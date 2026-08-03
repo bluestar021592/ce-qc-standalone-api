@@ -1,0 +1,55 @@
+{
+  "visualTestOnly": true,
+  "reportDate": "2026-07-20",
+  "topKpis": [
+    {"key":"total","label":"今日总单","value":18642,"yesterday":17895,"change":"+4.17%"},
+    {"key":"podRate","label":"已签收率","value":"88.63%","yesterday":"87.21%","change":"+1.42pp"},
+    {"key":"pending1","label":"Pending1+","value":1286,"ratio":"6.90%","change":"-0.61pp"},
+    {"key":"pending2","label":"Pending2+","value":642,"ratio":"3.45%","change":"-0.16pp"},
+    {"key":"pending3","label":"Pending3+","value":287,"ratio":"1.45%","change":"+0.08pp"},
+    {"key":"oc1","label":"OC1+","value":972,"ratio":"5.21%","change":"+0.32pp"},
+    {"key":"oc2","label":"OC2+","value":388,"ratio":"2.08%","change":"+0.16pp"},
+    {"key":"oc3","label":"OC3+","value":156,"ratio":"0.84%","change":"+0.12pp"},
+    {"key":"inboundNoScan","label":"入库无扫描","value":214,"ratio":"1.15%","change":"+0.07pp"},
+    {"key":"ticketOpen","label":"工单未处理","value":73,"ratio":"0.39%","change":"+0.04pp"}
+  ],
+  "ccsl":{"today":9286,"pod":8214,"podRate":"88.45%","yesterdayToday":8214,"todayChange":"↑ 13.04%","yesterdayPod":7198,"podChange":"↑ 14.11%","yesterdayPodRate":87.21,"podRateChange":"↑ 1.24pp","pending1":621,"pending2":312,"pending3":142,"oc1":487,"oc2":196,"oc3":78,"inboundNoScan":98,"ticketOpen":34},
+  "shopee":{
+    "all":{"today":9356,"pod":8257,"podRate":"88.25%","firstAttemptRate":"84.61%","pending1":665,"pending2":325,"pending3":145,"oc1":485,"oc2":194,"oc3":75,"inboundNoScan":124,"returnPending":39},
+    "cn":{"today":3612,"pod":3210,"podRate":"88.87%","firstAttemptRate":"85.42%","pending1":240,"pending2":115,"pending3":48,"oc1":180,"oc2":70,"oc3":26,"inboundNoScan":44,"returnPending":14},
+    "vn":{"today":5706,"pod":5015,"podRate":"87.89%","firstAttemptRate":"84.05%","pending1":420,"pending2":205,"pending3":94,"oc1":297,"oc2":120,"oc3":48,"inboundNoScan":78,"returnPending":24},
+    "other":{"today":38,"pod":32,"podRate":"84.21%","firstAttemptRate":"78.95%","pending1":5,"pending2":5,"pending3":3,"oc1":8,"oc2":4,"oc3":1,"inboundNoScan":2,"returnPending":1},
+    "pp":{"today":6842,"pod":6163,"podRate":"90.12%","pending1":412,"pending2":201,"pending3":88,"oc1":312,"oc2":128,"oc3":49,"inboundNoScan":79,"returnPending":26},
+    "pv":{"today":2514,"pod":2094,"podRate":"83.27%","pending1":253,"pending2":124,"pending3":57,"oc1":173,"oc2":66,"oc3":26,"inboundNoScan":45,"returnPending":13}
+  },
+  "dates":["07-14","07-15","07-16","07-17","07-18","07-19","07-20"],
+  "trends":{
+    "podRate":{"ccsl":[87.6,88.1,88.7,88.2,88.6,88.0,88.5],"pp":[90.3,90.8,90.5,90.1,89.8,89.9,90.1],"pv":[81.2,82.0,82.8,83.1,83.2,82.9,83.3]},
+    "pendingRate":{"ccsl":[10.1,10.3,9.8,9.6,9.4,9.6,10.1],"pp":[6.6,6.1,6.0,5.9,5.8,5.7,6.0],"pv":[7.2,6.8,6.9,6.7,6.6,6.5,6.7]},
+    "ocRate":{"ccsl":[6.9,6.7,6.5,6.4,6.6,6.7,6.9],"pp":[4.9,4.7,4.5,4.4,4.3,4.1,4.6],"pv":[5.6,5.3,5.2,5.1,5.0,4.9,5.2]}
+  },
+  "kpiTrends":{
+    "total":[17895,18120,18010,18340,18190,18480,18642],
+    "podRate":[87.1,87.8,87.4,88.0,87.9,88.3,88.63],
+    "pending1":[1435,1380,1340,1310,1305,1294,1286],
+    "pending2":[688,674,663,651,649,646,642],
+    "pending3":[272,279,276,282,280,291,287],
+    "oc1":[1015,990,981,960,978,965,972],
+    "oc2":[372,366,374,371,380,382,388],
+    "oc3":[149,147,151,148,154,153,156],
+    "inboundNoScan":[241,232,219,205,214,208,214],
+    "ticketOpen":[67,65,69,64,71,69,73]
+  },
+  "recipientTrends":{
+    "CN":{"podRate":[87.42,87.80,88.10,88.34,88.51,88.66,88.87],"firstAttemptRate":[83.71,84.02,84.38,84.61,84.92,85.10,85.42],"ocRate":[5.48,5.31,5.22,5.10,5.04,5.01,4.98]},
+    "VN":{"podRate":[86.95,87.12,87.31,87.46,87.55,87.72,87.89],"firstAttemptRate":[82.94,83.11,83.30,83.46,83.67,83.83,84.05],"ocRate":[5.63,5.52,5.41,5.35,5.29,5.24,5.20]}
+  },
+  "issueCount":198,
+  "issues":[
+    {"shipmentCode":"SPE260714001140","channel":"SHOPEE-PP","recipientGroup":"CN","recipientRaw":"shopeecn","region":"金边/本省","status":"Pending 异常滞留20+小时","pending":2,"oc":0,"inboundNoScan":false,"ticketOpen":false,"trackQuery":true,"updatedAt":"2026-07-20 20:40:24"},
+    {"shipmentCode":"CE002631UCH SOPHANITH","channel":"CCSL","region":"金边","status":"Pending 异常滞留19+小时","pending":3,"oc":1,"inboundNoScan":false,"ticketOpen":false,"trackQuery":true,"updatedAt":"2026-07-20 20:40:54"},
+    {"shipmentCode":"CE002748RATH SOKHIM","channel":"CCSL","region":"金边","status":"入库无扫描节点","pending":0,"oc":0,"inboundNoScan":true,"ticketOpen":false,"trackQuery":true,"updatedAt":"2026-07-20 20:41:07"},
+    {"shipmentCode":"SPE260719000921","channel":"SHOPEE-PV","recipientGroup":"VN","recipientRaw":"shopeevn","region":"外省/省外","status":"OC2 异常件","pending":1,"oc":2,"inboundNoScan":false,"ticketOpen":true,"trackQuery":false,"updatedAt":"2026-07-20 20:39:36"},
+    {"shipmentCode":"SPE260716000542","channel":"SHOPEE-PP","recipientGroup":"OTHER","recipientRaw":"待确认渠道","region":"金边/本省","status":"退回待处理（连续3次Pending）","pending":3,"oc":0,"inboundNoScan":false,"ticketOpen":true,"trackQuery":true,"updatedAt":"2026-07-20 20:38:12"}
+  ]
+}

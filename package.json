@@ -1,0 +1,18 @@
+{
+  "name": "ce-qc-standalone-api",
+  "version": "0.1.0",
+  "description": "CE 金边仓质控独立API版：日报+长期JSON+订单扫描API+批量轨迹API+XLSX导出",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "xlsx": "^0.18.5"
+  }
+}

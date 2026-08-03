@@ -1,0 +1,1086 @@
+import 'dotenv/config';
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { networkInterfaces } from 'os';
+
+import { CEClient, normalizeLoginToken } from './src/ceClient.js';
+import { parseDailyExcel } from './src/excelParser.js';
+import { parseLongBackupModules } from './src/backupParser.js';
+import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
+import { runQcPipeline } from './src/pipeline.js';
+import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
+import { exportShopeeXlsx } from './src/shopeeExporter.js';
+import { cleanMainBills, loadState, saveState, resetState } from './src/storage.js';
+import { clearToken, loadToken, saveToken, summarizeToken } from './src/authStore.js';
+import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, safeFinalRows } from './src/reporting.js';
+import { createDatabaseBackup, fileHash, listBackups, recordBackup, recordExport } from './src/backup.js';
+import { ensureRuntimeDirs, getRuntimeConfig } from './src/db.js';
+import { createOrRecoverRun, getCurrentReportDate, getDbStatus, getRunStatus, listExportRecords, loadDetail, resetRunForReport, updateRunLock } from './src/store.js';
+import { buildConsistencyReport } from './src/consistency.js';
+import { getShopCodeSummary, importShopCodesFromWorkbook } from './src/shopCodes.js';
+import { appendRuntimeLog } from './src/runtimeLog.js';
+import { createDashboardSnapshot, getMatchingSnapshot, getSnapshotById, listSnapshotHistory } from './src/snapshots.js';
+import { appendHistorySummary, buildLongBackupV2 } from './src/longBackup.js';
+import { mergeBackupModule } from './src/backupRecovery.js';
+import { buildShopeeDashboard } from './src/shopeeReporting.js';
+import { analyzeShopeeShipment } from './src/shopeeAnalyzer.js';
+import { queryBatchWithFallback, splitTrackBatches } from './src/trackBatching.js';
+import {
+  SHOPEE, createOrRecoverBusinessRun, getBusinessCurrentReportDate, getBusinessRunStatus,
+  getBusinessSnapshotById, getMatchingBusinessSnapshot, listBusinessHistoryDates, loadBusinessDetail, loadBusinessState, recordBusinessExport,
+  resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
+} from './src/businessStore.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const initialRuntimeConfig = getRuntimeConfig();
+ensureRuntimeDirs(initialRuntimeConfig);
+const upload = multer({ dest: initialRuntimeConfig.importsDir });
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+const client = new CEClient();
+const activeRunIds = new Set();
+
+app.get('/detail', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'detail.html'));
+});
+
+app.get(['/ccsl', '/shopee', '/track', '/reports', '/import', '/rules', '/settings'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/api/health', async (req, res) => {
+  res.json({ ok: true, version: '0.1.0', time: new Date().toISOString(), db: getDbStatus() });
+});
+
+app.get('/api/ce-auth-status', async (req, res) => {
+  const token = await loadToken();
+  res.json({ ok: true, authStatus: summarizeToken(token) });
+});
+
+app.post('/api/ce-login', async (req, res) => {
+  const authStatus = summarizeToken(await loadToken());
+  try {
+    const tenantId = String(req.body?.tenantId || '000000').trim() || '000000';
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    const grant_type = String(req.body?.grant_type || 'password').trim() || 'password';
+    const scope = String(req.body?.scope || 'all').trim() || 'all';
+    const type = String(req.body?.type || 'account').trim() || 'account';
+
+    if (!username || !password) {
+      res.status(400).json({ ok: false, error: '请输入CE账号和密码', authStatus });
+      return;
+    }
+    if (!hasEnv('CE_AUTHORIZATION')) {
+      res.status(400).json({ ok: false, error: '请先在 .env 配置 CE_AUTHORIZATION 基础认证', authStatus });
+      return;
+    }
+
+    const raw = await client.login({ tenantId, username, password, grant_type, scope, type });
+    throwIfCeAuthFailed(raw);
+    const token = normalizeLoginToken(raw, { tenantId, username });
+    await saveToken(token);
+
+    res.json({ ok: true, authStatus: summarizeToken(token) });
+  } catch (e) {
+    const ce = normalizeApiError(e);
+    res.status(500).json({
+      ok: false,
+      error: ce.ceMsg ? `CE登录失败：${ce.ceMsg}` : (ce.message || 'CE登录失败'),
+      ceStatus: ce.ceStatus,
+      ceCode: ce.ceCode,
+      ceMsg: ce.ceMsg,
+      authStatus
+    });
+  }
+});
+
+app.post('/api/ce-logout', async (req, res) => {
+  await clearToken();
+  res.json({ ok: true, authStatus: summarizeToken(null) });
+});
+
+app.post('/api/auth/login', (req, res) => res.redirect(307, '/api/ce-login'));
+app.post('/api/auth/logout', (req, res) => res.redirect(307, '/api/ce-logout'));
+
+app.get('/api/state', async (req, res) => {
+  const state = await loadState();
+  res.json({ ok: true, state: summarizeState(state) });
+});
+
+app.get('/api/shopee/state', async (req, res) => {
+  const state = loadBusinessState(SHOPEE);
+  res.json({ ok: true, state: summarizeShopeeState(state) });
+});
+
+app.get('/api/history', async (req, res) => {
+  const businessType = String(req.query.businessType || 'CCSL').toUpperCase() === SHOPEE ? SHOPEE : 'CCSL';
+  const rows = businessType === SHOPEE ? listBusinessHistoryDates(SHOPEE, 90) : listSnapshotHistory(90);
+  res.json({ ok: true, businessType, rows });
+});
+
+app.get('/api/snapshot/:businessType/:snapshotId', async (req, res) => {
+  const businessType = String(req.params.businessType || '').toUpperCase() === SHOPEE ? SHOPEE : 'CCSL';
+  const snapshot = businessType === SHOPEE
+    ? getBusinessSnapshotById(SHOPEE, req.params.snapshotId)
+    : getSnapshotById(req.params.snapshotId);
+  if (!snapshot) return res.status(404).json({ ok: false, error: '未找到该历史快照。' });
+  const state = snapshot.state || {};
+  res.json({ ok: true, businessType, reportDate: snapshot.reportDate || state.reportDate || '', snapshotId: snapshot.snapshotId, state: businessType === SHOPEE ? summarizeShopeeSnapshot(snapshot) : summarizeCcslSnapshot(snapshot) });
+});
+
+app.get('/api/state/startup', async (req, res) => {
+  const state = await loadState();
+  res.json({
+    ok: true,
+    restored: true,
+    db: getDbStatus(),
+    state: summarizeState(state)
+  });
+});
+
+app.get('/api/state/last-report', async (req, res) => {
+  const state = await loadState();
+  const summary = summarizeState(state);
+  res.json({
+    ok: true,
+    reportDate: summary.reportDate,
+    sourceName: summary.sourceName,
+    processing: summary.processing,
+    canResume: Boolean(summary.processing?.paused || summary.processing?.running || summary.scanResults || summary.trackResults),
+    canExport: Boolean(summary.finalRows || summary.scanResults || summary.dailySummary),
+    state: summary
+  });
+});
+
+app.post('/api/reset', async (req, res) => {
+  try {
+    const result = await resetState(req.body?.confirmText || '');
+    res.json({
+      ok: true,
+      ...result,
+      state: summarizeState(await loadState()),
+      shopeeState: summarizeShopeeState(loadBusinessState(SHOPEE))
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: `清空失败：${e.message}` });
+  }
+});
+
+app.post('/api/clear-logs', async (req, res) => {
+  const state = await loadState();
+  state.logs = [];
+  await saveState(state);
+  res.json({ ok: true, state: summarizeState(state) });
+});
+
+app.post('/api/pause', async (req, res) => {
+  const state = await loadState();
+  const reportDate = getCurrentReportDate();
+  const run = reportDate ? getRunStatus(reportDate).lock : null;
+  if (!run || !['running', 'paused'].includes(run.status)) {
+    res.status(409).json({ ok: false, code: 'RUN_NOT_ACTIVE', error: '当前没有可暂停的处理任务。' });
+    return;
+  }
+  state.currentRun = run;
+  state.lastRunSummary = { ...(state.lastRunSummary || {}), runId: run.runId, reportDate };
+  state.processing = { ...(state.processing || {}), running: false, paused: true, phase: run.currentStage || state.processing?.phase || '' };
+  await saveState(state);
+  updateRunLock(reportDate, 'paused');
+  res.json({ ok: true, state: summarizeState(state) });
+});
+
+app.post('/api/resume', handleResumeRequest);
+
+app.post('/api/run/pause', (req, res) => res.redirect(307, '/api/pause'));
+app.post('/api/run/resume', (req, res) => res.redirect(307, '/api/resume'));
+
+async function handleResumeRequest(req, res) {
+  const reportDate = getCurrentReportDate();
+  const run = reportDate ? getRunStatus(reportDate).lock : null;
+  if (run?.runId && activeRunIds.has(run.runId)) {
+    const state = await loadState();
+    state.currentRun = run;
+    state.lastRunSummary = { ...(state.lastRunSummary || {}), runId: run.runId, reportDate };
+    state.processing = { ...(state.processing || {}), running: true, paused: false, error: '' };
+    updateRunLock(reportDate, 'running');
+    await saveState(state);
+    res.json({ ok: true, resumedInProcess: true, run: { runId: run.runId, reportDate }, state: summarizeState(state) });
+    return;
+  }
+  return executeRunRequest(req, res, { resume: true });
+}
+
+app.post('/api/import-excel', upload.single('file'), handleDailyReportImport);
+app.post('/api/import/daily-report', upload.single('file'), handleDailyReportImport);
+app.post('/api/shopee/import-excel', upload.single('file'), handleShopeeDailyImport);
+app.post('/api/import-shop-codes', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) throw new Error('没有收到门店CP码文件');
+    const imported = importShopCodesFromWorkbook(req.file.path, req.file.originalname);
+    await fs.unlink(req.file.path).catch(() => {});
+    res.json({ ok: true, imported });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+async function handleDailyReportImport(req, res) {
+  try {
+    if (!req.file) throw new Error('没有收到Excel文件');
+    const state = await loadState();
+    const parsed = await parseDailyExcel(req.file.path, {
+      reportDate: req.body.reportDate || '',
+      originalName: req.file.originalname,
+      lastReportDate: state.reportDate || state.lastRunSummary?.reportDate || ''
+    });
+    if (!parsed.summary?.totalRecognized) throw new Error('文件格式错误或未识别到运单号');
+    if (!parsed.reportDate) throw new Error('未能自动识别日报日期，请手动选择日报归属日期。');
+    state.reportDate = parsed.reportDate;
+    state.daily = parsed;
+    state.dailyParseSummary = parsed.summary;
+    state.dailyParseRows = parsed.details;
+    state.pnhBills = parsed.pnhBills;
+    state.nonPnhBills = parsed.nonPnhBills;
+    state.excludedBills = parsed.excludedBills;
+    state.duplicateBills = parsed.duplicateBills;
+    state.sourceName = req.file.originalname;
+    state.scanPool = [];
+    state.scanResults = [];
+    state.needTrackBills = [];
+    state.trackResults = [];
+    state.trackEvents = [];
+    state.finalRows = [];
+    state.finalDiversionRows = [];
+    state.nextCarryBills = [];
+    state.lastRunSummary = null;
+    state.lastRun = null;
+    state.currentRun = null;
+    state.processing = { running: false, paused: false, phase: '' };
+    resetRunForReport(parsed.reportDate);
+    await saveState(state);
+    await fs.unlink(req.file.path).catch(() => {});
+    res.json({
+      ok: true,
+      parsed: {
+        ...parsed.summary,
+        reportDate: parsed.reportDate,
+        reportDateSource: parsed.reportDateSource,
+        reportDateAutoDetected: parsed.reportDateAutoDetected,
+        preview: parsed.preview,
+        notes: parsed.notes
+      },
+      state: summarizeState(state)
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+async function handleShopeeDailyImport(req, res) {
+  try {
+    if (!req.file) throw new Error('没有收到SHOPEE日报Excel文件');
+    const parsed = await parseShopeeDailyExcel(req.file.path, { reportDate: req.body.reportDate || '', originalName: req.file.originalname });
+    const state = loadBusinessState(SHOPEE);
+    state.businessType = SHOPEE;
+    state.reportDate = parsed.reportDate;
+    state.sourceName = req.file.originalname;
+    state.dailyReportReady = true;
+    state.daily = parsed;
+    state.dailyParseSummary = parsed.summary;
+    state.dailyParseRows = parsed.importRows;
+    state.recipientConflicts = parsed.conflicts;
+    state.recipientReconciliation = parsed.summary.reconciliation;
+    state.pnhBills = parsed.bills;
+    clearRunResults(state);
+    resetBusinessRunForReport(SHOPEE, parsed.reportDate);
+    saveBusinessState(state, SHOPEE);
+    await fs.unlink(req.file.path).catch(() => {});
+    res.json({ ok: true, parsed: { ...parsed.summary, reportDate: parsed.reportDate, preview: parsed.preview, conflicts: parsed.conflicts }, state: summarizeShopeeState(state) });
+  } catch (error) {
+    if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
+    res.status(500).json({ ok: false, error: error.message });
+  }
+}
+
+app.post('/api/import-backup', upload.single('file'), handleLongJsonImport);
+app.post('/api/import/long-json', upload.single('file'), handleLongJsonImport);
+
+async function handleLongJsonImport(req, res) {
+  try {
+    if (!req.file) throw new Error('没有收到JSON文件');
+    const started = Date.now();
+    const pack = JSON.parse(await fs.readFile(req.file.path, 'utf8'));
+    const modules = parseLongBackupModules(pack);
+    const ccslState = await loadState();
+    const shopeeState = loadBusinessState(SHOPEE);
+    mergeBackupModule(ccslState, modules.CCSL, { businessType: 'CCSL', importedAt: started });
+    mergeBackupModule(shopeeState, modules.SHOPEE, { businessType: SHOPEE, importedAt: started });
+    await saveState(ccslState);
+    saveBusinessState(shopeeState, SHOPEE);
+    await fs.unlink(req.file.path).catch(() => {});
+    res.json({
+      ok: true,
+      message: '长期备份恢复完成。历史数据已写入SQLite，可直接查看；开始新的当日处理时再导入对应日报。',
+      schemaVersion: modules.schemaVersion,
+      imported: ccslState.backupSummary,
+      modules: { CCSL: ccslState.backupSummary, SHOPEE: shopeeState.backupSummary },
+      state: summarizeState(ccslState),
+      shopeeState: summarizeShopeeState(shopeeState)
+    });
+  } catch (error) {
+    if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
+    res.status(500).json({ ok: false, error: error.message });
+  }
+}
+
+app.post('/api/run', (req, res) => executeRunRequest(req, res, { resume: false }));
+
+async function executeRunRequest(req, res, options = {}) {
+  let lockedReportDate = '';
+  let activeRunId = '';
+  try {
+    const reportDate = getCurrentReportDate();
+    if (!reportDate) {
+      res.status(400).json({ ok: false, code: 'REPORT_DATE_MISSING', error: '请先导入当日日报Excel。' });
+      return;
+    }
+    const state = await loadState();
+    state.reportDate = reportDate;
+    const authStatus = summarizeToken(await loadToken());
+    if (!authStatus.hasAccessToken) {
+      res.status(400).json({ ok: false, error: '请先登录CE系统。' });
+      return;
+    }
+    if (!(state.pnhBills || []).length) {
+      const restoredLongData = Boolean((state.carryBills || []).length || (state.podLocks || []).length || state.backupImportedAt);
+      res.status(400).json({
+        ok: false,
+        error: restoredLongData
+          ? '已恢复长期数据，但还未导入当日日报Excel。请先导入当日日报后再开始处理。'
+          : '请先导入当日日报Excel。'
+      });
+      return;
+    }
+    const beforeRun = getRunStatus(reportDate).lock;
+    if (options.resume && (!beforeRun || beforeRun.status === 'finished')) {
+      res.status(409).json({
+        ok: false,
+        code: beforeRun?.status === 'finished' ? 'RUN_ALREADY_COMPLETED' : 'RUN_NOT_RECOVERABLE',
+        error: beforeRun?.status === 'finished' ? '当前任务已经完成，不能继续处理。' : '当前没有可恢复的处理任务。'
+      });
+      return;
+    }
+    const outcome = createOrRecoverRun(reportDate, {
+      lockedBy: req.ip || '',
+      rejectRunning: Boolean(beforeRun?.runId && activeRunIds.has(beforeRun.runId))
+    });
+    if (!outcome.ok) {
+      res.status(outcome.code === 'RUN_ALREADY_ACTIVE' ? 409 : 500).json({ ok: false, code: outcome.code, error: outcome.error, run: outcome.run || null });
+      return;
+    }
+    const run = outcome.run;
+    lockedReportDate = reportDate;
+    activeRunId = run.runId;
+    activeRunIds.add(activeRunId);
+    if (outcome.created && beforeRun?.status === 'finished') clearRunResults(state);
+    state.currentRun = run;
+    state.processing = {
+      ...(state.processing || {}),
+      running: true,
+      paused: false,
+      phase: run.currentStage || '准备处理',
+      batchIndex: Number(run.batchIndex || 0),
+      totalBatches: Number(run.totalBatches || 0),
+      runId: run.runId
+    };
+    state.lastRunSummary = { ...(state.lastRunSummary || {}), runId: run.runId, reportDate, runStatus: 'running' };
+    await saveState(state);
+    const onProgress = async (msg) => {
+      state.logs = [...(state.logs || []), `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-300);
+      await appendRuntimeLog(msg);
+      await saveState(state);
+    };
+    const result = await runQcPipeline({
+      state,
+      client,
+      onProgress,
+      onCheckpoint: async checkpointState => {
+        checkpointState.currentRun = { ...(checkpointState.currentRun || run), runId: run.runId, reportDate };
+        checkpointState.lastRunSummary = { ...(checkpointState.lastRunSummary || {}), runId: run.runId, reportDate };
+        await saveState(checkpointState);
+      },
+      isPaused: async () => {
+        const latest = await loadState();
+        return Boolean(latest.processing?.paused);
+      }
+    });
+    const dashboardSnapshotRows = buildDashboardRows(result.state);
+    const criticalSnapshotRows = buildCriticalDashboard(result.state).rows;
+    const coreSnapshot = buildCoreKpis(result.state);
+    const metricSnapshot = {
+      ...result.summary,
+      totalMonitored: coreSnapshot.totalCount,
+      podRate: coreSnapshot.firstPodRate,
+      abnormalRate: coreSnapshot.anomalyRate,
+      severeCount: coreSnapshot.severeCount,
+      metrics: Object.fromEntries([
+        ['总件数', coreSnapshot.totalCount],
+        ['首投POD率', coreSnapshot.firstPodRate],
+        ['异常率', coreSnapshot.anomalyRate],
+        ['严重异常总件数', coreSnapshot.severeCount],
+        ...dashboardSnapshotRows.map(row => [row.项目, row.数值]),
+        ...criticalSnapshotRows.flatMap(row => [
+          [row.metricKey || row.异常类型, row.数量],
+          [row.异常类型, row.数量]
+        ])
+      ]),
+      metricStatuses: Object.fromEntries([
+        ['总件数', '正常'],
+        ['首投POD率', coreSnapshot.firstPodRate >= 90 ? '正常' : '需跟进'],
+        ['异常率', coreSnapshot.anomalyCount ? '重点关注' : '正常'],
+        ['严重异常总件数', coreSnapshot.severeCount ? '严重异常' : '正常'],
+        ...dashboardSnapshotRows.map(row => [row.项目, row.状态]),
+        ...criticalSnapshotRows.flatMap(row => [
+          [row.metricKey || row.异常类型, row.严重等级],
+          [row.异常类型, row.严重等级]
+        ])
+      ])
+    };
+    result.state.historySummary = appendHistorySummary(result.state.historySummary || [], metricSnapshot);
+    await saveState(result.state);
+    const snapshot = createDashboardSnapshot(result.state, { reportDate, runId: run.runId });
+    await appendRuntimeLog(`处理快照已保存：${snapshot.snapshotId}`);
+    res.json({ ok: true, summary: result.summary, run: { runId: run.runId, reportDate, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeState(await loadState()) });
+  } catch (e) {
+    console.error(e);
+    if (lockedReportDate) {
+      const run = getRunStatus(lockedReportDate).lock;
+      if (run?.status !== 'finished') updateRunLock(lockedReportDate, 'failed', e.message || String(e));
+      const failedState = await loadState();
+      failedState.processing = { ...(failedState.processing || {}), running: false, paused: false, error: e.message || String(e) };
+      await saveState(failedState);
+    }
+    res.status(500).json({ ok: false, code: e.code || 'RUN_FAILED', error: e.message || '处理失败，请查看日志' });
+  } finally {
+    if (activeRunId) activeRunIds.delete(activeRunId);
+  }
+}
+
+app.post('/api/run/start', (req, res) => executeRunRequest(req, res, { resume: false }));
+
+app.post('/api/shopee/run/start', (req, res) => executeShopeeRunRequest(req, res, { resume: false }));
+app.post('/api/shopee/run/resume', (req, res) => executeShopeeRunRequest(req, res, { resume: true }));
+app.post('/api/shopee/run/pause', async (req, res) => {
+  const state = loadBusinessState(SHOPEE);
+  const run = state.reportDate ? getBusinessRunStatus(SHOPEE, state.reportDate).lock : null;
+  if (!run || !['running', 'paused'].includes(run.status)) return res.status(409).json({ ok: false, error: 'SHOPEE当前没有可暂停任务。' });
+  state.processing = { ...(state.processing || {}), running: false, paused: true, phase: run.currentStage || state.processing?.phase || '' };
+  state.currentRun = run;
+  updateBusinessRunLock(SHOPEE, state.reportDate, 'paused');
+  saveBusinessState(state, SHOPEE);
+  res.json({ ok: true, state: summarizeShopeeState(state) });
+});
+
+async function executeShopeeRunRequest(req, res, options = {}) {
+  let reportDate = '';
+  let runId = '';
+  try {
+    const state = loadBusinessState(SHOPEE);
+    reportDate = getBusinessCurrentReportDate(SHOPEE);
+    if (!reportDate || !state.dailyReportReady) {
+      return res.status(400).json({ ok: false, code: 'REPORT_DATE_MISSING', error: '当前未导入SHOPEE当日日报Excel，请先导入后再开始处理。' });
+    }
+    if (!(state.pnhBills || []).length) return res.status(400).json({ ok: false, code: 'EMPTY_DAILY_REPORT', error: 'SHOPEE日报有效运单数为0，请核对日报解析结果。' });
+    if (!summarizeToken(await loadToken()).hasAccessToken) return res.status(400).json({ ok: false, error: '请先登录CE系统。' });
+    const before = getBusinessRunStatus(SHOPEE, reportDate).lock;
+    if (options.resume && (!before || before.status === 'finished')) return res.status(409).json({ ok: false, code: 'RUN_NOT_RECOVERABLE', error: 'SHOPEE当前没有可恢复任务。' });
+    const outcome = createOrRecoverBusinessRun(SHOPEE, reportDate, { lockedBy: req.ip || '', rejectRunning: Boolean(before?.runId && activeRunIds.has(before.runId)) });
+    if (!outcome.ok) return res.status(outcome.code === 'RUN_ALREADY_ACTIVE' || outcome.code === 'RUN_ALREADY_COMPLETED' ? 409 : 400).json(outcome);
+    const run = outcome.run;
+    runId = run.runId;
+    activeRunIds.add(runId);
+    state.businessType = SHOPEE;
+    state.currentRun = run;
+    state.processing = { ...(state.processing || {}), running: true, paused: false, phase: run.currentStage || '准备处理', runId };
+    state.lastRunSummary = { ...(state.lastRunSummary || {}), businessType: SHOPEE, reportDate, runId, runStatus: 'running' };
+    saveBusinessState(state, SHOPEE);
+    const result = await runQcPipeline({
+      state,
+      client,
+      onProgress: async message => {
+        state.logs = [...(state.logs || []), `[${new Date().toLocaleTimeString()}] ${message}`].slice(-300);
+        await appendRuntimeLog(`[SHOPEE] ${message}`);
+      },
+      onCheckpoint: async checkpointState => saveBusinessState(checkpointState, SHOPEE),
+      isPaused: async () => Boolean(loadBusinessState(SHOPEE).processing?.paused)
+    });
+    const view = buildShopeeDashboard(result.state);
+    if (view.recipientReconciliation?.status !== 'PASSED') {
+      const error = new Error('SHOPEE收件人分组对账失败，已阻止生成正式快照。');
+      error.code = 'FAILED_RECONCILIATION';
+      throw error;
+    }
+    const summary = {
+      businessType: SHOPEE, reportDate, runId,
+      ...view.metrics,
+      metrics: Object.fromEntries(view.dashboardRows.map(row => [row.metricKey, row.数值])),
+      metricStatuses: Object.fromEntries(view.dashboardRows.map(row => [row.metricKey, row.状态])),
+      recipientReconciliation: view.recipientReconciliation
+    };
+    result.state.historySummary = appendHistorySummary(result.state.historySummary || [], summary).map(item => ({ ...item, businessType: SHOPEE }));
+    result.state.lastRunSummary = { ...(result.state.lastRunSummary || {}), ...summary };
+    saveBusinessState(result.state, SHOPEE);
+    const snapshot = saveBusinessSnapshot(SHOPEE, result.state, buildShopeeDashboard(result.state));
+    result.state.snapshotId = snapshot.snapshotId;
+    saveBusinessState(result.state, SHOPEE);
+    res.json({ ok: true, summary, run: { reportDate, runId, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeShopeeState(result.state) });
+  } catch (error) {
+    if (reportDate) updateBusinessRunLock(SHOPEE, reportDate, 'failed', error.message || String(error));
+    const state = loadBusinessState(SHOPEE);
+    state.processing = { ...(state.processing || {}), running: false, paused: false, error: error.message || String(error) };
+    saveBusinessState(state, SHOPEE);
+    res.status(500).json({ ok: false, code: error.code || 'SHOPEE_RUN_FAILED', error: error.message });
+  } finally {
+    if (runId) activeRunIds.delete(runId);
+  }
+}
+
+app.post('/api/track-query', async (req, res) => {
+  const businessType = String(req.body?.businessType || 'SHOPEE').toUpperCase() === SHOPEE ? SHOPEE : 'CCSL';
+  const shipmentCodes = mergeUnique(req.body?.shipmentCodes || [], []).slice(0, 200);
+  if (!shipmentCodes.length) return res.status(400).json({ ok: false, error: '请至少输入一个运单号。' });
+  if (!summarizeToken(await loadToken()).hasAccessToken) return res.status(400).json({ ok: false, error: '请先登录CE系统。' });
+  try {
+    const reportDate = String(req.body?.reportDate || new Date().toISOString().slice(0, 10));
+    if (businessType === SHOPEE) {
+      const shipment = await manualBatchQuery(shipmentCodes, codes => client.shipmentTrack(codes), 'tms-shipment/track');
+      const events = await manualBatchQuery(shipmentCodes, codes => client.trackQuery(codes), 'tms-shipment-event/query');
+      const exceptions = await manualBatchQuery(shipmentCodes, codes => client.exceptionQuery(codes), 'exception-item/query');
+      const shipmentByBill = groupManualRows(shipment.rows);
+      const eventByBill = groupManualRows(events.rows);
+      const exceptionByBill = groupManualRows(exceptions.rows);
+      const rows = shipmentCodes.map(shipmentCode => analyzeShopeeShipment({
+        waybill: shipmentCode, reportDate,
+        scanRow: { shipmentCode, 运单号: shipmentCode, 来源类型: '手工查询' },
+        shipmentTrackRow: shipmentByBill.get(shipmentCode)?.[0] || {},
+        events: eventByBill.get(shipmentCode) || [],
+        exceptions: exceptionByBill.get(shipmentCode) || [],
+        apiStatus: {
+          shipment: shipment.failedBills.includes(shipmentCode) ? 'failed' : 'success',
+          event: events.failedBills.includes(shipmentCode) ? 'failed' : 'success',
+          exception: exceptions.failedBills.includes(shipmentCode) ? 'failed' : 'success'
+        }
+      }));
+      return res.json({ ok: true, businessType, reportDate, shipmentCodes, rows, shipmentRows: shipment.rows, trackEvents: events.rows, exceptionItems: exceptions.rows, batches: [...shipment.batches, ...events.batches, ...exceptions.batches] });
+    }
+    const scans = await manualBatchQuery(shipmentCodes, codes => client.confirmQuery(codes), 'confirm-query');
+    const events = await manualBatchQuery(shipmentCodes, codes => client.trackQuery(codes), 'tms-shipment-event/query');
+    return res.json({ ok: true, businessType, reportDate, shipmentCodes, scanRows: scans.rows, trackEvents: events.rows, batches: [...scans.batches, ...events.batches] });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message || '轨迹查询失败。' });
+  }
+});
+
+app.post('/api/test-ce-api', async (req, res) => {
+  const requestHeadersDebug = client.headerDebug();
+  const headersConfigured = ceHeaderStatus(requestHeadersDebug);
+  const authStatus = summarizeToken(await loadToken());
+  if (!headersConfigured.authorization) {
+    res.status(400).json({ ok: false, error: '请先在 .env 配置 CE_AUTHORIZATION 基础认证', headersConfigured, requestHeadersDebug, authStatus });
+    return;
+  }
+  if (!authStatus.hasAccessToken && !headersConfigured.bladeAuth && !headersConfigured.cookie) {
+    res.status(400).json({ ok: false, error: '请先登录CE系统', headersConfigured, requestHeadersDebug, authStatus });
+    return;
+  }
+
+  const shipmentCodes = mergeUnique(req.body?.shipmentCodes || [], []);
+  if (!shipmentCodes.length) {
+    res.status(400).json({ ok: false, error: '请提供有效运单号', headersConfigured, requestHeadersDebug, authStatus });
+    return;
+  }
+
+  let stage = 'confirm-query';
+  try {
+    const confirmRows = await client.confirmQuery(shipmentCodes);
+    const orderStatusByBill = buildOrderStatusByBill(shipmentCodes, confirmRows);
+    stage = 'tms-shipment-event/query';
+    const trackRows = await client.trackQuery(shipmentCodes);
+    const trackCountByBill = buildTrackCountByBill(shipmentCodes, trackRows);
+    const latestAuthStatus = summarizeToken(await loadToken());
+
+    res.json({
+      ok: true,
+      headersConfigured,
+      requestHeadersDebug,
+      shipmentCodes,
+      confirmCount: confirmRows.length,
+      orderStatusByBill,
+      trackEventCount: trackRows.length,
+      trackCountByBill,
+      authStatus: latestAuthStatus
+    });
+  } catch (e) {
+    const latestAuthStatus = summarizeToken(await loadToken());
+    res.status(500).json({
+      ok: false,
+      stage,
+      error: `CE API连通测试失败（${stage}）：${e.message}`,
+      ceStatus: e.ceStatus || '',
+      ceCode: e.ceCode || '',
+      ceMsg: e.ceMsg || '',
+      requestHeadersDebug,
+      headersConfigured,
+      authStatus: latestAuthStatus
+    });
+  }
+});
+
+app.get('/api/export-xlsx', async (req, res) => {
+  try {
+    const state = await loadState();
+    const snapshot = req.query.snapshotId ? getSnapshotById(req.query.snapshotId) : getMatchingSnapshot(state);
+    if (!snapshot) throw new Error('处理尚未完成，暂无可导出的处理快照。');
+    const exportState = snapshot ? { ...snapshot.state, snapshotId: snapshot.snapshotId } : state;
+    const file = await exportXlsx(exportState, snapshot);
+    setSnapshotHeaders(res, snapshot);
+    recordExport({
+      reportDate: exportState.reportDate || '',
+      exportType: 'xlsx',
+      fileName: path.basename(file),
+      fileHash: fileHash(file),
+      rowCount: (exportState.finalRows || []).length,
+      summary: exportState.lastRunSummary || exportState.dailyParseSummary || {},
+      consistency: snapshot?.consistency || buildConsistencyReport(exportState)
+    });
+    res.download(file);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post('/api/export/xlsx', async (req, res) => {
+  try {
+    const state = await loadState();
+    const snapshotId = req.body?.snapshotId || '';
+    const snapshot = snapshotId ? getSnapshotById(snapshotId) : getMatchingSnapshot(state);
+    if (!snapshot) throw new Error('处理尚未完成，暂无可导出的处理快照。');
+    const exportState = snapshot ? { ...snapshot.state, snapshotId: snapshot.snapshotId } : state;
+    const file = await exportXlsx(exportState, snapshot);
+    setSnapshotHeaders(res, snapshot);
+    recordExport({
+      reportDate: exportState.reportDate || '',
+      exportType: 'xlsx',
+      fileName: path.basename(file),
+      fileHash: fileHash(file),
+      rowCount: (exportState.finalRows || []).length,
+      summary: exportState.lastRunSummary || exportState.dailyParseSummary || {},
+      consistency: snapshot?.consistency || buildConsistencyReport(exportState)
+    });
+    res.download(file);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/export-daily-parse', async (req, res) => {
+  try {
+    const state = await loadState();
+    const file = await exportDailyParseXlsx(state);
+    res.download(file);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/shopee/export-xlsx', async (req, res) => {
+  try {
+    const state = loadBusinessState(SHOPEE);
+    const snapshot = req.query.snapshotId ? getBusinessSnapshotById(SHOPEE, req.query.snapshotId) : getMatchingBusinessSnapshot(SHOPEE, state);
+    if (!snapshot) throw new Error('SHOPEE处理尚未完成，暂无可导出的处理快照。');
+    const exportState = { ...snapshot.state, snapshotId: snapshot.snapshotId, businessType: SHOPEE };
+    const file = await exportShopeeXlsx(exportState, snapshot);
+    setSnapshotHeaders(res, snapshot);
+    recordBusinessExport({ businessType: SHOPEE, reportDate: exportState.reportDate, snapshotId: snapshot.snapshotId, exportType: 'xlsx', fileName: path.basename(file), rowCount: (exportState.finalRows || []).length });
+    res.download(file);
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/api/export-backup', async (req, res) => {
+  try {
+    const state = await loadState();
+    const shopeeState = loadBusinessState(SHOPEE);
+    const file = path.join(getRuntimeConfig().longJsonExportsDir, `CE_QC_BACKUP_${dateStamp()}.json`);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify(buildLongBackupV2(state, shopeeState), null, 2), 'utf8');
+    recordBackup({
+      backupType: 'long-json',
+      fileName: path.basename(file),
+      filePath: file,
+      fileHash: fileHash(file),
+      reason: 'manual-export'
+    });
+    res.download(file);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post('/api/export/long-json', async (req, res) => {
+  try {
+    const state = await loadState();
+    const shopeeState = loadBusinessState(SHOPEE);
+    const file = path.join(getRuntimeConfig().longJsonExportsDir, `CE_QC_BACKUP_${dateStamp()}.json`);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify(buildLongBackupV2(state, shopeeState), null, 2), 'utf8');
+    recordBackup({
+      backupType: 'long-json',
+      fileName: path.basename(file),
+      filePath: file,
+      fileHash: fileHash(file),
+      reason: 'manual-export'
+    });
+    res.download(file);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/run/status/:reportDate', async (req, res) => {
+  res.json({ ok: true, status: getRunStatus(req.params.reportDate) });
+});
+
+app.get('/api/compare/:reportDate', async (req, res) => {
+  const state = await loadState();
+  res.json({ ok: true, reportDate: req.params.reportDate, consistency: buildConsistencyReport(state) });
+});
+
+app.get('/api/results/:reportDate', async (req, res) => {
+  const state = await loadState();
+  const page = Math.max(1, Number(req.query.page || 1));
+  const pageSize = Math.min(500, Math.max(1, Number(req.query.pageSize || 200)));
+  const rows = safeFinalRows(state).filter(row => row?.是否POD !== '是' && row?.异常分类 !== '最终分流排除');
+  const start = (page - 1) * pageSize;
+  res.json({ ok: true, reportDate: req.params.reportDate, page, pageSize, total: rows.length, rows: rows.slice(start, start + pageSize) });
+});
+
+app.get('/api/detail', async (req, res) => {
+  const detail = String(req.query.businessType || '').toUpperCase() === SHOPEE
+    ? loadBusinessDetail(SHOPEE, req.query.reportDate || '', req.query.shipmentCode || req.query.waybill || '')
+    : loadDetail({ reportDate: req.query.reportDate || '', shipmentCode: req.query.shipmentCode || req.query.waybill || '' });
+  if (!detail) {
+    res.status(404).json({ ok: false, error: '未找到该运单详情' });
+    return;
+  }
+  res.json({ ok: true, detail });
+});
+
+app.get('/api/backups', async (req, res) => {
+  res.json({ ok: true, backups: listBackups(50), exports: listExportRecords(50) });
+});
+
+app.post('/api/clear-state', (req, res) => res.redirect(307, '/api/reset'));
+
+app.get('/api/logs/recent', async (req, res) => {
+  const state = await loadState();
+  res.json({ ok: true, logs: (state.logs || []).slice(-300) });
+});
+
+function summarizeState(state) {
+  const snapshot = getMatchingSnapshot(state);
+  const viewState = snapshot?.state || state;
+  const runStatus = viewState.reportDate ? getRunStatus(viewState.reportDate).lock : null;
+  const runtime = getRuntimeConfig();
+  return {
+    businessType: 'CCSL',
+    snapshotId: snapshot?.snapshotId || '',
+    reportDate: viewState.reportDate || '',
+    sourceName: viewState.sourceName || '',
+    dailyReportReady: Boolean(viewState.reportDate && (viewState.pnhBills || []).length),
+    pnh: (viewState.pnhBills || []).length,
+    nonPnh: (viewState.nonPnhBills || []).length,
+    carry: (viewState.carryBills || []).length,
+    podLocks: (viewState.podLocks || []).length,
+    scanResults: (viewState.scanResults || []).length,
+    scanPool: (viewState.scanPool || []).length,
+    needTrackBills: (viewState.needTrackBills || []).length,
+    trackResults: (viewState.trackResults || []).length,
+    trackEvents: (viewState.trackEvents || []).length,
+    finalRows: (viewState.finalRows || []).length,
+    nextCarry: (viewState.nextCarryBills || viewState.carryBills || []).length,
+    finalDiversion: (viewState.finalDiversionRows || []).length,
+    lastRun: viewState.lastRun || null,
+    lastRunSummary: viewState.lastRunSummary || viewState.lastRun || null,
+    runId: runStatus?.runId || viewState.currentRun?.runId || viewState.lastRunSummary?.runId || '',
+    runStatus: runStatus?.status || '',
+    currentRun: runStatus || null,
+    dailySummary: viewState.dailyParseSummary || viewState.daily?.summary || null,
+    dailyPreview: viewState.daily?.preview || (viewState.dailyParseRows || []).slice(0, 50),
+    backupSummary: viewState.backupSummary || null,
+    shopCodes: getShopCodeSummary(),
+    historySummary: viewState.historySummary || [],
+    processing: runStatus ? {
+      ...(viewState.processing || {}),
+      running: runStatus.status === 'running',
+      paused: runStatus.status === 'paused',
+      phase: runStatus.currentStage || viewState.processing?.phase || '',
+      batchIndex: Number(runStatus.batchIndex || 0),
+      totalBatches: Number(runStatus.totalBatches || 0),
+      error: runStatus.errorMessage || ''
+    } : (viewState.processing || { running: false, paused: false, phase: '' }),
+    dbStatus: getDbStatus(),
+    network: buildNetworkInfo(runtime),
+    consistency: snapshot?.consistency || buildConsistencyReport(viewState),
+    dashboardMetricHash: snapshot?.dashboardMetricHash || '',
+    detailRowHash: snapshot?.detailRowHash || '',
+    dashboard: snapshot?.dashboard || buildDashboardData(viewState),
+    coreKpis: snapshot?.coreKpis || buildCoreKpis(viewState),
+    criticalDashboard: (() => {
+      const critical = snapshot?.criticalDashboard || buildCriticalDashboard(viewState);
+      return { summary: critical.summary, rows: critical.rows };
+    })(),
+    detailTabs: snapshot?.detailTabs || buildDetailTabs(viewState),
+    logs: viewState.logs || []
+  };
+}
+
+function summarizeCcslSnapshot(snapshot) {
+  const state = { ...(snapshot.state || {}), snapshotId: snapshot.snapshotId || '' };
+  return { ...summarizeState(state), snapshotId: snapshot.snapshotId || '', reportDate: snapshot.reportDate || state.reportDate || '' };
+}
+
+function summarizeShopeeState(state) {
+  const snapshot = getMatchingBusinessSnapshot(SHOPEE, state);
+  const viewState = snapshot?.state || state;
+  const runStatus = viewState.reportDate ? getBusinessRunStatus(SHOPEE, viewState.reportDate).lock : null;
+  const dashboard = snapshot?.view || buildShopeeDashboard(viewState);
+  return {
+    businessType: SHOPEE,
+    snapshotId: snapshot?.snapshotId || viewState.snapshotId || '',
+    reportDate: viewState.reportDate || '',
+    sourceName: viewState.sourceName || '',
+    dailyReportReady: Boolean(viewState.dailyReportReady),
+    total: (viewState.pnhBills || []).length,
+    carry: (viewState.carryBills || []).length,
+    podLocks: (viewState.podLocks || []).length,
+    scanResults: (viewState.scanResults || []).length,
+    trackResults: (viewState.trackResults || []).length,
+    trackEvents: (viewState.trackEvents || []).length,
+    finalRows: (viewState.finalRows || []).length,
+    nextCarry: (viewState.nextCarryBills || viewState.carryBills || []).length,
+    dailySummary: viewState.dailyParseSummary || viewState.daily?.summary || null,
+    dailyPreview: viewState.daily?.preview || (viewState.dailyParseRows || []).slice(0, 50),
+    backupSummary: viewState.backupSummary || null,
+    historySummary: viewState.historySummary || [],
+    runId: runStatus?.runId || viewState.currentRun?.runId || viewState.lastRunSummary?.runId || '',
+    runStatus: runStatus?.status || '',
+    currentRun: runStatus || viewState.currentRun || null,
+    processing: runStatus ? {
+      ...(viewState.processing || {}),
+      running: runStatus.status === 'running',
+      paused: runStatus.status === 'paused',
+      phase: runStatus.currentStage || viewState.processing?.phase || '',
+      batchIndex: Number(runStatus.batchIndex || 0),
+      totalBatches: Number(runStatus.totalBatches || 0),
+      error: runStatus.errorMessage || ''
+    } : (viewState.processing || { running: false, paused: false, phase: '' }),
+    dashboard,
+    dashboardMetricHash: snapshot?.dashboardMetricHash || '',
+    detailRowHash: snapshot?.detailRowHash || '',
+    detailTabs: dashboard.detailTabs,
+    logs: viewState.logs || [],
+    dbStatus: getDbStatus()
+  };
+}
+
+function summarizeShopeeSnapshot(snapshot) {
+  const state = { ...(snapshot.state || {}), snapshotId: snapshot.snapshotId || '', businessType: SHOPEE };
+  const dashboard = snapshot.view || buildShopeeDashboard(state);
+  return { ...summarizeShopeeState(state), snapshotId: snapshot.snapshotId || '', reportDate: snapshot.reportDate || state.reportDate || '', dashboard, detailTabs: dashboard.detailTabs };
+}
+
+function setSnapshotHeaders(res, snapshot = {}) {
+  res.setHeader('X-Snapshot-Id', String(snapshot.snapshotId || ''));
+  res.setHeader('X-Dashboard-Metric-Hash', String(snapshot.dashboardMetricHash || ''));
+  res.setHeader('X-Detail-Row-Hash', String(snapshot.detailRowHash || ''));
+  res.setHeader('X-CE-API-Calls-During-Export', '0');
+}
+
+function clearRunResults(state) {
+  const activeCarry = new Set(state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || []));
+  const carryMetadata = new Map([...(state.priorCarryRows || []), ...(state.finalRows || [])]
+    .map(row => [String(row.shipmentCode || row.运单号 || '').trim().toUpperCase(), row])
+    .filter(([bill]) => bill && activeCarry.has(bill)));
+  state.priorCarryRows = [...carryMetadata.values()];
+  state.scanPool = [];
+  state.scanResults = [];
+  state.shipmentTrackResults = [];
+  state.shipmentQueryStatus = [];
+  state.needTrackBills = [];
+  state.trackResults = [];
+  state.trackEvents = [];
+  state.eventQueryStatus = [];
+  state.exceptionItems = [];
+  state.exceptionQueryStatus = [];
+  state.apiBatchStatus = [];
+  state.finalRows = [];
+  state.finalDiversionRows = [];
+  state.nextCarryBills = [];
+  state.lastRunSummary = null;
+  state.lastRun = null;
+}
+
+async function manualBatchQuery(shipmentCodes, query, apiName) {
+  const rows = [];
+  const failedBills = [];
+  const batches = [];
+  for (const batch of splitTrackBatches(shipmentCodes)) {
+    const outcome = await queryBatchWithFallback({ batch, query, apiName, onLog: async () => {} });
+    for (const success of outcome.successes) {
+      rows.push(...(success.events || []));
+      batches.push({ apiName, size: success.batch.length, status: 'success', resultCount: (success.events || []).length });
+    }
+    for (const failure of outcome.failures) {
+      failedBills.push(...failure.batch);
+      batches.push({ apiName, size: failure.batch.length, status: 'failed', error: failure.error?.message || String(failure.error || '') });
+    }
+  }
+  return { rows, failedBills: mergeUnique(failedBills, []), batches };
+}
+
+function groupManualRows(rows = []) {
+  const map = new Map();
+  for (const row of rows) {
+    const bill = String(row?.shipmentCode || row?.运单号 || '').trim().toUpperCase();
+    if (!bill) continue;
+    if (!map.has(bill)) map.set(bill, []);
+    map.get(bill).push(row);
+  }
+  return map;
+}
+
+function mergeUnique(a, b) {
+  return [...new Set([...(a || []), ...(b || [])].map(x => String(x || '').trim().toUpperCase()).filter(Boolean))];
+}
+
+function filterBackupBills(list) {
+  return mergeUnique(list || [], []).filter(wb => !/^SPE/i.test(wb) && !/^WHPP/i.test(wb) && !/WHPP/i.test(wb));
+}
+
+function filterActiveCarryBills(list, podLocks) {
+  const podSet = new Set(filterBackupBills(podLocks || []));
+  return filterBackupBills(list || []).filter(wb => !podSet.has(wb));
+}
+
+function ceHeaderStatus(debug = {}) {
+  return {
+    authorization: Boolean(debug.Authorization?.configured),
+    bladeAuth: Boolean(debug['Blade-Auth']?.configured),
+    cookie: hasEnv('CE_COOKIE')
+  };
+}
+
+function hasEnv(name) {
+  return Boolean(String(process.env[name] || '').trim());
+}
+
+function buildOrderStatusByBill(bills, rows) {
+  const byBill = new Map((rows || []).map(row => [String(row?.shipmentCode || '').trim().toUpperCase(), row]));
+  return bills.map(wb => ({
+    shipmentCode: wb,
+    orderStatus: byBill.get(wb)?.orderStatus ?? ''
+  }));
+}
+
+function buildTrackCountByBill(bills, rows) {
+  const counts = new Map(bills.map(wb => [wb, 0]));
+  for (const row of rows || []) {
+    const wb = String(row?.shipmentCode || '').trim().toUpperCase();
+    if (!counts.has(wb)) counts.set(wb, 0);
+    counts.set(wb, counts.get(wb) + 1);
+  }
+  return bills.map(wb => ({
+    shipmentCode: wb,
+    trackEventCount: counts.get(wb) || 0
+  }));
+}
+
+function throwIfCeAuthFailed(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const data = src.data && typeof src.data === 'object' ? src.data : {};
+  const ceCode = src.code ?? data.code ?? src.errorCode ?? data.errorCode ?? '';
+  const ceMsg = src.msg ?? data.msg ?? src.message ?? data.message ?? src.error ?? data.error ?? '';
+  const success = src.success ?? data.success;
+  const oauth = data.oauth && typeof data.oauth === 'object' ? data.oauth : {};
+  const hasToken = Boolean(src.access_token || src.accessToken || data.access_token || data.accessToken || oauth.access_token || oauth.accessToken);
+  const codeLooksFailed = ceCode && !['0', '200'].includes(String(ceCode));
+  if (hasToken) return;
+  if (success === false || codeLooksFailed) {
+    const err = new Error(ceMsg || 'CE登录失败');
+    err.ceCode = ceCode;
+    err.ceMsg = ceMsg;
+    throw err;
+  }
+}
+
+function normalizeApiError(e) {
+  const data = e?.response?.data || {};
+  return {
+    message: e?.message || '',
+    ceStatus: e?.response?.status || e?.ceStatus || '',
+    ceCode: e?.ceCode ?? data.code ?? data.errorCode ?? data.status ?? '',
+    ceMsg: e?.ceMsg ?? data.msg ?? data.message ?? data.error ?? ''
+  };
+}
+
+function dateStamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+}
+
+const runtimeConfig = getRuntimeConfig();
+const port = runtimeConfig.port;
+const host = runtimeConfig.host;
+app.listen(port, host, () => {
+  const network = buildNetworkInfo(runtimeConfig);
+  console.log(`本机访问: ${network.localUrl}`);
+  console.log(`局域网访问: ${network.lanUrl || '未检测到局域网IPv4，请查看电脑IP地址'}`);
+  console.log(`SQLite DB: ${runtimeConfig.dbFile}`);
+});
+
+function buildNetworkInfo(runtime = getRuntimeConfig()) {
+  const portValue = runtime.port || 5177;
+  const lanIp = getLanIpv4();
+  return {
+    host: runtime.host || '0.0.0.0',
+    port: portValue,
+    localUrl: `http://127.0.0.1:${portValue}`,
+    lanIp,
+    lanUrl: lanIp ? `http://${lanIp}:${portValue}` : ''
+  };
+}
+
+function getLanIpv4() {
+  const candidates = [];
+  for (const list of Object.values(networkInterfaces())) {
+    for (const item of list || []) {
+      if (item.family !== 'IPv4' || item.internal) continue;
+      candidates.push(item.address);
+    }
+  }
+  return candidates.find(ip => /^192\.168\./.test(ip))
+    || candidates.find(ip => /^10\./.test(ip))
+    || candidates.find(ip => /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip))
+    || candidates[0]
+    || '';
+}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 112" role="img" aria-label="CE Express">
+  <rect width="360" height="112" rx="10" fill="#d71920"/>
+  <path d="M36 23h92c21 0 36 14 36 33s-15 33-36 33H36c-21 0-36-14-36-33s15-33 36-33Z" fill="#fff"/>
+  <path d="M43 43c-12 0-20 5-20 13s8 13 20 13h34v17H41C16 86 0 74 0 56s16-33 41-33h36v20H43Z" fill="#d71920"/>
+  <path d="M89 23h60v20h-36v12h32v18h-32v16H89V23Z" fill="#d71920"/>
+  <text x="178" y="54" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="900" fill="#fff">EXPRESS</text>
+  <text x="180" y="82" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="#fff" letter-spacing="3">CE EXPRESS</text>
+</svg>

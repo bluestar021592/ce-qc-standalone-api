@@ -1,0 +1,26 @@
+{
+  "reference": "tools\\pixel-audit\\reference.png",
+  "actual": "data\\pixel-audit-output\\actual-1884x1092.png",
+  "size": [
+    1884,
+    1092
+  ],
+  "overall_changed_ratio": 0.13491,
+  "regions": {
+    "sidebar": 0.173212,
+    "topbar": 0.058929,
+    "kpi": 0.19899,
+    "overview": 0.108122,
+    "charts": 0.174329,
+    "bottom": 0.144831
+  },
+  "passed": false,
+  "failed": [
+    "overall=13.49% > 8%",
+    "sidebar=17.32% > 5%",
+    "kpi=19.90% > 8%",
+    "overview=10.81% > 8%",
+    "charts=17.43% > 10%",
+    "bottom=14.48% > 10%"
+  ]
+}

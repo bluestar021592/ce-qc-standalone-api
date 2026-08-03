@@ -1,0 +1,158 @@
+import { createHash, randomUUID } from 'crypto';
+
+import { buildConsistencyReport } from './consistency.js';
+import { getDb, nowIso } from './db.js';
+import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, getXlsxSheetRows } from './reporting.js';
+import { buildSnapshotHashes } from './snapshotHash.js';
+
+export function createDashboardSnapshot(state = {}, context = {}) {
+  const reportDate = String(context.reportDate || state.reportDate || '').trim();
+  const runId = String(context.runId || resolveRunId(state, reportDate)).trim();
+  if (!reportDate) throw snapshotError('REPORT_DATE_MISSING', '请先导入当日日报Excel。');
+  if (!runId) throw snapshotError('RUN_CREATE_FAILED', '处理任务未正确创建，无法生成处理快照。');
+
+  const existing = getSnapshot(reportDate, runId);
+  if (existing) return existing;
+
+  const snapshotId = `${reportDate}_${runId}_${randomUUID().slice(0, 8)}`;
+  const generatedAt = nowIso();
+  const snapshotState = clone({ ...state, snapshotId });
+  const dashboardRows = buildDashboardRows(snapshotState);
+  const coreKpis = buildCoreKpis(snapshotState);
+  const criticalDashboard = buildCriticalDashboard(snapshotState);
+  const detailTabs = buildDetailTabs(snapshotState);
+  const dashboard = buildDashboardData(snapshotState);
+  const xlsxRows = getXlsxSheetRows(snapshotState);
+  const hashDetailTabs = Object.fromEntries(Object.entries(xlsxRows)
+    .filter(([, rows]) => Array.isArray(rows))
+    .map(([key, rows]) => [key, { rows }]));
+  const snapshotHashes = buildSnapshotHashes({ dashboardRows, detailTabs: hashDetailTabs });
+  const metrics = Object.fromEntries([
+    ...dashboardRows.map(row => [row.metricKey || row.项目, row.数值]),
+    ...criticalDashboard.rows.map(row => [row.metricKey || row.异常类型, row.数量])
+  ]);
+  const detailCounts = Object.fromEntries(Object.entries(detailTabs).map(([key, value]) => [key, Number(value?.total || 0)]));
+  const dataHashes = {
+    dailyParseRows: hash(snapshotState.dailyParseRows || []),
+    scanResults: hash(snapshotState.scanResults || []),
+    trackEvents: hash(snapshotState.trackEvents || []),
+    finalRows: hash(snapshotState.finalRows || []),
+    carryBills: hash(snapshotState.nextCarryBills || snapshotState.carryBills || []),
+    podLocks: hash(snapshotState.podLocks || [])
+  };
+  const consistency = buildConsistencyReport(snapshotState);
+  const payload = {
+    snapshotId,
+    reportDate,
+    runId,
+    generatedAt,
+    metrics,
+    detailCounts,
+    dataHashes,
+    consistency,
+    coreKpis,
+    dashboard,
+    dashboardRows,
+    criticalDashboard,
+    detailTabs,
+    xlsxRows,
+    ...snapshotHashes,
+    state: snapshotState
+  };
+
+  const db = getDb();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(`
+      INSERT INTO export_snapshots(
+        snapshotId, reportDate, runId, snapshotType, payloadJson, metricsJson,
+        detailCountsJson, dataHashesJson, consistencyJson, generatedAt, createdAt
+      ) VALUES(?, ?, ?, 'dashboard', ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      snapshotId,
+      reportDate,
+      runId,
+      JSON.stringify(payload),
+      JSON.stringify(metrics),
+      JSON.stringify(detailCounts),
+      JSON.stringify(dataHashes),
+      JSON.stringify(consistency),
+      generatedAt,
+      generatedAt
+    );
+    db.prepare(`
+      UPDATE run_locks SET status='finished', currentStage='完成', batchIndex=1, totalBatches=1,
+        errorMessage='', completedAt=?, updatedAt=? WHERE reportDate=? AND runId=?
+    `).run(generatedAt, generatedAt, reportDate, runId);
+    db.prepare(`
+      INSERT INTO app_meta(key, value, updatedAt) VALUES('current_snapshot_id', ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=excluded.updatedAt
+    `).run(snapshotId, generatedAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+  return payload;
+}
+
+export function getMatchingSnapshot(state = {}) {
+  const reportDate = String(state.reportDate || '').trim();
+  const runId = String(resolveRunId(state, reportDate)).trim();
+  if (!reportDate || !runId) return null;
+  return getSnapshot(reportDate, runId);
+}
+
+function resolveRunId(state, reportDate) {
+  const stateRunId = state?.currentRun?.runId || state?.lastRunSummary?.runId || state?.lastRun?.runId || '';
+  if (stateRunId) return stateRunId;
+  if (!reportDate) return '';
+  return getDb().prepare('SELECT runId FROM run_locks WHERE reportDate=? ORDER BY updatedAt DESC LIMIT 1').get(reportDate)?.runId || '';
+}
+
+function snapshotError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+export function getSnapshot(reportDate, runId = '') {
+  const db = getDb();
+  const row = runId
+    ? db.prepare(`
+        SELECT payloadJson FROM export_snapshots
+        WHERE reportDate=? AND runId=? AND snapshotType='dashboard'
+        ORDER BY id DESC LIMIT 1
+      `).get(reportDate, runId)
+    : db.prepare(`
+        SELECT payloadJson FROM export_snapshots
+        WHERE reportDate=? AND snapshotType='dashboard'
+        ORDER BY id DESC LIMIT 1
+      `).get(reportDate);
+  if (!row?.payloadJson) return null;
+  try {
+    return JSON.parse(row.payloadJson);
+  } catch {
+    return null;
+  }
+}
+
+export function getSnapshotById(snapshotId) {
+  const row = getDb().prepare("SELECT payloadJson FROM export_snapshots WHERE snapshotId=? AND snapshotType='dashboard'").get(String(snapshotId || '').trim());
+  if (!row?.payloadJson) return null;
+  try { return JSON.parse(row.payloadJson); } catch { return null; }
+}
+
+export function listSnapshotHistory(limit = 60) {
+  return getDb().prepare(`SELECT reportDate,snapshotId,runId,generatedAt
+    FROM export_snapshots WHERE snapshotType='dashboard' ORDER BY reportDate DESC,createdAt DESC LIMIT ?`)
+    .all(Math.max(1, Math.min(365, Number(limit || 60))));
+}
+
+function hash(value) {
+  return createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value ?? null));
+}

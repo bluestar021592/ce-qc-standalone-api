@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运单详情 - CE Express CCSL</title>
+  <link rel="stylesheet" href="/style.css?v=detail-1">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="logo-box">
+        <img src="/assets/ce-express-logo.svg" alt="CE Express">
+      </div>
+      <div class="brand-title">运单详情</div>
+    </div>
+    <div class="header-right">
+      <a class="header-link" href="/">返回首页</a>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="card">
+      <div class="card-head">
+        <h2 id="detailTitle">正在读取...</h2>
+      </div>
+      <div id="detailStatus" class="chip-grid"></div>
+    </section>
+
+    <section class="card detail-card">
+      <div class="card-head"><h2>最终判断</h2></div>
+      <div id="finalRow" class="detail-table-wrap"></div>
+    </section>
+
+    <section class="card detail-card">
+      <div class="card-head"><h2>订单扫描</h2></div>
+      <div id="scanRow" class="detail-table-wrap"></div>
+    </section>
+
+    <section class="card detail-card">
+      <div class="card-head"><h2>轨迹节点</h2></div>
+      <div id="events" class="detail-table-wrap"></div>
+    </section>
+
+    <section class="card detail-card">
+      <div class="card-head"><h2>日报来源</h2></div>
+      <div id="dailyRows" class="detail-table-wrap"></div>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const shipmentCode = params.get('shipmentCode') || params.get('waybill') || '';
+    const reportDate = params.get('reportDate') || '';
+
+    fetch(`/api/detail?reportDate=${encodeURIComponent(reportDate)}&shipmentCode=${encodeURIComponent(shipmentCode)}`)
+      .then(r => r.json())
+      .then(j => {
+        if (!j.ok) throw new Error(j.error || '读取失败');
+        render(j.detail);
+      })
+      .catch(e => {
+        document.getElementById('detailTitle').textContent = '读取失败';
+        document.getElementById('detailStatus').innerHTML = `<span class="chip red">${escapeHtml(e.message)}</span>`;
+      });
+
+    function render(detail) {
+      document.getElementById('detailTitle').textContent = `${detail.shipmentCode} / ${detail.reportDate || '-'}`;
+      document.getElementById('detailStatus').innerHTML = `
+        <span class="chip ${detail.podLock ? 'green' : 'blue'}">POD锁 ${Boolean(detail.podLock)}</span>
+        <span class="chip blue">轨迹节点 ${(detail.events || []).length}</span>
+        <span class="chip ${detail.finalRow?.是否POD === '是' ? 'green' : 'orange'}">是否POD ${detail.finalRow?.是否POD || '-'}</span>
+        <span class="chip blue">分类 ${escapeHtml(detail.finalRow?.异常分类 || '-')}</span>
+      `;
+      document.getElementById('finalRow').innerHTML = table(detail.finalRow ? [detail.finalRow] : []);
+      document.getElementById('scanRow').innerHTML = table(detail.scan ? [detail.scan] : []);
+      document.getElementById('events').innerHTML = table(detail.events || []);
+      document.getElementById('dailyRows').innerHTML = table(detail.dailyRows || []);
+    }
+
+    function table(rows) {
+      if (!rows.length) return '<div class="empty-state">暂无数据</div>';
+      const keys = [...new Set(rows.flatMap(row => Object.keys(row || {})))];
+      return `<table><thead><tr>${keys.map(k => `<th>${escapeHtml(k)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${keys.map(k => `<td>${escapeHtml(row[k] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+  </script>
+</body>
+</html>

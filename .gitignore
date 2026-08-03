@@ -1,0 +1,14 @@
+.env
+data/
+data/*.json
+data/*.db
+data/*.sqlite
+data/*.db-wal
+data/*.db-shm
+data/token.json
+data/state.json
+data/backups/
+data/exports/
+node_modules/
+uploads/
+exports/

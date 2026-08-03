@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CE Express 质量控制管理系统</title>
+  <link rel="stylesheet" href="/style.css?v=unique-20260802-1">
+  <link rel="stylesheet" href="/pixel-lock.css?v=unique-20260802-2">
+  <link rel="stylesheet" href="/responsive-dashboard.css?v=unique-20260802-1">
+</head>
+<body>
+  <div class="app-stage">
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="sidebar-brand">
+        <img src="/assets/ce-express-logo-main.png" alt="CE Express">
+        <div class="brand-copy"><strong>CE EXPRESS</strong><small>质量控制管理系统</small></div>
+      </div>
+
+      <nav class="side-nav">
+        <button class="side-link active" data-page="home" onclick="navigatePage('home')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-home"></use></svg><span class="side-label">首页总看板</span></button>
+        <button class="side-link" data-page="ccsl" onclick="navigatePage('ccsl')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg><span class="side-label">CCSL看板</span></button>
+        <button class="side-link" data-page="shopee" onclick="navigatePage('shopee')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bag"></use></svg><span class="side-label">SHOPEE看板</span></button>
+
+        <div class="side-group" id="importNavGroup">
+          <button class="side-group-title" onclick="toggleNavGroup('importNavGroup')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-database"></use></svg><span class="side-label">数据导入</span><svg class="ui-icon group-chevron"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></button>
+          <button class="side-sub" data-page="import" onclick="navigatePage('import','ccslImport')">CCSL日报导入</button>
+          <button class="side-sub" data-page="import" onclick="navigatePage('import','shopeeImport')">SHOPEE日报导入</button>
+          <button class="side-sub" onclick="openBackupImport()">长期JSON导入（可选）</button>
+        </div>
+
+        <div class="side-group" id="trackNavGroup">
+          <button class="side-group-title" onclick="toggleNavGroup('trackNavGroup')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-route"></use></svg><span class="side-label">轨迹查询</span><svg class="ui-icon group-chevron"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></button>
+          <button class="side-sub" data-page="track" onclick="navigatePage('track')">批量轨迹查询</button>
+          <button class="side-sub" data-page="track" onclick="navigatePage('track','trackEventsTable')">查询记录</button>
+        </div>
+
+        <button class="side-link" data-page="settings" onclick="navigatePage('settings')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-settings"></use></svg><span class="side-label">系统设置</span></button>
+        <button class="side-link" data-page="settings" onclick="navigatePage('settings','logPanel')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-clipboard"></use></svg><span class="side-label">操作日志</span></button>
+      </nav>
+
+      <button class="sidebar-collapse" onclick="toggleSidebar()" title="展开或收起菜单"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg><span class="side-label">收起菜单</span></button>
+      <div id="sideSystemStatus" hidden></div>
+    </aside>
+
+    <div class="app-body">
+      <header class="topbar">
+        <h1 id="pageTitle">首页总看板</h1>
+        <div class="top-actions">
+          <label class="top-date"><select id="topHistoryDate" aria-label="日报日期" onchange="loadHistoryDate(this.value)"><option value="">—</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-calendar"></use></svg></label>
+          <label class="cycle-wrap"><select class="cycle-select" aria-label="周期"><option>日</option><option>周</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></label>
+          <button class="notification-button" title="系统通知"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bell"></use></svg><b>12</b></button>
+          <div class="top-user"><span class="top-avatar"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-user"></use></svg></span><span><b id="headerUserName">CE未登录</b><small id="headerUserRole">系统用户</small></span><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></div>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <section id="homePage" class="app-page">
+          <section id="homeKpis" class="kpi-row" aria-label="首页核心指标"></section>
+
+          <section class="overview-row">
+            <article class="pixel-panel"><h2 class="pixel-panel-title"><span class="pixel-section-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg></span>CCSL看板</h2><div id="homeCcslOverview"></div></article>
+            <article class="pixel-panel"><h2 class="pixel-panel-title"><span class="pixel-section-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bag"></use></svg></span>SHOPEE看板</h2><div id="homeShopeeOverview"></div></article>
+          </section>
+
+          <section id="homeTrendGrid" class="chart-row" aria-label="七天趋势"></section>
+
+          <section class="bottom-row">
+            <article class="pixel-panel"><h2 class="pixel-panel-title">当日遗留问题件 / 自动次日追踪 <span class="count">共 <b id="homeIssueCount">0</b> 条</span></h2><div id="homeIssueTable" class="pixel-carry-wrap"></div></article>
+            <article class="pixel-panel"><h2 class="pixel-panel-title">规则提醒</h2><div id="homeRules" class="pixel-rules"></div></article>
+          </section>
+        </section>
+
+        <section id="ccslPage" class="app-page" hidden>
+          <div class="page-heading"><div><h2>CCSL看板</h2><p id="ccslPageMeta">独立日报、快照与质控明细</p></div><div class="heading-actions"><button class="btn ghost" onclick="navigatePage('import','ccslImport')">导入日报</button><button class="btn primary" onclick="exportBusiness('CCSL')">导出CCSL Excel</button></div></div>
+          <div id="ccslKpis" class="board-kpi-grid"></div>
+          <section id="ccslExceptionBoard" class="panel board-panel"><div class="panel-title"><h3>CCSL 质控指标</h3><span class="status-pill muted">数据来自已保存快照</span></div><div id="ccslMetrics"></div></section>
+          <section id="ccslPreviewPanel" class="panel preview-panel"></section>
+        </section>
+
+        <section id="shopeePage" class="app-page" hidden>
+          <div class="page-heading"><div><h2>SHOPEE看板</h2><p id="shopeePageMeta">本省PP与外省PV独立统计</p></div><div class="heading-actions"><button class="btn ghost" onclick="navigatePage('import','shopeeImport')">导入日报</button><button class="btn shopee" onclick="exportBusiness('SHOPEE')">导出SHOPEE Excel</button></div></div>
+          <section class="panel shopee-import-summary"><div id="shopeeImportMeta"></div><div id="shopeeRecipientFilters" class="recipient-filter"></div></section>
+          <div id="shopeeRecipientGroups" class="recipient-group-grid"></div>
+          <div id="shopeeRegions" class="region-summary-grid"></div>
+          <section id="shopeeRecipientTrends" class="recipient-trend-grid"></section>
+          <section id="shopeePreviewPanel" class="panel preview-panel"></section>
+        </section>
+
+        <section id="reportsPage" class="app-page" hidden>
+          <div class="page-heading report-heading"><div><h2>报表数据预览</h2><p>字段口径与看板一致，导出不重新调用CE API</p></div></div>
+          <section class="panel report-filter-panel">
+            <div class="report-filter-grid">
+              <label>日期范围<input id="reportDateRange" readonly></label>
+              <label>渠道<select id="reportBusiness" onchange="setReportBusiness(this.value)"><option value="CCSL">CCSL</option><option value="SHOPEE">SHOPEE</option></select></label>
+              <label>区域<select id="reportRegion" onchange="setReportRegion(this.value)"><option value="ALL">全部</option><option value="PP">本省 PP</option><option value="PV">外省 PV</option></select></label>
+              <label>收件人来源<select id="reportRecipientGroup" onchange="setReportRecipientGroup(this.value)"><option value="ALL">全部</option><option value="CN">ShopeeCN</option><option value="VN">ShopeeVN</option><option value="OTHER">其他/待确认</option></select></label>
+              <label>异常类型<select id="reportCategory" onchange="setReportCategory(this.value)"></select></label>
+              <label>是否闭环<select><option>全部</option><option>是</option><option>否</option></select></label>
+              <label>关键词搜索<input id="reportSearch" placeholder="运单号 / 收件人 / 手机号" oninput="setReportSearch(this.value)"></label>
+              <button class="btn ghost" onclick="renderReportsPage()">↻ 刷新预览</button>
+              <button class="btn primary" onclick="exportBusiness(document.getElementById('reportBusiness').value)">下载Excel</button>
+            </div>
+            <p class="report-note">ⓘ 字段口径与看板一致：CCSL与SHOPEE分开统计，SHOPEE按本省（PP）/外省（PV）区分，当日遗留次日自动进入追踪。</p>
+          </section>
+          <div id="reportSummaryCards" class="report-summary-grid"></div>
+          <section id="reportPreviewPanel" class="panel preview-panel report-preview"></section>
+        </section>
+
+        <section id="importPage" class="app-page" hidden>
+          <div class="page-heading"><div><h2>数据导入与处理</h2><p>长期JSON为可选恢复备份，各业务日报独立导入</p></div></div>
+          <div class="operations-dashboard">
+            <section id="ccslImport" class="panel operation-panel"><div class="panel-title"><h3>CCSL日报导入</h3></div><label class="field-label">日报日期（可选修正）<input id="reportDate" type="date"></label><label class="file-picker"><input id="excelFile" type="file" accept=".xlsx,.xls,.html,.htm"><span>选择CCSL日报</span></label><button class="btn primary full" onclick="importExcel()">导入CCSL日报</button><div id="fileStatus" class="operation-status"></div></section>
+            <section id="shopeeImport" class="panel operation-panel shopee-accent"><div class="panel-title"><h3>SHOPEE日报导入</h3></div><label class="field-label">日报日期（可选修正）<input id="shopeeReportDate" type="date"></label><label class="file-picker"><input id="shopeeExcelFile" type="file" accept=".xlsx,.xls"><span>选择SHOPEE日报</span></label><button class="btn shopee full" onclick="importShopeeExcel()">导入SHOPEE日报</button><div id="shopeeFileStatus" class="operation-status"></div></section>
+            <section id="runPanel" class="panel operation-panel"><div class="panel-title"><h3>CCSL处理</h3></div><div class="button-stack"><button class="btn primary" onclick="run()">开始全自动处理</button><button class="btn ghost" onclick="resumeProcess()">继续处理</button><button class="btn warning" onclick="pauseProcess()">暂停</button></div><div id="ccslRunStatus" class="operation-status"></div></section>
+            <section id="shopeeRunPanel" class="panel operation-panel"><div class="panel-title"><h3>SHOPEE处理</h3></div><div class="button-stack"><button class="btn shopee" onclick="runShopee()">开始全自动处理</button><button class="btn ghost" onclick="resumeShopee()">继续处理</button><button class="btn warning" onclick="pauseShopee()">暂停</button></div><div id="shopeeRunStatus" class="operation-status"></div></section>
+          </div>
+        </section>
+
+        <section id="trackPage" class="app-page" hidden>
+          <div class="page-heading"><div><h2>扫描与轨迹查询</h2><p>使用真实CE接口，单批最多50票</p></div></div>
+          <div class="track-query-grid">
+            <section class="panel track-query-panel"><div class="panel-title"><h3>批量运单</h3><span id="trackCodeCount" class="status-pill muted">0 / 200</span></div><label class="field-label">业务板块<select id="trackBusiness"><option value="SHOPEE">SHOPEE</option><option value="CCSL">CCSL</option></select></label><label class="field-label">判断日期<input id="trackReportDate" type="date"></label><textarea id="trackCodes" class="track-textarea" placeholder="一行一个运单号，最多200票" oninput="updateTrackCodeCount()"></textarea><button id="trackQueryButton" class="btn primary full" onclick="queryTrackNow()">开始查询</button><div id="trackQueryStatus" class="operation-status"></div></section>
+            <section class="panel track-result-panel"><div class="panel-title"><h3>当前判定</h3><span id="trackBatchSummary" class="filter-status">尚未查询</span></div><div id="trackResultSummary" class="track-summary-empty">输入运单号后开始查询</div><div id="trackResultTable" class="preview-table-wrap"></div></section>
+          </div>
+          <div class="track-detail-grid"><section class="panel"><div class="panel-title"><h3>轨迹节点</h3></div><div id="trackEventsTable" class="preview-table-wrap"></div></section><section class="panel"><div class="panel-title"><h3>问题件记录</h3></div><div id="trackExceptionsTable" class="preview-table-wrap"></div></section></div>
+        </section>
+
+        <section id="rulesPage" class="app-page" hidden><div class="page-heading"><div><h2>规则说明</h2><p>当前锁版业务规则只读展示</p></div></div><div id="rulesContent" class="rules-grid"></div></section>
+
+        <section id="settingsPage" class="app-page" hidden>
+          <div class="page-heading"><div><h2>系统设置</h2><p>登录、门店配置、备份与日志</p></div></div>
+          <div class="settings-grid">
+            <section class="panel operation-panel auth-panel"><div class="panel-title"><h3>CE系统登录</h3></div><div id="ceAuthPanel"></div><div id="shopeeAuthPanel" hidden></div></section>
+            <section id="shopSettingsPanel" class="panel operation-panel"><div class="panel-title"><h3>门店CP码配置</h3></div><label class="file-picker"><input id="shopCodeFile" type="file" accept=".xlsx,.xls"><span>选择门店CP码</span></label><button class="btn ghost full" onclick="importShopCodes()">更新门店CP码</button><div id="shopCodeSettingStatus" class="operation-status"></div></section>
+            <section class="panel operation-panel"><div class="panel-title"><h3>导出与长期备份</h3></div><div class="button-stack"><button class="btn primary" onclick="navigatePage('reports')">报表预览</button><button class="btn ghost" onclick="downloadFile('/api/export-backup')">导出长期JSON</button><button class="btn ghost" onclick="openBackupImport()">恢复长期JSON</button></div></section>
+            <section id="logPanel" class="panel operation-panel log-panel-wide"><div class="panel-title"><h3>操作日志</h3><button class="text-button" onclick="clearLogs()">清空</button></div><pre id="logs" class="log-window"></pre><pre id="shopeeLogs" class="log-window"></pre></section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="backupDialog" class="modal" hidden><div class="modal-card"><div class="panel-title"><h3>导入长期JSON（可选恢复）</h3><button class="icon-button" title="关闭" onclick="closeBackupImport()">×</button></div><p>仅恢复历史趋势、POD锁和跨日遗留，不覆盖当前日报和当前处理进度。</p><label class="file-picker"><input id="backupFile" type="file" accept=".json"><span>选择长期JSON</span></label><button class="btn primary full" onclick="importBackup()">恢复长期备份</button><div id="backupImportResult" class="operation-status"></div></div></div>
+
+  </div>
+  <script src="/dashboard-components.js?v=unique-20260802-1"></script>
+  <script src="/app.js?v=unique-20260802-1"></script>
+</body>
+</html>
