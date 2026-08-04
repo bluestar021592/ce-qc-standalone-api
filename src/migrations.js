@@ -3,7 +3,7 @@ import path from 'path';
 import { DEFAULT_SHOP_CP_CODES } from './shopCodeDefaults.js';
 import { seedLatestShopWhitelist } from './shopWhitelist.js';
 
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 const REQUIRED_TABLES = [
   'pod_locks',
   'carry_bills',
@@ -760,6 +760,9 @@ export function migrateDatabase(db, cfg) {
     ensureColumn(db, 'business_api_batches', 'heartbeatAt', 'TEXT');
     ensureColumn(db, 'business_api_batches', 'startedAt', 'TEXT');
     ensureColumn(db, 'business_api_batches', 'completedAt', 'TEXT');
+    ensureColumn(db, 'backup_records', 'status', "TEXT NOT NULL DEFAULT 'ACTIVE'");
+    ensureColumn(db, 'backup_records', 'deletedAt', 'TEXT');
+    ensureColumn(db, 'backup_records', 'deletedBy', 'TEXT');
     db.exec("UPDATE business_daily_parse_rows SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
     db.exec("UPDATE business_carry_bills SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
     db.exec("UPDATE business_scan_results SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");

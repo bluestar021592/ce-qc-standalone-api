@@ -139,7 +139,7 @@ async function loadDataManagement() {
   try {
     const result = await api('/api/backups');
     const rows = result.backups || [];
-    document.getElementById('backupListTable').innerHTML = rows.length ? `<table class="preview-table"><thead><tr><th>创建时间</th><th>文件名</th><th>类型</th><th>校验</th><th>操作</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.createdAt || '')}</td><td>${escapeHtml(row.fileName || '')}</td><td>${escapeHtml(row.reason || '')}</td><td>${escapeHtml(String(row.fileHash || '').slice(0, 12))}</td><td><button class="text-button" onclick="restoreDatabaseBackup(${Number(row.id)})">恢复</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty-state compact">暂无备份</div>';
+    document.getElementById('backupListTable').innerHTML = rows.length ? `<table class="preview-table"><thead><tr><th>创建时间</th><th>文件名</th><th>类型</th><th>校验</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.createdAt || '')}</td><td>${escapeHtml(row.fileName || '')}</td><td>${escapeHtml(row.reason || '')}</td><td>${escapeHtml(String(row.fileHash || '').slice(0, 12))}</td><td>${escapeHtml(row.status || 'ACTIVE')}</td><td class="backup-actions"><button class="text-button" onclick="downloadFile('/api/backups/${Number(row.id)}/download')">下载</button><button class="text-button" onclick="restoreDatabaseBackup(${Number(row.id)})">恢复</button>${String(row.status || 'ACTIVE') === 'ACTIVE' ? `<button class="text-button danger-action" onclick="deleteDatabaseBackup(${Number(row.id)},'${escapeAttr(row.fileName || '')}')">删除</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-state compact">暂无备份</div>';
   } catch (error) { document.getElementById('backupListTable').innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`; }
 }
 
@@ -161,12 +161,22 @@ async function restoreDatabaseBackup(backupId) {
   } catch (error) { alert(`恢复失败：${error.message}`); }
 }
 
-async function loadUserManagement() {
+async function deleteDatabaseBackup(backupId, fileName) {
+  if (!confirm(`确定删除备份：${fileName}？`)) return;
+  const confirmText = prompt('请输入：删除备份');
+  if (confirmText !== '删除备份') return;
+  try {
+    await api('/api/admin/delete-backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backupId, confirmText }) });
+    await loadDataManagement();
+  } catch (error) { alert(`删除备份失败：${error.message}`); }
+}
+
+async function loadUserManagement(includeDeleted = false) {
   const target = document.getElementById('userManagementTable');
   if (!target || accessSession.user?.role !== 'ADMIN') return;
   try {
-    const result = await api('/api/admin/users');
-    target.innerHTML = `<table class="preview-table"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${(result.rows || []).map(row => `<tr><td>${escapeHtml(row.username)}</td><td>${escapeHtml(row.displayName)}</td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.businessScope)}</td><td>${row.enabled ? '启用' : '停用'}</td><td>${escapeHtml(row.lastLoginAt || '—')}</td><td><button class="text-button" onclick="toggleInternalUser(${Number(row.id)},${row.enabled ? 'false' : 'true'})">${row.enabled ? '停用' : '启用'}</button><button class="text-button" onclick="resetInternalUserPassword(${Number(row.id)})">重置密码</button><button class="text-button" onclick="revokeInternalUserSessions(${Number(row.id)})">退出会话</button><button class="text-button danger-action" onclick="deleteInternalUser(${Number(row.id)},'${escapeAttr(row.username)}')">删除</button></td></tr>`).join('')}</tbody></table>`;
+    const result = await api(`/api/admin/users${includeDeleted ? '?includeDeleted=1' : ''}`);
+    target.innerHTML = `<div class="table-toolbar"><button class="text-button" onclick="loadUserManagement(${includeDeleted ? 'false' : 'true'})">${includeDeleted ? '隐藏已删除用户' : '查看已删除用户'}</button></div><table class="preview-table"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${(result.rows || []).map(row => `<tr><td>${escapeHtml(row.username)}</td><td>${escapeHtml(row.displayName)}</td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.businessScope)}</td><td>${escapeHtml(row.status === 'DELETED' ? '已删除' : (row.enabled ? '启用' : '停用'))}</td><td>${escapeHtml(row.lastLoginAt || '—')}</td><td class="user-actions">${row.status === 'DELETED' ? `<button class="text-button" onclick="restoreInternalUser(${Number(row.id)})">恢复用户</button>` : `<button class="text-button" onclick="toggleInternalUser(${Number(row.id)},${row.enabled ? 'false' : 'true'})">${row.enabled ? '停用' : '启用'}</button><button class="text-button" onclick="resetInternalUserPassword(${Number(row.id)})">重置密码</button><button class="text-button" onclick="revokeInternalUserSessions(${Number(row.id)})">退出会话</button><button class="text-button danger-action" onclick="deleteInternalUser(${Number(row.id)},'${escapeAttr(row.username)}')">删除</button>`}</td></tr>`).join('')}</tbody></table>`;
   } catch (error) { target.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`; }
 }
 
@@ -200,6 +210,12 @@ async function deleteInternalUser(id, username) {
     await api(`/api/admin/users/${id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: confirmation }) });
     await loadUserManagement();
   } catch (error) { alert(`删除失败：${error.message}`); }
+}
+
+async function restoreInternalUser(id) {
+  if (!confirm('恢复后该用户需要使用管理员重置后的密码重新登录。')) return;
+  try { await api(`/api/admin/users/${id}/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); await loadUserManagement(true); }
+  catch (error) { alert(`恢复失败：${error.message}`); }
 }
 
 function pageFromPath() {

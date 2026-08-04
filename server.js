@@ -16,7 +16,7 @@ import { exportShopeeXlsx } from './src/shopeeExporter.js';
 import { cleanMainBills, loadState, saveState, resetState } from './src/storage.js';
 import { clearToken, loadToken, saveToken, summarizeToken } from './src/authStore.js';
 import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, safeFinalRows } from './src/reporting.js';
-import { createDatabaseBackup, fileHash, listBackups, recordBackup, recordExport } from './src/backup.js';
+import { createDatabaseBackup, deleteBackup, fileHash, listBackups, recordBackup, recordExport } from './src/backup.js';
 import { closeDb, ensureRuntimeDirs, getDb, getRuntimeConfig } from './src/db.js';
 import { createOrRecoverRun, getCurrentReportDate, getDbStatus, getRunStatus, listExportRecords, loadDetail, resetRunForReport, updateRunLock } from './src/store.js';
 import { buildConsistencyReport } from './src/consistency.js';
@@ -95,7 +95,8 @@ app.get('/api/session', (req, res) => {
 });
 
 app.get('/api/admin/users', requireRole('ADMIN'), (req, res) => {
-  const rows = getDb().prepare("SELECT id,username,displayName,departmentCompany,email,role,businessScope,enabled,expiresAt,mustChangePassword,failedLoginCount,lockedUntil,lastLoginAt,createdAt,updatedAt FROM users WHERE status='ACTIVE' ORDER BY enabled DESC, username").all();
+  const includeDeleted = String(req.query?.includeDeleted || '') === '1';
+  const rows = getDb().prepare(`SELECT id,username,displayName,departmentCompany,email,role,businessScope,enabled,status,expiresAt,mustChangePassword,failedLoginCount,lockedUntil,lastLoginAt,createdAt,updatedAt,deletedAt,deletedBy FROM users ${includeDeleted ? '' : "WHERE status='ACTIVE'"} ORDER BY CASE WHEN status='ACTIVE' THEN 0 ELSE 1 END, enabled DESC, username`).all();
   res.json({ ok: true, rows });
 });
 
@@ -171,6 +172,15 @@ app.delete('/api/admin/users/:id', requireRole('ADMIN'), (req, res) => {
   });
   update();
   auditAction(req, 'USER_SOFT_DELETED', { userId: id, username: target.username });
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/users/:id/restore', requireRole('ADMIN'), (req, res) => {
+  const id = Number(req.params.id || 0);
+  const user = getDb().prepare("SELECT * FROM users WHERE id=? AND status='DELETED'").get(id);
+  if (!user) return res.status(404).json({ ok: false, error: '未找到已删除用户。' });
+  getDb().prepare("UPDATE users SET status='ACTIVE',enabled=1,deletedAt=NULL,deletedBy=NULL,mustChangePassword=1,updatedAt=? WHERE id=?").run(new Date().toISOString(), id);
+  auditAction(req, 'USER_RESTORED', { userId: id, username: user.username });
   res.json({ ok: true });
 });
 
@@ -654,6 +664,21 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     }
     if (!(state.pnhBills || []).length) return res.status(400).json({ ok: false, code: 'EMPTY_DAILY_REPORT', error: 'SHOPEE日报有效运单数为0，请核对日报解析结果。' });
     if (!summarizeToken(await loadToken()).hasAccessToken) return res.status(400).json({ ok: false, error: '请先登录CE系统。' });
+    try {
+      const probeBills = state.pnhBills.slice(0, Math.min(5, state.pnhBills.length));
+      await client.confirmQuery(probeBills);
+      state.apiDiagnostic = { apiName: 'confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', shipmentCount: probeBills.length, preflight: 'passed', checkedAt: new Date().toISOString() };
+      saveBusinessState(state, SHOPEE);
+    } catch (error) {
+      const diagnostic = normalizeApiError(error);
+      const status = Number(diagnostic.ceStatus || 0);
+      const code = [401, 403].includes(status) ? 'AUTH_REQUIRED' : ([400, 422].includes(status) ? 'REQUEST_SCHEMA_INVALID' : (status === 404 ? 'ENDPOINT_INVALID' : 'CE_PREFLIGHT_FAILED'));
+      const message = code === 'AUTH_REQUIRED' ? 'CE系统登录已失效，请在系统设置重新登录后点击继续处理。' : (diagnostic.ceMsg || diagnostic.message || 'CE扫描预检失败');
+      state.apiDiagnostic = { apiName: 'confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', shipmentCount: Math.min(5, state.pnhBills.length), httpStatus: diagnostic.ceStatus || '', ceCode: diagnostic.ceCode || '', ceMsg: diagnostic.ceMsg || '', preflight: 'failed', checkedAt: new Date().toISOString() };
+      state.processing = { ...(state.processing || {}), running: false, paused: code === 'AUTH_REQUIRED', error: message };
+      saveBusinessState(state, SHOPEE);
+      return res.status(409).json({ ok: false, code, error: message, diagnostic: state.apiDiagnostic });
+    }
     const before = getBusinessRunStatus(SHOPEE, reportDate).lock;
     if (options.resume && (!before || before.status === 'finished')) return res.status(409).json({ ok: false, code: 'RUN_NOT_RECOVERABLE', error: 'SHOPEE当前没有可恢复任务。' });
     if (before?.runId && activeRunIds.has(before.runId)) {
@@ -700,11 +725,11 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     saveBusinessState(result.state, SHOPEE);
     res.json({ ok: true, summary, run: { reportDate, runId, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeShopeeState(result.state) });
   } catch (error) {
-    if (reportDate) updateBusinessRunLock(SHOPEE, reportDate, 'failed', error.message || String(error));
+    if (reportDate) updateBusinessRunLock(SHOPEE, reportDate, error.runStatus || 'failed', error.message || String(error));
     const state = loadBusinessState(SHOPEE);
     state.processing = { ...(state.processing || {}), running: false, paused: false, error: error.message || String(error) };
     saveBusinessState(state, SHOPEE);
-    res.status(500).json({ ok: false, code: error.code || 'SHOPEE_RUN_FAILED', error: error.message });
+    res.status(error.code === 'AUTH_REQUIRED' ? 409 : 500).json({ ok: false, code: error.code || 'SHOPEE_RUN_FAILED', error: error.message, diagnostic: error.apiDiagnostic || state.apiDiagnostic || null });
   } finally {
     if (runId) activeRunIds.delete(runId);
   }
@@ -946,11 +971,27 @@ app.get('/api/backups', async (req, res) => {
   res.json({ ok: true, backups: listBackups(50), exports: listExportRecords(50) });
 });
 
+app.get('/api/backups/:id/download', requireRole('ADMIN'), (req, res) => {
+  const backup = getDb().prepare("SELECT * FROM backup_records WHERE id=? AND COALESCE(status,'ACTIVE')='ACTIVE'").get(Number(req.params.id || 0));
+  if (!backup?.filePath || !fileHash(backup.filePath) || fileHash(backup.filePath) !== backup.fileHash) return res.status(404).json({ ok: false, error: '备份文件不存在或校验失败。' });
+  res.download(backup.filePath, backup.fileName);
+});
+
 app.post('/api/admin/backup-now', requireRole('ADMIN'), (req, res) => {
   const filePath = createDatabaseBackup('manual-admin');
   if (!filePath) return res.status(500).json({ ok: false, error: '数据库备份失败。' });
   auditAction(req, 'DATABASE_BACKUP_CREATED', { backupPath: filePath });
   res.json({ ok: true, filePath, sha256: fileHash(filePath) });
+});
+
+app.post('/api/admin/delete-backup', requireRole('ADMIN'), (req, res) => {
+  const backupId = Number(req.body?.backupId || 0);
+  if (req.body?.confirmText !== '删除备份') return res.status(400).json({ ok: false, error: '请准确输入“删除备份”确认。' });
+  try {
+    const result = deleteBackup(backupId, req.user?.username || req.user?.email || '');
+    auditAction(req, 'BACKUP_DELETED', { backupId, fileName: result.fileName });
+    res.json({ ok: true, ...result });
+  } catch (error) { res.status(409).json({ ok: false, error: error.message }); }
 });
 
 app.get('/api/admin/audit-logs', requireRole('ADMIN'), (req, res) => {
@@ -1078,6 +1119,7 @@ function summarizeShopeeState(state) {
     dailySummary: viewState.dailyParseSummary || viewState.daily?.summary || null,
     dailyPreview: viewState.daily?.preview || (viewState.dailyParseRows || []).slice(0, 50),
     backupSummary: viewState.backupSummary || null,
+    apiDiagnostic: viewState.apiDiagnostic || null,
     historySummary: viewState.historySummary || [],
     runId: runStatus?.runId || viewState.currentRun?.runId || viewState.lastRunSummary?.runId || '',
     runStatus: runStatus?.status || '',

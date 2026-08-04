@@ -88,3 +88,17 @@ test('Shopee POD, return and empty scan response do not enter track queue', asyn
   assert.deepEqual(state.scanRetryBills, [bills[2]]);
   assert.equal(state.needTrackBills.length, 0);
 });
+
+test('Shopee authentication failure pauses once instead of failing every bill', async () => {
+  const bills = ['SHP000000010', 'SHP000000011'];
+  const state = {
+    businessType: 'SHOPEE', reportDate: '2026-08-04', pnhBills: bills,
+    dailyParseRows: bills.map(shipmentCode => ({ shipmentCode, recipient_group: 'VN', importStatus: 'ACCEPTED' })),
+    currentRun: { runId: 'auth-test' }, carryBills: [], podLocks: []
+  };
+  const authError = Object.assign(new Error('unauthorized'), { ceStatus: 401, ceCode: '401', ceMsg: 'unauthorized' });
+  await assert.rejects(() => runQcPipeline({ state, client: { confirmQuery: async () => { throw authError; } } }), { code: 'AUTH_REQUIRED' });
+  assert.equal(state.apiDiagnostic.code, 'AUTH_REQUIRED');
+  assert.equal(state.scanResults?.length || 0, 0);
+  assert.equal(state.needTrackBills?.length || 0, 0);
+});

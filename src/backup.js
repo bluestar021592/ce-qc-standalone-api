@@ -48,6 +48,26 @@ export function listBackups(limit = 50) {
   return db.prepare('SELECT * FROM backup_records ORDER BY id DESC LIMIT ?').all(Number(limit || 50));
 }
 
+export function deleteBackup(backupId, deletedBy = '') {
+  const db = getDb();
+  const item = db.prepare("SELECT * FROM backup_records WHERE id=? AND COALESCE(status,'ACTIVE')='ACTIVE'").get(Number(backupId || 0));
+  if (!item) throw new Error('未找到可删除的备份。');
+  const cfg = getRuntimeConfig();
+  const resolved = path.resolve(item.filePath || '');
+  if (!resolved.startsWith(path.resolve(cfg.backupsDir) + path.sep)) throw new Error('备份文件不在受控目录。');
+  if (!fs.existsSync(resolved) || fileHash(resolved) !== item.fileHash) throw new Error('备份文件校验失败，请刷新备份状态后重试。');
+  const validCount = db.prepare("SELECT * FROM backup_records WHERE COALESCE(status,'ACTIVE')='ACTIVE'").all()
+    .filter(row => fs.existsSync(row.filePath || '') && fileHash(row.filePath) === row.fileHash).length;
+  if (validCount <= 1) throw new Error('不能删除当前唯一一个校验通过的完整备份。');
+  try { fs.rmSync(resolved, { force: false }); }
+  catch (error) {
+    db.prepare("UPDATE backup_records SET status='DELETE_FAILED' WHERE id=?").run(item.id);
+    throw new Error(`备份文件删除失败：${error.message}`);
+  }
+  db.prepare("UPDATE backup_records SET status='DELETED',deletedAt=?,deletedBy=? WHERE id=?").run(nowIso(), String(deletedBy || ''), item.id);
+  return { id: item.id, fileName: item.fileName, deletedAt: nowIso() };
+}
+
 export function recordExport(row = {}) {
   const db = getDb();
   db.prepare(`

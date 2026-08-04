@@ -394,6 +394,17 @@ async function queryShopeeConfirmApi({ state, bills, client, onProgress, onCheck
       }
       recordApiAttempt(state, { apiName: 'confirm-query', stage: 'scan-status', batchIndex: index + 1, batch, status: 'success', resultCount: (responseRows || []).length });
     } catch (error) {
+      const diagnostic = classifyCeFailure(error);
+      if (diagnostic.runStatus) {
+        state.apiDiagnostic = { ...diagnostic, apiName: 'confirm-query', batchKey: `scan-status:${String(index + 1).padStart(6, '0')}`, runId: state.currentRun?.runId || '', shipmentCount: batch.length };
+        state.processing = { ...state.processing, running: false, paused: true, error: diagnostic.userMessage };
+        await checkpoint(state, onCheckpoint);
+        const systemError = new Error(diagnostic.userMessage);
+        systemError.code = diagnostic.code;
+        systemError.runStatus = diagnostic.runStatus;
+        systemError.apiDiagnostic = state.apiDiagnostic;
+        throw systemError;
+      }
       for (const bill of batch) {
         statusByBill.set(bill, {
           businessType: 'SHOPEE', reportDate, shipmentCode: bill, status: 'failed',
@@ -477,6 +488,16 @@ function recordApiAttempt(state, attempt) {
     createdAt: existing?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString()
   };
   state.apiBatchStatus = [...(state.apiBatchStatus || []).filter(item => !(item.apiName === row.apiName && item.batchKey === row.batchKey && item.runId === row.runId)), row];
+}
+
+function classifyCeFailure(error) {
+  const status = Number(error?.ceStatus || error?.response?.status || 0);
+  const code = String(error?.ceCode || '');
+  const msg = String(error?.ceMsg || error?.message || '').slice(0, 500);
+  if ([401, 403].includes(status) || ['401', '403'].includes(code)) return { code: 'AUTH_REQUIRED', runStatus: 'AUTH_REQUIRED', httpStatus: status, ceCode: code, ceMsg: msg, userMessage: 'CE系统登录已失效，请在系统设置重新登录后点击继续处理。' };
+  if ([400, 422].includes(status)) return { code: 'REQUEST_SCHEMA_INVALID', runStatus: 'REQUEST_SCHEMA_INVALID', httpStatus: status, ceCode: code, ceMsg: msg, userMessage: `CE请求结构错误：${msg || `HTTP ${status}`}` };
+  if (status === 404) return { code: 'ENDPOINT_INVALID', runStatus: 'ENDPOINT_INVALID', httpStatus: status, ceCode: code, ceMsg: msg, userMessage: 'CE接口路径无效，已停止本次处理。' };
+  return { code: 'BATCH_REQUEST_FAILED', runStatus: '', httpStatus: status, ceCode: code, ceMsg: msg, userMessage: msg || 'CE请求失败' };
 }
 
 function groupRows(rows = []) {

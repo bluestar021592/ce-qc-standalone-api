@@ -186,7 +186,7 @@ export function normalizeBusinessState(state = {}, businessType = SHOPEE) {
     apiBatchStatus: state.apiBatchStatus || [], trackResults: state.trackResults || [], finalRows: state.finalRows || [], priorCarryRows: state.priorCarryRows || [], nextCarryBills: clean(state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || [])),
     historySummary: (state.historySummary || []).slice(-30), processing: state.processing || { running: false, paused: false, phase: '' },
     currentRun: state.currentRun || null, lastRunSummary: state.lastRunSummary || state.lastRun || null, lastRun: state.lastRun || state.lastRunSummary || null,
-    backupImportedAt: state.backupImportedAt || '', backupSummary: state.backupSummary || null, logs: (state.logs || []).slice(-300), snapshotId: state.snapshotId || ''
+    backupImportedAt: state.backupImportedAt || '', backupSummary: state.backupSummary || null, apiDiagnostic: state.apiDiagnostic || null, logs: (state.logs || []).slice(-300), snapshotId: state.snapshotId || ''
   };
 }
 
