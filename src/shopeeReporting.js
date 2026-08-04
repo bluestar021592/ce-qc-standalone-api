@@ -3,6 +3,15 @@ import { recipientGroupOf } from './recipientGroup.js';
 
 export const SHOPEE_RECIPIENT_GROUPS = Object.freeze(['ALL', 'CN', 'VN', 'OTHER']);
 
+const STORE_METRICS = Object.freeze([
+  ['在途门店', 'shopTransit', 'shopTransit', '件'],
+  ['到达门店', 'shopArrived', 'shopArrived', '件'],
+  ['门店Pending', 'shopPending', 'shopPending', '件'],
+  ['门店滞留1天+', 'shopRetention1', 'shopRetention1', '件'],
+  ['门店滞留2天+', 'shopRetention2', 'shopRetention2', '件'],
+  ['门店滞留3天+', 'shopRetention3', 'shopRetention3', '件']
+]);
+
 const PUBLIC_METRICS = Object.freeze([
   ['今日总单', 'total', 'all', '件'],
   ['今日POD', 'pod', 'pod', '件'],
@@ -99,6 +108,12 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
     ...allGroups.pending1, ...allGroups.oc1, ...allGroups.inboundNoScan, ...allGroups.returnRequired
   ]);
   const tabs = {
+    shopTransit: tab('在途门店', visibleRows(allGroups.shopTransit)),
+    shopArrived: tab('到达门店', visibleRows(allGroups.shopArrived)),
+    shopPending: tab('门店Pending', visibleRows(allGroups.shopPending)),
+    shopRetention1: tab('门店滞留1天+', visibleRows(allGroups.shopRetention1)),
+    shopRetention2: tab('门店滞留2天+', visibleRows(allGroups.shopRetention2)),
+    shopRetention3: tab('门店滞留3天+', visibleRows(allGroups.shopRetention3)),
     all: tab('全部明细', visibleRows(allGroups.all)),
     pod: tab('已签收', visibleRows(allGroups.pod)),
     firstAttempt: tab('首派成功', visibleRows(allGroups.firstAttempt)),
@@ -132,7 +147,7 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
 
 export function reconcileRecipientGroups(recipientGroups = {}) {
   const checks = [];
-  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan']) {
+  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3']) {
     const all = Number(recipientGroups.ALL?.metrics?.[key] || 0);
     const parts = ['CN', 'VN', 'OTHER'].reduce((sum, group) => sum + Number(recipientGroups[group]?.metrics?.[key] || 0), 0);
     checks.push({ key, all, parts, difference: all - parts, passed: all === parts });
@@ -149,6 +164,7 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
   const groupDaily = uniqueRows(select(dailyRows));
   const groupRows = uniqueRows(select(rows));
   const groups = buildGroups(groupRows, select(carryRows), select(nextCarryRows));
+  Object.assign(groups, buildStoreGroups(groupRows));
   const eligibleFirstAttempt = groupDaily.filter(row => row.API状态 !== '失败' && row.查询状态 !== 'refresh_failed' && Boolean(row.finalRowAvailable));
   const firstAttempt = eligibleFirstAttempt.filter(row => isPod(row) && Number(row.Pending最大次数 || row.Pending次数 || 0) === 0 && Number(row.OC最大天数 || row.OC天数 || 0) === 0);
   const pod = groupDaily.filter(isPod);
@@ -171,13 +187,19 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
       oc1: groups.oc1.length,
       oc2: groups.oc2.length,
       oc3plus: groups.oc3.length,
-      inboundNoScan: groups.inboundNoScan.length
+      inboundNoScan: groups.inboundNoScan.length,
+      shopTransit: groups.shopTransit.length,
+      shopArrived: groups.shopArrived.length,
+      shopPending: groups.shopPending.length,
+      shopRetention1: groups.shopRetention1.length,
+      shopRetention2: groups.shopRetention2.length,
+      shopRetention3: groups.shopRetention3.length
     }
   };
 }
 
 function metricRowsForGroup(group, summary, state) {
-  return PUBLIC_METRICS.map(([label, key, tabKey, unit]) => {
+  return [...PUBLIC_METRICS, ...STORE_METRICS].map(([label, key, tabKey, unit]) => {
     const value = Number(summary.metrics[key] || 0);
     const isRate = unit === '%';
     const status = isRate ? (value >= 90 ? 'normal' : 'warning') : (['total', 'pod'].includes(key) ? 'volume' : countStatus(value));
@@ -205,6 +227,12 @@ function tabsForRecipientGroup(group, summary) {
   const label = recipientGroupLabel(group);
   const groups = summary.groups;
   return {
+    shopTransit: tab(`${label}在途门店`, visibleRows(groups.shopTransit)),
+    shopArrived: tab(`${label}到达门店`, visibleRows(groups.shopArrived)),
+    shopPending: tab(`${label}门店Pending`, visibleRows(groups.shopPending)),
+    shopRetention1: tab(`${label}门店滞留1天+`, visibleRows(groups.shopRetention1)),
+    shopRetention2: tab(`${label}门店滞留2天+`, visibleRows(groups.shopRetention2)),
+    shopRetention3: tab(`${label}门店滞留3天+`, visibleRows(groups.shopRetention3)),
     all: tab(`${label}今日总单`, visibleRows(groups.all)),
     pod: tab(`${label}今日POD`, visibleRows(groups.pod)),
     firstAttempt: tab(`${label}首派成功`, visibleRows(groups.firstAttempt)),
@@ -265,6 +293,17 @@ function buildGroups(rows, carryRows, nextCarryRows) {
   };
 }
 
+function buildStoreGroups(rows = []) {
+  return {
+    shopTransit: rows.filter(row => row.shopState === 'SHOP_TRANSFER_IN_PROGRESS'),
+    shopArrived: rows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT'),
+    shopPending: rows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && (row.storeTags || row.tags || []).includes('SHOP_PENDING')),
+    shopRetention1: rows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && Number(row.shopRetentionNaturalDays || 0) >= 1),
+    shopRetention2: rows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && Number(row.shopRetentionNaturalDays || 0) >= 2),
+    shopRetention3: rows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && Number(row.shopRetentionNaturalDays || 0) >= 3)
+  };
+}
+
 function publicGroupSummary(summary) {
   return {
     group: summary.group,
@@ -304,7 +343,13 @@ function buildRegionSummary(dailyRows, rows) {
       oc2: monitor.filter(row => Number(row.OC天数 || 0) >= 2).length,
       oc3: monitor.filter(row => Number(row.OC天数 || 0) >= 3).length,
       inboundNoScan: monitor.filter(row => row.入库无扫描节点 === '是').length,
-      returnRequired: monitor.filter(row => row.returnRequired === true || row.退回待处理 === '是').length
+      returnRequired: monitor.filter(row => row.returnRequired === true || row.退回待处理 === '是').length,
+      shopTransit: monitor.filter(row => row.shopState === 'SHOP_TRANSFER_IN_PROGRESS').length,
+      shopArrived: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT').length,
+      shopPending: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && (row.storeTags || row.tags || []).includes('SHOP_PENDING')).length,
+      shopRetention1: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && Number(row.shopRetentionNaturalDays || 0) >= 1).length,
+      shopRetention2: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && Number(row.shopRetentionNaturalDays || 0) >= 2).length,
+      shopRetention3: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && Number(row.shopRetentionNaturalDays || 0) >= 3).length
     };
   };
   return { PP: summarize('PP'), PV: summarize('PV'), UNKNOWN: summarize('UNKNOWN') };

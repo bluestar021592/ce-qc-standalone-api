@@ -3,7 +3,7 @@ import path from 'path';
 import { classifyShopeeRegion } from './shopeeAnalyzer.js';
 import { classifyRecipient } from './recipientGroup.js';
 
-const BILL_HEADERS = new Set(['shipmentcode', 'shipment code', '运单号', '单号', 'waybill', 'waybillno', 'trackingnumber', 'tracking number', 'tracking no']);
+const BILL_HEADERS = new Set(['shipmentcode', 'shipment code', '运单号', '运单编号', '单号', 'waybill', 'waybillno', 'trackingnumber', 'tracking number', 'tracking no']);
 const DATE_HEADERS = new Set(['reportdate', 'report date', '报表日期', '日报日期', '日期', 'date']);
 const RECIPIENT_HEADERS = new Set(['收件人', '收件人名称', 'consigneename', 'consignee', 'recipientname', 'recipient']);
 

@@ -4,6 +4,7 @@ import { buildConsistencyReport } from './consistency.js';
 import { getDb, nowIso } from './db.js';
 import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, getXlsxSheetRows } from './reporting.js';
 import { buildSnapshotHashes } from './snapshotHash.js';
+import { SHOP_WHITELIST_SOURCE_SHA256, SHOP_WHITELIST_VERSION } from './shopWhitelist.js';
 
 export function createDashboardSnapshot(state = {}, context = {}) {
   const reportDate = String(context.reportDate || state.reportDate || '').trim();
@@ -59,6 +60,9 @@ export function createDashboardSnapshot(state = {}, context = {}) {
     ...snapshotHashes,
     state: snapshotState
   };
+  payload.status = consistency?.ok === false ? 'INVALID' : 'VALID';
+  payload.reconciliationStatus = consistency?.ok === false ? 'FAILED' : 'COMPLETED';
+  payload.whitelistVersion = SHOP_WHITELIST_VERSION;
 
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
@@ -80,6 +84,8 @@ export function createDashboardSnapshot(state = {}, context = {}) {
       generatedAt,
       generatedAt
     );
+    db.prepare(`UPDATE export_snapshots SET status=?,reconciliationStatus=?,invalidReason=?,whitelistVersion=?,whitelistSha256=? WHERE snapshotId=?`)
+      .run(payload.status, payload.reconciliationStatus, payload.status === 'INVALID' ? JSON.stringify(consistency) : '', SHOP_WHITELIST_VERSION, SHOP_WHITELIST_SOURCE_SHA256, snapshotId);
     db.prepare(`
       UPDATE run_locks SET status='finished', currentStage='完成', batchIndex=1, totalBatches=1,
         errorMessage='', completedAt=?, updatedAt=? WHERE reportDate=? AND runId=?

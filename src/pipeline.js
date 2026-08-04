@@ -1,7 +1,7 @@
 import { analyzeShipment, normalizeEvent } from './analyzer.js';
 import { cleanAnyBills, cleanMainBills, isExcludedBill } from './storage.js';
 import { getShopCodeMap } from './shopCodes.js';
-import { analyzeShopeeShipment } from './shopeeAnalyzer.js';
+import { analyzeShopeeShipment, classifyShopeeScanStatus } from './shopeeAnalyzer.js';
 import { queryBatchWithFallback, queryTrackBatchWithFallback, splitTrackBatches, TRACK_QUERY_BATCH_SIZE } from './trackBatching.js';
 
 const ORDER_BATCH_SIZE = Number(process.env.ORDER_BATCH_SIZE || 350);
@@ -94,7 +94,7 @@ export async function runQcPipeline({
     await checkpoint(state, onCheckpoint);
   }
 
-  const needTrack = scanPool.filter(wb => !podLocks.has(wb) && !excluded(wb));
+  const needTrack = scanPool.filter(wb => !podLocks.has(wb) && !refreshFailed.has(wb) && !excluded(wb));
   state.needTrackBills = needTrack;
   state.processing = { ...state.processing, phase: '轨迹查询', batchIndex: 0, totalBatches: Math.ceil(needTrack.length / TRACK_QUERY_BATCH_SIZE) };
   await onProgress(`订单扫描完成：POD ${scanResults.filter(x => x.是否POD === '是').length}票，进入轨迹 ${needTrack.length}票`);
@@ -273,8 +273,12 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
     const row = shipmentByBill.get(bill)?.[0] || {};
     return String(row.orderStatus ?? '') === '85' || /\bPOD\b|delivered|签收|已妥投/i.test(JSON.stringify(row));
   }));
+  const preliminaryReturnBills = new Set(scanPool.filter(bill => {
+    const row = shipmentByBill.get(bill)?.[0] || {};
+    return classifyShopeeScanStatus(row, row) === 'RETURN';
+  }));
   for (const bill of preliminaryPodBills) podLocks.add(bill);
-  const needTrack = scanPool.filter(bill => !preliminaryPodBills.has(bill));
+  const needTrack = scanPool.filter(bill => !preliminaryPodBills.has(bill) && !preliminaryReturnBills.has(bill));
   state.needTrackBills = needTrack;
   state.podLocks = [...podLocks].sort();
   await checkpoint(state, onCheckpoint);
@@ -305,15 +309,15 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
       waybill: bill,
       scanRow,
       shipmentTrackRow,
-      events: alreadyPod ? [] : (eventsByBill.get(bill) || []),
-      exceptions: alreadyPod ? [] : (exceptionsByBill.get(bill) || []),
+      events: (alreadyPod || preliminaryReturnBills.has(bill)) ? [] : (eventsByBill.get(bill) || []),
+      exceptions: (alreadyPod || preliminaryReturnBills.has(bill)) ? [] : (exceptionsByBill.get(bill) || []),
       reportDate,
       dailyRow: dailyByBill.get(bill) || {},
       priorRow: priorByBill.get(bill) || {},
       apiStatus: {
         shipment: shipmentStatusByBill.get(bill) || 'failed',
-        event: alreadyPod ? 'skipped_pod' : (eventStatusByBill.get(bill) || 'failed'),
-        exception: alreadyPod ? 'skipped_pod' : (exceptionStatusByBill.get(bill) || 'failed')
+        event: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (eventStatusByBill.get(bill) || 'failed')),
+        exception: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (exceptionStatusByBill.get(bill) || 'failed'))
       }
     });
     trackResults.push(result);

@@ -78,6 +78,18 @@
     return `<button class="pixel-metric ${className}" ${action ? `onclick="${action}"` : ''}><span>${text(label)}</span><b>${typeof value === 'string' ? text(value) : number(value)}</b>${note ? `<small>${text(note)}</small>` : ''}</button>`;
   }
 
+  function storeStrip(values = {}, businessType = 'CCSL', group = 'ALL') {
+    const open = tab => businessType === 'SHOPEE'
+      ? `openShopeeGroupMetric('${group}','${tab}')`
+      : `openBusinessMetric('CCSL','${tab}')`;
+    const items = [
+      ['在途门店', values.shopTransit, 'shopTransit'], ['到达门店', values.shopArrived ?? values.shopInbound, 'shopArrived'],
+      ['门店Pending', values.shopPending, 'shopPending'], ['门店滞留1天+', values.shopRetention1 ?? values.shopInbound1, 'shopRetention1'],
+      ['门店滞留2天+', values.shopRetention2 ?? values.shopInbound2, 'shopRetention2'], ['门店滞留3天+', values.shopRetention3 ?? values.shopInbound3plus, 'shopRetention3']
+    ];
+    return `<section class="store-state-strip"><h3>${icon('store')}<span>门店流转状态</span></h3><div>${items.map(([label, value, tab]) => metric(label, value || 0, '', '', open(tab))).join('')}</div></section>`;
+  }
+
   function ccslOverview(ccsl = {}) {
     const total = Number(ccsl.today || 0);
     const upper = [
@@ -95,7 +107,7 @@
       ['入库无扫描', ccsl.inboundNoScan, `占比 ${ratio(ccsl.inboundNoScan, total)}`, '', "openBusinessMetric('CCSL','inboundNoScan')"],
       ['工单未处理', ccsl.ticketOpen, `占比 ${ratio(ccsl.ticketOpen, total)}`, 'danger', "openBusinessMetric('CCSL','workOrderAbnormal')"]
     ];
-    return `<div class="pixel-ccsl-grid">${upper.map(args => metric(...args)).join('')}</div><div class="pixel-divider"></div><div class="pixel-ccsl-grid lower">${lower.map(args => metric(...args)).join('')}</div>`;
+    return `<div class="pixel-ccsl-grid">${upper.map(args => metric(...args)).join('')}</div><div class="pixel-divider"></div><div class="pixel-ccsl-grid lower">${lower.map(args => metric(...args)).join('')}</div>${storeStrip(ccsl, 'CCSL')}`;
   }
 
   function regionCard(code, region = {}) {
@@ -103,6 +115,12 @@
     const title = code === 'PP' ? '本省（PP）' : '外省（PV）';
     const tag = code === 'PP' ? '金边/本省' : '外省/省外';
     const fields = [
+      ['在途门店', region.shopTransit, ratio(region.shopTransit, total), 'shopTransit'],
+      ['到达门店', region.shopArrived, ratio(region.shopArrived, total), 'shopArrived'],
+      ['门店Pending', region.shopPending, ratio(region.shopPending, total), 'shopPending'],
+      ['门店滞留1天+', region.shopRetention1, ratio(region.shopRetention1, total), 'shopRetention1'],
+      ['门店滞留2天+', region.shopRetention2, ratio(region.shopRetention2, total), 'shopRetention2'],
+      ['门店滞留3天+', region.shopRetention3, ratio(region.shopRetention3, total), 'shopRetention3'],
       ['Pending1+', region.pending1, ratio(region.pending1, total), 'pending1'],
       ['Pending2+', region.pending2, ratio(region.pending2, total), 'pending2'],
       ['Pending3+', region.pending3, ratio(region.pending3, total), 'pending3'],
@@ -135,7 +153,7 @@
     if (!hasRecipientDimension) return `<div class="pixel-region-wrap">${regionCard('PP', shopee.pp || {})}${regionCard('PV', shopee.pv || {})}</div>`;
     const recipientGroups = [['ALL', shopee.all || {}], ['CN', shopee.cn || {}], ['VN', shopee.vn || {}]];
     if (Number(shopee.other?.today || 0) > 0) recipientGroups.push(['OTHER', shopee.other]);
-    return `<div class="pixel-recipient-wrap">${recipientGroups.map(([code, summary]) => recipientCard(code, summary)).join('')}</div><div class="pixel-region-caption">区域维度（与收件人来源独立）</div><div class="pixel-region-wrap compact">${regionCard('PP', shopee.pp || {})}${regionCard('PV', shopee.pv || {})}</div>`;
+    return `<div class="pixel-recipient-wrap">${recipientGroups.map(([code, summary]) => recipientCard(code, summary)).join('')}</div>${storeStrip(shopee.all || {}, 'SHOPEE', 'ALL')}<div class="pixel-region-caption">区域维度（与收件人来源独立）</div><div class="pixel-region-wrap compact">${regionCard('PP', shopee.pp || {})}${regionCard('PV', shopee.pv || {})}</div>`;
   }
 
   function ratio(value, total) {

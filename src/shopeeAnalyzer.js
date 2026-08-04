@@ -1,4 +1,5 @@
 import { normalizeEvent } from './analyzer.js';
+import { analyzeStoreFlow } from './storeFlow.js';
 
 const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|改派/i;
 const POD_RE = /\bPOD\b|delivered|签收|已妥投/i;
@@ -45,6 +46,9 @@ export function analyzeShopeeShipment({
   const noTrack = Boolean(completeForNegativeJudgment && apiStatus.event === 'success' && !sorted.length);
   const region = classifyShopeeRegion({ dailyRow, shipmentTrackRow, scanRow, events: sorted });
   const returnPhoto = classifyReturnPhoto(returnEvent, apiFailed);
+  const storeFlow = apiFailed
+    ? priorStoreFlow(priorRow)
+    : analyzeStoreFlow({ shipmentCode: waybill, events: sorted, reportDate, isPod, isReturned });
 
   let category = '其他已识别节点';
   if (isPod) category = 'POD';
@@ -59,7 +63,10 @@ export function analyzeShopeeShipment({
   else if (noTrack) category = '无轨迹';
   else if (staleDays > 0) category = '节点未更新';
 
-  const tags = buildTags({ pending, oc, cycleCount, inboundNoScan, deliveryDays, staleDays, noTrack, isReturned, returnPhoto, apiFailed, region });
+  const tags = [...new Set([
+    ...buildTags({ pending, oc, cycleCount, inboundNoScan: inboundNoScan && !storeFlow.shopState, deliveryDays, staleDays, noTrack, isReturned, returnPhoto, apiFailed, region }),
+    ...(storeFlow.storeTags || [])
+  ])];
   const currentPendingDays = pending.activeDays || (pending.returnRequired ? pending.maxDays : 0);
   const apiState = apiFailed ? '失败' : '成功';
   const queryState = apiFailed ? 'refresh_failed' : 'success';
@@ -70,6 +77,7 @@ export function analyzeShopeeShipment({
     ...priorRow,
     ...scanRow,
     businessType: 'SHOPEE',
+    ...storeFlow,
     reportDate,
     shipmentCode: waybill,
     运单号: waybill,
@@ -135,6 +143,18 @@ export function analyzeShopeeShipment({
     轨迹节点数: sorted.length,
     问题件数量: exceptionRows.length,
     QC判断: isPod ? 'SHOPEE包裹已POD' : (isReturned ? `SHOPEE包裹已退回，${returnPhoto.label}` : (apiFailed ? `${category}；API失败待重试，保留跨日续查` : category))
+  };
+}
+
+function priorStoreFlow(row = {}) {
+  return {
+    targetShopCode: row.targetShopCode || '', currentShopCode: row.currentShopCode || '',
+    shopName: row.shopName || '', shopCycleId: row.shopCycleId || '',
+    shopTransferStartedAt: row.shopTransferStartedAt || '', shopArrivedAt: row.shopArrivedAt || '',
+    shopLastEventAt: row.shopLastEventAt || '', shopPendingAt: row.shopPendingAt || '',
+    shopRetentionNaturalDays: Number(row.shopRetentionNaturalDays || 0), shopState: row.shopState || '',
+    shopStateReason: row.shopStateReason || 'API_FAILED_PRESERVED', whitelistVersion: row.whitelistVersion || '',
+    storeTags: Array.isArray(row.storeTags) ? row.storeTags : []
   };
 }
 
@@ -347,7 +367,7 @@ function dateKey(value) {
 
 function findRegionCode(value) {
   const text = flattenText(value);
-  const match = text.match(/(?:^|[^A-Z0-9])(PP\d*|PV\d+)(?=$|[^A-Z0-9])/i);
+  const match = text.match(/(?:^|[^A-Z0-9])((?:PP|PV)\d*)(?=$|[^A-Z0-9])/i);
   return match ? match[1].toUpperCase() : '';
 }
 

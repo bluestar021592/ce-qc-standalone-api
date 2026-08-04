@@ -29,6 +29,9 @@ import { buildShopeeDashboard } from './src/shopeeReporting.js';
 import { analyzeShopeeShipment } from './src/shopeeAnalyzer.js';
 import { queryBatchWithFallback, splitTrackBatches } from './src/trackBatching.js';
 import {
+  accessIdentity, auditAction, publicUser, requireRole, sameOriginWriteGuard, validateAccessConfiguration
+} from './src/accessControl.js';
+import {
   SHOPEE, createOrRecoverBusinessRun, getBusinessCurrentReportDate, getBusinessRunStatus,
   getBusinessSnapshotById, getMatchingBusinessSnapshot, listBusinessHistoryDates, loadBusinessDetail, loadBusinessState, recordBusinessExport,
   resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
@@ -38,11 +41,35 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+validateAccessConfiguration();
 const initialRuntimeConfig = getRuntimeConfig();
 ensureRuntimeDirs(initialRuntimeConfig);
-const upload = multer({ dest: initialRuntimeConfig.importsDir });
+const upload = multer({
+  dest: initialRuntimeConfig.importsDir,
+  limits: { fileSize: 80 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, callback) => {
+    const ext = path.extname(String(file.originalname || '')).toLowerCase();
+    callback(ext && ['.xls', '.xlsx', '.json'].includes(ext) ? null : new Error('仅支持 .xls、.xlsx 或 .json 文件'), Boolean(ext && ['.xls', '.xlsx', '.json'].includes(ext)));
+  }
+});
 
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '50mb' }));
+app.use(accessIdentity);
+app.use(sameOriginWriteGuard);
+app.use('/api', (req, res, next) => {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+  const adminOnly = /(?:ce-login|ce-logout|clear|reset|backup|settings|users)/i.test(req.path);
+  return requireRole(adminOnly ? 'ADMIN' : 'OPERATOR')(req, res, next);
+});
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 const client = new CEClient();
@@ -60,12 +87,16 @@ app.get('/api/health', async (req, res) => {
   res.json({ ok: true, version: '0.1.0', time: new Date().toISOString(), db: getDbStatus() });
 });
 
+app.get('/api/session', (req, res) => {
+  res.json({ ok: true, user: publicUser(req.user), unreadNotifications: 0 });
+});
+
 app.get('/api/ce-auth-status', async (req, res) => {
   const token = await loadToken();
   res.json({ ok: true, authStatus: summarizeToken(token) });
 });
 
-app.post('/api/ce-login', async (req, res) => {
+app.post('/api/ce-login', requireRole('ADMIN'), async (req, res) => {
   const authStatus = summarizeToken(await loadToken());
   try {
     const tenantId = String(req.body?.tenantId || '000000').trim() || '000000';
@@ -88,6 +119,7 @@ app.post('/api/ce-login', async (req, res) => {
     throwIfCeAuthFailed(raw);
     const token = normalizeLoginToken(raw, { tenantId, username });
     await saveToken(token);
+    auditAction(req, 'CE_LOGIN', { result: 'success' });
 
     res.json({ ok: true, authStatus: summarizeToken(token) });
   } catch (e) {
@@ -103,8 +135,9 @@ app.post('/api/ce-login', async (req, res) => {
   }
 });
 
-app.post('/api/ce-logout', async (req, res) => {
+app.post('/api/ce-logout', requireRole('ADMIN'), async (req, res) => {
   await clearToken();
+  auditAction(req, 'CE_LOGOUT', { result: 'success' });
   res.json({ ok: true, authStatus: summarizeToken(null) });
 });
 

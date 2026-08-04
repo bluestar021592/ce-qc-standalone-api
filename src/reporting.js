@@ -285,6 +285,11 @@ function buildCategoryCounts(openRows, finalRows) {
     nodeStale3plus: nodeRows.filter(row => staleDays(row) >= 3).length,
     delayedPod: finalRows.filter(row => row?.延迟POD === '是').length,
     shopTransit: shopTransitRows.length,
+    shopArrived: shopInboundRows.length,
+    shopPending: shopInboundRows.filter(row => (row.storeTags || row.tags || []).includes('SHOP_PENDING')).length,
+    shopRetention1: shopInboundRows.filter(row => shopDays(row) >= 1).length,
+    shopRetention2: shopInboundRows.filter(row => shopDays(row) >= 2).length,
+    shopRetention3: shopInboundRows.filter(row => shopDays(row) >= 3).length,
     shopTransit1: shopTransitRows.filter(row => shopDays(row) === 1).length,
     shopTransit2: shopTransitRows.filter(row => shopDays(row) === 2).length,
     shopTransit3plus: shopTransitRows.filter(row => shopDays(row) >= 3).length,
@@ -353,6 +358,11 @@ function buildDetailBuckets(openRows, finalRows, state) {
     nodeStale3: nodeRows.filter(row => staleDays(row) >= 3),
     delayedPod: finalRows.filter(row => row?.延迟POD === '是'),
     shopTransit: shopTransitRows,
+    shopArrived: shopInboundRows,
+    shopPending: shopInboundRows.filter(row => (row.storeTags || row.tags || []).includes('SHOP_PENDING')),
+    shopRetention1: shopInboundRows.filter(row => shopDays(row) >= 1),
+    shopRetention2: shopInboundRows.filter(row => shopDays(row) >= 2),
+    shopRetention3: shopInboundRows.filter(row => shopDays(row) >= 3),
     shopTransit1: shopTransitRows.filter(row => shopDays(row) === 1),
     shopTransit2: shopTransitRows.filter(row => shopDays(row) === 2),
     shopTransit3: shopTransitRows.filter(row => shopDays(row) >= 3),
@@ -418,16 +428,19 @@ function isNoActionRow(row = {}) {
 }
 
 function isShopRow(row = {}) {
+  if (row?.shopState || row?.targetShopCode || row?.currentShopCode) return true;
   return row?.是否门店链路 === '是'
     || Boolean(row?.门店编码 || row?.门店名称 || row?.门店状态)
     || /^门店/.test(String(row?.异常分类 || ''));
 }
 
 function isShopTransitRow(row = {}) {
+  if (row?.shopState === 'SHOP_TRANSFER_IN_PROGRESS') return true;
   return row?.门店状态 === '门店途中' || row?.异常分类 === '门店途中' || row?.异常分类 === '门店未入库';
 }
 
 function isShopInboundRow(row = {}) {
+  if (row?.shopState === 'SHOP_ARRIVED_CURRENT' || row?.shopArrivedAt) return true;
   return Boolean(row?.门店入库时间)
     || row?.门店动作类型 === '门店入库'
     || row?.门店状态 === '门店入库'
@@ -437,6 +450,7 @@ function isShopInboundRow(row = {}) {
 }
 
 function isShopStuckRow(row = {}) {
+  if (row?.shopState === 'SHOP_ARRIVED_CURRENT' && shopDays(row) >= 1) return true;
   return row?.门店状态 === '门店滞留'
     || row?.异常分类 === '门店滞留'
     || (isShopInboundRow(row) && shopDays(row) >= 2);
@@ -472,6 +486,7 @@ function staleDays(row = {}) {
 }
 
 function shopDays(row = {}) {
+  if (Number(row?.shopRetentionNaturalDays || 0) > 0) return Number(row.shopRetentionNaturalDays);
   return Number(row?.门店滞留天数 || row?.门店未更新天数 || row?.shopNoUpdateDays || 0) || 0;
 }
 

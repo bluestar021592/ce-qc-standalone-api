@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { DEFAULT_SHOP_CP_CODES } from './shopCodeDefaults.js';
+import { seedLatestShopWhitelist } from './shopWhitelist.js';
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 const REQUIRED_TABLES = [
   'pod_locks',
   'carry_bills',
@@ -28,7 +29,13 @@ const REQUIRED_TABLES = [
   'business_run_locks',
   'business_run_checkpoints',
   'business_export_snapshots',
-  'business_recipient_conflicts'
+  'business_recipient_conflicts',
+  'shop_whitelist_versions',
+  'shop_whitelist_entries',
+  'shop_whitelist_aliases',
+  'user_roles',
+  'audit_logs',
+  'notifications'
 ];
 const PERSISTED_TABLES = [...REQUIRED_TABLES, 'app_state', 'daily_parse_rows', 'export_records', 'business_export_records'];
 
@@ -515,6 +522,68 @@ export function migrateDatabase(db, cfg) {
       UNIQUE (businessType, reportDate, shipmentCode)
     );
 
+    CREATE TABLE IF NOT EXISTS shop_whitelist_versions (
+      version TEXT PRIMARY KEY,
+      sourceFile TEXT,
+      sourceSha256 TEXT,
+      fileSha256 TEXT,
+      active INTEGER DEFAULT 0,
+      storeCount INTEGER DEFAULT 0,
+      createdAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS shop_whitelist_entries (
+      version TEXT,
+      shopCode TEXT,
+      shopName TEXT,
+      prefix TEXT,
+      classificationEnabled INTEGER DEFAULT 1,
+      createdAt TEXT,
+      updatedAt TEXT,
+      PRIMARY KEY (version, shopCode)
+    );
+
+    CREATE TABLE IF NOT EXISTS shop_whitelist_aliases (
+      version TEXT,
+      shopCode TEXT,
+      alias TEXT,
+      createdAt TEXT,
+      PRIMARY KEY (version, shopCode, alias)
+    );
+
+    CREATE TABLE IF NOT EXISTS user_roles (
+      email TEXT PRIMARY KEY,
+      displayName TEXT,
+      department TEXT DEFAULT '质控部',
+      role TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      createdAt TEXT,
+      updatedAt TEXT,
+      lastLoginAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userEmail TEXT,
+      userRole TEXT,
+      action TEXT,
+      businessType TEXT,
+      reportDate TEXT,
+      runId TEXT,
+      detailJson TEXT,
+      ipAddress TEXT,
+      createdAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userEmail TEXT,
+      title TEXT,
+      body TEXT,
+      readAt TEXT,
+      createdAt TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_daily_parse_report ON daily_parse_rows(reportDate);
     CREATE INDEX IF NOT EXISTS idx_daily_parse_bill ON daily_parse_rows(shipmentCode);
     CREATE INDEX IF NOT EXISTS idx_daily_parse_report_bill ON daily_parse_rows(reportDate, shipmentCode);
@@ -534,6 +603,10 @@ export function migrateDatabase(db, cfg) {
     CREATE INDEX IF NOT EXISTS idx_business_api_batch ON business_api_batches(businessType, reportDate, runId, apiName, status);
     CREATE INDEX IF NOT EXISTS idx_business_checkpoint ON business_run_checkpoints(businessType, reportDate, runId, status);
     CREATE INDEX IF NOT EXISTS idx_business_snapshot ON business_export_snapshots(businessType, reportDate, runId, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_shop_whitelist_active ON shop_whitelist_versions(active, version);
+    CREATE INDEX IF NOT EXISTS idx_shop_whitelist_entry ON shop_whitelist_entries(version, shopCode, classificationEnabled);
+    CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(createdAt, userEmail, action);
+    CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(userEmail, readAt, createdAt);
   `);
 
     ensureColumn(db, 'export_snapshots', 'snapshotId', 'TEXT');
@@ -543,6 +616,11 @@ export function migrateDatabase(db, cfg) {
     ensureColumn(db, 'export_snapshots', 'dataHashesJson', 'TEXT');
     ensureColumn(db, 'export_snapshots', 'consistencyJson', 'TEXT');
     ensureColumn(db, 'export_snapshots', 'generatedAt', 'TEXT');
+    ensureColumn(db, 'export_snapshots', 'status', "TEXT DEFAULT 'LEGACY_UNVERIFIED'");
+    ensureColumn(db, 'export_snapshots', 'reconciliationStatus', "TEXT DEFAULT 'UNVERIFIED'");
+    ensureColumn(db, 'export_snapshots', 'invalidReason', 'TEXT');
+    ensureColumn(db, 'export_snapshots', 'whitelistVersion', 'TEXT');
+    ensureColumn(db, 'export_snapshots', 'whitelistSha256', 'TEXT');
     ensureColumn(db, 'final_rows', 'lastEventCode', 'TEXT');
     ensureColumn(db, 'final_rows', 'lastEventDesc', 'TEXT');
     ensureColumn(db, 'final_rows', 'lastEventTargetNode', 'TEXT');
@@ -563,11 +641,40 @@ export function migrateDatabase(db, cfg) {
     ensureColumn(db, 'carry_bills', 'lastEventDesc', 'TEXT');
     ensureColumn(db, 'carry_bills', 'matchedShopCode', 'TEXT');
     ensureColumn(db, 'carry_bills', 'lastRunId', 'TEXT');
+    for (const table of ['final_rows', 'carry_bills']) {
+      ensureColumn(db, table, 'targetShopCode', 'TEXT');
+      ensureColumn(db, table, 'currentShopCode', 'TEXT');
+      ensureColumn(db, table, 'shopName', 'TEXT');
+      ensureColumn(db, table, 'shopCycleId', 'TEXT');
+      ensureColumn(db, table, 'shopTransferStartedAt', 'TEXT');
+      ensureColumn(db, table, 'shopArrivedAt', 'TEXT');
+      ensureColumn(db, table, 'shopPendingAt', 'TEXT');
+      ensureColumn(db, table, 'shopRetentionNaturalDays', 'INTEGER DEFAULT 0');
+      ensureColumn(db, table, 'shopState', 'TEXT');
+      ensureColumn(db, table, 'shopStateReason', 'TEXT');
+      ensureColumn(db, table, 'whitelistVersion', 'TEXT');
+    }
+    ensureColumn(db, 'scan_results', 'needsTrackQuery', 'INTEGER DEFAULT 0');
+    ensureColumn(db, 'scan_results', 'skipTrackReason', 'TEXT');
+    ensureColumn(db, 'scan_results', 'scanBucket', 'TEXT');
     ensureColumn(db, 'business_daily_parse_rows', 'source_row_number', 'INTEGER');
     ensureColumn(db, 'business_daily_parse_rows', 'recipient_raw', 'TEXT');
     ensureColumn(db, 'business_daily_parse_rows', 'recipient_normalized', 'TEXT');
     ensureColumn(db, 'business_daily_parse_rows', 'recipient_group', "TEXT DEFAULT 'OTHER'");
     ensureColumn(db, 'business_daily_parse_rows', 'recipient_group_reason', 'TEXT');
+    ensureColumn(db, 'business_daily_parse_rows', 'source_mode', 'TEXT');
+    ensureColumn(db, 'business_daily_parse_rows', 'source_sheet', 'TEXT');
+    ensureColumn(db, 'business_daily_parse_rows', 'header_row_number', 'INTEGER');
+    ensureColumn(db, 'business_daily_parse_rows', 'import_disposition', 'TEXT');
+    ensureColumn(db, 'business_daily_parse_rows', 'region_code', 'TEXT');
+    ensureColumn(db, 'business_daily_parse_rows', 'region_type', 'TEXT');
+    ensureColumn(db, 'business_daily_parse_rows', 'order_time', 'TEXT');
+    ensureColumn(db, 'business_daily_reports', 'sourceMode', 'TEXT');
+    ensureColumn(db, 'business_daily_reports', 'headerRowNumber', 'INTEGER');
+    ensureColumn(db, 'business_daily_reports', 'fileFormat', 'TEXT');
+    ensureColumn(db, 'business_scan_results', 'needsTrackQuery', 'INTEGER DEFAULT 0');
+    ensureColumn(db, 'business_scan_results', 'skipTrackReason', 'TEXT');
+    ensureColumn(db, 'business_scan_results', 'scanBucket', 'TEXT');
     for (const table of ['business_carry_bills', 'business_scan_results', 'business_final_rows']) {
       ensureColumn(db, table, 'recipient_raw', 'TEXT');
       ensureColumn(db, table, 'recipient_normalized', 'TEXT');
@@ -575,6 +682,37 @@ export function migrateDatabase(db, cfg) {
       ensureColumn(db, table, 'recipient_group_reason', 'TEXT');
       ensureColumn(db, table, 'source_row_number', 'INTEGER');
     }
+    for (const table of ['business_carry_bills', 'business_final_rows']) {
+      ensureColumn(db, table, 'currentMainCategory', 'TEXT');
+      ensureColumn(db, table, 'auxiliaryFlagsJson', 'TEXT');
+      ensureColumn(db, table, 'targetShopCode', 'TEXT');
+      ensureColumn(db, table, 'currentShopCode', 'TEXT');
+      ensureColumn(db, table, 'shopName', 'TEXT');
+      ensureColumn(db, table, 'shopCycleId', 'TEXT');
+      ensureColumn(db, table, 'shopTransferStartedAt', 'TEXT');
+      ensureColumn(db, table, 'shopArrivedAt', 'TEXT');
+      ensureColumn(db, table, 'shopLastEventAt', 'TEXT');
+      ensureColumn(db, table, 'shopPendingAt', 'TEXT');
+      ensureColumn(db, table, 'shopPendingReason', 'TEXT');
+      ensureColumn(db, table, 'shopRetentionNaturalDays', 'INTEGER DEFAULT 0');
+      ensureColumn(db, table, 'shopState', 'TEXT');
+      ensureColumn(db, table, 'shopStateReason', 'TEXT');
+      ensureColumn(db, table, 'whitelistVersion', 'TEXT');
+      ensureColumn(db, table, 'firstAttemptAt', 'TEXT');
+      ensureColumn(db, table, 'currentAttemptNo', 'INTEGER DEFAULT 0');
+      ensureColumn(db, table, 'podAttemptNo', 'INTEGER DEFAULT 0');
+      ensureColumn(db, table, 'attemptStatus', 'TEXT');
+      ensureColumn(db, table, 'attemptConfidence', 'TEXT');
+      ensureColumn(db, table, 'attemptUnknownReason', 'TEXT');
+      ensureColumn(db, table, 'attemptHistoryJson', 'TEXT');
+      ensureColumn(db, table, 'attemptCalculatedAt', 'TEXT');
+    }
+    ensureColumn(db, 'business_export_snapshots', 'status', "TEXT DEFAULT 'LEGACY_UNVERIFIED'");
+    ensureColumn(db, 'business_export_snapshots', 'reconciliationStatus', "TEXT DEFAULT 'UNVERIFIED'");
+    ensureColumn(db, 'business_export_snapshots', 'invalidReason', 'TEXT');
+    ensureColumn(db, 'business_export_snapshots', 'whitelistVersion', 'TEXT');
+    ensureColumn(db, 'business_export_snapshots', 'whitelistSha256', 'TEXT');
+    ensureColumn(db, 'business_export_snapshots', 'payloadHash', 'TEXT');
     db.exec("UPDATE business_daily_parse_rows SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
     db.exec("UPDATE business_carry_bills SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
     db.exec("UPDATE business_scan_results SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
@@ -583,13 +721,17 @@ export function migrateDatabase(db, cfg) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_business_daily_bill_recipient_group ON business_daily_parse_rows(businessType, reportDate, shipmentCode, recipient_group)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_business_final_recipient_group ON business_final_rows(businessType, reportDate, recipient_group)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_business_conflict_status ON business_recipient_conflicts(businessType, reportDate, status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_business_snapshot_valid ON business_export_snapshots(businessType, reportDate, status, reconciliationStatus, createdAt)');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_export_snapshots_snapshot_id ON export_snapshots(snapshotId)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_export_snapshots_report ON export_snapshots(reportDate, createdAt)');
 
     seedDefaultShopCodes(db);
+    const whitelist = seedLatestShopWhitelist(db);
 
     writeMeta(db, 'db_schema_version', String(SCHEMA_VERSION));
-    writeMeta(db, 'app_version', '0.8.0');
+    writeMeta(db, 'app_version', '0.9.0');
+    writeMeta(db, 'shop_whitelist_version', whitelist.version);
+    writeMeta(db, 'shop_whitelist_sha256', whitelist.sourceSha256);
     writeMeta(db, 'last_startup_at', new Date().toISOString());
     writeMeta(db, 'last_migration_status', 'success');
     writeMeta(db, 'last_migration_backup', backupPath);

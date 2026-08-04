@@ -397,11 +397,11 @@ function legacyDetailRow(row = {}) {
     延迟POD: row.延迟POD || '',
     门店状态: row.门店状态 || '',
     门店动作类型: row.门店动作类型 || '',
-    门店编码: row.门店编码 || '',
-    门店名称: row.门店名称 || '',
-    门店发往时间: row.门店发往时间 || '',
-    门店入库时间: row.门店入库时间 || '',
-    门店滞留天数: row.门店滞留天数 || '',
+    门店编码: row.门店编码 || row.currentShopCode || row.targetShopCode || '',
+    门店名称: row.门店名称 || row.shopName || '',
+    门店发往时间: row.门店发往时间 || row.shopTransferStartedAt || '',
+    门店入库时间: row.门店入库时间 || row.shopArrivedAt || '',
+    门店滞留天数: row.门店滞留天数 || row.shopRetentionNaturalDays || '',
     门店未更新天数: row.门店未更新天数 || '',
     TBKH门店包裹: row.TBKH门店包裹 || '',
     TBKH识别来源: row.TBKH识别来源 || '',
@@ -459,7 +459,7 @@ function legacyShopRow(row = {}) {
     deliveryShop: row.deliveryShop || '',
     pickupShop: row.pickupShop || '',
     最终停留网点: row.最终停留网点 || row.deliveryShop || row.place || '',
-    门店状态: row.门店状态 || row.异常分类 || '',
+    门店状态: row.门店状态 || row.shopState || row.异常分类 || '',
     QC判断: row.QC判断 || ''
   }, SHOP_COLUMNS);
 }

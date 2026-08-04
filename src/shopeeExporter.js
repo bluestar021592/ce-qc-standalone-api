@@ -18,9 +18,11 @@ const GROUP_LABELS = { ALL: '全部合计', CN: 'ShopeeCN（中国）', VN: 'Sho
 const METRICS = [
   ['今日总单', 'all'], ['今日POD', 'pod'], ['POD率', 'pod'], ['首派成功率', 'firstAttempt'],
   ['Pending1+', 'pending1'], ['Pending2+', 'pending2'], ['Pending3+', 'pending3'],
-  ['OC1+', 'oc1'], ['OC2+', 'oc2'], ['OC3+', 'oc3'], ['入库无扫描', 'inboundNoScan']
+  ['OC1+', 'oc1'], ['OC2+', 'oc2'], ['OC3+', 'oc3'], ['入库无扫描', 'inboundNoScan'],
+  ['在途门店', 'shopTransit'], ['到达门店', 'shopArrived'], ['门店Pending', 'shopPending'],
+  ['门店滞留1天+', 'shopRetention1'], ['门店滞留2天+', 'shopRetention2'], ['门店滞留3天+', 'shopRetention3']
 ];
-const DETAIL_HEADERS = ['序号', '运单号', '日报日期', 'recipient_raw', 'recipient_group', 'PP/PV', '当前扫描状态', '异常分类', '累计自然日', '最新轨迹时间', '最新节点', '是否继续监控', 'Snapshot ID', '备注'];
+const DETAIL_HEADERS = ['序号', '运单号', '日报日期', 'recipient_raw', 'recipient_group', 'PP/PV', '当前扫描状态', '异常分类', '门店状态', '目标门店编码', '当前门店编码', '门店名称', '门店发往时间', '门店到达时间', '门店Pending时间', '门店滞留自然日', '累计自然日', '最新轨迹时间', '最新节点', '是否继续监控', 'Snapshot ID', '备注'];
 
 export async function exportShopeeXlsx(state = {}, snapshot = null) {
   const snapshotId = state.snapshotId || snapshot?.snapshotId || '';
@@ -202,7 +204,7 @@ function createDetailSheet(workbook, context, name, sourceRows, title) {
     });
     sheet.autoFilter = { from: 'A4', to: `${columnName(DETAIL_HEADERS.length)}${sheet.rowCount}` };
   }
-  sheet.columns = [8, 21, 14, 23, 16, 10, 18, 22, 14, 21, 42, 15, 31, 42].map(width => ({ width }));
+  sheet.columns = [8,21,14,23,16,10,18,22,18,16,16,24,20,20,20,14,14,21,42,15,31,42].map(width => ({ width }));
   addReturnLink(sheet, DETAIL_HEADERS.length);
   return sheet;
 }
@@ -278,6 +280,14 @@ function detailValues(row, index, context) {
     normalizedRegion(row),
     row.扫描状态 || row.shipmentStatus || '',
     row.primaryCategory || row.主分类 || row.异常分类 || '',
+    row.shopState || '',
+    row.targetShopCode || '',
+    row.currentShopCode || '',
+    row.shopName || '',
+    row.shopTransferStartedAt || '',
+    row.shopArrivedAt || '',
+    row.shopPendingAt || '',
+    Number(row.shopRetentionNaturalDays || 0),
     Math.max(Number(row.Pending次数 || row.Pending最大次数 || 0), Number(row.OC天数 || row.OC最大天数 || 0)),
     row.latestEventTime || row.最后节点时间 || '',
     row.latestEventDesc || row.最后节点 || row.latestNode || '',

@@ -49,7 +49,7 @@
         <div class="top-actions">
           <label class="top-date"><select id="topHistoryDate" aria-label="日报日期" onchange="loadHistoryDate(this.value)"><option value="">—</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-calendar"></use></svg></label>
           <label class="cycle-wrap"><select class="cycle-select" aria-label="周期"><option>日</option><option>周</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></label>
-          <button class="notification-button" title="系统通知"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bell"></use></svg><b>12</b></button>
+          <button class="notification-button" title="系统通知"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bell"></use></svg><b id="notificationCount" hidden></b></button>
           <div class="top-user"><span class="top-avatar"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-user"></use></svg></span><span><b id="headerUserName">CE未登录</b><small id="headerUserRole">系统用户</small></span><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></div>
         </div>
       </header>

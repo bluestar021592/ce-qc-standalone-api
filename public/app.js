@@ -1,6 +1,7 @@
 let appState = {};
 let shopeeState = {};
 let ceAuth = {};
+let accessSession = {};
 let currentPage = pageFromPath();
 let runInFlight = false;
 let historyCatalog = { CCSL: [], SHOPEE: [] };
@@ -29,17 +30,20 @@ async function refresh() {
     appState = buildVisualCcslState(visualFixture);
     shopeeState = buildVisualShopeeState(visualFixture);
     ceAuth = { loggedIn: true, account: '张三', role: '运营专员' };
+    accessSession = { user: { displayName: '张三', department: '质控部', role: 'OPERATOR', devMode: true }, unreadNotifications: 0 };
     historyCatalog = { CCSL: [{ reportDate: visualFixture.reportDate }], SHOPEE: [{ reportDate: visualFixture.reportDate }] };
     renderAll();
     return;
   }
-  const [ccsl, shopee, auth, ccslHistory, shopeeHistory] = await Promise.all([
+  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory] = await Promise.all([
     api('/api/state'), api('/api/shopee/state'), api('/api/ce-auth-status'),
+    api('/api/session'),
     api('/api/history?businessType=CCSL'), api('/api/history?businessType=SHOPEE')
   ]);
   appState = ccsl.state || {};
   shopeeState = shopee.state || {};
   ceAuth = auth.authStatus || {};
+  accessSession = session || {};
   historyCatalog = { CCSL: ccslHistory.rows || [], SHOPEE: shopeeHistory.rows || [] };
   historyModeDate = '';
   renderAll();
@@ -97,8 +101,12 @@ function renderTopbar() {
   const state = currentPage === 'shopee' ? shopeeState : appState;
   const titles = { home: '首页总看板', ccsl: 'CCSL看板', shopee: 'SHOPEE看板', track: '轨迹查询', reports: '报表数据预览', import: '数据导入', rules: '规则说明', settings: '系统设置' };
   document.getElementById('pageTitle').textContent = titles[currentPage] || '首页总看板';
-  document.getElementById('headerUserName').textContent = ceAuth.loggedIn ? (ceAuth.account || ceAuth.userId || '已登录') : 'CE未登录';
-  document.getElementById('headerUserRole').textContent = ceAuth.loggedIn ? (ceAuth.role || '运营专员') : '系统用户';
+  const user = accessSession.user || {};
+  document.getElementById('headerUserName').textContent = user.displayName || user.email || '本地用户';
+  document.getElementById('headerUserRole').textContent = `${user.department || '质控部'} · ${user.role || 'VIEWER'}`;
+  const notification = document.getElementById('notificationCount');
+  const unread = Number(accessSession.unreadNotifications || 0);
+  if (notification) { notification.hidden = unread <= 0; notification.textContent = unread > 99 ? '99+' : String(unread); }
   const selectedDate = currentPage === 'home' ? latestDate(appState.reportDate, shopeeState.reportDate) : state.reportDate;
   const dateSelect = document.getElementById('topHistoryDate');
   if (dateSelect && selectedDate && ![...dateSelect.options].some(option => option.value === selectedDate)) dateSelect.add(new Option(selectedDate, selectedDate));
@@ -588,6 +596,9 @@ function recipientMetrics(group = 'ALL') {
     oc3: Number(metrics.oc3plus || metrics.oc3 || 0),
     oc3plus: Number(metrics.oc3plus || metrics.oc3 || 0),
     inboundNoScan: Number(metrics.inboundNoScan || 0),
+    shopTransit: Number(metrics.shopTransit || 0), shopArrived: Number(metrics.shopArrived || 0),
+    shopPending: Number(metrics.shopPending || 0), shopRetention1: Number(metrics.shopRetention1 || 0),
+    shopRetention2: Number(metrics.shopRetention2 || 0), shopRetention3: Number(metrics.shopRetention3 || 0),
     abnormal: Number(metrics.abnormal || 0),
     returnRequired: Number(metrics.returnRequired || 0)
   };
@@ -1105,7 +1116,7 @@ function buildProductionDashboardSnapshot() {
 }
 
 function productionRegion(region = {}) {
-  return { today: Number(region.total || 0), pod: Number(region.pod || 0), podRate: Number(region.podRate || 0), pending1: Number(region.pending1 || 0), pending2: Number(region.pending2 || 0), pending3: Number(region.pending3 || 0), oc1: Number(region.oc1 || 0), oc2: Number(region.oc2 || 0), oc3: Number(region.oc3 || 0), inboundNoScan: Number(region.inboundNoScan || 0), returnPending: Number(region.returnRequired || 0) };
+  return { today: Number(region.total || 0), pod: Number(region.pod || 0), podRate: Number(region.podRate || 0), pending1: Number(region.pending1 || 0), pending2: Number(region.pending2 || 0), pending3: Number(region.pending3 || 0), oc1: Number(region.oc1 || 0), oc2: Number(region.oc2 || 0), oc3: Number(region.oc3 || 0), inboundNoScan: Number(region.inboundNoScan || 0), returnPending: Number(region.returnRequired || 0), shopTransit: Number(region.shopTransit || 0), shopArrived: Number(region.shopArrived || 0), shopPending: Number(region.shopPending || 0), shopRetention1: Number(region.shopRetention1 || 0), shopRetention2: Number(region.shopRetention2 || 0), shopRetention3: Number(region.shopRetention3 || 0) };
 }
 
 function productionRecipient(group) {
@@ -1169,7 +1180,7 @@ function detailRows(state, tab) { return state.detailTabs?.[tab]?.rows || []; }
 function longestStay(rows) { const max = Math.max(0, ...rows.map(row => Math.max(Number(row.OC天数 || 0), Number(row.盘点天数 || 0), Number(row.派送中天数 || row.派送中停留天数 || 0), Number(row.门店滞留天数 || row.节点未更新天数 || 0)))); return max ? `${max}天` : '—'; }
 function tabForMetric(type, metric) {
   const sh = { '今日件数':'all','总件数':'all','签收件数':'pod','已签收':'pod','签收率':'pod','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','入库无扫描':'inboundNoScan','退回待处理':'returnRequired' };
-  const cc = { '今日件数':'allData','签收件数':'podClosed','签收率':'podClosed','Pending1+':'pendingAll','Pending2+':'pending2plus','Pending3+':'pending3','OC1+':'ocAll','OC2+':'oc2plus','OC3+':'oc3','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单未处理':'workOrderAbnormal','盘点2天':'cycle2','门店途中2天':'shopTransit','门店滞留':'shopStuck' };
+  const cc = { '今日件数':'allData','签收件数':'podClosed','签收率':'podClosed','Pending1+':'pendingAll','Pending2+':'pending2plus','Pending3+':'pending3','OC1+':'ocAll','OC2+':'oc2plus','OC3+':'oc3','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单未处理':'workOrderAbnormal','盘点2天':'cycle2','在途门店':'shopTransit','到达门店':'shopArrived','门店Pending':'shopPending','门店滞留1天+':'shopRetention1','门店滞留2天+':'shopRetention2','门店滞留3天+':'shopRetention3','门店途中2天':'shopTransit','门店滞留':'shopStuck' };
   return (type === 'SHOPEE' ? sh : cc)[metric] || (type === 'SHOPEE' ? 'all' : 'allData');
 }
 function tabLabel(type, key) {

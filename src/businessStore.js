@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
+import { SHOP_WHITELIST_SOURCE_SHA256, SHOP_WHITELIST_VERSION } from './shopWhitelist.js';
 import { getDb, nowIso } from './db.js';
 import { buildSnapshotHashes } from './snapshotHash.js';
 
@@ -109,8 +111,11 @@ export function saveBusinessSnapshot(businessType, state, view) {
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare('INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,payloadJson,generatedAt,createdAt) VALUES(?,?,?,?,?,?,?)')
-      .run(snapshotId, type, reportDate, runId, JSON.stringify(payload), generatedAt, generatedAt);
+    const payloadJson = JSON.stringify({ ...payload, status: 'VALID', reconciliationStatus: 'COMPLETED', whitelistVersion: SHOP_WHITELIST_VERSION });
+    const payloadHash = createHash('sha256').update(payloadJson).digest('hex');
+    db.prepare(`INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,payloadJson,generatedAt,createdAt,status,reconciliationStatus,invalidReason,whitelistVersion,whitelistSha256,payloadHash)
+      VALUES(?,?,?,?,?,?,?,'VALID','COMPLETED','',?,?,?)`)
+      .run(snapshotId, type, reportDate, runId, payloadJson, generatedAt, generatedAt, SHOP_WHITELIST_VERSION, SHOP_WHITELIST_SOURCE_SHA256, payloadHash);
     db.prepare("UPDATE business_run_locks SET status='finished',currentStage='完成',completedAt=?,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=?")
       .run(generatedAt, generatedAt, type, reportDate, runId);
     db.exec('COMMIT');
@@ -222,6 +227,10 @@ function mirrorBusinessTables(db, state, type, now) {
     const final = state.finalRows.find(row => billOf(row) === bill) || state.priorCarryRows.find(row => billOf(row) === bill) || {};
     carryStmt.run(type, bill, date || '__active__', final.sourceDate || date, 'active', final.primaryCategory || final.异常分类 || '', JSON.stringify(final.tags || []), final.latestEventTime || final.最后节点时间 || '', final.latestEventDesc || final.最后节点 || '', date, state.currentRun?.runId || state.lastRunSummary?.runId || '', final.查询状态 === 'refresh_failed' ? 'refresh_failed' : '', final.QC判断 || '', final.recipient_raw || '', final.recipient_normalized || '', recipientGroup(final), final.recipient_group_reason || '', Number(final.source_row_number || final.rowNumber || 0), JSON.stringify(final), now, now);
   }
+  for (const row of state.finalRows) {
+    const bill = billOf(row);
+    if (bill && active.has(bill)) persistStoreFields(db, 'business_carry_bills', type, bill, date || '__active__', row);
+  }
   if (!date) return;
   mirrorRows(db, 'business_scan_results', type, date, state.scanResults, now, row => [Number(row.是否POD === '是'), String(row.orderStatus || ''), JSON.stringify(row)]);
   db.prepare('DELETE FROM business_shipment_tracks WHERE businessType=? AND reportDate=?').run(type, date);
@@ -242,6 +251,7 @@ function mirrorBusinessTables(db, state, type, now) {
   db.prepare('DELETE FROM business_final_rows WHERE businessType=? AND reportDate=?').run(type, date);
   const finalStmt = db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   for (const row of state.finalRows) finalStmt.run(type, billOf(row), date, Number(row.是否POD === '是'), row.primaryCategory || row.异常分类 || '', row.API状态 || row.查询状态 || '', row.carry状态 || '', row.latestEventTime || row.最后节点时间 || '', row.latestEventDesc || row.最后节点 || '', row.latestNode || '', row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', Number(row.source_row_number || row.rowNumber || 0), JSON.stringify(row), now, now);
+  for (const row of state.finalRows) persistStoreFields(db, 'business_final_rows', type, billOf(row), date, row);
   const historyStmt = db.prepare(`INSERT INTO business_history_summary(businessType,reportDate,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(businessType,reportDate) DO UPDATE SET summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`);
   for (const item of state.historySummary) {
     const historyDate = item.reportDate || item.summary?.reportDate || '';
@@ -263,6 +273,24 @@ function mirrorRows(db, table, type, date, rows, now, values) {
     const [isPod, orderStatus, rawJson] = values(row);
     stmt.run(type, billOf(row), date, isPod, orderStatus, row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', Number(row.source_row_number || row.rowNumber || 0), rawJson, now, now);
   }
+}
+
+function persistStoreFields(db, table, type, shipmentCode, reportDate, row = {}) {
+  if (!shipmentCode) return;
+  db.prepare(`UPDATE ${table} SET
+    targetShopCode=?,currentShopCode=?,shopName=?,shopCycleId=?,shopTransferStartedAt=?,shopArrivedAt=?,
+    shopLastEventAt=?,shopPendingAt=?,shopPendingReason=?,shopRetentionNaturalDays=?,shopState=?,shopStateReason=?,
+    whitelistVersion=?,currentMainCategory=?,auxiliaryFlagsJson=?,firstAttemptAt=?,currentAttemptNo=?,podAttemptNo=?,
+    attemptStatus=?,attemptConfidence=?,attemptUnknownReason=?,attemptHistoryJson=?,attemptCalculatedAt=?
+    WHERE businessType=? AND shipmentCode=? AND reportDate=?`).run(
+    row.targetShopCode || '', row.currentShopCode || '', row.shopName || '', row.shopCycleId || '',
+    row.shopTransferStartedAt || '', row.shopArrivedAt || '', row.shopLastEventAt || '', row.shopPendingAt || '',
+    row.shopPendingReason || '', Number(row.shopRetentionNaturalDays || 0), row.shopState || '', row.shopStateReason || '',
+    row.whitelistVersion || '', row.currentMainCategory || row.primaryCategory || '',
+    JSON.stringify(row.auxiliaryFlags || row.tags || []), row.firstAttemptAt || '', Number(row.currentAttemptNo || 0),
+    Number(row.podAttemptNo || 0), row.attemptStatus || '', row.attemptConfidence || '', row.attemptUnknownReason || '',
+    JSON.stringify(row.attemptHistory || []), row.attemptCalculatedAt || '', type, shipmentCode, reportDate
+  );
 }
 
 function emptyState(type) { return normalizeBusinessState({ businessType: type }, type); }

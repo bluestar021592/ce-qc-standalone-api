@@ -4,6 +4,7 @@ import {
   lastEffectiveEvent,
   parseEventNodeAction
 } from './shopCodes.js';
+import { analyzeStoreFlow } from './storeFlow.js';
 
 const PENDING_RE = /Pending|PENDING|客户无人接听|客户电话错误|地址错误|改地址|客户要求改派|无人接听|无法联系|客户不在|电话错误|空号|联系不上|改派/i;
 const IMAGE_ABNORMAL_STATUSES = new Set(['NO_IMAGE', 'IMAGE_FIELD_EMPTY', 'IMAGE_FIELD_INVALID']);
@@ -19,6 +20,7 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
     }
   }
   const isPod = String(scanRow?.orderStatus || '') === '85' || Boolean(podEvent);
+  const storeFlow = analyzeStoreFlow({ shipmentCode: waybill, events: sorted, reportDate, isPod });
   const lastText = last ? eventText(last) : '';
   const pendingEvents = sorted.filter(isPendingEvent);
   const ocEvents = sorted.filter(isOcEvent);
@@ -49,7 +51,7 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
   if (isPod && !stats.POD来源) stats.POD来源 = String(scanRow?.orderStatus || '') === '85' ? '订单扫描orderStatus=85' : 'POD识别';
 
   if (isPod) {
-    return baseResult({
+    return { ...baseResult({
       waybill,
       scanRow,
       events: sorted,
@@ -65,7 +67,7 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
         ...parseEventNodeAction(last || podEvent || {}),
         matchedRule: 'POD_PRIORITY'
       }
-    });
+    }), ...storeFlow };
   }
 
   const lastEvidence = parseEventNodeAction(last || {});
@@ -139,7 +141,7 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
     judgment = `最后节点日期早于日报日期${stats.节点未更新天数 || 0}天，需确认包裹是否无动作`;
   }
 
-  return baseResult({
+  const result = baseResult({
     waybill,
     scanRow,
     events: sorted,
@@ -162,6 +164,7 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
       delivery: deliveryDates.length
     }
   });
+  return { ...result, ...storeFlow, tags: [...new Set([...(result.tags || []), ...(storeFlow.storeTags || [])])] };
 }
 
 export function normalizeEvent(e) {

@@ -1,43 +1,32 @@
 import XLSX from 'xlsx';
 import { getDb, nowIso } from './db.js';
-import { DEFAULT_SHOP_CP_CODES, DEFAULT_SHOP_CP_ROWS } from './shopCodeDefaults.js';
+import {
+  SHOP_WHITELIST_VERSION,
+  SHOP_WHITELIST_SOURCE_SHA256,
+  normalizeShopCode as normalizeLatestShopCode,
+  isSupportedShopCode,
+  latestShopCodeMap,
+  seedLatestShopWhitelist
+} from './shopWhitelist.js';
 
-const SHOP_CODE_RE = /(?:^|[^A-Z0-9])(CP\d{6}|PV\d{3})(?![A-Z0-9])/gi;
+const SHOP_CODE_RE = /(?:^|[^A-Z0-9])((?:CP|FS)\s*\d{6}|(?:PV|PNH)\s*\d{3})(?![A-Z0-9])/gi;
 const SHOP_INBOUND_RE = /入库|到达网点|货物到达|到达门店|抵达|\bINBOUND\b|\bARRIV(?:E|ED|AL)?\b|\bRECEIVED\b/i;
 const SHOP_OUTBOUND_RE = /离开网点|货物离开|下一个网点|发往|转往|转运至|送往|\bOUTBOUND\b|\bDEPART(?:ED|URE)?\b|\bLEFT\b|\bNEXT\s+(?:STATION|SITE|BRANCH|NODE)\b/i;
 const NORMAL_FINAL_HUB_CODES = new Set(['CCSLCN', 'CCSLPDD', 'CCSL580', 'CEZT']);
 
 export function ensureDefaultShopCodes() {
-  const db = getDb();
-  const now = nowIso();
-  const stmt = db.prepare(`
-    INSERT INTO shop_cp_codes(shopCode, shopName, sourceFile, createdAt, updatedAt)
-    VALUES(?, ?, 'default', ?, ?)
-    ON CONFLICT(shopCode) DO UPDATE SET
-      shopName=CASE
-        WHEN shop_cp_codes.sourceFile='default'
-          OR shop_cp_codes.shopName=shop_cp_codes.shopCode
-          OR shop_cp_codes.shopName GLOB '[0-9]*'
-        THEN excluded.shopName
-        ELSE shop_cp_codes.shopName
-      END,
-      updatedAt=excluded.updatedAt
-  `);
-  for (const row of DEFAULT_SHOP_CP_ROWS) {
-    stmt.run(normalizeShopCode(row.code), row.name || row.code, now, now);
-  }
+  seedLatestShopWhitelist(getDb());
 }
 
 export function getShopCodeMap() {
   ensureDefaultShopCodes();
-  const rows = getDb().prepare('SELECT shopCode, shopName FROM shop_cp_codes ORDER BY shopCode').all();
-  return new Map(rows.map(row => [normalizeShopCode(row.shopCode), row.shopName || row.shopCode]));
+  return latestShopCodeMap();
 }
 
 export function getShopCodeSummary() {
   ensureDefaultShopCodes();
-  const row = getDb().prepare('SELECT COUNT(*) AS count FROM shop_cp_codes').get();
-  return { count: Number(row?.count || 0) };
+  const count = latestShopCodeMap().size;
+  return { count, version: SHOP_WHITELIST_VERSION, sourceSha256: SHOP_WHITELIST_SOURCE_SHA256 };
 }
 
 export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
@@ -48,7 +37,7 @@ export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
     for (const row of rows) {
       const cells = (row || []).map(cell => String(cell || '').trim()).filter(Boolean);
       const text = cells.join(' ');
-      for (const code of extractShopCodes(text, new Set([...DEFAULT_SHOP_CP_CODES, ...cells.map(normalizeShopCode)]))) {
+      for (const code of extractShopCodes(text, new Set(cells.map(normalizeShopCode).filter(isSupportedShopCode)))) {
         found.set(code, pickShopName(cells, code));
       }
     }
@@ -155,26 +144,7 @@ function matchTargetShop(targetNode, codeMap) {
   const codeSet = new Set(codeMap.keys());
   const code = extractShopCodes(target, codeSet)[0];
   if (code && !isNormalFinalHubCode(code)) return { code, name: codeMap.get(code) || code };
-
-  const normalizedTarget = normalizeShopName(target);
-  if (!normalizedTarget) return null;
-  for (const [candidateCode, name] of codeMap.entries()) {
-    if (isNormalFinalHubCode(candidateCode)) continue;
-    if (controlledNameAliases(name).some(alias => alias.length >= 6 && normalizedTarget.includes(alias))) {
-      return { code: candidateCode, name: name || candidateCode };
-    }
-  }
   return null;
-}
-
-function controlledNameAliases(name) {
-  const full = normalizeShopName(name);
-  if (!full) return [];
-  const stripped = full
-    .replace(/^ce\s+/, '')
-    .replace(/\s+(?:co\s*shop|shop)$/, '')
-    .trim();
-  return [...new Set([full, stripped])].filter(Boolean);
 }
 
 function extractTargetNode(text, actionType) {
@@ -201,17 +171,7 @@ function normalizeNodeCode(value) {
 }
 
 function normalizeShopCode(value) {
-  return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
-}
-
-function normalizeShopName(value) {
-  return cleanNodeLabel(value)
-    .toLowerCase()
-    .replace(/piphub/g, 'piphup')
-    .replace(/co[-\s]*shop/g, 'co shop')
-    .replace(/[^a-z0-9\u3400-\u9fff]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalizeLatestShopCode(value);
 }
 
 function cleanNodeLabel(value) {
@@ -253,7 +213,7 @@ function eventSortKey(event) {
 function pickShopName(cells, code) {
   const name = cells.find(cell => {
     const value = String(cell || '').trim();
-    if (!value || /^(CP\d{6}|PV\d{3})$/i.test(value) || /^\d+$/.test(value)) return false;
+    if (!value || /^(?:(?:CP|FS)\d{6}|(?:PV|PNH)\d{3})$/i.test(normalizeShopCode(value)) || /^\d+$/.test(value)) return false;
     return !/门店编码|门店名称|POD\s*Data/i.test(value);
   });
   return name || code;
