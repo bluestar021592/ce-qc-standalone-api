@@ -1,4 +1,5 @@
 import net from 'net';
+import crypto from 'crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { getDb, nowIso } from './db.js';
 
@@ -6,7 +7,7 @@ const ROLE_LEVEL = Object.freeze({ VIEWER: 1, OPERATOR: 2, ADMIN: 3 });
 let jwks = null;
 
 export function validateAccessConfiguration() {
-  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME);
+  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'qc.cambodianexpress.com');
   if (!publicHost || process.env.NODE_ENV !== 'production') return;
   const missing = ['CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD'].filter(name => !String(process.env[name] || '').trim());
   if (missing.length) throw new Error(`生产模式缺少 Cloudflare Access 配置：${missing.join(', ')}`);
@@ -15,9 +16,10 @@ export function validateAccessConfiguration() {
 export async function accessIdentity(req, res, next) {
   const host = normalizeHost(req.hostname || req.get('host'));
   const remote = normalizeIp(req.socket?.remoteAddress);
-  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME);
+  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'qc.cambodianexpress.com');
 
   try {
+    if (req.path === '/api/local-auth/login') return handleLocalLogin(req, res, host, remote);
     if (isLoopbackHost(host) && isLoopbackIp(remote) && envEnabled('LOCAL_DEV_ENABLED', true)) {
       req.user = localAdmin('local-admin@localhost', '本机管理员');
       req.accessMode = 'LOCAL';
@@ -30,15 +32,21 @@ export async function accessIdentity(req, res, next) {
     }
 
     if (isPrivateHost(host)) {
-      if (String(process.env.ACCESS_MODE || 'PUBLIC_ONLY').toUpperCase() !== 'DUAL' || !envEnabled('LAN_DIRECT_ENABLED', false)) {
+      if (String(process.env.ACCESS_MODE || 'DUAL').toUpperCase() !== 'DUAL' || !envEnabled('LAN_DIRECT_ENABLED', true)) {
         return denyPageOrApi(req, res, 403, '远程访问请使用正式HTTPS网址', publicHost
           ? `请打开 https://${publicHost}`
           : '正式公网网址尚未配置，请联系系统管理员。');
       }
-      if (!isAllowedLan(remote, process.env.LAN_ALLOWED_CIDRS)) {
+      if (!isAllowedLan(remote, process.env.LAN_ALLOWED_CIDRS || '192.168.0.0/16,10.0.0.0/8,172.16.0.0/12')) {
         return denyPageOrApi(req, res, 403, '当前局域网地址未获授权', '请联系系统管理员。');
       }
-      return denyPageOrApi(req, res, 401, '局域网访问需要内部登录', '当前版本未启用局域网内部登录，请使用正式HTTPS网址。');
+      const sessionUser = readLocalSession(req);
+      if (sessionUser) {
+        req.user = sessionUser;
+        req.accessMode = 'LAN';
+        return next();
+      }
+      return localLoginPage(req, res);
     }
 
     return denyPageOrApi(req, res, 421, '无法识别的访问地址', '请使用系统管理员提供的正式网址。');
@@ -46,6 +54,41 @@ export async function accessIdentity(req, res, next) {
     return denyPageOrApi(req, res, 401, '登录状态已失效', '请重新通过公司授权邮箱登录。');
   }
 }
+
+function handleLocalLogin(req, res, host, remote) {
+  if (!isPrivateHost(host) || !isAllowedLan(remote, process.env.LAN_ALLOWED_CIDRS || '192.168.0.0/16,10.0.0.0/8,172.16.0.0/12')) return res.status(403).json({ ok: false, error: '当前地址不允许局域网登录。' });
+  const username = String(req.body?.username || '').trim();
+  const password = String(req.body?.password || '');
+  const expectedUser = String(process.env.LOCAL_ADMIN_USERNAME || 'admin').trim();
+  const expectedHash = String(process.env.LOCAL_ADMIN_PASSWORD_SHA256 || '').trim().toLowerCase();
+  const actualHash = crypto.createHash('sha256').update(password, 'utf8').digest('hex');
+  if (!expectedHash) return res.status(503).json({ ok: false, error: '局域网内部登录尚未配置，请联系管理员。' });
+  if (expectedHash.length !== actualHash.length || !crypto.timingSafeEqual(Buffer.from(actualHash), Buffer.from(expectedHash)) || username !== expectedUser) return res.status(401).json({ ok: false, error: '用户名或密码不正确。' });
+  const token = signLocalSession({ email: `${username}@local.lan`, displayName: username, role: 'ADMIN', exp: Date.now() + 8 * 60 * 60_000 });
+  res.setHeader('Set-Cookie', `ce_local_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800`);
+  return res.json({ ok: true });
+}
+
+function localLoginPage(req, res) {
+  if (req.path.startsWith('/api/')) return res.status(401).json({ ok: false, error: '请先完成局域网内部登录。' });
+  return res.status(401).type('html').send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CE质控系统内部登录</title><style>body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,"Microsoft YaHei",sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(400px,calc(100% - 40px));background:#fff;border:1px solid #dce5ef;border-radius:8px;padding:28px;box-shadow:0 12px 36px #16395b18}h1{font-size:22px;margin:0 0 18px}label{display:block;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd8e5;border-radius:5px}button{width:100%;margin-top:18px;border:0;border-radius:5px;background:#126ee8;color:#fff;padding:11px;font-weight:700}#error{color:#b42318;margin-top:10px}</style></head><body><main class="box"><h1>CE质控系统内部登录</h1><form id="login"><label>用户名</label><input name="username" autocomplete="username" required><label>密码</label><input name="password" type="password" autocomplete="current-password" required><button>登录</button><div id="error"></div></form></main><script>document.getElementById('login').addEventListener('submit',async function(e){e.preventDefault();const b=Object.fromEntries(new FormData(this));const r=await fetch('/api/local-auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)});const j=await r.json();if(r.ok)location.href='/';else document.getElementById('error').textContent=j.error||'登录失败';});</script></body></html>`);
+}
+
+function signLocalSession(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', localSessionSecret()).update(body).digest('base64url');
+  return `${body}.${signature}`;
+}
+function readLocalSession(req) {
+  const token = String(req.get('cookie') || '').split(';').map(v => v.trim()).find(v => v.startsWith('ce_local_session='))?.slice(17);
+  if (!token) return null;
+  const [body, signature] = token.split('.');
+  if (!body || !signature) return null;
+  const expected = crypto.createHmac('sha256', localSessionSecret()).update(body).digest('base64url');
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try { const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); return payload.exp > Date.now() ? localAdmin(payload.email, payload.displayName) : null; } catch { return null; }
+}
+function localSessionSecret() { return String(process.env.LOCAL_SESSION_SECRET || process.env.LOCAL_ADMIN_PASSWORD_SHA256 || 'local-session-not-configured'); }
 
 export function requireRole(minimumRole) {
   return (req, res, next) => {
@@ -58,7 +101,7 @@ export function requireRole(minimumRole) {
 
 export function sameOriginWriteGuard(req, res, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
-  if (req.accessMode === 'LOCAL') return next();
+  if (req.accessMode === 'LOCAL' || req.accessMode === 'LAN') return next();
   const origin = String(req.get('origin') || '').replace(/\/$/, '');
   const expected = String(process.env.PUBLIC_ORIGIN || (process.env.PUBLIC_HOSTNAME ? `https://${process.env.PUBLIC_HOSTNAME}` : '')).replace(/\/$/, '');
   if (!expected || origin !== expected) return res.status(403).json({ ok: false, error: '请求来源校验失败。' });

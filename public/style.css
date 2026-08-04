@@ -921,6 +921,14 @@ body.sidebar-collapsed .sidebar-collapse { justify-content: center; margin-inlin
 .settings-grid,
 .rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .settings-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.data-management-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.data-backup-list { grid-column: 1 / -1; min-width: 0; }
+.data-status-list { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 12px; margin: 0 0 14px; }
+.data-status-list dt { color: #718096; }
+.data-status-list dd { margin: 0; color: #243b5a; overflow-wrap: anywhere; }
+.access-address-list { display: grid; gap: 8px; }
+.access-address-list > div { display: grid; grid-template-columns: 110px minmax(0, 1fr) 32px; align-items: center; gap: 8px; }
+.access-address-list b { overflow-wrap: anywhere; color: #23466f; font-size: 11px; }
 .log-panel-wide { grid-column: 1 / -1; }
 .log-panel-wide .log-window { display: inline-block; width: calc(50% - 27px); vertical-align: top; }
 .rules-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

@@ -99,7 +99,7 @@
               <label>异常类型<select id="reportCategory" onchange="setReportCategory(this.value)"></select></label>
               <label>是否闭环<select><option>全部</option><option>是</option><option>否</option></select></label>
               <label>关键词搜索<input id="reportSearch" placeholder="运单号 / 收件人 / 手机号" oninput="setReportSearch(this.value)"></label>
-              <button class="btn ghost" onclick="renderReportsPage()">↻ 刷新预览</button>
+              <button class="btn ghost" onclick="renderReportsPage()"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-refresh"></use></svg>刷新预览</button>
               <button class="btn primary" onclick="exportBusiness(document.getElementById('reportBusiness').value)">下载Excel</button>
             </div>
             <p class="report-note">ⓘ 字段口径与看板一致：CCSL与SHOPEE分开统计，SHOPEE按本省（PP）/外省（PV）区分，当日遗留次日自动进入追踪。</p>
@@ -129,6 +129,12 @@
 
         <section id="rulesPage" class="app-page" hidden><div class="page-heading"><div><h2>规则说明</h2><p>当前锁版业务规则只读展示</p></div></div><div id="rulesContent" class="rules-grid"></div></section>
 
+        <section id="exceptionsPage" class="app-page" hidden><div class="page-heading"><div><h2>异常明细</h2><p>CCSL与SHOPEE异常数据独立浏览</p></div></div><section id="exceptionsPreviewPanel" class="panel preview-panel"></section></section>
+
+        <section id="logsPage" class="app-page" hidden><div class="page-heading"><div><h2>操作日志</h2><p>登录、导入、处理、导出与数据管理审计</p></div></div><section class="panel"><div class="panel-title"><h3>最近操作</h3><button class="text-button" onclick="loadAuditLogs()">刷新</button></div><div id="auditLogTable" class="preview-table-wrap"></div></section></section>
+
+        <section id="data-managementPage" class="app-page" hidden><div class="page-heading"><div><h2>数据管理</h2><p>数据库备份、恢复与ADMIN安全清除</p></div></div><div class="data-management-grid"><section class="panel operation-panel"><div class="panel-title"><h3>数据库状态</h3></div><div id="dataDbStatus"></div><button class="btn primary full" onclick="backupDatabaseNow()">立即备份</button></section><section class="panel operation-panel"><div class="panel-title"><h3>清除业务数据</h3></div><p class="danger-note">清除前自动创建并校验完整备份，不删除用户、配置、白名单、迁移和审计。</p><button class="btn danger-outline full" onclick="openDataPurge()">清除全部业务数据</button></section><section class="panel data-backup-list"><div class="panel-title"><h3>备份列表</h3><button class="text-button" onclick="loadDataManagement()">刷新</button></div><div id="backupListTable" class="preview-table-wrap"></div></section></div></section>
+
         <section id="settingsPage" class="app-page" hidden>
           <div class="page-heading"><div><h2>系统设置</h2><p>登录、门店配置、备份与日志</p></div></div>
           <div class="settings-grid">
@@ -147,7 +153,7 @@
   </div>
   <div id="dataPurgeDialog" class="modal" hidden><div class="modal-card purge-card"><div class="panel-title"><h3>清除全部业务数据</h3><button class="icon-button" title="关闭" onclick="closeDataPurge()">×</button></div><div id="purgeStepOne"><div id="purgePreview" class="purge-preview"></div><div class="modal-actions"><button class="btn ghost" onclick="closeDataPurge()">取消</button><button class="btn danger-outline" onclick="continueDataPurge()">继续验证</button></div></div><div id="purgeStepTwo" hidden><p class="danger-note">此操作不可撤销。备份可由管理员用于独立恢复。</p><p>当前管理员：<b id="purgeAdmin"></b></p><label class="confirm-check"><input id="purgeBackupConfirmed" type="checkbox" onchange="updatePurgeButton()"> 我已确认自动备份成功</label><label class="field-label">请输入：永久清除全部业务数据<input id="purgePhrase" autocomplete="off" oninput="updatePurgeButton()"></label><p id="purgeCountdown" class="purge-countdown">请等待 5 秒</p><div class="modal-actions"><button class="btn ghost" onclick="closeDataPurge()">取消</button><button id="purgeExecuteButton" class="btn danger" onclick="executeDataPurge()" disabled>确认清除</button></div></div></div></div>
 
-  <script src="/dashboard-components.js?v=public-clear-20260804"></script>
-  <script src="/app.js?v=public-clear-20260804-3"></script>
+  <script src="/dashboard-components.js?v=final-merge-20260804"></script>
+  <script src="/app.js?v=final-merge-20260804"></script>
 </body>
 </html>

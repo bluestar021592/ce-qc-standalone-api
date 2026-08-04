@@ -17,7 +17,7 @@ import { cleanMainBills, loadState, saveState, resetState } from './src/storage.
 import { clearToken, loadToken, saveToken, summarizeToken } from './src/authStore.js';
 import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, safeFinalRows } from './src/reporting.js';
 import { createDatabaseBackup, fileHash, listBackups, recordBackup, recordExport } from './src/backup.js';
-import { ensureRuntimeDirs, getRuntimeConfig } from './src/db.js';
+import { closeDb, ensureRuntimeDirs, getDb, getRuntimeConfig } from './src/db.js';
 import { createOrRecoverRun, getCurrentReportDate, getDbStatus, getRunStatus, listExportRecords, loadDetail, resetRunForReport, updateRunLock } from './src/store.js';
 import { buildConsistencyReport } from './src/consistency.js';
 import { getShopCodeSummary, importShopCodesFromWorkbook } from './src/shopCodes.js';
@@ -81,7 +81,7 @@ app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
 });
 
-app.get(['/ccsl', '/shopee', '/track', '/reports', '/import', '/rules', '/settings'], (req, res) => {
+app.get(['/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -862,6 +862,46 @@ app.get('/api/backups', async (req, res) => {
   res.json({ ok: true, backups: listBackups(50), exports: listExportRecords(50) });
 });
 
+app.post('/api/admin/backup-now', requireRole('ADMIN'), (req, res) => {
+  const filePath = createDatabaseBackup('manual-admin');
+  if (!filePath) return res.status(500).json({ ok: false, error: '数据库备份失败。' });
+  auditAction(req, 'DATABASE_BACKUP_CREATED', { backupPath: filePath });
+  res.json({ ok: true, filePath, sha256: fileHash(filePath) });
+});
+
+app.get('/api/admin/audit-logs', requireRole('ADMIN'), (req, res) => {
+  const rows = getDb().prepare('SELECT userEmail,userRole,action,businessType,reportDate,runId,ipAddress,createdAt FROM audit_logs ORDER BY id DESC LIMIT 300').all();
+  res.json({ ok: true, rows });
+});
+
+app.post('/api/admin/restore-backup', requireRole('ADMIN'), async (req, res) => {
+  const backupId = Number(req.body?.backupId || 0);
+  if (req.body?.confirmText !== '恢复此数据库备份') return res.status(400).json({ ok: false, error: '确认文字不正确。' });
+  const backup = getDb().prepare('SELECT * FROM backup_records WHERE id = ?').get(backupId);
+  if (!backup?.filePath) return res.status(404).json({ ok: false, error: '未找到该备份记录。' });
+  const resolved = path.resolve(backup.filePath);
+  const runtime = getRuntimeConfig();
+  if (!resolved.startsWith(path.resolve(runtime.backupsDir) + path.sep)) return res.status(400).json({ ok: false, error: '备份文件不在受控目录。' });
+  if (!fileHash(resolved) || fileHash(resolved) !== backup.fileHash) return res.status(409).json({ ok: false, error: '备份校验失败，未恢复数据库。' });
+  const activeRun = getDb().prepare("SELECT COUNT(*) AS count FROM run_checkpoints WHERE status IN ('RUNNING','PROCESSING')").get();
+  if (Number(activeRun?.count || 0) > 0) return res.status(409).json({ ok: false, error: '当前有处理任务运行，暂不能恢复数据库。' });
+  const rollbackFile = createDatabaseBackup('before-admin-restore');
+  try {
+    closeDb();
+    await fs.rm(`${runtime.dbFile}-wal`, { force: true });
+    await fs.rm(`${runtime.dbFile}-shm`, { force: true });
+    await fs.copyFile(resolved, runtime.dbFile);
+    getDb().prepare('PRAGMA integrity_check').get();
+    auditAction(req, 'DATABASE_BACKUP_RESTORED', { backupId, backupPath: resolved, rollbackFile });
+    res.json({ ok: true, restoredFrom: backup.fileName, rollbackFile });
+  } catch (error) {
+    closeDb();
+    if (rollbackFile) await fs.copyFile(rollbackFile, runtime.dbFile);
+    getDb();
+    res.status(500).json({ ok: false, error: `恢复失败，已回滚：${error.message}` });
+  }
+});
+
 app.post('/api/clear-state', (req, res) => res.redirect(307, '/api/reset'));
 
 app.get('/api/logs/recent', async (req, res) => {
@@ -1135,31 +1175,33 @@ app.listen(port, host, () => {
   console.log(`本机访问: ${network.localUrl}`);
   console.log(`局域网访问: ${network.lanUrl || '未检测到局域网IPv4，请查看电脑IP地址'}`);
   console.log(`SQLite DB: ${runtimeConfig.dbFile}`);
+  console.log(`Public URL: ${network.publicUrl}`);
 });
 
 function buildNetworkInfo(runtime = getRuntimeConfig()) {
   const portValue = runtime.port || 5177;
-  const lanIp = getLanIpv4();
+  const lanIps = getLanIpv4s();
+  const lanIp = lanIps[0] || '';
   return {
     host: runtime.host || '0.0.0.0',
     port: portValue,
     localUrl: `http://127.0.0.1:${portValue}`,
     lanIp,
-    lanUrl: String(process.env.ACCESS_MODE || 'PUBLIC_ONLY').toUpperCase() === 'DUAL' && lanIp ? `http://${lanIp}:${portValue}` : ''
+    lanIps,
+    lanUrl: String(process.env.ACCESS_MODE || 'DUAL').toUpperCase() === 'DUAL' && lanIp ? `http://${lanIp}:${portValue}` : '',
+    lanUrls: String(process.env.ACCESS_MODE || 'DUAL').toUpperCase() === 'DUAL' ? lanIps.map(ip => `http://${ip}:${portValue}`) : [],
+    publicUrl: `https://${process.env.PUBLIC_HOSTNAME || 'qc.cambodianexpress.com'}`
   };
 }
 
-function getLanIpv4() {
+function getLanIpv4s() {
   const candidates = [];
   for (const list of Object.values(networkInterfaces())) {
     for (const item of list || []) {
       if (item.family !== 'IPv4' || item.internal) continue;
-      candidates.push(item.address);
+      if (/^169\.254\./.test(item.address)) continue;
+      if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address)) candidates.push(item.address);
     }
   }
-  return candidates.find(ip => /^192\.168\./.test(ip))
-    || candidates.find(ip => /^10\./.test(ip))
-    || candidates.find(ip => /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip))
-    || candidates[0]
-    || '';
+  return [...new Set(candidates)].sort((a, b) => Number(/^192\.168\./.test(b)) - Number(/^192\.168\./.test(a)));
 }

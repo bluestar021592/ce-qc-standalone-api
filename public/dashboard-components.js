@@ -95,7 +95,7 @@
     const upper = [
       ['今日件数', ccsl.today, ccsl.yesterdayToday !== undefined ? `昨日 ${number(ccsl.yesterdayToday)}  ${ccsl.todayChange || ''}` : '', '', "openBusinessMetric('CCSL','allData')"],
       ['签收件数', ccsl.pod, ccsl.yesterdayPod !== undefined ? `昨日 ${number(ccsl.yesterdayPod)}  ${ccsl.podChange || ''}` : '', '', "openBusinessMetric('CCSL','podClosed')"],
-      ['签收率', `${Number(ccsl.podRate || 0).toFixed(2)}%`, ccsl.yesterdayPodRate !== undefined ? `昨日 ${ccsl.yesterdayPodRate}%  ${ccsl.podRateChange || ''}` : '', 'blue-text', "openBusinessMetric('CCSL','podClosed')"],
+      ['签收率', `${Number(ccsl.podRate || 0).toFixed(2)}%`, ccsl.yesterdayPodRate != null ? `昨日 ${ccsl.yesterdayPodRate}%  ${ccsl.podRateChange || ''}` : '昨日 —', 'blue-text', "openBusinessMetric('CCSL','podClosed')"],
       ['Pending1+', ccsl.pending1, `占比 ${ratio(ccsl.pending1, total)}`, '', "openBusinessMetric('CCSL','pendingAll')"],
       ['Pending2+', ccsl.pending2, `占比 ${ratio(ccsl.pending2, total)}`, '', "openBusinessMetric('CCSL','pending2plus')"],
       ['Pending3+', ccsl.pending3, `占比 ${ratio(ccsl.pending3, total)}`, '', "openBusinessMetric('CCSL','pending3')"]

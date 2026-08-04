@@ -19,6 +19,35 @@ const previewState = {
   SHOPEE: { business: 'SHOPEE', category: 'ALL_all', recipientGroup: 'ALL', query: '' }
 };
 
+normalizeTopNavigation();
+separateLegacyPanels();
+
+function normalizeTopNavigation() {
+  const nav = document.querySelector('.side-nav');
+  if (!nav) return;
+  const items = [
+    ['home','首页总看板','home','/'], ['ccsl','CCSL看板','package','/ccsl'], ['shopee','SHOPEE看板','bag','/shopee'],
+    ['import','数据导入','database','/import'], ['tracking','轨迹查询','route','/tracking'], ['exceptions','异常明细','alert','/exceptions'],
+    ['reports','报表导出','clipboard','/reports'], ['settings','系统设置','settings','/settings'], ['logs','操作日志','clipboard','/logs'],
+    ['data-management','数据管理','database','/data-management']
+  ];
+  nav.innerHTML = items.map(([page,label,icon,path]) => `<button class="side-link ${page === currentPage ? 'active' : ''} ${page === 'data-management' ? 'admin-only' : ''}" data-page="${page}" data-path="${path}" onclick="navigatePage('${page}')" ${page === 'data-management' ? 'hidden' : ''}><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-${icon}"></use></svg><span class="side-label">${label}</span></button>`).join('');
+}
+
+function separateLegacyPanels() {
+  const grid = document.querySelector('#settingsPage .settings-grid');
+  if (!grid) return;
+  grid.querySelectorAll('section').forEach(section => {
+    const title = section.querySelector('h3')?.textContent || '';
+    if (title.includes('导出与长期备份') || title.includes('操作日志') || title.includes('数据管理')) section.hidden = true;
+  });
+  if (!document.getElementById('networkSettingsPanel')) grid.insertAdjacentHTML('beforeend', '<section id="networkSettingsPanel" class="panel operation-panel"><div class="panel-title"><h3>网络与访问</h3></div><div id="networkAccessCards"></div></section>');
+}
+
+document.querySelectorAll('.modal .icon-button').forEach(button => {
+  button.innerHTML = '<svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-close"></use></svg>';
+});
+
 async function api(url, options = {}) {
   const response = await fetch(url, options);
   const result = await response.json().catch(() => ({}));
@@ -56,10 +85,14 @@ function renderAll() {
   renderTopbar();
   renderSystemStatus();
   renderAuthPanels();
+  renderNetworkSettings();
   renderHome();
   renderCcslPage();
   renderShopeePage();
   renderReportsPage();
+  renderExceptionsPage();
+  if (currentPage === 'logs') loadAuditLogs();
+  if (currentPage === 'data-management') loadDataManagement();
   renderRulesPage();
   renderCcslOperations();
   renderShopeeOperations();
@@ -68,16 +101,71 @@ function renderAll() {
   if (trackDate && !trackDate.value) trackDate.value = latestDate(appState.reportDate, shopeeState.reportDate) || new Date().toISOString().slice(0, 10);
 }
 
+function renderNetworkSettings() {
+  const target = document.getElementById('networkAccessCards');
+  if (!target) return;
+  const network = appState.network || {};
+  const rows = [['本机访问', network.localUrl || 'http://127.0.0.1:5177'], ['同一局域网访问', network.lanUrl || '未检测到有效局域网IPv4'], ['不同网络/外地访问', network.publicUrl || 'https://qc.cambodianexpress.com']];
+  target.innerHTML = `<div class="access-address-list">${rows.map(([label,url]) => `<div><span>${label}</span><b>${escapeHtml(url)}</b><button class="icon-button" title="复制地址" onclick="navigator.clipboard.writeText('${escapeAttr(url)}')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-clipboard"></use></svg></button></div>`).join('')}</div><p class="operation-status">公网需 Named Tunnel 与 Cloudflare Access 配置完成后启用。</p>`;
+}
+
+function renderExceptionsPage() {
+  const panel = document.getElementById('exceptionsPreviewPanel');
+  if (!panel) return;
+  const ccRows = appState.detailTabs?.coreAbnormal?.rows || [];
+  const shRows = shopeeState.detailTabs?.abnormal?.rows || [];
+  const rows = [...ccRows.map(row => ({ ...row, 业务板块: 'CCSL' })), ...shRows.map(row => ({ ...row, 业务板块: 'SHOPEE' }))].slice(0, 300);
+  const fields = ['业务板块', '运单号', 'shipmentCode', '主分类', '异常分类', '最新节点', '是否POD'];
+  panel.innerHTML = `<div class="panel-title"><h3>异常明细</h3><span class="status-pill muted">${formatInt(rows.length)} 条预览</span></div><div class="preview-table-wrap">${renderSimpleTable(rows, fields)}</div>`;
+}
+
+async function loadAuditLogs() {
+  const target = document.getElementById('auditLogTable');
+  if (!target || accessSession.user?.role !== 'ADMIN') return;
+  try {
+    const result = await api('/api/admin/audit-logs');
+    target.innerHTML = renderSimpleTable(result.rows || [], ['createdAt','userEmail','userRole','action','businessType','reportDate','runId','ipAddress']);
+  } catch (error) { target.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`; }
+}
+
+async function loadDataManagement() {
+  if (accessSession.user?.role !== 'ADMIN') return;
+  const status = document.getElementById('dataDbStatus');
+  if (status) status.innerHTML = `<dl class="data-status-list"><dt>数据库</dt><dd>${escapeHtml(appState.dbStatus?.dbFile || '')}</dd><dt>Schema</dt><dd>${escapeHtml(appState.dbStatus?.dbSchemaVersion || '')}</dd><dt>状态</dt><dd>${escapeHtml(appState.dbStatus?.sqlite || 'normal')}</dd></dl>`;
+  try {
+    const result = await api('/api/backups');
+    const rows = result.backups || [];
+    document.getElementById('backupListTable').innerHTML = rows.length ? `<table class="preview-table"><thead><tr><th>创建时间</th><th>文件名</th><th>类型</th><th>校验</th><th>操作</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.createdAt || '')}</td><td>${escapeHtml(row.fileName || '')}</td><td>${escapeHtml(row.reason || '')}</td><td>${escapeHtml(String(row.fileHash || '').slice(0, 12))}</td><td><button class="text-button" onclick="restoreDatabaseBackup(${Number(row.id)})">恢复</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty-state compact">暂无备份</div>';
+  } catch (error) { document.getElementById('backupListTable').innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`; }
+}
+
+async function backupDatabaseNow() {
+  try { const result = await api('/api/admin/backup-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); alert(`备份完成：${result.filePath}`); await loadDataManagement(); }
+  catch (error) { alert(`备份失败：${error.message}`); }
+}
+
+async function restoreDatabaseBackup(backupId) {
+  if (!confirm('恢复数据库会先备份当前数据并重启数据库连接。确定继续？')) return;
+  const confirmText = prompt('请输入：恢复此数据库备份');
+  if (confirmText !== '恢复此数据库备份') return;
+  try {
+    await api('/api/admin/restore-backup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backupId, confirmText })
+    });
+    alert('数据库恢复成功，页面将重新加载。');
+    location.reload();
+  } catch (error) { alert(`恢复失败：${error.message}`); }
+}
+
 function pageFromPath() {
   const value = location.pathname.toLowerCase();
-  for (const page of ['shopee', 'ccsl', 'track', 'reports', 'import', 'rules', 'settings']) {
-    if (value.startsWith(`/${page}`)) return page;
-  }
+  const routes = { '/ccsl':'ccsl', '/shopee':'shopee', '/import':'import', '/tracking':'tracking', '/track':'tracking', '/exceptions':'exceptions', '/reports':'reports', '/settings':'settings', '/logs':'logs', '/data-management':'data-management' };
+  for (const [path,page] of Object.entries(routes)) if (value === path || value.startsWith(`${path}/`)) return page;
   return 'home';
 }
 
 function navigatePage(page, anchor = '') {
-  currentPage = ['ccsl', 'shopee', 'track', 'reports', 'import', 'rules', 'settings'].includes(page) ? page : 'home';
+  currentPage = ['ccsl', 'shopee', 'tracking', 'exceptions', 'reports', 'import', 'settings', 'logs', 'data-management'].includes(page) ? page : 'home';
   const path = currentPage === 'home' ? '/' : `/${currentPage}`;
   if (location.pathname !== path) history.pushState({}, '', path);
   renderAll();
@@ -86,8 +174,8 @@ function navigatePage(page, anchor = '') {
 }
 
 function renderPageVisibility() {
-  for (const page of ['home', 'ccsl', 'shopee', 'track', 'reports', 'import', 'rules', 'settings']) {
-    const el = document.getElementById(`${page}Page`);
+  for (const page of ['home', 'ccsl', 'shopee', 'tracking', 'exceptions', 'reports', 'import', 'settings', 'logs', 'data-management']) {
+    const el = document.getElementById(page === 'tracking' ? 'trackPage' : `${page}Page`);
     if (el) el.hidden = page !== currentPage;
   }
   document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === currentPage));
@@ -102,6 +190,7 @@ function toggleNavGroup(id) { document.getElementById(id)?.classList.toggle('col
 function renderTopbar() {
   const state = currentPage === 'shopee' ? shopeeState : appState;
   const titles = { home: '首页总看板', ccsl: 'CCSL看板', shopee: 'SHOPEE看板', track: '轨迹查询', reports: '报表数据预览', import: '数据导入', rules: '规则说明', settings: '系统设置' };
+  Object.assign(titles, { tracking: '轨迹查询', exceptions: '异常明细', logs: '操作日志', 'data-management': '数据管理', reports: '报表导出' });
   document.getElementById('pageTitle').textContent = titles[currentPage] || '首页总看板';
   const user = accessSession.user || {};
   document.querySelectorAll('.admin-only').forEach(element => { element.hidden = user.role !== 'ADMIN'; });
@@ -350,7 +439,7 @@ function renderBusinessSummary(type, state) {
     ? [['签收率', metricTrend(state, 'ALL_POD率'), '%'], ['Pending件数', metricTrend(state, 'ALL_Pending1+'), '件'], ['OC件数', metricTrend(state, 'ALL_OC1+'), '件'], ['入库无扫描', metricTrend(state, 'ALL_入库无扫描'), '件']]
     : [['签收率', metricTrend(state, '首投POD率'), '%'], ['异常率', metricTrend(state, '异常率'), '%'], ['Pending件数', sumMetricTrends(state, ['Pending1次', 'Pending2次', 'Pending3次以上']), '件'], ['OC件数', sumMetricTrends(state, ['OC1天', 'OC2天', 'OC3天以上']), '件'], ['入库无扫描', metricTrend(state, '入库无扫描节点'), '件']];
   return `<section class="panel business-summary ${isShopee ? 'shopee-panel' : ''}">
-    <div class="panel-title"><h3>${isShopee ? 'SHOPEE看板' : 'CCSL看板'}</h3><button class="text-button ${isShopee ? 'shopee-text' : ''}" onclick="navigatePage('${isShopee ? 'shopee' : 'ccsl'}')">进入${isShopee ? 'SHOPEE' : 'CCSL'}看板 →</button></div>
+    <div class="panel-title"><h3>${isShopee ? 'SHOPEE看板' : 'CCSL看板'}</h3><button class="text-button ${isShopee ? 'shopee-text' : ''}" onclick="navigatePage('${isShopee ? 'shopee' : 'ccsl'}')">进入${isShopee ? 'SHOPEE' : 'CCSL'}看板</button></div>
     <div class="summary-content">
       <div class="summary-meta">
         ${metaLine('日报状态', state.dailyReportReady || state.sourceName ? '已导入' : '未导入', Boolean(state.dailyReportReady || state.sourceName))}
