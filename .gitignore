@@ -12,3 +12,5 @@ data/exports/
 node_modules/
 uploads/
 exports/
+evidence/public-clear-test/
+evidence/server-final.*.log

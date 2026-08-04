@@ -24,7 +24,8 @@ export function getRuntimeConfig() {
     : '未检测到D盘，当前数据临时保存到项目data目录。建议检查数据保存路径。';
   const preferredDbFile = resolveProjectPath(process.env.DB_FILE || path.join(dataDir, 'ce_qc_monitor.db'));
   const dbFile = isPathRootAvailable(preferredDbFile) ? preferredDbFile : path.join(fallbackDataDir, 'ce_qc_monitor.db');
-  const host = process.env.HOST || '0.0.0.0';
+  const accessMode = String(process.env.ACCESS_MODE || 'PUBLIC_ONLY').toUpperCase();
+  const host = accessMode === 'DUAL' ? (process.env.HOST || '0.0.0.0') : '127.0.0.1';
   const port = Number(process.env.PORT || 5177);
   return {
     projectRoot,

@@ -156,6 +156,14 @@
     return `<div class="pixel-recipient-wrap">${recipientGroups.map(([code, summary]) => recipientCard(code, summary)).join('')}</div>${storeStrip(shopee.all || {}, 'SHOPEE', 'ALL')}<div class="pixel-region-caption">区域维度（与收件人来源独立）</div><div class="pixel-region-wrap compact">${regionCard('PP', shopee.pp || {})}${regionCard('PV', shopee.pv || {})}</div>`;
   }
 
+  function compactShopeeOverview(shopee = {}) {
+    const all = shopee.all || {};
+    const total = Number(all.today || 0);
+    const summary = [['今日件数', all.today, 'all'], ['签收件数', all.pod, 'pod'], ['签收率', `${Number(all.podRate || 0).toFixed(2)}%`, 'pod'], ['入库无扫描', all.inboundNoScan, 'inboundNoScan']];
+    const attempts = [['1派签收', all.firstAttemptPod || all.attempt1Pod, all.firstAttemptRate], ['2派签收', all.secondAttemptPod || all.attempt2Pod, all.secondAttemptRate], ['3派签收', all.thirdAttemptPod || all.attempt3Pod, all.thirdAttemptRate], ['3派以上', all.attempt3plus || 0, all.attempt3plusRate], ['派次待确认', all.attemptUnknown || 0, all.attemptUnknownRate], ['派次覆盖率', `${Number(all.attemptCoverageRate || 0).toFixed(2)}%`, '']];
+    return `<div class="pixel-shopee-summary">${summary.map(([label, value, tab]) => metric(label, value || 0, typeof value === 'string' ? '' : `占比 ${ratio(value, total)}`, '', `openShopeeGroupMetric('ALL','${tab}')`)).join('')}</div><div class="pixel-source-tabs"><button onclick="openShopeeGroupMetric('ALL','all')">SHOPEE全部</button><button onclick="openShopeeGroupMetric('CN','all')">Shopee CN</button><button onclick="openShopeeGroupMetric('VN','all')">Shopee VN</button></div>${storeStrip(all, 'SHOPEE', 'ALL')}<section class="attempt-strip"><h3>派次签收占比（基于签收件数）</h3><div>${attempts.map(([label, value, rateValue]) => metric(label, value || 0, rateValue === '' ? '' : `占比 ${Number(rateValue || 0).toFixed(2)}%`, '', "openShopeeGroupMetric('ALL','attempts')")).join('')}</div></section>`;
+  }
+
   function ratio(value, total) {
     return total ? `${((Number(value || 0) / total) * 100).toFixed(2)}%` : '0%';
   }
@@ -219,7 +227,7 @@
   function renderHome(snapshot) {
     document.getElementById('homeKpis').innerHTML = (snapshot.topKpis || []).map(kpiCard).join('');
     document.getElementById('homeCcslOverview').innerHTML = ccslOverview(snapshot.ccsl || {});
-    document.getElementById('homeShopeeOverview').innerHTML = shopeeOverview(snapshot.shopee || {});
+    document.getElementById('homeShopeeOverview').innerHTML = compactShopeeOverview(snapshot.shopee || {});
     document.getElementById('homeTrendGrid').innerHTML = charts(snapshot);
     document.getElementById('homeIssueCount').textContent = number(snapshot.issueCount ?? snapshot.issues?.length ?? 0);
     document.getElementById('homeIssueTable').innerHTML = carryTable(snapshot);

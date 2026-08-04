@@ -92,6 +92,28 @@ body {
   margin-top: 12px !important;
 }
 
+.overview-row > .pixel-panel { align-self: stretch !important; }
+
+.pixel-shopee-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 12px 10px; }
+.pixel-source-tabs { display: flex; gap: 7px; padding: 0 10px 6px; }
+.pixel-source-tabs button { border: 1px solid #d9e5f0; border-radius: 5px; background: #fff; color: #294967; padding: 6px 12px; cursor: pointer; }
+.pixel-source-tabs button:first-child { color: #fff; background: #1677ff; border-color: #1677ff; }
+.attempt-strip { margin: 8px; border: 1px solid #dce8f4; border-radius: 6px; overflow: hidden; }
+.attempt-strip h3 { margin: 0; padding: 8px 10px; color: #204d7d; background: #f8fbff; border-bottom: 1px solid #e4edf6; font-size: 12px; }
+.attempt-strip > div { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); padding: 7px 3px; }
+
+.danger-outline { color: #b42318 !important; border: 1px solid #efaaa4 !important; background: #fff !important; }
+.danger-outline:hover { background: #fff3f2 !important; }
+.purge-card { width: min(720px, calc(100vw - 32px)); }
+.purge-preview { max-height: 420px; overflow: auto; }
+.purge-warning, .danger-note { color: #b42318; background: #fff3f2; border: 1px solid #ffd0cc; border-radius: 6px; padding: 10px 12px; }
+.purge-preview dl { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 12px; }
+.purge-preview dt { color: #60758b; font-weight: 700; }
+.purge-preview dd { margin: 0; overflow-wrap: anywhere; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.confirm-check { display: flex; align-items: center; gap: 8px; margin: 16px 0; }
+.purge-countdown { color: #b42318; font-weight: 700; }
+
 .chart-row,
 .home-trend-grid,
 .recipient-trend-grid {
@@ -257,7 +279,6 @@ body.sidebar-collapsed .topbar { left: 72px !important; }
   .cycle-wrap { display: none !important; }
   .kpi-row,
   .home-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
-  .overview-row,
   .chart-row,
   .home-trend-grid,
   .recipient-trend-grid { grid-template-columns: 1fr !important; }

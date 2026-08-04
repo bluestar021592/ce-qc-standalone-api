@@ -36,6 +36,7 @@ import {
   getBusinessSnapshotById, getMatchingBusinessSnapshot, listBusinessHistoryDates, loadBusinessDetail, loadBusinessState, recordBusinessExport,
   resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
 } from './src/businessStore.js';
+import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,6 +75,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const client = new CEClient();
 const activeRunIds = new Set();
+const eventClients = new Set();
 
 app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
@@ -89,6 +91,17 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/session', (req, res) => {
   res.json({ ok: true, user: publicUser(req.user), unreadNotifications: 0 });
+});
+
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  const connection = { res };
+  eventClients.add(connection);
+  res.write('event: READY\ndata: {}\n\n');
+  req.on('close', () => eventClients.delete(connection));
 });
 
 app.get('/api/ce-auth-status', async (req, res) => {
@@ -194,7 +207,33 @@ app.get('/api/state/last-report', async (req, res) => {
   });
 });
 
+app.post('/api/admin/data-purge/prepare', requireRole('ADMIN'), async (req, res) => {
+  try {
+    auditAction(req, 'DATA_PURGE_REQUESTED', {});
+    const challenge = createPurgeChallenge(req.user);
+    auditAction(req, 'DATA_PURGE_BACKUP_VERIFIED', { backupPath: challenge.backup.path, sha256: challenge.backup.sha256 });
+    res.json({ ok: true, ...challenge, administrator: req.user.email });
+  } catch (e) {
+    auditAction(req, 'DATA_PURGE_FAILED', { stage: 'prepare', error: e.message });
+    res.status(409).json({ ok: false, error: e.message });
+  }
+});
+
+app.post('/api/admin/data-purge/execute', requireRole('ADMIN'), async (req, res) => {
+  try {
+    const result = executePurge({ ...req.body, user: req.user });
+    auditAction(req, 'DATA_PURGE_COMPLETED', { backupPath: result.backup.filePath, before: result.before, after: result.after });
+    broadcastEvent('DATA_RESET', { at: result.completedAt });
+    res.json({ ok: true, ...result, state: summarizeState(await loadState()), shopeeState: summarizeShopeeState(loadBusinessState(SHOPEE)) });
+  } catch (e) {
+    auditAction(req, 'DATA_PURGE_FAILED', { stage: 'execute', error: e.message });
+    res.status(409).json({ ok: false, error: e.message });
+  }
+});
+
 app.post('/api/reset', async (req, res) => {
+  return res.status(410).json({ ok: false, error: '请使用管理员“清除全部业务数据”双重确认入口。' });
+  /* legacy implementation retained below but unreachable */
   try {
     const result = await resetState(req.body?.confirmText || '');
     res.json({
@@ -1081,6 +1120,13 @@ function dateStamp() {
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 }
 
+function broadcastEvent(event, payload = {}) {
+  const message = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const connection of eventClients) {
+    try { connection.res.write(message); } catch { eventClients.delete(connection); }
+  }
+}
+
 const runtimeConfig = getRuntimeConfig();
 const port = runtimeConfig.port;
 const host = runtimeConfig.host;
@@ -1099,7 +1145,7 @@ function buildNetworkInfo(runtime = getRuntimeConfig()) {
     port: portValue,
     localUrl: `http://127.0.0.1:${portValue}`,
     lanIp,
-    lanUrl: lanIp ? `http://${lanIp}:${portValue}` : ''
+    lanUrl: String(process.env.ACCESS_MODE || 'PUBLIC_ONLY').toUpperCase() === 'DUAL' && lanIp ? `http://${lanIp}:${portValue}` : ''
   };
 }
 

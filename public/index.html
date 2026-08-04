@@ -6,7 +6,7 @@
   <title>CE Express 质量控制管理系统</title>
   <link rel="stylesheet" href="/style.css?v=unique-20260802-1">
   <link rel="stylesheet" href="/pixel-lock.css?v=unique-20260802-2">
-  <link rel="stylesheet" href="/responsive-dashboard.css?v=unique-20260802-1">
+  <link rel="stylesheet" href="/responsive-dashboard.css?v=public-clear-20260804">
 </head>
 <body>
   <div class="app-stage">
@@ -37,6 +37,7 @@
 
         <button class="side-link" data-page="settings" onclick="navigatePage('settings')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-settings"></use></svg><span class="side-label">系统设置</span></button>
         <button class="side-link" data-page="settings" onclick="navigatePage('settings','logPanel')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-clipboard"></use></svg><span class="side-label">操作日志</span></button>
+        <button id="adminDataNav" class="side-link admin-only" data-page="settings" hidden><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-database"></use></svg><span class="side-label">数据管理</span></button>
       </nav>
 
       <button class="sidebar-collapse" onclick="toggleSidebar()" title="展开或收起菜单"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg><span class="side-label">收起菜单</span></button>
@@ -144,7 +145,9 @@
   <div id="backupDialog" class="modal" hidden><div class="modal-card"><div class="panel-title"><h3>导入长期JSON（可选恢复）</h3><button class="icon-button" title="关闭" onclick="closeBackupImport()">×</button></div><p>仅恢复历史趋势、POD锁和跨日遗留，不覆盖当前日报和当前处理进度。</p><label class="file-picker"><input id="backupFile" type="file" accept=".json"><span>选择长期JSON</span></label><button class="btn primary full" onclick="importBackup()">恢复长期备份</button><div id="backupImportResult" class="operation-status"></div></div></div>
 
   </div>
-  <script src="/dashboard-components.js?v=unique-20260802-1"></script>
-  <script src="/app.js?v=unique-20260802-1"></script>
+  <div id="dataPurgeDialog" class="modal" hidden><div class="modal-card purge-card"><div class="panel-title"><h3>清除全部业务数据</h3><button class="icon-button" title="关闭" onclick="closeDataPurge()">×</button></div><div id="purgeStepOne"><div id="purgePreview" class="purge-preview"></div><div class="modal-actions"><button class="btn ghost" onclick="closeDataPurge()">取消</button><button class="btn danger-outline" onclick="continueDataPurge()">继续验证</button></div></div><div id="purgeStepTwo" hidden><p class="danger-note">此操作不可撤销。备份可由管理员用于独立恢复。</p><p>当前管理员：<b id="purgeAdmin"></b></p><label class="confirm-check"><input id="purgeBackupConfirmed" type="checkbox" onchange="updatePurgeButton()"> 我已确认自动备份成功</label><label class="field-label">请输入：永久清除全部业务数据<input id="purgePhrase" autocomplete="off" oninput="updatePurgeButton()"></label><p id="purgeCountdown" class="purge-countdown">请等待 5 秒</p><div class="modal-actions"><button class="btn ghost" onclick="closeDataPurge()">取消</button><button id="purgeExecuteButton" class="btn danger" onclick="executeDataPurge()" disabled>确认清除</button></div></div></div></div>
+
+  <script src="/dashboard-components.js?v=public-clear-20260804"></script>
+  <script src="/app.js?v=public-clear-20260804-3"></script>
 </body>
 </html>

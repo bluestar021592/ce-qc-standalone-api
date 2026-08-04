@@ -1,0 +1,105 @@
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { DatabaseSync } from 'node:sqlite';
+
+import { getDb, getRuntimeConfig, nowIso } from './db.js';
+import { resetAppState } from './store.js';
+
+export const PURGE_PHRASE = '永久清除全部业务数据';
+const challenges = new Map();
+const BUSINESS_TABLES = [
+  'daily_reports', 'daily_parse_rows', 'scan_results', 'track_events', 'final_rows', 'pod_locks', 'carry_bills',
+  'history_summary', 'run_checkpoints', 'run_locks', 'export_snapshots', 'export_records',
+  'business_daily_reports', 'business_daily_parse_rows', 'business_scan_results', 'business_track_events',
+  'business_final_rows', 'business_pod_locks', 'business_carry_bills', 'business_history_summary',
+  'business_run_checkpoints', 'business_run_locks', 'business_export_snapshots', 'business_export_records', 'business_states'
+];
+
+export function createPurgeChallenge(user = {}) {
+  const db = getDb();
+  assertNoActiveRuns(db);
+  assertIntegrity(db);
+  const counts = tableCounts(db);
+  const backup = createVerifiedPreClearBackup(user.email || '');
+  const challengeId = crypto.randomUUID();
+  const createdAt = Date.now();
+  challenges.set(challengeId, { email: user.email || '', backup, createdAt, expiresAt: createdAt + 10 * 60_000, counts });
+  return {
+    challengeId,
+    notBefore: new Date(createdAt + 5000).toISOString(),
+    expiresAt: new Date(createdAt + 10 * 60_000).toISOString(),
+    databasePath: getRuntimeConfig().dbFile,
+    counts,
+    backup: { path: backup.filePath, sha256: backup.sha256 },
+    deleteScope: ['日报及解析行', '运单、扫描和轨迹', 'run/checkpoint/snapshot', 'carry和POD锁', '趋势、缓存、通知及导出文件'],
+    retainedScope: ['数据库结构和迁移', '用户、角色与系统设置', '最新门店白名单', '审计日志', '清除前备份']
+  };
+}
+
+export function executePurge({ challengeId, phrase, backupConfirmed, user = {} }) {
+  const challenge = challenges.get(String(challengeId || ''));
+  if (!challenge || challenge.expiresAt < Date.now() || challenge.email !== (user.email || '')) throw new Error('清除验证已失效，请重新开始。');
+  if (Date.now() - challenge.createdAt < 5000) throw new Error('请等待5秒倒计时完成。');
+  if (!backupConfirmed) throw new Error('请勾选“我已确认自动备份成功”。');
+  if (String(phrase || '') !== PURGE_PHRASE) throw new Error(`请输入完整确认短语：${PURGE_PHRASE}`);
+
+  const db = getDb();
+  assertNoActiveRuns(db);
+  verifyBackup(challenge.backup);
+  const before = tableCounts(db);
+  resetAppState({ logs: [] });
+  const after = tableCounts(db);
+  clearRegenerableFiles();
+  assertIntegrity(db);
+  challenges.delete(String(challengeId || ''));
+  return { backup: challenge.backup, before, after, completedAt: nowIso(), event: 'DATA_RESET' };
+}
+
+export function getPurgeCounts() { return tableCounts(getDb()); }
+
+function createVerifiedPreClearBackup(adminEmail) {
+  const cfg = getRuntimeConfig();
+  const db = getDb();
+  assertIntegrity(db);
+  db.exec('PRAGMA wal_checkpoint(FULL)');
+  const stamp = localStamp();
+  const dir = path.join(cfg.backupsDir, 'pre_clear', stamp);
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, 'ce_qc_monitor.db');
+  fs.copyFileSync(cfg.dbFile, filePath);
+  const sha256 = hashFile(filePath);
+  const manifest = {
+    createdAt: nowIso(), reason: 'clear-all-business-data', databasePath: cfg.dbFile,
+    backupPath: filePath, sha256, systemVersion: process.env.npm_package_version || '0.1.0',
+    migrationVersion: Number(db.prepare("SELECT value FROM app_meta WHERE key='schema_version'").get()?.value || 0),
+    whitelistVersion: db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version || '',
+    administrator: adminEmail, counts: tableCounts(db)
+  };
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+  verifyBackup({ filePath, sha256 });
+  return { directory: dir, filePath, sha256, manifestPath: path.join(dir, 'manifest.json') };
+}
+
+function verifyBackup(backup) {
+  if (!backup?.filePath || !fs.existsSync(backup.filePath) || hashFile(backup.filePath) !== backup.sha256) throw new Error('自动备份校验失败，已停止清除。');
+  const copy = new DatabaseSync(backup.filePath, { readOnly: true });
+  try { if (copy.prepare('PRAGMA integrity_check').get()?.integrity_check !== 'ok') throw new Error('备份数据库完整性校验失败，已停止清除。'); }
+  finally { copy.close(); }
+}
+
+function tableCounts(db) {
+  const existing = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+  return Object.fromEntries(BUSINESS_TABLES.filter(name => existing.has(name)).map(name => [name, Number(db.prepare(`SELECT COUNT(*) count FROM ${name}`).get()?.count || 0)]));
+}
+
+function assertNoActiveRuns(db) {
+  const main = db.prepare("SELECT runId FROM run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get();
+  const business = db.prepare("SELECT runId FROM business_run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get();
+  const runId = main?.runId || business?.runId;
+  if (runId) throw new Error(`当前存在活动任务，不能清除。runId：${runId}`);
+}
+function assertIntegrity(db) { if (db.prepare('PRAGMA integrity_check').get()?.integrity_check !== 'ok') throw new Error('SQLite完整性检查未通过。'); }
+function hashFile(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
+function localStamp() { const d = new Date(); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; }
+function clearRegenerableFiles() { const cfg = getRuntimeConfig(); for (const dir of [cfg.exportsDir, cfg.importsDir]) { if (!fs.existsSync(dir)) continue; for (const entry of fs.readdirSync(dir)) fs.rmSync(path.join(dir, entry), { recursive: true, force: true }); } fs.mkdirSync(cfg.longJsonExportsDir, { recursive: true }); }
