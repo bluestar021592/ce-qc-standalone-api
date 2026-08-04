@@ -181,7 +181,7 @@ export function normalizeBusinessState(state = {}, businessType = SHOPEE) {
     daily: state.daily || null, dailyParseSummary: state.dailyParseSummary || state.daily?.summary || null, dailyParseRows: state.dailyParseRows || state.daily?.importRows || state.daily?.details || [],
     recipientConflicts: state.recipientConflicts || state.daily?.conflicts || [], recipientReconciliation: state.recipientReconciliation || state.daily?.summary?.reconciliation || null,
     pnhBills: clean(state.pnhBills || state.bills || []), carryBills: clean(state.carryBills || []), podLocks: clean(state.podLocks || []),
-    scanPool: clean(state.scanPool || []), scanResults: state.scanResults || [], scanQueryStatus: state.scanQueryStatus || [], shipmentTrackResults: state.shipmentTrackResults || [], shipmentQueryStatus: state.shipmentQueryStatus || [], needTrackBills: clean(state.needTrackBills || []),
+    scanPool: clean(state.scanPool || []), scanRetryBills: clean(state.scanRetryBills || []), scanResults: state.scanResults || [], scanQueryStatus: state.scanQueryStatus || [], shipmentTrackResults: state.shipmentTrackResults || [], shipmentQueryStatus: state.shipmentQueryStatus || [], needTrackBills: clean(state.needTrackBills || []),
     trackEvents: state.trackEvents || [], eventQueryStatus: state.eventQueryStatus || [], exceptionItems: state.exceptionItems || [], exceptionQueryStatus: state.exceptionQueryStatus || [],
     apiBatchStatus: state.apiBatchStatus || [], trackResults: state.trackResults || [], finalRows: state.finalRows || [], priorCarryRows: state.priorCarryRows || [], nextCarryBills: clean(state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || [])),
     historySummary: (state.historySummary || []).slice(-30), processing: state.processing || { running: false, paused: false, phase: '' },
@@ -204,6 +204,7 @@ function restrictShopeeState(state, type) {
     nextCarryBills: (state.nextCarryBills || []).filter(keepBill),
     podLocks: (state.podLocks || []).filter(keepBill),
     scanPool: (state.scanPool || []).filter(keepBill),
+    scanRetryBills: (state.scanRetryBills || []).filter(keepBill),
     needTrackBills: (state.needTrackBills || []).filter(keepBill),
     scanResults: rows('scanResults'),
     shipmentTrackResults: rows('shipmentTrackResults'),
@@ -269,10 +270,41 @@ function mirrorBusinessTables(db, state, type, now) {
   const exceptionStmt = db.prepare(`INSERT INTO business_exception_items(businessType,shipmentCode,reportDate,exceptionType,exceptionDesc,reportTime,statusCode,fileId,rawJson,createdAt)
     VALUES(?,?,?,?,?,?,?,?,?,?)`);
   for (const row of state.exceptionItems) exceptionStmt.run(type, billOf(row), date, row.exceptionType || '', row.exceptionDesc || '', row.reportTime || '', String(row.statusCode ?? ''), String(row.fileId ?? ''), JSON.stringify(row), now);
-  db.prepare('DELETE FROM business_api_batches WHERE businessType=? AND reportDate=? AND runId=?').run(type, date, state.currentRun?.runId || state.lastRunSummary?.runId || '');
-  const batchStmt = db.prepare(`INSERT INTO business_api_batches(businessType,reportDate,runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
-  for (const row of state.apiBatchStatus) batchStmt.run(type, date, row.runId || state.currentRun?.runId || state.lastRunSummary?.runId || '', row.apiName || '', row.batchKey || '', JSON.stringify(row.shipmentCodes || []), row.status || '', Number(row.attemptCount || 0), Number(row.resultCount || 0), row.errorMessage || '', row.createdAt || now, now);
+  const batchRows = new Map();
+  for (const row of state.apiBatchStatus || []) {
+    const runId = row.runId || state.currentRun?.runId || state.lastRunSummary?.runId || '';
+    const key = [type, date, runId, row.apiName || '', row.batchKey || ''].join('|');
+    const existing = batchRows.get(key);
+    if (existing?.payloadHash && row.payloadHash && existing.payloadHash !== row.payloadHash) {
+      const error = new Error(`批次${row.batchKey}的保存内容不一致，已停止写入。`);
+      error.code = 'BATCH_KEY_PAYLOAD_MISMATCH';
+      throw error;
+    }
+    batchRows.set(key, { ...(existing || {}), ...row, runId });
+  }
+  const batchStmt = db.prepare(`INSERT INTO business_api_batches(
+    businessType,reportDate,runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt,
+    payloadHash,shipmentCount,firstShipmentCode,lastShipmentCode,heartbeatAt,startedAt,completedAt
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  ON CONFLICT(businessType,reportDate,runId,apiName,batchKey) DO UPDATE SET
+    status=excluded.status,attemptCount=excluded.attemptCount,resultCount=excluded.resultCount,errorMessage=excluded.errorMessage,
+    updatedAt=excluded.updatedAt,heartbeatAt=excluded.heartbeatAt,completedAt=excluded.completedAt
+  WHERE business_api_batches.payloadHash IS NULL OR business_api_batches.payloadHash=excluded.payloadHash`);
+  const existingBatchStmt = db.prepare('SELECT payloadHash FROM business_api_batches WHERE businessType=? AND reportDate=? AND runId=? AND apiName=? AND batchKey=?');
+  for (const row of batchRows.values()) {
+    const previous = existingBatchStmt.get(type, date, row.runId, row.apiName || '', row.batchKey || '');
+    if (previous?.payloadHash && row.payloadHash && previous.payloadHash !== row.payloadHash) {
+      const error = new Error(`批次${row.batchKey}的运单内容与已保存记录不一致。`);
+      error.code = 'BATCH_KEY_PAYLOAD_MISMATCH';
+      throw error;
+    }
+    batchStmt.run(
+    type, date, row.runId, row.apiName || '', row.batchKey || '', JSON.stringify(row.shipmentCodes || []), row.status || '',
+    Number(row.attemptCount || 0), Number(row.resultCount || 0), row.errorMessage || '', row.createdAt || now, now,
+    row.payloadHash || '', Number(row.shipmentCount || (row.shipmentCodes || []).length), row.firstShipmentCode || '', row.lastShipmentCode || '',
+    row.updatedAt || now, row.createdAt || now, ['success', 'failed'].includes(row.status) ? (row.updatedAt || now) : ''
+    );
+  }
   db.prepare('DELETE FROM business_final_rows WHERE businessType=? AND reportDate=?').run(type, date);
   const finalStmt = db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   for (const row of state.finalRows) finalStmt.run(type, billOf(row), date, Number(row.是否POD === '是'), row.primaryCategory || row.异常分类 || '', row.API状态 || row.查询状态 || '', row.carry状态 || '', row.latestEventTime || row.最后节点时间 || '', row.latestEventDesc || row.最后节点 || '', row.latestNode || '', row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', Number(row.source_row_number || row.rowNumber || 0), JSON.stringify(row), now, now);

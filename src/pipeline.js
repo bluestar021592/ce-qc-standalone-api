@@ -1,4 +1,5 @@
 import { analyzeShipment, normalizeEvent } from './analyzer.js';
+import { createHash } from 'crypto';
 import { cleanAnyBills, cleanMainBills, isExcludedBill } from './storage.js';
 import { getShopCodeMap } from './shopCodes.js';
 import { analyzeShopeeShipment, classifyShopeeScanStatus } from './shopeeAnalyzer.js';
@@ -235,7 +236,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   state.apiBatchStatus = state.apiBatchStatus || [];
   state.scanPool = scanPool;
   state.processing = { running: true, paused: false, phase: 'SHOPEE状态查询', batchIndex: 0, totalBatches: Math.ceil(scanPool.length / TRACK_QUERY_BATCH_SIZE), runId };
-  state.processing = { ...state.processing, totalBatches: Math.ceil(scanPool.length / ORDER_BATCH_SIZE) };
+  state.processing = { ...state.processing, phase: '\u8ba2\u5355\u626b\u63cf', totalBatches: Math.ceil(scanPool.length / ORDER_BATCH_SIZE) };
   state.lastRunSummary = { ...(state.lastRunSummary || {}), businessType: 'SHOPEE', runId, reportDate, startedAt: startedAt.toISOString(), today: today.length, carry: carry.length, scanPool: scanPool.length };
   await checkpoint(state, onCheckpoint);
   await onProgress(`SHOPEE开始：今日日报 ${today.length}票，旧跨日 ${carry.length}票，查询池 ${scanPool.length}票`);
@@ -276,6 +277,8 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
     return classifyShopeeScanStatus(row, row) === 'RETURN';
   }));
   for (const bill of preliminaryPodBills) podLocks.add(bill);
+  const scanRetryBills = scanPool.filter(bill => scanStatusByBill.get(bill) !== 'success');
+  state.scanRetryBills = scanRetryBills;
   const needTrack = scanPool.filter(bill => scanStatusByBill.get(bill) === 'success' && !preliminaryPodBills.has(bill) && !preliminaryReturnBills.has(bill));
   state.needTrackBills = needTrack;
   state.podLocks = [...podLocks].sort();
@@ -334,6 +337,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
     today: today.length, carry: carry.length, scanPool: scanPool.length,
     scanPod: finalRows.filter(row => row.是否POD === '是').length,
     needTrack: needTrack.length, trackPod: finalRows.filter(row => row.是否POD === '是').length,
+    scanRetry: scanRetryBills.length,
     events: eventsResult.rows.length, exceptions: exceptionResult.rows.length,
     nextCarry: nextCarryBills.length, refreshFailed: failedBills.size,
     startedAt: startedAt.toISOString(), completedAt: completedAt.toISOString(),
@@ -382,12 +386,13 @@ async function queryShopeeConfirmApi({ state, bills, client, onProgress, onCheck
       rows.push(...(responseRows || []));
       const grouped = groupConfirmRows(responseRows || []);
       for (const bill of batch) {
+        const matched = grouped.get(bill) || [];
         statusByBill.set(bill, {
-          businessType: 'SHOPEE', reportDate, shipmentCode: bill, status: 'success',
-          resultCount: (grouped.get(bill) || []).length, checkedAt: new Date().toISOString()
+          businessType: 'SHOPEE', reportDate, shipmentCode: bill, status: matched.length ? 'success' : 'failed',
+          resultCount: matched.length, errorMessage: matched.length ? '' : 'SCAN_EMPTY_RESPONSE', checkedAt: new Date().toISOString()
         });
       }
-      recordApiAttempt(state, { apiName: 'confirm-query', batch, status: 'success', resultCount: (responseRows || []).length });
+      recordApiAttempt(state, { apiName: 'confirm-query', stage: 'scan-status', batchIndex: index + 1, batch, status: 'success', resultCount: (responseRows || []).length });
     } catch (error) {
       for (const bill of batch) {
         statusByBill.set(bill, {
@@ -395,7 +400,7 @@ async function queryShopeeConfirmApi({ state, bills, client, onProgress, onCheck
           errorMessage: error?.message || String(error || ''), checkedAt: new Date().toISOString()
         });
       }
-      recordApiAttempt(state, { apiName: 'confirm-query', batch, status: 'failed', error });
+      recordApiAttempt(state, { apiName: 'confirm-query', stage: 'scan-status', batchIndex: index + 1, batch, status: 'failed', error });
       await onProgress(`SHOPEE订单扫描批次失败：${batch.length}票已保留，续跑时仅重试该失败批次`);
     }
     state.scanResults = dedupeApiRows(rows, 'confirm-query');
@@ -426,7 +431,8 @@ async function queryShopeeApi({ state, apiName, bills, rowsKey, statusKey, query
       query,
       apiName,
       onLog: onProgress,
-      onAttempt: attempt => recordApiAttempt(state, attempt)
+      fallbackSizes: [],
+      onAttempt: attempt => recordApiAttempt(state, { ...attempt, stage: apiName === 'tms-shipment-event/query' ? 'track-event' : 'exception-item', batchIndex: batchNumber })
     });
     for (const success of outcome.successes) {
       const normalized = (success.events || []).map(normalizeRow).filter(row => billOf(row));
@@ -448,13 +454,25 @@ async function queryShopeeApi({ state, apiName, bills, rowsKey, statusKey, query
 
 function recordApiAttempt(state, attempt) {
   const codes = cleanAnyBills(attempt.batch || []);
-  const batchKey = `${codes.length}:${codes[0] || ''}:${codes.at(-1) || ''}`;
+  const stage = String(attempt.stage || attempt.apiName || 'batch').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+  const batchIndex = Math.max(1, Number(attempt.batchIndex || 1));
+  const batchKey = `${stage}:${String(batchIndex).padStart(6, '0')}`;
   const runId = state.currentRun?.runId || state.lastRunSummary?.runId || '';
   const existing = (state.apiBatchStatus || []).find(row => row.apiName === attempt.apiName && row.batchKey === batchKey && row.runId === runId);
+  const payloadHash = createHash('sha256').update(JSON.stringify(codes)).digest('hex');
+  if (existing?.payloadHash && existing.payloadHash !== payloadHash) {
+    const error = new Error(`批次${batchKey}的运单内容与已保存记录不一致，已停止避免重复请求。`);
+    error.code = 'BATCH_KEY_PAYLOAD_MISMATCH';
+    throw error;
+  }
   const row = {
     ...(existing || {}), businessType: 'SHOPEE', reportDate: state.reportDate || '', runId,
-    apiName: attempt.apiName, batchKey, shipmentCodes: codes,
-    status: attempt.status, attemptCount: Number(existing?.attemptCount || 0) + (attempt.status === 'running' ? 1 : 0),
+    apiName: attempt.apiName, batchKey, shipmentCodes: codes, payloadHash, shipmentCount: codes.length,
+    firstShipmentCode: codes[0] || '', lastShipmentCode: codes.at(-1) || '',
+    status: attempt.status,
+    attemptCount: attempt.status === 'running'
+      ? Number(existing?.attemptCount || 0) + 1
+      : Math.max(1, Number(existing?.attemptCount || 0)),
     resultCount: Number(attempt.resultCount || existing?.resultCount || 0), errorMessage: attempt.error?.message || '',
     createdAt: existing?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString()
   };

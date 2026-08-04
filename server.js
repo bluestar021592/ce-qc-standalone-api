@@ -656,6 +656,9 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     if (!summarizeToken(await loadToken()).hasAccessToken) return res.status(400).json({ ok: false, error: '请先登录CE系统。' });
     const before = getBusinessRunStatus(SHOPEE, reportDate).lock;
     if (options.resume && (!before || before.status === 'finished')) return res.status(409).json({ ok: false, code: 'RUN_NOT_RECOVERABLE', error: 'SHOPEE当前没有可恢复任务。' });
+    if (before?.runId && activeRunIds.has(before.runId)) {
+      return res.json({ ok: true, alreadyRunning: true, attachedRunId: before.runId, run: { reportDate, runId: before.runId }, state: summarizeShopeeState(state) });
+    }
     const outcome = createOrRecoverBusinessRun(SHOPEE, reportDate, { lockedBy: req.ip || '', rejectRunning: Boolean(before?.runId && activeRunIds.has(before.runId)) });
     if (!outcome.ok) return res.status(outcome.code === 'RUN_ALREADY_ACTIVE' || outcome.code === 'RUN_ALREADY_COMPLETED' ? 409 : 400).json(outcome);
     const run = outcome.run;
