@@ -268,30 +268,25 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   });
   state.scanResults = scanResults;
 
-  const preliminaryPodBills = new Set(scanPool.filter(bill => {
-    const row = (scanByBill.get(bill) || [])[0] || {};
-    return String(row.orderStatus ?? '') === '85' || /\bPOD\b|delivered|签收|已妥投/i.test(JSON.stringify(row));
-  }));
-  const preliminaryReturnBills = new Set(scanPool.filter(bill => {
-    const row = (scanByBill.get(bill) || [])[0] || {};
-    return classifyShopeeScanStatus(row, row) === 'RETURN';
-  }));
+  const scanRouteByBill = new Map(scanPool.map(bill => [bill, routeShopeeScan((scanByBill.get(bill) || [])[0] || {}, scanStatusByBill.get(bill))]));
+  const preliminaryPodBills = new Set(scanPool.filter(bill => scanRouteByBill.get(bill) === 'CLOSE_POD_NO_TRACK'));
+  const preliminaryReturnBills = new Set(scanPool.filter(bill => scanRouteByBill.get(bill) === 'CLOSE_RETURN_NO_TRACK'));
   for (const bill of preliminaryPodBills) podLocks.add(bill);
-  const scanRetryBills = scanPool.filter(bill => scanStatusByBill.get(bill) !== 'success');
+  const scanRetryBills = scanPool.filter(bill => scanRouteByBill.get(bill) === 'SCAN_RETRY');
   state.scanRetryBills = scanRetryBills;
-  const needTrack = scanPool.filter(bill => scanStatusByBill.get(bill) === 'success' && !preliminaryPodBills.has(bill) && !preliminaryReturnBills.has(bill));
+  const needTrack = scanPool.filter(bill => scanRouteByBill.get(bill) === 'TRACK');
   state.needTrackBills = needTrack;
   state.podLocks = [...podLocks].sort();
   await checkpoint(state, onCheckpoint);
 
   const eventsResult = await queryShopeeApi({
-    state, apiName: 'tms-shipment-event/query', bills: needTrack,
+    state, apiName: 'tms-shipment-event-query', bills: needTrack,
     rowsKey: 'trackEvents', statusKey: 'eventQueryStatus',
     query: codes => client.trackQuery(codes), onProgress, onCheckpoint, isPaused,
     normalizeRow: row => ({ ...normalizeEvent(row), reportDate })
   });
   const exceptionResult = await queryShopeeApi({
-    state, apiName: 'exception-item/query', bills: needTrack,
+    state, apiName: 'exception-item-query', bills: needTrack,
     rowsKey: 'exceptionItems', statusKey: 'exceptionQueryStatus',
     query: codes => client.exceptionQuery(codes), onProgress, onCheckpoint, isPaused,
     normalizeRow: row => ({ ...row, shipmentCode: billOf(row), reportDate })
@@ -305,6 +300,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   for (const bill of scanPool) {
     const scanRow = scanResults.find(row => billOf(row) === bill) || { 运单号: bill, shipmentCode: bill, 来源类型: sourceType(bill, today, carry) };
     const alreadyPod = preliminaryPodBills.has(bill);
+    const scanRetry = scanRouteByBill.get(bill) === 'SCAN_RETRY';
     const result = analyzeShopeeShipment({
       waybill: bill,
       scanRow,
@@ -315,11 +311,19 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
       dailyRow: dailyByBill.get(bill) || {},
       priorRow: priorByBill.get(bill) || {},
       apiStatus: {
-        shipment: scanStatusByBill.get(bill) || 'failed',
-        event: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (eventStatusByBill.get(bill) || 'failed')),
-        exception: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (exceptionStatusByBill.get(bill) || 'failed'))
+        shipment: scanRetry ? 'scan_retry' : (scanStatusByBill.get(bill) || 'failed'),
+        event: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (scanRetry ? 'skipped_scan_retry' : (eventStatusByBill.get(bill) || 'failed'))),
+        exception: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (scanRetry ? 'skipped_scan_retry' : (exceptionStatusByBill.get(bill) || 'failed')))
       }
     });
+    if (scanRetry) {
+      result.API状态 = '待重试';
+      result.查询状态 = 'scan_retry';
+      result.primaryCategory = '订单扫描待重试';
+      result.主分类 = '订单扫描待重试';
+      result.异常分类 = '订单扫描待重试';
+      result.QC判断 = '订单扫描未返回有效状态，未进入轨迹查询，保留次日续查。';
+    }
     trackResults.push(result);
     if (result.是否POD === '是') podLocks.add(bill);
   }
@@ -392,11 +396,11 @@ async function queryShopeeConfirmApi({ state, bills, client, onProgress, onCheck
           resultCount: matched.length, errorMessage: matched.length ? '' : 'SCAN_EMPTY_RESPONSE', checkedAt: new Date().toISOString()
         });
       }
-      recordApiAttempt(state, { apiName: 'confirm-query', stage: 'scan-status', batchIndex: index + 1, batch, status: 'success', resultCount: (responseRows || []).length });
+      recordApiAttempt(state, { apiName: 'otwms-order-confirm-query', stage: 'scan-status', batchIndex: index + 1, batch, status: 'success', resultCount: (responseRows || []).length });
     } catch (error) {
       const diagnostic = classifyCeFailure(error);
       if (diagnostic.runStatus) {
-        state.apiDiagnostic = { ...diagnostic, apiName: 'confirm-query', batchKey: `scan-status:${String(index + 1).padStart(6, '0')}`, runId: state.currentRun?.runId || '', shipmentCount: batch.length };
+        state.apiDiagnostic = { ...diagnostic, apiName: 'otwms-order-confirm-query', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', batchKey: `scan-status:${String(index + 1).padStart(6, '0')}`, runId: state.currentRun?.runId || '', shipmentCount: batch.length };
         state.processing = { ...state.processing, running: false, paused: true, error: diagnostic.userMessage };
         await checkpoint(state, onCheckpoint);
         const systemError = new Error(diagnostic.userMessage);
@@ -411,7 +415,7 @@ async function queryShopeeConfirmApi({ state, bills, client, onProgress, onCheck
           errorMessage: error?.message || String(error || ''), checkedAt: new Date().toISOString()
         });
       }
-      recordApiAttempt(state, { apiName: 'confirm-query', stage: 'scan-status', batchIndex: index + 1, batch, status: 'failed', error });
+      recordApiAttempt(state, { apiName: 'otwms-order-confirm-query', stage: 'scan-status', batchIndex: index + 1, batch, status: 'failed', error });
       await onProgress(`SHOPEE订单扫描批次失败：${batch.length}票已保留，续跑时仅重试该失败批次`);
     }
     state.scanResults = dedupeApiRows(rows, 'confirm-query');
@@ -443,7 +447,7 @@ async function queryShopeeApi({ state, apiName, bills, rowsKey, statusKey, query
       apiName,
       onLog: onProgress,
       fallbackSizes: [],
-      onAttempt: attempt => recordApiAttempt(state, { ...attempt, stage: apiName === 'tms-shipment-event/query' ? 'track-event' : 'exception-item', batchIndex: batchNumber })
+      onAttempt: attempt => recordApiAttempt(state, { ...attempt, stage: apiName === 'tms-shipment-event-query' ? 'track-event' : 'exception-item', batchIndex: batchNumber })
     });
     for (const success of outcome.successes) {
       const normalized = (success.events || []).map(normalizeRow).filter(row => billOf(row));
@@ -498,6 +502,19 @@ function classifyCeFailure(error) {
   if ([400, 422].includes(status)) return { code: 'REQUEST_SCHEMA_INVALID', runStatus: 'REQUEST_SCHEMA_INVALID', httpStatus: status, ceCode: code, ceMsg: msg, userMessage: `CE请求结构错误：${msg || `HTTP ${status}`}` };
   if (status === 404) return { code: 'ENDPOINT_INVALID', runStatus: 'ENDPOINT_INVALID', httpStatus: status, ceCode: code, ceMsg: msg, userMessage: 'CE接口路径无效，已停止本次处理。' };
   return { code: 'BATCH_REQUEST_FAILED', runStatus: '', httpStatus: status, ceCode: code, ceMsg: msg, userMessage: msg || 'CE请求失败' };
+}
+
+function routeShopeeScan(row = {}, requestStatus = '') {
+  if (requestStatus !== 'success') return 'SCAN_RETRY';
+  const orderStatus = String(row.orderStatus ?? '').trim();
+  if (orderStatus === '85' || classifyShopeeScanStatus(row, row) === 'POD') return 'CLOSE_POD_NO_TRACK';
+  if (classifyShopeeScanStatus(row, row) === 'RETURN') return 'CLOSE_RETURN_NO_TRACK';
+  // CE has explicitly confirmed 50 as inbound. Other known labels are handled
+  // by the existing status classifier; unmapped numeric statuses stay retryable.
+  if (orderStatus === '50') return 'TRACK';
+  const status = classifyShopeeScanStatus(row, row);
+  if (status === 'DELIVERY_ASSIGN' || status === 'DELIVERY') return 'TRACK';
+  return 'SCAN_RETRY';
 }
 
 function groupRows(rows = []) {

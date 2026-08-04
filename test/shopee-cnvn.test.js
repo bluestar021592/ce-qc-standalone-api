@@ -53,7 +53,7 @@ test('Shopee scans 4457 CN/VN bills in 13 batches before 50-sized track batches'
     currentRun: { runId: 'test-run' }, carryBills: [], podLocks: []
   };
   const client = {
-    confirmQuery: async codes => { calls.scan.push(codes); return codes.map(shipmentCode => ({ shipmentCode, orderStatus: 10 })); },
+    confirmQuery: async codes => { calls.scan.push(codes); return codes.map(shipmentCode => ({ shipmentCode, orderStatus: 50 })); },
     trackQuery: async codes => { calls.track.push(codes); return []; },
     exceptionQuery: async codes => { calls.exception.push(codes); return []; }
   };
@@ -62,7 +62,7 @@ test('Shopee scans 4457 CN/VN bills in 13 batches before 50-sized track batches'
   assert.ok(calls.track.every(batch => batch.length <= 50));
   assert.ok(calls.exception.every(batch => batch.length <= 50));
   assert.ok(calls.track.length > 0);
-  const scanBatches = state.apiBatchStatus.filter(row => row.apiName === 'confirm-query');
+  const scanBatches = state.apiBatchStatus.filter(row => row.apiName === 'otwms-order-confirm-query');
   assert.deepEqual(scanBatches.map(row => row.batchKey), Array.from({ length: 13 }, (_, index) => `scan-status:${String(index + 1).padStart(6, '0')}`));
   assert.ok(scanBatches.every(row => row.payloadHash && row.shipmentCount > 0));
 });
@@ -83,10 +83,11 @@ test('Shopee POD, return and empty scan response do not enter track queue', asyn
     trackQuery: async codes => { tracked.push(...codes); return []; },
     exceptionQuery: async () => []
   };
-  await assert.rejects(() => runQcPipeline({ state, client }), { code: 'SHOPEE_PARTIAL_API_FAILURE' });
+  await runQcPipeline({ state, client });
   assert.deepEqual(tracked, []);
   assert.deepEqual(state.scanRetryBills, [bills[2]]);
   assert.equal(state.needTrackBills.length, 0);
+  assert.equal(state.finalRows.find(row => row.shipmentCode === bills[2]).查询状态, 'scan_retry');
 });
 
 test('Shopee authentication failure pauses once instead of failing every bill', async () => {

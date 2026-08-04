@@ -667,14 +667,14 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     try {
       const probeBills = state.pnhBills.slice(0, Math.min(5, state.pnhBills.length));
       await client.confirmQuery(probeBills);
-      state.apiDiagnostic = { apiName: 'confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', shipmentCount: probeBills.length, preflight: 'passed', checkedAt: new Date().toISOString() };
+      state.apiDiagnostic = { apiName: 'otwms-order-confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', shipmentCount: probeBills.length, preflight: 'passed', checkedAt: new Date().toISOString() };
       saveBusinessState(state, SHOPEE);
     } catch (error) {
       const diagnostic = normalizeApiError(error);
       const status = Number(diagnostic.ceStatus || 0);
       const code = [401, 403].includes(status) ? 'AUTH_REQUIRED' : ([400, 422].includes(status) ? 'REQUEST_SCHEMA_INVALID' : (status === 404 ? 'ENDPOINT_INVALID' : 'CE_PREFLIGHT_FAILED'));
       const message = code === 'AUTH_REQUIRED' ? 'CE系统登录已失效，请在系统设置重新登录后点击继续处理。' : (diagnostic.ceMsg || diagnostic.message || 'CE扫描预检失败');
-      state.apiDiagnostic = { apiName: 'confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', shipmentCount: Math.min(5, state.pnhBills.length), httpStatus: diagnostic.ceStatus || '', ceCode: diagnostic.ceCode || '', ceMsg: diagnostic.ceMsg || '', preflight: 'failed', checkedAt: new Date().toISOString() };
+      state.apiDiagnostic = { apiName: 'otwms-order-confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', shipmentCount: Math.min(5, state.pnhBills.length), httpStatus: diagnostic.ceStatus || '', ceCode: diagnostic.ceCode || '', ceMsg: diagnostic.ceMsg || '', preflight: 'failed', checkedAt: new Date().toISOString() };
       state.processing = { ...(state.processing || {}), running: false, paused: code === 'AUTH_REQUIRED', error: message };
       saveBusinessState(state, SHOPEE);
       return res.status(409).json({ ok: false, code, error: message, diagnostic: state.apiDiagnostic });
@@ -684,11 +684,13 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     if (before?.runId && activeRunIds.has(before.runId)) {
       return res.json({ ok: true, alreadyRunning: true, attachedRunId: before.runId, run: { reportDate, runId: before.runId }, state: summarizeShopeeState(state) });
     }
-    const outcome = createOrRecoverBusinessRun(SHOPEE, reportDate, { lockedBy: req.ip || '', rejectRunning: Boolean(before?.runId && activeRunIds.has(before.runId)) });
+    const repair = !options.resume && before?.status === 'failed';
+    const outcome = createOrRecoverBusinessRun(SHOPEE, reportDate, { lockedBy: req.ip || '', repair, rejectRunning: Boolean(before?.runId && activeRunIds.has(before.runId)) });
     if (!outcome.ok) return res.status(outcome.code === 'RUN_ALREADY_ACTIVE' || outcome.code === 'RUN_ALREADY_COMPLETED' ? 409 : 400).json(outcome);
     const run = outcome.run;
     runId = run.runId;
     activeRunIds.add(runId);
+    if (repair && outcome.created) clearRunResults(state);
     state.businessType = SHOPEE;
     state.currentRun = run;
     state.processing = { ...(state.processing || {}), running: true, paused: false, phase: run.currentStage || '准备处理', runId };
@@ -723,7 +725,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     const snapshot = saveBusinessSnapshot(SHOPEE, result.state, buildShopeeDashboard(result.state));
     result.state.snapshotId = snapshot.snapshotId;
     saveBusinessState(result.state, SHOPEE);
-    res.json({ ok: true, summary, run: { reportDate, runId, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeShopeeState(result.state) });
+    res.json({ ok: true, summary, run: { reportDate, runId, recovered: outcome.recovered, repair }, snapshotId: snapshot.snapshotId, state: summarizeShopeeState(result.state) });
   } catch (error) {
     if (reportDate) updateBusinessRunLock(SHOPEE, reportDate, error.runStatus || 'failed', error.message || String(error));
     const state = loadBusinessState(SHOPEE);
@@ -1163,6 +1165,8 @@ function clearRunResults(state) {
   state.priorCarryRows = [...carryMetadata.values()];
   state.scanPool = [];
   state.scanResults = [];
+  state.scanQueryStatus = [];
+  state.scanRetryBills = [];
   state.shipmentTrackResults = [];
   state.shipmentQueryStatus = [];
   state.needTrackBills = [];
@@ -1177,6 +1181,7 @@ function clearRunResults(state) {
   state.nextCarryBills = [];
   state.lastRunSummary = null;
   state.lastRun = null;
+  state.apiDiagnostic = null;
 }
 
 async function manualBatchQuery(shipmentCodes, query, apiName) {

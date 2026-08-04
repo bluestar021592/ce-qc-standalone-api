@@ -46,7 +46,7 @@ export function createOrRecoverBusinessRun(businessType, reportDate, options = {
     return { ok: false, code: 'REPORT_DATE_MISSING', error: `当前未导入${type}当日日报Excel，请先导入后再开始处理。` };
   }
   const existing = db.prepare('SELECT * FROM business_run_locks WHERE businessType=? AND reportDate=?').get(type, date);
-  if (existing && ['running', 'paused', 'failed'].includes(existing.status)) {
+  if (existing && ['running', 'paused', 'failed'].includes(existing.status) && !(existing.status === 'failed' && options.repair)) {
     if (existing.status === 'running' && options.rejectRunning) return { ok: false, code: 'RUN_ALREADY_ACTIVE', error: '当前任务正在运行，请勿重复启动。', run: existing };
     db.prepare("UPDATE business_run_locks SET status='running',errorMessage='',updatedAt=? WHERE businessType=? AND reportDate=?").run(nowIso(), type, date);
     return { ok: true, created: false, recovered: true, run: getBusinessRunStatus(type, date).lock };
