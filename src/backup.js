@@ -14,7 +14,7 @@ export function createDatabaseBackup(reason = 'manual') {
     ? `backup_before_full_clear_${stamp}.db`
     : reason === 'before-clear-state'
       ? `backup_before_clear_${stamp}.db`
-    : `ce_qc_monitor_${safeName(reason)}_${stamp}.db`;
+      : `ce_qc_monitor_${safeName(reason)}_${stamp}.db`;
   const filePath = path.join(cfg.backupsDir, fileName);
   fs.copyFileSync(cfg.dbFile, filePath);
 
@@ -45,7 +45,7 @@ export function recordBackup(row = {}) {
 
 export function listBackups(limit = 50) {
   const db = getDb();
-  return db.prepare('SELECT * FROM backup_records ORDER BY id DESC LIMIT ?').all(Number(limit || 50));
+  return db.prepare("SELECT * FROM backup_records WHERE COALESCE(status,'ACTIVE')='ACTIVE' ORDER BY id DESC LIMIT ?").all(Number(limit || 50));
 }
 
 export function deleteBackup(backupId, deletedBy = '') {
@@ -54,18 +54,38 @@ export function deleteBackup(backupId, deletedBy = '') {
   if (!item) throw new Error('未找到可删除的备份。');
   const cfg = getRuntimeConfig();
   const resolved = path.resolve(item.filePath || '');
-  if (!resolved.startsWith(path.resolve(cfg.backupsDir) + path.sep)) throw new Error('备份文件不在受控目录。');
+  ensureBackupFileTarget(resolved, cfg);
   if (!fs.existsSync(resolved) || fileHash(resolved) !== item.fileHash) throw new Error('备份文件校验失败，请刷新备份状态后重试。');
-  const validCount = db.prepare("SELECT * FROM backup_records WHERE COALESCE(status,'ACTIVE')='ACTIVE'").all()
-    .filter(row => fs.existsSync(row.filePath || '') && fileHash(row.filePath) === row.fileHash).length;
-  if (validCount <= 1) throw new Error('不能删除当前唯一一个校验通过的完整备份。');
-  try { fs.rmSync(resolved, { force: false }); }
-  catch (error) {
+  try {
+    fs.rmSync(resolved, { force: false });
+  } catch (error) {
     db.prepare("UPDATE backup_records SET status='DELETE_FAILED' WHERE id=?").run(item.id);
     throw new Error(`备份文件删除失败：${error.message}`);
   }
   db.prepare("UPDATE backup_records SET status='DELETED',deletedAt=?,deletedBy=? WHERE id=?").run(nowIso(), String(deletedBy || ''), item.id);
   return { id: item.id, fileName: item.fileName, deletedAt: nowIso() };
+}
+
+export function deleteAllBackups(deletedBy = '') {
+  const db = getDb();
+  const cfg = getRuntimeConfig();
+  const rows = db.prepare("SELECT * FROM backup_records WHERE COALESCE(status,'ACTIVE')='ACTIVE' ORDER BY id").all();
+  const deleted = [];
+  const failed = [];
+  const now = nowIso();
+  for (const row of rows) {
+    const resolved = path.resolve(row.filePath || '');
+    try {
+      ensureBackupFileTarget(resolved, cfg);
+      if (fs.existsSync(resolved)) fs.rmSync(resolved, { force: false });
+      db.prepare("UPDATE backup_records SET status='DELETED',deletedAt=?,deletedBy=? WHERE id=?").run(now, String(deletedBy || ''), row.id);
+      deleted.push({ id: row.id, fileName: row.fileName });
+    } catch (error) {
+      db.prepare("UPDATE backup_records SET status='DELETE_FAILED' WHERE id=?").run(row.id);
+      failed.push({ id: row.id, fileName: row.fileName, error: error.message });
+    }
+  }
+  return { deletedCount: deleted.length, failedCount: failed.length, deleted, failed };
 }
 
 export function recordExport(row = {}) {
@@ -91,6 +111,12 @@ export function fileHash(filePath) {
   } catch {
     return '';
   }
+}
+
+function ensureBackupFileTarget(resolved, cfg) {
+  const backupRoot = path.resolve(cfg.backupsDir) + path.sep;
+  if (!resolved.startsWith(backupRoot)) throw new Error('备份文件不在受控目录。');
+  if (resolved === path.resolve(cfg.dbFile)) throw new Error('禁止删除正式SQLite数据库。');
 }
 
 function safeName(value) {

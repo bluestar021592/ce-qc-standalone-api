@@ -14,7 +14,7 @@ const BORDER = 'FFD7E2EB';
 const TEXT = 'FF1F3347';
 const MUTED = 'FF60758A';
 const WHITE = 'FFFFFFFF';
-const GROUP_LABELS = { ALL: '全部合计', CN: 'ShopeeCN（中国）', VN: 'ShopeeVN（越南）', OTHER: '其他/待确认' };
+const GROUP_LABELS = { ALL: '全部合计', CN: 'ShopeeCN（中国）', VN: 'ShopeeVN（越南）' };
 const METRICS = [
   ['今日总单', 'all'], ['今日POD', 'pod'], ['POD率', 'pod'], ['首派成功率', 'firstAttempt'],
   ['Pending1+', 'pending1'], ['Pending2+', 'pending2'], ['Pending3+', 'pending3'],
@@ -53,8 +53,6 @@ export async function exportShopeeXlsx(state = {}, snapshot = null) {
   createGroupStatisticsSheet(workbook, context, 'VN', '04_ShopeeVN统计');
   createGroupDetailSheet(workbook, context, 'CN', '05_ShopeeCN明细');
   createGroupDetailSheet(workbook, context, 'VN', '06_ShopeeVN明细');
-  const otherSheet = createGroupDetailSheet(workbook, context, 'OTHER', '07_其他待确认明细');
-  if (!Number(view.recipientGroups?.OTHER?.metrics?.total || 0)) otherSheet.state = 'hidden';
   createMetricTargetSheets(workbook, context, metricSheets);
   createExcludedAuditSheet(workbook, context, state.dailyParseRows || []);
   createConsistencySheet(workbook, context, snapshot, exportHashes);
@@ -228,7 +226,7 @@ function createDetailSheet(workbook, context, name, sourceRows, title) {
 function createConsistencySheet(workbook, context, snapshot, hashes) {
   const sheet = workbook.addWorksheet('99_一致性校验', { views: [{ showGridLines: false, state: 'frozen', ySplit: 4 }] });
   brandSheet(sheet, context, 'SHOPEE 快照一致性校验', 7);
-  const headers = ['检查项目', 'ALL', 'CN+VN+OTHER', '差异', '结果', '快照哈希', '导出哈希'];
+  const headers = ['检查项目', 'ALL', 'CN+VN', '差异', '结果', '快照哈希', '导出哈希'];
   sheet.getRow(4).values = headers;
   styleHeader(sheet.getRow(4), headers.length);
   for (const check of context.view.recipientReconciliation?.checks || []) {

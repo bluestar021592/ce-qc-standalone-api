@@ -139,7 +139,7 @@ async function loadDataManagement() {
   try {
     const result = await api('/api/backups');
     const rows = result.backups || [];
-    document.getElementById('backupListTable').innerHTML = rows.length ? `<table class="preview-table"><thead><tr><th>创建时间</th><th>文件名</th><th>类型</th><th>校验</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.createdAt || '')}</td><td>${escapeHtml(row.fileName || '')}</td><td>${escapeHtml(row.reason || '')}</td><td>${escapeHtml(String(row.fileHash || '').slice(0, 12))}</td><td>${escapeHtml(row.status || 'ACTIVE')}</td><td class="backup-actions"><button class="text-button" onclick="downloadFile('/api/backups/${Number(row.id)}/download')">下载</button><button class="text-button" onclick="restoreDatabaseBackup(${Number(row.id)})">恢复</button>${String(row.status || 'ACTIVE') === 'ACTIVE' ? `<button class="text-button danger-action" onclick="deleteDatabaseBackup(${Number(row.id)},'${escapeAttr(row.fileName || '')}')">删除</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-state compact">暂无备份</div>';
+    document.getElementById('backupListTable').innerHTML = `<div class="table-toolbar backup-toolbar"><span>当前备份 ${formatInt(rows.length)} 个</span><button class="text-button danger-action" onclick="deleteAllDatabaseBackups(${Number(rows.length)})">一键删除全部备份</button></div>${rows.length ? `<table class="preview-table"><thead><tr><th>创建时间</th><th>文件名</th><th>类型</th><th>校验</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.createdAt || '')}</td><td>${escapeHtml(row.fileName || '')}</td><td>${escapeHtml(row.reason || '')}</td><td>${escapeHtml(String(row.fileHash || '').slice(0, 12))}</td><td>${escapeHtml(row.status || 'ACTIVE')}</td><td class="backup-actions"><button class="text-button" onclick="downloadFile('/api/backups/${Number(row.id)}/download')">下载</button><button class="text-button" onclick="restoreDatabaseBackup(${Number(row.id)})">恢复</button>${String(row.status || 'ACTIVE') === 'ACTIVE' ? `<button class="text-button danger-action" onclick="deleteDatabaseBackup(${Number(row.id)},'${escapeAttr(row.fileName || '')}')">删除</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-state compact">暂无备份</div>'}`;
   } catch (error) { document.getElementById('backupListTable').innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`; }
 }
 
@@ -171,12 +171,24 @@ async function deleteDatabaseBackup(backupId, fileName) {
   } catch (error) { alert(`删除备份失败：${error.message}`); }
 }
 
+async function deleteAllDatabaseBackups(count) {
+  if (!Number(count || 0)) return alert('当前没有可删除的备份。');
+  if (!confirm(`将删除全部 ${count} 个备份文件，但不会删除当前正式数据库。确定继续？`)) return;
+  const confirmText = prompt('请准确输入：永久删除全部备份');
+  if (confirmText !== '永久删除全部备份') return;
+  try {
+    const result = await api('/api/admin/delete-all-backups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmText }) });
+    alert(`已删除 ${result.deletedCount || 0} 个备份${result.failedCount ? `，失败 ${result.failedCount} 个` : ''}。`);
+    await loadDataManagement();
+  } catch (error) { alert(`一键删除全部备份失败：${error.message}`); }
+}
+
 async function loadUserManagement(includeDeleted = false) {
   const target = document.getElementById('userManagementTable');
   if (!target || accessSession.user?.role !== 'ADMIN') return;
   try {
     const result = await api(`/api/admin/users${includeDeleted ? '?includeDeleted=1' : ''}`);
-    target.innerHTML = `<div class="table-toolbar"><button class="text-button" onclick="loadUserManagement(${includeDeleted ? 'false' : 'true'})">${includeDeleted ? '隐藏已删除用户' : '查看已删除用户'}</button></div><table class="preview-table"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${(result.rows || []).map(row => `<tr><td>${escapeHtml(row.username)}</td><td>${escapeHtml(row.displayName)}</td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.businessScope)}</td><td>${escapeHtml(row.status === 'DELETED' ? '已删除' : (row.enabled ? '启用' : '停用'))}</td><td>${escapeHtml(row.lastLoginAt || '—')}</td><td class="user-actions">${row.status === 'DELETED' ? `<button class="text-button" onclick="restoreInternalUser(${Number(row.id)})">恢复用户</button>` : `<button class="text-button" onclick="toggleInternalUser(${Number(row.id)},${row.enabled ? 'false' : 'true'})">${row.enabled ? '停用' : '启用'}</button><button class="text-button" onclick="resetInternalUserPassword(${Number(row.id)})">重置密码</button><button class="text-button" onclick="revokeInternalUserSessions(${Number(row.id)})">退出会话</button><button class="text-button danger-action" onclick="deleteInternalUser(${Number(row.id)},'${escapeAttr(row.username)}')">删除</button>`}</td></tr>`).join('')}</tbody></table>`;
+    target.innerHTML = `<div class="table-toolbar"><button class="text-button" onclick="loadUserManagement(${includeDeleted ? 'false' : 'true'})">${includeDeleted ? '隐藏已删除用户' : '查看已删除用户'}</button></div><table class="preview-table"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${(result.rows || []).map(row => `<tr><td>${escapeHtml(row.username)}</td><td>${escapeHtml(row.displayName)}</td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.businessScope)}</td><td>${escapeHtml(row.status === 'DELETED' ? '已删除' : (row.enabled ? '启用' : '停用'))}</td><td>${escapeHtml(row.lastLoginAt || '—')}</td><td class="user-actions">${row.status === 'DELETED' ? `<button class="text-button" onclick="restoreInternalUser(${Number(row.id)})">恢复用户</button>` : `<button class="text-button" onclick="toggleInternalUser(${Number(row.id)},${row.enabled ? 'false' : 'true'})">${row.enabled ? '停用' : '启用'}</button><button class="text-button" onclick="resetInternalUserPassword(${Number(row.id)})">重置密码</button><button class="text-button" onclick="revokeInternalUserSessions(${Number(row.id)})">强制退出</button><button class="text-button danger-action" onclick="deleteInternalUser(${Number(row.id)},'${escapeAttr(row.username)}')">删除用户</button>`}</td></tr>`).join('')}</tbody></table>`;
   } catch (error) { target.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`; }
 }
 
@@ -949,16 +961,19 @@ function renderCcslOperations() {
 function renderShopeeOperations() {
   const summary = shopeeState.dailySummary || {};
   const groups = summary.groupCounts || {};
-  document.getElementById('shopeeFileStatus').innerHTML = `${statusPill(shopeeState.sourceName ? '日报已导入' : '未导入日报', Boolean(shopeeState.sourceName))}<p>${escapeHtml(shopeeState.sourceName || '未选择文件')}</p><p>日期：${escapeHtml(shopeeState.reportDate || '—')} · 有效 ${formatInt(summary.totalRecognized || shopeeState.total || 0)} · CN ${formatInt(groups.CN || 0)} · VN ${formatInt(groups.VN || 0)} · OTHER ${formatInt(groups.OTHER || 0)} · 冲突 ${formatInt(summary.conflictCount || 0)}</p>`;
+  document.getElementById('shopeeFileStatus').innerHTML = `${statusPill(shopeeState.sourceName ? '日报已导入' : '未导入日报', Boolean(shopeeState.sourceName))}<p>${escapeHtml(shopeeState.sourceName || '未选择文件')}</p><p>日期：${escapeHtml(shopeeState.reportDate || '—')} · 有效 ${formatInt(summary.totalRecognized || shopeeState.total || 0)} · CN ${formatInt(groups.CN || 0)} · VN ${formatInt(groups.VN || 0)} · 冲突 ${formatInt(summary.conflictCount || 0)}</p>`;
   document.getElementById('shopeeRunStatus').innerHTML = runStatusMarkup(shopeeState);
   document.getElementById('shopeeLogs').textContent = (shopeeState.logs || []).slice(-300).join('\n');
 }
 
 function runStatusMarkup(state) {
   const processing = state.processing || {};
-  const done = Number(state.trackResults || 0);
-  const total = Number(state.needTrackBills || state.scanPool || state.total || 0);
-  return `${statusPill(runStatusText(state), state.runStatus === 'finished')}<p>当前阶段：${escapeHtml(processing.phase || '待处理')}</p><p>轨迹进度：${formatInt(done)} / ${formatInt(total)} · 单批最大50</p>`;
+  const isScan = /扫描/.test(String(processing.phase || ''));
+  const done = isScan ? Number(state.scanResults || 0) : Number(state.trackResults || 0);
+  const total = isScan ? Number(state.scanPool || state.total || 0) : Number(state.needTrackBills || state.scanPool || state.total || 0);
+  const label = isScan ? '扫描进度' : '轨迹进度';
+  const batchSize = isScan ? 350 : 50;
+  return `${statusPill(runStatusText(state), state.runStatus === 'finished')}<p>当前阶段：${escapeHtml(processing.phase || '待处理')}</p><p>${label}：${formatInt(done)} / ${formatInt(total)} · 单批最大${batchSize}</p>`;
 }
 
 function renderAuthPanels() {

@@ -16,7 +16,7 @@ import { exportShopeeXlsx } from './src/shopeeExporter.js';
 import { cleanMainBills, loadState, saveState, resetState } from './src/storage.js';
 import { clearToken, loadToken, saveToken, summarizeToken } from './src/authStore.js';
 import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, safeFinalRows } from './src/reporting.js';
-import { createDatabaseBackup, deleteBackup, fileHash, listBackups, recordBackup, recordExport } from './src/backup.js';
+import { createDatabaseBackup, deleteAllBackups, deleteBackup, fileHash, listBackups, recordBackup, recordExport } from './src/backup.js';
 import { closeDb, ensureRuntimeDirs, getDb, getRuntimeConfig } from './src/db.js';
 import { createOrRecoverRun, getCurrentReportDate, getDbStatus, getRunStatus, listExportRecords, loadDetail, resetRunForReport, updateRunLock } from './src/store.js';
 import { buildConsistencyReport } from './src/consistency.js';
@@ -33,7 +33,7 @@ import {
 } from './src/accessControl.js';
 import {
   SHOPEE, createOrRecoverBusinessRun, getBusinessCurrentReportDate, getBusinessRunStatus,
-  getBusinessSnapshotById, getMatchingBusinessSnapshot, listBusinessHistoryDates, loadBusinessDetail, loadBusinessState, recordBusinessExport,
+  getBusinessSnapshotById, getMatchingBusinessSnapshot, invalidateBusinessSnapshots, listBusinessHistoryDates, loadBusinessDetail, loadBusinessState, recordBusinessExport,
   resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
@@ -684,7 +684,31 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     if (before?.runId && activeRunIds.has(before.runId)) {
       return res.json({ ok: true, alreadyRunning: true, attachedRunId: before.runId, run: { reportDate, runId: before.runId }, state: summarizeShopeeState(state) });
     }
-    const repair = !options.resume && before?.status === 'failed';
+    const latestSnapshot = getMatchingBusinessSnapshot(SHOPEE, state);
+    const invalidCompleted = Boolean(
+      !options.resume
+      && before?.status === 'finished'
+      && latestSnapshot
+      && (
+        Number(latestSnapshot.state?.lastRunSummary?.scanRetry || 0) > 0
+        || Number(latestSnapshot.state?.scanRetryBills?.length || 0) > 0
+        || Number(latestSnapshot.state?.finalRows?.length || 0) !== Number(state.pnhBills?.length || 0)
+      )
+    );
+    if (invalidCompleted) {
+      invalidateBusinessSnapshots(SHOPEE, reportDate, {
+        reason: 'SHOPEE_SCAN_RETRY_OR_COUNT_MISMATCH',
+        previousRunId: before.runId,
+        snapshotId: latestSnapshot.snapshotId,
+        scanRetry: latestSnapshot.state?.lastRunSummary?.scanRetry || latestSnapshot.state?.scanRetryBills?.length || 0,
+        expected: state.pnhBills?.length || 0,
+        actual: latestSnapshot.state?.finalRows?.length || 0
+      });
+      updateBusinessRunLock(SHOPEE, reportDate, 'failed', '旧快照扫描待重试或数量不一致，已标记INVALID并创建REPAIR。');
+      state.snapshotId = '';
+      saveBusinessState(state, SHOPEE);
+    }
+    const repair = !options.resume && (before?.status === 'failed' || invalidCompleted);
     const outcome = createOrRecoverBusinessRun(SHOPEE, reportDate, { lockedBy: req.ip || '', repair, rejectRunning: Boolean(before?.runId && activeRunIds.has(before.runId)) });
     if (!outcome.ok) return res.status(outcome.code === 'RUN_ALREADY_ACTIVE' || outcome.code === 'RUN_ALREADY_COMPLETED' ? 409 : 400).json(outcome);
     const run = outcome.run;
@@ -730,6 +754,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     if (reportDate) updateBusinessRunLock(SHOPEE, reportDate, error.runStatus || 'failed', error.message || String(error));
     const state = loadBusinessState(SHOPEE);
     state.processing = { ...(state.processing || {}), running: false, paused: false, error: error.message || String(error) };
+    state.snapshotId = '';
     saveBusinessState(state, SHOPEE);
     res.status(error.code === 'AUTH_REQUIRED' ? 409 : 500).json({ ok: false, code: error.code || 'SHOPEE_RUN_FAILED', error: error.message, diagnostic: error.apiDiagnostic || state.apiDiagnostic || null });
   } finally {
@@ -993,6 +1018,15 @@ app.post('/api/admin/delete-backup', requireRole('ADMIN'), (req, res) => {
     const result = deleteBackup(backupId, req.user?.username || req.user?.email || '');
     auditAction(req, 'BACKUP_DELETED', { backupId, fileName: result.fileName });
     res.json({ ok: true, ...result });
+  } catch (error) { res.status(409).json({ ok: false, error: error.message }); }
+});
+
+app.post('/api/admin/delete-all-backups', requireRole('ADMIN'), (req, res) => {
+  if (req.body?.confirmText !== '永久删除全部备份') return res.status(400).json({ ok: false, error: '请准确输入“永久删除全部备份”确认。' });
+  try {
+    const result = deleteAllBackups(req.user?.username || req.user?.email || '');
+    auditAction(req, 'BACKUP_DELETE_ALL', { deletedCount: result.deletedCount, failedCount: result.failedCount });
+    res.json({ ok: result.failedCount === 0, ...result, error: result.failedCount ? '部分备份删除失败，请刷新后查看。' : '' });
   } catch (error) { res.status(409).json({ ok: false, error: error.message }); }
 });
 

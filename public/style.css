@@ -471,6 +471,12 @@ body.sidebar-collapsed .topbar { left: 0; }
 .preview-meta { padding: 7px 13px; display: flex; gap: 20px; flex-wrap: wrap; color: #68778b; border-bottom: 1px solid var(--line-soft); font-size: 10px; }
 .preview-meta b { margin-left: 4px; color: #203d61; }
 .preview-table-wrap { height: 390px; overflow: auto; }
+.backup-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.user-actions,
+.backup-actions { display: flex; flex-wrap: wrap; gap: 6px; min-width: 260px; }
+.backup-actions { min-width: 160px; }
+.user-actions .text-button,
+.backup-actions .text-button { white-space: nowrap; }
 .preview-table { width: 100%; min-width: 1160px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .preview-table th,
 .preview-table td { height: 34px; padding: 6px 8px; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); color: #4e6078; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -357,10 +357,27 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   state.lastRunSummary = summary;
   state.lastRun = summary;
   await checkpoint(state, onCheckpoint);
+  if (scanRetryBills.length) {
+    state.processing = {
+      ...(state.processing || {}),
+      running: false,
+      paused: false,
+      phase: '订单扫描待重试',
+      error: `SHOPEE订单扫描仍有${scanRetryBills.length}票未返回有效状态，已停止生成正式快照。`
+    };
+    state.lastRunSummary = { ...state.lastRunSummary, runStatus: 'SCAN_RETRY_REQUIRED' };
+    state.lastRun = state.lastRunSummary;
+    await checkpoint(state, onCheckpoint);
+    const error = new Error(`SHOPEE订单扫描仍有${scanRetryBills.length}票待重试，未生成正式快照。`);
+    error.code = 'SCAN_RETRY_REQUIRED';
+    error.runStatus = 'SCAN_RETRY_REQUIRED';
+    throw error;
+  }
   if (failedBills.size) {
     await onProgress(`SHOPEE部分接口失败：${failedBills.size}票已保留跨日与失败批次，继续处理时只重试失败票`);
     const error = new Error(`SHOPEE有${failedBills.size}票API查询失败，数据已保留，请点击继续处理重试失败批次。`);
     error.code = 'SHOPEE_PARTIAL_API_FAILURE';
+    error.runStatus = 'TRACK_RETRY_REQUIRED';
     throw error;
   }
   await onProgress(`SHOPEE完成：POD ${summary.scanPod}票，退回 ${finalRows.filter(row => row.退回状态 === '已退回').length}票，明日继续 ${summary.nextCarry}票`);
