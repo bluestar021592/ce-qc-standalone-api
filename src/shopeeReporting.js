@@ -1,7 +1,9 @@
 import { getMetricTrend, trendChars } from './reporting.js';
 import { recipientGroupOf } from './recipientGroup.js';
 
-export const SHOPEE_RECIPIENT_GROUPS = Object.freeze(['ALL', 'CN', 'VN', 'OTHER']);
+// OTHER is retained only in the import audit. It is never a Shopee business
+// group and therefore cannot reach dashboard, carry, trend or export metrics.
+export const SHOPEE_RECIPIENT_GROUPS = Object.freeze(['ALL', 'CN', 'VN']);
 
 const STORE_METRICS = Object.freeze([
   ['在途门店', 'shopTransit', 'shopTransit', '件'],
@@ -56,10 +58,7 @@ export function buildShopeeDashboard(state = {}) {
   current.returnRequired = groups.returnRequired.length;
   current.returned = groups.returned.length;
 
-  const dashboardRows = SHOPEE_RECIPIENT_GROUPS.flatMap(group => {
-    if (group === 'OTHER' && !recipientGroups.OTHER.metrics.total && !recipientGroups.OTHER.monitorCount) return [];
-    return metricRowsForGroup(group, recipientGroups[group], state);
-  });
+  const dashboardRows = SHOPEE_RECIPIENT_GROUPS.flatMap(group => metricRowsForGroup(group, recipientGroups[group], state));
   const detailTabs = buildShopeeDetailTabs(state, recipientGroups, abnormalRows);
   detailTabs.dashboard = { label: 'SHOPEE总看板', rows: dashboardRows, total: dashboardRows.length };
   const regions = buildRegionSummary(dailyRows, rows);
@@ -149,7 +148,7 @@ export function reconcileRecipientGroups(recipientGroups = {}) {
   const checks = [];
   for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3']) {
     const all = Number(recipientGroups.ALL?.metrics?.[key] || 0);
-    const parts = ['CN', 'VN', 'OTHER'].reduce((sum, group) => sum + Number(recipientGroups[group]?.metrics?.[key] || 0), 0);
+    const parts = ['CN', 'VN'].reduce((sum, group) => sum + Number(recipientGroups[group]?.metrics?.[key] || 0), 0);
     checks.push({ key, all, parts, difference: all - parts, passed: all === parts });
   }
   return {
@@ -160,7 +159,8 @@ export function reconcileRecipientGroups(recipientGroups = {}) {
 }
 
 function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRows) {
-  const select = list => group === 'ALL' ? list : list.filter(row => recipientGroupOf(row) === group);
+  const eligible = list => (list || []).filter(row => ['CN', 'VN'].includes(recipientGroupOf(row)));
+  const select = list => group === 'ALL' ? eligible(list) : eligible(list).filter(row => recipientGroupOf(row) === group);
   const groupDaily = uniqueRows(select(dailyRows));
   const groupRows = uniqueRows(select(rows));
   const groups = buildGroups(groupRows, select(carryRows), select(nextCarryRows));
@@ -248,7 +248,7 @@ function tabsForRecipientGroup(group, summary) {
 
 function buildDailyRows(state, finalRows) {
   const finalByBill = new Map(finalRows.map(row => [billOf(row), row]));
-  const acceptedRows = (state.dailyParseRows || []).filter(row => !row.importStatus || ['ACCEPTED', 'DUPLICATE_SAME_GROUP'].includes(row.importStatus));
+  const acceptedRows = (state.dailyParseRows || []).filter(row => ['CN', 'VN'].includes(recipientGroupOf(row)) && (!row.importStatus || ['ACCEPTED', 'DUPLICATE_SAME_GROUP'].includes(row.importStatus)));
   const dailyByBill = new Map();
   for (const row of acceptedRows) {
     const bill = billOf(row);

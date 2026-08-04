@@ -32,6 +32,7 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
   const cycleDates = uniqueDates(cycleEvents);
   const assignDates = uniqueDates(assignEvents);
   const deliveryDates = uniqueDates(deliveryEvents);
+  const workOrder = analyzeWorkOrder(sorted);
   const stats = buildActionStats({
     events: sorted,
     pendingEvents,
@@ -139,6 +140,11 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
   } else if (stats.节点日期未更新 === '是') {
     category = '节点日期未更新';
     judgment = `最后节点日期早于日报日期${stats.节点未更新天数 || 0}天，需确认包裹是否无动作`;
+  }
+
+  if (category === 'éœ€äººå·¥å¤æ ¸' && workOrder.unprocessed) {
+    category = '工单未处理';
+    judgment = '存在明确工单事件，且工单后没有更晚的有效业务处理节点';
   }
 
   const result = baseResult({
@@ -415,6 +421,31 @@ function enrichShopInfo(shopInfo = {}, reportDate = '', lastEvent = null) {
     shopActionType: inboundDate ? '门店入库' : '门店途中',
     shopStayDays
   };
+}
+
+function analyzeWorkOrder(events = []) {
+  const evidence = events.filter(isExplicitWorkOrderEvent);
+  if (!evidence.length) return { hasHistory: false, unprocessed: false, firstAt: '', lastAt: '', resolvedAt: '', evidence: '' };
+  const lastOrder = evidence[evidence.length - 1];
+  const laterAction = events.find(event => String(event.eventTime || '') > String(lastOrder.eventTime || '') && isEffectiveBusinessAction(event));
+  return {
+    hasHistory: true,
+    unprocessed: !laterAction,
+    firstAt: evidence[0]?.eventTime || '',
+    lastAt: lastOrder?.eventTime || '',
+    resolvedAt: laterAction?.eventTime || '',
+    evidence: evidence.map(event => `${event.eventTime || ''} ${event.trackingEventDescZh || event.trackingEventDesc || event.eventCode || ''}`.trim()).join(' | ').slice(0, 1000)
+  };
+}
+
+function isExplicitWorkOrderEvent(event = {}) {
+  const code = String(event.eventCode || event.trackingEventCode || '').toUpperCase();
+  const text = [event.trackingEventDescZh, event.trackingEventDesc, event.trackingEventDescKm, event.remark, event.exceptionType, event.exceptionDesc].map(value => String(value || '')).join(' ');
+  return /WORK[_ -]?ORDER|WORKORDER|工单|催派送工单|工单编号|工单创建|工单关闭|工单处理/i.test(`${code} ${text}`);
+}
+
+function isEffectiveBusinessAction(event = {}) {
+  return isPodEvent(event) || isPendingEvent(event) || isOcEvent(event) || isCycleEvent(event) || isAssignEvent(event) || isDeliveryEvent(event) || isCcslInboundEvent(event) || /\bOutbound\b|货物离开网点|退回|Return/i.test(eventText(event));
 }
 
 function eventText(e) {

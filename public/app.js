@@ -44,6 +44,9 @@ function separateLegacyPanels() {
   if (!document.getElementById('networkSettingsPanel')) grid.insertAdjacentHTML('beforeend', '<section id="networkSettingsPanel" class="panel operation-panel"><div class="panel-title"><h3>网络与访问</h3></div><div id="networkAccessCards"></div></section>');
 }
 
+const settingsGrid = document.querySelector('#settingsPage .settings-grid');
+if (settingsGrid && !document.getElementById('userManagementPanel')) settingsGrid.insertAdjacentHTML('beforeend', '<section id="userManagementPanel" class="panel operation-panel admin-only" hidden><div class="panel-title"><h3>用户与权限</h3><button class="text-button" onclick="loadUserManagement()">刷新</button></div><form id="userCreateForm" class="user-create-form" onsubmit="createInternalUser(event)"><input name="username" placeholder="用户名" required><input name="displayName" placeholder="姓名" required><input name="email" type="email" placeholder="邮箱"><input name="departmentCompany" placeholder="部门/公司"><select name="role"><option>VIEWER</option><option>OPERATOR</option><option>ADMIN</option></select><select name="businessScope"><option>ALL</option><option>CCSL</option><option>SHOPEE</option></select><input name="temporaryPassword" type="password" minlength="10" placeholder="临时密码（至少10位）" required><button class="btn primary" type="submit">新增用户</button></form><div id="userManagementTable" class="preview-table-wrap"></div></section>');
+
 document.querySelectorAll('.modal .icon-button').forEach(button => {
   button.innerHTML = '<svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-close"></use></svg>';
 });
@@ -86,6 +89,7 @@ function renderAll() {
   renderSystemStatus();
   renderAuthPanels();
   renderNetworkSettings();
+  if (currentPage === 'settings') loadUserManagement();
   renderHome();
   renderCcslPage();
   renderShopeePage();
@@ -155,6 +159,47 @@ async function restoreDatabaseBackup(backupId) {
     alert('数据库恢复成功，页面将重新加载。');
     location.reload();
   } catch (error) { alert(`恢复失败：${error.message}`); }
+}
+
+async function loadUserManagement() {
+  const target = document.getElementById('userManagementTable');
+  if (!target || accessSession.user?.role !== 'ADMIN') return;
+  try {
+    const result = await api('/api/admin/users');
+    target.innerHTML = `<table class="preview-table"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${(result.rows || []).map(row => `<tr><td>${escapeHtml(row.username)}</td><td>${escapeHtml(row.displayName)}</td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.businessScope)}</td><td>${row.enabled ? '启用' : '停用'}</td><td>${escapeHtml(row.lastLoginAt || '—')}</td><td><button class="text-button" onclick="toggleInternalUser(${Number(row.id)},${row.enabled ? 'false' : 'true'})">${row.enabled ? '停用' : '启用'}</button><button class="text-button" onclick="resetInternalUserPassword(${Number(row.id)})">重置密码</button><button class="text-button" onclick="revokeInternalUserSessions(${Number(row.id)})">退出会话</button><button class="text-button danger-action" onclick="deleteInternalUser(${Number(row.id)},'${escapeAttr(row.username)}')">删除</button></td></tr>`).join('')}</tbody></table>`;
+  } catch (error) { target.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`; }
+}
+
+async function createInternalUser(event) {
+  event.preventDefault(); const form = event.currentTarget; const payload = Object.fromEntries(new FormData(form));
+  try { await api('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); form.reset(); await loadUserManagement(); alert('用户已创建。请通过安全渠道告知临时密码。'); }
+  catch (error) { alert(`新增用户失败：${error.message}`); }
+}
+
+async function toggleInternalUser(id, enabled) {
+  try { await api(`/api/admin/users/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }); await loadUserManagement(); }
+  catch (error) { alert(`操作失败：${error.message}`); }
+}
+
+async function resetInternalUserPassword(id) {
+  const temporaryPassword = prompt('请输入至少10位的新临时密码：'); if (!temporaryPassword) return;
+  try { await api(`/api/admin/users/${id}/reset-password`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ temporaryPassword }) }); alert('密码已重置，旧会话已撤销。'); }
+  catch (error) { alert(`重置失败：${error.message}`); }
+}
+
+async function revokeInternalUserSessions(id) {
+  if (!confirm('确定强制该用户退出全部会话？')) return;
+  try { await api(`/api/admin/users/${id}/revoke-sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); alert('会话已撤销。'); }
+  catch (error) { alert(`操作失败：${error.message}`); }
+}
+
+async function deleteInternalUser(id, username) {
+  const confirmation = prompt(`此操作会停用用户并撤销其会话。请输入用户名 ${username} 确认删除：`);
+  if (confirmation === null) return;
+  try {
+    await api(`/api/admin/users/${id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: confirmation }) });
+    await loadUserManagement();
+  } catch (error) { alert(`删除失败：${error.message}`); }
 }
 
 function pageFromPath() {
@@ -491,13 +536,12 @@ function renderShopeeImportMeta() {
 }
 
 function renderShopeeRecipientFilters() {
-  const other = Number(shopeeState.dashboard?.recipientGroups?.OTHER?.metrics?.total || shopeeState.dailySummary?.groupCounts?.OTHER || 0);
-  const groups = ['ALL', 'CN', 'VN', ...(other ? ['OTHER'] : [])];
+  const groups = ['ALL', 'CN', 'VN'];
   document.getElementById('shopeeRecipientFilters').innerHTML = groups.map(group => `<button class="${shopeeRecipientGroup === group ? 'active' : ''}" onclick="setShopeeRecipientGroup('${group}')">${escapeHtml(recipientGroupLabel(group))}</button>`).join('');
 }
 
 function setShopeeRecipientGroup(group) {
-  shopeeRecipientGroup = ['CN', 'VN', 'OTHER'].includes(group) ? group : 'ALL';
+  shopeeRecipientGroup = ['CN', 'VN'].includes(group) ? group : 'ALL';
   previewState.SHOPEE.recipientGroup = shopeeRecipientGroup;
   previewState.SHOPEE.category = `${shopeeRecipientGroup}_all`;
   renderShopeePage();
@@ -505,7 +549,7 @@ function setShopeeRecipientGroup(group) {
 
 function renderShopeeRecipientGroups() {
   const groups = shopeeState.dashboard?.recipientGroups || {};
-  const visible = shopeeRecipientGroup === 'ALL' ? ['ALL', 'CN', 'VN', ...(Number(groups.OTHER?.metrics?.total || 0) ? ['OTHER'] : [])] : [shopeeRecipientGroup];
+  const visible = shopeeRecipientGroup === 'ALL' ? ['ALL', 'CN', 'VN'] : [shopeeRecipientGroup];
   document.getElementById('shopeeRecipientGroups').innerHTML = visible.map(group => renderRecipientGroupPanel(group, groups[group] || {})).join('');
 }
 
@@ -521,7 +565,7 @@ function renderRecipientGroupPanel(group, summary) {
 }
 
 function openShopeeGroupMetric(group, tab) {
-  shopeeRecipientGroup = ['CN', 'VN', 'OTHER'].includes(group) ? group : 'ALL';
+  shopeeRecipientGroup = ['CN', 'VN'].includes(group) ? group : 'ALL';
   previewState.SHOPEE.recipientGroup = shopeeRecipientGroup;
   openMetricDetail('SHOPEE', `${shopeeRecipientGroup}_${tab}`);
 }
@@ -745,7 +789,7 @@ function renderReportsPage() {
   const type = filter.business === 'SHOPEE' ? 'SHOPEE' : 'CCSL';
   const state = type === 'SHOPEE' ? shopeeState : appState;
   const tabs = state.detailTabs || {};
-  const recipientGroup = type === 'SHOPEE' && ['CN', 'VN', 'OTHER'].includes(filter.recipientGroup) ? filter.recipientGroup : 'ALL';
+  const recipientGroup = type === 'SHOPEE' && ['CN', 'VN'].includes(filter.recipientGroup) ? filter.recipientGroup : 'ALL';
   if (!tabs[filter.category]) filter.category = type === 'SHOPEE' ? `${recipientGroup}_all` : 'allData';
   const business = document.getElementById('reportBusiness');
   if (!business) return;
@@ -774,7 +818,7 @@ function renderReportPreview() {
   const tab = state.detailTabs?.[filter.category] || { rows: [], total: 0 };
   const query = String(filter.query || '').trim().toLowerCase();
   const region = type === 'SHOPEE' ? (filter.region || 'ALL') : 'ALL';
-  const recipientGroup = type === 'SHOPEE' && ['CN', 'VN', 'OTHER'].includes(filter.recipientGroup) ? filter.recipientGroup : 'ALL';
+  const recipientGroup = type === 'SHOPEE' && ['CN', 'VN'].includes(filter.recipientGroup) ? filter.recipientGroup : 'ALL';
   const filteredRows = (tab.rows || []).filter(row => {
     if (type === 'SHOPEE' && region !== 'ALL' && normalizedRegion(row) !== region) return false;
     if (type === 'SHOPEE' && recipientGroup !== 'ALL' && recipientGroupOfRow(row) !== recipientGroup) return false;
@@ -798,7 +842,7 @@ function setReportRegion(value) {
 }
 
 function setReportRecipientGroup(value) {
-  previewState.reports.recipientGroup = ['CN', 'VN', 'OTHER'].includes(value) ? value : 'ALL';
+  previewState.reports.recipientGroup = ['CN', 'VN'].includes(value) ? value : 'ALL';
   if (previewState.reports.business === 'SHOPEE') previewState.reports.category = `${previewState.reports.recipientGroup}_all`;
   renderReportsPage();
 }

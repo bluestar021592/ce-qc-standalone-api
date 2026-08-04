@@ -22,14 +22,14 @@ import { createOrRecoverRun, getCurrentReportDate, getDbStatus, getRunStatus, li
 import { buildConsistencyReport } from './src/consistency.js';
 import { getShopCodeSummary, importShopCodesFromWorkbook } from './src/shopCodes.js';
 import { appendRuntimeLog } from './src/runtimeLog.js';
-import { createDashboardSnapshot, getMatchingSnapshot, getSnapshotById, listSnapshotHistory } from './src/snapshots.js';
+import { createDashboardSnapshot, getMatchingSnapshot, getSnapshotById, listSnapshotHistory, repairSnapshotFromStoredData } from './src/snapshots.js';
 import { appendHistorySummary, buildLongBackupV2 } from './src/longBackup.js';
 import { mergeBackupModule } from './src/backupRecovery.js';
 import { buildShopeeDashboard } from './src/shopeeReporting.js';
 import { analyzeShopeeShipment } from './src/shopeeAnalyzer.js';
 import { queryBatchWithFallback, splitTrackBatches } from './src/trackBatching.js';
 import {
-  accessIdentity, auditAction, publicUser, requireRole, sameOriginWriteGuard, validateAccessConfiguration
+  accessIdentity, auditAction, publicUser, requireBusinessScope, requireRole, sameOriginWriteGuard, validateAccessConfiguration
 } from './src/accessControl.js';
 import {
   SHOPEE, createOrRecoverBusinessRun, getBusinessCurrentReportDate, getBusinessRunStatus,
@@ -59,6 +59,7 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '50mb' }));
 app.use(accessIdentity);
 app.use(sameOriginWriteGuard);
+app.use('/api/shopee', requireBusinessScope('SHOPEE'));
 app.use('/api', (req, res, next) => {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
   const adminOnly = /(?:ce-login|ce-logout|clear|reset|backup|settings|users)/i.test(req.path);
@@ -91,6 +92,86 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/session', (req, res) => {
   res.json({ ok: true, user: publicUser(req.user), unreadNotifications: 0 });
+});
+
+app.get('/api/admin/users', requireRole('ADMIN'), (req, res) => {
+  const rows = getDb().prepare("SELECT id,username,displayName,departmentCompany,email,role,businessScope,enabled,expiresAt,mustChangePassword,failedLoginCount,lockedUntil,lastLoginAt,createdAt,updatedAt FROM users WHERE status='ACTIVE' ORDER BY enabled DESC, username").all();
+  res.json({ ok: true, rows });
+});
+
+app.post('/api/admin/users', requireRole('ADMIN'), async (req, res) => {
+  const username = String(req.body?.username || '').trim().toLowerCase();
+  const displayName = String(req.body?.displayName || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const role = ['VIEWER', 'OPERATOR', 'ADMIN'].includes(String(req.body?.role || '').toUpperCase()) ? String(req.body.role).toUpperCase() : 'VIEWER';
+  const businessScope = ['CCSL', 'SHOPEE', 'ALL'].includes(String(req.body?.businessScope || '').toUpperCase()) ? String(req.body.businessScope).toUpperCase() : 'ALL';
+  const temporaryPassword = String(req.body?.temporaryPassword || '');
+  if (!/^[a-z0-9_.-]{1,60}$/.test(username) || !displayName || temporaryPassword.length < 10) return res.status(400).json({ ok: false, error: '用户名、姓名和至少10位临时密码为必填项。' });
+  try {
+    const bcrypt = await import('bcryptjs');
+    const hash = bcrypt.default.hashSync(temporaryPassword, 12);
+    const now = new Date().toISOString();
+    const row = getDb().prepare(`INSERT INTO users(username,displayName,departmentCompany,email,passwordHash,role,businessScope,enabled,expiresAt,mustChangePassword,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,1,?,?) RETURNING id,username,displayName,departmentCompany,email,role,businessScope,enabled,expiresAt,mustChangePassword,createdAt`)
+      .get(username, displayName, String(req.body?.departmentCompany || '').trim().slice(0, 120), email || null, hash, role, businessScope, req.body?.enabled === false ? 0 : 1, String(req.body?.expiresAt || '').trim() || null, now, now);
+    auditAction(req, 'USER_CREATED', { username, role, businessScope });
+    res.json({ ok: true, user: row, temporaryPasswordShownOnce: true });
+  } catch { res.status(409).json({ ok: false, error: '用户名或邮箱已存在。' }); }
+});
+
+app.patch('/api/admin/users/:id', requireRole('ADMIN'), (req, res) => {
+  const id = Number(req.params.id || 0);
+  const existing = getDb().prepare('SELECT * FROM users WHERE id=?').get(id);
+  if (!existing) return res.status(404).json({ ok: false, error: '用户不存在。' });
+  const role = ['VIEWER', 'OPERATOR', 'ADMIN'].includes(String(req.body?.role || existing.role).toUpperCase()) ? String(req.body?.role || existing.role).toUpperCase() : existing.role;
+  const businessScope = ['CCSL', 'SHOPEE', 'ALL'].includes(String(req.body?.businessScope || existing.businessScope).toUpperCase()) ? String(req.body?.businessScope || existing.businessScope).toUpperCase() : existing.businessScope;
+  getDb().prepare('UPDATE users SET displayName=?,departmentCompany=?,email=?,role=?,businessScope=?,enabled=?,expiresAt=?,updatedAt=? WHERE id=?').run(
+    String(req.body?.displayName ?? existing.displayName).trim().slice(0, 80), String(req.body?.departmentCompany ?? existing.departmentCompany).trim().slice(0, 120), String(req.body?.email ?? existing.email).trim().toLowerCase() || null, role, businessScope, req.body?.enabled === undefined ? existing.enabled : (req.body.enabled ? 1 : 0), String((req.body?.expiresAt ?? existing.expiresAt) || '').trim() || null, new Date().toISOString(), id
+  );
+  if (req.body?.enabled === false) getDb().prepare('UPDATE user_sessions SET revokedAt=? WHERE userId=? AND revokedAt IS NULL').run(new Date().toISOString(), id);
+  auditAction(req, req.body?.enabled === false ? 'USER_DISABLED' : 'USER_UPDATED', { username: existing.username, role, businessScope });
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/users/:id/reset-password', requireRole('ADMIN'), async (req, res) => {
+  const id = Number(req.params.id || 0); const password = String(req.body?.temporaryPassword || '');
+  if (password.length < 10) return res.status(400).json({ ok: false, error: '临时密码至少10位。' });
+  const user = getDb().prepare('SELECT username FROM users WHERE id=?').get(id);
+  if (!user) return res.status(404).json({ ok: false, error: '用户不存在。' });
+  const bcrypt = await import('bcryptjs'); const now = new Date().toISOString();
+  getDb().prepare('UPDATE users SET passwordHash=?,mustChangePassword=1,failedLoginCount=0,lockedUntil=NULL,updatedAt=? WHERE id=?').run(bcrypt.default.hashSync(password, 12), now, id);
+  getDb().prepare('UPDATE user_sessions SET revokedAt=? WHERE userId=? AND revokedAt IS NULL').run(now, id);
+  auditAction(req, 'PASSWORD_RESET', { username: user.username });
+  res.json({ ok: true, temporaryPasswordShownOnce: true });
+});
+
+app.post('/api/admin/users/:id/revoke-sessions', requireRole('ADMIN'), (req, res) => {
+  const id = Number(req.params.id || 0); const now = new Date().toISOString();
+  getDb().prepare('UPDATE user_sessions SET revokedAt=? WHERE userId=? AND revokedAt IS NULL').run(now, id);
+  auditAction(req, 'SESSION_REVOKED', { userId: id }); res.json({ ok: true });
+});
+
+app.delete('/api/admin/users/:id', requireRole('ADMIN'), (req, res) => {
+  const id = Number(req.params.id || 0);
+  const db = getDb();
+  const target = db.prepare("SELECT * FROM users WHERE id=? AND status='ACTIVE'").get(id);
+  if (!target) return res.status(404).json({ ok: false, error: '用户不存在或已删除。' });
+  if (Number(req.user?.id || 0) === id) return res.status(400).json({ ok: false, error: '不能删除当前登录用户。' });
+  if (String(target.role || '').toUpperCase() === 'ADMIN') {
+    const adminCount = db.prepare("SELECT COUNT(*) AS count FROM users WHERE status='ACTIVE' AND enabled=1 AND UPPER(role)='ADMIN'").get().count;
+    if (Number(adminCount) <= 1) return res.status(400).json({ ok: false, error: '不能删除最后一个启用的管理员。' });
+  }
+  const confirmation = String(req.body?.username || '').trim().toLowerCase();
+  if (confirmation !== String(target.username || '').trim().toLowerCase()) {
+    return res.status(400).json({ ok: false, error: '请输入要删除的用户名进行确认。' });
+  }
+  const now = new Date().toISOString();
+  const update = db.transaction(() => {
+    db.prepare("UPDATE users SET status='DELETED',enabled=0,deletedAt=?,deletedBy=?,updatedAt=? WHERE id=?").run(now, Number(req.user?.id || 0) || null, now, id);
+    db.prepare('UPDATE user_sessions SET revokedAt=? WHERE userId=? AND revokedAt IS NULL').run(now, id);
+  });
+  update();
+  auditAction(req, 'USER_SOFT_DELETED', { userId: id, username: target.username });
+  res.json({ ok: true });
 });
 
 app.get('/api/events', (req, res) => {

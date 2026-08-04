@@ -3,7 +3,7 @@ import path from 'path';
 import { DEFAULT_SHOP_CP_CODES } from './shopCodeDefaults.js';
 import { seedLatestShopWhitelist } from './shopWhitelist.js';
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 13;
 const REQUIRED_TABLES = [
   'pod_locks',
   'carry_bills',
@@ -34,6 +34,8 @@ const REQUIRED_TABLES = [
   'shop_whitelist_entries',
   'shop_whitelist_aliases',
   'user_roles',
+  'users',
+  'user_sessions',
   'audit_logs',
   'notifications'
 ];
@@ -562,6 +564,39 @@ export function migrateDatabase(db, cfg) {
       lastLoginAt TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      displayName TEXT NOT NULL,
+      departmentCompany TEXT DEFAULT '',
+      email TEXT UNIQUE,
+      passwordHash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'VIEWER',
+      businessScope TEXT NOT NULL DEFAULT 'ALL',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      expiresAt TEXT,
+      mustChangePassword INTEGER NOT NULL DEFAULT 1,
+      failedLoginCount INTEGER NOT NULL DEFAULT 0,
+      lockedUntil TEXT,
+      lastLoginAt TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INTEGER NOT NULL,
+      sessionHash TEXT NOT NULL UNIQUE,
+      accessChannel TEXT NOT NULL,
+      cloudflareEmail TEXT,
+      ipAddress TEXT,
+      userAgent TEXT,
+      expiresAt TEXT NOT NULL,
+      revokedAt TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY(userId) REFERENCES users(id)
+    );
+
     CREATE TABLE IF NOT EXISTS audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       userEmail TEXT,
@@ -606,6 +641,8 @@ export function migrateDatabase(db, cfg) {
     CREATE INDEX IF NOT EXISTS idx_shop_whitelist_active ON shop_whitelist_versions(active, version);
     CREATE INDEX IF NOT EXISTS idx_shop_whitelist_entry ON shop_whitelist_entries(version, shopCode, classificationEnabled);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(createdAt, userEmail, action);
+    CREATE INDEX IF NOT EXISTS idx_users_enabled ON users(enabled, username);
+    CREATE INDEX IF NOT EXISTS idx_sessions_active ON user_sessions(userId, expiresAt, revokedAt);
     CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(userEmail, readAt, createdAt);
   `);
 
@@ -713,6 +750,9 @@ export function migrateDatabase(db, cfg) {
     ensureColumn(db, 'business_export_snapshots', 'whitelistVersion', 'TEXT');
     ensureColumn(db, 'business_export_snapshots', 'whitelistSha256', 'TEXT');
     ensureColumn(db, 'business_export_snapshots', 'payloadHash', 'TEXT');
+    ensureColumn(db, 'users', 'status', "TEXT NOT NULL DEFAULT 'ACTIVE'");
+    ensureColumn(db, 'users', 'deletedAt', 'TEXT');
+    ensureColumn(db, 'users', 'deletedBy', 'INTEGER');
     db.exec("UPDATE business_daily_parse_rows SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
     db.exec("UPDATE business_carry_bills SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
     db.exec("UPDATE business_scan_results SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");

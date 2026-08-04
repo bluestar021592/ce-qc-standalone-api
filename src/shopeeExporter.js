@@ -56,6 +56,7 @@ export async function exportShopeeXlsx(state = {}, snapshot = null) {
   const otherSheet = createGroupDetailSheet(workbook, context, 'OTHER', '07_其他待确认明细');
   if (!Number(view.recipientGroups?.OTHER?.metrics?.total || 0)) otherSheet.state = 'hidden';
   createMetricTargetSheets(workbook, context, metricSheets);
+  createExcludedAuditSheet(workbook, context, state.dailyParseRows || []);
   createConsistencySheet(workbook, context, snapshot, exportHashes);
 
   await workbook.xlsx.writeFile(file);
@@ -67,7 +68,7 @@ function createDashboardSheet(workbook, context, metricSheets) {
   brandSheet(sheet, context, 'CE Express SHOPEE 质控追踪总看板', 12);
   sheet.getRow(4).values = ['分组', ...METRICS.map(([label]) => label)];
   styleHeader(sheet.getRow(4), 12);
-  const visibleGroups = ['ALL', 'CN', 'VN', ...(Number(context.view.recipientGroups?.OTHER?.metrics?.total || 0) ? ['OTHER'] : [])];
+  const visibleGroups = ['ALL', 'CN', 'VN'];
   for (const group of visibleGroups) {
     const metrics = context.view.recipientGroups[group]?.metrics || {};
     const values = [GROUP_LABELS[group], metrics.total || 0, metrics.pod || 0, rateValue(metrics.podRate), rateValue(metrics.firstAttemptRate), metrics.pending1 || 0, metrics.pending2 || 0, metrics.pending3plus || 0, metrics.oc1 || 0, metrics.oc2 || 0, metrics.oc3plus || 0, metrics.inboundNoScan || 0];
@@ -117,7 +118,6 @@ function createDashboardSheet(workbook, context, metricSheets) {
 function buildMetricSheetNames(context) {
   const map = new Map();
   for (const group of SHOPEE_RECIPIENT_GROUPS) {
-    if (group === 'OTHER' && !Number(context.view.recipientGroups?.OTHER?.metrics?.total || 0)) continue;
     for (const [label, tabKey] of METRICS) {
       const key = `${group}_${tabKey}`;
       if (map.has(key)) continue;
@@ -182,6 +182,22 @@ function createGroupStatisticsSheet(workbook, context, group, name) {
 function createGroupDetailSheet(workbook, context, group, name) {
   const rows = context.view.detailTabs?.[`${group}_all`]?.rows || [];
   return createDetailSheet(workbook, context, name, rows, `${GROUP_LABELS[group]}日报明细`);
+}
+
+function createExcludedAuditSheet(workbook, context, importRows) {
+  const rows = (importRows || []).filter(row => row.importStatus === 'IGNORED_NON_SHOPEE');
+  const sheet = workbook.addWorksheet('07_EXCLUDED_AUDIT', { views: [{ showGridLines: false, state: 'frozen', ySplit: 4 }] });
+  brandSheet(sheet, context, 'SHOPEE excluded import audit', 7);
+  const headers = ['shipmentCode', 'recipient_raw', 'recipient_normalized', 'recipient_group', 'importStatus', 'sheetName', 'rowNumber'];
+  sheet.getRow(4).values = headers;
+  styleHeader(sheet.getRow(4), headers.length);
+  for (const item of rows) {
+    const row = sheet.addRow(headers.map(key => item[key] ?? ''));
+    styleBodyRow(row, headers.length);
+  }
+  sheet.columns = [24, 28, 28, 18, 26, 24, 12].map(width => ({ width }));
+  if (rows.length) sheet.autoFilter = { from: 'A4', to: `G${sheet.rowCount}` };
+  addReturnLink(sheet, headers.length);
 }
 
 function createDetailSheet(workbook, context, name, sourceRows, title) {

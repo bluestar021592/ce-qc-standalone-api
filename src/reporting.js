@@ -307,7 +307,7 @@ function buildCategoryCounts(openRows, finalRows) {
     tbkhShopStuck3plus: tbkhStuckRows.filter(row => shopDays(row) >= 3).length,
     tbkhShopNotPod: tbkhOpenRows.length,
     finalDiversion: openRows.filter(isNormalFinalDiversionRow).length,
-    workOrderAbnormal: ordinaryRows.filter(row => row?.异常分类 === '需人工复核').length
+    workOrderAbnormal: ordinaryRows.filter(row => ['工单未处理', '工单异常'].includes(row?.异常分类)).length
   };
 }
 
@@ -350,7 +350,7 @@ function buildDetailBuckets(openRows, finalRows, state) {
     delivery2plus: ordinaryRows.filter(row => countOf(row, '派送中天数', '派件中天数') >= 2),
     assign2: ordinaryRows.filter(row => countOf(row, '派件分配天数') >= 2),
     inboundNoScan: ordinaryRows.filter(row => row?.异常分类 === '入库无扫描'),
-    workOrderAbnormal: ordinaryRows.filter(row => row?.异常分类 === '需人工复核'),
+    workOrderAbnormal: ordinaryRows.filter(row => ['工单未处理', '工单异常'].includes(row?.异常分类)),
     noAction: ordinaryRows.filter(isNoActionRow),
     nodeDateStale: nodeRows,
     nodeStale1: nodeRows.filter(row => staleDays(row) === 1),

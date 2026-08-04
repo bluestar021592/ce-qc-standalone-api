@@ -5,6 +5,8 @@ import { getDb, nowIso } from './db.js';
 import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, getXlsxSheetRows } from './reporting.js';
 import { buildSnapshotHashes } from './snapshotHash.js';
 import { SHOP_WHITELIST_SOURCE_SHA256, SHOP_WHITELIST_VERSION } from './shopWhitelist.js';
+import { analyzeShipment } from './analyzer.js';
+import { getShopCodeMap } from './shopCodes.js';
 
 export function createDashboardSnapshot(state = {}, context = {}) {
   const reportDate = String(context.reportDate || state.reportDate || '').trim();
@@ -107,6 +109,32 @@ export function getMatchingSnapshot(state = {}) {
   const runId = String(resolveRunId(state, reportDate)).trim();
   if (!reportDate || !runId) return null;
   return getSnapshot(reportDate, runId);
+}
+
+export function repairSnapshotFromStoredData(snapshot = {}) {
+  const source = clone(snapshot?.state || {});
+  if (!source.reportDate || !Array.isArray(source.finalRows)) throw new Error('Stored snapshot data is incomplete and cannot be repaired locally.');
+  const eventsByBill = new Map();
+  for (const event of source.trackEvents || []) {
+    const bill = String(event?.shipmentCode || event?.运单号 || '').trim().toUpperCase();
+    if (!bill) continue;
+    if (!eventsByBill.has(bill)) eventsByBill.set(bill, []);
+    eventsByBill.get(bill).push(event);
+  }
+  const scansByBill = new Map((source.scanResults || []).map(row => [String(row?.运单号 || row?.shipmentCode || '').trim().toUpperCase(), row]));
+  const shopCodeMap = getShopCodeMap();
+  source.finalRows = source.finalRows.map(row => {
+    const bill = String(row?.运单号 || row?.shipmentCode || '').trim().toUpperCase();
+    if (!bill || row?.是否POD === '是') return row;
+    return analyzeShipment({ waybill: bill, scanRow: scansByBill.get(bill) || row, events: eventsByBill.get(bill) || [], shopCodeMap, reportDate: source.reportDate });
+  });
+  source.trackResults = source.finalRows.filter(row => row?.是否POD !== '是');
+  const repairRunId = `${snapshot.runId || source.lastRunSummary?.runId || 'stored'}_repair_${Date.now()}`;
+  source.currentRun = { ...(source.currentRun || {}), runId: repairRunId };
+  source.lastRunSummary = { ...(source.lastRunSummary || {}), runId: repairRunId, repairSource: 'STORED_SQLITE_DATA', ceApiCallsDuringRepair: 0 };
+  getDb().prepare("UPDATE export_snapshots SET status='INVALID',reconciliationStatus='FAILED',invalidReason=? WHERE snapshotId=?")
+    .run(JSON.stringify({ reason: 'CLASSIFICATION_CONFLICT', repairedFromStoredData: true }), snapshot.snapshotId);
+  return createDashboardSnapshot(source, { reportDate: source.reportDate, runId: repairRunId });
 }
 
 function resolveRunId(state, reportDate) {

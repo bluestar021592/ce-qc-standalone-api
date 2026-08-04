@@ -235,20 +235,18 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   state.apiBatchStatus = state.apiBatchStatus || [];
   state.scanPool = scanPool;
   state.processing = { running: true, paused: false, phase: 'SHOPEE状态查询', batchIndex: 0, totalBatches: Math.ceil(scanPool.length / TRACK_QUERY_BATCH_SIZE), runId };
+  state.processing = { ...state.processing, totalBatches: Math.ceil(scanPool.length / ORDER_BATCH_SIZE) };
   state.lastRunSummary = { ...(state.lastRunSummary || {}), businessType: 'SHOPEE', runId, reportDate, startedAt: startedAt.toISOString(), today: today.length, carry: carry.length, scanPool: scanPool.length };
   await checkpoint(state, onCheckpoint);
   await onProgress(`SHOPEE开始：今日日报 ${today.length}票，旧跨日 ${carry.length}票，查询池 ${scanPool.length}票`);
 
-  const shipment = await queryShopeeApi({
-    state, apiName: 'tms-shipment/track', bills: scanPool,
-    rowsKey: 'shipmentTrackResults', statusKey: 'shipmentQueryStatus',
-    query: codes => client.shipmentTrack(codes), onProgress, onCheckpoint, isPaused
-  });
-  const shipmentByBill = groupRows(shipment.rows);
-  const shipmentStatusByBill = statusMap(shipment.statuses);
+  const scan = await queryShopeeConfirmApi({ state, bills: scanPool, client, onProgress, onCheckpoint, isPaused });
+  const scanByBill = groupRows(scan.rows);
+  const scanStatusByBill = statusMap(scan.statuses);
   const scanResults = scanPool.map(bill => {
-    const source = shipmentByBill.get(bill)?.[0] || {};
-    const status = shipmentStatusByBill.get(bill) || 'failed';
+    const sourceRows = scanByBill.get(bill) || [];
+    const source = sourceRows.find(row => String(row?.orderStatus ?? '') === '85') || sourceRows[0] || {};
+    const status = scanStatusByBill.get(bill) || 'failed';
     const recipient = dailyByBill.get(bill) || priorByBill.get(bill) || {};
     return {
       ...source,
@@ -270,15 +268,15 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   state.scanResults = scanResults;
 
   const preliminaryPodBills = new Set(scanPool.filter(bill => {
-    const row = shipmentByBill.get(bill)?.[0] || {};
+    const row = (scanByBill.get(bill) || [])[0] || {};
     return String(row.orderStatus ?? '') === '85' || /\bPOD\b|delivered|签收|已妥投/i.test(JSON.stringify(row));
   }));
   const preliminaryReturnBills = new Set(scanPool.filter(bill => {
-    const row = shipmentByBill.get(bill)?.[0] || {};
+    const row = (scanByBill.get(bill) || [])[0] || {};
     return classifyShopeeScanStatus(row, row) === 'RETURN';
   }));
   for (const bill of preliminaryPodBills) podLocks.add(bill);
-  const needTrack = scanPool.filter(bill => !preliminaryPodBills.has(bill) && !preliminaryReturnBills.has(bill));
+  const needTrack = scanPool.filter(bill => scanStatusByBill.get(bill) === 'success' && !preliminaryPodBills.has(bill) && !preliminaryReturnBills.has(bill));
   state.needTrackBills = needTrack;
   state.podLocks = [...podLocks].sort();
   await checkpoint(state, onCheckpoint);
@@ -303,19 +301,18 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   const trackResults = [];
   for (const bill of scanPool) {
     const scanRow = scanResults.find(row => billOf(row) === bill) || { 运单号: bill, shipmentCode: bill, 来源类型: sourceType(bill, today, carry) };
-    const shipmentTrackRow = shipmentByBill.get(bill)?.[0] || {};
     const alreadyPod = preliminaryPodBills.has(bill);
     const result = analyzeShopeeShipment({
       waybill: bill,
       scanRow,
-      shipmentTrackRow,
+      shipmentTrackRow: {},
       events: (alreadyPod || preliminaryReturnBills.has(bill)) ? [] : (eventsByBill.get(bill) || []),
       exceptions: (alreadyPod || preliminaryReturnBills.has(bill)) ? [] : (exceptionsByBill.get(bill) || []),
       reportDate,
       dailyRow: dailyByBill.get(bill) || {},
       priorRow: priorByBill.get(bill) || {},
       apiStatus: {
-        shipment: shipmentStatusByBill.get(bill) || 'failed',
+        shipment: scanStatusByBill.get(bill) || 'failed',
         event: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (eventStatusByBill.get(bill) || 'failed')),
         exception: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (exceptionStatusByBill.get(bill) || 'failed'))
       }
@@ -360,6 +357,54 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   }
   await onProgress(`SHOPEE完成：POD ${summary.scanPod}票，退回 ${finalRows.filter(row => row.退回状态 === '已退回').length}票，明日继续 ${summary.nextCarry}票`);
   return { state, summary };
+}
+
+async function queryShopeeConfirmApi({ state, bills, client, onProgress, onCheckpoint, isPaused }) {
+  const reportDate = state.reportDate || '';
+  const statusByBill = new Map((state.scanQueryStatus || [])
+    .filter(row => !row.reportDate || row.reportDate === reportDate)
+    .map(row => [billOf(row), row]));
+  const completed = new Set([...statusByBill]
+    .filter(([, row]) => row.status === 'success')
+    .map(([bill]) => bill));
+  const rows = (state.scanResults || []).filter(row => completed.has(billOf(row)));
+  const pending = cleanAnyBills(bills).filter(bill => !completed.has(bill));
+  const batches = [];
+  for (let index = 0; index < pending.length; index += ORDER_BATCH_SIZE) batches.push(pending.slice(index, index + ORDER_BATCH_SIZE));
+
+  for (let index = 0; index < batches.length; index += 1) {
+    const batch = batches[index];
+    await waitIfPaused(state, isPaused, onProgress, onCheckpoint);
+    state.processing = { ...state.processing, phase: 'SHOPEE订单扫描', batchIndex: index + 1, totalBatches: batches.length };
+    await onProgress(`SHOPEE订单扫描 ${index + 1}/${batches.length}：${batch.length}票（单批上限350）`);
+    try {
+      const responseRows = await client.confirmQuery(batch);
+      rows.push(...(responseRows || []));
+      const grouped = groupConfirmRows(responseRows || []);
+      for (const bill of batch) {
+        statusByBill.set(bill, {
+          businessType: 'SHOPEE', reportDate, shipmentCode: bill, status: 'success',
+          resultCount: (grouped.get(bill) || []).length, checkedAt: new Date().toISOString()
+        });
+      }
+      recordApiAttempt(state, { apiName: 'confirm-query', batch, status: 'success', resultCount: (responseRows || []).length });
+    } catch (error) {
+      for (const bill of batch) {
+        statusByBill.set(bill, {
+          businessType: 'SHOPEE', reportDate, shipmentCode: bill, status: 'failed',
+          errorMessage: error?.message || String(error || ''), checkedAt: new Date().toISOString()
+        });
+      }
+      recordApiAttempt(state, { apiName: 'confirm-query', batch, status: 'failed', error });
+      await onProgress(`SHOPEE订单扫描批次失败：${batch.length}票已保留，续跑时仅重试该失败批次`);
+    }
+    state.scanResults = dedupeApiRows(rows, 'confirm-query');
+    state.scanQueryStatus = [...statusByBill.values()];
+    await checkpoint(state, onCheckpoint);
+  }
+  state.scanResults = dedupeApiRows(rows, 'confirm-query');
+  state.scanQueryStatus = [...statusByBill.values()];
+  return { rows: state.scanResults, statuses: state.scanQueryStatus };
 }
 
 async function queryShopeeApi({ state, apiName, bills, rowsKey, statusKey, query, onProgress, onCheckpoint, isPaused, normalizeRow = row => row }) {

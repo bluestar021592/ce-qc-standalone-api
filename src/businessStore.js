@@ -10,12 +10,12 @@ export function loadBusinessState(businessType = SHOPEE) {
   const type = normalizeType(businessType);
   const row = getDb().prepare('SELECT valueJson FROM business_states WHERE businessType=?').get(type);
   if (!row?.valueJson) return emptyState(type);
-  try { return normalizeBusinessState(JSON.parse(row.valueJson), type); } catch { return emptyState(type); }
+  try { return restrictShopeeState(normalizeBusinessState(JSON.parse(row.valueJson), type), type); } catch { return emptyState(type); }
 }
 
 export function saveBusinessState(state = {}, businessType = state.businessType || SHOPEE) {
   const type = normalizeType(businessType);
-  const normalized = normalizeBusinessState(state, type);
+  const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
   const db = getDb();
   const now = nowIso();
   db.exec('BEGIN IMMEDIATE');
@@ -181,12 +181,37 @@ export function normalizeBusinessState(state = {}, businessType = SHOPEE) {
     daily: state.daily || null, dailyParseSummary: state.dailyParseSummary || state.daily?.summary || null, dailyParseRows: state.dailyParseRows || state.daily?.importRows || state.daily?.details || [],
     recipientConflicts: state.recipientConflicts || state.daily?.conflicts || [], recipientReconciliation: state.recipientReconciliation || state.daily?.summary?.reconciliation || null,
     pnhBills: clean(state.pnhBills || state.bills || []), carryBills: clean(state.carryBills || []), podLocks: clean(state.podLocks || []),
-    scanPool: clean(state.scanPool || []), scanResults: state.scanResults || [], shipmentTrackResults: state.shipmentTrackResults || [], shipmentQueryStatus: state.shipmentQueryStatus || [], needTrackBills: clean(state.needTrackBills || []),
+    scanPool: clean(state.scanPool || []), scanResults: state.scanResults || [], scanQueryStatus: state.scanQueryStatus || [], shipmentTrackResults: state.shipmentTrackResults || [], shipmentQueryStatus: state.shipmentQueryStatus || [], needTrackBills: clean(state.needTrackBills || []),
     trackEvents: state.trackEvents || [], eventQueryStatus: state.eventQueryStatus || [], exceptionItems: state.exceptionItems || [], exceptionQueryStatus: state.exceptionQueryStatus || [],
     apiBatchStatus: state.apiBatchStatus || [], trackResults: state.trackResults || [], finalRows: state.finalRows || [], priorCarryRows: state.priorCarryRows || [], nextCarryBills: clean(state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || [])),
     historySummary: (state.historySummary || []).slice(-30), processing: state.processing || { running: false, paused: false, phase: '' },
     currentRun: state.currentRun || null, lastRunSummary: state.lastRunSummary || state.lastRun || null, lastRun: state.lastRun || state.lastRunSummary || null,
     backupImportedAt: state.backupImportedAt || '', backupSummary: state.backupSummary || null, logs: (state.logs || []).slice(-300), snapshotId: state.snapshotId || ''
+  };
+}
+
+function restrictShopeeState(state, type) {
+  if (type !== SHOPEE) return state;
+  const isEligible = row => ['CN', 'VN'].includes(recipientGroup(row));
+  const eligibleBills = new Set((state.dailyParseRows || []).filter(isEligible).map(billOf).filter(Boolean));
+  const rows = key => (state[key] || []).filter(row => isEligible(row) || eligibleBills.has(billOf(row)));
+  const priorByBill = new Map([...rows('finalRows'), ...rows('priorCarryRows')].map(row => [billOf(row), row]));
+  const keepBill = bill => eligibleBills.has(bill) || isEligible(priorByBill.get(bill) || {});
+  return {
+    ...state,
+    pnhBills: (state.pnhBills || []).filter(keepBill),
+    carryBills: (state.carryBills || []).filter(keepBill),
+    nextCarryBills: (state.nextCarryBills || []).filter(keepBill),
+    podLocks: (state.podLocks || []).filter(keepBill),
+    scanPool: (state.scanPool || []).filter(keepBill),
+    needTrackBills: (state.needTrackBills || []).filter(keepBill),
+    scanResults: rows('scanResults'),
+    shipmentTrackResults: rows('shipmentTrackResults'),
+    trackEvents: rows('trackEvents'),
+    exceptionItems: rows('exceptionItems'),
+    trackResults: rows('trackResults'),
+    finalRows: rows('finalRows'),
+    priorCarryRows: rows('priorCarryRows')
   };
 }
 

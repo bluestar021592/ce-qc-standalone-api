@@ -85,29 +85,48 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
   const conflicts = [];
   const rows = [];
   const importRows = [];
+  const excludedRows = [];
   for (const [shipmentCode, sourceRows] of rowsByBill) {
-    const groups = [...new Set(sourceRows.map(row => row.recipient_group))];
+    const eligibleRows = sourceRows.filter(row => row.recipient_group === 'CN' || row.recipient_group === 'VN');
+    const otherRows = sourceRows.filter(row => row.recipient_group === 'OTHER');
+    const groups = [...new Set(eligibleRows.map(row => row.recipient_group))];
+    if (!eligibleRows.length) {
+      const excluded = sourceRows.map(row => ({
+        ...row,
+        importStatus: 'IGNORED_NON_SHOPEE',
+        recipient_group_reason: row.recipient_group_reason || 'UNMATCHED_RECIPIENT'
+      }));
+      excludedRows.push(...excluded);
+      importRows.push(...excluded);
+      continue;
+    }
     if (groups.length > 1) {
       const conflict = {
         shipmentCode,
         groups,
-        rows: sourceRows.map(row => ({ sheetName: row.sheetName, rowNumber: row.rowNumber, recipient_raw: row.recipient_raw, recipient_group: row.recipient_group }))
+        rows: eligibleRows.map(row => ({ sheetName: row.sheetName, rowNumber: row.rowNumber, recipient_raw: row.recipient_raw, recipient_group: row.recipient_group }))
       };
       conflicts.push(conflict);
-      importRows.push(...sourceRows.map(row => ({
+      importRows.push(...eligibleRows.map(row => ({
         ...row,
         importStatus: 'RECIPIENT_GROUP_CONFLICT',
         recipient_group_reason: 'RECIPIENT_GROUP_CONFLICT'
       })));
+      const excluded = otherRows.map(row => ({ ...row, importStatus: 'IGNORED_NON_SHOPEE' }));
+      excludedRows.push(...excluded);
+      importRows.push(...excluded);
       continue;
     }
-    const canonical = { ...sourceRows[0], importStatus: sourceRows.length > 1 ? 'DUPLICATE_SAME_GROUP' : 'ACCEPTED' };
+    const canonical = { ...eligibleRows[0], importStatus: eligibleRows.length > 1 ? 'DUPLICATE_SAME_GROUP' : 'ACCEPTED' };
     rows.push(canonical);
-    importRows.push(canonical, ...sourceRows.slice(1).map(row => ({ ...row, importStatus: 'DUPLICATE_SAME_GROUP' })));
+    importRows.push(canonical, ...eligibleRows.slice(1).map(row => ({ ...row, importStatus: 'DUPLICATE_SAME_GROUP' })));
+    const excluded = otherRows.map(row => ({ ...row, importStatus: 'IGNORED_NON_SHOPEE' }));
+    excludedRows.push(...excluded);
+    importRows.push(...excluded);
   }
-  const groupCounts = countGroups(rows);
+  const groupCounts = { ...countGroups(rows), OTHER: excludedRows.length };
   const reconciliation = {
-    status: rows.length === groupCounts.CN + groupCounts.VN + groupCounts.OTHER ? 'PASSED' : 'FAILED_RECONCILIATION',
+    status: rows.length === groupCounts.CN + groupCounts.VN ? 'PASSED' : 'FAILED_RECONCILIATION',
     total: rows.length,
     ...groupCounts
   };
@@ -117,10 +136,13 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
     sourceName: options.originalName || path.basename(filePath),
     bills: rows.map(row => row.shipmentCode),
     details: rows,
+    excludedRows,
     importRows,
     conflicts,
     preview: importRows.slice(0, 50),
     summary: {
+      rawRows: details.length,
+      eligibleUniqueShipments: rows.length,
       totalRecognized: rows.length,
       totalUniqueCount: rowsByBill.size,
       totalAppearCount: details.length,
@@ -141,7 +163,9 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
 
 function countGroups(rows) {
   const counts = { CN: 0, VN: 0, OTHER: 0 };
-  for (const row of rows) counts[row.recipient_group] += 1;
+  for (const row of rows) {
+    if (row.recipient_group === 'CN' || row.recipient_group === 'VN') counts[row.recipient_group] += 1;
+  }
   return counts;
 }
 
