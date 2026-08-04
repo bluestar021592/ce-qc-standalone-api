@@ -522,16 +522,13 @@ function classifyCeFailure(error) {
 }
 
 function routeShopeeScan(row = {}, requestStatus = '') {
-  if (requestStatus !== 'success') return 'SCAN_RETRY';
-  const orderStatus = String(row.orderStatus ?? '').trim();
-  if (orderStatus === '85' || classifyShopeeScanStatus(row, row) === 'POD') return 'CLOSE_POD_NO_TRACK';
-  if (classifyShopeeScanStatus(row, row) === 'RETURN') return 'CLOSE_RETURN_NO_TRACK';
-  // CE has explicitly confirmed 50 as inbound. Other known labels are handled
-  // by the existing status classifier; unmapped numeric statuses stay retryable.
-  if (orderStatus === '50') return 'TRACK';
+  if (requestStatus !== 'success' || !billOf(row)) return 'SCAN_RETRY';
   const status = classifyShopeeScanStatus(row, row);
-  if (status === 'DELIVERY_ASSIGN' || status === 'DELIVERY') return 'TRACK';
-  return 'SCAN_RETRY';
+  if (status === 'POD') return 'CLOSE_POD_NO_TRACK';
+  if (status === 'RETURN') return 'CLOSE_RETURN_NO_TRACK';
+  // A successful scan response is not an API failure. Only terminal POD/return
+  // statuses skip track query; all other successful statuses must enter track.
+  return 'TRACK';
 }
 
 function groupRows(rows = []) {
@@ -549,12 +546,15 @@ function statusMap(rows = []) { return new Map(rows.map(row => [billOf(row), row
 
 function dedupeApiRows(rows = [], apiName = '') {
   const map = new Map();
+  const normalizedApiName = String(apiName || '').toLowerCase();
+  const isTrackEvent = normalizedApiName.includes('shipment-event');
+  const isExceptionItem = normalizedApiName.includes('exception-item');
   for (const row of rows) {
     const bill = billOf(row);
     if (!bill) continue;
-    const key = apiName === 'tms-shipment-event/query'
+    const key = isTrackEvent
       ? `${bill}|${row.eventTime || ''}|${row.eventCode || ''}|${row.trackingEventCode || ''}|${row.trackingEventDescZh || row.trackingEventDesc || ''}`
-      : apiName === 'exception-item/query'
+      : isExceptionItem
         ? `${bill}|${row.reportTime || ''}|${row.exceptionType || ''}|${row.exceptionDesc || ''}|${row.fileId || ''}`
         : bill;
     map.set(key, row);

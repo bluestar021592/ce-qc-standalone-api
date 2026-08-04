@@ -87,7 +87,7 @@ app.get(['/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', 
 });
 
 app.get('/api/health', async (req, res) => {
-  res.json({ ok: true, version: '0.1.0', time: new Date().toISOString(), db: getDbStatus() });
+  res.json({ ok: true, version: '0.1.0-shopee-track-user-delete-v2', patchId: '2026-08-04-track-delete-v2', time: new Date().toISOString(), db: getDbStatus() });
 });
 
 app.get('/api/session', (req, res) => {
@@ -152,27 +152,85 @@ app.post('/api/admin/users/:id/revoke-sessions', requireRole('ADMIN'), (req, res
 });
 
 app.delete('/api/admin/users/:id', requireRole('ADMIN'), (req, res) => {
-  const id = Number(req.params.id || 0);
-  const db = getDb();
-  const target = db.prepare("SELECT * FROM users WHERE id=? AND status='ACTIVE'").get(id);
-  if (!target) return res.status(404).json({ ok: false, error: '用户不存在或已删除。' });
-  if (Number(req.user?.id || 0) === id) return res.status(400).json({ ok: false, error: '不能删除当前登录用户。' });
-  if (String(target.role || '').toUpperCase() === 'ADMIN') {
-    const adminCount = db.prepare("SELECT COUNT(*) AS count FROM users WHERE status='ACTIVE' AND enabled=1 AND UPPER(role)='ADMIN'").get().count;
-    if (Number(adminCount) <= 1) return res.status(400).json({ ok: false, error: '不能删除最后一个启用的管理员。' });
+  try {
+    const id = Number(req.params.id || 0);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, code: 'INVALID_USER_ID', error: '用户编号无效。' });
+    }
+
+    const db = getDb();
+    const target = db.prepare("SELECT * FROM users WHERE id=? AND COALESCE(status,'ACTIVE')='ACTIVE'").get(id);
+    if (!target) {
+      return res.status(404).json({ ok: false, code: 'USER_NOT_FOUND', error: '用户不存在或已经删除。' });
+    }
+
+    const currentUserId = Number(req.user?.id || 0);
+    if (currentUserId === id) {
+      return res.status(400).json({ ok: false, code: 'CANNOT_DELETE_SELF', error: '不能删除当前正在登录的管理员账号。' });
+    }
+
+    if (String(target.role || '').toUpperCase() === 'ADMIN') {
+      const adminRow = db.prepare(
+        "SELECT COUNT(*) AS count FROM users WHERE COALESCE(status,'ACTIVE')='ACTIVE' AND enabled=1 AND UPPER(role)='ADMIN'"
+      ).get();
+      if (Number(adminRow?.count || 0) <= 1) {
+        return res.status(400).json({ ok: false, code: 'LAST_ADMIN_PROTECTED', error: '不能删除最后一个启用的管理员。' });
+      }
+    }
+
+    const confirmation = String(req.body?.username || '').trim().toLowerCase();
+    const expectedUsername = String(target.username || '').trim().toLowerCase();
+    if (!confirmation || confirmation !== expectedUsername) {
+      return res.status(400).json({
+        ok: false,
+        code: 'USERNAME_CONFIRMATION_MISMATCH',
+        error: `请输入完整用户名 ${target.username} 进行确认。`
+      });
+    }
+
+    const now = new Date().toISOString();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const update = db.prepare(
+        "UPDATE users SET status='DELETED',enabled=0,deletedAt=?,deletedBy=?,updatedAt=? WHERE id=? AND COALESCE(status,'ACTIVE')='ACTIVE'"
+      ).run(now, currentUserId || null, now, id);
+
+      if (Number(update?.changes || 0) !== 1) {
+        throw new Error('用户状态已发生变化，请刷新页面后重试。');
+      }
+
+      db.prepare(
+        'UPDATE user_sessions SET revokedAt=? WHERE userId=? AND revokedAt IS NULL'
+      ).run(now, id);
+
+      auditAction(req, 'USER_SOFT_DELETED', {
+        userId: id,
+        username: target.username
+      });
+
+      db.exec('COMMIT');
+    } catch (transactionError) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw transactionError;
+    }
+
+    return res.json({
+      ok: true,
+      deletedUser: {
+        id,
+        username: target.username,
+        status: 'DELETED'
+      }
+    });
+  } catch (error) {
+    const message = error?.message || '未知错误';
+    void appendRuntimeLog(`[USER_DELETE_FAILED] userId=${req.params.id || ''} operator=${req.user?.username || ''} error=${message}`);
+    return res.status(500).json({
+      ok: false,
+      code: 'USER_DELETE_FAILED',
+      error: `删除用户失败：${message}`
+    });
   }
-  const confirmation = String(req.body?.username || '').trim().toLowerCase();
-  if (confirmation !== String(target.username || '').trim().toLowerCase()) {
-    return res.status(400).json({ ok: false, error: '请输入要删除的用户名进行确认。' });
-  }
-  const now = new Date().toISOString();
-  const update = db.transaction(() => {
-    db.prepare("UPDATE users SET status='DELETED',enabled=0,deletedAt=?,deletedBy=?,updatedAt=? WHERE id=?").run(now, Number(req.user?.id || 0) || null, now, id);
-    db.prepare('UPDATE user_sessions SET revokedAt=? WHERE userId=? AND revokedAt IS NULL').run(now, id);
-  });
-  update();
-  auditAction(req, 'USER_SOFT_DELETED', { userId: id, username: target.username });
-  res.json({ ok: true });
 });
 
 app.post('/api/admin/users/:id/restore', requireRole('ADMIN'), (req, res) => {

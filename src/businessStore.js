@@ -386,9 +386,14 @@ function sanitizeShopeeDailySummary(summary = null) {
     : summary.reconciliation;
   if (reconciliation && 'OTHER' in reconciliation) delete reconciliation.OTHER;
   return {
-    ...summary,
+    eligibleUniqueShipments: Number(summary.eligibleUniqueShipments || summary.totalRecognized || reconciliation?.total || 0),
+    totalRecognized: Number(summary.totalRecognized || summary.eligibleUniqueShipments || reconciliation?.total || 0),
+    conflictCount: Number(summary.conflictCount || 0),
+    recipientHeader: summary.recipientHeader || '',
     groupCounts,
     reconciliation,
-    warnings: (summary.warnings || []).filter(text => !/OTHER|其他|待确认/.test(String(text || '')))
+    warnings: (summary.warnings || []).filter(text => !/OTHER|其他|待确认/.test(String(text || ''))),
+    failedRows: summary.failedRows || [],
+    actualHeaders: summary.actualHeaders || []
   };
 }

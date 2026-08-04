@@ -85,19 +85,10 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
   const conflicts = [];
   const rows = [];
   const importRows = [];
-  const excludedRows = [];
   for (const [shipmentCode, sourceRows] of rowsByBill) {
     const eligibleRows = sourceRows.filter(row => row.recipient_group === 'CN' || row.recipient_group === 'VN');
     const groups = [...new Set(eligibleRows.map(row => row.recipient_group))];
-    if (!eligibleRows.length) {
-      excludedRows.push(...sourceRows.map(row => ({
-        sheetName: row.sheetName,
-        rowNumber: row.rowNumber,
-        shipmentCode: row.shipmentCode,
-        importStatus: 'IGNORED_NON_SHOPEE'
-      })));
-      continue;
-    }
+    if (!eligibleRows.length) continue;
     if (groups.length > 1) {
       const conflict = {
         shipmentCode,
@@ -128,7 +119,7 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
     sourceName: options.originalName || path.basename(filePath),
     bills: rows.map(row => row.shipmentCode),
     details: rows,
-    excludedRows,
+    excludedRows: [],
     importRows,
     conflicts,
     preview: importRows.slice(0, 50),

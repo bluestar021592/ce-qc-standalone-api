@@ -53,8 +53,15 @@ document.querySelectorAll('.modal .icon-button').forEach(button => {
 
 async function api(url, options = {}) {
   const response = await fetch(url, options);
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || result.ok === false) throw new Error(result.error || response.statusText || '请求失败');
+  const rawText = await response.text();
+  let result = {};
+  try { result = rawText ? JSON.parse(rawText) : {}; } catch {}
+  if (!response.ok || result.ok === false) {
+    const fallback = rawText && !/^\s*</.test(rawText)
+      ? rawText.slice(0, 300)
+      : `服务器请求失败（HTTP ${response.status}）`;
+    throw new Error(result.error || result.message || fallback || response.statusText || '请求失败');
+  }
   return result;
 }
 
@@ -219,7 +226,8 @@ async function deleteInternalUser(id, username) {
   const confirmation = prompt(`此操作会停用用户并撤销其会话。请输入用户名 ${username} 确认删除：`);
   if (confirmation === null) return;
   try {
-    await api(`/api/admin/users/${id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: confirmation }) });
+    const result = await api(`/api/admin/users/${id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: confirmation }) });
+    alert(`用户 ${result.deletedUser?.username || username} 已删除，全部登录会话已撤销。`);
     await loadUserManagement();
   } catch (error) { alert(`删除失败：${error.message}`); }
 }
@@ -559,7 +567,7 @@ function renderShopeeImportMeta() {
   document.getElementById('shopeeImportMeta').innerHTML = `<div class="import-meta-line">
     <span>文件 <b>${escapeHtml(shopeeState.sourceName || '未导入')}</b></span><span>reportDate <b>${escapeHtml(shopeeState.reportDate || '—')}</b></span>
     <span>有效单量 <b>${formatInt(summary.totalRecognized || shopeeState.total || 0)}</b></span><span>收件人字段 <b>${escapeHtml(summary.recipientHeader || '—')}</b></span>
-    <span>CN <b>${formatInt(counts.CN || 0)}</b></span><span>VN <b>${formatInt(counts.VN || 0)}</b></span><span>OTHER <b>${formatInt(counts.OTHER || 0)}</b></span><span>对账 <b>${escapeHtml(reconciliation)}</b></span>
+    <span>CN <b>${formatInt(counts.CN || 0)}</b></span><span>VN <b>${formatInt(counts.VN || 0)}</b></span><span>对账 <b>${escapeHtml(reconciliation)}</b></span>
   </div>${(summary.warnings || []).length ? `<div class="import-warning">${(summary.warnings || []).map(escapeHtml).join('；')}</div>` : ''}`;
 }
 
@@ -1022,7 +1030,7 @@ async function importShopeeExcel() {
     renderAll();
     const parsed = result.parsed || {};
     const groups = parsed.groupCounts || {};
-    alert(`SHOPEE日报导入成功：有效${parsed.totalRecognized || 0}票，CN ${groups.CN || 0}，VN ${groups.VN || 0}，OTHER ${groups.OTHER || 0}，冲突${parsed.conflictCount || 0}票。`);
+    alert(`SHOPEE日报导入成功：有效${parsed.totalRecognized || 0}票，CN ${groups.CN || 0}，VN ${groups.VN || 0}，冲突${parsed.conflictCount || 0}票。`);
   } catch (error) { alert(`SHOPEE日报导入失败：${error.message}`); }
 }
 

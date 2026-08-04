@@ -164,10 +164,11 @@ export function classifyShopeeScanStatus(shipmentTrackRow = {}, scanRow = {}) {
     shipmentTrackRow?.shipmentStatusDesc, shipmentTrackRow?.statusDesc, shipmentTrackRow?.statusName,
     shipmentTrackRow?.trackingStatus, scanRow?.扫描分类, scanRow?.statusText
   ].map(value => String(value || '')).join(' ');
-  if (String(scanRow?.orderStatus ?? '') === '85' || POD_RE.test(text)) return 'POD';
-  if (status === '81' || RETURN_RE.test(text)) return 'RETURN';
-  if (status === '30' || DELIVERY_ASSIGN_RE.test(text)) return 'DELIVERY_ASSIGN';
-  if (DELIVERY_RE.test(text)) return 'DELIVERY';
+  if (status === '85' || POD_RE.test(text)) return 'POD';
+  if (status === '81' || status === '100' || RETURN_RE.test(text)) return 'RETURN';
+  if (status === '60' || status === '30' || DELIVERY_ASSIGN_RE.test(text)) return 'DELIVERY_ASSIGN';
+  if (status === '70' || DELIVERY_RE.test(text)) return 'DELIVERY';
+  if (status === '50') return 'INBOUND';
   return 'UNKNOWN';
 }
 
