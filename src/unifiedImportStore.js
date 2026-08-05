@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getDb, nowIso } from './db.js';
+import { SHOPEE, loadBusinessState } from './businessStore.js';
 
 let ccslSnapshotCache = { snapshotId: '', state: null };
 
@@ -196,7 +197,19 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
   const memberSet = new Set(bills);
   const unified = db.prepare('SELECT status,payloadJson FROM unified_snapshots WHERE snapshotId=?').get(batch.snapshotId);
   const payload = JSON.parse(unified?.payloadJson || '{}');
+  const liveShopeeState = type.startsWith('SHOPEE') ? loadBusinessState(SHOPEE) : null;
+  const liveState = liveShopeeState?.reportDate === batch.reportDate ? liveShopeeState : null;
+  const filterMembers = rows => (rows || []).filter(row => memberSet.has(codeOf(row)));
   let finalRows = (payload.finalRows || []).filter(row => String(row.businessType || '').toUpperCase() === type);
+  if (!finalRows.length && liveState) finalRows = filterMembers(liveState.finalRows);
+  if (!finalRows.length && liveState?.processing?.running) {
+    finalRows = filterMembers(liveState.scanResults).map(row => ({
+      ...row,
+      businessType: type,
+      apiStatus: row.apiStatus || row.API状态 || 'success',
+      provisional: true
+    }));
+  }
   const ccslSnapshotState = !type.startsWith('SHOPEE') ? latestCcslSnapshotState(db, batch.reportDate) : null;
   if (!finalRows.length && !type.startsWith('SHOPEE')) {
     finalRows = (ccslSnapshotState?.finalRows || []).filter(row => memberSet.has(codeOf(row))).map(row => ({ ...row, businessType: type }));
@@ -215,15 +228,25 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
     dailyParseRows: dailyRows.map(row => ({ ...row, recipient_group: type === 'SHOPEECN' ? 'CN' : type === 'SHOPEEVN' ? 'VN' : row.recipient_group })),
     dailyParseSummary: { totalRecognized: bills.length, groupCounts: { CN: type === 'SHOPEECN' ? bills.length : 0, VN: type === 'SHOPEEVN' ? bills.length : 0 } },
     finalRows,
-    scanResults: (payload.scanResults || []).filter(row => memberSet.has(codeOf(row))).length
-      ? (payload.scanResults || []).filter(row => memberSet.has(codeOf(row)))
-      : (!type.startsWith('SHOPEE') ? (ccslSnapshotState?.scanResults || []).filter(row => memberSet.has(codeOf(row))).map(row => ({ ...row, businessType: type })) : []),
+    scanResults: filterMembers(payload.scanResults).length
+      ? filterMembers(payload.scanResults)
+      : (liveState
+          ? filterMembers(liveState.scanResults)
+          : (!type.startsWith('SHOPEE') ? filterMembers(ccslSnapshotState?.scanResults).map(row => ({ ...row, businessType: type })) : [])),
     trackResults: finalRows,
-    trackEvents: (payload.trackEvents || []).filter(row => memberSet.has(codeOf(row))),
+    trackEvents: filterMembers(payload.trackEvents).length ? filterMembers(payload.trackEvents) : filterMembers(liveState?.trackEvents),
     carryBills,
     nextCarryBills: carryBills,
-    podLocks: [...new Set([...podLocks, ...finalRows.filter(row => row.是否POD === '是').map(codeOf).filter(Boolean)])],
-    historySummary: []
+    podLocks: [...new Set([
+      ...podLocks,
+      ...filterMembers(liveState?.scanResults).filter(isPodRow).map(codeOf),
+      ...finalRows.filter(isPodRow).map(codeOf)
+    ].filter(Boolean))],
+    historySummary: liveState?.historySummary || [],
+    processing: liveState?.processing || { running: false, paused: false, phase: '' },
+    currentRun: liveState?.currentRun || null,
+    lastRunSummary: liveState?.lastRunSummary || null,
+    logs: liveState?.logs || []
   };
 }
 
