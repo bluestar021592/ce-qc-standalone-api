@@ -193,16 +193,22 @@
       plotted.filter(Boolean).forEach(point => { svg += `<circle cx="${point.x}" cy="${point.y}" r="2.2" fill="${series.color}"/><text x="${point.x - 9}" y="${point.y - 7}" font-size="8" font-weight="700" fill="${series.color}">${Number(point.value.toFixed(1))}%</text>`; });
     });
     svg += '</svg>';
-    return `<article class="pixel-chart-card"><div class="pixel-chart-title"><b>${text(definition.title)}</b><span>近7天 ${icon('chevron')}</span></div><div class="pixel-legend">${definition.series.map(series => `<span><i style="background:${series.color}"></i>${text(series.label)}</span>`).join('')}</div>${svg}</article>`;
+    const current = definition.series[0]?.values?.at(-1);
+    const previous = definition.series[0]?.values?.at(-2);
+    const change = Number.isFinite(Number(current)) && Number.isFinite(Number(previous)) && Number(previous) !== 0
+      ? ((Number(current) - Number(previous)) / Math.abs(Number(previous))) * 100 : null;
+    const unit = definition.unit || '%';
+    const action = definition.action ? `onclick="openHomeMetricDetail('${definition.action}')"` : '';
+    return `<article class="pixel-chart-card" role="button" tabindex="0" ${action}><div class="pixel-chart-title"><b>${text(definition.title)}</b><span>近7天 ${icon('chevron')}</span></div><div class="pixel-legend">${definition.series.map(series => `<span><i style="background:${series.color}"></i>${text(series.label)}</span>`).join('')}</div>${svg}<footer class="v6-chart-footer"><span>当前 <b>${Number.isFinite(Number(current)) ? `${Number(current).toFixed(unit === '%' ? 2 : 0)}${unit}` : '—'}</b></span><strong class="${change !== null && change < 0 ? 'down' : 'up'}">环比昨日 ${change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}</strong></footer></article>`;
   }
 
   function charts(snapshot) {
     const trends = snapshot.trends || {}; const dates = snapshot.dates || [];
     const series = (key, label, color) => ({ label, color, values: trends[key] || [] });
     const definitions = [
-      { title: '签收率趋势', min: 60, max: 100, series: [series('podCcsl', 'CCSL', COLORS.blue), series('podPp', 'SHOPEE 本省（PP）', COLORS.green), series('podPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
+      { title: 'POD率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('podCcsl', 'CCSL', COLORS.blue), series('podPp', 'SHOPEE 本省（PP）', COLORS.green), series('podPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
       { title: 'Pending率趋势', min: 0, max: 20, series: [series('pendingCcsl', 'CCSL', COLORS.blue), series('pendingPp', 'SHOPEE 本省（PP）', COLORS.green), series('pendingPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
-      { title: 'OC率趋势', min: 0, max: 15, series: [series('ocCcsl', 'CCSL', COLORS.blue), series('ocPp', 'SHOPEE 本省（PP）', COLORS.green), series('ocPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
+      { title: 'OC率趋势', min: 0, max: 15, unit: '%', action: 'oc', series: [series('ocCcsl', 'CCSL', COLORS.blue), series('ocPp', 'SHOPEE 本省（PP）', COLORS.green), series('ocPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
       { title: '本省/外省 对比（SHOPEE）', min: 60, max: 100, series: [series('podPp', '本省（PP）签收率', COLORS.green), series('podPv', '外省（PV）签收率', COLORS.orange)] }
     ];
     return definitions.map(definition => chartCard(definition, dates)).join('');
