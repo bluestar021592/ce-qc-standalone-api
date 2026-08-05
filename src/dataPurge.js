@@ -10,9 +10,9 @@ import { recordBackup } from './backup.js';
 export const PURGE_PHRASE = '永久清除全部业务数据';
 const challenges = new Map();
 
-export async function createPurgeChallenge(user = {}) {
+export async function createPurgeChallenge(user = {}, options = {}) {
   const db = getDb();
-  assertNoActiveRuns(db);
+  reconcileRunLocks(db, options.activeRunIds);
   assertIntegrity(db);
   const counts = tableCounts(db);
   const backup = await createVerifiedPreClearBackup(user.email || '');
@@ -31,7 +31,7 @@ export async function createPurgeChallenge(user = {}) {
   };
 }
 
-export async function executePurge({ challengeId, phrase, backupConfirmed, user = {} }) {
+export async function executePurge({ challengeId, phrase, backupConfirmed, user = {}, activeRunIds = null }) {
   const challenge = challenges.get(String(challengeId || ''));
   if (!challenge || challenge.expiresAt < Date.now() || challenge.email !== (user.email || '')) throw new Error('清除验证已失效，请重新开始。');
   if (Date.now() - challenge.createdAt < 5000) throw new Error('请等待5秒倒计时完成。');
@@ -39,7 +39,7 @@ export async function executePurge({ challengeId, phrase, backupConfirmed, user 
   if (String(phrase || '') !== PURGE_PHRASE) throw new Error(`请输入完整确认短语：${PURGE_PHRASE}`);
 
   const db = getDb();
-  assertNoActiveRuns(db);
+  reconcileRunLocks(db, activeRunIds);
   await verifyBackup(challenge.backup);
   const before = tableCounts(db);
   resetAppState({ logs: [] });
@@ -99,11 +99,26 @@ function tableCounts(db) {
   return Object.fromEntries(BUSINESS_DATA_TABLES.filter(name => existing.has(name)).map(name => [name, Number(db.prepare(`SELECT COUNT(*) count FROM ${name}`).get()?.count || 0)]));
 }
 
-function assertNoActiveRuns(db) {
-  const main = db.prepare("SELECT runId FROM run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get();
-  const business = db.prepare("SELECT runId FROM business_run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get();
-  const runId = main?.runId || business?.runId;
-  if (runId) throw new Error(`当前存在活动任务，不能清除。runId：${runId}`);
+function reconcileRunLocks(db, activeRunIds) {
+  const active = activeRunIds instanceof Set ? activeRunIds : new Set(activeRunIds || []);
+  const main = db.prepare("SELECT reportDate,runId FROM run_locks WHERE status IN ('running','paused','paused_write')").all();
+  const business = db.prepare("SELECT businessType,reportDate,runId FROM business_run_locks WHERE status IN ('running','paused','paused_write')").all();
+  const genuinelyActive = [...main, ...business].find(row => active.has(row.runId));
+  if (genuinelyActive) throw new Error(`当前存在活动任务，不能清除。runId：${genuinelyActive.runId}`);
+
+  if (!main.length && !business.length) return;
+  const now = nowIso();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare("UPDATE run_locks SET status='interrupted',currentStage='服务重启后由管理员终止',errorMessage='stale process lock cleared before full data purge',updatedAt=? WHERE status IN ('running','paused','paused_write')").run(now);
+    db.prepare("UPDATE business_run_locks SET status='interrupted',currentStage='服务重启后由管理员终止',errorMessage='stale process lock cleared before full data purge',updatedAt=? WHERE status IN ('running','paused','paused_write')").run(now);
+    db.prepare("UPDATE run_checkpoints SET status='INTERRUPTED',updatedAt=? WHERE status IN ('RUNNING','PROCESSING')").run(now);
+    db.prepare("UPDATE business_run_checkpoints SET status='interrupted',errorMessage='stale process lock cleared before full data purge',updatedAt=? WHERE status='running'").run(now);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 function assertIntegrity(db) { if (db.prepare('PRAGMA integrity_check').get()?.integrity_check !== 'ok') throw new Error('SQLite完整性检查未通过。'); }
 export function hashFileStream(file) {

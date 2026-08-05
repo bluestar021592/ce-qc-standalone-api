@@ -389,7 +389,7 @@ app.get('/api/state/last-report', async (req, res) => {
 app.post('/api/admin/data-purge/prepare', requireRole('ADMIN'), async (req, res) => {
   try {
     auditAction(req, 'DATA_PURGE_REQUESTED', {});
-    const challenge = await createPurgeChallenge(req.user);
+    const challenge = await createPurgeChallenge(req.user, { activeRunIds });
     auditAction(req, 'DATA_PURGE_BACKUP_VERIFIED', { backupPath: challenge.backup.path, sha256: challenge.backup.sha256 });
     res.json({ ok: true, ...challenge, administrator: req.user.email });
   } catch (e) {
@@ -400,7 +400,7 @@ app.post('/api/admin/data-purge/prepare', requireRole('ADMIN'), async (req, res)
 
 app.post('/api/admin/data-purge/execute', requireRole('ADMIN'), async (req, res) => {
   try {
-    const result = await executePurge({ ...req.body, user: req.user });
+    const result = await executePurge({ ...req.body, user: req.user, activeRunIds });
     auditAction(req, 'DATA_PURGE_COMPLETED', { backupPath: result.backup.filePath, before: result.before, after: result.after });
     broadcastEvent('DATA_RESET', { at: result.completedAt });
     res.json({ ok: true, ...result, state: summarizeState(await loadState()), shopeeState: summarizeShopeeState(loadBusinessState(SHOPEE)) });
