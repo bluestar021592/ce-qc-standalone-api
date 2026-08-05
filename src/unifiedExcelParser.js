@@ -3,15 +3,16 @@ import fs from 'fs';
 import XLSX from 'xlsx';
 
 const BUSINESS_PRIORITY = ['SHOPEEVN', 'SHOPEECN', 'TBKH', 'ALI1688'];
-const SHIPMENT_HEADERS = ['shipmentcode', 'shipment code', '运单号', '运单号码', '物流单号', '快递单号'];
-const RECIPIENT_HEADERS = ['收件人', '收件人名称', 'receiver', 'receivername', 'recipient', 'recipientname', '客户名称'];
-const REGION_HEADERS = ['区域代码', '区域', 'region', 'regioncode'];
-const DATE_HEADERS = ['日报日期', '日期', 'reportdate'];
+const SHIPMENT_HEADERS = ['运单号', '单号', '面单号', '快递单号', '物流单号', 'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'];
+const RECIPIENT_HEADERS = ['收件人', '收件人姓名', '客户名称', '客户', '收货人', 'recipient', 'receiver', 'receivername', 'consignee', 'customername'];
+const REGION_HEADERS = ['区域', '区域代码', '路区', '站点', '目的地', '网点', 'region', 'area', 'route', 'site', 'destination'];
+const DATE_HEADERS = ['日报日期', '日期', '数据日期', '入库日期', 'reportdate', 'date', 'inbounddate'];
 
 export function parseUnifiedDailyExcel(filePath, options = {}) {
   const workbook = XLSX.readFile(filePath, { cellDates: true });
   const details = [];
   const warnings = [];
+  const sheetDiagnostics = [];
   const seen = new Set();
   let rawRows = 0;
   let duplicateRows = 0;
@@ -21,15 +22,26 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   let detectedDate = normalizeDate(options.reportDate);
 
   for (const sheetName of workbook.SheetNames) {
-    const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: false });
+    const sheet = workbook.Sheets[sheetName];
+    const hidden = Number(workbook.Workbook?.Sheets?.find(item => item.name === sheetName)?.Hidden || 0) > 0;
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+    if (hidden || !matrix.some(row => row.some(value => String(value ?? '').trim()))) {
+      sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: hidden ? '隐藏Sheet' : '空Sheet', headerRow: null, detectedColumns: {}, missingFields: [] });
+      continue;
+    }
+    propagateMergedHeaderCells(sheet, matrix);
     const headerIndex = findHeaderRow(matrix);
-    if (headerIndex < 0) continue;
+    if (headerIndex < 0) {
+      sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: '前15行未找到运单号+收件人表头', headerRow: null, detectedColumns: {}, missingFields: ['waybill', 'recipient'], sampleHeaders: matrix.slice(0, 15).map(row => row.filter(Boolean).slice(0, 8)) });
+      continue;
+    }
     const headers = matrix[headerIndex].map(normalizeHeader);
     const shipmentIndex = findColumn(headers, SHIPMENT_HEADERS);
     const recipientIndex = findColumn(headers, RECIPIENT_HEADERS);
     const regionIndex = findColumn(headers, REGION_HEADERS);
     const dateIndex = findColumn(headers, DATE_HEADERS);
-    if (shipmentIndex < 0 || recipientIndex < 0) continue;
+    const detectedColumns = { waybill: shipmentIndex, recipient: recipientIndex, region: regionIndex, reportDate: dateIndex };
+    sheetDiagnostics.push({ sheetName, status: 'VALID', reason: '识别成功', headerRow: headerIndex + 1, detectedColumns, missingFields: [], sampleHeaders: matrix[headerIndex].slice(0, 12) });
 
     for (let index = headerIndex + 1; index < matrix.length; index += 1) {
       const row = matrix[index] || [];
@@ -69,7 +81,11 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     }
   }
 
-  if (!details.length) throw new Error('未识别到同时包含运单号和收件人字段的日报数据');
+  if (!details.length) {
+    const error = new Error('未识别到同时包含运单号和收件人字段的日报数据，请查看逐Sheet诊断');
+    error.sheetDiagnostics = sheetDiagnostics;
+    throw error;
+  }
   const reportDate = normalizeDate(options.reportDate) || detectedDate;
   if (!reportDate) throw new Error('未识别到日报日期，请手动选择日报日期');
   for (const row of details) row.reportDate = reportDate;
@@ -80,12 +96,13 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     classificationCounts,
     summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, classificationConflicts },
     rows: details,
-    warnings
+    warnings,
+    sheetDiagnostics
   };
 }
 
 function findHeaderRow(matrix) {
-  for (let i = 0; i < Math.min(matrix.length, 30); i += 1) {
+  for (let i = 0; i < Math.min(matrix.length, 15); i += 1) {
     const headers = (matrix[i] || []).map(normalizeHeader);
     if (findColumn(headers, SHIPMENT_HEADERS) >= 0 && findColumn(headers, RECIPIENT_HEADERS) >= 0) return i;
   }
@@ -108,4 +125,16 @@ function normalizeDate(value) {
   const text = String(value).trim().replace(/[./]/g, '-');
   const match = text.match(/(20\d{2})-(\d{1,2})-(\d{1,2})/);
   return match ? `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}` : '';
+}
+
+function propagateMergedHeaderCells(sheet, matrix) {
+  for (const range of sheet['!merges'] || []) {
+    if (range.s.r >= 15) continue;
+    const value = matrix[range.s.r]?.[range.s.c];
+    if (!String(value ?? '').trim()) continue;
+    for (let row = range.s.r; row <= range.e.r; row += 1) {
+      matrix[row] ||= [];
+      for (let column = range.s.c; column <= range.e.c; column += 1) matrix[row][column] ||= value;
+    }
+  }
 }

@@ -14,7 +14,7 @@
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
       <div class="sidebar-brand">
-        <img src="/assets/ce-express-logo-main.png" alt="CE Express">
+        <img src="/assets/ce-express-logo-main.png" alt="CE Express" data-testid="ce-express-logo">
         <div class="brand-copy"><strong>CE EXPRESS</strong><small>质量控制管理系统</small></div>
       </div>
 
@@ -56,14 +56,11 @@
         </div>
       </header>
 
-      <main class="main-content">
+      <main class="main-content" data-testid="page-root">
         <section id="homePage" class="app-page">
-          <section id="homeKpis" class="kpi-row" aria-label="首页核心指标"></section>
-
-          <section class="overview-row">
-            <article class="pixel-panel"><h2 class="pixel-panel-title"><span class="pixel-section-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg></span>CCSL看板</h2><div id="homeCcslOverview"></div></article>
-            <article class="pixel-panel"><h2 class="pixel-panel-title"><span class="pixel-section-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bag"></use></svg></span>SHOPEE看板</h2><div id="homeShopeeOverview"></div></article>
-          </section>
+          <section id="homeBusinessCards" class="business-card-grid" aria-label="六业务总览"></section>
+          <section class="pixel-panel home-core-panel"><h2 class="pixel-panel-title">核心指标总览 <small>PP＝派送｜PV＝派件</small></h2><div id="homeCoreMetrics" class="core-metric-grid"></div></section>
+          <section class="home-special-row"><article class="pixel-panel"><h2 class="pixel-panel-title">SHOPEE 专项指标</h2><div id="homeShopeeSpecial"></div></article><article class="pixel-panel"><h2 class="pixel-panel-title">派送概率分布（按派次）</h2><div id="homeDispatchDistribution"></div></article></section>
 
           <section id="homeTrendGrid" class="chart-row" aria-label="七天趋势"></section>
 
@@ -112,8 +109,8 @@
         <section id="importPage" class="app-page" hidden>
           <div class="page-heading"><div><h2>数据导入与处理</h2><p>一次上传综合日报，系统自动分类到五个独立业务队列</p></div></div>
           <div class="operations-dashboard">
-            <section id="unifiedImport" class="panel operation-panel unified-import-panel"><div class="panel-title"><h3>综合日报导入</h3></div><label class="field-label">日报日期（可选修正）<input id="reportDate" type="date"></label><label class="file-picker"><input id="excelFile" type="file" accept=".xlsx,.xls"><span>选择综合日报Excel</span></label><button class="btn primary full" onclick="importUnifiedExcel()">导入综合日报并自动分类</button><div id="fileStatus" class="operation-status"></div></section>
-            <section id="runPanel" class="panel operation-panel"><div class="panel-title"><h3>统一处理</h3></div><div class="button-stack"><button class="btn primary" onclick="runUnified()">开始全自动处理</button><button class="btn ghost" onclick="resumeUnified()">继续处理</button><button class="btn warning" onclick="pauseUnified()">暂停</button></div><div id="ccslRunStatus" class="operation-status"></div></section>
+            <section id="unifiedImport" class="panel operation-panel unified-import-panel"><div class="panel-title"><h3>综合日报导入</h3></div><label class="field-label">日报日期（可选修正）<input id="reportDate" type="date"></label><label class="file-picker"><input id="excelFile" type="file" accept=".xlsx,.xls"><span>选择综合日报Excel</span></label><button class="btn primary full" data-testid="combined-daily-import" onclick="importUnifiedExcel()">导入综合日报并自动分类</button><div id="fileStatus" class="operation-status"></div></section>
+            <section id="runPanel" class="panel operation-panel"><div class="panel-title"><h3>统一处理</h3></div><div class="button-stack"><button class="btn primary" data-testid="global-auto-process" onclick="runUnified()">开始全自动处理</button><button class="btn ghost" onclick="resumeUnified()">继续处理</button><button class="btn warning" onclick="pauseUnified()">暂停</button></div><div id="ccslRunStatus" class="operation-status"></div></section>
             <section class="panel unified-summary-panel"><div class="panel-title"><h3>自动分类结果</h3><span id="unifiedSnapshotStatus" class="status-pill muted">尚未导入</span></div><div id="unifiedClassificationSummary" class="unified-classification-summary"><div class="empty-state compact">导入综合日报后显示五业务分类和警告统计</div></div></section>
           </div>
         </section>
@@ -139,7 +136,7 @@
           <div class="page-heading"><div><h2>系统设置</h2><p>登录、门店配置、备份与日志</p></div></div>
           <div class="settings-grid">
             <section class="panel operation-panel auth-panel"><div class="panel-title"><h3>CE系统登录</h3></div><div id="ceAuthPanel"></div><div id="shopeeAuthPanel" hidden></div></section>
-            <section id="shopSettingsPanel" class="panel operation-panel"><div class="panel-title"><h3>门店CP码配置</h3></div><label class="file-picker"><input id="shopCodeFile" type="file" accept=".xlsx,.xls"><span>选择门店CP码</span></label><button class="btn ghost full" onclick="importShopCodes()">更新门店CP码</button><div id="shopCodeSettingStatus" class="operation-status"></div></section>
+            <section id="shopSettingsPanel" class="panel operation-panel"><div class="panel-title"><h3>门店CP码配置</h3></div><button class="btn ghost full" onclick="chooseAuxiliaryFile('shopCodeFile','.xlsx,.xls')">选择门店CP码</button><div id="shopCodeFileName" class="operation-status">未选择文件</div><button class="btn ghost full" onclick="importShopCodes()">更新门店CP码</button><div id="shopCodeSettingStatus" class="operation-status"></div></section>
             <section class="panel operation-panel"><div class="panel-title"><h3>导出与长期备份</h3></div><div class="button-stack"><button class="btn primary" onclick="navigatePage('reports')">报表预览</button><button class="btn ghost" onclick="downloadFile('/api/export-backup')">导出长期JSON</button><button class="btn ghost" onclick="openBackupImport()">恢复长期JSON</button></div></section>
             <section id="logPanel" class="panel operation-panel log-panel-wide"><div class="panel-title"><h3>操作日志</h3><button class="text-button" onclick="clearLogs()">清空</button></div><pre id="logs" class="log-window"></pre><pre id="shopeeLogs" class="log-window"></pre></section>
           </div>
@@ -148,11 +145,12 @@
     </div>
   </div>
 
-  <div id="backupDialog" class="modal" hidden><div class="modal-card"><div class="panel-title"><h3>导入长期JSON（可选恢复）</h3><button class="icon-button" title="关闭" onclick="closeBackupImport()">×</button></div><p>仅恢复历史趋势、POD锁和跨日遗留，不覆盖当前日报和当前处理进度。</p><label class="file-picker"><input id="backupFile" type="file" accept=".json"><span>选择长期JSON</span></label><button class="btn primary full" onclick="importBackup()">恢复长期备份</button><div id="backupImportResult" class="operation-status"></div></div></div>
+  <div id="backupDialog" class="modal" hidden><div class="modal-card"><div class="panel-title"><h3>导入长期JSON（可选恢复）</h3><button class="icon-button" title="关闭" onclick="closeBackupImport()">×</button></div><p>仅恢复历史趋势、POD锁和跨日遗留，不覆盖当前日报和当前处理进度。</p><button class="btn ghost full" onclick="chooseAuxiliaryFile('backupFile','.json')">选择长期JSON</button><div id="backupFileName" class="operation-status">未选择文件</div><button class="btn primary full" onclick="importBackup()">恢复长期备份</button><div id="backupImportResult" class="operation-status"></div></div></div>
 
   </div>
   <div id="dataPurgeDialog" class="modal" hidden><div class="modal-card purge-card"><div class="panel-title"><h3>清除全部业务数据</h3><button class="icon-button" title="关闭" onclick="closeDataPurge()">×</button></div><div id="purgeStepOne"><div id="purgePreview" class="purge-preview"></div><div class="modal-actions"><button class="btn ghost" onclick="closeDataPurge()">取消</button><button class="btn danger-outline" onclick="continueDataPurge()">继续验证</button></div></div><div id="purgeStepTwo" hidden><p class="danger-note">此操作不可撤销。备份可由管理员用于独立恢复。</p><p>当前管理员：<b id="purgeAdmin"></b></p><label class="confirm-check"><input id="purgeBackupConfirmed" type="checkbox" onchange="updatePurgeButton()"> 我已确认自动备份成功</label><label class="field-label">请输入：永久清除全部业务数据<input id="purgePhrase" autocomplete="off" oninput="updatePurgeButton()"></label><p id="purgeCountdown" class="purge-countdown">请等待 5 秒</p><div class="modal-actions"><button class="btn ghost" onclick="closeDataPurge()">取消</button><button id="purgeExecuteButton" class="btn danger" onclick="executeDataPurge()" disabled>确认清除</button></div></div></div></div>
 
+  <div id="metricDetailDialog" class="modal" data-testid="detail-view" hidden><div class="modal-card"><div class="panel-title"><h3 id="metricDetailTitle">指标明细</h3><button class="icon-button" data-testid="detail-close" onclick="closeMetricDetail()" title="关闭">×</button></div><div id="metricDetailBody" class="preview-table-wrap"><div class="empty-state">当前指标暂无明细</div></div></div></div>
   <script src="/dashboard-components.js?v=final-merge-20260804"></script>
   <script src="/app.js?v=final-merge-20260804"></script>
 </body>

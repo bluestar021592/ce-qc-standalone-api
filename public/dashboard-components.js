@@ -199,17 +199,17 @@
       ? ((Number(current) - Number(previous)) / Math.abs(Number(previous))) * 100 : null;
     const unit = definition.unit || '%';
     const action = definition.action ? `onclick="openHomeMetricDetail('${definition.action}')"` : '';
-    return `<article class="pixel-chart-card" role="button" tabindex="0" ${action}><div class="pixel-chart-title"><b>${text(definition.title)}</b><span>近7天 ${icon('chevron')}</span></div><div class="pixel-legend">${definition.series.map(series => `<span><i style="background:${series.color}"></i>${text(series.label)}</span>`).join('')}</div>${svg}<footer class="v6-chart-footer"><span>当前 <b>${Number.isFinite(Number(current)) ? `${Number(current).toFixed(unit === '%' ? 2 : 0)}${unit}` : '—'}</b></span><strong class="${change !== null && change < 0 ? 'down' : 'up'}">环比昨日 ${change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}</strong></footer></article>`;
+    return `<article class="pixel-chart-card" role="button" tabindex="0" ${action}><div class="pixel-chart-title"><b>${text(definition.title)}</b><span>近7天 ${icon('chevron')}</span></div><div class="pixel-legend">${definition.series.map(series => `<span><i style="background:${series.color}"></i>${text(series.label)}</span>`).join('')}</div>${svg}<footer class="v6-chart-footer"><span>当前 <b data-testid="trend-${definition.key}-current">${Number.isFinite(Number(current)) ? `${Number(current).toFixed(unit === '%' ? 2 : 0)}${unit}` : '—'}</b></span><strong data-testid="trend-${definition.key}-change" class="${change !== null && change < 0 ? 'down' : 'up'}">环比昨日 ${change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}</strong></footer></article>`;
   }
 
   function charts(snapshot) {
     const trends = snapshot.trends || {}; const dates = snapshot.dates || [];
     const series = (key, label, color) => ({ label, color, values: trends[key] || [] });
     const definitions = [
-      { title: 'POD率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('podCcsl', 'CCSL', COLORS.blue), series('podPp', 'SHOPEE 本省（PP）', COLORS.green), series('podPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
-      { title: 'Pending率趋势', min: 0, max: 20, series: [series('pendingCcsl', 'CCSL', COLORS.blue), series('pendingPp', 'SHOPEE 本省（PP）', COLORS.green), series('pendingPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
-      { title: 'OC率趋势', min: 0, max: 15, unit: '%', action: 'oc', series: [series('ocCcsl', 'CCSL', COLORS.blue), series('ocPp', 'SHOPEE 本省（PP）', COLORS.green), series('ocPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
-      { title: '本省/外省 对比（SHOPEE）', min: 60, max: 100, series: [series('podPp', '本省（PP）签收率', COLORS.green), series('podPv', '外省（PV）签收率', COLORS.orange)] }
+      { key:'ticket', title: '本月票数趋势', min: 0, max: 100, unit: '%', action: 'all', series: [series('pendingCcsl', '本月', COLORS.blue), series('pendingPp', '上月', COLORS.green)] },
+      { key:'pod', title: 'POD率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('podCcsl', 'CE', COLORS.blue), series('podPp', 'SHOPEE PP', COLORS.green), series('podPv', 'SHOPEE PV', COLORS.orange)] },
+      { key:'oc', title: 'OC率趋势', min: 0, max: 15, unit: '%', action: 'oc', series: [series('ocCcsl', 'CE', COLORS.blue), series('ocPp', 'SHOPEE PP', COLORS.green), series('ocPv', 'SHOPEE PV', COLORS.orange)] },
+      { key:'first', title: '首次妥投率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('podCcsl', 'CE', COLORS.purple), series('podPp', 'SHOPEE', COLORS.green)] }
     ];
     return definitions.map(definition => chartCard(definition, dates)).join('');
   }
@@ -231,13 +231,48 @@
   }
 
   function renderHome(snapshot) {
-    document.getElementById('homeKpis').innerHTML = (snapshot.topKpis || []).map(kpiCard).join('');
-    document.getElementById('homeCcslOverview').innerHTML = ccslOverview(snapshot.ccsl || {});
-    document.getElementById('homeShopeeOverview').innerHTML = compactShopeeOverview(snapshot.shopee || {});
+    const fallbackCards = [
+      {key:'total',label:'总览',value:snapshot.ccsl?.today || 0,tone:'blue'}, {key:'ce',label:'CE',value:snapshot.ccsl?.today || 0,tone:'green'},
+      {key:'tbkh',label:'TBKH',value:0,tone:'orange'}, {key:'shopeecn',label:'SHOPEE CN',value:snapshot.shopee?.cn?.today || 0,tone:'purple'},
+      {key:'shopeevn',label:'SHOPEE VN',value:snapshot.shopee?.vn?.today || 0,tone:'red'}, {key:'ali1688',label:'ALI1688',value:0,tone:'cyan'}
+    ];
+    const fallbackMetrics = [{key:'self-pickup',label:'仓库自提件',value:0,unit:'件'},{key:'cecn',label:'CECN滞留包裹',value:0,unit:'件'},{key:'cezt',label:'CEZT滞留包裹',value:0,unit:'件'}];
+    document.getElementById('homeBusinessCards').innerHTML = (snapshot.businessCards?.length ? snapshot.businessCards : fallbackCards).map(businessCard).join('');
+    document.getElementById('homeCoreMetrics').innerHTML = (snapshot.coreMetrics?.length ? snapshot.coreMetrics : fallbackMetrics).map(coreMetricCard).join('');
+    document.getElementById('homeShopeeSpecial').innerHTML = shopeeSpecial(snapshot.shopee || {});
+    document.getElementById('homeDispatchDistribution').innerHTML = dispatchDistribution(snapshot.shopee || {});
     document.getElementById('homeTrendGrid').innerHTML = charts(snapshot);
     document.getElementById('homeIssueCount').textContent = number(snapshot.issueCount ?? snapshot.issues?.length ?? 0);
     document.getElementById('homeIssueTable').innerHTML = carryTable(snapshot);
     document.getElementById('homeRules').innerHTML = rules();
+  }
+
+  function businessCard(item) {
+    const testKey = item.key === 'total' ? 'top-total' : `top-${item.key}`;
+    return `<button class="business-summary-card ${text(item.tone || 'blue')}" data-testid="${testKey}" onclick="${item.key === 'total' ? "navigatePage('home')" : `navigatePage('${text(item.key)}')`}"><span>${text(item.label)}</span><small>本期票数</small><b data-testid="${testKey}-value">${number(item.value || 0)}</b><em>占比可追溯</em></button>`;
+  }
+
+  function coreMetricCard(item) {
+    const testId = ['self-pickup','cecn','cezt'].includes(item.key) ? `metric-${item.key}` : `core-${item.key}`;
+    return `<button class="core-summary-card" data-testid="${testId}" onclick="openHomeMetricDetail('${text(item.key)}')"><i></i><span>${text(item.label)}</span><b>${display(item.value,item.unit)}</b><small>本月件数</small></button>`;
+  }
+
+  function shopeeSpecial(shopee) {
+    return `<div class="shopee-special-grid">${[['SHOPEE CN',shopee.cn],['SHOPEE VN',shopee.vn]].map(([label,row]) => `<section><b>${label}</b><span>PP ${number(row?.today || 0)}</span><span>POD率 ${display(row?.podRate || 0,'%')}</span></section>`).join('')}</div>`;
+  }
+
+  function dispatchDistribution(shopee) {
+    const groups = [
+      ['CN - PP', shopee.cn?.pp || shopee.pp],
+      ['CN - PV', shopee.cn?.pv || shopee.pv],
+      ['VN - PP', shopee.vn?.pp || shopee.pp],
+      ['VN - PV', shopee.vn?.pv || shopee.pv]
+    ];
+    const rates = row => [row?.firstAttemptRate, row?.secondAttemptRate, row?.thirdAttemptRate].map(value => {
+      const numeric = Number(value);
+      return value === null || value === undefined || !Number.isFinite(numeric) ? null : numeric;
+    });
+    return `<div class="dispatch-grid">${groups.map(([label,row]) => `<section><b>${label}</b>${rates(row).map((value,index) => `<span>${index+1}派 <i><em style="width:${value === null ? 0 : Math.max(0,Math.min(100,value))}%"></em></i>${value === null ? '—' : `${value.toFixed(2)}%`}</span>`).join('')}</section>`).join('')}</div>`;
   }
 
   window.DashboardComponents = { icon, renderHome, miniTrend, charts, carryTable, rules };

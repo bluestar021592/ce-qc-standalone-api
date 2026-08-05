@@ -27,10 +27,10 @@ function normalizeTopNavigation() {
   const nav = document.querySelector('.side-nav');
   if (!nav) return;
   const items = [
-    ['home','首页总看板','home','/'], ['ccsl','CCSL看板','package','/ccsl'], ['shopee','SHOPEE看板','bag','/shopee'],
-    ['import','数据导入','database','/import'], ['tracking','轨迹查询','route','/tracking'], ['exceptions','异常明细','alert','/exceptions'],
-    ['reports','报表导出','clipboard','/reports'], ['settings','系统设置','settings','/settings'], ['logs','操作日志','clipboard','/logs'],
-    ['data-management','数据管理','database','/data-management']
+    ['home','首页总看板','home','/'], ['ce','CE看板','package','/ce'], ['tbkh','TBKH看板','package','/tbkh'], ['ali1688','ALI1688看板','package','/ali1688'],
+    ['shopeecn','SHOPEE CN看板','bag','/shopeecn'], ['shopeevn','SHOPEE VN看板','bag','/shopeevn'], ['import','数据导入','database','/import'],
+    ['tracking','轨迹查询','route','/tracking'], ['exceptions','异常明细','alert','/exceptions'], ['reports','报表导出','clipboard','/reports'],
+    ['data-management','数据管理','database','/data-management'], ['settings','系统设置','settings','/settings'], ['logs','操作日志','clipboard','/logs']
   ];
   nav.innerHTML = items.map(([page,label,icon,path]) => `<button class="side-link ${page === currentPage ? 'active' : ''} ${page === 'data-management' ? 'admin-only' : ''}" data-page="${page}" data-path="${path}" onclick="navigatePage('${page}')" ${page === 'data-management' ? 'hidden' : ''}><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-${icon}"></use></svg><span class="side-label">${label}</span></button>`).join('');
 }
@@ -61,7 +61,9 @@ async function api(url, options = {}) {
     const fallback = rawText && !/^\s*</.test(rawText)
       ? rawText.slice(0, 300)
       : `服务器请求失败（HTTP ${response.status}）`;
-    throw new Error(result.error || result.message || fallback || response.statusText || '请求失败');
+    const error = new Error(result.error || result.message || fallback || response.statusText || '请求失败');
+    error.payload = result;
+    throw error;
   }
   return result;
 }
@@ -244,13 +246,13 @@ async function restoreInternalUser(id) {
 
 function pageFromPath() {
   const value = location.pathname.toLowerCase();
-  const routes = { '/ccsl':'ccsl', '/shopee':'shopee', '/import':'import', '/tracking':'tracking', '/track':'tracking', '/exceptions':'exceptions', '/reports':'reports', '/settings':'settings', '/logs':'logs', '/data-management':'data-management' };
+  const routes = { '/ce':'ce', '/tbkh':'tbkh', '/ali1688':'ali1688', '/shopeecn':'shopeecn', '/shopeevn':'shopeevn', '/ccsl':'ce', '/shopee':'shopeecn', '/import':'import', '/tracking':'tracking', '/track':'tracking', '/exceptions':'exceptions', '/reports':'reports', '/settings':'settings', '/logs':'logs', '/data-management':'data-management' };
   for (const [path,page] of Object.entries(routes)) if (value === path || value.startsWith(`${path}/`)) return page;
   return 'home';
 }
 
 function navigatePage(page, anchor = '') {
-  currentPage = ['ccsl', 'shopee', 'tracking', 'exceptions', 'reports', 'import', 'settings', 'logs', 'data-management'].includes(page) ? page : 'home';
+  currentPage = ['ce', 'tbkh', 'ali1688', 'shopeecn', 'shopeevn', 'tracking', 'exceptions', 'reports', 'import', 'settings', 'logs', 'data-management'].includes(page) ? page : 'home';
   const path = currentPage === 'home' ? '/' : `/${currentPage}`;
   if (location.pathname !== path) history.pushState({}, '', path);
   renderAll();
@@ -259,24 +261,27 @@ function navigatePage(page, anchor = '') {
 }
 
 function renderPageVisibility() {
-  for (const page of ['home', 'ccsl', 'shopee', 'tracking', 'exceptions', 'reports', 'import', 'settings', 'logs', 'data-management']) {
-    const el = document.getElementById(page === 'tracking' ? 'trackPage' : `${page}Page`);
-    if (el) el.hidden = page !== currentPage;
-  }
+  const ccslPages = ['ce', 'tbkh', 'ali1688'];
+  const shopeePages = ['shopeecn', 'shopeevn'];
+  document.querySelectorAll('.app-page').forEach(element => { element.hidden = true; });
+  const targetId = currentPage === 'home' ? 'homePage' : ccslPages.includes(currentPage) ? 'ccslPage' : shopeePages.includes(currentPage) ? 'shopeePage' : currentPage === 'tracking' ? 'trackPage' : `${currentPage}Page`;
+  const target = document.getElementById(targetId); if (target) target.hidden = false;
   document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === currentPage));
 }
 
-function activeBusinessPage() { return currentPage === 'shopee' ? 'shopee' : 'ccsl'; }
+function activeBusinessPage() { return ['shopeecn', 'shopeevn'].includes(currentPage) ? 'shopee' : 'ccsl'; }
 
 function toggleSidebar() { document.body.classList.toggle('sidebar-collapsed'); }
 
 function toggleNavGroup(id) { document.getElementById(id)?.classList.toggle('collapsed'); }
 
 function renderTopbar() {
-  const state = currentPage === 'shopee' ? shopeeState : appState;
-  const titles = { home: '首页总看板', ccsl: 'CCSL看板', shopee: 'SHOPEE看板', track: '轨迹查询', reports: '报表数据预览', import: '数据导入', rules: '规则说明', settings: '系统设置' };
+  const state = ['shopeecn','shopeevn'].includes(currentPage) ? shopeeState : appState;
+  const titles = { home: '首页总看板', ce: 'CE看板', tbkh: 'TBKH看板', ali1688: 'ALI1688看板', shopeecn: 'SHOPEE CN看板', shopeevn: 'SHOPEE VN看板', reports: '报表数据预览', import: '数据导入', settings: '系统设置' };
   Object.assign(titles, { tracking: '轨迹查询', exceptions: '异常明细', logs: '操作日志', 'data-management': '数据管理', reports: '报表导出' });
   document.getElementById('pageTitle').textContent = titles[currentPage] || '首页总看板';
+  const ccslHeading = document.querySelector('#ccslPage .page-heading h2'); if (ccslHeading && ['ce','tbkh','ali1688'].includes(currentPage)) ccslHeading.textContent = titles[currentPage];
+  const shopeeHeading = document.querySelector('#shopeePage .page-heading h2'); if (shopeeHeading && ['shopeecn','shopeevn'].includes(currentPage)) shopeeHeading.textContent = titles[currentPage];
   const user = accessSession.user || {};
   document.querySelectorAll('.admin-only').forEach(element => { element.hidden = user.role !== 'ADMIN'; });
   document.getElementById('headerUserName').textContent = user.displayName || user.email || '本地用户';
@@ -499,12 +504,20 @@ function renderHomeIssues() {
 }
 
 function openHomeMetricDetail(tab) {
+  if (['self-pickup', 'cecn', 'cezt'].includes(tab)) {
+    const labels = { 'self-pickup': '仓库自提件', cecn: 'CECN滞留包裹', cezt: 'CEZT滞留包裹' };
+    document.getElementById('metricDetailTitle').textContent = labels[tab];
+    document.getElementById('metricDetailDialog').hidden = false;
+    return;
+  }
   const type = tab === 'workOrderAbnormal' ? 'CCSL' : (homeFilters.business === 'SHOPEE' ? 'SHOPEE' : 'CCSL');
   previewState.reports.business = type;
   const ccslMap = { all: 'allData', pod: 'podClosed', pending1: 'pendingAll', pending2: 'pending2plus', pending3: 'pending3', oc1: 'ocAll', oc2: 'oc2plus', oc3: 'oc3' };
   previewState.reports.category = type === 'CCSL' ? (ccslMap[tab] || tab) : tab;
   navigatePage('reports');
 }
+
+function closeMetricDetail() { document.getElementById('metricDetailDialog').hidden = true; }
 
 function openBusinessMetric(type, tab) {
   openMetricDetail(type, tab);
@@ -1043,7 +1056,11 @@ async function importUnifiedExcel() {
     renderUnifiedImportResult();
     historyModeDate = result.reportDate;
     alert(`综合日报导入成功：有效${result.summary.validUniqueWaybills}票，CE ${result.classificationCounts.CE}，TBKH ${result.classificationCounts.TBKH}，ALI1688 ${result.classificationCounts.ALI1688}，SHOPEE CN ${result.classificationCounts.SHOPEECN}，SHOPEE VN ${result.classificationCounts.SHOPEEVN}。`);
-  } catch (error) { alert(`综合日报导入失败：${error.message}`); }
+  } catch (error) {
+    const target = document.getElementById('fileStatus');
+    const diagnostics = Array.isArray(error.payload?.sheetDiagnostics) ? error.payload.sheetDiagnostics : [];
+    target.innerHTML = `<div class="import-error"><b>导入失败：${escapeHtml(error.message)}</b>${diagnostics.length ? `<table class="compact-table"><thead><tr><th>Sheet</th><th>状态</th><th>表头行</th><th>原因</th></tr></thead><tbody>${diagnostics.map(row => `<tr><td>${escapeHtml(row.sheetName)}</td><td>${escapeHtml(row.status)}</td><td>${row.headerRow || '—'}</td><td>${escapeHtml(row.reason)}</td></tr>`).join('')}</tbody></table>` : ''}</div>`;
+  }
 }
 
 function renderUnifiedImportResult() {
@@ -1054,7 +1071,7 @@ function renderUnifiedImportResult() {
   document.getElementById('fileStatus').innerHTML = `${statusPill('综合日报已导入', true)}<p>日期：${escapeHtml(result.reportDate || '—')} · 有效唯一单号 ${formatInt(summary.validUniqueWaybills || 0)}</p><p>数据版本已切换到本次导入</p>`;
   document.getElementById('unifiedSnapshotStatus').textContent = result.duplicateFile ? '重复文件，沿用已有批次' : '新批次已保存';
   document.getElementById('unifiedSnapshotStatus').className = 'status-pill success';
-  document.getElementById('unifiedClassificationSummary').innerHTML = `<div class="unified-count-grid">${['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].map(type => `<div><span>${type}</span><b>${formatInt(counts[type] || 0)}</b></div>`).join('')}</div><div class="unified-warning-grid"><span>原始行 <b>${formatInt(summary.rawRows || 0)}</b></span><span>重复 <b>${formatInt(summary.duplicateRows || 0)}</b></span><span>无单号 <b>${formatInt(summary.missingWaybillRows || 0)}</b></span><span>收件人缺失 <b>${formatInt(summary.missingRecipientWarnings || 0)}</b></span><span>分类冲突 <b>${formatInt(summary.classificationConflicts || 0)}</b></span></div>`;
+  document.getElementById('unifiedClassificationSummary').innerHTML = `<div class="unified-count-grid"><div><span>有效唯一单号</span><b data-testid="classification-valid-unique">${formatInt(summary.validUniqueWaybills || 0)}</b></div>${[['CE','ce'],['TBKH','tbkh'],['ALI1688','ali1688'],['SHOPEECN','shopeecn'],['SHOPEEVN','shopeevn']].map(([type,key]) => `<div><span>${type}</span><b data-testid="classification-${key}">${formatInt(counts[type] || 0)}</b></div>`).join('')}</div><div class="unified-warning-grid"><span>原始行 <b>${formatInt(summary.rawRows || 0)}</b></span><span>重复 <b data-testid="classification-duplicates">${formatInt(summary.duplicateRows || 0)}</b></span><span>无单号 <b data-testid="classification-missing-waybill">${formatInt(summary.missingWaybillRows || 0)}</b></span><span>收件人缺失 <b data-testid="classification-missing-recipient">${formatInt(summary.missingRecipientWarnings || 0)}</b></span><span>分类冲突 <b data-testid="classification-conflicts">${formatInt(summary.classificationConflicts || 0)}</b></span></div>`;
 }
 
 async function runUnified() {
@@ -1088,11 +1105,28 @@ async function importShopeeExcel() {
   } catch (error) { alert(`SHOPEE日报导入失败：${error.message}`); }
 }
 
+const auxiliaryFiles = Object.create(null);
+
+function chooseAuxiliaryFile(key, accept) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = accept;
+  input.hidden = true;
+  input.addEventListener('change', () => {
+    auxiliaryFiles[key] = input.files?.[0] || null;
+    const label = document.getElementById(`${key}Name`);
+    if (label) label.textContent = auxiliaryFiles[key]?.name || '未选择文件';
+    input.remove();
+  }, { once: true });
+  document.body.appendChild(input);
+  input.click();
+}
+
 function openBackupImport() { document.getElementById('backupDialog').hidden = false; }
 function closeBackupImport() { document.getElementById('backupDialog').hidden = true; }
 
 async function importBackup() {
-  const file = document.getElementById('backupFile').files[0];
+  const file = auxiliaryFiles.backupFile;
   if (!file) return alert('请选择长期JSON');
   const body = new FormData(); body.append('file', file);
   try {
@@ -1119,7 +1153,7 @@ async function executeRun(url, type) {
 }
 
 async function importShopCodes() {
-  const file = document.getElementById('shopCodeFile').files[0]; if (!file) return alert('请选择门店CP码Excel');
+  const file = auxiliaryFiles.shopCodeFile; if (!file) return alert('请选择门店CP码Excel');
   const body = new FormData(); body.append('file', file);
   try { const result = await api('/api/import-shop-codes', { method: 'POST', body }); await refresh(); alert(`门店CP码导入完成：当前${result.imported.total}个。`); } catch (error) { alert(`门店CP码导入失败：${error.message}`); }
 }
@@ -1356,8 +1390,29 @@ function buildProductionDashboardSnapshot() {
   const shDashboard = shopeeState.dashboard || {};
   const ccslIssues = (appState.detailTabs?.coreAbnormal?.rows || []).map(row => issueFromRow(row, 'CCSL', '金边'));
   const shopeeIssues = (shopeeState.detailTabs?.abnormal?.rows || []).map(row => issueFromRow(row, `SHOPEE-${normalizedRegion(row)}`, normalizedRegion(row) === 'PV' ? '外省/省外' : '金边/本省'));
+  const importedCounts = unifiedImportState?.classificationCounts || {};
+  const hasUnifiedCounts = Boolean(unifiedImportState?.snapshotId);
+  const businessCards = [
+    ['total', '总览', hasUnifiedCounts ? Number(unifiedImportState.summary?.validUniqueWaybills || 0) : total, 'blue'],
+    ['ce', 'CE', hasUnifiedCounts ? Number(importedCounts.CE || 0) : cc.total, 'green'],
+    ['tbkh', 'TBKH', Number(importedCounts.TBKH || 0), 'orange'],
+    ['shopeecn', 'SHOPEE CN', hasUnifiedCounts ? Number(importedCounts.SHOPEECN || 0) : Number(shopeeState.dashboard?.recipientGroups?.CN?.metrics?.total || 0), 'purple'],
+    ['shopeevn', 'SHOPEE VN', hasUnifiedCounts ? Number(importedCounts.SHOPEEVN || 0) : Number(shopeeState.dashboard?.recipientGroups?.VN?.metrics?.total || 0), 'red'],
+    ['ali1688', 'ALI1688', Number(importedCounts.ALI1688 || 0), 'cyan']
+  ].map(([key, label, value, tone]) => ({ key, label, value, tone }));
+  const coreMetrics = [
+    ['pending-discontinuous','Pending不连续',metricValue(appState,'Pending不连续')], ['pending3','Pending 3天+',metricValue(appState,'Pending3+') + sh.pending3],
+    ['oc2','OC 2天+',metricValue(appState,'OC2+') + sh.oc2], ['store-retention','门店滞留',metricValue(appState,'门店滞留2天+')],
+    ['work-order','工单未处理',metricValue(appState,'工单未处理')], ['inbound-no-scan','入库无扫描节点',metricValue(appState,'入库无扫描节点') + sh.inboundNoScan],
+    ['inventory2','盘点 2天+',metricValue(appState,'盘点2天+')], ['oc-rate','OC率',rate(metricValue(appState,'OC1+') + sh.oc1,total),'%'],
+    ['first-rate','首次妥投率',cc.podRate,'%'], ['today-pod','今日POD',pod], ['pod-rate','POD率',rate(pod,total),'%'],
+    ['province-open','外省未完结POD件',metricValue(appState,'外省未完结POD件')],
+    ['self-pickup','仓库自提件',metricValue(appState,'仓库自提件')], ['cecn','CECN滞留包裹',metricValue(appState,'CECN滞留包裹')], ['cezt','CEZT滞留包裹',metricValue(appState,'CEZT滞留包裹')]
+  ].map(([key,label,value,unit='件']) => ({ key,label,value,unit }));
   return {
     reportDate: date,
+    businessCards,
+    coreMetrics,
     topKpis,
     ccsl: {
       today: cc.total, pod: cc.pod, podRate: cc.podRate,

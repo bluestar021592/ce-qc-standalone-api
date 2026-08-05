@@ -84,7 +84,7 @@ app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
 });
 
-app.get(['/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
+app.get(['/ce', '/tbkh', '/ali1688', '/shopeecn', '/shopeevn', '/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -557,7 +557,7 @@ async function handleUnifiedDailyImport(req, res) {
     res.json({ ok: true, ...saved, state: summarizeState(ccslState), shopeeState: summarizeShopeeState(shopeeState) });
   } catch (error) {
     if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
-    res.status(400).json({ ok: false, error: error.message });
+    res.status(400).json({ ok: false, error: error.message, sheetDiagnostics: error.sheetDiagnostics || [] });
   }
 }
 
