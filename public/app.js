@@ -82,12 +82,14 @@ async function refresh() {
     renderAll();
     return;
   }
-  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unified, ...businessResponses] = await Promise.all([
-    api('/api/state'), api('/api/shopee/state'), api('/api/ce-auth-status'),
+  const businessType = ['ce','tbkh','ali1688','shopeecn','shopeevn'].includes(currentPage) ? currentBusinessType() : '';
+  const needsFullAggregate = ['exceptions', 'reports'].includes(currentPage);
+  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unified, businessResponse] = await Promise.all([
+    api(`/api/state${needsFullAggregate ? '' : '?compact=1'}`), api(`/api/shopee/state${needsFullAggregate ? '' : '?compact=1'}`), api('/api/ce-auth-status'),
     api('/api/session'),
     api('/api/history?businessType=CCSL'), api('/api/history?businessType=SHOPEE'),
-    api('/api/import/unified-latest'),
-    ...['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].map(type => api(`/api/business-state/${type}`))
+    api('/api/import/unified-latest?compact=1'),
+    businessType ? api(`/api/business-state/${businessType}`) : Promise.resolve(null)
   ]);
   appState = ccsl.state || {};
   shopeeState = shopee.state || {};
@@ -95,7 +97,7 @@ async function refresh() {
   accessSession = session || {};
   historyCatalog = { CCSL: ccslHistory.rows || [], SHOPEE: shopeeHistory.rows || [] };
   unifiedImportState = unified.import || null;
-  businessStates = Object.fromEntries(businessResponses.map(result => [result.businessType, result.state || {}]));
+  if (businessResponse?.businessType) businessStates[businessResponse.businessType] = businessResponse.state || {};
   historyModeDate = '';
   renderAll();
   if (currentPage === 'tracking') loadTrackingWorkspace();
@@ -108,11 +110,11 @@ function renderAll() {
   renderAuthPanels();
   renderNetworkSettings();
   if (currentPage === 'settings') loadUserManagement();
-  renderHome();
-  renderCcslPage();
-  renderShopeePage();
-  renderReportsPage();
-  renderExceptionsPage();
+  if (currentPage === 'home') renderHome();
+  else if (['ce', 'tbkh', 'ali1688'].includes(currentPage)) renderCcslPage();
+  else if (['shopeecn', 'shopeevn'].includes(currentPage)) renderShopeePage();
+  else if (currentPage === 'reports') renderReportsPage();
+  else if (currentPage === 'exceptions') renderExceptionsPage();
   if (currentPage === 'logs') loadAuditLogs();
   if (currentPage === 'data-management') loadDataManagement();
   renderRulesPage();
@@ -262,9 +264,31 @@ function navigatePage(page, anchor = '') {
   const path = currentPage === 'home' ? '/' : `/${currentPage}`;
   if (location.pathname !== path) history.pushState({}, '', path);
   renderAll();
+  hydratePageData(currentPage);
   if (currentPage === 'tracking') loadTrackingWorkspace();
   if (anchor) requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   else scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function hydratePageData(page) {
+  try {
+    if (['ce', 'tbkh', 'ali1688', 'shopeecn', 'shopeevn'].includes(page)) {
+      const type = currentBusinessType();
+      const selectedDate = unifiedImportState?.reportDate || latestDate(appState.reportDate, shopeeState.reportDate);
+      if (!businessStates[type]?.snapshotId || (selectedDate && businessStates[type]?.reportDate !== selectedDate)) {
+        const result = await api(`/api/business-state/${type}`);
+        businessStates[type] = result.state || {};
+        renderAll();
+      }
+    } else if (['exceptions', 'reports'].includes(page) && (appState._compact || shopeeState._compact)) {
+      const [ccsl, shopee] = await Promise.all([api('/api/state'), api('/api/shopee/state')]);
+      appState = ccsl.state || {};
+      shopeeState = shopee.state || {};
+      renderAll();
+    }
+  } catch (error) {
+    console.error('Page hydration failed:', error.message);
+  }
 }
 
 async function loadTrackingWorkspace() {

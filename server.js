@@ -317,12 +317,14 @@ app.post('/api/auth/logout', (req, res) => res.redirect(307, '/api/ce-logout'));
 
 app.get('/api/state', async (req, res) => {
   const state = await loadState();
-  res.json({ ok: true, state: summarizeState(state) });
+  const summary = summarizeState(state);
+  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
 });
 
 app.get('/api/shopee/state', async (req, res) => {
   const state = loadBusinessState(SHOPEE);
-  res.json({ ok: true, state: summarizeShopeeState(state) });
+  const summary = summarizeShopeeState(state);
+  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
 });
 
 app.get('/api/business-state/:businessType', (req, res) => {
@@ -1354,6 +1356,27 @@ function summarizeState(state) {
     })(),
     detailTabs: snapshot?.detailTabs || buildDetailTabs(viewState),
     logs: viewState.logs || []
+  };
+}
+
+function compactDashboardState(summary = {}) {
+  const keepTabs = ['dashboard', 'coreAbnormal', 'nextCarry', 'abnormal'];
+  const detailTabs = Object.fromEntries(keepTabs
+    .filter(key => summary.detailTabs?.[key])
+    .map(key => {
+      const tab = summary.detailTabs[key];
+      const limit = key === 'dashboard' ? 100 : 200;
+      return [key, { ...tab, rows: Array.isArray(tab.rows) ? tab.rows.slice(0, limit) : [] }];
+    }));
+  return {
+    ...summary,
+    _compact: true,
+    dailyPreview: (summary.dailyPreview || []).slice(0, 20),
+    logs: (summary.logs || []).slice(-30),
+    detailTabs,
+    criticalDashboard: summary.criticalDashboard
+      ? { ...summary.criticalDashboard, rows: (summary.criticalDashboard.rows || []).slice(0, 100) }
+      : summary.criticalDashboard
   };
 }
 

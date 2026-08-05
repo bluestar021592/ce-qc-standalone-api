@@ -51,3 +51,12 @@ test('V18 normalizes object-shaped final rows and keeps dashboard metrics in Sho
   assert.match(reporting, /cycle2plus/);
   assert.match(exporter, /metrics\.cycle2plus/);
 });
+
+test('startup uses compact summaries and renders only the visible page', () => {
+  const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(app, /api\/state\$\{needsFullAggregate \? '' : '\?compact=1'\}/);
+  assert.match(app, /if \(currentPage === 'home'\) renderHome\(\)/);
+  assert.match(app, /hydratePageData\(currentPage\)/);
+  assert.match(server, /function compactDashboardState/);
+});
