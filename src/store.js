@@ -274,17 +274,25 @@ export function listExportRecords(limit = 50) {
 }
 
 export function loadDetail({ reportDate, shipmentCode }) {
-  const date = String(reportDate || '').trim();
+  const normalizedDate = String(reportDate || '').trim();
   const bill = String(shipmentCode || '').trim().toUpperCase();
   if (!bill) return null;
   const db = getDb();
-  const scan = db.prepare('SELECT * FROM scan_results WHERE shipmentCode=? AND (?="" OR reportDate=?)').get(bill, date, date);
-  const finalRow = db.prepare('SELECT * FROM final_rows WHERE shipmentCode=? AND (?="" OR reportDate=?)').get(bill, date, date);
-  const events = db.prepare('SELECT * FROM track_events WHERE shipmentCode=? AND (?="" OR reportDate=?) ORDER BY eventTime').all(bill, date, date);
-  const dailyRows = db.prepare('SELECT * FROM daily_parse_rows WHERE shipmentCode=? AND (?="" OR reportDate=?) ORDER BY rowNumber LIMIT 20').all(bill, date, date);
+  const scan = normalizedDate
+    ? db.prepare('SELECT * FROM scan_results WHERE shipmentCode=? AND reportDate=? ORDER BY updatedAt DESC,rowid DESC LIMIT 1').get(bill, normalizedDate)
+    : db.prepare('SELECT * FROM scan_results WHERE shipmentCode=? ORDER BY reportDate DESC,updatedAt DESC,rowid DESC LIMIT 1').get(bill);
+  const finalRow = normalizedDate
+    ? db.prepare('SELECT * FROM final_rows WHERE shipmentCode=? AND reportDate=? ORDER BY updatedAt DESC,rowid DESC LIMIT 1').get(bill, normalizedDate)
+    : db.prepare('SELECT * FROM final_rows WHERE shipmentCode=? ORDER BY reportDate DESC,updatedAt DESC,rowid DESC LIMIT 1').get(bill);
+  const events = normalizedDate
+    ? db.prepare('SELECT * FROM track_events WHERE shipmentCode=? AND reportDate=? ORDER BY eventTime,id').all(bill, normalizedDate)
+    : db.prepare('SELECT * FROM track_events WHERE shipmentCode=? ORDER BY reportDate DESC,eventTime,id').all(bill);
+  const dailyRows = normalizedDate
+    ? db.prepare('SELECT * FROM daily_parse_rows WHERE shipmentCode=? AND reportDate=? ORDER BY rowNumber,id LIMIT 20').all(bill, normalizedDate)
+    : db.prepare('SELECT * FROM daily_parse_rows WHERE shipmentCode=? ORDER BY reportDate DESC,rowNumber,id LIMIT 20').all(bill);
   const podLock = db.prepare('SELECT * FROM pod_locks WHERE shipmentCode=?').get(bill);
   const carry = db.prepare('SELECT * FROM carry_bills WHERE shipmentCode=? ORDER BY updatedAt DESC LIMIT 5').all(bill);
-  return { reportDate: date, shipmentCode: bill, scan: inflateRow(scan), finalRow: inflateRow(finalRow), events: events.map(inflateRow), dailyRows, podLock, carry };
+  return { reportDate: normalizedDate, shipmentCode: bill, scan: inflateRow(scan), finalRow: inflateRow(finalRow), events: events.map(inflateRow), dailyRows, podLock: podLock || null, carry };
 }
 
 function mirrorStateTables(state, now) {
@@ -677,7 +685,7 @@ function runTransaction(fn) {
 function inflateRow(row) {
   if (!row) return null;
   const raw = parseJson(row.rawJson || '', null);
-  return raw || row;
+  return raw && typeof raw === 'object' ? { ...row, ...raw } : row;
 }
 
 function parseJson(text, fallback) {

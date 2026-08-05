@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal
 
 cd /d "C:\Users\CELNT-~1\DOCUME~1\CECCSL~1\CE-QC-~1"
