@@ -35,13 +35,18 @@ ping -n 2 127.0.0.1 >nul
 
 echo Starting CE QC standalone API from:
 echo %CD%
-if exist "%CD%\package.json" (
-  call npm run start
-) else (
-  node server.js
+wscript.exe "%PROJECT_DIR%Start_CE_QC_Silent.vbs"
+if errorlevel 1 (
+  echo [ERROR] Failed to launch the background server.
+  pause
+  exit /b 1
 )
-
-set "EXIT_CODE=%ERRORLEVEL%"
-echo Server stopped or failed to start. Exit code: %EXIT_CODE%
-pause
-exit /b %EXIT_CODE%
+ping -n 4 127.0.0.1 >nul
+netstat -ano | findstr /R /C:":5177 .*LISTENING" >nul
+if errorlevel 1 (
+  echo [ERROR] Server did not start on port 5177.
+  pause
+  exit /b 1
+)
+echo Server started in background: http://127.0.0.1:5177
+exit /b 0
