@@ -11,7 +11,7 @@ let reportDateManualCorrection = false;
 let historyCatalog = { CCSL: [], SHOPEE: [] };
 let historyModeDate = '';
 let shopeeRecipientGroup = 'ALL';
-const visualMode = new URLSearchParams(location.search).get('visualTest') === '1';
+const visualMode = new URLSearchParams(location.search).has('visualTest');
 let visualFixture = null;
 let purgeChallenge = null;
 let purgeCountdownTimer = null;

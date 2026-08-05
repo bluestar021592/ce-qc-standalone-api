@@ -1,0 +1,21 @@
+{
+  "referenceOriginalSize": [
+    375,
+    111
+  ],
+  "actualOriginalSize": [
+    249,
+    72
+  ],
+  "normalizedSize": [
+    375,
+    112
+  ],
+  "meanAbsoluteRgbDifference": 26.033,
+  "contentChecks": {
+    "logo": true,
+    "title": "CE EXPRESS",
+    "subtitle": "????????",
+    "background": "deep blue"
+  }
+}

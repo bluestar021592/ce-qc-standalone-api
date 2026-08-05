@@ -9,12 +9,13 @@
   <link rel="stylesheet" href="/responsive-dashboard.css?v=public-clear-20260804">
   <link rel="stylesheet" href="/v6-white-blue.css?v=qc-ui-v6-20260805">
   <link rel="stylesheet" href="/reference-blue-dashboard.css?v=20260805-1">
+  <link rel="stylesheet" href="/v16-blue-white-colors.css?v=20260805-1">
 </head>
 <body>
   <div class="app-stage">
   <div class="app-shell">
-    <aside class="sidebar" aria-label="主导航">
-      <div class="sidebar-brand">
+    <aside class="sidebar" aria-label="主导航" data-testid="sidebar">
+      <div class="sidebar-brand" data-testid="ce-brand-block">
         <img src="/assets/ce-express-logo-main.png" alt="CE Express" data-testid="ce-express-logo">
         <div class="brand-copy"><strong>CE EXPRESS</strong><small>质量控制管理系统</small></div>
       </div>
@@ -47,7 +48,7 @@
     </aside>
 
     <div class="app-body">
-      <header class="topbar">
+      <header class="topbar" data-testid="topbar">
         <h1 id="pageTitle">首页总看板</h1>
         <div class="top-actions">
           <label class="top-date"><select id="topHistoryDate" aria-label="日报日期" onchange="loadHistoryDate(this.value)"><option value="">—</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-calendar"></use></svg></label>
@@ -165,5 +166,6 @@
   <div id="trackingDrawer" class="tracking-drawer" data-testid="tracking-detail" hidden><div class="tracking-drawer-panel"><div class="panel-title"><div><h3 id="trackingDrawerTitle">完整轨迹</h3><p id="trackingDrawerRule"></p></div><button class="icon-button" onclick="closeTrackingDrawer()" title="关闭">×</button></div><div id="trackingDrawerBody" class="tracking-timeline"></div></div></div>
   <script src="/dashboard-components.js?v=20260805-shopee-repair-3"></script>
   <script src="/app.js?v=20260805-shopee-repair-4"></script>
+  <script src="/v14-geometry-fixture.js?v=20260805-1"></script>
 </body>
 </html>
