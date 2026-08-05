@@ -2,6 +2,7 @@ import { normalizeEvent } from './analyzer.js';
 import { analyzeStoreFlow } from './storeFlow.js';
 import { classifyLatestSpecialNode } from './specialNode.js';
 import { summarizePendingEvents } from './pendingDays.js';
+import { classifyScanTerminal } from './scanTerminal.js';
 
 const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|改派/i;
 const POD_RE = /\bPOD\b|delivered|签收|已妥投/i;
@@ -28,10 +29,12 @@ export function analyzeShopeeShipment({
   const last = sorted.at(-1) || null;
   const lastText = eventText(last || {});
   const scanState = classifyShopeeScanStatus(shipmentTrackRow, scanRow);
+  const scanTerminal = classifyScanTerminal({ ...scanRow, ...shipmentTrackRow }, 'success');
   const podEvent = findLatest(sorted, isPodEvent);
   const returnEvent = findLatest(sorted, isReturnEvent);
   const isPod = scanState === 'POD' || Boolean(podEvent);
   const isReturned = !isPod && (scanState === 'RETURN' || Boolean(returnEvent));
+  const returnInProgress = !isPod && !isReturned && scanTerminal.currentState === 'RETURN_IN_PROGRESS';
   const apiFailed = ['shipment', 'event', 'exception'].some(key => apiStatus[key] === 'failed');
   const special = !isPod && !isReturned && !apiFailed ? classifyLatestSpecialNode(sorted) : null;
 
@@ -96,8 +99,13 @@ export function analyzeShopeeShipment({
     是否POD: isPod ? '是' : '否',
     POD状态: isPod ? 'POD' : '未POD',
     POD时间: podEvent?.eventTime || (isPod ? shipmentTrackRow?.podTime || '' : ''),
-    退回状态: isReturned ? '已退回' : '未退回',
-    退回时间: returnEvent?.eventTime || '',
+    currentState: isPod ? 'POD' : (isReturned ? 'RETURN_COMPLETED' : (returnInProgress ? 'RETURN_IN_PROGRESS' : scanTerminal.currentState)),
+    trackRequired: scanTerminal.trackRequired,
+    trackSkippedReason: scanTerminal.trackSkippedReason,
+    退回状态: isReturned ? '已退回' : (returnInProgress ? '退回处理中' : '未退回'),
+    退回开始时间: returnInProgress ? scanTimeOf(shipmentTrackRow, scanRow) : '',
+    退回完成时间: isReturned ? (returnEvent?.eventTime || scanTimeOf(shipmentTrackRow, scanRow)) : '',
+    退回时间: isReturned ? (returnEvent?.eventTime || scanTimeOf(shipmentTrackRow, scanRow)) : '',
     退回照片状态: returnPhoto.status,
     退回照片数量: returnPhoto.count,
     Pending状态: currentPendingDays ? '是' : '否',
@@ -175,17 +183,25 @@ function priorStoreFlow(row = {}) {
 }
 
 export function classifyShopeeScanStatus(shipmentTrackRow = {}, scanRow = {}) {
+  const terminal = classifyScanTerminal({ ...scanRow, ...shipmentTrackRow }, 'success');
+  if (terminal.currentState === 'POD') return 'POD';
+  if (terminal.currentState === 'RETURN_COMPLETED') return 'RETURN';
+  if (terminal.currentState === 'RETURN_IN_PROGRESS') return 'RETURN_IN_PROGRESS';
   const status = String(shipmentTrackRow?.shipmentStatus ?? shipmentTrackRow?.statusCode ?? scanRow?.shipmentStatus ?? scanRow?.orderStatus ?? '').trim();
   const text = [
     shipmentTrackRow?.shipmentStatusDesc, shipmentTrackRow?.statusDesc, shipmentTrackRow?.statusName,
     shipmentTrackRow?.trackingStatus, scanRow?.扫描分类, scanRow?.statusText
   ].map(value => String(value || '')).join(' ');
   if (status === '85' || POD_RE.test(text)) return 'POD';
-  if (status === '81' || status === '100' || RETURN_RE.test(text)) return 'RETURN';
   if (status === '60' || status === '30' || DELIVERY_ASSIGN_RE.test(text)) return 'DELIVERY_ASSIGN';
   if (status === '70' || DELIVERY_RE.test(text)) return 'DELIVERY';
   if (status === '50') return 'INBOUND';
   return 'UNKNOWN';
+}
+
+function scanTimeOf(shipmentTrackRow = {}, scanRow = {}) {
+  return shipmentTrackRow.returnTime || shipmentTrackRow.updateTime || shipmentTrackRow.updatedAt
+    || scanRow.returnTime || scanRow.updateTime || scanRow.updatedAt || '';
 }
 
 export function classifyShopeeRegion({ dailyRow = {}, shipmentTrackRow = {}, scanRow = {}, events = [] } = {}) {

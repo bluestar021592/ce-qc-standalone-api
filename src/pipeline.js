@@ -4,6 +4,7 @@ import { cleanAnyBills, cleanMainBills, isExcludedBill } from './storage.js';
 import { getShopCodeMap } from './shopCodes.js';
 import { analyzeShopeeShipment, classifyShopeeScanStatus } from './shopeeAnalyzer.js';
 import { queryBatchWithFallback, queryTrackBatchWithFallback, splitTrackBatches, TRACK_QUERY_BATCH_SIZE } from './trackBatching.js';
+import { classifyScanTerminal } from './scanTerminal.js';
 
 const ORDER_BATCH_SIZE = Number(process.env.ORDER_BATCH_SIZE || 350);
 const TRACK_CONCURRENCY = Number(process.env.TRACK_CONCURRENCY || 1);
@@ -46,6 +47,7 @@ export async function runQcPipeline({
   const scanResults = preserveRows(state.scanResults, scanPool, '运单号', state.reportDate || '');
   const scanned = new Set(scanResults.map(row => row.运单号));
   const refreshFailed = new Set();
+  const returnedCompleted = new Set();
 
   for (let i = 0; i < scanPool.length; i += ORDER_BATCH_SIZE) {
     await waitIfPaused(state, isPaused, onProgress, onCheckpoint);
@@ -63,14 +65,23 @@ export async function runQcPipeline({
     const grouped = groupConfirmRows(data);
     for (const wb of batch) {
       const rows = grouped.get(wb) || [];
-      const row = rows.find(item => String(item?.orderStatus ?? '') === '85') || rows[0] || null;
+      const row = selectConfirmRow(rows);
       const orderStatus = String(row?.orderStatus ?? '');
-      const isPod = rows.some(item => String(item?.orderStatus ?? '') === '85');
+      const terminal = classifyScanTerminal(row || {}, refreshFailed.has(wb) ? 'failed' : (row ? 'success' : 'failed'));
+      const isPod = terminal.currentState === 'POD';
       const scanRow = {
         运单号: wb,
         reportDate: state.reportDate || '',
         来源类型: sourceType(wb, today, carry),
         orderStatus,
+        businessType: businessType,
+        scanRawStatus: row?.shipmentStatus ?? row?.statusCode ?? row?.status ?? orderStatus,
+        scanNormalizedState: terminal.currentState,
+        scanTerminalType: terminal.scanTerminalType,
+        scanTerminalReason: terminal.scanTerminalReason,
+        currentState: terminal.currentState,
+        trackRequired: terminal.trackRequired,
+        trackSkippedReason: terminal.trackSkippedReason,
         是否POD: isPod ? '是' : '否',
         扫描分类: isPod ? '已签收(POD)' : (orderStatus ? `未签收状态(${orderStatus})` : '订单扫描无返回'),
         pickupShop: row?.pickupShop || '',
@@ -85,6 +96,14 @@ export async function runQcPipeline({
         scanRow.扫描分类 = '订单扫描API失败';
         scanRow.错误信息 = '订单扫描失败，保留明日续查';
       }
+      if (terminal.currentState === 'RETURN_COMPLETED') {
+        scanRow.退回状态 = '已退回';
+        scanRow.扫描分类 = '已退回(终态)';
+        returnedCompleted.add(wb);
+      } else if (terminal.currentState === 'RETURN_IN_PROGRESS') {
+        scanRow.退回状态 = '退回处理中';
+        scanRow.扫描分类 = '退回处理中';
+      }
       scanResults.push(scanRow);
       scanned.add(wb);
       if (isPod) podLocks.add(wb);
@@ -95,7 +114,8 @@ export async function runQcPipeline({
     await checkpoint(state, onCheckpoint);
   }
 
-  const needTrack = scanPool.filter(wb => !podLocks.has(wb) && !refreshFailed.has(wb) && !excluded(wb));
+  const scanByBill = new Map(scanResults.map(item => [item.运单号, item]));
+  const needTrack = scanPool.filter(wb => scanByBill.get(wb)?.trackRequired === true && !podLocks.has(wb) && !refreshFailed.has(wb) && !excluded(wb));
   state.needTrackBills = needTrack;
   state.processing = { ...state.processing, phase: '轨迹查询', batchIndex: 0, totalBatches: Math.ceil(needTrack.length / TRACK_QUERY_BATCH_SIZE) };
   await onProgress(`订单扫描完成：POD ${scanResults.filter(x => x.是否POD === '是').length}票，进入轨迹 ${needTrack.length}票`);
@@ -181,12 +201,14 @@ export async function runQcPipeline({
       QC判断: row.orderStatus === '85' ? '订单扫描已签收' : 'POD锁已闭环'
     }));
 
-  const finalRows = [...podRows, ...trackResults]
+  const returnedRows = scanResults.filter(row => returnedCompleted.has(row.运单号)).map(row => ({ ...row, 是否POD: '否', POD状态: '未POD', 退回状态: '已退回', primaryCategory: '退回', 主分类: '退回', 异常分类: '退回', 入库无扫描节点: '否', carry状态: 'closed_return', 跨日状态: '已闭环' }));
+  const retryRows = scanResults.filter(row => row.currentState === 'SCAN_PENDING_RETRY').map(row => ({ ...row, primaryCategory: '订单扫描待重试', 主分类: '订单扫描待重试', 异常分类: '订单扫描待重试', 入库无扫描节点: '否', carry状态: 'active' }));
+  const finalRows = [...podRows, ...returnedRows, ...retryRows, ...trackResults]
     .filter(row => row?.运单号 && !excluded(row.运单号))
     .filter(row => row.是否POD === '是' || !podSet.has(row.运单号));
   const finalDiversionRows = finalRows.filter(isNormalFinalDiversionRow);
-  const nextCarryBills = cleanBills(trackResults
-    .filter(row => row.是否POD !== '是')
+  const nextCarryBills = cleanBills([...trackResults, ...retryRows]
+    .filter(row => row.是否POD !== '是' && row.退回状态 !== '已退回')
     .filter(row => !isNormalFinalDiversionRow(row))
     .filter(row => row.specialState !== 'SELF_PICKUP' && row.primaryCategory !== '仓库自提')
     .map(row => row.运单号))
@@ -233,6 +255,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   const podLocks = new Set(cleanAnyBills(state.podLocks || []));
   const scanPool = cleanAnyBills([...today, ...carry]).filter(bill => !podLocks.has(bill));
   const dailyByBill = new Map((state.dailyParseRows || []).map(row => [billOf(row), row]));
+  const lockedToday = today.filter(bill => podLocks.has(bill));
   const priorByBill = new Map([...(state.priorCarryRows || []), ...(state.finalRows || [])].map(row => [billOf(row), row]));
   state.apiBatchStatus = state.apiBatchStatus || [];
   state.scanPool = scanPool;
@@ -267,9 +290,22 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
       rawJson: source
     };
   });
-  state.scanResults = scanResults;
+  const lockedPodRows = lockedToday.map(bill => ({
+    ...(dailyByBill.get(bill) || {}), businessType: 'SHOPEE', reportDate, 运单号: bill, shipmentCode: bill,
+    来源类型: '今日PNH', orderStatus: 85, scanNormalizedState: 'POD', currentState: 'POD', trackRequired: false,
+    trackSkippedReason: 'POD_LOCK', 是否POD: '是', POD状态: 'POD', 扫描状态: 'POD_LOCK', API状态: '已跳过', 查询状态: 'skipped_pod'
+  }));
+  state.scanResults = uniqueRows([...lockedPodRows, ...scanResults]);
 
+  const scanTerminalByBill = new Map(scanPool.map(bill => [bill, classifyScanTerminal(selectConfirmRow(scanByBill.get(bill) || []) || {}, scanStatusByBill.get(bill))]));
   const scanRouteByBill = new Map(scanPool.map(bill => [bill, routeShopeeScan((scanByBill.get(bill) || [])[0] || {}, scanStatusByBill.get(bill))]));
+  for (const row of scanResults) {
+    const terminal = scanTerminalByBill.get(billOf(row));
+    Object.assign(row, terminal, { scanNormalizedState: terminal.currentState, scanRawStatus: row.shipmentStatus || row.orderStatus || '' });
+    if (terminal.currentState === 'POD') { row.是否POD = '是'; row.POD状态 = 'POD'; }
+    if (terminal.currentState === 'RETURN_COMPLETED') row.退回状态 = '已退回';
+    if (terminal.currentState === 'RETURN_IN_PROGRESS') row.退回状态 = '退回处理中';
+  }
   const preliminaryPodBills = new Set(scanPool.filter(bill => scanRouteByBill.get(bill) === 'CLOSE_POD_NO_TRACK'));
   const preliminaryReturnBills = new Set(scanPool.filter(bill => scanRouteByBill.get(bill) === 'CLOSE_RETURN_NO_TRACK'));
   for (const bill of preliminaryPodBills) podLocks.add(bill);
@@ -330,7 +366,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   }
 
   const podSet = new Set(cleanAnyBills([...podLocks]));
-  const finalRows = uniqueRows(trackResults);
+  const finalRows = uniqueRows([...lockedPodRows.map(row => ({ ...row, primaryCategory: 'POD', 主分类: 'POD', 异常分类: 'POD', carry状态: 'closed_pod', 跨日状态: '已闭环', 入库无扫描节点: '否' })), ...trackResults]);
   const nextCarryBills = cleanAnyBills(finalRows
     .filter(row => row.是否POD !== '是' && row.退回状态 !== '已退回')
     .filter(row => row.specialState !== 'SELF_PICKUP' && row.primaryCategory !== '仓库自提')
@@ -451,13 +487,14 @@ async function queryShopeeApi({ state, apiName, bills, rowsKey, statusKey, query
   const existingRows = (state[rowsKey] || []).filter(row => !row.reportDate || row.reportDate === reportDate);
   const statusByBill = new Map((state[statusKey] || []).filter(row => !row.reportDate || row.reportDate === reportDate).map(row => [billOf(row), row]));
   const completed = new Set([...statusByBill].filter(([, row]) => row.status === 'success' || row.status === 'skipped_pod').map(([bill]) => bill));
-  const pending = cleanAnyBills(bills).filter(bill => !completed.has(bill));
-  const batches = splitTrackBatches(pending);
+  const batches = splitTrackBatches(cleanAnyBills(bills));
   let rows = existingRows.filter(row => completed.has(billOf(row)));
-  let batchNumber = 0;
-  for (const batch of batches) {
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+    const stableBatch = batches[batchIndex];
+    if (stableBatch.every(bill => completed.has(bill))) continue;
+    const batch = stableBatch.filter(bill => !completed.has(bill));
     await waitIfPaused(state, isPaused, onProgress, onCheckpoint);
-    batchNumber += 1;
+    const batchNumber = batchIndex + 1;
     state.processing = { ...state.processing, phase: apiName, batchIndex: batchNumber, totalBatches: batches.length };
     await onProgress(`${apiName} ${batchNumber}/${batches.length}：${batch.length}票（单批上限50）`);
     const outcome = await queryBatchWithFallback({
@@ -524,10 +561,10 @@ function classifyCeFailure(error) {
 }
 
 function routeShopeeScan(row = {}, requestStatus = '') {
-  if (requestStatus !== 'success' || !billOf(row)) return 'SCAN_RETRY';
-  const status = classifyShopeeScanStatus(row, row);
-  if (status === 'POD') return 'CLOSE_POD_NO_TRACK';
-  if (status === 'RETURN') return 'CLOSE_RETURN_NO_TRACK';
+  const terminal = classifyScanTerminal(row, requestStatus);
+  if (terminal.currentState === 'SCAN_PENDING_RETRY') return 'SCAN_RETRY';
+  if (terminal.currentState === 'POD') return 'CLOSE_POD_NO_TRACK';
+  if (terminal.currentState === 'RETURN_COMPLETED') return 'CLOSE_RETURN_NO_TRACK';
   // A successful scan response is not an API failure. Only terminal POD/return
   // statuses skip track query; all other successful statuses must enter track.
   return 'TRACK';
@@ -578,6 +615,15 @@ function groupConfirmRows(rows) {
   return grouped;
 }
 
+function selectConfirmRow(rows = []) {
+  const priorities = { POD: 4, RETURN_COMPLETED: 3, RETURN_IN_PROGRESS: 2, OPEN_TRACK_REQUIRED: 1, SCAN_PENDING_RETRY: 0 };
+  return [...rows].sort((left, right) => {
+    const a = classifyScanTerminal(left, 'success').currentState;
+    const b = classifyScanTerminal(right, 'success').currentState;
+    return (priorities[b] || 0) - (priorities[a] || 0);
+  })[0] || null;
+}
+
 function groupEvents(events, bills) {
   const m = new Map(bills.map(x => [x, []]));
   for (const e of events) {
@@ -601,7 +647,7 @@ function buildSummary({ state, today, carry, scanPool, scanResults, trackResults
     carry: carry.length,
     scanPool: scanPool.length,
     scanPod: scanResults.filter(x => x.是否POD === '是').length,
-    needTrack: scanPool.length - scanResults.filter(x => x.是否POD === '是').length,
+    needTrack: (state.needTrackBills || []).length,
     trackPod: trackResults.filter(x => x.是否POD === '是').length,
     events: allEvents.length,
     pending3: byCat['Pending3次以上'] || byCat['Pending连续3天+'] || 0,

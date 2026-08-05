@@ -102,9 +102,8 @@ function hasRecognizedAction(row = {}) {
   const latestAction = String(row?.lastEventActionType || row?.最后节点动作类型 || '').toUpperCase();
   const category = String(row?.primaryCategory || row?.异常分类 || '');
   const special = String(row?.specialState || '');
-  // Historical actions before the latest inbound do not invalidate inbound-no-scan.
-  // The analyzer already evaluates the ordered raw events; reconciliation only rejects
-  // a row when its latest/current evidence contradicts the inbound classification.
+  // Any recognized action after the first CCSL inbound invalidates inbound-no-scan,
+  // even if a later duplicate inbound becomes the latest raw event.
   return latestAction === 'OUTBOUND'
     || Boolean(special)
     || isShopRow(row)

@@ -11,7 +11,7 @@ import { parseDailyExcel } from './src/excelParser.js';
 import { parseLongBackupModules } from './src/backupParser.js';
 import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
-import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
+import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, loadUnifiedBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
 import { exportShopeeXlsx } from './src/shopeeExporter.js';
@@ -317,6 +317,27 @@ app.get('/api/state', async (req, res) => {
 app.get('/api/shopee/state', async (req, res) => {
   const state = loadBusinessState(SHOPEE);
   res.json({ ok: true, state: summarizeShopeeState(state) });
+});
+
+app.get('/api/business-state/:businessType', (req, res) => {
+  try {
+    const source = loadUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));
+    const shopee = /^SHOPEE/.test(source.businessType);
+    const shopeeDashboard = shopee ? buildShopeeDashboard({ ...source, businessType: 'SHOPEE' }) : null;
+    const state = shopee
+      ? {
+          ...source,
+          businessType: 'SHOPEE',
+          viewBusinessType: source.businessType,
+          total: source.pnhBills?.length || 0,
+          dailySummary: source.dailyParseSummary || {},
+          dashboard: shopeeDashboard,
+          detailTabs: shopeeDashboard.detailTabs
+        }
+      : { ...source, viewBusinessType: source.businessType, dashboard: buildDashboardData(source), detailTabs: buildDetailTabs(source) };
+    if (!shopee) state.detailTabs.dashboard = { label: `${source.businessType}总看板`, rows: buildDashboardRows(source), total: buildDashboardRows(source).length };
+    res.json({ ok: true, businessType: source.businessType, reportDate: source.reportDate, snapshotId: source.snapshotId, snapshotStatus: source.snapshotStatus, state });
+  } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
 });
 
 app.get('/api/history', async (req, res) => {
@@ -1154,6 +1175,7 @@ app.post('/api/snapshot/reconcile', async (req, res) => {
     const snapshot = req.body?.snapshotId ? getSnapshotById(req.body.snapshotId) : getMatchingSnapshot(state);
     if (!snapshot) return res.status(404).json({ ok: false, error: '没有可从SQLite原始数据重算的CCSL快照。' });
     const repaired = repairSnapshotFromStoredData(snapshot);
+    await saveState(repaired.state);
     const conflicts = (repaired.consistency?.errors || []).map(message => ({ shipmentCode: String(message).match(/[A-Z0-9]{8,}/)?.[0] || '', reason: message, snapshotId: repaired.snapshotId }));
     persistReconciliationDiagnostics(repaired, conflicts);
     res.json({ ok: repaired.status === 'VALID', oldSnapshotId: snapshot.snapshotId, newSnapshotId: repaired.snapshotId, status: repaired.status, consistency: repaired.consistency, conflicts });
@@ -1180,7 +1202,8 @@ app.get('/api/results/:reportDate', async (req, res) => {
 });
 
 app.get('/api/detail', async (req, res) => {
-  const detail = String(req.query.businessType || '').toUpperCase() === SHOPEE
+  const requestedBusinessType = String(req.query.businessType || '').toUpperCase();
+  const detail = /^SHOPEE(?:CN|VN)?$/.test(requestedBusinessType)
     ? loadBusinessDetail(SHOPEE, req.query.reportDate || '', req.query.shipmentCode || req.query.waybill || '')
     : loadDetail({ reportDate: req.query.reportDate || '', shipmentCode: req.query.shipmentCode || req.query.waybill || '' });
   if (!detail) {

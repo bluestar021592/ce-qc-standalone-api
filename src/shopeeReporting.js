@@ -25,7 +25,10 @@ const PUBLIC_METRICS = Object.freeze([
   ['OC1+', 'oc1', 'oc1', '件'],
   ['OC2+', 'oc2', 'oc2', '件'],
   ['OC3+', 'oc3plus', 'oc3', '件'],
-  ['入库无扫描', 'inboundNoScan', 'inboundNoScan', '件']
+  ['入库无扫描', 'inboundNoScan', 'inboundNoScan', '件'],
+  ['退回件', 'returned', 'returned', '件'],
+  ['退回率', 'returnRate', 'returned', '%'],
+  ['退回处理中', 'returnInProgress', 'returnInProgress', '件']
 ]);
 
 export function buildShopeeDashboard(state = {}) {
@@ -124,6 +127,8 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
     oc2: tab('OC2+', visibleRows(allGroups.oc2)),
     oc3: tab('OC3+', visibleRows(allGroups.oc3)),
     inboundNoScan: tab('入库无扫描', visibleRows(allGroups.inboundNoScan)),
+    returned: tab('已退回件', visibleRows(allGroups.returned)),
+    returnInProgress: tab('退回处理中', visibleRows(allGroups.returnInProgress)),
     returnRequired: tab('退回待处理', visibleRows(allGroups.returnRequired)),
     pp: tab('本省PP明细', visibleRows(rows.filter(row => normalizedRegion(row) === 'PP'))),
     pv: tab('外省PV明细', visibleRows(rows.filter(row => normalizedRegion(row) === 'PV'))),
@@ -146,7 +151,7 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
 
 export function reconcileRecipientGroups(recipientGroups = {}) {
   const checks = [];
-  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3']) {
+  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'returned', 'returnInProgress', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3']) {
     const all = Number(recipientGroups.ALL?.metrics?.[key] || 0);
     const parts = ['CN', 'VN'].reduce((sum, group) => sum + Number(recipientGroups[group]?.metrics?.[key] || 0), 0);
     checks.push({ key, all, parts, difference: all - parts, passed: all === parts });
@@ -188,6 +193,9 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
       oc2: groups.oc2.length,
       oc3plus: groups.oc3.length,
       inboundNoScan: groups.inboundNoScan.length,
+      returned: groups.returned.length,
+      returnRate: rate(groups.returned.length, groupDaily.length),
+      returnInProgress: groups.returnInProgress.length,
       shopTransit: groups.shopTransit.length,
       shopArrived: groups.shopArrived.length,
       shopPending: groups.shopPending.length,
@@ -242,7 +250,9 @@ function tabsForRecipientGroup(group, summary) {
     oc1: tab(`${label} OC1+`, visibleRows(groups.oc1)),
     oc2: tab(`${label} OC2+`, visibleRows(groups.oc2)),
     oc3: tab(`${label} OC3+`, visibleRows(groups.oc3)),
-    inboundNoScan: tab(`${label}入库无扫描`, visibleRows(groups.inboundNoScan))
+    inboundNoScan: tab(`${label}入库无扫描`, visibleRows(groups.inboundNoScan)),
+    returned: tab(`${label}已退回件`, visibleRows(groups.returned)),
+    returnInProgress: tab(`${label}退回处理中`, visibleRows(groups.returnInProgress))
   };
 }
 
@@ -288,6 +298,7 @@ function buildGroups(rows, carryRows, nextCarryRows) {
     retry: rows.filter(row => row.查询状态 === 'refresh_failed' || row.API状态 === '失败' || ['待重试', 'API失败待重试'].includes(categoryOf(row))),
     returnRequired: rows.filter(row => row.returnRequired === true || row.退回待处理 === '是' || ['三次Pending后未退回', '三次Pending后继续派送'].includes(categoryOf(row))),
     returned: rows.filter(row => row.退回状态 === '已退回' || categoryOf(row) === '退回'),
+    returnInProgress: rows.filter(row => row.退回状态 === '退回处理中' || row.currentState === 'RETURN_IN_PROGRESS'),
     carry: uniqueRows(carryRows),
     nextCarry: uniqueRows(nextCarryRows)
   };
@@ -321,6 +332,8 @@ function buildRecipientTrends(state, recipientGroups) {
       firstAttemptRate: getMetricTrend('SHOPEE', `${group}_首派成功率`, state.reportDate || '', 7, state, metrics.firstAttemptRate, metrics.firstAttemptRate >= 90 ? 'normal' : 'warning'),
       ocRate: getMetricTrend('SHOPEE', `${group}_OC率`, state.reportDate || '', 7, state, rate(metrics.oc1, recipientGroups[group].monitorCount), metrics.oc1 ? 'warning' : 'normal'),
       podRate: getMetricTrend('SHOPEE', `${group}_POD率`, state.reportDate || '', 7, state, metrics.podRate, metrics.podRate >= 90 ? 'normal' : 'warning')
+      ,returnCount: getMetricTrend('SHOPEE', `${group}_退回件`, state.reportDate || '', 7, state, metrics.returned, metrics.returned ? 'warning' : 'normal')
+      ,returnRate: getMetricTrend('SHOPEE', `${group}_退回率`, state.reportDate || '', 7, state, metrics.returnRate, metrics.returned ? 'warning' : 'normal')
     };
   }
   return output;
@@ -344,6 +357,8 @@ function buildRegionSummary(dailyRows, rows) {
       oc3: monitor.filter(row => Number(row.OC天数 || 0) >= 3).length,
       inboundNoScan: monitor.filter(row => row.入库无扫描节点 === '是').length,
       returnRequired: monitor.filter(row => row.returnRequired === true || row.退回待处理 === '是').length,
+      returned: monitor.filter(row => row.退回状态 === '已退回' || categoryOf(row) === '退回').length,
+      returnInProgress: monitor.filter(row => row.退回状态 === '退回处理中' || row.currentState === 'RETURN_IN_PROGRESS').length,
       shopTransit: monitor.filter(row => row.shopState === 'SHOP_TRANSFER_IN_PROGRESS').length,
       shopArrived: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT').length,
       shopPending: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && (row.storeTags || row.tags || []).includes('SHOP_PENDING')).length,
@@ -377,7 +392,7 @@ function rowsForBills(rows, bills) {
 function visibleRows(rows) { return uniqueRows(rows || []).map(publicShopeeRow); }
 
 function publicShopeeRow(row = {}) {
-  const hiddenCategories = new Set(['派送中停留', '节点未更新', '无轨迹', 'API失败待重试', '待重试', '退回', '已退回', '跨日遗留']);
+  const hiddenCategories = new Set(['派送中停留', '节点未更新', '无轨迹', 'API失败待重试', '待重试', '跨日遗留']);
   const output = { ...row };
   for (const key of ['派送中停留天数', '节点未更新天数', '无轨迹', '查询状态', 'API状态', 'carry状态', '跨日状态', 'finalRowAvailable']) delete output[key];
   for (const key of ['primaryCategory', '主分类', '当前分类', '异常分类']) {

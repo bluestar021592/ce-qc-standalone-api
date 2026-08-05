@@ -126,7 +126,7 @@ function add580Sheet(zip, rows) {
   const contentTypes = zip.file('[Content_Types].xml');
   return Promise.all([
     promise,
-    workbook.async('string').then(xml => zip.file('xl/workbook.xml', xml.replace('</x:sheets>', '<x:sheet name="17_580滞留单号" sheetId="18" r:id="rId18" /></x:sheets>'))),
+    workbook.async('string').then(xml => zip.file('xl/workbook.xml', xml.replace('</x:sheets>', '<x:sheet name="17_580滞留单号" sheetId="18" r:id="rId18" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" /></x:sheets>'))),
     rels.async('string').then(xml => zip.file('xl/_rels/workbook.xml.rels', xml.replace('</Relationships>', '<Relationship Id="rId18" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet18.xml" /></Relationships>'))),
     contentTypes.async('string').then(xml => zip.file('[Content_Types].xml', xml.replace('</Types>', '<Override PartName="/xl/worksheets/sheet18.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" /></Types>')))
   ]);
@@ -137,7 +137,8 @@ function dashboardXml(metrics, range, type) {
     ['今日总单','all','03_明细_核心数据'],['PP单量','pp','03_明细_核心数据'],['PV单量','pv','03_明细_核心数据'],['今日POD','pod','03_明细_核心数据'],['POD率','podRate','03_明细_核心数据'],
     ['首次妥投率','firstRate','03_明细_核心数据'],['Pending1+','pending1','07_Pending1+单号'],['Pending2+','pending2','08_Pending2+单号'],['Pending3+','pending3','09_Pending3+单号'],
     ['OC1+','oc1','10_OC1+单号'],['OC2+','oc2','11_OC2+单号'],['OC3+','oc3','12_OC3+单号'],['入库无扫描','inbound','13_入库无扫描单号'],
-    ['仓库自提件','selfPickup','14_仓库自提单号'],['CECN滞留包裹','cecn','15_CECN滞留单号'],['CEZT滞留包裹','cezt','16_CEZT滞留单号'],['580滞留包裹','retention580','17_580滞留单号']
+    ['仓库自提件','selfPickup','14_仓库自提单号'],['CECN滞留包裹','cecn','15_CECN滞留单号'],['CEZT滞留包裹','cezt','16_CEZT滞留单号'],['580滞留包裹','retention580','17_580滞留单号'],
+    ['已退回件','returned','03_明细_核心数据'],['退回率','returnRate','03_明细_核心数据'],['退回处理中','returnInProgress','03_明细_核心数据'],['PP退回件','ppReturned','03_明细_核心数据'],['PV退回件','pvReturned','03_明细_核心数据']
   ];
   const rows = [xmlRow(1, ['日期','板块','项目','数值（点击查看）','状态','近7天走势','说明'])];
   specs.forEach(([label,key,target], index) => rows.push(xmlFormulaRow(index + 2, [range.to, type, label], `HYPERLINK("#'${target}'!A1","${formatMetric(metrics[key], key)}")`, ['—', metrics.trends[key] || '—', `来源：${metrics.snapshotCount}个COMPLETED日快照`] )));
@@ -145,18 +146,18 @@ function dashboardXml(metrics, range, type) {
 }
 
 function analysisXml(snapshots, type) {
-  const rows = [xmlRow(1, ['日期','业务','总单','PP','PV','POD','POD率','Pending1+','Pending2+','Pending3+','OC1+','OC2+','OC3+','自提','CECN','CEZT','580'])];
+  const rows = [xmlRow(1, ['日期','业务','总单','PP','PV','POD','POD率','Pending1+','Pending2+','Pending3+','OC1+','OC2+','OC3+','自提','CECN','CEZT','580','已退回','退回率','退回处理中','PP退回','PV退回'])];
   snapshots.forEach((snapshot, index) => {
     const data = uniquePeriodRows((snapshot.payload.finalRows || []).filter(row => row.businessType === type));
     const m = dashboardMetrics(data, { from: snapshot.reportDate, to: snapshot.reportDate }, type);
-    rows.push(xmlRow(index + 2, [snapshot.reportDate,type,m.all,m.pp,m.pv,m.pod,m.podRate,m.pending1,m.pending2,m.pending3,m.oc1,m.oc2,m.oc3,m.selfPickup,m.cecn,m.cezt,m.retention580]));
+    rows.push(xmlRow(index + 2, [snapshot.reportDate,type,m.all,m.pp,m.pv,m.pod,m.podRate,m.pending1,m.pending2,m.pending3,m.oc1,m.oc2,m.oc3,m.selfPickup,m.cecn,m.cezt,m.retention580,m.returned,m.returnRate,m.returnInProgress,m.ppReturned,m.pvReturned]));
   });
   return rows.join('');
 }
 
 function detailXml(rows, label) {
-  const out = [xmlRow(1, ['序号','运单号','日期','业务','PP/PV','当前分类','Pending次数','OC天数','POD状态','API状态','Snapshot ID'])];
-  rows.forEach((row, index) => out.push(xmlRow(index + 2, [index + 1,bill(row),row.reportDate || '',row.businessType || '',row.regionCode || row.regionType || '',row.primaryCategory || row.主分类 || row.异常分类 || label,pending(row),oc(row),pod(row) ? 'POD' : '未POD',row.API状态 || row.apiStatus || '',row.snapshotId || ''])));
+  const out = [xmlRow(1, ['序号','运单号','日期','业务','PP/PV','当前分类','Pending次数','OC天数','POD状态','退回状态','退回开始时间','退回完成时间','API状态','Snapshot ID'])];
+  rows.forEach((row, index) => out.push(xmlRow(index + 2, [index + 1,bill(row),row.reportDate || '',row.businessType || '',row.regionCode || row.regionType || '',row.primaryCategory || row.主分类 || row.异常分类 || label,pending(row),oc(row),pod(row) ? 'POD' : '未POD',row.退回状态 || '未退回',row.退回开始时间 || '',row.退回完成时间 || row.退回时间 || '',row.API状态 || row.apiStatus || '',row.snapshotId || ''])));
   out.push(xmlFormulaRow(out.length + 1, ['返回总看板'], 'HYPERLINK("#\'01_总看板\'!A1","返回总看板")', []));
   return out.join('');
 }
@@ -176,8 +177,11 @@ function dashboardMetrics(rows, range) {
     pending1: count(row => pending(row) >= 1), pending2: count(row => pending(row) >= 2), pending3: count(row => pending(row) >= 3),
     oc1: count(row => oc(row) >= 1), oc2: count(row => oc(row) >= 2), oc3: count(row => oc(row) >= 3), inbound: count(row => yes(row.入库无扫描节点)),
     selfPickup: count(row => row.specialState === 'SELF_PICKUP'), cecn: count(row => row.specialState === 'CECN_RETENTION'), cezt: count(row => row.specialState === 'CEZT_RETENTION'), retention580: count(row => row.specialState === 'CCSL580_RETENTION'),
+    returned: count(returnCompleted), returnInProgress: count(returnInProgress),
+    ppReturned: count(row => returnCompleted(row) && region(row) === 'PP'), pvReturned: count(row => returnCompleted(row) && region(row) === 'PV'),
     snapshotCount: new Set(rows.map(row => row.snapshotId)).size, trends: {}
   };
+  metrics.returnRate = all ? metrics.returned / all : 0;
   return metrics;
 }
 
@@ -194,6 +198,8 @@ function bill(row) { return String(row.shipmentCode || row.运单号 || '').trim
 function pending(row) { return Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? row.Pending当前次数 ?? 0); }
 function oc(row) { return Number(row.OC天数 || 0); }
 function pod(row) { return row.是否POD === '是' || String(row.orderStatus || '') === '85' || row.POD状态 === 'POD'; }
+function returnCompleted(row) { return row.currentState === 'RETURN_COMPLETED' || row.退回状态 === '已退回'; }
+function returnInProgress(row) { return row.currentState === 'RETURN_IN_PROGRESS' || row.退回状态 === '退回处理中'; }
 function region(row) { return String(row.regionCode || row.regionType || row.区域 || '').toUpperCase().startsWith('PV') ? 'PV' : 'PP'; }
 function yes(value) { return value === '是' || value === true || Number(value) > 0; }
 function normalizeBusiness(value) { const type = String(value || '').toUpperCase(); if (!BUSINESSES.includes(type)) throw new Error('不支持的业务板块'); return type; }

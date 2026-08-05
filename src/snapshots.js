@@ -135,7 +135,14 @@ export function repairSnapshotFromStoredData(snapshot = {}) {
   source.lastRunSummary = { ...(source.lastRunSummary || {}), runId: repairRunId, repairSource: 'STORED_SQLITE_DATA', ceApiCallsDuringRepair: 0 };
   getDb().prepare("UPDATE export_snapshots SET status='INVALID_FAILED_RECONCILIATION',reconciliationStatus='FAILED',invalidReason=? WHERE snapshotId=?")
     .run(JSON.stringify({ reason: 'CLASSIFICATION_CONFLICT', repairedFromStoredData: true }), snapshot.snapshotId);
-  return createDashboardSnapshot(source, { reportDate: source.reportDate, runId: repairRunId });
+  const repaired = createDashboardSnapshot(source, { reportDate: source.reportDate, runId: repairRunId });
+  const completedAt = nowIso();
+  getDb().prepare(`INSERT OR REPLACE INTO run_locks(reportDate,runId,status,lockedBy,lockedAt,updatedAt,currentStage,batchIndex,totalBatches,errorMessage,completedAt)
+    VALUES(?,?,'finished','LOCAL_RECONCILIATION',?,?,'完成',1,1,'',?)`)
+    .run(source.reportDate, repairRunId, completedAt, completedAt, completedAt);
+  repaired.state.currentRun = { ...repaired.state.currentRun, runId: repairRunId, reportDate: source.reportDate, status: 'finished', currentStage: '完成', completedAt };
+  repaired.state.snapshotId = repaired.snapshotId;
+  return repaired;
 }
 
 function resolveRunId(state, reportDate) {

@@ -19,6 +19,7 @@ const METRICS = [
   ['今日总单', 'all'], ['今日POD', 'pod'], ['POD率', 'pod'], ['首派成功率', 'firstAttempt'],
   ['Pending1+', 'pending1'], ['Pending2+', 'pending2'], ['Pending3+', 'pending3'],
   ['OC1+', 'oc1'], ['OC2+', 'oc2'], ['OC3+', 'oc3'], ['入库无扫描', 'inboundNoScan'],
+  ['已退回件', 'returned'], ['退回率', 'returned'], ['退回处理中', 'returnInProgress'],
   ['在途门店', 'shopTransit'], ['到达门店', 'shopArrived'], ['门店Pending', 'shopPending'],
   ['门店滞留1天+', 'shopRetention1'], ['门店滞留2天+', 'shopRetention2'], ['门店滞留3天+', 'shopRetention3']
 ];
@@ -69,11 +70,13 @@ function createDashboardSheet(workbook, context, metricSheets) {
   const visibleGroups = ['ALL', 'CN', 'VN'];
   for (const group of visibleGroups) {
     const metrics = context.view.recipientGroups[group]?.metrics || {};
-    const values = [GROUP_LABELS[group], metrics.total || 0, metrics.pod || 0, rateValue(metrics.podRate), rateValue(metrics.firstAttemptRate), metrics.pending1 || 0, metrics.pending2 || 0, metrics.pending3plus || 0, metrics.oc1 || 0, metrics.oc2 || 0, metrics.oc3plus || 0, metrics.inboundNoScan || 0];
+    const values = [GROUP_LABELS[group], ...METRICS.map(([label]) => metricValueForExport(metrics, label))];
     const row = sheet.addRow(values);
     styleBodyRow(row, 12);
     row.getCell(4).numFmt = '0.00%';
     row.getCell(5).numFmt = '0.00%';
+    const returnRateColumn = 2 + METRICS.findIndex(([label]) => label === '退回率');
+    if (returnRateColumn > 1) row.getCell(returnRateColumn).numFmt = '0.00%';
   }
 
   let startRow = sheet.rowCount + 2;
@@ -108,8 +111,8 @@ function createDashboardSheet(workbook, context, metricSheets) {
     }
     startRow = sheet.rowCount + 2;
   }
-  sheet.columns = [12, 21, 19, 20, 15, 42, 42, 14, 14, 14, 14, 16].map(width => ({ width }));
-  sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + visibleGroups.length, column: 12 } };
+  sheet.columns = [21, ...METRICS.map(() => 16)].map(width => ({ width }));
+  sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + visibleGroups.length, column: METRICS.length + 1 } };
   sheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.25, right: 0.25, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } };
 }
 
@@ -166,7 +169,7 @@ function createGroupStatisticsSheet(workbook, context, group, name) {
   for (let index = 0; index < dates.length; index += 1) {
     const values = [dates[index], ...METRICS.map(([label]) => {
       const value = trendValue(context.view, `${group}_${label}`, index);
-      return ['POD率', '首派成功率'].includes(label) ? rateValue(value) : value;
+      return ['POD率', '首派成功率', '退回率'].includes(label) ? rateValue(value) : value;
     })];
     const row = sheet.addRow(values);
     styleBodyRow(row, headers.length);
@@ -344,10 +347,24 @@ function metricDescription(label) {
     'OC2+': '当前OC周期2天及以上',
     'OC3+': '当前OC周期3天及以上',
     入库无扫描: '入库后无更晚有效节点'
+    ,已退回件: '当前周期RETURN_COMPLETED唯一运单数'
+    ,退回率: '已退回件 ÷ 当前业务有效唯一单号'
+    ,退回处理中: 'PR/P4007退回中，仍继续查询轨迹'
   }[label] || '';
 }
 
 function rateValue(value) { return Number(value || 0) / 100; }
+function metricValueForExport(metrics, label) {
+  const map = {
+    今日总单: metrics.total, 今日POD: metrics.pod, POD率: rateValue(metrics.podRate), 首派成功率: rateValue(metrics.firstAttemptRate),
+    'Pending1+': metrics.pending1, 'Pending2+': metrics.pending2, 'Pending3+': metrics.pending3plus,
+    'OC1+': metrics.oc1, 'OC2+': metrics.oc2, 'OC3+': metrics.oc3plus, 入库无扫描: metrics.inboundNoScan,
+    已退回件: metrics.returned, 退回率: rateValue(metrics.returnRate), 退回处理中: metrics.returnInProgress,
+    在途门店: metrics.shopTransit, 到达门店: metrics.shopArrived, 门店Pending: metrics.shopPending,
+    '门店滞留1天+': metrics.shopRetention1, '门店滞留2天+': metrics.shopRetention2, '门店滞留3天+': metrics.shopRetention3
+  };
+  return map[label] ?? 0;
+}
 function statusLabel(value) { return { volume: '—', normal: '正常', warning: '需跟进', danger: '重点关注' }[value] || String(value || '—'); }
 function shortMetric(value) { return String(value).replace('今日', '').replace('首派成功率', '首派成功').slice(0, 18); }
 function hyperlinkFormula(sheetName, label) { const safeSheet = String(sheetName).replaceAll("'", "''"); const safeLabel = String(label).replaceAll('"', '""'); return { formula: `HYPERLINK("#'${safeSheet}'!A1","${safeLabel}")`, result: String(label) }; }

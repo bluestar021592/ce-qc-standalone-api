@@ -526,7 +526,10 @@ function isDeliveryEvent(e) {
 function isInboundWithoutSubsequentAction(events = []) {
   let inboundIndex = -1;
   for (let index = 0; index < events.length; index += 1) {
-    if (isCcslInboundEvent(events[index])) inboundIndex = index;
+    if (isCcslInboundEvent(events[index])) {
+      inboundIndex = index;
+      break;
+    }
   }
   if (inboundIndex < 0) return false;
   return !events.slice(inboundIndex + 1).some(isRecognizedPostInboundAction);

@@ -1,5 +1,6 @@
 let appState = {};
 let shopeeState = {};
+let businessStates = {};
 let ceAuth = {};
 let accessSession = {};
 let currentPage = pageFromPath();
@@ -81,11 +82,12 @@ async function refresh() {
     renderAll();
     return;
   }
-  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unified] = await Promise.all([
+  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unified, ...businessResponses] = await Promise.all([
     api('/api/state'), api('/api/shopee/state'), api('/api/ce-auth-status'),
     api('/api/session'),
     api('/api/history?businessType=CCSL'), api('/api/history?businessType=SHOPEE'),
-    api('/api/import/unified-latest')
+    api('/api/import/unified-latest'),
+    ...['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].map(type => api(`/api/business-state/${type}`))
   ]);
   appState = ccsl.state || {};
   shopeeState = shopee.state || {};
@@ -93,6 +95,7 @@ async function refresh() {
   accessSession = session || {};
   historyCatalog = { CCSL: ccslHistory.rows || [], SHOPEE: shopeeHistory.rows || [] };
   unifiedImportState = unified.import || null;
+  businessStates = Object.fromEntries(businessResponses.map(result => [result.businessType, result.state || {}]));
   historyModeDate = '';
   renderAll();
   if (currentPage === 'tracking') loadTrackingWorkspace();
@@ -301,7 +304,7 @@ async function openTrackingDrawer(row) {
   document.getElementById('trackingDrawerBody').innerHTML = '<div class="empty-state">正在读取完整轨迹…</div>';
   sessionStorage.setItem('trackingReturnContext', JSON.stringify({ reportDate: row.reportDate, businessType: row.businessType, region: row.region, snapshotId: row.snapshotId, scrollPosition: scrollY }));
   try {
-    const type = /^SHOPEE/.test(row.businessType || '') ? 'SHOPEE' : 'CCSL';
+    const type = /^SHOPEE/.test(row.businessType || '') ? String(row.businessType).toUpperCase() : String(row.businessType || 'CCSL').toUpperCase();
     const detail = await api(`/api/detail?businessType=${encodeURIComponent(type)}&reportDate=${encodeURIComponent(row.reportDate || '')}&shipmentCode=${encodeURIComponent(row.shipmentCode)}`);
     const events = detail.detail?.events || detail.events || [];
     document.getElementById('trackingDrawerBody').innerHTML = events.length ? events.map(event => `<article class="timeline-event"><time>${escapeHtml(event.eventTime || '—')}</time><div><b>${escapeHtml(event.trackingEventDescZh || event.trackingEventDesc || event.eventCode || '轨迹节点')}</b><p>${escapeHtml([event.place,event.eventShop,event.operator,event.eventCourier].filter(Boolean).join(' · '))}</p></div></article>`).join('') : '<div class="empty-state">该运单暂无轨迹节点</div>';
@@ -519,7 +522,8 @@ function renderRegionBlock(code, row) {
   const items = [
     ['今日件数', row.total], ['签收率', formatMetric(row.podRate || 0, '%')], ['签收件数', row.pod],
     ['Pending1+', row.pending1], ['Pending2+', row.pending2], ['Pending3+', row.pending3],
-    ['OC1+', row.oc1], ['OC2+', row.oc2], ['OC3+', row.oc3], ['入库无扫描', row.inboundNoScan], ['退回待处理', row.returnRequired]
+    ['OC1+', row.oc1], ['OC2+', row.oc2], ['OC3+', row.oc3], ['入库无扫描', row.inboundNoScan],
+    ['已退回件', row.returned], ['退回处理中', row.returnInProgress], ['退回待处理', row.returnRequired]
   ];
   return `<section class="region-block ${code.toLowerCase()}"><h4>${label}<small>${code === 'PP' ? '金边/本省' : '外省专线'}</small></h4><div>${items.map(([name, value]) => `<button onclick="openRegionDetail('${code}','${escapeAttr(tabForMetric('SHOPEE', name))}')"><span>${escapeHtml(name)}</span><b>${typeof value === 'string' ? escapeHtml(value) : formatInt(value || 0)}</b></button>`).join('')}</div></section>`;
 }
@@ -616,37 +620,89 @@ function metaLine(label, value, positive = false) {
 }
 
 function renderCcslPage() {
-  const metrics = ccslMetrics();
-  document.getElementById('ccslPageMeta').textContent = pageMeta(appState);
-  document.getElementById('ccslKpis').innerHTML = businessKpiDefs('CCSL', metrics).map(def => renderKpiCard(...def)).join('');
-  document.getElementById('ccslMetrics').innerHTML = renderMetricBoard('CCSL', dashboardRows(appState));
+  const state = currentBusinessState();
+  const type = currentBusinessType();
+  const metrics = ccslMetrics(state);
+  document.getElementById('ccslPageMeta').textContent = pageMeta(state);
+  document.getElementById('ccslKpis').innerHTML = businessKpiDefsForState(type, state, metrics).map(def => renderKpiCard(...def)).join('');
+  document.querySelector('#ccslExceptionBoard h3').textContent = `${type}质控指标`;
+  document.querySelector('#ccslPage .page-heading h2').dataset.testid = 'business-title';
+  document.querySelector('#ccslPage .page-heading h2').textContent = `${businessLabel(type)}看板`;
+  document.getElementById('ccslMetrics').innerHTML = renderMetricBoardForState(type, state);
+  document.getElementById('ccslKpis').insertAdjacentHTML('afterbegin', `<span data-testid="business-today-count" class="sr-only">${Number(metrics.total || 0)}</span>`);
   renderCcslOperations();
   renderPreview('ccslPreviewPanel', 'CCSL', false);
 }
 
 function renderShopeePage() {
-  document.getElementById('shopeePageMeta').textContent = pageMeta(shopeeState);
+  const state = currentBusinessState();
+  const type = currentBusinessType();
+  document.getElementById('shopeePageMeta').textContent = pageMeta(state);
+  document.querySelector('#shopeePage .page-heading h2').textContent = `${businessLabel(type)}看板`;
+  document.querySelector('#shopeePage .page-heading h2').dataset.testid = 'business-title';
+  document.getElementById('shopeePage').dataset.businessType = type;
+  const aggregate = shopeeState; shopeeState = state;
+  shopeeRecipientGroup = type === 'SHOPEECN' ? 'CN' : 'VN';
+  previewState.SHOPEE.recipientGroup = shopeeRecipientGroup;
   renderShopeeImportMeta();
   renderShopeeRecipientFilters();
   renderShopeeRecipientGroups();
+  const metrics = shopeeState.dashboard?.recipientGroups?.[shopeeRecipientGroup]?.metrics || {};
+  document.getElementById('shopeeRecipientGroups').insertAdjacentHTML('afterbegin', `<span data-testid="business-today-count" class="sr-only">${Number(metrics.total || 0)}</span>`);
   document.getElementById('shopeeRegions').innerHTML = renderShopeeRegions();
   document.getElementById('shopeeRecipientTrends').innerHTML = renderShopeeRecipientTrends();
   renderShopeeOperations();
   renderPreview('shopeePreviewPanel', 'SHOPEE', false);
+  shopeeState = aggregate;
+}
+
+function currentBusinessType() {
+  if (currentPage === 'shopee') return shopeeRecipientGroup === 'CN' ? 'SHOPEECN' : 'SHOPEEVN';
+  return ({ ce:'CE', tbkh:'TBKH', ali1688:'ALI1688', shopeecn:'SHOPEECN', shopeevn:'SHOPEEVN' })[currentPage] || 'CE';
+}
+
+function currentBusinessState() { return businessStates[currentBusinessType()] || (/^SHOPEE/.test(currentBusinessType()) ? shopeeState : appState); }
+function businessLabel(type) { return ({ SHOPEECN:'SHOPEE CN', SHOPEEVN:'SHOPEE VN' })[type] || type; }
+
+function businessKpiDefsForState(type, state, metrics) {
+  const oldCcsl = appState, oldShopee = shopeeState;
+  if (/^SHOPEE/.test(type)) shopeeState = state; else appState = state;
+  const defs = businessKpiDefs(/^SHOPEE/.test(type) ? 'SHOPEE' : 'CCSL', metrics);
+  appState = oldCcsl; shopeeState = oldShopee;
+  return defs;
+}
+
+function renderMetricBoardForState(type, state) {
+  const oldCcsl = appState; appState = state;
+  const html = renderMetricBoard('CCSL', dashboardRows(state));
+  appState = oldCcsl;
+  return html;
 }
 
 function renderShopeeImportMeta() {
   const summary = shopeeState.dailySummary || {};
   const counts = summary.groupCounts || {};
+  const exactType = currentBusinessType();
+  const exactGroup = exactType === 'SHOPEECN' ? 'CN' : exactType === 'SHOPEEVN' ? 'VN' : '';
+  const exactTotal = Number(shopeeState.dashboard?.recipientGroups?.[exactGroup]?.metrics?.total || shopeeState.total || 0);
+  const effectiveCounts = exactGroup
+    ? { CN: exactGroup === 'CN' ? exactTotal : 0, VN: exactGroup === 'VN' ? exactTotal : 0 }
+    : counts;
   const reconciliation = shopeeState.dashboard?.recipientReconciliation?.status || summary.reconciliation?.status || '待处理';
   document.getElementById('shopeeImportMeta').innerHTML = `<div class="import-meta-line">
     <span>文件 <b>${escapeHtml(shopeeState.sourceName || '未导入')}</b></span><span>reportDate <b>${escapeHtml(shopeeState.reportDate || '—')}</b></span>
-    <span>有效单量 <b>${formatInt(summary.totalRecognized || shopeeState.total || 0)}</b></span><span>收件人字段 <b>${escapeHtml(summary.recipientHeader || '—')}</b></span>
-    <span>CN <b>${formatInt(counts.CN || 0)}</b></span><span>VN <b>${formatInt(counts.VN || 0)}</b></span><span>对账 <b>${escapeHtml(reconciliation)}</b></span>
+    <span>有效单量 <b>${formatInt(exactGroup ? exactTotal : (summary.totalRecognized || shopeeState.total || 0))}</b></span><span>收件人字段 <b>${escapeHtml(summary.recipientHeader || '—')}</b></span>
+    <span>CN <b>${formatInt(effectiveCounts.CN || 0)}</b></span><span>VN <b>${formatInt(effectiveCounts.VN || 0)}</b></span><span>对账 <b>${escapeHtml(reconciliation)}</b></span>
   </div>${(summary.warnings || []).length ? `<div class="import-warning">${(summary.warnings || []).map(escapeHtml).join('；')}</div>` : ''}`;
 }
 
 function renderShopeeRecipientFilters() {
+  const exactType = currentBusinessType();
+  if (['SHOPEECN', 'SHOPEEVN'].includes(exactType)) {
+    const group = exactType === 'SHOPEECN' ? 'CN' : 'VN';
+    document.getElementById('shopeeRecipientFilters').innerHTML = `<button class="active" disabled>${escapeHtml(recipientGroupLabel(group))}</button>`;
+    return;
+  }
   const groups = ['ALL', 'CN', 'VN'];
   document.getElementById('shopeeRecipientFilters').innerHTML = groups.map(group => `<button class="${shopeeRecipientGroup === group ? 'active' : ''}" onclick="setShopeeRecipientGroup('${group}')">${escapeHtml(recipientGroupLabel(group))}</button>`).join('');
 }
@@ -670,9 +726,12 @@ function renderRecipientGroupPanel(group, summary) {
     ['今日件数', metrics.total, 'all', '件'], ['今日POD', metrics.pod, 'pod', '件'], ['POD率', metrics.podRate, 'pod', '%'],
     ['首派成功率', metrics.firstAttemptRate, 'firstAttempt', '%'], ['Pending1+', metrics.pending1, 'pending1', '件'], ['Pending2+', metrics.pending2, 'pending2', '件'],
     ['Pending3+', metrics.pending3plus, 'pending3', '件'], ['OC1+', metrics.oc1, 'oc1', '件'], ['OC2+', metrics.oc2, 'oc2', '件'],
-    ['OC3+', metrics.oc3plus, 'oc3', '件'], ['入库无扫描', metrics.inboundNoScan, 'inboundNoScan', '件']
+    ['OC3+', metrics.oc3plus, 'oc3', '件'], ['入库无扫描', metrics.inboundNoScan, 'inboundNoScan', '件'],
+    ['已退回件', metrics.returned, 'returned', '件'], ['退回率', metrics.returnRate, 'returned', '%'],
+    ['退回处理中', metrics.returnInProgress, 'returnInProgress', '件']
   ];
-  return `<article class="panel recipient-group-card ${group === 'OTHER' ? 'other' : ''}"><header><h3>${escapeHtml(recipientGroupLabel(group))}</h3><span>${formatInt(summary.monitorCount || 0)}票纳入监控</span></header><div class="recipient-metric-grid">${defs.map(([label, value, tab, unit]) => `<button onclick="openShopeeGroupMetric('${group}','${tab}')"><span>${escapeHtml(label)}</span><b>${formatMetric(value || 0, unit)}</b></button>`).join('')}</div></article>`;
+  const testId = label => ({ '已退回件':'return-completed-count', '退回率':'return-rate', '退回处理中':'return-in-progress-count' })[label] || '';
+  return `<article class="panel recipient-group-card ${group === 'OTHER' ? 'other' : ''}"><header><h3>${escapeHtml(recipientGroupLabel(group))}</h3><span>${formatInt(summary.monitorCount || 0)}票纳入监控</span></header><div class="recipient-metric-grid">${defs.map(([label, value, tab, unit]) => `<button ${testId(label) ? `data-testid="${testId(label)}"` : ''} onclick="openShopeeGroupMetric('${group}','${tab}')"><span>${escapeHtml(label)}</span><b>${formatMetric(value || 0, unit)}</b></button>`).join('')}</div></article>`;
 }
 
 function openShopeeGroupMetric(group, tab) {
@@ -687,7 +746,7 @@ function renderShopeeRecipientTrends() {
   const colors = { CN: 'blue', VN: 'orange' };
   const panel = (title, key) => renderTrendPanel(title, seriesGroups.map(group => [recipientGroupLabel(group), trends[group]?.[key], colors[group]]));
   const summaries = shopeeState.dashboard?.recipientGroups || {};
-  return [panel('首派成功率趋势', 'firstAttemptRate'), panel('OC率趋势', 'ocRate'), panel('POD率趋势', 'podRate'), `<article class="panel trend-panel"><div class="panel-title"><h3>收件人来源对比（今日）</h3><span>独立分子/分母</span></div><div class="recipient-compare">${seriesGroups.map(group => { const row = summaries[group]?.metrics || {}; return `<div><span>${escapeHtml(recipientGroupLabel(group))}</span><b>${formatInt(row.total || 0)}件</b><small>POD ${formatInt(row.pod || 0)} · ${formatMetric(row.podRate || 0, '%')} · 首派 ${formatMetric(row.firstAttemptRate || 0, '%')}</small></div>`; }).join('')}</div></article>`].join('');
+  return [panel('首派成功率趋势', 'firstAttemptRate'), panel('OC率趋势', 'ocRate'), panel('POD率趋势', 'podRate'), `<div data-testid="return-trend">${panel('退回率趋势', 'returnRate')}</div>`, `<article class="panel trend-panel"><div class="panel-title"><h3>收件人来源对比（今日）</h3><span>独立分子/分母</span></div><div class="recipient-compare">${seriesGroups.map(group => { const row = summaries[group]?.metrics || {}; return `<div><span>${escapeHtml(recipientGroupLabel(group))}</span><b>${formatInt(row.total || 0)}件</b><small>POD ${formatInt(row.pod || 0)} · ${formatMetric(row.podRate || 0, '%')} · 退回 ${formatInt(row.returned || 0)} · ${formatMetric(row.returnRate || 0, '%')}</small></div>`; }).join('')}</div></article>`].join('');
 }
 
 function renderShopeeRegions() {
@@ -815,8 +874,8 @@ function trendWithCurrent(reportDate, value, status = 'volume') {
   });
 }
 
-function ccslMetrics() {
-  const dashboard = appState.dashboard || {};
+function ccslMetrics(sourceState = appState) {
+  const dashboard = sourceState.dashboard || {};
   return { total: Number(dashboard.pnh || dashboard.totalMonitored || 0), pod: Number(dashboard.todayPod || 0), podRate: Number(dashboard.podRate || 0), abnormal: Number(dashboard.abnormalCount || 0), pending: Number(dashboard.categories?.pendingTotal || 0), oc: Number(dashboard.categories?.ocTotal || 0) };
 }
 
@@ -1004,17 +1063,19 @@ function renderRulesPage() {
 
 function renderPreview(containerId, scope, businessSelectable) {
   const filter = previewState[scope];
-  const type = businessSelectable ? filter.business : scope;
-  const state = type === 'SHOPEE' ? shopeeState : appState;
+  const exactBusiness = !businessSelectable && ['CCSL', 'SHOPEE'].includes(scope) ? currentBusinessType() : '';
+  const type = businessSelectable ? filter.business : (exactBusiness || scope);
+  const state = exactBusiness ? currentBusinessState() : (type === 'SHOPEE' ? shopeeState : appState);
+  const isShopee = /^SHOPEE/.test(type);
   const tabs = state.detailTabs || {};
-  if (!tabs[filter.category]) filter.category = type === 'SHOPEE' ? `${filter.recipientGroup || 'ALL'}_all` : 'allData';
+  if (!tabs[filter.category]) filter.category = isShopee ? `${filter.recipientGroup || 'ALL'}_all` : 'allData';
   const tab = tabs[filter.category] || { rows: [], total: 0, label: '全部明细' };
   const query = String(filter.query || '').trim().toLowerCase();
   const rows = (tab.rows || []).filter(row => !query || JSON.stringify(row).toLowerCase().includes(query)).slice(0, 200);
   const businessSelect = businessSelectable ? `<label>业务板块<select onchange="setPreviewFilter('${scope}','business',this.value)"><option value="CCSL" ${type === 'CCSL' ? 'selected' : ''}>CCSL</option><option value="SHOPEE" ${type === 'SHOPEE' ? 'selected' : ''}>SHOPEE</option></select></label>` : `<span class="fixed-business">${type}</span>`;
   const categoryOptions = Object.entries(tabs).filter(([, value]) => Array.isArray(value?.rows)).map(([key, value]) => `<option value="${escapeAttr(key)}" ${key === filter.category ? 'selected' : ''}>${escapeHtml(value.label || tabLabel(type, key))}</option>`).join('');
   document.getElementById(containerId).innerHTML = `
-    <div class="panel-title"><div><h3>数据明细与导出预览</h3><p>导出前核对当前快照及关键字段</p></div><button class="btn ${type === 'SHOPEE' ? 'shopee' : 'primary'}" ${state.snapshotId ? '' : 'disabled'} onclick="exportBusiness('${type}')">导出${type} Excel</button></div>
+    <div class="panel-title"><div><h3>数据明细与导出预览</h3><p>导出前核对当前快照及关键字段</p></div><button class="btn ${isShopee ? 'shopee' : 'primary'}" ${state.snapshotId ? '' : 'disabled'} onclick="exportBusiness('${type}')">导出${businessLabel(type)} Excel</button></div>
     <div class="preview-meta"><span>业务板块 <b>${type}</b></span><span>日报日期 <b>${escapeHtml(state.reportDate || '—')}</b></span><span>数据总数 <b>${formatInt(tab.total ?? rows.length)}</b></span><span>数据版本 <b>${state.snapshotId ? '已锁定' : '待处理'}</b></span></div>
     <div class="preview-filters">${businessSelect}<label>日期<input value="${escapeAttr(state.reportDate || '')}" readonly></label><label>异常类型<select onchange="setPreviewFilter('${scope}','category',this.value)">${categoryOptions}</select></label><label class="search-field">运单号 / CP码 / 收件人<input value="${escapeAttr(filter.query)}" oninput="setPreviewFilter('${scope}','query',this.value)"></label><button class="btn ghost" onclick="renderPreview('${containerId}','${scope}',${businessSelectable})">查询</button></div>
     <div class="preview-table-wrap">${rows.length ? renderPreviewTable(rows, type) : '<div class="empty-state">当前筛选暂无数据</div>'}</div>`;
@@ -1028,7 +1089,8 @@ function setPreviewFilter(scope, key, value) {
 }
 
 function renderPreviewTable(rows, type) {
-  const fields = type === 'SHOPEE'
+  const isShopee = /^SHOPEE/.test(type);
+  const fields = isShopee
     ? ['运单号','收件人来源','收件人原值','区域','最新节点','最新时间','当前分类','Pending次数','Pending连续性','OC天数','POD状态','操作']
     : ['运单号','区域','收件人','最新节点','最新时间','当前分类','Pending次数','Pending连续性','OC天数','入库无扫描','工单未处理','POD状态','操作'];
   return `<table class="preview-table"><thead><tr>${fields.map(field => `<th>${field}</th>`).join('')}</tr></thead><tbody>${rows.map(row => {
@@ -1036,9 +1098,10 @@ function renderPreviewTable(rows, type) {
     const region = pick(row, ['regionCode','区域','门店编码','CP码','pickupShop','deliveryShop']) || '—';
     const pendingCount = row.Pending当前次数 ?? row.Pending次数 ?? row.Pending最大次数 ?? '—';
     const pendingContinuity = row.Pending连续性 ?? (row.Pending连续 === true ? '连续' : row.Pending不连续 === true ? '不连续' : '—');
-    const detailLink = `<a class="table-link" href="/detail?businessType=${type}&reportDate=${encodeURIComponent(type === 'SHOPEE' ? shopeeState.reportDate || '' : appState.reportDate || '')}&shipmentCode=${encodeURIComponent(bill)}" target="_blank">查看轨迹</a>`;
+    const detailState = businessStates[type] || (isShopee ? shopeeState : appState);
+    const detailLink = `<a class="table-link" href="/detail?businessType=${type}&reportDate=${encodeURIComponent(detailState.reportDate || '')}&shipmentCode=${encodeURIComponent(bill)}" target="_blank">查看轨迹</a>`;
     const common = [bill, region, pick(row, ['收件人','customerName','receiverName']), pick(row, ['latestEventDesc','最后节点','latestNode']), pick(row, ['latestEventTime','最后节点时间']), pick(row, ['primaryCategory','主分类','异常分类']), pendingCount, pendingContinuity, row.OC天数 ?? row.OC最大天数 ?? '—'];
-    const values = type === 'SHOPEE'
+    const values = isShopee
       ? [bill, recipientGroupOfRow(row), row.recipient_raw || '—', region, pick(row, ['latestEventDesc','最后节点','latestNode']), pick(row, ['latestEventTime','最后节点时间']), pick(row, ['primaryCategory','主分类','异常分类']), pendingCount, pendingContinuity, row.OC天数 ?? row.OC最大天数 ?? '—', pick(row, ['POD状态','是否POD']), detailLink]
       : [...common, row.异常分类 === '入库无扫描' ? '是' : '否', row.异常分类 === '需人工复核' ? '是' : '否', pick(row, ['POD状态','是否POD']), detailLink];
     return `<tr>${values.map((value, index) => `<td>${index === values.length - 1 ? value : escapeHtml(value ?? '—')}</td>`).join('')}</tr>`;
@@ -1046,7 +1109,11 @@ function renderPreviewTable(rows, type) {
 }
 
 function openMetricDetail(type, tab) {
-  navigatePage(type === 'SHOPEE' ? 'shopee' : 'ccsl');
+  const isShopee = type === 'SHOPEE';
+  const targetPage = isShopee
+    ? (['shopeecn', 'shopeevn'].includes(currentPage) ? currentPage : (shopeeRecipientGroup === 'CN' ? 'shopeecn' : 'shopeevn'))
+    : (['ce', 'tbkh', 'ali1688'].includes(currentPage) ? currentPage : 'ce');
+  navigatePage(targetPage);
   previewState[type].category = tab || (type === 'SHOPEE' ? 'all' : 'allData');
   requestAnimationFrame(() => {
     renderPreview(type === 'SHOPEE' ? 'shopeePreviewPanel' : 'ccslPreviewPanel', type, false);
@@ -1297,9 +1364,17 @@ async function executeDataPurge() {
 
 function closeDataPurge() { clearInterval(purgeCountdownTimer); const dialog = document.getElementById('dataPurgeDialog'); if (dialog) dialog.hidden = true; purgeChallenge = null; }
 
-function exportBusiness(type) {
-  const state = type === 'SHOPEE' ? shopeeState : appState;
+async function exportBusiness(type) {
+  const state = businessStates[type] || (type === 'SHOPEE' ? shopeeState : appState);
   if (!state.snapshotId) return alert(`${type}暂无已完成处理快照，不能导出。`);
+  if (['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].includes(type)) {
+    try {
+      const result = await api('/api/export-period/prepare', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ periodType: 'daily', date: state.reportDate, businessType: type }) });
+      const file = (result.files || []).find(item => item.name.startsWith(`${type}_`));
+      if (!file) throw new Error('未生成对应业务报表');
+      return downloadFile(file.url);
+    } catch (error) { return alert(`导出失败：${error.message}`); }
+  }
   const base = type === 'SHOPEE' ? '/api/shopee/export-xlsx' : '/api/export-xlsx';
   downloadFile(`${base}?snapshotId=${encodeURIComponent(state.snapshotId)}`);
 }
