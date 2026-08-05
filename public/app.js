@@ -476,7 +476,9 @@ function renderSimpleTable(rows, fields) {
 }
 
 function renderHome() {
-  DashboardComponents.renderHome(buildDashboardSnapshot());
+  const snapshot = buildDashboardSnapshot();
+  const model = DashboardDataAdapterV18.mapSnapshotToDashboardModel(snapshot, visualMode);
+  DashboardV18.renderHome(document.getElementById('homePage'), model);
 }
 
 function renderHomeKpis() {
@@ -647,17 +649,10 @@ function renderCcslPage() {
   const state = currentBusinessState();
   const type = currentBusinessType();
   const metrics = ccslMetrics(state);
-  document.getElementById('ccslPageMeta').textContent = pageMeta(state);
   const businessDefs = businessKpiDefsForState(type, state, metrics);
-  document.getElementById('ccslKpis').innerHTML = businessDefs.slice(0, 6).map(def => renderKpiCard(...def)).join('');
-  document.querySelector('#ccslExceptionBoard h3').textContent = `${type}质控指标`;
-  document.querySelector('#ccslPage .page-heading h2').dataset.testid = 'business-title';
-  document.querySelector('#ccslPage .page-heading h2').textContent = `${businessLabel(type)}看板`;
-  document.getElementById('ccslMetrics').innerHTML = renderBusinessCoreCards(type, state, businessDefs);
-  document.getElementById('ccslTrendGrid').innerHTML = DashboardComponents.charts(buildBusinessTrendSnapshot(type, state));
-  document.getElementById('ccslKpis').insertAdjacentHTML('afterbegin', `<span data-testid="business-today-count" class="sr-only">${Number(metrics.total || 0)}</span>`);
-  renderCcslOperations();
-  renderPreview('ccslPreviewPanel', 'CCSL', false);
+  const cards = businessDefs.slice(0, 6).map(([label,value,trend,unit,color], index) => ({ key:type.toLowerCase(), label:index ? label : type, value:Number(value || 0), unit:unit || '件', tone:color }));
+  const core = businessDefs.slice(3,15).map(([label,value,trend,unit], index) => ({key:`${type}-${index}`,label,value:Number(value || 0),unit:unit || '件',ratio:'查看明细'}));
+  DashboardV18.renderBusiness(document.getElementById('ccslPage'), DashboardDataAdapterV18.mapBusiness({businessType:type,label:businessLabel(type),reportDate:state.reportDate,cards,core,trendSnapshot:buildBusinessTrendSnapshot(type,state)}, visualMode));
 }
 
 function renderBusinessCoreCards(type, state, definitions) {
@@ -675,24 +670,19 @@ function renderBusinessCoreCards(type, state, definitions) {
 function renderShopeePage() {
   const state = currentBusinessState();
   const type = currentBusinessType();
-  document.getElementById('shopeePageMeta').textContent = pageMeta(state);
-  document.querySelector('#shopeePage .page-heading h2').textContent = `${businessLabel(type)}看板`;
-  document.querySelector('#shopeePage .page-heading h2').dataset.testid = 'business-title';
   document.getElementById('shopeePage').dataset.businessType = type;
   const aggregate = shopeeState; shopeeState = state;
   shopeeRecipientGroup = type === 'SHOPEECN' ? 'CN' : 'VN';
   previewState.SHOPEE.recipientGroup = shopeeRecipientGroup;
-  renderShopeeImportMeta();
-  renderShopeeProcessingNotice(state);
-  renderShopeeRecipientFilters();
-  renderShopeeRecipientGroups();
   const metrics = shopeeState.dashboard?.recipientGroups?.[shopeeRecipientGroup]?.metrics || {};
-  document.getElementById('shopeeRecipientGroups').insertAdjacentHTML('afterbegin', `<span data-testid="business-today-count" class="sr-only">${Number(metrics.total || 0)}</span>`);
-  document.getElementById('shopeeRegions').innerHTML = renderShopeeRegions();
-  document.getElementById('shopeeRecipientTrends').innerHTML = renderShopeeRecipientTrends();
-  document.getElementById('shopeeTrendGrid').innerHTML = DashboardComponents.charts(buildBusinessTrendSnapshot(type, state));
-  renderShopeeOperations();
-  renderPreview('shopeePreviewPanel', 'SHOPEE', false);
+  const cards = [
+    ['今日件数',metrics.total,'件'],['今日POD',metrics.pod,'件'],['POD率',metrics.podRate,'%'],['首次妥投率',metrics.firstAttemptRate,'%'],['已退回件',metrics.returned,'件'],['退回率',metrics.returnRate,'%']
+  ].map(([label,value,unit],index)=>({key:type.toLowerCase(),label:index?label:type,value:Number(value||0),unit,tone:index===0?'purple':'blue'}));
+  const core = [
+    ['Pending1+',metrics.pending1],['Pending2+',metrics.pending2],['Pending3+',metrics.pending3plus],['OC1+',metrics.oc1],['OC2+',metrics.oc2],['OC3+',metrics.oc3plus],['入库无扫描',metrics.inboundNoScan],['已退回件',metrics.returned],['退回率',metrics.returnRate,'%'],['退回处理中',metrics.returnInProgress],['派送中',metrics.delivery],['派送中率',metrics.deliveryRate,'%']
+  ].map(([label,value,unit='件'],index)=>({key:`${type}-${index}`,label,value:Number(value||0),unit,ratio:'查看明细'}));
+  const regionHtml = `<div class="region-summary-grid">${renderShopeeRegions()}</div>`;
+  DashboardV18.renderBusiness(document.getElementById('shopeePage'), DashboardDataAdapterV18.mapBusiness({businessType:type,label:businessLabel(type),reportDate:state.reportDate,cards,core,regions:regionHtml,trendSnapshot:buildBusinessTrendSnapshot(type,state)}, visualMode));
   shopeeState = aggregate;
 }
 
