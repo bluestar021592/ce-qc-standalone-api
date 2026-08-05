@@ -104,6 +104,8 @@ body {
 
 .danger-outline { color: #b42318 !important; border: 1px solid #efaaa4 !important; background: #fff !important; }
 .danger-outline:hover { background: #fff3f2 !important; }
+.home-admin-actions { display: flex; justify-content: flex-end; margin: 0 0 10px; }
+.home-admin-actions .btn { min-height: 34px; padding: 7px 14px; font-size: 13px; }
 .purge-card { width: min(720px, calc(100vw - 32px)); }
 .purge-preview { max-height: 420px; overflow: auto; }
 .purge-warning, .danger-note { color: #b42318; background: #fff3f2; border: 1px solid #ffd0cc; border-radius: 6px; padding: 10px 12px; }
