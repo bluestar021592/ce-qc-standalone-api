@@ -773,7 +773,8 @@ function renderRecipientGroupPanel(group, summary) {
     ['OC3+', metrics.oc3plus, 'oc3', '件'], ['入库无扫描', metrics.inboundNoScan, 'inboundNoScan', '件'],
     ['已退回件', metrics.returned, 'returned', '件'], ['退回率', metrics.returnRate, 'returned', '%'],
     ['退回处理中', metrics.returnInProgress, 'returnInProgress', '件'],
-    ['派送中', metrics.deliveryStay, 'deliveryStay', '件'], ['派送中率', metrics.deliveryStayRate, 'deliveryStay', '%']
+    ['派送中', metrics.deliveryStay, 'deliveryStay', '件'], ['派送中率', metrics.deliveryStayRate, 'deliveryStay', '%'],
+    ['中转节点停留', metrics.transitHubStay, 'transitHubStay', '件'], ['严重超时未更新', metrics.severeOverdue, 'severeOverdue', '件']
   ];
   const testId = label => ({ '已退回件':'return-completed-count', '退回率':'return-rate', '退回处理中':'return-in-progress-count' })[label] || '';
   return `<article class="panel recipient-group-card ${group === 'OTHER' ? 'other' : ''}"><header><h3>${escapeHtml(recipientGroupLabel(group))}</h3><span>${formatInt(summary.monitorCount || 0)}票纳入监控</span></header><div class="recipient-metric-grid">${defs.map(([label, value, tab, unit]) => `<button ${testId(label) ? `data-testid="${testId(label)}"` : ''} onclick="openShopeeGroupMetric('${group}','${tab}')"><span>${escapeHtml(label)}</span><b>${formatMetric(value || 0, unit)}</b></button>`).join('')}</div></article>`;

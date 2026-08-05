@@ -31,6 +31,8 @@ const PUBLIC_METRICS = Object.freeze([
   ['退回处理中', 'returnInProgress', 'returnInProgress', '件']
   ,['派送中', 'deliveryStay', 'deliveryStay', '件']
   ,['派送中率', 'deliveryStayRate', 'deliveryStay', '%']
+  ,['中转节点停留', 'transitHubStay', 'transitHubStay', '件']
+  ,['严重超时未更新', 'severeOverdue', 'severeOverdue', '件']
 ]);
 
 export function buildShopeeDashboard(state = {}) {
@@ -62,6 +64,8 @@ export function buildShopeeDashboard(state = {}) {
   current.retry = groups.retry.length;
   current.returnRequired = groups.returnRequired.length;
   current.returned = groups.returned.length;
+  current.transitHubStay = groups.transitHubStay.length;
+  current.severeOverdue = groups.severeOverdue.length;
 
   const dashboardRows = SHOPEE_RECIPIENT_GROUPS.flatMap(group => metricRowsForGroup(group, recipientGroups[group], state));
   const detailTabs = buildShopeeDetailTabs(state, recipientGroups, abnormalRows);
@@ -129,6 +133,8 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
     oc2: tab('OC2+', visibleRows(allGroups.oc2)),
     oc3: tab('OC3+', visibleRows(allGroups.oc3)),
     inboundNoScan: tab('入库无扫描', visibleRows(allGroups.inboundNoScan)),
+    transitHubStay: tab('中转节点停留', visibleRows(allGroups.transitHubStay)),
+    severeOverdue: tab('严重超时未更新', visibleRows(allGroups.severeOverdue)),
     returned: tab('已退回件', visibleRows(allGroups.returned)),
     returnInProgress: tab('退回处理中', visibleRows(allGroups.returnInProgress)),
     returnRequired: tab('退回待处理', visibleRows(allGroups.returnRequired)),
@@ -153,7 +159,7 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
 
 export function reconcileRecipientGroups(recipientGroups = {}) {
   const checks = [];
-  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'returned', 'returnInProgress', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3']) {
+  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'transitHubStay', 'severeOverdue', 'returned', 'returnInProgress', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3']) {
     const all = Number(recipientGroups.ALL?.metrics?.[key] || 0);
     const parts = ['CN', 'VN'].reduce((sum, group) => sum + Number(recipientGroups[group]?.metrics?.[key] || 0), 0);
     checks.push({ key, all, parts, difference: all - parts, passed: all === parts });
@@ -200,6 +206,8 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
       returnInProgress: groups.returnInProgress.length,
       deliveryStay: groups.deliveryStay.length,
       deliveryStayRate: rate(groups.deliveryStay.length, groupDaily.length),
+      transitHubStay: groups.transitHubStay.length,
+      severeOverdue: groups.severeOverdue.length,
       shopTransit: groups.shopTransit.length,
       shopArrived: groups.shopArrived.length,
       shopPending: groups.shopPending.length,
@@ -255,6 +263,8 @@ function tabsForRecipientGroup(group, summary) {
     oc2: tab(`${label} OC2+`, visibleRows(groups.oc2)),
     oc3: tab(`${label} OC3+`, visibleRows(groups.oc3)),
     inboundNoScan: tab(`${label}入库无扫描`, visibleRows(groups.inboundNoScan)),
+    transitHubStay: tab(`${label}中转节点停留`, visibleRows(groups.transitHubStay)),
+    severeOverdue: tab(`${label}严重超时未更新`, visibleRows(groups.severeOverdue)),
     returned: tab(`${label}已退回件`, visibleRows(groups.returned)),
     returnInProgress: tab(`${label}退回处理中`, visibleRows(groups.returnInProgress))
     ,deliveryStay: tab(`${label}派送中`, visibleRows(groups.deliveryStay))
@@ -297,6 +307,8 @@ function buildGroups(rows, carryRows, nextCarryRows) {
     oc2: rows.filter(row => Number(row.OC天数 || 0) >= 2),
     oc3: rows.filter(row => Number(row.OC天数 || 0) >= 3),
     inboundNoScan: rows.filter(row => row.入库无扫描节点 === '是' || categoryOf(row) === '入库无扫描节点'),
+    transitHubStay: rows.filter(row => row.中转节点停留 === '是' || categoryOf(row) === '中转节点停留'),
+    severeOverdue: rows.filter(row => row.严重超时 === '是' || categoryOf(row) === '严重超时未更新'),
     deliveryStay: rows.filter(row => Number(row.派送中停留天数 || 0) > 0 || categoryOf(row) === '派送中停留'),
     nodeStale: rows.filter(row => Number(row.节点未更新天数 || 0) > 0 || categoryOf(row) === '节点未更新'),
     noTrack: rows.filter(row => row.无轨迹 === '是' || categoryOf(row) === '无轨迹'),
