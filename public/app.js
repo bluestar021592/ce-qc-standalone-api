@@ -694,7 +694,10 @@ function renderShopeeProcessingNotice(state) {
   const text = running
     ? `正在处理：${processing.phase || '准备处理'} · ${progress}。POD、Pending、派送中和退回等指标会随处理进度更新，完成一致性校验后锁定。`
     : '当前仅完成日报分类，尚未完成CE扫描和轨迹查询。下方状态数字不是最终结果，请点击“继续处理”。';
-  host.insertAdjacentHTML('beforeend', `<div class="processing-notice ${running ? 'running' : 'waiting'}"><b>${running ? '处理中' : '待处理'}</b><span>${escapeHtml(text)}</span></div>`);
+  const action = running
+    ? '<button class="btn ghost compact" onclick="refresh()">刷新进度</button>'
+    : '<button class="btn primary compact" onclick="resumeShopee()">继续处理</button>';
+  host.insertAdjacentHTML('beforeend', `<div class="processing-notice ${running ? 'running' : 'waiting'}"><b>${running ? '处理中' : '待处理'}</b><span>${escapeHtml(text)}</span>${action}</div>`);
 }
 
 function currentBusinessType() {
@@ -1306,7 +1309,14 @@ async function runUnified() {
   } catch (error) { alert(`全自动处理失败：${error.message}`); }
   finally { runInFlight = false; }
 }
-async function resumeUnified() { await resumeProcess(); }
+async function resumeUnified() {
+  if (runInFlight) return;
+  const tasks = [];
+  if (appState.processing?.paused || appState.processing?.running || (appState.reportDate && !appState.snapshotId)) tasks.push(['CCSL', '/api/resume']);
+  if (shopeeState.processing?.paused || shopeeState.processing?.running || (shopeeState.reportDate && !shopeeState.snapshotId)) tasks.push(['SHOPEE', '/api/shopee/run/resume']);
+  if (!tasks.length) return alert('当前没有需要继续的处理任务。');
+  for (const [type, url] of tasks) await executeRun(url, type);
+}
 async function pauseUnified() { await pauseProcess(); }
 
 async function importShopeeExcel() {

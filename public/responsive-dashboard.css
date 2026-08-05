@@ -160,6 +160,8 @@ body {
 .import-warning { margin-top: 7px; color: #b34b17; font-size: 11px; }
 .processing-notice { display: flex; gap: 10px; align-items: center; margin-top: 10px; padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.45; }
 .processing-notice b { flex: 0 0 auto; }
+.processing-notice span { flex: 1 1 auto; }
+.processing-notice .btn.compact { flex: 0 0 auto; min-height: 32px; padding: 6px 12px; white-space: nowrap; }
 .processing-notice.running { color: #145da0; background: #eaf4ff; border: 1px solid #b9d9fb; }
 .processing-notice.waiting { color: #8a5a00; background: #fff8e6; border: 1px solid #f2d38a; }
 
