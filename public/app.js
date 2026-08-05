@@ -1116,19 +1116,26 @@ function renderPreview(containerId, scope, businessSelectable) {
   if (!tabs[filter.category]) filter.category = isShopee ? `${filter.recipientGroup || 'ALL'}_all` : 'allData';
   const tab = tabs[filter.category] || { rows: [], total: 0, label: '全部明细' };
   const query = String(filter.query || '').trim().toLowerCase();
-  const rows = (tab.rows || []).filter(row => !query || JSON.stringify(row).toLowerCase().includes(query)).slice(0, 200);
+  const filteredRows = (tab.rows || []).filter(row => !query || JSON.stringify(row).toLowerCase().includes(query));
+  const rows = filteredRows.slice(0, 200);
   const businessSelect = businessSelectable ? `<label>业务板块<select onchange="setPreviewFilter('${scope}','business',this.value)"><option value="CCSL" ${type === 'CCSL' ? 'selected' : ''}>CCSL</option><option value="SHOPEE" ${type === 'SHOPEE' ? 'selected' : ''}>SHOPEE</option></select></label>` : `<span class="fixed-business">${type}</span>`;
   const categoryOptions = Object.entries(tabs).filter(([, value]) => Array.isArray(value?.rows)).map(([key, value]) => `<option value="${escapeAttr(key)}" ${key === filter.category ? 'selected' : ''}>${escapeHtml(value.label || tabLabel(type, key))}</option>`).join('');
   document.getElementById(containerId).innerHTML = `
     <div class="panel-title"><div><h3>数据明细与导出预览</h3><p>导出前核对当前快照及关键字段</p></div><button class="btn ${isShopee ? 'shopee' : 'primary'}" ${state.snapshotId ? '' : 'disabled'} onclick="exportBusiness('${type}')">导出${businessLabel(type)} Excel</button></div>
-    <div class="preview-meta"><span>业务板块 <b>${type}</b></span><span>日报日期 <b>${escapeHtml(state.reportDate || '—')}</b></span><span>数据总数 <b>${formatInt(tab.total ?? rows.length)}</b></span><span>数据版本 <b>${state.snapshotId ? '已锁定' : '待处理'}</b></span></div>
-    <div class="preview-filters">${businessSelect}<label>日期<input value="${escapeAttr(state.reportDate || '')}" readonly></label><label>异常类型<select onchange="setPreviewFilter('${scope}','category',this.value)">${categoryOptions}</select></label><label class="search-field">运单号 / CP码 / 收件人<input value="${escapeAttr(filter.query)}" oninput="setPreviewFilter('${scope}','query',this.value)"></label><button class="btn ghost" onclick="renderPreview('${containerId}','${scope}',${businessSelectable})">查询</button></div>
+    <div class="preview-meta"><span>业务板块 <b>${type}</b></span><span>日报日期 <b>${escapeHtml(state.reportDate || '—')}</b></span><span>分类总数 <b>${formatInt(tab.total ?? tab.rows?.length ?? 0)}</b></span><span>当前筛选 <b>${formatInt(filteredRows.length)}</b></span><span>数据版本 <b>${state.snapshotId ? '已锁定' : '待处理'}</b></span></div>
+    <div class="preview-filters">${businessSelect}<label>日期<input value="${escapeAttr(state.reportDate || '')}" readonly></label><label>异常类型<select onchange="setPreviewFilter('${scope}','category',this.value)">${categoryOptions}</select></label><label class="search-field">运单号 / CP码 / 收件人<input value="${escapeAttr(filter.query)}" oninput="setPreviewFilter('${scope}','query',this.value)"></label><button class="btn ghost" onclick="renderPreview('${containerId}','${scope}',${businessSelectable})">查询</button>${query ? `<button class="btn ghost" onclick="clearPreviewSearch('${scope}')">清除搜索</button>` : ''}</div>
     <div class="preview-table-wrap">${rows.length ? renderPreviewTable(rows, type) : '<div class="empty-state">当前筛选暂无数据</div>'}</div>`;
 }
 
 function setPreviewFilter(scope, key, value) {
   previewState[scope][key] = value;
   if (key === 'business') previewState[scope].category = value === 'SHOPEE' ? 'ALL_all' : 'allData';
+  const id = scope === 'home' ? 'homePreview' : scope === 'CCSL' ? 'ccslPreviewPanel' : 'shopeePreviewPanel';
+  renderPreview(id, scope, scope === 'home');
+}
+
+function clearPreviewSearch(scope) {
+  previewState[scope].query = '';
   const id = scope === 'home' ? 'homePreview' : scope === 'CCSL' ? 'ccslPreviewPanel' : 'shopeePreviewPanel';
   renderPreview(id, scope, scope === 'home');
 }
@@ -1161,6 +1168,7 @@ function openMetricDetail(type, tab) {
     : (['ce', 'tbkh', 'ali1688'].includes(currentPage) ? currentPage : 'ce');
   navigatePage(targetPage);
   previewState[type].category = tab || (type === 'SHOPEE' ? 'all' : 'allData');
+  previewState[type].query = '';
   requestAnimationFrame(() => {
     renderPreview(type === 'SHOPEE' ? 'shopeePreviewPanel' : 'ccslPreviewPanel', type, false);
     document.getElementById(type === 'SHOPEE' ? 'shopeePreviewPanel' : 'ccslPreviewPanel')?.scrollIntoView({ behavior: 'smooth' });
