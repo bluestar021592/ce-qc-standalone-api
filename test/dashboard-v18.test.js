@@ -60,3 +60,10 @@ test('startup uses compact summaries and renders only the visible page', () => {
   assert.match(app, /hydratePageData\(currentPage\)/);
   assert.match(server, /function compactDashboardState/);
 });
+
+test('business dashboard keeps a real detail preview target for metric navigation', () => {
+  const dashboard = fs.readFileSync(path.join(publicDir, 'dashboard-v18.js'), 'utf8');
+  assert.match(dashboard, /shopeePreviewPanel/);
+  assert.match(dashboard, /ccslPreviewPanel/);
+  assert.match(dashboard, /v18-detail-preview/);
+});

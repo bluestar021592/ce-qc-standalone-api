@@ -1098,7 +1098,9 @@ function renderReportsPage() {
   const business = document.getElementById('reportBusiness');
   if (!business) return;
   const periodDate = document.getElementById('periodExportDate');
-  if (periodDate && !periodDate.value) periodDate.value = state.reportDate || unifiedImportState?.reportDate || new Date().toISOString().slice(0, 10);
+  const savedDates = [...new Set([...(historyCatalog.CCSL || []), ...(historyCatalog.SHOPEE || [])].map(row => row.reportDate).filter(Boolean))].sort();
+  const latestSavedDate = savedDates.at(-1) || state.reportDate || unifiedImportState?.reportDate || '';
+  if (periodDate && (!periodDate.value || (exportPeriodType === 'daily' && savedDates.length && !savedDates.includes(periodDate.value)))) periodDate.value = latestSavedDate;
   business.value = type;
   document.getElementById('reportRegion').value = type === 'SHOPEE' ? (filter.region || 'ALL') : 'ALL';
   const recipientSelect = document.getElementById('reportRecipientGroup');
@@ -1120,6 +1122,11 @@ function renderReportsPage() {
 function setExportPeriod(type, button) {
   exportPeriodType = ['daily', 'weekly', 'monthly'].includes(type) ? type : 'daily';
   document.querySelectorAll('.period-tab').forEach(item => item.classList.toggle('active', item === button));
+  if (exportPeriodType === 'daily') {
+    const dates = [...new Set([...(historyCatalog.CCSL || []), ...(historyCatalog.SHOPEE || [])].map(row => row.reportDate).filter(Boolean))].sort();
+    const input = document.getElementById('periodExportDate');
+    if (input && dates.length && !dates.includes(input.value)) input.value = dates.at(-1);
+  }
 }
 
 async function exportPeriodReport() {
