@@ -46,6 +46,7 @@ export function analyzeShopeeShipment({
   const pendingSummary = summarizePendingEvents(sorted, isPendingEvent);
   const oc = analyzeOc(exceptionRows, sorted, effectiveAnalysisDate, isPod, isReturned);
   const cycleCount = analyzeCycleCount(sorted);
+  const deliveryAttempts = analyzeDeliveryAttempts(sorted, isPod);
   const deliveryEvent = findLatest(sorted, event => isDeliveryAssignEvent(event) || isDeliveryEvent(event));
   const deliveryDays = deliveryEvent && !isPod && !isReturned && (isDeliveryAssignEvent(last || {}) || isDeliveryEvent(last || {}))
     ? elapsedInclusiveDays(deliveryEvent.eventTime, effectiveAnalysisDate)
@@ -147,6 +148,14 @@ export function analyzeShopeeShipment({
     盘点天数: cycleCount.days,
     盘点日期: cycleCount.dates.join('、'),
     派送中停留天数: deliveryDays,
+    firstAttemptAt: deliveryAttempts.dates[0] || '',
+    currentAttemptNo: deliveryAttempts.count,
+    podAttemptNo: deliveryAttempts.podAttemptNo,
+    attemptStatus: deliveryAttempts.count ? 'CALCULATED_FROM_TRACK' : 'UNKNOWN_NO_DELIVERY_EVENT',
+    attemptConfidence: deliveryAttempts.count ? 'HIGH' : 'UNKNOWN',
+    attemptUnknownReason: deliveryAttempts.count ? '' : '轨迹中没有派件分配或派送中节点',
+    attemptHistory: deliveryAttempts.dates,
+    attemptCalculatedAt: new Date().toISOString(),
     节点未更新天数: staleDays,
     未闭环天数: unresolvedDays,
     严重超时: severeOverdue ? '是' : '否',
@@ -298,6 +307,12 @@ function analyzeCycleCount(events) {
   const activeEvents = events.slice(startIndex).filter(isCycleCountEvent);
   const dates = distinctEventDates(activeEvents);
   return { eventCount: matchingEvents.length, days: dates.length, dates, historicalDates: distinctEventDates(matchingEvents) };
+}
+
+function analyzeDeliveryAttempts(events, isPod) {
+  const attemptEvents = events.filter(event => isDeliveryAssignEvent(event) || isDeliveryEvent(event));
+  const dates = distinctEventDates(attemptEvents);
+  return { count: dates.length, dates, podAttemptNo: isPod && dates.length ? dates.length : 0 };
 }
 
 function classifyReturnPhoto(event, apiFailed) {

@@ -51,3 +51,17 @@ test('a POD event after reportDate closes the shipment', () => {
   assert.equal(row.primaryCategory, 'POD');
   assert.equal(row.入库无扫描节点, '否');
 });
+
+test('delivery attempts are counted once per Cambodia natural day', () => {
+  const row = analyzeShopeeShipment({
+    ...base,
+    events: [
+      { eventTime: '2026-08-02 08:00:00', trackingEventDescZh: '派件分配' },
+      { eventTime: '2026-08-02 10:00:00', trackingEventDescZh: '派送中' },
+      { eventTime: '2026-08-03 09:00:00', trackingEventDescZh: 'Delivery Assign' }
+    ]
+  });
+  assert.equal(row.currentAttemptNo, 2);
+  assert.deepEqual(row.attemptHistory, ['2026-08-02', '2026-08-03']);
+  assert.equal(row.attemptStatus, 'CALCULATED_FROM_TRACK');
+});

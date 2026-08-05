@@ -1314,12 +1314,21 @@ async function runUnified() {
   if (runInFlight) return;
   runInFlight = true;
   try {
-    const ccsl = await api('/api/run', { method: 'POST' });
-    appState = ccsl.state || appState;
-    const shopee = await api('/api/shopee/run/start', { method: 'POST' });
-    shopeeState = shopee.state || shopeeState;
+    const results = [];
+    for (const [type, url] of [['CCSL', '/api/run'], ['SHOPEE', '/api/shopee/run/start']]) {
+      try {
+        const result = await api(url, { method: 'POST' });
+        if (type === 'CCSL') appState = result.state || appState;
+        else shopeeState = result.state || shopeeState;
+        results.push(`${type}处理完成`);
+      } catch (error) {
+        if (error.payload?.code === 'RUN_ALREADY_COMPLETED') results.push(`${type}已完成，已跳过`);
+        else throw error;
+      }
+    }
+    await refresh();
     renderAll();
-    alert('综合日报全自动处理完成。');
+    alert(`综合日报处理结果：${results.join('；')}。`);
   } catch (error) { alert(`全自动处理失败：${error.message}`); }
   finally { runInFlight = false; }
 }
@@ -1710,8 +1719,8 @@ function buildProductionDashboardSnapshot() {
     },
     shopee: {
       all: productionRecipient('ALL'),
-      cn: productionRecipient('CN'),
-      vn: productionRecipient('VN'),
+      cn: { ...productionRecipient('CN'), pp: productionDispatchRegion('CN', 'PP'), pv: productionDispatchRegion('CN', 'PV') },
+      vn: { ...productionRecipient('VN'), pp: productionDispatchRegion('VN', 'PP'), pv: productionDispatchRegion('VN', 'PV') },
       other: productionRecipient('OTHER'),
       pp: productionRegion(regions.PP),
       pv: productionRegion(regions.PV)
@@ -1728,7 +1737,7 @@ function buildProductionDashboardSnapshot() {
 }
 
 function productionRegion(region = {}) {
-  return { today: Number(region.total || 0), pod: Number(region.pod || 0), podRate: Number(region.podRate || 0), pending1: Number(region.pending1 || 0), pending2: Number(region.pending2 || 0), pending3: Number(region.pending3 || 0), oc1: Number(region.oc1 || 0), oc2: Number(region.oc2 || 0), oc3: Number(region.oc3 || 0), inboundNoScan: Number(region.inboundNoScan || 0), returnPending: Number(region.returnRequired || 0), shopTransit: Number(region.shopTransit || 0), shopArrived: Number(region.shopArrived || 0), shopPending: Number(region.shopPending || 0), shopRetention1: Number(region.shopRetention1 || 0), shopRetention2: Number(region.shopRetention2 || 0), shopRetention3: Number(region.shopRetention3 || 0) };
+  return { today: Number(region.total || 0), pod: Number(region.pod || 0), podRate: Number(region.podRate || 0), pending1: Number(region.pending1 || 0), pending2: Number(region.pending2 || 0), pending3: Number(region.pending3 || 0), oc1: Number(region.oc1 || 0), oc2: Number(region.oc2 || 0), oc3: Number(region.oc3 || 0), inboundNoScan: Number(region.inboundNoScan || 0), returnPending: Number(region.returnRequired || 0), shopTransit: Number(region.shopTransit || 0), shopArrived: Number(region.shopArrived || 0), shopPending: Number(region.shopPending || 0), shopRetention1: Number(region.shopRetention1 || 0), shopRetention2: Number(region.shopRetention2 || 0), shopRetention3: Number(region.shopRetention3 || 0), firstAttemptRate: nullableNumber(region.dispatchAttempt1Rate), secondAttemptRate: nullableNumber(region.dispatchAttempt2Rate), thirdAttemptRate: nullableNumber(region.dispatchAttempt3Rate) };
 }
 
 function productionRecipient(group) {
@@ -1753,6 +1762,17 @@ function productionRecipient(group) {
     ,returnRate: metrics.returnRate
     ,returnInProgress: metrics.returnInProgress
   };
+}
+
+function productionDispatchRegion(group, region) {
+  const rows = (shopeeState.finalRows || []).filter(row => String(row.recipient_group || '').toUpperCase() === group && normalizedRegion(row) === region);
+  if (!rows.length) return { firstAttemptRate: null, secondAttemptRate: null, thirdAttemptRate: null };
+  const count = attempt => rows.filter(row => attempt < 3 ? Number(row.currentAttemptNo || row.podAttemptNo || 0) === attempt : Number(row.currentAttemptNo || row.podAttemptNo || 0) >= 3).length;
+  return { firstAttemptRate: rate(count(1), rows.length), secondAttemptRate: rate(count(2), rows.length), thirdAttemptRate: rate(count(3), rows.length) };
+}
+
+function nullableNumber(value) {
+  return value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
 }
 
 function issueFromRow(row, channel, region) {
