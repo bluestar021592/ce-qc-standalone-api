@@ -1,46 +1,47 @@
 @echo off
+setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul
-setlocal
+title CE QC Standalone API
 
-cd /d "C:\Users\CELNT-~1\DOCUME~1\CECCSL~1\CE-QC-~1"
-if errorlevel 1 (
-  echo Cannot open project folder.
-  echo Project folder should be:
-  echo C:\Users\CELNT-EE-097\Documents\CE CCSL QC APP\ce-qc-standalone-api
-  pause
-  exit /b 1
-)
+set "SCRIPT_DIR=%~dp0"
+set "PROJECT_DIR=%SCRIPT_DIR%"
 
-set "NODE_EXE=C:\Program Files\nodejs\node.exe"
-if not exist "%NODE_EXE%" set "NODE_EXE=C:\Users\CELNT-EE-097\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
-
-if not exist "%NODE_EXE%" (
-  echo Node.js was not found.
-  echo Please install Node.js 18+ or tell Codex to use the bundled runtime.
-  pause
-  exit /b 1
-)
-
-if not exist "node_modules" (
-  echo node_modules was not found.
-  echo Please run install first.
-  pause
-  exit /b 1
-)
-
-echo Starting CE QC standalone API...
-echo.
-echo Stopping old server on port 5177 if it exists...
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5177" ^| findstr "LISTENING"') do (
-  taskkill /F /PID %%P >nul 2>nul
-)
-echo.
-echo Keep this black window open.
-echo After you see "本机访问" and "局域网访问", open:
-echo http://127.0.0.1:5177
-echo.
-"%NODE_EXE%" server.js
-
-echo.
-echo Server stopped or failed to start.
+if exist "%PROJECT_DIR%package.json" goto :PROJECT_OK
+if exist "%PROJECT_DIR%server.js" goto :PROJECT_OK
+echo [ERROR] Cannot find package.json or server.js in:
+echo %PROJECT_DIR%
 pause
+exit /b 1
+
+:PROJECT_OK
+cd /d "%PROJECT_DIR%"
+if errorlevel 1 (
+  echo [ERROR] Cannot open project folder:
+  echo %PROJECT_DIR%
+  pause
+  exit /b 1
+)
+
+where node >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Node.js was not found in PATH.
+  pause
+  exit /b 1
+)
+
+echo Stopping old server on port 5177 if it exists...
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":5177 .*LISTENING"') do taskkill /PID %%P /F >nul 2>&1
+ping -n 2 127.0.0.1 >nul
+
+echo Starting CE QC standalone API from:
+echo %CD%
+if exist "%CD%\package.json" (
+  call npm run start
+) else (
+  node server.js
+)
+
+set "EXIT_CODE=%ERRORLEVEL%"
+echo Server stopped or failed to start. Exit code: %EXIT_CODE%
+pause
+exit /b %EXIT_CODE%

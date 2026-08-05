@@ -91,7 +91,11 @@ export function resetAppState(nextState = {}) {
     Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count || 0)
   ]));
   runTransaction(() => {
-    for (const table of clearTargets) db.exec(`DELETE FROM ${table}`);
+    for (const table of clearTargets) {
+      while (db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()) {
+        db.exec(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} LIMIT 50000)`);
+      }
+    }
     db.prepare(`
       INSERT INTO app_state(key, valueJson, updatedAt)
       VALUES(?, ?, ?)
@@ -198,7 +202,10 @@ export function createOrRecoverRun(reportDate, options = {}) {
   let result = null;
   runTransaction(() => {
     const existing = db.prepare('SELECT * FROM run_locks WHERE reportDate=?').get(date);
-    const recoverable = existing && ['running', 'paused', 'failed'].includes(existing.status);
+    const recoverable = existing && (
+      ['running', 'paused', 'failed'].includes(existing.status)
+      || (existing.status === 'finished' && options.recoverFinished === true)
+    );
     if (recoverable && existing.status === 'running' && options.rejectRunning) {
       result = { ok: false, code: 'RUN_ALREADY_ACTIVE', error: '当前日期已有处理任务正在运行，请勿重复启动。', run: existing };
       return;

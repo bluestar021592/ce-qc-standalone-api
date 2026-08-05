@@ -383,7 +383,7 @@ app.get('/api/state/last-report', async (req, res) => {
 app.post('/api/admin/data-purge/prepare', requireRole('ADMIN'), async (req, res) => {
   try {
     auditAction(req, 'DATA_PURGE_REQUESTED', {});
-    const challenge = createPurgeChallenge(req.user);
+    const challenge = await createPurgeChallenge(req.user);
     auditAction(req, 'DATA_PURGE_BACKUP_VERIFIED', { backupPath: challenge.backup.path, sha256: challenge.backup.sha256 });
     res.json({ ok: true, ...challenge, administrator: req.user.email });
   } catch (e) {
@@ -394,7 +394,7 @@ app.post('/api/admin/data-purge/prepare', requireRole('ADMIN'), async (req, res)
 
 app.post('/api/admin/data-purge/execute', requireRole('ADMIN'), async (req, res) => {
   try {
-    const result = executePurge({ ...req.body, user: req.user });
+    const result = await executePurge({ ...req.body, user: req.user });
     auditAction(req, 'DATA_PURGE_COMPLETED', { backupPath: result.backup.filePath, before: result.before, after: result.after });
     broadcastEvent('DATA_RESET', { at: result.completedAt });
     res.json({ ok: true, ...result, state: summarizeState(await loadState()), shopeeState: summarizeShopeeState(loadBusinessState(SHOPEE)) });
@@ -676,7 +676,9 @@ async function executeRunRequest(req, res, options = {}) {
       return;
     }
     const beforeRun = getRunStatus(reportDate).lock;
-    if (options.resume && (!beforeRun || beforeRun.status === 'finished')) {
+    const retryableFinishedRun = beforeRun?.status === 'finished'
+      && Number(state.lastRunSummary?.refreshFailed || 0) > 0;
+    if (options.resume && (!beforeRun || (beforeRun.status === 'finished' && !retryableFinishedRun))) {
       res.status(409).json({
         ok: false,
         code: beforeRun?.status === 'finished' ? 'RUN_ALREADY_COMPLETED' : 'RUN_NOT_RECOVERABLE',
@@ -686,7 +688,8 @@ async function executeRunRequest(req, res, options = {}) {
     }
     const outcome = createOrRecoverRun(reportDate, {
       lockedBy: req.ip || '',
-      rejectRunning: Boolean(beforeRun?.runId && activeRunIds.has(beforeRun.runId))
+      rejectRunning: Boolean(beforeRun?.runId && activeRunIds.has(beforeRun.runId)),
+      recoverFinished: Boolean(options.resume && retryableFinishedRun)
     });
     if (!outcome.ok) {
       res.status(outcome.code === 'RUN_ALREADY_ACTIVE' ? 409 : 500).json({ ok: false, code: outcome.code, error: outcome.error, run: outcome.run || null });
