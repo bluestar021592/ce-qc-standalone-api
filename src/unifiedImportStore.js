@@ -110,12 +110,74 @@ export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shope
     const shipmentCode = String(item.shipmentCode || item.运单号 || '').trim().toUpperCase();
     return { ...item, shipmentCode, 运单号: shipmentCode, businessType: typeByBill.get(shipmentCode) || item.businessType || 'CE' };
   });
-  payload.completedAt = nowIso();
+  const completedAt = nowIso();
+  payload.completedAt = completedAt;
   payload.sourceSnapshots = { CCSL: ccslSnapshot?.snapshotId || '', SHOPEE: shopeeSnapshot?.snapshotId || '' };
   payload.finalRows = [...normalizeRows(ccslSnapshot?.state?.finalRows), ...normalizeRows(shopeeSnapshot?.state?.finalRows)];
   payload.dashboard = { CCSL: ccslSnapshot?.view || null, SHOPEE: shopeeSnapshot?.view || null };
+  const expectedCounts = Object.fromEntries(db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(row.snapshotId).map(item => [item.businessType, Number(item.count)]));
+  const businessTypes = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+  const actualCounts = Object.fromEntries(businessTypes.map(type => [type, payload.finalRows.filter(item => item.businessType === type).length]));
+  const uniqueBills = new Set(payload.finalRows.map(codeOf).filter(Boolean));
+  const podRows = payload.finalRows.filter(isPodRow);
+  const returnedRows = payload.finalRows.filter(isReturnCompletedRow);
+  const inboundNoScanRows = payload.finalRows.filter(isInboundNoScanRow);
+  const inboundSet = new Set(inboundNoScanRows.map(codeOf));
+  const podInboundIntersection = podRows.filter(item => inboundSet.has(codeOf(item))).map(codeOf);
+  const returnInboundIntersection = returnedRows.filter(item => inboundSet.has(codeOf(item))).map(codeOf);
+  const sourceSnapshotsValid = Boolean(
+    ccslSnapshot?.snapshotId && shopeeSnapshot?.snapshotId
+    && String(ccslSnapshot.status || 'VALID') === 'VALID'
+    && String(ccslSnapshot.reconciliationStatus || 'COMPLETED') === 'COMPLETED'
+    && String(shopeeSnapshot.status || 'VALID') === 'VALID'
+    && String(shopeeSnapshot.reconciliationStatus || 'COMPLETED') === 'COMPLETED'
+  );
+  const countChecks = Object.fromEntries(businessTypes.map(type => [type, actualCounts[type] === Number(expectedCounts[type] || 0)]));
+  const retryCount = payload.finalRows.filter(isRetryRow).length;
+  const validationPassed = sourceSnapshotsValid
+    && uniqueBills.size === payload.finalRows.length
+    && payload.finalRows.length === Object.values(expectedCounts).reduce((sum, value) => sum + Number(value || 0), 0)
+    && Object.values(countChecks).every(Boolean)
+    && podInboundIntersection.length === 0
+    && returnInboundIntersection.length === 0;
+  const parentRunId = payload.parentRun?.runId || `UNIFIED-${row.batchId}`;
+  payload.parentRun = {
+    runId: parentRunId,
+    reportDate,
+    status: validationPassed ? 'COMPLETED' : 'FAILED_RECONCILIATION',
+    children: Object.fromEntries(businessTypes.map(type => [type, {
+      businessType: type,
+      expected: Number(expectedCounts[type] || 0),
+      completed: actualCounts[type],
+      status: countChecks[type] ? 'COMPLETED' : 'FAILED_RECONCILIATION'
+    }]))
+  };
+  payload.lifecycle = [
+    { status: 'IMPORTED', at: row.createdAt },
+    { status: 'PROCESSING', at: ccslSnapshot?.createdAt || row.createdAt },
+    { status: 'SCAN_COMPLETED', at: completedAt },
+    { status: 'TRACK_COMPLETED', at: completedAt },
+    { status: 'RECONCILING', at: completedAt },
+    { status: validationPassed ? 'VALID_COMPLETED' : 'INVALID_FAILED_RECONCILIATION', at: completedAt }
+  ];
+  payload.validationStatus = validationPassed ? 'VALID' : 'INVALID';
+  payload.reconciliationStatus = validationPassed ? 'COMPLETED' : 'FAILED';
+  payload.reconciliation = {
+    expectedCounts, actualCounts, uniqueFinalRows: uniqueBills.size, retryCount,
+    podCount: podRows.length, returnCompletedCount: returnedRows.length,
+    inboundNoScanCount: inboundNoScanRows.length,
+    podInboundIntersection, returnInboundIntersection,
+    sourceSnapshotsValid, countChecks, passed: validationPassed
+  };
+  if (!validationPassed) {
+    db.prepare("UPDATE unified_snapshots SET status='INVALID_FAILED_RECONCILIATION',payloadJson=? WHERE snapshotId=?").run(JSON.stringify(payload), row.snapshotId);
+    const error = new Error('统一快照一致性检查失败，已阻止正式完成与导出。');
+    error.code = 'UNIFIED_RECONCILIATION_FAILED';
+    error.reconciliation = payload.reconciliation;
+    throw error;
+  }
   db.prepare("UPDATE unified_snapshots SET status='COMPLETED',payloadJson=? WHERE snapshotId=?").run(JSON.stringify(payload), row.snapshotId);
-  return { snapshotId: row.snapshotId, reportDate, finalRowCount: payload.finalRows.length };
+  return { snapshotId: row.snapshotId, reportDate, finalRowCount: payload.finalRows.length, parentRun: payload.parentRun, reconciliation: payload.reconciliation };
 }
 
 export function listCompletedUnifiedSnapshots(fromDate, toDate) {
@@ -185,3 +247,23 @@ function latestCcslSnapshotState(db, reportDate) {
 }
 
 function codeOf(row = {}) { return String(row.shipmentCode || row.运单号 || '').trim().toUpperCase(); }
+
+function isPodRow(row = {}) {
+  return String(row.currentState || row.scanNormalizedState || '').toUpperCase() === 'POD'
+    || String(row.orderStatus || '') === '85' || row.是否POD === '是';
+}
+
+function isReturnCompletedRow(row = {}) {
+  return String(row.currentState || row.scanNormalizedState || '').toUpperCase() === 'RETURN_COMPLETED'
+    || ['R', 'P4008'].includes(String(row.orderStatus || '').toUpperCase())
+    || row.退回状态 === '已退回';
+}
+
+function isInboundNoScanRow(row = {}) {
+  return row.入库无扫描节点 === '是'
+    || String(row.primaryCategory || row.主分类 || row.异常分类 || '').includes('入库无扫描');
+}
+
+function isRetryRow(row = {}) {
+  return /RETRY|FAILED|失败|待重试/i.test(String(row.apiStatus || row.API状态 || row.查询状态 || ''));
+}

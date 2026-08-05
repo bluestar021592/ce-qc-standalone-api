@@ -9,6 +9,7 @@ import ExcelJS from 'exceljs';
 
 import { getRuntimeConfig } from './db.js';
 import { listCompletedUnifiedSnapshots } from './unifiedImportStore.js';
+import { fileHash, recordExport } from './backup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUSINESSES = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
@@ -38,6 +39,18 @@ export async function exportPeriodReports({ periodType = 'daily', date, business
   files.unshift(managementFile);
   const zipFile = path.join(outputDir, `CE_QC_${periodType}_${range.key}_五业务_${stamp()}.zip`);
   await zipFiles(files, zipFile);
+  const snapshotIds = snapshots.map(item => item.snapshotId);
+  for (const file of [...files, zipFile]) {
+    recordExport({
+      reportDate: range.to,
+      exportType: `${periodType}:${path.basename(file).startsWith('CE_QC_') ? 'all-zip' : 'workbook'}`,
+      fileName: path.basename(file),
+      fileHash: fileHash(file),
+      rowCount: snapshots.reduce((sum, item) => sum + Number(item.payload?.finalRows?.length || 0), 0),
+      summary: { periodType, range, snapshotIds },
+      consistency: { status: 'PASSED', validationStatus: 'VALID', reconciliationStatus: 'COMPLETED' }
+    });
+  }
   return { file: zipFile, files, range, snapshots: snapshots.map(item => item.snapshotId) };
 }
 
@@ -60,6 +73,10 @@ async function createManagementWorkbook({ periodType, range, snapshots, outputDi
 
 function addManagementSheet(workbook, name, rows, snapshots, range) {
   const sheet = workbook.addWorksheet(name);
+  if (name === '总管理看板') {
+    addManagementDashboard(sheet, rows, snapshots, range);
+    return;
+  }
   sheet.columns = [
     { header: '运单号', key: 'shipmentCode', width: 22 }, { header: '日期', key: 'reportDate', width: 13 },
     { header: '业务', key: 'businessType', width: 14 }, { header: 'PP/PV', key: 'region', width: 10 },
@@ -79,8 +96,40 @@ function addManagementSheet(workbook, name, rows, snapshots, range) {
       api: row.API状态 || row.apiStatus || '', snapshotId: row.snapshotId || ''
     });
   }
+  const returnRow = sheet.addRow({ shipmentCode: '返回总看板' });
+  returnRow.getCell(1).value = { formula: `HYPERLINK("#'总管理看板'!A1","返回总看板")`, result: '返回总看板' };
+  returnRow.getCell(1).font = { color: { argb: 'FF0563C1' }, underline: true, bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
   sheet.autoFilter = { from: 'A1', to: 'L1' };
+  sheet.getRow(1).eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF195A8D' } }; });
+}
+
+function addManagementDashboard(sheet, rows, snapshots, range) {
+  sheet.columns = [
+    { header: '日期', key: 'date', width: 14 }, { header: '模块', key: 'module', width: 18 },
+    { header: '指标', key: 'metric', width: 24 }, { header: '数值（点击查看）', key: 'value', width: 22 },
+    { header: '状态', key: 'status', width: 14 }, { header: '说明', key: 'note', width: 42 }
+  ];
+  const specs = [
+    ['全部业务', '总单量', rows.length, '五业务汇总'],
+    ...BUSINESSES.map(type => [type, '当期单量', rows.filter(row => row.businessType === type).length, '五业务汇总']),
+    ['区域', 'PP单量', rows.filter(row => region(row) === 'PP').length, 'PP_PV汇总'],
+    ['区域', 'PV单量', rows.filter(row => region(row) === 'PV').length, 'PP_PV汇总'],
+    ['特殊节点', '仓库自提', rows.filter(row => row.specialState === 'SELF_PICKUP').length, '仓库自提'],
+    ['特殊节点', 'CECN滞留', rows.filter(row => row.specialState === 'CECN_RETENTION').length, 'CECN滞留'],
+    ['特殊节点', 'CEZT滞留', rows.filter(row => row.specialState === 'CEZT_RETENTION').length, 'CEZT滞留'],
+    ['特殊节点', '580滞留', rows.filter(row => row.specialState === 'CCSL580_RETENTION').length, '580滞留'],
+    ['SHOPEE', '已退回件', rows.filter(row => /^SHOPEE/.test(row.businessType || '') && returnCompleted(row)).length, 'SHOPEE_CN_VN'],
+    ['跨日', '未完结', rows.filter(row => /跨日|active/i.test(`${row.跨日状态 || ''} ${row.carry状态 || ''}`)).length, '跨日未完结']
+  ];
+  for (const [module, metric, value, target] of specs) {
+    const dataRow = sheet.addRow({ date: range.to, module, metric, status: '已校验', note: `来源：${snapshots.length}个VALID+COMPLETED日快照` });
+    dataRow.getCell(4).value = { formula: `HYPERLINK("#'${target}'!A1","${value}")`, result: value };
+    dataRow.getCell(4).font = { color: { argb: 'FF0563C1' }, underline: true, bold: true };
+  }
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  sheet.autoFilter = { from: 'A1', to: `F${sheet.rowCount}` };
+  sheet.getRow(1).height = 30;
   sheet.getRow(1).eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF195A8D' } }; });
 }
 

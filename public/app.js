@@ -302,12 +302,33 @@ async function openTrackingDrawer(row) {
   document.getElementById('trackingDrawerTitle').textContent = `完整轨迹 · ${row.shipmentCode}`;
   document.getElementById('trackingDrawerRule').textContent = `${row.category || '待判定'} · Pending ${row.pendingRawEventCount || 0}条/${row.pendingDistinctDayCount || 0}天 · ${row.pendingContinuity || '无'}`;
   document.getElementById('trackingDrawerBody').innerHTML = '<div class="empty-state">正在读取完整轨迹…</div>';
-  sessionStorage.setItem('trackingReturnContext', JSON.stringify({ reportDate: row.reportDate, businessType: row.businessType, region: row.region, snapshotId: row.snapshotId, scrollPosition: scrollY }));
+  sessionStorage.setItem('trackingReturnContext', JSON.stringify({
+    reportDate: row.reportDate,
+    businessType: row.businessType,
+    region: row.region || row.regionCode,
+    snapshotId: row.snapshotId,
+    currentPage,
+    previewState,
+    shopeeRecipientGroup,
+    scrollPosition: scrollY
+  }));
   try {
     const type = /^SHOPEE/.test(row.businessType || '') ? String(row.businessType).toUpperCase() : String(row.businessType || 'CCSL').toUpperCase();
     const detail = await api(`/api/detail?businessType=${encodeURIComponent(type)}&reportDate=${encodeURIComponent(row.reportDate || '')}&shipmentCode=${encodeURIComponent(row.shipmentCode)}`);
-    const events = detail.detail?.events || detail.events || [];
-    document.getElementById('trackingDrawerBody').innerHTML = events.length ? events.map(event => `<article class="timeline-event"><time>${escapeHtml(event.eventTime || '—')}</time><div><b>${escapeHtml(event.trackingEventDescZh || event.trackingEventDesc || event.eventCode || '轨迹节点')}</b><p>${escapeHtml([event.place,event.eventShop,event.operator,event.eventCourier].filter(Boolean).join(' · '))}</p></div></article>`).join('') : '<div class="empty-state">该运单暂无轨迹节点</div>';
+    const payload = detail.detail || detail;
+    const events = payload.events || [];
+    const scan = payload.scan || {};
+    const finalRow = payload.finalRow || row;
+    const meta = [
+      ['扫描结果', scan.scanNormalizedState || scan.currentState || scan.orderStatus || row.scanStatus || '—'],
+      ['分类来源', finalRow.classificationSource || row.classificationSource || '—'],
+      ['规则判定', finalRow.primaryCategory || finalRow.主分类 || finalRow.异常分类 || row.category || '—'],
+      ['Pending', `${finalRow.pendingRawEventCount ?? row.pendingRawEventCount ?? 0}条 / ${finalRow.pendingDistinctDayCount ?? row.pendingDistinctDayCount ?? 0}天 / ${finalRow.pendingContinuity || row.pendingContinuity || '无'}`],
+      ['业务与区域', `${row.businessType || '—'} / ${row.region || row.regionCode || '—'}`]
+    ];
+    const metaHtml = `<div class="tracking-rule-summary">${meta.map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join('')}</div>`;
+    const timelineHtml = events.length ? events.map(event => `<article class="timeline-event"><time>${escapeHtml(event.eventTime || '—')}</time><div><b>${escapeHtml(event.trackingEventDescZh || event.trackingEventDesc || event.eventCode || '轨迹节点')}</b><p>${escapeHtml([event.place,event.eventShop,event.operator,event.eventCourier].filter(Boolean).join(' · '))}</p></div></article>`).join('') : '<div class="empty-state">该运单暂无轨迹节点</div>';
+    document.getElementById('trackingDrawerBody').innerHTML = `${metaHtml}${timelineHtml}`;
   } catch (error) { document.getElementById('trackingDrawerBody').innerHTML = `<div class="empty-state">轨迹读取失败：${escapeHtml(error.message)}</div>`; }
 }
 
@@ -315,6 +336,9 @@ function closeTrackingDrawer() {
   document.getElementById('trackingDrawer').hidden = true;
   document.body.classList.remove('drawer-open');
   const context = JSON.parse(sessionStorage.getItem('trackingReturnContext') || '{}');
+  if (context.currentPage && context.currentPage !== currentPage) navigatePage(context.currentPage);
+  if (context.previewState) Object.assign(previewState, context.previewState);
+  if (context.shopeeRecipientGroup) shopeeRecipientGroup = context.shopeeRecipientGroup;
   if (Number.isFinite(context.scrollPosition)) scrollTo(0, context.scrollPosition);
 }
 
@@ -1099,7 +1123,8 @@ function renderPreviewTable(rows, type) {
     const pendingCount = row.Pending当前次数 ?? row.Pending次数 ?? row.Pending最大次数 ?? '—';
     const pendingContinuity = row.Pending连续性 ?? (row.Pending连续 === true ? '连续' : row.Pending不连续 === true ? '不连续' : '—');
     const detailState = businessStates[type] || (isShopee ? shopeeState : appState);
-    const detailLink = `<a class="table-link" href="/detail?businessType=${type}&reportDate=${encodeURIComponent(detailState.reportDate || '')}&shipmentCode=${encodeURIComponent(bill)}" target="_blank">查看轨迹</a>`;
+    const drawerRow = { ...row, shipmentCode: bill, businessType: type, reportDate: detailState.reportDate || row.reportDate || '', snapshotId: detailState.snapshotId || row.snapshotId || '', region: region };
+    const detailLink = `<button class="text-button" data-testid="view-tracking" data-row="${escapeAttr(encodeURIComponent(JSON.stringify(drawerRow)))}" onclick="openTrackingDrawer(JSON.parse(decodeURIComponent(this.dataset.row)))">查看轨迹</button>`;
     const common = [bill, region, pick(row, ['收件人','customerName','receiverName']), pick(row, ['latestEventDesc','最后节点','latestNode']), pick(row, ['latestEventTime','最后节点时间']), pick(row, ['primaryCategory','主分类','异常分类']), pendingCount, pendingContinuity, row.OC天数 ?? row.OC最大天数 ?? '—'];
     const values = isShopee
       ? [bill, recipientGroupOfRow(row), row.recipient_raw || '—', region, pick(row, ['latestEventDesc','最后节点','latestNode']), pick(row, ['latestEventTime','最后节点时间']), pick(row, ['primaryCategory','主分类','异常分类']), pendingCount, pendingContinuity, row.OC天数 ?? row.OC最大天数 ?? '—', pick(row, ['POD状态','是否POD']), detailLink]
