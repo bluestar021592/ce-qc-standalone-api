@@ -1245,7 +1245,19 @@ function enableReportDateCorrection() {
 }
 
 function renderUnifiedImportResult() {
-  if (!unifiedImportState) return;
+  if (!unifiedImportState) {
+    const dateInput = document.getElementById('reportDate');
+    if (dateInput) { dateInput.value = ''; dateInput.readOnly = true; }
+    const dateSource = document.getElementById('dateDetectionSource');
+    if (dateSource) dateSource.textContent = '导入后自动识别';
+    const conflictPanel = document.getElementById('dateConflictPanel');
+    if (conflictPanel) { conflictPanel.hidden = true; conflictPanel.innerHTML = ''; }
+    const snapshotStatus = document.getElementById('unifiedSnapshotStatus');
+    if (snapshotStatus) { snapshotStatus.textContent = '无当前批次'; snapshotStatus.className = 'status-pill muted'; }
+    const summary = document.getElementById('unifiedClassificationSummary');
+    if (summary) summary.innerHTML = '<div class="empty-state compact unified-empty-state"><b>暂无已导入日报</b><span>选择综合日报后，这里会显示五业务分类、PP/PV和数据质量统计。</span></div>';
+    return;
+  }
   const result = unifiedImportState;
   const counts = result.classificationCounts || {};
   const summary = result.summary || {};
