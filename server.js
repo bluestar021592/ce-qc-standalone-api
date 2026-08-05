@@ -924,6 +924,29 @@ app.post('/api/track-query', async (req, res) => {
   }
 });
 
+app.get('/api/tracking-workspace', async (req, res) => {
+  const ccsl = await loadState();
+  const shopee = loadBusinessState(SHOPEE);
+  const unified = getLatestUnifiedImport();
+  const rows = [
+    ...workspaceRows(ccsl, 'CCSL'),
+    ...workspaceRows(shopee, 'SHOPEE')
+  ];
+  const summary = {
+    dailyNew: Number(unified?.summary?.validUniqueWaybills || unified?.summary?.totalUnique || 0),
+    historicalCarry: Number(unified?.carryover?.historicalOpen || 0),
+    scanCompleted: rows.filter(row => row.scanStatus && row.scanStatus !== '待扫描').length,
+    podSkipped: rows.filter(row => row.scanStatus === 'POD').length,
+    returnSkipped: rows.filter(row => row.scanStatus === 'RETURN').length,
+    needTrack: rows.filter(row => row.queryStatus === '需查轨迹').length,
+    trackSuccess: rows.filter(row => row.queryStatus === '成功').length,
+    trackFailed: rows.filter(row => row.queryStatus === '失败').length,
+    retryPending: rows.filter(row => row.queryStatus === '待重试').length,
+    completed: rows.filter(row => ['成功', 'POD跳过', '退回跳过'].includes(row.queryStatus)).length
+  };
+  res.json({ ok: true, reportDate: unified?.reportDate || ccsl.reportDate || shopee.reportDate || '', batchId: unified?.batchId || '', snapshotId: unified?.snapshotId || '', summary, rows: rows.slice(0, 5000) });
+});
+
 app.post('/api/test-ce-api', async (req, res) => {
   const requestHeadersDebug = client.headerDebug();
   const headersConfigured = ceHeaderStatus(requestHeadersDebug);
@@ -1060,6 +1083,22 @@ app.get('/api/export-period', async (req, res) => {
   }
 });
 
+app.post('/api/export-period/prepare', async (req, res) => {
+  try {
+    const result = await exportPeriodReports({ periodType: req.body?.periodType || 'daily', date: req.body?.date || '', businessType: req.body?.businessType || 'ALL' });
+    const files = [...result.files, result.file].filter((value, index, list) => list.indexOf(value) === index).map(file => ({ name: path.basename(file), url: `/api/export-file?name=${encodeURIComponent(path.basename(file))}` }));
+    res.json({ ok: true, range: result.range, snapshotIds: result.snapshots, files });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/api/export-file', async (req, res) => {
+  const name = path.basename(String(req.query.name || ''));
+  const file = path.join(getRuntimeConfig().exportsDir, name);
+  try { await fs.access(file); res.download(file, name); } catch { res.status(404).json({ ok: false, error: '导出文件不存在或已被清理。' }); }
+});
+
 app.get('/api/export-backup', async (req, res) => {
   try {
     const state = await loadState();
@@ -1107,6 +1146,28 @@ app.get('/api/run/status/:reportDate', async (req, res) => {
 app.get('/api/compare/:reportDate', async (req, res) => {
   const state = await loadState();
   res.json({ ok: true, reportDate: req.params.reportDate, consistency: buildConsistencyReport(state) });
+});
+
+app.post('/api/snapshot/reconcile', async (req, res) => {
+  try {
+    const state = await loadState();
+    const snapshot = req.body?.snapshotId ? getSnapshotById(req.body.snapshotId) : getMatchingSnapshot(state);
+    if (!snapshot) return res.status(404).json({ ok: false, error: '没有可从SQLite原始数据重算的CCSL快照。' });
+    const repaired = repairSnapshotFromStoredData(snapshot);
+    const conflicts = (repaired.consistency?.errors || []).map(message => ({ shipmentCode: String(message).match(/[A-Z0-9]{8,}/)?.[0] || '', reason: message, snapshotId: repaired.snapshotId }));
+    persistReconciliationDiagnostics(repaired, conflicts);
+    res.json({ ok: repaired.status === 'VALID', oldSnapshotId: snapshot.snapshotId, newSnapshotId: repaired.snapshotId, status: repaired.status, consistency: repaired.consistency, conflicts });
+  } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+});
+
+app.get('/api/reconciliation-diagnostics', (req, res) => {
+  const rows = getDb().prepare('SELECT businessType,reportDate,snapshotId,shipmentCode,conflictMetrics,latestEvent,reason,payloadJson,createdAt FROM reconciliation_diagnostics ORDER BY id DESC LIMIT 1000').all();
+  if (String(req.query.download || '') === '1') {
+    res.setHeader('Content-Disposition', `attachment; filename="reconciliation_${Date.now()}.json"`);
+    res.type('application/json').send(JSON.stringify({ generatedAt: new Date().toISOString(), rows }, null, 2));
+    return;
+  }
+  res.json({ ok: true, rows });
 });
 
 app.get('/api/results/:reportDate', async (req, res) => {
@@ -1474,6 +1535,40 @@ function broadcastEvent(event, payload = {}) {
   for (const connection of eventClients) {
     try { connection.res.write(message); } catch { eventClients.delete(connection); }
   }
+}
+
+function workspaceRows(state = {}, businessType = 'CCSL') {
+  const scans = new Map((state.scanResults || state.shipmentTrackResults || []).map(row => [billOfWorkspace(row), row]));
+  const queryStatus = new Map([...(state.eventQueryStatus || []), ...(state.apiBatchStatus || [])].flatMap(row => (row.shipmentCodes || []).map(code => [String(code).toUpperCase(), row])));
+  return (state.finalRows || []).map(row => {
+    const shipmentCode = billOfWorkspace(row);
+    const scan = scans.get(shipmentCode) || {};
+    const batch = queryStatus.get(shipmentCode) || {};
+    const isPod = row.是否POD === '是' || String(row.orderStatus || scan.orderStatus || '') === '85';
+    const isReturn = /RETURN|退回/.test(`${row.退回状态 || ''} ${row.primaryCategory || ''}`);
+    const failed = /fail|失败|refresh_failed/i.test(`${row.查询状态 || ''} ${row.API状态 || ''} ${batch.status || ''}`);
+    return {
+      shipmentCode, businessType: row.businessType || businessType, region: row.regionCode || row.区域 || '',
+      scanStatus: isPod ? 'POD' : (isReturn ? 'RETURN' : (scan.orderStatus || row.扫描状态 || '已扫描')),
+      latestNode: row.最后节点 || row.latestEventDesc || '', latestTime: row.最后节点时间 || row.latestEventTime || '',
+      pendingRawEventCount: Number(row.pendingRawEventCount || 0), pendingDistinctDayCount: Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? 0),
+      pendingDates: Array.isArray(row.pendingDates) ? row.pendingDates : String(row.Pending日期 || '').split(/[,、]/).map(value => value.trim()).filter(Boolean),
+      pendingContinuity: row.pendingContinuity || row.Pending连续性 || '', ocDays: Number(row.OC天数 || 0),
+      specialState: row.specialState || '', category: row.primaryCategory || row.主分类 || row.异常分类 || '',
+      queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹'))),
+      retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate: row.reportDate || state.reportDate || '', snapshotId: state.snapshotId || ''
+    };
+  }).filter(row => row.shipmentCode);
+}
+
+function persistReconciliationDiagnostics(snapshot, conflicts) {
+  const db = getDb();
+  const insert = db.prepare('INSERT INTO reconciliation_diagnostics(businessType,reportDate,snapshotId,shipmentCode,conflictMetrics,latestEvent,reason,payloadJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?)');
+  for (const conflict of conflicts) insert.run('CCSL', snapshot.reportDate || '', snapshot.snapshotId || '', conflict.shipmentCode || '', 'classification', '', conflict.reason || '', JSON.stringify(conflict), new Date().toISOString());
+}
+
+function billOfWorkspace(row = {}) {
+  return String(row.shipmentCode || row.运单号 || row.waybill || '').trim().toUpperCase();
 }
 
 const runtimeConfig = getRuntimeConfig();

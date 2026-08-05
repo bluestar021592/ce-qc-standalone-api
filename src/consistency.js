@@ -99,13 +99,16 @@ function isShopRow(row = {}) {
 }
 
 function hasRecognizedAction(row = {}) {
-  return Number(row?.Pending次数 || 0) > 0
-    || Number(row?.OC天数 || 0) > 0
-    || Number(row?.盘点天数 || row?.盘点次数 || 0) > 0
-    || Number(row?.派件分配天数 || 0) > 0
-    || Number(row?.派送中天数 || row?.派件中天数 || 0) > 0
-    || ['INBOUND', 'OUTBOUND'].includes(String(row?.lastEventActionType || row?.最后节点动作类型 || '').toUpperCase())
-      && String(row?.lastEventActionType || row?.最后节点动作类型 || '').toUpperCase() === 'OUTBOUND';
+  const latestAction = String(row?.lastEventActionType || row?.最后节点动作类型 || '').toUpperCase();
+  const category = String(row?.primaryCategory || row?.异常分类 || '');
+  const special = String(row?.specialState || '');
+  // Historical actions before the latest inbound do not invalidate inbound-no-scan.
+  // The analyzer already evaluates the ordered raw events; reconciliation only rejects
+  // a row when its latest/current evidence contradicts the inbound classification.
+  return latestAction === 'OUTBOUND'
+    || Boolean(special)
+    || isShopRow(row)
+    || /POD|退回|Pending|OC|盘点|派件|派送|转运|门店|自提|CECN|CEZT|580/.test(category);
 }
 
 function isNormalFinalHub(row = {}) {

@@ -6,6 +6,7 @@ import {
 } from './shopCodes.js';
 import { analyzeStoreFlow } from './storeFlow.js';
 import { classifyLatestSpecialNode } from './specialNode.js';
+import { summarizePendingEvents } from './pendingDays.js';
 
 const PENDING_RE = /Pending|PENDING|客户无人接听|客户电话错误|地址错误|改地址|客户要求改派|无人接听|无法联系|客户不在|电话错误|空号|联系不上|改派/i;
 const IMAGE_ABNORMAL_STATUSES = new Set(['NO_IMAGE', 'IMAGE_FIELD_EMPTY', 'IMAGE_FIELD_INVALID']);
@@ -23,12 +24,13 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
   const isPod = String(scanRow?.orderStatus || '') === '85' || Boolean(podEvent);
   const storeFlow = analyzeStoreFlow({ shipmentCode: waybill, events: sorted, reportDate, isPod });
   const lastText = last ? eventText(last) : '';
-  const pendingEvents = sorted.filter(isPendingEvent);
+  const pendingSummary = summarizePendingEvents(sorted, isPendingEvent);
+  const pendingEvents = pendingSummary.rawEvents;
   const ocEvents = sorted.filter(isOcEvent);
   const cycleEvents = sorted.filter(e => isCycleEvent(e) && !isStoreCycleEvent(e));
   const assignEvents = sorted.filter(isAssignEvent);
   const deliveryEvents = sorted.filter(isDeliveryEvent);
-  const pendingDates = uniqueDates(pendingEvents);
+  const pendingDates = pendingSummary.dates;
   const ocDates = uniqueDates(ocEvents);
   const cycleDates = uniqueDates(cycleEvents);
   const assignDates = uniqueDates(assignEvents);
@@ -48,7 +50,8 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
     deliveryDates,
     last,
     podEvent,
-    reportDate
+    reportDate,
+    pendingSummary
   });
   if (isPod && !stats.POD来源) stats.POD来源 = String(scanRow?.orderStatus || '') === '85' ? '订单扫描orderStatus=85' : 'POD识别';
 
@@ -104,13 +107,13 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
     } else {
       judgment = `命中门店${shopInfo.shopCode || shopInfo.shopName}，发现发往门店节点但未见到达门店/入库节点`;
     }
-  } else if (pendingEvents.length >= 3) {
+  } else if (pendingDates.length >= 3) {
     category = 'Pending3次以上';
-      judgment = `Pending累计${pendingEvents.length}次，${stats.Pending连续性 || '需复核原因真实性'}，图片状态：${stats.Pending图片状态 || '未识别'}`;
-  } else if (pendingEvents.length === 2) {
+      judgment = `Pending累计${pendingDates.length}个自然日（原始事件${pendingEvents.length}条），${stats.Pending连续性 || '需复核原因真实性'}，图片状态：${stats.Pending图片状态 || '未识别'}`;
+  } else if (pendingDates.length === 2) {
     category = 'Pending2次';
       judgment = `Pending累计2次，图片状态：${stats.Pending图片状态 || '未识别'}`;
-  } else if (pendingEvents.length === 1) {
+  } else if (pendingDates.length === 1) {
     category = 'Pending1次';
       judgment = `Pending累计1次，图片状态：${stats.Pending图片状态 || '未识别'}`;
   } else if (ocDates.length >= 3) {
@@ -254,6 +257,12 @@ function baseResult({ waybill, scanRow, events, category, judgment, isPod, lastN
     tags,
     Pending天数: counts.pending || 0,
     Pending次数: counts.Pending次数 || counts.pendingEvents || counts.pending || 0,
+    pendingRawEventCount: Number(counts.pendingRawEventCount || counts.pendingEvents || 0),
+    pendingDistinctDayCount: Number(counts.pendingDistinctDayCount ?? counts.pending ?? 0),
+    pendingDates: Array.isArray(counts.pendingDates) ? counts.pendingDates : [],
+    pendingContinuity: counts.pendingContinuity || counts.Pending连续性 || '',
+    latestPendingReason: counts.latestPendingReason || '',
+    latestPendingTime: counts.latestPendingTime || counts.最新Pending时间 || '',
     Pending日期: counts.Pending日期 || '',
     Pending连续性: counts.Pending连续性 || '',
     Pending连续3天以上: counts.Pending连续3天以上 || '',
@@ -333,7 +342,8 @@ function buildActionStats({
   deliveryDates,
   last,
   podEvent,
-  reportDate
+  reportDate,
+  pendingSummary
 }) {
   const latestPending = pendingEvents[pendingEvents.length - 1] || null;
   const pendingEvidence = pendingEvents.map(inspectImageEvidence);
@@ -361,10 +371,16 @@ function buildActionStats({
     assign: assignDates.length,
     delivery: deliveryDates.length,
     pendingEvents: pendingEvents.length,
-    Pending次数: pendingEvents.length,
+    Pending次数: pendingDates.length,
+    pendingRawEventCount: pendingSummary.rawEventCount,
+    pendingDistinctDayCount: pendingSummary.distinctDayCount,
+    pendingDates,
+    pendingContinuity: pendingSummary.continuity,
+    latestPendingReason: pendingSummary.latestReason,
+    latestPendingTime: pendingSummary.latestTime,
     Pending日期: pendingDates.join(', '),
-    Pending连续性: pendingDates.length ? (isConsecutive(pendingDates) ? '连续' : '不连续') : '',
-    Pending连续3天以上: isConsecutive(pendingDates) ? '是' : '否',
+    Pending连续性: pendingSummary.continuity,
+    Pending连续3天以上: pendingDates.length >= 3 && pendingSummary.continuous ? '是' : '否',
     Pending图片完整: pendingEvents.length
       ? (pendingImageStatus === 'UNKNOWN_API_NO_FIELD' ? '无法判断' : (pendingWithImage === pendingEvents.length ? '是' : '否'))
       : '',

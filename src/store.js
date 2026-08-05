@@ -3,6 +3,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
+import { persistPendingDailyMembers } from './pendingDays.js';
 
 const STATE_KEY = 'current';
 const ACTIVE_REPORT = '__active__';
@@ -293,6 +294,7 @@ function mirrorStateTables(state, now) {
   mirrorDaily(state, reportDate, now);
   mirrorScanResults(state, reportDate, now);
   mirrorTrackEvents(state, reportDate, now);
+  persistPendingDailyMembers(getDb(), { businessType: 'CCSL', reportDate, snapshotId: state.snapshotId || '', events: state.trackEvents || [], createdAt: now });
   mirrorFinalRows(state, reportDate, now);
   mirrorHistory(state, now);
   mirrorCheckpoint(state, reportDate, now);

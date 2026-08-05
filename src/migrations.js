@@ -3,7 +3,7 @@ import path from 'path';
 import { DEFAULT_SHOP_CP_CODES } from './shopCodeDefaults.js';
 import { seedLatestShopWhitelist } from './shopWhitelist.js';
 
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 const REQUIRED_TABLES = [
   'pod_locks',
   'carry_bills',
@@ -48,7 +48,9 @@ const REQUIRED_TABLES = [
   'metric_detail_members',
   'weekly_metric_snapshots',
   'monthly_metric_snapshots',
-  'export_jobs'
+  'export_jobs',
+  'pending_daily_members',
+  'reconciliation_diagnostics'
 ];
 const PERSISTED_TABLES = [...REQUIRED_TABLES, 'app_state', 'daily_parse_rows', 'export_records', 'business_export_records'];
 
@@ -688,10 +690,24 @@ export function migrateDatabase(db, cfg) {
       businessType TEXT NOT NULL, sourceSnapshotIdsJson TEXT NOT NULL, status TEXT NOT NULL,
       filePath TEXT, payloadHash TEXT, errorMessage TEXT, createdAt TEXT NOT NULL, completedAt TEXT
     );
+    CREATE TABLE IF NOT EXISTS pending_daily_members (
+      businessType TEXT NOT NULL, reportDate TEXT NOT NULL, snapshotId TEXT NOT NULL DEFAULT '',
+      shipmentCode TEXT NOT NULL, pendingEventDate TEXT NOT NULL, rawEventCount INTEGER NOT NULL,
+      representativeEventTime TEXT, representativeReason TEXT, representativeRawJson TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      PRIMARY KEY(businessType,reportDate,snapshotId,shipmentCode,pendingEventDate)
+    );
+    CREATE TABLE IF NOT EXISTS reconciliation_diagnostics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, businessType TEXT NOT NULL, reportDate TEXT NOT NULL,
+      snapshotId TEXT NOT NULL, shipmentCode TEXT NOT NULL, conflictMetrics TEXT,
+      latestEvent TEXT, reason TEXT, payloadJson TEXT NOT NULL, createdAt TEXT NOT NULL
+    );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_unified_import_hash ON unified_import_batches(reportDate, fileHash, status);
     CREATE INDEX IF NOT EXISTS idx_unified_rows_snapshot ON unified_import_rows(snapshotId, businessType, shipmentCode);
     CREATE INDEX IF NOT EXISTS idx_daily_snapshot_report ON shipment_daily_snapshots(reportDate,businessType,shipmentCode);
     CREATE INDEX IF NOT EXISTS idx_carryover_status ON carryover_open_items(status,businessType,sourceReportDate);
+    CREATE INDEX IF NOT EXISTS idx_pending_daily_lookup ON pending_daily_members(businessType,reportDate,shipmentCode,pendingEventDate);
+    CREATE INDEX IF NOT EXISTS idx_reconciliation_snapshot ON reconciliation_diagnostics(snapshotId,shipmentCode);
 
     CREATE INDEX IF NOT EXISTS idx_daily_parse_report ON daily_parse_rows(reportDate);
     CREATE INDEX IF NOT EXISTS idx_daily_parse_bill ON daily_parse_rows(shipmentCode);

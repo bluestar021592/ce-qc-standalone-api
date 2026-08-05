@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { SHOP_WHITELIST_SOURCE_SHA256, SHOP_WHITELIST_VERSION } from './shopWhitelist.js';
 import { getDb, nowIso } from './db.js';
 import { buildSnapshotHashes } from './snapshotHash.js';
+import { persistPendingDailyMembers } from './pendingDays.js';
 
 export const SHOPEE = 'SHOPEE';
 
@@ -282,6 +283,7 @@ function mirrorBusinessTables(db, state, type, now) {
   db.prepare('DELETE FROM business_track_events WHERE businessType=? AND reportDate=?').run(type, date);
   const eventStmt = db.prepare('INSERT INTO business_track_events(businessType,shipmentCode,reportDate,eventTime,eventCode,rawJson,createdAt) VALUES(?,?,?,?,?,?,?)');
   for (const row of state.trackEvents) eventStmt.run(type, billOf(row), date, row.eventTime || '', row.eventCode || '', JSON.stringify(row), now);
+  persistPendingDailyMembers(db, { businessType: type, reportDate: date, snapshotId: state.snapshotId || '', events: state.trackEvents, createdAt: now });
   db.prepare('DELETE FROM business_exception_items WHERE businessType=? AND reportDate=?').run(type, date);
   const exceptionStmt = db.prepare(`INSERT INTO business_exception_items(businessType,shipmentCode,reportDate,exceptionType,exceptionDesc,reportTime,statusCode,fileId,rawJson,createdAt)
     VALUES(?,?,?,?,?,?,?,?,?,?)`);

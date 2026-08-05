@@ -95,6 +95,7 @@ async function refresh() {
   unifiedImportState = unified.import || null;
   historyModeDate = '';
   renderAll();
+  if (currentPage === 'tracking') loadTrackingWorkspace();
 }
 
 function renderAll() {
@@ -124,7 +125,7 @@ function renderNetworkSettings() {
   const target = document.getElementById('networkAccessCards');
   if (!target) return;
   const network = appState.network || {};
-  const rows = [['本机访问', network.localUrl || 'http://127.0.0.1:5177'], ['同一局域网访问', network.lanUrl || '未检测到有效局域网IPv4'], ['不同网络/外地访问', network.publicUrl || 'https://qc.cambodianexpress.com']];
+  const rows = [['当前访问', location.origin], ['同一局域网访问', network.lanUrl || '未检测到有效局域网IPv4'], ['不同网络/外地访问', network.publicUrl || '尚未配置公网地址']];
   target.innerHTML = `<div class="access-address-list">${rows.map(([label,url]) => `<div><span>${label}</span><b>${escapeHtml(url)}</b><button class="icon-button" title="复制地址" onclick="navigator.clipboard.writeText('${escapeAttr(url)}')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-clipboard"></use></svg></button></div>`).join('')}</div><p class="operation-status">公网需 Named Tunnel 与 Cloudflare Access 配置完成后启用。</p>`;
 }
 
@@ -258,8 +259,60 @@ function navigatePage(page, anchor = '') {
   const path = currentPage === 'home' ? '/' : `/${currentPage}`;
   if (location.pathname !== path) history.pushState({}, '', path);
   renderAll();
+  if (currentPage === 'tracking') loadTrackingWorkspace();
   if (anchor) requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   else scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function loadTrackingWorkspace() {
+  const status = document.getElementById('trackingConnection');
+  if (!status) return;
+  status.textContent = '连接中'; status.className = 'status-pill muted';
+  try {
+    const result = await api('/api/tracking-workspace');
+    status.textContent = '服务正常'; status.className = 'status-pill ok';
+    const s = result.summary || {};
+    document.getElementById('trackingWorkspaceMeta').textContent = `${result.reportDate || '—'} · ${result.batchId || '当前SQLite批次'}`;
+    document.getElementById('trackingWorkspaceSummary').innerHTML = [
+      ['日报新单',s.dailyNew],['历史跨日',s.historicalCarry],['扫描完成',s.scanCompleted],['POD跳过',s.podSkipped],['退回跳过',s.returnSkipped],
+      ['需查轨迹',s.needTrack],['成功',s.trackSuccess],['失败',s.trackFailed],['待重试',s.retryPending],['已完成',s.completed]
+    ].map(([label,value], index) => `<span ${index === 2 ? 'data-testid="scan-progress"' : index === 5 ? 'data-testid="track-progress"' : ''}>${label} <b>${formatInt(value || 0)}</b></span>`).join('');
+    renderTrackingWorkspaceRows(result.rows || []);
+  } catch (error) {
+    status.textContent = '连接中断，正在等待重连'; status.className = 'status-pill danger';
+    document.getElementById('trackingWorkspaceTable').innerHTML = `<div class="empty-state">无法读取当前批次：${escapeHtml(error.message)}。页面将在10秒后自动重试。</div>`;
+    setTimeout(() => currentPage === 'tracking' && loadTrackingWorkspace(), 10000);
+  }
+}
+
+function renderTrackingWorkspaceRows(rows) {
+  const target = document.getElementById('trackingWorkspaceTable');
+  if (!rows.length) { target.innerHTML = '<div class="empty-state">当前批次暂无逐票数据</div>'; return; }
+  const head = ['运单号','业务','PP/PV','扫描状态','最新节点','Pending原始事件','去重天数','连续性','OC天数','特殊节点','当前分类','查询状态','重试','操作'];
+  target.innerHTML = `<table><thead><tr>${head.map(value => `<th>${value}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 1000).map(row => `<tr><td>${escapeHtml(row.shipmentCode)}</td><td>${escapeHtml(row.businessType)}</td><td>${escapeHtml(row.region || '—')}</td><td>${escapeHtml(row.scanStatus)}</td><td title="${escapeAttr(row.latestNode || '')}">${escapeHtml(String(row.latestNode || '—').slice(0, 42))}</td><td>${formatInt(row.pendingRawEventCount)}</td><td>${formatInt(row.pendingDistinctDayCount)}</td><td>${escapeHtml(row.pendingContinuity || '—')}</td><td>${formatInt(row.ocDays)}</td><td>${escapeHtml(row.specialState || '—')}</td><td>${escapeHtml(row.category || '—')}</td><td>${escapeHtml(row.queryStatus)}</td><td>${formatInt(row.retryCount)}</td><td><button class="text-button" data-testid="view-tracking" data-row="${escapeAttr(encodeURIComponent(JSON.stringify(row)))}" onclick="openTrackingDrawer(JSON.parse(decodeURIComponent(this.dataset.row)))">查看轨迹</button></td></tr>`).join('')}</tbody></table>`;
+}
+
+async function openTrackingDrawer(row) {
+  const drawer = document.getElementById('trackingDrawer');
+  drawer.hidden = false;
+  document.body.classList.add('drawer-open');
+  document.getElementById('trackingDrawerTitle').textContent = `完整轨迹 · ${row.shipmentCode}`;
+  document.getElementById('trackingDrawerRule').textContent = `${row.category || '待判定'} · Pending ${row.pendingRawEventCount || 0}条/${row.pendingDistinctDayCount || 0}天 · ${row.pendingContinuity || '无'}`;
+  document.getElementById('trackingDrawerBody').innerHTML = '<div class="empty-state">正在读取完整轨迹…</div>';
+  sessionStorage.setItem('trackingReturnContext', JSON.stringify({ reportDate: row.reportDate, businessType: row.businessType, region: row.region, snapshotId: row.snapshotId, scrollPosition: scrollY }));
+  try {
+    const type = /^SHOPEE/.test(row.businessType || '') ? 'SHOPEE' : 'CCSL';
+    const detail = await api(`/api/detail?businessType=${encodeURIComponent(type)}&reportDate=${encodeURIComponent(row.reportDate || '')}&shipmentCode=${encodeURIComponent(row.shipmentCode)}`);
+    const events = detail.detail?.events || detail.events || [];
+    document.getElementById('trackingDrawerBody').innerHTML = events.length ? events.map(event => `<article class="timeline-event"><time>${escapeHtml(event.eventTime || '—')}</time><div><b>${escapeHtml(event.trackingEventDescZh || event.trackingEventDesc || event.eventCode || '轨迹节点')}</b><p>${escapeHtml([event.place,event.eventShop,event.operator,event.eventCourier].filter(Boolean).join(' · '))}</p></div></article>`).join('') : '<div class="empty-state">该运单暂无轨迹节点</div>';
+  } catch (error) { document.getElementById('trackingDrawerBody').innerHTML = `<div class="empty-state">轨迹读取失败：${escapeHtml(error.message)}</div>`; }
+}
+
+function closeTrackingDrawer() {
+  document.getElementById('trackingDrawer').hidden = true;
+  document.body.classList.remove('drawer-open');
+  const context = JSON.parse(sessionStorage.getItem('trackingReturnContext') || '{}');
+  if (Number.isFinite(context.scrollPosition)) scrollTo(0, context.scrollPosition);
 }
 
 function renderPageVisibility() {
@@ -876,11 +929,18 @@ function setExportPeriod(type, button) {
   document.querySelectorAll('.period-tab').forEach(item => item.classList.toggle('active', item === button));
 }
 
-function exportPeriodReport() {
+async function exportPeriodReport() {
   const date = document.getElementById('periodExportDate')?.value;
   const businessType = document.getElementById('periodExportBusiness')?.value || 'ALL';
-  if (!date) return alert('请选择报表基准日期');
-  downloadFile(`/api/export-period?periodType=${encodeURIComponent(exportPeriodType)}&date=${encodeURIComponent(date)}&businessType=${encodeURIComponent(businessType)}`);
+  const progress = document.getElementById('exportProgress');
+  const files = document.getElementById('exportGeneratedFiles');
+  if (!date) { progress.textContent = '请选择报表基准日期'; return; }
+  progress.textContent = '正在从已保存snapshot生成报表，导出阶段不会调用CE API…'; files.innerHTML = '';
+  try {
+    const result = await api('/api/export-period/prepare', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ periodType: exportPeriodType, date, businessType }) });
+    progress.textContent = `生成完成：${result.range.from} 至 ${result.range.to}，共${result.files.length}个文件`;
+    files.innerHTML = result.files.map(file => `<a class="export-file-item" href="${escapeAttr(file.url)}"><span>${escapeHtml(file.name)}</span><b>下载</b></a>`).join('');
+  } catch (error) { progress.textContent = `导出失败：${error.message}`; }
 }
 
 function renderReportPreview() {

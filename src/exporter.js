@@ -871,12 +871,11 @@ function escapeFormulaString(value) {
 }
 
 function detailUrl(reportDate, shipmentCode) {
-  const cfg = getRuntimeConfig();
-  const base = process.env.APP_BASE_URL || process.env.PUBLIC_BASE_URL || `http://127.0.0.1:${cfg.port}`;
-  const url = new URL('/detail', base);
-  if (reportDate) url.searchParams.set('reportDate', reportDate);
-  url.searchParams.set('shipmentCode', shipmentCode);
-  return url.toString();
+  const query = new URLSearchParams();
+  if (reportDate) query.set('reportDate', reportDate);
+  query.set('shipmentCode', shipmentCode);
+  const base = String(process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || '').replace(/\/$/, '');
+  return `${base}/detail?${query.toString()}`;
 }
 
 function normalizeParseRow(row, resultOverride = '') {

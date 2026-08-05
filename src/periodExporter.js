@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import JSZip from 'jszip';
 import archiver from 'archiver';
 import { createWriteStream } from 'fs';
+import ExcelJS from 'exceljs';
 
 import { getRuntimeConfig } from './db.js';
 import { listCompletedUnifiedSnapshots } from './unifiedImportStore.js';
@@ -33,9 +34,54 @@ export async function exportPeriodReports({ periodType = 'daily', date, business
     files.push(file);
   }
   if (types.length === 1) return { file: files[0], files, range, snapshots: snapshots.map(item => item.snapshotId) };
+  const managementFile = await createManagementWorkbook({ periodType, range, snapshots, outputDir });
+  files.unshift(managementFile);
   const zipFile = path.join(outputDir, `CE_QC_${periodType}_${range.key}_五业务_${stamp()}.zip`);
   await zipFiles(files, zipFile);
   return { file: zipFile, files, range, snapshots: snapshots.map(item => item.snapshotId) };
+}
+
+async function createManagementWorkbook({ periodType, range, snapshots, outputDir }) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'CE QC';
+  const allRows = snapshots.flatMap(snapshot => (snapshot.payload.finalRows || []).map(row => ({ ...row, reportDate: row.reportDate || snapshot.reportDate, snapshotId: snapshot.snapshotId })));
+  const sheets = [
+    ['总管理看板', allRows], ['五业务汇总', allRows], ['PP_PV汇总', allRows], ['SHOPEE_CN_VN', allRows.filter(row => /^SHOPEE/.test(row.businessType || ''))],
+    ['1派_2派_3派', allRows.filter(row => /^SHOPEE/.test(row.businessType || ''))], ['跨日未完结', allRows.filter(row => /跨日|active/i.test(`${row.跨日状态 || ''} ${row.carry状态 || ''}`))],
+    ['仓库自提', allRows.filter(row => row.specialState === 'SELF_PICKUP')], ['CECN滞留', allRows.filter(row => row.specialState === 'CECN_RETENTION')],
+    ['CEZT滞留', allRows.filter(row => row.specialState === 'CEZT_RETENTION')], ['580滞留', allRows.filter(row => row.specialState === 'CCSL580_RETENTION')],
+    ['轨迹处理汇总', allRows], ['一致性校验', []]
+  ];
+  for (const [name, rows] of sheets) addManagementSheet(workbook, name, rows, snapshots, range);
+  const file = path.join(outputDir, `管理总汇总_${periodType}_${range.key}_${stamp()}.xlsx`);
+  await workbook.xlsx.writeFile(file);
+  return file;
+}
+
+function addManagementSheet(workbook, name, rows, snapshots, range) {
+  const sheet = workbook.addWorksheet(name);
+  sheet.columns = [
+    { header: '运单号', key: 'shipmentCode', width: 22 }, { header: '日期', key: 'reportDate', width: 13 },
+    { header: '业务', key: 'businessType', width: 14 }, { header: 'PP/PV', key: 'region', width: 10 },
+    { header: '当前分类', key: 'category', width: 24 }, { header: 'Pending原始事件数', key: 'raw', width: 18 },
+    { header: 'Pending去重天数', key: 'days', width: 18 }, { header: 'Pending日期列表', key: 'dates', width: 30 },
+    { header: 'Pending连续性', key: 'continuity', width: 15 }, { header: 'POD状态', key: 'pod', width: 12 },
+    { header: 'API状态', key: 'api', width: 14 }, { header: 'Snapshot ID', key: 'snapshotId', width: 40 }
+  ];
+  if (name === '一致性校验') {
+    sheet.addRow({ shipmentCode: 'VALID+COMPLETED snapshot', reportDate: `${range.from}~${range.to}`, businessType: snapshots.length, category: '通过' });
+  } else {
+    for (const row of rows) sheet.addRow({
+      shipmentCode: bill(row), reportDate: row.reportDate || '', businessType: row.businessType || '', region: region(row),
+      category: row.primaryCategory || row.主分类 || row.异常分类 || '', raw: Number(row.pendingRawEventCount || 0),
+      days: pending(row), dates: Array.isArray(row.pendingDates) ? row.pendingDates.join(', ') : (row.Pending日期 || ''),
+      continuity: row.pendingContinuity || row.Pending连续性 || '', pod: pod(row) ? 'POD' : '未POD',
+      api: row.API状态 || row.apiStatus || '', snapshotId: row.snapshotId || ''
+    });
+  }
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  sheet.autoFilter = { from: 'A1', to: 'L1' };
+  sheet.getRow(1).eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF195A8D' } }; });
 }
 
 async function createBusinessWorkbook({ type, periodType, range, snapshots, outputDir }) {
@@ -145,7 +191,7 @@ export function periodRange(type, value) {
 
 function uniquePeriodRows(rows) { const map = new Map(); for (const row of rows) map.set(`${row.reportDate || ''}|${bill(row)}`, row); return [...map.values()]; }
 function bill(row) { return String(row.shipmentCode || row.运单号 || '').trim().toUpperCase(); }
-function pending(row) { return Number(row.Pending次数 || row.Pending当前次数 || 0); }
+function pending(row) { return Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? row.Pending当前次数 ?? 0); }
 function oc(row) { return Number(row.OC天数 || 0); }
 function pod(row) { return row.是否POD === '是' || String(row.orderStatus || '') === '85' || row.POD状态 === 'POD'; }
 function region(row) { return String(row.regionCode || row.regionType || row.区域 || '').toUpperCase().startsWith('PV') ? 'PV' : 'PP'; }

@@ -1,6 +1,7 @@
 import { normalizeEvent } from './analyzer.js';
 import { analyzeStoreFlow } from './storeFlow.js';
 import { classifyLatestSpecialNode } from './specialNode.js';
+import { summarizePendingEvents } from './pendingDays.js';
 
 const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|改派/i;
 const POD_RE = /\bPOD\b|delivered|签收|已妥投/i;
@@ -35,6 +36,7 @@ export function analyzeShopeeShipment({
   const special = !isPod && !isReturned && !apiFailed ? classifyLatestSpecialNode(sorted) : null;
 
   const pending = analyzePendingCycles(sorted, reportDate, isPod, isReturned);
+  const pendingSummary = summarizePendingEvents(sorted, isPendingEvent);
   const oc = analyzeOc(exceptionRows, sorted, reportDate, isPod, isReturned);
   const cycleCount = analyzeCycleCount(sorted);
   const deliveryEvent = findLatest(sorted, event => isDeliveryAssignEvent(event) || isDeliveryEvent(event));
@@ -100,6 +102,12 @@ export function analyzeShopeeShipment({
     退回照片数量: returnPhoto.count,
     Pending状态: currentPendingDays ? '是' : '否',
     Pending次数: currentPendingDays,
+    pendingRawEventCount: pendingSummary.rawEventCount,
+    pendingDistinctDayCount: pendingSummary.distinctDayCount,
+    pendingDates: pendingSummary.dates,
+    pendingContinuity: pendingSummary.continuity,
+    latestPendingReason: pendingSummary.latestReason,
+    latestPendingTime: pendingSummary.latestTime,
     Pending当前次数: pending.activeDays,
     Pending最大次数: pending.maxDays,
     Pending日期: pending.activeDates.join('、'),

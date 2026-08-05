@@ -62,8 +62,9 @@ export function createDashboardSnapshot(state = {}, context = {}) {
     ...snapshotHashes,
     state: snapshotState
   };
-  payload.status = consistency?.ok === false ? 'INVALID' : 'VALID';
-  payload.reconciliationStatus = consistency?.ok === false ? 'FAILED' : 'COMPLETED';
+  const reconciliationFailed = consistency?.status === 'error' || (consistency?.errors || []).length > 0;
+  payload.status = reconciliationFailed ? 'INVALID_FAILED_RECONCILIATION' : 'VALID';
+  payload.reconciliationStatus = reconciliationFailed ? 'FAILED' : 'COMPLETED';
   payload.whitelistVersion = SHOP_WHITELIST_VERSION;
 
   const db = getDb();
@@ -87,7 +88,7 @@ export function createDashboardSnapshot(state = {}, context = {}) {
       generatedAt
     );
     db.prepare(`UPDATE export_snapshots SET status=?,reconciliationStatus=?,invalidReason=?,whitelistVersion=?,whitelistSha256=? WHERE snapshotId=?`)
-      .run(payload.status, payload.reconciliationStatus, payload.status === 'INVALID' ? JSON.stringify(consistency) : '', SHOP_WHITELIST_VERSION, SHOP_WHITELIST_SOURCE_SHA256, snapshotId);
+      .run(payload.status, payload.reconciliationStatus, reconciliationFailed ? JSON.stringify(consistency) : '', SHOP_WHITELIST_VERSION, SHOP_WHITELIST_SOURCE_SHA256, snapshotId);
     db.prepare(`
       UPDATE run_locks SET status='finished', currentStage='完成', batchIndex=1, totalBatches=1,
         errorMessage='', completedAt=?, updatedAt=? WHERE reportDate=? AND runId=?
@@ -132,7 +133,7 @@ export function repairSnapshotFromStoredData(snapshot = {}) {
   const repairRunId = `${snapshot.runId || source.lastRunSummary?.runId || 'stored'}_repair_${Date.now()}`;
   source.currentRun = { ...(source.currentRun || {}), runId: repairRunId };
   source.lastRunSummary = { ...(source.lastRunSummary || {}), runId: repairRunId, repairSource: 'STORED_SQLITE_DATA', ceApiCallsDuringRepair: 0 };
-  getDb().prepare("UPDATE export_snapshots SET status='INVALID',reconciliationStatus='FAILED',invalidReason=? WHERE snapshotId=?")
+  getDb().prepare("UPDATE export_snapshots SET status='INVALID_FAILED_RECONCILIATION',reconciliationStatus='FAILED',invalidReason=? WHERE snapshotId=?")
     .run(JSON.stringify({ reason: 'CLASSIFICATION_CONFLICT', repairedFromStoredData: true }), snapshot.snapshotId);
   return createDashboardSnapshot(source, { reportDate: source.reportDate, runId: repairRunId });
 }
