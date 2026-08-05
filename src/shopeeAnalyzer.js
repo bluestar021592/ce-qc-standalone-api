@@ -366,7 +366,12 @@ function exceptionsThroughDate(items, reportDate) {
 }
 
 function isOcItem(item = {}) {
-  return /(^|\s)oc($|\s)|overdue/i.test([item.exceptionDesc, item.exceptionType, item.reasonCode, item.reasonText].map(value => String(value || '')).join(' '));
+  const type = String(item.exceptionType || '').trim();
+  if (['20', '30', '40'].includes(type)) return true;
+  return /(^|\s)oc($|\s)|overdue/i.test([
+    item.exceptionDesc, item.excepitonDesc, item.exceptionType,
+    item.exceptionReason, item.exceptionChildReason, item.reasonCode, item.reasonText
+  ].map(value => String(value || '')).join(' '));
 }
 
 function isPendingEvent(event = {}) { return PENDING_RE.test(eventText(event)) && !isReturnEvent(event); }

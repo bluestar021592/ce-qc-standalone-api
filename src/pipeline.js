@@ -366,6 +366,19 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
     if (result.是否POD === '是') podLocks.add(bill);
   }
 
+  // A resumed run can already contain newer persisted events even when its API batch
+  // checkpoint is complete. Rebuild every non-terminal row from the cumulative
+  // evidence before publishing the snapshot so the final category cannot lag behind.
+  const reconciledEvidence = reconcileShopeeStateFromEvidence({
+    ...state,
+    finalRows: trackResults,
+    trackResults,
+    trackEvents: eventsResult.rows,
+    exceptionItems: exceptionResult.rows,
+    scanResults
+  });
+  trackResults.splice(0, trackResults.length, ...reconciledEvidence.finalRows);
+
   const podSet = new Set(cleanAnyBills([...podLocks]));
   const finalRows = uniqueRows([...lockedPodRows.map(row => ({ ...row, primaryCategory: 'POD', 主分类: 'POD', 异常分类: 'POD', carry状态: 'closed_pod', 跨日状态: '已闭环', 入库无扫描节点: '否' })), ...trackResults]);
   const nextCarryBills = cleanAnyBills(finalRows
@@ -421,6 +434,55 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   }
   await onProgress(`SHOPEE完成：POD ${summary.scanPod}票，退回 ${finalRows.filter(row => row.退回状态 === '已退回').length}票，明日继续 ${summary.nextCarry}票`);
   return { state, summary };
+}
+
+export function reconcileShopeeStateFromEvidence(state = {}, options = {}) {
+  const eventsByBill = groupRows(state.trackEvents || []);
+  const exceptionsByBill = groupRows(state.exceptionItems || []);
+  const scansByBill = groupRows(state.scanResults || []);
+  const shipmentsByBill = groupRows(state.shipmentTrackResults || []);
+  const sourceRows = state.finalRows?.length ? state.finalRows : (state.trackResults || []);
+  const analysisDate = options.analysisDate || undefined;
+  const finalRows = sourceRows.map(previous => {
+    const bill = billOf(previous);
+    if (!bill) return previous;
+    const scanRow = scansByBill.get(bill)?.at(-1) || previous;
+    const shipmentTrackRow = shipmentsByBill.get(bill)?.at(-1) || {};
+    const events = eventsByBill.get(bill) || [];
+    const exceptions = exceptionsByBill.get(bill) || [];
+    const result = analyzeShopeeShipment({
+      waybill: bill,
+      scanRow,
+      shipmentTrackRow,
+      events,
+      exceptions,
+      reportDate: state.reportDate || previous.reportDate || '',
+      analysisDate,
+      dailyRow: previous,
+      priorRow: previous,
+      apiStatus: {
+        shipment: previous.查询状态 === 'scan_retry' ? 'failed' : 'success',
+        event: events.length ? 'success' : (previous.查询状态 === 'refresh_failed' ? 'failed' : 'success'),
+        exception: previous.查询状态 === 'refresh_failed' ? 'failed' : 'success'
+      }
+    });
+    return { ...result, businessType: 'SHOPEE' };
+  });
+  const podLocks = new Set(state.podLocks || []);
+  for (const row of finalRows) if (row.是否POD === '是') podLocks.add(billOf(row));
+  const nextCarryBills = [...new Set(finalRows
+    .filter(row => row.是否POD !== '是' && row.退回状态 !== '已退回')
+    .filter(row => row.specialState !== 'SELF_PICKUP' && row.primaryCategory !== '仓库自提')
+    .map(billOf)
+    .filter(Boolean))];
+  return {
+    ...state,
+    finalRows,
+    trackResults: finalRows,
+    podLocks: [...podLocks].sort(),
+    nextCarryBills,
+    carryBills: nextCarryBills
+  };
 }
 
 async function queryShopeeConfirmApi({ state, bills, client, onProgress, onCheckpoint, isPaused }) {

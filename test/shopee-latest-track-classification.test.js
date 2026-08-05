@@ -65,3 +65,19 @@ test('delivery attempts are counted once per Cambodia natural day', () => {
   assert.deepEqual(row.attemptHistory, ['2026-08-02', '2026-08-03']);
   assert.equal(row.attemptStatus, 'CALCULATED_FROM_TRACK');
 });
+
+test('CE exception item types 20 30 and 40 open an OC natural-day cycle', () => {
+  for (const exceptionType of ['20', '30', '40']) {
+    const row = analyzeShopeeShipment({
+      waybill: `SPE-OC-${exceptionType}`,
+      reportDate: '2026-08-01',
+      analysisDate: '2026-08-05',
+      events: [{ shipmentCode: `SPE-OC-${exceptionType}`, eventCode: '30', eventTime: '2026-08-04 09:00:00', trackingEventDesc: 'Inbound' }],
+      exceptions: [{ shipmentCode: `SPE-OC-${exceptionType}`, exceptionType, reportTime: '2026-08-05 08:00:00' }],
+      apiStatus: { shipment: 'success', event: 'success', exception: 'success' }
+    });
+    assert.equal(row.OC天数, 1);
+    assert.match(row.primaryCategory, /OC1/);
+    assert.equal(row.入库无扫描节点, '否');
+  }
+});

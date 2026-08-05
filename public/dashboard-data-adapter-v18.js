@@ -10,9 +10,9 @@
   });
   const last = input => [...values(input)].reverse().find(value => value !== null) ?? null;
   const coreOrder = [
-    ['pendingGap', 'Pending不连续'], ['pending3', 'Pending 3天+'], ['oc2', 'OC 2天'],
+    ['pendingGap', 'Pending不连续'], ['pending3', 'Pending 3天+'], ['oc1', 'OC 1天+'],
     ['storeStay', '门店滞留'], ['ticketOpen', '工单'], ['inboundNoScan', '入库无扫描节点'],
-    ['stock2', '盘点2天'], ['ocRate', 'OC率'], ['firstRate', '首次妥投率'],
+    ['stock2', '盘点2天+'], ['oc2', 'OC 2天+'], ['firstRate', '首次妥投率'],
     ['todayPod', '今日POD'], ['podRate', 'POD率'], ['pvOpen', '外省未完结POD件']
   ];
 
@@ -27,9 +27,9 @@
   function coreMetrics(snapshot) {
     const map = metricLookup(snapshot);
     const aliases = {
-      pendingGap: ['pendingGap', 'Pending不连续'], pending3: ['pending3', 'Pending3+'], oc2: ['oc2', 'OC2+'],
+      pendingGap: ['pendingGap', 'Pending不连续'], pending3: ['pending3', 'Pending3+'], oc1: ['oc1', 'OC1+'],
       storeStay: ['storeStay', '门店滞留'], ticketOpen: ['ticketOpen', '工单未处理'], inboundNoScan: ['inboundNoScan', '入库无扫描'],
-      stock2: ['stock2', '盘点2天'], ocRate: ['ocRate', 'OC率'], firstRate: ['firstRate', '首次妥投率'],
+      stock2: ['stock2', '盘点2天+'], oc2: ['oc2', 'OC2+'], firstRate: ['firstRate', '首次妥投率'],
       todayPod: ['todayPod', '今日POD'], podRate: ['podRate', 'POD率'], pvOpen: ['pvOpen', '外省未完结POD件']
     };
     return coreOrder.map(([key, label]) => {
