@@ -919,6 +919,13 @@ function dashboardRows(state) {
   return state.detailTabs?.dashboard?.rows || [];
 }
 
+function normalizedFinalRows(state = {}) {
+  const value = state.finalRows;
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') return Object.values(value).filter(row => row && typeof row === 'object');
+  return [];
+}
+
 function metricTrend(state, name) {
   return validTrend(dashboardRows(state).find(row => row.项目 === name || row.metricKey === name)?.迷你走势数据);
 }
@@ -1046,7 +1053,7 @@ function detailTabsWithDerivedRows(state, type) {
   if (type === 'CCSL' && !tabs.provinceOpen) {
     tabs.provinceOpen = {
       label: '外省未完结POD件',
-      rows: (appState.finalRows || []).filter(row => {
+      rows: normalizedFinalRows(appState).filter(row => {
         const category = String(row.currentCategory || row['当前分类'] || '').toUpperCase();
         const target = String(row.nextSite || row.targetSite || row.place || row['当前网点'] || '').toUpperCase();
         const closed = category.includes('POD') || category.includes('RETURN_COMPLETED') || category.includes('SELF_PICKUP');
@@ -1768,7 +1775,7 @@ function buildProductionDashboardSnapshot() {
   const ccslTotalTrend = metricTrend(appState, '今日PNH');
   const ccslPodRateTrend = metricTrend(appState, '首投POD率');
   const shDashboard = shopeeState.dashboard || {};
-  const provinceOpenRows = (appState.finalRows || []).filter(row => {
+  const provinceOpenRows = normalizedFinalRows(appState).filter(row => {
     if (row.currentState === 'POD' || row.currentState === 'RETURN_COMPLETED' || row.是否POD === '是' || row.退回状态 === '已退回') return false;
     return /^(WHJT|WHPP|CCSL_PV)/i.test(String(row.lastEventTargetNode || row.最后节点目标网点 || ''));
   });

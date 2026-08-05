@@ -25,6 +25,7 @@ const PUBLIC_METRICS = Object.freeze([
   ['OC1+', 'oc1', 'oc1', '件'],
   ['OC2+', 'oc2', 'oc2', '件'],
   ['OC3+', 'oc3plus', 'oc3', '件'],
+  ['盘点2天+', 'cycle2plus', 'cycle2', '件'],
   ['入库无扫描', 'inboundNoScan', 'inboundNoScan', '件'],
   ['退回件', 'returned', 'returned', '件'],
   ['退回率', 'returnRate', 'returned', '%'],

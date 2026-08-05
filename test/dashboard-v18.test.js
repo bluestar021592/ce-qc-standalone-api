@@ -41,3 +41,13 @@ test('V18 navigation contract has thirteen unique labels', () => {
   for (const label of labels) assert.match(app, new RegExp(`'${label}'`));
   assert.equal(new Set(labels).size, 13);
 });
+
+test('V18 normalizes object-shaped final rows and keeps dashboard metrics in Shopee export', () => {
+  const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
+  const reporting = fs.readFileSync(path.join(__dirname, '..', 'src', 'shopeeReporting.js'), 'utf8');
+  const exporter = fs.readFileSync(path.join(__dirname, '..', 'src', 'shopeeExporter.js'), 'utf8');
+  assert.match(app, /function normalizedFinalRows/);
+  assert.match(app, /Object\.values\(value\)/);
+  assert.match(reporting, /cycle2plus/);
+  assert.match(exporter, /metrics\.cycle2plus/);
+});
