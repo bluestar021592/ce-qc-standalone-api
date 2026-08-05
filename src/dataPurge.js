@@ -4,18 +4,11 @@ import path from 'path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
-import { resetAppState } from './store.js';
+import { BUSINESS_DATA_TABLES, resetAppState } from './store.js';
 import { recordBackup } from './backup.js';
 
 export const PURGE_PHRASE = '永久清除全部业务数据';
 const challenges = new Map();
-const BUSINESS_TABLES = [
-  'daily_reports', 'daily_parse_rows', 'scan_results', 'track_events', 'final_rows', 'pod_locks', 'carry_bills',
-  'history_summary', 'run_checkpoints', 'run_locks', 'export_snapshots', 'export_records',
-  'business_daily_reports', 'business_daily_parse_rows', 'business_scan_results', 'business_track_events',
-  'business_final_rows', 'business_pod_locks', 'business_carry_bills', 'business_history_summary',
-  'business_run_checkpoints', 'business_run_locks', 'business_export_snapshots', 'business_export_records', 'business_states'
-];
 
 export async function createPurgeChallenge(user = {}) {
   const db = getDb();
@@ -103,7 +96,7 @@ async function verifyBackup(backup) {
 
 function tableCounts(db) {
   const existing = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
-  return Object.fromEntries(BUSINESS_TABLES.filter(name => existing.has(name)).map(name => [name, Number(db.prepare(`SELECT COUNT(*) count FROM ${name}`).get()?.count || 0)]));
+  return Object.fromEntries(BUSINESS_DATA_TABLES.filter(name => existing.has(name)).map(name => [name, Number(db.prepare(`SELECT COUNT(*) count FROM ${name}`).get()?.count || 0)]));
 }
 
 function assertNoActiveRuns(db) {

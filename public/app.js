@@ -1350,15 +1350,37 @@ async function clearLogs() { const result = await api('/api/clear-logs', { metho
 
 async function openDataPurge() {
   if (accessSession.user?.role !== 'ADMIN') return;
+  if (!window.confirm('确定要清空全部业务数据吗？系统会先创建并校验完整备份，用户、权限、配置、白名单、备份和审计不会删除。')) return;
+  const dialog = document.getElementById('dataPurgeDialog');
+  const preview = document.getElementById('purgePreview');
+  document.getElementById('purgeStepOne').hidden = false;
+  document.getElementById('purgeStepTwo').hidden = true;
+  preview.innerHTML = '<div class="purge-warning">正在创建并校验清空前备份，请勿关闭页面。大型数据库可能需要几分钟。</div>';
+  dialog.hidden = false;
   try {
     purgeChallenge = await api('/api/admin/data-purge/prepare', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const total = Object.values(purgeChallenge.counts || {}).reduce((sum, value) => sum + Number(value || 0), 0);
-    document.getElementById('purgePreview').innerHTML = `<div class="purge-warning">此操作会清除所有历史业务数据。</div><dl><dt>数据库</dt><dd>${escapeHtml(purgeChallenge.databasePath)}</dd><dt>业务记录总行数</dt><dd>${formatInt(total)}</dd><dt>自动备份</dt><dd>${escapeHtml(purgeChallenge.backup?.path || '')}</dd><dt>将被删除</dt><dd>${(purgeChallenge.deleteScope || []).map(escapeHtml).join('、')}</dd><dt>将被保留</dt><dd>${(purgeChallenge.retainedScope || []).map(escapeHtml).join('、')}</dd></dl>`;
+    preview.innerHTML = `<div class="purge-success">备份和完整性校验已完成，可以继续清空。</div><dl><dt>数据库</dt><dd>${escapeHtml(purgeChallenge.databasePath)}</dd><dt>业务记录总行数</dt><dd>${formatInt(total)}</dd><dt>安全备份</dt><dd>${escapeHtml(purgeChallenge.backup?.path || '')}</dd><dt>备份大小</dt><dd>${formatInt(purgeChallenge.backup?.size || 0)} 字节</dd><dt>完整性</dt><dd>${escapeHtml(purgeChallenge.backup?.integrity || '')}</dd><dt>将被删除</dt><dd>${(purgeChallenge.deleteScope || []).map(escapeHtml).join('、')}</dd><dt>将被保留</dt><dd>${(purgeChallenge.retainedScope || []).map(escapeHtml).join('、')}</dd></dl>`;
     document.getElementById('purgeAdmin').textContent = purgeChallenge.administrator || '';
     document.getElementById('purgeStepOne').hidden = false;
     document.getElementById('purgeStepTwo').hidden = true;
     document.getElementById('dataPurgeDialog').hidden = false;
-  } catch (error) { alert(`无法开始清除：${error.message}`); }
+    const waitMs = Math.max(0, new Date(purgeChallenge.notBefore).getTime() - Date.now());
+    if (waitMs > 0) {
+      preview.insertAdjacentHTML('beforeend', `<div class="purge-warning">安全倒计时 ${Math.ceil(waitMs / 1000)} 秒后自动清空，请保持页面打开。</div>`);
+      await new Promise(resolve => setTimeout(resolve, waitMs + 100));
+    }
+    preview.insertAdjacentHTML('beforeend', '<div class="purge-warning">正在清空全部业务数据并刷新看板...</div>');
+    const result = await api('/api/admin/data-purge/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeId: purgeChallenge.challengeId, phrase: '永久清除全部业务数据', backupConfirmed: true })
+    });
+    await applyCompletedPurge(result);
+  } catch (error) {
+    purgeChallenge = null;
+    preview.innerHTML = `<div class="purge-error">无法开始清空：${escapeHtml(error.message)}</div>`;
+  }
 }
 
 function continueDataPurge() {
@@ -1374,7 +1396,7 @@ function continueDataPurge() {
 
 function updatePurgeButton() {
   const ready = purgeChallenge && Date.now() >= new Date(purgeChallenge.notBefore).getTime();
-  const phraseOk = document.getElementById('purgePhrase')?.value === '永久清除全部业务数据';
+  const phraseOk = document.getElementById('purgePhrase')?.value.trim() === '永久清除全部业务数据';
   const backupOk = document.getElementById('purgeBackupConfirmed')?.checked;
   document.getElementById('purgeExecuteButton').disabled = !(ready && phraseOk && backupOk);
 }
@@ -1382,9 +1404,24 @@ function updatePurgeButton() {
 async function executeDataPurge() {
   const button = document.getElementById('purgeExecuteButton'); button.disabled = true;
   try {
-    await api('/api/admin/data-purge/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeId: purgeChallenge.challengeId, phrase: document.getElementById('purgePhrase').value, backupConfirmed: document.getElementById('purgeBackupConfirmed').checked }) });
-    closeDataPurge(); localStorage.clear(); sessionStorage.clear(); await refresh(); alert('全部业务数据已清除，系统备份已保留。');
-  } catch (error) { alert(`清除失败：${error.message}`); updatePurgeButton(); }
+    const result = await api('/api/admin/data-purge/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challengeId: purgeChallenge.challengeId, phrase: document.getElementById('purgePhrase').value, backupConfirmed: document.getElementById('purgeBackupConfirmed').checked }) });
+    await applyCompletedPurge(result);
+  } catch (error) {
+    document.getElementById('purgeCountdown').textContent = `清空失败：${error.message}`;
+    updatePurgeButton();
+  }
+}
+
+async function applyCompletedPurge(result) {
+  appState = result.state || {};
+  shopeeState = result.shopeeState || {};
+  businessStates = Object.fromEntries(['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].map(type => [type, {}]));
+  unifiedImportState = null;
+  historyCatalog = { CCSL: [], SHOPEE: [] };
+  localStorage.clear(); sessionStorage.clear();
+  closeDataPurge(); renderAll();
+  await refresh().catch(() => {});
+  alert('全部业务数据已清空，安全备份已经保留。');
 }
 
 function closeDataPurge() { clearInterval(purgeCountdownTimer); const dialog = document.getElementById('dataPurgeDialog'); if (dialog) dialog.hidden = true; purgeChallenge = null; }

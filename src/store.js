@@ -56,36 +56,57 @@ export function saveAppState(state = {}, options = {}) {
   runTransaction(tx);
 }
 
+export const BUSINESS_DATA_TABLES = [
+  'daily_reports',
+  'daily_parse_rows',
+  'scan_results',
+  'track_events',
+  'final_rows',
+  'pod_locks',
+  'carry_bills',
+  'history_summary',
+  'run_checkpoints',
+  'run_locks',
+  'export_snapshots',
+  'export_records',
+  'business_daily_reports',
+  'business_daily_parse_rows',
+  'business_scan_results',
+  'business_track_events',
+  'business_final_rows',
+  'business_pod_locks',
+  'business_carry_bills',
+  'business_history_summary',
+  'business_run_checkpoints',
+  'business_run_locks',
+  'business_export_snapshots',
+  'business_export_records',
+  'business_states',
+  'business_api_batches',
+  'business_exception_items',
+  'business_shipment_tracks',
+  'business_recipient_conflicts',
+  'carryover_open_items',
+  'export_jobs',
+  'metric_detail_members',
+  'metric_snapshots',
+  'monthly_metric_snapshots',
+  'notifications',
+  'pending_daily_members',
+  'reconciliation_diagnostics',
+  'shipment_current_state',
+  'shipment_daily_snapshots',
+  'unified_import_batches',
+  'unified_import_rows',
+  'unified_snapshots',
+  'weekly_metric_snapshots'
+];
+
 export function resetAppState(nextState = {}) {
   const db = getDb();
   const now = nowIso();
-  const clearTargets = [
-    'daily_reports',
-    'daily_parse_rows',
-    'scan_results',
-    'track_events',
-    'final_rows',
-    'pod_locks',
-    'carry_bills',
-    'history_summary',
-    'run_checkpoints',
-    'run_locks',
-    'export_snapshots',
-    'export_records',
-    'business_daily_reports',
-    'business_daily_parse_rows',
-    'business_scan_results',
-    'business_track_events',
-    'business_final_rows',
-    'business_pod_locks',
-    'business_carry_bills',
-    'business_history_summary',
-    'business_run_checkpoints',
-    'business_run_locks',
-    'business_export_snapshots',
-    'business_export_records',
-    'business_states'
-  ];
+  const existingTables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+  const clearTargets = BUSINESS_DATA_TABLES.filter(table => existingTables.has(table));
   const cleared = Object.fromEntries(clearTargets.map(table => [
     table,
     Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count || 0)

@@ -75,6 +75,12 @@ app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
+app.use((req, res, next) => {
+  if (/\.(?:html|js|css)$/i.test(req.path) || req.path === '/' || !path.extname(req.path)) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  }
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 const client = new CEClient();

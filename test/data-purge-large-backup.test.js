@@ -33,11 +33,26 @@ test('verified backup gates transactional business purge and preserves system ta
   const { createPurgeChallenge, executePurge, PURGE_PHRASE } = await import('../src/dataPurge.js');
   const db = getDb();
   db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-08-05');
+  db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,fileHash,status,summaryJson,warningsJson,createdAt)
+    VALUES('batch-1','snapshot-1','2026-08-05','hash','IMPORTED','{}','[]','2026-08-05T00:00:00Z')`).run();
+  db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,rowJson,createdAt)
+    VALUES('batch-1','snapshot-1','2026-08-05','CE','CC-TEST-1','{}','2026-08-05T00:00:00Z')`).run();
+  db.prepare(`INSERT INTO shipment_current_state(shipmentCode,businessType,reportDate,snapshotId,state,stateJson,updatedAt)
+    VALUES('CC-TEST-1','CE','2026-08-05','snapshot-1','PENDING','{}','2026-08-05T00:00:00Z')`).run();
+  db.prepare(`INSERT INTO carryover_open_items(shipmentCode,businessType,sourceReportDate,lastReportDate,sourceSnapshotId,lastSnapshotId,status,stateJson,createdAt,updatedAt)
+    VALUES('CC-TEST-1','CE','2026-08-05','2026-08-05','snapshot-1','snapshot-1','OPEN','{}','2026-08-05T00:00:00Z','2026-08-05T00:00:00Z')`).run();
   const challenge = await createPurgeChallenge({ email: 'test-admin' });
   await new Promise(resolve => setTimeout(resolve, 5100));
   const result = await executePurge({ challengeId: challenge.challengeId, phrase: PURGE_PHRASE, backupConfirmed: true, user: { email: 'test-admin' } });
   assert.ok(result.before.daily_reports >= 1);
+  assert.equal(result.before.unified_import_rows, 1);
+  assert.equal(result.before.shipment_current_state, 1);
+  assert.equal(result.before.carryover_open_items, 1);
   assert.equal(result.after.daily_reports, 0);
+  assert.equal(result.after.unified_import_batches, 0);
+  assert.equal(result.after.unified_import_rows, 0);
+  assert.equal(result.after.shipment_current_state, 0);
+  assert.equal(result.after.carryover_open_items, 0);
   assert.equal(result.integrity, 'ok');
   assert.equal(result.walCheckpoint, 'TRUNCATE');
   assert.ok(db.prepare('SELECT COUNT(*) count FROM backup_records').get().count >= 1);
