@@ -1765,7 +1765,13 @@ function productionRecipient(group) {
 }
 
 function productionDispatchRegion(group, region) {
-  const rows = (shopeeState.finalRows || []).filter(row => String(row.recipient_group || '').toUpperCase() === group && normalizedRegion(row) === region);
+  const finalRows = Array.isArray(shopeeState.finalRows) ? shopeeState.finalRows : [];
+  const detailRows = shopeeState.detailTabs?.byRecipientGroup?.[group]?.all?.rows
+    || shopeeState.detailTabs?.[`${group}_all`]?.rows
+    || shopeeState.dashboard?.detailTabs?.byRecipientGroup?.[group]?.all?.rows
+    || [];
+  const sourceRows = finalRows.length ? finalRows : (Array.isArray(detailRows) ? detailRows : []);
+  const rows = sourceRows.filter(row => String(row.recipient_group || '').toUpperCase() === group && normalizedRegion(row) === region);
   if (!rows.length) return { firstAttemptRate: null, secondAttemptRate: null, thirdAttemptRate: null };
   const count = attempt => rows.filter(row => attempt < 3 ? Number(row.currentAttemptNo || row.podAttemptNo || 0) === attempt : Number(row.currentAttemptNo || row.podAttemptNo || 0) >= 3).length;
   return { firstAttemptRate: rate(count(1), rows.length), secondAttemptRate: rate(count(2), rows.length), thirdAttemptRate: rate(count(3), rows.length) };
