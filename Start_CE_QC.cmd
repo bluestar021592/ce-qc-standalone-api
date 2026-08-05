@@ -3,6 +3,14 @@ setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul
 title CE QC Standalone API
 
+if /I "%~1"=="--background" goto :BACKGROUND
+
+set "SCRIPT_DIR=%~dp0"
+wscript.exe "%SCRIPT_DIR%Start_CE_QC_Silent.vbs"
+exit /b 0
+
+:BACKGROUND
+
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_DIR=%SCRIPT_DIR%"
 
@@ -35,18 +43,5 @@ ping -n 2 127.0.0.1 >nul
 
 echo Starting CE QC standalone API from:
 echo %CD%
-wscript.exe "%PROJECT_DIR%Start_CE_QC_Silent.vbs"
-if errorlevel 1 (
-  echo [ERROR] Failed to launch the background server.
-  pause
-  exit /b 1
-)
-ping -n 4 127.0.0.1 >nul
-netstat -ano | findstr /R /C:":5177 .*LISTENING" >nul
-if errorlevel 1 (
-  echo [ERROR] Server did not start on port 5177.
-  pause
-  exit /b 1
-)
-echo Server started in background: http://127.0.0.1:5177
-exit /b 0
+node server.js >> "%PROJECT_DIR%logs\server-output.log" 2>> "%PROJECT_DIR%logs\server-error.log"
+exit /b %ERRORLEVEL%
