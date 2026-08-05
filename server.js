@@ -29,7 +29,7 @@ import { createDashboardSnapshot, getMatchingSnapshot, getSnapshotById, listSnap
 import { appendHistorySummary, buildLongBackupV2 } from './src/longBackup.js';
 import { mergeBackupModule } from './src/backupRecovery.js';
 import { buildShopeeDashboard } from './src/shopeeReporting.js';
-import { analyzeShopeeShipment } from './src/shopeeAnalyzer.js';
+import { analyzeShopeeShipment, SHOPEE_ANALYSIS_RULE_VERSION } from './src/shopeeAnalyzer.js';
 import { queryBatchWithFallback, splitTrackBatches } from './src/trackBatching.js';
 import {
   accessIdentity, auditAction, publicUser, requireBusinessScope, requireRole, sameOriginWriteGuard, validateAccessConfiguration
@@ -845,6 +845,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
         Number(latestSnapshot.state?.lastRunSummary?.scanRetry || 0) > 0
         || Number(latestSnapshot.state?.scanRetryBills?.length || 0) > 0
         || Number(latestSnapshot.state?.finalRows?.length || 0) !== Number(state.pnhBills?.length || 0)
+        || latestSnapshot.state?.analysisRuleVersion !== SHOPEE_ANALYSIS_RULE_VERSION
       )
     );
     if (invalidCompleted) {

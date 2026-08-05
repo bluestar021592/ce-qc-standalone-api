@@ -13,6 +13,7 @@ const OUTBOUND_RE = /(^|\s)outbound(\s|$)|出库|离开网点/i;
 const INBOUND_RE = /pickup\s*inbound|(^|\s)inbound(\s|$)|入库|到仓|货物到达网点/i;
 const CYCLE_COUNT_RE = /cycle\s*count|盘点/i;
 const TRANSIT_HUB_RE = /(?:CE|CEL)\s*:\s*(?:WHJT|WHPP)\b|\b(?:WHJT|WHPP)\b/i;
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-05-latest-track-v2';
 
 export function analyzeShopeeShipment({
   waybill,
@@ -95,6 +96,7 @@ export function analyzeShopeeShipment({
     ...storeFlow,
     reportDate,
     analysisDate: effectiveAnalysisDate,
+    analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
     shipmentCode: waybill,
     运单号: waybill,
     recipient_raw: recipientSource?.recipient_raw || '',

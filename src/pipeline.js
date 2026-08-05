@@ -2,7 +2,7 @@ import { analyzeShipment, normalizeEvent } from './analyzer.js';
 import { createHash } from 'crypto';
 import { cleanAnyBills, cleanMainBills, isExcludedBill } from './storage.js';
 import { getShopCodeMap } from './shopCodes.js';
-import { analyzeShopeeShipment, classifyShopeeScanStatus } from './shopeeAnalyzer.js';
+import { analyzeShopeeShipment, classifyShopeeScanStatus, SHOPEE_ANALYSIS_RULE_VERSION } from './shopeeAnalyzer.js';
 import { queryBatchWithFallback, queryTrackBatchWithFallback, splitTrackBatches, TRACK_QUERY_BATCH_SIZE } from './trackBatching.js';
 import { classifyScanTerminal } from './scanTerminal.js';
 
@@ -235,6 +235,7 @@ export async function runQcPipeline({
   state.trackEvents = allEvents;
   state.trackResults = trackResults;
   state.finalRows = finalRows;
+  state.analysisRuleVersion = SHOPEE_ANALYSIS_RULE_VERSION;
   state.finalDiversionRows = finalDiversionRows;
   state.nextCarryBills = nextCarryBills;
   state.carryBills = nextCarryBills;
