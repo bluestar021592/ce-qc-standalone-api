@@ -258,7 +258,15 @@
   }
 
   function shopeeSpecial(shopee) {
-    return `<div class="shopee-special-grid">${[['SHOPEE CN',shopee.cn],['SHOPEE VN',shopee.vn]].map(([label,row]) => `<section><b>${label}</b><span>PP ${number(row?.today || 0)}</span><span>POD率 ${display(row?.podRate || 0,'%')}</span></section>`).join('')}</div>`;
+    return `<div class="shopee-special-grid detailed">${[['SHOPEE CN','CN',shopee.cn],['SHOPEE VN','VN',shopee.vn]].map(([label,group,row]) => {
+      const items = [
+        ['今日件数', row?.today, 'all'], ['今日POD', row?.pod, 'pod'], ['POD率', display(row?.podRate || 0, '%'), 'pod'],
+        ['派送中', row?.deliveryStay, 'deliveryStay'], ['派送中率', display(row?.deliveryStayRate || 0, '%'), 'deliveryStay'],
+        ['Pending1+', row?.pending1, 'pending1'], ['Pending3+', row?.pending3, 'pending3'],
+        ['已退回', row?.returned, 'returned'], ['退回率', display(row?.returnRate || 0, '%'), 'returned']
+      ];
+      return `<section><header><b>${label}</b><small>${number(row?.today || 0)}票</small></header><div>${items.map(([name,value,tab]) => `<button onclick="openShopeeGroupMetric('${group}','${tab}')"><span>${name}</span><strong>${typeof value === 'string' ? value : number(value || 0)}</strong></button>`).join('')}</div></section>`;
+    }).join('')}</div>`;
   }
 
   function dispatchDistribution(shopee) {

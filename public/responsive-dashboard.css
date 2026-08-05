@@ -304,3 +304,15 @@ body.sidebar-collapsed .topbar { left: 72px !important; }
   .shopee-import-summary { align-items: flex-start; flex-direction: column; }
   .recipient-filter { justify-content: flex-start; }
 }
+
+.shopee-special-grid.detailed { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; }
+.shopee-special-grid.detailed section { padding: 0; overflow: hidden; border: 1px solid #dce7f3; border-radius: 6px; background: #fff; }
+.shopee-special-grid.detailed section header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #e5edf6; }
+.shopee-special-grid.detailed section header small { color: #7588a0; }
+.shopee-special-grid.detailed section > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.shopee-special-grid.detailed button { min-height: 58px; padding: 8px 10px; border: 0; border-right: 1px solid #edf2f7; border-bottom: 1px solid #edf2f7; background: #fff; text-align: left; }
+.shopee-special-grid.detailed button:hover { background: #f4f8ff; }
+.shopee-special-grid.detailed button span,
+.shopee-special-grid.detailed button strong { display: block; }
+.shopee-special-grid.detailed button span { color: #71839a; font-size: 11px; }
+.shopee-special-grid.detailed button strong { margin-top: 4px; color: #15385f; font-size: 17px; }

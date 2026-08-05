@@ -947,6 +947,11 @@ function recipientMetrics(group = 'ALL') {
     oc3: Number(metrics.oc3plus || metrics.oc3 || 0),
     oc3plus: Number(metrics.oc3plus || metrics.oc3 || 0),
     inboundNoScan: Number(metrics.inboundNoScan || 0),
+    deliveryStay: Number(metrics.deliveryStay || 0),
+    deliveryStayRate: Number(metrics.deliveryStayRate || 0),
+    returned: Number(metrics.returned || 0),
+    returnRate: Number(metrics.returnRate || 0),
+    returnInProgress: Number(metrics.returnInProgress || 0),
     shopTransit: Number(metrics.shopTransit || 0), shopArrived: Number(metrics.shopArrived || 0),
     shopPending: Number(metrics.shopPending || 0), shopRetention1: Number(metrics.shopRetention1 || 0),
     shopRetention2: Number(metrics.shopRetention2 || 0), shopRetention3: Number(metrics.shopRetention3 || 0),
@@ -1682,11 +1687,11 @@ function buildProductionDashboardSnapshot() {
     ['ali1688', 'ALI1688', Number(importedCounts.ALI1688 || 0), 'cyan']
   ].map(([key, label, value, tone]) => ({ key, label, value, tone }));
   const coreMetrics = [
-    ['pending-discontinuous','Pending不连续',metricValue(appState,'Pending不连续')], ['pending3','Pending 3天+',metricValue(appState,'Pending3+') + sh.pending3],
-    ['oc2','OC 2天+',metricValue(appState,'OC2+') + sh.oc2], ['store-retention','门店滞留',metricValue(appState,'门店滞留2天+')],
-    ['work-order','工单未处理',metricValue(appState,'工单未处理')], ['inbound-no-scan','入库无扫描节点',metricValue(appState,'入库无扫描节点') + sh.inboundNoScan],
-    ['inventory2','盘点 2天+',metricValue(appState,'盘点2天+')], ['oc-rate','OC率',rate(metricValue(appState,'OC1+') + sh.oc1,total),'%'],
-    ['first-rate','首次妥投率',cc.podRate,'%'], ['today-pod','今日POD',pod], ['pod-rate','POD率',rate(pod,total),'%'],
+    ['pending-discontinuous','Pending不连续',metricValue(appState,'Pending不连续')], ['pending3','Pending 3天+',metricValue(appState,'Pending3+')],
+    ['oc2','OC 2天+',metricValue(appState,'OC2+')], ['store-retention','门店滞留',metricValue(appState,'门店滞留2天+')],
+    ['work-order','工单未处理',metricValue(appState,'工单未处理')], ['inbound-no-scan','入库无扫描节点',metricValue(appState,'入库无扫描节点')],
+    ['inventory2','盘点 2天+',metricValue(appState,'盘点2天+')], ['oc-rate','OC率',rate(metricValue(appState,'OC1+'),cc.total),'%'],
+    ['first-rate','首次妥投率',cc.podRate,'%'], ['today-pod','今日POD',cc.pod], ['pod-rate','POD率',rate(cc.pod,cc.total),'%'],
     ['province-open','外省未完结POD件',metricValue(appState,'外省未完结POD件')],
     ['self-pickup','仓库自提件',metricValue(appState,'仓库自提件')], ['cecn','CECN滞留包裹',metricValue(appState,'CECN滞留包裹')], ['cezt','CEZT滞留包裹',metricValue(appState,'CEZT滞留包裹')], ['580','580滞留包裹',metricValue(appState,'580滞留包裹')]
   ].map(([key,label,value,unit='件']) => ({ key,label,value,unit }));
@@ -1741,6 +1746,11 @@ function productionRecipient(group) {
     oc2: metrics.oc2,
     oc3: metrics.oc3plus,
     inboundNoScan: metrics.inboundNoScan
+    ,deliveryStay: metrics.deliveryStay
+    ,deliveryStayRate: metrics.deliveryStayRate
+    ,returned: metrics.returned
+    ,returnRate: metrics.returnRate
+    ,returnInProgress: metrics.returnInProgress
   };
 }
 
