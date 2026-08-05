@@ -4,6 +4,7 @@ let ceAuth = {};
 let accessSession = {};
 let currentPage = pageFromPath();
 let runInFlight = false;
+let unifiedImportState = null;
 let historyCatalog = { CCSL: [], SHOPEE: [] };
 let historyModeDate = '';
 let shopeeRecipientGroup = 'ALL';
@@ -76,16 +77,18 @@ async function refresh() {
     renderAll();
     return;
   }
-  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory] = await Promise.all([
+  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unified] = await Promise.all([
     api('/api/state'), api('/api/shopee/state'), api('/api/ce-auth-status'),
     api('/api/session'),
-    api('/api/history?businessType=CCSL'), api('/api/history?businessType=SHOPEE')
+    api('/api/history?businessType=CCSL'), api('/api/history?businessType=SHOPEE'),
+    api('/api/import/unified-latest')
   ]);
   appState = ccsl.state || {};
   shopeeState = shopee.state || {};
   ceAuth = auth.authStatus || {};
   accessSession = session || {};
   historyCatalog = { CCSL: ccslHistory.rows || [], SHOPEE: shopeeHistory.rows || [] };
+  unifiedImportState = unified.import || null;
   historyModeDate = '';
   renderAll();
 }
@@ -107,6 +110,7 @@ function renderAll() {
   renderRulesPage();
   renderCcslOperations();
   renderShopeeOperations();
+  renderUnifiedImportResult();
   renderHistoryOptions();
   const trackDate = document.getElementById('trackReportDate');
   if (trackDate && !trackDate.value) trackDate.value = latestDate(appState.reportDate, shopeeState.reportDate) || new Date().toISOString().slice(0, 10);
@@ -960,7 +964,8 @@ function openMetricDetail(type, tab) {
 
 function renderCcslOperations() {
   const summary = appState.dailySummary || {};
-  document.getElementById('fileStatus').innerHTML = `${statusPill(appState.sourceName ? '日报已导入' : '未导入日报', Boolean(appState.sourceName))}<p>${escapeHtml(appState.sourceName || '未选择文件')}</p><p>日期：${escapeHtml(appState.reportDate || '—')} · PNH ${formatInt(summary.pnh || 0)} · 非PNH ${formatInt(summary.nonPnh || 0)}</p>`;
+  const fileStatus = document.getElementById('fileStatus');
+  if (fileStatus && !unifiedImportState) fileStatus.innerHTML = `${statusPill(appState.sourceName ? '日报已导入' : '未导入日报', Boolean(appState.sourceName))}<p>${escapeHtml(appState.sourceName || '未选择文件')}</p><p>日期：${escapeHtml(appState.reportDate || '—')} · PNH ${formatInt(summary.pnh || 0)} · 非PNH ${formatInt(summary.nonPnh || 0)}</p>`;
   document.getElementById('ccslRunStatus').innerHTML = runStatusMarkup(appState);
   document.getElementById('shopCodeSettingStatus').innerHTML = `当前门店CP码：<b>${formatInt(appState.shopCodes?.count || 0)}</b>个`;
   document.getElementById('logs').textContent = (appState.logs || []).slice(-300).join('\n');
@@ -969,9 +974,12 @@ function renderCcslOperations() {
 function renderShopeeOperations() {
   const summary = shopeeState.dailySummary || {};
   const groups = summary.groupCounts || {};
-  document.getElementById('shopeeFileStatus').innerHTML = `${statusPill(shopeeState.sourceName ? '日报已导入' : '未导入日报', Boolean(shopeeState.sourceName))}<p>${escapeHtml(shopeeState.sourceName || '未选择文件')}</p><p>日期：${escapeHtml(shopeeState.reportDate || '—')} · 有效 ${formatInt(summary.totalRecognized || shopeeState.total || 0)} · CN ${formatInt(groups.CN || 0)} · VN ${formatInt(groups.VN || 0)} · 冲突 ${formatInt(summary.conflictCount || 0)}</p>`;
-  document.getElementById('shopeeRunStatus').innerHTML = runStatusMarkup(shopeeState);
-  document.getElementById('shopeeLogs').textContent = (shopeeState.logs || []).slice(-300).join('\n');
+  const fileStatus = document.getElementById('shopeeFileStatus');
+  if (fileStatus) fileStatus.innerHTML = `${statusPill(shopeeState.sourceName ? '日报已导入' : '未导入日报', Boolean(shopeeState.sourceName))}<p>${escapeHtml(shopeeState.sourceName || '未选择文件')}</p><p>日期：${escapeHtml(shopeeState.reportDate || '—')} · 有效 ${formatInt(summary.totalRecognized || shopeeState.total || 0)} · CN ${formatInt(groups.CN || 0)} · VN ${formatInt(groups.VN || 0)} · 冲突 ${formatInt(summary.conflictCount || 0)}</p>`;
+  const runStatus = document.getElementById('shopeeRunStatus');
+  if (runStatus) runStatus.innerHTML = runStatusMarkup(shopeeState);
+  const logs = document.getElementById('shopeeLogs');
+  if (logs) logs.textContent = (shopeeState.logs || []).slice(-300).join('\n');
 }
 
 function runStatusMarkup(state) {
@@ -1019,6 +1027,52 @@ async function importExcel() {
   const body = new FormData(); body.append('file', file); body.append('reportDate', document.getElementById('reportDate').value || '');
   try { const result = await api('/api/import-excel', { method: 'POST', body }); appState = result.state; renderAll(); alert(`CCSL日报导入成功：PNH ${result.parsed.pnh || 0}，非PNH ${result.parsed.nonPnh || 0}。`); } catch (error) { alert(`CCSL日报导入失败：${error.message}`); }
 }
+
+async function importUnifiedExcel() {
+  const file = document.getElementById('excelFile').files[0];
+  if (!file) return alert('请选择综合日报Excel');
+  const body = new FormData();
+  body.append('file', file);
+  body.append('reportDate', document.getElementById('reportDate').value || '');
+  try {
+    const result = await api('/api/import/unified-daily-report', { method: 'POST', body });
+    unifiedImportState = result;
+    appState = result.state || appState;
+    shopeeState = result.shopeeState || shopeeState;
+    document.getElementById('reportDate').value = result.reportDate;
+    renderUnifiedImportResult();
+    historyModeDate = result.reportDate;
+    alert(`综合日报导入成功：有效${result.summary.validUniqueWaybills}票，CE ${result.classificationCounts.CE}，TBKH ${result.classificationCounts.TBKH}，ALI1688 ${result.classificationCounts.ALI1688}，SHOPEE CN ${result.classificationCounts.SHOPEECN}，SHOPEE VN ${result.classificationCounts.SHOPEEVN}。`);
+  } catch (error) { alert(`综合日报导入失败：${error.message}`); }
+}
+
+function renderUnifiedImportResult() {
+  if (!unifiedImportState) return;
+  const result = unifiedImportState;
+  const counts = result.classificationCounts || {};
+  const summary = result.summary || {};
+  document.getElementById('fileStatus').innerHTML = `${statusPill('综合日报已导入', true)}<p>日期：${escapeHtml(result.reportDate || '—')} · 有效唯一单号 ${formatInt(summary.validUniqueWaybills || 0)}</p><p>数据版本已切换到本次导入</p>`;
+  document.getElementById('unifiedSnapshotStatus').textContent = result.duplicateFile ? '重复文件，沿用已有批次' : '新批次已保存';
+  document.getElementById('unifiedSnapshotStatus').className = 'status-pill success';
+  document.getElementById('unifiedClassificationSummary').innerHTML = `<div class="unified-count-grid">${['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].map(type => `<div><span>${type}</span><b>${formatInt(counts[type] || 0)}</b></div>`).join('')}</div><div class="unified-warning-grid"><span>原始行 <b>${formatInt(summary.rawRows || 0)}</b></span><span>重复 <b>${formatInt(summary.duplicateRows || 0)}</b></span><span>无单号 <b>${formatInt(summary.missingWaybillRows || 0)}</b></span><span>收件人缺失 <b>${formatInt(summary.missingRecipientWarnings || 0)}</b></span><span>分类冲突 <b>${formatInt(summary.classificationConflicts || 0)}</b></span></div>`;
+}
+
+async function runUnified() {
+  if (!unifiedImportState) return alert('请先导入综合日报并完成自动分类');
+  if (runInFlight) return;
+  runInFlight = true;
+  try {
+    const ccsl = await api('/api/run', { method: 'POST' });
+    appState = ccsl.state || appState;
+    const shopee = await api('/api/shopee/run/start', { method: 'POST' });
+    shopeeState = shopee.state || shopeeState;
+    renderAll();
+    alert('综合日报全自动处理完成。');
+  } catch (error) { alert(`全自动处理失败：${error.message}`); }
+  finally { runInFlight = false; }
+}
+async function resumeUnified() { await resumeProcess(); }
+async function pauseUnified() { await pauseProcess(); }
 
 async function importShopeeExcel() {
   const file = document.getElementById('shopeeExcelFile').files[0];

@@ -3,7 +3,7 @@ import path from 'path';
 import { DEFAULT_SHOP_CP_CODES } from './shopCodeDefaults.js';
 import { seedLatestShopWhitelist } from './shopWhitelist.js';
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 const REQUIRED_TABLES = [
   'pod_locks',
   'carry_bills',
@@ -37,7 +37,10 @@ const REQUIRED_TABLES = [
   'users',
   'user_sessions',
   'audit_logs',
-  'notifications'
+  'notifications',
+  'unified_import_batches',
+  'unified_import_rows',
+  'unified_snapshots'
 ];
 const PERSISTED_TABLES = [...REQUIRED_TABLES, 'app_state', 'daily_parse_rows', 'export_records', 'business_export_records'];
 
@@ -618,6 +621,25 @@ export function migrateDatabase(db, cfg) {
       readAt TEXT,
       createdAt TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS unified_import_batches (
+      batchId TEXT PRIMARY KEY, snapshotId TEXT NOT NULL, reportDate TEXT NOT NULL,
+      sourceName TEXT, fileHash TEXT NOT NULL, status TEXT NOT NULL,
+      summaryJson TEXT NOT NULL, warningsJson TEXT NOT NULL, createdAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS unified_import_rows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, batchId TEXT NOT NULL, snapshotId TEXT NOT NULL,
+      reportDate TEXT NOT NULL, businessType TEXT NOT NULL, shipmentCode TEXT NOT NULL,
+      regionCode TEXT, recipientRaw TEXT, recipientNormalized TEXT, sheetName TEXT,
+      rowNumber INTEGER, classificationReason TEXT, rowJson TEXT NOT NULL, createdAt TEXT NOT NULL,
+      UNIQUE(batchId, shipmentCode)
+    );
+    CREATE TABLE IF NOT EXISTS unified_snapshots (
+      snapshotId TEXT PRIMARY KEY, batchId TEXT NOT NULL, reportDate TEXT NOT NULL,
+      status TEXT NOT NULL, payloadJson TEXT NOT NULL, createdAt TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unified_import_hash ON unified_import_batches(reportDate, fileHash, status);
+    CREATE INDEX IF NOT EXISTS idx_unified_rows_snapshot ON unified_import_rows(snapshotId, businessType, shipmentCode);
 
     CREATE INDEX IF NOT EXISTS idx_daily_parse_report ON daily_parse_rows(reportDate);
     CREATE INDEX IF NOT EXISTS idx_daily_parse_bill ON daily_parse_rows(shipmentCode);

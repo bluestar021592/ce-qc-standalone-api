@@ -110,12 +110,11 @@
         </section>
 
         <section id="importPage" class="app-page" hidden>
-          <div class="page-heading"><div><h2>数据导入与处理</h2><p>长期JSON为可选恢复备份，各业务日报独立导入</p></div></div>
+          <div class="page-heading"><div><h2>数据导入与处理</h2><p>一次上传综合日报，系统自动分类到五个独立业务队列</p></div></div>
           <div class="operations-dashboard">
-            <section id="ccslImport" class="panel operation-panel"><div class="panel-title"><h3>CCSL日报导入</h3></div><label class="field-label">日报日期（可选修正）<input id="reportDate" type="date"></label><label class="file-picker"><input id="excelFile" type="file" accept=".xlsx,.xls,.html,.htm"><span>选择CCSL日报</span></label><button class="btn primary full" onclick="importExcel()">导入CCSL日报</button><div id="fileStatus" class="operation-status"></div></section>
-            <section id="shopeeImport" class="panel operation-panel shopee-accent"><div class="panel-title"><h3>SHOPEE日报导入</h3></div><label class="field-label">日报日期（可选修正）<input id="shopeeReportDate" type="date"></label><label class="file-picker"><input id="shopeeExcelFile" type="file" accept=".xlsx,.xls"><span>选择SHOPEE日报</span></label><button class="btn shopee full" onclick="importShopeeExcel()">导入SHOPEE日报</button><div id="shopeeFileStatus" class="operation-status"></div></section>
-            <section id="runPanel" class="panel operation-panel"><div class="panel-title"><h3>CCSL处理</h3></div><div class="button-stack"><button class="btn primary" onclick="run()">开始全自动处理</button><button class="btn ghost" onclick="resumeProcess()">继续处理</button><button class="btn warning" onclick="pauseProcess()">暂停</button></div><div id="ccslRunStatus" class="operation-status"></div></section>
-            <section id="shopeeRunPanel" class="panel operation-panel"><div class="panel-title"><h3>SHOPEE处理</h3></div><div class="button-stack"><button class="btn shopee" onclick="runShopee()">开始全自动处理</button><button class="btn ghost" onclick="resumeShopee()">继续处理</button><button class="btn warning" onclick="pauseShopee()">暂停</button></div><div id="shopeeRunStatus" class="operation-status"></div></section>
+            <section id="unifiedImport" class="panel operation-panel unified-import-panel"><div class="panel-title"><h3>综合日报导入</h3></div><label class="field-label">日报日期（可选修正）<input id="reportDate" type="date"></label><label class="file-picker"><input id="excelFile" type="file" accept=".xlsx,.xls"><span>选择综合日报Excel</span></label><button class="btn primary full" onclick="importUnifiedExcel()">导入综合日报并自动分类</button><div id="fileStatus" class="operation-status"></div></section>
+            <section id="runPanel" class="panel operation-panel"><div class="panel-title"><h3>统一处理</h3></div><div class="button-stack"><button class="btn primary" onclick="runUnified()">开始全自动处理</button><button class="btn ghost" onclick="resumeUnified()">继续处理</button><button class="btn warning" onclick="pauseUnified()">暂停</button></div><div id="ccslRunStatus" class="operation-status"></div></section>
+            <section class="panel unified-summary-panel"><div class="panel-title"><h3>自动分类结果</h3><span id="unifiedSnapshotStatus" class="status-pill muted">尚未导入</span></div><div id="unifiedClassificationSummary" class="unified-classification-summary"><div class="empty-state compact">导入综合日报后显示五业务分类和警告统计</div></div></section>
           </div>
         </section>
 

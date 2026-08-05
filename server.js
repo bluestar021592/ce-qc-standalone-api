@@ -10,6 +10,8 @@ import { CEClient, normalizeLoginToken } from './src/ceClient.js';
 import { parseDailyExcel } from './src/excelParser.js';
 import { parseLongBackupModules } from './src/backupParser.js';
 import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
+import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
+import { getLatestUnifiedImport, saveUnifiedImport } from './src/unifiedImportStore.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
 import { exportShopeeXlsx } from './src/shopeeExporter.js';
@@ -442,6 +444,8 @@ async function handleResumeRequest(req, res) {
 
 app.post('/api/import-excel', upload.single('file'), handleDailyReportImport);
 app.post('/api/import/daily-report', upload.single('file'), handleDailyReportImport);
+app.post('/api/import/unified-daily-report', upload.single('file'), handleUnifiedDailyImport);
+app.get('/api/import/unified-latest', (req, res) => res.json({ ok: true, import: getLatestUnifiedImport() }));
 app.post('/api/shopee/import-excel', upload.single('file'), handleShopeeDailyImport);
 app.post('/api/import-shop-codes', upload.single('file'), async (req, res) => {
   try {
@@ -503,6 +507,57 @@ async function handleDailyReportImport(req, res) {
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+async function handleUnifiedDailyImport(req, res) {
+  try {
+    if (!req.file) throw new Error('没有收到综合日报Excel文件');
+    const parsed = parseUnifiedDailyExcel(req.file.path, { reportDate: req.body.reportDate || '', originalName: req.file.originalname });
+    const saved = saveUnifiedImport(parsed, req.file.originalname);
+    const ccslRows = parsed.rows.filter(row => ['CE', 'TBKH', 'ALI1688'].includes(row.businessType));
+    const shopeeRows = parsed.rows.filter(row => ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
+    const ccslState = await loadState();
+    ccslState.reportDate = parsed.reportDate;
+    ccslState.sourceName = req.file.originalname;
+    ccslState.dailyReportReady = true;
+    ccslState.dailyParseRows = ccslRows.map(row => ({ ...row, result: 'PNH', reason: row.classificationReason }));
+    ccslState.dailyParseSummary = { totalRecognized: ccslRows.length, pnh: ccslRows.length, nonPnh: 0, excluded: 0, duplicate: parsed.summary.duplicateRows };
+    ccslState.pnhBills = ccslRows.map(row => row.shipmentCode);
+    ccslState.nonPnhBills = [];
+    ccslState.excludedBills = [];
+    ccslState.duplicateBills = [];
+    clearRunResults(ccslState);
+    resetRunForReport(parsed.reportDate);
+    await saveState(ccslState);
+
+    const shopeeState = loadBusinessState(SHOPEE);
+    shopeeState.businessType = SHOPEE;
+    shopeeState.reportDate = parsed.reportDate;
+    shopeeState.sourceName = req.file.originalname;
+    shopeeState.dailyReportReady = true;
+    shopeeState.dailyParseRows = shopeeRows.map(row => ({
+      ...row,
+      recipient_raw: row.recipientRaw,
+      recipient_normalized: row.recipientNormalized,
+      recipient_group: row.businessType === 'SHOPEEVN' ? 'VN' : 'CN',
+      region_code: row.regionCode,
+      import_disposition: 'ACCEPTED'
+    }));
+    shopeeState.dailyParseSummary = {
+      totalRecognized: shopeeRows.length,
+      groupCounts: { CN: saved.classificationCounts.SHOPEECN, VN: saved.classificationCounts.SHOPEEVN },
+      conflictCount: parsed.summary.classificationConflicts
+    };
+    shopeeState.pnhBills = shopeeRows.map(row => row.shipmentCode);
+    clearRunResults(shopeeState);
+    resetBusinessRunForReport(SHOPEE, parsed.reportDate);
+    saveBusinessState(shopeeState, SHOPEE);
+    await fs.unlink(req.file.path).catch(() => {});
+    res.json({ ok: true, ...saved, state: summarizeState(ccslState), shopeeState: summarizeShopeeState(shopeeState) });
+  } catch (error) {
+    if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
+    res.status(400).json({ ok: false, error: error.message });
   }
 }
 
