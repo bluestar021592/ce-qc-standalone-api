@@ -169,12 +169,18 @@
   }
 
   function chartCard(definition, dates) {
-    const width = 350; const height = 150; const left = 34; const right = 8; const top = 12; const bottom = 24;
-    const min = definition.min; const max = definition.max;
+    const width = 350; const height = 166; const left = 38; const right = 14; const top = 22; const bottom = 28;
+    const allValues = definition.series.flatMap(series => (series.values || []).filter(value => Number.isFinite(Number(value))).map(Number));
+    const min = Number.isFinite(definition.min) ? definition.min : 0;
+    const observedMax = Math.max(1, ...allValues);
+    const max = Number.isFinite(definition.max) ? Math.max(definition.max, observedMax) : Math.ceil(observedMax * 1.12);
+    const unit = definition.unit || '%';
+    const axisValue = value => unit === '%' ? `${Number(value).toFixed(0)}%` : number(Math.round(value));
+    const pointValue = value => unit === '%' ? `${Number(value).toFixed(2)}%` : number(Math.round(value));
     let svg = `<svg class="pixel-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${text(definition.title)}">`;
     [0, .25, .5, .75, 1].forEach(step => {
       const y = top + (height - top - bottom) * step;
-      svg += `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="#edf2f7"/><text x="2" y="${y + 3}" font-size="8" fill="#7b8da3">${Math.round(max - (max - min) * step)}%</text>`;
+      svg += `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="#edf2f7"/><text x="2" y="${y + 3}" font-size="8" fill="#7b8da3">${axisValue(max - (max - min) * step)}</text>`;
     });
     dates.forEach((date, index) => {
       const x = left + index * (width - left - right) / 6;
@@ -190,26 +196,37 @@
       plotted.forEach(point => { if (point) current.push(point); else if (current.length) { segments.push(current); current = []; } });
       if (current.length) segments.push(current);
       svg += segments.map(segment => `<polyline points="${segment.map(point => `${point.x},${point.y}`).join(' ')}" fill="none" stroke="${series.color}" stroke-width="2"/>`).join('');
-      plotted.filter(Boolean).forEach(point => { svg += `<circle cx="${point.x}" cy="${point.y}" r="2.2" fill="${series.color}"/><text x="${point.x - 9}" y="${point.y - 7}" font-size="8" font-weight="700" fill="${series.color}">${Number(point.value.toFixed(1))}%</text>`; });
+      plotted.filter(Boolean).forEach((point, index) => {
+        const date = dates[index] || '—';
+        const numerator = series.numerators?.[index];
+        const denominator = series.denominators?.[index];
+        const detail = Number.isFinite(Number(numerator)) && Number.isFinite(Number(denominator)) ? `；分子 ${number(numerator)}；分母 ${number(denominator)}` : '';
+        svg += `<g class="trend-point" tabindex="0"><title>${text(date)}；${text(series.label)} ${pointValue(point.value)}${detail}</title><circle cx="${point.x}" cy="${point.y}" r="3" fill="${series.color}"/><text x="${point.x}" y="${Math.max(10, point.y - 7)}" text-anchor="middle" font-size="8" font-weight="700" fill="${series.color}">${pointValue(point.value)}</text></g>`;
+      });
     });
     svg += '</svg>';
     const current = definition.series[0]?.values?.at(-1);
     const previous = definition.series[0]?.values?.at(-2);
     const change = Number.isFinite(Number(current)) && Number.isFinite(Number(previous)) && Number(previous) !== 0
       ? ((Number(current) - Number(previous)) / Math.abs(Number(previous))) * 100 : null;
-    const unit = definition.unit || '%';
     const action = definition.action ? `onclick="openHomeMetricDetail('${definition.action}')"` : '';
-    return `<article class="pixel-chart-card" role="button" tabindex="0" ${action}><div class="pixel-chart-title"><b>${text(definition.title)}</b><span>近7天 ${icon('chevron')}</span></div><div class="pixel-legend">${definition.series.map(series => `<span><i style="background:${series.color}"></i>${text(series.label)}</span>`).join('')}</div>${svg}<footer class="v6-chart-footer"><span>当前 <b data-testid="trend-${definition.key}-current">${Number.isFinite(Number(current)) ? `${Number(current).toFixed(unit === '%' ? 2 : 0)}${unit}` : '—'}</b></span><strong data-testid="trend-${definition.key}-change" class="${change !== null && change < 0 ? 'down' : 'up'}">环比昨日 ${change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}</strong></footer></article>`;
+    return `<article class="pixel-chart-card" role="button" tabindex="0" ${action}><div class="pixel-chart-title"><b>${text(definition.title)}</b><span>近7天 ${icon('chevron')}</span></div><div class="pixel-legend">${definition.series.map(series => `<span><i style="background:${series.color}"></i>${text(series.label)}</span>`).join('')}</div>${svg}<footer class="v6-chart-footer"><span>当前 <b data-testid="trend-${definition.key}-current">${Number.isFinite(Number(current)) ? pointValue(current) : '—'}</b></span><strong data-testid="trend-${definition.key}-change" class="${change !== null && change < 0 ? 'down' : 'up'}">环比昨日 ${change === null ? '—' : `${change >= 0 ? '↑' : '↓'} ${Math.abs(change).toFixed(2)}%`}</strong></footer></article>`;
   }
 
   function charts(snapshot) {
     const trends = snapshot.trends || {}; const dates = snapshot.dates || [];
-    const series = (key, label, color) => ({ label, color, values: trends[key] || [] });
-    const definitions = [
-      { key:'ticket', title: '本月票数趋势', min: 0, max: 100, unit: '%', action: 'all', series: [series('pendingCcsl', '本月', COLORS.blue), series('pendingPp', '上月', COLORS.green)] },
+    const series = (key, label, color) => ({ label, color, values: trends[key] || [], numerators: trends[`${key}Numerators`] || [], denominators: trends[`${key}Denominators`] || [] });
+    const business = snapshot.businessLabel;
+    const definitions = business ? [
+      { key:'ticket', title: '今日票数趋势', min: 0, unit: '件', action: 'all', series: [series('ticketTotal', business, COLORS.blue)] },
+      { key:'pod', title: 'POD率趋势', min: 0, max: 100, unit: '%', action: 'pod', series: [series('podRate', business, COLORS.green)] },
+      { key:'oc', title: 'OC率趋势', min: 0, max: 15, unit: '%', action: 'oc', series: [series('ocRate', business, COLORS.orange)] },
+      { key:'first', title: '首次妥投率趋势', min: 0, max: 100, unit: '%', action: 'pod', series: [series('firstRate', business, COLORS.purple)] }
+    ] : [
+      { key:'ticket', title: '今日票数趋势', min: 0, unit: '件', action: 'all', series: [series('ticketTotal', '今日', COLORS.blue)] },
       { key:'pod', title: 'POD率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('podCcsl', 'CE', COLORS.blue), series('podPp', 'SHOPEE PP', COLORS.green), series('podPv', 'SHOPEE PV', COLORS.orange)] },
       { key:'oc', title: 'OC率趋势', min: 0, max: 15, unit: '%', action: 'oc', series: [series('ocCcsl', 'CE', COLORS.blue), series('ocPp', 'SHOPEE PP', COLORS.green), series('ocPv', 'SHOPEE PV', COLORS.orange)] },
-      { key:'first', title: '首次妥投率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('podCcsl', 'CE', COLORS.purple), series('podPp', 'SHOPEE', COLORS.green)] }
+      { key:'first', title: '首次妥投率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('firstCcsl', 'CE', COLORS.purple), series('firstShopee', 'SHOPEE', COLORS.green)] }
     ];
     return definitions.map(definition => chartCard(definition, dates)).join('');
   }

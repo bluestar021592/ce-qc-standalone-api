@@ -1,0 +1,724 @@
+{
+  "viewport": {
+    "width": 1536,
+    "height": 1024,
+    "deviceScaleFactor": 1
+  },
+  "pages": [
+    {
+      "name": "01-home",
+      "route": "/",
+      "title": "报表导出",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1258,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 1194
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "02-ce",
+      "route": "/ce",
+      "title": "CE看板",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1378,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 1314
+        },
+        "heading": {
+          "x": 268,
+          "y": 90,
+          "width": 1250,
+          "height": 48
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "03-tbkh",
+      "route": "/tbkh",
+      "title": "TBKH看板",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1378,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 1314
+        },
+        "heading": {
+          "x": 268,
+          "y": 90,
+          "width": 1250,
+          "height": 48
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "04-ali1688",
+      "route": "/ali1688",
+      "title": "ALI1688看板",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1378,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 1314
+        },
+        "heading": {
+          "x": 268,
+          "y": 90,
+          "width": 1250,
+          "height": 48
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "05-shopeecn",
+      "route": "/shopeecn",
+      "title": "SHOPEE CN看板",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1628,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 1564
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "06-shopeevn",
+      "route": "/shopeevn",
+      "title": "SHOPEE VN看板",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1628,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 1564
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "07-import",
+      "route": "/import",
+      "title": "数据导入",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1024,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 960
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "08-tracking",
+      "route": "/tracking",
+      "title": "轨迹查询",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1024,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 960
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "09-exceptions",
+      "route": "/exceptions",
+      "title": "异常明细",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1024,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 960
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "10-reports",
+      "route": "/reports",
+      "title": "报表导出",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1258,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 1194
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "11-data-management",
+      "route": "/data-management",
+      "title": "数据管理",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1024,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 960
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "12-settings",
+      "route": "/settings",
+      "title": "系统设置",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1024,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 960
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    },
+    {
+      "name": "13-logs",
+      "route": "/logs",
+      "title": "操作日志",
+      "scrollWidth": 1536,
+      "clientWidth": 1536,
+      "scrollHeight": 1024,
+      "rects": {
+        "sidebar": {
+          "x": 0,
+          "y": 0,
+          "width": 250,
+          "height": 1024
+        },
+        "brand": {
+          "x": 0,
+          "y": 0,
+          "width": 249,
+          "height": 72
+        },
+        "topbar": {
+          "x": 250,
+          "y": 0,
+          "width": 1286,
+          "height": 64
+        },
+        "main": {
+          "x": 250,
+          "y": 64,
+          "width": 1286,
+          "height": 960
+        },
+        "heading": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "businessCards": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "charts": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        }
+      },
+      "backgroundImages": [],
+      "horizontalOverflow": 0,
+      "pageErrors": []
+    }
+  ]
+}

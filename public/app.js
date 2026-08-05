@@ -648,14 +648,28 @@ function renderCcslPage() {
   const type = currentBusinessType();
   const metrics = ccslMetrics(state);
   document.getElementById('ccslPageMeta').textContent = pageMeta(state);
-  document.getElementById('ccslKpis').innerHTML = businessKpiDefsForState(type, state, metrics).map(def => renderKpiCard(...def)).join('');
+  const businessDefs = businessKpiDefsForState(type, state, metrics);
+  document.getElementById('ccslKpis').innerHTML = businessDefs.slice(0, 6).map(def => renderKpiCard(...def)).join('');
   document.querySelector('#ccslExceptionBoard h3').textContent = `${type}质控指标`;
   document.querySelector('#ccslPage .page-heading h2').dataset.testid = 'business-title';
   document.querySelector('#ccslPage .page-heading h2').textContent = `${businessLabel(type)}看板`;
-  document.getElementById('ccslMetrics').innerHTML = renderMetricBoardForState(type, state);
+  document.getElementById('ccslMetrics').innerHTML = renderBusinessCoreCards(type, state, businessDefs);
+  document.getElementById('ccslTrendGrid').innerHTML = DashboardComponents.charts(buildBusinessTrendSnapshot(type, state));
   document.getElementById('ccslKpis').insertAdjacentHTML('afterbegin', `<span data-testid="business-today-count" class="sr-only">${Number(metrics.total || 0)}</span>`);
   renderCcslOperations();
   renderPreview('ccslPreviewPanel', 'CCSL', false);
+}
+
+function renderBusinessCoreCards(type, state, definitions) {
+  const metrics = ccslMetrics(state);
+  const rows = definitions.slice(3).concat([
+    ['今日POD', metrics.pod, metricTrend(state, '今日POD'), '件', 'green'],
+    ['POD率', metrics.podRate, metricTrend(state, '首投POD率'), '%', 'blue']
+  ]);
+  return `<div class="business-core-card-grid">${rows.slice(0, 12).map(([label,value,trend,unit,color]) => {
+    const key = tabForMetric('CCSL', label);
+    return `<button class="business-core-card ${escapeAttr(color || 'blue')}" onclick="openMetricDetail('CCSL','${escapeAttr(key)}')"><span>${escapeHtml(label)}</span><b>${formatMetric(value || 0, unit || '件')}</b><small>查看对应明细</small></button>`;
+  }).join('')}</div>`;
 }
 
 function renderShopeePage() {
@@ -676,6 +690,7 @@ function renderShopeePage() {
   document.getElementById('shopeeRecipientGroups').insertAdjacentHTML('afterbegin', `<span data-testid="business-today-count" class="sr-only">${Number(metrics.total || 0)}</span>`);
   document.getElementById('shopeeRegions').innerHTML = renderShopeeRegions();
   document.getElementById('shopeeRecipientTrends').innerHTML = renderShopeeRecipientTrends();
+  document.getElementById('shopeeTrendGrid').innerHTML = DashboardComponents.charts(buildBusinessTrendSnapshot(type, state));
   renderShopeeOperations();
   renderPreview('shopeePreviewPanel', 'SHOPEE', false);
   shopeeState = aggregate;
@@ -819,6 +834,37 @@ function businessKpiDefs(type, metrics) {
     ['入库无扫描', metricValue(state, type === 'SHOPEE' ? 'ALL_入库无扫描' : '入库无扫描节点'), metricTrend(state, type === 'SHOPEE' ? 'ALL_入库无扫描' : '入库无扫描节点'), '件', 'purple'],
     [type === 'SHOPEE' ? '退回待处理' : '工单未处理', metricValue(state, type === 'SHOPEE' ? '退回待处理' : '工单未处理'), metricTrend(state, type === 'SHOPEE' ? '退回待处理' : '工单未处理'), '件', 'red']
   ];
+}
+
+function buildBusinessTrendSnapshot(type, state) {
+  const isShopee = /^SHOPEE/.test(type);
+  const group = type === 'SHOPEECN' ? 'CN' : type === 'SHOPEEVN' ? 'VN' : 'ALL';
+  const totalKey = isShopee ? `${group}_今日总单` : '今日PNH';
+  const podKey = isShopee ? `${group}_POD率` : '首投POD率';
+  const ocCountKey = isShopee ? `${group}_OC1+` : 'OC1+';
+  const firstKey = isShopee ? `${group}_首派成功率` : '首投POD率';
+  const totalTrend = metricTrend(state, totalKey);
+  const ocRateTrend = ratioTrend(metricTrend(state, ocCountKey), totalTrend);
+  const podRateTrend = metricTrend(state, podKey);
+  const firstRateTrend = metricTrend(state, firstKey);
+  const fallbackMetrics = isShopee ? recipientMetrics(group) : ccslMetrics(state);
+  const ensured = (trend, value) => validTrend(trend).some(item => item.hasData) ? trend : trendWithCurrent(state.reportDate, value, 'normal');
+  const totalValues = trendValues(ensured(totalTrend, fallbackMetrics.total));
+  const podRateValues = trendValues(ensured(podRateTrend, fallbackMetrics.podRate));
+  const ocRateValues = trendValues(ensured(ocRateTrend, rate(fallbackMetrics.oc1 || 0, fallbackMetrics.total || 0)));
+  const firstRateValues = trendValues(ensured(firstRateTrend, fallbackMetrics.firstAttemptRate ?? fallbackMetrics.podRate));
+  const deriveNumerators = (rates, denominators) => rates.map((value,index) => Number.isFinite(Number(value)) && Number.isFinite(Number(denominators[index])) ? Math.round(Number(value) * Number(denominators[index]) / 100) : null);
+  const podNumerators = deriveNumerators(podRateValues, totalValues);
+  return {
+    businessLabel: businessLabel(type),
+    dates: trendDates(totalTrend, state.reportDate),
+    trends: {
+      ticketTotal: totalValues,
+      podRate: podRateValues, podRateNumerators: podNumerators, podRateDenominators: totalValues,
+      ocRate: ocRateValues, ocRateNumerators: deriveNumerators(ocRateValues, totalValues), ocRateDenominators: totalValues,
+      firstRate: firstRateValues, firstRateNumerators: deriveNumerators(firstRateValues, podNumerators), firstRateDenominators: podNumerators
+    }
+  };
 }
 
 function renderMetricBoard(type, rows) {
@@ -1540,9 +1586,22 @@ function buildVisualDashboardSnapshot(fixture) {
       trend: fixture.kpiTrends?.[item.key] || [], action: actions[item.key]
     };
   });
+  const businessCards = [
+    ['total','总览',Number(fixture.ccsl?.today || 0) + Number(fixture.shopee?.all?.today || 0),'blue'],
+    ['ce','CE',fixture.ccsl?.today,'green'], ['tbkh','TBKH',6250,'orange'],
+    ['shopeecn','SHOPEE CN',fixture.shopee?.cn?.today,'purple'], ['shopeevn','SHOPEE VN',fixture.shopee?.vn?.today,'red'],
+    ['ali1688','ALI1688',1150,'cyan']
+  ].map(([key,label,value,tone]) => ({key,label,value:Number(value || 0),tone}));
+  const coreMetrics = topKpis.slice(2).map(item => ({ key:item.key,label:item.label,value:item.value,unit:item.unit })).concat([
+    {key:'self-pickup',label:'仓库自提件',value:86,unit:'件'}, {key:'cecn',label:'CECN滞留包裹',value:42,unit:'件'},
+    {key:'cezt',label:'CEZT滞留包裹',value:31,unit:'件'}, {key:'580',label:'580滞留包裹',value:18,unit:'件'}
+  ]);
+  const withAttempts = (row, defaults) => ({ ...row, firstAttemptRate: row?.firstAttemptRate ?? defaults[0], secondAttemptRate: row?.secondAttemptRate ?? defaults[1], thirdAttemptRate: row?.thirdAttemptRate ?? defaults[2] });
   return {
     visualTestOnly: true,
     reportDate: fixture.reportDate,
+    businessCards,
+    coreMetrics,
     topKpis,
     ccsl: { ...fixture.ccsl, podRate: metricNumber(fixture.ccsl?.podRate) },
     shopee: {
@@ -1550,14 +1609,16 @@ function buildVisualDashboardSnapshot(fixture) {
       cn: { ...fixture.shopee?.cn, podRate: metricNumber(fixture.shopee?.cn?.podRate), firstAttemptRate: metricNumber(fixture.shopee?.cn?.firstAttemptRate) },
       vn: { ...fixture.shopee?.vn, podRate: metricNumber(fixture.shopee?.vn?.podRate), firstAttemptRate: metricNumber(fixture.shopee?.vn?.firstAttemptRate) },
       other: { ...fixture.shopee?.other, podRate: metricNumber(fixture.shopee?.other?.podRate), firstAttemptRate: metricNumber(fixture.shopee?.other?.firstAttemptRate) },
-      pp: { ...fixture.shopee?.pp, podRate: metricNumber(fixture.shopee?.pp?.podRate), returnPending: fixture.shopee?.pp?.returnPending || 0 },
-      pv: { ...fixture.shopee?.pv, podRate: metricNumber(fixture.shopee?.pv?.podRate), returnPending: fixture.shopee?.pv?.returnPending || 0 }
+      pp: withAttempts({ ...fixture.shopee?.pp, podRate: metricNumber(fixture.shopee?.pp?.podRate), returnPending: fixture.shopee?.pp?.returnPending || 0 }, [72.35,21.45,6.20]),
+      pv: withAttempts({ ...fixture.shopee?.pv, podRate: metricNumber(fixture.shopee?.pv?.podRate), returnPending: fixture.shopee?.pv?.returnPending || 0 }, [61.25,26.35,12.40])
     },
     dates: fixture.dates || [],
     trends: {
+      ticketTotal: fixture.kpiTrends?.total || [],
       podCcsl: fixture.trends?.podRate?.ccsl || [], podPp: fixture.trends?.podRate?.pp || [], podPv: fixture.trends?.podRate?.pv || [],
       pendingCcsl: fixture.trends?.pendingRate?.ccsl || [], pendingPp: fixture.trends?.pendingRate?.pp || [], pendingPv: fixture.trends?.pendingRate?.pv || [],
-      ocCcsl: fixture.trends?.ocRate?.ccsl || [], ocPp: fixture.trends?.ocRate?.pp || [], ocPv: fixture.trends?.ocRate?.pv || []
+      ocCcsl: fixture.trends?.ocRate?.ccsl || [], ocPp: fixture.trends?.ocRate?.pp || [], ocPv: fixture.trends?.ocRate?.pv || [],
+      firstCcsl: fixture.trends?.podRate?.ccsl || [], firstShopee: fixture.recipientTrends?.CN?.firstAttemptRate || []
     },
     issues: fixture.issues || [],
     issueCount: fixture.issueCount || fixture.issues?.length || 0
@@ -1735,9 +1796,11 @@ function buildProductionDashboardSnapshot() {
     },
     dates: trendDates(ccslPodRateTrend, date),
     trends: {
+      ticketTotal: trendValues(totalTrend),
       podCcsl: trendValues(ccslPodRateTrend), podPp: trendValues(shDashboard.regionTrends?.PP?.podRate), podPv: trendValues(shDashboard.regionTrends?.PV?.podRate),
       pendingCcsl: trendValues(ratioTrend(metricTrend(appState, 'Pending1+'), ccslTotalTrend)), pendingPp: trendValues(shDashboard.regionTrends?.PP?.pendingRate), pendingPv: trendValues(shDashboard.regionTrends?.PV?.pendingRate),
-      ocCcsl: trendValues(ratioTrend(metricTrend(appState, 'OC1+'), ccslTotalTrend)), ocPp: trendValues(shDashboard.regionTrends?.PP?.ocRate), ocPv: trendValues(shDashboard.regionTrends?.PV?.ocRate)
+      ocCcsl: trendValues(ratioTrend(metricTrend(appState, 'OC1+'), ccslTotalTrend)), ocPp: trendValues(shDashboard.regionTrends?.PP?.ocRate), ocPv: trendValues(shDashboard.regionTrends?.PV?.ocRate),
+      firstCcsl: trendValues(ccslPodRateTrend), firstShopee: trendValues(ratioTrend(metricTrend(shopeeState, 'ALL_今日POD'), metricTrend(shopeeState, 'ALL_今日总单')))
     },
     issues: [...ccslIssues, ...shopeeIssues].slice(0, 5),
     issueCount: ccslIssues.length + shopeeIssues.length
