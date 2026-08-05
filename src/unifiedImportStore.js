@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { getDb, nowIso } from './db.js';
-import { SHOPEE, loadBusinessState } from './businessStore.js';
+import { SHOPEE, getMatchingBusinessSnapshot, loadBusinessState } from './businessStore.js';
 
 let ccslSnapshotCache = { snapshotId: '', state: null };
 
@@ -199,8 +199,14 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
   const payload = JSON.parse(unified?.payloadJson || '{}');
   const liveShopeeState = type.startsWith('SHOPEE') ? loadBusinessState(SHOPEE) : null;
   const liveState = liveShopeeState?.reportDate === batch.reportDate ? liveShopeeState : null;
+  const completedShopeeSnapshot = liveState ? getMatchingBusinessSnapshot(SHOPEE, liveState) : null;
+  const completedShopeeState = completedShopeeSnapshot?.reconciliationStatus === 'COMPLETED'
+    ? completedShopeeSnapshot.state
+    : null;
   const filterMembers = rows => (rows || []).filter(row => memberSet.has(codeOf(row)));
-  let finalRows = (payload.finalRows || []).filter(row => String(row.businessType || '').toUpperCase() === type);
+  let finalRows = completedShopeeState
+    ? filterMembers(completedShopeeState.finalRows)
+    : (payload.finalRows || []).filter(row => String(row.businessType || '').toUpperCase() === type);
   if (!finalRows.length && liveState) finalRows = filterMembers(liveState.finalRows);
   if (!finalRows.length && liveState?.processing?.running) {
     finalRows = filterMembers(liveState.scanResults).map(row => ({
@@ -221,8 +227,8 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
     reportDate: batch.reportDate,
     sourceName: batch.sourceName,
     batchId: batch.batchId,
-    snapshotId: batch.snapshotId,
-    snapshotStatus: unified?.status || 'IMPORTED',
+    snapshotId: completedShopeeSnapshot?.snapshotId || batch.snapshotId,
+    snapshotStatus: completedShopeeSnapshot ? 'COMPLETED' : (unified?.status || 'IMPORTED'),
     dailyReportReady: true,
     pnhBills: bills,
     dailyParseRows: dailyRows.map(row => ({ ...row, recipient_group: type === 'SHOPEECN' ? 'CN' : type === 'SHOPEEVN' ? 'VN' : row.recipient_group })),

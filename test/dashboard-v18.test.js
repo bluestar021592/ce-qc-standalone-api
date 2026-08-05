@@ -32,7 +32,16 @@ test('V18 uses independent component files and clips chart drawing', () => {
   }
   assert.match(chart, /clipPath/);
   assert.match(chart, /lastValidSeriesValue|DashboardDataAdapterV18\.last/);
+  assert.match(chart, /rawDate\.length > 5/);
+  assert.match(chart, /placedLabels\.some/);
   assert.match(css, /\.v18-chart-plot\{[^}]*overflow:hidden/);
+});
+
+test('unified Shopee pages prefer the latest completed business snapshot', () => {
+  const store = fs.readFileSync(path.join(__dirname, '..', 'src', 'unifiedImportStore.js'), 'utf8');
+  assert.match(store, /getMatchingBusinessSnapshot\(SHOPEE, liveState\)/);
+  assert.match(store, /completedShopeeSnapshot\?\.reconciliationStatus === 'COMPLETED'/);
+  assert.match(store, /completedShopeeState\s*\?\s*filterMembers\(completedShopeeState\.finalRows\)/);
 });
 
 test('V18 navigation contract has thirteen unique labels', () => {
