@@ -3,7 +3,7 @@ import path from 'path';
 import { DEFAULT_SHOP_CP_CODES } from './shopCodeDefaults.js';
 import { seedLatestShopWhitelist } from './shopWhitelist.js';
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 const REQUIRED_TABLES = [
   'pod_locks',
   'carry_bills',
@@ -40,7 +40,15 @@ const REQUIRED_TABLES = [
   'notifications',
   'unified_import_batches',
   'unified_import_rows',
-  'unified_snapshots'
+  'unified_snapshots',
+  'shipment_daily_snapshots',
+  'shipment_current_state',
+  'carryover_open_items',
+  'metric_snapshots',
+  'metric_detail_members',
+  'weekly_metric_snapshots',
+  'monthly_metric_snapshots',
+  'export_jobs'
 ];
 const PERSISTED_TABLES = [...REQUIRED_TABLES, 'app_state', 'daily_parse_rows', 'export_records', 'business_export_records'];
 
@@ -638,8 +646,52 @@ export function migrateDatabase(db, cfg) {
       snapshotId TEXT PRIMARY KEY, batchId TEXT NOT NULL, reportDate TEXT NOT NULL,
       status TEXT NOT NULL, payloadJson TEXT NOT NULL, createdAt TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS shipment_daily_snapshots (
+      snapshotId TEXT NOT NULL, batchId TEXT NOT NULL, reportDate TEXT NOT NULL,
+      businessType TEXT NOT NULL, shipmentCode TEXT NOT NULL, regionCode TEXT,
+      classificationSource TEXT, rowJson TEXT NOT NULL, createdAt TEXT NOT NULL,
+      PRIMARY KEY(snapshotId, shipmentCode)
+    );
+    CREATE TABLE IF NOT EXISTS shipment_current_state (
+      shipmentCode TEXT PRIMARY KEY, businessType TEXT NOT NULL, reportDate TEXT NOT NULL,
+      snapshotId TEXT NOT NULL, state TEXT NOT NULL, apiStatus TEXT,
+      lastEventTime TEXT, stateJson TEXT NOT NULL, updatedAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS carryover_open_items (
+      shipmentCode TEXT PRIMARY KEY, businessType TEXT NOT NULL, sourceReportDate TEXT NOT NULL,
+      lastReportDate TEXT NOT NULL, sourceSnapshotId TEXT NOT NULL, lastSnapshotId TEXT NOT NULL,
+      status TEXT NOT NULL, apiStatus TEXT, closeReason TEXT, stateJson TEXT NOT NULL,
+      createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS metric_snapshots (
+      snapshotId TEXT NOT NULL, reportDate TEXT NOT NULL, businessType TEXT NOT NULL,
+      metricKey TEXT NOT NULL, metricValue REAL, unit TEXT, payloadJson TEXT NOT NULL,
+      createdAt TEXT NOT NULL, PRIMARY KEY(snapshotId,businessType,metricKey)
+    );
+    CREATE TABLE IF NOT EXISTS metric_detail_members (
+      snapshotId TEXT NOT NULL, businessType TEXT NOT NULL, metricKey TEXT NOT NULL,
+      shipmentCode TEXT NOT NULL, rowJson TEXT NOT NULL, createdAt TEXT NOT NULL,
+      PRIMARY KEY(snapshotId,businessType,metricKey,shipmentCode)
+    );
+    CREATE TABLE IF NOT EXISTS weekly_metric_snapshots (
+      periodKey TEXT NOT NULL, businessType TEXT NOT NULL, status TEXT NOT NULL,
+      sourceSnapshotIdsJson TEXT NOT NULL, payloadJson TEXT NOT NULL, payloadHash TEXT NOT NULL,
+      createdAt TEXT NOT NULL, PRIMARY KEY(periodKey,businessType)
+    );
+    CREATE TABLE IF NOT EXISTS monthly_metric_snapshots (
+      periodKey TEXT NOT NULL, businessType TEXT NOT NULL, status TEXT NOT NULL,
+      sourceSnapshotIdsJson TEXT NOT NULL, payloadJson TEXT NOT NULL, payloadHash TEXT NOT NULL,
+      createdAt TEXT NOT NULL, PRIMARY KEY(periodKey,businessType)
+    );
+    CREATE TABLE IF NOT EXISTS export_jobs (
+      exportJobId TEXT PRIMARY KEY, periodType TEXT NOT NULL, periodKey TEXT NOT NULL,
+      businessType TEXT NOT NULL, sourceSnapshotIdsJson TEXT NOT NULL, status TEXT NOT NULL,
+      filePath TEXT, payloadHash TEXT, errorMessage TEXT, createdAt TEXT NOT NULL, completedAt TEXT
+    );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_unified_import_hash ON unified_import_batches(reportDate, fileHash, status);
     CREATE INDEX IF NOT EXISTS idx_unified_rows_snapshot ON unified_import_rows(snapshotId, businessType, shipmentCode);
+    CREATE INDEX IF NOT EXISTS idx_daily_snapshot_report ON shipment_daily_snapshots(reportDate,businessType,shipmentCode);
+    CREATE INDEX IF NOT EXISTS idx_carryover_status ON carryover_open_items(status,businessType,sourceReportDate);
 
     CREATE INDEX IF NOT EXISTS idx_daily_parse_report ON daily_parse_rows(reportDate);
     CREATE INDEX IF NOT EXISTS idx_daily_parse_bill ON daily_parse_rows(shipmentCode);
@@ -785,6 +837,13 @@ export function migrateDatabase(db, cfg) {
     ensureColumn(db, 'backup_records', 'status', "TEXT NOT NULL DEFAULT 'ACTIVE'");
     ensureColumn(db, 'backup_records', 'deletedAt', 'TEXT');
     ensureColumn(db, 'backup_records', 'deletedBy', 'TEXT');
+    ensureColumn(db, 'unified_import_batches', 'dateDetectionSource', 'TEXT');
+    ensureColumn(db, 'unified_import_batches', 'dateCandidatesJson', "TEXT DEFAULT '[]'");
+    ensureColumn(db, 'unified_import_batches', 'dateWasManuallyCorrected', 'INTEGER DEFAULT 0');
+    ensureColumn(db, 'unified_import_batches', 'regionCountsJson', "TEXT DEFAULT '{}'");
+    ensureColumn(db, 'unified_import_rows', 'classificationSource', 'TEXT');
+    ensureColumn(db, 'unified_import_rows', 'classificationMatchedValue', 'TEXT');
+    ensureColumn(db, 'unified_import_rows', 'classificationWarning', 'TEXT');
     db.exec("UPDATE business_daily_parse_rows SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
     db.exec("UPDATE business_carry_bills SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");
     db.exec("UPDATE business_scan_results SET recipient_group='OTHER' WHERE recipient_group IS NULL OR TRIM(recipient_group)=''");

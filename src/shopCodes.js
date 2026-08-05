@@ -12,7 +12,7 @@ import {
 const SHOP_CODE_RE = /(?:^|[^A-Z0-9])((?:CP|FS)\s*\d{6}|(?:PV|PNH)\s*\d{3})(?![A-Z0-9])/gi;
 const SHOP_INBOUND_RE = /入库|到达网点|货物到达|到达门店|抵达|\bINBOUND\b|\bARRIV(?:E|ED|AL)?\b|\bRECEIVED\b/i;
 const SHOP_OUTBOUND_RE = /离开网点|货物离开|下一个网点|发往|转往|转运至|送往|\bOUTBOUND\b|\bDEPART(?:ED|URE)?\b|\bLEFT\b|\bNEXT\s+(?:STATION|SITE|BRANCH|NODE)\b/i;
-const NORMAL_FINAL_HUB_CODES = new Set(['CCSLCN', 'CCSLPDD', 'CCSL580', 'CEZT']);
+const NORMAL_FINAL_HUB_CODES = new Set(['CCSLCN', 'CCSLPDD']);
 
 export function ensureDefaultShopCodes() {
   seedLatestShopWhitelist(getDb());

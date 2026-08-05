@@ -5,6 +5,8 @@ let accessSession = {};
 let currentPage = pageFromPath();
 let runInFlight = false;
 let unifiedImportState = null;
+let exportPeriodType = 'daily';
+let reportDateManualCorrection = false;
 let historyCatalog = { CCSL: [], SHOPEE: [] };
 let historyModeDate = '';
 let shopeeRecipientGroup = 'ALL';
@@ -504,9 +506,12 @@ function renderHomeIssues() {
 }
 
 function openHomeMetricDetail(tab) {
-  if (['self-pickup', 'cecn', 'cezt'].includes(tab)) {
-    const labels = { 'self-pickup': '仓库自提件', cecn: 'CECN滞留包裹', cezt: 'CEZT滞留包裹' };
+  if (['self-pickup', 'cecn', 'cezt', '580'].includes(tab)) {
+    const labels = { 'self-pickup': '仓库自提件', cecn: 'CECN滞留包裹', cezt: 'CEZT滞留包裹', '580': '580滞留包裹' };
+    const keys = { 'self-pickup': 'selfPickup', cecn: 'cecnRetention', cezt: 'ceztRetention', '580': 'ccsl580Retention' };
+    const rows = appState.detailTabs?.[keys[tab]]?.rows || [];
     document.getElementById('metricDetailTitle').textContent = labels[tab];
+    document.getElementById('metricDetailBody').innerHTML = rows.length ? renderPreviewTable(rows.slice(0, 200), 'CCSL') : '<div class="empty-state">当前指标暂无明细</div>';
     document.getElementById('metricDetailDialog').hidden = false;
     return;
   }
@@ -846,6 +851,8 @@ function renderReportsPage() {
   if (!tabs[filter.category]) filter.category = type === 'SHOPEE' ? `${recipientGroup}_all` : 'allData';
   const business = document.getElementById('reportBusiness');
   if (!business) return;
+  const periodDate = document.getElementById('periodExportDate');
+  if (periodDate && !periodDate.value) periodDate.value = state.reportDate || unifiedImportState?.reportDate || new Date().toISOString().slice(0, 10);
   business.value = type;
   document.getElementById('reportRegion').value = type === 'SHOPEE' ? (filter.region || 'ALL') : 'ALL';
   const recipientSelect = document.getElementById('reportRecipientGroup');
@@ -862,6 +869,18 @@ function renderReportsPage() {
     : [['总记录', metrics.total, 'blue', 'allData'], ['Pending异常', metricValue(state, 'Pending1+'), 'purple', 'pendingAll'], ['OC异常', metricValue(state, 'OC1+'), 'orange', 'ocAll'], ['入库无扫描', metricValue(state, '入库无扫描节点'), 'blue', 'inboundNoScan'], ['工单未处理', metricValue(state, '工单未处理'), 'orange', 'workOrderAbnormal'], ['已签收', metrics.pod, 'green', 'podClosed']];
   document.getElementById('reportSummaryCards').innerHTML = summary.map(([label, value, color, tab]) => `<button class="report-summary-card ${color}" onclick="setReportCategory('${tab}')"><i></i><span>${label}</span><b>${formatInt(value)}</b></button>`).join('');
   renderReportPreview();
+}
+
+function setExportPeriod(type, button) {
+  exportPeriodType = ['daily', 'weekly', 'monthly'].includes(type) ? type : 'daily';
+  document.querySelectorAll('.period-tab').forEach(item => item.classList.toggle('active', item === button));
+}
+
+function exportPeriodReport() {
+  const date = document.getElementById('periodExportDate')?.value;
+  const businessType = document.getElementById('periodExportBusiness')?.value || 'ALL';
+  if (!date) return alert('请选择报表基准日期');
+  downloadFile(`/api/export-period?periodType=${encodeURIComponent(exportPeriodType)}&date=${encodeURIComponent(date)}&businessType=${encodeURIComponent(businessType)}`);
 }
 
 function renderReportPreview() {
@@ -1046,13 +1065,15 @@ async function importUnifiedExcel() {
   if (!file) return alert('请选择综合日报Excel');
   const body = new FormData();
   body.append('file', file);
-  body.append('reportDate', document.getElementById('reportDate').value || '');
+  if (reportDateManualCorrection) body.append('reportDate', document.getElementById('reportDate').value || '');
   try {
     const result = await api('/api/import/unified-daily-report', { method: 'POST', body });
     unifiedImportState = result;
     appState = result.state || appState;
     shopeeState = result.shopeeState || shopeeState;
     document.getElementById('reportDate').value = result.reportDate;
+    document.getElementById('reportDate').readOnly = true;
+    reportDateManualCorrection = false;
     renderUnifiedImportResult();
     historyModeDate = result.reportDate;
     alert(`综合日报导入成功：有效${result.summary.validUniqueWaybills}票，CE ${result.classificationCounts.CE}，TBKH ${result.classificationCounts.TBKH}，ALI1688 ${result.classificationCounts.ALI1688}，SHOPEE CN ${result.classificationCounts.SHOPEECN}，SHOPEE VN ${result.classificationCounts.SHOPEEVN}。`);
@@ -1063,12 +1084,27 @@ async function importUnifiedExcel() {
   }
 }
 
+function enableReportDateCorrection() {
+  const input = document.getElementById('reportDate');
+  input.readOnly = false;
+  reportDateManualCorrection = true;
+  input.focus();
+  document.getElementById('dateDetectionSource').textContent = '手动修正模式';
+}
+
 function renderUnifiedImportResult() {
   if (!unifiedImportState) return;
   const result = unifiedImportState;
   const counts = result.classificationCounts || {};
   const summary = result.summary || {};
-  document.getElementById('fileStatus').innerHTML = `${statusPill('综合日报已导入', true)}<p>日期：${escapeHtml(result.reportDate || '—')} · 有效唯一单号 ${formatInt(summary.validUniqueWaybills || 0)}</p><p>数据版本已切换到本次导入</p>`;
+  const source = result.dateDetectionSource || '未识别';
+  document.getElementById('dateDetectionSource').textContent = `识别来源：${source}`;
+  const candidates = result.dateCandidates || [];
+  const conflictPanel = document.getElementById('dateConflictPanel');
+  conflictPanel.hidden = !result.dateConflict && candidates.length <= 1;
+  conflictPanel.innerHTML = conflictPanel.hidden ? '' : `<b>检测到多个日期候选，请核对：</b>${candidates.map(item => `<span>${escapeHtml(item.date)}（${formatInt(item.count)}行）</span>`).join('')}`;
+  const carry = result.carryover || {};
+  document.getElementById('fileStatus').innerHTML = `${statusPill('综合日报已导入', true)}<p>日期：${escapeHtml(result.reportDate || '—')} · 有效唯一单号 ${formatInt(summary.validUniqueWaybills || 0)}</p><p>识别来源：${escapeHtml(source)} · 文件容器 ${escapeHtml(result.containerFormat || '—')} · PP ${formatInt(result.regionCounts?.PP || 0)} · PV ${formatInt(result.regionCounts?.PV || 0)}</p><p>当日未完结 <b>${formatInt(carry.todayOpen || 0)}</b> · 历史跨日未完结 <b data-testid="historical-carryover-count">${formatInt(carry.historicalOpen || 0)}</b> · 本次复核 <b>${formatInt(carry.rechecked || 0)}</b> · 当前处理队列 <b data-testid="combined-processing-queue-count">${formatInt(carry.currentOpen || 0)}</b></p><p>数据版本已切换到本次导入</p>`;
   document.getElementById('unifiedSnapshotStatus').textContent = result.duplicateFile ? '重复文件，沿用已有批次' : '新批次已保存';
   document.getElementById('unifiedSnapshotStatus').className = 'status-pill success';
   document.getElementById('unifiedClassificationSummary').innerHTML = `<div class="unified-count-grid"><div><span>有效唯一单号</span><b data-testid="classification-valid-unique">${formatInt(summary.validUniqueWaybills || 0)}</b></div>${[['CE','ce'],['TBKH','tbkh'],['ALI1688','ali1688'],['SHOPEECN','shopeecn'],['SHOPEEVN','shopeevn']].map(([type,key]) => `<div><span>${type}</span><b data-testid="classification-${key}">${formatInt(counts[type] || 0)}</b></div>`).join('')}</div><div class="unified-warning-grid"><span>原始行 <b>${formatInt(summary.rawRows || 0)}</b></span><span>重复 <b data-testid="classification-duplicates">${formatInt(summary.duplicateRows || 0)}</b></span><span>无单号 <b data-testid="classification-missing-waybill">${formatInt(summary.missingWaybillRows || 0)}</b></span><span>收件人缺失 <b data-testid="classification-missing-recipient">${formatInt(summary.missingRecipientWarnings || 0)}</b></span><span>分类冲突 <b data-testid="classification-conflicts">${formatInt(summary.classificationConflicts || 0)}</b></span></div>`;
@@ -1407,7 +1443,7 @@ function buildProductionDashboardSnapshot() {
     ['inventory2','盘点 2天+',metricValue(appState,'盘点2天+')], ['oc-rate','OC率',rate(metricValue(appState,'OC1+') + sh.oc1,total),'%'],
     ['first-rate','首次妥投率',cc.podRate,'%'], ['today-pod','今日POD',pod], ['pod-rate','POD率',rate(pod,total),'%'],
     ['province-open','外省未完结POD件',metricValue(appState,'外省未完结POD件')],
-    ['self-pickup','仓库自提件',metricValue(appState,'仓库自提件')], ['cecn','CECN滞留包裹',metricValue(appState,'CECN滞留包裹')], ['cezt','CEZT滞留包裹',metricValue(appState,'CEZT滞留包裹')]
+    ['self-pickup','仓库自提件',metricValue(appState,'仓库自提件')], ['cecn','CECN滞留包裹',metricValue(appState,'CECN滞留包裹')], ['cezt','CEZT滞留包裹',metricValue(appState,'CEZT滞留包裹')], ['580','580滞留包裹',metricValue(appState,'580滞留包裹')]
   ].map(([key,label,value,unit='件']) => ({ key,label,value,unit }));
   return {
     reportDate: date,

@@ -1,4 +1,5 @@
 import { cleanMainBills, isExcludedBill } from './storage.js';
+import { isSpecialCategory } from './specialNode.js';
 
 export function buildDashboardData(state = {}) {
   const finalRows = safeFinalRows(state);
@@ -93,6 +94,10 @@ export function buildDashboardRows(state = {}) {
     metric(date, '基础', '跨日遗留', d.carry, d.carry ? '需跟进' : '正常', '长期JSON或上一轮明日继续带入', 'carry'),
     metric(date, '基础', '明日继续监控', d.nextCarry, d.nextCarry ? '需跟进' : '正常', '本轮处理后仍需第二天继续扫描和轨迹', 'nextCarry'),
     metric(date, '基础', '延迟POD', c.delayedPod, countStatus(c.delayedPod), 'POD时间早于日报日期，作为历史POD补锁', 'delayedPod'),
+    metric(date, '特殊节点', '仓库自提件', c.selfPickup, countStatus(c.selfPickup), '最后有效轨迹命中仓库自提，排除普通异常', 'selfPickup'),
+    metric(date, '特殊节点', 'CECN滞留包裹', c.cecnRetention, countStatus(c.cecnRetention), '最后有效轨迹节点为CE:CECN或CEL:CECN', 'cecnRetention'),
+    metric(date, '特殊节点', 'CEZT滞留包裹', c.ceztRetention, countStatus(c.ceztRetention), '最后有效轨迹节点为CE:CEZT或CEL:CEZT', 'ceztRetention'),
+    metric(date, '特殊节点', '580滞留包裹', c.ccsl580Retention, countStatus(c.ccsl580Retention), '最后有效轨迹节点为580或CCSL580', 'ccsl580Retention'),
 
     metric(date, 'Pending', 'Pending率', d.pendingRateText, countStatus(c.pendingTotal), 'Pending总票数 / 扫描量', 'pendingAll'),
     metric(date, 'Pending', 'Pending1+', c.pendingTotal, countStatus(c.pendingTotal), '当前Pending自然日数至少1天', 'pendingAll'),
@@ -240,7 +245,7 @@ export function safeFinalRows(state = {}) {
 }
 
 function buildCategoryCounts(openRows, finalRows) {
-  const ordinaryRows = openRows.filter(row => !isShopRow(row) && !isNormalFinalDiversionRow(row) && !isRefreshFailedRow(row));
+  const ordinaryRows = openRows.filter(row => !isShopRow(row) && !isNormalFinalDiversionRow(row) && !isRefreshFailedRow(row) && !isSpecialCategory(row));
   const shopRows = finalRows.filter(isShopRow);
   const shopOpenRows = shopRows.filter(row => row?.是否POD !== '是');
   const shopTransitRows = shopOpenRows.filter(isShopTransitRow);
@@ -307,12 +312,16 @@ function buildCategoryCounts(openRows, finalRows) {
     tbkhShopStuck3plus: tbkhStuckRows.filter(row => shopDays(row) >= 3).length,
     tbkhShopNotPod: tbkhOpenRows.length,
     finalDiversion: openRows.filter(isNormalFinalDiversionRow).length,
-    workOrderAbnormal: ordinaryRows.filter(row => ['工单未处理', '工单异常'].includes(row?.异常分类)).length
+    workOrderAbnormal: ordinaryRows.filter(row => ['工单未处理', '工单异常'].includes(row?.异常分类)).length,
+    selfPickup: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'SELF_PICKUP').length,
+    cecnRetention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CECN_RETENTION').length,
+    ceztRetention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CEZT_RETENTION').length,
+    ccsl580Retention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CCSL580_RETENTION').length
   };
 }
 
 function buildDetailBuckets(openRows, finalRows, state) {
-  const ordinaryRows = openRows.filter(row => !isShopRow(row) && !isNormalFinalDiversionRow(row) && !isRefreshFailedRow(row));
+  const ordinaryRows = openRows.filter(row => !isShopRow(row) && !isNormalFinalDiversionRow(row) && !isRefreshFailedRow(row) && !isSpecialCategory(row));
   const shopRows = finalRows.filter(isShopRow);
   const shopOpenRows = shopRows.filter(row => row?.是否POD !== '是');
   const shopTransitRows = shopOpenRows.filter(isShopTransitRow);
@@ -357,6 +366,10 @@ function buildDetailBuckets(openRows, finalRows, state) {
     nodeStale2: nodeRows.filter(row => staleDays(row) === 2),
     nodeStale3: nodeRows.filter(row => staleDays(row) >= 3),
     delayedPod: finalRows.filter(row => row?.延迟POD === '是'),
+    selfPickup: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'SELF_PICKUP'),
+    cecnRetention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CECN_RETENTION'),
+    ceztRetention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CEZT_RETENTION'),
+    ccsl580Retention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CCSL580_RETENTION'),
     shopTransit: shopTransitRows,
     shopArrived: shopInboundRows,
     shopPending: shopInboundRows.filter(row => (row.storeTags || row.tags || []).includes('SHOP_PENDING')),

@@ -11,10 +11,11 @@ import { parseDailyExcel } from './src/excelParser.js';
 import { parseLongBackupModules } from './src/backupParser.js';
 import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
-import { getLatestUnifiedImport, saveUnifiedImport } from './src/unifiedImportStore.js';
+import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
 import { exportShopeeXlsx } from './src/shopeeExporter.js';
+import { exportPeriodReports } from './src/periodExporter.js';
 import { cleanMainBills, loadState, saveState, resetState } from './src/storage.js';
 import { clearToken, loadToken, saveToken, summarizeToken } from './src/authStore.js';
 import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, safeFinalRows } from './src/reporting.js';
@@ -515,8 +516,11 @@ async function handleUnifiedDailyImport(req, res) {
     if (!req.file) throw new Error('没有收到综合日报Excel文件');
     const parsed = parseUnifiedDailyExcel(req.file.path, { reportDate: req.body.reportDate || '', originalName: req.file.originalname });
     const saved = saveUnifiedImport(parsed, req.file.originalname);
+    const processingQueue = getUnifiedProcessingQueue(saved.batchId);
     const ccslRows = parsed.rows.filter(row => ['CE', 'TBKH', 'ALI1688'].includes(row.businessType));
     const shopeeRows = parsed.rows.filter(row => ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
+    const historicalCcsl = processingQueue.rows.filter(row => row.sourceType === 'HISTORICAL_CARRY' && ['CE', 'TBKH', 'ALI1688'].includes(row.businessType));
+    const historicalShopee = processingQueue.rows.filter(row => row.sourceType === 'HISTORICAL_CARRY' && ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
     const ccslState = await loadState();
     ccslState.reportDate = parsed.reportDate;
     ccslState.sourceName = req.file.originalname;
@@ -528,6 +532,8 @@ async function handleUnifiedDailyImport(req, res) {
     ccslState.excludedBills = [];
     ccslState.duplicateBills = [];
     clearRunResults(ccslState);
+    ccslState.carryBills = historicalCcsl.map(row => row.shipmentCode);
+    ccslState.priorCarryRows = historicalCcsl.map(row => safeJsonRow(row));
     resetRunForReport(parsed.reportDate);
     await saveState(ccslState);
 
@@ -551,10 +557,12 @@ async function handleUnifiedDailyImport(req, res) {
     };
     shopeeState.pnhBills = shopeeRows.map(row => row.shipmentCode);
     clearRunResults(shopeeState);
+    shopeeState.carryBills = historicalShopee.map(row => row.shipmentCode);
+    shopeeState.priorCarryRows = historicalShopee.map(row => safeJsonRow(row));
     resetBusinessRunForReport(SHOPEE, parsed.reportDate);
     saveBusinessState(shopeeState, SHOPEE);
     await fs.unlink(req.file.path).catch(() => {});
-    res.json({ ok: true, ...saved, state: summarizeState(ccslState), shopeeState: summarizeShopeeState(shopeeState) });
+    res.json({ ok: true, ...saved, carryover: processingQueue.summary, state: summarizeState(ccslState), shopeeState: summarizeShopeeState(shopeeState) });
   } catch (error) {
     if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
     res.status(400).json({ ok: false, error: error.message, sheetDiagnostics: error.sheetDiagnostics || [] });
@@ -734,6 +742,7 @@ async function executeRunRequest(req, res, options = {}) {
     result.state.historySummary = appendHistorySummary(result.state.historySummary || [], metricSnapshot);
     await saveState(result.state);
     const snapshot = createDashboardSnapshot(result.state, { reportDate, runId: run.runId });
+    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
     await appendRuntimeLog(`处理快照已保存：${snapshot.snapshotId}`);
     res.json({ ok: true, summary: result.summary, run: { runId: run.runId, reportDate, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeState(await loadState()) });
   } catch (e) {
@@ -861,6 +870,10 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     saveBusinessState(result.state, SHOPEE);
     const snapshot = saveBusinessSnapshot(SHOPEE, result.state, buildShopeeDashboard(result.state));
     result.state.snapshotId = snapshot.snapshotId;
+    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
+    const ccslState = await loadState();
+    const ccslSnapshot = getMatchingSnapshot(ccslState);
+    completeUnifiedSnapshot({ reportDate, ccslSnapshot, shopeeSnapshot: snapshot });
     saveBusinessState(result.state, SHOPEE);
     res.json({ ok: true, summary, run: { reportDate, runId, recovered: outcome.recovered, repair }, snapshotId: snapshot.snapshotId, state: summarizeShopeeState(result.state) });
   } catch (error) {
@@ -1035,6 +1048,15 @@ app.get('/api/shopee/export-xlsx', async (req, res) => {
     res.download(file);
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.get('/api/export-period', async (req, res) => {
+  try {
+    const result = await exportPeriodReports({ periodType: req.query.periodType || 'daily', date: req.query.date || '', businessType: req.query.businessType || 'ALL' });
+    res.download(result.file, path.basename(result.file));
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
   }
 });
 
@@ -1329,6 +1351,15 @@ function clearRunResults(state) {
   state.lastRunSummary = null;
   state.lastRun = null;
   state.apiDiagnostic = null;
+}
+
+function safeJsonRow(row = {}) {
+  try {
+    const parsed = JSON.parse(row.stateJson || '{}');
+    return { ...parsed, shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: row.businessType, sourceReportDate: row.sourceReportDate };
+  } catch {
+    return { shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: row.businessType, sourceReportDate: row.sourceReportDate };
+  }
 }
 
 async function manualBatchQuery(shipmentCodes, query, apiName) {

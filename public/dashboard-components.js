@@ -236,7 +236,7 @@
       {key:'tbkh',label:'TBKH',value:0,tone:'orange'}, {key:'shopeecn',label:'SHOPEE CN',value:snapshot.shopee?.cn?.today || 0,tone:'purple'},
       {key:'shopeevn',label:'SHOPEE VN',value:snapshot.shopee?.vn?.today || 0,tone:'red'}, {key:'ali1688',label:'ALI1688',value:0,tone:'cyan'}
     ];
-    const fallbackMetrics = [{key:'self-pickup',label:'仓库自提件',value:0,unit:'件'},{key:'cecn',label:'CECN滞留包裹',value:0,unit:'件'},{key:'cezt',label:'CEZT滞留包裹',value:0,unit:'件'}];
+    const fallbackMetrics = [{key:'self-pickup',label:'仓库自提件',value:0,unit:'件'},{key:'cecn',label:'CECN滞留包裹',value:0,unit:'件'},{key:'cezt',label:'CEZT滞留包裹',value:0,unit:'件'},{key:'580',label:'580滞留包裹',value:0,unit:'件'}];
     document.getElementById('homeBusinessCards').innerHTML = (snapshot.businessCards?.length ? snapshot.businessCards : fallbackCards).map(businessCard).join('');
     document.getElementById('homeCoreMetrics').innerHTML = (snapshot.coreMetrics?.length ? snapshot.coreMetrics : fallbackMetrics).map(coreMetricCard).join('');
     document.getElementById('homeShopeeSpecial').innerHTML = shopeeSpecial(snapshot.shopee || {});
@@ -253,7 +253,7 @@
   }
 
   function coreMetricCard(item) {
-    const testId = ['self-pickup','cecn','cezt'].includes(item.key) ? `metric-${item.key}` : `core-${item.key}`;
+    const testId = ['self-pickup','cecn','cezt','580'].includes(item.key) ? `metric-${item.key}` : `core-${item.key}`;
     return `<button class="core-summary-card" data-testid="${testId}" onclick="openHomeMetricDetail('${text(item.key)}')"><i></i><span>${text(item.label)}</span><b>${display(item.value,item.unit)}</b><small>本月件数</small></button>`;
   }
 

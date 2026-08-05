@@ -88,6 +88,11 @@
 
         <section id="reportsPage" class="app-page" hidden>
           <div class="page-heading report-heading"><div><h2>报表数据预览</h2><p>字段口径与看板一致，导出不重新调用CE API</p></div></div>
+          <section class="panel period-export-panel">
+            <div class="panel-title"><div><h3>日报 / 周报 / 月报</h3><p>只聚合 VALID + COMPLETED 日快照</p></div></div>
+            <div class="period-tabs" role="tablist"><button class="period-tab active" role="tab" data-period="daily" onclick="setExportPeriod('daily',this)">日报</button><button class="period-tab" role="tab" data-period="weekly" onclick="setExportPeriod('weekly',this)">周报</button><button class="period-tab" role="tab" data-period="monthly" onclick="setExportPeriod('monthly',this)">月报</button></div>
+            <div class="period-export-controls"><label>基准日期<input id="periodExportDate" type="date"></label><label>业务<select id="periodExportBusiness"><option value="ALL">五业务全部 ZIP</option><option value="CE">CE</option><option value="TBKH">TBKH</option><option value="ALI1688">ALI1688</option><option value="SHOPEECN">SHOPEE CN</option><option value="SHOPEEVN">SHOPEE VN</option></select></label><button class="btn primary" data-testid="export-all-business-zip" onclick="exportPeriodReport()">下载报表</button></div>
+          </section>
           <section class="panel report-filter-panel">
             <div class="report-filter-grid">
               <label>日期范围<input id="reportDateRange" readonly></label>
@@ -109,7 +114,7 @@
         <section id="importPage" class="app-page" hidden>
           <div class="page-heading"><div><h2>数据导入与处理</h2><p>一次上传综合日报，系统自动分类到五个独立业务队列</p></div></div>
           <div class="operations-dashboard">
-            <section id="unifiedImport" class="panel operation-panel unified-import-panel"><div class="panel-title"><h3>综合日报导入</h3></div><label class="field-label">日报日期（可选修正）<input id="reportDate" type="date"></label><label class="file-picker"><input id="excelFile" type="file" accept=".xlsx,.xls"><span>选择综合日报Excel</span></label><button class="btn primary full" data-testid="combined-daily-import" onclick="importUnifiedExcel()">导入综合日报并自动分类</button><div id="fileStatus" class="operation-status"></div></section>
+            <section id="unifiedImport" class="panel operation-panel unified-import-panel"><div class="panel-title"><h3>综合日报导入</h3></div><label class="field-label">日报日期 <span id="dateDetectionSource" class="muted-note">导入后自动识别</span><span class="date-edit-row"><input id="reportDate" type="date" readonly><button id="editReportDateButton" type="button" class="text-button" onclick="enableReportDateCorrection()">修改日期</button></span></label><div id="dateConflictPanel" class="operation-status" hidden></div><label class="file-picker"><input id="excelFile" type="file" accept=".xlsx,.xls"><span>选择综合日报Excel</span></label><button class="btn primary full" data-testid="combined-daily-import" onclick="importUnifiedExcel()">导入综合日报并自动分类</button><div id="fileStatus" class="operation-status"></div></section>
             <section id="runPanel" class="panel operation-panel"><div class="panel-title"><h3>统一处理</h3></div><div class="button-stack"><button class="btn primary" data-testid="global-auto-process" onclick="runUnified()">开始全自动处理</button><button class="btn ghost" onclick="resumeUnified()">继续处理</button><button class="btn warning" onclick="pauseUnified()">暂停</button></div><div id="ccslRunStatus" class="operation-status"></div></section>
             <section class="panel unified-summary-panel"><div class="panel-title"><h3>自动分类结果</h3><span id="unifiedSnapshotStatus" class="status-pill muted">尚未导入</span></div><div id="unifiedClassificationSummary" class="unified-classification-summary"><div class="empty-state compact">导入综合日报后显示五业务分类和警告统计</div></div></section>
           </div>

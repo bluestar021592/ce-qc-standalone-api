@@ -3,12 +3,14 @@ import fs from 'fs';
 import XLSX from 'xlsx';
 
 const BUSINESS_PRIORITY = ['SHOPEEVN', 'SHOPEECN', 'TBKH', 'ALI1688'];
-const SHIPMENT_HEADERS = ['运单号', '单号', '面单号', '快递单号', '物流单号', 'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'];
+const SHIPMENT_HEADERS = ['运单号', '运单编号', '单号', '面单号', '快递单号', '物流单号', 'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'];
 const RECIPIENT_HEADERS = ['收件人', '收件人姓名', '客户名称', '客户', '收货人', 'recipient', 'receiver', 'receivername', 'consignee', 'customername'];
-const REGION_HEADERS = ['区域', '区域代码', '路区', '站点', '目的地', '网点', 'region', 'area', 'route', 'site', 'destination'];
-const DATE_HEADERS = ['日报日期', '日期', '数据日期', '入库日期', 'reportdate', 'date', 'inbounddate'];
+const REGION_HEADERS = ['省份标识', '区域', '区域代码', '路区', '站点', '目的地', '网点', 'region', 'area', 'route', 'site', 'destination'];
+const DATE_HEADERS = ['日报日期', '数据日期', '下单时间', '入库日期', '日期', 'reportdate', 'ordertime', 'orderdate', 'date', 'inbounddate'];
 
 export function parseUnifiedDailyExcel(filePath, options = {}) {
+  const signature = fs.readFileSync(filePath).subarray(0, 4).toString('hex').toUpperCase();
+  const containerFormat = signature.startsWith('504B') ? 'OOXML_ZIP' : (signature.startsWith('D0CF11E0') ? 'OLE_XLS' : 'UNKNOWN');
   const workbook = XLSX.readFile(filePath, { cellDates: true });
   const details = [];
   const warnings = [];
@@ -20,6 +22,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   let missingRecipientWarnings = 0;
   let classificationConflicts = 0;
   let detectedDate = normalizeDate(options.reportDate);
+  const dateCandidates = new Map();
+  let dateDetectionSource = detectedDate ? '手动日期' : '';
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -51,7 +55,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       const recipientRaw = String(row[recipientIndex] ?? '').trim();
       const recipientNormalized = normalizeRecipient(recipientRaw);
       const regionCode = normalizeRegion(row[regionIndex]);
-      detectedDate ||= normalizeDate(row[dateIndex]);
+      const rowDate = normalizeDate(row[dateIndex]);
+      if (rowDate) dateCandidates.set(rowDate, Number(dateCandidates.get(rowDate) || 0) + 1);
       if (!shipmentCode) {
         missingWaybillRows += 1;
         warnings.push({ type: 'MISSING_WAYBILL', sheetName, rowNumber: index + 1, message: '运单号缺失，未计入分类' });
@@ -67,16 +72,20 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
         missingRecipientWarnings += 1;
         warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人缺失，按默认规则归类CE' });
       }
-      const matches = classifyMatches(recipientNormalized);
+      const matches = classifyMatches(shipmentCode, recipientNormalized);
       if (matches.length > 1) {
         classificationConflicts += 1;
         warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个板块，按优先级归类${matches[0]}` });
       }
-      const businessType = matches[0] || 'CE';
+      const classification = classifyBusiness(shipmentCode, recipientNormalized);
+      const businessType = classification.businessType;
       details.push({
         shipmentCode, businessType, regionCode, recipientRaw, recipientNormalized,
-        sheetName, rowNumber: index + 1, reportDate: detectedDate || '',
-        classificationReason: matches.length ? `收件人命中${businessType}` : '未命中特定板块，默认归类CE'
+        sheetName, rowNumber: index + 1, reportDate: detectedDate || rowDate || '',
+        classificationSource: classification.source,
+        classificationMatchedValue: classification.matchedValue,
+        classificationWarning: matches.length > 1 ? `命中多个板块：${matches.join(',')}` : '',
+        classificationReason: classification.reason
       });
     }
   }
@@ -86,14 +95,26 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     error.sheetDiagnostics = sheetDiagnostics;
     throw error;
   }
+  const sortedDateCandidates = [...dateCandidates.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (!detectedDate && sortedDateCandidates.length) {
+    detectedDate = sortedDateCandidates[0][0];
+    dateDetectionSource = '下单时间列';
+  }
   const reportDate = normalizeDate(options.reportDate) || detectedDate;
   if (!reportDate) throw new Error('未识别到日报日期，请手动选择日报日期');
   for (const row of details) row.reportDate = reportDate;
   const classificationCounts = Object.fromEntries(['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => [type, details.filter(row => row.businessType === type).length]));
+  const regionCounts = { PP: details.filter(row => row.regionCode === 'PP').length, PV: details.filter(row => row.regionCode === 'PV').length };
   return {
     reportDate,
+    dateDetectionSource,
+    dateWasManuallyCorrected: Boolean(normalizeDate(options.reportDate)),
+    dateCandidates: sortedDateCandidates.map(([date, count]) => ({ date, count })),
+    dateConflict: sortedDateCandidates.length > 1,
+    containerFormat,
     fileHash: crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex'),
     classificationCounts,
+    regionCounts,
     summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, classificationConflicts },
     rows: details,
     warnings,
@@ -111,14 +132,33 @@ function findHeaderRow(matrix) {
 
 function findColumn(headers, aliases) {
   const normalizedAliases = aliases.map(normalizeHeader);
-  return headers.findIndex(header => normalizedAliases.includes(header));
+  for (const alias of normalizedAliases) {
+    const index = headers.findIndex(header => header === alias);
+    if (index >= 0) return index;
+  }
+  return -1;
 }
 
 function normalizeHeader(value) { return String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/[\s_\-]+/g, ''); }
 function normalizeShipmentCode(value) { return String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/\s+/g, ''); }
 function normalizeRecipient(value) { return String(value ?? '').normalize('NFKC').toUpperCase().replace(/[\s_\-]+/g, ''); }
 function normalizeRegion(value) { const text = String(value ?? '').trim().toUpperCase(); return text === 'PV' ? 'PV' : text === 'PP' ? 'PP' : ''; }
-function classifyMatches(value) { return BUSINESS_PRIORITY.filter(type => value.includes(type)); }
+function classifyMatches(shipmentCode, recipient) {
+  const matches = [];
+  if (recipient.includes('SHOPEEVN')) matches.push('SHOPEEVN');
+  if (recipient.includes('SHOPEECN')) matches.push('SHOPEECN');
+  if (shipmentCode.startsWith('TBKH') || recipient.includes('TBKH')) matches.push('TBKH');
+  if (recipient.includes('ALI1688')) matches.push('ALI1688');
+  return BUSINESS_PRIORITY.filter(type => matches.includes(type));
+}
+function classifyBusiness(shipmentCode, recipient) {
+  if (recipient.includes('SHOPEEVN')) return { businessType: 'SHOPEEVN', source: 'RECIPIENT', matchedValue: 'SHOPEEVN', reason: '收件人命中SHOPEEVN' };
+  if (recipient.includes('SHOPEECN')) return { businessType: 'SHOPEECN', source: 'RECIPIENT', matchedValue: 'SHOPEECN', reason: '收件人命中SHOPEECN' };
+  if (shipmentCode.startsWith('TBKH')) return { businessType: 'TBKH', source: 'SHIPMENT_PREFIX', matchedValue: 'TBKH', reason: '运单号前缀命中TBKH' };
+  if (recipient.includes('TBKH')) return { businessType: 'TBKH', source: 'RECIPIENT', matchedValue: 'TBKH', reason: '收件人命中TBKH' };
+  if (recipient.includes('ALI1688')) return { businessType: 'ALI1688', source: 'RECIPIENT', matchedValue: 'ALI1688', reason: '收件人命中ALI1688' };
+  return { businessType: 'CE', source: 'DEFAULT', matchedValue: '', reason: '未命中特定板块，默认归类CE' };
+}
 function normalizeDate(value) {
   if (!value) return '';
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);

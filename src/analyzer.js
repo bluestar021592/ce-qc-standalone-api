@@ -5,6 +5,7 @@ import {
   parseEventNodeAction
 } from './shopCodes.js';
 import { analyzeStoreFlow } from './storeFlow.js';
+import { classifyLatestSpecialNode } from './specialNode.js';
 
 const PENDING_RE = /Pending|PENDING|客户无人接听|客户电话错误|地址错误|改地址|客户要求改派|无人接听|无法联系|客户不在|电话错误|空号|联系不上|改派/i;
 const IMAGE_ABNORMAL_STATUSES = new Set(['NO_IMAGE', 'IMAGE_FIELD_EMPTY', 'IMAGE_FIELD_INVALID']);
@@ -69,6 +70,17 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
         matchedRule: 'POD_PRIORITY'
       }
     }), ...storeFlow };
+  }
+
+  const special = classifyLatestSpecialNode(sorted);
+  if (special) {
+    const specialRow = baseResult({
+      waybill, scanRow, events: sorted, category: special.category,
+      judgment: `${special.label}，按最后有效轨迹判定并排除普通异常`, isPod: false,
+      lastNode: special.latestTrackingDescription, lastEvent: special.event,
+      evidence: { matchedRule: special.matchedRule, targetNode: special.latestNodeCode, actionType: special.specialState }
+    });
+    return { ...specialRow, ...special, primaryCategory: special.category, 主分类: special.category, 异常分类: special.category, 是否特殊节点: '是' };
   }
 
   const lastEvidence = parseEventNodeAction(last || {});

@@ -188,6 +188,7 @@ export async function runQcPipeline({
   const nextCarryBills = cleanBills(trackResults
     .filter(row => row.是否POD !== '是')
     .filter(row => !isNormalFinalDiversionRow(row))
+    .filter(row => row.specialState !== 'SELF_PICKUP' && row.primaryCategory !== '仓库自提')
     .map(row => row.运单号))
     .filter(wb => !podSet.has(wb));
 
@@ -332,6 +333,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   const finalRows = uniqueRows(trackResults);
   const nextCarryBills = cleanAnyBills(finalRows
     .filter(row => row.是否POD !== '是' && row.退回状态 !== '已退回')
+    .filter(row => row.specialState !== 'SELF_PICKUP' && row.primaryCategory !== '仓库自提')
     .map(billOf))
     .filter(bill => !podSet.has(bill));
   const completedAt = new Date();

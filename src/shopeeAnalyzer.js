@@ -1,5 +1,6 @@
 import { normalizeEvent } from './analyzer.js';
 import { analyzeStoreFlow } from './storeFlow.js';
+import { classifyLatestSpecialNode } from './specialNode.js';
 
 const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|改派/i;
 const POD_RE = /\bPOD\b|delivered|签收|已妥投/i;
@@ -31,6 +32,7 @@ export function analyzeShopeeShipment({
   const isPod = scanState === 'POD' || Boolean(podEvent);
   const isReturned = !isPod && (scanState === 'RETURN' || Boolean(returnEvent));
   const apiFailed = ['shipment', 'event', 'exception'].some(key => apiStatus[key] === 'failed');
+  const special = !isPod && !isReturned && !apiFailed ? classifyLatestSpecialNode(sorted) : null;
 
   const pending = analyzePendingCycles(sorted, reportDate, isPod, isReturned);
   const oc = analyzeOc(exceptionRows, sorted, reportDate, isPod, isReturned);
@@ -41,7 +43,7 @@ export function analyzeShopeeShipment({
     : 0;
   const staleDays = last ? elapsedDays(last.eventTime, reportDate) : 0;
   const completeForNegativeJudgment = !apiFailed && apiStatus.event !== 'failed' && apiStatus.exception !== 'failed';
-  const inboundNoScan = Boolean(completeForNegativeJudgment && last && isInboundEvent(last)
+  const inboundNoScan = Boolean(!special && completeForNegativeJudgment && last && isInboundEvent(last)
     && !pending.activeDays && !oc.active && !deliveryDays && !isPod && !isReturned);
   const noTrack = Boolean(completeForNegativeJudgment && apiStatus.event === 'success' && !sorted.length);
   const region = classifyShopeeRegion({ dailyRow, shipmentTrackRow, scanRow, events: sorted });
@@ -54,6 +56,7 @@ export function analyzeShopeeShipment({
   if (isPod) category = 'POD';
   else if (isReturned) category = '退回';
   else if (apiFailed) category = priorRow.primaryCategory || priorRow.主分类 || priorRow.异常分类 || 'API失败待重试';
+  else if (special) category = special.category;
   else if (pending.returnRequired) category = pending.latestActionAfterThreshold === 'delivery' ? '三次Pending后继续派送' : '三次Pending后未退回';
   else if (oc.active) category = oc.days >= 3 ? 'OC3天及以上' : `OC${Math.max(1, oc.days)}天`;
   else if (pending.activeDays) category = pending.activeDays >= 3 ? 'Pending3次及以上' : `Pending${pending.activeDays}次`;
@@ -70,7 +73,7 @@ export function analyzeShopeeShipment({
   const currentPendingDays = pending.activeDays || (pending.returnRequired ? pending.maxDays : 0);
   const apiState = apiFailed ? '失败' : '成功';
   const queryState = apiFailed ? 'refresh_failed' : 'success';
-  const closed = isPod || isReturned;
+  const closed = isPod || isReturned || special?.specialState === 'SELF_PICKUP';
   const recipientSource = Object.keys(dailyRow || {}).length ? dailyRow : priorRow;
 
   return {
@@ -129,10 +132,15 @@ export function analyzeShopeeShipment({
     主分类: category,
     异常分类: category,
     tags,
+    specialState: special?.specialState || '',
+    latestNodeCode: special?.latestNodeCode || '',
+    latestTrackingDescription: special?.latestTrackingDescription || '',
+    matchedRule: special?.matchedRule || '',
+    是否特殊节点: special ? '是' : '否',
     API状态: apiState,
     查询状态: queryState,
     apiStatus: { shipment: apiStatus.shipment || '', event: apiStatus.event || '', exception: apiStatus.exception || '' },
-    carry状态: closed ? (isPod ? 'closed_pod' : 'closed_return') : 'active',
+    carry状态: closed ? (isPod ? 'closed_pod' : (isReturned ? 'closed_return' : 'closed_self_pickup')) : 'active',
     跨日状态: closed ? '已闭环' : (scanRow?.来源类型 === '旧跨日' ? '跨日续查' : '当日'),
     latestEventTime: last?.eventTime || priorRow.latestEventTime || '',
     latestEventDesc: last ? eventText(last) : (priorRow.latestEventDesc || ''),
