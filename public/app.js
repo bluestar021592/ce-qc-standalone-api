@@ -669,6 +669,7 @@ function renderShopeePage() {
   shopeeRecipientGroup = type === 'SHOPEECN' ? 'CN' : 'VN';
   previewState.SHOPEE.recipientGroup = shopeeRecipientGroup;
   renderShopeeImportMeta();
+  renderShopeeProcessingNotice(state);
   renderShopeeRecipientFilters();
   renderShopeeRecipientGroups();
   const metrics = shopeeState.dashboard?.recipientGroups?.[shopeeRecipientGroup]?.metrics || {};
@@ -678,6 +679,22 @@ function renderShopeePage() {
   renderShopeeOperations();
   renderPreview('shopeePreviewPanel', 'SHOPEE', false);
   shopeeState = aggregate;
+}
+
+function renderShopeeProcessingNotice(state) {
+  const host = document.getElementById('shopeeImportMeta');
+  if (!host) return;
+  const processing = state.processing || {};
+  const running = Boolean(processing.running);
+  const completed = state.snapshotStatus === 'COMPLETED' && Boolean(state.snapshotId);
+  if (!running && completed) return;
+  const batch = Number(processing.batchIndex || 0);
+  const total = Number(processing.totalBatches || 0);
+  const progress = total ? `${batch}/${total} 批` : '等待处理';
+  const text = running
+    ? `正在处理：${processing.phase || '准备处理'} · ${progress}。POD、Pending、派送中和退回等指标会随处理进度更新，完成一致性校验后锁定。`
+    : '当前仅完成日报分类，尚未完成CE扫描和轨迹查询。下方状态数字不是最终结果，请点击“继续处理”。';
+  host.insertAdjacentHTML('beforeend', `<div class="processing-notice ${running ? 'running' : 'waiting'}"><b>${running ? '处理中' : '待处理'}</b><span>${escapeHtml(text)}</span></div>`);
 }
 
 function currentBusinessType() {
@@ -752,7 +769,8 @@ function renderRecipientGroupPanel(group, summary) {
     ['Pending3+', metrics.pending3plus, 'pending3', '件'], ['OC1+', metrics.oc1, 'oc1', '件'], ['OC2+', metrics.oc2, 'oc2', '件'],
     ['OC3+', metrics.oc3plus, 'oc3', '件'], ['入库无扫描', metrics.inboundNoScan, 'inboundNoScan', '件'],
     ['已退回件', metrics.returned, 'returned', '件'], ['退回率', metrics.returnRate, 'returned', '%'],
-    ['退回处理中', metrics.returnInProgress, 'returnInProgress', '件']
+    ['退回处理中', metrics.returnInProgress, 'returnInProgress', '件'],
+    ['派送中', metrics.deliveryStay, 'deliveryStay', '件'], ['派送中率', metrics.deliveryStayRate, 'deliveryStay', '%']
   ];
   const testId = label => ({ '已退回件':'return-completed-count', '退回率':'return-rate', '退回处理中':'return-in-progress-count' })[label] || '';
   return `<article class="panel recipient-group-card ${group === 'OTHER' ? 'other' : ''}"><header><h3>${escapeHtml(recipientGroupLabel(group))}</h3><span>${formatInt(summary.monitorCount || 0)}票纳入监控</span></header><div class="recipient-metric-grid">${defs.map(([label, value, tab, unit]) => `<button ${testId(label) ? `data-testid="${testId(label)}"` : ''} onclick="openShopeeGroupMetric('${group}','${tab}')"><span>${escapeHtml(label)}</span><b>${formatMetric(value || 0, unit)}</b></button>`).join('')}</div></article>`;
@@ -1738,9 +1756,19 @@ function formatInt(value) { return Number(value || 0).toLocaleString('zh-CN', { 
 function formatMetric(value, unit = '') { if (value === null || value === undefined || value === '') return '—'; const number = Number(value); if (!Number.isFinite(number)) return escapeHtml(value); if (unit === '%') return `${Number(number.toFixed(2))}%`; if (unit === '天') return `${Math.round(number)}天`; return formatInt(number); }
 function severityClass(value = '') { const text = String(value); if (/danger|critical|严重|重点|失败|异常/.test(text)) return 'danger'; if (/warning|关注|跟进/.test(text)) return 'warning'; if (/normal|正常|完成|成功/.test(text)) return 'normal'; if (/volume/.test(text)) return 'volume'; return 'neutral'; }
 function statusPill(text, ok) { return `<span class="status-pill ${ok ? 'success' : 'muted'}">${escapeHtml(text)}</span>`; }
-function runStatusText(state) { return ({ running: '处理中', paused: '已暂停', failed: '失败可恢复', finished: '已完成' })[state.runStatus] || (state.snapshotId ? '已完成' : '待处理'); }
+function runStatusText(state) {
+  if (state.processing?.running) {
+    const batch = Number(state.processing.batchIndex || 0);
+    const total = Number(state.processing.totalBatches || 0);
+    return `处理中：${state.processing.phase || '准备处理'}${total ? ` ${batch}/${total}批` : ''}`;
+  }
+  if (state.processing?.paused) return '已暂停，可继续处理';
+  if (state.processing?.error) return '处理失败，可重试';
+  if (state.snapshotStatus === 'COMPLETED' && state.snapshotId) return '已完成';
+  return '日报已导入，待完成处理';
+}
 function lastProcessed(state) { return state.lastRunSummary?.completedAt || state.lastRun?.completedAt || state.currentRun?.completedAt || ''; }
-function pageMeta(state) { return `日报 ${state.reportDate || '—'} · ${runStatusText(state)} · 数据版本${state.snapshotId ? '已锁定' : '待处理'}`; }
+function pageMeta(state) { return `日报 ${state.reportDate || '—'} · ${runStatusText(state)} · 数据版本${state.snapshotStatus === 'COMPLETED' && state.snapshotId ? '已锁定' : '未锁定'}`; }
 function latestDate(a, b) { return String(a || '') > String(b || '') ? a : (b || a || ''); }
 function pick(row, keys) { for (const key of keys) if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== '') return row[key]; return '—'; }
 function billOf(row = {}) { return String(row.shipmentCode || row.运单号 || '').trim().toUpperCase(); }

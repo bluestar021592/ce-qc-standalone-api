@@ -29,6 +29,8 @@ const PUBLIC_METRICS = Object.freeze([
   ['退回件', 'returned', 'returned', '件'],
   ['退回率', 'returnRate', 'returned', '%'],
   ['退回处理中', 'returnInProgress', 'returnInProgress', '件']
+  ,['派送中', 'deliveryStay', 'deliveryStay', '件']
+  ,['派送中率', 'deliveryStayRate', 'deliveryStay', '%']
 ]);
 
 export function buildShopeeDashboard(state = {}) {
@@ -196,6 +198,8 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
       returned: groups.returned.length,
       returnRate: rate(groups.returned.length, groupDaily.length),
       returnInProgress: groups.returnInProgress.length,
+      deliveryStay: groups.deliveryStay.length,
+      deliveryStayRate: rate(groups.deliveryStay.length, groupDaily.length),
       shopTransit: groups.shopTransit.length,
       shopArrived: groups.shopArrived.length,
       shopPending: groups.shopPending.length,
@@ -253,6 +257,7 @@ function tabsForRecipientGroup(group, summary) {
     inboundNoScan: tab(`${label}入库无扫描`, visibleRows(groups.inboundNoScan)),
     returned: tab(`${label}已退回件`, visibleRows(groups.returned)),
     returnInProgress: tab(`${label}退回处理中`, visibleRows(groups.returnInProgress))
+    ,deliveryStay: tab(`${label}派送中`, visibleRows(groups.deliveryStay))
   };
 }
 
