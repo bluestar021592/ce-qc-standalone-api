@@ -1313,10 +1313,15 @@ async function runUnified() {
   if (!unifiedImportState) return alert('请先导入综合日报并完成自动分类');
   if (runInFlight) return;
   runInFlight = true;
+  const runButton = document.querySelector('[data-testid="global-auto-process"]');
+  const runStatus = document.getElementById('ccslRunStatus');
+  if (runButton) { runButton.disabled = true; runButton.textContent = '正在启动处理…'; }
+  if (runStatus) runStatus.innerHTML = '<span class="status-pill warning">正在启动五业务处理，请勿重复点击</span>';
   try {
     const results = [];
     for (const [type, url] of [['CCSL', '/api/run'], ['SHOPEE', '/api/shopee/run/start']]) {
       try {
+        if (runStatus) runStatus.innerHTML = `<span class="status-pill warning">正在处理 ${type}，页面会在完成后自动刷新</span>`;
         const result = await api(url, { method: 'POST' });
         if (type === 'CCSL') appState = result.state || appState;
         else shopeeState = result.state || shopeeState;
@@ -1330,7 +1335,10 @@ async function runUnified() {
     renderAll();
     alert(`综合日报处理结果：${results.join('；')}。`);
   } catch (error) { alert(`全自动处理失败：${error.message}`); }
-  finally { runInFlight = false; }
+  finally {
+    runInFlight = false;
+    if (runButton) { runButton.disabled = false; runButton.textContent = '开始全自动处理'; }
+  }
 }
 async function resumeUnified() {
   if (runInFlight) return;
