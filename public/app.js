@@ -269,6 +269,11 @@ async function permanentlyDeleteInternalUser(id, username) {
 
 async function switchInternalAccount() {
   if (!confirm('确定退出当前系统账户并切换到其他账户？')) return;
+  await logoutInternalAccount(false);
+}
+
+async function logoutInternalAccount(askConfirmation = true) {
+  if (askConfirmation && !confirm('确定退出当前系统账户？')) return;
   try {
     await api('/api/internal-auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   } catch (error) {
@@ -276,6 +281,30 @@ async function switchInternalAccount() {
   }
   location.assign('/');
 }
+
+function toggleAccountMenu(event) {
+  event?.stopPropagation();
+  const menu = document.getElementById('accountDropdown');
+  const trigger = document.querySelector('.top-user');
+  if (!menu || !trigger) return;
+  const willOpen = menu.hidden;
+  menu.hidden = !willOpen;
+  trigger.setAttribute('aria-expanded', String(willOpen));
+}
+
+function closeAccountMenu() {
+  const menu = document.getElementById('accountDropdown');
+  const trigger = document.querySelector('.top-user');
+  if (menu) menu.hidden = true;
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+document.addEventListener('click', event => {
+  if (!event.target.closest('.top-user-menu')) closeAccountMenu();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeAccountMenu();
+});
 
 function pageFromPath() {
   const value = location.pathname.toLowerCase();

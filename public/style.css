@@ -933,6 +933,14 @@ body.sidebar-collapsed .sidebar-collapse { justify-content: center; margin-inlin
 .internal-account-bar small { color: #72859d; font-size: 10px; }
 .internal-account-bar strong { color: #18324f; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn.compact { width: auto; min-height: 30px; padding: 5px 11px; white-space: nowrap; }
+.top-user-menu { position: relative; }
+.top-user-menu .top-user { padding: 2px 4px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
+.top-user-menu .top-user:hover,
+.top-user-menu .top-user[aria-expanded="true"] { background: #f0f6ff; }
+.account-dropdown { position: absolute; top: calc(100% + 9px); right: 0; z-index: 120; width: 150px; padding: 5px; border: 1px solid #d9e4f2; border-radius: 7px; background: #fff; box-shadow: 0 12px 30px rgba(24, 50, 79, .16); }
+.account-dropdown button { width: 100%; min-height: 34px; padding: 7px 10px; border: 0; border-radius: 4px; color: #18324f; background: transparent; text-align: left; }
+.account-dropdown button:hover { background: #f1f6fc; }
+.account-dropdown button.danger-action { color: #c8322d; }
 .data-management-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .data-backup-list { grid-column: 1 / -1; min-width: 0; }
 .data-status-list { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 12px; margin: 0 0 14px; }

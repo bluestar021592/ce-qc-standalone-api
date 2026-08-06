@@ -16,8 +16,16 @@ test('permanent user deletion is restricted to previously deleted users', () => 
 
 test('account switching revokes the current internal session without fixed origins', () => {
   assert.match(appSource, /async function switchInternalAccount\(\)/);
+  assert.match(appSource, /async function logoutInternalAccount\(askConfirmation = true\)/);
   assert.match(appSource, /api\('\/api\/internal-auth\/logout'/);
   assert.doesNotMatch(appSource.match(/async function switchInternalAccount[\s\S]*?\n}/)?.[0] || '', /localhost|127\.0\.0\.1/);
+});
+
+test('top-right account control opens a real logout menu', () => {
+  const htmlSource = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(htmlSource, /onclick="toggleAccountMenu\(event\)"/);
+  assert.match(htmlSource, /id="accountDropdown"/);
+  assert.match(htmlSource, /onclick="logoutInternalAccount\(\)"/);
 });
 
 test('user management uses a full-width non-scrolling compact table', () => {

@@ -56,7 +56,13 @@
           <label class="top-date"><select id="topHistoryDate" aria-label="日报日期" onchange="loadHistoryDate(this.value)"><option value="">—</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-calendar"></use></svg></label>
           <label class="cycle-wrap"><select class="cycle-select" aria-label="周期"><option>日</option><option>周</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></label>
           <button class="notification-button" title="系统通知"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bell"></use></svg><b id="notificationCount" hidden></b></button>
-          <div class="top-user"><span class="top-avatar"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-user"></use></svg></span><span><b id="headerUserName">CE未登录</b><small id="headerUserRole">系统用户</small></span><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></div>
+          <div class="top-user-menu">
+            <button class="top-user" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleAccountMenu(event)"><span class="top-avatar"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-user"></use></svg></span><span><b id="headerUserName">CE未登录</b><small id="headerUserRole">系统用户</small></span><svg class="ui-icon account-chevron"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></button>
+            <div id="accountDropdown" class="account-dropdown" role="menu" hidden>
+              <button type="button" role="menuitem" onclick="switchInternalAccount()">切换账户</button>
+              <button type="button" role="menuitem" class="danger-action" onclick="logoutInternalAccount()">退出登录</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -173,7 +179,7 @@
   <script src="/dashboard-chart-v18.js?v=20260806-1"></script>
   <script src="/dashboard-v18.js?v=20260805-1"></script>
   <script src="/dashboard-components.js?v=20260805-v18-1"></script>
-  <script src="/app.js?v=users-20260806-1"></script>
+  <script src="/app.js?v=account-menu-20260806-1"></script>
   <script src="/v14-geometry-fixture.js?v=20260805-1"></script>
 </body>
 </html>
