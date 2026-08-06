@@ -60,7 +60,10 @@
         pending: { cn: number(snapshot.shopee?.cn?.pending3 || snapshot.shopee?.cn?.pending1) || 0, vn: number(snapshot.shopee?.vn?.pending3 || snapshot.shopee?.vn?.pending1) || 0 },
         returned: { cn: number(snapshot.shopee?.cn?.returned || snapshot.shopee?.cn?.returnPending) || 0, vn: number(snapshot.shopee?.vn?.returned || snapshot.shopee?.vn?.returnPending) || 0 }
       },
-      dispatch: ['CN-PP','CN-PV','VN-PP','VN-PV'].map((label, index) => ({ label, values: index % 2 ? [61.25,26.35,12.4] : [72.35,21.45,6.2] })),
+      dispatch: [
+        ['CN-PP', snapshot.shopee?.cn?.pp], ['CN-PV', snapshot.shopee?.cn?.pv],
+        ['VN-PP', snapshot.shopee?.vn?.pp], ['VN-PV', snapshot.shopee?.vn?.pv]
+      ].map(([label,row]) => ({ label, values:[row?.firstAttemptRate,row?.secondAttemptRate,row?.thirdAttemptRate], counts:[row?.firstAttemptCount,row?.secondAttemptCount,row?.thirdAttemptCount], denominator:row?.denominator || row?.today || 0 })),
       charts: [
         { title:'今日票数趋势', type:'count', dates, series:[normalizeSeries('今日','#1677ff',choose(t.ticketTotal, fixtureTrends.tickets))] },
         { title:'POD率趋势', type:'rate', dates, series:[normalizeSeries('CE','#1677ff',choose(t.podCcsl,fixtureTrends.podCe)),normalizeSeries('SHOPEE PP','#16a36a',choose(t.podPp,fixtureTrends.podPp)),normalizeSeries('SHOPEE PV','#ff8a00',choose(t.podPv,fixtureTrends.podPv))] },

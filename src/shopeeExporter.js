@@ -19,7 +19,9 @@ const METRICS = [
   ['今日总单', 'all'], ['今日POD', 'pod'], ['POD率', 'pod'], ['首派成功率', 'firstAttempt'],
   ['Pending1+', 'pending1'], ['Pending2+', 'pending2'], ['Pending3+', 'pending3'],
   ['OC1+', 'oc1'], ['OC2+', 'oc2'], ['OC3+', 'oc3'], ['盘点2天+', 'cycle2'], ['入库无扫描', 'inboundNoScan'],
-  ['已退回件', 'returned'], ['退回率', 'returned'], ['退回处理中', 'returnInProgress'],
+  ['已退回件', 'returned'], ['退回率', 'returned'], ['当前未闭环', 'unresolved'], ['对账差异', 'unresolved'], ['退回处理中', 'returnInProgress'],
+  ['1派POD', 'attempt1'], ['1派POD占比', 'attempt1'], ['2派POD', 'attempt2'], ['2派POD占比', 'attempt2'],
+  ['3派及以上POD', 'attempt3'], ['3派及以上POD占比', 'attempt3'],
   ['在途门店', 'shopTransit'], ['到达门店', 'shopArrived'], ['门店Pending', 'shopPending'],
   ['门店滞留1天+', 'shopRetention1'], ['门店滞留2天+', 'shopRetention2'], ['门店滞留3天+', 'shopRetention3']
 ];
@@ -351,6 +353,12 @@ function metricDescription(label) {
     ,已退回件: '当前周期RETURN_COMPLETED唯一运单数'
     ,退回率: '已退回件 ÷ 当前业务有效唯一单号'
     ,退回处理中: 'PR/P4007退回中，仍继续查询轨迹'
+    ,'1派POD': '日报当日（柬埔寨自然日）完成POD'
+    ,'1派POD占比': '1派POD ÷ 当日有效唯一单号'
+    ,'2派POD': '跨过第1个柬埔寨午夜后完成POD'
+    ,'2派POD占比': '2派POD ÷ 当日有效唯一单号'
+    ,'3派及以上POD': '跨过至少2个柬埔寨午夜后完成POD'
+    ,'3派及以上POD占比': '3派及以上POD ÷ 当日有效唯一单号'
   }[label] || '';
 }
 
@@ -360,7 +368,10 @@ function metricValueForExport(metrics, label) {
     今日总单: metrics.total, 今日POD: metrics.pod, POD率: rateValue(metrics.podRate), 首派成功率: rateValue(metrics.firstAttemptRate),
     'Pending1+': metrics.pending1, 'Pending2+': metrics.pending2, 'Pending3+': metrics.pending3plus,
     'OC1+': metrics.oc1, 'OC2+': metrics.oc2, 'OC3+': metrics.oc3plus, '盘点2天+': metrics.cycle2plus, 入库无扫描: metrics.inboundNoScan,
-    已退回件: metrics.returned, 退回率: rateValue(metrics.returnRate), 退回处理中: metrics.returnInProgress,
+    已退回件: metrics.returned, 退回率: rateValue(metrics.returnRate), 当前未闭环: metrics.unresolved, 对账差异: metrics.accountingDifference, 退回处理中: metrics.returnInProgress,
+    '1派POD': metrics.dispatchAttempt1, '1派POD占比': rateValue(metrics.dispatchAttempt1Rate),
+    '2派POD': metrics.dispatchAttempt2, '2派POD占比': rateValue(metrics.dispatchAttempt2Rate),
+    '3派及以上POD': metrics.dispatchAttempt3, '3派及以上POD占比': rateValue(metrics.dispatchAttempt3Rate),
     在途门店: metrics.shopTransit, 到达门店: metrics.shopArrived, 门店Pending: metrics.shopPending,
     '门店滞留1天+': metrics.shopRetention1, '门店滞留2天+': metrics.shopRetention2, '门店滞留3天+': metrics.shopRetention3
   };

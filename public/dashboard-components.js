@@ -254,7 +254,9 @@
       {key:'shopeevn',label:'SHOPEE VN',value:snapshot.shopee?.vn?.today || 0,tone:'red'}, {key:'ali1688',label:'ALI1688',value:0,tone:'cyan'}
     ];
     const fallbackMetrics = [{key:'self-pickup',label:'仓库自提件',value:0,unit:'件'},{key:'cecn',label:'CECN滞留包裹',value:0,unit:'件'},{key:'cezt',label:'CEZT滞留包裹',value:0,unit:'件'},{key:'580',label:'580滞留包裹',value:0,unit:'件'}];
-    document.getElementById('homeBusinessCards').innerHTML = (snapshot.businessCards?.length ? snapshot.businessCards : fallbackCards).map(businessCard).join('');
+    const cards = snapshot.businessCards?.length ? snapshot.businessCards : fallbackCards;
+    const total = Number(cards.find(item => item.key === 'total')?.value || 0);
+    document.getElementById('homeBusinessCards').innerHTML = cards.map(item => businessCard(item, total)).join('');
     document.getElementById('homeCoreMetrics').innerHTML = (snapshot.coreMetrics?.length ? snapshot.coreMetrics : fallbackMetrics).map(coreMetricCard).join('');
     document.getElementById('homeShopeeSpecial').innerHTML = shopeeSpecial(snapshot.shopee || {});
     document.getElementById('homeDispatchDistribution').innerHTML = dispatchDistribution(snapshot.shopee || {});
@@ -264,9 +266,10 @@
     document.getElementById('homeRules').innerHTML = rules();
   }
 
-  function businessCard(item) {
+  function businessCard(item, total) {
     const testKey = item.key === 'total' ? 'top-total' : `top-${item.key}`;
-    return `<button class="business-summary-card ${text(item.tone || 'blue')}" data-testid="${testKey}" onclick="${item.key === 'total' ? "navigatePage('home')" : `navigatePage('${text(item.key)}')`}"><span>${text(item.label)}</span><small>本期票数</small><b data-testid="${testKey}-value">${number(item.value || 0)}</b><em>占比可追溯</em></button>`;
+    const share = total ? (Number(item.value || 0) / total * 100) : 0;
+    return `<button class="business-summary-card ${text(item.tone || 'blue')}" data-testid="${testKey}" onclick="${item.key === 'total' ? "navigatePage('home')" : `navigatePage('${text(item.key)}')`}"><span>${text(item.label)}</span><small>本期票数</small><b data-testid="${testKey}-value">${number(item.value || 0)}</b><em>占比 ${share.toFixed(2)}%</em></button>`;
   }
 
   function coreMetricCard(item) {
@@ -280,7 +283,8 @@
         ['今日件数', row?.today, 'all'], ['今日POD', row?.pod, 'pod'], ['POD率', display(row?.podRate || 0, '%'), 'pod'],
         ['派送中', row?.deliveryStay, 'deliveryStay'], ['派送中率', display(row?.deliveryStayRate || 0, '%'), 'deliveryStay'],
         ['Pending1+', row?.pending1, 'pending1'], ['Pending3+', row?.pending3, 'pending3'],
-        ['已退回', row?.returned, 'returned'], ['退回率', display(row?.returnRate || 0, '%'), 'returned']
+        ['已退回', row?.returned, 'returned'], ['退回率', display(row?.returnRate || 0, '%'), 'returned'],
+        ['当前未闭环', row?.unresolved, 'unresolved']
       ];
       return `<section><header><b>${label}</b><small>${number(row?.today || 0)}票</small></header><div>${items.map(([name,value,tab]) => `<button onclick="openShopeeGroupMetric('${group}','${tab}')"><span>${name}</span><strong>${typeof value === 'string' ? value : number(value || 0)}</strong></button>`).join('')}</div></section>`;
     }).join('')}</div>`;
@@ -297,7 +301,7 @@
       const numeric = Number(value);
       return value === null || value === undefined || !Number.isFinite(numeric) ? null : numeric;
     });
-    return `<div class="dispatch-grid">${groups.map(([label,row]) => `<section><b>${label}</b>${rates(row).map((value,index) => `<span>${index+1}派 <i><em style="width:${value === null ? 0 : Math.max(0,Math.min(100,value))}%"></em></i>${value === null ? '—' : `${value.toFixed(2)}%`}</span>`).join('')}</section>`).join('')}</div>`;
+    return `<div class="dispatch-grid">${groups.map(([label,row]) => { const counts=[row?.firstAttemptCount,row?.secondAttemptCount,row?.thirdAttemptCount]; const denominator=Number(row?.denominator ?? row?.dispatchAttemptDenominator ?? row?.today ?? 0); return `<section><b>${label}</b>${rates(row).map((value,index) => `<span>${index+1}派 <i><em style="width:${value === null ? 0 : Math.max(0,Math.min(100,value))}%"></em></i>${value === null ? '—' : `${value.toFixed(2)}% (${number(counts[index] || 0)}/${number(denominator)})`}</span>`).join('')}</section>`; }).join('')}</div>`;
   }
 
   window.DashboardComponents = { icon, renderHome, miniTrend, charts, carryTable, rules };

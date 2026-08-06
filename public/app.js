@@ -755,11 +755,12 @@ function renderShopeePage() {
   shopeeRecipientGroup = type === 'SHOPEECN' ? 'CN' : 'VN';
   previewState.SHOPEE.recipientGroup = shopeeRecipientGroup;
   const metrics = shopeeState.dashboard?.recipientGroups?.[shopeeRecipientGroup]?.metrics || {};
+  const unresolved = Number.isFinite(Number(metrics.unresolved)) ? Number(metrics.unresolved) : Math.max(0, Number(metrics.total || 0) - Number(metrics.pod || 0) - Number(metrics.returned || 0));
   const cards = [
-    ['今日件数',metrics.total,'件'],['今日POD',metrics.pod,'件'],['POD率',metrics.podRate,'%'],['首次妥投率',metrics.firstAttemptRate,'%'],['已退回件',metrics.returned,'件'],['退回率',metrics.returnRate,'%']
+    ['今日件数',metrics.total,'件'],['今日POD',metrics.pod,'件'],['POD率',metrics.podRate,'%'],['已退回件',metrics.returned,'件'],['退回率',metrics.returnRate,'%'],['当前未闭环',unresolved,'件']
   ].map(([label,value,unit],index)=>({key:type.toLowerCase(),label:index?label:type,value:Number(value||0),unit,tone:index===0?'purple':'blue'}));
   const core = [
-    ['Pending1+',metrics.pending1],['Pending2+',metrics.pending2],['Pending3+',metrics.pending3plus],['OC1+',metrics.oc1],['OC2+',metrics.oc2],['OC3+',metrics.oc3plus],['盘点2天+',metrics.cycle2plus],['入库无扫描',metrics.inboundNoScan],['已退回件',metrics.returned],['退回率',metrics.returnRate,'%'],['派送中',metrics.deliveryStay],['派送中率',metrics.deliveryStayRate,'%']
+    ['Pending1+',metrics.pending1],['Pending2+',metrics.pending2],['Pending3+',metrics.pending3plus],['OC1+',metrics.oc1],['OC2+',metrics.oc2],['OC3+',metrics.oc3plus],['盘点2天+',metrics.cycle2plus],['入库无扫描',metrics.inboundNoScan],['已退回件',metrics.returned],['当前未闭环',unresolved],['派送中',metrics.deliveryStay],['派送中率',metrics.deliveryStayRate,'%']
   ].map(([label,value,unit='件'],index)=>({key:`${type}-${index}`,label,value:Number(value||0),unit,ratio:'查看明细'}));
   const regionHtml = `<div class="region-summary-grid">${renderShopeeRegions()}</div>`;
   DashboardV18.renderBusiness(document.getElementById('shopeePage'), DashboardDataAdapterV18.mapBusiness({businessType:type,label:businessLabel(type),reportDate:state.reportDate,cards,core,regions:regionHtml,trendSnapshot:buildBusinessTrendSnapshot(type,state)}, visualMode));
@@ -1922,7 +1923,7 @@ function buildProductionDashboardSnapshot() {
 }
 
 function productionRegion(region = {}) {
-  return { today: Number(region.total || 0), pod: Number(region.pod || 0), podRate: Number(region.podRate || 0), pending1: Number(region.pending1 || 0), pending2: Number(region.pending2 || 0), pending3: Number(region.pending3 || 0), oc1: Number(region.oc1 || 0), oc2: Number(region.oc2 || 0), oc3: Number(region.oc3 || 0), inboundNoScan: Number(region.inboundNoScan || 0), returnPending: Number(region.returnRequired || 0), shopTransit: Number(region.shopTransit || 0), shopArrived: Number(region.shopArrived || 0), shopPending: Number(region.shopPending || 0), shopRetention1: Number(region.shopRetention1 || 0), shopRetention2: Number(region.shopRetention2 || 0), shopRetention3: Number(region.shopRetention3 || 0), firstAttemptRate: nullableNumber(region.dispatchAttempt1Rate), secondAttemptRate: nullableNumber(region.dispatchAttempt2Rate), thirdAttemptRate: nullableNumber(region.dispatchAttempt3Rate) };
+  return { today: Number(region.total || 0), pod: Number(region.pod || 0), podRate: Number(region.podRate || 0), pending1: Number(region.pending1 || 0), pending2: Number(region.pending2 || 0), pending3: Number(region.pending3 || 0), oc1: Number(region.oc1 || 0), oc2: Number(region.oc2 || 0), oc3: Number(region.oc3 || 0), inboundNoScan: Number(region.inboundNoScan || 0), returnPending: Number(region.returnRequired || 0), shopTransit: Number(region.shopTransit || 0), shopArrived: Number(region.shopArrived || 0), shopPending: Number(region.shopPending || 0), shopRetention1: Number(region.shopRetention1 || 0), shopRetention2: Number(region.shopRetention2 || 0), shopRetention3: Number(region.shopRetention3 || 0), firstAttemptRate: nullableNumber(region.dispatchAttempt1Rate), secondAttemptRate: nullableNumber(region.dispatchAttempt2Rate), thirdAttemptRate: nullableNumber(region.dispatchAttempt3Rate), firstAttemptCount: Number(region.dispatchAttempt1Count || 0), secondAttemptCount: Number(region.dispatchAttempt2Count || 0), thirdAttemptCount: Number(region.dispatchAttempt3Count || 0), denominator: Number(region.dispatchAttemptDenominator || region.total || 0) };
 }
 
 function productionRecipient(group) {
@@ -1946,6 +1947,14 @@ function productionRecipient(group) {
     ,returned: metrics.returned
     ,returnRate: metrics.returnRate
     ,returnInProgress: metrics.returnInProgress
+    ,unresolved: Number.isFinite(Number(metrics.unresolved)) ? Number(metrics.unresolved) : Math.max(0, Number(metrics.total || 0) - Number(metrics.pod || 0) - Number(metrics.returned || 0))
+    ,firstAttemptCount: Number(metrics.dispatchAttempt1 || 0)
+    ,secondAttemptCount: Number(metrics.dispatchAttempt2 || 0)
+    ,thirdAttemptCount: Number(metrics.dispatchAttempt3 || 0)
+    ,firstAttemptRate: nullableNumber(metrics.dispatchAttempt1Rate)
+    ,secondAttemptRate: nullableNumber(metrics.dispatchAttempt2Rate)
+    ,thirdAttemptRate: nullableNumber(metrics.dispatchAttempt3Rate)
+    ,denominator: Number(metrics.dispatchAttemptDenominator || metrics.total || 0)
   };
 }
 
@@ -1957,9 +1966,19 @@ function productionDispatchRegion(group, region) {
     || [];
   const sourceRows = finalRows.length ? finalRows : (Array.isArray(detailRows) ? detailRows : []);
   const rows = sourceRows.filter(row => String(row.recipient_group || '').toUpperCase() === group && normalizedRegion(row) === region);
-  if (!rows.length) return { firstAttemptRate: null, secondAttemptRate: null, thirdAttemptRate: null };
-  const count = attempt => rows.filter(row => attempt < 3 ? Number(row.currentAttemptNo || row.podAttemptNo || 0) === attempt : Number(row.currentAttemptNo || row.podAttemptNo || 0) >= 3).length;
-  return { firstAttemptRate: rate(count(1), rows.length), secondAttemptRate: rate(count(2), rows.length), thirdAttemptRate: rate(count(3), rows.length) };
+  if (!rows.length) return { firstAttemptRate: null, secondAttemptRate: null, thirdAttemptRate: null, denominator: 0 };
+  const isPodRow = row => row.currentState === 'POD' || row.POD状态 === 'POD' || row.是否POD === '是';
+  const dayNo = row => {
+    const explicit = Number(row.dispatchDayNo || 0);
+    if (explicit > 0) return Math.min(3, explicit);
+    const start = String(row.reportDate || row.日报日期 || shopeeState.reportDate || '').slice(0, 10);
+    const end = String(row.POD时间 || row.podTime || row.terminalObservedAt || row.lastCheckedAt || row.analysisDate || '').slice(0, 10);
+    const a = Date.parse(`${start}T00:00:00+07:00`), b = Date.parse(`${end}T00:00:00+07:00`);
+    return Number.isFinite(a) && Number.isFinite(b) ? Math.min(3, Math.max(1, Math.floor((b-a)/86400000)+1)) : 0;
+  };
+  const count = attempt => rows.filter(row => isPodRow(row) && (attempt < 3 ? dayNo(row) === attempt : dayNo(row) >= 3)).length;
+  const counts = [count(1), count(2), count(3)];
+  return { firstAttemptRate: rate(counts[0], rows.length), secondAttemptRate: rate(counts[1], rows.length), thirdAttemptRate: rate(counts[2], rows.length), firstAttemptCount: counts[0], secondAttemptCount: counts[1], thirdAttemptCount: counts[2], denominator: rows.length };
 }
 
 function nullableNumber(value) {
@@ -2017,7 +2036,7 @@ function recipientGroupLabel(group = 'ALL') { return ({ ALL: 'SHOPEE全部', CN:
 function detailRows(state, tab) { return state.detailTabs?.[tab]?.rows || []; }
 function longestStay(rows) { const max = Math.max(0, ...rows.map(row => Math.max(Number(row.OC天数 || 0), Number(row.盘点天数 || 0), Number(row.派送中天数 || row.派送中停留天数 || 0), Number(row.门店滞留天数 || row.节点未更新天数 || 0)))); return max ? `${max}天` : '—'; }
 function tabForMetric(type, metric) {
-  const sh = { '今日件数':'all','总件数':'all','签收件数':'pod','已签收':'pod','签收率':'pod','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','盘点2天+':'cycle2','入库无扫描':'inboundNoScan','已退回件':'returned','退回率':'returned','派送中':'deliveryStay','派送中率':'deliveryStay','退回待处理':'returnRequired' };
+  const sh = { '今日件数':'all','总件数':'all','签收件数':'pod','已签收':'pod','签收率':'pod','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','盘点2天+':'cycle2','入库无扫描':'inboundNoScan','已退回件':'returned','退回率':'returned','当前未闭环':'unresolved','派送中':'deliveryStay','派送中率':'deliveryStay','退回待处理':'returnRequired' };
   const cc = { '今日件数':'allData','签收件数':'podClosed','签收率':'podClosed','Pending1+':'pendingAll','Pending2+':'pending2plus','Pending3+':'pending3','OC1+':'ocAll','OC 1天+':'ocAll','OC2+':'oc2plus','OC 2天+':'oc2plus','OC3+':'oc3','OC 3天+':'oc3','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单未处理':'workOrderAbnormal','盘点2天':'cycle2','盘点 2天+':'cycle2','外省未完结POD件':'provinceOpen','在途门店':'shopTransit','到达门店':'shopArrived','门店Pending':'shopPending','门店滞留1天+':'shopRetention1','门店滞留2天+':'shopRetention2','门店滞留3天+':'shopRetention3','门店途中2天':'shopTransit','门店滞留':'shopStuck' };
   return (type === 'SHOPEE' ? sh : cc)[metric] || (type === 'SHOPEE' ? 'all' : 'allData');
 }
