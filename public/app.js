@@ -45,6 +45,10 @@ function separateLegacyPanels() {
     const title = section.querySelector('h3')?.textContent || '';
     if (title.includes('导出与长期备份') || title.includes('操作日志') || title.includes('数据管理')) section.hidden = true;
   });
+  const authPanel = grid.querySelector('.auth-panel');
+  if (authPanel && !document.getElementById('currentAccountSummary')) {
+    authPanel.querySelector('.panel-title')?.insertAdjacentHTML('afterend', '<div class="internal-account-bar"><div><small>当前系统账户</small><strong id="currentAccountSummary">—</strong></div><button class="btn ghost compact" type="button" onclick="switchInternalAccount()">切换账户</button></div>');
+  }
   if (!document.getElementById('networkSettingsPanel')) grid.insertAdjacentHTML('beforeend', '<section id="networkSettingsPanel" class="panel operation-panel"><div class="panel-title"><h3>网络与访问</h3></div><div id="networkAccessCards"></div></section>');
 }
 
@@ -209,7 +213,7 @@ async function loadUserManagement(includeDeleted = false) {
   if (!target || accessSession.user?.role !== 'ADMIN') return;
   try {
     const result = await api(`/api/admin/users${includeDeleted ? '?includeDeleted=1' : ''}`);
-    target.innerHTML = `<div class="table-toolbar"><button class="text-button" onclick="loadUserManagement(${includeDeleted ? 'false' : 'true'})">${includeDeleted ? '隐藏已删除用户' : '查看已删除用户'}</button></div><table class="preview-table"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${(result.rows || []).map(row => `<tr><td>${escapeHtml(row.username)}</td><td>${escapeHtml(row.displayName)}</td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.businessScope)}</td><td>${escapeHtml(row.status === 'DELETED' ? '已删除' : (row.enabled ? '启用' : '停用'))}</td><td>${escapeHtml(row.lastLoginAt || '—')}</td><td class="user-actions">${row.status === 'DELETED' ? `<button class="text-button" onclick="restoreInternalUser(${Number(row.id)})">恢复用户</button>` : `<button class="text-button" onclick="toggleInternalUser(${Number(row.id)},${row.enabled ? 'false' : 'true'})">${row.enabled ? '停用' : '启用'}</button><button class="text-button" onclick="resetInternalUserPassword(${Number(row.id)})">重置密码</button><button class="text-button" onclick="revokeInternalUserSessions(${Number(row.id)})">强制退出</button><button class="text-button danger-action" onclick="deleteInternalUser(${Number(row.id)},'${escapeAttr(row.username)}')">删除用户</button>`}</td></tr>`).join('')}</tbody></table>`;
+    target.innerHTML = `<div class="table-toolbar"><button class="text-button" onclick="loadUserManagement(${includeDeleted ? 'false' : 'true'})">${includeDeleted ? '隐藏已删除用户' : '查看已删除用户'}</button></div><table class="preview-table user-table"><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead><tbody>${(result.rows || []).map(row => `<tr><td>${escapeHtml(row.username)}</td><td>${escapeHtml(row.displayName)}</td><td>${escapeHtml(row.role)}</td><td>${escapeHtml(row.businessScope)}</td><td>${escapeHtml(row.status === 'DELETED' ? '已删除' : (row.enabled ? '启用' : '停用'))}</td><td>${escapeHtml(row.lastLoginAt || '—')}</td><td class="user-actions">${row.status === 'DELETED' ? `<button class="text-button" onclick="restoreInternalUser(${Number(row.id)})">恢复</button><button class="text-button danger-action" onclick="permanentlyDeleteInternalUser(${Number(row.id)},'${escapeAttr(row.username)}')">永久删除</button>` : `<button class="text-button" onclick="toggleInternalUser(${Number(row.id)},${row.enabled ? 'false' : 'true'})">${row.enabled ? '停用' : '启用'}</button><button class="text-button" onclick="resetInternalUserPassword(${Number(row.id)})">重置密码</button><button class="text-button" onclick="revokeInternalUserSessions(${Number(row.id)})">强制退出</button><button class="text-button danger-action" onclick="deleteInternalUser(${Number(row.id)},'${escapeAttr(row.username)}')">删除用户</button>`}</td></tr>`).join('')}</tbody></table>`;
   } catch (error) { target.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message)}</div>`; }
 }
 
@@ -250,6 +254,27 @@ async function restoreInternalUser(id) {
   if (!confirm('恢复后该用户需要使用管理员重置后的密码重新登录。')) return;
   try { await api(`/api/admin/users/${id}/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); await loadUserManagement(true); }
   catch (error) { alert(`恢复失败：${error.message}`); }
+}
+
+async function permanentlyDeleteInternalUser(id, username) {
+  if (!confirm(`永久删除后无法恢复用户 ${username}。审计记录仍会保留，确定继续？`)) return;
+  const confirmation = prompt(`请准确输入用户名 ${username} 确认永久删除：`);
+  if (confirmation === null) return;
+  try {
+    await api(`/api/admin/users/${id}/permanent`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: confirmation }) });
+    alert(`用户 ${username} 已永久删除。`);
+    await loadUserManagement(true);
+  } catch (error) { alert(`永久删除失败：${error.message}`); }
+}
+
+async function switchInternalAccount() {
+  if (!confirm('确定退出当前系统账户并切换到其他账户？')) return;
+  try {
+    await api('/api/internal-auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  } catch (error) {
+    console.warn('Logout request failed:', error.message);
+  }
+  location.assign('/');
 }
 
 function pageFromPath() {
@@ -392,6 +417,8 @@ function renderTopbar() {
   document.querySelectorAll('.admin-only').forEach(element => { element.hidden = user.role !== 'ADMIN'; });
   document.getElementById('headerUserName').textContent = user.displayName || user.email || '本地用户';
   document.getElementById('headerUserRole').textContent = `${user.department || '质控部'} · ${user.role || 'VIEWER'}`;
+  const accountSummary = document.getElementById('currentAccountSummary');
+  if (accountSummary) accountSummary.textContent = `${user.displayName || user.username || user.email || '本地用户'} · ${user.role || 'VIEWER'}`;
   const notification = document.getElementById('notificationCount');
   const unread = Number(accessSession.unreadNotifications || 0);
   if (notification) { notification.hidden = unread <= 0; notification.textContent = unread > 99 ? '99+' : String(unread); }

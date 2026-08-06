@@ -251,6 +251,30 @@ app.post('/api/admin/users/:id/restore', requireRole('ADMIN'), (req, res) => {
   res.json({ ok: true });
 });
 
+app.delete('/api/admin/users/:id/permanent', requireRole('ADMIN'), (req, res) => {
+  const id = Number(req.params.id || 0);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: '用户编号无效。' });
+  const db = getDb();
+  const user = db.prepare("SELECT * FROM users WHERE id=? AND status='DELETED'").get(id);
+  if (!user) return res.status(404).json({ ok: false, error: '仅已删除用户可以永久删除。' });
+  const confirmation = String(req.body?.username || '').trim().toLowerCase();
+  if (confirmation !== String(user.username || '').trim().toLowerCase()) {
+    return res.status(400).json({ ok: false, error: `请输入完整用户名 ${user.username} 进行确认。` });
+  }
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('DELETE FROM user_sessions WHERE userId=?').run(id);
+    const removed = db.prepare("DELETE FROM users WHERE id=? AND status='DELETED'").run(id);
+    if (Number(removed.changes || 0) !== 1) throw new Error('用户状态已变化，请刷新后重试。');
+    auditAction(req, 'USER_PERMANENTLY_DELETED', { userId: id, username: user.username });
+    db.exec('COMMIT');
+    res.json({ ok: true, deletedUser: { id, username: user.username } });
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    res.status(500).json({ ok: false, error: `永久删除用户失败：${error.message}` });
+  }
+});
+
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
