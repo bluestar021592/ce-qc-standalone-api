@@ -103,18 +103,19 @@ export function carryoverSummary(reportDate) {
 
 export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shopeeSnapshot = null }) {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM unified_snapshots WHERE reportDate=? AND status IN ('IMPORTED','COMPLETED') ORDER BY createdAt DESC LIMIT 1").get(reportDate);
+  const row = db.prepare("SELECT * FROM unified_snapshots WHERE reportDate=? AND status IN ('IMPORTED','COMPLETED','INVALID_FAILED_RECONCILIATION') ORDER BY createdAt DESC LIMIT 1").get(reportDate);
   if (!row) return null;
   const payload = JSON.parse(row.payloadJson || '{}');
   const typeByBill = new Map(db.prepare('SELECT shipmentCode,businessType FROM unified_import_rows WHERE snapshotId=?').all(row.snapshotId).map(item => [item.shipmentCode, item.businessType]));
-  const normalizeRows = rows => (rows || []).map(item => {
-    const shipmentCode = String(item.shipmentCode || item.运单号 || '').trim().toUpperCase();
-    return { ...item, shipmentCode, 运单号: shipmentCode, businessType: typeByBill.get(shipmentCode) || item.businessType || 'CE' };
-  });
+  const partitionedRows = partitionUnifiedRows(
+    [...(ccslSnapshot?.state?.finalRows || []), ...(shopeeSnapshot?.state?.finalRows || [])],
+    typeByBill
+  );
   const completedAt = nowIso();
   payload.completedAt = completedAt;
   payload.sourceSnapshots = { CCSL: ccslSnapshot?.snapshotId || '', SHOPEE: shopeeSnapshot?.snapshotId || '' };
-  payload.finalRows = [...normalizeRows(ccslSnapshot?.state?.finalRows), ...normalizeRows(shopeeSnapshot?.state?.finalRows)];
+  payload.finalRows = partitionedRows.dailyRows;
+  payload.historicalCarryRows = partitionedRows.historicalCarryRows;
   payload.dashboard = { CCSL: ccslSnapshot?.view || null, SHOPEE: shopeeSnapshot?.view || null };
   const expectedCounts = Object.fromEntries(db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(row.snapshotId).map(item => [item.businessType, Number(item.count)]));
   const businessTypes = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
@@ -179,6 +180,28 @@ export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shope
   }
   db.prepare("UPDATE unified_snapshots SET status='COMPLETED',payloadJson=? WHERE snapshotId=?").run(JSON.stringify(payload), row.snapshotId);
   return { snapshotId: row.snapshotId, reportDate, finalRowCount: payload.finalRows.length, parentRun: payload.parentRun, reconciliation: payload.reconciliation };
+}
+
+export function partitionUnifiedRows(rows = [], typeByBill = new Map()) {
+  const dailyByBill = new Map();
+  const carryByBill = new Map();
+  for (const item of rows || []) {
+    const shipmentCode = codeOf(item);
+    if (!shipmentCode) continue;
+    const importedType = typeByBill.get(shipmentCode);
+    const normalized = {
+      ...item,
+      shipmentCode,
+      运单号: shipmentCode,
+      businessType: importedType || item.businessType || 'CE'
+    };
+    if (importedType) dailyByBill.set(shipmentCode, normalized);
+    else carryByBill.set(shipmentCode, normalized);
+  }
+  return {
+    dailyRows: [...dailyByBill.values()],
+    historicalCarryRows: [...carryByBill.values()]
+  };
 }
 
 export function listCompletedUnifiedSnapshots(fromDate, toDate) {
