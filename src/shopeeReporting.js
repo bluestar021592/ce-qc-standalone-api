@@ -181,6 +181,7 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
   const groupRows = uniqueRows(select(rows));
   const groups = buildGroups(groupRows, select(carryRows), select(nextCarryRows));
   Object.assign(groups, buildStoreGroups(groupRows));
+  const regions = buildRegionSummary(groupDaily, groupRows);
   const eligibleFirstAttempt = groupDaily.filter(row => row.API状态 !== '失败' && row.查询状态 !== 'refresh_failed' && Boolean(row.finalRowAvailable));
   const firstAttempt = eligibleFirstAttempt.filter(row => isPod(row) && Number(row.Pending最大次数 || row.Pending次数 || 0) === 0 && Number(row.OC最大天数 || row.OC天数 || 0) === 0);
   const pod = groupDaily.filter(isPod);
@@ -194,6 +195,7 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
     dailyRows: groupDaily,
     monitorRows: groupRows,
     monitorCount: groupRows.length,
+    regions,
     groups: { ...groups, all: groupDaily, pod, firstAttempt, unresolved },
     metrics: {
       total: groupDaily.length,
@@ -365,6 +367,7 @@ function publicGroupSummary(summary) {
     group: summary.group,
     metrics: summary.metrics,
     monitorCount: summary.monitorCount,
+    regions: summary.regions,
     detailCounts: Object.fromEntries(Object.entries(summary.groups).map(([key, rows]) => [key, rows.length]))
   };
 }

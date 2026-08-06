@@ -52,3 +52,24 @@ test('588 tickets reconcile without losing the three unresolved shipments', () =
   const metrics = view.recipientGroups.VN.metrics;
   assert.deepEqual({ total: metrics.total, pod: metrics.pod, returned: metrics.returned, unresolved: metrics.unresolved, difference: metrics.accountingDifference }, { total: 588, pod: 542, returned: 43, unresolved: 3, difference: 0 });
 });
+
+test('dispatch attempts are isolated to CN/VN and PP/PV dimensions', () => {
+  const rows = [
+    row('CN-PP-D1', 'POD', { recipient_group: 'CN', regionCode: 'PP', POD时间: '2026-07-01 18:00:00' }),
+    row('CN-PV-D2', 'POD', { recipient_group: 'CN', regionCode: 'PV', POD时间: '2026-07-02 08:00:00' }),
+    row('VN-PP-D3', 'POD', { recipient_group: 'VN', regionCode: 'PP', POD时间: '2026-07-03 08:00:00' }),
+    row('VN-PV-OPEN', 'OPEN_TRACK_REQUIRED', { recipient_group: 'VN', regionCode: 'PV' }),
+    row('CE-NOT-SHOPEE', 'POD', { recipient_group: 'CE', regionCode: 'PP', POD时间: '2026-07-01 10:00:00' })
+  ];
+  const view = buildShopeeDashboard({ reportDate: '2026-07-01', pnhBills: rows.map(item => item.shipmentCode), finalRows: rows });
+
+  assert.deepEqual([
+    view.recipientGroups.CN.regions.PP.dispatchAttempt1Count,
+    view.recipientGroups.CN.regions.PV.dispatchAttempt2Count,
+    view.recipientGroups.VN.regions.PP.dispatchAttempt3Count,
+    view.recipientGroups.VN.regions.PV.dispatchAttemptDenominator
+  ], [1, 1, 1, 1]);
+  assert.equal(view.recipientGroups.CN.metrics.total, 2);
+  assert.equal(view.recipientGroups.VN.metrics.total, 2);
+  assert.equal(view.recipientGroups.ALL.metrics.total, 4);
+});

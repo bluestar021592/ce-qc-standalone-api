@@ -882,7 +882,8 @@ function renderShopeeRecipientTrends() {
 }
 
 function renderShopeeRegions() {
-  const regions = shopeeState.dashboard?.regions || {};
+  const selectedGroup = ['CN', 'VN'].includes(shopeeRecipientGroup) ? shopeeRecipientGroup : 'ALL';
+  const regions = shopeeState.dashboard?.recipientGroups?.[selectedGroup]?.regions || {};
   return ['PP', 'PV'].map(code => `<article class="panel region-card ${code.toLowerCase()}">${renderRegionBlock(code, regions[code] || {})}</article>`).join('');
 }
 
