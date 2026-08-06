@@ -729,9 +729,20 @@ function renderCcslPage() {
   const state = currentBusinessState();
   const type = currentBusinessType();
   const metrics = ccslMetrics(state);
+  const accounting = businessAccounting(state, metrics);
   const businessDefs = businessKpiDefsForState(type, state, metrics);
-  const cards = businessDefs.slice(0, 6).map(([label,value,trend,unit,color], index) => ({ key:type.toLowerCase(), label:index ? label : type, value:Number(value || 0), unit:unit || '件', tone:color }));
-  const core = businessDefs.slice(3,15).map(([label,value,trend,unit], index) => ({key:`${type}-${index}`,label,value:Number(value || 0),unit:unit || '件',ratio:'查看明细'}));
+  state.detailTabs ||= {};
+  state.detailTabs.accountingReturned = { rows: accounting.returnedRows };
+  state.detailTabs.accountingOpen = { rows: accounting.openRows };
+  const cards = [
+    [type, accounting.total, '件', 'blue', 'POD + 已退回 + 未闭环'],
+    ['签收件数', accounting.pod, '件', 'green', '互斥票数'],
+    ['已退回件', accounting.returned, '件', 'orange', '互斥票数'],
+    ['当前未闭环', accounting.open, '件', 'red', '互斥票数'],
+    ['签收率', accounting.podRate, '%', 'purple', '比例指标，不参与相加'],
+    ['对账差异', accounting.difference, '件', accounting.difference ? 'red' : 'green', '总票数 - 三类互斥票数']
+  ].map(([label,value,unit,tone,ratio], index) => ({ key:type.toLowerCase(), label, value:Number(value || 0), unit, tone, ratio, metricKey:index }));
+  const core = businessDefs.slice(3).map(([label,value,trend,unit], index) => ({key:`${type}-${index}`,label,value:Number(value || 0),unit:unit || '件',ratio:'异常标签，可与其他指标重叠'}));
   DashboardV18.renderBusiness(document.getElementById('ccslPage'), DashboardDataAdapterV18.mapBusiness({businessType:type,label:businessLabel(type),reportDate:state.reportDate,cards,core,trendSnapshot:buildBusinessTrendSnapshot(type,state)}, visualMode));
 }
 
@@ -758,7 +769,7 @@ function renderShopeePage() {
   const unresolved = Number.isFinite(Number(metrics.unresolved)) ? Number(metrics.unresolved) : Math.max(0, Number(metrics.total || 0) - Number(metrics.pod || 0) - Number(metrics.returned || 0));
   const cards = [
     ['今日件数',metrics.total,'件'],['今日POD',metrics.pod,'件'],['POD率',metrics.podRate,'%'],['已退回件',metrics.returned,'件'],['退回率',metrics.returnRate,'%'],['当前未闭环',unresolved,'件']
-  ].map(([label,value,unit],index)=>({key:type.toLowerCase(),label:index?label:type,value:Number(value||0),unit,tone:index===0?'purple':'blue'}));
+  ].map(([label,value,unit],index)=>({key:type.toLowerCase(),label:index?label:type,value:Number(value||0),unit,tone:index===0?'purple':'blue',metricKey:index,ratio:unit==='%'?'比例指标，不参与相加':(index===0?'POD + 已退回 + 未闭环':'互斥票数')}));
   const core = [
     ['Pending1+',metrics.pending1],['Pending2+',metrics.pending2],['Pending3+',metrics.pending3plus],['OC1+',metrics.oc1],['OC2+',metrics.oc2],['OC3+',metrics.oc3plus],['盘点2天+',metrics.cycle2plus],['入库无扫描',metrics.inboundNoScan],['已退回件',metrics.returned],['当前未闭环',unresolved],['派送中',metrics.deliveryStay],['派送中率',metrics.deliveryStayRate,'%']
   ].map(([label,value,unit='件'],index)=>({key:`${type}-${index}`,label,value:Number(value||0),unit,ratio:'查看明细'}));
@@ -1048,6 +1059,20 @@ function trendWithCurrent(reportDate, value, status = 'volume') {
 function ccslMetrics(sourceState = appState) {
   const dashboard = sourceState.dashboard || {};
   return { total: Number(dashboard.pnh || dashboard.totalMonitored || 0), pod: Number(dashboard.todayPod || 0), podRate: Number(dashboard.podRate || 0), abnormal: Number(dashboard.abnormalCount || 0), pending: Number(dashboard.categories?.pendingTotal || 0), oc: Number(dashboard.categories?.ocTotal || 0) };
+}
+
+function businessAccounting(sourceState = {}, metrics = ccslMetrics(sourceState)) {
+  const rows = normalizedFinalRows(sourceState);
+  const isPod = row => row.currentState === 'POD' || row.scanNormalizedState === 'POD' || String(row.orderStatus || '') === '85' || row.POD状态 === 'POD' || row.是否POD === '是';
+  const isReturned = row => !isPod(row) && (row.currentState === 'RETURN_COMPLETED' || row.退回状态 === '已退回' || row.scanNormalizedState === 'RETURN_COMPLETED');
+  const podRows = rows.filter(isPod);
+  const returnedRows = rows.filter(isReturned);
+  const openRows = rows.filter(row => !isPod(row) && !isReturned(row));
+  const total = rows.length || Number(metrics.total || 0);
+  const pod = rows.length ? podRows.length : Number(metrics.pod || 0);
+  const returned = rows.length ? returnedRows.length : 0;
+  const open = rows.length ? openRows.length : Math.max(0, total - pod - returned);
+  return { total, pod, returned, open, difference: total - pod - returned - open, podRate: total ? Number(((pod / total) * 100).toFixed(2)) : 0, podRows, returnedRows, openRows };
 }
 
 function shopeeMetrics() {
@@ -2038,7 +2063,7 @@ function detailRows(state, tab) { return state.detailTabs?.[tab]?.rows || []; }
 function longestStay(rows) { const max = Math.max(0, ...rows.map(row => Math.max(Number(row.OC天数 || 0), Number(row.盘点天数 || 0), Number(row.派送中天数 || row.派送中停留天数 || 0), Number(row.门店滞留天数 || row.节点未更新天数 || 0)))); return max ? `${max}天` : '—'; }
 function tabForMetric(type, metric) {
   const sh = { '今日件数':'all','总件数':'all','签收件数':'pod','已签收':'pod','签收率':'pod','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','盘点2天+':'cycle2','入库无扫描':'inboundNoScan','已退回件':'returned','退回率':'returned','当前未闭环':'unresolved','派送中':'deliveryStay','派送中率':'deliveryStay','退回待处理':'returnRequired' };
-  const cc = { '今日件数':'allData','签收件数':'podClosed','签收率':'podClosed','Pending1+':'pendingAll','Pending2+':'pending2plus','Pending3+':'pending3','OC1+':'ocAll','OC 1天+':'ocAll','OC2+':'oc2plus','OC 2天+':'oc2plus','OC3+':'oc3','OC 3天+':'oc3','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单未处理':'workOrderAbnormal','盘点2天':'cycle2','盘点 2天+':'cycle2','外省未完结POD件':'provinceOpen','在途门店':'shopTransit','到达门店':'shopArrived','门店Pending':'shopPending','门店滞留1天+':'shopRetention1','门店滞留2天+':'shopRetention2','门店滞留3天+':'shopRetention3','门店途中2天':'shopTransit','门店滞留':'shopStuck' };
+  const cc = { '今日件数':'allData','签收件数':'podClosed','签收率':'podClosed','已退回件':'accountingReturned','当前未闭环':'accountingOpen','对账差异':'allData','Pending1+':'pendingAll','Pending2+':'pending2plus','Pending3+':'pending3','OC1+':'ocAll','OC 1天+':'ocAll','OC2+':'oc2plus','OC 2天+':'oc2plus','OC3+':'oc3','OC 3天+':'oc3','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单未处理':'workOrderAbnormal','盘点2天':'cycle2','盘点 2天+':'cycle2','外省未完结POD件':'provinceOpen','在途门店':'shopTransit','到达门店':'shopArrived','门店Pending':'shopPending','门店滞留1天+':'shopRetention1','门店滞留2天+':'shopRetention2','门店滞留3天+':'shopRetention3','门店途中2天':'shopTransit','门店滞留':'shopStuck' };
   return (type === 'SHOPEE' ? sh : cc)[metric] || (type === 'SHOPEE' ? 'all' : 'allData');
 }
 function tabLabel(type, key) {

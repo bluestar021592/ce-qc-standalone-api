@@ -76,3 +76,14 @@ test('business dashboard keeps a real detail preview target for metric navigatio
   assert.match(dashboard, /ccslPreviewPanel/);
   assert.match(dashboard, /v18-detail-preview/);
 });
+
+test('business dashboards expose mutually exclusive accounting buckets', () => {
+  const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
+  const dashboard = fs.readFileSync(path.join(publicDir, 'dashboard-v18.js'), 'utf8');
+  assert.match(app, /function businessAccounting/);
+  assert.match(app, /total - pod - returned - open/);
+  assert.match(app, /\['已退回件', accounting\.returned/);
+  assert.match(app, /\['当前未闭环', accounting\.open/);
+  assert.match(app, /异常标签，可与其他指标重叠/);
+  assert.match(dashboard, /row\.ratio\|\|'占比可追溯'/);
+});
