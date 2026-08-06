@@ -36,7 +36,10 @@
         const dot = svgNode('circle', { cx: x, cy: y, r: 3, fill: series.color, 'clip-path': `url(#${clipId})` }), title = svgNode('title');
         const numerator = series.numerators[index], denominator = series.denominators[index]; title.textContent = `${chart.dates[index]} · ${series.name} · ${Number.isFinite(numerator) && Number.isFinite(denominator) ? `${numerator}/${denominator} · ` : ''}${fmt(value, chart.type)}`; dot.appendChild(title); svg.appendChild(dot);
       });
-      if (segment.length >= 2) svg.appendChild(svgNode('polyline', { points: segment.map(point => `${point.x},${point.y}`).join(' '), fill: 'none', stroke: series.color, 'stroke-width': '2.2', 'clip-path': `url(#${clipId})` }));
+      // Missing dates stay missing, but real snapshots on either side remain one
+      // chronological series. This avoids hiding a valid trend merely because a
+      // non-processing day exists between two completed snapshots.
+      if (segment.length >= 2) svg.appendChild(svgNode('polyline', { points: segment.map(point => `${point.x},${point.y}`).join(' '), fill: 'none', stroke: series.color, 'stroke-width': '2.2', 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'clip-path': `url(#${clipId})` }));
       if (!lastPoint) return;
       const baseY = Math.max(13, Math.min(height - pad.b - 4, lastPoint.y - 7));
       const candidates = [baseY];

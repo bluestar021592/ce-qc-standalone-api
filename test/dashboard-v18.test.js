@@ -84,6 +84,16 @@ test('business dashboards expose mutually exclusive accounting buckets', () => {
   assert.match(app, /total - pod - returned - open/);
   assert.match(app, /\['已退回件', accounting\.returned/);
   assert.match(app, /\['当前未闭环', accounting\.open/);
-  assert.match(app, /异常标签，可与其他指标重叠/);
-  assert.match(dashboard, /row\.ratio\|\|'占比可追溯'/);
+  assert.match(app, /占本业务.*toFixed\(2\).*%/);
+  assert.match(dashboard, /row\.ratio\|\|'占总票数 0\.00%'/);
+});
+
+test('dashboard ratios are explicit and completed history drives trend lines', () => {
+  const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
+  const chart = fs.readFileSync(path.join(publicDir, 'dashboard-chart-v18.js'), 'utf8');
+  assert.match(app, /占总票数/);
+  assert.match(app, /state\.historySummary/);
+  assert.match(app, /preferHistory\('podRate'/);
+  assert.match(chart, /segment\.length >= 2/);
+  assert.doesNotMatch(chart, /占比可追溯/);
 });

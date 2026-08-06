@@ -730,6 +730,7 @@ function renderCcslPage() {
   const type = currentBusinessType();
   const metrics = ccslMetrics(state);
   const accounting = businessAccounting(state, metrics);
+  const share = value => `占本业务 ${rate(Number(value || 0), accounting.total).toFixed(2)}%`;
   const businessDefs = businessKpiDefsForState(type, state, metrics);
   state.detailTabs ||= {};
   state.detailTabs.accountingReturned = { rows: accounting.returnedRows };
@@ -741,8 +742,8 @@ function renderCcslPage() {
     ['当前未闭环', accounting.open, '件', 'red', '互斥票数'],
     ['签收率', accounting.podRate, '%', 'purple', '比例指标，不参与相加'],
     ['对账差异', accounting.difference, '件', accounting.difference ? 'red' : 'green', '总票数 - 三类互斥票数']
-  ].map(([label,value,unit,tone,ratio], index) => ({ key:type.toLowerCase(), label, value:Number(value || 0), unit, tone, ratio, metricKey:index }));
-  const core = businessDefs.slice(3).map(([label,value,trend,unit], index) => ({key:`${type}-${index}`,label,value:Number(value || 0),unit:unit || '件',ratio:'异常标签，可与其他指标重叠'}));
+  ].map(([label,value,unit,tone], index) => ({ key:type.toLowerCase(), label, value:Number(value || 0), unit, tone, ratio:index === 0 ? '占本业务 100.00%' : share(value), metricKey:index }));
+  const core = businessDefs.slice(3).map(([label,value,trend,unit], index) => ({key:`${type}-${index}`,label,value:Number(value || 0),unit:unit || '件',ratio:`占本业务 ${rate(Number(value || 0), accounting.total).toFixed(2)}%` }));
   DashboardV18.renderBusiness(document.getElementById('ccslPage'), DashboardDataAdapterV18.mapBusiness({businessType:type,label:businessLabel(type),reportDate:state.reportDate,cards,core,trendSnapshot:buildBusinessTrendSnapshot(type,state)}, visualMode));
 }
 
@@ -767,12 +768,14 @@ function renderShopeePage() {
   previewState.SHOPEE.recipientGroup = shopeeRecipientGroup;
   const metrics = shopeeState.dashboard?.recipientGroups?.[shopeeRecipientGroup]?.metrics || {};
   const unresolved = Number.isFinite(Number(metrics.unresolved)) ? Number(metrics.unresolved) : Math.max(0, Number(metrics.total || 0) - Number(metrics.pod || 0) - Number(metrics.returned || 0));
+  const total = Number(metrics.total || 0);
+  const share = value => `占本业务 ${rate(Number(value || 0), total).toFixed(2)}%`;
   const cards = [
     ['今日件数',metrics.total,'件'],['今日POD',metrics.pod,'件'],['POD率',metrics.podRate,'%'],['已退回件',metrics.returned,'件'],['退回率',metrics.returnRate,'%'],['当前未闭环',unresolved,'件']
-  ].map(([label,value,unit],index)=>({key:type.toLowerCase(),label:index?label:type,value:Number(value||0),unit,tone:index===0?'purple':'blue',metricKey:index,ratio:unit==='%'?'比例指标，不参与相加':(index===0?'POD + 已退回 + 未闭环':'互斥票数')}));
+  ].map(([label,value,unit],index)=>({key:type.toLowerCase(),label:index?label:type,value:Number(value||0),unit,tone:index===0?'purple':'blue',metricKey:index,ratio:index===0?'占本业务 100.00%':share(value)}));
   const core = [
     ['Pending1+',metrics.pending1],['Pending2+',metrics.pending2],['Pending3+',metrics.pending3plus],['OC1+',metrics.oc1],['OC2+',metrics.oc2],['OC3+',metrics.oc3plus],['盘点2天+',metrics.cycle2plus],['入库无扫描',metrics.inboundNoScan],['已退回件',metrics.returned],['当前未闭环',unresolved],['派送中',metrics.deliveryStay],['派送中率',metrics.deliveryStayRate,'%']
-  ].map(([label,value,unit='件'],index)=>({key:`${type}-${index}`,label,value:Number(value||0),unit,ratio:'查看明细'}));
+  ].map(([label,value,unit='件'],index)=>({key:`${type}-${index}`,label,value:Number(value||0),unit,ratio:share(value)}));
   const regionHtml = `<div class="region-summary-grid">${renderShopeeRegions()}</div>`;
   DashboardV18.renderBusiness(document.getElementById('shopeePage'), DashboardDataAdapterV18.mapBusiness({businessType:type,label:businessLabel(type),reportDate:state.reportDate,cards,core,regions:regionHtml,trendSnapshot:buildBusinessTrendSnapshot(type,state)}, visualMode));
   shopeeState = aggregate;
@@ -926,10 +929,24 @@ function buildBusinessTrendSnapshot(type, state) {
   const podKey = isShopee ? `${group}_POD率` : '首投POD率';
   const ocCountKey = isShopee ? `${group}_OC1+` : 'OC1+';
   const firstKey = isShopee ? `${group}_首派成功率` : '首投POD率';
-  const totalTrend = metricTrend(state, totalKey);
-  const ocRateTrend = ratioTrend(metricTrend(state, ocCountKey), totalTrend);
-  const podRateTrend = metricTrend(state, podKey);
-  const firstRateTrend = metricTrend(state, firstKey);
+  const history = Array.isArray(state.historySummary) ? state.historySummary : [];
+  const historyTrend = field => {
+    const end = new Date(`${state.reportDate || new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+    const values = new Map(history.map(item => [item.reportDate, Number(item.summary?.[field])]).filter(([, value]) => Number.isFinite(value)));
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(end); day.setUTCDate(end.getUTCDate() + index - 6);
+      const date = day.toISOString().slice(0, 10), value = values.has(date) ? values.get(date) : null;
+      return { date, value, hasData: value !== null, status: value === null ? 'missing' : 'normal' };
+    });
+  };
+  const preferHistory = (field, fallback) => {
+    const trend = historyTrend(field);
+    return trend.some(item => item.hasData) ? trend : fallback;
+  };
+  const totalTrend = preferHistory('today', metricTrend(state, totalKey));
+  const ocRateTrend = preferHistory('ocRate', ratioTrend(metricTrend(state, ocCountKey), totalTrend));
+  const podRateTrend = preferHistory('podRate', metricTrend(state, podKey));
+  const firstRateTrend = preferHistory('firstPodRate', metricTrend(state, firstKey));
   const fallbackMetrics = isShopee ? recipientMetrics(group) : ccslMetrics(state);
   const ensured = (trend, value) => validTrend(trend).some(item => item.hasData) ? trend : trendWithCurrent(state.reportDate, value, 'normal');
   const totalValues = trendValues(ensured(totalTrend, fallbackMetrics.total));
@@ -1905,7 +1922,12 @@ function buildProductionDashboardSnapshot() {
     ['shopeecn', 'SHOPEE CN', hasUnifiedCounts ? Number(importedCounts.SHOPEECN || 0) : Number(shopeeState.dashboard?.recipientGroups?.CN?.metrics?.total || 0), 'purple'],
     ['shopeevn', 'SHOPEE VN', hasUnifiedCounts ? Number(importedCounts.SHOPEEVN || 0) : Number(shopeeState.dashboard?.recipientGroups?.VN?.metrics?.total || 0), 'red'],
     ['ali1688', 'ALI1688', Number(importedCounts.ALI1688 || 0), 'cyan']
-  ].map(([key, label, value, tone]) => ({ key, label, value, tone }));
+  ];
+  const businessTotal = Number(businessCards[0]?.[2] || 0);
+  const businessCardsWithRatios = businessCards.map(([key, label, value, tone], index) => ({
+    key, label, value, tone,
+    ratio: `占总票数 ${index === 0 ? '100.00' : rate(Number(value || 0), businessTotal).toFixed(2)}%`
+  }));
   const coreMetrics = [
     ['pending-discontinuous','Pending不连续',metricValue(appState,'Pending不连续')], ['pending3','Pending 3天+',metricValue(appState,'Pending3+')],
     ['oc1','OC 1天+',metricValue(appState,'OC1+')], ['store-retention','门店滞留',metricValue(appState,'门店滞留2天+')],
@@ -1914,10 +1936,13 @@ function buildProductionDashboardSnapshot() {
     ['first-rate','首次妥投率',cc.podRate,'%'], ['today-pod','今日POD',cc.pod], ['pod-rate','POD率',rate(cc.pod,cc.total),'%'],
     ['province-open','外省未完结POD件',metricValue(appState,'外省未完结POD件') || provinceOpenCount],
     ['self-pickup','仓库自提件',metricValue(appState,'仓库自提件')], ['cecn','CECN滞留包裹',metricValue(appState,'CECN滞留包裹')], ['cezt','CEZT滞留包裹',metricValue(appState,'CEZT滞留包裹')], ['580','580滞留包裹',metricValue(appState,'580滞留包裹')]
-  ].map(([key,label,value,unit='件']) => ({ key,label,value,unit }));
+  ].map(([key,label,value,unit='件']) => ({
+    key, label, value, unit,
+    ratio: unit === '%' ? `当前 ${Number(value || 0).toFixed(2)}%` : `占CCSL ${rate(Number(value || 0), cc.total).toFixed(2)}%`
+  }));
   return {
     reportDate: date,
-    businessCards,
+    businessCards: businessCardsWithRatios,
     coreMetrics,
     topKpis,
     ccsl: {
