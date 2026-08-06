@@ -10,6 +10,7 @@ import ExcelJS from 'exceljs';
 import { getRuntimeConfig } from './db.js';
 import { listCompletedUnifiedSnapshots } from './unifiedImportStore.js';
 import { fileHash, recordExport } from './backup.js';
+import { createShopeeTemplateWorkbook } from './shopeeTemplateExporter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUSINESSES = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
@@ -134,6 +135,9 @@ function addManagementDashboard(sheet, rows, snapshots, range) {
 }
 
 async function createBusinessWorkbook({ type, periodType, range, snapshots, outputDir }) {
+  if (type === 'SHOPEECN' || type === 'SHOPEEVN') {
+    return (await createShopeeTemplateWorkbook({ type, periodType, range, snapshots, outputDir })).file;
+  }
   const template = path.join(TEMPLATE_DIR, `${type}_商务蓝白浅框线版_指标独立明细跳转.xlsx`);
   const zip = await JSZip.loadAsync(await fs.readFile(template));
   const rows = snapshots.flatMap(snapshot => (snapshot.payload.finalRows || []).filter(row => row.businessType === type).map(row => ({ ...row, reportDate: row.reportDate || snapshot.reportDate, snapshotId: snapshot.snapshotId })));

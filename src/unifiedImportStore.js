@@ -185,6 +185,37 @@ export function listCompletedUnifiedSnapshots(fromDate, toDate) {
   return getDb().prepare("SELECT snapshotId,reportDate,payloadJson,createdAt FROM unified_snapshots WHERE status='COMPLETED' AND reportDate BETWEEN ? AND ? ORDER BY reportDate ASC,createdAt ASC").all(fromDate, toDate).map(row => ({ ...row, payload: JSON.parse(row.payloadJson || '{}') }));
 }
 
+export function listUnifiedBusinessHistory(businessType, throughDate, limit = 30) {
+  const type = normalizeBusinessType(businessType);
+  const rows = getDb().prepare("SELECT snapshotId,reportDate,payloadJson FROM unified_snapshots WHERE status='COMPLETED' AND reportDate<=? ORDER BY reportDate DESC,createdAt DESC").all(throughDate || '9999-12-31');
+  const byDate = new Map();
+  for (const item of rows) {
+    if (byDate.has(item.reportDate)) continue;
+    const payload = JSON.parse(item.payloadJson || '{}');
+    const members = (payload.finalRows || []).filter(row => String(row.businessType || '').toUpperCase() === type);
+    const total = members.length;
+    const pod = members.filter(isPodRow).length;
+    const oc = members.filter(row => Number(row.ocDays || row.OC天数 || 0) > 0).length;
+    byDate.set(item.reportDate, {
+      reportDate: item.reportDate,
+      businessType: type,
+      summary: {
+        reportDate: item.reportDate,
+        today: total,
+        pnh: total,
+        todayPnh: total,
+        scanPod: pod,
+        todayPod: pod,
+        podRate: total ? (pod / total) * 100 : 0,
+        firstPodRate: total ? (pod / total) * 100 : 0,
+        ocRate: total ? (oc / total) * 100 : 0
+      }
+    });
+    if (byDate.size >= Number(limit || 30)) break;
+  }
+  return [...byDate.values()].sort((a, b) => a.reportDate.localeCompare(b.reportDate));
+}
+
 export function loadUnifiedBusinessState(businessType, snapshotId = '') {
   const type = normalizeBusinessType(businessType);
   const db = getDb();
@@ -248,7 +279,7 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
       ...filterMembers(liveState?.scanResults).filter(isPodRow).map(codeOf),
       ...finalRows.filter(isPodRow).map(codeOf)
     ].filter(Boolean))],
-    historySummary: liveState?.historySummary || [],
+    historySummary: listUnifiedBusinessHistory(type, batch.reportDate, 30),
     processing: liveState?.processing || { running: false, paused: false, phase: '' },
     currentRun: liveState?.currentRun || null,
     lastRunSummary: liveState?.lastRunSummary || null,

@@ -27,16 +27,16 @@
 
     const placedLabels = [];
     chart.series.forEach((series, seriesIndex) => {
-      let segment = [], lastPoint = null;
-      const flush = () => { if (segment.length >= 2) svg.appendChild(svgNode('polyline', { points: segment.map(point => `${point.x},${point.y}`).join(' '), fill: 'none', stroke: series.color, 'stroke-width': '2.2', 'clip-path': `url(#${clipId})` })); segment = []; };
+      const segment = [];
+      let lastPoint = null;
       series.values.forEach((value, index) => {
-        if (value === null) { flush(); return; }
+        if (value === null) return;
         const x = pad.l + (width - pad.l - pad.r) * index / Math.max(1, chart.dates.length - 1), y = pad.t + (height - pad.t - pad.b) * (1 - value / max);
         segment.push({ x, y }); lastPoint = { x, y, value };
         const dot = svgNode('circle', { cx: x, cy: y, r: 3, fill: series.color, 'clip-path': `url(#${clipId})` }), title = svgNode('title');
         const numerator = series.numerators[index], denominator = series.denominators[index]; title.textContent = `${chart.dates[index]} · ${series.name} · ${Number.isFinite(numerator) && Number.isFinite(denominator) ? `${numerator}/${denominator} · ` : ''}${fmt(value, chart.type)}`; dot.appendChild(title); svg.appendChild(dot);
       });
-      flush();
+      if (segment.length >= 2) svg.appendChild(svgNode('polyline', { points: segment.map(point => `${point.x},${point.y}`).join(' '), fill: 'none', stroke: series.color, 'stroke-width': '2.2', 'clip-path': `url(#${clipId})` }));
       if (!lastPoint) return;
       const baseY = Math.max(13, Math.min(height - pad.b - 4, lastPoint.y - 7));
       const candidates = [baseY];
@@ -47,6 +47,9 @@
       placedLabels.push(labelY);
       const label = svgNode('text', { x: width - 4, y: labelY, fill: series.color, class: 'v18-last-label', 'text-anchor': 'end' }); label.textContent = fmt(lastPoint.value, chart.type); svg.appendChild(label);
     });
+    const availableDays = new Set(chart.series.flatMap(series => series.values.map((value, index) => value === null ? null : chart.dates[index]).filter(Boolean))).size;
+    container.dataset.historyDays = String(availableDays);
+    if (availableDays < 2) container.querySelector('.v18-chart-note').textContent = `历史快照不足（${availableDays}/7），累计到2个有效日期后自动显示折线`;
     container.querySelector('.v18-chart-plot').appendChild(svg);
 
     const current = container.querySelector('.v18-chart-current');
