@@ -890,7 +890,7 @@ function detailUrl(reportDate, shipmentCode) {
   const query = new URLSearchParams();
   if (reportDate) query.set('reportDate', reportDate);
   query.set('shipmentCode', shipmentCode);
-  const base = String(process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || '').replace(/\/$/, '');
+  const base = String(process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || 'http://127.0.0.1:5177').replace(/\/$/, '');
   return `${base}/detail?${query.toString()}`;
 }
 
