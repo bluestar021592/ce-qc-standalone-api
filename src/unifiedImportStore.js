@@ -45,12 +45,14 @@ export function getLatestUnifiedImport() {
 }
 
 export function listUnifiedImportHistory(limit = 120) {
+  // One report date must resolve to the newest currently VALID import batch.
+  // A superseded COMPLETED snapshot belongs to an older upload of the same date
+  // and must never replace the latest imported classification on business pages.
   const rows = getDb().prepare(`SELECT b.*, s.status snapshotStatus, s.createdAt snapshotCreatedAt
     FROM unified_import_batches b
     LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-    ORDER BY b.reportDate DESC,
-      CASE s.status WHEN 'COMPLETED' THEN 0 WHEN 'IMPORTED' THEN 1 ELSE 2 END,
-      b.createdAt DESC
+    WHERE b.status='VALID'
+    ORDER BY b.reportDate DESC, b.createdAt DESC
     LIMIT ?`).all(Math.max(1, Math.min(500, Number(limit) || 120)));
   const seen = new Set();
   return rows.filter(row => {

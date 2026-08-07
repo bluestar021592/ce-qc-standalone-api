@@ -199,8 +199,13 @@ async function refreshInternal() {
     if (!backendHealthy) throw startupFailures.find(item => item.error?.code === 'NETWORK_CONNECTION_INTERRUPTED').error;
   }
 
+  // When the selected date is the current imported date, always bind the five
+  // business pages to that exact newest import snapshot. History may still contain
+  // an older completed snapshot for the same date and must not override it.
   const selectedUnified = historyModeDate
-    ? (historyCatalog.UNIFIED || []).find(row => row.reportDate === historyModeDate)
+    ? (unifiedImportState?.reportDate === historyModeDate
+        ? unifiedImportState
+        : (historyCatalog.UNIFIED || []).find(row => row.reportDate === historyModeDate))
     : null;
   const latestUnified = selectedUnified || (unifiedImportState?.snapshotId
     ? unifiedImportState
@@ -1051,7 +1056,11 @@ function renderShopeePage() {
   const aggregate = shopeeState; shopeeState = state;
   shopeeRecipientGroup = type === 'SHOPEECN' ? 'CN' : 'VN';
   previewState.SHOPEE.recipientGroup = shopeeRecipientGroup;
-  const metrics = shopeeState.dashboard?.recipientGroups?.[shopeeRecipientGroup]?.metrics || {};
+  const metrics = { ...(shopeeState.dashboard?.recipientGroups?.[shopeeRecipientGroup]?.metrics || {}) };
+  // A newly imported CN/VN slice has a valid total before CE scan/track processing.
+  // Keep POD/return/anomaly values at zero until processed, but never hide the imported count.
+  const importedTotal = Number(state.pnhBills?.length || state.dailyParseSummary?.totalRecognized || state.dailyParseRows?.length || 0);
+  if (!Number(metrics.total || 0) && importedTotal) metrics.total = importedTotal;
   const unresolved = Number.isFinite(Number(metrics.unresolved)) ? Number(metrics.unresolved) : Math.max(0, Number(metrics.total || 0) - Number(metrics.pod || 0) - Number(metrics.returned || 0));
   const total = Number(metrics.total || 0);
   const share = value => `占本业务 ${rate(Number(value || 0), total).toFixed(2)}%`;
@@ -1368,7 +1377,10 @@ function trendWithCurrent(reportDate, value, status = 'volume') {
 
 function ccslMetrics(sourceState = appState) {
   const dashboard = sourceState.dashboard || {};
-  return { total: Number(dashboard.pnh || dashboard.totalMonitored || 0), pod: Number(dashboard.todayPod || 0), podRate: Number(dashboard.podRate || 0), abnormal: Number(dashboard.abnormalCount || 0), pending: Number(dashboard.categories?.pendingTotal || 0), oc: Number(dashboard.categories?.ocTotal || 0) };
+  // Directly after unified import there may be no scan/final rows yet. The business
+  // ticket count is still authoritative from the exact imported business slice.
+  const importedTotal = Number(sourceState.pnhBills?.length || sourceState.dailyParseSummary?.totalRecognized || sourceState.dailyParseRows?.length || 0);
+  return { total: Number(dashboard.pnh || dashboard.totalMonitored || importedTotal), pod: Number(dashboard.todayPod || 0), podRate: Number(dashboard.podRate || 0), abnormal: Number(dashboard.abnormalCount || 0), pending: Number(dashboard.categories?.pendingTotal || 0), oc: Number(dashboard.categories?.ocTotal || 0) };
 }
 
 function businessAccounting(sourceState = {}, metrics = ccslMetrics(sourceState)) {
