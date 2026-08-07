@@ -37,6 +37,11 @@ jobs:
           node --check src/storeFlow.js
           node --check src/unifiedExcelParser.js
           node --check src/unifiedImportStore.js
+          node --check src/scanTerminal.js
+          node --check src/analyzer.js
+          node --check src/pipeline.js
+          node --check src/shopeeAnalyzer.js
+          node --check src/reporting.js
           $null = [scriptblock]::Create((Get-Content -Raw Start_CE_QC.ps1))
           if (-not (Select-String -Path Start_CE_QC.cmd -SimpleMatch 'Start_CE_QC.ps1')) { throw 'CMD wrapper does not call Start_CE_QC.ps1' }
 
@@ -70,6 +75,7 @@ jobs:
             'test/user-account-management.test.js',
             'test/v10-pending-and-exclusivity.test.js',
             'test/v11-terminal-isolation-return.test.js',
+            'test/v12-business-rule-hardening.test.js',
             'test/v9-period-range.test.js',
             'test/v9-special-nodes.test.js'
           )
@@ -113,9 +119,6 @@ jobs:
             }
             if (-not $ready) { throw 'Restored local web application did not become reachable on 5177.' }
 
-            # V18 deliberately protects API endpoints behind the internal login gate. The expected
-            # unauthenticated response is 401, which proves Express/access control/database startup
-            # is alive without weakening authentication for the smoke test.
             try {
               $health = Invoke-WebRequest 'http://127.0.0.1:5177/api/health' -UseBasicParsing -TimeoutSec 10
               $healthStatus = [int]$health.StatusCode

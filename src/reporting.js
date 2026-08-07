@@ -407,9 +407,14 @@ function nextCarryRows(state) {
     .filter(isNormalFinalDiversionRow)
     .map(billOf)
     .filter(Boolean));
+  const specialClosed = new Set((state.finalRows || [])
+    .filter(isSpecialRetentionRow)
+    .map(billOf)
+    .filter(Boolean));
   return cleanMainBills(state.nextCarryBills || state.carryBills || [])
     .filter(wb => !podSet.has(wb))
     .filter(wb => !finalDiversion.has(wb))
+    .filter(wb => !specialClosed.has(wb))
     .map(wb => ({ 运单号: wb, 来源类型: '明日继续' }));
 }
 
@@ -439,7 +444,8 @@ function isSevereAbnormalRow(row = {}) {
 function isAnyAbnormalRow(row = {}) {
   return row?.是否POD !== '是'
     && !isNormalFinalDiversionRow(row)
-    && !isRefreshFailedRow(row);
+    && !isRefreshFailedRow(row)
+    && !isSpecialRetentionRow(row);
 }
 
 function isRefreshFailedRow(row = {}) {

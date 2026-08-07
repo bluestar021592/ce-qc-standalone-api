@@ -1038,7 +1038,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
     trackSuccess: allRows.filter(row => row.queryStatus === '成功').length,
     trackFailed: allRows.filter(row => row.queryStatus === '失败').length,
     retryPending: allRows.filter(row => row.queryStatus === '待重试').length,
-    completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过'].includes(row.queryStatus)).length
+    completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过', '特殊节点跳过', '正常分流跳过'].includes(row.queryStatus)).length
   };
   res.json({ ok: true, reportDate, batchId: unified?.batchId || '', snapshotId, scope, allRowCount: allRows.length, summary, rows: rows.slice(0, 5000) });
 });
@@ -1675,7 +1675,9 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const specialState = row.specialState || row.primaryCategory || row.主分类 || '';
     const shopState = row.shopState || row.shopStatus || row.门店状态 || row.storeFlowState || '';
     const category = row.primaryCategory || row.主分类 || row.异常分类 || '';
-    const isClosed = isPod || isReturn;
+    const specialClosed = ['SELF_PICKUP', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION'].includes(String(specialState || '').trim().toUpperCase());
+    const normalFinal = category === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
+    const isClosed = isPod || isReturn || specialClosed || normalFinal;
     const isActionable = !isClosed;
     return {
       shipmentCode, businessType: row.businessType || businessType, region: row.regionCode || row.区域 || '',
@@ -1685,7 +1687,7 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
       pendingDates: Array.isArray(row.pendingDates) ? row.pendingDates : String(row.Pending日期 || '').split(/[,、]/).map(value => value.trim()).filter(Boolean),
       pendingContinuity: row.pendingContinuity || row.Pending连续性 || '', ocDays: Number(row.OC天数 || 0),
       specialState, shopState, category, isClosed, isActionable,
-      queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹'))),
+      queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (specialClosed ? '特殊节点跳过' : (normalFinal ? '正常分流跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹'))))),
       retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate: row.reportDate || state.reportDate || '', snapshotId: state.snapshotId || ''
     };
   }).filter(row => row.shipmentCode);

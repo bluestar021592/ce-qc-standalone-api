@@ -92,12 +92,13 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [] }) {
       if (!bill) continue;
       const pod = row.是否POD === '是' || String(row.orderStatus || '') === '85';
       const returned = row.退回状态 === '已退回' || /退回|RETURN/i.test(String(row.primaryCategory || row.主分类 || ''));
-      const selfPickup = row.primaryCategory === 'SELF_PICKUP' || row.主分类 === '仓库自提';
-      const normal = row.primaryCategory === '正常分流节点';
+      const specialState = String(row.specialState || row.primaryCategory || row.主分类 || '').trim().toUpperCase();
+      const specialClosed = ['SELF_PICKUP', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION'].includes(specialState) || row.主分类 === '仓库自提';
+      const normal = row.primaryCategory === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
       const apiFailed = /失败|retry/i.test(String(row.API状态 || row.查询状态 || ''));
-      const closed = pod || returned || selfPickup || normal;
+      const closed = pod || returned || specialClosed || normal;
       const status = closed ? 'CLOSED' : 'OPEN';
-      const reason = pod ? 'POD' : returned ? 'RETURNED' : selfPickup ? 'SELF_PICKUP' : normal ? 'NORMAL_FINAL' : '';
+      const reason = pod ? 'POD' : returned ? 'RETURNED' : specialClosed ? (specialState || 'SELF_PICKUP') : normal ? 'NORMAL_FINAL' : '';
       const apiStatus = apiFailed ? 'API_PENDING_RETRY' : 'SUCCESS';
       const json = JSON.stringify(row);
       update.run(status, apiStatus, reason, reportDate, snapshotId, json, now, bill);
