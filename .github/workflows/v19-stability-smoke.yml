@@ -1,0 +1,92 @@
+name: CE QC V19 stability smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  stability:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax and guard checks
+        shell: pwsh
+        run: |
+          node --check bootstrap.js
+          node --check public/v14-geometry-fixture.js
+          $null = [scriptblock]::Create((Get-Content -Raw Start_CE_QC.ps1))
+          $guard = Get-Content -Raw public/v14-geometry-fixture.js
+          foreach ($needle in @('__exactBusinessUnavailable','NETWORK_CONNECTION_INTERRUPTED','startBackendRecovery','businessStates?.[type]')) {
+            if (-not $guard.Contains($needle)) { throw "Missing V19 guard signature: $needle" }
+          }
+          $launcher = Get-Content -Raw Start_CE_QC.ps1
+          foreach ($needle in @('Automatic backend restart','Archive-BackendLogs','RestartTimes','BACKEND RECOVERED')) {
+            if (-not $launcher.Contains($needle)) { throw "Missing V19 supervisor signature: $needle" }
+          }
+
+      - name: Verify backend restarts after forced crash
+        shell: pwsh
+        env:
+          CI: 'true'
+          DATA_DIR: ${{ runner.temp }}\ce-qc-v19-data
+          DB_FILE: ${{ runner.temp }}\ce-qc-v19-data\ce_qc_monitor.db
+        run: |
+          $launcher = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','Start_CE_QC.ps1' -WorkingDirectory $PWD -PassThru -RedirectStandardOutput v19-launcher.out.log -RedirectStandardError v19-launcher.err.log
+          try {
+            $firstPid = 0
+            foreach ($i in 1..75) {
+              Start-Sleep -Seconds 1
+              $listener = Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($listener) {
+                try {
+                  $response = Invoke-WebRequest 'http://127.0.0.1:5177/' -UseBasicParsing -TimeoutSec 3
+                  if ([int]$response.StatusCode -ge 200) { $firstPid = [int]$listener.OwningProcess; break }
+                } catch {
+                  if ($_.Exception.Response) { $firstPid = [int]$listener.OwningProcess; break }
+                }
+              }
+              if ($launcher.HasExited) { break }
+            }
+            if (-not $firstPid) { throw 'Initial backend did not become ready.' }
+            Write-Host "Initial backend PID=$firstPid"
+
+            Stop-Process -Id $firstPid -Force
+
+            $secondPid = 0
+            foreach ($i in 1..60) {
+              Start-Sleep -Seconds 1
+              $listener = Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($listener -and [int]$listener.OwningProcess -ne $firstPid) {
+                try {
+                  $response = Invoke-WebRequest 'http://127.0.0.1:5177/' -UseBasicParsing -TimeoutSec 3
+                  if ([int]$response.StatusCode -ge 200) { $secondPid = [int]$listener.OwningProcess; break }
+                } catch {
+                  if ($_.Exception.Response) { $secondPid = [int]$listener.OwningProcess; break }
+                }
+              }
+              if ($launcher.HasExited) { break }
+            }
+            if (-not $secondPid) { throw 'Supervisor did not restart backend after forced crash.' }
+            if ($secondPid -eq $firstPid) { throw 'Backend PID did not change after forced crash.' }
+            Write-Host "Recovered backend PID=$secondPid"
+          }
+          finally {
+            if ($launcher -and -not $launcher.HasExited) { cmd /c "taskkill /PID $($launcher.Id) /T /F" | Out-Null }
+            Write-Host '--- launcher stdout ---'
+            Get-Content v19-launcher.out.log -ErrorAction SilentlyContinue
+            Write-Host '--- launcher stderr ---'
+            Get-Content v19-launcher.err.log -ErrorAction SilentlyContinue
+            Write-Host '--- startup error ---'
+            Get-Content logs\startup_error.log -ErrorAction SilentlyContinue
+          }
