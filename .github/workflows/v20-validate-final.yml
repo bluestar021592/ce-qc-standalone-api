@@ -1,0 +1,26 @@
+name: V20 final validation
+
+on:
+  push:
+    branches:
+      - chatgpt/v20-business-page-import-hydration-20260807
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Syntax
+        shell: pwsh
+        run: |
+          node --check public/app.js
+          node --check src/unifiedImportStore.js
+          node --check test/v20-business-page-import-hydration.test.js
+          node --check test/v20-unified-business-state-realistic.test.js
+      - name: V20 focused regressions
+        run: node --test test/v20-business-page-import-hydration.test.js test/v20-unified-business-state-realistic.test.js
