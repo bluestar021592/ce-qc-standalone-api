@@ -1,0 +1,33 @@
+{
+  "viewport": "1536x1024",
+  "routesVerified": 13,
+  "javascriptPageErrors": 0,
+  "horizontalOverflowPages": 0,
+  "pngOrJpegBackgroundImages": 0,
+  "brandRect": {
+    "width": 249,
+    "height": 72
+  },
+  "trendCharts": {
+    "count": 4,
+    "titles": [
+      "今日票数趋势",
+      "POD率趋势",
+      "OC率趋势",
+      "首次妥投率趋势"
+    ],
+    "visiblePointLabels": 63,
+    "currentValuesVisible": true,
+    "dayOverDayChangesVisible": true,
+    "tooltipIncludesDateAndValue": true,
+    "internalNavigationVerified": true
+  },
+  "automatedTests": {
+    "passed": 37,
+    "failed": 0
+  },
+  "referenceLimitations": [
+    "V17 reference images are lower resolution than the required 1536x1024 capture, so direct RGB pixel-difference ratios are not a valid geometry pass criterion after resizing.",
+    "The V17 package contains no dedicated reference images for data management, settings, or operation logs; those pages use the shared V17 tokens and layout rules."
+  ]
+}

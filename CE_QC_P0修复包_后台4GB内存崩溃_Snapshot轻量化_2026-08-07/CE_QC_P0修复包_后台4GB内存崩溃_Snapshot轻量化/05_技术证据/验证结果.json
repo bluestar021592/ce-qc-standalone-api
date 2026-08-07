@@ -1,0 +1,18 @@
+{
+  "root_cause": "createDashboardSnapshot JSON.stringify(payload) duplicated the full runtime state and derived row collections, exhausting V8 heap (~4096 MB).",
+  "original_sha256": "9f45fce81e87ceb8906db873baff00f27bdba2e1578d88a95b1cda38e861e7f1",
+  "patched_sha256": "8e55ddeb61b0ee04d9c6ab6e72b55e1d0f4861f10a26ad581d3ddd50d98a7f15",
+  "changed_files": [
+    "src/snapshots.js"
+  ],
+  "database_schema_changed": false,
+  "database_data_changed_by_patch": false,
+  "syntax_check": "node --check passed",
+  "synthetic_stress_test": {
+    "rows": 12000,
+    "heavy_nested_collections_per_row": true,
+    "heavy_nested_data_persisted_in_snapshot": false,
+    "snapshot_payload_mb": 1.03,
+    "heap_delta_mb": 75.45
+  }
+}

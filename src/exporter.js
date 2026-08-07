@@ -40,6 +40,8 @@ export async function exportXlsx(state, snapshot = null) {
   addSheet(wb, '明细_今日POD', legacy.todayPod, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
   addSheet(wb, '明细_跨日遗留', legacy.carry, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
   addSheet(wb, '明细_明日继续', legacy.nextCarry, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
+  addSheet(wb, '明细_未闭环', legacy.unresolved, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
+  addSheet(wb, '明细_严重异常', legacy.severeAbnormal, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
   addSheet(wb, '明细_Pending全部', legacy.pendingAll, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
   addSheet(wb, '明细_Pending1+', legacy.pendingAll, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
   addSheet(wb, '明细_Pending2+', legacy.pending2plus, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
@@ -83,6 +85,9 @@ export async function exportXlsx(state, snapshot = null) {
   addSheet(wb, '明细_门店滞留', legacy.shopStuck, { ...opts, columns: SHOP_COLUMNS, returnToDashboard: true });
   addSheet(wb, '明细_门店未入库', legacy.shopNotInbound, { ...opts, columns: SHOP_COLUMNS, returnToDashboard: true });
   addSheet(wb, '明细_TBKH门店', legacy.tbkhShop, { ...opts, columns: SHOP_COLUMNS, returnToDashboard: true });
+  addSheet(wb, '明细_CECN滞留', legacy.cecnRetention, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
+  addSheet(wb, '明细_CEZT滞留', legacy.ceztRetention, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
+  addSheet(wb, '明细_580滞留', legacy.ccsl580Retention, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
 
   const consistencyRows = buildExportConsistencyRows(state, legacy);
   const blockingRows = consistencyRows.filter(row => row.状态 === '不一致' || row.状态 === '错误');
@@ -177,6 +182,12 @@ const DASHBOARD_LINK_TARGETS = {
   门店入库2天: '明细_门店入库',
   门店入库3天以上: '明细_门店入库',
   门店滞留: '明细_门店滞留',
+  未闭环: '明细_未闭环',
+  严重异常: '明细_严重异常',
+  严重异常总件数: '明细_严重异常',
+  CECN滞留包裹: '明细_CECN滞留',
+  CEZT滞留包裹: '明细_CEZT滞留',
+  '580滞留包裹': '明细_580滞留',
   门店未入库: '明细_门店未入库',
   TBKH门店包裹: '明细_TBKH门店',
   TBKH门店总数: '明细_TBKH门店',
@@ -259,6 +270,8 @@ function buildLegacyWorkbookRows(state, rows) {
     carry: billRows(state.carryBills || []),
     nextCarryMonitor: (rows.nextCarry || []).map(legacyNextCarryRow),
     nextCarry: detailRows(rows.nextCarry),
+    unresolved: detailRows(rows.unresolved || rows.abnormalOpen),
+    severeAbnormal: detailRows(rows.severeAbnormal),
     pendingAll: detailRows(rows.pendingAll),
     pending1: detailRows(rows.pending1),
     pending2: detailRows(rows.pending2),
@@ -292,6 +305,9 @@ function buildLegacyWorkbookRows(state, rows) {
     shopStuck: (rows.shopStuck || []).map(legacyShopRow),
     shopNotInbound: (rows.shopNotInbound || []).map(legacyShopRow),
     tbkhShop: (rows.tbkhShop || []).map(legacyShopRow),
+    cecnRetention: detailRows(rows.cecnRetention),
+    ceztRetention: detailRows(rows.ceztRetention),
+    ccsl580Retention: detailRows(rows.ccsl580Retention),
     allData,
     coreAbnormal,
     trackEvents: (rows.trackEvents || []).map(legacyTrackEventRow),
@@ -397,11 +413,11 @@ function legacyDetailRow(row = {}) {
     延迟POD: row.延迟POD || '',
     门店状态: row.门店状态 || '',
     门店动作类型: row.门店动作类型 || '',
-    门店编码: row.门店编码 || '',
-    门店名称: row.门店名称 || '',
-    门店发往时间: row.门店发往时间 || '',
-    门店入库时间: row.门店入库时间 || '',
-    门店滞留天数: row.门店滞留天数 || '',
+    门店编码: row.门店编码 || row.currentShopCode || row.targetShopCode || '',
+    门店名称: row.门店名称 || row.shopName || '',
+    门店发往时间: row.门店发往时间 || row.shopTransferStartedAt || '',
+    门店入库时间: row.门店入库时间 || row.shopArrivedAt || '',
+    门店滞留天数: row.门店滞留天数 || row.shopRetentionNaturalDays || '',
     门店未更新天数: row.门店未更新天数 || '',
     TBKH门店包裹: row.TBKH门店包裹 || '',
     TBKH识别来源: row.TBKH识别来源 || '',
@@ -459,7 +475,7 @@ function legacyShopRow(row = {}) {
     deliveryShop: row.deliveryShop || '',
     pickupShop: row.pickupShop || '',
     最终停留网点: row.最终停留网点 || row.deliveryShop || row.place || '',
-    门店状态: row.门店状态 || row.异常分类 || '',
+    门店状态: row.门店状态 || row.shopState || row.异常分类 || '',
     QC判断: row.QC判断 || ''
   }, SHOP_COLUMNS);
 }
@@ -871,12 +887,11 @@ function escapeFormulaString(value) {
 }
 
 function detailUrl(reportDate, shipmentCode) {
-  const cfg = getRuntimeConfig();
-  const base = process.env.APP_BASE_URL || process.env.PUBLIC_BASE_URL || `http://127.0.0.1:${cfg.port}`;
-  const url = new URL('/detail', base);
-  if (reportDate) url.searchParams.set('reportDate', reportDate);
-  url.searchParams.set('shipmentCode', shipmentCode);
-  return url.toString();
+  const query = new URLSearchParams();
+  if (reportDate) query.set('reportDate', reportDate);
+  query.set('shipmentCode', shipmentCode);
+  const base = String(process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || '').replace(/\/$/, '');
+  return `${base}/detail?${query.toString()}`;
 }
 
 function normalizeParseRow(row, resultOverride = '') {

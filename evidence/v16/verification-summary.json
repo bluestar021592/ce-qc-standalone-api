@@ -1,0 +1,35 @@
+﻿{
+    "nodeTests":  {
+                      "passed":  37,
+                      "failed":  0
+                  },
+    "scriptSyntax":  "PASS",
+    "colorOnlyPropertyAudit":  {
+                                   "status":  "PASS",
+                                   "properties":  [
+                                                      "background",
+                                                      "border-color",
+                                                      "box-shadow",
+                                                      "color",
+                                                      "fill",
+                                                      "stroke"
+                                                  ]
+                               },
+    "geometryLock":  {
+                         "status":  "PASS",
+                         "viewport":  "1536x1024",
+                         "maxDeltaPx":  0
+                     },
+    "palette":  {
+                    "page":  "#F4F7FB",
+                    "panel":  "#FFFFFF",
+                    "sidebar":  "#052B52",
+                    "active":  "#1677FF"
+                },
+    "brand":  {
+                  "logoVisible":  true,
+                  "title":  "CE EXPRESS",
+                  "subtitle":  "质量控制管理系统",
+                  "legacyQcPlatform":  false
+              }
+}

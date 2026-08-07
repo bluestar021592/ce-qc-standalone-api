@@ -1,0 +1,24 @@
+{
+  "backgroundImages": 0,
+  "bindingErrors": 0,
+  "businessCards": 6,
+  "charts": 4,
+  "coreCards": 12,
+  "counts": {
+    "ALI1688看板": 1,
+    "CE看板": 1,
+    "SHOPEE CN看板": 1,
+    "SHOPEE VN看板": 1,
+    "TBKH看板": 1,
+    "异常明细": 1,
+    "报表导出": 1,
+    "操作日志": 1,
+    "数据导入": 1,
+    "数据管理": 1,
+    "系统设置": 1,
+    "轨迹查询": 1,
+    "首页总看板": 1
+  },
+  "horizontalOverflow": 0,
+  "nullDateHasNode": false
+}

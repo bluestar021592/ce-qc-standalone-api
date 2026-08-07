@@ -1,0 +1,13 @@
+﻿V3修复内容
+
+1. 修复V2误把 .env.example 当成敏感文件的问题。
+2. .env.example / .env.*.example 允许上传。
+3. 真正的 .env / .env.local / .env.production 仍然禁止上传。
+4. *.db / *.sqlite / token / cookie / credentials / 私钥仍禁止上传。
+5. LF -> CRLF warning属于Windows换行提示，可忽略。
+
+使用：
+- 用V3三个文件覆盖V2工具文件；
+- 放在真正项目根目录；
+- 双击 Run_GitHub_Upload_V3.bat；
+- 再粘贴同一个GitHub Private仓库HTTPS地址。

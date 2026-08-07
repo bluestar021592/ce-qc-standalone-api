@@ -92,6 +92,30 @@ body {
   margin-top: 12px !important;
 }
 
+.overview-row > .pixel-panel { align-self: stretch !important; }
+
+.pixel-shopee-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 12px 10px; }
+.pixel-source-tabs { display: flex; gap: 7px; padding: 0 10px 6px; }
+.pixel-source-tabs button { border: 1px solid #d9e5f0; border-radius: 5px; background: #fff; color: #294967; padding: 6px 12px; cursor: pointer; }
+.pixel-source-tabs button:first-child { color: #fff; background: #1677ff; border-color: #1677ff; }
+.attempt-strip { margin: 8px; border: 1px solid #dce8f4; border-radius: 6px; overflow: hidden; }
+.attempt-strip h3 { margin: 0; padding: 8px 10px; color: #204d7d; background: #f8fbff; border-bottom: 1px solid #e4edf6; font-size: 12px; }
+.attempt-strip > div { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); padding: 7px 3px; }
+
+.danger-outline { color: #b42318 !important; border: 1px solid #efaaa4 !important; background: #fff !important; }
+.danger-outline:hover { background: #fff3f2 !important; }
+.home-admin-actions { display: flex; justify-content: flex-end; margin: 0 0 10px; }
+.home-admin-actions .btn { min-height: 34px; padding: 7px 14px; font-size: 13px; }
+.purge-card { width: min(720px, calc(100vw - 32px)); }
+.purge-preview { max-height: 420px; overflow: auto; }
+.purge-warning, .danger-note { color: #b42318; background: #fff3f2; border: 1px solid #ffd0cc; border-radius: 6px; padding: 10px 12px; }
+.purge-preview dl { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 12px; }
+.purge-preview dt { color: #60758b; font-weight: 700; }
+.purge-preview dd { margin: 0; overflow-wrap: anywhere; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.confirm-check { display: flex; align-items: center; gap: 8px; margin: 16px 0; }
+.purge-countdown { color: #b42318; font-weight: 700; }
+
 .chart-row,
 .home-trend-grid,
 .recipient-trend-grid {
@@ -134,6 +158,12 @@ body {
 
 .import-meta-line b { color: #173b68; }
 .import-warning { margin-top: 7px; color: #b34b17; font-size: 11px; }
+.processing-notice { display: flex; gap: 10px; align-items: center; margin-top: 10px; padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.45; }
+.processing-notice b { flex: 0 0 auto; }
+.processing-notice span { flex: 1 1 auto; }
+.processing-notice .btn.compact { flex: 0 0 auto; min-height: 32px; padding: 6px 12px; white-space: nowrap; }
+.processing-notice.running { color: #145da0; background: #eaf4ff; border: 1px solid #b9d9fb; }
+.processing-notice.waiting { color: #8a5a00; background: #fff8e6; border: 1px solid #f2d38a; }
 
 .recipient-filter {
   display: flex;
@@ -257,7 +287,6 @@ body.sidebar-collapsed .topbar { left: 72px !important; }
   .cycle-wrap { display: none !important; }
   .kpi-row,
   .home-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
-  .overview-row,
   .chart-row,
   .home-trend-grid,
   .recipient-trend-grid { grid-template-columns: 1fr !important; }
@@ -275,3 +304,15 @@ body.sidebar-collapsed .topbar { left: 72px !important; }
   .shopee-import-summary { align-items: flex-start; flex-direction: column; }
   .recipient-filter { justify-content: flex-start; }
 }
+
+.shopee-special-grid.detailed { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; }
+.shopee-special-grid.detailed section { padding: 0; overflow: hidden; border: 1px solid #dce7f3; border-radius: 6px; background: #fff; }
+.shopee-special-grid.detailed section header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #e5edf6; }
+.shopee-special-grid.detailed section header small { color: #7588a0; }
+.shopee-special-grid.detailed section > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.shopee-special-grid.detailed button { min-height: 58px; padding: 8px 10px; border: 0; border-right: 1px solid #edf2f7; border-bottom: 1px solid #edf2f7; background: #fff; text-align: left; }
+.shopee-special-grid.detailed button:hover { background: #f4f8ff; }
+.shopee-special-grid.detailed button span,
+.shopee-special-grid.detailed button strong { display: block; }
+.shopee-special-grid.detailed button span { color: #71839a; font-size: 11px; }
+.shopee-special-grid.detailed button strong { margin-top: 4px; color: #15385f; font-size: 17px; }

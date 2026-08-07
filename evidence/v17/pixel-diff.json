@@ -1,0 +1,150 @@
+{
+  "method": "reference resized to 1536x1024; RGB pixel difference",
+  "pages": [
+    {
+      "page": "01-home",
+      "referenceSource": "01_首页总看板.png",
+      "referenceOriginalSize": [
+        1020,
+        600
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.954158
+    },
+    {
+      "page": "02-ce",
+      "referenceSource": "02_CE业务看板.png",
+      "referenceOriginalSize": [
+        521,
+        295
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.957088
+    },
+    {
+      "page": "03-tbkh",
+      "referenceSource": "03_TBKH业务看板.png",
+      "referenceOriginalSize": [
+        521,
+        315
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.953831
+    },
+    {
+      "page": "04-ali1688",
+      "referenceSource": "04_ALI1688业务看板.png",
+      "referenceOriginalSize": [
+        500,
+        290
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.952827
+    },
+    {
+      "page": "05-shopeecn",
+      "referenceSource": "05_SHOPEE_CN业务看板.png",
+      "referenceOriginalSize": [
+        495,
+        290
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.946063
+    },
+    {
+      "page": "06-shopeevn",
+      "referenceSource": "06_SHOPEE_VN业务看板.png",
+      "referenceOriginalSize": [
+        556,
+        290
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.944036
+    },
+    {
+      "page": "07-import",
+      "referenceSource": "07_数据导入与统一处理.png",
+      "referenceOriginalSize": [
+        380,
+        149
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.976206
+    },
+    {
+      "page": "08-tracking",
+      "referenceSource": "08_批量轨迹工作台.png",
+      "referenceOriginalSize": [
+        385,
+        149
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.966187
+    },
+    {
+      "page": "09-exceptions",
+      "referenceSource": "09_异常明细.png",
+      "referenceOriginalSize": [
+        390,
+        149
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.983465
+    },
+    {
+      "page": "10-reports",
+      "referenceSource": "10_报表导出.png",
+      "referenceOriginalSize": [
+        396,
+        149
+      ],
+      "comparisonSize": [
+        1536,
+        1024
+      ],
+      "changedPixelRatio": 0.981941
+    },
+    {
+      "page": "11-data-management",
+      "referenceSource": null,
+      "note": "No dedicated page reference in V17 package; shared V17 tokens applied"
+    },
+    {
+      "page": "12-settings",
+      "referenceSource": null,
+      "note": "No dedicated page reference in V17 package; shared V17 tokens applied"
+    },
+    {
+      "page": "13-logs",
+      "referenceSource": null,
+      "note": "No dedicated page reference in V17 package; shared V17 tokens applied"
+    }
+  ]
+}

@@ -113,6 +113,11 @@ button, input, select, textarea { font-family: inherit; }
 .pixel-metric span { display: block; color: #4c6278; font-size: 12px; white-space: nowrap; }
 .pixel-metric b { display: block; margin-top: 7px; color: #102a43; font-size: 19px; }
 .pixel-metric small { display: block; margin-top: 5px; color: #7f91a6; font-size: 9px; white-space: nowrap; }
+.store-state-strip { margin: 8px; border: 1px solid #dce8f4; border-radius: 6px; background: #f8fbff; }
+.store-state-strip h3 { height: 30px; margin: 0; padding: 0 10px; display: flex; align-items: center; gap: 7px; color: #204d7d; font-size: 12px; border-bottom: 1px solid #e4edf6; }
+.store-state-strip h3 .ui-icon { width: 14px; height: 14px; }
+.store-state-strip > div { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); padding: 6px 4px; }
+.store-state-strip .pixel-metric + .pixel-metric { border-left: 1px solid #e4edf6; }
 .pixel-metric.blue-text b { color: #1677ff; }
 .pixel-metric.danger span, .pixel-metric.danger b { color: #f04455; }
 .pixel-region-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 9px; }

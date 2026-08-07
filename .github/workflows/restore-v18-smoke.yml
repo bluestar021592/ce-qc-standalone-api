@@ -1,0 +1,139 @@
+name: CE QC restored V18 smoke
+
+on:
+  push:
+    branches:
+      - chatgpt/restore-final-v18-app
+      - chatgpt/restore-final-v18-clean
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax checks
+        shell: pwsh
+        run: |
+          node --check bootstrap.js
+          node --check server.js
+          node --check public/app.js
+          node --check src/db.js
+          node --check src/store.js
+          node --check src/shopWhitelist.js
+          node --check src/shopCodes.js
+          node --check src/storeFlow.js
+          node --check src/unifiedExcelParser.js
+          node --check src/unifiedImportStore.js
+          $null = [scriptblock]::Create((Get-Content -Raw Start_CE_QC.ps1))
+          if (-not (Select-String -Path Start_CE_QC.cmd -SimpleMatch 'Start_CE_QC.ps1')) { throw 'CMD wrapper does not call Start_CE_QC.ps1' }
+
+      - name: Verify locked UI signature
+        shell: pwsh
+        run: |
+          $html = Get-Content -Raw public/index.html
+          foreach ($needle in @('homeBusinessCards','homeCoreMetrics','homeShopeeSpecial','homeDispatchDistribution','综合日报导入','管理汇总 + 五业务')) {
+            if (-not $html.Contains($needle)) { throw "Missing V18 UI signature: $needle" }
+          }
+          foreach ($file in @('public/dashboard-v18.js','public/dashboard-v18.css','public/v16-blue-white-colors.css','public/v17-page-lock.css')) {
+            if (-not (Test-Path $file)) { throw "Missing locked UI file: $file" }
+          }
+
+      - name: Run self-contained regression tests
+        shell: pwsh
+        run: |
+          $tests = @(
+            'test/dashboard-v18.test.js',
+            'test/data-purge-large-backup.test.js',
+            'test/filename-date-detection.test.js',
+            'test/scan-batch-fallback.test.js',
+            'test/shopee-accounting-dispatch-day.test.js',
+            'test/shopee-cnvn.test.js',
+            'test/shopee-latest-track-classification.test.js',
+            'test/shopee-pv-open-disposition.test.js',
+            'test/shopee-template-export.test.js',
+            'test/store-flow.test.js',
+            'test/store-load-detail.test.js',
+            'test/unified-snapshot-membership.test.js',
+            'test/user-account-management.test.js',
+            'test/v10-pending-and-exclusivity.test.js',
+            'test/v11-terminal-isolation-return.test.js',
+            'test/v9-period-range.test.js',
+            'test/v9-special-nodes.test.js'
+          )
+          node --test $tests
+
+      - name: Note external-fixture tests
+        shell: pwsh
+        run: |
+          Write-Host 'The following historical tests require local Codex workbook fixtures that were never committed to Git and are intentionally excluded from CI:'
+          Write-Host ' - unified-import-v7.test.js'
+          Write-Host ' - unified-import-v8.test.js'
+          Write-Host ' - v9-real-reports.test.js'
+          Write-Host 'Production import behavior will be revalidated with the user real daily workbook after local startup is restored.'
+
+      - name: Start launcher and verify protected local app
+        shell: pwsh
+        env:
+          CI: 'true'
+          DATA_DIR: ${{ runner.temp }}\ce-qc-data
+          DB_FILE: ${{ runner.temp }}\ce-qc-data\ce_qc_monitor.db
+        run: |
+          $launcher = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','Start_CE_QC.ps1' -WorkingDirectory $PWD -PassThru -RedirectStandardOutput launcher.out.log -RedirectStandardError launcher.err.log
+          try {
+            $ready = $false
+            $status = 0
+            foreach ($i in 1..75) {
+              Start-Sleep -Seconds 1
+              try {
+                $response = Invoke-WebRequest 'http://127.0.0.1:5177/' -UseBasicParsing -TimeoutSec 3
+                $status = [int]$response.StatusCode
+                if ($status -ge 200 -and $status -lt 500) { $ready = $true; break }
+              } catch {
+                try {
+                  if ($_.Exception.Response) {
+                    $status = [int]$_.Exception.Response.StatusCode
+                    if ($status -ge 200 -and $status -lt 500) { $ready = $true; break }
+                  }
+                } catch {}
+              }
+              if ($launcher.HasExited) { break }
+            }
+            if (-not $ready) { throw 'Restored local web application did not become reachable on 5177.' }
+
+            # V18 deliberately protects API endpoints behind the internal login gate. The expected
+            # unauthenticated response is 401, which proves Express/access control/database startup
+            # is alive without weakening authentication for the smoke test.
+            try {
+              $health = Invoke-WebRequest 'http://127.0.0.1:5177/api/health' -UseBasicParsing -TimeoutSec 10
+              $healthStatus = [int]$health.StatusCode
+            } catch {
+              $healthStatus = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+            }
+            if ($healthStatus -notin @(200,401)) { throw "Unexpected /api/health status: $healthStatus" }
+
+            Write-Host "Local app reachable with HTTP $status; protected health status=$healthStatus"
+          }
+          finally {
+            if ($launcher -and -not $launcher.HasExited) { cmd /c "taskkill /PID $($launcher.Id) /T /F" | Out-Null }
+            Write-Host '--- launcher stdout ---'
+            Get-Content launcher.out.log -ErrorAction SilentlyContinue
+            Write-Host '--- launcher stderr ---'
+            Get-Content launcher.err.log -ErrorAction SilentlyContinue
+            Write-Host '--- startup log ---'
+            Get-Content logs\startup_latest.log -ErrorAction SilentlyContinue
+            Write-Host '--- startup error ---'
+            Get-Content logs\startup_error.log -ErrorAction SilentlyContinue
+          }

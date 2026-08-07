@@ -14,13 +14,18 @@ const BORDER = 'FFD7E2EB';
 const TEXT = 'FF1F3347';
 const MUTED = 'FF60758A';
 const WHITE = 'FFFFFFFF';
-const GROUP_LABELS = { ALL: '全部合计', CN: 'ShopeeCN（中国）', VN: 'ShopeeVN（越南）', OTHER: '其他/待确认' };
+const GROUP_LABELS = { ALL: '全部合计', CN: 'ShopeeCN（中国）', VN: 'ShopeeVN（越南）' };
 const METRICS = [
   ['今日总单', 'all'], ['今日POD', 'pod'], ['POD率', 'pod'], ['首派成功率', 'firstAttempt'],
   ['Pending1+', 'pending1'], ['Pending2+', 'pending2'], ['Pending3+', 'pending3'],
-  ['OC1+', 'oc1'], ['OC2+', 'oc2'], ['OC3+', 'oc3'], ['入库无扫描', 'inboundNoScan']
+  ['OC1+', 'oc1'], ['OC2+', 'oc2'], ['OC3+', 'oc3'], ['盘点2天+', 'cycle2'], ['入库无扫描', 'inboundNoScan'],
+  ['已退回件', 'returned'], ['退回率', 'returned'], ['当前未闭环', 'unresolved'], ['对账差异', 'unresolved'], ['退回处理中', 'returnInProgress'],
+  ['1派POD', 'attempt1'], ['1派POD占比', 'attempt1'], ['2派POD', 'attempt2'], ['2派POD占比', 'attempt2'],
+  ['3派及以上POD', 'attempt3'], ['3派及以上POD占比', 'attempt3'],
+  ['在途门店', 'shopTransit'], ['到达门店', 'shopArrived'], ['门店Pending', 'shopPending'],
+  ['门店滞留1天+', 'shopRetention1'], ['门店滞留2天+', 'shopRetention2'], ['门店滞留3天+', 'shopRetention3']
 ];
-const DETAIL_HEADERS = ['序号', '运单号', '日报日期', 'recipient_raw', 'recipient_group', 'PP/PV', '当前扫描状态', '异常分类', '累计自然日', '最新轨迹时间', '最新节点', '是否继续监控', 'Snapshot ID', '备注'];
+const DETAIL_HEADERS = ['序号', '运单号', '日报日期', 'recipient_raw', 'recipient_group', 'PP/PV', '当前扫描状态', '异常分类', '门店状态', '目标门店编码', '当前门店编码', '门店名称', '门店发往时间', '门店到达时间', '门店Pending时间', '门店滞留自然日', '累计自然日', '最新轨迹时间', '最新节点', '是否继续监控', 'Snapshot ID', '备注'];
 
 export async function exportShopeeXlsx(state = {}, snapshot = null) {
   const snapshotId = state.snapshotId || snapshot?.snapshotId || '';
@@ -51,9 +56,8 @@ export async function exportShopeeXlsx(state = {}, snapshot = null) {
   createGroupStatisticsSheet(workbook, context, 'VN', '04_ShopeeVN统计');
   createGroupDetailSheet(workbook, context, 'CN', '05_ShopeeCN明细');
   createGroupDetailSheet(workbook, context, 'VN', '06_ShopeeVN明细');
-  const otherSheet = createGroupDetailSheet(workbook, context, 'OTHER', '07_其他待确认明细');
-  if (!Number(view.recipientGroups?.OTHER?.metrics?.total || 0)) otherSheet.state = 'hidden';
   createMetricTargetSheets(workbook, context, metricSheets);
+  createExcludedAuditSheet(workbook, context, state.dailyParseRows || []);
   createConsistencySheet(workbook, context, snapshot, exportHashes);
 
   await workbook.xlsx.writeFile(file);
@@ -65,14 +69,16 @@ function createDashboardSheet(workbook, context, metricSheets) {
   brandSheet(sheet, context, 'CE Express SHOPEE 质控追踪总看板', 12);
   sheet.getRow(4).values = ['分组', ...METRICS.map(([label]) => label)];
   styleHeader(sheet.getRow(4), 12);
-  const visibleGroups = ['ALL', 'CN', 'VN', ...(Number(context.view.recipientGroups?.OTHER?.metrics?.total || 0) ? ['OTHER'] : [])];
+  const visibleGroups = ['ALL', 'CN', 'VN'];
   for (const group of visibleGroups) {
     const metrics = context.view.recipientGroups[group]?.metrics || {};
-    const values = [GROUP_LABELS[group], metrics.total || 0, metrics.pod || 0, rateValue(metrics.podRate), rateValue(metrics.firstAttemptRate), metrics.pending1 || 0, metrics.pending2 || 0, metrics.pending3plus || 0, metrics.oc1 || 0, metrics.oc2 || 0, metrics.oc3plus || 0, metrics.inboundNoScan || 0];
+    const values = [GROUP_LABELS[group], ...METRICS.map(([label]) => metricValueForExport(metrics, label))];
     const row = sheet.addRow(values);
     styleBodyRow(row, 12);
     row.getCell(4).numFmt = '0.00%';
     row.getCell(5).numFmt = '0.00%';
+    const returnRateColumn = 2 + METRICS.findIndex(([label]) => label === '退回率');
+    if (returnRateColumn > 1) row.getCell(returnRateColumn).numFmt = '0.00%';
   }
 
   let startRow = sheet.rowCount + 2;
@@ -107,15 +113,14 @@ function createDashboardSheet(workbook, context, metricSheets) {
     }
     startRow = sheet.rowCount + 2;
   }
-  sheet.columns = [12, 21, 19, 20, 15, 42, 42, 14, 14, 14, 14, 16].map(width => ({ width }));
-  sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + visibleGroups.length, column: 12 } };
+  sheet.columns = [21, ...METRICS.map(() => 16)].map(width => ({ width }));
+  sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + visibleGroups.length, column: METRICS.length + 1 } };
   sheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.25, right: 0.25, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } };
 }
 
 function buildMetricSheetNames(context) {
   const map = new Map();
   for (const group of SHOPEE_RECIPIENT_GROUPS) {
-    if (group === 'OTHER' && !Number(context.view.recipientGroups?.OTHER?.metrics?.total || 0)) continue;
     for (const [label, tabKey] of METRICS) {
       const key = `${group}_${tabKey}`;
       if (map.has(key)) continue;
@@ -166,7 +171,7 @@ function createGroupStatisticsSheet(workbook, context, group, name) {
   for (let index = 0; index < dates.length; index += 1) {
     const values = [dates[index], ...METRICS.map(([label]) => {
       const value = trendValue(context.view, `${group}_${label}`, index);
-      return ['POD率', '首派成功率'].includes(label) ? rateValue(value) : value;
+      return ['POD率', '首派成功率', '退回率'].includes(label) ? rateValue(value) : value;
     })];
     const row = sheet.addRow(values);
     styleBodyRow(row, headers.length);
@@ -180,6 +185,22 @@ function createGroupStatisticsSheet(workbook, context, group, name) {
 function createGroupDetailSheet(workbook, context, group, name) {
   const rows = context.view.detailTabs?.[`${group}_all`]?.rows || [];
   return createDetailSheet(workbook, context, name, rows, `${GROUP_LABELS[group]}日报明细`);
+}
+
+function createExcludedAuditSheet(workbook, context, importRows) {
+  const rows = (importRows || []).filter(row => row.importStatus === 'IGNORED_NON_SHOPEE');
+  const sheet = workbook.addWorksheet('07_EXCLUDED_AUDIT', { views: [{ showGridLines: false, state: 'frozen', ySplit: 4 }] });
+  brandSheet(sheet, context, 'SHOPEE excluded import audit', 7);
+  const headers = ['shipmentCode', 'recipient_raw', 'recipient_normalized', 'recipient_group', 'importStatus', 'sheetName', 'rowNumber'];
+  sheet.getRow(4).values = headers;
+  styleHeader(sheet.getRow(4), headers.length);
+  for (const item of rows) {
+    const row = sheet.addRow(headers.map(key => item[key] ?? ''));
+    styleBodyRow(row, headers.length);
+  }
+  sheet.columns = [24, 28, 28, 18, 26, 24, 12].map(width => ({ width }));
+  if (rows.length) sheet.autoFilter = { from: 'A4', to: `G${sheet.rowCount}` };
+  addReturnLink(sheet, headers.length);
 }
 
 function createDetailSheet(workbook, context, name, sourceRows, title) {
@@ -202,7 +223,7 @@ function createDetailSheet(workbook, context, name, sourceRows, title) {
     });
     sheet.autoFilter = { from: 'A4', to: `${columnName(DETAIL_HEADERS.length)}${sheet.rowCount}` };
   }
-  sheet.columns = [8, 21, 14, 23, 16, 10, 18, 22, 14, 21, 42, 15, 31, 42].map(width => ({ width }));
+  sheet.columns = [8,21,14,23,16,10,18,22,18,16,16,24,20,20,20,14,14,21,42,15,31,42].map(width => ({ width }));
   addReturnLink(sheet, DETAIL_HEADERS.length);
   return sheet;
 }
@@ -210,7 +231,7 @@ function createDetailSheet(workbook, context, name, sourceRows, title) {
 function createConsistencySheet(workbook, context, snapshot, hashes) {
   const sheet = workbook.addWorksheet('99_一致性校验', { views: [{ showGridLines: false, state: 'frozen', ySplit: 4 }] });
   brandSheet(sheet, context, 'SHOPEE 快照一致性校验', 7);
-  const headers = ['检查项目', 'ALL', 'CN+VN+OTHER', '差异', '结果', '快照哈希', '导出哈希'];
+  const headers = ['检查项目', 'ALL', 'CN+VN', '差异', '结果', '快照哈希', '导出哈希'];
   sheet.getRow(4).values = headers;
   styleHeader(sheet.getRow(4), headers.length);
   for (const check of context.view.recipientReconciliation?.checks || []) {
@@ -278,6 +299,14 @@ function detailValues(row, index, context) {
     normalizedRegion(row),
     row.扫描状态 || row.shipmentStatus || '',
     row.primaryCategory || row.主分类 || row.异常分类 || '',
+    row.shopState || '',
+    row.targetShopCode || '',
+    row.currentShopCode || '',
+    row.shopName || '',
+    row.shopTransferStartedAt || '',
+    row.shopArrivedAt || '',
+    row.shopPendingAt || '',
+    Number(row.shopRetentionNaturalDays || 0),
     Math.max(Number(row.Pending次数 || row.Pending最大次数 || 0), Number(row.OC天数 || row.OC最大天数 || 0)),
     row.latestEventTime || row.最后节点时间 || '',
     row.latestEventDesc || row.最后节点 || row.latestNode || '',
@@ -319,11 +348,35 @@ function metricDescription(label) {
     'OC1+': '当前OC周期1天及以上',
     'OC2+': '当前OC周期2天及以上',
     'OC3+': '当前OC周期3天及以上',
+    '盘点2天+': '按柬埔寨自然日计算，盘点累计2天及以上',
     入库无扫描: '入库后无更晚有效节点'
+    ,已退回件: '当前周期RETURN_COMPLETED唯一运单数'
+    ,退回率: '已退回件 ÷ 当前业务有效唯一单号'
+    ,退回处理中: 'PR/P4007退回中，仍继续查询轨迹'
+    ,'1派POD': '日报当日（柬埔寨自然日）完成POD'
+    ,'1派POD占比': '1派POD ÷ 当日有效唯一单号'
+    ,'2派POD': '跨过第1个柬埔寨午夜后完成POD'
+    ,'2派POD占比': '2派POD ÷ 当日有效唯一单号'
+    ,'3派及以上POD': '跨过至少2个柬埔寨午夜后完成POD'
+    ,'3派及以上POD占比': '3派及以上POD ÷ 当日有效唯一单号'
   }[label] || '';
 }
 
 function rateValue(value) { return Number(value || 0) / 100; }
+function metricValueForExport(metrics, label) {
+  const map = {
+    今日总单: metrics.total, 今日POD: metrics.pod, POD率: rateValue(metrics.podRate), 首派成功率: rateValue(metrics.firstAttemptRate),
+    'Pending1+': metrics.pending1, 'Pending2+': metrics.pending2, 'Pending3+': metrics.pending3plus,
+    'OC1+': metrics.oc1, 'OC2+': metrics.oc2, 'OC3+': metrics.oc3plus, '盘点2天+': metrics.cycle2plus, 入库无扫描: metrics.inboundNoScan,
+    已退回件: metrics.returned, 退回率: rateValue(metrics.returnRate), 当前未闭环: metrics.unresolved, 对账差异: metrics.accountingDifference, 退回处理中: metrics.returnInProgress,
+    '1派POD': metrics.dispatchAttempt1, '1派POD占比': rateValue(metrics.dispatchAttempt1Rate),
+    '2派POD': metrics.dispatchAttempt2, '2派POD占比': rateValue(metrics.dispatchAttempt2Rate),
+    '3派及以上POD': metrics.dispatchAttempt3, '3派及以上POD占比': rateValue(metrics.dispatchAttempt3Rate),
+    在途门店: metrics.shopTransit, 到达门店: metrics.shopArrived, 门店Pending: metrics.shopPending,
+    '门店滞留1天+': metrics.shopRetention1, '门店滞留2天+': metrics.shopRetention2, '门店滞留3天+': metrics.shopRetention3
+  };
+  return map[label] ?? 0;
+}
 function statusLabel(value) { return { volume: '—', normal: '正常', warning: '需跟进', danger: '重点关注' }[value] || String(value || '—'); }
 function shortMetric(value) { return String(value).replace('今日', '').replace('首派成功率', '首派成功').slice(0, 18); }
 function hyperlinkFormula(sheetName, label) { const safeSheet = String(sheetName).replaceAll("'", "''"); const safeLabel = String(label).replaceAll('"', '""'); return { formula: `HYPERLINK("#'${safeSheet}'!A1","${safeLabel}")`, result: String(label) }; }
