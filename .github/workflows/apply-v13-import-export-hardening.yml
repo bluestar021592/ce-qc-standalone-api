@@ -1,0 +1,61 @@
+name: Apply V13 unified import export hardening
+
+on:
+  push:
+    branches:
+      - chatgpt/v18-unified-import-export-hardening-20260807
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/v18-unified-import-export-hardening-20260807
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply export patch
+        run: node scripts/apply-v13-export-hardening.mjs
+
+      - name: Syntax checks
+        shell: pwsh
+        run: |
+          node --check src/unifiedExcelParser.js
+          node --check src/shopeeAnalyzer.js
+          node --check src/shopeeTemplateExporter.js
+          node --check test/v13-unified-import-hardening.test.js
+          node --check test/v13-export-link-region-hardening.test.js
+
+      - name: Run focused V13 tests
+        shell: pwsh
+        run: |
+          node --test test/v13-unified-import-hardening.test.js test/v13-export-link-region-hardening.test.js test/shopee-template-export.test.js test/v12-business-rule-hardening.test.js
+
+      - name: Verify locked V18 UI unchanged
+        shell: pwsh
+        run: |
+          $html = Get-Content -Raw public/index.html
+          foreach ($needle in @('homeBusinessCards','homeCoreMetrics','homeShopeeSpecial','homeDispatchDistribution','综合日报导入','管理汇总 + 五业务')) {
+            if (-not $html.Contains($needle)) { throw "Locked V18 UI signature missing: $needle" }
+          }
+
+      - name: Commit tested source changes
+        shell: pwsh
+        run: |
+          git config user.name "ChatGPT QC Maintainer"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/shopeeAnalyzer.js src/shopeeTemplateExporter.js
+          git commit -m "[skip ci] Harden region and clickable waybill export behavior"
+          git push origin HEAD:chatgpt/v18-unified-import-export-hardening-20260807
