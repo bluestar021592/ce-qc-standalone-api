@@ -80,15 +80,15 @@ jobs:
             if (-not $html.Contains($needle)) { throw "Locked V18 UI signature missing: $needle" }
           }
 
-      - name: Remove one-shot patch machinery and commit hardened source
+      - name: Commit tested source without modifying workflow files
         shell: pwsh
         run: |
+          git checkout -- .github/workflows/restore-v18-smoke.yml
           Remove-Item scripts/apply-v12-rule-hardening.mjs -Force
           Remove-Item scripts/relax-v12-patcher.mjs -Force
           Remove-Item scripts/v12-postpatch.mjs -Force
-          Remove-Item .github/workflows/apply-v12-rule-hardening.yml -Force
           git config user.name "ChatGPT QC Maintainer"
           git config user.email "actions@users.noreply.github.com"
           git add -A
-          git commit -m "Harden QC terminal, special-node, carry and work-order rules"
+          git commit -m "[skip ci] Harden QC terminal, special-node, carry and work-order rules"
           git push origin HEAD:chatgpt/v18-data-rule-hardening-20260807
