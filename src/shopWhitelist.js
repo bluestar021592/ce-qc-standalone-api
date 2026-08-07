@@ -3,19 +3,31 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const WHITELIST_FILE = fileURLToPath(new URL('./data/shop-whitelist-2026-08-03.json', import.meta.url));
-const WHITELIST_FILE_SHA256 = '4a79222e578de38ad97abd4f34a8545bdf95d626d023bf6cb60be8381de6afe5';
-const raw = fs.readFileSync(WHITELIST_FILE);
-const actualSha256 = crypto.createHash('sha256').update(raw).digest('hex');
+const EXPECTED_WHITELIST_FILE_SHA256 = '4a79222e578de38ad97abd4f34a8545bdf95d626d023bf6cb60be8381de6afe5';
 
-if (actualSha256 !== WHITELIST_FILE_SHA256) {
-  throw new Error('门店白名单文件校验失败，已停止加载。');
+export const SHOP_WHITELIST_AVAILABLE = fs.existsSync(WHITELIST_FILE);
+
+let raw = null;
+let payload = {
+  version: '2026-08-03',
+  source_file: '',
+  source_sha256: '',
+  stores: []
+};
+let loadedFileSha256 = '';
+
+if (SHOP_WHITELIST_AVAILABLE) {
+  raw = fs.readFileSync(WHITELIST_FILE);
+  loadedFileSha256 = crypto.createHash('sha256').update(raw).digest('hex');
+  if (loadedFileSha256 !== EXPECTED_WHITELIST_FILE_SHA256) {
+    throw new Error('门店白名单文件校验失败，已停止加载。');
+  }
+  payload = JSON.parse(raw.toString('utf8'));
 }
-
-const payload = JSON.parse(raw.toString('utf8'));
 
 export const SHOP_WHITELIST_VERSION = String(payload.version || '2026-08-03');
 export const SHOP_WHITELIST_SOURCE_SHA256 = String(payload.source_sha256 || '');
-export const SHOP_WHITELIST_FILE_SHA256 = WHITELIST_FILE_SHA256;
+export const SHOP_WHITELIST_FILE_SHA256 = loadedFileSha256 || EXPECTED_WHITELIST_FILE_SHA256;
 export const SHOP_WHITELIST_PREFIXES = Object.freeze(['CP', 'FS', 'PV', 'PNH']);
 export const LATEST_SHOP_STORES = Object.freeze((payload.stores || [])
   .filter(row => row.classification_enabled === true)
@@ -59,7 +71,19 @@ export function latestShopCodeMap() {
   return new Map(LATEST_SHOP_STORES.map(row => [row.code, row.name || row.code]));
 }
 
+/**
+ * Seed the signed whitelist when its source JSON is present.
+ *
+ * The production whitelist JSON intentionally lives under an ignored data path. A clean Git
+ * checkout therefore may not contain that file. In that case we MUST NOT throw, deactivate,
+ * truncate, or replace the whitelist already persisted in SQLite. The caller can continue to
+ * read the persisted whitelist/shop_cp_codes through shopCodes.js.
+ */
 export function seedLatestShopWhitelist(db) {
+  if (!SHOP_WHITELIST_AVAILABLE || !LATEST_SHOP_STORES.length) {
+    return persistedWhitelistSummary(db);
+  }
+
   const now = new Date().toISOString();
   db.prepare(`
     INSERT INTO shop_whitelist_versions(version, sourceFile, sourceSha256, fileSha256, active, storeCount, createdAt)
@@ -96,5 +120,49 @@ export function seedLatestShopWhitelist(db) {
     legacy.run(store.code, store.name, `whitelist:${SHOP_WHITELIST_VERSION}`, now, now);
     for (const name of store.aliases) alias.run(SHOP_WHITELIST_VERSION, store.code, name, now);
   }
-  return { version: SHOP_WHITELIST_VERSION, sourceSha256: SHOP_WHITELIST_SOURCE_SHA256, fileSha256: SHOP_WHITELIST_FILE_SHA256, count: LATEST_SHOP_STORES.length };
+  return {
+    version: SHOP_WHITELIST_VERSION,
+    sourceSha256: SHOP_WHITELIST_SOURCE_SHA256,
+    fileSha256: SHOP_WHITELIST_FILE_SHA256,
+    count: LATEST_SHOP_STORES.length,
+    source: 'SIGNED_FILE'
+  };
+}
+
+function persistedWhitelistSummary(db) {
+  let version = SHOP_WHITELIST_VERSION;
+  let sourceSha256 = '';
+  let fileSha256 = '';
+  let count = 0;
+
+  try {
+    const hasVersions = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='shop_whitelist_versions'").get();
+    const hasEntries = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='shop_whitelist_entries'").get();
+    if (hasVersions && hasEntries) {
+      const active = db.prepare(`
+        SELECT version, sourceSha256, fileSha256, storeCount
+        FROM shop_whitelist_versions
+        WHERE active=1
+        ORDER BY createdAt DESC
+        LIMIT 1
+      `).get();
+      if (active?.version) version = String(active.version);
+      sourceSha256 = String(active?.sourceSha256 || '');
+      fileSha256 = String(active?.fileSha256 || '');
+      count = Number(db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM shop_whitelist_entries
+        WHERE version=? AND classificationEnabled=1
+      `).get(version)?.count || 0);
+    }
+  } catch {}
+
+  if (!count) {
+    try {
+      const hasLegacy = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='shop_cp_codes'").get();
+      if (hasLegacy) count = Number(db.prepare('SELECT COUNT(*) AS count FROM shop_cp_codes').get()?.count || 0);
+    } catch {}
+  }
+
+  return { version, sourceSha256, fileSha256, count, source: 'SQLITE_PERSISTED' };
 }
