@@ -3,6 +3,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
+import { persistPendingDailyMembers } from './pendingDays.js';
 
 const STATE_KEY = 'current';
 const ACTIVE_REPORT = '__active__';
@@ -55,42 +56,67 @@ export function saveAppState(state = {}, options = {}) {
   runTransaction(tx);
 }
 
+export const BUSINESS_DATA_TABLES = [
+  'daily_reports',
+  'daily_parse_rows',
+  'scan_results',
+  'track_events',
+  'final_rows',
+  'pod_locks',
+  'carry_bills',
+  'history_summary',
+  'run_checkpoints',
+  'run_locks',
+  'export_snapshots',
+  'export_records',
+  'business_daily_reports',
+  'business_daily_parse_rows',
+  'business_scan_results',
+  'business_track_events',
+  'business_final_rows',
+  'business_pod_locks',
+  'business_carry_bills',
+  'business_history_summary',
+  'business_run_checkpoints',
+  'business_run_locks',
+  'business_export_snapshots',
+  'business_export_records',
+  'business_states',
+  'business_api_batches',
+  'business_exception_items',
+  'business_shipment_tracks',
+  'business_recipient_conflicts',
+  'carryover_open_items',
+  'export_jobs',
+  'metric_detail_members',
+  'metric_snapshots',
+  'monthly_metric_snapshots',
+  'notifications',
+  'pending_daily_members',
+  'reconciliation_diagnostics',
+  'shipment_current_state',
+  'shipment_daily_snapshots',
+  'unified_import_batches',
+  'unified_import_rows',
+  'unified_snapshots',
+  'weekly_metric_snapshots'
+];
+
 export function resetAppState(nextState = {}) {
   const db = getDb();
   const now = nowIso();
-  const clearTargets = [
-    'daily_reports',
-    'daily_parse_rows',
-    'scan_results',
-    'track_events',
-    'final_rows',
-    'pod_locks',
-    'carry_bills',
-    'history_summary',
-    'run_checkpoints',
-    'run_locks',
-    'export_snapshots',
-    'export_records',
-    'business_daily_reports',
-    'business_daily_parse_rows',
-    'business_scan_results',
-    'business_track_events',
-    'business_final_rows',
-    'business_pod_locks',
-    'business_carry_bills',
-    'business_history_summary',
-    'business_run_checkpoints',
-    'business_run_locks',
-    'business_export_snapshots',
-    'business_export_records',
-    'business_states'
-  ];
+  const existingTables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+  const clearTargets = BUSINESS_DATA_TABLES.filter(table => existingTables.has(table));
   const cleared = Object.fromEntries(clearTargets.map(table => [
     table,
     Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count || 0)
   ]));
   runTransaction(() => {
-    for (const table of clearTargets) db.exec(`DELETE FROM ${table}`);
+    for (const table of clearTargets) {
+      while (db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()) {
+        db.exec(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} LIMIT 50000)`);
+      }
+    }
     db.prepare(`
       INSERT INTO app_state(key, valueJson, updatedAt)
       VALUES(?, ?, ?)
@@ -197,7 +223,10 @@ export function createOrRecoverRun(reportDate, options = {}) {
   let result = null;
   runTransaction(() => {
     const existing = db.prepare('SELECT * FROM run_locks WHERE reportDate=?').get(date);
-    const recoverable = existing && ['running', 'paused', 'failed'].includes(existing.status);
+    const recoverable = existing && (
+      ['running', 'paused', 'failed'].includes(existing.status)
+      || (existing.status === 'finished' && options.recoverFinished === true)
+    );
     if (recoverable && existing.status === 'running' && options.rejectRunning) {
       result = { ok: false, code: 'RUN_ALREADY_ACTIVE', error: '当前日期已有处理任务正在运行，请勿重复启动。', run: existing };
       return;
@@ -273,17 +302,25 @@ export function listExportRecords(limit = 50) {
 }
 
 export function loadDetail({ reportDate, shipmentCode }) {
-  const date = String(reportDate || '').trim();
+  const normalizedDate = String(reportDate || '').trim();
   const bill = String(shipmentCode || '').trim().toUpperCase();
   if (!bill) return null;
   const db = getDb();
-  const scan = db.prepare('SELECT * FROM scan_results WHERE shipmentCode=? AND (?="" OR reportDate=?)').get(bill, date, date);
-  const finalRow = db.prepare('SELECT * FROM final_rows WHERE shipmentCode=? AND (?="" OR reportDate=?)').get(bill, date, date);
-  const events = db.prepare('SELECT * FROM track_events WHERE shipmentCode=? AND (?="" OR reportDate=?) ORDER BY eventTime').all(bill, date, date);
-  const dailyRows = db.prepare('SELECT * FROM daily_parse_rows WHERE shipmentCode=? AND (?="" OR reportDate=?) ORDER BY rowNumber LIMIT 20').all(bill, date, date);
+  const scan = normalizedDate
+    ? db.prepare('SELECT * FROM scan_results WHERE shipmentCode=? AND reportDate=? ORDER BY updatedAt DESC,rowid DESC LIMIT 1').get(bill, normalizedDate)
+    : db.prepare('SELECT * FROM scan_results WHERE shipmentCode=? ORDER BY reportDate DESC,updatedAt DESC,rowid DESC LIMIT 1').get(bill);
+  const finalRow = normalizedDate
+    ? db.prepare('SELECT * FROM final_rows WHERE shipmentCode=? AND reportDate=? ORDER BY updatedAt DESC,rowid DESC LIMIT 1').get(bill, normalizedDate)
+    : db.prepare('SELECT * FROM final_rows WHERE shipmentCode=? ORDER BY reportDate DESC,updatedAt DESC,rowid DESC LIMIT 1').get(bill);
+  const events = normalizedDate
+    ? db.prepare('SELECT * FROM track_events WHERE shipmentCode=? AND reportDate=? ORDER BY eventTime,id').all(bill, normalizedDate)
+    : db.prepare('SELECT * FROM track_events WHERE shipmentCode=? ORDER BY reportDate DESC,eventTime,id').all(bill);
+  const dailyRows = normalizedDate
+    ? db.prepare('SELECT * FROM daily_parse_rows WHERE shipmentCode=? AND reportDate=? ORDER BY rowNumber,id LIMIT 20').all(bill, normalizedDate)
+    : db.prepare('SELECT * FROM daily_parse_rows WHERE shipmentCode=? ORDER BY reportDate DESC,rowNumber,id LIMIT 20').all(bill);
   const podLock = db.prepare('SELECT * FROM pod_locks WHERE shipmentCode=?').get(bill);
   const carry = db.prepare('SELECT * FROM carry_bills WHERE shipmentCode=? ORDER BY updatedAt DESC LIMIT 5').all(bill);
-  return { reportDate: date, shipmentCode: bill, scan: inflateRow(scan), finalRow: inflateRow(finalRow), events: events.map(inflateRow), dailyRows, podLock, carry };
+  return { reportDate: normalizedDate, shipmentCode: bill, scan: inflateRow(scan), finalRow: inflateRow(finalRow), events: events.map(inflateRow), dailyRows, podLock: podLock || null, carry };
 }
 
 function mirrorStateTables(state, now) {
@@ -293,6 +330,7 @@ function mirrorStateTables(state, now) {
   mirrorDaily(state, reportDate, now);
   mirrorScanResults(state, reportDate, now);
   mirrorTrackEvents(state, reportDate, now);
+  persistPendingDailyMembers(getDb(), { businessType: 'CCSL', reportDate, snapshotId: state.snapshotId || '', events: state.trackEvents || [], createdAt: now });
   mirrorFinalRows(state, reportDate, now);
   mirrorHistory(state, now);
   mirrorCheckpoint(state, reportDate, now);
@@ -675,7 +713,7 @@ function runTransaction(fn) {
 function inflateRow(row) {
   if (!row) return null;
   const raw = parseJson(row.rawJson || '', null);
-  return raw || row;
+  return raw && typeof raw === 'object' ? { ...row, ...raw } : row;
 }
 
 function parseJson(text, fallback) {

@@ -153,7 +153,7 @@ export class CEClient {
   }
 
   async confirmQuery(shipmentCodes) {
-    const clean = cleanBills(shipmentCodes);
+    const clean = cleanAnyShipmentCodes(shipmentCodes);
     if (!clean.length) return [];
     const data = await this.postJson('/api/otwms/order/confirm-query', { shipmentCodes: clean }, 'confirm-query');
     return Array.isArray(data.data) ? data.data : [];

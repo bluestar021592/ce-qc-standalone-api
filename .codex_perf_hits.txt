@@ -1,0 +1,80 @@
+﻿src\store.js:70:  'export_snapshots',
+src\store.js:82:  'business_export_snapshots',
+src\store.js:92:  'metric_snapshots',
+src\store.js:93:  'monthly_metric_snapshots',
+src\store.js:98:  'shipment_daily_snapshots',
+src\store.js:101:  'unified_snapshots',
+src\store.js:102:  'weekly_metric_snapshots'
+src\store.js:137:      VALUES('current_snapshot_id', '', ?)
+src\store.js:275:    db.prepare('DELETE FROM export_snapshots WHERE reportDate=?').run(date);
+src\store.js:277:    db.prepare("UPDATE app_meta SET value='', updatedAt=? WHERE key='current_snapshot_id'").run(nowIso());
+src\store.js:333:  persistPendingDailyMembers(getDb(), { businessType: 'CCSL', reportDate, snapshotId: state.snapshotId || '', events: state.trackEvents || [], createdAt: now });
+src\store.js:359:  const finalByBill = new Map((state.finalRows || []).map(row => [billOf(row), row]));
+src\store.js:511:  for (const row of state.finalRows || []) {
+src\store.js:591:      finalRows: (state.finalRows || []).length,
+src\store.js:630:    finalRows: db.prepare('SELECT rawJson FROM final_rows WHERE reportDate=? ORDER BY shipmentCode').all(reportDate).map(row => parseJson(row.rawJson, {})),
+server.js:19:import { cleanMainBills, loadState, saveState, resetState } from './src/storage.js';
+server.js:28:import { createDashboardSnapshot, getMatchingSnapshot, getSnapshotById, listSnapshotHistory, repairSnapshotFromStoredData } from './src/snapshots.js';
+server.js:342:app.get('/api/state', async (req, res) => {
+server.js:343:  const state = await loadState();
+server.js:391:    const source = loadUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));
+server.js:406:    res.json({ ok: true, businessType: source.businessType, reportDate: source.reportDate, snapshotId: source.snapshotId, snapshotStatus: source.snapshotStatus, state: req.query.compact === '1' ? compactDashboardState(state) : state });
+server.js:416:app.get('/api/snapshot/:businessType/:snapshotId', async (req, res) => {
+server.js:418:  const snapshot = businessType === SHOPEE
+server.js:419:    ? getBusinessSnapshotById(SHOPEE, req.params.snapshotId)
+server.js:420:    : getSnapshotById(req.params.snapshotId);
+server.js:421:  if (!snapshot) return res.status(404).json({ ok: false, error: '未找到该历史快照。' });
+server.js:422:  const state = snapshot.state || {};
+server.js:423:  res.json({ ok: true, businessType, reportDate: snapshot.reportDate || state.reportDate || '', snapshotId: snapshot.snapshotId, state: businessType === SHOPEE ? summarizeShopeeSnapshot(snapshot) : summarizeCcslSnapshot(snapshot) });
+server.js:426:app.get('/api/state/startup', async (req, res) => {
+server.js:427:  const state = await loadState();
+server.js:436:app.get('/api/state/last-report', async (req, res) => {
+server.js:437:  const state = await loadState();
+server.js:445:    canExport: Boolean(summary.finalRows || summary.scanResults || summary.dailySummary),
+server.js:467:    res.json({ ok: true, ...result, state: summarizeState(await loadState()), shopeeState: summarizeShopeeState(loadBusinessState(SHOPEE)) });
+server.js:482:      state: summarizeState(await loadState()),
+server.js:491:  const state = await loadState();
+server.js:498:  const state = await loadState();
+server.js:522:    const state = await loadState();
+server.js:553:    const state = await loadState();
+server.js:575:    state.finalRows = [];
+server.js:612:    const ccslState = await loadState();
+server.js:695:    const ccslState = await loadState();
+server.js:728:    const state = await loadState();
+server.js:797:        const latest = await loadState();
+server.js:835:    const snapshot = createDashboardSnapshot(result.state, { reportDate, runId: run.runId });
+server.js:836:    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
+server.js:837:    await appendRuntimeLog(`处理快照已保存：${snapshot.snapshotId}`);
+server.js:838:    res.json({ ok: true, summary: result.summary, run: { runId: run.runId, reportDate, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeState(await loadState()) });
+server.js:844:      const failedState = await loadState();
+server.js:908:        || Number(latestSnapshot.state?.finalRows?.length || 0) !== Number(state.pnhBills?.length || 0)
+server.js:916:        snapshotId: latestSnapshot.snapshotId,
+server.js:919:        actual: latestSnapshot.state?.finalRows?.length || 0
+server.js:922:      state.snapshotId = '';
+server.js:963:    const snapshot = saveBusinessSnapshot(SHOPEE, result.state, buildShopeeDashboard(result.state));
+server.js:964:    result.state.snapshotId = snapshot.snapshotId;
+server.js:965:    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
+server.js:966:    const ccslState = await loadState();
+server.js:968:    completeUnifiedSnapshot({ reportDate, ccslSnapshot, shopeeSnapshot: snapshot });
+server.js:970:    res.json({ ok: true, summary, run: { reportDate, runId, recovered: outcome.recovered, repair }, snapshotId: snapshot.snapshotId, state: summarizeShopeeState(result.state) });
+server.js:975:    state.snapshotId = '';
+server.js:1021:  const snapshotId = String(req.query.snapshotId || unified?.snapshotId || '');
+server.js:1025:  if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadUnifiedBusinessState(type, snapshotId));
+server.js:1026:  if (!states.some(state => state?.finalRows?.length)) states = [await loadState(), loadBusinessState(SHOPEE)];
+server.js:1043:  res.json({ ok: true, reportDate, batchId: unified?.batchId || '', snapshotId, scope, allRowCount: allRows.length, summary, rows: rows.slice(0, 5000) });
+server.js:1103:    const state = await loadState();
+server.js:1104:    const snapshot = req.query.snapshotId ? getSnapshotById(req.query.snapshotId) : getMatchingSnapshot(state);
+server.js:1105:    if (!snapshot) throw new Error('处理尚未完成，暂无可导出的处理快照。');
+server.js:1106:    const exportState = snapshot ? { ...snapshot.state, snapshotId: snapshot.snapshotId } : state;
+server.js:1107:    const file = await exportXlsx(exportState, snapshot);
+server.js:1108:    setSnapshotHeaders(res, snapshot);
+server.js:1114:      rowCount: (exportState.finalRows || []).length,
+server.js:1116:      consistency: snapshot?.consistency || buildConsistencyReport(exportState)
+server.js:1126:    const state = await loadState();
+server.js:1127:    const snapshotId = req.body?.snapshotId || '';
+server.js:1128:    const snapshot = snapshotId ? getSnapshotById(snapshotId) : getMatchingSnapshot(state);
+server.js:1129:    if (!snapshot) throw new Error('处理尚未完成，暂无可导出的处理快照。');
+server.js:1130:    const exportState = snapshot ? { ...snapshot.state, snapshotId: snapshot.snapshotId } : state;
+server.js:1131:    const file = await exportXlsx(exportState, snapshot);
+server.js:1132:    setSnapshotHeaders(res, snapshot);
+server.js:1138:      rowCount: (exportState.finalRows || []).length,

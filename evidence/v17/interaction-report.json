@@ -1,0 +1,99 @@
+{
+  "chartCount": 4,
+  "chartTitles": [
+    "今日票数趋势",
+    "POD率趋势",
+    "OC率趋势",
+    "首次妥投率趋势"
+  ],
+  "currentValues": [
+    "18,642",
+    "88.50%",
+    "6.90%",
+    "88.50%"
+  ],
+  "changes": [
+    "环比昨日 ↑ 0.88%",
+    "环比昨日 ↑ 0.57%",
+    "环比昨日 ↑ 2.99%",
+    "环比昨日 ↑ 0.57%"
+  ],
+  "pointLabels": 63,
+  "tooltipSamples": [
+    "07-14；今日 17,895",
+    "07-15；今日 18,120",
+    "07-16；今日 18,010",
+    "07-17；今日 18,340",
+    "07-18；今日 18,190",
+    "07-19；今日 18,480",
+    "07-20；今日 18,642",
+    "07-14；CE 87.60%"
+  ],
+  "chartClick": {
+    "path": "/reports",
+    "dialogVisible": false,
+    "visiblePage": "reportsPage"
+  },
+  "routes": {
+    "ce": {
+      "path": "/ce",
+      "title": "CE看板",
+      "visiblePages": 1
+    },
+    "tbkh": {
+      "path": "/tbkh",
+      "title": "TBKH看板",
+      "visiblePages": 1
+    },
+    "ali1688": {
+      "path": "/ali1688",
+      "title": "ALI1688看板",
+      "visiblePages": 1
+    },
+    "shopeecn": {
+      "path": "/shopeecn",
+      "title": "SHOPEE CN看板",
+      "visiblePages": 1
+    },
+    "shopeevn": {
+      "path": "/shopeevn",
+      "title": "SHOPEE VN看板",
+      "visiblePages": 1
+    },
+    "import": {
+      "path": "/import",
+      "title": "数据导入",
+      "visiblePages": 1
+    },
+    "tracking": {
+      "path": "/tracking",
+      "title": "轨迹查询",
+      "visiblePages": 1
+    },
+    "exceptions": {
+      "path": "/exceptions",
+      "title": "异常明细",
+      "visiblePages": 1
+    },
+    "reports": {
+      "path": "/reports",
+      "title": "报表导出",
+      "visiblePages": 1
+    },
+    "data-management": {
+      "path": "/data-management",
+      "title": "数据管理",
+      "visiblePages": 1
+    },
+    "settings": {
+      "path": "/settings",
+      "title": "系统设置",
+      "visiblePages": 1
+    },
+    "logs": {
+      "path": "/logs",
+      "title": "操作日志",
+      "visiblePages": 1
+    }
+  }
+}

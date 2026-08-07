@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
+import { SHOP_WHITELIST_SOURCE_SHA256, SHOP_WHITELIST_VERSION } from './shopWhitelist.js';
 import { getDb, nowIso } from './db.js';
 import { buildSnapshotHashes } from './snapshotHash.js';
+import { persistPendingDailyMembers } from './pendingDays.js';
 
 export const SHOPEE = 'SHOPEE';
 
@@ -8,12 +11,12 @@ export function loadBusinessState(businessType = SHOPEE) {
   const type = normalizeType(businessType);
   const row = getDb().prepare('SELECT valueJson FROM business_states WHERE businessType=?').get(type);
   if (!row?.valueJson) return emptyState(type);
-  try { return normalizeBusinessState(JSON.parse(row.valueJson), type); } catch { return emptyState(type); }
+  try { return restrictShopeeState(normalizeBusinessState(JSON.parse(row.valueJson), type), type); } catch { return emptyState(type); }
 }
 
 export function saveBusinessState(state = {}, businessType = state.businessType || SHOPEE) {
   const type = normalizeType(businessType);
-  const normalized = normalizeBusinessState(state, type);
+  const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
   const db = getDb();
   const now = nowIso();
   db.exec('BEGIN IMMEDIATE');
@@ -44,12 +47,12 @@ export function createOrRecoverBusinessRun(businessType, reportDate, options = {
     return { ok: false, code: 'REPORT_DATE_MISSING', error: `当前未导入${type}当日日报Excel，请先导入后再开始处理。` };
   }
   const existing = db.prepare('SELECT * FROM business_run_locks WHERE businessType=? AND reportDate=?').get(type, date);
-  if (existing && ['running', 'paused', 'failed'].includes(existing.status)) {
+  if (existing && ['running', 'paused', 'failed'].includes(existing.status) && !(existing.status === 'failed' && options.repair)) {
     if (existing.status === 'running' && options.rejectRunning) return { ok: false, code: 'RUN_ALREADY_ACTIVE', error: '当前任务正在运行，请勿重复启动。', run: existing };
     db.prepare("UPDATE business_run_locks SET status='running',errorMessage='',updatedAt=? WHERE businessType=? AND reportDate=?").run(nowIso(), type, date);
     return { ok: true, created: false, recovered: true, run: getBusinessRunStatus(type, date).lock };
   }
-  if (existing?.status === 'finished') return { ok: false, code: 'RUN_ALREADY_COMPLETED', error: '当前任务已经完成，不能重复调用API。', run: existing };
+  if (existing?.status === 'finished' && !options.repair) return { ok: false, code: 'RUN_ALREADY_COMPLETED', error: '当前任务已经完成，不能重复调用API。', run: existing };
   const runId = options.runId || randomUUID();
   const now = nowIso();
   db.prepare(`INSERT INTO business_run_locks(businessType,reportDate,runId,status,currentStage,batchIndex,totalBatches,errorMessage,lockedBy,lockedAt,completedAt,updatedAt)
@@ -109,8 +112,11 @@ export function saveBusinessSnapshot(businessType, state, view) {
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
   try {
-    db.prepare('INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,payloadJson,generatedAt,createdAt) VALUES(?,?,?,?,?,?,?)')
-      .run(snapshotId, type, reportDate, runId, JSON.stringify(payload), generatedAt, generatedAt);
+    const payloadJson = JSON.stringify({ ...payload, status: 'VALID', reconciliationStatus: 'COMPLETED', whitelistVersion: SHOP_WHITELIST_VERSION });
+    const payloadHash = createHash('sha256').update(payloadJson).digest('hex');
+    db.prepare(`INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,payloadJson,generatedAt,createdAt,status,reconciliationStatus,invalidReason,whitelistVersion,whitelistSha256,payloadHash)
+      VALUES(?,?,?,?,?,?,?,'VALID','COMPLETED','',?,?,?)`)
+      .run(snapshotId, type, reportDate, runId, payloadJson, generatedAt, generatedAt, SHOP_WHITELIST_VERSION, SHOP_WHITELIST_SOURCE_SHA256, payloadHash);
     db.prepare("UPDATE business_run_locks SET status='finished',currentStage='完成',completedAt=?,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=?")
       .run(generatedAt, generatedAt, type, reportDate, runId);
     db.exec('COMMIT');
@@ -118,23 +124,36 @@ export function saveBusinessSnapshot(businessType, state, view) {
   return payload;
 }
 
+export function invalidateBusinessSnapshots(businessType, reportDate, reason = {}) {
+  const type = normalizeType(businessType);
+  const date = String(reportDate || '').trim();
+  if (!date) return { changed: 0 };
+  const info = JSON.stringify({ ...reason, invalidatedAt: nowIso() });
+  const result = getDb().prepare(`
+    UPDATE business_export_snapshots
+    SET status='INVALID', reconciliationStatus='FAILED', invalidReason=?
+    WHERE businessType=? AND reportDate=? AND COALESCE(status,'VALID')='VALID'
+  `).run(info, type, date);
+  return { changed: result.changes || 0 };
+}
+
 export function getBusinessSnapshot(businessType, reportDate, runId = '') {
   const type = normalizeType(businessType);
   const row = runId
-    ? getDb().prepare('SELECT payloadJson FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND runId=? ORDER BY id DESC LIMIT 1').get(type, reportDate, runId)
-    : getDb().prepare('SELECT payloadJson FROM business_export_snapshots WHERE businessType=? AND reportDate=? ORDER BY id DESC LIMIT 1').get(type, reportDate);
+    ? getDb().prepare("SELECT payloadJson FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND runId=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(type, reportDate, runId)
+    : getDb().prepare("SELECT payloadJson FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(type, reportDate);
   try { return row?.payloadJson ? JSON.parse(row.payloadJson) : null; } catch { return null; }
 }
 
 export function getBusinessSnapshotById(businessType, snapshotId) {
   const type = normalizeType(businessType);
-  const row = getDb().prepare('SELECT payloadJson FROM business_export_snapshots WHERE businessType=? AND snapshotId=?').get(type, String(snapshotId || '').trim());
+  const row = getDb().prepare("SELECT payloadJson FROM business_export_snapshots WHERE businessType=? AND snapshotId=? AND COALESCE(status,'VALID')='VALID'").get(type, String(snapshotId || '').trim());
   try { return row?.payloadJson ? JSON.parse(row.payloadJson) : null; } catch { return null; }
 }
 
 export function listBusinessHistoryDates(businessType, limit = 60) {
   return getDb().prepare(`SELECT reportDate,snapshotId,runId,generatedAt
-    FROM business_export_snapshots WHERE businessType=? ORDER BY reportDate DESC,createdAt DESC LIMIT ?`)
+    FROM business_export_snapshots WHERE businessType=? AND COALESCE(status,'VALID')='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT ?`)
     .all(normalizeType(businessType), Math.max(1, Math.min(365, Number(limit || 60))));
 }
 
@@ -176,12 +195,41 @@ export function normalizeBusinessState(state = {}, businessType = SHOPEE) {
     daily: state.daily || null, dailyParseSummary: state.dailyParseSummary || state.daily?.summary || null, dailyParseRows: state.dailyParseRows || state.daily?.importRows || state.daily?.details || [],
     recipientConflicts: state.recipientConflicts || state.daily?.conflicts || [], recipientReconciliation: state.recipientReconciliation || state.daily?.summary?.reconciliation || null,
     pnhBills: clean(state.pnhBills || state.bills || []), carryBills: clean(state.carryBills || []), podLocks: clean(state.podLocks || []),
-    scanPool: clean(state.scanPool || []), scanResults: state.scanResults || [], shipmentTrackResults: state.shipmentTrackResults || [], shipmentQueryStatus: state.shipmentQueryStatus || [], needTrackBills: clean(state.needTrackBills || []),
+    scanPool: clean(state.scanPool || []), scanRetryBills: clean(state.scanRetryBills || []), scanResults: state.scanResults || [], scanQueryStatus: state.scanQueryStatus || [], shipmentTrackResults: state.shipmentTrackResults || [], shipmentQueryStatus: state.shipmentQueryStatus || [], needTrackBills: clean(state.needTrackBills || []),
     trackEvents: state.trackEvents || [], eventQueryStatus: state.eventQueryStatus || [], exceptionItems: state.exceptionItems || [], exceptionQueryStatus: state.exceptionQueryStatus || [],
     apiBatchStatus: state.apiBatchStatus || [], trackResults: state.trackResults || [], finalRows: state.finalRows || [], priorCarryRows: state.priorCarryRows || [], nextCarryBills: clean(state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || [])),
     historySummary: (state.historySummary || []).slice(-30), processing: state.processing || { running: false, paused: false, phase: '' },
     currentRun: state.currentRun || null, lastRunSummary: state.lastRunSummary || state.lastRun || null, lastRun: state.lastRun || state.lastRunSummary || null,
-    backupImportedAt: state.backupImportedAt || '', backupSummary: state.backupSummary || null, logs: (state.logs || []).slice(-300), snapshotId: state.snapshotId || ''
+    backupImportedAt: state.backupImportedAt || '', backupSummary: state.backupSummary || null, apiDiagnostic: state.apiDiagnostic || null, logs: (state.logs || []).slice(-300), snapshotId: state.snapshotId || ''
+  };
+}
+
+function restrictShopeeState(state, type) {
+  if (type !== SHOPEE) return state;
+  const isEligible = row => ['CN', 'VN'].includes(recipientGroup(row));
+  const eligibleBills = new Set((state.dailyParseRows || []).filter(isEligible).map(billOf).filter(Boolean));
+  const rows = key => (state[key] || []).filter(row => isEligible(row) || eligibleBills.has(billOf(row)));
+  const priorByBill = new Map([...rows('finalRows'), ...rows('priorCarryRows')].map(row => [billOf(row), row]));
+  const keepBill = bill => eligibleBills.has(bill) || isEligible(priorByBill.get(bill) || {});
+  return {
+    ...state,
+    dailyParseRows: (state.dailyParseRows || []).filter(isEligible),
+    dailyParseSummary: sanitizeShopeeDailySummary(state.dailyParseSummary),
+    daily: state.daily ? { ...state.daily, importRows: (state.daily.importRows || []).filter(isEligible), preview: (state.daily.preview || []).filter(isEligible), excludedRows: [] } : state.daily,
+    pnhBills: (state.pnhBills || []).filter(keepBill),
+    carryBills: (state.carryBills || []).filter(keepBill),
+    nextCarryBills: (state.nextCarryBills || []).filter(keepBill),
+    podLocks: (state.podLocks || []).filter(keepBill),
+    scanPool: (state.scanPool || []).filter(keepBill),
+    scanRetryBills: (state.scanRetryBills || []).filter(keepBill),
+    needTrackBills: (state.needTrackBills || []).filter(keepBill),
+    scanResults: rows('scanResults'),
+    shipmentTrackResults: rows('shipmentTrackResults'),
+    trackEvents: rows('trackEvents'),
+    exceptionItems: rows('exceptionItems'),
+    trackResults: rows('trackResults'),
+    finalRows: rows('finalRows'),
+    priorCarryRows: rows('priorCarryRows')
   };
 }
 
@@ -222,6 +270,10 @@ function mirrorBusinessTables(db, state, type, now) {
     const final = state.finalRows.find(row => billOf(row) === bill) || state.priorCarryRows.find(row => billOf(row) === bill) || {};
     carryStmt.run(type, bill, date || '__active__', final.sourceDate || date, 'active', final.primaryCategory || final.异常分类 || '', JSON.stringify(final.tags || []), final.latestEventTime || final.最后节点时间 || '', final.latestEventDesc || final.最后节点 || '', date, state.currentRun?.runId || state.lastRunSummary?.runId || '', final.查询状态 === 'refresh_failed' ? 'refresh_failed' : '', final.QC判断 || '', final.recipient_raw || '', final.recipient_normalized || '', recipientGroup(final), final.recipient_group_reason || '', Number(final.source_row_number || final.rowNumber || 0), JSON.stringify(final), now, now);
   }
+  for (const row of state.finalRows) {
+    const bill = billOf(row);
+    if (bill && active.has(bill)) persistStoreFields(db, 'business_carry_bills', type, bill, date || '__active__', row);
+  }
   if (!date) return;
   mirrorRows(db, 'business_scan_results', type, date, state.scanResults, now, row => [Number(row.是否POD === '是'), String(row.orderStatus || ''), JSON.stringify(row)]);
   db.prepare('DELETE FROM business_shipment_tracks WHERE businessType=? AND reportDate=?').run(type, date);
@@ -231,17 +283,50 @@ function mirrorBusinessTables(db, state, type, now) {
   db.prepare('DELETE FROM business_track_events WHERE businessType=? AND reportDate=?').run(type, date);
   const eventStmt = db.prepare('INSERT INTO business_track_events(businessType,shipmentCode,reportDate,eventTime,eventCode,rawJson,createdAt) VALUES(?,?,?,?,?,?,?)');
   for (const row of state.trackEvents) eventStmt.run(type, billOf(row), date, row.eventTime || '', row.eventCode || '', JSON.stringify(row), now);
+  persistPendingDailyMembers(db, { businessType: type, reportDate: date, snapshotId: state.snapshotId || '', events: state.trackEvents, createdAt: now });
   db.prepare('DELETE FROM business_exception_items WHERE businessType=? AND reportDate=?').run(type, date);
   const exceptionStmt = db.prepare(`INSERT INTO business_exception_items(businessType,shipmentCode,reportDate,exceptionType,exceptionDesc,reportTime,statusCode,fileId,rawJson,createdAt)
     VALUES(?,?,?,?,?,?,?,?,?,?)`);
   for (const row of state.exceptionItems) exceptionStmt.run(type, billOf(row), date, row.exceptionType || '', row.exceptionDesc || '', row.reportTime || '', String(row.statusCode ?? ''), String(row.fileId ?? ''), JSON.stringify(row), now);
-  db.prepare('DELETE FROM business_api_batches WHERE businessType=? AND reportDate=? AND runId=?').run(type, date, state.currentRun?.runId || state.lastRunSummary?.runId || '');
-  const batchStmt = db.prepare(`INSERT INTO business_api_batches(businessType,reportDate,runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
-  for (const row of state.apiBatchStatus) batchStmt.run(type, date, row.runId || state.currentRun?.runId || state.lastRunSummary?.runId || '', row.apiName || '', row.batchKey || '', JSON.stringify(row.shipmentCodes || []), row.status || '', Number(row.attemptCount || 0), Number(row.resultCount || 0), row.errorMessage || '', row.createdAt || now, now);
+  const batchRows = new Map();
+  for (const row of state.apiBatchStatus || []) {
+    const runId = row.runId || state.currentRun?.runId || state.lastRunSummary?.runId || '';
+    const key = [type, date, runId, row.apiName || '', row.batchKey || ''].join('|');
+    const existing = batchRows.get(key);
+    if (existing?.payloadHash && row.payloadHash && existing.payloadHash !== row.payloadHash) {
+      const error = new Error(`批次${row.batchKey}的保存内容不一致，已停止写入。`);
+      error.code = 'BATCH_KEY_PAYLOAD_MISMATCH';
+      throw error;
+    }
+    batchRows.set(key, { ...(existing || {}), ...row, runId });
+  }
+  const batchStmt = db.prepare(`INSERT INTO business_api_batches(
+    businessType,reportDate,runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt,
+    payloadHash,shipmentCount,firstShipmentCode,lastShipmentCode,heartbeatAt,startedAt,completedAt
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  ON CONFLICT(businessType,reportDate,runId,apiName,batchKey) DO UPDATE SET
+    status=excluded.status,attemptCount=excluded.attemptCount,resultCount=excluded.resultCount,errorMessage=excluded.errorMessage,
+    updatedAt=excluded.updatedAt,heartbeatAt=excluded.heartbeatAt,completedAt=excluded.completedAt
+  WHERE business_api_batches.payloadHash IS NULL OR business_api_batches.payloadHash=excluded.payloadHash`);
+  const existingBatchStmt = db.prepare('SELECT payloadHash FROM business_api_batches WHERE businessType=? AND reportDate=? AND runId=? AND apiName=? AND batchKey=?');
+  for (const row of batchRows.values()) {
+    const previous = existingBatchStmt.get(type, date, row.runId, row.apiName || '', row.batchKey || '');
+    if (previous?.payloadHash && row.payloadHash && previous.payloadHash !== row.payloadHash) {
+      const error = new Error(`批次${row.batchKey}的运单内容与已保存记录不一致。`);
+      error.code = 'BATCH_KEY_PAYLOAD_MISMATCH';
+      throw error;
+    }
+    batchStmt.run(
+    type, date, row.runId, row.apiName || '', row.batchKey || '', JSON.stringify(row.shipmentCodes || []), row.status || '',
+    Number(row.attemptCount || 0), Number(row.resultCount || 0), row.errorMessage || '', row.createdAt || now, now,
+    row.payloadHash || '', Number(row.shipmentCount || (row.shipmentCodes || []).length), row.firstShipmentCode || '', row.lastShipmentCode || '',
+    row.updatedAt || now, row.createdAt || now, ['success', 'failed'].includes(row.status) ? (row.updatedAt || now) : ''
+    );
+  }
   db.prepare('DELETE FROM business_final_rows WHERE businessType=? AND reportDate=?').run(type, date);
   const finalStmt = db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   for (const row of state.finalRows) finalStmt.run(type, billOf(row), date, Number(row.是否POD === '是'), row.primaryCategory || row.异常分类 || '', row.API状态 || row.查询状态 || '', row.carry状态 || '', row.latestEventTime || row.最后节点时间 || '', row.latestEventDesc || row.最后节点 || '', row.latestNode || '', row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', Number(row.source_row_number || row.rowNumber || 0), JSON.stringify(row), now, now);
+  for (const row of state.finalRows) persistStoreFields(db, 'business_final_rows', type, billOf(row), date, row);
   const historyStmt = db.prepare(`INSERT INTO business_history_summary(businessType,reportDate,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(businessType,reportDate) DO UPDATE SET summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`);
   for (const item of state.historySummary) {
     const historyDate = item.reportDate || item.summary?.reportDate || '';
@@ -265,7 +350,52 @@ function mirrorRows(db, table, type, date, rows, now, values) {
   }
 }
 
+function persistStoreFields(db, table, type, shipmentCode, reportDate, row = {}) {
+  if (!shipmentCode) return;
+  db.prepare(`UPDATE ${table} SET
+    targetShopCode=?,currentShopCode=?,shopName=?,shopCycleId=?,shopTransferStartedAt=?,shopArrivedAt=?,
+    shopLastEventAt=?,shopPendingAt=?,shopPendingReason=?,shopRetentionNaturalDays=?,shopState=?,shopStateReason=?,
+    whitelistVersion=?,currentMainCategory=?,auxiliaryFlagsJson=?,firstAttemptAt=?,currentAttemptNo=?,podAttemptNo=?,
+    attemptStatus=?,attemptConfidence=?,attemptUnknownReason=?,attemptHistoryJson=?,attemptCalculatedAt=?
+    WHERE businessType=? AND shipmentCode=? AND reportDate=?`).run(
+    row.targetShopCode || '', row.currentShopCode || '', row.shopName || '', row.shopCycleId || '',
+    row.shopTransferStartedAt || '', row.shopArrivedAt || '', row.shopLastEventAt || '', row.shopPendingAt || '',
+    row.shopPendingReason || '', Number(row.shopRetentionNaturalDays || 0), row.shopState || '', row.shopStateReason || '',
+    row.whitelistVersion || '', row.currentMainCategory || row.primaryCategory || '',
+    JSON.stringify(row.auxiliaryFlags || row.tags || []), row.firstAttemptAt || '', Number(row.currentAttemptNo || 0),
+    Number(row.podAttemptNo || 0), row.attemptStatus || '', row.attemptConfidence || '', row.attemptUnknownReason || '',
+    JSON.stringify(row.attemptHistory || []), row.attemptCalculatedAt || '', type, shipmentCode, reportDate
+  );
+}
+
 function emptyState(type) { return normalizeBusinessState({ businessType: type }, type); }
 function normalizeType(value) { return String(value || '').toUpperCase() === 'SHOPEE' ? 'SHOPEE' : 'CCSL'; }
 function billOf(row = {}) { return String(row.shipmentCode || row.运单号 || '').trim().toUpperCase(); }
 function recipientGroup(row = {}) { const value = String(row.recipient_group || row.recipientGroup || '').toUpperCase(); return ['CN', 'VN', 'OTHER'].includes(value) ? value : 'OTHER'; }
+
+function sanitizeShopeeDailySummary(summary = null) {
+  if (!summary || typeof summary !== 'object') return summary;
+  const groupCounts = summary.groupCounts && typeof summary.groupCounts === 'object'
+    ? { CN: Number(summary.groupCounts.CN || 0), VN: Number(summary.groupCounts.VN || 0) }
+    : summary.groupCounts;
+  const reconciliation = summary.reconciliation && typeof summary.reconciliation === 'object'
+    ? {
+        ...summary.reconciliation,
+        CN: Number(summary.reconciliation.CN || groupCounts?.CN || 0),
+        VN: Number(summary.reconciliation.VN || groupCounts?.VN || 0),
+        total: Number(summary.reconciliation.total || 0)
+      }
+    : summary.reconciliation;
+  if (reconciliation && 'OTHER' in reconciliation) delete reconciliation.OTHER;
+  return {
+    eligibleUniqueShipments: Number(summary.eligibleUniqueShipments || summary.totalRecognized || reconciliation?.total || 0),
+    totalRecognized: Number(summary.totalRecognized || summary.eligibleUniqueShipments || reconciliation?.total || 0),
+    conflictCount: Number(summary.conflictCount || 0),
+    recipientHeader: summary.recipientHeader || '',
+    groupCounts,
+    reconciliation,
+    warnings: (summary.warnings || []).filter(text => !/OTHER|其他|待确认/.test(String(text || ''))),
+    failedRows: summary.failedRows || [],
+    actualHeaders: summary.actualHeaders || []
+  };
+}

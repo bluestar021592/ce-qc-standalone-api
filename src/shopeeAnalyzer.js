@@ -1,4 +1,8 @@
 import { normalizeEvent } from './analyzer.js';
+import { analyzeStoreFlow } from './storeFlow.js';
+import { classifyLatestSpecialNode } from './specialNode.js';
+import { summarizePendingEvents } from './pendingDays.js';
+import { classifyScanTerminal } from './scanTerminal.js';
 
 const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|改派/i;
 const POD_RE = /\bPOD\b|delivered|签收|已妥投/i;
@@ -8,6 +12,8 @@ const DELIVERY_RE = /(^|\s)delivery(\s|$)|派送中|out\s*for\s*delivery/i;
 const OUTBOUND_RE = /(^|\s)outbound(\s|$)|出库|离开网点/i;
 const INBOUND_RE = /pickup\s*inbound|(^|\s)inbound(\s|$)|入库|到仓|货物到达网点/i;
 const CYCLE_COUNT_RE = /cycle\s*count|盘点/i;
+const TRANSIT_HUB_RE = /(?:CE|CEL)\s*:\s*(?:WHJT|WHPP)\b|\b(?:WHJT|WHPP)\b/i;
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-06-pv-open-disposition-v1';
 
 export function analyzeShopeeShipment({
   waybill,
@@ -16,40 +22,57 @@ export function analyzeShopeeShipment({
   events = [],
   exceptions = [],
   reportDate = '',
+  analysisDate = currentCambodiaDate(),
   dailyRow = {},
   priorRow = {},
   apiStatus = {}
 }) {
-  const sorted = eventsThroughDate(events, reportDate);
-  const exceptionRows = exceptionsThroughDate(exceptions, reportDate);
+  const effectiveAnalysisDate = dateKey(analysisDate) || currentCambodiaDate();
+  const sorted = eventsThroughDate(events, effectiveAnalysisDate);
+  const exceptionRows = exceptionsThroughDate(exceptions, effectiveAnalysisDate);
   const last = sorted.at(-1) || null;
   const lastText = eventText(last || {});
   const scanState = classifyShopeeScanStatus(shipmentTrackRow, scanRow);
+  const scanTerminal = classifyScanTerminal({ ...scanRow, ...shipmentTrackRow }, 'success');
   const podEvent = findLatest(sorted, isPodEvent);
   const returnEvent = findLatest(sorted, isReturnEvent);
   const isPod = scanState === 'POD' || Boolean(podEvent);
   const isReturned = !isPod && (scanState === 'RETURN' || Boolean(returnEvent));
+  const returnInProgress = !isPod && !isReturned && scanTerminal.currentState === 'RETURN_IN_PROGRESS';
   const apiFailed = ['shipment', 'event', 'exception'].some(key => apiStatus[key] === 'failed');
+  const special = !isPod && !isReturned && !apiFailed ? classifyLatestSpecialNode(sorted) : null;
 
-  const pending = analyzePendingCycles(sorted, reportDate, isPod, isReturned);
-  const oc = analyzeOc(exceptionRows, sorted, reportDate, isPod, isReturned);
+  const pending = analyzePendingCycles(sorted, effectiveAnalysisDate, isPod, isReturned);
+  const pendingSummary = summarizePendingEvents(sorted, isPendingEvent);
+  const oc = analyzeOc(exceptionRows, sorted, effectiveAnalysisDate, isPod, isReturned);
   const cycleCount = analyzeCycleCount(sorted);
+  const deliveryAttempts = analyzeDeliveryAttempts(sorted, isPod);
   const deliveryEvent = findLatest(sorted, event => isDeliveryAssignEvent(event) || isDeliveryEvent(event));
   const deliveryDays = deliveryEvent && !isPod && !isReturned && (isDeliveryAssignEvent(last || {}) || isDeliveryEvent(last || {}))
-    ? elapsedInclusiveDays(deliveryEvent.eventTime, reportDate)
+    ? elapsedInclusiveDays(deliveryEvent.eventTime, effectiveAnalysisDate)
     : 0;
-  const staleDays = last ? elapsedDays(last.eventTime, reportDate) : 0;
+  const staleDays = last ? elapsedDays(last.eventTime, effectiveAnalysisDate) : 0;
+  const unresolvedDays = reportDate ? elapsedDays(reportDate, effectiveAnalysisDate) : staleDays;
+  const atTransitHub = Boolean(last && TRANSIT_HUB_RE.test(lastText));
+  const severeOverdue = Boolean(!isPod && !isReturned && Math.max(staleDays, unresolvedDays) >= 3);
   const completeForNegativeJudgment = !apiFailed && apiStatus.event !== 'failed' && apiStatus.exception !== 'failed';
-  const inboundNoScan = Boolean(completeForNegativeJudgment && last && isInboundEvent(last)
-    && !pending.activeDays && !oc.active && !deliveryDays && !isPod && !isReturned);
   const noTrack = Boolean(completeForNegativeJudgment && apiStatus.event === 'success' && !sorted.length);
   const region = classifyShopeeRegion({ dailyRow, shipmentTrackRow, scanRow, events: sorted });
   const returnPhoto = classifyReturnPhoto(returnEvent, apiFailed);
+  const storeFlow = apiFailed
+    ? priorStoreFlow(priorRow)
+    : analyzeStoreFlow({ shipmentCode: waybill, events: sorted, reportDate: effectiveAnalysisDate, isPod, isReturned });
+  const inboundNoScan = Boolean(!special && !atTransitHub && !storeFlow.shopState && completeForNegativeJudgment
+    && last && isInboundEvent(last) && !pending.activeDays && !oc.active && !deliveryDays && !isPod && !isReturned);
+  const pvOpenDisposition = classifyPvOpenDisposition({
+    region, storeFlow, deliveryDays, isPod, isReturned, apiFailed
+  });
 
   let category = '其他已识别节点';
   if (isPod) category = 'POD';
   else if (isReturned) category = '退回';
   else if (apiFailed) category = priorRow.primaryCategory || priorRow.主分类 || priorRow.异常分类 || 'API失败待重试';
+  else if (special) category = special.category;
   else if (pending.returnRequired) category = pending.latestActionAfterThreshold === 'delivery' ? '三次Pending后继续派送' : '三次Pending后未退回';
   else if (oc.active) category = oc.days >= 3 ? 'OC3天及以上' : `OC${Math.max(1, oc.days)}天`;
   else if (pending.activeDays) category = pending.activeDays >= 3 ? 'Pending3次及以上' : `Pending${pending.activeDays}次`;
@@ -57,20 +80,27 @@ export function analyzeShopeeShipment({
   else if (inboundNoScan) category = '入库无扫描节点';
   else if (deliveryDays) category = '派送中停留';
   else if (noTrack) category = '无轨迹';
-  else if (staleDays > 0) category = '节点未更新';
+  else if (severeOverdue) category = '严重超时未更新';
+  else if (staleDays > 0) category = atTransitHub ? '中转节点停留' : '节点未更新';
 
-  const tags = buildTags({ pending, oc, cycleCount, inboundNoScan, deliveryDays, staleDays, noTrack, isReturned, returnPhoto, apiFailed, region });
+  const tags = [...new Set([
+    ...buildTags({ pending, oc, cycleCount, inboundNoScan: inboundNoScan && !storeFlow.shopState, deliveryDays, staleDays, noTrack, isReturned, returnPhoto, apiFailed, region, atTransitHub, severeOverdue }),
+    ...(storeFlow.storeTags || [])
+  ])];
   const currentPendingDays = pending.activeDays || (pending.returnRequired ? pending.maxDays : 0);
   const apiState = apiFailed ? '失败' : '成功';
   const queryState = apiFailed ? 'refresh_failed' : 'success';
-  const closed = isPod || isReturned;
+  const closed = isPod || isReturned || special?.specialState === 'SELF_PICKUP';
   const recipientSource = Object.keys(dailyRow || {}).length ? dailyRow : priorRow;
 
   return {
     ...priorRow,
     ...scanRow,
     businessType: 'SHOPEE',
+    ...storeFlow,
     reportDate,
+    analysisDate: effectiveAnalysisDate,
+    analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
     shipmentCode: waybill,
     运单号: waybill,
     recipient_raw: recipientSource?.recipient_raw || '',
@@ -83,12 +113,23 @@ export function analyzeShopeeShipment({
     是否POD: isPod ? '是' : '否',
     POD状态: isPod ? 'POD' : '未POD',
     POD时间: podEvent?.eventTime || (isPod ? shipmentTrackRow?.podTime || '' : ''),
-    退回状态: isReturned ? '已退回' : '未退回',
-    退回时间: returnEvent?.eventTime || '',
+    currentState: isPod ? 'POD' : (isReturned ? 'RETURN_COMPLETED' : (returnInProgress ? 'RETURN_IN_PROGRESS' : scanTerminal.currentState)),
+    trackRequired: scanTerminal.trackRequired,
+    trackSkippedReason: scanTerminal.trackSkippedReason,
+    退回状态: isReturned ? '已退回' : (returnInProgress ? '退回处理中' : '未退回'),
+    退回开始时间: returnInProgress ? scanTimeOf(shipmentTrackRow, scanRow) : '',
+    退回完成时间: isReturned ? (returnEvent?.eventTime || scanTimeOf(shipmentTrackRow, scanRow)) : '',
+    退回时间: isReturned ? (returnEvent?.eventTime || scanTimeOf(shipmentTrackRow, scanRow)) : '',
     退回照片状态: returnPhoto.status,
     退回照片数量: returnPhoto.count,
     Pending状态: currentPendingDays ? '是' : '否',
     Pending次数: currentPendingDays,
+    pendingRawEventCount: pendingSummary.rawEventCount,
+    pendingDistinctDayCount: pendingSummary.distinctDayCount,
+    pendingDates: pendingSummary.dates,
+    pendingContinuity: pendingSummary.continuity,
+    latestPendingReason: pendingSummary.latestReason,
+    latestPendingTime: pendingSummary.latestTime,
     Pending当前次数: pending.activeDays,
     Pending最大次数: pending.maxDays,
     Pending日期: pending.activeDates.join('、'),
@@ -110,21 +151,39 @@ export function analyzeShopeeShipment({
     盘点天数: cycleCount.days,
     盘点日期: cycleCount.dates.join('、'),
     派送中停留天数: deliveryDays,
+    firstAttemptAt: deliveryAttempts.dates[0] || '',
+    currentAttemptNo: deliveryAttempts.count,
+    podAttemptNo: deliveryAttempts.podAttemptNo,
+    attemptStatus: deliveryAttempts.count ? 'CALCULATED_FROM_TRACK' : 'UNKNOWN_NO_DELIVERY_EVENT',
+    attemptConfidence: deliveryAttempts.count ? 'HIGH' : 'UNKNOWN',
+    attemptUnknownReason: deliveryAttempts.count ? '' : '轨迹中没有派件分配或派送中节点',
+    attemptHistory: deliveryAttempts.dates,
+    attemptCalculatedAt: new Date().toISOString(),
     节点未更新天数: staleDays,
+    未闭环天数: unresolvedDays,
+    严重超时: severeOverdue ? '是' : '否',
+    中转节点停留: atTransitHub && staleDays > 0 ? '是' : '否',
     入库无扫描节点: inboundNoScan ? '是' : '否',
     无轨迹: noTrack ? '是' : '否',
     regionType: region.regionType,
     regionCode: region.regionCode,
     regionSource: region.regionSource,
     区域: region.regionCode,
+    pvOpenDisposition,
+    外省未闭环分流: pvOpenDispositionLabel(pvOpenDisposition),
     primaryCategory: category,
     主分类: category,
     异常分类: category,
     tags,
+    specialState: special?.specialState || '',
+    latestNodeCode: special?.latestNodeCode || '',
+    latestTrackingDescription: special?.latestTrackingDescription || '',
+    matchedRule: special?.matchedRule || '',
+    是否特殊节点: special ? '是' : '否',
     API状态: apiState,
     查询状态: queryState,
     apiStatus: { shipment: apiStatus.shipment || '', event: apiStatus.event || '', exception: apiStatus.exception || '' },
-    carry状态: closed ? (isPod ? 'closed_pod' : 'closed_return') : 'active',
+    carry状态: closed ? (isPod ? 'closed_pod' : (isReturned ? 'closed_return' : 'closed_self_pickup')) : 'active',
     跨日状态: closed ? '已闭环' : (scanRow?.来源类型 === '旧跨日' ? '跨日续查' : '当日'),
     latestEventTime: last?.eventTime || priorRow.latestEventTime || '',
     latestEventDesc: last ? eventText(last) : (priorRow.latestEventDesc || ''),
@@ -138,17 +197,60 @@ export function analyzeShopeeShipment({
   };
 }
 
+function classifyPvOpenDisposition({ region, storeFlow, deliveryDays, isPod, isReturned, apiFailed }) {
+  if (region?.regionCode !== 'PV' || isPod || isReturned || apiFailed) return '';
+  if (storeFlow?.shopState === 'SHOP_ARRIVED_CURRENT') {
+    return Number(storeFlow.shopRetentionNaturalDays || 0) >= 2
+      ? 'PV_STORE_RETENTION'
+      : 'PV_STORE_INBOUND_NO_SCAN';
+  }
+  if (storeFlow?.shopState === 'SHOP_TRANSFER_IN_PROGRESS' || Number(deliveryDays || 0) > 0) {
+    return 'PV_DELIVERY_IN_PROGRESS';
+  }
+  return 'PV_OTHER_UNRESOLVED';
+}
+
+function pvOpenDispositionLabel(value) {
+  return ({
+    PV_DELIVERY_IN_PROGRESS: '外省派送中',
+    PV_STORE_RETENTION: '外省门店滞留',
+    PV_STORE_INBOUND_NO_SCAN: '外省门店入库无节点',
+    PV_OTHER_UNRESOLVED: '外省其他未闭环'
+  })[value] || '';
+}
+
+function priorStoreFlow(row = {}) {
+  return {
+    targetShopCode: row.targetShopCode || '', currentShopCode: row.currentShopCode || '',
+    shopName: row.shopName || '', shopCycleId: row.shopCycleId || '',
+    shopTransferStartedAt: row.shopTransferStartedAt || '', shopArrivedAt: row.shopArrivedAt || '',
+    shopLastEventAt: row.shopLastEventAt || '', shopPendingAt: row.shopPendingAt || '',
+    shopRetentionNaturalDays: Number(row.shopRetentionNaturalDays || 0), shopState: row.shopState || '',
+    shopStateReason: row.shopStateReason || 'API_FAILED_PRESERVED', whitelistVersion: row.whitelistVersion || '',
+    storeTags: Array.isArray(row.storeTags) ? row.storeTags : []
+  };
+}
+
 export function classifyShopeeScanStatus(shipmentTrackRow = {}, scanRow = {}) {
+  const terminal = classifyScanTerminal({ ...scanRow, ...shipmentTrackRow }, 'success');
+  if (terminal.currentState === 'POD') return 'POD';
+  if (terminal.currentState === 'RETURN_COMPLETED') return 'RETURN';
+  if (terminal.currentState === 'RETURN_IN_PROGRESS') return 'RETURN_IN_PROGRESS';
   const status = String(shipmentTrackRow?.shipmentStatus ?? shipmentTrackRow?.statusCode ?? scanRow?.shipmentStatus ?? scanRow?.orderStatus ?? '').trim();
   const text = [
     shipmentTrackRow?.shipmentStatusDesc, shipmentTrackRow?.statusDesc, shipmentTrackRow?.statusName,
     shipmentTrackRow?.trackingStatus, scanRow?.扫描分类, scanRow?.statusText
   ].map(value => String(value || '')).join(' ');
-  if (String(scanRow?.orderStatus ?? '') === '85' || POD_RE.test(text)) return 'POD';
-  if (status === '81' || RETURN_RE.test(text)) return 'RETURN';
-  if (status === '30' || DELIVERY_ASSIGN_RE.test(text)) return 'DELIVERY_ASSIGN';
-  if (DELIVERY_RE.test(text)) return 'DELIVERY';
+  if (status === '85' || POD_RE.test(text)) return 'POD';
+  if (status === '60' || status === '30' || DELIVERY_ASSIGN_RE.test(text)) return 'DELIVERY_ASSIGN';
+  if (status === '70' || DELIVERY_RE.test(text)) return 'DELIVERY';
+  if (status === '50') return 'INBOUND';
   return 'UNKNOWN';
+}
+
+function scanTimeOf(shipmentTrackRow = {}, scanRow = {}) {
+  return shipmentTrackRow.returnTime || shipmentTrackRow.updateTime || shipmentTrackRow.updatedAt
+    || scanRow.returnTime || scanRow.updateTime || scanRow.updatedAt || '';
 }
 
 export function classifyShopeeRegion({ dailyRow = {}, shipmentTrackRow = {}, scanRow = {}, events = [] } = {}) {
@@ -223,8 +325,21 @@ function analyzeOc(items, events, reportDate, isPod, isReturned) {
 
 function analyzeCycleCount(events) {
   const matchingEvents = events.filter(isCycleCountEvent);
-  const dates = [...new Set(matchingEvents.map(event => dateKey(event.eventTime)).filter(Boolean))].sort();
-  return { eventCount: matchingEvents.length, days: dates.length, dates };
+  const lastEvent = events.at(-1);
+  if (!lastEvent || !isCycleCountEvent(lastEvent)) {
+    return { eventCount: matchingEvents.length, days: 0, dates: [], historicalDates: distinctEventDates(matchingEvents) };
+  }
+  let startIndex = events.length - 1;
+  while (startIndex > 0 && isCycleCountEvent(events[startIndex - 1])) startIndex -= 1;
+  const activeEvents = events.slice(startIndex).filter(isCycleCountEvent);
+  const dates = distinctEventDates(activeEvents);
+  return { eventCount: matchingEvents.length, days: dates.length, dates, historicalDates: distinctEventDates(matchingEvents) };
+}
+
+function analyzeDeliveryAttempts(events, isPod) {
+  const attemptEvents = events.filter(event => isDeliveryAssignEvent(event) || isDeliveryEvent(event));
+  const dates = distinctEventDates(attemptEvents);
+  return { count: dates.length, dates, podAttemptNo: isPod && dates.length ? dates.length : 0 };
 }
 
 function classifyReturnPhoto(event, apiFailed) {
@@ -236,7 +351,7 @@ function classifyReturnPhoto(event, apiFailed) {
     : { status: '无照片', count: 0, label: '退回无照片' };
 }
 
-function buildTags({ pending, oc, cycleCount, inboundNoScan, deliveryDays, staleDays, noTrack, isReturned, returnPhoto, apiFailed, region }) {
+function buildTags({ pending, oc, cycleCount, inboundNoScan, deliveryDays, staleDays, noTrack, isReturned, returnPhoto, apiFailed, region, atTransitHub, severeOverdue }) {
   const tags = [];
   const pendingDays = pending.activeDays || (pending.returnRequired ? pending.maxDays : 0);
   if (pendingDays === 1) tags.push('PENDING_1');
@@ -255,6 +370,8 @@ function buildTags({ pending, oc, cycleCount, inboundNoScan, deliveryDays, stale
   if (inboundNoScan) tags.push('INBOUND_NO_SCAN');
   if (deliveryDays) tags.push('DELIVERY_STAY');
   if (staleDays > 0) tags.push('NODE_STALE');
+  if (atTransitHub) tags.push('TRANSIT_HUB_PROGRESS');
+  if (severeOverdue) tags.push('SEVERE_OVERDUE');
   if (noTrack) tags.push('NO_TRACK');
   if (isReturned) tags.push('RETURNED', returnPhoto.status === '有照片' ? 'RETURN_PHOTO_OK' : 'RETURN_PHOTO_MISSING');
   if (apiFailed) tags.push('REFRESH_FAILED');
@@ -276,7 +393,12 @@ function exceptionsThroughDate(items, reportDate) {
 }
 
 function isOcItem(item = {}) {
-  return /(^|\s)oc($|\s)|overdue/i.test([item.exceptionDesc, item.exceptionType, item.reasonCode, item.reasonText].map(value => String(value || '')).join(' '));
+  const type = String(item.exceptionType || '').trim();
+  if (['20', '30', '40'].includes(type)) return true;
+  return /(^|\s)oc($|\s)|overdue/i.test([
+    item.exceptionDesc, item.excepitonDesc, item.exceptionType,
+    item.exceptionReason, item.exceptionChildReason, item.reasonCode, item.reasonText
+  ].map(value => String(value || '')).join(' '));
 }
 
 function isPendingEvent(event = {}) { return PENDING_RE.test(eventText(event)) && !isReturnEvent(event); }
@@ -287,6 +409,14 @@ function isDeliveryEvent(event = {}) { return DELIVERY_RE.test(eventText(event))
 function isOutboundEvent(event = {}) { return OUTBOUND_RE.test(eventText(event)); }
 function isInboundEvent(event = {}) { return INBOUND_RE.test(eventText(event)); }
 function isCycleCountEvent(event = {}) { return CYCLE_COUNT_RE.test(eventText(event)); }
+
+function distinctEventDates(events = []) {
+  return [...new Set(events.map(event => dateKey(event.eventTime)).filter(Boolean))].sort();
+}
+
+function currentCambodiaDate() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Phnom_Penh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
 
 function eventText(event = {}) {
   return [event.eventCode, event.trackingEventCode, event.trackingEventDesc, event.trackingEventDescZh, event.trackingEventDescKm, event.place, event.locationCode, event.eventShop]
@@ -347,7 +477,7 @@ function dateKey(value) {
 
 function findRegionCode(value) {
   const text = flattenText(value);
-  const match = text.match(/(?:^|[^A-Z0-9])(PP\d*|PV\d+)(?=$|[^A-Z0-9])/i);
+  const match = text.match(/(?:^|[^A-Z0-9])((?:PP|PV)\d*)(?=$|[^A-Z0-9])/i);
   return match ? match[1].toUpperCase() : '';
 }
 

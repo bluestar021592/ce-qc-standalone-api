@@ -1,0 +1,42 @@
+{
+  "viewport": {
+    "width": 1536,
+    "height": 1024,
+    "deviceScaleFactor": 1
+  },
+  "pages": [
+    "首页总看板",
+    "CE看板",
+    "TBKH看板",
+    "ALI1688看板",
+    "SHOPEE CN看板",
+    "SHOPEE VN看板"
+  ],
+  "navigation": {
+    "uniqueLabels": 13,
+    "duplicateLabels": 0
+  },
+  "home": {
+    "businessCards": 6,
+    "coreMetricCards": 12,
+    "trendCards": 4,
+    "horizontalOverflow": 0,
+    "pngBackgrounds": 0
+  },
+  "trends": {
+    "missingDateIsNull": true,
+    "missingDateNodeRendered": false,
+    "connectNulls": false,
+    "drawingIsClipped": true,
+    "currentValueMatchesLastValidPoint": true,
+    "runtimeBindingErrors": 0,
+    "multiSeriesCurrentValuesVisible": true
+  },
+  "tests": {
+    "passed": 40,
+    "failed": 0
+  },
+  "backendFilesChanged": false,
+  "databaseFilesChanged": false,
+  "databaseBackup": "D:/CE CCSL金边数据库/backups/ce_qc_monitor_before_v18_20260805_230431.db"
+}

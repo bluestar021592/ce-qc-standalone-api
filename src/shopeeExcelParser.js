@@ -3,7 +3,7 @@ import path from 'path';
 import { classifyShopeeRegion } from './shopeeAnalyzer.js';
 import { classifyRecipient } from './recipientGroup.js';
 
-const BILL_HEADERS = new Set(['shipmentcode', 'shipment code', '运单号', '单号', 'waybill', 'waybillno', 'trackingnumber', 'tracking number', 'tracking no']);
+const BILL_HEADERS = new Set(['shipmentcode', 'shipment code', '运单号', '运单编号', '单号', 'waybill', 'waybillno', 'trackingnumber', 'tracking number', 'tracking no']);
 const DATE_HEADERS = new Set(['reportdate', 'report date', '报表日期', '日报日期', '日期', 'date']);
 const RECIPIENT_HEADERS = new Set(['收件人', '收件人名称', 'consigneename', 'consignee', 'recipientname', 'recipient']);
 
@@ -85,29 +85,39 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
   const conflicts = [];
   const rows = [];
   const importRows = [];
+  const excludedRows = [];
   for (const [shipmentCode, sourceRows] of rowsByBill) {
-    const groups = [...new Set(sourceRows.map(row => row.recipient_group))];
+    const eligibleRows = sourceRows.filter(row => row.recipient_group === 'CN' || row.recipient_group === 'VN');
+    const groups = [...new Set(eligibleRows.map(row => row.recipient_group))];
+    if (!eligibleRows.length) {
+      excludedRows.push({
+        ...sourceRows[0],
+        importStatus: 'IGNORED_NON_SHOPEE',
+        recipient_group_reason: sourceRows[0].recipient_group_reason || 'UNMATCHED_RECIPIENT'
+      });
+      continue;
+    }
     if (groups.length > 1) {
       const conflict = {
         shipmentCode,
         groups,
-        rows: sourceRows.map(row => ({ sheetName: row.sheetName, rowNumber: row.rowNumber, recipient_raw: row.recipient_raw, recipient_group: row.recipient_group }))
+        rows: eligibleRows.map(row => ({ sheetName: row.sheetName, rowNumber: row.rowNumber, recipient_raw: row.recipient_raw, recipient_group: row.recipient_group }))
       };
       conflicts.push(conflict);
-      importRows.push(...sourceRows.map(row => ({
+      importRows.push(...eligibleRows.map(row => ({
         ...row,
         importStatus: 'RECIPIENT_GROUP_CONFLICT',
         recipient_group_reason: 'RECIPIENT_GROUP_CONFLICT'
       })));
       continue;
     }
-    const canonical = { ...sourceRows[0], importStatus: sourceRows.length > 1 ? 'DUPLICATE_SAME_GROUP' : 'ACCEPTED' };
+    const canonical = { ...eligibleRows[0], importStatus: eligibleRows.length > 1 ? 'DUPLICATE_SAME_GROUP' : 'ACCEPTED' };
     rows.push(canonical);
-    importRows.push(canonical, ...sourceRows.slice(1).map(row => ({ ...row, importStatus: 'DUPLICATE_SAME_GROUP' })));
+    importRows.push(canonical, ...eligibleRows.slice(1).map(row => ({ ...row, importStatus: 'DUPLICATE_SAME_GROUP' })));
   }
   const groupCounts = countGroups(rows);
   const reconciliation = {
-    status: rows.length === groupCounts.CN + groupCounts.VN + groupCounts.OTHER ? 'PASSED' : 'FAILED_RECONCILIATION',
+    status: rows.length === groupCounts.CN + groupCounts.VN ? 'PASSED' : 'FAILED_RECONCILIATION',
     total: rows.length,
     ...groupCounts
   };
@@ -117,10 +127,13 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
     sourceName: options.originalName || path.basename(filePath),
     bills: rows.map(row => row.shipmentCode),
     details: rows,
+    excludedRows,
     importRows,
     conflicts,
     preview: importRows.slice(0, 50),
     summary: {
+      rawRows: details.length,
+      eligibleUniqueShipments: rows.length,
       totalRecognized: rows.length,
       totalUniqueCount: rowsByBill.size,
       totalAppearCount: details.length,
@@ -130,7 +143,6 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
       groupCounts,
       reconciliation,
       warnings: [
-        ...(groupCounts.OTHER ? [`存在${groupCounts.OTHER}票其他/待确认收件人`] : []),
         ...(conflicts.length ? [`存在${conflicts.length}票收件人分组冲突，已排除出正式处理池`] : [])
       ],
       failedRows: failures.slice(0, 50),
@@ -140,8 +152,10 @@ export async function parseShopeeDailyExcel(filePath, options = {}) {
 }
 
 function countGroups(rows) {
-  const counts = { CN: 0, VN: 0, OTHER: 0 };
-  for (const row of rows) counts[row.recipient_group] += 1;
+  const counts = { CN: 0, VN: 0 };
+  for (const row of rows) {
+    if (row.recipient_group === 'CN' || row.recipient_group === 'VN') counts[row.recipient_group] += 1;
+  }
   return counts;
 }
 

@@ -78,12 +78,24 @@
     return `<button class="pixel-metric ${className}" ${action ? `onclick="${action}"` : ''}><span>${text(label)}</span><b>${typeof value === 'string' ? text(value) : number(value)}</b>${note ? `<small>${text(note)}</small>` : ''}</button>`;
   }
 
+  function storeStrip(values = {}, businessType = 'CCSL', group = 'ALL') {
+    const open = tab => businessType === 'SHOPEE'
+      ? `openShopeeGroupMetric('${group}','${tab}')`
+      : `openBusinessMetric('CCSL','${tab}')`;
+    const items = [
+      ['在途门店', values.shopTransit, 'shopTransit'], ['到达门店', values.shopArrived ?? values.shopInbound, 'shopArrived'],
+      ['门店Pending', values.shopPending, 'shopPending'], ['门店滞留1天+', values.shopRetention1 ?? values.shopInbound1, 'shopRetention1'],
+      ['门店滞留2天+', values.shopRetention2 ?? values.shopInbound2, 'shopRetention2'], ['门店滞留3天+', values.shopRetention3 ?? values.shopInbound3plus, 'shopRetention3']
+    ];
+    return `<section class="store-state-strip"><h3>${icon('store')}<span>门店流转状态</span></h3><div>${items.map(([label, value, tab]) => metric(label, value || 0, '', '', open(tab))).join('')}</div></section>`;
+  }
+
   function ccslOverview(ccsl = {}) {
     const total = Number(ccsl.today || 0);
     const upper = [
       ['今日件数', ccsl.today, ccsl.yesterdayToday !== undefined ? `昨日 ${number(ccsl.yesterdayToday)}  ${ccsl.todayChange || ''}` : '', '', "openBusinessMetric('CCSL','allData')"],
       ['签收件数', ccsl.pod, ccsl.yesterdayPod !== undefined ? `昨日 ${number(ccsl.yesterdayPod)}  ${ccsl.podChange || ''}` : '', '', "openBusinessMetric('CCSL','podClosed')"],
-      ['签收率', `${Number(ccsl.podRate || 0).toFixed(2)}%`, ccsl.yesterdayPodRate !== undefined ? `昨日 ${ccsl.yesterdayPodRate}%  ${ccsl.podRateChange || ''}` : '', 'blue-text', "openBusinessMetric('CCSL','podClosed')"],
+      ['签收率', `${Number(ccsl.podRate || 0).toFixed(2)}%`, ccsl.yesterdayPodRate != null ? `昨日 ${ccsl.yesterdayPodRate}%  ${ccsl.podRateChange || ''}` : '昨日 —', 'blue-text', "openBusinessMetric('CCSL','podClosed')"],
       ['Pending1+', ccsl.pending1, `占比 ${ratio(ccsl.pending1, total)}`, '', "openBusinessMetric('CCSL','pendingAll')"],
       ['Pending2+', ccsl.pending2, `占比 ${ratio(ccsl.pending2, total)}`, '', "openBusinessMetric('CCSL','pending2plus')"],
       ['Pending3+', ccsl.pending3, `占比 ${ratio(ccsl.pending3, total)}`, '', "openBusinessMetric('CCSL','pending3')"]
@@ -95,7 +107,7 @@
       ['入库无扫描', ccsl.inboundNoScan, `占比 ${ratio(ccsl.inboundNoScan, total)}`, '', "openBusinessMetric('CCSL','inboundNoScan')"],
       ['工单未处理', ccsl.ticketOpen, `占比 ${ratio(ccsl.ticketOpen, total)}`, 'danger', "openBusinessMetric('CCSL','workOrderAbnormal')"]
     ];
-    return `<div class="pixel-ccsl-grid">${upper.map(args => metric(...args)).join('')}</div><div class="pixel-divider"></div><div class="pixel-ccsl-grid lower">${lower.map(args => metric(...args)).join('')}</div>`;
+    return `<div class="pixel-ccsl-grid">${upper.map(args => metric(...args)).join('')}</div><div class="pixel-divider"></div><div class="pixel-ccsl-grid lower">${lower.map(args => metric(...args)).join('')}</div>${storeStrip(ccsl, 'CCSL')}`;
   }
 
   function regionCard(code, region = {}) {
@@ -103,6 +115,12 @@
     const title = code === 'PP' ? '本省（PP）' : '外省（PV）';
     const tag = code === 'PP' ? '金边/本省' : '外省/省外';
     const fields = [
+      ['在途门店', region.shopTransit, ratio(region.shopTransit, total), 'shopTransit'],
+      ['到达门店', region.shopArrived, ratio(region.shopArrived, total), 'shopArrived'],
+      ['门店Pending', region.shopPending, ratio(region.shopPending, total), 'shopPending'],
+      ['门店滞留1天+', region.shopRetention1, ratio(region.shopRetention1, total), 'shopRetention1'],
+      ['门店滞留2天+', region.shopRetention2, ratio(region.shopRetention2, total), 'shopRetention2'],
+      ['门店滞留3天+', region.shopRetention3, ratio(region.shopRetention3, total), 'shopRetention3'],
       ['Pending1+', region.pending1, ratio(region.pending1, total), 'pending1'],
       ['Pending2+', region.pending2, ratio(region.pending2, total), 'pending2'],
       ['Pending3+', region.pending3, ratio(region.pending3, total), 'pending3'],
@@ -135,7 +153,15 @@
     if (!hasRecipientDimension) return `<div class="pixel-region-wrap">${regionCard('PP', shopee.pp || {})}${regionCard('PV', shopee.pv || {})}</div>`;
     const recipientGroups = [['ALL', shopee.all || {}], ['CN', shopee.cn || {}], ['VN', shopee.vn || {}]];
     if (Number(shopee.other?.today || 0) > 0) recipientGroups.push(['OTHER', shopee.other]);
-    return `<div class="pixel-recipient-wrap">${recipientGroups.map(([code, summary]) => recipientCard(code, summary)).join('')}</div><div class="pixel-region-caption">区域维度（与收件人来源独立）</div><div class="pixel-region-wrap compact">${regionCard('PP', shopee.pp || {})}${regionCard('PV', shopee.pv || {})}</div>`;
+    return `<div class="pixel-recipient-wrap">${recipientGroups.map(([code, summary]) => recipientCard(code, summary)).join('')}</div>${storeStrip(shopee.all || {}, 'SHOPEE', 'ALL')}<div class="pixel-region-caption">区域维度（与收件人来源独立）</div><div class="pixel-region-wrap compact">${regionCard('PP', shopee.pp || {})}${regionCard('PV', shopee.pv || {})}</div>`;
+  }
+
+  function compactShopeeOverview(shopee = {}) {
+    const all = shopee.all || {};
+    const total = Number(all.today || 0);
+    const summary = [['今日件数', all.today, 'all'], ['签收件数', all.pod, 'pod'], ['签收率', `${Number(all.podRate || 0).toFixed(2)}%`, 'pod'], ['入库无扫描', all.inboundNoScan, 'inboundNoScan']];
+    const attempts = [['1派签收', all.firstAttemptPod || all.attempt1Pod, all.firstAttemptRate], ['2派签收', all.secondAttemptPod || all.attempt2Pod, all.secondAttemptRate], ['3派签收', all.thirdAttemptPod || all.attempt3Pod, all.thirdAttemptRate], ['3派以上', all.attempt3plus || 0, all.attempt3plusRate], ['派次待确认', all.attemptUnknown || 0, all.attemptUnknownRate], ['派次覆盖率', `${Number(all.attemptCoverageRate || 0).toFixed(2)}%`, '']];
+    return `<div class="pixel-shopee-summary">${summary.map(([label, value, tab]) => metric(label, value || 0, typeof value === 'string' ? '' : `占比 ${ratio(value, total)}`, '', `openShopeeGroupMetric('ALL','${tab}')`)).join('')}</div><div class="pixel-source-tabs"><button onclick="openShopeeGroupMetric('ALL','all')">SHOPEE全部</button><button onclick="openShopeeGroupMetric('CN','all')">Shopee CN</button><button onclick="openShopeeGroupMetric('VN','all')">Shopee VN</button></div>${storeStrip(all, 'SHOPEE', 'ALL')}<section class="attempt-strip"><h3>派次签收占比（基于签收件数）</h3><div>${attempts.map(([label, value, rateValue]) => metric(label, value || 0, rateValue === '' ? '' : `占比 ${Number(rateValue || 0).toFixed(2)}%`, '', "openShopeeGroupMetric('ALL','attempts')")).join('')}</div></section>`;
   }
 
   function ratio(value, total) {
@@ -143,12 +169,18 @@
   }
 
   function chartCard(definition, dates) {
-    const width = 350; const height = 150; const left = 34; const right = 8; const top = 12; const bottom = 24;
-    const min = definition.min; const max = definition.max;
+    const width = 350; const height = 166; const left = 38; const right = 14; const top = 22; const bottom = 28;
+    const allValues = definition.series.flatMap(series => (series.values || []).filter(value => Number.isFinite(Number(value))).map(Number));
+    const min = Number.isFinite(definition.min) ? definition.min : 0;
+    const observedMax = Math.max(1, ...allValues);
+    const max = Number.isFinite(definition.max) ? Math.max(definition.max, observedMax) : Math.ceil(observedMax * 1.12);
+    const unit = definition.unit || '%';
+    const axisValue = value => unit === '%' ? `${Number(value).toFixed(0)}%` : number(Math.round(value));
+    const pointValue = value => unit === '%' ? `${Number(value).toFixed(2)}%` : number(Math.round(value));
     let svg = `<svg class="pixel-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${text(definition.title)}">`;
     [0, .25, .5, .75, 1].forEach(step => {
       const y = top + (height - top - bottom) * step;
-      svg += `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="#edf2f7"/><text x="2" y="${y + 3}" font-size="8" fill="#7b8da3">${Math.round(max - (max - min) * step)}%</text>`;
+      svg += `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="#edf2f7"/><text x="2" y="${y + 3}" font-size="8" fill="#7b8da3">${axisValue(max - (max - min) * step)}</text>`;
     });
     dates.forEach((date, index) => {
       const x = left + index * (width - left - right) / 6;
@@ -164,20 +196,37 @@
       plotted.forEach(point => { if (point) current.push(point); else if (current.length) { segments.push(current); current = []; } });
       if (current.length) segments.push(current);
       svg += segments.map(segment => `<polyline points="${segment.map(point => `${point.x},${point.y}`).join(' ')}" fill="none" stroke="${series.color}" stroke-width="2"/>`).join('');
-      plotted.filter(Boolean).forEach(point => { svg += `<circle cx="${point.x}" cy="${point.y}" r="2.2" fill="${series.color}"/><text x="${point.x - 9}" y="${point.y - 7}" font-size="8" font-weight="700" fill="${series.color}">${Number(point.value.toFixed(1))}%</text>`; });
+      plotted.filter(Boolean).forEach((point, index) => {
+        const date = dates[index] || '—';
+        const numerator = series.numerators?.[index];
+        const denominator = series.denominators?.[index];
+        const detail = Number.isFinite(Number(numerator)) && Number.isFinite(Number(denominator)) ? `；分子 ${number(numerator)}；分母 ${number(denominator)}` : '';
+        svg += `<g class="trend-point" tabindex="0"><title>${text(date)}；${text(series.label)} ${pointValue(point.value)}${detail}</title><circle cx="${point.x}" cy="${point.y}" r="3" fill="${series.color}"/><text x="${point.x}" y="${Math.max(10, point.y - 7)}" text-anchor="middle" font-size="8" font-weight="700" fill="${series.color}">${pointValue(point.value)}</text></g>`;
+      });
     });
     svg += '</svg>';
-    return `<article class="pixel-chart-card"><div class="pixel-chart-title"><b>${text(definition.title)}</b><span>近7天 ${icon('chevron')}</span></div><div class="pixel-legend">${definition.series.map(series => `<span><i style="background:${series.color}"></i>${text(series.label)}</span>`).join('')}</div>${svg}</article>`;
+    const current = definition.series[0]?.values?.at(-1);
+    const previous = definition.series[0]?.values?.at(-2);
+    const change = Number.isFinite(Number(current)) && Number.isFinite(Number(previous)) && Number(previous) !== 0
+      ? ((Number(current) - Number(previous)) / Math.abs(Number(previous))) * 100 : null;
+    const action = definition.action ? `onclick="openHomeMetricDetail('${definition.action}')"` : '';
+    return `<article class="pixel-chart-card" role="button" tabindex="0" ${action}><div class="pixel-chart-title"><b>${text(definition.title)}</b><span>近7天 ${icon('chevron')}</span></div><div class="pixel-legend">${definition.series.map(series => `<span><i style="background:${series.color}"></i>${text(series.label)}</span>`).join('')}</div>${svg}<footer class="v6-chart-footer"><span>当前 <b data-testid="trend-${definition.key}-current">${Number.isFinite(Number(current)) ? pointValue(current) : '—'}</b></span><strong data-testid="trend-${definition.key}-change" class="${change !== null && change < 0 ? 'down' : 'up'}">环比昨日 ${change === null ? '—' : `${change >= 0 ? '↑' : '↓'} ${Math.abs(change).toFixed(2)}%`}</strong></footer></article>`;
   }
 
   function charts(snapshot) {
     const trends = snapshot.trends || {}; const dates = snapshot.dates || [];
-    const series = (key, label, color) => ({ label, color, values: trends[key] || [] });
-    const definitions = [
-      { title: '签收率趋势', min: 60, max: 100, series: [series('podCcsl', 'CCSL', COLORS.blue), series('podPp', 'SHOPEE 本省（PP）', COLORS.green), series('podPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
-      { title: 'Pending率趋势', min: 0, max: 20, series: [series('pendingCcsl', 'CCSL', COLORS.blue), series('pendingPp', 'SHOPEE 本省（PP）', COLORS.green), series('pendingPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
-      { title: 'OC率趋势', min: 0, max: 15, series: [series('ocCcsl', 'CCSL', COLORS.blue), series('ocPp', 'SHOPEE 本省（PP）', COLORS.green), series('ocPv', 'SHOPEE 外省（PV）', COLORS.orange)] },
-      { title: '本省/外省 对比（SHOPEE）', min: 60, max: 100, series: [series('podPp', '本省（PP）签收率', COLORS.green), series('podPv', '外省（PV）签收率', COLORS.orange)] }
+    const series = (key, label, color) => ({ label, color, values: trends[key] || [], numerators: trends[`${key}Numerators`] || [], denominators: trends[`${key}Denominators`] || [] });
+    const business = snapshot.businessLabel;
+    const definitions = business ? [
+      { key:'ticket', title: '今日票数趋势', min: 0, unit: '件', action: 'all', series: [series('ticketTotal', business, COLORS.blue)] },
+      { key:'pod', title: 'POD率趋势', min: 0, max: 100, unit: '%', action: 'pod', series: [series('podRate', business, COLORS.green)] },
+      { key:'oc', title: 'OC率趋势', min: 0, max: 15, unit: '%', action: 'oc', series: [series('ocRate', business, COLORS.orange)] },
+      { key:'first', title: '首次妥投率趋势', min: 0, max: 100, unit: '%', action: 'pod', series: [series('firstRate', business, COLORS.purple)] }
+    ] : [
+      { key:'ticket', title: '今日票数趋势', min: 0, unit: '件', action: 'all', series: [series('ticketTotal', '今日', COLORS.blue)] },
+      { key:'pod', title: 'POD率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('podCcsl', 'CE', COLORS.blue), series('podPp', 'SHOPEE PP', COLORS.green), series('podPv', 'SHOPEE PV', COLORS.orange)] },
+      { key:'oc', title: 'OC率趋势', min: 0, max: 15, unit: '%', action: 'oc', series: [series('ocCcsl', 'CE', COLORS.blue), series('ocPp', 'SHOPEE PP', COLORS.green), series('ocPv', 'SHOPEE PV', COLORS.orange)] },
+      { key:'first', title: '首次妥投率趋势', min: 60, max: 100, unit: '%', action: 'pod', series: [series('firstCcsl', 'CE', COLORS.purple), series('firstShopee', 'SHOPEE', COLORS.green)] }
     ];
     return definitions.map(definition => chartCard(definition, dates)).join('');
   }
@@ -185,7 +234,7 @@
   function carryTable(snapshot) {
     const rows = (snapshot.issues || []).slice(0, 5);
     if (!rows.length) return '<div class="pixel-empty">暂无当前异常</div>';
-    return `<table class="pixel-carry-table"><thead><tr><th>运单号</th><th>渠道</th><th>区域</th><th>当前状态</th><th>Pending次数</th><th>OC次数</th><th>入库无扫描</th><th>工单未处理</th><th>是否进入轨迹查询</th><th>最新更新时间</th><th>操作</th></tr></thead><tbody>${rows.map(row => `<tr><td>${text(row.shipmentCode)}</td><td>${text(row.channel)}</td><td>${text(row.region)}</td><td><span class="pixel-tag">${text(row.status)}</span></td><td class="${Number(row.pending) >= 3 ? 'red' : ''}">${number(row.pending)}</td><td class="${Number(row.oc) >= 2 ? 'red' : ''}">${number(row.oc)}</td><td class="${row.inboundNoScan ? 'red' : ''}">${row.inboundNoScan ? '是' : '否'}</td><td class="${row.ticketOpen ? 'red' : ''}">${row.ticketOpen ? '是' : '否'}</td><td class="${row.trackQuery ? 'green' : 'red'}">${row.trackQuery ? '是' : '否'}</td><td>${text(row.updatedAt || '—')}</td><td><a href="${text(row.href || '#')}" ${row.href ? 'target="_blank"' : ''}>查看</a></td></tr>`).join('')}</tbody></table>`;
+    return `<table class="pixel-carry-table"><thead><tr><th>运单号</th><th>渠道</th><th>区域</th><th>当前状态</th><th>Pending天数</th><th>OC次数</th><th>入库无扫描</th><th>工单未处理</th><th>是否进入轨迹查询</th><th>最新更新时间</th><th>操作</th></tr></thead><tbody>${rows.map(row => `<tr><td>${text(row.shipmentCode)}</td><td>${text(row.channel)}</td><td>${text(row.region)}</td><td><span class="pixel-tag">${text(row.status)}</span></td><td class="${Number(row.pending) >= 3 ? 'red' : ''}">${number(row.pending)}</td><td class="${Number(row.oc) >= 2 ? 'red' : ''}">${number(row.oc)}</td><td class="${row.inboundNoScan ? 'red' : ''}">${row.inboundNoScan ? '是' : '否'}</td><td class="${row.ticketOpen ? 'red' : ''}">${row.ticketOpen ? '是' : '否'}</td><td class="${row.trackQuery ? 'green' : 'red'}">${row.trackQuery ? '是' : '否'}</td><td>${text(row.updatedAt || '—')}</td><td><button class="text-button" data-testid="view-tracking" onclick="navigatePage('tracking')">查看轨迹</button></td></tr>`).join('')}</tbody></table>`;
   }
 
   function rules() {
@@ -199,13 +248,60 @@
   }
 
   function renderHome(snapshot) {
-    document.getElementById('homeKpis').innerHTML = (snapshot.topKpis || []).map(kpiCard).join('');
-    document.getElementById('homeCcslOverview').innerHTML = ccslOverview(snapshot.ccsl || {});
-    document.getElementById('homeShopeeOverview').innerHTML = shopeeOverview(snapshot.shopee || {});
+    const fallbackCards = [
+      {key:'total',label:'总览',value:snapshot.ccsl?.today || 0,tone:'blue'}, {key:'ce',label:'CE',value:snapshot.ccsl?.today || 0,tone:'green'},
+      {key:'tbkh',label:'TBKH',value:0,tone:'orange'}, {key:'shopeecn',label:'SHOPEE CN',value:snapshot.shopee?.cn?.today || 0,tone:'purple'},
+      {key:'shopeevn',label:'SHOPEE VN',value:snapshot.shopee?.vn?.today || 0,tone:'red'}, {key:'ali1688',label:'ALI1688',value:0,tone:'cyan'}
+    ];
+    const fallbackMetrics = [{key:'self-pickup',label:'仓库自提件',value:0,unit:'件'},{key:'cecn',label:'CECN滞留包裹',value:0,unit:'件'},{key:'cezt',label:'CEZT滞留包裹',value:0,unit:'件'},{key:'580',label:'580滞留包裹',value:0,unit:'件'}];
+    const cards = snapshot.businessCards?.length ? snapshot.businessCards : fallbackCards;
+    const total = Number(cards.find(item => item.key === 'total')?.value || 0);
+    document.getElementById('homeBusinessCards').innerHTML = cards.map(item => businessCard(item, total)).join('');
+    document.getElementById('homeCoreMetrics').innerHTML = (snapshot.coreMetrics?.length ? snapshot.coreMetrics : fallbackMetrics).map(coreMetricCard).join('');
+    document.getElementById('homeShopeeSpecial').innerHTML = shopeeSpecial(snapshot.shopee || {});
+    document.getElementById('homeDispatchDistribution').innerHTML = dispatchDistribution(snapshot.shopee || {});
     document.getElementById('homeTrendGrid').innerHTML = charts(snapshot);
     document.getElementById('homeIssueCount').textContent = number(snapshot.issueCount ?? snapshot.issues?.length ?? 0);
     document.getElementById('homeIssueTable').innerHTML = carryTable(snapshot);
     document.getElementById('homeRules').innerHTML = rules();
+  }
+
+  function businessCard(item, total) {
+    const testKey = item.key === 'total' ? 'top-total' : `top-${item.key}`;
+    const share = total ? (Number(item.value || 0) / total * 100) : 0;
+    return `<button class="business-summary-card ${text(item.tone || 'blue')}" data-testid="${testKey}" onclick="${item.key === 'total' ? "navigatePage('home')" : `navigatePage('${text(item.key)}')`}"><span>${text(item.label)}</span><small>本期票数</small><b data-testid="${testKey}-value">${number(item.value || 0)}</b><em>占比 ${share.toFixed(2)}%</em></button>`;
+  }
+
+  function coreMetricCard(item) {
+    const testId = ['self-pickup','cecn','cezt','580'].includes(item.key) ? `metric-${item.key}` : `core-${item.key}`;
+    return `<button class="core-summary-card" data-testid="${testId}" onclick="openHomeMetricDetail('${text(item.key)}')"><i></i><span>${text(item.label)}</span><b>${display(item.value,item.unit)}</b><small>本月件数</small></button>`;
+  }
+
+  function shopeeSpecial(shopee) {
+    return `<div class="shopee-special-grid detailed">${[['SHOPEE CN','CN',shopee.cn],['SHOPEE VN','VN',shopee.vn]].map(([label,group,row]) => {
+      const items = [
+        ['今日件数', row?.today, 'all'], ['今日POD', row?.pod, 'pod'], ['POD率', display(row?.podRate || 0, '%'), 'pod'],
+        ['派送中', row?.deliveryStay, 'deliveryStay'], ['派送中率', display(row?.deliveryStayRate || 0, '%'), 'deliveryStay'],
+        ['Pending1+', row?.pending1, 'pending1'], ['Pending3+', row?.pending3, 'pending3'],
+        ['已退回', row?.returned, 'returned'], ['退回率', display(row?.returnRate || 0, '%'), 'returned'],
+        ['当前未闭环', row?.unresolved, 'unresolved']
+      ];
+      return `<section><header><b>${label}</b><small>${number(row?.today || 0)}票</small></header><div>${items.map(([name,value,tab]) => `<button onclick="openShopeeGroupMetric('${group}','${tab}')"><span>${name}</span><strong>${typeof value === 'string' ? value : number(value || 0)}</strong></button>`).join('')}</div></section>`;
+    }).join('')}</div>`;
+  }
+
+  function dispatchDistribution(shopee) {
+    const groups = [
+      ['CN - PP', shopee.cn?.pp || shopee.pp],
+      ['CN - PV', shopee.cn?.pv || shopee.pv],
+      ['VN - PP', shopee.vn?.pp || shopee.pp],
+      ['VN - PV', shopee.vn?.pv || shopee.pv]
+    ];
+    const rates = row => [row?.firstAttemptRate, row?.secondAttemptRate, row?.thirdAttemptRate].map(value => {
+      const numeric = Number(value);
+      return value === null || value === undefined || !Number.isFinite(numeric) ? null : numeric;
+    });
+    return `<div class="dispatch-grid">${groups.map(([label,row]) => { const counts=[row?.firstAttemptCount,row?.secondAttemptCount,row?.thirdAttemptCount]; const denominator=Number(row?.denominator ?? row?.dispatchAttemptDenominator ?? row?.today ?? 0); return `<section><b>${label}</b>${rates(row).map((value,index) => `<span>${index+1}派 <i><em style="width:${value === null ? 0 : Math.max(0,Math.min(100,value))}%"></em></i>${value === null ? '—' : `${value.toFixed(2)}% (${number(counts[index] || 0)}/${number(denominator)})`}</span>`).join('')}</section>`; }).join('')}</div>`;
   }
 
   window.DashboardComponents = { icon, renderHome, miniTrend, charts, carryTable, rules };

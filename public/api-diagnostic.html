@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CE QC API逐项诊断</title>
+<style>
+body{font-family:"Microsoft YaHei",Arial,sans-serif;margin:0;background:#f4f7fb;color:#0b315a}
+.wrap{max-width:1200px;margin:28px auto;padding:0 20px}
+.card{background:#fff;border:1px solid #dbe5f1;border-radius:12px;padding:20px;box-shadow:0 4px 16px rgba(22,66,120,.06)}
+h1{margin:0 0 8px;font-size:26px}
+.note{color:#607895;margin-bottom:18px}
+button{border:0;border-radius:8px;padding:11px 18px;background:#1677ff;color:#fff;font-weight:700;cursor:pointer;margin-right:8px}
+button.secondary{background:#eaf2ff;color:#1659a7}
+table{width:100%;border-collapse:collapse;margin-top:18px;font-size:14px}
+th,td{border-bottom:1px solid #e6edf5;padding:11px 9px;text-align:left;vertical-align:top}
+th{background:#f7faff}
+.ok{color:#0c9b55;font-weight:700}.bad{color:#d9363e;font-weight:700}.warn{color:#d97904;font-weight:700}
+pre{white-space:pre-wrap;word-break:break-all;margin:0;font-family:Consolas,monospace;font-size:12px;color:#445d78}
+#summary{margin-top:16px;padding:12px;border-radius:8px;background:#f7faff}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card">
+<h1>CE QC 后台API逐项诊断</h1>
+<div class="note">只执行GET读取，不写数据库、不修改数据。每测试一个接口后，都会再次检查 /api/health。</div>
+<button onclick="runAll()">开始逐项测试</button>
+<button class="secondary" onclick="copyResult()">复制诊断结果</button>
+<button class="secondary" onclick="location.href='/settings'">返回系统设置</button>
+<div id="summary">等待开始。</div>
+<table>
+<thead><tr><th>#</th><th>接口</th><th>结果</th><th>耗时</th><th>接口响应</th><th>接口后Health</th></tr></thead>
+<tbody id="rows"></tbody>
+</table>
+</div>
+</div>
+<script>
+const tests = [
+  ['/api/health','后台健康'],
+  ['/api/session','系统Session'],
+  ['/api/ce-auth-status','CE登录状态'],
+  ['/api/state?compact=1','CCSL状态'],
+  ['/api/shopee/state?compact=1','SHOPEE状态'],
+  ['/api/history?businessType=CCSL','CCSL历史'],
+  ['/api/history?businessType=SHOPEE','SHOPEE历史'],
+  ['/api/unified-history','统一日报历史'],
+  ['/api/import/unified-latest?compact=1','最新统一日报']
+];
+let results = [];
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+
+async function request(url, timeout=20000){
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), timeout);
+  const started = performance.now();
+  try{
+    const res = await fetch(url,{cache:'no-store',credentials:'same-origin',signal:controller.signal});
+    const text = await res.text();
+    let json=null;
+    try{json=text?JSON.parse(text):null}catch{}
+    return {ok:res.ok && (!json || json.ok!==false),status:res.status,ms:Math.round(performance.now()-started),text:text.slice(0,600),json};
+  }catch(e){
+    return {ok:false,status:0,ms:Math.round(performance.now()-started),error:`${e.name}: ${e.message}`};
+  }finally{clearTimeout(timer);}
+}
+
+async function healthAfter(){
+  for(let i=0;i<3;i++){
+    const h=await request('/api/health',5000);
+    if(h.ok)return {ok:true,status:h.status,recoveredAfter:i};
+    await sleep(1000);
+  }
+  return {ok:false,status:0};
+}
+
+async function runAll(){
+  results=[];
+  document.getElementById('rows').innerHTML='';
+  document.getElementById('summary').textContent='正在逐项测试，请不要关闭页面……';
+  let suspected=null;
+  for(let i=0;i<tests.length;i++){
+    const [url,label]=tests[i];
+    const r=await request(url,30000);
+    await sleep(400);
+    const h= url==='/api/health' ? {ok:r.ok,status:r.status,recoveredAfter:0} : await healthAfter();
+    const row={index:i+1,url,label,...r,healthAfter:h};
+    results.push(row);
+
+    let resultClass=r.ok?'ok':'bad';
+    let resultText=r.ok?`正常 HTTP ${r.status}`:(r.status?`失败 HTTP ${r.status}`:`连接失败`);
+    let healthClass=h.ok?(h.recoveredAfter>0?'warn':'ok'):'bad';
+    let healthText=h.ok?(h.recoveredAfter>0?`恢复（${h.recoveredAfter}次重试）`:'正常'):'后台不可达';
+
+    if(!r.ok && !h.ok && !suspected) suspected={url,label,reason:'该接口失败后后台Health也不可达'};
+    if(!r.ok && h.ok && !suspected) suspected={url,label,reason:'接口本身失败，但Node/数据库仍在线'};
+
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${i+1}</td><td><b>${esc(label)}</b><br><code>${esc(url)}</code></td>
+      <td class="${resultClass}">${esc(resultText)}</td><td>${r.ms} ms</td>
+      <td><pre>${esc(r.error||r.text||'')}</pre></td>
+      <td class="${healthClass}">${esc(healthText)}</td>`;
+    document.getElementById('rows').appendChild(tr);
+
+    if(!h.ok){
+      document.getElementById('summary').innerHTML=`<span class="bad">已定位高风险接口：${esc(label)} ${esc(url)}。该请求后后台Health不可达，测试已停止。</span>`;
+      break;
+    }
+  }
+  if(document.getElementById('summary').textContent.includes('正在逐项测试')){
+    const failed=results.filter(x=>!x.ok);
+    if(!failed.length){
+      document.getElementById('summary').innerHTML='<span class="ok">9个接口全部正常。若系统仍弹窗，则重点转向前端并发/启动瞬时连接问题。</span>';
+    }else{
+      document.getElementById('summary').innerHTML=`<span class="warn">后台仍在线，但有 ${failed.length} 个接口失败。第一个失败：${esc(failed[0].label)} ${esc(failed[0].url)}</span>`;
+    }
+  }
+}
+
+async function copyResult(){
+  const payload={time:new Date().toISOString(),origin:location.origin,results};
+  const text=JSON.stringify(payload,null,2);
+  try{await navigator.clipboard.writeText(text);alert('诊断结果已复制，可以直接粘贴给ChatGPT。');}
+  catch{prompt('复制下面内容给ChatGPT：',text);}
+}
+</script>
+</body>
+</html>

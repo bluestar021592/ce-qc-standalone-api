@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+
+# Databases / runtime data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+backups/
+backup/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+cookies.json
+cookie.json
+token.json
+tokens.json
+credentials.json
+
+# Runtime/temp
+logs/
+log/
+tmp/
+temp/
+cache/
+.cache/
+coverage/
+exports/
+export/
+downloads/
+uploads/
+screenshots/
+
+# Archives
+*.zip
+*.rar
+*.7z
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Migration/audit temp
+_ChatGPT_Migration/
+_PROJECT_AUDIT_*/
+_QUARANTINE_*/

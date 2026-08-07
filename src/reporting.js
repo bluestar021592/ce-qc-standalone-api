@@ -1,4 +1,5 @@
 import { cleanMainBills, isExcludedBill } from './storage.js';
+import { isSpecialCategory } from './specialNode.js';
 
 export function buildDashboardData(state = {}) {
   const finalRows = safeFinalRows(state);
@@ -93,6 +94,10 @@ export function buildDashboardRows(state = {}) {
     metric(date, '基础', '跨日遗留', d.carry, d.carry ? '需跟进' : '正常', '长期JSON或上一轮明日继续带入', 'carry'),
     metric(date, '基础', '明日继续监控', d.nextCarry, d.nextCarry ? '需跟进' : '正常', '本轮处理后仍需第二天继续扫描和轨迹', 'nextCarry'),
     metric(date, '基础', '延迟POD', c.delayedPod, countStatus(c.delayedPod), 'POD时间早于日报日期，作为历史POD补锁', 'delayedPod'),
+    metric(date, '特殊节点', '仓库自提件', c.selfPickup, countStatus(c.selfPickup), '最后有效轨迹命中仓库自提，排除普通异常', 'selfPickup'),
+    metric(date, '特殊节点', 'CECN滞留包裹', c.cecnRetention, countStatus(c.cecnRetention), '最后有效轨迹节点为CE:CECN或CEL:CECN', 'cecnRetention'),
+    metric(date, '特殊节点', 'CEZT滞留包裹', c.ceztRetention, countStatus(c.ceztRetention), '最后有效轨迹节点为CE:CEZT或CEL:CEZT', 'ceztRetention'),
+    metric(date, '特殊节点', '580滞留包裹', c.ccsl580Retention, countStatus(c.ccsl580Retention), '最后有效轨迹节点为580或CCSL580', 'ccsl580Retention'),
 
     metric(date, 'Pending', 'Pending率', d.pendingRateText, countStatus(c.pendingTotal), 'Pending总票数 / 扫描量', 'pendingAll'),
     metric(date, 'Pending', 'Pending1+', c.pendingTotal, countStatus(c.pendingTotal), '当前Pending自然日数至少1天', 'pendingAll'),
@@ -223,6 +228,8 @@ export function getXlsxSheetRows(state = {}) {
     trackEvents: state.trackEvents || [],
     podClosed: finalRows.filter(row => row?.是否POD === '是' || row?.异常分类 === 'POD闭环'),
     abnormalOpen: finalRows.filter(isCoreAbnormalRow),
+    unresolved: finalRows.filter(isCoreAbnormalRow),
+    severeAbnormal: finalRows.filter(row => isCoreAbnormalRow(row) && isSevereAbnormalRow(row)),
     ...buckets,
     nextCarry: nextCarryRows(state),
     podLocks: cleanMainBills(state.podLocks || []).map(wb => ({ 运单号: wb }))
@@ -231,7 +238,10 @@ export function getXlsxSheetRows(state = {}) {
 
 export function safeFinalRows(state = {}) {
   const podSet = new Set(cleanMainBills(state.podLocks || []));
-  return (state.finalRows || [])
+  const sourceRows = Array.isArray(state.finalRows)
+    ? state.finalRows
+    : Object.values(state.finalRows || {});
+  return sourceRows
     .filter(row => {
       const wb = billOf(row);
       return wb && !isExcludedBill(wb);
@@ -240,7 +250,7 @@ export function safeFinalRows(state = {}) {
 }
 
 function buildCategoryCounts(openRows, finalRows) {
-  const ordinaryRows = openRows.filter(row => !isShopRow(row) && !isNormalFinalDiversionRow(row) && !isRefreshFailedRow(row));
+  const ordinaryRows = openRows.filter(row => !isShopRow(row) && !isNormalFinalDiversionRow(row) && !isRefreshFailedRow(row) && !isSpecialCategory(row));
   const shopRows = finalRows.filter(isShopRow);
   const shopOpenRows = shopRows.filter(row => row?.是否POD !== '是');
   const shopTransitRows = shopOpenRows.filter(isShopTransitRow);
@@ -285,6 +295,11 @@ function buildCategoryCounts(openRows, finalRows) {
     nodeStale3plus: nodeRows.filter(row => staleDays(row) >= 3).length,
     delayedPod: finalRows.filter(row => row?.延迟POD === '是').length,
     shopTransit: shopTransitRows.length,
+    shopArrived: shopInboundRows.length,
+    shopPending: shopInboundRows.filter(row => (row.storeTags || row.tags || []).includes('SHOP_PENDING')).length,
+    shopRetention1: shopInboundRows.filter(row => shopDays(row) >= 1).length,
+    shopRetention2: shopInboundRows.filter(row => shopDays(row) >= 2).length,
+    shopRetention3: shopInboundRows.filter(row => shopDays(row) >= 3).length,
     shopTransit1: shopTransitRows.filter(row => shopDays(row) === 1).length,
     shopTransit2: shopTransitRows.filter(row => shopDays(row) === 2).length,
     shopTransit3plus: shopTransitRows.filter(row => shopDays(row) >= 3).length,
@@ -302,12 +317,16 @@ function buildCategoryCounts(openRows, finalRows) {
     tbkhShopStuck3plus: tbkhStuckRows.filter(row => shopDays(row) >= 3).length,
     tbkhShopNotPod: tbkhOpenRows.length,
     finalDiversion: openRows.filter(isNormalFinalDiversionRow).length,
-    workOrderAbnormal: ordinaryRows.filter(row => row?.异常分类 === '需人工复核').length
+    workOrderAbnormal: ordinaryRows.filter(row => ['工单未处理', '工单异常'].includes(row?.异常分类)).length,
+    selfPickup: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'SELF_PICKUP').length,
+    cecnRetention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CECN_RETENTION').length,
+    ceztRetention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CEZT_RETENTION').length,
+    ccsl580Retention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CCSL580_RETENTION').length
   };
 }
 
 function buildDetailBuckets(openRows, finalRows, state) {
-  const ordinaryRows = openRows.filter(row => !isShopRow(row) && !isNormalFinalDiversionRow(row) && !isRefreshFailedRow(row));
+  const ordinaryRows = openRows.filter(row => !isShopRow(row) && !isNormalFinalDiversionRow(row) && !isRefreshFailedRow(row) && !isSpecialCategory(row));
   const shopRows = finalRows.filter(isShopRow);
   const shopOpenRows = shopRows.filter(row => row?.是否POD !== '是');
   const shopTransitRows = shopOpenRows.filter(isShopTransitRow);
@@ -345,14 +364,23 @@ function buildDetailBuckets(openRows, finalRows, state) {
     delivery2plus: ordinaryRows.filter(row => countOf(row, '派送中天数', '派件中天数') >= 2),
     assign2: ordinaryRows.filter(row => countOf(row, '派件分配天数') >= 2),
     inboundNoScan: ordinaryRows.filter(row => row?.异常分类 === '入库无扫描'),
-    workOrderAbnormal: ordinaryRows.filter(row => row?.异常分类 === '需人工复核'),
+    workOrderAbnormal: ordinaryRows.filter(row => ['工单未处理', '工单异常'].includes(row?.异常分类)),
     noAction: ordinaryRows.filter(isNoActionRow),
     nodeDateStale: nodeRows,
     nodeStale1: nodeRows.filter(row => staleDays(row) === 1),
     nodeStale2: nodeRows.filter(row => staleDays(row) === 2),
     nodeStale3: nodeRows.filter(row => staleDays(row) >= 3),
     delayedPod: finalRows.filter(row => row?.延迟POD === '是'),
+    selfPickup: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'SELF_PICKUP'),
+    cecnRetention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CECN_RETENTION'),
+    ceztRetention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CEZT_RETENTION'),
+    ccsl580Retention: finalRows.filter(row => String(row.specialState || row.primaryCategory || '') === 'CCSL580_RETENTION'),
     shopTransit: shopTransitRows,
+    shopArrived: shopInboundRows,
+    shopPending: shopInboundRows.filter(row => (row.storeTags || row.tags || []).includes('SHOP_PENDING')),
+    shopRetention1: shopInboundRows.filter(row => shopDays(row) >= 1),
+    shopRetention2: shopInboundRows.filter(row => shopDays(row) >= 2),
+    shopRetention3: shopInboundRows.filter(row => shopDays(row) >= 3),
     shopTransit1: shopTransitRows.filter(row => shopDays(row) === 1),
     shopTransit2: shopTransitRows.filter(row => shopDays(row) === 2),
     shopTransit3: shopTransitRows.filter(row => shopDays(row) >= 3),
@@ -389,7 +417,23 @@ function isCoreAbnormalRow(row = {}) {
   return row?.是否POD !== '是'
     && !isNormalFinalDiversionRow(row)
     && !isRefreshFailedRow(row)
+    && !isSpecialRetentionRow(row)
     && !isShopRow(row);
+}
+
+function isSpecialRetentionRow(row = {}) {
+  return ['SELF_PICKUP', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION']
+    .includes(String(row.specialState || row.primaryCategory || row.主分类 || ''));
+}
+
+function isSevereAbnormalRow(row = {}) {
+  const days = Math.max(
+    countOf(row, 'Pending次数', 'Pending天数'),
+    countOf(row, 'OC天数'),
+    countOf(row, '盘点天数', '盘点次数'),
+    countOf(row, '节点未更新天数')
+  );
+  return /SEVERE|CRITICAL|严重/i.test(String(row.severity || row.严重等级 || row.异常分类 || '')) || days >= 3;
 }
 
 function isAnyAbnormalRow(row = {}) {
@@ -418,16 +462,19 @@ function isNoActionRow(row = {}) {
 }
 
 function isShopRow(row = {}) {
+  if (row?.shopState || row?.targetShopCode || row?.currentShopCode) return true;
   return row?.是否门店链路 === '是'
     || Boolean(row?.门店编码 || row?.门店名称 || row?.门店状态)
     || /^门店/.test(String(row?.异常分类 || ''));
 }
 
 function isShopTransitRow(row = {}) {
+  if (row?.shopState === 'SHOP_TRANSFER_IN_PROGRESS') return true;
   return row?.门店状态 === '门店途中' || row?.异常分类 === '门店途中' || row?.异常分类 === '门店未入库';
 }
 
 function isShopInboundRow(row = {}) {
+  if (row?.shopState === 'SHOP_ARRIVED_CURRENT' || row?.shopArrivedAt) return true;
   return Boolean(row?.门店入库时间)
     || row?.门店动作类型 === '门店入库'
     || row?.门店状态 === '门店入库'
@@ -437,6 +484,7 @@ function isShopInboundRow(row = {}) {
 }
 
 function isShopStuckRow(row = {}) {
+  if (row?.shopState === 'SHOP_ARRIVED_CURRENT' && shopDays(row) >= 1) return true;
   return row?.门店状态 === '门店滞留'
     || row?.异常分类 === '门店滞留'
     || (isShopInboundRow(row) && shopDays(row) >= 2);
@@ -472,6 +520,7 @@ function staleDays(row = {}) {
 }
 
 function shopDays(row = {}) {
+  if (Number(row?.shopRetentionNaturalDays || 0) > 0) return Number(row.shopRetentionNaturalDays);
   return Number(row?.门店滞留天数 || row?.门店未更新天数 || row?.shopNoUpdateDays || 0) || 0;
 }
 

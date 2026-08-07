@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>CE QC P1 验证</title>
+<style>body{font-family:Microsoft YaHei,Arial;padding:30px;background:#f4f7fb;color:#0b315a}pre{background:white;padding:18px;border:1px solid #dce6f2;border-radius:10px;white-space:pre-wrap}</style>
+<h2>CE QC P1 前端连接验证</h2><pre id="o">测试中...</pre>
+<script>
+(async()=>{
+ const urls=['/api/health','/api/session','/api/ce-auth-status','/api/state?compact=1','/api/shopee/state?compact=1'];
+ const out=[];
+ for(const u of urls){const t=performance.now();try{const r=await fetch(u,{cache:'no-store'});out.push(`${u} -> HTTP ${r.status} / ${Math.round(performance.now()-t)}ms`)}catch(e){out.push(`${u} -> FAIL ${e.message}`)}}
+ document.querySelector('#o').textContent=out.join('\n')+'\n\n如果全部HTTP 200，再打开 /settings 和 /logs，确认不再弹“后台连接中断”。';
+})();
+</script>

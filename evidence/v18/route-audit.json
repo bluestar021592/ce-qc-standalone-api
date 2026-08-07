@@ -1,0 +1,80 @@
+[
+  {
+    "name": "01-home",
+    "route": "/",
+    "bindingErrors": 0,
+    "charts": 4,
+    "overflow": 0,
+    "title": "首页总看板",
+    "viewport": [
+      1536,
+      1024
+    ],
+    "visible": 1
+  },
+  {
+    "name": "02-ce",
+    "route": "/ce",
+    "bindingErrors": 0,
+    "charts": 4,
+    "overflow": 0,
+    "title": "CE看板",
+    "viewport": [
+      1536,
+      1024
+    ],
+    "visible": 1
+  },
+  {
+    "name": "03-tbkh",
+    "route": "/tbkh",
+    "bindingErrors": 0,
+    "charts": 4,
+    "overflow": 0,
+    "title": "TBKH看板",
+    "viewport": [
+      1536,
+      1024
+    ],
+    "visible": 1
+  },
+  {
+    "name": "04-ali1688",
+    "route": "/ali1688",
+    "bindingErrors": 0,
+    "charts": 4,
+    "overflow": 0,
+    "title": "ALI1688看板",
+    "viewport": [
+      1536,
+      1024
+    ],
+    "visible": 1
+  },
+  {
+    "name": "05-shopeecn",
+    "route": "/shopeecn",
+    "bindingErrors": 0,
+    "charts": 4,
+    "overflow": 0,
+    "title": "SHOPEE CN看板",
+    "viewport": [
+      1536,
+      1024
+    ],
+    "visible": 1
+  },
+  {
+    "name": "06-shopeevn",
+    "route": "/shopeevn",
+    "bindingErrors": 0,
+    "charts": 4,
+    "overflow": 0,
+    "title": "SHOPEE VN看板",
+    "viewport": [
+      1536,
+      1024
+    ],
+    "visible": 1
+  }
+]

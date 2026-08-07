@@ -50,7 +50,6 @@ for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
   if (typeof original !== 'function') continue;
 
   express.application[method] = function ceQcSafeRouteRegistration(...args) {
-    // app.get('setting') is an Express getter and must retain its original behaviour.
     if (method === 'get' && args.length === 1) return original.apply(this, args);
     if (args.length < 2) return original.apply(this, args);
     return original.apply(this, [args[0], ...args.slice(1).map(wrapArgument)]);
