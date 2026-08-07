@@ -11,7 +11,7 @@ import { parseDailyExcel } from './src/excelParser.js';
 import { parseLongBackupModules } from './src/backupParser.js';
 import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
-import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, loadUnifiedBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
+import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
 import { exportShopeeXlsx } from './src/shopeeExporter.js';
@@ -19,7 +19,7 @@ import { exportPeriodReports } from './src/periodExporter.js';
 import { cleanMainBills, loadState, saveState, resetState } from './src/storage.js';
 import { clearToken, loadToken, saveToken, summarizeToken } from './src/authStore.js';
 import { buildCoreKpis, buildCriticalDashboard, buildDashboardData, buildDashboardRows, buildDetailTabs, safeFinalRows } from './src/reporting.js';
-import { createDatabaseBackup, deleteAllBackups, deleteBackup, fileHash, listBackups, recordBackup, recordExport } from './src/backup.js';
+import { createDatabaseBackup, deleteAllBackups, deleteBackup, fileHash, getBackupStorageSummary, listBackups, recordBackup, recordExport } from './src/backup.js';
 import { closeDb, ensureRuntimeDirs, getDb, getRuntimeConfig } from './src/db.js';
 import { createOrRecoverRun, getCurrentReportDate, getDbStatus, getRunStatus, listExportRecords, loadDetail, resetRunForReport, updateRunLock } from './src/store.js';
 import { buildConsistencyReport } from './src/consistency.js';
@@ -345,6 +345,41 @@ app.get('/api/state', async (req, res) => {
   res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
 });
 
+app.get('/api/unified-history', (req, res) => {
+  res.json({ ok: true, rows: listUnifiedImportHistory(req.query.limit) });
+});
+
+const periodDashboardCache = new Map();
+
+app.get('/api/period-dashboard', (req, res) => {
+  const mode = String(req.query.mode || '').toLowerCase();
+  const anchor = String(req.query.date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor) || !['weekly', 'monthly'].includes(mode)) {
+    return res.status(400).json({ ok: false, error: '请选择有效日期和周/月周期' });
+  }
+  const date = new Date(`${anchor}T12:00:00+07:00`);
+  let fromDate;
+  let toDate;
+  if (mode === 'weekly') {
+    const mondayOffset = (date.getDay() + 6) % 7;
+    const start = new Date(date); start.setDate(start.getDate() - mondayOffset);
+    const end = new Date(start); end.setDate(end.getDate() + 6);
+    fromDate = localIsoDate(start); toDate = localIsoDate(end);
+  } else {
+    fromDate = `${anchor.slice(0, 7)}-01`;
+    const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12);
+    toDate = localIsoDate(end);
+  }
+  const cacheKey = `${mode}:${fromDate}:${toDate}`;
+  const cached = periodDashboardCache.get(cacheKey);
+  if (cached && Date.now() - cached.createdAt < 5 * 60 * 1000) return res.json(cached.payload);
+  const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+  const states = Object.fromEntries(types.map(type => [type, loadUnifiedPeriodBusinessState(type, fromDate, toDate)]));
+  const payload = { ok: true, mode, anchor, fromDate, toDate, states };
+  periodDashboardCache.set(cacheKey, { createdAt: Date.now(), payload });
+  res.json(payload);
+});
+
 app.get('/api/shopee/state', async (req, res) => {
   const state = loadBusinessState(SHOPEE);
   const summary = summarizeShopeeState(state);
@@ -368,7 +403,7 @@ app.get('/api/business-state/:businessType', (req, res) => {
         }
       : { ...source, viewBusinessType: source.businessType, dashboard: buildDashboardData(source), detailTabs: buildDetailTabs(source) };
     if (!shopee) state.detailTabs.dashboard = { label: `${source.businessType}总看板`, rows: buildDashboardRows(source), total: buildDashboardRows(source).length };
-    res.json({ ok: true, businessType: source.businessType, reportDate: source.reportDate, snapshotId: source.snapshotId, snapshotStatus: source.snapshotStatus, state });
+    res.json({ ok: true, businessType: source.businessType, reportDate: source.reportDate, snapshotId: source.snapshotId, snapshotStatus: source.snapshotStatus, state: req.query.compact === '1' ? compactDashboardState(state) : state });
   } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
 });
 
@@ -982,26 +1017,30 @@ app.post('/api/track-query', async (req, res) => {
 });
 
 app.get('/api/tracking-workspace', async (req, res) => {
-  const ccsl = await loadState();
-  const shopee = loadBusinessState(SHOPEE);
   const unified = getLatestUnifiedImport();
-  const rows = [
-    ...workspaceRows(ccsl, 'CCSL'),
-    ...workspaceRows(shopee, 'SHOPEE')
-  ];
+  const snapshotId = String(req.query.snapshotId || unified?.snapshotId || '');
+  const reportDate = String(req.query.reportDate || unified?.reportDate || '');
+  const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
+  let states = [];
+  if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadUnifiedBusinessState(type, snapshotId));
+  if (!states.some(state => state?.finalRows?.length)) states = [await loadState(), loadBusinessState(SHOPEE)];
+  const allRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
+  const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
+  allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
+  const rows = scope === 'all' ? allRows : scope === 'pod' ? allRows.filter(row => row.isClosed) : allRows.filter(row => row.isActionable);
   const summary = {
     dailyNew: Number(unified?.summary?.validUniqueWaybills || unified?.summary?.totalUnique || 0),
     historicalCarry: Number(unified?.carryover?.historicalOpen || 0),
-    scanCompleted: rows.filter(row => row.scanStatus && row.scanStatus !== '待扫描').length,
-    podSkipped: rows.filter(row => row.scanStatus === 'POD').length,
-    returnSkipped: rows.filter(row => row.scanStatus === 'RETURN').length,
-    needTrack: rows.filter(row => row.queryStatus === '需查轨迹').length,
-    trackSuccess: rows.filter(row => row.queryStatus === '成功').length,
-    trackFailed: rows.filter(row => row.queryStatus === '失败').length,
-    retryPending: rows.filter(row => row.queryStatus === '待重试').length,
-    completed: rows.filter(row => ['成功', 'POD跳过', '退回跳过'].includes(row.queryStatus)).length
+    scanCompleted: allRows.filter(row => row.scanStatus && row.scanStatus !== '待扫描').length,
+    podSkipped: allRows.filter(row => row.scanStatus === 'POD').length,
+    returnSkipped: allRows.filter(row => row.scanStatus === 'RETURN').length,
+    needTrack: allRows.filter(row => row.queryStatus === '需查轨迹').length,
+    trackSuccess: allRows.filter(row => row.queryStatus === '成功').length,
+    trackFailed: allRows.filter(row => row.queryStatus === '失败').length,
+    retryPending: allRows.filter(row => row.queryStatus === '待重试').length,
+    completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过'].includes(row.queryStatus)).length
   };
-  res.json({ ok: true, reportDate: unified?.reportDate || ccsl.reportDate || shopee.reportDate || '', batchId: unified?.batchId || '', snapshotId: unified?.snapshotId || '', summary, rows: rows.slice(0, 5000) });
+  res.json({ ok: true, reportDate, batchId: unified?.batchId || '', snapshotId, scope, allRowCount: allRows.length, summary, rows: rows.slice(0, 5000) });
 });
 
 app.post('/api/test-ce-api', async (req, res) => {
@@ -1250,7 +1289,7 @@ app.get('/api/detail', async (req, res) => {
 });
 
 app.get('/api/backups', async (req, res) => {
-  res.json({ ok: true, backups: listBackups(50), exports: listExportRecords(50) });
+  res.json({ ok: true, backups: listBackups(50), backupStorage: getBackupStorageSummary(), exports: listExportRecords(50) });
 });
 
 app.get('/api/backups/:id/download', requireRole('ADMIN'), (req, res) => {
@@ -1392,7 +1431,7 @@ function compactDashboardState(summary = {}) {
       const limit = key === 'dashboard' ? 100 : 200;
       return [key, { ...tab, rows: Array.isArray(tab.rows) ? tab.rows.slice(0, limit) : [] }];
     }));
-  return {
+  const compact = {
     ...summary,
     _compact: true,
     dailyPreview: (summary.dailyPreview || []).slice(0, 20),
@@ -1402,6 +1441,12 @@ function compactDashboardState(summary = {}) {
       ? { ...summary.criticalDashboard, rows: (summary.criticalDashboard.rows || []).slice(0, 100) }
       : summary.criticalDashboard
   };
+  // These collections can contain thousands of rows/events. Compact dashboard
+  // requests use counters and short previews only; detail pages fetch rows on demand.
+  for (const key of ['finalRows', 'trackResults', 'trackEvents', 'scanResults', 'scanPool', 'needTrackBills', 'dailyRows', 'dailyParseRows', 'rawRows', 'exceptionItems']) {
+    delete compact[key];
+  }
+  return compact;
 }
 
 function summarizeCcslSnapshot(snapshot) {
@@ -1627,6 +1672,11 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const isPod = row.是否POD === '是' || String(row.orderStatus || scan.orderStatus || '') === '85';
     const isReturn = /RETURN|退回/.test(`${row.退回状态 || ''} ${row.primaryCategory || ''}`);
     const failed = /fail|失败|refresh_failed/i.test(`${row.查询状态 || ''} ${row.API状态 || ''} ${batch.status || ''}`);
+    const specialState = row.specialState || row.primaryCategory || row.主分类 || '';
+    const shopState = row.shopState || row.shopStatus || row.门店状态 || row.storeFlowState || '';
+    const category = row.primaryCategory || row.主分类 || row.异常分类 || '';
+    const isClosed = isPod || isReturn;
+    const isActionable = !isClosed;
     return {
       shipmentCode, businessType: row.businessType || businessType, region: row.regionCode || row.区域 || '',
       scanStatus: isPod ? 'POD' : (isReturn ? 'RETURN' : (scan.orderStatus || row.扫描状态 || '已扫描')),
@@ -1634,7 +1684,7 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
       pendingRawEventCount: Number(row.pendingRawEventCount || 0), pendingDistinctDayCount: Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? 0),
       pendingDates: Array.isArray(row.pendingDates) ? row.pendingDates : String(row.Pending日期 || '').split(/[,、]/).map(value => value.trim()).filter(Boolean),
       pendingContinuity: row.pendingContinuity || row.Pending连续性 || '', ocDays: Number(row.OC天数 || 0),
-      specialState: row.specialState || '', category: row.primaryCategory || row.主分类 || row.异常分类 || '',
+      specialState, shopState, category, isClosed, isActionable,
       queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹'))),
       retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate: row.reportDate || state.reportDate || '', snapshotId: state.snapshotId || ''
     };
@@ -1674,8 +1724,16 @@ function buildNetworkInfo(runtime = getRuntimeConfig()) {
     lanIps,
     lanUrl: String(process.env.ACCESS_MODE || 'DUAL').toUpperCase() === 'DUAL' && lanIp ? `http://${lanIp}:${portValue}` : '',
     lanUrls: String(process.env.ACCESS_MODE || 'DUAL').toUpperCase() === 'DUAL' ? lanIps.map(ip => `http://${ip}:${portValue}`) : [],
-    publicUrl: `https://${process.env.PUBLIC_HOSTNAME || 'qc.cambodianexpress.com'}`
+    publicUrl: `https://${process.env.PUBLIC_HOSTNAME || 'ce-qc.cambodian.com'}`,
+    publicConfigured: Boolean(process.env.PUBLIC_HOSTNAME && process.env.CF_ACCESS_TEAM_DOMAIN && process.env.CF_ACCESS_AUD)
   };
+}
+
+function localIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function getLanIpv4s() {

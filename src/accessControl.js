@@ -7,10 +7,11 @@ import { getDb, nowIso } from './db.js';
 const ROLE_LEVEL = Object.freeze({ VIEWER: 1, OPERATOR: 2, ADMIN: 3 });
 const LOGIN_LIMIT = 5;
 const SESSION_HOURS = 8;
+const SESSION_REFRESH_THRESHOLD_MS = 2 * 60 * 60_000;
 let jwks = null;
 
 export function validateAccessConfiguration() {
-  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'qc.cambodianexpress.com');
+  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'ce-qc.cambodian.com');
   if (!publicHost || process.env.NODE_ENV !== 'production') return;
   const missing = ['CF_ACCESS_TEAM_DOMAIN', 'CF_ACCESS_AUD'].filter(name => !String(process.env[name] || '').trim());
   if (missing.length) throw new Error(`Missing Cloudflare Access configuration: ${missing.join(', ')}`);
@@ -19,14 +20,14 @@ export function validateAccessConfiguration() {
 export async function accessIdentity(req, res, next) {
   const host = normalizeHost(req.hostname || req.get('host'));
   const remote = normalizeIp(req.socket?.remoteAddress);
-  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'qc.cambodianexpress.com');
+  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'ce-qc.cambodian.com');
   try {
     if (isInternalAuthPath(req.path)) return handleInternalAuth(req, res, host, remote);
     let channel = '';
     let cloudflareEmail = '';
     if (publicHost && host === publicHost) {
       channel = 'PUBLIC';
-      cloudflareEmail = await verifyCloudflareIdentity(req);
+      cloudflareEmail = envEnabled('PUBLIC_DIRECT_ENABLED', false) ? '' : await verifyCloudflareIdentity(req);
     } else if (isLoopbackHost(host) && isLoopbackIp(remote)) {
       channel = 'LOCAL';
     } else if (isPrivateHost(host) && String(process.env.ACCESS_MODE || 'DUAL').toUpperCase() === 'DUAL' && envEnabled('LAN_DIRECT_ENABLED', true) && isAllowedLan(remote, process.env.LAN_ALLOWED_CIDRS || '192.168.0.0/16,10.0.0.0/8,172.16.0.0/12')) {
@@ -34,8 +35,9 @@ export async function accessIdentity(req, res, next) {
     } else {
       return denyPageOrApi(req, res, 403, 'Access denied', publicHost ? `Please use https://${publicHost}` : 'Contact the system administrator.');
     }
-    const user = readSession(req, channel, cloudflareEmail);
+    let user = readSession(req, channel, cloudflareEmail);
     if (user) {
+      user = refreshSessionIfNeeded(req, res, user, channel);
       req.user = user;
       req.accessMode = channel;
       req.cloudflareEmail = cloudflareEmail;
@@ -52,11 +54,11 @@ function isInternalAuthPath(pathname) {
 }
 
 async function handleInternalAuth(req, res, host, remote) {
-  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'qc.cambodianexpress.com');
+  const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'ce-qc.cambodian.com');
   let channel = '';
   let cloudflareEmail = '';
   try {
-    if (publicHost && host === publicHost) { channel = 'PUBLIC'; cloudflareEmail = await verifyCloudflareIdentity(req); }
+    if (publicHost && host === publicHost) { channel = 'PUBLIC'; cloudflareEmail = envEnabled('PUBLIC_DIRECT_ENABLED', false) ? '' : await verifyCloudflareIdentity(req); }
     else if (isLoopbackHost(host) && isLoopbackIp(remote)) channel = 'LOCAL';
     else if (isPrivateHost(host) && String(process.env.ACCESS_MODE || 'DUAL').toUpperCase() === 'DUAL' && isAllowedLan(remote, process.env.LAN_ALLOWED_CIDRS || '192.168.0.0/16,10.0.0.0/8,172.16.0.0/12')) channel = 'LAN';
     else return res.status(403).json({ ok: false, error: 'Access channel is not allowed.' });
@@ -104,7 +106,7 @@ function loginInternalUser(req, res, channel, cloudflareEmail) {
   if (!Number(row.enabled)) return res.status(403).json({ ok: false, error: 'This account is disabled.' });
   if (row.expiresAt && new Date(row.expiresAt) <= now) return res.status(403).json({ ok: false, error: 'This account has expired.' });
   if (row.lockedUntil && new Date(row.lockedUntil) > now) return res.status(423).json({ ok: false, error: 'This account is temporarily locked. Please try again later.' });
-  if (channel === 'PUBLIC' && (!row.email || row.email.toLowerCase() !== cloudflareEmail.toLowerCase())) return res.status(403).json({ ok: false, error: 'Internal account email does not match Cloudflare Access identity.' });
+  if (channel === 'PUBLIC' && cloudflareEmail && (!row.email || row.email.toLowerCase() !== cloudflareEmail.toLowerCase())) return res.status(403).json({ ok: false, error: 'Internal account email does not match Cloudflare Access identity.' });
   getDb().prepare('UPDATE users SET failedLoginCount=0,lockedUntil=NULL,lastLoginAt=?,updatedAt=? WHERE id=?').run(nowIso(), nowIso(), row.id);
   const user = getDb().prepare("SELECT * FROM users WHERE id=? AND status='ACTIVE'").get(row.id);
   auditAction(req, 'LOGIN_SUCCESS', { username, accessChannel: channel });
@@ -145,10 +147,22 @@ function issueSession(res, row, req, channel, cloudflareEmail, mustChangePasswor
 function readSession(req, channel, cloudflareEmail) {
   const token = cookieValue(req, 'ce_internal_session');
   if (!token) return null;
-  const row = getDb().prepare(`SELECT s.id AS sessionId,u.* FROM user_sessions s JOIN users u ON u.id=s.userId WHERE s.sessionHash=? AND s.revokedAt IS NULL AND s.expiresAt>?`).get(sha256(token), nowIso());
-  if (!row || !Number(row.enabled) || (row.expiresAt && new Date(row.expiresAt) <= new Date())) return null;
-  if (channel === 'PUBLIC' && (!row.email || row.email.toLowerCase() !== cloudflareEmail.toLowerCase())) return null;
+  const row = getDb().prepare(`SELECT s.id AS sessionId,s.expiresAt AS sessionExpiresAt,u.* FROM user_sessions s JOIN users u ON u.id=s.userId WHERE s.sessionHash=? AND s.revokedAt IS NULL AND s.expiresAt>?`).get(sha256(token), nowIso());
+  if (!row || !Number(row.enabled) || (row.sessionExpiresAt && new Date(row.sessionExpiresAt) <= new Date())) return null;
+  if (channel === 'PUBLIC' && cloudflareEmail && (!row.email || row.email.toLowerCase() !== cloudflareEmail.toLowerCase())) return null;
   return { ...row, department: row.departmentCompany || '', devMode: channel === 'LOCAL' };
+}
+
+function refreshSessionIfNeeded(req, res, user, channel) {
+  const expiresAtMs = Date.parse(user.sessionExpiresAt || '');
+  if (Number.isFinite(expiresAtMs) && expiresAtMs - Date.now() > SESSION_REFRESH_THRESHOLD_MS) return user;
+  const token = cookieValue(req, 'ce_internal_session');
+  if (!token) return user;
+  const expiresAt = new Date(Date.now() + SESSION_HOURS * 60 * 60_000).toISOString();
+  getDb().prepare('UPDATE user_sessions SET expiresAt=? WHERE id=? AND sessionHash=? AND revokedAt IS NULL')
+    .run(expiresAt, user.sessionId, sha256(token));
+  res.setHeader('Set-Cookie', `ce_internal_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}${channel === 'PUBLIC' ? '; Secure' : ''}`);
+  return { ...user, sessionExpiresAt: expiresAt };
 }
 
 function revokeCookieSession(req) { const token = cookieValue(req, 'ce_internal_session'); if (token) getDb().prepare('UPDATE user_sessions SET revokedAt=? WHERE sessionHash=?').run(nowIso(), sha256(token)); }
@@ -174,7 +188,7 @@ export function requireBusinessScope(businessType) {
 export function sameOriginWriteGuard(req, res, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) || req.accessMode !== 'PUBLIC') return next();
   const origin = String(req.get('origin') || '').replace(/\/$/, '');
-  const expected = String(process.env.PUBLIC_ORIGIN || `https://${process.env.PUBLIC_HOSTNAME || 'qc.cambodianexpress.com'}`).replace(/\/$/, '');
+  const expected = String(process.env.PUBLIC_ORIGIN || `https://${process.env.PUBLIC_HOSTNAME || 'ce-qc.cambodian.com'}`).replace(/\/$/, '');
   if (origin && origin !== expected) return res.status(403).json({ ok: false, error: 'Request origin verification failed.' });
   next();
 }
@@ -201,7 +215,12 @@ async function verifyCloudflareIdentity(req) {
 }
 
 function loginPage(req, res, { channel, bootstrap }) {
-  if (req.path.startsWith('/api/')) return res.status(401).json({ ok: false, error: bootstrap ? 'Initial administrator setup is required.' : 'Internal sign-in is required.' });
+  if (req.path.startsWith('/api/')) return res.status(401).json({
+    ok: false,
+    code: bootstrap ? 'INTERNAL_BOOTSTRAP_REQUIRED' : 'INTERNAL_AUTH_REQUIRED',
+    reloginRequired: !bootstrap,
+    error: bootstrap ? '需要先创建系统管理员。' : '系统登录已过期，请重新登录后继续处理。'
+  });
   const endpoint = bootstrap ? '/api/internal-auth/bootstrap' : '/api/internal-auth/login';
   const title = bootstrap ? 'Initialize administrator' : 'CE QC internal sign-in';
   return res.status(401).type('html').send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(400px,calc(100% - 40px));background:#fff;border:1px solid #dce5ef;border-radius:8px;padding:28px;box-shadow:0 12px 36px #16395b18}h1{font-size:22px;margin:0 0 18px}label{display:block;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd8e5;border-radius:5px}button{width:100%;margin-top:18px;border:0;border-radius:5px;background:#126ee8;color:#fff;padding:11px;font-weight:700}#error{color:#b42318;margin-top:10px}</style><main class="box"><h1>${bootstrap ? '创建首个管理员' : 'CE质控系统内部登录'}</h1><form id="login">${bootstrap ? '<label>姓名</label><input name="displayName" required><label>邮箱</label><input name="email" type="email">' : ''}<label>用户名</label><input name="username" autocomplete="username" required><label>密码</label><input name="password" type="password" autocomplete="current-password" required><button>${bootstrap ? '创建管理员' : '登录'}</button><div id="error"></div></form></main><script>document.getElementById('login').addEventListener('submit',async e=>{e.preventDefault();const body=Object.fromEntries(new FormData(e.target));const r=await fetch('${endpoint}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(r.ok)location.href='/';else document.getElementById('error').textContent=j.error||'登录失败';});</script>`);

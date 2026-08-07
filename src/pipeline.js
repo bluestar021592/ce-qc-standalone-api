@@ -55,12 +55,16 @@ export async function runQcPipeline({
     if (!batch.length) continue;
     state.processing = { ...state.processing, phase: '订单扫描', batchIndex: Math.floor(i / ORDER_BATCH_SIZE) + 1, totalBatches: Math.ceil(scanPool.length / ORDER_BATCH_SIZE) };
     await onProgress(`订单扫描 ${i + 1}-${Math.min(i + ORDER_BATCH_SIZE, scanPool.length)} / ${scanPool.length}`);
-    let data = [];
-    try {
-      data = await client.confirmQuery(batch);
-    } catch (error) {
-      await onProgress(`订单扫描批次失败，保留明日续查：${error?.message || error}`);
-      for (const wb of batch) refreshFailed.add(wb);
+    const scanOutcome = await queryBatchWithFallback({
+      batch,
+      query: codes => client.confirmQuery(codes),
+      apiName: 'otwms-order-confirm-query',
+      fallbackSizes: [100, 50, 10, 1],
+      onLog: onProgress
+    });
+    const data = scanOutcome.successes.flatMap(item => item.events || []);
+    for (const failure of scanOutcome.failures) {
+      for (const wb of failure.batch) refreshFailed.add(wb);
     }
     const grouped = groupConfirmRows(data);
     for (const wb of batch) {
@@ -203,7 +207,9 @@ export async function runQcPipeline({
 
   const returnedRows = scanResults.filter(row => returnedCompleted.has(row.运单号)).map(row => ({ ...row, 是否POD: '否', POD状态: '未POD', 退回状态: '已退回', primaryCategory: '退回', 主分类: '退回', 异常分类: '退回', 入库无扫描节点: '否', carry状态: 'closed_return', 跨日状态: '已闭环' }));
   const retryRows = scanResults.filter(row => row.currentState === 'SCAN_PENDING_RETRY').map(row => ({ ...row, primaryCategory: '订单扫描待重试', 主分类: '订单扫描待重试', 异常分类: '订单扫描待重试', 入库无扫描节点: '否', carry状态: 'active' }));
-  const finalRows = [...podRows, ...returnedRows, ...retryRows, ...trackResults]
+  // API failures are operational retry items, not business anomalies. Keep them
+  // in carry/scan retry state, but never publish them as QC exception rows.
+  const finalRows = [...podRows, ...returnedRows, ...trackResults]
     .filter(row => row?.运单号 && !excluded(row.运单号))
     .filter(row => row.是否POD === '是' || !podSet.has(row.运单号));
   const finalDiversionRows = finalRows.filter(isNormalFinalDiversionRow);
@@ -504,17 +510,26 @@ async function queryShopeeConfirmApi({ state, bills, client, onProgress, onCheck
     state.processing = { ...state.processing, phase: 'SHOPEE订单扫描', batchIndex: index + 1, totalBatches: batches.length };
     await onProgress(`SHOPEE订单扫描 ${index + 1}/${batches.length}：${batch.length}票（单批上限350）`);
     try {
-      const responseRows = await client.confirmQuery(batch);
-      rows.push(...(responseRows || []));
-      const grouped = groupConfirmRows(responseRows || []);
+      const outcome = await queryBatchWithFallback({
+        batch,
+        query: codes => client.confirmQuery(codes),
+        apiName: 'otwms-order-confirm-query',
+        fallbackSizes: [100, 50, 10, 1],
+        onLog: onProgress,
+        onAttempt: attempt => recordApiAttempt(state, { ...attempt, stage: 'scan-status', batchIndex: index + 1 })
+      });
+      const responseRows = outcome.successes.flatMap(item => item.events || []);
+      rows.push(...responseRows);
+      const grouped = groupConfirmRows(responseRows);
+      const failed = new Set(outcome.failures.flatMap(item => item.batch));
       for (const bill of batch) {
         const matched = grouped.get(bill) || [];
+        const success = matched.length > 0 && !failed.has(bill);
         statusByBill.set(bill, {
-          businessType: 'SHOPEE', reportDate, shipmentCode: bill, status: matched.length ? 'success' : 'failed',
-          resultCount: matched.length, errorMessage: matched.length ? '' : 'SCAN_EMPTY_RESPONSE', checkedAt: new Date().toISOString()
+          businessType: 'SHOPEE', reportDate, shipmentCode: bill, status: success ? 'success' : 'failed',
+          resultCount: matched.length, errorMessage: success ? '' : 'SCAN_RETRY_REQUIRED', checkedAt: new Date().toISOString()
         });
       }
-      recordApiAttempt(state, { apiName: 'otwms-order-confirm-query', stage: 'scan-status', batchIndex: index + 1, batch, status: 'success', resultCount: (responseRows || []).length });
     } catch (error) {
       const diagnostic = classifyCeFailure(error);
       if (diagnostic.runStatus) {

@@ -72,12 +72,16 @@ export function deleteAllBackups(deletedBy = '') {
   const rows = db.prepare("SELECT * FROM backup_records WHERE COALESCE(status,'ACTIVE')='ACTIVE' ORDER BY id").all();
   const deleted = [];
   const failed = [];
+  let trackedDeletedBytes = 0;
   const now = nowIso();
   for (const row of rows) {
     const resolved = path.resolve(row.filePath || '');
     try {
       ensureBackupFileTarget(resolved, cfg);
-      if (fs.existsSync(resolved)) fs.rmSync(resolved, { force: false });
+      if (fs.existsSync(resolved)) {
+        trackedDeletedBytes += fs.statSync(resolved).size;
+        fs.rmSync(resolved, { force: false });
+      }
       db.prepare("UPDATE backup_records SET status='DELETED',deletedAt=?,deletedBy=? WHERE id=?").run(now, String(deletedBy || ''), row.id);
       deleted.push({ id: row.id, fileName: row.fileName });
     } catch (error) {
@@ -85,7 +89,27 @@ export function deleteAllBackups(deletedBy = '') {
       failed.push({ id: row.id, fileName: row.fileName, error: error.message });
     }
   }
-  return { deletedCount: deleted.length, failedCount: failed.length, deleted, failed };
+  const trackedPaths = new Set(rows.map((row) => path.resolve(row.filePath || '')).filter(Boolean));
+  const orphanResult = deleteUntrackedBackupFiles(cfg, trackedPaths);
+  return {
+    deletedCount: deleted.length + orphanResult.deleted.length,
+    trackedDeletedCount: deleted.length,
+    orphanDeletedCount: orphanResult.deleted.length,
+    deletedBytes: trackedDeletedBytes + orphanResult.deletedBytes,
+    failedCount: failed.length + orphanResult.failed.length,
+    deleted: [...deleted, ...orphanResult.deleted],
+    failed: [...failed, ...orphanResult.failed]
+  };
+}
+
+export function getBackupStorageSummary() {
+  const cfg = getRuntimeConfig();
+  const files = listBackupFiles(cfg.backupsDir);
+  return {
+    directory: cfg.backupsDir,
+    fileCount: files.length,
+    totalBytes: files.reduce((sum, file) => sum + file.size, 0)
+  };
 }
 
 export function recordExport(row = {}) {
@@ -117,6 +141,48 @@ function ensureBackupFileTarget(resolved, cfg) {
   const backupRoot = path.resolve(cfg.backupsDir) + path.sep;
   if (!resolved.startsWith(backupRoot)) throw new Error('备份文件不在受控目录。');
   if (resolved === path.resolve(cfg.dbFile)) throw new Error('禁止删除正式SQLite数据库。');
+}
+
+function deleteUntrackedBackupFiles(cfg, trackedPaths) {
+  const deleted = [];
+  const failed = [];
+  let deletedBytes = 0;
+  for (const file of listBackupFiles(cfg.backupsDir)) {
+    if (trackedPaths.has(file.path) && !fs.existsSync(file.path)) continue;
+    try {
+      ensureBackupFileTarget(file.path, cfg);
+      fs.rmSync(file.path, { force: true });
+      deletedBytes += file.size;
+      deleted.push({ fileName: path.relative(cfg.backupsDir, file.path), orphan: !trackedPaths.has(file.path) });
+    } catch (error) {
+      failed.push({ fileName: path.relative(cfg.backupsDir, file.path), error: error.message });
+    }
+  }
+  removeEmptyBackupDirectories(cfg.backupsDir, cfg.backupsDir);
+  return { deleted, failed, deletedBytes };
+}
+
+function listBackupFiles(root) {
+  if (!root || !fs.existsSync(root)) return [];
+  const files = [];
+  const visit = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) visit(target);
+      else if (entry.isFile()) files.push({ path: path.resolve(target), size: fs.statSync(target).size });
+    }
+  };
+  visit(root);
+  return files;
+}
+
+function removeEmptyBackupDirectories(directory, root) {
+  if (!fs.existsSync(directory)) return;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory() && !entry.isSymbolicLink()) removeEmptyBackupDirectories(path.join(directory, entry.name), root);
+  }
+  if (path.resolve(directory) !== path.resolve(root) && fs.readdirSync(directory).length === 0) fs.rmdirSync(directory);
 }
 
 function safeName(value) {

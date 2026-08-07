@@ -13,7 +13,7 @@ const OUTBOUND_RE = /(^|\s)outbound(\s|$)|出库|离开网点/i;
 const INBOUND_RE = /pickup\s*inbound|(^|\s)inbound(\s|$)|入库|到仓|货物到达网点/i;
 const CYCLE_COUNT_RE = /cycle\s*count|盘点/i;
 const TRANSIT_HUB_RE = /(?:CE|CEL)\s*:\s*(?:WHJT|WHPP)\b|\b(?:WHJT|WHPP)\b/i;
-export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-05-latest-track-v2';
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-06-pv-open-disposition-v1';
 
 export function analyzeShopeeShipment({
   waybill,
@@ -56,14 +56,17 @@ export function analyzeShopeeShipment({
   const atTransitHub = Boolean(last && TRANSIT_HUB_RE.test(lastText));
   const severeOverdue = Boolean(!isPod && !isReturned && Math.max(staleDays, unresolvedDays) >= 3);
   const completeForNegativeJudgment = !apiFailed && apiStatus.event !== 'failed' && apiStatus.exception !== 'failed';
-  const inboundNoScan = Boolean(!special && !atTransitHub && completeForNegativeJudgment && last && isInboundEvent(last)
-    && !pending.activeDays && !oc.active && !deliveryDays && !isPod && !isReturned);
   const noTrack = Boolean(completeForNegativeJudgment && apiStatus.event === 'success' && !sorted.length);
   const region = classifyShopeeRegion({ dailyRow, shipmentTrackRow, scanRow, events: sorted });
   const returnPhoto = classifyReturnPhoto(returnEvent, apiFailed);
   const storeFlow = apiFailed
     ? priorStoreFlow(priorRow)
-    : analyzeStoreFlow({ shipmentCode: waybill, events: sorted, reportDate, isPod, isReturned });
+    : analyzeStoreFlow({ shipmentCode: waybill, events: sorted, reportDate: effectiveAnalysisDate, isPod, isReturned });
+  const inboundNoScan = Boolean(!special && !atTransitHub && !storeFlow.shopState && completeForNegativeJudgment
+    && last && isInboundEvent(last) && !pending.activeDays && !oc.active && !deliveryDays && !isPod && !isReturned);
+  const pvOpenDisposition = classifyPvOpenDisposition({
+    region, storeFlow, deliveryDays, isPod, isReturned, apiFailed
+  });
 
   let category = '其他已识别节点';
   if (isPod) category = 'POD';
@@ -166,6 +169,8 @@ export function analyzeShopeeShipment({
     regionCode: region.regionCode,
     regionSource: region.regionSource,
     区域: region.regionCode,
+    pvOpenDisposition,
+    外省未闭环分流: pvOpenDispositionLabel(pvOpenDisposition),
     primaryCategory: category,
     主分类: category,
     异常分类: category,
@@ -190,6 +195,28 @@ export function analyzeShopeeShipment({
     问题件数量: exceptionRows.length,
     QC判断: isPod ? 'SHOPEE包裹已POD' : (isReturned ? `SHOPEE包裹已退回，${returnPhoto.label}` : (apiFailed ? `${category}；API失败待重试，保留跨日续查` : category))
   };
+}
+
+function classifyPvOpenDisposition({ region, storeFlow, deliveryDays, isPod, isReturned, apiFailed }) {
+  if (region?.regionCode !== 'PV' || isPod || isReturned || apiFailed) return '';
+  if (storeFlow?.shopState === 'SHOP_ARRIVED_CURRENT') {
+    return Number(storeFlow.shopRetentionNaturalDays || 0) >= 2
+      ? 'PV_STORE_RETENTION'
+      : 'PV_STORE_INBOUND_NO_SCAN';
+  }
+  if (storeFlow?.shopState === 'SHOP_TRANSFER_IN_PROGRESS' || Number(deliveryDays || 0) > 0) {
+    return 'PV_DELIVERY_IN_PROGRESS';
+  }
+  return 'PV_OTHER_UNRESOLVED';
+}
+
+function pvOpenDispositionLabel(value) {
+  return ({
+    PV_DELIVERY_IN_PROGRESS: '外省派送中',
+    PV_STORE_RETENTION: '外省门店滞留',
+    PV_STORE_INBOUND_NO_SCAN: '外省门店入库无节点',
+    PV_OTHER_UNRESOLVED: '外省其他未闭环'
+  })[value] || '';
 }
 
 function priorStoreFlow(row = {}) {

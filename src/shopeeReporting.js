@@ -34,6 +34,10 @@ const PUBLIC_METRICS = Object.freeze([
   ,['派送中率', 'deliveryStayRate', 'deliveryStay', '%']
   ,['中转节点停留', 'transitHubStay', 'transitHubStay', '件']
   ,['严重超时未更新', 'severeOverdue', 'severeOverdue', '件']
+  ,['外省派送中', 'pvDelivery', 'pvDelivery', '件']
+  ,['外省门店滞留', 'pvStoreRetention', 'pvStoreRetention', '件']
+  ,['外省门店入库无节点', 'pvStoreInboundNoScan', 'pvStoreInboundNoScan', '件']
+  ,['外省其他未闭环', 'pvOtherUnresolved', 'pvOtherUnresolved', '件']
 ]);
 
 export function buildShopeeDashboard(state = {}) {
@@ -141,6 +145,10 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
     unresolved: tab('当前未闭环', visibleRows(allGroups.unresolved)),
     returnInProgress: tab('退回处理中', visibleRows(allGroups.returnInProgress)),
     returnRequired: tab('退回待处理', visibleRows(allGroups.returnRequired)),
+    pvDelivery: tab('外省派送中', visibleRows(allGroups.pvDelivery)),
+    pvStoreRetention: tab('外省门店滞留', visibleRows(allGroups.pvStoreRetention)),
+    pvStoreInboundNoScan: tab('外省门店入库无节点', visibleRows(allGroups.pvStoreInboundNoScan)),
+    pvOtherUnresolved: tab('外省其他未闭环', visibleRows(allGroups.pvOtherUnresolved)),
     pp: tab('本省PP明细', visibleRows(rows.filter(row => normalizedRegion(row) === 'PP'))),
     pv: tab('外省PV明细', visibleRows(rows.filter(row => normalizedRegion(row) === 'PV'))),
     recipientConflicts: tab('收件人分组冲突', (state.recipientConflicts || []).map(conflict => ({
@@ -162,7 +170,7 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
 
 export function reconcileRecipientGroups(recipientGroups = {}) {
   const checks = [];
-  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'transitHubStay', 'severeOverdue', 'returned', 'returnInProgress', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3']) {
+  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'transitHubStay', 'severeOverdue', 'returned', 'returnInProgress', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3', 'pvDelivery', 'pvStoreRetention', 'pvStoreInboundNoScan', 'pvOtherUnresolved']) {
     const all = Number(recipientGroups.ALL?.metrics?.[key] || 0);
     const parts = ['CN', 'VN'].reduce((sum, group) => sum + Number(recipientGroups[group]?.metrics?.[key] || 0), 0);
     checks.push({ key, all, parts, difference: all - parts, passed: all === parts });
@@ -235,6 +243,10 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
       shopRetention1: groups.shopRetention1.length,
       shopRetention2: groups.shopRetention2.length,
       shopRetention3: groups.shopRetention3.length
+      ,pvDelivery: groups.pvDelivery.length
+      ,pvStoreRetention: groups.pvStoreRetention.length
+      ,pvStoreInboundNoScan: groups.pvStoreInboundNoScan.length
+      ,pvOtherUnresolved: groups.pvOtherUnresolved.length
     }
   };
 }
@@ -294,6 +306,10 @@ function tabsForRecipientGroup(group, summary) {
     attempt3: tab(`${label}3派及以上POD`, visibleRows(groups.all.filter(row => isPod(row) && dispatchDayNo(row) >= 3))),
     returnInProgress: tab(`${label}退回处理中`, visibleRows(groups.returnInProgress))
     ,deliveryStay: tab(`${label}派送中`, visibleRows(groups.deliveryStay))
+    ,pvDelivery: tab(`${label}外省派送中`, visibleRows(groups.pvDelivery))
+    ,pvStoreRetention: tab(`${label}外省门店滞留`, visibleRows(groups.pvStoreRetention))
+    ,pvStoreInboundNoScan: tab(`${label}外省门店入库无节点`, visibleRows(groups.pvStoreInboundNoScan))
+    ,pvOtherUnresolved: tab(`${label}外省其他未闭环`, visibleRows(groups.pvOtherUnresolved))
   };
 }
 
@@ -346,9 +362,28 @@ function buildGroups(rows, carryRows, nextCarryRows) {
     returnRequired: rows.filter(row => row.returnRequired === true || row.退回待处理 === '是' || ['三次Pending后未退回', '三次Pending后继续派送'].includes(categoryOf(row))),
     returned: rows.filter(row => row.退回状态 === '已退回' || categoryOf(row) === '退回'),
     returnInProgress: rows.filter(row => row.退回状态 === '退回处理中' || row.currentState === 'RETURN_IN_PROGRESS'),
+    pvDelivery: rows.filter(row => pvDisposition(row) === 'PV_DELIVERY_IN_PROGRESS'),
+    pvStoreRetention: rows.filter(row => pvDisposition(row) === 'PV_STORE_RETENTION'),
+    pvStoreInboundNoScan: rows.filter(row => pvDisposition(row) === 'PV_STORE_INBOUND_NO_SCAN'),
+    pvOtherUnresolved: rows.filter(row => pvDisposition(row) === 'PV_OTHER_UNRESOLVED'),
     carry: uniqueRows(carryRows),
     nextCarry: uniqueRows(nextCarryRows)
   };
+}
+
+function pvDisposition(row = {}) {
+  if (row.pvOpenDisposition) return row.pvOpenDisposition;
+  if (normalizedRegion(row) !== 'PV' || isPod(row) || isReturned(row) || isApiFailure(row)) return '';
+  if (row.shopState === 'SHOP_ARRIVED_CURRENT') {
+    return Number(row.shopRetentionNaturalDays || 0) >= 2 ? 'PV_STORE_RETENTION' : 'PV_STORE_INBOUND_NO_SCAN';
+  }
+  if (row.shopState === 'SHOP_TRANSFER_IN_PROGRESS' || Number(row.派送中停留天数 || 0) > 0) return 'PV_DELIVERY_IN_PROGRESS';
+  return 'PV_OTHER_UNRESOLVED';
+}
+
+function isApiFailure(row = {}) {
+  const status = String(row.API状态 || row.查询状态 || row.queryStatus || '').trim().toUpperCase();
+  return status === '失败' || status === 'REFRESH_FAILED' || status === 'SCAN_FAILED' || status === 'TRACK_FAILED';
 }
 
 function buildStoreGroups(rows = []) {
@@ -465,9 +500,13 @@ function recipientGroupLabel(group) {
   return { ALL: '全部合计', CN: 'ShopeeCN（中国）', VN: 'ShopeeVN（越南）', OTHER: '其他/待确认' }[group] || group;
 }
 
-function isPod(row) { return row?.是否POD === '是' || row?.POD状态 === 'POD'; }
+function isPod(row = {}) {
+  const state = String(row.currentState || row.scanNormalizedState || row.POD状态 || '').trim().toUpperCase();
+  return state === 'POD' || String(row.orderStatus || '').trim() === '85' || row.是否POD === '是';
+}
 function isReturned(row = {}) {
-  return row.currentState === 'RETURN_COMPLETED' || row.returnState === 'RETURN_COMPLETED'
+  const state = String(row.currentState || row.scanNormalizedState || row.returnState || '').trim().toUpperCase();
+  return state === 'RETURN_COMPLETED'
     || row.退回状态 === '已退回' || categoryOf(row) === '退回';
 }
 function dispatchDayNo(row = {}) {

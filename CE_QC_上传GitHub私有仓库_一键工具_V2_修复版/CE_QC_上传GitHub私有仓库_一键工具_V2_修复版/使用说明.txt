@@ -1,0 +1,25 @@
+﻿CE QC GitHub私有仓库上传工具 V2
+
+本版已经修复：
+1. BAT UTF-8 BOM 导致“╗┐@echo off”错误；
+2. C:\CE-QC\ 末尾反斜杠导致 PowerShell Resolve-Path 非法路径；
+3. 中文/空格目录兼容；
+4. 不再由BAT传ProjectRoot，PowerShell自动取自身所在目录。
+
+使用方法：
+1. 把以下3个文件放进真正的项目根目录：
+   - CE_QC_Upload_GitHub_Private_V2.ps1
+   - Run_GitHub_Upload_V2.bat
+   - .gitignore.ce-qc
+
+2. 确认同目录能看到 package.json 或 server.js。
+
+3. 双击 Run_GitHub_Upload_V2.bat。
+
+4. 输入你新建的GitHub PRIVATE仓库HTTPS地址。
+
+重要：
+- 不上传正式SQLite数据库；
+- 不上传node_modules；
+- 不上传.env、Token、Cookie；
+- 不上传历史ZIP/RAR、日志和备份。

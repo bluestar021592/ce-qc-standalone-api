@@ -228,6 +228,8 @@ export function getXlsxSheetRows(state = {}) {
     trackEvents: state.trackEvents || [],
     podClosed: finalRows.filter(row => row?.是否POD === '是' || row?.异常分类 === 'POD闭环'),
     abnormalOpen: finalRows.filter(isCoreAbnormalRow),
+    unresolved: finalRows.filter(isCoreAbnormalRow),
+    severeAbnormal: finalRows.filter(row => isCoreAbnormalRow(row) && isSevereAbnormalRow(row)),
     ...buckets,
     nextCarry: nextCarryRows(state),
     podLocks: cleanMainBills(state.podLocks || []).map(wb => ({ 运单号: wb }))
@@ -236,7 +238,10 @@ export function getXlsxSheetRows(state = {}) {
 
 export function safeFinalRows(state = {}) {
   const podSet = new Set(cleanMainBills(state.podLocks || []));
-  return (state.finalRows || [])
+  const sourceRows = Array.isArray(state.finalRows)
+    ? state.finalRows
+    : Object.values(state.finalRows || {});
+  return sourceRows
     .filter(row => {
       const wb = billOf(row);
       return wb && !isExcludedBill(wb);
@@ -412,7 +417,23 @@ function isCoreAbnormalRow(row = {}) {
   return row?.是否POD !== '是'
     && !isNormalFinalDiversionRow(row)
     && !isRefreshFailedRow(row)
+    && !isSpecialRetentionRow(row)
     && !isShopRow(row);
+}
+
+function isSpecialRetentionRow(row = {}) {
+  return ['SELF_PICKUP', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION']
+    .includes(String(row.specialState || row.primaryCategory || row.主分类 || ''));
+}
+
+function isSevereAbnormalRow(row = {}) {
+  const days = Math.max(
+    countOf(row, 'Pending次数', 'Pending天数'),
+    countOf(row, 'OC天数'),
+    countOf(row, '盘点天数', '盘点次数'),
+    countOf(row, '节点未更新天数')
+  );
+  return /SEVERE|CRITICAL|严重/i.test(String(row.severity || row.严重等级 || row.异常分类 || '')) || days >= 3;
 }
 
 function isAnyAbnormalRow(row = {}) {

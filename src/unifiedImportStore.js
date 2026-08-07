@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import { getDb, nowIso } from './db.js';
 import { SHOPEE, getMatchingBusinessSnapshot, loadBusinessState } from './businessStore.js';
+import { analyzeStoreFlow } from './storeFlow.js';
+import { loadAppState } from './store.js';
 
 let ccslSnapshotCache = { snapshotId: '', state: null };
 
@@ -40,6 +42,22 @@ export function saveUnifiedImport(parsed, sourceName) {
 export function getLatestUnifiedImport() {
   const row = getDb().prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC LIMIT 1").get();
   return row ? hydrateBatch(row, false) : null;
+}
+
+export function listUnifiedImportHistory(limit = 120) {
+  const rows = getDb().prepare(`SELECT b.*, s.status snapshotStatus, s.createdAt snapshotCreatedAt
+    FROM unified_import_batches b
+    LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    ORDER BY b.reportDate DESC,
+      CASE s.status WHEN 'COMPLETED' THEN 0 WHEN 'IMPORTED' THEN 1 ELSE 2 END,
+      b.createdAt DESC
+    LIMIT ?`).all(Math.max(1, Math.min(500, Number(limit) || 120)));
+  const seen = new Set();
+  return rows.filter(row => {
+    if (!row.reportDate || seen.has(row.reportDate)) return false;
+    seen.add(row.reportDate);
+    return true;
+  }).map(row => ({ ...hydrateBatch(row, false), snapshotStatus: row.snapshotStatus || 'IMPORTED', createdAt: row.snapshotCreatedAt || row.createdAt }));
 }
 
 function hydrateBatch(row, duplicateFile) {
@@ -241,17 +259,23 @@ export function listUnifiedBusinessHistory(businessType, throughDate, limit = 30
 
 export function loadUnifiedBusinessState(businessType, snapshotId = '') {
   const type = normalizeBusinessType(businessType);
+  const exactSnapshotRequested = Boolean(String(snapshotId || '').trim());
   const db = getDb();
   const batch = snapshotId
     ? db.prepare('SELECT * FROM unified_import_batches WHERE snapshotId=?').get(snapshotId)
     : db.prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC LIMIT 1").get();
   if (!batch) return emptyBusinessState(type);
+  const latestBatch = db.prepare("SELECT snapshotId FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC LIMIT 1").get();
+  const isCurrentSnapshot = latestBatch?.snapshotId === batch.snapshotId;
   const dailyRows = db.prepare('SELECT rowJson FROM unified_import_rows WHERE snapshotId=? AND businessType=? ORDER BY shipmentCode').all(batch.snapshotId, type).map(row => JSON.parse(row.rowJson || '{}'));
   const bills = dailyRows.map(row => row.shipmentCode).filter(Boolean);
   const memberSet = new Set(bills);
   const unified = db.prepare('SELECT status,payloadJson FROM unified_snapshots WHERE snapshotId=?').get(batch.snapshotId);
   const payload = JSON.parse(unified?.payloadJson || '{}');
-  const liveShopeeState = type.startsWith('SHOPEE') ? loadBusinessState(SHOPEE) : null;
+  // Historical views stay immutable. The exact currently active snapshot may
+  // use live progress so a freshly imported report does not display stale data.
+  const mayUseLiveState = !exactSnapshotRequested || isCurrentSnapshot;
+  const liveShopeeState = mayUseLiveState && type.startsWith('SHOPEE') ? loadBusinessState(SHOPEE) : null;
   const liveState = liveShopeeState?.reportDate === batch.reportDate ? liveShopeeState : null;
   const completedShopeeSnapshot = liveState ? getMatchingBusinessSnapshot(SHOPEE, liveState) : null;
   const completedShopeeState = completedShopeeSnapshot?.reconciliationStatus === 'COMPLETED'
@@ -270,9 +294,22 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
       provisional: true
     }));
   }
-  const ccslSnapshotState = !type.startsWith('SHOPEE') ? latestCcslSnapshotState(db, batch.reportDate) : null;
+  const ccslSnapshotState = mayUseLiveState && !type.startsWith('SHOPEE')
+    ? latestCcslSnapshotState(db, batch.reportDate)
+    : null;
+  const currentCcslState = mayUseLiveState && !type.startsWith('SHOPEE')
+    ? loadAppState()
+    : null;
+  const liveCcslState = currentCcslState?.reportDate === batch.reportDate ? currentCcslState : null;
+  const activeLiveState = type.startsWith('SHOPEE') ? liveState : liveCcslState;
   if (!finalRows.length && !type.startsWith('SHOPEE')) {
-    finalRows = (ccslSnapshotState?.finalRows || []).filter(row => memberSet.has(codeOf(row))).map(row => ({ ...row, businessType: type }));
+    const ccslRows = liveCcslState?.finalRows?.length ? liveCcslState.finalRows : ccslSnapshotState?.finalRows;
+    finalRows = (ccslRows || []).filter(row => memberSet.has(codeOf(row))).map(row => ({ ...row, businessType: type }));
+  }
+  const persistedTrackEvents = loadPersistedTrackEvents(db, batch.reportDate, memberSet);
+  if (persistedTrackEvents.length) {
+    const eventsByBill = groupEventsByBill(persistedTrackEvents);
+    finalRows = finalRows.map(row => enrichStoreFlow(row, eventsByBill.get(codeOf(row)) || [], batch.reportDate));
   }
   const carryBills = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE businessType=? AND status='OPEN' ORDER BY shipmentCode").all(type).map(row => row.shipmentCode);
   const podLocks = db.prepare("SELECT shipmentCode FROM shipment_current_state WHERE businessType=? AND state='POD' ORDER BY shipmentCode").all(type).map(row => row.shipmentCode);
@@ -281,7 +318,7 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
     reportDate: batch.reportDate,
     sourceName: batch.sourceName,
     batchId: batch.batchId,
-    snapshotId: completedShopeeSnapshot?.snapshotId || batch.snapshotId,
+    snapshotId: batch.snapshotId,
     snapshotStatus: completedShopeeSnapshot ? 'COMPLETED' : (unified?.status || 'IMPORTED'),
     dailyReportReady: true,
     pnhBills: bills,
@@ -292,21 +329,56 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
       ? filterMembers(payload.scanResults)
       : (liveState
           ? filterMembers(liveState.scanResults)
-          : (!type.startsWith('SHOPEE') ? filterMembers(ccslSnapshotState?.scanResults).map(row => ({ ...row, businessType: type })) : [])),
+          : (!type.startsWith('SHOPEE') ? filterMembers(liveCcslState?.scanResults?.length ? liveCcslState.scanResults : ccslSnapshotState?.scanResults).map(row => ({ ...row, businessType: type })) : [])),
     trackResults: finalRows,
-    trackEvents: filterMembers(payload.trackEvents).length ? filterMembers(payload.trackEvents) : filterMembers(liveState?.trackEvents),
+    trackEvents: filterMembers(payload.trackEvents).length
+      ? filterMembers(payload.trackEvents)
+      : (persistedTrackEvents.length ? persistedTrackEvents : filterMembers(liveState?.trackEvents)),
     carryBills,
     nextCarryBills: carryBills,
     podLocks: [...new Set([
       ...podLocks,
-      ...filterMembers(liveState?.scanResults).filter(isPodRow).map(codeOf),
+      ...filterMembers(activeLiveState?.scanResults).filter(isPodRow).map(codeOf),
       ...finalRows.filter(isPodRow).map(codeOf)
     ].filter(Boolean))],
     historySummary: listUnifiedBusinessHistory(type, batch.reportDate, 30),
-    processing: liveState?.processing || { running: false, paused: false, phase: '' },
-    currentRun: liveState?.currentRun || null,
-    lastRunSummary: liveState?.lastRunSummary || null,
-    logs: liveState?.logs || []
+    processing: activeLiveState?.processing || { running: false, paused: false, phase: '' },
+    currentRun: activeLiveState?.currentRun || null,
+    lastRunSummary: activeLiveState?.lastRunSummary || null,
+    logs: activeLiveState?.logs || []
+  };
+}
+
+export function loadUnifiedPeriodBusinessState(businessType, fromDate, toDate) {
+  const type = normalizeBusinessType(businessType);
+  const rows = getDb().prepare(`SELECT b.snapshotId,b.reportDate
+    FROM unified_import_batches b
+    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.reportDate BETWEEN ? AND ?
+      AND s.status='COMPLETED'
+    ORDER BY b.reportDate ASC,b.createdAt DESC`).all(fromDate, toDate);
+  const byDate = new Map();
+  for (const row of rows) if (!byDate.has(row.reportDate)) byDate.set(row.reportDate, row);
+  const states = [...byDate.values()].map(row => loadUnifiedBusinessState(type, row.snapshotId));
+  const finalRows = states.flatMap(state => (state.finalRows || []).map(item => ({ ...item, reportDate: item.reportDate || state.reportDate })));
+  const scanResults = states.flatMap(state => state.scanResults || []);
+  const trackEvents = states.flatMap(state => state.trackEvents || []);
+  return {
+    ...emptyBusinessState(type),
+    businessType: type,
+    reportDate: toDate,
+    periodStart: fromDate,
+    periodEnd: toDate,
+    periodDates: [...byDate.keys()],
+    snapshotId: `PERIOD:${type}:${fromDate}:${toDate}`,
+    snapshotStatus: states.length ? 'COMPLETED' : 'EMPTY',
+    dailyReportReady: states.length > 0,
+    pnhBills: states.flatMap(state => state.pnhBills || []),
+    finalRows,
+    trackResults: finalRows,
+    scanResults,
+    trackEvents,
+    historySummary: states.flatMap(state => state.historySummary || [])
   };
 }
 
@@ -334,6 +406,51 @@ function codeOf(row = {}) { return String(row.shipmentCode || row.运单号 || '
 function isPodRow(row = {}) {
   return String(row.currentState || row.scanNormalizedState || '').toUpperCase() === 'POD'
     || String(row.orderStatus || '') === '85' || row.是否POD === '是';
+}
+
+function loadPersistedTrackEvents(db, reportDate, memberSet) {
+  if (!reportDate || !memberSet.size) return [];
+  return db.prepare('SELECT * FROM track_events WHERE reportDate=? ORDER BY eventTime,id')
+    .all(reportDate)
+    .filter(row => memberSet.has(codeOf(row)))
+    .map(row => {
+      try { return { ...JSON.parse(row.rawJson || '{}'), ...row }; }
+      catch { return row; }
+    });
+}
+
+function groupEventsByBill(events) {
+  const grouped = new Map();
+  for (const event of events || []) {
+    const bill = codeOf(event);
+    if (!bill) continue;
+    if (!grouped.has(bill)) grouped.set(bill, []);
+    grouped.get(bill).push(event);
+  }
+  return grouped;
+}
+
+function enrichStoreFlow(row, events, reportDate) {
+  const state = String(row.currentState || row.scanNormalizedState || '').toUpperCase();
+  const returned = state === 'RETURN_COMPLETED' || row.isReturned === true || row.是否退回 === '是';
+  const storeFlow = analyzeStoreFlow({
+    shipmentCode: codeOf(row),
+    events,
+    reportDate,
+    isPod: isPodRow(row),
+    isReturned: returned
+  });
+  if (!storeFlow.shopState || storeFlow.shopState === 'CLOSED') return row;
+  return {
+    ...row,
+    ...storeFlow,
+    门店状态: storeFlow.shopState,
+    门店编码: storeFlow.currentShopCode || storeFlow.targetShopCode,
+    门店名称: storeFlow.shopName,
+    门店发往时间: storeFlow.shopTransferStartedAt,
+    门店入库时间: storeFlow.shopArrivedAt,
+    门店滞留天数: storeFlow.shopRetentionNaturalDays
+  };
 }
 
 function isReturnCompletedRow(row = {}) {

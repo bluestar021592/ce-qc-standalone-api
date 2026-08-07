@@ -1,0 +1,24 @@
+﻿CE QC P0 内存修复 V2
+
+上一版安装失败原因：
+安装器假设修复包必须放在项目根目录内部。
+你实际从 C:\CE-QC 运行，导致脚本向上推算ProjectRoot时得到空字符串。
+
+V2已修复：
+- 可以从任何文件夹运行。
+- 自动寻找真正的 ce-qc-standalone-api。
+- 已内置你当前电脑的正式项目路径作为候选。
+- 如果仍找不到，会让你手动粘贴项目文件夹。
+- 找到项目以后先校验 snapshots.js SHA。
+- SHA不一致则自动停止，绝不强制覆盖。
+- 安装前自动备份原 snapshots.js。
+- 安装后执行 node --check。
+- 不修改SQLite、不改数据库结构、不删业务数据。
+
+使用：
+1. 解压整个V2 ZIP到任意位置，例如桌面。
+2. 不需要复制到项目根目录。
+3. 双击 Apply_P0_Memory_Fix_V2.bat
+4. 看到 “P0 memory patch installed successfully” 后退出。
+5. 再用你原来的 Start_CE_QC 启动系统。
+6. 启动后可运行 Verify_After_P0_Fix.bat。

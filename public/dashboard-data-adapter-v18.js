@@ -77,7 +77,7 @@
     const base = mapHome(input.trendSnapshot || {}, visualTest);
     return {
       page:'business', businessType:input.businessType, label:input.label, reportDate:input.reportDate || '—',
-      cards:(input.cards || []).slice(0,6), core:(input.core || []).slice(0,12), charts:base.charts,
+      periodLabel:input.periodLabel || '', cards:(input.cards || []).slice(0,6), core:(input.core || []), charts:base.charts,
       regions:input.regions || null, dispatch:input.dispatch || null
     };
   }

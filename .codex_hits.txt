@@ -1,0 +1,80 @@
+﻿server.js:376:  const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+server.js:609:    const shopeeRows = parsed.rows.filter(row => ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
+server.js:611:    const historicalShopee = processingQueue.rows.filter(row => row.sourceType === 'HISTORICAL_CARRY' && ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
+server.js:637:      recipient_group: row.businessType === 'SHOPEEVN' ? 'VN' : 'CN',
+server.js:643:      groupCounts: { CN: saved.classificationCounts.SHOPEECN, VN: saved.classificationCounts.SHOPEEVN },
+server.js:1025:  if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadUnifiedBusinessState(type, snapshotId));
+public\dashboard-data-adapter-v18.js:15:    ['stock2', '盘点2天+'], ['oc2', 'OC 2天+'], ['firstRate', '首次妥投率'],
+public\dashboard-data-adapter-v18.js:32:      stock2: ['stock2', '盘点2天+'], oc2: ['oc2', 'OC2+'], firstRate: ['firstRate', '首次妥投率'],
+public\app.js:445:  const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+public\app.js:619:  const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+public\app.js:815:    ['已退回件', row.returned], ['退回处理中', row.returnInProgress], ['退回待处理', row.returnRequired]
+public\app.js:930:    ['已退回件', accounting.returned, '件', 'orange', '互斥票数'],
+public\app.js:962:  shopeeRecipientGroup = type === 'SHOPEECN' ? 'CN' : 'VN';
+public\app.js:969:    ['今日件数',metrics.total,'件'],['今日POD',metrics.pod,'件'],['POD率',metrics.podRate,'%'],['已退回件',metrics.returned,'件'],['退回率',metrics.returnRate,'%'],['当前未闭环',unresolved,'件']
+public\app.js:972:    ['Pending1+',metrics.pending1],['Pending2+',metrics.pending2],['Pending3+',metrics.pending3plus],['OC1+',metrics.oc1],['OC2+',metrics.oc2],['OC3+',metrics.oc3plus],['盘点2天+',metrics.cycle2plus],['入库无扫描',metrics.inboundNoScan],['已退回件',metrics.returned],['当前未闭环',unresolved],['派送中',metrics.deliveryStay],['派送中率',metrics.deliveryStayRate,'%'],['外省派送中',metrics.pvDelivery],['外省门店滞留',metrics.pvStoreRetention],['外省门店入库无节点',metrics.pvStoreInboundNoScan],['外省其他未闭环',metrics.pvOtherUnresolved]
+public\app.js:999:  if (currentPage === 'shopee') return shopeeRecipientGroup === 'CN' ? 'SHOPEECN' : 'SHOPEEVN';
+public\app.js:1000:  return ({ ce:'CE', tbkh:'TBKH', ali1688:'ALI1688', shopeecn:'SHOPEECN', shopeevn:'SHOPEEVN' })[currentPage] || 'CE';
+public\app.js:1004:function businessLabel(type) { return ({ SHOPEECN:'SHOPEE CN', SHOPEEVN:'SHOPEE VN' })[type] || type; }
+public\app.js:1025:  const exactGroup = exactType === 'SHOPEECN' ? 'CN' : exactType === 'SHOPEEVN' ? 'VN' : '';
+public\app.js:1040:  if (['SHOPEECN', 'SHOPEEVN'].includes(exactType)) {
+public\app.js:1041:    const group = exactType === 'SHOPEECN' ? 'CN' : 'VN';
+public\app.js:1069:    ['已退回件', metrics.returned, 'returned', '件'], ['退回率', metrics.returnRate, 'returned', '%'],
+public\app.js:1070:    ['退回处理中', metrics.returnInProgress, 'returnInProgress', '件'],
+public\app.js:1074:  const testId = label => ({ '已退回件':'return-completed-count', '退回率':'return-rate', '退回处理中':'return-in-progress-count' })[label] || '';
+public\app.js:1122:  const group = type === 'SHOPEECN' ? 'CN' : type === 'SHOPEEVN' ? 'VN' : 'ALL';
+public\app.js:1310:    const days = Math.max(Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? 0), Number(row.OC天数 || 0), Number(row.盘点天数 || 0), Number(row.门店滞留天数 || 0), Number(row.节点未更新天数 || 0));
+public\app.js:1598:  if (exactType === 'SHOPEECN') shopeeRecipientGroup = 'CN';
+public\app.js:1599:  if (exactType === 'SHOPEEVN') shopeeRecipientGroup = 'VN';
+public\app.js:1691:    alert(`综合日报导入成功：有效${result.summary.validUniqueWaybills}票，CE ${result.classificationCounts.CE}，TBKH ${result.classificationCounts.TBKH}，ALI1688 ${result.classificationCounts.ALI1688}，SHOPEE CN ${result.classificationCounts.SHOPEECN}，SHOPEE VN ${result.classificationCounts.SHOPEEVN}。`);
+public\app.js:1783:  document.getElementById('unifiedClassificationSummary').innerHTML = `<div class="unified-count-grid"><div><span>有效唯一单号</span><b data-testid="classification-valid-unique">${formatInt(summary.validUniqueWaybills || 0)}</b></div>${[['CE','ce'],['TBKH','tbkh'],['ALI1688','ali1688'],['SHOPEECN','shopeecn'],['SHOPEEVN','shopeevn']].map(([type,key]) => `<div><span>${type}</span><b data-testid="classification-${key}">${formatInt(counts[type] || 0)}</b></div>`).join('')}</div><div class="unified-warning-grid"><span>原始行 <b>${formatInt(summary.rawRows || 0)}</b></span><span>重复 <b data-testid="classification-duplicates">${formatInt(summary.duplicateRows || 0)}</b></span><span>无单号 <b data-testid="classification-missing-waybill">${formatInt(summary.missingWaybillRows || 0)}</b></span><span>收件人缺失 <b data-testid="classification-missing-recipient">${formatInt(summary.missingRecipientWarnings || 0)}</b></span><span>分类冲突 <b data-testid="classification-conflicts">${formatInt(summary.classificationConflicts || 0)}</b></span></div>`;
+public\app.js:2076:  businessStates = Object.fromEntries(['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].map(type => [type, {}]));
+public\app.js:2090:  if (['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].includes(type)) {
+public\app.js:2094:        SHOPEECN: 'SHOPEE_CN_',
+public\app.js:2095:        SHOPEEVN: 'SHOPEE_VN_'
+public\app.js:2314:    ['shopeecn', 'SHOPEE CN', hasUnifiedCounts ? Number(importedCounts.SHOPEECN || 0) : Number(shopeeState.dashboard?.recipientGroups?.CN?.metrics?.total || 0), 'purple'],
+public\app.js:2315:    ['shopeevn', 'SHOPEE VN', hasUnifiedCounts ? Number(importedCounts.SHOPEEVN || 0) : Number(shopeeState.dashboard?.recipientGroups?.VN?.metrics?.total || 0), 'red'],
+public\app.js:2327:    ['inventory2','盘点 2天+',metricValue(appState,'盘点2天+')], ['oc2','OC 2天+',metricValue(appState,'OC2+')],
+public\app.js:2480:function longestStay(rows) { const max = Math.max(0, ...rows.map(row => Math.max(Number(row.OC天数 || 0), Number(row.盘点天数 || 0), Number(row.派送中天数 || row.派送中停留天数 || 0), Number(row.门店滞留天数 || row.节点未更新天数 || 0)))); return max ? `${max}天` : '—'; }
+public\app.js:2488:  const sh = { '今日件数':'all','总件数':'all','签收件数':'pod','已签收':'pod','签收率':'pod','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','盘点2天+':'cycle2','入库无扫描':'inboundNoScan','已退回件':'returned','退回率':'returned','当前未闭环':'unresolved','派送中':'deliveryStay','派送中率':'deliveryStay','退回待处理':'returnRequired','外省派送中':'pvDelivery','外省门店滞留':'pvStoreRetention','外省门店入库无节点':'pvStoreInboundNoScan','外省其他未闭环':'pvOtherUnresolved' };
+public\app.js:2489:  const cc = { '今日件数':'allData','签收件数':'podClosed','签收率':'podClosed','已退回件':'accountingReturned','当前未闭环':'accountingOpen','对账差异':'allData','Pending1+':'pendingAll','Pending2+':'pending2plus','Pending3+':'pending3','OC1+':'ocAll','OC 1天+':'ocAll','OC2+':'oc2plus','OC 2天+':'oc2plus','OC3+':'oc3','OC 3天+':'oc3','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单未处理':'workOrderAbnormal','盘点2天':'cycle2','盘点 2天+':'cycle2','外省未完结POD件':'provinceOpen','在途门店':'shopTransit','到达门店':'shopArrived','门店Pending':'shopPending','门店滞留1天+':'shopRetention1','门店滞留2天+':'shopRetention2','门店滞留3天+':'shopRetention3','门店途中2天':'shopTransit','门店滞留':'shopStuck' };
+src\analyzer.js:9:import { summarizePendingEvents } from './pendingDays.js';
+src\analyzer.js:129:    category = '盘点3天以上';
+src\analyzer.js:130:    judgment = `CCSL相关盘点累计${cycleDates.length}天，需确认仓内状态`;
+src\analyzer.js:132:    category = '盘点2天';
+src\analyzer.js:133:    judgment = 'CCSL相关盘点累计2天，需确认仓内状态';
+src\analyzer.js:135:    category = '盘点1天';
+src\analyzer.js:136:    judgment = 'CCSL相关盘点累计1天，需关注';
+src\analyzer.js:154:    judgment = '已出现CCSL入库/到仓节点，且入库后没有Outbound、Pending、OC、盘点、派送、门店或POD等有效动作';
+src\analyzer.js:229:    Number(counts.盘点次数 || counts.cycleEvents || counts.cycle || 0) > 0 ? 'CYCLE_COUNT' : '',
+src\analyzer.js:286:    盘点天数: counts.cycle || 0,
+src\analyzer.js:287:    盘点次数: counts.盘点次数 || counts.cycleEvents || counts.cycle || 0,
+src\analyzer.js:288:    盘点日期: counts.盘点日期 || '',
+src\analyzer.js:289:    盘点连续性: counts.盘点连续性 || '',
+src\analyzer.js:404:    盘点次数: cycleEvents.length,
+src\analyzer.js:405:    盘点日期: cycleDates.join(', '),
+src\analyzer.js:406:    盘点连续性: cycleDates.length ? (isConsecutiveLoose(cycleDates) ? '连续' : '不连续') : '',
+src\analyzer.js:508:  return code === '32' || /Cycle Count|盘点/i.test(eventText(e));
+src\analyzer.js:575:    '盘点1天': 'CYCLE_DAYS_1',
+src\analyzer.js:576:    '盘点2天': 'CYCLE_DAYS_2',
+src\analyzer.js:577:    '盘点3天以上': 'CYCLE_DAYS_3_PLUS',
+src\businessStore.js:6:import { persistPendingDailyMembers } from './pendingDays.js';
+src\migrations.js:196:      pendingDays INTEGER,
+src\exporter.js:64:  addSheet(wb, '明细_盘点1天', legacy.cycle1, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
+src\exporter.js:65:  addSheet(wb, '明细_盘点2天', legacy.cycle2, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
+src\exporter.js:66:  addSheet(wb, '明细_盘点3天以上', legacy.cycle3, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
+src\exporter.js:67:  addSheet(wb, '明细_盘点2天以上', legacy.cycle2plus, { ...opts, columns: DETAIL_COLUMNS, returnToDashboard: true });
+src\exporter.js:157:  盘点1天: '明细_盘点1天',
+src\exporter.js:158:  盘点2天: '明细_盘点2天',
+src\exporter.js:159:  盘点3天以上: '明细_盘点3天以上',
+src\exporter.js:206:  '运单号', '来源类型', '是否POD', 'Pending次数', 'OC天数', '盘点次数', '分流类型',
+src\exporter.js:216:  'OC天数', 'OC日期', '盘点次数', '盘点日期', '工单次数', '最新工单日期', '工单后次日状态', '工单后异常',
+src\exporter.js:241:  '盘点次数', '重复盘点天数', '盘点日期', '盘点连续性', '盘点是否已闭环',
+src\exporter.js:249:const QUERY_LOG_COLUMNS = ['查询时间', '运单号', '查询状态', '是否POD', 'Pending次数', 'OC天数', '盘点次数', '分流类型', '最后节点时间', 'QC判断', '节点数'];
+src\exporter.js:250:const MASTER_COLUMNS = ['运单号', '归属日期', '最后检查时间', '来源类型', '业务来源', '快递员编号', '快递员', '快递员区域', '首次扫描状态', '最新扫描状态', '查询状态', '是否POD', 'POD时间', 'Pending次数', 'OC天数', '盘点次数', '是否闭环', '闭环类型', '闭环时间', '最终停留网点', '是否发往非CCSL', '重复返仓天数', '返仓日期', '最后节点时间', '最后节点', '最后QC判断', '电话核验状态', '照片核验状态', '赔付风险等级', '工单日期', '最新工单日期', '工单次日日期', '工单后次日状态', '工单后异常'];
+src\exporter.js:399:    盘点次数: row.盘点次数 || row.盘点天数 || 0,
+src\exporter.js:400:    盘点日期: row.盘点日期 || '',
+src\exporter.js:443:    盘点次数: row.盘点次数 || row.盘点天数 || 0,
+src\exporter.js:564:    盘点次数: row.盘点次数 || row.盘点天数 || 0,
+src\exporter.js:565:    重复盘点天数: row.重复盘点天数 || row.盘点天数 || row.盘点次数 || 0,
+src\exporter.js:566:    盘点日期: row.盘点日期 || '',

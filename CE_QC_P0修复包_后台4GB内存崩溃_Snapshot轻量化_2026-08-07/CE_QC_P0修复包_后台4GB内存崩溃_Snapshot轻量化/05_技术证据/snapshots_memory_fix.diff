@@ -1,0 +1,205 @@
+--- src/snapshots.js.original
++++ src/snapshots.js.patched
+@@ -19,7 +19,10 @@
+ 
+   const snapshotId = `${reportDate}_${runId}_${randomUUID().slice(0, 8)}`;
+   const generatedAt = nowIso();
+-  const snapshotState = clone({ ...state, snapshotId });
++  // Persist a compact, export-compatible snapshot state. The live state can contain
++  // raw scan/track evidence and nested API payloads; cloning/stringifying that entire
++  // object previously pushed Node beyond the V8 heap limit.
++  const snapshotState = compactSnapshotState(state, snapshotId);
+   const dashboardRows = buildDashboardRows(snapshotState);
+   const coreKpis = buildCoreKpis(snapshotState);
+   const criticalDashboard = buildCriticalDashboard(snapshotState);
+@@ -36,14 +39,14 @@
+   ]);
+   const detailCounts = Object.fromEntries(Object.entries(detailTabs).map(([key, value]) => [key, Number(value?.total || 0)]));
+   const dataHashes = {
+-    dailyParseRows: hash(snapshotState.dailyParseRows || []),
+-    scanResults: hash(snapshotState.scanResults || []),
+-    trackEvents: hash(snapshotState.trackEvents || []),
+-    finalRows: hash(snapshotState.finalRows || []),
+-    carryBills: hash(snapshotState.nextCarryBills || snapshotState.carryBills || []),
+-    podLocks: hash(snapshotState.podLocks || [])
++    dailyParseRows: hash(state.dailyParseRows || []),
++    scanResults: hash(state.scanResults || []),
++    trackEvents: hash(state.trackEvents || []),
++    finalRows: hash(state.finalRows || []),
++    carryBills: hash(state.nextCarryBills || state.carryBills || []),
++    podLocks: hash(state.podLocks || [])
+   };
+-  const consistency = buildConsistencyReport(snapshotState);
++  const consistency = buildConsistencyReport(state);
+   const payload = {
+     snapshotId,
+     reportDate,
+@@ -57,10 +60,12 @@
+     dashboard,
+     dashboardRows,
+     criticalDashboard,
+-    detailTabs,
+-    xlsxRows,
++    // detailTabs/xlsxRows are derived from snapshotState and are intentionally not
++    // duplicated inside payloadJson. Existing callers already rebuild them when absent.
+     ...snapshotHashes,
+-    state: snapshotState
++    state: snapshotState,
++    snapshotSchemaVersion: 2,
++    snapshotStorageMode: 'COMPACT_DERIVED'
+   };
+   const reconciliationFailed = consistency?.status === 'error' || (consistency?.errors || []).length > 0;
+   payload.status = reconciliationFailed ? 'INVALID_FAILED_RECONCILIATION' : 'VALID';
+@@ -79,7 +84,7 @@
+       snapshotId,
+       reportDate,
+       runId,
+-      JSON.stringify(payload),
++      stringifySnapshotPayload(payload),
+       JSON.stringify(metrics),
+       JSON.stringify(detailCounts),
+       JSON.stringify(dataHashes),
+@@ -115,6 +120,10 @@
+ export function repairSnapshotFromStoredData(snapshot = {}) {
+   const source = clone(snapshot?.state || {});
+   if (!source.reportDate || !Array.isArray(source.finalRows)) throw new Error('Stored snapshot data is incomplete and cannot be repaired locally.');
++  // Compact snapshots deliberately omit raw scan/track collections. They already live
++  // in normalized SQLite tables, so hydrate evidence only for this explicit repair path.
++  if (!Array.isArray(source.trackEvents) || !source.trackEvents.length) source.trackEvents = loadSnapshotRawRows('track_events', source.reportDate);
++  if (!Array.isArray(source.scanResults) || !source.scanResults.length) source.scanResults = loadSnapshotRawRows('scan_results', source.reportDate);
+   const eventsByBill = new Map();
+   for (const event of source.trackEvents || []) {
+     const bill = String(event?.shipmentCode || event?.运单号 || '').trim().toUpperCase();
+@@ -192,9 +201,129 @@
+ }
+ 
+ function hash(value) {
+-  return createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
++  // Stream the value into the hash instead of allocating one giant JSON string.
++  const digest = createHash('sha256');
++  updateHash(digest, value, new WeakSet());
++  return digest.digest('hex');
++}
++
++function updateHash(digest, value, seen) {
++  if (value === null) { digest.update('null'); return; }
++  if (value === undefined) { digest.update('undefined'); return; }
++  const type = typeof value;
++  if (type === 'string') { digest.update('s:'); digest.update(value); return; }
++  if (type === 'number' || type === 'boolean' || type === 'bigint') { digest.update(`${type}:${String(value)}`); return; }
++  if (type !== 'object') { digest.update(`${type}:${String(value)}`); return; }
++  if (seen.has(value)) { digest.update('[Circular]'); return; }
++  seen.add(value);
++  if (Array.isArray(value)) {
++    digest.update('[');
++    for (const item of value) { updateHash(digest, item, seen); digest.update(','); }
++    digest.update(']');
++  } else {
++    digest.update('{');
++    for (const key of Object.keys(value).sort()) {
++      digest.update(key); digest.update(':'); updateHash(digest, value[key], seen); digest.update(',');
++    }
++    digest.update('}');
++  }
++  seen.delete(value);
++}
++
++function compactSnapshotState(state = {}, snapshotId = '') {
++  const result = {
++    snapshotId,
++    reportDate: state.reportDate || '',
++    sourceName: state.sourceName || '',
++    businessType: state.businessType || 'CCSL',
++    dailyParseSummary: cloneSmall(state.dailyParseSummary || state.daily?.summary || null),
++    pnhBills: compactCodeList(state.pnhBills),
++    nonPnhBills: compactCodeList(state.nonPnhBills),
++    excludedBills: compactCodeList(state.excludedBills),
++    duplicateBills: compactCodeList(state.duplicateBills),
++    carryBills: compactCodeList(state.carryBills),
++    nextCarryBills: compactCodeList(state.nextCarryBills || state.carryBills),
++    podLocks: compactCodeList(state.podLocks),
++    needTrackBills: compactCodeList(state.needTrackBills),
++    finalRows: compactRows(state.finalRows),
++    finalDiversionRows: compactRows(state.finalDiversionRows),
++    historySummary: cloneSmall(Array.isArray(state.historySummary) ? state.historySummary.slice(-90) : []),
++    currentRun: cloneSmall(state.currentRun || null),
++    lastRunSummary: cloneSmall(state.lastRunSummary || state.lastRun || null),
++    lastRun: cloneSmall(state.lastRun || state.lastRunSummary || null),
++    processing: cloneSmall(state.processing || { running: false, paused: false, phase: '' }),
++    backupSummary: cloneSmall(state.backupSummary || null),
++    analysisRuleVersion: state.analysisRuleVersion || '',
++    logs: Array.isArray(state.logs) ? state.logs.slice(-100).map(value => String(value || '').slice(0, 2000)) : [],
++    _snapshotStateCompacted: true
++  };
++  return result;
++}
++
++function compactRows(rows) {
++  if (!Array.isArray(rows)) return [];
++  return rows.map(compactRow).filter(Boolean);
++}
++
++function compactRow(row) {
++  if (!row || typeof row !== 'object') return row ?? null;
++  const out = {};
++  const heavyKey = /(?:raw|json|payload|response|request|events?|picture|images?|photos?|attachments?|trace|history)/i;
++  for (const [key, value] of Object.entries(row)) {
++    // Normalized SQLite already owns raw evidence. Never duplicate it inside a
++    // dashboard snapshot, even when an API happened to expose it as a string.
++    if (heavyKey.test(key)) continue;
++    if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean') {
++      out[key] = value;
++      continue;
++    }
++    if (typeof value === 'string') {
++      // Excel cells cannot usefully carry arbitrarily large raw text either. Keep
++      // ordinary business text, but cap pathological strings defensively.
++      out[key] = value.length > 32767 ? value.slice(0, 32767) : value;
++      continue;
++    }
++    // Keep only genuinely small primitive arrays. Large/nested collections are
++    // evidence tables and are queried from SQLite on demand.
++    if (Array.isArray(value) && value.length <= 40 && value.every(item => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
++      const totalChars = value.reduce((sum, item) => sum + String(item ?? '').length, 0);
++      if (totalChars <= 8192) out[key] = value.slice();
++    }
++  }
++  return out;
++}
++
++function compactCodeList(values) {
++  if (!Array.isArray(values)) return [];
++  return [...new Set(values.map(value => String(value || '').trim().toUpperCase()).filter(Boolean))];
++}
++
++function cloneSmall(value) {
++  if (value === undefined) return null;
++  try { return structuredClone(value); } catch {}
++  try { return JSON.parse(JSON.stringify(value ?? null)); } catch { return null; }
+ }
+ 
+ function clone(value) {
+-  return JSON.parse(JSON.stringify(value ?? null));
+-}
++  return cloneSmall(value);
++}
++
++function stringifySnapshotPayload(payload) {
++  const text = JSON.stringify(payload);
++  const maxBytes = Math.max(8, Number(process.env.SNAPSHOT_MAX_MB || 256)) * 1024 * 1024;
++  if (Buffer.byteLength(text, 'utf8') > maxBytes) {
++    const error = snapshotError('SNAPSHOT_TOO_LARGE', `处理快照仍超过安全上限 ${Math.round(maxBytes / 1024 / 1024)}MB，已停止保存以保护后台服务。`);
++    error.snapshotBytes = Buffer.byteLength(text, 'utf8');
++    throw error;
++  }
++  return text;
++}
++
++function loadSnapshotRawRows(table, reportDate) {
++  const allowed = new Set(['track_events', 'scan_results']);
++  if (!allowed.has(table)) return [];
++  const rows = getDb().prepare(`SELECT rawJson FROM ${table} WHERE reportDate=? ORDER BY rowid`).all(String(reportDate || ''));
++  return rows.map(row => {
++    try { return JSON.parse(row.rawJson || '{}'); } catch { return {}; }
++  });
++}

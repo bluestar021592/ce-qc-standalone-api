@@ -56,20 +56,7 @@ export async function exportPeriodReports({ periodType = 'daily', date, business
 }
 
 async function createManagementWorkbook({ periodType, range, snapshots, outputDir }) {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'CE QC';
-  const allRows = snapshots.flatMap(snapshot => (snapshot.payload.finalRows || []).map(row => ({ ...row, reportDate: row.reportDate || snapshot.reportDate, snapshotId: snapshot.snapshotId })));
-  const sheets = [
-    ['总管理看板', allRows], ['五业务汇总', allRows], ['PP_PV汇总', allRows], ['SHOPEE_CN_VN', allRows.filter(row => /^SHOPEE/.test(row.businessType || ''))],
-    ['1派_2派_3派', allRows.filter(row => /^SHOPEE/.test(row.businessType || ''))], ['跨日未完结', allRows.filter(row => /跨日|active/i.test(`${row.跨日状态 || ''} ${row.carry状态 || ''}`))],
-    ['仓库自提', allRows.filter(row => row.specialState === 'SELF_PICKUP')], ['CECN滞留', allRows.filter(row => row.specialState === 'CECN_RETENTION')],
-    ['CEZT滞留', allRows.filter(row => row.specialState === 'CEZT_RETENTION')], ['580滞留', allRows.filter(row => row.specialState === 'CCSL580_RETENTION')],
-    ['轨迹处理汇总', allRows], ['一致性校验', []]
-  ];
-  for (const [name, rows] of sheets) addManagementSheet(workbook, name, rows, snapshots, range);
-  const file = path.join(outputDir, `管理总汇总_${periodType}_${range.key}_${stamp()}.xlsx`);
-  await workbook.xlsx.writeFile(file);
-  return file;
+  return (await createShopeeTemplateWorkbook({ type: 'ALL', periodType, range, snapshots, outputDir })).file;
 }
 
 function addManagementSheet(workbook, name, rows, snapshots, range) {
@@ -135,9 +122,8 @@ function addManagementDashboard(sheet, rows, snapshots, range) {
 }
 
 async function createBusinessWorkbook({ type, periodType, range, snapshots, outputDir }) {
-  if (type === 'SHOPEECN' || type === 'SHOPEEVN') {
-    return (await createShopeeTemplateWorkbook({ type, periodType, range, snapshots, outputDir })).file;
-  }
+  return (await createShopeeTemplateWorkbook({ type, periodType, range, snapshots, outputDir })).file;
+  /* Legacy template writer retained below temporarily for compatibility audit.
   const template = path.join(TEMPLATE_DIR, `${type}_商务蓝白浅框线版_指标独立明细跳转.xlsx`);
   const zip = await JSZip.loadAsync(await fs.readFile(template));
   const rows = snapshots.flatMap(snapshot => (snapshot.payload.finalRows || []).filter(row => row.businessType === type).map(row => ({ ...row, reportDate: row.reportDate || snapshot.reportDate, snapshotId: snapshot.snapshotId })));
@@ -157,7 +143,7 @@ async function createBusinessWorkbook({ type, periodType, range, snapshots, outp
   await patchSheetData(zip, 'xl/worksheets/sheet7.xml', consistencyXml(unique, snapshots, type, range));
   const file = path.join(outputDir, `${type}_${periodType}_${range.key}_${stamp()}.xlsx`);
   await fs.writeFile(file, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
-  return file;
+  return file; */
 }
 
 async function patchSheetData(zip, name, sheetData) {

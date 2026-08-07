@@ -1,0 +1,53 @@
+﻿{
+    "ok":  true,
+    "challengeId":  "f46412a2-2d1f-489c-88b2-e0d542ab8246",
+    "notBefore":  "2026-08-04T06:51:52.576Z",
+    "expiresAt":  "2026-08-04T07:01:47.576Z",
+    "databasePath":  "C:\\Users\\CELNT-EE-097\\Documents\\CE CCSL 质控研发APP\\ce-qc-standalone-api\\evidence\\public-clear-test\\test.db",
+    "counts":  {
+                   "daily_reports":  1,
+                   "daily_parse_rows":  6748,
+                   "scan_results":  3458,
+                   "track_events":  2667,
+                   "final_rows":  3458,
+                   "pod_locks":  3100,
+                   "carry_bills":  333,
+                   "history_summary":  1,
+                   "run_checkpoints":  1053,
+                   "run_locks":  1,
+                   "export_snapshots":  2,
+                   "export_records":  0,
+                   "business_daily_reports":  0,
+                   "business_daily_parse_rows":  0,
+                   "business_scan_results":  0,
+                   "business_track_events":  0,
+                   "business_final_rows":  0,
+                   "business_pod_locks":  0,
+                   "business_carry_bills":  0,
+                   "business_history_summary":  0,
+                   "business_run_checkpoints":  0,
+                   "business_run_locks":  0,
+                   "business_export_snapshots":  0,
+                   "business_export_records":  0,
+                   "business_states":  0
+               },
+    "backup":  {
+                   "path":  "C:\\Users\\CELNT-EE-097\\Documents\\CE CCSL 质控研发APP\\ce-qc-standalone-api\\evidence\\public-clear-test\\backups\\pre_clear\\20260804-135146\\ce_qc_monitor.db",
+                   "sha256":  "bc0e1d14d54a07a45ae49607ebd8c4d429ba99a5fbe2d66d83625bbf18c812b7"
+               },
+    "deleteScope":  [
+                        "日报及解析行",
+                        "运单、扫描和轨迹",
+                        "run/checkpoint/snapshot",
+                        "carry和POD锁",
+                        "趋势、缓存、通知及导出文件"
+                    ],
+    "retainedScope":  [
+                          "数据库结构和迁移",
+                          "用户、角色与系统设置",
+                          "最新门店白名单",
+                          "审计日志",
+                          "清除前备份"
+                      ],
+    "administrator":  "local-admin@localhost"
+}

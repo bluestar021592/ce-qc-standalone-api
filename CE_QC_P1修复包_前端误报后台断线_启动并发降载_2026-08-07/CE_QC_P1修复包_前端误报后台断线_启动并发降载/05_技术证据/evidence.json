@@ -1,0 +1,9 @@
+{
+  "diagnosis": "All nine tested GET endpoints returned HTTP 200 and health remained OK after each request.",
+  "root_issue": "frontend startup burst + global error classification; additional five business-state requests were also loaded immediately after initial startup on pages that do not require them",
+  "changed_file": "public/app.js",
+  "original_sha256": "295dd1c1ebb69ac0910d9756024456aa65ce42c55277edd10843bf58cfa014cd",
+  "patched_sha256": "b0ee8eddad73d9d9403a194c53fb8d6ea28e7ad59a165a56324fcb34bc34f57e",
+  "syntax_check": "node --check passed",
+  "database_modified": false
+}

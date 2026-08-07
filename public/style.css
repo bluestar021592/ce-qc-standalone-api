@@ -983,3 +983,7 @@ body.sidebar-collapsed .sidebar-collapse { justify-content: center; margin-inlin
   .board-kpi-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .report-filter-grid { grid-template-columns: repeat(5, minmax(130px, 1fr)); }
 }
+.global-processing-notice{display:flex;align-items:center;gap:12px;margin:12px 20px 0;padding:12px 14px;border:1px solid #d9e4f2;background:#f8fbff;color:#18324f}
+.global-processing-notice.error{border-color:#f1b7b7;background:#fff6f6;color:#9f2424}
+.global-processing-notice.success{border-color:#b7dfca;background:#f2fbf6;color:#17613b}
+.global-processing-notice>span{flex:1}.global-processing-notice .icon-button{width:32px;height:32px}

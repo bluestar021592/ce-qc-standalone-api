@@ -1,0 +1,193 @@
+--- public/app.js.original
++++ public/app.js.patched
+@@ -66,13 +66,37 @@
+   button.innerHTML = '<svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-close"></use></svg>';
+ });
+ 
++async function rawHealthProbe(timeoutMs = 3500) {
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), timeoutMs);
++  try {
++    const response = await fetch('/api/health', {
++      cache: 'no-store',
++      credentials: 'same-origin',
++      signal: controller.signal
++    });
++    const rawText = await response.text();
++    let result = {};
++    try { result = rawText ? JSON.parse(rawText) : {}; } catch {}
++    return response.ok && result.ok !== false;
++  } catch {
++    return false;
++  } finally {
++    clearTimeout(timer);
++  }
++}
++
+ async function api(url, options = {}) {
+   let response;
+   try {
+     response = await fetch(url, options);
+   } catch (cause) {
+-    const error = new Error('与后台的连接已中断，请稍候，系统将自动恢复任务状态');
+-    error.code = 'NETWORK_CONNECTION_INTERRUPTED';
++    const backendHealthy = url === '/api/health' ? false : await rawHealthProbe();
++    const error = new Error(backendHealthy
++      ? '当前接口请求中断，但后台服务仍在线，请稍后重试'
++      : '与后台的连接已中断，请稍候，系统将自动恢复任务状态');
++    error.code = backendHealthy ? 'API_REQUEST_INTERRUPTED' : 'NETWORK_CONNECTION_INTERRUPTED';
++    error.backendHealthy = backendHealthy;
+     error.cause = cause;
+     throw error;
+   }
+@@ -129,30 +153,65 @@
+   }
+   const businessType = ['ce','tbkh','ali1688','shopeecn','shopeevn'].includes(currentPage) ? currentBusinessType() : '';
+   const needsFullAggregate = ['exceptions', 'reports'].includes(currentPage);
+-  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unifiedHistory, unified, businessResponse] = await Promise.all([
+-    api(`/api/state${needsFullAggregate ? '' : '?compact=1'}`), api(`/api/shopee/state${needsFullAggregate ? '' : '?compact=1'}`), api('/api/ce-auth-status'),
+-    api('/api/session'),
+-    api('/api/history?businessType=CCSL'), api('/api/history?businessType=SHOPEE'), api('/api/unified-history'),
+-    api('/api/import/unified-latest?compact=1'),
+-    businessType ? api(`/api/business-state/${businessType}?compact=1`) : Promise.resolve(null)
+-  ]);
+-  appState = ccsl.state || {};
+-  shopeeState = shopee.state || {};
+-  ceAuth = auth.authStatus || {};
+-  accessSession = session || {};
+-  historyCatalog = { CCSL: ccslHistory.rows || [], SHOPEE: shopeeHistory.rows || [], UNIFIED: unifiedHistory.rows || [] };
+-  unifiedImportState = unified.import || null;
++  const requestDefinitions = [
++    ['CCSL状态', () => api(`/api/state${needsFullAggregate ? '' : '?compact=1'}`)],
++    ['SHOPEE状态', () => api(`/api/shopee/state${needsFullAggregate ? '' : '?compact=1'}`)],
++    ['CE登录状态', () => api('/api/ce-auth-status')],
++    ['系统Session', () => api('/api/session')],
++    ['CCSL历史', () => api('/api/history?businessType=CCSL')],
++    ['SHOPEE历史', () => api('/api/history?businessType=SHOPEE')],
++    ['统一日报历史', () => api('/api/unified-history')],
++    ['最新统一日报', () => api('/api/import/unified-latest?compact=1')],
++    ['当前业务板块', () => businessType ? api(`/api/business-state/${businessType}?compact=1`) : Promise.resolve(null)]
++  ];
++
++  // Limit the startup burst. The same endpoints are healthy when requested one-by-one,
++  // but firing all heavy snapshot/history endpoints at once can create a transient
++  // connection failure during page startup.
++  const loaded = [];
++  const startupFailures = [];
++  for (const [label, task] of requestDefinitions) {
++    try {
++      loaded.push(await task());
++    } catch (error) {
++      startupFailures.push({ label, error });
++      loaded.push(null);
++      console.warn(`[startup] ${label}读取失败`, error);
++      if (error?.code === 'NETWORK_CONNECTION_INTERRUPTED') break;
++    }
++  }
++
++  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unifiedHistory, unified, businessResponse] = loaded;
++  if (ccsl?.state) appState = ccsl.state;
++  if (shopee?.state) shopeeState = shopee.state;
++  if (auth?.authStatus) ceAuth = auth.authStatus;
++  if (session) accessSession = session;
++  historyCatalog = {
++    CCSL: ccslHistory?.rows || historyCatalog.CCSL || [],
++    SHOPEE: shopeeHistory?.rows || historyCatalog.SHOPEE || [],
++    UNIFIED: unifiedHistory?.rows || historyCatalog.UNIFIED || []
++  };
++  if (unified?.import) unifiedImportState = unified.import;
+   if (businessResponse?.businessType) businessStates[businessResponse.businessType] = businessResponse.state || {};
++
++  if (startupFailures.some(item => item.error?.code === 'NETWORK_CONNECTION_INTERRUPTED')) {
++    const backendHealthy = await rawHealthProbe();
++    if (!backendHealthy) throw startupFailures.find(item => item.error?.code === 'NETWORK_CONNECTION_INTERRUPTED').error;
++  }
++
+   const selectedUnified = historyModeDate
+     ? (historyCatalog.UNIFIED || []).find(row => row.reportDate === historyModeDate)
+     : null;
+   const latestUnified = selectedUnified || (unifiedImportState?.snapshotId
+     ? unifiedImportState
+     : (historyCatalog.UNIFIED || [])[0]);
+-  if (latestUnified?.snapshotId) {
++  const needsUnifiedDashboardState = ['home','ce','tbkh','ali1688','shopeecn','shopeevn','tracking','exceptions','reports'].includes(currentPage);
++  if (latestUnified?.snapshotId && needsUnifiedDashboardState) {
+     if (dashboardPeriodMode) await loadDashboardPeriod(dashboardPeriodMode, historyModeDate || latestUnified.reportDate, false);
+     else await syncUnifiedSelection(latestUnified.reportDate, latestUnified.snapshotId, false);
+-  } else {
++  } else if (latestUnified?.reportDate && !historyModeDate) {
++    historyModeDate = latestUnified.reportDate;
++  } else if (!latestUnified) {
+     historyModeDate = '';
+   }
+   renderAll();
+@@ -443,13 +502,44 @@
+   const normalizedSnapshotId = String(snapshotId || '').trim();
+   if (!normalizedDate || !normalizedSnapshotId) return false;
+   const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+-  const results = await Promise.all(types.map(type => api(`/api/business-state/${type}?snapshotId=${encodeURIComponent(normalizedSnapshotId)}`)));
+-  results.forEach((result, index) => { businessStates[types[index]] = result.state || {}; });
+-  appState = aggregateBusinessStates(types.slice(0, 3).map(type => businessStates[type]), 'CCSL', normalizedDate, normalizedSnapshotId);
+-  shopeeState = aggregateBusinessStates(types.slice(3).map(type => businessStates[type]), 'SHOPEE', normalizedDate, normalizedSnapshotId);
++  const loadedTypes = new Set();
++  const failures = [];
++
++  // Do not request five business snapshots concurrently. These can be large and were
++  // previously requested immediately after the first startup batch, creating another
++  // burst that could be misreported as a total backend outage.
++  for (const type of types) {
++    try {
++      const result = await api(`/api/business-state/${type}?snapshotId=${encodeURIComponent(normalizedSnapshotId)}`);
++      businessStates[type] = result.state || {};
++      loadedTypes.add(type);
++    } catch (error) {
++      failures.push({ type, error });
++      console.warn(`[snapshot] ${type}读取失败`, error);
++      if (error?.code === 'NETWORK_CONNECTION_INTERRUPTED') {
++        const backendHealthy = await rawHealthProbe();
++        if (!backendHealthy) throw error;
++      }
++    }
++  }
++
++  const ccslTypes = types.slice(0, 3);
++  const shopeeTypes = types.slice(3);
++  if (ccslTypes.every(type => loadedTypes.has(type))) {
++    appState = aggregateBusinessStates(ccslTypes.map(type => businessStates[type]), 'CCSL', normalizedDate, normalizedSnapshotId);
++  }
++  if (shopeeTypes.every(type => loadedTypes.has(type))) {
++    shopeeState = aggregateBusinessStates(shopeeTypes.map(type => businessStates[type]), 'SHOPEE', normalizedDate, normalizedSnapshotId);
++  }
++
++  if (failures.length) {
++    window.__cePartialLoadFailures = failures.map(item => ({ type: item.type, message: item.error?.message || '读取失败' }));
++  } else {
++    window.__cePartialLoadFailures = [];
++  }
+   historyModeDate = normalizedDate;
+   if (shouldRender) renderAll();
+-  return true;
++  return failures.length === 0;
+ }
+ 
+ async function loadTrackingWorkspace() {
+@@ -2507,7 +2597,18 @@
+ 
+ window.addEventListener('popstate', () => { currentPage = pageFromPath(); renderAll(); });
+ updateClock(); setInterval(updateClock, 1000);
+-refresh().catch(error => alert(`页面数据读取失败：${error.message}`));
++refresh().catch(async error => {
++  console.error('Initial page refresh failed:', error);
++  const backendHealthy = await rawHealthProbe();
++  if (!backendHealthy) {
++    alert('后台服务当前不可达，请确认Start_CE_QC仍在运行后重试。');
++    return;
++  }
++  // Backend and SQLite are healthy. Do not show a false global "backend disconnected"
++  // alert for a recoverable single-interface/startup timing failure.
++  console.warn('页面部分数据读取失败，但后台服务仍在线。页面将保留已成功加载的数据。', error);
++  renderAll();
++});
+ document.getElementById('adminDataNav')?.addEventListener('click', openDataPurge);
+ let processingPollBusy = false;
+ setInterval(async () => {
