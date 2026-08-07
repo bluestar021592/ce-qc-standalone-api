@@ -1,15 +1,33 @@
 import crypto from 'crypto';
 import fs from 'fs';
+import path from 'path';
 import XLSX from 'xlsx';
 
 const BUSINESS_PRIORITY = ['SHOPEEVN', 'SHOPEECN', 'TBKH', 'ALI1688'];
-const SHIPMENT_HEADERS = ['运单号', '运单编号', '单号', '面单号', '快递单号', '物流单号', 'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'];
-const RECIPIENT_HEADERS = ['收件人', '收件人姓名', '客户名称', '客户', '收货人', 'recipient', 'receiver', 'receivername', 'consignee', 'customername'];
-const REGION_HEADERS = ['省份标识', '区域', '区域代码', '路区', '站点', '目的地', '网点', 'region', 'area', 'route', 'site', 'destination'];
-const DATE_HEADERS = ['日报日期', '数据日期', '下单时间', '入库日期', '日期', 'reportdate', 'ordertime', 'orderdate', 'date', 'inbounddate'];
+const SHIPMENT_HEADERS = [
+  '运单号', '运单编号', '单号', '面单号', '快递单号', '物流单号',
+  'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'
+];
+const RECIPIENT_HEADERS = [
+  '收件人', '收件人姓名', '收件人名称', '收货人', '收货人姓名', '收货人名称',
+  '客户名称', '客户', '收件客户', '收货客户',
+  'recipient', 'recipientname', 'receiver', 'receivername', 'consignee', 'consigneename', 'customername'
+];
+const REGION_HEADERS = [
+  '省份标识', '区域', '区域代码', '路区', '站点', '目的地', '网点',
+  '省份', '收件省份', '目的省份', '目的地省份', '收货省份',
+  'region', 'area', 'route', 'site', 'destination', 'province', 'destprovince', 'destinationprovince', 'receiverprovince'
+];
+const EXPLICIT_REPORT_DATE_HEADERS = [
+  '日报日期', '数据日期', '报表日期', '报告日期', 'reportdate', 'reportingdate', 'datadate'
+];
+const TRANSACTION_DATE_HEADERS = [
+  '入库日期', '下单日期', '下单时间', '订单日期', '日期', 'ordertime', 'orderdate', 'date', 'inbounddate'
+];
 
 export function parseUnifiedDailyExcel(filePath, options = {}) {
-  const signature = fs.readFileSync(filePath).subarray(0, 4).toString('hex').toUpperCase();
+  const fileBuffer = fs.readFileSync(filePath);
+  const signature = fileBuffer.subarray(0, 4).toString('hex').toUpperCase();
   const containerFormat = signature.startsWith('504B') ? 'OOXML_ZIP' : (signature.startsWith('D0CF11E0') ? 'OLE_XLS' : 'UNKNOWN');
   const workbook = XLSX.readFile(filePath, { cellDates: true });
   const details = [];
@@ -21,9 +39,10 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   let missingWaybillRows = 0;
   let missingRecipientWarnings = 0;
   let classificationConflicts = 0;
-  let detectedDate = normalizeDate(options.reportDate);
-  const dateCandidates = new Map();
-  let dateDetectionSource = detectedDate ? '手动日期' : '';
+
+  const manualDate = normalizeDate(options.reportDate);
+  const explicitDateCandidates = new Map();
+  const transactionDateCandidates = new Map();
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -33,30 +52,68 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: hidden ? '隐藏Sheet' : '空Sheet', headerRow: null, detectedColumns: {}, missingFields: [] });
       continue;
     }
+
     propagateMergedHeaderCells(sheet, matrix);
     const headerIndex = findHeaderRow(matrix);
     if (headerIndex < 0) {
-      sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: '前15行未找到运单号+收件人表头', headerRow: null, detectedColumns: {}, missingFields: ['waybill', 'recipient'], sampleHeaders: matrix.slice(0, 15).map(row => row.filter(Boolean).slice(0, 8)) });
+      sheetDiagnostics.push({
+        sheetName, status: 'SKIPPED', reason: '前30行未找到可识别的运单号+收件人表头', headerRow: null,
+        detectedColumns: {}, missingFields: ['waybill', 'recipient'],
+        sampleHeaders: matrix.slice(0, 30).map(row => row.filter(Boolean).slice(0, 12)).filter(row => row.length).slice(0, 8)
+      });
       continue;
     }
-    const headers = matrix[headerIndex].map(normalizeHeader);
+
+    const originalHeaders = matrix[headerIndex].map(value => String(value ?? '').trim());
+    const headers = originalHeaders.map(normalizeHeader);
     const shipmentIndex = findColumn(headers, SHIPMENT_HEADERS);
-    const recipientIndex = findColumn(headers, RECIPIENT_HEADERS);
+    let recipientIndex = findColumn(headers, RECIPIENT_HEADERS);
+    let recipientDetection = 'HEADER_ALIAS';
+    if (recipientIndex < 0) {
+      recipientIndex = detectRecipientColumnByValues(matrix, headerIndex, shipmentIndex);
+      recipientDetection = recipientIndex >= 0 ? 'VALUE_HEURISTIC' : 'NOT_FOUND';
+    }
+    if (shipmentIndex < 0 || recipientIndex < 0) {
+      sheetDiagnostics.push({
+        sheetName, status: 'SKIPPED', reason: shipmentIndex < 0 ? '未识别运单号列' : '未识别收件人列', headerRow: headerIndex + 1,
+        detectedColumns: { waybill: shipmentIndex, recipient: recipientIndex },
+        missingFields: [shipmentIndex < 0 ? 'waybill' : 'recipient'], sampleHeaders: originalHeaders.slice(0, 16)
+      });
+      continue;
+    }
+
     const regionIndex = findColumn(headers, REGION_HEADERS);
-    const dateIndex = findColumn(headers, DATE_HEADERS);
-    const detectedColumns = { waybill: shipmentIndex, recipient: recipientIndex, region: regionIndex, reportDate: dateIndex };
-    sheetDiagnostics.push({ sheetName, status: 'VALID', reason: '识别成功', headerRow: headerIndex + 1, detectedColumns, missingFields: [], sampleHeaders: matrix[headerIndex].slice(0, 12) });
+    const explicitDateIndex = findColumn(headers, EXPLICIT_REPORT_DATE_HEADERS);
+    const transactionDateIndex = explicitDateIndex >= 0 ? -1 : findColumn(headers, TRANSACTION_DATE_HEADERS);
+    const detectedColumns = {
+      waybill: shipmentIndex,
+      recipient: recipientIndex,
+      recipientHeader: originalHeaders[recipientIndex] || '',
+      recipientDetection,
+      region: regionIndex,
+      regionHeader: regionIndex >= 0 ? originalHeaders[regionIndex] : '',
+      explicitReportDate: explicitDateIndex,
+      explicitReportDateHeader: explicitDateIndex >= 0 ? originalHeaders[explicitDateIndex] : '',
+      transactionDate: transactionDateIndex,
+      transactionDateHeader: transactionDateIndex >= 0 ? originalHeaders[transactionDateIndex] : ''
+    };
+    sheetDiagnostics.push({ sheetName, status: 'VALID', reason: '识别成功', headerRow: headerIndex + 1, detectedColumns, missingFields: [], sampleHeaders: originalHeaders.slice(0, 16) });
 
     for (let index = headerIndex + 1; index < matrix.length; index += 1) {
       const row = matrix[index] || [];
       if (!row.some(value => String(value ?? '').trim())) continue;
       rawRows += 1;
+
       const shipmentCode = normalizeShipmentCode(row[shipmentIndex]);
       const recipientRaw = String(row[recipientIndex] ?? '').trim();
       const recipientNormalized = normalizeRecipient(recipientRaw);
-      const regionCode = normalizeRegion(row[regionIndex]);
-      const rowDate = normalizeDate(row[dateIndex]);
-      if (rowDate) dateCandidates.set(rowDate, Number(dateCandidates.get(rowDate) || 0) + 1);
+      const regionRaw = regionIndex >= 0 ? String(row[regionIndex] ?? '').trim() : '';
+      const regionCode = normalizeRegion(regionRaw);
+      const explicitRowDate = explicitDateIndex >= 0 ? normalizeDate(row[explicitDateIndex]) : '';
+      const transactionRowDate = transactionDateIndex >= 0 ? normalizeDate(row[transactionDateIndex]) : '';
+      if (explicitRowDate) incrementCandidate(explicitDateCandidates, explicitRowDate);
+      if (transactionRowDate) incrementCandidate(transactionDateCandidates, transactionRowDate);
+
       if (!shipmentCode) {
         missingWaybillRows += 1;
         warnings.push({ type: 'MISSING_WAYBILL', sheetName, rowNumber: index + 1, message: '运单号缺失，未计入分类' });
@@ -68,24 +125,34 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
         continue;
       }
       seen.add(shipmentCode);
+
       if (!recipientRaw) {
         missingRecipientWarnings += 1;
         warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人缺失，按默认规则归类CE' });
       }
+
       const matches = classifyMatches(shipmentCode, recipientNormalized);
       if (matches.length > 1) {
         classificationConflicts += 1;
         warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个板块，按优先级归类${matches[0]}` });
       }
       const classification = classifyBusiness(shipmentCode, recipientNormalized);
-      const businessType = classification.businessType;
+      const raw = Object.fromEntries(originalHeaders.map((header, column) => [header || `column_${column + 1}`, row[column] ?? '']));
       details.push({
-        shipmentCode, businessType, regionCode, recipientRaw, recipientNormalized,
-        sheetName, rowNumber: index + 1, reportDate: detectedDate || rowDate || '',
+        shipmentCode,
+        businessType: classification.businessType,
+        regionCode,
+        regionRaw,
+        recipientRaw,
+        recipientNormalized,
+        sheetName,
+        rowNumber: index + 1,
+        reportDate: manualDate || explicitRowDate || transactionRowDate || '',
         classificationSource: classification.source,
         classificationMatchedValue: classification.matchedValue,
         classificationWarning: matches.length > 1 ? `命中多个板块：${matches.join(',')}` : '',
-        classificationReason: classification.reason
+        classificationReason: classification.reason,
+        raw
       });
     }
   }
@@ -95,24 +162,49 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     error.sheetDiagnostics = sheetDiagnostics;
     throw error;
   }
-  const sortedDateCandidates = [...dateCandidates.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  if (!detectedDate && sortedDateCandidates.length) {
-    detectedDate = sortedDateCandidates[0][0];
-    dateDetectionSource = '下单时间列';
+
+  const explicitSorted = sortCandidates(explicitDateCandidates);
+  const transactionSorted = sortCandidates(transactionDateCandidates);
+  const filenameDate = dateFromFilename(options.originalName || path.basename(filePath), options);
+
+  let reportDate = manualDate;
+  let dateDetectionSource = manualDate ? '手动日期' : '';
+  if (!reportDate && explicitSorted.length) {
+    reportDate = explicitSorted[0][0];
+    dateDetectionSource = '日报日期列';
   }
-  const reportDate = normalizeDate(options.reportDate) || detectedDate;
+  if (!reportDate && filenameDate) {
+    reportDate = filenameDate;
+    dateDetectionSource = '文件名';
+  }
+  if (!reportDate && transactionSorted.length) {
+    reportDate = transactionSorted[0][0];
+    dateDetectionSource = '业务日期列';
+    warnings.push({ type: 'DATE_FALLBACK', message: `未找到明确日报日期，使用业务日期列多数值 ${reportDate}` });
+  }
   if (!reportDate) throw new Error('未识别到日报日期，请手动选择日报日期');
+
   for (const row of details) row.reportDate = reportDate;
+
   const classificationCounts = Object.fromEntries(['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => [type, details.filter(row => row.businessType === type).length]));
-  const regionCounts = { PP: details.filter(row => row.regionCode === 'PP').length, PV: details.filter(row => row.regionCode === 'PV').length };
+  const regionCounts = {
+    PP: details.filter(row => row.regionCode === 'PP').length,
+    PV: details.filter(row => row.regionCode === 'PV').length,
+    UNKNOWN: details.filter(row => !['PP', 'PV'].includes(row.regionCode)).length
+  };
+  const allDateCandidates = mergeDateCandidates(explicitSorted, transactionSorted);
+
   return {
     reportDate,
     dateDetectionSource,
-    dateWasManuallyCorrected: Boolean(normalizeDate(options.reportDate)),
-    dateCandidates: sortedDateCandidates.map(([date, count]) => ({ date, count })),
-    dateConflict: sortedDateCandidates.length > 1,
+    dateWasManuallyCorrected: Boolean(manualDate),
+    filenameDate,
+    dateCandidates: allDateCandidates.map(([date, count]) => ({ date, count })),
+    explicitDateCandidates: explicitSorted.map(([date, count]) => ({ date, count })),
+    transactionDateCandidates: transactionSorted.map(([date, count]) => ({ date, count })),
+    dateConflict: explicitSorted.length > 1 || (!explicitSorted.length && transactionSorted.length > 1),
     containerFormat,
-    fileHash: crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex'),
+    fileHash: crypto.createHash('sha256').update(fileBuffer).digest('hex'),
     classificationCounts,
     regionCounts,
     summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, classificationConflicts },
@@ -123,9 +215,11 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
 }
 
 function findHeaderRow(matrix) {
-  for (let i = 0; i < Math.min(matrix.length, 15); i += 1) {
+  for (let i = 0; i < Math.min(matrix.length, 30); i += 1) {
     const headers = (matrix[i] || []).map(normalizeHeader);
-    if (findColumn(headers, SHIPMENT_HEADERS) >= 0 && findColumn(headers, RECIPIENT_HEADERS) >= 0) return i;
+    const shipmentIndex = findColumn(headers, SHIPMENT_HEADERS);
+    if (shipmentIndex < 0) continue;
+    if (findColumn(headers, RECIPIENT_HEADERS) >= 0 || detectRecipientColumnByValues(matrix, i, shipmentIndex) >= 0) return i;
   }
   return -1;
 }
@@ -139,10 +233,40 @@ function findColumn(headers, aliases) {
   return -1;
 }
 
-function normalizeHeader(value) { return String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/[\s_\-]+/g, ''); }
-function normalizeShipmentCode(value) { return String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/\s+/g, ''); }
-function normalizeRecipient(value) { return String(value ?? '').normalize('NFKC').toUpperCase().replace(/[\s_\-]+/g, ''); }
-function normalizeRegion(value) { const text = String(value ?? '').trim().toUpperCase(); return text === 'PV' ? 'PV' : text === 'PP' ? 'PP' : ''; }
+function detectRecipientColumnByValues(matrix, headerIndex, shipmentIndex) {
+  const maxColumns = Math.max(...matrix.slice(headerIndex, Math.min(matrix.length, headerIndex + 80)).map(row => row.length), 0);
+  let best = { index: -1, score: 0 };
+  for (let column = 0; column < maxColumns; column += 1) {
+    if (column === shipmentIndex) continue;
+    let score = 0;
+    for (let rowIndex = headerIndex + 1; rowIndex < Math.min(matrix.length, headerIndex + 80); rowIndex += 1) {
+      const value = normalizeRecipient(matrix[rowIndex]?.[column]);
+      if (!value) continue;
+      if (/SHOPEEVN|SHOPEECN|TBKH|ALI1688/.test(value)) score += 3;
+    }
+    if (score > best.score) best = { index: column, score };
+  }
+  return best.score >= 3 ? best.index : -1;
+}
+
+function normalizeHeader(value) {
+  return String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/[\s_\-]+/g, '');
+}
+function normalizeShipmentCode(value) {
+  return String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/\s+/g, '');
+}
+function normalizeRecipient(value) {
+  return String(value ?? '').normalize('NFKC').toUpperCase().replace(/[\s_\-]+/g, '');
+}
+function normalizeRegion(value) {
+  const raw = String(value ?? '').normalize('NFKC').trim();
+  const text = raw.toUpperCase().replace(/\s+/g, ' ');
+  if (!text) return '';
+  if (/^(?:PP\d*|PNH)$/.test(text) || /PHNOM\s*PENH|金边/i.test(raw)) return 'PP';
+  if (/^PV\d*$/.test(text)) return 'PV';
+  // A populated province/destination-province field that is not Phnom Penh is provincial.
+  return 'PV';
+}
 function classifyMatches(shipmentCode, recipient) {
   const matches = [];
   if (recipient.includes('SHOPEEVN')) matches.push('SHOPEEVN');
@@ -161,15 +285,57 @@ function classifyBusiness(shipmentCode, recipient) {
 }
 function normalizeDate(value) {
   if (!value) return '';
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  const text = String(value).trim().replace(/[./]/g, '-');
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return localDateKey(value);
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed?.y && parsed?.m && parsed?.d) return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
+  }
+  const text = String(value).normalize('NFKC').trim().replace(/[年/.]/g, '-').replace(/月/g, '-').replace(/日/g, '');
   const match = text.match(/(20\d{2})-(\d{1,2})-(\d{1,2})/);
   return match ? `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}` : '';
 }
 
+function dateFromFilename(name, options = {}) {
+  const base = path.basename(String(name || '')).replace(/\.[^.]+$/, '');
+  const full = base.match(/(?:^|[^0-9])(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})(?:[^0-9]|$)/);
+  if (full) return validDate(Number(full[1]), Number(full[2]), Number(full[3]));
+  const short = base.match(/(?:^|[^0-9])(\d{1,2})[-_.](\d{1,2})(?:[^0-9]|$)/);
+  if (!short) return '';
+  const reference = normalizeDate(options.referenceDate) || normalizeDate(options.lastReportDate) || currentCambodiaDate();
+  const year = Number(reference.slice(0, 4)) || new Date().getFullYear();
+  return validDate(year, Number(short[1]), Number(short[2]));
+}
+
+function validDate(year, month, day) {
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return '';
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() + 1 !== month || date.getUTCDate() !== day) return '';
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+function currentCambodiaDate() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Phnom_Penh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+function incrementCandidate(map, date) {
+  map.set(date, Number(map.get(date) || 0) + 1);
+}
+function sortCandidates(map) {
+  return [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+function mergeDateCandidates(...groups) {
+  const map = new Map();
+  for (const group of groups) for (const [date, count] of group) map.set(date, Number(map.get(date) || 0) + Number(count || 0));
+  return sortCandidates(map);
+}
+
 function propagateMergedHeaderCells(sheet, matrix) {
   for (const range of sheet['!merges'] || []) {
-    if (range.s.r >= 15) continue;
+    if (range.s.r >= 30) continue;
     const value = matrix[range.s.r]?.[range.s.c];
     if (!String(value ?? '').trim()) continue;
     for (let row = range.s.r; row <= range.e.r; row += 1) {
