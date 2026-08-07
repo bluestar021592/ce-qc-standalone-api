@@ -32,6 +32,9 @@ jobs:
       - name: Apply exact business-rule patch
         run: node scripts/apply-v12-rule-hardening.mjs
 
+      - name: Apply work-order evidence precedence
+        run: node scripts/v12-postpatch.mjs
+
       - name: Syntax checks
         shell: pwsh
         run: |
@@ -82,6 +85,7 @@ jobs:
         run: |
           Remove-Item scripts/apply-v12-rule-hardening.mjs -Force
           Remove-Item scripts/relax-v12-patcher.mjs -Force
+          Remove-Item scripts/v12-postpatch.mjs -Force
           Remove-Item .github/workflows/apply-v12-rule-hardening.yml -Force
           git config user.name "ChatGPT QC Maintainer"
           git config user.email "actions@users.noreply.github.com"
