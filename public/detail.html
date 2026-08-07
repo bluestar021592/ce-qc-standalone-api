@@ -21,39 +21,25 @@
 
   <main class="app-shell">
     <section class="card">
-      <div class="card-head">
-        <h2 id="detailTitle">正在读取...</h2>
-      </div>
+      <div class="card-head"><h2 id="detailTitle">正在读取...</h2></div>
       <div id="detailStatus" class="chip-grid"></div>
     </section>
 
-    <section class="card detail-card">
-      <div class="card-head"><h2>最终判断</h2></div>
-      <div id="finalRow" class="detail-table-wrap"></div>
-    </section>
-
-    <section class="card detail-card">
-      <div class="card-head"><h2>订单扫描</h2></div>
-      <div id="scanRow" class="detail-table-wrap"></div>
-    </section>
-
-    <section class="card detail-card">
-      <div class="card-head"><h2>轨迹节点</h2></div>
-      <div id="events" class="detail-table-wrap"></div>
-    </section>
-
-    <section class="card detail-card">
-      <div class="card-head"><h2>日报来源</h2></div>
-      <div id="dailyRows" class="detail-table-wrap"></div>
-    </section>
+    <section class="card detail-card"><div class="card-head"><h2>最终判断</h2></div><div id="finalRow" class="detail-table-wrap"></div></section>
+    <section class="card detail-card"><div class="card-head"><h2>订单扫描</h2></div><div id="scanRow" class="detail-table-wrap"></div></section>
+    <section class="card detail-card"><div class="card-head"><h2>轨迹节点</h2></div><div id="events" class="detail-table-wrap"></div></section>
+    <section class="card detail-card"><div class="card-head"><h2>日报来源</h2></div><div id="dailyRows" class="detail-table-wrap"></div></section>
   </main>
 
   <script>
     const params = new URLSearchParams(location.search);
     const shipmentCode = params.get('shipmentCode') || params.get('waybill') || '';
     const reportDate = params.get('reportDate') || '';
+    const businessType = params.get('businessType') || '';
+    const apiParams = new URLSearchParams({ reportDate, shipmentCode });
+    if (businessType) apiParams.set('businessType', businessType);
 
-    fetch(`/api/detail?reportDate=${encodeURIComponent(reportDate)}&shipmentCode=${encodeURIComponent(shipmentCode)}`)
+    fetch(`/api/detail?${apiParams.toString()}`)
       .then(r => r.json())
       .then(j => {
         if (!j.ok) throw new Error(j.error || '读取失败');

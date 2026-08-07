@@ -266,6 +266,7 @@ export function classifyShopeeRegion({ dailyRow = {}, shipmentTrackRow = {}, sca
   }
   const province = findNamedValue([dailyRow?.raw || dailyRow, shipmentTrackRow, scanRow], /dest.*province|province|省|区域/i);
   if (/\bPNH\b|phnom\s*penh|金边/i.test(province)) return { regionType: 'PHNOM_PENH', regionCode: 'PP', regionSource: 'destProvince' };
+  if (String(province || '').trim()) return { regionType: 'PROVINCE', regionCode: 'PV', regionSource: 'destProvince' };
   return { regionType: 'UNKNOWN', regionCode: 'UNKNOWN', regionSource: 'unresolved' };
 }
 
