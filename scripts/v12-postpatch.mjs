@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+const file = 'src/analyzer.js';
+let text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+const before = "      matchedRule: shopInfo.matchedRule || matchedRuleForCategory(category)";
+const after = "      matchedRule: category === '工单未处理' ? matchedRuleForCategory(category) : (shopInfo.matchedRule || matchedRuleForCategory(category))";
+const count = text.split(before).length - 1;
+if (count !== 1) throw new Error(`Expected one analyzer matchedRule assignment, found ${count}`);
+text = text.replace(before, after);
+fs.writeFileSync(file, text, 'utf8');
+console.log('V12 work-order evidence precedence applied.');
