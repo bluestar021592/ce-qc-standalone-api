@@ -4,9 +4,10 @@
   "description": "CE 金边仓质控独立API版：日报+长期JSON+订单扫描API+批量轨迹API+XLSX导出",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "start:production": "set NODE_ENV=production&& node server.js",
+    "start": "node bootstrap.js",
+    "start:raw": "node server.js",
+    "dev": "node --watch bootstrap.js",
+    "start:production": "set NODE_ENV=production&& node bootstrap.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
