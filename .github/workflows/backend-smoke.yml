@@ -32,8 +32,9 @@ jobs:
           node --check src/db.js
           node --check src/store.js
           $null = [scriptblock]::Create((Get-Content -Raw Start_CE_QC.ps1))
+          if (-not (Select-String -Path Start_CE_QC.cmd -SimpleMatch 'Start_CE_QC.ps1')) { throw 'CMD wrapper does not call Start_CE_QC.ps1' }
 
-      - name: Start through Windows launcher and verify core pages
+      - name: Start PowerShell launcher and verify core pages
         shell: pwsh
         env:
           HOST: 127.0.0.1
@@ -41,7 +42,7 @@ jobs:
           DATA_DIR: ${{ runner.temp }}\ce-qc-data
           DB_FILE: ${{ runner.temp }}\ce-qc-data\ce_qc_monitor.db
         run: |
-          $launcher = Start-Process "$env:ComSpec" -ArgumentList '/d','/c','Start_CE_QC.cmd' -WorkingDirectory $PWD -PassThru -WindowStyle Hidden
+          $launcher = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','Start_CE_QC.ps1' -WorkingDirectory $PWD -PassThru -RedirectStandardOutput launcher.out.log -RedirectStandardError launcher.err.log
           try {
             $ready = $false
             foreach ($i in 1..40) {
@@ -50,11 +51,17 @@ jobs:
                 $health = Invoke-RestMethod 'http://127.0.0.1:5177/api/health' -TimeoutSec 3
                 if ($health.ok) { $ready = $true; break }
               } catch {}
+              if ($launcher.HasExited) { break }
             }
 
             if (-not $ready) {
+              Write-Host '--- launcher stdout ---'
+              Get-Content launcher.out.log -ErrorAction SilentlyContinue
+              Write-Host '--- launcher stderr ---'
+              Get-Content launcher.err.log -ErrorAction SilentlyContinue
+              Write-Host '--- startup log ---'
               Get-Content logs\startup_latest.log -ErrorAction SilentlyContinue
-              throw 'Windows launcher did not bring the backend up on port 5177.'
+              throw 'PowerShell launcher did not bring the backend up on port 5177.'
             }
 
             $state = Invoke-RestMethod 'http://127.0.0.1:5177/api/state' -TimeoutSec 10
@@ -67,5 +74,10 @@ jobs:
             if ($launcher -and -not $launcher.HasExited) {
               cmd /c "taskkill /PID $($launcher.Id) /T /F" | Out-Null
             }
+            Write-Host '--- launcher stdout ---'
+            Get-Content launcher.out.log -ErrorAction SilentlyContinue
+            Write-Host '--- launcher stderr ---'
+            Get-Content launcher.err.log -ErrorAction SilentlyContinue
+            Write-Host '--- startup log ---'
             Get-Content logs\startup_latest.log -ErrorAction SilentlyContinue
           }
