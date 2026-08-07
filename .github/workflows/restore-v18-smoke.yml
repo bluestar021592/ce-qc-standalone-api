@@ -1,0 +1,92 @@
+name: CE QC restored V18 smoke
+
+on:
+  push:
+    branches:
+      - chatgpt/restore-final-v18-app
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax checks
+        shell: pwsh
+        run: |
+          node --check bootstrap.js
+          node --check server.js
+          node --check public/app.js
+          node --check src/db.js
+          node --check src/store.js
+          node --check src/unifiedExcelParser.js
+          node --check src/unifiedImportStore.js
+          $null = [scriptblock]::Create((Get-Content -Raw Start_CE_QC.ps1))
+          if (-not (Select-String -Path Start_CE_QC.cmd -SimpleMatch 'Start_CE_QC.ps1')) { throw 'CMD wrapper does not call Start_CE_QC.ps1' }
+
+      - name: Verify locked UI signature
+        shell: pwsh
+        run: |
+          $html = Get-Content -Raw public/index.html
+          foreach ($needle in @('homeBusinessCards','homeCoreMetrics','homeShopeeSpecial','homeDispatchDistribution','综合日报导入','管理汇总 + 五业务')) {
+            if (-not $html.Contains($needle)) { throw "Missing V18 UI signature: $needle" }
+          }
+          foreach ($file in @('public/dashboard-v18.js','public/dashboard-v18.css','public/v16-blue-white-colors.css','public/v17-page-lock.css')) {
+            if (-not (Test-Path $file)) { throw "Missing locked UI file: $file" }
+          }
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Start launcher and verify backend
+        shell: pwsh
+        env:
+          CI: 'true'
+          DATA_DIR: ${{ runner.temp }}\ce-qc-data
+          DB_FILE: ${{ runner.temp }}\ce-qc-data\ce_qc_monitor.db
+        run: |
+          $launcher = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','Start_CE_QC.ps1' -WorkingDirectory $PWD -PassThru -RedirectStandardOutput launcher.out.log -RedirectStandardError launcher.err.log
+          try {
+            $ready = $false
+            foreach ($i in 1..75) {
+              Start-Sleep -Seconds 1
+              try {
+                $health = Invoke-RestMethod 'http://127.0.0.1:5177/api/health' -TimeoutSec 3
+                if ($health.ok) { $ready = $true; break }
+              } catch {}
+              if ($launcher.HasExited) { break }
+            }
+            if (-not $ready) { throw 'Restored backend did not become healthy on 5177.' }
+
+            $state = Invoke-RestMethod 'http://127.0.0.1:5177/api/state' -TimeoutSec 10
+            if (-not $state.ok) { throw '/api/state returned ok=false' }
+
+            $settings = Invoke-WebRequest 'http://127.0.0.1:5177/settings' -UseBasicParsing -TimeoutSec 10
+            if ($settings.StatusCode -ne 200) { throw '/settings did not return 200' }
+
+            $home = Invoke-WebRequest 'http://127.0.0.1:5177/' -UseBasicParsing -TimeoutSec 10
+            if ($home.Content -notmatch 'homeBusinessCards') { throw 'Served homepage is not the restored V18 UI' }
+          }
+          finally {
+            if ($launcher -and -not $launcher.HasExited) { cmd /c "taskkill /PID $($launcher.Id) /T /F" | Out-Null }
+            Write-Host '--- launcher stdout ---'
+            Get-Content launcher.out.log -ErrorAction SilentlyContinue
+            Write-Host '--- launcher stderr ---'
+            Get-Content launcher.err.log -ErrorAction SilentlyContinue
+            Write-Host '--- startup log ---'
+            Get-Content logs\startup_latest.log -ErrorAction SilentlyContinue
+            Write-Host '--- startup error ---'
+            Get-Content logs\startup_error.log -ErrorAction SilentlyContinue
+          }
