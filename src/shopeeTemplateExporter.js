@@ -123,7 +123,17 @@ function fillDetail(sheet, range, datedRows, predicate = () => true) {
     header.height = 24;
     header.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF195A8D' } }; });
     if (!rows.length) sheet.getRow(rowNumber++).values = ['当日无数据'];
-    for (const row of rows) sheet.getRow(rowNumber++).values = detailValues(row);
+    for (const row of rows) {
+      const dataRow = sheet.getRow(rowNumber++);
+      dataRow.values = detailValues(row);
+      const shipmentCode = bill(row);
+      if (shipmentCode) {
+        const billCell = dataRow.getCell(2);
+        billCell.value = { text: shipmentCode, hyperlink: detailUrl(row) };
+        billCell.font = { ...billCell.font, color: { argb: 'FF0563C1' }, underline: true };
+        billCell.numFmt = '@';
+      }
+    }
     sheet.getRow(rowNumber++).values = [];
   }
   sheet.getCell('A1').value = title;
@@ -146,7 +156,7 @@ function clearDataRows(sheet, startRow) {
 }
 
 function detailValues(row) {
-  return [row.reportDate || '', bill(row), row.orderTime || row.下单时间 || '', row.deliveryTime || row.派件时间 || '', row.statusCode || row.状态标识 || '', row.statusDesc || row.状态说明 || row.currentState || '', row.recipientProvince || row.收件省份 || '', region(row) === 'PP' ? '金边' : '外省', row.currentStore || row.当前门店 || '', row.currentProvince || row.当前省份 || '', row.recipient || row.收件人 || '', row.recipientPhone || row.收件人手机 || '', row.recipientAddress || row.收件地址 || '', row.courier || row.派件快递员 || '', row.exceptionDescription || row.异常描述 || row.外省未闭环分流 || row.primaryCategory || ''];
+  return [row.reportDate || '', bill(row), row.orderTime || row.下单时间 || '', row.deliveryTime || row.派件时间 || '', row.statusCode || row.状态标识 || '', row.statusDesc || row.状态说明 || row.currentState || '', row.recipientProvince || row.收件省份 || '', regionLabel(row), row.currentStore || row.当前门店 || '', row.currentProvince || row.当前省份 || '', row.recipient || row.收件人 || '', row.recipientPhone || row.收件人手机 || '', row.recipientAddress || row.收件地址 || '', row.courier || row.派件快递员 || '', row.exceptionDescription || row.异常描述 || row.外省未闭环分流 || row.primaryCategory || ''];
 }
 
 function metrics(rows) {
@@ -163,7 +173,27 @@ function uniqueRows(rows) { const map = new Map(); for (const row of rows) { con
 function normalizeRows(value) { return Array.isArray(value) ? value : value && typeof value === 'object' ? Object.values(value) : []; }
 function buildGroups(rows) { return { all: rows.length, pp: rows.filter(row => region(row) === 'PP').length, pv: rows.filter(row => region(row) === 'PV').length }; }
 function bill(row = {}) { return String(row.shipmentCode || row.运单号 || row.运单编号 || '').trim().toUpperCase(); }
-function region(row = {}) { const value = String(row.regionCode || row.regionType || row.区域分类 || '').toUpperCase(); return value.includes('PP') || value.includes('金边') ? 'PP' : 'PV'; }
+function region(row = {}) {
+  const value = String(row.regionCode || row.regionType || row.区域分类 || '').trim().toUpperCase();
+  if (!value || value === 'UNKNOWN' || value === 'UNRESOLVED') return '';
+  if (value.includes('PP') || value.includes('PNH') || value.includes('PHNOM_PENH') || value.includes('金边')) return 'PP';
+  if (value.includes('PV') || value.includes('PROVINCE') || value.includes('外省')) return 'PV';
+  return '';
+}
+function regionLabel(row = {}) {
+  const value = region(row);
+  return value === 'PP' ? '金边' : value === 'PV' ? '外省' : '未识别';
+}
+function detailUrl(row = {}) {
+  const base = String(process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || 'http://127.0.0.1:5177').replace(/\/$/, '');
+  const query = new URLSearchParams();
+  if (row.reportDate) query.set('reportDate', row.reportDate);
+  const shipmentCode = bill(row);
+  if (shipmentCode) query.set('shipmentCode', shipmentCode);
+  const businessType = String(row.businessType || '').trim().toUpperCase();
+  if (businessType) query.set('businessType', businessType);
+  return `${base}/detail?${query.toString()}`;
+}
 function isPod(row = {}) { return String(row.currentState || row.scanNormalizedState || '').toUpperCase() === 'POD' || String(row.orderStatus || '') === '85' || row.是否POD === '是'; }
 function isReturned(row = {}) { return String(row.currentState || row.scanNormalizedState || row.退回状态 || '').toUpperCase().includes('RETURN_COMPLETED') || row.是否退回 === '是'; }
 function isDelivery(row = {}) { return /DELIVERY|派送中|派件分配/.test(String(row.currentState || row.primaryCategory || row.状态说明 || '').toUpperCase()); }
