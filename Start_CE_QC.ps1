@@ -71,29 +71,43 @@ Remove-Item -LiteralPath $ErrFile -Force -ErrorAction SilentlyContinue
 
 $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
+$LocalUrl = 'http://127.0.0.1:5177'
 
 Write-Host ''
-Write-Host 'Starting backend and waiting for /api/health...' -ForegroundColor Cyan
+Write-Host 'Starting backend and waiting for the local web application...' -ForegroundColor Cyan
 try {
     $Backend = Start-Process -FilePath $NodeExe -ArgumentList @('bootstrap.js') -WorkingDirectory $ProjectRoot -PassThru -NoNewWindow -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
 } catch { Fail "[ERROR] Unable to start Node.js backend: $($_.Exception.Message)" 17 }
 
+# /api/health is intentionally behind the internal access gate in V18. An unauthenticated
+# launcher must therefore test the root login/application response rather than treating the
+# expected 401 from /api/health as a backend failure.
 $Ready = $false
-$Health = $null
+$ReadyStatus = 0
 for ($i = 1; $i -le 60; $i++) {
     Start-Sleep -Seconds 1
     if ($Backend.HasExited) { break }
     try {
-        $Health = Invoke-RestMethod 'http://127.0.0.1:5177/api/health' -TimeoutSec 2
-        if ($Health -and $Health.ok) { $Ready = $true; break }
-    } catch {}
+        $Response = Invoke-WebRequest $LocalUrl -UseBasicParsing -TimeoutSec 2
+        $ReadyStatus = [int]$Response.StatusCode
+        if ($ReadyStatus -ge 200 -and $ReadyStatus -lt 500) { $Ready = $true; break }
+    } catch {
+        # Windows PowerShell throws for HTTP 4xx. A real HTTP response still proves that
+        # Node/Express is listening; connection-refused/timeouts have no usable response.
+        try {
+            if ($_.Exception.Response) {
+                $ReadyStatus = [int]$_.Exception.Response.StatusCode
+                if ($ReadyStatus -ge 200 -and $ReadyStatus -lt 500) { $Ready = $true; break }
+            }
+        } catch {}
+    }
 }
 
 if (-not $Ready) {
     Write-Host ''
     Write-Host '[ERROR] Backend did not become reachable on 127.0.0.1:5177.' -ForegroundColor Red
     if ($Backend.HasExited) { Write-Host "Node process exited early. Exit code: $($Backend.ExitCode)" -ForegroundColor Red }
-    else { Write-Host 'Node process is running but health is unreachable.' -ForegroundColor Red; Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue }
+    else { Write-Host 'Node process is running but the local web application is unreachable.' -ForegroundColor Red; Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue }
     Write-Host ''
     Write-Host '--- startup_latest.log ---' -ForegroundColor Yellow
     if (Test-Path -LiteralPath $LogFile) { Get-Content -LiteralPath $LogFile -Tail 160 -ErrorAction SilentlyContinue }
@@ -107,18 +121,16 @@ $LanIp = ''
 try {
     $LanIp = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.IPAddress -notmatch '^127\.' -and $_.IPAddress -notmatch '^169\.254\.' } |
-        Sort-Object -Property InterfaceMetric |
         Select-Object -First 1 -ExpandProperty IPAddress
 } catch {}
 
-$LocalUrl = 'http://127.0.0.1:5177'
 $LanUrl = if ($LanIp) { "http://$LanIp`:5177" } else { '' }
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor Green
-Write-Host 'BACKEND READY - health check passed' -ForegroundColor Green
+Write-Host 'BACKEND READY - local web response verified' -ForegroundColor Green
 Write-Host "Local URL: $LocalUrl" -ForegroundColor Green
 if ($LanUrl) { Write-Host "LAN URL: $LanUrl" -ForegroundColor Green }
-Write-Host "Database health: $($Health.db.ok)" -ForegroundColor Green
+Write-Host "Local HTTP status: $ReadyStatus" -ForegroundColor Green
 Write-Host "Startup log: $LogFile"
 Write-Host 'Keep this window open while using CE QC.' -ForegroundColor Yellow
 Write-Host '===============================================' -ForegroundColor Green
