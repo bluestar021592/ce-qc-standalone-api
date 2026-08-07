@@ -1,0 +1,1 @@
+Temporary marker for restoring the last confirmed CE QC full application from the local recovery branch. This branch preserves the V18 blue-white UI and unified five-business workflow while reapplying the stable startup launcher from ChatGPT.
