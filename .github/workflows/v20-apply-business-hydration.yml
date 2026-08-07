@@ -29,8 +29,20 @@ jobs:
         run: |
           node --check public/app.js
           node --check src/unifiedImportStore.js
-      - name: Run regression tests
-        run: npm test
+      - name: Run self-contained regression tests
+        shell: pwsh
+        run: |
+          $externalFixtureTests = @(
+            'unified-import-v7.test.js',
+            'unified-import-v8.test.js',
+            'v9-real-reports.test.js'
+          )
+          $tests = Get-ChildItem -LiteralPath test -Filter '*.test.js' -File |
+            Where-Object { $externalFixtureTests -notcontains $_.Name } |
+            Sort-Object Name |
+            ForEach-Object { $_.FullName }
+          if (-not $tests.Count) { throw 'No self-contained tests were found.' }
+          node --test $tests
       - name: Commit patched sources
         shell: pwsh
         run: |
