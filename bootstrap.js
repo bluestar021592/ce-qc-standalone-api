@@ -60,6 +60,13 @@ process.on('unhandledRejection', reason => {
   console.error('[CE-QC][UNHANDLED_REJECTION]', reason);
 });
 
+// Do not attempt to continue inside a process after an uncaught exception. The
+// Windows launcher supervises Node and starts a fresh process from persisted SQLite
+// checkpoints. This monitor guarantees the fatal stack is written to stderr first.
+process.on('uncaughtExceptionMonitor', (error, origin) => {
+  console.error('[CE-QC][UNCAUGHT_EXCEPTION_FATAL]', origin || '', error?.stack || error);
+});
+
 process.on('warning', warning => {
   console.warn('[CE-QC][NODE_WARNING]', warning?.stack || warning);
 });

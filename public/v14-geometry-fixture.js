@@ -41,3 +41,109 @@ if (new URLSearchParams(location.search).has('visualTest')) {
   applyV16TestIds();
   new MutationObserver(applyV16TestIds).observe(document.getElementById('homePage'), { childList: true, subtree: true });
 }
+
+// V19 stability guard. This file is intentionally loaded after app.js so it can
+// protect the locked V18 UI without changing its layout or styling.
+(function installV19StabilityGuard() {
+  if (new URLSearchParams(location.search).has('visualTest')) return;
+
+  function selectedUnifiedDate() {
+    try {
+      if (typeof historyModeDate !== 'undefined' && historyModeDate) return String(historyModeDate);
+    } catch {}
+    try {
+      if (typeof unifiedImportState !== 'undefined' && unifiedImportState?.reportDate) return String(unifiedImportState.reportDate);
+    } catch {}
+    const selected = document.getElementById('topHistoryDate')?.value;
+    return String(selected || '');
+  }
+
+  function emptyExactBusinessState(type, reportDate) {
+    return {
+      businessType: type,
+      viewBusinessType: type,
+      reportDate: reportDate || '',
+      snapshotId: '',
+      snapshotStatus: 'UNAVAILABLE',
+      dailyReportReady: false,
+      pnhBills: [],
+      carryBills: [],
+      podLocks: [],
+      scanPool: [],
+      scanResults: [],
+      needTrackBills: [],
+      trackResults: [],
+      trackEvents: [],
+      finalRows: [],
+      nextCarryBills: [],
+      dailyParseRows: [],
+      dailyParseSummary: { totalRecognized: 0 },
+      detailTabs: {},
+      processing: { running: false, paused: false, phase: '' },
+      __exactBusinessUnavailable: true
+    };
+  }
+
+  // Never let an exact five-business page fall back to the legacy CCSL/SHOPEE
+  // aggregate state. That fallback is what can make ALI1688 display an unrelated
+  // old report date (for example a legacy 2026-05-31 state) when its exact snapshot
+  // request fails or the backend drops during navigation.
+  if (typeof currentBusinessState === 'function' && typeof currentBusinessType === 'function') {
+    currentBusinessState = function v19CurrentBusinessState() {
+      const type = currentBusinessType();
+      const selectedDate = selectedUnifiedDate();
+      let exact = null;
+      try { exact = typeof businessStates !== 'undefined' ? businessStates?.[type] : null; } catch {}
+      if (exact && (!selectedDate || !exact.reportDate || String(exact.reportDate) === selectedDate)) return exact;
+      return emptyExactBusinessState(type, selectedDate);
+    };
+  }
+
+  let recoveryTimer = null;
+  let recoveryRunning = false;
+
+  async function tryRecoverBackend() {
+    if (recoveryRunning) return;
+    recoveryRunning = true;
+    try {
+      const healthy = typeof rawHealthProbe === 'function' ? await rawHealthProbe(2500) : false;
+      if (!healthy) return;
+      if (recoveryTimer) {
+        clearInterval(recoveryTimer);
+        recoveryTimer = null;
+      }
+      if (typeof refresh === 'function') await refresh();
+      try {
+        if (typeof processingNotice !== 'undefined') {
+          processingNotice = { type: 'SYSTEM', level: 'success', message: '后台服务已自动恢复，页面数据已重新同步。' };
+        }
+      } catch {}
+      if (typeof renderAll === 'function') renderAll();
+    } catch (error) {
+      console.warn('[V19] backend recovery retry failed', error);
+    } finally {
+      recoveryRunning = false;
+    }
+  }
+
+  function startBackendRecovery() {
+    if (recoveryTimer) return;
+    recoveryTimer = setInterval(() => { void tryRecoverBackend(); }, 3000);
+    void tryRecoverBackend();
+  }
+
+  if (typeof api === 'function') {
+    const originalApi = api;
+    api = async function v19ResilientApi(url, options = {}) {
+      try {
+        return await originalApi(url, options);
+      } catch (error) {
+        if (error?.code === 'NETWORK_CONNECTION_INTERRUPTED') startBackendRecovery();
+        throw error;
+      }
+    };
+  }
+
+  window.addEventListener('online', startBackendRecovery);
+  window.__CE_QC_START_BACKEND_RECOVERY__ = startBackendRecovery;
+})();

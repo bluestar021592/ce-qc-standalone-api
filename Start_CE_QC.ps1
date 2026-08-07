@@ -66,54 +66,75 @@ $LogDir = Join-Path $ProjectRoot 'logs'
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 $LogFile = Join-Path $LogDir 'startup_latest.log'
 $ErrFile = Join-Path $LogDir 'startup_error.log'
-Remove-Item -LiteralPath $LogFile -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $ErrFile -Force -ErrorAction SilentlyContinue
+$CrashDir = Join-Path $LogDir 'crashes'
+New-Item -ItemType Directory -Path $CrashDir -Force | Out-Null
 
 $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
 $LocalUrl = 'http://127.0.0.1:5177'
 
-Write-Host ''
-Write-Host 'Starting backend and waiting for the local web application...' -ForegroundColor Cyan
-try {
-    $Backend = Start-Process -FilePath $NodeExe -ArgumentList @('bootstrap.js') -WorkingDirectory $ProjectRoot -PassThru -NoNewWindow -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
-} catch { Fail "[ERROR] Unable to start Node.js backend: $($_.Exception.Message)" 17 }
-
-# /api/health is intentionally behind the internal access gate in V18. An unauthenticated
-# launcher must therefore test the root login/application response rather than treating the
-# expected 401 from /api/health as a backend failure.
-$Ready = $false
-$ReadyStatus = 0
-for ($i = 1; $i -le 60; $i++) {
-    Start-Sleep -Seconds 1
-    if ($Backend.HasExited) { break }
-    try {
-        $Response = Invoke-WebRequest $LocalUrl -UseBasicParsing -TimeoutSec 2
-        $ReadyStatus = [int]$Response.StatusCode
-        if ($ReadyStatus -ge 200 -and $ReadyStatus -lt 500) { $Ready = $true; break }
-    } catch {
-        # Windows PowerShell throws for HTTP 4xx. A real HTTP response still proves that
-        # Node/Express is listening; connection-refused/timeouts have no usable response.
-        try {
-            if ($_.Exception.Response) {
-                $ReadyStatus = [int]$_.Exception.Response.StatusCode
-                if ($ReadyStatus -ge 200 -and $ReadyStatus -lt 500) { $Ready = $true; break }
-            }
-        } catch {}
+function Archive-BackendLogs([string]$Reason) {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $safeReason = ($Reason -replace '[^A-Za-z0-9_-]', '_')
+    if (Test-Path -LiteralPath $LogFile) {
+        Copy-Item -LiteralPath $LogFile -Destination (Join-Path $CrashDir "${stamp}_${safeReason}_stdout.log") -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $ErrFile) {
+        Copy-Item -LiteralPath $ErrFile -Destination (Join-Path $CrashDir "${stamp}_${safeReason}_stderr.log") -Force -ErrorAction SilentlyContinue
     }
 }
 
-if (-not $Ready) {
-    Write-Host ''
-    Write-Host '[ERROR] Backend did not become reachable on 127.0.0.1:5177.' -ForegroundColor Red
-    if ($Backend.HasExited) { Write-Host "Node process exited early. Exit code: $($Backend.ExitCode)" -ForegroundColor Red }
-    else { Write-Host 'Node process is running but the local web application is unreachable.' -ForegroundColor Red; Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue }
+function Start-BackendInstance {
+    Remove-Item -LiteralPath $LogFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $ErrFile -Force -ErrorAction SilentlyContinue
+    return Start-Process -FilePath $NodeExe -ArgumentList @('bootstrap.js') -WorkingDirectory $ProjectRoot -PassThru -NoNewWindow -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
+}
+
+function Wait-BackendReady($Backend, [int]$Seconds = 60) {
+    $status = 0
+    for ($i = 1; $i -le $Seconds; $i++) {
+        Start-Sleep -Seconds 1
+        if ($Backend.HasExited) { break }
+        try {
+            $Response = Invoke-WebRequest $LocalUrl -UseBasicParsing -TimeoutSec 2
+            $status = [int]$Response.StatusCode
+            if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
+        } catch {
+            try {
+                if ($_.Exception.Response) {
+                    $status = [int]$_.Exception.Response.StatusCode
+                    if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
+                }
+            } catch {}
+        }
+    }
+    return @{ Ready = $false; Status = $status }
+}
+
+function Show-RecentBackendLogs {
     Write-Host ''
     Write-Host '--- startup_latest.log ---' -ForegroundColor Yellow
     if (Test-Path -LiteralPath $LogFile) { Get-Content -LiteralPath $LogFile -Tail 160 -ErrorAction SilentlyContinue }
     Write-Host ''
     Write-Host '--- startup_error.log ---' -ForegroundColor Yellow
     if (Test-Path -LiteralPath $ErrFile) { Get-Content -LiteralPath $ErrFile -Tail 160 -ErrorAction SilentlyContinue }
+}
+
+Write-Host ''
+Write-Host 'Starting backend and waiting for the local web application...' -ForegroundColor Cyan
+try { $Backend = Start-BackendInstance } catch { Fail "[ERROR] Unable to start Node.js backend: $($_.Exception.Message)" 17 }
+$Probe = Wait-BackendReady $Backend 60
+
+if (-not $Probe.Ready) {
+    Archive-BackendLogs 'initial_start_failure'
+    Write-Host ''
+    Write-Host '[ERROR] Backend did not become reachable on 127.0.0.1:5177.' -ForegroundColor Red
+    if ($Backend.HasExited) { Write-Host "Node process exited early. Exit code: $($Backend.ExitCode)" -ForegroundColor Red }
+    else {
+        Write-Host 'Node process is running but the local web application is unreachable.' -ForegroundColor Red
+        Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue
+    }
+    Show-RecentBackendLogs
     Fail '[ERROR] CE QC startup verification failed. Send this screen to ChatGPT.' 18
 }
 
@@ -123,28 +144,64 @@ try {
         Where-Object { $_.IPAddress -notmatch '^127\.' -and $_.IPAddress -notmatch '^169\.254\.' } |
         Select-Object -First 1 -ExpandProperty IPAddress
 } catch {}
-
 $LanUrl = if ($LanIp) { "http://$LanIp`:5177" } else { '' }
+
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor Green
 Write-Host 'BACKEND READY - local web response verified' -ForegroundColor Green
 Write-Host "Local URL: $LocalUrl" -ForegroundColor Green
 if ($LanUrl) { Write-Host "LAN URL: $LanUrl" -ForegroundColor Green }
-Write-Host "Local HTTP status: $ReadyStatus" -ForegroundColor Green
+Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green
 Write-Host "Startup log: $LogFile"
+Write-Host "Crash archive: $CrashDir"
+Write-Host 'Automatic backend restart: ENABLED (max 5 crashes / 10 minutes).' -ForegroundColor Green
 Write-Host 'Keep this window open while using CE QC.' -ForegroundColor Yellow
 Write-Host '===============================================' -ForegroundColor Green
 Write-Host ''
 
 if (-not $env:CI) { try { Start-Process $LocalUrl | Out-Null } catch {} }
 
-while (-not $Backend.HasExited) { Start-Sleep -Seconds 2 }
-$ExitCode = $Backend.ExitCode
-Write-Host ''
-Write-Host "[ERROR] CE QC backend stopped. Exit code: $ExitCode" -ForegroundColor Red
-Write-Host 'Recent startup output:' -ForegroundColor Yellow
-if (Test-Path -LiteralPath $LogFile) { Get-Content -LiteralPath $LogFile -Tail 120 -ErrorAction SilentlyContinue }
-if (Test-Path -LiteralPath $ErrFile) { Get-Content -LiteralPath $ErrFile -Tail 120 -ErrorAction SilentlyContinue }
-Write-Host ''
-Read-Host 'Press Enter to exit'
-exit $ExitCode
+# Supervise Node instead of letting a single unexpected exit permanently disconnect
+# the browser. Runtime state is persisted in SQLite/checkpoints, so a fresh Node process
+# is safer than continuing inside a process after an uncaught fatal error.
+$RestartTimes = New-Object System.Collections.Generic.List[datetime]
+while ($true) {
+    while (-not $Backend.HasExited) { Start-Sleep -Seconds 2 }
+
+    $ExitCode = $Backend.ExitCode
+    Archive-BackendLogs "exit_$ExitCode"
+    Write-Host ''
+    Write-Host "[WARN] CE QC backend stopped. Exit code: $ExitCode" -ForegroundColor Red
+    Show-RecentBackendLogs
+
+    $now = Get-Date
+    $recent = @($RestartTimes | Where-Object { $_ -gt $now.AddMinutes(-10) })
+    $RestartTimes.Clear()
+    foreach ($time in $recent) { $RestartTimes.Add($time) }
+    if ($RestartTimes.Count -ge 5) {
+        Fail '[ERROR] Backend crashed 5 times within 10 minutes. Automatic restart stopped to prevent a crash loop. Send this screen and logs\crashes to ChatGPT.' 19
+    }
+    $RestartTimes.Add($now)
+
+    Write-Host ''
+    Write-Host "Automatic recovery: restarting backend in 3 seconds... ($($RestartTimes.Count)/5)" -ForegroundColor Yellow
+    Start-Sleep -Seconds 3
+
+    try { $Backend = Start-BackendInstance } catch {
+        Write-Host "[WARN] Restart process creation failed: $($_.Exception.Message)" -ForegroundColor Red
+        Start-Sleep -Seconds 3
+        continue
+    }
+
+    $Probe = Wait-BackendReady $Backend 45
+    if ($Probe.Ready) {
+        Write-Host ''
+        Write-Host 'BACKEND RECOVERED - browser can reconnect automatically.' -ForegroundColor Green
+        Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green
+        continue
+    }
+
+    Archive-BackendLogs 'restart_not_ready'
+    if (-not $Backend.HasExited) { Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue }
+    Write-Host '[WARN] Restarted process did not become ready; supervisor will retry.' -ForegroundColor Red
+}
