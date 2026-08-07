@@ -81,6 +81,7 @@ jobs:
             'test/v12-business-rule-hardening.test.js',
             'test/v13-unified-import-hardening.test.js',
             'test/v13-export-link-region-hardening.test.js',
+            'test/v14-pod-lock-carryover.test.js',
             'test/v9-period-range.test.js',
             'test/v9-special-nodes.test.js'
           )
