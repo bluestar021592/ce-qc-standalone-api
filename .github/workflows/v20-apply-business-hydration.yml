@@ -1,0 +1,42 @@
+name: V20 apply business page import hydration
+
+on:
+  push:
+    branches:
+      - chatgpt/v20-business-page-import-hydration-20260807
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    if: ${{ !contains(github.event.head_commit.message, '[v20-applied]') }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply V20 exact-date hydration patch
+        run: node scripts/apply-v20-business-page-import-hydration.mjs
+      - name: Syntax checks
+        shell: pwsh
+        run: |
+          node --check public/app.js
+          node --check src/unifiedImportStore.js
+      - name: Run regression tests
+        run: npm test
+      - name: Commit patched sources
+        shell: pwsh
+        run: |
+          git config user.name "chatgpt-qc-bot"
+          git config user.email "chatgpt-qc-bot@users.noreply.github.com"
+          git add public/app.js src/unifiedImportStore.js test/v20-business-page-import-hydration.test.js
+          if (git diff --cached --quiet) { Write-Host "No source changes to commit"; exit 0 }
+          git commit -m "Fix exact-date business page import hydration [v20-applied]"
+          git push origin HEAD
