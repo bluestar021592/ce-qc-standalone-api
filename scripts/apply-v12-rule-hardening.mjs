@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 function replaceExact(file, before, after, expected = 1) {
-  let text = fs.readFileSync(file, 'utf8');
+  let text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   const count = text.split(before).length - 1;
   if (count !== expected) throw new Error(`${file}: expected ${expected} occurrence(s), found ${count}`);
   text = text.split(before).join(after);
