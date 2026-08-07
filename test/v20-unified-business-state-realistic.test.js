@@ -9,9 +9,10 @@ import test from 'node:test';
 // after import, before scan/track processing exists.
 test('exact unified snapshot hydrates all five imported business slices before processing', async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-v20-'));
-  process.env.CE_QC_DB_PATH = path.join(temp, 'v20.db');
+  process.env.DATA_DIR = temp;
+  process.env.DB_FILE = path.join(temp, 'v20.db');
 
-  const [{ getDb }, store] = await Promise.all([
+  const [{ getDb, closeDb }, store] = await Promise.all([
     import('../src/db.js'),
     import('../src/unifiedImportStore.js')
   ]);
@@ -28,14 +29,14 @@ test('exact unified snapshot hydrates all five imported business slices before p
     ['VN001', 'SHOPEEVN', 'PV']
   ];
 
-  db.prepare(`INSERT INTO unified_snapshots(snapshotId,reportDate,sourceFileName,sourceFileHash,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)`)
-    .run(snapshotId, reportDate, 'fixture.xlsx', 'fixture-hash', 'IMPORTED', now, now);
-  db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceFileName,fileHash,status,dateDetectionSource,dateCandidatesJson,dateWasManuallyCorrected,regionCountsJson,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  db.prepare(`INSERT INTO unified_snapshots(snapshotId,batchId,reportDate,status,payloadJson,createdAt) VALUES(?,?,?,?,?,?)`)
+    .run(snapshotId, batchId, reportDate, 'IMPORTED', '{}', now);
+  db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,dateDetectionSource,dateCandidatesJson,dateWasManuallyCorrected,regionCountsJson,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(batchId, snapshotId, reportDate, 'fixture.xlsx', 'fixture-hash', 'VALID', 'MANUAL', '[]', 0, JSON.stringify({ PP: 3, PV: 2 }), JSON.stringify({ validUniqueWaybills: 5 }), '[]', now);
 
-  const insert = db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,shipmentCode,recipientRaw,recipientNormalized,businessType,classificationReason,regionCode,provinceRaw,provinceNormalized,rawJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insert = db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   for (const [shipmentCode, businessType, regionCode] of rows) {
-    insert.run(batchId, snapshotId, reportDate, shipmentCode, businessType, businessType, businessType, 'TEST', regionCode, '', '', JSON.stringify({ shipmentCode }), now);
+    insert.run(batchId, snapshotId, reportDate, businessType, shipmentCode, regionCode, businessType, businessType, 'Fixture', 1, 'TEST', JSON.stringify({ shipmentCode }), now);
   }
 
   for (const type of ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']) {
@@ -47,4 +48,6 @@ test('exact unified snapshot hydrates all five imported business slices before p
     assert.equal(state.dailyParseRows.length, 1);
     assert.equal(state.pnhBills[0], rows.find(row => row[1] === type)[0]);
   }
+
+  closeDb();
 });
