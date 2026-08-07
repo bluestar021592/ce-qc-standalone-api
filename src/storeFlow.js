@@ -1,10 +1,6 @@
 import crypto from 'crypto';
-import { isNormalFinalHubCode } from './shopCodes.js';
-import {
-  SHOP_WHITELIST_VERSION,
-  extractStructuredShopCodes,
-  latestShopCodeMap
-} from './shopWhitelist.js';
+import { getShopCodeMap, isNormalFinalHubCode } from './shopCodes.js';
+import { SHOP_WHITELIST_VERSION } from './shopWhitelist.js';
 
 const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|改派/i;
 const POD_RE = /\bpod\b|delivered|签收|妥投/i;
@@ -12,9 +8,12 @@ const RETURN_RE = /\breturn(?:ed)?\b|退回|返仓|退件/i;
 const DELIVERY_RE = /delivery|派件分配|派送中|out\s*for\s*delivery/i;
 const OUTBOUND_RE = /\boutbound\b|离开网点|货物离开|发往|转往|下一个网点/i;
 const INBOUND_RE = /\binbound\b|到达网点|货物到达|到达门店|入库/i;
+const STRUCTURED_SHOP_CODE_RE = /(?:^|[^A-Z0-9])((?:CP|FS)\s*\d{6}|(?:PV|PNH)\s*\d{3})(?![A-Z0-9])/gi;
 
 export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = '', isPod = false, isReturned = false } = {}) {
-  const whitelist = latestShopCodeMap();
+  // Always use the runtime map. In production this preserves the full persisted CP/FS/PV/PNH
+  // whitelist from SQLite even when the signed source JSON is not present in the source tree.
+  const whitelist = getShopCodeMap();
   const sorted = [...(events || [])]
     .map((event, index) => ({ event, index }))
     .sort((a, b) => eventKey(a.event).localeCompare(eventKey(b.event)) || a.index - b.index)
@@ -119,7 +118,15 @@ function structuredCodes(event) {
     event?.deliveryShop, event?.trackingEventDescZh, event?.trackingEventDesc,
     event?.place, event?.remark
   ];
-  return [...new Set(fields.flatMap(extractStructuredShopCodes))];
+  const out = [];
+  for (const field of fields) {
+    const src = String(field || '').normalize('NFKC').toUpperCase();
+    for (const match of src.matchAll(STRUCTURED_SHOP_CODE_RE)) {
+      const code = String(match[1] || '').replace(/\s+/g, '').toUpperCase();
+      if (code && !out.includes(code)) out.push(code);
+    }
+  }
+  return out;
 }
 
 function eventAction(event) {
