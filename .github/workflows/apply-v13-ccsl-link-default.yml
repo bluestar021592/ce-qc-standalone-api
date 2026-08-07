@@ -1,0 +1,45 @@
+name: Apply V13 CCSL link default
+
+on:
+  push:
+    branches:
+      - chatgpt/v18-unified-import-export-hardening-20260807
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/v18-unified-import-export-hardening-20260807
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Patch localhost fallback for clickable CCSL waybills
+        shell: pwsh
+        run: |
+          $path = 'src/exporter.js'
+          $text = (Get-Content -Raw $path) -replace "`r`n", "`n"
+          $before = "  const base = String(process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || '').replace(/\/$/, '');"
+          $after = "  const base = String(process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || 'http://127.0.0.1:5177').replace(/\/$/, '');"
+          if (-not $text.Contains($before)) { throw 'Could not locate CCSL detailUrl base expression' }
+          $text = $text.Replace($before, $after)
+          [IO.File]::WriteAllText((Resolve-Path $path), $text, [Text.UTF8Encoding]::new($false))
+      - name: Verify source
+        shell: pwsh
+        run: |
+          node --check src/exporter.js
+          if (-not (Select-String -Path src/exporter.js -SimpleMatch "APP_BASE_URL || 'http://127.0.0.1:5177'")) { throw 'Clickable waybill localhost fallback missing' }
+      - name: Commit tested source only
+        shell: pwsh
+        run: |
+          git config user.name "ChatGPT QC Maintainer"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/exporter.js
+          git commit -m "[skip ci] Make CCSL Excel waybill links locally clickable"
+          git push origin HEAD:chatgpt/v18-unified-import-export-hardening-20260807
