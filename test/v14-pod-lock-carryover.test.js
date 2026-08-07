@@ -63,11 +63,15 @@ test('V14 next-day import never reopens an existing POD lock or completed return
   assert.equal(podCurrent.snapshotId, d2.snapshotId);
   assert.equal(retCurrent.state, 'RETURN_COMPLETED');
   assert.equal(retCurrent.apiStatus, 'SUCCESS');
-  assert.deepEqual({ status: podCarry.status, closeReason: podCarry.closeReason }, { status: 'CLOSED', closeReason: 'POD' });
+  assert.equal(podCarry.status, 'CLOSED');
+  assert.equal(podCarry.closeReason, 'POD');
   assert.equal(podCarry.lastReportDate, '2026-08-07');
   assert.equal(podCarry.lastSnapshotId, d2.snapshotId);
-  assert.deepEqual({ status: retCarry.status, closeReason: retCarry.closeReason }, { status: 'CLOSED', closeReason: 'RETURNED' });
-  assert.deepEqual(openCarry, { status: 'OPEN', closeReason: '', lastReportDate: '2026-08-07' });
+  assert.equal(retCarry.status, 'CLOSED');
+  assert.equal(retCarry.closeReason, 'RETURNED');
+  assert.equal(openCarry.status, 'OPEN');
+  assert.equal(openCarry.closeReason, '');
+  assert.equal(openCarry.lastReportDate, '2026-08-07');
 
   const queue = getUnifiedProcessingQueue(d2.batchId);
   assert.deepEqual(queue.rows.map(row => row.shipmentCode), ['OPEN00001']);
