@@ -1,47 +1,17 @@
 @echo off
-setlocal EnableExtensions DisableDelayedExpansion
+setlocal EnableExtensions
 chcp 65001 >nul
 title CE QC Standalone API
 
-if /I "%~1"=="--background" goto :BACKGROUND
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Start_CE_QC.ps1"
+set "EC=%ERRORLEVEL%"
 
-set "SCRIPT_DIR=%~dp0"
-wscript.exe "%SCRIPT_DIR%Start_CE_QC_Silent.vbs"
-exit /b 0
-
-:BACKGROUND
-
-set "SCRIPT_DIR=%~dp0"
-set "PROJECT_DIR=%SCRIPT_DIR%"
-
-if exist "%PROJECT_DIR%package.json" goto :PROJECT_OK
-if exist "%PROJECT_DIR%server.js" goto :PROJECT_OK
-echo [ERROR] Cannot find package.json or server.js in:
-echo %PROJECT_DIR%
-pause
-exit /b 1
-
-:PROJECT_OK
-cd /d "%PROJECT_DIR%"
-if errorlevel 1 (
-  echo [ERROR] Cannot open project folder:
-  echo %PROJECT_DIR%
+if not "%EC%"=="0" (
+  echo.
+  echo CE QC stopped with ErrorLevel=%EC%
+  echo Please send this window and logs\startup_latest.log to ChatGPT.
   pause
-  exit /b 1
 )
 
-where node >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] Node.js was not found in PATH.
-  pause
-  exit /b 1
-)
-
-echo Stopping old server on port 5177 if it exists...
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":5177 .*LISTENING"') do taskkill /PID %%P /F >nul 2>&1
-ping -n 2 127.0.0.1 >nul
-
-echo Starting CE QC standalone API from:
-echo %CD%
-node server.js >> "%PROJECT_DIR%logs\server-output.log" 2>> "%PROJECT_DIR%logs\server-error.log"
-exit /b %ERRORLEVEL%
+endlocal
+exit /b %EC%
