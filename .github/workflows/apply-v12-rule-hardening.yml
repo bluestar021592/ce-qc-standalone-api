@@ -1,0 +1,86 @@
+name: Apply V12 business-rule hardening
+
+on:
+  push:
+    branches:
+      - chatgpt/v18-data-rule-hardening-20260807
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/v18-data-rule-hardening-20260807
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply exact business-rule patch
+        run: node scripts/apply-v12-rule-hardening.mjs
+
+      - name: Syntax checks
+        shell: pwsh
+        run: |
+          node --check src/scanTerminal.js
+          node --check src/analyzer.js
+          node --check src/pipeline.js
+          node --check src/shopeeAnalyzer.js
+          node --check src/reporting.js
+          node --check src/unifiedImportStore.js
+          node --check server.js
+          node --check test/v12-business-rule-hardening.test.js
+
+      - name: Run focused and locked regression suite
+        shell: pwsh
+        run: |
+          $tests = @(
+            'test/dashboard-v18.test.js',
+            'test/data-purge-large-backup.test.js',
+            'test/filename-date-detection.test.js',
+            'test/scan-batch-fallback.test.js',
+            'test/shopee-accounting-dispatch-day.test.js',
+            'test/shopee-cnvn.test.js',
+            'test/shopee-latest-track-classification.test.js',
+            'test/shopee-pv-open-disposition.test.js',
+            'test/shopee-template-export.test.js',
+            'test/store-flow.test.js',
+            'test/store-load-detail.test.js',
+            'test/unified-snapshot-membership.test.js',
+            'test/user-account-management.test.js',
+            'test/v10-pending-and-exclusivity.test.js',
+            'test/v11-terminal-isolation-return.test.js',
+            'test/v12-business-rule-hardening.test.js',
+            'test/v9-period-range.test.js',
+            'test/v9-special-nodes.test.js'
+          )
+          node --test $tests
+
+      - name: Verify V18 UI remains untouched
+        shell: pwsh
+        run: |
+          $html = Get-Content -Raw public/index.html
+          foreach ($needle in @('homeBusinessCards','homeCoreMetrics','homeShopeeSpecial','homeDispatchDistribution','综合日报导入','管理汇总 + 五业务')) {
+            if (-not $html.Contains($needle)) { throw "Locked V18 UI signature missing: $needle" }
+          }
+
+      - name: Remove one-shot patch machinery and commit hardened source
+        shell: pwsh
+        run: |
+          Remove-Item scripts/apply-v12-rule-hardening.mjs -Force
+          Remove-Item .github/workflows/apply-v12-rule-hardening.yml -Force
+          git config user.name "ChatGPT QC Maintainer"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden QC terminal, special-node, carry and work-order rules"
+          git push origin HEAD:chatgpt/v18-data-rule-hardening-20260807
