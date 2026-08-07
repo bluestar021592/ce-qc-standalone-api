@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare exact patcher for all matching carry filters
+        run: node scripts/relax-v12-patcher.mjs
+
       - name: Apply exact business-rule patch
         run: node scripts/apply-v12-rule-hardening.mjs
 
@@ -78,6 +81,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item scripts/apply-v12-rule-hardening.mjs -Force
+          Remove-Item scripts/relax-v12-patcher.mjs -Force
           Remove-Item .github/workflows/apply-v12-rule-hardening.yml -Force
           git config user.name "ChatGPT QC Maintainer"
           git config user.email "actions@users.noreply.github.com"
