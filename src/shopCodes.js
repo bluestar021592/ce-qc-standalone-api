@@ -3,6 +3,7 @@ import { getDb, nowIso } from './db.js';
 import {
   SHOP_WHITELIST_VERSION,
   SHOP_WHITELIST_SOURCE_SHA256,
+  SHOP_WHITELIST_AVAILABLE,
   normalizeShopCode as normalizeLatestShopCode,
   isSupportedShopCode,
   latestShopCodeMap,
@@ -15,18 +16,30 @@ const SHOP_OUTBOUND_RE = /离开网点|货物离开|下一个网点|发往|转�
 const NORMAL_FINAL_HUB_CODES = new Set(['CCSLCN', 'CCSLPDD']);
 
 export function ensureDefaultShopCodes() {
-  seedLatestShopWhitelist(getDb());
+  return seedLatestShopWhitelist(getDb());
 }
 
 export function getShopCodeMap() {
-  ensureDefaultShopCodes();
-  return latestShopCodeMap();
+  const db = getDb();
+  seedLatestShopWhitelist(db);
+
+  const signed = latestShopCodeMap();
+  if (signed.size) return signed;
+
+  return loadPersistedShopCodeMap(db);
 }
 
 export function getShopCodeSummary() {
-  ensureDefaultShopCodes();
-  const count = latestShopCodeMap().size;
-  return { count, version: SHOP_WHITELIST_VERSION, sourceSha256: SHOP_WHITELIST_SOURCE_SHA256 };
+  const db = getDb();
+  const seeded = seedLatestShopWhitelist(db);
+  const map = latestShopCodeMap();
+  const count = map.size || loadPersistedShopCodeMap(db).size;
+  return {
+    count,
+    version: seeded?.version || SHOP_WHITELIST_VERSION,
+    sourceSha256: seeded?.sourceSha256 || SHOP_WHITELIST_SOURCE_SHA256,
+    source: SHOP_WHITELIST_AVAILABLE && map.size ? 'SIGNED_FILE' : 'SQLITE_PERSISTED'
+  };
 }
 
 export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
@@ -37,7 +50,8 @@ export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
     for (const row of rows) {
       const cells = (row || []).map(cell => String(cell || '').trim()).filter(Boolean);
       const text = cells.join(' ');
-      for (const code of extractShopCodes(text, new Set(cells.map(normalizeShopCode).filter(isSupportedShopCode)))) {
+      const structured = new Set(cells.map(normalizeShopCode).filter(isSupportedShopCode));
+      for (const code of extractShopCodes(text, structured)) {
         found.set(code, pickShopName(cells, code));
       }
     }
@@ -135,6 +149,39 @@ export function extractShopCodes(text, codeSet) {
     const code = normalizeShopCode(match[1]);
     if (codeSet.has(code) && !out.includes(code)) out.push(code);
   }
+  return out;
+}
+
+function loadPersistedShopCodeMap(db) {
+  const out = new Map();
+
+  try {
+    const active = db.prepare(`
+      SELECT e.shopCode, e.shopName
+      FROM shop_whitelist_entries e
+      JOIN shop_whitelist_versions v ON v.version=e.version
+      WHERE v.active=1 AND e.classificationEnabled=1
+      ORDER BY e.shopCode
+    `).all();
+    for (const row of active || []) {
+      const code = normalizeShopCode(row.shopCode);
+      if (isSupportedShopCode(code)) out.set(code, String(row.shopName || code).trim() || code);
+    }
+  } catch {}
+
+  // The production database already contains the full current set (including CP/FS/PV/PNH)
+  // in shop_cp_codes. Use it as a durable fallback when the signed source workbook/JSON is not
+  // present in a clean source checkout. Never truncate this persisted set during startup.
+  if (!out.size) {
+    try {
+      const legacy = db.prepare('SELECT shopCode, shopName FROM shop_cp_codes ORDER BY shopCode').all();
+      for (const row of legacy || []) {
+        const code = normalizeShopCode(row.shopCode);
+        if (isSupportedShopCode(code)) out.set(code, String(row.shopName || code).trim() || code);
+      }
+    } catch {}
+  }
+
   return out;
 }
 
