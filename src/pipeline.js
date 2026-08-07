@@ -5,6 +5,7 @@ import { getShopCodeMap } from './shopCodes.js';
 import { analyzeShopeeShipment, classifyShopeeScanStatus, SHOPEE_ANALYSIS_RULE_VERSION } from './shopeeAnalyzer.js';
 import { queryBatchWithFallback, queryTrackBatchWithFallback, splitTrackBatches, TRACK_QUERY_BATCH_SIZE } from './trackBatching.js';
 import { classifyScanTerminal } from './scanTerminal.js';
+import { isSpecialCategory } from './specialNode.js';
 
 const ORDER_BATCH_SIZE = Number(process.env.ORDER_BATCH_SIZE || 350);
 const TRACK_CONCURRENCY = Number(process.env.TRACK_CONCURRENCY || 1);
@@ -216,7 +217,7 @@ export async function runQcPipeline({
   const nextCarryBills = cleanBills([...trackResults, ...retryRows]
     .filter(row => row.是否POD !== '是' && row.退回状态 !== '已退回')
     .filter(row => !isNormalFinalDiversionRow(row))
-    .filter(row => row.specialState !== 'SELF_PICKUP' && row.primaryCategory !== '仓库自提')
+    .filter(row => !isSpecialCategory(row) && row.primaryCategory !== '仓库自提')
     .map(row => row.运单号))
     .filter(wb => !podSet.has(wb));
 
@@ -389,7 +390,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   const finalRows = uniqueRows([...lockedPodRows.map(row => ({ ...row, primaryCategory: 'POD', 主分类: 'POD', 异常分类: 'POD', carry状态: 'closed_pod', 跨日状态: '已闭环', 入库无扫描节点: '否' })), ...trackResults]);
   const nextCarryBills = cleanAnyBills(finalRows
     .filter(row => row.是否POD !== '是' && row.退回状态 !== '已退回')
-    .filter(row => row.specialState !== 'SELF_PICKUP' && row.primaryCategory !== '仓库自提')
+    .filter(row => !isSpecialCategory(row) && row.primaryCategory !== '仓库自提')
     .map(billOf))
     .filter(bill => !podSet.has(bill));
   const completedAt = new Date();
@@ -478,7 +479,7 @@ export function reconcileShopeeStateFromEvidence(state = {}, options = {}) {
   for (const row of finalRows) if (row.是否POD === '是') podLocks.add(billOf(row));
   const nextCarryBills = [...new Set(finalRows
     .filter(row => row.是否POD !== '是' && row.退回状态 !== '已退回')
-    .filter(row => row.specialState !== 'SELF_PICKUP' && row.primaryCategory !== '仓库自提')
+    .filter(row => !isSpecialCategory(row) && row.primaryCategory !== '仓库自提')
     .map(billOf)
     .filter(Boolean))];
   return {

@@ -11,8 +11,8 @@ export function classifyScanTerminal(row = {}, requestStatus = 'success') {
   const text = [row.statusText, row.statusName, row.statusDesc, row.shipmentStatusDesc, row.trackingStatus, row.scanCategory, row.扫描分类]
     .map(value => String(value || '').trim()).filter(Boolean).join(' ');
 
-  if (orderStatus === '85' || statusCode === 'Y') {
-    return result('POD', false, 'POD_COMPLETED', orderStatus === '85' ? 'ORDER_STATUS_85' : `STATUS_${statusCode || 'TEXT'}`);
+  if (orderStatus === '85') {
+    return result('POD', false, 'POD_COMPLETED', 'ORDER_STATUS_85');
   }
   if (statusCode === 'PR' || statusCode === 'P4007' || RETURN_PROGRESS_TEXT.test(text)) {
     return result('RETURN_IN_PROGRESS', true, '', `STATUS_${statusCode || 'TEXT'}`);

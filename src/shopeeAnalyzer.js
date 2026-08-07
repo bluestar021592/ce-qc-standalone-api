@@ -90,7 +90,7 @@ export function analyzeShopeeShipment({
   const currentPendingDays = pending.activeDays || (pending.returnRequired ? pending.maxDays : 0);
   const apiState = apiFailed ? '失败' : '成功';
   const queryState = apiFailed ? 'refresh_failed' : 'success';
-  const closed = isPod || isReturned || special?.specialState === 'SELF_PICKUP';
+  const closed = isPod || isReturned || Boolean(special);
   const recipientSource = Object.keys(dailyRow || {}).length ? dailyRow : priorRow;
 
   return {
@@ -183,7 +183,7 @@ export function analyzeShopeeShipment({
     API状态: apiState,
     查询状态: queryState,
     apiStatus: { shipment: apiStatus.shipment || '', event: apiStatus.event || '', exception: apiStatus.exception || '' },
-    carry状态: closed ? (isPod ? 'closed_pod' : (isReturned ? 'closed_return' : 'closed_self_pickup')) : 'active',
+    carry状态: closed ? (isPod ? 'closed_pod' : (isReturned ? 'closed_return' : `closed_${String(special?.specialState || 'special').toLowerCase()}`)) : 'active',
     跨日状态: closed ? '已闭环' : (scanRow?.来源类型 === '旧跨日' ? '跨日续查' : '当日'),
     latestEventTime: last?.eventTime || priorRow.latestEventTime || '',
     latestEventDesc: last ? eventText(last) : (priorRow.latestEventDesc || ''),

@@ -157,7 +157,7 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
     judgment = `最后节点日期早于日报日期${stats.节点未更新天数 || 0}天，需确认包裹是否无动作`;
   }
 
-  if (category === 'éœ€äººå·¥å¤æ ¸' && workOrder.unprocessed) {
+  if (category === '需人工复核' && workOrder.unprocessed) {
     category = '工单未处理';
     judgment = '存在明确工单事件，且工单后没有更晚的有效业务处理节点';
   }
@@ -174,7 +174,7 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
     shopInfo,
     evidence: {
       ...lastEvidence,
-      matchedRule: shopInfo.matchedRule || matchedRuleForCategory(category)
+      matchedRule: category === '工单未处理' ? matchedRuleForCategory(category) : (shopInfo.matchedRule || matchedRuleForCategory(category))
     },
     counts: {
       ...stats,
@@ -581,7 +581,8 @@ function matchedRuleForCategory(category) {
     '派件分配2天+': 'ASSIGN_DAYS_2_PLUS',
     '包裹无动作': 'NO_TRACK_EVENT',
     '节点日期未更新': 'STALE_LAST_EVENT',
-    '入库无扫描': 'INBOUND_WITHOUT_DELIVERY_SCAN'
+    '入库无扫描': 'INBOUND_WITHOUT_DELIVERY_SCAN',
+    '工单未处理': 'WORK_ORDER_UNPROCESSED'
   };
   return rules[category] || 'MANUAL_REVIEW';
 }
