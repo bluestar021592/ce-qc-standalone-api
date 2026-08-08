@@ -22,7 +22,10 @@ jobs:
           node --check bootstrap.js
           node --check src/v27ServerPatch.js
           node --check src/v27TrendPatch.js
+          node --check src/v27CarryBusinessPatch.js
           node --check public/v27-dashboard-fix.js
+          node --check public/v27-trend-mount-fix.js
+          node --check public/v27-carry-business-filter.js
           node --check public/v14-geometry-fixture.js
       - name: V27 regression test
         run: node --test test/v27-dashboard-interaction.test.js test/v27-sql-runtime.test.js
