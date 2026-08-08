@@ -152,7 +152,9 @@ if (!new URLSearchParams(location.search).has('visualTest')) {
   }
   loadRuntimeScript('/v27-dashboard-fix.js?v=20260808-v27-2', () => {
     loadRuntimeScript('/v27-trend-mount-fix.js?v=20260808-v27-trend-1', () => {
-      loadRuntimeScript('/v27-carry-business-filter.js?v=20260808-v27-carry-1');
+      loadRuntimeScript('/v27-carry-business-filter.js?v=20260809-v29-carry-1', () => {
+        loadRuntimeScript('/v29-data-consistency-fix.js?v=20260809-v29-1');
+      });
     });
   });
 }
