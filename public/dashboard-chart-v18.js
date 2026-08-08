@@ -5,19 +5,29 @@
   const svgNode = (tag, attrs = {}) => { const node = document.createElementNS(svgNs, tag); Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value)); return node; };
 
   function render(container, chart) {
+    chart = {
+      ...(chart || {}),
+      dates: Array.isArray(chart?.dates) ? chart.dates : [],
+      series: (Array.isArray(chart?.series) ? chart.series : []).map(series => ({
+        ...(series || {}),
+        values: Array.isArray(series?.values) ? series.values : [],
+        numerators: Array.isArray(series?.numerators) ? series.numerators : [],
+        denominators: Array.isArray(series?.denominators) ? series.denominators : []
+      }))
+    };
     container.innerHTML = '<div class="v18-chart-head"><h3></h3><span>近7天</span></div><div class="v18-chart-legend"></div><div class="v18-chart-plot"></div><div class="v18-chart-current"></div><p class="v18-chart-note">当前值与曲线最后有效节点保持一致</p>';
-    container.querySelector('h3').textContent = chart.title;
+    container.querySelector('h3').textContent = chart.title || '趋势';
     const legend = container.querySelector('.v18-chart-legend');
     chart.series.forEach(series => { const item = document.createElement('span'); const mark = document.createElement('i'); mark.style.background = series.color; item.append(mark, document.createTextNode(series.name)); legend.appendChild(item); });
 
     const width = 360, height = 158, pad = { l: 42, r: 54, t: 18, b: 30 };
-    const svg = svgNode('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': chart.title });
+    const svg = svgNode('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': chart.title || '趋势' });
     const clipId = `v18clip-${Math.random().toString(36).slice(2)}`;
     const defs = svgNode('defs'), clip = svgNode('clipPath', { id: clipId });
     clip.appendChild(svgNode('rect', { x: pad.l, y: pad.t, width: width - pad.l - pad.r, height: height - pad.t - pad.b })); defs.appendChild(clip); svg.appendChild(defs);
     const all = chart.series.flatMap(series => series.values).filter(value => value !== null);
     const maxData = Math.max(...all, 1);
-    const max = chart.type === 'rate' ? (chart.oc ? Math.max(3, maxData * 1.25) : 100) : Math.ceil(maxData / 1000) * 1000;
+    const max = chart.type === 'rate' ? (chart.oc ? Math.max(3, maxData * 1.25) : 100) : Math.max(1000, Math.ceil(maxData / 1000) * 1000);
     for (let index = 0; index <= 3; index += 1) {
       const y = pad.t + (height - pad.t - pad.b) * index / 3;
       svg.appendChild(svgNode('line', { x1: pad.l, x2: width - pad.r, y1: y, y2: y, class: 'v18-grid' }));
@@ -34,11 +44,8 @@
         const x = pad.l + (width - pad.l - pad.r) * index / Math.max(1, chart.dates.length - 1), y = pad.t + (height - pad.t - pad.b) * (1 - value / max);
         segment.push({ x, y }); lastPoint = { x, y, value };
         const dot = svgNode('circle', { cx: x, cy: y, r: 3, fill: series.color, 'clip-path': `url(#${clipId})` }), title = svgNode('title');
-        const numerator = series.numerators[index], denominator = series.denominators[index]; title.textContent = `${chart.dates[index]} · ${series.name} · ${Number.isFinite(numerator) && Number.isFinite(denominator) ? `${numerator}/${denominator} · ` : ''}${fmt(value, chart.type)}`; dot.appendChild(title); svg.appendChild(dot);
+        const numerator = series.numerators[index], denominator = series.denominators[index]; title.textContent = `${chart.dates[index] || '—'} · ${series.name} · ${Number.isFinite(numerator) && Number.isFinite(denominator) ? `${numerator}/${denominator} · ` : ''}${fmt(value, chart.type)}`; dot.appendChild(title); svg.appendChild(dot);
       });
-      // Missing dates stay missing, but real snapshots on either side remain one
-      // chronological series. This avoids hiding a valid trend merely because a
-      // non-processing day exists between two completed snapshots.
       if (segment.length >= 2) svg.appendChild(svgNode('polyline', { points: segment.map(point => `${point.x},${point.y}`).join(' '), fill: 'none', stroke: series.color, 'stroke-width': '2.2', 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'clip-path': `url(#${clipId})` }));
       if (!lastPoint) return;
       const baseY = Math.max(13, Math.min(height - pad.b - 4, lastPoint.y - 7));
@@ -62,7 +69,7 @@
       item.querySelector('span').textContent = `${series.name} 当前`; item.querySelector('b').style.color = series.color; item.querySelector('b').textContent = fmt(value, chart.type);
       item.querySelector('small').textContent = delta === null ? '较昨日 —' : `较昨日 ${delta >= 0 ? '↑' : '↓'}${Math.abs(delta).toFixed(2)}${chart.type === 'rate' ? '%' : ''}`;
       current.appendChild(item);
-      if (value !== global.DashboardDataAdapterV18.last(series.values)) container.dataset.bindingError = 'true';
+      if (global.DashboardDataAdapterV18 && value !== global.DashboardDataAdapterV18.last(series.values)) container.dataset.bindingError = 'true';
     });
   }
   global.RateTrendCardV18 = { render };
