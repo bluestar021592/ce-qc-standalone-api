@@ -60,9 +60,6 @@ process.on('unhandledRejection', reason => {
   console.error('[CE-QC][UNHANDLED_REJECTION]', reason);
 });
 
-// Do not attempt to continue inside a process after an uncaught exception. The
-// Windows launcher supervises Node and starts a fresh process from persisted SQLite
-// checkpoints. This monitor guarantees the fatal stack is written to stderr first.
 process.on('uncaughtExceptionMonitor', (error, origin) => {
   console.error('[CE-QC][UNCAUGHT_EXCEPTION_FATAL]', origin || '', error?.stack || error);
 });
@@ -72,11 +69,9 @@ process.on('warning', warning => {
 });
 
 try {
-  // V27 is installed before server.js registers routes. It replaces the expensive
-  // startup bootstrap with a SQLite aggregate payload and registers lazy detail,
-  // cross-day carry monitoring and lightweight trend APIs without changing V18 UI.
   await import('./src/v27ServerPatch.js');
   await import('./src/v27TrendPatch.js');
+  await import('./src/v27CarryBusinessPatch.js');
   await import('./server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);

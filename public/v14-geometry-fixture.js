@@ -42,8 +42,6 @@ if (new URLSearchParams(location.search).has('visualTest')) {
   new MutationObserver(applyV16TestIds).observe(document.getElementById('homePage'), { childList: true, subtree: true });
 }
 
-// V19 stability guard. This file is intentionally loaded after app.js so it can
-// protect the locked V18 UI without changing its layout or styling.
 (function installV19StabilityGuard() {
   if (new URLSearchParams(location.search).has('visualTest')) return;
 
@@ -84,10 +82,6 @@ if (new URLSearchParams(location.search).has('visualTest')) {
     };
   }
 
-  // Never let an exact five-business page fall back to the legacy CCSL/SHOPEE
-  // aggregate state. That fallback is what can make ALI1688 display an unrelated
-  // old report date (for example a legacy 2026-05-31 state) when its exact snapshot
-  // request fails or the backend drops during navigation.
   if (typeof currentBusinessState === 'function' && typeof currentBusinessType === 'function') {
     currentBusinessState = function v19CurrentBusinessState() {
       const type = currentBusinessType();
@@ -148,11 +142,17 @@ if (new URLSearchParams(location.search).has('visualTest')) {
   window.__CE_QC_START_BACKEND_RECOVERY__ = startBackendRecovery;
 })();
 
-// V27 is a runtime-only interaction/performance layer. Loading it here preserves
-// the locked V18 HTML/CSS geometry while fixing lazy details, trends and carryover.
 if (!new URLSearchParams(location.search).has('visualTest')) {
-  const script = document.createElement('script');
-  script.src = '/v27-dashboard-fix.js?v=20260808-v27-1';
-  script.async = false;
-  document.head.appendChild(script);
+  function loadRuntimeScript(src, done) {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = false;
+    if (done) script.onload = done;
+    document.head.appendChild(script);
+  }
+  loadRuntimeScript('/v27-dashboard-fix.js?v=20260808-v27-2', () => {
+    loadRuntimeScript('/v27-trend-mount-fix.js?v=20260808-v27-trend-1', () => {
+      loadRuntimeScript('/v27-carry-business-filter.js?v=20260808-v27-carry-1');
+    });
+  });
 }
