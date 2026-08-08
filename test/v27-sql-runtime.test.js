@@ -27,9 +27,9 @@ function seed(){
   const now=new Date().toISOString();
   db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,'VALID','{}','[]',?)`).run('b1','s1','2026-07-29','daily.xlsx','hash',now);
   db.prepare(`INSERT INTO unified_snapshots(snapshotId,batchId,reportDate,status,payloadJson,createdAt) VALUES('s1','b1','2026-07-29','COMPLETED','{}',?)`).run(now);
-  const insImport=db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt) VALUES('b1','s1','2026-07-29',?,?,?,?,?,'VN','S',1,'test','{}',?)`);
-  insImport.run('SHOPEEVN','VN001','PV','SHOPEEVN',now);
-  insImport.run('SHOPEEVN','VN002','PP','SHOPEEVN',now);
+  const insImport=db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt) VALUES('b1','s1','2026-07-29',?,?,?,?,?,'S',1,'test','{}',?)`);
+  insImport.run('SHOPEEVN','VN001','PV','SHOPEEVN','SHOPEEVN',now);
+  insImport.run('SHOPEEVN','VN002','PP','SHOPEEVN','SHOPEEVN',now);
   db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,latestEventTime,latestEventDesc,recipient_raw,recipient_group,podAttemptNo,currentAttemptNo,rawJson,createdAt,updatedAt) VALUES('SHOPEE','VN001','2026-07-29',0,'退回',?,'Returned','SHOPEEVN','VN',0,3,?, ?, ?)`).run(now,JSON.stringify({'退回状态':'已退回','Pending次数':3,'OC天数':1}),now,now);
   db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,latestEventTime,latestEventDesc,recipient_raw,recipient_group,podAttemptNo,currentAttemptNo,rawJson,createdAt,updatedAt) VALUES('SHOPEE','VN002','2026-07-29',1,'POD闭环',?,'POD','SHOPEEVN','VN',2,2,?, ?, ?)`).run(now,JSON.stringify({'Pending次数':1,'OC天数':0}),now,now);
   db.prepare(`INSERT INTO carryover_open_items(shipmentCode,businessType,sourceReportDate,lastReportDate,sourceSnapshotId,lastSnapshotId,status,apiStatus,closeReason,stateJson,createdAt,updatedAt) VALUES('VN001','SHOPEEVN','2026-07-27','2026-07-29','s0','s1','OPEN','OK','',?, ?, ?)`).run(JSON.stringify({lastEventTime:'2026-07-28T10:00:00+07:00',lastEventDesc:'Old node'}),now,now);
