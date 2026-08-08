@@ -8,7 +8,7 @@ import { createWriteStream } from 'fs';
 import ExcelJS from 'exceljs';
 
 import { getRuntimeConfig } from './db.js';
-import { listCompletedUnifiedSnapshots } from './unifiedImportStore.js';
+import { listLightweightCompletedUnifiedSnapshots } from './lightweightDashboardStore.js';
 import { fileHash, recordExport } from './backup.js';
 import { createShopeeTemplateWorkbook } from './shopeeTemplateExporter.js';
 
@@ -23,11 +23,11 @@ const DETAIL_SHEETS = [
   ['17_580滞留单号', row => row.specialState === 'CCSL580_RETENTION']
 ];
 
-export async function exportPeriodReports({ periodType = 'daily', date, businessType = 'ALL' }) {
-  const range = periodRange(periodType, date);
-  const snapshots = listCompletedUnifiedSnapshots(range.from, range.to);
-  if (!snapshots.length) throw new Error(`${range.from} 至 ${range.to} 没有 VALID + COMPLETED 日快照，不能导出。`);
+export async function exportPeriodReports({ periodType = 'daily', date, fromDate = '', toDate = '', businessType = 'ALL' }) {
+  const range = periodType === 'custom' ? customPeriodRange(fromDate, toDate) : periodRange(periodType, date);
   const types = businessType === 'ALL' ? BUSINESSES : [normalizeBusiness(businessType)];
+  const snapshots = listLightweightCompletedUnifiedSnapshots(range.from, range.to, types);
+  if (!snapshots.length) throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的日报数据，不能导出。`);
   const outputDir = getRuntimeConfig().exportsDir;
   await fs.mkdir(outputDir, { recursive: true });
   const files = [];
@@ -222,6 +222,15 @@ function dashboardMetrics(rows, range) {
   };
   metrics.returnRate = all ? metrics.returned / all : 0;
   return metrics;
+}
+
+function customPeriodRange(fromDate, toDate) {
+  const valid = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+  if (!valid(fromDate) || !valid(toDate)) throw new Error('请选择有效的开始日期和结束日期。');
+  if (fromDate > toDate) throw new Error('开始日期不能晚于结束日期。');
+  const days = Math.floor((new Date(`${toDate}T00:00:00Z`) - new Date(`${fromDate}T00:00:00Z`)) / 86400000) + 1;
+  if (days > 180) throw new Error('为保证导出稳定，单次日期范围最多180天。');
+  return { from: fromDate, to: toDate, key: `${fromDate}_${toDate}` };
 }
 
 export function periodRange(type, value) {

@@ -12,7 +12,7 @@ import { parseLongBackupModules } from './src/backupParser.js';
 import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
 import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
-import { loadLightweightAggregateState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';
+import { loadLightweightAggregateState, loadLightweightPeriodBusinessState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';
 import { summarizeLightweightCcslState, summarizeLightweightShopeeState } from './src/lightweightDashboardSummary.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
@@ -370,32 +370,37 @@ app.get('/api/unified-history', (req, res) => {
 const periodDashboardCache = new Map();
 
 app.get('/api/period-dashboard', (req, res) => {
-  const mode = String(req.query.mode || '').toLowerCase();
-  const anchor = String(req.query.date || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor) || !['weekly', 'monthly'].includes(mode)) {
-    return res.status(400).json({ ok: false, error: '请选择有效日期和周/月周期' });
+  try {
+    const rawFrom = String(req.query.from || '').trim();
+    const rawTo = String(req.query.to || '').trim();
+    const mode = String(req.query.mode || '').toLowerCase();
+    const anchor = String(req.query.date || '').trim();
+    let fromDate = rawFrom;
+    let toDate = rawTo;
+    let resolvedMode = 'custom';
+    if (!fromDate || !toDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor) || !['weekly', 'monthly'].includes(mode)) {
+        return res.status(400).json({ ok: false, error: '请选择有效的开始日期和结束日期。' });
+      }
+      const date = new Date(`${anchor}T12:00:00+07:00`);
+      if (mode === 'weekly') {
+        const mondayOffset = (date.getDay() + 6) % 7;
+        const start = new Date(date); start.setDate(start.getDate() - mondayOffset);
+        const end = new Date(start); end.setDate(end.getDate() + 6);
+        fromDate = localIsoDate(start); toDate = localIsoDate(end);
+      } else {
+        fromDate = `${anchor.slice(0, 7)}-01`;
+        const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12);
+        toDate = localIsoDate(end);
+      }
+      resolvedMode = mode;
+    }
+    const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+    const states = Object.fromEntries(types.map(type => [type, loadLightweightPeriodBusinessState(type, fromDate, toDate)]));
+    res.json({ ok: true, mode: resolvedMode, anchor: anchor || toDate, fromDate, toDate, states });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
   }
-  const date = new Date(`${anchor}T12:00:00+07:00`);
-  let fromDate;
-  let toDate;
-  if (mode === 'weekly') {
-    const mondayOffset = (date.getDay() + 6) % 7;
-    const start = new Date(date); start.setDate(start.getDate() - mondayOffset);
-    const end = new Date(start); end.setDate(end.getDate() + 6);
-    fromDate = localIsoDate(start); toDate = localIsoDate(end);
-  } else {
-    fromDate = `${anchor.slice(0, 7)}-01`;
-    const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12);
-    toDate = localIsoDate(end);
-  }
-  const cacheKey = `${mode}:${fromDate}:${toDate}`;
-  const cached = periodDashboardCache.get(cacheKey);
-  if (cached && Date.now() - cached.createdAt < 5 * 60 * 1000) return res.json(cached.payload);
-  const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
-  const states = Object.fromEntries(types.map(type => [type, loadUnifiedPeriodBusinessState(type, fromDate, toDate)]));
-  const payload = { ok: true, mode, anchor, fromDate, toDate, states };
-  periodDashboardCache.set(cacheKey, { createdAt: Date.now(), payload });
-  res.json(payload);
 });
 
 app.get('/api/shopee/state', async (req, res) => {
@@ -1190,7 +1195,7 @@ app.get('/api/shopee/export-xlsx', async (req, res) => {
 
 app.get('/api/export-period', async (req, res) => {
   try {
-    const result = await exportPeriodReports({ periodType: req.query.periodType || 'daily', date: req.query.date || '', businessType: req.query.businessType || 'ALL' });
+    const result = await exportPeriodReports({ periodType: req.query.periodType || 'daily', date: req.query.date || '', fromDate: req.query.fromDate || '', toDate: req.query.toDate || '', businessType: req.query.businessType || 'ALL' });
     res.download(result.file, path.basename(result.file));
   } catch (error) {
     res.status(400).json({ ok: false, error: error.message });
@@ -1199,7 +1204,7 @@ app.get('/api/export-period', async (req, res) => {
 
 app.post('/api/export-period/prepare', async (req, res) => {
   try {
-    const result = await exportPeriodReports({ periodType: req.body?.periodType || 'daily', date: req.body?.date || '', businessType: req.body?.businessType || 'ALL' });
+    const result = await exportPeriodReports({ periodType: req.body?.periodType || 'daily', date: req.body?.date || '', fromDate: req.body?.fromDate || '', toDate: req.body?.toDate || '', businessType: req.body?.businessType || 'ALL' });
     const files = [...result.files, result.file].filter((value, index, list) => list.indexOf(value) === index).map(file => ({ name: path.basename(file), url: `/api/export-file?name=${encodeURIComponent(path.basename(file))}` }));
     res.json({ ok: true, range: result.range, snapshotIds: result.snapshots, files });
   } catch (error) {

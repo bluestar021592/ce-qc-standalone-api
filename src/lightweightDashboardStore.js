@@ -18,7 +18,7 @@ const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
  * available through the existing per-waybill detail endpoint and is loaded only when
  * the user opens one shipment.
  */
-export function loadLightweightUnifiedBusinessState(businessType, snapshotId = '') {
+export function loadLightweightUnifiedBusinessState(businessType, snapshotId = '', options = {}) {
   const type = normalizeBusinessType(businessType);
   const db = getDb();
   const batch = selectBatch(db, snapshotId);
@@ -46,7 +46,7 @@ export function loadLightweightUnifiedBusinessState(businessType, snapshotId = '
     ORDER BY c.shipmentCode
   `).all(batch.snapshotId, type).map(row => row.shipmentCode);
   const run = loadRun(db, batch.reportDate, type);
-  const historySummary = listLightweightBusinessHistory(type, batch.reportDate, 30);
+  const historySummary = options.includeHistory === false ? [] : listLightweightBusinessHistory(type, batch.reportDate, 30);
   const needTrackBills = scanResults
     .filter(row => Number(row.needsTrackQuery || 0) === 1 && !isPodRow(row))
     .map(billOf)
@@ -328,9 +328,11 @@ function loadScanRows(db, batch, type) {
 }
 
 function normalizeCcslFinalRow(row, type) {
+  const raw = compactParsedFinalRow(row.rawJson);
   const category = row.primaryCategory || row.category || '';
   const pod = Number(row.isPod || 0) === 1;
   return {
+    ...raw,
     shipmentCode: row.shipmentCode,
     运单号: row.shipmentCode,
     businessType: type,
@@ -395,10 +397,12 @@ function normalizeCcslFinalRow(row, type) {
 }
 
 function normalizeShopeeFinalRow(row, type) {
+  const raw = compactParsedFinalRow(row.rawJson);
   const category = row.currentMainCategory || row.primaryCategory || '';
   const pod = Number(row.isPod || 0) === 1;
   const recipientGroup = type === 'SHOPEECN' ? 'CN' : 'VN';
   return {
+    ...raw,
     shipmentCode: row.shipmentCode,
     运单号: row.shipmentCode,
     businessType: type,
@@ -605,4 +609,163 @@ function shopStateLabel(value) {
     case 'SHOP_PENDING': return '门店Pending';
     default: return '';
   }
+}
+
+
+export function loadLightweightPeriodBusinessState(businessType, fromDate, toDate) {
+  const type = normalizeBusinessType(businessType);
+  const range = validateDateRange(fromDate, toDate, 180);
+  const batches = listLatestValidRangeBatches(range.from, range.to, true);
+  const states = batches.map(batch => loadLightweightUnifiedBusinessState(type, batch.snapshotId, { includeHistory: false }));
+  const finalRows = states.flatMap(state => (state.finalRows || []).map(row => ({
+    ...row,
+    reportDate: row.reportDate || state.reportDate,
+    businessType: type
+  })));
+  const dailyParseRows = states.flatMap(state => (state.dailyParseRows || []).map(row => ({
+    ...row,
+    reportDate: row.reportDate || state.reportDate,
+    businessType: type
+  })));
+  const scanResults = states.flatMap(state => (state.scanResults || []).map(row => ({
+    ...row,
+    reportDate: row.reportDate || state.reportDate,
+    businessType: type
+  })));
+  const pnhBills = states.flatMap(state => (state.pnhBills || []).map(code => `${state.reportDate}|${code}`));
+  return {
+    ...emptyState(type),
+    businessType: type,
+    reportDate: range.to,
+    periodStart: range.from,
+    periodEnd: range.to,
+    periodDates: batches.map(item => item.reportDate),
+    snapshotId: `PERIOD:${type}:${range.from}:${range.to}`,
+    snapshotStatus: batches.length ? 'COMPLETED' : 'EMPTY',
+    dailyReportReady: batches.length > 0,
+    pnhBills,
+    dailyParseRows,
+    dailyParseSummary: { totalRecognized: pnhBills.length, pnh: pnhBills.length },
+    finalRows,
+    scanResults,
+    scanPool: pnhBills,
+    needTrackBills: [],
+    trackResults: finalRows,
+    trackEvents: [],
+    carryBills: [],
+    nextCarryBills: [],
+    podLocks: [],
+    historySummary: listLightweightBusinessHistory(type, range.to, 120),
+    processing: { running: false, paused: false, phase: '范围汇总' },
+    currentRun: null,
+    lastRunSummary: null,
+    logs: [],
+    _normalizedSqliteRead: true,
+    _rawEvidenceDeferred: true,
+    _periodRead: true
+  };
+}
+
+export function listLightweightCompletedUnifiedSnapshots(fromDate, toDate, businessTypes = BUSINESS_TYPES) {
+  const range = validateDateRange(fromDate, toDate, 180);
+  const types = [...new Set((businessTypes || BUSINESS_TYPES).map(normalizeBusinessType))];
+  return listLatestValidRangeBatches(range.from, range.to, true).map(batch => ({
+    snapshotId: batch.snapshotId,
+    reportDate: batch.reportDate,
+    createdAt: batch.createdAt,
+    payload: {
+      finalRows: types.flatMap(type => loadLightweightExportRows(batch.snapshotId, batch.reportDate, type))
+    }
+  }));
+}
+
+function loadLightweightExportRows(snapshotId, reportDate, type) {
+  const db = getDb();
+  const sourceRows = db.prepare(`
+    SELECT shipmentCode,rowJson,regionCode,recipientRaw,recipientNormalized
+    FROM unified_import_rows
+    WHERE snapshotId=? AND businessType=?
+    ORDER BY shipmentCode
+  `).all(snapshotId, type);
+  const sourceByBill = new Map(sourceRows.map(row => {
+    let parsed = {};
+    try { parsed = JSON.parse(row.rowJson || '{}'); } catch {}
+    return [String(row.shipmentCode || '').trim().toUpperCase(), {
+      ...compactSourceRow(parsed),
+      shipmentCode: row.shipmentCode,
+      运单号: row.shipmentCode,
+      regionCode: row.regionCode || parsed.regionCode || '',
+      recipient_raw: row.recipientRaw || parsed.recipient_raw || parsed.recipientRaw || '',
+      recipient_normalized: row.recipientNormalized || parsed.recipient_normalized || parsed.recipientNormalized || '',
+      businessType: type,
+      reportDate
+    }];
+  }));
+  const state = loadLightweightUnifiedBusinessState(type, snapshotId, { includeHistory: false });
+  return (state.finalRows || []).map(row => {
+    const bill = billOf(row);
+    return {
+      ...(sourceByBill.get(bill) || {}),
+      ...row,
+      shipmentCode: bill,
+      运单号: bill,
+      businessType: type,
+      reportDate: row.reportDate || reportDate
+    };
+  });
+}
+
+function listLatestValidRangeBatches(fromDate, toDate, completedOnly = false) {
+  const db = getDb();
+  const statusClause = completedOnly ? "AND s.status='COMPLETED'" : '';
+  const rows = db.prepare(`
+    SELECT b.snapshotId,b.batchId,b.reportDate,b.sourceName,b.createdAt,s.status AS snapshotStatus
+    FROM unified_import_batches b
+    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ? ${statusClause}
+    ORDER BY b.reportDate ASC,b.createdAt DESC
+  `).all(fromDate, toDate);
+  const byDate = new Map();
+  for (const row of rows) if (!byDate.has(row.reportDate)) byDate.set(row.reportDate, row);
+  return [...byDate.values()];
+}
+
+function validateDateRange(fromDate, toDate, maxDays = 180) {
+  const valid = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+  if (!valid(fromDate) || !valid(toDate)) throw new Error('请选择有效的开始日期和结束日期。');
+  if (fromDate > toDate) throw new Error('开始日期不能晚于结束日期。');
+  const start = new Date(`${fromDate}T00:00:00Z`);
+  const end = new Date(`${toDate}T00:00:00Z`);
+  const days = Math.floor((end - start) / 86400000) + 1;
+  if (days > maxDays) throw new Error(`为保证系统流畅，单次日期范围最多${maxDays}天。`);
+  return { from: fromDate, to: toDate, days };
+}
+
+function compactParsedFinalRow(text) {
+  if (!text) return {};
+  let parsed = {};
+  try { parsed = JSON.parse(text); } catch { return {}; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const out = {};
+  const heavyKey = /(?:raw|json|payload|response|request|events?|picture|images?|photos?|attachments?|trace|history)/i;
+  for (const [key, value] of Object.entries(parsed)) {
+    if (heavyKey.test(key)) continue;
+    if (value === null || value === undefined || ['string', 'number', 'boolean'].includes(typeof value)) {
+      out[key] = typeof value === 'string' && value.length > 32767 ? value.slice(0, 32767) : value;
+      continue;
+    }
+    if (Array.isArray(value) && value.length <= 40 && value.every(item => item === null || ['string', 'number', 'boolean'].includes(typeof item))) out[key] = value.slice();
+  }
+  return out;
+}
+
+function compactSourceRow(row = {}) {
+  if (!row || typeof row !== 'object') return {};
+  const out = {};
+  const heavyKey = /(?:raw|json|payload|response|request|events?|picture|images?|photos?|attachments?|trace|history)/i;
+  for (const [key, value] of Object.entries(row)) {
+    if (heavyKey.test(key)) continue;
+    if (value === null || value === undefined || ['string', 'number', 'boolean'].includes(typeof value)) out[key] = value;
+  }
+  return out;
 }

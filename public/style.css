@@ -987,3 +987,21 @@ body.sidebar-collapsed .sidebar-collapse { justify-content: center; margin-inlin
 .global-processing-notice.error{border-color:#f1b7b7;background:#fff6f6;color:#9f2424}
 .global-processing-notice.success{border-color:#b7dfca;background:#f2fbf6;color:#17613b}
 .global-processing-notice>span{flex:1}.global-processing-notice .icon-button{width:32px;height:32px}
+
+
+.dashboard-range-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #dce7f3;
+  border-radius: 10px;
+  background: #fff;
+}
+.dashboard-range-toolbar strong { color: #123b63; margin-right: 4px; }
+.dashboard-range-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: #5d7190; font-size: 13px; }
+.dashboard-range-toolbar input { min-height: 34px; border: 1px solid #cddbea; border-radius: 7px; padding: 0 8px; color: #18324f; background: #fff; }
+.dashboard-range-toolbar small { color: #6f829d; margin-left: auto; }
+@media (max-width: 900px) { .dashboard-range-toolbar small { width: 100%; margin-left: 0; } }

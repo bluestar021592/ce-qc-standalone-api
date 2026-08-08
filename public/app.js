@@ -210,13 +210,15 @@ async function refreshInternal() {
   const latestUnified = selectedUnified || (unifiedImportState?.snapshotId
     ? unifiedImportState
     : (historyCatalog.UNIFIED || [])[0]);
-  const needsUnifiedDashboardState = ['home','ce','tbkh','ali1688','shopeecn','shopeevn','tracking','exceptions','reports'].includes(currentPage);
-  if (latestUnified?.snapshotId && needsUnifiedDashboardState) {
-    if (dashboardPeriodMode) await loadDashboardPeriod(dashboardPeriodMode, historyModeDate || latestUnified.reportDate, false);
-    else await syncUnifiedSelection(latestUnified.reportDate, latestUnified.snapshotId, false);
-  } else if (latestUnified?.reportDate && !historyModeDate) {
-    historyModeDate = latestUnified.reportDate;
-  } else if (!latestUnified) {
+  if (latestUnified?.snapshotId) {
+    if (dashboardPeriodMode === 'custom' && dashboardPeriodRange?.fromDate && dashboardPeriodRange?.toDate) {
+      await loadCustomDashboardRange(dashboardPeriodRange.fromDate, dashboardPeriodRange.toDate, false);
+    } else if (['weekly', 'monthly'].includes(dashboardPeriodMode)) {
+      await loadDashboardPeriod(dashboardPeriodMode, historyModeDate || latestUnified.reportDate, false);
+    } else if (!historyModeDate) {
+      historyModeDate = latestUnified.reportDate;
+    }
+  } else {
     historyModeDate = '';
   }
   renderAll();
@@ -690,7 +692,12 @@ function renderHistoryOptions() {
   const current = historyModeDate || latestDate(appState.reportDate, shopeeState.reportDate);
   select.innerHTML = dates.length ? dates.map(date => `<option value="${escapeAttr(date)}" ${date === current ? 'selected' : ''}>${escapeHtml(date)}</option>`).join('') : '<option value="">—</option>';
   const periodSelect = document.getElementById('dashboardPeriodMode');
-  if (periodSelect) periodSelect.value = dashboardPeriodMode;
+  if (periodSelect) periodSelect.value = ['weekly','monthly'].includes(dashboardPeriodMode) ? dashboardPeriodMode : '';
+  const rangeFrom = document.getElementById('dashboardRangeFrom');
+  const rangeTo = document.getElementById('dashboardRangeTo');
+  const fallbackDate = current || unifiedImportState?.reportDate || '';
+  if (rangeFrom && !rangeFrom.matches(':focus')) rangeFrom.value = dashboardPeriodRange?.fromDate || rangeFrom.value || fallbackDate;
+  if (rangeTo && !rangeTo.matches(':focus')) rangeTo.value = dashboardPeriodRange?.toDate || rangeTo.value || fallbackDate;
 }
 
 async function loadDashboardDate(reportDate) {
@@ -711,6 +718,27 @@ async function changeDashboardPeriod(mode) {
 async function loadDashboardPeriod(mode, anchor, shouldRender = true) {
   if (!anchor) return;
   const result = await api(`/api/period-dashboard?mode=${encodeURIComponent(mode)}&date=${encodeURIComponent(anchor)}`);
+  applyPeriodDashboardResult(result, mode, anchor, shouldRender);
+}
+
+async function loadCustomDashboardRange(fromDate = '', toDate = '', shouldRender = true) {
+  const from = fromDate || document.getElementById('dashboardRangeFrom')?.value || '';
+  const to = toDate || document.getElementById('dashboardRangeTo')?.value || '';
+  const status = document.getElementById('dashboardRangeStatus');
+  if (!from || !to) { if (status) status.textContent = '请选择开始日期和结束日期'; return; }
+  if (from > to) { if (status) status.textContent = '开始日期不能晚于结束日期'; return; }
+  if (status) status.textContent = '正在读取范围数据…';
+  try {
+    const result = await api(`/api/period-dashboard?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    applyPeriodDashboardResult(result, 'custom', to, shouldRender);
+    if (status) status.textContent = `${result.fromDate} 至 ${result.toDate} · 已加载`;
+  } catch (error) {
+    if (status) status.textContent = `读取失败：${error.message}`;
+    throw error;
+  }
+}
+
+function applyPeriodDashboardResult(result, mode, anchor, shouldRender = true) {
   const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
   types.forEach(type => { businessStates[type] = result.states?.[type] || {}; });
   const snapshotId = `PERIOD:${mode}:${result.fromDate}:${result.toDate}`;
@@ -722,9 +750,19 @@ async function loadDashboardPeriod(mode, anchor, shouldRender = true) {
     state.periodEnd = result.toDate;
     state.periodDates = [...new Set(types.flatMap(type => result.states?.[type]?.periodDates || []))].sort();
   }
-  historyModeDate = anchor;
+  historyModeDate = anchor || result.toDate;
+  dashboardPeriodMode = mode;
   dashboardPeriodRange = { mode, fromDate: result.fromDate, toDate: result.toDate };
   if (shouldRender) renderAll();
+}
+
+async function resetDashboardRange() {
+  dashboardPeriodMode = '';
+  dashboardPeriodRange = null;
+  const periodSelect = document.getElementById('dashboardPeriodMode');
+  if (periodSelect) periodSelect.value = '';
+  const date = unifiedImportState?.reportDate || historyModeDate || latestDate(appState.reportDate, shopeeState.reportDate);
+  if (date) await loadHistoryDate(date);
 }
 
 async function loadHistoryDate(reportDate) {
@@ -775,7 +813,7 @@ function aggregateBusinessStates(states, businessType, reportDate, snapshotId) {
 
 function dashboardPeriodLabel(state) {
   if (!state?.periodStart || !state?.periodEnd) return '';
-  const kind = state.periodMode === 'monthly' ? '月报' : '周报';
+  const kind = state.periodMode === 'monthly' ? '月报' : state.periodMode === 'weekly' ? '周报' : '自定义范围';
   return `${kind} ${state.periodStart} 至 ${state.periodEnd}`;
 }
 
@@ -1543,27 +1581,44 @@ function renderReportsPage() {
 }
 
 function setExportPeriod(type, button) {
-  exportPeriodType = ['daily', 'weekly', 'monthly'].includes(type) ? type : 'daily';
+  exportPeriodType = ['daily', 'weekly', 'monthly', 'custom'].includes(type) ? type : 'daily';
   document.querySelectorAll('.period-tab').forEach(item => item.classList.toggle('active', item === button));
-  if (exportPeriodType === 'daily') {
-    const dates = [...new Set([...(historyCatalog.CCSL || []), ...(historyCatalog.SHOPEE || [])].map(row => row.reportDate).filter(Boolean))].sort();
-    const input = document.getElementById('periodExportDate');
-    if (input && dates.length && !dates.includes(input.value)) input.value = dates.at(-1);
-  }
+  const date = document.getElementById('periodExportDate');
+  const from = document.getElementById('periodExportFrom');
+  const to = document.getElementById('periodExportTo');
+  const dates = [...new Set((historyCatalog.UNIFIED || []).map(row => row.reportDate).filter(Boolean))].sort();
+  const latest = dates.at(-1) || unifiedImportState?.reportDate || historyModeDate || '';
+  if (date && latest && !date.value) date.value = latest;
+  if (from && latest && !from.value) from.value = latest;
+  if (to && latest && !to.value) to.value = latest;
+  document.querySelectorAll('.custom-export-range').forEach(item => { item.hidden = exportPeriodType !== 'custom'; });
+  if (date?.closest('label')) date.closest('label').hidden = exportPeriodType === 'custom';
 }
 
 async function exportPeriodReport() {
-  const date = document.getElementById('periodExportDate')?.value;
+  const date = document.getElementById('periodExportDate')?.value || '';
+  const fromDate = document.getElementById('periodExportFrom')?.value || '';
+  const toDate = document.getElementById('periodExportTo')?.value || '';
   const businessType = document.getElementById('periodExportBusiness')?.value || 'ALL';
   const progress = document.getElementById('exportProgress');
   const files = document.getElementById('exportGeneratedFiles');
-  if (!date) { progress.textContent = '请选择报表基准日期'; return; }
-  progress.textContent = '正在从已保存snapshot生成报表，导出阶段不会调用CE API…'; files.innerHTML = '';
+  if (exportPeriodType === 'custom') {
+    if (!fromDate || !toDate) { progress.textContent = '请选择开始日期和结束日期'; return; }
+    if (fromDate > toDate) { progress.textContent = '开始日期不能晚于结束日期'; return; }
+  } else if (!date) {
+    progress.textContent = '请选择报表基准日期'; return;
+  }
+  progress.textContent = '正在从SQLite已完成日报生成报表；网页看板不会被阻塞…';
+  files.innerHTML = '';
   try {
-    const result = await api('/api/export-period/prepare', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ periodType: exportPeriodType, date, businessType }) });
+    const payload = { periodType: exportPeriodType, date, businessType };
+    if (exportPeriodType === 'custom') Object.assign(payload, { fromDate, toDate });
+    const result = await api('/api/export-period/prepare', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     progress.textContent = `生成完成：${result.range.from} 至 ${result.range.to}，共${result.files.length}个文件`;
     files.innerHTML = result.files.map(file => `<a class="export-file-item" href="${escapeAttr(file.url)}"><span>${escapeHtml(file.name)}</span><b>下载</b></a>`).join('');
-  } catch (error) { progress.textContent = `导出失败：${error.message}`; }
+  } catch (error) {
+    progress.textContent = `导出失败：${error.message}`;
+  }
 }
 
 function renderReportPreview() {
@@ -1788,7 +1843,13 @@ async function importUnifiedExcel() {
     const historyResult = await api('/api/unified-history');
     historyCatalog.UNIFIED = historyResult.rows || [];
     Object.keys(businessStates).forEach(key => { delete businessStates[key]; });
-    await syncUnifiedSelection(result.reportDate, result.snapshotId, false);
+    historyModeDate = result.reportDate;
+    const [ccslDashboard, shopeeDashboard] = await Promise.all([
+      api('/api/state?compact=1'),
+      api('/api/shopee/state?compact=1')
+    ]);
+    if (ccslDashboard?.state) appState = ccslDashboard.state;
+    if (shopeeDashboard?.state) shopeeState = shopeeDashboard.state;
     renderAll();
     alert(`综合日报导入成功：有效${result.summary.validUniqueWaybills}票，CE ${result.classificationCounts.CE}，TBKH ${result.classificationCounts.TBKH}，ALI1688 ${result.classificationCounts.ALI1688}，SHOPEE CN ${result.classificationCounts.SHOPEECN}，SHOPEE VN ${result.classificationCounts.SHOPEEVN}。`);
   } catch (error) {
