@@ -140,6 +140,28 @@ async function refresh() {
   }
 }
 
+async function runStartupRequestPool(definitions, concurrency = 3) {
+  const loaded = Array(definitions.length).fill(null);
+  const startupFailures = [];
+  let nextIndex = 0;
+  async function worker() {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= definitions.length) return;
+      const [label, task] = definitions[index];
+      try { loaded[index] = await task(); }
+      catch (error) {
+        startupFailures.push({ label, error });
+        loaded[index] = null;
+        console.warn(`[startup] ${label}读取失败`, error);
+      }
+    }
+  }
+  const count = Math.max(1, Math.min(Number(concurrency || 1), definitions.length));
+  await Promise.all(Array.from({ length: count }, () => worker()));
+  return { loaded, startupFailures };
+}
+
 async function refreshInternal() {
   if (visualMode) {
     visualFixture ||= await fetch('/visual-dashboard-fixture.json', { cache: 'no-store' }).then(response => response.json());
@@ -165,21 +187,13 @@ async function refreshInternal() {
     ['当前业务板块', () => businessType ? api(`/api/business-state/${businessType}?compact=1`) : Promise.resolve(null)]
   ];
 
-  // Limit the startup burst. The same endpoints are healthy when requested one-by-one,
-  // but firing all heavy snapshot/history endpoints at once can create a transient
-  // connection failure during page startup.
-  const loaded = [];
-  const startupFailures = [];
-  for (const [label, task] of requestDefinitions) {
-    try {
-      loaded.push(await task());
-    } catch (error) {
-      startupFailures.push({ label, error });
-      loaded.push(null);
-      console.warn(`[startup] ${label}读取失败`, error);
-      if (error?.code === 'NETWORK_CONNECTION_INTERRUPTED') break;
-    }
-  }
+  // Dashboard endpoints are compact SQL/cache reads. Run a bounded pool instead
+  // of nine serial round-trips so the first page behaves like a normal website
+  // without recreating the old all-at-once request burst.
+  const { loaded, startupFailures } = await runStartupRequestPool(
+    requestDefinitions,
+    needsFullAggregate ? 2 : 4
+  );
 
   const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unifiedHistory, unified, businessResponse] = loaded;
   if (ccsl?.state) appState = ccsl.state;
@@ -2048,12 +2062,16 @@ async function runUnified() {
         else appState = returnedState;
       }
       const hasSavedRun = Boolean(returnedState?.processing?.runId || returnedState?.processing?.running || returnedState?.processing?.error);
+      const reconciliationFailed = error.code === 'UNIFIED_RECONCILIATION_FAILED';
       processingNotice = {
         type: 'UNIFIED',
         level: 'error',
-        message: hasSavedRun
-          ? `全自动处理未完成：${error.message}。未完成批次已保存，可点击“继续处理”重试。`
-          : `全自动处理未启动：${error.message}。日报已保存，可直接再次开始处理。`
+        retryMode: reconciliationFailed ? 'restart' : 'resume',
+        message: reconciliationFailed
+          ? `统一快照对账未通过：${error.message}。日报与处理结果均已保留，请重新核对处理，系统会同时重建CCSL与SHOPEE当天快照。`
+          : (hasSavedRun
+            ? `全自动处理未完成：${error.message}。未完成批次已保存，可点击“继续处理”重试。`
+            : `全自动处理未启动：${error.message}。日报已保存，可直接再次开始处理。`)
       };
       if (runStatus) runStatus.innerHTML = '<span class="status-pill danger">部分查询失败，失败票已保留，请继续处理</span>';
       renderProcessingNotice();
@@ -2187,8 +2205,12 @@ function renderProcessingNotice() {
     document.querySelector('.main-content')?.prepend(target);
   }
   if (!processingNotice) { target.hidden = true; return; }
+  const retryHandler = processingNotice.retryMode === 'restart'
+    ? 'runUnified()'
+    : (processingNotice.type === 'SHOPEE' ? 'resumeShopee()' : processingNotice.type === 'CCSL' ? 'resumeProcess()' : 'resumeUnified()');
+  const retryLabel = processingNotice.retryMode === 'restart' ? '重新核对处理' : '继续处理';
   const retryAction = processingNotice.level === 'error'
-    ? `<button class="btn primary compact" onclick="${processingNotice.type === 'SHOPEE' ? 'resumeShopee()' : processingNotice.type === 'CCSL' ? 'resumeProcess()' : 'resumeUnified()'}">继续处理</button>`
+    ? `<button class="btn primary compact" onclick="${retryHandler}">${retryLabel}</button>`
     : '';
   target.hidden = false;
   target.className = `global-processing-notice ${processingNotice.level}`;

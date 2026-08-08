@@ -28,6 +28,7 @@ export async function runQcPipeline({
   const today = cleanBills(state.pnhBills || []);
   const carry = cleanBills(state.carryBills || state.nextCarryBills || []);
   const podLocks = new Set(cleanBills(state.podLocks || []));
+  const lockedToday = today.filter(wb => podLocks.has(wb));
   const shopCodeMap = businessType === 'CCSL' ? getShopCodeMap() : new Map();
   const scanPool = cleanBills([...today, ...carry]).filter(wb => !podLocks.has(wb));
 
@@ -206,13 +207,23 @@ export async function runQcPipeline({
       QC判断: row.orderStatus === '85' ? '订单扫描已签收' : 'POD锁已闭环'
     }));
 
+  const lockedDailyByBill = new Map((state.dailyParseRows || []).map(row => [String(row.shipmentCode || row.运单号 || '').trim().toUpperCase(), row]));
+  const lockedPodRows = lockedToday.map(wb => ({
+    ...(lockedDailyByBill.get(wb) || {}),
+    shipmentCode: wb, 运单号: wb, reportDate: state.reportDate || '', 来源类型: '今日PNH',
+    orderStatus: '85', scanNormalizedState: 'POD', currentState: 'POD', trackRequired: false,
+    trackSkippedReason: 'POD_LOCK', 是否POD: '是', POD状态: 'POD', 扫描分类: 'POD锁已闭环',
+    primaryCategory: 'POD闭环', 主分类: 'POD闭环', 异常分类: 'POD闭环',
+    QC判断: '历史POD锁命中，当日日报仍计入POD闭环', carry状态: 'closed_pod', 跨日状态: '已闭环'
+  }));
   const returnedRows = scanResults.filter(row => returnedCompleted.has(row.运单号)).map(row => ({ ...row, 是否POD: '否', POD状态: '未POD', 退回状态: '已退回', primaryCategory: '退回', 主分类: '退回', 异常分类: '退回', 入库无扫描节点: '否', carry状态: 'closed_return', 跨日状态: '已闭环' }));
   const retryRows = scanResults.filter(row => row.currentState === 'SCAN_PENDING_RETRY').map(row => ({ ...row, primaryCategory: '订单扫描待重试', 主分类: '订单扫描待重试', 异常分类: '订单扫描待重试', 入库无扫描节点: '否', carry状态: 'active' }));
   // API failures are operational retry items, not business anomalies. Keep them
   // in carry/scan retry state, but never publish them as QC exception rows.
-  const finalRows = [...podRows, ...returnedRows, ...trackResults]
+  const finalRows = [...new Map([...lockedPodRows, ...podRows, ...returnedRows, ...trackResults]
     .filter(row => row?.运单号 && !excluded(row.运单号))
-    .filter(row => row.是否POD === '是' || !podSet.has(row.运单号));
+    .filter(row => row.是否POD === '是' || !podSet.has(row.运单号))
+    .map(row => [String(row.运单号 || row.shipmentCode || '').trim().toUpperCase(), row])).values()];
   const finalDiversionRows = finalRows.filter(isNormalFinalDiversionRow);
   const nextCarryBills = cleanBills([...trackResults, ...retryRows]
     .filter(row => row.是否POD !== '是' && row.退回状态 !== '已退回')

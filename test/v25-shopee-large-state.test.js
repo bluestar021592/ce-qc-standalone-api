@@ -47,9 +47,9 @@ test('V25 stores large track evidence outside the single business_states JSON', 
   assert.equal(loaded.dailyParseRows.length, 3);
   assert.equal(loaded.scanResults.length, 3);
   assert.equal(loaded.trackEvents.length, 120);
-  assert.equal(loaded.trackResults.length, 3);
+  assert.equal(loaded.trackResults.length, 0);
   assert.equal(loaded.finalRows.length, 3);
-  assert.equal(Object.prototype.hasOwnProperty.call(loaded.trackResults[0], 'rawJson'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(loaded.finalRows[0], 'rawJson'), false);
 
   const snapshot = saveBusinessSnapshot(SHOPEE, { ...loaded, analysisRuleVersion: 'v25' }, {
     recipientReconciliation: { status: 'PASSED', checks: [] },

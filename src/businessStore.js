@@ -55,10 +55,26 @@ export function saveBusinessState(state = {}, businessType = state.businessType 
   return normalized;
 }
 
+export function saveBusinessRuntimeState(state = {}, businessType = state.businessType || SHOPEE) {
+  const type = normalizeType(businessType);
+  const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
+  const persisted = compactBusinessStatePayload(normalized);
+  const now = nowIso();
+  getDb().prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
+    ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
+    .run(type, JSON.stringify(persisted), now);
+  return normalized;
+}
+
 export function getBusinessCurrentReportDate(businessType = SHOPEE) {
-  const state = loadBusinessState(businessType);
-  if (state.reportDate && state.dailyReportReady) return state.reportDate;
-  return '';
+  const type = normalizeType(businessType);
+  const db = getDb();
+  let reportDate = '';
+  try {
+    reportDate = String(db.prepare(`SELECT json_extract(valueJson,'$.reportDate') AS reportDate FROM business_states WHERE businessType=?`).get(type)?.reportDate || '').trim();
+  } catch {}
+  if (reportDate && db.prepare('SELECT 1 FROM business_daily_reports WHERE businessType=? AND reportDate=?').get(type, reportDate)) return reportDate;
+  return String(db.prepare('SELECT reportDate FROM business_daily_reports WHERE businessType=? ORDER BY updatedAt DESC,reportDate DESC LIMIT 1').get(type)?.reportDate || '');
 }
 
 export function createOrRecoverBusinessRun(businessType, reportDate, options = {}) {
@@ -255,19 +271,20 @@ function compactBusinessStatePayload(state = {}) {
     dailyParseRows: [],
     recipientConflicts: [],
     scanResults: [],
-    scanQueryStatus: [],
+    scanQueryStatus: (state.scanQueryStatus || []).map(stripHeavyBusinessRow),
     shipmentTrackResults: [],
-    shipmentQueryStatus: [],
+    shipmentQueryStatus: (state.shipmentQueryStatus || []).map(stripHeavyBusinessRow),
     trackEvents: [],
-    eventQueryStatus: [],
+    eventQueryStatus: (state.eventQueryStatus || []).map(stripHeavyBusinessRow),
     exceptionItems: [],
-    exceptionQueryStatus: [],
+    exceptionQueryStatus: (state.exceptionQueryStatus || []).map(stripHeavyBusinessRow),
     apiBatchStatus: [],
-    // Track results are the only large-ish array retained because they are the
-    // resume checkpoint after an event batch. Strip embedded raw scan bodies.
-    trackResults: (state.trackResults || []).map(stripHeavyBusinessRow),
+    // Runtime metadata must stay small. Evidence/results are already mirrored in
+    // normalized SQLite tables during full stage checkpoints. Keeping these arrays
+    // here made every lightweight status save allocate large strings again.
+    trackResults: [],
     finalRows: [],
-    priorCarryRows: (state.priorCarryRows || []).map(stripHeavyBusinessRow)
+    priorCarryRows: []
   };
 }
 

@@ -41,7 +41,7 @@ import {
 import {
   SHOPEE, createOrRecoverBusinessRun, getBusinessCurrentReportDate, getBusinessRunStatus,
   getBusinessSnapshotById, getMatchingBusinessSnapshot, invalidateBusinessSnapshots, listBusinessHistoryDates, loadBusinessDetail, loadBusinessState, recordBusinessExport,
-  resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
+  resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, saveBusinessRuntimeState, updateBusinessRunLock
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 
@@ -95,6 +95,60 @@ let dashboardCacheWorker = null;
 let dashboardCachePendingDate = '';
 let dashboardCacheTimer = null;
 
+const RUN_FULL_CHECKPOINT_INTERVAL = Math.max(10, Number(process.env.RUN_FULL_CHECKPOINT_INTERVAL || 40));
+const runCheckpointMarkers = new Map();
+
+function shouldPersistFullCheckpoint(scope, state, reportDate, runId) {
+  const processing = state?.processing || {};
+  const phase = String(processing.phase || '');
+  const batchIndex = Number(processing.batchIndex || 0);
+  const totalBatches = Number(processing.totalBatches || 0);
+  const bucket = batchIndex > 0 ? Math.floor(batchIndex / RUN_FULL_CHECKPOINT_INTERVAL) : 0;
+  const key = `${scope}:${reportDate}:${runId}`;
+  const previous = runCheckpointMarkers.get(key);
+  const terminal = !processing.running || processing.paused || Boolean(processing.error) || phase === '完成';
+  const stageChanged = !previous || previous.phase !== phase;
+  const intervalReached = !previous || bucket > previous.bucket;
+  const stageCompleted = totalBatches > 0 && batchIndex >= totalBatches;
+  const full = stageChanged || intervalReached || stageCompleted || terminal;
+  if (full) runCheckpointMarkers.set(key, { phase, bucket, batchIndex });
+  return full;
+}
+
+function persistRunCheckpointOnly(scope, state, reportDate, runId) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const processing = state?.processing || {};
+  const status = processing.error ? 'failed' : (processing.paused ? 'paused' : (processing.running ? 'running' : (processing.phase === '完成' ? 'finished' : 'saved')));
+  const batchIndex = Number(processing.batchIndex || 0);
+  const totalBatches = Number(processing.totalBatches || 0);
+  const payload = JSON.stringify({
+    scanDone: Number(state?.scanResults?.length || 0),
+    trackDone: Number(state?.trackResults?.length || 0),
+    eventCount: Number(state?.trackEvents?.length || 0),
+    finalRows: Number(state?.finalRows?.length || 0),
+    nextCarry: Number(state?.nextCarryBills?.length || 0)
+  });
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (scope === 'SHOPEE') {
+      db.prepare(`UPDATE business_run_locks SET status=?,currentStage=?,batchIndex=?,totalBatches=?,errorMessage=?,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=?`)
+        .run(status, processing.phase || '', batchIndex, totalBatches, processing.error || '', now, SHOPEE, reportDate, runId);
+      db.prepare(`INSERT INTO business_run_checkpoints(businessType,runId,reportDate,stage,batchIndex,totalBatches,status,payloadJson,errorMessage,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(SHOPEE, runId, reportDate, processing.phase || '', batchIndex, totalBatches, status, payload, processing.error || '', now, now);
+    } else {
+      db.prepare(`UPDATE run_locks SET status=?,currentStage=?,batchIndex=?,totalBatches=?,errorMessage=?,updatedAt=? WHERE reportDate=? AND runId=?`)
+        .run(status, processing.phase || '', batchIndex, totalBatches, processing.error || '', now, reportDate, runId);
+      db.prepare(`INSERT INTO run_checkpoints(runId,reportDate,stage,batchIndex,totalBatches,status,payloadJson,errorMessage,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)`)
+        .run(runId, reportDate, processing.phase || '', batchIndex, totalBatches, status, payload, processing.error || '', now, now);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+}
+
 function launchDashboardCacheWorker({ reportDate = '', reason = 'SCHEDULED_REFRESH' } = {}) {
   const date = String(reportDate || '').trim();
   if (date) {
@@ -146,7 +200,7 @@ app.get('/api/health', async (req, res) => {
   res.json({
     ok: true,
     version: '0.1.0-shopee-track-user-delete-v2',
-    patchId: '2026-08-08-v23-range-fast-nav',
+    patchId: '2026-08-08-v26-stability-performance',
     time: new Date().toISOString(),
     db: getDbStatus(),
     memory: {
@@ -950,7 +1004,6 @@ async function executeRunRequest(req, res, options = {}) {
     const onProgress = async (msg) => {
       state.logs = [...(state.logs || []), `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-300);
       await appendRuntimeLog(msg);
-      await saveState(state);
     };
     const result = await runQcPipeline({
       state,
@@ -959,12 +1012,10 @@ async function executeRunRequest(req, res, options = {}) {
       onCheckpoint: async checkpointState => {
         checkpointState.currentRun = { ...(checkpointState.currentRun || run), runId: run.runId, reportDate };
         checkpointState.lastRunSummary = { ...(checkpointState.lastRunSummary || {}), runId: run.runId, reportDate };
-        await saveState(checkpointState);
+        if (shouldPersistFullCheckpoint('CCSL', checkpointState, reportDate, run.runId)) await saveState(checkpointState);
+        else persistRunCheckpointOnly('CCSL', checkpointState, reportDate, run.runId);
       },
-      isPaused: async () => {
-        const latest = await loadState();
-        return Boolean(latest.processing?.paused);
-      }
+      isPaused: async () => getRunStatus(reportDate).lock?.status === 'paused'
     });
     const dashboardSnapshotRows = buildDashboardRows(result.state);
     const criticalSnapshotRows = buildCriticalDashboard(result.state).rows;
@@ -1031,7 +1082,7 @@ app.post('/api/shopee/run/pause', async (req, res) => {
   state.processing = { ...(state.processing || {}), running: false, paused: true, phase: run.currentStage || state.processing?.phase || '' };
   state.currentRun = run;
   updateBusinessRunLock(SHOPEE, state.reportDate, 'paused');
-  saveBusinessState(state, SHOPEE);
+  saveBusinessRuntimeState(state, SHOPEE);
   res.json({ ok: true, state: summarizeShopeeState(state) });
 });
 
@@ -1050,7 +1101,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
       const probeBills = state.pnhBills.slice(0, Math.min(5, state.pnhBills.length));
       await client.confirmQuery(probeBills);
       state.apiDiagnostic = { apiName: 'otwms-order-confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', shipmentCount: probeBills.length, preflight: 'passed', checkedAt: new Date().toISOString() };
-      saveBusinessState(state, SHOPEE);
+      saveBusinessRuntimeState(state, SHOPEE);
     } catch (error) {
       const diagnostic = normalizeApiError(error);
       const status = Number(diagnostic.ceStatus || 0);
@@ -1058,7 +1109,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
       const message = code === 'AUTH_REQUIRED' ? 'CE系统登录已失效，请在系统设置重新登录后点击继续处理。' : (diagnostic.ceMsg || diagnostic.message || 'CE扫描预检失败');
       state.apiDiagnostic = { apiName: 'otwms-order-confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', shipmentCount: Math.min(5, state.pnhBills.length), httpStatus: diagnostic.ceStatus || '', ceCode: diagnostic.ceCode || '', ceMsg: diagnostic.ceMsg || '', preflight: 'failed', checkedAt: new Date().toISOString() };
       state.processing = { ...(state.processing || {}), running: false, paused: code === 'AUTH_REQUIRED', error: message };
-      saveBusinessState(state, SHOPEE);
+      saveBusinessRuntimeState(state, SHOPEE);
       return res.status(409).json({ ok: false, code, error: message, diagnostic: state.apiDiagnostic });
     }
     const before = getBusinessRunStatus(SHOPEE, reportDate).lock;
@@ -1089,7 +1140,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
       });
       updateBusinessRunLock(SHOPEE, reportDate, 'failed', '旧快照扫描待重试或数量不一致，已标记INVALID并创建REPAIR。');
       state.snapshotId = '';
-      saveBusinessState(state, SHOPEE);
+      saveBusinessRuntimeState(state, SHOPEE);
     }
     const repair = !options.resume && (before?.status === 'failed' || invalidCompleted);
     const outcome = createOrRecoverBusinessRun(SHOPEE, reportDate, { lockedBy: req.ip || '', repair, rejectRunning: Boolean(before?.runId && activeRunIds.has(before.runId)) });
@@ -1102,7 +1153,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     state.currentRun = run;
     state.processing = { ...(state.processing || {}), running: true, paused: false, phase: run.currentStage || '准备处理', runId };
     state.lastRunSummary = { ...(state.lastRunSummary || {}), businessType: SHOPEE, reportDate, runId, runStatus: 'running' };
-    saveBusinessState(state, SHOPEE);
+    saveBusinessRuntimeState(state, SHOPEE);
     const result = await runQcPipeline({
       state,
       client,
@@ -1110,8 +1161,11 @@ async function executeShopeeRunRequest(req, res, options = {}) {
         state.logs = [...(state.logs || []), `[${new Date().toLocaleTimeString()}] ${message}`].slice(-300);
         await appendRuntimeLog(`[SHOPEE] ${message}`);
       },
-      onCheckpoint: async checkpointState => saveBusinessState(checkpointState, SHOPEE),
-      isPaused: async () => Boolean(loadBusinessState(SHOPEE).processing?.paused)
+      onCheckpoint: async checkpointState => {
+        if (shouldPersistFullCheckpoint('SHOPEE', checkpointState, reportDate, runId)) saveBusinessState(checkpointState, SHOPEE);
+        else persistRunCheckpointOnly('SHOPEE', checkpointState, reportDate, runId);
+      },
+      isPaused: async () => getBusinessRunStatus(SHOPEE, reportDate).lock?.status === 'paused'
     });
     const view = buildShopeeDashboard(result.state);
     if (view.recipientReconciliation?.status !== 'PASSED') {
@@ -1135,7 +1189,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     const ccslState = await loadState();
     const ccslSnapshot = getMatchingSnapshot(ccslState);
     completeUnifiedSnapshot({ reportDate, ccslSnapshot, shopeeSnapshot: snapshot });
-    saveBusinessState(result.state, SHOPEE);
+    saveBusinessRuntimeState(result.state, SHOPEE);
     launchDashboardCacheWorker({ reportDate, reason: 'SHOPEE_RUN_COMPLETED' });
     res.json({ ok: true, summary, run: { reportDate, runId, recovered: outcome.recovered, repair }, snapshotId: snapshot.snapshotId, state: summarizeShopeeState(result.state) });
   } catch (error) {
@@ -1143,7 +1197,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     const state = loadBusinessState(SHOPEE);
     state.processing = { ...(state.processing || {}), running: false, paused: false, error: error.message || String(error) };
     state.snapshotId = '';
-    saveBusinessState(state, SHOPEE);
+    saveBusinessRuntimeState(state, SHOPEE);
     res.status(error.code === 'AUTH_REQUIRED' ? 409 : 500).json({ ok: false, code: error.code || 'SHOPEE_RUN_FAILED', error: error.message, diagnostic: error.apiDiagnostic || state.apiDiagnostic || null });
   } finally {
     if (runId) activeRunIds.delete(runId);
