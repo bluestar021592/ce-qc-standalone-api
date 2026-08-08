@@ -28,7 +28,7 @@ jobs:
         run: npm ci
 
       - name: Apply V21 fastload patch
-        run: node tools/apply-v21-fastload.mjs
+        run: node tools/apply-v21-fastload-v2.mjs
 
       - name: Syntax checks
         run: |
