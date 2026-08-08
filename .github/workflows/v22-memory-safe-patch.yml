@@ -36,6 +36,12 @@ jobs:
           grep -q "loadCustomDashboardRange" public/app.js
           grep -q "2026-08-08-v22-memory-safe-dashboard" server.js
 
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Run project tests
+        run: npm test
+
       - name: Commit patch
         run: |
           git config user.name "ChatGPT V22"
