@@ -19,77 +19,577 @@ jobs:
           ref: chatgpt/v22-memory-safe-dashboard
           fetch-depth: 0
 
-      - name: Patch server dashboard read paths
+      - name: Patch V22 normal website data paths
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
 
-          path = Path('server.js')
-          text = path.read_text(encoding='utf-8')
+          def must_replace(text, old, new, label):
+              if old in text:
+                  return text.replace(old, new, 1)
+              if new in text:
+                  return text
+              raise SystemExit(f'Missing patch anchor: {label}')
 
-          store_import = "import { loadLightweightAggregateState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';"
-          summary_import = "import { summarizeLightweightCcslState, summarizeLightweightShopeeState } from './src/lightweightDashboardSummary.js';"
-          if store_import not in text:
-              anchor = "import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';"
-              if anchor not in text:
-                  raise SystemExit('Missing unified store import anchor')
-              text = text.replace(anchor, anchor + '\n' + store_import, 1)
-          if summary_import not in text:
-              text = text.replace(store_import, store_import + '\n' + summary_import, 1)
-
-          state_route = (
-              "app.get('/api/state', async (req, res) => {\n"
-              "  const state = loadLightweightAggregateState('CCSL');\n"
-              "  const summary = summarizeLightweightCcslState(state, {\n"
-              "    dbStatus: getDbStatus(),\n"
-              "    network: buildNetworkInfo(getRuntimeConfig()),\n"
-              "    shopCodes: getShopCodeSummary()\n"
-              "  });\n"
-              "  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });\n"
-              "});"
+          # ------------------------------------------------------------------
+          # 1) Lightweight SQLite store: keep final-row accuracy, add range APIs.
+          # ------------------------------------------------------------------
+          store_path = Path('src/lightweightDashboardStore.js')
+          store = store_path.read_text(encoding='utf-8')
+          store = must_replace(
+              store,
+              "export function loadLightweightUnifiedBusinessState(businessType, snapshotId = '') {",
+              "export function loadLightweightUnifiedBusinessState(businessType, snapshotId = '', options = {}) {",
+              'lightweight business options'
           )
-          text, count = re.subn(
-              r"app\.get\('/api/state', async \(req, res\) => \{.*?\n\}\);(?=\n\napp\.get\('/api/unified-history')",
-              lambda _: state_route,
-              text,
+          store = must_replace(
+              store,
+              "const historySummary = listLightweightBusinessHistory(type, batch.reportDate, 30);",
+              "const historySummary = options.includeHistory === false ? [] : listLightweightBusinessHistory(type, batch.reportDate, 30);",
+              'lightweight optional history'
+          )
+
+          if 'const raw = compactParsedFinalRow(row.rawJson);' not in store:
+              store = store.replace(
+                  "function normalizeCcslFinalRow(row, type) {\n  const category = row.primaryCategory || row.category || '';",
+                  "function normalizeCcslFinalRow(row, type) {\n  const raw = compactParsedFinalRow(row.rawJson);\n  const category = row.primaryCategory || row.category || '';",
+                  1
+              )
+              store = re.sub(
+                  r"(function normalizeCcslFinalRow\(row, type\) \{.*?return \{\n)",
+                  r"\1    ...raw,\n",
+                  store,
+                  count=1,
+                  flags=re.S
+              )
+              store = store.replace(
+                  "function normalizeShopeeFinalRow(row, type) {\n  const category = row.currentMainCategory || row.primaryCategory || '';",
+                  "function normalizeShopeeFinalRow(row, type) {\n  const raw = compactParsedFinalRow(row.rawJson);\n  const category = row.currentMainCategory || row.primaryCategory || '';",
+                  1
+              )
+              store = re.sub(
+                  r"(function normalizeShopeeFinalRow\(row, type\) \{.*?return \{\n)",
+                  r"\1    ...raw,\n",
+                  store,
+                  count=1,
+                  flags=re.S
+              )
+
+          range_marker = 'export function loadLightweightPeriodBusinessState('
+          if range_marker not in store:
+              append = r'''
+
+export function loadLightweightPeriodBusinessState(businessType, fromDate, toDate) {
+  const type = normalizeBusinessType(businessType);
+  const range = validateDateRange(fromDate, toDate, 180);
+  const batches = listLatestValidRangeBatches(range.from, range.to, true);
+  const states = batches.map(batch => loadLightweightUnifiedBusinessState(type, batch.snapshotId, { includeHistory: false }));
+  const finalRows = states.flatMap(state => (state.finalRows || []).map(row => ({
+    ...row,
+    reportDate: row.reportDate || state.reportDate,
+    businessType: type
+  })));
+  const dailyParseRows = states.flatMap(state => (state.dailyParseRows || []).map(row => ({
+    ...row,
+    reportDate: row.reportDate || state.reportDate,
+    businessType: type
+  })));
+  const scanResults = states.flatMap(state => (state.scanResults || []).map(row => ({ ...row, reportDate: row.reportDate || state.reportDate, businessType: type })));
+  const pnhBills = states.flatMap(state => (state.pnhBills || []).map(code => `${state.reportDate}|${code}`));
+  return {
+    ...emptyState(type),
+    businessType: type,
+    reportDate: range.to,
+    periodStart: range.from,
+    periodEnd: range.to,
+    periodDates: batches.map(item => item.reportDate),
+    snapshotId: `PERIOD:${type}:${range.from}:${range.to}`,
+    snapshotStatus: batches.length ? 'COMPLETED' : 'EMPTY',
+    dailyReportReady: batches.length > 0,
+    pnhBills,
+    dailyParseRows,
+    dailyParseSummary: { totalRecognized: pnhBills.length, pnh: pnhBills.length },
+    finalRows,
+    scanResults,
+    scanPool: pnhBills,
+    trackResults: finalRows,
+    trackEvents: [],
+    carryBills: [],
+    nextCarryBills: [],
+    podLocks: [],
+    historySummary: listLightweightBusinessHistory(type, range.to, 120),
+    processing: { running: false, paused: false, phase: '范围汇总' },
+    _normalizedSqliteRead: true,
+    _rawEvidenceDeferred: true,
+    _periodRead: true
+  };
+}
+
+export function listLightweightCompletedUnifiedSnapshots(fromDate, toDate, businessTypes = BUSINESS_TYPES) {
+  const range = validateDateRange(fromDate, toDate, 180);
+  const types = [...new Set((businessTypes || BUSINESS_TYPES).map(normalizeBusinessType))];
+  return listLatestValidRangeBatches(range.from, range.to, true).map(batch => ({
+    snapshotId: batch.snapshotId,
+    reportDate: batch.reportDate,
+    createdAt: batch.createdAt,
+    payload: {
+      finalRows: types.flatMap(type => loadLightweightExportRows(batch.snapshotId, batch.reportDate, type))
+    }
+  }));
+}
+
+function loadLightweightExportRows(snapshotId, reportDate, type) {
+  const db = getDb();
+  const sourceRows = db.prepare(`
+    SELECT shipmentCode,rowJson,regionCode,recipientRaw,recipientNormalized
+    FROM unified_import_rows
+    WHERE snapshotId=? AND businessType=?
+    ORDER BY shipmentCode
+  `).all(snapshotId, type);
+  const sourceByBill = new Map(sourceRows.map(row => {
+    let parsed = {};
+    try { parsed = JSON.parse(row.rowJson || '{}'); } catch {}
+    return [String(row.shipmentCode || '').trim().toUpperCase(), {
+      ...compactSourceRow(parsed),
+      shipmentCode: row.shipmentCode,
+      运单号: row.shipmentCode,
+      regionCode: row.regionCode || parsed.regionCode || '',
+      recipient_raw: row.recipientRaw || parsed.recipient_raw || parsed.recipientRaw || '',
+      recipient_normalized: row.recipientNormalized || parsed.recipient_normalized || parsed.recipientNormalized || '',
+      businessType: type,
+      reportDate
+    }];
+  }));
+  const state = loadLightweightUnifiedBusinessState(type, snapshotId, { includeHistory: false });
+  return (state.finalRows || []).map(row => {
+    const bill = billOf(row);
+    return {
+      ...(sourceByBill.get(bill) || {}),
+      ...row,
+      shipmentCode: bill,
+      运单号: bill,
+      businessType: type,
+      reportDate: row.reportDate || reportDate
+    };
+  });
+}
+
+function listLatestValidRangeBatches(fromDate, toDate, completedOnly = false) {
+  const db = getDb();
+  const statusClause = completedOnly ? "AND s.status='COMPLETED'" : '';
+  const rows = db.prepare(`
+    SELECT b.snapshotId,b.batchId,b.reportDate,b.sourceName,b.createdAt,s.status AS snapshotStatus
+    FROM unified_import_batches b
+    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ? ${statusClause}
+    ORDER BY b.reportDate ASC,b.createdAt DESC
+  `).all(fromDate, toDate);
+  const byDate = new Map();
+  for (const row of rows) if (!byDate.has(row.reportDate)) byDate.set(row.reportDate, row);
+  return [...byDate.values()];
+}
+
+function validateDateRange(fromDate, toDate, maxDays = 180) {
+  const valid = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+  if (!valid(fromDate) || !valid(toDate)) throw new Error('请选择有效的开始日期和结束日期。');
+  if (fromDate > toDate) throw new Error('开始日期不能晚于结束日期。');
+  const start = new Date(`${fromDate}T00:00:00Z`);
+  const end = new Date(`${toDate}T00:00:00Z`);
+  const days = Math.floor((end - start) / 86400000) + 1;
+  if (days > maxDays) throw new Error(`为保证系统流畅，单次日期范围最多${maxDays}天。`);
+  return { from: fromDate, to: toDate, days };
+}
+
+function compactParsedFinalRow(text) {
+  if (!text) return {};
+  let parsed = {};
+  try { parsed = JSON.parse(text); } catch { return {}; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const out = {};
+  const heavyKey = /(?:raw|json|payload|response|request|events?|picture|images?|photos?|attachments?|trace|history)/i;
+  for (const [key, value] of Object.entries(parsed)) {
+    if (heavyKey.test(key)) continue;
+    if (value === null || value === undefined || ['string', 'number', 'boolean'].includes(typeof value)) {
+      out[key] = typeof value === 'string' && value.length > 32767 ? value.slice(0, 32767) : value;
+      continue;
+    }
+    if (Array.isArray(value) && value.length <= 40 && value.every(item => item === null || ['string', 'number', 'boolean'].includes(typeof item))) out[key] = value.slice();
+  }
+  return out;
+}
+
+function compactSourceRow(row = {}) {
+  if (!row || typeof row !== 'object') return {};
+  const out = {};
+  const heavyKey = /(?:raw|json|payload|response|request|events?|picture|images?|photos?|attachments?|trace|history)/i;
+  for (const [key, value] of Object.entries(row)) {
+    if (heavyKey.test(key)) continue;
+    if (value === null || value === undefined || ['string', 'number', 'boolean'].includes(typeof value)) out[key] = value;
+  }
+  return out;
+}
+'''
+              store += append
+          store_path.write_text(store, encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # 2) Server routes: range dashboard uses lightweight store only.
+          # ------------------------------------------------------------------
+          server_path = Path('server.js')
+          server = server_path.read_text(encoding='utf-8')
+          server = must_replace(
+              server,
+              "import { loadLightweightAggregateState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';",
+              "import { loadLightweightAggregateState, loadLightweightPeriodBusinessState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';",
+              'server light store import'
+          )
+
+          period_route = r'''app.get('/api/period-dashboard', (req, res) => {
+  try {
+    const rawFrom = String(req.query.from || '').trim();
+    const rawTo = String(req.query.to || '').trim();
+    const mode = String(req.query.mode || '').toLowerCase();
+    const anchor = String(req.query.date || '').trim();
+    let fromDate = rawFrom;
+    let toDate = rawTo;
+    let resolvedMode = 'custom';
+    if (!fromDate || !toDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor) || !['weekly', 'monthly'].includes(mode)) {
+        return res.status(400).json({ ok: false, error: '请选择有效的开始日期和结束日期。' });
+      }
+      const date = new Date(`${anchor}T12:00:00+07:00`);
+      if (mode === 'weekly') {
+        const mondayOffset = (date.getDay() + 6) % 7;
+        const start = new Date(date); start.setDate(start.getDate() - mondayOffset);
+        const end = new Date(start); end.setDate(end.getDate() + 6);
+        fromDate = localIsoDate(start); toDate = localIsoDate(end);
+      } else {
+        fromDate = `${anchor.slice(0, 7)}-01`;
+        const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12);
+        toDate = localIsoDate(end);
+      }
+      resolvedMode = mode;
+    }
+    const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+    const states = Object.fromEntries(types.map(type => [type, loadLightweightPeriodBusinessState(type, fromDate, toDate)]));
+    res.json({ ok: true, mode: resolvedMode, anchor: anchor || toDate, fromDate, toDate, states });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});'''
+          server, count = re.subn(
+              r"app\.get\('/api/period-dashboard', \(req, res\) => \{.*?\n\}\);(?=\n\napp\.get\('/api/shopee/state')",
+              lambda _: period_route,
+              server,
               count=1,
               flags=re.S
           )
           if count != 1:
-              raise SystemExit('Cannot patch /api/state')
+              raise SystemExit('Cannot patch period dashboard route')
 
-          shopee_route = (
-              "app.get('/api/shopee/state', async (req, res) => {\n"
-              "  const state = loadLightweightAggregateState('SHOPEE');\n"
-              "  const summary = summarizeLightweightShopeeState(state, { dbStatus: getDbStatus() });\n"
-              "  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });\n"
-              "});"
+          server = server.replace(
+              "const result = await exportPeriodReports({ periodType: req.query.periodType || 'daily', date: req.query.date || '', businessType: req.query.businessType || 'ALL' });",
+              "const result = await exportPeriodReports({ periodType: req.query.periodType || 'daily', date: req.query.date || '', fromDate: req.query.fromDate || '', toDate: req.query.toDate || '', businessType: req.query.businessType || 'ALL' });",
+              1
           )
-          text, count = re.subn(
-              r"app\.get\('/api/shopee/state', async \(req, res\) => \{.*?\n\}\);(?=\n\napp\.get\('/api/business-state/:businessType')",
-              lambda _: shopee_route,
-              text,
+          server = server.replace(
+              "const result = await exportPeriodReports({ periodType: req.body?.periodType || 'daily', date: req.body?.date || '', businessType: req.body?.businessType || 'ALL' });",
+              "const result = await exportPeriodReports({ periodType: req.body?.periodType || 'daily', date: req.body?.date || '', fromDate: req.body?.fromDate || '', toDate: req.body?.toDate || '', businessType: req.body?.businessType || 'ALL' });",
+              1
+          )
+          server_path.write_text(server, encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # 3) Period exporter: never parse unified_snapshots.payloadJson.
+          # ------------------------------------------------------------------
+          exporter_path = Path('src/periodExporter.js')
+          exporter = exporter_path.read_text(encoding='utf-8')
+          exporter = must_replace(
+              exporter,
+              "import { listCompletedUnifiedSnapshots } from './unifiedImportStore.js';",
+              "import { listLightweightCompletedUnifiedSnapshots } from './lightweightDashboardStore.js';",
+              'period exporter import'
+          )
+          old_start = """export async function exportPeriodReports({ periodType = 'daily', date, businessType = 'ALL' }) {
+  const range = periodRange(periodType, date);
+  const snapshots = listCompletedUnifiedSnapshots(range.from, range.to);
+  if (!snapshots.length) throw new Error(`${range.from} 至 ${range.to} 没有 VALID + COMPLETED 日快照，不能导出。`);
+  const types = businessType === 'ALL' ? BUSINESSES : [normalizeBusiness(businessType)];
+  const outputDir = getRuntimeConfig().exportsDir;
+  await fs.mkdir(outputDir, { recursive: true });
+  const files = [];"""
+          new_start = """export async function exportPeriodReports({ periodType = 'daily', date, fromDate = '', toDate = '', businessType = 'ALL' }) {
+  const range = periodType === 'custom' ? customPeriodRange(fromDate, toDate) : periodRange(periodType, date);
+  const types = businessType === 'ALL' ? BUSINESSES : [normalizeBusiness(businessType)];
+  const snapshots = listLightweightCompletedUnifiedSnapshots(range.from, range.to, types);
+  if (!snapshots.length) throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的日报数据，不能导出。`);
+  const outputDir = getRuntimeConfig().exportsDir;
+  await fs.mkdir(outputDir, { recursive: true });
+  const files = [];"""
+          exporter = must_replace(exporter, old_start, new_start, 'period exporter function start')
+          if 'function customPeriodRange(' not in exporter:
+              anchor = 'export function periodRange(type, value) {'
+              helper = r'''function customPeriodRange(fromDate, toDate) {
+  const valid = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+  if (!valid(fromDate) || !valid(toDate)) throw new Error('请选择有效的开始日期和结束日期。');
+  if (fromDate > toDate) throw new Error('开始日期不能晚于结束日期。');
+  const days = Math.floor((new Date(`${toDate}T00:00:00Z`) - new Date(`${fromDate}T00:00:00Z`)) / 86400000) + 1;
+  if (days > 180) throw new Error('为保证导出稳定，单次日期范围最多180天。');
+  return { from: fromDate, to: toDate, key: `${fromDate}_${toDate}` };
+}
+
+'''
+              if anchor not in exporter:
+                  raise SystemExit('Missing periodRange anchor')
+              exporter = exporter.replace(anchor, helper + anchor, 1)
+          exporter_path.write_text(exporter, encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # 4) Frontend: first paint does not hydrate all five boards.
+          # ------------------------------------------------------------------
+          app_path = Path('public/app.js')
+          app = app_path.read_text(encoding='utf-8')
+          old_selection = r'''  const needsUnifiedDashboardState = ['home','ce','tbkh','ali1688','shopeecn','shopeevn','tracking','exceptions','reports'].includes(currentPage);
+  if (latestUnified?.snapshotId && needsUnifiedDashboardState) {
+    if (dashboardPeriodMode) await loadDashboardPeriod(dashboardPeriodMode, historyModeDate || latestUnified.reportDate, false);
+    else await syncUnifiedSelection(latestUnified.reportDate, latestUnified.snapshotId, false);
+  } else if (latestUnified?.reportDate && !historyModeDate) {
+    historyModeDate = latestUnified.reportDate;
+  } else if (!latestUnified) {
+    historyModeDate = '';
+  }'''
+          new_selection = r'''  if (latestUnified?.snapshotId) {
+    if (dashboardPeriodMode === 'custom' && dashboardPeriodRange?.fromDate && dashboardPeriodRange?.toDate) {
+      await loadCustomDashboardRange(dashboardPeriodRange.fromDate, dashboardPeriodRange.toDate, false);
+    } else if (['weekly', 'monthly'].includes(dashboardPeriodMode)) {
+      await loadDashboardPeriod(dashboardPeriodMode, historyModeDate || latestUnified.reportDate, false);
+    } else if (!historyModeDate) {
+      historyModeDate = latestUnified.reportDate;
+    }
+  } else {
+    historyModeDate = '';
+  }'''
+          app = must_replace(app, old_selection, new_selection, 'startup no five-board hydration')
+
+          old_import_sync = """    Object.keys(businessStates).forEach(key => { delete businessStates[key]; });
+    await syncUnifiedSelection(result.reportDate, result.snapshotId, false);
+    renderAll();"""
+          new_import_sync = """    Object.keys(businessStates).forEach(key => { delete businessStates[key]; });
+    historyModeDate = result.reportDate;
+    const [ccslDashboard, shopeeDashboard] = await Promise.all([
+      api('/api/state?compact=1'),
+      api('/api/shopee/state?compact=1')
+    ]);
+    if (ccslDashboard?.state) appState = ccslDashboard.state;
+    if (shopeeDashboard?.state) shopeeState = shopeeDashboard.state;
+    renderAll();"""
+          app = must_replace(app, old_import_sync, new_import_sync, 'unified import lazy hydrate')
+
+          old_period_function = r'''async function loadDashboardPeriod(mode, anchor, shouldRender = true) {
+  if (!anchor) return;
+  const result = await api(`/api/period-dashboard?mode=${encodeURIComponent(mode)}&date=${encodeURIComponent(anchor)}`);
+  const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+  types.forEach(type => { businessStates[type] = result.states?.[type] || {}; });
+  const snapshotId = `PERIOD:${mode}:${result.fromDate}:${result.toDate}`;
+  appState = aggregateBusinessStates(types.slice(0, 3).map(type => businessStates[type]), 'CCSL', result.toDate, snapshotId);
+  shopeeState = aggregateBusinessStates(types.slice(3).map(type => businessStates[type]), 'SHOPEE', result.toDate, snapshotId);
+  for (const state of [appState, shopeeState]) {
+    state.periodMode = mode;
+    state.periodStart = result.fromDate;
+    state.periodEnd = result.toDate;
+    state.periodDates = [...new Set(types.flatMap(type => result.states?.[type]?.periodDates || []))].sort();
+  }
+  historyModeDate = anchor;
+  dashboardPeriodRange = { mode, fromDate: result.fromDate, toDate: result.toDate };
+  if (shouldRender) renderAll();
+}'''
+          new_period_function = r'''async function loadDashboardPeriod(mode, anchor, shouldRender = true) {
+  if (!anchor) return;
+  const result = await api(`/api/period-dashboard?mode=${encodeURIComponent(mode)}&date=${encodeURIComponent(anchor)}`);
+  applyPeriodDashboardResult(result, mode, anchor, shouldRender);
+}
+
+async function loadCustomDashboardRange(fromDate = '', toDate = '', shouldRender = true) {
+  const from = fromDate || document.getElementById('dashboardRangeFrom')?.value || '';
+  const to = toDate || document.getElementById('dashboardRangeTo')?.value || '';
+  const status = document.getElementById('dashboardRangeStatus');
+  if (!from || !to) { if (status) status.textContent = '请选择开始日期和结束日期'; return; }
+  if (from > to) { if (status) status.textContent = '开始日期不能晚于结束日期'; return; }
+  if (status) status.textContent = '正在读取范围数据…';
+  try {
+    const result = await api(`/api/period-dashboard?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    applyPeriodDashboardResult(result, 'custom', to, shouldRender);
+    if (status) status.textContent = `${result.fromDate} 至 ${result.toDate} · 已加载`;
+  } catch (error) {
+    if (status) status.textContent = `读取失败：${error.message}`;
+    throw error;
+  }
+}
+
+function applyPeriodDashboardResult(result, mode, anchor, shouldRender = true) {
+  const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+  types.forEach(type => { businessStates[type] = result.states?.[type] || {}; });
+  const snapshotId = `PERIOD:${mode}:${result.fromDate}:${result.toDate}`;
+  appState = aggregateBusinessStates(types.slice(0, 3).map(type => businessStates[type]), 'CCSL', result.toDate, snapshotId);
+  shopeeState = aggregateBusinessStates(types.slice(3).map(type => businessStates[type]), 'SHOPEE', result.toDate, snapshotId);
+  for (const state of [appState, shopeeState]) {
+    state.periodMode = mode;
+    state.periodStart = result.fromDate;
+    state.periodEnd = result.toDate;
+    state.periodDates = [...new Set(types.flatMap(type => result.states?.[type]?.periodDates || []))].sort();
+  }
+  historyModeDate = anchor || result.toDate;
+  dashboardPeriodMode = mode;
+  dashboardPeriodRange = { mode, fromDate: result.fromDate, toDate: result.toDate };
+  if (shouldRender) renderAll();
+}
+
+async function resetDashboardRange() {
+  dashboardPeriodMode = '';
+  dashboardPeriodRange = null;
+  const periodSelect = document.getElementById('dashboardPeriodMode');
+  if (periodSelect) periodSelect.value = '';
+  const date = unifiedImportState?.reportDate || historyModeDate || latestDate(appState.reportDate, shopeeState.reportDate);
+  if (date) await loadHistoryDate(date);
+}'''
+          app = must_replace(app, old_period_function, new_period_function, 'custom dashboard range functions')
+
+          app = must_replace(
+              app,
+              "const kind = state.periodMode === 'monthly' ? '月报' : '周报';\n  return `${kind} ${state.periodStart} 至 ${state.periodEnd}`;",
+              "const kind = state.periodMode === 'monthly' ? '月报' : state.periodMode === 'weekly' ? '周报' : '自定义范围';\n  return `${kind} ${state.periodStart} 至 ${state.periodEnd}`;",
+              'period label custom'
+          )
+
+          # Keep the custom-range inputs synchronized with the selected range/current date.
+          sync_anchor = """  const periodSelect = document.getElementById('dashboardPeriodMode');
+  if (periodSelect) periodSelect.value = dashboardPeriodMode;
+}"""
+          sync_replacement = """  const periodSelect = document.getElementById('dashboardPeriodMode');
+  if (periodSelect) periodSelect.value = ['weekly','monthly'].includes(dashboardPeriodMode) ? dashboardPeriodMode : '';
+  const rangeFrom = document.getElementById('dashboardRangeFrom');
+  const rangeTo = document.getElementById('dashboardRangeTo');
+  const fallbackDate = current || unifiedImportState?.reportDate || '';
+  if (rangeFrom && !rangeFrom.matches(':focus')) rangeFrom.value = dashboardPeriodRange?.fromDate || rangeFrom.value || fallbackDate;
+  if (rangeTo && !rangeTo.matches(':focus')) rangeTo.value = dashboardPeriodRange?.toDate || rangeTo.value || fallbackDate;
+}"""
+          app = must_replace(app, sync_anchor, sync_replacement, 'range input synchronization')
+
+          # Custom export period controls and payload.
+          app, count = re.subn(
+              r"function setExportPeriod\(type, button\) \{.*?\n\}(?=\n\nasync function exportPeriodReport)",
+              lambda _: r'''function setExportPeriod(type, button) {
+  exportPeriodType = ['daily', 'weekly', 'monthly', 'custom'].includes(type) ? type : 'daily';
+  document.querySelectorAll('.period-tab').forEach(item => item.classList.toggle('active', item === button));
+  const date = document.getElementById('periodExportDate');
+  const from = document.getElementById('periodExportFrom');
+  const to = document.getElementById('periodExportTo');
+  const dates = [...new Set((historyCatalog.UNIFIED || []).map(row => row.reportDate).filter(Boolean))].sort();
+  const latest = dates.at(-1) || unifiedImportState?.reportDate || historyModeDate || '';
+  if (date && latest && !date.value) date.value = latest;
+  if (from && latest && !from.value) from.value = latest;
+  if (to && latest && !to.value) to.value = latest;
+  document.querySelectorAll('.custom-export-range').forEach(item => { item.hidden = exportPeriodType !== 'custom'; });
+  if (date?.closest('label')) date.closest('label').hidden = exportPeriodType === 'custom';
+}''',
+              app,
               count=1,
               flags=re.S
           )
           if count != 1:
-              raise SystemExit('Cannot patch /api/shopee/state')
+              raise SystemExit('Cannot patch setExportPeriod')
 
-          old_loader = "const source = loadUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));"
-          new_loader = "const source = loadLightweightUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));"
-          if old_loader in text:
-              text = text.replace(old_loader, new_loader, 1)
-          elif new_loader not in text:
-              raise SystemExit('Cannot patch business state loader')
+          app, count = re.subn(
+              r"async function exportPeriodReport\(\) \{.*?\n\}(?=\n\nfunction renderReportPreview)",
+              lambda _: r'''async function exportPeriodReport() {
+  const date = document.getElementById('periodExportDate')?.value || '';
+  const fromDate = document.getElementById('periodExportFrom')?.value || '';
+  const toDate = document.getElementById('periodExportTo')?.value || '';
+  const businessType = document.getElementById('periodExportBusiness')?.value || 'ALL';
+  const progress = document.getElementById('exportProgress');
+  const files = document.getElementById('exportGeneratedFiles');
+  if (exportPeriodType === 'custom') {
+    if (!fromDate || !toDate) { progress.textContent = '请选择开始日期和结束日期'; return; }
+    if (fromDate > toDate) { progress.textContent = '开始日期不能晚于结束日期'; return; }
+  } else if (!date) {
+    progress.textContent = '请选择报表基准日期'; return;
+  }
+  progress.textContent = '正在从SQLite已完成日报生成报表；网页看板不会被阻塞…';
+  files.innerHTML = '';
+  try {
+    const payload = { periodType: exportPeriodType, date, businessType };
+    if (exportPeriodType === 'custom') Object.assign(payload, { fromDate, toDate });
+    const result = await api('/api/export-period/prepare', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    progress.textContent = `生成完成：${result.range.from} 至 ${result.range.to}，共${result.files.length}个文件`;
+    files.innerHTML = result.files.map(file => `<a class="export-file-item" href="${escapeAttr(file.url)}"><span>${escapeHtml(file.name)}</span><b>下载</b></a>`).join('');
+  } catch (error) {
+    progress.textContent = `导出失败：${error.message}`;
+  }
+}''',
+              app,
+              count=1,
+              flags=re.S
+          )
+          if count != 1:
+              raise SystemExit('Cannot patch exportPeriodReport')
 
-          old_workspace = "if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadUnifiedBusinessState(type, snapshotId));"
-          new_workspace = "if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));"
-          if old_workspace in text:
-              text = text.replace(old_workspace, new_workspace, 1)
+          app_path.write_text(app, encoding='utf-8')
 
-          path.write_text(text, encoding='utf-8')
+          # ------------------------------------------------------------------
+          # 5) UI: visible start/end date range on home + export page.
+          # ------------------------------------------------------------------
+          html_path = Path('public/index.html')
+          html = html_path.read_text(encoding='utf-8')
+          home_anchor = '<section id="homeBusinessCards" class="business-card-grid" aria-label="六业务总览"></section>'
+          home_range = '''<section class="dashboard-range-toolbar" aria-label="总看板日期范围">
+            <strong>总看板日期范围</strong>
+            <label>开始日期<input id="dashboardRangeFrom" type="date"></label>
+            <span>至</span>
+            <label>结束日期<input id="dashboardRangeTo" type="date"></label>
+            <button class="btn primary compact" type="button" onclick="loadCustomDashboardRange()">查询</button>
+            <button class="btn ghost compact" type="button" onclick="resetDashboardRange()">返回单日</button>
+            <small id="dashboardRangeStatus">可自由选择开始日期和结束日期</small>
+          </section>
+          ''' + home_anchor
+          if 'id="dashboardRangeFrom"' not in html:
+              if home_anchor not in html:
+                  raise SystemExit('Missing home business cards anchor')
+              html = html.replace(home_anchor, home_range, 1)
+
+          old_tabs = '<div class="period-tabs" role="tablist"><button class="period-tab active" role="tab" data-period="daily" onclick="setExportPeriod(\'daily\',this)">日报</button><button class="period-tab" role="tab" data-period="weekly" onclick="setExportPeriod(\'weekly\',this)">周报</button><button class="period-tab" role="tab" data-period="monthly" onclick="setExportPeriod(\'monthly\',this)">月报</button></div>'
+          new_tabs = '<div class="period-tabs" role="tablist"><button class="period-tab active" role="tab" data-period="daily" onclick="setExportPeriod(\'daily\',this)">日报</button><button class="period-tab" role="tab" data-period="weekly" onclick="setExportPeriod(\'weekly\',this)">周报</button><button class="period-tab" role="tab" data-period="monthly" onclick="setExportPeriod(\'monthly\',this)">月报</button><button class="period-tab" role="tab" data-period="custom" onclick="setExportPeriod(\'custom\',this)">自定义日期</button></div>'
+          html = must_replace(html, old_tabs, new_tabs, 'custom export tab')
+
+          old_controls = '<div class="period-export-controls"><label>基准日期<input id="periodExportDate" type="date"></label><label>业务<select id="periodExportBusiness"><option value="ALL">管理汇总 + 五业务</option><option value="CE">仅CE</option><option value="TBKH">仅TBKH</option><option value="ALI1688">仅ALI1688</option><option value="SHOPEECN">仅SHOPEE CN</option><option value="SHOPEEVN">仅SHOPEE VN</option></select></label><button class="btn primary" data-testid="export-all-reports" onclick="exportPeriodReport()">一键导出全部报表</button></div>'
+          new_controls = '<div class="period-export-controls"><label>基准日期<input id="periodExportDate" type="date"></label><label class="custom-export-range" hidden>开始日期<input id="periodExportFrom" type="date"></label><label class="custom-export-range" hidden>结束日期<input id="periodExportTo" type="date"></label><label>业务<select id="periodExportBusiness"><option value="ALL">管理汇总 + 五业务</option><option value="CE">仅CE</option><option value="TBKH">仅TBKH</option><option value="ALI1688">仅ALI1688</option><option value="SHOPEECN">仅SHOPEE CN</option><option value="SHOPEEVN">仅SHOPEE VN</option></select></label><button class="btn primary" data-testid="export-all-reports" onclick="exportPeriodReport()">一键导出全部报表</button></div>'
+          html = must_replace(html, old_controls, new_controls, 'custom export controls')
+          html_path.write_text(html, encoding='utf-8')
+
+          css_path = Path('public/style.css')
+          css = css_path.read_text(encoding='utf-8')
+          if '.dashboard-range-toolbar' not in css:
+              css += r'''
+
+.dashboard-range-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #dce7f3;
+  border-radius: 10px;
+  background: #fff;
+}
+.dashboard-range-toolbar strong { color: #123b63; margin-right: 4px; }
+.dashboard-range-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: #5d7190; font-size: 13px; }
+.dashboard-range-toolbar input { min-height: 34px; border: 1px solid #cddbea; border-radius: 7px; padding: 0 8px; color: #18324f; background: #fff; }
+.dashboard-range-toolbar small { color: #6f829d; margin-left: auto; }
+@media (max-width: 900px) { .dashboard-range-toolbar small { width: 100%; margin-left: 0; } }
+'''
+          css_path.write_text(css, encoding='utf-8')
           PY
 
       - name: Static validation
@@ -97,19 +597,23 @@ jobs:
           node --check server.js
           node --check src/lightweightDashboardStore.js
           node --check src/lightweightDashboardSummary.js
-          grep -q "summarizeLightweightCcslState(state" server.js
-          grep -q "summarizeLightweightShopeeState(state" server.js
-          grep -q "loadLightweightUnifiedBusinessState(req.params.businessType" server.js
+          node --check src/periodExporter.js
+          node --check public/app.js
+          grep -q "loadLightweightPeriodBusinessState" server.js
+          grep -q "listLightweightCompletedUnifiedSnapshots" src/periodExporter.js
+          grep -q "dashboardRangeFrom" public/index.html
+          grep -q "periodExportFrom" public/index.html
+          grep -q "loadCustomDashboardRange" public/app.js
           grep -q "2026-08-08-v22-memory-safe-dashboard" server.js
 
       - name: Commit patch
         run: |
           git config user.name "ChatGPT V22"
           git config user.email "actions@users.noreply.github.com"
-          git add server.js src/lightweightDashboardStore.js src/lightweightDashboardSummary.js
+          git add server.js src/lightweightDashboardStore.js src/lightweightDashboardSummary.js src/periodExporter.js public/app.js public/index.html public/style.css
           if git diff --cached --quiet; then
             echo "No source changes to commit"
             exit 0
           fi
-          git commit -m "V22 eliminate snapshot JSON from dashboard GET paths"
+          git commit -m "V22 fast dashboards and custom date range export"
           git push origin HEAD:chatgpt/v22-memory-safe-dashboard
