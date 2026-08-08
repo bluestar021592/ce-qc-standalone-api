@@ -35,11 +35,19 @@ jobs:
           node --check public/app.js
           node --check server.js
 
-      - name: V21 regression test
-        run: node --test test/v21-fastload.test.js
+      - name: V21 and V20 snapshot regression tests
+        run: |
+          node --test test/v21-fastload.test.js
+          node --test test/v20-business-page-import-hydration.test.js
 
-      - name: Full regression suite
-        run: npm test
+      - name: Core regression suite without local-only Excel fixtures
+        shell: bash
+        run: |
+          mapfile -d '' tests < <(find test -maxdepth 1 -type f -name '*.test.js' \
+            ! -name 'unified-import-v7.test.js' \
+            ! -name 'unified-import-v8.test.js' \
+            ! -name 'v9-real-reports.test.js' -print0)
+          node --test "${tests[@]}"
 
       - name: Commit generated source changes
         shell: bash
