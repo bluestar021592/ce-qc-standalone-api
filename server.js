@@ -103,7 +103,7 @@ app.get('/api/health', async (req, res) => {
   res.json({
     ok: true,
     version: '0.1.0-shopee-track-user-delete-v2',
-    patchId: '2026-08-08-v22-memory-safe-dashboard',
+    patchId: '2026-08-08-v23-range-fast-nav',
     time: new Date().toISOString(),
     db: getDbStatus(),
     memory: {
@@ -354,7 +354,87 @@ app.post('/api/ce-logout', requireRole('ADMIN'), async (req, res) => {
 app.post('/api/auth/login', (req, res) => res.redirect(307, '/api/ce-login'));
 app.post('/api/auth/logout', (req, res) => res.redirect(307, '/api/ce-logout'));
 
+const fastSqlDashboardCache = new Map();
+
+function fastDashboardBatch(snapshotId = '') {
+  const db = getDb();
+  if (String(snapshotId || '').trim()) {
+    return db.prepare(`
+      SELECT b.snapshotId,b.reportDate,s.status AS snapshotStatus
+      FROM unified_import_batches b
+      LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+      WHERE b.snapshotId=? AND b.status='VALID'
+      LIMIT 1
+    `).get(String(snapshotId).trim()) || null;
+  }
+  return db.prepare(`
+    SELECT b.snapshotId,b.reportDate,s.status AS snapshotStatus
+    FROM unified_import_batches b
+    LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID'
+    ORDER BY b.createdAt DESC
+    LIMIT 1
+  `).get() || null;
+}
+
+function cachedFastRange(batch) {
+  if (!batch || batch.snapshotStatus !== 'COMPLETED' || !batch.reportDate) return null;
+  const key = `${batch.snapshotId}:${batch.reportDate}`;
+  const cached = fastSqlDashboardCache.get(key);
+  if (cached && Date.now() - cached.at < 3000) return cached.value;
+  const value = loadRangeDashboard(batch.reportDate, batch.reportDate);
+  if (fastSqlDashboardCache.size > 12) fastSqlDashboardCache.clear();
+  fastSqlDashboardCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+function loadFastSqlAggregateState(scope) {
+  const batch = fastDashboardBatch();
+  const range = cachedFastRange(batch);
+  if (!range) return null;
+  const state = String(scope || '').toUpperCase() === 'SHOPEE' ? range.aggregates.SHOPEE : range.aggregates.CCSL;
+  return {
+    ...state,
+    reportDate: batch.reportDate,
+    snapshotId: batch.snapshotId,
+    snapshotStatus: 'COMPLETED',
+    processing: { running: false, paused: false, phase: '' },
+    logs: [],
+    _fastSqlSummary: true
+  };
+}
+
+function loadFastSqlBusinessState(businessType, snapshotId = '') {
+  const type = String(businessType || '').toUpperCase();
+  if (!['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].includes(type)) return null;
+  const batch = fastDashboardBatch(snapshotId);
+  const range = cachedFastRange(batch);
+  if (!range) return null;
+  const source = range.states[type];
+  if (!source) return null;
+  return {
+    ...source,
+    businessType: type.startsWith('SHOPEE') ? 'SHOPEE' : type,
+    viewBusinessType: type,
+    reportDate: batch.reportDate,
+    snapshotId: batch.snapshotId,
+    snapshotStatus: 'COMPLETED',
+    processing: { running: false, paused: false, phase: '' },
+    logs: [],
+    _fastSqlSummary: true
+  };
+}
+
 app.get('/api/state', async (req, res) => {
+  if (req.query.compact === '1') {
+    const fast = loadFastSqlAggregateState('CCSL');
+    if (fast) {
+      fast.dbStatus = getDbStatus();
+      fast.network = buildNetworkInfo(getRuntimeConfig());
+      fast.shopCodes = getShopCodeSummary();
+      return res.json({ ok: true, state: fast });
+    }
+  }
   const state = loadLightweightAggregateState('CCSL');
   const summary = summarizeLightweightCcslState(state, {
     dbStatus: getDbStatus(),
@@ -404,6 +484,10 @@ app.get('/api/period-dashboard', (req, res) => {
 });
 
 app.get('/api/shopee/state', async (req, res) => {
+  if (req.query.compact === '1') {
+    const fast = loadFastSqlAggregateState('SHOPEE');
+    if (fast) { fast.dbStatus = getDbStatus(); return res.json({ ok: true, state: fast }); }
+  }
   const state = loadLightweightAggregateState('SHOPEE');
   const summary = summarizeLightweightShopeeState(state, { dbStatus: getDbStatus() });
   res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
@@ -411,7 +495,12 @@ app.get('/api/shopee/state', async (req, res) => {
 
 app.get('/api/business-state/:businessType', (req, res) => {
   try {
-    const source = loadLightweightUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));
+    const requestedSnapshotId = String(req.query.snapshotId || '');
+    if (req.query.compact === '1') {
+      const fast = loadFastSqlBusinessState(req.params.businessType, requestedSnapshotId);
+      if (fast) return res.json({ ok: true, businessType: fast.viewBusinessType || fast.businessType, reportDate: fast.reportDate, snapshotId: fast.snapshotId, snapshotStatus: fast.snapshotStatus, state: fast });
+    }
+    const source = loadLightweightUnifiedBusinessState(req.params.businessType, requestedSnapshotId);
     const shopee = /^SHOPEE/.test(source.businessType);
     const shopeeDashboard = shopee ? buildShopeeDashboard({ ...source, businessType: 'SHOPEE' }) : null;
     const state = shopee

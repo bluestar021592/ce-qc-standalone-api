@@ -53,7 +53,14 @@
       <header class="topbar" data-testid="topbar">
         <h1 id="pageTitle">首页总看板</h1>
         <div class="top-actions">
-          <label class="top-date"><select id="topHistoryDate" aria-label="日报日期" onchange="loadDashboardDate(this.value)"><option value="">—</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-calendar"></use></svg></label>
+          <select id="topHistoryDate" aria-label="日报日期" onchange="loadDashboardDate(this.value)" hidden><option value="">—</option></select>
+          <div id="topRangePicker" class="top-range-picker" aria-label="日期范围">
+            <label class="top-range-date"><span>从</span><input id="topRangeFrom" type="date" aria-label="开始日期"></label>
+            <span class="top-range-separator">至</span>
+            <label class="top-range-date"><input id="topRangeTo" type="date" aria-label="结束日期"></label>
+            <button id="topRangeQuery" class="top-range-query" type="button" onclick="applyTopDateRange()">查询</button>
+            <small id="topRangeStatus" class="top-range-status"></small>
+          </div>
           <label class="cycle-wrap"><select id="dashboardPeriodMode" class="cycle-select" aria-label="周期" onchange="changeDashboardPeriod(this.value)"><option value="">周期</option><option value="weekly">周</option><option value="monthly">月</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></label>
           <button class="notification-button" title="系统通知"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bell"></use></svg><b id="notificationCount" hidden></b></button>
           <div class="top-user-menu">

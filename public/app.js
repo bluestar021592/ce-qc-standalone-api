@@ -488,8 +488,10 @@ async function hydratePageData(page) {
       if (!businessStates[type]?.snapshotId
         || (selectedDate && businessStates[type]?.reportDate !== selectedDate)
         || (expectedSnapshotId && businessStates[type]?.snapshotId !== expectedSnapshotId)) {
-        const suffix = unifiedRow?.snapshotId ? `?snapshotId=${encodeURIComponent(unifiedRow.snapshotId)}` : '';
-        const result = await api(`/api/business-state/${type}${suffix}`);
+        const params = new URLSearchParams();
+        if (unifiedRow?.snapshotId) params.set('snapshotId', unifiedRow.snapshotId);
+        params.set('compact', '1');
+        const result = await api(`/api/business-state/${type}?${params.toString()}`);
         businessStates[type] = result.state || {};
         renderAll();
       }
@@ -695,9 +697,36 @@ function renderHistoryOptions() {
   if (periodSelect) periodSelect.value = ['weekly','monthly'].includes(dashboardPeriodMode) ? dashboardPeriodMode : '';
   const rangeFrom = document.getElementById('dashboardRangeFrom');
   const rangeTo = document.getElementById('dashboardRangeTo');
+  const topRangeFrom = document.getElementById('topRangeFrom');
+  const topRangeTo = document.getElementById('topRangeTo');
   const fallbackDate = current || unifiedImportState?.reportDate || '';
-  if (rangeFrom && !rangeFrom.matches(':focus')) rangeFrom.value = dashboardPeriodRange?.fromDate || rangeFrom.value || fallbackDate;
-  if (rangeTo && !rangeTo.matches(':focus')) rangeTo.value = dashboardPeriodRange?.toDate || rangeTo.value || fallbackDate;
+  const selectedFrom = dashboardPeriodRange?.fromDate || fallbackDate;
+  const selectedTo = dashboardPeriodRange?.toDate || fallbackDate;
+  if (rangeFrom && !rangeFrom.matches(':focus')) rangeFrom.value = selectedFrom;
+  if (rangeTo && !rangeTo.matches(':focus')) rangeTo.value = selectedTo;
+  if (topRangeFrom && !topRangeFrom.matches(':focus')) topRangeFrom.value = selectedFrom;
+  if (topRangeTo && !topRangeTo.matches(':focus')) topRangeTo.value = selectedTo;
+  const topStatus = document.getElementById('topRangeStatus');
+  if (topStatus) topStatus.textContent = dashboardPeriodRange?.fromDate ? `${selectedFrom} ~ ${selectedTo}` : '';
+}
+
+async function applyTopDateRange() {
+  const from = document.getElementById('topRangeFrom')?.value || '';
+  const to = document.getElementById('topRangeTo')?.value || '';
+  const button = document.getElementById('topRangeQuery');
+  const status = document.getElementById('topRangeStatus');
+  if (!from || !to) { if (status) status.textContent = '请选择开始和结束日期'; return; }
+  if (from > to) { if (status) status.textContent = '开始日期不能晚于结束日期'; return; }
+  if (button) { button.disabled = true; button.textContent = '读取中'; }
+  if (status) status.textContent = '正在读取…';
+  try {
+    await loadCustomDashboardRange(from, to, true);
+    if (status) status.textContent = `${from} ~ ${to}`;
+  } catch (error) {
+    if (status) status.textContent = `读取失败：${error.message}`;
+  } finally {
+    if (button) { button.disabled = false; button.textContent = '查询'; }
+  }
 }
 
 async function loadDashboardDate(reportDate) {
@@ -722,9 +751,9 @@ async function loadDashboardPeriod(mode, anchor, shouldRender = true) {
 }
 
 async function loadCustomDashboardRange(fromDate = '', toDate = '', shouldRender = true) {
-  const from = fromDate || document.getElementById('dashboardRangeFrom')?.value || '';
-  const to = toDate || document.getElementById('dashboardRangeTo')?.value || '';
-  const status = document.getElementById('dashboardRangeStatus');
+  const from = fromDate || document.getElementById('topRangeFrom')?.value || document.getElementById('dashboardRangeFrom')?.value || '';
+  const to = toDate || document.getElementById('topRangeTo')?.value || document.getElementById('dashboardRangeTo')?.value || '';
+  const status = document.getElementById('topRangeStatus') || document.getElementById('dashboardRangeStatus');
   if (!from || !to) { if (status) status.textContent = '请选择开始日期和结束日期'; return; }
   if (from > to) { if (status) status.textContent = '开始日期不能晚于结束日期'; return; }
   if (status) status.textContent = '正在读取范围数据…';

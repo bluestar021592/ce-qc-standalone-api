@@ -1005,3 +1005,16 @@ body.sidebar-collapsed .sidebar-collapse { justify-content: center; margin-inlin
 .dashboard-range-toolbar input { min-height: 34px; border: 1px solid #cddbea; border-radius: 7px; padding: 0 8px; color: #18324f; background: #fff; }
 .dashboard-range-toolbar small { color: #6f829d; margin-left: auto; }
 @media (max-width: 900px) { .dashboard-range-toolbar small { width: 100%; margin-left: 0; } }
+
+
+/* V23 persistent date range + fast navigation */
+.top-range-picker{display:flex;align-items:center;gap:8px;min-height:44px;padding:4px 6px 4px 10px;border:1px solid #d7e2f0;border-radius:10px;background:#fff;box-shadow:0 1px 2px rgba(16,48,86,.04)}
+.top-range-date{display:flex;align-items:center;gap:6px;color:#70839a;font-size:12px;font-weight:600;white-space:nowrap}
+.top-range-date input{width:138px;height:34px;border:0;background:transparent;color:#16395f;font:600 14px/1.2 "Microsoft YaHei",sans-serif;outline:none;padding:0 4px}
+.top-range-date input:focus{background:#f4f8fd;border-radius:6px}
+.top-range-separator{color:#8ba0b7;font-size:13px}
+.top-range-query{height:34px;padding:0 14px;border:0;border-radius:7px;background:#0b6ffb;color:#fff;font:600 13px/34px "Microsoft YaHei",sans-serif;cursor:pointer}
+.top-range-query:hover{background:#075fd8}.top-range-query:disabled{opacity:.65;cursor:wait}
+.top-range-status{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6f8297;font-size:11px}
+@media(max-width:1180px){.top-range-status{display:none}.top-range-date input{width:124px}}
+@media(max-width:980px){.top-range-picker{gap:4px}.top-range-date span{display:none}.top-range-date input{width:118px}.top-range-query{padding:0 10px}}
