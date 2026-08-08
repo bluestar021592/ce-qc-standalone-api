@@ -72,6 +72,7 @@ try {
   await import('./src/v27ServerPatch.js');
   await import('./src/v27TrendPatch.js');
   await import('./src/v27CarryBusinessPatch.js');
+  await import('./src/v28ResumeGuardPatch.js');
   await import('./server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
