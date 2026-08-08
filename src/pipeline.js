@@ -255,6 +255,18 @@ export async function runQcPipeline({
   return { state, summary };
 }
 
+function stripHeavyPipelineRow(row = {}) {
+  if (!row || typeof row !== 'object') return row;
+  const copy = { ...row };
+  delete copy.rawJson;
+  delete copy.raw;
+  delete copy.events;
+  delete copy.trackEvents;
+  delete copy.exceptionItems;
+  delete copy.scanRaw;
+  return copy;
+}
+
 async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPaused, startedAt }) {
   const runId = String(state.currentRun?.runId || state.lastRunSummary?.runId || '').trim();
   const reportDate = state.reportDate || '';
@@ -369,7 +381,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
       result.异常分类 = '订单扫描待重试';
       result.QC判断 = '订单扫描未返回有效状态，未进入轨迹查询，保留次日续查。';
     }
-    trackResults.push(result);
+    trackResults.push(stripHeavyPipelineRow(result));
     if (result.是否POD === '是') podLocks.add(bill);
   }
 
@@ -407,8 +419,8 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
     durationSeconds: Math.round((completedAt - startedAt) / 1000)
   };
 
-  state.trackResults = trackResults;
-  state.finalRows = finalRows;
+  state.trackResults = trackResults.map(stripHeavyPipelineRow);
+  state.finalRows = finalRows.map(stripHeavyPipelineRow);
   state.nextCarryBills = nextCarryBills;
   state.carryBills = nextCarryBills;
   state.podLocks = [...podSet].sort();

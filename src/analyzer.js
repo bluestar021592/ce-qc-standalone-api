@@ -189,8 +189,14 @@ export function analyzeShipment({ waybill, scanRow = {}, events = [], shopCodeMa
 }
 
 export function normalizeEvent(e) {
+  const source = e && typeof e === 'object' ? { ...e } : {};
+  // Do not embed a JSON-string copy of the whole event inside the event itself.
+  // The normalized SQLite event row is already the raw evidence record. Keeping
+  // rawJson here doubles every track payload and caused large SHOPEE days to hit
+  // V8's maximum string/heap limits.
+  delete source.rawJson;
   return {
-    ...e,
+    ...source,
     shipmentCode: String(e?.shipmentCode || e?.运单号 || '').toUpperCase(),
     eventCode: String(e?.eventCode || ''),
     trackingEventCode: String(e?.trackingEventCode || ''),
@@ -202,8 +208,7 @@ export function normalizeEvent(e) {
     eventCourier: e?.eventCourier || '',
     eventShop: e?.eventShop || e?.eventShopName || e?.shopName || '',
     locationCode: e?.locationCode || '',
-    place: e?.place || '',
-    rawJson: e?.rawJson || JSON.stringify(e || {})
+    place: e?.place || ''
   };
 }
 

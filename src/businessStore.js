@@ -9,21 +9,43 @@ export const SHOPEE = 'SHOPEE';
 
 export function loadBusinessState(businessType = SHOPEE) {
   const type = normalizeType(businessType);
-  const row = getDb().prepare('SELECT valueJson FROM business_states WHERE businessType=?').get(type);
-  if (!row?.valueJson) return emptyState(type);
-  try { return restrictShopeeState(normalizeBusinessState(JSON.parse(row.valueJson), type), type); } catch { return emptyState(type); }
+  const db = getDb();
+  // Legacy versions stored the whole processing state (including every raw event)
+  // in one JSON string. Large SHOPEE days can exceed V8's maximum string length.
+  // Read a compact payload only when it is reasonably small; otherwise rebuild
+  // the current state from the normalized SQLite tables without materializing the
+  // legacy giant JSON in Node.js memory.
+  const meta = db.prepare('SELECT length(valueJson) AS jsonLength FROM business_states WHERE businessType=?').get(type);
+  let base = emptyState(type);
+  const jsonLength = Number(meta?.jsonLength || 0);
+  if (jsonLength > 0 && jsonLength <= 96 * 1024 * 1024) {
+    const row = db.prepare('SELECT valueJson FROM business_states WHERE businessType=?').get(type);
+    try { base = normalizeBusinessState(JSON.parse(row?.valueJson || '{}'), type); } catch { base = emptyState(type); }
+  } else if (jsonLength > 0) {
+    try {
+      const row = db.prepare(`SELECT
+        json_extract(valueJson,'$.reportDate') AS reportDate,
+        json_extract(valueJson,'$.sourceName') AS sourceName,
+        json_extract(valueJson,'$.snapshotId') AS snapshotId
+        FROM business_states WHERE businessType=?`).get(type);
+      base = normalizeBusinessState({ ...base, ...row }, type);
+    } catch {}
+  }
+  const hydrated = hydrateBusinessStateFromTables(db, base, type);
+  return restrictShopeeState(hydrated, type);
 }
 
 export function saveBusinessState(state = {}, businessType = state.businessType || SHOPEE) {
   const type = normalizeType(businessType);
   const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
+  const persisted = compactBusinessStatePayload(normalized);
   const db = getDb();
   const now = nowIso();
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
       ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
-      .run(type, JSON.stringify(normalized), now);
+      .run(type, JSON.stringify(persisted), now);
     mirrorBusinessTables(db, normalized, type, now);
     db.exec('COMMIT');
   } catch (error) {
@@ -106,7 +128,20 @@ export function saveBusinessSnapshot(businessType, state, view) {
   if (existing) return existing;
   const snapshotId = `${type}_${reportDate}_${runId}_${randomUUID().slice(0, 8)}`;
   const generatedAt = nowIso();
-  const snapshotState = { ...state, businessType: type, snapshotId };
+  const snapshotState = {
+    ...compactBusinessStatePayload(normalizeBusinessState(state, type)),
+    businessType: type,
+    snapshotId,
+    // Keep final rows in the immutable snapshot for count/reconciliation checks,
+    // but never embed raw API payloads or cumulative track events again.
+    finalRows: (state.finalRows || []).map(stripHeavyBusinessRow),
+    trackResults: [],
+    trackEvents: [],
+    scanResults: [],
+    shipmentTrackResults: [],
+    exceptionItems: [],
+    dailyParseRows: []
+  };
   const snapshotHashes = buildSnapshotHashes(view || {});
   const payload = { snapshotId, businessType: type, reportDate, runId, generatedAt, view, ...snapshotHashes, state: snapshotState };
   const db = getDb();
@@ -184,6 +219,162 @@ export function loadBusinessDetail(businessType, reportDate, shipmentCode) {
     podLock: db.prepare('SELECT * FROM business_pod_locks WHERE businessType=? AND shipmentCode=?').get(type, bill) || null,
     carry: db.prepare('SELECT * FROM business_carry_bills WHERE businessType=? AND shipmentCode=? ORDER BY updatedAt DESC').all(type, bill)
   };
+}
+
+
+function parseJsonSafe(value, fallback = null) {
+  if (value == null || value === '') return fallback;
+  try { return typeof value === 'string' ? JSON.parse(value) : value; } catch { return fallback; }
+}
+
+function stripHeavyBusinessRow(row = {}) {
+  if (!row || typeof row !== 'object') return row;
+  const copy = { ...row };
+  // Raw API bodies remain available in the normalized scan/event tables. Do not
+  // duplicate them inside state/snapshot JSON where they multiply memory usage.
+  delete copy.rawJson;
+  delete copy.raw;
+  delete copy.events;
+  delete copy.trackEvents;
+  delete copy.exceptionItems;
+  delete copy.scanRaw;
+  return copy;
+}
+
+function compactBusinessStatePayload(state = {}) {
+  const summary = state.dailyParseSummary || state.daily?.summary || null;
+  const compactDaily = state.daily ? {
+    reportDate: state.reportDate || state.daily.reportDate || '',
+    sourceName: state.sourceName || state.daily.sourceName || '',
+    importedAt: state.daily.importedAt || summary?.importedAt || '',
+    summary
+  } : null;
+  return {
+    ...state,
+    daily: compactDaily,
+    dailyParseRows: [],
+    recipientConflicts: [],
+    scanResults: [],
+    scanQueryStatus: [],
+    shipmentTrackResults: [],
+    shipmentQueryStatus: [],
+    trackEvents: [],
+    eventQueryStatus: [],
+    exceptionItems: [],
+    exceptionQueryStatus: [],
+    apiBatchStatus: [],
+    // Track results are the only large-ish array retained because they are the
+    // resume checkpoint after an event batch. Strip embedded raw scan bodies.
+    trackResults: (state.trackResults || []).map(stripHeavyBusinessRow),
+    finalRows: [],
+    priorCarryRows: (state.priorCarryRows || []).map(stripHeavyBusinessRow)
+  };
+}
+
+function rowsFromJson(db, sql, params = [], field = 'rawJson') {
+  try {
+    return db.prepare(sql).all(...params)
+      .map(row => parseJsonSafe(row?.[field], null))
+      .filter(Boolean)
+      .map(stripHeavyBusinessRow);
+  } catch {
+    return [];
+  }
+}
+
+function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
+  let date = String(state.reportDate || '').trim();
+  if (!date) {
+    const latest = db.prepare('SELECT reportDate,sourceFile,summaryJson FROM business_daily_reports WHERE businessType=? ORDER BY updatedAt DESC,reportDate DESC LIMIT 1').get(type);
+    if (!latest?.reportDate) return state;
+    date = latest.reportDate;
+    state = { ...state, reportDate: date, sourceName: latest.sourceFile || state.sourceName || '' };
+  }
+
+  const report = db.prepare('SELECT sourceFile,totalCount,summaryJson FROM business_daily_reports WHERE businessType=? AND reportDate=?').get(type, date);
+  const dailySummary = parseJsonSafe(report?.summaryJson, state.dailyParseSummary || null);
+  const dailyRows = rowsFromJson(db,
+    'SELECT rowJson FROM business_daily_parse_rows WHERE businessType=? AND reportDate=? ORDER BY id',
+    [type, date], 'rowJson');
+  const scanResults = rowsFromJson(db,
+    'SELECT rawJson FROM business_scan_results WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
+    [type, date]);
+  const shipmentTrackResults = rowsFromJson(db,
+    'SELECT rawJson FROM business_shipment_tracks WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
+    [type, date]);
+  const trackEvents = rowsFromJson(db,
+    'SELECT rawJson FROM business_track_events WHERE businessType=? AND reportDate=? ORDER BY eventTime,id',
+    [type, date]);
+  const exceptionItems = rowsFromJson(db,
+    'SELECT rawJson FROM business_exception_items WHERE businessType=? AND reportDate=? ORDER BY reportTime,id',
+    [type, date]);
+  const finalRows = rowsFromJson(db,
+    'SELECT rawJson FROM business_final_rows WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
+    [type, date]);
+
+  const conflictRows = db.prepare('SELECT shipmentCode,groupsJson,rowsJson,status FROM business_recipient_conflicts WHERE businessType=? AND reportDate=? ORDER BY id').all(type, date)
+    .map(row => ({ shipmentCode: row.shipmentCode, groups: parseJsonSafe(row.groupsJson, []), rows: parseJsonSafe(row.rowsJson, []), status: row.status || '' }));
+  const apiBatchStatus = db.prepare('SELECT runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt FROM business_api_batches WHERE businessType=? AND reportDate=? ORDER BY updatedAt').all(type, date)
+    .map(row => ({ ...row, shipmentCodes: parseJsonSafe(row.shipmentCodesJson, []) }));
+  const podLocks = db.prepare('SELECT shipmentCode FROM business_pod_locks WHERE businessType=? ORDER BY shipmentCode').all(type).map(row => row.shipmentCode);
+  const carryRowsRaw = rowsFromJson(db,
+    'SELECT rawJson FROM business_carry_bills WHERE businessType=? ORDER BY updatedAt DESC',
+    [type]);
+  const carryByBill = new Map();
+  for (const row of carryRowsRaw) {
+    const bill = billOf(row);
+    if (bill && !carryByBill.has(bill)) carryByBill.set(bill, row);
+  }
+  const carryRows = [...carryByBill.values()].filter(row => !String(row.carry状态 || row.status || '').startsWith('closed'));
+  const carryBills = carryRows.map(billOf).filter(Boolean);
+  const run = db.prepare('SELECT * FROM business_run_locks WHERE businessType=? AND reportDate=?').get(type, date) || null;
+  const historyRows = db.prepare('SELECT summaryJson FROM business_history_summary WHERE businessType=? ORDER BY reportDate DESC LIMIT 30').all(type)
+    .map(row => parseJsonSafe(row.summaryJson, null)).filter(Boolean).reverse();
+  const latestSnapshot = db.prepare("SELECT snapshotId FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(type, date);
+  const pnhBills = dailyRows.map(billOf).filter(Boolean);
+  const podSet = new Set(podLocks);
+  const scanPool = [...new Set([...pnhBills, ...carryBills])].filter(bill => !podSet.has(bill));
+  const needTrackBills = scanResults.filter(row => row.trackRequired === true && row.是否POD !== '是').map(billOf).filter(Boolean);
+  const currentSummary = historyRows.find(item => String(item?.reportDate || '') === date) || state.lastRunSummary || null;
+
+  return normalizeBusinessState({
+    ...state,
+    businessType: type,
+    reportDate: date,
+    sourceName: report?.sourceFile || state.sourceName || '',
+    dailyReportReady: Boolean(report || dailyRows.length),
+    dailyParseSummary: dailySummary,
+    daily: state.daily || (report ? { reportDate: date, sourceName: report.sourceFile || '', summary: dailySummary } : null),
+    dailyParseRows: dailyRows,
+    recipientConflicts: conflictRows,
+    recipientReconciliation: state.recipientReconciliation || dailySummary?.reconciliation || null,
+    pnhBills: pnhBills.length ? pnhBills : state.pnhBills,
+    podLocks,
+    carryBills,
+    priorCarryRows: carryRows,
+    scanPool,
+    scanResults,
+    shipmentTrackResults,
+    trackEvents,
+    exceptionItems,
+    apiBatchStatus,
+    finalRows,
+    needTrackBills,
+    historySummary: historyRows.length ? historyRows : state.historySummary,
+    processing: run ? {
+      running: run.status === 'running',
+      paused: run.status === 'paused',
+      phase: run.currentStage || '',
+      batchIndex: Number(run.batchIndex || 0),
+      totalBatches: Number(run.totalBatches || 0),
+      error: run.errorMessage || '',
+      runId: run.runId || ''
+    } : state.processing,
+    currentRun: run || state.currentRun,
+    lastRunSummary: currentSummary,
+    lastRun: currentSummary,
+    snapshotId: latestSnapshot?.snapshotId || state.snapshotId || ''
+  }, type);
 }
 
 export function normalizeBusinessState(state = {}, businessType = SHOPEE) {
