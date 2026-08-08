@@ -5,7 +5,8 @@ import {
   getDashboardCacheStatus,
   markDashboardCacheDirty,
   refreshDashboardCacheDate,
-  refreshDashboardCacheDirty
+  refreshDashboardCacheDirty,
+  warmDashboardCacheRange
 } from './rangeDashboardStore.js';
 
 const args = process.argv.slice(2);
@@ -23,7 +24,12 @@ try {
     markDashboardCacheDirty(reportDate, reason);
     result = refreshDashboardCacheDate(reportDate, { force: true });
   } else {
-    result = refreshDashboardCacheDirty({ limit: 16, recentDays: 14 });
+    const status = getDashboardCacheStatus();
+    if (Number(status.cachedDates || 0) === 0 || reason === 'STARTUP_WARM') {
+      result = warmDashboardCacheRange({ days: 180 });
+    } else {
+      result = refreshDashboardCacheDirty({ limit: 24, recentDays: 30 });
+    }
   }
   process.stdout.write(`${JSON.stringify({ ok: true, reason, result, cache: getDashboardCacheStatus() })}\n`);
   closeDb();

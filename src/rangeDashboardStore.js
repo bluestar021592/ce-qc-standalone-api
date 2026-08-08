@@ -173,6 +173,79 @@ export function refreshDashboardCacheDirty(options = {}) {
   return { checked: dates.length, refreshed: results.filter(item => item.refreshed).length, results };
 }
 
+export function warmDashboardCacheRange(options = {}) {
+  ensureDashboardCacheSchema();
+  const db = getDb();
+  const maxDays = Math.max(1, Math.min(180, Number(options.days || 180)));
+  const dates = db.prepare(`
+    SELECT DISTINCT b.reportDate
+    FROM unified_import_batches b
+    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID' AND s.status='COMPLETED'
+    ORDER BY b.reportDate DESC
+    LIMIT ?
+  `).all(maxDays).map(row => row.reportDate).sort();
+  if (!dates.length) return { warmed: 0, fromDate: '', toDate: '', rowCount: 0 };
+
+  const fromDate = dates[0];
+  const toDate = dates[dates.length - 1];
+  const dateSet = new Set(dates);
+  const ccslRows = queryCcslDailyRaw(fromDate, toDate).filter(row => dateSet.has(row.reportDate));
+  const shopeeRows = queryShopeeDailyRaw(fromDate, toDate).filter(row => dateSet.has(row.reportDate));
+  const rows = [...ccslRows, ...shopeeRows];
+  const byDate = new Map(dates.map(date => [date, []]));
+  for (const row of rows) {
+    if (!byDate.has(row.reportDate)) byDate.set(row.reportDate, []);
+    byDate.get(row.reportDate).push(row);
+  }
+  const refreshedAt = cacheIsoNow();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const deleteRows = db.prepare('DELETE FROM dashboard_daily_cache WHERE reportDate=?');
+    const insert = db.prepare(`
+      INSERT INTO dashboard_daily_cache(
+        reportDate,businessType,regionCode,metricsJson,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt
+      ) VALUES(?,?,?,?,?,?,?,?)
+    `);
+    const upsertDate = db.prepare(`
+      INSERT INTO dashboard_cache_dates(reportDate,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt)
+      VALUES(?,?,?,?,?)
+      ON CONFLICT(reportDate) DO UPDATE SET
+        snapshotId=excluded.snapshotId,
+        snapshotStatus=excluded.snapshotStatus,
+        sourceFingerprint=excluded.sourceFingerprint,
+        refreshedAt=excluded.refreshedAt
+    `);
+    const clearDirty = db.prepare('DELETE FROM dashboard_cache_dirty WHERE reportDate=?');
+    let warmed = 0;
+    for (const date of dates) {
+      const source = dashboardSourceInfo(date);
+      if (!source || source.snapshotStatus !== 'COMPLETED') continue;
+      deleteRows.run(date);
+      for (const row of byDate.get(date) || []) {
+        insert.run(
+          date,
+          String(row.businessType || ''),
+          String(row.regionCode || ''),
+          JSON.stringify(normalizeCountRow(row)),
+          String(source.snapshotId || ''),
+          String(source.snapshotStatus || ''),
+          source.fingerprint,
+          refreshedAt
+        );
+      }
+      upsertDate.run(date, source.snapshotId || '', source.snapshotStatus || '', source.fingerprint, refreshedAt);
+      clearDirty.run(date);
+      warmed += 1;
+    }
+    db.exec('COMMIT');
+    return { warmed, fromDate, toDate, rowCount: rows.length, refreshedAt };
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+}
+
 export function getDashboardCacheStatus() {
   ensureDashboardCacheSchema();
   const db = getDb();
