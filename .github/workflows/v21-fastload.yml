@@ -1,0 +1,55 @@
+name: V21 Fast Dashboard Patch
+
+on:
+  push:
+    branches:
+      - chatgpt/v21-dashboard-fastload-20260808
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: chatgpt/v21-dashboard-fastload-20260808
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply V21 fastload patch
+        run: node tools/apply-v21-fastload.mjs
+
+      - name: Syntax checks
+        run: |
+          node --check public/app.js
+          node --check server.js
+
+      - name: V21 regression test
+        run: node --test test/v21-fastload.test.js
+
+      - name: Full regression suite
+        run: npm test
+
+      - name: Commit generated source changes
+        shell: bash
+        run: |
+          if git diff --quiet -- public/app.js server.js; then
+            echo 'No generated source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'OpenAI ChatGPT'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js server.js
+          git commit -m 'Optimize V21 dashboard startup and multi-user reads'
+          git push origin HEAD:chatgpt/v21-dashboard-fastload-20260808
