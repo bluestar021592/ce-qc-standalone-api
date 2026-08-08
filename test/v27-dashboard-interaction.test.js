@@ -15,6 +15,32 @@ test('V27 server routes and fast bootstrap are installed before server start', (
   assert.match(trendPatch,/\/api\/v27\/trends/);
 });
 
+test('V28 SHOPEE resume clears only conflicting batch-audit hashes before route execution', () => {
+  const bootstrap=fs.readFileSync('bootstrap.js','utf8');
+  const resumePatch=fs.readFileSync('src/v28ResumeGuardPatch.js','utf8');
+  assert.match(bootstrap,/v28ResumeGuardPatch\.js/);
+  assert.ok(bootstrap.indexOf('v28ResumeGuardPatch.js') < bootstrap.indexOf("import('./server.js')"));
+  assert.match(resumePatch,/\/api\/shopee\/run\/resume/);
+  assert.match(resumePatch,/apiBatchStatus/);
+  assert.match(resumePatch,/saveBusinessState\(state, SHOPEE\)/);
+  assert.doesNotMatch(resumePatch,/scanQueryStatus\s*=\s*\[\]/);
+  assert.doesNotMatch(resumePatch,/eventQueryStatus\s*=\s*\[\]/);
+  assert.doesNotMatch(resumePatch,/exceptionQueryStatus\s*=\s*\[\]/);
+  assert.doesNotMatch(resumePatch,/podLocks\s*=\s*\[\]/);
+});
+
+test('V28 trends use up to seven completed valid report dates for a single-day dashboard', () => {
+  const trendPatch=fs.readFileSync('src/v27TrendPatch.js','utf8');
+  assert.match(trendPatch,/function resolveTrendWindow/);
+  assert.match(trendPatch,/s\.status='COMPLETED'/);
+  assert.match(trendPatch,/b\.status='VALID'/);
+  assert.match(trendPatch,/LIMIT 7/);
+  assert.match(trendPatch,/b\.reportDate<=\?/);
+  assert.match(trendPatch,/loadRangeDashboard\(trendWindow\.from,trendWindow\.to\)/);
+  assert.match(trendPatch,/attemptRows\(trendWindow\.from,trendWindow\.to\)/);
+  assert.match(trendPatch,/trendWindowDates/);
+});
+
 test('V27 client uses lazy details and exposes carryover + SHOPEE attempt interaction', () => {
   const client=fs.readFileSync('public/v27-dashboard-fix.js','utf8');
   const loader=fs.readFileSync('public/v14-geometry-fixture.js','utf8');
