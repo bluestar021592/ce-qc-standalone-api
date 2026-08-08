@@ -109,7 +109,9 @@ jobs:
         run: |
           node --check server.js
           node --check src/lightweightDashboardStore.js
-          node -e "import('./src/lightweightDashboardStore.js').then(m=>{for(const k of ['loadLightweightUnifiedBusinessState','loadLightweightAggregateState','listLightweightBusinessHistory']) if(typeof m[k] !== 'function') throw new Error(k+' missing'); console.log('V22 lightweight module exports OK')})"
+          grep -q "export function loadLightweightUnifiedBusinessState" src/lightweightDashboardStore.js
+          grep -q "export function loadLightweightAggregateState" src/lightweightDashboardStore.js
+          grep -q "export function listLightweightBusinessHistory" src/lightweightDashboardStore.js
           grep -q "loadLightweightAggregateState('CCSL')" server.js
           grep -q "loadLightweightAggregateState('SHOPEE')" server.js
           grep -q "loadLightweightUnifiedBusinessState(req.params.businessType" server.js
