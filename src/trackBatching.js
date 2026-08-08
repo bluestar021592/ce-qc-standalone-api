@@ -17,6 +17,22 @@ function splitBatchesAtSize(shipmentCodes = [], batchSize = 1) {
   return batches;
 }
 
+async function safeAttempt(onAttempt, payload, onLog) {
+  try {
+    await onAttempt(payload);
+  } catch (error) {
+    // Per-waybill scan/event/exception status is the authoritative resume checkpoint.
+    // apiBatchStatus is only audit metadata. After a partial success or adaptive
+    // fallback, the remaining waybills can legitimately be regrouped under the same
+    // numeric batch key. That must never block a safe resume.
+    if (error?.code === 'BATCH_KEY_PAYLOAD_MISMATCH') {
+      await onLog(`批次审计键已变化，按逐票成功/失败状态继续处理：${error.message || ''}`);
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function queryBatchWithFallback({
   batch,
   query,
@@ -27,12 +43,12 @@ export async function queryBatchWithFallback({
 }) {
   const original = [...batch];
   try {
-    await onAttempt({ apiName, batch: original, status: 'running' });
+    await safeAttempt(onAttempt, { apiName, batch: original, status: 'running' }, onLog);
     const events = await query(original);
-    await onAttempt({ apiName, batch: original, status: 'success', resultCount: (events || []).length });
+    await safeAttempt(onAttempt, { apiName, batch: original, status: 'success', resultCount: (events || []).length }, onLog);
     return { successes: [{ batch: original, events: events || [] }], failures: [] };
   } catch (error) {
-    await onAttempt({ apiName, batch: original, status: 'failed', error });
+    await safeAttempt(onAttempt, { apiName, batch: original, status: 'failed', error }, onLog);
     // Authentication failures pause the whole run. Splitting the same request
     // cannot repair an expired session and would only create needless traffic.
     const authFailure = Number(error?.ceStatus || error?.status || 0) === 401
