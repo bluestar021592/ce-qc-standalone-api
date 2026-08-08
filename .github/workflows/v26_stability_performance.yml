@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/v26_stability_performance.yml
       - .github/scripts/v26_stability_performance_fix.py
+      - .github/scripts/v26_regression_adjust.py
 
 permissions:
   contents: write
@@ -21,7 +22,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply V26 patch
-        run: python3 .github/scripts/v26_stability_performance_fix.py
+        run: |
+          python3 .github/scripts/v26_stability_performance_fix.py
+          python3 .github/scripts/v26_regression_adjust.py
 
       - name: Static validation
         run: |
@@ -29,13 +32,16 @@ jobs:
           node --check src/businessStore.js
           node --check src/pipeline.js
           node --check public/app.js
+          node --check test/v25-shopee-large-state.test.js
           node --check test/v26-stability-performance.test.js
 
       - name: Install dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
 
       - name: V26 targeted regression
-        run: node --test test/v26-stability-performance.test.js
+        run: |
+          node --test test/v25-shopee-large-state.test.js
+          node --test test/v26-stability-performance.test.js
 
       - name: Run runnable project tests
         shell: bash
@@ -51,7 +57,7 @@ jobs:
         run: |
           git config user.name "ChatGPT V26"
           git config user.email "actions@users.noreply.github.com"
-          git add server.js src/businessStore.js src/pipeline.js public/app.js test/v26-stability-performance.test.js
+          git add server.js src/businessStore.js src/pipeline.js public/app.js test/v25-shopee-large-state.test.js test/v26-stability-performance.test.js
           if git diff --cached --quiet; then
             echo "No product changes to commit"
             exit 0
