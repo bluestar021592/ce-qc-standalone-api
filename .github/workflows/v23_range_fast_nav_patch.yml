@@ -1,0 +1,68 @@
+name: V23 Range Fast Navigation Patch
+
+on:
+  push:
+    branches:
+      - chatgpt/v23-range-fast-nav-20260808
+    paths:
+      - .github/workflows/v23_range_fast_nav_patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/v23-range-fast-nav-20260808
+          fetch-depth: 0
+
+      - name: Apply V23 patch
+        run: python3 .github/scripts/v23_range_fast_nav_patch.py
+
+      - name: Static validation
+        run: |
+          node --check server.js
+          node --check public/app.js
+          grep -q 'topRangeFrom' public/index.html
+          grep -q 'topRangeTo' public/index.html
+          grep -q 'applyTopDateRange' public/app.js
+          grep -q "params.set('compact', '1')" public/app.js
+          grep -q 'loadFastSqlAggregateState' server.js
+          grep -q 'loadFastSqlBusinessState' server.js
+          grep -q '2026-08-08-v23-range-fast-nav' server.js
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: SQL range runtime smoke
+        env:
+          DATA_DIR: /tmp/ce-qc-v23-smoke
+          DB_FILE: /tmp/ce-qc-v23-smoke/v23-smoke.db
+        run: |
+          rm -rf /tmp/ce-qc-v23-smoke
+          node -e "import('./src/rangeDashboardStore.js').then(({loadRangeDashboard})=>{const r=loadRangeDashboard('2026-08-01','2026-08-08'); if(r.queryMode!=='SQL_AGGREGATE_ONLY') throw new Error('wrong query mode'); if(r.shipmentRowsTransferred!==0) throw new Error('shipment rows transferred'); console.log('V23 SQL range smoke OK');})"
+
+      - name: Run runnable project tests
+        shell: bash
+        run: |
+          TEST_FILES=$(find test -maxdepth 1 -name '*.test.js' \
+            ! -name 'unified-import-v7.test.js' \
+            ! -name 'unified-import-v8.test.js' \
+            ! -name 'v9-real-reports.test.js' \
+            -print | sort)
+          node --test $TEST_FILES
+
+      - name: Commit product changes
+        run: |
+          git config user.name "ChatGPT V23"
+          git config user.email "actions@users.noreply.github.com"
+          git add server.js public/app.js public/index.html public/style.css
+          if git diff --cached --quiet; then
+            echo "No product changes to commit"
+            exit 0
+          fi
+          git commit -m "V23 persistent date range and fast board navigation"
+          git push origin HEAD:chatgpt/v23-range-fast-nav-20260808
