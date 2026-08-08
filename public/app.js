@@ -741,14 +741,13 @@ async function loadCustomDashboardRange(fromDate = '', toDate = '', shouldRender
 function applyPeriodDashboardResult(result, mode, anchor, shouldRender = true) {
   const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
   types.forEach(type => { businessStates[type] = result.states?.[type] || {}; });
-  const snapshotId = `PERIOD:${mode}:${result.fromDate}:${result.toDate}`;
-  appState = aggregateBusinessStates(types.slice(0, 3).map(type => businessStates[type]), 'CCSL', result.toDate, snapshotId);
-  shopeeState = aggregateBusinessStates(types.slice(3).map(type => businessStates[type]), 'SHOPEE', result.toDate, snapshotId);
+  appState = result.aggregates?.CCSL || {};
+  shopeeState = result.aggregates?.SHOPEE || {};
   for (const state of [appState, shopeeState]) {
     state.periodMode = mode;
     state.periodStart = result.fromDate;
     state.periodEnd = result.toDate;
-    state.periodDates = [...new Set(types.flatMap(type => result.states?.[type]?.periodDates || []))].sort();
+    state.periodDates = result.dates || [];
   }
   historyModeDate = anchor || result.toDate;
   dashboardPeriodMode = mode;
@@ -985,6 +984,12 @@ function renderHomeIssues() {
 }
 
 function openHomeMetricDetail(tab) {
+  if (dashboardPeriodMode && (appState._rangeSummaryOnly || shopeeState._rangeSummaryOnly)) {
+    navigatePage('reports');
+    const status = document.getElementById('exportProgress');
+    if (status) status.textContent = `当前为 ${dashboardPeriodRange?.fromDate || ''} 至 ${dashboardPeriodRange?.toDate || ''} 范围汇总。范围完整明细请使用自定义日期导出；单票明细按日期进入对应看板查看。`;
+    return;
+  }
   if (['self-pickup', 'cecn', 'cezt', '580'].includes(tab)) {
     const labels = { 'self-pickup': '仓库自提件', cecn: 'CECN滞留包裹', cezt: 'CEZT滞留包裹', '580': '580滞留包裹' };
     const keys = { 'self-pickup': 'selfPickup', cecn: 'cecnRetention', cezt: 'ceztRetention', '580': 'ccsl580Retention' };

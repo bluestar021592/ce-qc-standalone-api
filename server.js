@@ -13,6 +13,7 @@ import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
 import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
 import { loadLightweightAggregateState, loadLightweightPeriodBusinessState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';
+import { loadRangeDashboard } from './src/rangeDashboardStore.js';
 import { summarizeLightweightCcslState, summarizeLightweightShopeeState } from './src/lightweightDashboardSummary.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
@@ -395,9 +396,8 @@ app.get('/api/period-dashboard', (req, res) => {
       }
       resolvedMode = mode;
     }
-    const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
-    const states = Object.fromEntries(types.map(type => [type, loadLightweightPeriodBusinessState(type, fromDate, toDate)]));
-    res.json({ ok: true, mode: resolvedMode, anchor: anchor || toDate, fromDate, toDate, states });
+    const result = loadRangeDashboard(fromDate, toDate);
+    res.json({ ok: true, mode: resolvedMode, anchor: anchor || toDate, ...result });
   } catch (error) {
     res.status(400).json({ ok: false, error: error.message });
   }
