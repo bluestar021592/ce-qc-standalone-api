@@ -23,6 +23,7 @@ jobs:
         run: |
           python3 .github/scripts/v22_range_patch.py
           python3 .github/scripts/v22_range_summary_patch.py
+          python3 .github/scripts/v22_final_accuracy_patch.py
 
       - name: Static validation
         run: |
@@ -39,10 +40,20 @@ jobs:
           grep -q "periodExportFrom" public/index.html
           grep -q "loadCustomDashboardRange" public/app.js
           grep -q "result.aggregates?.CCSL" public/app.js
+          grep -q "useSingleDayImportCounts" public/app.js
+          grep -q "rangeBusinessCount('TBKH')" public/app.js
           grep -q "2026-08-08-v22-memory-safe-dashboard" server.js
 
       - name: Install dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Runtime smoke test SQL range dashboard
+        env:
+          DATA_DIR: /tmp/ce-qc-v22-smoke
+          DB_FILE: /tmp/ce-qc-v22-smoke/v22-smoke.db
+        run: |
+          rm -rf /tmp/ce-qc-v22-smoke
+          node -e "import('./src/rangeDashboardStore.js').then(({loadRangeDashboard})=>{const r=loadRangeDashboard('2026-08-01','2026-08-08'); if(r.queryMode!=='SQL_AGGREGATE_ONLY') throw new Error('wrong query mode'); if(r.shipmentRowsTransferred!==0) throw new Error('shipment rows transferred'); if(!r.aggregates?.CCSL || !r.aggregates?.SHOPEE) throw new Error('missing aggregates'); console.log('V22 range SQL runtime smoke OK', r.fromDate, r.toDate);})"
 
       - name: Run all runnable project tests
         shell: bash
@@ -70,5 +81,5 @@ jobs:
             echo "No source changes to commit"
             exit 0
           fi
-          git commit -m "V22 SQL range dashboards without bulk shipment transfer"
+          git commit -m "V22 final range accuracy and runtime validation"
           git push origin HEAD:chatgpt/v22-memory-safe-dashboard
