@@ -13,6 +13,7 @@ import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
 import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
 import { loadLightweightAggregateState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';
+import { summarizeLightweightCcslState, summarizeLightweightShopeeState } from './src/lightweightDashboardSummary.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
 import { exportShopeeXlsx } from './src/shopeeExporter.js';
@@ -353,13 +354,13 @@ app.post('/api/auth/login', (req, res) => res.redirect(307, '/api/ce-login'));
 app.post('/api/auth/logout', (req, res) => res.redirect(307, '/api/ce-logout'));
 
 app.get('/api/state', async (req, res) => {
-  if (req.query.compact === '1') {
-    const state = loadLightweightAggregateState('CCSL');
-    return res.json({ ok: true, state: compactDashboardState(summarizeState(state)) });
-  }
-  const state = await loadState();
-  const summary = summarizeState(state);
-  res.json({ ok: true, state: summary });
+  const state = loadLightweightAggregateState('CCSL');
+  const summary = summarizeLightweightCcslState(state, {
+    dbStatus: getDbStatus(),
+    network: buildNetworkInfo(getRuntimeConfig()),
+    shopCodes: getShopCodeSummary()
+  });
+  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
 });
 
 app.get('/api/unified-history', (req, res) => {
@@ -398,13 +399,9 @@ app.get('/api/period-dashboard', (req, res) => {
 });
 
 app.get('/api/shopee/state', async (req, res) => {
-  if (req.query.compact === '1') {
-    const state = loadLightweightAggregateState('SHOPEE');
-    return res.json({ ok: true, state: compactDashboardState(summarizeShopeeState(state)) });
-  }
-  const state = loadBusinessState(SHOPEE);
-  const summary = summarizeShopeeState(state);
-  res.json({ ok: true, state: summary });
+  const state = loadLightweightAggregateState('SHOPEE');
+  const summary = summarizeLightweightShopeeState(state, { dbStatus: getDbStatus() });
+  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
 });
 
 app.get('/api/business-state/:businessType', (req, res) => {
