@@ -1,0 +1,54 @@
+name: CE QC V27 dashboard interaction smoke
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  v27:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: V27 syntax checks
+        shell: pwsh
+        run: |
+          node --check bootstrap.js
+          node --check src/v27ServerPatch.js
+          node --check src/v27TrendPatch.js
+          node --check public/v27-dashboard-fix.js
+          node --check public/v14-geometry-fixture.js
+      - name: V27 regression test
+        run: node --test test/v27-dashboard-interaction.test.js test/v27-sql-runtime.test.js
+      - name: Start protected app smoke
+        shell: pwsh
+        env:
+          CI: 'true'
+          DATA_DIR: ${{ runner.temp }}\ce-qc-v27
+          DB_FILE: ${{ runner.temp }}\ce-qc-v27\ce_qc_monitor.db
+        run: |
+          $proc = Start-Process node.exe -ArgumentList 'bootstrap.js' -WorkingDirectory $PWD -PassThru -RedirectStandardOutput v27.out.log -RedirectStandardError v27.err.log
+          try {
+            $ready=$false
+            foreach($i in 1..60){
+              Start-Sleep -Seconds 1
+              try {
+                $r=Invoke-WebRequest 'http://127.0.0.1:5177/' -UseBasicParsing -TimeoutSec 2
+                if([int]$r.StatusCode -lt 500){$ready=$true;break}
+              } catch {
+                try { if($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -lt 500){$ready=$true;break} } catch {}
+              }
+              if($proc.HasExited){break}
+            }
+            if(-not $ready){throw 'V27 app did not become reachable'}
+          } finally {
+            if($proc -and -not $proc.HasExited){cmd /c "taskkill /PID $($proc.Id) /T /F" | Out-Null}
+            Get-Content v27.out.log -ErrorAction SilentlyContinue
+            Get-Content v27.err.log -ErrorAction SilentlyContinue
+          }
