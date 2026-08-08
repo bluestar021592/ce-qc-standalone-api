@@ -72,6 +72,10 @@ process.on('warning', warning => {
 });
 
 try {
+  // V27 is installed before server.js registers routes. It replaces the expensive
+  // startup bootstrap with a SQLite aggregate payload and registers lazy detail /
+  // cross-day carry monitor APIs without changing the locked V18 layout.
+  await import('./src/v27ServerPatch.js');
   await import('./server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
