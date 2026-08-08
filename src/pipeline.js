@@ -30,6 +30,12 @@ export async function runQcPipeline({
   const podLocks = new Set(cleanBills(state.podLocks || []));
   const shopCodeMap = businessType === 'CCSL' ? getShopCodeMap() : new Map();
   const scanPool = cleanBills([...today, ...carry]).filter(wb => !podLocks.has(wb));
+  // Bills from today's imported report that are already protected by a historical
+  // POD lock must still be represented in today's finalRows. They are intentionally
+  // skipped from CE API scanning, but omitting them from finalRows breaks the
+  // unified 1:1 reconciliation against the imported daily report.
+  const lockedToday = today.filter(wb => podLocks.has(wb));
+  const dailyByBill = new Map((state.dailyParseRows || []).map(row => [billOf(row), row]));
 
   state.scanPool = scanPool;
   state.processing = { running: true, paused: false, phase: '订单扫描', batchIndex: 0, totalBatches: Math.ceil(scanPool.length / ORDER_BATCH_SIZE), runId };
@@ -205,12 +211,34 @@ export async function runQcPipeline({
       异常分类: 'POD闭环',
       QC判断: row.orderStatus === '85' ? '订单扫描已签收' : 'POD锁已闭环'
     }));
+  const lockedTodayRows = lockedToday.map(wb => ({
+    ...(dailyByBill.get(wb) || {}),
+    businessType,
+    reportDate: state.reportDate || '',
+    shipmentCode: wb,
+    运单号: wb,
+    来源类型: '今日PNH',
+    orderStatus: '85',
+    是否POD: '是',
+    POD状态: 'POD',
+    primaryCategory: 'POD闭环',
+    主分类: 'POD闭环',
+    异常分类: 'POD闭环',
+    QC判断: '历史POD锁已闭环，今日无需重复查询',
+    currentState: 'POD',
+    trackRequired: false,
+    trackSkippedReason: 'POD_LOCK',
+    carry状态: 'closed_pod',
+    跨日状态: '已闭环',
+    API状态: 'POD_LOCK',
+    查询状态: 'skipped_pod_lock'
+  }));
 
   const returnedRows = scanResults.filter(row => returnedCompleted.has(row.运单号)).map(row => ({ ...row, 是否POD: '否', POD状态: '未POD', 退回状态: '已退回', primaryCategory: '退回', 主分类: '退回', 异常分类: '退回', 入库无扫描节点: '否', carry状态: 'closed_return', 跨日状态: '已闭环' }));
   const retryRows = scanResults.filter(row => row.currentState === 'SCAN_PENDING_RETRY').map(row => ({ ...row, primaryCategory: '订单扫描待重试', 主分类: '订单扫描待重试', 异常分类: '订单扫描待重试', 入库无扫描节点: '否', carry状态: 'active' }));
   // API failures are operational retry items, not business anomalies. Keep them
   // in carry/scan retry state, but never publish them as QC exception rows.
-  const finalRows = [...podRows, ...returnedRows, ...trackResults]
+  const finalRows = [...lockedTodayRows, ...podRows, ...returnedRows, ...trackResults]
     .filter(row => row?.运单号 && !excluded(row.运单号))
     .filter(row => row.是否POD === '是' || !podSet.has(row.运单号));
   const finalDiversionRows = finalRows.filter(isNormalFinalDiversionRow);

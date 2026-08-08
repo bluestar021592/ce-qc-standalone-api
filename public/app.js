@@ -153,50 +153,57 @@ async function refreshInternal() {
   }
   const businessType = ['ce','tbkh','ali1688','shopeecn','shopeevn'].includes(currentPage) ? currentBusinessType() : '';
   const needsFullAggregate = ['exceptions', 'reports'].includes(currentPage);
-  const requestDefinitions = [
-    ['CCSL状态', () => api(`/api/state${needsFullAggregate ? '' : '?compact=1'}`)],
-    ['SHOPEE状态', () => api(`/api/shopee/state${needsFullAggregate ? '' : '?compact=1'}`)],
-    ['CE登录状态', () => api('/api/ce-auth-status')],
-    ['系统Session', () => api('/api/session')],
-    ['CCSL历史', () => api('/api/history?businessType=CCSL')],
-    ['SHOPEE历史', () => api('/api/history?businessType=SHOPEE')],
-    ['统一日报历史', () => api('/api/unified-history')],
-    ['最新统一日报', () => api('/api/import/unified-latest?compact=1')],
-    ['当前业务板块', () => businessType ? api(`/api/business-state/${businessType}?compact=1`) : Promise.resolve(null)]
-  ];
-
-  // Limit the startup burst. The same endpoints are healthy when requested one-by-one,
-  // but firing all heavy snapshot/history endpoints at once can create a transient
-  // connection failure during page startup.
-  const loaded = [];
-  const startupFailures = [];
-  for (const [label, task] of requestDefinitions) {
+  let bootstrapLoaded = false;
+  if (!needsFullAggregate) {
     try {
-      loaded.push(await task());
+      const boot = await api('/api/bootstrap');
+      if (boot?.state) appState = boot.state;
+      if (boot?.shopeeState) shopeeState = boot.shopeeState;
+      if (boot?.authStatus) ceAuth = boot.authStatus;
+      if (boot?.session) accessSession = boot.session;
+      historyCatalog = {
+        CCSL: boot?.history?.CCSL || historyCatalog.CCSL || [],
+        SHOPEE: boot?.history?.SHOPEE || historyCatalog.SHOPEE || [],
+        UNIFIED: boot?.history?.UNIFIED || historyCatalog.UNIFIED || []
+      };
+      if (boot?.unifiedImport) unifiedImportState = boot.unifiedImport;
+      businessStates = { ...businessStates, ...(boot?.businessStates || {}) };
+      bootstrapLoaded = true;
     } catch (error) {
-      startupFailures.push({ label, error });
-      loaded.push(null);
-      console.warn(`[startup] ${label}读取失败`, error);
-      if (error?.code === 'NETWORK_CONNECTION_INTERRUPTED') break;
+      console.warn('[startup] 快速启动接口读取失败，回退兼容加载', error);
     }
   }
 
-  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unifiedHistory, unified, businessResponse] = loaded;
-  if (ccsl?.state) appState = ccsl.state;
-  if (shopee?.state) shopeeState = shopee.state;
-  if (auth?.authStatus) ceAuth = auth.authStatus;
-  if (session) accessSession = session;
-  historyCatalog = {
-    CCSL: ccslHistory?.rows || historyCatalog.CCSL || [],
-    SHOPEE: shopeeHistory?.rows || historyCatalog.SHOPEE || [],
-    UNIFIED: unifiedHistory?.rows || historyCatalog.UNIFIED || []
-  };
-  if (unified?.import) unifiedImportState = unified.import;
-  if (businessResponse?.businessType) businessStates[businessResponse.businessType] = businessResponse.state || {};
-
-  if (startupFailures.some(item => item.error?.code === 'NETWORK_CONNECTION_INTERRUPTED')) {
-    const backendHealthy = await rawHealthProbe();
-    if (!backendHealthy) throw startupFailures.find(item => item.error?.code === 'NETWORK_CONNECTION_INTERRUPTED').error;
+  if (!bootstrapLoaded) {
+    const requestDefinitions = [
+      ['CCSL状态', () => api(`/api/state${needsFullAggregate ? '' : '?compact=1'}`)],
+      ['SHOPEE状态', () => api(`/api/shopee/state${needsFullAggregate ? '' : '?compact=1'}`)],
+      ['CE登录状态', () => api('/api/ce-auth-status')],
+      ['系统Session', () => api('/api/session')],
+      ['CCSL历史', () => api('/api/history?businessType=CCSL')],
+      ['SHOPEE历史', () => api('/api/history?businessType=SHOPEE')],
+      ['统一日报历史', () => api('/api/unified-history')],
+      ['最新统一日报', () => api('/api/import/unified-latest?compact=1')],
+      ['当前业务板块', () => businessType ? api(`/api/business-state/${businessType}?compact=1`) : Promise.resolve(null)]
+    ];
+    // Fallback requests are safe to run concurrently now that dashboard state is
+    // compact; this prevents a single slow request from serially blocking all UI.
+    const loaded = await Promise.all(requestDefinitions.map(async ([label, task]) => {
+      try { return await task(); }
+      catch (error) { console.warn(`[startup] ${label}读取失败`, error); return null; }
+    }));
+    const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unifiedHistory, unified, businessResponse] = loaded;
+    if (ccsl?.state) appState = ccsl.state;
+    if (shopee?.state) shopeeState = shopee.state;
+    if (auth?.authStatus) ceAuth = auth.authStatus;
+    if (session) accessSession = session;
+    historyCatalog = {
+      CCSL: ccslHistory?.rows || historyCatalog.CCSL || [],
+      SHOPEE: shopeeHistory?.rows || historyCatalog.SHOPEE || [],
+      UNIFIED: unifiedHistory?.rows || historyCatalog.UNIFIED || []
+    };
+    if (unified?.import) unifiedImportState = unified.import;
+    if (businessResponse?.businessType) businessStates[businessResponse.businessType] = businessResponse.state || {};
   }
 
   // When the selected date is the current imported date, always bind the five

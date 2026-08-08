@@ -146,7 +146,7 @@ app.get('/api/health', async (req, res) => {
   res.json({
     ok: true,
     version: '0.1.0-shopee-track-user-delete-v2',
-    patchId: '2026-08-08-v23-range-fast-nav',
+    patchId: '2026-08-08-v26-stability-bootstrap',
     time: new Date().toISOString(),
     db: getDbStatus(),
     memory: {
@@ -499,6 +499,43 @@ app.get('/api/dashboard-cache/status', (req, res) => {
 
 app.get('/api/unified-history', (req, res) => {
   res.json({ ok: true, rows: listUnifiedImportHistory(req.query.limit) });
+});
+
+// V26: one lightweight startup payload. The browser used to wait for nine API
+// requests serially before first paint. All dashboard data below is served from
+// the fast SQL/range cache when possible, so normal navigation behaves like a
+// website rather than a batch-processing console.
+app.get('/api/bootstrap', async (req, res) => {
+  try {
+    const ccsl = loadFastSqlAggregateState('CCSL') || compactDashboardState(summarizeLightweightCcslState(loadLightweightAggregateState('CCSL'), { dbStatus: getDbStatus(), network: buildNetworkInfo(getRuntimeConfig()), shopCodes: getShopCodeSummary() }));
+    const shopee = loadFastSqlAggregateState('SHOPEE') || compactDashboardState(summarizeLightweightShopeeState(loadLightweightAggregateState('SHOPEE'), { dbStatus: getDbStatus() }));
+    const unifiedHistory = listUnifiedImportHistory(120);
+    const latestUnified = getLatestUnifiedImport();
+    const selectedSnapshotId = String(latestUnified?.snapshotId || unifiedHistory?.[0]?.snapshotId || '');
+    const businesses = {};
+    for (const type of ['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN']) {
+      const fast = loadFastSqlBusinessState(type, selectedSnapshotId);
+      if (fast) businesses[type] = fast;
+    }
+    res.setHeader('Cache-Control', 'private, max-age=5');
+    res.json({
+      ok: true,
+      state: ccsl,
+      shopeeState: shopee,
+      authStatus: summarizeToken(await loadToken()),
+      session: { ok: true, user: publicUser(req.user), unreadNotifications: 0 },
+      history: {
+        CCSL: listSnapshotHistory(90),
+        SHOPEE: listBusinessHistoryDates(SHOPEE, 90),
+        UNIFIED: unifiedHistory
+      },
+      unifiedImport: latestUnified,
+      businessStates: businesses,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, code: 'BOOTSTRAP_FAILED', error: error.message || String(error) });
+  }
 });
 
 const periodDashboardCache = new Map();
