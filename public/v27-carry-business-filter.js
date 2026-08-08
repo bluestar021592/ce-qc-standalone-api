@@ -76,12 +76,12 @@
   function install(){
     if(typeof api==='function'&&!global.__V27_CARRY_API_WRAPPED__){
       const originalApi=api;
-      api=async function v27CarryBusinessApi(url,options={}){
+      api=async function v29CarryBusinessApi(url,options={}){
         const text=String(url||'');
-        if(text.startsWith('/api/v27/carry-monitor?')||text.startsWith('/api/v27/carry-monitor-business?')){
+        if(text.startsWith('/api/v27/carry-monitor?')||text.startsWith('/api/v27/carry-monitor-business?')||text.startsWith('/api/v29/carry-monitor?')){
           const parsed=new URL(text,location.origin);
           status=String(parsed.searchParams.get('status')||status||'OPEN').toUpperCase();
-          parsed.pathname='/api/v27/carry-monitor-business';
+          parsed.pathname='/api/v29/carry-monitor';
           parsed.searchParams.set('businessType',selected);
           parsed.searchParams.set('limit','50');
           const data=await originalApi(parsed.pathname+parsed.search,options);
