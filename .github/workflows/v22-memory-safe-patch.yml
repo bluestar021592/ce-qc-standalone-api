@@ -1,0 +1,128 @@
+name: V22 Memory Safe Dashboard Patch
+
+on:
+  push:
+    branches:
+      - chatgpt/v22-memory-safe-dashboard
+    paths:
+      - .github/workflows/v22-memory-safe-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/v22-memory-safe-dashboard
+          fetch-depth: 0
+
+      - name: Patch server dashboard read paths
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('server.js')
+          text = path.read_text(encoding='utf-8')
+
+          import_needle = "import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';"
+          import_line = import_needle + "\nimport { loadLightweightAggregateState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';"
+          if "./src/lightweightDashboardStore.js" not in text:
+              if import_needle not in text:
+                  raise SystemExit('Cannot find unifiedImportStore import anchor')
+              text = text.replace(import_needle, import_line, 1)
+
+          old_state = """app.get('/api/state', async (req, res) => {
+            const state = await loadState();
+            const summary = summarizeState(state);
+            res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
+          });"""
+          new_state = """app.get('/api/state', async (req, res) => {
+            if (req.query.compact === '1') {
+              const state = loadLightweightAggregateState('CCSL');
+              return res.json({ ok: true, state: compactDashboardState(summarizeState(state)) });
+            }
+            const state = await loadState();
+            const summary = summarizeState(state);
+            res.json({ ok: true, state: summary });
+          });"""
+          if old_state in text:
+              text = text.replace(old_state, new_state, 1)
+          elif "loadLightweightAggregateState('CCSL')" not in text:
+              raise SystemExit('Cannot find /api/state block')
+
+          old_shopee = """app.get('/api/shopee/state', async (req, res) => {
+            const state = loadBusinessState(SHOPEE);
+            const summary = summarizeShopeeState(state);
+            res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
+          });"""
+          new_shopee = """app.get('/api/shopee/state', async (req, res) => {
+            if (req.query.compact === '1') {
+              const state = loadLightweightAggregateState('SHOPEE');
+              return res.json({ ok: true, state: compactDashboardState(summarizeShopeeState(state)) });
+            }
+            const state = loadBusinessState(SHOPEE);
+            const summary = summarizeShopeeState(state);
+            res.json({ ok: true, state: summary });
+          });"""
+          if old_shopee in text:
+              text = text.replace(old_shopee, new_shopee, 1)
+          elif "loadLightweightAggregateState('SHOPEE')" not in text:
+              raise SystemExit('Cannot find /api/shopee/state block')
+
+          old_loader = "const source = loadUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));"
+          new_loader = "const source = loadLightweightUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));"
+          if old_loader in text:
+              text = text.replace(old_loader, new_loader, 1)
+          elif new_loader not in text:
+              raise SystemExit('Cannot find business-state loader')
+
+          old_workspace = "if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadUnifiedBusinessState(type, snapshotId));"
+          new_workspace = "if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));"
+          if old_workspace in text:
+              text = text.replace(old_workspace, new_workspace, 1)
+
+          health_old = "res.json({ ok: true, version: '0.1.0-shopee-track-user-delete-v2', patchId: '2026-08-04-track-delete-v2', time: new Date().toISOString(), db: getDbStatus() });"
+          health_new = """const memory = process.memoryUsage();
+            res.json({
+              ok: true,
+              version: '0.1.0-shopee-track-user-delete-v2',
+              patchId: '2026-08-08-v22-memory-safe-dashboard',
+              time: new Date().toISOString(),
+              db: getDbStatus(),
+              memory: {
+                rssMB: Math.round(memory.rss / 1024 / 1024),
+                heapUsedMB: Math.round(memory.heapUsed / 1024 / 1024),
+                heapTotalMB: Math.round(memory.heapTotal / 1024 / 1024)
+              }
+            });"""
+          if health_old in text:
+              text = text.replace(health_old, health_new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Static validation
+        run: |
+          node --check server.js
+          node --check src/lightweightDashboardStore.js
+          node -e "import('./src/lightweightDashboardStore.js').then(m=>{for(const k of ['loadLightweightUnifiedBusinessState','loadLightweightAggregateState','listLightweightBusinessHistory']) if(typeof m[k] !== 'function') throw new Error(k+' missing'); console.log('V22 lightweight module exports OK')})"
+          grep -q "loadLightweightAggregateState('CCSL')" server.js
+          grep -q "loadLightweightAggregateState('SHOPEE')" server.js
+          grep -q "loadLightweightUnifiedBusinessState(req.params.businessType" server.js
+          grep -q "2026-08-08-v22-memory-safe-dashboard" server.js
+
+      - name: Commit patch
+        run: |
+          git config user.name "ChatGPT V22"
+          git config user.email "actions@users.noreply.github.com"
+          git add server.js src/lightweightDashboardStore.js
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git commit -m "V22 use normalized SQLite for dashboard reads"
+          git push origin HEAD:chatgpt/v22-memory-safe-dashboard
