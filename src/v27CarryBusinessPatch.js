@@ -27,8 +27,12 @@ function businessCounts(status) {
 }
 
 function jsonValue(alias, paths) {
-  const args = paths.map(path => `json_extract(${alias}.stateJson,'${path}')`).join(',');
-  return `CASE WHEN json_valid(${alias}.stateJson) THEN COALESCE(${args}) END`;
+  const extracts = paths.map(path => `json_extract(${alias}.stateJson,'${path}')`);
+  if (!extracts.length) return 'NULL';
+  if (extracts.length === 1) {
+    return `CASE WHEN json_valid(${alias}.stateJson) THEN ${extracts[0]} END`;
+  }
+  return `CASE WHEN json_valid(${alias}.stateJson) THEN COALESCE(${extracts.join(',')}) END`;
 }
 
 function buildBaseSql(status, businessType) {
