@@ -29,170 +29,65 @@ jobs:
           path = Path('server.js')
           text = path.read_text(encoding='utf-8')
 
-          import_needle = "import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';"
-          import_line = import_needle + "\nimport { loadLightweightAggregateState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';"
-          if "./src/lightweightDashboardStore.js" not in text:
-              if import_needle not in text:
-                  raise SystemExit('Cannot find unifiedImportStore import anchor')
-              text = text.replace(import_needle, import_line, 1)
+          store_import = "import { loadLightweightAggregateState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';"
+          summary_import = "import { summarizeLightweightCcslState, summarizeLightweightShopeeState } from './src/lightweightDashboardSummary.js';"
+          if store_import not in text:
+              anchor = "import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';"
+              if anchor not in text:
+                  raise SystemExit('Missing unified store import anchor')
+              text = text.replace(anchor, anchor + '\n' + store_import, 1)
+          if summary_import not in text:
+              text = text.replace(store_import, store_import + '\n' + summary_import, 1)
 
-          state_route = """app.get('/api/state', async (req, res) => {
-            const state = loadLightweightAggregateState('CCSL');
-            const summary = summarizeLightweightCcslState(state);
-            res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
-          });"""
-          text, count = re.subn(r"app\.get\('/api/state', async \(req, res\) => \{.*?\n\}\);\n\napp\.get\('/api/unified-history'", state_route + "\n\napp.get('/api/unified-history'", text, count=1, flags=re.S)
+          state_route = (
+              "app.get('/api/state', async (req, res) => {\n"
+              "  const state = loadLightweightAggregateState('CCSL');\n"
+              "  const summary = summarizeLightweightCcslState(state, {\n"
+              "    dbStatus: getDbStatus(),\n"
+              "    network: buildNetworkInfo(getRuntimeConfig()),\n"
+              "    shopCodes: getShopCodeSummary()\n"
+              "  });\n"
+              "  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });\n"
+              "});"
+          )
+          text, count = re.subn(
+              r"app\.get\('/api/state', async \(req, res\) => \{.*?\n\}\);(?=\n\napp\.get\('/api/unified-history')",
+              lambda _: state_route,
+              text,
+              count=1,
+              flags=re.S
+          )
           if count != 1:
-              raise SystemExit('Cannot replace /api/state route')
+              raise SystemExit('Cannot patch /api/state')
 
-          shopee_route = """app.get('/api/shopee/state', async (req, res) => {
-            const state = loadLightweightAggregateState('SHOPEE');
-            const summary = summarizeLightweightShopeeState(state);
-            res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
-          });"""
-          text, count = re.subn(r"app\.get\('/api/shopee/state', async \(req, res\) => \{.*?\n\}\);\n\napp\.get\('/api/business-state/:businessType'", shopee_route + "\n\napp.get('/api/business-state/:businessType'", text, count=1, flags=re.S)
+          shopee_route = (
+              "app.get('/api/shopee/state', async (req, res) => {\n"
+              "  const state = loadLightweightAggregateState('SHOPEE');\n"
+              "  const summary = summarizeLightweightShopeeState(state, { dbStatus: getDbStatus() });\n"
+              "  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });\n"
+              "});"
+          )
+          text, count = re.subn(
+              r"app\.get\('/api/shopee/state', async \(req, res\) => \{.*?\n\}\);(?=\n\napp\.get\('/api/business-state/:businessType')",
+              lambda _: shopee_route,
+              text,
+              count=1,
+              flags=re.S
+          )
           if count != 1:
-              raise SystemExit('Cannot replace /api/shopee/state route')
+              raise SystemExit('Cannot patch /api/shopee/state')
 
           old_loader = "const source = loadUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));"
           new_loader = "const source = loadLightweightUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));"
           if old_loader in text:
               text = text.replace(old_loader, new_loader, 1)
           elif new_loader not in text:
-              raise SystemExit('Cannot find business-state loader')
+              raise SystemExit('Cannot patch business state loader')
 
           old_workspace = "if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadUnifiedBusinessState(type, snapshotId));"
           new_workspace = "if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));"
           if old_workspace in text:
               text = text.replace(old_workspace, new_workspace, 1)
-
-          if "2026-08-08-v22-memory-safe-dashboard" not in text:
-              health_old = "res.json({ ok: true, version: '0.1.0-shopee-track-user-delete-v2', patchId: '2026-08-04-track-delete-v2', time: new Date().toISOString(), db: getDbStatus() });"
-              health_new = """const memory = process.memoryUsage();
-            res.json({
-              ok: true,
-              version: '0.1.0-shopee-track-user-delete-v2',
-              patchId: '2026-08-08-v22-memory-safe-dashboard',
-              time: new Date().toISOString(),
-              db: getDbStatus(),
-              memory: {
-                rssMB: Math.round(memory.rss / 1024 / 1024),
-                heapUsedMB: Math.round(memory.heapUsed / 1024 / 1024),
-                heapTotalMB: Math.round(memory.heapTotal / 1024 / 1024)
-              }
-            });"""
-              if health_old in text:
-                  text = text.replace(health_old, health_new, 1)
-
-          helper_marker = 'function summarizeLightweightCcslState(state) {'
-          if helper_marker not in text:
-              anchor = 'function summarizeState(state) {'
-              if anchor not in text:
-                  raise SystemExit('Cannot find summarizeState anchor')
-              helpers = r"""
-function summarizeLightweightCcslState(state = {}) {
-  const viewState = state || {};
-  const runStatus = viewState.reportDate ? getRunStatus(viewState.reportDate).lock : null;
-  const runtime = getRuntimeConfig();
-  const dashboard = buildDashboardData(viewState);
-  const coreKpis = buildCoreKpis(viewState);
-  const critical = buildCriticalDashboard(viewState);
-  return {
-    businessType: 'CCSL',
-    snapshotId: viewState.snapshotId || '',
-    reportDate: viewState.reportDate || '',
-    sourceName: viewState.sourceName || '',
-    dailyReportReady: Boolean(viewState.reportDate && (viewState.pnhBills || []).length),
-    pnh: (viewState.pnhBills || []).length,
-    nonPnh: (viewState.nonPnhBills || []).length,
-    carry: (viewState.carryBills || []).length,
-    podLocks: (viewState.podLocks || []).length,
-    scanResults: (viewState.scanResults || []).length,
-    scanPool: (viewState.scanPool || []).length,
-    needTrackBills: (viewState.needTrackBills || []).length,
-    trackResults: (viewState.trackResults || []).length,
-    trackEvents: 0,
-    finalRows: (viewState.finalRows || []).length,
-    nextCarry: (viewState.nextCarryBills || viewState.carryBills || []).length,
-    finalDiversion: 0,
-    lastRun: viewState.lastRun || null,
-    lastRunSummary: viewState.lastRunSummary || viewState.lastRun || null,
-    runId: runStatus?.runId || viewState.currentRun?.runId || viewState.lastRunSummary?.runId || '',
-    runStatus: runStatus?.status || '',
-    currentRun: runStatus || viewState.currentRun || null,
-    dailySummary: viewState.dailyParseSummary || null,
-    dailyPreview: (viewState.dailyParseRows || []).slice(0, 50),
-    backupSummary: null,
-    shopCodes: getShopCodeSummary(),
-    historySummary: viewState.historySummary || [],
-    processing: runStatus ? {
-      ...(viewState.processing || {}),
-      running: runStatus.status === 'running',
-      paused: runStatus.status === 'paused',
-      phase: runStatus.currentStage || viewState.processing?.phase || '',
-      batchIndex: Number(runStatus.batchIndex || 0),
-      totalBatches: Number(runStatus.totalBatches || 0),
-      error: runStatus.errorMessage || ''
-    } : (viewState.processing || { running: false, paused: false, phase: '' }),
-    dbStatus: getDbStatus(),
-    network: buildNetworkInfo(runtime),
-    consistency: { status: 'NORMALIZED_SQLITE', errors: [], warnings: [] },
-    dashboardMetricHash: '',
-    detailRowHash: '',
-    dashboard,
-    coreKpis,
-    criticalDashboard: { summary: critical.summary, rows: critical.rows },
-    detailTabs: buildDetailTabs(viewState),
-    logs: []
-  };
-}
-
-function summarizeLightweightShopeeState(state = {}) {
-  const viewState = state || {};
-  const runStatus = viewState.reportDate ? getBusinessRunStatus(SHOPEE, viewState.reportDate).lock : null;
-  const dashboard = buildShopeeDashboard({ ...viewState, businessType: SHOPEE });
-  return {
-    businessType: SHOPEE,
-    snapshotId: viewState.snapshotId || '',
-    reportDate: viewState.reportDate || '',
-    sourceName: viewState.sourceName || '',
-    dailyReportReady: Boolean(viewState.dailyReportReady),
-    total: (viewState.pnhBills || []).length,
-    carry: (viewState.carryBills || []).length,
-    podLocks: (viewState.podLocks || []).length,
-    scanResults: (viewState.scanResults || []).length,
-    trackResults: (viewState.trackResults || []).length,
-    trackEvents: 0,
-    finalRows: (viewState.finalRows || []).length,
-    nextCarry: (viewState.nextCarryBills || viewState.carryBills || []).length,
-    dailySummary: viewState.dailyParseSummary || null,
-    dailyPreview: (viewState.dailyParseRows || []).slice(0, 50),
-    backupSummary: null,
-    apiDiagnostic: null,
-    historySummary: viewState.historySummary || [],
-    runId: runStatus?.runId || viewState.currentRun?.runId || viewState.lastRunSummary?.runId || '',
-    runStatus: runStatus?.status || '',
-    currentRun: runStatus || viewState.currentRun || null,
-    processing: runStatus ? {
-      ...(viewState.processing || {}),
-      running: runStatus.status === 'running',
-      paused: runStatus.status === 'paused',
-      phase: runStatus.currentStage || viewState.processing?.phase || '',
-      batchIndex: Number(runStatus.batchIndex || 0),
-      totalBatches: Number(runStatus.totalBatches || 0),
-      error: runStatus.errorMessage || ''
-    } : (viewState.processing || { running: false, paused: false, phase: '' }),
-    dashboard,
-    dashboardMetricHash: '',
-    detailRowHash: '',
-    detailTabs: dashboard.detailTabs,
-    logs: [],
-    dbStatus: getDbStatus()
-  };
-}
-
-"""
-              text = text.replace(anchor, helpers + anchor, 1)
 
           path.write_text(text, encoding='utf-8')
           PY
@@ -201,12 +96,9 @@ function summarizeLightweightShopeeState(state = {}) {
         run: |
           node --check server.js
           node --check src/lightweightDashboardStore.js
-          grep -q "export function loadLightweightUnifiedBusinessState" src/lightweightDashboardStore.js
-          grep -q "export function loadLightweightAggregateState" src/lightweightDashboardStore.js
-          grep -q "function summarizeLightweightCcslState" server.js
-          grep -q "function summarizeLightweightShopeeState" server.js
-          grep -q "summarizeLightweightCcslState(state)" server.js
-          grep -q "summarizeLightweightShopeeState(state)" server.js
+          node --check src/lightweightDashboardSummary.js
+          grep -q "summarizeLightweightCcslState(state" server.js
+          grep -q "summarizeLightweightShopeeState(state" server.js
           grep -q "loadLightweightUnifiedBusinessState(req.params.businessType" server.js
           grep -q "2026-08-08-v22-memory-safe-dashboard" server.js
 
@@ -214,10 +106,10 @@ function summarizeLightweightShopeeState(state = {}) {
         run: |
           git config user.name "ChatGPT V22"
           git config user.email "actions@users.noreply.github.com"
-          git add server.js src/lightweightDashboardStore.js
+          git add server.js src/lightweightDashboardStore.js src/lightweightDashboardSummary.js
           if git diff --cached --quiet; then
             echo "No source changes to commit"
             exit 0
           fi
-          git commit -m "V22 bypass heavyweight snapshot JSON in dashboard reads"
+          git commit -m "V22 eliminate snapshot JSON from dashboard GET paths"
           git push origin HEAD:chatgpt/v22-memory-safe-dashboard
