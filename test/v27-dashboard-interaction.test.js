@@ -37,6 +37,17 @@ test('V27 forced trend mount cannot create a DOM mutation render loop', () => {
   assert.match(mountFix,/topRangeQuery/);
 });
 
+test('V27 carry business filter cannot create a DOM mutation loop and caps first payload', () => {
+  const carryClient=fs.readFileSync('public/v27-carry-business-filter.js','utf8');
+  const carryServer=fs.readFileSync('src/v27CarryBusinessPatch.js','utf8');
+  assert.doesNotMatch(carryClient,/new\s+MutationObserver\s*\(/);
+  assert.match(carryClient,/carry-monitor-business/);
+  assert.match(carryClient,/searchParams\.set\('limit','50'\)/);
+  assert.match(carryServer,/Math\.min\(100/);
+  assert.match(carryServer,/json_valid/);
+  assert.match(carryServer,/Server-Timing/);
+});
+
 test('V27 does not replace locked V18 dashboard HTML/CSS files', () => {
   const html=fs.readFileSync('public/index.html','utf8');
   assert.match(html,/homeBusinessCards/);
