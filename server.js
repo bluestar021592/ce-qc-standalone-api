@@ -12,6 +12,7 @@ import { parseLongBackupModules } from './src/backupParser.js';
 import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
 import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
+import { loadLightweightAggregateState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
 import { exportShopeeXlsx } from './src/shopeeExporter.js';
@@ -96,7 +97,19 @@ app.get(['/ce', '/tbkh', '/ali1688', '/shopeecn', '/shopeevn', '/ccsl', '/shopee
 });
 
 app.get('/api/health', async (req, res) => {
-  res.json({ ok: true, version: '0.1.0-shopee-track-user-delete-v2', patchId: '2026-08-04-track-delete-v2', time: new Date().toISOString(), db: getDbStatus() });
+  const memory = process.memoryUsage();
+  res.json({
+    ok: true,
+    version: '0.1.0-shopee-track-user-delete-v2',
+    patchId: '2026-08-08-v22-memory-safe-dashboard',
+    time: new Date().toISOString(),
+    db: getDbStatus(),
+    memory: {
+      rssMB: Math.round(memory.rss / 1024 / 1024),
+      heapUsedMB: Math.round(memory.heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(memory.heapTotal / 1024 / 1024)
+    }
+  });
 });
 
 app.get('/api/session', (req, res) => {
@@ -340,9 +353,13 @@ app.post('/api/auth/login', (req, res) => res.redirect(307, '/api/ce-login'));
 app.post('/api/auth/logout', (req, res) => res.redirect(307, '/api/ce-logout'));
 
 app.get('/api/state', async (req, res) => {
+  if (req.query.compact === '1') {
+    const state = loadLightweightAggregateState('CCSL');
+    return res.json({ ok: true, state: compactDashboardState(summarizeState(state)) });
+  }
   const state = await loadState();
   const summary = summarizeState(state);
-  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
+  res.json({ ok: true, state: summary });
 });
 
 app.get('/api/unified-history', (req, res) => {
@@ -381,14 +398,18 @@ app.get('/api/period-dashboard', (req, res) => {
 });
 
 app.get('/api/shopee/state', async (req, res) => {
+  if (req.query.compact === '1') {
+    const state = loadLightweightAggregateState('SHOPEE');
+    return res.json({ ok: true, state: compactDashboardState(summarizeShopeeState(state)) });
+  }
   const state = loadBusinessState(SHOPEE);
   const summary = summarizeShopeeState(state);
-  res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
+  res.json({ ok: true, state: summary });
 });
 
 app.get('/api/business-state/:businessType', (req, res) => {
   try {
-    const source = loadUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));
+    const source = loadLightweightUnifiedBusinessState(req.params.businessType, String(req.query.snapshotId || ''));
     const shopee = /^SHOPEE/.test(source.businessType);
     const shopeeDashboard = shopee ? buildShopeeDashboard({ ...source, businessType: 'SHOPEE' }) : null;
     const state = shopee
@@ -1022,7 +1043,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const reportDate = String(req.query.reportDate || unified?.reportDate || '');
   const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
   let states = [];
-  if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadUnifiedBusinessState(type, snapshotId));
+  if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
   if (!states.some(state => state?.finalRows?.length)) states = [await loadState(), loadBusinessState(SHOPEE)];
   const allRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
