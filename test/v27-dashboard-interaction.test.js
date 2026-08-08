@@ -28,6 +28,15 @@ test('V27 client uses lazy details and exposes carryover + SHOPEE attempt intera
   assert.match(client,/attempt:index\+1/);
 });
 
+test('V27 forced trend mount cannot create a DOM mutation render loop', () => {
+  const mountFix=fs.readFileSync('public/v27-trend-mount-fix.js','utf8');
+  assert.doesNotMatch(mountFix,/new\s+MutationObserver\s*\(/);
+  assert.match(mountFix,/v27TrendKey/);
+  assert.match(mountFix,/v27TrendState/);
+  assert.match(mountFix,/if\(!force&&section\.dataset\.v27TrendKey===key&&section\.dataset\.v27TrendState==='ready'\)return/);
+  assert.match(mountFix,/topRangeQuery/);
+});
+
 test('V27 does not replace locked V18 dashboard HTML/CSS files', () => {
   const html=fs.readFileSync('public/index.html','utf8');
   assert.match(html,/homeBusinessCards/);
