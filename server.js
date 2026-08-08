@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { networkInterfaces } from 'os';
+import { spawn } from 'node:child_process';
 
 import { CEClient, normalizeLoginToken } from './src/ceClient.js';
 import { parseDailyExcel } from './src/excelParser.js';
@@ -13,7 +14,7 @@ import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
 import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
 import { loadLightweightAggregateState, loadLightweightPeriodBusinessState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';
-import { loadRangeDashboard } from './src/rangeDashboardStore.js';
+import { getDashboardCacheStatus, loadRangeDashboard, markDashboardCacheDirty } from './src/rangeDashboardStore.js';
 import { summarizeLightweightCcslState, summarizeLightweightShopeeState } from './src/lightweightDashboardSummary.js';
 import { runQcPipeline } from './src/pipeline.js';
 import { exportDailyParseXlsx, exportXlsx } from './src/exporter.js';
@@ -89,6 +90,48 @@ app.use(express.static(path.join(__dirname, 'public')));
 const client = new CEClient();
 const activeRunIds = new Set();
 const eventClients = new Set();
+const DASHBOARD_CACHE_REFRESH_MS = Math.max(60_000, Number(process.env.DASHBOARD_CACHE_REFRESH_MS || 600_000));
+let dashboardCacheWorker = null;
+let dashboardCachePendingDate = '';
+let dashboardCacheTimer = null;
+
+function launchDashboardCacheWorker({ reportDate = '', reason = 'SCHEDULED_REFRESH' } = {}) {
+  const date = String(reportDate || '').trim();
+  if (date) {
+    markDashboardCacheDirty(date, reason);
+    dashboardCachePendingDate = date;
+  }
+  if (dashboardCacheWorker) return { started: false, queued: Boolean(date) };
+  const workerFile = path.join(__dirname, 'src', 'dashboardCacheWorker.js');
+  const args = [workerFile, '--reason', String(reason || 'SCHEDULED_REFRESH')];
+  if (date) args.push('--date', date);
+  const child = spawn(process.execPath, args, {
+    cwd: __dirname,
+    env: process.env,
+    windowsHide: true,
+    stdio: ['ignore', 'ignore', 'ignore']
+  });
+  dashboardCacheWorker = child;
+  child.once('exit', () => {
+    dashboardCacheWorker = null;
+    fastSqlDashboardCache.clear();
+    periodDashboardCache.clear();
+    const queuedDate = dashboardCachePendingDate;
+    dashboardCachePendingDate = '';
+    if (queuedDate && queuedDate !== date) {
+      setTimeout(() => launchDashboardCacheWorker({ reportDate: queuedDate, reason: 'QUEUED_REFRESH' }), 100).unref?.();
+    }
+  });
+  child.once('error', () => { dashboardCacheWorker = null; });
+  return { started: true, queued: false };
+}
+
+function startDashboardCacheScheduler() {
+  if (dashboardCacheTimer) return;
+  setTimeout(() => launchDashboardCacheWorker({ reason: 'STARTUP_WARM' }), 1500).unref?.();
+  dashboardCacheTimer = setInterval(() => launchDashboardCacheWorker({ reason: 'TEN_MINUTE_REFRESH' }), DASHBOARD_CACHE_REFRESH_MS);
+  dashboardCacheTimer.unref?.();
+}
 
 app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
@@ -110,7 +153,8 @@ app.get('/api/health', async (req, res) => {
       rssMB: Math.round(memory.rss / 1024 / 1024),
       heapUsedMB: Math.round(memory.heapUsed / 1024 / 1024),
       heapTotalMB: Math.round(memory.heapTotal / 1024 / 1024)
-    }
+    },
+    dashboardCache: getDashboardCacheStatus()
   });
 });
 
@@ -444,6 +488,15 @@ app.get('/api/state', async (req, res) => {
   res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
 });
 
+app.get('/api/dashboard-cache/status', (req, res) => {
+  res.json({
+    ok: true,
+    refreshIntervalMs: DASHBOARD_CACHE_REFRESH_MS,
+    workerRunning: Boolean(dashboardCacheWorker),
+    cache: getDashboardCacheStatus()
+  });
+});
+
 app.get('/api/unified-history', (req, res) => {
   res.json({ ok: true, rows: listUnifiedImportHistory(req.query.limit) });
 });
@@ -693,6 +746,7 @@ async function handleDailyReportImport(req, res) {
     state.processing = { running: false, paused: false, phase: '' };
     resetRunForReport(parsed.reportDate);
     await saveState(state);
+    launchDashboardCacheWorker({ reportDate: parsed.reportDate, reason: 'DAILY_IMPORT' });
     await fs.unlink(req.file.path).catch(() => {});
     res.json({
       ok: true,
@@ -761,6 +815,7 @@ async function handleUnifiedDailyImport(req, res) {
     shopeeState.priorCarryRows = historicalShopee.map(row => safeJsonRow(row));
     resetBusinessRunForReport(SHOPEE, parsed.reportDate);
     saveBusinessState(shopeeState, SHOPEE);
+    launchDashboardCacheWorker({ reportDate: parsed.reportDate, reason: 'UNIFIED_IMPORT' });
     await fs.unlink(req.file.path).catch(() => {});
     res.json({ ok: true, ...saved, carryover: processingQueue.summary, state: summarizeState(ccslState), shopeeState: summarizeShopeeState(shopeeState) });
   } catch (error) {
@@ -787,6 +842,7 @@ async function handleShopeeDailyImport(req, res) {
     clearRunResults(state);
     resetBusinessRunForReport(SHOPEE, parsed.reportDate);
     saveBusinessState(state, SHOPEE);
+    launchDashboardCacheWorker({ reportDate: parsed.reportDate, reason: 'SHOPEE_IMPORT' });
     await fs.unlink(req.file.path).catch(() => {});
     res.json({ ok: true, parsed: { ...parsed.summary, reportDate: parsed.reportDate, preview: parsed.preview, conflicts: parsed.conflicts }, state: summarizeShopeeState(state) });
   } catch (error) {
@@ -947,6 +1003,7 @@ async function executeRunRequest(req, res, options = {}) {
     const snapshot = createDashboardSnapshot(result.state, { reportDate, runId: run.runId });
     updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
     await appendRuntimeLog(`处理快照已保存：${snapshot.snapshotId}`);
+    launchDashboardCacheWorker({ reportDate, reason: 'CCSL_RUN_COMPLETED' });
     res.json({ ok: true, summary: result.summary, run: { runId: run.runId, reportDate, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeState(await loadState()) });
   } catch (e) {
     console.error(e);
@@ -1079,6 +1136,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     const ccslSnapshot = getMatchingSnapshot(ccslState);
     completeUnifiedSnapshot({ reportDate, ccslSnapshot, shopeeSnapshot: snapshot });
     saveBusinessState(result.state, SHOPEE);
+    launchDashboardCacheWorker({ reportDate, reason: 'SHOPEE_RUN_COMPLETED' });
     res.json({ ok: true, summary, run: { reportDate, runId, recovered: outcome.recovered, repair }, snapshotId: snapshot.snapshotId, state: summarizeShopeeState(result.state) });
   } catch (error) {
     if (reportDate) updateBusinessRunLock(SHOPEE, reportDate, error.runStatus || 'failed', error.message || String(error));
@@ -1824,6 +1882,8 @@ app.listen(port, host, () => {
   console.log(`局域网访问: ${network.lanUrl || '未检测到局域网IPv4，请查看电脑IP地址'}`);
   console.log(`SQLite DB: ${runtimeConfig.dbFile}`);
   console.log(`Public URL: ${network.publicUrl}`);
+  console.log(`Dashboard cache: background refresh every ${Math.round(DASHBOARD_CACHE_REFRESH_MS / 60000)} minutes`);
+  startDashboardCacheScheduler();
 });
 
 function buildNetworkInfo(runtime = getRuntimeConfig()) {

@@ -99,7 +99,10 @@ export const BUSINESS_DATA_TABLES = [
   'unified_import_batches',
   'unified_import_rows',
   'unified_snapshots',
-  'weekly_metric_snapshots'
+  'weekly_metric_snapshots',
+  'dashboard_daily_cache',
+  'dashboard_cache_dates',
+  'dashboard_cache_dirty'
 ];
 
 export function resetAppState(nextState = {}) {

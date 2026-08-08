@@ -4,6 +4,217 @@ const CCSL_TYPES = Object.freeze(['CE', 'TBKH', 'ALI1688']);
 const SHOPEE_TYPES = Object.freeze(['SHOPEECN', 'SHOPEEVN']);
 const ALL_TYPES = Object.freeze([...CCSL_TYPES, ...SHOPEE_TYPES]);
 
+const DASHBOARD_CACHE_SCHEMA_VERSION = '2026-08-08-v24';
+let dashboardCacheSchemaReady = false;
+
+function ensureDashboardCacheSchema() {
+  if (dashboardCacheSchemaReady) return;
+  const db = getDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dashboard_daily_cache (
+      reportDate TEXT NOT NULL,
+      businessType TEXT NOT NULL,
+      regionCode TEXT NOT NULL DEFAULT '',
+      metricsJson TEXT NOT NULL,
+      snapshotId TEXT NOT NULL DEFAULT '',
+      snapshotStatus TEXT NOT NULL DEFAULT '',
+      sourceFingerprint TEXT NOT NULL DEFAULT '',
+      refreshedAt TEXT NOT NULL,
+      PRIMARY KEY(reportDate,businessType,regionCode)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dashboard_daily_cache_date
+      ON dashboard_daily_cache(reportDate,businessType);
+    CREATE TABLE IF NOT EXISTS dashboard_cache_dates (
+      reportDate TEXT PRIMARY KEY,
+      snapshotId TEXT NOT NULL DEFAULT '',
+      snapshotStatus TEXT NOT NULL DEFAULT '',
+      sourceFingerprint TEXT NOT NULL DEFAULT '',
+      refreshedAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS dashboard_cache_dirty (
+      reportDate TEXT PRIMARY KEY,
+      reason TEXT NOT NULL DEFAULT '',
+      dirtyAt TEXT NOT NULL
+    );
+  `);
+  dashboardCacheSchemaReady = true;
+}
+
+function cacheIsoNow() {
+  return new Date().toISOString();
+}
+
+function dashboardSourceInfo(reportDate) {
+  const db = getDb();
+  const batch = db.prepare(`
+    SELECT b.snapshotId,b.reportDate,b.createdAt,COALESCE(s.status,'') AS snapshotStatus
+    FROM unified_import_batches b
+    LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.reportDate=? AND b.status='VALID'
+    ORDER BY b.createdAt DESC
+    LIMIT 1
+  `).get(reportDate) || null;
+  if (!batch) return null;
+  const ccsl = db.prepare(`SELECT COUNT(*) AS count,COALESCE(MAX(updatedAt),'') AS updatedAt FROM final_rows WHERE reportDate=?`).get(reportDate) || {};
+  const shopee = db.prepare(`SELECT COUNT(*) AS count,COALESCE(MAX(updatedAt),'') AS updatedAt FROM business_final_rows WHERE reportDate=?`).get(reportDate) || {};
+  const imported = db.prepare(`SELECT COUNT(*) AS count FROM unified_import_rows WHERE reportDate=? AND snapshotId=?`).get(reportDate, batch.snapshotId) || {};
+  const fingerprint = JSON.stringify([
+    DASHBOARD_CACHE_SCHEMA_VERSION,
+    batch.snapshotId || '',
+    batch.snapshotStatus || '',
+    batch.createdAt || '',
+    Number(imported.count || 0),
+    Number(ccsl.count || 0), ccsl.updatedAt || '',
+    Number(shopee.count || 0), shopee.updatedAt || ''
+  ]);
+  return { ...batch, fingerprint };
+}
+
+export function markDashboardCacheDirty(reportDate, reason = 'DATA_CHANGED') {
+  const date = String(reportDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  ensureDashboardCacheSchema();
+  getDb().prepare(`
+    INSERT INTO dashboard_cache_dirty(reportDate,reason,dirtyAt)
+    VALUES(?,?,?)
+    ON CONFLICT(reportDate) DO UPDATE SET reason=excluded.reason,dirtyAt=excluded.dirtyAt
+  `).run(date, String(reason || 'DATA_CHANGED').slice(0,120), cacheIsoNow());
+  return true;
+}
+
+export function refreshDashboardCacheDate(reportDate, options = {}) {
+  const date = String(reportDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('缓存刷新日期无效。');
+  ensureDashboardCacheSchema();
+  const db = getDb();
+  const source = dashboardSourceInfo(date);
+  if (!source) return { reportDate: date, skipped: true, reason: 'NO_VALID_IMPORT' };
+  if (source.snapshotStatus !== 'COMPLETED') {
+    return { reportDate: date, skipped: true, reason: 'SNAPSHOT_NOT_COMPLETED', snapshotStatus: source.snapshotStatus || '' };
+  }
+  const existing = db.prepare('SELECT sourceFingerprint FROM dashboard_cache_dates WHERE reportDate=?').get(date);
+  if (!options.force && existing?.sourceFingerprint === source.fingerprint) {
+    db.prepare('DELETE FROM dashboard_cache_dirty WHERE reportDate=?').run(date);
+    return { reportDate: date, skipped: true, reason: 'UNCHANGED', snapshotId: source.snapshotId };
+  }
+
+  const ccslRows = queryCcslDailyRaw(date, date);
+  const shopeeRows = queryShopeeDailyRaw(date, date);
+  const rows = [...ccslRows, ...shopeeRows];
+  const refreshedAt = cacheIsoNow();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('DELETE FROM dashboard_daily_cache WHERE reportDate=?').run(date);
+    const insert = db.prepare(`
+      INSERT INTO dashboard_daily_cache(
+        reportDate,businessType,regionCode,metricsJson,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt
+      ) VALUES(?,?,?,?,?,?,?,?)
+    `);
+    for (const row of rows) {
+      insert.run(
+        date,
+        String(row.businessType || ''),
+        String(row.regionCode || ''),
+        JSON.stringify(normalizeCountRow(row)),
+        String(source.snapshotId || ''),
+        String(source.snapshotStatus || ''),
+        source.fingerprint,
+        refreshedAt
+      );
+    }
+    db.prepare(`
+      INSERT INTO dashboard_cache_dates(reportDate,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt)
+      VALUES(?,?,?,?,?)
+      ON CONFLICT(reportDate) DO UPDATE SET
+        snapshotId=excluded.snapshotId,
+        snapshotStatus=excluded.snapshotStatus,
+        sourceFingerprint=excluded.sourceFingerprint,
+        refreshedAt=excluded.refreshedAt
+    `).run(date, source.snapshotId || '', source.snapshotStatus || '', source.fingerprint, refreshedAt);
+    db.prepare('DELETE FROM dashboard_cache_dirty WHERE reportDate=?').run(date);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+  return { reportDate: date, refreshed: true, rowCount: rows.length, snapshotId: source.snapshotId, refreshedAt };
+}
+
+export function refreshDashboardCacheDirty(options = {}) {
+  ensureDashboardCacheSchema();
+  const db = getDb();
+  const limit = Math.max(1, Math.min(60, Number(options.limit || 16)));
+  const recentDays = Math.max(1, Math.min(30, Number(options.recentDays || 14)));
+  const dirty = db.prepare('SELECT reportDate FROM dashboard_cache_dirty ORDER BY dirtyAt LIMIT ?').all(limit).map(row => row.reportDate);
+  const recent = db.prepare(`
+    SELECT DISTINCT b.reportDate
+    FROM unified_import_batches b
+    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID' AND s.status='COMPLETED'
+    ORDER BY b.reportDate DESC
+    LIMIT ?
+  `).all(recentDays).map(row => row.reportDate);
+  const dates = [...new Set([...dirty, ...recent])].slice(0, limit);
+  const results = [];
+  for (const date of dates) {
+    const source = dashboardSourceInfo(date);
+    const marker = db.prepare('SELECT sourceFingerprint FROM dashboard_cache_dates WHERE reportDate=?').get(date);
+    const force = dirty.includes(date);
+    if (!source || source.snapshotStatus !== 'COMPLETED') {
+      results.push({ reportDate: date, skipped: true, reason: 'NOT_COMPLETED' });
+      continue;
+    }
+    if (!force && marker?.sourceFingerprint === source.fingerprint) {
+      results.push({ reportDate: date, skipped: true, reason: 'UNCHANGED' });
+      continue;
+    }
+    results.push(refreshDashboardCacheDate(date, { force: true }));
+  }
+  return { checked: dates.length, refreshed: results.filter(item => item.refreshed).length, results };
+}
+
+export function getDashboardCacheStatus() {
+  ensureDashboardCacheSchema();
+  const db = getDb();
+  const totals = db.prepare(`
+    SELECT COUNT(*) AS cachedDates,COALESCE(MIN(reportDate),'') AS oldestDate,COALESCE(MAX(reportDate),'') AS newestDate,COALESCE(MAX(refreshedAt),'') AS lastRefreshedAt
+    FROM dashboard_cache_dates
+  `).get() || {};
+  const dirty = db.prepare('SELECT COUNT(*) AS count FROM dashboard_cache_dirty').get() || {};
+  return {
+    schemaVersion: DASHBOARD_CACHE_SCHEMA_VERSION,
+    cachedDates: Number(totals.cachedDates || 0),
+    oldestDate: totals.oldestDate || '',
+    newestDate: totals.newestDate || '',
+    lastRefreshedAt: totals.lastRefreshedAt || '',
+    dirtyDates: Number(dirty.count || 0)
+  };
+}
+
+function cachedRowsForRange(scope, fromDate, toDate) {
+  ensureDashboardCacheSchema();
+  const expectedDates = listCompletedDates(fromDate, toDate);
+  if (!expectedDates.length) return null;
+  const db = getDb();
+  const markers = db.prepare(`
+    SELECT reportDate FROM dashboard_cache_dates
+    WHERE reportDate BETWEEN ? AND ? AND snapshotStatus='COMPLETED'
+  `).all(fromDate, toDate).map(row => row.reportDate);
+  const markerSet = new Set(markers);
+  if (!expectedDates.every(date => markerSet.has(date))) return null;
+  const businessTypes = scope === 'SHOPEE' ? SHOPEE_TYPES : CCSL_TYPES;
+  const placeholders = businessTypes.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT metricsJson FROM dashboard_daily_cache
+    WHERE reportDate BETWEEN ? AND ? AND businessType IN (${placeholders})
+    ORDER BY reportDate,businessType,regionCode
+  `).all(fromDate, toDate, ...businessTypes);
+  return rows.map(row => {
+    try { return normalizeCountRow(JSON.parse(row.metricsJson || '{}')); }
+    catch { return null; }
+  }).filter(Boolean);
+}
+
 /**
  * Fast date-range dashboard reader.
  *
@@ -42,6 +253,16 @@ export function loadRangeDashboard(fromDate, toDate) {
 }
 
 function queryCcslDaily(fromDate, toDate) {
+  const cached = cachedRowsForRange('CCSL', fromDate, toDate);
+  return cached || queryCcslDailyRaw(fromDate, toDate);
+}
+
+function queryShopeeDaily(fromDate, toDate) {
+  const cached = cachedRowsForRange('SHOPEE', fromDate, toDate);
+  return cached || queryShopeeDailyRaw(fromDate, toDate);
+}
+
+function queryCcslDailyRaw(fromDate, toDate) {
   const db = getDb();
   return db.prepare(`
     WITH valid AS (
@@ -84,7 +305,7 @@ function queryCcslDaily(fromDate, toDate) {
   `).all(fromDate, toDate).map(normalizeCountRow);
 }
 
-function queryShopeeDaily(fromDate, toDate) {
+function queryShopeeDailyRaw(fromDate, toDate) {
   const db = getDb();
   return db.prepare(`
     WITH valid AS (
