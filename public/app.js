@@ -151,104 +151,76 @@ async function refreshInternal() {
     renderAll();
     return;
   }
+  const businessType = ['ce','tbkh','ali1688','shopeecn','shopeevn'].includes(currentPage) ? currentBusinessType() : '';
+  const needsFullAggregate = ['exceptions', 'reports'].includes(currentPage);
+  const requestDefinitions = [
+    ['CCSL状态', () => api(`/api/state${needsFullAggregate ? '' : '?compact=1'}`)],
+    ['SHOPEE状态', () => api(`/api/shopee/state${needsFullAggregate ? '' : '?compact=1'}`)],
+    ['CE登录状态', () => api('/api/ce-auth-status')],
+    ['系统Session', () => api('/api/session')],
+    ['CCSL历史', () => api('/api/history?businessType=CCSL')],
+    ['SHOPEE历史', () => api('/api/history?businessType=SHOPEE')],
+    ['统一日报历史', () => api('/api/unified-history')],
+    ['最新统一日报', () => api('/api/import/unified-latest?compact=1')],
+    ['当前业务板块', () => businessType ? api(`/api/business-state/${businessType}?compact=1`) : Promise.resolve(null)]
+  ];
 
-  // V21_FASTLOAD_20260808
-  // Startup must render the visible dashboard first. History, CE auth and other
-  // non-visible metadata are loaded afterwards and never block first paint.
-  const businessPage = ['ce','tbkh','ali1688','shopeecn','shopeevn'].includes(currentPage);
-  const fastDashboardPage = currentPage === 'home' || businessPage;
-  const businessType = businessPage ? currentBusinessType() : '';
-  const bootstrapScope = currentPage === 'home' ? 'ALL' : businessType;
-
-  try {
-    const [sessionResult, bootstrapResult] = await Promise.all([
-      api('/api/session'),
-      fastDashboardPage
-        ? api(`/api/dashboard/bootstrap?scope=${encodeURIComponent(bootstrapScope)}`)
-        : Promise.resolve(null)
-    ]);
-
-    if (sessionResult) accessSession = sessionResult;
-
-    if (bootstrapResult?.states) {
-      unifiedImportState = bootstrapResult.import || unifiedImportState;
-      Object.assign(businessStates, bootstrapResult.states || {});
-      const reportDate = bootstrapResult.reportDate || unifiedImportState?.reportDate || '';
-      const snapshotId = bootstrapResult.snapshotId || unifiedImportState?.snapshotId || '';
-      if (reportDate) historyModeDate = reportDate;
-
-      if (currentPage === 'home') {
-        const ccslTypes = ['CE','TBKH','ALI1688'];
-        const shopeeTypes = ['SHOPEECN','SHOPEEVN'];
-        if (ccslTypes.every(type => businessStates[type])) {
-          appState = aggregateBusinessStates(ccslTypes.map(type => businessStates[type]), 'CCSL', reportDate, snapshotId);
-        }
-        if (shopeeTypes.every(type => businessStates[type])) {
-          shopeeState = aggregateBusinessStates(shopeeTypes.map(type => businessStates[type]), 'SHOPEE', reportDate, snapshotId);
-        }
-      } else if (businessType && businessStates[businessType]) {
-        if (/^SHOPEE/.test(businessType)) shopeeState = businessStates[businessType];
-        else appState = businessStates[businessType];
-      }
-
-      renderAll();
-      void loadDeferredStartupMetadata();
-      return;
+  // Limit the startup burst. The same endpoints are healthy when requested one-by-one,
+  // but firing all heavy snapshot/history endpoints at once can create a transient
+  // connection failure during page startup.
+  const loaded = [];
+  const startupFailures = [];
+  for (const [label, task] of requestDefinitions) {
+    try {
+      loaded.push(await task());
+    } catch (error) {
+      startupFailures.push({ label, error });
+      loaded.push(null);
+      console.warn(`[startup] ${label}读取失败`, error);
+      if (error?.code === 'NETWORK_CONNECTION_INTERRUPTED') break;
     }
-  } catch (error) {
-    console.warn('[V21 fast startup] 快速看板读取失败，转入兼容读取。', error);
-    const backendHealthy = await rawHealthProbe();
-    if (!backendHealthy) throw error;
   }
 
-  // Compatibility path for pages without a unified snapshot or non-dashboard pages.
-  const needsFullAggregate = ['exceptions', 'reports'].includes(currentPage);
-  const tasks = [
-    api('/api/session'),
-    api('/api/import/unified-latest?compact=1'),
-    api(`/api/state${needsFullAggregate ? '' : '?compact=1'}`),
-    api(`/api/shopee/state${needsFullAggregate ? '' : '?compact=1'}`)
-  ];
-  const [sessionSettled, unifiedSettled, ccslSettled, shopeeSettled] = await Promise.allSettled(tasks);
-  if (sessionSettled.status === 'fulfilled') accessSession = sessionSettled.value;
-  if (unifiedSettled.status === 'fulfilled' && unifiedSettled.value?.import) unifiedImportState = unifiedSettled.value.import;
-  if (ccslSettled.status === 'fulfilled' && ccslSettled.value?.state) appState = ccslSettled.value.state;
-  if (shopeeSettled.status === 'fulfilled' && shopeeSettled.value?.state) shopeeState = shopeeSettled.value.state;
-  if (unifiedImportState?.reportDate && !historyModeDate) historyModeDate = unifiedImportState.reportDate;
-  renderAll();
-  void loadDeferredStartupMetadata();
-  if (currentPage === 'tracking') void loadTrackingWorkspace();
-}
+  const [ccsl, shopee, auth, session, ccslHistory, shopeeHistory, unifiedHistory, unified, businessResponse] = loaded;
+  if (ccsl?.state) appState = ccsl.state;
+  if (shopee?.state) shopeeState = shopee.state;
+  if (auth?.authStatus) ceAuth = auth.authStatus;
+  if (session) accessSession = session;
+  historyCatalog = {
+    CCSL: ccslHistory?.rows || historyCatalog.CCSL || [],
+    SHOPEE: shopeeHistory?.rows || historyCatalog.SHOPEE || [],
+    UNIFIED: unifiedHistory?.rows || historyCatalog.UNIFIED || []
+  };
+  if (unified?.import) unifiedImportState = unified.import;
+  if (businessResponse?.businessType) businessStates[businessResponse.businessType] = businessResponse.state || {};
 
-function preferredUnifiedForSelectedDate() {
-  if (!historyModeDate) return unifiedImportState || (historyCatalog.UNIFIED || [])[0] || null;
-  return unifiedImportState?.reportDate === historyModeDate
+  if (startupFailures.some(item => item.error?.code === 'NETWORK_CONNECTION_INTERRUPTED')) {
+    const backendHealthy = await rawHealthProbe();
+    if (!backendHealthy) throw startupFailures.find(item => item.error?.code === 'NETWORK_CONNECTION_INTERRUPTED').error;
+  }
+
+  // When the selected date is the current imported date, always bind the five
+  // business pages to that exact newest import snapshot. History may still contain
+  // an older completed snapshot for the same date and must not override it.
+  const selectedUnified = historyModeDate
+    ? (unifiedImportState?.reportDate === historyModeDate
+        ? unifiedImportState
+        : (historyCatalog.UNIFIED || []).find(row => row.reportDate === historyModeDate))
+    : null;
+  const latestUnified = selectedUnified || (unifiedImportState?.snapshotId
     ? unifiedImportState
-    : (historyCatalog.UNIFIED || []).find(row => row.reportDate === historyModeDate) || null;
-}
-
-function loadDeferredStartupMetadata() {
-  return runSingleFlight('v21-deferred-startup-metadata', async () => {
-    const requests = await Promise.allSettled([
-      api('/api/ce-auth-status'),
-      api('/api/history?businessType=CCSL'),
-      api('/api/history?businessType=SHOPEE'),
-      api('/api/unified-history')
-    ]);
-    const [auth, ccslHistory, shopeeHistory, unifiedHistory] = requests;
-    if (auth.status === 'fulfilled' && auth.value?.authStatus) ceAuth = auth.value.authStatus;
-    historyCatalog = {
-      CCSL: ccslHistory.status === 'fulfilled' ? (ccslHistory.value?.rows || []) : (historyCatalog.CCSL || []),
-      SHOPEE: shopeeHistory.status === 'fulfilled' ? (shopeeHistory.value?.rows || []) : (historyCatalog.SHOPEE || []),
-      UNIFIED: unifiedHistory.status === 'fulfilled' ? (unifiedHistory.value?.rows || []) : (historyCatalog.UNIFIED || [])
-    };
-    const preferredUnified = preferredUnifiedForSelectedDate();
-    if (preferredUnified?.reportDate && !historyModeDate) historyModeDate = preferredUnified.reportDate;
-    renderHistoryOptions();
-    renderTopbar();
-    renderSystemStatus();
-    renderAuthPanels();
-  }).catch(error => console.warn('[V21 deferred metadata] 非阻塞元数据读取失败', error));
+    : (historyCatalog.UNIFIED || [])[0]);
+  const needsUnifiedDashboardState = ['home','ce','tbkh','ali1688','shopeecn','shopeevn','tracking','exceptions','reports'].includes(currentPage);
+  if (latestUnified?.snapshotId && needsUnifiedDashboardState) {
+    if (dashboardPeriodMode) await loadDashboardPeriod(dashboardPeriodMode, historyModeDate || latestUnified.reportDate, false);
+    else await syncUnifiedSelection(latestUnified.reportDate, latestUnified.snapshotId, false);
+  } else if (latestUnified?.reportDate && !historyModeDate) {
+    historyModeDate = latestUnified.reportDate;
+  } else if (!latestUnified) {
+    historyModeDate = '';
+  }
+  renderAll();
+  if (currentPage === 'tracking') loadTrackingWorkspace();
 }
 
 function runSingleFlight(key, task) {
@@ -515,7 +487,7 @@ async function hydratePageData(page) {
         || (selectedDate && businessStates[type]?.reportDate !== selectedDate)
         || (expectedSnapshotId && businessStates[type]?.snapshotId !== expectedSnapshotId)) {
         const suffix = unifiedRow?.snapshotId ? `?snapshotId=${encodeURIComponent(unifiedRow.snapshotId)}` : '';
-        const result = await api(`/api/business-state/${type}${suffix ? `${suffix}&compact=1` : `?compact=1`}`);
+        const result = await api(`/api/business-state/${type}${suffix}`);
         businessStates[type] = result.state || {};
         renderAll();
       }
@@ -535,47 +507,26 @@ async function syncUnifiedSelection(reportDate, snapshotId, shouldRender = true)
   const normalizedSnapshotId = String(snapshotId || '').trim();
   if (!normalizedDate || !normalizedSnapshotId) return false;
   const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
-
-  // V21: one lightweight request replaces five sequential business-state requests.
-  try {
-    const result = await api(`/api/dashboard/bootstrap?scope=ALL&snapshotId=${encodeURIComponent(normalizedSnapshotId)}`);
-    Object.assign(businessStates, result.states || {});
-    const ccslTypes = types.slice(0, 3);
-    const shopeeTypes = types.slice(3);
-    if (ccslTypes.every(type => businessStates[type])) {
-      appState = aggregateBusinessStates(ccslTypes.map(type => businessStates[type]), 'CCSL', normalizedDate, normalizedSnapshotId);
-    }
-    if (shopeeTypes.every(type => businessStates[type])) {
-      shopeeState = aggregateBusinessStates(shopeeTypes.map(type => businessStates[type]), 'SHOPEE', normalizedDate, normalizedSnapshotId);
-    }
-    historyModeDate = normalizedDate;
-    window.__cePartialLoadFailures = [];
-    if (shouldRender) renderAll();
-    return true;
-  } catch (error) {
-    console.warn('[V21 unified bootstrap] 合并快照读取失败，使用双并发兼容模式。', error);
-    const backendHealthy = await rawHealthProbe();
-    if (!backendHealthy) throw error;
-  }
-
   const loadedTypes = new Set();
   const failures = [];
-  let cursor = 0;
-  const worker = async () => {
-    while (cursor < types.length) {
-      const index = cursor++;
-      const type = types[index];
-      try {
-        const result = await api(`/api/business-state/${type}?snapshotId=${encodeURIComponent(normalizedSnapshotId)}&compact=1`);
-        businessStates[type] = result.state || {};
-        loadedTypes.add(type);
-      } catch (error) {
-        failures.push({ type, error });
-        console.warn(`[snapshot] ${type}读取失败`, error);
+
+  // Do not request five business snapshots concurrently. These can be large and were
+  // previously requested immediately after the first startup batch, creating another
+  // burst that could be misreported as a total backend outage.
+  for (const type of types) {
+    try {
+      const result = await api(`/api/business-state/${type}?snapshotId=${encodeURIComponent(normalizedSnapshotId)}`);
+      businessStates[type] = result.state || {};
+      loadedTypes.add(type);
+    } catch (error) {
+      failures.push({ type, error });
+      console.warn(`[snapshot] ${type}读取失败`, error);
+      if (error?.code === 'NETWORK_CONNECTION_INTERRUPTED') {
+        const backendHealthy = await rawHealthProbe();
+        if (!backendHealthy) throw error;
       }
     }
-  };
-  await Promise.all([worker(), worker()]);
+  }
 
   const ccslTypes = types.slice(0, 3);
   const shopeeTypes = types.slice(3);
@@ -585,7 +536,12 @@ async function syncUnifiedSelection(reportDate, snapshotId, shouldRender = true)
   if (shopeeTypes.every(type => loadedTypes.has(type))) {
     shopeeState = aggregateBusinessStates(shopeeTypes.map(type => businessStates[type]), 'SHOPEE', normalizedDate, normalizedSnapshotId);
   }
-  window.__cePartialLoadFailures = failures.map(item => ({ type: item.type, message: item.error?.message || '读取失败' }));
+
+  if (failures.length) {
+    window.__cePartialLoadFailures = failures.map(item => ({ type: item.type, message: item.error?.message || '读取失败' }));
+  } else {
+    window.__cePartialLoadFailures = [];
+  }
   historyModeDate = normalizedDate;
   if (shouldRender) renderAll();
   return failures.length === 0;
