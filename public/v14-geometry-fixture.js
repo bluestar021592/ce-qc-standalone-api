@@ -147,3 +147,12 @@ if (new URLSearchParams(location.search).has('visualTest')) {
   window.addEventListener('online', startBackendRecovery);
   window.__CE_QC_START_BACKEND_RECOVERY__ = startBackendRecovery;
 })();
+
+// V27 is a runtime-only interaction/performance layer. Loading it here preserves
+// the locked V18 HTML/CSS geometry while fixing lazy details, trends and carryover.
+if (!new URLSearchParams(location.search).has('visualTest')) {
+  const script = document.createElement('script');
+  script.src = '/v27-dashboard-fix.js?v=20260808-v27-1';
+  script.async = false;
+  document.head.appendChild(script);
+}
