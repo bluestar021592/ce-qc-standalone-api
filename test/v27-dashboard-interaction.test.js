@@ -45,7 +45,15 @@ test('V27 carry business filter cannot create a DOM mutation loop and caps first
   assert.match(carryClient,/searchParams\.set\('limit','50'\)/);
   assert.match(carryServer,/Math\.min\(100/);
   assert.match(carryServer,/json_valid/);
+  assert.match(carryServer,/extracts\.length === 1/);
   assert.match(carryServer,/Server-Timing/);
+});
+
+test('V18 trend renderer tolerates series without tooltip numerator metadata', () => {
+  const chart=fs.readFileSync('public/dashboard-chart-v18.js','utf8');
+  assert.match(chart,/numerators:\s*Array\.isArray\(series\?\.numerators\)/);
+  assert.match(chart,/denominators:\s*Array\.isArray\(series\?\.denominators\)/);
+  assert.match(chart,/dates:\s*Array\.isArray\(chart\?\.dates\)/);
 });
 
 test('V27 does not replace locked V18 dashboard HTML/CSS files', () => {
