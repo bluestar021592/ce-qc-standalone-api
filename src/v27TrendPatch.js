@@ -14,6 +14,31 @@ function lastSeven(items=[]) { return items.slice(-7); }
 function ratio(n,d){ return d?Number((Number(n||0)*100/Number(d)).toFixed(2)):0; }
 function metric(summary,key){ return Number(summary?.metrics?.[key] ?? 0); }
 
+function resolveTrendWindow(fromDate,toDate) {
+  const db=getDb();
+  const singleDay=fromDate===toDate;
+  const rows=singleDay
+    ? db.prepare(`
+        SELECT DISTINCT b.reportDate
+        FROM unified_import_batches b
+        INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId AND s.status='COMPLETED'
+        WHERE b.status='VALID' AND b.reportDate<=?
+        ORDER BY b.reportDate DESC
+        LIMIT 7
+      `).all(toDate)
+    : db.prepare(`
+        SELECT DISTINCT b.reportDate
+        FROM unified_import_batches b
+        INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId AND s.status='COMPLETED'
+        WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
+        ORDER BY b.reportDate DESC
+        LIMIT 7
+      `).all(fromDate,toDate);
+  const dates=rows.map(row=>String(row.reportDate||'')).filter(Boolean).sort();
+  if(!dates.length) return {from:fromDate,to:toDate,dates:[]};
+  return {from:dates[0],to:dates.at(-1),dates};
+}
+
 function attemptRows(fromDate,toDate) {
   const rows=getDb().prepare(`
     WITH latest AS (
@@ -83,15 +108,26 @@ function handler(req,res){
   try{
     const type=String(req.query.businessType||'CCSL').toUpperCase();
     if(!TYPES.has(type)) return res.status(400).json({ok:false,error:'业务板块无效'});
-    const to=validDate(req.query.to); const from=validDate(req.query.from)||to;
-    if(!from||!to||from>to) return res.status(400).json({ok:false,error:'日期范围无效'});
-    const result=loadRangeDashboard(from,to);
+    const requestedTo=validDate(req.query.to); const requestedFrom=validDate(req.query.from)||requestedTo;
+    if(!requestedFrom||!requestedTo||requestedFrom>requestedTo) return res.status(400).json({ok:false,error:'日期范围无效'});
+    const trendWindow=resolveTrendWindow(requestedFrom,requestedTo);
+    const result=loadRangeDashboard(trendWindow.from,trendWindow.to);
     const state=type==='CCSL'?result.aggregates.CCSL:type==='SHOPEE'?result.aggregates.SHOPEE:result.states[type];
-    const attempts=type.startsWith('SHOPEE')?attemptRows(from,to):[];
+    const attempts=type.startsWith('SHOPEE')?attemptRows(trendWindow.from,trendWindow.to):[];
+    const payload=trendPayload(type,state,attempts);
     res.setHeader('Cache-Control','private, max-age=30, stale-while-revalidate=120');
-    res.json({ok:true,businessType:type,fromDate:from,toDate:to,...trendPayload(type,state,attempts)});
+    res.json({
+      ok:true,
+      businessType:type,
+      requestedFromDate:requestedFrom,
+      requestedToDate:requestedTo,
+      fromDate:trendWindow.from,
+      toDate:trendWindow.to,
+      trendWindowDates:trendWindow.dates,
+      ...payload
+    });
   }catch(error){
-    console.error('[V27][TRENDS]',error);
+    console.error('[V28][TRENDS]',error);
     res.status(500).json({ok:false,error:error.message||String(error)});
   }
 }
