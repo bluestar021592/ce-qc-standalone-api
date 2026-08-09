@@ -78,6 +78,7 @@ try {
   await import('./src/v29BusinessRulesPatch.js');
   await import('./src/v29EndpointAliasPatch.js');
   await import('./src/v30CarryRulesPatch.js');
+  await import('./src/v33RunProgressPatch.js');
   await import('./server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);

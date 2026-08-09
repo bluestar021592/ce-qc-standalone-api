@@ -11,8 +11,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Parse PowerShell launcher scripts
-        shell: pwsh
+      - name: Parse launcher scripts with Windows PowerShell 5.1
+        shell: powershell
         run: |
           $files = @('tools/CE_QC_Start.ps1','tools/Install_CE_QC_Desktop_Shortcut.ps1')
           foreach ($file in $files) {
@@ -23,13 +23,21 @@ jobs:
               $errors | Format-List | Out-String | Write-Error
               exit 1
             }
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $file))
+            if (@($bytes | Where-Object { $_ -gt 127 }).Count -gt 0) {
+              throw "$file must remain ASCII-only for Windows PowerShell 5.1 compatibility"
+            }
           }
       - name: Verify stable launcher files
-        shell: pwsh
+        shell: powershell
         run: |
           if (-not (Test-Path 'CE_QC_Start.bat')) { throw 'CE_QC_Start.bat missing' }
           if (-not (Test-Path 'Install_CE_QC_Desktop_Shortcut.bat')) { throw 'shortcut installer missing' }
           $text = Get-Content 'tools/CE_QC_Start.ps1' -Raw
-          foreach ($required in @('fetch','origin','main','reset','--hard','origin/main','node_modules','bootstrap.js','5177')) {
+          foreach ($required in @('fetch','origin','main','reset','--hard','origin/main','node_modules','bootstrap.js','5177','ListenerPid')) {
             if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
+          }
+          $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
+          foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.bat')) {
+            if (-not $installer.Contains($required)) { throw "installer missing Unicode-safe shortcut token: $required" }
           }

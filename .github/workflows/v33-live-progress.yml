@@ -1,0 +1,34 @@
+name: CE QC V33 live run progress
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  live-progress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Syntax checks
+        run: |
+          node --check src/v33RunProgressPatch.js
+          node --check public/v33-live-run-progress.js
+          node --check public/v29-data-consistency-fix.js
+          node --check public/v29-data-consistency-core.js
+          node --check test/v33-run-progress.test.js
+      - name: Verify runtime loader
+        run: |
+          grep -q 'v29-data-consistency-core.js' public/v29-data-consistency-fix.js
+          grep -q 'v33-live-run-progress.js' public/v29-data-consistency-fix.js
+          grep -q '__V29_DATA_CONSISTENCY_FIX__' public/v29-data-consistency-core.js
+          grep -q '/api/v33/run-progress' public/v33-live-run-progress.js
+      - name: Run V33 progress regression
+        run: node --test test/v33-run-progress.test.js

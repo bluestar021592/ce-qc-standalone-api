@@ -74,7 +74,9 @@ test('V29 carry monitor heals terminal normal states and publishes only business
 
 test('V27/V29 client uses lazy details and exposes carryover + SHOPEE attempt interaction', () => {
   const client=fs.readFileSync('public/v27-dashboard-fix.js','utf8');
-  const v29=fs.readFileSync('public/v29-data-consistency-fix.js','utf8');
+  const v29Loader=fs.readFileSync('public/v29-data-consistency-fix.js','utf8');
+  const v29Core=fs.existsSync('public/v29-data-consistency-core.js') ? fs.readFileSync('public/v29-data-consistency-core.js','utf8') : v29Loader;
+  const v29=`${v29Loader}\n${v29Core}`;
   const loader=fs.readFileSync('public/v14-geometry-fixture.js','utf8');
   assert.match(loader,/v27-dashboard-fix\.js/);
   assert.match(loader,/v29-data-consistency-fix\.js/);
