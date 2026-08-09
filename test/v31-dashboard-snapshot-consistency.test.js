@@ -48,12 +48,15 @@ function insertFixture() {
     insertShopee.run(code,date,0,'Pending2次',JSON.stringify({ Pending次数:2, Pending当前次数:2, Pending连续性:'连续', currentState:'PENDING' }),oldAt,oldAt);
   }
 
-  // Latest snapshot: exactly two CE and two SHOPEEVN parcels.
+  // Latest snapshot: two CE, one CEAF and two SHOPEEVN parcels.
   insertImport.run('batch-new','snapshot-new',date,'CE','CE-NEW-PENDING','PV','{}',newAt);
   insertCcsl.run('CE-NEW-PENDING',date,0,'Pending2次',2,0,0,JSON.stringify({ Pending次数:2, Pending连续性:'连续', currentState:'PENDING' }),newAt,newAt);
 
   insertImport.run('batch-new','snapshot-new',date,'CE','CE-NEW-RETURN','PV','{}',newAt);
   insertCcsl.run('CE-NEW-RETURN',date,0,'退回',0,0,0,JSON.stringify({ 退回状态:'已退回', currentState:'RETURN_COMPLETED' }),newAt,newAt);
+
+  insertImport.run('batch-new','snapshot-new',date,'CEAF','AIR-NEW-PENDING','PP','{}',newAt);
+  insertCcsl.run('AIR-NEW-PENDING',date,0,'Pending2次',2,0,0,JSON.stringify({ Pending次数:2, Pending连续性:'连续', currentState:'PENDING' }),newAt,newAt);
 
   insertImport.run('batch-new','snapshot-new',date,'SHOPEEVN','VN-NEW-PENDING','PV','{}',newAt);
   insertShopee.run('VN-NEW-PENDING',date,0,'Pending2次',JSON.stringify({ Pending次数:2, Pending当前次数:2, Pending连续性:'连续', currentState:'PENDING', pvOpenDisposition:'PV_OTHER_PROGRESS' }),newAt,newAt);
@@ -62,7 +65,7 @@ function insertFixture() {
   insertShopee.run('VN-NEW-RETURN',date,0,'退回',JSON.stringify({ 退回状态:'已退回', currentState:'RETURN_COMPLETED' }),newAt,newAt);
 }
 
-test('V31 dashboard counts only latest VALID+COMPLETED snapshot per report date', () => {
+test('V31 dashboard counts latest snapshot and exposes CEAF as an independent CCSL board', () => {
   insertFixture();
   const result = loadRangeDashboard(date,date);
 
@@ -79,13 +82,19 @@ test('V31 dashboard counts only latest VALID+COMPLETED snapshot per report date'
   assert.equal(cePending2?.数值原值, 1);
   assert.equal(ceProvinceOpen?.数值原值, 1, 'PV returned parcel must not remain province-open');
 
+  const ceaf = result.states.CEAF;
+  assert.ok(ceaf, 'CEAF must have an independent range-dashboard state');
+  assert.equal(ceaf.dashboard.pnh, 1);
+  const ceafPending2 = ceaf.detailTabs.dashboard.rows.find(row => row.项目 === 'Pending2+');
+  assert.equal(ceafPending2?.数值原值, 1, 'CEAF uses the same CCSL/CE metric logic');
+
   const vn = result.states.SHOPEEVN.dashboard.metrics;
   assert.equal(vn.total, 2, 'old SHOPEEVN snapshot rows must not be double-counted');
   assert.equal(vn.pending2, 1);
   assert.equal(vn.returned, 1);
   assert.equal(vn.unresolved, 1, 'returned parcel is normal closure, not unresolved anomaly');
 
-  assert.equal(result.aggregates.CCSL.dashboard.pnh, 2);
+  assert.equal(result.aggregates.CCSL.dashboard.pnh, 3, 'CCSL aggregate includes CE + CEAF');
   assert.equal(result.aggregates.SHOPEE.dashboard.metrics.total, 2);
 });
 
