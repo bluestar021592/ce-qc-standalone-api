@@ -5,16 +5,16 @@ import { runQcPipeline } from '../src/pipeline.js';
 import { buildShopeeDashboard } from '../src/shopeeReporting.js';
 import { analyzeShipment } from '../src/analyzer.js';
 
-test('V11 terminal scan mapping distinguishes POD, completed return and return in progress', () => {
+test('V11 scan mapping follows locked confirm-query orderStatus only', () => {
   assert.deepEqual(classifyScanTerminal({ shipmentCode: 'A', orderStatus: 85 }).currentState, 'POD');
-  assert.deepEqual(classifyScanTerminal({ shipmentCode: 'B', statusCode: 'P4008' }).currentState, 'RETURN_COMPLETED');
-  assert.deepEqual(classifyScanTerminal({ shipmentCode: 'C', statusCode: 'P4007' }).currentState, 'RETURN_IN_PROGRESS');
-  assert.equal(classifyScanTerminal({ shipmentCode: 'B', statusCode: 'P4008' }).trackRequired, false);
-  assert.equal(classifyScanTerminal({ shipmentCode: 'C', statusCode: 'P4007' }).trackRequired, true);
+  assert.deepEqual(classifyScanTerminal({ shipmentCode: 'B', orderStatus: 100 }).currentState, 'RETURN_COMPLETED');
+  assert.deepEqual(classifyScanTerminal({ shipmentCode: 'C', orderStatus: 70, statusCode: 'P4007' }).currentState, 'OPEN_TRACK_REQUIRED');
+  assert.equal(classifyScanTerminal({ shipmentCode: 'B', orderStatus: 100 }).trackRequired, false);
+  assert.equal(classifyScanTerminal({ shipmentCode: 'C', orderStatus: 70, statusCode: 'P4007' }).trackRequired, true);
 });
 
-test('V11 POD and completed return make zero track calls while PR still tracks', async () => {
-  const bills = ['POD001', 'RET001', 'PR001'];
+test('V11 scan 85/100 make zero track calls while 50/60/70 still track', async () => {
+  const bills = ['POD001', 'RET001', 'OPEN001'];
   const tracked = [];
   const state = {
     businessType: 'SHOPEE', reportDate: '2026-08-04', pnhBills: bills,
@@ -24,16 +24,16 @@ test('V11 POD and completed return make zero track calls while PR still tracks',
   await runQcPipeline({ state, client: {
     confirmQuery: async () => [
       { shipmentCode: 'POD001', orderStatus: 85 },
-      { shipmentCode: 'RET001', statusCode: 'P4008' },
-      { shipmentCode: 'PR001', statusCode: 'P4007' }
+      { shipmentCode: 'RET001', orderStatus: 100 },
+      { shipmentCode: 'OPEN001', orderStatus: 70, statusCode: 'P4007', statusText: '退回中' }
     ],
     trackQuery: async codes => { tracked.push(...codes); return []; },
     exceptionQuery: async () => []
   }});
-  assert.deepEqual(tracked, ['PR001']);
+  assert.deepEqual(tracked, ['OPEN001']);
   assert.equal(state.needTrackBills.includes('POD001'), false);
   assert.equal(state.needTrackBills.includes('RET001'), false);
-  assert.equal(state.needTrackBills.includes('PR001'), true);
+  assert.equal(state.needTrackBills.includes('OPEN001'), true);
   assert.notEqual(state.finalRows.find(row => row.运单号 === 'POD001')?.入库无扫描节点, '是');
   assert.equal(state.finalRows.find(row => row.运单号 === 'RET001')?.入库无扫描节点, '否');
 });

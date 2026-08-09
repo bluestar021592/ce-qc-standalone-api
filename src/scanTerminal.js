@@ -1,31 +1,58 @@
-const POD_TEXT = /\bPOD\b|delivered|delivery successfully|已签收|签收成功|已妥投/i;
-const RETURN_COMPLETED_TEXT = /\bP4008\b|return successfully|returned|已退回|退回完成|退回签收/i;
-const RETURN_PROGRESS_TEXT = /\bP4007\b|\bPR\b|start to return|being returned|开始退回|退回中|退件中/i;
+const TRACK_REQUIRED_ORDER_STATUSES = new Set(['50', '60', '70']);
 
+/**
+ * Scan-layer classifier for otwms-order-confirm-query.
+ *
+ * IMPORTANT BUSINESS RULE:
+ * The scan API and the tracking-event API are two independent status layers.
+ * This function may ONLY use confirm-query `orderStatus` to decide whether a
+ * shipment is terminal or must continue to trajectory lookup.
+ *
+ * Locked mapping:
+ *   50  已入库   -> trajectory required
+ *   60  派件分配 -> trajectory required
+ *   70  派送中   -> trajectory required
+ *   85  已签收   -> POD terminal, no trajectory
+ *   100 已退回   -> return terminal, no trajectory
+ *
+ * Tracking event codes such as 26/30/32/99/150/80/84/86 must never be
+ * interpreted here.
+ */
 export function classifyScanTerminal(row = {}, requestStatus = 'success') {
-  if (requestStatus !== 'success') return result('SCAN_PENDING_RETRY', false, '', 'SCAN_API_FAILED');
-  if (!shipmentCodeOf(row)) return result('SCAN_PENDING_RETRY', false, '', 'SCAN_EMPTY_RESPONSE');
+  if (requestStatus !== 'success') {
+    return result('SCAN_PENDING_RETRY', false, '', 'SCAN_API_FAILED');
+  }
+  if (!shipmentCodeOf(row)) {
+    return result('SCAN_PENDING_RETRY', false, '', 'SCAN_EMPTY_RESPONSE');
+  }
 
-  const orderStatus = String(row.orderStatus ?? '').trim().toUpperCase();
-  const statusCode = String(row.shipmentStatus ?? row.statusCode ?? row.status ?? row.dailyStatus ?? '').trim().toUpperCase();
-  const text = [row.statusText, row.statusName, row.statusDesc, row.shipmentStatusDesc, row.trackingStatus, row.scanCategory, row.扫描分类]
-    .map(value => String(value || '').trim()).filter(Boolean).join(' ');
+  const orderStatus = String(row.orderStatus ?? '').trim();
 
   if (orderStatus === '85') {
     return result('POD', false, 'POD_COMPLETED', 'ORDER_STATUS_85');
   }
-  if (statusCode === 'PR' || statusCode === 'P4007' || RETURN_PROGRESS_TEXT.test(text)) {
-    return result('RETURN_IN_PROGRESS', true, '', `STATUS_${statusCode || 'TEXT'}`);
+  if (orderStatus === '100') {
+    return result('RETURN_COMPLETED', false, 'RETURN_COMPLETED', 'ORDER_STATUS_100');
   }
-  if (['81', '100'].includes(orderStatus) || ['R', 'P4008', '81', '100'].includes(statusCode) || RETURN_COMPLETED_TEXT.test(text)) {
-    return result('RETURN_COMPLETED', false, 'RETURN_COMPLETED', `STATUS_${statusCode || orderStatus || 'TEXT'}`);
+  if (TRACK_REQUIRED_ORDER_STATUSES.has(orderStatus)) {
+    return result('OPEN_TRACK_REQUIRED', true, '', `ORDER_STATUS_${orderStatus}`);
   }
-  if (POD_TEXT.test(text)) return result('POD', false, 'POD_COMPLETED', 'STATUS_TEXT');
-  return result('OPEN_TRACK_REQUIRED', true, '', statusCode ? `NON_TERMINAL_${statusCode}` : 'NON_TERMINAL_UNKNOWN');
+
+  // A successful but currently unknown scan status is intentionally sent to
+  // trajectory lookup instead of being guessed from status text/statusCode.
+  // This prevents false POD/return closure when tracking-layer codes or labels
+  // happen to be present in the confirm-query payload.
+  return result('OPEN_TRACK_REQUIRED', true, '', orderStatus ? `ORDER_STATUS_UNKNOWN_${orderStatus}` : 'ORDER_STATUS_UNKNOWN');
 }
 
 function result(currentState, trackRequired, scanTerminalType, scanTerminalReason) {
-  return { currentState, trackRequired, scanTerminalType, scanTerminalReason, trackSkippedReason: trackRequired ? '' : scanTerminalReason };
+  return {
+    currentState,
+    trackRequired,
+    scanTerminalType,
+    scanTerminalReason,
+    trackSkippedReason: trackRequired ? '' : scanTerminalReason
+  };
 }
 
 function shipmentCodeOf(row = {}) {

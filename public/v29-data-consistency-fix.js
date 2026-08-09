@@ -1,4 +1,4 @@
-(function installV29DataConsistencyFix(global){
+(function installV30DataConsistencyFix(global){
   if(new URLSearchParams(location.search).has('visualTest'))return;
   let detailContext=null;
 
@@ -20,21 +20,54 @@
     let date='';try{date=historyModeDate||unifiedImportState?.reportDate||appState?.reportDate||shopeeState?.reportDate||'';}catch{}
     return{from:date,to:date};
   }
+  function currentSnapshotId(){
+    try{
+      return String(
+        unifiedImportState?.snapshotId||unifiedImportState?.currentSnapshotId||
+        appState?.snapshotId||appState?.currentSnapshotId||
+        shopeeState?.snapshotId||shopeeState?.currentSnapshotId||''
+      ).trim();
+    }catch{return '';}
+  }
   function tabFor(label,metricKey,type){
-    const map={
-      'Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','Pending不连续':'pendingNonContinuous',
-      'OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','签收件数':'podClosed','今日POD':'podClosed','POD率':'podClosed',
-      '已退回件':'returned','退回件':'returned','退回率':'returned','当前未闭环':'unresolved','未闭环':'unresolved',
-      '入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单未处理':'workOrder','工单':'workOrder',
-      '严重异常':'severe','盘点2天+':'cycle2','外省未完结POD件':'provinceOpen','门店滞留':'shopStuck','门店途中':'shopTransit','门店入库':'shopArrived',
-      'CECN滞留包裹':'cecnRetention','CEZT滞留包裹':'ceztRetention','580滞留包裹':'retention580','派送中':'deliveryStay',
-      '外省派送中':'pvDelivery','外省门店滞留':'pvStoreRetention','外省门店入库无节点':'pvStoreInboundNoScan','外省其他未闭环':'pvOtherUnresolved'
+    const shopee=String(type||'').startsWith('SHOPEE');
+    const text=String(label||'').trim();
+    const key=String(metricKey||'').trim();
+    const ccsl={
+      'Pending1+':'pending1','Pending2+':'pending2plus','Pending3+':'pending3','Pending不连续':'pendingNonContinuous',
+      'OC1+':'oc1','OC2+':'oc2plus','OC3+':'oc3','签收件数':'podClosed','今日POD':'podClosed','POD率':'podClosed',
+      '已退回件':'accountingReturned','退回件':'accountingReturned','退回率':'accountingReturned','当前未闭环':'accountingOpen','未闭环':'accountingOpen',
+      '入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单未处理':'workOrderAbnormal','工单':'workOrderAbnormal',
+      '严重异常':'severeAbnormal','盘点2天+':'cycle2','外省未完结POD件':'provinceOpen','门店滞留':'shopStuck','门店途中':'shopTransit','门店入库':'shopArrived',
+      'CECN滞留包裹':'cecnRetention','CEZT滞留包裹':'ceztRetention','580滞留包裹':'ccsl580Retention','派送中':'deliveryAll'
     };
-    if(map[label])return map[label];
-    const key=String(metricKey||'');
-    const known=['pending1','pending2','pending3','pendingNonContinuous','oc1','oc2','oc3','cycle2','inboundNoScan','workOrder','returned','unresolved','deliveryStay','pvDelivery','pvStoreRetention','pvStoreInboundNoScan','pvOtherUnresolved','provinceOpen','cecnRetention','ceztRetention','retention580','shopTransit','shopArrived','shopStuck','podClosed'];
-    const hit=known.find(name=>key===name||key.endsWith(`-${name}`)||key.toLowerCase().includes(name.toLowerCase()));
-    return hit||(String(type).startsWith('SHOPEE')?'all':'allData');
+    const shop={
+      'Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','Pending不连续':'pendingNonContinuous',
+      'OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','签收件数':'pod','今日POD':'pod','POD率':'pod',
+      '已退回件':'returned','退回件':'returned','退回率':'returned','当前未闭环':'unresolved','未闭环':'unresolved',
+      '入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','盘点2天+':'cycle2','外省未完结POD件':'provinceOpen',
+      '派送中':'deliveryStay','外省派送中':'pvDelivery','外省门店滞留':'pvStoreRetention','外省门店入库无节点':'pvStoreInboundNoScan','外省其他未闭环':'pvOtherUnresolved'
+    };
+    const direct=(shopee?shop:ccsl)[text];
+    if(direct)return direct;
+
+    const aliases=shopee?{
+      pending1:'pending1',pending2:'pending2',pending2plus:'pending2',pending3:'pending3',pendingNonContinuous:'pendingNonContinuous',
+      oc1:'oc1',oc2:'oc2',oc2plus:'oc2',oc3:'oc3',cycle2:'cycle2',inboundNoScan:'inboundNoScan',returned:'returned',
+      unresolved:'unresolved',deliveryStay:'deliveryStay',pvDelivery:'pvDelivery',pvStoreRetention:'pvStoreRetention',
+      pvStoreInboundNoScan:'pvStoreInboundNoScan',pvOtherUnresolved:'pvOtherUnresolved',provinceOpen:'provinceOpen',podClosed:'pod',pod:'pod'
+    }:{
+      pending1:'pending1',pending2:'pending2plus',pending2plus:'pending2plus',pending3:'pending3',pendingNonContinuous:'pendingNonContinuous',
+      oc1:'oc1',oc2:'oc2plus',oc2plus:'oc2plus',oc3:'oc3',cycle2:'cycle2',inboundNoScan:'inboundNoScan',
+      workOrder:'workOrderAbnormal',workOrderAbnormal:'workOrderAbnormal',returned:'accountingReturned',accountingReturned:'accountingReturned',
+      unresolved:'accountingOpen',accountingOpen:'accountingOpen',severe:'severeAbnormal',severeAbnormal:'severeAbnormal',provinceOpen:'provinceOpen',
+      cecnRetention:'cecnRetention',ceztRetention:'ceztRetention',retention580:'ccsl580Retention',ccsl580Retention:'ccsl580Retention',
+      shopTransit:'shopTransit',shopArrived:'shopArrived',shopStuck:'shopStuck',deliveryStay:'deliveryAll',deliveryAll:'deliveryAll',podClosed:'podClosed'
+    };
+    for(const [needle,target] of Object.entries(aliases)){
+      if(key===needle||key.endsWith(`-${needle}`)||key.toLowerCase().includes(needle.toLowerCase()))return target;
+    }
+    return shopee?'all':'allData';
   }
   function panelFor(type){
     if(String(currentPage)==='home'){
@@ -58,11 +91,13 @@
     panel.classList.add('v27-detail-panel');panel.innerHTML=`<div class="v27-loading"><b>正在读取 ${esc(ctx.label)} 明细…</b></div>`;panel.scrollIntoView({behavior:'smooth',block:'start'});
     const range=currentRange();const params=new URLSearchParams({businessType:ctx.businessType,from:range.from,to:range.to,tab:ctx.tab,page:String(page),pageSize:'200'});
     if(ctx.region)params.set('region',ctx.region);if(ctx.attempt)params.set('attempt',String(ctx.attempt));
+    const snapshotId=currentSnapshotId();if(snapshotId)params.set('snapshotId',snapshotId);
     try{const data=await api(`/api/v29/metric-detail?${params}`);detailContext={...ctx,page};render(panel,data,ctx.label);}catch(error){panel.innerHTML=`<div class="empty-state">明细读取失败：${esc(error.message)}</div>`;}
   }
   function open(type,metricKey,label,extra={}){const businessType=exactType(type);const tab=extra.tab||tabFor(label,metricKey,businessType);void load({businessType,tab,label:label||metricKey||'指标明细',region:extra.region||'',attempt:extra.attempt||0,panel:extra.panel||null},1);}
   global.v29DetailPage=page=>{if(detailContext)void load(detailContext,Math.max(1,page));};
   global.openV18MetricDetail=function(type,metricKey,label){open(type,metricKey,label);};
-  try{openMetricDetail=function(type,tab){const businessType=exactType(type);open(businessType,tab,tab,{tab});};}catch{}
+  try{openMetricDetail=function(type,tab){const businessType=exactType(type);open(businessType,tab,tab,{tab:tabFor(tab,tab,businessType)});};}catch{}
   global.__V29_DATA_CONSISTENCY_FIX__=true;
+  global.__V30_METRIC_TAB_MAPPING__=true;
 })(window);

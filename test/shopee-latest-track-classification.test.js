@@ -7,6 +7,7 @@ const base = {
   reportDate: '2026-08-01',
   analysisDate: '2026-08-05',
   dailyRow: { recipient_group: 'VN' },
+  scanRow: { shipmentCode: 'SPE-TRACK-001', orderStatus: 70 },
   apiStatus: { shipment: 'success', event: 'success', exception: 'success' }
 };
 
@@ -29,8 +30,8 @@ test('a later inbound node closes the previous Pending episode', () => {
   const row = analyzeShopeeShipment({
     ...base,
     events: [
-      { eventTime: '2026-08-01 09:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
-      { eventTime: '2026-08-02 09:00:00', trackingEventDescZh: 'Pending 客户改约' },
+      { eventCode: '150', eventTime: '2026-08-01 09:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
+      { eventCode: '150', eventTime: '2026-08-02 09:00:00', trackingEventDescZh: 'Pending 客户改约' },
       { eventTime: '2026-08-03 09:00:00', trackingEventDescZh: 'Inbound 货物到达网点' }
     ]
   });
@@ -40,13 +41,13 @@ test('a later inbound node closes the previous Pending episode', () => {
   assert.equal(/Pending/.test(row.primaryCategory), false);
 });
 
-test('only Pending after the latest progress node remains active', () => {
+test('only code 150 Pending after the latest progress node remains active', () => {
   const row = analyzeShopeeShipment({
     ...base,
     events: [
-      { eventTime: '2026-08-01 09:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
+      { eventCode: '150', eventTime: '2026-08-01 09:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
       { eventTime: '2026-08-02 09:00:00', trackingEventDescZh: 'Outbound 发往外省门店' },
-      { eventTime: '2026-08-04 09:00:00', trackingEventDescZh: 'Pending 客户改约' }
+      { eventCode: '150', eventTime: '2026-08-04 09:00:00', trackingEventDescZh: 'Pending 客户改约' }
     ]
   });
   assert.equal(row.Pending当前次数, 1);
@@ -75,7 +76,8 @@ test('OC remains active only when it is newer than the latest progress node', ()
       waybill: `SPE-OC-${exceptionType}`,
       reportDate: '2026-08-01',
       analysisDate: '2026-08-05',
-      events: [{ shipmentCode: `SPE-OC-${exceptionType}`, eventCode: '30', eventTime: '2026-08-04 09:00:00', trackingEventDesc: 'Inbound' }],
+      scanRow: { shipmentCode: `SPE-OC-${exceptionType}`, orderStatus: 70 },
+      events: [{ shipmentCode: `SPE-OC-${exceptionType}`, eventTime: '2026-08-04 09:00:00', trackingEventDesc: 'Inbound' }],
       exceptions: [{ shipmentCode: `SPE-OC-${exceptionType}`, exceptionType, reportTime: '2026-08-05 08:00:00' }],
       apiStatus: { shipment: 'success', event: 'success', exception: 'success' }
     });
@@ -85,12 +87,12 @@ test('OC remains active only when it is newer than the latest progress node', ()
   }
 });
 
-test('cycle count closes after a later transit action', () => {
+test('cycle count code 30/32 closes after a later transit action', () => {
   const row = analyzeShopeeShipment({
     ...base,
     events: [
-      { eventTime: '2026-08-01 09:00:00', trackingEventDescZh: '盘点' },
-      { eventTime: '2026-08-02 09:00:00', trackingEventDescZh: 'Cycle Count' },
+      { eventCode: '30', eventTime: '2026-08-01 09:00:00', trackingEventDescZh: '盘点' },
+      { eventCode: '32', eventTime: '2026-08-02 09:00:00', trackingEventDescZh: 'Cycle Count' },
       { eventTime: '2026-08-04 09:00:00', trackingEventDescZh: '货物离开网点【CE:WHJT】' }
     ]
   });
@@ -99,12 +101,12 @@ test('cycle count closes after a later transit action', () => {
   assert.equal(row.入库无扫描节点, '否');
 });
 
-test('POD and completed return are normal closed states', () => {
+test('tracking code 80 POD and code 86 completed return are normal closed states', () => {
   const pod = analyzeShopeeShipment({
     ...base,
     events: [
-      { eventTime: '2026-08-01 09:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
-      { eventTime: '2026-08-04 11:00:00', trackingEventDescZh: 'POD 已签收' }
+      { eventCode: '150', eventTime: '2026-08-01 09:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
+      { eventCode: '80', eventTime: '2026-08-04 11:00:00', trackingEventDescZh: 'POD 已签收' }
     ]
   });
   assert.equal(pod.是否POD, '是');
@@ -114,9 +116,11 @@ test('POD and completed return are normal closed states', () => {
   const returned = analyzeShopeeShipment({
     ...base,
     waybill: 'SPE-RETURN-001',
+    scanRow: { shipmentCode: 'SPE-RETURN-001', orderStatus: 70 },
     events: [
-      { eventTime: '2026-08-01 09:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
-      { eventTime: '2026-08-04 11:00:00', eventCode: '81', trackingEventDescZh: '退回完成' }
+      { eventCode: '150', eventTime: '2026-08-01 09:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
+      { eventCode: '84', eventTime: '2026-08-03 11:00:00', trackingEventDescZh: '退回处理中' },
+      { eventCode: '86', eventTime: '2026-08-04 11:00:00', trackingEventDescZh: '退回完成' }
     ]
   });
   assert.equal(returned.退回状态, '已退回');

@@ -7,15 +7,31 @@ import { analyzeShopeeShipment } from '../src/shopeeAnalyzer.js';
 import { buildDashboardData } from '../src/reporting.js';
 import { runQcPipeline } from '../src/pipeline.js';
 
-test('V12 W/Y/P remain open and require tracking while 85/P4008/P4007 keep terminal routing', () => {
-  for (const statusCode of ['W', 'Y', 'P']) {
-    const result = classifyScanTerminal({ shipmentCode: 'CCV12', statusCode }, 'success');
+test('V12 scan layer uses only confirm-query orderStatus; track-layer labels never close scan', () => {
+  for (const orderStatus of [50, 60, 70]) {
+    const result = classifyScanTerminal({
+      shipmentCode: `OPEN${orderStatus}`,
+      orderStatus,
+      statusCode: 'P4008',
+      shipmentStatus: 'Y',
+      statusText: '已退回 POD'
+    }, 'success');
     assert.equal(result.currentState, 'OPEN_TRACK_REQUIRED');
     assert.equal(result.trackRequired, true);
   }
-  assert.equal(classifyScanTerminal({ shipmentCode: 'POD85', orderStatus: 85 }, 'success').currentState, 'POD');
-  assert.equal(classifyScanTerminal({ shipmentCode: 'RET', statusCode: 'P4008' }, 'success').trackRequired, false);
-  assert.equal(classifyScanTerminal({ shipmentCode: 'PR', statusCode: 'P4007' }, 'success').trackRequired, true);
+
+  const pod = classifyScanTerminal({ shipmentCode: 'POD85', orderStatus: 85 }, 'success');
+  assert.equal(pod.currentState, 'POD');
+  assert.equal(pod.trackRequired, false);
+
+  const returned = classifyScanTerminal({ shipmentCode: 'RET100', orderStatus: 100 }, 'success');
+  assert.equal(returned.currentState, 'RETURN_COMPLETED');
+  assert.equal(returned.trackRequired, false);
+
+  const p4008 = classifyScanTerminal({ shipmentCode: 'P4008', orderStatus: 70, statusCode: 'P4008' }, 'success');
+  const p4007 = classifyScanTerminal({ shipmentCode: 'P4007', orderStatus: 70, statusCode: 'P4007' }, 'success');
+  assert.equal(p4008.trackRequired, true);
+  assert.equal(p4007.trackRequired, true);
 });
 
 test('V12 unresolved explicit work order is classified as 工单未处理', () => {
