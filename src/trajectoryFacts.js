@@ -2,8 +2,9 @@ import { normalizeEvent } from './analyzerLegacy.js';
 import { detectShopInfo, lastEffectiveEvent, parseEventNodeAction } from './shopCodes.js';
 import { classifyLatestSpecialNode } from './specialNode.js';
 import { analyzeStoreFlow } from './storeFlow.js';
+import { phnomPenhDate, summarizePendingEvents } from './pendingDays.js';
 
-export const TRAJECTORY_FACT_VERSION = '2026-08-09-latest-effective-event-v1';
+export const TRAJECTORY_FACT_VERSION = '2026-08-09-latest-effective-event-v2';
 
 export const TRACK_FACT_CODES = Object.freeze({
   INBOUND_NO_SCAN: '26',
@@ -17,8 +18,8 @@ export const TRACK_FACT_CODES = Object.freeze({
 });
 
 /**
- * Build immutable-ish facts from scan + trajectory evidence before QC business
- * rules are applied.
+ * Build facts from scan + trajectory evidence before QC business rules are
+ * applied. All natural-day facts use Asia/Phnom_Penh through pendingDays.js.
  *
  * Core invariant: trajectory CURRENT state is determined by the LAST effective
  * trajectory event only. Historical POD/return/special/store nodes remain
@@ -32,9 +33,15 @@ export function buildTrajectoryFacts({
   scanRow = {},
   events = [],
   reportDate = '',
+  analysisDate = '',
   shopCodeMap = null
 } = {}) {
-  const sortedEvents = sortTrajectoryEvents(events);
+  const cutoffDate = phnomPenhDate(analysisDate);
+  const sortedEvents = sortTrajectoryEvents(events).filter(event => {
+    if (!cutoffDate) return true;
+    const date = phnomPenhDate(eventTimeOf(event));
+    return !date || date <= cutoffDate;
+  });
   const lastEvent = lastEffectiveEvent(sortedEvents) || sortedEvents.at(-1) || null;
   const lastCode = trackingCodeOf(lastEvent);
   const latestTrackTerminal = terminalFromLatestEvent(lastEvent);
@@ -56,11 +63,20 @@ export function buildTrajectoryFacts({
     isPod,
     isReturned
   });
-  const pendingEvents = sortedEvents.filter(event => trackingCodeOf(event) === TRACK_FACT_CODES.PENDING);
-  const pendingDates = distinctEventDates(pendingEvents);
+
+  const pendingSummary = summarizePendingEvents(
+    sortedEvents,
+    event => trackingCodeOf(event) === TRACK_FACT_CODES.PENDING
+  );
+  const pendingTailEvents = currentPendingTail(sortedEvents);
+  const pendingTailSummary = summarizePendingEvents(
+    pendingTailEvents,
+    event => trackingCodeOf(event) === TRACK_FACT_CODES.PENDING
+  );
 
   return {
     factVersion: TRAJECTORY_FACT_VERSION,
+    analysisCutoffDate: cutoffDate,
     sortedEvents,
     effectiveEventCount: sortedEvents.filter(isEffectiveFactEvent).length,
     lastEvent,
@@ -81,10 +97,16 @@ export function buildTrajectoryFacts({
     latestNodeAction,
     latestShop,
     storeFlow,
-    pendingRawEventCount: pendingEvents.length,
-    pendingDates,
-    pendingDistinctDayCount: pendingDates.length,
-    pendingDateContinuity: pendingDates.length <= 1 ? true : areConsecutiveDates(pendingDates)
+    pendingRawEventCount: pendingSummary.rawEventCount,
+    pendingDates: pendingSummary.dates,
+    pendingDistinctDayCount: pendingSummary.distinctDayCount,
+    pendingDateContinuity: pendingSummary.continuous,
+    pendingContinuityLabel: pendingSummary.continuity,
+    currentPendingRawEventCount: pendingTailSummary.rawEventCount,
+    currentPendingDates: pendingTailSummary.dates,
+    currentPendingDistinctDayCount: pendingTailSummary.distinctDayCount,
+    currentPendingDateContinuity: pendingTailSummary.continuous,
+    currentPendingContinuityLabel: pendingTailSummary.continuity
   };
 }
 
@@ -119,6 +141,16 @@ export function trajectoryEventText(event = {}) {
     event.locationCode,
     event.place
   ].map(value => String(value || '').trim()).filter(Boolean).join(' ');
+}
+
+function currentPendingTail(events = []) {
+  if (!events.length || trackingCodeOf(events.at(-1)) !== TRACK_FACT_CODES.PENDING) return [];
+  const tail = [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (trackingCodeOf(events[index]) !== TRACK_FACT_CODES.PENDING) break;
+    tail.push(events[index]);
+  }
+  return tail.reverse();
 }
 
 function compareTrajectoryEvents(a = {}, b = {}) {
@@ -156,33 +188,6 @@ function isEffectiveFactEvent(event = {}) {
     || trackingCodeOf(event)
     || trajectoryEventText(event)
   ));
-}
-
-function distinctEventDates(events = []) {
-  return [...new Set((events || []).map(event => dateKey(eventTimeOf(event))).filter(Boolean))].sort();
-}
-
-function areConsecutiveDates(dates = []) {
-  return dates.every((date, index) => index === 0 || elapsedDays(dates[index - 1], date) === 1);
-}
-
-function elapsedDays(start, end) {
-  const a = dayValue(start);
-  const b = dayValue(end);
-  if (a === null || b === null) return 0;
-  return Math.floor((b - a) / 86400000);
-}
-
-function dayValue(value) {
-  const key = dateKey(value);
-  if (!key) return null;
-  const [year, month, day] = key.split('-').map(Number);
-  return Date.UTC(year, month - 1, day);
-}
-
-function dateKey(value) {
-  const match = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);
-  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
 }
 
 function emptyNodeAction() {
