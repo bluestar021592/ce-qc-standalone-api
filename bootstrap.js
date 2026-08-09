@@ -68,18 +68,26 @@ process.on('warning', warning => {
   console.warn('[CE-QC][NODE_WARNING]', warning?.stack || warning);
 });
 
+async function importPhase(label, modulePath) {
+  const startedAt = Date.now();
+  console.log(`[CE-QC][BOOT] START ${label}`);
+  await import(modulePath);
+  console.log(`[CE-QC][BOOT] DONE ${label} ${Date.now() - startedAt}ms`);
+}
+
 try {
-  await import('./src/v27ServerPatch.js');
-  await import('./src/v27TrendPatch.js');
-  await import('./src/v27CarryBusinessPatch.js');
-  await import('./src/v28ResumeGuardPatch.js');
-  await import('./src/v28RuntimePatch.js');
-  await import('./src/v29DataConsistencyPatch.js');
-  await import('./src/v29BusinessRulesPatch.js');
-  await import('./src/v29EndpointAliasPatch.js');
-  await import('./src/v30CarryRulesPatch.js');
-  await import('./src/v33RunProgressPatch.js');
-  await import('./server.js');
+  console.log(`[CE-QC][BOOT] bootstrap pid=${process.pid} node=${process.version}`);
+  await importPhase('v27ServerPatch', './src/v27ServerPatch.js');
+  await importPhase('v27TrendPatch', './src/v27TrendPatch.js');
+  await importPhase('v27CarryBusinessPatch', './src/v27CarryBusinessPatch.js');
+  await importPhase('v28ResumeGuardPatch', './src/v28ResumeGuardPatch.js');
+  await importPhase('v28RuntimePatch', './src/v28RuntimePatch.js');
+  await importPhase('v29DataConsistencyPatch', './src/v29DataConsistencyPatch.js');
+  await importPhase('v29BusinessRulesPatch', './src/v29BusinessRulesPatch.js');
+  await importPhase('v29EndpointAliasPatch', './src/v29EndpointAliasPatch.js');
+  await importPhase('v30CarryRulesPatch', './src/v30CarryRulesPatch.js');
+  await importPhase('v33RunProgressPatch', './src/v33RunProgressPatch.js');
+  await importPhase('server', './server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
   process.exitCode = 1;

@@ -152,7 +152,23 @@ function Start-BackendInstance {
     return Start-Process -FilePath $NodeExe -ArgumentList @('bootstrap.js') -WorkingDirectory $ProjectRoot -PassThru -NoNewWindow -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile
 }
 
-function Wait-BackendReady($Backend, [int]$Seconds = 60) {
+function Write-BackendInitProgress([int]$Elapsed, [int]$Total) {
+    Write-Host "[WAIT] Backend is still initializing... ${Elapsed}s / ${Total}s" -ForegroundColor Yellow
+    if (Test-Path -LiteralPath $LogFile) {
+        try {
+            $tail = @(Get-Content -LiteralPath $LogFile -Tail 4 -ErrorAction SilentlyContinue)
+            foreach ($line in $tail) { if ($line) { Write-Host "       $line" -ForegroundColor DarkGray } }
+        } catch {}
+    }
+    if (Test-Path -LiteralPath $ErrFile) {
+        try {
+            $errTail = @(Get-Content -LiteralPath $ErrFile -Tail 2 -ErrorAction SilentlyContinue)
+            foreach ($line in $errTail) { if ($line) { Write-Host "       STDERR: $line" -ForegroundColor DarkYellow } }
+        } catch {}
+    }
+}
+
+function Wait-BackendReady($Backend, [int]$Seconds = 240) {
     $status = 0
     for ($i = 1; $i -le $Seconds; $i++) {
         Start-Sleep -Seconds 1
@@ -174,6 +190,7 @@ function Wait-BackendReady($Backend, [int]$Seconds = 60) {
             Start-Sleep -Milliseconds 300
             break
         }
+        if (($i % 30) -eq 0) { Write-BackendInitProgress $i $Seconds }
     }
     return @{ Ready = $false; Status = $status }
 }
@@ -210,8 +227,9 @@ function Get-BackendExitCode($Backend) {
 
 Write-Host ''
 Write-Host 'Starting backend and waiting for the local web application...' -ForegroundColor Cyan
+Write-Host 'Large local SQLite data can require extra startup time; the launcher will wait up to 4 minutes.' -ForegroundColor DarkGray
 try { $Backend = Start-BackendInstance } catch { Fail "[ERROR] Unable to start Node.js backend: $($_.Exception.Message)" 17 }
-$Probe = Wait-BackendReady $Backend 60
+$Probe = Wait-BackendReady $Backend 240
 
 if (-not $Probe.Ready -and (Test-AddressInUseLog)) {
     Archive-BackendLogs 'address_in_use_first_attempt'
@@ -220,7 +238,7 @@ if (-not $Probe.Ready -and (Test-AddressInUseLog)) {
     Clear-CeQcPort 5177
     Start-Sleep -Seconds 1
     try { $Backend = Start-BackendInstance } catch { Fail "[ERROR] Unable to retry Node.js backend: $($_.Exception.Message)" 21 }
-    $Probe = Wait-BackendReady $Backend 60
+    $Probe = Wait-BackendReady $Backend 120
 }
 
 if (-not $Probe.Ready) {
@@ -229,7 +247,8 @@ if (-not $Probe.Ready) {
     Write-Host '[ERROR] Backend did not become reachable on 127.0.0.1:5177.' -ForegroundColor Red
     if (-not (Test-BackendProcessAlive $Backend)) { Write-Host "Node process exited early. Exit code: $(Get-BackendExitCode $Backend)" -ForegroundColor Red }
     else {
-        Write-Host 'Node process is running but the local web application is unreachable.' -ForegroundColor Red
+        Write-Host 'Node process remained alive but initialization exceeded the safe startup window.' -ForegroundColor Red
+        Write-Host 'The bootstrap phase lines below identify exactly where initialization stopped.' -ForegroundColor Yellow
         Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue
     }
     Show-RecentBackendLogs
@@ -290,7 +309,7 @@ while ($true) {
             continue
         }
 
-        $Probe = Wait-BackendReady $Backend 45
+        $Probe = Wait-BackendReady $Backend 120
         if ($Probe.Ready) {
             Write-Host ''
             Write-Host 'BACKEND RECOVERED - browser can reconnect automatically.' -ForegroundColor Green
