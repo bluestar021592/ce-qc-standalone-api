@@ -55,7 +55,7 @@ jobs:
             if (-not $text.ToLowerInvariant().Contains($legacy)) { throw "launcher does not stop legacy supervisor token: $legacy" }
           }
           $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
-          foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.ps1','EncodedCommand','.cmd','WriteAllLines')) {
+          foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.ps1','EncodedCommand','.cmd','WriteAllLines','-NoExit','test_mode')) {
             if (-not $installer.Contains($required)) { throw "installer missing desktop CMD token: $required" }
           }
           if ($installer.Contains('CreateShortcut(')) {
@@ -74,6 +74,9 @@ jobs:
           if ($launchers.Count -ne 1) { throw "expected exactly one desktop .cmd launcher, found $($launchers.Count)" }
           if ($launchers[0].Length -le 0) { throw 'desktop CMD launcher is empty' }
           if (@(Get-ChildItem -LiteralPath $tempDesktop -Filter '*.lnk').Count -ne 0) { throw 'legacy .lnk should not remain' }
+          $cmdText = Get-Content -LiteralPath $launchers[0].FullName -Raw
+          if (-not $cmdText.Contains('-NoExit')) { throw 'normal desktop launcher must keep PowerShell visible with -NoExit' }
+          if (-not $cmdText.Contains(':test_mode')) { throw 'desktop launcher must contain CI test mode path' }
 
           $env:CE_QC_LAUNCHER_TEST_MODE = '1'
           $output = & cmd.exe /d /c ('"' + $launchers[0].FullName + '"') 2>&1 | Out-String
