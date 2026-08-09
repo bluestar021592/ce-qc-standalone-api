@@ -28,23 +28,31 @@ jobs:
               throw "$file must remain ASCII-only for Windows PowerShell 5.1 compatibility"
             }
           }
-      - name: Verify stable launcher files
+      - name: Verify stable launcher files and supervisor handoff
         shell: powershell
         run: |
           if (-not (Test-Path 'CE_QC_Start.bat')) { throw 'CE_QC_Start.bat missing' }
           if (-not (Test-Path 'Install_CE_QC_Desktop_Shortcut.bat')) { throw 'shortcut installer missing' }
+          if (-not (Test-Path 'Start_CE_QC.ps1')) { throw 'protected runtime Start_CE_QC.ps1 missing' }
           $text = Get-Content 'tools/CE_QC_Start.ps1' -Raw
           foreach ($required in @(
-            'fetch','origin','main','reset','--hard','origin/main','node_modules','bootstrap.js','5177',
-            'Get-PortOwnerPids','Stop-PortOwners','taskkill.exe','/T','/F','Start-CeQcBackend','Get-NetTCPConnection','netstat -ano','elseif'
+            'fetch','origin','main','reset','--hard','origin/main','node_modules','5177',
+            'Get-PortOwnerPids','Stop-PortOwners','Stop-LegacySupervisors','Get-CimInstance','taskkill.exe','/T','/F',
+            'Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','elseif'
           )) {
             if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
           }
           if ($text -match '(?m)^\s*elif\s*\(') {
             throw 'launcher contains bash/python-style elif; PowerShell requires elseif'
           }
-          if ($text -notmatch 'launchAttempt\s*=\s*1[\s\S]*launchAttempt\s*-le\s*2') {
-            throw 'launcher must retry backend startup once after a port collision'
+          if ($text.Contains("Start-CeQcBackend") -or $text.Contains("ArgumentList @('bootstrap.js')")) {
+            throw 'desktop launcher must hand off to the protected Start_CE_QC.ps1 supervisor instead of launching Node directly'
+          }
+          if ($text -match "stash','push','-u") {
+            throw 'launcher must not stash/remove untracked local runtime or backup files'
+          }
+          foreach ($legacy in @('start_ce_qc.ps1','start_ce_qc.cmd','run_ce_qc_v18')) {
+            if (-not $text.ToLowerInvariant().Contains($legacy)) { throw "launcher does not stop legacy supervisor token: $legacy" }
           }
           $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
           foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.bat')) {
