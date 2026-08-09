@@ -55,15 +55,16 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
 }
 
-async function withTransientRetry(query, batch, onLog, retries = 1, delayMs = 800) {
+async function withTransientRetry(query, batch, onLog, retries = 1, delayMs = 800, apiName = 'CE接口') {
   let attempt = 0;
   while (true) {
     try {
       return await query(batch);
     } catch (error) {
+      if (isAuthenticationFailure(error) || error?.runStatus) throw error;
       if (!isTransientTransportError(error) || attempt >= retries) throw error;
       attempt += 1;
-      await onLog(`轨迹网络瞬断：${batch.length}票将在${delayMs}ms后自动重试 ${attempt}/${retries}，原因：${error?.message || error}`);
+      await onLog(`${apiName}网络瞬断：${batch.length}票将在${delayMs * attempt}ms后自动重试 ${attempt}/${retries}，原因：${error?.message || error}`);
       await wait(delayMs * attempt);
     }
   }
@@ -75,12 +76,18 @@ export async function queryBatchWithFallback({
   onLog = async () => {},
   onAttempt = async () => {},
   apiName = 'track',
-  fallbackSizes = [25, 10]
+  fallbackSizes = [25, 10],
+  transientRetries = 1,
+  transientDelayMs = 800
 }) {
   const original = [...batch];
   try {
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'running' }, onLog);
-    const events = await query(original);
+    // Both confirm-query and track/event endpoints occasionally reset the socket while
+    // the CE service is otherwise healthy. Retry the exact same read-only request once
+    // before shrinking the batch. This keeps successful large batches fast, but prevents
+    // a single transient reset from turning the whole run into manual retry work.
+    const events = await withTransientRetry(query, original, onLog, transientRetries, transientDelayMs, apiName);
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'success', resultCount: (events || []).length }, onLog);
     return { successes: [{ batch: original, events: events || [] }], failures: [] };
   } catch (error) {
@@ -91,7 +98,7 @@ export async function queryBatchWithFallback({
     // Splitting the same unauthorized request into 100/50/10/1 batches only floods
     // CE and can incorrectly turn every waybill into a retry item.
     if (error?.runStatus || isAuthenticationFailure(error)) throw error;
-    await onLog(`轨迹批次失败：原批次${original.length}票，原因：${error?.message || error}`);
+    await onLog(`${apiName}批次失败：原批次${original.length}票，原因：${error?.message || error}`);
     const fallbackSize = fallbackSizes.find(size => size < original.length);
     if (!fallbackSize) return { successes: [], failures: [{ batch: original, error }] };
 
@@ -105,7 +112,9 @@ export async function queryBatchWithFallback({
         onLog,
         onAttempt,
         apiName,
-        fallbackSizes: fallbackSizes.filter(size => size < fallbackSize)
+        fallbackSizes: fallbackSizes.filter(size => size < fallbackSize),
+        transientRetries,
+        transientDelayMs
       });
       successes.push(...result.successes);
       failures.push(...result.failures);
@@ -120,15 +129,18 @@ export async function queryTrackBatchWithFallback(options = {}) {
   if (typeof rawQuery !== 'function') throw new Error('track query function is required');
 
   // Track/event queries are read-only. A remote CE socket reset should not turn a
-  // whole 10-waybill child batch into a manual resume item. Retry a transient
-  // transport failure once at the same size, then progressively isolate the failed
-  // child down to 5 and finally 1 waybill. Successful siblings are never repeated.
+  // whole 10-waybill child batch into a manual resume item. Generic batching now
+  // retries transient transport failures once at each size; track additionally
+  // continues adaptive fallback below 10 down to 5 and finally 1 waybill.
   return queryBatchWithFallback({
     ...options,
+    query: rawQuery,
     onLog,
+    apiName: options.apiName || 'track-query',
+    transientRetries: Number.isFinite(Number(options.transientRetries)) ? Number(options.transientRetries) : 1,
+    transientDelayMs: Number.isFinite(Number(options.transientDelayMs)) ? Number(options.transientDelayMs) : 800,
     fallbackSizes: Array.isArray(options.fallbackSizes) && options.fallbackSizes.length
       ? options.fallbackSizes
-      : [25, 10, 5, 1],
-    query: batch => withTransientRetry(rawQuery, batch, onLog, 1, 800)
+      : [25, 10, 5, 1]
   });
 }

@@ -22,6 +22,52 @@ test('350 scan bills split after batch failure without re-querying successful ch
   assert.deepEqual(attempts.map(batch => batch.length), [350, 100, 100, 100, 50]);
 });
 
+test('confirm-query socket hang up retries same 350 batch before fallback', async () => {
+  const attempts = [];
+  const logs = [];
+  let first = true;
+  const input = bills(350);
+  const result = await queryBatchWithFallback({
+    batch: input,
+    apiName: 'otwms-order-confirm-query',
+    fallbackSizes: [100, 50, 10, 1],
+    onLog: async message => logs.push(message),
+    query: async batch => {
+      attempts.push(batch.length);
+      if (first) {
+        first = false;
+        throw new Error('confirm-query失败：socket hang up');
+      }
+      return batch.map(shipmentCode => ({ shipmentCode, orderStatus: 85 }));
+    }
+  });
+
+  assert.equal(result.failures.length, 0);
+  assert.equal(result.successes.flatMap(item => item.batch).length, 350);
+  assert.deepEqual(attempts, [350, 350]);
+  assert.ok(logs.some(message => message.includes('otwms-order-confirm-query网络瞬断')));
+});
+
+test('persistent confirm-query transport failure falls back 350 to 100 without losing successful children', async () => {
+  const input = bills(350);
+  const attempts = [];
+  const result = await queryBatchWithFallback({
+    batch: input,
+    apiName: 'otwms-order-confirm-query',
+    fallbackSizes: [100, 50, 10, 1],
+    query: async batch => {
+      attempts.push(batch.length);
+      if (batch.length > 100) throw new Error('confirm-query失败：socket hang up');
+      return batch.map(shipmentCode => ({ shipmentCode, orderStatus: 60 }));
+    }
+  });
+  assert.equal(result.failures.length, 0);
+  assert.equal(result.successes.flatMap(item => item.batch).length, 350);
+  assert.deepEqual(attempts.slice(0, 2), [350, 350]);
+  assert.ok(attempts.filter(size => size === 100).length >= 3);
+  assert.ok(attempts.includes(50));
+});
+
 test('only unrecoverable single bill remains in scan retry', async () => {
   const input = bills(101);
   const broken = input[73];
