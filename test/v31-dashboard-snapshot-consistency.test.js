@@ -65,14 +65,24 @@ function insertFixture() {
   insertShopee.run('VN-NEW-RETURN',date,0,'退回',JSON.stringify({ 退回状态:'已退回', currentState:'RETURN_COMPLETED' }),newAt,newAt);
 }
 
-test('V31 dashboard counts latest snapshot and exposes CEAF as an independent CCSL board', () => {
+test('range dashboard uses latest source import and latest completed analysis without double counting', () => {
   insertFixture();
   const result = loadRangeDashboard(date,date);
 
-  assert.equal(result.queryMode, 'SQL_LATEST_VALID_COMPLETED_PER_DATE_V31');
+  assert.equal(result.queryMode, 'SQL_SOURCE_VALID_PLUS_ANALYSIS_COMPLETED_V32');
+  assert.equal(result.sourceSelection, 'LATEST_VALID_IMPORT_PER_DATE');
   assert.equal(result.snapshotSelection, 'LATEST_VALID_COMPLETED_PER_DATE');
+  assert.deepEqual(result.sourceDates, [date]);
+  assert.deepEqual(result.analyzedDates, [date]);
+  assert.deepEqual(result.missingAnalysisDates, []);
+  assert.equal(result.sourceTotal, 5, 'latest source import contains exactly five rows');
+  assert.equal(result.analyzedTotal, 5, 'latest completed analysis contains the same five rows');
+  assert.equal(result.analysisPending, 0);
+  assert.equal(result.analysisComplete, true);
 
   const ce = result.states.CE;
+  assert.equal(ce.sourceTotal, 2);
+  assert.equal(ce.analyzedTotal, 2);
   assert.equal(ce.dashboard.pnh, 2, 'old CE snapshot rows must not be double-counted');
   assert.equal(ce.dashboard.returned, 1);
   assert.equal(ce.dashboard.abnormalCount, 1, 'normal returned parcel is excluded from abnormal count');
@@ -84,17 +94,24 @@ test('V31 dashboard counts latest snapshot and exposes CEAF as an independent CC
 
   const ceaf = result.states.CEAF;
   assert.ok(ceaf, 'CEAF must have an independent range-dashboard state');
+  assert.equal(ceaf.sourceTotal, 1);
+  assert.equal(ceaf.analyzedTotal, 1);
   assert.equal(ceaf.dashboard.pnh, 1);
   const ceafPending2 = ceaf.detailTabs.dashboard.rows.find(row => row.项目 === 'Pending2+');
   assert.equal(ceafPending2?.数值原值, 1, 'CEAF uses the same CCSL/CE metric logic');
 
-  const vn = result.states.SHOPEEVN.dashboard.metrics;
+  const vnState = result.states.SHOPEEVN;
+  const vn = vnState.dashboard.metrics;
+  assert.equal(vnState.sourceTotal, 2);
+  assert.equal(vnState.analyzedTotal, 2);
   assert.equal(vn.total, 2, 'old SHOPEEVN snapshot rows must not be double-counted');
   assert.equal(vn.pending2, 1);
   assert.equal(vn.returned, 1);
   assert.equal(vn.unresolved, 1, 'returned parcel is normal closure, not unresolved anomaly');
 
-  assert.equal(result.aggregates.CCSL.dashboard.pnh, 3, 'CCSL aggregate includes CE + CEAF');
+  assert.equal(result.aggregates.CCSL.sourceTotal, 3, 'CCSL source aggregate includes CE + CEAF');
+  assert.equal(result.aggregates.CCSL.dashboard.pnh, 3, 'CCSL analyzed aggregate includes CE + CEAF');
+  assert.equal(result.aggregates.SHOPEE.sourceTotal, 2);
   assert.equal(result.aggregates.SHOPEE.dashboard.metrics.total, 2);
 });
 

@@ -23,5 +23,6 @@ jobs:
           node --check src/rangeDashboardStoreLegacy.js
           node --check src/rangeDashboardStoreV31.js
           node --check test/v31-dashboard-snapshot-consistency.test.js
-      - name: Latest snapshot regression
-        run: node --test test/v31-dashboard-snapshot-consistency.test.js
+          node --check test/range-source-analysis-coverage.test.js
+      - name: Latest snapshot and source coverage regression
+        run: node --test test/v31-dashboard-snapshot-consistency.test.js test/range-source-analysis-coverage.test.js
