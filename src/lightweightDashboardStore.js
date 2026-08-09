@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-const BUSINESS_TYPES = Object.freeze(['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
+const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 
 /**
@@ -108,7 +108,7 @@ export function loadLightweightAggregateState(scope = 'CCSL', snapshotId = '') {
   const normalizedScope = String(scope || 'CCSL').toUpperCase();
   const types = normalizedScope === 'SHOPEE'
     ? ['SHOPEECN', 'SHOPEEVN']
-    : ['CE', 'TBKH', 'ALI1688'];
+    : ['CE', 'CEAF', 'TBKH', 'ALI1688'];
   const states = types.map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
   const active = states.filter(state => state.snapshotId);
   if (!active.length) return emptyAggregate(normalizedScope);

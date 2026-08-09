@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-const CCSL_TYPES = Object.freeze(['CE', 'TBKH', 'ALI1688']);
+const CCSL_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688']);
 const SHOPEE_TYPES = Object.freeze(['SHOPEECN', 'SHOPEEVN']);
 const ALL_TYPES = Object.freeze([...CCSL_TYPES, ...SHOPEE_TYPES]);
 
@@ -21,6 +21,7 @@ export function loadRangeDashboard(fromDate, toDate) {
 
   const states = {
     CE: buildCcslState('CE', ccslDaily.filter(row => row.businessType === 'CE'), range, dates),
+    CEAF: buildCcslState('CEAF', ccslDaily.filter(row => row.businessType === 'CEAF'), range, dates),
     TBKH: buildCcslState('TBKH', ccslDaily.filter(row => row.businessType === 'TBKH'), range, dates),
     ALI1688: buildCcslState('ALI1688', ccslDaily.filter(row => row.businessType === 'ALI1688'), range, dates),
     SHOPEECN: buildShopeeState('SHOPEECN', shopeeDaily.filter(row => row.businessType === 'SHOPEECN'), range, dates),
@@ -68,7 +69,7 @@ function queryCcslDailyLatest(fromDate, toDate) {
       FROM latest l
       INNER JOIN unified_import_rows u
         ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate
-      WHERE u.businessType IN ('CE','TBKH','ALI1688')
+      WHERE u.businessType IN ('CE','CEAF','TBKH','ALI1688')
     )
     SELECT
       v.reportDate,
