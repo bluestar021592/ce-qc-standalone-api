@@ -1,7 +1,11 @@
 import { createDatabaseBackup } from './backup.js';
-import { initializeStore, loadAppState, resetAppState, saveAppState } from './store.js';
+import { loadAppState, resetAppState, saveAppState } from './store.js';
 
-initializeStore();
+// Do not initialize or materialize persisted app_state during module import.
+// Large historical installations can contain a very large legacy valueJson;
+// reading it before Express starts listening can make the launcher believe the
+// backend is dead. loadAppState() already initializes the store lazily when a
+// request actually needs the full mutable state.
 
 export async function loadState() {
   return normalizeState(loadAppState());
