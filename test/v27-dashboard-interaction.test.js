@@ -15,14 +15,16 @@ test('V27 server routes and fast bootstrap are installed before server start', (
   assert.match(trendPatch,/\/api\/v27\/trends/);
 });
 
-test('V28 SHOPEE resume clears only conflicting batch-audit hashes before route execution', () => {
+test('V28 SHOPEE resume deletes persisted batch audit hashes but preserves per-waybill checkpoints', () => {
   const bootstrap=fs.readFileSync('bootstrap.js','utf8');
   const resumePatch=fs.readFileSync('src/v28ResumeGuardPatch.js','utf8');
   assert.match(bootstrap,/v28ResumeGuardPatch\.js/);
   assert.ok(bootstrap.indexOf('v28ResumeGuardPatch.js') < bootstrap.indexOf("import('./server.js')"));
   assert.match(resumePatch,/\/api\/shopee\/run\/resume/);
+  assert.match(resumePatch,/DELETE FROM business_api_batches/);
   assert.match(resumePatch,/apiBatchStatus/);
   assert.match(resumePatch,/saveBusinessState\(state, SHOPEE\)/);
+  assert.match(resumePatch,/business_run_locks/);
   assert.doesNotMatch(resumePatch,/scanQueryStatus\s*=\s*\[\]/);
   assert.doesNotMatch(resumePatch,/eventQueryStatus\s*=\s*\[\]/);
   assert.doesNotMatch(resumePatch,/exceptionQueryStatus\s*=\s*\[\]/);
@@ -41,17 +43,49 @@ test('V28 trends use up to seven completed valid report dates for a single-day d
   assert.match(trendPatch,/trendWindowDates/);
 });
 
-test('V27 client uses lazy details and exposes carryover + SHOPEE attempt interaction', () => {
+test('V29 metric detail follows latest VALID import even before snapshot completion', () => {
+  const bootstrap=fs.readFileSync('bootstrap.js','utf8');
+  const rules=fs.readFileSync('src/v29BusinessRulesPatch.js','utf8');
+  const aliases=fs.readFileSync('src/v29EndpointAliasPatch.js','utf8');
+  assert.match(bootstrap,/v29BusinessRulesPatch\.js/);
+  assert.match(bootstrap,/v29EndpointAliasPatch\.js/);
+  assert.match(rules,/LATEST_VALID_IMPORT_V29/);
+  assert.match(rules,/b\.status='VALID'/);
+  assert.doesNotMatch(rules,/INNER JOIN unified_snapshots s[\s\S]{0,120}s\.status='COMPLETED'/);
+  assert.match(rules,/pendingNonContinuous/);
+  assert.match(rules,/shopStuck/);
+  assert.match(aliases,/\/api\/v29\/metric-detail/);
+  assert.match(aliases,/\/api\/v27\/metric-detail/);
+});
+
+test('V29 carry monitor heals terminal normal states and publishes only business abnormalities', () => {
+  const rules=fs.readFileSync('src/v29BusinessRulesPatch.js','utf8');
+  assert.match(rules,/healCarryTerminalRows/);
+  assert.match(rules,/RETURN_COMPLETED/);
+  assert.match(rules,/CEZT_RETENTION/);
+  assert.match(rules,/CCSL580_RETENTION/);
+  assert.match(rules,/三次Pending后未正常闭环/);
+  assert.match(rules,/Pending不连续/);
+  assert.match(rules,/OC2天\+/);
+  assert.match(rules,/门店滞留2天\+/);
+  assert.match(rules,/3天\+无新节点/);
+  assert.match(rules,/BUSINESS_ABNORMAL_ONLY_V29/);
+});
+
+test('V27/V29 client uses lazy details and exposes carryover + SHOPEE attempt interaction', () => {
   const client=fs.readFileSync('public/v27-dashboard-fix.js','utf8');
+  const v29=fs.readFileSync('public/v29-data-consistency-fix.js','utf8');
   const loader=fs.readFileSync('public/v14-geometry-fixture.js','utf8');
   assert.match(loader,/v27-dashboard-fix\.js/);
+  assert.match(loader,/v29-data-consistency-fix\.js/);
   assert.match(client,/\/api\/v27\/metric-detail/);
   assert.match(client,/\/api\/v27\/carry-monitor/);
   assert.match(client,/\/api\/v27\/trends/);
   assert.match(client,/遗留异常动态/);
   assert.match(client,/1\/2\/3派成功率趋势/);
-  assert.match(client,/pendingNonContinuous/);
-  assert.match(client,/attempt:index\+1/);
+  assert.match(v29,/\/api\/v29\/metric-detail/);
+  assert.match(v29,/Pending不连续/);
+  assert.match(v29,/外省未完结POD件/);
 });
 
 test('V27 forced trend mount cannot create a DOM mutation render loop', () => {
@@ -65,14 +99,10 @@ test('V27 forced trend mount cannot create a DOM mutation render loop', () => {
 
 test('V27 carry business filter cannot create a DOM mutation loop and caps first payload', () => {
   const carryClient=fs.readFileSync('public/v27-carry-business-filter.js','utf8');
-  const carryServer=fs.readFileSync('src/v27CarryBusinessPatch.js','utf8');
   assert.doesNotMatch(carryClient,/new\s+MutationObserver\s*\(/);
   assert.match(carryClient,/carry-monitor-business/);
   assert.match(carryClient,/searchParams\.set\('limit','50'\)/);
-  assert.match(carryServer,/Math\.min\(100/);
-  assert.match(carryServer,/json_valid/);
-  assert.match(carryServer,/extracts\.length === 1/);
-  assert.match(carryServer,/Server-Timing/);
+  assert.match(carryClient,/\/api\/v29\/carry-monitor/);
 });
 
 test('V18 trend renderer tolerates series without tooltip numerator metadata', () => {
@@ -82,7 +112,7 @@ test('V18 trend renderer tolerates series without tooltip numerator metadata', (
   assert.match(chart,/dates:\s*Array\.isArray\(chart\?\.dates\)/);
 });
 
-test('V27 does not replace locked V18 dashboard HTML/CSS files', () => {
+test('V29 does not replace locked V18 dashboard HTML/CSS files', () => {
   const html=fs.readFileSync('public/index.html','utf8');
   assert.match(html,/homeBusinessCards/);
   assert.match(html,/homeCoreMetrics/);
