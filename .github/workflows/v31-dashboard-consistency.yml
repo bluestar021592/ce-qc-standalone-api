@@ -23,6 +23,7 @@ jobs:
           node --check src/rangeDashboardStoreLegacy.js
           node --check src/rangeDashboardStoreV31.js
           node --check test/v31-dashboard-snapshot-consistency.test.js
+          node --check test/v31-pending-noncontinuous-range.test.js
           node --check test/range-source-analysis-coverage.test.js
-      - name: Latest snapshot and source coverage regression
-        run: node --test test/v31-dashboard-snapshot-consistency.test.js test/range-source-analysis-coverage.test.js
+      - name: Latest snapshot, source coverage and Pending gap regression
+        run: node --test test/v31-dashboard-snapshot-consistency.test.js test/v31-pending-noncontinuous-range.test.js test/range-source-analysis-coverage.test.js
