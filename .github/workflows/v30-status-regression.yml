@@ -32,4 +32,4 @@ jobs:
           node --check public/v29-data-consistency-fix.js
       - name: Run locked scan and trajectory status tests
         run: |
-          node --test test/trajectory-facts.test.js test/v30-scan-track-code-separation.test.js test/v30-general-track-codes.test.js test/v11-terminal-isolation-return.test.js test/shopee-latest-track-classification.test.js test/v32-current-status-display.test.js
+          node --test test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/v30-scan-track-code-separation.test.js test/v30-general-track-codes.test.js test/v11-terminal-isolation-return.test.js test/shopee-latest-track-classification.test.js test/v32-current-status-display.test.js
