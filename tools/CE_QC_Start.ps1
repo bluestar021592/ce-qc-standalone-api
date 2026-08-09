@@ -23,7 +23,6 @@ function Get-PortOwnerPids([int]$Port) {
     $result += @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.OwningProcess })
   }
   catch {}
-
   if ($result.Count -eq 0) {
     try {
       $pattern = ":$Port\s+.*LISTENING\s+(\d+)\s*$"
@@ -34,116 +33,73 @@ function Get-PortOwnerPids([int]$Port) {
     }
     catch {}
   }
-
   return @($result | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
 }
 
-function Describe-Process([int]$ProcessId) {
+function Stop-ProcessTree([int]$ProcessId, [string]$Reason) {
+  if ($ProcessId -le 0 -or $ProcessId -eq $PID) { return }
+  Write-Host "Stopping $Reason PID=$ProcessId ..." -ForegroundColor DarkYellow
+  try { & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null } catch {}
+  try { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+}
+
+function Stop-LegacySupervisors([string]$ProjectRoot) {
+  $root = $ProjectRoot.ToLowerInvariant()
+  $legacyTokens = @('start_ce_qc.ps1','start_ce_qc.cmd','run_ce_qc_v18_final_v5.bat','run_ce_qc_v18')
+  $matches = @()
   try {
-    $info = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
-    if ($null -ne $info) {
-      return "PID=$ProcessId Name=$($info.Name) CommandLine=$($info.CommandLine)"
-    }
+    $matches = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+      if (-not $_.CommandLine) { return $false }
+      if ([int]$_.ProcessId -eq $PID) { return $false }
+      $cmd = ([string]$_.CommandLine).ToLowerInvariant()
+      if (-not $cmd.Contains($root)) { return $false }
+      foreach ($token in $legacyTokens) {
+        if ($cmd.Contains($token)) { return $true }
+      }
+      return $false
+    })
   }
   catch {}
-  return "PID=$ProcessId"
+
+  foreach ($process in $matches) {
+    Stop-ProcessTree ([int]$process.ProcessId) 'legacy CE QC supervisor'
+  }
+  if ($matches.Count -gt 0) { Start-Sleep -Seconds 2 }
 }
 
 function Stop-PortOwners([int]$Port) {
   for ($attempt = 1; $attempt -le 8; $attempt++) {
     $owners = @(Get-PortOwnerPids $Port)
     if ($owners.Count -eq 0) { return }
-
     foreach ($ownerPid in $owners) {
-      if ($ownerPid -eq $PID) { continue }
-      Write-Host ("Stopping port owner: " + (Describe-Process $ownerPid)) -ForegroundColor DarkYellow
-
-      try {
-        & taskkill.exe /PID $ownerPid /T /F 2>$null | Out-Null
-      }
-      catch {}
-
-      try {
-        Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
-      }
-      catch {}
+      Stop-ProcessTree $ownerPid "port $Port owner"
     }
-
     Start-Sleep -Milliseconds 650
   }
-
   $remaining = @(Get-PortOwnerPids $Port)
   if ($remaining.Count -gt 0) {
-    $details = @($remaining | ForEach-Object { Describe-Process $_ }) -join ' | '
-    throw "Port $Port is still occupied after cleanup: $details"
-  }
-}
-
-function Test-AppReady([string]$Url) {
-  try {
-    $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
-    return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
-  }
-  catch {
-    return $false
-  }
-}
-
-function Start-CeQcBackend([string]$NodePath, [string]$ProjectRoot, [string]$Url, [int]$Port) {
-  for ($launchAttempt = 1; $launchAttempt -le 2; $launchAttempt++) {
-    Stop-PortOwners $Port
-    Start-Sleep -Milliseconds 450
-
-    $backend = Start-Process -FilePath $NodePath -ArgumentList @('bootstrap.js') -WorkingDirectory $ProjectRoot -PassThru
-    $ready = $false
-
-    for ($i = 0; $i -lt 50; $i++) {
-      Start-Sleep -Milliseconds 400
-      if (Test-AppReady $Url) {
-        $ready = $true
-        break
-      }
-      if ($backend.HasExited) { break }
-    }
-
-    if ($ready) { return $backend }
-
-    if (-not $backend.HasExited) {
-      try { Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue } catch {}
-    }
-
-    if ($launchAttempt -lt 2) {
-      Write-Host 'Backend start collided with an old listener. Cleaning port and retrying once...' -ForegroundColor DarkYellow
-      Stop-PortOwners $Port
-      Start-Sleep -Milliseconds 900
-      continue
-    }
-
-    if ($backend.HasExited) {
-      throw "CE QC backend exited during startup. ExitCode=$($backend.ExitCode)"
-    }
-    throw "CE QC backend did not answer at $Url within the startup window."
+    throw "Port $Port is still occupied after cleanup: $($remaining -join ',')"
   }
 }
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+$SelfPath = $PSCommandPath
 Set-Location $ProjectRoot
 $Port = 5177
-$Url = "http://127.0.0.1:$Port/"
 $TimeStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$Updated = $false
 $DependenciesChanged = $false
+$Updated = $false
+$SelfHashBefore = ''
+if (Test-Path -LiteralPath $SelfPath) {
+  try { $SelfHashBefore = (Get-FileHash -LiteralPath $SelfPath -Algorithm SHA256).Hash } catch {}
+}
 
 Write-Section 'CE QC APP - SAFE UPDATE AND START'
 Write-Host "Project: $ProjectRoot"
 Write-Host 'Every start checks GitHub main first. Runtime data is preserved.' -ForegroundColor DarkGray
 
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-  throw 'Git is not installed or not available in PATH.'
-}
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  throw 'Node.js is not installed or not available in PATH.'
-}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git is not installed or not available in PATH.' }
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is not installed or not available in PATH.' }
 
 Write-Host ''
 Write-Host '[1/5] Checking GitHub main...' -ForegroundColor Yellow
@@ -153,21 +109,19 @@ if ($FetchCode -eq 0) {
   $RemoteHead = (& git rev-parse origin/main).Trim()
   Write-Host "Local : $LocalHead"
   Write-Host "GitHub: $RemoteHead"
-
   if ($LocalHead -ne $RemoteHead) {
     $BackupBranch = "local-backup-before-ce-qc-start-$TimeStamp"
     Run-Git @('branch',$BackupBranch,$LocalHead) | Out-Null
     Write-Host "Safety branch: $BackupBranch" -ForegroundColor DarkYellow
 
-    $Dirty = @(& git status --porcelain)
-    if ($Dirty.Count -gt 0) {
-      Run-Git @('stash','push','-u','-m',"CE-QC auto backup $TimeStamp") | Out-Null
-      Write-Host 'Local uncommitted files were stashed safely.' -ForegroundColor DarkYellow
+    $TrackedDirty = @(& git status --porcelain --untracked-files=no)
+    if ($TrackedDirty.Count -gt 0) {
+      Run-Git @('stash','push','-m',"CE-QC tracked backup $TimeStamp") | Out-Null
+      Write-Host 'Tracked local edits were stashed safely. Untracked local files were left in place.' -ForegroundColor DarkYellow
     }
 
     $DependencyDiff = @(& git diff --name-only $LocalHead $RemoteHead -- package.json package-lock.json)
     $DependenciesChanged = $DependencyDiff.Count -gt 0
-
     Run-Git @('switch','main') | Out-Null
     Run-Git @('reset','--hard','origin/main') | Out-Null
     $Updated = $true
@@ -179,6 +133,17 @@ if ($FetchCode -eq 0) {
 }
 else {
   Write-Host 'GitHub is temporarily unavailable. Starting the installed local version.' -ForegroundColor Yellow
+}
+
+if ($Updated -and $SelfHashBefore) {
+  $SelfHashAfter = ''
+  try { $SelfHashAfter = (Get-FileHash -LiteralPath $SelfPath -Algorithm SHA256).Hash } catch {}
+  if ($SelfHashAfter -and $SelfHashAfter -ne $SelfHashBefore) {
+    Write-Host ''
+    Write-Host 'Launcher itself was updated. Restarting with the new launcher now...' -ForegroundColor Yellow
+    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $SelfPath
+    exit $LASTEXITCODE
+  }
 }
 
 if ($Updated -and $DependenciesChanged) {
@@ -198,24 +163,20 @@ else {
 }
 
 Write-Host ''
-Write-Host "[3/5] Taking ownership of local port $Port..." -ForegroundColor Yellow
+Write-Host '[3/5] Stopping old CE QC runtime and taking port 5177...' -ForegroundColor Yellow
+Stop-LegacySupervisors $ProjectRoot
 Stop-PortOwners $Port
-Write-Host "Port $Port is free." -ForegroundColor Green
+Write-Host 'Old CE QC runtime stopped. Port 5177 is free.' -ForegroundColor Green
+
+$RuntimeScript = Join-Path $ProjectRoot 'Start_CE_QC.ps1'
+if (-not (Test-Path -LiteralPath $RuntimeScript)) { throw 'Start_CE_QC.ps1 is missing.' }
 
 Write-Host ''
-Write-Host '[4/5] Starting CE QC backend...' -ForegroundColor Yellow
-$NodePath = (Get-Command node).Source
-$Backend = Start-CeQcBackend $NodePath $ProjectRoot $Url $Port
-Write-Host "Backend ready. PID=$($Backend.Id)" -ForegroundColor Green
+Write-Host '[4/5] Starting protected CE QC runtime...' -ForegroundColor Yellow
+Write-Host 'The runtime window will stay active and automatically restart Node after a crash.' -ForegroundColor DarkGray
+Write-Host '[5/5] The protected runtime will verify port 5177 and open the APP.' -ForegroundColor Yellow
+Write-Section 'HANDING OFF TO PROTECTED RUNTIME'
+Write-Host 'SQLite, .env, token/cookie, backups, node_modules and untracked local files are preserved.' -ForegroundColor DarkGray
 
-Write-Host ''
-Write-Host '[5/5] Opening CE QC APP...' -ForegroundColor Yellow
-Start-Process $Url
-
-Write-Section 'CE QC APP STARTED'
-$CurrentHead = (& git rev-parse HEAD).Trim()
-Write-Host "Version: $CurrentHead" -ForegroundColor Green
-Write-Host "URL    : $Url" -ForegroundColor Green
-Write-Host 'Use the desktop CE QC shortcut for all future starts.' -ForegroundColor Cyan
-Write-Host 'SQLite, .env, token/cookie, backups and ignored runtime data are not cleaned.' -ForegroundColor DarkGray
-Start-Sleep -Seconds 3
+& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $RuntimeScript
+exit $LASTEXITCODE
