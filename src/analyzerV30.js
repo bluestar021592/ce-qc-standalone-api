@@ -2,9 +2,7 @@ import {
   analyzeShipment as analyzeShipmentLegacy,
   normalizeEvent
 } from './analyzerLegacy.js';
-import { analyzeStoreFlow } from './storeFlow.js';
-import { classifyLatestSpecialNode } from './specialNode.js';
-import { lastEffectiveEvent } from './shopCodes.js';
+import { buildTrajectoryFacts } from './trajectoryFacts.js';
 
 export { normalizeEvent };
 
@@ -28,18 +26,19 @@ const CYCLE_CODES = new Set([TRACK.CYCLE_A, TRACK.CYCLE_B]);
  * locked tracking codes and prevents historical nodes from remaining abnormal.
  */
 export function analyzeShipment(args = {}) {
-  const { waybill = '', scanRow = {}, events = [], reportDate = '' } = args;
+  const { waybill = '', scanRow = {}, events = [], reportDate = '', shopCodeMap = null } = args;
   const legacy = analyzeShipmentLegacy(args);
-  const sorted = sortEvents(events);
-  const last = lastEffectiveEvent(sorted) || sorted.at(-1) || null;
-  const lastCode = codeOf(last);
-  const exactTerminal = latestTerminal(sorted);
-  const scanStatus = String(scanRow.orderStatus ?? '').trim();
-  const isPod = scanStatus === '85' || exactTerminal?.type === 'POD';
-  const isReturned = !isPod && (scanStatus === '100' || exactTerminal?.type === 'RETURN_COMPLETED');
-  const returnInProgress = !isPod && !isReturned && lastCode === TRACK.RETURN_START;
-  const special = !isPod && !isReturned && !returnInProgress ? classifyLatestSpecialNode(sorted) : null;
-  const storeFlow = analyzeStoreFlow({ shipmentCode: waybill, events: sorted, reportDate, isPod, isReturned });
+  const facts = buildTrajectoryFacts({ shipmentCode: waybill, scanRow, events, reportDate, shopCodeMap });
+  const sorted = facts.sortedEvents;
+  const last = facts.lastEvent;
+  const lastCode = facts.lastCode;
+  const exactTerminal = facts.latestTrackTerminal;
+  const scanStatus = facts.scanStatus;
+  const isPod = facts.isPod;
+  const isReturned = facts.isReturned;
+  const returnInProgress = facts.returnInProgress;
+  const special = facts.special;
+  const storeFlow = facts.storeFlow;
   const pending = pendingTail(sorted, last);
   const cycle = cycleTail(sorted, last, reportDate);
   const oc = ocCurrent(sorted, last, reportDate);
@@ -113,13 +112,23 @@ export function analyzeShipment(args = {}) {
   const currentCycleDays = !terminal && !returnInProgress && !special && !storeFlow.shopState && CYCLE_CODES.has(lastCode) ? cycle.days : 0;
   const currentOcDays = !terminal && !returnInProgress && !special && !storeFlow.shopState && oc.active ? oc.days : 0;
   const inboundNoScan = !terminal && !returnInProgress && !special && !storeFlow.shopState && lastCode === TRACK.INBOUND_NO_SCAN;
-  const allPendingDates = distinctDates(sorted.filter(event => codeOf(event) === TRACK.PENDING));
+  const allPendingDates = facts.pendingDates;
 
   return {
     ...legacy,
     ...storeFlow,
     ...(special || {}),
     analysisRuleVersion: '2026-08-09-ccsl-scan-track-code-separation-v30',
+    trajectoryFactVersion: facts.factVersion,
+    trajectoryTerminalSource: facts.terminalSource,
+    latestEffectiveEventCode: facts.lastCode,
+    latestEffectiveEventTime: facts.lastEventTime,
+    latestEffectiveEventText: facts.lastEventText,
+    latestEffectiveActionType: facts.latestNodeAction?.actionType || 'OTHER',
+    latestEffectiveTargetNode: facts.latestNodeAction?.targetNode || '',
+    latestEffectiveTargetNodeCode: facts.latestNodeAction?.targetNodeCode || '',
+    latestShopFactCode: facts.latestShop?.isShop ? (facts.latestShop.shopCode || '') : '',
+    latestShopFactRule: facts.latestShop?.matchedRule || '',
     是否POD: isPod ? '是' : '否',
     POD状态: isPod ? 'POD' : '未POD',
     POD来源: isPod ? (scanStatus === '85' ? '订单扫描orderStatus=85' : '轨迹状态码80') : '',
@@ -140,7 +149,8 @@ export function analyzeShipment(args = {}) {
     pendingDistinctDayCount: allPendingDates.length,
     pendingDates: allPendingDates,
     pendingContinuity: currentPendingDays >= 2 ? (pending.continuous ? '连续' : '不连续') : (currentPendingDays ? '单次' : ''),
-    pendingRawEventCount: sorted.filter(event => codeOf(event) === TRACK.PENDING).length,
+    pendingRawEventCount: facts.pendingRawEventCount,
+    pendingFactDateContinuity: facts.pendingDateContinuity ? '连续' : '不连续',
     OC天数: currentOcDays,
     OC次数: currentOcDays ? Number(legacy.OC次数 || 1) : 0,
     盘点天数: currentCycleDays,
