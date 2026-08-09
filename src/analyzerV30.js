@@ -1,7 +1,7 @@
 import {
   analyzeShipment as analyzeShipmentLegacy,
   normalizeEvent
-} from './analyzer.js';
+} from './analyzerLegacy.js';
 import { analyzeStoreFlow } from './storeFlow.js';
 import { classifyLatestSpecialNode } from './specialNode.js';
 import { lastEffectiveEvent } from './shopCodes.js';
