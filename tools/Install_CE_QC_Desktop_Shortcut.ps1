@@ -1,14 +1,13 @@
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Launcher = Join-Path $ProjectRoot 'CE_QC_Start.bat'
-if (-not (Test-Path -LiteralPath $Launcher)) {
-  throw "CE QC launcher not found: $Launcher"
+$LauncherScript = Join-Path $ProjectRoot 'tools\CE_QC_Start.ps1'
+if (-not (Test-Path -LiteralPath $LauncherScript)) {
+  throw "CE QC launcher script not found: $LauncherScript"
 }
 
-# Keep this script ASCII-only so Windows PowerShell 5.1 cannot misread UTF-8
-# source text. Build the Chinese shortcut title from Unicode code points.
-$ShortcutName = -join @(
+# Keep this installer source ASCII-only for Windows PowerShell 5.1.
+$LauncherName = -join @(
   'CE ',
   [char]0x8D28,
   [char]0x63A7,
@@ -17,18 +16,6 @@ $ShortcutName = -join @(
   [char]0x52A8
 )
 
-# WScript.Shell may reject a .bat file as TargetPath on some Windows builds.
-# Point the shortcut at cmd.exe and pass the stable BAT launcher as arguments.
-$CmdExe = ''
-if ($env:ComSpec -and (Test-Path -LiteralPath $env:ComSpec)) {
-  $CmdExe = $env:ComSpec
-}
-elseif ($env:SystemRoot) {
-  $Candidate = Join-Path $env:SystemRoot 'System32\cmd.exe'
-  if (Test-Path -LiteralPath $Candidate) { $CmdExe = $Candidate }
-}
-if (-not $CmdExe) { throw 'cmd.exe was not found.' }
-
 $Desktop = $env:CE_QC_SHORTCUT_DESKTOP
 if (-not $Desktop) { $Desktop = [Environment]::GetFolderPath('Desktop') }
 if (-not $Desktop) { throw 'Windows Desktop folder could not be resolved.' }
@@ -36,55 +23,55 @@ if (-not (Test-Path -LiteralPath $Desktop)) {
   New-Item -ItemType Directory -Path $Desktop -Force | Out-Null
 }
 
-$ShortcutPath = Join-Path $Desktop ($ShortcutName + '.lnk')
-$TempShortcutPath = Join-Path $Desktop 'CE_QC_APP_START_INSTALLING.lnk'
-Remove-Item -LiteralPath $TempShortcutPath -Force -ErrorAction SilentlyContinue
+# Do not rely on WScript.Shell .lnk argument quoting. It behaved differently on
+# the user's Windows build even though CI could create the link successfully.
+# Instead create a real desktop CMD launcher. Windows can double-click this
+# directly, and the project path is embedded inside an ASCII EncodedCommand so
+# Chinese/spaces in the project path cannot break command-line quoting.
+$DesktopCmd = Join-Path $Desktop ($LauncherName + '.cmd')
+$OldLink = Join-Path $Desktop ($LauncherName + '.lnk')
+$OldTempLink = Join-Path $Desktop 'CE_QC_APP_START_INSTALLING.lnk'
 
-$Shell = New-Object -ComObject WScript.Shell
+Remove-Item -LiteralPath $OldLink -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $OldTempLink -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $DesktopCmd -Force -ErrorAction SilentlyContinue
 
-# Create the .lnk with an ASCII-only temporary filename first. Some Windows
-# PowerShell 5.1 / WScript.Shell combinations cannot Save() directly to a
-# Unicode shortcut filename even though Windows itself supports that filename.
-$Shortcut = $Shell.CreateShortcut($TempShortcutPath)
-$Shortcut.TargetPath = $CmdExe
-$Shortcut.Arguments = '/d /c ""' + $Launcher + '""'
-$Shortcut.WorkingDirectory = $ProjectRoot
-$Shortcut.Description = 'CE EXPRESS QC - sync GitHub main and start local app'
-$Shortcut.IconLocation = "$CmdExe,0"
-$Shortcut.WindowStyle = 1
-$Shortcut.Save()
+$escapedScript = $LauncherScript.Replace("'", "''")
+$psCommand = "& '$escapedScript'"
+$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($psCommand))
 
-if (-not (Test-Path -LiteralPath $TempShortcutPath)) {
-  throw "Temporary desktop shortcut was not created: $TempShortcutPath"
+$lines = @(
+  '@echo off',
+  'title CE QC APP START',
+  ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + $encoded),
+  'if errorlevel 1 (',
+  '  echo.',
+  '  echo [CE QC] Start failed. Please send this window to ChatGPT.',
+  '  pause',
+  ')'
+)
+
+# ASCII only: the Unicode project path lives inside the Base64 EncodedCommand.
+[IO.File]::WriteAllLines($DesktopCmd, $lines, [Text.Encoding]::ASCII)
+
+if (-not (Test-Path -LiteralPath $DesktopCmd)) {
+  throw "Desktop launcher was not created: $DesktopCmd"
+}
+if ((Get-Item -LiteralPath $DesktopCmd).Length -le 0) {
+  throw 'Desktop launcher file is empty.'
 }
 
-# Verify the actual saved target before renaming the shortcut to its Chinese
-# user-facing name.
-$Saved = $Shell.CreateShortcut($TempShortcutPath)
-if ([string]::IsNullOrWhiteSpace([string]$Saved.TargetPath)) {
-  throw 'Desktop shortcut TargetPath is empty after save.'
-}
-if (-not ([string]$Saved.TargetPath).ToLowerInvariant().EndsWith('cmd.exe')) {
-  throw "Desktop shortcut TargetPath is invalid: $($Saved.TargetPath)"
-}
-if (-not ([string]$Saved.Arguments).Contains('CE_QC_Start.bat')) {
-  throw 'Desktop shortcut does not point to the stable CE QC launcher.'
-}
-
-# Rename with .NET/PowerShell after Save(). This avoids the WScript.Shell
-# Unicode filename limitation while still giving the user the required name.
-Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
-Move-Item -LiteralPath $TempShortcutPath -Destination $ShortcutPath -Force
-
-if (-not (Test-Path -LiteralPath $ShortcutPath)) {
-  throw "Desktop shortcut was not created: $ShortcutPath"
-}
+$verify = Get-Content -LiteralPath $DesktopCmd -Raw
+if (-not $verify.Contains('powershell.exe')) { throw 'Desktop launcher is missing PowerShell.' }
+if (-not $verify.Contains('-EncodedCommand')) { throw 'Desktop launcher is missing EncodedCommand.' }
+if ($verify.Contains($ProjectRoot)) { throw 'Desktop launcher unexpectedly contains an unencoded Unicode project path.' }
 
 Write-Host ''
 Write-Host '==============================================' -ForegroundColor Cyan
 Write-Host 'CE QC desktop launcher created successfully.' -ForegroundColor Green
 Write-Host '==============================================' -ForegroundColor Cyan
-Write-Host "Desktop shortcut: $ShortcutPath"
-Write-Host 'Use this shortcut for all future CE QC starts.' -ForegroundColor Yellow
-Write-Host 'It will check GitHub main before starting the app.' -ForegroundColor DarkGray
-Start-Sleep -Seconds 3
+Write-Host "Desktop launcher: $DesktopCmd"
+Write-Host 'The previous .lnk shortcut was removed.' -ForegroundColor DarkGray
+Write-Host 'Use this desktop CMD launcher for all future CE QC starts.' -ForegroundColor Yellow
+Write-Host 'It checks GitHub main before starting the app.' -ForegroundColor DarkGray
+Start-Sleep -Seconds 2
