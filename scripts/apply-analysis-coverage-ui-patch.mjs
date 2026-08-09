@@ -54,10 +54,10 @@ function renderAnalysisCoverageNotice() {
     target.hidden = true;
     return;
   }
-  const dateText = coverage.missingDates.length ? ` · 未完成日期 ${coverage.missingDates.join('、')}` : '';
+  const dateText = coverage.missingDates.length ? ' · 未完成日期 ' + coverage.missingDates.join('、') : '';
   target.hidden = false;
   target.className = 'global-processing-notice warning';
-  target.innerHTML = `<span><strong>数据分析未全部完成</strong> · 源日报 ${coverage.sourceTotal} 票 · 已分析 ${coverage.analyzedTotal} 票 · 待分析 ${coverage.analysisPending} 票${escapeHtml(dateText)}</span>`;
+  target.innerHTML = '<span><strong>数据分析未全部完成</strong> · 源日报 ' + coverage.sourceTotal + ' 票 · 已分析 ' + coverage.analyzedTotal + ' 票 · 待分析 ' + coverage.analysisPending + ' 票' + escapeHtml(dateText) + '</span>';
 }
 
 function renderProcessingNotice() {`,
