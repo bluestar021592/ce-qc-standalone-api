@@ -1,0 +1,38 @@
+name: Apply CCSL partial API gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/apply-ccsl-partial-api-gate.mjs'
+      - '.github/workflows/apply-ccsl-partial-api-gate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/apply-ccsl-partial-api-gate.mjs
+      - name: Commit partial API gate
+        shell: bash
+        run: |
+          if git diff --quiet -- src/pipeline.js; then
+            echo 'partial API gate already patched'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pipeline.js
+          git commit -m 'Block CCSL completion while API retries remain'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
