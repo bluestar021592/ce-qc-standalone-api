@@ -1,0 +1,39 @@
+name: Apply Pending continuity foundation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/apply-pending-continuity-foundation.mjs'
+      - '.github/workflows/apply-pending-continuity-foundation.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/apply-pending-continuity-foundation.mjs
+      - name: Commit Pending continuity integration
+        shell: bash
+        run: |
+          if git diff --quiet -- src/shopeeAnalyzerV30.js src/analyzerV30.js src/reporting.js src/rangeDashboardStoreV31.js; then
+            echo 'Pending continuity already integrated'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/shopeeAnalyzerV30.js src/analyzerV30.js src/reporting.js src/rangeDashboardStoreV31.js
+          git commit -m 'Unify latest terminal and Pending non-continuity facts'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
