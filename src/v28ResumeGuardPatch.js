@@ -44,9 +44,9 @@ function prepareShopeeRun(route) {
 
       // The normalized SQLite table rehydrates apiBatchStatus. Remove only the
       // current run/date audit rows so the stale batch hash cannot block recovery.
-      // Do NOT call saveBusinessState(state) here: loadBusinessState hydrates large
-      // per-waybill/event arrays, and serializing that whole recovered state again
-      // can exceed V8's maximum string size and throw "Invalid string length".
+      // Do not serialize the fully hydrated business state in this middleware:
+      // it contains large per-waybill/event arrays, and building another whole
+      // persisted JSON string can exceed V8's limit and throw "Invalid string length".
       // The next route handler reloads from normalized SQLite tables, so deleting
       // the audit metadata and clearing the run-lock error is sufficient.
       if (runId) {
