@@ -66,9 +66,19 @@ jobs:
           $runtime = Get-Content 'Start_CE_QC.ps1' -Raw
           foreach ($required in @(
             'runtime_supervisor.pid','Get-PortOwnerPids','Get-ShellSupervisor','Clear-CeQcPort','taskkill.exe','/T','/F',
-            'EADDRINUSE','address already in use','Another old supervisor reclaimed port 5177','Port 5177 is stable and free'
+            'EADDRINUSE','address already in use','Another old supervisor reclaimed port 5177','Port 5177 is stable and free',
+            'Test-BackendProcessAlive','Get-BackendExitCode','Runtime supervisor monitor recovered from an internal error',
+            'Backend is still running. Supervisor monitor will continue.'
           )) {
-            if (-not $runtime.Contains($required)) { throw "protected runtime missing anti-race token: $required" }
+            if (-not $runtime.Contains($required)) { throw "protected runtime missing anti-race/monitor token: $required" }
+          }
+          if ($runtime.Contains('while (-not $Backend.HasExited)')) {
+            throw 'protected runtime must not rely on the fragile Process.HasExited monitor loop'
+          }
+
+          $bat = Get-Content 'CE_QC_Start.bat' -Raw
+          if ($bat.Contains('启动未完成')) {
+            throw 'outer BAT must not print a misleading startup-failed message after the protected runtime has already been ready'
           }
 
           $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
