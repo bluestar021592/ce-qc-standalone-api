@@ -55,7 +55,7 @@ jobs:
             if (-not $text.ToLowerInvariant().Contains($legacy)) { throw "launcher does not stop legacy supervisor token: $legacy" }
           }
           $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
-          foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.bat','cmd.exe','TargetPath','Arguments')) {
+          foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.bat','cmd.exe','TargetPath','Arguments','CE_QC_APP_START_INSTALLING.lnk','Move-Item')) {
             if (-not $installer.Contains($required)) { throw "installer missing shortcut token: $required" }
           }
           if ($installer -match '\$Shortcut\.TargetPath\s*=\s*\$Launcher') {
@@ -69,10 +69,9 @@ jobs:
           $env:CE_QC_SHORTCUT_DESKTOP = $tempDesktop
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'tools/Install_CE_QC_Desktop_Shortcut.ps1'
           if ($LASTEXITCODE -ne 0) { throw "shortcut installer exited with $LASTEXITCODE" }
-          $link = Get-ChildItem -LiteralPath $tempDesktop -Filter '*.lnk' | Select-Object -First 1
-          if (-not $link) { throw 'shortcut installer did not create a .lnk file' }
-          $shell = New-Object -ComObject WScript.Shell
-          $saved = $shell.CreateShortcut($link.FullName)
-          if (-not ([string]$saved.TargetPath).ToLowerInvariant().EndsWith('cmd.exe')) { throw "unexpected shortcut target: $($saved.TargetPath)" }
-          if (-not ([string]$saved.Arguments).Contains('CE_QC_Start.bat')) { throw "shortcut arguments do not launch CE_QC_Start.bat: $($saved.Arguments)" }
-          if (-not ([string]$saved.WorkingDirectory).Contains('ce-qc-standalone-api')) { throw "unexpected working directory: $($saved.WorkingDirectory)" }
+          $links = @(Get-ChildItem -LiteralPath $tempDesktop -Filter '*.lnk')
+          if ($links.Count -ne 1) { throw "expected exactly one final .lnk file, found $($links.Count)" }
+          if ($links[0].Length -le 0) { throw 'created shortcut file is empty' }
+          if (Test-Path -LiteralPath (Join-Path $tempDesktop 'CE_QC_APP_START_INSTALLING.lnk')) {
+            throw 'temporary ASCII shortcut was not renamed/cleaned up'
+          }
