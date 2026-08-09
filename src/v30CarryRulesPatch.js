@@ -1,5 +1,6 @@
 import express from 'express';
 import { getDb } from './db.js';
+import { latestEffectiveStatusLabel } from './currentStatus.js';
 
 const BUSINESS_TYPES = ['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const SPECIAL_NORMAL = new Set([
@@ -111,14 +112,23 @@ function loadCarry(status='OPEN',businessType='ALL',limit=100){
   for(const row of source){
     const oldState=safeJson(row.oldJson,{}),state={...oldState,...safeJson(row.currentJson,{})};
     const latestTime=String(row.currentLastEventTime||state.latestEventTime||state.最后节点时间||'');
-    const reason=abnormalReason(state,latestTime,row.currentState);
+    const latestNode=String(state.latestEventDesc||state.lastEventDesc||state.最新节点||state.最后节点||'');
+    const currentStateCode=String(row.currentState||state.currentState||state.scanNormalizedState||'');
+    const reason=abnormalReason(state,latestTime,currentStateCode);
     if(status!=='CLOSED'&&!reason)continue;
     const previousTime=oldState.latestEventTime||oldState.最后节点时间||'';
+    const qcCategory=String(state.primaryCategory||state.当前分类||state.异常分类||'');
+    const currentStatus=latestEffectiveStatusLabel({currentState:currentStateCode,state,latestNode});
     items.push({
       shipmentCode:row.shipmentCode,businessType:row.businessType,sourceReportDate:row.sourceReportDate,lastReportDate:row.lastReportDate,
-      status:row.status,currentState:row.currentState||state.currentState||state.primaryCategory||'',apiStatus:row.currentApiStatus||row.apiStatus||'',
-      latestNode:state.latestEventDesc||state.lastEventDesc||state.最新节点||state.最后节点||'',latestEventTime:latestTime,previousEventTime:previousTime,
-      hasNewNode:Boolean(latestTime&&latestTime!==previousTime),daysOpen:staleNaturalDays(latestTime),category:state.primaryCategory||state.当前分类||state.异常分类||'',
+      status:row.status,
+      // The V27 table historically rendered `category || currentState` under
+      // "当前状态". Keep category user-facing/current and move the historical
+      // QC bucket to qcCategory so the UI cannot show an old anomaly as status.
+      category:currentStatus,currentState:currentStatus,currentStateCode,qcCategory,monitorReason:reason,
+      apiStatus:row.currentApiStatus||row.apiStatus||'',
+      latestNode,latestEventTime:latestTime,previousEventTime:previousTime,
+      hasNewNode:Boolean(latestTime&&latestTime!==previousTime),daysOpen:staleNaturalDays(latestTime),
       abnormalReason:reason,pendingDays:number(state.Pending当前次数 ?? state.Pending次数 ?? state.pendingDistinctDayCount),ocDays:number(state.OC天数),
       closeReason:row.closeReason||'',updatedAt:row.currentUpdatedAt||row.updatedAt||''
     });
@@ -135,8 +145,8 @@ function carryHandler(req,res){
     const businessType=BUSINESS_TYPES.includes(upper(req.query.businessType))?upper(req.query.businessType):'ALL';
     const data=loadCarry(status,businessType,req.query.limit||req.query.pageSize);
     res.setHeader('Cache-Control','no-store');
-    res.json({ok:true,status,businessType,...data,generatedAt:new Date().toISOString(),semantics:'BUSINESS_ABNORMAL_ONLY_V30'});
-  }catch(error){console.error('[V30][CARRY]',error);res.status(500).json({ok:false,error:error.message||String(error)});}
+    res.json({ok:true,status,businessType,...data,generatedAt:new Date().toISOString(),semantics:'LATEST_EFFECTIVE_CURRENT_STATUS_V32'});
+  }catch(error){console.error('[V32][CARRY]',error);res.status(500).json({ok:false,error:error.message||String(error)});}
 }
 
 let installed=false;
@@ -147,6 +157,7 @@ express.application.listen=function v30CarryRulesListen(...args){
     this.get('/api/v27/carry-monitor',carryHandler);
     this.get('/api/v27/carry-monitor-business',carryHandler);
     this.get('/api/v30/carry-monitor',carryHandler);
+    this.get('/api/v32/carry-monitor',carryHandler);
   }
   return previousListen.apply(this,args);
 };
