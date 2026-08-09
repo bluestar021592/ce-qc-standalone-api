@@ -74,8 +74,14 @@ test('range SQL counts independent Pending gaps but excludes returned and 580 cl
   assert.equal(ceRow?.数值原值, 1, 'only CE-GAP is an active ordinary Pending non-continuity anomaly');
   assert.equal(result.states.CE.dashboard.returned, 1);
 
-  const vn = result.states.SHOPEEVN.dashboard.metrics;
+  const vnState = result.states.SHOPEEVN;
+  const vn = vnState.dashboard.metrics;
   assert.equal(vn.pendingNonContinuous, 1, 'only VN-GAP counts; completed return is excluded');
+  assert.equal(vnState.dashboard.recipientGroups.VN.metrics.pendingNonContinuous, 1);
+  assert.equal(vnState.dashboard.recipientGroups.VN.detailCounts.pendingNonContinuous, 1);
+  const vnRow = vnState.dashboard.dashboardRows.find(row => row.收件人来源 === 'VN' && row.项目 === 'Pending不连续');
+  assert.equal(vnRow?.数值原值, 1, 'Shopee range dashboard must visibly carry the metric');
+  assert.equal(vnState.detailTabs.VN_pendingNonContinuous.total, 1, 'range detail tab count must match the card');
   assert.equal(vn.returned, 1);
 });
 
