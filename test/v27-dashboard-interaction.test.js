@@ -2,13 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+function serverBootIndex(bootstrap) {
+  const direct = bootstrap.indexOf("import('./server.js')");
+  const phased = bootstrap.indexOf("importPhase('server', './server.js')");
+  return direct >= 0 ? direct : phased;
+}
+
 test('V27 server routes and fast bootstrap are installed before server start', () => {
   const bootstrap=fs.readFileSync('bootstrap.js','utf8');
   const serverPatch=fs.readFileSync('src/v27ServerPatch.js','utf8');
   const trendPatch=fs.readFileSync('src/v27TrendPatch.js','utf8');
+  const serverIndex=serverBootIndex(bootstrap);
+  assert.ok(serverIndex >= 0);
   assert.match(bootstrap,/v27ServerPatch\.js/);
   assert.match(bootstrap,/v27TrendPatch\.js/);
-  assert.ok(bootstrap.indexOf('v27ServerPatch.js') < bootstrap.indexOf("import('./server.js')"));
+  assert.ok(bootstrap.indexOf('v27ServerPatch.js') < serverIndex);
   assert.match(serverPatch,/\/api\/v27\/metric-detail/);
   assert.match(serverPatch,/\/api\/v27\/carry-monitor/);
   assert.match(serverPatch,/v27BootstrapHandler/);
@@ -18,8 +26,10 @@ test('V27 server routes and fast bootstrap are installed before server start', (
 test('V28 SHOPEE resume deletes persisted batch audit hashes but preserves per-waybill checkpoints', () => {
   const bootstrap=fs.readFileSync('bootstrap.js','utf8');
   const resumePatch=fs.readFileSync('src/v28ResumeGuardPatch.js','utf8');
+  const serverIndex=serverBootIndex(bootstrap);
+  assert.ok(serverIndex >= 0);
   assert.match(bootstrap,/v28ResumeGuardPatch\.js/);
-  assert.ok(bootstrap.indexOf('v28ResumeGuardPatch.js') < bootstrap.indexOf("import('./server.js')"));
+  assert.ok(bootstrap.indexOf('v28ResumeGuardPatch.js') < serverIndex);
   assert.match(resumePatch,/\/api\/shopee\/run\/resume/);
   assert.match(resumePatch,/DELETE FROM business_api_batches/);
   assert.match(resumePatch,/apiBatchStatus/);
