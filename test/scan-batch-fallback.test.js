@@ -49,6 +49,20 @@ test('authentication pause is not split into more requests', async () => {
   assert.equal(calls, 1);
 });
 
+test('CE HTTP 200 请求未授权 is treated as authentication pause and never split', async () => {
+  let calls = 0;
+  const authError = Object.assign(new Error('confirm-query失败 HTTP 200：请求未授权'), {
+    ceStatus: 200,
+    ceMsg: '请求未授权'
+  });
+  await assert.rejects(() => queryBatchWithFallback({
+    batch: bills(350),
+    fallbackSizes: [100, 50, 10, 1],
+    query: async () => { calls += 1; throw authError; }
+  }), error => error === authError);
+  assert.equal(calls, 1);
+});
+
 test('track socket hang up retries the same batch automatically before fallback', async () => {
   const input = bills(10);
   const attempts = [];
