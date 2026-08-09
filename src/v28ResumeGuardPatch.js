@@ -1,5 +1,5 @@
 import express from 'express';
-import { SHOPEE, loadBusinessState, saveBusinessState } from './businessStore.js';
+import { SHOPEE, loadBusinessState } from './businessStore.js';
 import { getDb } from './db.js';
 
 const guardedRoutes = new Set(['/api/shopee/run/start', '/api/shopee/run/resume']);
@@ -33,52 +33,27 @@ function shouldResetAudit(route, state = {}, lock = null) {
   return ['failed', 'paused'].includes(String(lock?.status || '').toLowerCase());
 }
 
-function clearMismatchState(state = {}) {
-  if (isBatchMismatchMessage(state.processing?.error)) {
-    state.processing = { ...(state.processing || {}), running: false, paused: false, error: '', phase: '等待继续处理' };
-  }
-  if (isBatchMismatchMessage(state.lastRunSummary?.error || state.lastRunSummary?.errorMessage)) {
-    state.lastRunSummary = { ...(state.lastRunSummary || {}), error: '', errorMessage: '' };
-  }
-  if (isBatchMismatchMessage(state.lastRun?.error || state.lastRun?.errorMessage)) {
-    state.lastRun = { ...(state.lastRun || {}), error: '', errorMessage: '' };
-  }
-}
-
 function prepareShopeeRun(route) {
   return function prepareShopeeRunMiddleware(req, res, next) {
     try {
       const state = loadBusinessState(SHOPEE) || {};
-      const rows = Array.isArray(state.apiBatchStatus) ? state.apiBatchStatus : [];
       const db = getDb();
       const { reportDate, runId, lock } = currentRunContext(db, state);
 
       if (!reportDate || !shouldResetAudit(route, state, lock)) return next();
 
-      // The normalized SQLite table rehydrates apiBatchStatus. A prior build
-      // accidentally dropped payloadHash while hydrating it, so after a restart
-      // the same batch key could be paired with a different bill list and the
-      // subsequent save aborted with BATCH_KEY_PAYLOAD_MISMATCH. On recovery we
-      // remove only audit rows for the current SHOPEE run/date. Per-waybill scan,
-      // event, exception, POD, report and final-row checkpoints are untouched.
-      let deleted = 0;
+      // The normalized SQLite table rehydrates apiBatchStatus. Remove only the
+      // current run/date audit rows so the stale batch hash cannot block recovery.
+      // Do not serialize the fully hydrated business state in this middleware:
+      // it contains large per-waybill/event arrays, and building another whole
+      // persisted JSON string can exceed V8's limit and throw "Invalid string length".
+      // The next route handler reloads from normalized SQLite tables, so deleting
+      // the audit metadata and clearing the run-lock error is sufficient.
       if (runId) {
-        deleted = Number(db.prepare('DELETE FROM business_api_batches WHERE businessType=? AND reportDate=? AND runId=?').run(SHOPEE, reportDate, runId).changes || 0);
+        db.prepare('DELETE FROM business_api_batches WHERE businessType=? AND reportDate=? AND runId=?').run(SHOPEE, reportDate, runId);
       } else {
-        deleted = Number(db.prepare('DELETE FROM business_api_batches WHERE businessType=? AND reportDate=?').run(SHOPEE, reportDate).changes || 0);
+        db.prepare('DELETE FROM business_api_batches WHERE businessType=? AND reportDate=?').run(SHOPEE, reportDate);
       }
-
-      const kept = rows.filter(row => {
-        const rowRunId = String(row?.runId || '').trim();
-        const rowDate = String(row?.reportDate || '').trim();
-        if (runId && rowRunId === runId) return false;
-        if (!runId && reportDate && (!rowDate || rowDate === reportDate)) return false;
-        return true;
-      });
-      state.apiBatchStatus = kept;
-      state.resumeBatchAuditResetAt = new Date().toISOString();
-      state.resumeBatchAuditResetCount = Math.max(deleted, rows.length - kept.length);
-      clearMismatchState(state);
 
       const now = new Date().toISOString();
       if (runId) {
@@ -87,7 +62,6 @@ function prepareShopeeRun(route) {
         db.prepare('UPDATE business_run_locks SET errorMessage=?,updatedAt=? WHERE businessType=? AND reportDate=?').run('', now, SHOPEE, reportDate);
       }
 
-      saveBusinessState(state, SHOPEE);
       next();
     } catch (error) {
       console.error('[V28][SHOPEE_RUN_GUARD]', route, error);

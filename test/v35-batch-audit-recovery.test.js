@@ -12,10 +12,16 @@ test('SHOPEE batch audit recovery guards both start and resume', () => {
 });
 
 test('batch audit recovery preserves per-waybill checkpoints', () => {
-  assert.match(source, /Per-waybill scan,/);
+  assert.match(source, /per-waybill\/event arrays/);
   assert.doesNotMatch(source, /DELETE FROM business_scan_results/);
   assert.doesNotMatch(source, /DELETE FROM business_track_events/);
   assert.doesNotMatch(source, /DELETE FROM business_exception_items/);
   assert.doesNotMatch(source, /DELETE FROM business_pod_locks/);
   assert.doesNotMatch(source, /DELETE FROM business_final_rows/);
+});
+
+test('batch audit recovery never serializes the fully hydrated state', () => {
+  assert.doesNotMatch(source, /saveBusinessState\s*\(/);
+  assert.doesNotMatch(source, /JSON\.stringify\s*\(\s*state\s*\)/);
+  assert.match(source, /Invalid string length/);
 });
