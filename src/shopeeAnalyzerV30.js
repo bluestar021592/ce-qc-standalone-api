@@ -260,14 +260,12 @@ function trackCode(event = {}) {
   return String(event.eventCode ?? event.trackingEventCode ?? event.statusCode ?? '').trim();
 }
 
-function latestExactTerminal(events) {
-  let found = null;
-  for (const event of events) {
-    const code = trackCode(event);
-    if (code === TRACK.POD) found = { type: 'POD', event };
-    if (code === TRACK.RETURN_COMPLETE) found = { type: 'RETURN_COMPLETED', event };
-  }
-  return found;
+function latestExactTerminal(events = []) {
+  const event = events.at(-1) || null;
+  const code = trackCode(event || {});
+  if (code === TRACK.POD) return { type: 'POD', event };
+  if (code === TRACK.RETURN_COMPLETE) return { type: 'RETURN_COMPLETED', event };
+  return null;
 }
 
 function exactPendingState(events) {

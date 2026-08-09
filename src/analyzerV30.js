@@ -108,6 +108,12 @@ export function analyzeShipment(args = {}) {
   }
 
   const terminal = isPod || isReturned;
+  const pendingNonContinuous = !terminal
+    && !returnInProgress
+    && !special
+    && !storeFlow.shopState
+    && facts.pendingDistinctDayCount >= 2
+    && !facts.pendingDateContinuity;
   const currentPendingDays = !terminal && !returnInProgress && !special && !storeFlow.shopState && lastCode === TRACK.PENDING ? pending.days : 0;
   const currentCycleDays = !terminal && !returnInProgress && !special && !storeFlow.shopState && CYCLE_CODES.has(lastCode) ? cycle.days : 0;
   const currentOcDays = !terminal && !returnInProgress && !special && !storeFlow.shopState && oc.active ? oc.days : 0;
@@ -150,7 +156,12 @@ export function analyzeShipment(args = {}) {
     pendingDates: allPendingDates,
     pendingContinuity: currentPendingDays >= 2 ? (pending.continuous ? '连续' : '不连续') : (currentPendingDays ? '单次' : ''),
     pendingRawEventCount: facts.pendingRawEventCount,
-    pendingFactDateContinuity: facts.pendingDateContinuity ? '连续' : '不连续',
+    pendingFactDateContinuity: facts.pendingContinuityLabel,
+    Pending事实连续性: facts.pendingContinuityLabel,
+    currentPendingDistinctDayCount: facts.currentPendingDistinctDayCount,
+    currentPendingDates: facts.currentPendingDates,
+    currentPendingFactContinuity: facts.currentPendingContinuityLabel,
+    Pending不连续: pendingNonContinuous ? '是' : '否',
     OC天数: currentOcDays,
     OC次数: currentOcDays ? Number(legacy.OC次数 || 1) : 0,
     盘点天数: currentCycleDays,

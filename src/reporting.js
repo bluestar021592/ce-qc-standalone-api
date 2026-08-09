@@ -271,7 +271,7 @@ function buildCategoryCounts(openRows, finalRows) {
     pending2: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') === 2).length,
     pending3plus: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 3).length,
     pendingConsecutive3: ordinaryRows.filter(isPendingConsecutive3Row).length,
-    pendingNonContinuous: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 2 && row?.Pending连续性 === '不连续').length,
+    pendingNonContinuous: ordinaryRows.filter(isPendingNonContinuousRow).length,
     pendingWithImage: ordinaryRows.filter(isPendingWithImageRow).length,
     pendingWithoutImage: ordinaryRows.filter(isPendingWithoutImageRow).length,
     pictureException: ordinaryRows.filter(isPictureExceptionRow).length,
@@ -344,7 +344,7 @@ function buildDetailBuckets(openRows, finalRows, state) {
     pending2plus: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 2),
     pending3: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 3),
     pendingConsecutive3: ordinaryRows.filter(isPendingConsecutive3Row),
-    pendingNonContinuous: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 2 && row?.Pending连续性 === '不连续'),
+    pendingNonContinuous: ordinaryRows.filter(isPendingNonContinuousRow),
     pendingWithImage: ordinaryRows.filter(isPendingWithImageRow),
     pendingWithoutImage: ordinaryRows.filter(isPendingWithoutImageRow),
     pictureException: ordinaryRows.filter(isPictureExceptionRow),
@@ -446,6 +446,12 @@ function isAnyAbnormalRow(row = {}) {
     && !isNormalFinalDiversionRow(row)
     && !isRefreshFailedRow(row)
     && !isSpecialRetentionRow(row);
+}
+
+function isPendingNonContinuousRow(row = {}) {
+  if (row?.Pending不连续 === '是') return true;
+  if (row?.pendingFactDateContinuity === '不连续' || row?.Pending事实连续性 === '不连续') return true;
+  return Number(row?.pendingDistinctDayCount || 0) >= 2 && row?.Pending连续性 === '不连续';
 }
 
 function isRefreshFailedRow(row = {}) {

@@ -193,7 +193,17 @@ function queryCcslDailyLatest(fromDate, toDate) {
       SUM(CASE WHEN COALESCE(f.pendingDays,0)>=1 THEN 1 ELSE 0 END) AS pending1,
       SUM(CASE WHEN COALESCE(f.pendingDays,0)>=2 THEN 1 ELSE 0 END) AS pending2,
       SUM(CASE WHEN COALESCE(f.pendingDays,0)>=3 THEN 1 ELSE 0 END) AS pending3,
-      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续' THEN 1 ELSE 0 END) AS pendingNonContinuous,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=0
+                AND COALESCE(f.shopState,'')=''
+                AND UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) NOT IN ('POD','RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION')
+                AND UPPER(COALESCE(f.primaryCategory,'')) NOT IN ('SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION')
+                AND COALESCE(f.primaryCategory,'') NOT IN ('退回','退回处理中','仓库自提','自提','CECN滞留包裹','CEZT滞留包裹','580滞留包裹')
+                AND (
+                  COALESCE(json_extract(f.rawJson,'$."Pending不连续"'),'')='是'
+                  OR COALESCE(json_extract(f.rawJson,'$.pendingFactDateContinuity'),'')='不连续'
+                  OR COALESCE(json_extract(f.rawJson,'$."Pending事实连续性"'),'')='不连续'
+                  OR COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续'
+                ) THEN 1 ELSE 0 END) AS pendingNonContinuous,
       SUM(CASE WHEN COALESCE(f.ocDays,0)>=1 THEN 1 ELSE 0 END) AS oc1,
       SUM(CASE WHEN COALESCE(f.ocDays,0)>=2 THEN 1 ELSE 0 END) AS oc2,
       SUM(CASE WHEN COALESCE(f.ocDays,0)>=3 THEN 1 ELSE 0 END) AS oc3,
@@ -254,7 +264,17 @@ function queryShopeeDailyLatest(fromDate, toDate) {
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=1 THEN 1 ELSE 0 END) AS pending1,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=2 THEN 1 ELSE 0 END) AS pending2,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=3 THEN 1 ELSE 0 END) AS pending3,
-      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续' THEN 1 ELSE 0 END) AS pendingNonContinuous,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=0
+                AND COALESCE(f.shopState,'')=''
+                AND UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) NOT IN ('POD','RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION')
+                AND UPPER(COALESCE(f.primaryCategory,'')) NOT IN ('SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION')
+                AND COALESCE(f.primaryCategory,'') NOT IN ('退回','退回处理中','仓库自提','自提','CECN滞留包裹','CEZT滞留包裹','580滞留包裹')
+                AND (
+                  COALESCE(json_extract(f.rawJson,'$."Pending不连续"'),'')='是'
+                  OR COALESCE(json_extract(f.rawJson,'$.pendingFactDateContinuity'),'')='不连续'
+                  OR COALESCE(json_extract(f.rawJson,'$."Pending事实连续性"'),'')='不连续'
+                  OR COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续'
+                ) THEN 1 ELSE 0 END) AS pendingNonContinuous,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=1 THEN 1 ELSE 0 END) AS oc1,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=2 THEN 1 ELSE 0 END) AS oc2,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=3 THEN 1 ELSE 0 END) AS oc3,
