@@ -33,6 +33,31 @@ async function safeAttempt(onAttempt, payload, onLog) {
   }
 }
 
+function isTransientTransportError(error) {
+  const code = String(error?.code || error?.cause?.code || error?.transportCode || '').toUpperCase();
+  const message = String(error?.message || error?.cause?.message || '');
+  return ['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN', 'ENETRESET', 'ENETUNREACH'].includes(code)
+    || /socket hang up|connection reset|network error|timed?\s*out|timeout|premature close|read ECONNRESET/i.test(message);
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
+}
+
+async function withTransientRetry(query, batch, onLog, retries = 1, delayMs = 800) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await query(batch);
+    } catch (error) {
+      if (!isTransientTransportError(error) || attempt >= retries) throw error;
+      attempt += 1;
+      await onLog(`轨迹网络瞬断：${batch.length}票将在${delayMs}ms后自动重试 ${attempt}/${retries}，原因：${error?.message || error}`);
+      await wait(delayMs * attempt);
+    }
+  }
+}
+
 export async function queryBatchWithFallback({
   batch,
   query,
@@ -77,4 +102,21 @@ export async function queryBatchWithFallback({
   }
 }
 
-export const queryTrackBatchWithFallback = queryBatchWithFallback;
+export async function queryTrackBatchWithFallback(options = {}) {
+  const onLog = options.onLog || (async () => {});
+  const rawQuery = options.query;
+  if (typeof rawQuery !== 'function') throw new Error('track query function is required');
+
+  // Track/event queries are read-only. A remote CE socket reset should not turn a
+  // whole 10-waybill child batch into a manual resume item. Retry a transient
+  // transport failure once at the same size, then progressively isolate the failed
+  // child down to 5 and finally 1 waybill. Successful siblings are never repeated.
+  return queryBatchWithFallback({
+    ...options,
+    onLog,
+    fallbackSizes: Array.isArray(options.fallbackSizes) && options.fallbackSizes.length
+      ? options.fallbackSizes
+      : [25, 10, 5, 1],
+    query: batch => withTransientRetry(rawQuery, batch, onLog, 1, 800)
+  });
+}
