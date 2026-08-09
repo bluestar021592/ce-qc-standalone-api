@@ -137,7 +137,7 @@ app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
 });
 
-app.get(['/ce', '/tbkh', '/ali1688', '/shopeecn', '/shopeevn', '/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
+app.get(['/ce', '/ceaf', '/tbkh', '/ali1688', '/shopeecn', '/shopeevn', '/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -450,7 +450,7 @@ function loadFastSqlAggregateState(scope) {
 
 function loadFastSqlBusinessState(businessType, snapshotId = '') {
   const type = String(businessType || '').toUpperCase();
-  if (!['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].includes(type)) return null;
+  if (!['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].includes(type)) return null;
   const batch = fastDashboardBatch(snapshotId);
   const range = cachedFastRange(batch);
   if (!range) return null;
@@ -513,7 +513,7 @@ app.get('/api/bootstrap', async (req, res) => {
     const latestUnified = getLatestUnifiedImport();
     const selectedSnapshotId = String(latestUnified?.snapshotId || unifiedHistory?.[0]?.snapshotId || '');
     const businesses = {};
-    for (const type of ['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN']) {
+    for (const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']) {
       const fast = loadFastSqlBusinessState(type, selectedSnapshotId);
       if (fast) businesses[type] = fast;
     }
@@ -808,9 +808,9 @@ async function handleUnifiedDailyImport(req, res) {
     const parsed = parseUnifiedDailyExcel(req.file.path, { reportDate: req.body.reportDate || '', originalName: req.file.originalname });
     const saved = saveUnifiedImport(parsed, req.file.originalname);
     const processingQueue = getUnifiedProcessingQueue(saved.batchId);
-    const ccslRows = parsed.rows.filter(row => ['CE', 'TBKH', 'ALI1688'].includes(row.businessType));
+    const ccslRows = parsed.rows.filter(row => ['CE', 'CEAF', 'TBKH', 'ALI1688'].includes(row.businessType));
     const shopeeRows = parsed.rows.filter(row => ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
-    const historicalCcsl = processingQueue.rows.filter(row => row.sourceType === 'HISTORICAL_CARRY' && ['CE', 'TBKH', 'ALI1688'].includes(row.businessType));
+    const historicalCcsl = processingQueue.rows.filter(row => row.sourceType === 'HISTORICAL_CARRY' && ['CE', 'CEAF', 'TBKH', 'ALI1688'].includes(row.businessType));
     const historicalShopee = processingQueue.rows.filter(row => row.sourceType === 'HISTORICAL_CARRY' && ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
     const ccslState = await loadState();
     ccslState.reportDate = parsed.reportDate;
@@ -1229,7 +1229,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const reportDate = String(req.query.reportDate || unified?.reportDate || '');
   const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
   let states = [];
-  if (snapshotId) states = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
+  if (snapshotId) states = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
   if (!states.some(state => state?.finalRows?.length)) states = [await loadState(), loadBusinessState(SHOPEE)];
   const allRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
