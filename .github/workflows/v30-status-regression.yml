@@ -19,12 +19,14 @@ jobs:
         run: npm ci
       - name: Syntax checks
         run: |
+          node --check bootstrap.js
           node --check src/scanTerminal.js
           node --check src/analyzer.js
           node --check src/analyzerLegacy.js
           node --check src/analyzerV30.js
           node --check src/shopeeAnalyzerV30.js
           node --check src/shopeeAnalyzerV31.js
+          node --check src/v30CarryRulesPatch.js
           node --check public/v29-data-consistency-fix.js
       - name: Run locked scan and trajectory status tests
         run: |
