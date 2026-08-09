@@ -54,7 +54,7 @@ function openRows(codes) {
   return codes.map(shipmentCode => ({ shipmentCode, orderStatus: '70' }));
 }
 
-test('CCSL scan resume retries only failed waybills and preserves successful POD work', async () => {
+test('CCSL scan failure blocks completion, then resume retries only failed waybill', async () => {
   const state = baseState();
   const firstCalls = [];
   const firstClient = {
@@ -70,7 +70,16 @@ test('CCSL scan resume retries only failed waybills and preserves successful POD
     async trackQuery() { throw new Error('track should not run for POD/scan failure case'); }
   };
 
-  await runQcPipeline(runtimeOptions(state, firstClient));
+  await assert.rejects(
+    () => runQcPipeline(runtimeOptions(state, firstClient)),
+    error => error?.code === 'CCSL_PARTIAL_API_FAILURE'
+      && error?.runStatus === 'API_RETRY_REQUIRED'
+      && error?.scanRetry === 1
+      && error?.trackRetry === 0
+  );
+  assert.equal(state.processing.phase, '接口待重试');
+  assert.equal(state.lastRunSummary.runStatus, 'API_RETRY_REQUIRED');
+  assert.deepEqual(state.lastRunSummary.retryBills, [B]);
   assert.equal(state.scanQueryStatus.find(row => row.shipmentCode === A)?.status, 'success');
   assert.equal(state.scanQueryStatus.find(row => row.shipmentCode === B)?.status, 'failed');
   assert.ok(state.podLocks.includes(A));
@@ -85,15 +94,20 @@ test('CCSL scan resume retries only failed waybills and preserves successful POD
     async trackQuery() { throw new Error('track should not run after retry becomes POD'); }
   };
 
-  await runQcPipeline(runtimeOptions(state, secondClient));
+  const completed = await runQcPipeline(runtimeOptions(state, secondClient));
   assert.deepEqual(secondCalls, [[B]], 'successful A must never be rescanned; only failed B is retried');
   assert.equal(state.scanQueryStatus.find(row => row.shipmentCode === B)?.status, 'success');
   assert.ok(state.podLocks.includes(A));
   assert.ok(state.podLocks.includes(B));
   assert.equal(new Set(state.finalRows.map(row => row.运单号)).size, 2);
+  assert.equal(completed.summary.runStatus, 'COMPLETED');
+  assert.equal(state.processing.phase, '完成');
+  assert.equal(state.lastRunSummary.scanRetry, 0);
+  assert.equal(state.lastRunSummary.trackRetry, 0);
+  assert.deepEqual(state.lastRunSummary.retryBills, []);
 });
 
-test('CCSL track resume reuses successful track results and retries only the failed waybill', async () => {
+test('CCSL track failure blocks completion, then resume retries only failed waybill', async () => {
   const state = baseState();
   const firstTrackCalls = [];
   const firstClient = {
@@ -109,7 +123,16 @@ test('CCSL track resume reuses successful track results and retries only the fai
     }
   };
 
-  await runQcPipeline(runtimeOptions(state, firstClient));
+  await assert.rejects(
+    () => runQcPipeline(runtimeOptions(state, firstClient)),
+    error => error?.code === 'CCSL_PARTIAL_API_FAILURE'
+      && error?.runStatus === 'API_RETRY_REQUIRED'
+      && error?.scanRetry === 0
+      && error?.trackRetry === 1
+  );
+  assert.equal(state.processing.phase, '接口待重试');
+  assert.equal(state.lastRunSummary.runStatus, 'API_RETRY_REQUIRED');
+  assert.deepEqual(state.lastRunSummary.retryBills, [B]);
   assert.equal(state.scanQueryStatus.find(row => row.shipmentCode === A)?.status, 'success');
   assert.equal(state.scanQueryStatus.find(row => row.shipmentCode === B)?.status, 'success');
   assert.equal(state.trackQueryStatus.find(row => row.shipmentCode === A)?.status, 'success');
@@ -128,12 +151,17 @@ test('CCSL track resume reuses successful track results and retries only the fai
     }
   };
 
-  await runQcPipeline(runtimeOptions(state, secondClient));
+  const completed = await runQcPipeline(runtimeOptions(state, secondClient));
   assert.deepEqual(secondConfirmCalls, [], 'successful scan results must be reused on resume');
   assert.deepEqual(secondTrackCalls, [[B]], 'successful A track must be reused; only failed B is retried');
   assert.equal(state.trackQueryStatus.find(row => row.shipmentCode === A)?.status, 'success');
   assert.equal(state.trackQueryStatus.find(row => row.shipmentCode === B)?.status, 'success');
   assert.equal(new Set(state.trackResults.map(row => row.运单号)).size, 2);
+  assert.equal(completed.summary.runStatus, 'COMPLETED');
+  assert.equal(state.processing.phase, '完成');
+  assert.equal(state.lastRunSummary.scanRetry, 0);
+  assert.equal(state.lastRunSummary.trackRetry, 0);
+  assert.deepEqual(state.lastRunSummary.retryBills, []);
 });
 
 test.after(() => {
