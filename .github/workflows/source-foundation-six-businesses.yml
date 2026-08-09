@@ -1,0 +1,24 @@
+name: Source foundation six-business regression
+
+on:
+  pull_request:
+    paths:
+      - 'src/unifiedExcelParser.js'
+      - 'test/unified-import-v7.test.js'
+      - 'test/unified-import-ceaf.test.js'
+      - '.github/workflows/source-foundation-six-businesses.yml'
+  workflow_dispatch:
+
+jobs:
+  source-foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Run unified import source tests
+        run: node --test test/unified-import-v7.test.js test/unified-import-ceaf.test.js

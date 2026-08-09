@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import XLSX from 'xlsx';
 
-const BUSINESS_PRIORITY = ['SHOPEEVN', 'SHOPEECN', 'TBKH', 'ALI1688'];
+const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
+const BUSINESS_PRIORITY = Object.freeze(['CEAF', 'SHOPEEVN', 'SHOPEECN', 'TBKH', 'ALI1688']);
 const SHIPMENT_HEADERS = [
   '运单号', '运单编号', '单号', '面单号', '快递单号', '物流单号',
   'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'
@@ -12,6 +13,9 @@ const RECIPIENT_HEADERS = [
   '收件人', '收件人姓名', '收件人名称', '收货人', '收货人姓名', '收货人名称',
   '客户名称', '客户', '收件客户', '收货客户',
   'recipient', 'recipientname', 'receiver', 'receivername', 'consignee', 'consigneename', 'customername'
+];
+const CUSTOMER_NAME_HEADERS = [
+  '客户名称', '客户名', '客户', 'customername', 'customer', 'clientname'
 ];
 const REGION_HEADERS = [
   '省份标识', '区域', '区域代码', '路区', '站点', '目的地', '网点',
@@ -82,6 +86,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       continue;
     }
 
+    const customerNameIndex = findColumn(headers, CUSTOMER_NAME_HEADERS);
     const regionIndex = findColumn(headers, REGION_HEADERS);
     const explicitDateIndex = findColumn(headers, EXPLICIT_REPORT_DATE_HEADERS);
     const transactionDateIndex = explicitDateIndex >= 0 ? -1 : findColumn(headers, TRANSACTION_DATE_HEADERS);
@@ -90,6 +95,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       recipient: recipientIndex,
       recipientHeader: originalHeaders[recipientIndex] || '',
       recipientDetection,
+      customerName: customerNameIndex,
+      customerNameHeader: customerNameIndex >= 0 ? originalHeaders[customerNameIndex] : '',
       region: regionIndex,
       regionHeader: regionIndex >= 0 ? originalHeaders[regionIndex] : '',
       explicitReportDate: explicitDateIndex,
@@ -107,6 +114,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       const shipmentCode = normalizeShipmentCode(row[shipmentIndex]);
       const recipientRaw = String(row[recipientIndex] ?? '').trim();
       const recipientNormalized = normalizeRecipient(recipientRaw);
+      const customerNameRaw = customerNameIndex >= 0 ? String(row[customerNameIndex] ?? '').trim() : '';
+      const customerNameNormalized = normalizeCustomerName(customerNameRaw);
       const regionRaw = regionIndex >= 0 ? String(row[regionIndex] ?? '').trim() : '';
       const regionCode = normalizeRegion(regionRaw);
       const explicitRowDate = explicitDateIndex >= 0 ? normalizeDate(row[explicitDateIndex]) : '';
@@ -128,15 +137,15 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
 
       if (!recipientRaw) {
         missingRecipientWarnings += 1;
-        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人缺失，按默认规则归类CE' });
+        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人缺失，按客户名称/运单号规则继续分类，未命中则归CE' });
       }
 
-      const matches = classifyMatches(shipmentCode, recipientNormalized);
+      const matches = classifyMatches(shipmentCode, recipientNormalized, customerNameNormalized);
       if (matches.length > 1) {
         classificationConflicts += 1;
         warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个板块，按优先级归类${matches[0]}` });
       }
-      const classification = classifyBusiness(shipmentCode, recipientNormalized);
+      const classification = classifyBusiness(shipmentCode, recipientNormalized, customerNameNormalized);
       const raw = Object.fromEntries(originalHeaders.map((header, column) => [header || `column_${column + 1}`, row[column] ?? '']));
       details.push({
         shipmentCode,
@@ -145,6 +154,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
         regionRaw,
         recipientRaw,
         recipientNormalized,
+        customerNameRaw,
+        customerNameNormalized,
         sheetName,
         rowNumber: index + 1,
         reportDate: manualDate || explicitRowDate || transactionRowDate || '',
@@ -186,7 +197,22 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
 
   for (const row of details) row.reportDate = reportDate;
 
-  const classificationCounts = Object.fromEntries(['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => [type, details.filter(row => row.businessType === type).length]));
+  const classificationCounts = Object.fromEntries(BUSINESS_TYPES.map(type => [type, details.filter(row => row.businessType === type).length]));
+  const classifiedWaybills = Object.values(classificationCounts).reduce((sum, count) => sum + Number(count || 0), 0);
+  const sourceReconciliation = {
+    businessTypes: [...BUSINESS_TYPES],
+    validUniqueWaybills: details.length,
+    classifiedWaybills,
+    difference: classifiedWaybills - details.length,
+    balanced: classifiedWaybills === details.length
+  };
+  if (!sourceReconciliation.balanced) {
+    const error = new Error(`日报源数据分类守恒失败：有效唯一运单${details.length}票，六板块合计${classifiedWaybills}票`);
+    error.code = 'SOURCE_CLASSIFICATION_RECONCILIATION_FAILED';
+    error.sourceReconciliation = sourceReconciliation;
+    throw error;
+  }
+
   const regionCounts = {
     PP: details.filter(row => row.regionCode === 'PP').length,
     PV: details.filter(row => row.regionCode === 'PV').length,
@@ -206,6 +232,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     containerFormat,
     fileHash: crypto.createHash('sha256').update(fileBuffer).digest('hex'),
     classificationCounts,
+    sourceReconciliation,
     regionCounts,
     summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, classificationConflicts },
     rows: details,
@@ -256,6 +283,12 @@ function normalizeShipmentCode(value) {
   return String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/\s+/g, '');
 }
 function normalizeRecipient(value) {
+  return normalizeBusinessToken(value);
+}
+function normalizeCustomerName(value) {
+  return normalizeBusinessToken(value);
+}
+function normalizeBusinessToken(value) {
   return String(value ?? '').normalize('NFKC').toUpperCase().replace(/[\s_\-]+/g, '');
 }
 function normalizeRegion(value) {
@@ -267,15 +300,17 @@ function normalizeRegion(value) {
   // A populated province/destination-province field that is not Phnom Penh is provincial.
   return 'PV';
 }
-function classifyMatches(shipmentCode, recipient) {
+function classifyMatches(shipmentCode, recipient, customerName) {
   const matches = [];
+  if (customerName.includes('CCAF')) matches.push('CEAF');
   if (recipient.includes('SHOPEEVN')) matches.push('SHOPEEVN');
   if (recipient.includes('SHOPEECN')) matches.push('SHOPEECN');
   if (shipmentCode.startsWith('TBKH') || recipient.includes('TBKH')) matches.push('TBKH');
   if (recipient.includes('ALI1688')) matches.push('ALI1688');
   return BUSINESS_PRIORITY.filter(type => matches.includes(type));
 }
-function classifyBusiness(shipmentCode, recipient) {
+function classifyBusiness(shipmentCode, recipient, customerName) {
+  if (customerName.includes('CCAF')) return { businessType: 'CEAF', source: 'CUSTOMER_NAME', matchedValue: 'CCAF', reason: '客户名称命中CCAF，归类CEAF空运' };
   if (recipient.includes('SHOPEEVN')) return { businessType: 'SHOPEEVN', source: 'RECIPIENT', matchedValue: 'SHOPEEVN', reason: '收件人命中SHOPEEVN' };
   if (recipient.includes('SHOPEECN')) return { businessType: 'SHOPEECN', source: 'RECIPIENT', matchedValue: 'SHOPEECN', reason: '收件人命中SHOPEECN' };
   if (shipmentCode.startsWith('TBKH')) return { businessType: 'TBKH', source: 'SHIPMENT_PREFIX', matchedValue: 'TBKH', reason: '运单号前缀命中TBKH' };
