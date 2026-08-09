@@ -3,11 +3,16 @@ name: Source foundation six-business regression
 on:
   pull_request:
     paths:
+      - 'server.js'
       - 'src/unifiedExcelParser.js'
       - 'src/unifiedImportStore.js'
+      - 'src/lightweightDashboardStore.js'
+      - 'src/rangeDashboardStoreV31.js'
+      - 'src/rangeDashboardStoreLegacy.js'
       - 'test/unified-import-v7.test.js'
       - 'test/unified-import-ceaf.test.js'
       - 'test/source-six-business-persistence.test.js'
+      - 'test/ceaf-processing-routing.test.js'
       - '.github/workflows/source-foundation-six-businesses.yml'
   workflow_dispatch:
 
@@ -22,5 +27,5 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: Run unified import source tests
-        run: node --test test/unified-import-v7.test.js test/unified-import-ceaf.test.js test/source-six-business-persistence.test.js
+      - name: Run unified import source and CEAF routing tests
+        run: node --test test/unified-import-v7.test.js test/unified-import-ceaf.test.js test/source-six-business-persistence.test.js test/ceaf-processing-routing.test.js
