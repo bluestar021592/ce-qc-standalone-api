@@ -444,7 +444,7 @@ function shopeeDashboardRows(reportDate, groups) {
     const m = summary.metrics;
     const defs = [
       ['今日总单', m.total], ['今日POD', m.pod], ['POD率', m.podRate], ['首派成功率', m.firstAttemptRate],
-      ['Pending1+', m.pending1], ['Pending2+', m.pending2], ['Pending3+', m.pending3plus],
+      ['Pending1+', m.pending1], ['Pending2+', m.pending2], ['Pending3+', m.pending3plus], ['Pending不连续', m.pendingNonContinuous],
       ['OC1+', m.oc1], ['OC2+', m.oc2], ['OC3+', m.oc3plus], ['入库无扫描', m.inboundNoScan],
       ['退回件', m.returned], ['退回率', m.returnRate], ['退回处理中', m.returnInProgress],
       ['派送中', m.deliveryStay], ['派送中率', m.deliveryStayRate], ['中转节点停留', m.transitHubStay], ['严重超时未更新', m.severeOverdue]
@@ -460,7 +460,7 @@ function shopeeDashboardRows(reportDate, groups) {
 
 function groupSummary(group, metrics, regions) {
   return { group, metrics, monitorCount: metrics.total, regions, detailCounts: {
-    all: metrics.total, pod: metrics.pod, pending1: metrics.pending1, pending2: metrics.pending2, pending3: metrics.pending3plus,
+    all: metrics.total, pod: metrics.pod, pending1: metrics.pending1, pending2: metrics.pending2, pending3: metrics.pending3plus, pendingNonContinuous: metrics.pendingNonContinuous,
     oc1: metrics.oc1, oc2: metrics.oc2, oc3: metrics.oc3plus, inboundNoScan: metrics.inboundNoScan,
     returned: metrics.returned, returnInProgress: metrics.returnInProgress, deliveryStay: metrics.deliveryStay
   } };
@@ -474,7 +474,7 @@ function summarizeShopeeRows(rows) {
   const attempt1 = sum(rows, 'attempt1'), attempt2 = sum(rows, 'attempt2'), attempt3 = sum(rows, 'attempt3');
   return {
     total, pod, podRate: rate(pod, total), firstAttemptCount: attempt1, firstAttemptEligible: total, firstAttemptRate: rate(attempt1, total),
-    pending1: sum(rows, 'pending1'), pending2: sum(rows, 'pending2'), pending3plus: sum(rows, 'pending3'),
+    pending1: sum(rows, 'pending1'), pending2: sum(rows, 'pending2'), pending3plus: sum(rows, 'pending3'), pendingNonContinuous: sum(rows, 'pendingNonContinuous'),
     oc1: sum(rows, 'oc1'), oc2: sum(rows, 'oc2'), oc3plus: sum(rows, 'oc3'), cycle2plus: sum(rows, 'cycle2'), inboundNoScan: sum(rows, 'inboundNoScan'),
     returned, returnRate: rate(returned, total), unresolved: Math.max(0, total - pod - returned - specialClosed), accounted: total, accountingDifference: 0,
     returnInProgress: sum(rows, 'returnInProgress'), returnRequired: sum(rows, 'returnRequired'), deliveryStay: sum(rows, 'deliveryStay'),
@@ -528,7 +528,7 @@ function shopeeHistorySummary(row) {
     Object.assign(summary.metrics, {
       [`${prefix}_今日总单`]: metrics.total, [`${prefix}_今日POD`]: metrics.pod, [`${prefix}_POD率`]: metrics.podRate,
       [`${prefix}_首派成功率`]: metrics.firstAttemptRate, [`${prefix}_Pending1+`]: metrics.pending1, [`${prefix}_Pending2+`]: metrics.pending2,
-      [`${prefix}_Pending3+`]: metrics.pending3plus, [`${prefix}_OC1+`]: metrics.oc1, [`${prefix}_OC2+`]: metrics.oc2, [`${prefix}_OC3+`]: metrics.oc3plus,
+      [`${prefix}_Pending3+`]: metrics.pending3plus, [`${prefix}_Pending不连续`]: metrics.pendingNonContinuous, [`${prefix}_OC1+`]: metrics.oc1, [`${prefix}_OC2+`]: metrics.oc2, [`${prefix}_OC3+`]: metrics.oc3plus,
       [`${prefix}_入库无扫描`]: metrics.inboundNoScan, [`${prefix}_退回件`]: metrics.returned, [`${prefix}_退回率`]: metrics.returnRate
     });
   }
@@ -560,7 +560,7 @@ function rangeShopeeTabs(groups, all) {
     const m=groups[group].metrics;
     tabs[`${group}_all`]={label:`${group}范围全部`,rows:[],total:m.total}; tabs[`${group}_pod`]={label:`${group}已签收`,rows:[],total:m.pod};
     tabs[`${group}_pending1`]={label:`${group}Pending1+`,rows:[],total:m.pending1}; tabs[`${group}_pending2`]={label:`${group}Pending2+`,rows:[],total:m.pending2};
-    tabs[`${group}_pending3`]={label:`${group}Pending3+`,rows:[],total:m.pending3plus}; tabs[`${group}_oc1`]={label:`${group}OC1+`,rows:[],total:m.oc1};
+    tabs[`${group}_pending3`]={label:`${group}Pending3+`,rows:[],total:m.pending3plus}; tabs[`${group}_pendingNonContinuous`]={label:`${group}Pending不连续`,rows:[],total:m.pendingNonContinuous}; tabs[`${group}_oc1`]={label:`${group}OC1+`,rows:[],total:m.oc1};
     tabs[`${group}_oc2`]={label:`${group}OC2+`,rows:[],total:m.oc2}; tabs[`${group}_oc3`]={label:`${group}OC3+`,rows:[],total:m.oc3plus};
     tabs[`${group}_inboundNoScan`]={label:`${group}入库无扫描`,rows:[],total:m.inboundNoScan}; tabs[`${group}_returned`]={label:`${group}退回件`,rows:[],total:m.returned};
   }
@@ -568,7 +568,7 @@ function rangeShopeeTabs(groups, all) {
 }
 
 function tabKey(label) {
-  return ({ '今日总单':'all','今日POD':'pod','POD率':'pod','首派成功率':'firstAttempt','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3',
+  return ({ '今日总单':'all','今日POD':'pod','POD率':'pod','首派成功率':'firstAttempt','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','Pending不连续':'pendingNonContinuous',
     'OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','入库无扫描':'inboundNoScan','退回件':'returned','退回率':'returned','退回处理中':'returnInProgress',
     '派送中':'deliveryStay','派送中率':'deliveryStay','中转节点停留':'transitHubStay','严重超时未更新':'severeOverdue' })[label] || 'all';
 }
