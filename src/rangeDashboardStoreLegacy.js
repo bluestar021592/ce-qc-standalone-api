@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-const CCSL_TYPES = Object.freeze(['CE', 'TBKH', 'ALI1688']);
+const CCSL_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688']);
 const SHOPEE_TYPES = Object.freeze(['SHOPEECN', 'SHOPEEVN']);
 const ALL_TYPES = Object.freeze([...CCSL_TYPES, ...SHOPEE_TYPES]);
 
