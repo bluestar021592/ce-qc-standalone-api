@@ -37,28 +37,47 @@ if (-not (Test-Path -LiteralPath $Desktop)) {
 }
 
 $ShortcutPath = Join-Path $Desktop ($ShortcutName + '.lnk')
+$TempShortcutPath = Join-Path $Desktop 'CE_QC_APP_START_INSTALLING.lnk'
+Remove-Item -LiteralPath $TempShortcutPath -Force -ErrorAction SilentlyContinue
+
 $Shell = New-Object -ComObject WScript.Shell
-$Shortcut = $Shell.CreateShortcut($ShortcutPath)
+
+# Create the .lnk with an ASCII-only temporary filename first. Some Windows
+# PowerShell 5.1 / WScript.Shell combinations cannot Save() directly to a
+# Unicode shortcut filename even though Windows itself supports that filename.
+$Shortcut = $Shell.CreateShortcut($TempShortcutPath)
 $Shortcut.TargetPath = $CmdExe
 $Shortcut.Arguments = '/d /c ""' + $Launcher + '""'
 $Shortcut.WorkingDirectory = $ProjectRoot
 $Shortcut.Description = 'CE EXPRESS QC - sync GitHub main and start local app'
-$Shortcut.IconLocation = "$env:SystemRoot\System32\imageres.dll,15"
+$Shortcut.IconLocation = "$CmdExe,0"
 $Shortcut.WindowStyle = 1
 $Shortcut.Save()
 
-if (-not (Test-Path -LiteralPath $ShortcutPath)) {
-  throw "Desktop shortcut was not created: $ShortcutPath"
+if (-not (Test-Path -LiteralPath $TempShortcutPath)) {
+  throw "Temporary desktop shortcut was not created: $TempShortcutPath"
 }
 
-# Read the saved .lnk back through the same Windows COM API. This catches
-# invalid TargetPath/Arguments immediately instead of leaving a broken icon.
-$Saved = $Shell.CreateShortcut($ShortcutPath)
+# Verify the actual saved target before renaming the shortcut to its Chinese
+# user-facing name.
+$Saved = $Shell.CreateShortcut($TempShortcutPath)
 if ([string]::IsNullOrWhiteSpace([string]$Saved.TargetPath)) {
   throw 'Desktop shortcut TargetPath is empty after save.'
 }
+if (-not ([string]$Saved.TargetPath).ToLowerInvariant().EndsWith('cmd.exe')) {
+  throw "Desktop shortcut TargetPath is invalid: $($Saved.TargetPath)"
+}
 if (-not ([string]$Saved.Arguments).Contains('CE_QC_Start.bat')) {
   throw 'Desktop shortcut does not point to the stable CE QC launcher.'
+}
+
+# Rename with .NET/PowerShell after Save(). This avoids the WScript.Shell
+# Unicode filename limitation while still giving the user the required name.
+Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
+Move-Item -LiteralPath $TempShortcutPath -Destination $ShortcutPath -Force
+
+if (-not (Test-Path -LiteralPath $ShortcutPath)) {
+  throw "Desktop shortcut was not created: $ShortcutPath"
 }
 
 Write-Host ''
