@@ -34,10 +34,9 @@ const TRACK_LABELS = Object.freeze({
 /**
  * User-facing CURRENT status.
  *
- * This deliberately does not use historical QC classifications such as
- * "三次Pending后未退回" or "派送中停留" as the current status. Those remain
- * monitor/anomaly reasons. Current status is derived from the newest effective
- * scan/trajectory state only.
+ * Historical QC classifications such as "三次Pending后未退回" or
+ * "派送中停留" are monitor reasons, never current status. The display value
+ * follows the newest effective structured state / tracking code first.
  */
 export function latestEffectiveStatusLabel({ currentState = '', state = {}, latestNode = '' } = {}) {
   const rawCurrent = normalize(currentState || state.currentState || state.scanNormalizedState || '');
@@ -50,11 +49,11 @@ export function latestEffectiveStatusLabel({ currentState = '', state = {}, late
   if (state.退回状态 === '已退回' || ['RETURNED', 'RETURN_COMPLETED'].includes(rawCurrent) || trackCode === '86') return '已退回';
   if (state.退回状态 === '退回处理中' || rawCurrent === 'RETURN_IN_PROGRESS' || trackCode === '84') return '退回处理中';
 
-  // Special normal destinations are current routing states, not abnormalities.
-  const specialKey = special || specialFromCategory(category);
-  if (STATUS_LABELS[specialKey]) return STATUS_LABELS[specialKey];
+  // Explicit specialState is current routing state and is authoritative.
+  if (STATUS_LABELS[special]) return STATUS_LABELS[special];
 
-  // Structured current state from the classifier is authoritative.
+  // Structured current state from the classifier is authoritative and must be
+  // evaluated BEFORE historical category fallback.
   if (STATUS_LABELS[rawCurrent]) return STATUS_LABELS[rawCurrent];
   if (rawCurrent.startsWith('TRACK_')) {
     const code = rawCurrent.slice('TRACK_'.length);
@@ -77,6 +76,10 @@ export function latestEffectiveStatusLabel({ currentState = '', state = {}, late
   const fromNode = statusFromLatestNode(node);
   if (fromNode) return fromNode;
 
+  // Only when no structured current state or latest-node evidence exists may a
+  // non-historical category be used as a last-resort display label.
+  const categorySpecial = specialFromCategory(category);
+  if (STATUS_LABELS[categorySpecial]) return STATUS_LABELS[categorySpecial];
   if (category && !isHistoricalMonitorLabel(category)) return friendlyInternalLabel(category);
   return '待更新';
 }
