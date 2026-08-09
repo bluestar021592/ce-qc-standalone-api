@@ -1,0 +1,27 @@
+name: CE QC V30 status-code regression
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  status-code-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Syntax checks
+        run: |
+          node --check src/scanTerminal.js
+          node --check src/shopeeAnalyzerV30.js
+          node --check public/v29-data-consistency-fix.js
+      - name: Run locked scan and trajectory status tests
+        run: |
+          node --test test/v30-scan-track-code-separation.test.js test/v11-terminal-isolation-return.test.js
