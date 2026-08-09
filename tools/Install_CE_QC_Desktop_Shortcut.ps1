@@ -23,11 +23,11 @@ if (-not (Test-Path -LiteralPath $Desktop)) {
   New-Item -ItemType Directory -Path $Desktop -Force | Out-Null
 }
 
-# Do not rely on WScript.Shell .lnk argument quoting. It behaved differently on
-# the user's Windows build even though CI could create the link successfully.
-# Instead create a real desktop CMD launcher. Windows can double-click this
-# directly, and the project path is embedded inside an ASCII EncodedCommand so
-# Chinese/spaces in the project path cannot break command-line quoting.
+# Use a real desktop CMD launcher instead of WScript.Shell .lnk. The normal
+# desktop path keeps PowerShell open with -NoExit so the user can always see
+# startup progress/errors and the protected runtime window cannot flash-close.
+# The project path is embedded inside an ASCII EncodedCommand so Unicode/spaces
+# in the project path cannot break command-line quoting.
 $DesktopCmd = Join-Path $Desktop ($LauncherName + '.cmd')
 $OldLink = Join-Path $Desktop ($LauncherName + '.lnk')
 $OldTempLink = Join-Path $Desktop 'CE_QC_APP_START_INSTALLING.lnk'
@@ -43,12 +43,18 @@ $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($psComman
 $lines = @(
   '@echo off',
   'title CE QC APP START',
-  ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + $encoded),
+  'echo Starting CE QC APP...',
+  'if "%CE_QC_LAUNCHER_TEST_MODE%"=="1" goto test_mode',
+  ('powershell.exe -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -EncodedCommand ' + $encoded),
   'if errorlevel 1 (',
   '  echo.',
   '  echo [CE QC] Start failed. Please send this window to ChatGPT.',
   '  pause',
-  ')'
+  ')',
+  'exit /b',
+  ':test_mode',
+  ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + $encoded),
+  'exit /b %errorlevel%'
 )
 
 # ASCII only: the Unicode project path lives inside the Base64 EncodedCommand.
@@ -64,6 +70,7 @@ if ((Get-Item -LiteralPath $DesktopCmd).Length -le 0) {
 $verify = Get-Content -LiteralPath $DesktopCmd -Raw
 if (-not $verify.Contains('powershell.exe')) { throw 'Desktop launcher is missing PowerShell.' }
 if (-not $verify.Contains('-EncodedCommand')) { throw 'Desktop launcher is missing EncodedCommand.' }
+if (-not $verify.Contains('-NoExit')) { throw 'Desktop launcher is missing NoExit protection.' }
 if ($verify.Contains($ProjectRoot)) { throw 'Desktop launcher unexpectedly contains an unencoded Unicode project path.' }
 
 Write-Host ''
@@ -73,5 +80,6 @@ Write-Host '==============================================' -ForegroundColor Cya
 Write-Host "Desktop launcher: $DesktopCmd"
 Write-Host 'The previous .lnk shortcut was removed.' -ForegroundColor DarkGray
 Write-Host 'Use this desktop CMD launcher for all future CE QC starts.' -ForegroundColor Yellow
+Write-Host 'Its window stays open so startup progress and errors remain visible.' -ForegroundColor DarkGray
 Write-Host 'It checks GitHub main before starting the app.' -ForegroundColor DarkGray
 Start-Sleep -Seconds 2
