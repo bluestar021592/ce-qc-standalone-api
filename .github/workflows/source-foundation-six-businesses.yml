@@ -9,10 +9,13 @@ on:
       - 'src/lightweightDashboardStore.js'
       - 'src/rangeDashboardStoreV31.js'
       - 'src/rangeDashboardStoreLegacy.js'
+      - 'public/app.js'
+      - 'public/dashboard-v18.js'
       - 'test/unified-import-v7.test.js'
       - 'test/unified-import-ceaf.test.js'
       - 'test/source-six-business-persistence.test.js'
       - 'test/ceaf-processing-routing.test.js'
+      - 'test/ceaf-ui-routing.test.js'
       - '.github/workflows/source-foundation-six-businesses.yml'
   workflow_dispatch:
 
@@ -27,5 +30,5 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: Run unified import source and CEAF routing tests
-        run: node --test test/unified-import-v7.test.js test/unified-import-ceaf.test.js test/source-six-business-persistence.test.js test/ceaf-processing-routing.test.js
+      - name: Run six-business source, processing and UI tests
+        run: node --test test/unified-import-v7.test.js test/unified-import-ceaf.test.js test/source-six-business-persistence.test.js test/ceaf-processing-routing.test.js test/ceaf-ui-routing.test.js
