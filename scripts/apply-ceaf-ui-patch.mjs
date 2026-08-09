@@ -46,8 +46,8 @@ patchFile('public/app.js', [
   },
   {
     label: 'sync six business snapshots',
-    before: "const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];",
-    after: "const types = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];"
+    before: "async function syncUnifiedSelection(reportDate, snapshotId, shouldRender = true) {\n  const normalizedDate = String(reportDate || '').trim();\n  const normalizedSnapshotId = String(snapshotId || '').trim();\n  if (!normalizedDate || !normalizedSnapshotId) return false;\n  const types = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];",
+    after: "async function syncUnifiedSelection(reportDate, snapshotId, shouldRender = true) {\n  const normalizedDate = String(reportDate || '').trim();\n  const normalizedSnapshotId = String(snapshotId || '').trim();\n  if (!normalizedDate || !normalizedSnapshotId) return false;\n  const types = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];"
   },
   {
     label: 'sync CCSL slice four',
@@ -122,7 +122,7 @@ patchFile('public/app.js', [
   {
     label: 'home CEAF business card',
     before: "['ce', 'CE', useSingleDayImportCounts ? Number(importedCounts.CE || 0) : (dashboardPeriodMode ? rangeBusinessCount('CE') : cc.total), 'green'],\n    ['tbkh', 'TBKH',",
-    after: "['ce', 'CE', useSingleDayImportCounts ? Number(importedCounts.CE || 0) : rangeBusinessCount('CE'), 'green'],\n    ['ceaf', 'CEAF空运', useSingleDayImportCounts ? Number(importedCounts.CEAF || 0) : rangeBusinessCount('CEAF'), 'blue'],\n    ['tbkh', 'TBKH',"
+    after: "['ce', 'CE', useSingleDayImportCounts ? Number(importedCounts.CE || 0) : (dashboardPeriodMode ? rangeBusinessCount('CE') : cc.total), 'green'],\n    ['ceaf', 'CEAF空运', useSingleDayImportCounts ? Number(importedCounts.CEAF || 0) : rangeBusinessCount('CEAF'), 'blue'],\n    ['tbkh', 'TBKH',"
   }
 ]);
 
