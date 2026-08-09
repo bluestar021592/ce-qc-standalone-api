@@ -34,8 +34,14 @@ jobs:
           if (-not (Test-Path 'CE_QC_Start.bat')) { throw 'CE_QC_Start.bat missing' }
           if (-not (Test-Path 'Install_CE_QC_Desktop_Shortcut.bat')) { throw 'shortcut installer missing' }
           $text = Get-Content 'tools/CE_QC_Start.ps1' -Raw
-          foreach ($required in @('fetch','origin','main','reset','--hard','origin/main','node_modules','bootstrap.js','5177','ListenerPid')) {
+          foreach ($required in @(
+            'fetch','origin','main','reset','--hard','origin/main','node_modules','bootstrap.js','5177',
+            'Get-PortOwnerPids','Stop-PortOwners','taskkill.exe','/T','/F','Start-CeQcBackend','Get-NetTCPConnection','netstat -ano'
+          )) {
             if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
+          }
+          if ($text -notmatch 'launchAttempt\s*=\s*1[\s\S]*launchAttempt\s*-le\s*2') {
+            throw 'launcher must retry backend startup once after a port collision'
           }
           $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
           foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.bat')) {
