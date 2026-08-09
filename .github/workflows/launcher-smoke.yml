@@ -32,13 +32,13 @@ jobs:
         shell: powershell
         run: |
           if (-not (Test-Path 'CE_QC_Start.bat')) { throw 'CE_QC_Start.bat missing' }
-          if (-not (Test-Path 'Install_CE_QC_Desktop_Shortcut.bat')) { throw 'shortcut installer missing' }
+          if (-not (Test-Path 'Install_CE_QC_Desktop_Shortcut.bat')) { throw 'desktop installer missing' }
           if (-not (Test-Path 'Start_CE_QC.ps1')) { throw 'protected runtime Start_CE_QC.ps1 missing' }
           $text = Get-Content 'tools/CE_QC_Start.ps1' -Raw
           foreach ($required in @(
             'fetch','origin','main','reset','--hard','origin/main','node_modules','5177',
             'Get-PortOwnerPids','Stop-PortOwners','Stop-LegacySupervisors','Get-CimInstance','taskkill.exe','/T','/F',
-            'Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','elseif'
+            'Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','elseif','CE_QC_LAUNCHER_TEST_MODE'
           )) {
             if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
           }
@@ -46,7 +46,7 @@ jobs:
             throw 'launcher contains bash/python-style elif; PowerShell requires elseif'
           }
           if ($text.Contains("Start-CeQcBackend") -or $text.Contains("ArgumentList @('bootstrap.js')")) {
-            throw 'desktop launcher must hand off to the protected Start_CE_QC.ps1 supervisor instead of launching Node directly'
+            throw 'desktop launcher must hand off to protected Start_CE_QC.ps1 instead of launching Node directly'
           }
           if ($text -match "stash','push','-u") {
             throw 'launcher must not stash/remove untracked local runtime or backup files'
@@ -55,23 +55,29 @@ jobs:
             if (-not $text.ToLowerInvariant().Contains($legacy)) { throw "launcher does not stop legacy supervisor token: $legacy" }
           }
           $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
-          foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.bat','cmd.exe','TargetPath','Arguments','CE_QC_APP_START_INSTALLING.lnk','Move-Item')) {
-            if (-not $installer.Contains($required)) { throw "installer missing shortcut token: $required" }
+          foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.ps1','EncodedCommand','.cmd','WriteAllLines')) {
+            if (-not $installer.Contains($required)) { throw "installer missing desktop CMD token: $required" }
           }
-          if ($installer -match '\$Shortcut\.TargetPath\s*=\s*\$Launcher') {
-            throw 'shortcut must not use a BAT file directly as WScript.Shell TargetPath'
+          if ($installer.Contains('CreateShortcut(')) {
+            throw 'installer must not rely on WScript.Shell .lnk creation anymore'
           }
-      - name: Create and verify Windows desktop shortcut
+      - name: Create and actually execute Windows desktop launcher
         shell: powershell
         run: |
-          $tempDesktop = Join-Path $env:RUNNER_TEMP 'ce-qc-shortcut-test'
+          $tempDesktop = Join-Path $env:RUNNER_TEMP 'ce-qc-desktop-launcher-test'
           New-Item -ItemType Directory -Path $tempDesktop -Force | Out-Null
           $env:CE_QC_SHORTCUT_DESKTOP = $tempDesktop
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'tools/Install_CE_QC_Desktop_Shortcut.ps1'
-          if ($LASTEXITCODE -ne 0) { throw "shortcut installer exited with $LASTEXITCODE" }
-          $links = @(Get-ChildItem -LiteralPath $tempDesktop -Filter '*.lnk')
-          if ($links.Count -ne 1) { throw "expected exactly one final .lnk file, found $($links.Count)" }
-          if ($links[0].Length -le 0) { throw 'created shortcut file is empty' }
-          if (Test-Path -LiteralPath (Join-Path $tempDesktop 'CE_QC_APP_START_INSTALLING.lnk')) {
-            throw 'temporary ASCII shortcut was not renamed/cleaned up'
+          if ($LASTEXITCODE -ne 0) { throw "desktop installer exited with $LASTEXITCODE" }
+
+          $launchers = @(Get-ChildItem -LiteralPath $tempDesktop -Filter '*.cmd')
+          if ($launchers.Count -ne 1) { throw "expected exactly one desktop .cmd launcher, found $($launchers.Count)" }
+          if ($launchers[0].Length -le 0) { throw 'desktop CMD launcher is empty' }
+          if (@(Get-ChildItem -LiteralPath $tempDesktop -Filter '*.lnk').Count -ne 0) { throw 'legacy .lnk should not remain' }
+
+          $env:CE_QC_LAUNCHER_TEST_MODE = '1'
+          $output = & cmd.exe /d /c ('"' + $launchers[0].FullName + '"') 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "desktop launcher exited with $LASTEXITCODE`n$output" }
+          if (-not $output.Contains('CE_QC_LAUNCHER_TEST_OK')) {
+            throw "desktop launcher did not reach CE_QC_Start.ps1`n$output"
           }
