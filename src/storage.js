@@ -1,14 +1,25 @@
 import { createDatabaseBackup } from './backup.js';
-import { initializeStore, loadAppState, resetAppState, saveAppState } from './store.js';
+import { loadAppState, resetAppState, saveAppState } from './store.js';
 
-initializeStore();
+// Do not initialize or materialize persisted app_state during module import.
+// Large historical installations can contain a very large legacy valueJson;
+// reading it before Express starts listening can make the launcher believe the
+// backend is dead. loadAppState() already initializes the store lazily when a
+// request actually needs the full mutable state.
 
 export async function loadState() {
   return normalizeState(loadAppState());
 }
 
 export async function saveState(state) {
-  saveAppState(normalizeState(state));
+  // Runtime CE API rows can contain photos, attachments, nested raw responses or
+  // other very large values. The business rules only need the normalized fields
+  // already copied onto each scan/event/final row. Persist a bounded checkpoint
+  // representation so a completed scan batch cannot fail with V8
+  // "Invalid string length" while JSON.stringify-ing the whole app state.
+  // The caller keeps its full in-memory state; only the durable checkpoint is
+  // compacted. SQLite normalized tables remain the authoritative resume source.
+  saveAppState(compactStateForPersistence(normalizeState(state)));
 }
 
 export async function resetState(confirmText = '') {
@@ -77,4 +88,54 @@ export function isExcludedBill(value) {
 
 function normalizeRows(rows) {
   return Array.isArray(rows) ? rows : [];
+}
+
+function compactStateForPersistence(state = {}) {
+  const summary = state.dailyParseSummary || state.daily?.summary || null;
+  const compactDaily = state.daily ? {
+    reportDate: state.reportDate || state.daily?.reportDate || '',
+    sourceName: state.sourceName || state.daily?.sourceName || '',
+    importedAt: state.daily?.importedAt || summary?.importedAt || '',
+    summary: sanitizeValue(summary)
+  } : null;
+  return {
+    ...state,
+    daily: compactDaily,
+    dailyParseSummary: sanitizeValue(state.dailyParseSummary),
+    dailyParseRows: sanitizeRows(state.dailyParseRows),
+    scanResults: sanitizeRows(state.scanResults),
+    trackEvents: sanitizeRows(state.trackEvents),
+    trackResults: sanitizeRows(state.trackResults),
+    finalRows: sanitizeRows(state.finalRows),
+    finalDiversionRows: sanitizeRows(state.finalDiversionRows),
+    historySummary: sanitizeRows(state.historySummary),
+    logs: (state.logs || []).map(value => truncateString(value, 4000)).slice(-300),
+    backupSummary: sanitizeValue(state.backupSummary),
+    lastRunSummary: sanitizeValue(state.lastRunSummary),
+    lastRun: sanitizeValue(state.lastRun)
+  };
+}
+
+function sanitizeRows(rows) {
+  return Array.isArray(rows) ? rows.map(row => sanitizeValue(row)) : [];
+}
+
+function sanitizeValue(value, depth = 0) {
+  if (value == null) return value;
+  if (typeof value === 'string') return truncateString(value, 16000);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (depth >= 6) return Array.isArray(value) ? `[ARRAY:${value.length}]` : '[OBJECT]';
+  if (Array.isArray(value)) return value.slice(0, 5000).map(item => sanitizeValue(item, depth + 1));
+  if (typeof value !== 'object') return String(value);
+  const result = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (/^(?:raw|rawJson|rawData|response|request|payload|events|trackEvents|exceptionItems|scanRaw|fileData|base64|image|images|photo|photos|attachment|attachments|signature|signatures)$/i.test(key)) continue;
+    result[key] = sanitizeValue(item, depth + 1);
+  }
+  return result;
+}
+
+function truncateString(value, limit) {
+  const text = String(value ?? '');
+  return text.length > limit ? `${text.slice(0, limit)}...[TRUNCATED ${text.length - limit}]` : text;
 }
