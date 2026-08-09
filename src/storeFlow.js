@@ -41,6 +41,8 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     }
     if (cycle?.state === 'SHOP_ARRIVED_CURRENT' && PENDING_RE.test(eventText(event))) {
       cycle.shopPendingAt ||= event.eventTime || '';
+      // Pending is a real new shop-side track node. It does not close the shop
+      // cycle, but it DOES reset the no-update retention clock.
       cycle.shopLastEventAt = event.eventTime || cycle.shopLastEventAt;
       cycle.pending = true;
       cycle.reason = 'PENDING_AFTER_SHOP_ARRIVAL';
@@ -58,8 +60,19 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     cycle.state = 'CLOSED';
     cycle.reason = isPod ? 'POD_CLOSED' : 'RETURN_CLOSED';
   }
-  const retention = cycle.state === 'SHOP_ARRIVED_CURRENT'
+
+  // Two different clocks are intentionally preserved:
+  // - shopAgeNaturalDays: how long since the parcel first arrived at this shop.
+  // - shopRetentionNaturalDays: how long since the LAST valid shop-side node.
+  // QC abnormal retention must use the latter. A fresh Pending/inbound update today
+  // must never continue to display a 10/20-day stale retention inherited from the
+  // original arrival date.
+  const shopAge = cycle.state === 'SHOP_ARRIVED_CURRENT'
     ? elapsedInclusiveDays(cycle.shopArrivedAt, reportDate)
+    : 0;
+  const retentionAnchor = cycle.shopLastEventAt || cycle.shopArrivedAt;
+  const retention = cycle.state === 'SHOP_ARRIVED_CURRENT'
+    ? elapsedInclusiveDays(retentionAnchor, reportDate)
     : 0;
   const tags = [];
   if (cycle.state === 'SHOP_TRANSFER_IN_PROGRESS') tags.push('SHOP_TRANSFER_IN_PROGRESS');
@@ -78,6 +91,7 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     shopArrivedAt: cycle.shopArrivedAt,
     shopLastEventAt: cycle.shopLastEventAt,
     shopPendingAt: cycle.shopPendingAt,
+    shopAgeNaturalDays: shopAge,
     shopRetentionNaturalDays: retention,
     shopState: cycle.state,
     shopStateReason: cycle.reason,
@@ -90,7 +104,7 @@ export function emptyStoreFlow() {
   return {
     targetShopCode: '', currentShopCode: '', shopName: '', shopCycleId: '',
     shopTransferStartedAt: '', shopArrivedAt: '', shopLastEventAt: '', shopPendingAt: '',
-    shopRetentionNaturalDays: 0, shopState: '', shopStateReason: 'NO_STORE_CYCLE',
+    shopAgeNaturalDays: 0, shopRetentionNaturalDays: 0, shopState: '', shopStateReason: 'NO_STORE_CYCLE',
     whitelistVersion: SHOP_WHITELIST_VERSION, storeTags: []
   };
 }

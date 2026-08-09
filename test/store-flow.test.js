@@ -27,17 +27,21 @@ test('arrival changes transit to current store and calculates natural days', () 
   ] });
   assert.equal(result.shopState, 'SHOP_ARRIVED_CURRENT');
   assert.equal(result.currentShopCode, TEST_SHOP);
+  assert.equal(result.shopAgeNaturalDays, 2);
   assert.equal(result.shopRetentionNaturalDays, 2);
 });
 
-test('pending at current store is an auxiliary state', () => {
+test('fresh Pending at current store resets no-update retention but preserves total shop age', () => {
   const result = analyzeStoreFlow({ shipmentCode: 'T3', reportDate: '2026-08-04', events: [
-    event('2026-08-03 10:00:00', `Outbound next node CEL:${TEST_SHOP}`),
-    event('2026-08-03 11:00:00', `Inbound CEL:${TEST_SHOP}`),
+    event('2026-07-25 10:00:00', `Outbound next node CEL:${TEST_SHOP}`),
+    event('2026-07-26 11:00:00', `Inbound CEL:${TEST_SHOP}`),
     event('2026-08-04 12:00:00', 'Pending 无法联系客户', TEST_SHOP)
   ] });
   assert.equal(result.shopState, 'SHOP_ARRIVED_CURRENT');
   assert.ok(result.storeTags.includes('SHOP_PENDING'));
+  assert.ok(result.shopAgeNaturalDays > 5);
+  assert.equal(result.shopRetentionNaturalDays, 1);
+  assert.equal(result.storeTags.includes('SHOP_RETENTION_2_PLUS'), false);
 });
 
 test('normal hubs and fuzzy store names never become stores', () => {

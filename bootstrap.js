@@ -75,6 +75,8 @@ try {
   await import('./src/v28ResumeGuardPatch.js');
   await import('./src/v28RuntimePatch.js');
   await import('./src/v29DataConsistencyPatch.js');
+  await import('./src/v29BusinessRulesPatch.js');
+  await import('./src/v29EndpointAliasPatch.js');
   await import('./server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
