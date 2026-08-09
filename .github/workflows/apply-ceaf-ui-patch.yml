@@ -1,0 +1,39 @@
+name: Apply CEAF UI patch
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/apply-ceaf-ui-patch.mjs'
+      - '.github/workflows/apply-ceaf-ui-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/apply-ceaf-ui-patch.mjs
+      - name: Commit CEAF UI integration
+        shell: bash
+        run: |
+          TARGETS='public/app.js public/dashboard-v18.js'
+          if git diff --quiet -- $TARGETS; then
+            echo 'CEAF UI already patched'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add $TARGETS
+          git commit -m 'Expose CEAF across six-business UI'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
