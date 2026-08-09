@@ -198,14 +198,14 @@ function latestSnapshotCte() {`,
 
 replaceOnce(
 `function listCompletedDates(fromDate, toDate) {
-  return getDb().prepare(\`${latestSnapshotCte()} SELECT reportDate FROM latest ORDER BY reportDate\`).all(fromDate,toDate).map(row => row.reportDate);
+  return getDb().prepare(\`\${latestSnapshotCte()} SELECT reportDate FROM latest ORDER BY reportDate\`).all(fromDate,toDate).map(row => row.reportDate);
 }`,
 `function listSourceDates(fromDate, toDate) {
-  return getDb().prepare(\`${latestSourceCte()} SELECT reportDate FROM latest_source ORDER BY reportDate\`).all(fromDate,toDate).map(row => row.reportDate);
+  return getDb().prepare(\`\${latestSourceCte()} SELECT reportDate FROM latest_source ORDER BY reportDate\`).all(fromDate,toDate).map(row => row.reportDate);
 }
 
 function listCompletedDates(fromDate, toDate) {
-  return getDb().prepare(\`${latestSnapshotCte()} SELECT reportDate FROM latest ORDER BY reportDate\`).all(fromDate,toDate).map(row => row.reportDate);
+  return getDb().prepare(\`\${latestSnapshotCte()} SELECT reportDate FROM latest ORDER BY reportDate\`).all(fromDate,toDate).map(row => row.reportDate);
 }`,
 'source date list'
 );
