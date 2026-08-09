@@ -18,7 +18,7 @@ function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-v13-'));
 }
 
-test('V13 unified import accepts 收件人名称 after title rows, short filename date, five-business priority and province mapping', () => {
+test('V13 unified import accepts 收件人名称 after title rows, short filename date, six-business priority and province mapping', () => {
   const dir = tempDir();
   const file = path.join(dir, '日报表 (8-4).xls');
   const rows = Array.from({ length: 19 }, (_, index) => [index === 0 ? 'CE Express 综合日报' : '']);
@@ -34,7 +34,10 @@ test('V13 unified import accepts 收件人名称 after title rows, short filenam
   const result = parseUnifiedDailyExcel(file, { originalName: path.basename(file), referenceDate: '2026-08-07' });
   assert.equal(result.reportDate, '2026-08-04');
   assert.equal(result.dateDetectionSource, '文件名');
-  assert.deepEqual(result.classificationCounts, { CE: 1, TBKH: 1, ALI1688: 1, SHOPEECN: 1, SHOPEEVN: 2 });
+  assert.deepEqual(result.classificationCounts, { CE: 1, CEAF: 0, TBKH: 1, ALI1688: 1, SHOPEECN: 1, SHOPEEVN: 2 });
+  assert.equal(result.sourceReconciliation.balanced, true);
+  assert.equal(result.sourceReconciliation.validUniqueWaybills, 6);
+  assert.equal(result.sourceReconciliation.classifiedWaybills, 6);
   assert.equal(result.regionCounts.PP, 2);
   assert.equal(result.regionCounts.PV, 3);
   assert.equal(result.regionCounts.UNKNOWN, 1);
@@ -84,6 +87,7 @@ test('V13 recipient value heuristic supports unfamiliar recipient header when ta
   const result = parseUnifiedDailyExcel(file, { originalName: path.basename(file) });
   assert.equal(result.classificationCounts.SHOPEECN, 1);
   assert.equal(result.classificationCounts.CE, 1);
+  assert.equal(result.classificationCounts.CEAF, 0);
   assert.equal(result.sheetDiagnostics[0]?.detectedColumns?.recipientDetection, 'VALUE_HEURISTIC');
 });
 
