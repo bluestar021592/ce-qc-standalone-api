@@ -1,0 +1,26 @@
+name: CE QC CCSL waybill resume
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/pipeline.js'
+      - 'src/trackBatching.js'
+      - 'test/ccsl-waybill-resume.test.js'
+      - '.github/workflows/ccsl-waybill-resume.yml'
+  workflow_dispatch:
+
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: node --check src/pipeline.js
+      - run: node --test test/ccsl-waybill-resume.test.js
