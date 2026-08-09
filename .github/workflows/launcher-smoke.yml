@@ -36,9 +36,12 @@ jobs:
           $text = Get-Content 'tools/CE_QC_Start.ps1' -Raw
           foreach ($required in @(
             'fetch','origin','main','reset','--hard','origin/main','node_modules','bootstrap.js','5177',
-            'Get-PortOwnerPids','Stop-PortOwners','taskkill.exe','/T','/F','Start-CeQcBackend','Get-NetTCPConnection','netstat -ano'
+            'Get-PortOwnerPids','Stop-PortOwners','taskkill.exe','/T','/F','Start-CeQcBackend','Get-NetTCPConnection','netstat -ano','elseif'
           )) {
             if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
+          }
+          if ($text -match '(?m)^\s*elif\s*\(') {
+            throw 'launcher contains bash/python-style elif; PowerShell requires elseif'
           }
           if ($text -notmatch 'launchAttempt\s*=\s*1[\s\S]*launchAttempt\s*-le\s*2') {
             throw 'launcher must retry backend startup once after a port collision'

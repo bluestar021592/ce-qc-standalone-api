@@ -187,7 +187,7 @@ if ($Updated -and $DependenciesChanged) {
   & npm ci --no-audit --no-fund
   if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
 }
-elif (-not (Test-Path (Join-Path $ProjectRoot 'node_modules'))) {
+elseif (-not (Test-Path (Join-Path $ProjectRoot 'node_modules'))) {
   Write-Host ''
   Write-Host '[2/5] node_modules missing. Running npm ci...' -ForegroundColor Yellow
   & npm ci --no-audit --no-fund
