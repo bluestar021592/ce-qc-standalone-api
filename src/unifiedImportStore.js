@@ -4,16 +4,18 @@ import { SHOPEE, getMatchingBusinessSnapshot, loadBusinessState } from './busine
 import { analyzeStoreFlow } from './storeFlow.js';
 import { loadAppState } from './store.js';
 
+const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 let ccslSnapshotCache = { snapshotId: '', state: null };
 
 export function saveUnifiedImport(parsed, sourceName) {
+  assertSourceReconciliation(parsed);
   const db = getDb();
   const existing = db.prepare('SELECT * FROM unified_import_batches WHERE reportDate=? AND fileHash=? AND status=? ORDER BY createdAt DESC LIMIT 1').get(parsed.reportDate, parsed.fileHash, 'VALID');
   if (existing) return hydrateBatch(existing, true);
   const batchId = `BATCH-${crypto.randomUUID()}`;
   const snapshotId = `SNAP-${crypto.randomUUID()}`;
   const createdAt = nowIso();
-  const payload = { reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, containerFormat: parsed.containerFormat, classificationCounts: parsed.classificationCounts, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, rows: parsed.rows };
+  const payload = { reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, containerFormat: parsed.containerFormat, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, rows: parsed.rows };
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare("UPDATE unified_import_batches SET status='SUPERSEDED' WHERE reportDate=? AND status='VALID'").run(parsed.reportDate);
@@ -36,7 +38,7 @@ export function saveUnifiedImport(parsed, sourceName) {
     db.exec('ROLLBACK');
     throw error;
   }
-  return { batchId, snapshotId, reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, dateWasManuallyCorrected: parsed.dateWasManuallyCorrected, containerFormat: parsed.containerFormat, fileHash: parsed.fileHash, classificationCounts: parsed.classificationCounts, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, warnings: parsed.warnings, carryover: carryoverSummary(parsed.reportDate), duplicateFile: false };
+  return { batchId, snapshotId, reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, dateWasManuallyCorrected: parsed.dateWasManuallyCorrected, containerFormat: parsed.containerFormat, fileHash: parsed.fileHash, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, warnings: parsed.warnings, carryover: carryoverSummary(parsed.reportDate), duplicateFile: false };
 }
 
 export function getLatestUnifiedImport() {
@@ -64,11 +66,15 @@ export function listUnifiedImportHistory(limit = 120) {
 
 function hydrateBatch(row, duplicateFile) {
   const counts = getDb().prepare('SELECT businessType, COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType').all(row.batchId);
+  const classificationCounts = Object.assign(Object.fromEntries(BUSINESS_TYPES.map(type => [type, 0])), Object.fromEntries(counts.map(item => [item.businessType, Number(item.count)])));
+  const summary = JSON.parse(row.summaryJson || '{}');
+  const sourceReconciliation = buildSourceReconciliation(classificationCounts, summary.validUniqueWaybills);
   return {
     batchId: row.batchId, snapshotId: row.snapshotId, reportDate: row.reportDate, fileHash: row.fileHash,
-    classificationCounts: Object.assign({ CE: 0, TBKH: 0, ALI1688: 0, SHOPEECN: 0, SHOPEEVN: 0 }, Object.fromEntries(counts.map(item => [item.businessType, Number(item.count)]))),
+    classificationCounts,
+    sourceReconciliation,
     dateDetectionSource: row.dateDetectionSource || '', dateCandidates: JSON.parse(row.dateCandidatesJson || '[]'), dateConflict: JSON.parse(row.dateCandidatesJson || '[]').length > 1, dateWasManuallyCorrected: Boolean(row.dateWasManuallyCorrected),
-    regionCounts: JSON.parse(row.regionCountsJson || '{}'), summary: JSON.parse(row.summaryJson || '{}'), warnings: JSON.parse(row.warningsJson || '[]'), carryover: carryoverSummary(row.reportDate), duplicateFile
+    regionCounts: JSON.parse(row.regionCountsJson || '{}'), summary, warnings: JSON.parse(row.warningsJson || '[]'), carryover: carryoverSummary(row.reportDate), duplicateFile
   };
 }
 
@@ -138,9 +144,11 @@ export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shope
   payload.finalRows = partitionedRows.dailyRows;
   payload.historicalCarryRows = partitionedRows.historicalCarryRows;
   payload.dashboard = { CCSL: ccslSnapshot?.view || null, SHOPEE: shopeeSnapshot?.view || null };
-  const expectedCounts = Object.fromEntries(db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(row.snapshotId).map(item => [item.businessType, Number(item.count)]));
-  const businessTypes = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
-  const actualCounts = Object.fromEntries(businessTypes.map(type => [type, payload.finalRows.filter(item => item.businessType === type).length]));
+  const expectedCounts = Object.fromEntries(BUSINESS_TYPES.map(type => [type, 0]));
+  for (const item of db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(row.snapshotId)) {
+    expectedCounts[item.businessType] = Number(item.count);
+  }
+  const actualCounts = Object.fromEntries(BUSINESS_TYPES.map(type => [type, payload.finalRows.filter(item => item.businessType === type).length]));
   const uniqueBills = new Set(payload.finalRows.map(codeOf).filter(Boolean));
   const podRows = payload.finalRows.filter(isPodRow);
   const returnedRows = payload.finalRows.filter(isReturnCompletedRow);
@@ -155,11 +163,13 @@ export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shope
     && String(shopeeSnapshot.status || 'VALID') === 'VALID'
     && String(shopeeSnapshot.reconciliationStatus || 'COMPLETED') === 'COMPLETED'
   );
-  const countChecks = Object.fromEntries(businessTypes.map(type => [type, actualCounts[type] === Number(expectedCounts[type] || 0)]));
+  const countChecks = Object.fromEntries(BUSINESS_TYPES.map(type => [type, actualCounts[type] === Number(expectedCounts[type] || 0)]));
   const retryCount = payload.finalRows.filter(isRetryRow).length;
+  const sourceReconciliation = buildSourceReconciliation(expectedCounts, typeByBill.size);
   const validationPassed = sourceSnapshotsValid
+    && sourceReconciliation.balanced
     && uniqueBills.size === payload.finalRows.length
-    && payload.finalRows.length === Object.values(expectedCounts).reduce((sum, value) => sum + Number(value || 0), 0)
+    && payload.finalRows.length === sourceReconciliation.validUniqueWaybills
     && Object.values(countChecks).every(Boolean)
     && podInboundIntersection.length === 0
     && returnInboundIntersection.length === 0;
@@ -168,7 +178,7 @@ export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shope
     runId: parentRunId,
     reportDate,
     status: validationPassed ? 'COMPLETED' : 'FAILED_RECONCILIATION',
-    children: Object.fromEntries(businessTypes.map(type => [type, {
+    children: Object.fromEntries(BUSINESS_TYPES.map(type => [type, {
       businessType: type,
       expected: Number(expectedCounts[type] || 0),
       completed: actualCounts[type],
@@ -185,8 +195,10 @@ export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shope
   ];
   payload.validationStatus = validationPassed ? 'VALID' : 'INVALID';
   payload.reconciliationStatus = validationPassed ? 'COMPLETED' : 'FAILED';
+  payload.sourceReconciliation = sourceReconciliation;
   payload.reconciliation = {
     expectedCounts, actualCounts, uniqueFinalRows: uniqueBills.size, retryCount,
+    sourceReconciliation,
     podCount: podRows.length, returnCompletedCount: returnedRows.length,
     inboundNoScanCount: inboundNoScanRows.length,
     podInboundIntersection, returnInboundIntersection,
@@ -387,7 +399,7 @@ export function loadUnifiedPeriodBusinessState(businessType, fromDate, toDate) {
 
 function normalizeBusinessType(value) {
   const type = String(value || '').toUpperCase();
-  if (!['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].includes(type)) throw new Error('不支持的业务类型');
+  if (!BUSINESS_TYPES.includes(type)) throw new Error('不支持的业务类型');
   return type;
 }
 
@@ -469,4 +481,26 @@ function isInboundNoScanRow(row = {}) {
 
 function isRetryRow(row = {}) {
   return /RETRY|FAILED|失败|待重试/i.test(String(row.apiStatus || row.API状态 || row.查询状态 || ''));
+}
+
+function buildSourceReconciliation(classificationCounts = {}, validUniqueWaybills = 0) {
+  const normalizedCounts = Object.fromEntries(BUSINESS_TYPES.map(type => [type, Number(classificationCounts[type] || 0)]));
+  const classifiedWaybills = Object.values(normalizedCounts).reduce((sum, count) => sum + count, 0);
+  const validUnique = Number(validUniqueWaybills || 0);
+  return {
+    businessTypes: [...BUSINESS_TYPES],
+    validUniqueWaybills: validUnique,
+    classifiedWaybills,
+    difference: classifiedWaybills - validUnique,
+    balanced: classifiedWaybills === validUnique
+  };
+}
+
+function assertSourceReconciliation(parsed = {}) {
+  const sourceReconciliation = parsed.sourceReconciliation || buildSourceReconciliation(parsed.classificationCounts, parsed.summary?.validUniqueWaybills);
+  if (sourceReconciliation.balanced === true) return;
+  const error = new Error(`日报源数据分类守恒失败：有效唯一运单${Number(sourceReconciliation.validUniqueWaybills || 0)}票，六板块合计${Number(sourceReconciliation.classifiedWaybills || 0)}票`);
+  error.code = 'SOURCE_CLASSIFICATION_RECONCILIATION_FAILED';
+  error.sourceReconciliation = sourceReconciliation;
+  throw error;
 }
