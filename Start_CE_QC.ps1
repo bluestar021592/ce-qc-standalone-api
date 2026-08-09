@@ -168,7 +168,9 @@ function Wait-BackendReady($Backend, [int]$Seconds = 60) {
                 }
             } catch {}
         }
-        if ($Backend.HasExited) {
+        $alive = $false
+        try { $alive = $null -ne (Get-Process -Id $Backend.Id -ErrorAction SilentlyContinue) } catch {}
+        if (-not $alive) {
             Start-Sleep -Milliseconds 300
             break
         }
@@ -193,6 +195,19 @@ function Test-AddressInUseLog {
     } catch { return $false }
 }
 
+function Test-BackendProcessAlive($Backend) {
+    if (-not $Backend -or -not $Backend.Id) { return $false }
+    try { return $null -ne (Get-Process -Id $Backend.Id -ErrorAction SilentlyContinue) } catch { return $false }
+}
+
+function Get-BackendExitCode($Backend) {
+    try {
+        $Backend.Refresh()
+        if ($Backend.HasExited) { return [int]$Backend.ExitCode }
+    } catch {}
+    return -1
+}
+
 Write-Host ''
 Write-Host 'Starting backend and waiting for the local web application...' -ForegroundColor Cyan
 try { $Backend = Start-BackendInstance } catch { Fail "[ERROR] Unable to start Node.js backend: $($_.Exception.Message)" 17 }
@@ -212,7 +227,7 @@ if (-not $Probe.Ready) {
     Archive-BackendLogs 'initial_start_failure'
     Write-Host ''
     Write-Host '[ERROR] Backend did not become reachable on 127.0.0.1:5177.' -ForegroundColor Red
-    if ($Backend.HasExited) { Write-Host "Node process exited early. Exit code: $($Backend.ExitCode)" -ForegroundColor Red }
+    if (-not (Test-BackendProcessAlive $Backend)) { Write-Host "Node process exited early. Exit code: $(Get-BackendExitCode $Backend)" -ForegroundColor Red }
     else {
         Write-Host 'Node process is running but the local web application is unreachable.' -ForegroundColor Red
         Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue
@@ -246,43 +261,58 @@ if (-not $env:CI) { try { Start-Process $LocalUrl | Out-Null } catch {} }
 
 $RestartTimes = New-Object System.Collections.Generic.List[datetime]
 while ($true) {
-    while (-not $Backend.HasExited) { Start-Sleep -Seconds 2 }
+    try {
+        while (Test-BackendProcessAlive $Backend) { Start-Sleep -Seconds 2 }
 
-    $ExitCode = $Backend.ExitCode
-    Archive-BackendLogs "exit_$ExitCode"
-    Write-Host ''
-    Write-Host "[WARN] CE QC backend stopped. Exit code: $ExitCode" -ForegroundColor Red
-    Show-RecentBackendLogs
-
-    $now = Get-Date
-    $recent = @($RestartTimes | Where-Object { $_ -gt $now.AddMinutes(-10) })
-    $RestartTimes.Clear()
-    foreach ($time in $recent) { $RestartTimes.Add($time) }
-    if ($RestartTimes.Count -ge 5) {
-        Fail '[ERROR] Backend crashed 5 times within 10 minutes. Automatic restart stopped to prevent a crash loop. Send this screen and logs\crashes to ChatGPT.' 19
-    }
-    $RestartTimes.Add($now)
-
-    Write-Host ''
-    Write-Host "Automatic recovery: restarting backend in 3 seconds... ($($RestartTimes.Count)/5)" -ForegroundColor Yellow
-    Start-Sleep -Seconds 3
-
-    Clear-CeQcPort 5177
-    try { $Backend = Start-BackendInstance } catch {
-        Write-Host "[WARN] Restart process creation failed: $($_.Exception.Message)" -ForegroundColor Red
-        Start-Sleep -Seconds 3
-        continue
-    }
-
-    $Probe = Wait-BackendReady $Backend 45
-    if ($Probe.Ready) {
+        $ExitCode = Get-BackendExitCode $Backend
+        Archive-BackendLogs "exit_$ExitCode"
         Write-Host ''
-        Write-Host 'BACKEND RECOVERED - browser can reconnect automatically.' -ForegroundColor Green
-        Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green
-        continue
-    }
+        Write-Host "[WARN] CE QC backend stopped. Exit code: $ExitCode" -ForegroundColor Red
+        Show-RecentBackendLogs
 
-    Archive-BackendLogs 'restart_not_ready'
-    if (-not $Backend.HasExited) { Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue }
-    Write-Host '[WARN] Restarted process did not become ready; supervisor will retry.' -ForegroundColor Red
+        $now = Get-Date
+        $recent = @($RestartTimes | Where-Object { $_ -gt $now.AddMinutes(-10) })
+        $RestartTimes.Clear()
+        foreach ($time in $recent) { $RestartTimes.Add($time) }
+        if ($RestartTimes.Count -ge 5) {
+            Fail '[ERROR] Backend crashed 5 times within 10 minutes. Automatic restart stopped to prevent a crash loop. Send this screen and logs\crashes to ChatGPT.' 19
+        }
+        $RestartTimes.Add($now)
+
+        Write-Host ''
+        Write-Host "Automatic recovery: restarting backend in 3 seconds... ($($RestartTimes.Count)/5)" -ForegroundColor Yellow
+        Start-Sleep -Seconds 3
+
+        Clear-CeQcPort 5177
+        try { $Backend = Start-BackendInstance } catch {
+            Write-Host "[WARN] Restart process creation failed: $($_.Exception.Message)" -ForegroundColor Red
+            Start-Sleep -Seconds 3
+            continue
+        }
+
+        $Probe = Wait-BackendReady $Backend 45
+        if ($Probe.Ready) {
+            Write-Host ''
+            Write-Host 'BACKEND RECOVERED - browser can reconnect automatically.' -ForegroundColor Green
+            Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green
+            continue
+        }
+
+        Archive-BackendLogs 'restart_not_ready'
+        if (Test-BackendProcessAlive $Backend) { Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue }
+        Write-Host '[WARN] Restarted process did not become ready; supervisor will retry.' -ForegroundColor Red
+    }
+    catch {
+        Write-Host ''
+        Write-Host "[WARN] Runtime supervisor monitor recovered from an internal error: $($_.Exception.Message)" -ForegroundColor Yellow
+        try {
+            if (Test-BackendProcessAlive $Backend) {
+                Write-Host 'Backend is still running. Supervisor monitor will continue.' -ForegroundColor Green
+                Start-Sleep -Seconds 2
+                continue
+            }
+        } catch {}
+        Write-Host 'Backend state is not healthy. Supervisor will re-enter recovery flow.' -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+    }
 }
