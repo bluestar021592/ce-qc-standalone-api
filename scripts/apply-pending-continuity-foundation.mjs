@@ -104,3 +104,42 @@ if (occurrences === 2) {
   throw new Error(`range dashboard pendingNonContinuous: expected 2 legacy matches, got ${occurrences}`);
 }
 fs.writeFileSync('src/rangeDashboardStoreV31.js', range, 'utf8');
+
+patchFile('src/rangeDashboardStoreV31.js', [
+  {
+    label: 'Shopee dashboard row exposes pending non-continuity',
+    before: `      ['Pending1+', m.pending1], ['Pending2+', m.pending2], ['Pending3+', m.pending3plus],
+      ['OC1+', m.oc1],`,
+    after: `      ['Pending1+', m.pending1], ['Pending2+', m.pending2], ['Pending3+', m.pending3plus], ['Pending不连续', m.pendingNonContinuous],
+      ['OC1+', m.oc1],`
+  },
+  {
+    label: 'Shopee group detail count exposes pending non-continuity',
+    before: `    all: metrics.total, pod: metrics.pod, pending1: metrics.pending1, pending2: metrics.pending2, pending3: metrics.pending3plus,
+    oc1: metrics.oc1,`,
+    after: `    all: metrics.total, pod: metrics.pod, pending1: metrics.pending1, pending2: metrics.pending2, pending3: metrics.pending3plus, pendingNonContinuous: metrics.pendingNonContinuous,
+    oc1: metrics.oc1,`
+  },
+  {
+    label: 'Shopee summary carries pending non-continuity',
+    before: `    pending1: sum(rows, 'pending1'), pending2: sum(rows, 'pending2'), pending3plus: sum(rows, 'pending3'),
+    oc1: sum(rows, 'oc1'),`,
+    after: `    pending1: sum(rows, 'pending1'), pending2: sum(rows, 'pending2'), pending3plus: sum(rows, 'pending3'), pendingNonContinuous: sum(rows, 'pendingNonContinuous'),
+    oc1: sum(rows, 'oc1'),`
+  },
+  {
+    label: 'Shopee history carries pending non-continuity',
+    before: `      [\`${'${prefix}'}_Pending3+\`]: metrics.pending3plus, [\`${'${prefix}'}_OC1+\`]: metrics.oc1,`,
+    after: `      [\`${'${prefix}'}_Pending3+\`]: metrics.pending3plus, [\`${'${prefix}'}_Pending不连续\`]: metrics.pendingNonContinuous, [\`${'${prefix}'}_OC1+\`]: metrics.oc1,`
+  },
+  {
+    label: 'Shopee range tab carries pending non-continuity',
+    before: `    tabs[\`${'${group}'}_pending3\`]={label:\`${'${group}'}Pending3+\`,rows:[],total:m.pending3plus}; tabs[\`${'${group}'}_oc1\`]={label:\`${'${group}'}OC1+\`,rows:[],total:m.oc1};`,
+    after: `    tabs[\`${'${group}'}_pending3\`]={label:\`${'${group}'}Pending3+\`,rows:[],total:m.pending3plus}; tabs[\`${'${group}'}_pendingNonContinuous\`]={label:\`${'${group}'}Pending不连续\`,rows:[],total:m.pendingNonContinuous}; tabs[\`${'${group}'}_oc1\`]={label:\`${'${group}'}OC1+\`,rows:[],total:m.oc1};`
+  },
+  {
+    label: 'Shopee tab key maps pending non-continuity',
+    before: `  return ({ '今日总单':'all','今日POD':'pod','POD率':'pod','首派成功率':'firstAttempt','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3',`,
+    after: `  return ({ '今日总单':'all','今日POD':'pod','POD率':'pod','首派成功率':'firstAttempt','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','Pending不连续':'pendingNonContinuous',`
+  }
+]);
