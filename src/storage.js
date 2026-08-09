@@ -17,9 +17,20 @@ export async function saveState(state) {
   // already copied onto each scan/event/final row. Persist a bounded checkpoint
   // representation so a completed scan batch cannot fail with V8
   // "Invalid string length" while JSON.stringify-ing the whole app state.
-  // The caller keeps its full in-memory state; only the durable checkpoint is
-  // compacted. SQLite normalized tables remain the authoritative resume source.
-  saveAppState(compactStateForPersistence(normalizeState(state)));
+  //
+  // CCSL can discover POD in the trajectory after the scan result was already
+  // created. Older pipeline builds then temporarily had both the scan-derived POD
+  // row and the richer trajectory-derived POD row in finalRows. The final state is
+  // one shipment = one row, so normalize/dedupe before persistence AND copy the
+  // normalized rows back to the caller. server.js creates the immutable snapshot
+  // immediately after saveState(), therefore this also prevents a duplicate-only
+  // snapshot reconciliation failure without re-querying CE APIs.
+  const normalized = normalizeState(state);
+  if (state && typeof state === 'object') {
+    state.finalRows = normalized.finalRows;
+    state.finalDiversionRows = normalized.finalDiversionRows;
+  }
+  saveAppState(compactStateForPersistence(normalized));
 }
 
 export async function resetState(confirmText = '') {
@@ -37,7 +48,7 @@ export async function resetState(confirmText = '') {
 export function normalizeState(s = {}) {
   const dailySummary = s.dailyParseSummary || s.daily?.summary || null;
   const dailyRows = Array.isArray(s.dailyParseRows) ? s.dailyParseRows : (Array.isArray(s.daily?.details) ? s.daily.details : []);
-  const finalRows = Array.isArray(s.finalRows) ? s.finalRows : [];
+  const finalRows = dedupeRowsByBill(Array.isArray(s.finalRows) ? s.finalRows : []);
   const nextCarryBills = cleanMainBills(s.nextCarryBills || s.carryBills || []);
 
   return {
@@ -59,7 +70,7 @@ export function normalizeState(s = {}) {
     trackResults: normalizeRows(s.trackResults),
     finalRows,
     nextCarryBills,
-    finalDiversionRows: normalizeRows(s.finalDiversionRows),
+    finalDiversionRows: dedupeRowsByBill(normalizeRows(s.finalDiversionRows)),
     backupImportedAt: s.backupImportedAt || '',
     backupSummary: s.backupSummary || null,
     historySummary: Array.isArray(s.historySummary) ? s.historySummary.slice(-30) : [],
@@ -88,6 +99,33 @@ export function isExcludedBill(value) {
 
 function normalizeRows(rows) {
   return Array.isArray(rows) ? rows : [];
+}
+
+function dedupeRowsByBill(rows = []) {
+  const output = [];
+  const positionByBill = new Map();
+  for (const row of rows || []) {
+    const bill = rowBill(row);
+    if (!bill) {
+      // Keep malformed rows visible so consistency checks can still report them.
+      output.push(row);
+      continue;
+    }
+    if (positionByBill.has(bill)) {
+      // Later rows win. In the CCSL pipeline the trajectory-derived result is
+      // appended after the scan-derived placeholder, so it preserves richer final
+      // status/evidence when POD is discovered by trajectory status code 80.
+      output[positionByBill.get(bill)] = row;
+      continue;
+    }
+    positionByBill.set(bill, output.length);
+    output.push(row);
+  }
+  return output;
+}
+
+function rowBill(row = {}) {
+  return String(row?.运单号 || row?.shipmentCode || row?.waybill || row?.billNo || '').trim().toUpperCase();
 }
 
 function compactStateForPersistence(state = {}) {
