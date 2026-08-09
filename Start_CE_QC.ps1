@@ -50,24 +50,86 @@ if ($NeedInstall) {
     if ($LASTEXITCODE -ne 0) { Fail '[ERROR] npm ci failed.' 16 }
 }
 
-Write-Host 'Checking port 5177...' -ForegroundColor Cyan
-try {
-    $listeners = Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction SilentlyContinue
-    foreach ($listener in $listeners) {
-        if ($listener.OwningProcess -and $listener.OwningProcess -ne $PID) {
-            Write-Host "Stopping old listener PID $($listener.OwningProcess)..." -ForegroundColor Yellow
-            Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
-        }
-    }
-} catch { Write-Host 'Port pre-cleanup could not be completed; startup will continue.' -ForegroundColor Yellow }
-Start-Sleep -Seconds 1
-
 $LogDir = Join-Path $ProjectRoot 'logs'
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 $LogFile = Join-Path $LogDir 'startup_latest.log'
 $ErrFile = Join-Path $LogDir 'startup_error.log'
 $CrashDir = Join-Path $LogDir 'crashes'
+$RuntimePidFile = Join-Path $LogDir 'runtime_supervisor.pid'
 New-Item -ItemType Directory -Path $CrashDir -Force | Out-Null
+try { [IO.File]::WriteAllText($RuntimePidFile, [string]$PID, [Text.Encoding]::ASCII) } catch {}
+
+function Get-PortOwnerPids([int]$Port) {
+    $result = @()
+    try {
+        $result += @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.OwningProcess })
+    } catch {}
+    if ($result.Count -eq 0) {
+        try {
+            $pattern = ":$Port\s+.*LISTENING\s+(\d+)\s*$"
+            foreach ($line in @(netstat -ano -p tcp 2>$null)) {
+                $match = [regex]::Match([string]$line, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                if ($match.Success) { $result += [int]$match.Groups[1].Value }
+            }
+        } catch {}
+    }
+    return @($result | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+}
+
+function Stop-Tree([int]$ProcessId, [string]$Reason) {
+    if ($ProcessId -le 0 -or $ProcessId -eq $PID) { return }
+    Write-Host "Stopping $Reason PID $ProcessId..." -ForegroundColor Yellow
+    try { & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null } catch {}
+    try { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+}
+
+function Get-ShellSupervisor([int]$ProcessId) {
+    try {
+        $child = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+        if (-not $child) { return $null }
+        $parentId = [int]$child.ParentProcessId
+        if ($parentId -le 0 -or $parentId -eq $PID) { return $null }
+        $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$parentId" -ErrorAction SilentlyContinue
+        if (-not $parent) { return $null }
+        $name = ([string]$parent.Name).ToLowerInvariant()
+        if ($name -match '^(powershell|pwsh|cmd)\.exe$') { return $parent }
+    } catch {}
+    return $null
+}
+
+function Clear-CeQcPort([int]$Port) {
+    $freePasses = 0
+    for ($attempt = 1; $attempt -le 18; $attempt++) {
+        $owners = @(Get-PortOwnerPids $Port)
+        if ($owners.Count -eq 0) {
+            $freePasses += 1
+            if ($freePasses -ge 3) { return }
+            Start-Sleep -Milliseconds 700
+            continue
+        }
+
+        $freePasses = 0
+        foreach ($ownerPid in $owners) {
+            if ($ownerPid -eq $PID) { continue }
+            $supervisor = Get-ShellSupervisor $ownerPid
+            if ($supervisor) {
+                Stop-Tree ([int]$supervisor.ProcessId) "old CE QC supervisor for port $Port"
+            } else {
+                Stop-Tree $ownerPid "old listener on port $Port"
+            }
+        }
+        Start-Sleep -Milliseconds 900
+    }
+
+    $remaining = @(Get-PortOwnerPids $Port)
+    if ($remaining.Count -gt 0) {
+        Fail "[ERROR] Port $Port is still occupied after supervisor cleanup: $($remaining -join ',')" 20
+    }
+}
+
+Write-Host 'Checking port 5177...' -ForegroundColor Cyan
+Clear-CeQcPort 5177
+Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
 
 $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
@@ -94,7 +156,6 @@ function Wait-BackendReady($Backend, [int]$Seconds = 60) {
     $status = 0
     for ($i = 1; $i -le $Seconds; $i++) {
         Start-Sleep -Seconds 1
-        if ($Backend.HasExited) { break }
         try {
             $Response = Invoke-WebRequest $LocalUrl -UseBasicParsing -TimeoutSec 2
             $status = [int]$Response.StatusCode
@@ -106,6 +167,10 @@ function Wait-BackendReady($Backend, [int]$Seconds = 60) {
                     if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
                 }
             } catch {}
+        }
+        if ($Backend.HasExited) {
+            Start-Sleep -Milliseconds 300
+            break
         }
     }
     return @{ Ready = $false; Status = $status }
@@ -120,10 +185,28 @@ function Show-RecentBackendLogs {
     if (Test-Path -LiteralPath $ErrFile) { Get-Content -LiteralPath $ErrFile -Tail 160 -ErrorAction SilentlyContinue }
 }
 
+function Test-AddressInUseLog {
+    if (-not (Test-Path -LiteralPath $ErrFile)) { return $false }
+    try {
+        $text = Get-Content -LiteralPath $ErrFile -Raw -ErrorAction SilentlyContinue
+        return [bool]($text -match 'EADDRINUSE|address already in use')
+    } catch { return $false }
+}
+
 Write-Host ''
 Write-Host 'Starting backend and waiting for the local web application...' -ForegroundColor Cyan
 try { $Backend = Start-BackendInstance } catch { Fail "[ERROR] Unable to start Node.js backend: $($_.Exception.Message)" 17 }
 $Probe = Wait-BackendReady $Backend 60
+
+if (-not $Probe.Ready -and (Test-AddressInUseLog)) {
+    Archive-BackendLogs 'address_in_use_first_attempt'
+    Write-Host ''
+    Write-Host '[WARN] Another old supervisor reclaimed port 5177. Removing it and retrying once...' -ForegroundColor Yellow
+    Clear-CeQcPort 5177
+    Start-Sleep -Seconds 1
+    try { $Backend = Start-BackendInstance } catch { Fail "[ERROR] Unable to retry Node.js backend: $($_.Exception.Message)" 21 }
+    $Probe = Wait-BackendReady $Backend 60
+}
 
 if (-not $Probe.Ready) {
     Archive-BackendLogs 'initial_start_failure'
@@ -161,9 +244,6 @@ Write-Host ''
 
 if (-not $env:CI) { try { Start-Process $LocalUrl | Out-Null } catch {} }
 
-# Supervise Node instead of letting a single unexpected exit permanently disconnect
-# the browser. Runtime state is persisted in SQLite/checkpoints, so a fresh Node process
-# is safer than continuing inside a process after an uncaught fatal error.
 $RestartTimes = New-Object System.Collections.Generic.List[datetime]
 while ($true) {
     while (-not $Backend.HasExited) { Start-Sleep -Seconds 2 }
@@ -187,6 +267,7 @@ while ($true) {
     Write-Host "Automatic recovery: restarting backend in 3 seconds... ($($RestartTimes.Count)/5)" -ForegroundColor Yellow
     Start-Sleep -Seconds 3
 
+    Clear-CeQcPort 5177
     try { $Backend = Start-BackendInstance } catch {
         Write-Host "[WARN] Restart process creation failed: $($_.Exception.Message)" -ForegroundColor Red
         Start-Sleep -Seconds 3
