@@ -1,6 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = 'CE QC APP START'
 
+if ($env:CE_QC_LAUNCHER_TEST_MODE -eq '1') {
+  Write-Host 'CE_QC_LAUNCHER_TEST_OK'
+  exit 0
+}
+
 function Write-Section([string]$Text) {
   Write-Host ''
   Write-Host ('=' * 58) -ForegroundColor Cyan
