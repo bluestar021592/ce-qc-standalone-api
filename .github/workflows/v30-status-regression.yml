@@ -26,8 +26,9 @@ jobs:
           node --check src/analyzerV30.js
           node --check src/shopeeAnalyzerV30.js
           node --check src/shopeeAnalyzerV31.js
+          node --check src/currentStatus.js
           node --check src/v30CarryRulesPatch.js
           node --check public/v29-data-consistency-fix.js
       - name: Run locked scan and trajectory status tests
         run: |
-          node --test test/v30-scan-track-code-separation.test.js test/v30-general-track-codes.test.js test/v11-terminal-isolation-return.test.js test/shopee-latest-track-classification.test.js
+          node --test test/v30-scan-track-code-separation.test.js test/v30-general-track-codes.test.js test/v11-terminal-isolation-return.test.js test/shopee-latest-track-classification.test.js test/v32-current-status-display.test.js
