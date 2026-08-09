@@ -23,7 +23,8 @@ test('V28 SHOPEE resume deletes persisted batch audit hashes but preserves per-w
   assert.match(resumePatch,/\/api\/shopee\/run\/resume/);
   assert.match(resumePatch,/DELETE FROM business_api_batches/);
   assert.match(resumePatch,/apiBatchStatus/);
-  assert.match(resumePatch,/saveBusinessState\(state, SHOPEE\)/);
+  assert.doesNotMatch(resumePatch,/saveBusinessState\s*\(/);
+  assert.match(resumePatch,/Invalid string length/);
   assert.match(resumePatch,/business_run_locks/);
   assert.doesNotMatch(resumePatch,/scanQueryStatus\s*=\s*\[\]/);
   assert.doesNotMatch(resumePatch,/eventQueryStatus\s*=\s*\[\]/);
