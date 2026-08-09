@@ -48,6 +48,34 @@ function Stop-ProcessTree([int]$ProcessId, [string]$Reason) {
   try { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue } catch {}
 }
 
+function Get-ShellSupervisorForProcess([int]$ProcessId) {
+  try {
+    $child = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    if (-not $child) { return $null }
+    $parentId = [int]$child.ParentProcessId
+    if ($parentId -le 0 -or $parentId -eq $PID) { return $null }
+    $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$parentId" -ErrorAction SilentlyContinue
+    if (-not $parent) { return $null }
+    $name = ([string]$parent.Name).ToLowerInvariant()
+    if ($name -match '^(powershell|pwsh|cmd)\.exe$') { return $parent }
+  }
+  catch {}
+  return $null
+}
+
+function Stop-RecordedRuntime([string]$RuntimePidFile) {
+  if (-not (Test-Path -LiteralPath $RuntimePidFile)) { return }
+  $raw = ''
+  try { $raw = (Get-Content -LiteralPath $RuntimePidFile -Raw -ErrorAction SilentlyContinue).Trim() } catch {}
+  $runtimePid = 0
+  if ([int]::TryParse($raw, [ref]$runtimePid) -and $runtimePid -gt 0 -and $runtimePid -ne $PID) {
+    $process = $null
+    try { $process = Get-CimInstance Win32_Process -Filter "ProcessId=$runtimePid" -ErrorAction SilentlyContinue } catch {}
+    if ($process) { Stop-ProcessTree $runtimePid 'recorded CE QC runtime supervisor' }
+  }
+  Remove-Item -LiteralPath $RuntimePidFile -Force -ErrorAction SilentlyContinue
+}
+
 function Stop-LegacySupervisors([string]$ProjectRoot) {
   $root = $ProjectRoot.ToLowerInvariant()
   $legacyTokens = @('start_ce_qc.ps1','start_ce_qc.cmd','run_ce_qc_v18_final_v5.bat','run_ce_qc_v18')
@@ -57,10 +85,10 @@ function Stop-LegacySupervisors([string]$ProjectRoot) {
       if (-not $_.CommandLine) { return $false }
       if ([int]$_.ProcessId -eq $PID) { return $false }
       $cmd = ([string]$_.CommandLine).ToLowerInvariant()
-      if (-not $cmd.Contains($root)) { return $false }
       foreach ($token in $legacyTokens) {
         if ($cmd.Contains($token)) { return $true }
       }
+      if ($cmd.Contains($root) -and $cmd.Contains('bootstrap.js')) { return $true }
       return $false
     })
   }
@@ -73,13 +101,19 @@ function Stop-LegacySupervisors([string]$ProjectRoot) {
 }
 
 function Stop-PortOwners([int]$Port) {
-  for ($attempt = 1; $attempt -le 8; $attempt++) {
+  for ($attempt = 1; $attempt -le 10; $attempt++) {
     $owners = @(Get-PortOwnerPids $Port)
     if ($owners.Count -eq 0) { return }
     foreach ($ownerPid in $owners) {
-      Stop-ProcessTree $ownerPid "port $Port owner"
+      $supervisor = Get-ShellSupervisorForProcess $ownerPid
+      if ($supervisor) {
+        Stop-ProcessTree ([int]$supervisor.ProcessId) "supervisor of port $Port owner"
+      }
+      else {
+        Stop-ProcessTree $ownerPid "port $Port owner"
+      }
     }
-    Start-Sleep -Milliseconds 650
+    Start-Sleep -Milliseconds 900
   }
   $remaining = @(Get-PortOwnerPids $Port)
   if ($remaining.Count -gt 0) {
@@ -95,6 +129,8 @@ $TimeStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $DependenciesChanged = $false
 $Updated = $false
 $SelfHashBefore = ''
+$LogDir = Join-Path $ProjectRoot 'logs'
+$RuntimePidFile = Join-Path $LogDir 'runtime_supervisor.pid'
 if (Test-Path -LiteralPath $SelfPath) {
   try { $SelfHashBefore = (Get-FileHash -LiteralPath $SelfPath -Algorithm SHA256).Hash } catch {}
 }
@@ -169,9 +205,12 @@ else {
 
 Write-Host ''
 Write-Host '[3/5] Stopping old CE QC runtime and taking port 5177...' -ForegroundColor Yellow
+Stop-RecordedRuntime $RuntimePidFile
 Stop-LegacySupervisors $ProjectRoot
 Stop-PortOwners $Port
-Write-Host 'Old CE QC runtime stopped. Port 5177 is free.' -ForegroundColor Green
+Start-Sleep -Seconds 2
+Stop-PortOwners $Port
+Write-Host 'Old CE QC runtime stopped. Port 5177 is stable and free.' -ForegroundColor Green
 
 $RuntimeScript = Join-Path $ProjectRoot 'Start_CE_QC.ps1'
 if (-not (Test-Path -LiteralPath $RuntimeScript)) { throw 'Start_CE_QC.ps1 is missing.' }
