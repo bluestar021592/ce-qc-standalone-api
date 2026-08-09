@@ -100,7 +100,7 @@ test('Shopee POD, return and empty scan response stop before track and require r
   const client = {
     confirmQuery: async () => [
       { shipmentCode: bills[0], orderStatus: 85 },
-      { shipmentCode: bills[1], orderStatus: 81 }
+      { shipmentCode: bills[1], orderStatus: 100 }
     ],
     trackQuery: async codes => {
       tracked.push(...codes);
