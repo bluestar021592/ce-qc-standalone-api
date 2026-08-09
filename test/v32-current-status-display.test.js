@@ -9,6 +9,13 @@ test('current status prefers latest structured state over historical QC category
     state: { primaryCategory: '三次Pending后未退回', Pending次数: 3 }
   }), 'CEZT滞留包裹');
 
+  // Reverse case: an old CEZT monitoring bucket must NOT override a newer
+  // structured Pending state.
+  assert.equal(latestEffectiveStatusLabel({
+    currentState: 'PENDING',
+    state: { primaryCategory: 'CEZT_RETENTION', Pending次数: 1 }
+  }), 'Pending');
+
   assert.equal(latestEffectiveStatusLabel({
     currentState: 'RETURN_IN_PROGRESS',
     state: { primaryCategory: '派送中停留', 退回状态: '退回处理中' }
