@@ -1,0 +1,35 @@
+name: CE QC launcher smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  launcher:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell launcher scripts
+        shell: pwsh
+        run: |
+          $files = @('tools/CE_QC_Start.ps1','tools/Install_CE_QC_Desktop_Shortcut.ps1')
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+              exit 1
+            }
+          }
+      - name: Verify stable launcher files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'CE_QC_Start.bat')) { throw 'CE_QC_Start.bat missing' }
+          if (-not (Test-Path 'Install_CE_QC_Desktop_Shortcut.bat')) { throw 'shortcut installer missing' }
+          $text = Get-Content 'tools/CE_QC_Start.ps1' -Raw
+          foreach ($required in @('fetch','origin','main','reset','--hard','origin/main','node_modules','bootstrap.js','5177')) {
+            if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
+          }
