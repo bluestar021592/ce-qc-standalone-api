@@ -17,6 +17,115 @@ function Run-Git([string[]]$Arguments, [switch]$AllowFailure) {
   return $code
 }
 
+function Get-PortOwnerPids([int]$Port) {
+  $result = @()
+  try {
+    $result += @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.OwningProcess })
+  }
+  catch {}
+
+  if ($result.Count -eq 0) {
+    try {
+      $pattern = ":$Port\s+.*LISTENING\s+(\d+)\s*$"
+      foreach ($line in @(netstat -ano -p tcp 2>$null)) {
+        $match = [regex]::Match([string]$line, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($match.Success) { $result += [int]$match.Groups[1].Value }
+      }
+    }
+    catch {}
+  }
+
+  return @($result | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+}
+
+function Describe-Process([int]$ProcessId) {
+  try {
+    $info = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction SilentlyContinue
+    if ($null -ne $info) {
+      return "PID=$ProcessId Name=$($info.Name) CommandLine=$($info.CommandLine)"
+    }
+  }
+  catch {}
+  return "PID=$ProcessId"
+}
+
+function Stop-PortOwners([int]$Port) {
+  for ($attempt = 1; $attempt -le 8; $attempt++) {
+    $owners = @(Get-PortOwnerPids $Port)
+    if ($owners.Count -eq 0) { return }
+
+    foreach ($ownerPid in $owners) {
+      if ($ownerPid -eq $PID) { continue }
+      Write-Host ("Stopping port owner: " + (Describe-Process $ownerPid)) -ForegroundColor DarkYellow
+
+      try {
+        & taskkill.exe /PID $ownerPid /T /F 2>$null | Out-Null
+      }
+      catch {}
+
+      try {
+        Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
+      }
+      catch {}
+    }
+
+    Start-Sleep -Milliseconds 650
+  }
+
+  $remaining = @(Get-PortOwnerPids $Port)
+  if ($remaining.Count -gt 0) {
+    $details = @($remaining | ForEach-Object { Describe-Process $_ }) -join ' | '
+    throw "Port $Port is still occupied after cleanup: $details"
+  }
+}
+
+function Test-AppReady([string]$Url) {
+  try {
+    $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
+    return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+  }
+  catch {
+    return $false
+  }
+}
+
+function Start-CeQcBackend([string]$NodePath, [string]$ProjectRoot, [string]$Url, [int]$Port) {
+  for ($launchAttempt = 1; $launchAttempt -le 2; $launchAttempt++) {
+    Stop-PortOwners $Port
+    Start-Sleep -Milliseconds 450
+
+    $backend = Start-Process -FilePath $NodePath -ArgumentList @('bootstrap.js') -WorkingDirectory $ProjectRoot -PassThru
+    $ready = $false
+
+    for ($i = 0; $i -lt 50; $i++) {
+      Start-Sleep -Milliseconds 400
+      if (Test-AppReady $Url) {
+        $ready = $true
+        break
+      }
+      if ($backend.HasExited) { break }
+    }
+
+    if ($ready) { return $backend }
+
+    if (-not $backend.HasExited) {
+      try { Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue } catch {}
+    }
+
+    if ($launchAttempt -lt 2) {
+      Write-Host 'Backend start collided with an old listener. Cleaning port and retrying once...' -ForegroundColor DarkYellow
+      Stop-PortOwners $Port
+      Start-Sleep -Milliseconds 900
+      continue
+    }
+
+    if ($backend.HasExited) {
+      throw "CE QC backend exited during startup. ExitCode=$($backend.ExitCode)"
+    }
+    throw "CE QC backend did not answer at $Url within the startup window."
+  }
+}
+
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 $Port = 5177
@@ -89,50 +198,15 @@ else {
 }
 
 Write-Host ''
-Write-Host "[3/5] Checking local port $Port..." -ForegroundColor Yellow
-try {
-  $Listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-  foreach ($Listener in $Listeners) {
-    $ListenerPid = [int]$Listener.OwningProcess
-    if ($ListenerPid -le 0) { continue }
-    $Info = Get-CimInstance Win32_Process -Filter "ProcessId=$ListenerPid" -ErrorAction SilentlyContinue
-    $CommandLine = [string]$Info.CommandLine
-    if ($CommandLine -match 'bootstrap\.js|server\.js|ce-qc-standalone-api') {
-      Write-Host "Stopping previous CE QC backend PID $ListenerPid..." -ForegroundColor DarkYellow
-      Stop-Process -Id $ListenerPid -Force -ErrorAction SilentlyContinue
-      Start-Sleep -Milliseconds 700
-    }
-  }
-}
-catch {
-  Write-Host 'Port inspection was not fully available; continuing safely.' -ForegroundColor DarkYellow
-}
+Write-Host "[3/5] Taking ownership of local port $Port..." -ForegroundColor Yellow
+Stop-PortOwners $Port
+Write-Host "Port $Port is free." -ForegroundColor Green
 
 Write-Host ''
 Write-Host '[4/5] Starting CE QC backend...' -ForegroundColor Yellow
 $NodePath = (Get-Command node).Source
-$Backend = Start-Process -FilePath $NodePath -ArgumentList @('bootstrap.js') -WorkingDirectory $ProjectRoot -PassThru
-
-$Ready = $false
-for ($i = 0; $i -lt 40; $i++) {
-  Start-Sleep -Milliseconds 500
-  if ($Backend.HasExited) { break }
-  try {
-    $Response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
-    if ($Response.StatusCode -ge 200 -and $Response.StatusCode -lt 500) {
-      $Ready = $true
-      break
-    }
-  }
-  catch {}
-}
-
-if (-not $Ready) {
-  if ($Backend.HasExited) {
-    throw "CE QC backend exited during startup. ExitCode=$($Backend.ExitCode)"
-  }
-  throw "CE QC backend did not answer at $Url within the startup window."
-}
+$Backend = Start-CeQcBackend $NodePath $ProjectRoot $Url $Port
+Write-Host "Backend ready. PID=$($Backend.Id)" -ForegroundColor Green
 
 Write-Host ''
 Write-Host '[5/5] Opening CE QC APP...' -ForegroundColor Yellow
