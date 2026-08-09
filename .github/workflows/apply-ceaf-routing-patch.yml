@@ -24,15 +24,16 @@ jobs:
         with:
           node-version: '22'
       - run: node scripts/apply-ceaf-routing-patch.mjs
-      - name: Commit patched server routing
+      - name: Commit patched CEAF integration
         shell: bash
         run: |
-          if git diff --quiet -- server.js; then
-            echo 'server.js already patched'
+          TARGETS='server.js src/lightweightDashboardStore.js src/rangeDashboardStoreV31.js src/rangeDashboardStoreLegacy.js'
+          if git diff --quiet -- $TARGETS; then
+            echo 'CEAF integration targets already patched'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add server.js
-          git commit -m 'Route CEAF through CCSL processing flow'
+          git add $TARGETS
+          git commit -m 'Wire CEAF through CCSL processing and dashboard readers'
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
