@@ -27,6 +27,8 @@ jobs:
           node --check src/storeFlow.js
           node --check src/trajectoryFacts.js
           node --check src/analyzerV30.js
+          node --check src/analyzerFinal.js
+          node --check src/analyzer.js
           node --check src/shopeeAnalyzerV30.js
           node --check src/shopeeAnalyzerV31.js
           node --check src/reporting.js
