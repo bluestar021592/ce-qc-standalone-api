@@ -1,5 +1,5 @@
 (function (global) {
-  const VERSION='2026-08-10-v44-whpp-native-shopee-layout-v3';
+  const VERSION='2026-08-10-v44-whpp-native-shopee-layout-v4';
   let cached=null;
   let activeDate='';
   let observer=null;
@@ -35,9 +35,18 @@
     ensureNav();
     const target=host();
     if(!target)return;
-    document.querySelectorAll('.app-page').forEach(node=>{node.hidden=node!==target;node.classList.toggle('active',node===target);});
-    document.querySelectorAll('.side-link').forEach(node=>node.classList.toggle('active',node.dataset.page==='whpp'));
-    const title=document.getElementById('pageTitle');if(title)title.textContent='WHPP本土看板';
+    document.querySelectorAll('.app-page').forEach(node=>{
+      const shouldHide=node!==target;
+      const shouldActive=node===target;
+      if(node.hidden!==shouldHide)node.hidden=shouldHide;
+      if(node.classList.contains('active')!==shouldActive)node.classList.toggle('active',shouldActive);
+    });
+    document.querySelectorAll('.side-link').forEach(node=>{
+      const shouldActive=node.dataset.page==='whpp';
+      if(node.classList.contains('active')!==shouldActive)node.classList.toggle('active',shouldActive);
+    });
+    const title=document.getElementById('pageTitle');
+    if(title&&title.textContent!=='WHPP本土看板')title.textContent='WHPP本土看板';
   }
 
   function zeroDashboard(){
