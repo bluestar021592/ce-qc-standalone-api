@@ -89,6 +89,7 @@ try {
   await importPhase('v33RunProgressPatch', './src/v33RunProgressPatch.js');
   await importPhase('v39UnifiedSnapshotRecoveryPatch', './src/v39UnifiedSnapshotRecoveryPatch.js');
   await importPhase('v41AuthPausePatch', './src/v41AuthPausePatch.js');
+  await importPhase('v42WhppPatch', './src/v42WhppPatch.js');
   await importPhase('server', './server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
