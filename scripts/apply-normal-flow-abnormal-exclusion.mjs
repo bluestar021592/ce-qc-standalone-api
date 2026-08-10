@@ -102,9 +102,17 @@ patchFile('src/rangeDashboardStoreV31.js', [
   },
   {
     label: 'CCSL range abnormal denominator',
-    before: `  const returned = sum(rows, 'returned');
+    before: `function buildCcslState(label, rows, range, completedDates) {
+  const daily = mergeDailyRows(rows);
+  const total = sum(rows, 'total');
+  const pod = sum(rows, 'pod');
+  const returned = sum(rows, 'returned');
   const specialClosed = sum(rows, 'specialClosed');`,
-    after: `  const returned = sum(rows, 'returned');
+    after: `function buildCcslState(label, rows, range, completedDates) {
+  const daily = mergeDailyRows(rows);
+  const total = sum(rows, 'total');
+  const pod = sum(rows, 'pod');
+  const returned = sum(rows, 'returned');
   const returnInProgress = sum(rows, 'returnInProgress');
   const normalShopOpen = sum(rows, 'normalShopOpen');
   const specialClosed = sum(rows, 'specialClosed');`
