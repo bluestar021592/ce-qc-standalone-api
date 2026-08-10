@@ -40,13 +40,14 @@ test('startup cache worker does not scan 180 days during first paint', () => {
   assert.doesNotMatch(source, /warmDashboardCacheRange\(\{ days: 180 \}\)/);
 });
 
-test('WHPP direct SPA entry injects only the native V44 frontend', () => {
+test('WHPP direct SPA entry injects native frontend without legacy V42 UI', () => {
   const file = path.join(root, 'src', 'v44WhppUiPatch.js');
   const source = fs.readFileSync(file, 'utf8');
   const check = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   assert.equal(check.status, 0, check.stderr || check.stdout);
   assert.match(source, /'\/whpp'/);
   assert.match(source, /whpp-v44\.js/);
+  assert.match(source, /whpp-v45-cleanup\.js/);
   assert.doesNotMatch(source, /whpp-v42\.js/);
 });
 
@@ -55,8 +56,18 @@ test('WHPP board uses native Shopee dashboard classes and does not render dispat
   const source = fs.readFileSync(file, 'utf8');
   const check = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   assert.equal(check.status, 0, check.stderr || check.stdout);
-  for (const token of ['v18-business-grid','v18-core-grid','region-summary-grid','v18-chart-grid','订单取消','CCSLCN分流','CCSLZT分流','CCSL580分流','金边门店']) assert.match(source, new RegExp(token));
+  for (const token of ['v18-business-grid','v18-core-grid','region-summary-grid','v18-chart-grid','订单取消','金边门店']) assert.match(source, new RegExp(token));
   assert.doesNotMatch(source, /1派POD|2派POD|3派POD|派送概率分布/);
+});
+
+test('WHPP display hides unused work-order and diversion cards but keeps backend classification intact', () => {
+  const file = path.join(root, 'public', 'whpp-v45-cleanup.js');
+  const source = fs.readFileSync(file, 'utf8');
+  const check = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+  assert.equal(check.status, 0, check.stderr || check.stdout);
+  for (const label of ['工单', 'CCSLCN分流', 'CCSLZT分流', 'CCSL580分流']) assert.match(source, new RegExp(label));
+  assert.match(source, /HIDDEN_CORE_LABELS/);
+  assert.match(source, /card\.remove\(\)/);
 });
 
 test('WHPP visibility observer is idempotent and cannot self-trigger a browser freeze', () => {
