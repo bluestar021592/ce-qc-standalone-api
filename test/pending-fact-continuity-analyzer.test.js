@@ -68,12 +68,12 @@ test('historical Pending facts remain available but do not create current Pendin
     reportDate: '2026-08-09',
     events: [
       e('150', '2026-08-07 09:00:00', 'historical Pending'),
-      e('26', '2026-08-09 10:00:00', 'latest inbound-no-scan')
+      e('26', '2026-08-09 10:00:00', 'latest pickup success')
     ]
   });
 
   assert.notEqual(row.currentState, 'PENDING');
-  assert.equal(row.currentState, 'INBOUND_NO_SCAN');
+  assert.equal(row.currentState, 'PICKUP_SUCCESS');
   assert.equal(row.Pending次数, 0);
   assert.equal(row.Pending天数, 0);
   assert.equal(row.Pending日期, '');
