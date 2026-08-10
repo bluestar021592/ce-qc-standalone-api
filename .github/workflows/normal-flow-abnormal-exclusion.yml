@@ -1,0 +1,26 @@
+name: CE QC normal-flow abnormal exclusion
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/reporting.js'
+      - 'src/rangeDashboardStoreV31.js'
+      - 'test/normal-flow-abnormal-exclusion.test.js'
+      - '.github/workflows/normal-flow-abnormal-exclusion.yml'
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node --check src/reporting.js
+      - run: node --check src/rangeDashboardStoreV31.js
+      - run: node --test test/normal-flow-abnormal-exclusion.test.js
