@@ -45,7 +45,7 @@ test('realtime abnormal total excludes normal return/store flows but keeps true 
   };
   const dashboard = buildDashboardData(state);
   assert.equal(dashboard.abnormalCount, 2, 'only real Pending + 2-day shop retention remain abnormal');
-  assert.equal(dashboard.categories.shopStuck, 1, '1-day shop arrival must not be counted as shop retention');
+  assert.equal(dashboard.categories.shopStuck, 1, 'store Pending/OC and 1-day arrival must not be counted as shop retention');
 });
 
 function insertFlexible(db, table, values) {
