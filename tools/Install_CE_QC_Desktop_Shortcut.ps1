@@ -1,12 +1,11 @@
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$LauncherScript = Join-Path $ProjectRoot 'tools\CE_QC_Start.ps1'
-if (-not (Test-Path -LiteralPath $LauncherScript)) {
-  throw "CE QC launcher script not found: $LauncherScript"
+$AutoLauncher = Join-Path $ProjectRoot 'Start_CE_QC_Auto.vbs'
+if (-not (Test-Path -LiteralPath $AutoLauncher)) {
+  throw "CE QC one-click launcher not found: $AutoLauncher"
 }
 
-# Keep this installer source ASCII-only for Windows PowerShell 5.1.
 $LauncherName = -join @(
   'CE ',
   [char]0x8D28,
@@ -23,63 +22,36 @@ if (-not (Test-Path -LiteralPath $Desktop)) {
   New-Item -ItemType Directory -Path $Desktop -Force | Out-Null
 }
 
-# Use a real desktop CMD launcher instead of WScript.Shell .lnk. The normal
-# desktop path keeps PowerShell open with -NoExit so the user can always see
-# startup progress/errors and the protected runtime window cannot flash-close.
-# The project path is embedded inside an ASCII EncodedCommand so Unicode/spaces
-# in the project path cannot break command-line quoting.
-$DesktopCmd = Join-Path $Desktop ($LauncherName + '.cmd')
-$OldLink = Join-Path $Desktop ($LauncherName + '.lnk')
+$ShortcutPath = Join-Path $Desktop ($LauncherName + '.lnk')
+$OldCmd = Join-Path $Desktop ($LauncherName + '.cmd')
 $OldTempLink = Join-Path $Desktop 'CE_QC_APP_START_INSTALLING.lnk'
-
-Remove-Item -LiteralPath $OldLink -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $OldCmd -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $OldTempLink -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $DesktopCmd -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
 
-$escapedScript = $LauncherScript.Replace("'", "''")
-$psCommand = "& '$escapedScript'"
-$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($psCommand))
+$Wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
+if (-not (Test-Path -LiteralPath $Wscript)) { throw 'wscript.exe was not found.' }
 
-$lines = @(
-  '@echo off',
-  'title CE QC APP START',
-  'echo Starting CE QC APP...',
-  'if "%CE_QC_LAUNCHER_TEST_MODE%"=="1" goto test_mode',
-  ('powershell.exe -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -EncodedCommand ' + $encoded),
-  'if errorlevel 1 (',
-  '  echo.',
-  '  echo [CE QC] Start failed. Please send this window to ChatGPT.',
-  '  pause',
-  ')',
-  'exit /b',
-  ':test_mode',
-  ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + $encoded),
-  'exit /b %errorlevel%'
-)
+$Shell = New-Object -ComObject WScript.Shell
+$Shortcut = $Shell.CreateShortcut($ShortcutPath)
+$Shortcut.TargetPath = $Wscript
+$Shortcut.Arguments = '"' + $AutoLauncher + '"'
+$Shortcut.WorkingDirectory = $ProjectRoot
+$Shortcut.Description = 'CE Express Quality Control APP - one click start'
+$Shortcut.IconLocation = "$env:WINDIR\System32\shell32.dll,220"
+$Shortcut.Save()
 
-# ASCII only: the Unicode project path lives inside the Base64 EncodedCommand.
-[IO.File]::WriteAllLines($DesktopCmd, $lines, [Text.Encoding]::ASCII)
-
-if (-not (Test-Path -LiteralPath $DesktopCmd)) {
-  throw "Desktop launcher was not created: $DesktopCmd"
+if (-not (Test-Path -LiteralPath $ShortcutPath)) {
+  throw "Desktop shortcut was not created: $ShortcutPath"
 }
-if ((Get-Item -LiteralPath $DesktopCmd).Length -le 0) {
-  throw 'Desktop launcher file is empty.'
-}
-
-$verify = Get-Content -LiteralPath $DesktopCmd -Raw
-if (-not $verify.Contains('powershell.exe')) { throw 'Desktop launcher is missing PowerShell.' }
-if (-not $verify.Contains('-EncodedCommand')) { throw 'Desktop launcher is missing EncodedCommand.' }
-if (-not $verify.Contains('-NoExit')) { throw 'Desktop launcher is missing NoExit protection.' }
-if ($verify.Contains($ProjectRoot)) { throw 'Desktop launcher unexpectedly contains an unencoded Unicode project path.' }
 
 Write-Host ''
 Write-Host '==============================================' -ForegroundColor Cyan
-Write-Host 'CE QC desktop launcher created successfully.' -ForegroundColor Green
+Write-Host 'CE QC one-click desktop launcher created.' -ForegroundColor Green
 Write-Host '==============================================' -ForegroundColor Cyan
-Write-Host "Desktop launcher: $DesktopCmd"
-Write-Host 'The previous .lnk shortcut was removed.' -ForegroundColor DarkGray
-Write-Host 'Use this desktop CMD launcher for all future CE QC starts.' -ForegroundColor Yellow
-Write-Host 'Its window stays open so startup progress and errors remain visible.' -ForegroundColor DarkGray
-Write-Host 'It checks GitHub main before starting the app.' -ForegroundColor DarkGray
+Write-Host "Desktop shortcut: $ShortcutPath"
+Write-Host 'Daily use: double-click once. No Git pull, no npm test, no npm start.' -ForegroundColor Yellow
+Write-Host 'If CE QC is already running, it opens immediately without restarting the backend.' -ForegroundColor DarkGray
+Write-Host 'If CE QC is stopped, it starts the protected runtime silently and opens the browser when ready.' -ForegroundColor DarkGray
+Write-Host 'Use the visible project launcher only when troubleshooting startup errors.' -ForegroundColor DarkGray
 Start-Sleep -Seconds 2
