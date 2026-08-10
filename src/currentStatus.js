@@ -16,12 +16,14 @@ const STATUS_LABELS = Object.freeze({
   CYCLE_COUNT: '盘点',
   WORK_ORDER: '工单',
   INBOUND_NO_SCAN: '入库无扫描',
+  PICKUP_SUCCESS: '揽收成功',
+  UNKNOWN_SHOP_CODE: '未知门店编码',
   SCAN_PENDING_RETRY: '扫描待重试',
   OPEN_TRACK_REQUIRED: '待查询轨迹'
 });
 
 const TRACK_LABELS = Object.freeze({
-  '26': '入库无扫描',
+  '26': '揽收成功',
   '30': '盘点',
   '32': '盘点',
   '99': '工单',

@@ -271,7 +271,7 @@ function buildCategoryCounts(openRows, finalRows) {
     pending2: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') === 2).length,
     pending3plus: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 3).length,
     pendingConsecutive3: ordinaryRows.filter(isPendingConsecutive3Row).length,
-    pendingNonContinuous: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 2 && row?.Pending连续性 === '不连续').length,
+    pendingNonContinuous: ordinaryRows.filter(isPendingNonContinuousRow).length,
     pendingWithImage: ordinaryRows.filter(isPendingWithImageRow).length,
     pendingWithoutImage: ordinaryRows.filter(isPendingWithoutImageRow).length,
     pictureException: ordinaryRows.filter(isPictureExceptionRow).length,
@@ -287,7 +287,7 @@ function buildCategoryCounts(openRows, finalRows) {
     delivery2Only: ordinaryRows.filter(row => countOf(row, '派送中天数', '派件中天数') === 2).length,
     delivery3plus: ordinaryRows.filter(row => countOf(row, '派送中天数', '派件中天数') >= 3).length,
     assign2: ordinaryRows.filter(row => countOf(row, '派件分配天数') >= 2).length,
-    inboundNoScan: ordinaryRows.filter(row => row?.异常分类 === '入库无扫描').length,
+    inboundNoScan: ordinaryRows.filter(row => row?.异常分类 === '入库无扫描' || row?.入库无扫描节点 === '是').length,
     noAction: ordinaryRows.filter(isNoActionRow).length,
     nodeDateStale: nodeRows.length,
     nodeStale1: nodeRows.filter(row => staleDays(row) === 1).length,
@@ -344,7 +344,7 @@ function buildDetailBuckets(openRows, finalRows, state) {
     pending2plus: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 2),
     pending3: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 3),
     pendingConsecutive3: ordinaryRows.filter(isPendingConsecutive3Row),
-    pendingNonContinuous: ordinaryRows.filter(row => countOf(row, 'Pending次数', 'Pending天数') >= 2 && row?.Pending连续性 === '不连续'),
+    pendingNonContinuous: ordinaryRows.filter(isPendingNonContinuousRow),
     pendingWithImage: ordinaryRows.filter(isPendingWithImageRow),
     pendingWithoutImage: ordinaryRows.filter(isPendingWithoutImageRow),
     pictureException: ordinaryRows.filter(isPictureExceptionRow),
@@ -363,7 +363,7 @@ function buildDetailBuckets(openRows, finalRows, state) {
     delivery3: ordinaryRows.filter(row => countOf(row, '派送中天数', '派件中天数') >= 3),
     delivery2plus: ordinaryRows.filter(row => countOf(row, '派送中天数', '派件中天数') >= 2),
     assign2: ordinaryRows.filter(row => countOf(row, '派件分配天数') >= 2),
-    inboundNoScan: ordinaryRows.filter(row => row?.异常分类 === '入库无扫描'),
+    inboundNoScan: ordinaryRows.filter(row => row?.异常分类 === '入库无扫描' || row?.入库无扫描节点 === '是'),
     workOrderAbnormal: ordinaryRows.filter(row => ['工单未处理', '工单异常'].includes(row?.异常分类)),
     noAction: ordinaryRows.filter(isNoActionRow),
     nodeDateStale: nodeRows,
@@ -423,6 +423,7 @@ function isCoreAbnormalRow(row = {}) {
     && !isNormalFinalDiversionRow(row)
     && !isRefreshFailedRow(row)
     && !isSpecialRetentionRow(row)
+    && !isNormalOperationalFlowRow(row)
     && !isShopRow(row);
 }
 
@@ -447,6 +448,7 @@ function isAnyAbnormalRow(row = {}) {
     && !isNormalFinalDiversionRow(row)
     && !isRefreshFailedRow(row)
     && !isSpecialRetentionRow(row)
+    && !isNormalOperationalFlowRow(row)
     && !isNormalShopFlowRow(row);
 }
 
@@ -468,6 +470,18 @@ function isNormalShopFlowRow(row = {}) {
     || category === '门店途中3天+'
     || (row?.shopState === 'SHOP_ARRIVED_CURRENT' && retentionDays >= 2 && !['SHOP_PENDING', 'SHOP_OC'].includes(state));
   return !explicitStoreAbnormal;
+}
+
+function isPendingNonContinuousRow(row = {}) {
+  if (row?.Pending不连续 === '是') return true;
+  if (row?.pendingFactDateContinuity === '不连续' || row?.Pending事实连续性 === '不连续') return true;
+  return Number(row?.pendingDistinctDayCount || 0) >= 2 && row?.Pending连续性 === '不连续';
+}
+
+function isNormalOperationalFlowRow(row = {}) {
+  const state = String(row?.currentState || '').toUpperCase();
+  const category = String(row?.primaryCategory || row?.主分类 || row?.异常分类 || '').trim();
+  return state === 'PICKUP_SUCCESS' || category === '正常流转';
 }
 
 function isRefreshFailedRow(row = {}) {
@@ -551,6 +565,9 @@ function staleDays(row = {}) {
 }
 
 function shopDays(row = {}) {
+  if (String(row?.shopState || '') === 'SHOP_TRANSFER_IN_PROGRESS') {
+    return Number(row?.shopTransferNaturalDays || row?.门店途中天数 || 0) || 0;
+  }
   if (Number(row?.shopRetentionNaturalDays || 0) > 0) return Number(row.shopRetentionNaturalDays);
   return Number(row?.门店滞留天数 || row?.门店未更新天数 || row?.shopNoUpdateDays || 0) || 0;
 }

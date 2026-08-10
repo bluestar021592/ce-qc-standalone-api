@@ -29,10 +29,8 @@ export function analyzeShopeeShipment(args = {}) {
   const sorted = [...originalEvents].sort((a, b) => String(a?.eventTime || '').localeCompare(String(b?.eventTime || '')));
   const latest = sorted.at(-1) || null;
   const latestCode = codeOf(latest);
-  const hasTrackPod = sorted.some(event => codeOf(event) === '80');
-  const hasTrackReturn = sorted.some(event => codeOf(event) === '86');
-  const exactPod = scanGate.currentState === 'POD' || hasTrackPod;
-  const exactReturn = !exactPod && (scanGate.currentState === 'RETURN_COMPLETED' || hasTrackReturn);
+  const exactPod = scanGate.currentState === 'POD' || latestCode === '80';
+  const exactReturn = !exactPod && (scanGate.currentState === 'RETURN_COMPLETED' || latestCode === '86');
 
   if (!hasEvents && !exactPod && !exactReturn) {
     return {

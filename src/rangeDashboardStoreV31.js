@@ -193,7 +193,16 @@ function queryCcslDailyLatest(fromDate, toDate) {
       SUM(CASE WHEN COALESCE(f.pendingDays,0)>=1 THEN 1 ELSE 0 END) AS pending1,
       SUM(CASE WHEN COALESCE(f.pendingDays,0)>=2 THEN 1 ELSE 0 END) AS pending2,
       SUM(CASE WHEN COALESCE(f.pendingDays,0)>=3 THEN 1 ELSE 0 END) AS pending3,
-      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续' THEN 1 ELSE 0 END) AS pendingNonContinuous,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=0
+                AND COALESCE(f.shopState,'')=''
+                AND COALESCE(json_extract(f.rawJson,'$."退回状态"'),'') NOT IN ('已退回','退回处理中')
+                AND UPPER(COALESCE(f.primaryCategory,'')) NOT IN ('SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION')
+                AND (
+                  COALESCE(json_extract(f.rawJson,'$."Pending不连续"'),'')='是'
+                  OR COALESCE(json_extract(f.rawJson,'$.pendingFactDateContinuity'),'')='不连续'
+                  OR COALESCE(json_extract(f.rawJson,'$."Pending事实连续性"'),'')='不连续'
+                  OR (COALESCE(CAST(json_extract(f.rawJson,'$.pendingDistinctDayCount') AS INTEGER),0)>=2 AND COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续')
+                ) THEN 1 ELSE 0 END) AS pendingNonContinuous,
       SUM(CASE WHEN COALESCE(f.ocDays,0)>=1 THEN 1 ELSE 0 END) AS oc1,
       SUM(CASE WHEN COALESCE(f.ocDays,0)>=2 THEN 1 ELSE 0 END) AS oc2,
       SUM(CASE WHEN COALESCE(f.ocDays,0)>=3 THEN 1 ELSE 0 END) AS oc3,
@@ -223,7 +232,8 @@ function queryCcslDailyLatest(fromDate, toDate) {
                 OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),''))='RETURN_IN_PROGRESS'
                 OR COALESCE(f.primaryCategory,f.category,'')='退回处理中'
                THEN 1 ELSE 0 END) AS returnInProgress,
-      SUM(CASE WHEN COALESCE(f.shopState,'')='SHOP_TRANSFER_IN_PROGRESS'
+      SUM(CASE WHEN (COALESCE(f.shopState,'')='SHOP_TRANSFER_IN_PROGRESS'
+                  AND COALESCE(CAST(json_extract(f.rawJson,'$.shopTransferNaturalDays') AS INTEGER),0)<2)
                 OR (COALESCE(f.shopState,'')='SHOP_ARRIVED_CURRENT' AND (
                   COALESCE(f.shopRetentionNaturalDays,0)<2
                   OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) IN ('SHOP_PENDING','SHOP_OC')
@@ -265,7 +275,16 @@ function queryShopeeDailyLatest(fromDate, toDate) {
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=1 THEN 1 ELSE 0 END) AS pending1,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=2 THEN 1 ELSE 0 END) AS pending2,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=3 THEN 1 ELSE 0 END) AS pending3,
-      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续' THEN 1 ELSE 0 END) AS pendingNonContinuous,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=0
+                AND COALESCE(f.shopState,'')=''
+                AND COALESCE(json_extract(f.rawJson,'$."退回状态"'),'') NOT IN ('已退回','退回处理中')
+                AND UPPER(COALESCE(f.primaryCategory,'')) NOT IN ('SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION')
+                AND (
+                  COALESCE(json_extract(f.rawJson,'$."Pending不连续"'),'')='是'
+                  OR COALESCE(json_extract(f.rawJson,'$.pendingFactDateContinuity'),'')='不连续'
+                  OR COALESCE(json_extract(f.rawJson,'$."Pending事实连续性"'),'')='不连续'
+                  OR (COALESCE(CAST(json_extract(f.rawJson,'$.pendingDistinctDayCount') AS INTEGER),0)>=2 AND COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续')
+                ) THEN 1 ELSE 0 END) AS pendingNonContinuous,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=1 THEN 1 ELSE 0 END) AS oc1,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=2 THEN 1 ELSE 0 END) AS oc2,
       SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=3 THEN 1 ELSE 0 END) AS oc3,
@@ -293,7 +312,8 @@ function queryShopeeDailyLatest(fromDate, toDate) {
                   UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),''))='SHOP_PENDING'
                   OR COALESCE(f.primaryCategory,'')='门店Pending'
                 ) THEN 1 ELSE 0 END) AS shopPending,
-      SUM(CASE WHEN COALESCE(f.shopState,'')='SHOP_TRANSFER_IN_PROGRESS'
+      SUM(CASE WHEN (COALESCE(f.shopState,'')='SHOP_TRANSFER_IN_PROGRESS'
+                  AND COALESCE(CAST(json_extract(f.rawJson,'$.shopTransferNaturalDays') AS INTEGER),0)<2)
                 OR (COALESCE(f.shopState,'')='SHOP_ARRIVED_CURRENT' AND (
                   COALESCE(f.shopRetentionNaturalDays,0)<2
                   OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) IN ('SHOP_PENDING','SHOP_OC')
