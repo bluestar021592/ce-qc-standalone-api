@@ -145,10 +145,13 @@ function Set-RepoVisibility([string]$GhPath, [string]$Visibility) {
 }
 
 function Get-LatestDispatchRunId([string]$GhPath) {
+  $endpoint = "repos/$Repository/actions/workflows/$Workflow/runs"
   $result = Invoke-NativeCapture -Exe $GhPath -Arguments @(
-    'run', 'list', '-R', $Repository, '--workflow', $Workflow, '--branch', $Ref,
-    '--event', 'workflow_dispatch', '--limit', '1', '--json', 'databaseId',
-    '--jq', '.[0].databaseId // ""'
+    'api', '-X', 'GET', $endpoint,
+    '-f', 'event=workflow_dispatch',
+    '-f', "branch=$Ref",
+    '-f', 'per_page=5',
+    '--jq', '.workflow_runs[0].id // ""'
   )
   if ($result.ExitCode -ne 0) { return '' }
   return (($result.Output -join '').Trim())
@@ -192,7 +195,8 @@ try {
     throw "Unable to start workflow: $($trigger.Output -join ' ')"
   }
 
-  for ($i = 0; $i -lt 60; $i++) {
+  Write-Host 'Waiting for GitHub Actions to index the new run ...' -ForegroundColor Yellow
+  for ($i = 0; $i -lt 150; $i++) {
     Start-Sleep -Seconds 2
     $candidate = Get-LatestDispatchRunId $gh
     if ($candidate -and $candidate -ne $beforeRunId) {
@@ -200,8 +204,16 @@ try {
       break
     }
   }
+
   if (-not $runId) {
-    throw 'workflow_dispatch was sent, but no new Actions run appeared within 120 seconds.'
+    $candidate = Get-LatestDispatchRunId $gh
+    if ($candidate -and $candidate -ne $beforeRunId) {
+      $runId = $candidate
+    }
+  }
+
+  if (-not $runId) {
+    throw 'workflow_dispatch was sent, but GitHub did not expose a new Actions run within 300 seconds.'
   }
 
   Write-Host "Actions Run ID: $runId" -ForegroundColor Green
