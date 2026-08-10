@@ -96,7 +96,7 @@
     const type = String(input.businessType || '').toUpperCase();
     const shopee = type.startsWith('SHOPEE');
     const original = (input.core || []).map(item => ({ ...item }));
-    const { metrics, routing } = sourceMetrics(type);
+    const { dashboard, metrics, routing } = sourceMetrics(type);
     const hasRouting = routing && Object.keys(routing).length > 0;
 
     const ccslCn = hasRouting
@@ -117,6 +117,16 @@
       ? new Set(['外省门店滞留', '外省门店入库无节点', 'CCSLCN分流', 'CCSLZT分流', 'CECN滞留包裹', 'CEZT滞留包裹', '金边门店'])
       : new Set(['CECN滞留包裹', 'CEZT滞留包裹', 'CCSLCN分流', 'CCSLZT分流', '门店途中', '门店入库', '门店滞留', '金边门店']);
     const core = original.filter(item => !remove.has(String(item?.label || '')));
+
+    // Older single-day state objects may still have counted PV recipients that
+    // are transferring to a Phnom Penh shop inside "外省派送中". Range V34
+    // already removes this, so apply the fallback correction only without V34.
+    if (shopee && !hasRouting) {
+      const pvShopTransit = Number(dashboard?.regions?.PV?.shopTransit || 0);
+      const pvDelivery = core.find(item => String(item?.label || '') === '外省派送中');
+      if (pvDelivery && pvShopTransit > 0) pvDelivery.value = Math.max(0, Number(pvDelivery.value || 0) - pvShopTransit);
+    }
+
     const total = Number(input.cards?.[0]?.value || metrics.total || 0);
     const ratioText = value => total ? `占本业务 ${(Number(value || 0) * 100 / total).toFixed(2)}%` : '占本业务 0.00%';
 
