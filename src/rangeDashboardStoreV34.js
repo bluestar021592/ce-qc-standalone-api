@@ -71,38 +71,58 @@ function queryRoutingFacts(fromDate, toDate) {
         v.businessType,
         v.regionCode,
         v.shipmentCode,
-        COALESCE(f.primaryCategory,'') AS primaryCategory,
-        COALESCE(f.shopState, json_extract(f.rawJson,'$.shopState'), '') AS shopState,
+        CASE
+          WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') THEN COALESCE(sf.primaryCategory,'')
+          ELSE COALESCE(cf.primaryCategory,'')
+        END AS primaryCategory,
+        CASE
+          WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') THEN COALESCE(sf.shopState, json_extract(sf.rawJson,'$.shopState'), '')
+          ELSE COALESCE(cf.shopState, json_extract(cf.rawJson,'$.shopState'), '')
+        END AS shopState,
         UPPER(
-          COALESCE(f.primaryCategory,'') || ' ' ||
-          COALESCE(json_extract(f.rawJson,'$.specialState'),'') || ' ' ||
-          COALESCE(json_extract(f.rawJson,'$.latestEffectiveTargetNodeCode'),'') || ' ' ||
-          COALESCE(json_extract(f.rawJson,'$.latestEffectiveTargetNode'),'') || ' ' ||
-          COALESCE(json_extract(f.rawJson,'$.latestNodeCode'),'') || ' ' ||
-          COALESCE(json_extract(f.rawJson,'$.latestTrackingDescription'),'') || ' ' ||
-          COALESCE(json_extract(f.rawJson,'$.lastEventDesc'),'') || ' ' ||
-          COALESCE(json_extract(f.rawJson,'$.最后节点'),'')
+          CASE
+            WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') THEN
+              COALESCE(sf.primaryCategory,'') || ' ' ||
+              COALESCE(json_extract(sf.rawJson,'$.specialState'),'') || ' ' ||
+              COALESCE(json_extract(sf.rawJson,'$.latestEffectiveTargetNodeCode'),'') || ' ' ||
+              COALESCE(json_extract(sf.rawJson,'$.latestEffectiveTargetNode'),'') || ' ' ||
+              COALESCE(json_extract(sf.rawJson,'$.latestNodeCode'),'') || ' ' ||
+              COALESCE(json_extract(sf.rawJson,'$.latestTrackingDescription'),'') || ' ' ||
+              COALESCE(json_extract(sf.rawJson,'$.lastEventDesc'),'') || ' ' ||
+              COALESCE(json_extract(sf.rawJson,'$.最后节点'),'')
+            ELSE
+              COALESCE(cf.primaryCategory,'') || ' ' ||
+              COALESCE(json_extract(cf.rawJson,'$.specialState'),'') || ' ' ||
+              COALESCE(json_extract(cf.rawJson,'$.latestEffectiveTargetNodeCode'),'') || ' ' ||
+              COALESCE(json_extract(cf.rawJson,'$.latestEffectiveTargetNode'),'') || ' ' ||
+              COALESCE(json_extract(cf.rawJson,'$.latestNodeCode'),'') || ' ' ||
+              COALESCE(json_extract(cf.rawJson,'$.latestTrackingDescription'),'') || ' ' ||
+              COALESCE(json_extract(cf.rawJson,'$.lastEventDesc'),'') || ' ' ||
+              COALESCE(json_extract(cf.rawJson,'$.最后节点'),'')
+          END
         ) AS evidence
       FROM valid v
-      LEFT JOIN business_final_rows f
-        ON f.shipmentCode=v.shipmentCode
-       AND f.reportDate=v.reportDate
-       AND (
-         (v.businessType IN ('SHOPEECN','SHOPEEVN') AND f.businessType='SHOPEE')
-         OR f.businessType=v.businessType
-       )
+      LEFT JOIN final_rows cf
+        ON v.businessType IN ('CE','CEAF','TBKH','ALI1688')
+       AND cf.shipmentCode=v.shipmentCode
+       AND cf.reportDate=v.reportDate
+      LEFT JOIN business_final_rows sf
+        ON v.businessType IN ('SHOPEECN','SHOPEEVN')
+       AND sf.businessType='SHOPEE'
+       AND sf.shipmentCode=v.shipmentCode
+       AND sf.reportDate=v.reportDate
     )
     SELECT
       reportDate,
       businessType,
       regionCode,
       COUNT(*) AS total,
-      SUM(CASE WHEN evidence LIKE '%CCSLCN%' OR evidence LIKE '%CECN_RETENTION%' OR evidence LIKE '%CECN滞留%' THEN 1 ELSE 0 END) AS ccslCnDiversion,
-      SUM(CASE WHEN evidence LIKE '%CCSLZT%' OR evidence LIKE '%CEZT_RETENTION%' OR evidence LIKE '%CEZT滞留%' THEN 1 ELSE 0 END) AS ccslZtDiversion,
-      SUM(CASE WHEN (evidence LIKE '%CCSLCN%' OR evidence LIKE '%CCSLCN_DIVERSION%')
+      SUM(CASE WHEN evidence LIKE '%CCSLCN%' OR evidence LIKE '%CECN%' THEN 1 ELSE 0 END) AS ccslCnDiversion,
+      SUM(CASE WHEN evidence LIKE '%CCSLZT%' OR evidence LIKE '%CEZT%' THEN 1 ELSE 0 END) AS ccslZtDiversion,
+      SUM(CASE WHEN (evidence LIKE '%CCSLCN%' OR evidence LIKE '%CECN%')
                     AND UPPER(primaryCategory) NOT IN ('CECN_RETENTION','CECN滞留包裹')
                THEN 1 ELSE 0 END) AS ccslCnUnaccounted,
-      SUM(CASE WHEN (evidence LIKE '%CCSLZT%' OR evidence LIKE '%CCSLZT_DIVERSION%')
+      SUM(CASE WHEN (evidence LIKE '%CCSLZT%' OR evidence LIKE '%CEZT%')
                     AND UPPER(primaryCategory) NOT IN ('CEZT_RETENTION','CEZT滞留包裹')
                THEN 1 ELSE 0 END) AS ccslZtUnaccounted,
       SUM(CASE WHEN shopState IN ('SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT') THEN 1 ELSE 0 END) AS phnomPenhShop,
