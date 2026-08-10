@@ -15,10 +15,25 @@
     return Boolean(progress.running || progress.paused || ['running','paused','failed','processing'].includes(status) || (total > 0 && done < total && !['finished','completed'].includes(status)));
   }
 
+  async function hasCompletedBusinessSnapshot(model) {
+    const type = String(model.businessType || '').toUpperCase();
+    if (!type) return false;
+    const response = await fetch(`/api/business-state/${encodeURIComponent(type)}?compact=1`, { cache:'no-store', credentials:'same-origin' });
+    if (!response.ok) return false;
+    const payload = await response.json();
+    const reportDate = String(payload?.reportDate || payload?.state?.reportDate || '');
+    const snapshotStatus = String(payload?.snapshotStatus || payload?.state?.snapshotStatus || '').toUpperCase();
+    return reportDate === String(model.reportDate || '') && snapshotStatus === 'COMPLETED';
+  }
+
   async function protectUnfinishedBusinessDashboard(root, model, periodText) {
     const type = String(model.businessType || '').toUpperCase();
     const scope = type.startsWith('SHOPEE') ? 'SHOPEE' : 'CCSL';
     try {
+      // A completed immutable business snapshot is the source of truth for a historical/dashboard view.
+      // Do not let a stale global run summary from the same report date hide completed business results.
+      if (await hasCompletedBusinessSnapshot(model)) return;
+
       const response = await fetch(`/api/v33/run-progress?businessType=${encodeURIComponent(scope)}`, { cache:'no-store', credentials:'same-origin' });
       if (!response.ok) return;
       const progress = await response.json();
