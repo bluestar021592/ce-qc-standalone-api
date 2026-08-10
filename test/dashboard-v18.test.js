@@ -49,6 +49,14 @@ test('V18 uses independent component files and clips chart drawing', () => {
   assert.match(css, /\.v18-chart-plot\{[^}]*overflow:hidden/);
 });
 
+test('completed business snapshot wins over stale run-progress guard', () => {
+  const dashboard = fs.readFileSync(path.join(publicDir, 'dashboard-v18.js'), 'utf8');
+  assert.match(dashboard, /hasCompletedBusinessSnapshot/);
+  assert.match(dashboard, /\/api\/business-state\/\$\{encodeURIComponent\(type\)\}\?compact=1/);
+  assert.match(dashboard, /snapshotStatus === 'COMPLETED'/);
+  assert.match(dashboard, /if \(await hasCompletedBusinessSnapshot\(model\)\) return;/);
+});
+
 test('unified Shopee pages prefer the latest completed business snapshot', () => {
   const store = fs.readFileSync(path.join(__dirname, '..', 'src', 'unifiedImportStore.js'), 'utf8');
   assert.match(store, /getMatchingBusinessSnapshot\(SHOPEE, liveState\)/);
