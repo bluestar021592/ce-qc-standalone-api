@@ -219,6 +219,17 @@ function queryCcslDailyLatest(fromDate, toDate) {
                 OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) IN ('RETURNED','RETURN_COMPLETED')
                 OR COALESCE(f.primaryCategory,f.category,'')='退回'
                THEN 1 ELSE 0 END) AS returned,
+      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."退回状态"'),'')='退回处理中'
+                OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),''))='RETURN_IN_PROGRESS'
+                OR COALESCE(f.primaryCategory,f.category,'')='退回处理中'
+               THEN 1 ELSE 0 END) AS returnInProgress,
+      SUM(CASE WHEN COALESCE(f.shopState,'')='SHOP_TRANSFER_IN_PROGRESS'
+                OR (COALESCE(f.shopState,'')='SHOP_ARRIVED_CURRENT' AND (
+                  COALESCE(f.shopRetentionNaturalDays,0)<2
+                  OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) IN ('SHOP_PENDING','SHOP_OC')
+                  OR COALESCE(f.primaryCategory,f.category,'') IN ('门店Pending','门店OC')
+                ))
+               THEN 1 ELSE 0 END) AS normalShopOpen,
       SUM(CASE WHEN UPPER(COALESCE(f.primaryCategory,'')) IN ('SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION')
                 OR COALESCE(f.primaryCategory,'') IN ('仓库自提','自提','CECN滞留包裹','CEZT滞留包裹','580滞留包裹')
                THEN 1 ELSE 0 END) AS specialClosed
@@ -282,6 +293,13 @@ function queryShopeeDailyLatest(fromDate, toDate) {
                   UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),''))='SHOP_PENDING'
                   OR COALESCE(f.primaryCategory,'')='门店Pending'
                 ) THEN 1 ELSE 0 END) AS shopPending,
+      SUM(CASE WHEN COALESCE(f.shopState,'')='SHOP_TRANSFER_IN_PROGRESS'
+                OR (COALESCE(f.shopState,'')='SHOP_ARRIVED_CURRENT' AND (
+                  COALESCE(f.shopRetentionNaturalDays,0)<2
+                  OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) IN ('SHOP_PENDING','SHOP_OC')
+                  OR COALESCE(f.primaryCategory,'') IN ('门店Pending','门店OC')
+                ))
+               THEN 1 ELSE 0 END) AS normalShopOpen,
       SUM(CASE WHEN COALESCE(f.shopState,'')='SHOP_ARRIVED_CURRENT' AND COALESCE(f.shopRetentionNaturalDays,0)>=1 THEN 1 ELSE 0 END) AS shopRetention1,
       SUM(CASE WHEN COALESCE(f.shopState,'')='SHOP_ARRIVED_CURRENT' AND COALESCE(f.shopRetentionNaturalDays,0)>=2 THEN 1 ELSE 0 END) AS shopRetention2,
       SUM(CASE WHEN COALESCE(f.shopState,'')='SHOP_ARRIVED_CURRENT' AND COALESCE(f.shopRetentionNaturalDays,0)>=3 THEN 1 ELSE 0 END) AS shopRetention3,
@@ -305,6 +323,8 @@ function buildCcslState(label, rows, range, completedDates) {
   const total = sum(rows, 'total');
   const pod = sum(rows, 'pod');
   const returned = sum(rows, 'returned');
+  const returnInProgress = sum(rows, 'returnInProgress');
+  const normalShopOpen = sum(rows, 'normalShopOpen');
   const specialClosed = sum(rows, 'specialClosed');
   const metrics = sumMetrics(rows, [
     'pending1','pending2','pending3','pendingNonContinuous','oc1','oc2','oc3','cycle2','delivery1',
@@ -331,15 +351,17 @@ function buildCcslState(label, rows, range, completedDates) {
       todayPod: pod,
       podRate: rate(pod, total),
       returned,
+      returnInProgress,
+      normalShopOpen,
       specialClosed,
-      abnormalCount: Math.max(0, total - pod - returned - specialClosed),
+      abnormalCount: Math.max(0, total - pod - returned - returnInProgress - normalShopOpen - specialClosed),
       categories: { pendingTotal: metrics.pending1, ocTotal: metrics.oc1 }
     },
     detailTabs: {
       dashboard: { label: `${label}范围看板`, rows: dashboardRows, total: dashboardRows.length },
       allData: { label: '范围明细请按需读取或导出', rows: [], total },
-      coreAbnormal: { label: '范围异常汇总', rows: [], total: Math.max(0, total - pod - returned - specialClosed) },
-      abnormal: { label: '范围异常汇总', rows: [], total: Math.max(0, total - pod - returned - specialClosed) }
+      coreAbnormal: { label: '范围异常汇总', rows: [], total: Math.max(0, total - pod - returned - returnInProgress - normalShopOpen - specialClosed) },
+      abnormal: { label: '范围异常汇总', rows: [], total: Math.max(0, total - pod - returned - returnInProgress - normalShopOpen - specialClosed) }
     },
     _rangeSummaryOnly: true,
     _normalizedSqliteRead: true,
@@ -456,8 +478,8 @@ function summarizeShopeeRows(rows) {
     total, pod, podRate: rate(pod, total), firstAttemptCount: attempt1, firstAttemptEligible: total, firstAttemptRate: rate(attempt1, total),
     pending1: sum(rows, 'pending1'), pending2: sum(rows, 'pending2'), pending3plus: sum(rows, 'pending3'),
     oc1: sum(rows, 'oc1'), oc2: sum(rows, 'oc2'), oc3plus: sum(rows, 'oc3'), cycle2plus: sum(rows, 'cycle2'), inboundNoScan: sum(rows, 'inboundNoScan'),
-    returned, returnRate: rate(returned, total), unresolved: Math.max(0, total - pod - returned - specialClosed), accounted: total, accountingDifference: 0,
-    returnInProgress: sum(rows, 'returnInProgress'), returnRequired: sum(rows, 'returnRequired'), deliveryStay: sum(rows, 'deliveryStay'),
+    returned, returnRate: rate(returned, total), unresolved: Math.max(0, total - pod - returned - sum(rows, 'returnInProgress') - sum(rows, 'normalShopOpen') - specialClosed), accounted: total, accountingDifference: 0,
+    returnInProgress: sum(rows, 'returnInProgress'), normalShopOpen: sum(rows, 'normalShopOpen'), returnRequired: sum(rows, 'returnRequired'), deliveryStay: sum(rows, 'deliveryStay'),
     deliveryStayRate: rate(sum(rows, 'deliveryStay'), total), dispatchAttempt1: attempt1, dispatchAttempt2: attempt2, dispatchAttempt3: attempt3,
     dispatchAttemptDenominator: total, dispatchAttempt1Rate: rate(attempt1, total), dispatchAttempt2Rate: rate(attempt2, total), dispatchAttempt3Rate: rate(attempt3, total),
     transitHubStay: sum(rows, 'transitHubStay'), severeOverdue: sum(rows, 'severeOverdue'), shopTransit: sum(rows, 'shopTransit'), shopArrived: sum(rows, 'shopArrived'),
@@ -472,7 +494,7 @@ function mergeDailyRows(rows) {
   for (const row of rows) {
     if (!byDate.has(row.reportDate)) byDate.set(row.reportDate, { reportDate: row.reportDate });
     const target = byDate.get(row.reportDate);
-    for (const key of ['total','pod','pending1','pending2','pending3','pendingNonContinuous','oc1','oc2','oc3','cycle2','delivery1','inboundNoScan','workOrder','shopRetention2','provinceOpen','selfPickup','cecnRetention','ceztRetention','retention580','returned','specialClosed']) {
+    for (const key of ['total','pod','pending1','pending2','pending3','pendingNonContinuous','oc1','oc2','oc3','cycle2','delivery1','inboundNoScan','workOrder','shopRetention2','provinceOpen','selfPickup','cecnRetention','ceztRetention','retention580','returned','returnInProgress','normalShopOpen','specialClosed']) {
       target[key] = Number(target[key] || 0) + Number(row[key] || 0);
     }
   }
