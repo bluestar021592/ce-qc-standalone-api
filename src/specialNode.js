@@ -2,8 +2,13 @@ import { lastEffectiveEvent, parseEventNodeAction } from './shopCodes.js';
 
 const SELF_PICKUP_RE = /仓库自提|warehouse\s*self[ -]?pickup|self[ -]?pickup|យកទំនិញនៅឃ្លាំង/i;
 const SPECIAL_CODES = new Map([
-  ['CECN', { state: 'CECN_RETENTION', label: 'CECN滞留包裹' }],
-  ['CEZT', { state: 'CEZT_RETENTION', label: 'CEZT滞留包裹' }],
+  // Current production destination codes.
+  ['CCSLCN', { state: 'CCSLCN_DIVERSION', label: 'CCSLCN分流' }],
+  ['CCSLZT', { state: 'CCSLZT_DIVERSION', label: 'CCSLZT分流' }],
+  // Historical aliases are retained for old trajectory data, but normalize to
+  // the same current business meaning instead of being treated as retention.
+  ['CECN', { state: 'CCSLCN_DIVERSION', label: 'CCSLCN分流' }],
+  ['CEZT', { state: 'CCSLZT_DIVERSION', label: 'CCSLZT分流' }],
   ['580', { state: 'CCSL580_RETENTION', label: '580滞留包裹' }],
   ['CCSL580', { state: 'CCSL580_RETENTION', label: '580滞留包裹' }]
 ]);
@@ -20,7 +25,7 @@ export function classifyLatestSpecialNode(events = []) {
 }
 
 export function isSpecialCategory(row = {}) {
-  return ['SELF_PICKUP', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION'].includes(String(row.specialState || row.primaryCategory || row.主分类 || ''));
+  return ['SELF_PICKUP', 'CCSLCN_DIVERSION', 'CCSLZT_DIVERSION', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION'].includes(String(row.specialState || row.primaryCategory || row.主分类 || ''));
 }
 
 function specialResult(state, label, event, code, matchedRule) {
