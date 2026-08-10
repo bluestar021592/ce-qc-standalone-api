@@ -1,0 +1,25 @@
+name: CE QC Pending fact continuity
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/analyzerV30.js'
+      - 'src/trajectoryFacts.js'
+      - 'test/pending-fact-continuity-analyzer.test.js'
+      - '.github/workflows/pending-fact-continuity.yml'
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node --check src/analyzerV30.js
+      - run: node --test test/pending-fact-continuity-analyzer.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js
