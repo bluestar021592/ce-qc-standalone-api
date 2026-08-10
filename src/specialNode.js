@@ -2,15 +2,15 @@ import { lastEffectiveEvent, parseEventNodeAction } from './shopCodes.js';
 
 const SELF_PICKUP_RE = /仓库自提|warehouse\s*self[ -]?pickup|self[ -]?pickup|យកទំនិញនៅឃ្លាំង/i;
 const SPECIAL_CODES = new Map([
-  // Current production destination codes.
+  // Current production destination codes. Reaching these nodes is a normal
+  // diversion destination, not an abnormal retention condition by itself.
   ['CCSLCN', { state: 'CCSLCN_DIVERSION', label: 'CCSLCN分流' }],
   ['CCSLZT', { state: 'CCSLZT_DIVERSION', label: 'CCSLZT分流' }],
-  // Historical aliases are retained for old trajectory data, but normalize to
-  // the same current business meaning instead of being treated as retention.
+  ['CCSL580', { state: 'CCSL580_DIVERSION', label: 'CCSL580分流' }],
+  ['580', { state: 'CCSL580_DIVERSION', label: 'CCSL580分流' }],
+  // Historical aliases normalize to the same current business meaning.
   ['CECN', { state: 'CCSLCN_DIVERSION', label: 'CCSLCN分流' }],
-  ['CEZT', { state: 'CCSLZT_DIVERSION', label: 'CCSLZT分流' }],
-  ['580', { state: 'CCSL580_RETENTION', label: '580滞留包裹' }],
-  ['CCSL580', { state: 'CCSL580_RETENTION', label: '580滞留包裹' }]
+  ['CEZT', { state: 'CCSLZT_DIVERSION', label: 'CCSLZT分流' }]
 ]);
 
 export function classifyLatestSpecialNode(events = []) {
@@ -25,11 +25,30 @@ export function classifyLatestSpecialNode(events = []) {
 }
 
 export function isSpecialCategory(row = {}) {
-  return ['SELF_PICKUP', 'CCSLCN_DIVERSION', 'CCSLZT_DIVERSION', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION'].includes(String(row.specialState || row.primaryCategory || row.主分类 || ''));
+  return [
+    'SELF_PICKUP',
+    'CCSLCN_DIVERSION',
+    'CCSLZT_DIVERSION',
+    'CCSL580_DIVERSION',
+    // Legacy values remain recognized so old stored rows do not become generic
+    // abnormalities during historical review.
+    'CECN_RETENTION',
+    'CEZT_RETENTION',
+    'CCSL580_RETENTION'
+  ].includes(String(row.specialState || row.primaryCategory || row.主分类 || ''));
 }
 
 function specialResult(state, label, event, code, matchedRule) {
-  return { specialState: state, category: state, label, latestNodeCode: code, latestEventTime: event.eventTime || event.creationDate || event.lastUpdateDate || '', latestTrackingDescription: eventDescription(event), matchedRule, event };
+  return {
+    specialState: state,
+    category: state,
+    label,
+    latestNodeCode: code,
+    latestEventTime: event.eventTime || event.creationDate || event.lastUpdateDate || '',
+    latestTrackingDescription: eventDescription(event),
+    matchedRule,
+    event
+  };
 }
 
 function normalizeNodeCode(value) {
@@ -37,5 +56,8 @@ function normalizeNodeCode(value) {
 }
 
 function eventDescription(event = {}) {
-  return [event.trackingEventDescZh, event.trackingEventDesc, event.trackingEventDescKm, event.remark, event.place, event.locationCode, event.eventShop].map(value => String(value || '').trim()).filter(Boolean).join(' ');
+  return [event.trackingEventDescZh, event.trackingEventDesc, event.trackingEventDescKm, event.remark, event.place, event.locationCode, event.eventShop]
+    .map(value => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
 }
