@@ -1,12 +1,12 @@
 (function (global) {
-  const VERSION='2026-08-10-v44-whpp-native-shopee-layout-v2';
+  const VERSION='2026-08-10-v44-whpp-native-shopee-layout-v3';
   let cached=null;
   let activeDate='';
   let observer=null;
 
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
   const pct=value=>`${Number(value||0).toFixed(2).replace(/\.00$/,'')}%`;
-  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
+  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const attr=value=>esc(value).replace(/`/g,'&#96;');
   const share=(value,total)=>`占本业务 ${total?(Number(value||0)*100/Number(total)).toFixed(2):'0.00'}%`;
 
@@ -149,20 +149,23 @@
     const oc=Number(row.OC天数||0)||0;
     const category=String(row.primaryCategory||row.主分类||row.异常分类||'');
     const state=String(row.currentState||'').toUpperCase();
+    const special=String(row.specialState||row.primaryCategory||row.主分类||'').toUpperCase();
     const pod=row.是否POD==='是'||row.POD状态==='POD'||state==='POD';
     const returned=row.退回状态==='已退回'||['RETURNED','RETURN_COMPLETED'].includes(state)||category==='退回';
     const cancelled=row.订单取消==='是'||state==='ORDER_CANCELLED';
+    const normalDiversion=['SELF_PICKUP','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','CCSL580_RETENTION','CECN_RETENTION','CEZT_RETENTION'].includes(special)||category==='正常分流节点'||row.matchedRule==='NORMAL_FINAL_HUB';
+    const actionable=!pod&&!returned&&!cancelled&&!normalDiversion;
     if(key==='all')return true;
     if(key==='pod')return pod;
     if(key==='returned')return returned;
     if(key==='cancelled')return cancelled;
-    if(key==='pending1')return pending>=1;
-    if(key==='pending2')return pending>=2;
-    if(key==='pending3')return pending>=3;
-    if(key==='oc1')return oc>=1;
-    if(key==='oc2')return oc>=2;
-    if(key==='oc3')return oc>=3;
-    if(key==='unresolved')return !pod&&!returned&&!cancelled;
+    if(key==='pending1')return actionable&&pending>=1;
+    if(key==='pending2')return actionable&&pending>=2;
+    if(key==='pending3')return actionable&&pending>=3;
+    if(key==='oc1')return actionable&&oc>=1;
+    if(key==='oc2')return actionable&&oc>=2;
+    if(key==='oc3')return actionable&&oc>=3;
+    if(key==='unresolved')return actionable;
     if(key==='phnomPenhShop')return ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState||''));
     return true;
   }
