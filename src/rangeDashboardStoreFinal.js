@@ -73,23 +73,32 @@ function normalizeCcslDashboardRows(rows, adjustment) {
 function applyShopeeState(state, rows, label) {
   if (!state?.dashboard) return;
   const all = sumAdjustments(rows);
-  applyShopeeMetrics(state.dashboard.metrics, all);
-
   const groups = state.dashboard.recipientGroups || {};
-  if (groups.ALL?.metrics) applyShopeeMetrics(groups.ALL.metrics, all);
+  const allMetrics = groups.ALL?.metrics || state.dashboard.metrics;
+
+  // buildShopeeState intentionally shares the same ALL metrics/region objects
+  // between dashboard.metrics/dashboard.regions and recipientGroups.ALL. Apply
+  // the final adjustment to each object identity only once to avoid double
+  // subtraction of normal open-flow parcels.
+  applyShopeeMetrics(allMetrics, all);
+  if (state.dashboard.metrics && state.dashboard.metrics !== allMetrics) applyShopeeMetrics(state.dashboard.metrics, all);
+
   if (groups.CN?.metrics) applyShopeeMetrics(groups.CN.metrics, sumAdjustments(rows.filter(row => row.businessType === 'SHOPEECN')));
   if (groups.VN?.metrics) applyShopeeMetrics(groups.VN.metrics, sumAdjustments(rows.filter(row => row.businessType === 'SHOPEEVN')));
 
   for (const regionCode of ['PP', 'PV', 'UNKNOWN']) {
     const regionAdj = sumAdjustments(rows.filter(row => row.regionCode === regionCode));
-    if (state.dashboard.regions?.[regionCode]) applyShopeeMetrics(state.dashboard.regions[regionCode], regionAdj);
-    if (groups.ALL?.regions?.[regionCode]) applyShopeeMetrics(groups.ALL.regions[regionCode], regionAdj);
+    const allRegion = groups.ALL?.regions?.[regionCode] || state.dashboard.regions?.[regionCode];
+    if (allRegion) applyShopeeMetrics(allRegion, regionAdj);
+    if (state.dashboard.regions?.[regionCode] && state.dashboard.regions[regionCode] !== allRegion) {
+      applyShopeeMetrics(state.dashboard.regions[regionCode], regionAdj);
+    }
     if (groups.CN?.regions?.[regionCode]) applyShopeeMetrics(groups.CN.regions[regionCode], sumAdjustments(rows.filter(row => row.businessType === 'SHOPEECN' && row.regionCode === regionCode)));
     if (groups.VN?.regions?.[regionCode]) applyShopeeMetrics(groups.VN.regions[regionCode], sumAdjustments(rows.filter(row => row.businessType === 'SHOPEEVN' && row.regionCode === regionCode)));
   }
 
-  if (state.detailTabs?.abnormal) state.detailTabs.abnormal.total = Number(state.dashboard.metrics?.unresolved || 0);
-  if (state.dashboard.detailTabs?.abnormal) state.dashboard.detailTabs.abnormal.total = Number(state.dashboard.metrics?.unresolved || 0);
+  if (state.detailTabs?.abnormal) state.detailTabs.abnormal.total = Number(allMetrics?.unresolved || 0);
+  if (state.dashboard.detailTabs?.abnormal) state.dashboard.detailTabs.abnormal.total = Number(allMetrics?.unresolved || 0);
   state.dashboard.finalAdjustment = { label, ...all };
 }
 
