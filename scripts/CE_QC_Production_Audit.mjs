@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
-const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
+const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
 
 function resolveProjectPath(value) {
   if (path.isAbsolute(value)) return path.normalize(value);
@@ -83,10 +83,18 @@ function sourceRowsForBatch(db, batchId) {
   return db.prepare('SELECT businessType,shipmentCode FROM unified_import_rows WHERE batchId=? ORDER BY shipmentCode').all(batchId);
 }
 
+function whppSourceRowsForDate(db, reportDate) {
+  return db.prepare("SELECT 'WHPP' businessType,shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode").all(reportDate);
+}
+
 function snapshotForBatch(db, batch) {
   return db.prepare('SELECT * FROM unified_snapshots WHERE snapshotId=? LIMIT 1').get(batch.snapshotId)
     || db.prepare('SELECT * FROM unified_snapshots WHERE batchId=? ORDER BY createdAt DESC LIMIT 1').get(batch.batchId)
     || null;
+}
+
+function whppSnapshotForDate(db, reportDate) {
+  return db.prepare("SELECT * FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC LIMIT 1").get(reportDate) || null;
 }
 
 function retryBillsForDate(db, reportDate) {
@@ -95,7 +103,9 @@ function retryBillsForDate(db, reportDate) {
 }
 
 function auditDay(db, batch) {
-  const sourceRows = sourceRowsForBatch(db, batch.batchId);
+  const coreSourceRows = sourceRowsForBatch(db, batch.batchId);
+  const whppSourceRows = whppSourceRowsForDate(db, batch.reportDate);
+  const sourceRows = [...coreSourceRows, ...whppSourceRows];
   const sourceBills = unique(sourceRows.map((row) => String(row.shipmentCode || '').trim().toUpperCase()));
   const sourceSet = new Set(sourceBills);
   const classificationCounts = Object.fromEntries(BUSINESS_TYPES.map((type) => [type, 0]));
@@ -108,16 +118,24 @@ function auditDay(db, batch) {
 
   const snapshot = snapshotForBatch(db, batch);
   const payload = safeJson(snapshot?.payloadJson, {});
-  const finalRows = Array.isArray(payload.finalRows) ? payload.finalRows : [];
+  const coreFinalRows = Array.isArray(payload.finalRows) ? payload.finalRows : [];
+  const whppSnapshot = whppSnapshotForDate(db, batch.reportDate);
+  const whppPayload = safeJson(whppSnapshot?.payloadJson, {});
+  const whppFinalRows = Array.isArray(whppPayload?.state?.finalRows) ? whppPayload.state.finalRows : [];
+  const finalRows = [...coreFinalRows, ...whppFinalRows];
   const analyzedBills = unique(finalRows.map(billOf));
   const analyzedSet = new Set(analyzedBills);
   const missingBills = sourceBills.filter((bill) => !analyzedSet.has(bill));
   const extraBills = analyzedBills.filter((bill) => !sourceSet.has(bill));
   const duplicateFinalCount = Math.max(0, finalRows.map(billOf).filter(Boolean).length - analyzedBills.length);
   const retryBills = retryBillsForDate(db, batch.reportDate);
-  const snapshotStatus = String(snapshot?.status || 'MISSING').toUpperCase();
+  const coreSnapshotStatus = String(snapshot?.status || 'MISSING').toUpperCase();
+  const whppRequired = classificationCounts.WHPP > 0;
+  const whppSnapshotStatus = whppRequired ? (whppSnapshot ? 'COMPLETED' : 'MISSING') : 'NOT_REQUIRED';
+  const snapshotStatus = coreSnapshotStatus === 'COMPLETED' && (!whppRequired || whppSnapshot) ? 'COMPLETED' : `CORE:${coreSnapshotStatus}/WHPP:${whppSnapshotStatus}`;
   const complete = sourceBalanced
-    && snapshotStatus === 'COMPLETED'
+    && coreSnapshotStatus === 'COMPLETED'
+    && (!whppRequired || Boolean(whppSnapshot))
     && missingBills.length === 0
     && extraBills.length === 0
     && duplicateFinalCount === 0
@@ -128,9 +146,12 @@ function auditDay(db, batch) {
     reportDate: batch.reportDate,
     batchId: batch.batchId,
     snapshotId: batch.snapshotId,
+    whppSnapshotId: whppSnapshot?.snapshotId || '',
     sourceName: batch.sourceName || '',
     fileHash: batch.fileHash || '',
     snapshotStatus,
+    coreSnapshotStatus,
+    whppSnapshotStatus,
     sourceTotal: sourceBills.length,
     classifiedTotal,
     analyzedTotal: analyzedBills.length,
@@ -244,7 +265,7 @@ function main() {
       console.log('\nRESULT: REBUILD_REQUIRED - source data is intact, but one or more dates are incomplete.');
       resultCode = 10;
     } else {
-      console.log('\nRESULT: PASS - all imported dates are complete and reconciled.');
+      console.log('\nRESULT: PASS - all imported dates, including WHPP when present, are complete and reconciled.');
       resultCode = 0;
     }
   } finally {
