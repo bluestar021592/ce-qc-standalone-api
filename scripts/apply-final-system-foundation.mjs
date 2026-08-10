@@ -284,7 +284,7 @@ patchFile('src/analyzerV30.js', [
     after: `  } else if (unknownShopCode) {
     category = '未知门店编码';
     state = 'UNKNOWN_SHOP_CODE';
-    judgment = \`最新结构化门店编码\\\${unknownShopCode}未命中95码白名单，禁止按名称猜测，需人工确认\`;
+    judgment = '最新结构化门店编码' + unknownShopCode + '未命中95码白名单，禁止按名称猜测，需人工确认';
   } else if (storeFlow.shopState === 'SHOP_ARRIVED_CURRENT') {`
   },
   {
@@ -423,7 +423,7 @@ import { buildTrajectoryFacts } from './trajectoryFacts.js';`
     after: `  } else if (unknownShopCode) {
     category = '未知门店编码';
     currentState = 'UNKNOWN_SHOP_CODE';
-    qc = \`最新结构化门店编码\\\${unknownShopCode}未命中95码白名单，禁止按名称猜测，需人工确认\`;
+    qc = '最新结构化门店编码' + unknownShopCode + '未命中95码白名单，禁止按名称猜测，需人工确认';
   } else if (correctedStoreFlow.shopState === 'SHOP_ARRIVED_CURRENT') {`
   },
   {
