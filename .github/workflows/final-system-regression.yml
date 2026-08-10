@@ -35,4 +35,4 @@ jobs:
           node --check src/rangeDashboardStoreFinal.js
           node --check src/rangeDashboardStore.js
       - name: Final state-machine regression
-        run: node --test test/final-system-state-machine.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js
+        run: node --test test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js
