@@ -29,7 +29,13 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
       cycle = newCycle(shipmentCode, target, whitelist.get(target), event);
       continue;
     }
-    if (action === 'INBOUND' && target && cycle?.targetShopCode === target) {
+    if (action === 'INBOUND' && target) {
+      // The trajectory API may return an explicit store-arrival node even when
+      // the preceding transfer node is absent from the returned history. An
+      // exact whitelist inbound is sufficient proof of actual store arrival.
+      if (!cycle || cycle.targetShopCode !== target || cycle.state === 'CLOSED') {
+        cycle = newCycle(shipmentCode, target, whitelist.get(target), event);
+      }
       cycle.currentShopCode = target;
       cycle.shopArrivedAt = event.eventTime || '';
       cycle.shopLastEventAt = event.eventTime || '';
