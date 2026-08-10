@@ -6,14 +6,11 @@ const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|
 const OC_RE = /(?:^|[^A-Z])OC(?:[^A-Z]|$)|overdue|逾期|超时/i;
 const POD_RE = /\bpod\b|delivered|签收|妥投/i;
 const RETURN_RE = /\breturn(?:ed)?\b|退回|返仓|退件/i;
-const DELIVERY_RE = /delivery|派件分配|派送中|out\s*for\s*delivery/i;
 const OUTBOUND_RE = /\boutbound\b|离开网点|货物离开|发往|转往|下一个网点/i;
 const INBOUND_RE = /\binbound\b|到达网点|货物到达|到达门店|入库/i;
 const STRUCTURED_SHOP_CODE_RE = /(?:^|[^A-Z0-9])((?:CP|FS)\s*\d{6}|(?:PV|PNH)\s*\d{3})(?![A-Z0-9])/gi;
 
 export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = '', isPod = false, isReturned = false } = {}) {
-  // Always use the runtime map. In production this preserves the full persisted CP/FS/PV/PNH
-  // whitelist from SQLite even when the signed source JSON is not present in the source tree.
   const whitelist = getShopCodeMap();
   const sorted = [...(events || [])]
     .map((event, index) => ({ event, index }))
@@ -44,8 +41,6 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     }
     if (cycle?.state === 'SHOP_ARRIVED_CURRENT' && PENDING_RE.test(eventText(event))) {
       cycle.shopPendingAt ||= event.eventTime || '';
-      // Pending is a real new shop-side track node. It does not close the shop
-      // cycle, but it DOES reset the no-update retention clock.
       cycle.shopLastEventAt = event.eventTime || cycle.shopLastEventAt;
       cycle.pending = true;
       cycle.oc = false;
@@ -73,12 +68,6 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     cycle.reason = isPod ? 'POD_CLOSED' : 'RETURN_CLOSED';
   }
 
-  // Two different clocks are intentionally preserved:
-  // - shopAgeNaturalDays: how long since the parcel first arrived at this shop.
-  // - shopRetentionNaturalDays: how long since the LAST valid shop-side node.
-  // QC abnormal retention must use the latter. A fresh Pending/inbound update today
-  // must never continue to display a 10/20-day stale retention inherited from the
-  // original arrival date.
   const transfer = cycle.state === 'SHOP_TRANSFER_IN_PROGRESS'
     ? elapsedInclusiveDays(cycle.shopTransferStartedAt, reportDate)
     : 0;
@@ -176,7 +165,9 @@ function eventAction(event) {
 
 function closesStoreCycle(event, action, currentCode, arrivedCode) {
   const text = eventText(event);
-  if (POD_RE.test(text) || RETURN_RE.test(text) || DELIVERY_RE.test(text)) return true;
+  // Store is a customer self-pickup point. A generic "delivery" phrase must not
+  // close the store cycle because stores do not dispatch parcels for delivery.
+  if (POD_RE.test(text) || RETURN_RE.test(text)) return true;
   if (action === 'OUTBOUND' && (!currentCode || currentCode === arrivedCode)) return true;
   return action === 'INBOUND' && structuredHubCodes(event).some(isNormalFinalHubCode);
 }
