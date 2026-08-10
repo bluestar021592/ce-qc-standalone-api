@@ -1,0 +1,34 @@
+name: Sanitize final patch once
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/final-patch-sanitize-once.mjs'
+      - '.github/workflows/final-patch-sanitize-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sanitize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/final-patch-sanitize-once.mjs
+      - shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm scripts/final-patch-sanitize-once.mjs .github/workflows/final-patch-sanitize-once.yml
+          git add scripts/apply-final-system-foundation.mjs
+          git commit -m 'Sanitize final foundation patch and split range pass'
+          git pull --rebase origin ${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
