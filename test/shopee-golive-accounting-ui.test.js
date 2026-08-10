@@ -61,9 +61,15 @@ test('only the trend mount fix owns Shopee 1/2/3 attempt trend panel creation', 
 
 test('fast range dashboard and attempt trend both fall back from podAttemptNo to persisted POD timestamp', () => {
   const facade = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStore.js'), 'utf8');
+  const v35 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV35.js'), 'utf8');
+  const v34 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV34.js'), 'utf8');
   const v33 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV33.js'), 'utf8');
   const trend = fs.readFileSync(path.join(root, 'src', 'v27TrendPatch.js'), 'utf8');
-  assert.match(facade, /rangeDashboardStoreV33\.js/);
+
+  assert.match(facade, /rangeDashboardStoreV35\.js/);
+  assert.match(v35, /rangeDashboardStoreV34\.js/);
+  assert.match(v34, /rangeDashboardStoreV33\.js/);
+
   for (const source of [v33, trend]) {
     assert.match(source, /podAttemptNo/);
     assert.match(source, /POD时间/);
