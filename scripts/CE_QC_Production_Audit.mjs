@@ -1,9 +1,61 @@
+import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
-import { closeDb, ensureRuntimeDirs, getDb, getRuntimeConfig } from '../src/db.js';
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
 const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
+
+function resolveProjectPath(value) {
+  if (path.isAbsolute(value)) return path.normalize(value);
+  return path.resolve(projectRoot, value);
+}
+
+function isPathRootAvailable(targetPath) {
+  const parsed = path.parse(path.resolve(targetPath));
+  return !parsed.root || fs.existsSync(parsed.root);
+}
+
+function getReadOnlyRuntimeConfig() {
+  const preferredDataDir = resolveProjectPath(process.env.DATA_DIR || DEFAULT_DATA_DIR);
+  const fallbackDataDir = resolveProjectPath('./data');
+  const dataRootAvailable = isPathRootAvailable(preferredDataDir);
+  const dataDir = dataRootAvailable ? preferredDataDir : fallbackDataDir;
+  const preferredDbFile = resolveProjectPath(process.env.DB_FILE || path.join(dataDir, 'ce_qc_monitor.db'));
+  const dbFile = isPathRootAvailable(preferredDbFile) ? preferredDbFile : path.join(fallbackDataDir, 'ce_qc_monitor.db');
+  const exportsDir = process.env.EXPORTS_DIR ? resolveProjectPath(process.env.EXPORTS_DIR) : path.join(dataDir, 'exports');
+  return {
+    dataDir,
+    dbFile,
+    exportsDir,
+    usingFallbackDataDir: !dataRootAvailable,
+    dataPathWarning: dataRootAvailable ? '' : '未检测到首选数据盘，审计仅尝试读取项目 data 目录；不会创建或复制数据库。'
+  };
+}
+
+function openReadOnlyDb(dbFile) {
+  if (!fs.existsSync(dbFile)) throw new Error(`Production database not found: ${dbFile}`);
+  return new DatabaseSync(dbFile, { readOnly: true });
+}
+
+function readSchemaVersion(db) {
+  try {
+    const metaExists = db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='app_meta'").get();
+    if (metaExists) {
+      const row = db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get();
+      if (row?.value !== undefined && row?.value !== null && String(row.value).trim() !== '') {
+        return { value: Number(row.value || 0), source: 'app_meta.db_schema_version' };
+      }
+    }
+    return { value: Number(db.prepare('PRAGMA user_version').get()?.user_version || 0), source: 'PRAGMA user_version' };
+  } catch {
+    return { value: 0, source: 'unavailable' };
+  }
+}
 
 function safeJson(value, fallback = {}) {
   try { return JSON.parse(value || ''); } catch { return fallback; }
@@ -124,87 +176,96 @@ function printTable(days) {
 }
 
 function main() {
-  const cfg = getRuntimeConfig();
-  ensureRuntimeDirs(cfg);
-  const db = getDb();
-  const integrity = String(db.prepare('PRAGMA integrity_check').get()?.integrity_check || 'unknown');
-  const schemaVersion = Number(db.prepare("SELECT value FROM app_meta WHERE key='schema_version'").get()?.value || 0);
-  const batches = latestValidBatches(db);
-  const days = batches.map((batch) => auditDay(db, batch));
-  const monthly = buildMonthly(days);
-  const failedDays = days.filter((day) => day.result !== 'PASS');
-  const sourceErrors = days.filter((day) => !day.sourceBalanced);
-  const totalSource = days.reduce((sum, day) => sum + day.sourceTotal, 0);
-  const totalAnalyzed = days.reduce((sum, day) => sum + day.analyzedTotal, 0);
-  const totalMissing = days.reduce((sum, day) => sum + day.missingCount, 0);
-  const totalRetry = days.reduce((sum, day) => sum + day.retryCount, 0);
+  const cfg = getReadOnlyRuntimeConfig();
+  const db = openReadOnlyDb(cfg.dbFile);
+  let report;
+  let resultCode = 20;
+  try {
+    const integrity = String(db.prepare('PRAGMA integrity_check').get()?.integrity_check || 'unknown');
+    const schemaVersion = readSchemaVersion(db);
+    const batches = latestValidBatches(db);
+    const days = batches.map((batch) => auditDay(db, batch));
+    const monthly = buildMonthly(days);
+    const failedDays = days.filter((day) => day.result !== 'PASS');
+    const sourceErrors = days.filter((day) => !day.sourceBalanced);
+    const totalSource = days.reduce((sum, day) => sum + day.sourceTotal, 0);
+    const totalAnalyzed = days.reduce((sum, day) => sum + day.analyzedTotal, 0);
+    const totalMissing = days.reduce((sum, day) => sum + day.missingCount, 0);
+    const totalRetry = days.reduce((sum, day) => sum + day.retryCount, 0);
 
-  const report = {
-    generatedAt: new Date().toISOString(),
-    database: {
-      path: cfg.dbFile,
-      usingFallbackDataDir: Boolean(cfg.usingFallbackDataDir),
-      dataPathWarning: cfg.dataPathWarning || '',
-      integrity,
-      schemaVersion
-    },
-    summary: {
-      reportDays: days.length,
-      passedDays: days.length - failedDays.length,
-      needsRebuildDays: failedDays.length,
-      sourceErrorDays: sourceErrors.length,
-      sourceTotal: totalSource,
-      analyzedTotal: totalAnalyzed,
-      missingTotal: totalMissing,
-      retryTotal: totalRetry
-    },
-    monthly,
-    days
-  };
+    report = {
+      generatedAt: new Date().toISOString(),
+      readOnly: true,
+      database: {
+        path: cfg.dbFile,
+        usingFallbackDataDir: Boolean(cfg.usingFallbackDataDir),
+        dataPathWarning: cfg.dataPathWarning || '',
+        integrity,
+        schemaVersion: schemaVersion.value,
+        schemaVersionSource: schemaVersion.source
+      },
+      summary: {
+        reportDays: days.length,
+        passedDays: days.length - failedDays.length,
+        needsRebuildDays: failedDays.length,
+        sourceErrorDays: sourceErrors.length,
+        sourceTotal: totalSource,
+        analyzedTotal: totalAnalyzed,
+        missingTotal: totalMissing,
+        retryTotal: totalRetry
+      },
+      monthly,
+      days
+    };
+
+    console.log('\nCE QC PRODUCTION AUDIT');
+    console.log('SQLite connection: READ-ONLY');
+    console.log(`Database: ${cfg.dbFile}`);
+    console.log(`SQLite integrity: ${integrity}`);
+    console.log(`Schema version: ${schemaVersion.value} (${schemaVersion.source})`);
+    if (cfg.usingFallbackDataDir) console.log(`WARNING: ${cfg.dataPathWarning}`);
+    console.log('');
+    if (days.length) printTable(days);
+    else console.log('No VALID unified daily imports were found.');
+
+    console.log('\nSUMMARY');
+    console.log(`Report days: ${days.length}`);
+    console.log(`Passed days: ${days.length - failedDays.length}`);
+    console.log(`Needs rebuild: ${failedDays.length}`);
+    console.log(`Source total: ${totalSource}`);
+    console.log(`Analyzed total: ${totalAnalyzed}`);
+    console.log(`Missing waybills: ${totalMissing}`);
+    console.log(`API retry: ${totalRetry}`);
+
+    if (integrity !== 'ok' || sourceErrors.length > 0) {
+      console.error('\nRESULT: BLOCKED - database/source reconciliation error. Do not purge or rebuild history.');
+      resultCode = 20;
+    } else if (failedDays.length > 0) {
+      console.log('\nRESULT: REBUILD_REQUIRED - source data is intact, but one or more dates are incomplete.');
+      resultCode = 10;
+    } else {
+      console.log('\nRESULT: PASS - all imported dates are complete and reconciled.');
+      resultCode = 0;
+    }
+  } finally {
+    db.close();
+  }
 
   const auditDir = path.join(cfg.exportsDir, 'audit');
   fs.mkdirSync(auditDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outputPath = path.join(auditDir, `production_audit_${stamp}.json`);
   fs.writeFileSync(outputPath, JSON.stringify(report, null, 2), 'utf8');
-
-  console.log('\nCE QC PRODUCTION AUDIT');
-  console.log(`Database: ${cfg.dbFile}`);
-  console.log(`SQLite integrity: ${integrity}`);
-  console.log(`Schema version: ${schemaVersion}`);
-  if (cfg.usingFallbackDataDir) console.log(`WARNING: ${cfg.dataPathWarning || 'Using fallback data directory.'}`);
-  console.log('');
-  if (days.length) printTable(days);
-  else console.log('No VALID unified daily imports were found.');
-
-  console.log('\nSUMMARY');
-  console.log(`Report days: ${days.length}`);
-  console.log(`Passed days: ${days.length - failedDays.length}`);
-  console.log(`Needs rebuild: ${failedDays.length}`);
-  console.log(`Source total: ${totalSource}`);
-  console.log(`Analyzed total: ${totalAnalyzed}`);
-  console.log(`Missing waybills: ${totalMissing}`);
-  console.log(`API retry: ${totalRetry}`);
   console.log(`Audit JSON: ${outputPath}`);
-
-  if (integrity !== 'ok' || sourceErrors.length > 0) {
-    console.error('\nRESULT: BLOCKED - database/source reconciliation error. Do not purge or rebuild history.');
-    process.exitCode = 20;
-  } else if (failedDays.length > 0) {
-    console.log('\nRESULT: REBUILD_REQUIRED - source data is intact, but one or more dates are incomplete.');
-    process.exitCode = 10;
-  } else {
-    console.log('\nRESULT: PASS - all imported dates are complete and reconciled.');
-    process.exitCode = 0;
-  }
-
-  closeDb();
+  console.log('READ-ONLY CONFIRMED');
+  console.log('DATABASE MODIFIED: NO');
+  process.exitCode = resultCode;
 }
 
 try {
   main();
 } catch (error) {
   console.error(`\nAUDIT ERROR: ${error?.stack || error?.message || error}`);
-  try { closeDb(); } catch {}
+  console.log('DATABASE MODIFIED: NO');
   process.exitCode = 20;
 }
