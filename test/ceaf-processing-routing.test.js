@@ -23,7 +23,7 @@ function writeFixture() {
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
     ['日报表'],
     ['运单编号', '收件人', '客户名称', '省份标识'],
-    ['CE0001', 'CE10001', 'CCSL', 'PP'],
+    ['CC0001', 'CE10001', 'CCSL', 'PP'],
     ['AIR0001', 'CE10002', 'CCAF', 'PP'],
     ['TBKH0001', 'CE10003', 'CCSL', 'PV'],
     ['ALI0001', 'ALI1688', 'CCSL', 'PP'],
@@ -45,7 +45,7 @@ test('CEAF is independently readable while included in the CCSL processing/dashb
 
   const ccsl = loadLightweightAggregateState('CCSL', saved.snapshotId);
   assert.equal(ccsl.dailyParseSummary.totalRecognized, 4, 'CCSL scope contains CE + CEAF + TBKH + ALI1688');
-  assert.deepEqual(new Set(ccsl.pnhBills), new Set(['CE0001', 'AIR0001', 'TBKH0001', 'ALI0001']));
+  assert.deepEqual(new Set(ccsl.pnhBills), new Set(['CC0001', 'AIR0001', 'TBKH0001', 'ALI0001']));
 });
 
 test('server unified import explicitly routes CEAF through the generic CCSL run pool', () => {
