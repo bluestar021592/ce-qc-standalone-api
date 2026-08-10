@@ -92,6 +92,7 @@ try {
   await importPhase('v42WhppPatch', './src/v42WhppPatch.js');
   await importPhase('v44WhppUiPatch', './src/v44WhppUiPatch.js');
   await importPhase('v43BootstrapPerfPatch', './src/v43BootstrapPerfPatch.js');
+  await importPhase('v46ColdStartIndexPatch', './src/v46ColdStartIndexPatch.js');
   await importPhase('server', './server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
