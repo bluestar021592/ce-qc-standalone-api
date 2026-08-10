@@ -27,3 +27,14 @@ test('V43 performance patch is installed before the main server registers bootst
   assert.ok(perf >= 0, 'V43 bootstrap performance patch must be loaded');
   assert.ok(server > perf, 'V43 must load before server.js registers /api/bootstrap');
 });
+
+test('startup cache worker does not scan 180 days during first paint', () => {
+  const file = path.join(root, 'src', 'dashboardCacheWorker.js');
+  const source = fs.readFileSync(file, 'utf8');
+  const check = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+  assert.equal(check.status, 0, check.stderr || check.stdout);
+  assert.match(source, /reason === 'STARTUP_WARM'/);
+  assert.match(source, /STARTUP_WARM_DISABLED_FOR_FAST_FIRST_PAINT/);
+  assert.match(source, /DASHBOARD_CACHE_WARM_DAYS/);
+  assert.doesNotMatch(source, /warmDashboardCacheRange\(\{ days: 180 \}\)/);
+});
