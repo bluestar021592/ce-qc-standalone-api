@@ -3,8 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import XLSX from 'xlsx';
 
-const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
-const BUSINESS_PRIORITY = Object.freeze(['CEAF', 'SHOPEEVN', 'SHOPEECN', 'TBKH', 'ALI1688']);
+const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
+const BUSINESS_PRIORITY = Object.freeze(['CEAF', 'SHOPEEVN', 'SHOPEECN', 'TBKH', 'ALI1688', 'WHPP', 'CE']);
 const SHIPMENT_HEADERS = [
   '运单号', '运单编号', '单号', '面单号', '快递单号', '物流单号',
   'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'
@@ -137,7 +137,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
 
       if (!recipientRaw) {
         missingRecipientWarnings += 1;
-        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人缺失，按客户名称/运单号规则继续分类，未命中则归CE' });
+        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人缺失，继续按客户名称与运单号前缀精确分类；不再默认归CE。' });
       }
 
       const matches = classifyMatches(shipmentCode, recipientNormalized, customerNameNormalized);
@@ -146,6 +146,14 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
         warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个板块，按优先级归类${matches[0]}` });
       }
       const classification = classifyBusiness(shipmentCode, recipientNormalized, customerNameNormalized);
+      if (!classification) {
+        const error = new Error(`运单 ${shipmentCode} 未命中任何业务板块。CE必须CC开头，WHPP本土必须CE开头；已阻止静默归CE。`);
+        error.code = 'UNCLASSIFIED_WAYBILL_PREFIX';
+        error.shipmentCode = shipmentCode;
+        error.sheetName = sheetName;
+        error.rowNumber = index + 1;
+        throw error;
+      }
       const raw = Object.fromEntries(originalHeaders.map((header, column) => [header || `column_${column + 1}`, row[column] ?? '']));
       details.push({
         shipmentCode,
@@ -207,7 +215,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     balanced: classifiedWaybills === details.length
   };
   if (!sourceReconciliation.balanced) {
-    const error = new Error(`日报源数据分类守恒失败：有效唯一运单${details.length}票，六板块合计${classifiedWaybills}票`);
+    const error = new Error(`日报源数据分类守恒失败：有效唯一运单${details.length}票，七板块合计${classifiedWaybills}票`);
     error.code = 'SOURCE_CLASSIFICATION_RECONCILIATION_FAILED';
     error.sourceReconciliation = sourceReconciliation;
     throw error;
@@ -297,7 +305,6 @@ function normalizeRegion(value) {
   if (!text) return '';
   if (/^(?:PP\d*|PNH)$/.test(text) || /PHNOM\s*PENH|金边/i.test(raw)) return 'PP';
   if (/^PV\d*$/.test(text)) return 'PV';
-  // A populated province/destination-province field that is not Phnom Penh is provincial.
   return 'PV';
 }
 function classifyMatches(shipmentCode, recipient, customerName) {
@@ -307,6 +314,8 @@ function classifyMatches(shipmentCode, recipient, customerName) {
   if (recipient.includes('SHOPEECN')) matches.push('SHOPEECN');
   if (shipmentCode.startsWith('TBKH') || recipient.includes('TBKH')) matches.push('TBKH');
   if (recipient.includes('ALI1688')) matches.push('ALI1688');
+  if (shipmentCode.startsWith('CE')) matches.push('WHPP');
+  if (shipmentCode.startsWith('CC')) matches.push('CE');
   return BUSINESS_PRIORITY.filter(type => matches.includes(type));
 }
 function classifyBusiness(shipmentCode, recipient, customerName) {
@@ -316,7 +325,9 @@ function classifyBusiness(shipmentCode, recipient, customerName) {
   if (shipmentCode.startsWith('TBKH')) return { businessType: 'TBKH', source: 'SHIPMENT_PREFIX', matchedValue: 'TBKH', reason: '运单号前缀命中TBKH' };
   if (recipient.includes('TBKH')) return { businessType: 'TBKH', source: 'RECIPIENT', matchedValue: 'TBKH', reason: '收件人命中TBKH' };
   if (recipient.includes('ALI1688')) return { businessType: 'ALI1688', source: 'RECIPIENT', matchedValue: 'ALI1688', reason: '收件人命中ALI1688' };
-  return { businessType: 'CE', source: 'DEFAULT', matchedValue: '', reason: '未命中特定板块，默认归类CE' };
+  if (shipmentCode.startsWith('CE')) return { businessType: 'WHPP', source: 'SHIPMENT_PREFIX', matchedValue: 'CE', reason: '运单号CE开头，归类WHPP本土' };
+  if (shipmentCode.startsWith('CC')) return { businessType: 'CE', source: 'SHIPMENT_PREFIX', matchedValue: 'CC', reason: '运单号CC开头，归类CE' };
+  return null;
 }
 function normalizeDate(value) {
   if (!value) return '';
