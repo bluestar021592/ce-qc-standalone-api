@@ -21,12 +21,25 @@ test('V43 bootstrap patch is syntax-valid and uses cache-summary only startup', 
   assert.doesNotMatch(source, /unified_snapshots\.payloadJson/);
 });
 
-test('V43 performance patch is installed before the main server registers bootstrap route', () => {
+test('V43 and V46 cold-start performance patches load before the main server', () => {
   const source = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
-  const perf = source.indexOf("v43BootstrapPerfPatch");
+  const v43 = source.indexOf("v43BootstrapPerfPatch");
+  const v46 = source.indexOf("v46ColdStartIndexPatch");
   const server = source.indexOf("importPhase('server'");
-  assert.ok(perf >= 0, 'V43 bootstrap performance patch must be loaded');
-  assert.ok(server > perf, 'V43 must load before server.js registers /api/bootstrap');
+  assert.ok(v43 >= 0, 'V43 bootstrap performance patch must be loaded');
+  assert.ok(v46 > v43, 'V46 cold-start index patch must load after V43');
+  assert.ok(server > v46, 'V46 must finish before server.js accepts browser requests');
+});
+
+test('V46 installs covering indexes for the exact cold bootstrap grouping path', () => {
+  const file = path.join(root, 'src', 'v46ColdStartIndexPatch.js');
+  const source = fs.readFileSync(file, 'utf8');
+  const check = spawnSync(process.execPath, ['--check', file], { encoding:'utf8' });
+  assert.equal(check.status, 0, check.stderr || check.stdout);
+  assert.match(source, /idx_unified_rows_bootstrap_cover/);
+  assert.match(source, /snapshotId, businessType, regionCode/);
+  assert.match(source, /idx_unified_batches_latest_valid/);
+  assert.doesNotMatch(source, /VACUUM/i);
 });
 
 test('startup cache worker does not scan 180 days during first paint', () => {
@@ -38,6 +51,18 @@ test('startup cache worker does not scan 180 days during first paint', () => {
   assert.match(source, /STARTUP_WARM_DISABLED_FOR_FAST_FIRST_PAINT/);
   assert.match(source, /DASHBOARD_CACHE_WARM_DAYS/);
   assert.doesNotMatch(source, /warmDashboardCacheRange\(\{ days: 180 \}\)/);
+});
+
+test('one-click launcher opens a running app immediately and cold-starts silently', () => {
+  const auto = fs.readFileSync(path.join(root, 'Start_CE_QC_Auto.vbs'), 'utf8');
+  const installer = fs.readFileSync(path.join(root, 'tools', 'Install_CE_QC_Desktop_Shortcut.ps1'), 'utf8');
+  assert.match(auto, /WinHttp\.WinHttpRequest\.5\.1/);
+  assert.match(auto, /status >= 200 And status < 500/);
+  assert.match(auto, /Start_CE_QC\.cmd/);
+  assert.doesNotMatch(auto, /git\s+(fetch|pull)/i);
+  assert.match(installer, /Start_CE_QC_Auto\.vbs/);
+  assert.match(installer, /wscript\.exe/);
+  assert.doesNotMatch(installer, /CE_QC_Start\.ps1/);
 });
 
 test('WHPP direct SPA entry injects native frontend without legacy V42 UI', () => {
