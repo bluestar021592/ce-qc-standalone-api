@@ -8,7 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const root = path.resolve(__dirname, '..');
 const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
-const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+const TYPES = [...CORE_TYPES, 'WHPP'];
 const SHOPEE = new Set(['SHOPEECN','SHOPEEVN']);
 
 const resolvePath = value => path.isAbsolute(value) ? path.normalize(value) : path.resolve(root, value);
@@ -17,7 +18,6 @@ const dbFile = resolvePath(process.env.DB_FILE || path.join(dataDir, 'ce_qc_moni
 const requestedDate = String(process.argv[2] || '').trim();
 
 function safeJson(text, fallback = {}) { try { return JSON.parse(text || ''); } catch { return fallback; } }
-function billOf(row = {}) { return String(row.shipmentCode || row.运单号 || row.waybill || '').trim().toUpperCase(); }
 function isPod(row = {}) {
   return Number(row.isPod || 0) === 1
     || String(row.是否POD || '').trim() === '是'
@@ -48,6 +48,12 @@ try {
     WHERE b.status='VALID' AND b.reportDate=?
     ORDER BY b.createdAt DESC LIMIT 1
   `).get(reportDate) : null;
+  const whppSnapshot = reportDate ? db.prepare(`
+    SELECT snapshotId,payloadJson
+    FROM business_export_snapshots
+    WHERE businessType='WHPP' AND reportDate=?
+    ORDER BY createdAt DESC LIMIT 1
+  `).get(reportDate) : null;
 
   console.log('\nCE QC FIRST-DAY GO-LIVE VERIFY - STRICT READ ONLY');
   console.log(`Database: ${dbFile}`);
@@ -57,11 +63,13 @@ try {
     console.log('GO_LIVE_RESULT: BLOCKED_NO_VALID_IMPORT');
     exitCode = 20;
   } else {
-    console.log(`Snapshot status: ${batch.snapshotStatus || 'MISSING'}`);
+    console.log(`Core snapshot status: ${batch.snapshotStatus || 'MISSING'}`);
+    console.log(`WHPP snapshot: ${whppSnapshot?.snapshotId || 'NONE'}`);
     const expected = zeros();
     for (const row of db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(batch.snapshotId)) {
-      if (TYPES.includes(row.businessType)) expected[row.businessType] = Number(row.count || 0);
+      if (CORE_TYPES.includes(row.businessType)) expected[row.businessType] = Number(row.count || 0);
     }
+    expected.WHPP = Number(db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(reportDate)?.count || 0);
 
     const payload = safeJson(batch.payloadJson, {});
     const payloadRows = Array.isArray(payload.finalRows) ? payload.finalRows : [];
@@ -69,17 +77,21 @@ try {
     const payloadPod = zeros();
     for (const row of payloadRows) {
       const type = String(row.businessType || '').toUpperCase();
-      if (!TYPES.includes(type)) continue;
+      if (!CORE_TYPES.includes(type)) continue;
       payloadCount[type] += 1;
       if (isPod(row)) payloadPod[type] += 1;
     }
+    const whppPayload = safeJson(whppSnapshot?.payloadJson, {});
+    const whppRows = Array.isArray(whppPayload?.state?.finalRows) ? whppPayload.state.finalRows : [];
+    payloadCount.WHPP = whppRows.length;
+    payloadPod.WHPP = whppRows.filter(isPod).length;
 
     const normalizedCount = zeros();
     const normalizedPod = zeros();
     const currentCount = zeros();
     const currentPod = zeros();
 
-    for (const type of TYPES) {
+    for (const type of CORE_TYPES) {
       if (SHOPEE.has(type)) {
         const r = db.prepare(`
           SELECT COUNT(f.shipmentCode) count,COALESCE(SUM(CASE WHEN f.isPod=1 THEN 1 ELSE 0 END),0) pod
@@ -112,9 +124,17 @@ try {
       currentPod[type] = Number(c.pod || 0);
     }
 
+    const whppNorm = db.prepare("SELECT COUNT(*) count,COALESCE(SUM(CASE WHEN isPod=1 THEN 1 ELSE 0 END),0) pod FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(reportDate) || {};
+    normalizedCount.WHPP = Number(whppNorm.count || 0);
+    normalizedPod.WHPP = Number(whppNorm.pod || 0);
+    const whppCurrent = db.prepare("SELECT COUNT(*) count,COALESCE(SUM(CASE WHEN UPPER(COALESCE(state,''))='POD' THEN 1 ELSE 0 END),0) pod FROM shipment_current_state WHERE businessType='WHPP' AND reportDate=?").get(reportDate) || {};
+    currentCount.WHPP = Number(whppCurrent.count || 0);
+    currentPod.WHPP = Number(whppCurrent.pod || 0);
+
     console.log('\nBUSINESS      SRC    PAY    PAY_POD  NORM   NORM_POD  CUR    CUR_POD  RESULT');
     console.log('------------  -----  -----  -------  -----  --------  -----  -------  ----------------');
     let allPass = integrity === 'ok' && batch.snapshotStatus === 'COMPLETED';
+    if (expected.WHPP > 0 && !whppSnapshot) allPass = false;
     for (const type of TYPES) {
       const pass = expected[type] === payloadCount[type]
         && expected[type] === normalizedCount[type]
