@@ -5,13 +5,14 @@ import {
 } from './shopeeAnalyzerV30.js';
 import { classifyScanTerminal } from './scanTerminal.js';
 
-export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-09-scan-track-code-separation-v31';
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-10-final-trajectory-state-machine-v1';
 
 /**
- * Safety wrapper around V30.
+ * Final safety wrapper around V30.
  * - An empty trajectory result must not crash the classifier.
  * - Legacy text/old code 81 must not resurrect POD/return terminal states.
- * Locked terminal sources are scan 85/100 or tracking 80/86 only.
+ * - Only scan 85/100 or the latest trajectory event 80/86 can close a parcel.
+ * - Store Pending/OC remain store self-pickup context, never store retention.
  */
 export function analyzeShopeeShipment(args = {}) {
   const originalEvents = Array.isArray(args.events) ? args.events : [];
@@ -57,10 +58,6 @@ export function analyzeShopeeShipment(args = {}) {
     };
   }
 
-  // V29 historically treated text/81 as completed return and broad POD text as
-  // terminal. V30 corrects most fields, but its inherited currentState/category
-  // can still carry those legacy labels. Strip them unless an exact terminal code
-  // is present.
   if (!exactPod && !exactReturn) {
     const falseTerminalState = ['POD', 'RETURN', 'RETURNED', 'RETURN_COMPLETED'].includes(String(result.currentState || '').toUpperCase());
     const falseTerminalCategory = ['POD', 'POD闭环', '退回'].includes(String(result.primaryCategory || result.主分类 || result.异常分类 || ''));
@@ -78,6 +75,10 @@ export function analyzeShopeeShipment(args = {}) {
         carry状态: latestCode === '84' ? 'active_return' : 'active'
       });
     }
+  }
+
+  if (result.shopState === 'SHOP_ARRIVED_CURRENT' && ['SHOP_PENDING', 'SHOP_OC'].includes(String(result.currentState || '').toUpperCase())) {
+    result.pvOpenDisposition = 'PV_STORE_NORMAL';
   }
 
   return { ...result, analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION };
