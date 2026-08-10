@@ -1,0 +1,36 @@
+name: CE QC go-live preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go-live-preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Critical syntax checks
+        run: |
+          node --check src/trajectoryFacts.js
+          node --check src/analyzerV30.js
+          node --check src/analyzerFinal.js
+          node --check src/analyzer.js
+          node --check src/shopeeAnalyzer.js
+          node --check src/unifiedImportStore.js
+          node --check src/rangeDashboardStore.js
+          node --check src/dataPurge.js
+          node --check scripts/CE_QC_Production_Audit.mjs
+          node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
+      - name: Go-live regression suite
+        run: npm run test:golive
