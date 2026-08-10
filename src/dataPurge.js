@@ -69,10 +69,12 @@ async function createVerifiedPreClearBackup(adminEmail) {
   const backupSize = fs.statSync(filePath).size;
   if (backupSize <= 0 || backupSize !== sourceSize) throw new Error('备份文件大小校验失败，已停止清除。');
   const sha256 = await hashFileStream(filePath);
+  const schemaMeta = Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0);
+  const pragmaSchema = Number(db.prepare('PRAGMA user_version').get()?.user_version || 0);
   const manifest = {
     createdAt: nowIso(), reason: 'clear-all-business-data', databasePath: cfg.dbFile,
     backupPath: filePath, sha256, size: backupSize, sourceSize, systemVersion: process.env.npm_package_version || '0.1.0',
-    migrationVersion: Number(db.prepare("SELECT value FROM app_meta WHERE key='schema_version'").get()?.value || 0),
+    migrationVersion: schemaMeta || pragmaSchema,
     whitelistVersion: db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version || '',
     administrator: adminEmail, counts: tableCounts(db)
   };
