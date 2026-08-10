@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+const file = 'scripts/apply-final-system-foundation.mjs';
+let source = fs.readFileSync(file, 'utf8');
+source = source.replace(/judgment = \\\`最新结构化门店编码[\\$\\{}A-Za-z]+未命中95码白名单，禁止按名称猜测，需人工确认\\\`;/, "judgment = '最新结构化门店编码' + unknownShopCode + '未命中95码白名单，禁止按名称猜测，需人工确认';");
+source = source.replace(/qc = \\\`最新结构化门店编码[\\$\\{}A-Za-z]+未命中95码白名单，禁止按名称猜测，需人工确认\\\`;/, "qc = '最新结构化门店编码' + unknownShopCode + '未命中95码白名单，禁止按名称猜测，需人工确认';");
+const marker = "\npatchFile('src/rangeDashboardStoreV31.js', [";
+const index = source.indexOf(marker);
+if (index >= 0) source = source.slice(0, index).trimEnd() + '\n';
+if (source.includes('${unknownShopCode}')) throw new Error('unsafe template interpolation remains');
+fs.writeFileSync(file, source, 'utf8');
