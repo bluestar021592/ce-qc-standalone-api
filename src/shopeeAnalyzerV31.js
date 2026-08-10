@@ -13,6 +13,7 @@ export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-10-final-trajectory-state-m
  * - Legacy text/old code 81 must not resurrect POD/return terminal states.
  * - Only scan 85/100 or the latest trajectory event 80/86 can close a parcel.
  * - Store Pending/OC remain store self-pickup context, never store retention.
+ * - Legacy carry flags are rebuilt from the same exact terminal facts.
  */
 export function analyzeShopeeShipment(args = {}) {
   const originalEvents = Array.isArray(args.events) ? args.events : [];
@@ -54,6 +55,9 @@ export function analyzeShopeeShipment(args = {}) {
       轨迹节点数: 0,
       tags: scanGate.currentState === 'SCAN_PENDING_RETRY' ? ['REFRESH_FAILED'] : ['NO_TRACK'],
       carry状态: 'active',
+      跨日状态: '未闭环',
+      trackRequired: true,
+      trackSkippedReason: '',
       QC判断: scanGate.currentState === 'SCAN_PENDING_RETRY' ? '订单扫描待重试' : '轨迹接口成功但没有返回有效轨迹，保留续查'
     };
   }
@@ -71,8 +75,7 @@ export function analyzeShopeeShipment(args = {}) {
         异常分类: fallbackCategory,
         是否POD: '否',
         POD状态: '未POD',
-        退回状态: latestCode === '84' ? '退回处理中' : '未退回',
-        carry状态: latestCode === '84' ? 'active_return' : 'active'
+        退回状态: latestCode === '84' ? '退回处理中' : '未退回'
       });
     }
   }
@@ -81,7 +84,16 @@ export function analyzeShopeeShipment(args = {}) {
     result.pvOpenDisposition = 'PV_STORE_NORMAL';
   }
 
-  return { ...result, analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION };
+  const returnInProgress = !exactPod && !exactReturn && (latestCode === '84' || result.退回状态 === '退回处理中' || String(result.currentState || '').toUpperCase() === 'RETURN_IN_PROGRESS');
+  Object.assign(result, {
+    analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
+    trackRequired: !(exactPod || exactReturn),
+    trackSkippedReason: exactPod ? 'POD_COMPLETED' : exactReturn ? 'RETURN_COMPLETED' : '',
+    carry状态: exactPod ? 'closed_pod' : exactReturn ? 'closed_return' : returnInProgress ? 'active_return' : 'active',
+    跨日状态: exactPod || exactReturn ? '已闭环' : '未闭环'
+  });
+
+  return result;
 }
 
 export { classifyShopeeScanStatus, classifyShopeeRegion };
