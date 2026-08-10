@@ -39,3 +39,22 @@ test('startup cache worker does not scan 180 days during first paint', () => {
   assert.match(source, /DASHBOARD_CACHE_WARM_DAYS/);
   assert.doesNotMatch(source, /warmDashboardCacheRange\(\{ days: 180 \}\)/);
 });
+
+test('WHPP direct SPA entry injects only the native V44 frontend', () => {
+  const file = path.join(root, 'src', 'v44WhppUiPatch.js');
+  const source = fs.readFileSync(file, 'utf8');
+  const check = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+  assert.equal(check.status, 0, check.stderr || check.stdout);
+  assert.match(source, /'\/whpp'/);
+  assert.match(source, /whpp-v44\.js/);
+  assert.doesNotMatch(source, /whpp-v42\.js/);
+});
+
+test('WHPP board uses native Shopee dashboard classes and does not render dispatch-attempt POD cards', () => {
+  const file = path.join(root, 'public', 'whpp-v44.js');
+  const source = fs.readFileSync(file, 'utf8');
+  const check = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+  assert.equal(check.status, 0, check.stderr || check.stdout);
+  for (const token of ['v18-business-grid','v18-core-grid','region-summary-grid','v18-chart-grid','订单取消','CCSLCN分流','CCSLZT分流','CCSL580分流','金边门店']) assert.match(source, new RegExp(token));
+  assert.doesNotMatch(source, /1派POD|2派POD|3派POD|派送概率分布/);
+});
