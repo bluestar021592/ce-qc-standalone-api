@@ -1,0 +1,34 @@
+name: Final source cleanup once
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/final-source-cleanup-once.mjs'
+      - '.github/workflows/final-source-cleanup-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/final-source-cleanup-once.mjs
+      - shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm scripts/final-source-cleanup-once.mjs .github/workflows/final-source-cleanup-once.yml
+          git add src/analyzerV30.js src/shopeeAnalyzerV30.js
+          git commit -m 'Clean final state machine duplicate guards'
+          git pull --rebase origin ${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
