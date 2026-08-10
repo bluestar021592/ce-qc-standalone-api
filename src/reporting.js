@@ -512,7 +512,7 @@ function isShopInboundRow(row = {}) {
 }
 
 function isShopStuckRow(row = {}) {
-  if (row?.shopState === 'SHOP_ARRIVED_CURRENT' && shopDays(row) >= 1) return true;
+  if (row?.shopState === 'SHOP_ARRIVED_CURRENT' && shopDays(row) >= 2) return true;
   return row?.门店状态 === '门店滞留'
     || row?.异常分类 === '门店滞留'
     || (isShopInboundRow(row) && shopDays(row) >= 2);
