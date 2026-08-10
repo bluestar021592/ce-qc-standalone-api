@@ -1,0 +1,221 @@
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
+import { saveUnifiedImport, getUnifiedProcessingQueue } from './unifiedImportStore.js';
+import { loadAppState, saveAppState } from './store.js';
+import { SHOPEE, loadBusinessState, saveBusinessState } from './businessStore.js';
+import { CEClient } from './ceClient.js';
+import { runWhppPipeline } from './whppPipeline.js';
+import { buildWhppDashboard } from './whppReporting.js';
+import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
+import { getDb } from './db.js';
+
+const PATCH_ID = '2026-08-10-v42-whpp-local-board-v1';
+const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
+const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
+const APP_PATHS = new Set(['/', '/home', '/ce', '/ceaf', '/tbkh', '/ali1688', '/shopeecn', '/shopeevn', '/whpp', '/tracking', '/abnormal', '/carry', '/export', '/import', '/data', '/settings', '/logs']);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const INDEX_FILE = path.resolve(__dirname, '..', 'public', 'index.html');
+let whppRunPromise = null;
+
+async function handleUnifiedImportV42(req, res) {
+  try {
+    if (!req.file) throw new Error('没有收到综合日报Excel文件');
+    const parsed = parseUnifiedDailyExcel(req.file.path, {
+      reportDate: req.body?.reportDate || '',
+      originalName: req.file.originalname
+    });
+    const whppRows = parsed.rows.filter(row => row.businessType === WHPP);
+    const coreRows = parsed.rows.filter(row => row.businessType !== WHPP);
+    const coreParsed = coreProjection(parsed, coreRows);
+    const saved = saveUnifiedImport(coreParsed, req.file.originalname);
+    const queue = getUnifiedProcessingQueue(saved.batchId);
+
+    initializeCcslState(parsed.reportDate, req.file.originalname, coreRows.filter(row => CCSL_TYPES.has(row.businessType)), queue.rows);
+    initializeShopeeState(parsed.reportDate, req.file.originalname, coreRows.filter(row => SHOPEE_TYPES.has(row.businessType)), queue.rows);
+    const whppState = saveWhppDailyImport({
+      reportDate: parsed.reportDate,
+      sourceName: req.file.originalname,
+      rows: whppRows,
+      batchId: saved.batchId,
+      snapshotId: saved.snapshotId
+    });
+
+    res.json({
+      ok: true,
+      patchId: PATCH_ID,
+      ...saved,
+      classificationCounts: parsed.classificationCounts,
+      sourceReconciliation: parsed.sourceReconciliation,
+      summary: parsed.summary,
+      warnings: parsed.warnings,
+      sheetDiagnostics: parsed.sheetDiagnostics,
+      whpp: {
+        businessType: WHPP,
+        count: whppRows.length,
+        reportDate: parsed.reportDate,
+        dailyReportReady: whppState.dailyReportReady
+      },
+      architectureNote: 'WHPP使用独立持久化快照；现有CCSL/SHOPEE统一快照保持兼容，首页由V42合并展示。'
+    });
+  } catch (error) {
+    console.error('[V42][UNIFIED_IMPORT]', error);
+    res.status(400).json({ ok: false, code: error.code || 'WHPP_UNIFIED_IMPORT_FAILED', error: error.message || String(error), shipmentCode: error.shipmentCode || '' });
+  }
+}
+
+function initializeCcslState(reportDate, sourceName, rows, queueRows) {
+  const current = loadAppState();
+  const today = rows.map(row => row.shipmentCode);
+  const carry = queueRows.filter(row => CCSL_TYPES.has(String(row.businessType || '').toUpperCase()) && row.sourceType === 'HISTORICAL_CARRY').map(row => row.shipmentCode);
+  saveAppState({
+    ...current,
+    businessType: 'CCSL', reportDate, sourceName, dailyReportReady: true,
+    pnhBills: today,
+    dailyParseRows: rows.map(row => ({ ...row, result: 'PNH', 运单号: row.shipmentCode })),
+    carryBills: [...new Set(carry)], nextCarryBills: [...new Set(carry)],
+    scanResults: [], scanQueryStatus: [], trackResults: [], trackEvents: [], trackQueryStatus: [], finalRows: [], needTrackBills: [],
+    processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
+    lastRunSummary: null, lastRun: null, currentRun: null
+  });
+}
+
+function initializeShopeeState(reportDate, sourceName, rows, queueRows) {
+  const current = loadBusinessState(SHOPEE);
+  const today = rows.map(row => row.shipmentCode);
+  const carry = queueRows.filter(row => SHOPEE_TYPES.has(String(row.businessType || '').toUpperCase()) && row.sourceType === 'HISTORICAL_CARRY').map(row => row.shipmentCode);
+  const dailyParseRows = rows.map(row => ({
+    ...row,
+    运单号: row.shipmentCode,
+    recipient_raw: row.recipientRaw || '',
+    recipient_normalized: row.recipientNormalized || '',
+    recipient_group: row.businessType === 'SHOPEECN' ? 'CN' : 'VN',
+    recipient_group_reason: 'UNIFIED_BUSINESS_TYPE',
+    source_row_number: Number(row.rowNumber || 0),
+    importStatus: 'ACCEPTED'
+  }));
+  saveBusinessState({
+    ...current,
+    businessType: SHOPEE, reportDate, sourceName, dailyReportReady: true,
+    pnhBills: today, dailyParseRows,
+    dailyParseSummary: { totalRecognized: today.length, groupCounts: { CN: rows.filter(row => row.businessType === 'SHOPEECN').length, VN: rows.filter(row => row.businessType === 'SHOPEEVN').length }, importedAt: new Date().toISOString() },
+    carryBills: [...new Set(carry)], nextCarryBills: [...new Set(carry)],
+    scanResults: [], scanQueryStatus: [], trackResults: [], trackEvents: [], eventQueryStatus: [], exceptionItems: [], exceptionQueryStatus: [], finalRows: [], needTrackBills: [],
+    processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
+    lastRunSummary: null, lastRun: null, currentRun: null
+  }, SHOPEE);
+}
+
+function coreProjection(parsed, rows) {
+  const counts = Object.fromEntries(CORE_TYPES.map(type => [type, rows.filter(row => row.businessType === type).length]));
+  const total = rows.length;
+  return {
+    ...parsed,
+    rows,
+    classificationCounts: counts,
+    sourceReconciliation: { businessTypes: [...CORE_TYPES], validUniqueWaybills: total, classifiedWaybills: total, difference: 0, balanced: true },
+    summary: { ...(parsed.summary || {}), validUniqueWaybills: total },
+    warnings: [...(parsed.warnings || []), ...(parsed.rows.some(row => row.businessType === WHPP) ? [{ type: 'WHPP_SEPARATE_PERSISTENCE', message: 'WHPP本土由V42独立持久化和业务快照处理，不进入旧六板块统一快照。' }] : [])]
+  };
+}
+
+async function runWhpp(req, res) {
+  if (whppRunPromise) return res.status(409).json({ ok: false, code: 'WHPP_RUN_ALREADY_ACTIVE', error: 'WHPP当前任务正在运行，请勿重复启动。' });
+  const state = loadWhppState();
+  if (!state.reportDate || !state.dailyReportReady) return res.status(400).json({ ok: false, code: 'WHPP_REPORT_MISSING', error: '当前未导入WHPP本土日报数据。' });
+  const client = new CEClient();
+  const log = [];
+  const onProgress = async message => { log.push({ at: new Date().toISOString(), message: String(message || '') }); if (log.length > 200) log.shift(); };
+  whppRunPromise = (async () => {
+    const result = await runWhppPipeline({
+      state,
+      client,
+      onProgress,
+      onCheckpoint: async current => { current.progressLog = [...log]; saveWhppState(current); },
+      isPaused: async () => Boolean(loadWhppState().processing?.paused)
+    });
+    const finalized = finalizeWhppState(result.state);
+    return { ...finalized, summary: result.summary, log };
+  })();
+  try {
+    const result = await whppRunPromise;
+    res.json({ ok: true, patchId: PATCH_ID, reportDate: result.state.reportDate, snapshotId: result.snapshotId, summary: result.summary, dashboard: result.dashboard, log: result.log.slice(-50) });
+  } catch (error) {
+    console.error('[V42][WHPP_RUN]', error);
+    const current = loadWhppState();
+    const auth = /401|403|未授权|unauthorized|登录.*失效|token/i.test(`${error?.ceStatus || ''} ${error?.ceCode || ''} ${error?.message || ''}`);
+    res.status(auth ? 409 : 500).json({ ok: false, code: auth ? 'AUTH_REQUIRED' : (error.code || 'WHPP_RUN_FAILED'), error: auth ? 'CE系统登录已失效，请重新登录后继续WHPP处理。' : (error.message || String(error)), reportDate: current.reportDate, processing: current.processing, log: log.slice(-50) });
+  } finally {
+    whppRunPromise = null;
+  }
+}
+
+function whppStatePayload(reportDate = '') {
+  const current = loadWhppState();
+  if (!reportDate || reportDate === current.reportDate) return { state: current, dashboard: buildWhppDashboard(current), snapshotStatus: current.snapshotStatus || 'IMPORTED' };
+  const row = getDb().prepare(`SELECT snapshotId,payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC LIMIT 1`).get(reportDate);
+  if (!row) return { state: { businessType: WHPP, reportDate, pnhBills: [], finalRows: [] }, dashboard: buildWhppDashboard({ businessType: WHPP, reportDate }), snapshotStatus: 'EMPTY' };
+  const payload = JSON.parse(row.payloadJson || '{}');
+  return { state: payload.state || {}, dashboard: payload.dashboard || buildWhppDashboard(payload.state || {}), snapshotStatus: 'COMPLETED', snapshotId: row.snapshotId };
+}
+
+function whppDetail(req, res) {
+  const reportDate = String(req.query.reportDate || '').slice(0, 10);
+  const tab = String(req.query.tab || 'all');
+  const payload = whppStatePayload(reportDate);
+  const detail = payload.dashboard?.detailTabs?.[tab] || { label: tab, rows: [], total: 0 };
+  const page = Math.max(1, Number(req.query.page || 1));
+  const pageSize = Math.max(1, Math.min(300, Number(req.query.pageSize || 200)));
+  const start = (page - 1) * pageSize;
+  res.json({ ok: true, businessType: WHPP, reportDate: payload.state?.reportDate || reportDate, tab, label: detail.label || tab, total: Number(detail.total || detail.rows?.length || 0), page, pageSize, rows: (detail.rows || []).slice(start, start + pageSize) });
+}
+
+function whppHtmlMiddleware(req, res, next) {
+  if (req.method !== 'GET' || !APP_PATHS.has(req.path)) return next();
+  try {
+    const html = fs.readFileSync(INDEX_FILE, 'utf8').replace('</body>', '  <script src="/whpp-v42.js?v=20260810-1"></script>\n</body>');
+    res.type('html').send(html);
+  } catch (error) { next(error); }
+}
+
+const previousPost = express.application.post;
+express.application.post = function v42WhppPost(pathValue, ...handlers) {
+  if (pathValue === '/api/import/unified-daily-report' && handlers.length) {
+    return previousPost.call(this, pathValue, ...handlers.slice(0, -1), handleUnifiedImportV42);
+  }
+  return previousPost.call(this, pathValue, ...handlers);
+};
+
+const previousUse = express.application.use;
+let htmlInjectionInstalled = false;
+express.application.use = function v42WhppUse(...args) {
+  const candidates = args.flat().filter(value => typeof value === 'function');
+  if (!htmlInjectionInstalled && candidates.some(fn => fn.name === 'serveStatic')) {
+    htmlInjectionInstalled = true;
+    previousUse.call(this, whppHtmlMiddleware);
+  }
+  return previousUse.apply(this, args);
+};
+
+const previousListen = express.application.listen;
+let routesInstalled = false;
+express.application.listen = function v42WhppListen(...args) {
+  if (!routesInstalled) {
+    routesInstalled = true;
+    this.get('/api/whpp/state', (req, res) => res.json({ ok: true, patchId: PATCH_ID, ...whppStatePayload(String(req.query.reportDate || '').slice(0, 10)) }));
+    this.get('/api/whpp/history', (req, res) => res.json({ ok: true, businessType: WHPP, rows: listWhppHistory(req.query.limit) }));
+    this.get('/api/whpp/snapshot/:id', (req, res) => { const payload = loadWhppSnapshot(req.params.id); return payload ? res.json({ ok: true, ...payload }) : res.status(404).json({ ok: false, error: 'WHPP快照不存在' }); });
+    this.get('/api/whpp/metric-detail', whppDetail);
+    this.get('/api/whpp/progress', (req, res) => { const state = loadWhppState(); res.json({ ok: true, reportDate: state.reportDate, processing: state.processing, summary: state.lastRunSummary, log: (state.progressLog || []).slice(-50) }); });
+    this.post('/api/whpp/run/start', runWhpp);
+    this.post('/api/whpp/run/resume', runWhpp);
+    this.post('/api/whpp/run/pause', (req, res) => { const state = loadWhppState(); state.processing = { ...(state.processing || {}), paused: true }; saveWhppState(state); res.json({ ok: true, reportDate: state.reportDate, processing: state.processing }); });
+    this.post('/api/whpp/run/continue', (req, res) => { const state = loadWhppState(); state.processing = { ...(state.processing || {}), paused: false }; saveWhppState(state); res.json({ ok: true, reportDate: state.reportDate, processing: state.processing }); });
+  }
+  return previousListen.apply(this, args);
+};
+
+export const V42_WHPP_PATCH_ID = PATCH_ID;
