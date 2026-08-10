@@ -73,11 +73,66 @@
     };
   }
 
+  function stateForBusiness(type) {
+    try {
+      if (typeof businessStates !== 'undefined' && businessStates?.[type]) return businessStates[type];
+    } catch {}
+    return {};
+  }
+
+  function sourceMetrics(type) {
+    const state = stateForBusiness(type);
+    const dashboard = state?.dashboard || {};
+    const metrics = dashboard?.recipientGroups?.ALL?.metrics || dashboard?.metrics || state?.metrics || {};
+    return { state, dashboard, metrics, routing: dashboard?.routing || {} };
+  }
+
+  function coreValue(core, labels) {
+    const row = (core || []).find(item => labels.includes(String(item?.label || '')));
+    return number(row?.value) || 0;
+  }
+
+  function routingCore(input) {
+    const type = String(input.businessType || '').toUpperCase();
+    const shopee = type.startsWith('SHOPEE');
+    const original = (input.core || []).map(item => ({ ...item }));
+    const { metrics, routing } = sourceMetrics(type);
+    const hasRouting = routing && Object.keys(routing).length > 0;
+
+    const ccslCn = hasRouting
+      ? Number(routing.ccslCnDiversion || 0)
+      : Number(metrics.ccslCnDiversion || coreValue(original, ['CCSLCN分流', 'CECN滞留包裹']));
+    const ccslZt = hasRouting
+      ? Number(routing.ccslZtDiversion || 0)
+      : Number(metrics.ccslZtDiversion || coreValue(original, ['CCSLZT分流', 'CEZT滞留包裹']));
+    const phnomPenhShop = hasRouting
+      ? Number(routing.phnomPenhShop || 0)
+      : Number(metrics.phnomPenhShop || 0) || (
+          shopee
+            ? Number(metrics.shopTransit || 0) + Number(metrics.shopArrived || 0)
+            : coreValue(original, ['门店途中']) + coreValue(original, ['门店入库'])
+        );
+
+    const remove = shopee
+      ? new Set(['外省门店滞留', '外省门店入库无节点', 'CCSLCN分流', 'CCSLZT分流', 'CECN滞留包裹', 'CEZT滞留包裹', '金边门店'])
+      : new Set(['CECN滞留包裹', 'CEZT滞留包裹', 'CCSLCN分流', 'CCSLZT分流', '门店途中', '门店入库', '门店滞留', '金边门店']);
+    const core = original.filter(item => !remove.has(String(item?.label || '')));
+    const total = Number(input.cards?.[0]?.value || metrics.total || 0);
+    const ratioText = value => total ? `占本业务 ${(Number(value || 0) * 100 / total).toFixed(2)}%` : '占本业务 0.00%';
+
+    core.push(
+      { key:`${type}-ccslcn-routing`, metricKey:'ccslCnDiversion', label:'CCSLCN分流', value:ccslCn, unit:'件', ratio:ratioText(ccslCn) },
+      { key:`${type}-ccslzt-routing`, metricKey:'ccslZtDiversion', label:'CCSLZT分流', value:ccslZt, unit:'件', ratio:ratioText(ccslZt) },
+      { key:`${type}-phnom-penh-shop`, metricKey:'phnomPenhShop', label:'金边门店', value:phnomPenhShop, unit:'件', ratio:ratioText(phnomPenhShop) }
+    );
+    return core;
+  }
+
   function mapBusiness(input, visualTest) {
     const base = mapHome(input.trendSnapshot || {}, visualTest);
     return {
       page:'business', businessType:input.businessType, label:input.label, reportDate:input.reportDate || '—',
-      periodLabel:input.periodLabel || '', cards:(input.cards || []).slice(0,6), core:(input.core || []), charts:base.charts,
+      periodLabel:input.periodLabel || '', cards:(input.cards || []).slice(0,6), core:routingCore(input), charts:base.charts,
       regions:input.regions || null, dispatch:input.dispatch || null
     };
   }
