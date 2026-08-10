@@ -51,22 +51,67 @@ function attemptRows(fromDate,toDate) {
           INNER JOIN unified_snapshots ns ON ns.snapshotId=newer.snapshotId AND ns.status='COMPLETED'
           WHERE newer.status='VALID' AND newer.reportDate=b.reportDate AND newer.createdAt>b.createdAt
         )
+    ), valid AS (
+      SELECT DISTINCT u.reportDate,u.businessType,u.shipmentCode
+      FROM latest l
+      INNER JOIN unified_import_rows u
+        ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate
+      WHERE u.businessType IN ('SHOPEECN','SHOPEEVN')
+    ), prepared AS (
+      SELECT
+        v.reportDate,
+        v.businessType,
+        v.shipmentCode,
+        COALESCE(f.isPod,0) AS isPod,
+        COALESCE(
+          NULLIF(CAST(f.podAttemptNo AS INTEGER),0),
+          NULLIF(CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0),
+          0
+        ) AS explicitAttempt,
+        COALESCE(
+          NULLIF(json_extract(f.rawJson,'$."POD时间"'),''),
+          NULLIF(json_extract(f.rawJson,'$.podTime'),''),
+          NULLIF(json_extract(f.rawJson,'$.podClosedAt'),''),
+          NULLIF(json_extract(f.rawJson,'$.terminalObservedAt'),''),
+          ''
+        ) AS podTimestamp
+      FROM valid v
+      LEFT JOIN business_final_rows f
+        ON f.businessType='SHOPEE'
+       AND f.shipmentCode=v.shipmentCode
+       AND f.reportDate=v.reportDate
+    ), classified AS (
+      SELECT
+        reportDate,
+        businessType,
+        shipmentCode,
+        isPod,
+        CASE
+          WHEN isPod<>1 THEN 0
+          WHEN explicitAttempt>0 THEN MIN(3,explicitAttempt)
+          WHEN length(podTimestamp)>=10
+               AND julianday(date(replace(substr(podTimestamp,1,10),'/','-'))) IS NOT NULL
+          THEN MIN(3,MAX(1,
+            CAST(julianday(date(replace(substr(podTimestamp,1,10),'/','-'))) - julianday(reportDate) AS INTEGER) + 1
+          ))
+          ELSE 0
+        END AS attemptDay
+      FROM prepared
     )
-    SELECT u.reportDate,u.businessType,COUNT(*) AS total,
-      SUM(CASE WHEN COALESCE(f.isPod,0)=1 AND COALESCE(f.podAttemptNo,CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0)=1 THEN 1 ELSE 0 END) AS a1,
-      SUM(CASE WHEN COALESCE(f.isPod,0)=1 AND COALESCE(f.podAttemptNo,CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0)=2 THEN 1 ELSE 0 END) AS a2,
-      SUM(CASE WHEN COALESCE(f.isPod,0)=1 AND COALESCE(f.podAttemptNo,CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0)>=3 THEN 1 ELSE 0 END) AS a3
-    FROM latest l
-    INNER JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate AND u.businessType IN ('SHOPEECN','SHOPEEVN')
-    LEFT JOIN business_final_rows f ON f.businessType='SHOPEE' AND f.shipmentCode=u.shipmentCode AND f.reportDate=u.reportDate
-    GROUP BY u.reportDate,u.businessType
-    ORDER BY u.reportDate,u.businessType
+    SELECT reportDate,businessType,COUNT(*) AS total,
+      SUM(CASE WHEN isPod=1 AND attemptDay=1 THEN 1 ELSE 0 END) AS a1,
+      SUM(CASE WHEN isPod=1 AND attemptDay=2 THEN 1 ELSE 0 END) AS a2,
+      SUM(CASE WHEN isPod=1 AND attemptDay>=3 THEN 1 ELSE 0 END) AS a3,
+      SUM(CASE WHEN isPod=1 AND attemptDay=0 THEN 1 ELSE 0 END) AS unknownPodAttempt
+    FROM classified
+    GROUP BY reportDate,businessType
+    ORDER BY reportDate,businessType
   `).all(fromDate,toDate);
   const map=new Map();
   for(const row of rows){
-    if(!map.has(row.reportDate)) map.set(row.reportDate,{reportDate:row.reportDate,CN:{total:0,a1:0,a2:0,a3:0},VN:{total:0,a1:0,a2:0,a3:0}});
+    if(!map.has(row.reportDate)) map.set(row.reportDate,{reportDate:row.reportDate,CN:{total:0,a1:0,a2:0,a3:0,unknown:0},VN:{total:0,a1:0,a2:0,a3:0,unknown:0}});
     const group=row.businessType==='SHOPEECN'?'CN':'VN';
-    map.get(row.reportDate)[group]={total:Number(row.total||0),a1:Number(row.a1||0),a2:Number(row.a2||0),a3:Number(row.a3||0)};
+    map.get(row.reportDate)[group]={total:Number(row.total||0),a1:Number(row.a1||0),a2:Number(row.a2||0),a3:Number(row.a3||0),unknown:Number(row.unknownPodAttempt||0)};
   }
   return [...map.values()].sort((a,b)=>a.reportDate.localeCompare(b.reportDate));
 }
@@ -76,7 +121,7 @@ function trendPayload(type,state,attemptHistory){
   const dates=history.map(item=>item.reportDate);
   const shopee=type.startsWith('SHOPEE');
   const group=type==='SHOPEECN'?'CN':type==='SHOPEEVN'?'VN':'ALL';
-  const base={ dates,ticket:[],podRate:[],ocRate:[],firstRate:[],attempt1:[],attempt2:[],attempt3:[],attempt1Count:[],attempt2Count:[],attempt3Count:[],attemptDenominator:[] };
+  const base={ dates,ticket:[],podRate:[],ocRate:[],firstRate:[],attempt1:[],attempt2:[],attempt3:[],attempt1Count:[],attempt2Count:[],attempt3Count:[],attemptDenominator:[],attemptUnknownPod:[] };
   for(const item of history){
     const s=item.summary||{};
     if(!shopee){
@@ -89,17 +134,19 @@ function trendPayload(type,state,attemptHistory){
     base.ticket.push(metric(s,`${group}_今日总单`));
     base.podRate.push(metric(s,`${group}_POD率`));
     base.ocRate.push(ratio(metric(s,`${group}_OC1+`),metric(s,`${group}_今日总单`)));
-    base.firstRate.push(metric(s,`${group}_首派成功率`));
     const attempts=attemptHistory.find(row=>row.reportDate===item.reportDate);
     const selected=group==='ALL'?{
       total:Number(attempts?.CN?.total||0)+Number(attempts?.VN?.total||0),
       a1:Number(attempts?.CN?.a1||0)+Number(attempts?.VN?.a1||0),
       a2:Number(attempts?.CN?.a2||0)+Number(attempts?.VN?.a2||0),
-      a3:Number(attempts?.CN?.a3||0)+Number(attempts?.VN?.a3||0)
-    }:(attempts?.[group]||{total:0,a1:0,a2:0,a3:0});
+      a3:Number(attempts?.CN?.a3||0)+Number(attempts?.VN?.a3||0),
+      unknown:Number(attempts?.CN?.unknown||0)+Number(attempts?.VN?.unknown||0)
+    }:(attempts?.[group]||{total:0,a1:0,a2:0,a3:0,unknown:0});
+    base.firstRate.push(ratio(selected.a1,selected.total));
     base.attemptDenominator.push(selected.total);
     base.attempt1Count.push(selected.a1); base.attempt2Count.push(selected.a2); base.attempt3Count.push(selected.a3);
     base.attempt1.push(ratio(selected.a1,selected.total)); base.attempt2.push(ratio(selected.a2,selected.total)); base.attempt3.push(ratio(selected.a3,selected.total));
+    base.attemptUnknownPod.push(selected.unknown);
   }
   return base;
 }
@@ -127,7 +174,7 @@ function handler(req,res){
       ...payload
     });
   }catch(error){
-    console.error('[V28][TRENDS]',error);
+    console.error('[V33][TRENDS]',error);
     res.status(500).json({ok:false,error:error.message||String(error)});
   }
 }
