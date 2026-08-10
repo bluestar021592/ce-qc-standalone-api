@@ -103,6 +103,10 @@ export function analyzeShopeeShipment(args = {}) {
     category = '未知门店编码';
     currentState = 'UNKNOWN_SHOP_CODE';
     qc = `最新结构化门店编码\${unknownShopCode}未命中95码白名单，禁止按名称猜测，需人工确认`;
+  } else if (unknownShopCode) {
+    category = '未知门店编码';
+    currentState = 'UNKNOWN_SHOP_CODE';
+    qc = '最新结构化门店编码' + unknownShopCode + '未命中95码白名单，禁止按名称猜测，需人工确认';
   } else if (correctedStoreFlow.shopState === 'SHOP_ARRIVED_CURRENT') {
     if (oc.active) {
       category = '门店OC';

@@ -75,6 +75,10 @@ export function analyzeShipment(args = {}) {
     category = '未知门店编码';
     state = 'UNKNOWN_SHOP_CODE';
     judgment = `最新结构化门店编码\${unknownShopCode}未命中95码白名单，禁止按名称猜测，需人工确认`;
+  } else if (unknownShopCode) {
+    category = '未知门店编码';
+    state = 'UNKNOWN_SHOP_CODE';
+    judgment = '最新结构化门店编码' + unknownShopCode + '未命中95码白名单，禁止按名称猜测，需人工确认';
   } else if (storeFlow.shopState === 'SHOP_ARRIVED_CURRENT') {
     if (storeOc) {
       category = '门店OC';
