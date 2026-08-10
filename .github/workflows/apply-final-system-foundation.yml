@@ -26,6 +26,7 @@ jobs:
       - name: Commit final system foundation
         shell: bash
         run: |
+          # Guarded patch: only source files that matched exact expected snippets are committed.
           if git diff --quiet -- src; then
             echo 'No source changes needed.'
             exit 0
