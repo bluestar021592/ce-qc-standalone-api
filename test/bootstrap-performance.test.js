@@ -8,16 +8,17 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 
-test('V43 bootstrap patch is syntax-valid and does not call heavy range dashboard reader', () => {
+test('V43 bootstrap patch is syntax-valid and uses cache-summary only startup', () => {
   const file = path.join(root, 'src', 'v43BootstrapPerfPatch.js');
   const source = fs.readFileSync(file, 'utf8');
   const check = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   assert.equal(check.status, 0, check.stderr || check.stdout);
-  assert.match(source, /loadLightweightUnifiedBusinessState/);
-  assert.match(source, /LIGHTWEIGHT_NORMALIZED_SQLITE/);
+  assert.match(source, /dashboard_daily_cache/);
+  assert.match(source, /CACHE_SUMMARY_ONLY/);
   assert.match(source, /BOOTSTRAP_LIGHT_CACHE_MS/);
+  assert.doesNotMatch(source, /loadLightweightUnifiedBusinessState/);
   assert.doesNotMatch(source, /loadRangeDashboard/);
-  assert.doesNotMatch(source, /rangeDashboardStore/);
+  assert.doesNotMatch(source, /unified_snapshots\.payloadJson/);
 });
 
 test('V43 performance patch is installed before the main server registers bootstrap route', () => {
