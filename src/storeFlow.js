@@ -3,16 +3,14 @@ import { getShopCodeMap, isNormalFinalHubCode } from './shopCodes.js';
 import { SHOP_WHITELIST_VERSION } from './shopWhitelist.js';
 
 const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|改派/i;
+const OC_RE = /(?:^|[^A-Z])OC(?:[^A-Z]|$)|overdue|逾期|超时/i;
 const POD_RE = /\bpod\b|delivered|签收|妥投/i;
 const RETURN_RE = /\breturn(?:ed)?\b|退回|返仓|退件/i;
-const DELIVERY_RE = /delivery|派件分配|派送中|out\s*for\s*delivery/i;
 const OUTBOUND_RE = /\boutbound\b|离开网点|货物离开|发往|转往|下一个网点/i;
 const INBOUND_RE = /\binbound\b|到达网点|货物到达|到达门店|入库/i;
 const STRUCTURED_SHOP_CODE_RE = /(?:^|[^A-Z0-9])((?:CP|FS)\s*\d{6}|(?:PV|PNH)\s*\d{3})(?![A-Z0-9])/gi;
 
 export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = '', isPod = false, isReturned = false } = {}) {
-  // Always use the runtime map. In production this preserves the full persisted CP/FS/PV/PNH
-  // whitelist from SQLite even when the signed source JSON is not present in the source tree.
   const whitelist = getShopCodeMap();
   const sorted = [...(events || [])]
     .map((event, index) => ({ event, index }))
@@ -31,21 +29,36 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
       cycle = newCycle(shipmentCode, target, whitelist.get(target), event);
       continue;
     }
-    if (action === 'INBOUND' && target && cycle?.targetShopCode === target) {
+    if (action === 'INBOUND' && target) {
+      // The trajectory API may return an explicit store-arrival node even when
+      // the preceding transfer node is absent from the returned history. An
+      // exact whitelist inbound is sufficient proof of actual store arrival.
+      if (!cycle || cycle.targetShopCode !== target || cycle.state === 'CLOSED') {
+        cycle = newCycle(shipmentCode, target, whitelist.get(target), event);
+      }
       cycle.currentShopCode = target;
       cycle.shopArrivedAt = event.eventTime || '';
       cycle.shopLastEventAt = event.eventTime || '';
+      cycle.pending = false;
+      cycle.oc = false;
       cycle.state = 'SHOP_ARRIVED_CURRENT';
       cycle.reason = 'STRUCTURED_WHITELIST_INBOUND';
       continue;
     }
     if (cycle?.state === 'SHOP_ARRIVED_CURRENT' && PENDING_RE.test(eventText(event))) {
       cycle.shopPendingAt ||= event.eventTime || '';
-      // Pending is a real new shop-side track node. It does not close the shop
-      // cycle, but it DOES reset the no-update retention clock.
       cycle.shopLastEventAt = event.eventTime || cycle.shopLastEventAt;
       cycle.pending = true;
+      cycle.oc = false;
       cycle.reason = 'PENDING_AFTER_SHOP_ARRIVAL';
+      continue;
+    }
+    if (cycle?.state === 'SHOP_ARRIVED_CURRENT' && OC_RE.test(eventText(event))) {
+      cycle.shopOcAt ||= event.eventTime || '';
+      cycle.shopLastEventAt = event.eventTime || cycle.shopLastEventAt;
+      cycle.oc = true;
+      cycle.pending = false;
+      cycle.reason = 'OC_AFTER_SHOP_ARRIVAL';
       continue;
     }
     if (cycle?.state === 'SHOP_ARRIVED_CURRENT' && closesStoreCycle(event, action, current, cycle.currentShopCode)) {
@@ -61,12 +74,9 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     cycle.reason = isPod ? 'POD_CLOSED' : 'RETURN_CLOSED';
   }
 
-  // Two different clocks are intentionally preserved:
-  // - shopAgeNaturalDays: how long since the parcel first arrived at this shop.
-  // - shopRetentionNaturalDays: how long since the LAST valid shop-side node.
-  // QC abnormal retention must use the latter. A fresh Pending/inbound update today
-  // must never continue to display a 10/20-day stale retention inherited from the
-  // original arrival date.
+  const transfer = cycle.state === 'SHOP_TRANSFER_IN_PROGRESS'
+    ? elapsedInclusiveDays(cycle.shopTransferStartedAt, reportDate)
+    : 0;
   const shopAge = cycle.state === 'SHOP_ARRIVED_CURRENT'
     ? elapsedInclusiveDays(cycle.shopArrivedAt, reportDate)
     : 0;
@@ -76,8 +86,12 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     : 0;
   const tags = [];
   if (cycle.state === 'SHOP_TRANSFER_IN_PROGRESS') tags.push('SHOP_TRANSFER_IN_PROGRESS');
+  if (transfer >= 1) tags.push('SHOP_TRANSFER_1_PLUS');
+  if (transfer >= 2) tags.push('SHOP_TRANSFER_2_PLUS');
+  if (transfer >= 3) tags.push('SHOP_TRANSFER_3_PLUS');
   if (cycle.state === 'SHOP_ARRIVED_CURRENT') tags.push('SHOP_ARRIVED_CURRENT');
   if (cycle.pending && cycle.state === 'SHOP_ARRIVED_CURRENT') tags.push('SHOP_PENDING');
+  if (cycle.oc && cycle.state === 'SHOP_ARRIVED_CURRENT') tags.push('SHOP_OC');
   if (retention >= 1) tags.push('SHOP_RETENTION_1_PLUS');
   if (retention >= 2) tags.push('SHOP_RETENTION_2_PLUS');
   if (retention >= 3) tags.push('SHOP_RETENTION_3_PLUS');
@@ -91,6 +105,8 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     shopArrivedAt: cycle.shopArrivedAt,
     shopLastEventAt: cycle.shopLastEventAt,
     shopPendingAt: cycle.shopPendingAt,
+    shopOcAt: cycle.shopOcAt,
+    shopTransferNaturalDays: transfer,
     shopAgeNaturalDays: shopAge,
     shopRetentionNaturalDays: retention,
     shopState: cycle.state,
@@ -103,8 +119,8 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
 export function emptyStoreFlow() {
   return {
     targetShopCode: '', currentShopCode: '', shopName: '', shopCycleId: '',
-    shopTransferStartedAt: '', shopArrivedAt: '', shopLastEventAt: '', shopPendingAt: '',
-    shopAgeNaturalDays: 0, shopRetentionNaturalDays: 0, shopState: '', shopStateReason: 'NO_STORE_CYCLE',
+    shopTransferStartedAt: '', shopArrivedAt: '', shopLastEventAt: '', shopPendingAt: '', shopOcAt: '',
+    shopTransferNaturalDays: 0, shopAgeNaturalDays: 0, shopRetentionNaturalDays: 0, shopState: '', shopStateReason: 'NO_STORE_CYCLE',
     whitelistVersion: SHOP_WHITELIST_VERSION, storeTags: []
   };
 }
@@ -120,7 +136,9 @@ function newCycle(shipmentCode, code, name, event) {
     shopArrivedAt: '',
     shopLastEventAt: startedAt,
     shopPendingAt: '',
+    shopOcAt: '',
     pending: false,
+    oc: false,
     state: 'SHOP_TRANSFER_IN_PROGRESS',
     reason: 'STRUCTURED_WHITELIST_OUTBOUND'
   };
@@ -153,7 +171,9 @@ function eventAction(event) {
 
 function closesStoreCycle(event, action, currentCode, arrivedCode) {
   const text = eventText(event);
-  if (POD_RE.test(text) || RETURN_RE.test(text) || DELIVERY_RE.test(text)) return true;
+  // Store is a customer self-pickup point. A generic "delivery" phrase must not
+  // close the store cycle because stores do not dispatch parcels for delivery.
+  if (POD_RE.test(text) || RETURN_RE.test(text)) return true;
   if (action === 'OUTBOUND' && (!currentCode || currentCode === arrivedCode)) return true;
   return action === 'INBOUND' && structuredHubCodes(event).some(isNormalFinalHubCode);
 }

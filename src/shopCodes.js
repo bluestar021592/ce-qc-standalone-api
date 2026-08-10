@@ -4,6 +4,7 @@ import {
   SHOP_WHITELIST_VERSION,
   SHOP_WHITELIST_SOURCE_SHA256,
   SHOP_WHITELIST_AVAILABLE,
+  SHOP_WHITELIST_SOURCE_KIND,
   normalizeShopCode as normalizeLatestShopCode,
   isSupportedShopCode,
   latestShopCodeMap,
@@ -38,7 +39,7 @@ export function getShopCodeSummary() {
     count,
     version: seeded?.version || SHOP_WHITELIST_VERSION,
     sourceSha256: seeded?.sourceSha256 || SHOP_WHITELIST_SOURCE_SHA256,
-    source: SHOP_WHITELIST_AVAILABLE && map.size ? 'SIGNED_FILE' : 'SQLITE_PERSISTED'
+    source: map.size ? SHOP_WHITELIST_SOURCE_KIND : 'SQLITE_PERSISTED'
   };
 }
 
@@ -84,8 +85,14 @@ export function detectShopInfo({ events = [], shopCodeMap = null, lastEvent = nu
     return { isShop: false, ...evidence, matchedRule: 'NORMAL_FINAL_HUB' };
   }
 
+  const supportedTargetCode = extractSupportedShopCodes(evidence.targetNode)[0] || '';
   const matched = matchTargetShop(evidence.targetNode, codeMap);
-  if (!matched) return { isShop: false, ...evidence, matchedRule: 'TARGET_NOT_IN_SHOP_WHITELIST' };
+  if (!matched) {
+    if (supportedTargetCode) {
+      return { isShop: false, unknownShopCode: supportedTargetCode, ...evidence, matchedRule: 'UNKNOWN_SHOP_CODE' };
+    }
+    return { isShop: false, ...evidence, matchedRule: 'TARGET_NOT_IN_SHOP_WHITELIST' };
+  }
 
   const inbound = evidence.actionType === 'INBOUND';
   return {
@@ -140,6 +147,16 @@ export function lastEffectiveEvent(events = []) {
     .filter(({ event }) => isEffectiveEvent(event))
     .sort((a, b) => eventSortKey(a.event).localeCompare(eventSortKey(b.event)) || a.index - b.index);
   return sorted.at(-1)?.event || null;
+}
+
+export function extractSupportedShopCodes(text) {
+  const out = [];
+  const src = String(text || '').normalize('NFKC').toUpperCase();
+  for (const match of src.matchAll(SHOP_CODE_RE)) {
+    const code = normalizeShopCode(match[1]);
+    if (isSupportedShopCode(code) && !out.includes(code)) out.push(code);
+  }
+  return out;
 }
 
 export function extractShopCodes(text, codeSet) {

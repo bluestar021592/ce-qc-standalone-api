@@ -1,6 +1,12 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import {
+  BUILTIN_SHOP_STORES,
+  BUILTIN_SHOP_WHITELIST_SOURCE_FILE,
+  BUILTIN_SHOP_WHITELIST_SOURCE_SHA256,
+  BUILTIN_SHOP_WHITELIST_VERSION
+} from './shopWhitelistBuiltin.js';
 
 const WHITELIST_FILE = fileURLToPath(new URL('./data/shop-whitelist-2026-08-03.json', import.meta.url));
 const EXPECTED_WHITELIST_FILE_SHA256 = '4a79222e578de38ad97abd4f34a8545bdf95d626d023bf6cb60be8381de6afe5';
@@ -9,12 +15,12 @@ export const SHOP_WHITELIST_AVAILABLE = fs.existsSync(WHITELIST_FILE);
 
 let raw = null;
 let payload = {
-  version: '2026-08-03',
-  source_file: '',
-  source_sha256: '',
-  stores: []
+  version: BUILTIN_SHOP_WHITELIST_VERSION,
+  source_file: BUILTIN_SHOP_WHITELIST_SOURCE_FILE,
+  source_sha256: BUILTIN_SHOP_WHITELIST_SOURCE_SHA256,
+  stores: BUILTIN_SHOP_STORES
 };
-let loadedFileSha256 = '';
+let loadedFileSha256 = crypto.createHash('sha256').update(JSON.stringify(BUILTIN_SHOP_STORES)).digest('hex');
 
 if (SHOP_WHITELIST_AVAILABLE) {
   raw = fs.readFileSync(WHITELIST_FILE);
@@ -25,7 +31,8 @@ if (SHOP_WHITELIST_AVAILABLE) {
   payload = JSON.parse(raw.toString('utf8'));
 }
 
-export const SHOP_WHITELIST_VERSION = String(payload.version || '2026-08-03');
+export const SHOP_WHITELIST_VERSION = String(payload.version || BUILTIN_SHOP_WHITELIST_VERSION);
+export const SHOP_WHITELIST_SOURCE_KIND = SHOP_WHITELIST_AVAILABLE ? 'SIGNED_FILE' : 'BUILTIN_EXECUTION_COPY';
 export const SHOP_WHITELIST_SOURCE_SHA256 = String(payload.source_sha256 || '');
 export const SHOP_WHITELIST_FILE_SHA256 = loadedFileSha256 || EXPECTED_WHITELIST_FILE_SHA256;
 export const SHOP_WHITELIST_PREFIXES = Object.freeze(['CP', 'FS', 'PV', 'PNH']);
@@ -80,7 +87,7 @@ export function latestShopCodeMap() {
  * read the persisted whitelist/shop_cp_codes through shopCodes.js.
  */
 export function seedLatestShopWhitelist(db) {
-  if (!SHOP_WHITELIST_AVAILABLE || !LATEST_SHOP_STORES.length) {
+  if (!LATEST_SHOP_STORES.length) {
     return persistedWhitelistSummary(db);
   }
 
@@ -125,7 +132,7 @@ export function seedLatestShopWhitelist(db) {
     sourceSha256: SHOP_WHITELIST_SOURCE_SHA256,
     fileSha256: SHOP_WHITELIST_FILE_SHA256,
     count: LATEST_SHOP_STORES.length,
-    source: 'SIGNED_FILE'
+    source: SHOP_WHITELIST_SOURCE_KIND
   };
 }
 

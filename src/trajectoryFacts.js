@@ -6,7 +6,7 @@ import { analyzeStoreFlow } from './storeFlow.js';
 export const TRAJECTORY_FACT_VERSION = '2026-08-09-latest-effective-event-v1';
 
 export const TRACK_FACT_CODES = Object.freeze({
-  INBOUND_NO_SCAN: '26',
+  PICKUP_SUCCESS: '26',
   CYCLE_A: '30',
   CYCLE_B: '32',
   POD: '80',
@@ -58,6 +58,10 @@ export function buildTrajectoryFacts({
   });
   const pendingEvents = sortedEvents.filter(event => trackingCodeOf(event) === TRACK_FACT_CODES.PENDING);
   const pendingDates = distinctEventDates(pendingEvents);
+  const pendingDateContinuity = pendingDates.length <= 1 ? true : areConsecutiveDates(pendingDates);
+  const pendingContinuityLabel = pendingDates.length === 0 ? '无' : pendingDates.length === 1 ? '单次' : pendingDateContinuity ? '连续' : '不连续';
+  const inboundNoScan = Boolean(lastEvent && isCcslInboundFactEvent(lastEvent));
+  const pickupSuccess = lastCode === TRACK_FACT_CODES.PICKUP_SUCCESS;
 
   return {
     factVersion: TRAJECTORY_FACT_VERSION,
@@ -80,11 +84,16 @@ export function buildTrajectoryFacts({
     special,
     latestNodeAction,
     latestShop,
+    unknownShopCode: latestShop?.unknownShopCode || '',
     storeFlow,
+    pickupSuccess,
+    inboundNoScan,
     pendingRawEventCount: pendingEvents.length,
     pendingDates,
     pendingDistinctDayCount: pendingDates.length,
-    pendingDateContinuity: pendingDates.length <= 1 ? true : areConsecutiveDates(pendingDates)
+    pendingDateContinuity,
+    pendingContinuityLabel,
+    pendingNonContinuous: pendingDates.length >= 2 && !pendingDateContinuity
   };
 }
 
@@ -183,6 +192,13 @@ function dayValue(value) {
 function dateKey(value) {
   const match = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);
   return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+}
+
+function isCcslInboundFactEvent(event = {}) {
+  const action = parseEventNodeAction(event);
+  if (action.actionType !== 'INBOUND') return false;
+  const code = String(action.targetNodeCode || action.targetNode || '').normalize('NFKC').toUpperCase().replace(/^CEL?\s*:\s*/, '').replace(/[^A-Z0-9]/g, '');
+  return code === 'CCSL';
 }
 
 function emptyNodeAction() {

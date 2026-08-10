@@ -7,7 +7,7 @@ import { buildTrajectoryFacts } from './trajectoryFacts.js';
 export { normalizeEvent };
 
 const TRACK = Object.freeze({
-  INBOUND_NO_SCAN: '26',
+  PICKUP_SUCCESS: '26',
   CYCLE_A: '30',
   CYCLE_B: '32',
   WORK_ORDER: '99',
@@ -39,6 +39,7 @@ export function analyzeShipment(args = {}) {
   const returnInProgress = facts.returnInProgress;
   const special = facts.special;
   const storeFlow = facts.storeFlow;
+  const unknownShopCode = facts.unknownShopCode || '';
   // Pending business facts come from the trajectory fact layer: all distinct
   // Pending calendar dates are de-duplicated there, and continuity is calculated
   // from those dates. The old pendingTail() only counted the final adjacent run of
@@ -70,6 +71,10 @@ export function analyzeShipment(args = {}) {
     category = special.category;
     state = special.specialState || 'SPECIAL_NORMAL';
     judgment = `${special.label || category}，按特殊正常去向监管并排除普通异常`;
+  } else if (unknownShopCode) {
+    category = '未知门店编码';
+    state = 'UNKNOWN_SHOP_CODE';
+    judgment = '最新结构化门店编码' + unknownShopCode + '未命中95码白名单，禁止按名称猜测，需人工确认';
   } else if (storeFlow.shopState === 'SHOP_ARRIVED_CURRENT') {
     if (storeOc) {
       category = '门店OC';
@@ -87,7 +92,7 @@ export function analyzeShipment(args = {}) {
         : '包裹已到门店，当前为正常门店流转';
     }
   } else if (storeFlow.shopState === 'SHOP_TRANSFER_IN_PROGRESS') {
-    category = Number(storeFlow.shopRetentionNaturalDays || 0) >= 2 ? '门店途中2天+' : '门店途中';
+    category = Number(storeFlow.shopTransferNaturalDays || 0) >= 2 ? '门店途中2天+' : '门店途中';
     state = 'SHOP_TRANSFER_IN_PROGRESS';
   } else if (lastCode === TRACK.PENDING) {
     const days = Math.max(1, pending.days);
@@ -106,24 +111,30 @@ export function analyzeShipment(args = {}) {
     category = '工单未处理';
     state = 'WORK_ORDER';
     judgment = '当前最后有效轨迹状态码99为工单，等待后续有效动作';
-  } else if (lastCode === TRACK.INBOUND_NO_SCAN) {
+  } else if (facts.inboundNoScan) {
     category = '入库无扫描';
     state = 'INBOUND_NO_SCAN';
-    judgment = '当前最后有效轨迹状态码26，入库后没有后续有效动作';
+    judgment = '最新有效轨迹为明确CCSL到达/入库节点，且没有更晚有效业务动作';
+  } else if (lastCode === TRACK.PICKUP_SUCCESS) {
+    category = '正常流转';
+    state = 'PICKUP_SUCCESS';
+    judgment = '轨迹状态码26表示揽收成功/由CEL节点收件，不作为入库无扫描异常';
   }
 
   const terminal = isPod || isReturned;
-  const currentPendingDays = !terminal && !returnInProgress && !special && !storeFlow.shopState && lastCode === TRACK.PENDING ? pending.days : 0;
-  const currentCycleDays = !terminal && !returnInProgress && !special && !storeFlow.shopState && CYCLE_CODES.has(lastCode) ? cycle.days : 0;
-  const currentOcDays = !terminal && !returnInProgress && !special && !storeFlow.shopState && oc.active ? oc.days : 0;
-  const inboundNoScan = !terminal && !returnInProgress && !special && !storeFlow.shopState && lastCode === TRACK.INBOUND_NO_SCAN;
+  const ordinaryOpen = !terminal && !returnInProgress && !special && !storeFlow.shopState && !unknownShopCode;
+  const currentPendingDays = ordinaryOpen && lastCode === TRACK.PENDING ? pending.days : 0;
+  const currentCycleDays = ordinaryOpen && CYCLE_CODES.has(lastCode) ? cycle.days : 0;
+  const currentOcDays = ordinaryOpen && oc.active ? oc.days : 0;
+  const inboundNoScan = ordinaryOpen && facts.inboundNoScan;
+  const pendingNonContinuous = ordinaryOpen && facts.pendingNonContinuous;
   const allPendingDates = facts.pendingDates;
 
   return {
     ...legacy,
     ...storeFlow,
     ...(special || {}),
-    analysisRuleVersion: '2026-08-09-ccsl-scan-track-code-separation-v30',
+    analysisRuleVersion: '2026-08-10-final-trajectory-state-machine-v1',
     trajectoryFactVersion: facts.factVersion,
     trajectoryTerminalSource: facts.terminalSource,
     latestEffectiveEventCode: facts.lastCode,
@@ -155,7 +166,12 @@ export function analyzeShipment(args = {}) {
     pendingDates: allPendingDates,
     pendingContinuity: currentPendingDays >= 2 ? (pending.continuous ? '连续' : '不连续') : (currentPendingDays ? '单次' : ''),
     pendingRawEventCount: facts.pendingRawEventCount,
-    pendingFactDateContinuity: facts.pendingDateContinuity ? '连续' : '不连续',
+    pendingFactDateContinuity: facts.pendingContinuityLabel,
+    Pending事实连续性: facts.pendingContinuityLabel,
+    Pending不连续: pendingNonContinuous ? '是' : '否',
+    unknownShopCode,
+    shopWhitelistStatus: unknownShopCode ? 'UNKNOWN_SHOP_CODE' : '',
+    pickupSuccess: facts.pickupSuccess ? '是' : '否',
     OC天数: currentOcDays,
     OC次数: currentOcDays ? Number(legacy.OC次数 || 1) : 0,
     盘点天数: currentCycleDays,
@@ -170,7 +186,7 @@ export function analyzeShipment(args = {}) {
     跨日状态: terminal ? '已闭环' : legacy.跨日状态,
     tags: rebuildTags(legacy.tags, {
       isPod, isReturned, returnInProgress, pendingDays: currentPendingDays,
-      pendingContinuous: pending.continuous, ocDays: currentOcDays, cycleDays: currentCycleDays,
+      pendingContinuous: pending.continuous, pendingNonContinuous, ocDays: currentOcDays, cycleDays: currentCycleDays,
       inboundNoScan, storePending, storeOc
     })
   };
@@ -262,7 +278,8 @@ function rebuildTags(existing = [], s = {}) {
   if (s.isReturned) tags.push('RETURNED');
   if (s.returnInProgress) tags.push('RETURN_IN_PROGRESS');
   if (s.pendingDays) tags.push('PENDING', s.pendingDays >= 3 ? 'PENDING_3_PLUS' : `PENDING_${s.pendingDays}`);
-  if (s.pendingDays >= 2) tags.push(s.pendingContinuous ? 'PENDING_CONTINUOUS' : 'PENDING_NON_CONTINUOUS');
+  if (s.pendingDays >= 2 && s.pendingContinuous) tags.push('PENDING_CONTINUOUS');
+  if (s.pendingNonContinuous) tags.push('PENDING_NON_CONTINUOUS');
   if (s.ocDays) tags.push('OC', s.ocDays >= 3 ? 'OC_3_PLUS' : `OC_${s.ocDays}_DAY`);
   if (s.cycleDays) tags.push('CYCLE_COUNT', s.cycleDays >= 3 ? 'CYCLE_3_PLUS' : `CYCLE_${s.cycleDays}_DAY`);
   if (s.inboundNoScan) tags.push('INBOUND_NO_SCAN');

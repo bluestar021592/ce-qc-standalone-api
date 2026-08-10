@@ -5,13 +5,15 @@ import {
 } from './shopeeAnalyzerV30.js';
 import { classifyScanTerminal } from './scanTerminal.js';
 
-export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-09-scan-track-code-separation-v31';
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-10-final-trajectory-state-machine-v1';
 
 /**
- * Safety wrapper around V30.
+ * Final safety wrapper around V30.
  * - An empty trajectory result must not crash the classifier.
  * - Legacy text/old code 81 must not resurrect POD/return terminal states.
- * Locked terminal sources are scan 85/100 or tracking 80/86 only.
+ * - Only scan 85/100 or the latest trajectory event 80/86 can close a parcel.
+ * - Store Pending/OC remain store self-pickup context, never store retention.
+ * - Legacy carry flags are rebuilt from the same exact terminal facts.
  */
 export function analyzeShopeeShipment(args = {}) {
   const originalEvents = Array.isArray(args.events) ? args.events : [];
@@ -29,10 +31,8 @@ export function analyzeShopeeShipment(args = {}) {
   const sorted = [...originalEvents].sort((a, b) => String(a?.eventTime || '').localeCompare(String(b?.eventTime || '')));
   const latest = sorted.at(-1) || null;
   const latestCode = codeOf(latest);
-  const hasTrackPod = sorted.some(event => codeOf(event) === '80');
-  const hasTrackReturn = sorted.some(event => codeOf(event) === '86');
-  const exactPod = scanGate.currentState === 'POD' || hasTrackPod;
-  const exactReturn = !exactPod && (scanGate.currentState === 'RETURN_COMPLETED' || hasTrackReturn);
+  const exactPod = scanGate.currentState === 'POD' || latestCode === '80';
+  const exactReturn = !exactPod && (scanGate.currentState === 'RETURN_COMPLETED' || latestCode === '86');
 
   if (!hasEvents && !exactPod && !exactReturn) {
     return {
@@ -55,14 +55,13 @@ export function analyzeShopeeShipment(args = {}) {
       轨迹节点数: 0,
       tags: scanGate.currentState === 'SCAN_PENDING_RETRY' ? ['REFRESH_FAILED'] : ['NO_TRACK'],
       carry状态: 'active',
+      跨日状态: '未闭环',
+      trackRequired: true,
+      trackSkippedReason: '',
       QC判断: scanGate.currentState === 'SCAN_PENDING_RETRY' ? '订单扫描待重试' : '轨迹接口成功但没有返回有效轨迹，保留续查'
     };
   }
 
-  // V29 historically treated text/81 as completed return and broad POD text as
-  // terminal. V30 corrects most fields, but its inherited currentState/category
-  // can still carry those legacy labels. Strip them unless an exact terminal code
-  // is present.
   if (!exactPod && !exactReturn) {
     const falseTerminalState = ['POD', 'RETURN', 'RETURNED', 'RETURN_COMPLETED'].includes(String(result.currentState || '').toUpperCase());
     const falseTerminalCategory = ['POD', 'POD闭环', '退回'].includes(String(result.primaryCategory || result.主分类 || result.异常分类 || ''));
@@ -76,13 +75,25 @@ export function analyzeShopeeShipment(args = {}) {
         异常分类: fallbackCategory,
         是否POD: '否',
         POD状态: '未POD',
-        退回状态: latestCode === '84' ? '退回处理中' : '未退回',
-        carry状态: latestCode === '84' ? 'active_return' : 'active'
+        退回状态: latestCode === '84' ? '退回处理中' : '未退回'
       });
     }
   }
 
-  return { ...result, analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION };
+  if (result.shopState === 'SHOP_ARRIVED_CURRENT' && ['SHOP_PENDING', 'SHOP_OC'].includes(String(result.currentState || '').toUpperCase())) {
+    result.pvOpenDisposition = 'PV_STORE_NORMAL';
+  }
+
+  const returnInProgress = !exactPod && !exactReturn && (latestCode === '84' || result.退回状态 === '退回处理中' || String(result.currentState || '').toUpperCase() === 'RETURN_IN_PROGRESS');
+  Object.assign(result, {
+    analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
+    trackRequired: !(exactPod || exactReturn),
+    trackSkippedReason: exactPod ? 'POD_COMPLETED' : exactReturn ? 'RETURN_COMPLETED' : '',
+    carry状态: exactPod ? 'closed_pod' : exactReturn ? 'closed_return' : returnInProgress ? 'active_return' : 'active',
+    跨日状态: exactPod || exactReturn ? '已闭环' : '未闭环'
+  });
+
+  return result;
 }
 
 export { classifyShopeeScanStatus, classifyShopeeRegion };

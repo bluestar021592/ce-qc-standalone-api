@@ -6,11 +6,12 @@ import {
   classifyShopeeRegion
 } from './shopeeAnalyzerV29.js';
 import { classifyScanTerminal } from './scanTerminal.js';
+import { buildTrajectoryFacts } from './trajectoryFacts.js';
 
 export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-09-scan-track-code-separation-v30';
 
 const TRACK = Object.freeze({
-  INBOUND_NO_SCAN: '26',
+  PICKUP_SUCCESS: '26',
   CYCLE_A: '30',
   CYCLE_B: '32',
   WORK_ORDER: '99',
@@ -22,7 +23,7 @@ const TRACK = Object.freeze({
 
 const CYCLE_CODES = new Set([TRACK.CYCLE_A, TRACK.CYCLE_B]);
 const BUSINESS_PROGRESS_CODES = new Set([
-  TRACK.INBOUND_NO_SCAN,
+  TRACK.PICKUP_SUCCESS,
   TRACK.CYCLE_A,
   TRACK.CYCLE_B,
   TRACK.WORK_ORDER,
@@ -51,21 +52,17 @@ export function analyzeShopeeShipment(args = {}) {
   const scanRequestStatus = ['failed', 'scan_retry'].includes(String(apiStatus.shipment || '').toLowerCase()) ? 'failed' : 'success';
   const scanGate = classifyScanTerminal({ shipmentCode: waybill || scanRow.shipmentCode || scanRow.运单号, orderStatus: scanRow.orderStatus }, scanRequestStatus);
 
-  const exactTerminal = latestExactTerminal(sorted);
+  const facts = buildTrajectoryFacts({ shipmentCode: waybill, scanRow, events: sorted, reportDate: effectiveDate });
+  const exactTerminal = facts.latestTrackTerminal;
   const isPod = scanGate.currentState === 'POD' || exactTerminal?.type === 'POD';
   const isReturned = !isPod && (scanGate.currentState === 'RETURN_COMPLETED' || exactTerminal?.type === 'RETURN_COMPLETED');
   const returnInProgress = !isPod && !isReturned && latestCode === TRACK.RETURN_START;
 
-  const storeFlow = analyzeStoreFlow({
-    shipmentCode: waybill,
-    events: sorted,
-    reportDate: effectiveDate,
-    isPod,
-    isReturned
-  });
-  const special = !isPod && !isReturned ? classifyLatestSpecialNode(sorted) : null;
+  const storeFlow = facts.storeFlow;
+  const special = !isPod && !isReturned ? facts.special : null;
+  const unknownShopCode = facts.unknownShopCode || '';
   const region = classifyShopeeRegion({ dailyRow, shipmentTrackRow, scanRow, events: sorted });
-  const pending = exactPendingState(sorted);
+  const pending = pendingFromFacts(facts, latestCode);
   const cycle = exactCycleState(sorted, effectiveDate);
   const oc = exactOcState(exceptions, sorted, effectiveDate, isPod || isReturned);
 
@@ -77,7 +74,7 @@ export function analyzeShopeeShipment(args = {}) {
         ...storeFlow,
         shopLastEventAt: latest?.eventTime || storeFlow.shopLastEventAt || '',
         shopPendingAt: latest?.eventTime || storeFlow.shopPendingAt || '',
-        shopRetentionNaturalDays: 1,
+        shopRetentionNaturalDays: 0,
         storeTags: unique([...(storeFlow.storeTags || []), 'SHOP_PENDING'])
       }
     : storeFlow;
@@ -102,6 +99,10 @@ export function analyzeShopeeShipment(args = {}) {
     category = special.category;
     currentState = special.specialState || 'SPECIAL_NORMAL';
     qc = `${category}，按特殊正常去向监管`;
+  } else if (unknownShopCode) {
+    category = '未知门店编码';
+    currentState = 'UNKNOWN_SHOP_CODE';
+    qc = '最新结构化门店编码' + unknownShopCode + '未命中95码白名单，禁止按名称猜测，需人工确认';
   } else if (correctedStoreFlow.shopState === 'SHOP_ARRIVED_CURRENT') {
     if (oc.active) {
       category = '门店OC';
@@ -117,7 +118,7 @@ export function analyzeShopeeShipment(args = {}) {
       qc = category === '门店滞留' ? '包裹当前停留在门店，按门店无新节点时长监管' : '包裹已到门店，当前正常门店流转';
     }
   } else if (correctedStoreFlow.shopState === 'SHOP_TRANSFER_IN_PROGRESS') {
-    category = Number(correctedStoreFlow.shopRetentionNaturalDays || 0) >= 2 ? '门店途中2天+' : '门店途中';
+    category = Number(correctedStoreFlow.shopTransferNaturalDays || 0) >= 2 ? '门店途中2天+' : '门店途中';
     currentState = 'SHOP_TRANSFER_IN_PROGRESS';
   } else if (oc.active) {
     category = oc.days >= 3 ? 'OC3天及以上' : `OC${Math.max(1, oc.days)}天`;
@@ -132,26 +133,32 @@ export function analyzeShopeeShipment(args = {}) {
   } else if (latestCode === TRACK.WORK_ORDER) {
     category = '工单状态';
     currentState = 'WORK_ORDER';
-  } else if (latestCode === TRACK.INBOUND_NO_SCAN) {
+  } else if (facts.inboundNoScan) {
     category = '入库无扫描节点';
     currentState = 'INBOUND_NO_SCAN';
+  } else if (latestCode === TRACK.PICKUP_SUCCESS) {
+    category = '正常流转';
+    currentState = 'PICKUP_SUCCESS';
+    qc = '轨迹状态码26表示揽收成功/由CEL节点收件，不作为入库无扫描异常';
   } else if (latest && BUSINESS_PROGRESS_CODES.has(latestCode)) {
     currentState = `TRACK_${latestCode}`;
   }
 
   const terminal = isPod || isReturned;
-  const currentPending = !terminal && !returnInProgress && !special && !correctedStoreFlow.shopState && latestCode === TRACK.PENDING
-    ? pending.activeDays : 0;
-  const allPendingDates = exactPendingAllDates(sorted);
+  const ordinaryOpen = !terminal && !returnInProgress && !special && !correctedStoreFlow.shopState && !unknownShopCode;
+  const currentPending = ordinaryOpen && latestCode === TRACK.PENDING ? pending.activeDays : 0;
+  const allPendingDates = facts.pendingDates;
   const pendingContinuity = currentPending >= 2 ? (pending.continuous ? '连续' : '不连续') : (currentPending ? '单次' : '无');
-  const cycleDays = !terminal && !returnInProgress && CYCLE_CODES.has(latestCode) ? cycle.days : 0;
-  const inboundNoScan = !terminal && !returnInProgress && !special && !correctedStoreFlow.shopState && latestCode === TRACK.INBOUND_NO_SCAN;
+  const pendingNonContinuous = ordinaryOpen && facts.pendingNonContinuous;
+  const cycleDays = ordinaryOpen && CYCLE_CODES.has(latestCode) ? cycle.days : 0;
+  const inboundNoScan = ordinaryOpen && facts.inboundNoScan;
 
   const tags = terminal
     ? unique([isPod ? 'POD' : 'RETURNED', `REGION_${region.regionCode}`])
     : rebuildTags(base.tags, {
         pendingDays: currentPending,
         pendingContinuous: pending.continuous,
+        pendingNonContinuous,
         oc,
         cycleDays,
         inboundNoScan,
@@ -164,7 +171,7 @@ export function analyzeShopeeShipment(args = {}) {
     ...base,
     ...correctedStoreFlow,
     businessType: 'SHOPEE',
-    analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
+    analysisRuleVersion: '2026-08-10-final-trajectory-state-machine-v1',
     scanNormalizedState: scanGate.currentState,
     scanTerminalType: scanGate.scanTerminalType,
     scanTerminalReason: scanGate.scanTerminalReason,
@@ -190,7 +197,12 @@ export function analyzeShopeeShipment(args = {}) {
     Pending连续性: pendingContinuity,
     pendingContinuity,
     Pending连续: currentPending >= 2 && pending.continuous ? '是' : '否',
-    Pending不连续: currentPending >= 2 && !pending.continuous ? '是' : '否',
+    Pending事实连续性: facts.pendingContinuityLabel,
+    pendingFactDateContinuity: facts.pendingContinuityLabel,
+    Pending不连续: pendingNonContinuous ? '是' : '否',
+    unknownShopCode,
+    shopWhitelistStatus: unknownShopCode ? 'UNKNOWN_SHOP_CODE' : '',
+    pickupSuccess: facts.pickupSuccess ? '是' : '否',
     returnRequired: currentPending >= 3,
     退回待处理: currentPending >= 3 ? '是' : '否',
     OC状态: oc.active && !terminal && !returnInProgress ? '是' : '否',
@@ -260,14 +272,18 @@ function trackCode(event = {}) {
   return String(event.eventCode ?? event.trackingEventCode ?? event.statusCode ?? '').trim();
 }
 
-function latestExactTerminal(events) {
-  let found = null;
-  for (const event of events) {
-    const code = trackCode(event);
-    if (code === TRACK.POD) found = { type: 'POD', event };
-    if (code === TRACK.RETURN_COMPLETE) found = { type: 'RETURN_COMPLETED', event };
-  }
-  return found;
+function latestExactTerminal(events = []) {
+  const event = events.at(-1) || null;
+  const code = trackCode(event || {});
+  if (code === TRACK.POD) return { type: 'POD', event };
+  if (code === TRACK.RETURN_COMPLETE) return { type: 'RETURN_COMPLETED', event };
+  return null;
+}
+
+function pendingFromFacts(facts = {}, latestCode = '') {
+  if (String(latestCode || '') !== TRACK.PENDING) return { activeDays: 0, activeDates: [], continuous: false };
+  const dates = [...new Set((facts.pendingDates || []).map(String).filter(Boolean))].sort();
+  return { activeDays: Math.max(1, dates.length), activeDates: dates, continuous: dates.length <= 1 ? true : Boolean(facts.pendingDateContinuity) };
 }
 
 function exactPendingState(events) {
@@ -338,7 +354,8 @@ function rebuildTags(existing = [], state = {}) {
   if (state.pendingDays === 1) tags.push('PENDING_1');
   if (state.pendingDays === 2) tags.push('PENDING_2');
   if (state.pendingDays >= 3) tags.push('PENDING_3_PLUS');
-  if (state.pendingDays >= 2) tags.push(state.pendingContinuous ? 'PENDING_CONTINUOUS' : 'PENDING_NON_CONTINUOUS');
+  if (state.pendingDays >= 2 && state.pendingContinuous) tags.push('PENDING_CONTINUOUS');
+  if (state.pendingNonContinuous) tags.push('PENDING_NON_CONTINUOUS');
   if (state.oc?.active) tags.push(state.oc.days >= 3 ? 'OC_3_PLUS' : state.oc.days === 2 ? 'OC_2_DAY' : 'OC_1_DAY');
   if (state.cycleDays) tags.push(state.cycleDays >= 3 ? 'CYCLE_3_PLUS' : state.cycleDays === 2 ? 'CYCLE_2_DAY' : 'CYCLE_1_DAY');
   if (state.inboundNoScan) tags.push('INBOUND_NO_SCAN');

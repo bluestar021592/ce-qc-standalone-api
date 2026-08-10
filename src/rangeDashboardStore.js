@@ -1,6 +1,7 @@
-// V31 public facade.
-// Keep cache-maintenance APIs on the preserved implementation, while every
-// dashboard read uses the corrected latest VALID + COMPLETED snapshot per date.
+// Final public facade.
+// Cache-maintenance APIs stay on the preserved implementation, while dashboard
+// reads use V31 source/snapshot selection plus the final business-rule
+// normalization layer.
 export {
   markDashboardCacheDirty,
   refreshDashboardCacheDate,
@@ -10,4 +11,4 @@ export {
   RANGE_DASHBOARD_BUSINESS_TYPES
 } from './rangeDashboardStoreLegacy.js';
 
-export { loadRangeDashboard } from './rangeDashboardStoreV31.js';
+export { loadRangeDashboard } from './rangeDashboardStoreFinal.js';
