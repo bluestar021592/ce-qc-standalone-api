@@ -1,0 +1,38 @@
+name: Apply shop retention 2-day threshold
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/apply-shop-retention-2day-threshold.mjs'
+      - '.github/workflows/apply-shop-retention-2day-threshold.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/apply-shop-retention-2day-threshold.mjs
+      - name: Commit shop retention threshold
+        shell: bash
+        run: |
+          if git diff --quiet -- src/reporting.js; then
+            echo 'shop retention threshold already patched'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/reporting.js
+          git commit -m 'Use two-day threshold for shop retention'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
