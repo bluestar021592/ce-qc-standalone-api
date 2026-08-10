@@ -11,6 +11,47 @@ function Write-Step([string]$Text) {
   Write-Host "`n=== $Text ===" -ForegroundColor Cyan
 }
 
+function Invoke-NativeCapture {
+  param(
+    [Parameter(Mandatory = $true)][string]$Exe,
+    [Parameter(Mandatory = $true)][string[]]$Arguments
+  )
+
+  $oldPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    $output = & $Exe @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $oldPreference
+  }
+
+  return [pscustomobject]@{
+    ExitCode = [int]$exitCode
+    Output = @($output)
+  }
+}
+
+function Invoke-NativeInteractive {
+  param(
+    [Parameter(Mandatory = $true)][string]$Exe,
+    [Parameter(Mandatory = $true)][string[]]$Arguments
+  )
+
+  $oldPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $Exe @Arguments
+    $exitCode = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $oldPreference
+  }
+
+  return [int]$exitCode
+}
+
 function Resolve-GhCli {
   $command = Get-Command gh -ErrorAction SilentlyContinue
   if ($command) { return [string]$command.Source }
@@ -29,8 +70,10 @@ function Resolve-GhCli {
   }
 
   Write-Step 'First run: installing GitHub CLI'
-  & $winget.Source install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements | Out-Host
-  $installExit = $LASTEXITCODE
+  $installExit = Invoke-NativeInteractive -Exe $winget.Source -Arguments @(
+    'install', '--id', 'GitHub.cli', '-e', '--source', 'winget',
+    '--accept-package-agreements', '--accept-source-agreements'
+  )
   if ($installExit -ne 0) {
     throw "GitHub CLI installation failed. Exit code: $installExit"
   }
@@ -47,19 +90,51 @@ function Resolve-GhCli {
   throw 'GitHub CLI was installed but gh.exe is not visible in this process. Close this window and run the BAT again.'
 }
 
-function Get-RepoVisibility([string]$GhPath) {
-  $value = & $GhPath repo view $Repository --json visibility --jq '.visibility' 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw "Cannot read repository visibility: $($value -join ' ')"
+function Test-GhAuthentication([string]$GhPath) {
+  $result = Invoke-NativeCapture -Exe $GhPath -Arguments @('auth', 'status', '-h', 'github.com')
+  return ($result.ExitCode -eq 0)
+}
+
+function Ensure-GhAuthentication([string]$GhPath) {
+  if (Test-GhAuthentication $GhPath) {
+    Write-Host 'GitHub authentication is already active.' -ForegroundColor Green
+    return
   }
-  return (($value -join '').Trim().ToLowerInvariant())
+
+  Write-Host 'GitHub login is required once. A browser window will open.' -ForegroundColor Yellow
+  Write-Host 'Complete the browser sign-in using the GitHub account that owns this repository.' -ForegroundColor Yellow
+
+  $loginExit = Invoke-NativeInteractive -Exe $GhPath -Arguments @(
+    'auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web'
+  )
+  if ($loginExit -ne 0) {
+    throw "GitHub CLI login failed. Exit code: $loginExit"
+  }
+  if (-not (Test-GhAuthentication $GhPath)) {
+    throw 'GitHub CLI login finished but authentication is still unavailable.'
+  }
+
+  Write-Host 'GitHub login completed.' -ForegroundColor Green
+}
+
+function Get-RepoVisibility([string]$GhPath) {
+  $result = Invoke-NativeCapture -Exe $GhPath -Arguments @(
+    'repo', 'view', $Repository, '--json', 'visibility', '--jq', '.visibility'
+  )
+  if ($result.ExitCode -ne 0) {
+    throw "Cannot read repository visibility: $($result.Output -join ' ')"
+  }
+  return (($result.Output -join '').Trim().ToLowerInvariant())
 }
 
 function Set-RepoVisibility([string]$GhPath, [string]$Visibility) {
   Write-Host "Changing repository visibility to $Visibility ..." -ForegroundColor Yellow
-  $output = & $GhPath repo edit $Repository --visibility $Visibility --accept-visibility-change-consequences 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw "Changing repository visibility to $Visibility failed: $($output -join ' ')"
+  $result = Invoke-NativeCapture -Exe $GhPath -Arguments @(
+    'repo', 'edit', $Repository, '--visibility', $Visibility,
+    '--accept-visibility-change-consequences'
+  )
+  if ($result.ExitCode -ne 0) {
+    throw "Changing repository visibility to $Visibility failed: $($result.Output -join ' ')"
   }
 
   for ($i = 0; $i -lt 30; $i++) {
@@ -70,9 +145,13 @@ function Set-RepoVisibility([string]$GhPath, [string]$Visibility) {
 }
 
 function Get-LatestDispatchRunId([string]$GhPath) {
-  $result = & $GhPath run list -R $Repository --workflow $Workflow --branch $Ref --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>&1
-  if ($LASTEXITCODE -ne 0) { return '' }
-  return (($result -join '').Trim())
+  $result = Invoke-NativeCapture -Exe $GhPath -Arguments @(
+    'run', 'list', '-R', $Repository, '--workflow', $Workflow, '--branch', $Ref,
+    '--event', 'workflow_dispatch', '--limit', '1', '--json', 'databaseId',
+    '--jq', '.[0].databaseId // ""'
+  )
+  if ($result.ExitCode -ne 0) { return '' }
+  return (($result.Output -join '').Trim())
 }
 
 $gh = $null
@@ -87,12 +166,7 @@ try {
   $gh = [string](Resolve-GhCli)
 
   Write-Step 'Checking GitHub authentication'
-  & $gh auth status -h github.com *> $null
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host 'GitHub login is required once. A browser window will open.' -ForegroundColor Yellow
-    & $gh auth login --hostname github.com --git-protocol https --web
-    if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI login failed.' }
-  }
+  Ensure-GhAuthentication $gh
 
   Write-Step 'Checking repository visibility'
   $originalVisibility = Get-RepoVisibility $gh
@@ -111,9 +185,11 @@ try {
 
   Write-Step 'Starting final regression workflow'
   $beforeRunId = Get-LatestDispatchRunId $gh
-  $triggerOutput = & $gh workflow run $Workflow -R $Repository --ref $Ref 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw "Unable to start workflow: $($triggerOutput -join ' ')"
+  $trigger = Invoke-NativeCapture -Exe $gh -Arguments @(
+    'workflow', 'run', $Workflow, '-R', $Repository, '--ref', $Ref
+  )
+  if ($trigger.ExitCode -ne 0) {
+    throw "Unable to start workflow: $($trigger.Output -join ' ')"
   }
 
   for ($i = 0; $i -lt 60; $i++) {
@@ -130,15 +206,18 @@ try {
 
   Write-Host "Actions Run ID: $runId" -ForegroundColor Green
   Write-Step 'Waiting for CI to finish'
-  & $gh run watch $runId -R $Repository --compact --exit-status
-  $ciExitCode = $LASTEXITCODE
+  $ciExitCode = Invoke-NativeInteractive -Exe $gh -Arguments @(
+    'run', 'watch', $runId, '-R', $Repository, '--compact', '--exit-status'
+  )
 
   if ($ciExitCode -eq 0) {
     Write-Host "`nFINAL CI RESULT: PASSED" -ForegroundColor Green
   } else {
     Write-Host "`nFINAL CI RESULT: FAILED" -ForegroundColor Red
     Write-Host 'Failed-job log follows:' -ForegroundColor Red
-    & $gh run view $runId -R $Repository --log-failed
+    [void](Invoke-NativeInteractive -Exe $gh -Arguments @(
+      'run', 'view', $runId, '-R', $Repository, '--log-failed'
+    ))
   }
 }
 catch {
