@@ -70,16 +70,24 @@ export async function runWhppPipeline({
   }
 
   const scanFailed = allBills.filter(bill => scanStatuses.get(bill)?.status !== 'success');
-  const scanTerminal = new Set(allBills.filter(bill => ['85','100','10'].includes(String(scanRows.get(bill)?.orderStatus ?? '').trim())));
+  const podOrReturnTerminal = new Set(allBills.filter(bill => ['85','100'].includes(String(scanRows.get(bill)?.orderStatus ?? '').trim())));
+  const cancelledByScan = new Set(allBills.filter(bill => String(scanRows.get(bill)?.orderStatus ?? '').trim() === '10'));
+  const scanTerminal = new Set([...podOrReturnTerminal, ...cancelledByScan]);
   const needTrack = allBills.filter(bill => !scanTerminal.has(bill) && scanStatuses.get(bill)?.status === 'success' && !podLocks.has(bill));
+  // A scan-side orderStatus=10 is already sufficient to close cancellation, but
+  // exception-item/query is still queried to enrich reason/sub-reason/report-shop
+  // details. Failure of this enrichment must not reopen a confirmed cancellation.
+  const needException = cleanCodes([...needTrack, ...cancelledByScan]);
   state.needTrackBills = needTrack;
-  await onProgress(`WHPP订单扫描完成：扫描终态 ${scanTerminal.size}票，进入轨迹/异常查询 ${needTrack.length}票，扫描待重试 ${scanFailed.length}票`);
+  state.needExceptionBills = needException;
+  await onProgress(`WHPP订单扫描完成：扫描终态 ${scanTerminal.size}票，进入轨迹 ${needTrack.length}票，取消/异常查询 ${needException.length}票，扫描待重试 ${scanFailed.length}票`);
   await checkpoint(state, onCheckpoint);
 
   const eventRows = new Map(groupRows((state.trackEvents || []).map(row => ({ ...normalizeEvent(row), reportDate }))));
   const eventStatuses = statusMap(state.eventQueryStatus || []);
   await queryEvidenceBatches({
     state, bills: needTrack, rowsByBill: eventRows, statuses: eventStatuses,
+    rowsKey: 'trackEvents', statusKey: 'eventQueryStatus',
     phase: 'WHPP轨迹查询', apiName: 'whpp-track-query',
     query: codes => client.trackQuery(codes), normalize: row => ({ ...normalizeEvent(row), reportDate }),
     onProgress, onCheckpoint, isPaused
@@ -90,7 +98,8 @@ export async function runWhppPipeline({
   const exceptionRows = new Map(groupRows(state.exceptionItems || []));
   const exceptionStatuses = statusMap(state.exceptionQueryStatus || []);
   await queryEvidenceBatches({
-    state, bills: needTrack, rowsByBill: exceptionRows, statuses: exceptionStatuses,
+    state, bills: needException, rowsByBill: exceptionRows, statuses: exceptionStatuses,
+    rowsKey: 'exceptionItems', statusKey: 'exceptionQueryStatus',
     phase: 'WHPP订单取消/异常查询', apiName: 'whpp-exception-item-query',
     query: codes => client.exceptionQuery(codes), normalize: row => ({ ...row, shipmentCode: billOf(row), reportDate }),
     onProgress, onCheckpoint, isPaused
@@ -135,11 +144,15 @@ export async function runWhppPipeline({
         waybill: bill,
         scanRow,
         events: scanTerminal.has(bill) ? [] : (eventRows.get(bill) || []),
-        exceptions: scanTerminal.has(bill) && String(scanRow.orderStatus) !== '10' ? [] : (exceptionRows.get(bill) || []),
+        exceptions: podOrReturnTerminal.has(bill) ? [] : (exceptionRows.get(bill) || []),
         reportDate,
         dailyRow,
         priorRow: {},
-        apiStatus: { shipment: 'success', event: 'success', exception: 'success' }
+        apiStatus: {
+          shipment: 'success',
+          event: scanTerminal.has(bill) ? 'skipped_terminal' : 'success',
+          exception: exceptionStatuses.get(bill)?.status || (podOrReturnTerminal.has(bill) ? 'skipped_terminal' : 'success')
+        }
       });
       result = { ...dailyRow, ...result, businessType: 'WHPP', reportDate, shipmentCode: bill, 运单号: bill, regionCode: dailyRow.regionCode || result.regionCode || '' };
     }
@@ -148,7 +161,6 @@ export async function runWhppPipeline({
   }
 
   const nextCarryBills = cleanCodes(finalRows.filter(row => !isClosed(row) && row.查询状态 !== 'refresh_failed').map(billOf));
-  // Failed rows remain resumable too.
   for (const bill of failedBills) if (!nextCarryBills.includes(bill)) nextCarryBills.push(bill);
 
   const completedAt = new Date();
@@ -159,6 +171,7 @@ export async function runWhppPipeline({
     returned: finalRows.filter(isReturned).length,
     cancelled: finalRows.filter(isWhppCancelledRow).length,
     needTrack: needTrack.length,
+    cancellationEvidenceQueries: needException.length,
     retry: failedBills.size,
     nextCarry: nextCarryBills.length,
     startedAt: startedAt.toISOString(), completedAt: completedAt.toISOString(),
@@ -187,7 +200,7 @@ export async function runWhppPipeline({
   return { state, summary };
 }
 
-async function queryEvidenceBatches({ state, bills, rowsByBill, statuses, phase, apiName, query, normalize, onProgress, onCheckpoint, isPaused }) {
+async function queryEvidenceBatches({ state, bills, rowsByBill, statuses, rowsKey, statusKey, phase, apiName, query, normalize, onProgress, onCheckpoint, isPaused }) {
   const pending = cleanCodes(bills).filter(bill => statuses.get(bill)?.status !== 'success');
   const batches = splitTrackBatches(pending);
   for (let index = 0; index < batches.length; index += 1) {
@@ -208,6 +221,10 @@ async function queryEvidenceBatches({ state, bills, rowsByBill, statuses, phase,
       if (!failed.has(bill) || statuses.get(bill)?.status === 'success') continue;
       statuses.set(bill, failedStatus(bill, state.reportDate || '', failed.get(bill)?.message || `${apiName}_FAILED`));
     }
+    // Persist each successful/failed child batch immediately. A restart therefore
+    // only retries the exact bills whose per-waybill status is not success.
+    state[rowsKey] = flattenRows(rowsByBill);
+    state[statusKey] = [...statuses.values()];
     await checkpoint(state, onCheckpoint);
   }
 }
