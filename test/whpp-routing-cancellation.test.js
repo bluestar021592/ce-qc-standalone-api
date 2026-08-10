@@ -24,7 +24,7 @@ function parseRows(rows) {
 }
 
 test('WHPP runtime integration files pass node syntax checks', () => {
-  for (const relative of ['src/whppAnalyzer.js','src/whppReporting.js','src/whppStore.js','src/whppPipeline.js','src/v42WhppPatch.js','public/whpp-v42.js']) {
+  for (const relative of ['src/whppAnalyzer.js','src/whppReporting.js','src/whppStore.js','src/whppPipeline.js','src/v42WhppPatch.js','src/v44WhppUiPatch.js','public/whpp-v42.js','public/whpp-v44.js']) {
     const file = path.resolve(relative);
     const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
     assert.equal(result.status, 0, `${relative} syntax failed:\n${result.stderr || result.stdout}`);
@@ -115,7 +115,12 @@ test('WHPP accounting keeps POD return cancellation diversion and unresolved mut
   assert.equal(dashboard.metrics.pending1, 1);
 });
 
-test('integrated WHPP dashboard exposes required business labels', () => {
-  const source = fs.readFileSync(new URL('../public/whpp-v42.js', import.meta.url), 'utf8');
-  for (const text of ['WHPP本土看板','订单取消','CCSLCN分流','CCSLZT分流','CCSL580分流','金边门店']) assert.match(source, new RegExp(text));
+test('integrated WHPP dashboard exposes required business labels and old-db empty notice', () => {
+  const legacy = fs.readFileSync(new URL('../public/whpp-v42.js', import.meta.url), 'utf8');
+  const fast = fs.readFileSync(new URL('../public/whpp-v44.js', import.meta.url), 'utf8');
+  for (const text of ['WHPP本土看板','订单取消','CCSLCN分流','CCSLZT分流','CCSL580分流','金边门店']) {
+    assert.match(legacy + fast, new RegExp(text));
+  }
+  assert.match(fast, /旧数据库没有WHPP独立历史数据/);
+  assert.match(fast, /AbortController/);
 });
