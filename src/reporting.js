@@ -443,9 +443,31 @@ function isSevereAbnormalRow(row = {}) {
 
 function isAnyAbnormalRow(row = {}) {
   return row?.是否POD !== '是'
+    && !isNormalReturnFlowRow(row)
     && !isNormalFinalDiversionRow(row)
     && !isRefreshFailedRow(row)
-    && !isSpecialRetentionRow(row);
+    && !isSpecialRetentionRow(row)
+    && !isNormalShopFlowRow(row);
+}
+
+function isNormalReturnFlowRow(row = {}) {
+  const state = String(row?.currentState || row?.scanNormalizedState || '').toUpperCase();
+  const returnStatus = String(row?.退回状态 || '').trim();
+  return ['RETURN_COMPLETED', 'RETURNED', 'RETURN_IN_PROGRESS'].includes(state)
+    || ['已退回', '退回处理中'].includes(returnStatus)
+    || ['退回', '退回处理中'].includes(String(row?.primaryCategory || row?.主分类 || row?.异常分类 || '').trim());
+}
+
+function isNormalShopFlowRow(row = {}) {
+  if (!isShopRow(row)) return false;
+  const category = String(row?.primaryCategory || row?.主分类 || row?.异常分类 || '').trim();
+  const state = String(row?.currentState || '').toUpperCase();
+  const retentionDays = shopDays(row);
+  const explicitStoreAbnormal = category === '门店滞留'
+    || category === '门店途中2天+'
+    || category === '门店途中3天+'
+    || (row?.shopState === 'SHOP_ARRIVED_CURRENT' && retentionDays >= 2 && !['SHOP_PENDING', 'SHOP_OC'].includes(state));
+  return !explicitStoreAbnormal;
 }
 
 function isRefreshFailedRow(row = {}) {
