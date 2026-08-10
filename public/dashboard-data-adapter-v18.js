@@ -53,7 +53,7 @@
     const t = snapshot.trends || {};
     const fixtureTrends = fixture.trends || {};
     const choose = (value, fallback) => visualTest ? (fallback || value || []) : (value || []);
-    const cards = (snapshot.businessCards || []).slice(0, 6).map((row, index) => ({ ...row, key: row.key || String(index), value: number(row.value) || 0 }));
+    const cards = (snapshot.businessCards || []).map((row, index) => ({ ...row, key: row.key || String(index), value: number(row.value) || 0 }));
     return {
       page: 'home', reportDate: snapshot.reportDate || '—', cards, core: coreMetrics(snapshot),
       special: {
