@@ -58,3 +58,10 @@ test('WHPP board uses native Shopee dashboard classes and does not render dispat
   for (const token of ['v18-business-grid','v18-core-grid','region-summary-grid','v18-chart-grid','订单取消','CCSLCN分流','CCSLZT分流','CCSL580分流','金边门店']) assert.match(source, new RegExp(token));
   assert.doesNotMatch(source, /1派POD|2派POD|3派POD|派送概率分布/);
 });
+
+test('WHPP visibility observer is idempotent and cannot self-trigger a browser freeze', () => {
+  const source = fs.readFileSync(path.join(root, 'public', 'whpp-v44.js'), 'utf8');
+  assert.match(source, /if\(node\.hidden!==shouldHide\)node\.hidden=shouldHide/);
+  assert.match(source, /if\(node\.classList\.contains\('active'\)!==shouldActive\)node\.classList\.toggle\('active',shouldActive\)/);
+  assert.match(source, /if\(title&&title\.textContent!=='WHPP本土看板'\)title\.textContent='WHPP本土看板'/);
+});
