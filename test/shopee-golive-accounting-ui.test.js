@@ -47,7 +47,10 @@ test('dashboard patch keeps percentage subtitles semantic instead of dividing a 
   const source = fs.readFileSync(path.join(root, 'public', 'v27-dashboard-fix.js'), 'utf8');
   assert.match(source, /function normalizeRatioText\(model\)/);
   assert.match(source, /当前比率/);
-  assert.match(source, /item\.unit==='%'\|\|\/\(率\|百分比\)\$\//);
+  // Optional chaining is an implementation detail; the regression guard cares
+  // that explicit %-unit metrics OR labels ending in 率/百分比 use the semantic path.
+  assert.match(source, /item\?\.unit\s*===\s*'%'|item\.unit\s*===\s*'%'/);
+  assert.match(source, /\(率\|百分比\)\$\/\.test\(label\)/);
 });
 
 test('only the trend mount fix owns Shopee 1/2/3 attempt trend panel creation', () => {
