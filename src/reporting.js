@@ -512,6 +512,9 @@ function isShopInboundRow(row = {}) {
 }
 
 function isShopStuckRow(row = {}) {
+  const state = String(row?.currentState || '').toUpperCase();
+  const category = String(row?.primaryCategory || row?.主分类 || row?.异常分类 || '').trim();
+  if (['SHOP_PENDING', 'SHOP_OC'].includes(state) || ['门店Pending', '门店OC'].includes(category)) return false;
   if (row?.shopState === 'SHOP_ARRIVED_CURRENT' && shopDays(row) >= 2) return true;
   return row?.门店状态 === '门店滞留'
     || row?.异常分类 === '门店滞留'
