@@ -18,6 +18,16 @@
 
   function esc(value){return String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');}
   function fmt(value){return Number(value||0).toLocaleString('zh-CN');}
+  function normalizeRatioText(model){
+    for(const item of [...(model?.cards||[]),...(model?.core||[])]){
+      const label=String(item?.label||'');
+      if(item?.unit==='%'||/(率|百分比)$/.test(label)){
+        const value=Number(item?.value||0);
+        item.ratio=`当前比率 ${Number.isFinite(value)?value.toFixed(2):'0.00'}%`;
+      }
+    }
+    return model;
+  }
   function currentRange(){
     try{
       if(typeof dashboardPeriodRange!=='undefined'&&dashboardPeriodRange?.fromDate&&dashboardPeriodRange?.toDate) return {from:dashboardPeriodRange.fromDate,to:dashboardPeriodRange.toDate};
@@ -120,27 +130,20 @@
   }
   function attemptChart(data,label){return{title:`${label} 1/2/3派成功率趋势`,type:'rate',dates:data.dates,series:[series('1派','#1677ff',data.attempt1,data.attempt1Count,data.attemptDenominator),series('2派','#16a36a',data.attempt2,data.attempt2Count,data.attemptDenominator),series('3派','#ff8a00',data.attempt3,data.attempt3Count,data.attemptDenominator)]};}
   async function enrichHome(){
-    wireShopeeSpecial();
-    const trendSection=document.querySelector('#homePage .v18-trend-section');if(!trendSection)return;
-    let extra=document.getElementById('v27HomeAttemptTrends');if(!extra){extra=document.createElement('section');extra.id='v27HomeAttemptTrends';extra.className='v18-panel v27-attempt-section';extra.innerHTML='<h2>SHOPEE 1/2/3派成功率趋势</h2><div class="v27-attempt-grid"><article class="v27-attempt-card" data-group="CN"></article><article class="v27-attempt-card" data-group="VN"></article></div>';trendSection.insertAdjacentElement('afterend',extra);}
-    const [cn,vn]=await Promise.all([getTrends('SHOPEECN'),getTrends('SHOPEEVN')]);
-    if(cn)RateTrendCardV18.render(extra.querySelector('[data-group="CN"]'),attemptChart(cn,'SHOPEE CN'));
-    if(vn)RateTrendCardV18.render(extra.querySelector('[data-group="VN"]'),attemptChart(vn,'SHOPEE VN'));
+    // Attempt trends are owned exclusively by v27-trend-mount-fix.js.
+    // Keeping a second mount here created duplicate 1/2/3 panels on every Shopee page.
     wireShopeeSpecial();
   }
   async function enrichBusiness(model){
     const root=String(model.businessType||'').startsWith('SHOPEE')?document.getElementById('shopeePage'):document.getElementById('ccslPage');if(!root)return;
     const data=await getTrends(model.businessType);if(!data)return;
     root.querySelectorAll('.v18-chart-card').forEach((node,index)=>{const chart=genericCharts(data)[index];if(chart)RateTrendCardV18.render(node,chart);});
-    if(String(model.businessType).startsWith('SHOPEE')){
-      let extra=root.querySelector('.v27-attempt-section');if(!extra){extra=document.createElement('section');extra.className='v18-panel v27-attempt-section';extra.innerHTML='<h2>1/2/3派成功率趋势</h2><div class="v27-attempt-grid single"><article class="v27-attempt-card"></article></div>';root.querySelector('.v18-trend-section')?.insertAdjacentElement('afterend',extra);}
-      RateTrendCardV18.render(extra.querySelector('.v27-attempt-card'),attemptChart(data,model.label));
-    }
+    // Attempt trend ownership: v27-trend-mount-fix.js only.
   }
   if(global.DashboardV18){
     const home=global.DashboardV18.renderHome, business=global.DashboardV18.renderBusiness;
     global.DashboardV18.renderHome=function(root,model){home(root,model);queueMicrotask(()=>void enrichHome());};
-    global.DashboardV18.renderBusiness=function(root,model){business(root,model);queueMicrotask(()=>void enrichBusiness(model));};
+    global.DashboardV18.renderBusiness=function(root,model){normalizeRatioText(model);business(root,model);queueMicrotask(()=>void enrichBusiness(model));};
   }
 
   function ensureCarryPage(){
