@@ -25,13 +25,13 @@ function Resolve-GhCli {
 
   $winget = Get-Command winget -ErrorAction SilentlyContinue
   if (-not $winget) {
-    throw '未找到 GitHub CLI (gh)，并且当前电脑没有 winget。请先安装 GitHub CLI 后重新运行。'
+    throw 'GitHub CLI (gh) was not found and winget is unavailable. Install GitHub CLI and run this file again.'
   }
 
-  Write-Step '首次运行：自动安装 GitHub CLI'
+  Write-Step 'First run: installing GitHub CLI'
   & $winget.Source install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements
   if ($LASTEXITCODE -ne 0) {
-    throw "GitHub CLI 安装失败，退出码：$LASTEXITCODE"
+    throw "GitHub CLI installation failed. Exit code: $LASTEXITCODE"
   }
 
   $command = Get-Command gh -ErrorAction SilentlyContinue
@@ -39,29 +39,29 @@ function Resolve-GhCli {
   foreach ($candidate in $candidates) {
     if (Test-Path $candidate) { return $candidate }
   }
-  throw 'GitHub CLI 已安装，但当前进程未找到 gh.exe。请关闭窗口后重新双击 BAT。'
+  throw 'GitHub CLI was installed but gh.exe is not visible in this process. Close this window and run the BAT again.'
 }
 
 function Get-RepoVisibility([string]$GhPath) {
   $value = & $GhPath repo view $Repository --json visibility --jq '.visibility' 2>&1
   if ($LASTEXITCODE -ne 0) {
-    throw "无法读取仓库可见性：$($value -join ' ')"
+    throw "Cannot read repository visibility: $($value -join ' ')"
   }
   return (($value -join '').Trim().ToLowerInvariant())
 }
 
 function Set-RepoVisibility([string]$GhPath, [string]$Visibility) {
-  Write-Host "切换仓库为 $Visibility ..." -ForegroundColor Yellow
+  Write-Host "Changing repository visibility to $Visibility ..." -ForegroundColor Yellow
   $output = & $GhPath repo edit $Repository --visibility $Visibility --accept-visibility-change-consequences 2>&1
   if ($LASTEXITCODE -ne 0) {
-    throw "仓库可见性切换为 $Visibility 失败：$($output -join ' ')"
+    throw "Changing repository visibility to $Visibility failed: $($output -join ' ')"
   }
 
-  for ($i = 0; $i -lt 20; $i++) {
+  for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 2
     if ((Get-RepoVisibility $GhPath) -eq $Visibility) { return }
   }
-  throw "GitHub 未在预期时间内确认仓库已切换为 $Visibility。"
+  throw "GitHub did not confirm visibility=$Visibility within 60 seconds."
 }
 
 function Get-LatestDispatchRunId([string]$GhPath) {
@@ -70,44 +70,48 @@ function Get-LatestDispatchRunId([string]$GhPath) {
   return (($result -join '').Trim())
 }
 
-$gh = Resolve-GhCli
+$gh = $null
 $originalVisibility = ''
-$madePublic = $false
+$visibilityChanged = $false
 $runId = ''
-$ciExitCode = 1
-$finalError = $null
+$ciExitCode = $null
+$flowError = $null
+$restoreError = $null
 
 try {
-  Write-Step '检查 GitHub 登录'
+  $gh = Resolve-GhCli
+
+  Write-Step 'Checking GitHub authentication'
   & $gh auth status -h github.com *> $null
   if ($LASTEXITCODE -ne 0) {
-    Write-Host '首次运行需要登录一次 GitHub。浏览器会自动打开，登录完成后脚本继续。' -ForegroundColor Yellow
+    Write-Host 'GitHub login is required once. A browser window will open.' -ForegroundColor Yellow
     & $gh auth login --hostname github.com --git-protocol https --web
-    if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI 登录失败。' }
+    if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI login failed.' }
   }
 
-  Write-Step '检查仓库当前状态'
+  Write-Step 'Checking repository visibility'
   $originalVisibility = Get-RepoVisibility $gh
-  Write-Host "仓库：$Repository"
-  Write-Host "原始可见性：$originalVisibility"
+  Write-Host "Repository: $Repository"
+  Write-Host "Original visibility: $originalVisibility"
 
-  if ($originalVisibility -ne 'public') {
-    Write-Step '临时切换 Public，使用免费的标准 GitHub-hosted runner'
+  if ($originalVisibility -eq 'private') {
+    Write-Step 'Temporarily switching Private to Public for free GitHub-hosted Actions'
     Set-RepoVisibility $gh 'public'
-    $madePublic = $true
+    $visibilityChanged = $true
+  } elseif ($originalVisibility -eq 'public') {
+    Write-Host 'Repository is already Public. No visibility change is needed.' -ForegroundColor Green
   } else {
-    Write-Host '仓库本来就是 Public，不需要切换。' -ForegroundColor Green
+    throw "Unsupported repository visibility: $originalVisibility"
   }
 
-  Write-Step '触发最终系统回归测试'
+  Write-Step 'Starting final regression workflow'
   $beforeRunId = Get-LatestDispatchRunId $gh
   $triggerOutput = & $gh workflow run $Workflow -R $Repository --ref $Ref 2>&1
   if ($LASTEXITCODE -ne 0) {
-    throw "无法触发 workflow：$($triggerOutput -join ' ')"
+    throw "Unable to start workflow: $($triggerOutput -join ' ')"
   }
-  if ($triggerOutput) { $triggerOutput | ForEach-Object { Write-Host $_ } }
 
-  for ($i = 0; $i -lt 45; $i++) {
+  for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Seconds 2
     $candidate = Get-LatestDispatchRunId $gh
     if ($candidate -and $candidate -ne $beforeRunId) {
@@ -116,40 +120,43 @@ try {
     }
   }
   if (-not $runId) {
-    throw '已发送 workflow_dispatch，但90秒内没有找到新的 Actions Run。'
+    throw 'workflow_dispatch was sent, but no new Actions run appeared within 120 seconds.'
   }
 
-  Write-Host "Actions Run ID：$runId" -ForegroundColor Green
-  Write-Step '等待 CI 完成'
+  Write-Host "Actions Run ID: $runId" -ForegroundColor Green
+  Write-Step 'Waiting for CI to finish'
   & $gh run watch $runId -R $Repository --compact --exit-status
   $ciExitCode = $LASTEXITCODE
 
   if ($ciExitCode -eq 0) {
-    Write-Host "`n最终 CI：全部通过。" -ForegroundColor Green
+    Write-Host "`nFINAL CI RESULT: PASSED" -ForegroundColor Green
   } else {
-    Write-Host "`n最终 CI：有测试失败。下面输出失败日志。" -ForegroundColor Red
+    Write-Host "`nFINAL CI RESULT: FAILED" -ForegroundColor Red
+    Write-Host 'Failed-job log follows:' -ForegroundColor Red
     & $gh run view $runId -R $Repository --log-failed
   }
 }
 catch {
-  $finalError = $_
-  Write-Host "`n免费 CI 流程发生错误：$($_.Exception.Message)" -ForegroundColor Red
+  $flowError = $_
+  Write-Host "`nFREE CI FLOW ERROR: $($_.Exception.Message)" -ForegroundColor Red
 }
 finally {
-  if ($madePublic) {
+  if ($visibilityChanged -and $gh) {
     try {
-      Write-Step '恢复仓库 Private'
+      Write-Step 'Restoring repository to Private'
       Set-RepoVisibility $gh 'private'
-      Write-Host '仓库已恢复 Private。' -ForegroundColor Green
+      Write-Host 'Repository visibility restored to Private.' -ForegroundColor Green
     }
     catch {
-      Write-Host "严重提示：自动恢复 Private 失败：$($_.Exception.Message)" -ForegroundColor Red
-      Write-Host "请立即进入 GitHub Settings -> Danger Zone 手动改回 Private。" -ForegroundColor Red
-      if (-not $finalError) { $finalError = $_ }
+      $restoreError = $_
+      Write-Host "CRITICAL: automatic restore to Private failed: $($_.Exception.Message)" -ForegroundColor Red
+      Write-Host 'Open GitHub -> Repository Settings -> Danger Zone and set the repository to Private immediately.' -ForegroundColor Red
     }
   }
 }
 
-if ($finalError) { exit 2 }
-if ($ciExitCode -ne 0) { exit 1 }
+if ($restoreError) { exit 21 }
+if ($flowError) { exit 20 }
+if ($null -eq $ciExitCode) { exit 20 }
+if ($ciExitCode -ne 0) { exit 10 }
 exit 0
