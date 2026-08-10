@@ -13,14 +13,14 @@ function Write-Step([string]$Text) {
 
 function Resolve-GhCli {
   $command = Get-Command gh -ErrorAction SilentlyContinue
-  if ($command) { return $command.Source }
+  if ($command) { return [string]$command.Source }
 
   $candidates = @(
     "$env:ProgramFiles\GitHub CLI\gh.exe",
     "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
   )
   foreach ($candidate in $candidates) {
-    if (Test-Path $candidate) { return $candidate }
+    if (Test-Path $candidate) { return [string]$candidate }
   }
 
   $winget = Get-Command winget -ErrorAction SilentlyContinue
@@ -29,15 +29,20 @@ function Resolve-GhCli {
   }
 
   Write-Step 'First run: installing GitHub CLI'
-  & $winget.Source install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -ne 0) {
-    throw "GitHub CLI installation failed. Exit code: $LASTEXITCODE"
+  & $winget.Source install --id GitHub.cli -e --source winget --accept-package-agreements --accept-source-agreements | Out-Host
+  $installExit = $LASTEXITCODE
+  if ($installExit -ne 0) {
+    throw "GitHub CLI installation failed. Exit code: $installExit"
   }
 
+  $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  $env:Path = "$machinePath;$userPath"
+
   $command = Get-Command gh -ErrorAction SilentlyContinue
-  if ($command) { return $command.Source }
+  if ($command) { return [string]$command.Source }
   foreach ($candidate in $candidates) {
-    if (Test-Path $candidate) { return $candidate }
+    if (Test-Path $candidate) { return [string]$candidate }
   }
   throw 'GitHub CLI was installed but gh.exe is not visible in this process. Close this window and run the BAT again.'
 }
@@ -79,7 +84,7 @@ $flowError = $null
 $restoreError = $null
 
 try {
-  $gh = Resolve-GhCli
+  $gh = [string](Resolve-GhCli)
 
   Write-Step 'Checking GitHub authentication'
   & $gh auth status -h github.com *> $null
