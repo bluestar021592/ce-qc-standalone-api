@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import XLSX from 'xlsx';
 import { parseUnifiedDailyExcel } from '../src/unifiedExcelParser.js';
@@ -21,6 +22,14 @@ function parseRows(rows) {
   try { return parseUnifiedDailyExcel(file, { reportDate: '2026-08-10', originalName: path.basename(file) }); }
   finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
+
+test('WHPP runtime integration files pass node syntax checks', () => {
+  for (const relative of ['src/whppAnalyzer.js','src/whppReporting.js','src/whppStore.js','src/whppPipeline.js','src/v42WhppPatch.js','public/whpp-v42.js']) {
+    const file = path.resolve(relative);
+    const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+    assert.equal(result.status, 0, `${relative} syntax failed:\n${result.stderr || result.stdout}`);
+  }
+});
 
 test('daily import classifies CC as CE and CE as WHPP after explicit business overrides', () => {
   const parsed = parseRows([
