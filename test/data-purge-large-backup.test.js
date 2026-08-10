@@ -41,7 +41,14 @@ test('verified backup gates transactional business purge and preserves system ta
     VALUES('CC-TEST-1','CE','2026-08-05','snapshot-1','PENDING','{}','2026-08-05T00:00:00Z')`).run();
   db.prepare(`INSERT INTO carryover_open_items(shipmentCode,businessType,sourceReportDate,lastReportDate,sourceSnapshotId,lastSnapshotId,status,stateJson,createdAt,updatedAt)
     VALUES('CC-TEST-1','CE','2026-08-05','2026-08-05','snapshot-1','snapshot-1','OPEN','{}','2026-08-05T00:00:00Z','2026-08-05T00:00:00Z')`).run();
+  const schemaBefore = Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0);
+  assert.equal(schemaBefore, 18);
+
   const challenge = await createPurgeChallenge({ email: 'test-admin' });
+  const manifestPath = path.join(path.dirname(challenge.backup.path), 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  assert.equal(manifest.migrationVersion, 18);
+
   await new Promise(resolve => setTimeout(resolve, 5100));
   const result = await executePurge({ challengeId: challenge.challengeId, phrase: PURGE_PHRASE, backupConfirmed: true, user: { email: 'test-admin' } });
   assert.ok(result.before.daily_reports >= 1);
@@ -56,5 +63,7 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(result.integrity, 'ok');
   assert.equal(result.walCheckpoint, 'TRUNCATE');
   assert.ok(db.prepare('SELECT COUNT(*) count FROM backup_records').get().count >= 1);
+  assert.equal(Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0), 18);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
 });
