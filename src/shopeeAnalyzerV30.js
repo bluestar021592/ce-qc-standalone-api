@@ -23,7 +23,7 @@ const TRACK = Object.freeze({
 
 const CYCLE_CODES = new Set([TRACK.CYCLE_A, TRACK.CYCLE_B]);
 const BUSINESS_PROGRESS_CODES = new Set([
-  TRACK.INBOUND_NO_SCAN,
+  TRACK.PICKUP_SUCCESS,
   TRACK.CYCLE_A,
   TRACK.CYCLE_B,
   TRACK.WORK_ORDER,
@@ -99,10 +99,6 @@ export function analyzeShopeeShipment(args = {}) {
     category = special.category;
     currentState = special.specialState || 'SPECIAL_NORMAL';
     qc = `${category}，按特殊正常去向监管`;
-  } else if (unknownShopCode) {
-    category = '未知门店编码';
-    currentState = 'UNKNOWN_SHOP_CODE';
-    qc = `最新结构化门店编码\${unknownShopCode}未命中95码白名单，禁止按名称猜测，需人工确认`;
   } else if (unknownShopCode) {
     category = '未知门店编码';
     currentState = 'UNKNOWN_SHOP_CODE';
