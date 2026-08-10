@@ -23,6 +23,18 @@ test('V18 missing trend dates remain null and last value ignores gaps', () => {
   assert.equal(adapter.last(values), 12);
 });
 
+test('V18 home preserves all seven business cards including ALI1688', () => {
+  const adapter = loadAdapter();
+  const businessCards = [
+    ['total','总览',9540], ['ce','CE',2781], ['ceaf','CEAF空运',0], ['tbkh','TBKH',2067],
+    ['shopeecn','SHOPEE CN',0], ['shopeevn','SHOPEE VN',4457], ['ali1688','ALI1688',235]
+  ].map(([key,label,value]) => ({ key, label, value }));
+  const model = adapter.mapSnapshotToDashboardModel({ businessCards, coreMetrics: [], topKpis: [] }, false);
+  assert.equal(model.cards.length, 7);
+  assert.equal(model.cards.at(-1).key, 'ali1688');
+  assert.equal(model.cards.at(-1).value, 235);
+});
+
 test('V18 uses independent component files and clips chart drawing', () => {
   const html = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8');
   const chart = fs.readFileSync(path.join(publicDir, 'dashboard-chart-v18.js'), 'utf8');
