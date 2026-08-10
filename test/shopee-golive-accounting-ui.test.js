@@ -58,3 +58,20 @@ test('only the trend mount fix owns Shopee 1/2/3 attempt trend panel creation', 
   assert.match(trendMount, /id='v27ForcedAttemptTrend'/);
   assert.match(trendMount, /<h2>1\/2\/3派成功率趋势<\/h2>/);
 });
+
+test('fast range dashboard and attempt trend both fall back from podAttemptNo to persisted POD timestamp', () => {
+  const facade = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStore.js'), 'utf8');
+  const v33 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV33.js'), 'utf8');
+  const trend = fs.readFileSync(path.join(root, 'src', 'v27TrendPatch.js'), 'utf8');
+  assert.match(facade, /rangeDashboardStoreV33\.js/);
+  for (const source of [v33, trend]) {
+    assert.match(source, /podAttemptNo/);
+    assert.match(source, /POD时间/);
+    assert.match(source, /podTime/);
+    assert.match(source, /terminalObservedAt/);
+    assert.match(source, /julianday/);
+    assert.match(source, /attemptDay/);
+  }
+  assert.match(v33, /dispatchAttemptUnclassifiedPod/);
+  assert.match(trend, /attemptUnknownPod/);
+});
