@@ -2,7 +2,7 @@ import { getDb } from './db.js';
 import { loadRangeDashboard as loadRangeDashboardV36 } from './rangeDashboardStoreV36.js';
 import { classifyFinalRoutingDestination, ROUTING_DESTINATIONS } from './routingDestinationV48.js';
 
-const PATCH_ID = '2026-08-11-v55-dashboard-reconciliation-v1';
+const PATCH_ID = '2026-08-11-v55-dashboard-reconciliation-v2';
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
 
@@ -136,10 +136,11 @@ function patchShopeeState(state, rows) {
 }
 
 function ccslDetails(rows) {
-  const pod=rows.filter(isPod), returned=rows.filter(isReturned), open=rows.filter(isGenuineOpen), abnormal=open.filter(isActionableAbnormal);
+  const pod=rows.filter(isPod), returned=rows.filter(isReturned), open=rows.filter(isGenuineOpen), abnormal=rows.filter(isActionableAbnormal);
   const cn=rows.filter(r=>!isTerminal(r)&&destination(r)===ROUTING_DESTINATIONS.CCSLCN);
   const zt=rows.filter(r=>!isTerminal(r)&&destination(r)===ROUTING_DESTINATIONS.CCSLZT);
   const r580=rows.filter(r=>!isTerminal(r)&&destination(r)===ROUTING_DESTINATIONS.CCSL580);
+  const ppShop=rows.filter(isPhnomPenhShop), pvShop=rows.filter(isProvinceShop);
   return {
     allData:tab('全部数据',rows),podClosed:tab('签收件数',pod),accountingReturned:tab('已退回件',returned),accountingOpen:tab('当前未闭环',open),unresolved:tab('未闭环',open),ordinaryOpen:tab('未闭环',open),
     coreAbnormal:tab('遗留异常',abnormal),abnormal:tab('遗留异常',abnormal),severeAbnormal:tab('严重异常',abnormal.filter(isSevere)),
@@ -147,17 +148,18 @@ function ccslDetails(rows) {
     ocAll:tab('OC1+',open.filter(r=>ocDays(r)>=1)),oc2plus:tab('OC2+',open.filter(r=>ocDays(r)>=2)),oc3:tab('OC3+',open.filter(r=>ocDays(r)>=3)),
     cycle2:tab('盘点2天+',open.filter(r=>cycleDays(r)>=2)),cycle2plus:tab('盘点2天+',open.filter(r=>cycleDays(r)>=2)),inboundNoScan:tab('入库无扫描',open.filter(isInboundNoScan)),workOrderAbnormal:tab('工单未处理',open.filter(isWorkOrder)),
     provinceOpen:tab('外省未完结POD件',rows.filter(isProvinceOpen)),selfPickup:tab('仓库自提件',rows.filter(r=>!isTerminal(r)&&isSelfPickup(r))),
+    returnInProgress:tab('退回处理中',rows.filter(isReturnInProgress)),normalOperationalOpen:tab('正常流转',rows.filter(isNormalOperationalOpen)),cancelled:tab('订单取消',rows.filter(isCancelled)),
     cecnRetention:tab('CCSLCN分流',cn),ccslCnDiversion:tab('CCSLCN分流',cn),ceztRetention:tab('CCSLZT分流',zt),ccslZtDiversion:tab('CCSLZT分流',zt),ccsl580Retention:tab('580滞留包裹',r580),ccsl580Diversion:tab('580滞留包裹',r580),
-    phnomPenhShop:tab('金边门店',rows.filter(isPhnomPenhShop)),provinceShop:tab('外省门店',rows.filter(isProvinceShop)),
-    shopTransit:tab('门店途中',open.filter(r=>r.shopState==='SHOP_TRANSFER_IN_PROGRESS')),shopArrived:tab('门店入库',open.filter(r=>r.shopState==='SHOP_ARRIVED_CURRENT')),shopStuck:tab('门店滞留',open.filter(r=>r.shopState==='SHOP_ARRIVED_CURRENT'&&num(r.shopRetentionNaturalDays)>=2)),
+    phnomPenhShop:tab('金边门店',ppShop),provinceShop:tab('外省门店',pvShop),
+    shopTransit:tab('门店途中',rows.filter(r=>!isTerminal(r)&&r.shopState==='SHOP_TRANSFER_IN_PROGRESS')),shopArrived:tab('门店入库',rows.filter(r=>!isTerminal(r)&&r.shopState==='SHOP_ARRIVED_CURRENT')),shopStuck:tab('门店滞留',rows.filter(r=>!isTerminal(r)&&r.shopState==='SHOP_ARRIVED_CURRENT'&&num(r.shopRetentionNaturalDays)>=2&&!isStorePendingOrOc(r))),
     accountingDifference:tab('对账差异',[])
   };
 }
 
 function shopeeDetails(rows) {
-  const open=rows.filter(isGenuineOpen);
+  const open=rows.filter(isGenuineOpen), abnormal=rows.filter(isActionableAbnormal);
   return {
-    all:tab('全部数据',rows),pod:tab('今日POD',rows.filter(isPod)),returned:tab('已退回件',rows.filter(isReturned)),unresolved:tab('当前未闭环',open),abnormal:tab('当前异常',open.filter(isActionableAbnormal)),
+    all:tab('全部数据',rows),pod:tab('今日POD',rows.filter(isPod)),returned:tab('已退回件',rows.filter(isReturned)),unresolved:tab('当前未闭环',open),abnormal:tab('当前异常',abnormal),
     pending1:tab('Pending1+',open.filter(r=>pendingDays(r)>=1)),pending2:tab('Pending2+',open.filter(r=>pendingDays(r)>=2)),pending3:tab('Pending3+',open.filter(r=>pendingDays(r)>=3)),pendingNonContinuous:tab('Pending不连续',open.filter(isPendingNonContinuous)),
     oc1:tab('OC1+',open.filter(r=>ocDays(r)>=1)),oc2:tab('OC2+',open.filter(r=>ocDays(r)>=2)),oc3:tab('OC3+',open.filter(r=>ocDays(r)>=3)),cycle2:tab('盘点2天+',open.filter(r=>cycleDays(r)>=2)),inboundNoScan:tab('入库无扫描',open.filter(isInboundNoScan)),
     deliveryStay:tab('派送中',open.filter(r=>deliveryDays(r)>0||/派送中/.test(category(r)))),returnRequired:tab('退回待处理',open.filter(r=>r.退回待处理==='是'||/三次Pending后/.test(category(r)))),
@@ -167,10 +169,10 @@ function shopeeDetails(rows) {
 
 function ccslSummary(rows,d=ccslDetails(rows)) {
   const total=rows.length,pod=d.podClosed.total,returned=d.accountingReturned.total,open=d.accountingOpen.total;
-  const normal=d.ccslCnDiversion.total+d.ccslZtDiversion.total+d.ccsl580Retention.total+d.phnomPenhShop.total+d.selfPickup.total;
+  const normal=d.ccslCnDiversion.total+d.ccslZtDiversion.total+d.ccsl580Retention.total+d.phnomPenhShop.total+d.provinceShop.total+d.selfPickup.total+d.returnInProgress.total+d.normalOperationalOpen.total+d.cancelled.total;
   return { total,pod,podRate:rate(pod,total),returned,returnRate:rate(returned,total),open,unresolved:open,abnormal:d.coreAbnormal.total,accountingDifference:Math.max(0,total-pod-returned-normal-open),
     pending1:d.pendingAll.total,pending2:d.pending2plus.total,pending3:d.pending3.total,pendingNonContinuous:d.pendingNonContinuous.total,oc1:d.ocAll.total,oc2:d.oc2plus.total,oc3:d.oc3.total,cycle2:d.cycle2.total,inboundNoScan:d.inboundNoScan.total,workOrder:d.workOrderAbnormal.total,
-    provinceOpen:d.provinceOpen.total,ccslCnDiversion:d.ccslCnDiversion.total,ccslZtDiversion:d.ccslZtDiversion.total,ccsl580Retention:d.ccsl580Retention.total,phnomPenhShop:d.phnomPenhShop.total,provinceShop:d.provinceShop.total,selfPickup:d.selfPickup.total,normalDestination:normal,accounted:pod+returned+normal+open };
+    provinceOpen:d.provinceOpen.total,ccslCnDiversion:d.ccslCnDiversion.total,ccslZtDiversion:d.ccslZtDiversion.total,ccsl580Retention:d.ccsl580Retention.total,phnomPenhShop:d.phnomPenhShop.total,provinceShop:d.provinceShop.total,selfPickup:d.selfPickup.total,returnInProgress:d.returnInProgress.total,normalOperationalOpen:d.normalOperationalOpen.total,cancelled:d.cancelled.total,normalDestination:normal,accounted:pod+returned+normal+open };
 }
 
 function shopeeSummary(rows) {
@@ -202,10 +204,10 @@ function patchDashboardRows(rows,s) {
 }
 function upsert(rows,label,value,tabName){let r=rows.find(x=>String(x?.项目||x?.metricKey||'')===label);if(!r){r={日期:rows[0]?.日期||'',项目:label,metricKey:label};rows.push(r);}Object.assign(r,{项目:label,metricKey:label,数值:num(value),数值原值:num(value),明细Tab:tabName,状态:num(value)>0?'需跟进':'正常'});}
 
-function isGenuineOpen(r){return !isTerminal(r)&&!destination(r)&&!isSelfPickup(r)&&!isPhnomPenhShop(r);}
-function isProvinceOpen(r){return isGenuineOpen(r)&&physicalLocation(r)!=='PHNOM_PENH'&&(region(r.regionCode||r.区域)==='PV'||physicalLocation(r)==='PROVINCE');}
-function isPhnomPenhShop(r){return !isTerminal(r)&&!destination(r)&&isActiveShop(r)&&physicalLocation(r)==='PHNOM_PENH';}
-function isProvinceShop(r){return !isTerminal(r)&&!destination(r)&&((isActiveShop(r)&&physicalLocation(r)==='PROVINCE')||explicitProvinceShop(r));}
+function isGenuineOpen(r){return !isTerminal(r)&&!destination(r)&&!isSelfPickup(r)&&!isReturnInProgress(r)&&!isNormalOperationalOpen(r)&&!isActiveShop(r);}
+function isProvinceOpen(r){return !isTerminal(r)&&!destination(r)&&!isSelfPickup(r)&&!isReturnInProgress(r)&&physicalLocation(r)!=='PHNOM_PENH'&&(region(r.regionCode||r.区域)==='PV'||physicalLocation(r)==='PROVINCE');}
+function isPhnomPenhShop(r){return !isTerminal(r)&&!destination(r)&&!isReturnInProgress(r)&&!isNormalOperationalOpen(r)&&isActiveShop(r)&&physicalLocation(r)==='PHNOM_PENH';}
+function isProvinceShop(r){return !isTerminal(r)&&!destination(r)&&!isReturnInProgress(r)&&!isNormalOperationalOpen(r)&&((isActiveShop(r)&&physicalLocation(r)==='PROVINCE')||explicitProvinceShop(r));}
 function explicitProvinceShop(r){return /\bSHV(?:\s*SHOP)?\b|SIHANOUK|PREAH\s*SIHANOUK|西港|CCSL[_:\s-]*PV[_:\s-]*CENS|(?:^|[^A-Z0-9])PV\d{3}(?!\d)/i.test(locationText(r));}
 function physicalLocation(r){const t=locationText(r).toUpperCase();if(/\bSHV(?:\s*SHOP)?\b|SIHANOUK|PREAH\s*SIHANOUK|西港|CCSL[_:\s-]*PV[_:\s-]*CENS|(?:^|[^A-Z0-9])PV\d{3}(?!\d)/.test(t))return'PROVINCE';if(/PHNOM\s*PENH|金边|CCSL[_:\s-]*PP|(?:^|[^A-Z0-9])PNH\d{3}(?!\d)/.test(t))return'PHNOM_PENH';if(isActiveShop(r)){const x=region(r.regionCode||r.区域);if(x==='PP')return'PHNOM_PENH';if(x==='PV')return'PROVINCE';}return'UNKNOWN';}
 function locationText(r={}){return[r.latestEffectiveTargetNodeCode,r.latestEffectiveTargetNode,r.latestTargetNodeCode,r.latestTargetNode,r.latestNodeCode,r.latestNode,r.最后节点编码,r.最后节点,r.lastEventDesc,r.latestEventDesc,r.最新节点,r.targetShopCode,r.currentShopCode,r.shopName,r.eventShop,r.locationCode,r.place,r.shopState].filter(Boolean).join(' ');}
@@ -215,8 +217,22 @@ function isTerminal(r){return isPod(r)||isReturned(r)||isCancelled(r);}
 function isPod(r){return num(r.isPod)===1||r.是否POD==='是'||r.POD状态==='POD'||state(r)==='POD'||String(r.orderStatus??r.scanOrderStatus??'')==='85';}
 function isReturned(r){return r.退回状态==='已退回'||['RETURNED','RETURN_COMPLETED'].includes(state(r))||String(r.orderStatus??r.scanOrderStatus??'')==='100'||category(r)==='退回';}
 function isCancelled(r){return r.订单取消==='是'||r.取消状态==='已取消'||state(r)==='ORDER_CANCELLED'||String(r.orderStatus??r.scanOrderStatus??'')==='10';}
+function isReturnInProgress(r){return r.退回状态==='退回处理中'||state(r)==='RETURN_IN_PROGRESS'||category(r)==='退回处理中';}
+function isNormalOperationalOpen(r){const s=state(r),c=category(r).toUpperCase();return s==='PICKUP_SUCCESS'||c==='正常流转'||c==='PICKUP_SUCCESS';}
 function isSelfPickup(r){return String(r.specialState||'').toUpperCase()==='SELF_PICKUP'||/^(?:仓库自提|自提)$/.test(category(r));}
-function isActionableAbnormal(r){if(!isGenuineOpen(r))return false;if(isProvinceOpen(r)||pendingDays(r)>0||ocDays(r)>0||cycleDays(r)>0||deliveryDays(r)>0||isInboundNoScan(r)||isWorkOrder(r)||isPendingNonContinuous(r))return true;const c=category(r);return Boolean(c&&!/^(?:正常流转|PICKUP_SUCCESS|派送中|待派送|正常)$/.test(c));}
+function isStorePendingOrOc(r){const s=state(r),c=category(r);return ['SHOP_PENDING','SHOP_OC'].includes(s)||['门店Pending','门店OC'].includes(c);}
+function shopTransferDays(r){return num(r.shopTransferNaturalDays??r.门店途中天数);}
+function isActionableAbnormal(r){
+  if(isTerminal(r)||destination(r)||isSelfPickup(r)||isReturnInProgress(r)||isNormalOperationalOpen(r))return false;
+  if(isActiveShop(r)){
+    if(isStorePendingOrOc(r))return false;
+    if(String(r.shopState||'')==='SHOP_TRANSFER_IN_PROGRESS')return shopTransferDays(r)>=2;
+    if(String(r.shopState||'')==='SHOP_ARRIVED_CURRENT')return num(r.shopRetentionNaturalDays)>=2;
+    return false;
+  }
+  if(pendingDays(r)>0||ocDays(r)>0||cycleDays(r)>0||deliveryDays(r)>0||isInboundNoScan(r)||isWorkOrder(r)||isPendingNonContinuous(r))return true;
+  const c=category(r);return Boolean(c&&!/^(?:正常流转|PICKUP_SUCCESS|派送中|待派送|正常)$/.test(c));
+}
 function isSevere(r){return /SEVERE|CRITICAL|严重/.test(`${category(r)} ${r.severity||r.严重等级||''}`)||Math.max(pendingDays(r),ocDays(r),cycleDays(r),num(r.节点未更新天数))>=3;}
 function isPendingNonContinuous(r){return r.Pending不连续==='是'||/不连续/.test(String(r.pendingContinuity||r.pendingFactDateContinuity||r.Pending事实连续性||r.Pending连续性||''));}
 function isInboundNoScan(r){return r.入库无扫描节点==='是'||/入库无扫描/.test(category(r));}
