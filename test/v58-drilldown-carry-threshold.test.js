@@ -21,7 +21,8 @@ test('V58 excludes CEZT CCSLCN CCSL580 normal registration destinations from car
   assert.match(source,/classifyFinalRoutingDestination\(row\)\.destination/);
   assert.match(source,/CCSLCN_DIVERSION/);
   assert.match(source,/CCSLZT_DIVERSION/);
-  assert.match(source,/CCSL580_\(\?:RETENTION\|DIVERSION\)/);
+  assert.ok(source.includes('CCSL580_(?:RETENTION|DIVERSION)'));
+  assert.match(source,/登记状态:'正常登记'/);
 });
 
 test('V58 becomes the compact dashboard and metric-detail source of truth',()=>{
