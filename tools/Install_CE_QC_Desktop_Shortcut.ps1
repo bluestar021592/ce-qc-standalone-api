@@ -1,16 +1,17 @@
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$ProjectIcon = Join-Path $ProjectRoot 'assets\CE_QC_APP.ico'
-if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'Start_CE_QC.cmd'))) {
-  throw "CE QC project launcher not found: $ProjectRoot"
+$ProjectLauncher = Join-Path $ProjectRoot 'Start_CE_QC.ps1'
+$IconSourceB64 = Join-Path $ProjectRoot 'assets\CE_EXPRESS_DESKTOP_V4.ico.b64'
+if (-not (Test-Path -LiteralPath $ProjectLauncher)) {
+  throw "CE QC project launcher not found: $ProjectLauncher"
+}
+if (-not (Test-Path -LiteralPath $IconSourceB64)) {
+  throw "CE EXPRESS icon source not found: $IconSourceB64"
 }
 
 $Shell = New-Object -ComObject WScript.Shell
 
-# Resolve every plausible Desktop location. Some Windows installations redirect
-# Desktop through OneDrive or the User Shell Folders registry value, so relying on
-# only %USERPROFILE%\Desktop can leave an old VBS shortcut visible.
 $DesktopCandidates = New-Object System.Collections.Generic.List[string]
 function Add-DesktopCandidate([string]$Path) {
   if ([string]::IsNullOrWhiteSpace($Path)) { return }
@@ -35,17 +36,16 @@ if (-not $Desktop) {
   Add-DesktopCandidate $Desktop
 }
 
-# Never store the Unicode project path inside the desktop shortcut. The launcher
-# lives under an ASCII-only LocalAppData path and reaches the source tree through
-# a directory junction.
+# Keep the complete desktop launch chain in an ASCII-only location.
 $LauncherRoot = Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER'
 $AppLink = Join-Path $LauncherRoot 'app'
 $LauncherPs1 = Join-Path $LauncherRoot 'Launch_CE_QC.ps1'
-$LauncherCmd = Join-Path $LauncherRoot 'Launch_CE_QC.cmd'
-$LauncherIcon = Join-Path $LauncherRoot 'CE_EXPRESS_APP.ico'
-
+$LauncherLog = Join-Path $LauncherRoot 'launcher_latest.log'
+$LauncherIcon = Join-Path $LauncherRoot 'CE_EXPRESS_APP_V4.ico'
 New-Item -ItemType Directory -Path $LauncherRoot -Force | Out-Null
 
+# Rebuild the project bridge. The real source tree can stay in the Chinese path,
+# while every process launched by the desktop shortcut sees the ASCII junction.
 if (Test-Path -LiteralPath $AppLink) {
   $existing = Get-Item -LiteralPath $AppLink -Force
   if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) {
@@ -56,57 +56,125 @@ if (Test-Path -LiteralPath $AppLink) {
 }
 New-Item -ItemType Junction -Path $AppLink -Target $ProjectRoot | Out-Null
 
-if (Test-Path -LiteralPath $ProjectIcon) {
-  Copy-Item -LiteralPath $ProjectIcon -Destination $LauncherIcon -Force
+# The repository stores the exact user-provided 256px CE EXPRESS artwork as
+# base64 PNG text. Wrap that PNG in a valid single-frame ICO container so Explorer
+# always gets the exact artwork and a NEW icon path, bypassing the stale icon cache.
+$pngB64 = (Get-Content -LiteralPath $IconSourceB64 -Raw -ErrorAction Stop) -replace '\s',''
+$pngBytes = [Convert]::FromBase64String($pngB64)
+$stream = New-Object IO.MemoryStream
+$writer = New-Object IO.BinaryWriter($stream)
+try {
+  $writer.Write([UInt16]0)      # reserved
+  $writer.Write([UInt16]1)      # icon
+  $writer.Write([UInt16]1)      # one image
+  $writer.Write([byte]0)        # width 256
+  $writer.Write([byte]0)        # height 256
+  $writer.Write([byte]0)        # palette
+  $writer.Write([byte]0)        # reserved
+  $writer.Write([UInt16]1)      # planes
+  $writer.Write([UInt16]32)     # bit depth
+  $writer.Write([UInt32]$pngBytes.Length)
+  $writer.Write([UInt32]22)     # image offset
+  $writer.Write($pngBytes)
+  $writer.Flush()
+  [IO.File]::WriteAllBytes($LauncherIcon, $stream.ToArray())
+}
+finally {
+  $writer.Dispose()
+  $stream.Dispose()
 }
 
 $LauncherPs1Content = @'
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
 $url = 'http://127.0.0.1:5177/'
+$launcherRoot = $PSScriptRoot
+$logFile = Join-Path $launcherRoot 'launcher_latest.log'
 
-# Fast path: if CE QC is already running, open it immediately.
-try {
-  $response = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 1
-  if ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) {
-    Start-Process $url
-    exit 0
-  }
-} catch {}
-
-# Cold start through the ASCII junction path.
-$appRoot = Join-Path $PSScriptRoot 'app'
-$cmd = Join-Path $appRoot 'Start_CE_QC.cmd'
-if (-not (Test-Path -LiteralPath $cmd)) {
-  Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
-  try { [System.Windows.MessageBox]::Show('CE QC launcher is missing. Please reinstall the desktop shortcut.','CE QC') | Out-Null } catch {}
-  exit 2
+function Write-LauncherLog([string]$Text) {
+  try {
+    $line = ('{0:yyyy-MM-dd HH:mm:ss.fff} {1}' -f (Get-Date), $Text)
+    Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
+  } catch {}
 }
 
-Start-Process -FilePath $cmd -WorkingDirectory $appRoot -WindowStyle Hidden
-exit 0
+function Test-CeQcReady {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 2
+    return ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500)
+  } catch {
+    try {
+      if ($_.Exception.Response) {
+        $status = [int]$_.Exception.Response.StatusCode
+        return ($status -ge 200 -and $status -lt 500)
+      }
+    } catch {}
+    return $false
+  }
+}
+
+function Show-LauncherError([string]$Message) {
+  Write-LauncherLog ('ERROR ' + $Message)
+  try {
+    Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
+    [System.Windows.MessageBox]::Show($Message, 'CE QC APP') | Out-Null
+  } catch {}
+}
+
+try {
+  Remove-Item -LiteralPath $logFile -Force -ErrorAction SilentlyContinue
+  Write-LauncherLog 'Desktop launcher started.'
+
+  if (Test-CeQcReady) {
+    Write-LauncherLog 'Backend already ready. Opening browser.'
+    Start-Process $url | Out-Null
+    exit 0
+  }
+
+  $appRoot = Join-Path $launcherRoot 'app'
+  $supervisor = Join-Path $appRoot 'Start_CE_QC.ps1'
+  if (-not (Test-Path -LiteralPath $supervisor)) {
+    Show-LauncherError 'CE QC startup file is missing. Please reinstall the desktop launcher.'
+    exit 2
+  }
+
+  $powerShellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  if (-not (Test-Path -LiteralPath $powerShellExe)) {
+    Show-LauncherError 'Windows PowerShell was not found.'
+    exit 3
+  }
+
+  Write-LauncherLog ('Starting hidden supervisor: ' + $supervisor)
+  Start-Process -FilePath $powerShellExe `
+    -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $supervisor + '"')) `
+    -WorkingDirectory $appRoot `
+    -WindowStyle Hidden | Out-Null
+
+  # Start_CE_QC.ps1 verifies the backend and opens the browser itself when ready.
+  # This launcher can safely exit immediately; the hidden supervisor remains alive.
+  Write-LauncherLog 'Hidden supervisor process created successfully.'
+  exit 0
+}
+catch {
+  Show-LauncherError ('CE QC could not start: ' + $_.Exception.Message + "`n`nLog: " + $logFile)
+  exit 10
+}
 '@
 [IO.File]::WriteAllText($LauncherPs1, $LauncherPs1Content, (New-Object Text.UTF8Encoding($false)))
 
-$LauncherCmdContent = @'
-@echo off
-start "" /b powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0Launch_CE_QC.ps1"
-exit /b 0
-'@
-[IO.File]::WriteAllText($LauncherCmd, $LauncherCmdContent, [Text.Encoding]::ASCII)
+# Remove obsolete launcher files from LocalAppData as well as stale desktop links.
+Remove-Item -LiteralPath (Join-Path $LauncherRoot 'Launch_CE_QC.cmd') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $LauncherRoot 'Launch_CE_QC.vbs') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $LauncherRoot 'CE_EXPRESS_APP.ico') -Force -ErrorAction SilentlyContinue
 
-# Aggressively remove stale CE QC shortcuts, including old shortcuts with custom
-# names whose hidden target/arguments still reference Start_CE_QC_Auto.vbs.
 $OldNames = @(
   'CE_QC_APP.lnk','CE_QC_APP.vbs','CE_QC_APP.cmd','CE_QC_APP_START_INSTALLING.lnk',
   'CE QC APP.lnk','CE QC APP.vbs','CE QC APP.cmd','CE EXPRESS QC.lnk'
 )
 foreach ($desk in ($DesktopCandidates | Select-Object -Unique)) {
   if (-not $desk -or -not (Test-Path -LiteralPath $desk)) { continue }
-
   foreach ($name in $OldNames) {
     Remove-Item -LiteralPath (Join-Path $desk $name) -Force -ErrorAction SilentlyContinue
   }
-
   Get-ChildItem -LiteralPath $desk -Filter '*.lnk' -File -ErrorAction SilentlyContinue | ForEach-Object {
     try {
       $candidate = $Shell.CreateShortcut($_.FullName)
@@ -120,56 +188,59 @@ foreach ($desk in ($DesktopCandidates | Select-Object -Unique)) {
   }
 }
 
-# Create ONE new shortcut. Its target is an ASCII .cmd file with no arguments,
-# so Windows Script Host is no longer part of the launch path at all.
+# Direct PowerShell shortcut: no CMD console window, no VBS/Windows Script Host,
+# and no Unicode project path is stored in the .lnk file.
+$PowerShellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+if (-not (Test-Path -LiteralPath $PowerShellExe)) { throw 'powershell.exe was not found.' }
+
 $ShortcutPath = Join-Path $Desktop 'CE QC APP.lnk'
 $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $LauncherCmd
-$Shortcut.Arguments = ''
+$Shortcut.TargetPath = $PowerShellExe
+$Shortcut.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $LauncherPs1 + '"'
 $Shortcut.WorkingDirectory = $LauncherRoot
 $Shortcut.Description = 'CE Express Quality Control APP - one click start'
 $Shortcut.WindowStyle = 7
-if (Test-Path -LiteralPath $LauncherIcon) {
-  $Shortcut.IconLocation = $LauncherIcon + ',0'
-}
+$Shortcut.IconLocation = $LauncherIcon + ',0'
 $Shortcut.Save()
 
 if (-not (Test-Path -LiteralPath $ShortcutPath)) {
   throw "Desktop shortcut was not created: $ShortcutPath"
 }
-
 $Saved = $Shell.CreateShortcut($ShortcutPath)
-if ([string]$Saved.TargetPath -ne [string]$LauncherCmd) {
+if ([string]$Saved.TargetPath -ne [string]$PowerShellExe) {
   throw "Shortcut target verification failed: $($Saved.TargetPath)"
 }
-if (-not [string]::IsNullOrWhiteSpace([string]$Saved.Arguments)) {
-  throw "Shortcut arguments must be empty: $($Saved.Arguments)"
+if ([string]$Saved.Arguments -notlike '*CE_QC_LAUNCHER*Launch_CE_QC.ps1*') {
+  throw "Shortcut arguments verification failed: $($Saved.Arguments)"
 }
-if ([string]$Saved.TargetPath -like "*$ProjectRoot*") {
+if ([string]$Saved.TargetPath -like "*$ProjectRoot*" -or [string]$Saved.Arguments -like "*$ProjectRoot*") {
   throw 'Shortcut still contains the Unicode project path; installation aborted.'
 }
-if ((Test-Path -LiteralPath $LauncherIcon) -and ([string]$Saved.IconLocation -notlike '*CE_EXPRESS_APP.ico*')) {
+if ([string]$Saved.IconLocation -notlike '*CE_EXPRESS_APP_V4.ico*') {
   throw "Shortcut icon verification failed: $($Saved.IconLocation)"
 }
 
-# Refresh Explorer icon presentation.
+# Force Explorer to notice the new V4 icon path.
 try {
   $Ie4uinit = Join-Path $env:WINDIR 'System32\ie4uinit.exe'
   if (Test-Path -LiteralPath $Ie4uinit) {
+    Start-Process -FilePath $Ie4uinit -ArgumentList '-ClearIconCache' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    Start-Sleep -Milliseconds 300
     Start-Process -FilePath $Ie4uinit -ArgumentList '-show' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
   }
 } catch {}
 
 Write-Host ''
 Write-Host '====================================================' -ForegroundColor Cyan
-Write-Host 'CE QC desktop launcher installed successfully.' -ForegroundColor Green
+Write-Host 'CE QC desktop launcher V4 installed successfully.' -ForegroundColor Green
 Write-Host '====================================================' -ForegroundColor Cyan
 Write-Host "Desktop:          $Desktop"
 Write-Host "Shortcut:         $ShortcutPath"
-Write-Host "Shortcut target:  $LauncherCmd"
+Write-Host "Shortcut target:  $PowerShellExe"
+Write-Host "Hidden launcher:  $LauncherPs1"
 Write-Host "Project bridge:   $AppLink"
-if (Test-Path -LiteralPath $LauncherIcon) { Write-Host "CE EXPRESS icon:  $LauncherIcon" -ForegroundColor Green }
+Write-Host "CE EXPRESS icon:  $LauncherIcon" -ForegroundColor Green
 Write-Host ''
-Write-Host 'IMPORTANT: old VBS shortcuts were removed.' -ForegroundColor Yellow
+Write-Host 'NO CMD window. NO VBS. NO Windows Script Host.' -ForegroundColor Yellow
 Write-Host 'Daily use: double-click CE QC APP.' -ForegroundColor Yellow
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 2
