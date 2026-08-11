@@ -64,7 +64,7 @@ test('V55 UI directly owns the real V18 drilldown entry points',()=>{
   assert.match(ui,/global\.openV18MetricDetail=function v55OpenV18MetricDetail/);
   assert.match(ui,/global\.openMetricDetail=function v55OpenMetricDetail/);
   assert.match(ui,/\/api\/v55\/metric-detail/);
-  for(const label of ['CCSLCN分流','CCSLZT分流','580滞留包裹','金边门店','外省门店','外省未完结POD件','当前未闭环'])assert.match(ui,new RegExp(label));
+  for(const label of ['CCSLCN','CEZT','CCSL580','金边门店','外省门店','外省未完结POD件','当前未闭环'])assert.match(ui,new RegExp(label));
 });
 
 test('V55 UI reconciles legacy top cards from the authoritative V55 summary endpoint',()=>{
@@ -72,8 +72,9 @@ test('V55 UI reconciles legacy top cards from the authoritative V55 summary endp
   assert.match(ui,/\/api\/v55\/reconciliation/);
   assert.match(ui,/syncVisibleBusinessPage/);
   assert.match(ui,/'当前未闭环':s\.open/);
-  assert.match(ui,/'CCSLCN分流':s\.ccslCnDiversion/);
+  assert.match(ui,/'CCSLCN':s\.ccslCnDiversion/);
   assert.match(ui,/ensureCoreCard\(grid,type,label/);
+  assert.match(ui,/dedupeCoreCards/);
   assert.match(ui,/MutationObserver/);
   assert.match(ui,/function setText\(node,text\)/);
   assert.match(ui,/record\.addedNodes/);
@@ -103,7 +104,7 @@ test('V57 trend truth actively blocks fake seven-day charts when history is insu
 
 test('V55 and V57 are injected after previous dashboard compatibility scripts with fresh cache keys',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-4/);
+  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-5/);
   assert.match(injector,/v55-home-drilldown\.js/);
   assert.match(injector,/v56-trend-truth\.js\?v=20260811-2/);
   assert.ok(injector.indexOf('v55-dashboard-reconciliation.js')>injector.indexOf('v50-dashboard-source-truth.js'));
