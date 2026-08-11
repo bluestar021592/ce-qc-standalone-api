@@ -4,7 +4,7 @@ import { isWhppCancelledRow } from './whppAnalyzer.js';
  * WHPP is a single local-business board. It follows the same operational KPI
  * semantics as Shopee but does not use Shopee CN/VN recipient groups.
  * Accounting buckets are mutually exclusive:
- * total = POD + returned + cancelled + unresolved.
+ * total = POD + returned + cancelled + normal special destinations + unresolved.
  */
 export function buildWhppDashboard(state = {}) {
   const rows = uniqueRows(state.finalRows || []);
@@ -15,6 +15,7 @@ export function buildWhppDashboard(state = {}) {
   const cancelledRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && isWhppCancelledRow(row));
   const unresolvedRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row));
   const normalDiversionRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && isNormalDiversion(row));
+  const ccsl580Rows = normalDiversionRows.filter(row => ['CCSL580_RETENTION','CCSL580_DIVERSION'].includes(specialOf(row)));
 
   const actionable = monitorRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row));
   const metrics = {
@@ -42,13 +43,13 @@ export function buildWhppDashboard(state = {}) {
     workOrder: actionable.filter(row => /工单/.test(categoryOf(row))).length,
     ccslCnDiversion: normalDiversionRows.filter(row => specialOf(row) === 'CCSLCN_DIVERSION').length,
     ccslZtDiversion: normalDiversionRows.filter(row => specialOf(row) === 'CCSLZT_DIVERSION').length,
-    ccsl580Diversion: normalDiversionRows.filter(row => specialOf(row) === 'CCSL580_DIVERSION' || specialOf(row) === 'CCSL580_RETENTION').length,
+    // CEL:CCSL580 is the dedicated 580 retention destination. The old
+    // ccsl580Diversion key is retained only as a compatibility alias.
+    ccsl580Retention: ccsl580Rows.length,
+    ccsl580Diversion: ccsl580Rows.length,
     phnomPenhShop: monitorRows.filter(row => ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState || ''))).length,
     phnomPenhShopTransit: monitorRows.filter(row => row.shopState === 'SHOP_TRANSFER_IN_PROGRESS').length,
     phnomPenhShopArrived: monitorRows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT').length,
-    // No retention threshold has been supplied for CCSL580 yet. Reaching 580
-    // is therefore only a normal diversion metric; retention stays explicit 0.
-    ccsl580Retention: 0,
     dispatchAttempt1: podRows.filter(row => dispatchDayNo(row) === 1).length,
     dispatchAttempt2: podRows.filter(row => dispatchDayNo(row) === 2).length,
     dispatchAttempt3: podRows.filter(row => dispatchDayNo(row) >= 3).length
@@ -84,7 +85,8 @@ export function buildWhppDashboard(state = {}) {
     workOrder: tab('工单', actionable.filter(row => /工单/.test(categoryOf(row)))),
     ccslCnDiversion: tab('CCSLCN分流', normalDiversionRows.filter(row => specialOf(row) === 'CCSLCN_DIVERSION')),
     ccslZtDiversion: tab('CCSLZT分流', normalDiversionRows.filter(row => specialOf(row) === 'CCSLZT_DIVERSION')),
-    ccsl580Diversion: tab('CCSL580分流', normalDiversionRows.filter(row => ['CCSL580_DIVERSION','CCSL580_RETENTION'].includes(specialOf(row)))),
+    ccsl580Retention: tab('580滞留包裹', ccsl580Rows),
+    ccsl580Diversion: tab('580滞留包裹', ccsl580Rows),
     phnomPenhShop: tab('金边门店', monitorRows.filter(row => ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState || '')))),
     attempt1: tab('1派POD', podRows.filter(row => dispatchDayNo(row) === 1)),
     attempt2: tab('2派POD', podRows.filter(row => dispatchDayNo(row) === 2)),
@@ -158,7 +160,7 @@ function isActionable(row) {
 
 function isNormalDiversion(row = {}) {
   const special = specialOf(row);
-  return ['SELF_PICKUP','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','CCSL580_RETENTION','CECN_RETENTION','CEZT_RETENTION'].includes(special)
+  return ['SELF_PICKUP','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_RETENTION','CCSL580_DIVERSION','CECN_RETENTION','CEZT_RETENTION'].includes(special)
     || row.primaryCategory === '正常分流节点'
     || row.matchedRule === 'NORMAL_FINAL_HUB';
 }
