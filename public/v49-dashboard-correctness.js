@@ -1,5 +1,5 @@
 (function installDashboardCorrectnessV49(global){
-  const VERSION='2026-08-11-v49-dashboard-correctness-ui-v1';
+  const VERSION='2026-08-11-v49-dashboard-correctness-ui-v2';
   const SPECIAL={
     ccslCnDiversion:'CCSLCN分流',
     ccslZtDiversion:'CCSLZT分流',
@@ -38,9 +38,9 @@
   function previewPanel(type){return String(type).startsWith('SHOPEE')?document.getElementById('shopeePreviewPanel'):document.getElementById('ccslPreviewPanel');}
   function columns(rows){
     const keys=['shipmentCode','businessType','reportDate','regionCode','recipient_raw','当前分类','primaryCategory','POD状态','Pending次数','pendingDays','OC天数','ocDays','最新节点','最新时间'];
-    return keys.filter(key=>rows.some(row=>row?.[key]!==undefined)).slice(0,12);
+    return keys.filter(key=>rows.some(row=>row?.[key]!==undefined)).slice(0,14);
   }
-  function name(key){return({shipmentCode:'运单号',businessType:'业务',reportDate:'日报日期',regionCode:'区域',recipient_raw:'收件人',primaryCategory:'当前分类',pendingDays:'Pending天数',ocDays:'OC天数',最新节点:'最新节点',最新时间:'最新时间'})[key]||key;}
+  function name(key){return({shipmentCode:'运单号',businessType:'业务',reportDate:'日报日期',regionCode:'区域',recipient_raw:'收件人',primaryCategory:'当前分类',pendingDays:'Pending天数',ocDays:'OC天数',最新节点:'最终/最新节点',最新时间:'最新时间'})[key]||key;}
   function renderSpecialDetail(panel,data,label){
     const rows=data.rows||[],cols=columns(rows),maxPage=Math.max(1,Math.ceil(Number(data.total||0)/Number(data.pageSize||200)));
     panel.innerHTML=`<div class="v27-detail-head"><div><h3>${esc(label)}</h3><div class="v27-detail-meta">${esc(data.fromDate)} ～ ${esc(data.toDate)} · 共 ${fmt(data.total)} 票 · 当前第 ${data.page}/${maxPage} 页</div></div></div><div class="v27-detail-scroll">${rows.length?`<table class="v27-detail-table"><thead><tr>${cols.map(k=>`<th>${esc(name(k))}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${cols.map(k=>`<td>${esc(row?.[k]??'—')}</td>`).join('')}</tr>`).join('')}</tbody></table>`:'<div class="empty-state">该指标当前没有匹配的逐票数据</div>'}</div>`;
@@ -60,15 +60,17 @@
   }
 
   function installMetricWrapper(){
+    if(global.openV18MetricDetail?.__v49ExactDrilldown)return;
     const original=global.openV18MetricDetail;
-    global.openV18MetricDetail=function(type,metricKey,label){
+    const wrapped=function(type,metricKey,label){
       const key=String(metricKey||''),text=String(label||'');
       const tab=SPECIAL[key]?key:LABEL_TAB[text];
       if(tab)return void openSpecial(type,tab,SPECIAL[tab]||text);
-      // SHOPEE uses the business term “退件率”; the legacy detail tab is still “returned”.
       if(text==='退件率'&&typeof original==='function')return original.call(this,type,metricKey,'退回率');
       return typeof original==='function'?original.apply(this,arguments):undefined;
     };
+    wrapped.__v49ExactDrilldown=true;
+    global.openV18MetricDetail=wrapped;
   }
 
   function renameShopeeReturnRate(model){
@@ -76,10 +78,18 @@
     for(const row of [...(model.cards||[]),...(model.core||[])])if(String(row?.label||'')==='退回率')row.label='退件率';
     return model;
   }
+  function renameVisibleShopeeReturnRate(){
+    if(!['/shopeecn','/shopeevn'].includes(location.pathname))return;
+    document.querySelectorAll('#shopeePage button span,#shopeePage h3').forEach(node=>{if(node.textContent?.trim()==='退回率')node.textContent='退件率';});
+  }
   function installRenderWrapper(){
     if(!global.DashboardV18||global.DashboardV18.__v49ReturnRateWrapped)return;
     const original=global.DashboardV18.renderBusiness;
-    global.DashboardV18.renderBusiness=function(root,model){return original.call(this,root,renameShopeeReturnRate(model));};
+    global.DashboardV18.renderBusiness=function(root,model){
+      const value=original.call(this,root,renameShopeeReturnRate(model));
+      queueMicrotask(renameVisibleShopeeReturnRate);
+      return value;
+    };
     global.DashboardV18.__v49ReturnRateWrapped=true;
   }
 
@@ -106,17 +116,21 @@
   function scheduleWhppTrends(){clearTimeout(whppTrendTimer);whppTrendTimer=setTimeout(()=>void hydrateWhppTrends(),100);}
   function installObserver(){
     const target=document.querySelector('.app-shell')||document.body;
-    const observer=new MutationObserver(mutations=>{if(location.pathname==='/whpp'&&mutations.some(m=>m.addedNodes?.length))scheduleWhppTrends();});
+    const observer=new MutationObserver(mutations=>{
+      if(!mutations.some(m=>m.addedNodes?.length))return;
+      if(location.pathname==='/whpp')scheduleWhppTrends();
+      if(['/shopeecn','/shopeevn'].includes(location.pathname))renameVisibleShopeeReturnRate();
+    });
     observer.observe(target,{subtree:true,childList:true});
-    global.addEventListener('popstate',scheduleWhppTrends);
+    global.addEventListener('popstate',()=>{scheduleWhppTrends();renameVisibleShopeeReturnRate();});
     document.addEventListener('click',event=>{if(event.target?.closest?.('[data-page="whpp"],#topRangeQuery,.top-range-query'))setTimeout(scheduleWhppTrends,150);},true);
   }
 
   function install(){
     installRenderWrapper();
-    // V27 installs its metric handler during page startup. Install after it, then re-check once.
     setTimeout(installMetricWrapper,0);
     setTimeout(installMetricWrapper,500);
+    setTimeout(renameVisibleShopeeReturnRate,100);
     installObserver();
     scheduleWhppTrends();
     console.info('[CE-QC][DASHBOARD_V49]',VERSION);
