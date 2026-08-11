@@ -32,6 +32,7 @@ test('V49 dashboard correctness patch owns exact routing/shop detail and WHPP re
   assert.match(server, /ccsl580Retention/);
   assert.match(server, /phnomPenhShop/);
   assert.match(server, /shipment_current_state/);
+  assert.match(server, /persistedCurrentState/);
   assert.match(server, /orderStatus/);
   assert.match(server, /api\/v49\/whpp-trends/);
   assert.match(ui, /退件率/);
@@ -41,15 +42,24 @@ test('V49 dashboard correctness patch owns exact routing/shop detail and WHPP re
   assert.match(injector, /v49-dashboard-correctness\.js/);
 });
 
-test('V49 special detail refuses terminal POD/return/cancel rows from current Phnom Penh shop', () => {
+test('V49 special detail refuses terminal POD/return/cancel rows from shop and routing destination tabs', () => {
   const source = fs.readFileSync(path.resolve('src/v49DashboardCorrectnessPatch.js'), 'utf8');
-  assert.match(source, /if\(isTerminal\(row\)\|\|destination!==ROUTING_DESTINATIONS\.NONE\)return false/);
+  assert.match(source, /if\(isTerminal\(row\)\)return false/);
+  assert.match(source, /const destination=dest=>rows\.filter\(r=>!isTerminal\(r\)&&finalDestination\(r\)===dest\)/);
   assert.match(source, /SHOP_TRANSFER_IN_PROGRESS/);
   assert.match(source, /SHOP_ARRIVED_CURRENT/);
 });
 
+test('range V36 terminal evidence outranks stale shop and CCSL routing nodes', () => {
+  const source = fs.readFileSync(path.resolve('src/rangeDashboardStoreV36.js'), 'utf8');
+  assert.match(source, /const live = rows\.filter\(row => !isTerminalRow\(row\)\)/);
+  assert.match(source, /rows\.filter\(row => !isTerminalRow\(row\) && row\.routingDestination === ROUTING_DESTINATIONS\.CCSLZT\)/);
+  assert.match(source, /function isTerminalRow/);
+  assert.match(source, /status === '85'/);
+});
+
 test('V49 dashboard integration files pass syntax checks', () => {
-  for (const relative of ['src/v27TrendPatch.js', 'src/v44WhppUiPatch.js', 'public/whpp-v47-auto-run.js', 'src/v49DashboardCorrectnessPatch.js', 'public/v49-dashboard-correctness.js']) {
+  for (const relative of ['src/v27TrendPatch.js', 'src/v44WhppUiPatch.js', 'public/whpp-v47-auto-run.js', 'src/v49DashboardCorrectnessPatch.js', 'public/v49-dashboard-correctness.js', 'src/rangeDashboardStoreV36.js']) {
     const result = spawnSync(process.execPath, ['--check', path.resolve(relative)], { encoding: 'utf8' });
     assert.equal(result.status, 0, `${relative} syntax failed:\n${result.stderr || result.stdout}`);
   }
