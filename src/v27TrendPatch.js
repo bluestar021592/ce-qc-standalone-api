@@ -66,6 +66,8 @@ function attemptRows(fromDate,toDate) {
         COALESCE(
           NULLIF(CAST(f.podAttemptNo AS INTEGER),0),
           NULLIF(CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0),
+          NULLIF(CAST(f.currentAttemptNo AS INTEGER),0),
+          NULLIF(CAST(json_extract(f.rawJson,'$.currentAttemptNo') AS INTEGER),0),
           0
         ) AS explicitAttempt,
         COALESCE(
