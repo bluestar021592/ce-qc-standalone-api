@@ -4,9 +4,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-test('CEAF is accepted by the shared trend endpoint', () => {
+test('CEAF is accepted and mounted by the shared trend endpoint', () => {
   const source = fs.readFileSync(path.resolve('src/v27TrendPatch.js'), 'utf8');
+  const mount = fs.readFileSync(path.resolve('public/v27-trend-mount-fix.js'), 'utf8');
   assert.match(source, /new Set\(\['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','CCSL','SHOPEE'\]\)/);
+  assert.match(mount, /ceaf:'CEAF'/);
 });
 
 test('global automatic processing continues into WHPP after CCSL and Shopee', () => {
@@ -58,8 +60,19 @@ test('range V36 terminal evidence outranks stale shop and CCSL routing nodes', (
   assert.match(source, /status === '85'/);
 });
 
+test('Shopee attempt trends use persisted currentAttemptNo before timestamp fallback', () => {
+  const trend = fs.readFileSync(path.resolve('src/v27TrendPatch.js'), 'utf8');
+  const range = fs.readFileSync(path.resolve('src/rangeDashboardStoreV33.js'), 'utf8');
+  for (const source of [trend, range]) {
+    assert.match(source, /f\.currentAttemptNo/);
+    assert.match(source, /\$\.currentAttemptNo/);
+    assert.match(source, /podAttemptNo/);
+    assert.match(source, /POD时间/);
+  }
+});
+
 test('V49 dashboard integration files pass syntax checks', () => {
-  for (const relative of ['src/v27TrendPatch.js', 'src/v44WhppUiPatch.js', 'public/whpp-v47-auto-run.js', 'src/v49DashboardCorrectnessPatch.js', 'public/v49-dashboard-correctness.js', 'src/rangeDashboardStoreV36.js']) {
+  for (const relative of ['src/v27TrendPatch.js', 'src/v44WhppUiPatch.js', 'public/whpp-v47-auto-run.js', 'src/v49DashboardCorrectnessPatch.js', 'public/v49-dashboard-correctness.js', 'src/rangeDashboardStoreV36.js', 'src/rangeDashboardStoreV33.js', 'public/v27-trend-mount-fix.js']) {
     const result = spawnSync(process.execPath, ['--check', path.resolve(relative)], { encoding: 'utf8' });
     assert.equal(result.status, 0, `${relative} syntax failed:\n${result.stderr || result.stdout}`);
   }
