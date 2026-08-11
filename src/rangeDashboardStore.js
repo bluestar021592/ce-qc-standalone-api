@@ -1,8 +1,8 @@
 // Final public facade.
-// Cache-maintenance APIs stay on the preserved implementation, while dashboard
-// reads use V31 source/snapshot selection, V33 Shopee dispatch-attempt timestamp
-// fallback, V34 Phnom Penh store/routing semantics, and V35 CCSL580 normal
-// diversion semantics.
+// Cache-maintenance APIs stay on the preserved implementation. Dashboard reads
+// use the latest VALID + COMPLETED source selection, Shopee attempt fallback and
+// V36 final-location routing semantics. CCSLCN / CCSLZT / CCSL580 are mutually
+// exclusive and are determined only by each parcel's latest effective node.
 export {
   markDashboardCacheDirty,
   refreshDashboardCacheDate,
@@ -12,4 +12,4 @@ export {
   RANGE_DASHBOARD_BUSINESS_TYPES
 } from './rangeDashboardStoreLegacy.js';
 
-export { loadRangeDashboard } from './rangeDashboardStoreV35.js';
+export { loadRangeDashboard } from './rangeDashboardStoreV36.js';
