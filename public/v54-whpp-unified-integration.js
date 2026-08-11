@@ -1,5 +1,5 @@
 (function installWhppUnifiedIntegrationV54(global) {
-  const VERSION = '2026-08-11-v54-whpp-unified-integration-v2';
+  const VERSION = '2026-08-11-v54-whpp-unified-integration-v3';
   let busy = false;
   let whppSummaryCache = null;
   let whppSummaryAt = 0;
@@ -145,18 +145,23 @@
     return Number(String(node?.textContent || '').replace(/[^0-9.-]/g, '')) || 0;
   }
 
-  function patchImportedUniqueTotal(grid, whppTotal) {
+  function setTextIfChanged(node, text) {
+    if (node && node.textContent !== text) node.textContent = text;
+  }
+
+  function patchImportedUniqueTotal(grid) {
     const validNode = grid.querySelector('[data-testid="classification-valid-unique"]');
     const businessKeys = ['ce','ceaf','tbkh','ali1688','shopeecn','shopeevn','whpp'];
     const reconciled = businessKeys.reduce((sum, key) => sum + numberOf(grid.querySelector(`[data-testid="classification-${key}"]`)), 0);
-    if (validNode && reconciled > 0) validNode.textContent = reconciled.toLocaleString('zh-CN');
+    const reconciledText = reconciled.toLocaleString('zh-CN');
+    if (validNode && reconciled > 0) setTextIfChanged(validNode, reconciledText);
 
     const status = document.getElementById('fileStatus');
     if (status && reconciled > 0) {
       status.querySelectorAll('p').forEach(p => {
-        if (/有效唯一单号/.test(p.textContent || '')) {
-          p.innerHTML = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${reconciled.toLocaleString('zh-CN')}`);
-        }
+        if (!/有效唯一单号/.test(p.textContent || '')) return;
+        const next = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${reconciledText}`);
+        if (next !== p.innerHTML) p.innerHTML = next;
       });
     }
   }
@@ -177,11 +182,11 @@
         grid.appendChild(card);
       }
       const value = card.querySelector('b');
-      if (value) value.textContent = Number(whppTotal || 0).toLocaleString('zh-CN');
-      patchImportedUniqueTotal(grid, whppTotal);
+      setTextIfChanged(value, Number(whppTotal || 0).toLocaleString('zh-CN'));
+      patchImportedUniqueTotal(grid);
 
       const empty = document.querySelector('#unifiedClassificationSummary .unified-empty-state span');
-      if (empty && /六业务/.test(empty.textContent || '')) empty.textContent = (empty.textContent || '').replace('六业务', '七业务');
+      if (empty && /六业务/.test(empty.textContent || '')) setTextIfChanged(empty, (empty.textContent || '').replace('六业务', '七业务'));
     } finally {
       decorating = false;
     }
