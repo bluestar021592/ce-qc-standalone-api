@@ -9,10 +9,9 @@ const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
  * V36 final-location routing correction.
  *
  * Routing cards are mutually exclusive and use only each parcel's FINAL
- * effective trajectory destination. Current Phnom Penh shop metrics are also
- * CURRENT-state metrics: POD/return/cancelled/special-destination rows are never
- * allowed to remain in the shop bucket just because they historically had a
- * shopState value.
+ * effective trajectory destination. Terminal POD/return/cancel evidence always
+ * outranks an older routing/shop node, so completed parcels never remain visible
+ * in current destination buckets.
  */
 export function loadRangeDashboard(fromDate, toDate) {
   const range = loadRangeDashboardV33(fromDate, toDate);
@@ -29,7 +28,7 @@ export function loadRangeDashboard(fromDate, toDate) {
   return {
     ...range,
     queryMode: `${range.queryMode || 'SQL'}+FINAL_LOCATION_ROUTING_V36`,
-    routingRuleVersion: '2026-08-11-final-location-exclusive-v36-current-shop-terminal-exclusion-v2'
+    routingRuleVersion: '2026-08-11-final-location-exclusive-v36-terminal-outranks-routing-v3'
   };
 }
 
@@ -126,9 +125,9 @@ function patchCcslState(state, rows, label) {
   }
 
   state.detailTabs ||= {};
-  state.detailTabs.ccslCnDiversion = tab('CCSLCN分流', rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSLCN));
-  state.detailTabs.ccslZtDiversion = tab('CCSLZT分流', rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSLZT));
-  state.detailTabs.ccsl580Retention = tab('580滞留包裹', rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSL580));
+  state.detailTabs.ccslCnDiversion = tab('CCSLCN分流', rows.filter(row => !isTerminalRow(row) && row.routingDestination === ROUTING_DESTINATIONS.CCSLCN));
+  state.detailTabs.ccslZtDiversion = tab('CCSLZT分流', rows.filter(row => !isTerminalRow(row) && row.routingDestination === ROUTING_DESTINATIONS.CCSLZT));
+  state.detailTabs.ccsl580Retention = tab('580滞留包裹', rows.filter(row => !isTerminalRow(row) && row.routingDestination === ROUTING_DESTINATIONS.CCSL580));
   state.detailTabs.ccsl580Diversion = state.detailTabs.ccsl580Retention;
   state.detailTabs.phnomPenhShop = tab('金边门店', rows.filter(isPhnomPenhShop));
 
@@ -169,9 +168,9 @@ function patchShopeeState(state, rows, label) {
   }
 
   state.detailTabs ||= {};
-  state.detailTabs.ccslCnDiversion = tab('CCSLCN分流', rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSLCN));
-  state.detailTabs.ccslZtDiversion = tab('CCSLZT分流', rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSLZT));
-  state.detailTabs.ccsl580Retention = tab('580滞留包裹', rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSL580));
+  state.detailTabs.ccslCnDiversion = tab('CCSLCN分流', rows.filter(row => !isTerminalRow(row) && row.routingDestination === ROUTING_DESTINATIONS.CCSLCN));
+  state.detailTabs.ccslZtDiversion = tab('CCSLZT分流', rows.filter(row => !isTerminalRow(row) && row.routingDestination === ROUTING_DESTINATIONS.CCSLZT));
+  state.detailTabs.ccsl580Retention = tab('580滞留包裹', rows.filter(row => !isTerminalRow(row) && row.routingDestination === ROUTING_DESTINATIONS.CCSL580));
   state.detailTabs.ccsl580Diversion = state.detailTabs.ccsl580Retention;
   state.detailTabs.phnomPenhShop = tab('金边门店', rows.filter(isPhnomPenhShop));
   if (dashboard.detailTabs) {
@@ -200,10 +199,11 @@ function patchShopeeMetrics(metrics, summary) {
 }
 
 function summarize(rows = []) {
-  const cn = rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSLCN);
-  const zt = rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSLZT);
-  const r580 = rows.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSL580);
-  const shops = rows.filter(isPhnomPenhShop);
+  const live = rows.filter(row => !isTerminalRow(row));
+  const cn = live.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSLCN);
+  const zt = live.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSLZT);
+  const r580 = live.filter(row => row.routingDestination === ROUTING_DESTINATIONS.CCSL580);
+  const shops = live.filter(isPhnomPenhShop);
   return {
     ccslCnDiversion: cn.length,
     ccslZtDiversion: zt.length,
@@ -228,8 +228,9 @@ function recognizedSpecial(row = {}, destination = '') {
 function isTerminalRow(row = {}) {
   const current = String(row.currentState || row.state || '').toUpperCase();
   const category = String(row.primaryCategory || row.主分类 || row.异常分类 || '').toUpperCase();
-  if (Number(row.isPod || 0) === 1 || row.是否POD === '是' || row.POD状态 === 'POD' || current === 'POD') return true;
-  if (row.退回状态 === '已退回' || ['RETURNED','RETURN_COMPLETED','ORDER_CANCELLED'].includes(current) || category === '退回' || category === '订单取消') return true;
+  const status = String(row.orderStatus || '').trim();
+  if (Number(row.isPod || 0) === 1 || row.是否POD === '是' || row.POD状态 === 'POD' || current === 'POD' || status === '85') return true;
+  if (row.退回状态 === '已退回' || ['RETURNED','RETURN_COMPLETED','ORDER_CANCELLED'].includes(current) || category === '退回' || category === '订单取消' || status === '100' || status === '10') return true;
   return false;
 }
 
