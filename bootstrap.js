@@ -95,6 +95,7 @@ try {
   await importPhase('v46ColdStartIndexPatch', './src/v46ColdStartIndexPatch.js');
   await importPhase('v48RoutingPatch', './src/v48RoutingPatch.js');
   await importPhase('v49DashboardCorrectnessPatch', './src/v49DashboardCorrectnessPatch.js');
+  await importPhase('v50DashboardSourceTruthPatch', './src/v50DashboardSourceTruthPatch.js');
   await importPhase('server', './server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
