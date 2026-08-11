@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import './v51CarryDashboardPatch.js';
 
-const PATCH_ID='2026-08-11-v52-whpp-source-truth-ui-inject-v14';
+const PATCH_ID='2026-08-11-v54-whpp-unified-ui-inject-v15';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
@@ -14,7 +14,7 @@ function html(req,res,next){
   try{
     const source=fs.readFileSync(INDEX_FILE,'utf8');
     const withStyle=source.replace('</head>','  <link rel="stylesheet" href="/dashboard-title-dedup.css?v=20260810-1">\n</head>');
-    const injected=withStyle.replace('</body>','  <script src="/whpp-v44.js?v=20260810-4"></script>\n  <script src="/whpp-v45-cleanup.js?v=20260811-2"></script>\n  <script src="/whpp-v47-auto-run.js?v=20260811-2"></script>\n  <script src="/routing-v48.js?v=20260811-2"></script>\n  <script src="/v49-dashboard-correctness.js?v=20260811-2"></script>\n  <script src="/v50-dashboard-source-truth.js?v=20260811-1"></script>\n  <script src="/v51-runtime-fix.js?v=20260811-1"></script>\n  <script src="/v52-whpp-source-truth-route.js?v=20260811-1"></script>\n</body>');
+    const injected=withStyle.replace('</body>','  <script src="/whpp-v44.js?v=20260810-4"></script>\n  <script src="/whpp-v45-cleanup.js?v=20260811-2"></script>\n  <script src="/whpp-v47-auto-run.js?v=20260811-2"></script>\n  <script src="/routing-v48.js?v=20260811-2"></script>\n  <script src="/v49-dashboard-correctness.js?v=20260811-2"></script>\n  <script src="/v50-dashboard-source-truth.js?v=20260811-1"></script>\n  <script src="/v51-runtime-fix.js?v=20260811-1"></script>\n  <script src="/v52-whpp-source-truth-route.js?v=20260811-1"></script>\n  <script src="/v54-whpp-unified-integration.js?v=20260811-2"></script>\n</body>');
     res.type('html').send(injected);
   }catch(error){next(error);}
 }
@@ -25,8 +25,8 @@ express.application.use=function v44WhppUiUse(...args){
   const candidates=args.flat().filter(value=>typeof value==='function');
   if(!installed&&candidates.some(fn=>fn.name==='serveStatic')){
     installed=true;
-    // Register before express.static so /whpp and all business dashboards receive
-    // the final UI/correctness patches without changing the locked base geometry.
+    // Register before express.static so every dashboard and the unified import
+    // page receive the final WHPP source-truth and one-click integration layers.
     previousUse.call(this,html);
   }
   return previousUse.apply(this,args);
