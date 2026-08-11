@@ -1,5 +1,5 @@
 (function (global) {
-  const VERSION = '2026-08-11-v47-whpp-global-auto-run-v1';
+  const VERSION = '2026-08-11-v47-whpp-global-auto-run-v2';
   let whppRunInFlight = false;
 
   async function readJson(response) {
@@ -26,8 +26,17 @@
     if (whppRunInFlight) return { skipped: true, reason: 'already-running' };
     const current = await getWhppState();
     const total = Number(current?.dashboard?.metrics?.total || current?.state?.pnhBills?.length || 0);
+    const unresolved = Number(current?.dashboard?.metrics?.unresolved || 0);
     if (!total || !current?.state?.dailyReportReady) return { skipped: true, reason: 'no-whpp-daily' };
-    if (String(current?.snapshotStatus || '').toUpperCase() === 'COMPLETED') return { skipped: true, reason: 'completed' };
+
+    // A historical snapshot can be marked COMPLETED even though its rows are all
+    // still unresolved. In that case WHPP must be refreshed again; otherwise a
+    // stale PENDING_SCAN snapshot can permanently suppress the real CE terminal
+    // POD/return/cancel state. Only skip a completed WHPP day when nothing is
+    // unresolved anymore.
+    if (String(current?.snapshotStatus || '').toUpperCase() === 'COMPLETED' && unresolved === 0) {
+      return { skipped: true, reason: 'completed-and-closed' };
+    }
 
     whppRunInFlight = true;
     const runButton = document.querySelector('[data-testid="global-auto-process"]');
