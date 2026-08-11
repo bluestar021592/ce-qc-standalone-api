@@ -1,7 +1,7 @@
 import express from 'express';
 import { loadRangeDashboard } from './rangeDashboardStoreV58.js';
 
-const PATCH_ID='2026-08-11-v60-same-object-drilldown-v1';
+const PATCH_ID='2026-08-11-v61-canonical-drilldown-v1';
 const CCSL_TYPES=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 
@@ -49,6 +49,20 @@ function unique(rows=[]) {
   return [...map.values()];
 }
 
+function summaryValueForTab(summary={},key='') {
+  const map={
+    podClosed:'pod',accountingReturned:'returned',accountingOpen:'open',unresolved:'open',ordinaryOpen:'open',
+    pendingAll:'pending1',pending2plus:'pending2',pending3:'pending3',pendingNonContinuous:'pendingNonContinuous',
+    ocAll:'oc1',oc2plus:'oc2',oc3:'oc3',cycle2:'cycle2',inboundNoScan:'inboundNoScan',workOrderAbnormal:'workOrder',
+    provinceOpen:'provinceOpen',ccslCnDiversion:'ccslCnDiversion',ccslZtDiversion:'ccslZtDiversion',ccsl580Retention:'ccsl580Retention',
+    phnomPenhShop:'phnomPenhShop',provinceShop:'provinceShop',severeAbnormal:'severeAbnormal',accountingDifference:'accountingDifference',
+    pod:'pod',returned:'returned',unresolved:'unresolved',pending1:'pending1',pending2:'pending2',pending3:'pending3',
+    oc1:'oc1',oc2:'oc2',oc3:'oc3',cycle2:'cycle2',deliveryStay:'delivery',returnRequired:'returnRequired'
+  };
+  const metric=map[key];
+  return metric?Number(summary?.[metric]??0):null;
+}
+
 function metricDetail(req,res) {
   try {
     const toDate=isoDate(req.query.to||req.query.reportDate);
@@ -58,10 +72,9 @@ function metricDetail(req,res) {
     const type=normalizeType(req.query.businessType||'CCSL');
     const key=normalizeDetailKey(type,req.query.tab||'allData');
 
-    // IMPORTANT: the visible card summary and the clicked rows are now taken from
-    // this exact same V58 range object in this exact same request. There is no
-    // second SQL/detail reconstruction path anymore. This prevents cases such as
-    // “金边门店 11” opening a separate query that returns 0.
+    // Canonical drill-down contract: the visible card summary and clicked rows
+    // come from the same V58 range object in the same request. V61 uses a new,
+    // unambiguous public route so no legacy metric-detail handler can shadow it.
     const range=loadRangeDashboard(fromDate,toDate);
     const state=pickState(range,type);
     if(!state)return res.status(404).json({ok:false,patchId:PATCH_ID,error:`未找到${type}看板状态`});
@@ -78,7 +91,7 @@ function metricDetail(req,res) {
     res.json({
       ok:true,
       patchId:PATCH_ID,
-      source:'V60_SAME_RANGE_OBJECT',
+      source:'V61_CANONICAL_DRILLDOWN',
       businessType:type,
       fromDate,
       toDate,
@@ -88,11 +101,13 @@ function metricDetail(req,res) {
       pageSize:safeSize,
       total,
       detailDeclaredTotal:Number(detail?.total??total),
+      summaryValue:summaryValueForTab(summary,key),
+      detailKeyPresent:Boolean(detail),
       summary,
       rows:rows.slice(start,start+safeSize)
     });
   } catch(error) {
-    console.error('[V60][METRIC_DETAIL]',error);
+    console.error('[V61][METRIC_DETAIL]',error);
     res.status(500).json({ok:false,patchId:PATCH_ID,error:error.message||String(error)});
   }
 }
@@ -108,9 +123,9 @@ function reconciliation(req,res) {
     summary.CCSL=range.aggregates?.CCSL?.v55Summary||range.aggregates?.CCSL?.dashboard?.v55Summary||{};
     summary.SHOPEE=range.aggregates?.SHOPEE?.v55Summary||range.aggregates?.SHOPEE?.dashboard?.v55Summary||{};
     res.setHeader('Cache-Control','no-store');
-    res.json({ok:true,patchId:PATCH_ID,source:'V60_SAME_RANGE_OBJECT',fromDate,toDate,summary});
+    res.json({ok:true,patchId:PATCH_ID,source:'V61_CANONICAL_DRILLDOWN',fromDate,toDate,summary});
   } catch(error) {
-    console.error('[V60][RECONCILIATION]',error);
+    console.error('[V61][RECONCILIATION]',error);
     res.status(500).json({ok:false,patchId:PATCH_ID,error:error.message||String(error)});
   }
 }
@@ -120,6 +135,7 @@ const previousListen=express.application.listen;
 express.application.listen=function v55DashboardReconciliationListen(...args){
   if(!installed){
     installed=true;
+    this.get('/api/v61/metric-detail',metricDetail);
     this.get('/api/v55/metric-detail',metricDetail);
     this.get('/api/v55/reconciliation',reconciliation);
   }
