@@ -24,7 +24,7 @@ function parseRows(rows) {
 }
 
 test('WHPP runtime integration files pass node syntax checks', () => {
-  for (const relative of ['src/whppAnalyzer.js','src/whppReporting.js','src/whppStore.js','src/whppPipeline.js','src/v42WhppPatch.js','src/v44WhppUiPatch.js','public/whpp-v42.js','public/whpp-v44.js']) {
+  for (const relative of ['src/whppAnalyzer.js','src/whppReporting.js','src/whppStore.js','src/whppPipeline.js','src/v42WhppPatch.js','src/v44WhppUiPatch.js','public/whpp-v42.js','public/whpp-v44.js','public/routing-v48.js']) {
     const file = path.resolve(relative);
     const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
     assert.equal(result.status, 0, `${relative} syntax failed:\n${result.stderr || result.stdout}`);
@@ -93,34 +93,37 @@ test('POD terminal evidence outranks stale WHPP cancellation evidence', () => {
   assert.notEqual(result.currentState, 'ORDER_CANCELLED');
 });
 
-test('CEL:CCSL580 is normal diversion, not automatic 580 retention', () => {
+test('CEL:CCSL580 is the dedicated 580 retention destination', () => {
   const result = classifyLatestSpecialNode([{ shipmentCode: 'CC1', eventTime: '2026-08-10 09:00:00', eventCode: '26', locationCode: 'CEL:CCSL580', trackingEventDescZh: '操作完成，货物到达网点 [CEL:CCSL580]' }]);
-  assert.equal(result?.specialState, 'CCSL580_DIVERSION');
-  assert.equal(result?.label, 'CCSL580分流');
-  assert.notEqual(result?.specialState, 'CCSL580_RETENTION');
+  assert.equal(result?.specialState, 'CCSL580_RETENTION');
+  assert.equal(result?.label, '580滞留包裹');
+  assert.equal(result?.latestNodeCode, 'CCSL580');
 });
 
-test('WHPP accounting keeps POD return cancellation diversion and unresolved mutually exclusive', () => {
+test('WHPP accounting keeps POD return cancellation special destination and unresolved mutually exclusive', () => {
   const rows = [
     { shipmentCode: 'CE1', reportDate: '2026-08-10', 是否POD: '是', currentState: 'POD', regionCode: 'PP' },
     { shipmentCode: 'CE2', reportDate: '2026-08-10', 退回状态: '已退回', currentState: 'RETURN_COMPLETED', regionCode: 'PP' },
     { shipmentCode: 'CE3', reportDate: '2026-08-10', 订单取消: '是', currentState: 'ORDER_CANCELLED', regionCode: 'PV' },
-    { shipmentCode: 'CE4', reportDate: '2026-08-10', specialState: 'CCSL580_DIVERSION', currentState: 'CCSL580_DIVERSION', regionCode: 'PV' },
+    { shipmentCode: 'CE4', reportDate: '2026-08-10', specialState: 'CCSL580_RETENTION', currentState: 'CCSL580_RETENTION', latestNodeCode: 'CCSL580', regionCode: 'PV' },
     { shipmentCode: 'CE5', reportDate: '2026-08-10', currentState: 'OPEN_TRACK_REQUIRED', regionCode: 'PV', Pending当前次数: 1 }
   ];
   const dashboard = buildWhppDashboard({ reportDate: '2026-08-10', pnhBills: rows.map(row => row.shipmentCode), dailyParseRows: rows, finalRows: rows });
   assert.deepEqual(dashboard.accounting, { total: 5, pod: 1, returned: 1, cancelled: 1, normalDiversion: 1, unresolved: 1, accounted: 5, difference: 0, balanced: true });
-  assert.equal(dashboard.metrics.ccsl580Diversion, 1);
-  assert.equal(dashboard.metrics.ccsl580Retention, 0);
+  assert.equal(dashboard.metrics.ccsl580Retention, 1);
+  assert.equal(dashboard.metrics.ccsl580Diversion, 1, 'legacy alias must point to the same exact 580 set, never a second bucket');
+  assert.equal(dashboard.detailTabs.ccsl580Retention.total, 1);
   assert.equal(dashboard.metrics.pending1, 1);
 });
 
-test('integrated WHPP dashboard exposes required business labels and old-db empty notice', () => {
+test('integrated WHPP dashboard exposes current business labels and empty-database notice', () => {
   const legacy = fs.readFileSync(new URL('../public/whpp-v42.js', import.meta.url), 'utf8');
   const fast = fs.readFileSync(new URL('../public/whpp-v44.js', import.meta.url), 'utf8');
-  for (const text of ['WHPP本土看板','订单取消','CCSLCN分流','CCSLZT分流','CCSL580分流','金边门店']) {
-    assert.match(legacy + fast, new RegExp(text));
+  const routing = fs.readFileSync(new URL('../public/routing-v48.js', import.meta.url), 'utf8');
+  for (const text of ['WHPP本土看板','订单取消','CCSLCN分流','CCSLZT分流','金边门店']) {
+    assert.match(legacy + fast + routing, new RegExp(text));
   }
-  assert.match(fast, /旧数据库没有WHPP独立历史数据/);
+  assert.match(routing, /580滞留包裹/);
+  assert.match(fast, /当前数据库暂无WHPP本土日报/);
   assert.match(fast, /AbortController/);
 });
