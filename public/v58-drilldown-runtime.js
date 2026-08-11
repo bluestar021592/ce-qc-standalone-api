@@ -1,5 +1,5 @@
 (function installDrilldownRuntimeV58(global){
-  const VERSION='2026-08-11-v58-drilldown-runtime-v3';
+  const VERSION='2026-08-11-v61-canonical-drilldown-v4';
   const PATH_TYPES=new Map([['/ce','CE'],['/ceaf','CEAF'],['/tbkh','TBKH'],['/ali1688','ALI1688'],['/shopeecn','SHOPEECN'],['/shopeevn','SHOPEEVN']]);
   const COMMON={
     '签收件数':'podClosed','今日POD':'podClosed','签收率':'podClosed','POD率':'podClosed','首次妥投率':'podClosed',
@@ -107,7 +107,7 @@
     host.scrollIntoView({behavior:'smooth',block:'start'});
     try{
       const params=new URLSearchParams({businessType:type,from:range.from,to:range.to,tab,page:'1',pageSize:'200'});
-      const response=await fetch(`/api/v55/metric-detail?${params}`,{cache:'no-store',credentials:'same-origin'});
+      const response=await fetch(`/api/v61/metric-detail?${params}`,{cache:'no-store',credentials:'same-origin'});
       const data=await response.json().catch(()=>({}));if(request!==activeRequest)return;
       if(!response.ok||data.ok===false)throw new Error(data.error||`HTTP ${response.status}`);
       render(host,data,visibleLabel);
@@ -122,9 +122,6 @@
     });
   }
 
-  // Runtime safety net: every core metric label is unique inside each dashboard grid.
-  // V55 may hydrate cards after the first render; V58 removes any repeated DOM copies
-  // without touching the authoritative value or creating a replacement card.
   function dedupeCoreMetricCards(){
     document.querySelectorAll('.v18-core-grid').forEach(grid=>{
       const seen=new Set();
@@ -171,8 +168,8 @@
     stabilizeMetrics();
     setTimeout(()=>{stabilizeMetrics();void syncSevereMetric();},100);
     setTimeout(stabilizeMetrics,500);
-    document.documentElement.dataset.v58Drilldown='3';
-    console.info('[CE-QC][DRILLDOWN_V58]',VERSION);
+    document.documentElement.dataset.v58Drilldown='4';
+    console.info('[CE-QC][DRILLDOWN_V61]',VERSION);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })(window);
