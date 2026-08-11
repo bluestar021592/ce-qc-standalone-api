@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { loadRangeDashboard } from './rangeDashboardStore.js';
 
-const PATCH_ID='2026-08-11-v48-final-location-routing-api-v1';
+const PATCH_ID='2026-08-11-v48-final-location-routing-api-v2';
 const EXACT_TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
 const AGGREGATES=new Set(['CCSL','SHOPEE']);
 const DESTINATION_TABS={
@@ -78,6 +78,8 @@ function handler(req,res){
     const detail=tabName?(state.detailTabs?.[tabName]||state.dashboard?.detailTabs?.[tabName]||{rows:[],total:0}):null;
     const pageSize=Math.max(1,Math.min(2000,Number(req.query.pageSize||1000)));
     const rows=detail?(detail.rows||[]).slice(0,pageSize):[];
+    const businessTotal=totalFor(state);
+    const detailTotal=detail?Number(detail.total??detail.rows?.length??0):0;
 
     res.setHeader('Cache-Control','private, max-age=10');
     res.json({
@@ -86,11 +88,11 @@ function handler(req,res){
       businessType:type,
       fromDate:from,
       toDate:to,
-      total:totalFor(state),
+      businessTotal,
+      total:destination&&detail?detailTotal:businessTotal,
       summary,
       destination:tabName?destination:'',
-      totalDetail:detail?Number(detail.total??detail.rows?.length??0):0,
-      total:destination&&detail?Number(detail.total??detail.rows?.length??0):totalFor(state),
+      totalDetail:detailTotal,
       rows,
       routingRuleVersion:range.routingRuleVersion||''
     });
