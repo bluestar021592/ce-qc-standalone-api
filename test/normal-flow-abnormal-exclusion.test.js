@@ -44,7 +44,7 @@ test('realtime abnormal total excludes normal return/store flows but keeps true 
     nextCarryBills: []
   };
   const dashboard = buildDashboardData(state);
-  assert.equal(dashboard.abnormalCount, 2, 'only real Pending + 2-day shop retention remain abnormal');
+  assert.equal(dashboard.abnormalCount, 2, 'legacy realtime layer still exposes Pending + 2-day shop retention before V58 reconciliation');
   assert.equal(dashboard.categories.shopStuck, 1, 'store Pending/OC and 1-day arrival must not be counted as shop retention');
 });
 
@@ -55,7 +55,7 @@ function insertFlexible(db, table, values) {
   db.prepare(sql).run(...entries.map(([, value]) => value));
 }
 
-test('range abnormal total uses the same normal-flow exclusions as realtime', () => {
+test('range abnormal total applies V58 dedicated thresholds after normal-flow exclusions', () => {
   const db = getDb();
   const date = '2026-08-10';
   const snapshotId = 'snapshot-normal-flow';
@@ -96,8 +96,8 @@ test('range abnormal total uses the same normal-flow exclusions as realtime', ()
   assert.equal(range.states.CE.dashboard.returnInProgress, 1);
   assert.equal(range.states.CE.dashboard.normalShopOpen, 2, '1-day store + store Pending are normal store flows');
   assert.equal(range.states.CE.dashboard.specialClosed, 1);
-  assert.equal(range.states.CE.dashboard.abnormalCount, 2, 'only 2-day store retention + Pending remain abnormal');
-  assert.equal(range.states.CE.detailTabs.abnormal.total, 2);
+  assert.equal(range.states.CE.dashboard.abnormalCount, 1, 'V58 keeps 2-day store retention abnormal while continuous Pending2 remains below threshold');
+  assert.equal(range.states.CE.detailTabs.abnormal.total, 1);
 });
 
 test.after(() => {
