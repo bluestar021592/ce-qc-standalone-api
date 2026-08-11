@@ -1,131 +1,138 @@
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$AutoLauncher = Join-Path $ProjectRoot 'Start_CE_QC_Auto.vbs'
-$IconPath = Join-Path $ProjectRoot 'assets\CE_QC_APP.ico'
-
-if (-not (Test-Path -LiteralPath $AutoLauncher)) {
-  throw "CE QC one-click launcher not found: $AutoLauncher"
-}
-if (-not (Test-Path -LiteralPath $IconPath)) {
-  throw "CE EXPRESS desktop icon not found: $IconPath"
+$ProjectIcon = Join-Path $ProjectRoot 'assets\CE_QC_APP.ico'
+if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'Start_CE_QC.cmd'))) {
+  throw "CE QC project launcher not found: $ProjectRoot"
 }
 
 $Shell = New-Object -ComObject WScript.Shell
 
-# Build every Desktop location Windows may actually be showing. This includes
-# normal Desktop, OneDrive redirected Desktop, WSH Desktop and an optional
-# operator override. Older installers sometimes created CE_QC_APP on a different
-# Desktop path than the one later resolved by WSH, leaving the visible old file.
+# Resolve every plausible Desktop location so old launchers are removed even
+# when Windows/OneDrive redirects Desktop.
 $DesktopCandidates = New-Object System.Collections.Generic.List[string]
-function Add-DesktopCandidate([string]$Path) {
-  if ([string]::IsNullOrWhiteSpace($Path)) { return }
-  try { $full = [IO.Path]::GetFullPath($Path) } catch { return }
-  if (-not $DesktopCandidates.Contains($full)) { $DesktopCandidates.Add($full) }
-}
-
-Add-DesktopCandidate $env:CE_QC_SHORTCUT_DESKTOP
-try { Add-DesktopCandidate ([Environment]::GetFolderPath('Desktop')) } catch {}
-try { Add-DesktopCandidate ([string]$Shell.SpecialFolders.Item('Desktop')) } catch {}
-if ($env:USERPROFILE) { Add-DesktopCandidate (Join-Path $env:USERPROFILE 'Desktop') }
-if ($env:OneDrive) { Add-DesktopCandidate (Join-Path $env:OneDrive 'Desktop') }
-if ($env:OneDriveConsumer) { Add-DesktopCandidate (Join-Path $env:OneDriveConsumer 'Desktop') }
-if ($env:OneDriveCommercial) { Add-DesktopCandidate (Join-Path $env:OneDriveCommercial 'Desktop') }
-try {
-  $regDesktop = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -Name Desktop -ErrorAction Stop).Desktop
-  if ($regDesktop) { Add-DesktopCandidate ([Environment]::ExpandEnvironmentVariables([string]$regDesktop)) }
-} catch {}
-
-if ($DesktopCandidates.Count -eq 0) {
-  throw 'Windows Desktop folder could not be resolved.'
-}
-
-$ChineseLauncherName = -join @('CE ',[char]0x8D28,[char]0x63A7,'APP',[char]0x542F,[char]0x52A8)
-$OldNames = @(
-  'CE QC APP.lnk',
-  'CE_QC_APP.lnk',
-  'CE_QC_APP.vbs',
-  'CE_QC_APP.cmd',
-  'CE_QC_APP_START_INSTALLING.lnk',
-  ($ChineseLauncherName + '.lnk'),
-  ($ChineseLauncherName + '.cmd')
-)
-
-# Prefer the Desktop that currently contains the visible old CE_QC_APP file.
-# This makes the repair replace exactly what the user sees instead of silently
-# creating a second shortcut somewhere else.
-$Desktop = $null
-foreach ($candidate in $DesktopCandidates) {
-  foreach ($name in $OldNames) {
-    if (Test-Path -LiteralPath (Join-Path $candidate $name)) {
-      $Desktop = $candidate
-      break
-    }
-  }
-  if ($Desktop) { break }
-}
+try { $DesktopCandidates.Add([string]$Shell.SpecialFolders.Item('Desktop')) } catch {}
+if ($env:USERPROFILE) { $DesktopCandidates.Add((Join-Path $env:USERPROFILE 'Desktop')) }
+if ($env:OneDrive) { $DesktopCandidates.Add((Join-Path $env:OneDrive 'Desktop')) }
+if ($env:OneDriveConsumer) { $DesktopCandidates.Add((Join-Path $env:OneDriveConsumer 'Desktop')) }
+$Desktop = $DesktopCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
 if (-not $Desktop) {
-  foreach ($candidate in $DesktopCandidates) {
-    if (Test-Path -LiteralPath $candidate) { $Desktop = $candidate; break }
-  }
-}
-if (-not $Desktop) {
-  $Desktop = $DesktopCandidates[0]
+  $Desktop = Join-Path $env:USERPROFILE 'Desktop'
   New-Item -ItemType Directory -Path $Desktop -Force | Out-Null
 }
 
-# Remove old launcher variants from ALL known Desktop locations so Explorer
-# cannot keep showing the underscore version from a redirected Desktop.
-foreach ($candidate in $DesktopCandidates) {
+# IMPORTANT: never launch VBS or CMD through a shortcut path that contains the
+# Chinese project folder. This Windows/WSH combination converts that path to ????
+# and fails before CE QC even starts. Instead create an ASCII-only launcher root
+# under LocalAppData and bridge to the real project with a directory junction.
+$LauncherRoot = Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER'
+$AppLink = Join-Path $LauncherRoot 'app'
+$LauncherScript = Join-Path $LauncherRoot 'Launch_CE_QC.ps1'
+$LauncherIcon = Join-Path $LauncherRoot 'CE_EXPRESS_APP.ico'
+
+New-Item -ItemType Directory -Path $LauncherRoot -Force | Out-Null
+
+if (Test-Path -LiteralPath $AppLink) {
+  Remove-Item -LiteralPath $AppLink -Force -Recurse -ErrorAction SilentlyContinue
+}
+New-Item -ItemType Junction -Path $AppLink -Target $ProjectRoot | Out-Null
+
+if (Test-Path -LiteralPath $ProjectIcon) {
+  Copy-Item -LiteralPath $ProjectIcon -Destination $LauncherIcon -Force
+}
+
+$LauncherContent = @'
+$ErrorActionPreference = 'SilentlyContinue'
+$url = 'http://127.0.0.1:5177/'
+
+# Fast path: server already running -> open immediately.
+try {
+  $response = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 1
+  if ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) {
+    Start-Process $url
+    exit 0
+  }
+} catch {}
+
+# Cold start through the ASCII junction path. Start_CE_QC.cmd and every child
+# process therefore see an ASCII path, while the real source tree may remain in
+# its original Chinese-named folder.
+$appRoot = Join-Path $PSScriptRoot 'app'
+$cmd = Join-Path $appRoot 'Start_CE_QC.cmd'
+if (-not (Test-Path -LiteralPath $cmd)) {
+  Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
+  try { [System.Windows.MessageBox]::Show('CE QC launcher is missing. Please reinstall the desktop shortcut.','CE QC') | Out-Null } catch {}
+  exit 2
+}
+
+Start-Process -FilePath $cmd -WorkingDirectory $appRoot -WindowStyle Hidden
+exit 0
+'@
+[IO.File]::WriteAllText($LauncherScript, $LauncherContent, (New-Object Text.UTF8Encoding($false)))
+
+$PowerShellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+if (-not (Test-Path -LiteralPath $PowerShellExe)) { throw 'powershell.exe was not found.' }
+
+# Remove old launchers from all detected desktop locations.
+$OldNames = @(
+  'CE_QC_APP.lnk','CE_QC_APP.vbs','CE_QC_APP.cmd','CE_QC_APP_START_INSTALLING.lnk',
+  'CE QC APP.lnk','CE QC APP.vbs','CE QC APP.cmd'
+)
+foreach ($desk in ($DesktopCandidates | Select-Object -Unique)) {
+  if (-not $desk) { continue }
   foreach ($name in $OldNames) {
-    Remove-Item -LiteralPath (Join-Path $candidate $name) -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $desk $name) -Force -ErrorAction SilentlyContinue
   }
 }
 
-# Create one clean launcher. The visible file name intentionally contains spaces
-# and no underscores: CE QC APP.
 $ShortcutPath = Join-Path $Desktop 'CE QC APP.lnk'
 $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $AutoLauncher
-$Shortcut.Arguments = ''
-$Shortcut.WorkingDirectory = $ProjectRoot
+$Shortcut.TargetPath = $PowerShellExe
+$Shortcut.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $LauncherScript + '"'
+$Shortcut.WorkingDirectory = $LauncherRoot
 $Shortcut.Description = 'CE Express Quality Control APP - one click start'
-$Shortcut.WindowStyle = 1
-$Shortcut.IconLocation = $IconPath + ',0'
+$Shortcut.WindowStyle = 7
+if (Test-Path -LiteralPath $LauncherIcon) {
+  $Shortcut.IconLocation = $LauncherIcon + ',0'
+}
 $Shortcut.Save()
 
 if (-not (Test-Path -LiteralPath $ShortcutPath)) {
-  throw "Shortcut save returned without creating the file: $ShortcutPath"
+  throw "Desktop shortcut was not created: $ShortcutPath"
 }
 
-$SavedShortcut = $Shell.CreateShortcut($ShortcutPath)
-if ([string]$SavedShortcut.TargetPath -ne [string]$AutoLauncher) {
-  throw "Shortcut target verification failed. Expected: $AutoLauncher ; Saved: $($SavedShortcut.TargetPath)"
+# Verify that NO Chinese project path is stored in shortcut target/arguments.
+$Saved = $Shell.CreateShortcut($ShortcutPath)
+if ([string]$Saved.TargetPath -ne [string]$PowerShellExe) {
+  throw "Shortcut target verification failed: $($Saved.TargetPath)"
 }
-if ([string]$SavedShortcut.Arguments) {
-  throw "Shortcut unexpectedly contains launcher arguments: $($SavedShortcut.Arguments)"
+if ([string]$Saved.Arguments -notlike '*CE_QC_LAUNCHER*Launch_CE_QC.ps1*') {
+  throw "Shortcut launcher verification failed: $($Saved.Arguments)"
 }
-if ([string]$SavedShortcut.IconLocation -notlike '*CE_QC_APP.ico*') {
-  throw "Shortcut icon verification failed. Saved icon: $($SavedShortcut.IconLocation)"
+if ([string]$Saved.Arguments -like "*$ProjectRoot*") {
+  throw 'Shortcut still contains the Unicode project path; installation aborted.'
+}
+if ((Test-Path -LiteralPath $LauncherIcon) -and ([string]$Saved.IconLocation -notlike '*CE_EXPRESS_APP.ico*')) {
+  throw "Shortcut icon verification failed: $($Saved.IconLocation)"
 }
 
-# Force Explorer to discard the old generic/blank icon presentation.
+# Refresh Explorer icon presentation. A new ASCII icon path avoids stale cache
+# entries from the old CE_QC_APP shortcut.
 try {
   $Ie4uinit = Join-Path $env:WINDIR 'System32\ie4uinit.exe'
   if (Test-Path -LiteralPath $Ie4uinit) {
-    Start-Process -FilePath $Ie4uinit -ArgumentList '-ClearIconCache' -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue | Out-Null
-    Start-Process -FilePath $Ie4uinit -ArgumentList '-show' -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue | Out-Null
+    Start-Process -FilePath $Ie4uinit -ArgumentList '-show' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
   }
 } catch {}
 
 Write-Host ''
 Write-Host '==============================================' -ForegroundColor Cyan
-Write-Host 'CE QC desktop launcher repaired successfully.' -ForegroundColor Green
+Write-Host 'CE QC desktop launcher installed successfully.' -ForegroundColor Green
 Write-Host '==============================================' -ForegroundColor Cyan
-Write-Host "Desktop: $Desktop"
-Write-Host "Desktop launcher: $ShortcutPath"
-Write-Host "Target: $AutoLauncher"
-Write-Host "CE EXPRESS icon: $IconPath" -ForegroundColor Green
-Write-Host 'Visible name must be: CE QC APP' -ForegroundColor Yellow
-Write-Host 'No underscore shortcut should remain on any detected Desktop.' -ForegroundColor DarkGray
+Write-Host "Desktop shortcut: $ShortcutPath"
+Write-Host "ASCII launcher:   $LauncherScript"
+Write-Host "Project bridge:   $AppLink"
+if (Test-Path -LiteralPath $LauncherIcon) { Write-Host "CE EXPRESS icon:  $LauncherIcon" -ForegroundColor Green }
+Write-Host 'Daily use: double-click CE QC APP.' -ForegroundColor Yellow
+Write-Host 'The desktop shortcut no longer stores the Chinese project path.' -ForegroundColor DarkGray
 Start-Sleep -Seconds 2
