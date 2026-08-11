@@ -1,10 +1,9 @@
-import { loadMetricDetail as loadMetricDetailV55, loadRangeDashboard as loadRangeDashboardV55 } from './rangeDashboardStoreV55.js';
+import { loadRangeDashboard as loadRangeDashboardV55 } from './rangeDashboardStoreV55.js';
 import { classifyFinalRoutingDestination, ROUTING_DESTINATIONS } from './routingDestinationV48.js';
 
-const PATCH_ID='2026-08-11-v58-carry-threshold-truth-v4';
+const PATCH_ID='2026-08-11-v59-metric-detail-state-parity-v1';
 const CCSL_TYPES=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
-const ABNORMAL_TABS=new Set(['coreAbnormal','abnormal','severeAbnormal']);
 
 export function loadRangeDashboard(fromDate,toDate){
   const range=loadRangeDashboardV55(fromDate,toDate);
@@ -13,29 +12,56 @@ export function loadRangeDashboard(fromDate,toDate){
   return {...range,queryMode:`${range.queryMode||'SQL'}+CARRY_THRESHOLD_V58`,reconciliationRuleVersion:PATCH_ID};
 }
 
+// Metric drill-down must read the exact same already-built state/detailTabs that
+// produced the card summary. Do not independently re-query/reclassify the same
+// date range here: that previously allowed a visible card such as 金边门店=11 to
+// open a second code path that returned 0 rows.
 export function loadMetricDetail({businessType='CCSL',fromDate='',toDate='',tab='allData',page=1,pageSize=200}={}){
   const type=String(businessType||'CCSL').trim().toUpperCase();
-  const key=String(tab||'allData');
-  if(!ABNORMAL_TABS.has(key)){
-    return normalizeDetailResult(loadMetricDetailV55({businessType:type,fromDate,toDate,tab:key,page,pageSize}));
-  }
-
+  const key=normalizeDetailKey(type,String(tab||'allData'));
   const range=loadRangeDashboardV55(fromDate,toDate);
   const state=pickState(range,type);
   patchState(state);
-  const source=key==='severeAbnormal'
-    ? state?.detailTabs?.severeAbnormal?.rows||[]
-    : state?.detailTabs?.coreAbnormal?.rows||state?.detailTabs?.abnormal?.rows||[];
-  const rows=unique(source).map(normalizeRegistryRowDisplay);
+
+  const detail=state?.detailTabs?.[key]||state?.dashboard?.detailTabs?.[key]||null;
+  const rows=unique(detail?.rows||[]).map(normalizeRegistryRowDisplay);
   const safePage=Math.max(1,Number(page||1)||1);
   const safeSize=Math.max(1,Math.min(500,Number(pageSize||200)||200));
   const start=(safePage-1)*safeSize;
-  return {ok:true,patchId:PATCH_ID,businessType:type,fromDate,toDate,tab:key,page:safePage,pageSize:safeSize,total:rows.length,rows:rows.slice(start,start+safeSize)};
+  return {
+    ok:true,
+    patchId:PATCH_ID,
+    source:'V58_STATE_DETAIL_TABS',
+    businessType:type,
+    fromDate,
+    toDate,
+    tab:key,
+    requestedTab:String(tab||''),
+    page:safePage,
+    pageSize:safeSize,
+    total:rows.length,
+    rows:rows.slice(start,start+safeSize)
+  };
 }
 
-function normalizeDetailResult(result){
-  if(!result||!Array.isArray(result.rows))return result;
-  return {...result,patchId:PATCH_ID,rows:result.rows.map(normalizeRegistryRowDisplay)};
+function normalizeDetailKey(type,key){
+  const raw=String(key||'').trim();
+  const common={
+    all:'allData',
+    cecnRetention:'ccslCnDiversion',
+    ceztRetention:'ccslZtDiversion',
+    ccsl580Diversion:'ccsl580Retention',
+    cycle2plus:'cycle2'
+  };
+  if(SHOPEE_TYPES.has(type)||type==='SHOPEE'){
+    const shopee={
+      allData:'all',podClosed:'pod',accountingReturned:'returned',accountingOpen:'unresolved',
+      pendingAll:'pending1',pending2plus:'pending2',ocAll:'oc1',oc2plus:'oc2',
+      cycle2plus:'cycle2'
+    };
+    return shopee[raw]||raw;
+  }
+  return common[raw]||raw;
 }
 
 function pickState(range,type){
