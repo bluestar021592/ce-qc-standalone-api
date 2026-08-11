@@ -75,6 +75,8 @@ test('V55 UI reconciles legacy top cards from the authoritative V55 summary endp
   assert.match(ui,/'CCSLCN分流':s\.ccslCnDiversion/);
   assert.match(ui,/ensureCoreCard\(grid,type,label/);
   assert.match(ui,/MutationObserver/);
+  assert.match(ui,/function setText\(node,text\)/);
+  assert.match(ui,/record\.addedNodes/);
 });
 
 test('V55 home core metrics use the same exact drilldown endpoint',()=>{
@@ -88,7 +90,7 @@ test('V55 home core metrics use the same exact drilldown endpoint',()=>{
 
 test('V55 is injected after previous dashboard compatibility scripts with a fresh cache key',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-3/);
+  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-4/);
   assert.match(injector,/v55-home-drilldown\.js/);
   assert.ok(injector.indexOf('v55-dashboard-reconciliation.js')>injector.indexOf('v50-dashboard-source-truth.js'));
 });
