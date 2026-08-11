@@ -1,14 +1,13 @@
-import { loadRangeDashboard as loadRangeDashboardV55 } from './rangeDashboardStoreV55.js';
+import { loadRangeDashboard as loadRangeDashboardV58 } from './rangeDashboardStoreV58.js';
 
-// V55 correctness needs the canonical row set while it calculates each metric,
-// but bootstrap/business-state responses must stay lightweight. Keep the small
-// dashboard metric row list plus a bounded residual-abnormal preview. Full
-// shipment drill-down is served on demand by /api/v55/metric-detail.
+// V58 keeps V55's canonical row source but applies the final carry/severe thresholds
+// before bootstrap/business-state responses are compacted. Full shipment drill-down
+// remains on demand via the metric-detail endpoint.
 export function loadRangeDashboard(fromDate,toDate){
-  const range=loadRangeDashboardV55(fromDate,toDate);
+  const range=loadRangeDashboardV58(fromDate,toDate);
   for(const state of Object.values(range.states||{}))compactState(state);
   for(const state of Object.values(range.aggregates||{}))compactState(state);
-  return {...range,queryMode:`${range.queryMode||'SQL'}+COMPACT_V55`};
+  return {...range,queryMode:`${range.queryMode||'SQL'}+COMPACT_V58`};
 }
 
 function compactState(state){
@@ -24,9 +23,9 @@ function compactTabs(tabs){
     if(!value||typeof value!=='object')continue;
     const rows=Array.isArray(value.rows)?value.rows:[];
     if(key==='dashboard')value.rows=rows.slice(0,100);
-    else if(['coreAbnormal','abnormal'].includes(key))value.rows=rows.slice(0,300);
+    else if(['coreAbnormal','abnormal','severeAbnormal'].includes(key))value.rows=rows.slice(0,300);
     else value.rows=[];
   }
 }
 
-export const RANGE_DASHBOARD_V55_COMPACT_ID='2026-08-11-v55-dashboard-reconciliation-compact-v2';
+export const RANGE_DASHBOARD_V55_COMPACT_ID='2026-08-11-v58-carry-threshold-compact-v1';
