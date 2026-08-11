@@ -104,7 +104,7 @@ test('V57 trend truth actively blocks fake seven-day charts when history is insu
 
 test('V55 and V57 are injected after previous dashboard compatibility scripts with fresh cache keys',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-5/);
+  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-6/);
   assert.match(injector,/v55-home-drilldown\.js/);
   assert.match(injector,/v56-trend-truth\.js\?v=20260811-2/);
   assert.ok(injector.indexOf('v55-dashboard-reconciliation.js')>injector.indexOf('v50-dashboard-source-truth.js'));
