@@ -6,14 +6,10 @@ const SHOPEE_TYPES = Object.freeze(['SHOPEECN', 'SHOPEEVN']);
 /**
  * V33 is a narrow correctness layer over the final range dashboard.
  *
- * Older fast-range SQL only counted podAttemptNo. The live Shopee analyzer
- * persists the actual POD timestamp (POD时间 / podTime / terminalObservedAt)
- * and may legitimately leave podAttemptNo empty. That made every 1/2/3派
- * metric render as zero even though POD rows existed.
- *
- * This wrapper keeps V31/final snapshot selection and every other metric intact,
- * but recalculates dispatch attempt day from the persisted POD timestamp when an
- * explicit attempt number is unavailable.
+ * Dispatch attempt classification uses the strongest persisted evidence in this
+ * order: podAttemptNo -> currentAttemptNo -> POD timestamp relative to report day.
+ * This preserves exact track-derived attempt numbers while allowing terminal POD
+ * rows that retained currentAttemptNo to participate instead of rendering 0%.
  */
 export function loadRangeDashboard(fromDate, toDate) {
   const range = loadFinalRangeDashboard(fromDate, toDate);
@@ -27,7 +23,7 @@ export function loadRangeDashboard(fromDate, toDate) {
   return {
     ...range,
     queryMode: `${range.queryMode || 'SQL'}+SHOPEE_DISPATCH_TIMESTAMP_V33`,
-    dispatchAttemptRuleVersion: '2026-08-10-pod-timestamp-fallback-v1'
+    dispatchAttemptRuleVersion: '2026-08-11-pod-attempt-current-attempt-timestamp-fallback-v2'
   };
 }
 
@@ -74,6 +70,8 @@ function queryDispatchAttemptFacts(fromDate, toDate) {
         COALESCE(
           NULLIF(CAST(f.podAttemptNo AS INTEGER),0),
           NULLIF(CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0),
+          NULLIF(CAST(f.currentAttemptNo AS INTEGER),0),
+          NULLIF(CAST(json_extract(f.rawJson,'$.currentAttemptNo') AS INTEGER),0),
           0
         ) AS explicitAttempt,
         COALESCE(
@@ -150,7 +148,7 @@ function patchShopeeState(state, rows, label) {
     pod: all.pod,
     classifiedPod: all.attempt1 + all.attempt2 + all.attempt3,
     unclassifiedPod: all.podAttemptUnknown,
-    rule: 'EXPLICIT_ATTEMPT_THEN_POD_TIMESTAMP'
+    rule: 'POD_ATTEMPT_THEN_CURRENT_ATTEMPT_THEN_POD_TIMESTAMP'
   };
 }
 
