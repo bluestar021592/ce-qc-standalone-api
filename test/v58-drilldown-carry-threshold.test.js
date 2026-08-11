@@ -45,15 +45,27 @@ test('V58 drilldown resolves business context and renamed registry cards without
   for(const label of ['CCSL580','CEZT','CCSLCN','金边门店','外省门店','严重异常'])assert.match(ui,new RegExp(label));
 });
 
+test('V55 compatibility layer canonicalizes registry names and removes duplicate core cards',()=>{
+  const ui=read('public/v55-dashboard-reconciliation.js');
+  assert.match(ui,/return'CCSLCN'/);
+  assert.match(ui,/return'CEZT'/);
+  assert.match(ui,/return'CCSL580'/);
+  assert.match(ui,/dedupeCoreCards/);
+  assert.match(ui,/card\.remove\(\)/);
+  assert.match(ui,/\['未闭环','严重异常','CCSLCN','CEZT','CCSL580','金边门店','外省门店'\]/);
+  assert.doesNotMatch(ui,/const wanted=\['未闭环','严重异常','CCSLCN分流','CCSLZT分流','580滞留包裹'/);
+});
+
 test('V58 UI is injected after V55 and trend compatibility layers with fresh cache key',()=>{
   const injector=read('src/v44WhppUiPatch.js');
+  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-5/);
   assert.match(injector,/v58-drilldown-runtime\.js\?v=20260811-2/);
   assert.ok(injector.indexOf('v58-drilldown-runtime.js')>injector.indexOf('v55-dashboard-reconciliation.js'));
   assert.ok(injector.indexOf('v58-drilldown-runtime.js')>injector.indexOf('v56-trend-truth.js'));
 });
 
 test('V58 JavaScript files pass syntax checks',()=>{
-  for(const relative of ['src/rangeDashboardStoreV58.js','public/v58-drilldown-runtime.js','src/v55DashboardReconciliationPatch.js','src/rangeDashboardStoreV55Compact.js']){
+  for(const relative of ['src/rangeDashboardStoreV58.js','public/v58-drilldown-runtime.js','public/v55-dashboard-reconciliation.js','src/v55DashboardReconciliationPatch.js','src/rangeDashboardStoreV55Compact.js']){
     const result=spawnSync(process.execPath,['--check',path.resolve(relative)],{encoding:'utf8'});
     assert.equal(result.status,0,`${relative} syntax failed:\n${result.stderr||result.stdout}`);
   }
