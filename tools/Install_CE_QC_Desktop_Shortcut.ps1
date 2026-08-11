@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ProjectLauncher = Join-Path $ProjectRoot 'Start_CE_QC.ps1'
-$IconSourceB64 = Join-Path $ProjectRoot 'assets\CE_EXPRESS_DESKTOP_V4.ico.b64'
+$IconSourceB64 = Join-Path $ProjectRoot 'assets\CE_EXPRESS_DESKTOP_V5.ico.b64'
 if (-not (Test-Path -LiteralPath $ProjectLauncher)) {
   throw "CE QC project launcher not found: $ProjectLauncher"
 }
@@ -12,6 +12,7 @@ if (-not (Test-Path -LiteralPath $IconSourceB64)) {
 
 $Shell = New-Object -ComObject WScript.Shell
 
+# Resolve the actual Windows desktop path, including redirected/OneDrive desktops.
 $DesktopCandidates = New-Object System.Collections.Generic.List[string]
 function Add-DesktopCandidate([string]$Path) {
   if ([string]::IsNullOrWhiteSpace($Path)) { return }
@@ -36,15 +37,14 @@ if (-not $Desktop) {
   Add-DesktopCandidate $Desktop
 }
 
-# Keep the complete desktop launch chain in an ASCII-only location.
+# Keep the complete desktop launch chain under an ASCII-only path.
 $LauncherRoot = Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER'
 $AppLink = Join-Path $LauncherRoot 'app'
 $LauncherPs1 = Join-Path $LauncherRoot 'Launch_CE_QC.ps1'
-$LauncherIcon = Join-Path $LauncherRoot 'CE_EXPRESS_APP_V4.ico'
+$LauncherIcon = Join-Path $LauncherRoot 'CE_EXPRESS_APP_V5.ico'
 New-Item -ItemType Directory -Path $LauncherRoot -Force | Out-Null
 
-# Rebuild the project bridge. The real source tree can stay in the Chinese path,
-# while every process launched by the desktop shortcut sees the ASCII junction.
+# Rebuild the ASCII junction to the real project directory.
 if (Test-Path -LiteralPath $AppLink) {
   $existing = Get-Item -LiteralPath $AppLink -Force
   if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) {
@@ -55,14 +55,18 @@ if (Test-Path -LiteralPath $AppLink) {
 }
 New-Item -ItemType Junction -Path $AppLink -Target $ProjectRoot | Out-Null
 
-# Decode the exact CE EXPRESS ICO generated from the user's supplied artwork.
-$iconB64 = (Get-Content -LiteralPath $IconSourceB64 -Raw -ErrorAction Stop) -replace '\s',''
+# Decode a validated ICO generated from the exact CE EXPRESS artwork supplied by the user.
+$iconB64 = Get-Content -LiteralPath $IconSourceB64 -Raw -ErrorAction Stop
+$iconB64 = $iconB64 -replace '[^A-Za-z0-9+/=]', ''
+$remainder = $iconB64.Length % 4
+if ($remainder -ne 0) { $iconB64 += ('=' * (4 - $remainder)) }
 $iconBytes = [Convert]::FromBase64String($iconB64)
 if ($iconBytes.Length -lt 100 -or $iconBytes[0] -ne 0 -or $iconBytes[1] -ne 0 -or $iconBytes[2] -ne 1 -or $iconBytes[3] -ne 0) {
   throw 'CE EXPRESS desktop icon source is not a valid ICO file.'
 }
 [IO.File]::WriteAllBytes($LauncherIcon, $iconBytes)
 
+# Hidden launcher. It never uses CMD or Windows Script Host.
 $LauncherPs1Content = @'
 $ErrorActionPreference = 'Stop'
 $url = 'http://127.0.0.1:5177/'
@@ -71,8 +75,7 @@ $logFile = Join-Path $launcherRoot 'launcher_latest.log'
 
 function Write-LauncherLog([string]$Text) {
   try {
-    $line = ('{0:yyyy-MM-dd HH:mm:ss.fff} {1}' -f (Get-Date), $Text)
-    Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
+    Add-Content -LiteralPath $logFile -Value (('{0:yyyy-MM-dd HH:mm:ss.fff} {1}' -f (Get-Date), $Text)) -Encoding UTF8
   } catch {}
 }
 
@@ -101,7 +104,7 @@ function Show-LauncherError([string]$Message) {
 
 try {
   Remove-Item -LiteralPath $logFile -Force -ErrorAction SilentlyContinue
-  Write-LauncherLog 'Desktop launcher started.'
+  Write-LauncherLog 'Desktop launcher V5 started.'
 
   if (Test-CeQcReady) {
     Write-LauncherLog 'Backend already ready. Opening browser.'
@@ -123,28 +126,44 @@ try {
   }
 
   Write-LauncherLog ('Starting hidden supervisor: ' + $supervisor)
-  $quotedSupervisor = '"' + $supervisor + '"'
-  Start-Process -FilePath $powerShellExe `
-    -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$quotedSupervisor) `
+  $proc = Start-Process -FilePath $powerShellExe `
+    -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $supervisor + '"')) `
     -WorkingDirectory $appRoot `
-    -WindowStyle Hidden | Out-Null
+    -WindowStyle Hidden `
+    -PassThru
 
-  # Start_CE_QC.ps1 verifies the backend and opens the browser itself when ready.
-  # This launcher exits immediately while the hidden supervisor keeps running.
-  Write-LauncherLog 'Hidden supervisor process created successfully.'
-  exit 0
+  # Wait silently for the supervisor/backend. Start_CE_QC.ps1 opens the browser when ready.
+  for ($i = 0; $i -lt 480; $i++) {
+    Start-Sleep -Milliseconds 500
+    if (Test-CeQcReady) {
+      Write-LauncherLog 'Backend became ready.'
+      exit 0
+    }
+    try {
+      $proc.Refresh()
+      if ($proc.HasExited) {
+        Write-LauncherLog ('Supervisor exited early with code ' + $proc.ExitCode)
+        break
+      }
+    } catch {}
+  }
+
+  $startupLog = Join-Path $appRoot 'logs\startup_latest.log'
+  Show-LauncherError ("CE QC did not become ready. Please send this message and the startup log to ChatGPT.`n`nStartup log: $startupLog`nLauncher log: $logFile")
+  exit 10
 }
 catch {
-  Show-LauncherError ('CE QC could not start: ' + $_.Exception.Message + "`n`nLog: " + $logFile)
-  exit 10
+  Show-LauncherError ('CE QC could not start: ' + $_.Exception.Message + "`n`nLauncher log: " + $logFile)
+  exit 11
 }
 '@
 [IO.File]::WriteAllText($LauncherPs1, $LauncherPs1Content, (New-Object Text.UTF8Encoding($false)))
 
-# Remove obsolete launcher files from LocalAppData as well as stale desktop links.
+# Remove old launchers and stale desktop links.
 Remove-Item -LiteralPath (Join-Path $LauncherRoot 'Launch_CE_QC.cmd') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $LauncherRoot 'Launch_CE_QC.vbs') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $LauncherRoot 'CE_EXPRESS_APP.ico') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $LauncherRoot 'CE_EXPRESS_APP_V4.ico') -Force -ErrorAction SilentlyContinue
 
 $OldNames = @(
   'CE_QC_APP.lnk','CE_QC_APP.vbs','CE_QC_APP.cmd','CE_QC_APP_START_INSTALLING.lnk',
@@ -168,8 +187,7 @@ foreach ($desk in ($DesktopCandidates | Select-Object -Unique)) {
   }
 }
 
-# Direct hidden PowerShell shortcut: no CMD console window, no VBS/WSH, and no
-# Unicode project path is stored in the desktop shortcut.
+# Direct hidden PowerShell shortcut: no CMD console and no VBS/WSH.
 $PowerShellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $PowerShellExe)) { throw 'powershell.exe was not found.' }
 
@@ -183,24 +201,14 @@ $Shortcut.WindowStyle = 7
 $Shortcut.IconLocation = $LauncherIcon + ',0'
 $Shortcut.Save()
 
-if (-not (Test-Path -LiteralPath $ShortcutPath)) {
-  throw "Desktop shortcut was not created: $ShortcutPath"
-}
+if (-not (Test-Path -LiteralPath $ShortcutPath)) { throw "Desktop shortcut was not created: $ShortcutPath" }
 $Saved = $Shell.CreateShortcut($ShortcutPath)
-if ([string]$Saved.TargetPath -ne [string]$PowerShellExe) {
-  throw "Shortcut target verification failed: $($Saved.TargetPath)"
-}
-if ([string]$Saved.Arguments -notlike '*CE_QC_LAUNCHER*Launch_CE_QC.ps1*') {
-  throw "Shortcut arguments verification failed: $($Saved.Arguments)"
-}
-if ([string]$Saved.TargetPath -like "*$ProjectRoot*" -or [string]$Saved.Arguments -like "*$ProjectRoot*") {
-  throw 'Shortcut still contains the Unicode project path; installation aborted.'
-}
-if ([string]$Saved.IconLocation -notlike '*CE_EXPRESS_APP_V4.ico*') {
-  throw "Shortcut icon verification failed: $($Saved.IconLocation)"
-}
+if ([string]$Saved.TargetPath -ne [string]$PowerShellExe) { throw "Shortcut target verification failed: $($Saved.TargetPath)" }
+if ([string]$Saved.Arguments -notlike '*CE_QC_LAUNCHER*Launch_CE_QC.ps1*') { throw "Shortcut arguments verification failed: $($Saved.Arguments)" }
+if ([string]$Saved.TargetPath -like "*$ProjectRoot*" -or [string]$Saved.Arguments -like "*$ProjectRoot*") { throw 'Shortcut still contains the Unicode project path; installation aborted.' }
+if ([string]$Saved.IconLocation -notlike '*CE_EXPRESS_APP_V5.ico*') { throw "Shortcut icon verification failed: $($Saved.IconLocation)" }
 
-# Force Explorer to notice the new V4 icon path.
+# Force Explorer to notice the new V5 icon path.
 try {
   $Ie4uinit = Join-Path $env:WINDIR 'System32\ie4uinit.exe'
   if (Test-Path -LiteralPath $Ie4uinit) {
@@ -212,7 +220,7 @@ try {
 
 Write-Host ''
 Write-Host '====================================================' -ForegroundColor Cyan
-Write-Host 'CE QC desktop launcher V4 installed successfully.' -ForegroundColor Green
+Write-Host 'CE QC desktop launcher V5 installed successfully.' -ForegroundColor Green
 Write-Host '====================================================' -ForegroundColor Cyan
 Write-Host "Desktop:          $Desktop"
 Write-Host "Shortcut:         $ShortcutPath"
