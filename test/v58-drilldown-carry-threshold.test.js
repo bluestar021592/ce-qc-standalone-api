@@ -90,8 +90,8 @@ test('V55 compatibility layer canonicalizes registry names and removes duplicate
 
 test('V58 UI is injected after V55 and trend compatibility layers with fresh cache key',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-5/);
-  assert.match(injector,/v58-drilldown-runtime\.js\?v=20260811-3/);
+  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-6/);
+  assert.match(injector,/v58-drilldown-runtime\.js\?v=20260811-4/);
   assert.ok(injector.indexOf('v58-drilldown-runtime.js')>injector.indexOf('v55-dashboard-reconciliation.js'));
   assert.ok(injector.indexOf('v58-drilldown-runtime.js')>injector.indexOf('v56-trend-truth.js'));
 });
