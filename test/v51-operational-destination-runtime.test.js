@@ -19,6 +19,14 @@ test('V51 inherited anomaly excludes dedicated normal destinations and includes 
   assert.match(carrySource,/if \(!reason\) continue/);
 });
 
+test('V57 carry anomaly honors explicit business thresholds before generic stale age',()=>{
+  assert.match(carrySource,/hasExplicitThresholdState/);
+  assert.match(carrySource,/盘点1天 is NOT promoted/);
+  assert.match(carrySource,/if \(cycle >= 2\) return '盘点2天\+'/);
+  assert.match(carrySource,/if \(hasExplicitThresholdState\) return ''/);
+  assert.ok(carrySource.indexOf("if (hasExplicitThresholdState) return ''") < carrySource.indexOf("if (stale >= 3) return '3天+无新节点'"));
+});
+
 test('V51 browser runtime forces source-truth WHPP routes, exact special drilldown and WHPP home share',()=>{
   assert.match(uiSource,/\/api\/v50\/whpp-state/);
   assert.match(uiSource,/\/api\/v50\/whpp-metric-detail/);

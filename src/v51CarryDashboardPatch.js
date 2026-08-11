@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { classifyFinalRoutingDestination, ROUTING_DESTINATIONS } from './routingDestinationV48.js';
 
-const PATCH_ID = '2026-08-11-v51-carry-dashboard-v1';
+const PATCH_ID = '2026-08-11-v57-carry-threshold-precedence-v2';
 const BUSINESS_TYPES = ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
 const ROUTING_NORMAL = new Set([
   ROUTING_DESTINATIONS.CCSLCN,
@@ -70,7 +70,7 @@ function isNormalOperationalDestination(state = {}, persisted = '') {
 }
 function abnormalReason(state = {}, latestEventTime = '', persisted = '') {
   // POD / returned / cancelled / self pickup / CCSLCN / CCSLZT / CCSL580 /
-  // Phnom Penh shop are operational outcomes, never inherited anomalies.
+  // normal shop flow are operational outcomes, never inherited anomalies.
   if (isNormalOperationalDestination(state, persisted)) return '';
   if (isReturnInProgress(state, persisted)) return '';
 
@@ -94,6 +94,11 @@ function abnormalReason(state = {}, latestEventTime = '', persisted = '') {
   const cycle = n(state.盘点天数 ?? state.cycleCountDays);
   const delivery = n(state.派送中停留天数 ?? state.派送中天数 ?? state.deliveryDays);
   const returnRequired = state.退回待处理 === '是' || state.returnRequired === true || /三次Pending后/.test(category);
+  const explicitStateText = upper(`${category} ${name} ${state.scanNormalizedState || ''}`);
+  // A known state with its own business threshold must be judged by that threshold first.
+  // Example: 盘点1天 is NOT promoted to "3天+无新节点" merely because the old carry row is 41 days old.
+  const hasExplicitThresholdState = pending > 0 || oc > 0 || cycle > 0 || delivery > 0 ||
+    /PENDING|\bOC\b|盘点|CYCLE|派送|DELIVERY|门店|SHOP_|入库无扫描|工单/.test(explicitStateText);
 
   if (returnRequired) return '三次Pending后未正常闭环';
   if (pending >= 2 && nonContinuous) return 'Pending不连续';
@@ -104,6 +109,7 @@ function abnormalReason(state = {}, latestEventTime = '', persisted = '') {
   if (/工单/.test(category)) return '工单未处理';
   if (delivery >= 2 && stale >= 1) return '派送停留2天+';
   if (/无轨迹/.test(category)) return '无轨迹';
+  if (hasExplicitThresholdState) return '';
   if (stale >= 3) return '3天+无新节点';
   return '';
 }
@@ -180,19 +186,19 @@ function handler(req, res) {
     };
     res.setHeader('Cache-Control', 'no-store');
     res.json({
-      ok:true, patchId:PATCH_ID, semantics:'ANOMALY_ONLY_EXCLUDES_NORMAL_DESTINATIONS',
+      ok:true, patchId:PATCH_ID, semantics:'ANOMALY_ONLY_THRESHOLD_PRECEDENCE',
       status,businessType,businessSummary:{ ALL:allFiltered.length, ...counts },summary,
       rows:scoped.slice(0,limit),pageSize:limit,generatedAt:new Date().toISOString()
     });
   } catch (error) {
-    console.error('[V51][CARRY_MONITOR]', error);
+    console.error('[V57][CARRY_MONITOR]', error);
     res.status(500).json({ ok:false, patchId:PATCH_ID, error:error.message || String(error) });
   }
 }
 
 let installed = false;
 const previousListen = express.application.listen;
-express.application.listen = function v51CarryDashboardListen(...args) {
+express.application.listen = function v57CarryDashboardListen(...args) {
   if (!installed) {
     installed = true;
     this.get('/api/v51/carry-monitor', handler);

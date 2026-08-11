@@ -88,25 +88,29 @@ test('V55 home core metrics use the same exact drilldown endpoint',()=>{
   assert.match(ui,/外省门店/);
 });
 
-test('V56 trend truth does not fabricate history and exposes missing dispatch evidence',()=>{
+test('V57 trend truth actively blocks fake seven-day charts when history is insufficient',()=>{
   const ui=read('public/v56-trend-truth.js');
   assert.match(ui,/\/api\/v27\/trends/);
-  assert.match(ui,/至少导入 2 个不同日期后才显示真实趋势/);
+  assert.match(ui,/至少导入 2 个不同日期后才显示折线/);
+  assert.match(ui,/v56-trend-blocker/);
+  assert.match(ui,/applySectionBlocks/);
+  assert.match(ui,/unionDates/);
+  assert.match(ui,/inspectHome/);
   assert.match(ui,/attemptUnknownPod/);
   assert.match(ui,/缺少可验证的派次证据/);
   assert.match(ui,/不会被硬算成1派\/2派\/3派/);
 });
 
-test('V55 and V56 are injected after previous dashboard compatibility scripts with fresh cache keys',()=>{
+test('V55 and V57 are injected after previous dashboard compatibility scripts with fresh cache keys',()=>{
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-4/);
   assert.match(injector,/v55-home-drilldown\.js/);
-  assert.match(injector,/v56-trend-truth\.js\?v=20260811-1/);
+  assert.match(injector,/v56-trend-truth\.js\?v=20260811-2/);
   assert.ok(injector.indexOf('v55-dashboard-reconciliation.js')>injector.indexOf('v50-dashboard-source-truth.js'));
   assert.ok(injector.indexOf('v56-trend-truth.js')>injector.indexOf('v55-dashboard-reconciliation.js'));
 });
 
-test('V55 and V56 JavaScript files pass syntax checks',()=>{
+test('V55 and V57 JavaScript files pass syntax checks',()=>{
   for(const relative of ['src/rangeDashboardStoreV55.js','src/rangeDashboardStoreV55Compact.js','src/v55DashboardReconciliationPatch.js','public/v55-dashboard-reconciliation.js','public/v55-home-drilldown.js','public/v56-trend-truth.js']){
     const result=spawnSync(process.execPath,['--check',path.resolve(relative)],{encoding:'utf8'});
     assert.equal(result.status,0,`${relative} syntax failed:\n${result.stderr||result.stdout}`);
