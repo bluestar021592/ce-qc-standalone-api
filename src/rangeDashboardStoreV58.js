@@ -1,7 +1,7 @@
 import { loadMetricDetail as loadMetricDetailV55, loadRangeDashboard as loadRangeDashboardV55 } from './rangeDashboardStoreV55.js';
-import { classifyFinalRoutingDestination } from './routingDestinationV48.js';
+import { classifyFinalRoutingDestination, ROUTING_DESTINATIONS } from './routingDestinationV48.js';
 
-const PATCH_ID='2026-08-11-v58-carry-threshold-truth-v3';
+const PATCH_ID='2026-08-11-v58-carry-threshold-truth-v4';
 const CCSL_TYPES=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 const ABNORMAL_TABS=new Set(['coreAbnormal','abnormal','severeAbnormal']);
@@ -16,7 +16,9 @@ export function loadRangeDashboard(fromDate,toDate){
 export function loadMetricDetail({businessType='CCSL',fromDate='',toDate='',tab='allData',page=1,pageSize=200}={}){
   const type=String(businessType||'CCSL').trim().toUpperCase();
   const key=String(tab||'allData');
-  if(!ABNORMAL_TABS.has(key))return loadMetricDetailV55({businessType:type,fromDate,toDate,tab:key,page,pageSize});
+  if(!ABNORMAL_TABS.has(key)){
+    return normalizeDetailResult(loadMetricDetailV55({businessType:type,fromDate,toDate,tab:key,page,pageSize}));
+  }
 
   const range=loadRangeDashboardV55(fromDate,toDate);
   const state=pickState(range,type);
@@ -24,11 +26,16 @@ export function loadMetricDetail({businessType='CCSL',fromDate='',toDate='',tab=
   const source=key==='severeAbnormal'
     ? state?.detailTabs?.severeAbnormal?.rows||[]
     : state?.detailTabs?.coreAbnormal?.rows||state?.detailTabs?.abnormal?.rows||[];
-  const rows=unique(source);
+  const rows=unique(source).map(normalizeRegistryRowDisplay);
   const safePage=Math.max(1,Number(page||1)||1);
   const safeSize=Math.max(1,Math.min(500,Number(pageSize||200)||200));
   const start=(safePage-1)*safeSize;
   return {ok:true,patchId:PATCH_ID,businessType:type,fromDate,toDate,tab:key,page:safePage,pageSize:safeSize,total:rows.length,rows:rows.slice(start,start+safeSize)};
+}
+
+function normalizeDetailResult(result){
+  if(!result||!Array.isArray(result.rows))return result;
+  return {...result,patchId:PATCH_ID,rows:result.rows.map(normalizeRegistryRowDisplay)};
 }
 
 function pickState(range,type){
@@ -42,7 +49,7 @@ function patchState(state){
   if(!state)return;
   const tabs=state.detailTabs||{};
   const source=unique([...(tabs.coreAbnormal?.rows||[]),...(tabs.abnormal?.rows||[])]);
-  const abnormal=source.filter(isActionableCarryRow);
+  const abnormal=source.filter(isActionableCarryRow).map(normalizeRegistryRowDisplay);
   const severe=abnormal.filter(isSevereCarryRow);
   setTab(tabs,'coreAbnormal','遗留异常',abnormal);
   setTab(tabs,'abnormal','遗留异常',abnormal);
@@ -69,9 +76,13 @@ function patchState(state){
 
 function renameRegistryTabs(tabs){
   if(!tabs||typeof tabs!=='object')return;
-  for(const key of ['cecnRetention','ccslCnDiversion'])if(tabs[key])tabs[key].label='CCSLCN';
-  for(const key of ['ceztRetention','ccslZtDiversion'])if(tabs[key])tabs[key].label='CEZT';
-  for(const key of ['ccsl580Retention','ccsl580Diversion'])if(tabs[key])tabs[key].label='CCSL580';
+  for(const [keys,label] of [[['cecnRetention','ccslCnDiversion'],'CCSLCN'],[['ceztRetention','ccslZtDiversion'],'CEZT'],[['ccsl580Retention','ccsl580Diversion'],'CCSL580']]){
+    for(const key of keys){
+      if(!tabs[key])continue;
+      tabs[key].label=label;
+      if(Array.isArray(tabs[key].rows))tabs[key].rows=tabs[key].rows.map(normalizeRegistryRowDisplay);
+    }
+  }
 }
 
 function patchMetricRows(rows,abnormal,severe){
@@ -123,6 +134,15 @@ function isActionableCarryRow(row={}){
 function isNormalRegistryDestination(row={}){
   if(classifyFinalRoutingDestination(row).destination)return true;
   return /^(?:CCSLCN_DIVERSION|CCSLZT_DIVERSION|CCSL580_(?:RETENTION|DIVERSION)|CECN_RETENTION|CEZT_RETENTION)$/i.test(category(row));
+}
+
+function normalizeRegistryRowDisplay(row={}){
+  const destination=classifyFinalRoutingDestination(row).destination;
+  const label=destination===ROUTING_DESTINATIONS.CCSLCN?'CCSLCN'
+    :destination===ROUTING_DESTINATIONS.CCSLZT?'CEZT'
+      :destination===ROUTING_DESTINATIONS.CCSL580?'CCSL580':'';
+  if(!label)return row;
+  return {...row,当前分类:label,登记状态:'正常登记'};
 }
 
 function isSevereCarryRow(row={}){
