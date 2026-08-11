@@ -14,9 +14,9 @@ test('V55 facade is the canonical compact dashboard reader',()=>{
   assert.ok(bootstrap.indexOf('v55DashboardReconciliationPatch')<bootstrap.indexOf("'server'"));
 });
 
-test('V55 mutually excludes final CCSLCN ZT 580 from genuine unresolved',()=>{
+test('V55 mutually excludes final CCSLCN ZT 580 and normal destinations from genuine unresolved',()=>{
   const source=read('src/rangeDashboardStoreV55.js');
-  assert.match(source,/function isGenuineOpen\(r\)\{return !isTerminal\(r\)&&!destination\(r\)&&!isSelfPickup\(r\)&&!isPhnomPenhShop\(r\);\}/);
+  assert.match(source,/function isGenuineOpen\(r\)\{return !isTerminal\(r\)&&!destination\(r\)&&!isSelfPickup\(r\)&&!isReturnInProgress\(r\)&&!isNormalOperationalOpen\(r\)&&!isActiveShop\(r\);\}/);
   assert.match(source,/ROUTING_DESTINATIONS\.CCSLCN/);
   assert.match(source,/ROUTING_DESTINATIONS\.CCSLZT/);
   assert.match(source,/ROUTING_DESTINATIONS\.CCSL580/);
@@ -30,6 +30,16 @@ test('V55 distinguishes Phnom Penh shops from provincial and SHV shops',()=>{
   assert.match(source,/SHV/);
   assert.match(source,/SIHANOUK/);
   assert.match(source,/CCSL\[_:\\s-\]\*PV/);
+});
+
+test('V55 province-open is a location metric and does not itself create an abnormal',()=>{
+  const source=read('src/rangeDashboardStoreV55.js');
+  const abnormal=source.match(/function isActionableAbnormal\(r\)\{[\s\S]*?\n\}/)?.[0]||'';
+  assert.ok(abnormal,'isActionableAbnormal must exist');
+  assert.doesNotMatch(abnormal,/isProvinceOpen\(r\)/);
+  assert.match(abnormal,/isActiveShop\(r\)/);
+  assert.match(abnormal,/isStorePendingOrOc\(r\)/);
+  assert.match(abnormal,/shopRetentionNaturalDays/);
 });
 
 test('V55 one source drives card summary and exact detail rows',()=>{
