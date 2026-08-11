@@ -1,6 +1,7 @@
 import { loadMetricDetail as loadMetricDetailV55, loadRangeDashboard as loadRangeDashboardV55 } from './rangeDashboardStoreV55.js';
+import { classifyFinalRoutingDestination } from './routingDestinationV48.js';
 
-const PATCH_ID='2026-08-11-v58-carry-threshold-truth-v2';
+const PATCH_ID='2026-08-11-v58-carry-threshold-truth-v3';
 const CCSL_TYPES=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 const ABNORMAL_TABS=new Set(['coreAbnormal','abnormal','severeAbnormal']);
@@ -46,10 +47,12 @@ function patchState(state){
   setTab(tabs,'coreAbnormal','遗留异常',abnormal);
   setTab(tabs,'abnormal','遗留异常',abnormal);
   setTab(tabs,'severeAbnormal','严重异常',severe);
+  renameRegistryTabs(tabs);
   if(state.dashboard?.detailTabs){
     setTab(state.dashboard.detailTabs,'coreAbnormal','遗留异常',abnormal);
     setTab(state.dashboard.detailTabs,'abnormal','遗留异常',abnormal);
     setTab(state.dashboard.detailTabs,'severeAbnormal','严重异常',severe);
+    renameRegistryTabs(state.dashboard.detailTabs);
   }
   for(const summary of [state.v55Summary,state.dashboard?.v55Summary,state.dashboard?.metrics]){
     if(!summary||typeof summary!=='object')continue;
@@ -64,10 +67,24 @@ function patchState(state){
   }
 }
 
+function renameRegistryTabs(tabs){
+  if(!tabs||typeof tabs!=='object')return;
+  for(const key of ['cecnRetention','ccslCnDiversion'])if(tabs[key])tabs[key].label='CCSLCN';
+  for(const key of ['ceztRetention','ccslZtDiversion'])if(tabs[key])tabs[key].label='CEZT';
+  for(const key of ['ccsl580Retention','ccsl580Diversion'])if(tabs[key])tabs[key].label='CCSL580';
+}
+
 function patchMetricRows(rows,abnormal,severe){
   if(!Array.isArray(rows))return;
   for(const row of rows){
-    const label=String(row?.项目||row?.metricKey||row?.label||'').trim();
+    let label=String(row?.项目||row?.metricKey||row?.label||'').trim();
+    const renamed=registryLabel(label);
+    if(renamed!==label){
+      if('项目'in row)row.项目=renamed;
+      if('metricKey'in row)row.metricKey=renamed;
+      if('label'in row)row.label=renamed;
+      label=renamed;
+    }
     if(label==='严重异常')assignMetric(row,severe);
     if(['遗留异常','当前异常'].includes(label))assignMetric(row,abnormal);
   }
@@ -78,6 +95,11 @@ function assignMetric(row,value){
 function setTab(tabs,key,label,rows){if(!tabs||typeof tabs!=='object')return;const values=unique(rows);tabs[key]={...(tabs[key]||{}),label,rows:values,total:values.length};}
 
 function isActionableCarryRow(row={}){
+  // CEZT / CCSLCN / CCSL580 are normal registration destinations. Once the
+  // latest effective trajectory is there, the parcel must never appear in
+  // 遗留异常/严重异常, regardless of old Pending/OC/盘点/history/category text.
+  if(isNormalRegistryDestination(row))return false;
+
   const c=category(row);
   const pending=pendingDays(row),oc=ocDays(row),cycle=cycleDays(row);
 
@@ -93,9 +115,14 @@ function isActionableCarryRow(row={}){
   if(/正常流转|PICKUP_SUCCESS|正常门店|派送中|待派送|正常$/i.test(c))return false;
   if(/严重超时未更新|SEVERE|CRITICAL|严重异常/i.test(`${c} ${row.severity||row.严重等级||''}`))return true;
 
-  // V55 has already excluded terminal/special-destination/normal-flow rows.
-  // Keep only rows that still carry a concrete abnormal category.
+  // V55 has already excluded terminal/normal-flow rows. Keep only rows that
+  // still carry a concrete abnormal category after the V58 destination guard.
   return Boolean(c);
+}
+
+function isNormalRegistryDestination(row={}){
+  if(classifyFinalRoutingDestination(row).destination)return true;
+  return /^(?:CCSLCN_DIVERSION|CCSLZT_DIVERSION|CCSL580_(?:RETENTION|DIVERSION)|CECN_RETENTION|CEZT_RETENTION)$/i.test(category(row));
 }
 
 function isSevereCarryRow(row={}){
@@ -105,6 +132,13 @@ function isSevereCarryRow(row={}){
   return Math.max(pendingDays(row),ocDays(row),cycleDays(row),number(row.节点未更新天数))>=3;
 }
 
+function registryLabel(value=''){
+  const label=String(value||'').trim();
+  if(['CCSLCN分流','CECN滞留包裹','CCSLCN滞留包裹'].includes(label))return'CCSLCN';
+  if(['CCSLZT分流','CEZT滞留包裹','CCSLZT滞留包裹'].includes(label))return'CEZT';
+  if(['580滞留包裹','CCSL580分流','CCSL580滞留包裹'].includes(label))return'CCSL580';
+  return label;
+}
 function category(row){return String(row.primaryCategory||row.当前分类||row.主分类||row.异常分类||'').trim();}
 function pendingDays(row){return Math.max(number(row.pendingDistinctDayCount??row.Pending当前次数??row.Pending次数??row.pendingDays),extractDays(category(row),'Pending'));}
 function ocDays(row){return Math.max(number(row.OC天数??row.ocDays),extractDays(category(row),'OC'));}
