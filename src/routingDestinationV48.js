@@ -11,6 +11,13 @@ const FINAL_NODE_FIELDS = Object.freeze([
   'latestTargetNode',
   'latestNodeCode',
   'latestNode',
+  // V55/V58 persisted final facts expose the real latest trajectory mainly
+  // through these fields. They must outrank stale historical specialState /
+  // primaryCategory values, otherwise a parcel that already reached CEZT can
+  // still be shown under CCSL580.
+  'lastEventDesc',
+  'latestEventDesc',
+  '最新节点',
   '最后节点编码',
   '最后节点'
 ]);
@@ -18,7 +25,7 @@ const FINAL_NODE_FIELDS = Object.freeze([
 /**
  * Routing classification is intentionally FINAL-NODE ONLY.
  *
- * A shipment may have visited CCSLCN / CCSLZT / CCSL580 earlier in its history.
+ * A shipment may have visited CCSLCN / CEZT / CCSL580 earlier in its history.
  * That historical evidence must never make it appear in several routing cards.
  * The first populated final-node field is authoritative; if it points somewhere
  * else, stale specialState/category text is ignored. specialState is used only
@@ -71,7 +78,7 @@ export function destinationFromNodeText(value = '') {
 
 export function canonicalNodeLabel(destination = '') {
   if (destination === ROUTING_DESTINATIONS.CCSLCN) return 'CEL:CCSLCN';
-  if (destination === ROUTING_DESTINATIONS.CCSLZT) return 'CEL:CCSLZT';
+  if (destination === ROUTING_DESTINATIONS.CCSLZT) return 'CEL:CEZT';
   if (destination === ROUTING_DESTINATIONS.CCSL580) return 'CEL:CCSL580';
   return '';
 }
