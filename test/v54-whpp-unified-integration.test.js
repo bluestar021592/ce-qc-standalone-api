@@ -22,10 +22,18 @@ test('V54 exposes WHPP in unified classification and reconciles seven-business t
   assert.match(integration, /\['ce','ceaf','tbkh','ali1688','shopeecn','shopeevn','whpp'\]/);
 });
 
-test('V54 is injected after the earlier WHPP auto-run and source-truth scripts', () => {
+test('V54 skips an already-completed earlier stage instead of blocking WHPP', () => {
+  assert.match(integration, /function alreadyComplete/);
+  assert.match(integration, /当前任务已经完成/);
+  assert.match(integration, /if \(alreadyComplete\(error\)\)/);
+  assert.match(integration, /continue;/);
+  assert.match(integration, /已完成，自动跳过/);
+});
+
+test('V54 is injected after the earlier WHPP auto-run and source-truth scripts with a fresh cache key', () => {
   const oldAuto = injector.indexOf('/whpp-v47-auto-run.js');
   const sourceTruth = injector.indexOf('/v52-whpp-source-truth-route.js');
-  const v54 = injector.indexOf('/v54-whpp-unified-integration.js');
+  const v54 = injector.indexOf('/v54-whpp-unified-integration.js?v=20260811-4');
   assert.ok(oldAuto >= 0 && sourceTruth >= 0 && v54 >= 0, 'all WHPP runtime layers must be present');
   assert.ok(v54 > oldAuto, 'V54 must load after the old V47 wrapper');
   assert.ok(v54 > sourceTruth, 'V54 must load after V52 source-truth routing');
