@@ -3,7 +3,7 @@ import { getDb } from './db.js';
 import { loadWhppState } from './whppStore.js';
 import { classifyFinalRoutingDestination, ROUTING_DESTINATIONS } from './routingDestinationV48.js';
 
-const PATCH_ID = '2026-08-11-v49-dashboard-correctness-v1';
+const PATCH_ID = '2026-08-11-v49-dashboard-correctness-v2-terminal-first';
 const SPECIAL_TABS = new Set(['ccslCnDiversion','ccslZtDiversion','ccsl580Retention','ccsl580Diversion','phnomPenhShop']);
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -73,19 +73,20 @@ function decorate(row={},fallbackType='') {
   delete merged.rawJson;
   return merged;
 }
-function stateOf(row={}){return String(row.currentState||row.state||'').toUpperCase();}
+function stateOf(row={}){return String(row.persistedCurrentState||row.currentState||row.state||'').toUpperCase();}
 function isPod(row={}){return n(row.isPod)===1||row.是否POD==='是'||row.POD状态==='POD'||stateOf(row)==='POD'||String(row.orderStatus||'')==='85';}
 function isReturned(row={}){return row.退回状态==='已退回'||['RETURNED','RETURN_COMPLETED'].includes(stateOf(row))||String(row.orderStatus||'')==='100'||String(row.primaryCategory||row.当前分类||'')==='退回';}
 function isCancelled(row={}){return row.订单取消==='是'||stateOf(row)==='ORDER_CANCELLED'||String(row.orderStatus||'')==='10';}
 function isTerminal(row={}){return isPod(row)||isReturned(row)||isCancelled(row);}
 function finalDestination(row={}){return classifyFinalRoutingDestination(row).destination;}
 function matchesSpecial(row,tab){
+  if(isTerminal(row))return false;
   const destination=finalDestination(row);
   if(tab==='ccslCnDiversion')return destination===ROUTING_DESTINATIONS.CCSLCN;
   if(tab==='ccslZtDiversion')return destination===ROUTING_DESTINATIONS.CCSLZT;
   if(tab==='ccsl580Retention'||tab==='ccsl580Diversion')return destination===ROUTING_DESTINATIONS.CCSL580;
   if(tab==='phnomPenhShop'){
-    if(isTerminal(row)||destination!==ROUTING_DESTINATIONS.NONE)return false;
+    if(destination!==ROUTING_DESTINATIONS.NONE)return false;
     return ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState||''));
   }
   return false;
@@ -119,25 +120,29 @@ function currentWhppRows(state={}){
   const dailyBy=new Map((state.dailyParseRows||[]).map(row=>[billOf(row),row]));
   const scanBy=new Map((state.scanResults||[]).map(row=>[billOf(row),row]));
   const finalBy=new Map((state.finalRows||[]).map(row=>[billOf(row),row]));
-  const bills=[...new Set([...(state.pnhBills||[]).map(x=>String(x||'').toUpperCase()),...dailyBy.keys(),...scanBy.keys(),...finalBy.keys()])].filter(Boolean);
   const currentRows=getDb().prepare("SELECT shipmentCode,state,stateJson,lastEventTime FROM shipment_current_state WHERE businessType='WHPP'").all();
-  const currentBy=new Map(currentRows.map(row=>[String(row.shipmentCode||'').toUpperCase(),{...safeJson(row.stateJson,{}),shipmentCode:row.shipmentCode,currentState:row.state||'',latestEventTime:row.lastEventTime||''}]));
-  return bills.map(bill=>normalizeWhppTerminal({...dailyBy.get(bill),...scanBy.get(bill),...currentBy.get(bill),...finalBy.get(bill),shipmentCode:bill,运单号:bill,businessType:'WHPP',reportDate:state.reportDate||dailyBy.get(bill)?.reportDate||''}));
+  const currentBy=new Map(currentRows.map(row=>[String(row.shipmentCode||'').toUpperCase(),{
+    ...safeJson(row.stateJson,{}),shipmentCode:row.shipmentCode,persistedCurrentState:row.state||'',latestEventTime:row.lastEventTime||''
+  }]));
+  const bills=[...new Set([...(state.pnhBills||[]).map(x=>String(x||'').toUpperCase()),...dailyBy.keys(),...scanBy.keys(),...currentBy.keys(),...finalBy.keys()])].filter(Boolean);
+  return bills.map(bill=>normalizeWhppTerminal({...dailyBy.get(bill),...scanBy.get(bill),...finalBy.get(bill),...currentBy.get(bill),shipmentCode:bill,运单号:bill,businessType:'WHPP',reportDate:state.reportDate||dailyBy.get(bill)?.reportDate||''}));
 }
 function normalizeWhppTerminal(row={}){
+  const persisted=String(row.persistedCurrentState||'').toUpperCase();
   const status=String(row.orderStatus??'').trim();
-  if(status==='85'&&!isPod(row))Object.assign(row,{isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',primaryCategory:'POD',主分类:'POD',跨日状态:'已闭环'});
-  else if(status==='100'&&!isReturned(row))Object.assign(row,{isPod:0,是否POD:'否',POD状态:'未POD',退回状态:'已退回',currentState:'RETURN_COMPLETED',primaryCategory:'退回',主分类:'退回',跨日状态:'已闭环'});
-  else if(status==='10'&&!isCancelled(row))Object.assign(row,{isPod:0,是否POD:'否',POD状态:'未POD',订单取消:'是',currentState:'ORDER_CANCELLED',primaryCategory:'订单取消',主分类:'订单取消',跨日状态:'已闭环'});
+  if((persisted==='POD'||status==='85')&&!isPod(row))Object.assign(row,{isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',primaryCategory:'POD',主分类:'POD',跨日状态:'已闭环'});
+  else if((['RETURNED','RETURN_COMPLETED'].includes(persisted)||status==='100')&&!isReturned(row))Object.assign(row,{isPod:0,是否POD:'否',POD状态:'未POD',退回状态:'已退回',currentState:'RETURN_COMPLETED',primaryCategory:'退回',主分类:'退回',跨日状态:'已闭环'});
+  else if((persisted==='ORDER_CANCELLED'||status==='10')&&!isCancelled(row))Object.assign(row,{isPod:0,是否POD:'否',POD状态:'未POD',订单取消:'是',currentState:'ORDER_CANCELLED',primaryCategory:'订单取消',主分类:'订单取消',跨日状态:'已闭环'});
   return row;
 }
 function pendingCount(row={}){return n(row.Pending当前次数??row.Pending次数??row.pendingDistinctDayCount);}
 function ocCount(row={}){return n(row.OC天数??row.ocDays);}
-function isSpecialClosed(row={}){return finalDestination(row)!==ROUTING_DESTINATIONS.NONE||['SELF_PICKUP'].includes(String(row.specialState||'').toUpperCase())||['仓库自提','自提','正常分流节点'].includes(String(row.primaryCategory||row.主分类||''));}
+function isSpecialClosed(row={}){return !isTerminal(row)&&(finalDestination(row)!==ROUTING_DESTINATIONS.NONE||['SELF_PICKUP'].includes(String(row.specialState||'').toUpperCase())||['仓库自提','自提','正常分流节点'].includes(String(row.primaryCategory||row.主分类||'')));}
 function actionable(row={}){return !isTerminal(row)&&!isSpecialClosed(row);}
 function rowRegion(row={}){return String(row.regionCode||row.区域||'UNKNOWN').toUpperCase()==='PP'?'PP':String(row.regionCode||row.区域||'').toUpperCase()==='PV'?'PV':'UNKNOWN';}
 function whppMetrics(rows=[]){
   const pod=rows.filter(isPod),returned=rows.filter(isReturned),cancelled=rows.filter(isCancelled),open=rows.filter(actionable);
+  const liveRoutes=rows.filter(r=>!isTerminal(r));
   const metric={
     total:rows.length,pod:pod.length,podRate:rate(pod.length,rows.length),returned:returned.length,returnRate:rate(returned.length,rows.length),cancelled:cancelled.length,cancelRate:rate(cancelled.length,rows.length),unresolved:open.length,
     pendingNonContinuous:open.filter(r=>r.Pending不连续==='是'||String(r.pendingContinuity||r.Pending事实连续性||'').includes('不连续')).length,
@@ -147,13 +152,14 @@ function whppMetrics(rows=[]){
     inboundNoScan:open.filter(r=>r.入库无扫描节点==='是'||String(r.primaryCategory||'').includes('入库无扫描')).length,
     delivery:open.filter(r=>n(r.派送中停留天数??r.deliveryDays)>0||String(r.primaryCategory||'').includes('派送中')).length,
     workOrder:open.filter(r=>String(r.primaryCategory||r.主分类||'').includes('工单')).length,
-    ccslCnDiversion:rows.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.CCSLCN).length,
-    ccslZtDiversion:rows.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.CCSLZT).length,
-    ccsl580Diversion:rows.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.CCSL580).length,
-    ccsl580Retention:rows.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.CCSL580).length,
+    ccslCnDiversion:liveRoutes.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.CCSLCN).length,
+    ccslZtDiversion:liveRoutes.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.CCSLZT).length,
+    ccsl580Diversion:liveRoutes.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.CCSL580).length,
+    ccsl580Retention:liveRoutes.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.CCSL580).length,
     phnomPenhShop:open.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.NONE&&['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(r.shopState||''))).length
   };
-  metric.accounted=pod.length+returned.length+cancelled.length+metric.ccslCnDiversion+metric.ccslZtDiversion+metric.ccsl580Retention+rows.filter(r=>String(r.specialState||'').toUpperCase()==='SELF_PICKUP').length+open.length;
+  const selfPickup=liveRoutes.filter(r=>String(r.specialState||'').toUpperCase()==='SELF_PICKUP').length;
+  metric.accounted=pod.length+returned.length+cancelled.length+metric.ccslCnDiversion+metric.ccslZtDiversion+metric.ccsl580Retention+selfPickup+open.length;
   metric.accountingDifference=Math.max(0,rows.length-metric.accounted);
   return metric;
 }
@@ -162,7 +168,7 @@ function buildWhppV49(state={}){
   const rows=currentWhppRows(state);
   const m=whppMetrics(rows);
   const open=rows.filter(actionable);
-  const destination=dest=>rows.filter(r=>finalDestination(r)===dest);
+  const destination=dest=>rows.filter(r=>!isTerminal(r)&&finalDestination(r)===dest);
   const shop=open.filter(r=>finalDestination(r)===ROUTING_DESTINATIONS.NONE&&['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(r.shopState||'')));
   const details={
     all:tab('全部',rows),pod:tab('今日POD',rows.filter(isPod)),returned:tab('已退回件',rows.filter(isReturned)),cancelled:tab('订单取消',rows.filter(isCancelled)),unresolved:tab('当前未闭环',open),
@@ -171,7 +177,7 @@ function buildWhppV49(state={}){
     ccslCnDiversion:tab('CCSLCN分流',destination(ROUTING_DESTINATIONS.CCSLCN)),ccslZtDiversion:tab('CCSLZT分流',destination(ROUTING_DESTINATIONS.CCSLZT)),ccsl580Diversion:tab('580滞留包裹',destination(ROUTING_DESTINATIONS.CCSL580)),ccsl580Retention:tab('580滞留包裹',destination(ROUTING_DESTINATIONS.CCSL580)),phnomPenhShop:tab('金边门店',shop),
     pp:tab('本省（PP）',rows.filter(r=>rowRegion(r)==='PP')),pv:tab('外省（PV）',rows.filter(r=>rowRegion(r)==='PV'))
   };
-  return {businessType:'WHPP',reportDate:state.reportDate||'',metrics:m,regions:{PP:whppMetrics(details.pp.rows),PV:whppMetrics(details.pv.rows)},detailTabs:details,accounting:{total:m.total,accounted:m.total,difference:0,balanced:true}};
+  return {businessType:'WHPP',reportDate:state.reportDate||'',metrics:m,regions:{PP:whppMetrics(details.pp.rows),PV:whppMetrics(details.pv.rows)},detailTabs:details,accounting:{total:m.total,accounted:m.total-m.accountingDifference,difference:m.accountingDifference,balanced:m.accountingDifference===0}};
 }
 
 function whppStateHandler(req,res,next){
@@ -181,7 +187,7 @@ function whppStateHandler(req,res,next){
     const requested=isoDate(req.query.reportDate);
     if(requested&&requested!==state.reportDate)return next();
     const dashboard=buildWhppV49(state);
-    const completed=dashboard.metrics.total>0&&dashboard.metrics.unresolved===0;
+    const completed=dashboard.metrics.total>0&&dashboard.metrics.unresolved===0&&dashboard.accounting.balanced;
     res.setHeader('Cache-Control','private, max-age=3');
     res.json({ok:true,patchId:PATCH_ID,state,dashboard,snapshotStatus:state.snapshotStatus|| (completed?'RECONCILED_TERMINAL':'IMPORTED')});
   }catch(error){next(error);}
