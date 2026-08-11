@@ -1,7 +1,7 @@
 import express from 'express';
-import { loadMetricDetail, loadRangeDashboard } from './rangeDashboardStoreV55.js';
+import { loadMetricDetail, loadRangeDashboard } from './rangeDashboardStoreV58.js';
 
-const PATCH_ID='2026-08-11-v55-dashboard-reconciliation-api-v1';
+const PATCH_ID='2026-08-11-v58-dashboard-reconciliation-api-v1';
 
 function isoDate(value='') {
   const text=String(value||'').trim().slice(0,10);
@@ -23,7 +23,7 @@ function metricDetail(req,res) {
     res.setHeader('Cache-Control','private, max-age=2');
     res.json({...result,patchId:PATCH_ID});
   } catch(error) {
-    console.error('[V55][METRIC_DETAIL]',error);
+    console.error('[V58][METRIC_DETAIL]',error);
     res.status(500).json({ok:false,patchId:PATCH_ID,error:error.message||String(error)});
   }
 }
@@ -41,7 +41,7 @@ function reconciliation(req,res) {
     res.setHeader('Cache-Control','no-store');
     res.json({ok:true,patchId:PATCH_ID,fromDate,toDate,summary});
   } catch(error) {
-    console.error('[V55][RECONCILIATION]',error);
+    console.error('[V58][RECONCILIATION]',error);
     res.status(500).json({ok:false,patchId:PATCH_ID,error:error.message||String(error)});
   }
 }
