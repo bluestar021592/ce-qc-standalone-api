@@ -41,34 +41,39 @@ test('V55 one source drives card summary and exact detail rows',()=>{
   assert.match(source,/accountingDifference:Math\.max\(0,total-pod-returned-normal-open\)/);
 });
 
-test('V55 compact facade does not ship full detail tables in bootstrap',()=>{
+test('V55 compact facade keeps metric rows but not full shipment tables',()=>{
   const source=read('src/rangeDashboardStoreV55Compact.js');
   assert.match(source,/state\.finalRows=\[\]/);
+  assert.match(source,/key==='dashboard'/);
   assert.match(source,/rows\.slice\(0,300\)/);
   assert.match(source,/\/api\/v55\/metric-detail/);
 });
 
-test('V55 UI captures all supported metric cards before legacy special handlers',()=>{
+test('V55 UI captures all supported business metric cards before legacy special handlers',()=>{
   const ui=read('public/v55-dashboard-reconciliation.js');
   assert.match(ui,/global\.addEventListener\('click'/);
   assert.match(ui,/\/api\/v55\/metric-detail/);
-  assert.match(ui,/CCSLCN分流/);
-  assert.match(ui,/CCSLZT分流/);
-  assert.match(ui,/580滞留包裹/);
+  for(const label of ['CCSLCN分流','CCSLZT分流','580滞留包裹','金边门店','外省门店','外省未完结POD件','当前未闭环'])assert.match(ui,new RegExp(label));
+});
+
+test('V55 home core metrics use the same exact drilldown endpoint',()=>{
+  const ui=read('public/v55-home-drilldown.js');
+  assert.match(ui,/\/api\/v55\/metric-detail/);
+  assert.match(ui,/businessType:'CCSL'/);
+  assert.match(ui,/外省未完结POD件/);
   assert.match(ui,/金边门店/);
   assert.match(ui,/外省门店/);
-  assert.match(ui,/外省未完结POD件/);
-  assert.match(ui,/当前未闭环/);
 });
 
 test('V55 is injected after previous dashboard compatibility scripts',()=>{
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(injector,/v55-dashboard-reconciliation\.js/);
+  assert.match(injector,/v55-home-drilldown\.js/);
   assert.ok(injector.indexOf('v55-dashboard-reconciliation.js')>injector.indexOf('v50-dashboard-source-truth.js'));
 });
 
 test('V55 JavaScript files pass syntax checks',()=>{
-  for(const relative of ['src/rangeDashboardStoreV55.js','src/rangeDashboardStoreV55Compact.js','src/v55DashboardReconciliationPatch.js','public/v55-dashboard-reconciliation.js']){
+  for(const relative of ['src/rangeDashboardStoreV55.js','src/rangeDashboardStoreV55Compact.js','src/v55DashboardReconciliationPatch.js','public/v55-dashboard-reconciliation.js','public/v55-home-drilldown.js']){
     const result=spawnSync(process.execPath,['--check',path.resolve(relative)],{encoding:'utf8'});
     assert.equal(result.status,0,`${relative} syntax failed:\n${result.stderr||result.stdout}`);
   }
