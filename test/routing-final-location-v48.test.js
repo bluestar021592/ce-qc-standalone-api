@@ -27,13 +27,25 @@ test('final CCSLCN overrides stale historical CCSLZT classification', () => {
   }), ROUTING_DESTINATIONS.CCSLCN);
 });
 
-test('final CEL:CCSL580 belongs only to 580 retention destination', () => {
+test('final CEL:CCSL580 belongs only to 580 registration destination', () => {
   const result = classifyFinalRoutingDestination({
     latestEffectiveTargetNodeCode: 'CEL:CCSL580',
     specialState: 'CCSLCN_DIVERSION'
   });
   assert.equal(result.destination, ROUTING_DESTINATIONS.CCSL580);
   assert.equal(result.finalNode, 'CEL:CCSL580');
+  assert.equal(result.usedFallback, false);
+});
+
+test('latest event description overrides a stale historical CCSL580 category after parcel reaches CEZT', () => {
+  const result = classifyFinalRoutingDestination({
+    lastEventDesc: '30 TE01072026104103127357 货物到达网点【CEL:CEZT】 Parcel has arrived at 【CEL:CEZT】',
+    specialState: 'CCSL580_RETENTION',
+    primaryCategory: 'CCSL580_RETENTION'
+  });
+  assert.equal(result.destination, ROUTING_DESTINATIONS.CCSLZT);
+  assert.equal(result.finalNode, 'CEL:CEZT');
+  assert.equal(result.sourceField, 'lastEventDesc');
   assert.equal(result.usedFallback, false);
 });
 
@@ -53,12 +65,10 @@ test('legacy specialState is used only when no final-node field is available', (
   assert.equal(classify({ specialState: 'CCSL580_RETENTION' }), ROUTING_DESTINATIONS.CCSL580);
 });
 
-test('routing UI and range layer explicitly cover TBKH and all three destination cards', () => {
-  const range = fs.readFileSync(path.resolve('src/rangeDashboardStoreV36.js'), 'utf8');
-  const ui = fs.readFileSync(path.resolve('public/routing-v48.js'), 'utf8');
-  assert.match(range, /'TBKH'/);
-  assert.match(ui, /'\/tbkh':'TBKH'/);
-  for (const label of ['CCSLCN分流','CCSLZT分流','580滞留包裹']) {
-    assert.match(range + ui, new RegExp(label));
-  }
+test('V58 registry UI exposes CEZT CCSLCN CCSL580 as normal registration cards', () => {
+  const ui = fs.readFileSync(path.resolve('public/v58-drilldown-runtime.js'), 'utf8');
+  for (const label of ['CCSLCN','CEZT','CCSL580']) assert.match(ui, new RegExp(label));
+  assert.match(ui, /CCSLCN.*ccslCnDiversion/);
+  assert.match(ui, /CEZT.*ccslZtDiversion/);
+  assert.match(ui, /CCSL580.*ccsl580Retention/);
 });
