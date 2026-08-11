@@ -6,8 +6,9 @@ import test from 'node:test';
 
 const read=file=>fs.readFileSync(path.resolve(file),'utf8');
 
-test('V55 facade is the canonical dashboard reader',()=>{
-  assert.match(read('src/rangeDashboardStore.js'),/rangeDashboardStoreV55/);
+test('V55 facade is the canonical compact dashboard reader',()=>{
+  const facade=read('src/rangeDashboardStore.js');
+  assert.match(facade,/rangeDashboardStoreV55Compact/);
   const bootstrap=read('bootstrap.js');
   assert.match(bootstrap,/v55DashboardReconciliationPatch/);
   assert.ok(bootstrap.indexOf('v55DashboardReconciliationPatch')<bootstrap.indexOf("'server'"));
@@ -40,6 +41,13 @@ test('V55 one source drives card summary and exact detail rows',()=>{
   assert.match(source,/accountingDifference:Math\.max\(0,total-pod-returned-normal-open\)/);
 });
 
+test('V55 compact facade does not ship full detail tables in bootstrap',()=>{
+  const source=read('src/rangeDashboardStoreV55Compact.js');
+  assert.match(source,/state\.finalRows=\[\]/);
+  assert.match(source,/rows\.slice\(0,300\)/);
+  assert.match(source,/\/api\/v55\/metric-detail/);
+});
+
 test('V55 UI captures all supported metric cards before legacy special handlers',()=>{
   const ui=read('public/v55-dashboard-reconciliation.js');
   assert.match(ui,/global\.addEventListener\('click'/);
@@ -60,7 +68,7 @@ test('V55 is injected after previous dashboard compatibility scripts',()=>{
 });
 
 test('V55 JavaScript files pass syntax checks',()=>{
-  for(const relative of ['src/rangeDashboardStoreV55.js','src/v55DashboardReconciliationPatch.js','public/v55-dashboard-reconciliation.js']){
+  for(const relative of ['src/rangeDashboardStoreV55.js','src/rangeDashboardStoreV55Compact.js','src/v55DashboardReconciliationPatch.js','public/v55-dashboard-reconciliation.js']){
     const result=spawnSync(process.execPath,['--check',path.resolve(relative)],{encoding:'utf8'});
     assert.equal(result.status,0,`${relative} syntax failed:\n${result.stderr||result.stdout}`);
   }
