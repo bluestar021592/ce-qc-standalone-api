@@ -8,22 +8,13 @@ const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 /**
  * V36 final-location routing correction.
  *
- * The routing cards are mutually exclusive and use only each parcel's FINAL
- * effective trajectory destination. Historical visits to CCSLCN / CCSLZT /
- * CCSL580 are never concatenated into evidence and therefore can never make one
- * parcel appear in several routing cards.
- *
- * Canonical business display:
- *   CEL:CCSLCN  -> CCSLCN分流
- *   CEL:CCSLZT  -> CCSLZT分流
- *   CEL:CCSL580 -> 580滞留包裹
- *
- * All three are special/normal destinations and remain excluded from ordinary
- * Pending/OC/work-order/inbound-no-scan abnormal buckets.
+ * Routing cards are mutually exclusive and use only each parcel's FINAL
+ * effective trajectory destination. Current Phnom Penh shop metrics are also
+ * CURRENT-state metrics: POD/return/cancelled/special-destination rows are never
+ * allowed to remain in the shop bucket just because they historically had a
+ * shopState value.
  */
 export function loadRangeDashboard(fromDate, toDate) {
-  // Bypass V34/V35 because those versions used broad concatenated text evidence.
-  // V33 contains the preceding source/snapshot, Shopee attempt and final rules.
   const range = loadRangeDashboardV33(fromDate, toDate);
   const facts = queryFinalLocationFacts(range.fromDate, range.toDate);
 
@@ -38,7 +29,7 @@ export function loadRangeDashboard(fromDate, toDate) {
   return {
     ...range,
     queryMode: `${range.queryMode || 'SQL'}+FINAL_LOCATION_ROUTING_V36`,
-    routingRuleVersion: '2026-08-11-final-location-exclusive-v36'
+    routingRuleVersion: '2026-08-11-final-location-exclusive-v36-current-shop-terminal-exclusion-v2'
   };
 }
 
@@ -71,6 +62,7 @@ function queryFinalLocationFacts(fromDate, toDate) {
     )
     SELECT
       v.reportDate,v.businessType,v.shipmentCode,v.regionCode,
+      CASE WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') THEN COALESCE(sf.isPod,0) ELSE COALESCE(cf.isPod,0) END AS isPod,
       CASE WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') THEN COALESCE(sf.primaryCategory,'') ELSE COALESCE(cf.primaryCategory,'') END AS primaryCategory,
       CASE WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') THEN COALESCE(sf.shopState,'') ELSE COALESCE(cf.shopState,'') END AS shopState,
       CASE WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') THEN COALESCE(sf.rawJson,'{}') ELSE COALESCE(cf.rawJson,'{}') END AS rawJson
@@ -95,6 +87,7 @@ function queryFinalLocationFacts(fromDate, toDate) {
       reportDate: row.reportDate,
       businessType: row.businessType,
       regionCode: row.regionCode,
+      isPod: Number(row.isPod || raw.isPod || 0),
       primaryCategory: row.primaryCategory || raw.primaryCategory || raw.主分类 || '',
       shopState: row.shopState || raw.shopState || ''
     };
@@ -121,8 +114,6 @@ function patchCcslState(state, rows, label) {
     ccslCnDiversion: summary.ccslCnDiversion,
     ccslZtDiversion: summary.ccslZtDiversion,
     ccsl580Retention: summary.ccsl580Retention,
-    // Compatibility only: old readers may still ask for this key. It represents
-    // the same mutually-exclusive CEL:CCSL580 rows and must never be a 2nd bucket.
     ccsl580Diversion: summary.ccsl580Retention,
     phnomPenhShop: summary.phnomPenhShop
   };
@@ -203,9 +194,6 @@ function patchShopeeMetrics(metrics, summary) {
   metrics.phnomPenhShopArrived = summary.phnomPenhShopArrived;
   metrics.unresolved = Math.max(0, Number(metrics.unresolved || 0) - summary.routingUnaccounted);
 
-  // A recognized CP/FS/PV/PNH store is a Phnom Penh operational location. Keep
-  // recipient PP/PV analysis intact, but do not expose that operational location
-  // as an "external province store" bucket.
   if ('pvDelivery' in metrics) metrics.pvDelivery = Math.max(0, Number(metrics.pvDelivery || 0) - summary.pvShopTransit);
   if ('pvStoreRetention' in metrics) metrics.pvStoreRetention = 0;
   if ('pvStoreInboundNoScan' in metrics) metrics.pvStoreInboundNoScan = 0;
@@ -237,7 +225,17 @@ function recognizedSpecial(row = {}, destination = '') {
   return false;
 }
 
+function isTerminalRow(row = {}) {
+  const current = String(row.currentState || row.state || '').toUpperCase();
+  const category = String(row.primaryCategory || row.主分类 || row.异常分类 || '').toUpperCase();
+  if (Number(row.isPod || 0) === 1 || row.是否POD === '是' || row.POD状态 === 'POD' || current === 'POD') return true;
+  if (row.退回状态 === '已退回' || ['RETURNED','RETURN_COMPLETED','ORDER_CANCELLED'].includes(current) || category === '退回' || category === '订单取消') return true;
+  return false;
+}
+
 function isPhnomPenhShop(row = {}) {
+  if (isTerminalRow(row)) return false;
+  if (row.routingDestination && row.routingDestination !== ROUTING_DESTINATIONS.NONE) return false;
   return ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState || ''));
 }
 
