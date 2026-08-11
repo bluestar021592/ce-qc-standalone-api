@@ -1,3 +1,15 @@
+(function ensureExactDrilldownRuntime(global){
+  const RUNTIME_ID='ce-qc-v58-drilldown-runtime';
+  if(!global?.document)return;
+  if(document.documentElement?.dataset?.v58Drilldown||document.getElementById(RUNTIME_ID))return;
+  const script=document.createElement('script');
+  script.id=RUNTIME_ID;
+  script.src='/v58-drilldown-runtime.js?v=20260811-v61-1';
+  script.async=false;
+  script.dataset.ceQcExactDrilldown='1';
+  (document.head||document.documentElement).appendChild(script);
+})(window);
+
 (function (global) {
   const fmt=(value,unit='件')=>value===null||value===undefined?'—':unit==='%'?`${Number(value).toFixed(2).replace(/\.00$/,'')}%`:Number(value).toLocaleString('zh-CN');
   const metricCard=(row,businessType='HOME')=>`<button class="v18-metric-card" data-metric="${row.key}" onclick="window.openV18MetricDetail?.('${businessType}','${row.key}','${row.label}')"><i aria-hidden="true">●</i><span>${row.label}</span><b>${fmt(row.value,row.unit)}</b><small>${row.ratio||'查看明细'}</small></button>`;
