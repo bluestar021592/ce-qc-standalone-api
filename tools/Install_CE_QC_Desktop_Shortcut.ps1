@@ -40,7 +40,6 @@ if (-not $Desktop) {
 $LauncherRoot = Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER'
 $AppLink = Join-Path $LauncherRoot 'app'
 $LauncherPs1 = Join-Path $LauncherRoot 'Launch_CE_QC.ps1'
-$LauncherLog = Join-Path $LauncherRoot 'launcher_latest.log'
 $LauncherIcon = Join-Path $LauncherRoot 'CE_EXPRESS_APP_V4.ico'
 New-Item -ItemType Directory -Path $LauncherRoot -Force | Out-Null
 
@@ -56,33 +55,13 @@ if (Test-Path -LiteralPath $AppLink) {
 }
 New-Item -ItemType Junction -Path $AppLink -Target $ProjectRoot | Out-Null
 
-# The repository stores the exact user-provided 256px CE EXPRESS artwork as
-# base64 PNG text. Wrap that PNG in a valid single-frame ICO container so Explorer
-# always gets the exact artwork and a NEW icon path, bypassing the stale icon cache.
-$pngB64 = (Get-Content -LiteralPath $IconSourceB64 -Raw -ErrorAction Stop) -replace '\s',''
-$pngBytes = [Convert]::FromBase64String($pngB64)
-$stream = New-Object IO.MemoryStream
-$writer = New-Object IO.BinaryWriter($stream)
-try {
-  $writer.Write([UInt16]0)      # reserved
-  $writer.Write([UInt16]1)      # icon
-  $writer.Write([UInt16]1)      # one image
-  $writer.Write([byte]0)        # width 256
-  $writer.Write([byte]0)        # height 256
-  $writer.Write([byte]0)        # palette
-  $writer.Write([byte]0)        # reserved
-  $writer.Write([UInt16]1)      # planes
-  $writer.Write([UInt16]32)     # bit depth
-  $writer.Write([UInt32]$pngBytes.Length)
-  $writer.Write([UInt32]22)     # image offset
-  $writer.Write($pngBytes)
-  $writer.Flush()
-  [IO.File]::WriteAllBytes($LauncherIcon, $stream.ToArray())
+# Decode the exact CE EXPRESS ICO generated from the user's supplied artwork.
+$iconB64 = (Get-Content -LiteralPath $IconSourceB64 -Raw -ErrorAction Stop) -replace '\s',''
+$iconBytes = [Convert]::FromBase64String($iconB64)
+if ($iconBytes.Length -lt 100 -or $iconBytes[0] -ne 0 -or $iconBytes[1] -ne 0 -or $iconBytes[2] -ne 1 -or $iconBytes[3] -ne 0) {
+  throw 'CE EXPRESS desktop icon source is not a valid ICO file.'
 }
-finally {
-  $writer.Dispose()
-  $stream.Dispose()
-}
+[IO.File]::WriteAllBytes($LauncherIcon, $iconBytes)
 
 $LauncherPs1Content = @'
 $ErrorActionPreference = 'Stop'
@@ -144,13 +123,14 @@ try {
   }
 
   Write-LauncherLog ('Starting hidden supervisor: ' + $supervisor)
+  $quotedSupervisor = '"' + $supervisor + '"'
   Start-Process -FilePath $powerShellExe `
-    -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $supervisor + '"')) `
+    -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$quotedSupervisor) `
     -WorkingDirectory $appRoot `
     -WindowStyle Hidden | Out-Null
 
   # Start_CE_QC.ps1 verifies the backend and opens the browser itself when ready.
-  # This launcher can safely exit immediately; the hidden supervisor remains alive.
+  # This launcher exits immediately while the hidden supervisor keeps running.
   Write-LauncherLog 'Hidden supervisor process created successfully.'
   exit 0
 }
@@ -188,8 +168,8 @@ foreach ($desk in ($DesktopCandidates | Select-Object -Unique)) {
   }
 }
 
-# Direct PowerShell shortcut: no CMD console window, no VBS/Windows Script Host,
-# and no Unicode project path is stored in the .lnk file.
+# Direct hidden PowerShell shortcut: no CMD console window, no VBS/WSH, and no
+# Unicode project path is stored in the desktop shortcut.
 $PowerShellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $PowerShellExe)) { throw 'powershell.exe was not found.' }
 
