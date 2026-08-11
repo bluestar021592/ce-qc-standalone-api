@@ -32,8 +32,14 @@ $LauncherIcon = Join-Path $LauncherRoot 'CE_EXPRESS_APP.ico'
 
 New-Item -ItemType Directory -Path $LauncherRoot -Force | Out-Null
 
+# Remove only the junction itself. Never recurse through it into the real project.
 if (Test-Path -LiteralPath $AppLink) {
-  Remove-Item -LiteralPath $AppLink -Force -Recurse -ErrorAction SilentlyContinue
+  $existing = Get-Item -LiteralPath $AppLink -Force
+  if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    & cmd.exe /d /c "rmdir `"$AppLink`"" | Out-Null
+  } else {
+    throw "Launcher bridge path already exists and is not a junction: $AppLink"
+  }
 }
 New-Item -ItemType Junction -Path $AppLink -Target $ProjectRoot | Out-Null
 
