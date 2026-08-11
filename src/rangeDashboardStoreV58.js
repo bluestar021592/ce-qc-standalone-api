@@ -1,6 +1,6 @@
 import { loadMetricDetail as loadMetricDetailV55, loadRangeDashboard as loadRangeDashboardV55 } from './rangeDashboardStoreV55.js';
 
-const PATCH_ID='2026-08-11-v58-carry-threshold-truth-v1';
+const PATCH_ID='2026-08-11-v58-carry-threshold-truth-v2';
 const CCSL_TYPES=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 const ABNORMAL_TABS=new Set(['coreAbnormal','abnormal','severeAbnormal']);
@@ -75,7 +75,7 @@ function patchMetricRows(rows,abnormal,severe){
 function assignMetric(row,value){
   row.数值=Number(value||0);row.数值原值=Number(value||0);row.value=Number(value||0);
 }
-function setTab(tabs,key,label,rows){if(!tabs||typeof tabs!=='object')return;tabs[key]={...(tabs[key]||{}),label,rows:unique(rows),total:unique(rows).length};}
+function setTab(tabs,key,label,rows){if(!tabs||typeof tabs!=='object')return;const values=unique(rows);tabs[key]={...(tabs[key]||{}),label,rows:values,total:values.length};}
 
 function isActionableCarryRow(row={}){
   const c=category(row);
@@ -106,13 +106,13 @@ function isSevereCarryRow(row={}){
 }
 
 function category(row){return String(row.primaryCategory||row.当前分类||row.主分类||row.异常分类||'').trim();}
-function pendingDays(row){return number(row.pendingDistinctDayCount??row.Pending当前次数??row.Pending次数??row.pendingDays);}
-function ocDays(row){return number(row.OC天数??row.ocDays);}
-function cycleDays(row){return number(row.盘点天数??row.cycleCountDays??extractDays(category(row),'盘点'));}
-function shopTransferDays(row){return number(row.shopTransferNaturalDays??row.门店途中天数??extractDays(category(row),'门店途中'));}
-function shopRetentionDays(row){return number(row.shopRetentionNaturalDays??row.门店滞留天数??extractDays(category(row),'门店')) ;}
+function pendingDays(row){return Math.max(number(row.pendingDistinctDayCount??row.Pending当前次数??row.Pending次数??row.pendingDays),extractDays(category(row),'Pending'));}
+function ocDays(row){return Math.max(number(row.OC天数??row.ocDays),extractDays(category(row),'OC'));}
+function cycleDays(row){return Math.max(number(row.盘点天数??row.cycleCountDays),extractDays(category(row),'盘点'));}
+function shopTransferDays(row){return Math.max(number(row.shopTransferNaturalDays??row.门店途中天数),extractDays(category(row),'门店途中'));}
+function shopRetentionDays(row){return Math.max(number(row.shopRetentionNaturalDays??row.门店滞留天数),extractDays(category(row),'门店滞留'),extractDays(category(row),'门店入库'));}
 function isPendingNonContinuous(row){return row.Pending不连续==='是'||/不连续/.test(String(row.pendingContinuity||row.pendingFactDateContinuity||row.Pending事实连续性||row.Pending连续性||''));}
-function extractDays(text,prefix){const match=String(text||'').match(new RegExp(`${prefix}\\s*(\\d+)\\s*天`));return match?Number(match[1]):0;}
+function extractDays(text,prefix){const match=String(text||'').match(new RegExp(`${prefix}\\s*(\\d+)\\s*(?:天|次)?`,'i'));return match?Number(match[1]):0;}
 function number(value){const n=Number(value||0);return Number.isFinite(n)?n:0;}
 function unique(rows){const map=new Map();for(const row of rows||[]){const key=`${row.reportDate||''}|${row.businessType||''}|${String(row.shipmentCode||row.运单号||'').toUpperCase()}`;if(row.shipmentCode||row.运单号)map.set(key,row);}return[...map.values()];}
 
