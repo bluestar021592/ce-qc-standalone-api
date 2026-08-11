@@ -1,5 +1,5 @@
 (function installDrilldownRuntimeV58(global){
-  const VERSION='2026-08-11-v58-drilldown-runtime-v1';
+  const VERSION='2026-08-11-v58-drilldown-runtime-v2';
   const PATH_TYPES=new Map([['/ce','CE'],['/ceaf','CEAF'],['/tbkh','TBKH'],['/ali1688','ALI1688'],['/shopeecn','SHOPEECN'],['/shopeevn','SHOPEEVN']]);
   const COMMON={
     '签收件数':'podClosed','今日POD':'podClosed','签收率':'podClosed','POD率':'podClosed','首次妥投率':'podClosed',
@@ -9,7 +9,7 @@
     'OC1+':'ocAll','OC 1天+':'ocAll','OC2+':'oc2plus','OC 2天+':'oc2plus','OC3+':'oc3','OC 3天+':'oc3',
     '盘点2天+':'cycle2','盘点 2天+':'cycle2','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan',
     '工单':'workOrderAbnormal','工单未处理':'workOrderAbnormal','外省未完结POD件':'provinceOpen','仓库自提件':'selfPickup',
-    'CCSLCN分流':'ccslCnDiversion','CCSLZT分流':'ccslZtDiversion','580滞留包裹':'ccsl580Retention','金边门店':'phnomPenhShop','外省门店':'provinceShop'
+    'CCSLCN':'ccslCnDiversion','CEZT':'ccslZtDiversion','CCSL580':'ccsl580Retention','金边门店':'phnomPenhShop','外省门店':'provinceShop'
   };
   const SHOPEE={
     '今日POD':'pod','POD率':'pod','签收件数':'pod','签收率':'pod','已退回件':'returned','退件率':'returned','退回率':'returned',
@@ -23,9 +23,9 @@
 
   function canonicalLabel(value=''){
     const label=String(value||'').trim();
-    if(['CECN滞留包裹','CCSLCN滞留包裹'].includes(label))return'CCSLCN分流';
-    if(['CEZT滞留包裹','CCSLZT滞留包裹'].includes(label))return'CCSLZT分流';
-    if(['CCSL580分流','CCSL580滞留包裹'].includes(label))return'580滞留包裹';
+    if(['CCSLCN','CCSLCN分流','CECN滞留包裹','CCSLCN滞留包裹'].includes(label))return'CCSLCN';
+    if(['CEZT','CCSLZT分流','CEZT滞留包裹','CCSLZT滞留包裹'].includes(label))return'CEZT';
+    if(['CCSL580','580滞留包裹','CCSL580分流','CCSL580滞留包裹'].includes(label))return'CCSL580';
     return label;
   }
 
@@ -106,20 +106,21 @@
   function render(host,data,label){
     const rows=Array.isArray(data.rows)?data.rows:[],cols=columns(rows),maxPage=Math.max(1,Math.ceil(Number(data.total||0)/Number(data.pageSize||200)));
     host.classList.add('v27-detail-panel');
-    host.innerHTML=`<div class="v27-detail-head"><div><h3>${esc(label)}</h3><div class="v27-detail-meta">${esc(data.fromDate||'')} ～ ${esc(data.toDate||'')} · 共 ${fmt(data.total)} 票 · 当前第 ${Number(data.page||1)}/${maxPage} 页</div></div></div><div class="v27-detail-scroll">${rows.length?`<table class="v27-detail-table"><thead><tr>${cols.map(key=>`<th>${esc(name(key))}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${cols.map(key=>`<td>${esc(row?.[key]??'—')}</td>`).join('')}</tr>`).join('')}</tbody></table>`:'<div class="empty-state">该指标当前没有匹配的逐票数据</div>'}</div>`;
+    host.innerHTML=`<div class="v27-detail-head"><div><h3>${esc(canonicalLabel(label))}</h3><div class="v27-detail-meta">${esc(data.fromDate||'')} ～ ${esc(data.toDate||'')} · 共 ${fmt(data.total)} 票 · 当前第 ${Number(data.page||1)}/${maxPage} 页</div></div></div><div class="v27-detail-scroll">${rows.length?`<table class="v27-detail-table"><thead><tr>${cols.map(key=>`<th>${esc(name(key))}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${cols.map(key=>`<td>${esc(row?.[key]??'—')}</td>`).join('')}</tr>`).join('')}</tbody></table>`:'<div class="empty-state">该指标当前没有匹配的逐票数据</div>'}</div>`;
   }
 
   async function openDetail(type,tab,label){
     const host=ensureDetailHost(type),range=dateRange();if(!host||!range.to)return;
     const request=++activeRequest;
-    host.innerHTML=`<div class="v27-loading"><b>正在读取 ${esc(label)} 明细…</b></div>`;
+    const visibleLabel=canonicalLabel(label);
+    host.innerHTML=`<div class="v27-loading"><b>正在读取 ${esc(visibleLabel)} 明细…</b></div>`;
     host.scrollIntoView({behavior:'smooth',block:'start'});
     try{
       const params=new URLSearchParams({businessType:type,from:range.from,to:range.to,tab,page:'1',pageSize:'200'});
       const response=await fetch(`/api/v55/metric-detail?${params}`,{cache:'no-store',credentials:'same-origin'});
       const data=await response.json().catch(()=>({}));if(request!==activeRequest)return;
       if(!response.ok||data.ok===false)throw new Error(data.error||`HTTP ${response.status}`);
-      render(host,data,label);
+      render(host,data,visibleLabel);
     }catch(error){if(request===activeRequest)host.innerHTML=`<div class="empty-state">明细读取失败：${esc(error.message||error)}</div>`;}
   }
 
@@ -138,6 +139,17 @@
     }catch{}
   }
 
+  function normalizeSpecialLabels(){
+    document.querySelectorAll('.v18-metric-card').forEach(card=>{
+      const node=card.querySelector('.v18-metric-label')||card.querySelector('span');
+      if(!node)return;
+      const next=canonicalLabel(node.textContent||'');
+      if(next&&next!==String(node.textContent||'').trim())node.textContent=next;
+      const metric=String(card.dataset?.metric||'');
+      if(metric.startsWith('v55-'))card.dataset.metric=`v55-${canonicalLabel(metric.slice(4))}`;
+    });
+  }
+
   function onClick(event){
     const card=event.target?.closest?.('.v18-metric-card,.v18-business-card');if(!card)return;
     const type=pageBusinessType(card),label=cardLabel(card),tab=tabFor(type,label,card.dataset?.metric||'');
@@ -148,10 +160,15 @@
 
   function install(){
     global.addEventListener('click',onClick,true);
-    const observer=new MutationObserver(()=>{clearTimeout(global.__CE_QC_V58_SYNC_TIMER__);global.__CE_QC_V58_SYNC_TIMER__=setTimeout(syncSevereMetric,80);});
+    const observer=new MutationObserver(()=>{
+      normalizeSpecialLabels();
+      clearTimeout(global.__CE_QC_V58_SYNC_TIMER__);
+      global.__CE_QC_V58_SYNC_TIMER__=setTimeout(syncSevereMetric,80);
+    });
     observer.observe(document.documentElement,{subtree:true,childList:true});
+    normalizeSpecialLabels();
     setTimeout(syncSevereMetric,100);
-    document.documentElement.dataset.v58Drilldown='1';
+    document.documentElement.dataset.v58Drilldown='2';
     console.info('[CE-QC][DRILLDOWN_V58]',VERSION);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
