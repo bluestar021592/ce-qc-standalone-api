@@ -1,7 +1,7 @@
 (function installV27TrendMountFix(global){
   if (new URLSearchParams(location.search).has('visualTest')) return;
 
-  const TYPE_BY_PAGE={ce:'CE',tbkh:'TBKH',ali1688:'ALI1688',shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'};
+  const TYPE_BY_PAGE={ce:'CE',ceaf:'CEAF',tbkh:'TBKH',ali1688:'ALI1688',shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'};
   const pending=new Map();
   const cache=new Map();
   let timer=null;
@@ -197,9 +197,6 @@
       }
     }catch(error){console.warn('[V27 TREND] hook failed',error);}
 
-    // IMPORTANT: do NOT observe the dashboard DOM. Chart rendering itself mutates
-    // the DOM and a MutationObserver here creates a render -> mutation -> render loop
-    // that freezes Chrome. Only explicit navigation/render/date actions may remount.
     document.getElementById('topRangeQuery')?.addEventListener('click',()=>schedule({force:true,delay:180}));
     document.getElementById('dashboardRangeFrom')?.addEventListener('change',()=>schedule({force:true,delay:180}));
     document.getElementById('dashboardRangeTo')?.addEventListener('change',()=>schedule({force:true,delay:180}));
