@@ -3,7 +3,7 @@ import path from 'node:path';
 import { loadRangeDashboard } from './rangeDashboardStore.js';
 import { getDb } from './db.js';
 
-const TYPES = new Set(['CE','TBKH','ALI1688','SHOPEECN','SHOPEEVN','CCSL','SHOPEE']);
+const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','CCSL','SHOPEE']);
 
 function validDate(value='') {
   const date=String(value||'').trim().slice(0,10);
