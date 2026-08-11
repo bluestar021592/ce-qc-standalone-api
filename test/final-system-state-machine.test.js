@@ -135,7 +135,7 @@ test('special node and work-order self pickup outrank ordinary work-order anomal
   assert.equal(selfPickup.specialState, 'SELF_PICKUP');
   assert.equal(selfPickup.currentState, 'SELF_PICKUP');
 
-  for (const [node, expected] of [['580','CCSL580_DIVERSION'], ['CCSL580','CCSL580_DIVERSION'], ['CECN','CCSLCN_DIVERSION'], ['CEZT','CCSLZT_DIVERSION']]) {
+  for (const [node, expected] of [['580','CCSL580_RETENTION'], ['CCSL580','CCSL580_RETENTION'], ['CECN','CCSLCN_DIVERSION'], ['CEZT','CCSLZT_DIVERSION']]) {
     const result = analyzeShipment({ waybill: `S-${node}`, scanRow: { orderStatus: '70' }, reportDate: '2026-08-10', events: [ev('', '2026-08-10 10:00:00', `货物到达网点【CEL:${node}】`, { locationCode: node })] });
     assert.equal(result.currentState, expected);
   }
