@@ -97,6 +97,16 @@ test('business dashboard keeps a real detail preview target for metric navigatio
   assert.match(dashboard, /v18-detail-preview/);
 });
 
+test('business dashboard loads the exact V58 drilldown runtime before user interaction', () => {
+  const dashboard = fs.readFileSync(path.join(publicDir, 'dashboard-v18.js'), 'utf8');
+  const runtime = fs.readFileSync(path.join(publicDir, 'v58-drilldown-runtime.js'), 'utf8');
+  assert.match(dashboard, /v58-drilldown-runtime\.js\?v=20260811-v61-1/);
+  assert.match(dashboard, /script\.async=false/);
+  assert.match(runtime, /'金边门店':'phnomPenhShop'/);
+  assert.match(runtime, /\/api\/v55\/metric-detail/);
+  assert.match(runtime, /PATH_TYPES=new Map\(\[\['\/ce','CE'\]/);
+});
+
 test('business dashboards expose mutually exclusive accounting buckets', () => {
   const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
   const dashboard = fs.readFileSync(path.join(publicDir, 'dashboard-v18.js'), 'utf8');
