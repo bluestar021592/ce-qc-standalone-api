@@ -33,14 +33,24 @@ test('V58 becomes the compact dashboard and metric-detail source of truth',()=>{
   assert.match(api,/\/api\/v55\/metric-detail/);
 });
 
-test('V59 metric detail reads the exact same state detailTabs as dashboard summaries',()=>{
+test('V59 store metric detail reads state detailTabs instead of a second V55 detail query',()=>{
   const source=read('src/rangeDashboardStoreV58.js');
   assert.doesNotMatch(source,/loadMetricDetail as loadMetricDetailV55/);
   assert.match(source,/const range=loadRangeDashboardV55\(fromDate,toDate\)/);
   assert.match(source,/const state=pickState\(range,type\)/);
   assert.match(source,/state\?\.detailTabs\?\.\[key\]/);
   assert.match(source,/source:'V58_STATE_DETAIL_TABS'/);
-  assert.match(source,/金边门店=11/);
+});
+
+test('V60 public metric endpoint reads summary and rows from the exact same range object',()=>{
+  const api=read('src/v55DashboardReconciliationPatch.js');
+  assert.doesNotMatch(api,/import \{ loadMetricDetail,/);
+  assert.match(api,/const range=loadRangeDashboard\(fromDate,toDate\)/);
+  assert.match(api,/const state=pickState\(range,type\)/);
+  assert.match(api,/state\?\.detailTabs\?\.\[key\]/);
+  assert.match(api,/state\?\.v55Summary/);
+  assert.match(api,/source:'V60_SAME_RANGE_OBJECT'/);
+  assert.match(api,/“金边门店 11”/);
 });
 
 test('V58 drilldown resolves business context and renamed registry cards without relying only on pathname',()=>{
@@ -84,7 +94,7 @@ test('V58 UI is injected after V55 and trend compatibility layers with fresh cac
   assert.ok(injector.indexOf('v58-drilldown-runtime.js')>injector.indexOf('v56-trend-truth.js'));
 });
 
-test('V58 JavaScript files pass syntax checks',()=>{
+test('V58/V60 JavaScript files pass syntax checks',()=>{
   for(const relative of ['src/rangeDashboardStoreV58.js','public/v58-drilldown-runtime.js','public/v55-dashboard-reconciliation.js','src/v55DashboardReconciliationPatch.js','src/rangeDashboardStoreV55Compact.js']){
     const result=spawnSync(process.execPath,['--check',path.resolve(relative)],{encoding:'utf8'});
     assert.equal(result.status,0,`${relative} syntax failed:\n${result.stderr||result.stdout}`);
