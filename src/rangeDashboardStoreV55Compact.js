@@ -1,9 +1,9 @@
 import { loadRangeDashboard as loadRangeDashboardV55 } from './rangeDashboardStoreV55.js';
 
 // V55 correctness needs the canonical row set while it calculates each metric,
-// but bootstrap/business-state responses must stay lightweight.  Keep exact
-// totals and only a bounded residual-abnormal preview; full card drill-down is
-// served on demand by /api/v55/metric-detail.
+// but bootstrap/business-state responses must stay lightweight. Keep the small
+// dashboard metric row list plus a bounded residual-abnormal preview. Full
+// shipment drill-down is served on demand by /api/v55/metric-detail.
 export function loadRangeDashboard(fromDate,toDate){
   const range=loadRangeDashboardV55(fromDate,toDate);
   for(const state of Object.values(range.states||{}))compactState(state);
@@ -23,9 +23,10 @@ function compactTabs(tabs){
   for(const [key,value] of Object.entries(tabs)){
     if(!value||typeof value!=='object')continue;
     const rows=Array.isArray(value.rows)?value.rows:[];
-    if(['coreAbnormal','abnormal'].includes(key))value.rows=rows.slice(0,300);
+    if(key==='dashboard')value.rows=rows.slice(0,100);
+    else if(['coreAbnormal','abnormal'].includes(key))value.rows=rows.slice(0,300);
     else value.rows=[];
   }
 }
 
-export const RANGE_DASHBOARD_V55_COMPACT_ID='2026-08-11-v55-dashboard-reconciliation-compact-v1';
+export const RANGE_DASHBOARD_V55_COMPACT_ID='2026-08-11-v55-dashboard-reconciliation-compact-v2';
