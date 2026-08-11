@@ -1,6 +1,8 @@
 (function () {
-  const VERSION = '2026-08-10-v45-whpp-cleanup-v1';
-  const HIDDEN_CORE_LABELS = new Set(['工单', 'CCSLCN分流', 'CCSLZT分流', 'CCSL580分流']);
+  const VERSION = '2026-08-11-v48-whpp-cleanup-v2';
+  // CN/ZT are hidden on WHPP's compact local board. 580 is no longer hidden:
+  // CEL:CCSL580 is a dedicated 580滞留包裹 business metric.
+  const HIDDEN_CORE_LABELS = new Set(['工单', 'CCSLCN分流', 'CCSLZT分流']);
   let scheduled = false;
 
   function cleanup() {
