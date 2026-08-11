@@ -9,7 +9,7 @@
     "dev": "node --watch bootstrap.js",
     "start:production": "set NODE_ENV=production&& node bootstrap.js",
     "test": "node --test test/*.test.js",
-    "test:golive": "node --test test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js test/ceaf-processing-routing.test.js test/ccsl-waybill-resume.test.js test/dashboard-v18.test.js test/filename-date-detection.test.js test/production-readonly-tools.test.js test/data-purge-large-backup.test.js test/fresh-start-reset.test.js test/shopee-accounting-dispatch-day.test.js test/shopee-golive-accounting-ui.test.js test/whpp-routing-cancellation.test.js test/routing-final-location-v48.test.js test/bootstrap-performance.test.js test/v47-dashboard-integration.test.js"
+    "test:golive": "node --test test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js test/ceaf-processing-routing.test.js test/ccsl-waybill-resume.test.js test/dashboard-v18.test.js test/filename-date-detection.test.js test/production-readonly-tools.test.js test/data-purge-large-backup.test.js test/fresh-start-reset.test.js test/shopee-accounting-dispatch-day.test.js test/shopee-golive-accounting-ui.test.js test/whpp-routing-cancellation.test.js test/routing-final-location-v48.test.js test/bootstrap-performance.test.js test/v47-dashboard-integration.test.js test/v50-dashboard-source-truth.test.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
