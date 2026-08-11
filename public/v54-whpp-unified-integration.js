@@ -1,5 +1,5 @@
 (function installWhppUnifiedIntegrationV54(global) {
-  const VERSION = '2026-08-11-v54-whpp-unified-integration-v3';
+  const VERSION = '2026-08-11-v54-whpp-unified-integration-v4';
   let busy = false;
   let whppSummaryCache = null;
   let whppSummaryAt = 0;
@@ -60,6 +60,18 @@
     return !(status === 'COMPLETED' && unresolved === 0);
   }
 
+  function alreadyComplete(error = {}) {
+    const payload = error?.payload || {};
+    const text = [
+      error?.code,
+      error?.message,
+      payload?.code,
+      payload?.error,
+      payload?.message
+    ].filter(Boolean).join(' ');
+    return /当前任务已经完成|不能继续处理|already\s*(?:completed|finished)|task[_ -]?completed|run[_ -]?completed/i.test(text);
+  }
+
   async function readRunStates() {
     const [ccsl, shopee, whpp] = await Promise.all([
       api('/api/state?compact=1').catch(() => ({})),
@@ -96,16 +108,34 @@
       }
 
       const completed = [];
+      const skipped = [];
       for (const [label, url] of stages) {
-        await runStage(label, url);
-        completed.push(label);
+        try {
+          await runStage(label, url);
+          completed.push(label);
+        } catch (error) {
+          if (alreadyComplete(error)) {
+            skipped.push(label);
+            console.info('[CE-QC][V54_UNIFIED_RUN] already complete, continue:', label);
+            continue;
+          }
+          throw error;
+        }
       }
 
-      setStatus('success', `综合日报处理完成：${completed.join('；')}处理完成。`);
+      const parts = [];
+      if (completed.length) parts.push(`${completed.join('；')}处理完成`);
+      if (skipped.length) parts.push(`${skipped.join('；')}已完成，自动跳过`);
+      setStatus('success', `综合日报处理完成：${parts.join('；')}。`);
       whppSummaryCache = null;
       whppSummaryAt = 0;
-      if (typeof global.refresh === 'function') await global.refresh();
-      else global.location.reload();
+      if (location.pathname === '/whpp' && typeof global.navigateWhppPage === 'function') {
+        await global.navigateWhppPage();
+      } else if (typeof global.refresh === 'function') {
+        await global.refresh();
+      } else {
+        global.location.reload();
+      }
     } catch (error) {
       console.error('[CE-QC][V54_UNIFIED_RUN]', error);
       setStatus('danger', `全自动处理失败：${String(error.message || error)}`);
@@ -193,9 +223,6 @@
   }
 
   function install() {
-    // The base app dispatches only CCSL + SHOPEE. V54 is intentionally loaded
-    // last and owns all three unified buttons so one click covers all seven
-    // classified business boards, including the separately persisted WHPP state.
     global.runUnified = () => executeUnified('start');
     global.resumeUnified = () => executeUnified('resume');
     global.pauseUnified = pauseUnifiedV54;
