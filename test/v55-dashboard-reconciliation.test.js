@@ -59,11 +59,22 @@ test('V55 compact facade keeps metric rows but not full shipment tables',()=>{
   assert.match(source,/\/api\/v55\/metric-detail/);
 });
 
-test('V55 UI captures all supported business metric cards before legacy special handlers',()=>{
+test('V55 UI directly owns the real V18 drilldown entry points',()=>{
   const ui=read('public/v55-dashboard-reconciliation.js');
-  assert.match(ui,/global\.addEventListener\('click'/);
+  assert.match(ui,/global\.openV18MetricDetail=function v55OpenV18MetricDetail/);
+  assert.match(ui,/global\.openMetricDetail=function v55OpenMetricDetail/);
   assert.match(ui,/\/api\/v55\/metric-detail/);
   for(const label of ['CCSLCN分流','CCSLZT分流','580滞留包裹','金边门店','外省门店','外省未完结POD件','当前未闭环'])assert.match(ui,new RegExp(label));
+});
+
+test('V55 UI reconciles legacy top cards from the authoritative V55 summary endpoint',()=>{
+  const ui=read('public/v55-dashboard-reconciliation.js');
+  assert.match(ui,/\/api\/v55\/reconciliation/);
+  assert.match(ui,/syncVisibleBusinessPage/);
+  assert.match(ui,/'当前未闭环':s\.open/);
+  assert.match(ui,/'CCSLCN分流':s\.ccslCnDiversion/);
+  assert.match(ui,/ensureCoreCard\(grid,type,label/);
+  assert.match(ui,/MutationObserver/);
 });
 
 test('V55 home core metrics use the same exact drilldown endpoint',()=>{
@@ -75,9 +86,9 @@ test('V55 home core metrics use the same exact drilldown endpoint',()=>{
   assert.match(ui,/外省门店/);
 });
 
-test('V55 is injected after previous dashboard compatibility scripts',()=>{
+test('V55 is injected after previous dashboard compatibility scripts with a fresh cache key',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/v55-dashboard-reconciliation\.js/);
+  assert.match(injector,/v55-dashboard-reconciliation\.js\?v=20260811-3/);
   assert.match(injector,/v55-home-drilldown\.js/);
   assert.ok(injector.indexOf('v55-dashboard-reconciliation.js')>injector.indexOf('v50-dashboard-source-truth.js'));
 });
