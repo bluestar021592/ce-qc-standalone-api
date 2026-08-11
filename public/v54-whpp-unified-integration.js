@@ -1,8 +1,9 @@
 (function installWhppUnifiedIntegrationV54(global) {
-  const VERSION = '2026-08-11-v54-whpp-unified-integration-v1';
+  const VERSION = '2026-08-11-v54-whpp-unified-integration-v2';
   let busy = false;
   let whppSummaryCache = null;
   let whppSummaryAt = 0;
+  let decorating = false;
 
   async function readJson(response) {
     const text = await response.text();
@@ -26,18 +27,12 @@
     }));
   }
 
-  function statusNode() {
-    return document.getElementById('ccslRunStatus');
-  }
-
-  function runButton() {
-    return document.querySelector('[data-testid="global-auto-process"]');
-  }
+  function statusNode() { return document.getElementById('ccslRunStatus'); }
+  function runButton() { return document.querySelector('[data-testid="global-auto-process"]'); }
 
   function setStatus(kind, text) {
     const node = statusNode();
-    if (!node) return;
-    node.innerHTML = `<span class="status-pill ${kind}">${String(text || '')}</span>`;
+    if (node) node.innerHTML = `<span class="status-pill ${kind}">${String(text || '')}</span>`;
   }
 
   function setBusy(value, text = '') {
@@ -53,14 +48,16 @@
     const phase = String(state?.processing?.phase || '').trim();
     const error = String(state?.processing?.error || '').trim();
     const retry = Number(state?.lastRunSummary?.refreshFailed || state?.lastRunSummary?.retry || 0);
-    return Boolean(state?.reportDate) && phase === '完成' && !error && retry === 0 && Boolean(state?.snapshotId || state?.snapshotStatus === 'COMPLETED');
+    return Boolean(state?.reportDate) && phase === '完成' && !error && retry === 0;
   }
 
-  function whppFinished(payload = {}) {
-    const total = Number(payload?.dashboard?.metrics?.total || payload?.state?.pnhBills?.length || 0);
+  function whppNeedsRun(payload = {}) {
+    const state = payload?.state || {};
+    const total = Number(payload?.dashboard?.metrics?.total || state?.pnhBills?.length || 0);
     const unresolved = Number(payload?.dashboard?.metrics?.unresolved || 0);
-    const status = String(payload?.snapshotStatus || payload?.state?.snapshotStatus || '').toUpperCase();
-    return total > 0 && unresolved === 0 && status === 'COMPLETED';
+    const status = String(payload?.snapshotStatus || state?.snapshotStatus || '').toUpperCase();
+    if (!state?.dailyReportReady || total <= 0) return false;
+    return !(status === 'COMPLETED' && unresolved === 0);
   }
 
   async function readRunStates() {
@@ -75,12 +72,11 @@
   async function runStage(label, url) {
     setBusy(true, `正在处理${label}…`);
     setStatus('warning', `正在处理 ${label}，请勿关闭页面；完成后自动进入下一业务。`);
-    const result = await api(url, {
+    return api(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}'
     });
-    return result;
   }
 
   async function executeUnified(mode = 'start') {
@@ -92,7 +88,7 @@
 
       if (!stateFinished(states.ccsl)) stages.push(['CCSL（CE/CEAF/TBKH/ALI1688）', mode === 'resume' ? '/api/resume' : '/api/run']);
       if (!stateFinished(states.shopee)) stages.push(['SHOPEE CN/VN', mode === 'resume' ? '/api/shopee/run/resume' : '/api/shopee/run/start']);
-      if (!whppFinished(states.whpp)) stages.push(['WHPP本土', mode === 'resume' ? '/api/whpp/run/resume' : '/api/whpp/run/start']);
+      if (whppNeedsRun(states.whpp)) stages.push(['WHPP本土', mode === 'resume' ? '/api/whpp/run/resume' : '/api/whpp/run/start']);
 
       if (!stages.length) {
         setStatus('success', '七业务均已完成，无需重复处理。');
@@ -113,7 +109,6 @@
     } catch (error) {
       console.error('[CE-QC][V54_UNIFIED_RUN]', error);
       setStatus('danger', `全自动处理失败：${String(error.message || error)}`);
-      throw error;
     } finally {
       setBusy(false);
     }
@@ -146,35 +141,66 @@
     }
   }
 
+  function numberOf(node) {
+    return Number(String(node?.textContent || '').replace(/[^0-9.-]/g, '')) || 0;
+  }
+
+  function patchImportedUniqueTotal(grid, whppTotal) {
+    const validNode = grid.querySelector('[data-testid="classification-valid-unique"]');
+    const businessKeys = ['ce','ceaf','tbkh','ali1688','shopeecn','shopeevn','whpp'];
+    const reconciled = businessKeys.reduce((sum, key) => sum + numberOf(grid.querySelector(`[data-testid="classification-${key}"]`)), 0);
+    if (validNode && reconciled > 0) validNode.textContent = reconciled.toLocaleString('zh-CN');
+
+    const status = document.getElementById('fileStatus');
+    if (status && reconciled > 0) {
+      status.querySelectorAll('p').forEach(p => {
+        if (/有效唯一单号/.test(p.textContent || '')) {
+          p.innerHTML = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${reconciled.toLocaleString('zh-CN')}`);
+        }
+      });
+    }
+  }
+
   async function decorateUnifiedImport() {
+    if (decorating) return;
     const grid = document.querySelector('#unifiedClassificationSummary .unified-count-grid');
     if (!grid) return;
-    const payload = await getWhppSummary();
-    const whppTotal = Number(payload?.dashboard?.metrics?.total || payload?.state?.pnhBills?.length || 0);
-    let card = grid.querySelector('[data-v54-business="WHPP"]');
-    if (!card) {
-      card = document.createElement('div');
-      card.dataset.v54Business = 'WHPP';
-      card.innerHTML = '<span>WHPP本土</span><b data-testid="classification-whpp">0</b>';
-      grid.appendChild(card);
-    }
-    const value = card.querySelector('b');
-    if (value) value.textContent = Number(whppTotal || 0).toLocaleString('zh-CN');
+    decorating = true;
+    try {
+      const payload = await getWhppSummary();
+      const whppTotal = Number(payload?.dashboard?.metrics?.total || payload?.state?.pnhBills?.length || 0);
+      let card = grid.querySelector('[data-v54-business="WHPP"]');
+      if (!card) {
+        card = document.createElement('div');
+        card.dataset.v54Business = 'WHPP';
+        card.innerHTML = '<span>WHPP本土</span><b data-testid="classification-whpp">0</b>';
+        grid.appendChild(card);
+      }
+      const value = card.querySelector('b');
+      if (value) value.textContent = Number(whppTotal || 0).toLocaleString('zh-CN');
+      patchImportedUniqueTotal(grid, whppTotal);
 
-    const empty = document.querySelector('#unifiedClassificationSummary .unified-empty-state span');
-    if (empty && /六业务/.test(empty.textContent || '')) empty.textContent = (empty.textContent || '').replace('六业务', '七业务');
+      const empty = document.querySelector('#unifiedClassificationSummary .unified-empty-state span');
+      if (empty && /六业务/.test(empty.textContent || '')) empty.textContent = (empty.textContent || '').replace('六业务', '七业务');
+    } finally {
+      decorating = false;
+    }
   }
 
   function install() {
-    // The base app only dispatches CCSL + SHOPEE even though the button is named
-    // "开始全自动". V54 becomes the final owner of the inline handlers so WHPP
-    // is always part of the same one-click workflow and resume/pause lifecycle.
+    // The base app dispatches only CCSL + SHOPEE. V54 is intentionally loaded
+    // last and owns all three unified buttons so one click covers all seven
+    // classified business boards, including the separately persisted WHPP state.
     global.runUnified = () => executeUnified('start');
     global.resumeUnified = () => executeUnified('resume');
     global.pauseUnified = pauseUnifiedV54;
 
     void decorateUnifiedImport();
-    const observer = new MutationObserver(() => void decorateUnifiedImport());
+    let timer = null;
+    const observer = new MutationObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void decorateUnifiedImport(), 60);
+    });
     observer.observe(document.querySelector('.app-shell') || document.body, { subtree: true, childList: true });
     console.info('[CE-QC][WHPP_UNIFIED_V54]', VERSION);
   }
