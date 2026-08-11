@@ -2,7 +2,7 @@ import { loadRangeDashboard as loadRangeDashboardV58 } from './rangeDashboardSto
 
 // V58 keeps V55's canonical row source but applies the final carry/severe thresholds
 // before bootstrap/business-state responses are compacted. Full shipment drill-down
-// remains on demand via the metric-detail endpoint.
+// remains on demand via /api/v55/metric-detail.
 export function loadRangeDashboard(fromDate,toDate){
   const range=loadRangeDashboardV58(fromDate,toDate);
   for(const state of Object.values(range.states||{}))compactState(state);
