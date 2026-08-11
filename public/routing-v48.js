@@ -1,5 +1,5 @@
 (function installRoutingV48(global){
-  const VERSION='2026-08-11-v48-final-location-routing-ui-v1';
+  const VERSION='2026-08-11-v48-final-location-routing-ui-v2';
   const PATH_TYPE={
     '/ce':'CE','/ceaf':'CEAF','/tbkh':'TBKH','/ali1688':'ALI1688'
   };
@@ -18,6 +18,7 @@
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
 
   function businessType(){return PATH_TYPE[location.pathname]||'';}
+  function relevantPath(){return Boolean(businessType()||location.pathname==='/whpp');}
   function range(){
     const from=document.getElementById('topRangeFrom')?.value||document.getElementById('dashboardRangeFrom')?.value||'';
     const to=document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||from;
@@ -73,8 +74,23 @@
     return button;
   }
 
+  function applyWhpp580(){
+    if(location.pathname!=='/whpp')return;
+    const container=document.querySelector('#shopeePage .v18-core-grid');
+    if(!container)return;
+    for(const card of metricCards(container)){
+      const label=labelOf(card);
+      if(!['CCSL580分流','CCSL580滞留包裹','580滞留包裹'].includes(label))continue;
+      const span=card.querySelector('span');
+      if(span)span.textContent='580滞留包裹';
+      card.title='仅显示最终轨迹位于 CEL:CCSL580 的运单';
+      card.onclick=event=>{event.preventDefault();event.stopPropagation();if(typeof global.openWhppDetailV44==='function')global.openWhppDetailV44('ccsl580Retention');};
+    }
+  }
+
   async function apply(){
     scheduled=false;
+    if(location.pathname==='/whpp'){applyWhpp580();return;}
     const type=businessType();if(!type)return;
     const container=grid();if(!container)return;
     const {from,to}=range();if(!from||!to)return;
@@ -112,7 +128,7 @@
   function schedule(){if(scheduled)return;scheduled=true;setTimeout(apply,60);}
   function install(){
     const observer=new MutationObserver(mutations=>{
-      if(!businessType())return;
+      if(!relevantPath())return;
       if(mutations.some(m=>m.type==='childList'&&m.addedNodes.length))schedule();
     });
     observer.observe(document.querySelector('.app-shell')||document.body,{subtree:true,childList:true});
