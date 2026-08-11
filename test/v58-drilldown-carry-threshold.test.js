@@ -33,6 +33,16 @@ test('V58 becomes the compact dashboard and metric-detail source of truth',()=>{
   assert.match(api,/\/api\/v55\/metric-detail/);
 });
 
+test('V59 metric detail reads the exact same state detailTabs as dashboard summaries',()=>{
+  const source=read('src/rangeDashboardStoreV58.js');
+  assert.doesNotMatch(source,/loadMetricDetail as loadMetricDetailV55/);
+  assert.match(source,/const range=loadRangeDashboardV55\(fromDate,toDate\)/);
+  assert.match(source,/const state=pickState\(range,type\)/);
+  assert.match(source,/state\?\.detailTabs\?\.\[key\]/);
+  assert.match(source,/source:'V58_STATE_DETAIL_TABS'/);
+  assert.match(source,/金边门店=11/);
+});
+
 test('V58 drilldown resolves business context and renamed registry cards without relying only on pathname',()=>{
   const ui=read('public/v58-drilldown-runtime.js');
   assert.match(ui,/inlineBusinessType/);
