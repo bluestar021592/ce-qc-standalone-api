@@ -61,8 +61,10 @@ test('one-click launcher opens a running app immediately and cold-starts silentl
   assert.match(installer, /WindowStyle Hidden/);
   assert.match(installer, /Test-CeQcReady/);
   assert.match(installer, /127\.0\.0\.1:5177/);
-  assert.doesNotMatch(installer, /Start_CE_QC_Auto\.vbs/);
-  assert.doesNotMatch(installer, /wscript\.exe/i);
+  // The installer may mention legacy VBS launcher names only to delete stale
+  // shortcuts. It must not execute Windows Script Host in the active path.
+  assert.doesNotMatch(installer, /TargetPath\s*=\s*.*wscript\.exe/i);
+  assert.doesNotMatch(installer, /Start-Process\s+.*wscript\.exe/i);
   assert.doesNotMatch(installer, /git\s+(fetch|pull)/i);
 });
 
