@@ -194,7 +194,8 @@ test('final range layer excludes pickup-success normal flow and keeps store-tran
     ['PICKUP', { primaryCategory: '正常流转', rawJson: JSON.stringify({ currentState: 'PICKUP_SUCCESS' }) }],
     ['TRANSIT2', { primaryCategory: '门店途中2天+', shopState: 'SHOP_TRANSFER_IN_PROGRESS', rawJson: JSON.stringify({ currentState: 'SHOP_TRANSFER_IN_PROGRESS', shopTransferNaturalDays: 2 }) }],
     ['SHOPP', { primaryCategory: '门店Pending', shopState: 'SHOP_ARRIVED_CURRENT', shopRetentionNaturalDays: 3, rawJson: JSON.stringify({ currentState: 'SHOP_PENDING' }) }],
-    ['PENDING', { primaryCategory: 'Pending1次', pendingDays: 1, rawJson: JSON.stringify({ currentState: 'PENDING' }) }]
+    ['PENDING1', { primaryCategory: 'Pending1次', pendingDays: 1, rawJson: JSON.stringify({ currentState: 'PENDING', Pending连续性: '连续' }) }],
+    ['PENDING3', { primaryCategory: 'Pending3次', pendingDays: 3, rawJson: JSON.stringify({ currentState: 'PENDING', Pending连续性: '连续' }) }]
   ];
 
   for (const [code, final] of fixtures) {
@@ -211,7 +212,7 @@ test('final range layer excludes pickup-success normal flow and keeps store-tran
   assert.equal(range.states.CE.dashboard.normalOperationalOpen, 1);
   assert.equal(range.states.CE.dashboard.shopTransit2, 1);
   assert.equal(range.states.CE.dashboard.shopRetention2, 0, 'store Pending must not double-count as store retention');
-  assert.equal(range.states.CE.dashboard.abnormalCount, 2, 'only transfer2+ and ordinary Pending remain ordinary abnormal');
+  assert.equal(range.states.CE.dashboard.abnormalCount, 2, 'V58 keeps store-transfer 2+ and Pending3+ abnormal while continuous Pending1 stays below threshold');
 });
 
 test.after(() => {
