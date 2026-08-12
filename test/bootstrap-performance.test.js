@@ -31,7 +31,7 @@ test('V43 and V46 cold-start performance patches load before the main server', (
   assert.ok(server > v46, 'V46 must finish before server.js accepts browser requests');
 });
 
-test('V46 cold-start index patch is read-only and never builds large indexes during bootstrap', () => {
+test('V46 cold-start index patch never opens SQLite during bootstrap', () => {
   const file = path.join(root, 'src', 'v46ColdStartIndexPatch.js');
   const source = fs.readFileSync(file, 'utf8');
   const check = spawnSync(process.execPath, ['--check', file], { encoding:'utf8' });
@@ -40,11 +40,20 @@ test('V46 cold-start index patch is read-only and never builds large indexes dur
   assert.match(source, /snapshotId, businessType, regionCode/);
   assert.match(source, /idx_unified_batches_latest_valid/);
   assert.match(source, /sqlite_master/);
-  assert.match(source, /startup remained read-only/);
-  assert.doesNotMatch(source, /db\.exec\s*\(/);
+  assert.match(source, /optional index inspection deferred/);
+  assert.match(source, /export function inspectV46Indexes/);
+  assert.doesNotMatch(source, /const db = getDb\(\)/);
   assert.doesNotMatch(source, /CREATE\s+INDEX/i);
-  assert.doesNotMatch(source, /pragma\(['"]optimize/i);
   assert.doesNotMatch(source, /VACUUM/i);
+});
+
+test('database open avoids reapplying WAL when already active', () => {
+  const source = fs.readFileSync(path.join(root, 'src', 'db.js'), 'utf8');
+  assert.match(source, /PRAGMA busy_timeout = 3000/);
+  assert.match(source, /PRAGMA journal_mode/);
+  assert.match(source, /if \(journalMode !== 'wal'\)/);
+  assert.match(source, /WAL mode switch deferred/);
+  assert.ok(source.indexOf('PRAGMA busy_timeout = 3000') < source.indexOf("if (journalMode !== 'wal')"));
 });
 
 test('startup cache worker does not scan 180 days during first paint', () => {
@@ -66,8 +75,6 @@ test('one-click launcher opens a running app immediately and cold-starts silentl
   assert.match(installer, /WindowStyle Hidden/);
   assert.match(installer, /Test-CeQcReady/);
   assert.match(installer, /127\.0\.0\.1:5177/);
-  // The installer may mention legacy VBS launcher names only to delete stale
-  // shortcuts. It must not execute Windows Script Host in the active path.
   assert.doesNotMatch(installer, /TargetPath\s*=\s*.*wscript\.exe/i);
   assert.doesNotMatch(installer, /Start-Process\s+.*wscript\.exe/i);
   assert.doesNotMatch(installer, /git\s+(fetch|pull)/i);
