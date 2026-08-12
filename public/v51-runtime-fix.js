@@ -1,5 +1,5 @@
 (function installRuntimeFixV51(global){
-  const VERSION='2026-08-12-v51-runtime-fix-v2';
+  const VERSION='2026-08-12-v51-runtime-fix-v3';
   const nativeFetch=global.fetch.bind(global);
   const SPECIAL_TAB_BY_LABEL={
     'CCSLCN分流':'ccslCnDiversion','CECN滞留包裹':'ccslCnDiversion',
@@ -62,7 +62,7 @@
     const url=buildUrl(input);
     if(!sameOrigin(url))return nativeFetch(input,init);
 
-    if(url.pathname==='/api/whpp/state')url.pathname='/api/v50/whpp-state';
+    if(url.pathname==='/api/whpp/state')url.pathname='/api/v71/whpp-summary';
     else if(url.pathname==='/api/whpp/metric-detail')url.pathname='/api/v50/whpp-metric-detail';
     else if(CARRY_PATHS.has(url.pathname)){
       carryStatus=String(url.searchParams.get('status')||carryStatus||'OPEN').toUpperCase();
@@ -72,8 +72,7 @@
       url.searchParams.set('status',carryStatus);
       url.searchParams.set('businessType',carrySelected||requested||'ALL');
     }else if(url.pathname==='/api/v61/metric-detail'){
-      // V61 is the canonical detail source. Never let this legacy wrapper
-      // downgrade it back to the old V50 special-detail query.
+      // Canonical detail route stays untouched.
     }else if(/\/metric-detail$/.test(url.pathname)){
       rewriteSpecialDetail(url);
     }
@@ -114,9 +113,6 @@
     }catch(error){host.innerHTML=`<div class="empty-state">明细读取失败：${esc(error.message||error)}</div>`;}
   }
 
-  // Legacy V51 used to capture these cards before V55/V58/V61 could see the
-  // click. Once the canonical V61 bridge is installed, relinquish ownership so
-  // card count and detail rows come from the exact same V58/V61 state object.
   document.addEventListener('click',event=>{
     const card=event.target?.closest?.('.v18-metric-card,.v18-business-card');
     if(!card)return;
@@ -126,7 +122,7 @@
     void openSpecialDetail(type,tab,label);
   },true);
 
-  function homeVisible(){const node=document.getElementById('homePage');return node&&!node.hidden&&node.classList.contains('active')||location.pathname==='/'||location.pathname==='/home';}
+  function homeVisible(){const node=document.getElementById('homePage');return Boolean((node&&!node.hidden&&node.classList.contains('active'))||location.pathname==='/'||location.pathname==='/home');}
   function businessCardValue(card){return parseNumber(card.querySelector('b')?.textContent);}
   function patchHomeWhppCard(){
     if(homeWhppTotal===null||!homeVisible())return;
@@ -141,32 +137,31 @@
       grid.appendChild(whpp);
       cards=[...grid.querySelectorAll('.v18-business-card')];
     }else{
-      const value=whpp.querySelector('b');if(value)value.textContent=fmt(homeWhppTotal);
+      const value=whpp.querySelector('b');if(value&&value.textContent!==fmt(homeWhppTotal))value.textContent=fmt(homeWhppTotal);
     }
     const totalCard=cards.find(card=>cardLabel(card)==='总览')||cards[0];
     const nonTotal=cards.filter(card=>card!==totalCard&&card!==whpp);
     const existingSum=nonTotal.reduce((sum,card)=>sum+businessCardValue(card),0);
     let grand=businessCardValue(totalCard);
     const expected=existingSum+Number(homeWhppTotal||0);
-    // Old V42 may already include WHPP in 总览 but omit its card. Only increase
-    // 总览 when it clearly equals the sum of the visible non-WHPP cards.
     if(grand<=0||Math.abs(grand-existingSum)<0.5||grand<expected)grand=expected;
-    const totalValue=totalCard?.querySelector('b');if(totalValue)totalValue.textContent=fmt(grand);
-    const totalRatio=totalCard?.querySelector('em');if(totalRatio)totalRatio.textContent='占总票数 100.00%';
+    const totalValue=totalCard?.querySelector('b');if(totalValue&&totalValue.textContent!==fmt(grand))totalValue.textContent=fmt(grand);
+    const totalRatio=totalCard?.querySelector('em');if(totalRatio&&totalRatio.textContent!=='占总票数 100.00%')totalRatio.textContent='占总票数 100.00%';
     cards.filter(card=>card!==totalCard).forEach(card=>{
-      const ratio=card.querySelector('em');if(ratio)ratio.textContent=`占总票数 ${grand?(businessCardValue(card)*100/grand).toFixed(2):'0.00'}%`;
+      const ratio=card.querySelector('em');const text=`占总票数 ${grand?(businessCardValue(card)*100/grand).toFixed(2):'0.00'}%`;if(ratio&&ratio.textContent!==text)ratio.textContent=text;
     });
   }
-  async function refreshHomeWhpp(){
+  async function refreshHomeWhpp(force=false){
     if(!homeVisible())return;
     const date=selectedDate();
-    if(homeRequest||homeWhppDate===date&&homeWhppTotal!==null){patchHomeWhppCard();return;}
+    if(homeRequest)return homeRequest;
+    if(!force&&homeWhppDate===date&&homeWhppTotal!==null){patchHomeWhppCard();return;}
     homeRequest=(async()=>{
       try{
         const q=date?`?reportDate=${encodeURIComponent(date)}`:'';
-        const response=await nativeFetch(`/api/v50/whpp-state${q}`,{cache:'no-store',credentials:'same-origin'});
+        const response=await nativeFetch(`/api/v71/whpp-summary${q}`,{cache:'no-store',credentials:'same-origin'});
         const data=await response.json().catch(()=>({}));
-        if(response.ok&&data?.ok!==false){homeWhppTotal=Number(data?.dashboard?.metrics?.total||0);homeWhppDate=date||data?.state?.reportDate||'';patchHomeWhppCard();}
+        if(response.ok&&data?.ok!==false){homeWhppTotal=Number(data?.dashboard?.metrics?.total??data?.total??0);homeWhppDate=date||data?.state?.reportDate||data?.reportDate||'';patchHomeWhppCard();}
       }catch(error){console.warn('[V51][HOME_WHPP]',error);}
       finally{homeRequest=null;}
     })();
@@ -189,8 +184,8 @@
     const grid=document.querySelector('.v27-carry-business-grid');if(!grid)return;
     [...grid.querySelectorAll('.v27-carry-business-card')].forEach(card=>{
       const type=businessFromCard(card);if(type)card.dataset.v51Business=type;
-      card.classList.toggle('active',type===carrySelected);
-      const count=card.querySelector('b');if(count&&type&&carrySummary[type]!==undefined)count.textContent=fmt(carrySummary[type]);
+      if(card.classList.contains('active')!==(type===carrySelected))card.classList.toggle('active',type===carrySelected);
+      const count=card.querySelector('b');const text=fmt(carrySummary[type]||0);if(count&&type&&carrySummary[type]!==undefined&&count.textContent!==text)count.textContent=text;
     });
     for(const item of EXTRA_BUSINESS){
       let card=grid.querySelector(`[data-v51-business="${item.type}"]`);
@@ -212,8 +207,9 @@
     if(typeof global.v27SetCarryStatus==='function')global.v27SetCarryStatus(carryStatus||'OPEN');
   };
   document.addEventListener('click',event=>{
-    const card=event.target?.closest?.('.v27-carry-business-card');if(!card)return;
-    const type=card.dataset.v51Business||businessFromCard(card);if(type)carrySelected=type;
+    const card=event.target?.closest?.('.v27-carry-business-card');if(card){const type=card.dataset.v51Business||businessFromCard(card);if(type)carrySelected=type;}
+    if(event.target?.closest?.('[data-page="home"],#topRangeQuery'))setTimeout(()=>void refreshHomeWhpp(true),20);
+    if(event.target?.closest?.('[data-page="carry"]'))setTimeout(()=>void refreshCarrySummary(),20);
   },true);
 
   async function refreshCarrySummary(){
@@ -228,14 +224,12 @@
 
   function scheduleDecorate(){
     clearTimeout(decorateTimer);
-    decorateTimer=setTimeout(()=>{patchHomeWhppCard();patchCarryBusinessCards();void refreshHomeWhpp();},50);
+    decorateTimer=setTimeout(()=>{patchHomeWhppCard();patchCarryBusinessCards();},30);
   }
-  const observer=new MutationObserver(scheduleDecorate);
-  observer.observe(document.querySelector('.app-shell')||document.body,{subtree:true,childList:true});
-  global.addEventListener('popstate',()=>setTimeout(()=>{void refreshHomeWhpp();void refreshCarrySummary();},80));
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){void refreshHomeWhpp();void refreshCarrySummary();}});
 
-  setTimeout(()=>{void refreshHomeWhpp();void refreshCarrySummary();},80);
-  setInterval(()=>{if(document.querySelector('.v27-carry-business-grid'))void refreshCarrySummary();},5000);
+  global.addEventListener('popstate',()=>setTimeout(()=>{void refreshHomeWhpp(true);void refreshCarrySummary();},40));
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){void refreshHomeWhpp(false);}});
+  document.addEventListener('ce-qc-run-complete',()=>{homeWhppDate='';void refreshHomeWhpp(true);void refreshCarrySummary();});
+  setTimeout(()=>{void refreshHomeWhpp(false);void refreshCarrySummary();},40);
   console.info('[CE-QC][RUNTIME_V51]',VERSION);
 })(window);
