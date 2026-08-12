@@ -86,7 +86,7 @@ test('WHPP direct SPA entry injects native frontend without legacy V42 UI', () =
   const check = spawnSync(process.execPath, ['--check', file], { encoding:'utf8' });
   assert.equal(check.status, 0, check.stderr || check.stdout);
   assert.match(source, /'\/whpp'/);
-  assert.match(source, /whpp-v44\.js/);
+  assert.match(source, /whpp-v44\.js\?v=20260812-2/);
   assert.match(source, /whpp-v45-cleanup\.js/);
   assert.match(source, /dashboard-title-dedup\.css/);
   assert.doesNotMatch(source, /whpp-v42\.js/);
@@ -120,6 +120,8 @@ test('WHPP board uses native Shopee dashboard classes and does not render dispat
   const check = spawnSync(process.execPath, ['--check', file], { encoding:'utf8' });
   assert.equal(check.status, 0, check.stderr || check.stdout);
   for (const token of ['v18-business-grid','v18-core-grid','region-summary-grid','v18-chart-grid','订单取消','金边门店']) assert.match(source, new RegExp(token));
+  assert.match(source, /\/api\/v71\/whpp-summary/);
+  assert.doesNotMatch(source, /\/api\/whpp\/state/);
   assert.doesNotMatch(source, /1派POD|2派POD|3派POD|派送概率分布/);
 });
 
@@ -133,9 +135,11 @@ test('WHPP display hides unused work-order and CN/ZT diversion cards but keeps b
   assert.match(source, /card\.remove\(\)/);
 });
 
-test('WHPP visibility observer is idempotent and cannot self-trigger a browser freeze', () => {
+test('WHPP board is event-driven and never observes the whole application DOM', () => {
   const source = fs.readFileSync(path.join(root, 'public', 'whpp-v44.js'), 'utf8');
   assert.match(source, /if\(node\.hidden!==shouldHide\)node\.hidden=shouldHide/);
   assert.match(source, /if\(node\.classList\.contains\('active'\)!==shouldActive\)node\.classList\.toggle\('active',shouldActive\)/);
-  assert.match(source, /if\(title&&title\.textContent!=='WHPP本土看板'\)title\.textContent='WHPP本土看板'/);
+  assert.match(source, /ce-qc-run-complete/);
+  assert.doesNotMatch(source, /new MutationObserver/);
+  assert.doesNotMatch(source, /observer\.observe/);
 });
