@@ -46,7 +46,7 @@ test('unified import UI reconciles core snapshot totals with separately persiste
   const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
   assert.match(ui, /combinedImportTruth/);
   assert.match(ui, /coreUnique \+ separateWhpp/);
-  assert.match(ui, /classificationCounts\?\.WHPP/);
+  assert.match(ui, /counts\?\.WHPP/);
   assert.match(ui, /当前处理队列/);
   assert.match(ui, /收件人为空（仍已按规则分类）/);
   assert.match(ui, /真正分类冲突/);
