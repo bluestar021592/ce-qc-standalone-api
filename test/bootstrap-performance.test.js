@@ -31,7 +31,7 @@ test('V43 and V46 cold-start performance patches load before the main server', (
   assert.ok(server > v46, 'V46 must finish before server.js accepts browser requests');
 });
 
-test('V46 installs covering indexes for the exact cold bootstrap grouping path', () => {
+test('V46 cold-start index patch is read-only and never builds large indexes during bootstrap', () => {
   const file = path.join(root, 'src', 'v46ColdStartIndexPatch.js');
   const source = fs.readFileSync(file, 'utf8');
   const check = spawnSync(process.execPath, ['--check', file], { encoding:'utf8' });
@@ -39,6 +39,11 @@ test('V46 installs covering indexes for the exact cold bootstrap grouping path',
   assert.match(source, /idx_unified_rows_bootstrap_cover/);
   assert.match(source, /snapshotId, businessType, regionCode/);
   assert.match(source, /idx_unified_batches_latest_valid/);
+  assert.match(source, /sqlite_master/);
+  assert.match(source, /startup remained read-only/);
+  assert.doesNotMatch(source, /db\.exec\s*\(/);
+  assert.doesNotMatch(source, /CREATE\s+INDEX/i);
+  assert.doesNotMatch(source, /pragma\(['"]optimize/i);
   assert.doesNotMatch(source, /VACUUM/i);
 });
 
