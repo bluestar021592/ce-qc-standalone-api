@@ -11,17 +11,31 @@ test('CEAF is accepted and mounted by the shared trend endpoint', () => {
   assert.match(mount, /ceaf:'CEAF'/);
 });
 
-test('global automatic processing continues into WHPP after CCSL and Shopee', () => {
+test('global automatic processing always reaches WHPP and can recover CCSL/Shopee independently', () => {
   const source = fs.readFileSync(path.resolve('public/whpp-v47-auto-run.js'), 'utf8');
   assert.match(source, /global\.runUnified/);
-  assert.match(source, /\/api\/whpp\/state/);
+  assert.match(source, /\/api\/run/);
+  assert.match(source, /\/api\/resume/);
+  assert.match(source, /\/api\/shopee\/run\/start/);
+  assert.match(source, /\/api\/shopee\/run\/resume/);
   assert.match(source, /\/api\/whpp\/run\/start/);
-  assert.match(source, /snapshotStatus/);
+  assert.match(source, /\/api\/whpp\/run\/resume/);
+  assert.match(source, /results\.push\(await runBusiness/);
+  assert.match(source, /if \(isAuth\(error\)\) throw error/);
+  assert.match(source, /attempt < 3/);
 });
 
-test('WHPP V47 integration is injected into every application page', () => {
+test('global continue processing resumes CCSL Shopee and WHPP', () => {
+  const source = fs.readFileSync(path.resolve('public/whpp-v47-auto-run.js'), 'utf8');
+  assert.match(source, /global\.resumeUnified/);
+  assert.match(source, /label: 'CCSL', start: '\/api\/resume'/);
+  assert.match(source, /label: 'SHOPEE', start: '\/api\/shopee\/run\/resume'/);
+  assert.match(source, /label: 'WHPP本土', start: '\/api\/whpp\/run\/resume'/);
+});
+
+test('WHPP V47 integration is injected into every application page with current cache key', () => {
   const source = fs.readFileSync(path.resolve('src/v44WhppUiPatch.js'), 'utf8');
-  assert.match(source, /whpp-v47-auto-run\.js/);
+  assert.match(source, /whpp-v47-auto-run\.js\?v=20260812-3/);
 });
 
 test('V49 dashboard correctness patch owns exact routing/shop detail and WHPP reconciliation', () => {
@@ -71,7 +85,7 @@ test('Shopee attempt trends use persisted currentAttemptNo before timestamp fall
   }
 });
 
-test('V49 dashboard integration files pass syntax checks', () => {
+test('V49 and seven-business integration files pass syntax checks', () => {
   for (const relative of ['src/v27TrendPatch.js', 'src/v44WhppUiPatch.js', 'public/whpp-v47-auto-run.js', 'src/v49DashboardCorrectnessPatch.js', 'public/v49-dashboard-correctness.js', 'src/rangeDashboardStoreV36.js', 'src/rangeDashboardStoreV33.js', 'public/v27-trend-mount-fix.js']) {
     const result = spawnSync(process.execPath, ['--check', path.resolve(relative)], { encoding: 'utf8' });
     assert.equal(result.status, 0, `${relative} syntax failed:\n${result.stderr || result.stdout}`);
