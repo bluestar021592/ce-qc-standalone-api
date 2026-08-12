@@ -27,8 +27,9 @@ test('V57 carry anomaly honors explicit business thresholds before generic stale
   assert.ok(carrySource.indexOf("if (hasExplicitThresholdState) return ''") < carrySource.indexOf("if (stale >= 3) return '3天+无新节点'"));
 });
 
-test('V51 browser runtime forces source-truth WHPP routes, exact special drilldown and WHPP home share',()=>{
-  assert.match(uiSource,/\/api\/v50\/whpp-state/);
+test('V51 browser runtime keeps exact drilldown and uses lightweight WHPP home summary',()=>{
+  assert.match(uiSource,/\/api\/v71\/whpp-summary/);
+  assert.doesNotMatch(uiSource,/\/api\/v50\/whpp-state/);
   assert.match(uiSource,/\/api\/v50\/whpp-metric-detail/);
   assert.match(uiSource,/\/api\/v50\/special-detail/);
   assert.match(uiSource,/\/api\/v51\/carry-monitor/);
@@ -40,9 +41,16 @@ test('V51 browser runtime forces source-truth WHPP routes, exact special drilldo
   assert.match(uiSource,/金边门店/);
 });
 
-test('V51 runtime is injected after V50 on every application page',()=>{
+test('V51 browser runtime is event-driven and never observes or polls the whole app',()=>{
+  assert.doesNotMatch(uiSource,/new MutationObserver/);
+  assert.doesNotMatch(uiSource,/setInterval/);
+  assert.match(uiSource,/ce-qc-run-complete/);
+  assert.match(uiSource,/visibilitychange/);
+});
+
+test('V51 runtime is injected after V50 on every application page with current cache key',()=>{
   const v50=injectSource.indexOf('/v50-dashboard-source-truth.js');
-  const v51=injectSource.indexOf('/v51-runtime-fix.js');
+  const v51=injectSource.indexOf('/v51-runtime-fix.js?v=20260812-3');
   assert.ok(v50>=0);
   assert.ok(v51>v50);
   assert.match(injectSource,/import '\.\/v51CarryDashboardPatch\.js'/);
