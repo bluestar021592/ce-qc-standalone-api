@@ -50,5 +50,18 @@ test('unified import UI reconciles core snapshot totals with separately persiste
   assert.match(ui, /当前处理队列/);
   assert.match(ui, /收件人为空（仍已按规则分类）/);
   assert.match(ui, /真正分类冲突/);
-  assert.match(injector, /v54-whpp-unified-integration\.js\?v=20260812-6/);
+  assert.match(injector, /v54-whpp-unified-integration\.js\?v=20260812-7/);
+});
+
+test('home dashboard uses the same seven-business import truth as the import page for a single selected day', () => {
+  const ui = fs.readFileSync(new URL('../public/v54-whpp-unified-integration.js', import.meta.url), 'utf8');
+  assert.match(ui, /patchHomeDashboard/);
+  assert.match(ui, /#homePage \.v18-business-grid/);
+  assert.match(ui, /selectedHomeDateMatches/);
+  assert.match(ui, /CEAF空运/);
+  assert.match(ui, /SHOPEE CN/);
+  assert.match(ui, /SHOPEE VN/);
+  assert.match(ui, /ALI1688/);
+  assert.match(ui, /WHPP本土/);
+  assert.match(ui, /truth\.combinedUnique/);
 });
