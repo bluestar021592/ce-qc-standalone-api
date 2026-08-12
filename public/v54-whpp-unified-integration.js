@@ -1,5 +1,5 @@
 (function installWhppUnifiedIntegrationV54(global) {
-  const VERSION = '2026-08-12-v54-whpp-unified-integration-v5';
+  const VERSION = '2026-08-12-v54-whpp-unified-integration-v6';
   let busy = false;
   let whppSummaryCache = null;
   let whppSummaryAt = 0;
@@ -191,19 +191,49 @@
     if (node && node.textContent !== text) node.textContent = text;
   }
 
-  function patchImportedUniqueTotal(grid, imported = null) {
+  function sameReport(imported, whppPayload) {
+    const unifiedDate = String(imported?.reportDate || '');
+    const whppDate = String(whppPayload?.state?.reportDate || whppPayload?.reportDate || '');
+    return Boolean(unifiedDate && whppDate && unifiedDate === whppDate);
+  }
+
+  function combinedImportTruth(imported = null, whppPayload = null) {
+    const coreUnique = Number(imported?.summary?.validUniqueWaybills || 0);
+    const persistedWhppRaw = imported?.classificationCounts?.WHPP;
+    const persistedWhpp = persistedWhppRaw === undefined || persistedWhppRaw === null ? NaN : Number(persistedWhppRaw);
+    const runtimeWhpp = sameReport(imported, whppPayload)
+      ? Number(whppPayload?.dashboard?.metrics?.total || whppPayload?.state?.pnhBills?.length || 0)
+      : 0;
+    const separateWhpp = Number.isFinite(persistedWhpp) ? 0 : runtimeWhpp;
+    const whppTotal = Number.isFinite(persistedWhpp) ? persistedWhpp : runtimeWhpp;
+    return {
+      coreUnique,
+      whppTotal,
+      combinedUnique: coreUnique + separateWhpp,
+      separateWhpp
+    };
+  }
+
+  function patchImportedUniqueTotal(grid, imported = null, whppPayload = null) {
     const validNode = grid.querySelector('[data-testid="classification-valid-unique"]');
-    const validUnique = Number(imported?.summary?.validUniqueWaybills || 0);
-    if (!validUnique) return;
-    const validText = validUnique.toLocaleString('zh-CN');
+    const truth = combinedImportTruth(imported, whppPayload);
+    if (!truth.combinedUnique) return;
+    const validText = truth.combinedUnique.toLocaleString('zh-CN');
     if (validNode) setTextIfChanged(validNode, validText);
 
     const status = document.getElementById('fileStatus');
     if (status) {
       status.querySelectorAll('p').forEach(p => {
-        if (!/有效唯一单号/.test(p.textContent || '')) return;
-        const next = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${validText}`);
-        if (next !== p.innerHTML) p.innerHTML = next;
+        if (/有效唯一单号/.test(p.textContent || '')) {
+          const next = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${validText}`);
+          if (next !== p.innerHTML) p.innerHTML = next;
+        }
+        if (/当前处理队列/.test(p.textContent || '')) {
+          const currentOpen = Number(imported?.carryover?.currentOpen || 0);
+          const queueText = Math.max(currentOpen, truth.combinedUnique).toLocaleString('zh-CN');
+          const next = p.innerHTML.replace(/当前处理队列\s*<b[^>]*>[\d,]+<\/b>/, `当前处理队列 <b data-testid="combined-processing-queue-count">${queueText}</b>`);
+          if (next !== p.innerHTML) p.innerHTML = next;
+        }
       });
     }
   }
@@ -224,9 +254,7 @@
     decorating = true;
     try {
       const [whppPayload, imported] = await Promise.all([getWhppSummary(), getUnifiedImportSummary()]);
-      const importedWhpp = Number(imported?.classificationCounts?.WHPP);
-      const fallbackWhpp = Number(whppPayload?.dashboard?.metrics?.total || whppPayload?.state?.pnhBills?.length || 0);
-      const whppTotal = Number.isFinite(importedWhpp) ? importedWhpp : fallbackWhpp;
+      const truth = combinedImportTruth(imported, whppPayload);
       let card = grid.querySelector('[data-v54-business="WHPP"]');
       if (!card) {
         card = document.createElement('div');
@@ -235,8 +263,8 @@
         grid.appendChild(card);
       }
       const value = card.querySelector('b');
-      setTextIfChanged(value, Number(whppTotal || 0).toLocaleString('zh-CN'));
-      patchImportedUniqueTotal(grid, imported);
+      setTextIfChanged(value, Number(truth.whppTotal || 0).toLocaleString('zh-CN'));
+      patchImportedUniqueTotal(grid, imported, whppPayload);
       relabelWarning('classification-missing-recipient', '收件人为空（仍已按规则分类）');
       relabelWarning('classification-conflicts', '真正分类冲突');
 
