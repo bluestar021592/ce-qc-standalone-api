@@ -1,7 +1,7 @@
 (function installWhppClassificationStabilityV68(global) {
   if (global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__) return;
 
-  const VERSION = '2026-08-12-v68-whpp-classification-stability-v1';
+  const VERSION = '2026-08-12-v68-whpp-classification-stability-v2';
   const CACHE_KEY = 'ce_qc_v68_whpp_classification_truth';
   let busy = false;
   let timer = null;
@@ -111,14 +111,34 @@
     return { reportDate, whppTotal, fullUnique, core, rawUnique, source };
   }
 
+  function isWhppCard(node) {
+    if (!node) return false;
+    const label = String(node.querySelector('span')?.textContent || '').trim();
+    return label === 'WHPP本土'
+      || node.dataset?.v54Business === 'WHPP'
+      || node.dataset?.v64Business === 'WHPP'
+      || node.dataset?.v68Business === 'WHPP';
+  }
+
   function ensureWhppCard(target) {
-    let card = [...target.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === 'WHPP本土');
+    const cards = [...target.children].filter(isWhppCard);
+    let card = cards[0] || null;
     if (!card) {
       card = document.createElement('div');
-      card.dataset.v68Business = 'WHPP';
       card.innerHTML = '<span>WHPP本土</span><b data-testid="classification-whpp">0</b>';
       target.appendChild(card);
     }
+    card.dataset.v64Business = 'WHPP';
+    card.dataset.v68Business = 'WHPP';
+    const label = card.querySelector('span');
+    if (label && String(label.textContent || '').trim() !== 'WHPP本土') label.textContent = 'WHPP本土';
+    let value = card.querySelector('b');
+    if (!value) {
+      value = document.createElement('b');
+      card.appendChild(value);
+    }
+    value.dataset.testid = 'classification-whpp';
+    cards.slice(1).forEach(extra => extra.remove());
     return card;
   }
 
