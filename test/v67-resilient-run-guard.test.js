@@ -17,12 +17,13 @@ test('V67 resilient run guard is syntax-valid',()=>{
   assert.equal(result.status,0,result.stderr||result.stdout);
 });
 
-test('V67 preserves last good dashboard truth on transient GET failure',()=>{
+test('V67 preserves last good dashboard truth and uses lightweight WHPP status',()=>{
   const source=read(runtimePath);
   assert.match(source,/\/api\/import\/unified-latest/);
   assert.match(source,/\/api\/state/);
   assert.match(source,/\/api\/shopee\/state/);
-  assert.match(source,/\/api\/v51\/whpp-state/);
+  assert.match(source,/\/api\/v71\/whpp-summary/);
+  assert.doesNotMatch(source,/\/api\/v51\/whpp-state/);
   assert.match(source,/readCache/);
   assert.match(source,/serving last good dashboard truth/);
   assert.match(source,/NETWORK_CONNECTION_INTERRUPTED/);
@@ -38,9 +39,9 @@ test('V67 resumes every processing family after an interrupted run',()=>{
   assert.match(source,/waitForStage/);
 });
 
-test('V67 loads before legacy unified run and WHPP dashboard runtimes',()=>{
+test('V67 loads before legacy unified run and WHPP dashboard runtimes with current cache key',()=>{
   const injector=read(injectorPath);
-  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260812-1/);
+  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260812-3/);
   const v67=injector.indexOf('v67-resilient-run-guard.js');
   const v54=injector.indexOf('v54-whpp-unified-integration.js');
   const v64=injector.indexOf('v64-whpp-total-kpi-integration.js');
