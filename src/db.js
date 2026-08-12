@@ -52,10 +52,20 @@ export function getDb() {
     ensureRuntimeDirs(cfg);
     maybeCopyLegacyDatabase(cfg);
     db = new DatabaseSync(cfg.dbFile);
-    db.exec('PRAGMA journal_mode = WAL');
+
+    // Configure lock handling before any pragma that might need a write lock.
+    // Re-applying journal_mode=WAL on every process open can block for tens of
+    // seconds when a stale reader/supervisor still exists. Read first and only
+    // switch modes when the database is genuinely not already WAL.
+    db.exec('PRAGMA busy_timeout = 3000');
+    let journalMode = '';
+    try { journalMode = String(db.prepare('PRAGMA journal_mode').get()?.journal_mode || '').toLowerCase(); } catch {}
+    if (journalMode !== 'wal') {
+      try { db.exec('PRAGMA journal_mode = WAL'); }
+      catch (error) { console.warn('[CE-QC][DB] WAL mode switch deferred:', error?.message || error); }
+    }
     db.exec('PRAGMA synchronous = NORMAL');
     db.exec('PRAGMA foreign_keys = ON');
-    db.exec('PRAGMA busy_timeout = 5000');
   }
   if (!initialized) {
     const expected = getExpectedSchemaVersion();
