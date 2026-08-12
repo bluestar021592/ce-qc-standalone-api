@@ -4,7 +4,7 @@ import path from 'path';
 import XLSX from 'xlsx';
 
 const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
-const BUSINESS_PRIORITY = Object.freeze(['CEAF', 'SHOPEEVN', 'SHOPEECN', 'TBKH', 'ALI1688', 'WHPP', 'CE']);
+const BUSINESS_PRIORITY = Object.freeze(['CEAF', 'SHOPEEVN', 'SHOPEECN', 'ALI1688', 'TBKH', 'WHPP', 'CE']);
 const SHIPMENT_HEADERS = [
   '运单号', '运单编号', '单号', '面单号', '快递单号', '物流单号',
   'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'
@@ -137,13 +137,13 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
 
       if (!recipientRaw) {
         missingRecipientWarnings += 1;
-        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人缺失，继续按客户名称与运单号前缀精确分类；不再默认归CE。' });
+        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人为空，但仍按客户名称与运单号前缀继续精确分类；不影响有效票数。' });
       }
 
       const matches = classifyMatches(shipmentCode, recipientNormalized, customerNameNormalized);
       if (matches.length > 1) {
         classificationConflicts += 1;
-        warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个板块，按优先级归类${matches[0]}` });
+        warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个强业务规则，按优先级归类${matches[0]}` });
       }
       const classification = classifyBusiness(shipmentCode, recipientNormalized, customerNameNormalized);
       if (!classification) {
@@ -169,7 +169,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
         reportDate: manualDate || explicitRowDate || transactionRowDate || '',
         classificationSource: classification.source,
         classificationMatchedValue: classification.matchedValue,
-        classificationWarning: matches.length > 1 ? `命中多个板块：${matches.join(',')}` : '',
+        classificationWarning: matches.length > 1 ? `命中多个强业务规则：${matches.join(',')}` : '',
         classificationReason: classification.reason,
         raw
       });
@@ -277,7 +277,7 @@ function detectRecipientColumnByValues(matrix, headerIndex, shipmentIndex) {
     for (let rowIndex = headerIndex + 1; rowIndex < Math.min(matrix.length, headerIndex + 80); rowIndex += 1) {
       const value = normalizeRecipient(matrix[rowIndex]?.[column]);
       if (!value) continue;
-      if (/SHOPEEVN|SHOPEECN|TBKH|ALI1688/.test(value)) score += 3;
+      if (/SHOPEEVN|SHOPEECN|ALI1688/.test(value)) score += 3;
     }
     if (score > best.score) best = { index: column, score };
   }
@@ -307,24 +307,40 @@ function normalizeRegion(value) {
   if (/^PV\d*$/.test(text)) return 'PV';
   return 'PV';
 }
+
+export function classifyUnifiedMatches(shipmentCode, recipient = '', customerName = '') {
+  return classifyMatches(normalizeShipmentCode(shipmentCode), normalizeRecipient(recipient), normalizeCustomerName(customerName));
+}
+
+export function classifyUnifiedBusiness(shipmentCode, recipient = '', customerName = '') {
+  return classifyBusiness(normalizeShipmentCode(shipmentCode), normalizeRecipient(recipient), normalizeCustomerName(customerName));
+}
+
 function classifyMatches(shipmentCode, recipient, customerName) {
   const matches = [];
   if (customerName.includes('CCAF')) matches.push('CEAF');
   if (recipient.includes('SHOPEEVN')) matches.push('SHOPEEVN');
   if (recipient.includes('SHOPEECN')) matches.push('SHOPEECN');
-  if (shipmentCode.startsWith('TBKH') || recipient.includes('TBKH')) matches.push('TBKH');
   if (recipient.includes('ALI1688')) matches.push('ALI1688');
-  if (shipmentCode.startsWith('CE')) matches.push('WHPP');
-  if (shipmentCode.startsWith('CC')) matches.push('CE');
+  if (shipmentCode.startsWith('TBKH')) matches.push('TBKH');
+
+  // CE/CC prefixes are fallback ownership rules. They must not be counted as a
+  // classification conflict when a stronger recipient/customer rule already
+  // identified the parcel. This is what prevents normal Shopee/ALI rows from
+  // generating hundreds of false "classification conflict" warnings.
+  if (!matches.length) {
+    if (shipmentCode.startsWith('CE')) matches.push('WHPP');
+    else if (shipmentCode.startsWith('CC')) matches.push('CE');
+  }
   return BUSINESS_PRIORITY.filter(type => matches.includes(type));
 }
+
 function classifyBusiness(shipmentCode, recipient, customerName) {
   if (customerName.includes('CCAF')) return { businessType: 'CEAF', source: 'CUSTOMER_NAME', matchedValue: 'CCAF', reason: '客户名称命中CCAF，归类CEAF空运' };
   if (recipient.includes('SHOPEEVN')) return { businessType: 'SHOPEEVN', source: 'RECIPIENT', matchedValue: 'SHOPEEVN', reason: '收件人命中SHOPEEVN' };
   if (recipient.includes('SHOPEECN')) return { businessType: 'SHOPEECN', source: 'RECIPIENT', matchedValue: 'SHOPEECN', reason: '收件人命中SHOPEECN' };
-  if (shipmentCode.startsWith('TBKH')) return { businessType: 'TBKH', source: 'SHIPMENT_PREFIX', matchedValue: 'TBKH', reason: '运单号前缀命中TBKH' };
-  if (recipient.includes('TBKH')) return { businessType: 'TBKH', source: 'RECIPIENT', matchedValue: 'TBKH', reason: '收件人命中TBKH' };
   if (recipient.includes('ALI1688')) return { businessType: 'ALI1688', source: 'RECIPIENT', matchedValue: 'ALI1688', reason: '收件人命中ALI1688' };
+  if (shipmentCode.startsWith('TBKH')) return { businessType: 'TBKH', source: 'SHIPMENT_PREFIX', matchedValue: 'TBKH', reason: '运单号前缀命中TBKH' };
   if (shipmentCode.startsWith('CE')) return { businessType: 'WHPP', source: 'SHIPMENT_PREFIX', matchedValue: 'CE', reason: '运单号CE开头，归类WHPP本土' };
   if (shipmentCode.startsWith('CC')) return { businessType: 'CE', source: 'SHIPMENT_PREFIX', matchedValue: 'CC', reason: '运单号CC开头，归类CE' };
   return null;
