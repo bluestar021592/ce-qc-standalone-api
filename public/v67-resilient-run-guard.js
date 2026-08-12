@@ -1,93 +1,15 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-12-v67-resilient-run-guard-v3';
-  const priorFetch = global.fetch.bind(global);
-  const readCache = new Map();
-  const CACHE_TTL_MS = 30 * 60 * 1000;
-  let runBusy = false;
+  const VERSION = '2026-08-12-v67-seven-business-runner-v4';
+  let busy = false;
 
-  function urlOf(input) {
-    try {
-      if (typeof input === 'string') return new URL(input, location.origin);
-      if (input instanceof URL) return new URL(input.href);
-      if (input instanceof Request) return new URL(input.url);
-    } catch {}
-    return null;
-  }
+  function wait(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
 
-  function methodOf(input, init) {
-    return String(init?.method || (input instanceof Request ? input.method : 'GET') || 'GET').toUpperCase();
-  }
-
-  function headerValue(init, name) {
-    try { return new Headers(init?.headers || {}).get(name) || ''; } catch { return ''; }
-  }
-
-  function cacheableRead(url) {
-    if (!url || url.origin !== location.origin) return false;
-    const path = url.pathname;
-    return path === '/api/import/unified-latest'
-      || path === '/api/state'
-      || path === '/api/shopee/state'
-      || path === '/api/v71/whpp-summary';
-  }
-
-  function cacheKey(url) {
-    return `${url.pathname}${url.search}`;
-  }
-
-  function responseFrom(entry) {
-    return new Response(entry.body, {
-      status: entry.status,
-      statusText: entry.statusText,
-      headers: entry.headers
-    });
-  }
-
-  global.fetch = async function v67Fetch(input, init) {
-    const method = methodOf(input, init);
-    const url = urlOf(input);
-    const liveOnly = headerValue(init, 'X-CE-QC-V67-Live') === '1';
-    if (method !== 'GET' || liveOnly || !cacheableRead(url)) return priorFetch(input, init);
-
-    const key = cacheKey(url);
-    try {
-      const response = await priorFetch(input, init);
-      if (response.ok) {
-        const copy = response.clone();
-        copy.text().then(body => {
-          readCache.set(key, {
-            body,
-            status: response.status,
-            statusText: response.statusText,
-            headers: [...response.headers.entries()],
-            savedAt: Date.now()
-          });
-        }).catch(() => {});
-      }
-      return response;
-    } catch (error) {
-      const cached = readCache.get(key);
-      if (cached && Date.now() - cached.savedAt <= CACHE_TTL_MS) {
-        console.warn('[CE-QC][V67] read interrupted, serving last good dashboard truth:', key);
-        return responseFrom(cached);
-      }
-      throw error;
-    }
-  };
-
-  async function readJson(url, options = {}, { live = false } = {}) {
-    const headers = new Headers(options.headers || {});
-    if (live) headers.set('X-CE-QC-V67-Live', '1');
+  async function jsonFetch(url, options = {}) {
     let response;
     try {
-      response = await global.fetch(url, {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        ...options,
-        headers
-      });
+      response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', ...options });
     } catch (cause) {
       const error = new Error('与后台连接中断');
       error.code = 'NETWORK_CONNECTION_INTERRUPTED';
@@ -107,207 +29,146 @@
     return payload;
   }
 
-  function stateOf(payload) {
-    return payload?.state || payload || {};
-  }
+  function stateOf(payload) { return payload?.state || payload || {}; }
 
-  function isFinished(payload) {
+  function completed(payload) {
     const state = stateOf(payload);
-    const phase = String(state?.processing?.phase || '').trim();
-    const error = String(state?.processing?.error || '').trim();
-    const status = String(payload?.snapshotStatus || state?.snapshotStatus || '').toUpperCase();
-    return Boolean(state?.reportDate)
-      && !error
-      && (status === 'COMPLETED' || /^(完成|处理完成)$/.test(phase));
-  }
-
-  function isRunning(payload) {
-    return Boolean(stateOf(payload)?.processing?.running);
-  }
-
-  function stateError(payload) {
-    return String(stateOf(payload)?.processing?.error || '').trim();
-  }
-
-  function whppNeedsRun(payload) {
-    const state = stateOf(payload);
-    const total = Number(payload?.dashboard?.metrics?.total || payload?.total || state?.pnhBills?.length || 0);
-    const unresolved = Number(payload?.dashboard?.metrics?.unresolved || payload?.metrics?.unresolved || 0);
     const status = String(payload?.snapshotStatus || state?.snapshotStatus || (payload?.completed ? 'COMPLETED' : '')).toUpperCase();
-    if (!state?.dailyReportReady || total <= 0) return false;
-    return !(status === 'COMPLETED' && unresolved === 0);
+    const phase = String(state?.processing?.phase || '').trim();
+    return status === 'COMPLETED' || /^(完成|处理完成)$/.test(phase);
   }
 
-  async function readRunStates({ live = true } = {}) {
-    const requests = [
-      readJson('/api/state?compact=1', {}, { live }),
-      readJson('/api/shopee/state?compact=1', {}, { live }),
-      readJson('/api/v71/whpp-summary', {}, { live })
-    ];
-    const results = await Promise.allSettled(requests);
-    if (results.every(item => item.status === 'rejected')) {
-      const error = new Error('后台当前不可连接');
-      error.code = 'NETWORK_CONNECTION_INTERRUPTED';
-      throw error;
-    }
-    return {
-      ccsl: results[0].status === 'fulfilled' ? results[0].value : {},
-      shopee: results[1].status === 'fulfilled' ? results[1].value : {},
-      whpp: results[2].status === 'fulfilled' ? results[2].value : {}
-    };
+  function hasReport(payload, type) {
+    const state = stateOf(payload);
+    if (type === 'WHPP') return Boolean(state?.dailyReportReady && Number(payload?.total || payload?.dashboard?.metrics?.total || 0) > 0);
+    return Boolean(state?.reportDate && state?.dailyReportReady !== false);
+  }
+
+  function isAuth(error) {
+    const status = Number(error?.status || error?.payload?.status || 0);
+    const code = String(error?.code || '').toUpperCase();
+    const message = String(error?.message || '');
+    return [401, 403].includes(status) || ['401','403','AUTH_REQUIRED'].includes(code)
+      || /未授权|unauthorized|登录.*失效|token.*(?:过期|expired|invalid)/i.test(message);
+  }
+
+  function isTransient(error) {
+    const status = Number(error?.status || 0);
+    const code = String(error?.code || '').toUpperCase();
+    const message = String(error?.message || '');
+    return ['NETWORK_CONNECTION_INTERRUPTED','ECONNRESET','ECONNABORTED','ETIMEDOUT'].includes(code)
+      || [408,425,429,500,502,503,504].includes(status)
+      || /socket hang up|connection reset|timeout|timed out|failed to fetch|fetch failed|连接中断|网络中断/i.test(message);
+  }
+
+  function alreadyDone(error) {
+    return ['RUN_ALREADY_COMPLETED','WHPP_RUN_ALREADY_ACTIVE'].includes(String(error?.code || ''))
+      || /已经完成|当前任务已经完成|already\s*(?:completed|finished)/i.test(String(error?.message || ''));
+  }
+
+  function noReport(error) {
+    return ['WHPP_REPORT_MISSING','REPORT_MISSING','NO_DAILY_REPORT'].includes(String(error?.code || ''))
+      || /未导入.*日报|没有.*日报/i.test(String(error?.message || ''));
   }
 
   function statusNode() { return document.getElementById('ccslRunStatus'); }
   function runButton() { return document.querySelector('[data-testid="global-auto-process"]'); }
 
-  function setStatus(kind, text) {
+  function setStatus(text, level = 'warning') {
     const node = statusNode();
-    if (node) node.innerHTML = `<span class="status-pill ${kind}">${String(text || '')}</span>`;
+    if (node) node.innerHTML = `<span class="status-pill ${level}">${String(text || '')}</span>`;
   }
 
   function setBusy(value, text = '') {
-    runBusy = Boolean(value);
+    busy = Boolean(value);
     const button = runButton();
-    if (!button) return;
-    button.disabled = runBusy;
-    button.textContent = runBusy ? (text || '正在处理…') : '开始全自动';
-  }
-
-  function transient(error) {
-    return error?.code === 'NETWORK_CONNECTION_INTERRUPTED'
-      || /socket hang up|ECONNRESET|ETIMEDOUT|timeout|连接中断|网络中断|fetch failed|failed to fetch/i.test(String(error?.message || error || ''));
-  }
-
-  function alreadyComplete(error) {
-    return /RUN_ALREADY_COMPLETED|RUN_NOT_RECOVERABLE|当前任务已经完成|已经完成|不能继续处理|already\s*(?:completed|finished)/i.test([
-      error?.code, error?.message, error?.payload?.code, error?.payload?.error
-    ].filter(Boolean).join(' '));
-  }
-
-  function stateForStage(states, key) {
-    return key === 'CCSL' ? states.ccsl : key === 'SHOPEE' ? states.shopee : states.whpp;
-  }
-
-  async function waitForStage(key, label, maxMs = 10 * 60 * 1000) {
-    const started = Date.now();
-    while (Date.now() - started < maxMs) {
-      await new Promise(resolve => setTimeout(resolve, 2500));
-      let states;
-      try { states = await readRunStates({ live: true }); }
-      catch { continue; }
-      const current = stateForStage(states, key);
-      if (isFinished(current) || (key === 'WHPP' && !whppNeedsRun(current))) return { done: true, states };
-      const message = stateError(current);
-      if (message && !isRunning(current)) {
-        const error = new Error(message);
-        error.code = 'STAGE_FAILED';
-        error.states = states;
-        throw error;
-      }
-      if (!isRunning(current)) return { done: false, states };
-      setStatus('warning', `${label} 后台仍在处理，页面正在从断点读取进度…`);
+    if (button) {
+      button.disabled = busy;
+      button.textContent = busy ? (text || '七业务处理中…') : '开始全自动';
     }
-    const error = new Error(`${label}处理时间较长，后台任务仍保留，可稍后继续检查`);
-    error.code = 'STAGE_WAIT_TIMEOUT';
-    throw error;
   }
 
-  async function postStage(key, label, startUrl, resumeUrl, preferResume) {
-    let useResume = Boolean(preferResume);
-    const delays = [0, 2000, 5000, 10000];
-    let lastError = null;
+  async function readStates() {
+    const results = await Promise.allSettled([
+      jsonFetch('/api/state?compact=1'),
+      jsonFetch('/api/shopee/state?compact=1'),
+      jsonFetch('/api/v71/whpp-summary')
+    ]);
+    return {
+      CCSL: results[0].status === 'fulfilled' ? results[0].value : {},
+      SHOPEE: results[1].status === 'fulfilled' ? results[1].value : {},
+      WHPP: results[2].status === 'fulfilled' ? results[2].value : {}
+    };
+  }
 
-    for (let attempt = 0; attempt < delays.length; attempt += 1) {
-      if (delays[attempt]) await new Promise(resolve => setTimeout(resolve, delays[attempt]));
-      const url = useResume ? resumeUrl : startUrl;
-      setBusy(true, `正在处理${label}…`);
-      setStatus('warning', `${label}处理中${attempt ? ` · 第${attempt + 1}次恢复` : ''}，请勿重新上传日报。`);
+  async function runStage(stage, preferResume) {
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const useResume = Boolean(preferResume || attempt > 0);
+      const url = useResume ? stage.resume : stage.start;
+      if (attempt) await wait(700 * attempt);
+      setStatus(`${stage.label}${attempt ? `自动续跑 ${attempt + 1}/3` : '处理中'}…`);
       try {
-        await readJson(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: '{}'
-        }, { live: true });
-        return;
+        await jsonFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        return { label: stage.label, ok: true };
       } catch (error) {
+        if (alreadyDone(error) || noReport(error)) return { label: stage.label, ok: true, skipped: true };
+        if (isAuth(error)) throw error;
         lastError = error;
-        if (alreadyComplete(error)) return;
-        if (error.code === 'RUN_NOT_RECOVERABLE' && useResume) {
-          useResume = false;
+        if (!isTransient(error)) break;
+      }
+    }
+    return { label: stage.label, ok: false, error: lastError?.message || String(lastError || '处理失败') };
+  }
+
+  async function execute(mode = 'start') {
+    if (busy) return;
+    setBusy(true, '正在检查七业务状态…');
+    const results = [];
+    try {
+      const states = await readStates();
+      const stages = [
+        { key: 'CCSL', label: 'CCSL（CE/CEAF/TBKH/ALI1688）', start: '/api/run', resume: '/api/resume' },
+        { key: 'SHOPEE', label: 'SHOPEE CN/VN', start: '/api/shopee/run/start', resume: '/api/shopee/run/resume' },
+        { key: 'WHPP', label: 'WHPP本土', start: '/api/whpp/run/start', resume: '/api/whpp/run/resume' }
+      ];
+
+      for (const stage of stages) {
+        const state = states[stage.key] || {};
+        if (!hasReport(state, stage.key) || completed(state)) {
+          results.push({ label: stage.label, ok: true, skipped: true });
           continue;
         }
-        if (error.code === 'NETWORK_CONNECTION_INTERRUPTED') {
-          try {
-            const check = await waitForStage(key, label, 30000);
-            if (check.done) return;
-          } catch (waitError) {
-            lastError = waitError;
-          }
-        }
-        if (!transient(lastError) || attempt === delays.length - 1) throw lastError;
-        useResume = true;
-      }
-    }
-    throw lastError || new Error(`${label}处理失败`);
-  }
-
-  async function refreshPageState() {
-    try {
-      if (typeof global.refresh === 'function') await global.refresh();
-      else global.location.reload();
-    } catch {}
-  }
-
-  async function executeUnified(mode = 'start') {
-    if (runBusy) return;
-    setBusy(true, '正在检查处理状态…');
-    try {
-      const states = await readRunStates({ live: true });
-      const stages = [];
-      if (!isFinished(states.ccsl)) stages.push(['CCSL', 'CCSL（CE/CEAF/TBKH/ALI1688）', '/api/run', '/api/resume']);
-      if (!isFinished(states.shopee)) stages.push(['SHOPEE', 'SHOPEE CN/VN', '/api/shopee/run/start', '/api/shopee/run/resume']);
-      if (whppNeedsRun(states.whpp)) stages.push(['WHPP', 'WHPP本土', '/api/whpp/run/start', '/api/whpp/run/resume']);
-
-      if (!stages.length) {
-        setStatus('success', '七业务均已完成，无需重复处理。');
-        await refreshPageState();
-        return;
+        results.push(await runStage(stage, mode === 'resume'));
       }
 
-      for (const [key, label, startUrl, resumeUrl] of stages) {
-        await postStage(key, label, startUrl, resumeUrl, mode === 'resume');
-      }
-
-      setStatus('success', '七业务处理完成，历史快照已保留。');
-      await refreshPageState();
-    } catch (error) {
-      console.error('[CE-QC][V67_RESILIENT_RUN]', error);
-      if (transient(error)) {
-        setStatus('danger', '后台/CE接口连接中断。已完成进度和日报均已保存；请勿重新上传，后台恢复后点击“继续处理”。');
+      const failed = results.filter(item => item.ok === false);
+      if (failed.length) {
+        setStatus(`已完成可完成板块；${failed.map(item => item.label).join('、')}保留断点待续查。`, 'warning');
       } else {
-        setStatus('danger', `处理未完成：${String(error.message || error)}。已保存断点，可继续处理。`);
+        setStatus('七业务处理完成，已保存最新快照。', 'success');
       }
+      document.dispatchEvent(new CustomEvent('ce-qc-run-complete', { detail: { results } }));
+      try { if (typeof global.refresh === 'function') await global.refresh(); } catch {}
+      return { ok: failed.length === 0, results };
+    } catch (error) {
+      const text = isAuth(error)
+        ? 'CE登录已失效，请重新登录后点击继续处理；已完成断点不会丢失。'
+        : `处理连接异常：${String(error.message || error)}；已完成断点不会丢失。`;
+      setStatus(text, 'danger');
+      return { ok: false, error: error.message || String(error), results };
     } finally {
       setBusy(false);
     }
   }
 
-  function installRunOverride() {
-    global.runUnified = () => executeUnified('start');
-    global.resumeUnified = () => executeUnified('resume');
-    console.info('[CE-QC][V67_RESILIENT_RUN_GUARD]', VERSION);
+  function install() {
+    global.runUnified = () => execute('start');
+    global.resumeUnified = () => execute('resume');
+    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute };
+    console.info('[CE-QC][V67_SEVEN_BUSINESS_RUNNER]', VERSION);
   }
 
-  function scheduleRunOverride() {
-    setTimeout(installRunOverride, 0);
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scheduleRunOverride, { once: true });
-  else scheduleRunOverride();
-
-  global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = {
-    version: VERSION,
-    readCacheSize: () => readCache.size,
-    clearReadCache: () => readCache.clear()
-  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
+  else setTimeout(install, 0);
 })(window);
