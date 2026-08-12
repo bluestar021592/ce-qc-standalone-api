@@ -100,6 +100,7 @@ try {
   await importPhase('v51WhppLegacyEvidencePatch', './src/v51WhppLegacyEvidencePatch.js');
   await importPhase('v55DashboardReconciliationPatch', './src/v55DashboardReconciliationPatch.js');
   await importPhase('v70ConfirmQueryResiliencePatch', './src/v70ConfirmQueryResiliencePatch.js');
+  await importPhase('v71WhppSummaryPatch', './src/v71WhppSummaryPatch.js');
   await importPhase('server', './server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
