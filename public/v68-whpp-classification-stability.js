@@ -1,10 +1,8 @@
 (function installWhppClassificationStabilityV68(global) {
   if (global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__) return;
 
-  const VERSION = '2026-08-12-v68-whpp-classification-stability-v3';
-  const CACHE_KEY = 'ce_qc_v68_whpp_classification_truth';
-  let busy = false;
-  let timer = null;
+  const VERSION = '2026-08-12-v68-whpp-classification-stability-v4';
+  let scheduled = false;
 
   const num = value => {
     const parsed = Number(String(value ?? '').replace(/[,\s]/g, ''));
@@ -12,46 +10,26 @@
   };
   const fmt = value => Number(value || 0).toLocaleString('zh-CN');
 
-  async function json(url) {
-    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
-    const text = await response.text();
-    let payload = {};
-    try { payload = text ? JSON.parse(text) : {}; } catch {}
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
-    return payload;
-  }
-
-  function readCache(reportDate) {
-    try {
-      const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
-      return cached.reportDate === reportDate ? cached : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function saveCache(value) {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(value)); } catch {}
+  function summaryRoot() {
+    return document.getElementById('unifiedClassificationSummary');
   }
 
   function grid() {
-    return document.querySelector('#unifiedClassificationSummary .unified-count-grid');
+    return summaryRoot()?.querySelector('.unified-count-grid') || null;
+  }
+
+  function cardByLabel(label) {
+    const target = grid();
+    if (!target) return null;
+    return [...target.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === label) || null;
   }
 
   function readCardCount(label) {
-    const target = grid();
-    if (!target) return 0;
-    const card = [...target.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === label);
-    return num(card?.querySelector('b')?.textContent);
+    return num(cardByLabel(label)?.querySelector('b')?.textContent);
   }
 
-  function currentReportDate(imported = {}) {
-    return String(imported?.reportDate || document.getElementById('reportDate')?.value || '').trim();
-  }
-
-  function domRawStats() {
-    const summary = document.getElementById('unifiedClassificationSummary');
-    const text = String(summary?.textContent || '');
+  function rawStats() {
+    const text = String(summaryRoot()?.textContent || '');
     const pick = label => {
       const match = text.match(new RegExp(`${label}\\s*([\\d,]+)`));
       return match ? num(match[1]) : 0;
@@ -59,58 +37,22 @@
     return {
       rawRows: pick('原始行'),
       duplicateRows: pick('重复'),
-      missingWaybillRows: pick('无单号'),
-      classificationConflicts: pick('分类冲突') || pick('真正分类冲突')
+      missingWaybillRows: pick('无单号')
     };
   }
 
-  function coreCount(imported = {}) {
-    const counts = imported?.classificationCounts || {};
-    const labels = [
-      ['CE', 'CE'], ['CEAF', 'CEAF'], ['TBKH', 'TBKH'], ['ALI1688', 'ALI1688'],
-      ['SHOPEECN', 'SHOPEECN'], ['SHOPEEVN', 'SHOPEEVN']
-    ];
-    return labels.reduce((sum, [key, label]) => {
-      const source = counts[key];
-      return sum + (source === undefined || source === null ? readCardCount(label) : num(source));
-    }, 0);
-  }
-
-  function deriveTruth(imported = {}) {
-    const reportDate = currentReportDate(imported);
-    const summary = imported?.summary || domRawStats();
-    const rawRows = num(summary.rawRows);
-    const duplicateRows = num(summary.duplicateRows);
-    const missingWaybillRows = num(summary.missingWaybillRows);
-    const conflicts = num(summary.classificationConflicts);
-    const rawUnique = Math.max(0, rawRows - duplicateRows - missingWaybillRows);
-    const core = coreCount(imported);
-
-    const persistedRaw = imported?.classificationCounts?.WHPP;
-    const persisted = persistedRaw === undefined || persistedRaw === null ? null : num(persistedRaw);
-    const cached = readCache(reportDate);
-
-    let whppTotal = persisted;
-    let source = persisted !== null ? 'persisted' : '';
-    if (whppTotal === null && cached && Number.isFinite(Number(cached.whppTotal))) {
-      whppTotal = num(cached.whppTotal);
-      source = 'cache';
-    }
-    if ((whppTotal === null || whppTotal === 0) && rawUnique >= core && conflicts === 0) {
-      const derived = Math.max(0, rawUnique - core);
-      if (derived > 0 || whppTotal === null) {
-        whppTotal = derived;
-        source = 'derived';
-      }
-    }
-    if (whppTotal === null) whppTotal = 0;
-
+  function deriveTruth() {
+    const stats = rawStats();
+    const rawUnique = Math.max(0, stats.rawRows - stats.duplicateRows - stats.missingWaybillRows);
+    const core = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']
+      .reduce((sum, label) => sum + readCardCount(label), 0);
+    const whppTotal = rawUnique >= core ? Math.max(0, rawUnique - core) : 0;
     const fullUnique = rawUnique > 0 ? rawUnique : core + whppTotal;
-    return { reportDate, whppTotal, fullUnique, core, rawUnique, source };
+    return { rawUnique, core, whppTotal, fullUnique };
   }
 
   function isWhppCard(node) {
-    if (!node) return false;
+    if (!node || node.nodeType !== 1) return false;
     const label = String(node.querySelector('span')?.textContent || '').trim();
     return label === 'WHPP本土'
       || node.dataset?.v54Business === 'WHPP'
@@ -144,15 +86,16 @@
     const status = document.getElementById('fileStatus');
     if (!status) return;
     status.querySelectorAll('p').forEach(p => {
-      if (/有效唯一单号/.test(p.textContent || '')) {
-        p.innerHTML = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${fmt(truth.fullUnique)}`);
-      }
+      if (!/有效唯一单号/.test(p.textContent || '')) return;
+      const next = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${fmt(truth.fullUnique)}`);
+      if (next !== p.innerHTML) p.innerHTML = next;
     });
   }
 
-  function patchGrid(truth) {
+  function normalize() {
     const target = grid();
-    if (!target) return;
+    if (!target) return false;
+    const truth = deriveTruth();
     const whpp = ensureWhppCard(target);
     const whppValue = whpp.querySelector('b');
     const whppText = fmt(truth.whppTotal);
@@ -161,31 +104,20 @@
     const fullText = fmt(truth.fullUnique);
     if (valid && valid.textContent !== fullText) valid.textContent = fullText;
     patchStatus(truth);
-    if (truth.reportDate && (truth.source === 'persisted' || truth.source === 'derived')) {
-      saveCache({ reportDate: truth.reportDate, whppTotal: truth.whppTotal, fullUnique: truth.fullUnique, savedAt: Date.now() });
-    }
+    document.documentElement.dataset.v68WhppTotal = String(truth.whppTotal);
+    document.documentElement.dataset.v68UnifiedTotal = String(truth.fullUnique);
+    return true;
   }
 
-  async function refreshTruth() {
-    if (busy || !grid()) return;
-    busy = true;
-    try {
-      let imported = null;
-      try {
-        const payload = await json('/api/import/unified-latest?compact=1');
-        imported = payload?.import || payload || null;
-      } catch (error) {
-        console.warn('[CE-QC][V68_WHPP_CLASSIFICATION] unified import read skipped', error);
-      }
-      patchGrid(deriveTruth(imported || {}));
-    } finally {
-      busy = false;
-    }
-  }
-
-  function schedule(delay = 60) {
-    clearTimeout(timer);
-    timer = setTimeout(() => void refreshTruth(), delay);
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    const run = () => {
+      scheduled = false;
+      normalize();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run, 0);
   }
 
   function install() {
@@ -193,27 +125,36 @@
     if (typeof original === 'function' && !original.__v68WhppWrapped) {
       const wrapped = function () {
         const result = original.apply(this, arguments);
-        schedule(0);
+        // Patch immediately from the already-rendered source counts. No API read,
+        // no delayed heavy request and no dependency on page navigation timing.
+        normalize();
+        schedule();
         return result;
       };
       wrapped.__v68WhppWrapped = true;
       global.renderUnifiedImportResult = wrapped;
     }
 
-    // Do not observe the full application DOM here. Older V68 watched every
-    // mutation and then performed two heavy reads again, so its own card update
-    // scheduled another refresh and created a permanent request/render loop.
-    document.addEventListener('click', event => {
-      if (event.target?.closest?.('[data-page="import"],[data-testid="global-auto-process"]')) schedule(120);
-    }, true);
-    document.addEventListener('change', event => {
-      if (event.target?.closest?.('#reportDate,input[type="file"]')) schedule(160);
-    }, true);
-    global.addEventListener('popstate', () => schedule(160));
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && grid()) schedule(200);
+    // The initial render can occur before this compatibility script is installed.
+    // Observe only the import summary. Equality guards make our own writes inert.
+    const observer = new MutationObserver(records => {
+      if (records.some(record => record.target === summaryRoot() || record.target?.closest?.('#unifiedClassificationSummary'))) schedule();
     });
-    schedule(0);
+    const root = summaryRoot();
+    if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
+    else {
+      const pageObserver = new MutationObserver(() => {
+        const next = summaryRoot();
+        if (!next) return;
+        pageObserver.disconnect();
+        observer.observe(next, { childList: true, subtree: true, characterData: true });
+        schedule();
+      });
+      pageObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    normalize();
+    schedule();
     console.info('[CE-QC][V68_WHPP_CLASSIFICATION_STABILITY]', VERSION);
   }
 
@@ -222,6 +163,6 @@
 
   global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__ = {
     version: VERSION,
-    refresh: refreshTruth
+    refresh: normalize
   };
 })(window);
