@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('V66 import success alert includes WHPP from unified import response', () => {
   const file = new URL('../public/v66-import-success-whpp.js', import.meta.url);
   const source = fs.readFileSync(file, 'utf8');
-  const check = spawnSync(process.execPath, ['--check', file.pathname], { encoding: 'utf8' });
+  const check = spawnSync(process.execPath, ['--check', fileURLToPath(file)], { encoding: 'utf8' });
   assert.equal(check.status, 0, check.stderr || check.stdout);
   assert.match(source, /classificationCounts\?\.WHPP/);
   assert.match(source, /payload\?\.whpp\?\.count/);
