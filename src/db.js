@@ -13,6 +13,7 @@ const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
 
 let db = null;
 let initialized = false;
+let expectedSchemaVersion = null;
 
 export function getRuntimeConfig() {
   const preferredDataDir = resolveProjectPath(process.env.DATA_DIR || DEFAULT_DATA_DIR);
@@ -57,7 +58,9 @@ export function getDb() {
     db.exec('PRAGMA busy_timeout = 5000');
   }
   if (!initialized) {
-    migrateDatabase(db, getRuntimeConfig());
+    const expected = getExpectedSchemaVersion();
+    const current = readCurrentSchemaVersion(db);
+    if (!expected || current !== expected) migrateDatabase(db, getRuntimeConfig());
     initialized = true;
   }
   return db;
@@ -83,6 +86,31 @@ export function nowIso() {
 export function ensureRuntimeDirs(cfg = getRuntimeConfig()) {
   for (const dir of [cfg.dataDir, cfg.backupsDir, cfg.exportsDir, cfg.longJsonExportsDir, cfg.importsDir, cfg.logsDir, cfg.tokenDir]) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function getExpectedSchemaVersion() {
+  if (Number.isInteger(expectedSchemaVersion) && expectedSchemaVersion > 0) return expectedSchemaVersion;
+  try {
+    const source = fs.readFileSync(path.join(__dirname, 'migrations.js'), 'utf8');
+    const match = source.match(/\bSCHEMA_VERSION\s*=\s*(\d+)/);
+    expectedSchemaVersion = match ? Number(match[1]) : 0;
+  } catch {
+    expectedSchemaVersion = 0;
+  }
+  return expectedSchemaVersion;
+}
+
+function readCurrentSchemaVersion(database) {
+  try {
+    const exists = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_meta' LIMIT 1").get();
+    if (exists) {
+      const row = database.prepare("SELECT value FROM app_meta WHERE key='db_schema_version' LIMIT 1").get();
+      if (row?.value !== undefined && row?.value !== null && String(row.value).trim() !== '') return Number(row.value || 0);
+    }
+    return Number(database.prepare('PRAGMA user_version').get()?.user_version || 0);
+  } catch {
+    return -1;
   }
 }
 
