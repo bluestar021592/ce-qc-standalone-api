@@ -1,11 +1,11 @@
 (function installRuntimeFixV51(global){
-  const VERSION='2026-08-11-v51-runtime-fix-v1';
+  const VERSION='2026-08-12-v51-runtime-fix-v2';
   const nativeFetch=global.fetch.bind(global);
   const SPECIAL_TAB_BY_LABEL={
     'CCSLCN分流':'ccslCnDiversion','CECN滞留包裹':'ccslCnDiversion',
     'CCSLZT分流':'ccslZtDiversion','CEZT滞留包裹':'ccslZtDiversion',
     '580滞留包裹':'ccsl580Retention','CCSL580分流':'ccsl580Retention','CCSL580滞留包裹':'ccsl580Retention',
-    '金边门店':'phnomPenhShop'
+    '金边门店':'phnomPenhShop','外省门店':'provinceShop'
   };
   const CARRY_PATHS=new Set([
     '/api/v27/carry-monitor','/api/v27/carry-monitor-business','/api/v29/carry-monitor',
@@ -45,7 +45,7 @@
   function sameOrigin(url){return url&&url.origin===location.origin;}
   function rewriteSpecialDetail(url){
     const tab=String(url.searchParams.get('tab')||'');
-    const specials=new Set(['ccslCnDiversion','ccslZtDiversion','ccsl580Retention','ccsl580Diversion','phnomPenhShop']);
+    const specials=new Set(['ccslCnDiversion','ccslZtDiversion','ccsl580Retention','ccsl580Diversion','phnomPenhShop','provinceShop']);
     if(!specials.has(tab))return false;
     let type=String(url.searchParams.get('businessType')||currentBusinessType()||'').toUpperCase();
     if(type==='CCSL'||type==='SHOPEE')type=currentBusinessType()||type;
@@ -71,6 +71,9 @@
       url.pathname='/api/v51/carry-monitor';
       url.searchParams.set('status',carryStatus);
       url.searchParams.set('businessType',carrySelected||requested||'ALL');
+    }else if(url.pathname==='/api/v61/metric-detail'){
+      // V61 is the canonical detail source. Never let this legacy wrapper
+      // downgrade it back to the old V50 special-detail query.
     }else if(/\/metric-detail$/.test(url.pathname)){
       rewriteSpecialDetail(url);
     }
@@ -111,13 +114,14 @@
     }catch(error){host.innerHTML=`<div class="empty-state">明细读取失败：${esc(error.message||error)}</div>`;}
   }
 
-  // Strong capture-phase ownership: these four normal-location cards can never
-  // fall back to the legacy allData detail handler.
+  // Legacy V51 used to capture these cards before V55/V58/V61 could see the
+  // click. Once the canonical V61 bridge is installed, relinquish ownership so
+  // card count and detail rows come from the exact same V58/V61 state object.
   document.addEventListener('click',event=>{
     const card=event.target?.closest?.('.v18-metric-card,.v18-business-card');
     if(!card)return;
     const label=cardLabel(card),tab=SPECIAL_TAB_BY_LABEL[label],type=currentBusinessType();
-    if(!tab||!type||type==='WHPP')return;
+    if(!tab||!type||type==='WHPP'||global.__CE_QC_V61_DRILLDOWN_ROUTE_BRIDGE__)return;
     event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
     void openSpecialDetail(type,tab,label);
   },true);
