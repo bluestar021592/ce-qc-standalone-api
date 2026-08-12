@@ -103,7 +103,7 @@ test('business dashboard loads the exact V58 drilldown runtime before user inter
   assert.match(dashboard, /v58-drilldown-runtime\.js\?v=20260811-v61-1/);
   assert.match(dashboard, /script\.async=false/);
   assert.match(runtime, /'金边门店':'phnomPenhShop'/);
-  assert.match(runtime, /\/api\/v55\/metric-detail/);
+  assert.match(runtime, /\/api\/v61\/metric-detail/);
   assert.match(runtime, /PATH_TYPES=new Map\(\[\['\/ce','CE'\]/);
 });
 
