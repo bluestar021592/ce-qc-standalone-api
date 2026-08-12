@@ -4,7 +4,7 @@ import { isWhppCancelledRow } from './whppAnalyzer.js';
  * WHPP is a single local-business board. It follows the same operational KPI
  * semantics as Shopee but does not use Shopee CN/VN recipient groups.
  * Accounting buckets are mutually exclusive:
- * total = POD + returned + cancelled + normal special destinations + unresolved.
+ * total = POD + returned + cancelled + normal special destinations + shops + unresolved.
  */
 export function buildWhppDashboard(state = {}) {
   const rows = uniqueRows(state.finalRows || []);
@@ -13,11 +13,18 @@ export function buildWhppDashboard(state = {}) {
   const podRows = dailyRows.filter(isPod);
   const returnedRows = dailyRows.filter(row => !isPod(row) && isReturned(row));
   const cancelledRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && isWhppCancelledRow(row));
-  const unresolvedRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row));
+  const activeShopRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && isActiveShop(row));
+  const phnomPenhShopRows = activeShopRows.filter(row => regionOf(row) === 'PP');
+  const provinceShopRows = activeShopRows.filter(row => regionOf(row) === 'PV');
+  const unknownShopRows = activeShopRows.filter(row => regionOf(row) === 'UNKNOWN');
+  const unresolvedRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row) && !isActiveShop(row));
   const normalDiversionRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && isNormalDiversion(row));
   const ccsl580Rows = normalDiversionRows.filter(row => ['CCSL580_RETENTION','CCSL580_DIVERSION'].includes(specialOf(row)));
 
-  const actionable = monitorRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row));
+  // Current shop location is a normal destination bucket, not an ordinary
+  // Pending/OC/盘点 anomaly bucket. This prevents the same parcel from appearing
+  // both in 门店 and in ordinary operational anomalies.
+  const actionable = monitorRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row) && !isActiveShop(row));
   const metrics = {
     total: dailyRows.length,
     pod: podRows.length,
@@ -28,8 +35,9 @@ export function buildWhppDashboard(state = {}) {
     cancelRate: rate(cancelledRows.length, dailyRows.length),
     unresolved: unresolvedRows.length,
     normalDiversion: normalDiversionRows.length,
-    accounted: podRows.length + returnedRows.length + cancelledRows.length + unresolvedRows.length + normalDiversionRows.length,
-    accountingDifference: dailyRows.length - podRows.length - returnedRows.length - cancelledRows.length - unresolvedRows.length - normalDiversionRows.length,
+    shopTotal: activeShopRows.length,
+    accounted: podRows.length + returnedRows.length + cancelledRows.length + unresolvedRows.length + normalDiversionRows.length + activeShopRows.length,
+    accountingDifference: dailyRows.length - podRows.length - returnedRows.length - cancelledRows.length - unresolvedRows.length - normalDiversionRows.length - activeShopRows.length,
     pending1: actionable.filter(row => pendingDays(row) >= 1).length,
     pending2: actionable.filter(row => pendingDays(row) >= 2).length,
     pending3: actionable.filter(row => pendingDays(row) >= 3).length,
@@ -47,9 +55,13 @@ export function buildWhppDashboard(state = {}) {
     // ccsl580Diversion key is retained only as a compatibility alias.
     ccsl580Retention: ccsl580Rows.length,
     ccsl580Diversion: ccsl580Rows.length,
-    phnomPenhShop: monitorRows.filter(row => ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState || ''))).length,
-    phnomPenhShopTransit: monitorRows.filter(row => row.shopState === 'SHOP_TRANSFER_IN_PROGRESS').length,
-    phnomPenhShopArrived: monitorRows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT').length,
+    phnomPenhShop: phnomPenhShopRows.length,
+    provinceShop: provinceShopRows.length,
+    unknownShop: unknownShopRows.length,
+    phnomPenhShopTransit: phnomPenhShopRows.filter(row => row.shopState === 'SHOP_TRANSFER_IN_PROGRESS').length,
+    phnomPenhShopArrived: phnomPenhShopRows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT').length,
+    provinceShopTransit: provinceShopRows.filter(row => row.shopState === 'SHOP_TRANSFER_IN_PROGRESS').length,
+    provinceShopArrived: provinceShopRows.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT').length,
     dispatchAttempt1: podRows.filter(row => dispatchDayNo(row) === 1).length,
     dispatchAttempt2: podRows.filter(row => dispatchDayNo(row) === 2).length,
     dispatchAttempt3: podRows.filter(row => dispatchDayNo(row) >= 3).length
@@ -87,7 +99,9 @@ export function buildWhppDashboard(state = {}) {
     ccslZtDiversion: tab('CCSLZT分流', normalDiversionRows.filter(row => specialOf(row) === 'CCSLZT_DIVERSION')),
     ccsl580Retention: tab('580滞留包裹', ccsl580Rows),
     ccsl580Diversion: tab('580滞留包裹', ccsl580Rows),
-    phnomPenhShop: tab('金边门店', monitorRows.filter(row => ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState || '')))),
+    phnomPenhShop: tab('金边门店', phnomPenhShopRows),
+    provinceShop: tab('外省门店', provinceShopRows),
+    unknownShop: tab('门店区域待确认', unknownShopRows),
     attempt1: tab('1派POD', podRows.filter(row => dispatchDayNo(row) === 1)),
     attempt2: tab('2派POD', podRows.filter(row => dispatchDayNo(row) === 2)),
     attempt3: tab('3派及以上POD', podRows.filter(row => dispatchDayNo(row) >= 3)),
@@ -108,6 +122,7 @@ export function buildWhppDashboard(state = {}) {
       returned: metrics.returned,
       cancelled: metrics.cancelled,
       normalDiversion: metrics.normalDiversion,
+      shops: metrics.shopTotal,
       unresolved: metrics.unresolved,
       accounted: metrics.accounted,
       difference: metrics.accountingDifference,
@@ -135,7 +150,8 @@ function buildRegion(code, dailyRows, monitorRows) {
   const pod = daily.filter(isPod).length;
   const returned = daily.filter(row => !isPod(row) && isReturned(row)).length;
   const cancelled = daily.filter(row => !isPod(row) && !isReturned(row) && isWhppCancelledRow(row)).length;
-  const open = daily.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row)).length;
+  const shops = daily.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && isActiveShop(row));
+  const open = daily.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row) && !isActiveShop(row)).length;
   return {
     regionCode: code,
     total: daily.length,
@@ -150,12 +166,18 @@ function buildRegion(code, dailyRows, monitorRows) {
     oc1: monitor.filter(row => isActionable(row) && Number(row.OC天数 || 0) >= 1).length,
     oc2: monitor.filter(row => isActionable(row) && Number(row.OC天数 || 0) >= 2).length,
     oc3: monitor.filter(row => isActionable(row) && Number(row.OC天数 || 0) >= 3).length,
-    phnomPenhShop: monitor.filter(row => ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState || ''))).length
+    shop: shops.length,
+    phnomPenhShop: code === 'PP' ? shops.length : 0,
+    provinceShop: code === 'PV' ? shops.length : 0
   };
 }
 
 function isActionable(row) {
-  return !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row);
+  return !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row) && !isActiveShop(row);
+}
+
+function isActiveShop(row = {}) {
+  return ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState || row.storeFlowState || ''));
 }
 
 function isNormalDiversion(row = {}) {
@@ -220,7 +242,8 @@ function uniqueRows(rows = []) {
 }
 
 function tab(label, rows) {
-  return { label, rows: uniqueRows(rows), total: uniqueRows(rows).length };
+  const values = uniqueRows(rows);
+  return { label, rows: values, total: values.length };
 }
 
 function rate(value, total) {
