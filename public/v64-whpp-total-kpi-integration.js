@@ -1,7 +1,6 @@
 (function installWhppTotalKpiIntegrationV64(global) {
-  const VERSION = '2026-08-12-v64-whpp-total-kpi-integration-v1';
-  let cache = null;
-  let cacheAt = 0;
+  const VERSION = '2026-08-12-v64-whpp-total-kpi-integration-v2';
+  const summaryCache = new Map();
   let decorating = false;
   let timer = null;
 
@@ -12,91 +11,98 @@
   const fmt = value => Number(value || 0).toLocaleString('zh-CN');
   const rate = (value, total) => total ? Number(value || 0) * 100 / Number(total) : 0;
 
-  async function json(url) {
-    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
-    const text = await response.text();
-    let payload = {};
-    try { payload = text ? JSON.parse(text) : {}; } catch {}
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
-    return payload;
-  }
-
-  async function truth() {
-    if (cache && Date.now() - cacheAt < 1200) return cache;
-    const [unified, whpp] = await Promise.all([
-      json('/api/import/unified-latest?compact=1').catch(() => ({})),
-      json('/api/v51/whpp-state').catch(() => ({}))
-    ]);
-    const imported = unified?.import || {};
-    const whppDate = String(whpp?.state?.reportDate || whpp?.reportDate || '');
-    const importedDate = String(imported?.reportDate || '');
-    const whppMatches = Boolean(importedDate && whppDate && importedDate === whppDate);
-    const whppMetrics = whppMatches ? (whpp?.dashboard?.metrics || {}) : {};
-    const whppRows = whppMatches ? (whpp?.dashboard?.detailTabs?.all?.rows || []) : [];
-    const counts = { ...(imported?.classificationCounts || {}) };
-    const whppTotal = whppMatches ? Number(whppMetrics.total || whpp?.state?.pnhBills?.length || 0) : 0;
-    counts.WHPP = whppTotal;
-    const coreTypes = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
-    const coreCount = coreTypes.reduce((sum, type) => sum + Number(counts[type] || 0), 0);
-    const summary = imported?.summary || {};
-    const rawUnique = Math.max(0, Number(summary.rawRows || 0) - Number(summary.duplicateRows || 0) - Number(summary.missingWaybillRows || 0));
-    const sevenCount = coreCount + whppTotal;
-    const fullUnique = rawUnique || sevenCount;
-    cache = { imported, whpp, counts, whppMetrics, whppRows, whppTotal, coreCount, sevenCount, fullUnique, reportDate: importedDate };
-    cacheAt = Date.now();
-    return cache;
-  }
-
-  function selectedSingleDay(reportDate) {
-    if (!reportDate) return false;
-    const from = String(document.getElementById('topRangeFrom')?.value || reportDate);
-    const to = String(document.getElementById('topRangeTo')?.value || reportDate);
-    return from === reportDate && to === reportDate;
-  }
-
   function setText(node, text) {
     if (node && node.textContent !== text) node.textContent = text;
   }
 
+  function importGrid() {
+    return document.querySelector('#unifiedClassificationSummary .unified-count-grid');
+  }
+
+  function importCardCount(label) {
+    const grid = importGrid();
+    if (!grid) return 0;
+    const card = [...grid.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === label);
+    return num(card?.querySelector('b')?.textContent);
+  }
+
+  function importStats() {
+    const root = document.getElementById('unifiedClassificationSummary');
+    const text = String(root?.textContent || '');
+    const pick = label => {
+      const match = text.match(new RegExp(`${label}\\s*([\\d,]+)`));
+      return match ? num(match[1]) : 0;
+    };
+    const rawRows = pick('原始行');
+    const duplicateRows = pick('重复');
+    const missingWaybillRows = pick('无单号');
+    const coreLabels = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+    const coreCount = coreLabels.reduce((sum, label) => sum + importCardCount(label), 0);
+    const rawUnique = Math.max(0, rawRows - duplicateRows - missingWaybillRows);
+    const whppTotal = rawUnique >= coreCount ? rawUnique - coreCount : 0;
+    return { rawRows, duplicateRows, missingWaybillRows, coreCount, rawUnique, whppTotal, fullUnique: rawUnique || coreCount + whppTotal };
+  }
+
   function ensureImportWhppCard(grid) {
-    let card = grid.querySelector('[data-v64-business="WHPP"]') || grid.querySelector('[data-v54-business="WHPP"]');
+    let card = [...grid.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === 'WHPP本土');
     if (!card) {
       card = document.createElement('div');
       card.dataset.v64Business = 'WHPP';
       card.innerHTML = '<span>WHPP本土</span><b data-testid="classification-whpp">0</b>';
       grid.appendChild(card);
     }
+    card.dataset.v64Business = 'WHPP';
     return card;
   }
 
-  function patchImportPage(data) {
-    const grid = document.querySelector('#unifiedClassificationSummary .unified-count-grid');
-    if (!grid) return;
+  function patchImportPage() {
+    const grid = importGrid();
+    if (!grid) return null;
+    const data = importStats();
     const whppCard = ensureImportWhppCard(grid);
     setText(whppCard.querySelector('b'), fmt(data.whppTotal));
     setText(grid.querySelector('[data-testid="classification-valid-unique"]'), fmt(data.fullUnique));
-
-    const labels = new Map([
-      ['CE','CE'], ['CEAF','CEAF'], ['TBKH','TBKH'], ['ALI1688','ALI1688'],
-      ['SHOPEECN','SHOPEECN'], ['SHOPEEVN','SHOPEEVN'], ['WHPP本土','WHPP']
-    ]);
-    for (const node of grid.children) {
-      const label = String(node.querySelector('span')?.textContent || '').trim();
-      const type = labels.get(label);
-      if (type) setText(node.querySelector('b'), fmt(data.counts[type] || 0));
-    }
-
     const status = document.getElementById('fileStatus');
-    if (status) {
-      status.querySelectorAll('p').forEach(p => {
-        if (/有效唯一单号/.test(p.textContent || '')) p.innerHTML = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${fmt(data.fullUnique)}`);
-        if (/当前处理队列/.test(p.textContent || '')) p.innerHTML = p.innerHTML.replace(/当前处理队列\s*<b[^>]*>[\d,]+<\/b>/, `当前处理队列 <b>${fmt(Math.max(num(data.imported?.carryover?.currentOpen), data.fullUnique))}</b>`);
-      });
-    }
+    status?.querySelectorAll('p').forEach(p => {
+      if (/有效唯一单号/.test(p.textContent || '')) p.innerHTML = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${fmt(data.fullUnique)}`);
+    });
+    return data;
+  }
+
+  async function readWhppSummary(reportDate) {
+    const date = String(reportDate || '').slice(0, 10);
+    if (!date) return { reportDate: '', total: 0, metrics: {}, regionPvUnresolved: 0, activeStoreRetention: 0, selfPickup: 0 };
+    const cached = summaryCache.get(date);
+    if (cached && Date.now() - cached.at < 30000) return cached.value;
+    const response = await fetch(`/api/v71/whpp-summary?reportDate=${encodeURIComponent(date)}`, { cache: 'no-store', credentials: 'same-origin' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+    summaryCache.set(date, { at: Date.now(), value: payload });
+    return payload;
+  }
+
+  function selectedReportDate() {
+    return String(document.getElementById('topRangeTo')?.value || document.getElementById('dashboardRangeTo')?.value || '').slice(0, 10);
+  }
+
+  function selectedSingleDay(reportDate) {
+    if (!reportDate) return false;
+    const from = String(document.getElementById('topRangeFrom')?.value || reportDate).slice(0, 10);
+    const to = String(document.getElementById('topRangeTo')?.value || reportDate).slice(0, 10);
+    return from === reportDate && to === reportDate;
+  }
+
+  function homeCard(label) {
+    return [...document.querySelectorAll('#homePage .v18-business-grid .v18-business-card')]
+      .find(card => String(card.querySelector('span')?.textContent || '').trim() === label) || null;
+  }
+
+  function homeCardValue(label) {
+    return num(homeCard(label)?.querySelector('b')?.textContent);
   }
 
   function ensureHomeWhppCard(grid) {
-    let card = [...grid.querySelectorAll('.v18-business-card')].find(node => String(node.querySelector('span')?.textContent || '').trim() === 'WHPP本土');
+    let card = homeCard('WHPP本土');
     if (card) return card;
     card = document.createElement('button');
     card.type = 'button';
@@ -109,35 +115,22 @@
   }
 
   function patchHomeTop(data) {
-    if (!selectedSingleDay(data.reportDate)) return;
     const grid = document.querySelector('#homePage .v18-business-grid');
-    if (!grid) return;
+    if (!grid || !selectedSingleDay(data.reportDate)) return 0;
     ensureHomeWhppCard(grid);
-    const values = new Map([
-      ['总览', data.fullUnique], ['CE', data.counts.CE || 0], ['CEAF空运', data.counts.CEAF || 0],
-      ['TBKH', data.counts.TBKH || 0], ['SHOPEE CN', data.counts.SHOPEECN || 0], ['SHOPEE VN', data.counts.SHOPEEVN || 0],
-      ['ALI1688', data.counts.ALI1688 || 0], ['WHPP本土', data.whppTotal]
-    ]);
+    const whppTotal = Number(data.total || 0);
+    setText(homeCard('WHPP本土')?.querySelector('b'), fmt(whppTotal));
+    const sixLabels = ['CE','CEAF空运','TBKH','SHOPEE CN','SHOPEE VN','ALI1688'];
+    const fullTotal = sixLabels.reduce((sum, label) => sum + homeCardValue(label), 0) + whppTotal;
     for (const card of grid.querySelectorAll('.v18-business-card')) {
       const label = String(card.querySelector('span')?.textContent || '').trim();
-      if (!values.has(label)) continue;
-      const value = Number(values.get(label) || 0);
-      setText(card.querySelector('b'), fmt(value));
-      setText(card.querySelector('em'), `占总票数 ${label === '总览' ? '100.00' : rate(value, data.fullUnique).toFixed(2)}%`);
+      const value = label === '总览' ? fullTotal : (label === 'WHPP本土' ? whppTotal : num(card.querySelector('b')?.textContent));
+      if (label === '总览') setText(card.querySelector('b'), fmt(fullTotal));
+      if (label === '总览' || sixLabels.includes(label) || label === 'WHPP本土') {
+        setText(card.querySelector('em'), `占总票数 ${label === '总览' ? '100.00' : rate(value, fullTotal).toFixed(2)}%`);
+      }
     }
-  }
-
-  function activeWhppStoreRetention(rows) {
-    return (rows || []).filter(row => {
-      const shopState = String(row?.shopState || row?.storeFlowState || '');
-      const days = Number(row?.shopRetentionNaturalDays || 0);
-      const terminal = row?.是否POD === '是' || row?.POD状态 === 'POD' || row?.退回状态 === '已退回' || ['POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED'].includes(String(row?.currentState || '').toUpperCase());
-      return !terminal && ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(shopState) && days >= 2;
-    }).length;
-  }
-
-  function whppSelfPickup(rows) {
-    return (rows || []).filter(row => String(row?.specialState || row?.primaryCategory || row?.主分类 || '').toUpperCase() === 'SELF_PICKUP' || String(row?.主分类 || '') === '仓库自提').length;
+    return fullTotal;
   }
 
   function metricCardByLabel(label) {
@@ -173,26 +166,25 @@
     if (!selectedSingleDay(data.reportDate)) return;
     const core = document.querySelector('#homePage .v18-core');
     if (!core) return;
-    const ccslTotal = Number(data.counts.CE || 0) + Number(data.counts.CEAF || 0) + Number(data.counts.TBKH || 0) + Number(data.counts.ALI1688 || 0);
-    const denominator = ccslTotal + Number(data.whppTotal || 0);
-    const m = data.whppMetrics || {};
-    const signature = `${data.reportDate}|${data.whppTotal}|${m.pod || 0}|${m.pending3 || 0}|${m.oc2 || 0}`;
-
+    const ccslTotal = homeCardValue('CE') + homeCardValue('CEAF空运') + homeCardValue('TBKH') + homeCardValue('ALI1688');
+    const denominator = ccslTotal + Number(data.total || 0);
+    const m = data.metrics || {};
+    const signature = `${data.reportDate}|${data.total || 0}|${m.pod || 0}|${m.pending3 || 0}|${m.oc2 || 0}`;
     const heading = core.querySelector('h2');
     if (heading) heading.innerHTML = '核心指标总览 <small>CE + CEAF空运 + TBKH + ALI1688 + WHPP本土，不含 SHOPEE CN/VN</small>';
 
     patchCountMetric('Pending不连续', m.pendingNonContinuous, denominator, signature);
     patchCountMetric('Pending 3天+', m.pending3, denominator, signature);
     patchCountMetric('OC 1天+', m.oc1, denominator, signature);
-    patchCountMetric('门店滞留', activeWhppStoreRetention(data.whppRows), denominator, signature);
+    patchCountMetric('门店滞留', data.activeStoreRetention, denominator, signature);
     patchCountMetric('工单', m.workOrder, denominator, signature);
     patchCountMetric('工单未处理', m.workOrder, denominator, signature);
     patchCountMetric('入库无扫描节点', m.inboundNoScan, denominator, signature);
     patchCountMetric('盘点2天+', m.cycle2, denominator, signature);
     patchCountMetric('盘点 2天+', m.cycle2, denominator, signature);
     patchCountMetric('OC 2天+', m.oc2, denominator, signature);
-    patchCountMetric('外省未完结POD件', data.whpp?.dashboard?.regions?.PV?.unresolved || 0, denominator, signature);
-    patchCountMetric('仓库自提件', whppSelfPickup(data.whppRows), denominator, signature);
+    patchCountMetric('外省未完结POD件', data.regionPvUnresolved, denominator, signature);
+    patchCountMetric('仓库自提件', data.selfPickup, denominator, signature);
     patchCountMetric('CECN滞留包裹', m.ccslCnDiversion, denominator, signature);
     patchCountMetric('CEZT滞留包裹', m.ccslZtDiversion, denominator, signature);
     patchCountMetric('580滞留包裹', m.ccsl580Retention, denominator, signature);
@@ -206,20 +198,21 @@
     }
     const combinedPodRate = rate(combinedPod, denominator);
     patchRateMetric('POD率', combinedPodRate, signature);
-    // Existing homepage semantics use the same current-day POD completion basis for
-    // this card; preserve that behavior while expanding the denominator to WHPP.
     patchRateMetric('首次妥投率', combinedPodRate, signature);
   }
 
   async function decorate() {
     if (decorating) return;
-    if (!document.querySelector('#unifiedClassificationSummary, #homePage')) return;
     decorating = true;
     try {
-      const data = await truth();
-      patchImportPage(data);
-      patchHomeTop(data);
-      patchHomeCore(data);
+      patchImportPage();
+      const home = document.getElementById('homePage');
+      if (!home || home.hidden) return;
+      const reportDate = selectedReportDate();
+      if (!reportDate) return;
+      const summary = await readWhppSummary(reportDate);
+      patchHomeTop(summary);
+      patchHomeCore(summary);
     } catch (error) {
       console.warn('[CE-QC][V64_WHPP_TOTAL_KPI] skipped', error);
     } finally {
@@ -227,22 +220,29 @@
     }
   }
 
-  function schedule() {
+  function schedule(delay = 0, invalidate = false) {
+    if (invalidate) summaryCache.clear();
     clearTimeout(timer);
-    timer = setTimeout(() => void decorate(), 80);
+    timer = setTimeout(() => void decorate(), Math.max(0, delay));
   }
 
   function install() {
-    void decorate();
-    const observer = new MutationObserver(schedule);
-    observer.observe(document.querySelector('.app-shell') || document.body, { childList: true, subtree: true });
+    const originalRenderAll = global.renderAll;
+    if (typeof originalRenderAll === 'function' && !originalRenderAll.__v64WhppWrapped) {
+      const wrapped = function () {
+        const result = originalRenderAll.apply(this, arguments);
+        schedule(0, false);
+        return result;
+      };
+      wrapped.__v64WhppWrapped = true;
+      global.renderAll = wrapped;
+    }
+
     document.addEventListener('click', event => {
-      if (event.target?.closest?.('#topRangeQuery,[data-page="home"],[data-page="import"]')) {
-        cache = null;
-        cacheAt = 0;
-        setTimeout(() => void decorate(), 120);
-      }
+      if (event.target?.closest?.('#topRangeQuery,[data-page="home"],[data-page="import"]')) schedule(20, true);
     }, true);
+    document.addEventListener('ce-qc-run-complete', () => schedule(0, true));
+    schedule(0, false);
     console.info('[CE-QC][V64_WHPP_TOTAL_KPI]', VERSION);
   }
 
