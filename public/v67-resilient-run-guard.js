@@ -1,7 +1,7 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-12-v67-resilient-run-guard-v1';
+  const VERSION = '2026-08-12-v67-resilient-run-guard-v2';
   const priorFetch = global.fetch.bind(global);
   const readCache = new Map();
   const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -301,8 +301,12 @@
     console.info('[CE-QC][V67_RESILIENT_RUN_GUARD]', VERSION);
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installRunOverride, { once: true });
-  else installRunOverride();
+  function scheduleRunOverride() {
+    setTimeout(installRunOverride, 0);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scheduleRunOverride, { once: true });
+  else scheduleRunOverride();
 
   global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = {
     version: VERSION,
