@@ -14,13 +14,13 @@ test('recipient rules identify Shopee and ALI before ordinary CC/CE fallback own
   assert.equal(typeOf('CE100005', 'ALI1688'), 'ALI1688');
 });
 
-test('ordinary Khmer or blank recipients never prevent prefix ownership classification', () => {
+test('ordinary non-Latin or blank recipients never prevent prefix ownership classification', () => {
   assert.equal(typeOf('CC200001', ''), 'CE');
-  assert.equal(typeOf('CC200002', 'សុខ ដារ៉ា'), 'CE');
+  assert.equal(typeOf('CC200002', '\u1780\u1781'), 'CE');
   assert.equal(typeOf('CE200003', ''), 'WHPP');
-  assert.equal(typeOf('CE200004', 'ចាន់ ស្រីនាង'), 'WHPP');
+  assert.equal(typeOf('CE200004', '\u1782\u1783'), 'WHPP');
   assert.equal(typeOf('TBKH200005', ''), 'TBKH');
-  assert.equal(typeOf('TBKH200006', 'អតិថិជន'), 'TBKH');
+  assert.equal(typeOf('TBKH200006', '\u1784\u1785'), 'TBKH');
 });
 
 test('TBKH is recognized by shipment prefix only, not recipient text', () => {
@@ -41,12 +41,14 @@ test('only genuinely competing strong signals remain a classification conflict',
   assert.deepEqual(classifyUnifiedMatches('CC500002', 'SHOPEEVN ALI1688'), ['SHOPEEVN', 'ALI1688']);
 });
 
-test('unified import UI uses imported WHPP count and imported unique total instead of WHPP runtime total', () => {
+test('unified import UI reconciles core snapshot totals with separately persisted WHPP rows', () => {
   const ui = fs.readFileSync(new URL('../public/v54-whpp-unified-integration.js', import.meta.url), 'utf8');
   const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
+  assert.match(ui, /combinedImportTruth/);
+  assert.match(ui, /coreUnique \+ separateWhpp/);
   assert.match(ui, /classificationCounts\?\.WHPP/);
-  assert.match(ui, /summary\?\.validUniqueWaybills/);
+  assert.match(ui, /当前处理队列/);
   assert.match(ui, /收件人为空（仍已按规则分类）/);
   assert.match(ui, /真正分类冲突/);
-  assert.match(injector, /v54-whpp-unified-integration\.js\?v=20260812-5/);
+  assert.match(injector, /v54-whpp-unified-integration\.js\?v=20260812-6/);
 });
