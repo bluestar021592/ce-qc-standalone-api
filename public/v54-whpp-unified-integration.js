@@ -1,8 +1,10 @@
 (function installWhppUnifiedIntegrationV54(global) {
-  const VERSION = '2026-08-11-v54-whpp-unified-integration-v4';
+  const VERSION = '2026-08-12-v54-whpp-unified-integration-v5';
   let busy = false;
   let whppSummaryCache = null;
   let whppSummaryAt = 0;
+  let unifiedImportCache = null;
+  let unifiedImportAt = 0;
   let decorating = false;
 
   async function readJson(response) {
@@ -129,6 +131,8 @@
       setStatus('success', `综合日报处理完成：${parts.join('；')}。`);
       whppSummaryCache = null;
       whppSummaryAt = 0;
+      unifiedImportCache = null;
+      unifiedImportAt = 0;
       if (location.pathname === '/whpp' && typeof global.navigateWhppPage === 'function') {
         await global.navigateWhppPage();
       } else if (typeof global.refresh === 'function') {
@@ -171,29 +175,46 @@
     }
   }
 
-  function numberOf(node) {
-    return Number(String(node?.textContent || '').replace(/[^0-9.-]/g, '')) || 0;
+  async function getUnifiedImportSummary() {
+    if (unifiedImportCache && Date.now() - unifiedImportAt < 800) return unifiedImportCache;
+    try {
+      const payload = await api('/api/import/unified-latest?compact=1');
+      unifiedImportCache = payload?.import || null;
+      unifiedImportAt = Date.now();
+      return unifiedImportCache;
+    } catch {
+      return null;
+    }
   }
 
   function setTextIfChanged(node, text) {
     if (node && node.textContent !== text) node.textContent = text;
   }
 
-  function patchImportedUniqueTotal(grid) {
+  function patchImportedUniqueTotal(grid, imported = null) {
     const validNode = grid.querySelector('[data-testid="classification-valid-unique"]');
-    const businessKeys = ['ce','ceaf','tbkh','ali1688','shopeecn','shopeevn','whpp'];
-    const reconciled = businessKeys.reduce((sum, key) => sum + numberOf(grid.querySelector(`[data-testid="classification-${key}"]`)), 0);
-    const reconciledText = reconciled.toLocaleString('zh-CN');
-    if (validNode && reconciled > 0) setTextIfChanged(validNode, reconciledText);
+    const validUnique = Number(imported?.summary?.validUniqueWaybills || 0);
+    if (!validUnique) return;
+    const validText = validUnique.toLocaleString('zh-CN');
+    if (validNode) setTextIfChanged(validNode, validText);
 
     const status = document.getElementById('fileStatus');
-    if (status && reconciled > 0) {
+    if (status) {
       status.querySelectorAll('p').forEach(p => {
         if (!/有效唯一单号/.test(p.textContent || '')) return;
-        const next = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${reconciledText}`);
+        const next = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${validText}`);
         if (next !== p.innerHTML) p.innerHTML = next;
       });
     }
+  }
+
+  function relabelWarning(testId, label) {
+    const valueNode = document.querySelector(`[data-testid="${testId}"]`);
+    const parent = valueNode?.closest('span');
+    if (!valueNode || !parent) return;
+    const value = valueNode.textContent || '0';
+    const html = `${label} <b data-testid="${testId}">${value}</b>`;
+    if (parent.innerHTML !== html) parent.innerHTML = html;
   }
 
   async function decorateUnifiedImport() {
@@ -202,8 +223,10 @@
     if (!grid) return;
     decorating = true;
     try {
-      const payload = await getWhppSummary();
-      const whppTotal = Number(payload?.dashboard?.metrics?.total || payload?.state?.pnhBills?.length || 0);
+      const [whppPayload, imported] = await Promise.all([getWhppSummary(), getUnifiedImportSummary()]);
+      const importedWhpp = Number(imported?.classificationCounts?.WHPP);
+      const fallbackWhpp = Number(whppPayload?.dashboard?.metrics?.total || whppPayload?.state?.pnhBills?.length || 0);
+      const whppTotal = Number.isFinite(importedWhpp) ? importedWhpp : fallbackWhpp;
       let card = grid.querySelector('[data-v54-business="WHPP"]');
       if (!card) {
         card = document.createElement('div');
@@ -213,7 +236,9 @@
       }
       const value = card.querySelector('b');
       setTextIfChanged(value, Number(whppTotal || 0).toLocaleString('zh-CN'));
-      patchImportedUniqueTotal(grid);
+      patchImportedUniqueTotal(grid, imported);
+      relabelWarning('classification-missing-recipient', '收件人为空（仍已按规则分类）');
+      relabelWarning('classification-conflicts', '真正分类冲突');
 
       const empty = document.querySelector('#unifiedClassificationSummary .unified-empty-state span');
       if (empty && /六业务/.test(empty.textContent || '')) setTextIfChanged(empty, (empty.textContent || '').replace('六业务', '七业务'));
