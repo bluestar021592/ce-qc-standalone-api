@@ -1,14 +1,14 @@
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-12-v46-cold-start-readonly-index-check-v2';
+const PATCH_ID = '2026-08-12-v46-cold-start-readonly-index-check-v3';
 
 // IMPORTANT: startup must stay read-only.
 //
 // This patch originally created covering indexes synchronously during bootstrap.
 // On a large SQLite database, or while another CE QC process still held a write
-// lock, CREATE INDEX / PRAGMA optimize could block bootstrap before server.js
-// started listening on port 5177. That made the desktop launcher look dead even
-// though the business data itself was intact.
+// lock, write-side index/statistics maintenance could block bootstrap before
+// server.js started listening on port 5177. That made the desktop launcher look
+// dead even though the business data itself was intact.
 //
 // Keep the expected index definitions documented here, but only inspect
 // sqlite_master during startup. Missing indexes are reported and can be created
