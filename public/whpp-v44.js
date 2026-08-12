@@ -1,8 +1,7 @@
 (function (global) {
-  const VERSION='2026-08-12-v44-whpp-shop-metrics-v5';
+  const VERSION='2026-08-12-v44-whpp-light-board-v6';
   let cached=null;
   let activeDate='';
-  let observer=null;
 
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
   const pct=value=>`${Number(value||0).toFixed(2).replace(/\.00$/,'')}%`;
@@ -137,9 +136,9 @@
     const timer=setTimeout(()=>controller.abort(),5000);
     try{
       const q=date?`?reportDate=${encodeURIComponent(date)}`:'';
-      const response=await fetch(`/api/whpp/state${q}`,{cache:'no-store',credentials:'same-origin',signal:controller.signal});
+      const response=await fetch(`/api/v71/whpp-summary${q}`,{cache:'no-store',credentials:'same-origin',signal:controller.signal});
       const data=await response.json().catch(()=>({}));
-      if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);
+      if(!response.ok||data.ok===false)throw new Error(data.error||`HTTP ${response.status}`);
       return data;
     }finally{clearTimeout(timer);}
   }
@@ -227,9 +226,8 @@
     global.navigateWhppPage=navigate;
     global.openWhppDetailV44=openDetail;
     global.openWhppRegionDetailV44=openRegionDetail;
-    observer=new MutationObserver(()=>{ensureNav();if(location.pathname==='/whpp')forceVisibility();});
-    observer.observe(document.querySelector('.app-shell')||document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','class']});
     global.addEventListener('popstate',()=>{if(location.pathname==='/whpp')navigate(activeDate);});
+    document.addEventListener('ce-qc-run-complete',()=>{if(location.pathname==='/whpp')navigate(activeDate);});
     if(location.pathname==='/whpp')navigate(activeDate);
     console.info('[CE-QC][WHPP_NATIVE_UI]',VERSION);
   }
