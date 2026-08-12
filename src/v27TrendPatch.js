@@ -1,6 +1,6 @@
 import express from 'express';
 import path from 'node:path';
-import { loadRangeDashboard } from './rangeDashboardStore.js';
+import { loadRangeDashboard } from './rangeDashboardStoreLegacy.js';
 import { getDb } from './db.js';
 
 const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','CCSL','SHOPEE']);
