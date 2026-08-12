@@ -1,5 +1,5 @@
 (function installDashboardSourceTruthV50(global){
-  const VERSION='2026-08-11-v50-dashboard-source-truth-ui-v1';
+  const VERSION='2026-08-12-v50-dashboard-source-truth-ui-v2';
   const TAB_BY_LABEL={
     'CCSLCN分流':'ccslCnDiversion','CECN滞留包裹':'ccslCnDiversion',
     'CCSLZT分流':'ccslZtDiversion','CEZT滞留包裹':'ccslZtDiversion',
@@ -8,7 +8,7 @@
   };
   let detailContext=null;
 
-  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
   function businessType(){
     const path=location.pathname.toLowerCase();
@@ -53,8 +53,6 @@
     }catch(error){host.innerHTML=`<div class="empty-state">明细读取失败：${esc(error.message||error)}</div>`;}
   }
 
-  // Capture phase intentionally runs before legacy inline onclick. This prevents a
-  // special routing/location card from falling through to the old all/allData tab.
   document.addEventListener('click',event=>{
     const card=event.target?.closest?.('.v18-metric-card,.v18-business-card,.core-metric-card,.metric-card');
     if(!card)return;
@@ -70,10 +68,10 @@
       if(String(node.textContent||'').trim()==='退回率')node.textContent='退件率';
     });
   }
-  let timer=null;
-  const observer=new MutationObserver(()=>{clearTimeout(timer);timer=setTimeout(renameReturnRate,50);});
-  observer.observe(document.querySelector('.app-shell')||document.body,{subtree:true,childList:true});
-  global.addEventListener('popstate',()=>setTimeout(renameReturnRate,50));
-  renameReturnRate();
+  function scheduleRename(delay=30){setTimeout(renameReturnRate,Math.max(0,delay));}
+  global.addEventListener('popstate',()=>scheduleRename(40));
+  document.addEventListener('click',event=>{if(event.target?.closest?.('[data-page="shopeecn"],[data-page="shopeevn"],#topRangeQuery,#dashboardRangeQuery'))scheduleRename(40);},true);
+  document.addEventListener('ce-qc-run-complete',()=>scheduleRename(20));
+  scheduleRename(0);
   console.info('[CE-QC][DASHBOARD_V50]',VERSION);
 })(window);
