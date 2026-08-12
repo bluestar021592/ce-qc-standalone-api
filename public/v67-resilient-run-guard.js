@@ -1,7 +1,7 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-12-v67-resilient-run-guard-v2';
+  const VERSION = '2026-08-12-v67-resilient-run-guard-v3';
   const priorFetch = global.fetch.bind(global);
   const readCache = new Map();
   const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -30,7 +30,7 @@
     return path === '/api/import/unified-latest'
       || path === '/api/state'
       || path === '/api/shopee/state'
-      || path === '/api/v51/whpp-state';
+      || path === '/api/v71/whpp-summary';
   }
 
   function cacheKey(url) {
@@ -131,9 +131,9 @@
 
   function whppNeedsRun(payload) {
     const state = stateOf(payload);
-    const total = Number(payload?.dashboard?.metrics?.total || state?.pnhBills?.length || 0);
-    const unresolved = Number(payload?.dashboard?.metrics?.unresolved || 0);
-    const status = String(payload?.snapshotStatus || state?.snapshotStatus || '').toUpperCase();
+    const total = Number(payload?.dashboard?.metrics?.total || payload?.total || state?.pnhBills?.length || 0);
+    const unresolved = Number(payload?.dashboard?.metrics?.unresolved || payload?.metrics?.unresolved || 0);
+    const status = String(payload?.snapshotStatus || state?.snapshotStatus || (payload?.completed ? 'COMPLETED' : '')).toUpperCase();
     if (!state?.dailyReportReady || total <= 0) return false;
     return !(status === 'COMPLETED' && unresolved === 0);
   }
@@ -142,7 +142,7 @@
     const requests = [
       readJson('/api/state?compact=1', {}, { live }),
       readJson('/api/shopee/state?compact=1', {}, { live }),
-      readJson('/api/v51/whpp-state', {}, { live })
+      readJson('/api/v71/whpp-summary', {}, { live })
     ];
     const results = await Promise.allSettled(requests);
     if (results.every(item => item.status === 'rejected')) {
@@ -232,12 +232,10 @@
       } catch (error) {
         lastError = error;
         if (alreadyComplete(error)) return;
-
         if (error.code === 'RUN_NOT_RECOVERABLE' && useResume) {
           useResume = false;
           continue;
         }
-
         if (error.code === 'NETWORK_CONNECTION_INTERRUPTED') {
           try {
             const check = await waitForStage(key, label, 30000);
@@ -246,7 +244,6 @@
             lastError = waitError;
           }
         }
-
         if (!transient(lastError) || attempt === delays.length - 1) throw lastError;
         useResume = true;
       }
