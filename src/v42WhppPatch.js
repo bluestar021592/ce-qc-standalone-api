@@ -12,7 +12,8 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-10-v42-whpp-local-board-v1';
+const PATCH_ID = '2026-08-12-v64-unified-ruleset-version-v2';
+const IMPORT_RULESET_VERSION = '2026-08-12-v64-final-business-ownership';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -28,6 +29,10 @@ async function handleUnifiedImportV42(req, res) {
       reportDate: req.body?.reportDate || '',
       originalName: req.file.originalname
     });
+    // A byte-identical Excel must be reclassified after business ownership rules change.
+    // Persist the ruleset version with the hash so an old VALID batch cannot silently win
+    // simply because the source file bytes are unchanged.
+    parsed.fileHash = `${parsed.fileHash}:${IMPORT_RULESET_VERSION}`;
     const whppRows = parsed.rows.filter(row => row.businessType === WHPP);
     const coreRows = parsed.rows.filter(row => row.businessType !== WHPP);
     const coreParsed = coreProjection(parsed, coreRows);
@@ -47,6 +52,7 @@ async function handleUnifiedImportV42(req, res) {
     res.json({
       ok: true,
       patchId: PATCH_ID,
+      importRulesetVersion: IMPORT_RULESET_VERSION,
       ...saved,
       classificationCounts: parsed.classificationCounts,
       sourceReconciliation: parsed.sourceReconciliation,
@@ -59,7 +65,7 @@ async function handleUnifiedImportV42(req, res) {
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
       },
-      architectureNote: 'WHPP使用独立持久化快照；现有CCSL/SHOPEE统一快照保持兼容，首页由V42合并展示。'
+      architectureNote: 'WHPP使用独立持久化快照；现有CCSL/SHOPEE统一快照保持兼容，首页合并展示七业务。'
     });
   } catch (error) {
     console.error('[V42][UNIFIED_IMPORT]', error);
