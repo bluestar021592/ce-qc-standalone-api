@@ -1,7 +1,7 @@
 (function installWhppClassificationStabilityV68(global) {
   if (global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__) return;
 
-  const VERSION = '2026-08-12-v68-whpp-classification-stability-v2';
+  const VERSION = '2026-08-12-v68-whpp-classification-stability-v3';
   const CACHE_KEY = 'ce_qc_v68_whpp_classification_truth';
   let busy = false;
   let timer = null;
@@ -76,7 +76,7 @@
     }, 0);
   }
 
-  function deriveTruth(imported = {}, whppPayload = null) {
+  function deriveTruth(imported = {}) {
     const reportDate = currentReportDate(imported);
     const summary = imported?.summary || domRawStats();
     const rawRows = num(summary.rawRows);
@@ -88,22 +88,20 @@
 
     const persistedRaw = imported?.classificationCounts?.WHPP;
     const persisted = persistedRaw === undefined || persistedRaw === null ? null : num(persistedRaw);
-    const whppState = whppPayload?.state || {};
-    const whppDate = String(whppState.reportDate || whppPayload?.reportDate || '').trim();
-    const whppMatches = Boolean(reportDate && whppDate && reportDate === whppDate);
-    const liveRaw = whppMatches
-      ? (whppPayload?.dashboard?.metrics?.total ?? whppState?.pnhBills?.length)
-      : null;
-    const live = liveRaw === undefined || liveRaw === null ? null : num(liveRaw);
     const cached = readCache(reportDate);
 
-    let whppTotal = live;
-    let source = live !== null ? 'live' : '';
-    if (whppTotal === null && persisted !== null) { whppTotal = persisted; source = 'persisted'; }
-    if (whppTotal === null && cached && Number.isFinite(Number(cached.whppTotal))) { whppTotal = num(cached.whppTotal); source = 'cache'; }
-    if (whppTotal === null && rawUnique >= core && conflicts === 0) {
-      whppTotal = Math.max(0, rawUnique - core);
-      source = 'derived';
+    let whppTotal = persisted;
+    let source = persisted !== null ? 'persisted' : '';
+    if (whppTotal === null && cached && Number.isFinite(Number(cached.whppTotal))) {
+      whppTotal = num(cached.whppTotal);
+      source = 'cache';
+    }
+    if ((whppTotal === null || whppTotal === 0) && rawUnique >= core && conflicts === 0) {
+      const derived = Math.max(0, rawUnique - core);
+      if (derived > 0 || whppTotal === null) {
+        whppTotal = derived;
+        source = 'derived';
+      }
     }
     if (whppTotal === null) whppTotal = 0;
 
@@ -157,11 +155,13 @@
     if (!target) return;
     const whpp = ensureWhppCard(target);
     const whppValue = whpp.querySelector('b');
-    if (whppValue) whppValue.textContent = fmt(truth.whppTotal);
+    const whppText = fmt(truth.whppTotal);
+    if (whppValue && whppValue.textContent !== whppText) whppValue.textContent = whppText;
     const valid = target.querySelector('[data-testid="classification-valid-unique"]');
-    if (valid) valid.textContent = fmt(truth.fullUnique);
+    const fullText = fmt(truth.fullUnique);
+    if (valid && valid.textContent !== fullText) valid.textContent = fullText;
     patchStatus(truth);
-    if (truth.reportDate && (truth.source === 'live' || truth.source === 'persisted' || truth.source === 'derived')) {
+    if (truth.reportDate && (truth.source === 'persisted' || truth.source === 'derived')) {
       saveCache({ reportDate: truth.reportDate, whppTotal: truth.whppTotal, fullUnique: truth.fullUnique, savedAt: Date.now() });
     }
   }
@@ -171,17 +171,13 @@
     busy = true;
     try {
       let imported = null;
-      let whpp = null;
-      const results = await Promise.allSettled([
-        json('/api/import/unified-latest?compact=1'),
-        json('/api/v51/whpp-state')
-      ]);
-      if (results[0].status === 'fulfilled') imported = results[0].value?.import || results[0].value || null;
-      if (results[1].status === 'fulfilled') whpp = results[1].value;
-      patchGrid(deriveTruth(imported || {}, whpp));
-    } catch (error) {
-      console.warn('[CE-QC][V68_WHPP_CLASSIFICATION] refresh skipped', error);
-      patchGrid(deriveTruth({}, null));
+      try {
+        const payload = await json('/api/import/unified-latest?compact=1');
+        imported = payload?.import || payload || null;
+      } catch (error) {
+        console.warn('[CE-QC][V68_WHPP_CLASSIFICATION] unified import read skipped', error);
+      }
+      patchGrid(deriveTruth(imported || {}));
     } finally {
       busy = false;
     }
@@ -204,11 +200,19 @@
       global.renderUnifiedImportResult = wrapped;
     }
 
-    const observer = new MutationObserver(() => schedule(80));
-    observer.observe(document.querySelector('.app-shell') || document.body, { childList: true, subtree: true });
+    // Do not observe the full application DOM here. Older V68 watched every
+    // mutation and then performed two heavy reads again, so its own card update
+    // scheduled another refresh and created a permanent request/render loop.
     document.addEventListener('click', event => {
-      if (event.target?.closest?.('[data-page="import"],#topRangeQuery,[data-testid="global-auto-process"]')) schedule(120);
+      if (event.target?.closest?.('[data-page="import"],[data-testid="global-auto-process"]')) schedule(120);
     }, true);
+    document.addEventListener('change', event => {
+      if (event.target?.closest?.('#reportDate,input[type="file"]')) schedule(160);
+    }, true);
+    global.addEventListener('popstate', () => schedule(160));
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && grid()) schedule(200);
+    });
     schedule(0);
     console.info('[CE-QC][V68_WHPP_CLASSIFICATION_STABILITY]', VERSION);
   }
