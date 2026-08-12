@@ -1,5 +1,5 @@
 (function installWhppUnifiedIntegrationV54(global) {
-  const VERSION = '2026-08-12-v54-whpp-unified-integration-v6';
+  const VERSION = '2026-08-12-v54-whpp-unified-integration-v7';
   let busy = false;
   let whppSummaryCache = null;
   let whppSummaryAt = 0;
@@ -198,8 +198,11 @@
   }
 
   function combinedImportTruth(imported = null, whppPayload = null) {
-    const coreUnique = Number(imported?.summary?.validUniqueWaybills || 0);
-    const persistedWhppRaw = imported?.classificationCounts?.WHPP;
+    const counts = imported?.classificationCounts || {};
+    const coreTypes = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+    const countedCore = coreTypes.reduce((sum, type) => sum + Number(counts?.[type] || 0), 0);
+    const coreUnique = countedCore || Number(imported?.summary?.validUniqueWaybills || 0);
+    const persistedWhppRaw = counts?.WHPP;
     const persistedWhpp = persistedWhppRaw === undefined || persistedWhppRaw === null ? NaN : Number(persistedWhppRaw);
     const runtimeWhpp = sameReport(imported, whppPayload)
       ? Number(whppPayload?.dashboard?.metrics?.total || whppPayload?.state?.pnhBills?.length || 0)
@@ -207,6 +210,7 @@
     const separateWhpp = Number.isFinite(persistedWhpp) ? 0 : runtimeWhpp;
     const whppTotal = Number.isFinite(persistedWhpp) ? persistedWhpp : runtimeWhpp;
     return {
+      counts,
       coreUnique,
       whppTotal,
       combinedUnique: coreUnique + separateWhpp,
@@ -247,29 +251,93 @@
     if (parent.innerHTML !== html) parent.innerHTML = html;
   }
 
-  async function decorateUnifiedImport() {
+  function selectedHomeDateMatches(imported) {
+    const reportDate = String(imported?.reportDate || '');
+    if (!reportDate) return false;
+    const from = String(document.getElementById('topRangeFrom')?.value || reportDate);
+    const to = String(document.getElementById('topRangeTo')?.value || reportDate);
+    return from === reportDate && to === reportDate;
+  }
+
+  function ensureHomeBusinessCard(grid, label, pageKey) {
+    let card = [...grid.querySelectorAll('.v18-business-card')].find(node => String(node.querySelector('span')?.textContent || '').trim() === label);
+    if (card) return card;
+    card = document.createElement('button');
+    card.className = 'v18-business-card blue';
+    card.type = 'button';
+    card.dataset.v54Business = pageKey.toUpperCase();
+    card.onclick = () => {
+      if (pageKey === 'whpp' && typeof global.navigateWhppPage === 'function') return global.navigateWhppPage();
+      if (typeof global.navigatePage === 'function') return global.navigatePage(pageKey);
+    };
+    card.innerHTML = `<span>${label}</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em>`;
+    grid.appendChild(card);
+    return card;
+  }
+
+  function patchHomeCard(card, value, total, isTotal = false) {
+    if (!card) return;
+    const count = Number(value || 0);
+    setTextIfChanged(card.querySelector('b'), count.toLocaleString('zh-CN'));
+    const ratio = isTotal ? 100 : (total ? count * 100 / total : 0);
+    setTextIfChanged(card.querySelector('em'), `占总票数 ${ratio.toFixed(2)}%`);
+  }
+
+  function patchHomeDashboard(imported, whppPayload) {
+    const grid = document.querySelector('#homePage .v18-business-grid');
+    if (!grid || !selectedHomeDateMatches(imported)) return;
+    const truth = combinedImportTruth(imported, whppPayload);
+    if (!truth.combinedUnique) return;
+
+    const values = new Map([
+      ['总览', truth.combinedUnique],
+      ['CE', Number(truth.counts?.CE || 0)],
+      ['CEAF空运', Number(truth.counts?.CEAF || 0)],
+      ['TBKH', Number(truth.counts?.TBKH || 0)],
+      ['SHOPEE CN', Number(truth.counts?.SHOPEECN || 0)],
+      ['SHOPEE VN', Number(truth.counts?.SHOPEEVN || 0)],
+      ['ALI1688', Number(truth.counts?.ALI1688 || 0)],
+      ['WHPP本土', Number(truth.whppTotal || 0)]
+    ]);
+
+    const whppCard = ensureHomeBusinessCard(grid, 'WHPP本土', 'whpp');
+    for (const card of grid.querySelectorAll('.v18-business-card')) {
+      const label = String(card.querySelector('span')?.textContent || '').trim();
+      if (!values.has(label)) continue;
+      patchHomeCard(card, values.get(label), truth.combinedUnique, label === '总览');
+    }
+    patchHomeCard(whppCard, truth.whppTotal, truth.combinedUnique, false);
+  }
+
+  async function decorateUnifiedViews() {
     if (decorating) return;
-    const grid = document.querySelector('#unifiedClassificationSummary .unified-count-grid');
-    if (!grid) return;
+    const importGrid = document.querySelector('#unifiedClassificationSummary .unified-count-grid');
+    const homeGrid = document.querySelector('#homePage .v18-business-grid');
+    if (!importGrid && !homeGrid) return;
     decorating = true;
     try {
       const [whppPayload, imported] = await Promise.all([getWhppSummary(), getUnifiedImportSummary()]);
       const truth = combinedImportTruth(imported, whppPayload);
-      let card = grid.querySelector('[data-v54-business="WHPP"]');
-      if (!card) {
-        card = document.createElement('div');
-        card.dataset.v54Business = 'WHPP';
-        card.innerHTML = '<span>WHPP本土</span><b data-testid="classification-whpp">0</b>';
-        grid.appendChild(card);
-      }
-      const value = card.querySelector('b');
-      setTextIfChanged(value, Number(truth.whppTotal || 0).toLocaleString('zh-CN'));
-      patchImportedUniqueTotal(grid, imported, whppPayload);
-      relabelWarning('classification-missing-recipient', '收件人为空（仍已按规则分类）');
-      relabelWarning('classification-conflicts', '真正分类冲突');
 
-      const empty = document.querySelector('#unifiedClassificationSummary .unified-empty-state span');
-      if (empty && /六业务/.test(empty.textContent || '')) setTextIfChanged(empty, (empty.textContent || '').replace('六业务', '七业务'));
+      if (importGrid) {
+        let card = importGrid.querySelector('[data-v54-business="WHPP"]');
+        if (!card) {
+          card = document.createElement('div');
+          card.dataset.v54Business = 'WHPP';
+          card.innerHTML = '<span>WHPP本土</span><b data-testid="classification-whpp">0</b>';
+          importGrid.appendChild(card);
+        }
+        const value = card.querySelector('b');
+        setTextIfChanged(value, Number(truth.whppTotal || 0).toLocaleString('zh-CN'));
+        patchImportedUniqueTotal(importGrid, imported, whppPayload);
+        relabelWarning('classification-missing-recipient', '收件人为空（仍已按规则分类）');
+        relabelWarning('classification-conflicts', '真正分类冲突');
+
+        const empty = document.querySelector('#unifiedClassificationSummary .unified-empty-state span');
+        if (empty && /六业务/.test(empty.textContent || '')) setTextIfChanged(empty, (empty.textContent || '').replace('六业务', '七业务'));
+      }
+
+      if (homeGrid) patchHomeDashboard(imported, whppPayload);
     } finally {
       decorating = false;
     }
@@ -280,11 +348,11 @@
     global.resumeUnified = () => executeUnified('resume');
     global.pauseUnified = pauseUnifiedV54;
 
-    void decorateUnifiedImport();
+    void decorateUnifiedViews();
     let timer = null;
     const observer = new MutationObserver(() => {
       clearTimeout(timer);
-      timer = setTimeout(() => void decorateUnifiedImport(), 60);
+      timer = setTimeout(() => void decorateUnifiedViews(), 60);
     });
     observer.observe(document.querySelector('.app-shell') || document.body, { subtree: true, childList: true });
     console.info('[CE-QC][WHPP_UNIFIED_V54]', VERSION);
