@@ -1,9 +1,10 @@
 import { CEClient } from './ceClient.js';
 
-const PATCH_ID = '2026-08-12-v70-confirm-query-resilience-v1';
+const PATCH_ID = '2026-08-12-v70-confirm-query-resilience-v2';
 const ORIGINAL = CEClient.prototype.confirmQuery;
-const MAX_BATCH = Math.max(10, Math.min(350, Number(process.env.CONFIRM_QUERY_BATCH_SIZE || 100)));
-const MIN_SPLIT = Math.max(1, Math.min(25, Number(process.env.CONFIRM_QUERY_MIN_SPLIT || 10)));
+const MAX_BATCH = Math.max(10, Math.min(100, Number(process.env.CONFIRM_QUERY_BATCH_SIZE || 50)));
+const MIN_SPLIT = Math.max(1, Math.min(10, Number(process.env.CONFIRM_QUERY_MIN_SPLIT || 5)));
+const CONFIRM_TIMEOUT_MS = Math.max(8000, Math.min(45000, Number(process.env.CONFIRM_QUERY_TIMEOUT_MS || 25000)));
 
 function cleanCodes(values = []) {
   return [...new Set((values || [])
@@ -26,9 +27,11 @@ function isAuthError(error) {
 }
 
 function isTransient(error) {
+  const status = Number(error?.ceStatus || error?.response?.status || 0);
   const code = String(error?.code || error?.cause?.code || '').toUpperCase();
   const message = String(error?.message || error?.cause?.message || '');
-  return ['ECONNRESET','ECONNABORTED','ETIMEDOUT','EPIPE','EAI_AGAIN','ENETRESET','ENETUNREACH'].includes(code)
+  return [408, 425, 429, 500, 502, 503, 504].includes(status)
+    || ['ECONNRESET','ECONNABORTED','ETIMEDOUT','EPIPE','EAI_AGAIN','ENETRESET','ENETUNREACH'].includes(code)
     || /socket hang up|connection reset|network error|timed?\s*out|timeout|premature close|read ECONNRESET/i.test(message);
 }
 
@@ -36,25 +39,44 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
 }
 
-async function queryAdaptive(client, codes, depth = 0) {
+async function originalWithConfirmTimeout(client, codes) {
+  const http = client?.http;
+  const previousTimeout = http?.defaults?.timeout;
+  if (http?.defaults) http.defaults.timeout = CONFIRM_TIMEOUT_MS;
   try {
     return await ORIGINAL.call(client, codes);
+  } finally {
+    if (http?.defaults && previousTimeout !== undefined) http.defaults.timeout = previousTimeout;
+  }
+}
+
+async function queryAdaptive(client, codes, depth = 0) {
+  try {
+    return await originalWithConfirmTimeout(client, codes);
   } catch (error) {
     if (isAuthError(error) || !isTransient(error)) throw error;
 
     if (codes.length <= MIN_SPLIT) {
-      // Small transient failures get one final retry instead of immediately
-      // poisoning the whole parent batch.
-      await wait(350 + depth * 150);
-      return ORIGINAL.call(client, codes);
+      // One small CE timeout must not discard all successful waybills from the
+      // parent request. Retry once, then return no rows for only this tiny child.
+      // The normal per-waybill checkpoint logic will mark those missing rows as
+      // retry-required and a later resume can query only them.
+      await wait(500 + depth * 120);
+      try {
+        return await originalWithConfirmTimeout(client, codes);
+      } catch (retryError) {
+        if (isAuthError(retryError) || !isTransient(retryError)) throw retryError;
+        console.warn(`[CE-QC][V70] confirm-query child deferred: ${codes.length} waybills; ${retryError?.message || retryError}`);
+        return [];
+      }
     }
 
-    const half = Math.max(MIN_SPLIT, Math.ceil(codes.length / 2));
-    const parts = split(codes, half);
+    const nextSize = Math.max(MIN_SPLIT, Math.ceil(codes.length / 2));
+    const parts = split(codes, nextSize);
     const rows = [];
     for (const part of parts) {
       rows.push(...await queryAdaptive(client, part, depth + 1));
-      if (parts.length > 1) await wait(80);
+      if (parts.length > 1) await wait(60);
     }
     return rows;
   }
@@ -68,7 +90,7 @@ CEClient.prototype.confirmQuery = async function v70ConfirmQuery(shipmentCodes) 
   const batches = split(codes, MAX_BATCH);
   for (let i = 0; i < batches.length; i += 1) {
     rows.push(...await queryAdaptive(this, batches[i], 0));
-    if (i < batches.length - 1) await wait(80);
+    if (i < batches.length - 1) await wait(60);
   }
   return rows;
 };
