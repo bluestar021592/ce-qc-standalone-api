@@ -1,5 +1,5 @@
 (function (global) {
-  const VERSION='2026-08-10-v44-whpp-native-shopee-layout-v4';
+  const VERSION='2026-08-12-v44-whpp-shop-metrics-v5';
   let cached=null;
   let activeDate='';
   let observer=null;
@@ -50,7 +50,7 @@
   }
 
   function zeroDashboard(){
-    return {metrics:{total:0,pod:0,podRate:0,returned:0,returnRate:0,cancelled:0,cancelRate:0,unresolved:0,pendingNonContinuous:0,pending1:0,pending2:0,pending3:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,workOrder:0,delivery:0,normalDiversion:0,ccslCnDiversion:0,ccslZtDiversion:0,ccsl580Diversion:0,phnomPenhShop:0},regions:{PP:{},PV:{}}};
+    return {metrics:{total:0,pod:0,podRate:0,returned:0,returnRate:0,cancelled:0,cancelRate:0,unresolved:0,pendingNonContinuous:0,pending1:0,pending2:0,pending3:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,workOrder:0,delivery:0,normalDiversion:0,ccslCnDiversion:0,ccslZtDiversion:0,ccsl580Retention:0,ccsl580Diversion:0,shopTotal:0,phnomPenhShop:0,provinceShop:0},regions:{PP:{},PV:{}}};
   }
 
   function topCard(label,value,unit,tone,tab,total){
@@ -64,11 +64,14 @@
   function regionBlock(code,row={}){
     const label=code==='PP'?'本省（PP）':'外省（PV）';
     const sub=code==='PP'?'金边/本省':'外省收件地址';
+    const shopLabel=code==='PP'?'金边门店':'外省门店';
+    const shopKey=code==='PP'?'phnomPenhShop':'provinceShop';
+    const shopValue=Number(row.shop??row?.[shopKey]??0);
     const items=[
       ['今日件数',row.total,'all'],['签收率',pct(row.podRate),'pod'],['签收件数',row.pod,'pod'],
       ['Pending1+',row.pending1,'pending1'],['Pending2+',row.pending2,'pending2'],['Pending3+',row.pending3,'pending3'],
       ['OC1+',row.oc1,'oc1'],['OC2+',row.oc2,'oc2'],['OC3+',row.oc3,'oc3'],
-      ['已退回件',row.returned,'returned'],['订单取消',row.cancelled,'cancelled'],['当前未闭环',row.unresolved,'unresolved'],['金边门店',row.phnomPenhShop,'phnomPenhShop']
+      ['已退回件',row.returned,'returned'],['订单取消',row.cancelled,'cancelled'],['当前未闭环',row.unresolved,'unresolved'],[shopLabel,shopValue,shopKey]
     ];
     return `<article class="panel region-card ${code.toLowerCase()}"><section class="region-block ${code.toLowerCase()}"><h4>${label}<small>${sub}</small></h4><div>${items.map(([name,value,key])=>`<button onclick="window.openWhppRegionDetailV44('${code}','${key}')"><span>${esc(name)}</span><b>${typeof value==='string'?value:fmt(value)}</b></button>`).join('')}</div></section></article>`;
   }
@@ -106,7 +109,8 @@
       ['OC1+',m.oc1,'件','oc1'],['OC2+',m.oc2,'件','oc2'],['OC3+',m.oc3,'件','oc3'],['盘点2天+',m.cycle2,'件','cycle2'],['入库无扫描',m.inboundNoScan,'件','inboundNoScan'],
       ['已退回件',m.returned,'件','returned'],['退回率',m.returnRate,'%','returned'],['订单取消',m.cancelled,'件','cancelled'],['取消率',m.cancelRate,'%','cancelled'],
       ['当前未闭环',m.unresolved,'件','unresolved'],['派送中',m.delivery,'件','delivery'],['工单',m.workOrder,'件','workOrder'],
-      ['CCSLCN分流',m.ccslCnDiversion,'件','ccslCnDiversion'],['CCSLZT分流',m.ccslZtDiversion,'件','ccslZtDiversion'],['CCSL580分流',m.ccsl580Diversion,'件','ccsl580Diversion'],['金边门店',m.phnomPenhShop,'件','phnomPenhShop']
+      ['CCSLCN分流',m.ccslCnDiversion,'件','ccslCnDiversion'],['CCSLZT分流',m.ccslZtDiversion,'件','ccslZtDiversion'],['580滞留包裹',m.ccsl580Retention??m.ccsl580Diversion,'件','ccsl580Retention'],
+      ['金边门店',m.phnomPenhShop,'件','phnomPenhShop'],['外省门店',m.provinceShop,'件','provinceShop']
     ];
     const charts=[
       chart('今日票数趋势','count',m.total,date),chart('POD率趋势','rate',m.podRate,date),chart('OC率趋势','rate',total?Number(m.oc1||0)*100/total:0,date,true),chart('退回率趋势','rate',m.returnRate,date)
@@ -159,11 +163,13 @@
     const category=String(row.primaryCategory||row.主分类||row.异常分类||'');
     const state=String(row.currentState||'').toUpperCase();
     const special=String(row.specialState||row.primaryCategory||row.主分类||'').toUpperCase();
+    const region=String(row.regionCode||row.区域||'').toUpperCase();
+    const activeShop=['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState||row.storeFlowState||''));
     const pod=row.是否POD==='是'||row.POD状态==='POD'||state==='POD';
     const returned=row.退回状态==='已退回'||['RETURNED','RETURN_COMPLETED'].includes(state)||category==='退回';
     const cancelled=row.订单取消==='是'||state==='ORDER_CANCELLED';
     const normalDiversion=['SELF_PICKUP','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','CCSL580_RETENTION','CECN_RETENTION','CEZT_RETENTION'].includes(special)||category==='正常分流节点'||row.matchedRule==='NORMAL_FINAL_HUB';
-    const actionable=!pod&&!returned&&!cancelled&&!normalDiversion;
+    const actionable=!pod&&!returned&&!cancelled&&!normalDiversion&&!activeShop;
     if(key==='all')return true;
     if(key==='pod')return pod;
     if(key==='returned')return returned;
@@ -175,7 +181,8 @@
     if(key==='oc2')return actionable&&oc>=2;
     if(key==='oc3')return actionable&&oc>=3;
     if(key==='unresolved')return actionable;
-    if(key==='phnomPenhShop')return ['SHOP_TRANSFER_IN_PROGRESS','SHOP_ARRIVED_CURRENT'].includes(String(row.shopState||''));
+    if(key==='phnomPenhShop')return activeShop&&region==='PP';
+    if(key==='provinceShop')return activeShop&&region==='PV';
     return true;
   }
 
