@@ -16,15 +16,16 @@ test('V68 WHPP classification runtime is syntax-valid and preserves last good tr
   assert.match(source, /localStorage\.getItem\(CACHE_KEY\)/);
   assert.match(source, /rawUnique\s*-\s*core/);
   assert.match(source, /classificationConflicts/);
-  assert.match(source, /Promise\.allSettled/);
 });
 
-test('V68 restores WHPP after unified import rerenders and is loaded last', () => {
+test('V68 restores WHPP after unified import rerenders without a mutation polling loop', () => {
   const source = read('public/v68-whpp-classification-stability.js');
   const injector = read('src/v44WhppUiPatch.js');
   assert.match(source, /renderUnifiedImportResult/);
-  assert.match(source, /MutationObserver/);
-  assert.match(injector, /v68-whpp-classification-stability\.js\?v=20260812-2/);
+  assert.match(source, /\/api\/import\/unified-latest\?compact=1/);
+  assert.doesNotMatch(source, /new MutationObserver/);
+  assert.doesNotMatch(source, /\/api\/v51\/whpp-state/);
+  assert.match(injector, /v68-whpp-classification-stability\.js\?v=20260812-3/);
   assert.ok(injector.indexOf('v68-whpp-classification-stability.js') > injector.indexOf('v66-import-success-whpp.js'));
   assert.ok(injector.indexOf('v68-whpp-classification-stability.js') > injector.indexOf('v64-whpp-total-kpi-integration.js'));
 });
