@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('V65 request coalescing runtime is syntax-valid and GET-only', () => {
   const file = new URL('../public/v65-request-coalescing.js', import.meta.url);
   const source = fs.readFileSync(file, 'utf8');
-  const check = spawnSync(process.execPath, ['--check', file.pathname], { encoding: 'utf8' });
+  const check = spawnSync(process.execPath, ['--check', fileURLToPath(file)], { encoding: 'utf8' });
   assert.equal(check.status, 0, check.stderr || check.stdout);
   assert.match(source, /const inflight = new Map\(\)/);
   assert.match(source, /response\.clone\(\)/);
