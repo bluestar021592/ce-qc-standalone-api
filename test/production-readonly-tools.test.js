@@ -31,12 +31,12 @@ test('production audit reads the canonical db_schema_version key', () => {
   assert.match(source, /key='db_schema_version'/);
 });
 
-test('first-day go-live gate requires source payload normalized and current-state equality', () => {
+test('first-day go-live gate requires source membership normalized and current-state equality without giant payload parsing', () => {
   const source = read('scripts/CE_QC_First_Day_GoLive_Verify_ReadOnly.mjs');
-  assert.match(source, /expected\[type\]\s*===\s*payloadCount\[type\]/);
-  assert.match(source, /expected\[type\]\s*===\s*normalizedCount\[type\]/);
-  assert.match(source, /expected\[type\]\s*===\s*currentCount\[type\]/);
-  assert.match(source, /payloadPod\[type\]\s*===\s*normalizedPod\[type\]/);
-  assert.match(source, /payloadPod\[type\]\s*===\s*currentPod\[type\]/);
+  assert.match(source, /groupedSourceCounts\(db, batch\.snapshotId\)/);
+  assert.match(source, /source\[type\]\s*===\s*normalizedCount\[type\]/);
+  assert.match(source, /source\[type\]\s*===\s*currentCount\[type\]/);
+  assert.match(source, /normalizedPod\[type\]\s*===\s*currentPod\[type\]/);
+  assert.doesNotMatch(source, /payloadJson/);
   assert.match(source, /GO_LIVE_RESULT:\s*\$\{allPass \? 'READY' : 'BLOCKED'\}/);
 });
