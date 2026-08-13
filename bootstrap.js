@@ -82,7 +82,10 @@ try {
   const v92StartedAt = Date.now();
   const v92Result = v92.repairWhppTerminalAuthorityOnce();
   console.log(`[CE-QC][BOOT] V92 WHPP terminal authority ${Date.now()-v92StartedAt}ms ${JSON.stringify({skipped:Boolean(v92Result.skipped),scanned:v92Result.scanned,repaired:v92Result.repaired,affectedDates:v92Result.affectedDates})}`);
-  await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
+  const v93 = await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
+  const v93StartedAt = Date.now();
+  const v93Result = v93.prepareShopeeResumeAudit();
+  console.log(`[CE-QC][BOOT] V93 SHOPEE resume resilience ${Date.now()-v93StartedAt}ms ${JSON.stringify(v93Result)}`);
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
