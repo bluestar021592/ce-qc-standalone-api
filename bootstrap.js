@@ -45,6 +45,32 @@ async function importPhase(label, modulePath) {
   return loaded;
 }
 
+function scheduleDeferredMaintenance({ v92, v76Repair }) {
+  const delayMs = Math.max(5_000, Number(process.env.CE_QC_BACKGROUND_MAINTENANCE_DELAY_MS || 15_000));
+  const timer = setTimeout(() => {
+    // These are historical/repair tasks, not prerequisites for serving the UI.
+    // Running them before server.js made a large SQLite database look like a dead
+    // desktop launcher. Current request-time guards and V89/V90/V94 read paths are
+    // already authoritative, so maintenance may safely happen after first paint.
+    try {
+      const startedAt = Date.now();
+      const result = v92.repairWhppTerminalAuthorityOnce();
+      console.log(`[CE-QC][BACKGROUND] V92 WHPP terminal authority ${Date.now()-startedAt}ms ${JSON.stringify({skipped:Boolean(result.skipped),scanned:result.scanned,repaired:result.repaired,affectedDates:result.affectedDates})}`);
+    } catch (error) {
+      console.error('[CE-QC][BACKGROUND] V92 maintenance failed:', error?.stack || error);
+    }
+    try {
+      const startedAt = Date.now();
+      const result = v76Repair.repairLatestCeafSplit();
+      console.log(`[CE-QC][BACKGROUND] V76 CEAF repair ${Date.now()-startedAt}ms ${JSON.stringify(result)}`);
+    } catch (error) {
+      console.error('[CE-QC][BACKGROUND] V76 maintenance failed:', error?.stack || error);
+    }
+  }, delayMs);
+  timer.unref?.();
+  console.log(`[CE-QC][BOOT] background maintenance deferred ${delayMs}ms; first paint is not blocked.`);
+}
+
 try {
   console.log(`[CE-QC][BOOT] bootstrap pid=${process.pid} node=${process.version}`);
   await importPhase('v27ServerPatch', './src/v27ServerPatch.js');
@@ -80,20 +106,17 @@ try {
   await importPhase('v90FastDashboardReadPatch', './src/v90FastDashboardReadPatch.js');
   await importPhase('v94ShopeeWhppSourceTruthPatch', './src/v94ShopeeWhppSourceTruthPatch.js');
   await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
+
+  // Load maintenance modules before server so their exported logic is available,
+  // but do not execute database repair scans on the cold-start critical path.
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
-  const v92StartedAt = Date.now();
-  const v92Result = v92.repairWhppTerminalAuthorityOnce();
-  console.log(`[CE-QC][BOOT] V92 WHPP terminal authority ${Date.now()-v92StartedAt}ms ${JSON.stringify({skipped:Boolean(v92Result.skipped),scanned:v92Result.scanned,repaired:v92Result.repaired,affectedDates:v92Result.affectedDates})}`);
-  const v93 = await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
-  const v93StartedAt = Date.now();
-  const v93Result = v93.prepareShopeeResumeAudit();
-  console.log(`[CE-QC][BOOT] V93 SHOPEE resume resilience ${Date.now()-v93StartedAt}ms ${JSON.stringify(v93Result)}`);
+  await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
-  const v76Result = v76Repair.repairLatestCeafSplit();
-  console.log(`[CE-QC][BOOT] V76 CEAF repair ${JSON.stringify(v76Result)}`);
+
   await importPhase('server', './server.js');
+  scheduleDeferredMaintenance({ v92, v76Repair });
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
   process.exitCode = 1;
