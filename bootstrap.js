@@ -78,6 +78,7 @@ try {
   await importPhase('v86StrictTrackStatusGate', './src/v86StrictTrackStatusGate.js');
   await importPhase('v89InstantDashboardPatch', './src/v89InstantDashboardPatch.js');
   await importPhase('v90FastDashboardReadPatch', './src/v90FastDashboardReadPatch.js');
+  await importPhase('v94ShopeeWhppSourceTruthPatch', './src/v94ShopeeWhppSourceTruthPatch.js');
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   const v92StartedAt = Date.now();
   const v92Result = v92.repairWhppTerminalAuthorityOnce();
