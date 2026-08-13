@@ -42,7 +42,12 @@ test('V46 cold-start index patch never opens SQLite during bootstrap', () => {
   assert.match(source, /sqlite_master/);
   assert.match(source, /optional index inspection deferred/);
   assert.match(source, /export function inspectV46Indexes/);
-  assert.doesNotMatch(source, /const db = getDb\(\)/);
+  assert.match(source, /export function inspectV46Indexes\(\)\s*\{[\s\S]*?const db = getDb\(\)/);
+  const inspectStart = source.indexOf('export function inspectV46Indexes');
+  const startupLog = source.indexOf("console.log('[CE-QC][V46]");
+  assert.ok(inspectStart >= 0 && startupLog > inspectStart, 'V46 deferred inspector boundaries must be present');
+  const bootstrapPath = `${source.slice(0, inspectStart)}\n${source.slice(startupLog)}`;
+  assert.doesNotMatch(bootstrapPath, /\bgetDb\s*\(\s*\)/, 'normal V46 module startup must remain SQLite-lazy');
   assert.doesNotMatch(source, /CREATE\s+INDEX/i);
   assert.doesNotMatch(source, /VACUUM/i);
 });
