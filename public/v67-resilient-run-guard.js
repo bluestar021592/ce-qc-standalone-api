@@ -1,7 +1,7 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-12-v67-seven-business-runner-v4';
+  const VERSION = '2026-08-13-v67-seven-business-runner-v5';
   let busy = false;
 
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
@@ -34,8 +34,32 @@
   function completed(payload) {
     const state = stateOf(payload);
     const status = String(payload?.snapshotStatus || state?.snapshotStatus || (payload?.completed ? 'COMPLETED' : '')).toUpperCase();
+    const runStatus = String(
+      state?.currentRun?.status
+      || state?.lastRunSummary?.runStatus
+      || state?.lastRun?.runStatus
+      || payload?.runStatus
+      || ''
+    ).toUpperCase();
     const phase = String(state?.processing?.phase || '').trim();
-    return status === 'COMPLETED' || /^(完成|处理完成)$/.test(phase);
+    return status === 'COMPLETED'
+      || ['FINISHED', 'COMPLETED'].includes(runStatus)
+      || /^(完成|处理完成)$/.test(phase);
+  }
+
+  function canResume(payload) {
+    const state = stateOf(payload);
+    const runStatus = String(
+      state?.currentRun?.status
+      || state?.lastRunSummary?.runStatus
+      || state?.lastRun?.runStatus
+      || ''
+    ).toLowerCase();
+    return Boolean(
+      state?.processing?.running
+      || state?.processing?.paused
+      || ['running', 'paused', 'failed'].includes(runStatus)
+    );
   }
 
   function hasReport(payload, type) {
@@ -139,7 +163,8 @@
           results.push({ label: stage.label, ok: true, skipped: true });
           continue;
         }
-        results.push(await runStage(stage, mode === 'resume'));
+        const preferResume = mode === 'resume' && canResume(state);
+        results.push(await runStage(stage, preferResume));
       }
 
       const failed = results.filter(item => item.ok === false);
