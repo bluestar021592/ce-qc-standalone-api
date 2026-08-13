@@ -12,8 +12,8 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-12-v64-unified-ruleset-version-v2';
-const IMPORT_RULESET_VERSION = '2026-08-12-v64-final-business-ownership';
+const PATCH_ID = '2026-08-13-v77-fresh-import-authority-v3';
+const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -21,6 +21,28 @@ const APP_PATHS = new Set(['/', '/home', '/ce', '/ceaf', '/tbkh', '/ali1688', '/
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE = path.resolve(__dirname, '..', 'public', 'index.html');
 let whppRunPromise = null;
+
+function invalidateMutableSameDatePointers(reportDate) {
+  const date = String(reportDate || '').slice(0, 10);
+  if (!date) return;
+  const db = getDb();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    // A newly imported same-date source is the current truth. Mutable summary and
+    // run pointers from an older source must not shadow it; immutable export
+    // snapshots are intentionally retained for audit/history.
+    db.prepare('DELETE FROM run_locks WHERE reportDate=?').run(date);
+    db.prepare('DELETE FROM run_checkpoints WHERE reportDate=?').run(date);
+    db.prepare('DELETE FROM history_summary WHERE reportDate=?').run(date);
+    db.prepare("DELETE FROM business_run_locks WHERE reportDate=? AND businessType IN ('SHOPEE','WHPP')").run(date);
+    db.prepare("DELETE FROM business_run_checkpoints WHERE reportDate=? AND businessType IN ('SHOPEE','WHPP')").run(date);
+    db.prepare("DELETE FROM business_history_summary WHERE reportDate=? AND businessType IN ('SHOPEE','WHPP')").run(date);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+}
 
 async function handleUnifiedImportV42(req, res) {
   try {
@@ -48,6 +70,7 @@ async function handleUnifiedImportV42(req, res) {
       batchId: saved.batchId,
       snapshotId: saved.snapshotId
     });
+    invalidateMutableSameDatePointers(parsed.reportDate);
 
     res.json({
       ok: true,
