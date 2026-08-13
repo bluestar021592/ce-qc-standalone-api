@@ -23,9 +23,6 @@ function Start-CeQcBackendIfNeeded {
   return $false
 }
 
-# All source-only regression gates run while the current backend stays online.
-# A stale/brittle assertion must never take the live system offline before the
-# candidate build has passed every code-level deployment gate.
 Write-Host '[CE-QC] Running V94 focused deployment gate while current backend stays online...' -ForegroundColor Cyan
 & node --test `
   'test/v94-shopee-whpp-source-truth.test.js' `
@@ -37,7 +34,9 @@ Write-Host '[CE-QC] Running V94 focused deployment gate while current backend st
   'test/v75-ceaf-upload-normalizer.test.js' `
   'test/v76-current-ceaf-split-repair.test.js' `
   'test/v89-fast-dashboard-source-truth.test.js' `
-  'test/v90-instant-whpp-navigation.test.js'
+  'test/v90-instant-whpp-navigation.test.js' `
+  'test/v95-first-paint-before-maintenance.test.js' `
+  'test/v95-v94-safe-deployment.test.js'
 if ($LASTEXITCODE -ne 0) { throw "V94 focused deployment tests failed (exit=$LASTEXITCODE). Current backend was left running; no deployment was attempted." }
 Write-Host '[CE-QC] V94 focused deployment gate passed.' -ForegroundColor Green
 
