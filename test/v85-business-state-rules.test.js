@@ -10,8 +10,10 @@ import { analyzeWhppShipment } from '../src/whppAnalyzer.js';
 const whppPipeline = fs.readFileSync(new URL('../src/whppPipeline.js', import.meta.url), 'utf8');
 const uiUrl = new URL('../public/v85-business-rule-ui.js', import.meta.url);
 const metricUrl = new URL('../src/v85ShopeeWhppMetricPatch.js', import.meta.url);
+const rangeUrl = new URL('../src/rangeDashboardStoreV58.js', import.meta.url);
 const ui = fs.readFileSync(uiUrl, 'utf8');
 const metric = fs.readFileSync(metricUrl, 'utf8');
+const rangeSource = fs.readFileSync(rangeUrl, 'utf8');
 const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
 const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
 
@@ -20,7 +22,7 @@ function event(code, time, text, extra = {}) {
 }
 
 test('V85 runtime files are syntax valid', () => {
-  for (const url of [uiUrl, metricUrl]) {
+  for (const url of [uiUrl, metricUrl, rangeUrl]) {
     const check = spawnSync(process.execPath, ['--check', fileURLToPath(url)], { encoding: 'utf8' });
     assert.equal(check.status, 0, check.stderr || check.stdout);
   }
@@ -125,6 +127,15 @@ test('Shopee WHPP metric uses normalized SQLite and stays independent from PP/PV
   assert.match(metric, /pageSize = Math\.max\(1, Math\.min\(1000/);
   assert.doesNotMatch(metric, /DELETE FROM|UPDATE business_|INSERT INTO|DROP TABLE/i);
   assert.match(bootstrap, /v85ShopeeWhppMetricPatch/);
+});
+
+test('historical/range dashboard removes WHPP responsibility from ordinary Shopee anomaly buckets without closing it', () => {
+  assert.match(rangeSource, /isShopeeWhppRetention/);
+  assert.match(rangeSource, /setTab\(tabs,'whppRetention','WHPP滞留包裹',whpp\)/);
+  assert.match(rangeSource, /ordinaryTabs=\['pending1','pending2','pending3','pendingNonContinuous','oc1','oc2','oc3','cycle2','inboundNoScan','deliveryStay','returnRequired','provinceOpen'/);
+  assert.match(rangeSource, /summary\.whppRetention=whpp\.length/);
+  assert.match(rangeSource, /if\(isNormalRegistryDestination\(row\)\|\|isShopeeWhppRetention\(row\)\)return false/);
+  assert.match(rangeSource, /Keep current-unresolved accounting unchanged/);
 });
 
 test('business UI hides impossible special nodes and shows one combined range-safe Shopee WHPP metric', () => {
