@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-13-v85-shopee-whpp-sql-metric-v1';
+const PATCH_ID = '2026-08-13-v85-shopee-whpp-sql-metric-v2';
 const ROUTE = '/api/v85/shopee-whpp-retention';
 const TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 const originalListen = express.application.listen;
@@ -25,6 +25,11 @@ function whereSql(includePagination = false) {
       AND f.reportDate BETWEEN ? AND ?
       AND COALESCE(f.isPod,0)=0
       AND UPPER(COALESCE(f.primaryCategory,'')) NOT IN ('POD','POD闭环','退回','RETURN','RETURNED','RETURN_COMPLETED')
+      AND COALESCE(f.rawJson,'') NOT LIKE '%"退回状态":"已退回"%'
+      AND COALESCE(f.rawJson,'') NOT LIKE '%"currentState":"RETURN_COMPLETED"%'
+      AND COALESCE(f.rawJson,'') NOT LIKE '%"currentState":"RETURNED"%'
+      AND COALESCE(f.rawJson,'') NOT LIKE '%"orderStatus":"100"%'
+      AND COALESCE(f.rawJson,'') NOT LIKE '%"orderStatus":100%'
       AND (
         UPPER(REPLACE(REPLACE(REPLACE(COALESCE(f.latestNode,''),' ',''),'CEL:',''),'CE:',''))='WHPP'
         OR UPPER(COALESCE(f.latestEventDesc,'')) LIKE '%CE:WHPP%'
