@@ -46,12 +46,16 @@ async function importPhase(label, modulePath) {
 }
 
 function scheduleDeferredMaintenance({ v92, v76Repair }) {
-  const delayMs = Math.max(5_000, Number(process.env.CE_QC_BACKGROUND_MAINTENANCE_DELAY_MS || 15_000));
+  // Historical repair scans are maintenance, not a condition for serving pages.
+  // On a large local SQLite database they can otherwise make the UI freeze again
+  // shortly after first paint. Normal startup therefore stays read/serve-first;
+  // one-shot repair/deployment tools remain the authoritative maintenance path.
+  if (String(process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED || '').trim() !== '1') {
+    console.log('[CE-QC][BOOT] background maintenance disabled on normal startup; first paint is not blocked.');
+    return;
+  }
+  const delayMs = Math.max(5_000, Number(process.env.CE_QC_BACKGROUND_MAINTENANCE_DELAY_MS || 300_000));
   const timer = setTimeout(() => {
-    // These are historical/repair tasks, not prerequisites for serving the UI.
-    // Running them before server.js made a large SQLite database look like a dead
-    // desktop launcher. Current request-time guards and V89/V90/V94 read paths are
-    // already authoritative, so maintenance may safely happen after first paint.
     try {
       const startedAt = Date.now();
       const result = v92.repairWhppTerminalAuthorityOnce();
@@ -68,7 +72,7 @@ function scheduleDeferredMaintenance({ v92, v76Repair }) {
     }
   }, delayMs);
   timer.unref?.();
-  console.log(`[CE-QC][BOOT] background maintenance deferred ${delayMs}ms; first paint is not blocked.`);
+  console.log(`[CE-QC][BOOT] background maintenance explicitly enabled and deferred ${delayMs}ms; first paint is not blocked.`);
 }
 
 try {
@@ -107,8 +111,6 @@ try {
   await importPhase('v94ShopeeWhppSourceTruthPatch', './src/v94ShopeeWhppSourceTruthPatch.js');
   await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
 
-  // Load maintenance modules before server so their exported logic is available,
-  // but do not execute database repair scans on the cold-start critical path.
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
