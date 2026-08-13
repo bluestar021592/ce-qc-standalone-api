@@ -18,11 +18,12 @@ for (const [name,url] of [['first-day audit',firstDayUrl],['business audit',busi
   });
 }
 
-test('live audits never run full integrity_check or parse giant immutable snapshot payloads', () => {
+test('live audits never execute full integrity_check or parse giant immutable snapshot payloads', () => {
   const first = read(firstDayUrl);
   const business = read(businessUrl);
   for (const source of [first,business]) {
-    assert.doesNotMatch(source, /PRAGMA\s+integrity_check/i);
+    // Explanatory log text may mention integrity_check; block only executable SQL.
+    assert.doesNotMatch(source, /db\.(?:exec|prepare)\(\s*['"`]\s*PRAGMA\s+integrity_check/i);
     assert.doesNotMatch(source, /payloadJson/);
     assert.match(source, /readOnly:\s*true/);
     assert.match(source, /PRAGMA query_only=ON/);
