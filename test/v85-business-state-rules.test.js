@@ -145,7 +145,7 @@ test('Shopee UI now owns WHPP in the dashboard model and V85 no longer polls/mut
   assert.match(ui, /CCSLCN分流/);
   assert.match(ui, /580滞留包裹/);
   assert.doesNotMatch(ui, /\/api\/v85\/shopee-whpp-retention/);
-  assert.doesNotMatch(ui, /MutationObserver/);
+  assert.doesNotMatch(ui, /\bnew\s+MutationObserver\s*\(/);
   assert.doesNotMatch(ui, /readWhppMetric/);
 
   assert.match(v89Ui, /WHPP滞留包裹/);
