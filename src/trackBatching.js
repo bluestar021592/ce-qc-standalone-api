@@ -1,6 +1,7 @@
 export const TRACK_QUERY_BATCH_SIZE = 50;
 const DEFAULT_TRANSIENT_RETRIES = Math.max(1, Math.min(5, Number(process.env.CE_TRANSIENT_RETRIES || 3)));
 const DEFAULT_TRANSIENT_DELAY_MS = Math.max(200, Math.min(5000, Number(process.env.CE_TRANSIENT_RETRY_DELAY_MS || 800)));
+const TRACK_FALLBACK_SIZES = Object.freeze([25, 10, 5, 1]);
 
 export function splitTrackBatches(shipmentCodes = [], batchSize = TRACK_QUERY_BATCH_SIZE) {
   const size = Math.max(1, Math.min(TRACK_QUERY_BATCH_SIZE, Number(batchSize || TRACK_QUERY_BATCH_SIZE)));
@@ -59,6 +60,14 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
 }
 
+function effectiveFallbackSizes(apiName = '', fallbackSizes = []) {
+  if (Array.isArray(fallbackSizes) && fallbackSizes.length) return fallbackSizes;
+  // The SHOPEE pipeline historically passed [] here, which disabled adaptive
+  // recovery for exactly the event/exception calls most likely to suffer a remote
+  // TLS reset. Read-only track/exception APIs are safe to split after retries.
+  return /track|shipment-event|exception-item/i.test(String(apiName || '')) ? [...TRACK_FALLBACK_SIZES] : [];
+}
+
 async function withTransientRetry(query, batch, onLog, retries = DEFAULT_TRANSIENT_RETRIES, delayMs = DEFAULT_TRANSIENT_DELAY_MS, apiName = 'CE接口') {
   let attempt = 0;
   while (true) {
@@ -86,6 +95,7 @@ export async function queryBatchWithFallback({
   transientDelayMs = DEFAULT_TRANSIENT_DELAY_MS
 }) {
   const original = [...batch];
+  const fallback = effectiveFallbackSizes(apiName, fallbackSizes);
   try {
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'running' }, onLog);
     // CE's read-only query endpoints can occasionally reset the TLS socket before
@@ -102,7 +112,7 @@ export async function queryBatchWithFallback({
     // stop immediately, preserve checkpoints, and let the run pause for login.
     if (error?.runStatus || isAuthenticationFailure(error)) throw error;
     await onLog(`${apiName}批次失败：原批次${original.length}票，原因：${error?.message || error}`);
-    const fallbackSize = (fallbackSizes || []).find(size => size < original.length);
+    const fallbackSize = fallback.find(size => size < original.length);
     if (!fallbackSize) return { successes: [], failures: [{ batch: original, error }] };
 
     await onLog(`仅对失败批次自适应降级：${original.length}→${fallbackSize}`);
@@ -115,7 +125,7 @@ export async function queryBatchWithFallback({
         onLog,
         onAttempt,
         apiName,
-        fallbackSizes: (fallbackSizes || []).filter(size => size < fallbackSize),
+        fallbackSizes: fallback.filter(size => size < fallbackSize),
         transientRetries,
         transientDelayMs
       });
@@ -142,6 +152,6 @@ export async function queryTrackBatchWithFallback(options = {}) {
     transientDelayMs: Number.isFinite(Number(options.transientDelayMs)) ? Number(options.transientDelayMs) : DEFAULT_TRANSIENT_DELAY_MS,
     fallbackSizes: Array.isArray(options.fallbackSizes) && options.fallbackSizes.length
       ? options.fallbackSizes
-      : [25, 10, 5, 1]
+      : [...TRACK_FALLBACK_SIZES]
   });
 }
