@@ -1,8 +1,15 @@
 import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-13-v76-current-ceaf-split-repair-v2';
+const PATCH_ID = '2026-08-13-v76-current-ceaf-split-repair-v3';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
-const ACTIVE_RUN_STATES = new Set(['running', 'paused']);
+const WHPP_EVIDENCE_TABLES = Object.freeze([
+  'business_scan_results',
+  'business_shipment_tracks',
+  'business_track_events',
+  'business_exception_items',
+  'business_final_rows',
+  'business_carry_bills'
+]);
 
 function safeJson(value, fallback = {}) {
   try {
@@ -56,28 +63,6 @@ function scalar(db, sql, ...params) {
   catch { return 0; }
 }
 
-function activeRunBlocksRepair(db, reportDate) {
-  const coreRun = tableExists(db, 'run_locks')
-    ? db.prepare('SELECT status FROM run_locks WHERE reportDate=? LIMIT 1').get(reportDate)
-    : null;
-  const whppRun = tableExists(db, 'business_run_locks')
-    ? db.prepare("SELECT status FROM business_run_locks WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)
-    : null;
-  return ACTIVE_RUN_STATES.has(String(coreRun?.status || '').toLowerCase())
-    || ACTIVE_RUN_STATES.has(String(whppRun?.status || '').toLowerCase());
-}
-
-function processedEvidenceBlocksRepair(db, reportDate, bills) {
-  if (!bills.length) return false;
-  const marks = bills.map(() => '?').join(',');
-  const params = [reportDate, ...bills];
-  for (const table of ['business_scan_results', 'business_final_rows', 'business_track_events', 'business_exception_items']) {
-    if (!tableExists(db, table)) continue;
-    if (scalar(db, `SELECT COUNT(*) count FROM ${table} WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (${marks})`, ...params) > 0) return true;
-  }
-  return false;
-}
-
 function currentWhppCompletion(db, reportDate, batch) {
   if (!tableExists(db, 'business_export_snapshots')) return { current: false, row: null };
   const rows = db.prepare("SELECT snapshotId,payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC,id DESC").all(reportDate);
@@ -98,9 +83,12 @@ function patchWhppState(state, reportDate, airBills) {
   const air = new Set(airBills);
   const filterBills = values => (values || []).filter(value => !air.has(String(value || '').trim().toUpperCase()));
   const filterRows = values => (values || []).filter(row => !air.has(billOf(row)));
-  const next = {
+  const pnhBills = filterBills(state.pnhBills);
+  return {
     ...state,
-    pnhBills: filterBills(state.pnhBills),
+    snapshotId: '',
+    snapshotStatus: 'IMPORTED',
+    pnhBills,
     dailyParseRows: filterRows(state.dailyParseRows),
     scanResults: filterRows(state.scanResults),
     needTrackBills: filterBills(state.needTrackBills),
@@ -108,30 +96,38 @@ function patchWhppState(state, reportDate, airBills) {
     trackEvents: filterRows(state.trackEvents),
     finalRows: filterRows(state.finalRows),
     exceptionItems: filterRows(state.exceptionItems),
-    scanPool: filterBills(state.scanPool)
+    scanPool: filterBills(state.scanPool),
+    processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
+    lastRunSummary: null,
+    lastRun: null,
+    currentRun: null,
+    dailyParseSummary: {
+      ...(state.dailyParseSummary || {}),
+      totalRecognized: pnhBills.length,
+      pnh: pnhBills.length
+    }
   };
-  next.dailyParseSummary = {
-    ...(state.dailyParseSummary || {}),
-    totalRecognized: next.pnhBills.length,
-    pnh: next.pnhBills.length
-  };
-  return next;
 }
 
-function patchCcslState(state, reportDate, rows) {
+function patchCcslState(state, reportDate, rows, podBills = []) {
   if (!state || state.reportDate !== reportDate) return state;
   const byBill = new Map((state.dailyParseRows || []).map(row => [billOf(row), row]));
   for (const row of rows) byBill.set(billOf(row), { ...row, result: 'PNH', reason: row.classificationReason });
   const pnhBills = [...new Set([...(state.pnhBills || []).map(value => String(value || '').trim().toUpperCase()), ...rows.map(billOf)].filter(Boolean))];
-  const next = { ...state, pnhBills, dailyParseRows: [...byBill.values()] };
-  next.dailyParseSummary = {
-    ...(state.dailyParseSummary || {}),
-    totalRecognized: pnhBills.length,
-    pnh: pnhBills.length,
-    nonPnh: Number(state.dailyParseSummary?.nonPnh || 0),
-    excluded: Number(state.dailyParseSummary?.excluded || 0)
+  const podLocks = [...new Set([...(state.podLocks || []).map(value => String(value || '').trim().toUpperCase()), ...podBills].filter(Boolean))];
+  return {
+    ...state,
+    pnhBills,
+    podLocks,
+    dailyParseRows: [...byBill.values()],
+    dailyParseSummary: {
+      ...(state.dailyParseSummary || {}),
+      totalRecognized: pnhBills.length,
+      pnh: pnhBills.length,
+      nonPnh: Number(state.dailyParseSummary?.nonPnh || 0),
+      excluded: Number(state.dailyParseSummary?.excluded || 0)
+    }
   };
-  return next;
 }
 
 function updateUnifiedPayload(db, batch, addedRows, createdAt) {
@@ -164,6 +160,58 @@ function updateUnifiedPayload(db, batch, addedRows, createdAt) {
   return { counts, coreTotal };
 }
 
+function archiveDiagnostic(db, batch, reportDate, shipmentCode, tableName, row, createdAt) {
+  if (!tableExists(db, 'reconciliation_diagnostics')) return;
+  db.prepare(`INSERT INTO reconciliation_diagnostics(
+      businessType,reportDate,snapshotId,shipmentCode,conflictMetrics,latestEvent,reason,payloadJson,createdAt
+    ) VALUES(?,?,?,?,?,?,?,?,?)`)
+    .run(
+      'WHPP', reportDate, batch.snapshotId, shipmentCode,
+      JSON.stringify({ sourceTable: tableName, reclassifiedTo: 'CEAF', patchId: PATCH_ID }),
+      String(row?.latestEventTime || row?.eventTime || row?.latestEventDesc || ''),
+      '原WHPP记录含CCAF/CEAF源标识，已归档并重置为CEAF重新处理',
+      JSON.stringify(row || {}), createdAt
+    );
+}
+
+function archiveAndRemoveWrongWhppEvidence(db, batch, reportDate, bills, createdAt) {
+  if (!bills.length) return { archived: 0, podBills: [] };
+  const marks = bills.map(() => '?').join(',');
+  const params = [reportDate, ...bills];
+  let archived = 0;
+
+  for (const table of WHPP_EVIDENCE_TABLES) {
+    if (!tableExists(db, table)) continue;
+    const rows = db.prepare(`SELECT * FROM ${table} WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (${marks})`).all(...params);
+    for (const row of rows) {
+      archiveDiagnostic(db, batch, reportDate, String(row.shipmentCode || '').toUpperCase(), table, row, createdAt);
+      archived += 1;
+    }
+    db.prepare(`DELETE FROM ${table} WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (${marks})`).run(...params);
+  }
+
+  const podBills = [];
+  if (tableExists(db, 'business_pod_locks')) {
+    const lockParams = [...bills];
+    const locks = db.prepare(`SELECT * FROM business_pod_locks WHERE businessType='WHPP' AND shipmentCode IN (${marks})`).all(...lockParams);
+    for (const lock of locks) {
+      const bill = String(lock.shipmentCode || '').toUpperCase();
+      podBills.push(bill);
+      archiveDiagnostic(db, batch, reportDate, bill, 'business_pod_locks', lock, createdAt);
+      archived += 1;
+      if (tableExists(db, 'pod_locks')) {
+        db.prepare(`INSERT INTO pod_locks(shipmentCode,source,podTime,evidenceType,evidenceText,lastSeenReportDate,createdAt,updatedAt)
+          VALUES(?,?,?,?,?,?,?,?)
+          ON CONFLICT(shipmentCode) DO UPDATE SET source=excluded.source,podTime=CASE WHEN excluded.podTime<>'' THEN excluded.podTime ELSE pod_locks.podTime END,lastSeenReportDate=excluded.lastSeenReportDate,updatedAt=excluded.updatedAt`)
+          .run(bill, 'V76_CEAF_REPAIR', String(lock.podTime || ''), 'WHPP_RECLASSIFIED', 'CCAF/CEAF源标识从WHPP纠正到CEAF', reportDate, lock.createdAt || createdAt, createdAt);
+      }
+    }
+    db.prepare(`DELETE FROM business_pod_locks WHERE businessType='WHPP' AND shipmentCode IN (${marks})`).run(...lockParams);
+  }
+
+  return { archived, podBills: [...new Set(podBills)] };
+}
+
 export function repairLatestCeafSplit(database = null) {
   const db = database || getDb();
   if (!tableExists(db, 'unified_import_batches') || !tableExists(db, 'business_daily_parse_rows')) {
@@ -177,11 +225,8 @@ export function repairLatestCeafSplit(database = null) {
     ? db.prepare('SELECT status FROM unified_snapshots WHERE snapshotId=? LIMIT 1').get(batch.snapshotId)
     : null;
   if (String(snapshot?.status || '').toUpperCase() === 'COMPLETED') return { repaired: false, reason: 'IMMUTABLE_COMPLETED_SNAPSHOT', reportDate };
-  if (activeRunBlocksRepair(db, reportDate)) return { repaired: false, reason: 'RUN_CURRENTLY_ACTIVE', reportDate };
 
   const whppCompletion = currentWhppCompletion(db, reportDate, batch);
-  if (whppCompletion.current) return { repaired: false, reason: 'CURRENT_WHPP_SNAPSHOT_ALREADY_COMPLETED', reportDate };
-
   const whppRows = db.prepare("SELECT * FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY rowNumber,id").all(reportDate);
   const candidates = whppRows
     .map(record => ({ record, row: safeJson(record.rowJson, {}) }))
@@ -194,11 +239,11 @@ export function repairLatestCeafSplit(database = null) {
   const toMove = candidates.filter(item => !existing.has(item.bill));
   if (!toMove.length) return { repaired: false, reason: 'ALREADY_REPAIRED', reportDate, ceaf: existing.size };
   const airBills = toMove.map(item => item.bill);
-  if (processedEvidenceBlocksRepair(db, reportDate, airBills)) return { repaired: false, reason: 'WHPP_AIR_ROWS_ALREADY_PROCESSED', reportDate, detected: airBills.length };
 
   const createdAt = nowIso();
   db.exec('BEGIN IMMEDIATE');
   try {
+    const evidence = archiveAndRemoveWrongWhppEvidence(db, batch, reportDate, airBills, createdAt);
     const insertUnified = db.prepare(`INSERT OR IGNORE INTO unified_import_rows(
       batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,
       classificationReason,rowJson,createdAt,classificationSource,classificationMatchedValue,classificationWarning
@@ -238,11 +283,10 @@ export function repairLatestCeafSplit(database = null) {
         .run(remainingWhpp, JSON.stringify(reportSummary), createdAt, reportDate);
     }
 
-    // A same-date re-import can leave an older WHPP history row behind. V71 gives
-    // that history row priority over the fresh daily report, which is why the WHPP
-    // board could show 196 while the import page still showed 276. If no completed
-    // WHPP snapshot belongs to the current source snapshot, remove only that stale
-    // summary pointer; old immutable export snapshots themselves are retained.
+    // A same-date upload may leave an older or even already-completed WHPP summary
+    // pointing at the wrong 276-member source set. Preserve every export snapshot as
+    // immutable evidence, but clear the single current summary pointer so the fresh
+    // corrected daily membership becomes authoritative immediately.
     if (tableExists(db, 'business_history_summary')) {
       db.prepare("DELETE FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?").run(reportDate);
     }
@@ -259,7 +303,7 @@ export function repairLatestCeafSplit(database = null) {
     if (tableExists(db, 'app_state')) {
       const app = db.prepare("SELECT valueJson FROM app_state WHERE key='current' LIMIT 1").get();
       if (app?.valueJson) {
-        const state = patchCcslState(safeJson(app.valueJson, {}), reportDate, movedRows);
+        const state = patchCcslState(safeJson(app.valueJson, {}), reportDate, movedRows, evidence.podBills);
         db.prepare("UPDATE app_state SET valueJson=?,updatedAt=? WHERE key='current'").run(JSON.stringify(state), createdAt);
 
         if (state.reportDate === reportDate && tableExists(db, 'daily_reports')) {
@@ -277,21 +321,18 @@ export function repairLatestCeafSplit(database = null) {
       }
     }
 
-    // V42 clears current state on a new unified import but historically did not
-    // clear an old finished run lock for the same report date. Once the source
-    // membership is repaired, discard only that stale finished lock/checkpoints
-    // so the corrected 80 CEAF parcels are eligible for the next normal run.
-    if (tableExists(db, 'run_locks')) {
-      const coreRun = db.prepare('SELECT status FROM run_locks WHERE reportDate=? LIMIT 1').get(reportDate);
-      if (String(coreRun?.status || '').toLowerCase() === 'finished') {
-        db.prepare('DELETE FROM run_locks WHERE reportDate=?').run(reportDate);
-        if (tableExists(db, 'run_checkpoints')) db.prepare('DELETE FROM run_checkpoints WHERE reportDate=?').run(reportDate);
-      }
-    }
+    // A bootstrap has no in-memory pipeline left running. Any persisted lock for the
+    // just-repaired source set is therefore stale relative to the corrected membership.
+    // Reset locks/checkpoints only for this report date; shipment evidence is retained
+    // outside the 80 wrong-business rows and those 80 rows were archived above.
+    if (tableExists(db, 'run_locks')) db.prepare('DELETE FROM run_locks WHERE reportDate=?').run(reportDate);
+    if (tableExists(db, 'run_checkpoints')) db.prepare('DELETE FROM run_checkpoints WHERE reportDate=?').run(reportDate);
+    if (tableExists(db, 'business_run_locks')) db.prepare("DELETE FROM business_run_locks WHERE businessType='WHPP' AND reportDate=?").run(reportDate);
+    if (tableExists(db, 'business_run_checkpoints')) db.prepare("DELETE FROM business_run_checkpoints WHERE businessType='WHPP' AND reportDate=?").run(reportDate);
 
     const unified = updateUnifiedPayload(db, batch, movedRows, createdAt);
     db.exec('COMMIT');
-    console.warn(`[CE-QC][V76_CEAF_REPAIR] reportDate=${reportDate} moved=${toMove.length} CEAF=${unified.counts.CEAF || 0} WHPP=${remainingWhpp}`);
+    console.warn(`[CE-QC][V76_CEAF_REPAIR] reportDate=${reportDate} moved=${toMove.length} CEAF=${unified.counts.CEAF || 0} WHPP=${remainingWhpp} archived=${evidence.archived}`);
     return {
       repaired: true,
       patchId: PATCH_ID,
@@ -299,7 +340,9 @@ export function repairLatestCeafSplit(database = null) {
       moved: toMove.length,
       ceaf: Number(unified.counts.CEAF || 0),
       whpp: remainingWhpp,
-      coreTotal: unified.coreTotal
+      coreTotal: unified.coreTotal,
+      archivedEvidence: evidence.archived,
+      preservedPreviousWhppSnapshot: Boolean(whppCompletion.current)
     };
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
@@ -308,4 +351,4 @@ export function repairLatestCeafSplit(database = null) {
 }
 
 export const V76_CURRENT_CEAF_SPLIT_REPAIR_ID = PATCH_ID;
-export const __test = { hasExactAirSourceMarker, ceafRow, patchWhppState, patchCcslState, currentWhppCompletion };
+export const __test = { hasExactAirSourceMarker, ceafRow, patchWhppState, patchCcslState, currentWhppCompletion, archiveAndRemoveWrongWhppEvidence };
