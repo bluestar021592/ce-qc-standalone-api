@@ -14,7 +14,7 @@ const files = {
 };
 const read = key => fs.readFileSync(files[key], 'utf8');
 
-test('V84 export runtime is syntax valid', () => {
+test('V84/V87 export runtime is syntax valid', () => {
   for (const key of ['patch', 'job', 'business', 'ui']) {
     const check = spawnSync(process.execPath, ['--check', fileURLToPath(files[key])], { encoding: 'utf8' });
     assert.equal(check.status, 0, `${key}: ${check.stderr || check.stdout}`);
@@ -33,9 +33,9 @@ test('period export prepare is replaced by a detached job and never blocks on Ex
   assert.doesNotMatch(source, /DELETE FROM|DROP TABLE|reimport/i);
 });
 
-test('large all-business export is split and isolated by business/date part', () => {
+test('large seven-business export is split and isolated by business/date part', () => {
   const source = read('job');
-  assert.match(source, /ALL_TYPES = Object\.freeze\(\['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'\]\)/);
+  assert.match(source, /ALL_TYPES = Object\.freeze\(\['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP'\]\)/);
   assert.match(source, /LARGE_BUSINESS_THRESHOLD/);
   assert.match(source, /splitRange\(range\)/);
   assert.match(source, /spawnSync\(process\.execPath/);
@@ -47,21 +47,24 @@ test('large all-business export is split and isolated by business/date part', ()
   assert.doesNotMatch(source, /DELETE FROM|DROP TABLE|UPDATE unified_import/i);
 });
 
-test('each business part keeps the existing template exporter and normalized SQLite reader', () => {
+test('each business part keeps template export and has normalized unified/WHPP SQLite readers', () => {
   const source = read('business');
   assert.match(source, /listLightweightCompletedUnifiedSnapshots/);
+  assert.match(source, /listCompletedWhppSnapshots/);
   assert.match(source, /createShopeeTemplateWorkbook/);
-  assert.match(source, /\['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'\]/);
+  assert.match(source, /\['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP'\]/);
   assert.doesNotMatch(source, /unified_snapshots\.payloadJson/);
 });
 
-test('browser polls background progress instead of waiting on one long request', () => {
+test('browser polls background progress and exposes seven business choices', () => {
   const source = read('ui');
   assert.match(source, /\/api\/export-period\/prepare/);
   assert.match(source, /\/api\/v84\/export-job\//);
   assert.match(source, /await sleep\(1200\)/);
   assert.match(source, /后台导出仍在运行/);
+  assert.match(source, /管理汇总 \+ 7业务/);
+  assert.match(source, /\['WHPP', '仅WHPP本土'\]/);
   assert.match(source, /global\.exportPeriodReport = exportPeriodReportV84/);
   assert.match(read('bootstrap'), /v84AsyncExportPatch/);
-  assert.match(read('injector'), /v84-async-export-ui\.js\?v=20260813-1/);
+  assert.match(read('injector'), /v84-async-export-ui\.js\?v=20260813-2/);
 });
