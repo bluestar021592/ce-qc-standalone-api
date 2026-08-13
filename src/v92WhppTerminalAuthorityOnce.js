@@ -3,18 +3,49 @@ import { V92_WHPP_TERMINAL_AUTHORITY_ID, repairWhppTerminalAuthority } from './v
 
 const META_KEY='v92_whpp_terminal_authority_last_run';
 function safe(value){try{return JSON.parse(String(value||''))||{};}catch{return{};}}
+function upper(value){return String(value??'').trim().toUpperCase();}
+
+function ensureDerivedTerminalRows(db){
+  const rows=db.prepare(`SELECT reportDate,shipmentCode,isPod,primaryCategory,latestEventTime,rawJson FROM business_final_rows WHERE businessType='WHPP' AND COALESCE(json_extract(rawJson,'$.terminalAuthority'),0)=1`).all();
+  if(!rows.length)return 0;
+  const now=nowIso();
+  const current=db.prepare(`INSERT INTO shipment_current_state(shipmentCode,businessType,reportDate,snapshotId,state,apiStatus,lastEventTime,stateJson,updatedAt)
+    VALUES(?,'WHPP',?,?,?,'SUCCESS',?,?,?)
+    ON CONFLICT(shipmentCode) DO UPDATE SET businessType='WHPP',reportDate=excluded.reportDate,snapshotId=CASE WHEN COALESCE(shipment_current_state.snapshotId,'')='' THEN excluded.snapshotId ELSE shipment_current_state.snapshotId END,state=excluded.state,apiStatus='SUCCESS',lastEventTime=excluded.lastEventTime,stateJson=excluded.stateJson,updatedAt=excluded.updatedAt`);
+  const carry=db.prepare(`INSERT INTO carryover_open_items(shipmentCode,businessType,sourceReportDate,lastReportDate,sourceSnapshotId,lastSnapshotId,status,apiStatus,closeReason,stateJson,createdAt,updatedAt)
+    VALUES(?,'WHPP',?,?,?,?,?,'SUCCESS',?,?,?,?)
+    ON CONFLICT(shipmentCode) DO UPDATE SET businessType='WHPP',lastReportDate=excluded.lastReportDate,lastSnapshotId=excluded.lastSnapshotId,status='CLOSED',apiStatus='SUCCESS',closeReason=excluded.closeReason,stateJson=excluded.stateJson,updatedAt=excluded.updatedAt`);
+  const podLock=db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt) VALUES('WHPP',?,?,'V92_TERMINAL_AUTHORITY',?,?) ON CONFLICT(businessType,shipmentCode) DO UPDATE SET podTime=excluded.podTime,source=excluded.source,updatedAt=excluded.updatedAt`);
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    for(const row of rows){
+      const raw=safe(row.rawJson), state=upper(raw.currentState)|| (Number(row.isPod||0)===1?'POD':String(row.primaryCategory||''));
+      if(!['POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED'].includes(state))continue;
+      const closeReason=state==='RETURNED'?'RETURN_COMPLETED':state;
+      const snapshot=db.prepare("SELECT snapshotId FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC,id DESC LIMIT 1").get(row.reportDate)?.snapshotId || `V92-${row.reportDate}`;
+      const at=String(row.latestEventTime||raw.terminalObservedAt||'');
+      current.run(row.shipmentCode,row.reportDate,snapshot,closeReason,at,row.rawJson,now);
+      carry.run(row.shipmentCode,row.reportDate,row.reportDate,snapshot,snapshot,'CLOSED',closeReason,row.rawJson,now,now);
+      if(closeReason==='POD')podLock.run(row.shipmentCode,at,now,now);
+    }
+    db.exec('COMMIT');
+  }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
+  return rows.length;
+}
 
 export function repairWhppTerminalAuthorityOnce(db=getDb()){
   const meta=db.prepare('SELECT value FROM app_meta WHERE key=?').get(META_KEY);
   const previous=safe(meta?.value);
+  let result;
   if(previous.patchId===V92_WHPP_TERMINAL_AUTHORITY_ID){
-    return{patchId:V92_WHPP_TERMINAL_AUTHORITY_ID,skipped:true,reason:'ALREADY_RECONCILED',scanned:Number(previous.scanned||0),repaired:Number(previous.repaired||0),affectedDates:previous.affectedDates||[]};
+    result={patchId:V92_WHPP_TERMINAL_AUTHORITY_ID,skipped:true,reason:'ALREADY_RECONCILED',scanned:Number(previous.scanned||0),repaired:Number(previous.repaired||0),affectedDates:previous.affectedDates||[]};
+  }else{
+    result=repairWhppTerminalAuthority(db);
+    if(!result.repaired){
+      const now=nowIso();
+      db.prepare('INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt')
+        .run(META_KEY,JSON.stringify({...result,runAt:now}),now);
+    }
   }
-  const result=repairWhppTerminalAuthority(db);
-  if(!result.repaired){
-    const now=nowIso();
-    db.prepare('INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt')
-      .run(META_KEY,JSON.stringify({...result,runAt:now}),now);
-  }
-  return result;
+  return{...result,derivedTerminalRowsEnsured:ensureDerivedTerminalRows(db)};
 }
