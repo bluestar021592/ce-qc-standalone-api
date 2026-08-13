@@ -28,6 +28,28 @@ function safeJson(value, fallback = {}) {
   catch { return fallback; }
 }
 function billOf(row = {}) { return String(row.shipmentCode || row.运单号 || row.waybill || '').trim().toUpperCase(); }
+function normalizeDynamicCarryRow(row = {}) {
+  const state = String(row.currentState || row.scanNormalizedState || '').toUpperCase();
+  const category = String(row.primaryCategory || row.主分类 || row.异常分类 || '');
+  const returnInProgress = state === 'RETURN_IN_PROGRESS' || row.退回状态 === '退回处理中' || /退回处理中/.test(category);
+  if (returnInProgress) {
+    return {
+      ...row,
+      dynamicOriginalCategory: category,
+      primaryCategory: '逆向处理中',
+      主分类: '逆向处理中',
+      异常分类: '逆向处理中',
+      currentState: 'RETURN_IN_PROGRESS',
+      退回状态: '退回处理中',
+      dynamicCarryRule: 'KEEP_OPEN_UNTIL_RETURN_86'
+    };
+  }
+  const cancelled = state === 'ORDER_CANCELLED' || row.订单取消 === '是' || row.取消状态 === '已取消' || String(row.orderStatus || '') === '10' || /订单取消/.test(category);
+  if (cancelled) {
+    return { ...row, matchedRule: 'NORMAL_FINAL_HUB', dynamicTerminalReason: 'ORDER_CANCELLED', dynamicCarryRule: 'CLOSE_CANCELLED' };
+  }
+  return row;
+}
 
 export function cambodiaClock(date = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
@@ -95,7 +117,7 @@ export async function processCarryFamilyForRefresh(family, rows, { client = new 
     const bill = billOf(row);
     if (!bill || !allowed.has(bill)) continue;
     if (/失败|REFRESH_FAILED|API_PENDING_RETRY|RETRY/i.test(`${row.API状态 || ''} ${row.查询状态 || ''} ${row.apiStatus || ''}`)) failed.add(bill);
-    else { successfulRows.push(row); success.add(bill); }
+    else { successfulRows.push(normalizeDynamicCarryRow(row)); success.add(bill); }
   }
   for (const row of rows) if (!success.has(row.shipmentCode)) failed.add(row.shipmentCode);
   return { successfulRows, failedBills: [...failed] };
