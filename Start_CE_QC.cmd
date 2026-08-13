@@ -3,7 +3,6 @@ setlocal EnableExtensions
 chcp 65001 >nul
 title CE QC APP - Managed Backend
 
-start "" /b powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\CE_QC_CarryRefresh_Poller.ps1"
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\CE_QC_Managed_Launcher.ps1"
 set "EC=%ERRORLEVEL%"
 
