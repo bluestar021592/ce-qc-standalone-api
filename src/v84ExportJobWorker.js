@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 import ExcelJS from 'exceljs';
 import archiver from 'archiver';
 import { getDb, getRuntimeConfig, closeDb } from './db.js';
+import { countCompletedWhppRows, whppDailyCounts } from './v87WhppExportStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const businessWorker = path.join(__dirname, 'v84ExportBusinessWorker.js');
-const ALL_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
+const ALL_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
 const LARGE_BUSINESS_THRESHOLD = Math.max(20000, Number(process.env.EXPORT_SPLIT_THRESHOLD || 70000));
 const PART_DAYS = Math.max(1, Math.min(14, Number(process.env.EXPORT_PART_DAYS || 7)));
 const CHILD_HEAP_MB = Math.max(1024, Number(process.env.EXPORT_BUSINESS_HEAP_MB || 3072));
@@ -70,6 +71,7 @@ function splitRange(range, partDays = PART_DAYS) {
 }
 
 function completedBusinessCount(type, range) {
+  if (type === 'WHPP') return countCompletedWhppRows(range.from, range.to);
   return Number(getDb().prepare(`
     SELECT COUNT(*) AS count
     FROM unified_import_rows u
@@ -112,7 +114,7 @@ function spawnBusinessPart({ type, range, periodType, partIndex, partCount }) {
   return result.files || [];
 }
 
-async function createManagementSummary(range, types) {
+async function createManagementSummary(range) {
   const db = getDb();
   const rows = db.prepare(`
     SELECT b.reportDate,u.businessType,COUNT(*) AS count
@@ -122,7 +124,9 @@ async function createManagementSummary(range, types) {
     WHERE b.status='VALID' AND s.status='COMPLETED' AND b.reportDate BETWEEN ? AND ?
     GROUP BY b.reportDate,u.businessType
     ORDER BY b.reportDate,u.businessType
-  `).all(range.from, range.to);
+  `).all(range.from, range.to).map(row => ({ ...row, count: Number(row.count || 0) }));
+  rows.push(...whppDailyCounts(range.from, range.to));
+
   const byDate = new Map();
   for (const row of rows) {
     if (!byDate.has(row.reportDate)) byDate.set(row.reportDate, Object.fromEntries(ALL_TYPES.map(type => [type, 0])));
@@ -135,7 +139,7 @@ async function createManagementSummary(range, types) {
     ...ALL_TYPES.map(type => ({ header: type, key: type, width: 14 })),
     { header: '总票数', key: 'total', width: 16 }
   ];
-  for (const [date, counts] of byDate) {
+  for (const [date, counts] of [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const values = Object.fromEntries(ALL_TYPES.map(type => [type, Number(counts[type] || 0)]));
     sheet.addRow({ date, ...values, total: ALL_TYPES.reduce((sum, type) => sum + values[type], 0) });
   }
@@ -176,7 +180,7 @@ async function main() {
   const types = requested === 'ALL' ? [...ALL_TYPES] : ALL_TYPES.includes(requested) ? [requested] : [];
   if (!types.length) throw new Error(`不支持的业务板块：${requested}`);
 
-  writeJob({ status: 'RUNNING', progress: 1, range, message: `正在准备 ${range.from} 至 ${range.to} 的后台导出` });
+  writeJob({ status: 'RUNNING', progress: 1, range, message: `正在准备 ${range.from} 至 ${range.to} 的7业务后台导出` });
   const plan = [];
   for (const type of types) {
     const count = completedBusinessCount(type, range);
@@ -207,8 +211,8 @@ async function main() {
 
   let managementFile = '';
   if (requested === 'ALL') {
-    writeJob({ status: 'RUNNING', progress: 93, message: '正在生成轻量管理汇总（不重复装载20万票明细）' });
-    managementFile = await createManagementSummary(range, types);
+    writeJob({ status: 'RUNNING', progress: 93, message: '正在生成7业务轻量管理汇总（不重复装载20万票明细）' });
+    managementFile = await createManagementSummary(range);
     files.unshift(managementFile);
   }
 
