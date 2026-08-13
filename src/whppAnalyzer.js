@@ -1,27 +1,19 @@
 import { analyzeShopeeShipment } from './shopeeAnalyzer.js';
 
-export const WHPP_ANALYSIS_RULE_VERSION = '2026-08-10-whpp-local-cancellation-v1';
+export const WHPP_ANALYSIS_RULE_VERSION = '2026-08-13-v92-whpp-terminal-authority-v2';
 
 /**
- * WHPP local shipments use the same operational analysis as Shopee, with one
- * additional terminal outcome: order cancellation.
- *
- * Locked evidence supplied by production samples:
- * - confirm-query orderStatus = 10
- * - exception-item/query exceptionType = 20 AND statusCode = 10
- *
- * Cancellation reason/sub-reason codes are evidence fields only. They are not
- * used as the sole terminal rule because different cancellation reasons may use
- * different reason codes in production.
+ * WHPP terminal authority is strict:
+ * - scan 85 => POD, no track
+ * - scan 100 => returned, no track
+ * - scan 10 => cancelled, no track
+ * - when scan is not terminal, latest trajectory 80 => POD and 86 => returned
+ * Terminal evidence always wins over older Pending/OC/carry classifications.
  */
 export function analyzeWhppShipment(args = {}) {
   const base = analyzeShopeeShipment(args);
-
-  // Newer/stronger delivery terminal evidence must never be overwritten by an
-  // older cancellation record.
-  if (isPodTerminal(base) || isReturnTerminal(base)) {
-    return { ...base, analysisRuleVersion: WHPP_ANALYSIS_RULE_VERSION, businessType: 'WHPP' };
-  }
+  const forced = forceWhppTerminal(base, args);
+  if (forced) return { ...forced, analysisRuleVersion: WHPP_ANALYSIS_RULE_VERSION, businessType: 'WHPP' };
 
   const scanCancelled = isWhppCancellationScan(args.scanRow || {});
   const cancellationException = findWhppCancellationException(args.exceptions || []);
@@ -38,10 +30,9 @@ export function analyzeWhppShipment(args = {}) {
     .filter(Boolean)
     .join('+');
 
-  return {
+  return closeTerminal({
     ...base,
     businessType: 'WHPP',
-    analysisRuleVersion: WHPP_ANALYSIS_RULE_VERSION,
     currentState: 'ORDER_CANCELLED',
     scanNormalizedState: 'ORDER_CANCELLED',
     primaryCategory: '订单取消',
@@ -62,27 +53,86 @@ export function analyzeWhppShipment(args = {}) {
     cancellationChildReason: String(evidence.exceptionChildReason ?? ''),
     cancellationReportShop: String(evidence.reportShop ?? ''),
     cancellationConfirmedAt: confirmedAt,
-    trackRequired: false,
     trackSkippedReason: 'ORDER_CANCELLED',
     carry状态: 'closed_cancelled',
+    tags: uniqueTags([...(Array.isArray(base.tags) ? base.tags : []), 'ORDER_CANCELLED']),
+    QC判断: `WHPP订单已取消并闭环${cancellationSource ? `（${cancellationSource}）` : ''}`
+  });
+}
+
+function forceWhppTerminal(base = {}, args = {}) {
+  const scanStatus = String(args.scanRow?.orderStatus ?? '').trim();
+  if (scanStatus === '85') {
+    return closeTerminal({
+      ...base,
+      currentState: 'POD', scanNormalizedState: 'POD', primaryCategory: 'POD', 主分类: 'POD', 异常分类: 'POD',
+      是否POD: '是', POD状态: 'POD', 退回状态: '未退回', 订单取消: '否', 取消状态: '',
+      trackSkippedReason: 'POD_COMPLETED', carry状态: 'closed_pod',
+      tags: uniqueTags([...(Array.isArray(base.tags) ? base.tags : []), 'POD_LOCK', 'SCAN_85']),
+      QC判断: 'WHPP扫描orderStatus=85已签收，强制POD闭环，不进入轨迹查询'
+    });
+  }
+  if (scanStatus === '100') {
+    return closeTerminal({
+      ...base,
+      currentState: 'RETURN_COMPLETED', scanNormalizedState: 'RETURN_COMPLETED', primaryCategory: '退回', 主分类: '退回', 异常分类: '退回',
+      是否POD: '否', POD状态: '未POD', 退回状态: '已退回', 订单取消: '否', 取消状态: '',
+      trackSkippedReason: 'RETURN_COMPLETED', carry状态: 'closed_return',
+      tags: uniqueTags([...(Array.isArray(base.tags) ? base.tags : []), 'RETURN_COMPLETED', 'SCAN_100']),
+      QC判断: 'WHPP扫描orderStatus=100已退回，强制退回闭环，不进入轨迹查询'
+    });
+  }
+  if (scanStatus === '10') return null; // cancellation enrichment below
+
+  const events = Array.isArray(args.events) ? [...args.events] : [];
+  const latest = events.sort((a,b) => eventTimeOf(a).localeCompare(eventTimeOf(b))).at(-1) || null;
+  const code = String(latest?.eventCode ?? latest?.trackingEventCode ?? latest?.statusCode ?? '').trim();
+  if (code === '80') {
+    return closeTerminal({
+      ...base,
+      currentState: 'POD', primaryCategory: 'POD', 主分类: 'POD', 异常分类: 'POD', 是否POD: '是', POD状态: 'POD', 退回状态: '未退回',
+      trackSkippedReason: 'POD_COMPLETED', carry状态: 'closed_pod', latestTrackStatusCode: '80',
+      tags: uniqueTags([...(Array.isArray(base.tags) ? base.tags : []), 'POD_LOCK', 'TRACK_80']),
+      QC判断: 'WHPP最新轨迹eventCode=80已签收，强制POD闭环'
+    });
+  }
+  if (code === '86') {
+    return closeTerminal({
+      ...base,
+      currentState: 'RETURN_COMPLETED', primaryCategory: '退回', 主分类: '退回', 异常分类: '退回', 是否POD: '否', POD状态: '未POD', 退回状态: '已退回',
+      trackSkippedReason: 'RETURN_COMPLETED', carry状态: 'closed_return', latestTrackStatusCode: '86',
+      tags: uniqueTags([...(Array.isArray(base.tags) ? base.tags : []), 'RETURN_COMPLETED', 'TRACK_86']),
+      QC判断: 'WHPP最新轨迹eventCode=86已退回，强制退回闭环'
+    });
+  }
+  return null;
+}
+
+function closeTerminal(row = {}) {
+  return {
+    ...row,
+    trackRequired: false,
     跨日状态: '已闭环',
     入库无扫描节点: '否',
     无轨迹: '否',
+    Pending状态: '否',
     Pending次数: 0,
     Pending当前次数: 0,
     pendingDistinctDayCount: 0,
+    Pending日期: '',
+    Pending连续: '否',
     Pending连续性: '',
     Pending不连续: '否',
+    OC状态: '否',
     OC天数: 0,
+    盘点状态: '否',
     盘点天数: 0,
     派送中停留天数: 0,
     shopRetentionNaturalDays: 0,
     shopState: '',
     pvOpenDisposition: '',
     退回待处理: '否',
-    returnRequired: false,
-    tags: uniqueTags([...(Array.isArray(base.tags) ? base.tags : []), 'ORDER_CANCELLED']),
-    QC判断: `WHPP订单已取消并闭环${cancellationSource ? `（${cancellationSource}）` : ''}`
+    returnRequired: false
   };
 }
 
@@ -104,21 +154,8 @@ export function isWhppCancelledRow(row = {}) {
     || String(row.primaryCategory || row.主分类 || row.异常分类 || '') === '订单取消';
 }
 
-function isPodTerminal(row = {}) {
-  return row.是否POD === '是'
-    || String(row.currentState || '').toUpperCase() === 'POD'
-    || String(row.primaryCategory || row.主分类 || '') === 'POD';
-}
-
-function isReturnTerminal(row = {}) {
-  const state = String(row.currentState || '').toUpperCase();
-  return row.退回状态 === '已退回'
-    || ['RETURNED', 'RETURN_COMPLETED'].includes(state)
-    || String(row.primaryCategory || row.主分类 || '') === '退回';
-}
-
 function eventTimeOf(row = {}) {
-  return String(row.reportTime || row.lastUpdateDate || row.creationDate || row.updatedAt || '').trim();
+  return String(row.reportTime || row.eventTime || row.lastUpdateDate || row.creationDate || row.updatedAt || '').trim();
 }
 
 function uniqueTags(values = []) {
