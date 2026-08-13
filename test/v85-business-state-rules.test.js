@@ -160,5 +160,5 @@ test('Shopee UI now owns WHPP in the dashboard model and V85 no longer polls/mut
   assert.doesNotMatch(v89Metric, /DELETE FROM|UPDATE\s+|INSERT INTO|DROP TABLE/i);
 
   assert.match(injector, /v85-business-rule-ui\.js\?v=20260813-2/);
-  assert.match(injector, /v89-fast-dashboard\.js\?v=20260813-1/);
+  assert.match(injector, /v89-fast-dashboard\.js\?v=20260813-2/);
 });
