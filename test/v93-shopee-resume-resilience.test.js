@@ -80,3 +80,25 @@ test('the exact secure-TLS disconnect from production is classified as transient
   assert.equal(result.successes.length, 1);
   assert.ok(logs.some(message => message.includes('网络/TLS瞬断')));
 });
+
+test('SHOPEE track API still adaptively splits 50-waybill failures even when the legacy caller passes fallbackSizes empty', async () => {
+  const bills = Array.from({ length: 50 }, (_, i) => `T${String(i + 1).padStart(3, '0')}`);
+  const calls = [];
+  const result = await queryBatchWithFallback({
+    batch: bills,
+    apiName: 'tms-shipment-event-query',
+    fallbackSizes: [],
+    transientRetries: 0,
+    onLog: async () => {},
+    query: async codes => {
+      calls.push(codes.length);
+      if (codes.length > 10) throw new Error('remote batch too large');
+      return codes.map(shipmentCode => ({ shipmentCode, eventCode: '26' }));
+    }
+  });
+  assert.equal(result.failures.length, 0);
+  assert.equal(result.successes.flatMap(item => item.batch).length, 50);
+  assert.ok(calls.includes(50));
+  assert.ok(calls.includes(25));
+  assert.ok(calls.some(size => size <= 10));
+});
