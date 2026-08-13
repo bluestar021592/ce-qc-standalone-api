@@ -6,7 +6,7 @@ import {
   loadStrictShopeeWhppRetentionRows
 } from './shopeeWhppRetentionTruth.js';
 
-export const V94_SHOPEE_WHPP_SOURCE_TRUTH_ID = '2026-08-13-v94-shopee-whpp-source-truth-v1';
+export const V94_SHOPEE_WHPP_SOURCE_TRUTH_ID = '2026-08-13-v94-shopee-whpp-source-truth-v2';
 const SUMMARY_ROUTE = '/api/v89/instant-dashboard';
 const DETAIL_ROUTE = '/api/v89/shopee-whpp-detail';
 const TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -38,7 +38,10 @@ function summaryHandler(req, res) {
   const startedAt = Date.now();
   try {
     const requestedDate = req.query.date || req.query.reportDate || '';
-    const base = inspectV90FastDashboard(requestedDate);
+    // V94 replaces legacy SHOPEE WHPP counts with strict latest-location truth.
+    // Ask V90 only for the fast base/CEAF/WHPP classification so we do not run
+    // the older broad WHPP count twice immediately before the strict V94 read.
+    const base = inspectV90FastDashboard(requestedDate, { skipShopeeWhpp: true });
     const db = getDb();
     const batch = latestBatch(db, requestedDate);
     const shopeeWhpp = { SHOPEECN: 0, SHOPEEVN: 0 };
@@ -96,10 +99,6 @@ function detailHandler(req, res) {
   }
 }
 
-// V89 registers summary/detail lazily from its listen wrapper. V90 already wraps
-// app.get for the tiny summary. V94 wraps listen last and temporarily bypasses
-// both older handlers for these two routes, so card count and drilldown are built
-// from the exact same normalized track-event source truth.
 const previousListen = express.application.listen;
 express.application.listen = function v94ShopeeWhppSourceTruthListen(...args) {
   const app = this;
