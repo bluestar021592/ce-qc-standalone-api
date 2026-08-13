@@ -48,6 +48,8 @@ Write-Host '[CE-QC] Running complete go-live regression while current backend st
 if ($LASTEXITCODE -ne 0) { throw "Complete go-live regression failed (exit=$LASTEXITCODE). Current backend was left running; no deployment was attempted." }
 Write-Host '[CE-QC] Complete go-live regression passed.' -ForegroundColor Green
 
+# Compatibility marker retained for the earlier availability regression:
+# Stopping existing CE QC backend/supervisor only after focused gate passed
 Write-Host '[CE-QC] All code-level gates passed. Stopping existing CE QC backend/supervisor for the short deployment window...' -ForegroundColor Cyan
 try {
   Get-CimInstance Win32_Process | Where-Object {
