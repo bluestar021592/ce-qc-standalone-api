@@ -5,6 +5,20 @@ const META_KEY='v92_whpp_terminal_authority_last_run';
 function safe(value){try{return JSON.parse(String(value||''))||{};}catch{return{};}}
 function upper(value){return String(value??'').trim().toUpperCase();}
 
+function cleanupPrematureRepairSnapshots(db,dates=[]){
+  let removed=0;
+  for(const date of dates||[]){
+    const prior=db.prepare("SELECT 1 FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND COALESCE(runId,'')<>'V92_TERMINAL_AUTHORITY' LIMIT 1").get(date);
+    if(prior)continue;
+    const result=db.prepare("DELETE FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND runId='V92_TERMINAL_AUTHORITY'").run(date);
+    removed+=Number(result.changes||0);
+    const history=db.prepare("SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?").get(date);
+    const summary=safe(history?.summaryJson);
+    if(String(summary.snapshotId||'').startsWith('WHPP-V92-')) db.prepare("DELETE FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?").run(date);
+  }
+  return removed;
+}
+
 function ensureDerivedTerminalRows(db){
   const rows=db.prepare(`SELECT reportDate,shipmentCode,isPod,primaryCategory,latestEventTime,rawJson FROM business_final_rows WHERE businessType='WHPP' AND COALESCE(json_extract(rawJson,'$.terminalAuthority'),0)=1`).all();
   if(!rows.length)return 0;
@@ -19,10 +33,10 @@ function ensureDerivedTerminalRows(db){
   db.exec('BEGIN IMMEDIATE');
   try{
     for(const row of rows){
-      const raw=safe(row.rawJson), state=upper(raw.currentState)|| (Number(row.isPod||0)===1?'POD':String(row.primaryCategory||''));
+      const raw=safe(row.rawJson), state=upper(raw.currentState)||(Number(row.isPod||0)===1?'POD':String(row.primaryCategory||''));
       if(!['POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED'].includes(state))continue;
       const closeReason=state==='RETURNED'?'RETURN_COMPLETED':state;
-      const snapshot=db.prepare("SELECT snapshotId FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC,id DESC LIMIT 1").get(row.reportDate)?.snapshotId || `V92-${row.reportDate}`;
+      const snapshot=db.prepare("SELECT snapshotId FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC,id DESC LIMIT 1").get(row.reportDate)?.snapshotId||`V92-${row.reportDate}`;
       const at=String(row.latestEventTime||raw.terminalObservedAt||'');
       current.run(row.shipmentCode,row.reportDate,snapshot,closeReason,at,row.rawJson,now);
       carry.run(row.shipmentCode,row.reportDate,row.reportDate,snapshot,snapshot,'CLOSED',closeReason,row.rawJson,now,now);
@@ -43,9 +57,9 @@ export function repairWhppTerminalAuthorityOnce(db=getDb()){
     result=repairWhppTerminalAuthority(db);
     if(!result.repaired){
       const now=nowIso();
-      db.prepare('INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt')
-        .run(META_KEY,JSON.stringify({...result,runAt:now}),now);
+      db.prepare('INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt').run(META_KEY,JSON.stringify({...result,runAt:now}),now);
     }
   }
-  return{...result,derivedTerminalRowsEnsured:ensureDerivedTerminalRows(db)};
+  const prematureSnapshotsRemoved=cleanupPrematureRepairSnapshots(db,result.affectedDates||[]);
+  return{...result,prematureSnapshotsRemoved,derivedTerminalRowsEnsured:ensureDerivedTerminalRows(db)};
 }
