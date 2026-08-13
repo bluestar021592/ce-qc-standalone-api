@@ -71,8 +71,9 @@ process.on('warning', warning => {
 async function importPhase(label, modulePath) {
   const startedAt = Date.now();
   console.log(`[CE-QC][BOOT] START ${label}`);
-  await import(modulePath);
+  const loaded = await import(modulePath);
   console.log(`[CE-QC][BOOT] DONE ${label} ${Date.now() - startedAt}ms`);
+  return loaded;
 }
 
 try {
@@ -104,6 +105,9 @@ try {
   await importPhase('v71WhppSummaryPatch', './src/v71WhppSummaryPatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
+  const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
+  const v76Result = v76Repair.repairLatestCeafSplit();
+  console.log(`[CE-QC][BOOT] V76 CEAF repair ${JSON.stringify(v76Result)}`);
   await importPhase('server', './server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
