@@ -9,64 +9,34 @@ function wrapHandler(handler) {
   const wrapped = function ceQcSafeAsyncHandler(req, res, next) {
     try {
       const result = handler.call(this, req, res, next);
-      if (result && typeof result.then === 'function') {
-        result.catch(error => handleRouteError(error, req, res, next));
-      }
+      if (result && typeof result.then === 'function') result.catch(error => handleRouteError(error, req, res, next));
       return result;
-    } catch (error) {
-      return handleRouteError(error, req, res, next);
-    }
+    } catch (error) { return handleRouteError(error, req, res, next); }
   };
-
   Object.defineProperty(wrapped, WRAPPED, { value: true });
   return wrapped;
 }
-
-function wrapArgument(value) {
-  if (Array.isArray(value)) return value.map(wrapArgument);
-  return wrapHandler(value);
-}
-
+function wrapArgument(value) { if (Array.isArray(value)) return value.map(wrapArgument); return wrapHandler(value); }
 function handleRouteError(error, req, res, next) {
   const message = error?.message || String(error || 'Unknown server error');
   console.error(`[CE-QC][API_ERROR] ${req?.method || ''} ${req?.originalUrl || req?.url || ''}:`, error);
-
-  if (res?.headersSent) {
-    if (typeof next === 'function') return next(error);
-    return;
-  }
-
-  if (String(req?.originalUrl || req?.url || '').startsWith('/api/')) {
-    res.status(500).json({ ok: false, error: message, code: 'SERVER_ROUTE_ERROR' });
-    return;
-  }
-
+  if (res?.headersSent) { if (typeof next === 'function') return next(error); return; }
+  if (String(req?.originalUrl || req?.url || '').startsWith('/api/')) { res.status(500).json({ ok: false, error: message, code: 'SERVER_ROUTE_ERROR' }); return; }
   if (typeof next === 'function') return next(error);
   res.status(500).send('CE QC server error');
 }
-
 for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
   const original = express.application[method];
   if (typeof original !== 'function') continue;
-
   express.application[method] = function ceQcSafeRouteRegistration(...args) {
     if (method === 'get' && args.length === 1) return original.apply(this, args);
     if (args.length < 2) return original.apply(this, args);
     return original.apply(this, [args[0], ...args.slice(1).map(wrapArgument)]);
   };
 }
-
-process.on('unhandledRejection', reason => {
-  console.error('[CE-QC][UNHANDLED_REJECTION]', reason);
-});
-
-process.on('uncaughtExceptionMonitor', (error, origin) => {
-  console.error('[CE-QC][UNCAUGHT_EXCEPTION_FATAL]', origin || '', error?.stack || error);
-});
-
-process.on('warning', warning => {
-  console.warn('[CE-QC][NODE_WARNING]', warning?.stack || warning);
-});
+process.on('unhandledRejection', reason => console.error('[CE-QC][UNHANDLED_REJECTION]', reason));
+process.on('uncaughtExceptionMonitor', (error, origin) => console.error('[CE-QC][UNCAUGHT_EXCEPTION_FATAL]', origin || '', error?.stack || error));
+process.on('warning', warning => console.warn('[CE-QC][NODE_WARNING]', warning?.stack || warning));
 
 async function importPhase(label, modulePath) {
   const startedAt = Date.now();
@@ -109,6 +79,10 @@ try {
   await importPhase('v86StrictTrackStatusGate', './src/v86StrictTrackStatusGate.js');
   await importPhase('v89InstantDashboardPatch', './src/v89InstantDashboardPatch.js');
   await importPhase('v90FastDashboardReadPatch', './src/v90FastDashboardReadPatch.js');
+  const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthority.js');
+  const v92StartedAt = Date.now();
+  const v92Result = v92.repairWhppTerminalAuthority();
+  console.log(`[CE-QC][BOOT] V92 WHPP terminal authority ${Date.now()-v92StartedAt}ms ${JSON.stringify({scanned:v92Result.scanned,repaired:v92Result.repaired,affectedDates:v92Result.affectedDates})}`);
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
