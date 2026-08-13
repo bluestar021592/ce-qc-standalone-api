@@ -56,16 +56,21 @@ function whppSourceCount(db, reportDate) {
 
 function normalizedStats(db, batch, type) {
   if (type === 'WHPP') {
-    if (!tableExists(db, 'business_final_rows')) return { count: 0, pod: 0 };
+    if (!tableExists(db, 'business_final_rows') || !tableExists(db, 'business_daily_parse_rows')) return { count: 0, pod: 0 };
     return db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
       FROM (
-        SELECT shipmentCode, MAX(CASE WHEN COALESCE(isPod,0)=1 THEN 1 ELSE 0 END) AS pod
-        FROM business_final_rows
-        WHERE businessType='WHPP' AND reportDate=?
-        GROUP BY shipmentCode
+        SELECT p.shipmentCode, MAX(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod
+        FROM (
+          SELECT DISTINCT shipmentCode
+          FROM business_daily_parse_rows
+          WHERE businessType='WHPP' AND reportDate=?
+        ) p
+        INNER JOIN business_final_rows f
+          ON f.shipmentCode=p.shipmentCode AND f.businessType='WHPP' AND f.reportDate=?
+        GROUP BY p.shipmentCode
       )
-    `).get(batch.reportDate) || { count: 0, pod: 0 };
+    `).get(batch.reportDate, batch.reportDate) || { count: 0, pod: 0 };
   }
 
   if (SHOPEE.has(type)) {
@@ -73,58 +78,75 @@ function normalizedStats(db, batch, type) {
     return db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
       FROM (
-        SELECT f.shipmentCode, MAX(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod
-        FROM business_final_rows f
-        INNER JOIN unified_import_rows u
-          ON u.shipmentCode=f.shipmentCode AND u.snapshotId=? AND u.businessType=?
-        WHERE f.reportDate=? AND f.businessType IN ('SHOPEE', ?)
-        GROUP BY f.shipmentCode
+        SELECT u.shipmentCode, MAX(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod
+        FROM unified_import_rows u
+        INNER JOIN business_final_rows f
+          ON f.shipmentCode=u.shipmentCode
+         AND f.reportDate=?
+         AND f.businessType IN ('SHOPEE', ?)
+        WHERE u.snapshotId=? AND u.businessType=?
+        GROUP BY u.shipmentCode
       )
-    `).get(batch.snapshotId, type, batch.reportDate, type) || { count: 0, pod: 0 };
+    `).get(batch.reportDate, type, batch.snapshotId, type) || { count: 0, pod: 0 };
   }
 
   if (!tableExists(db, 'final_rows')) return { count: 0, pod: 0 };
   return db.prepare(`
     SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
     FROM (
-      SELECT f.shipmentCode, MAX(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod
-      FROM final_rows f
-      INNER JOIN unified_import_rows u
-        ON u.shipmentCode=f.shipmentCode AND u.snapshotId=? AND u.businessType=?
-      WHERE f.reportDate=?
-      GROUP BY f.shipmentCode
+      SELECT u.shipmentCode, MAX(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod
+      FROM unified_import_rows u
+      INNER JOIN final_rows f
+        ON f.shipmentCode=u.shipmentCode AND f.reportDate=?
+      WHERE u.snapshotId=? AND u.businessType=?
+      GROUP BY u.shipmentCode
     )
-  `).get(batch.snapshotId, type, batch.reportDate) || { count: 0, pod: 0 };
+  `).get(batch.reportDate, batch.snapshotId, type) || { count: 0, pod: 0 };
 }
 
 function currentStats(db, batch, type) {
   if (!tableExists(db, 'shipment_current_state')) return { count: 0, pod: 0 };
+
+  // shipment_current_state is intentionally mutable and its snapshotId is updated
+  // to the child CCSL/SHOPEE/WHPP processing snapshot after analysis. Therefore a
+  // parent unified snapshotId equality check is incorrect after a successful run.
+  // Drive the query from the exact current source membership instead, then use the
+  // shipmentCode PK for a bounded lookup into current-state.
   if (type === 'WHPP') {
+    if (!tableExists(db, 'business_daily_parse_rows')) return { count: 0, pod: 0 };
     return db.prepare(`
-      SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
+      SELECT COUNT(s.shipmentCode) AS count,
+             COALESCE(SUM(CASE WHEN UPPER(COALESCE(s.state,''))='POD' THEN 1 ELSE 0 END),0) AS pod
       FROM (
-        SELECT shipmentCode, MAX(CASE WHEN UPPER(COALESCE(state,''))='POD' THEN 1 ELSE 0 END) AS pod
-        FROM shipment_current_state
+        SELECT DISTINCT shipmentCode
+        FROM business_daily_parse_rows
         WHERE businessType='WHPP' AND reportDate=?
-        GROUP BY shipmentCode
-      )
+      ) p
+      LEFT JOIN shipment_current_state s ON s.shipmentCode=p.shipmentCode
     `).get(batch.reportDate) || { count: 0, pod: 0 };
   }
+
   return db.prepare(`
-    SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
-    FROM (
-      SELECT s.shipmentCode, MAX(CASE WHEN UPPER(COALESCE(s.state,''))='POD' THEN 1 ELSE 0 END) AS pod
-      FROM shipment_current_state s
-      INNER JOIN unified_import_rows u
-        ON u.shipmentCode=s.shipmentCode AND u.snapshotId=? AND u.businessType=?
-      WHERE s.snapshotId=?
-      GROUP BY s.shipmentCode
-    )
-  `).get(batch.snapshotId, type, batch.snapshotId) || { count: 0, pod: 0 };
+    SELECT COUNT(s.shipmentCode) AS count,
+           COALESCE(SUM(CASE WHEN UPPER(COALESCE(s.state,''))='POD' THEN 1 ELSE 0 END),0) AS pod
+    FROM unified_import_rows u
+    LEFT JOIN shipment_current_state s ON s.shipmentCode=u.shipmentCode
+    WHERE u.snapshotId=? AND u.businessType=?
+  `).get(batch.snapshotId, type) || { count: 0, pod: 0 };
+}
+
+function runStatus(db, reportDate) {
+  const ccsl = tableExists(db, 'run_locks')
+    ? db.prepare('SELECT status,currentStage,runId FROM run_locks WHERE reportDate=?').get(reportDate) || null
+    : null;
+  const business = tableExists(db, 'business_run_locks')
+    ? db.prepare(`SELECT businessType,status,currentStage,runId FROM business_run_locks WHERE reportDate=? AND businessType IN ('SHOPEE','WHPP') ORDER BY businessType`).all(reportDate)
+    : [];
+  return { ccsl, business };
 }
 
 if (!fs.existsSync(dbFile)) {
-  console.error(`GO_LIVE_RESULT: BLOCKED_DATABASE_NOT_FOUND`);
+  console.error('GO_LIVE_RESULT: BLOCKED_DATABASE_NOT_FOUND');
   console.error(`Database: ${dbFile}`);
   process.exit(20);
 }
@@ -135,10 +157,10 @@ let exitCode = 20;
 try {
   db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=1500;');
   const dbSizeGb = before.size / 1024 / 1024 / 1024;
-  console.log('\nCE QC FIRST-DAY GO-LIVE VERIFY - FAST STRICT READ ONLY');
+  console.log('\nCE QC FIRST-DAY GO-LIVE VERIFY - SOURCE MEMBERSHIP STRICT READ ONLY');
   console.log(`Database: ${dbFile}`);
   console.log(`Database size: ${dbSizeGb.toFixed(2)} GB`);
-  console.log('Live integrity mode: READ-ONLY OPEN + NORMALIZED CONSISTENCY (full PRAGMA integrity_check intentionally skipped on live multi-GB DB)');
+  console.log('Live integrity mode: READ-ONLY OPEN + SOURCE-MEMBERSHIP CONSISTENCY');
 
   const reportDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
     ? requestedDate
@@ -160,6 +182,10 @@ try {
     console.log(`Batch: ${batch.batchId}`);
     console.log(`Snapshot: ${batch.snapshotId}`);
     console.log(`Snapshot status: ${batch.snapshotStatus || 'MISSING'}`);
+
+    const runs = runStatus(db, reportDate);
+    console.log(`RUN CCSL: ${runs.ccsl?.status || 'NONE'} | ${runs.ccsl?.currentStage || ''}`);
+    for (const item of runs.business) console.log(`RUN ${item.businessType}: ${item.status || 'NONE'} | ${item.currentStage || ''}`);
 
     const source = timed('source membership counts', () => groupedSourceCounts(db, batch.snapshotId)).value;
     source.WHPP = timed('WHPP source count', () => whppSourceCount(db, reportDate)).value;
