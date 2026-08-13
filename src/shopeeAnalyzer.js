@@ -3,4 +3,4 @@ export {
   analyzeShopeeShipment,
   classifyShopeeScanStatus,
   classifyShopeeRegion
-} from './shopeeAnalyzerV31.js';
+} from './shopeeAnalyzerV32.js';
