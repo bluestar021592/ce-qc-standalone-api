@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const source = fs.readFileSync(new URL('../tools/Repair_20260801_CEAF_And_Start.ps1', import.meta.url), 'utf8');
 
-test('V78 one-shot launcher backs up, repairs, verifies exact source truth, and only then opens browser', () => {
+test('one-shot launcher backs up, verifies exact source truth, then starts and opens browser', () => {
   assert.match(source, /pre_ceaf_repair_/);
   assert.match(source, /repairLatestCeafSplit/);
   assert.match(source, /CEAF_SPLIT_OK/);
@@ -14,7 +14,6 @@ test('V78 one-shot launcher backs up, repairs, verifies exact source truth, and 
   assert.match(source, /business_daily_parse_rows/);
   assert.match(source, /business_daily_reports/);
   assert.match(source, /Stop-CeQcProcesses/);
-  assert.match(source, /Invoke-RestMethod -Uri 'http:\/\/127\.0\.0\.1:5177\/api\/health'/);
 
   const repair = source.indexOf('Invoke-CurrentCeafRepair');
   const verify = source.lastIndexOf('Assert-ExpectedSplit $actual');
@@ -23,24 +22,29 @@ test('V78 one-shot launcher backs up, repairs, verifies exact source truth, and 
   assert.ok(repair >= 0);
   assert.ok(verify > repair, 'database truth must be verified after repair');
   assert.ok(start > verify, 'backend must start only after exact data verification passes');
-  assert.ok(browser > start, 'browser must open only after backend health succeeds');
+  assert.ok(browser > start, 'browser must open only after backend readiness succeeds');
 });
 
-test('V78 launcher never reimports the report or deletes data', () => {
+test('launcher accepts the authenticated root response, including HTTP 401, as backend ready', () => {
+  assert.match(source, /Invoke-WebRequest -Uri 'http:\/\/127\.0\.0\.1:5177\/'/);
+  assert.match(source, /\$status -ge 200 -and \$status -lt 500/);
+  assert.match(source, /Exception\.Response\.StatusCode/);
+  assert.match(source, /Get-NetTCPConnection -LocalPort 5177 -State Listen/);
+  assert.match(source, /BACKEND_READY HTTP=/);
+  assert.doesNotMatch(source, /\/api\/health/);
+});
+
+test('launcher never reimports the report or deletes data', () => {
   assert.doesNotMatch(source, /unified-daily-report/);
   assert.doesNotMatch(source, /Invoke-WebRequest.*upload/i);
   assert.doesNotMatch(source, /Remove-Item.*(?:sqlite|\.db)/i);
   assert.doesNotMatch(source, /git\s+reset\s+--hard/i);
 });
 
-test('V79 backup keeps the Unicode database path inside Node instead of round-tripping through Windows PowerShell', () => {
-  assert.match(source, /const cfg = getRuntimeConfig\(\)/);
-  assert.match(source, /const dbPath = cfg\.dbFile/);
+test('backup keeps the Unicode database path inside Node instead of round-tripping through Windows PowerShell', () => {
+  assert.match(source, /getRuntimeConfig\(\)\.dbFile/);
   assert.match(source, /fs\.copyFileSync/);
   assert.match(source, /BACKUP_OK/);
-
-  // Windows PowerShell 5.1 can decode Node UTF-8 stdout using a legacy codepage.
-  // Never capture the Chinese database path into a PowerShell variable again.
   assert.doesNotMatch(source, /\$dbPath\s*=\s*\(&\s*node/);
   assert.doesNotMatch(source, /Test-Path\s+\$dbPath/);
   assert.doesNotMatch(source, /Split-Path\s+\$dbPath/);
