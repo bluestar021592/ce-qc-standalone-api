@@ -10,6 +10,9 @@ export { normalizeEvent };
  */
 export function analyzeShipment(args = {}) {
   const result = analyzeShipmentV30(args);
+  const hold = scanStatusHold(args.events || []);
+  if (hold) return scanHoldResult(result, args.scanRow || {}, hold);
+
   const state = String(result.currentState || '').toUpperCase();
   const isPod = result.是否POD === '是' || state === 'POD';
   const isReturned = result.退回状态 === '已退回' || ['RETURNED', 'RETURN_COMPLETED'].includes(state);
@@ -18,10 +21,59 @@ export function analyzeShipment(args = {}) {
 
   return {
     ...result,
-    analysisRuleVersion: '2026-08-10-final-trajectory-state-machine-v1',
+    analysisRuleVersion: '2026-08-13-v86-final-strict-track-gate-v2',
     trackRequired: !terminal,
     trackSkippedReason: terminal ? (isPod ? 'POD_COMPLETED' : 'RETURN_COMPLETED') : '',
     carry状态: isPod ? 'closed_pod' : isReturned ? 'closed_return' : returnInProgress ? 'active_return' : 'active',
     跨日状态: terminal ? '已闭环' : '未闭环'
+  };
+}
+
+function scanStatusHold(events = []) {
+  return (Array.isArray(events) ? events : []).find(event => String(event?.syntheticType || event?.__ceQcSynthetic || '').toUpperCase() === 'SCAN_STATUS_HOLD') || null;
+}
+
+function scanHoldResult(base = {}, scanRow = {}, hold = {}) {
+  const status = String(hold.scanOrderStatus || scanRow.orderStatus || '').trim();
+  const tags = [...new Set([...(Array.isArray(base.tags) ? base.tags : []), 'SCAN_STATUS_HOLD'])];
+  return {
+    ...base,
+    analysisRuleVersion: '2026-08-13-v86-final-strict-track-gate-v2',
+    currentState: 'SCAN_STATUS_HOLD',
+    scanNormalizedState: 'SCAN_STATUS_HOLD',
+    primaryCategory: '扫描状态待识别',
+    主分类: '扫描状态待识别',
+    异常分类: '扫描状态待识别',
+    orderStatus: status,
+    是否POD: '否',
+    POD状态: '未POD',
+    退回状态: '未退回',
+    trackRequired: false,
+    trackSkippedReason: 'SCAN_STATUS_NOT_TRACKABLE',
+    carry状态: 'active',
+    跨日状态: '未闭环',
+    Pending次数: 0,
+    Pending当前次数: 0,
+    pendingDistinctDayCount: 0,
+    Pending日期: '',
+    Pending连续性: '',
+    Pending不连续: '否',
+    OC天数: 0,
+    OC次数: 0,
+    盘点天数: 0,
+    盘点次数: 0,
+    派送中停留天数: 0,
+    入库无扫描节点: '否',
+    无轨迹: '否',
+    最后节点: '',
+    最后节点时间: '',
+    lastEventCode: '',
+    lastEventDesc: '',
+    轨迹节点数: 0,
+    tags,
+    systemHold: true,
+    API状态: '已跳过',
+    查询状态: 'scan_status_hold',
+    QC判断: `扫描orderStatus=${status || 'UNKNOWN'}不属于已入库50/分配60/派送70；系统未调用CE轨迹接口，保留待识别`
   };
 }
