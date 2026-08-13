@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 const uiUrl = new URL('../public/v90-instant-whpp-navigation.js', import.meta.url);
 const serverUrl = new URL('../src/v90FastDashboardReadPatch.js', import.meta.url);
-const ui = fs.readFileSync(uiUrl, 'utf8');
-const server = fs.readFileSync(serverUrl, 'utf8');
-const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
-const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
-const launcher = fs.readFileSync(new URL('../Fast_Start_CE_QC.ps1', import.meta.url), 'utf8');
-const cmd = fs.readFileSync(new URL('../Start_CE_QC.cmd', import.meta.url), 'utf8');
+const ui = fs.readFileSync(uiUrl, 'utf8').replace(/\r\n/g, '\n');
+const server = fs.readFileSync(serverUrl, 'utf8').replace(/\r\n/g, '\n');
+const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const launcher = fs.readFileSync(new URL('../Fast_Start_CE_QC.ps1', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const cmd = fs.readFileSync(new URL('../Start_CE_QC.cmd', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 for (const [name, url] of [['V90 UI', uiUrl], ['V90 server', serverUrl]]) {
   test(`${name} is syntax-valid`, () => {
@@ -27,15 +27,31 @@ test('WHPP click switches visible content before any full async WHPP refresh', (
   assert.match(ui, /currentPage='whpp'/);
   assert.match(ui, /renderInstant\(\)/);
   assert.match(ui, /navigateWhppPage/);
-  assert.ok(ui.indexOf('renderInstant();') < ui.indexOf("setTimeout(()=>{\n        if(location.pathname==='/whpp'&&typeof global.navigateWhppPage"));
-  assert.match(ui, /不再保留上一页SHOPEE内容/);
+
+  const beginAt = ui.indexOf('function beginWhppNavigation');
+  const renderAt = ui.indexOf('renderInstant();', beginAt);
+  const delayedRefreshAt = ui.indexOf("if(location.pathname==='/whpp'&&typeof global.navigateWhppPage==='function')", renderAt);
+  assert.ok(beginAt >= 0, 'beginWhppNavigation must exist');
+  assert.ok(renderAt > beginAt, 'WHPP must render immediately after route switch');
+  assert.ok(delayedRefreshAt > renderAt, 'full WHPP refresh must run only after the immediate render');
+
+  assert.match(ui, /WHPP\u9875\u9762\u5df2\u5207\u6362\u5b8c\u6210/);
   assert.doesNotMatch(ui, /new MutationObserver/);
 });
 
 test('instant WHPP board does not reintroduce impossible CN ZT or 580 cards', () => {
-  const renderBlock = ui.slice(ui.indexOf('const core=['), ui.indexOf('target.className'));
-  assert.doesNotMatch(renderBlock, /CCSLCN分流|CCSLZT分流|580滞留包裹|CECN滞留包裹|CEZT滞留包裹/);
-  for (const label of ['已退回件','订单取消','当前未闭环','Pending1+','OC1+']) assert.match(renderBlock, new RegExp(label));
+  const start = ui.indexOf('const core=[');
+  const end = ui.indexOf('target.className', start);
+  assert.ok(start >= 0 && end > start, 'WHPP core metric block must be present');
+  const renderBlock = ui.slice(start, end);
+
+  assert.doesNotMatch(
+    renderBlock,
+    /CCSLCN\u5206\u6d41|CCSLZT\u5206\u6d41|580\u6ede\u7559\u5305\u88f9|CECN\u6ede\u7559\u5305\u88f9|CEZT\u6ede\u7559\u5305\u88f9/
+  );
+  for (const field of ['metrics.returned','metrics.cancelled','metrics.unresolved','metrics.pending1','metrics.oc1']) {
+    assert.match(renderBlock, new RegExp(field.replace('.', '\\.')));
+  }
 });
 
 test('V90 replaces V89 startup summary with normalized SQL rather than large rawJson LIKE scans', () => {
