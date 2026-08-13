@@ -22,12 +22,18 @@ function makeDb() {
     CREATE TABLE run_locks(reportDate TEXT PRIMARY KEY,status TEXT);
     CREATE TABLE run_checkpoints(id INTEGER PRIMARY KEY AUTOINCREMENT,reportDate TEXT);
     CREATE TABLE business_run_locks(businessType TEXT,reportDate TEXT,status TEXT,PRIMARY KEY(businessType,reportDate));
+    CREATE TABLE business_run_checkpoints(id INTEGER PRIMARY KEY AUTOINCREMENT,businessType TEXT,reportDate TEXT);
     CREATE TABLE business_history_summary(businessType TEXT,reportDate TEXT,summaryJson TEXT,PRIMARY KEY(businessType,reportDate));
     CREATE TABLE business_export_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,snapshotId TEXT,businessType TEXT,reportDate TEXT,payloadJson TEXT,createdAt TEXT);
-    CREATE TABLE business_scan_results(businessType TEXT,shipmentCode TEXT,reportDate TEXT);
-    CREATE TABLE business_final_rows(businessType TEXT,shipmentCode TEXT,reportDate TEXT);
-    CREATE TABLE business_track_events(businessType TEXT,shipmentCode TEXT,reportDate TEXT);
-    CREATE TABLE business_exception_items(businessType TEXT,shipmentCode TEXT,reportDate TEXT);
+    CREATE TABLE business_scan_results(businessType TEXT,shipmentCode TEXT,reportDate TEXT,rawJson TEXT);
+    CREATE TABLE business_shipment_tracks(businessType TEXT,shipmentCode TEXT,reportDate TEXT,rawJson TEXT);
+    CREATE TABLE business_final_rows(businessType TEXT,shipmentCode TEXT,reportDate TEXT,rawJson TEXT);
+    CREATE TABLE business_track_events(businessType TEXT,shipmentCode TEXT,reportDate TEXT,eventTime TEXT,rawJson TEXT);
+    CREATE TABLE business_exception_items(businessType TEXT,shipmentCode TEXT,reportDate TEXT,rawJson TEXT);
+    CREATE TABLE business_carry_bills(businessType TEXT,shipmentCode TEXT,reportDate TEXT,rawJson TEXT);
+    CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT,createdAt TEXT,updatedAt TEXT);
+    CREATE TABLE pod_locks(shipmentCode TEXT PRIMARY KEY,source TEXT,podTime TEXT,evidenceType TEXT,evidenceText TEXT,lastSeenReportDate TEXT,createdAt TEXT,updatedAt TEXT);
+    CREATE TABLE reconciliation_diagnostics(id INTEGER PRIMARY KEY AUTOINCREMENT,businessType TEXT,reportDate TEXT,snapshotId TEXT,shipmentCode TEXT,conflictMetrics TEXT,latestEvent TEXT,reason TEXT,payloadJson TEXT,createdAt TEXT);
   `);
   return db;
 }
@@ -79,23 +85,33 @@ test('V76 repairs persisted current source split from WHPP 276 to CEAF 80 + WHPP
   db.prepare("INSERT INTO business_daily_reports VALUES('WHPP',?,?,276,?,?,?)")
     .run(date, '日报表.xlsx', JSON.stringify({ batchId, snapshotId, total: 276, totalRecognized: 276 }), createdAt, createdAt);
   db.prepare("INSERT INTO business_states VALUES('WHPP',?,?)")
-    .run(JSON.stringify({ businessType: 'WHPP', reportDate: date, batchId, sourceSnapshotId: snapshotId, pnhBills, dailyParseRows, dailyParseSummary: { totalRecognized: 276 } }), createdAt);
+    .run(JSON.stringify({ businessType: 'WHPP', reportDate: date, batchId, sourceSnapshotId: snapshotId, snapshotId: 'WHPP-CURRENT', snapshotStatus: 'COMPLETED', pnhBills, dailyParseRows, dailyParseSummary: { totalRecognized: 276 }, processing: { running: false } }), createdAt);
   db.prepare("INSERT INTO app_state VALUES('current',?,?)")
-    .run(JSON.stringify({ reportDate: date, pnhBills: [], dailyParseRows: [], dailyParseSummary: { totalRecognized: 0, pnh: 0 } }), createdAt);
+    .run(JSON.stringify({ reportDate: date, pnhBills: [], podLocks: [], dailyParseRows: [], dailyParseSummary: { totalRecognized: 0, pnh: 0 } }), createdAt);
   db.prepare("INSERT INTO daily_reports VALUES(?,0,0,?,?)").run(date, JSON.stringify({ totalRecognized: 0, pnh: 0 }), createdAt);
 
-  // Model the real observed stale-state symptom: an older completed WHPP summary
-  // for the same report date says 196 and shadows the newly imported 276 daily rows.
+  // Reproduce every stale condition seen during the real troubleshooting: an older
+  // summary pointer, a completed WHPP snapshot for the current source, stale run
+  // locks after restarts, and one partial scan record on an air parcel.
   db.prepare("INSERT INTO business_history_summary VALUES('WHPP',?,?)")
     .run(date, JSON.stringify({ total: 196, snapshotId: 'WHPP-OLD' }));
   db.prepare("INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,payloadJson,createdAt) VALUES('WHPP-OLD','WHPP',?,?,?)")
     .run(date, JSON.stringify({ state: { reportDate: date, batchId: 'OLD-BATCH', sourceSnapshotId: 'OLD-SNAPSHOT' } }), '2026-07-31T00:00:00.000Z');
+  db.prepare("INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,payloadJson,createdAt) VALUES('WHPP-CURRENT','WHPP',?,?,?)")
+    .run(date, JSON.stringify({ state: { reportDate: date, batchId, sourceSnapshotId: snapshotId } }), '2026-08-01T01:00:00.000Z');
+  db.prepare("INSERT INTO run_locks VALUES(?,'running')").run(date);
+  db.prepare("INSERT INTO run_checkpoints(reportDate) VALUES(?)").run(date);
+  db.prepare("INSERT INTO business_run_locks VALUES('WHPP',?,'paused')").run(date);
+  db.prepare("INSERT INTO business_run_checkpoints(businessType,reportDate) VALUES('WHPP',?)").run(date);
+  db.prepare("INSERT INTO business_scan_results VALUES('WHPP','CE000001',?,?)").run(date, JSON.stringify({ shipmentCode: 'CE000001', orderStatus: '0' }));
 
   const result = repairLatestCeafSplit(db);
   assert.equal(result.repaired, true);
   assert.equal(result.moved, 80);
   assert.equal(result.ceaf, 80);
   assert.equal(result.whpp, 196);
+  assert.equal(result.preservedPreviousWhppSnapshot, true);
+  assert.ok(result.archivedEvidence >= 1);
 
   assert.equal(db.prepare("SELECT COUNT(*) count FROM unified_import_rows WHERE batchId=? AND businessType='CEAF'").get(batchId).count, 80);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(date).count, 196);
@@ -103,10 +119,19 @@ test('V76 repairs persisted current source split from WHPP 276 to CEAF 80 + WHPP
   assert.equal(db.prepare("SELECT COUNT(*) count FROM shipment_current_state WHERE businessType='CEAF'").get().count, 80);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM carryover_open_items WHERE businessType='CEAF'").get().count, 80);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?").get(date).count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM business_scan_results WHERE businessType='WHPP' AND shipmentCode='CE000001'").get().count, 0);
+  assert.ok(db.prepare("SELECT COUNT(*) count FROM reconciliation_diagnostics WHERE shipmentCode='CE000001'").get().count >= 1);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM run_locks WHERE reportDate=?").get(date).count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM run_checkpoints WHERE reportDate=?").get(date).count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM business_run_locks WHERE businessType='WHPP' AND reportDate=?").get(date).count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM business_run_checkpoints WHERE businessType='WHPP' AND reportDate=?").get(date).count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=?").get(date).count, 2);
 
   const whppState = JSON.parse(db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP'").get().valueJson);
   assert.equal(whppState.pnhBills.length, 196);
   assert.equal(whppState.dailyParseRows.length, 196);
+  assert.equal(whppState.snapshotStatus, 'IMPORTED');
+  assert.equal(whppState.snapshotId, '');
 
   const ccslState = JSON.parse(db.prepare("SELECT valueJson FROM app_state WHERE key='current'").get().valueJson);
   assert.equal(ccslState.pnhBills.length, 80);
@@ -120,7 +145,7 @@ test('V76 repairs persisted current source split from WHPP 276 to CEAF 80 + WHPP
   assert.equal(payload.rows.length, 80);
 });
 
-test('V76 refuses to mutate completed current snapshots', () => {
+test('V76 refuses to mutate completed unified parent snapshots', () => {
   const db = makeDb();
   db.prepare("INSERT INTO unified_import_batches VALUES('B','S','2026-08-01','x','h','VALID','{}','[]','2026-08-01')").run();
   db.prepare("INSERT INTO unified_snapshots VALUES('S','B','2026-08-01','COMPLETED','{}','2026-08-01')").run();
