@@ -1,7 +1,25 @@
 (function installAsyncExportUiV84(global) {
   if (global.__CE_QC_V84_ASYNC_EXPORT_UI__) return;
-  const VERSION = '2026-08-13-v84-async-export-ui-v1';
+  const VERSION = '2026-08-13-v87-seven-business-export-ui-v2';
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  function ensureBusinessOptions() {
+    const select = document.getElementById('periodExportBusiness');
+    if (!select) return;
+    const wanted = [
+      ['ALL', '管理汇总 + 7业务'],
+      ['CE', '仅CE'],
+      ['CEAF', '仅CEAF空运'],
+      ['TBKH', '仅TBKH'],
+      ['ALI1688', '仅ALI1688'],
+      ['SHOPEECN', '仅SHOPEE CN'],
+      ['SHOPEEVN', '仅SHOPEE VN'],
+      ['WHPP', '仅WHPP本土']
+    ];
+    const current = select.value || 'ALL';
+    select.innerHTML = wanted.map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+    select.value = wanted.some(([value]) => value === current) ? current : 'ALL';
+  }
 
   async function json(url, init = {}) {
     const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', ...init });
@@ -15,6 +33,7 @@
   }
 
   function exportInputs() {
+    ensureBusinessOptions();
     return {
       periodType: String(global.exportPeriodType || document.querySelector('.period-tab.active')?.dataset?.period || 'daily'),
       date: document.getElementById('periodExportDate')?.value || '',
@@ -70,7 +89,7 @@
     const payload = exportInputs();
     if (!validate(payload, progress)) return;
     files.innerHTML = '';
-    progress.textContent = '正在创建后台导出任务；大范围报表不会再占住网页后台…';
+    progress.textContent = '正在创建7业务后台导出任务；大范围报表不会再占住网页后台…';
     try {
       const start = await json('/api/export-period/prepare', {
         method: 'POST',
@@ -78,7 +97,6 @@
         body: JSON.stringify(payload)
       });
       if (!start.async || !start.jobId) {
-        // Compatibility with an older server during rolling update.
         if (start.files) {
           progress.textContent = `生成完成：${start.range?.from || ''} 至 ${start.range?.to || ''}`;
           renderFiles(files, start.files);
@@ -93,7 +111,8 @@
     }
   }
 
+  ensureBusinessOptions();
   global.exportPeriodReport = exportPeriodReportV84;
   global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION };
-  console.info('[CE-QC][V84_ASYNC_EXPORT_UI]', VERSION);
+  console.info('[CE-QC][V87_SEVEN_BUSINESS_EXPORT_UI]', VERSION);
 })(window);
