@@ -49,42 +49,22 @@ test('V82 binds exact 2026-08-01 source counts, user, and compact dashboard metr
       constructor(type, init = {}) { this.type = type; this.detail = init.detail; }
     },
     sessionStorage: { setItem() {} },
-    document: {
-      getElementById(id) { return id === 'topRangeStatus' ? status : null; }
-    },
+    document: { getElementById(id) { return id === 'topRangeStatus' ? status : null; } },
     fetch: async url => {
       requests.push(String(url));
       if (String(url).startsWith('/api/import/unified-latest')) {
-        return {
+        return { ok: true, status: 200, json: async () => ({
           ok: true,
-          status: 200,
-          json: async () => ({
-            ok: true,
-            import: {
-              snapshotId: 'SNAP-20260801',
-              reportDate: '2026-08-01',
-              classificationCounts: {
-                CE: 2505,
-                CEAF: 80,
-                TBKH: 2067,
-                ALI1688: 235,
-                SHOPEECN: 0,
-                SHOPEEVN: 4457
-              },
-              summary: { validUniqueWaybills: 9344 }
-            }
-          })
-        };
+          import: {
+            snapshotId: 'SNAP-20260801', reportDate: '2026-08-01',
+            classificationCounts: { CE: 2505, CEAF: 80, TBKH: 2067, ALI1688: 235, SHOPEECN: 0, SHOPEEVN: 4457 },
+            summary: { validUniqueWaybills: 9344 }
+          }
+        }) };
       }
-      if (url === '/api/session') {
-        return { ok: true, status: 200, json: async () => ({ ok: true, user: { displayName: 'CE-LEE', department: '质控部', role: 'ADMIN' } }) };
-      }
-      if (url === '/api/state?compact=1') {
-        return { ok: true, status: 200, json: async () => ({ ok: true, state: { reportDate: '2026-08-01', dashboard: { pnh: 4887, todayPod: 4700, podRate: 96.17 } } }) };
-      }
-      if (url === '/api/shopee/state?compact=1') {
-        return { ok: true, status: 200, json: async () => ({ ok: true, state: { reportDate: '2026-08-01', dashboard: { total: 4457, todayPod: 4300 } } }) };
-      }
+      if (url === '/api/session') return { ok: true, status: 200, json: async () => ({ ok: true, user: { displayName: 'CE-LEE', department: '质控部', role: 'ADMIN' } }) };
+      if (url === '/api/state?compact=1') return { ok: true, status: 200, json: async () => ({ ok: true, state: { reportDate: '2026-08-01', dashboard: { pnh: 4887, todayPod: 4700, podRate: 96.17 } } }) };
+      if (url === '/api/shopee/state?compact=1') return { ok: true, status: 200, json: async () => ({ ok: true, state: { reportDate: '2026-08-01', dashboard: { total: 4457, todayPod: 4300 } } }) };
       throw new Error(`Unexpected request: ${url}`);
     },
     dispatchEvent() {},
@@ -110,7 +90,7 @@ test('V82 binds exact 2026-08-01 source counts, user, and compact dashboard metr
   vm.runInContext(runtime, context);
   await new Promise(resolve => setTimeout(resolve, 180));
 
-  const state = vm.runInContext(`({
+  const state = JSON.parse(vm.runInContext(`JSON.stringify({
     appState,
     shopeeState,
     unifiedImportState,
@@ -119,12 +99,10 @@ test('V82 binds exact 2026-08-01 source counts, user, and compact dashboard metr
     historyCatalog,
     renders: globalThis.__renders || 0,
     refreshes: globalThis.__refreshes || 0
-  })`, context);
+  })`, context));
 
   assert.equal(state.unifiedImportState.reportDate, '2026-08-01');
-  assert.deepEqual(state.unifiedImportState.classificationCounts, {
-    CE: 2505, CEAF: 80, TBKH: 2067, ALI1688: 235, SHOPEECN: 0, SHOPEEVN: 4457
-  });
+  assert.deepEqual(state.unifiedImportState.classificationCounts, { CE: 2505, CEAF: 80, TBKH: 2067, ALI1688: 235, SHOPEECN: 0, SHOPEEVN: 4457 });
   assert.equal(state.historyModeDate, '2026-08-01');
   assert.equal(state.historyCatalog.UNIFIED[0].snapshotId, 'SNAP-20260801');
   assert.equal(state.accessSession.user.displayName, 'CE-LEE');
@@ -135,12 +113,7 @@ test('V82 binds exact 2026-08-01 source counts, user, and compact dashboard metr
   assert.equal(state.shopeeState.dashboard.total, 4457);
   assert.ok(state.renders >= 1);
   assert.ok(state.refreshes >= 1);
-  assert.deepEqual(requests.sort(), [
-    '/api/import/unified-latest?compact=1',
-    '/api/session',
-    '/api/state?compact=1',
-    '/api/shopee/state?compact=1'
-  ].sort());
+  assert.deepEqual(requests.sort(), ['/api/import/unified-latest?compact=1', '/api/session', '/api/state?compact=1', '/api/shopee/state?compact=1'].sort());
   assert.equal(status.textContent, '');
   assert.equal(reloads, 0);
 });
