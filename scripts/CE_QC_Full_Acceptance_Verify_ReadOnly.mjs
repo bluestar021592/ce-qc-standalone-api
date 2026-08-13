@@ -54,10 +54,12 @@ emit('This verifier does not re-import reports, does not delete source data, and
 const day = runPhase('A. DAILY DATA SOURCE -> NORMALIZED -> CURRENT CONSISTENCY', process.execPath, ['scripts/CE_QC_First_Day_GoLive_Verify_ReadOnly.mjs', reportDate], 60000);
 const business = runPhase('B. SEVEN-BUSINESS SNAPSHOT CONSISTENCY + QUERY SPEED', process.execPath, ['scripts/CE_QC_Business_Snapshot_Audit_ReadOnly.mjs', reportDate, 'ALL'], 60000);
 const terminal = runPhase('B2. WHPP TERMINAL AUTHORITY - ALL DATES + CE01072600002', process.execPath, ['scripts/CE_QC_WHPP_Terminal_Authority_Audit_ReadOnly.mjs', 'CE01072600002'], 60000);
+const shopeeResume = runPhase('B3. SHOPEE RESUME AUDIT - BATCH IDENTITY + CURRENT CHECKPOINT', process.execPath, ['scripts/CE_QC_SHOPEE_Resume_Audit_ReadOnly.mjs'], 60000);
 
 const criticalTests = [
   'test/v86-strict-track-status-gate.test.js',
   'test/v92-whpp-terminal-authority.test.js',
+  'test/v93-shopee-resume-resilience.test.js',
   'test/v70-confirm-query-resilience.test.js',
   'test/v61-drilldown-route-bridge.test.js',
   'test/v55-dashboard-reconciliation.test.js',
@@ -67,7 +69,7 @@ const criticalTests = [
   'test/v89-fast-dashboard-source-truth.test.js',
   'test/v90-instant-whpp-navigation.test.js'
 ];
-const critical = runPhase('C. CRITICAL SCAN/TRACK/WHPP-TERMINAL/DRILLDOWN/EXPORT/PERFORMANCE REGRESSION', process.execPath, ['--test', ...criticalTests], 120000);
+const critical = runPhase('C. CRITICAL SCAN/TRACK/RESUME/WHPP-TERMINAL/DRILLDOWN/EXPORT/PERFORMANCE REGRESSION', process.execPath, ['--test', ...criticalTests], 120000);
 const full = runNpmPhase('D. COMPLETE GO-LIVE REGRESSION SUITE', 'test:golive', 240000);
 
 const perfWarn = /PERFORMANCE_RESULT: WARN_QUERY_OVER_1S/.test(day.stdout) || /BLOCKED_SLOW_QUERY/.test(day.stdout) || /BLOCKED_SLOW_QUERY/.test(business.stdout);
@@ -78,7 +80,8 @@ emit('============================================================');
 emit(`Daily data consistency: ${day.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`Seven-business consistency: ${business.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`WHPP terminal authority: ${terminal.pass ? 'PASS' : 'BLOCKED'}`);
-emit(`Critical scan/track/WHPP-terminal/drilldown/export tests: ${critical.pass ? 'PASS' : 'BLOCKED'}`);
+emit(`SHOPEE resume integrity: ${shopeeResume.pass ? 'PASS' : 'BLOCKED'}`);
+emit(`Critical scan/track/resume/WHPP-terminal/drilldown/export tests: ${critical.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`Full go-live regression: ${full.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`Live DB query speed: ${perfWarn ? 'WARN/BLOCKED - inspect PERF lines' : 'PASS'}`);
 emit(`ACCEPTANCE_RESULT: ${blocked ? 'BLOCKED' : 'READY_FOR_UI_AND_EXPORT_ACCEPTANCE'}`);
