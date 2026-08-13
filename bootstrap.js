@@ -94,6 +94,7 @@ try {
   await importPhase('v75CeafUploadNormalizerPatch', './src/v75CeafUploadNormalizerPatch.js');
   await importPhase('v42WhppPatch', './src/v42WhppPatch.js');
   await importPhase('v44WhppUiPatch', './src/v44WhppUiPatch.js');
+  await importPhase('v89StaticAssetCachePatch', './src/v89StaticAssetCachePatch.js');
   await importPhase('v43BootstrapPerfPatch', './src/v43BootstrapPerfPatch.js');
   await importPhase('v46ColdStartIndexPatch', './src/v46ColdStartIndexPatch.js');
   await importPhase('v48RoutingPatch', './src/v48RoutingPatch.js');
@@ -106,6 +107,7 @@ try {
   await importPhase('v84AsyncExportPatch', './src/v84AsyncExportPatch.js');
   await importPhase('v85ShopeeWhppMetricPatch', './src/v85ShopeeWhppMetricPatch.js');
   await importPhase('v86StrictTrackStatusGate', './src/v86StrictTrackStatusGate.js');
+  await importPhase('v89InstantDashboardPatch', './src/v89InstantDashboardPatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
