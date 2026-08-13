@@ -1,4 +1,6 @@
 export const TRACK_QUERY_BATCH_SIZE = 50;
+const DEFAULT_TRANSIENT_RETRIES = Math.max(1, Math.min(5, Number(process.env.CE_TRANSIENT_RETRIES || 3)));
+const DEFAULT_TRANSIENT_DELAY_MS = Math.max(200, Math.min(5000, Number(process.env.CE_TRANSIENT_RETRY_DELAY_MS || 800)));
 
 export function splitTrackBatches(shipmentCodes = [], batchSize = TRACK_QUERY_BATCH_SIZE) {
   const size = Math.max(1, Math.min(TRACK_QUERY_BATCH_SIZE, Number(batchSize || TRACK_QUERY_BATCH_SIZE)));
@@ -33,11 +35,13 @@ async function safeAttempt(onAttempt, payload, onLog) {
   }
 }
 
-function isTransientTransportError(error) {
+export function isTransientTransportError(error) {
   const code = String(error?.code || error?.cause?.code || error?.transportCode || '').toUpperCase();
-  const message = String(error?.message || error?.cause?.message || '');
-  return ['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN', 'ENETRESET', 'ENETUNREACH'].includes(code)
-    || /socket hang up|connection reset|network error|timed?\s*out|timeout|premature close|read ECONNRESET/i.test(message);
+  const message = [error?.message, error?.cause?.message, error?.ceMsg]
+    .filter(Boolean)
+    .join(' ');
+  return ['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN', 'ENETRESET', 'ENETUNREACH', 'ECONNREFUSED'].includes(code)
+    || /socket hang up|connection reset|network error|timed?\s*out|timeout|premature close|read ECONNRESET|socket disconnected before secure TLS connection|before secure TLS connection was established|client network socket disconnected/i.test(message);
 }
 
 function isAuthenticationFailure(error) {
@@ -55,7 +59,7 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
 }
 
-async function withTransientRetry(query, batch, onLog, retries = 1, delayMs = 800, apiName = 'CE接口') {
+async function withTransientRetry(query, batch, onLog, retries = DEFAULT_TRANSIENT_RETRIES, delayMs = DEFAULT_TRANSIENT_DELAY_MS, apiName = 'CE接口') {
   let attempt = 0;
   while (true) {
     try {
@@ -64,8 +68,9 @@ async function withTransientRetry(query, batch, onLog, retries = 1, delayMs = 80
       if (isAuthenticationFailure(error) || error?.runStatus) throw error;
       if (!isTransientTransportError(error) || attempt >= retries) throw error;
       attempt += 1;
-      await onLog(`${apiName}网络瞬断：${batch.length}票将在${delayMs * attempt}ms后自动重试 ${attempt}/${retries}，原因：${error?.message || error}`);
-      await wait(delayMs * attempt);
+      const backoff = Math.min(8000, delayMs * attempt);
+      await onLog(`${apiName}网络/TLS瞬断：${batch.length}票将在${backoff}ms后自动重试 ${attempt}/${retries}，原因：${error?.message || error}`);
+      await wait(backoff);
     }
   }
 }
@@ -77,16 +82,16 @@ export async function queryBatchWithFallback({
   onAttempt = async () => {},
   apiName = 'track',
   fallbackSizes = [25, 10],
-  transientRetries = 1,
-  transientDelayMs = 800
+  transientRetries = DEFAULT_TRANSIENT_RETRIES,
+  transientDelayMs = DEFAULT_TRANSIENT_DELAY_MS
 }) {
   const original = [...batch];
   try {
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'running' }, onLog);
-    // Both confirm-query and track/event endpoints occasionally reset the socket while
-    // the CE service is otherwise healthy. Retry the exact same read-only request once
-    // before shrinking the batch. This keeps successful large batches fast, but prevents
-    // a single transient reset from turning the whole run into manual retry work.
+    // CE's read-only query endpoints can occasionally reset the TLS socket before
+    // the secure connection is established. Retry the exact same idempotent request
+    // several times before treating the waybills as failed. This prevents one brief
+    // upstream network reset from stopping a multi-thousand-row daily run.
     const events = await withTransientRetry(query, original, onLog, transientRetries, transientDelayMs, apiName);
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'success', resultCount: (events || []).length }, onLog);
     return { successes: [{ batch: original, events: events || [] }], failures: [] };
@@ -95,11 +100,9 @@ export async function queryBatchWithFallback({
     // CE sometimes reports an expired/unauthorized session with HTTP 200 and a
     // business message such as “请求未授权”. Treat that exactly like HTTP 401/403:
     // stop immediately, preserve checkpoints, and let the run pause for login.
-    // Splitting the same unauthorized request into 100/50/10/1 batches only floods
-    // CE and can incorrectly turn every waybill into a retry item.
     if (error?.runStatus || isAuthenticationFailure(error)) throw error;
     await onLog(`${apiName}批次失败：原批次${original.length}票，原因：${error?.message || error}`);
-    const fallbackSize = fallbackSizes.find(size => size < original.length);
+    const fallbackSize = (fallbackSizes || []).find(size => size < original.length);
     if (!fallbackSize) return { successes: [], failures: [{ batch: original, error }] };
 
     await onLog(`仅对失败批次自适应降级：${original.length}→${fallbackSize}`);
@@ -112,7 +115,7 @@ export async function queryBatchWithFallback({
         onLog,
         onAttempt,
         apiName,
-        fallbackSizes: fallbackSizes.filter(size => size < fallbackSize),
+        fallbackSizes: (fallbackSizes || []).filter(size => size < fallbackSize),
         transientRetries,
         transientDelayMs
       });
@@ -128,17 +131,15 @@ export async function queryTrackBatchWithFallback(options = {}) {
   const rawQuery = options.query;
   if (typeof rawQuery !== 'function') throw new Error('track query function is required');
 
-  // Track/event queries are read-only. A remote CE socket reset should not turn a
-  // whole 10-waybill child batch into a manual resume item. Generic batching now
-  // retries transient transport failures once at each size; track additionally
-  // continues adaptive fallback below 10 down to 5 and finally 1 waybill.
+  // Track/event queries are read-only. Retry transient network/TLS failures up to
+  // three times at each size, then adaptively shrink only the failed batch.
   return queryBatchWithFallback({
     ...options,
     query: rawQuery,
     onLog,
     apiName: options.apiName || 'track-query',
-    transientRetries: Number.isFinite(Number(options.transientRetries)) ? Number(options.transientRetries) : 1,
-    transientDelayMs: Number.isFinite(Number(options.transientDelayMs)) ? Number(options.transientDelayMs) : 800,
+    transientRetries: Number.isFinite(Number(options.transientRetries)) ? Number(options.transientRetries) : DEFAULT_TRANSIENT_RETRIES,
+    transientDelayMs: Number.isFinite(Number(options.transientDelayMs)) ? Number(options.transientDelayMs) : DEFAULT_TRANSIENT_DELAY_MS,
     fallbackSizes: Array.isArray(options.fallbackSizes) && options.fallbackSizes.length
       ? options.fallbackSizes
       : [25, 10, 5, 1]
