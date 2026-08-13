@@ -56,7 +56,7 @@ test('V90 loads after V89 and before server, and the UI runtime is injected afte
   const v90 = bootstrap.indexOf('v90FastDashboardReadPatch');
   const mainServer = bootstrap.indexOf("importPhase('server'");
   assert.ok(v89 >= 0 && v90 > v89 && mainServer > v90);
-  assert.match(injector, /v89-fast-dashboard\.js\?v=20260813-1/);
+  assert.match(injector, /v89-fast-dashboard\.js\?v=20260813-2/);
   assert.match(injector, /v90-instant-whpp-navigation\.js\?v=20260813-1/);
   assert.ok(injector.indexOf('v90-instant-whpp-navigation.js') > injector.indexOf('v89-fast-dashboard.js'));
 });
