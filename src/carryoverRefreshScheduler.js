@@ -7,11 +7,13 @@ import { updateCarryoverResults } from './unifiedImportStore.js';
 export const CARRY_REFRESH_TIMEZONE = 'Asia/Phnom_Penh';
 export const CARRY_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
 export const CARRY_REFRESH_POLL_MS = 60 * 1000;
+const FAILURE_RETRY_MS = 15 * 60 * 1000;
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
 
 let schedulerTimer = null;
 let inFlight = false;
+let lastFailureAt = 0;
 
 function getMeta(db, key) {
   try { return String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(key)?.value || ''); }
@@ -101,6 +103,8 @@ export async function processCarryFamilyForRefresh(family, rows, { client = new 
 
 export function applySuccessfulCarryRefresh(rows, { snapshotId, reportDate } = {}) {
   if (!rows?.length) return null;
+  // Reuse the exact persistence path already used by successful normal processing.
+  // Failed API bills are never passed here, so their previous current state is untouched.
   return updateCarryoverResults({ snapshotId, reportDate, rows });
 }
 
@@ -114,9 +118,84 @@ export function recordCarryRefreshSuccess(db = getDb(), { date, openCount = 0, r
   setMeta(db, 'carry_refresh_last_reason', reason);
 }
 
+export async function refreshOpenCarryNow({ reason = 'INTERNAL', client = new CEClient(), date = new Date(), db = getDb() } = {}) {
+  if (inFlight) return { ok: true, skipped: true, reason: 'ALREADY_RUNNING' };
+  if (hasActiveBusinessProcessing(db)) return { ok: true, skipped: true, reason: 'FOREGROUND_PROCESSING_ACTIVE' };
+  inFlight = true;
+  const clock = cambodiaClock(date);
+  const refreshId = `AUTO-CARRY-${clock.date}-${Date.now()}`;
+  try {
+    const open = loadOpenCarryRows(db);
+    if (!open.length) {
+      recordCarryRefreshSuccess(db, { date: clock.date, reason, openCount: 0 });
+      return { ok: true, refreshId, reason, openBefore: 0, openAfter: 0, refreshed: 0, failed: 0, closed: 0 };
+    }
+
+    const ccslRows = open.filter(row => CCSL_TYPES.has(row.businessType));
+    const shopeeRows = open.filter(row => SHOPEE_TYPES.has(row.businessType));
+    const whppRows = open.filter(row => row.businessType === 'WHPP');
+    const outcomes = [
+      await processCarryFamilyForRefresh('CCSL', ccslRows, { client, reportDate: clock.date, refreshId: `${refreshId}-CCSL` }),
+      await processCarryFamilyForRefresh('SHOPEE', shopeeRows, { client, reportDate: clock.date, refreshId: `${refreshId}-SHOPEE` }),
+      await processCarryFamilyForRefresh('WHPP', whppRows, { client, reportDate: clock.date, refreshId: `${refreshId}-WHPP` })
+    ];
+    const successfulRows = outcomes.flatMap(item => item.successfulRows);
+    const failedBills = new Set(outcomes.flatMap(item => item.failedBills));
+    for (const row of open) {
+      if (!CCSL_TYPES.has(row.businessType) && !SHOPEE_TYPES.has(row.businessType) && row.businessType !== 'WHPP') failedBills.add(row.shipmentCode);
+    }
+
+    if (successfulRows.length) applySuccessfulCarryRefresh(successfulRows, { snapshotId: refreshId, reportDate: clock.date });
+    const openAfter = Number(db.prepare("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN'").get()?.count || 0);
+    const closed = Math.max(0, open.length - openAfter);
+
+    // A total API outage does not change any shipment state and is retried after a short throttle.
+    if (!successfulRows.length && failedBills.size) throw new Error(`OPEN_CARRY_REFRESH_ALL_FAILED:${failedBills.size}`);
+
+    recordCarryRefreshSuccess(db, { date: clock.date, reason, openCount: openAfter, refreshed: successfulRows.length, failed: failedBills.size, closed });
+    return { ok: true, refreshId, reason, openBefore: open.length, openAfter, refreshed: successfulRows.length, failed: failedBills.size, closed };
+  } catch (error) {
+    lastFailureAt = Date.now();
+    try {
+      setMeta(db, 'carry_refresh_last_error_at', nowIso());
+      setMeta(db, 'carry_refresh_last_error', String(error?.message || error).slice(0, 1000));
+    } catch {}
+    throw error;
+  } finally { inFlight = false; }
+}
+
+async function schedulerTick() {
+  if (inFlight) return;
+  if (lastFailureAt && Date.now() - lastFailureAt < FAILURE_RETRY_MS) return;
+  const db = getDb();
+  const reason = dueCarryRefreshReason(db, new Date());
+  if (!reason || hasActiveBusinessProcessing(db)) return;
+  try {
+    const result = await refreshOpenCarryNow({ reason, db });
+    console.log('[CE-QC][CARRY_REFRESH]', JSON.stringify(result));
+    lastFailureAt = 0;
+  } catch (error) {
+    console.error('[CE-QC][CARRY_REFRESH_FAILED]', error?.message || error);
+  }
+}
+
+export function startCarryoverRefreshScheduler() {
+  if (schedulerTimer) return { started: false, reason: 'ALREADY_STARTED' };
+  if (process.env.CI || process.env.NODE_ENV === 'test' || String(process.env.CE_QC_DISABLE_CARRY_REFRESH || '') === '1') {
+    return { started: false, reason: 'DISABLED_BY_ENV' };
+  }
+  schedulerTimer = setInterval(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_TICK]', error?.message || error)); }, CARRY_REFRESH_POLL_MS);
+  schedulerTimer.unref?.();
+  // Startup catch-up means a PC that was off at 00:05 refreshes OPEN carry on next launch.
+  setTimeout(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_STARTUP]', error?.message || error)); }, 5000).unref?.();
+  console.log('[CE-QC][CARRY_REFRESH] Cambodia 00:05 rollover + every 2 hours; OPEN carry only; history immutable.');
+  return { started: true, pollMs: CARRY_REFRESH_POLL_MS, refreshMs: CARRY_REFRESH_INTERVAL_MS, timezone: CARRY_REFRESH_TIMEZONE };
+}
+
 export function schedulerStateForTests() { return { started: Boolean(schedulerTimer), inFlight, ccslTypes: [...CCSL_TYPES], shopeeTypes: [...SHOPEE_TYPES] }; }
 export function stopCarryoverRefreshSchedulerForTests() {
   if (schedulerTimer) clearInterval(schedulerTimer);
   schedulerTimer = null;
   inFlight = false;
+  lastFailureAt = 0;
 }
