@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'SilentlyContinue'
-$StatusUrl = 'http://127.0.0.1:5177/api/v98/carry-refresh/status'
-$RefreshUrl = 'http://127.0.0.1:5177/api/v98/carry-refresh'
+$StatusUrl = 'http://127.0.0.1:5177/_ce_qc_internal/v98/carry-refresh/status'
+$RefreshUrl = 'http://127.0.0.1:5177/_ce_qc_internal/v98/carry-refresh'
 $BackendMissingSince = $null
 
 while ($true) {
@@ -15,7 +15,7 @@ while ($true) {
     }
   } catch {
     if (-not $BackendMissingSince) { $BackendMissingSince = Get-Date }
-    if (((Get-Date) - $BackendMissingSince).TotalMinutes -ge 2) { exit 0 }
+    if (((Get-Date) - $BackendMissingSince).TotalMinutes -ge 5) { exit 0 }
   }
   Start-Sleep -Seconds 60
 }
