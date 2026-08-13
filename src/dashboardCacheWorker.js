@@ -20,16 +20,24 @@ const reason = valueAfter('--reason') || (reportDate ? 'EVENT_REFRESH' : 'SCHEDU
 const warmDays = Math.max(1, Math.min(60, Number(process.env.DASHBOARD_CACHE_WARM_DAYS || 30)));
 
 try {
+  // STARTUP_WARM is intentionally a true no-op. Return before asking for cache
+  // status, because getDashboardCacheStatus() itself opens SQLite. On the large
+  // local CE QC database that second connection used to compete with the first
+  // browser reads ~1.5s after startup and made the UI feel frozen again.
+  if (!reportDate && reason === 'STARTUP_WARM') {
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      reason,
+      result: { skipped: true, reason: 'STARTUP_WARM_DISABLED_FOR_FAST_FIRST_PAINT' },
+      cache: { skipped: true, reason: 'STARTUP_SQLITE_LAZY' }
+    })}\n`);
+    process.exit(0);
+  }
+
   let result;
   if (reportDate) {
     markDashboardCacheDirty(reportDate, reason);
     result = refreshDashboardCacheDate(reportDate, { force: true });
-  } else if (reason === 'STARTUP_WARM') {
-    // Startup must never compete with the first browser paint. The dashboard now
-    // reads normalized SQLite directly through the V43 lightweight bootstrap, so
-    // warming historical range caches immediately after process start only creates
-    // unnecessary disk/SQLite contention on large production databases.
-    result = { skipped: true, reason: 'STARTUP_WARM_DISABLED_FOR_FAST_FIRST_PAINT' };
   } else {
     const status = getDashboardCacheStatus();
     if (Number(status.cachedDates || 0) === 0) {
