@@ -106,5 +106,7 @@ test('business UI hides impossible special nodes and shows one combined Shopee W
   assert.match(ui, /WHPP滞留包裹/);
   assert.match(ui, /WHPP责任 · PP\/PV合并/);
   assert.match(ui, /rows\.filter\(isWhppRetention\)/);
+  assert.match(ui, /node && node\.textContent !== text/);
+  assert.match(ui, /setText\(card\.querySelector\('b'\), fmt\(matched\.length\)\)/);
   assert.match(injector, /v85-business-rule-ui\.js\?v=20260813-1/);
 });
