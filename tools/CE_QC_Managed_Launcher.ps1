@@ -2,7 +2,6 @@ $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $ProjectRoot
-$LocalUrl = 'http://127.0.0.1:5177/'
 $LauncherLogDir = Join-Path $ProjectRoot 'logs'
 New-Item -ItemType Directory -Path $LauncherLogDir -Force | Out-Null
 $LauncherLog = Join-Path $LauncherLogDir 'managed_launcher_latest.log'
@@ -101,11 +100,16 @@ function Invoke-SafeAutoUpdate {
 
   $backupScript = Join-Path $ProjectRoot 'scripts\CE_QC_PreUpdate_Backup.mjs'
   if (-not (Test-Path -LiteralPath $backupScript)) {
-    Write-ManagedLog '[UPDATE] Pre-update database backup tool is missing; update blocked.' Red
+    Write-ManagedLog '[UPDATE] Pre-update database backup tool is missing; update blocked. Starting current version.' Yellow
     return
   }
-  Write-ManagedLog '[UPDATE] Creating and verifying database safety backup before code switch...' Cyan
-  Invoke-Exe $script:NodeExe @($backupScript,$current,$remote) | Out-Null
+  try {
+    Write-ManagedLog '[UPDATE] Creating and verifying database safety backup before code switch...' Cyan
+    Invoke-Exe $script:NodeExe @($backupScript,$current,$remote) | Out-Null
+  } catch {
+    Write-ManagedLog ("[UPDATE] Database safety backup failed; update cancelled and current version retained. " + $_.Exception.Message) Yellow
+    return
+  }
 
   $dependencyFiles = Get-GitText @('diff','--name-only',$current,$remote,'--','package.json','package-lock.json')
   Write-ManagedLog '[UPDATE] Installing verified fast-forward update...' Cyan
@@ -198,7 +202,8 @@ function Start-ManagedSupervisor {
   try {
     Write-ManagedLog '[APP] Starting CE QC backend under managed process tree.' Cyan
     Write-ManagedLog '[APP] Closing THIS window will automatically stop the backend and release port 5177.' Yellow
-    $proc = Start-Process -FilePath $powerShellExe -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $supervisor + '"')) -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru
+    $quotedSupervisor = '"' + $supervisor + '"'
+    $proc = Start-Process -FilePath $powerShellExe -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$quotedSupervisor) -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru
     if (-not [CeQcNativeJob]::AssignProcessToJobObject($job, $proc.Handle)) {
       throw "Unable to attach CE QC supervisor to managed job. Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
     }
