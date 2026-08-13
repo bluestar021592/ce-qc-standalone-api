@@ -86,7 +86,7 @@ test('V76 repairs persisted current source split from WHPP 276 to CEAF 80 + WHPP
 
   // Model the real observed stale-state symptom: an older completed WHPP summary
   // for the same report date says 196 and shadows the newly imported 276 daily rows.
-  db.prepare("INSERT INTO business_history_summary VALUES('WHPP',?,?,?)")
+  db.prepare("INSERT INTO business_history_summary VALUES('WHPP',?,?)")
     .run(date, JSON.stringify({ total: 196, snapshotId: 'WHPP-OLD' }));
   db.prepare("INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,payloadJson,createdAt) VALUES('WHPP-OLD','WHPP',?,?,?)")
     .run(date, JSON.stringify({ state: { reportDate: date, batchId: 'OLD-BATCH', sourceSnapshotId: 'OLD-SNAPSHOT' } }), '2026-07-31T00:00:00.000Z');
