@@ -6,9 +6,9 @@ $AuditDate = '2026-08-01'
 Write-Host '[CE-QC] V94 SHOPEE WHPP terminal-location + CEAF display source truth apply' -ForegroundColor Cyan
 Set-Location $ProjectRoot
 
-# Keep the currently running CE QC backend available while source-only focused
-# tests execute. A stale/brittle assertion must never take the user's live system
-# offline before the candidate build has even passed its first deployment gate.
+# All source-only regression gates run while the current backend stays online.
+# A stale/brittle assertion must never take the live system offline before the
+# candidate build has passed every code-level deployment gate.
 Write-Host '[CE-QC] Running V94 focused deployment gate while current backend stays online...' -ForegroundColor Cyan
 & node --test `
   'test/v94-shopee-whpp-source-truth.test.js' `
@@ -24,7 +24,12 @@ Write-Host '[CE-QC] Running V94 focused deployment gate while current backend st
 if ($LASTEXITCODE -ne 0) { throw "V94 focused deployment tests failed (exit=$LASTEXITCODE). Current backend was left running; no deployment was attempted." }
 Write-Host '[CE-QC] V94 focused deployment gate passed.' -ForegroundColor Green
 
-Write-Host '[CE-QC] Stopping existing CE QC backend/supervisor only after focused gate passed...' -ForegroundColor Cyan
+Write-Host '[CE-QC] Running complete go-live regression while current backend stays online...' -ForegroundColor Cyan
+& npm run test:golive
+if ($LASTEXITCODE -ne 0) { throw "Complete go-live regression failed (exit=$LASTEXITCODE). Current backend was left running; no deployment was attempted." }
+Write-Host '[CE-QC] Complete go-live regression passed.' -ForegroundColor Green
+
+Write-Host '[CE-QC] All code-level gates passed. Stopping existing CE QC backend/supervisor for the short deployment window...' -ForegroundColor Cyan
 try {
   Get-CimInstance Win32_Process | Where-Object {
     $_.CommandLine -and (
@@ -57,11 +62,6 @@ if ($dbPath -and (Test-Path $dbPath)) {
 } else {
   Write-Host '[CE-QC] Database path not found; deployment gate continues without modifying source data.' -ForegroundColor Yellow
 }
-
-Write-Host '[CE-QC] Running complete go-live regression before deployment...' -ForegroundColor Cyan
-& npm run test:golive
-if ($LASTEXITCODE -ne 0) { throw "Complete go-live regression failed (exit=$LASTEXITCODE). Backend was not restarted with an unverified build." }
-Write-Host '[CE-QC] Complete go-live regression passed.' -ForegroundColor Green
 
 Write-Host '[CE-QC] Running read-only source-truth audit before restart...' -ForegroundColor Cyan
 & node (Join-Path $ProjectRoot 'scripts\CE_QC_V94_SHOPEE_WHPP_SourceTruth_Audit_ReadOnly.mjs') $AuditDate
