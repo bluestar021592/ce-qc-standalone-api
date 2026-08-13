@@ -1,12 +1,13 @@
 (function installBusinessRuleUiV85(global) {
   if (global.__CE_QC_V85_BUSINESS_RULE_UI__) return;
-  const VERSION = '2026-08-13-v85-business-rule-ui-v1';
+  const VERSION = '2026-08-13-v85-business-rule-ui-v2';
   const cache = new Map();
   let busy = false;
   let timer = null;
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
   const fmt = value => Number(value || 0).toLocaleString('zh-CN');
+  const setText = (node, text) => { if (node && node.textContent !== text) node.textContent = text; };
 
   function routeType() {
     const path = location.pathname.toLowerCase();
@@ -84,8 +85,8 @@
       card.innerHTML = '<i aria-hidden="true">●</i><span>WHPP滞留包裹</span><b>0</b><small>WHPP责任 · PP/PV合并</small>';
       grid.appendChild(card);
     }
-    card.querySelector('b').textContent = fmt(matched.length);
-    card.querySelector('small').textContent = 'WHPP责任 · PP/PV合并';
+    setText(card.querySelector('b'), fmt(matched.length));
+    setText(card.querySelector('small'), 'WHPP责任 · PP/PV合并');
     card.onclick = () => showRows(type, matched);
   }
 
