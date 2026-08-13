@@ -190,45 +190,27 @@ public static class CeQcNativeJob {
 '@
 }
 
-function Add-ToManagedJob([IntPtr]$Job, [Diagnostics.Process]$Process, [string]$Label) {
-  if (-not $Process) { throw "Managed process was not created: $Label" }
-  if (-not [CeQcNativeJob]::AssignProcessToJobObject($Job, $Process.Handle)) {
-    throw "Unable to attach $Label to managed job. Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
-  }
-}
-
 function Start-ManagedSupervisor {
   $supervisor = Join-Path $ProjectRoot 'Start_CE_QC.ps1'
-  $poller = Join-Path $ProjectRoot 'tools\CE_QC_CarryRefresh_Poller.ps1'
   if (-not (Test-Path -LiteralPath $supervisor)) { throw "Missing supervisor: $supervisor" }
-  if (-not (Test-Path -LiteralPath $poller)) { throw "Missing carry refresh poller: $poller" }
   $powerShellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
   if (-not (Test-Path -LiteralPath $powerShellExe)) { throw 'Windows PowerShell was not found.' }
 
-  # Ephemeral per-launch token. It is inherited only by this managed backend tree
-  # and never written to disk or logs. Closing this window destroys the whole job.
-  $env:CE_QC_LOCAL_SCHEDULER_TOKEN = ([guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N'))
-
   Add-JobObjectType
   $job = [CeQcNativeJob]::CreateKillOnCloseJob()
-  $supervisorProc = $null
-  $pollerProc = $null
+  $proc = $null
   try {
-    Write-ManagedLog '[APP] Starting CE QC backend and OPEN-carry refresher under one managed process tree.' Cyan
-    Write-ManagedLog '[APP] Closing THIS window will automatically stop the backend, refresher and release port 5177.' Yellow
+    Write-ManagedLog '[APP] Starting CE QC backend under managed process tree.' Cyan
+    Write-ManagedLog '[APP] Closing THIS window will automatically stop the backend and release port 5177.' Yellow
     $quotedSupervisor = '"' + $supervisor + '"'
-    $supervisorProc = Start-Process -FilePath $powerShellExe -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$quotedSupervisor) -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru
-    Add-ToManagedJob $job $supervisorProc 'CE QC supervisor'
-
-    $quotedPoller = '"' + $poller + '"'
-    $pollerProc = Start-Process -FilePath $powerShellExe -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$quotedPoller) -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru
-    Add-ToManagedJob $job $pollerProc 'carry refresh poller'
-
-    $supervisorProc.WaitForExit()
-    return [int]$supervisorProc.ExitCode
+    $proc = Start-Process -FilePath $powerShellExe -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$quotedSupervisor) -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru
+    if (-not [CeQcNativeJob]::AssignProcessToJobObject($job, $proc.Handle)) {
+      throw "Unable to attach CE QC supervisor to managed job. Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+    }
+    $proc.WaitForExit()
+    return [int]$proc.ExitCode
   } finally {
     if ($job -ne [IntPtr]::Zero) { [void][CeQcNativeJob]::CloseHandle($job) }
-    Remove-Item Env:CE_QC_LOCAL_SCHEDULER_TOKEN -ErrorAction SilentlyContinue
   }
 }
 
