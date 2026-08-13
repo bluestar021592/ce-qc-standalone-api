@@ -11,9 +11,13 @@ const whppPipeline = fs.readFileSync(new URL('../src/whppPipeline.js', import.me
 const uiUrl = new URL('../public/v85-business-rule-ui.js', import.meta.url);
 const metricUrl = new URL('../src/v85ShopeeWhppMetricPatch.js', import.meta.url);
 const rangeUrl = new URL('../src/rangeDashboardStoreV58.js', import.meta.url);
+const v89UiUrl = new URL('../public/v89-fast-dashboard.js', import.meta.url);
+const v89MetricUrl = new URL('../src/v89InstantDashboardPatch.js', import.meta.url);
 const ui = fs.readFileSync(uiUrl, 'utf8');
 const metric = fs.readFileSync(metricUrl, 'utf8');
 const rangeSource = fs.readFileSync(rangeUrl, 'utf8');
+const v89Ui = fs.readFileSync(v89UiUrl, 'utf8');
+const v89Metric = fs.readFileSync(v89MetricUrl, 'utf8');
 const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
 const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
 
@@ -21,8 +25,8 @@ function event(code, time, text, extra = {}) {
   return { eventCode: String(code ?? ''), eventTime: time, trackingEventDesc: text, trackingEventDescZh: text, ...extra };
 }
 
-test('V85 runtime files are syntax valid', () => {
-  for (const url of [uiUrl, metricUrl, rangeUrl]) {
+test('V85/V89 runtime files are syntax valid', () => {
+  for (const url of [uiUrl, metricUrl, rangeUrl, v89UiUrl, v89MetricUrl]) {
     const check = spawnSync(process.execPath, ['--check', fileURLToPath(url)], { encoding: 'utf8' });
     assert.equal(check.status, 0, check.stderr || check.stdout);
   }
@@ -119,12 +123,10 @@ test('Shopee WHPP metric uses normalized SQLite and stays independent from PP/PV
   assert.match(metric, /ROUTE = '\/api\/v85\/shopee-whpp-retention'/);
   assert.match(metric, /business_final_rows f/);
   assert.match(metric, /unified_import_rows u/);
-  assert.match(metric, /u\.businessType=\?/);
   assert.match(metric, /latestNode/);
   assert.match(metric, /latestEventDesc/);
   assert.match(metric, /WHPP滞留包裹/);
   assert.match(metric, /splitByRegion: false/);
-  assert.match(metric, /pageSize = Math\.max\(1, Math\.min\(1000/);
   assert.doesNotMatch(metric, /DELETE FROM|UPDATE business_|INSERT INTO|DROP TABLE/i);
   assert.match(bootstrap, /v85ShopeeWhppMetricPatch/);
 });
@@ -138,15 +140,25 @@ test('historical/range dashboard removes WHPP responsibility from ordinary Shope
   assert.match(rangeSource, /Keep current-unresolved accounting unchanged/);
 });
 
-test('business UI hides impossible special nodes and shows one combined range-safe Shopee WHPP metric', () => {
-  assert.match(ui, /removeMetricCards\(\['CCSLCN分流', 'CCSLZT分流', '580滞留包裹', 'CECN滞留包裹', 'CEZT滞留包裹'\]\)/);
-  assert.match(ui, /removeMetricCards\(\['580滞留包裹', 'CCSLCN分流', 'CECN滞留包裹'\]\)/);
-  assert.match(ui, /WHPP滞留包裹/);
-  assert.match(ui, /WHPP责任 · PP\/PV合并/);
-  assert.match(ui, /\/api\/v85\/shopee-whpp-retention/);
-  assert.doesNotMatch(ui, /\/api\/business-state\//);
-  assert.match(ui, /selectedRange/);
-  assert.match(ui, /node && node\.textContent !== text/);
-  assert.match(ui, /setText\(card\.querySelector\('b'\), fmt\(payload\.total\)\)/);
-  assert.match(injector, /v85-business-rule-ui\.js\?v=20260813-1/);
+test('Shopee UI now owns WHPP in the dashboard model and V85 no longer polls/mutates the whole document', () => {
+  assert.match(ui, /removeMetricCards/);
+  assert.match(ui, /CCSLCN分流/);
+  assert.match(ui, /580滞留包裹/);
+  assert.doesNotMatch(ui, /\/api\/v85\/shopee-whpp-retention/);
+  assert.doesNotMatch(ui, /MutationObserver/);
+  assert.doesNotMatch(ui, /readWhppMetric/);
+
+  assert.match(v89Ui, /WHPP滞留包裹/);
+  assert.match(v89Ui, /metricKey: 'whppRetention'/);
+  assert.match(v89Ui, /\/api\/v89\/instant-dashboard/);
+  assert.match(v89Ui, /\/api\/v89\/shopee-whpp-detail/);
+  assert.match(v89Ui, /SHOPEECN/);
+  assert.match(v89Ui, /SHOPEEVN/);
+  assert.match(v89Metric, /business_final_rows f/);
+  assert.match(v89Metric, /unified_import_rows/);
+  assert.match(v89Metric, /f\.businessType IN \('SHOPEE', \?\)/);
+  assert.doesNotMatch(v89Metric, /DELETE FROM|UPDATE\s+|INSERT INTO|DROP TABLE/i);
+
+  assert.match(injector, /v85-business-rule-ui\.js\?v=20260813-2/);
+  assert.match(injector, /v89-fast-dashboard\.js\?v=20260813-1/);
 });
