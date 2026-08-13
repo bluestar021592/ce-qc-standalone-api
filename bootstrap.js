@@ -102,6 +102,7 @@ try {
   await importPhase('v70ConfirmQueryResiliencePatch', './src/v70ConfirmQueryResiliencePatch.js');
   await importPhase('v71WhppSummaryPatch', './src/v71WhppSummaryPatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
+  await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   await importPhase('server', './server.js');
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
