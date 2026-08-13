@@ -6,13 +6,15 @@ import {
 import { classifyScanTerminal } from './scanTerminal.js';
 import { buildTrajectoryFacts } from './trajectoryFacts.js';
 
-export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-13-shopee-whpp-responsibility-v2';
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-13-v86-shopee-strict-track-gate-whpp-v3';
 
 /**
  * Final safety wrapper around V30.
  * - An empty trajectory result must not crash the classifier.
  * - Legacy text/old code 81 must not resurrect POD/return terminal states.
  * - Only scan 85/100 or the latest trajectory event 80/86 can close a parcel.
+ * - Only scan 50/60/70 are allowed into automated CE trajectory APIs; other
+ *   successful scan statuses are held locally for review without a CE track call.
  * - Store Pending/OC remain store self-pickup context, never store retention.
  * - Latest effective CE:WHPP is one Shopee WHPP-responsibility location bucket,
  *   independent of PP/PV and excluded from ordinary Pending/OC/etc anomalies.
@@ -36,6 +38,9 @@ export function analyzeShopeeShipment(args = {}) {
   const latestCode = codeOf(latest);
   const exactPod = scanGate.currentState === 'POD' || latestCode === '80';
   const exactReturn = !exactPod && (scanGate.currentState === 'RETURN_COMPLETED' || latestCode === '86');
+  const hold = scanStatusHold(originalEvents);
+
+  if (hold && !exactPod && !exactReturn) return scanHoldResult(result, args.scanRow || {}, hold);
 
   if (!hasEvents && !exactPod && !exactReturn) {
     return {
@@ -137,6 +142,56 @@ export function analyzeShopeeShipment(args = {}) {
 }
 
 export { classifyShopeeScanStatus, classifyShopeeRegion };
+
+function scanStatusHold(events = []) {
+  return (Array.isArray(events) ? events : []).find(event => String(event?.syntheticType || event?.__ceQcSynthetic || '').toUpperCase() === 'SCAN_STATUS_HOLD') || null;
+}
+
+function scanHoldResult(base = {}, scanRow = {}, hold = {}) {
+  const status = String(hold.scanOrderStatus || scanRow.orderStatus || '').trim();
+  const tags = [...new Set([...(Array.isArray(base.tags) ? base.tags : []), 'SCAN_STATUS_HOLD'])];
+  return {
+    ...base,
+    analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
+    currentState: 'SCAN_STATUS_HOLD',
+    scanNormalizedState: 'SCAN_STATUS_HOLD',
+    primaryCategory: '扫描状态待识别',
+    主分类: '扫描状态待识别',
+    异常分类: '扫描状态待识别',
+    orderStatus: status,
+    是否POD: '否',
+    POD状态: '未POD',
+    退回状态: '未退回',
+    trackRequired: false,
+    trackSkippedReason: 'SCAN_STATUS_NOT_TRACKABLE',
+    carry状态: 'active',
+    跨日状态: '未闭环',
+    Pending次数: 0,
+    Pending当前次数: 0,
+    pendingDistinctDayCount: 0,
+    Pending日期: '',
+    Pending连续性: '',
+    Pending不连续: '否',
+    OC天数: 0,
+    盘点天数: 0,
+    入库无扫描节点: '否',
+    无轨迹: '否',
+    latestEventTime: '',
+    latestEventDesc: '',
+    latestTrackStatusCode: '',
+    最后节点时间: '',
+    最后节点: '',
+    轨迹节点数: 0,
+    pvOpenDisposition: '',
+    returnRequired: false,
+    退回待处理: '否',
+    tags,
+    systemHold: true,
+    API状态: '已跳过',
+    查询状态: 'scan_status_hold',
+    QC判断: `扫描orderStatus=${status || 'UNKNOWN'}不属于已入库50/分配60/派送70；系统未调用CE轨迹接口，保留待识别`
+  };
+}
 
 function codeOf(event) {
   const row = event || {};
