@@ -108,6 +108,7 @@ try {
   await importPhase('v85ShopeeWhppMetricPatch', './src/v85ShopeeWhppMetricPatch.js');
   await importPhase('v86StrictTrackStatusGate', './src/v86StrictTrackStatusGate.js');
   await importPhase('v89InstantDashboardPatch', './src/v89InstantDashboardPatch.js');
+  await importPhase('v90FastDashboardReadPatch', './src/v90FastDashboardReadPatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
