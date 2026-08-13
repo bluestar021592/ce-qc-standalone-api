@@ -40,10 +40,11 @@ if ($dbPath -and (Test-Path $dbPath)) {
   Write-Host '[CE-QC] Database path not found; deployment gate continues without modifying source data.' -ForegroundColor Yellow
 }
 
-Write-Host '[CE-QC] Running V94 deployment gate...' -ForegroundColor Cyan
+Write-Host '[CE-QC] Running V94 focused deployment gate...' -ForegroundColor Cyan
 & node --test `
   'test/v94-shopee-whpp-source-truth.test.js' `
   'test/v94-fast-dashboard-whpp-precedence.test.js' `
+  'test/v94-shopee-analyzer-routing.test.js' `
   'test/v93-shopee-resume-resilience.test.js' `
   'test/v86-strict-track-status-gate.test.js' `
   'test/v73-ceaf-whpp-source-split.test.js' `
@@ -51,8 +52,13 @@ Write-Host '[CE-QC] Running V94 deployment gate...' -ForegroundColor Cyan
   'test/v76-current-ceaf-split-repair.test.js' `
   'test/v89-fast-dashboard-source-truth.test.js' `
   'test/v90-instant-whpp-navigation.test.js'
-if ($LASTEXITCODE -ne 0) { throw "V94 deployment tests failed (exit=$LASTEXITCODE). Backend was not restarted with an unverified build." }
-Write-Host '[CE-QC] V94 deployment gate passed.' -ForegroundColor Green
+if ($LASTEXITCODE -ne 0) { throw "V94 focused deployment tests failed (exit=$LASTEXITCODE). Backend was not restarted with an unverified build." }
+Write-Host '[CE-QC] V94 focused deployment gate passed.' -ForegroundColor Green
+
+Write-Host '[CE-QC] Running complete go-live regression before deployment...' -ForegroundColor Cyan
+& npm run test:golive
+if ($LASTEXITCODE -ne 0) { throw "Complete go-live regression failed (exit=$LASTEXITCODE). Backend was not restarted with an unverified build." }
+Write-Host '[CE-QC] Complete go-live regression passed.' -ForegroundColor Green
 
 Write-Host '[CE-QC] Running read-only source-truth audit before restart...' -ForegroundColor Cyan
 & node (Join-Path $ProjectRoot 'scripts\CE_QC_V94_SHOPEE_WHPP_SourceTruth_Audit_ReadOnly.mjs') $AuditDate
