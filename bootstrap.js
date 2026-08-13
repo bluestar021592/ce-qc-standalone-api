@@ -79,6 +79,7 @@ try {
   await importPhase('v89InstantDashboardPatch', './src/v89InstantDashboardPatch.js');
   await importPhase('v90FastDashboardReadPatch', './src/v90FastDashboardReadPatch.js');
   await importPhase('v94ShopeeWhppSourceTruthPatch', './src/v94ShopeeWhppSourceTruthPatch.js');
+  await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   const v92StartedAt = Date.now();
   const v92Result = v92.repairWhppTerminalAuthorityOnce();
