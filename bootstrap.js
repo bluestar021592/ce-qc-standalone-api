@@ -103,6 +103,7 @@ try {
   await importPhase('v55DashboardReconciliationPatch', './src/v55DashboardReconciliationPatch.js');
   await importPhase('v70ConfirmQueryResiliencePatch', './src/v70ConfirmQueryResiliencePatch.js');
   await importPhase('v71WhppSummaryPatch', './src/v71WhppSummaryPatch.js');
+  await importPhase('v84AsyncExportPatch', './src/v84AsyncExportPatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
