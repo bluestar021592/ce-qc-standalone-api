@@ -62,6 +62,7 @@ const criticalTests = [
   'test/v92-whpp-terminal-authority.test.js',
   'test/v93-shopee-resume-resilience.test.js',
   'test/v94-shopee-whpp-source-truth.test.js',
+  'test/v94-fast-dashboard-whpp-precedence.test.js',
   'test/v70-confirm-query-resilience.test.js',
   'test/v61-drilldown-route-bridge.test.js',
   'test/v55-dashboard-reconciliation.test.js',
