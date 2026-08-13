@@ -36,8 +36,9 @@ test('instant dashboard corrects exact CCAF/CEAF source markers without rewritin
   assert.doesNotMatch(source, /\bDELETE\s+FROM\b|\bUPDATE\s+[A-Za-z_]|\bINSERT\s+INTO\b|\bDROP\s+TABLE\b/i);
 });
 
-test('Shopee WHPP summary/detail is one responsibility bucket using normalized final rows plus source business membership', () => {
+test('Shopee WHPP summary/detail legacy V89 source remains available but V94 is the authoritative route override', () => {
   const source = read('server');
+  const bootstrap = read('bootstrap');
   assert.match(source, /shopeeWhppCount/);
   assert.match(source, /business_final_rows f/);
   assert.match(source, /unified_import_rows u/);
@@ -49,6 +50,7 @@ test('Shopee WHPP summary/detail is one responsibility bucket using normalized f
   assert.match(source, /SHOPEE_WHPP_RETENTION/);
   assert.match(source, /COALESCE\(f\.isPod,0\)=0/);
   assert.match(source, /RETURN_COMPLETED/);
+  assert.match(bootstrap, /v94ShopeeWhppSourceTruthPatch/);
 });
 
 test('home and Shopee models receive corrected source truth before native V18 rendering', () => {
@@ -63,6 +65,7 @@ test('home and Shopee models receive corrected source truth before native V18 re
   assert.match(source, /\/api\/v89\/instant-dashboard/);
   assert.match(source, /\/api\/v89\/shopee-whpp-detail/);
   assert.match(source, /localStorage\.setItem\(CACHE_KEY/);
+  assert.match(source, /strictWhppValue/);
 });
 
 test('cold startup no longer duplicates app.js primary refresh and V85 no longer observes the whole document', () => {
@@ -94,5 +97,5 @@ test('V89 patches are loaded before server and injected with fresh browser cache
   assert.ok(bootstrap.indexOf('v89InstantDashboardPatch') < bootstrap.indexOf("importPhase('server'"));
   assert.match(injector, /v81-startup-source-truth\.js\?v=20260813-3/);
   assert.match(injector, /v85-business-rule-ui\.js\?v=20260813-2/);
-  assert.match(injector, /v89-fast-dashboard\.js\?v=20260813-1/);
+  assert.match(injector, /v89-fast-dashboard\.js\?v=20260813-2/);
 });
