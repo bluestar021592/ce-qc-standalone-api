@@ -6,6 +6,23 @@ $AuditDate = '2026-08-01'
 Write-Host '[CE-QC] V94 SHOPEE WHPP terminal-location + CEAF display source truth apply' -ForegroundColor Cyan
 Set-Location $ProjectRoot
 
+function Test-CeQcListener {
+  try { return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) }
+  catch { return $false }
+}
+
+function Start-CeQcBackendIfNeeded {
+  if (Test-CeQcListener) { return $true }
+  $cmd = Join-Path $ProjectRoot 'Start_CE_QC.cmd'
+  if (-not (Test-Path $cmd)) { return $false }
+  Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ('"{0}"' -f $cmd) -WorkingDirectory $ProjectRoot
+  for ($i=0; $i -lt 150; $i++) {
+    Start-Sleep -Seconds 1
+    if (Test-CeQcListener) { return $true }
+  }
+  return $false
+}
+
 # All source-only regression gates run while the current backend stays online.
 # A stale/brittle assertion must never take the live system offline before the
 # candidate build has passed every code-level deployment gate.
@@ -45,52 +62,52 @@ try {
 } catch {}
 Start-Sleep -Seconds 2
 
-Write-Host '[CE-QC] Creating pre-V94 database safety copy...' -ForegroundColor Cyan
-$dbPath = (& node --input-type=module -e "import {getRuntimeConfig} from './src/db.js'; console.log(getRuntimeConfig().dbFile)").Trim()
-if ($dbPath -and (Test-Path $dbPath)) {
-  $dbDir = Split-Path -Parent $dbPath
-  $backupDir = Join-Path $dbDir 'backups'
-  New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-  $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-  $baseName = "pre_v94_whpp_ceaf_truth_$stamp"
-  Copy-Item $dbPath (Join-Path $backupDir "$baseName.db") -Force
-  foreach ($suffix in @('-wal','-shm')) {
-    $sidecar = "$dbPath$suffix"
-    if (Test-Path $sidecar) { Copy-Item $sidecar (Join-Path $backupDir "$baseName.db$suffix") -Force }
+try {
+  Write-Host '[CE-QC] Creating pre-V94 database safety copy...' -ForegroundColor Cyan
+  $dbPath = (& node --input-type=module -e "import {getRuntimeConfig} from './src/db.js'; console.log(getRuntimeConfig().dbFile)").Trim()
+  if ($dbPath -and (Test-Path $dbPath)) {
+    $dbDir = Split-Path -Parent $dbPath
+    $backupDir = Join-Path $dbDir 'backups'
+    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $baseName = "pre_v94_whpp_ceaf_truth_$stamp"
+    Copy-Item $dbPath (Join-Path $backupDir "$baseName.db") -Force
+    foreach ($suffix in @('-wal','-shm')) {
+      $sidecar = "$dbPath$suffix"
+      if (Test-Path $sidecar) { Copy-Item $sidecar (Join-Path $backupDir "$baseName.db$suffix") -Force }
+    }
+    Write-Host "[CE-QC] Backup saved: $backupDir\$baseName.db" -ForegroundColor Green
+  } else {
+    Write-Host '[CE-QC] Database path not found; deployment gate continues without modifying source data.' -ForegroundColor Yellow
   }
-  Write-Host "[CE-QC] Backup saved: $backupDir\$baseName.db" -ForegroundColor Green
-} else {
-  Write-Host '[CE-QC] Database path not found; deployment gate continues without modifying source data.' -ForegroundColor Yellow
+
+  Write-Host '[CE-QC] Running read-only source-truth audit before restart...' -ForegroundColor Cyan
+  & node (Join-Path $ProjectRoot 'scripts\CE_QC_V94_SHOPEE_WHPP_SourceTruth_Audit_ReadOnly.mjs') $AuditDate
+  if ($LASTEXITCODE -ne 0) { throw "V94 source-truth audit is BLOCKED before restart (exit=$LASTEXITCODE)." }
+
+  Write-Host '[CE-QC] Starting corrected backend...' -ForegroundColor Cyan
+  if (-not (Start-CeQcBackendIfNeeded)) { throw 'CE QC backend did not listen on port 5177 within 150 seconds.' }
+  Write-Host '[CE-QC] Backend is listening on 5177.' -ForegroundColor Green
+  Start-Sleep -Seconds 3
+
+  Write-Host '[CE-QC] Re-running read-only V94 audit against the restarted build...' -ForegroundColor Cyan
+  & node (Join-Path $ProjectRoot 'scripts\CE_QC_V94_SHOPEE_WHPP_SourceTruth_Audit_ReadOnly.mjs') $AuditDate
+  if ($LASTEXITCODE -ne 0) { throw "V94 source-truth audit is BLOCKED after restart (exit=$LASTEXITCODE)." }
+
+  Write-Host '[CE-QC] V94_SOURCE_TRUTH_READY' -ForegroundColor Green
+  Write-Host '[CE-QC] SHOPEE WHPP retention now means latest effective location is WHPP only; POD/return/return-start/outbound are excluded.' -ForegroundColor Green
+  Write-Host '[CE-QC] SHOPEE WHPP card and detail use the same normalized track-event source.' -ForegroundColor Green
+  Write-Host '[CE-QC] Import-page CEAF/WHPP classification display is synchronized to the same canonical dashboard counts.' -ForegroundColor Green
+  Start-Process 'http://127.0.0.1:5177/shopeevn'
+  Start-Sleep -Milliseconds 500
+  Start-Process 'http://127.0.0.1:5177/import'
+} catch {
+  Write-Host "[CE-QC] Deployment stage failed: $($_.Exception.Message)" -ForegroundColor Red
+  Write-Host '[CE-QC] Recovering backend automatically so the live system is not left offline...' -ForegroundColor Yellow
+  if (Start-CeQcBackendIfNeeded) {
+    Write-Host '[CE-QC] BACKEND_RECOVERED_AFTER_ABORT' -ForegroundColor Green
+  } else {
+    Write-Host '[CE-QC] BACKEND_RECOVERY_FAILED - manual intervention is required.' -ForegroundColor Red
+  }
+  throw
 }
-
-Write-Host '[CE-QC] Running read-only source-truth audit before restart...' -ForegroundColor Cyan
-& node (Join-Path $ProjectRoot 'scripts\CE_QC_V94_SHOPEE_WHPP_SourceTruth_Audit_ReadOnly.mjs') $AuditDate
-if ($LASTEXITCODE -ne 0) { throw "V94 source-truth audit is BLOCKED before restart (exit=$LASTEXITCODE)." }
-
-Write-Host '[CE-QC] Starting corrected backend...' -ForegroundColor Cyan
-$cmd = Join-Path $ProjectRoot 'Start_CE_QC.cmd'
-Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ('"{0}"' -f $cmd) -WorkingDirectory $ProjectRoot
-
-$ready = $false
-for ($i=0; $i -lt 150; $i++) {
-  Start-Sleep -Seconds 1
-  try {
-    $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($listener) { $ready = $true; break }
-  } catch {}
-}
-if (-not $ready) { throw 'CE QC backend did not listen on port 5177 within 150 seconds.' }
-Write-Host '[CE-QC] Backend is listening on 5177.' -ForegroundColor Green
-Start-Sleep -Seconds 3
-
-Write-Host '[CE-QC] Re-running read-only V94 audit against the restarted build...' -ForegroundColor Cyan
-& node (Join-Path $ProjectRoot 'scripts\CE_QC_V94_SHOPEE_WHPP_SourceTruth_Audit_ReadOnly.mjs') $AuditDate
-if ($LASTEXITCODE -ne 0) { throw "V94 source-truth audit is BLOCKED after restart (exit=$LASTEXITCODE)." }
-
-Write-Host '[CE-QC] V94_SOURCE_TRUTH_READY' -ForegroundColor Green
-Write-Host '[CE-QC] SHOPEE WHPP retention now means latest effective location is WHPP only; POD/return/return-start/outbound are excluded.' -ForegroundColor Green
-Write-Host '[CE-QC] SHOPEE WHPP card and detail use the same normalized track-event source.' -ForegroundColor Green
-Write-Host '[CE-QC] Import-page CEAF/WHPP classification display is synchronized to the same canonical dashboard counts.' -ForegroundColor Green
-Start-Process 'http://127.0.0.1:5177/shopeevn'
-Start-Sleep -Milliseconds 500
-Start-Process 'http://127.0.0.1:5177/import'
