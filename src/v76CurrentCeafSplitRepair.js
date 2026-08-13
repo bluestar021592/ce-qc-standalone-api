@@ -1,8 +1,8 @@
 import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-13-v76-current-ceaf-split-repair-v1';
+const PATCH_ID = '2026-08-13-v76-current-ceaf-split-repair-v2';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
-const TERMINAL_RUN_STATES = new Set(['running', 'paused', 'finished']);
+const ACTIVE_RUN_STATES = new Set(['running', 'paused']);
 
 function safeJson(value, fallback = {}) {
   try {
@@ -63,8 +63,8 @@ function activeRunBlocksRepair(db, reportDate) {
   const whppRun = tableExists(db, 'business_run_locks')
     ? db.prepare("SELECT status FROM business_run_locks WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)
     : null;
-  return TERMINAL_RUN_STATES.has(String(coreRun?.status || '').toLowerCase())
-    || TERMINAL_RUN_STATES.has(String(whppRun?.status || '').toLowerCase());
+  return ACTIVE_RUN_STATES.has(String(coreRun?.status || '').toLowerCase())
+    || ACTIVE_RUN_STATES.has(String(whppRun?.status || '').toLowerCase());
 }
 
 function processedEvidenceBlocksRepair(db, reportDate, bills) {
@@ -76,6 +76,21 @@ function processedEvidenceBlocksRepair(db, reportDate, bills) {
     if (scalar(db, `SELECT COUNT(*) count FROM ${table} WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (${marks})`, ...params) > 0) return true;
   }
   return false;
+}
+
+function currentWhppCompletion(db, reportDate, batch) {
+  if (!tableExists(db, 'business_export_snapshots')) return { current: false, row: null };
+  const rows = db.prepare("SELECT snapshotId,payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC,id DESC").all(reportDate);
+  for (const row of rows) {
+    const payload = safeJson(row.payloadJson, {});
+    const state = payload.state || {};
+    const sourceSnapshotId = String(state.sourceSnapshotId || '');
+    const sourceBatchId = String(state.batchId || '');
+    if ((sourceSnapshotId && sourceSnapshotId === String(batch.snapshotId || '')) || (sourceBatchId && sourceBatchId === String(batch.batchId || ''))) {
+      return { current: true, row };
+    }
+  }
+  return { current: false, row: null };
 }
 
 function patchWhppState(state, reportDate, airBills) {
@@ -162,13 +177,10 @@ export function repairLatestCeafSplit(database = null) {
     ? db.prepare('SELECT status FROM unified_snapshots WHERE snapshotId=? LIMIT 1').get(batch.snapshotId)
     : null;
   if (String(snapshot?.status || '').toUpperCase() === 'COMPLETED') return { repaired: false, reason: 'IMMUTABLE_COMPLETED_SNAPSHOT', reportDate };
-  if (activeRunBlocksRepair(db, reportDate)) return { repaired: false, reason: 'RUN_ALREADY_STARTED', reportDate };
-  if (tableExists(db, 'business_history_summary') && scalar(db, "SELECT COUNT(*) count FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?", reportDate) > 0) {
-    return { repaired: false, reason: 'WHPP_HISTORY_ALREADY_COMPLETED', reportDate };
-  }
-  if (tableExists(db, 'business_export_snapshots') && scalar(db, "SELECT COUNT(*) count FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=?", reportDate) > 0) {
-    return { repaired: false, reason: 'WHPP_SNAPSHOT_ALREADY_COMPLETED', reportDate };
-  }
+  if (activeRunBlocksRepair(db, reportDate)) return { repaired: false, reason: 'RUN_CURRENTLY_ACTIVE', reportDate };
+
+  const whppCompletion = currentWhppCompletion(db, reportDate, batch);
+  if (whppCompletion.current) return { repaired: false, reason: 'CURRENT_WHPP_SNAPSHOT_ALREADY_COMPLETED', reportDate };
 
   const whppRows = db.prepare("SELECT * FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY rowNumber,id").all(reportDate);
   const candidates = whppRows
@@ -226,6 +238,15 @@ export function repairLatestCeafSplit(database = null) {
         .run(remainingWhpp, JSON.stringify(reportSummary), createdAt, reportDate);
     }
 
+    // A same-date re-import can leave an older WHPP history row behind. V71 gives
+    // that history row priority over the fresh daily report, which is why the WHPP
+    // board could show 196 while the import page still showed 276. If no completed
+    // WHPP snapshot belongs to the current source snapshot, remove only that stale
+    // summary pointer; old immutable export snapshots themselves are retained.
+    if (tableExists(db, 'business_history_summary')) {
+      db.prepare("DELETE FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?").run(reportDate);
+    }
+
     if (tableExists(db, 'business_states')) {
       const stateRow = db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP' LIMIT 1").get();
       if (stateRow?.valueJson) {
@@ -256,6 +277,18 @@ export function repairLatestCeafSplit(database = null) {
       }
     }
 
+    // V42 clears current state on a new unified import but historically did not
+    // clear an old finished run lock for the same report date. Once the source
+    // membership is repaired, discard only that stale finished lock/checkpoints
+    // so the corrected 80 CEAF parcels are eligible for the next normal run.
+    if (tableExists(db, 'run_locks')) {
+      const coreRun = db.prepare('SELECT status FROM run_locks WHERE reportDate=? LIMIT 1').get(reportDate);
+      if (String(coreRun?.status || '').toLowerCase() === 'finished') {
+        db.prepare('DELETE FROM run_locks WHERE reportDate=?').run(reportDate);
+        if (tableExists(db, 'run_checkpoints')) db.prepare('DELETE FROM run_checkpoints WHERE reportDate=?').run(reportDate);
+      }
+    }
+
     const unified = updateUnifiedPayload(db, batch, movedRows, createdAt);
     db.exec('COMMIT');
     console.warn(`[CE-QC][V76_CEAF_REPAIR] reportDate=${reportDate} moved=${toMove.length} CEAF=${unified.counts.CEAF || 0} WHPP=${remainingWhpp}`);
@@ -275,4 +308,4 @@ export function repairLatestCeafSplit(database = null) {
 }
 
 export const V76_CURRENT_CEAF_SPLIT_REPAIR_ID = PATCH_ID;
-export const __test = { hasExactAirSourceMarker, ceafRow, patchWhppState, patchCcslState };
+export const __test = { hasExactAirSourceMarker, ceafRow, patchWhppState, patchCcslState, currentWhppCompletion };
