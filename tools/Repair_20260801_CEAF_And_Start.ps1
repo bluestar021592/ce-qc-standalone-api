@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$ExpectedCommit = 'c686b7a04a726c27afeeb5cfff9cca0071d67b99'
+$RequiredAncestor = 'c686b7a04a726c27afeeb5cfff9cca0071d67b99'
 $Expected = [ordered]@{
   ReportDate = '2026-08-01'
   CE = 2505
@@ -67,7 +67,7 @@ function New-PreRepairBackup {
 }
 
 function Invoke-CurrentCeafRepair {
-  Write-Step 'Repairing the persisted 2026-08-01 CEAF/WHPP membership...'
+  Write-Step 'Repairing persisted 2026-08-01 CEAF/WHPP membership...'
   $repairScript = @'
 import { repairLatestCeafSplit } from './src/v76CurrentCeafSplitRepair.js';
 import { closeDb } from './src/db.js';
@@ -97,15 +97,9 @@ try {
   const rows = db.prepare("SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType").all(batch.batchId);
   const counts = Object.fromEntries(rows.map(row => [String(row.businessType || '').toUpperCase(), Number(row.count || 0)]));
   const whppReport = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(batch.reportDate);
+  const whppRows = db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(batch.reportDate);
   const whpp = Number(whppReport?.totalCount || 0);
-  const whppStateRow = db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP' LIMIT 1").get();
-  let whppStateCount = 0;
-  if (whppStateRow?.valueJson) {
-    try {
-      const state = JSON.parse(whppStateRow.valueJson);
-      if (state.reportDate === batch.reportDate) whppStateCount = Array.isArray(state.pnhBills) ? state.pnhBills.length : 0;
-    } catch {}
-  }
+  const whppMembership = Number(whppRows?.count || 0);
   const coreTotal = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].reduce((sum, type) => sum + Number(counts[type] || 0), 0);
   const result = {
     reportDate: batch.reportDate,
@@ -118,7 +112,7 @@ try {
     SHOPEECN: Number(counts.SHOPEECN || 0),
     SHOPEEVN: Number(counts.SHOPEEVN || 0),
     WHPP: whpp,
-    whppStateCount,
+    whppMembership,
     coreTotal,
     total: coreTotal + whpp
   };
@@ -144,8 +138,8 @@ function Assert-ExpectedSplit($Actual) {
     @('ALI1688', [int]$Actual.ALI1688, [int]$Expected.ALI1688),
     @('SHOPEECN', [int]$Actual.SHOPEECN, [int]$Expected.SHOPEECN),
     @('SHOPEEVN', [int]$Actual.SHOPEEVN, [int]$Expected.SHOPEEVN),
-    @('WHPP', [int]$Actual.WHPP, [int]$Expected.WHPP),
-    @('WHPP state', [int]$Actual.whppStateCount, [int]$Expected.WHPP),
+    @('WHPP report', [int]$Actual.WHPP, [int]$Expected.WHPP),
+    @('WHPP membership', [int]$Actual.whppMembership, [int]$Expected.WHPP),
     @('Total', [int]$Actual.total, [int]$Expected.Total)
   )
   $failed = @($checks | Where-Object { $_[1] -ne $_[2] })
@@ -175,9 +169,10 @@ function Start-CeQcAndWait {
 }
 
 Set-Location $ProjectRoot
-$head = (& git rev-parse HEAD).Trim()
-if ($head -ne $ExpectedCommit) {
-  throw "Wrong local version. Expected $ExpectedCommit but found $head. Run the provided update command first."
+& git merge-base --is-ancestor $RequiredAncestor HEAD 2>$null
+if ($LASTEXITCODE -ne 0) {
+  $head = (& git rev-parse HEAD).Trim()
+  throw "Local code is older than the required CEAF repair baseline. Current HEAD: $head"
 }
 
 Stop-CeQcProcesses
