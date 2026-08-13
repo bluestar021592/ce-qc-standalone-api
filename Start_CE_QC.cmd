@@ -3,7 +3,7 @@ setlocal EnableExtensions
 chcp 65001 >nul
 title CE QC Standalone API
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Start_CE_QC.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Fast_Start_CE_QC.ps1"
 set "EC=%ERRORLEVEL%"
 
 if not "%EC%"=="0" (
