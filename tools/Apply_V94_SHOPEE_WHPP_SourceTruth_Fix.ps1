@@ -43,6 +43,7 @@ if ($dbPath -and (Test-Path $dbPath)) {
 Write-Host '[CE-QC] Running V94 deployment gate...' -ForegroundColor Cyan
 & node --test `
   'test/v94-shopee-whpp-source-truth.test.js' `
+  'test/v94-fast-dashboard-whpp-precedence.test.js' `
   'test/v93-shopee-resume-resilience.test.js' `
   'test/v86-strict-track-status-gate.test.js' `
   'test/v73-ceaf-whpp-source-split.test.js' `
