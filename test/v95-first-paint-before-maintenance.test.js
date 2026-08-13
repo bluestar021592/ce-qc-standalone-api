@@ -12,13 +12,13 @@ test('bootstrap stays syntax-valid after first-paint maintenance deferral', () =
   assert.equal(check.status, 0, check.stderr || check.stdout);
 });
 
-test('server starts before one-time V92/V76 database maintenance executes', () => {
+test('server starts before one-time V92/V76 database maintenance can execute', () => {
   const mainStart = bootstrap.indexOf("try {\n  console.log(`[CE-QC][BOOT]");
   const serverCall = bootstrap.indexOf("await importPhase('server', './server.js')", mainStart);
   const scheduleCall = bootstrap.indexOf('scheduleDeferredMaintenance({ v92, v76Repair })', serverCall);
   assert.ok(mainStart >= 0, 'bootstrap main phase must exist');
   assert.ok(serverCall > mainStart, 'server import must exist on the startup path');
-  assert.ok(scheduleCall > serverCall, 'historical maintenance must be scheduled only after server import');
+  assert.ok(scheduleCall > serverCall, 'historical maintenance must be considered only after server import');
 
   const coldStartCriticalPath = bootstrap.slice(mainStart, serverCall);
   assert.doesNotMatch(coldStartCriticalPath, /repairWhppTerminalAuthorityOnce\s*\(/);
@@ -26,7 +26,10 @@ test('server starts before one-time V92/V76 database maintenance executes', () =
   assert.doesNotMatch(coldStartCriticalPath, /repairLatestCeafSplit\s*\(/);
 });
 
-test('background maintenance is delayed and does not keep the process alive by itself', () => {
+test('normal startup disables historical repair scans unless an administrator explicitly opts in', () => {
+  assert.match(bootstrap, /CE_QC_BACKGROUND_MAINTENANCE_ENABLED/);
+  assert.match(bootstrap, /!== '1'/);
+  assert.match(bootstrap, /background maintenance disabled on normal startup/);
   assert.match(bootstrap, /CE_QC_BACKGROUND_MAINTENANCE_DELAY_MS/);
   assert.match(bootstrap, /Math\.max\(5_000/);
   assert.match(bootstrap, /timer\.unref\?\.\(\)/);
