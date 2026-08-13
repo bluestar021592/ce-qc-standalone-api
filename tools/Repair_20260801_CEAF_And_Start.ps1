@@ -47,23 +47,34 @@ function Stop-CeQcProcesses {
 
 function New-PreRepairBackup {
   Write-Step 'Creating pre-repair database backup...'
-  $dbPath = (& node --input-type=module -e "import('./src/db.js').then(m=>{console.log(m.getRuntimeConfig().dbFile)})" 2>$null | Select-Object -Last 1).Trim()
-  if (-not $dbPath -or -not (Test-Path $dbPath)) {
-    throw "Database file not found: $dbPath"
-  }
+  # Keep the Unicode database path inside Node. Windows PowerShell 5.1 can
+  # corrupt UTF-8 stdout when a Chinese path is captured into a PowerShell
+  # variable, which previously turned the valid D:\CE CCSL金边数据库 path into
+  # mojibake and caused a false "Database file not found" error.
+  $backupScript = @'
+import fs from 'node:fs';
+import path from 'node:path';
+import { getRuntimeConfig } from './src/db.js';
 
-  $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-  $backupDir = Join-Path (Split-Path $dbPath -Parent) "backups\pre_ceaf_repair_$stamp"
-  New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-
-  Copy-Item $dbPath (Join-Path $backupDir (Split-Path $dbPath -Leaf)) -Force
-  foreach ($suffix in @('-wal', '-shm')) {
-    $sidecar = "$dbPath$suffix"
-    if (Test-Path $sidecar) {
-      Copy-Item $sidecar (Join-Path $backupDir (Split-Path $sidecar -Leaf)) -Force
-    }
-  }
-  Write-Host "[CE-QC] Backup: $backupDir" -ForegroundColor DarkGray
+const cfg = getRuntimeConfig();
+const dbPath = cfg.dbFile;
+if (!dbPath || !fs.existsSync(dbPath)) {
+  console.error('DB_NOT_FOUND');
+  process.exit(2);
+}
+const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+const backupDir = path.join(path.dirname(dbPath), 'backups', `pre_ceaf_repair_${stamp}`);
+fs.mkdirSync(backupDir, { recursive: true });
+for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+  if (!fs.existsSync(file)) continue;
+  fs.copyFileSync(file, path.join(backupDir, path.basename(file)));
+}
+console.log(JSON.stringify({ ok: true, code: 'BACKUP_OK' }));
+'@
+  $resultText = ($backupScript | & node --input-type=module - 2>&1 | Select-Object -Last 1)
+  if ($LASTEXITCODE -ne 0) { throw "Database backup failed: $resultText" }
+  if ($resultText -notmatch 'BACKUP_OK') { throw "Database backup verification failed: $resultText" }
+  Write-Host '[CE-QC] BACKUP_OK' -ForegroundColor Green
 }
 
 function Invoke-CurrentCeafRepair {

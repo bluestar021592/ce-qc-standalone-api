@@ -32,3 +32,16 @@ test('V78 launcher never reimports the report or deletes data', () => {
   assert.doesNotMatch(source, /Remove-Item.*(?:sqlite|\.db)/i);
   assert.doesNotMatch(source, /git\s+reset\s+--hard/i);
 });
+
+test('V79 backup keeps the Unicode database path inside Node instead of round-tripping through Windows PowerShell', () => {
+  assert.match(source, /const cfg = getRuntimeConfig\(\)/);
+  assert.match(source, /const dbPath = cfg\.dbFile/);
+  assert.match(source, /fs\.copyFileSync/);
+  assert.match(source, /BACKUP_OK/);
+
+  // Windows PowerShell 5.1 can decode Node UTF-8 stdout using a legacy codepage.
+  // Never capture the Chinese database path into a PowerShell variable again.
+  assert.doesNotMatch(source, /\$dbPath\s*=\s*\(&\s*node/);
+  assert.doesNotMatch(source, /Test-Path\s+\$dbPath/);
+  assert.doesNotMatch(source, /Split-Path\s+\$dbPath/);
+});
