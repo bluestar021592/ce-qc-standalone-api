@@ -29,6 +29,7 @@ Write-Host '[CE-QC] Running V94 focused deployment gate while current backend st
   'test/v94-shopee-whpp-source-truth.test.js' `
   'test/v94-fast-dashboard-whpp-precedence.test.js' `
   'test/v94-shopee-analyzer-routing.test.js' `
+  'test/v94-unified-import-display-truth.test.js' `
   'test/v93-shopee-resume-resilience.test.js' `
   'test/v86-strict-track-status-gate.test.js' `
   'test/v73-ceaf-whpp-source-split.test.js' `
@@ -37,7 +38,8 @@ Write-Host '[CE-QC] Running V94 focused deployment gate while current backend st
   'test/v89-fast-dashboard-source-truth.test.js' `
   'test/v90-instant-whpp-navigation.test.js' `
   'test/v95-first-paint-before-maintenance.test.js' `
-  'test/v95-v94-safe-deployment.test.js'
+  'test/v95-v94-safe-deployment.test.js' `
+  'test/v95-v94-fast-summary.test.js'
 if ($LASTEXITCODE -ne 0) { throw "V94 focused deployment tests failed (exit=$LASTEXITCODE). Current backend was left running; no deployment was attempted." }
 Write-Host '[CE-QC] V94 focused deployment gate passed.' -ForegroundColor Green
 
