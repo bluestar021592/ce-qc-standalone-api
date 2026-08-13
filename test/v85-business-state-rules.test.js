@@ -1,19 +1,32 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { classifyScanTerminal } from '../src/scanTerminal.js';
 import { analyzeShopeeShipment } from '../src/shopeeAnalyzerV31.js';
 import { analyzeWhppShipment } from '../src/whppAnalyzer.js';
 
 const whppPipeline = fs.readFileSync(new URL('../src/whppPipeline.js', import.meta.url), 'utf8');
-const ui = fs.readFileSync(new URL('../public/v85-business-rule-ui.js', import.meta.url), 'utf8');
+const uiUrl = new URL('../public/v85-business-rule-ui.js', import.meta.url);
+const metricUrl = new URL('../src/v85ShopeeWhppMetricPatch.js', import.meta.url);
+const ui = fs.readFileSync(uiUrl, 'utf8');
+const metric = fs.readFileSync(metricUrl, 'utf8');
 const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
+const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
 
 function event(code, time, text, extra = {}) {
   return { eventCode: String(code ?? ''), eventTime: time, trackingEventDesc: text, trackingEventDescZh: text, ...extra };
 }
 
-test('CE/TBKH/ALI1688/CEAF scan terminal gate: only 50/60/70 need trajectory; 85 POD and 100 return do not', () => {
+test('V85 runtime files are syntax valid', () => {
+  for (const url of [uiUrl, metricUrl]) {
+    const check = spawnSync(process.execPath, ['--check', fileURLToPath(url)], { encoding: 'utf8' });
+    assert.equal(check.status, 0, check.stderr || check.stdout);
+  }
+});
+
+test('CE/TBKH/ALI1688/CEAF scan terminal gate: 50/60/70 need trajectory; 85 POD and 100 return do not', () => {
   for (const status of ['50', '60', '70']) {
     const row = classifyScanTerminal({ shipmentCode: `OPEN-${status}`, orderStatus: status }, 'success');
     assert.equal(row.trackRequired, true, status);
@@ -71,13 +84,13 @@ test('latest effective CE:WHPP becomes one Shopee WHPP responsibility retention 
   assert.equal(result.primaryCategory, 'WHPP滞留包裹');
   assert.equal(result.WHPP滞留, '是');
   assert.equal(result.responsibilityHub, 'WHPP');
-  assert.equal(result.trackRequired, true, 'WHPP is open responsibility location and must keep future tracking until terminal closure');
+  assert.equal(result.trackRequired, true, 'WHPP is an open responsibility location and keeps future tracking until terminal closure');
   assert.equal(result.Pending次数, 0);
   assert.equal(result.Pending不连续, '否');
   assert.equal(result.OC天数, 0);
   assert.equal(result.盘点天数, 0);
   assert.equal(result.入库无扫描节点, '否');
-  assert.equal(result.pvOpenDisposition, '', 'WHPP bucket is independent from PP/PV unresolved buckets');
+  assert.equal(result.pvOpenDisposition, '', 'WHPP is independent from PP/PV unresolved buckets');
 });
 
 test('historical CE:WHPP does not win over a newer node and terminal scan still outranks WHPP', () => {
@@ -100,13 +113,29 @@ test('historical CE:WHPP does not win over a newer node and terminal scan still 
   assert.notEqual(pod.primaryCategory, 'WHPP滞留包裹');
 });
 
-test('business UI hides impossible special nodes and shows one combined Shopee WHPP metric', () => {
+test('Shopee WHPP metric uses normalized SQLite and stays independent from PP/PV', () => {
+  assert.match(metric, /ROUTE = '\/api\/v85\/shopee-whpp-retention'/);
+  assert.match(metric, /business_final_rows f/);
+  assert.match(metric, /unified_import_rows u/);
+  assert.match(metric, /u\.businessType=\?/);
+  assert.match(metric, /latestNode/);
+  assert.match(metric, /latestEventDesc/);
+  assert.match(metric, /WHPP滞留包裹/);
+  assert.match(metric, /splitByRegion: false/);
+  assert.match(metric, /pageSize = Math\.max\(1, Math\.min\(1000/);
+  assert.doesNotMatch(metric, /DELETE FROM|UPDATE business_|INSERT INTO|DROP TABLE/i);
+  assert.match(bootstrap, /v85ShopeeWhppMetricPatch/);
+});
+
+test('business UI hides impossible special nodes and shows one combined range-safe Shopee WHPP metric', () => {
   assert.match(ui, /removeMetricCards\(\['CCSLCN分流', 'CCSLZT分流', '580滞留包裹', 'CECN滞留包裹', 'CEZT滞留包裹'\]\)/);
   assert.match(ui, /removeMetricCards\(\['580滞留包裹', 'CCSLCN分流', 'CECN滞留包裹'\]\)/);
   assert.match(ui, /WHPP滞留包裹/);
   assert.match(ui, /WHPP责任 · PP\/PV合并/);
-  assert.match(ui, /rows\.filter\(isWhppRetention\)/);
+  assert.match(ui, /\/api\/v85\/shopee-whpp-retention/);
+  assert.doesNotMatch(ui, /\/api\/business-state\//);
+  assert.match(ui, /selectedRange/);
   assert.match(ui, /node && node\.textContent !== text/);
-  assert.match(ui, /setText\(card\.querySelector\('b'\), fmt\(matched\.length\)\)/);
+  assert.match(ui, /setText\(card\.querySelector\('b'\), fmt\(payload\.total\)\)/);
   assert.match(injector, /v85-business-rule-ui\.js\?v=20260813-1/);
 });
