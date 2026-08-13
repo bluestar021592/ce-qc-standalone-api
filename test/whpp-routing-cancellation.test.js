@@ -100,7 +100,7 @@ test('CEL:CCSL580 is the dedicated 580 retention destination', () => {
   assert.equal(result?.latestNodeCode, 'CCSL580');
 });
 
-test('WHPP accounting keeps POD return cancellation special destination and unresolved mutually exclusive', () => {
+test('WHPP accounting keeps POD return cancellation special destination shops and unresolved mutually exclusive', () => {
   const rows = [
     { shipmentCode: 'CE1', reportDate: '2026-08-10', 是否POD: '是', currentState: 'POD', regionCode: 'PP' },
     { shipmentCode: 'CE2', reportDate: '2026-08-10', 退回状态: '已退回', currentState: 'RETURN_COMPLETED', regionCode: 'PP' },
@@ -109,7 +109,7 @@ test('WHPP accounting keeps POD return cancellation special destination and unre
     { shipmentCode: 'CE5', reportDate: '2026-08-10', currentState: 'OPEN_TRACK_REQUIRED', regionCode: 'PV', Pending当前次数: 1 }
   ];
   const dashboard = buildWhppDashboard({ reportDate: '2026-08-10', pnhBills: rows.map(row => row.shipmentCode), dailyParseRows: rows, finalRows: rows });
-  assert.deepEqual(dashboard.accounting, { total: 5, pod: 1, returned: 1, cancelled: 1, normalDiversion: 1, unresolved: 1, accounted: 5, difference: 0, balanced: true });
+  assert.deepEqual(dashboard.accounting, { total: 5, pod: 1, returned: 1, cancelled: 1, normalDiversion: 1, shops: 0, unresolved: 1, accounted: 5, difference: 0, balanced: true });
   assert.equal(dashboard.metrics.ccsl580Retention, 1);
   assert.equal(dashboard.metrics.ccsl580Diversion, 1, 'legacy alias must point to the same exact 580 set, never a second bucket');
   assert.equal(dashboard.detailTabs.ccsl580Retention.total, 1);
