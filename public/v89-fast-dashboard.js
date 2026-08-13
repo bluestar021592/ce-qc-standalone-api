@@ -1,6 +1,6 @@
 (function installFastDashboardV89(global) {
   if (global.__CE_QC_V89_FAST_DASHBOARD__) return;
-  const VERSION = '2026-08-13-v89-fast-dashboard-ui-v1';
+  const VERSION = '2026-08-13-v94-fast-dashboard-whpp-truth-v2';
   const CACHE_KEY = 'ce_qc_v89_instant_dashboard';
   let summary = loadCached();
   let inflight = null;
@@ -68,14 +68,24 @@
     } catch { return null; }
   }
 
+  function strictWhppValue(data, type) {
+    if (!data?.shopeeWhpp || !Object.prototype.hasOwnProperty.call(data.shopeeWhpp, type)) return null;
+    const value = Number(data.shopeeWhpp[type]);
+    return Number.isFinite(value) ? value : null;
+  }
+
   function patchShopeeModel(model) {
     const type = String(model?.businessType || '').toUpperCase();
     if (!['SHOPEECN', 'SHOPEEVN'].includes(type)) return model;
     const remove = new Set(['580滞留包裹','CCSL580分流','CCSL580滞留包裹','CCSLCN分流','CCSLCN','CECN滞留包裹']);
     const core = (Array.isArray(model.core) ? model.core : []).filter(row => !remove.has(String(row?.label || '').trim())).map(row => ({ ...row }));
     const data = summaryForDate(String(model.reportDate || ''));
+    const strict = strictWhppValue(data, type);
     const fromState = stateWhppValue(type);
-    const whppValue = fromState !== null ? fromState : Number(data?.shopeeWhpp?.[type] || 0);
+    // V94 normalized source truth is authoritative whenever the tiny summary has
+    // been loaded for this date. Old completed snapshots may still carry the V31
+    // broad-text WHPP count, so they are fallback only and must never override V94.
+    const whppValue = strict !== null ? strict : (fromState !== null ? fromState : 0);
     const existing = core.find(row => String(row?.label || '').trim() === 'WHPP滞留包裹');
     const metric = {
       key: `${type}-whpp-retention`, metricKey: 'whppRetention', label: 'WHPP滞留包裹',
@@ -182,9 +192,6 @@
   global.addEventListener('popstate', () => setTimeout(() => void fetchSummary(currentDate()), 40));
   global.addEventListener('ce-qc-startup-truth-ready', event => void fetchSummary(event?.detail?.reportDate || currentDate()));
 
-  // Reuse the last verified tiny summary immediately; then refresh it in the
-  // background. This is the same perceived-performance pattern used by fast web
-  // apps: cached shell/data first, fresh source truth second.
   setTimeout(() => {
     installRenderHooks();
     patchVisibleHome();
