@@ -30,7 +30,7 @@ test('V93 runtime files are syntax-valid and loaded after V92 before server', ()
   assert.match(bootstrap, /v93ShopeeResumeResiliencePatch/);
   assert.ok(bootstrap.indexOf('v93ShopeeResumeResiliencePatch') > bootstrap.indexOf('v92WhppTerminalAuthority'));
   assert.ok(bootstrap.indexOf('v93ShopeeResumeResiliencePatch') < bootstrap.indexOf("importPhase('server'"));
-  assert.match(injector, /v93-shopee-resume-ui\.js\?v=20260813-1/);
+  assert.match(injector, /v93-shopee-resume-ui\.js\?v=20260813-2/);
 });
 
 test('legacy numeric batch audit keys are payload-scoped so a resume subset cannot collide', () => {
@@ -106,11 +106,14 @@ test('SHOPEE track API still adaptively splits 50-waybill failures even when the
   assert.ok(calls.some(size => size <= 10));
 });
 
-test('SHOPEE UI no longer presents event-row count as if it were waybill progress', () => {
+test('SHOPEE UI separates event rows from waybill progress and auto-resumes interrupted runs once', () => {
   const ui = fs.readFileSync(uiUrl, 'utf8');
   assert.match(ui, /已保存轨迹事件/);
   assert.match(ui, /日报运单/);
   assert.match(ui, /当前批次/);
   assert.match(ui, /轨迹处理/);
+  assert.match(ui, /\/api\/shopee\/run\/resume/);
+  assert.match(ui, /shouldAutoResume/);
+  assert.match(ui, /sessionStorage/);
   assert.doesNotMatch(ui, /轨迹进度：\$\{formatInt\(done\)\} \/ \$\{formatInt\(total\)\}/);
 });
