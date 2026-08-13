@@ -1,7 +1,7 @@
 import { loadRangeDashboard as loadRangeDashboardV55 } from './rangeDashboardStoreV55.js';
 import { classifyFinalRoutingDestination, ROUTING_DESTINATIONS } from './routingDestinationV48.js';
 
-const PATCH_ID='2026-08-11-v59-metric-detail-state-parity-v1';
+const PATCH_ID='2026-08-13-v85-shopee-whpp-range-parity-v2';
 const CCSL_TYPES=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 
@@ -9,7 +9,7 @@ export function loadRangeDashboard(fromDate,toDate){
   const range=loadRangeDashboardV55(fromDate,toDate);
   for(const state of Object.values(range.states||{}))patchState(state);
   for(const state of Object.values(range.aggregates||{}))patchState(state);
-  return {...range,queryMode:`${range.queryMode||'SQL'}+CARRY_THRESHOLD_V58`,reconciliationRuleVersion:PATCH_ID};
+  return {...range,queryMode:`${range.queryMode||'SQL'}+CARRY_THRESHOLD_V58+SHOPEE_WHPP_V85`,reconciliationRuleVersion:PATCH_ID};
 }
 
 // Metric drill-down must read the exact same already-built state/detailTabs that
@@ -57,7 +57,7 @@ function normalizeDetailKey(type,key){
     const shopee={
       allData:'all',podClosed:'pod',accountingReturned:'returned',accountingOpen:'unresolved',
       pendingAll:'pending1',pending2plus:'pending2',ocAll:'oc1',oc2plus:'oc2',
-      cycle2plus:'cycle2'
+      cycle2plus:'cycle2',whpp:'whppRetention',whppRetention:'whppRetention'
     };
     return shopee[raw]||raw;
   }
@@ -74,6 +74,10 @@ function pickState(range,type){
 function patchState(state){
   if(!state)return;
   const tabs=state.detailTabs||{};
+  const allRows=unique(state.finalRows||tabs.all?.rows||tabs.allData?.rows||[]);
+  const whpp=allRows.filter(isShopeeWhppRetention);
+  if(whpp.length||isShopeeState(state))patchShopeeWhppState(state,allRows,whpp);
+
   const source=unique([...(tabs.coreAbnormal?.rows||[]),...(tabs.abnormal?.rows||[])]);
   const abnormal=source.filter(isActionableCarryRow).map(normalizeRegistryRowDisplay);
   const severe=abnormal.filter(isSevereCarryRow);
@@ -98,6 +102,75 @@ function patchState(state){
     patchMetricRows(state.detailTabs?.dashboard?.rows,abnormal.length,severe.length);
     patchMetricRows(state.dashboard?.detailTabs?.dashboard?.rows,abnormal.length,severe.length);
   }
+}
+
+function isShopeeState(state={}){
+  const type=String(state.viewBusinessType||state.businessType||'').toUpperCase();
+  return type==='SHOPEE'||SHOPEE_TYPES.has(type)||Boolean(state.dashboard?.recipientGroups);
+}
+
+function patchShopeeWhppState(state,allRows,whpp){
+  if(!isShopeeState(state))return;
+  const tabs=state.detailTabs||{};
+  const dashboardTabs=state.dashboard?.detailTabs||null;
+  setTab(tabs,'whppRetention','WHPP滞留包裹',whpp);
+  if(dashboardTabs)setTab(dashboardTabs,'whppRetention','WHPP滞留包裹',whpp);
+
+  const ordinaryTabs=['pending1','pending2','pending3','pendingNonContinuous','oc1','oc2','oc3','cycle2','inboundNoScan','deliveryStay','returnRequired','provinceOpen','phnomPenhShop','provinceShop'];
+  for(const key of ordinaryTabs){
+    removeWhppFromTab(tabs,key);
+    if(dashboardTabs)removeWhppFromTab(dashboardTabs,key);
+  }
+
+  patchShopeeSummaryForWhpp(state.v55Summary,whpp);
+  patchShopeeSummaryForWhpp(state.dashboard?.v55Summary,whpp);
+  patchShopeeSummaryForWhpp(state.dashboard?.metrics,whpp);
+
+  const groups=state.dashboard?.recipientGroups||{};
+  for(const [group,type] of [['ALL',''],['CN','SHOPEECN'],['VN','SHOPEEVN']]){
+    const subset=type?whpp.filter(row=>String(row.businessType||'').toUpperCase()===type):whpp;
+    patchShopeeSummaryForWhpp(groups[group]?.metrics,subset);
+  }
+
+  // Keep current-unresolved accounting unchanged: a WHPP responsibility parcel is
+  // still open until POD/return. Only ordinary anomaly/location buckets are removed.
+  for(const summary of [state.v55Summary,state.dashboard?.v55Summary,state.dashboard?.metrics]){
+    if(summary&&typeof summary==='object')summary.whppRetention=whpp.length;
+  }
+  const viewType=String(state.viewBusinessType||'').toUpperCase();
+  if(groups.ALL?.metrics)groups.ALL.metrics.whppRetention=whpp.length;
+  if(groups.CN?.metrics)groups.CN.metrics.whppRetention=whpp.filter(row=>String(row.businessType||viewType).toUpperCase()==='SHOPEECN').length;
+  if(groups.VN?.metrics)groups.VN.metrics.whppRetention=whpp.filter(row=>String(row.businessType||viewType).toUpperCase()==='SHOPEEVN').length;
+
+  // V55 may have copied allRows into detailTabs before this layer. Preserve them;
+  // the WHPP responsibility tab is additive and the ordinary tabs are corrected.
+  if(!tabs.all&&allRows.length)setTab(tabs,'all','全部数据',allRows);
+}
+
+function patchShopeeSummaryForWhpp(summary,whpp){
+  if(!summary||typeof summary!=='object'||!whpp.length)return;
+  const subtract=(key,count)=>{if(Object.hasOwn(summary,key))summary[key]=Math.max(0,number(summary[key])-count);};
+  subtract('pending1',whpp.filter(row=>pendingDays(row)>=1).length);
+  subtract('pending2',whpp.filter(row=>pendingDays(row)>=2).length);
+  subtract('pending3plus',whpp.filter(row=>pendingDays(row)>=3).length);
+  subtract('pending3',whpp.filter(row=>pendingDays(row)>=3).length);
+  subtract('pendingNonContinuous',whpp.filter(isPendingNonContinuous).length);
+  subtract('oc1',whpp.filter(row=>ocDays(row)>=1).length);
+  subtract('oc2',whpp.filter(row=>ocDays(row)>=2).length);
+  subtract('oc3plus',whpp.filter(row=>ocDays(row)>=3).length);
+  subtract('oc3',whpp.filter(row=>ocDays(row)>=3).length);
+  subtract('cycle2plus',whpp.filter(row=>cycleDays(row)>=2).length);
+  subtract('cycle2',whpp.filter(row=>cycleDays(row)>=2).length);
+  subtract('inboundNoScan',whpp.filter(isInboundNoScanRow).length);
+  subtract('provinceOpen',whpp.filter(row=>String(row.regionCode||row.区域||'').toUpperCase()==='PV').length);
+  summary.whppRetention=whpp.length;
+}
+
+function removeWhppFromTab(tabs,key){
+  const current=tabs?.[key];
+  if(!current||!Array.isArray(current.rows))return;
+  const rows=current.rows.filter(row=>!isShopeeWhppRetention(row));
+  tabs[key]={...current,rows,total:rows.length};
 }
 
 function renameRegistryTabs(tabs){
@@ -135,7 +208,7 @@ function isActionableCarryRow(row={}){
   // CEZT / CCSLCN / CCSL580 are normal registration destinations. Once the
   // latest effective trajectory is there, the parcel must never appear in
   // 遗留异常/严重异常, regardless of old Pending/OC/盘点/history/category text.
-  if(isNormalRegistryDestination(row))return false;
+  if(isNormalRegistryDestination(row)||isShopeeWhppRetention(row))return false;
 
   const c=category(row);
   const pending=pendingDays(row),oc=ocDays(row),cycle=cycleDays(row);
@@ -162,7 +235,27 @@ function isNormalRegistryDestination(row={}){
   return /^(?:CCSLCN_DIVERSION|CCSLZT_DIVERSION|CCSL580_(?:RETENTION|DIVERSION)|CECN_RETENTION|CEZT_RETENTION)$/i.test(category(row));
 }
 
+function isShopeeWhppRetention(row={}){
+  const type=String(row.businessType||row.viewBusinessType||'').toUpperCase();
+  if(type&&type!=='SHOPEE'&&!SHOPEE_TYPES.has(type))return false;
+  if(isTerminalRow(row))return false;
+  if(row.whppRetention===true||row.WHPP滞留==='是'||String(row.specialState||'').toUpperCase()==='SHOPEE_WHPP_RETENTION'||String(row.currentState||'').toUpperCase()==='SHOPEE_WHPP_RETENTION')return true;
+  const node=normalizeNode(row.latestEffectiveTargetNodeCode||row.latestEffectiveTargetNode||row.latestTargetNodeCode||row.latestTargetNode||row.latestNode||row.lastEventTargetNode||row.currentHub||row.responsibilityHub||'');
+  if(node==='WHPP')return true;
+  const text=[row.latestEventDesc,row.lastEventDesc,row.最后节点,row.最新节点,row.lastEvent,row.place,row.locationCode].filter(Boolean).join(' ');
+  return/(?:CE|CEL)\s*:\s*WHPP\b/i.test(text)||/到达网点[^\n]*WHPP/i.test(text);
+}
+
+function isTerminalRow(row={}){
+  const s=String(row.currentState||row.persistedCurrentState||row.scanNormalizedState||'').toUpperCase();
+  return number(row.isPod)===1||row.是否POD==='是'||row.POD状态==='POD'||['POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED'].includes(s)||row.退回状态==='已退回'||String(row.orderStatus??row.scanOrderStatus??'')==='85'||String(row.orderStatus??row.scanOrderStatus??'')==='100';
+}
+
+function normalizeNode(value){return String(value||'').normalize('NFKC').toUpperCase().replace(/^CEL?\s*:\s*/,'').replace(/[^A-Z0-9]/g,'');}
+function isInboundNoScanRow(row={}){return row.入库无扫描节点==='是'||/入库无扫描/.test(category(row));}
+
 function normalizeRegistryRowDisplay(row={}){
+  if(isShopeeWhppRetention(row))return {...row,当前分类:'WHPP滞留包裹',责任归属:'WHPP',登记状态:'责任位置'};
   const destination=classifyFinalRoutingDestination(row).destination;
   const label=destination===ROUTING_DESTINATIONS.CCSLCN?'CCSLCN'
     :destination===ROUTING_DESTINATIONS.CCSLZT?'CEZT'
