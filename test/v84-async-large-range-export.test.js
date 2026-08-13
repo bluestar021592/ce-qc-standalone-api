@@ -14,7 +14,7 @@ const files = {
 };
 const read = key => fs.readFileSync(files[key], 'utf8');
 
-test('V84/V87 export runtime is syntax valid', () => {
+test('V84/V87/V88 export runtime is syntax valid', () => {
   for (const key of ['patch', 'job', 'business', 'ui']) {
     const check = spawnSync(process.execPath, ['--check', fileURLToPath(files[key])], { encoding: 'utf8' });
     assert.equal(check.status, 0, `${key}: ${check.stderr || check.stdout}`);
@@ -61,10 +61,10 @@ test('browser polls background progress and exposes seven business choices', () 
   assert.match(source, /\/api\/export-period\/prepare/);
   assert.match(source, /\/api\/v84\/export-job\//);
   assert.match(source, /await sleep\(1200\)/);
-  assert.match(source, /后台导出仍在运行/);
+  assert.match(source, /后台任务仍在服务器运行/);
   assert.match(source, /管理汇总 \+ 7业务/);
   assert.match(source, /\['WHPP', '仅WHPP本土'\]/);
   assert.match(source, /global\.exportPeriodReport = exportPeriodReportV84/);
   assert.match(read('bootstrap'), /v84AsyncExportPatch/);
-  assert.match(read('injector'), /v84-async-export-ui\.js\?v=20260813-2/);
+  assert.match(read('injector'), /v84-async-export-ui\.js\?v=20260813-3/);
 });
