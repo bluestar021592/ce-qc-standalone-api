@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const source = fs.readFileSync(new URL('../tools/Apply_V94_SHOPEE_WHPP_SourceTruth_Fix.ps1', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 test('V94 runs focused and full regression before stopping the live 5177 backend', () => {
   const focused = source.indexOf('Running V94 focused deployment gate while current backend stays online');
@@ -12,6 +13,11 @@ test('V94 runs focused and full regression before stopping the live 5177 backend
   assert.ok(full > focused, 'complete go-live regression must run after focused tests');
   assert.ok(stop > full, 'live backend must not be stopped until every code-level gate passes');
   assert.match(source, /npm run test:golive/);
+});
+
+test('test commands force TAP summaries so tests/pass/fail are always visible', () => {
+  assert.match(pkg.scripts.test, /--test-reporter=tap/);
+  assert.match(pkg.scripts['test:golive'], /--test-reporter=tap/);
 });
 
 test('V94 deployment automatically restores the backend if a post-stop audit/start stage aborts', () => {
