@@ -34,6 +34,17 @@ test('live audits never execute full integrity_check or parse giant immutable sn
   assert.match(business, /QUERY_MS/);
 });
 
+test('first-day audit follows exact source membership instead of stale parent snapshot ids or WHPP carry rows', () => {
+  const source = read(firstDayUrl);
+  assert.match(source, /LEFT JOIN shipment_current_state s ON s\.shipmentCode=u\.shipmentCode/);
+  assert.match(source, /WHERE u\.snapshotId=\? AND u\.businessType=\?/);
+  assert.doesNotMatch(source, /WHERE s\.snapshotId=\?/);
+  assert.match(source, /SELECT DISTINCT shipmentCode\s+FROM business_daily_parse_rows\s+WHERE businessType='WHPP' AND reportDate=\?/s);
+  assert.match(source, /INNER JOIN business_final_rows f\s+ON f\.shipmentCode=p\.shipmentCode AND f\.businessType='WHPP' AND f\.reportDate=\?/s);
+  assert.match(source, /RUN CCSL:/);
+  assert.match(source, /RUN \$\{item\.businessType\}:/);
+});
+
 test('full acceptance gate covers data truth, seven businesses, WHPP terminals, strict tracking, drilldowns, exports and complete go-live', () => {
   const source = read(fullUrl);
   assert.match(source, /CE_QC_First_Day_GoLive_Verify_ReadOnly\.mjs/);
