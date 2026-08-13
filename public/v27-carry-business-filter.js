@@ -72,6 +72,11 @@
     if(typeof global.v27SetCarryStatus==='function')global.v27SetCarryStatus(status);
   };
   global.v27CarryGoBusiness=go;
+  global.__CE_QC_CARRY_FILTER_STATE__=()=>({selected,status});
+  global.v27CarryRefreshCurrent=function(){
+    if(typeof global.v27SetCarryStatus!=='function')return null;
+    return global.v27SetCarryStatus(status);
+  };
 
   function install(){
     if(typeof api==='function'&&!global.__V27_CARRY_API_WRAPPED__){
