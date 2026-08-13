@@ -9,7 +9,9 @@ import { isTransientTransportError, queryBatchWithFallback } from '../src/trackB
 
 const patchUrl = new URL('../src/v93ShopeeResumeResiliencePatch.js', import.meta.url);
 const batchingUrl = new URL('../src/trackBatching.js', import.meta.url);
+const uiUrl = new URL('../public/v93-shopee-resume-ui.js', import.meta.url);
 const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
+const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
 
 function createBatchTable(db) {
   db.exec(`CREATE TABLE business_api_batches (
@@ -20,14 +22,15 @@ function createBatchTable(db) {
   )`);
 }
 
-test('V93 files are syntax-valid and loaded after V92 before server', () => {
-  for (const url of [patchUrl, batchingUrl]) {
+test('V93 runtime files are syntax-valid and loaded after V92 before server', () => {
+  for (const url of [patchUrl, batchingUrl, uiUrl]) {
     const result = spawnSync(process.execPath, ['--check', fileURLToPath(url)], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   }
   assert.match(bootstrap, /v93ShopeeResumeResiliencePatch/);
   assert.ok(bootstrap.indexOf('v93ShopeeResumeResiliencePatch') > bootstrap.indexOf('v92WhppTerminalAuthority'));
   assert.ok(bootstrap.indexOf('v93ShopeeResumeResiliencePatch') < bootstrap.indexOf("importPhase('server'"));
+  assert.match(injector, /v93-shopee-resume-ui\.js\?v=20260813-1/);
 });
 
 test('legacy numeric batch audit keys are payload-scoped so a resume subset cannot collide', () => {
@@ -101,4 +104,13 @@ test('SHOPEE track API still adaptively splits 50-waybill failures even when the
   assert.ok(calls.includes(50));
   assert.ok(calls.includes(25));
   assert.ok(calls.some(size => size <= 10));
+});
+
+test('SHOPEE UI no longer presents event-row count as if it were waybill progress', () => {
+  const ui = fs.readFileSync(uiUrl, 'utf8');
+  assert.match(ui, /已保存轨迹事件/);
+  assert.match(ui, /日报运单/);
+  assert.match(ui, /当前批次/);
+  assert.match(ui, /轨迹处理/);
+  assert.doesNotMatch(ui, /轨迹进度：\$\{formatInt\(done\)\} \/ \$\{formatInt\(total\)\}/);
 });
