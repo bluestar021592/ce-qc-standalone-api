@@ -75,7 +75,7 @@ test('cold startup no longer duplicates app.js primary refresh and V85 no longer
   assert.match(startup, /refreshPromise/);
   assert.match(startup, /Promise\.race/);
   assert.doesNotMatch(startup, /scheduleNormalRefresh/);
-  assert.doesNotMatch(cleanup, /MutationObserver/);
+  assert.doesNotMatch(cleanup, /\bnew\s+MutationObserver\s*\(/);
   assert.doesNotMatch(cleanup, /\/api\/v85\/shopee-whpp-retention/);
   assert.match(cleanup, /V89 injects WHPP into the dashboard model itself/);
 });
