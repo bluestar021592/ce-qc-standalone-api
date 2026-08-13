@@ -6,7 +6,25 @@ $AuditDate = '2026-08-01'
 Write-Host '[CE-QC] V94 SHOPEE WHPP terminal-location + CEAF display source truth apply' -ForegroundColor Cyan
 Set-Location $ProjectRoot
 
-Write-Host '[CE-QC] Stopping existing CE QC backend/supervisor...' -ForegroundColor Cyan
+# Keep the currently running CE QC backend available while source-only focused
+# tests execute. A stale/brittle assertion must never take the user's live system
+# offline before the candidate build has even passed its first deployment gate.
+Write-Host '[CE-QC] Running V94 focused deployment gate while current backend stays online...' -ForegroundColor Cyan
+& node --test `
+  'test/v94-shopee-whpp-source-truth.test.js' `
+  'test/v94-fast-dashboard-whpp-precedence.test.js' `
+  'test/v94-shopee-analyzer-routing.test.js' `
+  'test/v93-shopee-resume-resilience.test.js' `
+  'test/v86-strict-track-status-gate.test.js' `
+  'test/v73-ceaf-whpp-source-split.test.js' `
+  'test/v75-ceaf-upload-normalizer.test.js' `
+  'test/v76-current-ceaf-split-repair.test.js' `
+  'test/v89-fast-dashboard-source-truth.test.js' `
+  'test/v90-instant-whpp-navigation.test.js'
+if ($LASTEXITCODE -ne 0) { throw "V94 focused deployment tests failed (exit=$LASTEXITCODE). Current backend was left running; no deployment was attempted." }
+Write-Host '[CE-QC] V94 focused deployment gate passed.' -ForegroundColor Green
+
+Write-Host '[CE-QC] Stopping existing CE QC backend/supervisor only after focused gate passed...' -ForegroundColor Cyan
 try {
   Get-CimInstance Win32_Process | Where-Object {
     $_.CommandLine -and (
@@ -39,21 +57,6 @@ if ($dbPath -and (Test-Path $dbPath)) {
 } else {
   Write-Host '[CE-QC] Database path not found; deployment gate continues without modifying source data.' -ForegroundColor Yellow
 }
-
-Write-Host '[CE-QC] Running V94 focused deployment gate...' -ForegroundColor Cyan
-& node --test `
-  'test/v94-shopee-whpp-source-truth.test.js' `
-  'test/v94-fast-dashboard-whpp-precedence.test.js' `
-  'test/v94-shopee-analyzer-routing.test.js' `
-  'test/v93-shopee-resume-resilience.test.js' `
-  'test/v86-strict-track-status-gate.test.js' `
-  'test/v73-ceaf-whpp-source-split.test.js' `
-  'test/v75-ceaf-upload-normalizer.test.js' `
-  'test/v76-current-ceaf-split-repair.test.js' `
-  'test/v89-fast-dashboard-source-truth.test.js' `
-  'test/v90-instant-whpp-navigation.test.js'
-if ($LASTEXITCODE -ne 0) { throw "V94 focused deployment tests failed (exit=$LASTEXITCODE). Backend was not restarted with an unverified build." }
-Write-Host '[CE-QC] V94 focused deployment gate passed.' -ForegroundColor Green
 
 Write-Host '[CE-QC] Running complete go-live regression before deployment...' -ForegroundColor Cyan
 & npm run test:golive
