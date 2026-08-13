@@ -58,10 +58,22 @@ test('due-only endpoint cannot refresh during foreground processing or before sc
   assert.match(source,/refreshOpenCarryNow/);
 });
 
+test('internal refresh bypass is restricted to exact loopback host and socket peer',()=>{
+  const source=read('src/v98CarryRefreshEndpointPatch.js');
+  assert.match(source,/STATUS_ROUTE = '\/_ce_qc_internal\/v98\/carry-refresh\/status'/);
+  assert.match(source,/REFRESH_ROUTE = '\/_ce_qc_internal\/v98\/carry-refresh'/);
+  assert.match(source,/value\.name !== 'accessIdentity'/);
+  assert.match(source,/isLoopbackRequest/);
+  assert.match(source,/\['localhost','127\.0\.0\.1','::1'\]\.includes\(host\)/);
+  assert.match(source,/\['127\.0\.0\.1','::1'\]\.includes\(remote\)/);
+  assert.match(source,/LOCAL_INTERNAL_ONLY/);
+  assert.doesNotMatch(source,/PUBLIC|LAN_DIRECT_ENABLED|CF_ACCESS/);
+});
+
 test('managed local poller checks due state every minute and never calls an external host',()=>{
   const source=read('tools/CE_QC_CarryRefresh_Poller.ps1');
-  assert.match(source,/127\.0\.0\.1:5177\/api\/v98\/carry-refresh\/status/);
-  assert.match(source,/127\.0\.0\.1:5177\/api\/v98\/carry-refresh/);
+  assert.match(source,/127\.0\.0\.1:5177\/_ce_qc_internal\/v98\/carry-refresh\/status/);
+  assert.match(source,/127\.0\.0\.1:5177\/_ce_qc_internal\/v98\/carry-refresh/);
   assert.match(source,/Start-Sleep -Seconds 60/);
   assert.doesNotMatch(source,/https:\/\//i);
 });
