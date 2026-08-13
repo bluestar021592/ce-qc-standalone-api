@@ -25,6 +25,7 @@ function Start-CeQcBackendIfNeeded {
 
 Write-Host '[CE-QC] Running V94 focused deployment gate while current backend stays online...' -ForegroundColor Cyan
 & node --test `
+  'test/bootstrap-performance.test.js' `
   'test/v94-shopee-whpp-source-truth.test.js' `
   'test/v94-fast-dashboard-whpp-precedence.test.js' `
   'test/v94-shopee-analyzer-routing.test.js' `
