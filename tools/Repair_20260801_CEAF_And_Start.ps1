@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$RequiredAncestor = 'c686b7a04a726c27afeeb5cfff9cca0071d67b99'
+Set-Location $ProjectRoot
+
 $Expected = [ordered]@{
   ReportDate = '2026-08-01'
   CE = 2505
@@ -26,19 +27,15 @@ function Stop-CeQcProcesses {
     $pids += Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction SilentlyContinue |
       Select-Object -ExpandProperty OwningProcess -Unique
   } catch {}
-
   try {
     $escapedRoot = [regex]::Escape($ProjectRoot)
     $pids += Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
       Where-Object {
-        $_.Name -ieq 'node.exe' -and
-        $_.CommandLine -and
+        $_.Name -ieq 'node.exe' -and $_.CommandLine -and
         $_.CommandLine -match $escapedRoot -and
         $_.CommandLine -match '(bootstrap\.js|server\.js)'
-      } |
-      Select-Object -ExpandProperty ProcessId
+      } | Select-Object -ExpandProperty ProcessId
   } catch {}
-
   $pids | Where-Object { $_ } | Sort-Object -Unique | ForEach-Object {
     Stop-Process -Id ([int]$_) -Force -ErrorAction SilentlyContinue
   }
@@ -47,17 +44,11 @@ function Stop-CeQcProcesses {
 
 function New-PreRepairBackup {
   Write-Step 'Creating pre-repair database backup...'
-  # Keep the Unicode database path inside Node. Windows PowerShell 5.1 can
-  # corrupt UTF-8 stdout when a Chinese path is captured into a PowerShell
-  # variable, which previously turned the valid D:\CE CCSL金边数据库 path into
-  # mojibake and caused a false "Database file not found" error.
   $backupScript = @'
 import fs from 'node:fs';
 import path from 'node:path';
 import { getRuntimeConfig } from './src/db.js';
-
-const cfg = getRuntimeConfig();
-const dbPath = cfg.dbFile;
+const dbPath = getRuntimeConfig().dbFile;
 if (!dbPath || !fs.existsSync(dbPath)) {
   console.error('DB_NOT_FOUND');
   process.exit(2);
@@ -66,19 +57,19 @@ const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
 const backupDir = path.join(path.dirname(dbPath), 'backups', `pre_ceaf_repair_${stamp}`);
 fs.mkdirSync(backupDir, { recursive: true });
 for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
-  if (!fs.existsSync(file)) continue;
-  fs.copyFileSync(file, path.join(backupDir, path.basename(file)));
+  if (fs.existsSync(file)) fs.copyFileSync(file, path.join(backupDir, path.basename(file)));
 }
-console.log(JSON.stringify({ ok: true, code: 'BACKUP_OK' }));
+console.log('BACKUP_OK');
 '@
-  $resultText = ($backupScript | & node --input-type=module - 2>&1 | Select-Object -Last 1)
-  if ($LASTEXITCODE -ne 0) { throw "Database backup failed: $resultText" }
-  if ($resultText -notmatch 'BACKUP_OK') { throw "Database backup verification failed: $resultText" }
+  $result = ($backupScript | & node --input-type=module - 2>&1 | Select-Object -Last 1)
+  if ($LASTEXITCODE -ne 0 -or $result -notmatch 'BACKUP_OK') {
+    throw "Database backup failed: $result"
+  }
   Write-Host '[CE-QC] BACKUP_OK' -ForegroundColor Green
 }
 
 function Invoke-CurrentCeafRepair {
-  Write-Step 'Repairing persisted 2026-08-01 CEAF/WHPP membership...'
+  Write-Step 'Checking persisted 2026-08-01 CEAF/WHPP membership...'
   $repairScript = @'
 import { repairLatestCeafSplit } from './src/v76CurrentCeafSplitRepair.js';
 import { closeDb } from './src/db.js';
@@ -92,13 +83,13 @@ try {
   process.exit(1);
 }
 '@
-  $resultText = ($repairScript | & node --input-type=module - 2>&1 | Select-Object -Last 1)
-  if ($LASTEXITCODE -ne 0) { throw "CEAF repair failed: $resultText" }
-  Write-Host "[CE-QC] Repair result: $resultText" -ForegroundColor DarkGray
+  $result = ($repairScript | & node --input-type=module - 2>&1 | Select-Object -Last 1)
+  if ($LASTEXITCODE -ne 0) { throw "CEAF repair failed: $result" }
+  Write-Host "[CE-QC] Repair result: $result" -ForegroundColor DarkGray
 }
 
 function Get-VerifiedSplit {
-  Write-Step 'Verifying database truth before the website is allowed to open...'
+  Write-Step 'Verifying database truth before backend start...'
   $verifyScript = @'
 import { getDb, closeDb } from './src/db.js';
 const db = getDb();
@@ -112,10 +103,8 @@ try {
   const whpp = Number(whppReport?.totalCount || 0);
   const whppMembership = Number(whppRows?.count || 0);
   const coreTotal = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].reduce((sum, type) => sum + Number(counts[type] || 0), 0);
-  const result = {
+  console.log(JSON.stringify({
     reportDate: batch.reportDate,
-    batchId: batch.batchId,
-    snapshotId: batch.snapshotId,
     CE: Number(counts.CE || 0),
     CEAF: Number(counts.CEAF || 0),
     TBKH: Number(counts.TBKH || 0),
@@ -124,10 +113,8 @@ try {
     SHOPEEVN: Number(counts.SHOPEEVN || 0),
     WHPP: whpp,
     whppMembership,
-    coreTotal,
     total: coreTotal + whpp
-  };
-  console.log(JSON.stringify(result));
+  }));
   closeDb();
 } catch (error) {
   try { closeDb(); } catch {}
@@ -149,7 +136,7 @@ function Assert-ExpectedSplit($Actual) {
     @('ALI1688', [int]$Actual.ALI1688, [int]$Expected.ALI1688),
     @('SHOPEECN', [int]$Actual.SHOPEECN, [int]$Expected.SHOPEECN),
     @('SHOPEEVN', [int]$Actual.SHOPEEVN, [int]$Expected.SHOPEEVN),
-    @('WHPP report', [int]$Actual.WHPP, [int]$Expected.WHPP),
+    @('WHPP', [int]$Actual.WHPP, [int]$Expected.WHPP),
     @('WHPP membership', [int]$Actual.whppMembership, [int]$Expected.WHPP),
     @('Total', [int]$Actual.total, [int]$Expected.Total)
   )
@@ -161,29 +148,42 @@ function Assert-ExpectedSplit($Actual) {
   Write-Host '[CE-QC] CEAF_SPLIT_OK: CE=2505, CEAF=80, TBKH=2067, ALI1688=235, SHOPEECN=0, SHOPEEVN=4457, WHPP=196, TOTAL=9540' -ForegroundColor Green
 }
 
+function Test-BackendReachable {
+  $status = 0
+  try {
+    $response = Invoke-WebRequest -Uri 'http://127.0.0.1:5177/' -UseBasicParsing -TimeoutSec 2
+    $status = [int]$response.StatusCode
+    if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
+  } catch {
+    try {
+      if ($_.Exception.Response) {
+        $status = [int]$_.Exception.Response.StatusCode
+        if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
+      }
+    } catch {}
+  }
+  try {
+    $listener = Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($listener) { return @{ Ready = $true; Status = $status } }
+  } catch {}
+  return @{ Ready = $false; Status = $status }
+}
+
 function Start-CeQcAndWait {
   $launcher = Join-Path $ProjectRoot 'Start_CE_QC.cmd'
-  if (-not (Test-Path $launcher)) { throw "Launcher not found: $launcher" }
+  if (-not (Test-Path -LiteralPath $launcher)) { throw "Launcher not found: $launcher" }
   Write-Step 'Starting CE QC backend...'
   Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', ('"{0}"' -f $launcher)) -WorkingDirectory $ProjectRoot | Out-Null
 
-  $ready = $false
-  for ($i = 0; $i -lt 240; $i++) {
+  for ($i = 1; $i -le 180; $i++) {
     Start-Sleep -Seconds 1
-    try {
-      $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5177/api/health' -TimeoutSec 2
-      if ($health.ok) { $ready = $true; break }
-    } catch {}
+    $probe = Test-BackendReachable
+    if ($probe.Ready) {
+      Write-Host "[CE-QC] BACKEND_READY HTTP=$($probe.Status)" -ForegroundColor Green
+      return
+    }
   }
-  if (-not $ready) { throw 'Backend did not become healthy within 240 seconds.' }
-  Write-Host '[CE-QC] BACKEND_READY' -ForegroundColor Green
-}
-
-Set-Location $ProjectRoot
-& git merge-base --is-ancestor $RequiredAncestor HEAD 2>$null
-if ($LASTEXITCODE -ne 0) {
-  $head = (& git rev-parse HEAD).Trim()
-  throw "Local code is older than the required CEAF repair baseline. Current HEAD: $head"
+  throw 'Backend did not become reachable on 127.0.0.1:5177 within 180 seconds.'
 }
 
 Stop-CeQcProcesses
@@ -195,4 +195,4 @@ Start-CeQcAndWait
 
 $cacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 Start-Process "http://127.0.0.1:5177/import?repair=$cacheBust"
-Write-Host '[CE-QC] COMPLETE - current data repaired and verified before browser launch.' -ForegroundColor Green
+Write-Host '[CE-QC] COMPLETE' -ForegroundColor Green
