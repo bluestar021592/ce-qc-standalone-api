@@ -16,7 +16,7 @@ function Write-ManagedLog([string]$Text, [ConsoleColor]$Color = [ConsoleColor]::
 function Invoke-Exe([string]$File, [string[]]$Args, [switch]$AllowFailure) {
   & $File @Args
   $code = $LASTEXITCODE
-  if ($code -ne 0 -and -not $AllowFailure) { throw "$File exited with code $code: $($Args -join ' ')" }
+  if ($code -ne 0 -and -not $AllowFailure) { throw "$File exited with code ${code}: $($Args -join ' ')" }
   return $code
 }
 
