@@ -48,7 +48,7 @@ function Test-RemoteCandidate([string]$RemoteCommit) {
     try {
       Invoke-Exe $script:NpmExe @('ci','--prefer-offline','--no-audit','--no-fund') | Out-Null
       Invoke-Exe $script:NpmExe @('run','test:golive') | Out-Null
-      Invoke-Exe $script:NodeExe @('--test','--test-reporter=tap','test/v99-managed-runtime-final.test.js','test/v100-carry-live-ui.test.js') | Out-Null
+      Invoke-Exe $script:NodeExe @('--test','--test-reporter=tap','test/v99-managed-runtime-final.test.js','test/v100-carry-live-ui.test.js','test/v101-carry-refresh-terminal-safety.test.js') | Out-Null
     } finally { Pop-Location }
     Write-ManagedLog '[UPDATE] Candidate tests passed. Code is eligible for installation.' Green
     return $true
