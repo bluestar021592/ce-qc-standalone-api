@@ -5,7 +5,6 @@ const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
 function wrapHandler(handler) {
   if (typeof handler !== 'function') return handler;
   if (handler[WRAPPED]) return handler;
-
   const wrapped = function ceQcSafeAsyncHandler(req, res, next) {
     try {
       const result = handler.call(this, req, res, next);
@@ -79,10 +78,10 @@ try {
   await importPhase('v86StrictTrackStatusGate', './src/v86StrictTrackStatusGate.js');
   await importPhase('v89InstantDashboardPatch', './src/v89InstantDashboardPatch.js');
   await importPhase('v90FastDashboardReadPatch', './src/v90FastDashboardReadPatch.js');
-  const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthority.js');
+  const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   const v92StartedAt = Date.now();
-  const v92Result = v92.repairWhppTerminalAuthority();
-  console.log(`[CE-QC][BOOT] V92 WHPP terminal authority ${Date.now()-v92StartedAt}ms ${JSON.stringify({scanned:v92Result.scanned,repaired:v92Result.repaired,affectedDates:v92Result.affectedDates})}`);
+  const v92Result = v92.repairWhppTerminalAuthorityOnce();
+  console.log(`[CE-QC][BOOT] V92 WHPP terminal authority ${Date.now()-v92StartedAt}ms ${JSON.stringify({skipped:Boolean(v92Result.skipped),scanned:v92Result.scanned,repaired:v92Result.repaired,affectedDates:v92Result.affectedDates})}`);
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
