@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { getDb, nowIso } from './db.js';
 
-export const V93_SHOPEE_RESUME_RESILIENCE_ID = '2026-08-13-v93-shopee-resume-resilience-v1';
+export const V93_SHOPEE_RESUME_RESILIENCE_ID = '2026-08-13-v93-shopee-resume-resilience-v2';
 const SHOPEE = 'SHOPEE';
 const GUARDED_ROUTES = new Set(['/api/shopee/run/start', '/api/shopee/run/resume']);
 const LEGACY_BATCH_KEY = /^(?:scan-status|track-event|exception-item):\d{6}$/i;
@@ -45,7 +45,7 @@ export function rekeyLegacyShopeeApiBatches(db = getDb(), reportDate = '') {
 
   const selectTarget = db.prepare('SELECT 1 FROM business_api_batches WHERE businessType=? AND reportDate=? AND runId=? AND apiName=? AND batchKey=?');
   const deleteTarget = db.prepare('DELETE FROM business_api_batches WHERE businessType=? AND reportDate=? AND runId=? AND apiName=? AND batchKey=?');
-  const updateKey = db.prepare('UPDATE business_api_batches SET batchKey=?,payloadHash=CASE WHEN COALESCE(payloadHash,\'\')=\'\' THEN ? ELSE payloadHash END,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=? AND apiName=? AND batchKey=?');
+  const updateKey = db.prepare("UPDATE business_api_batches SET batchKey=?,payloadHash=CASE WHEN COALESCE(payloadHash,'')='' THEN ? ELSE payloadHash END,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=? AND apiName=? AND batchKey=?");
   let moved = 0;
   let merged = 0;
   const now = nowIso();
@@ -106,15 +106,3 @@ express.application.post = function v93ShopeeResumePost(pathValue, ...handlers) 
   }
   return previousPost.call(this, pathValue, ...handlers);
 };
-
-let startupResult = null;
-try {
-  startupResult = prepareShopeeResumeAudit(getDb());
-  console.log(`[CE-QC][V93] SHOPEE resume audit prepared ${JSON.stringify(startupResult)}`);
-} catch (error) {
-  // Startup must not be killed by audit metadata cleanup. The guarded route will
-  // retry preparation and return a controlled API error if the database is locked.
-  console.warn('[CE-QC][V93] startup audit preparation deferred:', error?.message || error);
-}
-
-export function getV93StartupResult() { return startupResult; }
