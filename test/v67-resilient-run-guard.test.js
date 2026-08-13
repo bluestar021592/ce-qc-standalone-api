@@ -70,7 +70,7 @@ test('V96 restores read-only V33 live progress without replacing V67 runner',()=
 
 test('V67 and V96 progress bridge are injected with current cache keys',()=>{
   const injector=read(injectorPath);
-  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260813-5/);
+  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260814-5/);
   assert.match(injector,/v96-v67-live-progress-bridge\.js\?v=20260813-1/);
   const v67=injector.indexOf('v67-resilient-run-guard.js');
   const v47=injector.indexOf('whpp-v47-auto-run.js');
