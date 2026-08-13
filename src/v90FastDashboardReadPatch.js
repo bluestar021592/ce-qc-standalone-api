@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-13-v90-fast-dashboard-normalized-read-v1';
+const PATCH_ID = '2026-08-13-v90-fast-dashboard-normalized-read-v2';
 const SUMMARY_ROUTE = '/api/v89/instant-dashboard';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 const CACHE_MS = Math.max(5_000, Number(process.env.V90_DASHBOARD_CACHE_MS || 30_000));
@@ -44,8 +44,6 @@ function whppRawTotal(db, reportDate) {
   return Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?`).get(reportDate)?.count || 0);
 }
 
-// This deliberately scans only the tiny WHPP import membership for exact source
-// markers. It never scans the large final-row raw JSON table.
 function airCandidatesInWhpp(db, reportDate) {
   const rows = db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?`).all(reportDate);
   const out = new Map();
@@ -127,11 +125,12 @@ function fastWhppSummary(db, reportDate, total) {
   return { reportDate, completed: Boolean(row), metrics };
 }
 
-function buildSummary(requestedDate = '') {
+function buildSummary(requestedDate = '', options = {}) {
   const db = getDb();
   const batch = latestBatch(db, requestedDate);
   if (!batch) return { ok:true, patchId:PATCH_ID, reportDate:'', counts:{}, total:0, shopeeWhpp:{SHOPEECN:0,SHOPEEVN:0}, whppSummary:{reportDate:'',completed:false,metrics:{total:0}} };
-  const key = `${batch.snapshotId}|${batch.reportDate}`;
+  const skipShopeeWhpp = options?.skipShopeeWhpp === true;
+  const key = `${batch.snapshotId}|${batch.reportDate}|${skipShopeeWhpp ? 'base' : 'full'}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return { ...hit.payload, cacheHit:true };
   const baseCounts = importedCounts(db, batch.snapshotId);
@@ -146,7 +145,7 @@ function buildSummary(requestedDate = '') {
     snapshotId:batch.snapshotId,
     counts,
     total,
-    shopeeWhpp:{
+    shopeeWhpp: skipShopeeWhpp ? { SHOPEECN:0, SHOPEEVN:0 } : {
       SHOPEECN:shopeeWhppCount(db,batch,'SHOPEECN'),
       SHOPEEVN:shopeeWhppCount(db,batch,'SHOPEEVN')
     },
@@ -177,14 +176,11 @@ function summaryHandler(req,res) {
   }
 }
 
-// V89 registers its route only when app.listen() is called. V90 loads after V89
-// but before server.js, so intercept that registration and swap only the summary
-// handler. Detail/export/business rules remain untouched.
 const previousGet = express.application.get;
 express.application.get = function v90FastDashboardGet(pathValue, ...handlers) {
   if (pathValue === SUMMARY_ROUTE && handlers.length) return previousGet.call(this, pathValue, summaryHandler);
   return previousGet.call(this, pathValue, ...handlers);
 };
 
-export function inspectV90FastDashboard(requestedDate='') { return buildSummary(requestedDate); }
+export function inspectV90FastDashboard(requestedDate='', options={}) { return buildSummary(requestedDate, options); }
 export const V90_FAST_DASHBOARD_READ_PATCH_ID = PATCH_ID;
