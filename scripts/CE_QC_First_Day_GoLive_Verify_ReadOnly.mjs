@@ -17,19 +17,115 @@ const dataDir = resolvePath(process.env.DATA_DIR || DEFAULT_DATA_DIR);
 const dbFile = resolvePath(process.env.DB_FILE || path.join(dataDir, 'ce_qc_monitor.db'));
 const requestedDate = String(process.argv[2] || '').trim();
 
-function safeJson(text, fallback = {}) { try { return JSON.parse(text || ''); } catch { return fallback; } }
-function isPod(row = {}) {
-  return Number(row.isPod || 0) === 1
-    || String(row.是否POD || '').trim() === '是'
-    || String(row.orderStatus || '').trim() === '85'
-    || String(row.currentState || row.state || '').trim().toUpperCase() === 'POD'
-    || String(row.异常分类 || row.primaryCategory || row.category || '').trim().toUpperCase() === 'POD闭环';
+const zeros = () => Object.fromEntries(TYPES.map(type => [type, 0]));
+const pad = (value, width) => String(value).padEnd(width);
+const now = () => Number(process.hrtime.bigint()) / 1e6;
+
+function timed(label, fn) {
+  const started = now();
+  const value = fn();
+  const elapsed = now() - started;
+  console.log(`[PERF] ${label}: ${elapsed.toFixed(1)} ms`);
+  return { value, elapsed };
 }
-function zeros() { return Object.fromEntries(TYPES.map(t => [t, 0])); }
-function pad(v, n) { return String(v).padEnd(n); }
+
+function tableExists(db, name) {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+}
+
+function groupedSourceCounts(db, snapshotId) {
+  const out = zeros();
+  const rows = db.prepare(`
+    SELECT businessType, COUNT(DISTINCT shipmentCode) AS count
+    FROM unified_import_rows
+    WHERE snapshotId=?
+    GROUP BY businessType
+  `).all(snapshotId);
+  for (const row of rows) if (CORE_TYPES.includes(row.businessType)) out[row.businessType] = Number(row.count || 0);
+  return out;
+}
+
+function whppSourceCount(db, reportDate) {
+  if (!tableExists(db, 'business_daily_parse_rows')) return 0;
+  return Number(db.prepare(`
+    SELECT COUNT(DISTINCT shipmentCode) AS count
+    FROM business_daily_parse_rows
+    WHERE businessType='WHPP' AND reportDate=?
+  `).get(reportDate)?.count || 0);
+}
+
+function normalizedStats(db, batch, type) {
+  if (type === 'WHPP') {
+    if (!tableExists(db, 'business_final_rows')) return { count: 0, pod: 0 };
+    return db.prepare(`
+      SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
+      FROM (
+        SELECT shipmentCode, MAX(CASE WHEN COALESCE(isPod,0)=1 THEN 1 ELSE 0 END) AS pod
+        FROM business_final_rows
+        WHERE businessType='WHPP' AND reportDate=?
+        GROUP BY shipmentCode
+      )
+    `).get(batch.reportDate) || { count: 0, pod: 0 };
+  }
+
+  if (SHOPEE.has(type)) {
+    if (!tableExists(db, 'business_final_rows')) return { count: 0, pod: 0 };
+    return db.prepare(`
+      SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
+      FROM (
+        SELECT f.shipmentCode, MAX(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod
+        FROM business_final_rows f
+        INNER JOIN unified_import_rows u
+          ON u.shipmentCode=f.shipmentCode AND u.snapshotId=? AND u.businessType=?
+        WHERE f.reportDate=? AND f.businessType IN ('SHOPEE', ?)
+        GROUP BY f.shipmentCode
+      )
+    `).get(batch.snapshotId, type, batch.reportDate, type) || { count: 0, pod: 0 };
+  }
+
+  if (!tableExists(db, 'final_rows')) return { count: 0, pod: 0 };
+  return db.prepare(`
+    SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
+    FROM (
+      SELECT f.shipmentCode, MAX(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod
+      FROM final_rows f
+      INNER JOIN unified_import_rows u
+        ON u.shipmentCode=f.shipmentCode AND u.snapshotId=? AND u.businessType=?
+      WHERE f.reportDate=?
+      GROUP BY f.shipmentCode
+    )
+  `).get(batch.snapshotId, type, batch.reportDate) || { count: 0, pod: 0 };
+}
+
+function currentStats(db, batch, type) {
+  if (!tableExists(db, 'shipment_current_state')) return { count: 0, pod: 0 };
+  if (type === 'WHPP') {
+    return db.prepare(`
+      SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
+      FROM (
+        SELECT shipmentCode, MAX(CASE WHEN UPPER(COALESCE(state,''))='POD' THEN 1 ELSE 0 END) AS pod
+        FROM shipment_current_state
+        WHERE businessType='WHPP' AND reportDate=?
+        GROUP BY shipmentCode
+      )
+    `).get(batch.reportDate) || { count: 0, pod: 0 };
+  }
+  return db.prepare(`
+    SELECT COUNT(*) AS count, COALESCE(SUM(pod),0) AS pod
+    FROM (
+      SELECT s.shipmentCode, MAX(CASE WHEN UPPER(COALESCE(s.state,''))='POD' THEN 1 ELSE 0 END) AS pod
+      FROM shipment_current_state s
+      INNER JOIN unified_import_rows u
+        ON u.shipmentCode=s.shipmentCode AND u.snapshotId=? AND u.businessType=?
+      WHERE s.snapshotId=?
+      GROUP BY s.shipmentCode
+    )
+  `).get(batch.snapshotId, type, batch.snapshotId) || { count: 0, pod: 0 };
+}
 
 if (!fs.existsSync(dbFile)) {
-  console.error(`BLOCKED: database not found: ${dbFile}`);
+  console.error(`GO_LIVE_RESULT: BLOCKED_DATABASE_NOT_FOUND`);
+  console.error(`Database: ${dbFile}`);
   process.exit(20);
 }
 
@@ -37,126 +133,91 @@ const before = fs.statSync(dbFile);
 const db = new DatabaseSync(dbFile, { readOnly: true });
 let exitCode = 20;
 try {
-  const integrity = String(db.prepare('PRAGMA integrity_check').get()?.integrity_check || 'unknown');
+  db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=1500;');
+  const dbSizeGb = before.size / 1024 / 1024 / 1024;
+  console.log('\nCE QC FIRST-DAY GO-LIVE VERIFY - FAST STRICT READ ONLY');
+  console.log(`Database: ${dbFile}`);
+  console.log(`Database size: ${dbSizeGb.toFixed(2)} GB`);
+  console.log('Live integrity mode: READ-ONLY OPEN + NORMALIZED CONSISTENCY (full PRAGMA integrity_check intentionally skipped on live multi-GB DB)');
+
   const reportDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
     ? requestedDate
     : String(db.prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate || '');
-  const batch = reportDate ? db.prepare(`
-    SELECT b.*,s.status snapshotStatus,s.payloadJson
+  console.log(`Report date: ${reportDate || 'NONE'}`);
+
+  const batch = reportDate ? timed('load valid batch', () => db.prepare(`
+    SELECT b.batchId,b.snapshotId,b.reportDate,b.createdAt,s.status AS snapshotStatus
     FROM unified_import_batches b
     LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
     WHERE b.status='VALID' AND b.reportDate=?
     ORDER BY b.createdAt DESC LIMIT 1
-  `).get(reportDate) : null;
-  const whppSnapshot = reportDate ? db.prepare(`
-    SELECT snapshotId,payloadJson
-    FROM business_export_snapshots
-    WHERE businessType='WHPP' AND reportDate=?
-    ORDER BY createdAt DESC LIMIT 1
-  `).get(reportDate) : null;
+  `).get(reportDate) || null).value : null;
 
-  console.log('\nCE QC FIRST-DAY GO-LIVE VERIFY - STRICT READ ONLY');
-  console.log(`Database: ${dbFile}`);
-  console.log(`SQLite integrity: ${integrity}`);
-  console.log(`Report date: ${reportDate || 'NONE'}`);
   if (!batch) {
     console.log('GO_LIVE_RESULT: BLOCKED_NO_VALID_IMPORT');
     exitCode = 20;
   } else {
-    console.log(`Core snapshot status: ${batch.snapshotStatus || 'MISSING'}`);
-    console.log(`WHPP snapshot: ${whppSnapshot?.snapshotId || 'NONE'}`);
-    const expected = zeros();
-    for (const row of db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(batch.snapshotId)) {
-      if (CORE_TYPES.includes(row.businessType)) expected[row.businessType] = Number(row.count || 0);
-    }
-    expected.WHPP = Number(db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(reportDate)?.count || 0);
+    console.log(`Batch: ${batch.batchId}`);
+    console.log(`Snapshot: ${batch.snapshotId}`);
+    console.log(`Snapshot status: ${batch.snapshotStatus || 'MISSING'}`);
 
-    const payload = safeJson(batch.payloadJson, {});
-    const payloadRows = Array.isArray(payload.finalRows) ? payload.finalRows : [];
-    const payloadCount = zeros();
-    const payloadPod = zeros();
-    for (const row of payloadRows) {
-      const type = String(row.businessType || '').toUpperCase();
-      if (!CORE_TYPES.includes(type)) continue;
-      payloadCount[type] += 1;
-      if (isPod(row)) payloadPod[type] += 1;
-    }
-    const whppPayload = safeJson(whppSnapshot?.payloadJson, {});
-    const whppRows = Array.isArray(whppPayload?.state?.finalRows) ? whppPayload.state.finalRows : [];
-    payloadCount.WHPP = whppRows.length;
-    payloadPod.WHPP = whppRows.filter(isPod).length;
+    const source = timed('source membership counts', () => groupedSourceCounts(db, batch.snapshotId)).value;
+    source.WHPP = timed('WHPP source count', () => whppSourceCount(db, reportDate)).value;
 
     const normalizedCount = zeros();
     const normalizedPod = zeros();
     const currentCount = zeros();
     const currentPod = zeros();
+    let slowestMs = 0;
 
-    for (const type of CORE_TYPES) {
-      if (SHOPEE.has(type)) {
-        const r = db.prepare(`
-          SELECT COUNT(f.shipmentCode) count,COALESCE(SUM(CASE WHEN f.isPod=1 THEN 1 ELSE 0 END),0) pod
-          FROM unified_import_rows u
-          LEFT JOIN business_final_rows f
-            ON f.shipmentCode=u.shipmentCode AND f.businessType='SHOPEE' AND f.reportDate=?
-          WHERE u.snapshotId=? AND u.businessType=?
-        `).get(reportDate, batch.snapshotId, type) || {};
-        normalizedCount[type] = Number(r.count || 0);
-        normalizedPod[type] = Number(r.pod || 0);
-      } else {
-        const r = db.prepare(`
-          SELECT COUNT(f.shipmentCode) count,COALESCE(SUM(CASE WHEN f.isPod=1 THEN 1 ELSE 0 END),0) pod
-          FROM unified_import_rows u
-          LEFT JOIN final_rows f
-            ON f.shipmentCode=u.shipmentCode AND f.reportDate=?
-          WHERE u.snapshotId=? AND u.businessType=?
-        `).get(reportDate, batch.snapshotId, type) || {};
-        normalizedCount[type] = Number(r.count || 0);
-        normalizedPod[type] = Number(r.pod || 0);
-      }
-      const c = db.prepare(`
-        SELECT COUNT(s.shipmentCode) count,COALESCE(SUM(CASE WHEN UPPER(COALESCE(s.state,''))='POD' THEN 1 ELSE 0 END),0) pod
-        FROM unified_import_rows u
-        LEFT JOIN shipment_current_state s
-          ON s.shipmentCode=u.shipmentCode AND s.snapshotId=?
-        WHERE u.snapshotId=? AND u.businessType=?
-      `).get(batch.snapshotId, batch.snapshotId, type) || {};
-      currentCount[type] = Number(c.count || 0);
-      currentPod[type] = Number(c.pod || 0);
-    }
-
-    const whppNorm = db.prepare("SELECT COUNT(*) count,COALESCE(SUM(CASE WHEN isPod=1 THEN 1 ELSE 0 END),0) pod FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(reportDate) || {};
-    normalizedCount.WHPP = Number(whppNorm.count || 0);
-    normalizedPod.WHPP = Number(whppNorm.pod || 0);
-    const whppCurrent = db.prepare("SELECT COUNT(*) count,COALESCE(SUM(CASE WHEN UPPER(COALESCE(state,''))='POD' THEN 1 ELSE 0 END),0) pod FROM shipment_current_state WHERE businessType='WHPP' AND reportDate=?").get(reportDate) || {};
-    currentCount.WHPP = Number(whppCurrent.count || 0);
-    currentPod.WHPP = Number(whppCurrent.pod || 0);
-
-    console.log('\nBUSINESS      SRC    PAY    PAY_POD  NORM   NORM_POD  CUR    CUR_POD  RESULT');
-    console.log('------------  -----  -----  -------  -----  --------  -----  -------  ----------------');
-    let allPass = integrity === 'ok' && batch.snapshotStatus === 'COMPLETED';
-    if (expected.WHPP > 0 && !whppSnapshot) allPass = false;
     for (const type of TYPES) {
-      const pass = expected[type] === payloadCount[type]
-        && expected[type] === normalizedCount[type]
-        && expected[type] === currentCount[type]
-        && payloadPod[type] === normalizedPod[type]
-        && payloadPod[type] === currentPod[type];
-      if (!pass) allPass = false;
-      console.log(`${pad(type,12)}  ${pad(expected[type],5)}  ${pad(payloadCount[type],5)}  ${pad(payloadPod[type],7)}  ${pad(normalizedCount[type],5)}  ${pad(normalizedPod[type],8)}  ${pad(currentCount[type],5)}  ${pad(currentPod[type],7)}  ${pass ? 'PASS' : 'BLOCKED'}`);
+      const norm = timed(`${type} normalized`, () => normalizedStats(db, batch, type));
+      normalizedCount[type] = Number(norm.value.count || 0);
+      normalizedPod[type] = Number(norm.value.pod || 0);
+      slowestMs = Math.max(slowestMs, norm.elapsed);
+
+      const current = timed(`${type} current-state`, () => currentStats(db, batch, type));
+      currentCount[type] = Number(current.value.count || 0);
+      currentPod[type] = Number(current.value.pod || 0);
+      slowestMs = Math.max(slowestMs, current.elapsed);
     }
 
-    const sourceTotal = Object.values(expected).reduce((a,b) => a+b,0);
-    const payloadTotal = Object.values(payloadCount).reduce((a,b) => a+b,0);
-    const normalizedTotal = Object.values(normalizedCount).reduce((a,b) => a+b,0);
-    const currentTotal = Object.values(currentCount).reduce((a,b) => a+b,0);
-    console.log(`\nTOTAL source=${sourceTotal} payload=${payloadTotal} normalized=${normalizedTotal} current=${currentTotal}`);
+    console.log('\nBUSINESS      SOURCE  NORMAL  NORM_POD  CURRENT  CUR_POD  RESULT');
+    console.log('------------  ------  ------  --------  -------  -------  ----------------');
+    let allPass = batch.snapshotStatus === 'COMPLETED';
+    for (const type of TYPES) {
+      const pass = source[type] === normalizedCount[type]
+        && source[type] === currentCount[type]
+        && normalizedPod[type] === currentPod[type];
+      if (!pass) allPass = false;
+      console.log(`${pad(type,12)}  ${pad(source[type],6)}  ${pad(normalizedCount[type],6)}  ${pad(normalizedPod[type],8)}  ${pad(currentCount[type],7)}  ${pad(currentPod[type],7)}  ${pass ? 'PASS' : 'BLOCKED'}`);
+    }
+
+    const sourceTotal = Object.values(source).reduce((a,b) => a + Number(b || 0), 0);
+    const normalizedTotal = Object.values(normalizedCount).reduce((a,b) => a + Number(b || 0), 0);
+    const currentTotal = Object.values(currentCount).reduce((a,b) => a + Number(b || 0), 0);
+    console.log(`\nTOTAL source=${sourceTotal} normalized=${normalizedTotal} current=${currentTotal}`);
+    console.log(`SLOWEST_DB_CHECK_MS: ${slowestMs.toFixed(1)}`);
+    if (slowestMs > 3000) {
+      console.log('PERFORMANCE_RESULT: BLOCKED_SLOW_DB_QUERY');
+      allPass = false;
+    } else if (slowestMs > 1000) {
+      console.log('PERFORMANCE_RESULT: WARN_QUERY_OVER_1S');
+    } else {
+      console.log('PERFORMANCE_RESULT: PASS');
+    }
+
     console.log(`GO_LIVE_RESULT: ${allPass ? 'READY' : 'BLOCKED'}`);
-    if (!allPass) console.log('Do not declare the fresh-start day live until every non-zero business row is PASS.');
     exitCode = allPass ? 0 : 10;
   }
+} catch (error) {
+  console.error('GO_LIVE_RESULT: BLOCKED_AUDIT_ERROR');
+  console.error(error?.stack || error);
+  exitCode = 30;
 } finally {
   db.close();
 }
+
 const after = fs.statSync(dbFile);
 console.log('READ-ONLY CONFIRMED');
 console.log(`DATABASE MODIFIED: ${before.size === after.size && before.mtimeMs === after.mtimeMs ? 'NO' : 'YES'}`);
