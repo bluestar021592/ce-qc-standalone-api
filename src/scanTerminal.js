@@ -51,7 +51,11 @@ function result(currentState, trackRequired, scanTerminalType, scanTerminalReaso
     trackRequired,
     scanTerminalType,
     scanTerminalReason,
-    trackSkippedReason: trackRequired ? '' : scanTerminalReason
+    // Keep the scan evidence reason (ORDER_STATUS_85/100) separately while
+    // exposing the canonical no-track closure reason expected by analyzers/UI.
+    // Retry/no-response cases have no terminal type and therefore retain their
+    // API failure reason.
+    trackSkippedReason: trackRequired ? '' : (scanTerminalType || scanTerminalReason)
   };
 }
 
