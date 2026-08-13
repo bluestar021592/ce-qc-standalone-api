@@ -90,6 +90,7 @@ try {
   await importPhase('v39UnifiedSnapshotRecoveryPatch', './src/v39UnifiedSnapshotRecoveryPatch.js');
   await importPhase('v41AuthPausePatch', './src/v41AuthPausePatch.js');
   await importPhase('v53WhppRefreshGatePatch', './src/v53WhppRefreshGatePatch.js');
+  await importPhase('v75CeafUploadNormalizerPatch', './src/v75CeafUploadNormalizerPatch.js');
   await importPhase('v42WhppPatch', './src/v42WhppPatch.js');
   await importPhase('v44WhppUiPatch', './src/v44WhppUiPatch.js');
   await importPhase('v43BootstrapPerfPatch', './src/v43BootstrapPerfPatch.js');
