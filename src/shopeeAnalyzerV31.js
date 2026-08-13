@@ -4,8 +4,9 @@ import {
   classifyShopeeRegion
 } from './shopeeAnalyzerV30.js';
 import { classifyScanTerminal } from './scanTerminal.js';
+import { buildTrajectoryFacts } from './trajectoryFacts.js';
 
-export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-10-final-trajectory-state-machine-v1';
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-13-shopee-whpp-responsibility-v2';
 
 /**
  * Final safety wrapper around V30.
@@ -13,6 +14,8 @@ export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-10-final-trajectory-state-m
  * - Legacy text/old code 81 must not resurrect POD/return terminal states.
  * - Only scan 85/100 or the latest trajectory event 80/86 can close a parcel.
  * - Store Pending/OC remain store self-pickup context, never store retention.
+ * - Latest effective CE:WHPP is one Shopee WHPP-responsibility location bucket,
+ *   independent of PP/PV and excluded from ordinary Pending/OC/etc anomalies.
  * - Legacy carry flags are rebuilt from the same exact terminal facts.
  */
 export function analyzeShopeeShipment(args = {}) {
@@ -85,6 +88,43 @@ export function analyzeShopeeShipment(args = {}) {
   }
 
   const returnInProgress = !exactPod && !exactReturn && (latestCode === '84' || result.退回状态 === '退回处理中' || String(result.currentState || '').toUpperCase() === 'RETURN_IN_PROGRESS');
+  const facts = !exactPod && !exactReturn && !returnInProgress
+    ? buildTrajectoryFacts({ shipmentCode: args.waybill || args.scanRow?.shipmentCode || args.scanRow?.运单号 || '', scanRow: args.scanRow || {}, events: originalEvents, reportDate: args.analysisDate || args.reportDate || '' })
+    : null;
+  const atShopeeWhpp = Boolean(facts && latestIsWhpp(facts));
+
+  if (atShopeeWhpp) {
+    const tags = [...new Set([...(Array.isArray(result.tags) ? result.tags : []), 'SHOPEE_WHPP_RETENTION'])];
+    Object.assign(result, {
+      specialState: 'SHOPEE_WHPP_RETENTION',
+      currentState: 'SHOPEE_WHPP_RETENTION',
+      primaryCategory: 'WHPP滞留包裹',
+      主分类: 'WHPP滞留包裹',
+      异常分类: 'WHPP滞留包裹',
+      WHPP滞留: '是',
+      whppRetention: true,
+      currentHub: 'WHPP',
+      responsibilityHub: 'WHPP',
+      Pending状态: '否',
+      Pending次数: 0,
+      Pending当前次数: 0,
+      Pending日期: '',
+      Pending连续: '否',
+      Pending不连续: '否',
+      returnRequired: false,
+      退回待处理: '否',
+      OC状态: '否',
+      OC天数: 0,
+      盘点状态: '否',
+      盘点天数: 0,
+      入库无扫描节点: '否',
+      无轨迹: '否',
+      pvOpenDisposition: '',
+      tags,
+      QC判断: '最新有效节点到达CE:WHPP，归WHPP责任滞留；独立统计，不并入PP/PV普通异常'
+    });
+  }
+
   Object.assign(result, {
     analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
     trackRequired: !(exactPod || exactReturn),
@@ -101,4 +141,19 @@ export { classifyShopeeScanStatus, classifyShopeeRegion };
 function codeOf(event) {
   const row = event || {};
   return String(row.eventCode ?? row.trackingEventCode ?? row.statusCode ?? '').trim();
+}
+
+function latestIsWhpp(facts = {}) {
+  const action = facts.latestNodeAction || {};
+  const node = normalizeNode(action.targetNodeCode || action.targetNode || facts.lastEvent?.locationCode || facts.lastEvent?.eventShop || facts.lastEvent?.place || '');
+  if (node === 'WHPP') return true;
+  return /(?:CE|CEL)\s*:\s*WHPP\b/i.test(String(facts.lastEventText || ''));
+}
+
+function normalizeNode(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toUpperCase()
+    .replace(/^CEL?\s*:\s*/, '')
+    .replace(/[^A-Z0-9]/g, '');
 }
