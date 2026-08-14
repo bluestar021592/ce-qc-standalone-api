@@ -1,6 +1,6 @@
 (function installFastRenderV105(global){
   if(global.__CE_QC_V105_FAST_RENDER__)return;
-  const VERSION='2026-08-14-v105-visible-page-render-v1';
+  const VERSION='2026-08-14-v105-visible-page-render-v2';
   let scheduledHistory=false;
 
   const call=name=>{
@@ -8,6 +8,7 @@
     if(typeof fn==='function')return fn();
     return undefined;
   };
+  const pageNow=()=>typeof currentPage!=='undefined'?String(currentPage||'home'):'home';
 
   function deferHistory(){
     if(scheduledHistory)return;
@@ -22,6 +23,7 @@
 
   global.renderAll=function v105VisiblePageRender(){
     const started=performance.now();
+    const page=pageNow();
     try{
       call('renderPageVisibility');
       call('renderTopbar');
@@ -29,7 +31,6 @@
       call('renderProcessingNotice');
       call('renderAnalysisCoverageNotice');
 
-      const page=String(global.currentPage||'home');
       if(page==='home')call('renderHome');
       else if(['ce','ceaf','tbkh','ali1688'].includes(page))call('renderCcslPage');
       else if(['shopeecn','shopeevn'].includes(page))call('renderShopeePage');
@@ -51,21 +52,19 @@
         if(typeof global.runPageLoad==='function'&&typeof global.loadDataManagement==='function')void global.runPageLoad('data-management',global.loadDataManagement,15000);
       }
 
-      // Date/history options change much less often than live counters. Render them
-      // after the visible page so the user sees the dashboard first.
       deferHistory();
       const trackDate=document.getElementById('trackReportDate');
-      if(page==='tracking'&&trackDate&&!trackDate.value&&typeof global.latestDate==='function'){
-        trackDate.value=global.latestDate(global.appState?.reportDate,global.shopeeState?.reportDate)||new Date().toISOString().slice(0,10);
+      if(page==='tracking'&&trackDate&&!trackDate.value&&typeof latestDate==='function'){
+        trackDate.value=latestDate(appState?.reportDate,shopeeState?.reportDate)||new Date().toISOString().slice(0,10);
       }
     }catch(error){
       console.error('[CE-QC][V105_FAST_RENDER]',error);
     }finally{
       const ms=performance.now()-started;
-      if(ms>100)console.warn(`[CE-QC][V105_RENDER_SLOW] ${Math.round(ms)}ms page=${global.currentPage||'home'}`);
+      if(ms>100)console.warn(`[CE-QC][V105_RENDER_SLOW] ${Math.round(ms)}ms page=${page}`);
     }
   };
 
-  global.__CE_QC_V105_FAST_RENDER__={version:VERSION};
+  global.__CE_QC_V105_FAST_RENDER__={version:VERSION,page:pageNow};
   console.info('[CE-QC][V105_FAST_RENDER]',VERSION);
 })(window);
