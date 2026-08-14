@@ -44,3 +44,14 @@ test('carry persistence closes only explicit POD, completed return, special dest
   assert.match(fn,/const normal =/);
   assert.match(fn,/const closed = pod \|\| returned \|\| specialClosed \|\| normal/);
 });
+
+test('full business-data purge and automatic carry refresh are mutually exclusive',()=>{
+  const scheduler=read('src/carryoverRefreshScheduler.js');
+  const purge=read('src/dataPurge.js');
+  assert.match(scheduler,/data_purge_block_until/);
+  assert.match(scheduler,/purgeBlockUntil > Date\.now\(\)/);
+  assert.match(purge,/const PURGE_BLOCK_KEY = 'data_purge_block_until'/);
+  assert.match(purge,/setPurgeBlock\(db, expiresAt\)/);
+  assert.match(purge,/clearBusinessRuntimeMeta\(db\)/);
+  assert.match(purge,/key LIKE 'carry_refresh_%' OR key=\?/);
+});
