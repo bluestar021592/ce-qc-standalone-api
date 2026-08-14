@@ -2,6 +2,12 @@ import express from 'express';
 
 const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
 
+// Normal operation is interactive-first. Dashboard cache maintenance must never
+// compete with users every ten minutes on the same local SQLite file. Two hours
+// matches the QC refresh requirement; an empty cache warms only the recent week.
+if (!process.env.DASHBOARD_CACHE_REFRESH_MS) process.env.DASHBOARD_CACHE_REFRESH_MS = String(2 * 60 * 60 * 1000);
+if (!process.env.DASHBOARD_CACHE_WARM_DAYS) process.env.DASHBOARD_CACHE_WARM_DAYS = '7';
+
 function wrapHandler(handler) {
   if (typeof handler !== 'function') return handler;
   if (handler[WRAPPED]) return handler;
@@ -46,10 +52,6 @@ async function importPhase(label, modulePath) {
 }
 
 function scheduleDeferredMaintenance({ v92, v76Repair }) {
-  // Historical repair scans are maintenance, not a condition for serving pages.
-  // On a large local SQLite database they can otherwise make the UI freeze again
-  // shortly after first paint. Normal startup therefore stays read/serve-first;
-  // one-shot repair/deployment tools remain the authoritative maintenance path.
   if (String(process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED || '').trim() !== '1') {
     console.log('[CE-QC][BOOT] background maintenance disabled on normal startup; first paint is not blocked.');
     return;
