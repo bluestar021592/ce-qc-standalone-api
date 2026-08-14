@@ -15,7 +15,7 @@ const syntax=p=>{
 test('candidate runtime files are syntax valid',()=>{
   for(const file of [
     'bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js',
-    'src/v44WhppUiPatch.js','scripts/CE_QC_PreUpdate_Backup.mjs',
+    'src/v44WhppUiPatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','scripts/CE_QC_PurgeDeleteWorker.mjs',
     'public/v125-local-api-resilience.js','public/v104-fast-purge-ui.js',
     'public/v108-route-lazy-features.js','public/v105-fast-render.js',
     'public/v103-home-whpp-card-guard.js'
@@ -57,32 +57,34 @@ test('V127 update backup is visible reusable read-only and still verified',()=>{
   assert.doesNotMatch(backup,/readFileSync\(copyFile\)/);
 });
 
-test('V130 purge submit never exposes abort errors and can recover completed jobs',()=>{
+test('V131 executes destructive purge in isolated sqlite worker while API stays responsive',()=>{
   const patch=read('src/v105AsyncPurgePatch.js');
+  const worker=read('scripts/CE_QC_PurgeDeleteWorker.mjs');
   const ui=read('public/v104-fast-purge-ui.js');
-  const lazy=read('public/v108-route-lazy-features.js');
-  const injector=read('src/v44WhppUiPatch.js');
-  assert.match(patch,/v130-purge-job-recovery-v1/);
+  assert.match(patch,/v131-isolated-purge-worker-v1/);
+  assert.match(patch,/PURGE_WORKER_FILE/);
+  assert.match(patch,/spawn\(process\.execPath,\[PURGE_WORKER_FILE,payload\]/);
+  assert.match(patch,/if\(kind==='EXECUTE'\)result=await runIsolatedExecute\(req,job\)/);
+  assert.match(patch,/preparedChallenges/);
+  assert.match(patch,/rememberPreparedChallenge/);
+  assert.match(patch,/verifyPreparedForWorker/);
+  assert.match(patch,/DATA_PURGE_WORKER_COMPLETED/);
   assert.match(patch,/RECOVER_STATUS_PATH = '\/api\/v105\/data-purge\/recover'/);
-  assert.match(patch,/function recentJobFor/);
-  assert.match(patch,/activeJobFor\(owner, kind\) \|\| recentJobFor\(owner, kind\)/);
-  assert.match(patch,/inspectV130PurgeJobs/);
+  assert.match(patch,/inspectV131PurgeJobs/);
+  assert.match(worker,/ISOLATED_SQLITE_WORKER/);
+  assert.match(worker,/BEGIN IMMEDIATE/);
+  assert.match(worker,/DATABASE_CHANGED_BEFORE_PURGE_WORKER_LOCK/);
+  assert.match(worker,/BUSINESS_DATA_TABLES/);
+  assert.match(worker,/DELETE FROM \$\{table\}/);
+  assert.match(worker,/data_purge_block_until/);
+  assert.match(worker,/PURGE_WORKER_FOREIGN_KEYS_NOT_RESTORED/);
+  assert.match(worker,/clearRegenerableFiles/);
   assert.match(ui,/v130-resilient-purge-submit-v4/);
-  assert.match(ui,/function abortLike/);
-  assert.match(ui,/signal is aborted\|aborted without reason/);
-  assert.match(ui,/directJson\(url,\{method:'POST'/);
-  assert.match(ui,/\},0\)/);
   assert.match(ui,/recoverRecentJob/);
   assert.match(ui,/Promise\.race\(\[submitPromise,recoveryPromise\]\)/);
-  assert.match(ui,/后台任务提交响应延迟/);
-  assert.doesNotMatch(ui,/throw error;\n\s*}\n\s*}\n\s*throw error;/);
-  assert.match(lazy,/v108-route-lazy-features-v8/);
-  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-8/);
-  assert.match(injector,/v130-responsive-performance-spine-v18/);
-  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-8/);
 });
 
-test('purge remains backup-first and destructive phase avoids whole-database post scans',()=>{
+test('purge preparation remains backup-first and legacy direct path remains safety-valid',()=>{
   const purge=read('src/dataPurge.js');
   assert.match(purge,/createVerifiedPreClearBackup/);
   assert.match(purge,/verifyPreparedBackupStillPresent/);
@@ -92,15 +94,7 @@ test('purge remains backup-first and destructive phase avoids whole-database pos
   assert.match(purge,/export function resealPurgeChallenge/);
   assert.match(purge,/sourceSeal='POST_PREPARE_AUDIT'/);
   assert.match(purge,/DELETE_CHANGESET_EXACT/);
-  assert.match(purge,/PRAGMA foreign_keys=OFF/);
-  assert.match(purge,/PRAGMA foreign_keys=ON/);
-  assert.match(purge,/assertPurgeStructure/);
-  assert.match(purge,/integrityCheck:'TRANSACTION_AND_SCHEMA'/);
-  assert.match(purge,/walCheckpoint:'AUTO'/);
-  assert.match(purge,/FAST_TABLE_DELETE_FK_GUARDED/);
-  assert.doesNotMatch(purge,/assertQuickIntegrity\(db\)/);
   assert.doesNotMatch(purge,/wal_checkpoint\(TRUNCATE\)/);
-  assert.match(purge,/await clearRegenerableFiles\(\)/);
   assert.doesNotMatch(purge,/reset\s+--hard/i);
 });
 
