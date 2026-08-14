@@ -87,11 +87,15 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(fastDashboard,/function shopeeWhppCounts/);
   assert.match(fastDashboard,/GROUP BY u\.businessType/);
   assert.doesNotMatch(fastDashboard,/function shopeeWhppCount\(/);
-  assert.match(exp,/v119-export-active-index-v1/);
+  assert.match(exp,/v121-export-job-read-cache-v1/);
   assert.match(exp,/const activeJobs = new Map\(\)/);
+  assert.match(exp,/const jobReadCache = new Map\(\)/);
   assert.match(exp,/function activeReusableJob/);
+  assert.match(exp,/function readJobFile/);
+  assert.match(exp,/statSignature/);
   assert.match(exp,/JOB_FILE_INDEX_CACHE_MS/);
-  assert.match(exp,/inspectV119ExportIndex/);
+  assert.match(exp,/JOB_READ_CACHE_MAX/);
+  assert.match(exp,/inspectV121ExportCaches/);
   assert.match(exp,/detached: true/);
   assert.match(exp,/reusableJob/);
   assert.match(worker,/EXPORT_WORKER_CONCURRENCY/);
