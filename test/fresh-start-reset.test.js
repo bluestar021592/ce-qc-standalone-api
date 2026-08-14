@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import test from 'node:test';
 
 test('go-live fresh start clears business history but preserves schema and verified backup', async () => {
@@ -25,6 +25,10 @@ test('go-live fresh start clears business history but preserves schema and verif
       VALUES('CC-FRESH-1','CE','2026-08-01','fresh-snapshot','PENDING','{}','2026-08-01T00:00:00Z')`).run();
     db.prepare(`INSERT INTO carryover_open_items(shipmentCode,businessType,sourceReportDate,lastReportDate,sourceSnapshotId,lastSnapshotId,status,stateJson,createdAt,updatedAt)
       VALUES('CC-FRESH-1','CE','2026-08-01','2026-08-01','fresh-snapshot','fresh-snapshot','OPEN','{}','2026-08-01T00:00:00Z','2026-08-01T00:00:00Z')`).run();
+    db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES
+      ('carry_refresh_last_success_at','2026-08-01T02:00:00.000Z','2026-08-01T02:00:00.000Z'),
+      ('carry_refresh_last_rollover_date','2026-08-01','2026-08-01T02:00:00.000Z'),
+      ('carry_refresh_last_error','old refresh error','2026-08-01T02:00:00.000Z')`).run();
 
     const schemaBefore = Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0);
     const userVersionBefore = Number(db.prepare('PRAGMA user_version').get()?.user_version || 0);
@@ -50,6 +54,7 @@ test('go-live fresh start clears business history but preserves schema and verif
     }
     assert.equal(Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0), 18);
     assert.equal(Number(db.prepare('PRAGMA user_version').get()?.user_version || 0), 18);
+    assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM app_meta WHERE key LIKE 'carry_refresh_%'").get()?.count || 0), 0);
     assert.equal(db.prepare('PRAGMA integrity_check').get()?.integrity_check, 'ok');
     assert.ok(db.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get()?.value);
     assert.ok(Number(db.prepare('SELECT COUNT(*) count FROM backup_records').get()?.count || 0) >= 1);
