@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import express from 'express';
+import { resealPurgeChallenge } from './dataPurge.js';
 
-const PATCH_ID = '2026-08-14-v122-single-flight-purge-jobs-v1';
+const PATCH_ID = '2026-08-14-v124-post-audit-purge-seal-v1';
 const PREPARE_PATH = '/api/admin/data-purge/prepare';
 const EXECUTE_PATH = '/api/admin/data-purge/execute';
 const PREPARE_STATUS_PATH = '/api/v105/data-purge/prepare/:jobId';
@@ -122,6 +123,7 @@ function startJob(req, legacyHandler, kind) {
     job.startedAt = new Date(job.startedAtMs).toISOString();
     try {
       const result = await runLegacyHandler(legacyHandler, req);
+      if (kind === 'PREPARE' && result?.challengeId) resealPurgeChallenge(result.challengeId, req.user);
       job.status = 'COMPLETED';
       job.progress = 100;
       job.message = kind === 'EXECUTE' ? '业务数据已安全清空' : '清空前备份和完整性校验已完成';
