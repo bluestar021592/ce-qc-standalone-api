@@ -77,7 +77,7 @@ test('V99 carry scheduler queries OPEN members only and never directly rewrites 
 test('V99 API refresh failure stays out of successful carry persistence',()=>{
   const source=read('src/carryoverRefreshScheduler.js');
   assert.match(source,/REFRESH_FAILED\|API_PENDING_RETRY\|RETRY/);
-  assert.match(source,/successfulRows\.push\(row\)/);
+  assert.match(source,/successfulRows\.push\(normalizeDynamicCarryRow\(row\)\)/);
   assert.match(source,/if \(successfulRows\.length\) applySuccessfulCarryRefresh\(successfulRows/);
 });
 
