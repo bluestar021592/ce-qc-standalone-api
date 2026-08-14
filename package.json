@@ -10,7 +10,7 @@
     "start:production": "set NODE_ENV=production&& node bootstrap.js",
     "test": "node --test --test-reporter=tap --test-skip-pattern=\"desktop root start no longer|due-only endpoint cannot refresh|internal refresh bypass is restricted\" test/*.test.js",
     "test:full": "npm test",
-    "test:golive": "node --test --test-reporter=tap test/v107-focused-golive.test.js test/v104-fast-purge-backup.test.js test/data-purge-large-backup.test.js"
+    "test:golive": "node --test --test-reporter=tap test/v107-focused-golive.test.js test/v104-fast-purge-backup.test.js test/v124-purge-audit-seal.test.js test/data-purge-large-backup.test.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
