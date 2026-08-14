@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 
-const PATCH_ID = '2026-08-14-v105-async-purge-lifecycle-v2';
+const PATCH_ID = '2026-08-14-v122-single-flight-purge-jobs-v1';
 const PREPARE_PATH = '/api/admin/data-purge/prepare';
 const EXECUTE_PATH = '/api/admin/data-purge/execute';
 const PREPARE_STATUS_PATH = '/api/v105/data-purge/prepare/:jobId';
@@ -39,6 +39,15 @@ function pruneJobs() {
     const stamp = Number(job.completedAtMs || job.createdAtMs || 0);
     if (stamp && stamp < cutoff) jobs.delete(id);
   }
+}
+
+function activeJobFor(owner, kind) {
+  if (!owner) return null;
+  pruneJobs();
+  for (const job of jobs.values()) {
+    if (job.owner === owner && job.kind === kind && ['QUEUED', 'RUNNING'].includes(String(job.status || ''))) return job;
+  }
+  return null;
 }
 
 function fakeResponse(resolve, reject) {
@@ -81,13 +90,17 @@ function runLegacyHandler(handler, req) {
 
 function startJob(req, legacyHandler, kind) {
   pruneJobs();
+  const owner = ownerKey(req.user);
+  const existing = activeJobFor(owner, kind);
+  if (existing) return { job: existing, reused: true };
+
   const prefix = kind === 'EXECUTE' ? 'PURGE-EXEC' : 'PURGE-PREP';
   const jobId = `${prefix}-${crypto.randomUUID().toUpperCase()}`;
   const now = Date.now();
   const job = {
     kind,
     jobId,
-    owner: ownerKey(req.user),
+    owner,
     status: 'QUEUED',
     progress: 1,
     message: kind === 'EXECUTE' ? '安全清空任务已进入后台队列' : '清空前安全备份任务已进入后台队列',
@@ -126,11 +139,11 @@ function startJob(req, legacyHandler, kind) {
       job.completedAt = new Date(job.completedAtMs).toISOString();
     }
   });
-  return job;
+  return { job, reused: false };
 }
 
 function statusHandler(expectedKind) {
-  return function v105PurgeStatus(req, res) {
+  return function v122PurgeStatus(req, res) {
     pruneJobs();
     const job = jobs.get(String(req.params.jobId || ''));
     if (!job || job.kind !== expectedKind) return res.status(404).json({ ok: false, patchId: PATCH_ID, error: '清空任务不存在或已过期。' });
@@ -157,30 +170,36 @@ function installStatusRoutes(app) {
   originalGet.call(app, EXECUTE_STATUS_PATH, statusHandler('EXECUTE'));
 }
 
-express.application.post = function v105AsyncPurgePost(pathValue, ...handlers) {
+express.application.post = function v122AsyncPurgePost(pathValue, ...handlers) {
   if (![PREPARE_PATH, EXECUTE_PATH].includes(pathValue) || !handlers.length) return originalPost.call(this, pathValue, ...handlers);
   const legacyHandler = handlers[handlers.length - 1];
   if (typeof legacyHandler !== 'function') return originalPost.call(this, pathValue, ...handlers);
   installStatusRoutes(this);
   const preserved = handlers.slice(0, -1);
   const kind = pathValue === EXECUTE_PATH ? 'EXECUTE' : 'PREPARE';
-  const enqueue = function v105PurgeJobEnqueue(req, res) {
-    const job = startJob(req, legacyHandler, kind);
+  const enqueue = function v122PurgeJobEnqueue(req, res) {
+    const started = startJob(req, legacyHandler, kind);
+    const job = started.job;
     const statusBase = kind === 'EXECUTE' ? '/api/v105/data-purge/execute/' : '/api/v105/data-purge/prepare/';
     res.setHeader('Cache-Control', 'no-store');
     return res.status(202).json({
       ok: true,
       patchId: PATCH_ID,
       async: true,
+      reused: started.reused ? 'ACTIVE' : false,
       kind,
       jobId: job.jobId,
       status: job.status,
       progress: job.progress,
-      message: job.message,
+      message: started.reused ? '相同清空阶段正在后台执行，已复用当前任务' : job.message,
       pollUrl: `${statusBase}${encodeURIComponent(job.jobId)}`
     });
   };
   return originalPost.call(this, pathValue, ...preserved, enqueue);
 };
 
+export function inspectV122PurgeJobs(){
+  const active=[...jobs.values()].filter(job=>['QUEUED','RUNNING'].includes(String(job.status||'')));
+  return {total:jobs.size,active:active.length,byKind:{PREPARE:active.filter(job=>job.kind==='PREPARE').length,EXECUTE:active.filter(job=>job.kind==='EXECUTE').length}};
+}
 export const V105_ASYNC_PURGE_PATCH_ID = PATCH_ID;
