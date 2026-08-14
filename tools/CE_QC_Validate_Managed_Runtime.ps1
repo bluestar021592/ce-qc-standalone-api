@@ -22,10 +22,17 @@ if ($cmd -match 'Fast_Start_CE_QC\.ps1') { throw 'Start_CE_QC.cmd still referenc
 Write-Host '[PASS] Root start command is managed.' -ForegroundColor Green
 
 $launcher = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'tools\CE_QC_Managed_Launcher.ps1'))
-foreach ($marker in @('JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE','AssignProcessToJobObject','CE_QC_PreUpdate_Backup.mjs','test:golive','pull' + "','--ff-only")) {
+foreach ($marker in @('JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE','AssignProcessToJobObject','CE_QC_PreUpdate_Backup.mjs','test:golive','pull' + "','--ff-only",'Update check failed, but startup will continue')) {
   if ($launcher -notlike "*$marker*") { throw "Managed launcher safety marker missing: $marker" }
 }
+if ($launcher -match '\[string\[\]\]\s*\$Args\b' -or $launcher -match '@Args\b') {
+  throw 'Managed launcher must not use PowerShell automatic $args as an explicit argument-list parameter.'
+}
+if ($launcher -notmatch '\[string\[\]\]\s*\$ArgumentList\b' -or $launcher -notmatch '\[string\[\]\]\s*\$GitArguments\b') {
+  throw 'Managed launcher explicit argument-list parameters are missing.'
+}
 Write-Host '[PASS] Managed lifecycle/update safety markers are present.' -ForegroundColor Green
+Write-Host '[PASS] Managed launcher does not collide with PowerShell automatic $args.' -ForegroundColor Green
 
 Write-Host 'MANAGED_RUNTIME_VALIDATION: PASS' -ForegroundColor Green
 exit 0
