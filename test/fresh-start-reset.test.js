@@ -38,6 +38,8 @@ test('go-live fresh start clears business history but preserves schema and verif
     const challenge = await createPurgeChallenge({ email: 'fresh-start-admin' });
     assert.equal(challenge.backup.integrity, 'ok');
     assert.ok(fs.existsSync(challenge.backup.path));
+    const blockUntil = Number(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_block_until'").get()?.value || 0);
+    assert.ok(blockUntil > Date.now(), 'purge challenge must block automatic carry refresh while backup/confirmation is active');
     const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(challenge.backup.path), 'manifest.json'), 'utf8'));
     assert.equal(manifest.migrationVersion, 18);
 
@@ -55,6 +57,7 @@ test('go-live fresh start clears business history but preserves schema and verif
     assert.equal(Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0), 18);
     assert.equal(Number(db.prepare('PRAGMA user_version').get()?.user_version || 0), 18);
     assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM app_meta WHERE key LIKE 'carry_refresh_%'").get()?.count || 0), 0);
+    assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM app_meta WHERE key='data_purge_block_until'").get()?.count || 0), 0);
     assert.equal(db.prepare('PRAGMA integrity_check').get()?.integrity_check, 'ok');
     assert.ok(db.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get()?.value);
     assert.ok(Number(db.prepare('SELECT COUNT(*) count FROM backup_records').get()?.count || 0) >= 1);
