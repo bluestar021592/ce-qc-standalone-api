@@ -38,6 +38,8 @@ test('full purge stays backup first asynchronous and uses fast whole-table reset
   assert.match(purge,/sameFingerprint/);
   assert.match(purge,/PREPARED_EXACT_COUNTS/);
   assert.match(purge,/RECOUNT_AFTER_DATABASE_CHANGE/);
+  assert.match(purge,/sourceQuickCheck:'deferred-to-verified-copy'/);
+  assert.match(purge,/verificationMode:'online-backup\+backup-quick-check\+sha256'/);
   assert.match(asyncPatch,/setImmediate\(async \(\) =>/);
   assert.match(asyncPatch,/\/api\/v105\/data-purge\/prepare\//);
   assert.match(ui,/安全备份正在后台执行/);
@@ -106,14 +108,19 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(db,/SQLITE_MMAP_BYTES \|\| 256 \* 1024 \* 1024/);
 });
 
-test('update and purge backups use online copy quick structural verification and sha256',()=>{
+test('update and purge backups verify the recovery copy and sha256 without duplicate source scans',()=>{
   const updateBackup=read('scripts/CE_QC_PreUpdate_Backup.mjs');
   const purge=read('src/dataPurge.js');
   assert.match(updateBackup,/backupQuickCheck:'ok'/);
-  assert.match(updateBackup,/verificationMode:'online-backup\+quick-check\+sha256'/);
+  assert.match(updateBackup,/sourceQuickCheck:'deferred-to-verified-copy'/);
+  assert.match(updateBackup,/verificationMode:'online-backup\+backup-quick-check\+sha256'/);
+  assert.match(updateBackup,/sourceStableDuringBackup/);
+  assert.doesNotMatch(updateBackup,/source\.prepare\('PRAGMA quick_check/);
   assert.doesNotMatch(updateBackup,/PRAGMA integrity_check/);
   assert.match(purge,/verifyBackupQuick/);
   assert.match(purge,/hashFileStream/);
+  const backupBody=purge.slice(purge.indexOf('async function createVerifiedPreClearBackup'),purge.indexOf('function verifyBackupQuick'));
+  assert.doesNotMatch(backupBody,/assertQuickIntegrity\(db\)/);
 });
 
 test('WHPP total conservation guard remains enabled',()=>{
