@@ -12,8 +12,7 @@ const syntax=p=>{const r=spawnSync(process.execPath,['--check',path.join(root,p)
 test('managed desktop launcher remains safe and non-destructive',()=>{
   const cmd=read('Start_CE_QC.cmd');
   const launcher=read('tools/CE_QC_Managed_Launcher.ps1');
-  assert.match(cmd,/CE_QC_Managed_Launcher\.ps1/);
-  assert.match(launcher,/JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(cmd,/JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
   assert.match(launcher,/CE_QC_PreUpdate_Backup\.mjs/);
   assert.match(launcher,/pull','--ff-only/);
   assert.doesNotMatch(launcher,/reset\s+--hard/i);
@@ -72,6 +71,10 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(worker,/EXPORT_WORKER_CONCURRENCY/);
   assert.match(worker,/Promise\.all/);
   assert.match(worker,/zlib:\{level:1\}/);
+  assert.match(worker,/EXPORT_PLAN_VERSION/);
+  assert.match(worker,/function completedBusinessCounts/);
+  assert.match(worker,/GROUP BY u\.businessType/);
+  assert.doesNotMatch(worker,/function completedBusinessCount\(/);
   assert.match(templateExport,/EXPORT_PARTITION_CACHE_VERSION/);
   assert.match(templateExport,/function partitionRows/);
   assert.match(templateExport,/metricsFromBuckets/);
