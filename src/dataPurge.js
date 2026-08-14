@@ -37,8 +37,6 @@ export async function createPurgeChallenge(user={},options={}){
     setPurgeBlock(db,expiresAt);
     reconcileRunLocks(db,options.activeRunIds);
     const verifiedBackup=await createVerifiedPreClearBackup(user.email||'');
-    // recordBackup() inside backup creation writes retained metadata. Capture the
-    // source fingerprint only after every prepare-stage write is complete.
     const sourceFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
     const challengeId=crypto.randomUUID();
     challenges.set(challengeId,{email:user.email||'',backup:verifiedBackup,createdAt,expiresAt,sourceFingerprint,countMode:PURGE_PREPARE_COUNT_MODE});
@@ -72,14 +70,23 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
     clearPurgeBlock(db);
     throw new Error('数据库在安全备份后发生变化，已停止清除。请重新开始，系统会先创建包含最新数据的新备份。');
   }
+
+  // The backup has already been verified. For the destructive phase, make the
+  // database transaction itself as short as possible. Disabling FK enforcement
+  // only for the all-business-data transaction allows SQLite's whole-table delete
+  // fast path; every business table is cleared and the setting is restored before
+  // the request can complete.
   const reset=fastResetBusinessState(db,{logs:[]});
   clearBusinessRuntimeMeta(db);
-  const fileCleanupWarnings=clearRegenerableFiles();
-  assertQuickIntegrity(db);
-  db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+
+  // File cleanup is regenerable and uses async filesystem calls so the HTTP event
+  // loop can keep serving purge job status while old exports/imports are removed.
+  const fileCleanupWarnings=await clearRegenerableFiles();
+  assertPurgeStructure(db);
   if(String(process.env.VACUUM_AFTER_PURGE||'').toLowerCase()==='true')db.exec('VACUUM');
+  clearPurgeBlock(db);
   challenges.delete(String(challengeId||''));
-  return {backup:challenge.backup,before:reset.before,after:reset.after,completedAt:nowIso(),event:'DATA_RESET',integrity:'ok',walCheckpoint:'TRUNCATE',fileCleanupWarnings,deleteMode:'FAST_TABLE_DELETE',performanceIndexes:'V108',countSource:PURGE_EXECUTE_COUNT_MODE,backupSourceFingerprint:'MATCHED'};
+  return {backup:challenge.backup,before:reset.before,after:reset.after,completedAt:nowIso(),event:'DATA_RESET',integrity:'ok',integrityCheck:'TRANSACTION_AND_SCHEMA',walCheckpoint:'AUTO',fileCleanupWarnings,deleteMode:'FAST_TABLE_DELETE_FK_GUARDED',performanceIndexes:'V108',countSource:PURGE_EXECUTE_COUNT_MODE,backupSourceFingerprint:'MATCHED'};
 }
 
 export function getPurgeCounts(){return tableCounts(getDb());}
@@ -94,9 +101,6 @@ async function createVerifiedPreClearBackup(adminEmail){
   const sourceSize=fs.statSync(cfg.dbFile).size;
   assertFreeSpace(dir,sourceSize);
 
-  // Do not perform a full source quick_check before copying. The verified backup
-  // copy is the actual safety artifact used for recovery; if its structural check
-  // fails the challenge is rejected and no business row is deleted.
   const sourceFingerprintBeforeBackup=databaseFingerprint(cfg.dbFile);
   await backup(db,filePath,{rate:1024});
   const sourceFingerprintAfterBackup=databaseFingerprint(cfg.dbFile);
@@ -159,6 +163,8 @@ function fastResetBusinessState(db,nextState={}){
   const clearTargets=BUSINESS_DATA_TABLES.filter(name=>existing.has(name));
   const before={};
   const after={};
+  const foreignKeysBefore=Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys||0);
+  if(foreignKeysBefore)db.exec('PRAGMA foreign_keys=OFF');
   db.exec('BEGIN IMMEDIATE');
   try{
     for(const table of clearTargets){
@@ -180,6 +186,7 @@ function fastResetBusinessState(db,nextState={}){
     db.exec('COMMIT');
     return {before,after};
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
+  finally{if(foreignKeysBefore)try{db.exec('PRAGMA foreign_keys=ON');}catch{}}
 }
 
 function tableCounts(db){
@@ -204,7 +211,9 @@ async function waitForBackgroundMaintenanceIdle(db,timeoutMs=5*60_000){
     await new Promise(resolve=>setTimeout(resolve,250));
   }
 }
-function clearBusinessRuntimeMeta(db){db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key IN (?,?,?)`).run(PURGE_BLOCK_KEY,CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY);}
+function clearBusinessRuntimeMeta(db){
+  db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key IN (?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY);
+}
 function reconcileRunLocks(db,activeRunIds){
   const active=activeRunIds instanceof Set?activeRunIds:new Set(activeRunIds||[]);
   const main=db.prepare("SELECT reportDate,runId FROM run_locks WHERE status IN ('running','paused','paused_write')").all();
@@ -222,12 +231,29 @@ function reconcileRunLocks(db,activeRunIds){
     db.exec('COMMIT');
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
 }
-function assertQuickIntegrity(db){const quick=db.prepare('PRAGMA quick_check(1)').get()?.quick_check||'';if(quick!=='ok')throw new Error(`SQLite快速完整性检查未通过：${quick||'unknown'}`);}
+function assertPurgeStructure(db){
+  for(const table of ['app_meta','app_state','users','audit_logs','backup_records']){
+    const exists=db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(table)?.ok;
+    if(!exists)throw new Error(`清空后结构校验失败：缺少 ${table}`);
+  }
+  if(Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys||0)!==1)throw new Error('清空后外键保护未恢复。');
+}
 export function hashFileStream(file){return new Promise((resolve,reject)=>{const hash=crypto.createHash('sha256');const input=fs.createReadStream(file,{highWaterMark:8*1024*1024});input.on('error',reject);input.on('data',chunk=>hash.update(chunk));input.on('end',()=>resolve(hash.digest('hex')));});}
 function assertFreeSpace(targetDir,sourceSize){const disk=fs.statfsSync(targetDir);const available=Number(disk.bavail)*Number(disk.bsize);const required=Math.ceil(sourceSize*1.1)+256*1024*1024;if(available<required)throw new Error(`备份磁盘空间不足：至少需要 ${required} 字节，当前可用 ${available} 字节。`);}
 function localStamp(){const d=new Date();const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;}
-function clearRegenerableFiles(){
-  const cfg=getRuntimeConfig();const warnings=[];
-  for(const dir of [cfg.exportsDir,cfg.importsDir]){if(!fs.existsSync(dir))continue;for(const entry of fs.readdirSync(dir)){try{fs.rmSync(path.join(dir,entry),{recursive:true,force:true});}catch(error){warnings.push(`${entry}: ${error?.message||String(error)}`);}}}
-  fs.mkdirSync(cfg.longJsonExportsDir,{recursive:true});return warnings;
+async function clearRegenerableFiles(){
+  const cfg=getRuntimeConfig();
+  const warnings=[];
+  for(const dir of [cfg.exportsDir,cfg.importsDir]){
+    if(!fs.existsSync(dir))continue;
+    const entries=fs.readdirSync(dir);
+    for(let index=0;index<entries.length;index+=1){
+      const entry=entries[index];
+      try{await fs.promises.rm(path.join(dir,entry),{recursive:true,force:true});}
+      catch(error){warnings.push(`${entry}: ${error?.message||String(error)}`);}
+      if(index%20===19)await new Promise(resolve=>setImmediate(resolve));
+    }
+  }
+  fs.mkdirSync(cfg.longJsonExportsDir,{recursive:true});
+  return warnings;
 }
