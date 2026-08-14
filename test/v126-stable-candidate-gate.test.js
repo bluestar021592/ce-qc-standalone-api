@@ -57,28 +57,29 @@ test('V127 update backup is visible reusable read-only and still verified',()=>{
   assert.doesNotMatch(backup,/readFileSync\(copyFile\)/);
 });
 
-test('V128 purge returns job before destructive work and can recover active job',()=>{
+test('V130 purge submit never exposes abort errors and can recover completed jobs',()=>{
   const patch=read('src/v105AsyncPurgePatch.js');
   const ui=read('public/v104-fast-purge-ui.js');
   const lazy=read('public/v108-route-lazy-features.js');
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(patch,/v128-purge-submit-flush-v1/);
-  assert.match(patch,/JOB_START_DELAY_MS/);
-  assert.match(patch,/setTimeout\(async \(\) =>/);
-  assert.match(patch,/ACTIVE_STATUS_PATH = '\/api\/v105\/data-purge\/active'/);
-  assert.match(patch,/activeStatusHandler/);
-  assert.match(patch,/pollUrlFor\(job\)/);
-  assert.match(patch,/inspectV128PurgeJobs/);
-  assert.doesNotMatch(patch,/setImmediate\(async \(\) =>/);
-  assert.match(ui,/v128-responsive-purge-ui-v3/);
-  assert.match(ui,/submitBackground\('EXECUTE'/);
-  assert.match(ui,/recoverActiveJob\(kind\)/);
+  assert.match(patch,/v130-purge-job-recovery-v1/);
+  assert.match(patch,/RECOVER_STATUS_PATH = '\/api\/v105\/data-purge\/recover'/);
+  assert.match(patch,/function recentJobFor/);
+  assert.match(patch,/activeJobFor\(owner, kind\) \|\| recentJobFor\(owner, kind\)/);
+  assert.match(patch,/inspectV130PurgeJobs/);
+  assert.match(ui,/v130-resilient-purge-submit-v4/);
+  assert.match(ui,/function abortLike/);
+  assert.match(ui,/signal is aborted\|aborted without reason/);
+  assert.match(ui,/directJson\(url,\{method:'POST'/);
+  assert.match(ui,/\},0\)/);
+  assert.match(ui,/recoverRecentJob/);
+  assert.match(ui,/Promise\.race\(\[submitPromise,recoveryPromise\]\)/);
   assert.match(ui,/后台任务提交响应延迟/);
-  assert.match(ui,/directJson\(pollUrl,\{\},5000\)/);
-  assert.match(lazy,/v108-route-lazy-features-v7/);
-  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-7/);
-  assert.match(injector,/v128-responsive-performance-spine-v17/);
-  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-7/);
+  assert.doesNotMatch(ui,/throw error;\n\s*}\n\s*}\n\s*throw error;/);
+  assert.match(lazy,/v108-route-lazy-features-v8/);
+  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-8/);
+  assert.match(injector,/v130-responsive-performance-spine-v18/);
+  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-8/);
 });
 
 test('purge remains backup-first and destructive phase avoids whole-database post scans',()=>{
