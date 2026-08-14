@@ -22,38 +22,39 @@ test('purge backup stays online verified and count-free before delete',()=>{
   assert.doesNotMatch(purge,/wal_checkpoint\(FULL\)/);
 });
 
-test('V130 submit response never relies on abort and recent jobs are recoverable',()=>{
+test('V131 sends destructive delete to isolated worker and preserves V130 browser recovery',()=>{
   const backend=read('src/v105AsyncPurgePatch.js');
+  const worker=read('scripts/CE_QC_PurgeDeleteWorker.mjs');
   const ui=read('public/v104-fast-purge-ui.js');
   syntax('src/v105AsyncPurgePatch.js');
+  syntax('scripts/CE_QC_PurgeDeleteWorker.mjs');
   syntax('public/v104-fast-purge-ui.js');
-  assert.match(backend,/v130-purge-job-recovery-v1/);
+  assert.match(backend,/v131-isolated-purge-worker-v1/);
+  assert.match(backend,/PURGE_WORKER_FILE/);
+  assert.match(backend,/spawn\(process\.execPath,\[PURGE_WORKER_FILE,payload\]/);
+  assert.match(backend,/runIsolatedExecute/);
   assert.match(backend,/RECOVER_STATUS_PATH/);
-  assert.match(backend,/function recentJobFor/);
-  assert.match(backend,/activeJobFor\(owner, kind\) \|\| recentJobFor\(owner, kind\)/);
+  assert.match(worker,/ISOLATED_SQLITE_WORKER/);
+  assert.match(worker,/BEGIN IMMEDIATE/);
+  assert.match(worker,/BUSINESS_DATA_TABLES/);
   assert.match(ui,/v130-resilient-purge-submit-v4/);
-  assert.match(ui,/function abortLike/);
-  assert.match(ui,/signal is aborted\|aborted without reason/);
-  assert.match(ui,/Promise\.race\(\[submitPromise,recoveryPromise\]\)/);
   assert.match(ui,/recoverRecentJob/);
+  assert.match(ui,/Promise\.race\(\[submitPromise,recoveryPromise\]\)/);
   assert.match(ui,/后台任务提交响应延迟/);
 });
 
-test('destructive phase is short and does not run whole-database post checks',()=>{
-  const purge=read('src/dataPurge.js');
-  const execute=purge.slice(purge.indexOf('export async function executePurge'),purge.indexOf('export function getPurgeCounts'));
-  assert.doesNotMatch(execute,/tableCounts\(db\)/);
-  assert.match(purge,/PRAGMA foreign_keys=OFF/);
-  assert.match(purge,/PRAGMA foreign_keys=ON/);
-  assert.match(purge,/FAST_TABLE_DELETE_FK_GUARDED/);
-  assert.match(purge,/assertPurgeStructure/);
-  assert.doesNotMatch(purge,/assertQuickIntegrity\(db\)/);
-  assert.doesNotMatch(purge,/wal_checkpoint\(TRUNCATE\)/);
-  assert.match(purge,/walCheckpoint:'AUTO'/);
-  assert.match(purge,/await clearRegenerableFiles\(\)/);
+test('isolated worker keeps destructive phase out of web event loop and avoids whole-database post scans',()=>{
+  const worker=read('scripts/CE_QC_PurgeDeleteWorker.mjs');
+  assert.match(worker,/PRAGMA foreign_keys=OFF/);
+  assert.match(worker,/PRAGMA foreign_keys=ON/);
+  assert.match(worker,/DELETE FROM \$\{table\}/);
+  assert.match(worker,/SELECT 1 AS present FROM \$\{table\} LIMIT 1/);
+  assert.match(worker,/PURGE_WORKER_FOREIGN_KEYS_NOT_RESTORED/);
+  assert.match(worker,/clearRegenerableFiles/);
+  assert.doesNotMatch(worker,/PRAGMA integrity_check|wal_checkpoint\(TRUNCATE\)/);
 });
 
-test('V130 data-management lazy load uses fresh purge UI cache key',()=>{
+test('V130 browser asset remains fresh and compatible with V131 backend',()=>{
   const lazy=read('public/v108-route-lazy-features.js');
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(lazy,/v108-route-lazy-features-v8/);
