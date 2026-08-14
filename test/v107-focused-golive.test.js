@@ -20,7 +20,7 @@ test('managed desktop launcher remains safe and non-destructive',()=>{
 });
 
 test('server bootstrap and fast runtime files are syntax valid',()=>{
-  for(const file of ['bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v55DashboardReconciliationPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
+  for(const file of ['bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
 });
 
 test('full purge stays backup first asynchronous and uses fast whole-table reset',()=>{
@@ -47,6 +47,7 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   const detail=read('src/v55DashboardReconciliationPatch.js');
   const exp=read('src/v84AsyncExportPatch.js');
   const worker=read('src/v84ExportJobWorker.js');
+  const templateExport=read('src/shopeeTemplateExporter.js');
   const req=read('public/v65-request-coalescing.js');
   const indexes=read('src/v108PerformanceIndexWorker.js');
   const lazy=read('public/v108-route-lazy-features.js');
@@ -58,6 +59,8 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(nav,/businessStates\?\.\[type\]/);
   assert.match(prewarm,/\/api\/v55\/reconciliation\?from=/);
   assert.match(prewarm,/pointerover/);
+  assert.match(prewarm,/pointerout/);
+  assert.match(prewarm,/INTENT_DELAY_MS=320/);
   assert.match(prewarm,/TTL=55_000/);
   assert.match(detail,/const rangeCache=new Map\(\)/);
   assert.match(exp,/detached: true/);
@@ -65,6 +68,10 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(worker,/EXPORT_WORKER_CONCURRENCY/);
   assert.match(worker,/Promise\.all/);
   assert.match(worker,/zlib:\{level:1\}/);
+  assert.match(templateExport,/EXPORT_PARTITION_CACHE_VERSION/);
+  assert.match(templateExport,/function partitionRows/);
+  assert.match(templateExport,/metricsFromBuckets/);
+  assert.doesNotMatch(templateExport,/function metrics\(rows\)/);
   assert.match(req,/const recent = new Map\(\)/);
   assert.match(indexes,/idx_v108_business_final_report_type/);
   assert.match(indexes,/DATA_PURGE_ACTIVE/);
@@ -74,7 +81,7 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.doesNotMatch(lazy,/function warmIdle/);
   assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-3/);
   assert.match(injector,/v109-instant-business-navigation\.js\?v=20260814-1/);
-  assert.match(injector,/v110-drilldown-prewarm\.js\?v=20260814-1/);
+  assert.match(injector,/v110-drilldown-prewarm\.js\?v=20260814-2/);
   assert.doesNotMatch(injector,/v84-async-export-ui\.js/);
   assert.doesNotMatch(injector,/v104-fast-purge-ui\.js/);
 });
