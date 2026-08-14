@@ -7,8 +7,9 @@ import './v98CarryRefreshEndpointPatch.js';
 import './v105AsyncPurgePatch.js';
 import './v132WhppFastIntegrationPatch.js';
 import './v133ClosureRatePatch.js';
+import './v134WhppRunSupervisorPatch.js';
 
-const PATCH_ID='2026-08-14-v133-all-board-closure-rate-v20';
+const PATCH_ID='2026-08-14-v134-whpp-run-supervisor-v21';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
@@ -32,11 +33,11 @@ function html(req,res,next){
 
 const previousUse=express.application.use;
 let installed=false;
-express.application.use=function v133ClosureUiUse(...args){
+express.application.use=function v134WhppSupervisorUiUse(...args){
   const candidates=args.flat().filter(value=>typeof value==='function');
   if(!installed&&candidates.some(fn=>fn.name==='serveStatic')){installed=true;previousUse.call(this,html);}
   return previousUse.apply(this,args);
 };
 
-export function inspectV133HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID};}
+export function inspectV134HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID};}
 export const V44_WHPP_UI_PATCH_ID=PATCH_ID;
