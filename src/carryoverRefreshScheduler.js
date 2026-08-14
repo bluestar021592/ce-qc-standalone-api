@@ -7,7 +7,7 @@ import { updateCarryoverResults } from './unifiedImportStore.js';
 export const CARRY_REFRESH_TIMEZONE = 'Asia/Phnom_Penh';
 export const CARRY_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
 export const CARRY_REFRESH_POLL_MS = 60 * 1000;
-export const CARRY_REFRESH_STARTUP_DELAY_MS = Math.max(30_000, Math.min(10 * 60 * 1000, Number(process.env.CARRY_REFRESH_STARTUP_DELAY_MS || 90_000)));
+export const CARRY_REFRESH_STARTUP_DELAY_MS = Math.max(30_000, Math.min(10 * 60 * 1000, Number(process.env.CARRY_REFRESH_STARTUP_DELAY_MS || 120_000)));
 const FAILURE_RETRY_MS = 15 * 60 * 1000;
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -215,8 +215,8 @@ export function startCarryoverRefreshScheduler() {
   startupNotBefore = Date.now() + CARRY_REFRESH_STARTUP_DELAY_MS;
   schedulerTimer = setInterval(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_TICK]', error?.message || error)); }, CARRY_REFRESH_POLL_MS);
   schedulerTimer.unref?.();
-  // Startup catch-up is intentionally deferred so first paint, navigation and the
-  // user's initial import are not competing with historical OPEN parcel refresh.
+  // V108 index maintenance is scheduled around 90s. Start carry refresh later so
+  // the two background jobs never intentionally begin together after launch.
   startupTimer = setTimeout(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_STARTUP]', error?.message || error)); }, CARRY_REFRESH_STARTUP_DELAY_MS);
   startupTimer.unref?.();
   console.log(`[CE-QC][CARRY_REFRESH] interactive startup protected for ${CARRY_REFRESH_STARTUP_DELAY_MS}ms; then Cambodia 00:05 + every 2 hours; OPEN carry only.`);
