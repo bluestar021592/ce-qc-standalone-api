@@ -116,8 +116,9 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(db,/SQLITE_CACHE_KIB \|\| 64 \* 1024/);
   assert.match(db,/SQLITE_MMAP_BYTES \|\| 256 \* 1024 \* 1024/);
   assert.match(carry,/CARRY_REFRESH_STARTUP_DELAY_MS/);
-  assert.match(carry,/90_000/);
+  assert.match(carry,/120_000/);
   assert.match(carry,/Date\.now\(\) < startupNotBefore/);
+  assert.match(carry,/V108 index maintenance is scheduled around 90s/);
   assert.match(carry,/setTimeout\(\(\) => \{ schedulerTick\(\)/);
   assert.match(carry,/startupDelayMs: CARRY_REFRESH_STARTUP_DELAY_MS/);
   assert.doesNotMatch(carry,/setTimeout\(\(\) => \{ schedulerTick\(\)[\s\S]{0,160}\}, 5000\)/);
