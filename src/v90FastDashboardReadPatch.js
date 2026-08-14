@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-14-v115-fast-dashboard-air-prefilter-v1';
+const PATCH_ID = '2026-08-14-v115-fast-dashboard-whpp-grouped-v2';
 const SUMMARY_ROUTE = '/api/v89/instant-dashboard';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 const CACHE_MS = Math.max(5_000, Number(process.env.V90_DASHBOARD_CACHE_MS || 30_000));
@@ -91,23 +91,22 @@ function correctAirClassification(db, batch, counts, whppTotal) {
   };
 }
 
-function shopeeWhppCount(db, batch, type) {
-  if (!batch?.snapshotId || !['SHOPEECN', 'SHOPEEVN'].includes(type)) return 0;
-  return Number(db.prepare(`
-    SELECT COUNT(DISTINCT f.shipmentCode) count
-    FROM business_final_rows f
-    WHERE f.reportDate=?
-      AND f.businessType IN ('SHOPEE', ?)
+function shopeeWhppCounts(db, batch) {
+  const result = { SHOPEECN: 0, SHOPEEVN: 0 };
+  if (!batch?.snapshotId) return result;
+  const rows = db.prepare(`
+    SELECT u.businessType,COUNT(DISTINCT f.shipmentCode) count
+    FROM unified_import_rows u
+    INNER JOIN business_final_rows f
+      ON f.reportDate=? AND f.shipmentCode=u.shipmentCode
+      AND (f.businessType='SHOPEE' OR f.businessType=u.businessType)
+    WHERE u.snapshotId=? AND u.businessType IN ('SHOPEECN','SHOPEEVN')
       AND COALESCE(f.isPod,0)=0
       AND UPPER(COALESCE(f.primaryCategory,'')) NOT IN ('POD','POD闭环','退回','RETURN','RETURNED','RETURN_COMPLETED')
-      AND EXISTS (
-        SELECT 1 FROM unified_import_rows u
-        WHERE u.snapshotId=? AND u.businessType=? AND u.shipmentCode=f.shipmentCode
-      )
       AND NOT EXISTS (
         SELECT 1 FROM business_scan_results sr
         WHERE sr.reportDate=f.reportDate AND sr.shipmentCode=f.shipmentCode
-          AND sr.businessType IN ('SHOPEE', ?)
+          AND (sr.businessType='SHOPEE' OR sr.businessType=u.businessType)
           AND (COALESCE(sr.isPod,0)=1 OR CAST(COALESCE(sr.orderStatus,'') AS TEXT) IN ('85','100'))
       )
       AND (
@@ -116,7 +115,10 @@ function shopeeWhppCount(db, batch, type) {
         OR UPPER(COALESCE(f.latestEventDesc,'')) LIKE '%CEL:WHPP%'
         OR COALESCE(f.primaryCategory,'')='WHPP滞留包裹'
       )
-  `).get(batch.reportDate, type, batch.snapshotId, type, type)?.count || 0);
+    GROUP BY u.businessType
+  `).all(batch.reportDate, batch.snapshotId);
+  for (const row of rows) if (Object.hasOwn(result, row.businessType)) result[row.businessType] = Number(row.count || 0);
+  return result;
 }
 
 function fastWhppSummary(db, reportDate, total) {
@@ -147,6 +149,7 @@ function buildSummary(requestedDate = '', options = {}) {
   const correction = correctAirClassification(db, batch, baseCounts, whppSource);
   const counts = { ...correction.counts, WHPP: correction.whpp };
   const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+  const shopeeWhpp = skipShopeeWhpp ? { SHOPEECN:0, SHOPEEVN:0 } : shopeeWhppCounts(db,batch);
   const payload = {
     ok:true,
     patchId:PATCH_ID,
@@ -154,10 +157,7 @@ function buildSummary(requestedDate = '', options = {}) {
     snapshotId:batch.snapshotId,
     counts,
     total,
-    shopeeWhpp: skipShopeeWhpp ? { SHOPEECN:0, SHOPEEVN:0 } : {
-      SHOPEECN:shopeeWhppCount(db,batch,'SHOPEECN'),
-      SHOPEEVN:shopeeWhppCount(db,batch,'SHOPEEVN')
-    },
+    shopeeWhpp,
     whppSummary:fastWhppSummary(db,batch.reportDate,correction.whpp),
     sourceCorrection:{
       exactAirMarkerBills:correction.candidates.length,
