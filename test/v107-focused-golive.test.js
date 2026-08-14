@@ -19,23 +19,26 @@ test('managed launcher remains fast-forward only and non-destructive',()=>{
 });
 
 test('current responsive runtime and purge files are syntax valid',()=>{
-  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v44WhppUiPatch.js','public/v104-fast-purge-ui.js','public/v108-route-lazy-features.js','public/v125-local-api-resilience.js'])syntax(file);
+  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','scripts/CE_QC_PurgeDeleteWorker.mjs','src/v44WhppUiPatch.js','public/v104-fast-purge-ui.js','public/v108-route-lazy-features.js','public/v125-local-api-resilience.js'])syntax(file);
 });
 
-test('V130 purge submit and execute paths recover delayed completed jobs',()=>{
+test('V131 destructive purge runs outside main web process and stays recoverable',()=>{
   const patch=read('src/v105AsyncPurgePatch.js');
-  const purge=read('src/dataPurge.js');
+  const worker=read('scripts/CE_QC_PurgeDeleteWorker.mjs');
   const ui=read('public/v104-fast-purge-ui.js');
-  assert.match(patch,/v130-purge-job-recovery-v1/);
+  assert.match(patch,/v131-isolated-purge-worker-v1/);
+  assert.match(patch,/spawn\(process\.execPath,\[PURGE_WORKER_FILE,payload\]/);
+  assert.match(patch,/runIsolatedExecute/);
   assert.match(patch,/RECOVER_STATUS_PATH/);
   assert.match(patch,/function recentJobFor/);
+  assert.match(worker,/ISOLATED_SQLITE_WORKER/);
+  assert.match(worker,/BEGIN IMMEDIATE/);
+  assert.match(worker,/DATABASE_CHANGED_BEFORE_PURGE_WORKER_LOCK/);
+  assert.match(worker,/BUSINESS_DATA_TABLES/);
   assert.match(ui,/v130-resilient-purge-submit-v4/);
   assert.match(ui,/recoverRecentJob/);
   assert.match(ui,/signal is aborted\|aborted without reason/);
   assert.match(ui,/Promise\.race\(\[submitPromise,recoveryPromise\]\)/);
-  assert.match(purge,/FAST_TABLE_DELETE_FK_GUARDED/);
-  assert.match(purge,/integrityCheck:'TRANSACTION_AND_SCHEMA'/);
-  assert.doesNotMatch(purge,/wal_checkpoint\(TRUNCATE\)/);
 });
 
 test('request coalescing lazy loading and V125 resilience remain enabled',()=>{
