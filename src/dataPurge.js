@@ -75,7 +75,6 @@ export function getPurgeCounts(){return tableCounts(getDb());}
 async function createVerifiedPreClearBackup(adminEmail,counts={}){
   const cfg=getRuntimeConfig();
   const db=getDb();
-  assertQuickIntegrity(db);
   const stamp=`${localStamp()}-${crypto.randomUUID().slice(0,8)}`;
   const dir=path.join(cfg.backupsDir,'pre_clear',stamp);
   fs.mkdirSync(dir,{recursive:true});
@@ -83,6 +82,9 @@ async function createVerifiedPreClearBackup(adminEmail,counts={}){
   const sourceSize=fs.statSync(cfg.dbFile).size;
   assertFreeSpace(dir,sourceSize);
 
+  // Do not perform a full source quick_check before copying. The verified backup
+  // copy is the actual safety artifact used for recovery; if its structural check
+  // fails the challenge is rejected and no business row is deleted.
   await backup(db,filePath,{rate:1024});
   const backupSize=fs.statSync(filePath).size;
   if(backupSize<=0)throw new Error('备份文件为空，已停止清除。');
@@ -92,7 +94,7 @@ async function createVerifiedPreClearBackup(adminEmail,counts={}){
   const stat=fs.statSync(filePath);
   const schemaMeta=Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value||0);
   const pragmaSchema=Number(db.prepare('PRAGMA user_version').get()?.user_version||0);
-  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'ok',backupQuickCheck:'ok',integrity:verified.integrity,verificationMode:'online-backup+quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:'node-sqlite-online-backup',systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts};
+  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:verified.integrity,verificationMode:'online-backup+backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:'node-sqlite-online-backup',systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts};
   fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
   recordBackup({backupType:'database',fileName:path.basename(filePath),filePath,fileHash:sha256,reason:'before-full-clear'});
   return {directory:dir,filePath,sha256,size:backupSize,mtimeMs:stat.mtimeMs,integrity:verified.integrity,method:'node-sqlite-online-backup',manifestPath:path.join(dir,'manifest.json')};
