@@ -47,9 +47,14 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(schemaBefore, 18);
 
   const challenge = await createPurgeChallenge({ email: 'test-admin' });
+  assert.equal(challenge.counts, null);
+  assert.equal(challenge.countMode, 'DEFERRED_TO_TRANSACTIONAL_DELETE');
   const manifestPath = path.join(path.dirname(challenge.backup.path), 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   assert.equal(manifest.migrationVersion, 18);
+  assert.equal(manifest.counts, null);
+  assert.equal(manifest.countMode, 'DEFERRED_TO_TRANSACTIONAL_DELETE');
+  assert.equal(manifest.sourceStableDuringBackup, true);
 
   await new Promise(resolve => setTimeout(resolve, 5100));
   const result = await executePurge({ challengeId: challenge.challengeId, phrase: PURGE_PHRASE, backupConfirmed: true, user: { email: 'test-admin' } });
@@ -62,6 +67,8 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(result.after.unified_import_rows, 0);
   assert.equal(result.after.shipment_current_state, 0);
   assert.equal(result.after.carryover_open_items, 0);
+  assert.equal(result.countSource, 'DELETE_CHANGESET_EXACT');
+  assert.equal(result.backupSourceFingerprint, 'MATCHED');
   assert.equal(result.integrity, 'ok');
   assert.equal(result.walCheckpoint, 'TRUNCATE');
   assert.ok(db.prepare('SELECT COUNT(*) count FROM backup_records').get().count >= 1);
