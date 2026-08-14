@@ -10,6 +10,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
+const SQLITE_CACHE_KIB = Math.max(8 * 1024, Math.min(256 * 1024, Number(process.env.SQLITE_CACHE_KIB || 64 * 1024)));
+const SQLITE_MMAP_BYTES = Math.max(0, Math.min(1024 * 1024 * 1024, Number(process.env.SQLITE_MMAP_BYTES || 256 * 1024 * 1024)));
+const SQLITE_WAL_AUTOCHECKPOINT_PAGES = Math.max(1000, Math.min(16000, Number(process.env.SQLITE_WAL_AUTOCHECKPOINT_PAGES || 4000)));
+const SQLITE_JOURNAL_SIZE_LIMIT = Math.max(16 * 1024 * 1024, Math.min(256 * 1024 * 1024, Number(process.env.SQLITE_JOURNAL_SIZE_LIMIT || 64 * 1024 * 1024)));
 
 let db = null;
 let initialized = false;
@@ -66,6 +70,7 @@ export function getDb() {
     }
     db.exec('PRAGMA synchronous = NORMAL');
     db.exec('PRAGMA foreign_keys = ON');
+    configurePerformancePragmas(db);
   }
   if (!initialized) {
     const expected = getExpectedSchemaVersion();
@@ -96,6 +101,23 @@ export function nowIso() {
 export function ensureRuntimeDirs(cfg = getRuntimeConfig()) {
   for (const dir of [cfg.dataDir, cfg.backupsDir, cfg.exportsDir, cfg.longJsonExportsDir, cfg.importsDir, cfg.logsDir, cfg.tokenDir]) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function configurePerformancePragmas(database) {
+  // Negative cache_size is KiB. This remains a per-connection memory ceiling,
+  // does not change the SQLite file format, and is safe for the detached export
+  // workers as well as the main API process.
+  const statements = [
+    `PRAGMA cache_size = -${Math.round(SQLITE_CACHE_KIB)}`,
+    'PRAGMA temp_store = MEMORY',
+    `PRAGMA mmap_size = ${Math.round(SQLITE_MMAP_BYTES)}`,
+    `PRAGMA wal_autocheckpoint = ${Math.round(SQLITE_WAL_AUTOCHECKPOINT_PAGES)}`,
+    `PRAGMA journal_size_limit = ${Math.round(SQLITE_JOURNAL_SIZE_LIMIT)}`
+  ];
+  for (const statement of statements) {
+    try { database.exec(statement); }
+    catch (error) { console.warn('[CE-QC][DB] optional performance pragma skipped:', statement, error?.message || error); }
   }
 }
 
