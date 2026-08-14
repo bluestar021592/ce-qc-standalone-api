@@ -40,14 +40,18 @@ test('full purge stays backup first async single-flight and avoids pre-count sca
   assert.match(purge,/DELETE_CHANGESET_EXACT/);
   assert.match(purge,/deleted\?\.changes/);
   assert.match(purge,/backupSourceFingerprint:'MATCHED'/);
+  assert.match(purge,/export function resealPurgeChallenge/);
+  assert.match(purge,/sourceSeal='POST_PREPARE_AUDIT'/);
   assert.match(purge,/数据库在安全备份后发生变化，已停止清除/);
-  const prepare=purge.slice(purge.indexOf('export async function createPurgeChallenge'),purge.indexOf('export async function executePurge'));
+  const prepare=purge.slice(purge.indexOf('export async function createPurgeChallenge'),purge.indexOf('export function resealPurgeChallenge'));
   const execute=purge.slice(purge.indexOf('export async function executePurge'),purge.indexOf('export function getPurgeCounts'));
   assert.doesNotMatch(prepare,/tableCounts\(db\)/);
   assert.doesNotMatch(execute,/tableCounts\(db\)/);
   assert.match(purge,/sourceQuickCheck:'deferred-to-verified-copy'/);
   assert.match(purge,/verificationMode:'online-backup\+stable-source-fingerprint\+backup-quick-check\+sha256'/);
-  assert.match(asyncPatch,/v122-single-flight-purge-jobs-v1/);
+  assert.match(asyncPatch,/v124-post-audit-purge-seal-v1/);
+  assert.match(asyncPatch,/import \{ resealPurgeChallenge \} from '\.\/dataPurge\.js'/);
+  assert.match(asyncPatch,/kind === 'PREPARE' && result\?\.challengeId\) resealPurgeChallenge\(result\.challengeId, req\.user\)/);
   assert.match(asyncPatch,/function activeJobFor/);
   assert.match(asyncPatch,/reused: started\.reused \? 'ACTIVE' : false/);
   assert.match(asyncPatch,/inspectV122PurgeJobs/);
@@ -178,6 +182,7 @@ test('update and purge backups verify the recovery copy and sha256 without dupli
   assert.match(purge,/hashFileStream/);
   assert.match(purge,/sourceFingerprintBeforeBackup/);
   assert.match(purge,/sourceFingerprintAfterBackup/);
+  assert.match(purge,/sourceFingerprintAfterVerification/);
   assert.match(purge,/sourceStableDuringBackup:true/);
   const backupBody=purge.slice(purge.indexOf('async function createVerifiedPreClearBackup'),purge.indexOf('function verifyBackupQuick'));
   assert.doesNotMatch(backupBody,/assertQuickIntegrity\(db\)/);
