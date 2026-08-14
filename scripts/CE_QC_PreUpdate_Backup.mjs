@@ -113,10 +113,10 @@ if(reusable){
 const dir=path.join(backupRoot,stamp());
 fs.mkdirSync(dir,{recursive:true});
 const copyFile=path.join(dir,'ce_qc_monitor.db');
-log('1/4',`Opening source SQLite: ${dbFile}`);
-const source=new DatabaseSync(dbFile,{timeout:10000});
+log('1/4',`Opening source SQLite read-only: ${dbFile}`);
+const source=new DatabaseSync(dbFile,{readOnly:true,timeout:10000});
 try{
-  source.exec('PRAGMA busy_timeout=10000');
+  source.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');
   log('2/4',`Creating SQLite online backup in ${BACKUP_RATE_PAGES} page batches...`);
   let nextReport=5;
   let lastPct=-1;
@@ -153,7 +153,7 @@ const manifest={
   beforeCommit,targetCommit,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:'quick-ok',
   verificationMode:'online-backup+stable-source-fingerprint+backup-quick-check+sha256',method:'node-sqlite-online-backup',
   sourceFingerprint:fingerprintAfter,sourceFingerprintBefore:fingerprintBefore,sourceFingerprintAfter:fingerprintAfter,
-  sourceStableDuringBackup:true,backupRatePages:BACKUP_RATE_PAGES
+  sourceStableDuringBackup:true,backupRatePages:BACKUP_RATE_PAGES,sourceOpenMode:'read-only'
 };
 fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
 log('READY',`Verified backup ready: ${copyFile}`);
