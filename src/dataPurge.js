@@ -46,6 +46,15 @@ export async function createPurgeChallenge(user={},options={}){
   }catch(error){clearPurgeBlock(db);throw error;}
 }
 
+export function resealPurgeChallenge(challengeId,user={}){
+  const challenge=challenges.get(String(challengeId||''));
+  if(!challenge||challenge.expiresAt<Date.now()||challenge.email!==(user.email||''))throw new Error('清除验证已失效，无法完成安全封存。');
+  challenge.sourceFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
+  challenge.resealedAt=Date.now();
+  challenge.sourceSeal='POST_PREPARE_AUDIT';
+  return {challengeId:String(challengeId||''),sourceSeal:challenge.sourceSeal};
+}
+
 export async function executePurge({challengeId,phrase,backupConfirmed,user={},activeRunIds=null}){
   const challenge=challenges.get(String(challengeId||''));
   if(!challenge||challenge.expiresAt<Date.now()||challenge.email!==(user.email||''))throw new Error('清除验证已失效，请重新开始。');
@@ -100,6 +109,11 @@ async function createVerifiedPreClearBackup(adminEmail){
 
   const verified=verifyBackupQuick(filePath);
   const sha256=await hashFileStream(filePath);
+  const sourceFingerprintAfterVerification=databaseFingerprint(cfg.dbFile);
+  if(!sameFingerprint(sourceFingerprintAfterBackup,sourceFingerprintAfterVerification)){
+    try{fs.rmSync(dir,{recursive:true,force:true});}catch{}
+    throw new Error('数据库在备份校验期间发生变化，已停止清除。请稍后重新开始。');
+  }
   const stat=fs.statSync(filePath);
   const schemaMeta=Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value||0);
   const pragmaSchema=Number(db.prepare('PRAGMA user_version').get()?.user_version||0);
