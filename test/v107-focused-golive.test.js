@@ -12,14 +12,15 @@ const syntax=p=>{const r=spawnSync(process.execPath,['--check',path.join(root,p)
 test('managed desktop launcher remains safe and non-destructive',()=>{
   const cmd=read('Start_CE_QC.cmd');
   const launcher=read('tools/CE_QC_Managed_Launcher.ps1');
-  assert.match(cmd,/JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(cmd,/CE_QC_Managed_Launcher\.ps1/);
+  assert.match(launcher,/JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
   assert.match(launcher,/CE_QC_PreUpdate_Backup\.mjs/);
   assert.match(launcher,/pull','--ff-only/);
   assert.doesNotMatch(launcher,/reset\s+--hard/i);
 });
 
 test('server bootstrap and fast runtime files are syntax valid',()=>{
-  for(const file of ['bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
+  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
 });
 
 test('full purge stays backup first asynchronous and uses fast whole-table reset',()=>{
@@ -55,6 +56,7 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   const indexes=read('src/v108PerformanceIndexWorker.js');
   const lazy=read('public/v108-route-lazy-features.js');
   const injector=read('src/v44WhppUiPatch.js');
+  const db=read('src/db.js');
   assert.match(render,/v105VisiblePageRender/);
   assert.match(render,/requestIdleCallback/);
   assert.match(nav,/V109_BOOTSTRAP_SUMMARY/);
@@ -91,6 +93,13 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(injector,/v110-drilldown-prewarm\.js\?v=20260814-2/);
   assert.doesNotMatch(injector,/v84-async-export-ui\.js/);
   assert.doesNotMatch(injector,/v104-fast-purge-ui\.js/);
+  assert.match(db,/PRAGMA synchronous = NORMAL/);
+  assert.match(db,/PRAGMA temp_store = MEMORY/);
+  assert.match(db,/PRAGMA cache_size = -\$\{Math\.round\(SQLITE_CACHE_KIB\)\}/);
+  assert.match(db,/PRAGMA mmap_size = \$\{Math\.round\(SQLITE_MMAP_BYTES\)\}/);
+  assert.match(db,/PRAGMA wal_autocheckpoint = \$\{Math\.round\(SQLITE_WAL_AUTOCHECKPOINT_PAGES\)\}/);
+  assert.match(db,/SQLITE_CACHE_KIB \|\| 64 \* 1024/);
+  assert.match(db,/SQLITE_MMAP_BYTES \|\| 256 \* 1024 \* 1024/);
 });
 
 test('update and purge backups use online copy quick structural verification and sha256',()=>{
