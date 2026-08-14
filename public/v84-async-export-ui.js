@@ -1,6 +1,6 @@
 (function installAsyncExportUiV84(global) {
   if (global.__CE_QC_V84_ASYNC_EXPORT_UI__) return;
-  const VERSION = '2026-08-13-v88-resumable-seven-business-export-ui-v3';
+  const VERSION = '2026-08-14-v120-adaptive-export-polling-v1';
   const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v88';
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pollingJobId = '';
@@ -80,10 +80,24 @@
     target.innerHTML = files.map(file => `<a class="export-file-item" href="${String(file.url || '').replace(/"/g, '&quot;')}"><span>${String(file.name || '').replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]))}</span><b>下载</b></a>`).join('');
   }
 
+  function setProgressText(target, text) {
+    if (target.textContent !== text) target.textContent = text;
+  }
+
+  function pollDelay(unchangedCycles, networkErrors = 0) {
+    if (document.visibilityState === 'hidden') return 5000;
+    if (networkErrors > 0) return Math.min(5000, 1800 + networkErrors * 350);
+    if (unchangedCycles >= 5) return 2500;
+    if (unchangedCycles >= 2) return 1800;
+    return 900;
+  }
+
   async function waitForJob(jobId, progress, files) {
     if (!jobId || pollingJobId === jobId) return null;
     pollingJobId = jobId;
     let networkErrors = 0;
+    let lastSignature = '';
+    let unchangedCycles = 0;
     try {
       while (true) {
         try {
@@ -91,7 +105,10 @@
           networkErrors = 0;
           const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
           const part = job.currentBusiness ? ` · ${job.currentBusiness}${job.businessParts > 1 ? ` ${job.currentPart}/${job.businessParts}` : ''}` : '';
-          progress.textContent = `${job.message || '后台生成中'} · ${pct}%${part}`;
+          const signature = `${job.status}|${pct}|${job.currentBusiness || ''}|${job.currentPart || 0}|${job.businessParts || 0}|${job.message || ''}`;
+          if (signature === lastSignature) unchangedCycles += 1;
+          else { lastSignature = signature; unchangedCycles = 0; }
+          setProgressText(progress, `${job.message || '后台生成中'} · ${pct}%${part}`);
           if (job.status === 'COMPLETED') {
             renderFiles(files, job.files || []);
             clearActiveJob(jobId);
@@ -105,9 +122,9 @@
           networkErrors += 1;
           if (error.status === 401) throw error;
           if (networkErrors >= 8) throw error;
-          progress.textContent = `后台任务仍在服务器运行，页面连接正在恢复（${networkErrors}/8）…`;
+          setProgressText(progress, `后台任务仍在服务器运行，页面连接正在恢复（${networkErrors}/8）…`);
         }
-        await sleep(1200);
+        await sleep(pollDelay(unchangedCycles, networkErrors));
       }
     } finally {
       if (pollingJobId === jobId) pollingJobId = '';
@@ -162,7 +179,7 @@
   ensureBusinessOptions();
   global.exportPeriodReport = exportPeriodReportV84;
   global.resumeActiveExportJob = resumeActiveJob;
-  global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION };
+  global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION, pollDelay };
   setTimeout(() => void resumeActiveJob(), 80);
-  console.info('[CE-QC][V88_RESUMABLE_SEVEN_BUSINESS_EXPORT_UI]', VERSION);
+  console.info('[CE-QC][V120_ADAPTIVE_EXPORT_POLLING]', VERSION);
 })(window);
