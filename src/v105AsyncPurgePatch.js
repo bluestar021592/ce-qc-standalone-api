@@ -2,12 +2,13 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { resealPurgeChallenge } from './dataPurge.js';
 
-const PATCH_ID = '2026-08-14-v128-purge-submit-flush-v1';
+const PATCH_ID = '2026-08-14-v130-purge-job-recovery-v1';
 const PREPARE_PATH = '/api/admin/data-purge/prepare';
 const EXECUTE_PATH = '/api/admin/data-purge/execute';
 const PREPARE_STATUS_PATH = '/api/v105/data-purge/prepare/:jobId';
 const EXECUTE_STATUS_PATH = '/api/v105/data-purge/execute/:jobId';
 const ACTIVE_STATUS_PATH = '/api/v105/data-purge/active';
+const RECOVER_STATUS_PATH = '/api/v105/data-purge/recover';
 const JOB_TTL_MS = 30 * 60 * 1000;
 const JOB_START_DELAY_MS = Math.max(100, Math.min(2000, Number(process.env.PURGE_JOB_START_DELAY_MS || 350)));
 const jobs = new Map();
@@ -57,6 +58,17 @@ function activeJobFor(owner, kind) {
     if (job.owner === owner && job.kind === kind && ['QUEUED', 'RUNNING'].includes(String(job.status || ''))) return job;
   }
   return null;
+}
+
+function recentJobFor(owner, kind) {
+  if (!owner) return null;
+  pruneJobs();
+  let latest = null;
+  for (const job of jobs.values()) {
+    if (job.owner !== owner || job.kind !== kind) continue;
+    if (!latest || Number(job.createdAtMs || 0) > Number(latest.createdAtMs || 0)) latest = job;
+  }
+  return latest;
 }
 
 function fakeResponse(resolve, reject) {
@@ -121,9 +133,6 @@ function startJob(req, legacyHandler, kind) {
   };
   jobs.set(jobId, job);
 
-  // Do not start destructive synchronous SQLite work in the same event-loop turn
-  // that is sending the HTTP 202 response. A short timer guarantees the browser
-  // receives jobId/pollUrl before the fast delete transaction begins.
   const timer = setTimeout(async () => {
     job.status = 'RUNNING';
     job.progress = kind === 'EXECUTE' ? 12 : 8;
@@ -157,7 +166,7 @@ function startJob(req, legacyHandler, kind) {
 }
 
 function statusHandler(expectedKind) {
-  return function v128PurgeStatus(req, res) {
+  return function v130PurgeStatus(req, res) {
     pruneJobs();
     const job = jobs.get(String(req.params.jobId || ''));
     if (!job || job.kind !== expectedKind) return res.status(404).json({ ok: false, patchId: PATCH_ID, error: '清空任务不存在或已过期。' });
@@ -183,6 +192,16 @@ function activeStatusHandler(req, res) {
   return res.json(publicJob(job));
 }
 
+function recoverStatusHandler(req, res) {
+  if (String(req.user?.role || '').toUpperCase() !== 'ADMIN') return res.status(403).json({ ok: false, patchId: PATCH_ID, error: '无权恢复清空任务。' });
+  const kind = String(req.query?.kind || 'EXECUTE').toUpperCase() === 'PREPARE' ? 'PREPARE' : 'EXECUTE';
+  const owner = ownerKey(req.user);
+  const job = activeJobFor(owner, kind) || recentJobFor(owner, kind);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!job) return res.status(404).json({ ok: false, patchId: PATCH_ID, error: '最近没有可恢复的清空任务。' });
+  return res.json(publicJob(job));
+}
+
 const originalPost = express.application.post;
 const originalGet = express.application.get;
 let statusInstalled = false;
@@ -193,16 +212,17 @@ function installStatusRoutes(app) {
   originalGet.call(app, PREPARE_STATUS_PATH, statusHandler('PREPARE'));
   originalGet.call(app, EXECUTE_STATUS_PATH, statusHandler('EXECUTE'));
   originalGet.call(app, ACTIVE_STATUS_PATH, activeStatusHandler);
+  originalGet.call(app, RECOVER_STATUS_PATH, recoverStatusHandler);
 }
 
-express.application.post = function v128AsyncPurgePost(pathValue, ...handlers) {
+express.application.post = function v130AsyncPurgePost(pathValue, ...handlers) {
   if (![PREPARE_PATH, EXECUTE_PATH].includes(pathValue) || !handlers.length) return originalPost.call(this, pathValue, ...handlers);
   const legacyHandler = handlers[handlers.length - 1];
   if (typeof legacyHandler !== 'function') return originalPost.call(this, pathValue, ...handlers);
   installStatusRoutes(this);
   const preserved = handlers.slice(0, -1);
   const kind = pathValue === EXECUTE_PATH ? 'EXECUTE' : 'PREPARE';
-  const enqueue = function v128PurgeJobEnqueue(req, res) {
+  const enqueue = function v130PurgeJobEnqueue(req, res) {
     const started = startJob(req, legacyHandler, kind);
     const job = started.job;
     res.setHeader('Cache-Control', 'no-store');
@@ -222,8 +242,8 @@ express.application.post = function v128AsyncPurgePost(pathValue, ...handlers) {
   return originalPost.call(this, pathValue, ...preserved, enqueue);
 };
 
-export function inspectV128PurgeJobs(){
+export function inspectV130PurgeJobs(){
   const active=[...jobs.values()].filter(job=>['QUEUED','RUNNING'].includes(String(job.status||'')));
-  return {total:jobs.size,active:active.length,startDelayMs:JOB_START_DELAY_MS,byKind:{PREPARE:active.filter(job=>job.kind==='PREPARE').length,EXECUTE:active.filter(job=>job.kind==='EXECUTE').length}};
+  return {total:jobs.size,active:active.length,startDelayMs:JOB_START_DELAY_MS,recoveryPath:RECOVER_STATUS_PATH,byKind:{PREPARE:active.filter(job=>job.kind==='PREPARE').length,EXECUTE:active.filter(job=>job.kind==='EXECUTE').length}};
 }
 export const V105_ASYNC_PURGE_PATCH_ID = PATCH_ID;
