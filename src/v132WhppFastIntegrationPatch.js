@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID='2026-08-14-v132-whpp-fast-summary-v1';
+const PATCH_ID='2026-08-14-v135-whpp-fast-summary-retry-v2';
 const ROUTE='/api/v132/whpp-fast-summary';
 const CACHE_MS=Math.max(5_000,Number(process.env.V132_WHPP_FAST_CACHE_MS||15_000));
 const cache=new Map();
@@ -69,11 +69,11 @@ function finalRegions(db,date){
 function buildFastSummary(requested=''){
   const db=getDb();
   const reportDate=latestDate(db,requested);
-  if(!reportDate){const metrics={total:0,pod:0,podRate:0,returned:0,returnRate:0,cancelled:0,cancelRate:0,unresolved:0};return {ok:true,patchId:PATCH_ID,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',metrics,regions:{PP:emptyRegion('PP'),PV:emptyRegion('PV'),UNKNOWN:emptyRegion('UNKNOWN')}};}
+  if(!reportDate){const metrics={total:0,pod:0,podRate:0,returned:0,returnRate:0,cancelled:0,cancelRate:0,unresolved:0,retryPending:0};return {ok:true,patchId:PATCH_ID,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',metrics,regions:{PP:emptyRegion('PP'),PV:emptyRegion('PV'),UNKNOWN:emptyRegion('UNKNOWN')}};}
   const daily=db.prepare("SELECT totalCount,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||{};
   const history=db.prepare("SELECT summaryJson,updatedAt FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||null;
-  const finalStat=db.prepare("SELECT COUNT(*) count,MAX(updatedAt) updatedAt FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(reportDate)||{};
-  const fingerprint=`${reportDate}|${daily.updatedAt||''}|${history?.updatedAt||''}|${num(finalStat.count)}|${finalStat.updatedAt||''}`;
+  const finalStat=db.prepare("SELECT COUNT(*) count,MAX(updatedAt) updatedAt,SUM(CASE WHEN UPPER(COALESCE(apiStatus,''))='API_PENDING_RETRY' THEN 1 ELSE 0 END) retryPending FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(reportDate)||{};
+  const fingerprint=`${reportDate}|${daily.updatedAt||''}|${history?.updatedAt||''}|${num(finalStat.count)}|${num(finalStat.retryPending)}|${finalStat.updatedAt||''}`;
   const hit=cache.get(reportDate);
   if(hit&&hit.fingerprint===fingerprint&&Date.now()-hit.at<CACHE_MS)return {...hit.payload,cacheHit:true};
 
@@ -82,20 +82,22 @@ function buildFastSummary(requested=''){
   const metrics={...source,total:num(source.total??total)};
   delete metrics.accounting;delete metrics.snapshotId;delete metrics.regions;
   for(const key of ['pod','returned','cancelled','unresolved','pendingNonContinuous','pending1','pending2','pending3','oc1','oc2','oc3','cycle2','inboundNoScan','delivery','workOrder','normalDiversion','shopTotal','ccslCnDiversion','ccslZtDiversion','ccsl580Retention','ccsl580Diversion','phnomPenhShop','provinceShop','unknownShop','dispatchAttempt1','dispatchAttempt2','dispatchAttempt3'])metrics[key]=num(metrics[key]);
+  metrics.retryPending=num(finalStat.retryPending);
   metrics.podRate=history?num(metrics.podRate):0;
   metrics.returnRate=history?num(metrics.returnRate):0;
   metrics.cancelRate=history?num(metrics.cancelRate):0;
   if(!history)metrics.unresolved=metrics.total;
   const regions=num(finalStat.count)>0?finalRegions(db,reportDate):importedRegions(db,reportDate);
-  const payload={ok:true,patchId:PATCH_ID,reportDate,total:metrics.total,completed:Boolean(history),snapshotStatus:history?'COMPLETED':'PENDING',metrics,regions,generatedAt:new Date().toISOString(),cacheHit:false};
+  const snapshotStatus=history?(metrics.retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED'):'PENDING';
+  const payload={ok:true,patchId:PATCH_ID,reportDate,total:metrics.total,completed:Boolean(history),snapshotStatus,metrics,regions,generatedAt:new Date().toISOString(),cacheHit:false};
   cache.set(reportDate,{fingerprint,at:Date.now(),payload});
   return payload;
 }
 
 const previousListen=express.application.listen;
 let installed=false;
-express.application.listen=function v132WhppFastListen(...args){
-  if(!installed){installed=true;this.get(ROUTE,(req,res)=>{try{const payload=buildFastSummary(req.query.reportDate||req.query.date||'');res.setHeader('Cache-Control','private, max-age=5');res.setHeader('Server-Timing','v132;desc=whpp-fast-summary');res.json(payload);}catch(error){res.status(500).json({ok:false,patchId:PATCH_ID,error:error?.message||String(error)});}});}
+express.application.listen=function v135WhppFastListen(...args){
+  if(!installed){installed=true;this.get(ROUTE,(req,res)=>{try{const payload=buildFastSummary(req.query.reportDate||req.query.date||'');res.setHeader('Cache-Control','private, max-age=5');res.setHeader('Server-Timing','v135;desc=whpp-fast-summary');res.json(payload);}catch(error){res.status(500).json({ok:false,patchId:PATCH_ID,error:error?.message||String(error)});}});}
   return previousListen.apply(this,args);
 };
 
