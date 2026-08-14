@@ -19,11 +19,17 @@ test('full purge pre-clear backup uses SQLite online backup instead of blocking 
   assert.doesNotMatch(source,/promises\.copyFile\(cfg\.dbFile, filePath\)/);
 });
 
-test('purge source is quick-checked once per stage while backup receives the full integrity check',()=>{
+test('purge source is quick-checked once before backup while backup receives the full integrity check',()=>{
   assert.match(source,/PRAGMA quick_check\(1\)/);
   assert.match(source,/verifyBackupIntegrityOnce\(filePath\)/);
   assert.match(source,/PRAGMA integrity_check/);
   assert.doesNotMatch(source,/function assertIntegrity\(/);
+  const prepareStart=source.indexOf('export async function createPurgeChallenge');
+  const prepareEnd=source.indexOf('export async function executePurge',prepareStart);
+  const prepare=source.slice(prepareStart,prepareEnd);
+  assert.doesNotMatch(prepare,/assertQuickIntegrity\(db\)/);
+  assert.match(prepare,/const counts = tableCounts\(db\)/);
+  assert.match(prepare,/createVerifiedPreClearBackup\(user\.email \|\| '', counts\)/);
 });
 
 test('five-second confirmation reuses already verified backup without another whole-file hash or integrity scan',()=>{
@@ -42,4 +48,13 @@ test('purge still keeps a SHA-256 manifest and full backup integrity evidence',(
   assert.match(source,/sourceQuickCheck: 'ok'/);
   assert.match(source,/integrity: verified\.integrity/);
   assert.match(source,/recordBackup\(/);
+});
+
+test('dead dashboard-cache worker lease is cleared immediately instead of delaying purge for fifteen minutes',()=>{
+  assert.match(source,/function pidIsAlive\(pid\)/);
+  assert.match(source,/process\.kill\(pid, 0\)/);
+  assert.match(source,/owner\.match\(\/\^\(\\d\+\)-\//);
+  assert.match(source,/DELETE FROM app_meta WHERE key IN \(\?,\?\)/);
+  assert.match(source,/timeoutMs = 5 \* 60_000/);
+  assert.doesNotMatch(source,/timeoutMs = 15 \* 60_000/);
 });
