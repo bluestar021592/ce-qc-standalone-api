@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import fs from 'fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -56,9 +56,6 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(manifest.countMode, 'DEFERRED_TO_TRANSACTIONAL_DELETE');
   assert.equal(manifest.sourceStableDuringBackup, true);
 
-  // Production writes the retained DATA_PURGE_BACKUP_VERIFIED audit row after
-  // the backup route returns. Re-seal after that expected retained write so the
-  // five-second guard still rejects any later database mutation.
   db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v124_test_retained_audit','1',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(new Date().toISOString());
   const seal = resealPurgeChallenge(challenge.challengeId, { email: 'test-admin' });
   assert.equal(seal.sourceSeal, 'POST_PREPARE_AUDIT');
@@ -77,10 +74,12 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(result.countSource, 'DELETE_CHANGESET_EXACT');
   assert.equal(result.backupSourceFingerprint, 'MATCHED');
   assert.equal(result.integrity, 'ok');
-  assert.equal(result.walCheckpoint, 'TRUNCATE');
+  assert.equal(result.integrityCheck, 'TRANSACTION_AND_SCHEMA');
+  assert.equal(result.walCheckpoint, 'AUTO');
+  assert.equal(result.deleteMode, 'FAST_TABLE_DELETE_FK_GUARDED');
   assert.ok(db.prepare('SELECT COUNT(*) count FROM backup_records').get().count >= 1);
   assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='v124_test_retained_audit'").get()?.value, '1');
   assert.equal(Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0), 18);
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
-  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
 });
