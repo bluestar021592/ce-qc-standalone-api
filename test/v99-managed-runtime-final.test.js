@@ -34,15 +34,20 @@ test('V99 managed launcher ties the backend tree to a close-on-owner Windows job
   assert.match(source,/release port 5177/);
 });
 
-test('V99 pre-update database backup is syntax-valid and independently verified',()=>{
+test('V99 pre-update database backup is syntax-valid, online, progress-visible and independently verified',()=>{
   const relative='scripts/CE_QC_PreUpdate_Backup.mjs';
   const source=read(relative);
   const syntax=spawnSync(process.execPath,['--check',path.join(root,relative)],{encoding:'utf8'});
   assert.equal(syntax.status,0,syntax.stderr||syntax.stdout);
+  assert.match(source,/import \{ backup, DatabaseSync \} from 'node:sqlite'/);
+  assert.match(source,/PRAGMA quick_check\(1\)/);
+  assert.match(source,/await backup\(source, copyFile/);
+  assert.match(source,/progress:\s*\(\{ totalPages, remainingPages \}\)/);
   assert.match(source,/PRAGMA integrity_check/);
-  assert.match(source,/wal_checkpoint\(FULL\)/);
   assert.match(source,/sha256/);
+  assert.match(source,/node-sqlite-online-backup/);
   assert.match(source,/pre_update/);
+  assert.doesNotMatch(source,/wal_checkpoint\(FULL\)/);
 });
 
 test('V99 dynamic carry refresh has no HTTP route and is backend-owned',()=>{
