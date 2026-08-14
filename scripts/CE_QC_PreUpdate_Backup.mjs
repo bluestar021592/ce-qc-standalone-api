@@ -1,17 +1,26 @@
-import 'dotenv/config';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import dotenv from 'dotenv';
 import { backup, DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const root = path.resolve(__dirname, '..');
+const candidateRoot = path.resolve(__dirname, '..');
+const root = path.resolve(process.env.CE_QC_BACKUP_PROJECT_ROOT || candidateRoot);
+dotenv.config({ path: path.join(root, '.env'), override: false });
+
 const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
 const resolveProjectPath = value => path.isAbsolute(value) ? path.normalize(value) : path.resolve(root, value);
-const dataDir = resolveProjectPath(process.env.DATA_DIR || DEFAULT_DATA_DIR);
-const dbFile = resolveProjectPath(process.env.DB_FILE || path.join(dataDir, 'ce_qc_monitor.db'));
+const fallbackDataDir = path.resolve(root, 'data');
+const rootAvailable = value => {
+  try { return fs.existsSync(path.parse(path.resolve(value)).root); } catch { return false; }
+};
+const preferredDataDir = resolveProjectPath(process.env.DATA_DIR || DEFAULT_DATA_DIR);
+const dataDir = rootAvailable(preferredDataDir) ? preferredDataDir : fallbackDataDir;
+const preferredDbFile = resolveProjectPath(process.env.DB_FILE || path.join(dataDir, 'ce_qc_monitor.db'));
+const dbFile = rootAvailable(preferredDbFile) ? preferredDbFile : path.join(fallbackDataDir, 'ce_qc_monitor.db');
 const beforeCommit = String(process.argv[2] || '').trim();
 const targetCommit = String(process.argv[3] || '').trim();
 
@@ -39,7 +48,7 @@ function sha256(file) {
 
 if (!fs.existsSync(dbFile)) {
   log('SKIP', `Database not found: ${dbFile}`);
-  console.log(JSON.stringify({ ok: true, skipped: true, reason: 'DATABASE_NOT_FOUND', dbFile }));
+  console.log(JSON.stringify({ ok: true, skipped: true, reason: 'DATABASE_NOT_FOUND', dbFile, root }));
   process.exit(0);
 }
 
@@ -48,7 +57,7 @@ const dir = path.join(dataDir, 'backups', 'pre_update', stamp());
 fs.mkdirSync(dir, { recursive: true });
 const copyFile = path.join(dir, 'ce_qc_monitor.db');
 
-log('1/5', 'Opening source SQLite and running quick_check...');
+log('1/5', `Opening source SQLite: ${dbFile}`);
 const source = new DatabaseSync(dbFile, { timeout: 10000 });
 try {
   source.exec('PRAGMA busy_timeout=10000');
@@ -90,6 +99,8 @@ const copyHash = sha256(copyFile);
 const manifest = {
   createdAt: new Date().toISOString(),
   reason: 'before-automatic-code-update',
+  projectRoot: root,
+  candidateRoot,
   databasePath: dbFile,
   backupPath: copyFile,
   size: copySize,
