@@ -16,9 +16,6 @@ const challenges = new Map();
 
 export async function createPurgeChallenge(user = {}, options = {}) {
   const db = getDb();
-  // Block NEW background refresh work immediately. Any carry/cache worker that
-  // already owned work before this click is allowed to finish, and the purge
-  // waits for it before the verified backup begins.
   setPurgeBlock(db, Date.now() + 20 * 60_000);
   try {
     await waitForBackgroundMaintenanceIdle(db);
@@ -83,9 +80,8 @@ async function createVerifiedPreClearBackup(adminEmail, counts = {}) {
   const sourceSize = fs.statSync(cfg.dbFile).size;
   assertFreeSpace(dir, sourceSize);
 
-  // SQLite online backup copies a transactionally consistent database image,
-  // including committed WAL content, without forcing a blocking FULL checkpoint.
-  // This is much faster for large live databases than integrity+checkpoint+copy.
+  // Transactionally consistent online backup includes committed WAL content and
+  // avoids the old blocking FULL checkpoint + physical file-copy path.
   await backup(db, filePath, { rate: 1024 });
   const backupSize = fs.statSync(filePath).size;
   if (backupSize <= 0) throw new Error('备份文件为空，已停止清除。');
@@ -133,8 +129,8 @@ function verifyPreparedBackupStillPresent(backup) {
   const stat = fs.statSync(backup.filePath);
   if (stat.size <= 0 || (backup.size && stat.size !== backup.size)) throw new Error('自动备份大小发生变化，已停止清除。');
   // The backup was already SHA-256 hashed and fully integrity-checked at prepare
-  // time. During the five-second confirmation window, a cheap mtime/size guard
-  // prevents a second full-file scan while still refusing any changed backup.
+  // time. During the confirmation window, cheap mtime/size guards prevent a
+  // second whole-file scan while still refusing any changed backup.
   if (Number.isFinite(Number(backup.mtimeMs)) && Math.abs(Number(stat.mtimeMs) - Number(backup.mtimeMs)) > 1) {
     throw new Error('自动备份在确认期间发生变化，已停止清除。');
   }
@@ -156,26 +152,35 @@ function setPurgeBlock(db, expiresAt) {
 }
 function clearPurgeBlock(db) { db.prepare('DELETE FROM app_meta WHERE key=?').run(PURGE_BLOCK_KEY); }
 
+function pidIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error?.code === 'EPERM'; }
+}
+
 function cacheWorkerActive(db) {
   const owner = String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(CACHE_WORKER_ACTIVE_KEY)?.value || '');
   const until = Number(db.prepare('SELECT value FROM app_meta WHERE key=?').get(CACHE_WORKER_ACTIVE_UNTIL_KEY)?.value || 0);
-  return Boolean(owner && Number.isFinite(until) && until > Date.now());
+  if (!owner || !Number.isFinite(until) || until <= Date.now()) return false;
+  const pid = Number(owner.match(/^(\d+)-/)?.[1] || 0);
+  if (pid > 0 && !pidIsAlive(pid)) {
+    db.prepare('DELETE FROM app_meta WHERE key IN (?,?)').run(CACHE_WORKER_ACTIVE_KEY, CACHE_WORKER_ACTIVE_UNTIL_KEY);
+    return false;
+  }
+  return true;
 }
 
-async function waitForBackgroundMaintenanceIdle(db, timeoutMs = 15 * 60_000) {
+async function waitForBackgroundMaintenanceIdle(db, timeoutMs = 5 * 60_000) {
   const started = Date.now();
   while (schedulerStateForTests().inFlight || cacheWorkerActive(db)) {
     if (Date.now() - started >= timeoutMs) {
-      throw new Error('后台遗留刷新或看板缓存维护长时间未结束，系统已安全停止本次清除，没有修改业务数据。');
+      throw new Error('后台遗留刷新或看板缓存维护超过5分钟仍未结束，系统已安全停止本次清除，没有修改业务数据。');
     }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
 }
 
 function clearBusinessRuntimeMeta(db) {
-  // Fresh-start must not inherit a prior data set's dynamic refresh/cache clock,
-  // and transient maintenance/purge leases must disappear after completion.
-  // Schema/app/user/system/whitelist/backup metadata is intentionally retained.
   db.prepare(`DELETE FROM app_meta
     WHERE key LIKE 'carry_refresh_%' OR key IN (?,?,?)`)
     .run(PURGE_BLOCK_KEY, CACHE_WORKER_ACTIVE_KEY, CACHE_WORKER_ACTIVE_UNTIL_KEY);
