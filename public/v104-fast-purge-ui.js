@@ -1,6 +1,6 @@
-(function installAsyncPurgeUiV128(global){
+(function installAsyncPurgeUiV130(global){
   if(global.__CE_QC_V105_ASYNC_PURGE_UI__)return;
-  const VERSION='2026-08-14-v128-responsive-purge-ui-v3';
+  const VERSION='2026-08-14-v130-resilient-purge-submit-v4';
   let polling=false;
   let flowActive=false;
 
@@ -27,11 +27,25 @@
     return 1000;
   }
 
+  function abortLike(error){
+    const name=String(error?.name||'');
+    const text=String(error?.message||error||'');
+    return name==='AbortError'||name==='TimeoutError'||/signal is aborted|aborted without reason|request.*timeout|timed out/i.test(text);
+  }
+
+  function recoverableTransport(error){
+    const name=String(error?.name||'');
+    const text=String(error?.message||error||'');
+    return abortLike(error)||name==='TypeError'||/failed to fetch|network|load failed|连接|socket|connection/i.test(text);
+  }
+
   async function directJson(url,options={},timeoutMs=7000){
-    const controller=new AbortController();
-    const timer=setTimeout(()=>controller.abort(),timeoutMs);
+    const controller=timeoutMs>0?new AbortController():null;
+    const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
     try{
-      const response=await fetch(url,{cache:'no-store',credentials:'same-origin',...options,signal:controller.signal});
+      const init={cache:'no-store',credentials:'same-origin',...options};
+      if(controller)init.signal=controller.signal;
+      const response=await fetch(url,init);
       const text=await response.text();
       let payload={};
       try{payload=text?JSON.parse(text):{};}catch{}
@@ -41,32 +55,45 @@
       }
       return payload;
     }catch(error){
-      if(error?.name==='AbortError')error.submitTimeout=true;
+      if(abortLike(error)){
+        const wrapped=new Error('请求响应延迟，正在自动恢复后台任务状态');
+        wrapped.submitTimeout=true;wrapped.cause=error;throw wrapped;
+      }
       throw error;
-    }finally{clearTimeout(timer);}
+    }finally{if(timer)clearTimeout(timer);}
   }
 
-  async function recoverActiveJob(kind){
-    try{return await directJson(`/api/v105/data-purge/active?kind=${encodeURIComponent(kind)}`,{},3500);}
+  async function recoverRecentJob(kind){
+    try{return await directJson(`/api/v105/data-purge/recover?kind=${encodeURIComponent(kind)}`,{},4000);}
     catch(error){if(Number(error?.status)===404)return null;throw error;}
   }
 
-  async function submitBackground(kind,url,body,preview){
-    try{
-      return await directJson(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})},6500);
-    }catch(error){
-      const recoverable=Boolean(error?.submitTimeout||error?.name==='TypeError'||/failed to fetch|network|load failed|连接/i.test(String(error?.message||'')));
-      if(!recoverable)throw error;
-      setPreview(preview,`<div class="purge-warning"><strong>后台任务提交响应延迟</strong><br>正在自动找回已经提交的任务，请勿重复点击。</div>`);
-      for(let attempt=0;attempt<6;attempt+=1){
-        await sleep(attempt?500:150);
-        try{
-          const active=await recoverActiveJob(kind);
-          if(active?.jobId&&active?.pollUrl)return active;
-        }catch{}
+  async function recoverLoop(kind,preview){
+    await sleep(900);
+    for(let attempt=0;attempt<40;attempt+=1){
+      if(attempt===0||attempt%5===0)setPreview(preview,`<div class="purge-warning"><strong>后台任务提交响应延迟</strong><br>正在自动恢复真实任务状态，请勿重复点击。已尝试 ${attempt+1} 次。</div>`);
+      try{
+        const recovered=await recoverRecentJob(kind);
+        if(recovered?.jobId&&recovered?.pollUrl)return recovered;
+      }catch(error){
+        const status=Number(error?.status||0);
+        if((status>=400&&status<500)&&status!==404)throw error;
       }
-      throw error;
+      await sleep(Math.min(1800,500+attempt*40));
     }
+    throw new Error('后台任务状态暂时无法确认。请保持后台运行并重新打开“数据管理”查看结果，不要重复点击清空。');
+  }
+
+  async function submitBackground(kind,url,body,preview){
+    const submitPromise=directJson(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})},0)
+      .then(value=>({source:'submit',value}))
+      .catch(error=>({source:'submitError',error}));
+    const recoveryPromise=recoverLoop(kind,preview).then(value=>({source:'recover',value}));
+    const outcome=await Promise.race([submitPromise,recoveryPromise]);
+    if(outcome.source==='submit')return outcome.value;
+    if(outcome.source==='recover')return outcome.value;
+    if(!recoverableTransport(outcome.error))throw outcome.error;
+    return (await recoveryPromise).value;
   }
 
   async function pollJob(pollUrl,preview,mode='PREPARE'){
@@ -78,7 +105,7 @@
     try{
       for(let attempt=0;attempt<2400;attempt+=1){
         try{
-          const status=await directJson(pollUrl,{},5000);
+          const status=await directJson(pollUrl,{},8000);
           networkErrors=0;
           if(status.status==='COMPLETED')return status.result;
           if(status.status==='FAILED'){
@@ -98,8 +125,8 @@
           const httpStatus=Number(error?.status||0);
           if(error?.purgeJobFailed||error?.reloginRequired||(httpStatus>=400&&httpStatus<500))throw error;
           networkErrors+=1;
-          if(networkErrors>=10)throw error;
-          setPreview(preview,`<div class="purge-warning"><strong>后台任务仍在运行</strong><br>主进程正在处理数据库，页面正在自动恢复状态（${networkErrors}/10）…</div>`);
+          if(networkErrors>=20)throw new Error('后台任务仍在执行，但页面连续无法读取状态。请保持后台运行，稍后重新打开数据管理查看结果。');
+          setPreview(preview,`<div class="purge-warning"><strong>后台任务仍在运行</strong><br>主进程正在处理数据库，页面正在自动恢复状态（${networkErrors}/20）…</div>`);
         }
         await sleep(pollDelay(mode,unchangedCycles,networkErrors));
       }
@@ -123,7 +150,7 @@
     return submitted;
   }
 
-  global.openDataPurge=async function v128OpenDataPurge(){
+  global.openDataPurge=async function v130OpenDataPurge(){
     if(accessSession.user?.role!=='ADMIN'||flowActive)return;
     if(!window.confirm('确定要清空全部业务数据吗？系统会先创建并校验完整备份，用户、权限、配置、白名单、备份和审计不会删除。'))return;
     flowActive=true;
@@ -143,11 +170,12 @@
       await applyCompletedPurge(result);
     }catch(error){
       purgeChallenge=null;
-      setPreview(preview,`<div class="purge-error">无法完成一键清空：${escapeHtml(error.message||String(error))}</div>`);
+      const message=abortLike(error)?'后台任务响应延迟，系统正在恢复状态。请勿重复点击清空。':(error.message||String(error));
+      setPreview(preview,`<div class="purge-error">无法完成一键清空：${escapeHtml(message)}</div>`);
     }finally{flowActive=false;}
   };
 
-  global.executeDataPurge=async function v128ExecuteDataPurge(){
+  global.executeDataPurge=async function v130ExecuteDataPurge(){
     if(!purgeChallenge?.challengeId||flowActive)return;
     flowActive=true;
     const preview=document.getElementById('purgePreview');
@@ -155,10 +183,11 @@
       const result=await executeChallengeAutomatically(purgeChallenge,preview);
       await applyCompletedPurge(result);
     }catch(error){
-      setPreview(preview,`<div class="purge-error">清空失败：${escapeHtml(error.message||String(error))}</div>`);
+      const message=abortLike(error)?'后台任务响应延迟，系统正在恢复状态。请勿重复点击清空。':(error.message||String(error));
+      setPreview(preview,`<div class="purge-error">清空失败：${escapeHtml(message)}</div>`);
     }finally{flowActive=false;}
   };
 
-  global.__CE_QC_V105_ASYNC_PURGE_UI__={version:VERSION,isPolling:()=>polling,isFlowActive:()=>flowActive,pollDelay};
-  console.info('[CE-QC][V128_PURGE_UI]',VERSION);
+  global.__CE_QC_V105_ASYNC_PURGE_UI__={version:VERSION,isPolling:()=>polling,isFlowActive:()=>flowActive,pollDelay,recoverRecentJob};
+  console.info('[CE-QC][V130_PURGE_UI]',VERSION);
 })(window);
