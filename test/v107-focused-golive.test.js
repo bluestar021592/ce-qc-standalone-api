@@ -23,7 +23,7 @@ test('server bootstrap and fast runtime files are syntax valid',()=>{
   for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/carryoverRefreshScheduler.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v90FastDashboardReadPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v84-async-export-ui.js','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
 });
 
-test('full purge stays backup first asynchronous and uses fast whole-table reset',()=>{
+test('full purge stays backup first async single-flight and fast',()=>{
   const purge=read('src/dataPurge.js');
   const asyncPatch=read('src/v105AsyncPurgePatch.js');
   const ui=read('public/v104-fast-purge-ui.js');
@@ -40,8 +40,18 @@ test('full purge stays backup first asynchronous and uses fast whole-table reset
   assert.match(purge,/RECOUNT_AFTER_DATABASE_CHANGE/);
   assert.match(purge,/sourceQuickCheck:'deferred-to-verified-copy'/);
   assert.match(purge,/verificationMode:'online-backup\+backup-quick-check\+sha256'/);
+  assert.match(asyncPatch,/v122-single-flight-purge-jobs-v1/);
+  assert.match(asyncPatch,/function activeJobFor/);
+  assert.match(asyncPatch,/reused: started\.reused \? 'ACTIVE' : false/);
+  assert.match(asyncPatch,/inspectV122PurgeJobs/);
   assert.match(asyncPatch,/setImmediate\(async \(\) =>/);
   assert.match(asyncPatch,/\/api\/v105\/data-purge\/prepare\//);
+  assert.match(ui,/v123-adaptive-purge-ui-v2/);
+  assert.match(ui,/function pollDelay/);
+  assert.match(ui,/document\.visibilityState==='hidden'/);
+  assert.match(ui,/purgeJobFailed/);
+  assert.match(ui,/httpStatus>=400&&httpStatus<500/);
+  assert.match(ui,/function setPreview/);
   assert.match(ui,/安全备份正在后台执行/);
   assert.match(ui,/自动清空业务数据，无需再次点击/);
 });
@@ -117,18 +127,19 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(indexes,/idx_v108_business_final_report_type/);
   assert.match(indexes,/DATA_PURGE_ACTIVE/);
   assert.match(indexes,/LARGE_LEGACY_DB_DEFER_UNTIL_FAST_PURGE/);
-  assert.match(lazy,/v108-route-lazy-features-v4/);
+  assert.match(lazy,/v108-route-lazy-features-v6/);
   assert.match(lazy,/v84-async-export-ui\.js\?v=20260814-5/);
+  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-6/);
   assert.match(lazy,/loadGroup\('reports'\)/);
   assert.match(lazy,/loadGroup\('data'\)/);
   assert.doesNotMatch(lazy,/function warmIdle/);
-  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-4/);
+  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-6/);
   assert.match(injector,/v109-instant-business-navigation\.js\?v=20260814-1/);
   assert.match(injector,/v110-drilldown-prewarm\.js\?v=20260814-2/);
   assert.match(injector,/let injectedHtml=''/);
   assert.match(injector,/function buildInjectedHtml\(\)/);
   assert.match(injector,/if\(injectedHtml\)return injectedHtml/);
-  assert.match(injector,/inspectV120HtmlCache/);
+  assert.match(injector,/inspectV123HtmlCache/);
   assert.doesNotMatch(injector,/v84-async-export-ui\.js/);
   assert.doesNotMatch(injector,/v104-fast-purge-ui\.js/);
   assert.match(db,/PRAGMA synchronous = NORMAL/);
