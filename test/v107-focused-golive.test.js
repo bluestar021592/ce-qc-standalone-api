@@ -20,7 +20,7 @@ test('managed desktop launcher remains safe and non-destructive',()=>{
 });
 
 test('server bootstrap and fast runtime files are syntax valid',()=>{
-  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
+  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v90FastDashboardReadPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
 });
 
 test('full purge stays backup first asynchronous and uses fast whole-table reset',()=>{
@@ -51,6 +51,7 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   const nav=read('public/v109-instant-business-navigation.js');
   const prewarm=read('public/v110-drilldown-prewarm.js');
   const detail=read('src/v55DashboardReconciliationPatch.js');
+  const fastDashboard=read('src/v90FastDashboardReadPatch.js');
   const exp=read('src/v84AsyncExportPatch.js');
   const worker=read('src/v84ExportJobWorker.js');
   const templateExport=read('src/shopeeTemplateExporter.js');
@@ -70,6 +71,13 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(prewarm,/INTENT_DELAY_MS=320/);
   assert.match(prewarm,/TTL=55_000/);
   assert.match(detail,/const rangeCache=new Map\(\)/);
+  assert.match(fastDashboard,/function airCandidatesInWhpp/);
+  assert.match(fastDashboard,/LIKE '%CCAF%'/);
+  assert.match(fastDashboard,/LIKE '%CEAF%'/);
+  assert.match(fastDashboard,/rowHasExactAirMarker/);
+  assert.match(fastDashboard,/function shopeeWhppCounts/);
+  assert.match(fastDashboard,/GROUP BY u\.businessType/);
+  assert.doesNotMatch(fastDashboard,/function shopeeWhppCount\(/);
   assert.match(exp,/detached: true/);
   assert.match(exp,/reusableJob/);
   assert.match(worker,/EXPORT_WORKER_CONCURRENCY/);
