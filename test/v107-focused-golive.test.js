@@ -7,10 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
-const syntax=p=>{
-  const r=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});
-  assert.equal(r.status,0,`${p}: ${r.stderr||r.stdout}`);
-};
+const syntax=p=>{const r=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(r.status,0,`${p}: ${r.stderr||r.stdout}`);};
 
 test('managed desktop launcher remains safe and non-destructive',()=>{
   const cmd=read('Start_CE_QC.cmd');
@@ -22,34 +19,55 @@ test('managed desktop launcher remains safe and non-destructive',()=>{
   assert.doesNotMatch(launcher,/reset\s+--hard/i);
 });
 
-test('server bootstrap and core runtime files are syntax valid',()=>{
-  for(const file of ['bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v55DashboardReconciliationPatch.js','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js']) syntax(file);
+test('server bootstrap and fast runtime files are syntax valid',()=>{
+  for(const file of ['bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v55DashboardReconciliationPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js'])syntax(file);
 });
 
-test('full purge stays backup first and asynchronous in the browser',()=>{
+test('full purge stays backup first asynchronous and uses fast whole-table reset',()=>{
   const purge=read('src/dataPurge.js');
   const asyncPatch=read('src/v105AsyncPurgePatch.js');
   const ui=read('public/v104-fast-purge-ui.js');
   assert.match(purge,/createVerifiedPreClearBackup/);
   assert.match(purge,/verifyPreparedBackupStillPresent/);
   assert.match(purge,/node-sqlite-online-backup/);
+  assert.match(purge,/fastResetBusinessState/);
+  assert.match(purge,/DELETE FROM \$\{table\}/);
+  assert.doesNotMatch(purge,/LIMIT 50000/);
+  assert.match(purge,/idx_v108_unified_batches_valid_date/);
   assert.match(asyncPatch,/setImmediate\(async \(\) =>/);
   assert.match(asyncPatch,/\/api\/v105\/data-purge\/prepare\//);
   assert.match(ui,/安全备份正在后台执行/);
   assert.match(ui,/自动清空业务数据，无需再次点击/);
 });
 
-test('page rendering, detail reads and exports keep fast paths',()=>{
+test('page rendering detail reads exports and database reads keep fast paths',()=>{
   const render=read('public/v105-fast-render.js');
   const detail=read('src/v55DashboardReconciliationPatch.js');
   const exp=read('src/v84AsyncExportPatch.js');
+  const worker=read('src/v84ExportJobWorker.js');
   const req=read('public/v65-request-coalescing.js');
+  const indexes=read('src/v108PerformanceIndexWorker.js');
   assert.match(render,/v105VisiblePageRender/);
   assert.match(render,/requestIdleCallback/);
   assert.match(detail,/const rangeCache=new Map\(\)/);
   assert.match(exp,/detached: true/);
   assert.match(exp,/reusableJob/);
+  assert.match(worker,/EXPORT_WORKER_CONCURRENCY/);
+  assert.match(worker,/Promise\.all/);
+  assert.match(worker,/zlib:\{level:1\}/);
   assert.match(req,/const recent = new Map\(\)/);
+  assert.match(indexes,/idx_v108_business_final_report_type/);
+  assert.match(indexes,/DATA_PURGE_ACTIVE/);
+});
+
+test('update and purge backups use online copy quick structural verification and sha256',()=>{
+  const updateBackup=read('scripts/CE_QC_PreUpdate_Backup.mjs');
+  const purge=read('src/dataPurge.js');
+  assert.match(updateBackup,/backupQuickCheck:'ok'/);
+  assert.match(updateBackup,/verificationMode:'online-backup\+quick-check\+sha256'/);
+  assert.doesNotMatch(updateBackup,/PRAGMA integrity_check/);
+  assert.match(purge,/verifyBackupQuick/);
+  assert.match(purge,/hashFileStream/);
 });
 
 test('WHPP total conservation guard remains enabled',()=>{
