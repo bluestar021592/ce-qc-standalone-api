@@ -10,7 +10,7 @@ const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 test('managed bootstrap installs purge reseal patch before server registers purge routes',()=>{
   const bootstrap=read('bootstrap.js');
   const v44=bootstrap.indexOf("importPhase('v44WhppUiPatch'");
-  const server=bootstrap.indexOf("importPhase('server', './server.js')");
+  const server=bootstrap.indexOf('importServerInteractiveFirst()');
   assert.ok(v44>=0&&server>v44,'v44/v105 purge patch must load before server route registration');
 });
 
@@ -22,9 +22,10 @@ test('prepare route audit is resealed only after verified backup response comple
   assert.ok(create>=0&&audit>create&&response>audit,'verified-backup audit must remain between challenge creation and response');
 
   const patch=read('src/v105AsyncPurgePatch.js');
-  assert.match(patch,/v124-post-audit-purge-seal-v1/);
+  assert.match(patch,/v128-purge-submit-flush-v1/);
   assert.match(patch,/const result = await runLegacyHandler\(legacyHandler, req\)/);
   assert.match(patch,/kind === 'PREPARE' && result\?\.challengeId\) resealPurgeChallenge\(result\.challengeId, req\.user\)/);
+  assert.match(patch,/JOB_START_DELAY_MS/);
 });
 
 test('backup guard covers backup and SHA verification windows before audit reseal',()=>{
