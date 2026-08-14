@@ -103,14 +103,21 @@ test('purge remains backup-first and destructive phase avoids whole-database pos
   assert.doesNotMatch(purge,/reset\s+--hard/i);
 });
 
-test('managed launcher stays fast-forward only and owns backend lifetime',()=>{
+test('managed launcher stays fast-forward only owns backend lifetime and never recursively removes reused node_modules',()=>{
   const cmd=read('Start_CE_QC.cmd');
   const launcher=read('tools/CE_QC_Managed_Launcher.ps1');
+  const pkg=JSON.parse(read('package.json'));
   assert.match(cmd,/CE_QC_Managed_Launcher\.ps1/);
   assert.match(launcher,/JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
   assert.match(launcher,/pull','--ff-only/);
   assert.match(launcher,/CE_QC_PreUpdate_Backup\.mjs/);
+  assert.match(launcher,/function Remove-JunctionOnly/);
+  assert.match(launcher,/ReparsePoint/);
+  assert.match(launcher,/rmdir `"\$Path`"/);
+  assert.match(launcher,/Candidate temp worktree intentionally retained to protect installed node_modules/);
+  assert.doesNotMatch(launcher,/Remove-Item -LiteralPath \(Join-Path \$tempRoot 'node_modules'\) -Force/);
   assert.doesNotMatch(launcher,/reset\s+--hard/i);
+  assert.equal(pkg.ceQcUpdateGate,'v129-safe-junction-cleanup');
 });
 
 test('WHPP total conservation guard remains present after fast render',()=>{
