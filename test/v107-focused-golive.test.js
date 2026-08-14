@@ -23,7 +23,7 @@ test('server bootstrap and fast runtime files are syntax valid',()=>{
   for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/carryoverRefreshScheduler.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v90FastDashboardReadPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v84-async-export-ui.js','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
 });
 
-test('full purge stays backup first async single-flight and fast',()=>{
+test('full purge stays backup first async single-flight and avoids pre-count scans',()=>{
   const purge=read('src/dataPurge.js');
   const asyncPatch=read('src/v105AsyncPurgePatch.js');
   const ui=read('public/v104-fast-purge-ui.js');
@@ -36,10 +36,17 @@ test('full purge stays backup first async single-flight and fast',()=>{
   assert.match(purge,/idx_v108_unified_batches_valid_date/);
   assert.match(purge,/databaseFingerprint/);
   assert.match(purge,/sameFingerprint/);
-  assert.match(purge,/PREPARED_EXACT_COUNTS/);
-  assert.match(purge,/RECOUNT_AFTER_DATABASE_CHANGE/);
+  assert.match(purge,/DEFERRED_TO_TRANSACTIONAL_DELETE/);
+  assert.match(purge,/DELETE_CHANGESET_EXACT/);
+  assert.match(purge,/deleted\?\.changes/);
+  assert.match(purge,/backupSourceFingerprint:'MATCHED'/);
+  assert.match(purge,/数据库在安全备份后发生变化，已停止清除/);
+  const prepare=purge.slice(purge.indexOf('export async function createPurgeChallenge'),purge.indexOf('export async function executePurge'));
+  const execute=purge.slice(purge.indexOf('export async function executePurge'),purge.indexOf('export function getPurgeCounts'));
+  assert.doesNotMatch(prepare,/tableCounts\(db\)/);
+  assert.doesNotMatch(execute,/tableCounts\(db\)/);
   assert.match(purge,/sourceQuickCheck:'deferred-to-verified-copy'/);
-  assert.match(purge,/verificationMode:'online-backup\+backup-quick-check\+sha256'/);
+  assert.match(purge,/verificationMode:'online-backup\+stable-source-fingerprint\+backup-quick-check\+sha256'/);
   assert.match(asyncPatch,/v122-single-flight-purge-jobs-v1/);
   assert.match(asyncPatch,/function activeJobFor/);
   assert.match(asyncPatch,/reused: started\.reused \? 'ACTIVE' : false/);
@@ -169,8 +176,12 @@ test('update and purge backups verify the recovery copy and sha256 without dupli
   assert.doesNotMatch(updateBackup,/PRAGMA integrity_check/);
   assert.match(purge,/verifyBackupQuick/);
   assert.match(purge,/hashFileStream/);
+  assert.match(purge,/sourceFingerprintBeforeBackup/);
+  assert.match(purge,/sourceFingerprintAfterBackup/);
+  assert.match(purge,/sourceStableDuringBackup:true/);
   const backupBody=purge.slice(purge.indexOf('async function createVerifiedPreClearBackup'),purge.indexOf('function verifyBackupQuick'));
   assert.doesNotMatch(backupBody,/assertQuickIntegrity\(db\)/);
+  assert.doesNotMatch(backupBody,/tableCounts\(db\)/);
 });
 
 test('WHPP total conservation guard remains enabled',()=>{
