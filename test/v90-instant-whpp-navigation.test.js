@@ -10,7 +10,7 @@ const ui = fs.readFileSync(uiUrl, 'utf8').replace(/\r\n/g, '\n');
 const server = fs.readFileSync(serverUrl, 'utf8').replace(/\r\n/g, '\n');
 const injector = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-const launcher = fs.readFileSync(new URL('../Fast_Start_CE_QC.ps1', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const managedLauncher = fs.readFileSync(new URL('../tools/CE_QC_Managed_Launcher.ps1', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const cmd = fs.readFileSync(new URL('../Start_CE_QC.cmd', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 for (const [name, url] of [['V90 UI', uiUrl], ['V90 server', serverUrl]]) {
@@ -45,13 +45,8 @@ test('instant WHPP board does not reintroduce impossible CN ZT or 580 cards', ()
   assert.ok(start >= 0 && end > start, 'WHPP core metric block must be present');
   const renderBlock = ui.slice(start, end);
 
-  assert.doesNotMatch(
-    renderBlock,
-    /CCSLCN\u5206\u6d41|CCSLZT\u5206\u6d41|580\u6ede\u7559\u5305\u88f9|CECN\u6ede\u7559\u5305\u88f9|CEZT\u6ede\u7559\u5305\u88f9/
-  );
-  for (const field of ['metrics.returned','metrics.cancelled','metrics.unresolved','metrics.pending1','metrics.oc1']) {
-    assert.match(renderBlock, new RegExp(field.replace('.', '\\.')));
-  }
+  assert.doesNotMatch(renderBlock,/CCSLCN\u5206\u6d41|CCSLZT\u5206\u6d41|580\u6ede\u7559\u5305\u88f9|CECN\u6ede\u7559\u5305\u88f9|CEZT\u6ede\u7559\u5305\u88f9/);
+  for (const field of ['metrics.returned','metrics.cancelled','metrics.unresolved','metrics.pending1','metrics.oc1']) assert.match(renderBlock, new RegExp(field.replace('.', '\\.')));
 });
 
 test('V90 replaces V89 startup summary with normalized SQL rather than large rawJson LIKE scans', () => {
@@ -77,12 +72,14 @@ test('V90 loads after V89 and before server, and the UI runtime is injected afte
   assert.ok(injector.indexOf('v90-instant-whpp-navigation.js') > injector.indexOf('v89-fast-dashboard.js'));
 });
 
-test('desktop launcher reuses an already-running backend before entering the cold-start supervisor', () => {
-  assert.match(cmd, /Fast_Start_CE_QC\.ps1/i);
-  assert.match(launcher, /Test-CeQcAlreadyRunning/);
-  assert.match(launcher, /Backend is already running\. Reusing it without restart/);
-  assert.match(launcher, /Start-Process \$LocalUrl/);
-  assert.match(launcher, /Start_CE_QC\.ps1/);
-  assert.doesNotMatch(launcher, /npm\s+ls|Clear-CeQcPort|taskkill/i);
-  assert.ok(launcher.indexOf('if (Test-CeQcAlreadyRunning)') < launcher.indexOf("$launcher = Join-Path $ProjectRoot 'Start_CE_QC.ps1'"));
+test('desktop launcher uses one managed backend owner and reuses dependencies during safe candidate validation', () => {
+  assert.match(cmd, /CE_QC_Managed_Launcher\.ps1/i);
+  assert.doesNotMatch(cmd, /Fast_Start_CE_QC\.ps1/i);
+  assert.match(managedLauncher, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(managedLauncher, /AssignProcessToJobObject/);
+  assert.match(managedLauncher, /Closing THIS window will automatically stop the backend and release port 5177/);
+  assert.match(managedLauncher, /Dependencies unchanged; reusing installed node_modules/);
+  assert.match(managedLauncher, /New-Item -ItemType Junction/);
+  assert.match(managedLauncher, /Update check failed, but startup will continue with the current installed version/);
+  assert.doesNotMatch(managedLauncher, /reset\s+--hard/i);
 });
