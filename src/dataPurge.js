@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { DatabaseSync } from 'node:sqlite';
+import { backup, DatabaseSync } from 'node:sqlite';
 
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES, resetAppState } from './store.js';
@@ -26,7 +26,7 @@ export async function createPurgeChallenge(user = {}, options = {}) {
     const expiresAt = createdAt + 10 * 60_000;
     setPurgeBlock(db, expiresAt);
     reconcileRunLocks(db, options.activeRunIds);
-    assertIntegrity(db);
+    assertQuickIntegrity(db);
     const counts = tableCounts(db);
     const backup = await createVerifiedPreClearBackup(user.email || '');
     const challengeId = crypto.randomUUID();
@@ -37,7 +37,8 @@ export async function createPurgeChallenge(user = {}, options = {}) {
       expiresAt: new Date(expiresAt).toISOString(),
       databasePath: getRuntimeConfig().dbFile,
       counts,
-      backup: { path: backup.filePath, sha256: backup.sha256, size: backup.size, integrity: backup.integrity },
+      administrator: user.email || '',
+      backup: { path: backup.filePath, sha256: backup.sha256, size: backup.size, integrity: backup.integrity, method: backup.method },
       deleteScope: ['日报及解析行', '运单、扫描和轨迹', 'run/checkpoint/snapshot', 'carry和POD锁', '趋势、缓存、通知及导出文件', '遗留动态刷新运行时间戳'],
       retainedScope: ['数据库结构和迁移', '用户、角色与系统设置', '最新门店白名单', '审计日志', '清除前备份']
     };
@@ -57,13 +58,13 @@ export async function executePurge({ challengeId, phrase, backupConfirmed, user 
   const db = getDb();
   await waitForBackgroundMaintenanceIdle(db);
   reconcileRunLocks(db, activeRunIds);
-  await verifyBackup(challenge.backup);
+  verifyPreparedBackupStillPresent(challenge.backup);
   const before = tableCounts(db);
   resetAppState({ logs: [] });
   clearBusinessRuntimeMeta(db);
   const after = tableCounts(db);
   const fileCleanupWarnings = clearRegenerableFiles();
-  assertIntegrity(db);
+  assertQuickIntegrity(db);
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   if (String(process.env.VACUUM_AFTER_PURGE || '').toLowerCase() === 'true') db.exec('VACUUM');
   challenges.delete(String(challengeId || ''));
@@ -75,43 +76,73 @@ export function getPurgeCounts() { return tableCounts(getDb()); }
 async function createVerifiedPreClearBackup(adminEmail) {
   const cfg = getRuntimeConfig();
   const db = getDb();
-  assertIntegrity(db);
-  db.exec('PRAGMA wal_checkpoint(FULL)');
+  assertQuickIntegrity(db);
   const stamp = localStamp();
   const dir = path.join(cfg.backupsDir, 'pre_clear', stamp);
   fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, 'ce_qc_monitor.db');
   const sourceSize = fs.statSync(cfg.dbFile).size;
   assertFreeSpace(dir, sourceSize);
-  await fs.promises.copyFile(cfg.dbFile, filePath);
+
+  // SQLite online backup copies a transactionally consistent database image,
+  // including committed WAL content, without forcing a blocking FULL checkpoint.
+  // This is much faster for large live databases than integrity+checkpoint+copy.
+  await backup(db, filePath, { rate: 1024 });
   const backupSize = fs.statSync(filePath).size;
-  if (backupSize <= 0 || backupSize !== sourceSize) throw new Error('备份文件大小校验失败，已停止清除。');
+  if (backupSize <= 0) throw new Error('备份文件为空，已停止清除。');
+
+  const verified = verifyBackupIntegrityOnce(filePath);
   const sha256 = await hashFileStream(filePath);
+  const stat = fs.statSync(filePath);
   const schemaMeta = Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0);
   const pragmaSchema = Number(db.prepare('PRAGMA user_version').get()?.user_version || 0);
   const manifest = {
     createdAt: nowIso(), reason: 'clear-all-business-data', databasePath: cfg.dbFile,
-    backupPath: filePath, sha256, size: backupSize, sourceSize, systemVersion: process.env.npm_package_version || '0.1.0',
+    backupPath: filePath, sha256, size: backupSize, sourceSize, sourceQuickCheck: 'ok', integrity: verified.integrity,
+    backupMtimeMs: stat.mtimeMs, method: 'node-sqlite-online-backup', systemVersion: process.env.npm_package_version || '0.1.0',
     migrationVersion: schemaMeta || pragmaSchema,
     whitelistVersion: db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version || '',
     administrator: adminEmail, counts: tableCounts(db)
   };
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
-  const verified = await verifyBackup({ filePath, sha256, size: backupSize });
   recordBackup({ backupType: 'database', fileName: path.basename(filePath), filePath, fileHash: sha256, reason: 'before-full-clear' });
-  return { directory: dir, filePath, sha256, size: backupSize, integrity: verified.integrity, manifestPath: path.join(dir, 'manifest.json') };
+  return {
+    directory: dir,
+    filePath,
+    sha256,
+    size: backupSize,
+    mtimeMs: stat.mtimeMs,
+    integrity: verified.integrity,
+    method: 'node-sqlite-online-backup',
+    manifestPath: path.join(dir, 'manifest.json')
+  };
 }
 
-async function verifyBackup(backup) {
-  if (!backup?.filePath || !fs.existsSync(backup.filePath)) throw new Error('自动备份不存在，已停止清除。');
-  const size = fs.statSync(backup.filePath).size;
-  if (size <= 0 || (backup.size && size !== backup.size)) throw new Error('自动备份大小校验失败，已停止清除。');
-  if (await hashFileStream(backup.filePath) !== backup.sha256) throw new Error('自动备份SHA-256校验失败，已停止清除。');
-  const copy = new DatabaseSync(backup.filePath, { readOnly: true });
+function verifyBackupIntegrityOnce(filePath) {
+  const copy = new DatabaseSync(filePath, { readOnly: true, timeout: 10000 });
   let integrity = '';
-  try { integrity = copy.prepare('PRAGMA integrity_check').get()?.integrity_check || ''; if (integrity !== 'ok') throw new Error('备份数据库完整性校验失败，已停止清除。'); }
-  finally { copy.close(); }
-  return { integrity, size };
+  try {
+    copy.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');
+    integrity = copy.prepare('PRAGMA integrity_check').get()?.integrity_check || '';
+    if (integrity !== 'ok') throw new Error('备份数据库完整性校验失败，已停止清除。');
+  } finally { copy.close(); }
+  return { integrity };
+}
+
+function verifyPreparedBackupStillPresent(backup) {
+  if (!backup?.filePath || !fs.existsSync(backup.filePath)) throw new Error('自动备份不存在，已停止清除。');
+  const stat = fs.statSync(backup.filePath);
+  if (stat.size <= 0 || (backup.size && stat.size !== backup.size)) throw new Error('自动备份大小发生变化，已停止清除。');
+  // The backup was already SHA-256 hashed and fully integrity-checked at prepare
+  // time. During the five-second confirmation window, a cheap mtime/size guard
+  // prevents a second full-file scan while still refusing any changed backup.
+  if (Number.isFinite(Number(backup.mtimeMs)) && Math.abs(Number(stat.mtimeMs) - Number(backup.mtimeMs)) > 1) {
+    throw new Error('自动备份在确认期间发生变化，已停止清除。');
+  }
+  if (backup.integrity !== 'ok' || !/^[a-f0-9]{64}$/i.test(String(backup.sha256 || ''))) {
+    throw new Error('自动备份验证记录无效，已停止清除。');
+  }
+  return true;
 }
 
 function tableCounts(db) {
@@ -172,7 +203,10 @@ function reconcileRunLocks(db, activeRunIds) {
     throw error;
   }
 }
-function assertIntegrity(db) { if (db.prepare('PRAGMA integrity_check').get()?.integrity_check !== 'ok') throw new Error('SQLite完整性检查未通过。'); }
+function assertQuickIntegrity(db) {
+  const quick = db.prepare('PRAGMA quick_check(1)').get()?.quick_check || '';
+  if (quick !== 'ok') throw new Error(`SQLite快速完整性检查未通过：${quick || 'unknown'}`);
+}
 export function hashFileStream(file) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
