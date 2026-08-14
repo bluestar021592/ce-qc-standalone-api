@@ -24,6 +24,8 @@ const targetCommit=String(process.argv[3]||'').trim();
 
 function log(step,text){console.log(`[BACKUP ${step}] ${text}`);}
 function stamp(){const d=new Date();const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;}
+function fileStat(file){try{const s=fs.statSync(file);return {exists:true,size:Number(s.size||0),mtimeMs:Number(s.mtimeMs||0)};}catch{return {exists:false,size:0,mtimeMs:0};}}
+function sourceFingerprint(){return {db:fileStat(dbFile),wal:fileStat(`${dbFile}-wal`)};}
 function sha256(file){const hash=crypto.createHash('sha256');const fd=fs.openSync(file,'r');try{const buffer=Buffer.allocUnsafe(8*1024*1024);let bytes=0;do{bytes=fs.readSync(fd,buffer,0,buffer.length,null);if(bytes>0)hash.update(buffer.subarray(0,bytes));}while(bytes>0);}finally{fs.closeSync(fd);}return hash.digest('hex');}
 
 if(!fs.existsSync(dbFile)){log('SKIP',`Database not found: ${dbFile}`);console.log(JSON.stringify({ok:true,skipped:true,reason:'DATABASE_NOT_FOUND',dbFile,root}));process.exit(0);}
@@ -47,10 +49,9 @@ const verify=new DatabaseSync(copyFile,{readOnly:true,timeout:10000});
 try{verify.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');const quick=verify.prepare('PRAGMA quick_check(1)').get()?.quick_check||'';if(quick!=='ok')throw new Error(`BACKUP_QUICK_CHECK_FAILED:${quick}`);}finally{verify.close();}
 
 log('4/5','Calculating backup SHA-256...');
-const copySize=fs.statSync(copyFile).size;if(copySize<=0)throw new Error('BACKUP_EMPTY');
+const copyStat=fileStat(copyFile);if(!copyStat.exists||copyStat.size<=0)throw new Error('BACKUP_EMPTY');
 const copyHash=sha256(copyFile);
-const sourceStat=fs.statSync(dbFile);
-const manifest={createdAt:new Date().toISOString(),reason:'before-automatic-code-update',projectRoot:root,candidateRoot,databasePath:dbFile,backupPath:copyFile,size:copySize,sha256:copyHash,beforeCommit,targetCommit,sourceQuickCheck:'ok',backupQuickCheck:'ok',integrity:'quick-ok',verificationMode:'online-backup+quick-check+sha256',method:'node-sqlite-online-backup',sourceSize:Number(sourceStat.size||0),sourceMtimeMs:Number(sourceStat.mtimeMs||0)};
+const manifest={createdAt:new Date().toISOString(),reason:'before-automatic-code-update',projectRoot:root,candidateRoot,databasePath:dbFile,backupPath:copyFile,size:copyStat.size,backupMtimeMs:copyStat.mtimeMs,sha256:copyHash,beforeCommit,targetCommit,sourceQuickCheck:'ok',backupQuickCheck:'ok',integrity:'quick-ok',verificationMode:'online-backup+quick-check+sha256',method:'node-sqlite-online-backup',sourceFingerprint:sourceFingerprint()};
 fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
 log('5/5',`Verified backup ready: ${copyFile}`);
 console.log(JSON.stringify({ok:true,...manifest}));
