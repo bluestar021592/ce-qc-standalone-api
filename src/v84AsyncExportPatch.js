@@ -6,12 +6,13 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-14-v119-export-active-index-v1';
+const PATCH_ID = '2026-08-14-v121-export-job-read-cache-v1';
 const PREPARE_PATH = '/api/export-period/prepare';
 const STATUS_PATH = '/api/v84/export-job/:jobId';
 const RECENT_REUSE_MS = Math.max(5 * 60_000, Number(process.env.EXPORT_RESULT_REUSE_MS || 30 * 60_000));
 const MAX_JOB_SCAN = Math.max(20, Math.min(300, Number(process.env.EXPORT_JOB_SCAN_LIMIT || 100)));
 const JOB_FILE_INDEX_CACHE_MS = Math.max(1000, Math.min(15_000, Number(process.env.EXPORT_JOB_FILE_INDEX_CACHE_MS || 5000)));
+const JOB_READ_CACHE_MAX = Math.max(16, Math.min(256, Number(process.env.EXPORT_JOB_READ_CACHE_MAX || 64)));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workerFile = path.join(__dirname, 'v84ExportJobWorker.js');
 const originalPost = express.application.post;
@@ -19,6 +20,7 @@ const originalGet = express.application.get;
 let installed = false;
 let jobFileIndexCache = { at: 0, files: [] };
 const activeJobs = new Map();
+const jobReadCache = new Map();
 
 function jobsDir() {
   const dir = path.join(getRuntimeConfig().dataDir, 'export_jobs');
@@ -37,17 +39,47 @@ function jobPath(jobId) {
   return path.join(jobsDir(), `${safe}.json`);
 }
 
+function statSignature(stat = {}) {
+  return `${Number(stat.size || 0)}|${Number(stat.mtimeMs || 0)}|${Number(stat.ctimeMs || 0)}`;
+}
+
+function cacheJobRead(file, stat, job) {
+  if (!file || !job) return job;
+  jobReadCache.delete(file);
+  jobReadCache.set(file, { signature: statSignature(stat), job });
+  while (jobReadCache.size > JOB_READ_CACHE_MAX) {
+    const first = jobReadCache.keys().next().value;
+    if (first === undefined) break;
+    jobReadCache.delete(first);
+  }
+  return job;
+}
+
 function writeJsonAtomic(file, value) {
   const temp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(value, null, 2), 'utf8');
   fs.renameSync(temp, file);
+  try { cacheJobRead(file, fs.statSync(file), value); } catch { jobReadCache.delete(file); }
+}
+
+function readJobFile(file) {
+  if (!file) return null;
+  let stat;
+  try { stat = fs.statSync(file); }
+  catch { jobReadCache.delete(file); return null; }
+  const signature = statSignature(stat);
+  const hit = jobReadCache.get(file);
+  if (hit?.signature === signature) {
+    jobReadCache.delete(file);
+    jobReadCache.set(file, hit);
+    return hit.job;
+  }
+  try { return cacheJobRead(file, stat, JSON.parse(fs.readFileSync(file, 'utf8'))); }
+  catch { jobReadCache.delete(file); return null; }
 }
 
 function readJob(jobId) {
-  const file = jobPath(jobId);
-  if (!file || !fs.existsSync(file)) return null;
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
-  catch { return null; }
+  return readJobFile(jobPath(jobId));
 }
 
 function normalizePayload(body = {}) {
@@ -112,10 +144,9 @@ function recentJobFiles() {
 
 function recentJobs() {
   const jobs = [];
-  // The file-name/stat index may be cached briefly, but job JSON is deliberately
-  // re-read every time because detached workers update status/progress in place.
   for (const item of recentJobFiles()) {
-    try { jobs.push(JSON.parse(fs.readFileSync(item.file, 'utf8'))); } catch {}
+    const job = readJobFile(item.file);
+    if (job) jobs.push(job);
   }
   return jobs;
 }
@@ -253,5 +284,5 @@ express.application.post = function v84AsyncExportRoute(...args) {
   return this;
 };
 
-export function inspectV119ExportIndex(){return {activeJobs:activeJobs.size,fileIndexAgeMs:jobFileIndexCache.at?Date.now()-jobFileIndexCache.at:null,fileCount:jobFileIndexCache.files.length,ttlMs:JOB_FILE_INDEX_CACHE_MS};}
+export function inspectV121ExportCaches(){return {activeJobs:activeJobs.size,fileIndexAgeMs:jobFileIndexCache.at?Date.now()-jobFileIndexCache.at:null,fileCount:jobFileIndexCache.files.length,fileIndexTtlMs:JOB_FILE_INDEX_CACHE_MS,jobReadCache:jobReadCache.size,jobReadCacheMax:JOB_READ_CACHE_MAX};}
 export const V84_ASYNC_EXPORT_PATCH_ID = PATCH_ID;
