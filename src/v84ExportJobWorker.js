@@ -10,10 +10,12 @@ import { countCompletedWhppRows, whppDailyCounts } from './v87WhppExportStore.js
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const businessWorker=path.join(__dirname,'v84ExportBusinessWorker.js');
 const ALL_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
+const UNIFIED_TYPES=Object.freeze(ALL_TYPES.filter(type=>type!=='WHPP'));
 const LARGE_BUSINESS_THRESHOLD=Math.max(20000,Number(process.env.EXPORT_SPLIT_THRESHOLD||70000));
 const PART_DAYS=Math.max(1,Math.min(14,Number(process.env.EXPORT_PART_DAYS||7)));
 const CHILD_HEAP_MB=Math.max(1024,Number(process.env.EXPORT_BUSINESS_HEAP_MB||2048));
 const CONCURRENCY=Math.max(1,Math.min(3,Number(process.env.EXPORT_WORKER_CONCURRENCY||2)));
+const EXPORT_PLAN_VERSION='2026-08-14-v112-grouped-export-planning-v1';
 
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
@@ -54,9 +56,22 @@ function splitRange(range,partDays=PART_DAYS){
   while(from<=range.to){const tentative=addDays(from,partDays-1);const to=tentative<range.to?tentative:range.to;result.push({from,to,key:`${from}_${to}`});from=addDays(to,1);}
   return result;
 }
-function completedBusinessCount(type,range){
-  if(type==='WHPP')return countCompletedWhppRows(range.from,range.to);
-  return Number(getDb().prepare(`SELECT COUNT(*) AS count FROM unified_import_rows u INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId WHERE b.status='VALID' AND s.status='COMPLETED' AND b.reportDate BETWEEN ? AND ? AND u.businessType=?`).get(range.from,range.to,type)?.count||0);
+
+function completedBusinessCounts(range){
+  const counts=Object.fromEntries(ALL_TYPES.map(type=>[type,0]));
+  const rows=getDb().prepare(`
+    SELECT u.businessType,COUNT(*) AS count
+    FROM unified_import_rows u
+    INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId
+    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID' AND s.status='COMPLETED'
+      AND b.reportDate BETWEEN ? AND ?
+      AND u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
+    GROUP BY u.businessType
+  `).all(range.from,range.to);
+  for(const row of rows){if(Object.hasOwn(counts,row.businessType))counts[row.businessType]=Number(row.count||0);}
+  counts.WHPP=countCompletedWhppRows(range.from,range.to);
+  return counts;
 }
 
 function spawnBusinessPart({type,range,periodType,partIndex,partCount}){
@@ -118,9 +133,10 @@ async function main(){
   const job=readJob();const range=rangeOf(job.payload||{});const requested=String(job.payload?.businessType||'ALL').toUpperCase();
   const types=requested==='ALL'?[...ALL_TYPES]:ALL_TYPES.includes(requested)?[requested]:[];
   if(!types.length)throw new Error(`不支持的业务板块：${requested}`);
-  writeJob({status:'RUNNING',progress:1,range,message:`正在准备 ${range.from} 至 ${range.to} 的${requested==='ALL'?'7业务':'单业务'}后台导出`});
+  writeJob({status:'RUNNING',progress:1,range,message:`正在准备 ${range.from} 至 ${range.to} 的${requested==='ALL'?'7业务':'单业务'}后台导出`,exportPlanVersion:EXPORT_PLAN_VERSION});
+  const counts=completedBusinessCounts(range);
   const tasks=[];
-  for(const type of types){const count=completedBusinessCount(type,range);if(!count)continue;const parts=count>LARGE_BUSINESS_THRESHOLD?splitRange(range):[range];for(let i=0;i<parts.length;i+=1)tasks.push({type,range:parts[i],partIndex:i+1,partCount:parts.length});}
+  for(const type of types){const count=Number(counts[type]||0);if(!count)continue;const parts=count>LARGE_BUSINESS_THRESHOLD?splitRange(range):[range];for(let i=0;i<parts.length;i+=1)tasks.push({type,range:parts[i],partIndex:i+1,partCount:parts.length});}
   if(!tasks.length)throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的数据。`);
   const files=await runTasks(tasks,job.payload||{});
   let managementFile='';
@@ -128,7 +144,7 @@ async function main(){
   let finalFile=files[0]||'';
   if(files.length>1){writeJob({status:'RUNNING',progress:96,message:'正在快速打包全部报表文件'});finalFile=path.join(getRuntimeConfig().exportsDir,`CE_QC_${range.key}_${requested}_后台导出.zip`);await zipFiles(files,finalFile);}
   const allFiles=[...new Set([...files,finalFile].filter(Boolean))].sort((a,b)=>path.basename(a).localeCompare(path.basename(b),'zh-CN'));
-  writeJob({status:'COMPLETED',progress:100,message:`导出完成：${range.from} 至 ${range.to}`,files:allFiles.map(file=>({name:path.basename(file),url:`/api/export-file?name=${encodeURIComponent(path.basename(file))}`})),completedAt:new Date().toISOString(),currentBusiness:'',currentPart:0,businessParts:0,workerConcurrency:Math.min(CONCURRENCY,tasks.length)});
+  writeJob({status:'COMPLETED',progress:100,message:`导出完成：${range.from} 至 ${range.to}`,files:allFiles.map(file=>({name:path.basename(file),url:`/api/export-file?name=${encodeURIComponent(path.basename(file))}`})),completedAt:new Date().toISOString(),currentBusiness:'',currentPart:0,businessParts:0,workerConcurrency:Math.min(CONCURRENCY,tasks.length),exportPlanVersion:EXPORT_PLAN_VERSION});
 }
 
 try{await main();}catch(error){try{writeJob({status:'FAILED',message:error?.message||String(error),error:error?.stack||String(error),failedAt:new Date().toISOString()});}catch{}process.exitCode=1;}finally{try{closeDb();}catch{}}
