@@ -22,19 +22,20 @@ test('purge backup stays online verified and count-free before delete',()=>{
   assert.doesNotMatch(purge,/wal_checkpoint\(FULL\)/);
 });
 
-test('V128 submit response is flushed before destructive purge begins',()=>{
+test('V130 submit response never relies on abort and recent jobs are recoverable',()=>{
   const backend=read('src/v105AsyncPurgePatch.js');
   const ui=read('public/v104-fast-purge-ui.js');
   syntax('src/v105AsyncPurgePatch.js');
   syntax('public/v104-fast-purge-ui.js');
-  assert.match(backend,/v128-purge-submit-flush-v1/);
-  assert.match(backend,/JOB_START_DELAY_MS/);
-  assert.match(backend,/setTimeout\(async \(\) =>/);
-  assert.doesNotMatch(backend,/setImmediate\(async \(\) =>/);
-  assert.match(backend,/\/api\/v105\/data-purge\/active/);
-  assert.match(ui,/v128-responsive-purge-ui-v3/);
-  assert.match(ui,/recoverActiveJob/);
-  assert.match(ui,/submitBackground/);
+  assert.match(backend,/v130-purge-job-recovery-v1/);
+  assert.match(backend,/RECOVER_STATUS_PATH/);
+  assert.match(backend,/function recentJobFor/);
+  assert.match(backend,/activeJobFor\(owner, kind\) \|\| recentJobFor\(owner, kind\)/);
+  assert.match(ui,/v130-resilient-purge-submit-v4/);
+  assert.match(ui,/function abortLike/);
+  assert.match(ui,/signal is aborted\|aborted without reason/);
+  assert.match(ui,/Promise\.race\(\[submitPromise,recoveryPromise\]\)/);
+  assert.match(ui,/recoverRecentJob/);
   assert.match(ui,/后台任务提交响应延迟/);
 });
 
@@ -52,13 +53,13 @@ test('destructive phase is short and does not run whole-database post checks',()
   assert.match(purge,/await clearRegenerableFiles\(\)/);
 });
 
-test('V128 data-management lazy load uses fresh purge UI cache key',()=>{
+test('V130 data-management lazy load uses fresh purge UI cache key',()=>{
   const lazy=read('public/v108-route-lazy-features.js');
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(lazy,/v108-route-lazy-features-v7/);
-  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-7/);
-  assert.match(injector,/v128-responsive-performance-spine-v17/);
-  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-7/);
+  assert.match(lazy,/v108-route-lazy-features-v8/);
+  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-8/);
+  assert.match(injector,/v130-responsive-performance-spine-v18/);
+  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-8/);
   assert.doesNotMatch(injector,/v104-fast-purge-ui\.js/);
 });
 
