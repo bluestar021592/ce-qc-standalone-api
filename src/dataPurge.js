@@ -36,8 +36,11 @@ export async function createPurgeChallenge(user={},options={}){
     reconcileRunLocks(db,options.activeRunIds);
     const counts=tableCounts(db);
     const verifiedBackup=await createVerifiedPreClearBackup(user.email||'',counts);
+    // recordBackup() inside backup creation writes retained metadata. Capture the
+    // source fingerprint only after every prepare-stage write is complete.
+    const sourceFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
     const challengeId=crypto.randomUUID();
-    challenges.set(challengeId,{email:user.email||'',backup:verifiedBackup,createdAt,expiresAt,counts});
+    challenges.set(challengeId,{email:user.email||'',backup:verifiedBackup,createdAt,expiresAt,counts,sourceFingerprint});
     return {challengeId,notBefore:new Date(createdAt+5000).toISOString(),expiresAt:new Date(expiresAt).toISOString(),databasePath:getRuntimeConfig().dbFile,counts,administrator:user.email||'',backup:{path:verifiedBackup.filePath,sha256:verifiedBackup.sha256,size:verifiedBackup.size,integrity:verifiedBackup.integrity,method:verifiedBackup.method},deleteScope:['日报及解析行','运单、扫描和轨迹','run/checkpoint/snapshot','carry和POD锁','趋势、缓存、通知及导出文件','遗留动态刷新运行时间戳'],retainedScope:['数据库结构和迁移','用户、角色与系统设置','最新门店白名单','审计日志','清除前备份']};
   }catch(error){clearPurgeBlock(db);throw error;}
 }
@@ -53,7 +56,9 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
   await waitForBackgroundMaintenanceIdle(db);
   reconcileRunLocks(db,activeRunIds);
   verifyPreparedBackupStillPresent(challenge.backup);
-  const before=tableCounts(db);
+  const currentFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
+  const preparedCountsStillExact=sameFingerprint(challenge.sourceFingerprint,currentFingerprint);
+  const before=preparedCountsStillExact?{...(challenge.counts||{})}:tableCounts(db);
   fastResetBusinessState(db,{logs:[]});
   clearBusinessRuntimeMeta(db);
   const after=Object.fromEntries(Object.keys(before).map(name=>[name,0]));
@@ -62,7 +67,7 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   if(String(process.env.VACUUM_AFTER_PURGE||'').toLowerCase()==='true')db.exec('VACUUM');
   challenges.delete(String(challengeId||''));
-  return {backup:challenge.backup,before,after,completedAt:nowIso(),event:'DATA_RESET',integrity:'ok',walCheckpoint:'TRUNCATE',fileCleanupWarnings,deleteMode:'FAST_TABLE_DELETE',performanceIndexes:'V108'};
+  return {backup:challenge.backup,before,after,completedAt:nowIso(),event:'DATA_RESET',integrity:'ok',walCheckpoint:'TRUNCATE',fileCleanupWarnings,deleteMode:'FAST_TABLE_DELETE',performanceIndexes:'V108',countSource:preparedCountsStillExact?'PREPARED_EXACT_COUNTS':'RECOUNT_AFTER_DATABASE_CHANGE'};
 }
 
 export function getPurgeCounts(){return tableCounts(getDb());}
@@ -108,6 +113,20 @@ function verifyPreparedBackupStillPresent(backupInfo){
   if(!['ok','quick-ok'].includes(String(backupInfo.integrity||''))||!/^[a-f0-9]{64}$/i.test(String(backupInfo.sha256||'')))throw new Error('自动备份验证记录无效，已停止清除。');
   return true;
 }
+
+function statFingerprint(file){
+  try{
+    const stat=fs.statSync(file);
+    return {exists:true,size:Number(stat.size||0),mtimeMs:Number(stat.mtimeMs||0)};
+  }catch{return {exists:false,size:0,mtimeMs:0};}
+}
+function databaseFingerprint(dbFile){
+  return {db:statFingerprint(dbFile),wal:statFingerprint(`${dbFile}-wal`)};
+}
+function sameStatFingerprint(a={},b={}){
+  return Boolean(a.exists)===Boolean(b.exists)&&Number(a.size||0)===Number(b.size||0)&&Math.abs(Number(a.mtimeMs||0)-Number(b.mtimeMs||0))<=1;
+}
+function sameFingerprint(a={},b={}){return sameStatFingerprint(a.db,b.db)&&sameStatFingerprint(a.wal,b.wal);}
 
 function fastResetBusinessState(db,nextState={}){
   const now=nowIso();
