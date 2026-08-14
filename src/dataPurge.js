@@ -26,9 +26,8 @@ export async function createPurgeChallenge(user = {}, options = {}) {
     const expiresAt = createdAt + 10 * 60_000;
     setPurgeBlock(db, expiresAt);
     reconcileRunLocks(db, options.activeRunIds);
-    assertQuickIntegrity(db);
     const counts = tableCounts(db);
-    const backup = await createVerifiedPreClearBackup(user.email || '');
+    const backup = await createVerifiedPreClearBackup(user.email || '', counts);
     const challengeId = crypto.randomUUID();
     challenges.set(challengeId, { email: user.email || '', backup, createdAt, expiresAt, counts });
     return {
@@ -73,11 +72,11 @@ export async function executePurge({ challengeId, phrase, backupConfirmed, user 
 
 export function getPurgeCounts() { return tableCounts(getDb()); }
 
-async function createVerifiedPreClearBackup(adminEmail) {
+async function createVerifiedPreClearBackup(adminEmail, counts = {}) {
   const cfg = getRuntimeConfig();
   const db = getDb();
   assertQuickIntegrity(db);
-  const stamp = localStamp();
+  const stamp = `${localStamp()}-${crypto.randomUUID().slice(0,8)}`;
   const dir = path.join(cfg.backupsDir, 'pre_clear', stamp);
   fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, 'ce_qc_monitor.db');
@@ -102,7 +101,7 @@ async function createVerifiedPreClearBackup(adminEmail) {
     backupMtimeMs: stat.mtimeMs, method: 'node-sqlite-online-backup', systemVersion: process.env.npm_package_version || '0.1.0',
     migrationVersion: schemaMeta || pragmaSchema,
     whitelistVersion: db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version || '',
-    administrator: adminEmail, counts: tableCounts(db)
+    administrator: adminEmail, counts
   };
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
   recordBackup({ backupType: 'database', fileName: path.basename(filePath), filePath, fileHash: sha256, reason: 'before-full-clear' });
