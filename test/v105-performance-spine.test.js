@@ -8,30 +8,33 @@ import { spawnSync } from 'node:child_process';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 
-for(const relative of ['src/v105AsyncPurgePatch.js','public/v104-fast-purge-ui.js','public/v105-fast-render.js','src/v84AsyncExportPatch.js','src/v89StaticAssetCachePatch.js']){
+for(const relative of ['src/v105AsyncPurgePatch.js','public/v104-fast-purge-ui.js','public/v105-fast-render.js','src/v84AsyncExportPatch.js','src/v89StaticAssetCachePatch.js','src/v55DashboardReconciliationPatch.js']){
   test(`${relative} stays syntax-valid`,()=>{
     const check=spawnSync(process.execPath,['--check',path.join(root,relative)],{encoding:'utf8'});
     assert.equal(check.status,0,check.stderr||check.stdout);
   });
 }
 
-test('purge prepare returns a job immediately and executes legacy protected prepare in background',()=>{
+test('purge prepare and execute both return jobs immediately and use protected legacy handlers in background',()=>{
   const source=read('src/v105AsyncPurgePatch.js');
   assert.match(source,/PREPARE_PATH = '\/api\/admin\/data-purge\/prepare'/);
-  assert.match(source,/STATUS_PATH = '\/api\/v105\/data-purge\/prepare\/:jobId'/);
+  assert.match(source,/EXECUTE_PATH = '\/api\/admin\/data-purge\/execute'/);
+  assert.match(source,/PREPARE_STATUS_PATH = '\/api\/v105\/data-purge\/prepare\/:jobId'/);
+  assert.match(source,/EXECUTE_STATUS_PATH = '\/api\/v105\/data-purge\/execute\/:jobId'/);
   assert.match(source,/setImmediate\(async \(\) =>/);
-  assert.match(source,/runLegacyPrepare\(legacyHandler, req\)/);
+  assert.match(source,/runLegacyHandler\(legacyHandler, req\)/);
   assert.match(source,/res\.status\(202\)\.json/);
   assert.match(source,/ownerKey\(req\.user\)/);
-  assert.match(source,/role \|\| ''\)\.toUpperCase\(\) !== 'ADMIN'/);
+  assert.match(source,/toUpperCase\(\) !== 'ADMIN'/);
 });
 
-test('purge UI polls background status and keeps existing destructive confirmation flow',()=>{
+test('purge UI polls both background phases and keeps existing destructive confirmation flow',()=>{
   const source=read('public/v104-fast-purge-ui.js');
-  assert.match(source,/pollJob\(prepared\.pollUrl,preview\)/);
-  assert.match(source,/await sleep\(750\)/);
+  assert.match(source,/pollJob\(prepared\.pollUrl,preview,'PREPARE'\)/);
+  assert.match(source,/pollJob\(submitted\.pollUrl,preview,'EXECUTE'\)/);
   assert.match(source,/purgeChallenge=challenge/);
   assert.match(source,/安全备份正在后台执行/);
+  assert.match(source,/applyCompletedPurge\(result\)/);
   assert.doesNotMatch(source,/大型数据库可能需要几分钟/);
 });
 
@@ -53,6 +56,14 @@ test('identical exports reuse active or recently completed jobs',()=>{
   assert.match(source,/reused: 'COMPLETED'/);
   assert.match(source,/jobFilesExist\(job\)/);
   assert.match(source,/相同条件报表已生成/);
+});
+
+test('drilldown range is cached once and reused across metric clicks',()=>{
+  const source=read('src/v55DashboardReconciliationPatch.js');
+  assert.match(source,/const rangeCache=new Map\(\)/);
+  assert.match(source,/function cachedRange\(fromDate,toDate\)/);
+  assert.match(source,/RANGE_CACHE_MS/);
+  assert.match(source,/const range=cachedRange\(fromDate,toDate\)/);
 });
 
 test('versioned static assets receive browser max-age cache instead of forced revalidation',()=>{
