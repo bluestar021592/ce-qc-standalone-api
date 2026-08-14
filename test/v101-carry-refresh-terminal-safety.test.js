@@ -57,6 +57,16 @@ test('full business-data purge and automatic carry refresh are mutually exclusiv
   assert.match(purge,/key LIKE 'carry_refresh_%' OR key=\?/);
 });
 
+test('normal schema migration cannot delete business rows or drop tables',()=>{
+  const source=read('src/migrations.js');
+  assert.doesNotMatch(source,/\bDROP\s+TABLE\b/i);
+  assert.doesNotMatch(source,/\bDELETE\s+FROM\b/i);
+  const backupAt=source.indexOf('backupDbFile(db, cfg)');
+  const beginAt=source.indexOf("db.exec('BEGIN IMMEDIATE')");
+  assert.ok(backupAt>=0 && beginAt>backupAt,'business-data migration must back up before transaction');
+  assert.match(source,/ROLLBACK/);
+});
+
 test('managed Windows runtime parses before a desktop candidate can be accepted', { skip: process.platform !== 'win32' }, () => {
   const validator=path.join(root,'tools','CE_QC_Validate_Managed_Runtime.ps1');
   assert.equal(fs.existsSync(validator),true,'managed runtime validator must exist');
