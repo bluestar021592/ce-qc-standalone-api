@@ -8,27 +8,35 @@ import { BUSINESS_DATA_TABLES, resetAppState } from './store.js';
 import { recordBackup } from './backup.js';
 
 export const PURGE_PHRASE = '永久清除全部业务数据';
+const PURGE_BLOCK_KEY = 'data_purge_block_until';
 const challenges = new Map();
 
 export async function createPurgeChallenge(user = {}, options = {}) {
   const db = getDb();
-  reconcileRunLocks(db, options.activeRunIds);
-  assertIntegrity(db);
-  const counts = tableCounts(db);
-  const backup = await createVerifiedPreClearBackup(user.email || '');
-  const challengeId = crypto.randomUUID();
   const createdAt = Date.now();
-  challenges.set(challengeId, { email: user.email || '', backup, createdAt, expiresAt: createdAt + 10 * 60_000, counts });
-  return {
-    challengeId,
-    notBefore: new Date(createdAt + 5000).toISOString(),
-    expiresAt: new Date(createdAt + 10 * 60_000).toISOString(),
-    databasePath: getRuntimeConfig().dbFile,
-    counts,
-    backup: { path: backup.filePath, sha256: backup.sha256, size: backup.size, integrity: backup.integrity },
-    deleteScope: ['日报及解析行', '运单、扫描和轨迹', 'run/checkpoint/snapshot', 'carry和POD锁', '趋势、缓存、通知及导出文件', '遗留动态刷新运行时间戳'],
-    retainedScope: ['数据库结构和迁移', '用户、角色与系统设置', '最新门店白名单', '审计日志', '清除前备份']
-  };
+  const expiresAt = createdAt + 10 * 60_000;
+  setPurgeBlock(db, expiresAt);
+  try {
+    reconcileRunLocks(db, options.activeRunIds);
+    assertIntegrity(db);
+    const counts = tableCounts(db);
+    const backup = await createVerifiedPreClearBackup(user.email || '');
+    const challengeId = crypto.randomUUID();
+    challenges.set(challengeId, { email: user.email || '', backup, createdAt, expiresAt, counts });
+    return {
+      challengeId,
+      notBefore: new Date(createdAt + 5000).toISOString(),
+      expiresAt: new Date(expiresAt).toISOString(),
+      databasePath: getRuntimeConfig().dbFile,
+      counts,
+      backup: { path: backup.filePath, sha256: backup.sha256, size: backup.size, integrity: backup.integrity },
+      deleteScope: ['日报及解析行', '运单、扫描和轨迹', 'run/checkpoint/snapshot', 'carry和POD锁', '趋势、缓存、通知及导出文件', '遗留动态刷新运行时间戳'],
+      retainedScope: ['数据库结构和迁移', '用户、角色与系统设置', '最新门店白名单', '审计日志', '清除前备份']
+    };
+  } catch (error) {
+    clearPurgeBlock(db);
+    throw error;
+  }
 }
 
 export async function executePurge({ challengeId, phrase, backupConfirmed, user = {}, activeRunIds = null }) {
@@ -102,11 +110,18 @@ function tableCounts(db) {
   return Object.fromEntries(BUSINESS_DATA_TABLES.filter(name => existing.has(name)).map(name => [name, Number(db.prepare(`SELECT COUNT(*) count FROM ${name}`).get()?.count || 0)]));
 }
 
+function setPurgeBlock(db, expiresAt) {
+  db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`)
+    .run(PURGE_BLOCK_KEY, String(expiresAt), nowIso());
+}
+function clearPurgeBlock(db) { db.prepare('DELETE FROM app_meta WHERE key=?').run(PURGE_BLOCK_KEY); }
+
 function clearBusinessRuntimeMeta(db) {
-  // Fresh-start must not inherit a prior data set's dynamic carry-refresh clock.
-  // Preserve schema/app/user/system/whitelist/backup metadata; only ephemeral
-  // business refresh markers are removed so the first clean import gets a fresh clock.
-  db.prepare("DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%'").run();
+  // Fresh-start must not inherit a prior data set's dynamic carry-refresh clock,
+  // and the transient purge block must disappear immediately after completion.
+  // Schema/app/user/system/whitelist/backup metadata is intentionally retained.
+  db.prepare("DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key=?").run(PURGE_BLOCK_KEY);
 }
 
 function reconcileRunLocks(db, activeRunIds) {
