@@ -91,6 +91,7 @@ try {
   await importPhase('v41AuthPausePatch', './src/v41AuthPausePatch.js');
   await importPhase('v53WhppRefreshGatePatch', './src/v53WhppRefreshGatePatch.js');
   await importPhase('v75CeafUploadNormalizerPatch', './src/v75CeafUploadNormalizerPatch.js');
+  await importPhase('v102UnifiedImportSafetyGatePatch', './src/v102UnifiedImportSafetyGatePatch.js');
   await importPhase('v42WhppPatch', './src/v42WhppPatch.js');
   await importPhase('v44WhppUiPatch', './src/v44WhppUiPatch.js');
   await importPhase('v89StaticAssetCachePatch', './src/v89StaticAssetCachePatch.js');
