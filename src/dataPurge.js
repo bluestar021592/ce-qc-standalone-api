@@ -10,17 +10,18 @@ import { schedulerStateForTests } from './carryoverRefreshScheduler.js';
 
 export const PURGE_PHRASE = '永久清除全部业务数据';
 const PURGE_BLOCK_KEY = 'data_purge_block_until';
+const CACHE_WORKER_ACTIVE_KEY = 'dashboard_cache_worker_active';
+const CACHE_WORKER_ACTIVE_UNTIL_KEY = 'dashboard_cache_worker_active_until';
 const challenges = new Map();
 
 export async function createPurgeChallenge(user = {}, options = {}) {
   const db = getDb();
-  // Block any NEW automatic carry refresh immediately, then wait for a refresh
-  // that may already have been in-flight before the administrator clicked clear.
-  // JavaScript execution is single-threaded up to the first await, so this closes
-  // the start-race without introducing another database writer.
+  // Block NEW background refresh work immediately. Any carry/cache worker that
+  // already owned work before this click is allowed to finish, and the purge
+  // waits for it before the verified backup begins.
   setPurgeBlock(db, Date.now() + 20 * 60_000);
   try {
-    await waitForCarryRefreshIdle();
+    await waitForBackgroundMaintenanceIdle(db);
     const createdAt = Date.now();
     const expiresAt = createdAt + 10 * 60_000;
     setPurgeBlock(db, expiresAt);
@@ -54,9 +55,7 @@ export async function executePurge({ challengeId, phrase, backupConfirmed, user 
   if (String(phrase || '') !== PURGE_PHRASE) throw new Error(`请输入完整确认短语：${PURGE_PHRASE}`);
 
   const db = getDb();
-  // Challenge creation already waited for the carry scheduler and holds the
-  // purge block. Recheck before the destructive transaction for defense in depth.
-  await waitForCarryRefreshIdle();
+  await waitForBackgroundMaintenanceIdle(db);
   reconcileRunLocks(db, activeRunIds);
   await verifyBackup(challenge.backup);
   const before = tableCounts(db);
@@ -127,21 +126,29 @@ function setPurgeBlock(db, expiresAt) {
 }
 function clearPurgeBlock(db) { db.prepare('DELETE FROM app_meta WHERE key=?').run(PURGE_BLOCK_KEY); }
 
-async function waitForCarryRefreshIdle(timeoutMs = 15 * 60_000) {
+function cacheWorkerActive(db) {
+  const owner = String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(CACHE_WORKER_ACTIVE_KEY)?.value || '');
+  const until = Number(db.prepare('SELECT value FROM app_meta WHERE key=?').get(CACHE_WORKER_ACTIVE_UNTIL_KEY)?.value || 0);
+  return Boolean(owner && Number.isFinite(until) && until > Date.now());
+}
+
+async function waitForBackgroundMaintenanceIdle(db, timeoutMs = 15 * 60_000) {
   const started = Date.now();
-  while (schedulerStateForTests().inFlight) {
+  while (schedulerStateForTests().inFlight || cacheWorkerActive(db)) {
     if (Date.now() - started >= timeoutMs) {
-      throw new Error('遗留异常自动刷新长时间未结束，系统已安全停止本次清除，没有修改业务数据。');
+      throw new Error('后台遗留刷新或看板缓存维护长时间未结束，系统已安全停止本次清除，没有修改业务数据。');
     }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
 }
 
 function clearBusinessRuntimeMeta(db) {
-  // Fresh-start must not inherit a prior data set's dynamic carry-refresh clock,
-  // and the transient purge block must disappear immediately after completion.
+  // Fresh-start must not inherit a prior data set's dynamic refresh/cache clock,
+  // and transient maintenance/purge leases must disappear after completion.
   // Schema/app/user/system/whitelist/backup metadata is intentionally retained.
-  db.prepare("DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key=?").run(PURGE_BLOCK_KEY);
+  db.prepare(`DELETE FROM app_meta
+    WHERE key LIKE 'carry_refresh_%' OR key IN (?,?,?)`)
+    .run(PURGE_BLOCK_KEY, CACHE_WORKER_ACTIVE_KEY, CACHE_WORKER_ACTIVE_UNTIL_KEY);
 }
 
 function reconcileRunLocks(db, activeRunIds) {
