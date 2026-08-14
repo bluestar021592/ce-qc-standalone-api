@@ -69,10 +69,10 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(indexes,/idx_v108_business_final_report_type/);
   assert.match(indexes,/DATA_PURGE_ACTIVE/);
   assert.match(indexes,/LARGE_LEGACY_DB_DEFER_UNTIL_FAST_PURGE/);
-  assert.match(lazy,/requestIdleCallback/);
   assert.match(lazy,/loadGroup\('reports'\)/);
   assert.match(lazy,/loadGroup\('data'\)/);
-  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-2/);
+  assert.doesNotMatch(lazy,/function warmIdle/);
+  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-3/);
   assert.match(injector,/v109-instant-business-navigation\.js\?v=20260814-1/);
   assert.match(injector,/v110-drilldown-prewarm\.js\?v=20260814-1/);
   assert.doesNotMatch(injector,/v84-async-export-ui\.js/);
