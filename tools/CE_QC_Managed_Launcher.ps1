@@ -30,11 +30,47 @@ function Test-TrackedTreeClean {
   return [string]::IsNullOrWhiteSpace($text)
 }
 
-function Remove-ValidationWorktree([string]$Path) {
+function Test-SafeValidationPath([string]$Path) {
+  try {
+    $full = [IO.Path]::GetFullPath($Path)
+    $temp = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+    return $full.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -and ([IO.Path]::GetFileName($full) -like 'CE_QC_UPDATE_VERIFY_*')
+  } catch { return $false }
+}
+
+function Remove-JunctionOnly([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path)) { return $true }
+  try {
+    $item = Get-Item -LiteralPath $Path -Force
+    $isReparsePoint = (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+    if (-not $isReparsePoint) {
+      Write-ManagedLog "[UPDATE] Refusing junction cleanup because path is not a reparse point: $Path" Yellow
+      return $false
+    }
+    $cmd = if ($env:ComSpec) { $env:ComSpec } else { 'cmd.exe' }
+    & $cmd /d /c "rmdir `"$Path`"" | Out-Null
+    if ($LASTEXITCODE -ne 0 -or (Test-Path -LiteralPath $Path)) {
+      Write-ManagedLog "[UPDATE] Validation node_modules junction could not be detached safely; temp directory will be retained: $Path" Yellow
+      return $false
+    }
+    return $true
+  } catch {
+    Write-ManagedLog ("[UPDATE] Safe junction cleanup failed; temp directory will be retained. " + $_.Exception.Message) Yellow
+    return $false
+  }
+}
+
+function Remove-ValidationWorktree([string]$Path, [bool]$SafeToRecurse = $false) {
   if ([string]::IsNullOrWhiteSpace($Path)) { return }
   try { & $script:GitExe worktree remove --force $Path 2>$null | Out-Null } catch {}
   if (Test-Path -LiteralPath $Path) {
-    try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+    if ($SafeToRecurse -and (Test-SafeValidationPath $Path)) {
+      try { Remove-Item -LiteralPath $Path -Recurse -Force -Confirm:$false -ErrorAction Stop } catch {
+        Write-ManagedLog "[UPDATE] Validation temp directory retained for later cleanup: $Path" Yellow
+      }
+    } else {
+      Write-ManagedLog "[UPDATE] Validation temp directory retained for safety: $Path" Yellow
+    }
   }
   try { & $script:GitExe worktree prune 2>$null | Out-Null } catch {}
 }
@@ -42,6 +78,7 @@ function Remove-ValidationWorktree([string]$Path) {
 function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
   $tempRoot = Join-Path $env:TEMP ("CE_QC_UPDATE_VERIFY_{0}_{1}" -f $PID, (Get-Date -Format 'yyyyMMddHHmmss'))
   $linkedModules = $false
+  $junctionCleanupOk = $true
   $oldBackupRoot = $env:CE_QC_BACKUP_PROJECT_ROOT
   try {
     Write-ManagedLog "[UPDATE] Verifying candidate $($RemoteCommit.Substring(0,[Math]::Min(8,$RemoteCommit.Length))) before installing..." Cyan
@@ -65,7 +102,7 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
 
     Push-Location $tempRoot
     try {
-      Invoke-Exe $script:NpmExe @('run','test:golive') | Out-Null
+      Invoke-Exe $script:NpmExe @('run','test:golive')
     } finally { Pop-Location }
 
     $candidateBackup = Join-Path $tempRoot 'scripts\CE_QC_PreUpdate_Backup.mjs'
@@ -83,10 +120,15 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
   } finally {
     if ($null -eq $oldBackupRoot) { Remove-Item Env:CE_QC_BACKUP_PROJECT_ROOT -ErrorAction SilentlyContinue }
     else { $env:CE_QC_BACKUP_PROJECT_ROOT = $oldBackupRoot }
+
     if ($linkedModules) {
-      try { Remove-Item -LiteralPath (Join-Path $tempRoot 'node_modules') -Force -ErrorAction SilentlyContinue } catch {}
+      $junctionCleanupOk = Remove-JunctionOnly (Join-Path $tempRoot 'node_modules')
     }
-    Remove-ValidationWorktree $tempRoot
+    if (-not $linkedModules -or $junctionCleanupOk) {
+      Remove-ValidationWorktree $tempRoot $true
+    } else {
+      Write-ManagedLog "[UPDATE] Candidate temp worktree intentionally retained to protect installed node_modules: $tempRoot" Yellow
+    }
   }
 }
 
