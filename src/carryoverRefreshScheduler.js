@@ -7,11 +7,14 @@ import { updateCarryoverResults } from './unifiedImportStore.js';
 export const CARRY_REFRESH_TIMEZONE = 'Asia/Phnom_Penh';
 export const CARRY_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
 export const CARRY_REFRESH_POLL_MS = 60 * 1000;
+export const CARRY_REFRESH_STARTUP_DELAY_MS = Math.max(30_000, Math.min(10 * 60 * 1000, Number(process.env.CARRY_REFRESH_STARTUP_DELAY_MS || 90_000)));
 const FAILURE_RETRY_MS = 15 * 60 * 1000;
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
 
 let schedulerTimer = null;
+let startupTimer = null;
+let startupNotBefore = 0;
 let inFlight = false;
 let lastFailureAt = 0;
 
@@ -190,6 +193,7 @@ export async function refreshOpenCarryNow({ reason = 'INTERNAL', client = new CE
 
 async function schedulerTick() {
   if (inFlight) return;
+  if (startupNotBefore && Date.now() < startupNotBefore) return;
   if (lastFailureAt && Date.now() - lastFailureAt < FAILURE_RETRY_MS) return;
   const db = getDb();
   const reason = dueCarryRefreshReason(db, new Date());
@@ -208,18 +212,24 @@ export function startCarryoverRefreshScheduler() {
   if (process.env.CI || process.env.NODE_ENV === 'test' || String(process.env.CE_QC_DISABLE_CARRY_REFRESH || '') === '1') {
     return { started: false, reason: 'DISABLED_BY_ENV' };
   }
+  startupNotBefore = Date.now() + CARRY_REFRESH_STARTUP_DELAY_MS;
   schedulerTimer = setInterval(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_TICK]', error?.message || error)); }, CARRY_REFRESH_POLL_MS);
   schedulerTimer.unref?.();
-  // Startup catch-up means a PC that was off at 00:05 refreshes OPEN carry on next launch.
-  setTimeout(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_STARTUP]', error?.message || error)); }, 5000).unref?.();
-  console.log('[CE-QC][CARRY_REFRESH] Cambodia 00:05 rollover + every 2 hours; OPEN carry only; history immutable.');
-  return { started: true, pollMs: CARRY_REFRESH_POLL_MS, refreshMs: CARRY_REFRESH_INTERVAL_MS, timezone: CARRY_REFRESH_TIMEZONE };
+  // Startup catch-up is intentionally deferred so first paint, navigation and the
+  // user's initial import are not competing with historical OPEN parcel refresh.
+  startupTimer = setTimeout(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_STARTUP]', error?.message || error)); }, CARRY_REFRESH_STARTUP_DELAY_MS);
+  startupTimer.unref?.();
+  console.log(`[CE-QC][CARRY_REFRESH] interactive startup protected for ${CARRY_REFRESH_STARTUP_DELAY_MS}ms; then Cambodia 00:05 + every 2 hours; OPEN carry only.`);
+  return { started: true, pollMs: CARRY_REFRESH_POLL_MS, refreshMs: CARRY_REFRESH_INTERVAL_MS, startupDelayMs: CARRY_REFRESH_STARTUP_DELAY_MS, timezone: CARRY_REFRESH_TIMEZONE };
 }
 
-export function schedulerStateForTests() { return { started: Boolean(schedulerTimer), inFlight, ccslTypes: [...CCSL_TYPES], shopeeTypes: [...SHOPEE_TYPES] }; }
+export function schedulerStateForTests() { return { started: Boolean(schedulerTimer), inFlight, startupNotBefore, startupDelayMs: CARRY_REFRESH_STARTUP_DELAY_MS, ccslTypes: [...CCSL_TYPES], shopeeTypes: [...SHOPEE_TYPES] }; }
 export function stopCarryoverRefreshSchedulerForTests() {
   if (schedulerTimer) clearInterval(schedulerTimer);
+  if (startupTimer) clearTimeout(startupTimer);
   schedulerTimer = null;
+  startupTimer = null;
+  startupNotBefore = 0;
   inFlight = false;
   lastFailureAt = 0;
 }
