@@ -58,3 +58,15 @@ test('dead dashboard-cache worker lease is cleared immediately instead of delayi
   assert.match(source,/timeoutMs = 5 \* 60_000/);
   assert.doesNotMatch(source,/timeoutMs = 15 \* 60_000/);
 });
+
+test('purge dialog shows live elapsed time while fast online backup is running',()=>{
+  const uiRelative='public/v104-fast-purge-ui.js';
+  const ui=fs.readFileSync(path.join(root,uiRelative),'utf8');
+  const syntax=spawnSync(process.execPath,['--check',path.join(root,uiRelative)],{encoding:'utf8'});
+  assert.equal(syntax.status,0,syntax.stderr||syntax.stdout);
+  assert.match(ui,/快速在线备份/);
+  assert.match(ui,/已用 \$\{elapsed\} 秒/);
+  assert.match(ui,/global\.openDataPurge/);
+  const injector=fs.readFileSync(path.join(root,'src/v44WhppUiPatch.js'),'utf8');
+  assert.match(injector,/v104-fast-purge-ui\.js\?v=20260814-1/);
+});
