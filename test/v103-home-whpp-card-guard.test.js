@@ -27,10 +27,19 @@ test('V103 updates total and all business ratios after adding WHPP',()=>{
   assert.match(source,/rate\(whppValue,finalTotal\)/);
 });
 
-test('normal HTML injection loads V103 after V64 WHPP integration',()=>{
+test('V103 is event-driven and does not observe the whole home DOM',()=>{
+  const source=read('public/v103-home-whpp-card-guard.js');
+  assert.match(source,/global\.renderAll/);
+  assert.match(source,/originalRenderAll/);
+  assert.match(source,/ce-qc-run-complete/);
+  assert.doesNotMatch(source,/new MutationObserver/);
+  assert.doesNotMatch(source,/observer\.observe/);
+});
+
+test('normal HTML injection loads V103 after V64 WHPP integration with fresh cache key',()=>{
   const source=read('src/v44WhppUiPatch.js');
   const v64=source.indexOf('v64-whpp-total-kpi-integration.js');
   const v103=source.indexOf('v103-home-whpp-card-guard.js');
   assert.ok(v64>=0 && v103>v64);
-  assert.match(source,/v103-home-whpp-card-guard\.js\?v=20260814-1/);
+  assert.match(source,/v103-home-whpp-card-guard\.js\?v=20260814-2/);
 });
