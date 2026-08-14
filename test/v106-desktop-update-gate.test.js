@@ -12,15 +12,21 @@ const syntax=p=>{
   assert.equal(result.status,0,`${p}: ${result.stderr||result.stdout}`);
 };
 
-test('desktop update candidate keeps the managed launcher and bootstrap entry',()=>{
+test('desktop update candidate validates and backs up with candidate tool before fast-forward install',()=>{
   const cmd=read('Start_CE_QC.cmd');
   const launcher=read('tools/CE_QC_Managed_Launcher.ps1');
   assert.match(cmd,/CE_QC_Managed_Launcher\.ps1/);
   assert.match(launcher,/Test-RemoteCandidate/);
-  assert.match(launcher,/CE_QC_PreUpdate_Backup\.mjs/);
-  assert.match(launcher,/pull','--ff-only/);
+  assert.match(launcher,/candidateBackup = Join-Path \$tempRoot 'scripts\\CE_QC_PreUpdate_Backup\.mjs'/);
+  assert.match(launcher,/CE_QC_BACKUP_PROJECT_ROOT = \$ProjectRoot/);
+  assert.match(launcher,/Candidate tests passed\. Creating verified SQLite online backup before code switch/);
+  const backup=launcher.indexOf("$candidateBackup = Join-Path $tempRoot 'scripts\\CE_QC_PreUpdate_Backup.mjs'");
+  const pull=launcher.indexOf("@('pull','--ff-only'");
+  assert.ok(backup>=0&&pull>backup);
+  assert.doesNotMatch(launcher,/\$backupScript = Join-Path \$ProjectRoot 'scripts\\CE_QC_PreUpdate_Backup\.mjs'/);
   assert.doesNotMatch(launcher,/reset\s+--hard/i);
   syntax('bootstrap.js');
+  syntax('scripts/CE_QC_PreUpdate_Backup.mjs');
 });
 
 test('normal startup serves first paint before optional historical maintenance',()=>{
