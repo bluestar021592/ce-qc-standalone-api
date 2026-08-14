@@ -32,7 +32,7 @@ test('verified backup gates transactional business purge and preserves system ta
   process.env.DATA_DIR = dir;
   process.env.DB_FILE = path.join(dir, 'test.db');
   const { getDb } = await import('../src/db.js');
-  const { createPurgeChallenge, executePurge, PURGE_PHRASE } = await import('../src/dataPurge.js');
+  const { createPurgeChallenge, executePurge, resealPurgeChallenge, PURGE_PHRASE } = await import('../src/dataPurge.js');
   const db = getDb();
   db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-08-05');
   db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,fileHash,status,summaryJson,warningsJson,createdAt)
@@ -56,6 +56,13 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(manifest.countMode, 'DEFERRED_TO_TRANSACTIONAL_DELETE');
   assert.equal(manifest.sourceStableDuringBackup, true);
 
+  // Production writes the retained DATA_PURGE_BACKUP_VERIFIED audit row after
+  // the backup route returns. Re-seal after that expected retained write so the
+  // five-second guard still rejects any later database mutation.
+  db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v124_test_retained_audit','1',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(new Date().toISOString());
+  const seal = resealPurgeChallenge(challenge.challengeId, { email: 'test-admin' });
+  assert.equal(seal.sourceSeal, 'POST_PREPARE_AUDIT');
+
   await new Promise(resolve => setTimeout(resolve, 5100));
   const result = await executePurge({ challengeId: challenge.challengeId, phrase: PURGE_PHRASE, backupConfirmed: true, user: { email: 'test-admin' } });
   assert.ok(result.before.daily_reports >= 1);
@@ -72,6 +79,7 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(result.integrity, 'ok');
   assert.equal(result.walCheckpoint, 'TRUNCATE');
   assert.ok(db.prepare('SELECT COUNT(*) count FROM backup_records').get().count >= 1);
+  assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='v124_test_retained_audit'").get()?.value, '1');
   assert.equal(Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0), 18);
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
