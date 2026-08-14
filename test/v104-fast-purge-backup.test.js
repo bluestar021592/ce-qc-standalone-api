@@ -50,6 +50,7 @@ test('purge backup keeps SHA-256 quick-check and source-stability evidence',()=>
   assert.match(source,/backupQuickCheck:'ok'/);
   assert.match(source,/sourceFingerprintBeforeBackup/);
   assert.match(source,/sourceFingerprintAfterBackup/);
+  assert.match(source,/sourceFingerprintAfterVerification/);
   assert.match(source,/sourceStableDuringBackup:true/);
   assert.match(source,/verificationMode:'online-backup\+stable-source-fingerprint\+backup-quick-check\+sha256'/);
   assert.match(source,/recordBackup\(/);
@@ -69,7 +70,9 @@ test('transactional fast delete returns exact before counts without pre-scanning
   assert.match(source,/export function getPurgeCounts\(\)\{return tableCounts\(getDb\(\)\);\}/);
 });
 
-test('database changes after the verified backup abort purge instead of deleting unbacked rows',()=>{
+test('database changes after the sealed verified backup abort purge instead of deleting unbacked rows',()=>{
+  assert.match(source,/export function resealPurgeChallenge/);
+  assert.match(source,/sourceSeal='POST_PREPARE_AUDIT'/);
   assert.match(source,/if\(!sameFingerprint\(challenge\.sourceFingerprint,currentFingerprint\)\)/);
   assert.match(source,/clearPurgeBlock\(db\)/);
   assert.match(source,/数据库在安全备份后发生变化，已停止清除/);
@@ -85,7 +88,7 @@ test('dead dashboard-cache worker lease is cleared immediately instead of delayi
   assert.doesNotMatch(source,/timeoutMs = 15 \* 60_000/);
 });
 
-test('one-click purge backgrounds both backup and execution without a second user action',()=>{
+test('one-click purge backgrounds backup execution and seals after the verified audit',()=>{
   const backend=read('src/v105AsyncPurgePatch.js');
   const uiRelative='public/v104-fast-purge-ui.js';
   const ui=read(uiRelative);
@@ -97,7 +100,9 @@ test('one-click purge backgrounds both backup and execution without a second use
   assert.match(backend,/EXECUTE_PATH = '\/api\/admin\/data-purge\/execute'/);
   assert.match(backend,/setImmediate\(async \(\) =>/);
   assert.match(backend,/runLegacyHandler\(legacyHandler, req\)/);
-  assert.match(backend,/v122-single-flight-purge-jobs-v1/);
+  assert.match(backend,/v124-post-audit-purge-seal-v1/);
+  assert.match(backend,/import \{ resealPurgeChallenge \} from '\.\/dataPurge\.js'/);
+  assert.match(backend,/kind === 'PREPARE' && result\?\.challengeId\) resealPurgeChallenge\(result\.challengeId, req\.user\)/);
   assert.match(ui,/v123-adaptive-purge-ui-v2/);
   assert.match(ui,/executeChallengeAutomatically\(challenge,preview\)/);
   assert.match(ui,/安全倒计时 \$\{remaining\} 秒后自动清空业务数据，无需再次点击/);
