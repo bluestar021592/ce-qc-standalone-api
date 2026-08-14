@@ -1,9 +1,11 @@
 import 'dotenv/config';
-import { closeDb, getDb, nowIso } from './db.js';
+import fs from 'node:fs';
+import { closeDb, getDb, getRuntimeConfig, nowIso } from './db.js';
 
-const PATCH_ID='2026-08-14-v108-deferred-query-index-worker-v1';
+const PATCH_ID='2026-08-14-v108-deferred-query-index-worker-v2';
 const READY_KEY='v108_performance_indexes_ready';
 const PURGE_KEY='data_purge_block_until';
+const LARGE_DB_BYTES=Math.max(256*1024*1024,Number(process.env.V108_LARGE_DB_DEFER_BYTES||768*1024*1024));
 
 const INDEXES=[
   ['idx_v108_unified_batches_valid_date',`CREATE INDEX IF NOT EXISTS idx_v108_unified_batches_valid_date ON unified_import_batches(status,reportDate DESC,createdAt DESC,snapshotId)`],
@@ -23,46 +25,27 @@ function activeBusinessWrite(db){
   if(db.prepare("SELECT 1 FROM business_run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get())return 'BUSINESS_RUN_ACTIVE';
   return '';
 }
-function setMeta(db,key,value){
-  db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(key,String(value??''),nowIso());
-}
+function setMeta(db,key,value){db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(key,String(value??''),nowIso());}
 function present(db,name){return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name=? LIMIT 1").get(name));}
+function databaseSize(){try{return Number(fs.statSync(getRuntimeConfig().dbFile).size||0);}catch{return 0;}}
 
 try{
-  const db=getDb();
-  db.exec('PRAGMA busy_timeout=3000');
+  const db=getDb();db.exec('PRAGMA busy_timeout=3000');
   const blocked=activeBusinessWrite(db);
-  if(blocked){
-    process.stdout.write(`${JSON.stringify({ok:true,skipped:true,reason:blocked,patchId:PATCH_ID})}\n`);
-    closeDb();
-    process.exit(0);
-  }
+  if(blocked){process.stdout.write(`${JSON.stringify({ok:true,skipped:true,reason:blocked,patchId:PATCH_ID})}\n`);closeDb();process.exit(0);}
   const missing=INDEXES.filter(([name])=>!present(db,name));
-  if(!missing.length){
-    setMeta(db,READY_KEY,'1');
-    process.stdout.write(`${JSON.stringify({ok:true,skipped:true,reason:'ALREADY_READY',patchId:PATCH_ID})}\n`);
-    closeDb();
-    process.exit(0);
+  if(!missing.length){setMeta(db,READY_KEY,'1');process.stdout.write(`${JSON.stringify({ok:true,skipped:true,reason:'ALREADY_READY',patchId:PATCH_ID})}\n`);closeDb();process.exit(0);}
+  const size=databaseSize();
+  if(size>=LARGE_DB_BYTES&&String(process.env.V108_FORCE_LARGE_DB_INDEX_BUILD||'')!=='1'){
+    process.stdout.write(`${JSON.stringify({ok:true,skipped:true,reason:'LARGE_LEGACY_DB_DEFER_UNTIL_FAST_PURGE',patchId:PATCH_ID,size,threshold:LARGE_DB_BYTES,missing:missing.map(([name])=>name)})}\n`);
+    closeDb();process.exit(0);
   }
   const built=[];
   for(const [name,sql] of missing){
-    const newlyBlocked=activeBusinessWrite(db);
-    if(newlyBlocked)break;
-    try{db.exec(sql);built.push(name);}catch(error){
-      if(/locked|busy/i.test(String(error?.message||'')))break;
-      throw error;
-    }
+    const newlyBlocked=activeBusinessWrite(db);if(newlyBlocked)break;
+    try{db.exec(sql);built.push(name);}catch(error){if(/locked|busy/i.test(String(error?.message||'')))break;throw error;}
   }
   const remaining=INDEXES.filter(([name])=>!present(db,name)).map(([name])=>name);
-  if(!remaining.length){
-    try{db.exec('PRAGMA optimize');}catch{}
-    setMeta(db,READY_KEY,'1');
-  }
-  process.stdout.write(`${JSON.stringify({ok:true,patchId:PATCH_ID,built,remaining})}\n`);
-  closeDb();
-  process.exit(0);
-}catch(error){
-  process.stderr.write(`${JSON.stringify({ok:false,patchId:PATCH_ID,error:error?.message||String(error)})}\n`);
-  try{closeDb();}catch{}
-  process.exit(1);
-}
+  if(!remaining.length){try{db.exec('PRAGMA optimize');}catch{}setMeta(db,READY_KEY,'1');}
+  process.stdout.write(`${JSON.stringify({ok:true,patchId:PATCH_ID,built,remaining})}\n`);closeDb();process.exit(0);
+}catch(error){process.stderr.write(`${JSON.stringify({ok:false,patchId:PATCH_ID,error:error?.message||String(error)})}\n`);try{closeDb();}catch{}process.exit(1);}
