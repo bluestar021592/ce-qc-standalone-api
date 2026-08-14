@@ -15,10 +15,11 @@ const syntax=p=>{
 test('candidate runtime files are syntax valid',()=>{
   for(const file of [
     'bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js',
-    'src/v44WhppUiPatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','scripts/CE_QC_PurgeDeleteWorker.mjs',
+    'src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js',
+    'scripts/CE_QC_PreUpdate_Backup.mjs','scripts/CE_QC_PurgeDeleteWorker.mjs',
     'public/v125-local-api-resilience.js','public/v104-fast-purge-ui.js',
     'public/v108-route-lazy-features.js','public/v105-fast-render.js',
-    'public/v103-home-whpp-card-guard.js'
+    'public/v103-home-whpp-card-guard.js','public/v132-whpp-seven-business-fast.js'
   ]) syntax(file);
 });
 
@@ -115,10 +116,30 @@ test('managed launcher stays fast-forward only owns backend lifetime and never r
   assert.equal(pkg.ceQcUpdateGate,'v129-safe-junction-cleanup');
 });
 
+test('V132 makes WHPP fast and refuses false seven-business completion',()=>{
+  const backend=read('src/v132WhppFastIntegrationPatch.js');
+  const ui=read('public/v132-whpp-seven-business-fast.js');
+  const injector=read('src/v44WhppUiPatch.js');
+  assert.match(backend,/v132-whpp-fast-summary-v1/);
+  assert.match(backend,/\/api\/v132\/whpp-fast-summary/);
+  assert.match(backend,/business_history_summary/);
+  assert.match(backend,/CACHE_MS/);
+  assert.match(ui,/v132-whpp-seven-business-fast-v2/);
+  assert.match(ui,/ensureWhppCompleted/);
+  assert.match(ui,/WHPP最终快照已验证/);
+  assert.match(ui,/系统不会把它误报为七业务处理完成/);
+  assert.match(ui,/global\.runUnified=\(\)=>runSeven\('start'\)/);
+  assert.match(ui,/global\.resumeUnified=\(\)=>runSeven\('resume'\)/);
+  assert.match(injector,/v132-whpp-fast-seven-business-v19/);
+  assert.match(injector,/v132-whpp-seven-business-fast\.js\?v=20260814-1/);
+  assert.doesNotMatch(injector,/v90-instant-whpp-navigation\.js/);
+});
+
 test('WHPP total conservation guard remains present after fast render',()=>{
   const guard=read('public/v103-home-whpp-card-guard.js');
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(guard,/WHPP本土/);
   assert.match(guard,/const residual=Math\.max\(0,total-sixTotal\)/);
   assert.ok(injector.indexOf('v105-fast-render.js')<injector.indexOf('v103-home-whpp-card-guard.js'));
+  assert.ok(injector.indexOf('v103-home-whpp-card-guard.js')<injector.indexOf('v132-whpp-seven-business-fast.js'));
 });
