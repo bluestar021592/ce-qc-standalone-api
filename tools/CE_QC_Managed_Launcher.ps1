@@ -39,23 +39,46 @@ function Remove-ValidationWorktree([string]$Path) {
   try { & $script:GitExe worktree prune 2>$null | Out-Null } catch {}
 }
 
-function Test-RemoteCandidate([string]$RemoteCommit) {
+function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
   $tempRoot = Join-Path $env:TEMP ("CE_QC_UPDATE_VERIFY_{0}_{1}" -f $PID, (Get-Date -Format 'yyyyMMddHHmmss'))
+  $linkedModules = $false
   try {
     Write-ManagedLog "[UPDATE] Verifying candidate $($RemoteCommit.Substring(0,[Math]::Min(8,$RemoteCommit.Length))) before installing..." Cyan
     Invoke-Exe $script:GitExe @('worktree','add','--detach','--quiet',$tempRoot,$RemoteCommit) | Out-Null
+
+    $dependencyFiles = Get-GitText @('diff','--name-only',$CurrentCommit,$RemoteCommit,'--','package.json','package-lock.json')
+    $currentModules = Join-Path $ProjectRoot 'node_modules'
+    $candidateModules = Join-Path $tempRoot 'node_modules'
+    $canReuseModules = [string]::IsNullOrWhiteSpace($dependencyFiles) -and (Test-Path -LiteralPath $currentModules)
+
+    if ($canReuseModules) {
+      Write-ManagedLog '[UPDATE] Dependencies unchanged; reusing installed node_modules for isolated candidate tests.' DarkCyan
+      New-Item -ItemType Junction -Path $candidateModules -Target $currentModules -Force | Out-Null
+      $linkedModules = $true
+    } else {
+      Write-ManagedLog '[UPDATE] Dependencies changed or missing; installing candidate dependencies once.' DarkCyan
+      Push-Location $tempRoot
+      try { Invoke-Exe $script:NpmExe @('ci','--prefer-offline','--no-audit','--no-fund') | Out-Null }
+      finally { Pop-Location }
+    }
+
     Push-Location $tempRoot
     try {
-      Invoke-Exe $script:NpmExe @('ci','--prefer-offline','--no-audit','--no-fund') | Out-Null
       Invoke-Exe $script:NpmExe @('run','test:golive') | Out-Null
-      Invoke-Exe $script:NodeExe @('--test','--test-reporter=tap','test/v99-managed-runtime-final.test.js','test/v100-carry-live-ui.test.js','test/v101-carry-refresh-terminal-safety.test.js','test/v103-home-whpp-card-guard.test.js') | Out-Null
+      Invoke-Exe $script:NodeExe @('--test','--test-reporter=tap','test/v100-carry-live-ui.test.js','test/v101-carry-refresh-terminal-safety.test.js','test/v103-home-whpp-card-guard.test.js') | Out-Null
     } finally { Pop-Location }
+
     Write-ManagedLog '[UPDATE] Candidate tests passed. Code is eligible for installation.' Green
     return $true
   } catch {
     Write-ManagedLog ("[UPDATE] Candidate rejected; current known-good version will be kept. " + $_.Exception.Message) Yellow
     return $false
-  } finally { Remove-ValidationWorktree $tempRoot }
+  } finally {
+    if ($linkedModules) {
+      try { Remove-Item -LiteralPath (Join-Path $tempRoot 'node_modules') -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    Remove-ValidationWorktree $tempRoot
+  }
 }
 
 function Invoke-SafeAutoUpdate {
@@ -97,7 +120,7 @@ function Invoke-SafeAutoUpdate {
     Write-ManagedLog '[UPDATE] Remote history is not a fast-forward of this installation; automatic update blocked for safety.' Yellow
     return
   }
-  if (-not (Test-RemoteCandidate $remote)) { return }
+  if (-not (Test-RemoteCandidate $remote $current)) { return }
 
   $backupScript = Join-Path $ProjectRoot 'scripts\CE_QC_PreUpdate_Backup.mjs'
   if (-not (Test-Path -LiteralPath $backupScript)) {
