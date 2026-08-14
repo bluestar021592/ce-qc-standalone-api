@@ -20,7 +20,7 @@ test('managed desktop launcher remains safe and non-destructive',()=>{
 });
 
 test('server bootstrap and fast runtime files are syntax valid',()=>{
-  for(const file of ['bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v55DashboardReconciliationPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js'])syntax(file);
+  for(const file of ['bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v55DashboardReconciliationPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js'])syntax(file);
 });
 
 test('full purge stays backup first asynchronous and uses fast whole-table reset',()=>{
@@ -42,6 +42,7 @@ test('full purge stays backup first asynchronous and uses fast whole-table reset
 
 test('page rendering detail reads exports and database reads keep fast paths',()=>{
   const render=read('public/v105-fast-render.js');
+  const nav=read('public/v109-instant-business-navigation.js');
   const detail=read('src/v55DashboardReconciliationPatch.js');
   const exp=read('src/v84AsyncExportPatch.js');
   const worker=read('src/v84ExportJobWorker.js');
@@ -51,6 +52,9 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(render,/v105VisiblePageRender/);
   assert.match(render,/requestIdleCallback/);
+  assert.match(nav,/V109_BOOTSTRAP_SUMMARY/);
+  assert.match(nav,/requestIdleCallback/);
+  assert.match(nav,/businessStates\?\.\[type\]/);
   assert.match(detail,/const rangeCache=new Map\(\)/);
   assert.match(exp,/detached: true/);
   assert.match(exp,/reusableJob/);
@@ -64,6 +68,7 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(lazy,/loadGroup\('reports'\)/);
   assert.match(lazy,/loadGroup\('data'\)/);
   assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-2/);
+  assert.match(injector,/v109-instant-business-navigation\.js\?v=20260814-1/);
   assert.doesNotMatch(injector,/v84-async-export-ui\.js/);
   assert.doesNotMatch(injector,/v104-fast-purge-ui\.js/);
 });
