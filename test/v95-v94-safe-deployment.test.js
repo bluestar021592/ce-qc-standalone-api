@@ -15,9 +15,12 @@ test('V94 runs focused and full regression before stopping the live 5177 backend
   assert.match(source, /npm run test:golive/);
 });
 
-test('test commands force TAP summaries so tests/pass/fail are always visible', () => {
+test('test commands force TAP summaries and V124 purge lifecycle is part of go-live', () => {
   assert.match(pkg.scripts.test, /--test-reporter=tap/);
   assert.match(pkg.scripts['test:golive'], /--test-reporter=tap/);
+  assert.match(pkg.scripts['test:golive'], /v107-focused-golive\.test\.js/);
+  assert.match(pkg.scripts['test:golive'], /v104-fast-purge-backup\.test\.js/);
+  assert.match(pkg.scripts['test:golive'], /data-purge-large-backup\.test\.js/);
 });
 
 test('V94 deployment automatically restores the backend if a post-stop audit/start stage aborts', () => {
