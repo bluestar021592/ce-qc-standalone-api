@@ -42,14 +42,17 @@ test('automatic code update validates remote candidate before installation and b
   assert.doesNotMatch(source,/reset\s+--hard/i);
 });
 
-test('pre-update backup is syntax valid, hash verified and does not mutate business rows',()=>{
+test('pre-update backup is syntax valid, online verified and does not mutate business rows',()=>{
   const source=read(backup);
   const syntax=spawnSync(process.execPath,['--check',path.join(root,backup)],{encoding:'utf8'});
   assert.equal(syntax.status,0,syntax.stderr||syntax.stdout);
+  assert.match(source,/import \{ backup, DatabaseSync \} from 'node:sqlite'/);
+  assert.match(source,/PRAGMA quick_check\(1\)/);
+  assert.match(source,/await backup\(source, copyFile/);
   assert.match(source,/PRAGMA integrity_check/);
-  assert.match(source,/PRAGMA wal_checkpoint\(FULL\)/);
   assert.match(source,/sha256/);
   assert.match(source,/backups.*pre_update/s);
+  assert.doesNotMatch(source,/wal_checkpoint\(FULL\)/);
   assert.doesNotMatch(source,/DELETE\s+FROM|UPDATE\s+\w+\s+SET|INSERT\s+INTO/i);
   assert.doesNotMatch(source,/resetAppState|executePurge|永久清除/);
 });
