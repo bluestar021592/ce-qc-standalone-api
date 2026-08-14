@@ -1,14 +1,15 @@
 (function installAsyncPurgeUiV105(global){
   if(global.__CE_QC_V105_ASYNC_PURGE_UI__)return;
-  const VERSION='2026-08-14-v105-async-purge-ui-v2';
+  const VERSION='2026-08-14-v105-async-purge-ui-v3';
   let polling=false;
 
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const elapsedText=ms=>`${Math.max(0,Math.floor(Number(ms||0)/1000))} 秒`;
 
-  function showPreparing(preview,status={}){
+  function progressHtml(status={},mode='PREPARE'){
     const progress=Math.max(0,Math.min(100,Number(status.progress||0)));
-    preview.innerHTML=`<div class="purge-warning"><strong>安全备份正在后台执行</strong><br>${escapeHtml(status.message||'正在准备 SQLite 在线安全备份')}<br><span>已用 ${escapeHtml(elapsedText(status.elapsedMs))} · ${progress}%</span><div style="height:8px;margin-top:10px;border-radius:8px;background:#eef3f8;overflow:hidden"><i style="display:block;height:100%;width:${progress}%;background:#1677ff;transition:width .25s ease"></i></div><small style="display:block;margin-top:8px;color:#6b7f96">页面不会被备份任务锁死；任务完成后会自动进入下一步。</small></div>`;
+    const title=mode==='EXECUTE'?'正在后台安全清空业务数据':'安全备份正在后台执行';
+    return `<div class="purge-warning"><strong>${title}</strong><br>${escapeHtml(status.message||'正在处理')}<br><span>已用 ${escapeHtml(elapsedText(status.elapsedMs))} · ${progress}%</span><div style="height:8px;margin-top:10px;border-radius:8px;background:#eef3f8;overflow:hidden"><i style="display:block;height:100%;width:${progress}%;background:#1677ff;transition:width .25s ease"></i></div><small style="display:block;margin-top:8px;color:#6b7f96">任务在后台执行，网页不会被锁死。</small></div>`;
   }
 
   function showReady(preview,challenge){
@@ -18,18 +19,17 @@
     if(admin)admin.textContent=challenge.administrator||'';
   }
 
-  async function pollJob(pollUrl,preview){
+  async function pollJob(pollUrl,preview,mode='PREPARE'){
     polling=true;
     try{
       for(let attempt=0;attempt<2400;attempt+=1){
-        if(document.getElementById('dataPurgeDialog')?.hidden) await sleep(750);
         const status=await api(pollUrl,{cache:'no-store'});
         if(status.status==='COMPLETED')return status.result;
-        if(status.status==='FAILED')throw new Error(status.error||status.message||'清空前安全备份失败');
-        showPreparing(preview,status);
-        await sleep(750);
+        if(status.status==='FAILED')throw new Error(status.error||status.message||'后台任务失败');
+        if(preview)preview.innerHTML=progressHtml(status,mode);
+        await sleep(mode==='EXECUTE'?500:750);
       }
-      throw new Error('清空前备份任务等待超时，请重新打开数据管理后查看。');
+      throw new Error('后台任务等待超时，请重新打开数据管理查看。');
     }finally{polling=false;}
   }
 
@@ -42,12 +42,10 @@
     document.getElementById('purgeStepTwo').hidden=true;
     dialog.hidden=false;
     purgeChallenge=null;
-    showPreparing(preview,{progress:1,message:'正在提交后台安全备份任务',elapsedMs:0});
+    preview.innerHTML=progressHtml({progress:1,message:'正在提交后台安全备份任务',elapsedMs:0},'PREPARE');
     try{
       const prepared=await api('/api/admin/data-purge/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-      const challenge=prepared?.async&&prepared?.pollUrl
-        ? await pollJob(prepared.pollUrl,preview)
-        : prepared;
+      const challenge=prepared?.async&&prepared?.pollUrl?await pollJob(prepared.pollUrl,preview,'PREPARE'):prepared;
       if(!challenge?.challengeId)throw new Error('清空前备份完成，但未取得有效清空凭证。');
       purgeChallenge=challenge;
       showReady(preview,challenge);
@@ -56,6 +54,29 @@
     }catch(error){
       purgeChallenge=null;
       preview.innerHTML=`<div class="purge-error">无法开始清空：${escapeHtml(error.message||String(error))}</div>`;
+    }
+  };
+
+  global.executeDataPurge=async function v105ExecuteDataPurge(){
+    if(!purgeChallenge?.challengeId||polling)return;
+    const button=document.getElementById('purgeExecuteButton');
+    const preview=document.getElementById('purgePreview');
+    if(button)button.disabled=true;
+    try{
+      const submitted=await api('/api/admin/data-purge/execute',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          challengeId:purgeChallenge.challengeId,
+          phrase:document.getElementById('purgePhrase').value,
+          backupConfirmed:document.getElementById('purgeBackupConfirmed').checked
+        })
+      });
+      const result=submitted?.async&&submitted?.pollUrl?await pollJob(submitted.pollUrl,preview,'EXECUTE'):submitted;
+      await applyCompletedPurge(result);
+    }catch(error){
+      if(preview)preview.innerHTML=`<div class="purge-error">清空失败：${escapeHtml(error.message||String(error))}</div>`;
+      if(button)button.disabled=false;
     }
   };
 
