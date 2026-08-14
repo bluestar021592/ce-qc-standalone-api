@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-13-v90-fast-dashboard-normalized-read-v2';
+const PATCH_ID = '2026-08-14-v115-fast-dashboard-air-prefilter-v1';
 const SUMMARY_ROUTE = '/api/v89/instant-dashboard';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 const CACHE_MS = Math.max(5_000, Number(process.env.V90_DASHBOARD_CACHE_MS || 30_000));
@@ -45,7 +45,16 @@ function whppRawTotal(db, reportDate) {
 }
 
 function airCandidatesInWhpp(db, reportDate) {
-  const rows = db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?`).all(reportDate);
+  // CCAF/CEAF markers are rare. Let SQLite discard rows whose JSON text cannot
+  // possibly contain either marker before transferring and JSON.parse-ing them in
+  // Node. The existing exact-value check remains the authority, so false-positive
+  // text matches cannot change the CEAF/WHPP source-truth classification.
+  const rows = db.prepare(`
+    SELECT shipmentCode,rowJson
+    FROM business_daily_parse_rows
+    WHERE businessType='WHPP' AND reportDate=?
+      AND (COALESCE(rowJson,'') LIKE '%CCAF%' OR COALESCE(rowJson,'') LIKE '%CEAF%')
+  `).all(reportDate);
   const out = new Map();
   for (const record of rows) {
     const bill = text(record.shipmentCode).toUpperCase();
