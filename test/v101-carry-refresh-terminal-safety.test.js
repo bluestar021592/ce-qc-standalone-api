@@ -93,6 +93,20 @@ test('managed launcher never uses PowerShell automatic args variable as an expli
   assert.match(launcher,/Update check failed, but startup will continue with the current installed version/);
 });
 
+test('home dashboard cannot hide WHPP when total already includes it',()=>{
+  const guard=read('public/v103-home-whpp-card-guard.js');
+  const injector=read('src/v44WhppUiPatch.js');
+  const syntax=spawnSync(process.execPath,['--check',path.join(root,'public','v103-home-whpp-card-guard.js')],{encoding:'utf8'});
+  assert.equal(syntax.status,0,syntax.stderr||syntax.stdout);
+  assert.match(guard,/const residual=Math\.max\(0,total-sixTotal\)/);
+  assert.match(guard,/WHPP本土/);
+  assert.match(guard,/navigateWhppPage/);
+  assert.match(guard,/占总票数 100\.00%/);
+  const v64=injector.indexOf('v64-whpp-total-kpi-integration.js');
+  const v103=injector.indexOf('v103-home-whpp-card-guard.js');
+  assert.ok(v64>=0 && v103>v64,'V103 guard must run after V64 WHPP integration');
+});
+
 test('managed Windows runtime parses before a desktop candidate can be accepted', { skip: process.platform !== 'win32' }, () => {
   const validator=path.join(root,'tools','CE_QC_Validate_Managed_Runtime.ps1');
   assert.equal(fs.existsSync(validator),true,'managed runtime validator must exist');
