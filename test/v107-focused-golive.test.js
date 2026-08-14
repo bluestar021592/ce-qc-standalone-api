@@ -20,7 +20,7 @@ test('managed desktop launcher remains safe and non-destructive',()=>{
 });
 
 test('server bootstrap and fast runtime files are syntax valid',()=>{
-  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v90FastDashboardReadPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
+  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/carryoverRefreshScheduler.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v90FastDashboardReadPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
 });
 
 test('full purge stays backup first asynchronous and uses fast whole-table reset',()=>{
@@ -60,6 +60,7 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   const lazy=read('public/v108-route-lazy-features.js');
   const injector=read('src/v44WhppUiPatch.js');
   const db=read('src/db.js');
+  const carry=read('src/carryoverRefreshScheduler.js');
   assert.match(render,/v105VisiblePageRender/);
   assert.match(render,/requestIdleCallback/);
   assert.match(nav,/V109_BOOTSTRAP_SUMMARY/);
@@ -114,6 +115,12 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(db,/PRAGMA wal_autocheckpoint = \$\{Math\.round\(SQLITE_WAL_AUTOCHECKPOINT_PAGES\)\}/);
   assert.match(db,/SQLITE_CACHE_KIB \|\| 64 \* 1024/);
   assert.match(db,/SQLITE_MMAP_BYTES \|\| 256 \* 1024 \* 1024/);
+  assert.match(carry,/CARRY_REFRESH_STARTUP_DELAY_MS/);
+  assert.match(carry,/90_000/);
+  assert.match(carry,/Date\.now\(\) < startupNotBefore/);
+  assert.match(carry,/setTimeout\(\(\) => \{ schedulerTick\(\)/);
+  assert.match(carry,/startupDelayMs: CARRY_REFRESH_STARTUP_DELAY_MS/);
+  assert.doesNotMatch(carry,/setTimeout\(\(\) => \{ schedulerTick\(\)[\s\S]{0,160}\}, 5000\)/);
 });
 
 test('update and purge backups verify the recovery copy and sha256 without duplicate source scans',()=>{
