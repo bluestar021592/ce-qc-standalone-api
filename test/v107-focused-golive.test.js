@@ -84,8 +84,12 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(worker,/EXPORT_WORKER_CONCURRENCY/);
   assert.match(worker,/Promise\.all/);
   assert.match(worker,/zlib:\{level:1\}/);
-  assert.match(worker,/EXPORT_PLAN_VERSION/);
-  assert.match(worker,/function completedBusinessCounts/);
+  assert.match(worker,/v118-overlapped-export-planning-v2/);
+  assert.match(worker,/function completedBusinessCounts\(range,requestedTypes=ALL_TYPES\)/);
+  assert.match(worker,/completedBusinessCounts\(range,types\)/);
+  assert.match(worker,/const managementPromise=requested==='ALL'\?createManagementSummary\(range\)/);
+  assert.match(worker,/const files=await runTasks\(tasks,job\.payload\|\|\{\}\)/);
+  assert.match(worker,/const managementFile=await managementPromise/);
   assert.match(worker,/GROUP BY u\.businessType/);
   assert.doesNotMatch(worker,/function completedBusinessCount\(/);
   assert.match(templateExport,/EXPORT_PARTITION_CACHE_VERSION/);
