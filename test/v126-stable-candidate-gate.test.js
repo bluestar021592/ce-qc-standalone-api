@@ -15,11 +15,11 @@ const syntax=p=>{
 test('candidate runtime files are syntax valid',()=>{
   for(const file of [
     'bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js',
-    'src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js',
+    'src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/v133ClosureRatePatch.js',
     'scripts/CE_QC_PreUpdate_Backup.mjs','scripts/CE_QC_PurgeDeleteWorker.mjs',
     'public/v125-local-api-resilience.js','public/v104-fast-purge-ui.js',
     'public/v108-route-lazy-features.js','public/v105-fast-render.js',
-    'public/v103-home-whpp-card-guard.js','public/v132-whpp-seven-business-fast.js'
+    'public/v103-home-whpp-card-guard.js','public/v132-whpp-seven-business-fast.js','public/v133-closure-rate.js'
   ]) syntax(file);
 });
 
@@ -130,9 +130,29 @@ test('V132 makes WHPP fast and refuses false seven-business completion',()=>{
   assert.match(ui,/系统不会把它误报为七业务处理完成/);
   assert.match(ui,/global\.runUnified=\(\)=>runSeven\('start'\)/);
   assert.match(ui,/global\.resumeUnified=\(\)=>runSeven\('resume'\)/);
-  assert.match(injector,/v132-whpp-fast-seven-business-v19/);
+  assert.match(injector,/v133-all-board-closure-rate-v20/);
   assert.match(injector,/v132-whpp-seven-business-fast\.js\?v=20260814-1/);
   assert.doesNotMatch(injector,/v90-instant-whpp-navigation\.js/);
+});
+
+test('V133 adds the same closure-rate definition to home and all seven business boards',()=>{
+  const backend=read('src/v133ClosureRatePatch.js');
+  const ui=read('public/v133-closure-rate.js');
+  const injector=read('src/v44WhppUiPatch.js');
+  assert.match(backend,/v133-unified-closure-rate-v1/);
+  assert.match(backend,/\/api\/v133\/closure-summary/);
+  assert.match(backend,/carryover_open_items/);
+  assert.match(backend,/WHPP/);
+  assert.match(backend,/closureRate:completed \? rate\(closed, row\.total\) : null/);
+  assert.match(backend,/closureRate:allCompleted \? rate\(closed, total\) : null/);
+  assert.match(ui,/v133-unified-closure-rate-v1/);
+  assert.match(ui,/闭环率/);
+  assert.match(ui,/总闭环率/);
+  assert.match(ui,/已闭环 \$\{fmt\(closed\)\} \/ 总票 \$\{fmt\(total\)\}/);
+  assert.match(ui,/const closed=Math\.max\(0,total-unresolved\)/);
+  assert.match(injector,/v133ClosureRatePatch\.js/);
+  assert.match(injector,/v133-closure-rate\.js\?v=20260814-1/);
+  assert.ok(injector.indexOf('v132-whpp-seven-business-fast.js')<injector.indexOf('v133-closure-rate.js'));
 });
 
 test('WHPP total conservation guard remains present after fast render',()=>{
@@ -142,4 +162,5 @@ test('WHPP total conservation guard remains present after fast render',()=>{
   assert.match(guard,/const residual=Math\.max\(0,total-sixTotal\)/);
   assert.ok(injector.indexOf('v105-fast-render.js')<injector.indexOf('v103-home-whpp-card-guard.js'));
   assert.ok(injector.indexOf('v103-home-whpp-card-guard.js')<injector.indexOf('v132-whpp-seven-business-fast.js'));
+  assert.ok(injector.indexOf('v132-whpp-seven-business-fast.js')<injector.indexOf('v133-closure-rate.js'));
 });
