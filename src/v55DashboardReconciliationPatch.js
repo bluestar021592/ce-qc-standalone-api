@@ -1,9 +1,11 @@
 import express from 'express';
 import { loadRangeDashboard } from './rangeDashboardStoreV58.js';
 
-const PATCH_ID='2026-08-11-v61-canonical-drilldown-v1';
+const PATCH_ID='2026-08-14-v105-cached-canonical-drilldown-v2';
 const CCSL_TYPES=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
+const RANGE_CACHE_MS=Math.max(10_000,Number(process.env.V105_DRILLDOWN_RANGE_CACHE_MS||60_000));
+const rangeCache=new Map();
 
 function isoDate(value='') {
   const text=String(value||'').trim().slice(0,10);
@@ -14,6 +16,21 @@ function normalizeType(value='') {
   const type=String(value||'').trim().toUpperCase().replace(/\s+/g,'');
   if(type==='CCSL'||type==='SHOPEE'||CCSL_TYPES.has(type)||SHOPEE_TYPES.has(type))return type;
   return 'CCSL';
+}
+
+function cachedRange(fromDate,toDate) {
+  const key=`${fromDate}|${toDate}`;
+  const now=Date.now();
+  const hit=rangeCache.get(key);
+  if(hit&&now-hit.at<RANGE_CACHE_MS)return hit.value;
+  const value=loadRangeDashboard(fromDate,toDate);
+  rangeCache.set(key,{at:now,value});
+  while(rangeCache.size>12){
+    const first=rangeCache.keys().next().value;
+    if(first===undefined)break;
+    rangeCache.delete(first);
+  }
+  return value;
 }
 
 function pickState(range,type) {
@@ -64,6 +81,7 @@ function summaryValueForTab(summary={},key='') {
 }
 
 function metricDetail(req,res) {
+  const startedAt=Date.now();
   try {
     const toDate=isoDate(req.query.to||req.query.reportDate);
     const fromDate=isoDate(req.query.from)||toDate;
@@ -71,11 +89,7 @@ function metricDetail(req,res) {
 
     const type=normalizeType(req.query.businessType||'CCSL');
     const key=normalizeDetailKey(type,req.query.tab||'allData');
-
-    // Canonical drill-down contract: the visible card summary and clicked rows
-    // come from the same V58 range object in the same request. V61 uses a new,
-    // unambiguous public route so no legacy metric-detail handler can shadow it.
-    const range=loadRangeDashboard(fromDate,toDate);
+    const range=cachedRange(fromDate,toDate);
     const state=pickState(range,type);
     if(!state)return res.status(404).json({ok:false,patchId:PATCH_ID,error:`未找到${type}看板状态`});
 
@@ -87,11 +101,12 @@ function metricDetail(req,res) {
     const start=(safePage-1)*safeSize;
     const total=rows.length;
 
-    res.setHeader('Cache-Control','no-store');
+    res.setHeader('Cache-Control','private, max-age=10');
+    res.setHeader('Server-Timing',`v105-detail;dur=${Date.now()-startedAt}`);
     res.json({
       ok:true,
       patchId:PATCH_ID,
-      source:'V61_CANONICAL_DRILLDOWN',
+      source:'V105_CACHED_CANONICAL_DRILLDOWN',
       businessType:type,
       fromDate,
       toDate,
@@ -107,32 +122,34 @@ function metricDetail(req,res) {
       rows:rows.slice(start,start+safeSize)
     });
   } catch(error) {
-    console.error('[V61][METRIC_DETAIL]',error);
+    console.error('[V105][METRIC_DETAIL]',error);
     res.status(500).json({ok:false,patchId:PATCH_ID,error:error.message||String(error)});
   }
 }
 
 function reconciliation(req,res) {
+  const startedAt=Date.now();
   try {
     const toDate=isoDate(req.query.to||req.query.reportDate);
     const fromDate=isoDate(req.query.from)||toDate;
     if(!fromDate||!toDate||fromDate>toDate)return res.status(400).json({ok:false,patchId:PATCH_ID,error:'日期范围无效'});
-    const range=loadRangeDashboard(fromDate,toDate);
+    const range=cachedRange(fromDate,toDate);
     const summary={};
     for(const [type,state] of Object.entries(range.states||{}))summary[type]=state?.v55Summary||state?.dashboard?.v55Summary||{};
     summary.CCSL=range.aggregates?.CCSL?.v55Summary||range.aggregates?.CCSL?.dashboard?.v55Summary||{};
     summary.SHOPEE=range.aggregates?.SHOPEE?.v55Summary||range.aggregates?.SHOPEE?.dashboard?.v55Summary||{};
-    res.setHeader('Cache-Control','no-store');
-    res.json({ok:true,patchId:PATCH_ID,source:'V61_CANONICAL_DRILLDOWN',fromDate,toDate,summary});
+    res.setHeader('Cache-Control','private, max-age=10');
+    res.setHeader('Server-Timing',`v105-reconciliation;dur=${Date.now()-startedAt}`);
+    res.json({ok:true,patchId:PATCH_ID,source:'V105_CACHED_CANONICAL_DRILLDOWN',fromDate,toDate,summary});
   } catch(error) {
-    console.error('[V61][RECONCILIATION]',error);
+    console.error('[V105][RECONCILIATION]',error);
     res.status(500).json({ok:false,patchId:PATCH_ID,error:error.message||String(error)});
   }
 }
 
 let installed=false;
 const previousListen=express.application.listen;
-express.application.listen=function v55DashboardReconciliationListen(...args){
+express.application.listen=function v105DashboardReconciliationListen(...args){
   if(!installed){
     installed=true;
     this.get('/api/v61/metric-detail',metricDetail);
@@ -142,4 +159,5 @@ express.application.listen=function v55DashboardReconciliationListen(...args){
   return previousListen.apply(this,args);
 };
 
+export function inspectV105RangeCache(){return {size:rangeCache.size,ttlMs:RANGE_CACHE_MS};}
 export const V55_DASHBOARD_RECONCILIATION_PATCH_ID=PATCH_ID;
