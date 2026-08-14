@@ -15,7 +15,7 @@ const LARGE_BUSINESS_THRESHOLD=Math.max(20000,Number(process.env.EXPORT_SPLIT_TH
 const PART_DAYS=Math.max(1,Math.min(14,Number(process.env.EXPORT_PART_DAYS||7)));
 const CHILD_HEAP_MB=Math.max(1024,Number(process.env.EXPORT_BUSINESS_HEAP_MB||2048));
 const CONCURRENCY=Math.max(1,Math.min(3,Number(process.env.EXPORT_WORKER_CONCURRENCY||2)));
-const EXPORT_PLAN_VERSION='2026-08-14-v112-grouped-export-planning-v1';
+const EXPORT_PLAN_VERSION='2026-08-14-v118-overlapped-export-planning-v2';
 
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
@@ -56,21 +56,27 @@ function splitRange(range,partDays=PART_DAYS){
   while(from<=range.to){const tentative=addDays(from,partDays-1);const to=tentative<range.to?tentative:range.to;result.push({from,to,key:`${from}_${to}`});from=addDays(to,1);}
   return result;
 }
+function placeholders(size){return Array.from({length:size},()=>'?').join(',');}
 
-function completedBusinessCounts(range){
+function completedBusinessCounts(range,requestedTypes=ALL_TYPES){
   const counts=Object.fromEntries(ALL_TYPES.map(type=>[type,0]));
-  const rows=getDb().prepare(`
-    SELECT u.businessType,COUNT(*) AS count
-    FROM unified_import_rows u
-    INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId
-    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-    WHERE b.status='VALID' AND s.status='COMPLETED'
-      AND b.reportDate BETWEEN ? AND ?
-      AND u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
-    GROUP BY u.businessType
-  `).all(range.from,range.to);
-  for(const row of rows){if(Object.hasOwn(counts,row.businessType))counts[row.businessType]=Number(row.count||0);}
-  counts.WHPP=countCompletedWhppRows(range.from,range.to);
+  const requested=new Set((requestedTypes||ALL_TYPES).map(type=>String(type||'').toUpperCase()));
+  const unifiedWanted=UNIFIED_TYPES.filter(type=>requested.has(type));
+  if(unifiedWanted.length){
+    const marks=placeholders(unifiedWanted.length);
+    const rows=getDb().prepare(`
+      SELECT u.businessType,COUNT(*) AS count
+      FROM unified_import_rows u
+      INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId
+      INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+      WHERE b.status='VALID' AND s.status='COMPLETED'
+        AND b.reportDate BETWEEN ? AND ?
+        AND u.businessType IN (${marks})
+      GROUP BY u.businessType
+    `).all(range.from,range.to,...unifiedWanted);
+    for(const row of rows){if(Object.hasOwn(counts,row.businessType))counts[row.businessType]=Number(row.count||0);}
+  }
+  if(requested.has('WHPP'))counts.WHPP=countCompletedWhppRows(range.from,range.to);
   return counts;
 }
 
@@ -134,13 +140,19 @@ async function main(){
   const types=requested==='ALL'?[...ALL_TYPES]:ALL_TYPES.includes(requested)?[requested]:[];
   if(!types.length)throw new Error(`不支持的业务板块：${requested}`);
   writeJob({status:'RUNNING',progress:1,range,message:`正在准备 ${range.from} 至 ${range.to} 的${requested==='ALL'?'7业务':'单业务'}后台导出`,exportPlanVersion:EXPORT_PLAN_VERSION});
-  const counts=completedBusinessCounts(range);
+  const counts=completedBusinessCounts(range,types);
   const tasks=[];
   for(const type of types){const count=Number(counts[type]||0);if(!count)continue;const parts=count>LARGE_BUSINESS_THRESHOLD?splitRange(range):[range];for(let i=0;i<parts.length;i+=1)tasks.push({type,range:parts[i],partIndex:i+1,partCount:parts.length});}
   if(!tasks.length)throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的数据。`);
+
+  // Management summary is independent of the business workbooks. Start it before
+  // child workers and let its small grouped read/write overlap with the expensive
+  // per-business Excel generation instead of serially adding to total export time.
+  const managementPromise=requested==='ALL'?createManagementSummary(range):Promise.resolve('');
   const files=await runTasks(tasks,job.payload||{});
-  let managementFile='';
-  if(requested==='ALL'){writeJob({status:'RUNNING',progress:93,message:'正在生成7业务轻量管理汇总'});managementFile=await createManagementSummary(range);files.unshift(managementFile);}
+  const managementFile=await managementPromise;
+  if(managementFile)files.unshift(managementFile);
+
   let finalFile=files[0]||'';
   if(files.length>1){writeJob({status:'RUNNING',progress:96,message:'正在快速打包全部报表文件'});finalFile=path.join(getRuntimeConfig().exportsDir,`CE_QC_${range.key}_${requested}_后台导出.zip`);await zipFiles(files,finalFile);}
   const allFiles=[...new Set([...files,finalFile].filter(Boolean))].sort((a,b)=>path.basename(a).localeCompare(path.basename(b),'zh-CN'));
