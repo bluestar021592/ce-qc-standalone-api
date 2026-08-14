@@ -6,16 +6,19 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-14-v105-export-dedup-cache-v2';
+const PATCH_ID = '2026-08-14-v119-export-active-index-v1';
 const PREPARE_PATH = '/api/export-period/prepare';
 const STATUS_PATH = '/api/v84/export-job/:jobId';
 const RECENT_REUSE_MS = Math.max(5 * 60_000, Number(process.env.EXPORT_RESULT_REUSE_MS || 30 * 60_000));
 const MAX_JOB_SCAN = Math.max(20, Math.min(300, Number(process.env.EXPORT_JOB_SCAN_LIMIT || 100)));
+const JOB_FILE_INDEX_CACHE_MS = Math.max(1000, Math.min(15_000, Number(process.env.EXPORT_JOB_FILE_INDEX_CACHE_MS || 5000)));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workerFile = path.join(__dirname, 'v84ExportJobWorker.js');
 const originalPost = express.application.post;
 const originalGet = express.application.get;
 let installed = false;
+let jobFileIndexCache = { at: 0, files: [] };
+const activeJobs = new Map();
 
 function jobsDir() {
   const dir = path.join(getRuntimeConfig().dataDir, 'export_jobs');
@@ -63,6 +66,21 @@ function payloadKey(payload) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
+function activeSlot(key, requester = '') {
+  return `${String(key || '')}|${String(requester || '')}`;
+}
+
+function rememberActive(job = {}) {
+  if (!job?.jobId || !job?.payloadKey) return;
+  activeJobs.set(activeSlot(job.payloadKey, job.requestedBy || ''), job.jobId);
+}
+
+function forgetActive(job = {}) {
+  if (!job?.payloadKey) return;
+  const slot = activeSlot(job.payloadKey, job.requestedBy || '');
+  if (!job.jobId || activeJobs.get(slot) === job.jobId) activeJobs.delete(slot);
+}
+
 function jobFilesExist(job = {}) {
   if (!Array.isArray(job.files) || !job.files.length) return false;
   const exportDir = getRuntimeConfig().exportsDir;
@@ -72,7 +90,9 @@ function jobFilesExist(job = {}) {
   });
 }
 
-function recentJobs() {
+function recentJobFiles() {
+  const now = Date.now();
+  if (jobFileIndexCache.files.length && now - jobFileIndexCache.at < JOB_FILE_INDEX_CACHE_MS) return jobFileIndexCache.files;
   let files = [];
   try {
     files = fs.readdirSync(jobsDir(), { withFileTypes: true })
@@ -85,20 +105,45 @@ function recentJobs() {
       })
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
       .slice(0, MAX_JOB_SCAN);
-  } catch { return []; }
+  } catch { files = []; }
+  jobFileIndexCache = { at: now, files };
+  return files;
+}
+
+function recentJobs() {
   const jobs = [];
-  for (const item of files) {
+  // The file-name/stat index may be cached briefly, but job JSON is deliberately
+  // re-read every time because detached workers update status/progress in place.
+  for (const item of recentJobFiles()) {
     try { jobs.push(JSON.parse(fs.readFileSync(item.file, 'utf8'))); } catch {}
   }
   return jobs;
 }
 
+function activeReusableJob(key, requester = '') {
+  const id = activeJobs.get(activeSlot(key, requester));
+  if (!id) return null;
+  const job = readJob(id);
+  if (!job || String(job.payloadKey || '') !== key || String(job.requestedBy || '') !== String(requester || '')) {
+    activeJobs.delete(activeSlot(key, requester));
+    return null;
+  }
+  if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) return { job, reused: 'ACTIVE' };
+  forgetActive(job);
+  return null;
+}
+
 function reusableJob(key, requester = '') {
+  const active = activeReusableJob(key, requester);
+  if (active) return active;
   const now = Date.now();
   for (const job of recentJobs()) {
     if (String(job.payloadKey || '') !== key) continue;
     if (requester && job.requestedBy && String(job.requestedBy) !== requester) continue;
-    if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) return { job, reused: 'ACTIVE' };
+    if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) {
+      rememberActive(job);
+      return { job, reused: 'ACTIVE' };
+    }
     if (String(job.status || '') === 'COMPLETED') {
       const completedAt = Date.parse(job.completedAt || job.updatedAt || '');
       if (Number.isFinite(completedAt) && now - completedAt <= RECENT_REUSE_MS && jobFilesExist(job)) {
@@ -165,6 +210,8 @@ function enqueueExport(req, res) {
     requestedBy: requester
   };
   writeJsonAtomic(file, job);
+  rememberActive(job);
+  jobFileIndexCache = { at: 0, files: [] };
 
   const child = spawn(process.execPath, ['--max-old-space-size=1536', workerFile, file], {
     cwd: getRuntimeConfig().projectRoot,
@@ -190,6 +237,8 @@ function enqueueExport(req, res) {
 function exportStatus(req, res) {
   const job = readJob(req.params.jobId);
   if (!job) return res.status(404).json({ ok: false, error: '导出任务不存在或已过期。' });
+  if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) rememberActive(job);
+  else forgetActive(job);
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true, ...job });
 }
@@ -204,4 +253,5 @@ express.application.post = function v84AsyncExportRoute(...args) {
   return this;
 };
 
+export function inspectV119ExportIndex(){return {activeJobs:activeJobs.size,fileIndexAgeMs:jobFileIndexCache.at?Date.now()-jobFileIndexCache.at:null,fileCount:jobFileIndexCache.files.length,ttlMs:JOB_FILE_INDEX_CACHE_MS};}
 export const V84_ASYNC_EXPORT_PATCH_ID = PATCH_ID;
