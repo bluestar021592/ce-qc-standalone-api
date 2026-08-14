@@ -22,15 +22,17 @@ test('current responsive runtime and purge files are syntax valid',()=>{
   for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/v105AsyncPurgePatch.js','src/v44WhppUiPatch.js','public/v104-fast-purge-ui.js','public/v108-route-lazy-features.js','public/v125-local-api-resilience.js'])syntax(file);
 });
 
-test('V128 purge submit and execute paths stay responsive',()=>{
+test('V130 purge submit and execute paths recover delayed completed jobs',()=>{
   const patch=read('src/v105AsyncPurgePatch.js');
   const purge=read('src/dataPurge.js');
   const ui=read('public/v104-fast-purge-ui.js');
-  assert.match(patch,/v128-purge-submit-flush-v1/);
-  assert.match(patch,/JOB_START_DELAY_MS/);
-  assert.match(patch,/ACTIVE_STATUS_PATH/);
-  assert.match(ui,/v128-responsive-purge-ui-v3/);
-  assert.match(ui,/recoverActiveJob/);
+  assert.match(patch,/v130-purge-job-recovery-v1/);
+  assert.match(patch,/RECOVER_STATUS_PATH/);
+  assert.match(patch,/function recentJobFor/);
+  assert.match(ui,/v130-resilient-purge-submit-v4/);
+  assert.match(ui,/recoverRecentJob/);
+  assert.match(ui,/signal is aborted\|aborted without reason/);
+  assert.match(ui,/Promise\.race\(\[submitPromise,recoveryPromise\]\)/);
   assert.match(purge,/FAST_TABLE_DELETE_FK_GUARDED/);
   assert.match(purge,/integrityCheck:'TRANSACTION_AND_SCHEMA'/);
   assert.doesNotMatch(purge,/wal_checkpoint\(TRUNCATE\)/);
@@ -41,8 +43,8 @@ test('request coalescing lazy loading and V125 resilience remain enabled',()=>{
   const lazy=read('public/v108-route-lazy-features.js');
   const resilience=read('public/v125-local-api-resilience.js');
   assert.match(req,/const recent = new Map\(\)/);
-  assert.match(lazy,/v108-route-lazy-features-v7/);
-  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-7/);
+  assert.match(lazy,/v108-route-lazy-features-v8/);
+  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-8/);
   assert.match(resilience,/v125-local-api-resilience-v1/);
   assert.match(resilience,/\['GET','HEAD'\]\.includes\(method\)/);
 });
