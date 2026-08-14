@@ -139,12 +139,12 @@ test('V133 adds the same closure-rate definition to home and all seven business 
   const backend=read('src/v133ClosureRatePatch.js');
   const ui=read('public/v133-closure-rate.js');
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(backend,/v133-unified-closure-rate-v1/);
+  assert.match(backend,/v133-unified-closure-rate-v2/);
   assert.match(backend,/\/api\/v133\/closure-summary/);
   assert.match(backend,/carryover_open_items/);
   assert.match(backend,/WHPP/);
-  assert.match(backend,/closureRate:completed \? rate\(closed, row\.total\) : null/);
-  assert.match(backend,/closureRate:allCompleted \? rate\(closed, total\) : null/);
+  assert.match(backend,/businessTotal > 0 && completed \? rate\(closed, businessTotal\) : null/);
+  assert.match(backend,/total > 0 && allCompleted \? rate\(closed,total\) : null/);
   assert.match(ui,/v133-unified-closure-rate-v1/);
   assert.match(ui,/闭环率/);
   assert.match(ui,/总闭环率/);
