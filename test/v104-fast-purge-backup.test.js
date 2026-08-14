@@ -60,7 +60,7 @@ test('dead dashboard-cache worker lease is cleared immediately instead of delayi
   assert.doesNotMatch(source,/timeoutMs = 15 \* 60_000/);
 });
 
-test('purge dialog backgrounds both backup preparation and destructive execution',()=>{
+test('one-click purge backgrounds both backup and execution without a second user action',()=>{
   const backend=read('src/v105AsyncPurgePatch.js');
   const uiRelative='public/v104-fast-purge-ui.js';
   const ui=read(uiRelative);
@@ -72,17 +72,18 @@ test('purge dialog backgrounds both backup preparation and destructive execution
   assert.match(backend,/EXECUTE_PATH = '\/api\/admin\/data-purge\/execute'/);
   assert.match(backend,/setImmediate\(async \(\) =>/);
   assert.match(backend,/runLegacyHandler\(legacyHandler, req\)/);
-  assert.match(ui,/安全备份正在后台执行/);
-  assert.match(ui,/正在后台安全清空业务数据/);
-  assert.match(ui,/pollJob\(prepared\.pollUrl,preview,'PREPARE'\)/);
+  assert.match(ui,/executeChallengeAutomatically\(challenge,preview\)/);
+  assert.match(ui,/安全倒计时 \$\{remaining\} 秒后自动清空业务数据，无需再次点击/);
+  assert.match(ui,/phrase:'永久清除全部业务数据'/);
+  assert.match(ui,/backupConfirmed:true/);
   assert.match(ui,/pollJob\(submitted\.pollUrl,preview,'EXECUTE'\)/);
-  assert.match(ui,/global\.executeDataPurge/);
   assert.match(ui,/applyCompletedPurge\(result\)/);
   assert.doesNotMatch(ui,/大型数据库可能需要几分钟/);
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/v104-fast-purge-ui\.js\?v=20260814-3/);
+  assert.match(injector,/v104-fast-purge-ui\.js\?v=20260814-4/);
   assert.match(injector,/v105-fast-render\.js\?v=20260814-2/);
   assert.match(injector,/v105AsyncPurgePatch\.js/);
+  assert.ok(injector.indexOf('v105-fast-render.js')<injector.indexOf('v103-home-whpp-card-guard.js'));
 });
 
 test('visible page render avoids hidden-page work on every refresh',()=>{
