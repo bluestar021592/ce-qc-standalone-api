@@ -28,7 +28,9 @@ test('go-live fresh start clears business history but preserves schema and verif
     db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES
       ('carry_refresh_last_success_at','2026-08-01T02:00:00.000Z','2026-08-01T02:00:00.000Z'),
       ('carry_refresh_last_rollover_date','2026-08-01','2026-08-01T02:00:00.000Z'),
-      ('carry_refresh_last_error','old refresh error','2026-08-01T02:00:00.000Z')`).run();
+      ('carry_refresh_last_error','old refresh error','2026-08-01T02:00:00.000Z'),
+      ('dashboard_cache_worker_active','stale-worker','2026-08-01T02:00:00.000Z'),
+      ('dashboard_cache_worker_active_until','1','2026-08-01T02:00:00.000Z')`).run();
 
     const schemaBefore = Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0);
     const userVersionBefore = Number(db.prepare('PRAGMA user_version').get()?.user_version || 0);
@@ -39,7 +41,7 @@ test('go-live fresh start clears business history but preserves schema and verif
     assert.equal(challenge.backup.integrity, 'ok');
     assert.ok(fs.existsSync(challenge.backup.path));
     const blockUntil = Number(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_block_until'").get()?.value || 0);
-    assert.ok(blockUntil > Date.now(), 'purge challenge must block automatic carry refresh while backup/confirmation is active');
+    assert.ok(blockUntil > Date.now(), 'purge challenge must block automatic carry/cache maintenance while backup/confirmation is active');
     const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(challenge.backup.path), 'manifest.json'), 'utf8'));
     assert.equal(manifest.migrationVersion, 18);
 
@@ -57,7 +59,7 @@ test('go-live fresh start clears business history but preserves schema and verif
     assert.equal(Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0), 18);
     assert.equal(Number(db.prepare('PRAGMA user_version').get()?.user_version || 0), 18);
     assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM app_meta WHERE key LIKE 'carry_refresh_%'").get()?.count || 0), 0);
-    assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM app_meta WHERE key='data_purge_block_until'").get()?.count || 0), 0);
+    assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM app_meta WHERE key IN ('data_purge_block_until','dashboard_cache_worker_active','dashboard_cache_worker_active_until')").get()?.count || 0), 0);
     assert.equal(db.prepare('PRAGMA integrity_check').get()?.integrity_check, 'ok');
     assert.ok(db.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get()?.value);
     assert.ok(Number(db.prepare('SELECT COUNT(*) count FROM backup_records').get()?.count || 0) >= 1);
