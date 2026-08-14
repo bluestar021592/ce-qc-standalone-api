@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES, resetAppState } from './store.js';
 import { recordBackup } from './backup.js';
+import { schedulerStateForTests } from './carryoverRefreshScheduler.js';
 
 export const PURGE_PHRASE = '永久清除全部业务数据';
 const PURGE_BLOCK_KEY = 'data_purge_block_until';
@@ -13,10 +14,16 @@ const challenges = new Map();
 
 export async function createPurgeChallenge(user = {}, options = {}) {
   const db = getDb();
-  const createdAt = Date.now();
-  const expiresAt = createdAt + 10 * 60_000;
-  setPurgeBlock(db, expiresAt);
+  // Block any NEW automatic carry refresh immediately, then wait for a refresh
+  // that may already have been in-flight before the administrator clicked clear.
+  // JavaScript execution is single-threaded up to the first await, so this closes
+  // the start-race without introducing another database writer.
+  setPurgeBlock(db, Date.now() + 20 * 60_000);
   try {
+    await waitForCarryRefreshIdle();
+    const createdAt = Date.now();
+    const expiresAt = createdAt + 10 * 60_000;
+    setPurgeBlock(db, expiresAt);
     reconcileRunLocks(db, options.activeRunIds);
     assertIntegrity(db);
     const counts = tableCounts(db);
@@ -47,18 +54,21 @@ export async function executePurge({ challengeId, phrase, backupConfirmed, user 
   if (String(phrase || '') !== PURGE_PHRASE) throw new Error(`请输入完整确认短语：${PURGE_PHRASE}`);
 
   const db = getDb();
+  // Challenge creation already waited for the carry scheduler and holds the
+  // purge block. Recheck before the destructive transaction for defense in depth.
+  await waitForCarryRefreshIdle();
   reconcileRunLocks(db, activeRunIds);
   await verifyBackup(challenge.backup);
   const before = tableCounts(db);
   resetAppState({ logs: [] });
   clearBusinessRuntimeMeta(db);
   const after = tableCounts(db);
-  clearRegenerableFiles();
+  const fileCleanupWarnings = clearRegenerableFiles();
   assertIntegrity(db);
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   if (String(process.env.VACUUM_AFTER_PURGE || '').toLowerCase() === 'true') db.exec('VACUUM');
   challenges.delete(String(challengeId || ''));
-  return { backup: challenge.backup, before, after, completedAt: nowIso(), event: 'DATA_RESET', integrity: 'ok', walCheckpoint: 'TRUNCATE' };
+  return { backup: challenge.backup, before, after, completedAt: nowIso(), event: 'DATA_RESET', integrity: 'ok', walCheckpoint: 'TRUNCATE', fileCleanupWarnings };
 }
 
 export function getPurgeCounts() { return tableCounts(getDb()); }
@@ -117,6 +127,16 @@ function setPurgeBlock(db, expiresAt) {
 }
 function clearPurgeBlock(db) { db.prepare('DELETE FROM app_meta WHERE key=?').run(PURGE_BLOCK_KEY); }
 
+async function waitForCarryRefreshIdle(timeoutMs = 15 * 60_000) {
+  const started = Date.now();
+  while (schedulerStateForTests().inFlight) {
+    if (Date.now() - started >= timeoutMs) {
+      throw new Error('遗留异常自动刷新长时间未结束，系统已安全停止本次清除，没有修改业务数据。');
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+}
+
 function clearBusinessRuntimeMeta(db) {
   // Fresh-start must not inherit a prior data set's dynamic carry-refresh clock,
   // and the transient purge block must disappear immediately after completion.
@@ -162,4 +182,16 @@ function assertFreeSpace(targetDir, sourceSize) {
   if (available < required) throw new Error(`备份磁盘空间不足：至少需要 ${required} 字节，当前可用 ${available} 字节。`);
 }
 function localStamp() { const d = new Date(); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; }
-function clearRegenerableFiles() { const cfg = getRuntimeConfig(); for (const dir of [cfg.exportsDir, cfg.importsDir]) { if (!fs.existsSync(dir)) continue; for (const entry of fs.readdirSync(dir)) fs.rmSync(path.join(dir, entry), { recursive: true, force: true }); } fs.mkdirSync(cfg.longJsonExportsDir, { recursive: true }); }
+function clearRegenerableFiles() {
+  const cfg = getRuntimeConfig();
+  const warnings = [];
+  for (const dir of [cfg.exportsDir, cfg.importsDir]) {
+    if (!fs.existsSync(dir)) continue;
+    for (const entry of fs.readdirSync(dir)) {
+      try { fs.rmSync(path.join(dir, entry), { recursive: true, force: true }); }
+      catch (error) { warnings.push(`${entry}: ${error?.message || String(error)}`); }
+    }
+  }
+  fs.mkdirSync(cfg.longJsonExportsDir, { recursive: true });
+  return warnings;
+}
