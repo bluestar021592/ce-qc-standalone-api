@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
+import path from 'path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -15,7 +15,7 @@ const syntax=p=>{
 test('candidate runtime files are syntax valid',()=>{
   for(const file of [
     'bootstrap.js','server.js','src/dataPurge.js','src/v105AsyncPurgePatch.js',
-    'src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/v133ClosureRatePatch.js',
+    'src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/v133ClosureRatePatch.js','src/v134WhppRunSupervisorPatch.js',
     'scripts/CE_QC_PreUpdate_Backup.mjs','scripts/CE_QC_PurgeDeleteWorker.mjs',
     'public/v125-local-api-resilience.js','public/v104-fast-purge-ui.js',
     'public/v108-route-lazy-features.js','public/v105-fast-render.js',
@@ -130,7 +130,7 @@ test('V132 makes WHPP fast and refuses false seven-business completion',()=>{
   assert.match(ui,/系统不会把它误报为七业务处理完成/);
   assert.match(ui,/global\.runUnified=\(\)=>runSeven\('start'\)/);
   assert.match(ui,/global\.resumeUnified=\(\)=>runSeven\('resume'\)/);
-  assert.match(injector,/v133-all-board-closure-rate-v20/);
+  assert.match(injector,/v134-whpp-run-supervisor-v21/);
   assert.match(injector,/v132-whpp-seven-business-fast\.js\?v=20260814-1/);
   assert.doesNotMatch(injector,/v90-instant-whpp-navigation\.js/);
 });
@@ -153,6 +153,24 @@ test('V133 adds the same closure-rate definition to home and all seven business 
   assert.match(injector,/v133ClosureRatePatch\.js/);
   assert.match(injector,/v133-closure-rate\.js\?v=20260814-1/);
   assert.ok(injector.indexOf('v132-whpp-seven-business-fast.js')<injector.indexOf('v133-closure-rate.js'));
+});
+
+test('V134 supervises WHPP asynchronously and recovers stale persisted running state',()=>{
+  const supervisor=read('src/v134WhppRunSupervisorPatch.js');
+  const injector=read('src/v44WhppUiPatch.js');
+  assert.match(supervisor,/v134-whpp-run-supervisor-v1/);
+  assert.match(supervisor,/res\.status\(202\)\.json/);
+  assert.match(supervisor,/runtimePromise/);
+  assert.match(supervisor,/runtimeActive/);
+  assert.match(supervisor,/const stale = Boolean\(persisted\.running && !runtimeActive\)/);
+  assert.match(supervisor,/phase: 'WHPP等待断点恢复'/);
+  assert.match(supervisor,/WHPP_REQUEST_TIMEOUT_MS \|\| 20_000/);
+  assert.match(supervisor,/client\.http\.defaults\.timeout = WHPP_REQUEST_TIMEOUT_MS/);
+  assert.match(supervisor,/delete copy\.rawJson/);
+  assert.match(supervisor,/trackResults: \[\]/);
+  assert.match(supervisor,/WHPP订单扫描\\s\+\(\\d\+\)-\(\\d\+\)/);
+  assert.match(injector,/v134WhppRunSupervisorPatch\.js/);
+  assert.match(injector,/v134-whpp-run-supervisor-v21/);
 });
 
 test('WHPP total conservation guard remains present after fast render',()=>{
