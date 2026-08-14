@@ -20,7 +20,7 @@ test('managed desktop launcher remains safe and non-destructive',()=>{
 });
 
 test('server bootstrap and fast runtime files are syntax valid',()=>{
-  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/carryoverRefreshScheduler.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v90FastDashboardReadPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
+  for(const file of ['bootstrap.js','server.js','src/db.js','src/dataPurge.js','src/carryoverRefreshScheduler.js','src/v105AsyncPurgePatch.js','src/v84AsyncExportPatch.js','src/v84ExportJobWorker.js','src/v84ExportBusinessWorker.js','src/shopeeTemplateExporter.js','src/v55DashboardReconciliationPatch.js','src/v90FastDashboardReadPatch.js','src/v108PerformanceIndexPatch.js','src/v108PerformanceIndexWorker.js','src/v44WhppUiPatch.js','src/v89StaticAssetCachePatch.js','scripts/CE_QC_PreUpdate_Backup.mjs','public/v84-async-export-ui.js','public/v104-fast-purge-ui.js','public/v105-fast-render.js','public/v103-home-whpp-card-guard.js','public/v65-request-coalescing.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','public/v110-drilldown-prewarm.js'])syntax(file);
 });
 
 test('full purge stays backup first asynchronous and uses fast whole-table reset',()=>{
@@ -50,6 +50,7 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   const render=read('public/v105-fast-render.js');
   const nav=read('public/v109-instant-business-navigation.js');
   const prewarm=read('public/v110-drilldown-prewarm.js');
+  const exportUi=read('public/v84-async-export-ui.js');
   const detail=read('src/v55DashboardReconciliationPatch.js');
   const fastDashboard=read('src/v90FastDashboardReadPatch.js');
   const exp=read('src/v84AsyncExportPatch.js');
@@ -71,6 +72,13 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(prewarm,/pointerout/);
   assert.match(prewarm,/INTENT_DELAY_MS=320/);
   assert.match(prewarm,/TTL=55_000/);
+  assert.match(exportUi,/v120-adaptive-export-polling-v1/);
+  assert.match(exportUi,/function pollDelay/);
+  assert.match(exportUi,/document\.visibilityState === 'hidden'/);
+  assert.match(exportUi,/unchangedCycles >= 5/);
+  assert.match(exportUi,/return 2500/);
+  assert.match(exportUi,/return 900/);
+  assert.match(exportUi,/function setProgressText/);
   assert.match(detail,/const rangeCache=new Map\(\)/);
   assert.match(fastDashboard,/function airCandidatesInWhpp/);
   assert.match(fastDashboard,/LIKE '%CCAF%'/);
@@ -105,16 +113,18 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(indexes,/idx_v108_business_final_report_type/);
   assert.match(indexes,/DATA_PURGE_ACTIVE/);
   assert.match(indexes,/LARGE_LEGACY_DB_DEFER_UNTIL_FAST_PURGE/);
+  assert.match(lazy,/v108-route-lazy-features-v4/);
+  assert.match(lazy,/v84-async-export-ui\.js\?v=20260814-5/);
   assert.match(lazy,/loadGroup\('reports'\)/);
   assert.match(lazy,/loadGroup\('data'\)/);
   assert.doesNotMatch(lazy,/function warmIdle/);
-  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-3/);
+  assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-4/);
   assert.match(injector,/v109-instant-business-navigation\.js\?v=20260814-1/);
   assert.match(injector,/v110-drilldown-prewarm\.js\?v=20260814-2/);
   assert.match(injector,/let injectedHtml=''/);
   assert.match(injector,/function buildInjectedHtml\(\)/);
   assert.match(injector,/if\(injectedHtml\)return injectedHtml/);
-  assert.match(injector,/inspectV114HtmlCache/);
+  assert.match(injector,/inspectV120HtmlCache/);
   assert.doesNotMatch(injector,/v84-async-export-ui\.js/);
   assert.doesNotMatch(injector,/v104-fast-purge-ui\.js/);
   assert.match(db,/PRAGMA synchronous = NORMAL/);
