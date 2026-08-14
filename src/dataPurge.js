@@ -12,6 +12,8 @@ export const PURGE_PHRASE='永久清除全部业务数据';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const CACHE_WORKER_ACTIVE_KEY='dashboard_cache_worker_active';
 const CACHE_WORKER_ACTIVE_UNTIL_KEY='dashboard_cache_worker_active_until';
+const PURGE_PREPARE_COUNT_MODE='DEFERRED_TO_TRANSACTIONAL_DELETE';
+const PURGE_EXECUTE_COUNT_MODE='DELETE_CHANGESET_EXACT';
 const challenges=new Map();
 
 const FAST_INDEXES=[
@@ -34,14 +36,13 @@ export async function createPurgeChallenge(user={},options={}){
     const expiresAt=createdAt+10*60_000;
     setPurgeBlock(db,expiresAt);
     reconcileRunLocks(db,options.activeRunIds);
-    const counts=tableCounts(db);
-    const verifiedBackup=await createVerifiedPreClearBackup(user.email||'',counts);
+    const verifiedBackup=await createVerifiedPreClearBackup(user.email||'');
     // recordBackup() inside backup creation writes retained metadata. Capture the
     // source fingerprint only after every prepare-stage write is complete.
     const sourceFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
     const challengeId=crypto.randomUUID();
-    challenges.set(challengeId,{email:user.email||'',backup:verifiedBackup,createdAt,expiresAt,counts,sourceFingerprint});
-    return {challengeId,notBefore:new Date(createdAt+5000).toISOString(),expiresAt:new Date(expiresAt).toISOString(),databasePath:getRuntimeConfig().dbFile,counts,administrator:user.email||'',backup:{path:verifiedBackup.filePath,sha256:verifiedBackup.sha256,size:verifiedBackup.size,integrity:verifiedBackup.integrity,method:verifiedBackup.method},deleteScope:['日报及解析行','运单、扫描和轨迹','run/checkpoint/snapshot','carry和POD锁','趋势、缓存、通知及导出文件','遗留动态刷新运行时间戳'],retainedScope:['数据库结构和迁移','用户、角色与系统设置','最新门店白名单','审计日志','清除前备份']};
+    challenges.set(challengeId,{email:user.email||'',backup:verifiedBackup,createdAt,expiresAt,sourceFingerprint,countMode:PURGE_PREPARE_COUNT_MODE});
+    return {challengeId,notBefore:new Date(createdAt+5000).toISOString(),expiresAt:new Date(expiresAt).toISOString(),databasePath:getRuntimeConfig().dbFile,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,administrator:user.email||'',backup:{path:verifiedBackup.filePath,sha256:verifiedBackup.sha256,size:verifiedBackup.size,integrity:verifiedBackup.integrity,method:verifiedBackup.method},deleteScope:['日报及解析行','运单、扫描和轨迹','run/checkpoint/snapshot','carry和POD锁','趋势、缓存、通知及导出文件','遗留动态刷新运行时间戳'],retainedScope:['数据库结构和迁移','用户、角色与系统设置','最新门店白名单','审计日志','清除前备份']};
   }catch(error){clearPurgeBlock(db);throw error;}
 }
 
@@ -57,22 +58,24 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
   reconcileRunLocks(db,activeRunIds);
   verifyPreparedBackupStillPresent(challenge.backup);
   const currentFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
-  const preparedCountsStillExact=sameFingerprint(challenge.sourceFingerprint,currentFingerprint);
-  const before=preparedCountsStillExact?{...(challenge.counts||{})}:tableCounts(db);
-  fastResetBusinessState(db,{logs:[]});
+  if(!sameFingerprint(challenge.sourceFingerprint,currentFingerprint)){
+    challenges.delete(String(challengeId||''));
+    clearPurgeBlock(db);
+    throw new Error('数据库在安全备份后发生变化，已停止清除。请重新开始，系统会先创建包含最新数据的新备份。');
+  }
+  const reset=fastResetBusinessState(db,{logs:[]});
   clearBusinessRuntimeMeta(db);
-  const after=Object.fromEntries(Object.keys(before).map(name=>[name,0]));
   const fileCleanupWarnings=clearRegenerableFiles();
   assertQuickIntegrity(db);
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   if(String(process.env.VACUUM_AFTER_PURGE||'').toLowerCase()==='true')db.exec('VACUUM');
   challenges.delete(String(challengeId||''));
-  return {backup:challenge.backup,before,after,completedAt:nowIso(),event:'DATA_RESET',integrity:'ok',walCheckpoint:'TRUNCATE',fileCleanupWarnings,deleteMode:'FAST_TABLE_DELETE',performanceIndexes:'V108',countSource:preparedCountsStillExact?'PREPARED_EXACT_COUNTS':'RECOUNT_AFTER_DATABASE_CHANGE'};
+  return {backup:challenge.backup,before:reset.before,after:reset.after,completedAt:nowIso(),event:'DATA_RESET',integrity:'ok',walCheckpoint:'TRUNCATE',fileCleanupWarnings,deleteMode:'FAST_TABLE_DELETE',performanceIndexes:'V108',countSource:PURGE_EXECUTE_COUNT_MODE,backupSourceFingerprint:'MATCHED'};
 }
 
 export function getPurgeCounts(){return tableCounts(getDb());}
 
-async function createVerifiedPreClearBackup(adminEmail,counts={}){
+async function createVerifiedPreClearBackup(adminEmail){
   const cfg=getRuntimeConfig();
   const db=getDb();
   const stamp=`${localStamp()}-${crypto.randomUUID().slice(0,8)}`;
@@ -85,7 +88,13 @@ async function createVerifiedPreClearBackup(adminEmail,counts={}){
   // Do not perform a full source quick_check before copying. The verified backup
   // copy is the actual safety artifact used for recovery; if its structural check
   // fails the challenge is rejected and no business row is deleted.
+  const sourceFingerprintBeforeBackup=databaseFingerprint(cfg.dbFile);
   await backup(db,filePath,{rate:1024});
+  const sourceFingerprintAfterBackup=databaseFingerprint(cfg.dbFile);
+  if(!sameFingerprint(sourceFingerprintBeforeBackup,sourceFingerprintAfterBackup)){
+    try{fs.rmSync(dir,{recursive:true,force:true});}catch{}
+    throw new Error('数据库在安全备份期间发生变化，已停止清除。请稍后重新开始。');
+  }
   const backupSize=fs.statSync(filePath).size;
   if(backupSize<=0)throw new Error('备份文件为空，已停止清除。');
 
@@ -94,7 +103,7 @@ async function createVerifiedPreClearBackup(adminEmail,counts={}){
   const stat=fs.statSync(filePath);
   const schemaMeta=Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value||0);
   const pragmaSchema=Number(db.prepare('PRAGMA user_version').get()?.user_version||0);
-  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:verified.integrity,verificationMode:'online-backup+backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:'node-sqlite-online-backup',systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts};
+  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:verified.integrity,verificationMode:'online-backup+stable-source-fingerprint+backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:'node-sqlite-online-backup',systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,sourceStableDuringBackup:true};
   fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
   recordBackup({backupType:'database',fileName:path.basename(filePath),filePath,fileHash:sha256,reason:'before-full-clear'});
   return {directory:dir,filePath,sha256,size:backupSize,mtimeMs:stat.mtimeMs,integrity:verified.integrity,method:'node-sqlite-online-backup',manifestPath:path.join(dir,'manifest.json')};
@@ -134,10 +143,20 @@ function fastResetBusinessState(db,nextState={}){
   const now=nowIso();
   const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name));
   const clearTargets=BUSINESS_DATA_TABLES.filter(name=>existing.has(name));
+  const before={};
+  const after={};
   db.exec('BEGIN IMMEDIATE');
   try{
-    for(const table of clearTargets)db.exec(`DELETE FROM ${table}`);
+    for(const table of clearTargets){
+      const deleted=db.prepare(`DELETE FROM ${table}`).run();
+      before[table]=Number(deleted?.changes||0);
+    }
     for(const [table,sql] of FAST_INDEXES)if(existing.has(table))db.exec(sql);
+    for(const table of clearTargets){
+      const remaining=Number(db.prepare(`SELECT COUNT(*) count FROM ${table}`).get()?.count||0);
+      after[table]=remaining;
+      if(remaining!==0)throw new Error(`业务表清空校验失败：${table} 仍有 ${remaining} 行。`);
+    }
     db.prepare(`INSERT INTO app_state(key,valueJson,updatedAt) VALUES('current',?,?) ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`).run(JSON.stringify(nextState),now);
     const meta=db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`);
     meta.run('last_processed_report_date','',now);
@@ -145,6 +164,7 @@ function fastResetBusinessState(db,nextState={}){
     meta.run('current_snapshot_id','',now);
     meta.run('v108_performance_indexes_ready','1',now);
     db.exec('COMMIT');
+    return {before,after};
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
 }
 
