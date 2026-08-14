@@ -21,14 +21,17 @@ test('V84/V87/V88 export runtime is syntax valid', () => {
   }
 });
 
-test('period export prepare is replaced by a detached job and never blocks on Excel generation', () => {
+test('period export prepare is detached, reusable and never blocks on Excel generation', () => {
   const source = read('patch');
   assert.match(source, /PREPARE_PATH = '\/api\/export-period\/prepare'/);
   assert.match(source, /STATUS_PATH = '\/api\/v84\/export-job\/:jobId'/);
   assert.match(source, /spawn\(process\.execPath/);
   assert.match(source, /detached: true/);
   assert.match(source, /res\.status\(202\)\.json/);
-  assert.match(source, /Suppress the legacy synchronous handler/);
+  assert.match(source, /function payloadKey\(payload\)/);
+  assert.match(source, /function reusableJob\(key, requester/);
+  assert.match(source, /reused: 'ACTIVE'/);
+  assert.match(source, /reused: 'COMPLETED'/);
   assert.doesNotMatch(source, /exportPeriodReports/);
   assert.doesNotMatch(source, /DELETE FROM|DROP TABLE|reimport/i);
 });
