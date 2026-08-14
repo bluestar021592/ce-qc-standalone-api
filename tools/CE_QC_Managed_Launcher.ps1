@@ -12,16 +12,16 @@ function Write-ManagedLog([string]$Text, [ConsoleColor]$Color = [ConsoleColor]::
   Write-Host $Text -ForegroundColor $Color
 }
 
-function Invoke-Exe([string]$File, [string[]]$Args, [switch]$AllowFailure) {
-  & $File @Args
+function Invoke-Exe([string]$File, [string[]]$ArgumentList, [switch]$AllowFailure) {
+  & $File @ArgumentList
   $code = $LASTEXITCODE
-  if ($code -ne 0 -and -not $AllowFailure) { throw "$File exited with code ${code}: $($Args -join ' ')" }
+  if ($code -ne 0 -and -not $AllowFailure) { throw "$File exited with code ${code}: $($ArgumentList -join ' ')" }
   return $code
 }
 
-function Get-GitText([string[]]$Args) {
-  $text = (& $script:GitExe @Args 2>$null | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0) { throw "git failed: $($Args -join ' ')" }
+function Get-GitText([string[]]$GitArguments) {
+  $text = (& $script:GitExe @GitArguments 2>$null | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0) { throw "git failed: $($GitArguments -join ' ')" }
   return $text
 }
 
@@ -221,7 +221,11 @@ try {
   Write-Host ' Managed Desktop Launcher' -ForegroundColor Cyan
   Write-Host '===================================================' -ForegroundColor Cyan
   Write-ManagedLog '[APP] Startup requested.' Cyan
-  Invoke-SafeAutoUpdate
+  try {
+    Invoke-SafeAutoUpdate
+  } catch {
+    Write-ManagedLog ("[UPDATE] Update check failed, but startup will continue with the current installed version. " + $_.Exception.Message) Yellow
+  }
   $exitCode = Start-ManagedSupervisor
   Write-ManagedLog "[APP] Supervisor exited with code $exitCode. Port 5177 process tree has been released." Yellow
   exit $exitCode
