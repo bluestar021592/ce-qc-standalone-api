@@ -1,6 +1,6 @@
 (function installRouteLazyFeaturesV108(global){
   if(global.__CE_QC_V108_ROUTE_LAZY__)return;
-  const VERSION='2026-08-14-v108-route-lazy-features-v2';
+  const VERSION='2026-08-14-v108-route-lazy-features-v3';
   const loaded=new Map();
   const groups={
     shopee:[
@@ -37,18 +37,14 @@
     if(p==='reports')jobs.push(loadGroup('reports'));
     if(p==='settings')jobs.push(loadGroup('settings'));
     if(p==='data-management')jobs.push(loadGroup('data'));
-    if(['exceptions','home'].includes(p))jobs.push(loadGroup('carry'));
+    if(p==='exceptions')jobs.push(loadGroup('carry'));
     if(!jobs.length)return;
     await Promise.all(jobs);
     if(typeof global.renderAll==='function')setTimeout(()=>global.renderAll(),0);
   }
-  function warmIdle(){
-    const work=async()=>{for(const name of ['shopee','import','reports','settings','data','carry']){try{await loadGroup(name);}catch{}await new Promise(resolve=>setTimeout(resolve,0));}};
-    if('requestIdleCallback'in global)global.requestIdleCallback(()=>void work(),{timeout:15000});else setTimeout(()=>void work(),8000);
-  }
   document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link,[data-page]'))setTimeout(()=>void ensurePage(pageNow()),0);},true);
   global.addEventListener('popstate',()=>setTimeout(()=>void ensurePage(pageNow()),0));
-  setTimeout(()=>void ensurePage(pageNow()),0);warmIdle();
+  setTimeout(()=>void ensurePage(pageNow()),0);
   global.__CE_QC_V108_ROUTE_LAZY__={version:VERSION,ensurePage,loadGroup,loadedCount:()=>loaded.size};
   console.info('[CE-QC][V108_ROUTE_LAZY]',VERSION);
 })(window);
