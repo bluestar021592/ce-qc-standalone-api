@@ -72,6 +72,8 @@ export function dueCarryRefreshReason(db = getDb(), date = new Date()) {
 }
 
 export function hasActiveBusinessProcessing(db = getDb()) {
+  const purgeBlockUntil = Number(getMeta(db, 'data_purge_block_until') || 0);
+  if (Number.isFinite(purgeBlockUntil) && purgeBlockUntil > Date.now()) return true;
   if (db.prepare("SELECT 1 FROM run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get()) return true;
   return Boolean(db.prepare("SELECT 1 FROM business_run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get());
 }
