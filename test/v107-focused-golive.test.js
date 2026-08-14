@@ -34,6 +34,10 @@ test('full purge stays backup first asynchronous and uses fast whole-table reset
   assert.match(purge,/DELETE FROM \$\{table\}/);
   assert.doesNotMatch(purge,/LIMIT 50000/);
   assert.match(purge,/idx_v108_unified_batches_valid_date/);
+  assert.match(purge,/databaseFingerprint/);
+  assert.match(purge,/sameFingerprint/);
+  assert.match(purge,/PREPARED_EXACT_COUNTS/);
+  assert.match(purge,/RECOUNT_AFTER_DATABASE_CHANGE/);
   assert.match(asyncPatch,/setImmediate\(async \(\) =>/);
   assert.match(asyncPatch,/\/api\/v105\/data-purge\/prepare\//);
   assert.match(ui,/安全备份正在后台执行/);
