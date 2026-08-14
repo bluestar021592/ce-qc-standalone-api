@@ -1,6 +1,6 @@
 (function installAsyncPurgeUiV105(global){
   if(global.__CE_QC_V105_ASYNC_PURGE_UI__)return;
-  const VERSION='2026-08-14-v123-adaptive-purge-ui-v1';
+  const VERSION='2026-08-14-v123-adaptive-purge-ui-v2';
   let polling=false;
 
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -38,18 +38,24 @@
           const status=await api(pollUrl,{cache:'no-store'});
           networkErrors=0;
           if(status.status==='COMPLETED')return status.result;
-          if(status.status==='FAILED')throw new Error(status.error||status.message||'后台任务失败');
+          if(status.status==='FAILED'){
+            const failure=new Error(status.error||status.message||'后台任务失败');
+            failure.purgeJobFailed=true;
+            throw failure;
+          }
           const signature=`${status.status}|${status.progress}|${status.message||''}`;
           if(signature===lastSignature)unchangedCycles+=1;
           else{lastSignature=signature;unchangedCycles=0;}
           const elapsedSecond=Math.floor(Number(status.elapsedMs||0)/1000);
-          if(signature!==lastSignature||lastRenderedSecond<0||elapsedSecond-lastRenderedSecond>=3||unchangedCycles===0){
+          if(lastRenderedSecond<0||elapsedSecond-lastRenderedSecond>=3||unchangedCycles===0){
             setPreview(preview,progressHtml(status,mode));
             lastRenderedSecond=elapsedSecond;
           }
         }catch(error){
+          const httpStatus=Number(error?.status||0);
+          if(error?.purgeJobFailed||error?.reloginRequired||(httpStatus>=400&&httpStatus<500))throw error;
           networkErrors+=1;
-          if(error?.status===401||networkErrors>=8)throw error;
+          if(networkErrors>=8)throw error;
           setPreview(preview,`<div class="purge-warning"><strong>后台任务仍在运行</strong><br>页面连接正在恢复（${networkErrors}/8）…</div>`);
         }
         await sleep(pollDelay(mode,unchangedCycles,networkErrors));
