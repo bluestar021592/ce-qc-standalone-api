@@ -20,6 +20,7 @@ test('test commands force TAP summaries and V124 purge lifecycle is part of go-l
   assert.match(pkg.scripts['test:golive'], /--test-reporter=tap/);
   assert.match(pkg.scripts['test:golive'], /v107-focused-golive\.test\.js/);
   assert.match(pkg.scripts['test:golive'], /v104-fast-purge-backup\.test\.js/);
+  assert.match(pkg.scripts['test:golive'], /v124-purge-audit-seal\.test\.js/);
   assert.match(pkg.scripts['test:golive'], /data-purge-large-backup\.test\.js/);
 });
 
