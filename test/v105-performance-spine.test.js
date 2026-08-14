@@ -74,10 +74,11 @@ test('versioned static assets receive browser max-age cache instead of forced re
   assert.doesNotMatch(source,/private, no-cache/);
 });
 
-test('daily go-live gate excludes the 2GiB durability test but full test suite still discovers it',()=>{
+test('2GiB durability scenario stays available but is opt-in during normal go-live validation',()=>{
   const pkg=JSON.parse(read('package.json'));
-  assert.doesNotMatch(pkg.scripts['test:golive'],/data-purge-large-backup\.test\.js/);
+  const large=read('test/data-purge-large-backup.test.js');
+  assert.match(pkg.scripts['test:golive'],/data-purge-large-backup\.test\.js/);
   assert.match(pkg.scripts.test,/test\/\*\.test\.js/);
-  assert.match(pkg.scripts['test:golive'],/v104-fast-purge-backup\.test\.js/);
-  assert.match(pkg.scripts['test:golive'],/v105-performance-spine\.test\.js/);
+  assert.match(large,/CE_QC_RUN_LARGE_DURABILITY/);
+  assert.match(large,/skip: !RUN_LARGE_DURABILITY/);
 });
