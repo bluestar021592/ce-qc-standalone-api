@@ -46,17 +46,25 @@ test('carry persistence closes only explicit POD, completed return, special dest
   assert.match(fn,/const closed = pod \|\| returned \|\| specialClosed \|\| normal/);
 });
 
-test('full business-data purge and automatic carry refresh are mutually exclusive',()=>{
+test('full business-data purge is exclusive with carry refresh and dashboard cache workers',()=>{
   const scheduler=read('src/carryoverRefreshScheduler.js');
   const purge=read('src/dataPurge.js');
+  const cacheWorker=read('src/dashboardCacheWorker.js');
   assert.match(scheduler,/data_purge_block_until/);
   assert.match(scheduler,/purgeBlockUntil > Date\.now\(\)/);
   assert.match(purge,/const PURGE_BLOCK_KEY = 'data_purge_block_until'/);
   assert.match(purge,/setPurgeBlock\(db, Date\.now\(\) \+ 20 \* 60_000\)/);
-  assert.match(purge,/await waitForCarryRefreshIdle\(\)/);
+  assert.match(purge,/await waitForBackgroundMaintenanceIdle\(db\)/);
   assert.match(purge,/schedulerStateForTests\(\)\.inFlight/);
+  assert.match(purge,/cacheWorkerActive\(db\)/);
+  assert.match(purge,/dashboard_cache_worker_active/);
+  assert.match(purge,/dashboard_cache_worker_active_until/);
+  assert.match(cacheWorker,/BEGIN IMMEDIATE/);
+  assert.match(cacheWorker,/data_purge_block_until/);
+  assert.match(cacheWorker,/FULL_DATA_PURGE_ACTIVE/);
+  assert.match(cacheWorker,/dashboard_cache_worker_active_until/);
   assert.match(purge,/clearBusinessRuntimeMeta\(db\)/);
-  assert.match(purge,/key LIKE 'carry_refresh_%' OR key=\?/);
+  assert.match(purge,/key LIKE 'carry_refresh_%' OR key IN/);
 });
 
 test('regenerable file cleanup cannot turn a completed database purge into a false failure',()=>{
