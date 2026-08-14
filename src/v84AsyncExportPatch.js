@@ -3,12 +3,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-13-v84-async-large-range-export-v1';
+const PATCH_ID = '2026-08-14-v105-export-dedup-cache-v2';
 const PREPARE_PATH = '/api/export-period/prepare';
 const STATUS_PATH = '/api/v84/export-job/:jobId';
+const RECENT_REUSE_MS = Math.max(5 * 60_000, Number(process.env.EXPORT_RESULT_REUSE_MS || 30 * 60_000));
+const MAX_JOB_SCAN = Math.max(20, Math.min(300, Number(process.env.EXPORT_JOB_SCAN_LIMIT || 100)));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workerFile = path.join(__dirname, 'v84ExportJobWorker.js');
 const originalPost = express.application.post;
@@ -57,15 +59,93 @@ function normalizePayload(body = {}) {
   };
 }
 
-function enqueueExport(req, res) {
-  const payload = normalizePayload(req.body || {});
+function payloadKey(payload) {
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function jobFilesExist(job = {}) {
+  if (!Array.isArray(job.files) || !job.files.length) return false;
+  const exportDir = getRuntimeConfig().exportsDir;
+  return job.files.every(item => {
+    const name = path.basename(String(item?.name || ''));
+    return name && fs.existsSync(path.join(exportDir, name));
+  });
+}
+
+function recentJobs() {
+  let files = [];
+  try {
+    files = fs.readdirSync(jobsDir(), { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
+      .map(entry => {
+        const file = path.join(jobsDir(), entry.name);
+        let mtimeMs = 0;
+        try { mtimeMs = fs.statSync(file).mtimeMs; } catch {}
+        return { file, mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, MAX_JOB_SCAN);
+  } catch { return []; }
+  const jobs = [];
+  for (const item of files) {
+    try { jobs.push(JSON.parse(fs.readFileSync(item.file, 'utf8'))); } catch {}
+  }
+  return jobs;
+}
+
+function reusableJob(key, requester = '') {
+  const now = Date.now();
+  for (const job of recentJobs()) {
+    if (String(job.payloadKey || '') !== key) continue;
+    if (requester && job.requestedBy && String(job.requestedBy) !== requester) continue;
+    if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) return { job, reused: 'ACTIVE' };
+    if (String(job.status || '') === 'COMPLETED') {
+      const completedAt = Date.parse(job.completedAt || job.updatedAt || '');
+      if (Number.isFinite(completedAt) && now - completedAt <= RECENT_REUSE_MS && jobFilesExist(job)) {
+        return { job, reused: 'COMPLETED' };
+      }
+    }
+  }
+  return null;
+}
+
+function validatePayload(payload, res) {
   if (payload.periodType === 'custom') {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(payload.toDate)) {
-      return res.status(400).json({ ok: false, error: '请选择有效的开始日期和结束日期。' });
+      res.status(400).json({ ok: false, error: '请选择有效的开始日期和结束日期。' });
+      return false;
     }
-    if (payload.fromDate > payload.toDate) return res.status(400).json({ ok: false, error: '开始日期不能晚于结束日期。' });
+    if (payload.fromDate > payload.toDate) {
+      res.status(400).json({ ok: false, error: '开始日期不能晚于结束日期。' });
+      return false;
+    }
   } else if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.date)) {
-    return res.status(400).json({ ok: false, error: '请选择有效的基准日期。' });
+    res.status(400).json({ ok: false, error: '请选择有效的基准日期。' });
+    return false;
+  }
+  return true;
+}
+
+function enqueueExport(req, res) {
+  const payload = normalizePayload(req.body || {});
+  if (!validatePayload(payload, res)) return;
+  const key = payloadKey(payload);
+  const requester = req.user?.username || req.user?.email || '';
+  const reusable = reusableJob(key, requester);
+  if (reusable) {
+    const job = reusable.job;
+    const completed = reusable.reused === 'COMPLETED';
+    return res.status(completed ? 200 : 202).json({
+      ok: true,
+      async: !completed,
+      reused: reusable.reused,
+      jobId: job.jobId,
+      status: job.status,
+      progress: Number(job.progress || 0),
+      message: completed ? '相同条件报表已生成，直接复用现有文件' : '相同条件导出正在后台执行，已复用现有任务',
+      files: completed ? (job.files || []) : undefined,
+      pollUrl: `/api/v84/export-job/${encodeURIComponent(job.jobId)}`
+    });
   }
 
   const jobId = `EXP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
@@ -74,6 +154,7 @@ function enqueueExport(req, res) {
   const job = {
     version: PATCH_ID,
     jobId,
+    payloadKey: key,
     status: 'QUEUED',
     progress: 0,
     message: '导出任务已进入后台队列',
@@ -81,7 +162,7 @@ function enqueueExport(req, res) {
     files: [],
     createdAt: now,
     updatedAt: now,
-    requestedBy: req.user?.username || req.user?.email || ''
+    requestedBy: requester
   };
   writeJsonAtomic(file, job);
 
@@ -97,6 +178,7 @@ function enqueueExport(req, res) {
   res.status(202).json({
     ok: true,
     async: true,
+    reused: false,
     jobId,
     status: job.status,
     progress: job.progress,
@@ -119,8 +201,6 @@ express.application.post = function v84AsyncExportRoute(...args) {
     originalPost.call(this, PREPARE_PATH, enqueueExport);
     originalGet.call(this, STATUS_PATH, exportStatus);
   }
-  // Suppress the legacy synchronous handler. Heavy Excel generation is now owned
-  // by the detached export worker so a 200k+ range cannot block the API event loop.
   return this;
 };
 
