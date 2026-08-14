@@ -52,9 +52,18 @@ test('full business-data purge and automatic carry refresh are mutually exclusiv
   assert.match(scheduler,/data_purge_block_until/);
   assert.match(scheduler,/purgeBlockUntil > Date\.now\(\)/);
   assert.match(purge,/const PURGE_BLOCK_KEY = 'data_purge_block_until'/);
-  assert.match(purge,/setPurgeBlock\(db, expiresAt\)/);
+  assert.match(purge,/setPurgeBlock\(db, Date\.now\(\) \+ 20 \* 60_000\)/);
+  assert.match(purge,/await waitForCarryRefreshIdle\(\)/);
+  assert.match(purge,/schedulerStateForTests\(\)\.inFlight/);
   assert.match(purge,/clearBusinessRuntimeMeta\(db\)/);
   assert.match(purge,/key LIKE 'carry_refresh_%' OR key=\?/);
+});
+
+test('regenerable file cleanup cannot turn a completed database purge into a false failure',()=>{
+  const purge=read('src/dataPurge.js');
+  assert.match(purge,/const fileCleanupWarnings = clearRegenerableFiles\(\)/);
+  assert.match(purge,/catch \(error\) \{ warnings\.push/);
+  assert.match(purge,/fileCleanupWarnings/);
 });
 
 test('normal schema migration cannot delete business rows or drop tables',()=>{
