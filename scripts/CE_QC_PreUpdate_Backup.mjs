@@ -15,36 +15,53 @@ const dbFile = resolveProjectPath(process.env.DB_FILE || path.join(dataDir, 'ce_
 const beforeCommit = String(process.argv[2] || '').trim();
 const targetCommit = String(process.argv[3] || '').trim();
 
+function log(step, text) {
+  console.log(`[BACKUP ${step}] ${text}`);
+}
 function stamp() {
   const d = new Date();
   const p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
-function sha256(file) {
+function sha256(file, label) {
+  const total = fs.statSync(file).size;
   const hash = crypto.createHash('sha256');
   const fd = fs.openSync(file, 'r');
   try {
     const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
     let bytes = 0;
+    let readTotal = 0;
+    let nextReport = 25;
     do {
       bytes = fs.readSync(fd, buffer, 0, buffer.length, null);
-      if (bytes > 0) hash.update(buffer.subarray(0, bytes));
+      if (bytes > 0) {
+        hash.update(buffer.subarray(0, bytes));
+        readTotal += bytes;
+        const pct = total > 0 ? Math.floor((readTotal / total) * 100) : 100;
+        if (pct >= nextReport) {
+          log('4/6', `${label} SHA-256 ${Math.min(100, pct)}%`);
+          nextReport += 25;
+        }
+      }
     } while (bytes > 0);
   } finally { fs.closeSync(fd); }
   return hash.digest('hex');
 }
 
 if (!fs.existsSync(dbFile)) {
+  log('SKIP', `Database not found: ${dbFile}`);
   console.log(JSON.stringify({ ok: true, skipped: true, reason: 'DATABASE_NOT_FOUND', dbFile }));
   process.exit(0);
 }
 
 fs.mkdirSync(path.join(dataDir, 'backups', 'pre_update'), { recursive: true });
+log('1/6', 'Checking source SQLite integrity...');
 const source = new DatabaseSync(dbFile);
 try {
   source.exec('PRAGMA busy_timeout=10000');
   const integrity = source.prepare('PRAGMA integrity_check').get()?.integrity_check || '';
   if (integrity !== 'ok') throw new Error(`SOURCE_INTEGRITY_FAILED:${integrity}`);
+  log('2/6', 'Flushing WAL into the main database file...');
   source.exec('PRAGMA wal_checkpoint(FULL)');
 } finally {
   source.close();
@@ -53,14 +70,18 @@ try {
 const dir = path.join(dataDir, 'backups', 'pre_update', stamp());
 fs.mkdirSync(dir, { recursive: true });
 const copyFile = path.join(dir, 'ce_qc_monitor.db');
-fs.copyFileSync(dbFile, copyFile);
 const sourceSize = fs.statSync(dbFile).size;
+log('3/6', `Copying database backup (${Math.max(1, Math.round(sourceSize / 1024 / 1024))} MB)...`);
+fs.copyFileSync(dbFile, copyFile);
 const copySize = fs.statSync(copyFile).size;
 if (sourceSize <= 0 || copySize !== sourceSize) throw new Error(`BACKUP_SIZE_MISMATCH:${sourceSize}:${copySize}`);
-const sourceHash = sha256(dbFile);
-const copyHash = sha256(copyFile);
+
+log('4/6', 'Verifying source and backup SHA-256...');
+const sourceHash = sha256(dbFile, 'source');
+const copyHash = sha256(copyFile, 'backup');
 if (sourceHash !== copyHash) throw new Error('BACKUP_SHA256_MISMATCH');
 
+log('5/6', 'Opening backup read-only and checking SQLite integrity...');
 const verify = new DatabaseSync(copyFile, { readOnly: true });
 try {
   verify.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=5000');
@@ -80,4 +101,5 @@ const manifest = {
   integrity: 'ok'
 };
 fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+log('6/6', `Verified backup ready: ${copyFile}`);
 console.log(JSON.stringify({ ok: true, ...manifest }));
