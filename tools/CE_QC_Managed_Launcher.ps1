@@ -42,6 +42,7 @@ function Remove-ValidationWorktree([string]$Path) {
 function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
   $tempRoot = Join-Path $env:TEMP ("CE_QC_UPDATE_VERIFY_{0}_{1}" -f $PID, (Get-Date -Format 'yyyyMMddHHmmss'))
   $linkedModules = $false
+  $oldBackupRoot = $env:CE_QC_BACKUP_PROJECT_ROOT
   try {
     Write-ManagedLog "[UPDATE] Verifying candidate $($RemoteCommit.Substring(0,[Math]::Min(8,$RemoteCommit.Length))) before installing..." Cyan
     Invoke-Exe $script:GitExe @('worktree','add','--detach','--quiet',$tempRoot,$RemoteCommit) | Out-Null
@@ -65,15 +66,23 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
     Push-Location $tempRoot
     try {
       Invoke-Exe $script:NpmExe @('run','test:golive') | Out-Null
-      Invoke-Exe $script:NodeExe @('--test','--test-reporter=tap','test/v100-carry-live-ui.test.js','test/v101-carry-refresh-terminal-safety.test.js','test/v103-home-whpp-card-guard.test.js') | Out-Null
     } finally { Pop-Location }
 
-    Write-ManagedLog '[UPDATE] Candidate tests passed. Code is eligible for installation.' Green
+    $candidateBackup = Join-Path $tempRoot 'scripts\CE_QC_PreUpdate_Backup.mjs'
+    if (-not (Test-Path -LiteralPath $candidateBackup)) { throw 'Candidate pre-update backup tool is missing.' }
+    Invoke-Exe $script:NodeExe @('--check',$candidateBackup) | Out-Null
+    $env:CE_QC_BACKUP_PROJECT_ROOT = $ProjectRoot
+    Write-ManagedLog '[UPDATE] Candidate tests passed. Creating verified SQLite online backup before code switch...' Green
+    Invoke-Exe $script:NodeExe @($candidateBackup,$CurrentCommit,$RemoteCommit) | Out-Null
+
+    Write-ManagedLog '[UPDATE] Candidate tests and verified database backup passed. Code is eligible for installation.' Green
     return $true
   } catch {
     Write-ManagedLog ("[UPDATE] Candidate rejected; current known-good version will be kept. " + $_.Exception.Message) Yellow
     return $false
   } finally {
+    if ($null -eq $oldBackupRoot) { Remove-Item Env:CE_QC_BACKUP_PROJECT_ROOT -ErrorAction SilentlyContinue }
+    else { $env:CE_QC_BACKUP_PROJECT_ROOT = $oldBackupRoot }
     if ($linkedModules) {
       try { Remove-Item -LiteralPath (Join-Path $tempRoot 'node_modules') -Force -ErrorAction SilentlyContinue } catch {}
     }
@@ -121,19 +130,6 @@ function Invoke-SafeAutoUpdate {
     return
   }
   if (-not (Test-RemoteCandidate $remote $current)) { return }
-
-  $backupScript = Join-Path $ProjectRoot 'scripts\CE_QC_PreUpdate_Backup.mjs'
-  if (-not (Test-Path -LiteralPath $backupScript)) {
-    Write-ManagedLog '[UPDATE] Pre-update database backup tool is missing; update blocked. Starting current version.' Yellow
-    return
-  }
-  try {
-    Write-ManagedLog '[UPDATE] Creating and verifying database safety backup before code switch...' Cyan
-    Invoke-Exe $script:NodeExe @($backupScript,$current,$remote) | Out-Null
-  } catch {
-    Write-ManagedLog ("[UPDATE] Database safety backup failed; update cancelled and current version retained. " + $_.Exception.Message) Yellow
-    return
-  }
 
   $dependencyFiles = Get-GitText @('diff','--name-only',$current,$remote,'--','package.json','package-lock.json')
   Write-ManagedLog '[UPDATE] Installing verified fast-forward update...' Cyan
