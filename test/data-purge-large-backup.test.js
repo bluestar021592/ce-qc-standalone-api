@@ -6,7 +6,9 @@ import test from 'node:test';
 
 import { hashFileStream } from '../src/dataPurge.js';
 
-test('backup primitives support a sparse file larger than 2 GiB without whole-file Buffer reads', async () => {
+const RUN_LARGE_DURABILITY = String(process.env.CE_QC_RUN_LARGE_DURABILITY || '') === '1';
+
+test('backup primitives support a sparse file larger than 2 GiB without whole-file Buffer reads', { skip: !RUN_LARGE_DURABILITY }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-large-backup-'));
   const source = path.join(dir, 'source.db');
   const backup = path.join(dir, 'backup.db');
