@@ -7,6 +7,7 @@ const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
 // matches the QC refresh requirement; an empty cache warms only the recent week.
 if (!process.env.DASHBOARD_CACHE_REFRESH_MS) process.env.DASHBOARD_CACHE_REFRESH_MS = String(2 * 60 * 60 * 1000);
 if (!process.env.DASHBOARD_CACHE_WARM_DAYS) process.env.DASHBOARD_CACHE_WARM_DAYS = '7';
+if (!process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS) process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = '120000';
 
 function wrapHandler(handler) {
   if (typeof handler !== 'function') return handler;
@@ -49,6 +50,28 @@ async function importPhase(label, modulePath) {
   const loaded = await import(modulePath);
   console.log(`[CE-QC][BOOT] DONE ${label} ${Date.now() - startedAt}ms`);
   return loaded;
+}
+
+async function importServerInteractiveFirst() {
+  const nativeSetTimeout = globalThis.setTimeout;
+  const startupDelayMs = Math.max(30_000, Number(process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS || 120_000));
+  globalThis.setTimeout = function ceQcInteractiveFirstTimeout(callback, delay, ...args) {
+    let effectiveDelay = delay;
+    if (Number(delay) === 1500 && typeof callback === 'function') {
+      let source = '';
+      try { source = Function.prototype.toString.call(callback); } catch {}
+      if (/launchDashboardCacheWorker/.test(source) && /STARTUP_WARM/.test(source)) {
+        effectiveDelay = startupDelayMs;
+        console.log(`[CE-QC][BOOT] dashboard STARTUP_WARM deferred from 1500ms to ${startupDelayMs}ms so first paint stays responsive.`);
+      }
+    }
+    return nativeSetTimeout(callback, effectiveDelay, ...args);
+  };
+  try {
+    return await importPhase('server', './server.js');
+  } finally {
+    globalThis.setTimeout = nativeSetTimeout;
+  }
 }
 
 function scheduleDeferredMaintenance({ v92, v76Repair }) {
@@ -120,7 +143,7 @@ try {
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
 
-  await importPhase('server', './server.js');
+  await importServerInteractiveFirst();
   scheduleDeferredMaintenance({ v92, v76Repair });
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
