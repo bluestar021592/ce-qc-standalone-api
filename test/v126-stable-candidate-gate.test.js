@@ -39,7 +39,7 @@ test('V125 keeps local reads resilient without retrying writes',()=>{
   assert.match(bootstrap,/importServerInteractiveFirst/);
 });
 
-test('V127 update backup is visible reusable and still verified',()=>{
+test('V127 update backup is visible reusable read-only and still verified',()=>{
   const backup=read('scripts/CE_QC_PreUpdate_Backup.mjs');
   assert.match(backup,/console\.error\(`\[BACKUP \$\{step\}\] \$\{text\}`\)/);
   assert.match(backup,/CE_QC_UPDATE_BACKUP_RATE_PAGES\|\|8192/);
@@ -47,9 +47,12 @@ test('V127 update backup is visible reusable and still verified',()=>{
   assert.match(backup,/exact-source-fingerprint\+verified-backup-reuse/);
   assert.match(backup,/SQLite backup \$\{remainingPages===0\?100:pct\}%/);
   assert.match(backup,/SHA-256 \$\{processed>=total\?100:pct\}%/);
+  assert.match(backup,/new DatabaseSync\(dbFile,\{readOnly:true,timeout:10000\}\)/);
+  assert.match(backup,/PRAGMA query_only=ON/);
   assert.match(backup,/PRAGMA quick_check\(1\)/);
   assert.match(backup,/validSha\(manifest\.sha256\)/);
   assert.match(backup,/SOURCE_CHANGED_DURING_UPDATE_BACKUP/);
+  assert.match(backup,/sourceOpenMode:'read-only'/);
   assert.doesNotMatch(backup,/readFileSync\(copyFile\)/);
 });
 
