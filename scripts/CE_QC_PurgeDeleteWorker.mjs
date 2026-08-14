@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { BUSINESS_DATA_TABLES } from '../src/store.js';
 
@@ -18,6 +19,21 @@ function decodePayload(){
   if(!raw)throw new Error('PURGE_WORKER_PAYLOAD_MISSING');
   return JSON.parse(Buffer.from(raw,'base64url').toString('utf8'));
 }
+async function clearRegenerableFiles(payload){
+  const warnings=[];
+  for(const dir of [payload.exportsDir,payload.importsDir]){
+    if(!dir||!fs.existsSync(dir))continue;
+    const entries=fs.readdirSync(dir);
+    for(let index=0;index<entries.length;index+=1){
+      const entry=entries[index];
+      try{await fs.promises.rm(path.join(dir,entry),{recursive:true,force:true});}
+      catch(error){warnings.push(`${entry}: ${error?.message||String(error)}`);}
+      if(index%20===19)await new Promise(resolve=>setImmediate(resolve));
+    }
+  }
+  if(payload.longJsonExportsDir)fs.mkdirSync(payload.longJsonExportsDir,{recursive:true});
+  return warnings;
+}
 
 let db=null;
 try{
@@ -36,15 +52,11 @@ try{
   db.exec('BEGIN IMMEDIATE');
   try{
     const lockedFingerprint=databaseFingerprint(dbFile);
-    if(!sameFingerprint(expectedFingerprint,lockedFingerprint)){
-      throw new Error('DATABASE_CHANGED_BEFORE_PURGE_WORKER_LOCK');
-    }
+    if(!sameFingerprint(expectedFingerprint,lockedFingerprint))throw new Error('DATABASE_CHANGED_BEFORE_PURGE_WORKER_LOCK');
     for(const table of clearTargets){
       const deleted=db.prepare(`DELETE FROM ${table}`).run();
       before[table]=Number(deleted?.changes||0);
-      if(db.prepare(`SELECT 1 AS present FROM ${table} LIMIT 1`).get()?.present){
-        throw new Error(`PURGE_TABLE_NOT_EMPTY:${table}`);
-      }
+      if(db.prepare(`SELECT 1 AS present FROM ${table} LIMIT 1`).get()?.present)throw new Error(`PURGE_TABLE_NOT_EMPTY:${table}`);
       after[table]=0;
     }
     const now=new Date().toISOString();
@@ -54,6 +66,7 @@ try{
     meta.run('last_full_clear_at',now,now);
     meta.run('current_snapshot_id','',now);
     meta.run('v108_performance_indexes_ready','1',now);
+    db.prepare("DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key IN ('dashboard_cache_worker_active','dashboard_cache_worker_active_until','data_purge_block_until')").run();
     db.exec('COMMIT');
   }catch(error){
     try{db.exec('ROLLBACK');}catch{}
@@ -63,8 +76,12 @@ try{
   }
   const fk=Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys||0);
   if(fk!==1)throw new Error('PURGE_WORKER_FOREIGN_KEYS_NOT_RESTORED');
-  process.stdout.write(`${JSON.stringify({ok:true,before,after,deleteMode:'ISOLATED_SQLITE_WORKER'})}\n`);
+  for(const table of ['app_meta','app_state','users','audit_logs','backup_records']){
+    if(!db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(table)?.ok)throw new Error(`PURGE_REQUIRED_TABLE_MISSING:${table}`);
+  }
   db.close();db=null;
+  const fileCleanupWarnings=await clearRegenerableFiles(payload);
+  process.stdout.write(`${JSON.stringify({ok:true,before,after,fileCleanupWarnings,deleteMode:'ISOLATED_SQLITE_WORKER'})}\n`);
   process.exit(0);
 }catch(error){
   try{db?.close();}catch{}
