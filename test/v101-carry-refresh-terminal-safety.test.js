@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
@@ -54,4 +55,14 @@ test('full business-data purge and automatic carry refresh are mutually exclusiv
   assert.match(purge,/setPurgeBlock\(db, expiresAt\)/);
   assert.match(purge,/clearBusinessRuntimeMeta\(db\)/);
   assert.match(purge,/key LIKE 'carry_refresh_%' OR key=\?/);
+});
+
+test('managed Windows runtime parses before a desktop candidate can be accepted', { skip: process.platform !== 'win32' }, () => {
+  const validator=path.join(root,'tools','CE_QC_Validate_Managed_Runtime.ps1');
+  assert.equal(fs.existsSync(validator),true,'managed runtime validator must exist');
+  const powershell=path.join(process.env.WINDIR||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+  assert.equal(fs.existsSync(powershell),true,'Windows PowerShell must exist');
+  const result=spawnSync(powershell,['-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',validator],{cwd:root,encoding:'utf8',timeout:30000});
+  assert.equal(result.status,0,`${result.stdout||''}\n${result.stderr||''}`);
+  assert.match(result.stdout||'',/MANAGED_RUNTIME_VALIDATION: PASS/);
 });
