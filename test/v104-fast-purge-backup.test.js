@@ -59,17 +59,19 @@ test('dead dashboard-cache worker lease is cleared immediately instead of delayi
   assert.doesNotMatch(source,/timeoutMs = 15 \* 60_000/);
 });
 
-test('purge dialog uses background prepare polling instead of blocking one HTTP request',()=>{
+test('purge dialog backgrounds both backup preparation and destructive execution',()=>{
   const uiRelative='public/v104-fast-purge-ui.js';
   const ui=fs.readFileSync(path.join(root,uiRelative),'utf8');
   const syntax=spawnSync(process.execPath,['--check',path.join(root,uiRelative)],{encoding:'utf8'});
   assert.equal(syntax.status,0,syntax.stderr||syntax.stdout);
   assert.match(ui,/安全备份正在后台执行/);
-  assert.match(ui,/pollJob\(prepared\.pollUrl,preview\)/);
-  assert.match(ui,/await sleep\(750\)/);
-  assert.match(ui,/purgeChallenge=challenge/);
+  assert.match(ui,/正在后台安全清空业务数据/);
+  assert.match(ui,/pollJob\(prepared\.pollUrl,preview,'PREPARE'\)/);
+  assert.match(ui,/pollJob\(submitted\.pollUrl,preview,'EXECUTE'\)/);
+  assert.match(ui,/global\.executeDataPurge/);
+  assert.match(ui,/applyCompletedPurge\(result\)/);
   assert.doesNotMatch(ui,/大型数据库可能需要几分钟/);
   const injector=fs.readFileSync(path.join(root,'src/v44WhppUiPatch.js'),'utf8');
-  assert.match(injector,/v104-fast-purge-ui\.js\?v=20260814-2/);
+  assert.match(injector,/v104-fast-purge-ui\.js\?v=20260814-3/);
   assert.match(injector,/v105AsyncPurgePatch\.js/);
 });
