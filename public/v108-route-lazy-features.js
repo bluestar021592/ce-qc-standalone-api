@@ -1,6 +1,6 @@
 (function installRouteLazyFeaturesV108(global){
   if(global.__CE_QC_V108_ROUTE_LAZY__)return;
-  const VERSION='2026-08-14-v108-route-lazy-features-v5';
+  const VERSION='2026-08-14-v108-route-lazy-features-v6';
   const loaded=new Map();
   const groups={
     shopee:[
@@ -14,7 +14,7 @@
     import:['/v66-import-success-whpp.js?v=20260812-1','/v96-v67-live-progress-bridge.js?v=20260813-1'],
     reports:['/v84-async-export-ui.js?v=20260814-5'],
     settings:['/v62-network-settings-runtime.js?v=20260812-1'],
-    data:['/v104-fast-purge-ui.js?v=20260814-5','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
+    data:['/v104-fast-purge-ui.js?v=20260814-6','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
     carry:['/v99-carry-live-ui.js?v=20260814-1']
   };
 
