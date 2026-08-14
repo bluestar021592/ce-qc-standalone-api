@@ -91,6 +91,10 @@ test('page rendering detail reads exports and database reads keep fast paths',()
   assert.match(injector,/v108-route-lazy-features\.js\?v=20260814-3/);
   assert.match(injector,/v109-instant-business-navigation\.js\?v=20260814-1/);
   assert.match(injector,/v110-drilldown-prewarm\.js\?v=20260814-2/);
+  assert.match(injector,/let injectedHtml=''/);
+  assert.match(injector,/function buildInjectedHtml\(\)/);
+  assert.match(injector,/if\(injectedHtml\)return injectedHtml/);
+  assert.match(injector,/inspectV114HtmlCache/);
   assert.doesNotMatch(injector,/v84-async-export-ui\.js/);
   assert.doesNotMatch(injector,/v104-fast-purge-ui\.js/);
   assert.match(db,/PRAGMA synchronous = NORMAL/);
