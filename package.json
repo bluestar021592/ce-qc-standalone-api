@@ -1,6 +1,6 @@
 {
   "name": "ce-qc-standalone-api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CE 金边仓质控独立API版：日报+长期JSON+订单扫描API+批量轨迹API+XLSX导出",
   "type": "module",
   "scripts": {
