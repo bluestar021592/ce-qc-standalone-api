@@ -84,6 +84,15 @@ test('normal schema migration cannot delete business rows or drop tables',()=>{
   assert.match(source,/ROLLBACK/);
 });
 
+test('managed launcher never uses PowerShell automatic args variable as an explicit parameter',()=>{
+  const launcher=read('tools/CE_QC_Managed_Launcher.ps1');
+  assert.doesNotMatch(launcher,/\[string\[\]\]\s*\$Args\b/i);
+  assert.doesNotMatch(launcher,/@Args\b/i);
+  assert.match(launcher,/\[string\[\]\]\s*\$ArgumentList\b/);
+  assert.match(launcher,/\[string\[\]\]\s*\$GitArguments\b/);
+  assert.match(launcher,/Update check failed, but startup will continue with the current installed version/);
+});
+
 test('managed Windows runtime parses before a desktop candidate can be accepted', { skip: process.platform !== 'win32' }, () => {
   const validator=path.join(root,'tools','CE_QC_Validate_Managed_Runtime.ps1');
   assert.equal(fs.existsSync(validator),true,'managed runtime validator must exist');
