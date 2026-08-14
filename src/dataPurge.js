@@ -26,7 +26,7 @@ export async function createPurgeChallenge(user = {}, options = {}) {
     databasePath: getRuntimeConfig().dbFile,
     counts,
     backup: { path: backup.filePath, sha256: backup.sha256, size: backup.size, integrity: backup.integrity },
-    deleteScope: ['日报及解析行', '运单、扫描和轨迹', 'run/checkpoint/snapshot', 'carry和POD锁', '趋势、缓存、通知及导出文件'],
+    deleteScope: ['日报及解析行', '运单、扫描和轨迹', 'run/checkpoint/snapshot', 'carry和POD锁', '趋势、缓存、通知及导出文件', '遗留动态刷新运行时间戳'],
     retainedScope: ['数据库结构和迁移', '用户、角色与系统设置', '最新门店白名单', '审计日志', '清除前备份']
   };
 }
@@ -43,6 +43,7 @@ export async function executePurge({ challengeId, phrase, backupConfirmed, user 
   await verifyBackup(challenge.backup);
   const before = tableCounts(db);
   resetAppState({ logs: [] });
+  clearBusinessRuntimeMeta(db);
   const after = tableCounts(db);
   clearRegenerableFiles();
   assertIntegrity(db);
@@ -99,6 +100,13 @@ async function verifyBackup(backup) {
 function tableCounts(db) {
   const existing = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
   return Object.fromEntries(BUSINESS_DATA_TABLES.filter(name => existing.has(name)).map(name => [name, Number(db.prepare(`SELECT COUNT(*) count FROM ${name}`).get()?.count || 0)]));
+}
+
+function clearBusinessRuntimeMeta(db) {
+  // Fresh-start must not inherit a prior data set's dynamic carry-refresh clock.
+  // Preserve schema/app/user/system/whitelist/backup metadata; only ephemeral
+  // business refresh markers are removed so the first clean import gets a fresh clock.
+  db.prepare("DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%'").run();
 }
 
 function reconcileRunLocks(db, activeRunIds) {
