@@ -64,18 +64,20 @@ test('V148 distinguishes real API scan coverage from terminal POD-lock reuse',()
   assert.match(backend,/UPDATE unified_snapshots SET status='IMPORTED'/);
 });
 
-test('V148 Shopee attempt trends search later carryover POD and dispatch evidence for original intake day',()=>{
+test('V148 Shopee attempt trends search later carryover real POD and dispatch evidence for original intake day',()=>{
   const trend=read('src/v137TrendTruthPatch.js');
   assert.match(trend,/pod_candidates AS/);
   assert.match(trend,/s\.reportDate>=v\.reportDate/);
   assert.match(trend,/f\.reportDate>=v\.reportDate AND f\.isPod=1/);
+  assert.match(trend,/COALESCE\(s\.rawJson,''\) NOT LIKE '%POD_LOCK%'/);
+  assert.match(trend,/COALESCE\(f\.rawJson,''\) NOT LIKE '%POD_LOCK%'/);
   assert.match(trend,/pod_first AS/);
   assert.match(trend,/track_attempts AS/);
   assert.match(trend,/evidenceDate/);
   assert.match(trend,/firstPodObservedDate/);
   assert.match(trend,/firstPodEvidenceJson/);
   assert.match(trend,/podLockTime/);
-  assert.match(trend,/PERSISTED_ATTEMPT_THEN_CROSS_DAY_DISPATCH_EVENTS_THEN_POD_TIMESTAMP_THEN_FIRST_POD_OBSERVED_DATE/);
+  assert.match(trend,/PERSISTED_ATTEMPT_THEN_CROSS_DAY_DISPATCH_EVENTS_THEN_POD_TIMESTAMP_THEN_FIRST_REAL_POD_OBSERVED_DATE/);
 });
 
 test('V145 home core excludes Shopee and Shopee special metrics come from canonical final rows',()=>{
