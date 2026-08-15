@@ -10,7 +10,19 @@ const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const syntax=p=>{const result=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(result.status,0,`${p}: ${result.stderr||result.stdout}`);};
 
 test('V156 import runtime JavaScript is syntax valid',()=>{
-  for(const file of ['src/v102UnifiedImportSafetyGatePatch.js','src/v150UnifiedImportFastRoutePatch.js','src/v153UnifiedImportQueue.js','src/v153UnifiedImportWorker.js','src/unifiedImportSafety.js','src/v153RuntimeBuildPatch.js','public/v150-import-fast-path.js','public/v153-build-sync.js'])syntax(file);
+  for(const file of ['src/v156SessionHotPathPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v150UnifiedImportFastRoutePatch.js','src/v153UnifiedImportQueue.js','src/v153UnifiedImportWorker.js','src/unifiedImportSafety.js','src/v153RuntimeBuildPatch.js','public/v150-import-fast-path.js','public/v153-build-sync.js'])syntax(file);
+});
+
+test('V156 validated sessions are cached off the SQLite hot path',()=>{
+  const hot=read('src/v156SessionHotPathPatch.js');
+  const ingress=read('src/v102UnifiedImportSafetyGatePatch.js');
+  assert.match(ingress,/import '\.\/v156SessionHotPathPatch\.js'/);
+  assert.match(hot,/handler\.name!=='accessIdentity'/);
+  assert.match(hot,/ce_internal_session/);
+  assert.match(hot,/X-CE-QC-Session-Cache/);
+  assert.match(hot,/cacheExpiresAt/);
+  assert.doesNotMatch(hot,/getDb\(/);
+  assert.doesNotMatch(hot,/from '\.\/db\.js'/);
 });
 
 test('V156 unified HTTP ingress hard replaces legacy route multer',()=>{
