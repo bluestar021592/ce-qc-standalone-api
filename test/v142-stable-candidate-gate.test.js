@@ -31,20 +31,35 @@ test('V152 safety gate directly persists and never invokes the legacy heavy impo
   assert.match(safety,/legacy unified import final handler is intentionally NOT called/);
 });
 
-test('V152 upload persistence excludes full carry queue and carry summary',()=>{
+test('V152 upload persistence is staging-only and excludes processing tables',()=>{
   const fast=read('src/v150UnifiedImportFastRoutePatch.js');
-  assert.match(fast,/export function persistUnifiedUploadFast/);
-  assert.match(fast,/ROWS_NORMALIZED_IN_TABLES_V151/);
+  assert.match(fast,/UPLOAD_STAGING_ONLY_V152/);
   const start=fast.indexOf('export function persistUnifiedUploadFast');
   const end=fast.indexOf('function clearTransientRunState',start);
   assert.ok(start>=0&&end>start,'persist block not found');
   const block=fast.slice(start,end);
   assert.doesNotMatch(block,/getUnifiedProcessingQueue/);
   assert.doesNotMatch(block,/carryoverSummary/);
+  assert.doesNotMatch(block,/shipment_current_state/);
+  assert.doesNotMatch(block,/carryover_open_items/);
+  assert.doesNotMatch(block,/shipment_daily_snapshots/);
 });
 
-test('V152 historical carry hydration is deferred until process start',()=>{
+test('V152 duplicate upload is O1 metadata hydration and never scans unified import rows',()=>{
   const fast=read('src/v150UnifiedImportFastRoutePatch.js');
+  const start=fast.indexOf('function fastHydrateExisting');
+  const end=fast.indexOf('// Upload persistence is intentionally STAGING-ONLY',start);
+  assert.ok(start>=0&&end>start,'duplicate hydration block not found');
+  const block=fast.slice(start,end);
+  assert.match(block,/unified_snapshots/);
+  assert.match(block,/classificationCounts/);
+  assert.doesNotMatch(block,/unified_import_rows/);
+  assert.doesNotMatch(block,/GROUP BY/);
+});
+
+test('V152 processing membership and historical carry are deferred until process start',()=>{
+  const fast=read('src/v150UnifiedImportFastRoutePatch.js');
+  assert.match(fast,/function materializeProcessingMembership/);
   assert.match(fast,/getUnifiedProcessingQueue\(batch\.batchId\)/);
   assert.match(fast,/START_ROUTES=new Set\(\['\/api\/run\/start','\/api\/shopee\/run\/start'\]\)/);
   assert.match(fast,/await hydrateReportState\(requested\)/);
