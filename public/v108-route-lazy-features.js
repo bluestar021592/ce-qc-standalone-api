@@ -1,6 +1,6 @@
 (function installRouteLazyFeaturesV108(global){
   if(global.__CE_QC_V108_ROUTE_LAZY__)return;
-  const VERSION='2026-08-14-v108-route-lazy-features-v8';
+  const VERSION='2026-08-15-v138-route-lazy-features-v9';
   const loaded=new Map();
   const groups={
     shopee:[
@@ -8,8 +8,7 @@
       '/v52-whpp-source-truth-route.js?v=20260811-1','/v54-whpp-unified-integration.js?v=20260812-9',
       '/v64-whpp-total-kpi-integration.js?v=20260812-2','/v68-whpp-classification-stability.js?v=20260812-4',
       '/v69-whpp-card-dedup.js?v=20260812-3','/v72-whpp-light-state-bridge.js?v=20260812-1',
-      '/v90-instant-whpp-navigation.js?v=20260813-1','/v93-shopee-resume-ui.js?v=20260813-2',
-      '/v94-business-source-truth-ui-v2.js?v=20260813-2'
+      '/v93-shopee-resume-ui.js?v=20260813-2','/v94-business-source-truth-ui-v2.js?v=20260813-2'
     ],
     import:['/v66-import-success-whpp.js?v=20260812-1','/v96-v67-live-progress-bridge.js?v=20260813-1'],
     reports:['/v84-async-export-ui.js?v=20260814-5'],
@@ -17,15 +16,16 @@
     data:['/v104-fast-purge-ui.js?v=20260814-8','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
     carry:['/v99-carry-live-ui.js?v=20260814-1']
   };
+  const BUSINESS_PAGES=new Set(['ce','ceaf','tbkh','ali1688','shopeecn','shopeevn','shopee','whpp']);
 
   function loadScript(src){
     if(loaded.has(src))return loaded.get(src);
     const existing=[...document.scripts].find(node=>String(node.src||'').includes(src.split('?')[0]));
     if(existing){const p=Promise.resolve(existing);loaded.set(src,p);return p;}
     const promise=new Promise((resolve,reject)=>{
-      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v108';
+      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v138';
       script.onload=()=>resolve(script);script.onerror=()=>reject(new Error(`加载页面功能失败：${src}`));document.head.appendChild(script);
-    }).catch(error=>{loaded.delete(src);console.warn('[CE-QC][V108_LAZY]',error);throw error;});
+    }).catch(error=>{loaded.delete(src);console.warn('[CE-QC][V138_LAZY]',error);throw error;});
     loaded.set(src,promise);return promise;
   }
   async function loadGroup(name){for(const src of groups[name]||[])await loadScript(src);}
@@ -40,11 +40,13 @@
     if(p==='exceptions')jobs.push(loadGroup('carry'));
     if(!jobs.length)return;
     await Promise.all(jobs);
-    if(typeof global.renderAll==='function')setTimeout(()=>global.renderAll(),0);
+    // Business pages already rendered from the bootstrap/range summary. Re-running
+    // renderAll here caused a second full dashboard pass and visible navigation lag.
+    if(!BUSINESS_PAGES.has(p)&&typeof global.renderAll==='function')setTimeout(()=>global.renderAll(),0);
   }
   document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link,[data-page]'))setTimeout(()=>void ensurePage(pageNow()),0);},true);
   global.addEventListener('popstate',()=>setTimeout(()=>void ensurePage(pageNow()),0));
   setTimeout(()=>void ensurePage(pageNow()),0);
   global.__CE_QC_V108_ROUTE_LAZY__={version:VERSION,ensurePage,loadGroup,loadedCount:()=>loaded.size};
-  console.info('[CE-QC][V108_ROUTE_LAZY]',VERSION);
+  console.info('[CE-QC][V138_ROUTE_LAZY]',VERSION);
 })(window);
