@@ -1,28 +1,54 @@
 import { getDb } from './db.js';
 import { loadRangeDashboard as loadRangeDashboardV58 } from './rangeDashboardStoreV58.js';
 
-export const RANGE_DASHBOARD_V136_TERMINAL_OVERLAY_ID='2026-08-15-v136-latest-terminal-overlay-v1';
+export const RANGE_DASHBOARD_V136_TERMINAL_OVERLAY_ID='2026-08-15-v137-scoped-terminal-overlay-v2';
 const OPEN_TABS=new Set(['accountingOpen','unresolved','ordinaryOpen','coreAbnormal','abnormal','severeAbnormal','pendingAll','pending1','pending2plus','pending2','pending3','pendingNonContinuous','ocAll','oc1','oc2plus','oc2','oc3','cycle2','cycle2plus','inboundNoScan','workOrderAbnormal','provinceOpen','deliveryStay','returnRequired','shopTransit','shopArrived','shopStuck','pvDelivery','pvStoreRetention','pvStoreInboundNoScan','pvOtherUnresolved']);
+const LOOKUP_CHUNK=350;
 
 export function loadRangeDashboard(fromDate,toDate){
   const range=loadRangeDashboardV58(fromDate,toDate);
-  const authority=loadTerminalAuthority();
+  const bills=collectRangeBills(range);
+  const authority=loadTerminalAuthority(bills);
   for(const state of Object.values(range.states||{}))patchState(state,authority);
   for(const state of Object.values(range.aggregates||{}))patchState(state,authority);
   compactRange(range);
-  return {...range,queryMode:`${range.queryMode||'SQL'}+LATEST_TERMINAL_V136`,terminalAuthority:RANGE_DASHBOARD_V136_TERMINAL_OVERLAY_ID};
+  return {...range,queryMode:`${range.queryMode||'SQL'}+LATEST_TERMINAL_V137_SCOPED`,terminalAuthority:RANGE_DASHBOARD_V136_TERMINAL_OVERLAY_ID,terminalLookupBills:bills.length};
 }
 
-function loadTerminalAuthority(){
+function collectRangeBills(range={}){
+  const set=new Set();
+  const addRows=rows=>{for(const row of rows||[]){const bill=billOf(row);if(bill)set.add(bill);}};
+  for(const state of [...Object.values(range.states||{}),...Object.values(range.aggregates||{})]){
+    if(!state)continue;
+    addRows(state.finalRows);
+    for(const tabs of [state.detailTabs,state.dashboard?.detailTabs]){
+      if(!tabs)continue;
+      for(const value of Object.values(tabs))if(Array.isArray(value?.rows))addRows(value.rows);
+    }
+  }
+  return [...set];
+}
+
+function chunks(values,size=LOOKUP_CHUNK){const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;}
+function loadTerminalAuthority(bills=[]){
   const db=getDb();const map=new Map();
   const absorb=(bill,row,priority)=>{bill=String(bill||'').trim().toUpperCase();if(!bill)return;const current=map.get(bill);if(current&&current.priority>priority)return;const truth=terminalTruth(row);if(truth)map.set(bill,{...truth,priority});};
-  for(const row of db.prepare(`SELECT c.shipmentCode,c.state,c.stateJson,c.updatedAt,o.status carryStatus,o.closeReason,o.stateJson carryJson,o.updatedAt carryUpdatedAt
-    FROM shipment_current_state c LEFT JOIN carryover_open_items o ON o.shipmentCode=c.shipmentCode`).all()){
-    absorb(row.shipmentCode,{...safe(row.carryJson),state:row.closeReason||'',closeReason:row.closeReason||'',carryStatus:row.carryStatus||''},2);
-    absorb(row.shipmentCode,{...safe(row.stateJson),state:row.state||'',currentState:row.state||''},4);
+  for(const batch of chunks(bills)){
+    if(!batch.length)continue;
+    const placeholders=batch.map(()=>'?').join(',');
+    for(const row of db.prepare(`SELECT shipmentCode,status carryStatus,closeReason,stateJson carryJson,updatedAt carryUpdatedAt FROM carryover_open_items WHERE shipmentCode IN (${placeholders}) ORDER BY updatedAt`).all(...batch)){
+      absorb(row.shipmentCode,{...safe(row.carryJson),state:row.closeReason||'',closeReason:row.closeReason||'',carryStatus:row.carryStatus||''},2);
+    }
+    for(const row of db.prepare(`SELECT shipmentCode,rawJson,primaryCategory,isPod,updatedAt FROM business_final_rows WHERE businessType IN ('SHOPEE','WHPP') AND shipmentCode IN (${placeholders}) ORDER BY updatedAt`).all(...batch)){
+      absorb(row.shipmentCode,{...safe(row.rawJson),primaryCategory:row.primaryCategory,isPod:row.isPod},3);
+    }
+    for(const row of db.prepare(`SELECT shipmentCode,rawJson,primaryCategory,isPod,updatedAt FROM final_rows WHERE shipmentCode IN (${placeholders}) ORDER BY updatedAt`).all(...batch)){
+      absorb(row.shipmentCode,{...safe(row.rawJson),primaryCategory:row.primaryCategory,isPod:row.isPod},3);
+    }
+    for(const row of db.prepare(`SELECT shipmentCode,state,stateJson,updatedAt FROM shipment_current_state WHERE shipmentCode IN (${placeholders})`).all(...batch)){
+      absorb(row.shipmentCode,{...safe(row.stateJson),state:row.state||'',currentState:row.state||''},4);
+    }
   }
-  for(const row of db.prepare(`SELECT shipmentCode,rawJson,primaryCategory,isPod,updatedAt FROM business_final_rows WHERE businessType='SHOPEE' ORDER BY updatedAt`).all())absorb(row.shipmentCode,{...safe(row.rawJson),primaryCategory:row.primaryCategory,isPod:row.isPod},3);
-  for(const row of db.prepare(`SELECT shipmentCode,rawJson,primaryCategory,isPod,updatedAt FROM final_rows ORDER BY updatedAt`).all())absorb(row.shipmentCode,{...safe(row.rawJson),primaryCategory:row.primaryCategory,isPod:row.isPod},3);
   return map;
 }
 function safe(value){try{return typeof value==='object'&&value?value:JSON.parse(String(value||'{}'));}catch{return {};}}
@@ -58,3 +84,5 @@ function patchSummary(obj,tabs,allRows){if(!obj||typeof obj!=='object')return;co
 function patchState(state,authority){if(!state)return;const tabs=state.detailTabs||{};const source=unique(state.finalRows||tabs.all?.rows||tabs.allData?.rows||[]);const allRows=source.map(row=>applyTruth(row,authority.get(billOf(row))));state.finalRows=allRows;patchTabs(tabs,allRows,authority);if(state.dashboard?.detailTabs)patchTabs(state.dashboard.detailTabs,allRows,authority);patchSummary(state.v55Summary,tabs,allRows);patchSummary(state.dashboard?.v55Summary,tabs,allRows);patchSummary(state.dashboard?.metrics,tabs,allRows);if(state.dashboard){const pod=(tab(tabs,'podClosed')||tab(tabs,'pod'))?.total||0;const open=(tab(tabs,'accountingOpen')||tab(tabs,'unresolved'))?.total||0;if(Object.hasOwn(state.dashboard,'todayPod'))state.dashboard.todayPod=pod;if(Object.hasOwn(state.dashboard,'abnormalCount'))state.dashboard.abnormalCount=(tab(tabs,'coreAbnormal')||tab(tabs,'abnormal'))?.total||open;}
 }
 function compactRange(range){for(const state of [...Object.values(range.states||{}),...Object.values(range.aggregates||{})]){if(!state)continue;state.finalRows=[];for(const tabs of [state.detailTabs,state.dashboard?.detailTabs]){if(!tabs)continue;for(const [key,value] of Object.entries(tabs)){if(!value||!Array.isArray(value.rows))continue;if(key==='dashboard')value.rows=value.rows.slice(0,100);else if(['coreAbnormal','abnormal','severeAbnormal'].includes(key))value.rows=value.rows.slice(0,300);else value.rows=[];}}}}
+
+export const __test={collectRangeBills,terminalTruth};
