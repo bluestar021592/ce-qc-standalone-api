@@ -18,7 +18,7 @@ test('candidate runtime files are syntax valid',()=>{
     'src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/v133ClosureRatePatch.js','src/v134WhppRunSupervisorPatch.js','src/v135WhppPartialSnapshotPatch.js',
     'scripts/CE_QC_PreUpdate_Backup.mjs','scripts/CE_QC_PurgeDeleteWorker.mjs',
     'public/v125-local-api-resilience.js','public/v104-fast-purge-ui.js',
-    'public/v108-route-lazy-features.js','public/v105-fast-render.js',
+    'public/v108-route-lazy-features.js','public/v105-fast-render.js','public/v67-resilient-run-guard.js',
     'public/v103-home-whpp-card-guard.js','public/v132-whpp-seven-business-fast.js','public/v135-whpp-retry-aware-run.js','public/v133-closure-rate.js'
   ]) syntax(file);
 });
@@ -129,9 +129,9 @@ test('WHPP fast summary exposes partial snapshot retry count instead of treating
   assert.match(backend,/retryPending/);
   assert.match(backend,/COMPLETED_WITH_RETRY/);
   assert.match(backend,/business_history_summary/);
-  assert.match(injector,/v135-whpp-partial-snapshot-v23/);
+  assert.match(injector,/v136-run-start-unblock-v24/);
   assert.match(injector,/v132-whpp-seven-business-fast\.js\?v=20260814-2/);
-  assert.match(injector,/v135-whpp-retry-aware-run\.js\?v=20260814-1/);
+  assert.match(injector,/v135-whpp-retry-aware-run\.js\?v=20260815-1/);
   assert.doesNotMatch(injector,/v90-instant-whpp-navigation\.js/);
 });
 
@@ -152,7 +152,7 @@ test('V133 adds the same closure-rate definition to home and all seven business 
   assert.match(ui,/const closed=Math\.max\(0,total-unresolved\)/);
   assert.match(injector,/v133ClosureRatePatch\.js/);
   assert.match(injector,/v133-closure-rate\.js\?v=20260814-1/);
-  assert.ok(injector.indexOf('v135-whpp-retry-aware-run.js')<injector.indexOf('v133-closure-rate.js'));
+  assert.ok(injector.indexOf('v132-whpp-seven-business-fast.js')<injector.indexOf('v133-closure-rate.js'));
 });
 
 test('V135 finalizes a valid WHPP snapshot even when some API rows remain retryable',()=>{
@@ -166,11 +166,27 @@ test('V135 finalizes a valid WHPP snapshot even when some API rows remain retrya
   assert.match(supervisor,/API.*待重试|接口待重试/);
   assert.match(supervisor,/res\.status\(202\)\.json/);
   assert.match(supervisor,/phase:'WHPP等待断点恢复'/);
-  assert.match(retryUi,/v135-whpp-retry-aware-run-v1/);
+  assert.match(retryUi,/v136-whpp-retry-aware-run-v2/);
   assert.match(retryUi,/value\.completed\?'\/api\/whpp\/run\/resume':'\/api\/whpp\/run\/start'/);
   assert.match(retryUi,/retryPending/);
   assert.match(retryUi,/断点已保留/);
   assert.match(injector,/v135WhppPartialSnapshotPatch\.js/);
+});
+
+test('V136 starts the current imported day without hanging on slow or stale status preflight',()=>{
+  const runner=read('public/v67-resilient-run-guard.js');
+  const retryUi=read('public/v135-whpp-retry-aware-run.js');
+  const injector=read('src/v44WhppUiPatch.js');
+  assert.match(runner,/v136-seven-business-runner-preflight-v1/);
+  assert.match(runner,/STATE_PREFLIGHT_TIMEOUT_MS = 4000/);
+  assert.match(runner,/controller\.abort\(\)/);
+  assert.match(runner,/__stateUnknown/);
+  assert.match(runner,/document\.getElementById\('reportDate'\)/);
+  assert.match(runner,/const sameTargetDay = !target \|\| date === target/);
+  assert.match(runner,/if \(!known \|\| !sameTargetDay\)/);
+  assert.match(retryUi,/__CE_QC_V67_RESILIENT_RUN_GUARD__\?\.targetDate/);
+  assert.match(retryUi,/document\.getElementById\('reportDate'\)/);
+  assert.ok(injector.indexOf('v135-whpp-retry-aware-run.js')<injector.indexOf('v132-whpp-seven-business-fast.js'));
 });
 
 test('WHPP total conservation guard remains present after fast render',()=>{
@@ -179,7 +195,7 @@ test('WHPP total conservation guard remains present after fast render',()=>{
   assert.match(guard,/WHPP本土/);
   assert.match(guard,/const residual=Math\.max\(0,total-sixTotal\)/);
   assert.ok(injector.indexOf('v105-fast-render.js')<injector.indexOf('v103-home-whpp-card-guard.js'));
-  assert.ok(injector.indexOf('v103-home-whpp-card-guard.js')<injector.indexOf('v132-whpp-seven-business-fast.js'));
-  assert.ok(injector.indexOf('v132-whpp-seven-business-fast.js')<injector.indexOf('v135-whpp-retry-aware-run.js'));
-  assert.ok(injector.indexOf('v135-whpp-retry-aware-run.js')<injector.indexOf('v133-closure-rate.js'));
+  assert.ok(injector.indexOf('v103-home-whpp-card-guard.js')<injector.indexOf('v135-whpp-retry-aware-run.js'));
+  assert.ok(injector.indexOf('v135-whpp-retry-aware-run.js')<injector.indexOf('v132-whpp-seven-business-fast.js'));
+  assert.ok(injector.indexOf('v132-whpp-seven-business-fast.js')<injector.indexOf('v133-closure-rate.js'));
 });
