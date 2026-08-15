@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v140-seven-business-range-trends-fast-v4';
+export const V137_TREND_TRUTH_ID='2026-08-15-v141-seven-business-direct-attempt-fast-v5';
 const BUSINESSES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const TYPES=new Set([...BUSINESSES,'CCSL','SHOPEE','TOTAL']);
 const CORE=['CE','CEAF','TBKH','ALI1688'];
@@ -13,6 +13,7 @@ function dateOnly(value=''){const v=String(value||'').trim().slice(0,10);return 
 function safe(value){try{return value&&typeof value==='object'?value:JSON.parse(String(value||'{}'));}catch{return {};}}
 function num(value){const n=Number(value);return Number.isFinite(n)?n:0;}
 function nullableNum(...values){for(const value of values){if(value===null||value===undefined||value==='')continue;const n=Number(value);if(Number.isFinite(n))return n;}return null;}
+function positiveNum(...values){for(const value of values){const n=Number(value);if(Number.isFinite(n)&&n>0)return n;}return 0;}
 function rate(n,d){return d?Number((num(n)*100/num(d)).toFixed(2)):0;}
 function clampAttempt(value){const n=Math.trunc(num(value));return n>0?Math.max(1,Math.min(3,n)):0;}
 
@@ -59,6 +60,8 @@ function sourceRows(fromDate,toDate,type){
       COALESCE(bf.isPod,cf.isPod,0) finalIsPod,
       COALESCE(bf.primaryCategory,cf.primaryCategory,'') finalCategory,
       COALESCE(bf.rawJson,cf.rawJson,'{}') finalJson,
+      COALESCE(bf.podAttemptNo,0) finalPodAttemptNo,
+      COALESCE(bf.currentAttemptNo,0) finalCurrentAttemptNo,
       COALESCE(c.state,'') currentState,COALESCE(c.stateJson,'{}') currentJson
     FROM valid v
     LEFT JOIN final_rows cf
@@ -110,8 +113,18 @@ function attemptOf(reportDate,current={},final={}){
 }
 
 function decorate(row){
-  const final={...safe(row.finalJson),primaryCategory:row.finalCategory,isPod:row.finalIsPod};
-  const current={...safe(row.currentJson),currentState:row.currentState};
+  const rawFinal=safe(row.finalJson);
+  const rawCurrent=safe(row.currentJson);
+  const persistedPodAttempt=positiveNum(row.finalPodAttemptNo,rawFinal.podAttemptNo);
+  const persistedCurrentAttempt=positiveNum(row.finalCurrentAttemptNo,rawFinal.currentAttemptNo);
+  const final={
+    ...rawFinal,
+    primaryCategory:row.finalCategory,
+    isPod:row.finalIsPod,
+    ...(persistedPodAttempt?{podAttemptNo:persistedPodAttempt}:{}),
+    ...(persistedCurrentAttempt?{currentAttemptNo:persistedCurrentAttempt}:{})
+  };
+  const current={...rawCurrent,currentState:row.currentState};
   const currentTerminal=terminalTruth(current);
   const finalTerminal=terminalTruth(final);
   const terminal=currentTerminal||finalTerminal;
@@ -170,13 +183,14 @@ function handler(req,res){
     const to=dateOnly(req.query.to),from=dateOnly(req.query.from)||to;
     if(!from||!to||from>to)return res.status(400).json({ok:false,error:'日期范围无效'});
     const dates=completedDates(from,to);
-    if(!dates.length)return res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:from,toDate:to,dates:[],ticket:[],podRate:[],ocRate:[],firstRate:[],attempt1:[],attempt2:[],attempt3:[],attemptUnknownPod:[]});
+    if(!dates.length)return res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:from,toDate:to,dates:[],ticket:[],podRate:[],ocRate:[],firstRate:[],attempt1:[],attempt2:[],attempt3:[],attemptUnknownPod:[],requestedDateAvailable:false});
     const entry=cacheEntry(type,from,to,dates);
+    const requestedDateAvailable=dates.includes(to);
     res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=30');
-    res.setHeader('Server-Timing',`v140;desc=scoped-trend-${entry.cacheHit?'hit':'miss'};dur=0`);
-    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'KNOWN_ATTEMPTS_RENDER_WITH_UNKNOWN_REPORTED_SEPARATELY',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
-  }catch(error){console.error('[CE-QC][V140][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
+    res.setHeader('Server-Timing',`v141;desc=scoped-direct-attempt-trend-${entry.cacheHit?'hit':'miss'};dur=0`);
+    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_COLUMNS_THEN_JSON_THEN_POD_DATE',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
+  }catch(error){console.error('[CE-QC][V141][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
 }
 
 const previousListen=express.application.listen;let installed=false;
-express.application.listen=function v140TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
+express.application.listen=function v141TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
