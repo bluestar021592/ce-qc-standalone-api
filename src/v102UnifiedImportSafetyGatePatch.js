@@ -1,3 +1,4 @@
+import './v156SessionHotPathPatch.js';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
@@ -5,7 +6,7 @@ import multer from 'multer';
 import express from 'express';
 import { enqueueUnifiedImport } from './v153UnifiedImportQueue.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID='2026-08-15-v156-zero-db-disk-upload-ingress-v8';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID='2026-08-15-v156-zero-db-disk-upload-ingress-v9';
 const ROUTE='/api/import/unified-daily-report';
 const WRAPPED=Symbol.for('ce-qc.v102-unified-import-safety');
 const fastSpoolDir=path.join(process.env.LOCALAPPDATA||process.env.TEMP||process.cwd(),'CE_QC_LAUNCHER','upload_spool');
@@ -25,11 +26,10 @@ function ingressError(code,message){const error=new Error(message);error.code=co
 function validExcelName(name=''){return /\.(xlsx|xls)$/i.test(String(name||'').trim());}
 
 // V156 hard boundary:
-// For the unified-daily-report route we deliberately discard the legacy route-level
-// multer middleware (whose destination is the DB/data disk) and install exactly one
-// local-appdata multer middleware. App-level auth/same-origin middleware remains in
-// force. After the multipart body is on C: the ingress only creates tiny LOCALAPPDATA
-// queue metadata and returns HTTP 202; neither D: nor SQLite is touched before 202.
+// Session identity is served from the validated in-memory hot cache on normal active
+// sessions, then this route discards the legacy DB-disk multer middleware and installs
+// exactly one LOCALAPPDATA multer middleware. After multipart reception, only tiny
+// LOCALAPPDATA queue metadata is written before HTTP 202. SQLite is Worker-only.
 const previousPost=express.application.post;
 if(typeof previousPost==='function'&&!previousPost[WRAPPED]){
   const wrappedPost=function v156UnifiedImportQueuePost(pathValue,...handlers){
@@ -45,7 +45,7 @@ if(typeof previousPost==='function'&&!previousPost[WRAPPED]){
         const queued=await enqueueUnifiedImport({tempPath:req.file.path,originalName:req.file.originalname,manualReportDate:req.body?.reportDate||''});
         res.setHeader('Cache-Control','no-store');
         res.setHeader('X-CE-QC-Import-Path','V156-LOCALAPPDATA-ZERO-DB-DISK');
-        return res.status(202).json({ok:true,queued:true,...queued,uploadElapsedMs:Date.now()-startedAt,patchId:'2026-08-15-v156-zero-db-disk-upload-v1',message:'日报已接收，正在自动识别并分类，可以继续上传下一份。'});
+        return res.status(202).json({ok:true,queued:true,...queued,uploadElapsedMs:Date.now()-startedAt,patchId:'2026-08-15-v156-zero-db-disk-upload-v2',message:'日报已接收，正在自动识别并分类，可以继续上传下一份。'});
       }catch(error){
         if(req?.file?.path)await fsPromises.unlink(req.file.path).catch(()=>{});
         console.error('[CE-QC][V156_IMPORT_INGRESS]',error?.code||'',error?.message||error);
