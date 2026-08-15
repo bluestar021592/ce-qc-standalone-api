@@ -33,6 +33,16 @@ test('V137 keeps WHPP business rules but removes independent dashboard-source wo
   assert.match(ui,/数据来自当前业务有效快照/);
   assert.match(ui,/当前业务快照处理中/);
   assert.match(injector,/v137WhppUnifiedBusinessStatePatch\.js/);
-  assert.match(injector,/v137-whpp-unified-snapshot-view\.js\?v=20260815-1/);
+  assert.match(injector,/v137-whpp-unified-snapshot-view\.js\?v=20260815-2/);
   assert.ok(injector.indexOf('v132-whpp-seven-business-fast.js')<injector.indexOf('v137-whpp-unified-snapshot-view.js'));
+});
+
+test('V137 heading reconciliation is idempotent and cannot self-trigger an endless body observer loop',()=>{
+  const ui=read('public/v137-whpp-unified-snapshot-view.js');
+  assert.match(ui,/v137-whpp-unified-snapshot-view-v2/);
+  assert.match(ui,/if\(node\.textContent!==target\)node\.textContent=target/);
+  assert.match(ui,/pageObserver\.observe\(page,\{subtree:true,childList:true,characterData:true\}\)/);
+  assert.match(ui,/bootstrapObserver\.observe\(document\.body,\{subtree:true,childList:true\}\)/);
+  assert.doesNotMatch(ui,/observer\.observe\(document\.body,\{subtree:true,childList:true,characterData:true\}\)/);
+  assert.ok(ui.indexOf('const headingDate=')<ui.indexOf("document.getElementById('reportDate')"));
 });
