@@ -3,18 +3,16 @@ const TRACK_REQUIRED_ORDER_STATUSES = new Set(['50', '60', '70']);
 /**
  * Scan-layer classifier for otwms-order-confirm-query.
  *
- * IMPORTANT BUSINESS RULE:
- * The scan API and the tracking-event API are two independent status layers.
- * This shared classifier stays conservative because it is used by both CCSL and
- * SHOPEE. Business-specific terminal rules such as SHOPEE order cancellation are
- * applied by the SHOPEE analyzer, not globally here.
- *
- * Locked mapping:
+ * The scan API decides whether trajectory is needed. Locked mapping:
+ *   10  订单取消 -> normal terminal, no trajectory
  *   50  已入库   -> trajectory required
  *   60  派件分配 -> trajectory required
  *   70  派送中   -> trajectory required
  *   85  已签收   -> POD terminal, no trajectory
  *   100 已退回   -> return terminal, no trajectory
+ *
+ * Unknown successful scan statuses are not guessed from free text. They remain
+ * local scan-status holds and are blocked from automated trajectory calls by V86.
  */
 export function classifyScanTerminal(row = {}, requestStatus = 'success') {
   if (requestStatus !== 'success') {
@@ -26,6 +24,9 @@ export function classifyScanTerminal(row = {}, requestStatus = 'success') {
 
   const orderStatus = String(row.orderStatus ?? '').trim();
 
+  if (orderStatus === '10') {
+    return result('ORDER_CANCELLED', false, 'ORDER_CANCELLED', 'ORDER_STATUS_10');
+  }
   if (orderStatus === '85') {
     return result('POD', false, 'POD_COMPLETED', 'ORDER_STATUS_85');
   }
@@ -36,9 +37,7 @@ export function classifyScanTerminal(row = {}, requestStatus = 'success') {
     return result('OPEN_TRACK_REQUIRED', true, '', `ORDER_STATUS_${orderStatus}`);
   }
 
-  // A successful but currently unknown scan status is intentionally sent to
-  // trajectory lookup instead of being guessed from status text/statusCode.
-  return result('OPEN_TRACK_REQUIRED', true, '', orderStatus ? `ORDER_STATUS_UNKNOWN_${orderStatus}` : 'ORDER_STATUS_UNKNOWN');
+  return result('SCAN_STATUS_HOLD', false, '', orderStatus ? `ORDER_STATUS_UNKNOWN_${orderStatus}` : 'ORDER_STATUS_UNKNOWN');
 }
 
 function result(currentState, trackRequired, scanTerminalType, scanTerminalReason) {
