@@ -93,5 +93,5 @@ test('V139 retries missing confirm rows and read-only trajectory requests at lea
 test('V139 manual carry UI is injected into the managed HTML build', () => {
   const injector = read('src/v44WhppUiPatch.js');
   assert.match(injector, /v138-ccsl-scan-progress\.js\?v=20260816-2/);
-  assert.match(injector, /v139-carry-manual-window\.js\?v=20260816-2/);
+  assert.match(injector, /v139-carry-manual-window\.js\?v=20260816-3/);
 });
