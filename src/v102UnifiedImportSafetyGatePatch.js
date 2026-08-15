@@ -5,7 +5,7 @@ import multer from 'multer';
 import express from 'express';
 import { enqueueUnifiedImport } from './v153UnifiedImportQueue.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID='2026-08-15-v155-local-spool-classification-first-v7';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID='2026-08-15-v156-zero-db-disk-upload-ingress-v8';
 const ROUTE='/api/import/unified-daily-report';
 const WRAPPED=Symbol.for('ce-qc.v102-unified-import-safety');
 const fastSpoolDir=path.join(process.env.LOCALAPPDATA||process.env.TEMP||process.cwd(),'CE_QC_LAUNCHER','upload_spool');
@@ -24,41 +24,40 @@ const fastUnifiedUpload=multer({
 function ingressError(code,message){const error=new Error(message);error.code=code;return error;}
 function validExcelName(name=''){return /\.(xlsx|xls)$/i.test(String(name||'').trim());}
 
-// V155 upload boundary:
-// 1) Multipart bytes land on the local launcher spool instead of the large DB/data disk.
-// 2) HTTP ingress only registers the already-received spool file and returns 202.
-// 3) Excel parsing/classification and SQLite persistence stay in an isolated Worker.
-// This restores the old "upload -> recognize -> auto classify" experience without
-// putting 15+ GiB SQLite work back onto the browser request thread.
+// V156 hard boundary:
+// For the unified-daily-report route we deliberately discard the legacy route-level
+// multer middleware (whose destination is the DB/data disk) and install exactly one
+// local-appdata multer middleware. App-level auth/same-origin middleware remains in
+// force. After the multipart body is on C: the ingress only creates tiny LOCALAPPDATA
+// queue metadata and returns HTTP 202; neither D: nor SQLite is touched before 202.
 const previousPost=express.application.post;
 if(typeof previousPost==='function'&&!previousPost[WRAPPED]){
-  const wrappedPost=function v155UnifiedImportQueuePost(pathValue,...handlers){
+  const wrappedPost=function v156UnifiedImportQueuePost(pathValue,...handlers){
     if(pathValue!==ROUTE||handlers.length===0)return previousPost.call(this,pathValue,...handlers);
-    const legacyFinalHandler=handlers.pop();
-    if(typeof legacyFinalHandler!=='function')return previousPost.call(this,pathValue,...handlers,legacyFinalHandler);
+    const legacyFinalHandler=handlers[handlers.length-1];
+    if(typeof legacyFinalHandler!=='function')return previousPost.call(this,pathValue,...handlers);
 
-    const routeHandlers=[...handlers];
-    const multerIndex=routeHandlers.findIndex(handler=>typeof handler==='function'&&/multer/i.test(String(handler.name||'')));
-    if(multerIndex>=0)routeHandlers[multerIndex]=fastUnifiedUpload.single('file');
-    else if(routeHandlers.length===1)routeHandlers[0]=fastUnifiedUpload.single('file');
-
-    const queuedHandler=async function v155UnifiedImportQueueIngress(req,res,next){
+    const queuedHandler=async function v156UnifiedImportQueueIngress(req,res,next){
       const startedAt=Date.now();
       try{
         if(!req?.file?.path)return await legacyFinalHandler.call(this,req,res,next);
         if(!validExcelName(req.file.originalname))throw ingressError('UNIFIED_IMPORT_FILE_TYPE','综合日报只支持 .xls 或 .xlsx。');
         const queued=await enqueueUnifiedImport({tempPath:req.file.path,originalName:req.file.originalname,manualReportDate:req.body?.reportDate||''});
         res.setHeader('Cache-Control','no-store');
-        res.setHeader('X-CE-QC-Import-Path','V155-LOCAL-SPOOL-WORKER-CLASSIFICATION');
-        return res.status(202).json({ok:true,queued:true,...queued,uploadElapsedMs:Date.now()-startedAt,patchId:'2026-08-15-v155-classification-first-v1',message:'日报已接收，正在自动识别并分类，可以继续上传下一份。'});
+        res.setHeader('X-CE-QC-Import-Path','V156-LOCALAPPDATA-ZERO-DB-DISK');
+        return res.status(202).json({ok:true,queued:true,...queued,uploadElapsedMs:Date.now()-startedAt,patchId:'2026-08-15-v156-zero-db-disk-upload-v1',message:'日报已接收，正在自动识别并分类，可以继续上传下一份。'});
       }catch(error){
         if(req?.file?.path)await fsPromises.unlink(req.file.path).catch(()=>{});
-        console.error('[CE-QC][V155_IMPORT_INGRESS]',error?.code||'',error?.message||error);
+        console.error('[CE-QC][V156_IMPORT_INGRESS]',error?.code||'',error?.message||error);
         if(res.headersSent)return;
         return res.status(400).json({ok:false,code:error?.code||'UNIFIED_IMPORT_QUEUE_FAILED',error:error?.message||String(error),gateId:V102_UNIFIED_IMPORT_SAFETY_GATE_ID});
       }
     };
-    return previousPost.call(this,pathValue,...routeHandlers,queuedHandler);
+
+    // IMPORTANT: do not forward any legacy route-level upload middleware here.
+    // The current server route has only legacy multer + final handler; the global
+    // access-control middleware is registered separately with app.use().
+    return previousPost.call(this,pathValue,fastUnifiedUpload.single('file'),queuedHandler);
   };
   Object.defineProperty(wrappedPost,WRAPPED,{value:true});
   express.application.post=wrappedPost;
