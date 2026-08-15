@@ -7,16 +7,40 @@ import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 
-test('V141 Shopee trends use scoped queries, direct attempt columns and partial evidence',()=>{
+test('V142 Shopee trends use scoped queries, persisted attempt columns and real track-event fallback',()=>{
   const source=read('src/v137TrendTruthPatch.js');
   assert.match(source,/function scopeBusinessTypes\(type\)/);
-  assert.match(source,/\.all\(fromDate,toDate,\.\.\.scope\)/);
   assert.match(source,/bf\.podAttemptNo/);
   assert.match(source,/bf\.currentAttemptNo/);
   assert.match(source,/persistedPodAttempt/);
+  assert.match(source,/business_track_events/);
+  assert.match(source,/eventCode,''\) AS TEXT\)='30'/);
+  assert.match(source,/delivery assign/);
+  assert.match(source,/out for delivery/);
+  assert.match(source,/trackAttemptCount/);
   assert.doesNotMatch(source,/d\.unknown===0/);
   assert.match(source,/attemptUnknownPod/);
-  assert.match(source,/attemptEvidencePolicy:'PERSISTED_ATTEMPT_COLUMNS_THEN_JSON_THEN_POD_DATE'/);
+  assert.match(source,/attemptEvidencePolicy:'PERSISTED_ATTEMPT_THEN_RAW_THEN_TRACK_EVENTS_THEN_POD_DATE'/);
+});
+
+test('V142 selected imported day is auto-finalized only from two valid completed child snapshots',()=>{
+  const source=read('src/v142UnifiedSnapshotRepairPatch.js');
+  assert.match(source,/latestCcslSnapshot/);
+  assert.match(source,/latestShopeeSnapshot/);
+  assert.match(source,/COALESCE\(status,'VALID'\)='VALID'/);
+  assert.match(source,/COALESCE\(reconciliationStatus,'COMPLETED'\)='COMPLETED'/);
+  assert.match(source,/completeUnifiedSnapshot/);
+  assert.match(source,/WAITING_FOR_CHILD_SNAPSHOTS/);
+  assert.doesNotMatch(source,/SET status='COMPLETED'/);
+});
+
+test('V142 lifecycle UI distinguishes not imported, processing and reconciliation failure',()=>{
+  const source=read('public/v137-range-trends.js');
+  assert.match(source,/requestedDateAvailable===false/);
+  assert.match(source,/尚未导入日报/);
+  assert.match(source,/日报已导入，正在等待处理完成/);
+  assert.match(source,/一致性检查未通过/);
+  assert.match(source,/data-v141-hidden-for-no-data/);
 });
 
 test('V141 legacy V27 trend calls bridge to V137 instead of returning retired JSON errors',()=>{
@@ -33,13 +57,6 @@ test('V141 legacy V56 trend observer is fully retired',()=>{
   assert.match(source,/replacement:'V137_RANGE_TRENDS'/);
   assert.doesNotMatch(source,/fetch\(`\/api\/v27\/trends/);
   assert.doesNotMatch(source,/new MutationObserver/);
-});
-
-test('V141 selected day without completed snapshot is not presented as truthful zero data',()=>{
-  const source=read('public/v137-range-trends.js');
-  assert.match(source,/requestedDateAvailable===false/);
-  assert.match(source,/没有 VALID \+ COMPLETED 的有效日报快照/);
-  assert.match(source,/data-v141-hidden-for-no-data/);
 });
 
 test('V140 WHPP import display never derives WHPP as the remainder of six businesses',()=>{
