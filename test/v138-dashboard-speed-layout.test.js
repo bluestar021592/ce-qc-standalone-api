@@ -10,8 +10,8 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const syntax=p=>{const r=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(r.status,0,`${p}: ${r.stderr||r.stdout}`);};
 
-test('V138 runtime javascript is syntax valid',()=>{
-  for(const file of ['src/v137TrendTruthPatch.js','public/v137-range-trends.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','src/v44WhppUiPatch.js'])syntax(file);
+test('V142 runtime javascript is syntax valid',()=>{
+  for(const file of ['src/v137TrendTruthPatch.js','src/v142UnifiedSnapshotRepairPatch.js','public/v137-range-trends.js','public/v108-route-lazy-features.js','public/v109-instant-business-navigation.js','src/v44WhppUiPatch.js'])syntax(file);
 });
 
 test('home desktop layout keeps all eight business cards on one row',()=>{
@@ -22,26 +22,30 @@ test('home desktop layout keeps all eight business cards on one row',()=>{
   assert.match(injector,/v138-dashboard-speed-layout\.css\?v=20260815-1/);
 });
 
-test('V138 is the only live range trend renderer and legacy V56 is not injected',()=>{
+test('V142 is the only live range trend renderer and lifecycle UI is cache-busted',()=>{
   const ui=read('public/v137-range-trends.js');
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(ui,/v138-range-trends-exclusive-v2/);
+  assert.match(ui,/v142-range-trends-lifecycle-v4/);
   assert.match(ui,/v137-exclusive-trends/);
-  assert.match(ui,/data-replaced-by|replacedBy/);
+  assert.match(ui,/replacedBy/);
   assert.match(ui,/v137-attempt-trends/);
-  assert.match(ui,/SHOPEE CN/);
-  assert.match(ui,/SHOPEE VN/);
-  assert.match(injector,/v137-range-trends\.js\?v=20260815-2/);
+  assert.match(ui,/requestedDateLifecycle/);
+  assert.match(ui,/尚未导入日报/);
+  assert.match(ui,/正在等待处理完成/);
+  assert.match(ui,/一致性检查未通过/);
+  assert.match(injector,/v137-range-trends\.js\?v=20260815-6/);
   assert.doesNotMatch(injector,/<script src="\/v56-trend-truth\.js/);
 });
 
-test('trend backend computes a selected range once and reuses it across business navigation',()=>{
+test('trend backend uses selected business scope, persisted attempts, track events and lifecycle repair',()=>{
   const backend=read('src/v137TrendTruthPatch.js');
   assert.match(backend,/CACHE_TTL_MS=15_000/);
-  assert.match(backend,/const trendCache=new Map\(\)/);
-  assert.match(backend,/function cacheEntry/);
-  assert.match(backend,/for\(const type of TYPES\)byType\[type\]=build/);
-  assert.match(backend,/cacheHit/);
+  assert.match(backend,/function scopeBusinessTypes\(type\)/);
+  assert.match(backend,/function sourceRows\(fromDate,toDate,type\)/);
+  assert.match(backend,/business_track_events/);
+  assert.match(backend,/trackAttemptCount/);
+  assert.match(backend,/repairUnifiedSnapshotCompletion\(to\)/);
+  assert.match(backend,/requestedDateLifecycle:lifecycle/);
   assert.match(backend,/related=type==='TOTAL'/);
 });
 
