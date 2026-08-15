@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V139_INSTANT_BOOTSTRAP_ID='2026-08-15-v139-v43-light-current-import-shell-v4';
+export const V139_INSTANT_BOOTSTRAP_ID='2026-08-15-v139-v43-light-current-import-shell-v5';
 const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const CACHE_MS=5_000;
 let countCache=null;
@@ -37,11 +37,11 @@ function currentCounts(snapshotId=''){
       for(const row of rows)if(counts[row.businessType]!==undefined)counts[row.businessType]=n(row.count);
       const finals=getDb().prepare(`
         SELECT u.businessType,
-          SUM(CASE
-            WHEN u.businessType IN ('CE','CEAF','TBKH','ALI1688') AND f.shipmentCode IS NOT NULL THEN 1
-            WHEN u.businessType IN ('SHOPEECN','SHOPEEVN') AND bf.shipmentCode IS NOT NULL THEN 1
-            WHEN u.businessType='WHPP' AND wf.shipmentCode IS NOT NULL THEN 1
-            ELSE 0 END) AS finalized
+          COUNT(DISTINCT CASE
+            WHEN u.businessType IN ('CE','CEAF','TBKH','ALI1688') AND f.shipmentCode IS NOT NULL THEN u.shipmentCode
+            WHEN u.businessType IN ('SHOPEECN','SHOPEEVN') AND bf.shipmentCode IS NOT NULL THEN u.shipmentCode
+            WHEN u.businessType='WHPP' AND wf.shipmentCode IS NOT NULL THEN u.shipmentCode
+            ELSE NULL END) AS finalized
         FROM unified_import_rows u
         LEFT JOIN final_rows f
           ON u.businessType IN ('CE','CEAF','TBKH','ALI1688')
