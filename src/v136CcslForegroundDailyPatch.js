@@ -1,6 +1,6 @@
 import express from 'express';
 import { CEClient } from './ceClient.js';
-import { runQcPipeline } from './pipeline.js';
+import { runQcPipeline } from './pipelineV137.js';
 import { loadState, saveState } from './storage.js';
 import { createOrRecoverRun, getCurrentReportDate, getRunStatus, updateRunLock } from './store.js';
 import { buildCoreKpis, buildCriticalDashboard, buildDashboardRows } from './reporting.js';
@@ -10,7 +10,7 @@ import { appendRuntimeLog } from './runtimeLog.js';
 import { completeUnifiedSnapshot, updateCarryoverResults } from './unifiedImportStore.js';
 import { getMatchingBusinessSnapshot, loadBusinessState, SHOPEE } from './businessStore.js';
 
-export const V136_CCSL_FOREGROUND_DAILY_ID='2026-08-15-v136-ccsl-foreground-daily-v1';
+export const V136_CCSL_FOREGROUND_DAILY_ID='2026-08-15-v137-ccsl-foreground-scan-only-v2';
 const ROUTES=new Set(['/api/run','/api/run/start','/api/run/resume']);
 const active=new Set();
 function bill(value){return String(value||'').trim().toUpperCase();}
