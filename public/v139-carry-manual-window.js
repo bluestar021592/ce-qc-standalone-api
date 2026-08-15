@@ -1,17 +1,70 @@
 (function installV139CarryManualWindow(global) {
   if (global.__CE_QC_V139_CARRY_MANUAL_WINDOW__) return;
   global.__CE_QC_V139_CARRY_MANUAL_WINDOW__ = true;
-  const VERSION = '2026-08-16-v139-carry-manual-window-v2';
+  const VERSION = '2026-08-16-v139-carry-manual-window-v3';
   let busy = false;
 
   function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;' }[ch]));
   }
   function fmt(value) { return Number(value || 0).toLocaleString('zh-CN'); }
   function visibleImportPage() {
     return location.pathname === '/import' || document.getElementById('importPage')?.hidden === false || document.getElementById('importPage')?.classList?.contains('active');
   }
+
+  function installLayoutStyle() {
+    if (document.getElementById('v139ImportLayoutStyle')) return;
+    const style = document.createElement('style');
+    style.id = 'v139ImportLayoutStyle';
+    style.textContent = `
+      #importPage .operations-dashboard {
+        display: grid !important;
+        grid-template-columns: minmax(430px, .92fr) minmax(540px, 1.08fr) !important;
+        grid-template-areas:
+          "import summary"
+          "run carry" !important;
+        gap: 12px !important;
+        align-items: start !important;
+      }
+      #importPage #unifiedImport { grid-area: import; align-self: start !important; }
+      #importPage #runPanel { grid-area: run; align-self: start !important; }
+      #importPage #v139CarryManualPanel { grid-area: carry; align-self: start !important; }
+      #importPage .unified-summary-panel {
+        grid-area: summary;
+        min-height: 0 !important;
+        height: auto !important;
+        align-self: start !important;
+      }
+      #importPage .unified-summary-panel #unifiedClassificationSummary {
+        min-height: 0 !important;
+        height: auto !important;
+      }
+      #importPage .unified-summary-panel .empty-state,
+      #importPage .unified-summary-panel .empty-state.compact {
+        min-height: 170px !important;
+        padding: 28px 18px !important;
+      }
+      #importPage #v139CarryManualPanel .preview-table-wrap {
+        max-height: 300px;
+        overflow: auto;
+      }
+      #importPage #v139CarryManualPanel .empty-state { min-height: 120px !important; }
+      @media (max-width: 1280px) {
+        #importPage .operations-dashboard {
+          grid-template-columns: 1fr !important;
+          grid-template-areas:
+            "import"
+            "summary"
+            "run"
+            "carry" !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   function host() {
+    installLayoutStyle();
     const page = document.getElementById('importPage');
     if (!page) return null;
     let panel = document.getElementById('v139CarryManualPanel');
@@ -61,9 +114,6 @@
         historicalSeparate: true
       };
       if (typeof renderUnifiedImportResult === 'function') renderUnifiedImportResult();
-      // Keep the original status block understandable for an already-imported day:
-      // “current queue” is now today's automatic queue only; historical tickets are
-      // visible in the independent panel below.
       const statusRoot = document.getElementById('fileStatus');
       if (statusRoot) {
         for (const node of statusRoot.querySelectorAll('p,span,div')) {
@@ -137,6 +187,7 @@
 
   function ensure() {
     if (!visibleImportPage()) return;
+    installLayoutStyle();
     host();
     load();
   }
