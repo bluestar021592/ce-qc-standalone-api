@@ -1,7 +1,8 @@
 import express from 'express';
 import { getDb } from './db.js';
+import { repairUnifiedSnapshotCompletion } from './v142UnifiedSnapshotRepairPatch.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v141-seven-business-direct-attempt-fast-v5';
+export const V137_TREND_TRUTH_ID='2026-08-15-v142-track-attempt-and-snapshot-repair-v6';
 const BUSINESSES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const TYPES=new Set([...BUSINESSES,'CCSL','SHOPEE','TOTAL']);
 const CORE=['CE','CEAF','TBKH','ALI1688'];
@@ -43,6 +44,28 @@ function completedDates(fromDate,toDate){
 function sourceRows(fromDate,toDate,type){
   const scope=scopeBusinessTypes(type);
   const placeholders=scope.map(()=>'?').join(',');
+  const needsShopeeAttempts=scope.some(item=>SHOPEE.includes(item));
+  const attemptCte=needsShopeeAttempts?`, track_attempts AS (
+      SELECT reportDate,UPPER(TRIM(shipmentCode)) shipmentCode,
+        COUNT(DISTINCT CASE
+          WHEN length(eventTime)>=10 THEN substr(replace(eventTime,'/','-'),1,10)
+          ELSE NULL END) attemptCount
+      FROM business_track_events
+      WHERE businessType='SHOPEE' AND reportDate BETWEEN ? AND ?
+        AND (
+          CAST(COALESCE(eventCode,'') AS TEXT)='30'
+          OR LOWER(COALESCE(rawJson,'')) LIKE '%delivery assign%'
+          OR LOWER(COALESCE(rawJson,'')) LIKE '%courier assign%'
+          OR LOWER(COALESCE(rawJson,'')) LIKE '%out for delivery%'
+          OR COALESCE(rawJson,'') LIKE '%派件分配%'
+          OR COALESCE(rawJson,'') LIKE '%分配快递员%'
+          OR COALESCE(rawJson,'') LIKE '%派送中%'
+        )
+      GROUP BY reportDate,UPPER(TRIM(shipmentCode))
+    )`:'';
+  const trackSelect=needsShopeeAttempts?'COALESCE(ta.attemptCount,0)':'0';
+  const trackJoin=needsShopeeAttempts?'LEFT JOIN track_attempts ta ON ta.reportDate=v.reportDate AND ta.shipmentCode=UPPER(TRIM(v.shipmentCode))':'';
+  const params=[fromDate,toDate,...scope,...(needsShopeeAttempts?[fromDate,toDate]:[])];
   return getDb().prepare(`
     WITH ranked AS (
       SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
@@ -55,13 +78,14 @@ function sourceRows(fromDate,toDate,type){
       SELECT DISTINCT u.reportDate,u.businessType,u.shipmentCode
       FROM latest l INNER JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate
       WHERE u.businessType IN (${placeholders})
-    )
+    )${attemptCte}
     SELECT v.reportDate,v.businessType,v.shipmentCode,
       COALESCE(bf.isPod,cf.isPod,0) finalIsPod,
       COALESCE(bf.primaryCategory,cf.primaryCategory,'') finalCategory,
       COALESCE(bf.rawJson,cf.rawJson,'{}') finalJson,
       COALESCE(bf.podAttemptNo,0) finalPodAttemptNo,
       COALESCE(bf.currentAttemptNo,0) finalCurrentAttemptNo,
+      ${trackSelect} trackAttemptCount,
       COALESCE(c.state,'') currentState,COALESCE(c.stateJson,'{}') currentJson
     FROM valid v
     LEFT JOIN final_rows cf
@@ -69,9 +93,10 @@ function sourceRows(fromDate,toDate,type){
     LEFT JOIN business_final_rows bf
       ON bf.shipmentCode=v.shipmentCode AND bf.reportDate=v.reportDate
      AND ((v.businessType IN ('SHOPEECN','SHOPEEVN') AND bf.businessType='SHOPEE') OR (v.businessType='WHPP' AND bf.businessType='WHPP'))
+    ${trackJoin}
     LEFT JOIN shipment_current_state c ON c.shipmentCode=v.shipmentCode
     ORDER BY v.reportDate,v.businessType,v.shipmentCode
-  `).all(fromDate,toDate,...scope);
+  `).all(...params);
 }
 
 function terminalTruth(row={}){
@@ -98,11 +123,13 @@ function attemptDateFromSource(source={}){
   return /^\d{4}-\d{2}-\d{2}$/.test(stamp)?stamp:'';
 }
 
-function attemptOf(reportDate,current={},final={}){
+function attemptOf(reportDate,current={},final={},trackAttemptCount=0){
   for(const source of [current,final]){
     const explicit=attemptFromSource(source);
     if(explicit)return explicit;
   }
+  const trackAttempt=clampAttempt(trackAttemptCount);
+  if(trackAttempt)return trackAttempt;
   for(const source of [current,final]){
     const stamp=attemptDateFromSource(source);
     if(!stamp)continue;
@@ -131,7 +158,7 @@ function decorate(row){
   const pod=terminal==='POD'||(!terminal&&Number(row.finalIsPod||0)===1);
   const closed=Boolean(terminal);
   const ocDays=closed?0:num(nullableNum(current.OC天数,current.ocDays,final.OC天数,final.ocDays));
-  const attempt=pod?attemptOf(row.reportDate,current,final):0;
+  const attempt=pod?attemptOf(row.reportDate,current,final,row.trackAttemptCount):0;
   return {...row,pod,closed,terminal,ocDays,attempt,attemptUnknown:pod&&!attempt?1:0};
 }
 
@@ -182,15 +209,16 @@ function handler(req,res){
     if(!TYPES.has(type))return res.status(400).json({ok:false,error:'业务板块无效'});
     const to=dateOnly(req.query.to),from=dateOnly(req.query.from)||to;
     if(!from||!to||from>to)return res.status(400).json({ok:false,error:'日期范围无效'});
+    const lifecycle=repairUnifiedSnapshotCompletion(to);
     const dates=completedDates(from,to);
-    if(!dates.length)return res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:from,toDate:to,dates:[],ticket:[],podRate:[],ocRate:[],firstRate:[],attempt1:[],attempt2:[],attempt3:[],attemptUnknownPod:[],requestedDateAvailable:false});
+    if(!dates.length)return res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:from,toDate:to,dates:[],ticket:[],podRate:[],ocRate:[],firstRate:[],attempt1:[],attempt2:[],attempt3:[],attemptUnknownPod:[],requestedDateAvailable:false,requestedDateLifecycle:lifecycle});
     const entry=cacheEntry(type,from,to,dates);
     const requestedDateAvailable=dates.includes(to);
     res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=30');
-    res.setHeader('Server-Timing',`v141;desc=scoped-direct-attempt-trend-${entry.cacheHit?'hit':'miss'};dur=0`);
-    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_COLUMNS_THEN_JSON_THEN_POD_DATE',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
-  }catch(error){console.error('[CE-QC][V141][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
+    res.setHeader('Server-Timing',`v142;desc=track-attempt-trend-${entry.cacheHit?'hit':'miss'};dur=0`);
+    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,requestedDateLifecycle:lifecycle,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_THEN_RAW_THEN_TRACK_EVENTS_THEN_POD_DATE',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
+  }catch(error){console.error('[CE-QC][V142][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
 }
 
 const previousListen=express.application.listen;let installed=false;
-express.application.listen=function v141TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
+express.application.listen=function v142TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
