@@ -9,7 +9,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const syntax=p=>{const result=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(result.status,0,`${p}: ${result.stderr||result.stdout}`);};
 
-test('V146 candidate critical runtime files are syntax valid',()=>{
+test('V147 candidate critical runtime files are syntax valid',()=>{
   for(const file of [
     'bootstrap.js','server.js','src/v44WhppUiPatch.js','src/v137TrendTruthPatch.js',
     'src/v142UnifiedSnapshotRepairPatch.js','src/v143HomeTruthPatch.js','src/v146ProcessingReadinessPatch.js','src/unifiedImportStore.js',
@@ -17,19 +17,29 @@ test('V146 candidate critical runtime files are syntax valid',()=>{
   ])syntax(file);
 });
 
-test('V146 UI cache bust loads processing readiness runner and canonical home truth',()=>{
+test('V147 UI cache bust loads current-unified-date runner',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/2026-08-15-v146-processing-readiness-v34/);
-  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260815-7/);
+  assert.match(injector,/2026-08-15-v147-current-unified-date-runner-v35/);
+  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260815-8/);
   assert.match(injector,/v137-range-trends\.js\?v=20260815-6/);
   assert.match(injector,/v64-whpp-total-kpi-integration\.js\?v=20260815-8/);
   assert.ok(injector.indexOf('v139-normal-web-runtime.js?v=20260815-5')<injector.indexOf('v64-whpp-total-kpi-integration.js?v=20260815-8'));
   assert.doesNotMatch(injector,/<script src="\/v56-trend-truth\.js/);
 });
 
+test('V147 runner binds readiness to latest unified import date instead of yesterday completed Shopee state',()=>{
+  const runner=read('public/v67-resilient-run-guard.js');
+  assert.match(runner,/api\/import\/unified-latest\?compact=1/);
+  assert.match(runner,/const unifiedDate=isoDate\(states\.UNIFIED\?\.import\?\.reportDate\)/);
+  assert.match(runner,/states\.CURRENT_REPORT_DATE=reportDate/);
+  assert.match(runner,/api\/v146\/processing-readiness/);
+  assert.match(runner,/readiness\.processingComplete/);
+  assert.match(runner,/LATEST_UNIFIED_REPORT_DATE_PROCESSING_EVIDENCE/);
+  assert.match(runner,/SHOPEE扫描/);
+});
+
 test('V146 distinguishes imported final rows from actually processed Shopee rows',()=>{
   const backend=read('src/v146ProcessingReadinessPatch.js');
-  const runner=read('public/v67-resilient-run-guard.js');
   const bootstrap=read('bootstrap.js');
   assert.match(bootstrap,/v146ProcessingReadinessPatch/);
   assert.match(backend,/business_scan_results/);
@@ -42,9 +52,6 @@ test('V146 distinguishes imported final rows from actually processed Shopee rows
   assert.match(backend,/UPDATE business_export_snapshots/);
   assert.match(backend,/UPDATE business_run_locks/);
   assert.match(backend,/UPDATE unified_snapshots SET status='IMPORTED'/);
-  assert.match(runner,/api\/v146\/processing-readiness/);
-  assert.match(runner,/readiness\.processingComplete/);
-  assert.match(runner,/CURRENT_REPORT_PROCESSING_EVIDENCE/);
 });
 
 test('V145 home core excludes Shopee and Shopee special metrics come from canonical final rows',()=>{
@@ -105,6 +112,6 @@ test('unified snapshot completion still blocks invalid reconciliation rather tha
   const store=read('src/unifiedImportStore.js');assert.match(store,/INVALID_FAILED_RECONCILIATION/);assert.match(store,/UNIFIED_RECONCILIATION_FAILED/);assert.match(store,/validationPassed/);assert.match(store,/status='COMPLETED'/);
 });
 
-test('database schema is not bumped by V143/V144/V145/V146 repair',()=>{
+test('database schema is not bumped by V143/V144/V145/V146/V147 repair',()=>{
   const migrations=read('src/migrations.js');assert.match(migrations,/const SCHEMA_VERSION = 18/);
 });
