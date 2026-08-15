@@ -134,7 +134,6 @@ try {
   await importPhase('v86StrictTrackStatusGate', './src/v86StrictTrackStatusGate.js');
   await importPhase('v89InstantDashboardPatch', './src/v89InstantDashboardPatch.js');
   await importPhase('v90FastDashboardReadPatch', './src/v90FastDashboardReadPatch.js');
-  await importPhase('v108PerformanceIndexPatch', './src/v108PerformanceIndexPatch.js');
   await importPhase('v94ShopeeWhppSourceTruthPatch', './src/v94ShopeeWhppSourceTruthPatch.js');
   await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
 
@@ -143,7 +142,6 @@ try {
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
-  await importPhase('v146ProcessingReadinessPatch', './src/v146ProcessingReadinessPatch.js');
 
   await importServerInteractiveFirst();
   scheduleDeferredMaintenance({ v92, v76Repair });

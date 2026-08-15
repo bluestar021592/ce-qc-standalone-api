@@ -3,16 +3,20 @@ const TRACK_REQUIRED_ORDER_STATUSES = new Set(['50', '60', '70']);
 /**
  * Scan-layer classifier for otwms-order-confirm-query.
  *
- * The scan API decides whether trajectory is needed. Locked mapping:
- *   10  订单取消 -> normal terminal, no trajectory
+ * IMPORTANT BUSINESS RULE:
+ * The scan API and the tracking-event API are two independent status layers.
+ * This function may ONLY use confirm-query `orderStatus` to decide whether a
+ * shipment is terminal or must continue to trajectory lookup.
+ *
+ * Locked mapping:
  *   50  已入库   -> trajectory required
  *   60  派件分配 -> trajectory required
  *   70  派送中   -> trajectory required
  *   85  已签收   -> POD terminal, no trajectory
  *   100 已退回   -> return terminal, no trajectory
  *
- * Unknown successful scan statuses are not guessed from free text. They remain
- * local scan-status holds and are blocked from automated trajectory calls by V86.
+ * Tracking event codes such as 26/30/32/99/150/80/84/86 must never be
+ * interpreted here.
  */
 export function classifyScanTerminal(row = {}, requestStatus = 'success') {
   if (requestStatus !== 'success') {
@@ -24,9 +28,6 @@ export function classifyScanTerminal(row = {}, requestStatus = 'success') {
 
   const orderStatus = String(row.orderStatus ?? '').trim();
 
-  if (orderStatus === '10') {
-    return result('ORDER_CANCELLED', false, 'ORDER_CANCELLED', 'ORDER_STATUS_10');
-  }
   if (orderStatus === '85') {
     return result('POD', false, 'POD_COMPLETED', 'ORDER_STATUS_85');
   }
@@ -37,7 +38,11 @@ export function classifyScanTerminal(row = {}, requestStatus = 'success') {
     return result('OPEN_TRACK_REQUIRED', true, '', `ORDER_STATUS_${orderStatus}`);
   }
 
-  return result('SCAN_STATUS_HOLD', false, '', orderStatus ? `ORDER_STATUS_UNKNOWN_${orderStatus}` : 'ORDER_STATUS_UNKNOWN');
+  // A successful but currently unknown scan status is intentionally sent to
+  // trajectory lookup instead of being guessed from status text/statusCode.
+  // This prevents false POD/return closure when tracking-layer codes or labels
+  // happen to be present in the confirm-query payload.
+  return result('OPEN_TRACK_REQUIRED', true, '', orderStatus ? `ORDER_STATUS_UNKNOWN_${orderStatus}` : 'ORDER_STATUS_UNKNOWN');
 }
 
 function result(currentState, trackRequired, scanTerminalType, scanTerminalReason) {
@@ -46,6 +51,10 @@ function result(currentState, trackRequired, scanTerminalType, scanTerminalReaso
     trackRequired,
     scanTerminalType,
     scanTerminalReason,
+    // Keep the scan evidence reason (ORDER_STATUS_85/100) separately while
+    // exposing the canonical no-track closure reason expected by analyzers/UI.
+    // Retry/no-response cases have no terminal type and therefore retain their
+    // API failure reason.
     trackSkippedReason: trackRequired ? '' : (scanTerminalType || scanTerminalReason)
   };
 }

@@ -1,9 +1,7 @@
 (function installV94BusinessSourceTruthUi(global) {
   if (global.__CE_QC_V94_BUSINESS_SOURCE_TRUTH_UI__) return;
-  const VERSION = '2026-08-15-v140-business-source-truth-ui-v3';
+  const VERSION = '2026-08-13-v94-business-source-truth-ui-v2';
   let syncing = false;
-  let pendingSync = false;
-  let timer = null;
 
   function importState() {
     try {
@@ -30,17 +28,9 @@
     try {
       const state = importState();
       if (!state || !payload?.counts || state.reportDate !== payload.reportDate) return false;
-      const keys = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP'];
-      const counts = Object.fromEntries(keys.map(key => [key, Number(payload.counts?.[key] || 0)]));
-      state.classificationCounts = counts;
-      state.classificationDisplaySource = 'V140_CANONICAL_DATABASE_CLASSIFICATION';
-      if (state.summary && Number(payload.total || 0) >= 0) state.summary.validUniqueWaybills = Number(payload.total || 0);
-      global.__CE_QC_CANONICAL_CLASSIFICATION__ = {
-        reportDate: payload.reportDate,
-        counts,
-        total: Number(payload.total || keys.reduce((sum, key) => sum + counts[key], 0)),
-        receivedAt: Date.now()
-      };
+      state.classificationCounts = { ...(state.classificationCounts || {}), ...(payload.counts || {}) };
+      state.classificationDisplaySource = 'V94_CANONICAL_POST_CLASSIFICATION';
+      if (state.summary && Number(payload.total || 0) > 0) state.summary.validUniqueWaybills = Number(payload.total || state.summary.validUniqueWaybills || 0);
       if (typeof global.renderUnifiedImportResult === 'function') global.renderUnifiedImportResult();
       else {
         try { if (typeof renderUnifiedImportResult === 'function') renderUnifiedImportResult(); } catch {}
@@ -50,46 +40,33 @@
         badge.textContent = '当前有效分类已同步';
         badge.className = 'status-pill success';
       }
-      global.dispatchEvent(new CustomEvent('ce-qc-canonical-classification-ready', { detail: global.__CE_QC_CANONICAL_CLASSIFICATION__ }));
       return true;
     } catch { return false; }
   }
 
   async function syncCanonicalCounts() {
-    if (syncing) {
-      pendingSync = true;
-      return;
-    }
+    if (syncing) return;
     const date = currentDate();
     if (!date) return;
     syncing = true;
-    pendingSync = false;
     try {
-      const payload = await fetch(`/api/v89/instant-dashboard?date=${encodeURIComponent(date)}&_=${Date.now()}`, {
+      const payload = await fetch(`/api/v89/instant-dashboard?date=${encodeURIComponent(date)}`, {
         cache: 'no-store', credentials: 'same-origin'
       }).then(readJson);
       applyCanonicalCounts(payload);
     } catch (error) {
-      console.warn('[CE-QC][V140_SOURCE_TRUTH_UI] classification sync skipped', error);
+      console.warn('[CE-QC][V94_SOURCE_TRUTH_UI] classification sync skipped', error);
     } finally {
       syncing = false;
-      if (pendingSync) {
-        pendingSync = false;
-        queueMicrotask(() => void syncCanonicalCounts());
-      }
     }
   }
 
-  function schedule(delay = 60) {
-    clearTimeout(timer);
-    timer = setTimeout(() => void syncCanonicalCounts(), Math.max(0, delay));
-  }
+  function schedule(delay = 60) { setTimeout(() => void syncCanonicalCounts(), Math.max(0, delay)); }
 
   const originalImport = global.importUnifiedExcel;
   if (typeof originalImport === 'function' && !originalImport.__v94Wrapped) {
-    const wrapped = async function v140ImportUnifiedExcel() {
+    const wrapped = async function v94ImportUnifiedExcel() {
       const result = await originalImport.apply(this, arguments);
-      pendingSync = true;
       await syncCanonicalCounts();
       return result;
     };
@@ -98,13 +75,12 @@
   }
 
   document.addEventListener('click', event => {
-    if (event.target?.closest?.('[data-page="import"],#topRangeQuery,#dashboardRangeQuery')) schedule(40);
+    if (event.target?.closest?.('[data-page="import"],#topRangeQuery,#dashboardRangeQuery')) schedule(120);
   }, true);
-  global.addEventListener('popstate', () => schedule(40));
-  global.addEventListener('ce-qc-startup-truth-ready', () => schedule(20));
-  global.addEventListener('ce-qc-run-complete', () => schedule(0));
-  schedule(80);
+  global.addEventListener('popstate', () => schedule(120));
+  global.addEventListener('ce-qc-startup-truth-ready', () => schedule(80));
+  schedule(200);
 
   global.__CE_QC_V94_BUSINESS_SOURCE_TRUTH_UI__ = { version: VERSION, sync: syncCanonicalCounts, applyCanonicalCounts };
-  console.info('[CE-QC][V140_BUSINESS_SOURCE_TRUTH_UI]', VERSION);
+  console.info('[CE-QC][V94_BUSINESS_SOURCE_TRUTH_UI]', VERSION);
 })(window);

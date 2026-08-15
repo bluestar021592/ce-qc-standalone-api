@@ -1,9 +1,9 @@
 import { CEClient, cleanAnyShipmentCodes } from './ceClient.js';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-15-v137-scan-first-terminal-gate-v2';
+const PATCH_ID = '2026-08-13-v86-strict-track-status-gate-v1';
 const OPEN_TRACK_STATUSES = new Set(['50', '60', '70']);
-const GLOBAL_TERMINAL_STATUSES = new Set(['10', '85', '100']);
+const GLOBAL_TERMINAL_STATUSES = new Set(['85', '100']);
 const scanEvidence = new Map();
 
 const originalConfirmQuery = CEClient.prototype.confirmQuery;
@@ -58,9 +58,8 @@ function classifyBills(codes = []) {
   for (const bill of cleanAnyShipmentCodes(codes)) {
     const evidence = evidenceFor(bill);
     if (!evidence?.status) {
-      // Direct/manual trajectory lookup without a preceding scan remains allowed.
-      // Automated pipelines always call confirmQuery first and therefore have
-      // scan evidence before reaching this gate.
+      // Manual trajectory lookup or legacy evidence without a preceding scan is
+      // still allowed. This gate only constrains automated scan→track pipelines.
       unknownEvidence.push(bill);
       continue;
     }
@@ -68,7 +67,7 @@ function classifyBills(codes = []) {
       allowed.push(bill);
       continue;
     }
-    if (GLOBAL_TERMINAL_STATUSES.has(evidence.status)) {
+    if (GLOBAL_TERMINAL_STATUSES.has(evidence.status) || (evidence.status === '10' && evidence.businessType === 'WHPP')) {
       terminal.push({ bill, ...evidence });
       continue;
     }
@@ -94,28 +93,28 @@ function syntheticHoldEvent(item) {
   };
 }
 
-CEClient.prototype.confirmQuery = async function v137ConfirmQuery(shipmentCodes) {
+CEClient.prototype.confirmQuery = async function v86ConfirmQuery(shipmentCodes) {
   const rows = await originalConfirmQuery.call(this, shipmentCodes);
   rememberRows(rows);
   return rows;
 };
 
-CEClient.prototype.trackQuery = async function v137TrackQuery(shipmentCodes) {
+CEClient.prototype.trackQuery = async function v86TrackQuery(shipmentCodes) {
   const requested = cleanAnyShipmentCodes(shipmentCodes);
   const { allowed, hold } = classifyBills(requested);
   const remote = allowed.length ? await originalTrackQuery.call(this, allowed) : [];
-  // Scan terminals 10/85/100 return no synthetic trajectory event: scan evidence
-  // remains the authoritative closure. Other non-trackable statuses get a local
-  // audit hold so 1:1 reconciliation is preserved without calling CE trajectory.
+  // Terminal 85/100 (and WHPP 10) return no synthetic event: their scan evidence
+  // remains the authoritative closure. Unknown/non-trackable statuses get one
+  // local audit event so snapshot row reconciliation remains 1:1 without a CE call.
   return [...(remote || []), ...hold.map(syntheticHoldEvent)];
 };
 
-CEClient.prototype.shipmentTrack = async function v137ShipmentTrack(shipmentCodes) {
+CEClient.prototype.shipmentTrack = async function v86ShipmentTrack(shipmentCodes) {
   const { allowed } = classifyBills(shipmentCodes);
   return allowed.length ? originalShipmentTrack.call(this, allowed) : [];
 };
 
-CEClient.prototype.exceptionQuery = async function v137ExceptionQuery(shipmentCodes) {
+CEClient.prototype.exceptionQuery = async function v86ExceptionQuery(shipmentCodes) {
   const { allowed } = classifyBills(shipmentCodes);
   return allowed.length ? originalExceptionQuery.call(this, allowed) : [];
 };
@@ -126,4 +125,3 @@ export function inspectStrictTrackGate(shipmentCodes = []) {
 
 export const V86_STRICT_TRACK_STATUS_GATE_ID = PATCH_ID;
 export const V86_OPEN_TRACK_STATUSES = Object.freeze([...OPEN_TRACK_STATUSES]);
-export const V137_GLOBAL_SCAN_TERMINALS = Object.freeze([...GLOBAL_TERMINAL_STATUSES]);

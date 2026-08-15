@@ -62,8 +62,7 @@ export function destinationFromNodeText(value = '') {
 
   // Prefer an explicit CE/CEL node token. If a final-event description happens
   // to contain both source and target nodes, the last routing token is the target.
-  // 580 aliases observed in old/new data include CE:580, CEL:580, CE580 and CCSL580.
-  const explicit = [...source.matchAll(/(?:CEL|CE)\s*:\s*(CCSLCN|CCSLZT|CCSL580|CECN|CEZT|CE580|580)(?![A-Z0-9])/g)];
+  const explicit = [...source.matchAll(/(?:CEL|CE)\s*:\s*(CCSLCN|CCSLZT|CCSL580|CECN|CEZT|580)(?![A-Z0-9])/g)];
   if (explicit.length) return canonicalDestination(explicit.at(-1)[1]);
 
   const compact = source
@@ -73,7 +72,7 @@ export function destinationFromNodeText(value = '') {
 
   if (/^(?:CCSLCN|CECN)$/.test(compact)) return ROUTING_DESTINATIONS.CCSLCN;
   if (/^(?:CCSLZT|CEZT)$/.test(compact)) return ROUTING_DESTINATIONS.CCSLZT;
-  if (/^(?:CCSL580|CE580|580)$/.test(compact)) return ROUTING_DESTINATIONS.CCSL580;
+  if (/^(?:CCSL580|580)$/.test(compact)) return ROUTING_DESTINATIONS.CCSL580;
   return '';
 }
 
@@ -88,14 +87,14 @@ function canonicalDestination(code = '') {
   const value = String(code || '').toUpperCase();
   if (['CCSLCN', 'CECN'].includes(value)) return ROUTING_DESTINATIONS.CCSLCN;
   if (['CCSLZT', 'CEZT'].includes(value)) return ROUTING_DESTINATIONS.CCSLZT;
-  if (['CCSL580', 'CE580', '580'].includes(value)) return ROUTING_DESTINATIONS.CCSL580;
+  if (['CCSL580', '580'].includes(value)) return ROUTING_DESTINATIONS.CCSL580;
   return '';
 }
 
 function destinationFromSpecialState(value = '') {
   if (['CCSLCN_DIVERSION', 'CECN_RETENTION'].includes(value)) return ROUTING_DESTINATIONS.CCSLCN;
   if (['CCSLZT_DIVERSION', 'CEZT_RETENTION'].includes(value)) return ROUTING_DESTINATIONS.CCSLZT;
-  if (['CCSL580_DIVERSION', 'CCSL580_RETENTION', 'CE580_RETENTION', '580_RETENTION'].includes(value)) return ROUTING_DESTINATIONS.CCSL580;
+  if (['CCSL580_DIVERSION', 'CCSL580_RETENTION'].includes(value)) return ROUTING_DESTINATIONS.CCSL580;
   return '';
 }
 

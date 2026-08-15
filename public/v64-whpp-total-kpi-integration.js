@@ -1,118 +1,251 @@
-(function installCanonicalHomeTruthV143(global){
-  if(global.__CE_QC_V143_HOME_TRUTH_UI__)return;
-  const VERSION='2026-08-15-v145-canonical-home-shopee-special-v2';
-  const cache=new Map();let timer=null,running=false,rerun=false;
+(function installWhppTotalKpiIntegrationV64(global) {
+  const VERSION = '2026-08-12-v64-whpp-total-kpi-integration-v2';
+  const summaryCache = new Map();
+  let decorating = false;
+  let timer = null;
 
-  const num=value=>{const n=Number(String(value??'').replace(/[,%\s]/g,''));return Number.isFinite(n)?n:0;};
-  const fmt=value=>Number(value||0).toLocaleString('zh-CN');
-  const pct=value=>value===null||value===undefined?'—':`${Number(value||0).toFixed(2).replace(/\.00$/,'')}%`;
-  const selectedDate=()=>String(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'').slice(0,10);
-  const singleDay=date=>date&&String(document.getElementById('topRangeFrom')?.value||date).slice(0,10)===date&&String(document.getElementById('topRangeTo')?.value||date).slice(0,10)===date;
+  const num = value => {
+    const parsed = Number(String(value ?? '').replace(/[,%\s]/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const fmt = value => Number(value || 0).toLocaleString('zh-CN');
+  const rate = (value, total) => total ? Number(value || 0) * 100 / Number(total) : 0;
 
-  async function load(date){
-    const hit=cache.get(date);if(hit&&Date.now()-hit.at<8000)return hit.data;
-    const response=await fetch(`/api/v143/home-truth?reportDate=${encodeURIComponent(date)}&_=${Date.now()}`,{cache:'no-store',credentials:'same-origin'});
-    const data=await response.json().catch(()=>({}));if(!response.ok||data?.ok===false)throw new Error(data?.error||`HTTP ${response.status}`);
-    cache.set(date,{at:Date.now(),data});return data;
+  function setText(node, text) {
+    if (node && node.textContent !== text) node.textContent = text;
   }
 
-  function card(label){return [...document.querySelectorAll('#homePage .v18-business-grid .v18-business-card')].find(node=>String(node.querySelector('span')?.textContent||'').trim()===label)||null;}
-  function setText(node,text){if(node&&node.textContent!==text)node.textContent=text;}
-  function ensureWhpp(){
-    const grid=document.querySelector('#homePage .v18-business-grid');if(!grid)return null;let node=card('WHPP本土');if(node)return node;
-    node=document.createElement('button');node.type='button';node.className='v18-business-card cyan';node.dataset.v143Business='WHPP';
-    node.onclick=()=>typeof global.navigateWhppPage==='function'?global.navigateWhppPage():global.navigatePage?.('whpp');
-    node.innerHTML='<span>WHPP本土</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em>';grid.appendChild(node);return node;
+  function importGrid() {
+    return document.querySelector('#unifiedClassificationSummary .unified-count-grid');
   }
 
-  function patchTop(data){
-    const labels={CE:'CE',CEAF:'CEAF空运',TBKH:'TBKH',ALI1688:'ALI1688',SHOPEECN:'SHOPEE CN',SHOPEEVN:'SHOPEE VN',WHPP:'WHPP本土'};
-    ensureWhpp();
-    for(const [type,label] of Object.entries(labels)){const node=card(label);if(!node)continue;const value=Number(data.counts?.[type]||0);setText(node.querySelector('b'),fmt(value));setText(node.querySelector('em'),`占总票数 ${data.total?((value*100/data.total).toFixed(2)):'0.00'}%`);}
-    const totalCard=card('总览');if(totalCard){setText(totalCard.querySelector('b'),fmt(data.total));setText(totalCard.querySelector('em'),'占总票数 100.00%');}
+  function importCardCount(label) {
+    const grid = importGrid();
+    if (!grid) return 0;
+    const card = [...grid.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === label);
+    return num(card?.querySelector('b')?.textContent);
   }
 
-  function metric(label){return [...document.querySelectorAll('#homePage .v18-core-grid .v18-metric-card')].find(node=>String(node.querySelector('span')?.textContent||'').trim()===label)||null;}
-  function metricAny(labels){for(const label of labels){const node=metric(label);if(node)return node;}return null;}
-  function setCount(labels,value,total,note='占核心业务'){
-    const node=metricAny(labels);if(!node)return;setText(node.querySelector('b'),fmt(value));setText(node.querySelector('small'),`${note} ${total?((Number(value||0)*100/total).toFixed(2)):'0.00'}%`);
-  }
-  function setRate(labels,value,note='当前'){
-    const node=metricAny(labels);if(!node)return;setText(node.querySelector('b'),pct(value));setText(node.querySelector('small'),value===null||value===undefined?'派次证据不足':`${note} ${Number(value||0).toFixed(2)}%`);
-  }
-
-  function patchCore(data){
-    const c=data.core;if(!c)return;const root=document.querySelector('#homePage .v18-core');if(!root)return;
-    const heading=root.querySelector('h2');if(heading)heading.innerHTML='核心指标总览 <small>CE + CEAF空运 + TBKH + ALI1688 + WHPP本土，不含 SHOPEE CN/VN</small>';
-    setCount(['Pending不连续'],c.pendingNonContinuous,c.total);
-    setCount(['Pending 3天+','Pending3+'],c.pending3,c.total);
-    setCount(['OC 1天+','OC1+'],c.oc1,c.total);
-    setCount(['门店滞留'],c.storeRetention,c.total);
-    setCount(['工单','工单未处理'],c.workOrder,c.total);
-    setCount(['入库无扫描节点','入库无扫描'],c.inboundNoScan,c.total);
-    setCount(['盘点2天+','盘点 2天+'],c.cycle2,c.total);
-    setCount(['OC 2天+','OC2+'],c.oc2,c.total);
-    setRate(['首次妥投率'],c.firstPodRate);
-    setCount(['今日POD'],c.todayPod,c.total);
-    setRate(['POD率'],c.podRate);
-    setCount(['外省未完结POD件'],c.provinceOpen,c.total);
-    root.dataset.v143CoreSource='CANONICAL_CORE_FIVE_BUSINESSES';
-    root.dataset.v143CoreTotal=String(c.total||0);
-  }
-
-  function patchSpecial(data){
-    const root=[...document.querySelectorAll('#homePage .v18-panel')].find(node=>/SHOPEE\s*专项指标/.test(String(node.querySelector('h2')?.textContent||'')));
-    if(!root||!data.special)return;
-    const applyBlock=(title,field)=>{
-      const block=[...root.querySelectorAll('.v18-special-grid > div')].find(node=>String(node.querySelector('h3')?.textContent||'').includes(title));
-      if(!block)return;
-      const spans=[...block.querySelectorAll(':scope > span')];
-      const pairs=[['CN',data.special.CN],['VN',data.special.VN]];
-      spans.slice(0,2).forEach((span,index)=>{
-        const [label,item]=pairs[index];if(!item)return;
-        const value=Number(item[field]||0),total=Number(item.total||0);
-        const b=span.querySelector('b'),small=span.querySelector('small');
-        if(b)setText(b,fmt(value));
-        if(small)setText(small,`${total?((value*100/total).toFixed(2)):'0.00'}%`);
-        span.title=`${label} ${field==='returned'?'退回件':'Pending不连续'} ${value}票 / 本板块 ${total}票`;
-      });
-      block.dataset.v145SpecialSource='CANONICAL_SHOPEE_FINAL_ROWS';
+  function importStats() {
+    const root = document.getElementById('unifiedClassificationSummary');
+    const text = String(root?.textContent || '');
+    const pick = label => {
+      const match = text.match(new RegExp(`${label}\\s*([\\d,]+)`));
+      return match ? num(match[1]) : 0;
     };
-    applyBlock('Pending不连续','pendingNonContinuous');
-    applyBlock('退回件','returned');
+    const rawRows = pick('原始行');
+    const duplicateRows = pick('重复');
+    const missingWaybillRows = pick('无单号');
+    const coreLabels = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+    const coreCount = coreLabels.reduce((sum, label) => sum + importCardCount(label), 0);
+    const rawUnique = Math.max(0, rawRows - duplicateRows - missingWaybillRows);
+    const whppTotal = rawUnique >= coreCount ? rawUnique - coreCount : 0;
+    return { rawRows, duplicateRows, missingWaybillRows, coreCount, rawUnique, whppTotal, fullUnique: rawUnique || coreCount + whppTotal };
   }
 
-  function patchDispatch(data){
-    const grid=document.querySelector('#homePage .v18-dispatch-grid');if(!grid)return;
-    const groups=data.dispatch||{};
-    for(const block of grid.children){
-      const label=String(block.querySelector('h3')?.textContent||'').trim();const truth=groups[label];if(!truth)continue;
-      const rows=[...block.querySelectorAll('span')];
-      rows.slice(0,3).forEach((row,index)=>{
-        const value=truth.values?.[index];const bar=row.querySelector('i b'),out=row.querySelector('em');
-        if(bar)bar.style.width=value===null||value===undefined?'0%':`${Math.max(0,Math.min(100,Number(value)||0))}%`;
-        if(out)out.textContent=value===null||value===undefined?'—':`${Number(value||0).toFixed(2)}%`;
-        row.title=value===null||value===undefined?(truth.total?`POD ${truth.pod}票，当前无足够派次证据`:'本区域无票'):`${index+1}派 ${truth.counts?.[index]||0}票 / 总票 ${truth.total}`;
-      });
-      block.dataset.v143DispatchSource='CANONICAL_SHOPEE_ATTEMPT_TRUTH';
+  function ensureImportWhppCard(grid) {
+    let card = [...grid.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === 'WHPP本土');
+    if (!card) {
+      card = document.createElement('div');
+      card.dataset.v64Business = 'WHPP';
+      card.innerHTML = '<span>WHPP本土</span><b data-testid="classification-whpp">0</b>';
+      grid.appendChild(card);
+    }
+    card.dataset.v64Business = 'WHPP';
+    return card;
+  }
+
+  function patchImportPage() {
+    const grid = importGrid();
+    if (!grid) return null;
+    const data = importStats();
+    const whppCard = ensureImportWhppCard(grid);
+    setText(whppCard.querySelector('b'), fmt(data.whppTotal));
+    setText(grid.querySelector('[data-testid="classification-valid-unique"]'), fmt(data.fullUnique));
+    const status = document.getElementById('fileStatus');
+    status?.querySelectorAll('p').forEach(p => {
+      if (/有效唯一单号/.test(p.textContent || '')) p.innerHTML = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${fmt(data.fullUnique)}`);
+    });
+    return data;
+  }
+
+  async function readWhppSummary(reportDate) {
+    const date = String(reportDate || '').slice(0, 10);
+    if (!date) return { reportDate: '', total: 0, metrics: {}, regionPvUnresolved: 0, activeStoreRetention: 0, selfPickup: 0 };
+    const cached = summaryCache.get(date);
+    if (cached && Date.now() - cached.at < 30000) return cached.value;
+    const response = await fetch(`/api/v71/whpp-summary?reportDate=${encodeURIComponent(date)}`, { cache: 'no-store', credentials: 'same-origin' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+    summaryCache.set(date, { at: Date.now(), value: payload });
+    return payload;
+  }
+
+  function selectedReportDate() {
+    return String(document.getElementById('topRangeTo')?.value || document.getElementById('dashboardRangeTo')?.value || '').slice(0, 10);
+  }
+
+  function selectedSingleDay(reportDate) {
+    if (!reportDate) return false;
+    const from = String(document.getElementById('topRangeFrom')?.value || reportDate).slice(0, 10);
+    const to = String(document.getElementById('topRangeTo')?.value || reportDate).slice(0, 10);
+    return from === reportDate && to === reportDate;
+  }
+
+  function homeCard(label) {
+    return [...document.querySelectorAll('#homePage .v18-business-grid .v18-business-card')]
+      .find(card => String(card.querySelector('span')?.textContent || '').trim() === label) || null;
+  }
+
+  function homeCardValue(label) {
+    return num(homeCard(label)?.querySelector('b')?.textContent);
+  }
+
+  function ensureHomeWhppCard(grid) {
+    let card = homeCard('WHPP本土');
+    if (card) return card;
+    card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'v18-business-card cyan';
+    card.dataset.v64Business = 'WHPP';
+    card.onclick = () => typeof global.navigateWhppPage === 'function' ? global.navigateWhppPage() : (typeof global.navigatePage === 'function' ? global.navigatePage('whpp') : null);
+    card.innerHTML = '<span>WHPP本土</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em>';
+    grid.appendChild(card);
+    return card;
+  }
+
+  function patchHomeTop(data) {
+    const grid = document.querySelector('#homePage .v18-business-grid');
+    if (!grid || !selectedSingleDay(data.reportDate)) return 0;
+    ensureHomeWhppCard(grid);
+    const whppTotal = Number(data.total || 0);
+    setText(homeCard('WHPP本土')?.querySelector('b'), fmt(whppTotal));
+    const sixLabels = ['CE','CEAF空运','TBKH','SHOPEE CN','SHOPEE VN','ALI1688'];
+    const fullTotal = sixLabels.reduce((sum, label) => sum + homeCardValue(label), 0) + whppTotal;
+    for (const card of grid.querySelectorAll('.v18-business-card')) {
+      const label = String(card.querySelector('span')?.textContent || '').trim();
+      const value = label === '总览' ? fullTotal : (label === 'WHPP本土' ? whppTotal : num(card.querySelector('b')?.textContent));
+      if (label === '总览') setText(card.querySelector('b'), fmt(fullTotal));
+      if (label === '总览' || sixLabels.includes(label) || label === 'WHPP本土') {
+        setText(card.querySelector('em'), `占总票数 ${label === '总览' ? '100.00' : rate(value, fullTotal).toFixed(2)}%`);
+      }
+    }
+    return fullTotal;
+  }
+
+  function metricCardByLabel(label) {
+    return [...document.querySelectorAll('#homePage .v18-core-grid .v18-metric-card')].find(card => String(card.querySelector('span')?.textContent || '').trim() === label);
+  }
+
+  function baseValue(card, signature) {
+    if (!card) return 0;
+    if (card.dataset.v64BaseSignature !== signature) {
+      card.dataset.v64BaseSignature = signature;
+      card.dataset.v64BaseValue = String(num(card.querySelector('b')?.textContent));
+    }
+    return Number(card.dataset.v64BaseValue || 0);
+  }
+
+  function patchCountMetric(label, addValue, denominator, signature) {
+    const card = metricCardByLabel(label);
+    if (!card) return;
+    const value = baseValue(card, signature) + Number(addValue || 0);
+    setText(card.querySelector('b'), fmt(value));
+    setText(card.querySelector('small'), `占CCSL+WHPP ${rate(value, denominator).toFixed(2)}%`);
+  }
+
+  function patchRateMetric(label, value, signature) {
+    const card = metricCardByLabel(label);
+    if (!card) return;
+    baseValue(card, signature);
+    setText(card.querySelector('b'), `${Number(value || 0).toFixed(2).replace(/\.00$/, '')}%`);
+    setText(card.querySelector('small'), `当前 ${Number(value || 0).toFixed(2)}%`);
+  }
+
+  function patchHomeCore(data) {
+    if (!selectedSingleDay(data.reportDate)) return;
+    const core = document.querySelector('#homePage .v18-core');
+    if (!core) return;
+    const ccslTotal = homeCardValue('CE') + homeCardValue('CEAF空运') + homeCardValue('TBKH') + homeCardValue('ALI1688');
+    const denominator = ccslTotal + Number(data.total || 0);
+    const m = data.metrics || {};
+    const signature = `${data.reportDate}|${data.total || 0}|${m.pod || 0}|${m.pending3 || 0}|${m.oc2 || 0}`;
+    const heading = core.querySelector('h2');
+    if (heading) heading.innerHTML = '核心指标总览 <small>CE + CEAF空运 + TBKH + ALI1688 + WHPP本土，不含 SHOPEE CN/VN</small>';
+
+    patchCountMetric('Pending不连续', m.pendingNonContinuous, denominator, signature);
+    patchCountMetric('Pending 3天+', m.pending3, denominator, signature);
+    patchCountMetric('OC 1天+', m.oc1, denominator, signature);
+    patchCountMetric('门店滞留', data.activeStoreRetention, denominator, signature);
+    patchCountMetric('工单', m.workOrder, denominator, signature);
+    patchCountMetric('工单未处理', m.workOrder, denominator, signature);
+    patchCountMetric('入库无扫描节点', m.inboundNoScan, denominator, signature);
+    patchCountMetric('盘点2天+', m.cycle2, denominator, signature);
+    patchCountMetric('盘点 2天+', m.cycle2, denominator, signature);
+    patchCountMetric('OC 2天+', m.oc2, denominator, signature);
+    patchCountMetric('外省未完结POD件', data.regionPvUnresolved, denominator, signature);
+    patchCountMetric('仓库自提件', data.selfPickup, denominator, signature);
+    patchCountMetric('CECN滞留包裹', m.ccslCnDiversion, denominator, signature);
+    patchCountMetric('CEZT滞留包裹', m.ccslZtDiversion, denominator, signature);
+    patchCountMetric('580滞留包裹', m.ccsl580Retention, denominator, signature);
+
+    const podCard = metricCardByLabel('今日POD');
+    const ccslPod = baseValue(podCard, signature);
+    const combinedPod = ccslPod + Number(m.pod || 0);
+    if (podCard) {
+      setText(podCard.querySelector('b'), fmt(combinedPod));
+      setText(podCard.querySelector('small'), `占CCSL+WHPP ${rate(combinedPod, denominator).toFixed(2)}%`);
+    }
+    const combinedPodRate = rate(combinedPod, denominator);
+    patchRateMetric('POD率', combinedPodRate, signature);
+    patchRateMetric('首次妥投率', combinedPodRate, signature);
+  }
+
+  async function decorate() {
+    if (decorating) return;
+    decorating = true;
+    try {
+      patchImportPage();
+      const home = document.getElementById('homePage');
+      if (!home || home.hidden) return;
+      const reportDate = selectedReportDate();
+      if (!reportDate) return;
+      const summary = await readWhppSummary(reportDate);
+      patchHomeTop(summary);
+      patchHomeCore(summary);
+    } catch (error) {
+      console.warn('[CE-QC][V64_WHPP_TOTAL_KPI] skipped', error);
+    } finally {
+      decorating = false;
     }
   }
 
-  async function apply(){
-    if(running){rerun=true;return;}const home=document.getElementById('homePage');const date=selectedDate();if(!home||home.hidden||!singleDay(date))return;
-    running=true;rerun=false;
-    try{const data=await load(date);if(!data?.available)return;patchTop(data);patchCore(data);patchSpecial(data);patchDispatch(data);document.documentElement.dataset.v143HomeTruth=VERSION;}
-    catch(error){console.warn('[CE-QC][V145_HOME_TRUTH_UI]',error);}
-    finally{running=false;if(rerun){rerun=false;setTimeout(()=>void apply(),0);}}
+  function schedule(delay = 0, invalidate = false) {
+    if (invalidate) summaryCache.clear();
+    clearTimeout(timer);
+    timer = setTimeout(() => void decorate(), Math.max(0, delay));
   }
-  function schedule(delay=30,invalidate=false){if(invalidate)cache.clear();clearTimeout(timer);timer=setTimeout(()=>void apply(),delay);}
 
-  const prior=global.renderAll;if(typeof prior==='function'&&!prior.__v143HomeTruthWrapped){const wrapped=function(){const result=prior.apply(this,arguments);schedule(0);return result;};wrapped.__v143HomeTruthWrapped=true;global.renderAll=wrapped;}
-  document.addEventListener('click',event=>{if(event.target?.closest?.('#topRangeQuery,#dashboardRangeQuery,[data-page="home"],.side-link'))schedule(20,true);},true);
-  document.addEventListener('change',event=>{if(event.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(20,true);});
-  document.addEventListener('ce-qc-run-complete',()=>schedule(0,true));
-  const root=document.getElementById('homePage');if(root){const observer=new MutationObserver(records=>{if(records.some(record=>record.addedNodes.length))schedule(10);});observer.observe(root,{childList:true,subtree:true});}
-  schedule(40,true);
-  global.__CE_QC_V143_HOME_TRUTH_UI__={version:VERSION,refresh:()=>schedule(0,true)};
-  console.info('[CE-QC][V145_HOME_TRUTH_UI]',VERSION);
+  function install() {
+    const originalRenderAll = global.renderAll;
+    if (typeof originalRenderAll === 'function' && !originalRenderAll.__v64WhppWrapped) {
+      const wrapped = function () {
+        const result = originalRenderAll.apply(this, arguments);
+        schedule(0, false);
+        return result;
+      };
+      wrapped.__v64WhppWrapped = true;
+      global.renderAll = wrapped;
+    }
+
+    document.addEventListener('click', event => {
+      if (event.target?.closest?.('#topRangeQuery,[data-page="home"],[data-page="import"]')) schedule(20, true);
+    }, true);
+    document.addEventListener('ce-qc-run-complete', () => schedule(0, true));
+    schedule(0, false);
+    console.info('[CE-QC][V64_WHPP_TOTAL_KPI]', VERSION);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
+  else install();
 })(window);

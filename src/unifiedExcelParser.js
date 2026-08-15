@@ -14,12 +14,6 @@ const RECIPIENT_HEADERS = [
   '客户名称', '客户', '收件客户', '收货客户',
   'recipient', 'recipientname', 'receiver', 'receivername', 'consignee', 'consigneename', 'customername'
 ];
-const SENDER_HEADERS = [
-  '发件人', '发件人姓名', '发件人名称', '寄件人', '寄件人姓名', '寄件人名称',
-  '发货人', '发货人姓名', '发货人名称', '寄件客户', '发件客户', '发货客户',
-  'sender', 'sendername', 'shipper', 'shippername', 'consignor', 'consignorname',
-  'origincustomer', 'origincustomername'
-];
 const CUSTOMER_NAME_HEADERS = [
   '客户名称', '客户名', '客户', 'customername', 'customer', 'clientname'
 ];
@@ -48,8 +42,6 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   let duplicateRows = 0;
   let missingWaybillRows = 0;
   let missingRecipientWarnings = 0;
-  let missingSenderWarnings = 0;
-  let missingPartyWarnings = 0;
   let classificationConflicts = 0;
 
   const manualDate = normalizeDate(options.reportDate);
@@ -69,8 +61,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     const headerIndex = findHeaderRow(matrix);
     if (headerIndex < 0) {
       sheetDiagnostics.push({
-        sheetName, status: 'SKIPPED', reason: '前30行未找到可识别的运单号+收件人/发件人表头', headerRow: null,
-        detectedColumns: {}, missingFields: ['waybill', 'recipient_or_sender'],
+        sheetName, status: 'SKIPPED', reason: '前30行未找到可识别的运单号+收件人表头', headerRow: null,
+        detectedColumns: {}, missingFields: ['waybill', 'recipient'],
         sampleHeaders: matrix.slice(0, 30).map(row => row.filter(Boolean).slice(0, 12)).filter(row => row.length).slice(0, 8)
       });
       continue;
@@ -80,22 +72,16 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     const headers = originalHeaders.map(normalizeHeader);
     const shipmentIndex = findColumn(headers, SHIPMENT_HEADERS);
     let recipientIndex = findColumn(headers, RECIPIENT_HEADERS);
-    const senderIndex = findColumn(headers, SENDER_HEADERS);
-    let recipientDetection = recipientIndex >= 0 ? 'HEADER_ALIAS' : 'NOT_FOUND';
-    let senderDetection = senderIndex >= 0 ? 'HEADER_ALIAS' : 'NOT_FOUND';
-    if (recipientIndex < 0 && senderIndex < 0) {
-      recipientIndex = detectBusinessPartyColumnByValues(matrix, headerIndex, shipmentIndex);
+    let recipientDetection = 'HEADER_ALIAS';
+    if (recipientIndex < 0) {
+      recipientIndex = detectRecipientColumnByValues(matrix, headerIndex, shipmentIndex);
       recipientDetection = recipientIndex >= 0 ? 'VALUE_HEURISTIC' : 'NOT_FOUND';
     }
-    if (shipmentIndex < 0 || (recipientIndex < 0 && senderIndex < 0)) {
+    if (shipmentIndex < 0 || recipientIndex < 0) {
       sheetDiagnostics.push({
-        sheetName,
-        status: 'SKIPPED',
-        reason: shipmentIndex < 0 ? '未识别运单号列' : '未识别收件人或发件人列',
-        headerRow: headerIndex + 1,
-        detectedColumns: { waybill: shipmentIndex, recipient: recipientIndex, sender: senderIndex },
-        missingFields: [shipmentIndex < 0 ? 'waybill' : 'recipient_or_sender'],
-        sampleHeaders: originalHeaders.slice(0, 16)
+        sheetName, status: 'SKIPPED', reason: shipmentIndex < 0 ? '未识别运单号列' : '未识别收件人列', headerRow: headerIndex + 1,
+        detectedColumns: { waybill: shipmentIndex, recipient: recipientIndex },
+        missingFields: [shipmentIndex < 0 ? 'waybill' : 'recipient'], sampleHeaders: originalHeaders.slice(0, 16)
       });
       continue;
     }
@@ -107,11 +93,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     const detectedColumns = {
       waybill: shipmentIndex,
       recipient: recipientIndex,
-      recipientHeader: recipientIndex >= 0 ? originalHeaders[recipientIndex] || '' : '',
+      recipientHeader: originalHeaders[recipientIndex] || '',
       recipientDetection,
-      sender: senderIndex,
-      senderHeader: senderIndex >= 0 ? originalHeaders[senderIndex] || '' : '',
-      senderDetection,
       customerName: customerNameIndex,
       customerNameHeader: customerNameIndex >= 0 ? originalHeaders[customerNameIndex] : '',
       region: regionIndex,
@@ -129,10 +112,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       rawRows += 1;
 
       const shipmentCode = normalizeShipmentCode(row[shipmentIndex]);
-      const recipientRaw = recipientIndex >= 0 ? String(row[recipientIndex] ?? '').trim() : '';
+      const recipientRaw = String(row[recipientIndex] ?? '').trim();
       const recipientNormalized = normalizeRecipient(recipientRaw);
-      const senderRaw = senderIndex >= 0 ? String(row[senderIndex] ?? '').trim() : '';
-      const senderNormalized = normalizeSender(senderRaw);
       const customerNameRaw = customerNameIndex >= 0 ? String(row[customerNameIndex] ?? '').trim() : '';
       const customerNameNormalized = normalizeCustomerName(customerNameRaw);
       const regionRaw = regionIndex >= 0 ? String(row[regionIndex] ?? '').trim() : '';
@@ -154,21 +135,19 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       }
       seen.add(shipmentCode);
 
-      if (!recipientRaw) missingRecipientWarnings += 1;
-      if (!senderRaw) missingSenderWarnings += 1;
-      if (!recipientRaw && !senderRaw) {
-        missingPartyWarnings += 1;
-        warnings.push({ type: 'MISSING_PARTY', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人与发件人均为空，只能按客户名称与运单号前缀分类，请重点复核。' });
+      if (!recipientRaw) {
+        missingRecipientWarnings += 1;
+        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人为空，但仍按客户名称与运单号前缀继续精确分类；不影响有效票数。' });
       }
 
-      const matches = classifyMatches(shipmentCode, recipientNormalized, customerNameNormalized, senderNormalized);
+      const matches = classifyMatches(shipmentCode, recipientNormalized, customerNameNormalized);
       if (matches.length > 1) {
         classificationConflicts += 1;
-        warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个强业务规则：${matches.join(' / ')}；安全门禁将阻止自动猜分流` });
+        warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个强业务规则，按优先级归类${matches[0]}` });
       }
-      const classification = classifyBusiness(shipmentCode, recipientNormalized, customerNameNormalized, senderNormalized);
+      const classification = classifyBusiness(shipmentCode, recipientNormalized, customerNameNormalized);
       if (!classification) {
-        const error = new Error(`运单 ${shipmentCode} 未命中任何业务板块。系统已检查收件人、发件人、客户名称和运单前缀，已阻止静默归类。`);
+        const error = new Error(`运单 ${shipmentCode} 未命中任何业务板块。CE必须CC开头，WHPP本土必须CE开头；已阻止静默归CE。`);
         error.code = 'UNCLASSIFIED_WAYBILL_PREFIX';
         error.shipmentCode = shipmentCode;
         error.sheetName = sheetName;
@@ -183,8 +162,6 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
         regionRaw,
         recipientRaw,
         recipientNormalized,
-        senderRaw,
-        senderNormalized,
         customerNameRaw,
         customerNameNormalized,
         sheetName,
@@ -200,7 +177,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   }
 
   if (!details.length) {
-    const error = new Error('未识别到同时包含运单号和收件人/发件人字段的日报数据，请查看逐Sheet诊断');
+    const error = new Error('未识别到同时包含运单号和收件人字段的日报数据，请查看逐Sheet诊断');
     error.sheetDiagnostics = sheetDiagnostics;
     throw error;
   }
@@ -265,7 +242,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     classificationCounts,
     sourceReconciliation,
     regionCounts,
-    summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, missingSenderWarnings, missingPartyWarnings, classificationConflicts },
+    summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, classificationConflicts },
     rows: details,
     warnings,
     sheetDiagnostics
@@ -277,7 +254,7 @@ function findHeaderRow(matrix) {
     const headers = (matrix[i] || []).map(normalizeHeader);
     const shipmentIndex = findColumn(headers, SHIPMENT_HEADERS);
     if (shipmentIndex < 0) continue;
-    if (findColumn(headers, RECIPIENT_HEADERS) >= 0 || findColumn(headers, SENDER_HEADERS) >= 0 || detectBusinessPartyColumnByValues(matrix, i, shipmentIndex) >= 0) return i;
+    if (findColumn(headers, RECIPIENT_HEADERS) >= 0 || detectRecipientColumnByValues(matrix, i, shipmentIndex) >= 0) return i;
   }
   return -1;
 }
@@ -291,16 +268,16 @@ function findColumn(headers, aliases) {
   return -1;
 }
 
-function detectBusinessPartyColumnByValues(matrix, headerIndex, shipmentIndex) {
+function detectRecipientColumnByValues(matrix, headerIndex, shipmentIndex) {
   const maxColumns = Math.max(...matrix.slice(headerIndex, Math.min(matrix.length, headerIndex + 80)).map(row => row.length), 0);
   let best = { index: -1, score: 0 };
   for (let column = 0; column < maxColumns; column += 1) {
     if (column === shipmentIndex) continue;
     let score = 0;
     for (let rowIndex = headerIndex + 1; rowIndex < Math.min(matrix.length, headerIndex + 80); rowIndex += 1) {
-      const value = normalizeBusinessToken(matrix[rowIndex]?.[column]);
+      const value = normalizeRecipient(matrix[rowIndex]?.[column]);
       if (!value) continue;
-      if (/SHOPEEVN|SHOPEECN|ALI1688|CCAF|CEAF|TBKH|WHPP/.test(value)) score += 3;
+      if (/SHOPEEVN|SHOPEECN|ALI1688/.test(value)) score += 3;
     }
     if (score > best.score) best = { index: column, score };
   }
@@ -314,9 +291,6 @@ function normalizeShipmentCode(value) {
   return String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/\s+/g, '');
 }
 function normalizeRecipient(value) {
-  return normalizeBusinessToken(value);
-}
-function normalizeSender(value) {
   return normalizeBusinessToken(value);
 }
 function normalizeCustomerName(value) {
@@ -334,41 +308,26 @@ function normalizeRegion(value) {
   return 'PV';
 }
 
-export function classifyUnifiedMatches(shipmentCode, recipient = '', customerName = '', sender = '') {
-  return classifyMatches(normalizeShipmentCode(shipmentCode), normalizeRecipient(recipient), normalizeCustomerName(customerName), normalizeSender(sender));
+export function classifyUnifiedMatches(shipmentCode, recipient = '', customerName = '') {
+  return classifyMatches(normalizeShipmentCode(shipmentCode), normalizeRecipient(recipient), normalizeCustomerName(customerName));
 }
 
-export function classifyUnifiedBusiness(shipmentCode, recipient = '', customerName = '', sender = '') {
-  return classifyBusiness(normalizeShipmentCode(shipmentCode), normalizeRecipient(recipient), normalizeCustomerName(customerName), normalizeSender(sender));
+export function classifyUnifiedBusiness(shipmentCode, recipient = '', customerName = '') {
+  return classifyBusiness(normalizeShipmentCode(shipmentCode), normalizeRecipient(recipient), normalizeCustomerName(customerName));
 }
 
-function partyHit(marker, recipient, sender, customerName) {
-  if (recipient.includes(marker)) return { source: 'RECIPIENT', value: recipient };
-  if (sender.includes(marker)) return { source: 'SENDER', value: sender };
-  if (customerName.includes(marker)) return { source: 'CUSTOMER_NAME', value: customerName };
-  return null;
-}
-
-function anyPartyHit(markers, recipient, sender, customerName) {
-  for (const marker of markers) {
-    const hit = partyHit(marker, recipient, sender, customerName);
-    if (hit) return { ...hit, marker };
-  }
-  return null;
-}
-
-function classifyMatches(shipmentCode, recipient, customerName, sender = '') {
+function classifyMatches(shipmentCode, recipient, customerName) {
   const matches = [];
-  if (anyPartyHit(['CCAF', 'CEAF'], recipient, sender, customerName)) matches.push('CEAF');
-  if (partyHit('SHOPEEVN', recipient, sender, customerName)) matches.push('SHOPEEVN');
-  if (partyHit('SHOPEECN', recipient, sender, customerName)) matches.push('SHOPEECN');
-  if (partyHit('ALI1688', recipient, sender, customerName)) matches.push('ALI1688');
-  if (shipmentCode.startsWith('TBKH') || partyHit('TBKH', recipient, sender, customerName)) matches.push('TBKH');
-  if (partyHit('WHPP', recipient, sender, customerName)) matches.push('WHPP');
+  if (customerName.includes('CCAF')) matches.push('CEAF');
+  if (recipient.includes('SHOPEEVN')) matches.push('SHOPEEVN');
+  if (recipient.includes('SHOPEECN')) matches.push('SHOPEECN');
+  if (recipient.includes('ALI1688')) matches.push('ALI1688');
+  if (shipmentCode.startsWith('TBKH')) matches.push('TBKH');
 
-  // CC/CE prefixes are ownership fallbacks only. Strong sender/recipient/customer
-  // evidence always wins; competing strong evidence is surfaced to V102 and is
-  // blocked before persistence instead of being silently guessed.
+  // CE/CC prefixes are fallback ownership rules. They must not be counted as a
+  // classification conflict when a stronger recipient/customer rule already
+  // identified the parcel. This is what prevents normal Shopee/ALI rows from
+  // generating hundreds of false "classification conflict" warnings.
   if (!matches.length) {
     if (shipmentCode.startsWith('CE')) matches.push('WHPP');
     else if (shipmentCode.startsWith('CC')) matches.push('CE');
@@ -376,31 +335,16 @@ function classifyMatches(shipmentCode, recipient, customerName, sender = '') {
   return BUSINESS_PRIORITY.filter(type => matches.includes(type));
 }
 
-function classifyBusiness(shipmentCode, recipient, customerName, sender = '') {
-  const af = anyPartyHit(['CCAF', 'CEAF'], recipient, sender, customerName);
-  if (af) return { businessType: 'CEAF', source: af.source, matchedValue: af.marker, reason: `${partySourceZh(af.source)}命中${af.marker}，归类CEAF空运` };
-  const vn = partyHit('SHOPEEVN', recipient, sender, customerName);
-  if (vn) return { businessType: 'SHOPEEVN', source: vn.source, matchedValue: 'SHOPEEVN', reason: `${partySourceZh(vn.source)}命中SHOPEEVN` };
-  const cn = partyHit('SHOPEECN', recipient, sender, customerName);
-  if (cn) return { businessType: 'SHOPEECN', source: cn.source, matchedValue: 'SHOPEECN', reason: `${partySourceZh(cn.source)}命中SHOPEECN` };
-  const ali = partyHit('ALI1688', recipient, sender, customerName);
-  if (ali) return { businessType: 'ALI1688', source: ali.source, matchedValue: 'ALI1688', reason: `${partySourceZh(ali.source)}命中ALI1688` };
-  const tbkh = partyHit('TBKH', recipient, sender, customerName);
+function classifyBusiness(shipmentCode, recipient, customerName) {
+  if (customerName.includes('CCAF')) return { businessType: 'CEAF', source: 'CUSTOMER_NAME', matchedValue: 'CCAF', reason: '客户名称命中CCAF，归类CEAF空运' };
+  if (recipient.includes('SHOPEEVN')) return { businessType: 'SHOPEEVN', source: 'RECIPIENT', matchedValue: 'SHOPEEVN', reason: '收件人命中SHOPEEVN' };
+  if (recipient.includes('SHOPEECN')) return { businessType: 'SHOPEECN', source: 'RECIPIENT', matchedValue: 'SHOPEECN', reason: '收件人命中SHOPEECN' };
+  if (recipient.includes('ALI1688')) return { businessType: 'ALI1688', source: 'RECIPIENT', matchedValue: 'ALI1688', reason: '收件人命中ALI1688' };
   if (shipmentCode.startsWith('TBKH')) return { businessType: 'TBKH', source: 'SHIPMENT_PREFIX', matchedValue: 'TBKH', reason: '运单号前缀命中TBKH' };
-  if (tbkh) return { businessType: 'TBKH', source: tbkh.source, matchedValue: 'TBKH', reason: `${partySourceZh(tbkh.source)}命中TBKH` };
-  const whpp = partyHit('WHPP', recipient, sender, customerName);
-  if (whpp) return { businessType: 'WHPP', source: whpp.source, matchedValue: 'WHPP', reason: `${partySourceZh(whpp.source)}命中WHPP本土` };
   if (shipmentCode.startsWith('CE')) return { businessType: 'WHPP', source: 'SHIPMENT_PREFIX', matchedValue: 'CE', reason: '运单号CE开头，归类WHPP本土' };
   if (shipmentCode.startsWith('CC')) return { businessType: 'CE', source: 'SHIPMENT_PREFIX', matchedValue: 'CC', reason: '运单号CC开头，归类CE' };
   return null;
 }
-
-function partySourceZh(source) {
-  if (source === 'SENDER') return '发件人';
-  if (source === 'CUSTOMER_NAME') return '客户名称';
-  return '收件人';
-}
-
 function normalizeDate(value) {
   if (!value) return '';
   if (value instanceof Date && !Number.isNaN(value.getTime())) return localDateKey(value);

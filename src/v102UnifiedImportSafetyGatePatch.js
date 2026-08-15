@@ -3,7 +3,7 @@ import express from 'express';
 import XLSX from 'xlsx';
 import { classifyUnifiedBusiness, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-15-v137-party-aware-import-safety-v2';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-14-v102-pre-persistence-import-safety-v1';
 const ROUTE = '/api/import/unified-daily-report';
 const WRAPPED = Symbol.for('ce-qc.v102-unified-import-safety');
 
@@ -48,13 +48,12 @@ function findDuplicateOwnershipConflict(filePath, parsed) {
     const row = matrix[Math.max(0, Number(warning.rowNumber || 1) - 1)] || [];
     const columns = diagnostic.detectedColumns || {};
     const recipient = Number.isInteger(columns.recipient) && columns.recipient >= 0 ? row[columns.recipient] : '';
-    const sender = Number.isInteger(columns.sender) && columns.sender >= 0 ? row[columns.sender] : '';
     const customerName = Number.isInteger(columns.customerName) && columns.customerName >= 0 ? row[columns.customerName] : '';
-    const duplicateClassification = classifyUnifiedBusiness(bill, recipient, customerName, sender);
+    const duplicateClassification = classifyUnifiedBusiness(bill, recipient, customerName);
     if (!duplicateClassification) {
       throw safetyError(
         'DUPLICATE_WAYBILL_REVIEW_REQUIRED',
-        `重复运单 ${bill} 的后续行无法根据收件人、发件人、客户名称和运单号确认业务归属，已停止导入。`,
+        `重复运单 ${bill} 的后续行无法确认业务归属，已停止导入，避免“第一行覆盖后续行”。`,
         { shipmentCode: bill, firstBusinessType: first.businessType, sheetName: warning.sheetName, rowNumber: warning.rowNumber }
       );
     }

@@ -7,41 +7,22 @@ import { analyzeShopeeShipment as analyzeShopeeShipmentV30 } from './shopeeAnaly
 import { buildTrajectoryFacts } from './trajectoryFacts.js';
 import { isStrictShopeeWhppRetention } from './shopeeWhppRetentionTruth.js';
 
-export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-15-v136-shopee-cancel-terminal-v33';
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-13-v94-shopee-whpp-terminal-location-v32';
 
+/**
+ * V31 introduced the WHPP responsibility bucket, but its text fallback accepted
+ * any latest description containing "CE:WHPP". A return/departure sentence can
+ * mention WHPP as the source node, so that rule could turn an already-returning
+ * parcel into WHPP retention and zero its normal state fields.
+ *
+ * V32 keeps every V31 terminal/scan safety rule, but WHPP is accepted only when
+ * the latest effective event still locates the parcel at WHPP. If V31 produced a
+ * false WHPP bucket, rebuild the parcel with V30's ordinary state machine from
+ * the same saved evidence rather than trying to guess which Pending/OC/store
+ * fields V31 had zeroed.
+ */
 export function analyzeShopeeShipment(args = {}) {
   const result = analyzeShopeeShipmentV31(args);
-  const orderStatus = String(args.scanRow?.orderStatus ?? result?.orderStatus ?? '').trim();
-  if (orderStatus === '10' || String(result?.currentState || '').toUpperCase() === 'ORDER_CANCELLED' || result?.订单取消 === '是' || result?.取消状态 === '已取消') {
-    return {
-      ...result,
-      analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
-      orderStatus: '10',
-      currentState: 'ORDER_CANCELLED',
-      primaryCategory: '订单取消',
-      主分类: '订单取消',
-      异常分类: '订单取消',
-      订单取消: '是',
-      取消状态: '已取消',
-      是否POD: '否',
-      POD状态: '未POD',
-      退回状态: '未退回',
-      Pending次数: 0,
-      Pending当前次数: 0,
-      Pending不连续: '否',
-      OC天数: 0,
-      盘点天数: 0,
-      入库无扫描节点: '否',
-      trackRequired: false,
-      trackSkippedReason: 'ORDER_CANCELLED',
-      matchedRule: 'NORMAL_FINAL_HUB',
-      carry状态: 'closed_cancelled',
-      跨日状态: '已闭环',
-      tags: [...new Set([...(Array.isArray(result?.tags) ? result.tags : []), 'ORDER_CANCELLED'])],
-      QC判断: '订单扫描orderStatus=10，订单已取消，按正常终态闭环；不计未POD/Pending/OC/遗留异常'
-    };
-  }
-
   if (String(result?.specialState || '') !== 'SHOPEE_WHPP_RETENTION') {
     return { ...result, analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION };
   }
