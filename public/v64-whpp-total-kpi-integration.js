@@ -1,6 +1,6 @@
 (function installCanonicalHomeTruthV143(global){
   if(global.__CE_QC_V143_HOME_TRUTH_UI__)return;
-  const VERSION='2026-08-15-v143-canonical-home-truth-v1';
+  const VERSION='2026-08-15-v145-canonical-home-shopee-special-v2';
   const cache=new Map();let timer=null,running=false,rerun=false;
 
   const num=value=>{const n=Number(String(value??'').replace(/[,%\s]/g,''));return Number.isFinite(n)?n:0;};
@@ -60,6 +60,28 @@
     root.dataset.v143CoreTotal=String(c.total||0);
   }
 
+  function patchSpecial(data){
+    const root=[...document.querySelectorAll('#homePage .v18-panel')].find(node=>/SHOPEE\s*专项指标/.test(String(node.querySelector('h2')?.textContent||'')));
+    if(!root||!data.special)return;
+    const applyBlock=(title,field)=>{
+      const block=[...root.querySelectorAll('.v18-special-grid > div')].find(node=>String(node.querySelector('h3')?.textContent||'').includes(title));
+      if(!block)return;
+      const spans=[...block.querySelectorAll(':scope > span')];
+      const pairs=[['CN',data.special.CN],['VN',data.special.VN]];
+      spans.slice(0,2).forEach((span,index)=>{
+        const [label,item]=pairs[index];if(!item)return;
+        const value=Number(item[field]||0),total=Number(item.total||0);
+        const b=span.querySelector('b'),small=span.querySelector('small');
+        if(b)setText(b,fmt(value));
+        if(small)setText(small,`${total?((value*100/total).toFixed(2)):'0.00'}%`);
+        span.title=`${label} ${field==='returned'?'退回件':'Pending不连续'} ${value}票 / 本板块 ${total}票`;
+      });
+      block.dataset.v145SpecialSource='CANONICAL_SHOPEE_FINAL_ROWS';
+    };
+    applyBlock('Pending不连续','pendingNonContinuous');
+    applyBlock('退回件','returned');
+  }
+
   function patchDispatch(data){
     const grid=document.querySelector('#homePage .v18-dispatch-grid');if(!grid)return;
     const groups=data.dispatch||{};
@@ -79,8 +101,8 @@
   async function apply(){
     if(running){rerun=true;return;}const home=document.getElementById('homePage');const date=selectedDate();if(!home||home.hidden||!singleDay(date))return;
     running=true;rerun=false;
-    try{const data=await load(date);if(!data?.available)return;patchTop(data);patchCore(data);patchDispatch(data);document.documentElement.dataset.v143HomeTruth=VERSION;}
-    catch(error){console.warn('[CE-QC][V143_HOME_TRUTH_UI]',error);}
+    try{const data=await load(date);if(!data?.available)return;patchTop(data);patchCore(data);patchSpecial(data);patchDispatch(data);document.documentElement.dataset.v143HomeTruth=VERSION;}
+    catch(error){console.warn('[CE-QC][V145_HOME_TRUTH_UI]',error);}
     finally{running=false;if(rerun){rerun=false;setTimeout(()=>void apply(),0);}}
   }
   function schedule(delay=30,invalidate=false){if(invalidate)cache.clear();clearTimeout(timer);timer=setTimeout(()=>void apply(),delay);}
@@ -92,5 +114,5 @@
   const root=document.getElementById('homePage');if(root){const observer=new MutationObserver(records=>{if(records.some(record=>record.addedNodes.length))schedule(10);});observer.observe(root,{childList:true,subtree:true});}
   schedule(40,true);
   global.__CE_QC_V143_HOME_TRUTH_UI__={version:VERSION,refresh:()=>schedule(0,true)};
-  console.info('[CE-QC][V143_HOME_TRUTH_UI]',VERSION);
+  console.info('[CE-QC][V145_HOME_TRUTH_UI]',VERSION);
 })(window);
