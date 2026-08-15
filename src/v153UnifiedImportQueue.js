@@ -2,10 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { Worker } from 'node:worker_threads';
-import { getRuntimeConfig } from './db.js';
 
-export const V153_IMPORT_QUEUE_ID='2026-08-15-v155-local-spool-worker-queue-v2';
-const queueDir=path.join(getRuntimeConfig().importsDir,'unified_queue');
+export const V153_IMPORT_QUEUE_ID='2026-08-15-v156-localappdata-worker-queue-v3';
+const spoolRoot=path.join(process.env.LOCALAPPDATA||process.env.TEMP||process.cwd(),'CE_QC_LAUNCHER','upload_spool');
+const queueDir=path.join(spoolRoot,'jobs');
 fs.mkdirSync(queueDir,{recursive:true});
 let activeJobId='';
 const pending=[];
@@ -17,9 +17,8 @@ function writeJobSync(job){const target=jobPath(job.jobId),tmp=`${target}.tmp`;f
 function readJobSync(id){try{return JSON.parse(fs.readFileSync(jobPath(id),'utf8'));}catch{return null;}}
 function enqueueId(id){if(!id||pendingSet.has(id)||activeJobId===id)return;pending.push(id);pendingSet.add(id);}
 
-// V155 deliberately does NOT copy/rename the uploaded Excel into the DB data disk
-// on the HTTP request. Multer already placed it in the persistent local launcher
-// spool. We only write a tiny queue metadata file here and return immediately.
+// V156 keeps both the uploaded Excel and queue metadata on the local launcher spool.
+// The HTTP ingress therefore does not touch the database/data disk before returning 202.
 export async function enqueueUnifiedImport({tempPath,originalName='',manualReportDate=''}={}){
   if(!tempPath)throw new Error('没有收到综合日报Excel文件');
   const source=path.resolve(String(tempPath));
@@ -27,7 +26,7 @@ export async function enqueueUnifiedImport({tempPath,originalName='',manualRepor
   const jobId=`IMPORT-${Date.now()}-${crypto.randomUUID().slice(0,8)}`;
   const job={
     jobId,status:'QUEUED',phase:'QUEUED',originalName:String(originalName||''),manualReportDate:String(manualReportDate||''),
-    filePath:source,spoolPolicy:'LOCAL_FAST_SPOOL_REFERENCE',createdAt:nowIso(),updatedAt:nowIso(),result:null,preview:null,error:null,
+    filePath:source,spoolPolicy:'LOCALAPPDATA_ZERO_DB_DISK',createdAt:nowIso(),updatedAt:nowIso(),result:null,preview:null,error:null,
     queueId:V153_IMPORT_QUEUE_ID
   };
   writeJobSync(job);enqueueId(jobId);setImmediate(pump);
@@ -83,9 +82,9 @@ function resumeQueuedJobs(){
       if(job.status==='PROCESSING'){job.status='QUEUED';job.phase='RECOVERED_AFTER_RESTART';job.updatedAt=nowIso();writeJobSync(job);}
       if(job.status==='QUEUED')enqueueId(job.jobId);
     }
-  }catch(error){console.error('[CE-QC][V155_IMPORT_QUEUE] resume failed',error?.stack||error);}
+  }catch(error){console.error('[CE-QC][V156_IMPORT_QUEUE] resume failed',error?.stack||error);}
   if(pending.length)setImmediate(pump);
 }
 resumeQueuedJobs();
 
-export function getUnifiedImportQueueSummary(){return {queueId:V153_IMPORT_QUEUE_ID,activeJobId,pendingCount:pending.length,queueDir};}
+export function getUnifiedImportQueueSummary(){return {queueId:V153_IMPORT_QUEUE_ID,activeJobId,pendingCount:pending.length,queueRoot:'LOCALAPPDATA'};}
