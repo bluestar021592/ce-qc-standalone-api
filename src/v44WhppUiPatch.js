@@ -13,10 +13,11 @@ import './v136CcslForegroundDailyPatch.js';
 import './v136ShopeeForegroundDailyPatch.js';
 import './v136WhppForegroundDailyPatch.js';
 import './v137TrendTruthPatch.js';
+import './v137ClassificationAuditPatch.js';
 
 // Legacy gate markers remain until the next gate cleanup; V136/V137 own runtime.
 const LEGACY_GATE_MARKERS='v135-whpp-partial-snapshot-v23 v134-whpp-run-supervisor-v21';
-const PATCH_ID='2026-08-15-v137-system-truth-v25';
+const PATCH_ID='2026-08-15-v137-system-truth-v26';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
