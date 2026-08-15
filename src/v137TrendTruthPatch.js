@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { repairUnifiedSnapshotCompletion } from './v142UnifiedSnapshotRepairPatch.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v148-cross-day-attempt-evidence-v9';
+export const V137_TREND_TRUTH_ID='2026-08-15-v148-cross-day-attempt-evidence-v10';
 const BUSINESSES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const TYPES=new Set([...BUSINESSES,'CCSL','SHOPEE','TOTAL']);
 const CORE=['CE','CEAF','TBKH','ALI1688'];
@@ -82,6 +82,7 @@ function sourceRows(fromDate,toDate,type){
        AND s.reportDate>=v.reportDate
       WHERE v.businessType IN ('SHOPEECN','SHOPEEVN')
         AND (s.isPod=1 OR CAST(COALESCE(s.orderStatus,'') AS TEXT)='85')
+        AND COALESCE(s.rawJson,'') NOT LIKE '%POD_LOCK%'
       UNION ALL
       SELECT v.reportDate sourceReportDate,UPPER(TRIM(v.shipmentCode)) shipmentCode,
         f.reportDate evidenceDate,f.rawJson evidenceJson,'FINAL' evidenceSource
@@ -89,6 +90,7 @@ function sourceRows(fromDate,toDate,type){
       INNER JOIN business_final_rows f
         ON f.businessType='SHOPEE' AND UPPER(TRIM(f.shipmentCode))=UPPER(TRIM(v.shipmentCode))
        AND f.reportDate>=v.reportDate AND f.isPod=1
+       AND COALESCE(f.rawJson,'') NOT LIKE '%POD_LOCK%'
       WHERE v.businessType IN ('SHOPEECN','SHOPEEVN')
     ),
     pod_ranked AS (
@@ -211,7 +213,7 @@ function decorate(row){
   };
   const current={...rawCurrent,currentState:row.currentState};
   const currentTerminal=terminalTruth(current),finalTerminal=terminalTruth(final),scanTerminal=terminalTruth(rawScan),shipmentTerminal=terminalTruth(rawShipment),evidenceTerminal=terminalTruth(rawPodEvidence);
-  const futurePod=Boolean(row.firstPodObservedDate);
+  const futurePod=Boolean(row.firstPodObservedDate)||Boolean(normalizeDate(row.podLockTime));
   const terminal=currentTerminal||finalTerminal||scanTerminal||shipmentTerminal||evidenceTerminal||(futurePod?'POD':'');
   const pod=terminal==='POD'||futurePod||(!terminal&&Number(row.finalIsPod||0)===1);
   const closed=Boolean(terminal);
@@ -274,7 +276,7 @@ function handler(req,res){
     const requestedDateAvailable=dates.includes(to);
     res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=30');
     res.setHeader('Server-Timing',`v148;desc=cross-day-attempt-${entry.cacheHit?'hit':'miss'};dur=0`);
-    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,requestedDateLifecycle:lifecycle,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_THEN_CROSS_DAY_DISPATCH_EVENTS_THEN_POD_TIMESTAMP_THEN_FIRST_POD_OBSERVED_DATE',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
+    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,requestedDateLifecycle:lifecycle,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_THEN_CROSS_DAY_DISPATCH_EVENTS_THEN_POD_TIMESTAMP_THEN_FIRST_REAL_POD_OBSERVED_DATE',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
   }catch(error){console.error('[CE-QC][V148][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
 }
 
