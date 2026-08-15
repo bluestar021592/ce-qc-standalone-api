@@ -2,7 +2,7 @@ import { getDb, nowIso } from './db.js';
 import { CEClient } from './ceClient.js';
 import { runQcPipeline } from './pipelineV137.js';
 import { runWhppPipeline } from './whppPipeline.js';
-import { updateCarryoverResults } from './unifiedImportStore.js';
+import { updateCarryoverResults } from './unifiedImportStoreV137.js';
 
 export const CARRY_REFRESH_TIMEZONE = 'Asia/Phnom_Penh';
 export const CARRY_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
@@ -130,8 +130,6 @@ export async function processCarryFamilyForRefresh(family, rows, { client = new 
 
 export function applySuccessfulCarryRefresh(rows, { snapshotId, reportDate } = {}) {
   if (!rows?.length) return null;
-  // Reuse the exact persistence path already used by successful normal processing.
-  // Failed API bills are never passed here, so their previous current state is untouched.
   return updateCarryoverResults({ snapshotId, reportDate, rows });
 }
 
@@ -176,7 +174,6 @@ export async function refreshOpenCarryNow({ reason = 'INTERNAL', client = new CE
     const openAfter = Number(db.prepare("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN'").get()?.count || 0);
     const closed = Math.max(0, open.length - openAfter);
 
-    // A total API outage does not change any shipment state and is retried after a short throttle.
     if (!successfulRows.length && failedBills.size) throw new Error(`OPEN_CARRY_REFRESH_ALL_FAILED:${failedBills.size}`);
 
     recordCarryRefreshSuccess(db, { date: clock.date, reason, openCount: openAfter, refreshed: successfulRows.length, failed: failedBills.size, closed });
@@ -215,8 +212,6 @@ export function startCarryoverRefreshScheduler() {
   startupNotBefore = Date.now() + CARRY_REFRESH_STARTUP_DELAY_MS;
   schedulerTimer = setInterval(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_TICK]', error?.message || error)); }, CARRY_REFRESH_POLL_MS);
   schedulerTimer.unref?.();
-  // V108 index maintenance is scheduled around 90s. Start carry refresh later so
-  // the two background jobs never intentionally begin together after launch.
   startupTimer = setTimeout(() => { schedulerTick().catch(error => console.error('[CE-QC][CARRY_REFRESH_STARTUP]', error?.message || error)); }, CARRY_REFRESH_STARTUP_DELAY_MS);
   startupTimer.unref?.();
   console.log(`[CE-QC][CARRY_REFRESH] interactive startup protected for ${CARRY_REFRESH_STARTUP_DELAY_MS}ms; then Cambodia 00:05 + every 2 hours; OPEN carry only.`);
