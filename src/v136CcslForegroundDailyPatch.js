@@ -7,7 +7,7 @@ import { buildCoreKpis, buildCriticalDashboard, buildDashboardRows } from './rep
 import { createDashboardSnapshot, getMatchingSnapshot } from './snapshots.js';
 import { appendHistorySummary } from './longBackup.js';
 import { appendRuntimeLog } from './runtimeLog.js';
-import { completeUnifiedSnapshot, updateCarryoverResults } from './unifiedImportStore.js';
+import { completeUnifiedSnapshot, updateCarryoverResults } from './unifiedImportStoreV137.js';
 import { getMatchingBusinessSnapshot, loadBusinessState, SHOPEE } from './businessStore.js';
 
 export const V136_CCSL_FOREGROUND_DAILY_ID='2026-08-15-v137-ccsl-foreground-scan-only-v2';
@@ -66,8 +66,6 @@ function handler(pathValue){const resume=String(pathValue).endsWith('/resume');r
       result=await runQcPipeline({state:work,client:new CEClient(),onProgress:async msg=>{work.logs=[...(work.logs||[]),`[${new Date().toLocaleTimeString()}] ${msg}`].slice(-300);await appendRuntimeLog(`[CCSL] ${msg}`);},onCheckpoint:async current=>{current.currentRun={...(current.currentRun||run),runId,reportDate};current.lastRunSummary={...(current.lastRunSummary||{}),runId,reportDate,foregroundToday:today.length,historicalOpenBackground:historical.length};await persist(current,historical);},isPaused:async()=>Boolean((await loadState()).processing?.paused)});
     }catch(error){
       if(!retryError(error))throw error;
-      // CCSL scan-retry rows are not published in finalRows, therefore retain the
-      // checkpoint and require an explicit Continue. Do not fake a completed day.
       await persist(work,historical);
       updateRunLock(reportDate,'failed',error.message||String(error));
       return res.status(409).json({ok:false,code:error.code||'CCSL_RETRY_REQUIRED',retryRequired:true,error:error.message||String(error),foregroundToday:today.length,historicalOpenBackground:historical.length,message:'当日失败票已保存断点；点击继续处理只重试当日失败票。历史遗留不会重新进入前台队列。'});
