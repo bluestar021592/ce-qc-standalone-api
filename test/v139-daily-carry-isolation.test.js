@@ -29,6 +29,15 @@ test('V139 daily import no longer hydrates historical carry into automatic runti
   assert.doesNotMatch(source, /DELETE FROM carryover_open_items/i);
 });
 
+test('V139 reuses the workbook parse already validated by V102 instead of parsing the Excel twice', () => {
+  syntax('src/v102UnifiedImportSafetyGatePatch.js');
+  const gate = read('src/v102UnifiedImportSafetyGatePatch.js');
+  const source = read('src/v139DailyCarryIsolationPatch.js');
+  assert.match(gate, /req\.ceQcParsedUnified = parsed/);
+  assert.match(source, /req\.ceQcParsedUnified \|\| parseUnifiedDailyExcel/);
+  assert.match(source, /parseReusedFromSafetyGate/);
+});
+
 test('V139 current and resumed daily runs strip carry sources but preserve scan and track checkpoints', () => {
   const source = read('src/v139DailyCarryIsolationPatch.js');
   assert.match(source, /DAILY_RUN_ROUTES/);
