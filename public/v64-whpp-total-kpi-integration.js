@@ -1,16 +1,15 @@
-(function installCanonicalHomeTruthV143(global){
-  if(global.__CE_QC_V143_HOME_TRUTH_UI__)return;
-  const VERSION='2026-08-15-v145-canonical-home-shopee-special-v2';
+(function installCanonicalHomeTruthV149(global){
+  if(global.__CE_QC_V149_HOME_TRUTH_UI__)return;
+  const VERSION='2026-08-15-v149-current-import-home-truth-v3';
   const cache=new Map();let timer=null,running=false,rerun=false;
 
-  const num=value=>{const n=Number(String(value??'').replace(/[,%\s]/g,''));return Number.isFinite(n)?n:0;};
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
   const pct=value=>value===null||value===undefined?'—':`${Number(value||0).toFixed(2).replace(/\.00$/,'')}%`;
-  const selectedDate=()=>String(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'').slice(0,10);
+  const selectedDate=()=>String(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||global.historyModeDate||global.unifiedImportState?.reportDate||'').slice(0,10);
   const singleDay=date=>date&&String(document.getElementById('topRangeFrom')?.value||date).slice(0,10)===date&&String(document.getElementById('topRangeTo')?.value||date).slice(0,10)===date;
 
   async function load(date){
-    const hit=cache.get(date);if(hit&&Date.now()-hit.at<8000)return hit.data;
+    const hit=cache.get(date);if(hit&&Date.now()-hit.at<3000)return hit.data;
     const response=await fetch(`/api/v143/home-truth?reportDate=${encodeURIComponent(date)}&_=${Date.now()}`,{cache:'no-store',credentials:'same-origin'});
     const data=await response.json().catch(()=>({}));if(!response.ok||data?.ok===false)throw new Error(data?.error||`HTTP ${response.status}`);
     cache.set(date,{at:Date.now(),data});return data;
@@ -20,7 +19,7 @@
   function setText(node,text){if(node&&node.textContent!==text)node.textContent=text;}
   function ensureWhpp(){
     const grid=document.querySelector('#homePage .v18-business-grid');if(!grid)return null;let node=card('WHPP本土');if(node)return node;
-    node=document.createElement('button');node.type='button';node.className='v18-business-card cyan';node.dataset.v143Business='WHPP';
+    node=document.createElement('button');node.type='button';node.className='v18-business-card cyan';node.dataset.v149Business='WHPP';
     node.onclick=()=>typeof global.navigateWhppPage==='function'?global.navigateWhppPage():global.navigatePage?.('whpp');
     node.innerHTML='<span>WHPP本土</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em>';grid.appendChild(node);return node;
   }
@@ -56,8 +55,8 @@
     setCount(['今日POD'],c.todayPod,c.total);
     setRate(['POD率'],c.podRate);
     setCount(['外省未完结POD件'],c.provinceOpen,c.total);
-    root.dataset.v143CoreSource='CANONICAL_CORE_FIVE_BUSINESSES';
-    root.dataset.v143CoreTotal=String(c.total||0);
+    root.dataset.v149CoreSource='LATEST_VALID_UNIFIED_IMPORT_PLUS_LIVE_SQL_EVIDENCE';
+    root.dataset.v149CoreTotal=String(c.total||0);
   }
 
   function patchSpecial(data){
@@ -76,7 +75,7 @@
         if(small)setText(small,`${total?((value*100/total).toFixed(2)):'0.00'}%`);
         span.title=`${label} ${field==='returned'?'退回件':'Pending不连续'} ${value}票 / 本板块 ${total}票`;
       });
-      block.dataset.v145SpecialSource='CANONICAL_SHOPEE_FINAL_ROWS';
+      block.dataset.v149SpecialSource='LIVE_SQL_FINAL_OR_CURRENT_STATE';
     };
     applyBlock('Pending不连续','pendingNonContinuous');
     applyBlock('退回件','returned');
@@ -92,27 +91,32 @@
         const value=truth.values?.[index];const bar=row.querySelector('i b'),out=row.querySelector('em');
         if(bar)bar.style.width=value===null||value===undefined?'0%':`${Math.max(0,Math.min(100,Number(value)||0))}%`;
         if(out)out.textContent=value===null||value===undefined?'—':`${Number(value||0).toFixed(2)}%`;
-        row.title=value===null||value===undefined?(truth.total?`POD ${truth.pod}票，当前无足够派次证据`:'本区域无票'):`${index+1}派 ${truth.counts?.[index]||0}票 / 总票 ${truth.total}`;
+        row.title=value===null||value===undefined?(truth.total?`POD ${truth.pod}票，其中 ${truth.unknownPod||0}票尚无可验证派次证据`:'本区域无票'):`${index+1}派 ${truth.counts?.[index]||0}票 / 总票 ${truth.total}`;
       });
-      block.dataset.v143DispatchSource='CANONICAL_SHOPEE_ATTEMPT_TRUTH';
+      block.dataset.v149DispatchSource='CROSS_DAY_REAL_POD_AND_DISPATCH_EVIDENCE';
     }
   }
 
   async function apply(){
     if(running){rerun=true;return;}const home=document.getElementById('homePage');const date=selectedDate();if(!home||home.hidden||!singleDay(date))return;
     running=true;rerun=false;
-    try{const data=await load(date);if(!data?.available)return;patchTop(data);patchCore(data);patchSpecial(data);patchDispatch(data);document.documentElement.dataset.v143HomeTruth=VERSION;}
-    catch(error){console.warn('[CE-QC][V145_HOME_TRUTH_UI]',error);}
+    try{
+      const data=await load(date);if(!data?.available)return;
+      patchTop(data);patchCore(data);patchSpecial(data);patchDispatch(data);
+      document.documentElement.dataset.v149HomeTruth=VERSION;
+      document.documentElement.dataset.v149HomeSnapshotStatus=String(data.snapshotStatus||'');
+    }catch(error){console.warn('[CE-QC][V149_HOME_TRUTH_UI]',error);}
     finally{running=false;if(rerun){rerun=false;setTimeout(()=>void apply(),0);}}
   }
   function schedule(delay=30,invalidate=false){if(invalidate)cache.clear();clearTimeout(timer);timer=setTimeout(()=>void apply(),delay);}
 
-  const prior=global.renderAll;if(typeof prior==='function'&&!prior.__v143HomeTruthWrapped){const wrapped=function(){const result=prior.apply(this,arguments);schedule(0);return result;};wrapped.__v143HomeTruthWrapped=true;global.renderAll=wrapped;}
+  const prior=global.renderAll;if(typeof prior==='function'&&!prior.__v149HomeTruthWrapped){const wrapped=function(){const result=prior.apply(this,arguments);schedule(0);return result;};wrapped.__v149HomeTruthWrapped=true;global.renderAll=wrapped;}
   document.addEventListener('click',event=>{if(event.target?.closest?.('#topRangeQuery,#dashboardRangeQuery,[data-page="home"],.side-link'))schedule(20,true);},true);
   document.addEventListener('change',event=>{if(event.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(20,true);});
   document.addEventListener('ce-qc-run-complete',()=>schedule(0,true));
   const root=document.getElementById('homePage');if(root){const observer=new MutationObserver(records=>{if(records.some(record=>record.addedNodes.length))schedule(10);});observer.observe(root,{childList:true,subtree:true});}
+  setInterval(()=>{if(!document.hidden&&document.getElementById('homePage')&&!document.getElementById('homePage').hidden)schedule(0,true);},5000);
   schedule(40,true);
-  global.__CE_QC_V143_HOME_TRUTH_UI__={version:VERSION,refresh:()=>schedule(0,true)};
-  console.info('[CE-QC][V145_HOME_TRUTH_UI]',VERSION);
+  global.__CE_QC_V149_HOME_TRUTH_UI__={version:VERSION,refresh:()=>schedule(0,true)};
+  console.info('[CE-QC][V149_HOME_TRUTH_UI]',VERSION);
 })(window);
