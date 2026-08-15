@@ -5,6 +5,7 @@ import path from 'path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import './v137-system-logic.test.js';
+import './v138-dashboard-speed-layout.test.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
