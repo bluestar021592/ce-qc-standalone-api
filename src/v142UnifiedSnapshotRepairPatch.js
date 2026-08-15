@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 import { completeUnifiedSnapshot } from './unifiedImportStore.js';
 
-export const V142_UNIFIED_REPAIR_ID='2026-08-15-v142-unified-auto-finalize-v3';
+export const V142_UNIFIED_REPAIR_ID='2026-08-15-v144-zero-family-auto-finalize-v4';
 const recentAttempts=new Map();
 const RETRY_MS=15_000;
 
@@ -18,6 +18,31 @@ function currentUnified(reportDate){
     WHERE b.reportDate=? AND b.status='VALID'
     ORDER BY b.createdAt DESC,b.batchId DESC LIMIT 1
   `).get(reportDate)||null;
+}
+
+function expectedFamilyCounts(snapshotId){
+  const row=getDb().prepare(`
+    SELECT
+      SUM(CASE WHEN UPPER(COALESCE(businessType,'')) IN ('CE','CEAF','TBKH','ALI1688') THEN 1 ELSE 0 END) ccsl,
+      SUM(CASE WHEN UPPER(COALESCE(businessType,'')) IN ('SHOPEECN','SHOPEEVN') THEN 1 ELSE 0 END) shopee,
+      COUNT(*) total
+    FROM unified_import_rows WHERE snapshotId=?
+  `).get(snapshotId)||{};
+  return {ccsl:Number(row.ccsl||0),shopee:Number(row.shopee||0),total:Number(row.total||0)};
+}
+
+function emptyCompletedChild(family,reportDate,unified){
+  return {
+    snapshotId:`ZERO-${family}-${reportDate}-${unified?.snapshotId||'UNIFIED'}`,
+    reportDate,
+    runId:`ZERO-${family}-${reportDate}`,
+    status:'VALID',
+    reconciliationStatus:'COMPLETED',
+    createdAt:unified?.snapshotCreatedAt||unified?.batchCreatedAt||new Date().toISOString(),
+    zeroRowFamily:true,
+    state:{finalRows:[]},
+    view:null
+  };
 }
 
 function latestCcslSnapshot(reportDate){
@@ -46,10 +71,10 @@ function latestShopeeSnapshot(reportDate){
   return {...safeJson(row.payloadJson),snapshotId:row.snapshotId,businessType:'SHOPEE',reportDate:row.reportDate,runId:row.runId,status:row.status||'VALID',reconciliationStatus:row.reconciliationStatus||'COMPLETED',createdAt:row.createdAt||row.generatedAt||''};
 }
 
-function markWaiting(row,missing){
+function markWaiting(row,missing,expectedFamilies){
   if(!row?.snapshotId)return;
   const payload=safeJson(row.payloadJson);
-  payload.autoFinalize={patchId:V142_UNIFIED_REPAIR_ID,status:'WAITING_FOR_CHILD_SNAPSHOTS',missing,checkedAt:new Date().toISOString()};
+  payload.autoFinalize={patchId:V142_UNIFIED_REPAIR_ID,status:'WAITING_FOR_REQUIRED_CHILD_SNAPSHOTS',missing,expectedFamilies,checkedAt:new Date().toISOString()};
   getDb().prepare(`UPDATE unified_snapshots SET payloadJson=?
     WHERE snapshotId=? AND status IN ('IMPORTED','PROCESSING')`).run(JSON.stringify(payload),row.snapshotId);
 }
@@ -70,23 +95,28 @@ export function repairUnifiedSnapshotCompletion(reportDate,{force=false}={}){
   if(!unified)return remember(date,{ok:true,reportDate:date,imported:false,status:'NOT_IMPORTED'});
   if(unified.snapshotStatus==='COMPLETED')return remember(date,{ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:unified.snapshotId});
 
-  const ccsl=latestCcslSnapshot(date);
-  const shopee=latestShopeeSnapshot(date);
+  const expectedFamilies=expectedFamilyCounts(unified.snapshotId);
+  const ccslRequired=expectedFamilies.ccsl>0;
+  const shopeeRequired=expectedFamilies.shopee>0;
+  const realCcsl=ccslRequired?latestCcslSnapshot(date):null;
+  const realShopee=shopeeRequired?latestShopeeSnapshot(date):null;
+  const ccsl=ccslRequired?realCcsl:emptyCompletedChild('CCSL',date,unified);
+  const shopee=shopeeRequired?realShopee:emptyCompletedChild('SHOPEE',date,unified);
   const missing=[];
-  if(!ccsl)missing.push('CCSL');
-  if(!shopee)missing.push('SHOPEE');
+  if(ccslRequired&&!realCcsl)missing.push('CCSL');
+  if(shopeeRequired&&!realShopee)missing.push('SHOPEE');
   if(missing.length){
-    markWaiting(unified,missing);
-    return remember(date,{ok:true,reportDate:date,imported:true,completed:false,status:'PROCESSING',missing,snapshotId:unified.snapshotId});
+    markWaiting(unified,missing,expectedFamilies);
+    return remember(date,{ok:true,reportDate:date,imported:true,completed:false,status:'PROCESSING',missing,expectedFamilies,snapshotId:unified.snapshotId});
   }
 
   restoreCompletableStatus(unified);
   try{
     const result=completeUnifiedSnapshot({reportDate:date,ccslSnapshot:ccsl,shopeeSnapshot:shopee});
     if(!result)return remember(date,{ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:'UNIFIED_SNAPSHOT_NOT_COMPLETABLE',error:'统一快照未进入可完成状态。'});
-    return remember(date,{ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:result.snapshotId||unified.snapshotId,repairId:V142_UNIFIED_REPAIR_ID});
+    return remember(date,{ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:result.snapshotId||unified.snapshotId,repairId:V142_UNIFIED_REPAIR_ID,expectedFamilies,zeroFamilies:{CCSL:!ccslRequired,SHOPEE:!shopeeRequired}});
   }catch(error){
-    return remember(date,{ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:error?.code||'UNIFIED_RECONCILIATION_FAILED',error:error?.message||String(error),reconciliation:error?.reconciliation||null});
+    return remember(date,{ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:error?.code||'UNIFIED_RECONCILIATION_FAILED',error:error?.message||String(error),reconciliation:error?.reconciliation||null,expectedFamilies});
   }
 }
 
@@ -101,6 +131,6 @@ export function repairRecentUnifiedSnapshots(limit=14){
   return rows.map(row=>repairUnifiedSnapshotCompletion(row.reportDate,{force:true}));
 }
 
-setTimeout(()=>{try{repairRecentUnifiedSnapshots();}catch(error){console.warn('[CE-QC][V142][STARTUP_REPAIR]',error?.message||error);}},1200).unref?.();
-const timer=setInterval(()=>{try{repairRecentUnifiedSnapshots(7);}catch(error){console.warn('[CE-QC][V142][PERIODIC_REPAIR]',error?.message||error);}},60_000);
+setTimeout(()=>{try{repairRecentUnifiedSnapshots();}catch(error){console.warn('[CE-QC][V144][STARTUP_REPAIR]',error?.message||error);}},1200).unref?.();
+const timer=setInterval(()=>{try{repairRecentUnifiedSnapshots(7);}catch(error){console.warn('[CE-QC][V144][PERIODIC_REPAIR]',error?.message||error);}},60_000);
 timer.unref?.();
