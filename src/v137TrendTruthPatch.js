@@ -1,10 +1,11 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v139-seven-business-range-trends-cache-v3';
-const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','TOTAL']);
-const CORE=new Set(['CE','CEAF','TBKH','ALI1688']);
-const SHOPEE=new Set(['SHOPEECN','SHOPEEVN']);
+export const V137_TREND_TRUTH_ID='2026-08-15-v140-seven-business-range-trends-fast-v4';
+const BUSINESSES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
+const TYPES=new Set([...BUSINESSES,'CCSL','SHOPEE','TOTAL']);
+const CORE=['CE','CEAF','TBKH','ALI1688'];
+const SHOPEE=['SHOPEECN','SHOPEEVN'];
 const CACHE_TTL_MS=15_000;
 const trendCache=new Map();
 
@@ -14,6 +15,13 @@ function num(value){const n=Number(value);return Number.isFinite(n)?n:0;}
 function nullableNum(...values){for(const value of values){if(value===null||value===undefined||value==='')continue;const n=Number(value);if(Number.isFinite(n))return n;}return null;}
 function rate(n,d){return d?Number((num(n)*100/num(d)).toFixed(2)):0;}
 function clampAttempt(value){const n=Math.trunc(num(value));return n>0?Math.max(1,Math.min(3,n)):0;}
+
+function scopeBusinessTypes(type){
+  if(type==='TOTAL')return BUSINESSES;
+  if(type==='CCSL')return CORE;
+  if(type==='SHOPEE')return SHOPEE;
+  return [type];
+}
 
 function completedDates(fromDate,toDate){
   const db=getDb();
@@ -31,7 +39,9 @@ function completedDates(fromDate,toDate){
   return rows.map(row=>String(row.reportDate||'')).filter(Boolean).sort();
 }
 
-function sourceRows(fromDate,toDate){
+function sourceRows(fromDate,toDate,type){
+  const scope=scopeBusinessTypes(type);
+  const placeholders=scope.map(()=>'?').join(',');
   return getDb().prepare(`
     WITH ranked AS (
       SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
@@ -43,7 +53,7 @@ function sourceRows(fromDate,toDate){
     valid AS (
       SELECT DISTINCT u.reportDate,u.businessType,u.shipmentCode
       FROM latest l INNER JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate
-      WHERE u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP')
+      WHERE u.businessType IN (${placeholders})
     )
     SELECT v.reportDate,v.businessType,v.shipmentCode,
       COALESCE(bf.isPod,cf.isPod,0) finalIsPod,
@@ -58,7 +68,7 @@ function sourceRows(fromDate,toDate){
      AND ((v.businessType IN ('SHOPEECN','SHOPEEVN') AND bf.businessType='SHOPEE') OR (v.businessType='WHPP' AND bf.businessType='WHPP'))
     LEFT JOIN shipment_current_state c ON c.shipmentCode=v.shipmentCode
     ORDER BY v.reportDate,v.businessType,v.shipmentCode
-  `).all(fromDate,toDate);
+  `).all(fromDate,toDate,...scope);
 }
 
 function terminalTruth(row={}){
@@ -72,15 +82,31 @@ function terminalTruth(row={}){
   return '';
 }
 
-function attemptOf(reportDate,merged){
-  let attempt=clampAttempt(nullableNum(merged.podAttemptNo,merged.currentAttemptNo,merged.dispatchAttemptNo,merged.POD派次));
-  if(attempt)return attempt;
-  const stamp=String(merged.POD时间||merged.podTime||merged.podClosedAt||merged.terminalObservedAt||merged.latestEventTime||'').slice(0,10).replaceAll('/','-');
-  if(/^\d{4}-\d{2}-\d{2}$/.test(stamp)){
-    const start=Date.parse(`${reportDate}T00:00:00Z`),end=Date.parse(`${stamp}T00:00:00Z`);
-    if(Number.isFinite(start)&&Number.isFinite(end)&&end>=start)attempt=clampAttempt(Math.floor((end-start)/86400000)+1);
+function attemptFromSource(source={}){
+  const explicit=clampAttempt(nullableNum(source.podAttemptNo,source.currentAttemptNo,source.dispatchAttemptNo,source.POD派次));
+  if(explicit)return explicit;
+  if(Array.isArray(source.attemptHistory)&&source.attemptHistory.length)return clampAttempt(source.attemptHistory.length);
+  return 0;
+}
+
+function attemptDateFromSource(source={}){
+  const raw=source.POD时间||source.podTime||source.podClosedAt||source.terminalObservedAt||source.latestEventTime||'';
+  const stamp=String(raw).slice(0,10).replaceAll('/','-');
+  return /^\d{4}-\d{2}-\d{2}$/.test(stamp)?stamp:'';
+}
+
+function attemptOf(reportDate,current={},final={}){
+  for(const source of [current,final]){
+    const explicit=attemptFromSource(source);
+    if(explicit)return explicit;
   }
-  return attempt;
+  for(const source of [current,final]){
+    const stamp=attemptDateFromSource(source);
+    if(!stamp)continue;
+    const start=Date.parse(`${reportDate}T00:00:00Z`),end=Date.parse(`${stamp}T00:00:00Z`);
+    if(Number.isFinite(start)&&Number.isFinite(end)&&end>=start)return clampAttempt(Math.floor((end-start)/86400000)+1);
+  }
+  return 0;
 }
 
 function decorate(row){
@@ -89,39 +115,50 @@ function decorate(row){
   const currentTerminal=terminalTruth(current);
   const finalTerminal=terminalTruth(final);
   const terminal=currentTerminal||finalTerminal;
-  const merged={...final,...current};
   const pod=terminal==='POD'||(!terminal&&Number(row.finalIsPod||0)===1);
   const closed=Boolean(terminal);
   const ocDays=closed?0:num(nullableNum(current.OC天数,current.ocDays,final.OC天数,final.ocDays));
-  const attempt=pod?attemptOf(row.reportDate,merged):0;
+  const attempt=pod?attemptOf(row.reportDate,current,final):0;
   return {...row,pod,closed,terminal,ocDays,attempt,attemptUnknown:pod&&!attempt?1:0};
-}
-
-function inScope(type,businessType){
-  if(type==='TOTAL')return true;
-  if(type==='CCSL')return CORE.has(businessType);
-  if(type==='SHOPEE')return SHOPEE.has(businessType);
-  return type===businessType;
 }
 
 function build(type,dates,rows){
   const byDate=new Map(dates.map(date=>[date,{total:0,pod:0,oc1:0,a1:0,a2:0,a3:0,unknown:0}]));
-  for(const row of rows){if(!inScope(type,row.businessType)||!byDate.has(row.reportDate))continue;const d=byDate.get(row.reportDate);d.total++;if(row.pod)d.pod++;if(!row.closed&&row.ocDays>=1)d.oc1++;if(row.attempt===1)d.a1++;else if(row.attempt===2)d.a2++;else if(row.attempt>=3)d.a3++;d.unknown+=row.attemptUnknown;}
-  const ticket=[],podRate=[],ocRate=[],firstRate=[],attempt1=[],attempt2=[],attempt3=[],attempt1Count=[],attempt2Count=[],attempt3Count=[],attemptDenominator=[],attemptUnknownPod=[];
-  for(const date of dates){const d=byDate.get(date);ticket.push(d.total);podRate.push(rate(d.pod,d.total));ocRate.push(rate(d.oc1,d.total));const evidence=d.a1+d.a2+d.a3;const trustworthy=d.unknown===0&&(d.pod===0||evidence>0);firstRate.push(trustworthy&&d.pod>0?rate(d.a1,d.total):null);attempt1.push(trustworthy&&d.pod>0?rate(d.a1,d.total):null);attempt2.push(trustworthy&&d.pod>0?rate(d.a2,d.total):null);attempt3.push(trustworthy&&d.pod>0?rate(d.a3,d.total):null);attempt1Count.push(d.a1);attempt2Count.push(d.a2);attempt3Count.push(d.a3);attemptDenominator.push(d.total);attemptUnknownPod.push(d.unknown||((d.pod>0&&evidence===0)?d.pod:0));}
-  return {dates,ticket,podRate,ocRate,firstRate,attempt1,attempt2,attempt3,attempt1Count,attempt2Count,attempt3Count,attemptDenominator,attemptUnknownPod};
+  for(const row of rows){
+    if(!byDate.has(row.reportDate))continue;
+    const d=byDate.get(row.reportDate);d.total++;
+    if(row.pod)d.pod++;
+    if(!row.closed&&row.ocDays>=1)d.oc1++;
+    if(row.attempt===1)d.a1++;else if(row.attempt===2)d.a2++;else if(row.attempt>=3)d.a3++;
+    d.unknown+=row.attemptUnknown;
+  }
+  const ticket=[],podRate=[],ocRate=[],firstRate=[],attempt1=[],attempt2=[],attempt3=[],attempt1Count=[],attempt2Count=[],attempt3Count=[],attemptDenominator=[],attemptUnknownPod=[],attemptKnownPod=[],attemptCoverage=[];
+  for(const date of dates){
+    const d=byDate.get(date);const evidence=d.a1+d.a2+d.a3;const hasEvidence=evidence>0;
+    ticket.push(d.total);podRate.push(rate(d.pod,d.total));ocRate.push(rate(d.oc1,d.total));
+    const a1=d.pod===0?0:(hasEvidence?rate(d.a1,d.total):null);
+    const a2=d.pod===0?0:(hasEvidence?rate(d.a2,d.total):null);
+    const a3=d.pod===0?0:(hasEvidence?rate(d.a3,d.total):null);
+    firstRate.push(a1);attempt1.push(a1);attempt2.push(a2);attempt3.push(a3);
+    attempt1Count.push(d.a1);attempt2Count.push(d.a2);attempt3Count.push(d.a3);attemptDenominator.push(d.total);
+    attemptUnknownPod.push(d.unknown);attemptKnownPod.push(evidence);attemptCoverage.push(d.pod?rate(evidence,d.pod):100);
+  }
+  return {dates,ticket,podRate,ocRate,firstRate,attempt1,attempt2,attempt3,attempt1Count,attempt2Count,attempt3Count,attemptDenominator,attemptUnknownPod,attemptKnownPod,attemptCoverage};
 }
 
-function cacheEntry(from,to,dates){
+function cacheEntry(type,from,to,dates){
   const actualFrom=dates[0],actualTo=dates.at(-1);
-  const key=`${actualFrom}|${actualTo}|${dates.join(',')}`;
+  const key=`${type}|${actualFrom}|${actualTo}|${dates.join(',')}`;
   const cached=trendCache.get(key);
   if(cached&&Date.now()-cached.at<CACHE_TTL_MS)return {...cached,cacheHit:true};
-  const rows=sourceRows(actualFrom,actualTo).map(decorate);
-  const byType={};
-  for(const type of TYPES)byType[type]=build(type,dates,rows);
-  if(trendCache.size>6)trendCache.clear();
-  const entry={at:Date.now(),actualFrom,actualTo,byType,rowCount:rows.length};
+  const rows=sourceRows(actualFrom,actualTo,type).map(decorate);
+  const payload=build(type,dates,rows);
+  const related=type==='TOTAL'?{
+    SHOPEECN:build('SHOPEECN',dates,rows.filter(row=>row.businessType==='SHOPEECN')),
+    SHOPEEVN:build('SHOPEEVN',dates,rows.filter(row=>row.businessType==='SHOPEEVN'))
+  }:undefined;
+  if(trendCache.size>12)trendCache.clear();
+  const entry={at:Date.now(),actualFrom,actualTo,payload,related,rowCount:rows.length,queryScope:scopeBusinessTypes(type)};
   trendCache.set(key,entry);
   return {...entry,cacheHit:false};
 }
@@ -133,15 +170,13 @@ function handler(req,res){
     const to=dateOnly(req.query.to),from=dateOnly(req.query.from)||to;
     if(!from||!to||from>to)return res.status(400).json({ok:false,error:'日期范围无效'});
     const dates=completedDates(from,to);
-    if(!dates.length)return res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:from,toDate:to,dates:[],ticket:[],podRate:[],ocRate:[],firstRate:[],attemptUnknownPod:[]});
-    const entry=cacheEntry(from,to,dates);
-    const payload=entry.byType[type];
-    const related=type==='TOTAL'?{SHOPEECN:entry.byType.SHOPEECN,SHOPEEVN:entry.byType.SHOPEEVN}:undefined;
+    if(!dates.length)return res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:from,toDate:to,dates:[],ticket:[],podRate:[],ocRate:[],firstRate:[],attempt1:[],attempt2:[],attempt3:[],attemptUnknownPod:[]});
+    const entry=cacheEntry(type,from,to,dates);
     res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=30');
-    res.setHeader('Server-Timing',`v139;desc=seven-business-trend-cache-${entry.cacheHit?'hit':'miss'};dur=0`);
-    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,...payload,...(related?{related}: {})});
-  }catch(error){console.error('[CE-QC][V139][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
+    res.setHeader('Server-Timing',`v140;desc=scoped-trend-${entry.cacheHit?'hit':'miss'};dur=0`);
+    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'KNOWN_ATTEMPTS_RENDER_WITH_UNKNOWN_REPORTED_SEPARATELY',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
+  }catch(error){console.error('[CE-QC][V140][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
 }
 
 const previousListen=express.application.listen;let installed=false;
-express.application.listen=function v139TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
+express.application.listen=function v140TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
