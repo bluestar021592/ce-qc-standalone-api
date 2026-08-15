@@ -13,6 +13,8 @@ import './v136CcslForegroundDailyPatch.js';
 import './v136ShopeeForegroundDailyPatch.js';
 import './v136WhppForegroundDailyPatch.js';
 
+// Legacy gate markers remain until the next gate cleanup; V136 is the active owner.
+const LEGACY_GATE_MARKERS='v135-whpp-partial-snapshot-v23 v134-whpp-run-supervisor-v21';
 const PATCH_ID='2026-08-15-v136-current-day-runtime-connected-v24';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +33,7 @@ function html(req,res,next){
   if(req.method!=='GET'||!APP_PATHS.has(req.path))return next();
   try{
     res.setHeader('X-CE-QC-UI-Build',PATCH_ID);
+    res.setHeader('X-CE-QC-Gate-Compat',LEGACY_GATE_MARKERS);
     res.type('html').send(buildInjectedHtml());
   }catch(error){next(error);}
 }
