@@ -6,9 +6,11 @@ const SPECIAL_CODES = new Map([
   // these business destinations according to its latest effective trajectory.
   ['CCSLCN', { state: 'CCSLCN_DIVERSION', label: 'CCSLCN分流' }],
   ['CCSLZT', { state: 'CCSLZT_DIVERSION', label: 'CCSLZT分流' }],
-  // CEL:CCSL580 is the dedicated "580滞留包裹" destination. It remains a
-  // normal/special destination and is excluded from ordinary Pending/OC/etc.
+  // CEL:CCSL580 / CE:580 / CEL:580 / legacy CE580 are the same dedicated
+  // "580滞留包裹" destination. It remains normal/special and is excluded from
+  // ordinary Pending/OC/etc.
   ['CCSL580', { state: 'CCSL580_RETENTION', label: '580滞留包裹' }],
+  ['CE580', { state: 'CCSL580_RETENTION', label: '580滞留包裹' }],
   ['580', { state: 'CCSL580_RETENTION', label: '580滞留包裹' }],
   // Historical aliases normalize to the same current business meaning.
   ['CECN', { state: 'CCSLCN_DIVERSION', label: 'CCSLCN分流' }],
@@ -32,9 +34,11 @@ export function isSpecialCategory(row = {}) {
     'CCSLCN_DIVERSION',
     'CCSLZT_DIVERSION',
     'CCSL580_RETENTION',
-    // Legacy value remains recognized so old stored rows do not become generic
+    // Legacy values remain recognized so old stored rows do not become generic
     // abnormalities during historical review.
     'CCSL580_DIVERSION',
+    'CE580_RETENTION',
+    '580_RETENTION',
     'CECN_RETENTION',
     'CEZT_RETENTION'
   ].includes(String(row.specialState || row.primaryCategory || row.主分类 || ''));
