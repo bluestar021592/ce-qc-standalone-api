@@ -27,6 +27,7 @@ test('current import bootstrap supplies seven business shells from classified to
   const patch=read('src/v139InstantBootstrapPatch.js');
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(patch,/v27BootstrapHandler/);
+  assert.match(patch,/SELECT businessType,COUNT\(DISTINCT shipmentCode\)/);
   assert.match(patch,/classificationCounts/);
   for(const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'])assert.match(patch,new RegExp(type));
   assert.match(patch,/_instantImportShell:true/);
@@ -45,7 +46,7 @@ test('WHPP current-day page uses imported classification count immediately and f
   assert.doesNotMatch(ui,/当前无WHPP本土数据/);
 });
 
-test('legacy V27 trend DOM runner is retired and V139 restores the clean dashboard renderer',()=>{
+test('legacy V27 trend DOM runner is retired and old V27 network work is suppressed',()=>{
   const retired=read('public/v27-trend-mount-fix.js');
   const runtime=read('public/v139-normal-web-runtime.js');
   const injector=read('src/v44WhppUiPatch.js');
@@ -53,7 +54,9 @@ test('legacy V27 trend DOM runner is retired and V139 restores the clean dashboa
   assert.doesNotMatch(retired,/api\/v27\/trends/);
   assert.match(runtime,/__CE_QC_DASHBOARD_V18_BASE__/);
   assert.match(runtime,/removeLegacyTrendDom/);
-  assert.match(injector,/v139-normal-web-runtime\.js\?v=20260815-1/);
+  assert.match(runtime,/api\\\/v27\\\/trends/);
+  assert.match(runtime,/X-CE-QC-Retired/);
+  assert.match(injector,/v139-normal-web-runtime\.js\?v=20260815-2/);
 });
 
 test('versioned JS CSS and images are immutable while HTML remains outside static asset cache',()=>{
