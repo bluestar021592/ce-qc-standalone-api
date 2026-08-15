@@ -28,7 +28,7 @@ function analyze({ orderStatus = '70', events = [], exceptions = [], analysisDat
   });
 }
 
-test('confirm-query scan gate uses orderStatus only', () => {
+test('confirm-query scan gate uses orderStatus only and closes 10 85 100 locally', () => {
   for (const status of ['50', '60', '70']) {
     const result = classifyScanTerminal(scan(status, {
       statusCode: 'P4008',
@@ -39,6 +39,10 @@ test('confirm-query scan gate uses orderStatus only', () => {
     assert.equal(result.trackRequired, true);
   }
 
+  const cancelled = classifyScanTerminal(scan('10'), 'success');
+  assert.equal(cancelled.currentState, 'ORDER_CANCELLED');
+  assert.equal(cancelled.trackRequired, false);
+
   const pod = classifyScanTerminal(scan('85'), 'success');
   assert.equal(pod.currentState, 'POD');
   assert.equal(pod.trackRequired, false);
@@ -46,6 +50,10 @@ test('confirm-query scan gate uses orderStatus only', () => {
   const returned = classifyScanTerminal(scan('100'), 'success');
   assert.equal(returned.currentState, 'RETURN_COMPLETED');
   assert.equal(returned.trackRequired, false);
+
+  const unknown = classifyScanTerminal(scan('99'), 'success');
+  assert.equal(unknown.currentState, 'SCAN_STATUS_HOLD');
+  assert.equal(unknown.trackRequired, false);
 });
 
 test('tracking 26 latest is inbound without scan', () => {
