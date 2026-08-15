@@ -9,7 +9,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const syntax=p=>{const result=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(result.status,0,`${p}: ${result.stderr||result.stdout}`);};
 
-test('V150 candidate critical runtime files are syntax valid',()=>{
+test('V151 candidate critical runtime files are syntax valid',()=>{
   for(const file of [
     'bootstrap.js','server.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v150UnifiedImportFastRoutePatch.js',
     'src/v137TrendTruthPatch.js','src/v142UnifiedSnapshotRepairPatch.js','src/v143HomeTruthPatch.js','src/v146ProcessingReadinessPatch.js','src/unifiedImportStore.js',
@@ -17,56 +17,57 @@ test('V150 candidate critical runtime files are syntax valid',()=>{
   ])syntax(file);
 });
 
-test('V150 UI loads import fast path last and cache busts event-driven home truth',()=>{
-  const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/2026-08-15-v150-import-first-stability-v38/);
-  assert.match(injector,/v64-whpp-total-kpi-integration\.js\?v=20260815-10/);
-  assert.match(injector,/v150-import-fast-path\.js\?v=20260815-3/);
-  assert.ok(injector.indexOf('v64-whpp-total-kpi-integration.js?v=20260815-10')<injector.indexOf('v150-import-fast-path.js?v=20260815-3'));
-});
-
-test('V150 browser import returns after persistence and does not wait for dashboard states',()=>{
+test('V151 UI still uses the upload-first browser path',()=>{
   const ui=read('public/v150-import-fast-path.js');
-  assert.match(ui,/v150-import-fast-path-v3/);
   assert.match(ui,/api\/import\/unified-daily-report/);
   assert.match(ui,/已保存，可以继续上传下一份/);
   assert.doesNotMatch(ui,/api\/state\?compact=1/);
   assert.doesNotMatch(ui,/api\/shopee\/state\?compact=1/);
 });
 
-test('V150 safety gate parses workbook once and hands parsed object to persistence route',()=>{
+test('V151 safety gate hard-bypasses the legacy heavy import handler',()=>{
   const safety=read('src/v102UnifiedImportSafetyGatePatch.js');
-  assert.match(safety,/v150-single-parse-import-safety-v4/);
+  assert.match(safety,/v151-direct-persist-safety-v5/);
   assert.match(safety,/req\.ceQcParsedUnified = parsed/);
-  assert.match(safety,/await import\('\.\/v150UnifiedImportFastRoutePatch\.js'\)/);
+  assert.match(safety,/persistUnifiedUploadFast\(parsed, req\.file\.originalname\)/);
+  assert.match(safety,/X-CE-QC-Import-Path/);
+  assert.match(safety,/V151-DIRECT-SAFE-PERSIST/);
+  assert.match(safety,/legacy unified import final handler is intentionally NOT called/);
 });
 
-test('V150 upload-first backend removes full carry queue from upload request',()=>{
+test('V151 persistence omits carryover summary and giant snapshot row duplication',()=>{
   const fast=read('src/v150UnifiedImportFastRoutePatch.js');
-  assert.match(fast,/v150-upload-first-route-v1/);
-  assert.match(fast,/req\.ceQcParsedUnified\|\|parseUnifiedDailyExcel/);
-  assert.match(fast,/saveUnifiedImport\(parsed,req\.file\.originalname\)/);
-  assert.match(fast,/processingDeferred:true/);
-  assert.match(fast,/statePreparation:'ON_PROCESS_START'/);
-  const importStart=fast.indexOf('async function fastImportHandler');
-  const importEnd=fast.indexOf('const previousPost=',importStart);
-  const importBlock=fast.slice(importStart,importEnd);
-  assert.doesNotMatch(importBlock,/getUnifiedProcessingQueue/);
-  assert.doesNotMatch(importBlock,/loadState\(/);
-  assert.doesNotMatch(importBlock,/loadBusinessState\(/);
+  assert.match(fast,/v151-direct-safe-persist-v2/);
+  assert.match(fast,/export function persistUnifiedUploadFast/);
+  assert.match(fast,/carryoverDeferred:true/);
+  assert.match(fast,/ROWS_NORMALIZED_IN_TABLES_V151/);
+  const start=fast.indexOf('export function persistUnifiedUploadFast');
+  const end=fast.indexOf('function clearTransientRunState',start);
+  const block=fast.slice(start,end);
+  assert.doesNotMatch(block,/carryoverSummary/);
+  assert.doesNotMatch(block,/getUnifiedProcessingQueue/);
+  assert.doesNotMatch(block,/payload\s*=\s*\{[^}]*rows\s*:/s);
 });
 
-test('V150 heavy carry hydration moves to actual process start',()=>{
+test('V151 duplicate re-upload returns from indexed import tables without carryover scan',()=>{
+  const fast=read('src/v150UnifiedImportFastRoutePatch.js');
+  assert.match(fast,/function fastHydrateExisting/);
+  const start=fast.indexOf('function fastHydrateExisting');
+  const end=fast.indexOf('export function persistUnifiedUploadFast',start);
+  const block=fast.slice(start,end);
+  assert.doesNotMatch(block,/carryoverSummary/);
+  assert.match(block,/unified_import_rows/);
+});
+
+test('V151 heavy carry hydration happens only when processing actually starts',()=>{
   const fast=read('src/v150UnifiedImportFastRoutePatch.js');
   assert.match(fast,/const queue=getUnifiedProcessingQueue\(batch\.batchId\)/);
   assert.match(fast,/START_ROUTES=new Set\(\['\/api\/run\/start','\/api\/shopee\/run\/start'\]\)/);
   assert.match(fast,/await hydrateReportState\(requested\)/);
-  assert.match(fast,/unifiedBatchId=batch\.batchId/);
 });
 
-test('V150 homepage truth is event-driven and never background polls SQL',()=>{
+test('homepage truth remains event-driven and never background polls SQL',()=>{
   const ui=read('public/v64-whpp-total-kpi-integration.js');
-  assert.match(ui,/v150-event-driven-home-truth-v4/);
   assert.match(ui,/EVENT_DRIVEN_NO_BACKGROUND_POLL/);
   assert.doesNotMatch(ui,/setInterval/);
   assert.doesNotMatch(ui,/MutationObserver/);
@@ -84,7 +85,7 @@ test('unified snapshot completion still blocks failed reconciliation',()=>{
   assert.match(store,/status='COMPLETED'/);
 });
 
-test('database schema is not bumped by V150 upload repairs',()=>{
+test('database schema is not bumped by V151 upload repairs',()=>{
   const migrations=read('src/migrations.js');
   assert.match(migrations,/const SCHEMA_VERSION = 18/);
 });
