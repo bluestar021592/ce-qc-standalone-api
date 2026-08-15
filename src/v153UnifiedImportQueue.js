@@ -1,11 +1,10 @@
 import fs from 'fs';
-import fsp from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { Worker } from 'node:worker_threads';
 import { getRuntimeConfig } from './db.js';
 
-export const V153_IMPORT_QUEUE_ID='2026-08-15-v153-durable-worker-queue-v1';
+export const V153_IMPORT_QUEUE_ID='2026-08-15-v155-local-spool-worker-queue-v2';
 const queueDir=path.join(getRuntimeConfig().importsDir,'unified_queue');
 fs.mkdirSync(queueDir,{recursive:true});
 let activeJobId='';
@@ -13,25 +12,26 @@ const pending=[];
 const pendingSet=new Set();
 
 const nowIso=()=>new Date().toISOString();
-const safeBase=name=>String(name||'daily-report.xlsx').replace(/[^a-zA-Z0-9._-]+/g,'_').slice(-100)||'daily-report.xlsx';
 const jobPath=id=>path.join(queueDir,`${id}.json`);
 function writeJobSync(job){const target=jobPath(job.jobId),tmp=`${target}.tmp`;fs.writeFileSync(tmp,JSON.stringify(job,null,2),'utf8');fs.renameSync(tmp,target);}
 function readJobSync(id){try{return JSON.parse(fs.readFileSync(jobPath(id),'utf8'));}catch{return null;}}
 function enqueueId(id){if(!id||pendingSet.has(id)||activeJobId===id)return;pending.push(id);pendingSet.add(id);}
 
-async function moveFile(source,target){
-  try{await fsp.rename(source,target);}
-  catch(error){if(error?.code!=='EXDEV')throw error;await fsp.copyFile(source,target);await fsp.unlink(source).catch(()=>{});}
-}
-
+// V155 deliberately does NOT copy/rename the uploaded Excel into the DB data disk
+// on the HTTP request. Multer already placed it in the persistent local launcher
+// spool. We only write a tiny queue metadata file here and return immediately.
 export async function enqueueUnifiedImport({tempPath,originalName='',manualReportDate=''}={}){
   if(!tempPath)throw new Error('没有收到综合日报Excel文件');
+  const source=path.resolve(String(tempPath));
+  if(!fs.existsSync(source))throw new Error('综合日报临时文件不存在');
   const jobId=`IMPORT-${Date.now()}-${crypto.randomUUID().slice(0,8)}`;
-  const target=path.join(queueDir,`${jobId}-${safeBase(originalName)}`);
-  await moveFile(tempPath,target);
-  const job={jobId,status:'QUEUED',phase:'QUEUED',originalName:String(originalName||''),manualReportDate:String(manualReportDate||''),filePath:target,createdAt:nowIso(),updatedAt:nowIso(),result:null,error:null,queueId:V153_IMPORT_QUEUE_ID};
+  const job={
+    jobId,status:'QUEUED',phase:'QUEUED',originalName:String(originalName||''),manualReportDate:String(manualReportDate||''),
+    filePath:source,spoolPolicy:'LOCAL_FAST_SPOOL_REFERENCE',createdAt:nowIso(),updatedAt:nowIso(),result:null,preview:null,error:null,
+    queueId:V153_IMPORT_QUEUE_ID
+  };
   writeJobSync(job);enqueueId(jobId);setImmediate(pump);
-  return {jobId,status:'QUEUED',originalName:job.originalName,manualReportDate:job.manualReportDate,createdAt:job.createdAt,queueId:V153_IMPORT_QUEUE_ID};
+  return {jobId,status:'QUEUED',originalName:job.originalName,manualReportDate:job.manualReportDate,createdAt:job.createdAt,queueId:V153_IMPORT_QUEUE_ID,spoolPolicy:job.spoolPolicy};
 }
 
 export function getUnifiedImportJob(jobId){const job=readJobSync(jobId);if(!job)return null;const {filePath,...safe}=job;return safe;}
@@ -44,7 +44,16 @@ function runWorker(job){
     let finished=false;
     const settle=(patch)=>{if(finished)return;finished=true;updateJob(job.jobId,patch);resolve();};
     worker.on('message',message=>{
-      if(message?.type==='phase'){updateJob(job.jobId,{status:'PROCESSING',phase:message.phase||'PROCESSING',reportDate:message.reportDate||readJobSync(job.jobId)?.reportDate||'',total:Number(message.total||readJobSync(job.jobId)?.total||0)});return;}
+      if(message?.type==='phase'){
+        const current=readJobSync(job.jobId)||{};
+        updateJob(job.jobId,{status:'PROCESSING',phase:message.phase||'PROCESSING',reportDate:message.reportDate||current.reportDate||'',total:Number(message.total||current.total||0),retryAttempt:Number(message.retryAttempt||0),retryDelayMs:Number(message.retryDelayMs||0)});
+        return;
+      }
+      if(message?.type==='classified'){
+        const preview=message.preview&&typeof message.preview==='object'?message.preview:{};
+        updateJob(job.jobId,{status:'PROCESSING',phase:'CLASSIFIED',preview,reportDate:preview.reportDate||'',total:Number(preview.summary?.validUniqueWaybills||0),classifiedAt:nowIso()});
+        return;
+      }
       if(message?.type==='done'){settle({status:'COMPLETED',phase:'COMPLETED',result:message.result||{},reportDate:message.result?.reportDate||'',error:null,completedAt:nowIso()});return;}
       if(message?.type==='failed'){settle({status:'FAILED',phase:'FAILED',error:message.error||{message:'导入Worker失败'},completedAt:nowIso()});}
     });
@@ -74,7 +83,7 @@ function resumeQueuedJobs(){
       if(job.status==='PROCESSING'){job.status='QUEUED';job.phase='RECOVERED_AFTER_RESTART';job.updatedAt=nowIso();writeJobSync(job);}
       if(job.status==='QUEUED')enqueueId(job.jobId);
     }
-  }catch(error){console.error('[CE-QC][V153_IMPORT_QUEUE] resume failed',error?.stack||error);}
+  }catch(error){console.error('[CE-QC][V155_IMPORT_QUEUE] resume failed',error?.stack||error);}
   if(pending.length)setImmediate(pump);
 }
 resumeQueuedJobs();
