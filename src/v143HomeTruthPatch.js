@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V143_HOME_TRUTH_ID='2026-08-15-v143-home-source-truth-v1';
+export const V143_HOME_TRUTH_ID='2026-08-15-v143-home-source-truth-v2';
 const CORE_TYPES=new Set(['CE','CEAF','TBKH','ALI1688','WHPP']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 
@@ -30,8 +30,8 @@ function sourceRows(snapshot){
       COALESCE(bf.isPod,f.isPod,0) isPod,
       COALESCE(bf.primaryCategory,f.primaryCategory,'') primaryCategory,
       COALESCE(bf.rawJson,f.rawJson,u.rowJson,'{}') rawJson,
-      COALESCE(bf.podAttemptNo,f.podAttemptNo,0) podAttemptNo,
-      COALESCE(bf.currentAttemptNo,f.currentAttemptNo,0) currentAttemptNo
+      COALESCE(bf.podAttemptNo,0) podAttemptNo,
+      COALESCE(bf.currentAttemptNo,0) currentAttemptNo
     FROM unified_import_rows u
     LEFT JOIN final_rows f
       ON u.businessType IN ('CE','CEAF','TBKH','ALI1688')
