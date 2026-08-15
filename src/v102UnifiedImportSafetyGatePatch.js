@@ -3,7 +3,7 @@ import express from 'express';
 import XLSX from 'xlsx';
 import { classifyUnifiedBusiness, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-15-v150-single-parse-import-safety-v3';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-15-v150-single-parse-import-safety-v4';
 const ROUTE = '/api/import/unified-daily-report';
 const WRAPPED = Symbol.for('ce-qc.v102-unified-import-safety');
 
@@ -144,8 +144,6 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
           reportDate: req.body?.reportDate || '',
           originalName: req.file.originalname
         });
-        // The persistence route reuses this exact safety-checked parse result. This
-        // prevents the same XLS/XLSX workbook from being parsed twice per upload.
         req.ceQcParsedUnified = parsed;
         req.ceQcImportSafety = assertUnifiedImportSafety({
           filePath: req.file.path,
@@ -169,5 +167,9 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
   Object.defineProperty(wrappedPost, WRAPPED, { value: true });
   express.application.post = wrappedPost;
 }
+
+// Install the upload-first route only after this safety wrapper exists. The fast
+// route therefore preserves V102 checks but replaces the legacy heavy final handler.
+await import('./v150UnifiedImportFastRoutePatch.js');
 
 export const __test = { findDuplicateOwnershipConflict };
