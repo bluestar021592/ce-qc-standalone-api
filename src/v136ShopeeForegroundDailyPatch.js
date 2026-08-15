@@ -15,12 +15,12 @@ import {
 import { buildShopeeDashboard } from './shopeeReporting.js';
 import { appendHistorySummary } from './longBackup.js';
 import { appendRuntimeLog } from './runtimeLog.js';
-import { completeUnifiedSnapshot, updateCarryoverResults } from './unifiedImportStore.js';
+import { completeUnifiedSnapshot, updateCarryoverResults } from './unifiedImportStoreV137.js';
 import { loadState } from './storage.js';
 import { getMatchingSnapshot } from './snapshots.js';
 import { getDb } from './db.js';
 
-export const V136_SHOPEE_FOREGROUND_DAILY_ID = '2026-08-15-v136-shopee-foreground-daily-v1';
+export const V136_SHOPEE_FOREGROUND_DAILY_ID = '2026-08-15-v137-shopee-foreground-special-terminal-v2';
 const ROUTES = new Set(['/api/shopee/run/start','/api/shopee/run/resume']);
 const activeRunIds = new Set();
 
@@ -80,7 +80,7 @@ async function finalizeCurrentDay({state,reportDate,run,outcome,partial=false}){
 
 function handlerFor(pathValue){
   const resume=String(pathValue).endsWith('/resume');
-  return async function v136ShopeeForegroundDaily(req,res){
+  return async function v136ShopeeForeground(req,res){
     let reportDate='';let runId='';let historicalBills=[];let priorRows=[];
     try{
       const loaded=loadBusinessState(SHOPEE);
@@ -103,10 +103,6 @@ function handlerFor(pathValue){
       }
       const run=outcome.run;runId=run.runId;activeRunIds.add(runId);
 
-      // Critical V136 rule: the interactive run receives ONLY today's imported
-      // bills. Historical OPEN carry remains in priorCarryRows for continuity but
-      // is never placed in the CE API query pool. The dedicated two-hour backend
-      // scheduler owns historical OPEN refresh.
       const work={...loaded,carryBills:[],nextCarryBills:[],currentRun:run,
         processing:{...(loaded.processing||{}),running:true,paused:false,phase:'准备处理当日日报',runId},
         lastRunSummary:{...(loaded.lastRunSummary||{}),businessType:SHOPEE,reportDate,runId,runStatus:'running',foregroundToday:today.length,historicalOpenBackground:historicalBills.length}};
@@ -162,8 +158,6 @@ const previousPost=express.application.post;
 express.application.post=function v136ShopeeForegroundPost(pathValue,...handlers){
   const path=String(pathValue||'');
   if(ROUTES.has(path)){
-    // Preserve middleware injected by older wrappers (auth/audit preparation) but
-    // replace only the final legacy long-running handler.
     const middleware=handlers.length>1?handlers.slice(0,-1):[];
     return previousPost.call(this,path,...middleware,handlerFor(path));
   }
