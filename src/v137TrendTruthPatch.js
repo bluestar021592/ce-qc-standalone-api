@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { repairUnifiedSnapshotCompletion } from './v142UnifiedSnapshotRepairPatch.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v145-scan-shipment-attempt-recovery-v7';
+export const V137_TREND_TRUTH_ID='2026-08-15-v148-cross-day-attempt-evidence-v8';
 const BUSINESSES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const TYPES=new Set([...BUSINESSES,'CCSL','SHOPEE','TOTAL']);
 const CORE=['CE','CEAF','TBKH','ALI1688'];
@@ -38,6 +38,12 @@ function findPodDateInObject(value,depth=0){
   return'';
 }
 function podDateFromSources(...sources){for(const source of sources){const found=findPodDateInObject(source);if(found)return found;}return'';}
+function attemptFromDates(reportDate,podDate){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate||'')||!/^\d{4}-\d{2}-\d{2}$/.test(podDate||''))return 0;
+  const start=Date.parse(`${reportDate}T00:00:00Z`),end=Date.parse(`${podDate}T00:00:00Z`);
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<start)return 0;
+  return clampAttempt(Math.floor((end-start)/86400000)+1);
+}
 
 function scopeBusinessTypes(type){
   if(type==='TOTAL')return BUSINESSES;
@@ -66,31 +72,63 @@ function sourceRows(fromDate,toDate,type){
   const scope=scopeBusinessTypes(type);
   const placeholders=scope.map(()=>'?').join(',');
   const needsShopeeAttempts=scope.some(item=>SHOPEE.includes(item));
-  const attemptCte=needsShopeeAttempts?`, track_attempts AS (
-      SELECT reportDate,UPPER(TRIM(shipmentCode)) shipmentCode,
-        COUNT(DISTINCT CASE
-          WHEN length(eventTime)>=10 THEN substr(replace(eventTime,'/','-'),1,10)
-          ELSE NULL END) attemptCount
-      FROM business_track_events
-      WHERE businessType='SHOPEE' AND reportDate BETWEEN ? AND ?
-        AND (
-          CAST(COALESCE(eventCode,'') AS TEXT)='30'
-          OR LOWER(COALESCE(rawJson,'')) LIKE '%delivery assign%'
-          OR LOWER(COALESCE(rawJson,'')) LIKE '%courier assign%'
-          OR LOWER(COALESCE(rawJson,'')) LIKE '%out for delivery%'
-          OR COALESCE(rawJson,'') LIKE '%派件分配%'
-          OR COALESCE(rawJson,'') LIKE '%分配快递员%'
-          OR COALESCE(rawJson,'') LIKE '%派送中%'
-        )
-      GROUP BY reportDate,UPPER(TRIM(shipmentCode))
+  const evidenceCtes=needsShopeeAttempts?`,
+    pod_candidates AS (
+      SELECT v.reportDate sourceReportDate,UPPER(TRIM(v.shipmentCode)) shipmentCode,
+        s.reportDate evidenceDate,s.rawJson evidenceJson,'SCAN' evidenceSource
+      FROM valid v
+      INNER JOIN business_scan_results s
+        ON s.businessType='SHOPEE' AND UPPER(TRIM(s.shipmentCode))=UPPER(TRIM(v.shipmentCode))
+       AND s.reportDate>=v.reportDate
+      WHERE v.businessType IN ('SHOPEECN','SHOPEEVN')
+        AND (s.isPod=1 OR CAST(COALESCE(s.orderStatus,'') AS TEXT)='85')
+      UNION ALL
+      SELECT v.reportDate sourceReportDate,UPPER(TRIM(v.shipmentCode)) shipmentCode,
+        f.reportDate evidenceDate,f.rawJson evidenceJson,'FINAL' evidenceSource
+      FROM valid v
+      INNER JOIN business_final_rows f
+        ON f.businessType='SHOPEE' AND UPPER(TRIM(f.shipmentCode))=UPPER(TRIM(v.shipmentCode))
+       AND f.reportDate>=v.reportDate AND f.isPod=1
+      WHERE v.businessType IN ('SHOPEECN','SHOPEEVN')
+    ),
+    pod_ranked AS (
+      SELECT sourceReportDate,shipmentCode,evidenceDate,evidenceJson,evidenceSource,
+        ROW_NUMBER() OVER(PARTITION BY sourceReportDate,shipmentCode ORDER BY evidenceDate,CASE evidenceSource WHEN 'SCAN' THEN 0 ELSE 1 END) rn
+      FROM pod_candidates
+    ),
+    pod_first AS (
+      SELECT sourceReportDate,shipmentCode,evidenceDate,evidenceJson,evidenceSource
+      FROM pod_ranked WHERE rn=1
+    ),
+    track_attempts AS (
+      SELECT v.reportDate sourceReportDate,UPPER(TRIM(v.shipmentCode)) shipmentCode,
+        COUNT(DISTINCT CASE WHEN LENGTH(e.eventTime)>=10 THEN SUBSTR(REPLACE(e.eventTime,'/','-'),1,10) END) attemptCount
+      FROM valid v
+      INNER JOIN pod_first p ON p.sourceReportDate=v.reportDate AND p.shipmentCode=UPPER(TRIM(v.shipmentCode))
+      INNER JOIN business_track_events e
+        ON e.businessType='SHOPEE' AND UPPER(TRIM(e.shipmentCode))=UPPER(TRIM(v.shipmentCode))
+       AND (LENGTH(e.eventTime)<10 OR SUBSTR(REPLACE(e.eventTime,'/','-'),1,10)>=v.reportDate)
+       AND (LENGTH(e.eventTime)<10 OR SUBSTR(REPLACE(e.eventTime,'/','-'),1,10)<=p.evidenceDate)
+      WHERE v.businessType IN ('SHOPEECN','SHOPEEVN') AND (
+        CAST(COALESCE(e.eventCode,'') AS TEXT)='30'
+        OR LOWER(COALESCE(e.rawJson,'')) LIKE '%delivery assign%'
+        OR LOWER(COALESCE(e.rawJson,'')) LIKE '%courier assign%'
+        OR LOWER(COALESCE(e.rawJson,'')) LIKE '%out for delivery%'
+        OR COALESCE(e.rawJson,'') LIKE '%派件分配%'
+        OR COALESCE(e.rawJson,'') LIKE '%分配快递员%'
+        OR COALESCE(e.rawJson,'') LIKE '%派送中%'
+      )
+      GROUP BY v.reportDate,UPPER(TRIM(v.shipmentCode))
     )`:'';
   const trackSelect=needsShopeeAttempts?'COALESCE(ta.attemptCount,0)':'0';
-  const trackJoin=needsShopeeAttempts?'LEFT JOIN track_attempts ta ON ta.reportDate=v.reportDate AND ta.shipmentCode=UPPER(TRIM(v.shipmentCode))':'';
+  const trackJoin=needsShopeeAttempts?'LEFT JOIN track_attempts ta ON ta.sourceReportDate=v.reportDate AND ta.shipmentCode=UPPER(TRIM(v.shipmentCode))':'';
+  const podSelect=needsShopeeAttempts?"COALESCE(pf.evidenceDate,''),COALESCE(pf.evidenceJson,'{}'),COALESCE(pf.evidenceSource,''),COALESCE(pl.podTime,'')":"'','{}','',''";
+  const podJoin=needsShopeeAttempts?"LEFT JOIN pod_first pf ON pf.sourceReportDate=v.reportDate AND pf.shipmentCode=UPPER(TRIM(v.shipmentCode)) LEFT JOIN business_pod_locks pl ON pl.businessType='SHOPEE' AND UPPER(TRIM(pl.shipmentCode))=UPPER(TRIM(v.shipmentCode))":'';
   const scanSelect=needsShopeeAttempts?"COALESCE(sr.rawJson,'{}')":"'{}'";
   const shipmentSelect=needsShopeeAttempts?"COALESCE(st.rawJson,'{}')":"'{}'";
   const scanJoin=needsShopeeAttempts?"LEFT JOIN business_scan_results sr ON sr.businessType='SHOPEE' AND sr.shipmentCode=v.shipmentCode AND sr.reportDate=v.reportDate":'';
   const shipmentJoin=needsShopeeAttempts?"LEFT JOIN business_shipment_tracks st ON st.businessType='SHOPEE' AND st.shipmentCode=v.shipmentCode AND st.reportDate=v.reportDate":'';
-  const params=[fromDate,toDate,...scope,...(needsShopeeAttempts?[fromDate,toDate]:[])];
+  const params=[fromDate,toDate,...scope];
   return getDb().prepare(`
     WITH ranked AS (
       SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
@@ -103,7 +141,7 @@ function sourceRows(fromDate,toDate,type){
       SELECT DISTINCT u.reportDate,u.businessType,u.shipmentCode
       FROM latest l INNER JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate
       WHERE u.businessType IN (${placeholders})
-    )${attemptCte}
+    )${evidenceCtes}
     SELECT v.reportDate,v.businessType,v.shipmentCode,
       COALESCE(bf.isPod,cf.isPod,0) finalIsPod,
       COALESCE(bf.primaryCategory,cf.primaryCategory,'') finalCategory,
@@ -111,6 +149,7 @@ function sourceRows(fromDate,toDate,type){
       COALESCE(bf.podAttemptNo,0) finalPodAttemptNo,
       COALESCE(bf.currentAttemptNo,0) finalCurrentAttemptNo,
       ${trackSelect} trackAttemptCount,
+      ${podSelect},
       ${scanSelect} scanJson,
       ${shipmentSelect} shipmentJson,
       COALESCE(c.state,'') currentState,COALESCE(c.stateJson,'{}') currentJson
@@ -121,11 +160,25 @@ function sourceRows(fromDate,toDate,type){
       ON bf.shipmentCode=v.shipmentCode AND bf.reportDate=v.reportDate
      AND ((v.businessType IN ('SHOPEECN','SHOPEEVN') AND bf.businessType='SHOPEE') OR (v.businessType='WHPP' AND bf.businessType='WHPP'))
     ${trackJoin}
+    ${podJoin}
     ${scanJoin}
     ${shipmentJoin}
     LEFT JOIN shipment_current_state c ON c.shipmentCode=v.shipmentCode
     ORDER BY v.reportDate,v.businessType,v.shipmentCode
-  `).all(...params);
+  `).all(...params).map(row=>{
+    // Dynamic podSelect fields are unnamed expressions in SQLite. Normalize the
+    // four columns by reading their generated keys in stable SELECT order.
+    if(!needsShopeeAttempts)return {...row,firstPodObservedDate:'',firstPodEvidenceJson:'{}',firstPodEvidenceSource:'',podLockTime:''};
+    const keys=Object.keys(row);
+    const dynamic=keys.filter(key=>/COALESCE\(pf\.|COALESCE\(pl\./.test(key));
+    return {
+      ...row,
+      firstPodObservedDate:row.firstPodObservedDate||row[dynamic[0]]||'',
+      firstPodEvidenceJson:row.firstPodEvidenceJson||row[dynamic[1]]||'{}',
+      firstPodEvidenceSource:row.firstPodEvidenceSource||row[dynamic[2]]||'',
+      podLockTime:row.podLockTime||row[dynamic[3]]||''
+    };
+  });
 }
 
 function terminalTruth(row={}){
@@ -146,23 +199,19 @@ function attemptFromSource(source={}){
   return 0;
 }
 
-function attemptOf(reportDate,current={},final={},trackAttemptCount=0,shipment={},scan={}){
-  for(const source of [current,final,shipment,scan]){
+function attemptOf(reportDate,current={},final={},trackAttemptCount=0,shipment={},scan={},podEvidence={},podLockTime='',firstPodObservedDate=''){
+  for(const source of [current,final,podEvidence,shipment,scan]){
     const explicit=attemptFromSource(source);
     if(explicit)return explicit;
   }
   const trackAttempt=clampAttempt(trackAttemptCount);
   if(trackAttempt)return trackAttempt;
-  const stamp=podDateFromSources(final,shipment,scan,current);
-  if(stamp){
-    const start=Date.parse(`${reportDate}T00:00:00Z`),end=Date.parse(`${stamp}T00:00:00Z`);
-    if(Number.isFinite(start)&&Number.isFinite(end)&&end>=start)return clampAttempt(Math.floor((end-start)/86400000)+1);
-  }
-  return 0;
+  const stamp=podDateFromSources(podEvidence,final,shipment,scan,current)||normalizeDate(podLockTime)||normalizeDate(firstPodObservedDate);
+  return attemptFromDates(reportDate,stamp);
 }
 
 function decorate(row){
-  const rawFinal=safe(row.finalJson),rawCurrent=safe(row.currentJson),rawScan=safe(row.scanJson),rawShipment=safe(row.shipmentJson);
+  const rawFinal=safe(row.finalJson),rawCurrent=safe(row.currentJson),rawScan=safe(row.scanJson),rawShipment=safe(row.shipmentJson),rawPodEvidence=safe(row.firstPodEvidenceJson);
   const persistedPodAttempt=positiveNum(row.finalPodAttemptNo,rawFinal.podAttemptNo);
   const persistedCurrentAttempt=positiveNum(row.finalCurrentAttemptNo,rawFinal.currentAttemptNo);
   const final={
@@ -173,12 +222,13 @@ function decorate(row){
     ...(persistedCurrentAttempt?{currentAttemptNo:persistedCurrentAttempt}:{})
   };
   const current={...rawCurrent,currentState:row.currentState};
-  const currentTerminal=terminalTruth(current),finalTerminal=terminalTruth(final),scanTerminal=terminalTruth(rawScan),shipmentTerminal=terminalTruth(rawShipment);
-  const terminal=currentTerminal||finalTerminal||scanTerminal||shipmentTerminal;
-  const pod=terminal==='POD'||(!terminal&&Number(row.finalIsPod||0)===1);
+  const currentTerminal=terminalTruth(current),finalTerminal=terminalTruth(final),scanTerminal=terminalTruth(rawScan),shipmentTerminal=terminalTruth(rawShipment),evidenceTerminal=terminalTruth(rawPodEvidence);
+  const futurePod=Boolean(row.firstPodObservedDate);
+  const terminal=currentTerminal||finalTerminal||scanTerminal||shipmentTerminal||evidenceTerminal||(futurePod?'POD':'');
+  const pod=terminal==='POD'||futurePod||(!terminal&&Number(row.finalIsPod||0)===1);
   const closed=Boolean(terminal);
   const ocDays=closed?0:num(nullableNum(current.OC天数,current.ocDays,final.OC天数,final.ocDays));
-  const attempt=pod?attemptOf(row.reportDate,current,final,row.trackAttemptCount,rawShipment,rawScan):0;
+  const attempt=pod?attemptOf(row.reportDate,current,final,row.trackAttemptCount,rawShipment,rawScan,rawPodEvidence,row.podLockTime,row.firstPodObservedDate):0;
   return {...row,pod,closed,terminal,ocDays,attempt,attemptUnknown:pod&&!attempt?1:0};
 }
 
@@ -235,10 +285,10 @@ function handler(req,res){
     const entry=cacheEntry(type,from,to,dates);
     const requestedDateAvailable=dates.includes(to);
     res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=30');
-    res.setHeader('Server-Timing',`v145;desc=scan-shipment-attempt-${entry.cacheHit?'hit':'miss'};dur=0`);
-    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,requestedDateLifecycle:lifecycle,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_THEN_TRACK_EVENTS_THEN_SHIPMENT_SCAN_POD_TIME',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
-  }catch(error){console.error('[CE-QC][V145][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
+    res.setHeader('Server-Timing',`v148;desc=cross-day-attempt-${entry.cacheHit?'hit':'miss'};dur=0`);
+    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,requestedDateLifecycle:lifecycle,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_THEN_CROSS_DAY_DISPATCH_EVENTS_THEN_POD_TIMESTAMP_THEN_FIRST_POD_OBSERVED_DATE',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
+  }catch(error){console.error('[CE-QC][V148][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
 }
 
 const previousListen=express.application.listen;let installed=false;
-express.application.listen=function v145TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
+express.application.listen=function v148TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
