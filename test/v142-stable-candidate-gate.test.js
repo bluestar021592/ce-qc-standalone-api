@@ -10,7 +10,7 @@ const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const syntax=p=>{const result=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(result.status,0,`${p}: ${result.stderr||result.stdout}`);};
 
 test('V153 upload queue critical JavaScript is syntax valid',()=>{
-  for(const file of ['src/v102UnifiedImportSafetyGatePatch.js','src/v150UnifiedImportFastRoutePatch.js','src/v153UnifiedImportQueue.js','src/v153UnifiedImportWorker.js','src/unifiedImportSafety.js','public/v150-import-fast-path.js'])syntax(file);
+  for(const file of ['src/v102UnifiedImportSafetyGatePatch.js','src/v150UnifiedImportFastRoutePatch.js','src/v153UnifiedImportQueue.js','src/v153UnifiedImportWorker.js','src/unifiedImportSafety.js','src/v153RuntimeBuildPatch.js','public/v150-import-fast-path.js','public/v153-build-sync.js'])syntax(file);
 });
 
 test('V153 HTTP upload ingress is queue-only and never parses or opens SQLite',()=>{
@@ -71,6 +71,21 @@ test('V153 processing materialization remains deferred until run start',()=>{
   assert.match(fast,/function materializeProcessingMembership/);
   assert.match(fast,/getUnifiedProcessingQueue\(batch\.batchId\)/);
   assert.match(fast,/START_ROUTES=new Set\(\['\/api\/run\/start','\/api\/shopee\/run\/start'\]\)/);
+});
+
+test('V153 import assets are no-store and stale tabs can auto reload',()=>{
+  const cache=read('src/v89StaticAssetCachePatch.js');
+  const html=read('src/v44WhppUiPatch.js');
+  const sync=read('public/v153-build-sync.js');
+  const runtime=read('src/v153RuntimeBuildPatch.js');
+  assert.match(cache,/v150-import-fast-path\|v153-build-sync/);
+  assert.match(cache,/no-store, max-age=0/);
+  assert.match(html,/__CE_QC_UI_BUILD_ID__/);
+  assert.match(html,/v153-build-sync\.js/);
+  assert.match(html,/v150-import-fast-path\.js\?v=20260815-5/);
+  assert.match(sync,/api\/runtime-build/);
+  assert.match(sync,/location\.reload\(\)/);
+  assert.match(runtime,/api\/runtime-build/);
 });
 
 test('V153 managed launcher remains fail closed after candidate validation',()=>{
