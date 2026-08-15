@@ -62,12 +62,22 @@ test('V139 exposes a separate manual carry queue and bounded 200-ticket recheck 
   assert.match(source, /\/api\/v139\/carryover\/recheck/);
   assert.match(source, /sourceReportDate</);
   assert.match(source, /MANUAL_LIMIT_MAX = 200/);
-  assert.match(ui, /v139-carry-manual-window-v2/);
+  assert.match(ui, /v139-carry-manual-window-v3/);
   assert.match(ui, /跨日遗留独立处理/);
   assert.match(ui, /手动复查下一批200票/);
   assert.match(ui, /不再进入当日日报全自动/);
   assert.match(ui, /currentOpen: todayOpen/);
   assert.match(ui, /当日自动处理队列/);
+});
+
+test('V139 import page uses a compact two-row layout instead of stretching classification results', () => {
+  const ui = read('public/v139-carry-manual-window.js');
+  assert.match(ui, /grid-template-areas:/);
+  assert.match(ui, /"import summary"/);
+  assert.match(ui, /"run carry"/);
+  assert.match(ui, /\.unified-summary-panel[\s\S]*align-self: start !important/);
+  assert.match(ui, /\.empty-state\.compact[\s\S]*min-height: 170px !important/);
+  assert.match(ui, /@media \(max-width: 1280px\)/);
 });
 
 test('V139 retries missing confirm rows and read-only trajectory requests at least three final rounds', () => {
