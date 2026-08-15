@@ -12,11 +12,14 @@ function Write-ManagedLog([string]$Text, [ConsoleColor]$Color = [ConsoleColor]::
   Write-Host $Text -ForegroundColor $Color
 }
 
+# Native stdout must never leak into a PowerShell function's return value. Candidate
+# validation is a Boolean contract; output pollution previously made a rejected
+# candidate look truthy and allowed installation to continue.
 function Invoke-Exe([string]$File, [string[]]$ArgumentList, [switch]$AllowFailure) {
-  & $File @ArgumentList
+  & $File @ArgumentList | ForEach-Object { Write-Host $_ }
   $code = $LASTEXITCODE
   if ($code -ne 0 -and -not $AllowFailure) { throw "$File exited with code ${code}: $($ArgumentList -join ' ')" }
-  return $code
+  if ($AllowFailure) { return [int]$code }
 }
 
 function Get-GitText([string[]]$GitArguments) {
@@ -101,9 +104,8 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
     }
 
     Push-Location $tempRoot
-    try {
-      Invoke-Exe $script:NpmExe @('run','test:golive')
-    } finally { Pop-Location }
+    try { Invoke-Exe $script:NpmExe @('run','test:golive') }
+    finally { Pop-Location }
 
     $candidateBackup = Join-Path $tempRoot 'scripts\CE_QC_PreUpdate_Backup.mjs'
     if (-not (Test-Path -LiteralPath $candidateBackup)) { throw 'Candidate pre-update backup tool is missing.' }
@@ -120,15 +122,9 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
   } finally {
     if ($null -eq $oldBackupRoot) { Remove-Item Env:CE_QC_BACKUP_PROJECT_ROOT -ErrorAction SilentlyContinue }
     else { $env:CE_QC_BACKUP_PROJECT_ROOT = $oldBackupRoot }
-
-    if ($linkedModules) {
-      $junctionCleanupOk = Remove-JunctionOnly (Join-Path $tempRoot 'node_modules')
-    }
-    if (-not $linkedModules -or $junctionCleanupOk) {
-      Remove-ValidationWorktree $tempRoot $true
-    } else {
-      Write-ManagedLog "[UPDATE] Candidate temp worktree intentionally retained to protect installed node_modules: $tempRoot" Yellow
-    }
+    if ($linkedModules) { $junctionCleanupOk = Remove-JunctionOnly (Join-Path $tempRoot 'node_modules') }
+    if (-not $linkedModules -or $junctionCleanupOk) { Remove-ValidationWorktree $tempRoot $true }
+    else { Write-ManagedLog "[UPDATE] Candidate temp worktree intentionally retained to protect installed node_modules: $tempRoot" Yellow }
   }
 }
 
@@ -171,7 +167,16 @@ function Invoke-SafeAutoUpdate {
     Write-ManagedLog '[UPDATE] Remote history is not a fast-forward of this installation; automatic update blocked for safety.' Yellow
     return
   }
-  if (-not (Test-RemoteCandidate $remote $current)) { return }
+
+  # FAIL_CLOSED_CANDIDATE_GATE_V152
+  # Exactly one Boolean value must come back from validation. Any stray pipeline
+  # output is itself a validation failure and blocks installation.
+  $candidateResult = @(Test-RemoteCandidate $remote $current)
+  $candidateAccepted = ($candidateResult.Count -eq 1 -and $candidateResult[0] -eq $true)
+  if (-not $candidateAccepted) {
+    Write-ManagedLog '[UPDATE] Candidate validation did not return one clean TRUE result; installation blocked.' Yellow
+    return
+  }
 
   $dependencyFiles = Get-GitText @('diff','--name-only',$current,$remote,'--','package.json','package-lock.json')
   Write-ManagedLog '[UPDATE] Installing verified fast-forward update...' Cyan
@@ -282,11 +287,8 @@ try {
   Write-Host ' Managed Desktop Launcher' -ForegroundColor Cyan
   Write-Host '===================================================' -ForegroundColor Cyan
   Write-ManagedLog '[APP] Startup requested.' Cyan
-  try {
-    Invoke-SafeAutoUpdate
-  } catch {
-    Write-ManagedLog ("[UPDATE] Update check failed, but startup will continue with the current installed version. " + $_.Exception.Message) Yellow
-  }
+  try { Invoke-SafeAutoUpdate }
+  catch { Write-ManagedLog ("[UPDATE] Update check failed, but startup will continue with the current installed version. " + $_.Exception.Message) Yellow }
   $exitCode = Start-ManagedSupervisor
   Write-ManagedLog "[APP] Supervisor exited with code $exitCode. Port 5177 process tree has been released." Yellow
   exit $exitCode
