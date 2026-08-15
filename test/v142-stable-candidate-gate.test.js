@@ -24,18 +24,20 @@ test('V150 UI loads import fast path last and cache busts event-driven home trut
   assert.match(injector,/v67-resilient-run-guard\.js\?v=20260815-9/);
   assert.match(injector,/v137-range-trends\.js\?v=20260815-6/);
   assert.match(injector,/v64-whpp-total-kpi-integration\.js\?v=20260815-10/);
-  assert.match(injector,/v150-import-fast-path\.js\?v=20260815-1/);
-  assert.ok(injector.indexOf('v64-whpp-total-kpi-integration.js?v=20260815-10')<injector.indexOf('v150-import-fast-path.js?v=20260815-1'));
+  assert.match(injector,/v150-import-fast-path\.js\?v=20260815-2/);
+  assert.ok(injector.indexOf('v64-whpp-total-kpi-integration.js?v=20260815-10')<injector.indexOf('v150-import-fast-path.js?v=20260815-2'));
   assert.doesNotMatch(injector,/<script src="\/v56-trend-truth\.js/);
 });
 
 test('V150 import fast path saves first then defers history/dashboard work',()=>{
   const ui=read('public/v150-import-fast-path.js');
+  assert.match(ui,/v150-import-fast-path-v2/);
   assert.match(ui,/api\/import\/unified-daily-report/);
   assert.match(ui,/global\.importUnifiedExcel=importUnifiedExcelFast/);
   assert.match(ui,/已保存，可以继续上传下一份/);
   assert.match(ui,/refreshCatalogLater/);
   assert.match(ui,/setTimeout\(async\(\)=>/);
+  assert.match(ui,/80\*1024\*1024/);
   assert.doesNotMatch(ui,/api\/state\?compact=1/);
   assert.doesNotMatch(ui,/api\/shopee\/state\?compact=1/);
 });
