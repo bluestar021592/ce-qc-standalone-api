@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import './v139-normal-web-runtime.test.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
@@ -21,7 +22,7 @@ test('home desktop layout keeps all eight business cards on one row',()=>{
   assert.match(injector,/v138-dashboard-speed-layout\.css\?v=20260815-1/);
 });
 
-test('V138 is the only live trend renderer and legacy V56 is not injected',()=>{
+test('V138 is the only live range trend renderer and legacy V56 is not injected',()=>{
   const ui=read('public/v137-range-trends.js');
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(ui,/v138-range-trends-exclusive-v2/);
