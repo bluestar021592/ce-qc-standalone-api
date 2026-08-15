@@ -57,6 +57,7 @@ test('V138 scan batches follow the real CE batch size and cannot recurse without
   assert.match(patch,/process\.env\.ORDER_BATCH_SIZE = String/);
   assert.match(patch,/remainingMs\(deadline\)/);
   assert.match(patch,/confirm-query batch budget exhausted/);
+  assert.match(patch,/v138StartupRunRecoveryPatch\.js/);
 });
 
 test('V138 progress counts retry placeholders separately from successful scans',()=>{
@@ -75,4 +76,16 @@ test('V138 progress counts retry placeholders separately from successful scans',
   assert.match(ui,/__CE_QC_V96_V67_LIVE_PROGRESS_BRIDGE__=true/);
   assert.match(injector,/v138-ccsl-scan-progress\.js\?v=20260815-1/);
   assert.ok(injector.indexOf('v138-ccsl-scan-progress.js')<injector.indexOf('v108-route-lazy-features.js'));
+});
+
+test('V138 converts only orphaned running locks to paused on a fresh backend process',()=>{
+  syntax('src/v138StartupRunRecoveryPatch.js');
+  const recovery=read('src/v138StartupRunRecoveryPatch.js');
+  assert.match(recovery,/WHERE status='running'/);
+  assert.match(recovery,/SET status='paused'/);
+  assert.match(recovery,/batchIndex\/totalBatches\/checkpoints/);
+  assert.match(recovery,/UPDATE run_locks/);
+  assert.match(recovery,/UPDATE business_run_locks/);
+  assert.doesNotMatch(recovery,/DELETE FROM/);
+  assert.doesNotMatch(recovery,/UPDATE (?:final_rows|business_final_rows|unified_import_rows)/);
 });
