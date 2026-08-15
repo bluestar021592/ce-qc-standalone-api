@@ -1,4 +1,5 @@
 import { CEClient } from './ceClient.js';
+import './v138StartupRunRecoveryPatch.js';
 
 const PATCH_ID = '2026-08-15-v138-confirm-query-bounded-progress-v1';
 const ORIGINAL = CEClient.prototype.confirmQuery;
