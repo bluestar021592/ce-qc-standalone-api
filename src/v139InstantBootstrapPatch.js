@@ -2,10 +2,19 @@ import express from 'express';
 import { getDb } from './db.js';
 import { v27BootstrapHandler } from './v27ServerPatch.js';
 
-export const V139_INSTANT_BOOTSTRAP_ID='2026-08-15-v139-current-import-shell-v1';
+export const V139_INSTANT_BOOTSTRAP_ID='2026-08-15-v139-seven-business-current-import-shell-v2';
 const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 
 function n(value){const x=Number(value);return Number.isFinite(x)?x:0;}
+function currentImportCounts(snapshotId=''){
+  const result=Object.fromEntries(TYPES.map(type=>[type,0]));
+  if(!snapshotId)return result;
+  try{
+    const rows=getDb().prepare(`SELECT businessType,COUNT(DISTINCT shipmentCode) AS count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType`).all(snapshotId);
+    for(const row of rows)if(result[row.businessType]!==undefined)result[row.businessType]=n(row.count);
+  }catch(error){console.warn('[CE-QC][V139_BOOTSTRAP] import-count probe skipped',error?.message||error);}
+  return result;
+}
 function currentFinalCounts(snapshotId=''){
   const result=Object.fromEntries(TYPES.map(type=>[type,0]));
   if(!snapshotId)return result;
@@ -54,19 +63,21 @@ function shell(type,unified,total,finalized){
 function transform(payload={}){
   const unified=payload?.unifiedImport;
   if(!unified?.snapshotId||!unified?.reportDate)return payload;
-  const counts=unified.classificationCounts||{};
-  const finalCounts=currentFinalCounts(String(unified.snapshotId));
+  const snapshotId=String(unified.snapshotId);
+  const counts=currentImportCounts(snapshotId);
+  const finalCounts=currentFinalCounts(snapshotId);
+  unified.classificationCounts={...(unified.classificationCounts||{}),...counts};
+  unified.summary={...(unified.summary||{}),validUniqueWaybills:Object.values(counts).reduce((sum,value)=>sum+n(value),0)};
   payload.businessStates ||= {};
   for(const type of TYPES){
     const total=n(counts[type]);
-    if(type==='WHPP'&&total===0)continue;
     const current=payload.businessStates[type]||{};
     const sameDate=String(current.reportDate||'')===String(unified.reportDate||'');
     const completeForSlice=total===0||finalCounts[type]>=total;
     if(sameDate&&completeForSlice&&!current._instantImportShell)continue;
     payload.businessStates[type]=shell(type,unified,total,finalCounts[type]);
   }
-  payload.v139={instantCurrentImport:true,reportDate:unified.reportDate,snapshotId:unified.snapshotId,finalCounts};
+  payload.v139={instantCurrentImport:true,reportDate:unified.reportDate,snapshotId,counts,finalCounts};
   return payload;
 }
 async function handler(req,res){
