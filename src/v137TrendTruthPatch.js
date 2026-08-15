@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v138-seven-business-range-trends-cache-v2';
+export const V137_TREND_TRUTH_ID='2026-08-15-v139-seven-business-range-trends-cache-v3';
 const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','TOTAL']);
 const CORE=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE=new Set(['SHOPEECN','SHOPEEVN']);
@@ -108,7 +108,7 @@ function build(type,dates,rows){
   const byDate=new Map(dates.map(date=>[date,{total:0,pod:0,oc1:0,a1:0,a2:0,a3:0,unknown:0}]));
   for(const row of rows){if(!inScope(type,row.businessType)||!byDate.has(row.reportDate))continue;const d=byDate.get(row.reportDate);d.total++;if(row.pod)d.pod++;if(!row.closed&&row.ocDays>=1)d.oc1++;if(row.attempt===1)d.a1++;else if(row.attempt===2)d.a2++;else if(row.attempt>=3)d.a3++;d.unknown+=row.attemptUnknown;}
   const ticket=[],podRate=[],ocRate=[],firstRate=[],attempt1=[],attempt2=[],attempt3=[],attempt1Count=[],attempt2Count=[],attempt3Count=[],attemptDenominator=[],attemptUnknownPod=[];
-  for(const date of dates){const d=byDate.get(date);ticket.push(d.total);podRate.push(rate(d.pod,d.total));ocRate.push(rate(d.oc1,d.total));const trustworthy=d.unknown===0;firstRate.push(trustworthy?rate(d.a1,d.total):null);attempt1.push(trustworthy?rate(d.a1,d.total):null);attempt2.push(trustworthy?rate(d.a2,d.total):null);attempt3.push(trustworthy?rate(d.a3,d.total):null);attempt1Count.push(d.a1);attempt2Count.push(d.a2);attempt3Count.push(d.a3);attemptDenominator.push(d.total);attemptUnknownPod.push(d.unknown);}
+  for(const date of dates){const d=byDate.get(date);ticket.push(d.total);podRate.push(rate(d.pod,d.total));ocRate.push(rate(d.oc1,d.total));const evidence=d.a1+d.a2+d.a3;const trustworthy=d.unknown===0&&(d.pod===0||evidence>0);firstRate.push(trustworthy&&d.pod>0?rate(d.a1,d.total):null);attempt1.push(trustworthy&&d.pod>0?rate(d.a1,d.total):null);attempt2.push(trustworthy&&d.pod>0?rate(d.a2,d.total):null);attempt3.push(trustworthy&&d.pod>0?rate(d.a3,d.total):null);attempt1Count.push(d.a1);attempt2Count.push(d.a2);attempt3Count.push(d.a3);attemptDenominator.push(d.total);attemptUnknownPod.push(d.unknown||((d.pod>0&&evidence===0)?d.pod:0));}
   return {dates,ticket,podRate,ocRate,firstRate,attempt1,attempt2,attempt3,attempt1Count,attempt2Count,attempt3Count,attemptDenominator,attemptUnknownPod};
 }
 
@@ -138,10 +138,10 @@ function handler(req,res){
     const payload=entry.byType[type];
     const related=type==='TOTAL'?{SHOPEECN:entry.byType.SHOPEECN,SHOPEEVN:entry.byType.SHOPEEVN}:undefined;
     res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=30');
-    res.setHeader('Server-Timing',`v138;desc=seven-business-trend-cache-${entry.cacheHit?'hit':'miss'};dur=0`);
+    res.setHeader('Server-Timing',`v139;desc=seven-business-trend-cache-${entry.cacheHit?'hit':'miss'};dur=0`);
     res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,...payload,...(related?{related}: {})});
-  }catch(error){console.error('[CE-QC][V138][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
+  }catch(error){console.error('[CE-QC][V139][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
 }
 
 const previousListen=express.application.listen;let installed=false;
-express.application.listen=function v138TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
+express.application.listen=function v139TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
