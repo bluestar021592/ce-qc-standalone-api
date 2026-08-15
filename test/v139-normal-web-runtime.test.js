@@ -9,8 +9,8 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const syntax=p=>{const r=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(r.status,0,`${p}: ${r.stderr||r.stdout}`);};
 
-test('V139 normal-web runtime files are syntax valid',()=>{
-  for(const file of ['src/v139InstantBootstrapPatch.js','public/v139-normal-web-runtime.js','public/dashboard-v18.js','public/v132-whpp-seven-business-fast.js','public/v27-trend-mount-fix.js','src/v89StaticAssetCachePatch.js','src/v137TrendTruthPatch.js','src/v44WhppUiPatch.js'])syntax(file);
+test('V142 normal-web runtime files are syntax valid',()=>{
+  for(const file of ['src/v139InstantBootstrapPatch.js','public/v139-normal-web-runtime.js','public/dashboard-v18.js','public/v132-whpp-seven-business-fast.js','public/v27-trend-mount-fix.js','src/v89StaticAssetCachePatch.js','src/v137TrendTruthPatch.js','src/v142UnifiedSnapshotRepairPatch.js','src/v44WhppUiPatch.js'])syntax(file);
 });
 
 test('business renderer never probes processing APIs or blocks navigation after paint',()=>{
@@ -48,7 +48,7 @@ test('WHPP current-day page uses imported classification count immediately and f
   assert.doesNotMatch(ui,/当前无WHPP本土数据/);
 });
 
-test('legacy V27 trend DOM runner is retired and old V27 network work is suppressed',()=>{
+test('legacy V27 trend DOM runner is retired and old V27 network work bridges to canonical V137',()=>{
   const retired=read('public/v27-trend-mount-fix.js');
   const runtime=read('public/v139-normal-web-runtime.js');
   const injector=read('src/v44WhppUiPatch.js');
@@ -56,9 +56,9 @@ test('legacy V27 trend DOM runner is retired and old V27 network work is suppres
   assert.doesNotMatch(retired,/api\/v27\/trends/);
   assert.match(runtime,/__CE_QC_DASHBOARD_V18_BASE__/);
   assert.match(runtime,/removeLegacyTrendDom/);
-  assert.match(runtime,/api\\\/v27\\\/trends/);
-  assert.match(runtime,/X-CE-QC-Retired/);
-  assert.match(injector,/v139-normal-web-runtime\.js\?v=20260815-2/);
+  assert.match(runtime,/url\.pathname==='\/api\/v27\/trends'/);
+  assert.match(runtime,/url\.pathname='\/api\/v137\/trends'/);
+  assert.match(injector,/v139-normal-web-runtime\.js\?v=20260815-5/);
 });
 
 test('versioned JS CSS and images are immutable while HTML remains outside static asset cache',()=>{
@@ -68,10 +68,12 @@ test('versioned JS CSS and images are immutable while HTML remains outside stati
   assert.doesNotMatch(cache,/\.html\$.*max-age=31536000/);
 });
 
-test('attempt trends never display fabricated zero percent when POD has no attempt evidence',()=>{
+test('attempt trends use only evidence-backed attempt values and expose unknown POD count',()=>{
   const trend=read('src/v137TrendTruthPatch.js');
   assert.match(trend,/const evidence=d\.a1\+d\.a2\+d\.a3/);
-  assert.match(trend,/d\.pod===0\|\|evidence>0/);
-  assert.match(trend,/d\.pod>0\?rate\(d\.a1,d\.total\):null/);
-  assert.match(trend,/d\.pod>0&&evidence===0/);
+  assert.match(trend,/const hasEvidence=evidence>0/);
+  assert.match(trend,/hasEvidence\?rate\(d\.a1,d\.total\):null/);
+  assert.match(trend,/attemptUnknownPod/);
+  assert.match(trend,/trackAttemptCount/);
+  assert.match(trend,/PERSISTED_ATTEMPT_THEN_RAW_THEN_TRACK_EVENTS_THEN_POD_DATE/);
 });
