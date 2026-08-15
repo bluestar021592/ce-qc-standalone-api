@@ -36,5 +36,7 @@
     const statusText=meta.active?`${periodText} · 已导入 ${fmt(meta.sourceTotal)} 票 · 后台扫描/轨迹处理中，页面可正常浏览，完成后自动更新`:`${periodText} · 数据来自当前业务有效快照`;
     root.className='app-page v18-dashboard-page v18-business-page';root.innerHTML=`<section class="v18-page-heading"><div><h2>${model.label}看板</h2><p>${statusText}</p></div></section>${businessCards(model.cards)}<section class="v18-panel v18-core"><h2>核心指标</h2><div class="v18-core-grid">${model.core.map(row=>metricCard(row,model.businessType)).join('')}</div></section>${model.regions||model.dispatch?`<section class="v18-panel"><h2>区域与派次</h2><div class="v18-business-extra">${model.regions||''}${model.dispatch||''}</div></section>`:''}<section class="v18-panel v18-trend-section"><h2>趋势图表</h2>${charts(model.charts)}</section><section id="${previewId}" class="panel v18-detail-preview" aria-live="polite"></section>`;mountCharts(root,model.charts);markLiveProcessing(root,model,meta);
   }
-  global.DashboardV18={renderHome,renderBusiness};
+  const base={renderHome,renderBusiness};
+  global.__CE_QC_DASHBOARD_V18_BASE__=base;
+  global.DashboardV18={...base};
 })(window);
