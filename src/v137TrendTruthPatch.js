@@ -1,10 +1,12 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v137-seven-business-range-trends-v1';
+export const V137_TREND_TRUTH_ID='2026-08-15-v138-seven-business-range-trends-cache-v2';
 const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','TOTAL']);
 const CORE=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE=new Set(['SHOPEECN','SHOPEEVN']);
+const CACHE_TTL_MS=15_000;
+const trendCache=new Map();
 
 function dateOnly(value=''){const v=String(value||'').trim().slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(v)?v:'';}
 function safe(value){try{return value&&typeof value==='object'?value:JSON.parse(String(value||'{}'));}catch{return {};}}
@@ -110,6 +112,20 @@ function build(type,dates,rows){
   return {dates,ticket,podRate,ocRate,firstRate,attempt1,attempt2,attempt3,attempt1Count,attempt2Count,attempt3Count,attemptDenominator,attemptUnknownPod};
 }
 
+function cacheEntry(from,to,dates){
+  const actualFrom=dates[0],actualTo=dates.at(-1);
+  const key=`${actualFrom}|${actualTo}|${dates.join(',')}`;
+  const cached=trendCache.get(key);
+  if(cached&&Date.now()-cached.at<CACHE_TTL_MS)return {...cached,cacheHit:true};
+  const rows=sourceRows(actualFrom,actualTo).map(decorate);
+  const byType={};
+  for(const type of TYPES)byType[type]=build(type,dates,rows);
+  if(trendCache.size>6)trendCache.clear();
+  const entry={at:Date.now(),actualFrom,actualTo,byType,rowCount:rows.length};
+  trendCache.set(key,entry);
+  return {...entry,cacheHit:false};
+}
+
 function handler(req,res){
   try{
     const type=String(req.query.businessType||'TOTAL').trim().toUpperCase();
@@ -118,14 +134,14 @@ function handler(req,res){
     if(!from||!to||from>to)return res.status(400).json({ok:false,error:'日期范围无效'});
     const dates=completedDates(from,to);
     if(!dates.length)return res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:from,toDate:to,dates:[],ticket:[],podRate:[],ocRate:[],firstRate:[],attemptUnknownPod:[]});
-    const actualFrom=dates[0],actualTo=dates.at(-1);
-    const rows=sourceRows(actualFrom,actualTo).map(decorate);
-    const payload=build(type,dates,rows);
-    res.setHeader('Cache-Control','private, max-age=20, stale-while-revalidate=60');
-    res.setHeader('Server-Timing',`v137;desc=seven-business-trend;dur=0`);
-    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:actualFrom,toDate:actualTo,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',...payload});
-  }catch(error){console.error('[CE-QC][V137][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
+    const entry=cacheEntry(from,to,dates);
+    const payload=entry.byType[type];
+    const related=type==='TOTAL'?{SHOPEECN:entry.byType.SHOPEECN,SHOPEEVN:entry.byType.SHOPEEVN}:undefined;
+    res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=30');
+    res.setHeader('Server-Timing',`v138;desc=seven-business-trend-cache-${entry.cacheHit?'hit':'miss'};dur=0`);
+    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,...payload,...(related?{related}: {})});
+  }catch(error){console.error('[CE-QC][V138][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
 }
 
 const previousListen=express.application.listen;let installed=false;
-express.application.listen=function v137TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
+express.application.listen=function v138TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
