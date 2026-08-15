@@ -1,12 +1,13 @@
 import { getDb } from './db.js';
 import { completeUnifiedSnapshot } from './unifiedImportStore.js';
 
-export const V142_UNIFIED_REPAIR_ID='2026-08-15-v142-unified-auto-finalize-v2';
+export const V142_UNIFIED_REPAIR_ID='2026-08-15-v142-unified-auto-finalize-v3';
 const recentAttempts=new Map();
 const RETRY_MS=15_000;
 
 function safeJson(value){try{return value&&typeof value==='object'?value:JSON.parse(String(value||'{}'));}catch{return {};}}
 function dateOnly(value=''){const text=String(value||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';}
+function remember(date,result){recentAttempts.set(date,{at:Date.now(),result});return result;}
 
 function currentUnified(reportDate){
   return getDb().prepare(`
@@ -49,17 +50,12 @@ function markWaiting(row,missing){
   if(!row?.snapshotId)return;
   const payload=safeJson(row.payloadJson);
   payload.autoFinalize={patchId:V142_UNIFIED_REPAIR_ID,status:'WAITING_FOR_CHILD_SNAPSHOTS',missing,checkedAt:new Date().toISOString()};
-  // Keep the database lifecycle as IMPORTED while child processing is incomplete.
-  // completeUnifiedSnapshot already understands IMPORTED, so the day remains
-  // automatically completable as soon as both child snapshots are ready.
   getDb().prepare(`UPDATE unified_snapshots SET payloadJson=?
     WHERE snapshotId=? AND status IN ('IMPORTED','PROCESSING')`).run(JSON.stringify(payload),row.snapshotId);
 }
 
 function restoreCompletableStatus(row){
   if(row?.snapshotStatus!=='PROCESSING')return;
-  // V142 v1 briefly used PROCESSING as a physical DB status. Restore those rows
-  // to the existing lifecycle vocabulary before calling completeUnifiedSnapshot.
   getDb().prepare("UPDATE unified_snapshots SET status='IMPORTED' WHERE snapshotId=? AND status='PROCESSING'").run(row.snapshotId);
   row.snapshotStatus='IMPORTED';
 }
@@ -67,13 +63,12 @@ function restoreCompletableStatus(row){
 export function repairUnifiedSnapshotCompletion(reportDate,{force=false}={}){
   const date=dateOnly(reportDate);
   if(!date)return {ok:false,code:'INVALID_DATE',reportDate:date};
-  const last=Number(recentAttempts.get(date)||0);
-  if(!force&&Date.now()-last<RETRY_MS)return {ok:true,reportDate:date,skipped:true,reason:'RECENTLY_CHECKED'};
-  recentAttempts.set(date,Date.now());
+  const recent=recentAttempts.get(date);
+  if(!force&&recent&&Date.now()-Number(recent.at||0)<RETRY_MS)return {...recent.result,cached:true};
 
   const unified=currentUnified(date);
-  if(!unified)return {ok:true,reportDate:date,imported:false,status:'NOT_IMPORTED'};
-  if(unified.snapshotStatus==='COMPLETED')return {ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:unified.snapshotId};
+  if(!unified)return remember(date,{ok:true,reportDate:date,imported:false,status:'NOT_IMPORTED'});
+  if(unified.snapshotStatus==='COMPLETED')return remember(date,{ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:unified.snapshotId});
 
   const ccsl=latestCcslSnapshot(date);
   const shopee=latestShopeeSnapshot(date);
@@ -82,16 +77,16 @@ export function repairUnifiedSnapshotCompletion(reportDate,{force=false}={}){
   if(!shopee)missing.push('SHOPEE');
   if(missing.length){
     markWaiting(unified,missing);
-    return {ok:true,reportDate:date,imported:true,completed:false,status:'PROCESSING',missing,snapshotId:unified.snapshotId};
+    return remember(date,{ok:true,reportDate:date,imported:true,completed:false,status:'PROCESSING',missing,snapshotId:unified.snapshotId});
   }
 
   restoreCompletableStatus(unified);
   try{
     const result=completeUnifiedSnapshot({reportDate:date,ccslSnapshot:ccsl,shopeeSnapshot:shopee});
-    if(!result)return {ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:'UNIFIED_SNAPSHOT_NOT_COMPLETABLE',error:'统一快照未进入可完成状态。'};
-    return {ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:result.snapshotId||unified.snapshotId,repairId:V142_UNIFIED_REPAIR_ID};
+    if(!result)return remember(date,{ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:'UNIFIED_SNAPSHOT_NOT_COMPLETABLE',error:'统一快照未进入可完成状态。'});
+    return remember(date,{ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:result.snapshotId||unified.snapshotId,repairId:V142_UNIFIED_REPAIR_ID});
   }catch(error){
-    return {ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:error?.code||'UNIFIED_RECONCILIATION_FAILED',error:error?.message||String(error),reconciliation:error?.reconciliation||null};
+    return remember(date,{ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:error?.code||'UNIFIED_RECONCILIATION_FAILED',error:error?.message||String(error),reconciliation:error?.reconciliation||null});
   }
 }
 
@@ -106,9 +101,6 @@ export function repairRecentUnifiedSnapshots(limit=14){
   return rows.map(row=>repairUnifiedSnapshotCompletion(row.reportDate,{force:true}));
 }
 
-// Repair is deliberately conservative: it can only finalize a day when BOTH
-// persisted child snapshots are already VALID + COMPLETED. No API calls, no
-// guessed data, and no re-upload are required.
 setTimeout(()=>{try{repairRecentUnifiedSnapshots();}catch(error){console.warn('[CE-QC][V142][STARTUP_REPAIR]',error?.message||error);}},1200).unref?.();
 const timer=setInterval(()=>{try{repairRecentUnifiedSnapshots(7);}catch(error){console.warn('[CE-QC][V142][PERIODIC_REPAIR]',error?.message||error);}},60_000);
 timer.unref?.();
