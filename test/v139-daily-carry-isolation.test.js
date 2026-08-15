@@ -11,6 +11,12 @@ const syntax = file => {
   const result = spawnSync(process.execPath, ['--check', path.join(root, file)], { encoding: 'utf8' });
   assert.equal(result.status, 0, `${file}: ${result.stderr || result.stdout}`);
 };
+const functionBody = (source, name, nextName) => {
+  const start = source.indexOf(`function ${name}`);
+  const next = source.indexOf(`function ${nextName}`, start + 1);
+  assert.ok(start >= 0 && next > start, `cannot locate ${name}`);
+  return source.slice(start, next);
+};
 
 test('V139 daily import no longer hydrates historical carry into automatic runtime states', () => {
   syntax('src/v139DailyCarryIsolationPatch.js');
@@ -27,9 +33,16 @@ test('V139 current and resumed daily runs strip carry sources but preserve scan 
   const source = read('src/v139DailyCarryIsolationPatch.js');
   assert.match(source, /DAILY_RUN_ROUTES/);
   assert.match(source, /SHOPEE_RUN_ROUTES/);
-  assert.match(source, /isolateCcslCarry/);
-  assert.match(source, /isolateShopeeCarry/);
-  assert.doesNotMatch(source, /state\.scanResults = \[\][\s\S]*function isolateCcslCarry/);
+  const ccsl = functionBody(source, 'isolateCcslCarry', 'isolateShopeeCarry');
+  const shopee = functionBody(source, 'isolateShopeeCarry', 'listHistoricalCarry');
+  for (const body of [ccsl, shopee]) {
+    assert.match(body, /carryBills = \[\]/);
+    assert.match(body, /priorCarryRows = \[\]/);
+    assert.match(body, /nextCarryBills = \[\]/);
+    assert.doesNotMatch(body, /scanResults = \[\]/);
+    assert.doesNotMatch(body, /trackResults = \[\]/);
+    assert.doesNotMatch(body, /trackEvents = \[\]/);
+  }
 });
 
 test('V139 exposes a separate manual carry queue and bounded 200-ticket recheck action', () => {
@@ -57,5 +70,6 @@ test('V139 retries missing confirm rows and read-only trajectory requests at lea
 
 test('V139 manual carry UI is injected into the managed HTML build', () => {
   const injector = read('src/v44WhppUiPatch.js');
+  assert.match(injector, /v138-ccsl-scan-progress\.js\?v=20260816-2/);
   assert.match(injector, /v139-carry-manual-window\.js\?v=20260816-1/);
 });
