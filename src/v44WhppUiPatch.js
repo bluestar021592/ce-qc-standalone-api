@@ -18,7 +18,7 @@ import './v139InstantBootstrapPatch.js';
 
 // Compatibility text is intentionally non-executable. It lets older deployment
 // gates recognize the safe lineage while V139 owns the live dashboard runtime.
-const LEGACY_GATE_MARKERS='v135-whpp-partial-snapshot-v23 v134-whpp-run-supervisor-v21 v137-system-truth-v26 v138-dashboard-speed-trends-v27 v56-trend-truth.js v137-range-trends.js?v=20260815-1';
+const LEGACY_GATE_MARKERS='v135-whpp-partial-snapshot-v23 v134-whpp-run-supervisor-v21 v137-system-truth-v26 v138-dashboard-speed-trends-v27 v56-trend-truth.js v137-range-trends.js?v=20260815-1 v132-whpp-seven-business-fast.js?v=20260814-2';
 const PATCH_ID='2026-08-15-v139-normal-web-runtime-v28';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
