@@ -1,5 +1,5 @@
 (function installWhppTotalKpiIntegrationV64(global) {
-  const VERSION = '2026-08-12-v64-whpp-total-kpi-integration-v2';
+  const VERSION = '2026-08-15-v140-whpp-home-only-v3';
   const summaryCache = new Map();
   let decorating = false;
   let timer = null;
@@ -10,70 +10,13 @@
   };
   const fmt = value => Number(value || 0).toLocaleString('zh-CN');
   const rate = (value, total) => total ? Number(value || 0) * 100 / Number(total) : 0;
-
-  function setText(node, text) {
-    if (node && node.textContent !== text) node.textContent = text;
-  }
-
-  function importGrid() {
-    return document.querySelector('#unifiedClassificationSummary .unified-count-grid');
-  }
-
-  function importCardCount(label) {
-    const grid = importGrid();
-    if (!grid) return 0;
-    const card = [...grid.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === label);
-    return num(card?.querySelector('b')?.textContent);
-  }
-
-  function importStats() {
-    const root = document.getElementById('unifiedClassificationSummary');
-    const text = String(root?.textContent || '');
-    const pick = label => {
-      const match = text.match(new RegExp(`${label}\\s*([\\d,]+)`));
-      return match ? num(match[1]) : 0;
-    };
-    const rawRows = pick('原始行');
-    const duplicateRows = pick('重复');
-    const missingWaybillRows = pick('无单号');
-    const coreLabels = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
-    const coreCount = coreLabels.reduce((sum, label) => sum + importCardCount(label), 0);
-    const rawUnique = Math.max(0, rawRows - duplicateRows - missingWaybillRows);
-    const whppTotal = rawUnique >= coreCount ? rawUnique - coreCount : 0;
-    return { rawRows, duplicateRows, missingWaybillRows, coreCount, rawUnique, whppTotal, fullUnique: rawUnique || coreCount + whppTotal };
-  }
-
-  function ensureImportWhppCard(grid) {
-    let card = [...grid.children].find(node => String(node.querySelector('span')?.textContent || '').trim() === 'WHPP本土');
-    if (!card) {
-      card = document.createElement('div');
-      card.dataset.v64Business = 'WHPP';
-      card.innerHTML = '<span>WHPP本土</span><b data-testid="classification-whpp">0</b>';
-      grid.appendChild(card);
-    }
-    card.dataset.v64Business = 'WHPP';
-    return card;
-  }
-
-  function patchImportPage() {
-    const grid = importGrid();
-    if (!grid) return null;
-    const data = importStats();
-    const whppCard = ensureImportWhppCard(grid);
-    setText(whppCard.querySelector('b'), fmt(data.whppTotal));
-    setText(grid.querySelector('[data-testid="classification-valid-unique"]'), fmt(data.fullUnique));
-    const status = document.getElementById('fileStatus');
-    status?.querySelectorAll('p').forEach(p => {
-      if (/有效唯一单号/.test(p.textContent || '')) p.innerHTML = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${fmt(data.fullUnique)}`);
-    });
-    return data;
-  }
+  const setText = (node, text) => { if (node && node.textContent !== text) node.textContent = text; };
 
   async function readWhppSummary(reportDate) {
     const date = String(reportDate || '').slice(0, 10);
     if (!date) return { reportDate: '', total: 0, metrics: {}, regionPvUnresolved: 0, activeStoreRetention: 0, selfPickup: 0 };
     const cached = summaryCache.get(date);
-    if (cached && Date.now() - cached.at < 30000) return cached.value;
+    if (cached && Date.now() - cached.at < 15000) return cached.value;
     const response = await fetch(`/api/v71/whpp-summary?reportDate=${encodeURIComponent(date)}`, { cache: 'no-store', credentials: 'same-origin' });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
@@ -97,9 +40,7 @@
       .find(card => String(card.querySelector('span')?.textContent || '').trim() === label) || null;
   }
 
-  function homeCardValue(label) {
-    return num(homeCard(label)?.querySelector('b')?.textContent);
-  }
+  function homeCardValue(label) { return num(homeCard(label)?.querySelector('b')?.textContent); }
 
   function ensureHomeWhppCard(grid) {
     let card = homeCard('WHPP本土');
@@ -205,7 +146,6 @@
     if (decorating) return;
     decorating = true;
     try {
-      patchImportPage();
       const home = document.getElementById('homePage');
       if (!home || home.hidden) return;
       const reportDate = selectedReportDate();
@@ -214,7 +154,7 @@
       patchHomeTop(summary);
       patchHomeCore(summary);
     } catch (error) {
-      console.warn('[CE-QC][V64_WHPP_TOTAL_KPI] skipped', error);
+      console.warn('[CE-QC][V140_WHPP_TOTAL_KPI] skipped', error);
     } finally {
       decorating = false;
     }
@@ -239,11 +179,11 @@
     }
 
     document.addEventListener('click', event => {
-      if (event.target?.closest?.('#topRangeQuery,[data-page="home"],[data-page="import"]')) schedule(20, true);
+      if (event.target?.closest?.('#topRangeQuery,[data-page="home"]')) schedule(10, true);
     }, true);
     document.addEventListener('ce-qc-run-complete', () => schedule(0, true));
     schedule(0, false);
-    console.info('[CE-QC][V64_WHPP_TOTAL_KPI]', VERSION);
+    console.info('[CE-QC][V140_WHPP_TOTAL_KPI_HOME_ONLY]', VERSION);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
