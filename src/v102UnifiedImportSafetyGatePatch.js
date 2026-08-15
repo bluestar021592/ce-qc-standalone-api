@@ -1,11 +1,13 @@
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import express from 'express';
 import XLSX from 'xlsx';
 import { classifyUnifiedBusiness, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-15-v150-single-parse-import-safety-v4';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-15-v151-direct-persist-safety-v5';
 const ROUTE = '/api/import/unified-daily-report';
 const WRAPPED = Symbol.for('ce-qc.v102-unified-import-safety');
+let persistUnifiedUploadFast = null;
 
 function safetyError(code, message, extra = {}) {
   const error = new Error(message);
@@ -132,14 +134,15 @@ export function assertUnifiedImportSafety({ filePath = '', parsed, manualReportD
 
 const previousPost = express.application.post;
 if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
-  const wrappedPost = function v102UnifiedImportSafetyPost(pathValue, ...handlers) {
+  const wrappedPost = function v151UnifiedImportSafetyPost(pathValue, ...handlers) {
     if (pathValue !== ROUTE || handlers.length === 0) return previousPost.call(this, pathValue, ...handlers);
     const finalHandler = handlers.pop();
     if (typeof finalHandler !== 'function') return previousPost.call(this, pathValue, ...handlers, finalHandler);
 
-    const guardedFinalHandler = function v102UnifiedImportSafety(req, res, next) {
+    const guardedFinalHandler = async function v151UnifiedImportSafety(req, res, next) {
+      const startedAt = Date.now();
       try {
-        if (!req?.file?.path) return finalHandler.call(this, req, res, next);
+        if (!req?.file?.path) return await finalHandler.call(this, req, res, next);
         const parsed = parseUnifiedDailyExcel(req.file.path, {
           reportDate: req.body?.reportDate || '',
           originalName: req.file.originalname
@@ -150,15 +153,33 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
           parsed,
           manualReportDate: req.body?.reportDate || ''
         });
-        return finalHandler.call(this, req, res, next);
+        if (typeof persistUnifiedUploadFast !== 'function') throw safetyError('IMPORT_FAST_PERSIST_NOT_READY', '快速保存模块尚未就绪，请重新启动CE QC后再导入。');
+        // HARD BYPASS: after safety validation, persist and respond right here.
+        // The legacy unified import final handler is intentionally NOT called.
+        const saved = persistUnifiedUploadFast(parsed, req.file.originalname);
+        await fsPromises.unlink(req.file.path).catch(() => {});
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-CE-QC-Import-Path', 'V151-DIRECT-SAFE-PERSIST');
+        return res.json({
+          ok: true,
+          ...saved,
+          processingDeferred: true,
+          statePreparation: 'ON_PROCESS_START',
+          importElapsedMs: Date.now() - startedAt,
+          patchId: '2026-08-15-v151-direct-safe-persist-v2',
+          safetyGateId: V102_UNIFIED_IMPORT_SAFETY_GATE_ID
+        });
       } catch (error) {
-        console.error('[CE-QC][V102_IMPORT_SAFETY]', error?.code || '', error?.message || error);
+        if (req?.file?.path) await fsPromises.unlink(req.file.path).catch(() => {});
+        console.error('[CE-QC][V151_IMPORT_SAFETY]', error?.code || '', error?.message || error);
+        if (res.headersSent) return;
         return res.status(400).json({
           ok: false,
           code: error?.code || 'UNIFIED_IMPORT_SAFETY_BLOCKED',
           error: error?.message || String(error),
           shipmentCode: error?.shipmentCode || '',
-          gateId: V102_UNIFIED_IMPORT_SAFETY_GATE_ID
+          gateId: V102_UNIFIED_IMPORT_SAFETY_GATE_ID,
+          sheetDiagnostics: error?.sheetDiagnostics || []
         });
       }
     };
@@ -168,8 +189,9 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
   express.application.post = wrappedPost;
 }
 
-// Install the upload-first route only after this safety wrapper exists. The fast
-// route therefore preserves V102 checks but replaces the legacy heavy final handler.
-await import('./v150UnifiedImportFastRoutePatch.js');
+// Install run-start hydration only after this safety wrapper exists. Import requests
+// are persisted directly by V102 above; the old heavy final handler can no longer run.
+const fastModule = await import('./v150UnifiedImportFastRoutePatch.js');
+persistUnifiedUploadFast = fastModule.persistUnifiedUploadFast;
 
 export const __test = { findDuplicateOwnershipConflict };
