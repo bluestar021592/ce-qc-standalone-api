@@ -38,7 +38,7 @@ test('V148 runner binds to unified date and reapplies canonical evidence after l
   assert.match(runner,/scanCoveredCount/);
   assert.match(runner,/POD锁复用/);
   assert.match(runner,/await global\.refresh\(\)/);
-  assert.ok(runner.indexOf("await global.refresh()")<runner.indexOf('renderEvidenceStatus(currentReportDate'));
+  assert.ok(runner.indexOf('await global.refresh()')<runner.indexOf('renderEvidenceStatus(currentReportDate'));
   assert.match(runner,/LATEST_UNIFIED_REPORT_DATE_PLUS_API_OR_POD_LOCK_EVIDENCE/);
 });
 
@@ -64,6 +64,20 @@ test('V148 distinguishes real API scan coverage from terminal POD-lock reuse',()
   assert.match(backend,/UPDATE unified_snapshots SET status='IMPORTED'/);
 });
 
+test('V148 Shopee attempt trends search later carryover POD and dispatch evidence for original intake day',()=>{
+  const trend=read('src/v137TrendTruthPatch.js');
+  assert.match(trend,/pod_candidates AS/);
+  assert.match(trend,/s\.reportDate>=v\.reportDate/);
+  assert.match(trend,/f\.reportDate>=v\.reportDate AND f\.isPod=1/);
+  assert.match(trend,/pod_first AS/);
+  assert.match(trend,/track_attempts AS/);
+  assert.match(trend,/evidenceDate/);
+  assert.match(trend,/firstPodObservedDate/);
+  assert.match(trend,/firstPodEvidenceJson/);
+  assert.match(trend,/podLockTime/);
+  assert.match(trend,/PERSISTED_ATTEMPT_THEN_CROSS_DAY_DISPATCH_EVENTS_THEN_POD_TIMESTAMP_THEN_FIRST_POD_OBSERVED_DATE/);
+});
+
 test('V145 home core excludes Shopee and Shopee special metrics come from canonical final rows',()=>{
   const backend=read('src/v143HomeTruthPatch.js');
   const ui=read('public/v64-whpp-total-kpi-integration.js');
@@ -79,13 +93,12 @@ test('V145 home core excludes Shopee and Shopee special metrics come from canoni
   assert.doesNotMatch(ui,/\+ Number\(addValue/);
 });
 
-test('V145 Shopee attempt recovery reads persisted attempt fields track events shipment summary and scan raw POD time',()=>{
+test('Shopee attempt recovery still reads persisted attempt fields and POD timestamps',()=>{
   const home=read('src/v143HomeTruthPatch.js');
   const trend=read('src/v137TrendTruthPatch.js');
   for(const source of [home,trend]){
     assert.match(source,/business_track_events/);
     assert.match(source,/business_scan_results/);
-    assert.match(source,/business_shipment_tracks/);
     assert.match(source,/podAttemptNo/);
     assert.match(source,/findPodDateInObject/);
     assert.match(source,/deliveryCompletedAt/);
@@ -93,7 +106,6 @@ test('V145 Shopee attempt recovery reads persisted attempt fields track events s
   }
   assert.match(home,/group\.pod>0&&group\.known===0/);
   assert.match(home,/group\.values=\[null,null,null\]/);
-  assert.match(trend,/PERSISTED_ATTEMPT_THEN_TRACK_EVENTS_THEN_SHIPMENT_SCAN_POD_TIME/);
 });
 
 test('V144 zero-row family is considered complete instead of waiting forever for a child snapshot',()=>{
@@ -110,7 +122,7 @@ test('V144 zero-row family is considered complete instead of waiting forever for
 
 test('selected-day trend endpoint exposes lifecycle truth and automatic persisted repair',()=>{
   const backend=read('src/v137TrendTruthPatch.js');const repair=read('src/v142UnifiedSnapshotRepairPatch.js');
-  assert.match(backend,/repairUnifiedSnapshotCompletion\(to\)/);assert.match(backend,/requestedDateLifecycle:lifecycle/);assert.match(backend,/business_track_events/);assert.match(backend,/trackAttemptCount/);
+  assert.match(backend,/repairUnifiedSnapshotCompletion\(to\)/);assert.match(backend,/requestedDateLifecycle:lifecycle/);assert.match(backend,/business_track_events/);assert.match(backend,/track_attempts/);
   assert.match(repair,/latestCcslSnapshot/);assert.match(repair,/latestShopeeSnapshot/);assert.match(repair,/VALID/);assert.match(repair,/COMPLETED/);assert.match(repair,/completeUnifiedSnapshot/);
 });
 
