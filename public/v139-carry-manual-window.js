@@ -1,7 +1,7 @@
 (function installV139CarryManualWindow(global) {
   if (global.__CE_QC_V139_CARRY_MANUAL_WINDOW__) return;
   global.__CE_QC_V139_CARRY_MANUAL_WINDOW__ = true;
-  const VERSION = '2026-08-16-v139-carry-manual-window-v1';
+  const VERSION = '2026-08-16-v139-carry-manual-window-v2';
   let busy = false;
 
   function escapeHtml(value) {
@@ -47,10 +47,41 @@
     return payload;
   }
 
+  function syncDailyQueueSummary(summary = {}) {
+    try {
+      if (typeof unifiedImportState === 'undefined' || !unifiedImportState) return;
+      const carry = unifiedImportState.carryover || {};
+      const todayOpen = Number(carry.todayOpen || 0);
+      unifiedImportState.carryover = {
+        ...carry,
+        currentOpen: todayOpen,
+        historicalOpen: Number(summary.historicalOpen || carry.historicalOpen || 0),
+        cumulativeHistorical: Number(summary.cumulativeHistorical || carry.cumulativeHistorical || 0),
+        historicalClosed: Number(summary.historicalClosed || carry.historicalClosed || 0),
+        historicalSeparate: true
+      };
+      if (typeof renderUnifiedImportResult === 'function') renderUnifiedImportResult();
+      // Keep the original status block understandable for an already-imported day:
+      // “current queue” is now today's automatic queue only; historical tickets are
+      // visible in the independent panel below.
+      const statusRoot = document.getElementById('fileStatus');
+      if (statusRoot) {
+        for (const node of statusRoot.querySelectorAll('p,span,div')) {
+          if (node.childElementCount === 0 && /当前处理队列/.test(node.textContent || '')) {
+            node.textContent = String(node.textContent || '').replace('当前处理队列', '当日自动处理队列');
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[CE-QC][V139] daily queue summary sync skipped', error);
+    }
+  }
+
   function render(payload) {
     const panel = host();
     if (!panel) return;
     const s = payload.summary || {};
+    syncDailyQueueSummary(s);
     const by = s.byBusiness || {};
     panel.querySelector('#v139CarrySummary').innerHTML = [
       ['当前历史未闭环', s.historicalOpen],
