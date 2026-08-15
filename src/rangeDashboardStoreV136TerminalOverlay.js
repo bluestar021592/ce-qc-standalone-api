@@ -1,9 +1,11 @@
 import { getDb } from './db.js';
 import { loadRangeDashboard as loadRangeDashboardV58 } from './rangeDashboardStoreV58.js';
 
-export const RANGE_DASHBOARD_V136_TERMINAL_OVERLAY_ID='2026-08-15-v137-scoped-terminal-overlay-v2';
+export const RANGE_DASHBOARD_V136_TERMINAL_OVERLAY_ID='2026-08-15-v140-single-query-terminal-overlay-v3';
 const OPEN_TABS=new Set(['accountingOpen','unresolved','ordinaryOpen','coreAbnormal','abnormal','severeAbnormal','pendingAll','pending1','pending2plus','pending2','pending3','pendingNonContinuous','ocAll','oc1','oc2plus','oc2','oc3','cycle2','cycle2plus','inboundNoScan','workOrderAbnormal','provinceOpen','deliveryStay','returnRequired','shopTransit','shopArrived','shopStuck','pvDelivery','pvStoreRetention','pvStoreInboundNoScan','pvOtherUnresolved']);
 const LOOKUP_CHUNK=350;
+let fastAuthorityStatement=null;
+let jsonEachAvailable=true;
 
 export function loadRangeDashboard(fromDate,toDate){
   const range=loadRangeDashboardV58(fromDate,toDate);
@@ -12,7 +14,7 @@ export function loadRangeDashboard(fromDate,toDate){
   for(const state of Object.values(range.states||{}))patchState(state,authority);
   for(const state of Object.values(range.aggregates||{}))patchState(state,authority);
   compactRange(range);
-  return {...range,queryMode:`${range.queryMode||'SQL'}+LATEST_TERMINAL_V137_SCOPED`,terminalAuthority:RANGE_DASHBOARD_V136_TERMINAL_OVERLAY_ID,terminalLookupBills:bills.length};
+  return {...range,queryMode:`${range.queryMode||'SQL'}+LATEST_TERMINAL_V140_SINGLE_QUERY`,terminalAuthority:RANGE_DASHBOARD_V136_TERMINAL_OVERLAY_ID,terminalLookupBills:bills.length};
 }
 
 function collectRangeBills(range={}){
@@ -30,27 +32,94 @@ function collectRangeBills(range={}){
 }
 
 function chunks(values,size=LOOKUP_CHUNK){const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;}
-function loadTerminalAuthority(bills=[]){
-  const db=getDb();const map=new Map();
+
+function getFastAuthorityStatement(db){
+  if(fastAuthorityStatement)return fastAuthorityStatement;
+  fastAuthorityStatement=db.prepare(`
+    WITH wanted(shipmentCode) AS (
+      SELECT UPPER(TRIM(CAST(value AS TEXT))) FROM json_each(?)
+    ), candidates AS (
+      SELECT 'CARRY' source,c.shipmentCode,c.stateJson payloadJson,'' state,'' category,0 isPod,
+        c.status carryStatus,c.closeReason closeReason,2 priority,c.updatedAt updatedAt
+      FROM carryover_open_items c INNER JOIN wanted w ON UPPER(c.shipmentCode)=w.shipmentCode
+      UNION ALL
+      SELECT 'BUSINESS_FINAL',b.shipmentCode,b.rawJson,'',b.primaryCategory,b.isPod,'','',3,b.updatedAt
+      FROM business_final_rows b INNER JOIN wanted w ON UPPER(b.shipmentCode)=w.shipmentCode
+      WHERE b.businessType IN ('SHOPEE','WHPP')
+      UNION ALL
+      SELECT 'FINAL',f.shipmentCode,f.rawJson,'',f.primaryCategory,f.isPod,'','',3,f.updatedAt
+      FROM final_rows f INNER JOIN wanted w ON UPPER(f.shipmentCode)=w.shipmentCode
+      UNION ALL
+      SELECT 'CURRENT',s.shipmentCode,s.stateJson,s.state,'',0,'','',4,s.updatedAt
+      FROM shipment_current_state s INNER JOIN wanted w ON UPPER(s.shipmentCode)=w.shipmentCode
+    )
+    SELECT source,shipmentCode,payloadJson,state,category,isPod,carryStatus,closeReason,priority,updatedAt
+    FROM candidates
+    ORDER BY shipmentCode,priority,updatedAt
+  `);
+  return fastAuthorityStatement;
+}
+
+function absorbAuthorityRows(rows,map){
+  const absorb=(bill,row,priority)=>{
+    bill=String(bill||'').trim().toUpperCase();if(!bill)return;
+    const current=map.get(bill);if(current&&current.priority>priority)return;
+    const truth=terminalTruth(row);if(truth)map.set(bill,{...truth,priority});
+  };
+  for(const row of rows||[]){
+    const payload=safe(row.payloadJson);
+    if(row.source==='CARRY')absorb(row.shipmentCode,{...payload,state:row.closeReason||'',closeReason:row.closeReason||'',carryStatus:row.carryStatus||''},Number(row.priority||2));
+    else if(row.source==='CURRENT')absorb(row.shipmentCode,{...payload,state:row.state||'',currentState:row.state||''},Number(row.priority||4));
+    else absorb(row.shipmentCode,{...payload,primaryCategory:row.category||'',isPod:row.isPod},Number(row.priority||3));
+  }
+}
+
+function loadTerminalAuthorityFast(db,bills=[]){
+  if(!bills.length)return new Map();
+  const rows=getFastAuthorityStatement(db).all(JSON.stringify(bills));
+  const map=new Map();
+  absorbAuthorityRows(rows,map);
+  return map;
+}
+
+function loadTerminalAuthorityFallback(db,bills=[]){
+  const map=new Map();
   const absorb=(bill,row,priority)=>{bill=String(bill||'').trim().toUpperCase();if(!bill)return;const current=map.get(bill);if(current&&current.priority>priority)return;const truth=terminalTruth(row);if(truth)map.set(bill,{...truth,priority});};
   for(const batch of chunks(bills)){
     if(!batch.length)continue;
     const placeholders=batch.map(()=>'?').join(',');
-    for(const row of db.prepare(`SELECT shipmentCode,status carryStatus,closeReason,stateJson carryJson,updatedAt carryUpdatedAt FROM carryover_open_items WHERE shipmentCode IN (${placeholders}) ORDER BY updatedAt`).all(...batch)){
-      absorb(row.shipmentCode,{...safe(row.carryJson),state:row.closeReason||'',closeReason:row.closeReason||'',carryStatus:row.carryStatus||''},2);
-    }
-    for(const row of db.prepare(`SELECT shipmentCode,rawJson,primaryCategory,isPod,updatedAt FROM business_final_rows WHERE businessType IN ('SHOPEE','WHPP') AND shipmentCode IN (${placeholders}) ORDER BY updatedAt`).all(...batch)){
-      absorb(row.shipmentCode,{...safe(row.rawJson),primaryCategory:row.primaryCategory,isPod:row.isPod},3);
-    }
-    for(const row of db.prepare(`SELECT shipmentCode,rawJson,primaryCategory,isPod,updatedAt FROM final_rows WHERE shipmentCode IN (${placeholders}) ORDER BY updatedAt`).all(...batch)){
-      absorb(row.shipmentCode,{...safe(row.rawJson),primaryCategory:row.primaryCategory,isPod:row.isPod},3);
-    }
-    for(const row of db.prepare(`SELECT shipmentCode,state,stateJson,updatedAt FROM shipment_current_state WHERE shipmentCode IN (${placeholders})`).all(...batch)){
-      absorb(row.shipmentCode,{...safe(row.stateJson),state:row.state||'',currentState:row.state||''},4);
+    const rows=db.prepare(`
+      SELECT 'CARRY' source,shipmentCode,stateJson payloadJson,'' state,'' category,0 isPod,status carryStatus,closeReason,2 priority,updatedAt FROM carryover_open_items WHERE shipmentCode IN (${placeholders})
+      UNION ALL
+      SELECT 'BUSINESS_FINAL',shipmentCode,rawJson,'',primaryCategory,isPod,'','',3,updatedAt FROM business_final_rows WHERE businessType IN ('SHOPEE','WHPP') AND shipmentCode IN (${placeholders})
+      UNION ALL
+      SELECT 'FINAL',shipmentCode,rawJson,'',primaryCategory,isPod,'','',3,updatedAt FROM final_rows WHERE shipmentCode IN (${placeholders})
+      UNION ALL
+      SELECT 'CURRENT',shipmentCode,stateJson,state,'',0,'','',4,updatedAt FROM shipment_current_state WHERE shipmentCode IN (${placeholders})
+      ORDER BY shipmentCode,priority,updatedAt
+    `).all(...batch,...batch,...batch,...batch);
+    for(const row of rows){
+      const payload=safe(row.payloadJson);
+      if(row.source==='CARRY')absorb(row.shipmentCode,{...payload,state:row.closeReason||'',closeReason:row.closeReason||'',carryStatus:row.carryStatus||''},2);
+      else if(row.source==='CURRENT')absorb(row.shipmentCode,{...payload,state:row.state||'',currentState:row.state||''},4);
+      else absorb(row.shipmentCode,{...payload,primaryCategory:row.category||'',isPod:row.isPod},3);
     }
   }
   return map;
 }
+
+function loadTerminalAuthority(bills=[]){
+  const db=getDb();
+  if(!bills.length)return new Map();
+  if(jsonEachAvailable){
+    try{return loadTerminalAuthorityFast(db,bills);}catch(error){
+      if(/json_each|no such table|malformed JSON/i.test(String(error?.message||''))){jsonEachAvailable=false;fastAuthorityStatement=null;}
+      else throw error;
+    }
+  }
+  return loadTerminalAuthorityFallback(db,bills);
+}
+
 function safe(value){try{return typeof value==='object'&&value?value:JSON.parse(String(value||'{}'));}catch{return {};}}
 function terminalTruth(row={}){
   const state=String(row.currentState||row.state||'').toUpperCase();const close=String(row.closeReason||'').toUpperCase();const cat=String(row.primaryCategory||row.主分类||row.异常分类||'').toUpperCase();const order=String(row.orderStatus??row.scanOrderStatus??'').trim();
@@ -85,4 +154,4 @@ function patchState(state,authority){if(!state)return;const tabs=state.detailTab
 }
 function compactRange(range){for(const state of [...Object.values(range.states||{}),...Object.values(range.aggregates||{})]){if(!state)continue;state.finalRows=[];for(const tabs of [state.detailTabs,state.dashboard?.detailTabs]){if(!tabs)continue;for(const [key,value] of Object.entries(tabs)){if(!value||!Array.isArray(value.rows))continue;if(key==='dashboard')value.rows=value.rows.slice(0,100);else if(['coreAbnormal','abnormal','severeAbnormal'].includes(key))value.rows=value.rows.slice(0,300);else value.rows=[];}}}}
 
-export const __test={collectRangeBills,terminalTruth};
+export const __test={collectRangeBills,terminalTruth,loadTerminalAuthority};
