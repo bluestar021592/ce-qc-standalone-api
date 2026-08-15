@@ -11,7 +11,7 @@
     "start:production": "set NODE_ENV=production&& node bootstrap.js",
     "test": "node --test --test-reporter=tap --test-skip-pattern=\"desktop root start no longer|due-only endpoint cannot refresh|internal refresh bypass is restricted\" test/*.test.js",
     "test:full": "npm test",
-    "test:golive": "node --test --test-reporter=dot test/v126-stable-candidate-gate.test.js"
+    "test:golive": "node --test --test-reporter=dot test/v126-stable-candidate-gate.test.js test/v137-whpp-unified-business-state.test.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
