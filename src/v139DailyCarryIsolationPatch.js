@@ -16,7 +16,7 @@ import { classifyScanTerminal } from './scanTerminal.js';
 import { getShopCodeMap } from './shopCodes.js';
 import { isSpecialCategory } from './specialNode.js';
 
-const PATCH_ID = '2026-08-16-v139-daily-carry-isolation-v1';
+const PATCH_ID = '2026-08-16-v139-daily-carry-isolation-v2';
 const DAILY_RUN_ROUTES = new Set(['/api/run', '/api/run/start', '/api/resume', '/api/run/resume']);
 const SHOPEE_RUN_ROUTES = new Set(['/api/shopee/run/start', '/api/shopee/run/resume']);
 const CCSL_TYPES = new Set(['CE', 'CEAF', 'TBKH', 'ALI1688']);
@@ -112,9 +112,6 @@ function buildImportCarryDisplay(saved = {}, reportDate = '') {
     todayOpen,
     historicalOpen: separate.historicalOpen,
     rechecked: 0,
-    // V139: this field is rendered as “当前处理队列”. It intentionally means
-    // today's queue only. Historical carry is displayed separately and never joins
-    // the automatic daily run.
     currentOpen: todayOpen,
     historicalSeparate: true,
     cumulativeHistorical: separate.cumulativeHistorical,
@@ -125,7 +122,9 @@ function buildImportCarryDisplay(saved = {}, reportDate = '') {
 async function fastUnifiedImport(req, res) {
   try {
     if (!req.file) throw new Error('没有收到综合日报Excel文件');
-    const parsed = parseUnifiedDailyExcel(req.file.path, {
+    // V102 has already parsed and validated this workbook before persistence.
+    // Reuse that exact object to avoid reading/classifying the same Excel twice.
+    const parsed = req.ceQcParsedUnified || parseUnifiedDailyExcel(req.file.path, {
       reportDate: req.body?.reportDate || '',
       originalName: req.file.originalname
     });
@@ -133,9 +132,6 @@ async function fastUnifiedImport(req, res) {
     const ccslRows = parsed.rows.filter(row => CCSL_TYPES.has(row.businessType));
     const shopeeRows = parsed.rows.filter(row => SHOPEE_TYPES.has(row.businessType));
 
-    // Daily processing is intentionally isolated from historical carry. The
-    // historical queue remains in carryover_open_items and is handled only by the
-    // V139 manual carry window.
     const ccslState = clearDailyRunResults(await loadState());
     ccslState.reportDate = parsed.reportDate;
     ccslState.sourceName = req.file.originalname;
@@ -188,7 +184,7 @@ async function fastUnifiedImport(req, res) {
       carryover: buildImportCarryDisplay(saved, parsed.reportDate),
       state: compactImportedState(ccslState, 'CCSL'),
       shopeeState: compactImportedState(shopeeState, 'SHOPEE'),
-      dailyIsolation: { enabled: true, historicalCarryInDailyRun: 0, patchId: PATCH_ID }
+      dailyIsolation: { enabled: true, historicalCarryInDailyRun: 0, parseReusedFromSafetyGate: Boolean(req.ceQcParsedUnified), patchId: PATCH_ID }
     });
   } catch (error) {
     if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
@@ -199,12 +195,9 @@ async function fastUnifiedImport(req, res) {
 async function isolateCcslCarry(req, res, next) {
   try {
     const state = await loadState();
-    if ((state.carryBills || []).length || (state.priorCarryRows || []).length) {
+    if ((state.carryBills || []).length || (state.priorCarryRows || []).length || (state.nextCarryBills || []).length) {
       state.carryBills = [];
       state.priorCarryRows = [];
-      // nextCarryBills can contain current-day unresolved tickets from a partial run.
-      // They already exist in pnhBills, so removing this duplicate run source is safe;
-      // scanResults/trackResults checkpoints are preserved for resume.
       state.nextCarryBills = [];
       await saveState(state);
     }
@@ -215,7 +208,7 @@ async function isolateCcslCarry(req, res, next) {
 function isolateShopeeCarry(req, res, next) {
   try {
     const state = loadBusinessState(SHOPEE);
-    if ((state.carryBills || []).length || (state.priorCarryRows || []).length) {
+    if ((state.carryBills || []).length || (state.priorCarryRows || []).length || (state.nextCarryBills || []).length) {
       state.carryBills = [];
       state.priorCarryRows = [];
       state.nextCarryBills = [];
@@ -327,7 +320,6 @@ async function recheckHistoricalCarry(rows, reportDate) {
   const priorByBill = new Map(rows.map(row => [String(row.shipmentCode || '').trim().toUpperCase(), safeJson(row.stateJson, {})]));
   const businessByBill = new Map(rows.map(row => [String(row.shipmentCode || '').trim().toUpperCase(), String(row.businessType || '').trim().toUpperCase()]));
 
-  // V139 confirmQuery itself performs three final missing-waybill retry rounds.
   const confirmRows = await carryClient.confirmQuery(selected);
   const confirmByBill = groupRows(confirmRows);
   const scanFailed = new Set(selected.filter(bill => !(confirmByBill.get(bill) || []).length));
@@ -362,9 +354,6 @@ async function recheckHistoricalCarry(rows, reportDate) {
     try {
       eventRows = (await carryClient.trackQuery(trackBills)).map(row => ({ ...normalizeEvent(row), reportDate }));
     } catch (error) {
-      // The wrapped trackQuery already attempts each failed batch three more times.
-      // If it still fails, keep the selected tickets OPEN rather than inventing a
-      // business status.
       console.warn('[CE-QC][V139] carry track retry exhausted:', error?.message || error);
       for (const bill of trackBills) trackFailed.add(bill);
     }
@@ -420,7 +409,6 @@ async function recheckHistoricalCarry(rows, reportDate) {
   }
 
   const results = selected.map(bill => resultByBill.get(bill)).filter(Boolean);
-  // Never let a normal special terminal become an abnormal carry item.
   for (const row of results) {
     if (isSpecialCategory(row) || row.primaryCategory === '仓库自提') {
       row.API状态 = row.API状态 || '成功';
@@ -446,13 +434,12 @@ async function carryRecheckHandler(req, res) {
     const reportDate = latestUnifiedReportDate();
     if (!reportDate) return res.status(400).json({ ok: false, error: '暂无综合日报日期，无法确定跨日边界。' });
     const businessType = String(req.body?.businessType || 'ALL').toUpperCase();
-    const requested = cleanCodes(req.body?.shipmentCodes || []);
+    const requested = cleanCodes(req.body?.shipmentCodes || []).slice(0, MANUAL_LIMIT_MAX);
     let sourceRows;
     if (requested.length) {
       const placeholders = requested.map(() => '?').join(',');
-      const dbRows = getDb().prepare(`SELECT shipmentCode,businessType,sourceReportDate,lastReportDate,status,apiStatus,closeReason,stateJson,updatedAt
-        FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate<? AND shipmentCode IN (${placeholders})`).all(reportDate, ...requested.slice(0, MANUAL_LIMIT_MAX));
-      sourceRows = dbRows;
+      sourceRows = getDb().prepare(`SELECT shipmentCode,businessType,sourceReportDate,lastReportDate,status,apiStatus,closeReason,stateJson,updatedAt
+        FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate<? AND shipmentCode IN (${placeholders})`).all(reportDate, ...requested);
     } else {
       sourceRows = listHistoricalCarry({ reportDate, businessType, limit: Math.max(1, Math.min(MANUAL_LIMIT_MAX, Number(req.body?.limit || 200))) });
     }
@@ -481,8 +468,6 @@ express.application.post = function v139DailyCarryPost(...args) {
   const route = String(args[0] || '');
   if (route === '/api/import/unified-daily-report' && args.length >= 2) {
     const handlers = args.slice(1);
-    // Keep multer/auth middleware but replace only the old heavy handler that loaded
-    // the whole historical processing queue into both daily runtime states.
     handlers[handlers.length - 1] = fastUnifiedImport;
     return previousPost.apply(this, [args[0], ...handlers]);
   }
