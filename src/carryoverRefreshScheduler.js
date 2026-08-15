@@ -1,6 +1,6 @@
 import { getDb, nowIso } from './db.js';
 import { CEClient } from './ceClient.js';
-import { runQcPipeline } from './pipeline.js';
+import { runQcPipeline } from './pipelineV137.js';
 import { runWhppPipeline } from './whppPipeline.js';
 import { updateCarryoverResults } from './unifiedImportStore.js';
 
