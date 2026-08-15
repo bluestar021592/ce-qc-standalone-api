@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V143_HOME_TRUTH_ID='2026-08-15-v143-home-source-truth-v2';
+export const V143_HOME_TRUTH_ID='2026-08-15-v145-shopee-special-attempt-truth-v3';
 const CORE_TYPES=new Set(['CE','CEAF','TBKH','ALI1688','WHPP']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 
@@ -12,6 +12,27 @@ function positive(...values){for(const value of values){const n=Number(value);if
 function yes(value){return value===true||value===1||/^(?:1|true|yes|是|有|异常)$/i.test(String(value||'').trim());}
 function rate(n,d){return d?Number((Number(n||0)*100/Number(d)).toFixed(2)):0;}
 function clampAttempt(value){const n=Math.trunc(Number(value||0));return n>0?Math.max(1,Math.min(3,n)):0;}
+function normalizeDate(value=''){
+  const match=String(value||'').match(/(20\d{2})[-\/]?(\d{2})[-\/]?(\d{2})/);
+  return match?`${match[1]}-${match[2]}-${match[3]}`:'';
+}
+function findPodDateInObject(value,depth=0){
+  if(!value||depth>5)return'';
+  if(Array.isArray(value)){
+    for(const item of value){const found=findPodDateInObject(item,depth+1);if(found)return found;}
+    return'';
+  }
+  if(typeof value!=='object')return'';
+  const preferred=/^(?:podTime|podAt|podDate|deliveredAt|deliveredTime|deliveryCompleteTime|deliveryCompletedAt|signTime|signedTime|signedAt|finishTime|proofOfDeliveryTime|签收时间|妥投时间|POD时间|派送完成时间)$/i;
+  for(const [key,item] of Object.entries(value)){
+    if(preferred.test(String(key))){const date=normalizeDate(item);if(date)return date;}
+  }
+  for(const item of Object.values(value)){
+    if(item&&typeof item==='object'){const found=findPodDateInObject(item,depth+1);if(found)return found;}
+  }
+  return'';
+}
+function podDateFromSources(...sources){for(const source of sources){const found=findPodDateInObject(source);if(found)return found;}return'';}
 
 function latestSnapshot(date){
   return getDb().prepare(`
@@ -31,7 +52,9 @@ function sourceRows(snapshot){
       COALESCE(bf.primaryCategory,f.primaryCategory,'') primaryCategory,
       COALESCE(bf.rawJson,f.rawJson,u.rowJson,'{}') rawJson,
       COALESCE(bf.podAttemptNo,0) podAttemptNo,
-      COALESCE(bf.currentAttemptNo,0) currentAttemptNo
+      COALESCE(bf.currentAttemptNo,0) currentAttemptNo,
+      COALESCE(sr.rawJson,'{}') scanJson,
+      COALESCE(st.rawJson,'{}') shipmentJson
     FROM unified_import_rows u
     LEFT JOIN final_rows f
       ON u.businessType IN ('CE','CEAF','TBKH','ALI1688')
@@ -40,6 +63,12 @@ function sourceRows(snapshot){
       ON bf.shipmentCode=u.shipmentCode AND bf.reportDate=u.reportDate
      AND ((u.businessType IN ('SHOPEECN','SHOPEEVN') AND bf.businessType='SHOPEE')
        OR (u.businessType='WHPP' AND bf.businessType='WHPP'))
+    LEFT JOIN business_scan_results sr
+      ON u.businessType IN ('SHOPEECN','SHOPEEVN')
+     AND sr.businessType='SHOPEE' AND sr.shipmentCode=u.shipmentCode AND sr.reportDate=u.reportDate
+    LEFT JOIN business_shipment_tracks st
+      ON u.businessType IN ('SHOPEECN','SHOPEEVN')
+     AND st.businessType='SHOPEE' AND st.shipmentCode=u.shipmentCode AND st.reportDate=u.reportDate
     WHERE u.snapshotId=?
     ORDER BY u.businessType,u.shipmentCode
   `).all(snapshot.snapshotId);
@@ -65,13 +94,13 @@ function trackAttempts(date){
 }
 
 function truth(row){
-  const raw=safe(row.rawJson);
-  const state=String(raw.currentState||raw.state||'').toUpperCase();
+  const raw=safe(row.rawJson),scan=safe(row.scanJson),shipment=safe(row.shipmentJson);
+  const state=String(raw.currentState||raw.state||scan.currentState||shipment.currentState||'').toUpperCase();
   const category=String(row.primaryCategory||raw.primaryCategory||raw.主分类||raw.异常分类||'');
   const categoryUpper=category.toUpperCase();
-  const order=String(raw.orderStatus??raw.scanOrderStatus??'').trim();
-  const pod=Number(row.isPod||0)===1||raw.是否POD==='是'||raw.POD状态==='POD'||order==='85'||state==='POD';
-  const returned=order==='100'||raw.退回状态==='已退回'||['RETURNED','RETURN_COMPLETED'].includes(state)||/退回|RETURN/.test(categoryUpper);
+  const order=String(raw.orderStatus??scan.orderStatus??shipment.orderStatus??raw.scanOrderStatus??'').trim();
+  const pod=Number(row.isPod||0)===1||raw.是否POD==='是'||scan.是否POD==='是'||raw.POD状态==='POD'||order==='85'||state==='POD';
+  const returned=order==='100'||raw.退回状态==='已退回'||scan.退回状态==='已退回'||['RETURNED','RETURN_COMPLETED'].includes(state)||/退回|RETURN/.test(categoryUpper);
   const cancelled=order==='10'||raw.订单取消==='是'||raw.取消状态==='已取消'||state==='ORDER_CANCELLED'||/订单取消|CANCEL/.test(categoryUpper);
   const special=['SELF_PICKUP','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','CCSL580_RETENTION','CECN_RETENTION','CEZT_RETENTION','NORMAL_FINAL','NORMAL_FINAL_HUB'].includes(state)
     ||/SELF_PICKUP|CCSLCN_DIVERSION|CCSLZT_DIVERSION|580_RETENTION|580_DIVERSION|CECN_RETENTION|CEZT_RETENTION|正常闭环/.test(categoryUpper);
@@ -86,8 +115,8 @@ function truth(row){
   const inboundNoScan=!closed&&(yes(raw.入库无扫描节点)||yes(raw.inboundNoScan)||/入库无扫描/.test(category));
   const storeRetention=!closed&&['SHOP_ARRIVED_CURRENT','SHOP_TRANSFER_IN_PROGRESS'].includes(shopState)&&shopRetentionDays>=2;
   const attempt=clampAttempt(positive(row.podAttemptNo,row.currentAttemptNo,raw.podAttemptNo,raw.currentAttemptNo,raw.dispatchAttemptNo,raw.POD派次));
-  const podDate=String(raw.POD时间||raw.podTime||raw.podClosedAt||raw.terminalObservedAt||raw.latestEventTime||'').slice(0,10).replaceAll('/','-');
-  return {raw,pod,returned,cancelled,special,closed,pendingDays,ocDays,cycleDays,pendingNonContinuous,workOrder,inboundNoScan,storeRetention,attempt,podDate};
+  const podDate=podDateFromSources(raw,shipment,scan);
+  return {raw,scan,shipment,pod,returned,cancelled,special,closed,pendingDays,ocDays,cycleDays,pendingNonContinuous,workOrder,inboundNoScan,storeRetention,attempt,podDate};
 }
 
 function fallbackAttempt(date,podDate){
@@ -123,6 +152,19 @@ function coreSummary(rows){
   };
 }
 
+function shopeeSpecialSummary(rows){
+  const result={CN:{total:0,pendingNonContinuous:0,returned:0},VN:{total:0,pendingNonContinuous:0,returned:0}};
+  for(const row of rows){
+    const type=String(row.businessType||'').toUpperCase();
+    if(!SHOPEE_TYPES.has(type))continue;
+    const key=type==='SHOPEECN'?'CN':'VN';
+    const item=truth(row);result[key].total++;
+    if(item.pendingNonContinuous)result[key].pendingNonContinuous++;
+    if(item.returned)result[key].returned++;
+  }
+  return result;
+}
+
 function dispatchSummary(rows,date){
   const tracks=trackAttempts(date);
   const keys=['CN-PP','CN-PV','VN-PP','VN-PV'];
@@ -153,15 +195,15 @@ function handler(req,res){
     const date=dateOnly(req.query.reportDate);
     if(!date)return res.status(400).json({ok:false,patchId:V143_HOME_TRUTH_ID,error:'日期无效'});
     const snapshot=latestSnapshot(date);
-    if(!snapshot)return res.json({ok:true,patchId:V143_HOME_TRUTH_ID,reportDate:date,available:false,core:null,dispatch:{}});
+    if(!snapshot)return res.json({ok:true,patchId:V143_HOME_TRUTH_ID,reportDate:date,available:false,core:null,special:null,dispatch:{}});
     const rows=sourceRows(snapshot);
     const counts={CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0};
     for(const row of rows){const type=String(row.businessType||'').toUpperCase();if(Object.hasOwn(counts,type))counts[type]++;}
     const total=Object.values(counts).reduce((sum,value)=>sum+value,0);
     res.setHeader('Cache-Control','private, max-age=5');
-    res.json({ok:true,patchId:V143_HOME_TRUTH_ID,reportDate:date,available:true,snapshotId:snapshot.snapshotId,total,counts,core:coreSummary(rows),dispatch:dispatchSummary(rows,date)});
-  }catch(error){console.error('[CE-QC][V143][HOME_TRUTH]',error?.stack||error);res.status(500).json({ok:false,patchId:V143_HOME_TRUTH_ID,error:error?.message||String(error)});}
+    res.json({ok:true,patchId:V143_HOME_TRUTH_ID,reportDate:date,available:true,snapshotId:snapshot.snapshotId,total,counts,core:coreSummary(rows),special:shopeeSpecialSummary(rows),dispatch:dispatchSummary(rows,date)});
+  }catch(error){console.error('[CE-QC][V145][HOME_TRUTH]',error?.stack||error);res.status(500).json({ok:false,patchId:V143_HOME_TRUTH_ID,error:error?.message||String(error)});}
 }
 
 const previousListen=express.application.listen;let installed=false;
-express.application.listen=function v143HomeTruthListen(...args){if(!installed){installed=true;this.get('/api/v143/home-truth',handler);}return previousListen.apply(this,args);};
+express.application.listen=function v145HomeTruthListen(...args){if(!installed){installed=true;this.get('/api/v143/home-truth',handler);}return previousListen.apply(this,args);};
