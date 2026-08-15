@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { repairUnifiedSnapshotCompletion } from './v142UnifiedSnapshotRepairPatch.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v148-cross-day-attempt-evidence-v8';
+export const V137_TREND_TRUTH_ID='2026-08-15-v148-cross-day-attempt-evidence-v9';
 const BUSINESSES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const TYPES=new Set([...BUSINESSES,'CCSL','SHOPEE','TOTAL']);
 const CORE=['CE','CEAF','TBKH','ALI1688'];
@@ -122,13 +122,14 @@ function sourceRows(fromDate,toDate,type){
     )`:'';
   const trackSelect=needsShopeeAttempts?'COALESCE(ta.attemptCount,0)':'0';
   const trackJoin=needsShopeeAttempts?'LEFT JOIN track_attempts ta ON ta.sourceReportDate=v.reportDate AND ta.shipmentCode=UPPER(TRIM(v.shipmentCode))':'';
-  const podSelect=needsShopeeAttempts?"COALESCE(pf.evidenceDate,''),COALESCE(pf.evidenceJson,'{}'),COALESCE(pf.evidenceSource,''),COALESCE(pl.podTime,'')":"'','{}','',''";
+  const podSelect=needsShopeeAttempts
+    ? "COALESCE(pf.evidenceDate,'') firstPodObservedDate,COALESCE(pf.evidenceJson,'{}') firstPodEvidenceJson,COALESCE(pf.evidenceSource,'') firstPodEvidenceSource,COALESCE(pl.podTime,'') podLockTime"
+    : "'' firstPodObservedDate,'{}' firstPodEvidenceJson,'' firstPodEvidenceSource,'' podLockTime";
   const podJoin=needsShopeeAttempts?"LEFT JOIN pod_first pf ON pf.sourceReportDate=v.reportDate AND pf.shipmentCode=UPPER(TRIM(v.shipmentCode)) LEFT JOIN business_pod_locks pl ON pl.businessType='SHOPEE' AND UPPER(TRIM(pl.shipmentCode))=UPPER(TRIM(v.shipmentCode))":'';
   const scanSelect=needsShopeeAttempts?"COALESCE(sr.rawJson,'{}')":"'{}'";
   const shipmentSelect=needsShopeeAttempts?"COALESCE(st.rawJson,'{}')":"'{}'";
   const scanJoin=needsShopeeAttempts?"LEFT JOIN business_scan_results sr ON sr.businessType='SHOPEE' AND sr.shipmentCode=v.shipmentCode AND sr.reportDate=v.reportDate":'';
   const shipmentJoin=needsShopeeAttempts?"LEFT JOIN business_shipment_tracks st ON st.businessType='SHOPEE' AND st.shipmentCode=v.shipmentCode AND st.reportDate=v.reportDate":'';
-  const params=[fromDate,toDate,...scope];
   return getDb().prepare(`
     WITH ranked AS (
       SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
@@ -165,20 +166,7 @@ function sourceRows(fromDate,toDate,type){
     ${shipmentJoin}
     LEFT JOIN shipment_current_state c ON c.shipmentCode=v.shipmentCode
     ORDER BY v.reportDate,v.businessType,v.shipmentCode
-  `).all(...params).map(row=>{
-    // Dynamic podSelect fields are unnamed expressions in SQLite. Normalize the
-    // four columns by reading their generated keys in stable SELECT order.
-    if(!needsShopeeAttempts)return {...row,firstPodObservedDate:'',firstPodEvidenceJson:'{}',firstPodEvidenceSource:'',podLockTime:''};
-    const keys=Object.keys(row);
-    const dynamic=keys.filter(key=>/COALESCE\(pf\.|COALESCE\(pl\./.test(key));
-    return {
-      ...row,
-      firstPodObservedDate:row.firstPodObservedDate||row[dynamic[0]]||'',
-      firstPodEvidenceJson:row.firstPodEvidenceJson||row[dynamic[1]]||'{}',
-      firstPodEvidenceSource:row.firstPodEvidenceSource||row[dynamic[2]]||'',
-      podLockTime:row.podLockTime||row[dynamic[3]]||''
-    };
-  });
+  `).all(fromDate,toDate,...scope);
 }
 
 function terminalTruth(row={}){
