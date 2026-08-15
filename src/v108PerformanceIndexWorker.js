@@ -2,7 +2,7 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import { closeDb, getDb, getRuntimeConfig, nowIso } from './db.js';
 
-const PATCH_ID='2026-08-14-v108-deferred-query-index-worker-v2';
+const PATCH_ID='2026-08-15-v137-deferred-query-index-worker-v3';
 const READY_KEY='v108_performance_indexes_ready';
 const PURGE_KEY='data_purge_block_until';
 const LARGE_DB_BYTES=Math.max(256*1024*1024,Number(process.env.V108_LARGE_DB_DEFER_BYTES||768*1024*1024));
@@ -15,7 +15,11 @@ const INDEXES=[
   ['idx_v108_business_scan_report_type',`CREATE INDEX IF NOT EXISTS idx_v108_business_scan_report_type ON business_scan_results(reportDate,businessType,shipmentCode,isPod,orderStatus)`],
   ['idx_v108_business_daily_report_type',`CREATE INDEX IF NOT EXISTS idx_v108_business_daily_report_type ON business_daily_parse_rows(reportDate,businessType,shipmentCode)`],
   ['idx_v108_metric_detail_lookup',`CREATE INDEX IF NOT EXISTS idx_v108_metric_detail_lookup ON metric_detail_members(snapshotId,businessType,metricKey,shipmentCode)`],
-  ['idx_v108_current_business_date',`CREATE INDEX IF NOT EXISTS idx_v108_current_business_date ON shipment_current_state(businessType,reportDate,shipmentCode)`]
+  ['idx_v108_current_business_date',`CREATE INDEX IF NOT EXISTS idx_v108_current_business_date ON shipment_current_state(businessType,reportDate,shipmentCode)`],
+  ['idx_v137_current_bill',`CREATE INDEX IF NOT EXISTS idx_v137_current_bill ON shipment_current_state(shipmentCode)`],
+  ['idx_v137_carry_bill_status',`CREATE INDEX IF NOT EXISTS idx_v137_carry_bill_status ON carryover_open_items(shipmentCode,status,updatedAt)`],
+  ['idx_v137_final_bill_updated',`CREATE INDEX IF NOT EXISTS idx_v137_final_bill_updated ON final_rows(shipmentCode,updatedAt)`],
+  ['idx_v137_business_final_bill_updated',`CREATE INDEX IF NOT EXISTS idx_v137_business_final_bill_updated ON business_final_rows(shipmentCode,businessType,updatedAt)`]
 ];
 
 function activeBusinessWrite(db){
