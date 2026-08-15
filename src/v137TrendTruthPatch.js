@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { repairUnifiedSnapshotCompletion } from './v142UnifiedSnapshotRepairPatch.js';
 
-export const V137_TREND_TRUTH_ID='2026-08-15-v142-track-attempt-and-snapshot-repair-v6';
+export const V137_TREND_TRUTH_ID='2026-08-15-v145-scan-shipment-attempt-recovery-v7';
 const BUSINESSES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const TYPES=new Set([...BUSINESSES,'CCSL','SHOPEE','TOTAL']);
 const CORE=['CE','CEAF','TBKH','ALI1688'];
@@ -17,6 +17,27 @@ function nullableNum(...values){for(const value of values){if(value===null||valu
 function positiveNum(...values){for(const value of values){const n=Number(value);if(Number.isFinite(n)&&n>0)return n;}return 0;}
 function rate(n,d){return d?Number((num(n)*100/num(d)).toFixed(2)):0;}
 function clampAttempt(value){const n=Math.trunc(num(value));return n>0?Math.max(1,Math.min(3,n)):0;}
+function normalizeDate(value=''){
+  const match=String(value||'').match(/(20\d{2})[-\/]?(\d{2})[-\/]?(\d{2})/);
+  return match?`${match[1]}-${match[2]}-${match[3]}`:'';
+}
+function findPodDateInObject(value,depth=0){
+  if(!value||depth>5)return'';
+  if(Array.isArray(value)){
+    for(const item of value){const found=findPodDateInObject(item,depth+1);if(found)return found;}
+    return'';
+  }
+  if(typeof value!=='object')return'';
+  const preferred=/^(?:podTime|podAt|podDate|deliveredAt|deliveredTime|deliveryCompleteTime|deliveryCompletedAt|signTime|signedTime|signedAt|finishTime|proofOfDeliveryTime|签收时间|妥投时间|POD时间|派送完成时间)$/i;
+  for(const [key,item] of Object.entries(value)){
+    if(preferred.test(String(key))){const date=normalizeDate(item);if(date)return date;}
+  }
+  for(const item of Object.values(value)){
+    if(item&&typeof item==='object'){const found=findPodDateInObject(item,depth+1);if(found)return found;}
+  }
+  return'';
+}
+function podDateFromSources(...sources){for(const source of sources){const found=findPodDateInObject(source);if(found)return found;}return'';}
 
 function scopeBusinessTypes(type){
   if(type==='TOTAL')return BUSINESSES;
@@ -65,6 +86,10 @@ function sourceRows(fromDate,toDate,type){
     )`:'';
   const trackSelect=needsShopeeAttempts?'COALESCE(ta.attemptCount,0)':'0';
   const trackJoin=needsShopeeAttempts?'LEFT JOIN track_attempts ta ON ta.reportDate=v.reportDate AND ta.shipmentCode=UPPER(TRIM(v.shipmentCode))':'';
+  const scanSelect=needsShopeeAttempts?"COALESCE(sr.rawJson,'{}')":"'{}'";
+  const shipmentSelect=needsShopeeAttempts?"COALESCE(st.rawJson,'{}')":"'{}'";
+  const scanJoin=needsShopeeAttempts?"LEFT JOIN business_scan_results sr ON sr.businessType='SHOPEE' AND sr.shipmentCode=v.shipmentCode AND sr.reportDate=v.reportDate":'';
+  const shipmentJoin=needsShopeeAttempts?"LEFT JOIN business_shipment_tracks st ON st.businessType='SHOPEE' AND st.shipmentCode=v.shipmentCode AND st.reportDate=v.reportDate":'';
   const params=[fromDate,toDate,...scope,...(needsShopeeAttempts?[fromDate,toDate]:[])];
   return getDb().prepare(`
     WITH ranked AS (
@@ -86,6 +111,8 @@ function sourceRows(fromDate,toDate,type){
       COALESCE(bf.podAttemptNo,0) finalPodAttemptNo,
       COALESCE(bf.currentAttemptNo,0) finalCurrentAttemptNo,
       ${trackSelect} trackAttemptCount,
+      ${scanSelect} scanJson,
+      ${shipmentSelect} shipmentJson,
       COALESCE(c.state,'') currentState,COALESCE(c.stateJson,'{}') currentJson
     FROM valid v
     LEFT JOIN final_rows cf
@@ -94,6 +121,8 @@ function sourceRows(fromDate,toDate,type){
       ON bf.shipmentCode=v.shipmentCode AND bf.reportDate=v.reportDate
      AND ((v.businessType IN ('SHOPEECN','SHOPEEVN') AND bf.businessType='SHOPEE') OR (v.businessType='WHPP' AND bf.businessType='WHPP'))
     ${trackJoin}
+    ${scanJoin}
+    ${shipmentJoin}
     LEFT JOIN shipment_current_state c ON c.shipmentCode=v.shipmentCode
     ORDER BY v.reportDate,v.businessType,v.shipmentCode
   `).all(...params);
@@ -117,22 +146,15 @@ function attemptFromSource(source={}){
   return 0;
 }
 
-function attemptDateFromSource(source={}){
-  const raw=source.POD时间||source.podTime||source.podClosedAt||source.terminalObservedAt||source.latestEventTime||'';
-  const stamp=String(raw).slice(0,10).replaceAll('/','-');
-  return /^\d{4}-\d{2}-\d{2}$/.test(stamp)?stamp:'';
-}
-
-function attemptOf(reportDate,current={},final={},trackAttemptCount=0){
-  for(const source of [current,final]){
+function attemptOf(reportDate,current={},final={},trackAttemptCount=0,shipment={},scan={}){
+  for(const source of [current,final,shipment,scan]){
     const explicit=attemptFromSource(source);
     if(explicit)return explicit;
   }
   const trackAttempt=clampAttempt(trackAttemptCount);
   if(trackAttempt)return trackAttempt;
-  for(const source of [current,final]){
-    const stamp=attemptDateFromSource(source);
-    if(!stamp)continue;
+  const stamp=podDateFromSources(final,shipment,scan,current);
+  if(stamp){
     const start=Date.parse(`${reportDate}T00:00:00Z`),end=Date.parse(`${stamp}T00:00:00Z`);
     if(Number.isFinite(start)&&Number.isFinite(end)&&end>=start)return clampAttempt(Math.floor((end-start)/86400000)+1);
   }
@@ -140,8 +162,7 @@ function attemptOf(reportDate,current={},final={},trackAttemptCount=0){
 }
 
 function decorate(row){
-  const rawFinal=safe(row.finalJson);
-  const rawCurrent=safe(row.currentJson);
+  const rawFinal=safe(row.finalJson),rawCurrent=safe(row.currentJson),rawScan=safe(row.scanJson),rawShipment=safe(row.shipmentJson);
   const persistedPodAttempt=positiveNum(row.finalPodAttemptNo,rawFinal.podAttemptNo);
   const persistedCurrentAttempt=positiveNum(row.finalCurrentAttemptNo,rawFinal.currentAttemptNo);
   const final={
@@ -152,13 +173,12 @@ function decorate(row){
     ...(persistedCurrentAttempt?{currentAttemptNo:persistedCurrentAttempt}:{})
   };
   const current={...rawCurrent,currentState:row.currentState};
-  const currentTerminal=terminalTruth(current);
-  const finalTerminal=terminalTruth(final);
-  const terminal=currentTerminal||finalTerminal;
+  const currentTerminal=terminalTruth(current),finalTerminal=terminalTruth(final),scanTerminal=terminalTruth(rawScan),shipmentTerminal=terminalTruth(rawShipment);
+  const terminal=currentTerminal||finalTerminal||scanTerminal||shipmentTerminal;
   const pod=terminal==='POD'||(!terminal&&Number(row.finalIsPod||0)===1);
   const closed=Boolean(terminal);
   const ocDays=closed?0:num(nullableNum(current.OC天数,current.ocDays,final.OC天数,final.ocDays));
-  const attempt=pod?attemptOf(row.reportDate,current,final,row.trackAttemptCount):0;
+  const attempt=pod?attemptOf(row.reportDate,current,final,row.trackAttemptCount,rawShipment,rawScan):0;
   return {...row,pod,closed,terminal,ocDays,attempt,attemptUnknown:pod&&!attempt?1:0};
 }
 
@@ -174,7 +194,7 @@ function build(type,dates,rows){
   }
   const ticket=[],podRate=[],ocRate=[],firstRate=[],attempt1=[],attempt2=[],attempt3=[],attempt1Count=[],attempt2Count=[],attempt3Count=[],attemptDenominator=[],attemptUnknownPod=[],attemptKnownPod=[],attemptCoverage=[];
   for(const date of dates){
-    const d=byDate.get(date);const evidence=d.a1+d.a2+d.a3;const hasEvidence=evidence>0;
+    const d=byDate.get(date),evidence=d.a1+d.a2+d.a3,hasEvidence=evidence>0;
     ticket.push(d.total);podRate.push(rate(d.pod,d.total));ocRate.push(rate(d.oc1,d.total));
     const a1=d.pod===0?0:(hasEvidence?rate(d.a1,d.total):null);
     const a2=d.pod===0?0:(hasEvidence?rate(d.a2,d.total):null);
@@ -215,10 +235,10 @@ function handler(req,res){
     const entry=cacheEntry(type,from,to,dates);
     const requestedDateAvailable=dates.includes(to);
     res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=30');
-    res.setHeader('Server-Timing',`v142;desc=track-attempt-trend-${entry.cacheHit?'hit':'miss'};dur=0`);
-    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,requestedDateLifecycle:lifecycle,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_THEN_RAW_THEN_TRACK_EVENTS_THEN_POD_DATE',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
-  }catch(error){console.error('[CE-QC][V142][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
+    res.setHeader('Server-Timing',`v145;desc=scan-shipment-attempt-${entry.cacheHit?'hit':'miss'};dur=0`);
+    res.json({ok:true,patchId:V137_TREND_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:entry.actualFrom,toDate:entry.actualTo,requestedDateAvailable,requestedDateLifecycle:lifecycle,trendPolicy:from===to?'LAST_7_VALID_DAYS':'FULL_SELECTED_VALID_DAYS',attemptEvidencePolicy:'PERSISTED_ATTEMPT_THEN_TRACK_EVENTS_THEN_SHIPMENT_SCAN_POD_TIME',cacheHit:entry.cacheHit,sourceRowCount:entry.rowCount,queryScope:entry.queryScope,...entry.payload,...(entry.related?{related:entry.related}:{})});
+  }catch(error){console.error('[CE-QC][V145][TRENDS]',error?.stack||error);res.status(500).json({ok:false,patchId:V137_TREND_TRUTH_ID,error:error?.message||String(error)});}
 }
 
 const previousListen=express.application.listen;let installed=false;
-express.application.listen=function v142TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
+express.application.listen=function v145TrendTruthListen(...args){if(!installed){installed=true;this.get('/api/v137/trends',handler);}return previousListen.apply(this,args);};
