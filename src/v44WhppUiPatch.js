@@ -11,7 +11,7 @@ import './v134WhppRunSupervisorPatch.js';
 import './v135WhppPartialSnapshotPatch.js';
 import './v137WhppUnifiedBusinessStatePatch.js';
 
-const PATCH_ID='2026-08-15-v137-whpp-unified-business-state-v25';
+const PATCH_ID='2026-08-15-v136-run-start-unblock-v24+v137-whpp-unified-business-state-v1';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
