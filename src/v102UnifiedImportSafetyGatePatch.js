@@ -3,7 +3,7 @@ import express from 'express';
 import XLSX from 'xlsx';
 import { classifyUnifiedBusiness, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-14-v102-pre-persistence-import-safety-v1';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-16-v102-pre-persistence-import-safety-v2';
 const ROUTE = '/api/import/unified-daily-report';
 const WRAPPED = Symbol.for('ce-qc.v102-unified-import-safety');
 
@@ -148,6 +148,10 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
           parsed,
           manualReportDate: req.body?.reportDate || ''
         });
+        // V139 reuses this exact validated parse. This keeps the pre-persistence
+        // safety gate unchanged while eliminating a second full workbook parse in
+        // the final import handler.
+        req.ceQcParsedUnified = parsed;
         return finalHandler.call(this, req, res, next);
       } catch (error) {
         console.error('[CE-QC][V102_IMPORT_SAFETY]', error?.code || '', error?.message || error);
