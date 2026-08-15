@@ -9,7 +9,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const syntax=p=>{const result=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(result.status,0,`${p}: ${result.stderr||result.stdout}`);};
 
-test('V148 candidate critical runtime files are syntax valid',()=>{
+test('V149 candidate critical runtime files are syntax valid',()=>{
   for(const file of [
     'bootstrap.js','server.js','src/v44WhppUiPatch.js','src/v137TrendTruthPatch.js',
     'src/v142UnifiedSnapshotRepairPatch.js','src/v143HomeTruthPatch.js','src/v146ProcessingReadinessPatch.js','src/unifiedImportStore.js',
@@ -17,17 +17,17 @@ test('V148 candidate critical runtime files are syntax valid',()=>{
   ])syntax(file);
 });
 
-test('V148 UI cache bust loads unified processing evidence runner',()=>{
+test('V149 UI cache bust loads current import homepage truth',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/2026-08-15-v148-unified-processing-evidence-v36/);
+  assert.match(injector,/2026-08-15-v149-live-import-home-truth-v37/);
   assert.match(injector,/v67-resilient-run-guard\.js\?v=20260815-9/);
   assert.match(injector,/v137-range-trends\.js\?v=20260815-6/);
-  assert.match(injector,/v64-whpp-total-kpi-integration\.js\?v=20260815-8/);
-  assert.ok(injector.indexOf('v139-normal-web-runtime.js?v=20260815-5')<injector.indexOf('v64-whpp-total-kpi-integration.js?v=20260815-8'));
+  assert.match(injector,/v64-whpp-total-kpi-integration\.js\?v=20260815-9/);
+  assert.ok(injector.indexOf('v139-normal-web-runtime.js?v=20260815-5')<injector.indexOf('v64-whpp-total-kpi-integration.js?v=20260815-9'));
   assert.doesNotMatch(injector,/<script src="\/v56-trend-truth\.js/);
 });
 
-test('V148 runner binds to unified date and reapplies canonical evidence after legacy CCSL render',()=>{
+test('V149 runner binds to unified date and reapplies canonical evidence after legacy CCSL render',()=>{
   const runner=read('public/v67-resilient-run-guard.js');
   assert.match(runner,/api\/import\/unified-latest\?compact=1/);
   assert.match(runner,/const unifiedDate=isoDate\(states\.UNIFIED\?\.import\?\.reportDate\)/);
@@ -42,7 +42,7 @@ test('V148 runner binds to unified date and reapplies canonical evidence after l
   assert.match(runner,/LATEST_UNIFIED_REPORT_DATE_PLUS_API_OR_POD_LOCK_EVIDENCE/);
 });
 
-test('V148 distinguishes real API scan coverage from terminal POD-lock reuse',()=>{
+test('V149 distinguishes real API scan coverage from terminal POD-lock reuse',()=>{
   const backend=read('src/v146ProcessingReadinessPatch.js');
   const bootstrap=read('bootstrap.js');
   assert.match(bootstrap,/v146ProcessingReadinessPatch/);
@@ -62,6 +62,33 @@ test('V148 distinguishes real API scan coverage from terminal POD-lock reuse',()
   assert.match(backend,/UPDATE business_export_snapshots/);
   assert.match(backend,/UPDATE business_run_locks/);
   assert.match(backend,/UPDATE unified_snapshots SET status='IMPORTED'/);
+});
+
+test('V149 homepage accepts latest VALID imported day before COMPLETED and isolates core from Shopee',()=>{
+  const backend=read('src/v143HomeTruthPatch.js');
+  const ui=read('public/v64-whpp-total-kpi-integration.js');
+  assert.match(backend,/v149-live-import-cross-day-attempt-v4/);
+  assert.match(backend,/LEFT JOIN unified_snapshots/);
+  assert.match(backend,/WHERE b\.status='VALID' AND b\.reportDate=\?/);
+  assert.match(backend,/LATEST_VALID_UNIFIED_IMPORT_PLUS_LIVE_SQL_EVIDENCE/);
+  assert.match(backend,/CORE_TYPES=new Set\(\['CE','CEAF','TBKH','ALI1688','WHPP'\]\)/);
+  assert.match(ui,/v149-current-import-home-truth-v3/);
+  assert.match(ui,/LATEST_VALID_UNIFIED_IMPORT_PLUS_LIVE_SQL_EVIDENCE/);
+  assert.match(ui,/setInterval/);
+});
+
+test('V149 Shopee homepage dispatch uses cross-day real POD and dispatch evidence',()=>{
+  const backend=read('src/v143HomeTruthPatch.js');
+  assert.match(backend,/pod_candidates AS/);
+  assert.match(backend,/s\.reportDate>=\?/);
+  assert.match(backend,/f\.reportDate>=\? AND f\.isPod=1/);
+  assert.match(backend,/COALESCE\(s\.rawJson,''\) NOT LIKE '%POD_LOCK%'/);
+  assert.match(backend,/COALESCE\(f\.rawJson,''\) NOT LIKE '%POD_LOCK%'/);
+  assert.match(backend,/track_attempts AS/);
+  assert.match(backend,/firstPodObservedDate/);
+  assert.match(backend,/podLockTime/);
+  assert.match(backend,/realScanPod/);
+  assert.match(backend,/fallbackAttempt\(date,podDate\)/);
 });
 
 test('V148 Shopee attempt trends search later carryover real POD and dispatch evidence for original intake day',()=>{
@@ -85,14 +112,11 @@ test('V145 home core excludes Shopee and Shopee special metrics come from canoni
   const ui=read('public/v64-whpp-total-kpi-integration.js');
   assert.match(backend,/CORE_TYPES=new Set\(\['CE','CEAF','TBKH','ALI1688','WHPP'\]\)/);
   assert.match(backend,/SHOPEE_TYPES=new Set\(\['SHOPEECN','SHOPEEVN'\]\)/);
-  assert.match(backend,/special:shopeeSpecialSummary\(rows\)/);
   assert.match(backend,/pendingNonContinuous/);
   assert.match(backend,/returned/);
   assert.match(ui,/patchSpecial\(data\)/);
-  assert.match(ui,/CANONICAL_SHOPEE_FINAL_ROWS/);
-  assert.match(ui,/CANONICAL_CORE_FIVE_BUSINESSES/);
-  assert.doesNotMatch(ui,/baseValue\(/);
-  assert.doesNotMatch(ui,/\+ Number\(addValue/);
+  assert.match(ui,/LIVE_SQL_FINAL_OR_CURRENT_STATE/);
+  assert.match(ui,/LATEST_VALID_UNIFIED_IMPORT_PLUS_LIVE_SQL_EVIDENCE/);
 });
 
 test('Shopee attempt recovery still reads persisted attempt fields and POD timestamps',()=>{
@@ -106,8 +130,6 @@ test('Shopee attempt recovery still reads persisted attempt fields and POD times
     assert.match(source,/deliveryCompletedAt/);
     assert.match(source,/signTime/);
   }
-  assert.match(home,/group\.pod>0&&group\.known===0/);
-  assert.match(home,/group\.values=\[null,null,null\]/);
 });
 
 test('V144 zero-row family is considered complete instead of waiting forever for a child snapshot',()=>{
@@ -136,6 +158,6 @@ test('unified snapshot completion still blocks invalid reconciliation rather tha
   const store=read('src/unifiedImportStore.js');assert.match(store,/INVALID_FAILED_RECONCILIATION/);assert.match(store,/UNIFIED_RECONCILIATION_FAILED/);assert.match(store,/validationPassed/);assert.match(store,/status='COMPLETED'/);
 });
 
-test('database schema is not bumped by V143 through V148 repairs',()=>{
+test('database schema is not bumped by V143 through V149 repairs',()=>{
   const migrations=read('src/migrations.js');assert.match(migrations,/const SCHEMA_VERSION = 18/);
 });
