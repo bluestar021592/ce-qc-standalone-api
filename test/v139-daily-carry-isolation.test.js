@@ -62,9 +62,12 @@ test('V139 exposes a separate manual carry queue and bounded 200-ticket recheck 
   assert.match(source, /\/api\/v139\/carryover\/recheck/);
   assert.match(source, /sourceReportDate</);
   assert.match(source, /MANUAL_LIMIT_MAX = 200/);
+  assert.match(ui, /v139-carry-manual-window-v2/);
   assert.match(ui, /跨日遗留独立处理/);
   assert.match(ui, /手动复查下一批200票/);
   assert.match(ui, /不再进入当日日报全自动/);
+  assert.match(ui, /currentOpen: todayOpen/);
+  assert.match(ui, /当日自动处理队列/);
 });
 
 test('V139 retries missing confirm rows and read-only trajectory requests at least three final rounds', () => {
@@ -80,5 +83,5 @@ test('V139 retries missing confirm rows and read-only trajectory requests at lea
 test('V139 manual carry UI is injected into the managed HTML build', () => {
   const injector = read('src/v44WhppUiPatch.js');
   assert.match(injector, /v138-ccsl-scan-progress\.js\?v=20260816-2/);
-  assert.match(injector, /v139-carry-manual-window\.js\?v=20260816-1/);
+  assert.match(injector, /v139-carry-manual-window\.js\?v=20260816-2/);
 });
