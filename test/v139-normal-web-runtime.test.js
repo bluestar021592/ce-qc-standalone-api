@@ -23,16 +23,18 @@ test('business renderer never probes processing APIs or blocks navigation after 
   assert.match(ui,/__CE_QC_DASHBOARD_V18_BASE__/);
 });
 
-test('current import bootstrap supplies seven business shells from classified totals instead of prior completed date',()=>{
+test('current import bootstrap decorates V43 light payload with seven classified business totals',()=>{
   const patch=read('src/v139InstantBootstrapPatch.js');
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(patch,/v27BootstrapHandler/);
+  assert.doesNotMatch(patch,/v27BootstrapHandler/);
+  assert.match(patch,/V43_LIGHT_BOOTSTRAP/);
   assert.match(patch,/SELECT businessType,COUNT\(DISTINCT shipmentCode\)/);
   assert.match(patch,/classificationCounts/);
+  assert.match(patch,/CACHE_MS=5_000/);
   for(const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'])assert.match(patch,new RegExp(type));
   assert.match(patch,/_instantImportShell:true/);
   assert.match(patch,/snapshotStatus:'PROCESSING'/);
-  assert.match(patch,/this\.route\(path\)\.get\(handler\)/);
+  assert.match(patch,/this\.route\(path\)\.get\(currentAware\(sourceHandler\)\)/);
   assert.match(injector,/v139InstantBootstrapPatch\.js/);
 });
 
