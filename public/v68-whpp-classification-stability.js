@@ -1,14 +1,31 @@
 (function installWhppClassificationStabilityV68(global) {
   if (global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__) return;
 
-  const VERSION = '2026-08-12-v68-whpp-classification-stability-v4';
+  const VERSION = '2026-08-15-v140-whpp-canonical-classification-v5';
   let scheduled = false;
 
+  const BUSINESS_KEYS = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const num = value => {
     const parsed = Number(String(value ?? '').replace(/[,\s]/g, ''));
     return Number.isFinite(parsed) ? parsed : 0;
   };
   const fmt = value => Number(value || 0).toLocaleString('zh-CN');
+
+  function importState() {
+    try {
+      if (typeof unifiedImportState !== 'undefined') return unifiedImportState;
+    } catch {}
+    return global.unifiedImportState || null;
+  }
+
+  function sourceTruthCounts() {
+    const state = importState();
+    const canonical = global.__CE_QC_CANONICAL_CLASSIFICATION__;
+    if (canonical?.counts && (!state?.reportDate || canonical.reportDate === state.reportDate)) return canonical.counts;
+    const counts = state?.classificationCounts;
+    if (counts && typeof counts === 'object' && BUSINESS_KEYS.some(key => Object.prototype.hasOwnProperty.call(counts, key))) return counts;
+    return null;
+  }
 
   function summaryRoot() {
     return document.getElementById('unifiedClassificationSummary');
@@ -44,11 +61,16 @@
   function deriveTruth() {
     const stats = rawStats();
     const rawUnique = Math.max(0, stats.rawRows - stats.duplicateRows - stats.missingWaybillRows);
-    const core = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']
-      .reduce((sum, label) => sum + readCardCount(label), 0);
-    const whppTotal = rawUnique >= core ? Math.max(0, rawUnique - core) : 0;
-    const fullUnique = rawUnique > 0 ? rawUnique : core + whppTotal;
-    return { rawUnique, core, whppTotal, fullUnique };
+    const counts = sourceTruthCounts();
+    if (counts) {
+      const core = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].reduce((sum, key) => sum + num(counts[key]), 0);
+      const whppTotal = num(counts.WHPP);
+      const fullUnique = BUSINESS_KEYS.reduce((sum, key) => sum + num(counts[key]), 0);
+      return { rawUnique, core, whppTotal, fullUnique: fullUnique || rawUnique, source: 'CANONICAL_COUNTS' };
+    }
+    const core = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].reduce((sum, label) => sum + readCardCount(label), 0);
+    const whppTotal = readCardCount('WHPP本土');
+    return { rawUnique, core, whppTotal, fullUnique: rawUnique || core + whppTotal, source: 'RENDERED_COUNTS_NO_GUESS' };
   }
 
   function isWhppCard(node) {
@@ -106,6 +128,7 @@
     patchStatus(truth);
     document.documentElement.dataset.v68WhppTotal = String(truth.whppTotal);
     document.documentElement.dataset.v68UnifiedTotal = String(truth.fullUnique);
+    document.documentElement.dataset.v68ClassificationSource = truth.source;
     return true;
   }
 
@@ -125,8 +148,6 @@
     if (typeof original === 'function' && !original.__v68WhppWrapped) {
       const wrapped = function () {
         const result = original.apply(this, arguments);
-        // Patch immediately from the already-rendered source counts. No API read,
-        // no delayed heavy request and no dependency on page navigation timing.
         normalize();
         schedule();
         return result;
@@ -135,8 +156,6 @@
       global.renderUnifiedImportResult = wrapped;
     }
 
-    // The initial render can occur before this compatibility script is installed.
-    // Observe only the import summary. Equality guards make our own writes inert.
     const observer = new MutationObserver(records => {
       if (records.some(record => record.target === summaryRoot() || record.target?.closest?.('#unifiedClassificationSummary'))) schedule();
     });
@@ -153,9 +172,10 @@
       pageObserver.observe(document.body, { childList: true, subtree: true });
     }
 
+    global.addEventListener('ce-qc-canonical-classification-ready', schedule);
     normalize();
     schedule();
-    console.info('[CE-QC][V68_WHPP_CLASSIFICATION_STABILITY]', VERSION);
+    console.info('[CE-QC][V140_WHPP_CLASSIFICATION_STABILITY]', VERSION);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
