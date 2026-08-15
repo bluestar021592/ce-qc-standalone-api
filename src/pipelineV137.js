@@ -1,7 +1,8 @@
 import { runQcPipeline as runQcPipelineLegacy, reconcileShopeeStateFromEvidence } from './pipeline.js';
+import { decorateLocationDimensions } from './locationDimensionsV137.js';
 
 export { reconcileShopeeStateFromEvidence };
-export const PIPELINE_V137_ID='2026-08-15-v137-scan-only-final-reconciliation-v2';
+export const PIPELINE_V137_ID='2026-08-15-v137-scan-only-final-reconciliation-v3';
 
 function billOf(row={}){return String(row.shipmentCode||row.运单号||row.waybill||'').trim().toUpperCase();}
 function unique(values=[]){return [...new Set((values||[]).map(value=>String(value||'').trim().toUpperCase()).filter(Boolean))];}
@@ -27,6 +28,14 @@ function holdRow(source={},scanRow={},bill=''){
     tags:tags(scanRow,'SCAN_STATUS_HOLD'),systemHold:true,API状态:'已跳过',查询状态:'scan_status_hold',QC判断:`扫描orderStatus=${status||'UNKNOWN'}不属于50/60/70开放轨迹状态；未调用CE轨迹接口，保留后台下一轮重新扫描`};
 }
 
+function decorateCoreRows(state={}){
+  if(isShopee(state))return state;
+  const daily=new Map((state.dailyParseRows||[]).map(row=>[billOf(row),row]));
+  state.finalRows=(state.finalRows||[]).map(row=>decorateLocationDimensions(row,daily.get(billOf(row))||{}));
+  state.trackResults=(state.trackResults||[]).map(row=>decorateLocationDimensions(row,daily.get(billOf(row))||{}));
+  return state;
+}
+
 export function reconcileCoreScanOnlyState(state={}){
   if(isShopee(state))return state;
   const scans=Array.isArray(state.scanResults)?state.scanResults:[];
@@ -39,20 +48,23 @@ export function reconcileCoreScanOnlyState(state={}){
     const scanState=String(scanRow.currentState||scanRow.scanNormalizedState||'').toUpperCase();
     if(!['ORDER_CANCELLED','SCAN_STATUS_HOLD'].includes(scanState))continue;
     const source=daily.get(bill)||{};
-    const row=scanState==='ORDER_CANCELLED'?cancellationRow(source,scanRow,bill):holdRow(source,scanRow,bill);
-    row.reportDate=state.reportDate||source.reportDate||'';
-    row.businessType=source.businessType||scanRow.businessType||'CCSL';
+    const raw=scanState==='ORDER_CANCELLED'?cancellationRow(source,scanRow,bill):holdRow(source,scanRow,bill);
+    raw.reportDate=state.reportDate||source.reportDate||'';
+    raw.businessType=source.businessType||scanRow.businessType||'CCSL';
+    const row=decorateLocationDimensions(raw,source);
     existing.set(bill,row);recovered++;
     if(scanState==='SCAN_STATUS_HOLD')holds.push(bill);
   }
 
-  if(!recovered)return state;
-  state.finalRows=[...existing.values()];
-  const currentCarry=unique(state.nextCarryBills?.length?state.nextCarryBills:state.carryBills||[]);
-  state.nextCarryBills=unique([...currentCarry,...holds]);
-  state.carryBills=[...state.nextCarryBills];
-  state.lastRunSummary={...(state.lastRunSummary||{}),nextCarry:state.nextCarryBills.length,scanOnlyRecovered:recovered,scanStatusHolds:holds.length,pipelineReconciliation:PIPELINE_V137_ID};
-  state.lastRun={...(state.lastRun||{}),...state.lastRunSummary};
+  if(recovered){
+    state.finalRows=[...existing.values()];
+    const currentCarry=unique(state.nextCarryBills?.length?state.nextCarryBills:state.carryBills||[]);
+    state.nextCarryBills=unique([...currentCarry,...holds]);
+    state.carryBills=[...state.nextCarryBills];
+    state.lastRunSummary={...(state.lastRunSummary||{}),nextCarry:state.nextCarryBills.length,scanOnlyRecovered:recovered,scanStatusHolds:holds.length,pipelineReconciliation:PIPELINE_V137_ID};
+    state.lastRun={...(state.lastRun||{}),...state.lastRunSummary};
+  }
+  decorateCoreRows(state);
   return state;
 }
 
