@@ -1,6 +1,10 @@
 import express from 'express';
 
 const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
+
+// Normal operation is interactive-first. Dashboard cache maintenance must never
+// compete with users every ten minutes on the same local SQLite file. Two hours
+// matches the QC refresh requirement; an empty cache warms only the recent week.
 if (!process.env.DASHBOARD_CACHE_REFRESH_MS) process.env.DASHBOARD_CACHE_REFRESH_MS = String(2 * 60 * 60 * 1000);
 if (!process.env.DASHBOARD_CACHE_WARM_DAYS) process.env.DASHBOARD_CACHE_WARM_DAYS = '7';
 if (!process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS) process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = '120000';
@@ -63,8 +67,11 @@ async function importServerInteractiveFirst() {
     }
     return nativeSetTimeout(callback, effectiveDelay, ...args);
   };
-  try { return await importPhase('server', './server.js'); }
-  finally { globalThis.setTimeout = nativeSetTimeout; }
+  try {
+    return await importPhase('server', './server.js');
+  } finally {
+    globalThis.setTimeout = nativeSetTimeout;
+  }
 }
 
 function scheduleDeferredMaintenance({ v92, v76Repair }) {
@@ -78,12 +85,16 @@ function scheduleDeferredMaintenance({ v92, v76Repair }) {
       const startedAt = Date.now();
       const result = v92.repairWhppTerminalAuthorityOnce();
       console.log(`[CE-QC][BACKGROUND] V92 WHPP terminal authority ${Date.now()-startedAt}ms ${JSON.stringify({skipped:Boolean(result.skipped),scanned:result.scanned,repaired:result.repaired,affectedDates:result.affectedDates})}`);
-    } catch (error) { console.error('[CE-QC][BACKGROUND] V92 maintenance failed:', error?.stack || error); }
+    } catch (error) {
+      console.error('[CE-QC][BACKGROUND] V92 maintenance failed:', error?.stack || error);
+    }
     try {
       const startedAt = Date.now();
       const result = v76Repair.repairLatestCeafSplit();
       console.log(`[CE-QC][BACKGROUND] V76 CEAF repair ${Date.now()-startedAt}ms ${JSON.stringify(result)}`);
-    } catch (error) { console.error('[CE-QC][BACKGROUND] V76 maintenance failed:', error?.stack || error); }
+    } catch (error) {
+      console.error('[CE-QC][BACKGROUND] V76 maintenance failed:', error?.stack || error);
+    }
   }, delayMs);
   timer.unref?.();
   console.log(`[CE-QC][BOOT] background maintenance explicitly enabled and deferred ${delayMs}ms; first paint is not blocked.`);
@@ -108,7 +119,6 @@ try {
   await importPhase('v102UnifiedImportSafetyGatePatch', './src/v102UnifiedImportSafetyGatePatch.js');
   await importPhase('v42WhppPatch', './src/v42WhppPatch.js');
   await importPhase('v44WhppUiPatch', './src/v44WhppUiPatch.js');
-  await importPhase('v153RuntimeBuildPatch', './src/v153RuntimeBuildPatch.js');
   await importPhase('v89StaticAssetCachePatch', './src/v89StaticAssetCachePatch.js');
   await importPhase('v43BootstrapPerfPatch', './src/v43BootstrapPerfPatch.js');
   await importPhase('v46ColdStartIndexPatch', './src/v46ColdStartIndexPatch.js');
@@ -127,12 +137,14 @@ try {
   await importPhase('v108PerformanceIndexPatch', './src/v108PerformanceIndexPatch.js');
   await importPhase('v94ShopeeWhppSourceTruthPatch', './src/v94ShopeeWhppSourceTruthPatch.js');
   await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
+
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
   await importPhase('v146ProcessingReadinessPatch', './src/v146ProcessingReadinessPatch.js');
+
   await importServerInteractiveFirst();
   scheduleDeferredMaintenance({ v92, v76Repair });
 } catch (error) {

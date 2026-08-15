@@ -9,125 +9,133 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 const syntax=p=>{const result=spawnSync(process.execPath,['--check',path.join(root,p)],{encoding:'utf8'});assert.equal(result.status,0,`${p}: ${result.stderr||result.stdout}`);};
 
-test('V156 import runtime JavaScript is syntax valid',()=>{
-  for(const file of ['src/v156SessionHotPathPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v150UnifiedImportFastRoutePatch.js','src/v153UnifiedImportQueue.js','src/v153UnifiedImportWorker.js','src/unifiedImportSafety.js','src/v153RuntimeBuildPatch.js','public/v150-import-fast-path.js','public/v153-build-sync.js'])syntax(file);
+test('V148 candidate critical runtime files are syntax valid',()=>{
+  for(const file of [
+    'bootstrap.js','server.js','src/v44WhppUiPatch.js','src/v137TrendTruthPatch.js',
+    'src/v142UnifiedSnapshotRepairPatch.js','src/v143HomeTruthPatch.js','src/v146ProcessingReadinessPatch.js','src/unifiedImportStore.js',
+    'public/v67-resilient-run-guard.js','public/v137-range-trends.js','public/v139-normal-web-runtime.js','public/v64-whpp-total-kpi-integration.js'
+  ])syntax(file);
 });
 
-test('V156 validated sessions are cached off the SQLite hot path',()=>{
-  const hot=read('src/v156SessionHotPathPatch.js');
-  const ingress=read('src/v102UnifiedImportSafetyGatePatch.js');
-  assert.match(ingress,/import '\.\/v156SessionHotPathPatch\.js'/);
-  assert.match(hot,/handler\.name!=='accessIdentity'/);
-  assert.match(hot,/ce_internal_session/);
-  assert.match(hot,/X-CE-QC-Session-Cache/);
-  assert.match(hot,/cacheExpiresAt/);
-  assert.doesNotMatch(hot,/getDb\(/);
-  assert.doesNotMatch(hot,/from '\.\/db\.js'/);
+test('V148 UI cache bust loads unified processing evidence runner',()=>{
+  const injector=read('src/v44WhppUiPatch.js');
+  assert.match(injector,/2026-08-15-v148-unified-processing-evidence-v36/);
+  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260815-9/);
+  assert.match(injector,/v137-range-trends\.js\?v=20260815-6/);
+  assert.match(injector,/v64-whpp-total-kpi-integration\.js\?v=20260815-8/);
+  assert.ok(injector.indexOf('v139-normal-web-runtime.js?v=20260815-5')<injector.indexOf('v64-whpp-total-kpi-integration.js?v=20260815-8'));
+  assert.doesNotMatch(injector,/<script src="\/v56-trend-truth\.js/);
 });
 
-test('V156 unified HTTP ingress hard replaces legacy route multer',()=>{
-  const ingress=read('src/v102UnifiedImportSafetyGatePatch.js');
-  assert.match(ingress,/V156-LOCALAPPDATA-ZERO-DB-DISK/);
-  assert.match(ingress,/fastSpoolDir/);
-  assert.match(ingress,/LOCALAPPDATA/);
-  assert.match(ingress,/fastUnifiedUpload\.single\('file'\),queuedHandler/);
-  assert.match(ingress,/do not forward any legacy route-level upload middleware/i);
-  assert.match(ingress,/res\.status\(202\)/);
-  assert.doesNotMatch(ingress,/parseUnifiedDailyExcel/);
-  assert.doesNotMatch(ingress,/persistUnifiedUploadFast/);
-  assert.doesNotMatch(ingress,/getDb\(/);
+test('V148 runner binds to unified date and reapplies canonical evidence after legacy CCSL render',()=>{
+  const runner=read('public/v67-resilient-run-guard.js');
+  assert.match(runner,/api\/import\/unified-latest\?compact=1/);
+  assert.match(runner,/const unifiedDate=isoDate\(states\.UNIFIED\?\.import\?\.reportDate\)/);
+  assert.match(runner,/states\.CURRENT_REPORT_DATE=reportDate/);
+  assert.match(runner,/api\/v146\/processing-readiness/);
+  assert.match(runner,/apiScanCount/);
+  assert.match(runner,/podLockCount/);
+  assert.match(runner,/scanCoveredCount/);
+  assert.match(runner,/POD锁复用/);
+  assert.match(runner,/await global\.refresh\(\)/);
+  assert.ok(runner.indexOf('await global.refresh()')<runner.indexOf('renderEvidenceStatus(currentReportDate'));
+  assert.match(runner,/LATEST_UNIFIED_REPORT_DATE_PLUS_API_OR_POD_LOCK_EVIDENCE/);
 });
 
-test('V156 queue metadata is localappdata only and imports no db runtime',()=>{
-  const queue=read('src/v153UnifiedImportQueue.js');
-  assert.match(queue,/LOCALAPPDATA/);
-  assert.match(queue,/upload_spool/);
-  assert.match(queue,/queueDir=path\.join\(spoolRoot,'jobs'\)/);
-  assert.match(queue,/LOCALAPPDATA_ZERO_DB_DISK/);
-  assert.doesNotMatch(queue,/getRuntimeConfig/);
-  assert.doesNotMatch(queue,/from '\.\/db\.js'/);
-  assert.doesNotMatch(queue,/copyFile/);
-  assert.doesNotMatch(queue,/moveFile/);
-  assert.match(queue,/new Worker\(/);
-  assert.match(queue,/RECOVERED_AFTER_RESTART/);
+test('V148 distinguishes real API scan coverage from terminal POD-lock reuse',()=>{
+  const backend=read('src/v146ProcessingReadinessPatch.js');
+  const bootstrap=read('bootstrap.js');
+  assert.match(bootstrap,/v146ProcessingReadinessPatch/);
+  assert.match(backend,/business_scan_results/);
+  assert.match(backend,/business_pod_locks/);
+  assert.match(backend,/business_final_rows/);
+  assert.match(backend,/business_run_locks/);
+  assert.match(backend,/business_export_snapshots/);
+  assert.match(backend,/apiScanCount/);
+  assert.match(backend,/podLockScanCount/);
+  assert.match(backend,/podLockTimedCount/);
+  assert.match(backend,/scanCoveredCount/);
+  assert.match(backend,/const scanComplete=sourceCount===0\|\|evidence\.scanCoveredCount>=sourceCount/);
+  assert.match(backend,/API_SCAN_OR_TERMINAL_POD_LOCK_THEN_FINAL_ROW/);
+  assert.match(backend,/falseCompleted/);
+  assert.match(backend,/SHOPEE_PROCESSING_EVIDENCE_INCOMPLETE/);
+  assert.match(backend,/UPDATE business_export_snapshots/);
+  assert.match(backend,/UPDATE business_run_locks/);
+  assert.match(backend,/UPDATE unified_snapshots SET status='IMPORTED'/);
 });
 
-test('V156 worker publishes auto classification before SQLite persistence',()=>{
-  const worker=read('src/v153UnifiedImportWorker.js');
-  assert.match(worker,/classificationPreview/);
-  assert.match(worker,/type:'classified'/);
-  assert.match(worker,/CLASSIFY_FIRST_PERSIST_BACKGROUND_V155/);
-  assert.ok(worker.indexOf("type:'classified'")<worker.indexOf("phase:'PERSISTING'"),'classification preview must be published before persistence');
-  assert.match(worker,/persistWithRetry/);
-  assert.match(worker,/SQLITE_BUSY/);
-  assert.match(worker,/SQLITE_LOCKED/);
-  assert.match(worker,/attempt<=8/);
+test('V148 Shopee attempt trends search later carryover real POD and dispatch evidence for original intake day',()=>{
+  const trend=read('src/v137TrendTruthPatch.js');
+  assert.match(trend,/pod_candidates AS/);
+  assert.match(trend,/s\.reportDate>=v\.reportDate/);
+  assert.match(trend,/f\.reportDate>=v\.reportDate AND f\.isPod=1/);
+  assert.match(trend,/COALESCE\(s\.rawJson,''\) NOT LIKE '%POD_LOCK%'/);
+  assert.match(trend,/COALESCE\(f\.rawJson,''\) NOT LIKE '%POD_LOCK%'/);
+  assert.match(trend,/pod_first AS/);
+  assert.match(trend,/track_attempts AS/);
+  assert.match(trend,/evidenceDate/);
+  assert.match(trend,/firstPodObservedDate/);
+  assert.match(trend,/firstPodEvidenceJson/);
+  assert.match(trend,/podLockTime/);
+  assert.match(trend,/PERSISTED_ATTEMPT_THEN_CROSS_DAY_DISPATCH_EVENTS_THEN_POD_TIMESTAMP_THEN_FIRST_REAL_POD_OBSERVED_DATE/);
 });
 
-test('V156 queue persists classification preview for the browser',()=>{
-  const queue=read('src/v153UnifiedImportQueue.js');
-  assert.match(queue,/message\?\.type==='classified'/);
-  assert.match(queue,/phase:'CLASSIFIED'/);
-  assert.match(queue,/preview/);
-  assert.match(queue,/classifiedAt/);
+test('V145 home core excludes Shopee and Shopee special metrics come from canonical final rows',()=>{
+  const backend=read('src/v143HomeTruthPatch.js');
+  const ui=read('public/v64-whpp-total-kpi-integration.js');
+  assert.match(backend,/CORE_TYPES=new Set\(\['CE','CEAF','TBKH','ALI1688','WHPP'\]\)/);
+  assert.match(backend,/SHOPEE_TYPES=new Set\(\['SHOPEECN','SHOPEEVN'\]\)/);
+  assert.match(backend,/special:shopeeSpecialSummary\(rows\)/);
+  assert.match(backend,/pendingNonContinuous/);
+  assert.match(backend,/returned/);
+  assert.match(ui,/patchSpecial\(data\)/);
+  assert.match(ui,/CANONICAL_SHOPEE_FINAL_ROWS/);
+  assert.match(ui,/CANONICAL_CORE_FIVE_BUSINESSES/);
+  assert.doesNotMatch(ui,/baseValue\(/);
+  assert.doesNotMatch(ui,/\+ Number\(addValue/);
 });
 
-test('V156 browser restores upload recognize auto-classify experience',()=>{
-  const ui=read('public/v150-import-fast-path.js');
-  assert.match(ui,/LOCAL_FAST_SPOOL_CLASSIFY_FIRST_BACKGROUND_PERSIST_V155/);
-  assert.match(ui,/识别完成，已自动分类/);
-  assert.match(ui,/正在自动识别并分类/);
-  assert.match(ui,/bindState\(item\.job\.preview\)/);
-  assert.match(ui,/ce-qc-unified-import-classified/);
-  assert.match(ui,/页面已释放，可以继续选择下一份日报/);
-  assert.doesNotMatch(ui,/api\/state\?compact=1/);
-  assert.doesNotMatch(ui,/api\/shopee\/state\?compact=1/);
+test('Shopee attempt recovery still reads persisted attempt fields and POD timestamps',()=>{
+  const home=read('src/v143HomeTruthPatch.js');
+  const trend=read('src/v137TrendTruthPatch.js');
+  for(const source of [home,trend]){
+    assert.match(source,/business_track_events/);
+    assert.match(source,/business_scan_results/);
+    assert.match(source,/podAttemptNo/);
+    assert.match(source,/findPodDateInObject/);
+    assert.match(source,/deliveryCompletedAt/);
+    assert.match(source,/signTime/);
+  }
+  assert.match(home,/group\.pod>0&&group\.known===0/);
+  assert.match(home,/group\.values=\[null,null,null\]/);
 });
 
-test('V156 queue status APIs expose jobs without local filesystem paths',()=>{
-  const runtime=read('src/v153RuntimeBuildPatch.js');
-  assert.match(runtime,/api\/import\/unified-queue/);
-  assert.match(runtime,/getUnifiedImportJob/);
-  assert.match(runtime,/getUnifiedImportQueueSummary/);
+test('V144 zero-row family is considered complete instead of waiting forever for a child snapshot',()=>{
+  const repair=read('src/v142UnifiedSnapshotRepairPatch.js');
+  assert.match(repair,/v144-zero-family-auto-finalize-v4/);
+  assert.match(repair,/function expectedFamilyCounts/);
+  assert.match(repair,/function emptyCompletedChild/);
+  assert.match(repair,/const ccslRequired=expectedFamilies\.ccsl>0/);
+  assert.match(repair,/const shopeeRequired=expectedFamilies\.shopee>0/);
+  assert.match(repair,/if\(ccslRequired&&!realCcsl\)missing\.push\('CCSL'\)/);
+  assert.match(repair,/if\(shopeeRequired&&!realShopee\)missing\.push\('SHOPEE'\)/);
+  assert.match(repair,/zeroFamilies:\{CCSL:!ccslRequired,SHOPEE:!shopeeRequired\}/);
 });
 
-test('V156 persistence is staging-only and processing materialization stays deferred',()=>{
-  const fast=read('src/v150UnifiedImportFastRoutePatch.js');
-  assert.match(fast,/UPLOAD_STAGING_ONLY_V152/);
-  const persistStart=fast.indexOf('export function persistUnifiedUploadFast');
-  const persistEnd=fast.indexOf('function clearTransientRunState',persistStart);
-  const persist=fast.slice(persistStart,persistEnd);
-  assert.doesNotMatch(persist,/shipment_current_state/);
-  assert.doesNotMatch(persist,/carryover_open_items/);
-  assert.doesNotMatch(persist,/shipment_daily_snapshots/);
-  assert.match(fast,/function materializeProcessingMembership/);
-  assert.match(fast,/getUnifiedProcessingQueue\(batch\.batchId\)/);
-  assert.match(fast,/START_ROUTES=new Set\(\['\/api\/run\/start','\/api\/shopee\/run\/start'\]\)/);
+test('selected-day trend endpoint exposes lifecycle truth and automatic persisted repair',()=>{
+  const backend=read('src/v137TrendTruthPatch.js');const repair=read('src/v142UnifiedSnapshotRepairPatch.js');
+  assert.match(backend,/repairUnifiedSnapshotCompletion\(to\)/);assert.match(backend,/requestedDateLifecycle:lifecycle/);assert.match(backend,/business_track_events/);assert.match(backend,/track_attempts/);
+  assert.match(repair,/latestCcslSnapshot/);assert.match(repair,/latestShopeeSnapshot/);assert.match(repair,/VALID/);assert.match(repair,/COMPLETED/);assert.match(repair,/completeUnifiedSnapshot/);
 });
 
-test('V156 import runtime is no-store and build-sync protected',()=>{
-  const cache=read('src/v89StaticAssetCachePatch.js');
-  const html=read('src/v44WhppUiPatch.js');
-  const sync=read('public/v153-build-sync.js');
-  const runtime=read('src/v153RuntimeBuildPatch.js');
-  assert.match(cache,/v150-import-fast-path\|v153-build-sync/);
-  assert.match(cache,/no-store, max-age=0/);
-  assert.match(html,/__CE_QC_UI_BUILD_ID__/);
-  assert.match(html,/v153-build-sync\.js/);
-  assert.match(html,/v150-import-fast-path\.js\?v=20260815-8/);
-  assert.match(html,/v156-zero-db-disk-upload/);
-  assert.match(sync,/api\/runtime-build/);
-  assert.match(sync,/location\.reload\(\)/);
-  assert.match(runtime,/api\/runtime-build/);
+test('front end distinguishes not imported processing reconciliation failure and generic version mismatch fallback',()=>{
+  const ui=read('public/v137-range-trends.js');assert.match(ui,/requestedDateLifecycle/);assert.match(ui,/尚未导入日报/);assert.match(ui,/正在等待处理完成/);assert.match(ui,/一致性检查未通过/);assert.match(ui,/没有 VALID \+ COMPLETED 的有效日报快照/);
 });
 
-test('V156 managed launcher remains fail closed after candidate validation',()=>{
-  const launcher=read('tools/CE_QC_Managed_Launcher.ps1');
-  assert.match(launcher,/FAIL_CLOSED_CANDIDATE_GATE_V152/);
-  assert.match(launcher,/\$candidateResult\s*=\s*@\(Test-RemoteCandidate \$remote \$current\)/);
-  assert.match(launcher,/\$candidateAccepted\s*=\s*\(\$candidateResult\.Count -eq 1 -and \$candidateResult\[0\] -eq \$true\)/);
+test('unified snapshot completion still blocks invalid reconciliation rather than fabricating a completed day',()=>{
+  const store=read('src/unifiedImportStore.js');assert.match(store,/INVALID_FAILED_RECONCILIATION/);assert.match(store,/UNIFIED_RECONCILIATION_FAILED/);assert.match(store,/validationPassed/);assert.match(store,/status='COMPLETED'/);
 });
 
-test('V156 keeps database schema unchanged',()=>{
-  assert.match(read('src/migrations.js'),/const SCHEMA_VERSION = 18/);
+test('database schema is not bumped by V143 through V148 repairs',()=>{
+  const migrations=read('src/migrations.js');assert.match(migrations,/const SCHEMA_VERSION = 18/);
 });
