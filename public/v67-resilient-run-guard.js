@@ -1,7 +1,7 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-15-v146-processing-readiness-runner-v7';
+  const VERSION = '2026-08-15-v147-current-unified-date-runner-v8';
   let busy = false;
 
   async function jsonFetch(url, options = {}) {
@@ -33,30 +33,51 @@
   function runButton(){return document.querySelector('[data-testid="global-auto-process"]');}
   function setStatus(text,level='warning'){const node=statusNode();if(node)node.innerHTML=`<span class="status-pill ${level}">${String(text||'')}</span>`;}
   function setBusy(value,text=''){busy=Boolean(value);const button=runButton();if(button){button.disabled=busy;button.textContent=busy?(text||'当日日报处理中…'):'开始全自动处理';}}
+  function isoDate(value){const v=String(value||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(v)?v:'';}
 
   async function readStates(){
-    const results=await Promise.allSettled([jsonFetch('/api/state?compact=1'),jsonFetch('/api/shopee/state?compact=1')]);
-    const states={CCSL:results[0].status==='fulfilled'?results[0].value:{},SHOPEE:results[1].status==='fulfilled'?results[1].value:{}};
-    const shopeeDate=String(stateOf(states.SHOPEE)?.reportDate||'').slice(0,10);
+    const results=await Promise.allSettled([
+      jsonFetch('/api/state?compact=1'),
+      jsonFetch('/api/shopee/state?compact=1'),
+      jsonFetch('/api/import/unified-latest?compact=1')
+    ]);
+    const states={
+      CCSL:results[0].status==='fulfilled'?results[0].value:{},
+      SHOPEE:results[1].status==='fulfilled'?results[1].value:{},
+      UNIFIED:results[2].status==='fulfilled'?results[2].value:null
+    };
+    // The currently imported unified report is authoritative. Aggregate business
+    // state may still point to yesterday's last completed snapshot, which must
+    // never make today's imported report look already processed.
+    const unifiedDate=isoDate(states.UNIFIED?.import?.reportDate);
+    const shopeeStateDate=isoDate(stateOf(states.SHOPEE)?.reportDate);
+    const reportDate=unifiedDate||shopeeStateDate;
+    states.CURRENT_REPORT_DATE=reportDate;
     try{
-      const q=shopeeDate?`?reportDate=${encodeURIComponent(shopeeDate)}`:'';
+      const q=reportDate?`?reportDate=${encodeURIComponent(reportDate)}`:'';
       states.READINESS=await jsonFetch(`/api/v146/processing-readiness${q}`);
     }catch(error){
-      console.warn('[CE-QC][V146_RUNNER] processing readiness unavailable, using legacy state',error);
+      console.warn('[CE-QC][V147_RUNNER] processing readiness unavailable, using legacy state',error);
       states.READINESS=null;
     }
     return states;
   }
-  async function runStage(stage,mode,state,readiness){
-    if(!hasReport(state))return {label:stage.label,ok:true,skipped:true};
-    if(mode==='start'){
-      if(stage.key==='SHOPEE'&&readiness){
+  async function runStage(stage,mode,state,readiness,currentReportDate){
+    if(stage.key==='SHOPEE'){
+      if(readiness){
         if(!readiness.imported||Number(readiness.sourceCount||0)===0)return {label:stage.label,ok:true,skipped:true,noRows:true};
-        if(readiness.processingComplete)return {label:stage.label,ok:true,skipped:true,alreadyCompleted:true};
-      }else if(completed(state))return {label:stage.label,ok:true,skipped:true,alreadyCompleted:true};
+        if(mode==='start'&&readiness.processingComplete)return {label:stage.label,ok:true,skipped:true,alreadyCompleted:true};
+      }else if(!hasReport(state))return {label:stage.label,ok:true,skipped:true};
+    }else{
+      const stateDate=isoDate(stateOf(state)?.reportDate);
+      // If the current unified day has zero CCSL rows, the CCSL aggregate is allowed
+      // to remain on an older completed day and must not be re-run by mistake.
+      if(currentReportDate&&stateDate&&stateDate!==currentReportDate)return {label:stage.label,ok:true,skipped:true,olderState:true};
+      if(!hasReport(state))return {label:stage.label,ok:true,skipped:true};
+      if(mode==='start'&&completed(state))return {label:stage.label,ok:true,skipped:true,alreadyCompleted:true};
     }
     const url=mode==='resume'?stage.resume:stage.start;
-    setStatus(`${stage.label}：正在处理当日日报。历史OPEN遗留由后台每2小时独立刷新。`);
+    setStatus(`${stage.label}：正在处理 ${currentReportDate||'当日'} 日报，请保持页面开启。`);
     try{
       const result=await jsonFetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
       return {label:stage.label,ok:true,result};
@@ -69,23 +90,37 @@
 
   async function execute(mode='start'){
     if(busy)return {ok:false,busy:true};
-    setBusy(true,'正在检查当日日报…');const results=[];
+    setBusy(true,'正在检查当前导入日报…');const results=[];
     try{
       const states=await readStates();
+      const currentReportDate=states.CURRENT_REPORT_DATE;
+      if(!currentReportDate){setStatus('当前没有已导入日报，请先导入综合日报。','warning');return {ok:false,noReport:true};}
+      const readiness=states.READINESS?.SHOPEE||null;
+      if(readiness&&Number(readiness.sourceCount||0)>0&&!readiness.processingComplete){
+        setStatus(`${currentReportDate} SHOPEE 待处理：${Number(readiness.scanCount||0).toLocaleString('zh-CN')} / ${Number(readiness.sourceCount||0).toLocaleString('zh-CN')} 已完成扫描，正在启动真实处理…`,'warning');
+      }
       const stages=[
         {key:'CCSL',label:'CE + CEAF + TBKH + ALI1688',start:'/api/run/start',resume:'/api/run/resume'},
         {key:'SHOPEE',label:'SHOPEE CN + SHOPEE VN',start:'/api/shopee/run/start',resume:'/api/shopee/run/resume'}
       ];
-      for(const stage of stages)results.push(await runStage(stage,mode,states[stage.key]||{},stage.key==='SHOPEE'?states.READINESS?.SHOPEE:null));
+      for(const stage of stages)results.push(await runStage(stage,mode,states[stage.key]||{},stage.key==='SHOPEE'?readiness:null,currentReportDate));
       const failed=results.filter(item=>item.ok===false);
-      if(failed.length)setStatus(`${failed.map(item=>item.label).join('、')}仍有当日失败票；断点已保存。请点击“继续处理”再次重试，不会自动重跑历史数据。`,'warning');
-      else setStatus('当日日报处理状态已校验；需要处理的业务已执行，零票或已完成业务自动跳过。','success');
-      return {ok:failed.length===0,results,readiness:states.READINESS};
+      if(failed.length)setStatus(`${failed.map(item=>item.label).join('、')}仍有当日失败票；断点已保存。请点击“继续处理”再次重试。`,'warning');
+      else {
+        let after=null;
+        try{after=await jsonFetch(`/api/v146/processing-readiness?reportDate=${encodeURIComponent(currentReportDate)}&_=${Date.now()}`);}catch{}
+        const sh=after?.SHOPEE;
+        if(sh&&Number(sh.sourceCount||0)>0&&!sh.processingComplete){
+          setStatus(`${currentReportDate} 处理尚未完成：SHOPEE扫描 ${Number(sh.scanCount||0).toLocaleString('zh-CN')} / ${Number(sh.sourceCount||0).toLocaleString('zh-CN')}，最终结果 ${Number(sh.finalCount||0).toLocaleString('zh-CN')} / ${Number(sh.sourceCount||0).toLocaleString('zh-CN')}。`,'warning');
+        }else setStatus(`${currentReportDate} 当日日报处理完成并已校验实际处理证据。`,'success');
+      }
+      try{if(typeof global.refresh==='function')await global.refresh();}catch{}
+      return {ok:failed.length===0,results,readiness:states.READINESS,reportDate:currentReportDate};
     }catch(error){
-      setStatus(isAuth(error)?'CE登录已失效，请重新登录后点击继续处理；断点不会丢失。':`处理失败：${String(error.message||error)}。不会自动续跑，请确认后点击继续处理。`,'danger');
+      setStatus(isAuth(error)?'CE登录已失效，请重新登录后点击继续处理；断点不会丢失。':`处理失败：${String(error.message||error)}。请确认后点击继续处理。`,'danger');
       return {ok:false,error:error?.message||String(error),results};
     }finally{setBusy(false);}
   }
-  function install(){global.runUnified=()=>execute('start');global.resumeUnified=()=>execute('resume');global.__CE_QC_V67_RESILIENT_RUN_GUARD__={version:VERSION,run:execute,autoRetry:false,foregroundPolicy:'CURRENT_REPORT_PROCESSING_EVIDENCE'};console.info('[CE-QC][V146_PROCESSING_READINESS_RUNNER]',VERSION);}
+  function install(){global.runUnified=()=>execute('start');global.resumeUnified=()=>execute('resume');global.__CE_QC_V67_RESILIENT_RUN_GUARD__={version:VERSION,run:execute,autoRetry:false,foregroundPolicy:'LATEST_UNIFIED_REPORT_DATE_PROCESSING_EVIDENCE'};console.info('[CE-QC][V147_CURRENT_UNIFIED_DATE_RUNNER]',VERSION);}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,0),{once:true});else setTimeout(install,0);
 })(window);
