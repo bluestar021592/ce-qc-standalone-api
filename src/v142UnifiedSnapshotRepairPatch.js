@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 import { completeUnifiedSnapshot } from './unifiedImportStore.js';
 
-export const V142_UNIFIED_REPAIR_ID='2026-08-15-v142-unified-auto-finalize-v1';
+export const V142_UNIFIED_REPAIR_ID='2026-08-15-v142-unified-auto-finalize-v2';
 const recentAttempts=new Map();
 const RETRY_MS=15_000;
 
@@ -49,11 +49,19 @@ function markWaiting(row,missing){
   if(!row?.snapshotId)return;
   const payload=safeJson(row.payloadJson);
   payload.autoFinalize={patchId:V142_UNIFIED_REPAIR_ID,status:'WAITING_FOR_CHILD_SNAPSHOTS',missing,checkedAt:new Date().toISOString()};
-  // PROCESSING means “日报已导入，但两条业务处理链尚未同时形成正式快照”.
-  // It must never be treated as a truthful completed day by dashboards.
-  getDb().prepare(`UPDATE unified_snapshots
-    SET status=CASE WHEN status='IMPORTED' THEN 'PROCESSING' ELSE status END,payloadJson=?
+  // Keep the database lifecycle as IMPORTED while child processing is incomplete.
+  // completeUnifiedSnapshot already understands IMPORTED, so the day remains
+  // automatically completable as soon as both child snapshots are ready.
+  getDb().prepare(`UPDATE unified_snapshots SET payloadJson=?
     WHERE snapshotId=? AND status IN ('IMPORTED','PROCESSING')`).run(JSON.stringify(payload),row.snapshotId);
+}
+
+function restoreCompletableStatus(row){
+  if(row?.snapshotStatus!=='PROCESSING')return;
+  // V142 v1 briefly used PROCESSING as a physical DB status. Restore those rows
+  // to the existing lifecycle vocabulary before calling completeUnifiedSnapshot.
+  getDb().prepare("UPDATE unified_snapshots SET status='IMPORTED' WHERE snapshotId=? AND status='PROCESSING'").run(row.snapshotId);
+  row.snapshotStatus='IMPORTED';
 }
 
 export function repairUnifiedSnapshotCompletion(reportDate,{force=false}={}){
@@ -77,9 +85,11 @@ export function repairUnifiedSnapshotCompletion(reportDate,{force=false}={}){
     return {ok:true,reportDate:date,imported:true,completed:false,status:'PROCESSING',missing,snapshotId:unified.snapshotId};
   }
 
+  restoreCompletableStatus(unified);
   try{
     const result=completeUnifiedSnapshot({reportDate:date,ccslSnapshot:ccsl,shopeeSnapshot:shopee});
-    return {ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:result?.snapshotId||unified.snapshotId,repairId:V142_UNIFIED_REPAIR_ID};
+    if(!result)return {ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:'UNIFIED_SNAPSHOT_NOT_COMPLETABLE',error:'统一快照未进入可完成状态。'};
+    return {ok:true,reportDate:date,imported:true,completed:true,status:'COMPLETED',snapshotId:result.snapshotId||unified.snapshotId,repairId:V142_UNIFIED_REPAIR_ID};
   }catch(error){
     return {ok:false,reportDate:date,imported:true,completed:false,status:'RECONCILIATION_FAILED',snapshotId:unified.snapshotId,code:error?.code||'UNIFIED_RECONCILIATION_FAILED',error:error?.message||String(error),reconciliation:error?.reconciliation||null};
   }
