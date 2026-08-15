@@ -143,6 +143,7 @@ try {
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');
   await importPhase('v74CeafDuplicateReimportPatch', './src/v74CeafDuplicateReimportPatch.js');
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
+  await importPhase('v146ProcessingReadinessPatch', './src/v146ProcessingReadinessPatch.js');
 
   await importServerInteractiveFirst();
   scheduleDeferredMaintenance({ v92, v76Repair });
