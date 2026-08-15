@@ -1,7 +1,7 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-15-v136-explicit-foreground-runner-v6';
+  const VERSION = '2026-08-15-v146-processing-readiness-runner-v7';
   let busy = false;
 
   async function jsonFetch(url, options = {}) {
@@ -28,7 +28,7 @@
   function hasReport(payload){const state=stateOf(payload);return Boolean(state?.reportDate&&state?.dailyReportReady!==false);}
   function isAuth(error){const status=Number(error?.status||0),code=String(error?.code||'').toUpperCase(),message=String(error?.message||'');return [401,403].includes(status)||['401','403','AUTH_REQUIRED'].includes(code)||/未授权|unauthorized|登录.*失效|token.*(?:过期|expired|invalid)/i.test(message);}
   function alreadyDone(error){return String(error?.code||'')==='RUN_ALREADY_COMPLETED'||/已经完成|already\s*(?:completed|finished)/i.test(String(error?.message||''));}
-  function noReport(error){return /REPORT.*MISSING|NO_DAILY_REPORT/i.test(String(error?.code||''))||/未导入.*日报|没有.*日报/i.test(String(error?.message||''));}
+  function noReport(error){return /REPORT.*MISSING|NO_DAILY_REPORT|EMPTY_DAILY_REPORT/i.test(String(error?.code||''))||/未导入.*日报|没有.*日报|有效运单数为0|请先导入当日日报/i.test(String(error?.message||''));}
   function statusNode(){return document.getElementById('ccslRunStatus');}
   function runButton(){return document.querySelector('[data-testid="global-auto-process"]');}
   function setStatus(text,level='warning'){const node=statusNode();if(node)node.innerHTML=`<span class="status-pill ${level}">${String(text||'')}</span>`;}
@@ -36,11 +36,25 @@
 
   async function readStates(){
     const results=await Promise.allSettled([jsonFetch('/api/state?compact=1'),jsonFetch('/api/shopee/state?compact=1')]);
-    return {CCSL:results[0].status==='fulfilled'?results[0].value:{},SHOPEE:results[1].status==='fulfilled'?results[1].value:{}};
+    const states={CCSL:results[0].status==='fulfilled'?results[0].value:{},SHOPEE:results[1].status==='fulfilled'?results[1].value:{}};
+    const shopeeDate=String(stateOf(states.SHOPEE)?.reportDate||'').slice(0,10);
+    try{
+      const q=shopeeDate?`?reportDate=${encodeURIComponent(shopeeDate)}`:'';
+      states.READINESS=await jsonFetch(`/api/v146/processing-readiness${q}`);
+    }catch(error){
+      console.warn('[CE-QC][V146_RUNNER] processing readiness unavailable, using legacy state',error);
+      states.READINESS=null;
+    }
+    return states;
   }
-  async function runStage(stage,mode,state){
+  async function runStage(stage,mode,state,readiness){
     if(!hasReport(state))return {label:stage.label,ok:true,skipped:true};
-    if(mode==='start'&&completed(state))return {label:stage.label,ok:true,skipped:true,alreadyCompleted:true};
+    if(mode==='start'){
+      if(stage.key==='SHOPEE'&&readiness){
+        if(!readiness.imported||Number(readiness.sourceCount||0)===0)return {label:stage.label,ok:true,skipped:true,noRows:true};
+        if(readiness.processingComplete)return {label:stage.label,ok:true,skipped:true,alreadyCompleted:true};
+      }else if(completed(state))return {label:stage.label,ok:true,skipped:true,alreadyCompleted:true};
+    }
     const url=mode==='resume'?stage.resume:stage.start;
     setStatus(`${stage.label}：正在处理当日日报。历史OPEN遗留由后台每2小时独立刷新。`);
     try{
@@ -58,22 +72,20 @@
     setBusy(true,'正在检查当日日报…');const results=[];
     try{
       const states=await readStates();
-      // V136 base runner owns the six non-WHPP business classifications. WHPP is
-      // deliberately handled once by the final V135/V136 controller afterwards.
       const stages=[
         {key:'CCSL',label:'CE + CEAF + TBKH + ALI1688',start:'/api/run/start',resume:'/api/run/resume'},
         {key:'SHOPEE',label:'SHOPEE CN + SHOPEE VN',start:'/api/shopee/run/start',resume:'/api/shopee/run/resume'}
       ];
-      for(const stage of stages)results.push(await runStage(stage,mode,states[stage.key]||{}));
+      for(const stage of stages)results.push(await runStage(stage,mode,states[stage.key]||{},stage.key==='SHOPEE'?states.READINESS?.SHOPEE:null));
       const failed=results.filter(item=>item.ok===false);
       if(failed.length)setStatus(`${failed.map(item=>item.label).join('、')}仍有当日失败票；断点已保存。请点击“继续处理”再次重试，不会自动重跑历史数据。`,'warning');
-      else setStatus('六个非WHPP业务的当日日报已处理；正在校验WHPP本土。','success');
-      return {ok:failed.length===0,results};
+      else setStatus('当日日报处理状态已校验；需要处理的业务已执行，零票或已完成业务自动跳过。','success');
+      return {ok:failed.length===0,results,readiness:states.READINESS};
     }catch(error){
       setStatus(isAuth(error)?'CE登录已失效，请重新登录后点击继续处理；断点不会丢失。':`处理失败：${String(error.message||error)}。不会自动续跑，请确认后点击继续处理。`,'danger');
       return {ok:false,error:error?.message||String(error),results};
     }finally{setBusy(false);}
   }
-  function install(){global.runUnified=()=>execute('start');global.resumeUnified=()=>execute('resume');global.__CE_QC_V67_RESILIENT_RUN_GUARD__={version:VERSION,run:execute,autoRetry:false,foregroundPolicy:'CURRENT_REPORT_ONLY'};console.info('[CE-QC][V136_EXPLICIT_FOREGROUND_RUNNER]',VERSION);}
+  function install(){global.runUnified=()=>execute('start');global.resumeUnified=()=>execute('resume');global.__CE_QC_V67_RESILIENT_RUN_GUARD__={version:VERSION,run:execute,autoRetry:false,foregroundPolicy:'CURRENT_REPORT_PROCESSING_EVIDENCE'};console.info('[CE-QC][V146_PROCESSING_READINESS_RUNNER]',VERSION);}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,0),{once:true});else setTimeout(install,0);
 })(window);
