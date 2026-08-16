@@ -1,8 +1,7 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-15-v136-seven-business-runner-preflight-v1';
-  const STATE_PREFLIGHT_TIMEOUT_MS = 4000;
+  const VERSION = '2026-08-16-v148-direct-daily-runner-v1';
   let busy = false;
 
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
@@ -36,12 +35,6 @@
     try {
       response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', ...options });
     } catch (cause) {
-      if (cause?.name === 'AbortError') {
-        const error = new Error('状态检查超时');
-        error.code = 'STATE_PREFLIGHT_TIMEOUT';
-        error.cause = cause;
-        throw error;
-      }
       const error = new Error('与后台连接中断');
       error.code = 'NETWORK_CONNECTION_INTERRUPTED';
       error.cause = cause;
@@ -60,50 +53,6 @@
     return payload;
   }
 
-  function stateOf(payload) { return payload?.state || payload || {}; }
-  function stateDate(payload) {
-    const state = stateOf(payload);
-    return normalizeDate(payload?.reportDate || state?.reportDate || state?.snapshotReportDate || '');
-  }
-  function stateKnown(payload) { return Boolean(payload && payload.__stateUnknown !== true); }
-
-  function completed(payload) {
-    const state = stateOf(payload);
-    const status = String(payload?.snapshotStatus || state?.snapshotStatus || (payload?.completed ? 'COMPLETED' : '')).toUpperCase();
-    const runStatus = String(
-      state?.currentRun?.status
-      || state?.lastRunSummary?.runStatus
-      || state?.lastRun?.runStatus
-      || payload?.runStatus
-      || ''
-    ).toUpperCase();
-    const phase = String(state?.processing?.phase || '').trim();
-    return status === 'COMPLETED'
-      || ['FINISHED', 'COMPLETED'].includes(runStatus)
-      || /^(完成|处理完成)$/.test(phase);
-  }
-
-  function canResume(payload) {
-    const state = stateOf(payload);
-    const runStatus = String(
-      state?.currentRun?.status
-      || state?.lastRunSummary?.runStatus
-      || state?.lastRun?.runStatus
-      || ''
-    ).toLowerCase();
-    return Boolean(
-      state?.processing?.running
-      || state?.processing?.paused
-      || ['running', 'paused', 'failed'].includes(runStatus)
-    );
-  }
-
-  function hasReport(payload, type) {
-    const state = stateOf(payload);
-    if (type === 'WHPP') return Boolean(state?.dailyReportReady && Number(payload?.total || payload?.dashboard?.metrics?.total || 0) > 0);
-    return Boolean(state?.reportDate && state?.dailyReportReady !== false);
-  }
-
   function isAuth(error) {
     const status = Number(error?.status || error?.payload?.status || 0);
     const code = String(error?.code || '').toUpperCase();
@@ -116,9 +65,9 @@
     const status = Number(error?.status || 0);
     const code = String(error?.code || '').toUpperCase();
     const message = String(error?.message || '');
-    return ['NETWORK_CONNECTION_INTERRUPTED','STATE_PREFLIGHT_TIMEOUT','ECONNRESET','ECONNABORTED','ETIMEDOUT'].includes(code)
+    return ['NETWORK_CONNECTION_INTERRUPTED','ECONNRESET','ECONNABORTED','ETIMEDOUT'].includes(code)
       || [408,425,429,500,502,503,504].includes(status)
-      || /socket hang up|connection reset|timeout|timed out|failed to fetch|fetch failed|连接中断|网络中断|状态检查超时/i.test(message);
+      || /socket hang up|connection reset|timeout|timed out|failed to fetch|fetch failed|连接中断|网络中断/i.test(message);
   }
 
   function alreadyDone(error) {
@@ -148,27 +97,6 @@
     }
   }
 
-  async function readState(url) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), STATE_PREFLIGHT_TIMEOUT_MS);
-    try {
-      return await jsonFetch(url, { signal: controller.signal });
-    } catch (error) {
-      return { __stateUnknown: true, __stateError: error?.message || '状态读取失败' };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async function readStates() {
-    const [ccsl, shopee, whpp] = await Promise.all([
-      readState('/api/state?compact=1'),
-      readState('/api/shopee/state?compact=1'),
-      readState('/api/v71/whpp-summary')
-    ]);
-    return { CCSL: ccsl, SHOPEE: shopee, WHPP: whpp };
-  }
-
   async function runStage(stage, preferResume) {
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -191,11 +119,15 @@
 
   async function execute(mode = 'start') {
     if (busy) return;
-    setBusy(true, '正在检查七业务状态…');
+    const target = targetDate();
+    setBusy(true, `正在启动 ${target || '当日'} 七业务处理…`);
     const results = [];
     try {
-      const target = targetDate();
-      const states = await readStates();
+      // V148: do not pre-read three large dashboard/state endpoints before a daily run.
+      // On a ~20GB SQLite database those aborted browser reads can keep executing on
+      // the backend and compete with the real scan/track workload. Daily import is the
+      // authority for what should run; each processing endpoint already knows how to
+      // return RUN_ALREADY_COMPLETED / NO_DAILY_REPORT and how to resume checkpoints.
       const stages = [
         { key: 'CCSL', label: 'CCSL（CE/CEAF/TBKH/ALI1688）', start: '/api/run', resume: '/api/resume' },
         { key: 'SHOPEE', label: 'SHOPEE CN/VN', start: '/api/shopee/run/start', resume: '/api/shopee/run/resume' },
@@ -203,26 +135,16 @@
       ];
 
       for (const stage of stages) {
-        const state = states[stage.key] || { __stateUnknown: true };
-        const known = stateKnown(state);
-        const date = stateDate(state);
-        const sameTargetDay = !target || date === target;
-        if (known && sameTargetDay && (!hasReport(state, stage.key) || completed(state))) {
-          results.push({ label: stage.label, ok: true, skipped: true });
-          continue;
-        }
-        if (!known || !sameTargetDay) {
-          setStatus(`${stage.label}状态${!known ? '读取超时' : `仍是 ${date || '旧日期'}`}，直接按 ${target || '当前导入日'} 启动处理…`);
-        }
-        const preferResume = mode === 'resume' && known && sameTargetDay && canResume(state);
-        results.push(await runStage(stage, preferResume));
+        setStatus(`${stage.label}正在进入当日日报处理…`);
+        const result = await runStage(stage, mode === 'resume');
+        results.push(result);
       }
 
       const failed = results.filter(item => item.ok === false);
       if (failed.length) {
-        setStatus(`已完成可完成板块；${failed.map(item => item.label).join('、')}保留断点待续查。`, 'warning');
+        setStatus(`当日日报主流程已继续推进；${failed.map(item => item.label).join('、')}失败票已保留到独立重试中心。`, 'warning');
       } else {
-        setStatus('七业务处理完成，已保存最新快照。', 'success');
+        setStatus('七业务当日日报处理完成，已保存最新快照。', 'success');
       }
       document.dispatchEvent(new CustomEvent('ce-qc-run-complete', { detail: { results, reportDate: target } }));
       try { if (typeof global.refresh === 'function') await global.refresh(); } catch {}
@@ -242,7 +164,7 @@
     global.runUnified = () => execute('start');
     global.resumeUnified = () => execute('resume');
     global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute, targetDate };
-    console.info('[CE-QC][V67_SEVEN_BUSINESS_RUNNER]', VERSION);
+    console.info('[CE-QC][V148_DIRECT_DAILY_RUNNER]', VERSION);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
