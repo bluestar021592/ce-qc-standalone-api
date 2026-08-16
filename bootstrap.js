@@ -128,6 +128,8 @@ try {
   await importPhase('v51WhppLegacyEvidencePatch', './src/v51WhppLegacyEvidencePatch.js');
   await importPhase('v55DashboardReconciliationPatch', './src/v55DashboardReconciliationPatch.js');
   await importPhase('v70ConfirmQueryResiliencePatch', './src/v70ConfirmQueryResiliencePatch.js');
+  await importPhase('v141WhppDailyRetryIsolationPatch', './src/v141WhppDailyRetryIsolationPatch.js');
+  await importPhase('v142SevenBusinessExportPatch', './src/v142SevenBusinessExportPatch.js');
   await importPhase('v71WhppSummaryPatch', './src/v71WhppSummaryPatch.js');
   await importPhase('v84AsyncExportPatch', './src/v84AsyncExportPatch.js');
   await importPhase('v85ShopeeWhppMetricPatch', './src/v85ShopeeWhppMetricPatch.js');
