@@ -16,9 +16,14 @@ const progress = read('src/v33RunProgressPatch.js');
 const truth = read('public/v140-current-business-truth.js');
 const cache = read('src/dashboardCacheWorker.js');
 const injector = read('src/v44WhppUiPatch.js');
+const trends = read('src/v27TrendPatch.js');
+const reimport = read('src/v74CeafDuplicateReimportPatch.js');
 
-test('V149/V150 hot-path files are syntax valid', () => {
-  for (const file of ['src/v33RunProgressPatch.js','public/v140-current-business-truth.js','src/dashboardCacheWorker.js','src/v44WhppUiPatch.js']) syntax(file);
+test('V149/V150/V151 candidate files are syntax valid', () => {
+  for (const file of [
+    'src/v33RunProgressPatch.js','public/v140-current-business-truth.js','src/dashboardCacheWorker.js','src/v44WhppUiPatch.js',
+    'src/v27TrendPatch.js','src/v74CeafDuplicateReimportPatch.js'
+  ]) syntax(file);
 });
 
 test('V149 live progress is lightweight, backward-compatible, and bounded by target pool', () => {
@@ -56,6 +61,26 @@ test('V150 current boards use exact snapshot membership and block legacy V55 his
   assert.doesNotMatch(truth, /\/api\/v89\/instant-dashboard/);
 });
 
+test('V151 trends recognize VALID daily imports even when processing snapshots are not COMPLETED', () => {
+  assert.match(trends, /listLightweightBusinessHistory/);
+  assert.match(trends, /WHERE status='VALID' AND reportDate<=\?/);
+  assert.match(trends, /WHERE status='VALID' AND reportDate BETWEEN \? AND \?/);
+  assert.match(trends, /historySource:'VALID_UNIFIED_IMPORT_SQLITE'/);
+  assert.doesNotMatch(trends, /loadRangeDashboard/);
+  assert.doesNotMatch(trends, /s\.status='COMPLETED'/);
+  assert.doesNotMatch(trends, /ns\.status='COMPLETED'/);
+});
+
+test('V151 same-file daily reimport supersedes the prior VALID batch but restores it if replacement fails', () => {
+  assert.match(reimport, /v151-safe-same-file-reimport-v2/);
+  assert.match(reimport, /prepareSameFileReplacement/);
+  assert.match(reimport, /SET status='SUPERSEDED'/);
+  assert.match(reimport, /restorePriorBatchIfReplacementFailed/);
+  assert.match(reimport, /SET status='VALID'/);
+  assert.match(reimport, /statusCode \|\| 200/);
+  assert.doesNotMatch(reimport, /DELETE\s+FROM\s+unified_import/i);
+});
+
 test('V149 dashboard cache yields to import and foreground scan-track processing', () => {
   assert.match(cache, /UNIFIED_IMPORT\|DAILY_IMPORT\|SHOPEE_IMPORT/);
   assert.match(cache, /IMPORT_DIRTY_ONLY_WAIT_FOR_RUN_COMPLETED/);
@@ -66,9 +91,10 @@ test('V149 dashboard cache yields to import and foreground scan-track processing
   assert.ok(importGuard >= 0 && actualCacheRead >= 0 && importGuard < actualCacheRead);
 });
 
-test('V150 exact-current UI keeps storage destructive operations out of hot-path patch', () => {
+test('V151 current/history fixes keep destructive storage operations out of the changed paths', () => {
   assert.match(injector, /v149-hotpath-isolation-v2/);
   assert.match(injector, /v140-current-business-truth\.js\?v=20260816-3/);
-  assert.doesNotMatch(`${progress}\n${truth}\n${cache}\n${injector}`, /DROP\s+TABLE/i);
-  assert.doesNotMatch(`${progress}\n${truth}\n${cache}\n${injector}`, /DELETE\s+FROM\s+(?:unified_import_batches|unified_import_rows|unified_snapshots|shipment_daily_snapshots)\b/i);
+  const combined = `${progress}\n${truth}\n${cache}\n${injector}\n${trends}\n${reimport}`;
+  assert.doesNotMatch(combined, /DROP\s+TABLE/i);
+  assert.doesNotMatch(combined, /DELETE\s+FROM\s+(?:unified_import_batches|unified_import_rows|unified_snapshots|shipment_daily_snapshots)\b/i);
 });
