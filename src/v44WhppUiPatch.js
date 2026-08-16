@@ -9,11 +9,12 @@ import './v132WhppFastIntegrationPatch.js';
 import './v133ClosureRatePatch.js';
 import './v134WhppRunSupervisorPatch.js';
 import './v141WhppDailyRetryIsolationPatch.js';
+import './v147TrackTimeoutConfig.js';
 import './v145SevenBusinessRetryCenterPatch.js';
 import './v135WhppPartialSnapshotPatch.js';
 import './v137WhppUnifiedBusinessStatePatch.js';
 
-const PATCH_ID='2026-08-16-v136-run-start-unblock-v24+v137-whpp-unified-business-state-v1+v138-truthful-scan-progress-v1+v139-daily-carry-isolation-ui-v3+v140-current-business-truth-v1+v141-whpp-daily-retry-isolation-v1+v142-history-export-audit-v1+v145-seven-business-retry-center-v1+v146-unified-import-date-status-v1';
+const PATCH_ID='2026-08-16-v136-run-start-unblock-v24+v137-whpp-unified-business-state-v1+v138-truthful-scan-progress-v1+v139-daily-carry-isolation-ui-v3+v140-current-business-truth-v1+v141-whpp-daily-retry-isolation-v1+v142-history-export-audit-v1+v145-seven-business-retry-center-v1+v146-unified-import-date-status-v1+v147-track-time-budget-v1';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
@@ -37,7 +38,7 @@ function html(req,res,next){
 
 const previousUse=express.application.use;
 let installed=false;
-express.application.use=function v146UnifiedImportUiUse(...args){
+express.application.use=function v147TrackBudgetUiUse(...args){
   const candidates=args.flat().filter(value=>typeof value==='function');
   if(!installed&&candidates.some(fn=>fn.name==='serveStatic')){installed=true;previousUse.call(this,html);}
   return previousUse.apply(this,args);
