@@ -1,6 +1,8 @@
 export const TRACK_QUERY_BATCH_SIZE = 50;
 const DEFAULT_TRANSIENT_RETRIES = Math.max(1, Math.min(5, Number(process.env.CE_TRANSIENT_RETRIES || 3)));
 const DEFAULT_TRANSIENT_DELAY_MS = Math.max(200, Math.min(5000, Number(process.env.CE_TRANSIENT_RETRY_DELAY_MS || 800)));
+const DEFAULT_BATCH_TIME_BUDGET_MS = Math.max(30000, Math.min(180000, Number(process.env.CE_TRACK_BATCH_BUDGET_MS || 90000)));
+const MIN_REQUEST_WINDOW_MS = 15000;
 const TRACK_FALLBACK_SIZES = Object.freeze([25, 10, 5, 1]);
 
 export function splitTrackBatches(shipmentCodes = [], batchSize = TRACK_QUERY_BATCH_SIZE) {
@@ -68,16 +70,30 @@ function effectiveFallbackSizes(apiName = '', fallbackSizes = []) {
   return /track|shipment-event|exception-item/i.test(String(apiName || '')) ? [...TRACK_FALLBACK_SIZES] : [];
 }
 
-async function withTransientRetry(query, batch, onLog, retries = DEFAULT_TRANSIENT_RETRIES, delayMs = DEFAULT_TRANSIENT_DELAY_MS, apiName = 'CE接口') {
+function budgetError(apiName, batch, budgetMs) {
+  const error = new Error(`${apiName}批次超过${Math.ceil(Number(budgetMs || DEFAULT_BATCH_TIME_BUDGET_MS) / 1000)}秒时间预算，${batch.length}票转入接口失败重试中心，主流程继续下一批。`);
+  error.code = 'BATCH_TIME_BUDGET_EXCEEDED';
+  error.transportCode = 'ETIMEDOUT';
+  return error;
+}
+
+async function withTransientRetry(query, batch, onLog, retries = DEFAULT_TRANSIENT_RETRIES, delayMs = DEFAULT_TRANSIENT_DELAY_MS, apiName = 'CE接口', deadlineAt = 0, budgetMs = DEFAULT_BATCH_TIME_BUDGET_MS) {
   let attempt = 0;
   while (true) {
+    const remaining = deadlineAt ? deadlineAt - Date.now() : Number.POSITIVE_INFINITY;
+    if (deadlineAt && remaining < MIN_REQUEST_WINDOW_MS) throw budgetError(apiName, batch, budgetMs);
     try {
       return await query(batch);
     } catch (error) {
       if (isAuthenticationFailure(error) || error?.runStatus) throw error;
+      if (error?.code === 'BATCH_TIME_BUDGET_EXCEEDED') throw error;
       if (!isTransientTransportError(error) || attempt >= retries) throw error;
       attempt += 1;
       const backoff = Math.min(8000, delayMs * attempt);
+      if (deadlineAt && Date.now() + backoff + MIN_REQUEST_WINDOW_MS > deadlineAt) {
+        await onLog(`${apiName}已完成网络补偿尝试 ${attempt}/${retries}，当前50票批次达到时间预算，将保存失败票并继续后续批次。`);
+        throw budgetError(apiName, batch, budgetMs);
+      }
       await onLog(`${apiName}网络/TLS瞬断：${batch.length}票将在${backoff}ms后自动重试 ${attempt}/${retries}，原因：${error?.message || error}`);
       await wait(backoff);
     }
@@ -92,17 +108,22 @@ export async function queryBatchWithFallback({
   apiName = 'track',
   fallbackSizes = [25, 10],
   transientRetries = DEFAULT_TRANSIENT_RETRIES,
-  transientDelayMs = DEFAULT_TRANSIENT_DELAY_MS
+  transientDelayMs = DEFAULT_TRANSIENT_DELAY_MS,
+  batchTimeBudgetMs = DEFAULT_BATCH_TIME_BUDGET_MS,
+  deadlineAt = 0
 }) {
   const original = [...batch];
   const fallback = effectiveFallbackSizes(apiName, fallbackSizes);
+  const effectiveBudgetMs = Math.max(30000, Math.min(180000, Number(batchTimeBudgetMs || DEFAULT_BATCH_TIME_BUDGET_MS)));
+  const effectiveDeadlineAt = deadlineAt || (Date.now() + effectiveBudgetMs);
   try {
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'running' }, onLog);
     // CE's read-only query endpoints can occasionally reset the TLS socket before
     // the secure connection is established. Retry the exact same idempotent request
-    // several times before treating the waybills as failed. This prevents one brief
-    // upstream network reset from stopping a multi-thousand-row daily run.
-    const events = await withTransientRetry(query, original, onLog, transientRetries, transientDelayMs, apiName);
+    // several times before treating the waybills as failed. A wall-clock budget is
+    // shared by the original request and every fallback child so one bad batch can
+    // never freeze thousands of later waybills.
+    const events = await withTransientRetry(query, original, onLog, transientRetries, transientDelayMs, apiName, effectiveDeadlineAt, effectiveBudgetMs);
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'success', resultCount: (events || []).length }, onLog);
     return { successes: [{ batch: original, events: events || [] }], failures: [] };
   } catch (error) {
@@ -112,6 +133,10 @@ export async function queryBatchWithFallback({
     // stop immediately, preserve checkpoints, and let the run pause for login.
     if (error?.runStatus || isAuthenticationFailure(error)) throw error;
     await onLog(`${apiName}批次失败：原批次${original.length}票，原因：${error?.message || error}`);
+    if (error?.code === 'BATCH_TIME_BUDGET_EXCEEDED' || Date.now() + MIN_REQUEST_WINDOW_MS >= effectiveDeadlineAt) {
+      await onLog(`${apiName}本批时间预算已用完：${original.length}票已保存为待重试，主流程立即继续下一批。`);
+      return { successes: [], failures: [{ batch: original, error }] };
+    }
     const fallbackSize = fallback.find(size => size < original.length);
     if (!fallbackSize) return { successes: [], failures: [{ batch: original, error }] };
 
@@ -119,6 +144,11 @@ export async function queryBatchWithFallback({
     const successes = [];
     const failures = [];
     for (const child of splitBatchesAtSize(original, fallbackSize)) {
+      if (Date.now() + MIN_REQUEST_WINDOW_MS >= effectiveDeadlineAt) {
+        const timeout = budgetError(apiName, child, effectiveBudgetMs);
+        failures.push({ batch: child, error: timeout });
+        continue;
+      }
       const result = await queryBatchWithFallback({
         batch: child,
         query,
@@ -127,7 +157,9 @@ export async function queryBatchWithFallback({
         apiName,
         fallbackSizes: fallback.filter(size => size < fallbackSize),
         transientRetries,
-        transientDelayMs
+        transientDelayMs,
+        batchTimeBudgetMs: effectiveBudgetMs,
+        deadlineAt: effectiveDeadlineAt
       });
       successes.push(...result.successes);
       failures.push(...result.failures);
@@ -141,8 +173,9 @@ export async function queryTrackBatchWithFallback(options = {}) {
   const rawQuery = options.query;
   if (typeof rawQuery !== 'function') throw new Error('track query function is required');
 
-  // Track/event queries are read-only. Retry transient network/TLS failures up to
-  // three times at each size, then adaptively shrink only the failed batch.
+  // Track/event queries are read-only. Retry transient network/TLS failures at least
+  // three times, adaptively shrink only while the shared time budget remains, then
+  // save unresolved bills for the seven-business retry center and continue the run.
   return queryBatchWithFallback({
     ...options,
     query: rawQuery,
@@ -150,6 +183,7 @@ export async function queryTrackBatchWithFallback(options = {}) {
     apiName: options.apiName || 'track-query',
     transientRetries: Number.isFinite(Number(options.transientRetries)) ? Number(options.transientRetries) : DEFAULT_TRANSIENT_RETRIES,
     transientDelayMs: Number.isFinite(Number(options.transientDelayMs)) ? Number(options.transientDelayMs) : DEFAULT_TRANSIENT_DELAY_MS,
+    batchTimeBudgetMs: Number.isFinite(Number(options.batchTimeBudgetMs)) ? Number(options.batchTimeBudgetMs) : DEFAULT_BATCH_TIME_BUDGET_MS,
     fallbackSizes: Array.isArray(options.fallbackSizes) && options.fallbackSizes.length
       ? options.fallbackSizes
       : [...TRACK_FALLBACK_SIZES]
