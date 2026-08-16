@@ -9,7 +9,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const syntax=file=>{const r=spawnSync(process.execPath,['--check',path.join(root,file)],{encoding:'utf8'});assert.equal(r.status,0,`${file}: ${r.stderr||r.stdout}`);};
 
-test('V143 WHPP retry queue is independent, persistent, async and only targets failed WHPP rows',()=>{
+test('V143 WHPP retry queue remains independent, persistent, async and only targets failed WHPP rows',()=>{
   syntax('src/v143WhppRetryQueuePatch.js');
   const s=read('src/v143WhppRetryQueuePatch.js');
   assert.match(s,/v143-whpp-independent-retry-queue-v2/);
@@ -29,20 +29,24 @@ test('V143 WHPP retry queue is independent, persistent, async and only targets f
   assert.doesNotMatch(s,/DELETE FROM/);
 });
 
-test('V143 retry UI gives WHPP its own button, polls background progress and removes the import-page gap',()=>{
+test('V144 uses the classification-panel gap as the WHPP retry workspace and supports CE relogin',()=>{
   syntax('public/v141-whpp-retry-isolation-ui.js');
   const ui=read('public/v141-whpp-retry-isolation-ui.js');
-  assert.match(ui,/v143-whpp-retry-layout-ui-v2/);
+  assert.match(ui,/v144-whpp-retry-workspace-auth-v1/);
+  assert.match(ui,/summaryPanel\(\)/);
   assert.match(ui,/WHPP接口待重试/);
   assert.match(ui,/独立重试下一批/);
   assert.match(ui,/后台重试处理中/);
   assert.match(ui,/schedulePoll/);
   assert.match(ui,/grid-template-areas:"import summary" "run run" "carry carry"/);
-  assert.match(ui,/#importPage #runPanel\{grid-area:run/);
-  assert.match(ui,/#importPage #v139CarryManualPanel\{grid-area:carry/);
+  assert.match(ui,/unified-summary-panel/);
+  assert.match(ui,/flex:1 1 auto!important/);
+  assert.match(ui,/重新登录CE并继续重试/);
+  assert.match(ui,/\/api\/ce-login/);
+  assert.match(ui,/密码只用于本次CE登录请求/);
 });
 
-test('V143 is wired through the already-installed V141 backend entry point',()=>{
+test('V143 backend remains wired through the already-installed V141 backend entry point',()=>{
   const backend=read('src/v141WhppDailyRetryIsolationPatch.js');
   assert.match(backend,/import '\.\/v143WhppRetryQueuePatch\.js'/);
 });
