@@ -113,6 +113,7 @@ try {
   await importPhase('v29BusinessRulesPatch', './src/v29BusinessRulesPatch.js');
   await importPhase('v29EndpointAliasPatch', './src/v29EndpointAliasPatch.js');
   await importPhase('v30CarryRulesPatch', './src/v30CarryRulesPatch.js');
+  await importPhase('v162ShopeeLiveProgressPatch', './src/v162ShopeeLiveProgressPatch.js');
   await importPhase('v33RunProgressPatch', './src/v33RunProgressPatch.js');
   await importPhase('v39UnifiedSnapshotRecoveryPatch', './src/v39UnifiedSnapshotRecoveryPatch.js');
   await importPhase('v41AuthPausePatch', './src/v41AuthPausePatch.js');
