@@ -1,8 +1,9 @@
 import express from 'express';
+import './v165WhppRunStateRecoveryPatch.js';
 import './v143WhppRetryQueuePatch.js';
 import { loadWhppState, saveWhppState } from './whppStore.js';
 
-const PATCH_ID = '2026-08-16-v141-whpp-daily-retry-isolation-v1+v143-independent-retry-queue-v1';
+const PATCH_ID = '2026-08-17-v141-whpp-daily-retry-isolation-v2+v165-run-state-recovery+v143-independent-retry-queue';
 const RUN_ROUTES = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
 const WRAPPED = Symbol.for('ce-qc.v141-whpp-daily-retry-isolation');
 
