@@ -11,14 +11,13 @@
     "start:production": "set NODE_ENV=production&& node bootstrap.js",
     "test": "node --test --test-reporter=tap --test-skip-pattern=\"desktop root start no longer|due-only endpoint cannot refresh|internal refresh bypass is restricted\" test/*.test.js",
     "test:full": "npm test",
-    "test:golive": "node --test --test-reporter=dot test/v126-stable-candidate-gate.test.js test/v137-whpp-unified-business-state.test.js test/v139-daily-carry-isolation.test.js test/v140-shopee-checkpoint-current-board.test.js test/v141-whpp-daily-retry-isolation.test.js test/v142-seven-business-history-export.test.js test/v143-whpp-retry-layout.test.js test/v145-seven-business-retry-center.test.js"
+    "test:golive": "node --test --test-reporter=dot test/v126-stable-candidate-gate.test.js test/v137-whpp-unified-business-state.test.js test/v139-daily-carry-isolation.test.js test/v140-shopee-checkpoint-current-board.test.js test/v141-whpp-daily-retry-isolation.test.js test/v142-seven-business-history-export.test.js test/v143-whpp-retry-layout.test.js test/v145-seven-business-retry-center.test.js test/v146-unified-import-date-bridge.test.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.7",
     "exceljs": "^4.4.0",
-    "express": "^4.21.2",
     "jose": "^6.1.0",
     "multer": "^1.4.5-lts.1",
     "xlsx": "^0.18.5"
