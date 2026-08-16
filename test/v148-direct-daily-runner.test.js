@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+// Candidate sync marker: 2026-08-17-v165-gate-refresh-v1.
+// This file is intentionally touched so managed desktop updates cannot retain the
+// pre-V165 V148 assertion while installing the current V165 runner.
 const runner = fs.readFileSync(new URL('../public/v67-resilient-run-guard.js', import.meta.url), 'utf8');
 const uiPatch = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
 
