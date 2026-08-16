@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-16-v140-shopee-per-waybill-checkpoint-recovery-v1';
+const PATCH_ID = '2026-08-16-v140-shopee-per-waybill-checkpoint-recovery-v2';
 const RUN_ROUTES = new Set(['/api/shopee/run/start', '/api/shopee/run/resume']);
 const WRAPPED = Symbol.for('ce-qc.v140-shopee-checkpoint-recovery');
 
@@ -66,6 +66,11 @@ function recoverFromBatchAudit(db, reportDate, runId, maps) {
     if (!['success', 'failed'].includes(status)) continue;
     const codes = safeJson(row.shipmentCodesJson, []);
     for (const shipmentCode of Array.isArray(codes) ? codes : []) {
+      // confirm-query can return HTTP 200 with only a subset of requested rows.
+      // Therefore a successful parent batch is NOT per-waybill success evidence.
+      // Scan success is recovered only from business_scan_results below. A failed
+      // batch is still useful retry evidence until a real normalized row overrides it.
+      if (key === 'scanQueryStatus' && status === 'success') continue;
       mergeStatus(maps[key], {
         shipmentCode,
         status,
@@ -79,16 +84,15 @@ function recoverFromBatchAudit(db, reportDate, runId, maps) {
 
 function recoverNormalizedEvidence(db, reportDate, maps) {
   // A normalized confirm row only exists when CE returned a real row for that
-  // waybill, therefore it is safe success evidence even if the compact JSON state
-  // lost its scanQueryStatus array.
+  // waybill, therefore it is the ONLY recovered scan-success authority.
   for (const row of db.prepare(`SELECT shipmentCode FROM business_scan_results
       WHERE businessType='SHOPEE' AND reportDate=?`).all(reportDate)) {
     mergeStatus(maps.scanQueryStatus, { shipmentCode: row.shipmentCode, status: 'success' }, reportDate);
   }
 
-  // Event/exception tables prove successful responses for tickets that returned at
-  // least one row. Zero-row successes are recovered from the successful batch audit
-  // above, so both evidence shapes are covered without re-querying the full day.
+  // Event/exception APIs are read-only lookups where a successful request may
+  // legitimately return zero rows. Their successful batch audit therefore proves
+  // the requested waybills were queried; normalized rows add the non-empty case.
   for (const row of db.prepare(`SELECT DISTINCT shipmentCode FROM business_track_events
       WHERE businessType='SHOPEE' AND reportDate=?`).all(reportDate)) {
     mergeStatus(maps.eventQueryStatus, { shipmentCode: row.shipmentCode, status: 'success' }, reportDate);
