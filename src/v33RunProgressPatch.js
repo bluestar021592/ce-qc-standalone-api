@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v2';
+const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v2+v155-valid-import-total-fallback-v1';
 
 function parseJson(value, fallback = {}) {
   try { return JSON.parse(String(value || '')) || fallback; }
@@ -35,6 +35,34 @@ function boundedCounts(totalValue, doneValue, retryValue, observedValue) {
   return { done, retry, observed, total };
 }
 
+function latestValidSnapshotId(db, reportDate) {
+  return String(db.prepare(`
+    SELECT snapshotId FROM unified_import_batches
+    WHERE reportDate=? AND status='VALID'
+    ORDER BY createdAt DESC,batchId DESC LIMIT 1
+  `).get(reportDate)?.snapshotId || '');
+}
+function unifiedCcslTotal(db, reportDate) {
+  const snapshotId = latestValidSnapshotId(db, reportDate);
+  if (!snapshotId) return 0;
+  return num(db.prepare(`
+    SELECT COUNT(DISTINCT shipmentCode) count
+    FROM unified_import_rows
+    WHERE snapshotId=? AND reportDate=?
+      AND businessType IN ('CE','CEAF','TBKH','ALI1688')
+  `).get(snapshotId, reportDate)?.count);
+}
+function unifiedShopeeTotal(db, reportDate) {
+  const snapshotId = latestValidSnapshotId(db, reportDate);
+  if (!snapshotId) return 0;
+  return num(db.prepare(`
+    SELECT COUNT(DISTINCT shipmentCode) count
+    FROM unified_import_rows
+    WHERE snapshotId=? AND reportDate=?
+      AND businessType IN ('SHOPEECN','SHOPEEVN')
+  `).get(snapshotId, reportDate)?.count);
+}
+
 function ccslProgress(db) {
   const reportDate = db.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value
     || db.prepare('SELECT reportDate FROM daily_reports ORDER BY updatedAt DESC,reportDate DESC LIMIT 1').get()?.reportDate
@@ -45,7 +73,8 @@ function ccslProgress(db) {
     ? db.prepare('SELECT payloadJson,stage,batchIndex,totalBatches,status,errorMessage,updatedAt FROM run_checkpoints WHERE reportDate=? AND runId=? ORDER BY updatedAt DESC,rowid DESC LIMIT 1').get(reportDate, lock.runId)
     : null;
   const payload = parseJson(checkpoint?.payloadJson, {});
-  const sourceTotal = num(db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount);
+  const mirroredTotal = num(db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount);
+  const sourceTotal = targetTotal(mirroredTotal, unifiedCcslTotal(db, reportDate), 0);
   const phase = String(lock.currentStage || checkpoint?.stage || '').trim() || '待处理';
   const persistedTrackTotal = phaseIsTrack(phase)
     ? num(db.prepare('SELECT COUNT(DISTINCT shipmentCode) count FROM scan_results WHERE reportDate=? AND COALESCE(isPod,0)=0').get(reportDate)?.count)
@@ -62,7 +91,8 @@ function shopeeProgress(db) {
     ? db.prepare("SELECT payloadJson,stage,batchIndex,totalBatches,status,errorMessage,updatedAt FROM business_run_checkpoints WHERE businessType='SHOPEE' AND reportDate=? AND runId=? ORDER BY updatedAt DESC,id DESC LIMIT 1").get(reportDate, lock.runId)
     : null;
   const payload = parseJson(checkpoint?.payloadJson, {});
-  const sourceTotal = num(db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='SHOPEE' AND reportDate=?").get(reportDate)?.totalCount);
+  const mirroredTotal = num(db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='SHOPEE' AND reportDate=?").get(reportDate)?.totalCount);
+  const sourceTotal = targetTotal(mirroredTotal, unifiedShopeeTotal(db, reportDate), 0);
   const phase = String(lock.currentStage || checkpoint?.stage || '').trim() || '待处理';
   const persistedTrackTotal = phaseIsTrack(phase)
     ? num(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_scan_results WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(isPod,0)=0").get(reportDate)?.count)
