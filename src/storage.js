@@ -23,20 +23,29 @@ export async function saveState(state, options = {}) {
     state.finalDiversionRows = normalized.finalDiversionRows;
   }
   const mode = String(options.mode || inferPersistenceMode(normalized)).toLowerCase();
-  const checkpointKey = checkpointIdentity(normalized);
+  const persistenceState = mode === 'import'
+    ? { ...normalized, carryBills: [], nextCarryBills: [], priorCarryRows: [], scanPool: cleanMainBills(normalized.pnhBills || []).filter(wb => !(normalized.podLocks || []).includes(wb)) }
+    : normalized;
+  if (mode === 'import' && state && typeof state === 'object') {
+    state.carryBills = [];
+    state.nextCarryBills = [];
+    state.priorCarryRows = [];
+    state.scanPool = persistenceState.scanPool;
+  }
+  const checkpointKey = checkpointIdentity(persistenceState);
   if (mode === 'checkpoint' && checkpointKey) {
-    const signature = checkpointSignature(normalized);
-    if (runtimeCheckpointSignatures.get(checkpointKey) === signature) return normalized;
+    const signature = checkpointSignature(persistenceState);
+    if (runtimeCheckpointSignatures.get(checkpointKey) === signature) return persistenceState;
     runtimeCheckpointSignatures.set(checkpointKey, signature);
   }
   if (mode === 'full' || mode === 'import') {
     for (const key of [...runtimeCheckpointSignatures.keys()]) {
-      if (key.startsWith(`${normalized.reportDate || ''}|`)) runtimeCheckpointSignatures.delete(key);
+      if (key.startsWith(`${persistenceState.reportDate || ''}|`)) runtimeCheckpointSignatures.delete(key);
     }
   }
   const mirror = options.mirror === false || mode === 'state-only' ? false : true;
-  saveAppState(compactStateForPersistence(normalized), { mirror, mirrorMode: mode });
-  return normalized;
+  saveAppState(compactStateForPersistence(persistenceState), { mirror, mirrorMode: mode });
+  return persistenceState;
 }
 
 function inferPersistenceMode(state = {}) {
