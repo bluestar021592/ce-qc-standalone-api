@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { loadWhppState, saveWhppState } from './whppStore.js';
 
-const PATCH_ID = '2026-08-17-v165-whpp-run-state-recovery-v1';
+const PATCH_ID = '2026-08-17-v165-whpp-run-state-recovery-v2';
 const RUN_ROUTES = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
 const WRAPPED = Symbol.for('ce-qc.v165-whpp-run-state-recovery');
 
@@ -18,6 +18,12 @@ function codeOf(value = {}) {
   return String(typeof value === 'string' ? value : (value.shipmentCode || value.运单号 || value.waybill || '')).trim().toUpperCase();
 }
 function unique(values = []) { return [...new Set((values || []).map(codeOf).filter(Boolean))]; }
+function sameSet(left = [], right = []) {
+  const a = unique(left), b = unique(right);
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every(code => set.has(code));
+}
 
 function normalizedDaily(reportDate = '') {
   const db = getDb();
@@ -51,7 +57,7 @@ function recoverWhppState(reportDate = '') {
   }
   const current = loadWhppState();
   const sameDate = dateOnly(current.reportDate) === dateOnly(normalized.daily.reportDate);
-  const sameMembers = unique(current.pnhBills || []).length === expected;
+  const sameMembers = sameSet(current.pnhBills || [], normalized.bills);
   if (sameDate && current.dailyReportReady && sameMembers) {
     return { recovered: false, reason: 'STATE_ALREADY_CURRENT', state: current, expected };
   }
