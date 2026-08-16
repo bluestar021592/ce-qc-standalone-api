@@ -1,12 +1,13 @@
 (function installCurrentImportStabilityV159(global){
   if(global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__)return;
-  const VERSION='2026-08-16-v159-current-import-stability-v1';
+  const VERSION='2026-08-17-v159-current-import-stability-v2-result-refresh';
   const PAGE_TYPE=Object.freeze({ce:'CE',ceaf:'CEAF',tbkh:'TBKH',ali1688:'ALI1688',shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'});
   const PATH_PAGE=Object.freeze({'/':'home','/home':'home','/ce':'ce','/ceaf':'ceaf','/tbkh':'tbkh','/ali1688':'ali1688','/shopeecn':'shopeecn','/shopeevn':'shopeevn','/import':'import','/tracking':'tracking','/track':'tracking','/exceptions':'exceptions','/reports':'reports','/settings':'settings','/logs':'logs','/data-management':'data-management'});
   const TYPES=Object.values(PAGE_TYPE);
   const exactLoads=new Map();
   let routeGuardBusy=false;
   let routeGuardQueued=false;
+  let resultRefreshBusy=false;
 
   const num=value=>{const parsed=Number(value||0);return Number.isFinite(parsed)?parsed:0;};
   const fmt=value=>num(value).toLocaleString('zh-CN');
@@ -27,6 +28,10 @@
     ].map(num);
     return Math.max(0,...values);
   }
+  function completedSnapshot(state={}){
+    const status=String(state?.snapshotStatus||'').toUpperCase();
+    return status==='COMPLETED'||status==='COMPLETED_WITH_RETRY';
+  }
   function metrics(total=0){
     return {total,pod:0,podRate:0,returned:0,returnRate:0,cancelled:0,cancelRate:0,unresolved:total,pendingNonContinuous:0,pending1:0,pending2:0,pending3:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,delivery:0,workOrder:0,dispatchAttempt1:0,dispatchAttempt2:0,dispatchAttempt3:0,dispatchAttemptDenominator:total,dispatchAttempt1Rate:0,dispatchAttempt2Rate:0,dispatchAttempt3Rate:0,firstAttemptCount:0,firstAttemptEligible:total,firstAttemptRate:0};
   }
@@ -37,7 +42,7 @@
       businessType:type,viewBusinessType:type,reportDate:date,sourceName:imported?.sourceName||'',batchId:imported?.batchId||'',snapshotId:imported?.snapshotId||'',snapshotStatus:'IMPORTED',dailyReportReady:Boolean(date),
       pnhBills:[],dailyParseRows:[],dailyParseSummary:{totalRecognized:total,pnh:total,nonPnh:0,excluded:0,duplicate:0,groupCounts:{CN:type==='SHOPEECN'?total:0,VN:type==='SHOPEEVN'?total:0}},
       finalRows:[],scanResults:[],trackResults:[],trackEvents:[],carryBills:[],nextCarryBills:[],podLocks:[],historySummary:[],processing:{running:false,paused:false,phase:''},
-      sourceTotal:total,v55Summary:{total,__source:'V159_FRESH_IMPORT_CLASSIFICATION'},__v159Provisional:true,__v159ExpectedTotal:total
+      sourceTotal:total,v55Summary:{total,__source:'V159_FRESH_IMPORT_CLASSIFICATION'},__v159Provisional:true,__v159ExpectedTotal:total,__v159ResultTruthLoaded:false
     };
     if(/^SHOPEE/.test(type)){
       const all=metrics(total),cn=metrics(type==='SHOPEECN'?total:0),vn=metrics(type==='SHOPEEVN'?total:0);
@@ -84,14 +89,15 @@
     note.innerHTML=`<b>${String(imported.reportDate)} 当日自动处理队列：${fmt(today)}票</b> · 历史跨日 ${fmt(historical)}票独立复查，不会混入当日全自动。`;
   }
 
-  async function exactBusinessState(type){
+  async function exactBusinessState(type,options={}){
     const imported=currentImport(),states=currentStates();
     if(!imported||!states||!TYPES.includes(type))return null;
+    const force=Boolean(options?.force);
     const date=dateOnly(imported.reportDate),snapshotId=String(imported.snapshotId||'').trim(),expected=expectedCount(imported,type);
     if(!date||!snapshotId)return null;
     const current=states[type];
-    if(current&&!current.__v159Provisional&&dateOnly(current.reportDate)===date&&stateTotal(current)===expected)return current;
-    const key=`${type}:${snapshotId}`;
+    if(!force&&current&&!current.__v159Provisional&&dateOnly(current.reportDate)===date&&stateTotal(current)===expected&&completedSnapshot(current)&&current.__v159ResultTruthLoaded===true)return current;
+    const key=`${type}:${snapshotId}:${force?'force':'normal'}`;
     if(exactLoads.has(key))return exactLoads.get(key);
     const task=(async()=>{
       try{
@@ -101,7 +107,7 @@
         const state=payload?.state||{};
         const actual=stateTotal(state);
         if(actual!==expected&&expected>0)throw new Error(`${type} 当前快照成员应为 ${expected}，接口返回 ${actual}`);
-        states[type]={...state,__v159Provisional:false,__v159ExpectedTotal:expected};
+        states[type]={...state,__v159Provisional:false,__v159ExpectedTotal:expected,__v159ResultTruthLoaded:completedSnapshot(state),__v159ExactFetchedAt:Date.now()};
         return states[type];
       }catch(error){
         console.warn('[CE-QC][V159_EXACT_BUSINESS]',type,error?.message||error);
@@ -110,6 +116,15 @@
     })();
     exactLoads.set(key,task);
     return task;
+  }
+
+  async function refreshAllResultTruth(){
+    if(resultRefreshBusy)return;
+    resultRefreshBusy=true;
+    try{
+      for(const type of TYPES)await exactBusinessState(type,{force:true});
+      global.renderAll?.();
+    }finally{resultRefreshBusy=false;}
   }
 
   function pageFromPath(){return PATH_PAGE[location.pathname]||'home';}
@@ -167,9 +182,9 @@
     const observer=new MutationObserver(()=>queueRouteGuard());
     observer.observe(document.querySelector('.app-shell')||document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden']});
     global.addEventListener('popstate',queueRouteGuard);
-    document.addEventListener('ce-qc-run-complete',()=>{seedCurrentImport();queueRouteGuard();});
+    document.addEventListener('ce-qc-run-complete',()=>{seedCurrentImport();queueRouteGuard();void refreshAllResultTruth();});
     setTimeout(()=>{if(seedCurrentImport())global.renderAll?.();normalizeImportStatus();queueRouteGuard();},80);
-    global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,routeGuard:restoreRouteOwnership};
+    global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,refreshResults:refreshAllResultTruth,routeGuard:restoreRouteOwnership};
     console.info('[CE-QC][V159_CURRENT_IMPORT_STABILITY]',VERSION);
   }
 
