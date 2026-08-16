@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v2+v155-runtime-scan-pool-fallback-v2';
+const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v2+v155-runtime-scan-pool-fallback-v2-edge';
 
 function parseJson(value, fallback = {}) {
   try { return JSON.parse(String(value || '')) || fallback; }
@@ -112,7 +112,7 @@ function progressShape({ businessType, reportDate, lock = {}, checkpoint = null,
   const rawScanDone = num(payload.scanDone, payload.scanResults);
   const rawScanRetry = num(payload.scanRetry);
   const rawScanObserved = num(payload.scanObserved, rawScanDone + rawScanRetry);
-  const runtimeScanPool = num(payload.lastRunSummary?.scanPool);
+  const runtimeScanPool = payload.lastRunSummary?.scanPool;
   const declaredScanTotal = targetTotal(payload.scanTotal, runtimeScanPool, sourceTotal);
   const scanTotal = targetTotal(declaredScanTotal, sourceTotal, rawScanDone + rawScanRetry);
   const scan = boundedCounts(scanTotal, rawScanDone, rawScanRetry, rawScanObserved);
