@@ -33,7 +33,7 @@ export function loadBusinessState(businessType = SHOPEE) {
 export function saveBusinessState(state = {}, businessType = state.businessType || SHOPEE, options = {}) {
   const type = normalizeType(businessType);
   const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
-  const mode = String(options.mode || 'full').toLowerCase();
+  const mode = String(options.mode || inferBusinessPersistenceMode(normalized)).toLowerCase();
   const persisted = compactBusinessStatePayload(normalized, mode);
   const db = getDb();
   const now = nowIso();
@@ -51,6 +51,19 @@ export function saveBusinessState(state = {}, businessType = state.businessType 
     throw error;
   }
   return normalized;
+}
+
+function inferBusinessPersistenceMode(state = {}) {
+  const processing = state.processing || {};
+  const phase = String(processing.phase || '').trim();
+  const runStatus = String(state.lastRunSummary?.runStatus || state.currentRun?.status || '').toUpperCase();
+  if (/^(完成|COMPLETED)$/.test(phase) || runStatus === 'COMPLETED') return 'full';
+  if (state.currentRun?.runId || state.lastRunSummary?.runId) {
+    if (processing.running || processing.paused || processing.error || /RETRY|FAILED|RUNNING|PAUSED|AUTH_REQUIRED/.test(runStatus)) return 'checkpoint';
+    if ((state.finalRows || []).length) return 'full';
+  }
+  if (state.dailyReportReady && (state.pnhBills || []).length && !(state.finalRows || []).length) return 'import';
+  return 'full';
 }
 
 export function saveBusinessRunProgress(state = {}, businessType = state.businessType || SHOPEE) {
@@ -257,13 +270,16 @@ function compactBusinessStatePayload(state = {}, mode = 'full') {
     summary
   } : null;
   const checkpoint = mode === 'checkpoint';
+  const currentDayOnly = state.currentDayOnly !== false;
   return {
     ...state,
     checkpointMode: checkpoint,
-    currentDayOnly: state.currentDayOnly !== false,
+    currentDayOnly,
     daily: compactDaily,
     dailyParseRows: [],
     recipientConflicts: [],
+    carryBills: currentDayOnly ? [] : state.carryBills,
+    nextCarryBills: currentDayOnly ? [] : state.nextCarryBills,
     scanResults: checkpoint ? (state.scanResults || []).map(stripHeavyBusinessRow) : [],
     scanQueryStatus: checkpoint ? (state.scanQueryStatus || []).map(stripHeavyBusinessRow) : [],
     shipmentTrackResults: checkpoint ? (state.shipmentTrackResults || []).map(stripHeavyBusinessRow) : [],
@@ -331,16 +347,16 @@ function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
       EXISTS (SELECT 1 FROM business_daily_parse_rows d WHERE d.businessType=? AND d.reportDate=? AND d.shipmentCode=p.shipmentCode)
       OR EXISTS (SELECT 1 FROM business_carry_bills c WHERE c.businessType=? AND c.status='active' AND c.shipmentCode=p.shipmentCode)
     ) ORDER BY p.shipmentCode`).all(type, type, date, type).map(row => row.shipmentCode);
-  const carryRowsRaw = rowsFromJson(db,
-    "SELECT rawJson FROM business_carry_bills WHERE businessType=? AND status='active' ORDER BY updatedAt DESC",
-    [type]);
+  const historicalCarryRows = state.currentDayOnly === false
+    ? rowsFromJson(db, "SELECT rawJson FROM business_carry_bills WHERE businessType=? AND status='active' ORDER BY updatedAt DESC", [type])
+    : [];
   const carryByBill = new Map();
-  for (const row of carryRowsRaw) {
+  for (const row of historicalCarryRows) {
     const bill = billOf(row);
     if (bill && !carryByBill.has(bill)) carryByBill.set(bill, row);
   }
-  const historicalCarryRows = [...carryByBill.values()];
-  const historicalCarryBills = historicalCarryRows.map(billOf).filter(Boolean);
+  const uniqueHistoricalCarryRows = [...carryByBill.values()];
+  const historicalCarryBills = uniqueHistoricalCarryRows.map(billOf).filter(Boolean);
   const run = db.prepare('SELECT * FROM business_run_locks WHERE businessType=? AND reportDate=?').get(type, date) || null;
   const historyRows = db.prepare('SELECT summaryJson FROM business_history_summary WHERE businessType=? ORDER BY reportDate DESC LIMIT 30').all(type)
     .map(row => parseJsonSafe(row.summaryJson, null)).filter(Boolean).reverse();
@@ -353,7 +369,7 @@ function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
   const exceptionItems = checkpoint && (state.exceptionItems || []).length ? state.exceptionItems : persistedExceptions;
   const finalRows = checkpoint && (state.finalRows || []).length ? state.finalRows : persistedFinalRows;
   const apiBatchStatus = checkpoint && (state.apiBatchStatus || []).length ? state.apiBatchStatus : persistedApiBatchStatus;
-  const currentCarryBills = state.currentDayOnly ? (state.carryBills || []) : historicalCarryBills;
+  const currentCarryBills = state.currentDayOnly ? [] : historicalCarryBills;
   const podSet = new Set([...(state.podLocks || []), ...podLocks]);
   const scanPool = [...new Set([...pnhBills, ...currentCarryBills])].filter(bill => !podSet.has(bill));
   const needTrackBills = (state.needTrackBills || []).length
@@ -376,7 +392,7 @@ function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
     podLocks: [...podSet],
     carryBills: currentCarryBills,
     historicalCarryBills,
-    priorCarryRows: state.currentDayOnly ? (state.priorCarryRows || []) : historicalCarryRows,
+    priorCarryRows: state.currentDayOnly ? [] : uniqueHistoricalCarryRows,
     scanPool,
     scanResults,
     shipmentTrackResults,
@@ -435,8 +451,8 @@ function restrictShopeeState(state, type) {
     dailyParseSummary: sanitizeShopeeDailySummary(state.dailyParseSummary),
     daily: state.daily ? { ...state.daily, importRows: (state.daily.importRows || []).filter(isEligible), preview: (state.daily.preview || []).filter(isEligible), excludedRows: [] } : state.daily,
     pnhBills: (state.pnhBills || []).filter(keepBill),
-    carryBills: (state.carryBills || []).filter(keepBill),
-    nextCarryBills: (state.nextCarryBills || []).filter(keepBill),
+    carryBills: state.currentDayOnly ? [] : (state.carryBills || []).filter(keepBill),
+    nextCarryBills: state.currentDayOnly ? [] : (state.nextCarryBills || []).filter(keepBill),
     podLocks: (state.podLocks || []).filter(keepBill),
     scanPool: (state.scanPool || []).filter(keepBill),
     scanRetryBills: (state.scanRetryBills || []).filter(keepBill),
@@ -447,7 +463,7 @@ function restrictShopeeState(state, type) {
     exceptionItems: rows('exceptionItems'),
     trackResults: rows('trackResults'),
     finalRows: rows('finalRows'),
-    priorCarryRows: rows('priorCarryRows')
+    priorCarryRows: state.currentDayOnly ? [] : rows('priorCarryRows')
   };
 }
 
