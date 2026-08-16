@@ -4,7 +4,7 @@ import express from 'express';
 import XLSX from 'xlsx';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-16-v151-safe-same-file-reimport-v2';
+const PATCH_ID = '2026-08-16-v154-safe-same-date-reimport-v3';
 const WRAPPED = Symbol.for('ce-qc.v74-ceaf-duplicate-reimport');
 
 const SHIPMENT_HEADERS = new Set([
@@ -58,16 +58,17 @@ function prepareSameFileReplacement(req) {
   if (!filePath || !fs.existsSync(filePath)) return { repaired: false, reason: 'NO_FILE' };
 
   const fileHash = fileHashOf(filePath);
+  const rulesetHashLike = `${fileHash}:%`;
   const manualDate = String(req?.body?.reportDate || '').trim().slice(0, 10);
   const db = getDb();
   const existing = manualDate
-    ? db.prepare("SELECT * FROM unified_import_batches WHERE reportDate=? AND fileHash=? AND status='VALID' ORDER BY createdAt DESC LIMIT 1").get(manualDate, fileHash)
-    : db.prepare("SELECT * FROM unified_import_batches WHERE fileHash=? AND status='VALID' ORDER BY createdAt DESC LIMIT 1").get(fileHash);
+    ? db.prepare("SELECT * FROM unified_import_batches WHERE reportDate=? AND (fileHash=? OR fileHash LIKE ?) AND status='VALID' ORDER BY createdAt DESC LIMIT 1").get(manualDate, fileHash, rulesetHashLike)
+    : db.prepare("SELECT * FROM unified_import_batches WHERE (fileHash=? OR fileHash LIKE ?) AND status='VALID' ORDER BY createdAt DESC LIMIT 1").get(fileHash, rulesetHashLike);
   if (!existing) return { repaired: false, reason: 'NO_EXISTING_SAME_FILE', fileHash };
 
-  // Keep CEAF marker diagnostics because this patch originally repaired stale CEAF
-  // classification. They are diagnostics only now: an intentional re-import of the
-  // same daily workbook must be allowed for every business type.
+  // V42 persists a ruleset suffix after the raw SHA-256. Match either the raw
+  // file hash or that ruleset-qualified form so a byte-identical daily workbook
+  // can still create a fresh batch and rebuild classification + scan + track.
   let airRows = 0;
   try { airRows = countAirMarkerRows(filePath); } catch {}
   const existingCeaf = Number(db.prepare("SELECT COUNT(*) count FROM unified_import_rows WHERE batchId=? AND businessType='CEAF'").get(existing.batchId)?.count || 0);
@@ -77,13 +78,14 @@ function prepareSameFileReplacement(req) {
     return { repaired: false, reason: 'SAME_FILE_BATCH_ALREADY_CHANGED', fileHash, reportDate: existing.reportDate, batchId: existing.batchId, airRows, existingCeaf, existingWhpp };
   }
 
-  console.warn(`[CE-QC][V151_SAME_FILE_REIMPORT] prior VALID batch temporarily superseded batch=${existing.batchId} reportDate=${existing.reportDate}`);
+  console.warn(`[CE-QC][V154_SAME_DATE_REIMPORT] prior VALID batch temporarily superseded batch=${existing.batchId} reportDate=${existing.reportDate}`);
   return {
     repaired: true,
-    reason: 'SAME_FILE_REIMPORT_PREPARED',
+    reason: 'SAME_DATE_REIMPORT_PREPARED',
     batchId: existing.batchId,
     reportDate: existing.reportDate,
     fileHash,
+    storedFileHash: existing.fileHash || '',
     airRows,
     existingCeaf,
     existingWhpp
@@ -91,15 +93,8 @@ function prepareSameFileReplacement(req) {
 }
 
 function restorePriorBatchIfReplacementFailed(prepared) {
-  if (!prepared?.repaired || !prepared.batchId || !prepared.reportDate || !prepared.fileHash) return false;
+  if (!prepared?.repaired || !prepared.batchId || !prepared.reportDate) return false;
   const db = getDb();
-  const replacement = db.prepare(`
-    SELECT batchId FROM unified_import_batches
-    WHERE reportDate=? AND fileHash=? AND status='VALID' AND batchId<>?
-    ORDER BY createdAt DESC LIMIT 1
-  `).get(prepared.reportDate, prepared.fileHash, prepared.batchId);
-  if (replacement?.batchId) return false;
-
   const activeSameDate = db.prepare(`
     SELECT batchId FROM unified_import_batches
     WHERE reportDate=? AND status='VALID' AND batchId<>?
@@ -109,65 +104,62 @@ function restorePriorBatchIfReplacementFailed(prepared) {
 
   const restored = db.prepare("UPDATE unified_import_batches SET status='VALID' WHERE batchId=? AND status='SUPERSEDED'").run(prepared.batchId);
   if (Number(restored?.changes || 0) === 1) {
-    console.warn(`[CE-QC][V151_SAME_FILE_REIMPORT] replacement failed; restored prior batch=${prepared.batchId} reportDate=${prepared.reportDate}`);
+    console.warn(`[CE-QC][V154_SAME_DATE_REIMPORT] replacement failed; restored prior batch=${prepared.batchId} reportDate=${prepared.reportDate}`);
     return true;
   }
   return false;
 }
 
+function sameFileReplacementPreHandler(req, res, next) {
+  let prepared = { repaired: false, reason: 'NOT_PREPARED' };
+  try {
+    prepared = prepareSameFileReplacement(req);
+  } catch (error) {
+    console.warn('[CE-QC][V154_SAME_DATE_REIMPORT] prepare skipped:', error?.message || error);
+  }
+
+  if (prepared.repaired && res && typeof res.json === 'function') {
+    const originalJson = res.json.bind(res);
+    res.json = function v154SafeReimportJson(body) {
+      const failed = Number(res.statusCode || 200) >= 400 || body?.ok === false;
+      if (failed) {
+        try { restorePriorBatchIfReplacementFailed(prepared); } catch (error) {
+          console.warn('[CE-QC][V154_SAME_DATE_REIMPORT] restore after error failed:', error?.message || error);
+        }
+        return originalJson(body);
+      }
+      const replacement = {
+        mode: 'FORCE_NEW_BATCH_FOR_SAME_WORKBOOK',
+        reportDate: prepared.reportDate,
+        supersededBatchId: prepared.batchId,
+        sourceHash: prepared.fileHash
+      };
+      return originalJson(body && typeof body === 'object' ? { ...body, sameDateReplacement: replacement } : body);
+    };
+  }
+
+  return next();
+}
+
 const previousPost = express.application.post;
 if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
-  const wrappedPost = function v151SafeSameFileReimportPost(path, ...handlers) {
+  const wrappedPost = function v154SafeSameDateReimportPost(path, ...handlers) {
     if (path !== '/api/import/unified-daily-report' || handlers.length === 0) {
       return previousPost.call(this, path, ...handlers);
     }
 
-    const finalHandler = handlers.pop();
-    if (typeof finalHandler !== 'function') {
-      handlers.push(finalHandler);
-      return previousPost.call(this, path, ...handlers);
-    }
+    const finalHandler = handlers[handlers.length - 1];
+    if (typeof finalHandler !== 'function') return previousPost.call(this, path, ...handlers);
 
-    const guardedFinalHandler = function v151SafeSameFileReimportGuard(req, res, next) {
-      let prepared = { repaired: false, reason: 'NOT_PREPARED' };
-      try {
-        prepared = prepareSameFileReplacement(req);
-      } catch (error) {
-        console.warn('[CE-QC][V151_SAME_FILE_REIMPORT] prepare skipped:', error?.message || error);
-      }
-
-      if (prepared.repaired && res && typeof res.json === 'function') {
-        const originalJson = res.json.bind(res);
-        res.json = function v151SafeReimportJson(body) {
-          if (Number(res.statusCode || 200) >= 400 || body?.ok === false) {
-            try { restorePriorBatchIfReplacementFailed(prepared); } catch (error) {
-              console.warn('[CE-QC][V151_SAME_FILE_REIMPORT] restore after error failed:', error?.message || error);
-            }
-          }
-          return originalJson(body);
-        };
-      }
-
-      try {
-        const result = finalHandler.call(this, req, res, next);
-        if (result && typeof result.then === 'function') {
-          return result.catch(error => {
-            try { restorePriorBatchIfReplacementFailed(prepared); } catch {}
-            throw error;
-          });
-        }
-        return result;
-      } catch (error) {
-        try { restorePriorBatchIfReplacementFailed(prepared); } catch {}
-        throw error;
-      }
-    };
-
-    return previousPost.call(this, path, ...handlers, guardedFinalHandler);
+    // IMPORTANT: V42 is an earlier route-registration wrapper and replaces only
+    // the LAST handler with handleUnifiedImportV42. Therefore this guard must be
+    // inserted BEFORE the last handler, not wrapped around it; otherwise V42
+    // would discard the reimport guard at registration time.
+    return previousPost.call(this, path, ...handlers.slice(0, -1), sameFileReplacementPreHandler, finalHandler);
   };
   Object.defineProperty(wrappedPost, WRAPPED, { value: true });
   express.application.post = wrappedPost;
 }
 
 export const V74_CEAF_DUPLICATE_REIMPORT_PATCH_ID = PATCH_ID;
-export const __test = { countAirMarkerRows, isAirMarker, fileHashOf };
+export const __test = { countAirMarkerRows, isAirMarker, fileHashOf, prepareSameFileReplacement, restorePriorBatchIfReplacementFailed };
