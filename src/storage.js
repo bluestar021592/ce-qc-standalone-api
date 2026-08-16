@@ -11,26 +11,26 @@ export async function loadState() {
   return normalizeState(loadAppState());
 }
 
-export async function saveState(state) {
+export async function saveState(state, options = {}) {
   // Runtime CE API rows can contain photos, attachments, nested raw responses or
   // other very large values. The business rules only need the normalized fields
   // already copied onto each scan/event/final row. Persist a bounded checkpoint
   // representation so a completed scan batch cannot fail with V8
   // "Invalid string length" while JSON.stringify-ing the whole app state.
   //
-  // CCSL can discover POD in the trajectory after the scan result was already
-  // created. Older pipeline builds then temporarily had both the scan-derived POD
-  // row and the richer trajectory-derived POD row in finalRows. The final state is
-  // one shipment = one row, so normalize/dedupe before persistence AND copy the
-  // normalized rows back to the caller. server.js creates the immutable snapshot
-  // immediately after saveState(), therefore this also prevents a duplicate-only
-  // snapshot reconciliation failure without re-querying CE APIs.
+  // V149 separates persistence responsibilities:
+  // - full (default): immutable/final business data + current state
+  // - import: current daily membership only; historical carry is not rewritten
+  // - state-only: crash-resume JSON only; normalized tables are left untouched
+  // This prevents every progress/checkpoint message from re-writing the whole day.
   const normalized = normalizeState(state);
   if (state && typeof state === 'object') {
     state.finalRows = normalized.finalRows;
     state.finalDiversionRows = normalized.finalDiversionRows;
   }
-  saveAppState(compactStateForPersistence(normalized));
+  const mode = String(options.mode || 'full').toLowerCase();
+  const mirror = options.mirror === false || mode === 'state-only' ? false : true;
+  saveAppState(compactStateForPersistence(normalized), { mirror, mirrorMode: mode });
 }
 
 export async function resetState(confirmText = '') {
@@ -54,6 +54,7 @@ export function normalizeState(s = {}) {
   return {
     reportDate: s.reportDate || '',
     sourceName: s.sourceName || '',
+    dailyReportReady: Boolean(s.dailyReportReady || (s.reportDate && (s.pnhBills || []).length)),
     daily: s.daily || null,
     dailyParseSummary: dailySummary,
     dailyParseRows: dailyRows,
@@ -65,12 +66,16 @@ export function normalizeState(s = {}) {
     podLocks: cleanMainBills(s.podLocks || []),
     scanPool: cleanMainBills(s.scanPool || []),
     scanResults: normalizeRows(s.scanResults),
+    scanQueryStatus: normalizeRows(s.scanQueryStatus),
+    scanRetryBills: cleanMainBills(s.scanRetryBills || []),
     needTrackBills: cleanMainBills(s.needTrackBills || []),
     trackEvents: normalizeRows(s.trackEvents),
     trackResults: normalizeRows(s.trackResults),
+    trackQueryStatus: normalizeRows(s.trackQueryStatus),
     finalRows,
     nextCarryBills,
     finalDiversionRows: dedupeRowsByBill(normalizeRows(s.finalDiversionRows)),
+    priorCarryRows: normalizeRows(s.priorCarryRows),
     backupImportedAt: s.backupImportedAt || '',
     backupSummary: s.backupSummary || null,
     historySummary: Array.isArray(s.historySummary) ? s.historySummary.slice(-30) : [],
@@ -107,14 +112,10 @@ function dedupeRowsByBill(rows = []) {
   for (const row of rows || []) {
     const bill = rowBill(row);
     if (!bill) {
-      // Keep malformed rows visible so consistency checks can still report them.
       output.push(row);
       continue;
     }
     if (positionByBill.has(bill)) {
-      // Later rows win. In the CCSL pipeline the trajectory-derived result is
-      // appended after the scan-derived placeholder, so it preserves richer final
-      // status/evidence when POD is discovered by trajectory status code 80.
       output[positionByBill.get(bill)] = row;
       continue;
     }
@@ -142,9 +143,12 @@ function compactStateForPersistence(state = {}) {
     dailyParseSummary: sanitizeValue(state.dailyParseSummary),
     dailyParseRows: sanitizeRows(state.dailyParseRows),
     scanResults: sanitizeRows(state.scanResults),
+    scanQueryStatus: sanitizeRows(state.scanQueryStatus),
     trackEvents: sanitizeRows(state.trackEvents),
     trackResults: sanitizeRows(state.trackResults),
+    trackQueryStatus: sanitizeRows(state.trackQueryStatus),
     finalRows: sanitizeRows(state.finalRows),
+    priorCarryRows: sanitizeRows(state.priorCarryRows),
     finalDiversionRows: sanitizeRows(state.finalDiversionRows),
     historySummary: sanitizeRows(state.historySummary),
     logs: (state.logs || []).map(value => truncateString(value, 4000)).slice(-300),
