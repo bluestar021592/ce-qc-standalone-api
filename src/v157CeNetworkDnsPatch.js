@@ -1,5 +1,6 @@
 import dns from 'node:dns';
 import https from 'node:https';
+import { purgeCorrupted20260813Once } from './v158OneTimePurge20260813.js';
 
 const PATCH_ID = '2026-08-16-v157-ce-doh-dns-fallback-v1';
 const SYSTEM_DNS_BUDGET_MS = Math.max(500, Number(process.env.CE_SYSTEM_DNS_BUDGET_MS || 1500));
@@ -172,6 +173,7 @@ function install() {
   console.log(`[CE-QC][V157] CE network DNS fallback installed for ${CE_HOSTNAME}; system budget=${SYSTEM_DNS_BUDGET_MS}ms, DoH timeout=${DOH_TIMEOUT_MS}ms.`);
 }
 
+purgeCorrupted20260813Once();
 install();
 
 export const V157_CE_NETWORK_DNS_PATCH_ID = PATCH_ID;
