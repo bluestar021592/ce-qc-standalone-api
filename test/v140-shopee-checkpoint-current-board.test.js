@@ -63,11 +63,11 @@ test('V149 progress keeps V140 checkpoint truth while removing full-state hydrat
   assert.doesNotMatch(source,/business_exception_items/);
 });
 
-test('V149 current business board uses exact import membership and strips historical carry/POD contamination',()=>{
+test('V150 current business board uses exact import membership and blocks legacy V55 historical overwrite',()=>{
   syntax('public/v140-current-business-truth.js');
   const ui=read('public/v140-current-business-truth.js');
   const server=read('server.js');
-  assert.match(ui,/v149-current-business-truth-v2/);
+  assert.match(ui,/v150-current-business-truth-v3-v55-guard/);
   assert.match(ui,/classificationCounts\?\.\[type\]/);
   assert.match(ui,/\/api\/business-state\/\$\{encodeURIComponent\(type\)\}\?snapshotId=/);
   assert.match(ui,/function restrictToCurrentMembers/);
@@ -75,13 +75,15 @@ test('V149 current business board uses exact import membership and strips histor
   assert.match(ui,/podLocks: filterBills\(state\.podLocks\)/);
   assert.match(ui,/scanResults: filterRows\(state\.scanResults\)/);
   assert.match(ui,/__v149CanonicalCurrent/);
+  assert.match(ui,/installV55CurrentGuard/);
+  assert.match(ui,/V150_EXACT_CURRENT_SNAPSHOT/);
   assert.match(ui,/当前日报数据对账失败/);
+  assert.match(ui,/当前日报读取失败/);
   assert.doesNotMatch(ui,/\/api\/v89\/instant-dashboard/);
-  assert.doesNotMatch(ui,/v55Summary\?\.total/);
   assert.match(server,/loadLightweightUnifiedBusinessState\(req\.params\.businessType, requestedSnapshotId\)/);
 });
 
-test('V149 current business truth is injected after V139 carry UI and before lazy render layers',()=>{
+test('V150 current business truth remains injected after V139 carry UI and before lazy render layers',()=>{
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(injector,/v140-current-business-truth\.js\?v=20260816-3/);
   assert.match(injector,/v149-hotpath-isolation-v2/);
