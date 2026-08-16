@@ -40,7 +40,7 @@ test('V140 carry isolation runs first and checkpoint recovery runs immediately b
   assert.match(v139,/SHOPEE_RUN_ROUTES/);
   assert.match(v139,/return previousPost\.apply\(this, \[args\[0\], isolateShopeeCarry, \.\.\.args\.slice\(1\)\]\)/);
   assert.match(v140,/recoveryMiddleware, finalHandler/);
-  assert.match(v140,/restore the checkpoint/);
+  assert.match(v140,/restores the checkpoint/);
 });
 
 test('V140 progress is phase-aware unique-waybill evidence and bounded by target total',()=>{
