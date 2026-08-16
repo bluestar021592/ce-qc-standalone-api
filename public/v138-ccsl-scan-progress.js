@@ -1,17 +1,22 @@
 (function installV138CcslScanProgress(global){
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
-  const VERSION='2026-08-16-v139-ccsl-scan-progress-v2';
+  const VERSION='2026-08-16-v156-ccsl-final-progress-truth-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
 
-  // V138/V139 supersedes the older V96 renderer. Prevent the lazy loader from
-  // starting a second poller that would race this one and paint stale
-  // scanResults.length as completed work.
   global.__CE_QC_V96_V67_LIVE_PROGRESS_BRIDGE__=true;
 
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
+  const statusText=progress=>{
+    const status=String(progress?.runStatus||'').toLowerCase();
+    if(progress?.running)return '正在处理';
+    if(progress?.paused||status==='paused')return '已暂停';
+    if(status==='finished'||status==='completed')return '已完成';
+    if(status.includes('retry')||status==='failed')return '待重试';
+    return '待处理';
+  };
 
   async function read(type){
     try{
@@ -30,7 +35,21 @@
     return {label:raw||'准备处理',done:Number(progress.done||0),retry:Number(progress.retry||0),observed:Number(progress.done||0)+Number(progress.retry||0),total:Number(progress.total||0),batchMax:0};
   }
 
+  function finalMarkup(progress={}){
+    const status=statusText(progress);
+    const failed=Number(progress.scanRetry||0)+Number(progress.trackRetry||0);
+    const skipped=Number(progress.podLockSkipped||0);
+    const pillClass=status==='已完成'?'success':(status==='待重试'?'warning':'warning');
+    return `<span class="status-pill ${pillClass}">${esc(progress.businessType||'CCSL')} ${esc(status)}</span>`
+      +`<p>当前阶段：${esc(status==='已完成'?'完成':(progress.phase||status))}</p>`
+      +`<p>订单扫描：成功 ${fmt(progress.scanDone)} / ${fmt(progress.scanTotal)}${Number(progress.scanRetry||0)?` · 待重试 ${fmt(progress.scanRetry)}`:''} · 单批最大100</p>`
+      +`<p>轨迹查询：成功 ${fmt(progress.trackDone)} / ${fmt(progress.trackTotal)}${Number(progress.trackRetry||0)?` · 待重试 ${fmt(progress.trackRetry)}`:''} · 单批最大50</p>`
+      +(skipped?`<p class="muted">历史POD锁直接闭环 ${fmt(skipped)} 票，无需重复请求CE接口。</p>`:'')
+      +(failed?`<p class="muted">仍有 ${fmt(failed)} 票接口待重试，不能按完整完成处理。</p>`:'');
+  }
+
   function markup(progress={}){
+    if(!progress.running)return finalMarkup(progress);
     const p=phase(progress),batch=Number(progress.batchIndex||0),batches=Number(progress.totalBatches||0);
     const batchText=batches>0?` · 当前批次 ${batch||1}/${batches}`:'';
     const retryText=p.retry>0?` · <b>待重试 ${fmt(p.retry)}</b>`:'';
@@ -48,7 +67,7 @@
     const status=document.getElementById('ccslRunStatus');
     const button=document.querySelector('[data-testid="global-auto-process"]');
     if(status)status.innerHTML=markup(progress);
-    if(button&&button.disabled){
+    if(button&&button.disabled&&progress.running){
       const p=phase(progress);
       button.textContent=`${progress.businessType||'CCSL'} ${p.label} ${p.done}/${p.total}${p.retry?` · 重试${p.retry}`:''}`;
     }
@@ -61,6 +80,7 @@
       const [ccsl,shopee]=await Promise.all([read('CCSL'),read('SHOPEE')]);
       const active=[ccsl,shopee].find(item=>item?.running===true);
       if(active)render(active);
+      else if(ccsl?.runId)render(ccsl);
     }finally{polling=false;}
   }
 
@@ -71,7 +91,7 @@
       const type=String(state?.businessType||'CCSL').toUpperCase()==='SHOPEE'?'SHOPEE':'CCSL';
       const live=progressByType.get(type);
       const sameDate=!live?.reportDate||!state?.reportDate||String(live.reportDate)===String(state.reportDate);
-      if(live?.running&&sameDate)return markup(live);
+      if(live?.runId&&sameDate)return markup(live);
       return original.apply(this,arguments);
     };
     wrapped.__v138TruthfulProgress=true;
@@ -85,5 +105,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
   global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,phase,progressByType};
-  console.info('[CE-QC][V139_CCSL_SCAN_PROGRESS]',VERSION);
+  console.info('[CE-QC][V156_CCSL_FINAL_PROGRESS]',VERSION);
 })(window);
