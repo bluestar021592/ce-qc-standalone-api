@@ -173,19 +173,20 @@ test('V135 finalizes a valid WHPP snapshot even when some API rows remain retrya
   assert.match(injector,/v135WhppPartialSnapshotPatch\.js/);
 });
 
-test('V136 starts the current imported day without hanging on slow or stale status preflight',()=>{
+test('V148 starts the current imported day directly without heavyweight state preflight',()=>{
   const runner=read('public/v67-resilient-run-guard.js');
   const retryUi=read('public/v135-whpp-retry-aware-run.js');
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(runner,/v136-seven-business-runner-preflight-v1/);
-  assert.match(runner,/STATE_PREFLIGHT_TIMEOUT_MS = 4000/);
-  assert.match(runner,/controller\.abort\(\)/);
-  assert.match(runner,/__stateUnknown/);
-  assert.match(runner,/document\.getElementById\('reportDate'\)/);
-  assert.match(runner,/const sameTargetDay = !target \|\| date === target/);
-  assert.match(runner,/if \(!known \|\| !sameTargetDay\)/);
+  assert.match(runner,/v148-direct-daily-runner-v1/);
+  assert.doesNotMatch(runner,/async function readStates\s*\(/);
+  assert.doesNotMatch(runner,/await readStates\s*\(/);
+  assert.doesNotMatch(runner,/正在检查七业务状态/);
+  assert.match(runner,/start: '\/api\/run', resume: '\/api\/resume'/);
+  assert.match(runner,/start: '\/api\/shopee\/run\/start', resume: '\/api\/shopee\/run\/resume'/);
+  assert.match(runner,/start: '\/api\/whpp\/run\/start', resume: '\/api\/whpp\/run\/resume'/);
   assert.match(retryUi,/__CE_QC_V67_RESILIENT_RUN_GUARD__\?\.targetDate/);
   assert.match(retryUi,/document\.getElementById\('reportDate'\)/);
+  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260816-8/);
   assert.ok(injector.indexOf('v135-whpp-retry-aware-run.js')<injector.indexOf('v132-whpp-seven-business-fast.js'));
 });
 
