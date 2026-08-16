@@ -6,25 +6,28 @@ import { fileURLToPath } from 'node:url';
 
 const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('V74 duplicate repair is syntax-valid and only supersedes stale same-file CEAF classification', () => {
+test('V151 same-file reimport is syntax-valid, supersedes only the prior VALID batch, and restores it on failed replacement', () => {
   const file = new URL('../src/v74CeafDuplicateReimportPatch.js', import.meta.url);
   const source = fs.readFileSync(file, 'utf8');
-  const check = spawnSync(process.execPath, ['--check', fileURLToPath(file)], { encoding: 'utf8' });
+  const check = spawnSync(process.execPath, ['--check', fileURLToPath(file)], { encoding:'utf8' });
   assert.equal(check.status, 0, check.stderr || check.stdout);
 
+  assert.match(source, /v151-safe-same-file-reimport-v2/);
   assert.match(source, /\/api\/import\/unified-daily-report/);
   assert.match(source, /fileHash/);
+  assert.match(source, /prepareSameFileReplacement/);
+  assert.match(source, /SET status='SUPERSEDED'/);
+  assert.match(source, /restorePriorBatchIfReplacementFailed/);
+  assert.match(source, /SET status='VALID'/);
+  assert.match(source, /replacement failed; restored prior batch/);
   assert.match(source, /businessType='CEAF'/);
   assert.match(source, /businessType='WHPP'/);
-  assert.match(source, /existingCeaf >= airRows/);
-  assert.match(source, /SET status='SUPERSEDED'/);
-  assert.match(source, /status='VALID'/);
   assert.match(source, /CCAF/);
   assert.match(source, /CEAF/);
   assert.doesNotMatch(source, /DELETE FROM unified_import/);
 });
 
-test('V74 repair loads after V73 classification guard and before server registration', () => {
+test('V151 reimport guard loads after V73 classification guard and before server registration', () => {
   const bootstrap = read('bootstrap.js');
   const v73 = bootstrap.indexOf('v73CeafSourceMarkerPatch');
   const v74 = bootstrap.indexOf('v74CeafDuplicateReimportPatch');
