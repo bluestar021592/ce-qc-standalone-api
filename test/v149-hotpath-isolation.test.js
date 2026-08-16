@@ -47,7 +47,9 @@ test('V149 dashboard cache yields to import and foreground scan-track processing
   assert.match(cache, /IMPORT_DIRTY_ONLY_WAIT_FOR_RUN_COMPLETED/);
   assert.match(cache, /activeForegroundRun/);
   assert.match(cache, /FOREGROUND_PROCESSING_ACTIVE/);
-  assert.ok(cache.indexOf('IMPORT_DIRTY_ONLY_WAIT_FOR_RUN_COMPLETED') < cache.indexOf('getDashboardCacheStatus()'));
+  const importGuard = cache.indexOf('IMPORT_DIRTY_ONLY_WAIT_FOR_RUN_COMPLETED');
+  const actualCacheRead = cache.indexOf('const status = getDashboardCacheStatus();');
+  assert.ok(importGuard >= 0 && actualCacheRead >= 0 && importGuard < actualCacheRead);
 });
 
 test('V149 UI cache bust is installed without touching business rules', () => {
