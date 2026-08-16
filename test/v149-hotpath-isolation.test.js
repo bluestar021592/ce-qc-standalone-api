@@ -21,16 +21,23 @@ test('V149 hot-path files are syntax valid', () => {
   for (const file of ['src/v33RunProgressPatch.js','public/v140-current-business-truth.js','src/dashboardCacheWorker.js','src/v44WhppUiPatch.js']) syntax(file);
 });
 
-test('V149 live progress never hydrates full CCSL or SHOPEE business state', () => {
-  assert.match(progress, /v149-tiny-run-progress-compat-v1/);
+test('V149 live progress is lightweight, backward-compatible, and bounded by target pool', () => {
+  assert.match(progress, /v149-tiny-run-progress-compat-v2/);
   assert.match(progress, /FROM run_locks/);
   assert.match(progress, /FROM run_checkpoints/);
   assert.match(progress, /FROM business_run_locks/);
   assert.match(progress, /FROM business_run_checkpoints/);
   assert.match(progress, /payload\.scanDone, payload\.scanResults/);
   assert.match(progress, /payload\.trackDone, payload\.trackResults/);
+  assert.match(progress, /function boundedCounts/);
+  assert.match(progress, /Math\.min\(total, rawDone\)/);
+  assert.match(progress, /Math\.min\(Math\.max\(0, total - done\), rawRetry\)/);
+  assert.match(progress, /V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_BOUNDED/);
   assert.doesNotMatch(progress, /loadState\s*\(/);
   assert.doesNotMatch(progress, /loadBusinessState\s*\(/);
+  assert.doesNotMatch(progress, /business_api_batches/);
+  assert.doesNotMatch(progress, /business_track_events/);
+  assert.doesNotMatch(progress, /business_exception_items/);
 });
 
 test('V149 current business boards use exact snapshot membership and strip historical carry/POD', () => {
