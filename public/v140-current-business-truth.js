@@ -1,9 +1,39 @@
 (function installV149CurrentBusinessTruth(global) {
   if (global.__CE_QC_V149_CURRENT_BUSINESS_TRUTH__) return;
   global.__CE_QC_V149_CURRENT_BUSINESS_TRUTH__ = true;
-  const VERSION = '2026-08-16-v149-current-business-truth-v1';
+  const VERSION = '2026-08-16-v149-current-business-truth-v2';
   const PAGE_TYPE = Object.freeze({ ce:'CE', ceaf:'CEAF', tbkh:'TBKH', ali1688:'ALI1688', shopeecn:'SHOPEECN', shopeevn:'SHOPEEVN' });
   let inFlight = null;
+
+  function codeOf(value) {
+    if (typeof value === 'string') return value.trim().toUpperCase();
+    return String(value?.shipmentCode || value?.运单号 || value?.waybill || value?.billNo || '').trim().toUpperCase();
+  }
+
+  function restrictToCurrentMembers(state = {}) {
+    const members = new Set((state.pnhBills || []).map(codeOf).filter(Boolean));
+    if (!members.size) return state;
+    const filterBills = rows => (rows || []).filter(item => members.has(codeOf(item)));
+    const filterRows = rows => (rows || []).filter(item => members.has(codeOf(item)));
+    return {
+      ...state,
+      pnhBills: [...members],
+      carryBills: filterBills(state.carryBills),
+      nextCarryBills: filterBills(state.nextCarryBills),
+      podLocks: filterBills(state.podLocks),
+      scanPool: filterBills(state.scanPool),
+      scanRetryBills: filterBills(state.scanRetryBills),
+      needTrackBills: filterBills(state.needTrackBills),
+      dailyParseRows: filterRows(state.dailyParseRows),
+      scanResults: filterRows(state.scanResults),
+      trackResults: filterRows(state.trackResults),
+      trackEvents: filterRows(state.trackEvents),
+      finalRows: filterRows(state.finalRows),
+      priorCarryRows: filterRows(state.priorCarryRows),
+      finalDiversionRows: filterRows(state.finalDiversionRows),
+      __v149CurrentMemberCount: members.size
+    };
+  }
 
   function membershipCount(state = {}) {
     const direct = Number(state.pnhBills?.length);
@@ -34,7 +64,7 @@
       return;
     }
     node.hidden = false;
-    node.innerHTML = `<span><strong>${type} 当前日报数据对账失败</strong> · 日报分类 ${expected.toLocaleString('zh-CN')}票 · 当前业务状态 ${actual.toLocaleString('zh-CN')}票。系统已停止把旧缓存当作当前数据，请先完成数据链路修复。</span>`;
+    node.innerHTML = `<span><strong>${type} 当前日报数据对账失败</strong> · 日报分类 ${expected.toLocaleString('zh-CN')}票 · 当前业务成员 ${actual.toLocaleString('zh-CN')}票。系统已停止把旧缓存或历史遗留当作当前数据。</span>`;
   }
 
   async function ensureCurrentBusinessTruth(page = '') {
@@ -59,14 +89,16 @@
           && !current._fastSqlSummary
           && !current._compact;
         if (alreadyCanonical) {
-          sourceMismatchBanner(type, expected, membershipCount(current));
+          const canonical = restrictToCurrentMembers(current);
+          businessStates[type] = canonical;
+          sourceMismatchBanner(type, expected, membershipCount(canonical));
           return;
         }
 
         // Current-day business pages must never use range/fast snapshot state as
         // their source of truth. Fetch exact membership by this import snapshotId.
         const result = await readJson(`/api/business-state/${encodeURIComponent(type)}?snapshotId=${encodeURIComponent(snapshotId)}`);
-        const live = result?.state || {};
+        const live = restrictToCurrentMembers(result?.state || {});
         live.__v149CanonicalCurrent = true;
         live.__v149ExpectedSourceTotal = expected;
         businessStates[type] = live;

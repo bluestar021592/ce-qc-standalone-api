@@ -33,10 +33,14 @@ test('V149 live progress never hydrates full CCSL or SHOPEE business state', () 
   assert.doesNotMatch(progress, /loadBusinessState\s*\(/);
 });
 
-test('V149 current business boards use the exact current import snapshot', () => {
-  assert.match(truth, /v149-current-business-truth-v1/);
+test('V149 current business boards use exact snapshot membership and strip historical carry/POD', () => {
+  assert.match(truth, /v149-current-business-truth-v2/);
   assert.match(truth, /classificationCounts\?\.\[type\]/);
   assert.match(truth, /\/api\/business-state\/\$\{encodeURIComponent\(type\)\}\?snapshotId=/);
+  assert.match(truth, /function restrictToCurrentMembers/);
+  assert.match(truth, /carryBills: filterBills\(state\.carryBills\)/);
+  assert.match(truth, /nextCarryBills: filterBills\(state\.nextCarryBills\)/);
+  assert.match(truth, /podLocks: filterBills\(state\.podLocks\)/);
   assert.doesNotMatch(truth, /\/api\/v89\/instant-dashboard/);
   assert.doesNotMatch(truth, /v55Summary\?\.total/);
   assert.match(truth, /当前日报数据对账失败/);
@@ -53,8 +57,8 @@ test('V149 dashboard cache yields to import and foreground scan-track processing
 });
 
 test('V149 UI cache bust is installed without touching business rules', () => {
-  assert.match(injector, /v149-hotpath-isolation-v1/);
-  assert.match(injector, /v140-current-business-truth\.js\?v=20260816-2/);
+  assert.match(injector, /v149-hotpath-isolation-v2/);
+  assert.match(injector, /v140-current-business-truth\.js\?v=20260816-3/);
   assert.doesNotMatch(`${progress}\n${truth}\n${cache}\n${injector}`, /DROP\s+TABLE/i);
   assert.doesNotMatch(`${progress}\n${truth}\n${cache}\n${injector}`, /DELETE\s+FROM\s+(?:unified_import_batches|unified_import_rows|unified_snapshots|shipment_daily_snapshots)\b/i);
 });
