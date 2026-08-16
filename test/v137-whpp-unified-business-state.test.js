@@ -65,22 +65,26 @@ test('V140 scan batches remain bounded and unresolved API rows get final retries
   assert.ok(patch.indexOf('v140ShopeeCheckpointRecoveryPatch.js')<patch.indexOf('v139DailyCarryIsolationPatch.js'));
 });
 
-test('V140 progress counts current active API by unique waybill and can never exceed its target pool',()=>{
+test('V149 progress remains bounded by target pool without rehydrating full API evidence tables',()=>{
   syntax('src/v33RunProgressPatch.js');
   syntax('public/v138-ccsl-scan-progress.js');
   const backend=read('src/v33RunProgressPatch.js');
   const ui=read('public/v138-ccsl-scan-progress.js');
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(backend,/function uniqueBills/);
+  assert.match(backend,/v149-tiny-run-progress-compat-v2/);
   assert.match(backend,/function boundedCounts/);
-  assert.match(backend,/Math\.min\(total, success\)/);
-  assert.match(backend,/V140_UNIQUE_WAYBILL_ACTIVE_API_STATUS/);
-  assert.match(backend,/%shipment-event%/);
-  assert.match(backend,/%exception-item%/);
-  assert.match(backend,/business_api_batches/);
-  assert.match(backend,/business_track_events/);
-  assert.match(backend,/business_exception_items/);
-  assert.doesNotMatch(backend,/const trackObserved = countRows\(state\.trackResults\)/);
+  assert.match(backend,/Math\.min\(total, rawDone\)/);
+  assert.match(backend,/Math\.min\(Math\.max\(0, total - done\), rawRetry\)/);
+  assert.match(backend,/V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_BOUNDED/);
+  assert.match(backend,/FROM run_locks/);
+  assert.match(backend,/FROM run_checkpoints/);
+  assert.match(backend,/FROM business_run_locks/);
+  assert.match(backend,/FROM business_run_checkpoints/);
+  assert.doesNotMatch(backend,/business_api_batches/);
+  assert.doesNotMatch(backend,/business_track_events/);
+  assert.doesNotMatch(backend,/business_exception_items/);
+  assert.doesNotMatch(backend,/loadState\s*\(/);
+  assert.doesNotMatch(backend,/loadBusinessState\s*\(/);
   assert.match(ui,/v139-ccsl-scan-progress-v2/);
   assert.match(ui,/待重试/);
   assert.match(ui,/单批最大/);
