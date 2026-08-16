@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-export const V142_HISTORY_AUDIT_ID = '2026-08-16-v142-seven-business-history-audit-v1';
+export const V142_HISTORY_AUDIT_ID = '2026-08-16-v142-seven-business-history-audit-v2';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const ALL_TYPES = [...CORE_TYPES,'WHPP'];
 
@@ -32,12 +32,14 @@ function whppDay(db,reportDate){
   return {reportPresent:Boolean(report),reported:Number(report?.totalCount??daily),dailyRows:daily,finalRows:finals,retryPending:retry,snapshotPresent:Boolean(snapshot),snapshotId:String(snapshot?.snapshotId||'')};
 }
 function airMismatch(db,reportDate,snapshotId){
-  if(!snapshotId||!tableExists(db,'business_daily_parse_rows'))return {markers:0,ceafMembers:0,mismatch:0};
-  let markers=0;
-  const candidates=db.prepare("SELECT rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND (COALESCE(rowJson,'') LIKE '%CCAF%' OR COALESCE(rowJson,'') LIKE '%CEAF%')").all(reportDate);
-  for(const row of candidates){if(hasAirMarker(safeJson(row.rowJson,{})))markers+=1;}
-  const ceafMembers=count(db,"SELECT COUNT(DISTINCT shipmentCode) count FROM unified_import_rows WHERE snapshotId=? AND businessType='CEAF'",snapshotId);
-  return {markers,ceafMembers,mismatch:Math.max(0,markers-ceafMembers)};
+  if(!snapshotId||!tableExists(db,'business_daily_parse_rows'))return {markers:0,ceafMembers:0,mismatch:0,missingBills:[]};
+  const markerBills=[];
+  const candidates=db.prepare("SELECT shipmentCode,rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND (COALESCE(rowJson,'') LIKE '%CCAF%' OR COALESCE(rowJson,'') LIKE '%CEAF%')").all(reportDate);
+  for(const row of candidates){if(hasAirMarker(safeJson(row.rowJson,{})))markerBills.push(String(row.shipmentCode||'').trim().toUpperCase());}
+  const ceafRows=db.prepare("SELECT shipmentCode FROM unified_import_rows WHERE snapshotId=? AND businessType='CEAF'").all(snapshotId);
+  const ceafSet=new Set(ceafRows.map(row=>String(row.shipmentCode||'').trim().toUpperCase()).filter(Boolean));
+  const missingBills=[...new Set(markerBills.filter(code=>code&&!ceafSet.has(code)))];
+  return {markers:new Set(markerBills).size,ceafMembers:ceafSet.size,mismatch:missingBills.length,missingBills:missingBills.slice(0,50)};
 }
 
 export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={}){
@@ -63,7 +65,7 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
     if(whpp.dailyRows!==whpp.reported)issues.push('WHPP_DAILY_COUNT_MISMATCH');
     if(whpp.snapshotPresent&&whpp.finalRows<whpp.dailyRows)issues.push('WHPP_FINAL_ROWS_INCOMPLETE');
     if(air.mismatch>0)issues.push('CEAF_SOURCE_MEMBERSHIP_MISMATCH');
-    if(issues.length)incomplete.push({reportDate,issues});
+    if(issues.length)incomplete.push({reportDate,issues,ceafMissingBills:air.missingBills});
     if(whpp.retryPending>0)warnings.push({reportDate,type:'WHPP_RETRY_PENDING',count:whpp.retryPending});
     totalImported+=coreTotal+whpp.reported; totalWhpp+=whpp.reported; totalRetry+=whpp.retryPending;
     days.push({reportDate,status:issues.length?'CHECK_REQUIRED':'OK',snapshotId:batch.snapshotId,snapshotStatus:batch.snapshotStatus,coreCounts:counts,coreTotal,whpp,air,issues});
