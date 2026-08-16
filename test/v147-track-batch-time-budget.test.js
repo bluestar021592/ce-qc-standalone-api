@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const track = fs.readFileSync(new URL('../src/trackBatching.js', import.meta.url), 'utf8');
+const pipeline = fs.readFileSync(new URL('../src/pipeline.js', import.meta.url), 'utf8');
 const config = fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js', import.meta.url), 'utf8');
 const uiPatch = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
 const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
@@ -20,6 +21,13 @@ test('V147 bounds one track batch instead of allowing recursive waits forever', 
   assert.match(track, /主流程立即继续下一批/);
   assert.match(track, /TRACK_FALLBACK_SIZES = Object\.freeze\(\[25, 10, 5, 1\]\)/);
   assert.match(track, /DEFAULT_TRANSIENT_RETRIES/);
+});
+
+test('SHOPEE event and exception APIs explicitly stay in fixed 50-ticket batch mode', () => {
+  assert.match(pipeline, /fallbackSizes: \[\]/);
+  assert.match(track, /if \(Array\.isArray\(fallbackSizes\)\) return fallbackSizes/);
+  assert.match(track, /固定批次模式/);
+  assert.match(track, /SHOPEE calls[\s\S]*fallbackSizes: \[\]/);
 });
 
 test('V147 keeps at least three transient retries and shortens each CE network wait', () => {
