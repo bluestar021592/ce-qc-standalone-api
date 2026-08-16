@@ -51,7 +51,7 @@ test('V144 uses an independent background retry workspace with visible polling a
 test('V141 backend isolation is installed before WHPP run routes and V144 UI is force-refreshed after V135 runner',()=>{
   const injector=read('src/v44WhppUiPatch.js');
   assert.ok(injector.indexOf("import './v141WhppDailyRetryIsolationPatch.js'")<injector.indexOf("import './v135WhppPartialSnapshotPatch.js'"));
-  assert.match(injector,/v141-whpp-retry-isolation-ui\.js\?v=20260816-5/);
+  assert.match(injector,/v141-whpp-retry-isolation-ui\.js\?v=20260816-6/);
   assert.match(injector,/v144-whpp-retry-workspace-auth-v1/);
   assert.ok(injector.indexOf('v135-whpp-retry-aware-run.js')<injector.indexOf('v141-whpp-retry-isolation-ui.js'));
 });
