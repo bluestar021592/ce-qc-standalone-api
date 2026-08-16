@@ -91,9 +91,11 @@ test('V149 dashboard cache yields to import and foreground scan-track processing
   assert.ok(importGuard >= 0 && actualCacheRead >= 0 && importGuard < actualCacheRead);
 });
 
-test('V151 current/history fixes keep destructive storage operations out of the changed paths', () => {
+test('V152 current/history fixes keep destructive storage operations out of the changed paths', () => {
   assert.match(injector, /v149-hotpath-isolation-v2/);
-  assert.match(injector, /v140-current-business-truth\.js\?v=20260816-3/);
+  assert.match(injector, /v152-multi-generation-fact-truth-v2/);
+  assert.match(injector, /v140-current-business-truth\.js\?v=20260816-4/);
+  assert.ok(injector.indexOf('v109-instant-business-navigation.js') < injector.indexOf('v140-current-business-truth.js'));
   const combined = `${progress}\n${truth}\n${cache}\n${injector}\n${trends}\n${reimport}`;
   assert.doesNotMatch(combined, /DROP\s+TABLE/i);
   assert.doesNotMatch(combined, /DELETE\s+FROM\s+(?:unified_import_batches|unified_import_rows|unified_snapshots|shipment_daily_snapshots)\b/i);
