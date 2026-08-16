@@ -73,7 +73,10 @@ test('V149 progress remains bounded by target pool without rehydrating full API 
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(backend,/v149-tiny-run-progress-compat-v2/);
   assert.match(backend,/v155-runtime-scan-pool-fallback-v2/);
-  assert.match(backend,/v156-run-membership-repair-v1/);
+  assert.match(backend,/v156-run-membership-repair-v2/);
+  assert.match(backend,/function exactCount/);
+  assert.match(backend,/hasCount\(last\.scanPool\)/);
+  assert.match(backend,/hasCount\(last\.needTrack\)/);
   assert.match(backend,/function boundedCounts/);
   assert.match(backend,/Math\.min\(total, rawDone\)/);
   assert.match(backend,/Math\.min\(Math\.max\(0, total - done\), rawRetry\)/);
@@ -82,8 +85,6 @@ test('V149 progress remains bounded by target pool without rehydrating full API 
   assert.match(backend,/FROM run_checkpoints/);
   assert.match(backend,/FROM business_run_locks/);
   assert.match(backend,/FROM business_run_checkpoints/);
-  assert.match(backend,/payload\.lastRunSummary\?\.scanPool/);
-  assert.match(backend,/payload\.lastRunSummary\?\.needTrack/);
   assert.match(backend,/FROM unified_import_batches/);
   assert.match(backend,/FROM unified_import_rows/);
   assert.match(backend,/businessType IN \('CE','CEAF','TBKH','ALI1688'\)/);
