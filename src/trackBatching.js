@@ -62,11 +62,12 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
 }
 
-function effectiveFallbackSizes(apiName = '', fallbackSizes = []) {
-  if (Array.isArray(fallbackSizes) && fallbackSizes.length) return fallbackSizes;
-  // The SHOPEE pipeline historically passed [] here, which disabled adaptive
-  // recovery for exactly the event/exception calls most likely to suffer a remote
-  // TLS reset. Read-only track/exception APIs are safe to split after retries.
+function effectiveFallbackSizes(apiName = '', fallbackSizes = null) {
+  // An explicitly supplied [] means "fixed-size batch, never shrink". The SHOPEE
+  // event/exception pipeline uses this mode so a 50-ticket batch is retried as the
+  // same batch and then checkpointed for later retry instead of degrading to
+  // 25/10/5/1 and slowing thousands of daily shipments.
+  if (Array.isArray(fallbackSizes)) return fallbackSizes;
   return /track|shipment-event|exception-item/i.test(String(apiName || '')) ? [...TRACK_FALLBACK_SIZES] : [];
 }
 
@@ -91,7 +92,7 @@ async function withTransientRetry(query, batch, onLog, retries = DEFAULT_TRANSIE
       attempt += 1;
       const backoff = Math.min(8000, delayMs * attempt);
       if (deadlineAt && Date.now() + backoff + MIN_REQUEST_WINDOW_MS > deadlineAt) {
-        await onLog(`${apiName}已完成网络补偿尝试 ${attempt}/${retries}，当前50票批次达到时间预算，将保存失败票并继续后续批次。`);
+        await onLog(`${apiName}已完成网络补偿尝试 ${attempt}/${retries}，当前${batch.length}票批次达到时间预算，将保存失败票并继续后续批次。`);
         throw budgetError(apiName, batch, budgetMs);
       }
       await onLog(`${apiName}网络/TLS瞬断：${batch.length}票将在${backoff}ms后自动重试 ${attempt}/${retries}，原因：${error?.message || error}`);
@@ -106,7 +107,7 @@ export async function queryBatchWithFallback({
   onLog = async () => {},
   onAttempt = async () => {},
   apiName = 'track',
-  fallbackSizes = [25, 10],
+  fallbackSizes = null,
   transientRetries = DEFAULT_TRANSIENT_RETRIES,
   transientDelayMs = DEFAULT_TRANSIENT_DELAY_MS,
   batchTimeBudgetMs = DEFAULT_BATCH_TIME_BUDGET_MS,
@@ -138,7 +139,10 @@ export async function queryBatchWithFallback({
       return { successes: [], failures: [{ batch: original, error }] };
     }
     const fallbackSize = fallback.find(size => size < original.length);
-    if (!fallbackSize) return { successes: [], failures: [{ batch: original, error }] };
+    if (!fallbackSize) {
+      await onLog(`${apiName}固定批次模式：${original.length}票不再拆分，已保存为待重试，主流程继续下一批。`);
+      return { successes: [], failures: [{ batch: original, error }] };
+    }
 
     await onLog(`仅对失败批次自适应降级：${original.length}→${fallbackSize}`);
     const successes = [];
@@ -173,9 +177,9 @@ export async function queryTrackBatchWithFallback(options = {}) {
   const rawQuery = options.query;
   if (typeof rawQuery !== 'function') throw new Error('track query function is required');
 
-  // Track/event queries are read-only. Retry transient network/TLS failures at least
-  // three times, adaptively shrink only while the shared time budget remains, then
-  // save unresolved bills for the seven-business retry center and continue the run.
+  // Generic CCSL track queries may still opt into adaptive fallback. SHOPEE calls
+  // queryBatchWithFallback directly with fallbackSizes: [] and therefore remain at
+  // the stable 50-ticket batch size.
   return queryBatchWithFallback({
     ...options,
     query: rawQuery,
@@ -184,7 +188,7 @@ export async function queryTrackBatchWithFallback(options = {}) {
     transientRetries: Number.isFinite(Number(options.transientRetries)) ? Number(options.transientRetries) : DEFAULT_TRANSIENT_RETRIES,
     transientDelayMs: Number.isFinite(Number(options.transientDelayMs)) ? Number(options.transientDelayMs) : DEFAULT_TRANSIENT_DELAY_MS,
     batchTimeBudgetMs: Number.isFinite(Number(options.batchTimeBudgetMs)) ? Number(options.batchTimeBudgetMs) : DEFAULT_BATCH_TIME_BUDGET_MS,
-    fallbackSizes: Array.isArray(options.fallbackSizes) && options.fallbackSizes.length
+    fallbackSizes: Array.isArray(options.fallbackSizes)
       ? options.fallbackSizes
       : [...TRACK_FALLBACK_SIZES]
   });
