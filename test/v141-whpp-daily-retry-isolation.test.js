@@ -26,10 +26,11 @@ test('V141 isolates WHPP daily automatic runs from historical carry without dele
 test('V165 rebuilds missing WHPP run state from normalized current-day SQLite membership before V141 isolation',()=>{
   syntax('src/v165WhppRunStateRecoveryPatch.js');
   const source=read('src/v165WhppRunStateRecoveryPatch.js');
-  assert.match(source,/v165-whpp-run-state-recovery-v1/);
+  assert.match(source,/v165-whpp-run-state-recovery-v2/);
   assert.match(source,/business_daily_reports/);
   assert.match(source,/business_daily_parse_rows/);
   assert.match(source,/WHPP_NORMALIZED_DAILY_MISMATCH/);
+  assert.match(source,/sameSet\(current\.pnhBills \|\| \[\], normalized\.bills\)/);
   assert.match(source,/pnhBills: normalized\.bills/);
   assert.match(source,/carryBills: \[\]/);
   assert.match(source,/nextCarryBills: \[\]/);
