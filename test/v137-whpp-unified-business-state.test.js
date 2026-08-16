@@ -72,6 +72,7 @@ test('V149 progress remains bounded by target pool without rehydrating full API 
   const ui=read('public/v138-ccsl-scan-progress.js');
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(backend,/v149-tiny-run-progress-compat-v2/);
+  assert.match(backend,/v155-runtime-scan-pool-fallback-v2/);
   assert.match(backend,/function boundedCounts/);
   assert.match(backend,/Math\.min\(total, rawDone\)/);
   assert.match(backend,/Math\.min\(Math\.max\(0, total - done\), rawRetry\)/);
@@ -80,6 +81,11 @@ test('V149 progress remains bounded by target pool without rehydrating full API 
   assert.match(backend,/FROM run_checkpoints/);
   assert.match(backend,/FROM business_run_locks/);
   assert.match(backend,/FROM business_run_checkpoints/);
+  assert.match(backend,/payload\.lastRunSummary\?\.scanPool/);
+  assert.match(backend,/FROM unified_import_batches/);
+  assert.match(backend,/FROM unified_import_rows/);
+  assert.match(backend,/businessType IN \('CE','CEAF','TBKH','ALI1688'\)/);
+  assert.match(backend,/businessType IN \('SHOPEECN','SHOPEEVN'\)/);
   assert.doesNotMatch(backend,/business_api_batches/);
   assert.doesNotMatch(backend,/business_track_events/);
   assert.doesNotMatch(backend,/business_exception_items/);
@@ -94,6 +100,18 @@ test('V149 progress remains bounded by target pool without rehydrating full API 
   assert.ok(injector.indexOf('v138-ccsl-scan-progress.js')<injector.indexOf('v139-carry-manual-window.js'));
   assert.ok(injector.indexOf('v139-carry-manual-window.js')<injector.indexOf('v140-current-business-truth.js'));
   assert.ok(injector.indexOf('v140-current-business-truth.js')<injector.indexOf('v108-route-lazy-features.js'));
+});
+
+test('V155 unified import persists the CCSL membership summary used by current-day processing and progress',()=>{
+  syntax('src/v42WhppPatch.js');
+  const patch=read('src/v42WhppPatch.js');
+  assert.match(patch,/v155-fresh-import-summary-authority-v1/);
+  assert.match(patch,/dailyParseSummary:\s*\{/);
+  assert.match(patch,/totalRecognized:\s*today\.length/);
+  assert.match(patch,/pnh:\s*today\.length/);
+  assert.match(patch,/pnhCount:\s*today\.length/);
+  assert.match(patch,/businessCounts/);
+  assert.match(patch,/V155_UNIFIED_VALID_MEMBERSHIP/);
 });
 
 test('V138 converts only orphaned running locks to paused on a fresh backend process',()=>{
