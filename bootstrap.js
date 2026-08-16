@@ -142,6 +142,7 @@ try {
   await importPhase('v90FastDashboardReadPatch', './src/v90FastDashboardReadPatch.js');
   await importPhase('v94ShopeeWhppSourceTruthPatch', './src/v94ShopeeWhppSourceTruthPatch.js');
   await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
+  await importPhase('v161UnifiedImportRuntimeTruthPatch', './src/v161UnifiedImportRuntimeTruthPatch.js');
 
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
