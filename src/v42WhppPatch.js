@@ -12,7 +12,7 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-13-v77-fresh-import-authority-v3';
+const PATCH_ID = '2026-08-16-v155-fresh-import-summary-authority-v1';
 const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
@@ -100,11 +100,27 @@ function initializeCcslState(reportDate, sourceName, rows, queueRows) {
   const current = loadAppState();
   const today = rows.map(row => row.shipmentCode);
   const carry = queueRows.filter(row => CCSL_TYPES.has(String(row.businessType || '').toUpperCase()) && row.sourceType === 'HISTORICAL_CARRY').map(row => row.shipmentCode);
+  const businessCounts = Object.fromEntries([...CCSL_TYPES].map(type => [type, rows.filter(row => String(row.businessType || '').toUpperCase() === type).length]));
   saveAppState({
     ...current,
     businessType: 'CCSL', reportDate, sourceName, dailyReportReady: true,
     pnhBills: today,
     dailyParseRows: rows.map(row => ({ ...row, result: 'PNH', 运单号: row.shipmentCode })),
+    dailyParseSummary: {
+      totalRecognized: today.length,
+      totalUniqueCount: today.length,
+      pnh: today.length,
+      pnhCount: today.length,
+      nonPnh: 0,
+      nonPnhCount: 0,
+      excluded: 0,
+      excludedCount: 0,
+      duplicate: 0,
+      duplicateCount: 0,
+      businessCounts,
+      importedAt: new Date().toISOString(),
+      source: 'V155_UNIFIED_VALID_MEMBERSHIP'
+    },
     carryBills: [...new Set(carry)], nextCarryBills: [...new Set(carry)],
     scanResults: [], scanQueryStatus: [], trackResults: [], trackEvents: [], trackQueryStatus: [], finalRows: [], needTrackBills: [],
     processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
