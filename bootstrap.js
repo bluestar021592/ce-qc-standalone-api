@@ -102,6 +102,7 @@ function scheduleDeferredMaintenance({ v92, v76Repair }) {
 
 try {
   console.log(`[CE-QC][BOOT] bootstrap pid=${process.pid} node=${process.version}`);
+  await importPhase('v157CeNetworkDnsPatch', './src/v157CeNetworkDnsPatch.js');
   await importPhase('v147TrackTimeoutConfig', './src/v147TrackTimeoutConfig.js');
   await importPhase('v27ServerPatch', './src/v27ServerPatch.js');
   await importPhase('v27TrendPatch', './src/v27TrendPatch.js');
