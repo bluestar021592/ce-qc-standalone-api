@@ -16,6 +16,7 @@ test('V141 isolates WHPP daily automatic runs from historical carry without dele
   syntax('src/v141WhppDailyRetryIsolationPatch.js');
   const source=read('src/v141WhppDailyRetryIsolationPatch.js');
   assert.match(source,/v141-whpp-daily-retry-isolation-v1/);
+  assert.match(source,/v143WhppRetryQueuePatch/);
   assert.match(source,/\/api\/whpp\/run\/start/);
   assert.match(source,/\/api\/whpp\/run\/resume/);
   assert.match(source,/state\.carryBills = \[\]/);
@@ -33,13 +34,14 @@ test('WHPP resume path still queries only per-waybill statuses that are not alre
   assert.match(pipeline,/仅重试失败运单/);
 });
 
-test('V141 replaces ambiguous partial-snapshot wording with explicit retry-only guidance',()=>{
+test('V143 replaces ambiguous retry guidance with an independent retry queue',()=>{
   syntax('public/v141-whpp-retry-isolation-ui.js');
   const ui=read('public/v141-whpp-retry-isolation-ui.js');
   assert.match(ui,/WHPP尚未完全结束/);
-  assert.match(ui,/点击“继续处理”只重试这/);
-  assert.match(ui,/已成功票不会重新查询/);
-  assert.match(ui,/历史跨日也不会进入当日全自动/);
+  assert.match(ui,/WHPP接口待重试/);
+  assert.match(ui,/独立重试下一批/);
+  assert.match(ui,/成功票不会重查/);
+  assert.match(ui,/不会阻塞后续日期上传/);
 });
 
 test('V141 backend isolation is installed before WHPP run routes and UI wording loads after V135 runner',()=>{
