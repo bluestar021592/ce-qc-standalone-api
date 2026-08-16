@@ -30,9 +30,10 @@ test('SHOPEE event and exception APIs explicitly stay in fixed 50-ticket batch m
   assert.match(track, /SHOPEE calls[\s\S]*fallbackSizes: \[\]/);
 });
 
-test('V147 keeps at least three transient retries and shortens each CE network wait', () => {
-  assert.match(config, /REQUEST_TIMEOUT_MS\) process\.env\.REQUEST_TIMEOUT_MS = '20000'/);
-  assert.match(config, /CE_TRACK_BATCH_BUDGET_MS\) process\.env\.CE_TRACK_BATCH_BUDGET_MS = '90000'/);
+test('V147 keeps three transient retries while allowing normal slow CE responses', () => {
+  assert.match(config, /v147-track-time-budget-v2/);
+  assert.match(config, /REQUEST_TIMEOUT_MS\) process\.env\.REQUEST_TIMEOUT_MS = '30000'/);
+  assert.match(config, /CE_TRACK_BATCH_BUDGET_MS\) process\.env\.CE_TRACK_BATCH_BUDGET_MS = '135000'/);
   assert.match(config, /CE_TRANSIENT_RETRIES\) process\.env\.CE_TRANSIENT_RETRIES = '3'/);
 });
 
