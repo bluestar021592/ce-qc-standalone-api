@@ -1,14 +1,21 @@
 import axios from 'axios';
+import dns from 'node:dns';
+import https from 'node:https';
 import { clearTokenSync, loadTokenSync, normalizeToken, saveTokenSync } from './authStore.js';
+
+const DEFAULT_CE_BASE_URL = 'https://otwms.cambodianexpress.com';
+const DEFAULT_CE_DNS_SERVERS = ['1.1.1.1', '8.8.8.8'];
 
 export class CEClient {
   constructor() {
-    this.baseURL = process.env.CE_BASE_URL || 'https://otwms.cambodianexpress.com';
+    this.baseURL = process.env.CE_BASE_URL || DEFAULT_CE_BASE_URL;
+    this.origin = ceOrigin(this.baseURL);
     this.timeout = Number(process.env.REQUEST_TIMEOUT_MS || 45000);
     this.http = axios.create({
       baseURL: this.baseURL,
       timeout: this.timeout,
-      headers: this.headers()
+      headers: this.headers(),
+      httpsAgent: createCeHttpsAgent()
     });
   }
 
@@ -22,13 +29,14 @@ export class CEClient {
     const refreshToken = savedToken?.refresh_token || cookieParsed.refreshToken;
     const tokenType = normalizeTokenType(savedToken?.token_type || 'bearer');
     const tenantId = savedToken?.tenantId || savedToken?.tenant_id || process.env.CE_TENANT_ID || '000000';
+    const origin = this.origin || ceOrigin(this.baseURL || DEFAULT_CE_BASE_URL);
     const h = {
       'Content-Type': 'application/json;charset=UTF-8',
       'Accept': 'application/json, text/plain, */*',
       'language': 'zh',
       'Tenant-Id': tenantId,
-      'Origin': 'https://otwms.cambodianexpress.com',
-      'Referer': 'https://otwms.cambodianexpress.com/',
+      'Origin': origin,
+      'Referer': `${origin}/`,
       'User-Agent': 'Mozilla/5.0'
     };
     if (authorization) h.Authorization = authorization;
@@ -53,6 +61,9 @@ export class CEClient {
       Authorization: authorization,
       'Blade-Auth': bladeAuth,
       Cookie: cookie,
+      ceBaseUrl: this.baseURL,
+      ceOrigin: this.origin,
+      dnsFallbackServers: ceDnsServers(),
       loginToken: {
         configured: Boolean(savedToken?.access_token),
         length: savedToken?.access_token ? savedToken.access_token.length : 0,
@@ -88,11 +99,12 @@ export class CEClient {
 
   loginHeaders(tenantId = '000000') {
     const authorization = normalizeAuthorization(process.env.CE_AUTHORIZATION);
+    const origin = this.origin || ceOrigin(this.baseURL || DEFAULT_CE_BASE_URL);
     const h = {
       'Language': 'zh',
       'Tenant-Id': tenantId,
-      'Origin': 'https://otwms.cambodianexpress.com',
-      'Referer': 'https://otwms.cambodianexpress.com/',
+      'Origin': origin,
+      'Referer': `${origin}/`,
       'User-Agent': 'Mozilla/5.0',
       'Accept': 'application/json, text/plain, */*',
       'Content-Type': 'application/json;charset=UTF-8'
@@ -102,11 +114,15 @@ export class CEClient {
   }
 
   async login({ tenantId = '000000', username, password, grant_type = 'password', scope = 'all', type = 'account' }) {
-    const res = await this.http.post('/api/blade-auth/oauth/token', undefined, {
-      params: { tenantId, username, password, grant_type, scope, type },
-      headers: this.loginHeaders(tenantId)
-    });
-    return res.data;
+    try {
+      const res = await this.http.post('/api/blade-auth/oauth/token', undefined, {
+        params: { tenantId, username, password, grant_type, scope, type },
+        headers: this.loginHeaders(tenantId)
+      });
+      return res.data;
+    } catch (e) {
+      throw normalizeCeError('CE登录', e);
+    }
   }
 
   async refreshTokenIfNeeded({ force = false } = {}) {
@@ -239,13 +255,17 @@ function pickTokenSource(raw) {
 function normalizeCeError(label, e) {
   const status = e?.response?.status || '';
   const data = e?.response?.data;
-  const ceCode = data?.code ?? data?.errorCode ?? data?.status ?? '';
+  const ceCode = data?.code ?? data?.errorCode ?? data?.status ?? e?.code ?? '';
   const ceMsg = data?.msg ?? data?.message ?? data?.error ?? '';
-  const detail = ceMsg || (data ? JSON.stringify(data).slice(0, 300) : e.message);
+  const dnsFailure = ['ENOTFOUND', 'EAI_AGAIN', 'ETIMEOUT'].includes(String(e?.code || '').toUpperCase());
+  const detail = dnsFailure
+    ? `DNS解析失败：${e?.hostname || e?.config?.baseURL || DEFAULT_CE_BASE_URL}`
+    : (ceMsg || (data ? JSON.stringify(data).slice(0, 300) : e.message));
   const err = new Error(`${label}失败${status ? ` HTTP ${status}` : ''}${detail ? `：${detail}` : ''}`);
   err.ceStatus = status;
   err.ceCode = ceCode;
   err.ceMsg = ceMsg;
+  err.causeCode = e?.code || '';
   return err;
 }
 
@@ -323,6 +343,48 @@ function safeHeaderDebug(value, includePrefix) {
     length: v.length,
     prefix10: includePrefix ? v.slice(0, 10) : ''
   };
+}
+
+function ceOrigin(value) {
+  try { return new URL(String(value || DEFAULT_CE_BASE_URL)).origin; }
+  catch { return DEFAULT_CE_BASE_URL; }
+}
+
+function ceDnsServers() {
+  const configured = String(process.env.CE_DNS_SERVERS || '').split(',').map(value => value.trim()).filter(Boolean);
+  return configured.length ? configured : DEFAULT_CE_DNS_SERVERS;
+}
+
+function createCeHttpsAgent() {
+  const resolver = new dns.Resolver();
+  const servers = ceDnsServers();
+  try { resolver.setServers(servers); }
+  catch (error) { console.warn('[CE-QC][DNS] invalid CE_DNS_SERVERS, using system DNS only:', error?.message || error); }
+
+  const lookup = (hostname, options, callback) => {
+    dns.lookup(hostname, options, (error, address, family) => {
+      if (!error) return callback(null, address, family);
+      const code = String(error?.code || '').toUpperCase();
+      if (!['ENOTFOUND', 'EAI_AGAIN', 'ETIMEOUT'].includes(code)) return callback(error);
+
+      const opts = options && typeof options === 'object' ? options : {};
+      const requestedFamily = Number(opts.family || 0);
+      const useIpv6 = requestedFamily === 6;
+      const resolve = useIpv6 ? resolver.resolve6.bind(resolver) : resolver.resolve4.bind(resolver);
+      resolve(hostname, (fallbackError, addresses) => {
+        if (fallbackError || !Array.isArray(addresses) || !addresses.length) {
+          console.error(`[CE-QC][DNS] fallback failed for ${hostname} via ${servers.join(',')}:`, fallbackError?.code || fallbackError?.message || fallbackError || error?.code || error);
+          return callback(error);
+        }
+        const resolvedFamily = useIpv6 ? 6 : 4;
+        console.warn(`[CE-QC][DNS] system resolver failed for ${hostname} (${code}); fallback resolved ${addresses[0]} via ${servers.join(',')}.`);
+        if (opts.all) return callback(null, addresses.map(item => ({ address: String(item), family: resolvedFamily })));
+        return callback(null, String(addresses[0]), resolvedFamily);
+      });
+    });
+  };
+
+  return new https.Agent({ keepAlive: true, lookup });
 }
 
 export function cleanBills(list) {
