@@ -15,6 +15,7 @@ const syntax=file=>{
 test('V140 recovers SHOPEE per-waybill query checkpoints before start or resume without deleting business evidence',()=>{
   syntax('src/v140ShopeeCheckpointRecoveryPatch.js');
   const source=read('src/v140ShopeeCheckpointRecoveryPatch.js');
+  assert.match(source,/v140-shopee-per-waybill-checkpoint-recovery-v2/);
   assert.match(source,/RUN_ROUTES = new Set\(\['\/api\/shopee\/run\/start', '\/api\/shopee\/run\/resume'\]\)/);
   assert.match(source,/business_api_batches/);
   assert.match(source,/business_scan_results/);
@@ -24,6 +25,8 @@ test('V140 recovers SHOPEE per-waybill query checkpoints before start or resume 
   assert.match(source,/eventQueryStatus/);
   assert.match(source,/exceptionQueryStatus/);
   assert.match(source,/current\?\.status === 'success'/);
+  assert.match(source,/key === 'scanQueryStatus' && status === 'success'/);
+  assert.match(source,/ONLY recovered scan-success authority/);
   assert.match(source,/UPDATE business_states SET valueJson=/);
   assert.doesNotMatch(source,/DELETE FROM/i);
   assert.doesNotMatch(source,/UPDATE (?:unified_import_rows|final_rows|business_final_rows|business_scan_results|business_track_events|business_exception_items)/i);
@@ -49,6 +52,7 @@ test('V140 progress is phase-aware unique-waybill evidence and bounded by target
   assert.match(source,/Math\.min\(total, success\)/);
   assert.match(source,/Math\.min\(Math\.max\(0, total - Math\.min\(total, success\)\), failed\)/);
   assert.match(source,/%confirm-query%/);
+  assert.match(source,/allowBatchSuccess: false/);
   assert.match(source,/%shipment-event%/);
   assert.match(source,/%exception-item%/);
   assert.match(source,/V140_UNIQUE_WAYBILL_ACTIVE_API_STATUS/);
