@@ -46,16 +46,21 @@ test('V140 carry isolation runs first and checkpoint recovery runs immediately b
 test('V149 progress keeps V140 checkpoint truth while removing full-state hydration from the 1s poll path',()=>{
   syntax('src/v33RunProgressPatch.js');
   const source=read('src/v33RunProgressPatch.js');
-  assert.match(source,/v149-tiny-run-progress-compat-v1/);
+  assert.match(source,/v149-tiny-run-progress-compat-v2/);
   assert.match(source,/FROM run_locks/);
   assert.match(source,/FROM run_checkpoints/);
   assert.match(source,/FROM business_run_locks/);
   assert.match(source,/FROM business_run_checkpoints/);
   assert.match(source,/payload\.scanDone, payload\.scanResults/);
   assert.match(source,/payload\.trackDone, payload\.trackResults/);
+  assert.match(source,/function boundedCounts/);
+  assert.match(source,/V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_BOUNDED/);
   assert.doesNotMatch(source,/loadState\s*\(/);
   assert.doesNotMatch(source,/loadBusinessState\s*\(/);
   assert.doesNotMatch(source,/statusEvidence\s*\(/);
+  assert.doesNotMatch(source,/business_api_batches/);
+  assert.doesNotMatch(source,/business_track_events/);
+  assert.doesNotMatch(source,/business_exception_items/);
 });
 
 test('V149 current business board uses exact import membership and strips historical carry/POD contamination',()=>{
