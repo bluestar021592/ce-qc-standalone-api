@@ -1,19 +1,15 @@
-(function installV140CurrentBusinessTruth(global) {
-  if (global.__CE_QC_V140_CURRENT_BUSINESS_TRUTH__) return;
-  global.__CE_QC_V140_CURRENT_BUSINESS_TRUTH__ = true;
-  const VERSION = '2026-08-16-v140-current-business-truth-v1';
+(function installV149CurrentBusinessTruth(global) {
+  if (global.__CE_QC_V149_CURRENT_BUSINESS_TRUTH__) return;
+  global.__CE_QC_V149_CURRENT_BUSINESS_TRUTH__ = true;
+  const VERSION = '2026-08-16-v149-current-business-truth-v1';
   const PAGE_TYPE = Object.freeze({ ce:'CE', ceaf:'CEAF', tbkh:'TBKH', ali1688:'ALI1688', shopeecn:'SHOPEECN', shopeevn:'SHOPEEVN' });
   let inFlight = null;
 
-  function countState(state = {}) {
-    const values = [
-      state.pnhBills?.length,
-      state.dailyParseSummary?.totalRecognized,
-      state.dashboard?.pnh,
-      state.dashboard?.totalMonitored,
-      state.v55Summary?.total
-    ].map(value => Number(value || 0));
-    return Math.max(0, ...values.filter(Number.isFinite));
+  function membershipCount(state = {}) {
+    const direct = Number(state.pnhBills?.length);
+    if (Number.isFinite(direct) && direct >= 0 && Array.isArray(state.pnhBills)) return direct;
+    const parsed = Number(state.dailyParseSummary?.totalRecognized);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
   }
 
   async function readJson(url) {
@@ -25,6 +21,22 @@
     return payload;
   }
 
+  function sourceMismatchBanner(type, expected, actual) {
+    let node = document.getElementById('v149CurrentSourceMismatch');
+    if (!node) {
+      node = document.createElement('div');
+      node.id = 'v149CurrentSourceMismatch';
+      node.className = 'global-processing-notice danger';
+      document.querySelector('.main-content')?.prepend(node);
+    }
+    if (expected === actual) {
+      node.hidden = true;
+      return;
+    }
+    node.hidden = false;
+    node.innerHTML = `<span><strong>${type} 当前日报数据对账失败</strong> · 日报分类 ${expected.toLocaleString('zh-CN')}票 · 当前业务状态 ${actual.toLocaleString('zh-CN')}票。系统已停止把旧缓存当作当前数据，请先完成数据链路修复。</span>`;
+  }
+
   async function ensureCurrentBusinessTruth(page = '') {
     const normalizedPage = String(page || (typeof currentPage !== 'undefined' ? currentPage : '')).toLowerCase();
     const type = PAGE_TYPE[normalizedPage];
@@ -33,41 +45,35 @@
 
     inFlight = (async () => {
       try {
-        const latest = await readJson('/api/import/unified-latest?compact=1');
+        const latest = await readJson('/api/import/unified-latest');
         const imported = latest?.import || null;
         const reportDate = String(imported?.reportDate || '').trim();
         const snapshotId = String(imported?.snapshotId || '').trim();
         if (!reportDate || !snapshotId) return;
-
-        // Home/source truth is intentionally lightweight. It is only used as a
-        // mismatch detector; the detailed board still comes from the canonical
-        // /api/business-state endpoint and never fabricates KPI rows in the browser.
-        let sourceTotal = 0;
-        try {
-          const source = await readJson(`/api/v89/instant-dashboard?date=${encodeURIComponent(reportDate)}`);
-          sourceTotal = Number(source?.counts?.[type] || 0);
-        } catch {}
+        const expected = Number(imported?.classificationCounts?.[type] || 0);
 
         const current = businessStates[type] || {};
-        const currentTotal = countState(current);
-        const sameSnapshot = String(current.snapshotId || '') === snapshotId;
-        const sameDate = String(current.reportDate || '') === reportDate;
-        if (sameSnapshot && sameDate && (currentTotal > 0 || sourceTotal <= 0)) return;
+        const alreadyCanonical = current.__v149CanonicalCurrent === true
+          && String(current.snapshotId || '') === snapshotId
+          && String(current.reportDate || '') === reportDate
+          && !current._fastSqlSummary
+          && !current._compact;
+        if (alreadyCanonical) {
+          sourceMismatchBanner(type, expected, membershipCount(current));
+          return;
+        }
 
-        // Deliberately omit compact=1. The compact route may use the latest formal
-        // COMPLETED range snapshot; while today's seven-business run is still in
-        // progress we need current SQLite membership + already-produced results.
+        // Current-day business pages must never use range/fast snapshot state as
+        // their source of truth. Fetch exact membership by this import snapshotId.
         const result = await readJson(`/api/business-state/${encodeURIComponent(type)}?snapshotId=${encodeURIComponent(snapshotId)}`);
         const live = result?.state || {};
+        live.__v149CanonicalCurrent = true;
+        live.__v149ExpectedSourceTotal = expected;
         businessStates[type] = live;
+        sourceMismatchBanner(type, expected, membershipCount(live));
         if (typeof renderAll === 'function') renderAll();
-
-        const liveTotal = countState(live);
-        if (sourceTotal > 0 && liveTotal === 0) {
-          console.error(`[CE-QC][V140_CURRENT_BUSINESS_TRUTH] ${type} source=${sourceTotal} but canonical live state=0; source membership requires server-side repair.`);
-        }
       } catch (error) {
-        console.warn('[CE-QC][V140_CURRENT_BUSINESS_TRUTH]', error?.message || error);
+        console.warn('[CE-QC][V149_CURRENT_BUSINESS_TRUTH]', error?.message || error);
       } finally {
         inFlight = null;
       }
@@ -77,14 +83,14 @@
 
   if (typeof hydratePageData === 'function') {
     const originalHydratePageData = hydratePageData;
-    hydratePageData = async function v140HydratePageData(page) {
+    hydratePageData = async function v149HydratePageData(page) {
       await originalHydratePageData(page);
       await ensureCurrentBusinessTruth(page);
     };
   }
 
-  document.addEventListener('ce-qc-run-complete', () => setTimeout(() => ensureCurrentBusinessTruth(), 200));
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(() => ensureCurrentBusinessTruth(), 150), { once:true });
-  else setTimeout(() => ensureCurrentBusinessTruth(), 150);
-  console.info('[CE-QC][V140_CURRENT_BUSINESS_TRUTH]', VERSION);
+  document.addEventListener('ce-qc-run-complete', () => setTimeout(() => ensureCurrentBusinessTruth(), 150));
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(() => ensureCurrentBusinessTruth(), 120), { once:true });
+  else setTimeout(() => ensureCurrentBusinessTruth(), 120);
+  console.info('[CE-QC][V149_CURRENT_BUSINESS_TRUTH]', VERSION);
 })(window);

@@ -10,11 +10,6 @@ export const SHOPEE = 'SHOPEE';
 export function loadBusinessState(businessType = SHOPEE) {
   const type = normalizeType(businessType);
   const db = getDb();
-  // Legacy versions stored the whole processing state (including every raw event)
-  // in one JSON string. Large SHOPEE days can exceed V8's maximum string length.
-  // Read a compact payload only when it is reasonably small; otherwise rebuild
-  // the current state from the normalized SQLite tables without materializing the
-  // legacy giant JSON in Node.js memory.
   const meta = db.prepare('SELECT length(valueJson) AS jsonLength FROM business_states WHERE businessType=?').get(type);
   let base = emptyState(type);
   const jsonLength = Number(meta?.jsonLength || 0);
@@ -35,10 +30,11 @@ export function loadBusinessState(businessType = SHOPEE) {
   return restrictShopeeState(hydrated, type);
 }
 
-export function saveBusinessState(state = {}, businessType = state.businessType || SHOPEE) {
+export function saveBusinessState(state = {}, businessType = state.businessType || SHOPEE, options = {}) {
   const type = normalizeType(businessType);
   const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
-  const persisted = compactBusinessStatePayload(normalized);
+  const mode = String(options.mode || inferBusinessPersistenceMode(normalized)).toLowerCase();
+  const persisted = compactBusinessStatePayload(normalized, mode);
   const db = getDb();
   const now = nowIso();
   db.exec('BEGIN IMMEDIATE');
@@ -46,7 +42,9 @@ export function saveBusinessState(state = {}, businessType = state.businessType 
     db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
       ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
       .run(type, JSON.stringify(persisted), now);
-    mirrorBusinessTables(db, normalized, type, now);
+    if (mode === 'import') mirrorBusinessImportTables(db, normalized, type, now);
+    else if (mode === 'checkpoint') mirrorBusinessProgress(db, normalized, type, now);
+    else if (mode !== 'state-only') mirrorBusinessTables(db, normalized, type, now);
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
@@ -55,10 +53,37 @@ export function saveBusinessState(state = {}, businessType = state.businessType 
   return normalized;
 }
 
+function inferBusinessPersistenceMode(state = {}) {
+  const processing = state.processing || {};
+  const phase = String(processing.phase || '').trim();
+  const runStatus = String(state.lastRunSummary?.runStatus || state.currentRun?.status || '').toUpperCase();
+  if (/^(完成|COMPLETED)$/.test(phase) || runStatus === 'COMPLETED') return 'full';
+  if (state.currentRun?.runId || state.lastRunSummary?.runId) {
+    if (processing.running || processing.paused || processing.error || /RETRY|FAILED|RUNNING|PAUSED|AUTH_REQUIRED/.test(runStatus)) return 'checkpoint';
+    if ((state.finalRows || []).length) return 'full';
+  }
+  if (state.dailyReportReady && (state.pnhBills || []).length && !(state.finalRows || []).length) return 'import';
+  return 'full';
+}
+
+export function saveBusinessRunProgress(state = {}, businessType = state.businessType || SHOPEE) {
+  const type = normalizeType(businessType);
+  const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
+  const db = getDb();
+  const now = nowIso();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    mirrorBusinessProgress(db, normalized, type, now);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+}
+
 export function getBusinessCurrentReportDate(businessType = SHOPEE) {
-  const state = loadBusinessState(businessType);
-  if (state.reportDate && state.dailyReportReady) return state.reportDate;
-  return '';
+  const type = normalizeType(businessType);
+  return getDb().prepare('SELECT reportDate FROM business_daily_reports WHERE businessType=? ORDER BY updatedAt DESC,reportDate DESC LIMIT 1').get(type)?.reportDate || '';
 }
 
 export function createOrRecoverBusinessRun(businessType, reportDate, options = {}) {
@@ -129,11 +154,9 @@ export function saveBusinessSnapshot(businessType, state, view) {
   const snapshotId = `${type}_${reportDate}_${runId}_${randomUUID().slice(0, 8)}`;
   const generatedAt = nowIso();
   const snapshotState = {
-    ...compactBusinessStatePayload(normalizeBusinessState(state, type)),
+    ...compactBusinessStatePayload(normalizeBusinessState(state, type), 'full'),
     businessType: type,
     snapshotId,
-    // Keep final rows in the immutable snapshot for count/reconciliation checks,
-    // but never embed raw API payloads or cumulative track events again.
     finalRows: (state.finalRows || []).map(stripHeavyBusinessRow),
     trackResults: [],
     trackEvents: [],
@@ -221,7 +244,6 @@ export function loadBusinessDetail(businessType, reportDate, shipmentCode) {
   };
 }
 
-
 function parseJsonSafe(value, fallback = null) {
   if (value == null || value === '') return fallback;
   try { return typeof value === 'string' ? JSON.parse(value) : value; } catch { return fallback; }
@@ -230,8 +252,6 @@ function parseJsonSafe(value, fallback = null) {
 function stripHeavyBusinessRow(row = {}) {
   if (!row || typeof row !== 'object') return row;
   const copy = { ...row };
-  // Raw API bodies remain available in the normalized scan/event tables. Do not
-  // duplicate them inside state/snapshot JSON where they multiply memory usage.
   delete copy.rawJson;
   delete copy.raw;
   delete copy.events;
@@ -241,7 +261,7 @@ function stripHeavyBusinessRow(row = {}) {
   return copy;
 }
 
-function compactBusinessStatePayload(state = {}) {
+function compactBusinessStatePayload(state = {}, mode = 'full') {
   const summary = state.dailyParseSummary || state.daily?.summary || null;
   const compactDaily = state.daily ? {
     reportDate: state.reportDate || state.daily.reportDate || '',
@@ -249,25 +269,30 @@ function compactBusinessStatePayload(state = {}) {
     importedAt: state.daily.importedAt || summary?.importedAt || '',
     summary
   } : null;
+  const checkpoint = mode === 'checkpoint';
+  const currentDayOnly = state.currentDayOnly !== false;
   return {
     ...state,
+    checkpointMode: checkpoint,
+    currentDayOnly,
     daily: compactDaily,
     dailyParseRows: [],
     recipientConflicts: [],
-    scanResults: [],
-    scanQueryStatus: [],
-    shipmentTrackResults: [],
-    shipmentQueryStatus: [],
-    trackEvents: [],
-    eventQueryStatus: [],
-    exceptionItems: [],
-    exceptionQueryStatus: [],
-    apiBatchStatus: [],
-    // Track results are the only large-ish array retained because they are the
-    // resume checkpoint after an event batch. Strip embedded raw scan bodies.
+    carryBills: currentDayOnly ? [] : state.carryBills,
+    nextCarryBills: currentDayOnly ? [] : state.nextCarryBills,
+    scanResults: checkpoint ? (state.scanResults || []).map(stripHeavyBusinessRow) : [],
+    scanQueryStatus: checkpoint ? (state.scanQueryStatus || []).map(stripHeavyBusinessRow) : [],
+    shipmentTrackResults: checkpoint ? (state.shipmentTrackResults || []).map(stripHeavyBusinessRow) : [],
+    shipmentQueryStatus: checkpoint ? (state.shipmentQueryStatus || []).map(stripHeavyBusinessRow) : [],
+    trackEvents: checkpoint ? (state.trackEvents || []).map(stripHeavyBusinessRow) : [],
+    eventQueryStatus: checkpoint ? (state.eventQueryStatus || []).map(stripHeavyBusinessRow) : [],
+    exceptionItems: checkpoint ? (state.exceptionItems || []).map(stripHeavyBusinessRow) : [],
+    exceptionQueryStatus: checkpoint ? (state.exceptionQueryStatus || []).map(stripHeavyBusinessRow) : [],
+    apiBatchStatus: checkpoint ? (state.apiBatchStatus || []).map(stripHeavyBusinessRow) : [],
     trackResults: (state.trackResults || []).map(stripHeavyBusinessRow),
-    finalRows: [],
-    priorCarryRows: (state.priorCarryRows || []).map(stripHeavyBusinessRow)
+    finalRows: checkpoint ? (state.finalRows || []).map(stripHeavyBusinessRow) : [],
+    priorCarryRows: [],
+    historicalCarryBills: []
   };
 }
 
@@ -296,45 +321,60 @@ function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
   const dailyRows = rowsFromJson(db,
     'SELECT rowJson FROM business_daily_parse_rows WHERE businessType=? AND reportDate=? ORDER BY id',
     [type, date], 'rowJson');
-  const scanResults = rowsFromJson(db,
+  const persistedScanResults = rowsFromJson(db,
     'SELECT rawJson FROM business_scan_results WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
     [type, date]);
-  const shipmentTrackResults = rowsFromJson(db,
+  const persistedShipmentTracks = rowsFromJson(db,
     'SELECT rawJson FROM business_shipment_tracks WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
     [type, date]);
-  const trackEvents = rowsFromJson(db,
+  const persistedTrackEvents = rowsFromJson(db,
     'SELECT rawJson FROM business_track_events WHERE businessType=? AND reportDate=? ORDER BY eventTime,id',
     [type, date]);
-  const exceptionItems = rowsFromJson(db,
+  const persistedExceptions = rowsFromJson(db,
     'SELECT rawJson FROM business_exception_items WHERE businessType=? AND reportDate=? ORDER BY reportTime,id',
     [type, date]);
-  const finalRows = rowsFromJson(db,
+  const persistedFinalRows = rowsFromJson(db,
     'SELECT rawJson FROM business_final_rows WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
     [type, date]);
 
   const conflictRows = db.prepare('SELECT shipmentCode,groupsJson,rowsJson,status FROM business_recipient_conflicts WHERE businessType=? AND reportDate=? ORDER BY id').all(type, date)
     .map(row => ({ shipmentCode: row.shipmentCode, groups: parseJsonSafe(row.groupsJson, []), rows: parseJsonSafe(row.rowsJson, []), status: row.status || '' }));
-  const apiBatchStatus = db.prepare('SELECT runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt FROM business_api_batches WHERE businessType=? AND reportDate=? ORDER BY updatedAt').all(type, date)
+  const persistedApiBatchStatus = db.prepare('SELECT runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt FROM business_api_batches WHERE businessType=? AND reportDate=? ORDER BY updatedAt').all(type, date)
     .map(row => ({ ...row, shipmentCodes: parseJsonSafe(row.shipmentCodesJson, []) }));
-  const podLocks = db.prepare('SELECT shipmentCode FROM business_pod_locks WHERE businessType=? ORDER BY shipmentCode').all(type).map(row => row.shipmentCode);
-  const carryRowsRaw = rowsFromJson(db,
-    'SELECT rawJson FROM business_carry_bills WHERE businessType=? ORDER BY updatedAt DESC',
-    [type]);
+  const podLocks = db.prepare(`SELECT p.shipmentCode
+    FROM business_pod_locks p
+    WHERE p.businessType=? AND (
+      EXISTS (SELECT 1 FROM business_daily_parse_rows d WHERE d.businessType=? AND d.reportDate=? AND d.shipmentCode=p.shipmentCode)
+      OR EXISTS (SELECT 1 FROM business_carry_bills c WHERE c.businessType=? AND c.status='active' AND c.shipmentCode=p.shipmentCode)
+    ) ORDER BY p.shipmentCode`).all(type, type, date, type).map(row => row.shipmentCode);
+  const historicalCarryRows = state.currentDayOnly === false
+    ? rowsFromJson(db, "SELECT rawJson FROM business_carry_bills WHERE businessType=? AND status='active' ORDER BY updatedAt DESC", [type])
+    : [];
   const carryByBill = new Map();
-  for (const row of carryRowsRaw) {
+  for (const row of historicalCarryRows) {
     const bill = billOf(row);
     if (bill && !carryByBill.has(bill)) carryByBill.set(bill, row);
   }
-  const carryRows = [...carryByBill.values()].filter(row => !String(row.carry状态 || row.status || '').startsWith('closed'));
-  const carryBills = carryRows.map(billOf).filter(Boolean);
+  const uniqueHistoricalCarryRows = [...carryByBill.values()];
+  const historicalCarryBills = uniqueHistoricalCarryRows.map(billOf).filter(Boolean);
   const run = db.prepare('SELECT * FROM business_run_locks WHERE businessType=? AND reportDate=?').get(type, date) || null;
   const historyRows = db.prepare('SELECT summaryJson FROM business_history_summary WHERE businessType=? ORDER BY reportDate DESC LIMIT 30').all(type)
     .map(row => parseJsonSafe(row.summaryJson, null)).filter(Boolean).reverse();
   const latestSnapshot = db.prepare("SELECT snapshotId FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(type, date);
   const pnhBills = dailyRows.map(billOf).filter(Boolean);
-  const podSet = new Set(podLocks);
-  const scanPool = [...new Set([...pnhBills, ...carryBills])].filter(bill => !podSet.has(bill));
-  const needTrackBills = scanResults.filter(row => row.trackRequired === true && row.是否POD !== '是').map(billOf).filter(Boolean);
+  const checkpoint = Boolean(state.checkpointMode);
+  const scanResults = checkpoint && (state.scanResults || []).length ? state.scanResults : persistedScanResults;
+  const shipmentTrackResults = checkpoint && (state.shipmentTrackResults || []).length ? state.shipmentTrackResults : persistedShipmentTracks;
+  const trackEvents = checkpoint && (state.trackEvents || []).length ? state.trackEvents : persistedTrackEvents;
+  const exceptionItems = checkpoint && (state.exceptionItems || []).length ? state.exceptionItems : persistedExceptions;
+  const finalRows = checkpoint && (state.finalRows || []).length ? state.finalRows : persistedFinalRows;
+  const apiBatchStatus = checkpoint && (state.apiBatchStatus || []).length ? state.apiBatchStatus : persistedApiBatchStatus;
+  const currentCarryBills = state.currentDayOnly ? [] : historicalCarryBills;
+  const podSet = new Set([...(state.podLocks || []), ...podLocks]);
+  const scanPool = [...new Set([...pnhBills, ...currentCarryBills])].filter(bill => !podSet.has(bill));
+  const needTrackBills = (state.needTrackBills || []).length
+    ? state.needTrackBills
+    : scanResults.filter(row => row.trackRequired === true && row.是否POD !== '是').map(billOf).filter(Boolean);
   const currentSummary = historyRows.find(item => String(item?.reportDate || '') === date) || state.lastRunSummary || null;
 
   return normalizeBusinessState({
@@ -349,9 +389,10 @@ function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
     recipientConflicts: conflictRows,
     recipientReconciliation: state.recipientReconciliation || dailySummary?.reconciliation || null,
     pnhBills: pnhBills.length ? pnhBills : state.pnhBills,
-    podLocks,
-    carryBills,
-    priorCarryRows: carryRows,
+    podLocks: [...podSet],
+    carryBills: currentCarryBills,
+    historicalCarryBills,
+    priorCarryRows: state.currentDayOnly ? [] : uniqueHistoricalCarryRows,
     scanPool,
     scanResults,
     shipmentTrackResults,
@@ -383,9 +424,11 @@ export function normalizeBusinessState(state = {}, businessType = SHOPEE) {
   return {
     businessType: type,
     reportDate: state.reportDate || '', sourceName: state.sourceName || '', dailyReportReady: Boolean(state.dailyReportReady || state.daily?.summary?.totalRecognized),
+    currentDayOnly: state.currentDayOnly !== false,
+    checkpointMode: Boolean(state.checkpointMode),
     daily: state.daily || null, dailyParseSummary: state.dailyParseSummary || state.daily?.summary || null, dailyParseRows: state.dailyParseRows || state.daily?.importRows || state.daily?.details || [],
     recipientConflicts: state.recipientConflicts || state.daily?.conflicts || [], recipientReconciliation: state.recipientReconciliation || state.daily?.summary?.reconciliation || null,
-    pnhBills: clean(state.pnhBills || state.bills || []), carryBills: clean(state.carryBills || []), podLocks: clean(state.podLocks || []),
+    pnhBills: clean(state.pnhBills || state.bills || []), carryBills: clean(state.carryBills || []), historicalCarryBills: clean(state.historicalCarryBills || []), podLocks: clean(state.podLocks || []),
     scanPool: clean(state.scanPool || []), scanRetryBills: clean(state.scanRetryBills || []), scanResults: state.scanResults || [], scanQueryStatus: state.scanQueryStatus || [], shipmentTrackResults: state.shipmentTrackResults || [], shipmentQueryStatus: state.shipmentQueryStatus || [], needTrackBills: clean(state.needTrackBills || []),
     trackEvents: state.trackEvents || [], eventQueryStatus: state.eventQueryStatus || [], exceptionItems: state.exceptionItems || [], exceptionQueryStatus: state.exceptionQueryStatus || [],
     apiBatchStatus: state.apiBatchStatus || [], trackResults: state.trackResults || [], finalRows: state.finalRows || [], priorCarryRows: state.priorCarryRows || [], nextCarryBills: clean(state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || [])),
@@ -408,8 +451,8 @@ function restrictShopeeState(state, type) {
     dailyParseSummary: sanitizeShopeeDailySummary(state.dailyParseSummary),
     daily: state.daily ? { ...state.daily, importRows: (state.daily.importRows || []).filter(isEligible), preview: (state.daily.preview || []).filter(isEligible), excludedRows: [] } : state.daily,
     pnhBills: (state.pnhBills || []).filter(keepBill),
-    carryBills: (state.carryBills || []).filter(keepBill),
-    nextCarryBills: (state.nextCarryBills || []).filter(keepBill),
+    carryBills: state.currentDayOnly ? [] : (state.carryBills || []).filter(keepBill),
+    nextCarryBills: state.currentDayOnly ? [] : (state.nextCarryBills || []).filter(keepBill),
     podLocks: (state.podLocks || []).filter(keepBill),
     scanPool: (state.scanPool || []).filter(keepBill),
     scanRetryBills: (state.scanRetryBills || []).filter(keepBill),
@@ -420,39 +463,64 @@ function restrictShopeeState(state, type) {
     exceptionItems: rows('exceptionItems'),
     trackResults: rows('trackResults'),
     finalRows: rows('finalRows'),
-    priorCarryRows: rows('priorCarryRows')
+    priorCarryRows: state.currentDayOnly ? [] : rows('priorCarryRows')
   };
+}
+
+function mirrorBusinessImportTables(db, state, type, now) {
+  const date = state.reportDate;
+  if (!date) return;
+  clearCurrentBusinessDateProcessing(db, type, date);
+  mirrorBusinessDailyTables(db, state, type, now);
+  mirrorBusinessPodLocks(db, state, type, now);
+}
+
+function clearCurrentBusinessDateProcessing(db, type, date) {
+  for (const table of ['business_scan_results','business_shipment_tracks','business_track_events','business_exception_items','business_final_rows','business_api_batches']) {
+    db.prepare(`DELETE FROM ${table} WHERE businessType=? AND reportDate=?`).run(type, date);
+  }
+  db.prepare('DELETE FROM pending_daily_members WHERE businessType=? AND reportDate=?').run(type, date);
+}
+
+function mirrorBusinessDailyTables(db, state, type, now) {
+  const date = state.reportDate;
+  if (!date || !state.dailyReportReady) return;
+  db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)
+    ON CONFLICT(businessType,reportDate) DO UPDATE SET sourceFile=excluded.sourceFile,totalCount=excluded.totalCount,summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
+    .run(type, date, state.sourceName, state.pnhBills.length, JSON.stringify(state.dailyParseSummary || {}), now, now);
+  db.prepare('DELETE FROM business_daily_parse_rows WHERE businessType=? AND reportDate=?').run(type, date);
+  const dailyStmt = db.prepare(`INSERT INTO business_daily_parse_rows(
+    businessType,reportDate,shipmentCode,sheetName,rowNumber,source_row_number,
+    recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,rawText,rowJson,createdAt
+  ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  for (const row of state.dailyParseRows) dailyStmt.run(
+    type, date, billOf(row), row.sheetName || '', Number(row.rowNumber || row.source_row_number || 0), Number(row.source_row_number || row.rowNumber || 0),
+    row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', row.rawText || '', JSON.stringify(row), now
+  );
+  db.prepare('DELETE FROM business_recipient_conflicts WHERE businessType=? AND reportDate=?').run(type, date);
+  const conflictStmt = db.prepare(`INSERT INTO business_recipient_conflicts(
+    businessType,reportDate,shipmentCode,groupsJson,rowsJson,status,createdAt,updatedAt
+  ) VALUES(?,?,?,?,?,'unresolved',?,?)`);
+  for (const conflict of state.recipientConflicts || []) conflictStmt.run(type, date, billOf(conflict), JSON.stringify(conflict.groups || []), JSON.stringify(conflict.rows || []), now, now);
+}
+
+function mirrorBusinessPodLocks(db, state, type, now) {
+  const podStmt = db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt) VALUES(?,?,?,'state',?,?)
+    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET podTime=excluded.podTime,updatedAt=excluded.updatedAt`);
+  for (const bill of state.podLocks) podStmt.run(type, bill, '', now, now);
 }
 
 function mirrorBusinessTables(db, state, type, now) {
   const date = state.reportDate;
-  if (date && state.dailyReportReady) {
-    db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)
-      ON CONFLICT(businessType,reportDate) DO UPDATE SET sourceFile=excluded.sourceFile,totalCount=excluded.totalCount,summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
-      .run(type, date, state.sourceName, state.pnhBills.length, JSON.stringify(state.dailyParseSummary || {}), now, now);
-    db.prepare('DELETE FROM business_daily_parse_rows WHERE businessType=? AND reportDate=?').run(type, date);
-    const dailyStmt = db.prepare(`INSERT INTO business_daily_parse_rows(
-      businessType,reportDate,shipmentCode,sheetName,rowNumber,source_row_number,
-      recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,rawText,rowJson,createdAt
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-    for (const row of state.dailyParseRows) dailyStmt.run(
-      type, date, billOf(row), row.sheetName || '', Number(row.rowNumber || row.source_row_number || 0), Number(row.source_row_number || row.rowNumber || 0),
-      row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', row.rawText || '', JSON.stringify(row), now
-    );
-    db.prepare('DELETE FROM business_recipient_conflicts WHERE businessType=? AND reportDate=?').run(type, date);
-    const conflictStmt = db.prepare(`INSERT INTO business_recipient_conflicts(
-      businessType,reportDate,shipmentCode,groupsJson,rowsJson,status,createdAt,updatedAt
-    ) VALUES(?,?,?,?,?,'unresolved',?,?)`);
-    for (const conflict of state.recipientConflicts || []) conflictStmt.run(type, date, billOf(conflict), JSON.stringify(conflict.groups || []), JSON.stringify(conflict.rows || []), now, now);
-  }
-  const podStmt = db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt) VALUES(?,?,?,'state',?,?)
-    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET podTime=excluded.podTime,updatedAt=excluded.updatedAt`);
-  for (const bill of state.podLocks) podStmt.run(type, bill, '', now, now);
+  mirrorBusinessDailyTables(db, state, type, now);
+  mirrorBusinessPodLocks(db, state, type, now);
 
   const active = new Set(state.nextCarryBills.length ? state.nextCarryBills : state.carryBills);
   const podSet = new Set(state.podLocks);
-  for (const row of db.prepare("SELECT shipmentCode FROM business_carry_bills WHERE businessType=? AND status='active'").all(type)) {
-    if (!active.has(row.shipmentCode) || podSet.has(row.shipmentCode)) db.prepare("UPDATE business_carry_bills SET status=?,updatedAt=? WHERE businessType=? AND shipmentCode=? AND status='active'").run(podSet.has(row.shipmentCode) ? 'closed_pod' : 'closed_normal', now, type, row.shipmentCode);
+  // Historical carry is not closed merely because it is absent from today's
+  // auto-run state. It closes only with explicit terminal evidence.
+  for (const bill of podSet) {
+    db.prepare("UPDATE business_carry_bills SET status='closed_pod',updatedAt=? WHERE businessType=? AND shipmentCode=? AND status='active'").run(now, type, bill);
   }
   const carryStmt = db.prepare(`INSERT INTO business_carry_bills(businessType,shipmentCode,reportDate,sourceDate,status,primaryCategory,tagsJson,lastEventTime,lastEventDesc,lastCheckedDate,lastRunId,retryStatus,reason,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(businessType,shipmentCode,reportDate) DO UPDATE SET status='active',primaryCategory=excluded.primaryCategory,lastEventTime=excluded.lastEventTime,lastEventDesc=excluded.lastEventDesc,lastCheckedDate=excluded.lastCheckedDate,lastRunId=excluded.lastRunId,retryStatus=excluded.retryStatus,reason=excluded.reason,recipient_raw=excluded.recipient_raw,recipient_normalized=excluded.recipient_normalized,recipient_group=excluded.recipient_group,recipient_group_reason=excluded.recipient_group_reason,source_row_number=excluded.source_row_number,rawJson=excluded.rawJson,updatedAt=excluded.updatedAt`);
@@ -479,6 +547,50 @@ function mirrorBusinessTables(db, state, type, now) {
   const exceptionStmt = db.prepare(`INSERT INTO business_exception_items(businessType,shipmentCode,reportDate,exceptionType,exceptionDesc,reportTime,statusCode,fileId,rawJson,createdAt)
     VALUES(?,?,?,?,?,?,?,?,?,?)`);
   for (const row of state.exceptionItems) exceptionStmt.run(type, billOf(row), date, row.exceptionType || '', row.exceptionDesc || '', row.reportTime || '', String(row.statusCode ?? ''), String(row.fileId ?? ''), JSON.stringify(row), now);
+  mirrorBusinessApiBatches(db, state, type, now);
+  db.prepare('DELETE FROM business_final_rows WHERE businessType=? AND reportDate=?').run(type, date);
+  const finalStmt = db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  for (const row of state.finalRows) finalStmt.run(type, billOf(row), date, Number(row.是否POD === '是'), row.primaryCategory || row.异常分类 || '', row.API状态 || row.查询状态 || '', row.carry状态 || '', row.latestEventTime || row.最后节点时间 || '', row.latestEventDesc || row.最后节点 || '', row.latestNode || '', row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', Number(row.source_row_number || row.rowNumber || 0), JSON.stringify(row), now, now);
+  for (const row of state.finalRows) persistStoreFields(db, 'business_final_rows', type, billOf(row), date, row);
+  const historyStmt = db.prepare(`INSERT INTO business_history_summary(businessType,reportDate,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(businessType,reportDate) DO UPDATE SET summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`);
+  for (const item of state.historySummary) {
+    const historyDate = item.reportDate || item.summary?.reportDate || '';
+    if (historyDate) historyStmt.run(type, historyDate, JSON.stringify(item.summary || item), now, now);
+  }
+  mirrorBusinessProgress(db, state, type, now, { skipApiBatches: true });
+}
+
+function mirrorBusinessProgress(db, state, type, now, options = {}) {
+  const date = state.reportDate;
+  const run = state.currentRun || state.lastRunSummary;
+  if (!date || !run?.runId) return;
+  if (!options.skipApiBatches) mirrorBusinessApiBatches(db, state, type, now);
+  const processing = state.processing || {};
+  const scanStatus = queryStatusCounts(state.scanQueryStatus, state.scanResults);
+  const eventStatus = queryStatusCounts(state.eventQueryStatus, state.trackEvents);
+  const exceptionStatus = queryStatusCounts(state.exceptionQueryStatus, state.exceptionItems);
+  const trackStage = /exception/i.test(String(processing.phase || '')) ? exceptionStatus : eventStatus;
+  const payload = {
+    scanDone: scanStatus.done,
+    scanRetry: scanStatus.retry,
+    scanObserved: scanStatus.observed,
+    scanTotal: state.scanPool.length || state.pnhBills.length,
+    trackDone: trackStage.done,
+    trackRetry: trackStage.retry,
+    trackObserved: trackStage.observed,
+    trackTotal: state.needTrackBills.length,
+    finalRows: state.finalRows.length,
+    runStatus: state.lastRunSummary?.runStatus || ''
+  };
+  db.prepare(`UPDATE business_run_locks SET currentStage=?,batchIndex=?,totalBatches=?,errorMessage=?,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=?`)
+    .run(processing.phase || '', Number(processing.batchIndex || 0), Number(processing.totalBatches || 0), processing.error || '', now, type, date, run.runId);
+  db.prepare('INSERT INTO business_run_checkpoints(businessType,runId,reportDate,stage,batchIndex,totalBatches,status,payloadJson,errorMessage,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run(type, run.runId, date, processing.phase || '', Number(processing.batchIndex || 0), Number(processing.totalBatches || 0), processing.running ? 'running' : (processing.paused ? 'paused' : 'saved'), JSON.stringify(payload), processing.error || '', now, now);
+}
+
+function mirrorBusinessApiBatches(db, state, type, now) {
+  const date = state.reportDate;
+  if (!date) return;
   const batchRows = new Map();
   for (const row of state.apiBatchStatus || []) {
     const runId = row.runId || state.currentRun?.runId || state.lastRunSummary?.runId || '';
@@ -508,28 +620,36 @@ function mirrorBusinessTables(db, state, type, now) {
       throw error;
     }
     batchStmt.run(
-    type, date, row.runId, row.apiName || '', row.batchKey || '', JSON.stringify(row.shipmentCodes || []), row.status || '',
-    Number(row.attemptCount || 0), Number(row.resultCount || 0), row.errorMessage || '', row.createdAt || now, now,
-    row.payloadHash || '', Number(row.shipmentCount || (row.shipmentCodes || []).length), row.firstShipmentCode || '', row.lastShipmentCode || '',
-    row.updatedAt || now, row.createdAt || now, ['success', 'failed'].includes(row.status) ? (row.updatedAt || now) : ''
+      type, date, row.runId, row.apiName || '', row.batchKey || '', JSON.stringify(row.shipmentCodes || []), row.status || '',
+      Number(row.attemptCount || 0), Number(row.resultCount || 0), row.errorMessage || '', row.createdAt || now, now,
+      row.payloadHash || '', Number(row.shipmentCount || (row.shipmentCodes || []).length), row.firstShipmentCode || '', row.lastShipmentCode || '',
+      row.updatedAt || now, row.createdAt || now, ['success', 'failed'].includes(row.status) ? (row.updatedAt || now) : ''
     );
   }
-  db.prepare('DELETE FROM business_final_rows WHERE businessType=? AND reportDate=?').run(type, date);
-  const finalStmt = db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  for (const row of state.finalRows) finalStmt.run(type, billOf(row), date, Number(row.是否POD === '是'), row.primaryCategory || row.异常分类 || '', row.API状态 || row.查询状态 || '', row.carry状态 || '', row.latestEventTime || row.最后节点时间 || '', row.latestEventDesc || row.最后节点 || '', row.latestNode || '', row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', Number(row.source_row_number || row.rowNumber || 0), JSON.stringify(row), now, now);
-  for (const row of state.finalRows) persistStoreFields(db, 'business_final_rows', type, billOf(row), date, row);
-  const historyStmt = db.prepare(`INSERT INTO business_history_summary(businessType,reportDate,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(businessType,reportDate) DO UPDATE SET summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`);
-  for (const item of state.historySummary) {
-    const historyDate = item.reportDate || item.summary?.reportDate || '';
-    if (historyDate) historyStmt.run(type, historyDate, JSON.stringify(item.summary || item), now, now);
+}
+
+function queryStatusCounts(statusRows = [], fallbackRows = []) {
+  const statuses = new Map();
+  for (const row of statusRows || []) {
+    const bill = billOf(row);
+    if (!bill) continue;
+    statuses.set(bill, String(row.status || row.查询状态 || row.API状态 || '').toLowerCase());
   }
-  const run = state.currentRun || state.lastRunSummary;
-  if (run?.runId) {
-    db.prepare(`UPDATE business_run_locks SET currentStage=?,batchIndex=?,totalBatches=?,errorMessage=?,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=?`)
-      .run(state.processing.phase || '', Number(state.processing.batchIndex || 0), Number(state.processing.totalBatches || 0), state.processing.error || '', now, type, date, run.runId);
-    db.prepare('INSERT INTO business_run_checkpoints(businessType,runId,reportDate,stage,batchIndex,totalBatches,status,payloadJson,errorMessage,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
-      .run(type, run.runId, date, state.processing.phase || '', Number(state.processing.batchIndex || 0), Number(state.processing.totalBatches || 0), state.processing.running ? 'running' : (state.processing.paused ? 'paused' : 'saved'), JSON.stringify({ scanDone: state.scanResults.length, trackDone: state.trackResults.length }), state.processing.error || '', now, now);
+  if (!statuses.size) {
+    for (const row of fallbackRows || []) {
+      const bill = billOf(row);
+      if (!bill) continue;
+      const text = String(row.查询状态 || row.API状态 || row.status || '').toLowerCase();
+      statuses.set(bill, /failed|retry|失败|待重试/.test(text) ? 'failed' : 'success');
+    }
   }
+  let done = 0;
+  let retry = 0;
+  for (const status of statuses.values()) {
+    if (/failed|retry|失败|待重试/.test(status)) retry += 1;
+    else done += 1;
+  }
+  return { done, retry, observed: done + retry };
 }
 
 function mirrorRows(db, table, type, date, rows, now, values) {

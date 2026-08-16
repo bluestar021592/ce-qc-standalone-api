@@ -43,6 +43,7 @@ export function loadAppState() {
 export function saveAppState(state = {}, options = {}) {
   const db = getDb();
   const now = nowIso();
+  const mirrorMode = String(options.mirrorMode || 'full').toLowerCase();
   const tx = () => {
     db.prepare(`
       INSERT INTO app_state(key, valueJson, updatedAt)
@@ -51,9 +52,18 @@ export function saveAppState(state = {}, options = {}) {
     `).run(STATE_KEY, JSON.stringify(state), now);
 
     setMeta('last_processed_report_date', state.reportDate || '');
-    if (options.mirror !== false) mirrorStateTables(state, now);
+    if (options.mirror !== false) mirrorStateTables(state, now, mirrorMode);
   };
   runTransaction(tx);
+}
+
+// V149 hot-path checkpoint. It intentionally writes only run_locks + one tiny
+// checkpoint payload. Full scan/track/final tables are persisted once at final
+// reconciliation; app_state remains the crash-resume source during the run.
+export function saveRunProgress(state = {}) {
+  const reportDate = String(state.reportDate || '').trim();
+  if (!reportDate) return;
+  runTransaction(() => mirrorCheckpoint(state, reportDate, nowIso()));
 }
 
 export const BUSINESS_DATA_TABLES = [
@@ -326,8 +336,18 @@ export function loadDetail({ reportDate, shipmentCode }) {
   return { reportDate: normalizedDate, shipmentCode: bill, scan: inflateRow(scan), finalRow: inflateRow(finalRow), events: events.map(inflateRow), dailyRows, podLock: podLock || null, carry };
 }
 
-function mirrorStateTables(state, now) {
+function mirrorStateTables(state, now, mode = 'full') {
   const reportDate = state.reportDate || ACTIVE_REPORT;
+  if (mode === 'import') {
+    clearCurrentDateProcessing(reportDate);
+    mirrorPodLocks(state, now);
+    mirrorDaily(state, reportDate, now);
+    return;
+  }
+  if (mode === 'checkpoint') {
+    mirrorCheckpoint(state, reportDate, now);
+    return;
+  }
   mirrorPodLocks(state, now);
   mirrorCarryBills(state, reportDate, now);
   mirrorDaily(state, reportDate, now);
@@ -337,6 +357,15 @@ function mirrorStateTables(state, now) {
   mirrorFinalRows(state, reportDate, now);
   mirrorHistory(state, now);
   mirrorCheckpoint(state, reportDate, now);
+}
+
+function clearCurrentDateProcessing(reportDate) {
+  if (!reportDate || reportDate === ACTIVE_REPORT) return;
+  const db = getDb();
+  db.prepare('DELETE FROM scan_results WHERE reportDate=?').run(reportDate);
+  db.prepare('DELETE FROM track_events WHERE reportDate=?').run(reportDate);
+  db.prepare('DELETE FROM final_rows WHERE reportDate=?').run(reportDate);
+  db.prepare("DELETE FROM pending_daily_members WHERE businessType='CCSL' AND reportDate=?").run(reportDate);
 }
 
 function mirrorPodLocks(state, now) {
@@ -573,6 +602,21 @@ function mirrorCheckpoint(state, reportDate, now) {
   const status = processing.error ? 'failed' : (processing.paused ? 'paused' : (processing.running ? 'running' : (processing.phase === '完成' ? 'finished' : 'running')));
   const batchIndex = Number(processing.batchIndex || 0);
   const totalBatches = Number(processing.totalBatches || 0);
+  const scanStatus = queryStatusCounts(state.scanQueryStatus, state.scanResults);
+  const trackStatus = queryStatusCounts(state.trackQueryStatus, state.trackResults);
+  const progressPayload = {
+    scanDone: scanStatus.done,
+    scanRetry: scanStatus.retry,
+    scanObserved: scanStatus.observed,
+    scanTotal: cleanBills(state.scanPool || []).length,
+    trackDone: trackStatus.done,
+    trackRetry: trackStatus.retry,
+    trackObserved: trackStatus.observed,
+    trackTotal: cleanBills(state.needTrackBills || []).length,
+    finalRows: (state.finalRows || []).length,
+    nextCarryBills: (state.nextCarryBills || []).length,
+    runStatus: state.lastRunSummary?.runStatus || status
+  };
   db.prepare(`
     UPDATE run_locks SET status=?, currentStage=?, batchIndex=?, totalBatches=?, errorMessage=?, updatedAt=?
     WHERE reportDate=? AND runId=?
@@ -587,18 +631,35 @@ function mirrorCheckpoint(state, reportDate, now) {
     batchIndex,
     totalBatches,
     status,
-    JSON.stringify({
-      scanResults: (state.scanResults || []).length,
-      trackResults: (state.trackResults || []).length,
-      trackEvents: (state.trackEvents || []).length,
-      finalRows: (state.finalRows || []).length,
-      nextCarryBills: (state.nextCarryBills || []).length,
-      lastRunSummary: state.lastRunSummary || null
-    }),
+    JSON.stringify(progressPayload),
     processing.error || '',
     now,
     now
   );
+}
+
+function queryStatusCounts(statusRows = [], fallbackRows = []) {
+  const statuses = new Map();
+  for (const row of statusRows || []) {
+    const bill = billOf(row);
+    if (!bill) continue;
+    statuses.set(bill, String(row.status || row.查询状态 || row.API状态 || '').toLowerCase());
+  }
+  if (!statuses.size) {
+    for (const row of fallbackRows || []) {
+      const bill = billOf(row);
+      if (!bill) continue;
+      const text = String(row.查询状态 || row.API状态 || row.status || '').toLowerCase();
+      statuses.set(bill, /failed|retry|失败|待重试/.test(text) ? 'failed' : 'success');
+    }
+  }
+  let done = 0;
+  let retry = 0;
+  for (const status of statuses.values()) {
+    if (/failed|retry|失败|待重试/.test(status)) retry += 1;
+    else done += 1;
+  }
+  return { done, retry, observed: done + retry };
 }
 
 function buildStateFromTables() {
@@ -627,7 +688,9 @@ function buildStateFromTables() {
     excludedBills: dailyParseRows.filter(row => row?.result === '排除').map(billOf).filter(Boolean),
     duplicateBills: dailyParseRows.filter(row => row?.result === '重复' || row?.duplicate).map(billOf).filter(Boolean),
     podLocks,
-    carryBills: db.prepare('SELECT shipmentCode FROM carry_bills WHERE status=? ORDER BY shipmentCode').all('active').map(row => row.shipmentCode).filter(wb => !podSet.has(wb)),
+    // Historical carry is deliberately not injected into the current-day auto run.
+    // It remains durable in carry_bills and is handled by the independent carry/retry flow.
+    carryBills: [],
     scanResults: db.prepare('SELECT rawJson FROM scan_results WHERE reportDate=? ORDER BY shipmentCode').all(reportDate).map(row => parseJson(row.rawJson, {})),
     trackEvents: db.prepare('SELECT rawJson FROM track_events WHERE reportDate=? ORDER BY eventTime').all(reportDate).map(row => parseJson(row.rawJson, {})),
     finalRows: db.prepare('SELECT rawJson FROM final_rows WHERE reportDate=? ORDER BY shipmentCode').all(reportDate).map(row => parseJson(row.rawJson, {})),

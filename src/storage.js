@@ -7,30 +7,109 @@ import { loadAppState, resetAppState, saveAppState } from './store.js';
 // backend is dead. loadAppState() already initializes the store lazily when a
 // request actually needs the full mutable state.
 
+const runtimeCheckpointSignatures = new Map();
+
 export async function loadState() {
   return normalizeState(loadAppState());
 }
 
-export async function saveState(state) {
-  // Runtime CE API rows can contain photos, attachments, nested raw responses or
-  // other very large values. The business rules only need the normalized fields
-  // already copied onto each scan/event/final row. Persist a bounded checkpoint
-  // representation so a completed scan batch cannot fail with V8
-  // "Invalid string length" while JSON.stringify-ing the whole app state.
-  //
-  // CCSL can discover POD in the trajectory after the scan result was already
-  // created. Older pipeline builds then temporarily had both the scan-derived POD
-  // row and the richer trajectory-derived POD row in finalRows. The final state is
-  // one shipment = one row, so normalize/dedupe before persistence AND copy the
-  // normalized rows back to the caller. server.js creates the immutable snapshot
-  // immediately after saveState(), therefore this also prevents a duplicate-only
-  // snapshot reconciliation failure without re-querying CE APIs.
+export async function saveState(state, options = {}) {
+  // V149 makes persistence intent explicit at the storage boundary even when an
+  // older caller still invokes saveState() without options. Import, in-flight
+  // checkpoint and final reconciliation no longer perform the same I/O.
   const normalized = normalizeState(state);
   if (state && typeof state === 'object') {
     state.finalRows = normalized.finalRows;
     state.finalDiversionRows = normalized.finalDiversionRows;
   }
-  saveAppState(compactStateForPersistence(normalized));
+  const mode = String(options.mode || inferPersistenceMode(normalized)).toLowerCase();
+  const persistenceState = mode === 'import'
+    ? { ...normalized, carryBills: [], nextCarryBills: [], priorCarryRows: [], scanPool: cleanMainBills(normalized.pnhBills || []).filter(wb => !(normalized.podLocks || []).includes(wb)) }
+    : normalized;
+  if (mode === 'import' && state && typeof state === 'object') {
+    state.carryBills = [];
+    state.nextCarryBills = [];
+    state.priorCarryRows = [];
+    state.scanPool = persistenceState.scanPool;
+  }
+  const checkpointKey = checkpointIdentity(persistenceState);
+  if (mode === 'checkpoint' && checkpointKey) {
+    const signature = checkpointSignature(persistenceState);
+    if (runtimeCheckpointSignatures.get(checkpointKey) === signature) return persistenceState;
+    runtimeCheckpointSignatures.set(checkpointKey, signature);
+  }
+  if (mode === 'full' || mode === 'import') {
+    for (const key of [...runtimeCheckpointSignatures.keys()]) {
+      if (key.startsWith(`${persistenceState.reportDate || ''}|`)) runtimeCheckpointSignatures.delete(key);
+    }
+  }
+  const mirror = options.mirror === false || mode === 'state-only' ? false : true;
+  saveAppState(compactStateForPersistence(persistenceState), { mirror, mirrorMode: mode });
+  return persistenceState;
+}
+
+function inferPersistenceMode(state = {}) {
+  const processing = state.processing || {};
+  const runStatus = String(state.lastRunSummary?.runStatus || state.currentRun?.status || '').toUpperCase();
+  const phase = String(processing.phase || '').trim();
+  if (/^(完成|COMPLETED)$/.test(phase) || runStatus === 'COMPLETED') return 'full';
+  if (state.currentRun?.runId || state.lastRunSummary?.runId) {
+    if (processing.running || processing.paused || processing.error || /RETRY|FAILED|RUNNING|PAUSED/.test(runStatus)) return 'checkpoint';
+    if ((state.finalRows || []).length) return 'full';
+  }
+  if (state.dailyReportReady && (state.dailyParseRows || []).length && !(state.finalRows || []).length) return 'import';
+  return 'full';
+}
+
+function checkpointIdentity(state = {}) {
+  const runId = String(state.currentRun?.runId || state.lastRunSummary?.runId || state.lastRun?.runId || '').trim();
+  return state.reportDate && runId ? `${state.reportDate}|${runId}` : '';
+}
+
+function checkpointSignature(state = {}) {
+  const processing = state.processing || {};
+  const scanStatus = statusCounts(state.scanQueryStatus, state.scanResults);
+  const trackStatus = statusCounts(state.trackQueryStatus, state.trackResults);
+  return JSON.stringify({
+    phase: processing.phase || '',
+    paused: Boolean(processing.paused),
+    error: processing.error || '',
+    scanDone: scanStatus.done,
+    scanRetry: scanStatus.retry,
+    scanObserved: scanStatus.observed,
+    scanTotal: cleanMainBills(state.scanPool || []).length,
+    trackDone: trackStatus.done,
+    trackRetry: trackStatus.retry,
+    trackObserved: trackStatus.observed,
+    trackTotal: cleanMainBills(state.needTrackBills || []).length,
+    finalRows: (state.finalRows || []).length,
+    nextCarry: cleanMainBills(state.nextCarryBills || []).length,
+    runStatus: state.lastRunSummary?.runStatus || ''
+  });
+}
+
+function statusCounts(statusRows = [], fallbackRows = []) {
+  const byBill = new Map();
+  for (const row of statusRows || []) {
+    const bill = rowBill(row);
+    if (!bill) continue;
+    byBill.set(bill, String(row.status || row.查询状态 || row.API状态 || '').toLowerCase());
+  }
+  if (!byBill.size) {
+    for (const row of fallbackRows || []) {
+      const bill = rowBill(row);
+      if (!bill) continue;
+      const text = String(row.查询状态 || row.API状态 || row.status || '').toLowerCase();
+      byBill.set(bill, /failed|retry|失败|待重试/.test(text) ? 'failed' : 'success');
+    }
+  }
+  let done = 0;
+  let retry = 0;
+  for (const status of byBill.values()) {
+    if (/failed|retry|失败|待重试/.test(status)) retry += 1;
+    else done += 1;
+  }
+  return { done, retry, observed: done + retry };
 }
 
 export async function resetState(confirmText = '') {
@@ -42,6 +121,7 @@ export async function resetState(confirmText = '') {
   const cleared = resetAppState(normalizeState({
     logs: [`已彻底清空全部业务数据；登录token和门店CP码保留。备份：${backupFile}`]
   }));
+  runtimeCheckpointSignatures.clear();
   return { backupFile, cleared, tokenPreserved: true, shopCodesPreserved: true };
 }
 
@@ -54,6 +134,7 @@ export function normalizeState(s = {}) {
   return {
     reportDate: s.reportDate || '',
     sourceName: s.sourceName || '',
+    dailyReportReady: Boolean(s.dailyReportReady || (s.reportDate && (s.pnhBills || []).length)),
     daily: s.daily || null,
     dailyParseSummary: dailySummary,
     dailyParseRows: dailyRows,
@@ -65,12 +146,16 @@ export function normalizeState(s = {}) {
     podLocks: cleanMainBills(s.podLocks || []),
     scanPool: cleanMainBills(s.scanPool || []),
     scanResults: normalizeRows(s.scanResults),
+    scanQueryStatus: normalizeRows(s.scanQueryStatus),
+    scanRetryBills: cleanMainBills(s.scanRetryBills || []),
     needTrackBills: cleanMainBills(s.needTrackBills || []),
     trackEvents: normalizeRows(s.trackEvents),
     trackResults: normalizeRows(s.trackResults),
+    trackQueryStatus: normalizeRows(s.trackQueryStatus),
     finalRows,
     nextCarryBills,
     finalDiversionRows: dedupeRowsByBill(normalizeRows(s.finalDiversionRows)),
+    priorCarryRows: normalizeRows(s.priorCarryRows),
     backupImportedAt: s.backupImportedAt || '',
     backupSummary: s.backupSummary || null,
     historySummary: Array.isArray(s.historySummary) ? s.historySummary.slice(-30) : [],
@@ -107,14 +192,10 @@ function dedupeRowsByBill(rows = []) {
   for (const row of rows || []) {
     const bill = rowBill(row);
     if (!bill) {
-      // Keep malformed rows visible so consistency checks can still report them.
       output.push(row);
       continue;
     }
     if (positionByBill.has(bill)) {
-      // Later rows win. In the CCSL pipeline the trajectory-derived result is
-      // appended after the scan-derived placeholder, so it preserves richer final
-      // status/evidence when POD is discovered by trajectory status code 80.
       output[positionByBill.get(bill)] = row;
       continue;
     }
@@ -142,9 +223,12 @@ function compactStateForPersistence(state = {}) {
     dailyParseSummary: sanitizeValue(state.dailyParseSummary),
     dailyParseRows: sanitizeRows(state.dailyParseRows),
     scanResults: sanitizeRows(state.scanResults),
+    scanQueryStatus: sanitizeRows(state.scanQueryStatus),
     trackEvents: sanitizeRows(state.trackEvents),
     trackResults: sanitizeRows(state.trackResults),
+    trackQueryStatus: sanitizeRows(state.trackQueryStatus),
     finalRows: sanitizeRows(state.finalRows),
+    priorCarryRows: sanitizeRows(state.priorCarryRows),
     finalDiversionRows: sanitizeRows(state.finalDiversionRows),
     historySummary: sanitizeRows(state.historySummary),
     logs: (state.logs || []).map(value => truncateString(value, 4000)).slice(-300),
