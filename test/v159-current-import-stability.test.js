@@ -14,7 +14,20 @@ test('V159 keeps fresh unified-import classification totals visible on every bus
   assert.match(source,/dailyParseSummary:\{totalRecognized:total/);
   assert.match(source,/dashboard=\{pnh:total,totalMonitored:total/);
   assert.match(source,/recipientGroups:\{ALL:\{metrics:all\},CN:\{metrics:cn\},VN:\{metrics:vn\}\}/);
-  assert.match(source,/exactBusinessState\(type\)/);
+  assert.match(source,/exactBusinessState\(type/);
+});
+
+test('V159 V2 force-refreshes exact CE/CEAF/ALI/Shopee result truth after the run completes',()=>{
+  const source=read('public/v159-current-import-stability.js');
+  assert.match(source,/v159-current-import-stability-v2-result-refresh/);
+  assert.match(source,/async function exactBusinessState\(type,options=\{\}\)/);
+  assert.match(source,/const force=Boolean\(options\?\.force\)/);
+  assert.match(source,/completedSnapshot\(current\)/);
+  assert.match(source,/__v159ResultTruthLoaded===true/);
+  assert.match(source,/async function refreshAllResultTruth\(\)/);
+  assert.match(source,/for\(const type of TYPES\)await exactBusinessState\(type,\{force:true\}\)/);
+  assert.match(source,/ce-qc-run-complete/);
+  assert.match(source,/refreshAllResultTruth\(\)/);
 });
 
 test('V159 makes URL route authoritative and blocks stale WHPP visual activation',()=>{
@@ -37,5 +50,5 @@ test('managed HTML injects V159 after the legacy business and WHPP scripts',()=>
   const guard=source.indexOf('v159-current-import-stability.js');
   assert.ok(legacy>=0,'V132 WHPP script must remain present');
   assert.ok(guard>legacy,'V159 must load after V132 so it can guard stale async UI activation');
-  assert.match(source,/v159-current-import-stability-v1/);
+  assert.match(source,/v159-current-import-stability-v1|v159-current-import-stability-v2-result-refresh/);
 });
