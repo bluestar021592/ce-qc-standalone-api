@@ -1,8 +1,9 @@
 import { CEClient } from './ceClient.js';
 import './v138StartupRunRecoveryPatch.js';
+import './v140ShopeeCheckpointRecoveryPatch.js';
 import './v139DailyCarryIsolationPatch.js';
 
-const PATCH_ID = '2026-08-16-v139-confirm-track-final-retry-v1';
+const PATCH_ID = '2026-08-16-v140-confirm-track-final-retry-v2';
 const ORIGINAL_CONFIRM = CEClient.prototype.confirmQuery;
 const ORIGINAL_TRACK = CEClient.prototype.trackQuery;
 const ORIGINAL_EXCEPTION = CEClient.prototype.exceptionQuery;
@@ -89,7 +90,7 @@ async function queryAdaptive(client, codes, depth = 0, deadline = Date.now() + C
   } catch (error) {
     if (isAuthError(error) || !isTransient(error)) throw error;
     if (remainingMs(deadline) <= 0) {
-      console.warn(`[CE-QC][V139] confirm-query batch budget exhausted: ${codes.length} waybills deferred`);
+      console.warn(`[CE-QC][V140] confirm-query batch budget exhausted: ${codes.length} waybills deferred`);
       return [];
     }
 
@@ -101,7 +102,7 @@ async function queryAdaptive(client, codes, depth = 0, deadline = Date.now() + C
         return await originalWithConfirmTimeout(client, codes, deadline);
       } catch (retryError) {
         if (isAuthError(retryError) || !isTransient(retryError)) throw retryError;
-        console.warn(`[CE-QC][V139] confirm-query child deferred: ${codes.length} waybills; ${retryError?.message || retryError}`);
+        console.warn(`[CE-QC][V140] confirm-query child deferred: ${codes.length} waybills; ${retryError?.message || retryError}`);
         return [];
       }
     }
@@ -127,7 +128,7 @@ async function queryConfirmBatches(client, codes) {
   return rows;
 }
 
-CEClient.prototype.confirmQuery = async function v139ConfirmQuery(shipmentCodes) {
+CEClient.prototype.confirmQuery = async function v140ConfirmQuery(shipmentCodes) {
   const codes = cleanCodes(shipmentCodes);
   if (!codes.length) return [];
 
@@ -140,7 +141,7 @@ CEClient.prototype.confirmQuery = async function v139ConfirmQuery(shipmentCodes)
   // missing tickets three final rounds after the normal adaptive pass.
   for (let round = 1; round <= FINAL_RETRY_ROUNDS && missing.length; round += 1) {
     await wait(250 * round);
-    console.warn(`[CE-QC][V139] confirm-query final retry ${round}/${FINAL_RETRY_ROUNDS}: ${missing.length} waybills`);
+    console.warn(`[CE-QC][V140] confirm-query final retry ${round}/${FINAL_RETRY_ROUNDS}: ${missing.length} waybills`);
     const retriedRows = await queryConfirmBatches(this, missing);
     rows.push(...retriedRows);
     returned = new Set(rows.map(rowBill).filter(Boolean));
@@ -166,7 +167,7 @@ async function queryReadOnlyWithFinalRetries(client, original, shipmentCodes, ap
         if (isAuthError(error) || isPermanentRequestError(error)) throw error;
         if (attempt >= FINAL_RETRY_ROUNDS) break;
         const delay = 400 * (attempt + 1);
-        console.warn(`[CE-QC][V139] ${apiName} final retry ${attempt + 1}/${FINAL_RETRY_ROUNDS}: ${batch.length} waybills; ${error?.message || error}`);
+        console.warn(`[CE-QC][V140] ${apiName} final retry ${attempt + 1}/${FINAL_RETRY_ROUNDS}: ${batch.length} waybills; ${error?.message || error}`);
         await wait(delay);
       }
     }
@@ -175,11 +176,11 @@ async function queryReadOnlyWithFinalRetries(client, original, shipmentCodes, ap
   return rows;
 }
 
-CEClient.prototype.trackQuery = async function v139TrackQuery(shipmentCodes) {
+CEClient.prototype.trackQuery = async function v140TrackQuery(shipmentCodes) {
   return queryReadOnlyWithFinalRetries(this, ORIGINAL_TRACK, shipmentCodes, 'track-query');
 };
 
-CEClient.prototype.exceptionQuery = async function v139ExceptionQuery(shipmentCodes) {
+CEClient.prototype.exceptionQuery = async function v140ExceptionQuery(shipmentCodes) {
   return queryReadOnlyWithFinalRetries(this, ORIGINAL_EXCEPTION, shipmentCodes, 'exception-query');
 };
 
