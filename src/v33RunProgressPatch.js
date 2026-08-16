@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v2+v155-runtime-scan-pool-fallback-v2+v156-run-membership-repair-v1';
+const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v2+v155-runtime-scan-pool-fallback-v2+v156-run-membership-repair-v2';
 const CCSL_RUN_ROUTES = new Set(['/api/run','/api/run/start','/api/resume','/api/run/resume']);
 
 function parseJson(value, fallback = {}) {
@@ -12,6 +12,16 @@ function num(...values) {
   for (const value of values) {
     const n = Number(value);
     if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+function hasCount(value) {
+  if (value === undefined || value === null || value === '') return false;
+  return Number.isFinite(Number(value));
+}
+function exactCount(...values) {
+  for (const value of values) {
+    if (hasCount(value)) return Math.max(0, Number(value));
   }
   return 0;
 }
@@ -52,6 +62,13 @@ function latestValidSnapshotId(db, reportDate) {
     ORDER BY createdAt DESC,batchId DESC LIMIT 1
   `).get(reportDate)?.snapshotId || '');
 }
+function latestValidReportDate(db) {
+  return String(db.prepare(`
+    SELECT reportDate FROM unified_import_batches
+    WHERE status='VALID'
+    ORDER BY reportDate DESC,createdAt DESC,batchId DESC LIMIT 1
+  `).get()?.reportDate || '');
+}
 function unifiedCcslMembers(db, reportDate) {
   const snapshotId = latestValidSnapshotId(db, reportDate);
   if (!snapshotId) return [];
@@ -78,7 +95,7 @@ function unifiedShopeeTotal(db, reportDate) {
 function repairCcslMembershipBeforeRun(req, res, next) {
   try {
     const db = getDb();
-    const reportDate = String(db.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value || '').trim();
+    const reportDate = String(db.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value || latestValidReportDate(db)).trim();
     if (!reportDate) return next();
     const authoritative = unifiedCcslMembers(db, reportDate);
     if (!authoritative.length) return next();
@@ -138,6 +155,7 @@ function repairCcslMembershipBeforeRun(req, res, next) {
 function ccslProgress(db) {
   const reportDate = db.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value
     || db.prepare('SELECT reportDate FROM daily_reports ORDER BY updatedAt DESC,reportDate DESC LIMIT 1').get()?.reportDate
+    || latestValidReportDate(db)
     || '';
   if (!reportDate) return emptyProgress('CCSL');
   const lock = db.prepare('SELECT * FROM run_locks WHERE reportDate=?').get(reportDate) || {};
@@ -145,14 +163,14 @@ function ccslProgress(db) {
     ? db.prepare('SELECT payloadJson,stage,batchIndex,totalBatches,status,errorMessage,updatedAt FROM run_checkpoints WHERE reportDate=? AND runId=? ORDER BY updatedAt DESC,rowid DESC LIMIT 1').get(reportDate, lock.runId)
     : null;
   const payload = parseJson(checkpoint?.payloadJson, {});
-  const mirroredTotal = num(db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount);
-  const sourceTotal = targetTotal(mirroredTotal, unifiedCcslTotal(db, reportDate), 0);
+  const mirroredTotal = db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount;
+  const unifiedTotal = unifiedCcslTotal(db, reportDate);
+  const sourceTotal = hasCount(mirroredTotal) && Number(mirroredTotal) > 0 ? Number(mirroredTotal) : unifiedTotal;
   const phase = String(lock.currentStage || checkpoint?.stage || '').trim() || '待处理';
   const persistedTrackTotal = phaseIsTrack(phase)
     ? num(db.prepare('SELECT COUNT(DISTINCT shipmentCode) count FROM scan_results WHERE reportDate=? AND COALESCE(isPod,0)=0').get(reportDate)?.count)
-    : 0;
-  const trackTotal = targetTotal(persistedTrackTotal, payload.trackTotal, payload.lastRunSummary?.needTrack);
-  return progressShape({ businessType:'CCSL', reportDate, lock, checkpoint, payload, sourceTotal, trackTotal });
+    : undefined;
+  return progressShape({ businessType:'CCSL', reportDate, lock, checkpoint, payload, sourceTotal, persistedTrackTotal });
 }
 
 function shopeeProgress(db) {
@@ -163,36 +181,45 @@ function shopeeProgress(db) {
     ? db.prepare("SELECT payloadJson,stage,batchIndex,totalBatches,status,errorMessage,updatedAt FROM business_run_checkpoints WHERE businessType='SHOPEE' AND reportDate=? AND runId=? ORDER BY updatedAt DESC,id DESC LIMIT 1").get(reportDate, lock.runId)
     : null;
   const payload = parseJson(checkpoint?.payloadJson, {});
-  const mirroredTotal = num(db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='SHOPEE' AND reportDate=?").get(reportDate)?.totalCount);
-  const sourceTotal = targetTotal(mirroredTotal, unifiedShopeeTotal(db, reportDate), 0);
+  const mirroredTotal = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='SHOPEE' AND reportDate=?").get(reportDate)?.totalCount;
+  const unifiedTotal = unifiedShopeeTotal(db, reportDate);
+  const sourceTotal = hasCount(mirroredTotal) && Number(mirroredTotal) > 0 ? Number(mirroredTotal) : unifiedTotal;
   const phase = String(lock.currentStage || checkpoint?.stage || '').trim() || '待处理';
   const persistedTrackTotal = phaseIsTrack(phase)
     ? num(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_scan_results WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(isPod,0)=0").get(reportDate)?.count)
-    : 0;
-  const trackTotal = targetTotal(persistedTrackTotal, payload.trackTotal, payload.lastRunSummary?.needTrack);
-  return progressShape({ businessType:'SHOPEE', reportDate, lock, checkpoint, payload, sourceTotal, trackTotal });
+    : undefined;
+  return progressShape({ businessType:'SHOPEE', reportDate, lock, checkpoint, payload, sourceTotal, persistedTrackTotal });
 }
 
-function progressShape({ businessType, reportDate, lock = {}, checkpoint = null, payload = {}, sourceTotal = 0, trackTotal = 0 }) {
+function progressShape({ businessType, reportDate, lock = {}, checkpoint = null, payload = {}, sourceTotal = 0, persistedTrackTotal }) {
   const phase = String(lock.currentStage || checkpoint?.stage || '').trim() || '待处理';
   const running = String(lock.status || '').toLowerCase() === 'running';
   const paused = String(lock.status || '').toLowerCase() === 'paused';
   const isTrack = phaseIsTrack(phase);
+  const last = payload.lastRunSummary || {};
+
   const rawScanDone = num(payload.scanDone, payload.scanResults);
-  const rawScanRetry = num(payload.scanRetry);
+  const rawScanRetry = num(payload.scanRetry, last.scanRetry);
   const rawScanObserved = num(payload.scanObserved, rawScanDone + rawScanRetry);
-  const runtimeScanPool = payload.lastRunSummary?.scanPool;
-  const declaredScanTotal = targetTotal(payload.scanTotal, runtimeScanPool, sourceTotal);
-  const scanTotal = targetTotal(declaredScanTotal, sourceTotal, rawScanDone + rawScanRetry);
+  const scanTotal = hasCount(payload.scanTotal)
+    ? exactCount(payload.scanTotal)
+    : hasCount(last.scanPool)
+      ? exactCount(last.scanPool)
+      : Math.max(0, Number(sourceTotal) || rawScanDone + rawScanRetry);
   const scan = boundedCounts(scanTotal, rawScanDone, rawScanRetry, rawScanObserved);
 
   const rawTrackDone = num(payload.trackDone, payload.trackResults);
-  const rawTrackRetry = num(payload.trackRetry);
+  const rawTrackRetry = num(payload.trackRetry, last.trackRetry);
   const rawTrackObserved = num(payload.trackObserved, rawTrackDone + rawTrackRetry);
-  const runtimeNeedTrack = payload.lastRunSummary?.needTrack;
-  const resolvedTrackTotal = targetTotal(trackTotal, payload.trackTotal, runtimeNeedTrack ?? (rawTrackDone + rawTrackRetry));
-  const track = boundedCounts(resolvedTrackTotal, rawTrackDone, rawTrackRetry, rawTrackObserved);
-  const runStatus = String(payload.runStatus || payload.lastRunSummary?.runStatus || lock.status || checkpoint?.status || '');
+  const trackTotal = hasCount(payload.trackTotal)
+    ? exactCount(payload.trackTotal)
+    : hasCount(last.needTrack)
+      ? exactCount(last.needTrack)
+      : hasCount(persistedTrackTotal)
+        ? exactCount(persistedTrackTotal)
+        : Math.max(0, rawTrackDone + rawTrackRetry);
+  const track = boundedCounts(trackTotal, rawTrackDone, rawTrackRetry, rawTrackObserved);
+  const runStatus = String(payload.runStatus || last.runStatus || lock.status || checkpoint?.status || '');
 
   return {
     ok: true,
