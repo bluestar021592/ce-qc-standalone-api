@@ -17,9 +17,18 @@ test('V163 quarantines historical Shopee carry from current-day run and restores
 
 test('V163 detects and resets an already mixed Shopee runtime before a fresh start', () => {
   assert.match(patch, /scanRows > expected \|\| scanPool > expected/);
-  assert.match(patch, /DELETE FROM business_run_checkpoints/);
-  assert.match(patch, /DELETE FROM business_api_batches/);
-  assert.match(patch, /DELETE FROM business_scan_results/);
+  assert.match(patch, /resetMixedRuntime/);
+  for (const table of [
+    'business_run_checkpoints',
+    'business_api_batches',
+    'business_scan_results',
+    'business_shipment_tracks',
+    'business_track_events',
+    'business_exception_items',
+    'business_final_rows'
+  ]) assert.match(patch, new RegExp(table));
+  assert.match(patch, /DELETE FROM \$\{table\}/);
+  assert.match(patch, /DELETE FROM business_run_locks/);
   assert.match(patch, /req\.path === '\/api\/shopee\/run\/start'/);
 });
 
