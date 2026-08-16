@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v1';
+const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v2';
 
 function parseJson(value, fallback = {}) {
   try { return JSON.parse(String(value || '')) || fallback; }
@@ -15,6 +15,25 @@ function num(...values) {
   return 0;
 }
 function phaseIsTrack(phase = '') { return /轨迹|track|shipment-event|exception-item/i.test(String(phase || '')); }
+function targetTotal(primary, secondary, fallback = 0) {
+  const first = Number(primary);
+  const second = Number(secondary);
+  if (Number.isFinite(first) && first > 0) return Math.max(0, first);
+  if (Number.isFinite(second) && second > 0) return Math.max(0, second);
+  if (Number.isFinite(first) && first === 0 && (!Number.isFinite(second) || second <= 0)) return 0;
+  if (Number.isFinite(second) && second === 0) return 0;
+  return Math.max(0, Number(fallback) || 0);
+}
+function boundedCounts(totalValue, doneValue, retryValue, observedValue) {
+  const total = Math.max(0, Number(totalValue) || 0);
+  const rawDone = Math.max(0, Number(doneValue) || 0);
+  const rawRetry = Math.max(0, Number(retryValue) || 0);
+  const rawObserved = Math.max(0, Number(observedValue) || 0);
+  const done = Math.min(total, rawDone);
+  const retry = Math.min(Math.max(0, total - done), rawRetry);
+  const observed = Math.min(total, Math.max(done + retry, rawObserved));
+  return { done, retry, observed, total };
+}
 
 function ccslProgress(db) {
   const reportDate = db.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value
@@ -28,9 +47,10 @@ function ccslProgress(db) {
   const payload = parseJson(checkpoint?.payloadJson, {});
   const sourceTotal = num(db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount);
   const phase = String(lock.currentStage || checkpoint?.stage || '').trim() || '待处理';
-  const trackTotal = phaseIsTrack(phase)
-    ? num(payload.trackTotal, db.prepare('SELECT COUNT(DISTINCT shipmentCode) count FROM scan_results WHERE reportDate=? AND COALESCE(isPod,0)=0').get(reportDate)?.count)
-    : num(payload.trackTotal);
+  const persistedTrackTotal = phaseIsTrack(phase)
+    ? num(db.prepare('SELECT COUNT(DISTINCT shipmentCode) count FROM scan_results WHERE reportDate=? AND COALESCE(isPod,0)=0').get(reportDate)?.count)
+    : 0;
+  const trackTotal = targetTotal(persistedTrackTotal, payload.trackTotal, 0);
   return progressShape({ businessType:'CCSL', reportDate, lock, checkpoint, payload, sourceTotal, trackTotal });
 }
 
@@ -44,9 +64,10 @@ function shopeeProgress(db) {
   const payload = parseJson(checkpoint?.payloadJson, {});
   const sourceTotal = num(db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='SHOPEE' AND reportDate=?").get(reportDate)?.totalCount);
   const phase = String(lock.currentStage || checkpoint?.stage || '').trim() || '待处理';
-  const trackTotal = phaseIsTrack(phase)
-    ? num(payload.trackTotal, db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_scan_results WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(isPod,0)=0").get(reportDate)?.count)
-    : num(payload.trackTotal);
+  const persistedTrackTotal = phaseIsTrack(phase)
+    ? num(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_scan_results WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(isPod,0)=0").get(reportDate)?.count)
+    : 0;
+  const trackTotal = targetTotal(persistedTrackTotal, payload.trackTotal, 0);
   return progressShape({ businessType:'SHOPEE', reportDate, lock, checkpoint, payload, sourceTotal, trackTotal });
 }
 
@@ -57,18 +78,22 @@ function progressShape({ businessType, reportDate, lock = {}, checkpoint = null,
   const isTrack = phaseIsTrack(phase);
   // Compatibility: V148 checkpoints stored scanResults/trackResults counts;
   // V149 core checkpoints store scanDone/trackDone plus retry/total fields.
-  const scanDone = num(payload.scanDone, payload.scanResults);
-  const scanRetry = num(payload.scanRetry);
-  const scanObserved = num(payload.scanObserved, scanDone + scanRetry);
-  const scanTotal = num(payload.scanTotal, sourceTotal);
-  const trackDone = num(payload.trackDone, payload.trackResults);
-  const trackRetry = num(payload.trackRetry);
-  const trackObserved = num(payload.trackObserved, trackDone + trackRetry);
-  const resolvedTrackTotal = num(trackTotal, payload.trackTotal, trackDone + trackRetry);
+  const rawScanDone = num(payload.scanDone, payload.scanResults);
+  const rawScanRetry = num(payload.scanRetry);
+  const rawScanObserved = num(payload.scanObserved, rawScanDone + rawScanRetry);
+  const scanTotal = targetTotal(payload.scanTotal, sourceTotal, rawScanDone + rawScanRetry);
+  const scan = boundedCounts(scanTotal, rawScanDone, rawScanRetry, rawScanObserved);
+
+  const rawTrackDone = num(payload.trackDone, payload.trackResults);
+  const rawTrackRetry = num(payload.trackRetry);
+  const rawTrackObserved = num(payload.trackObserved, rawTrackDone + rawTrackRetry);
+  const resolvedTrackTotal = targetTotal(trackTotal, payload.trackTotal, rawTrackDone + rawTrackRetry);
+  const track = boundedCounts(resolvedTrackTotal, rawTrackDone, rawTrackRetry, rawTrackObserved);
+
   return {
     ok: true,
     version: VERSION,
-    progressRule: 'V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_COMPAT',
+    progressRule: 'V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_BOUNDED',
     businessType,
     reportDate,
     running,
@@ -76,11 +101,17 @@ function progressShape({ businessType, reportDate, lock = {}, checkpoint = null,
     phase,
     batchIndex: num(lock.batchIndex, checkpoint?.batchIndex),
     totalBatches: num(lock.totalBatches, checkpoint?.totalBatches),
-    scanDone, scanRetry, scanObserved, scanTotal,
-    trackDone, trackRetry, trackObserved, trackTotal: resolvedTrackTotal,
-    done: isTrack ? trackDone : scanDone,
-    retry: isTrack ? trackRetry : scanRetry,
-    total: isTrack ? resolvedTrackTotal : scanTotal,
+    scanDone: scan.done,
+    scanRetry: scan.retry,
+    scanObserved: scan.observed,
+    scanTotal: scan.total,
+    trackDone: track.done,
+    trackRetry: track.retry,
+    trackObserved: track.observed,
+    trackTotal: track.total,
+    done: isTrack ? track.done : scan.done,
+    retry: isTrack ? track.retry : scan.retry,
+    total: isTrack ? track.total : scan.total,
     runId: String(lock.runId || ''),
     runStatus: String(payload.runStatus || payload.lastRunSummary?.runStatus || lock.status || checkpoint?.status || ''),
     lastMessage: String(lock.errorMessage || checkpoint?.errorMessage || ''),
@@ -89,7 +120,7 @@ function progressShape({ businessType, reportDate, lock = {}, checkpoint = null,
 }
 
 function emptyProgress(businessType) {
-  return { ok:true, version:VERSION, progressRule:'V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_COMPAT', businessType, reportDate:'', running:false, paused:false, phase:'待处理', batchIndex:0, totalBatches:0, scanDone:0, scanRetry:0, scanObserved:0, scanTotal:0, trackDone:0, trackRetry:0, trackObserved:0, trackTotal:0, done:0, retry:0, total:0, runId:'', runStatus:'', lastMessage:'', generatedAt:new Date().toISOString() };
+  return { ok:true, version:VERSION, progressRule:'V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_BOUNDED', businessType, reportDate:'', running:false, paused:false, phase:'待处理', batchIndex:0, totalBatches:0, scanDone:0, scanRetry:0, scanObserved:0, scanTotal:0, trackDone:0, trackRetry:0, trackObserved:0, trackTotal:0, done:0, retry:0, total:0, runId:'', runStatus:'', lastMessage:'', generatedAt:new Date().toISOString() };
 }
 
 function progressHandler(req, res) {
@@ -109,4 +140,4 @@ express.application.listen = function v149TinyRunProgressCompatListen(...args) {
   return previousListen.apply(this, args);
 };
 
-export { ccslProgress, shopeeProgress, progressShape };
+export { ccslProgress, shopeeProgress, progressShape, boundedCounts };
