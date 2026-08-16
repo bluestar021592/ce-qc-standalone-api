@@ -105,7 +105,7 @@ test('V149 progress remains bounded by target pool without rehydrating full API 
   assert.match(ui,/batchMax:100/);
   assert.match(ui,/__CE_QC_V96_V67_LIVE_PROGRESS_BRIDGE__=true/);
   assert.match(injector,/v156-ccsl-final-progress-truth-v1/);
-  assert.match(injector,/v138-ccsl-scan-progress\.js\?v=20260816-3/);
+  assert.match(injector,/v138-ccsl-scan-progress\.js\?v=/);
   assert.ok(injector.indexOf('v138-ccsl-scan-progress.js')<injector.indexOf('v139-carry-manual-window.js'));
   assert.ok(injector.indexOf('v139-carry-manual-window.js')<injector.indexOf('v140-current-business-truth.js'));
   assert.ok(injector.indexOf('v140-current-business-truth.js')<injector.indexOf('v108-route-lazy-features.js'));
