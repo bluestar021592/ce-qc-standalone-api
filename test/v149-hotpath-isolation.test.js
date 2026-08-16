@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => fs.readFileSync(path.join(root, file),'utf8');
 const syntax = file => {
   const result = spawnSync(process.execPath, ['--check', path.join(root, file)], { encoding:'utf8' });
   assert.equal(result.status, 0, `${file}: ${result.stderr || result.stdout}`);
@@ -17,7 +17,7 @@ const truth = read('public/v140-current-business-truth.js');
 const cache = read('src/dashboardCacheWorker.js');
 const injector = read('src/v44WhppUiPatch.js');
 
-test('V149 hot-path files are syntax valid', () => {
+test('V149/V150 hot-path files are syntax valid', () => {
   for (const file of ['src/v33RunProgressPatch.js','public/v140-current-business-truth.js','src/dashboardCacheWorker.js','src/v44WhppUiPatch.js']) syntax(file);
 });
 
@@ -40,17 +40,20 @@ test('V149 live progress is lightweight, backward-compatible, and bounded by tar
   assert.doesNotMatch(progress, /business_exception_items/);
 });
 
-test('V149 current business boards use exact snapshot membership and strip historical carry/POD', () => {
-  assert.match(truth, /v149-current-business-truth-v2/);
+test('V150 current boards use exact snapshot membership and block legacy V55 history override', () => {
+  assert.match(truth, /v150-current-business-truth-v3-v55-guard/);
   assert.match(truth, /classificationCounts\?\.\[type\]/);
   assert.match(truth, /\/api\/business-state\/\$\{encodeURIComponent\(type\)\}\?snapshotId=/);
   assert.match(truth, /function restrictToCurrentMembers/);
   assert.match(truth, /carryBills: filterBills\(state\.carryBills\)/);
   assert.match(truth, /nextCarryBills: filterBills\(state\.nextCarryBills\)/);
   assert.match(truth, /podLocks: filterBills\(state\.podLocks\)/);
-  assert.doesNotMatch(truth, /\/api\/v89\/instant-dashboard/);
-  assert.doesNotMatch(truth, /v55Summary\?\.total/);
+  assert.match(truth, /function installV55CurrentGuard/);
+  assert.match(truth, /state\.v55Summary = \{ total, __source: 'V150_EXACT_CURRENT_SNAPSHOT' \}/);
+  assert.match(truth, /__v150BlocksLegacyV55RangeFallback/);
   assert.match(truth, /当前日报数据对账失败/);
+  assert.match(truth, /当前日报读取失败/);
+  assert.doesNotMatch(truth, /\/api\/v89\/instant-dashboard/);
 });
 
 test('V149 dashboard cache yields to import and foreground scan-track processing', () => {
@@ -63,7 +66,7 @@ test('V149 dashboard cache yields to import and foreground scan-track processing
   assert.ok(importGuard >= 0 && actualCacheRead >= 0 && importGuard < actualCacheRead);
 });
 
-test('V149 UI cache bust is installed without touching business rules', () => {
+test('V150 exact-current UI keeps storage destructive operations out of hot-path patch', () => {
   assert.match(injector, /v149-hotpath-isolation-v2/);
   assert.match(injector, /v140-current-business-truth\.js\?v=20260816-3/);
   assert.doesNotMatch(`${progress}\n${truth}\n${cache}\n${injector}`, /DROP\s+TABLE/i);
