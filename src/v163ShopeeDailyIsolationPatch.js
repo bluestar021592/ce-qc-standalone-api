@@ -2,7 +2,7 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-16-v163-shopee-daily-carry-isolation-v1';
+const PATCH_ID = '2026-08-17-v163-shopee-daily-membership-isolation-v2';
 const ROUTES = new Set(['/api/shopee/run/start', '/api/shopee/run/resume']);
 const WRAPPED = Symbol.for('ce-qc.v163-shopee-daily-carry-isolation');
 const HOLD_PREFIX = 'V163_HOLD:';
@@ -102,16 +102,19 @@ function resetMixedRuntime(db, reportDate) {
 function quarantineHistorical(db, reportDate) {
   ensureHoldTable(db);
   const token = `${HOLD_PREFIX}${reportDate}:${randomUUID()}`;
+  // Current-day auto processing is membership based, never date-label based.
+  // Legacy carry rows can have sourceDate/reportDate rewritten by an old mixed run,
+  // so every active carry bill that is NOT a member of today's daily report must
+  // be isolated regardless of its stored sourceDate/reportDate value.
   const rows = db.prepare(`
     SELECT rowid,status,rawJson,reportDate,sourceDate,shipmentCode
     FROM business_carry_bills c
     WHERE businessType='SHOPEE' AND status='active'
-      AND COALESCE(NULLIF(sourceDate,''),reportDate) < ?
       AND NOT EXISTS (
         SELECT 1 FROM business_daily_parse_rows d
         WHERE d.businessType='SHOPEE' AND d.reportDate=? AND d.shipmentCode=c.shipmentCode
       )
-  `).all(reportDate, reportDate);
+  `).all(reportDate);
   if (!rows.length) return { token: '', count: 0 };
   const insert = db.prepare('INSERT INTO v163_shopee_carry_hold(token,rowId,originalStatus,originalRawJson,createdAt) VALUES(?,?,?,?,?)');
   const update = db.prepare('UPDATE business_carry_bills SET status=?,rawJson=?,updatedAt=? WHERE rowid=?');
@@ -128,7 +131,7 @@ function quarantineHistorical(db, reportDate) {
     try { db.exec('ROLLBACK'); } catch {}
     throw error;
   }
-  console.log(`[CE-QC][V163] isolated ${rows.length} historical SHOPEE carry rows from ${reportDate} daily run.`);
+  console.log(`[CE-QC][V163] isolated ${rows.length} non-daily SHOPEE carry rows from ${reportDate} daily run.`);
   return { token, count: rows.length };
 }
 
