@@ -14,8 +14,9 @@ import './v145SevenBusinessRetryCenterPatch.js';
 import './v135WhppPartialSnapshotPatch.js';
 import './v137WhppUnifiedBusinessStatePatch.js';
 import './v152FactTruthPatch.js';
+import './v152WhppTrendStatusPatch.js';
 
-const PATCH_ID='2026-08-16-v136-run-start-unblock-v24+v137-whpp-unified-business-state-v1+v138-truthful-scan-progress-v1+v139-daily-carry-isolation-ui-v3+v140-current-business-truth-v1+v141-whpp-daily-retry-isolation-v1+v142-history-export-audit-v1+v145-seven-business-retry-center-v1+v146-unified-import-date-status-v1+v147-track-time-budget-v2+v148-direct-daily-runner-v1+v149-hotpath-isolation-v2+v152-multi-generation-fact-truth-v2';
+const PATCH_ID='2026-08-16-v136-run-start-unblock-v24+v137-whpp-unified-business-state-v1+v138-truthful-scan-progress-v1+v139-daily-carry-isolation-ui-v3+v140-current-business-truth-v1+v141-whpp-daily-retry-isolation-v1+v142-history-export-audit-v1+v145-seven-business-retry-center-v1+v146-unified-import-date-status-v1+v147-track-time-budget-v2+v148-direct-daily-runner-v1+v149-hotpath-isolation-v2+v152-multi-generation-fact-truth-v3';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
