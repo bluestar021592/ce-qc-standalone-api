@@ -61,11 +61,12 @@ function parseJson(value, fallback = []) {
   catch { return fallback; }
 }
 
-function statusEvidence(reportDate = '', runId = '', apiPattern = '', normalizedTable = '') {
+function statusEvidence(reportDate = '', runId = '', apiPattern = '', normalizedTable = '', options = {}) {
   const success = new Set();
   const failed = new Set();
   if (!reportDate) return { success, failed };
   const db = getDb();
+  const allowBatchSuccess = options.allowBatchSuccess !== false;
   try {
     const rows = runId
       ? db.prepare(`SELECT shipmentCodesJson,status FROM business_api_batches
@@ -78,7 +79,9 @@ function statusEvidence(reportDate = '', runId = '', apiPattern = '', normalized
       for (const codeValue of Array.isArray(codes) ? codes : []) {
         const code = String(codeValue || '').trim().toUpperCase();
         if (!code) continue;
-        if (status === 'success') { success.add(code); failed.delete(code); }
+        // confirm-query may resolve HTTP 200 with a partial body. Its batch-level
+        // success cannot prove every requested waybill returned a scan row.
+        if (status === 'success' && allowBatchSuccess) { success.add(code); failed.delete(code); }
         else if (status === 'failed' && !success.has(code)) failed.add(code);
       }
     }
@@ -126,7 +129,7 @@ function summarizeShopee(state = {}) {
 
   const scanTargets = uniqueBills(state.scanPool || state.pnhBills || []);
   const scanEvidence = mergeStateStatuses(
-    statusEvidence(reportDate, runId, '%confirm-query%', 'business_scan_results'),
+    statusEvidence(reportDate, runId, '%confirm-query%', 'business_scan_results', { allowBatchSuccess: false }),
     state.scanQueryStatus || []
   );
   // Explicit scan retry rows are failure evidence only when no success exists.
