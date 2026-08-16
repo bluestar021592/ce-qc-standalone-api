@@ -5,6 +5,7 @@ import fs from 'node:fs';
 const track = fs.readFileSync(new URL('../src/trackBatching.js', import.meta.url), 'utf8');
 const config = fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js', import.meta.url), 'utf8');
 const uiPatch = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
+const bootstrap = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
 
 function pos(source, text) {
   const index = source.indexOf(text);
@@ -27,7 +28,11 @@ test('V147 keeps at least three transient retries and shortens each CE network w
   assert.match(config, /CE_TRANSIENT_RETRIES\) process\.env\.CE_TRANSIENT_RETRIES = '3'/);
 });
 
-test('V147 timeout config loads before any business patch can construct CE clients', () => {
+test('V147 timeout config loads before any runtime or business patch can construct CE clients', () => {
+  const bootConfigPos = pos(bootstrap, "await importPhase('v147TrackTimeoutConfig', './src/v147TrackTimeoutConfig.js');");
+  const bootFirstRuntimePos = pos(bootstrap, "await importPhase('v27ServerPatch', './src/v27ServerPatch.js');");
+  assert.ok(bootConfigPos < bootFirstRuntimePos);
+
   const configPos = pos(uiPatch, "import './v147TrackTimeoutConfig.js';");
   const firstBusinessPos = pos(uiPatch, "import './v51CarryDashboardPatch.js';");
   const retryCenterPos = pos(uiPatch, "import './v145SevenBusinessRetryCenterPatch.js';");
