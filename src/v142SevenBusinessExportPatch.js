@@ -3,9 +3,8 @@ import path from 'path';
 import { auditSevenBusinessHistory } from './v142SevenBusinessHistoryAudit.js';
 import { exportSevenBusinessPeriodReports } from './v142SevenBusinessPeriodExporter.js';
 
-const PATCH_ID='2026-08-16-v142-seven-business-export-preflight-v1';
+const PATCH_ID='2026-08-16-v142-seven-business-export-preflight-v2';
 const WRAPPED_GET=Symbol.for('ce-qc.v142-export-get');
-const WRAPPED_POST=Symbol.for('ce-qc.v142-export-post');
 
 function auditHandler(req,res){
   try{
@@ -21,13 +20,6 @@ async function downloadHandler(req,res){
     res.download(result.file,path.basename(result.file));
   }catch(error){res.status(400).json({ok:false,patchId:PATCH_ID,error:error.message||String(error)});}
 }
-async function prepareHandler(req,res){
-  try{
-    const result=await exportSevenBusinessPeriodReports({periodType:req.body?.periodType||'daily',date:req.body?.date||'',fromDate:req.body?.fromDate||'',toDate:req.body?.toDate||'',businessType:req.body?.businessType||'ALL'});
-    const unique=[...new Set([...result.files,result.file])];
-    res.json({ok:true,patchId:PATCH_ID,range:result.range,snapshotIds:result.snapshots,audit:{expectedDays:result.audit.expectedDays,totalImported:result.audit.totalImported,totalRetryPending:result.audit.totalRetryPending,exportStatus:result.audit.exportStatus},files:unique.map(file=>({name:path.basename(file),url:`/api/export-file?name=${encodeURIComponent(path.basename(file))}`}))});
-  }catch(error){res.status(400).json({ok:false,patchId:PATCH_ID,error:error.message||String(error)});}
-}
 
 const previousGet=express.application.get;
 if(typeof previousGet==='function'&&!previousGet[WRAPPED_GET]){
@@ -37,14 +29,10 @@ if(typeof previousGet==='function'&&!previousGet[WRAPPED_GET]){
   };
   Object.defineProperty(wrapped,WRAPPED_GET,{value:true});express.application.get=wrapped;
 }
-const previousPost=express.application.post;
-if(typeof previousPost==='function'&&!previousPost[WRAPPED_POST]){
-  const wrapped=function v142Post(pathValue,...handlers){
-    if(String(pathValue||'')==='/api/export-period/prepare')return previousPost.call(this,pathValue,prepareHandler);
-    return previousPost.call(this,pathValue,...handlers);
-  };
-  Object.defineProperty(wrapped,WRAPPED_POST,{value:true});express.application.post=wrapped;
-}
+
+// POST /api/export-period/prepare deliberately remains owned by V84 asynchronous
+// export jobs. Its worker imports the V142 read-only audit before generating files,
+// so large range exports stay responsive while still failing closed on missing days.
 let installed=false;const previousListen=express.application.listen;
 express.application.listen=function v142Listen(...args){if(!installed){installed=true;this.get('/api/v142/history-integrity',auditHandler);}return previousListen.apply(this,args);};
 
