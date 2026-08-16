@@ -6,10 +6,12 @@ const patch = fs.readFileSync(new URL('../src/v163ShopeeDailyIsolationPatch.js',
 const boot = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
 const pipeline = fs.readFileSync(new URL('../src/pipeline.js', import.meta.url), 'utf8');
 
-test('V163 quarantines historical Shopee carry from current-day run and restores it afterwards', () => {
+test('V163 quarantines every active Shopee carry bill that is not a current-day member and restores it afterwards', () => {
   assert.match(patch, /business_carry_bills/);
-  assert.match(patch, /sourceDate/);
   assert.match(patch, /business_daily_parse_rows/);
+  assert.match(patch, /NOT EXISTS/);
+  assert.match(patch, /d\.reportDate=\? AND d\.shipmentCode=c\.shipmentCode/);
+  assert.doesNotMatch(patch, /COALESCE\(NULLIF\(sourceDate,''\),reportDate\)\s*</);
   assert.match(patch, /closed_v163_daily_isolation/);
   assert.match(patch, /restoreToken/);
   assert.match(patch, /res\.once\('finish', restore\)/);
