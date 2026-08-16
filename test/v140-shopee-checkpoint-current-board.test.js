@@ -43,40 +43,39 @@ test('V140 carry isolation runs first and checkpoint recovery runs immediately b
   assert.match(v140,/restores the checkpoint/);
 });
 
-test('V140 progress is phase-aware unique-waybill evidence and bounded by target total',()=>{
+test('V149 progress keeps V140 checkpoint truth while removing full-state hydration from the 1s poll path',()=>{
   syntax('src/v33RunProgressPatch.js');
   const source=read('src/v33RunProgressPatch.js');
-  assert.match(source,/function uniqueBills/);
-  assert.match(source,/function statusEvidence/);
-  assert.match(source,/function boundedCounts/);
-  assert.match(source,/Math\.min\(total, success\)/);
-  assert.match(source,/Math\.min\(Math\.max\(0, total - Math\.min\(total, success\)\), failed\)/);
-  assert.match(source,/%confirm-query%/);
-  assert.match(source,/allowBatchSuccess: false/);
-  assert.match(source,/%shipment-event%/);
-  assert.match(source,/%exception-item%/);
-  assert.match(source,/V140_UNIQUE_WAYBILL_ACTIVE_API_STATUS/);
-  assert.doesNotMatch(source,/trackObserved = countRows\(state\.trackResults\)/);
+  assert.match(source,/v149-tiny-run-progress-compat-v1/);
+  assert.match(source,/FROM run_locks/);
+  assert.match(source,/FROM run_checkpoints/);
+  assert.match(source,/FROM business_run_locks/);
+  assert.match(source,/FROM business_run_checkpoints/);
+  assert.match(source,/payload\.scanDone, payload\.scanResults/);
+  assert.match(source,/payload\.trackDone, payload\.trackResults/);
+  assert.doesNotMatch(source,/loadState\s*\(/);
+  assert.doesNotMatch(source,/loadBusinessState\s*\(/);
+  assert.doesNotMatch(source,/statusEvidence\s*\(/);
 });
 
-test('V140 current business board bypasses completed-only compact cache when latest source has nonzero membership but board is empty',()=>{
+test('V149 current business board uses exact latest import snapshot and refuses stale fast-cache truth',()=>{
   syntax('public/v140-current-business-truth.js');
   const ui=read('public/v140-current-business-truth.js');
   const server=read('server.js');
-  assert.match(ui,/v140-current-business-truth-v1/);
-  assert.match(ui,/sourceTotal > 0/);
-  assert.match(ui,/currentTotal > 0 \|\| sourceTotal <= 0/);
-  assert.match(ui,/\/api\/v89\/instant-dashboard\?date=/);
+  assert.match(ui,/v149-current-business-truth-v1/);
+  assert.match(ui,/classificationCounts\?\.\[type\]/);
   assert.match(ui,/\/api\/business-state\/\$\{encodeURIComponent\(type\)\}\?snapshotId=/);
-  assert.match(ui,/Deliberately omit compact=1/);
-  assert.match(server,/if \(!batch \|\| batch\.snapshotStatus !== 'COMPLETED'/);
+  assert.match(ui,/__v149CanonicalCurrent/);
+  assert.match(ui,/当前日报数据对账失败/);
+  assert.doesNotMatch(ui,/\/api\/v89\/instant-dashboard/);
+  assert.doesNotMatch(ui,/v55Summary\?\.total/);
   assert.match(server,/loadLightweightUnifiedBusinessState\(req\.params\.businessType, requestedSnapshotId\)/);
 });
 
-test('V140 current business truth is injected after V139 carry UI and before lazy render layers',()=>{
+test('V149 current business truth is injected after V139 carry UI and before lazy render layers',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/v140-current-business-truth\.js\?v=20260816-1/);
-  assert.match(injector,/v140-current-business-truth-v1/);
+  assert.match(injector,/v140-current-business-truth\.js\?v=20260816-2/);
+  assert.match(injector,/v149-hotpath-isolation-v1/);
   assert.ok(injector.indexOf('v139-carry-manual-window.js')<injector.indexOf('v140-current-business-truth.js'));
   assert.ok(injector.indexOf('v140-current-business-truth.js')<injector.indexOf('v108-route-lazy-features.js'));
 });

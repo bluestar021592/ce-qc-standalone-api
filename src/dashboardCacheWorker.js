@@ -24,6 +24,15 @@ const PURGE_BLOCK_KEY = 'data_purge_block_until';
 const workerId = `${process.pid}-${Date.now()}`;
 let workerLeaseOwned = false;
 
+function writeSkip(skipReason) {
+  process.stdout.write(`${JSON.stringify({ ok: true, reason, reportDate, result: { skipped: true, reason: skipReason } })}\n`);
+}
+
+function activeForegroundRun(db = getDb()) {
+  if (db.prepare("SELECT 1 FROM run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get()) return true;
+  return Boolean(db.prepare("SELECT 1 FROM business_run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get());
+}
+
 function acquireWorkerLease() {
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
@@ -67,22 +76,34 @@ function releaseWorkerLease() {
 }
 
 try {
+  // Import only marks a date dirty. Rebuilding a dashboard before scan/track
+  // completion produces a half-finished cache and competes with the foreground
+  // run on the same large SQLite file. RUN_COMPLETED will rebuild it later.
+  if (/^(?:UNIFIED_IMPORT|DAILY_IMPORT|SHOPEE_IMPORT)$/.test(reason)) {
+    writeSkip('IMPORT_DIRTY_ONLY_WAIT_FOR_RUN_COMPLETED');
+    process.exit(0);
+  }
+
   // STARTUP_WARM is intentionally a true no-op. Return before asking for cache
   // status, because getDashboardCacheStatus() itself opens SQLite. On the large
   // local CE QC database that second connection used to compete with the first
   // browser reads ~1.5s after startup and made the UI feel frozen again.
   if (!reportDate && reason === 'STARTUP_WARM') {
-    process.stdout.write(`${JSON.stringify({
-      ok: true,
-      reason,
-      result: { skipped: true, reason: 'STARTUP_WARM_DISABLED_FOR_FAST_FIRST_PAINT' },
-      cache: { skipped: true, reason: 'STARTUP_SQLITE_LAZY' }
-    })}\n`);
+    writeSkip('STARTUP_WARM_DISABLED_FOR_FAST_FIRST_PAINT');
+    process.exit(0);
+  }
+
+  // Scheduled cache maintenance is subordinate to user-facing scan/track work.
+  // Read only two tiny lock tables, then leave immediately if a foreground run
+  // is active. No cache query is allowed to contend with the live business run.
+  if (activeForegroundRun()) {
+    writeSkip('FOREGROUND_PROCESSING_ACTIVE');
+    closeDb();
     process.exit(0);
   }
 
   if (!acquireWorkerLease()) {
-    process.stdout.write(`${JSON.stringify({ ok: true, reason, result: { skipped: true, reason: 'FULL_DATA_PURGE_ACTIVE' } })}\n`);
+    writeSkip('FULL_DATA_PURGE_ACTIVE');
     closeDb();
     process.exit(0);
   }
