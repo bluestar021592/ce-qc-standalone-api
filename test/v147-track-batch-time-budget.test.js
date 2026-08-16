@@ -47,7 +47,7 @@ test('V147 timeout config loads before any runtime or business patch can constru
   const retryCenterPos = pos(uiPatch, "import './v145SevenBusinessRetryCenterPatch.js';");
   assert.ok(configPos < firstBusinessPos);
   assert.ok(configPos < retryCenterPos);
-  assert.match(uiPatch, /v147-track-time-budget-v1/);
+  assert.match(uiPatch, /v147-track-time-budget-v2/);
 });
 
 test('V147 recovery code does not delete historical business data', () => {
