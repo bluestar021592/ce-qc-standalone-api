@@ -12,7 +12,8 @@ const syntax=file=>{const result=spawnSync(process.execPath,['--check',path.join
 test('V141 isolates WHPP daily automatic runs from historical carry without deleting evidence',()=>{
   syntax('src/v141WhppDailyRetryIsolationPatch.js');
   const source=read('src/v141WhppDailyRetryIsolationPatch.js');
-  assert.match(source,/v141-whpp-daily-retry-isolation-v1/);
+  assert.match(source,/v141-whpp-daily-retry-isolation-v2/);
+  assert.match(source,/v165WhppRunStateRecoveryPatch/);
   assert.match(source,/v143WhppRetryQueuePatch/);
   assert.match(source,/\/api\/whpp\/run\/start/);
   assert.match(source,/\/api\/whpp\/run\/resume/);
@@ -20,6 +21,20 @@ test('V141 isolates WHPP daily automatic runs from historical carry without dele
   assert.match(source,/state\.nextCarryBills = \[\]/);
   assert.match(source,/historicalDetached/);
   assert.match(source,/retryPendingBefore/);
+});
+
+test('V165 rebuilds missing WHPP run state from normalized current-day SQLite membership before V141 isolation',()=>{
+  syntax('src/v165WhppRunStateRecoveryPatch.js');
+  const source=read('src/v165WhppRunStateRecoveryPatch.js');
+  assert.match(source,/v165-whpp-run-state-recovery-v1/);
+  assert.match(source,/business_daily_reports/);
+  assert.match(source,/business_daily_parse_rows/);
+  assert.match(source,/WHPP_NORMALIZED_DAILY_MISMATCH/);
+  assert.match(source,/pnhBills: normalized\.bills/);
+  assert.match(source,/carryBills: \[\]/);
+  assert.match(source,/nextCarryBills: \[\]/);
+  assert.match(source,/reportDate: normalized\.daily\.reportDate/);
+  assert.doesNotMatch(source,/DELETE FROM/);
 });
 
 test('WHPP resume path still queries only per-waybill statuses that are not already successful',()=>{
