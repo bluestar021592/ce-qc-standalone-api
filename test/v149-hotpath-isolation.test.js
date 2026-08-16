@@ -19,7 +19,7 @@ const injector = read('src/v44WhppUiPatch.js');
 const trends = read('src/v27TrendPatch.js');
 const reimport = read('src/v74CeafDuplicateReimportPatch.js');
 
-test('V149/V150/V151 candidate files are syntax valid', () => {
+test('V149/V150/V151/V154 candidate files are syntax valid', () => {
   for (const file of [
     'src/v33RunProgressPatch.js','public/v140-current-business-truth.js','src/dashboardCacheWorker.js','src/v44WhppUiPatch.js',
     'src/v27TrendPatch.js','src/v74CeafDuplicateReimportPatch.js'
@@ -71,13 +71,16 @@ test('V151 trends recognize VALID daily imports even when processing snapshots a
   assert.doesNotMatch(trends, /ns\.status='COMPLETED'/);
 });
 
-test('V151 same-file daily reimport supersedes the prior VALID batch but restores it if replacement fails', () => {
-  assert.match(reimport, /v151-safe-same-file-reimport-v2/);
+test('V154 exact same-day workbook reimport supersedes the prior VALID batch before V42 and restores it on failure', () => {
+  assert.match(reimport, /v154-safe-same-date-reimport-v3/);
   assert.match(reimport, /prepareSameFileReplacement/);
+  assert.match(reimport, /fileHash LIKE \?/);
   assert.match(reimport, /SET status='SUPERSEDED'/);
   assert.match(reimport, /restorePriorBatchIfReplacementFailed/);
   assert.match(reimport, /SET status='VALID'/);
-  assert.match(reimport, /statusCode \|\| 200/);
+  assert.match(reimport, /sameFileReplacementPreHandler/);
+  assert.match(reimport, /handlers\.slice\(0, -1\), sameFileReplacementPreHandler, finalHandler/);
+  assert.match(reimport, /FORCE_NEW_BATCH_FOR_SAME_WORKBOOK/);
   assert.doesNotMatch(reimport, /DELETE\s+FROM\s+unified_import/i);
 });
 
