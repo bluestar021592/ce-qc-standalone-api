@@ -19,7 +19,8 @@ test('V152 fact reader and UI bridges are syntax valid and installed',()=>{
   for(const file of ['src/v152FactTruthPatch.js','src/v152WhppTrendStatusPatch.js','src/v44WhppUiPatch.js','public/v152-history-key-bridge.js','public/v152-whpp-trend.js'])syntax(file);
   assert.match(injector,/import '\.\/v152FactTruthPatch\.js'/);
   assert.match(injector,/import '\.\/v152WhppTrendStatusPatch\.js'/);
-  assert.match(injector,/v152-multi-generation-fact-truth-v3/);
+  assert.match(injector,/v152-multi-generation-fact-truth-v2/);
+  assert.match(injector,/v152-whpp-trend-status-v1/);
   assert.match(injector,/v152-history-key-bridge\.js\?v=20260816-1/);
   assert.match(injector,/v152-whpp-trend\.js\?v=20260816-1/);
 });
