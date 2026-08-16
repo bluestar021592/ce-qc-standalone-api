@@ -34,22 +34,23 @@ test('WHPP resume path still queries only per-waybill statuses that are not alre
   assert.match(pipeline,/仅重试失败运单/);
 });
 
-test('V143 replaces ambiguous retry guidance with an independent retry queue',()=>{
+test('V143 uses an independent background retry queue with visible polling state',()=>{
   syntax('public/v141-whpp-retry-isolation-ui.js');
   const ui=read('public/v141-whpp-retry-isolation-ui.js');
-  assert.match(ui,/v143-whpp-retry-layout-ui-v1/);
+  assert.match(ui,/v143-whpp-retry-layout-ui-v2/);
   assert.match(ui,/WHPP尚未完全结束/);
   assert.match(ui,/WHPP接口待重试/);
   assert.match(ui,/独立重试下一批/);
-  assert.match(ui,/成功票不会重查/);
+  assert.match(ui,/后台重试处理中/);
+  assert.match(ui,/schedulePoll/);
   assert.match(ui,/不会阻塞后续日期上传/);
   assert.match(ui,/grid-template-areas:"import summary" "run run" "carry carry"/);
 });
 
-test('V141 backend isolation is installed before WHPP run routes and V143 UI is force-refreshed after V135 runner',()=>{
+test('V141 backend isolation is installed before WHPP run routes and async V143 UI is force-refreshed after V135 runner',()=>{
   const injector=read('src/v44WhppUiPatch.js');
   assert.ok(injector.indexOf("import './v141WhppDailyRetryIsolationPatch.js'")<injector.indexOf("import './v135WhppPartialSnapshotPatch.js'"));
-  assert.match(injector,/v141-whpp-retry-isolation-ui\.js\?v=20260816-4/);
-  assert.match(injector,/v143-whpp-retry-layout-ui-v2/);
+  assert.match(injector,/v141-whpp-retry-isolation-ui\.js\?v=20260816-5/);
+  assert.match(injector,/v143-whpp-retry-layout-ui-v3/);
   assert.ok(injector.indexOf('v135-whpp-retry-aware-run.js')<injector.indexOf('v141-whpp-retry-isolation-ui.js'));
 });
