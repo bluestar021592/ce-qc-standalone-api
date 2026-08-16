@@ -83,12 +83,17 @@ test('V150 current business board uses exact import membership and blocks legacy
   assert.match(server,/loadLightweightUnifiedBusinessState\(req\.params\.businessType, requestedSnapshotId\)/);
 });
 
-test('V150 current business truth remains injected after V139 carry UI and before lazy render layers',()=>{
+test('V152 current business truth loads after instant navigation and before final history bridge',()=>{
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(injector,/v140-current-business-truth\.js\?v=20260816-3/);
-  assert.match(injector,/v149-hotpath-isolation-v2/);
-  assert.ok(injector.indexOf('v139-carry-manual-window.js')<injector.indexOf('v140-current-business-truth.js'));
-  assert.ok(injector.indexOf('v140-current-business-truth.js')<injector.indexOf('v108-route-lazy-features.js'));
+  assert.match(injector,/v140-current-business-truth\.js\?v=20260816-4/);
+  assert.match(injector,/v152-multi-generation-fact-truth-v2/);
+  const v139=injector.indexOf('v139-carry-manual-window.js');
+  const v109=injector.indexOf('v109-instant-business-navigation.js');
+  const truth=injector.indexOf('v140-current-business-truth.js');
+  const bridge=injector.indexOf('v152-history-key-bridge.js');
+  assert.ok(v139>=0&&v109>v139);
+  assert.ok(truth>v109);
+  assert.ok(bridge>truth);
 });
 
 test('CEAF source rules remain exact and stronger than WHPP CE-prefix fallback',()=>{
