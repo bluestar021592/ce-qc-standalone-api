@@ -6,8 +6,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-17-v182-fresh-legacy-layout-export-launch-v1';
-const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V182_LEGACY_LAYOUT_REAL_POD_TIME';
+const PATCH_ID = '2026-08-17-v183-refreshed-current-status-export-launch-v1';
+const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V183_REFRESHED_CURRENT_STATUS';
 const PREPARE_PATH = '/api/export-period/prepare';
 const STATUS_PATH = '/api/v84/export-job/:jobId';
 const RECENT_REUSE_MS = Math.max(5 * 60_000, Number(process.env.EXPORT_RESULT_REUSE_MS || 30 * 60_000));
@@ -18,7 +18,7 @@ const ALL_JOB_HEAP_MB = Math.max(256, Math.min(1024, Number(process.env.EXPORT_J
 const SINGLE_JOB_HEAP_MB = Math.max(384, Math.min(1024, Number(process.env.EXPORT_SINGLE_JOB_HEAP_MB || 768)));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workerFile = path.join(__dirname, 'v84ExportJobWorker.js');
-const singleWorkerFile = path.join(__dirname, 'v180SingleBusinessExportJobWorker.js');
+const singleWorkerFile = path.join(__dirname, 'v183SingleBusinessExportJobWorker.js');
 const originalPost = express.application.post;
 const originalGet = express.application.get;
 let installed = false;
@@ -110,7 +110,7 @@ function reusableJob(key, requester = '') {
   for (const job of recentJobs()) {
     if (String(job.payloadKey || '') !== key) continue;
     if (requester && job.requestedBy && String(job.requestedBy) !== requester) continue;
-    if (String(job.exportContractVersion || '') && String(job.exportContractVersion) !== EXPORT_CONTRACT_VERSION) continue;
+    if (String(job.exportContractVersion || '') !== EXPORT_CONTRACT_VERSION) continue;
     if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) { rememberActive(job); return { job, reused: 'ACTIVE' }; }
     if (String(job.status || '') === 'COMPLETED') {
       const completedAt = Date.parse(job.completedAt || job.updatedAt || '');
@@ -135,21 +135,12 @@ function failWorkerJob(file, jobId, message, errorCode = 'EXPORT_WORKER_PROCESS_
     if (!current || String(current.jobId || '') !== String(jobId || '')) return;
     if (!['QUEUED', 'RUNNING'].includes(String(current.status || '').toUpperCase())) return;
     const now = new Date().toISOString();
-    const next = {
-      ...current,
-      status: 'FAILED',
-      errorCode,
-      message,
-      error: detail || message,
-      failedAt: now,
-      updatedAt: now,
-      launcherPatchId: PATCH_ID
-    };
+    const next = { ...current, status: 'FAILED', errorCode, message, error: detail || message, failedAt: now, updatedAt: now, launcherPatchId: PATCH_ID };
     writeJsonAtomic(file, next);
     forgetActive(next);
     jobFileIndexCache = { at: 0, files: [] };
   } catch (error) {
-    console.error('[CE-QC][V182_EXPORT] failed to persist worker failure:', error?.stack || error);
+    console.error('[CE-QC][V183_EXPORT] failed to persist worker failure:', error?.stack || error);
   }
 }
 function launchExportWorker(file, job) {
@@ -169,17 +160,14 @@ function launchExportWorker(file, job) {
     failWorkerJob(file, job.jobId, `后台报表进程启动失败：${error?.message || String(error)}`, 'EXPORT_WORKER_SPAWN_FAILED', error?.stack || String(error));
     return null;
   }
-
   child.once('error', error => {
-    console.error('[CE-QC][V182_EXPORT] worker spawn error:', error?.stack || error);
+    console.error('[CE-QC][V183_EXPORT] worker spawn error:', error?.stack || error);
     failWorkerJob(file, job.jobId, `后台报表进程启动失败：${error?.message || String(error)}`, 'EXPORT_WORKER_SPAWN_FAILED', error?.stack || String(error));
   });
   child.once('exit', (code, signal) => {
     const current = readJobFile(file);
     if (!current || !['QUEUED', 'RUNNING'].includes(String(current.status || '').toUpperCase())) return;
-    const reason = code === 0
-      ? '后台报表进程已结束，但任务没有写入完成状态。'
-      : `后台报表进程异常退出（code=${code ?? 'null'}${signal ? `, signal=${signal}` : ''}）。`;
+    const reason = code === 0 ? '后台报表进程已结束，但任务没有写入完成状态。' : `后台报表进程异常退出（code=${code ?? 'null'}${signal ? `, signal=${signal}` : ''}）。`;
     failWorkerJob(file, job.jobId, `${reason} 请重新发起导出。`, 'EXPORT_WORKER_EXITED_EARLY', reason);
   });
   child.unref();
@@ -194,7 +182,13 @@ function enqueueExport(req, res) {
   if (reusable) {
     const job = reusable.job;
     const completed = reusable.reused === 'COMPLETED';
-    return res.status(completed ? 200 : 202).json({ ok: true, async: !completed, reused: reusable.reused, jobId: job.jobId, status: job.status, progress: Number(job.progress || 0), message: completed ? '相同条件V182完整报表已生成，直接复用现有文件' : '相同条件V182完整报表正在后台执行，已复用当前V182任务', files: completed ? (job.files || []) : undefined, pollUrl: `/api/v84/export-job/${encodeURIComponent(job.jobId)}` });
+    return res.status(completed ? 200 : 202).json({
+      ok: true, async: !completed, reused: reusable.reused, jobId: job.jobId, status: job.status,
+      progress: Number(job.progress || 0),
+      message: completed ? '相同条件V183刷新状态完整报表已生成，直接复用现有文件' : '相同条件V183刷新状态完整报表正在后台执行，已复用当前任务',
+      files: completed ? (job.files || []) : undefined,
+      pollUrl: `/api/v84/export-job/${encodeURIComponent(job.jobId)}`
+    });
   }
   const jobId = `EXP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
   const file = jobPath(jobId);
@@ -207,7 +201,7 @@ function enqueueExport(req, res) {
     payloadKey: key,
     status: 'QUEUED',
     progress: 0,
-    message: singleBusiness ? 'V182单业务完整报表已进入全新独立后台进程' : 'V182 7业务完整报表任务已进入后台队列',
+    message: singleBusiness ? 'V183单业务完整报表已进入全新独立后台进程' : 'V183 7业务完整报表任务已进入后台队列',
     payload,
     files: [],
     createdAt: now,
@@ -229,7 +223,7 @@ function exportStatus(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true, ...job });
 }
-express.application.post = function v182AsyncExportRoute(...args) {
+express.application.post = function v183AsyncExportRoute(...args) {
   if (args[0] !== PREPARE_PATH || args.length < 2) return originalPost.apply(this, args);
   if (!installed) {
     installed = true;
