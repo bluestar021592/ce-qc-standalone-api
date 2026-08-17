@@ -1,7 +1,7 @@
 (function installSevenBusinessStatusV168(global) {
   if (global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__) return;
 
-  const VERSION = '2026-08-17-v168-seven-business-completion-truth-v1';
+  const VERSION = '2026-08-17-v168-seven-business-completion-truth-v2';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   let lastTruth = null;
   let refreshBusy = false;
@@ -36,15 +36,29 @@
   }
 
   function stageFromCcsl(payload, target) {
-    const lock = payload?.status?.lock || {};
-    const date = normalizeDate(lock.reportDate || target);
-    const status = String(lock.status || '').toLowerCase();
+    const date = normalizeDate(payload?.reportDate || target);
+    const runStatus = String(payload?.runStatus || '').toLowerCase();
+    const phase = String(payload?.phase || '').trim();
+    const running = Boolean(payload?.running);
+    const paused = Boolean(payload?.paused);
+    const scanTotal = Math.max(0, Number(payload?.scanTotal || 0));
+    const scanObserved = Math.max(0, Number(payload?.scanObserved ?? payload?.scanDone ?? 0));
+    const trackTotal = Math.max(0, Number(payload?.trackTotal || 0));
+    const trackObserved = Math.max(0, Number(payload?.trackObserved ?? payload?.trackDone ?? 0));
+    const dailyTotal = Math.max(0, Number(payload?.dailyTotal || 0));
+    const podLockSkipped = Math.max(0, Number(payload?.podLockSkipped || 0));
+    const explicitDone = /finished|completed|complete|done|success|succeeded/.test(runStatus)
+      || /完成|finished|completed|complete/i.test(phase);
+    const countsDone = dailyTotal > 0
+      && !running && !paused
+      && ((scanTotal > 0 && scanObserved >= scanTotal) || (scanTotal === 0 && podLockSkipped >= dailyTotal))
+      && (trackTotal === 0 || trackObserved >= trackTotal);
     let state = 'pending';
-    if (date === target && status === 'finished') state = 'done';
-    else if (date === target && status === 'running') state = 'running';
-    else if (date === target && status === 'paused') state = 'paused';
-    else if (date === target && status === 'failed') state = 'failed';
-    return { key: 'CCSL', label: 'CCSL', state, date, status, total: 0 };
+    if (date === target && (explicitDone || countsDone)) state = 'done';
+    else if (date === target && running) state = 'running';
+    else if (date === target && paused) state = 'paused';
+    else if (date === target && /failed|error/.test(runStatus)) state = 'failed';
+    return { key: 'CCSL', label: 'CCSL', state, date, runStatus, phase, total: dailyTotal };
   }
 
   function stageFromBusiness(key, label, payload, target) {
@@ -62,17 +76,22 @@
     return { key, label, state, date, snapshotStatus, runStatus, total };
   }
 
+  function failedStage(key, label, error) {
+    return { key, label, state: 'error', date: '', total: 0, error: String(error?.message || error || '状态读取失败') };
+  }
+
   function stageText(stage) {
     if (stage.state === 'done') return `${stage.label} 已完成`;
     if (stage.state === 'running') return `${stage.label} 处理中`;
     if (stage.state === 'paused') return `${stage.label} 已暂停`;
     if (stage.state === 'failed') return `${stage.label} 失败`;
+    if (stage.state === 'error') return `${stage.label} 状态读取失败`;
     return `${stage.label} 待处理`;
   }
 
   function pillClass(stage) {
     if (stage.state === 'done') return 'success';
-    if (stage.state === 'failed') return 'danger';
+    if (stage.state === 'failed' || stage.state === 'error') return 'danger';
     if (stage.state === 'running' || stage.state === 'paused') return 'warning';
     return 'muted';
   }
@@ -102,7 +121,7 @@
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
-        ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}">${stageText(stage)}</span>`).join('')}
+        ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${stage.error || ''}">${stageText(stage)}</span>`).join('')}
         <span class="status-pill ${truth.complete ? 'success' : 'muted'}">${truth.complete ? '七业务已完成' : '尚未全部完成'}</span>
       </div>`;
 
@@ -141,20 +160,28 @@
     if (!target) return lastTruth;
     refreshBusy = true;
     try {
-      const [ccsl, shopee, whpp] = await Promise.all([
-        readJson(`/api/run/status/${encodeURIComponent(target)}`),
-        readJson('/api/business-state/SHOPEE?compact=1'),
-        readJson('/api/business-state/WHPP?compact=1')
+      const encoded = encodeURIComponent(target);
+      const requests = await Promise.allSettled([
+        readJson('/api/v33/run-progress?businessType=CCSL'),
+        readJson(`/api/business-state/SHOPEE?reportDate=${encoded}&compact=1`),
+        readJson(`/api/business-state/WHPP?reportDate=${encoded}&compact=1`)
       ]);
       const stages = [
-        stageFromCcsl(ccsl, target),
-        stageFromBusiness('SHOPEE', 'SHOPEE CN/VN', shopee, target),
-        stageFromBusiness('WHPP', 'WHPP本土', whpp, target)
+        requests[0].status === 'fulfilled' ? stageFromCcsl(requests[0].value, target) : failedStage('CCSL', 'CCSL', requests[0].reason),
+        requests[1].status === 'fulfilled' ? stageFromBusiness('SHOPEE', 'SHOPEE CN/VN', requests[1].value, target) : failedStage('SHOPEE', 'SHOPEE CN/VN', requests[1].reason),
+        requests[2].status === 'fulfilled' ? stageFromBusiness('WHPP', 'WHPP本土', requests[2].value, target) : failedStage('WHPP', 'WHPP本土', requests[2].reason)
       ];
       lastTruth = { reportDate: target, stages, complete: stages.every(stage => stage.state === 'done'), checkedAt: Date.now() };
       renderTruth(lastTruth);
       return lastTruth;
     } catch (error) {
+      lastTruth = {
+        reportDate: target,
+        stages: [failedStage('CCSL', 'CCSL', error), failedStage('SHOPEE', 'SHOPEE CN/VN', error), failedStage('WHPP', 'WHPP本土', error)],
+        complete: false,
+        checkedAt: Date.now()
+      };
+      renderTruth(lastTruth);
       console.warn('[CE-QC][V168] seven-business truth refresh failed:', error?.message || error);
       return lastTruth;
     } finally {
