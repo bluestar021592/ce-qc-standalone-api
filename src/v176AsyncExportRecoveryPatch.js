@@ -3,12 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID='2026-08-17-v176-async-export-stale-recovery-v1';
+const PATCH_ID='2026-08-17-v179-async-export-stale-recovery-v2';
 const PREPARE_PATH='/api/export-period/prepare';
 const STATUS_PATH='/api/v84/export-job/:jobId';
 const LEGACY_RUNNING_STALE_MS=Math.max(60_000,Number(process.env.EXPORT_LEGACY_RUNNING_STALE_MS||120_000));
 const HEARTBEAT_RUNNING_STALE_MS=Math.max(90_000,Number(process.env.EXPORT_HEARTBEAT_RUNNING_STALE_MS||180_000));
-const QUEUED_STALE_MS=Math.max(30_000,Number(process.env.EXPORT_QUEUED_STALE_MS||90_000));
+const QUEUED_STALE_MS=Math.max(20_000,Number(process.env.EXPORT_QUEUED_STALE_MS||30_000));
 const SCAN_LIMIT=Math.max(20,Math.min(500,Number(process.env.EXPORT_STALE_SCAN_LIMIT||200)));
 const WRAPPED=Symbol.for('ce-qc.v176-export-stale-recovery');
 let prepareInstalled=false;
@@ -56,8 +56,8 @@ function markStale(file,job,info){
     updatedAt:now,
     recoveryPatchId:PATCH_ID
   };
-  try{writeAtomic(file,next);console.warn(`[CE-QC][V176_EXPORT] stale job released ${job.jobId||path.basename(file)} age=${Math.round(info.ageMs/1000)}s`);return next;}
-  catch(error){console.error('[CE-QC][V176_EXPORT] failed to mark stale job:',error?.stack||error);return job;}
+  try{writeAtomic(file,next);console.warn(`[CE-QC][V179_EXPORT_RECOVERY] stale job released ${job.jobId||path.basename(file)} age=${Math.round(info.ageMs/1000)}s`);return next;}
+  catch(error){console.error('[CE-QC][V179_EXPORT_RECOVERY] failed to mark stale job:',error?.stack||error);return job;}
 }
 function reapFile(file){
   const job=readJob(file);if(!job)return null;
@@ -70,25 +70,25 @@ function reapRecent(){
   return reaped;
 }
 function prepareRecovery(req,res,next){
-  try{const reaped=reapRecent();if(reaped)req.ceQcV176ReapedJobs=reaped;}catch(error){console.warn('[CE-QC][V176_EXPORT] prepare stale scan failed:',error?.message||error);}
+  try{const reaped=reapRecent();if(reaped)req.ceQcV176ReapedJobs=reaped;}catch(error){console.warn('[CE-QC][V179_EXPORT_RECOVERY] prepare stale scan failed:',error?.message||error);}
   next();
 }
 function statusRecovery(req,res,next){
-  try{const file=fileFor(req.params?.jobId);if(file&&fs.existsSync(file))reapFile(file);}catch(error){console.warn('[CE-QC][V176_EXPORT] status stale check failed:',error?.message||error);}
+  try{const file=fileFor(req.params?.jobId);if(file&&fs.existsSync(file))reapFile(file);}catch(error){console.warn('[CE-QC][V179_EXPORT_RECOVERY] status stale check failed:',error?.message||error);}
   next();
 }
 
 const previousPost=express.application.post;
 const previousGet=express.application.get;
 if(typeof previousPost==='function'&&!previousPost[WRAPPED]){
-  const wrappedPost=function v176ExportRecoveryPost(pathValue,...handlers){
+  const wrappedPost=function v179ExportRecoveryPost(pathValue,...handlers){
     if(String(pathValue||'')===PREPARE_PATH&&!prepareInstalled){prepareInstalled=true;previousPost.call(this,PREPARE_PATH,prepareRecovery);}
     return previousPost.call(this,pathValue,...handlers);
   };
   Object.defineProperty(wrappedPost,WRAPPED,{value:true});express.application.post=wrappedPost;
 }
 if(typeof previousGet==='function'&&!previousGet[WRAPPED]){
-  const wrappedGet=function v176ExportRecoveryGet(pathValue,...handlers){
+  const wrappedGet=function v179ExportRecoveryGet(pathValue,...handlers){
     if(String(pathValue||'')===STATUS_PATH&&!statusInstalled){statusInstalled=true;previousGet.call(this,STATUS_PATH,statusRecovery);}
     return previousGet.call(this,pathValue,...handlers);
   };
