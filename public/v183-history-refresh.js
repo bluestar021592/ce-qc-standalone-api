@@ -1,7 +1,7 @@
 (function installV183HistoryRefresh(global) {
   if (global.__CE_QC_V183_HISTORY_REFRESH__) return;
   global.__CE_QC_V183_HISTORY_REFRESH__ = true;
-  const VERSION = '2026-08-17-v183-history-refresh-ui-v1';
+  const VERSION = '2026-08-17-v183-history-refresh-ui-v2';
   const originalExport = typeof global.exportPeriodReport === 'function' ? global.exportPeriodReport.bind(global) : null;
   let pollTimer = null;
   let activeJob = '';
@@ -84,24 +84,24 @@
       panel.className = 'panel';
       panel.innerHTML = `
         <div class="v183-title">
-          <div><h3>历史状态刷新 / 导出前复核</h3><p>只刷新当前仍未闭环的历史票；已POD、已退回等终态不重复请求。原始日报与历史快照不改写。</p></div>
+          <div><h3>历史状态刷新 / 导出前复核</h3><p>刷新所选区间内仍非POD/退回/取消终态的历史票；终态票不重复请求。原始日报和历史快照不改写。</p></div>
           <div class="v183-actions">
             <button id="v183ReadBtn" class="btn ghost" type="button">读取当前状态</button>
-            <button id="v183RefreshBtn" class="btn ghost" type="button">刷新未闭环状态</button>
+            <button id="v183RefreshBtn" class="btn ghost" type="button">刷新非终态状态</button>
             <button id="v183RefreshExportBtn" class="btn primary" type="button">刷新状态后导出</button>
           </div>
         </div>
         <div class="v183-grid">
-          <div class="v183-card"><span>区间唯一票数</span><b id="v183Total">—</b><small>当前状态库</small></div>
-          <div class="v183-card"><span>当前POD</span><b id="v183Pod">—</b><small>刷新后终态</small></div>
-          <div class="v183-card"><span>当前已退回</span><b id="v183Returned">—</b><small>刷新后终态</small></div>
+          <div class="v183-card"><span>区间唯一票数</span><b id="v183Total">—</b><small>按首次日报归属</small></div>
+          <div class="v183-card"><span>当前POD</span><b id="v183Pod">—</b><small>最新终态</small></div>
+          <div class="v183-card"><span>当前已退回</span><b id="v183Returned">—</b><small>最新终态</small></div>
           <div class="v183-card"><span>当前Pending</span><b id="v183Pending">—</b><small id="v183PendingTimes">累计次数 —</small></div>
           <div class="v183-card"><span>派送中</span><b id="v183Delivering">—</b><small>当前状态</small></div>
-          <div class="v183-card"><span>仍未闭环 / 待刷新</span><b id="v183Open">—</b><small id="v183Failed">接口待重试 —</small></div>
+          <div class="v183-card"><span>待刷新（非终态）</span><b id="v183Open">—</b><small id="v183Failed">接口待重试 —</small></div>
           <div class="v183-card"><span>最后状态更新时间</span><b id="v183RefreshTime" style="font-size:14px;line-height:1.45">—</b><small>柬埔寨时间</small></div>
         </div>
         <div id="v183Progress" class="v183-progress" hidden><strong id="v183ProgressText">准备中</strong><div class="v183-progress-bar"><i id="v183ProgressFill"></i></div><small id="v183ProgressMeta"></small></div>
-        <div id="v183Note" class="v183-note">选择 SHOPEE CN 或 SHOPEE VN 后，可先刷新历史未闭环状态，再导出一个完整Excel。</div>
+        <div id="v183Note" class="v183-note">选择 SHOPEE CN 或 SHOPEE VN 后，可先刷新非终态历史票，再导出一个完整Excel。</div>
       `;
       exportPanel.insertAdjacentElement('afterend', panel);
       panel.querySelector('#v183ReadBtn').addEventListener('click', () => readSummary(true));
@@ -123,12 +123,13 @@
   function showSummary(summary) {
     lastSummary = summary;
     const set = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value; };
+    const toRefresh = Number(summary.toRefresh ?? summary.open ?? 0);
     set('v183Total', fmt(summary.total)); set('v183Pod', fmt(summary.pod)); set('v183Returned', fmt(summary.returned));
     set('v183Pending', fmt(summary.pending)); set('v183PendingTimes', `累计Pending次数 ${fmt(summary.pendingTimes)}`);
-    set('v183Delivering', fmt(summary.delivering)); set('v183Open', fmt(summary.open)); set('v183Failed', `接口待重试 ${fmt(summary.failed)}`);
+    set('v183Delivering', fmt(summary.delivering)); set('v183Open', fmt(toRefresh)); set('v183Failed', `接口待重试 ${fmt(summary.failed)}`);
     set('v183RefreshTime', fmtTime(summary.lastRefreshAt));
-    if (Number(summary.open || 0) > 0) note(`当前还有 ${fmt(summary.open)} 票未闭环。导出前建议先点“刷新状态后导出”，系统只请求这些未闭环票。`, 'warn');
-    else note('该区间当前已全部闭环，可直接导出。', 'ok');
+    if (toRefresh > 0) note(`当前还有 ${fmt(toRefresh)} 票不是POD/退回/取消终态。导出前建议点“刷新状态后导出”，只对这些票重新请求最新状态。`, 'warn');
+    else note('该区间当前全部已进入POD/退回/取消终态，可直接导出。', 'ok');
   }
   async function readSummary(userAction = false) {
     const panel = ensurePanel(); if (!panel) return null;
@@ -189,7 +190,7 @@
     const sel = selection();
     if (!supported(sel.businessType)) return note('请先选择“仅SHOPEE CN完整表”或“仅SHOPEE VN完整表”。', 'warn');
     if (!sel.fromDate || !sel.toDate) return note('请先选择有效日期范围。', 'warn');
-    setBusy(true); note('正在创建历史未闭环状态刷新任务…');
+    setBusy(true); note('正在创建历史非终态状态刷新任务…');
     try {
       const job = await apiJson('/api/v183/history-refresh/start', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sel) });
       activeJob = job.jobId; progress(job); void pollJob(job.jobId, autoExport);
