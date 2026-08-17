@@ -5,6 +5,51 @@ import { loadWhppState, saveWhppState } from './whppStore.js';
 const PATCH_ID = '2026-08-17-v165-whpp-run-state-recovery-v2';
 const RUN_ROUTES = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
 const WRAPPED = Symbol.for('ce-qc.v165-whpp-run-state-recovery');
+const INTERRUPTED_RUN_REASON = 'PROCESS_RESTART_INTERRUPTED';
+
+function recoverInterruptedRunLocks() {
+  const db = getDb();
+  const now = new Date().toISOString();
+  let ccsl = 0;
+  let business = 0;
+  try {
+    const result = db.prepare(`UPDATE run_locks
+      SET status='failed',
+          errorMessage=CASE
+            WHEN TRIM(COALESCE(errorMessage,''))='' THEN ?
+            ELSE errorMessage || ' | ' || ?
+          END,
+          updatedAt=?
+      WHERE status='running'`).run(INTERRUPTED_RUN_REASON, INTERRUPTED_RUN_REASON, now);
+    ccsl = Number(result?.changes || 0);
+  } catch (error) {
+    console.warn('[CE-QC][V165] interrupted CCSL run-lock recovery skipped:', error?.message || error);
+  }
+  try {
+    const result = db.prepare(`UPDATE business_run_locks
+      SET status='failed',
+          errorMessage=CASE
+            WHEN TRIM(COALESCE(errorMessage,''))='' THEN ?
+            ELSE errorMessage || ' | ' || ?
+          END,
+          updatedAt=?
+      WHERE status='running'`).run(INTERRUPTED_RUN_REASON, INTERRUPTED_RUN_REASON, now);
+    business = Number(result?.changes || 0);
+  } catch (error) {
+    console.warn('[CE-QC][V165] interrupted business run-lock recovery skipped:', error?.message || error);
+  }
+  if (ccsl || business) {
+    console.log(`[CE-QC][V165] recovered stale running locks after process restart: CCSL=${ccsl}, business=${business}`);
+  }
+  return { ccsl, business, recoveredAt: now };
+}
+
+// This module is loaded before server.js. At this moment no new foreground run can
+// exist in the current process yet. Therefore any persisted status='running' row
+// belongs to a previous process and must not block V183 history refresh forever.
+// Paused / paused_write locks are deliberately preserved because the user may
+// intentionally resume them later.
+export const V165_STARTUP_RUN_LOCK_RECOVERY = recoverInterruptedRunLocks();
 
 function dateOnly(value = '') {
   const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
