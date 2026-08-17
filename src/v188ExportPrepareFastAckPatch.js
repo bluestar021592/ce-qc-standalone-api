@@ -6,21 +6,32 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-17-v188-export-prepare-fast-ack-v2';
+const PATCH_ID = '2026-08-17-v188-export-prepare-fast-ack-v3';
 const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM';
 const PREPARE_PATH = '/api/export-period/prepare';
+const STATUS_PATH = '/api/v84/export-job/:jobId';
 const ALL_JOB_HEAP_MB = Math.max(256, Math.min(1024, Number(process.env.EXPORT_JOB_HEAP_MB || 512)));
 const SINGLE_JOB_HEAP_MB = Math.max(384, Math.min(1024, Number(process.env.EXPORT_SINGLE_JOB_HEAP_MB || 768)));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const allWorkerFile = path.join(__dirname, 'v84ExportJobWorker.js');
 const singleWorkerFile = path.join(__dirname, 'v183SingleBusinessExportJobWorker.js');
 const originalPost = express.application.post;
+const originalGet = express.application.get;
 let installed = false;
+let statusInstalled = false;
 
 function jobsDir() {
   const dir = path.join(getRuntimeConfig().dataDir, 'export_jobs');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+function safeJobId(value) {
+  const id = String(value || '').trim();
+  return /^EXP-[A-Z0-9-]{10,80}$/i.test(id) ? id : '';
+}
+function jobFileFor(jobId) {
+  const id = safeJobId(jobId);
+  return id ? path.join(jobsDir(), `${id}.json`) : '';
 }
 function normalizePayload(body = {}) {
   const periodType = ['daily', 'weekly', 'monthly', 'custom'].includes(String(body.periodType || '')) ? String(body.periodType) : 'daily';
@@ -112,6 +123,17 @@ function launchWorker(file, job) {
   });
   child.unref();
 }
+function fastStatus(req, res) {
+  const file = jobFileFor(req.params?.jobId);
+  const job = file ? readJob(file) : null;
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-CE-QC-Export-Status', PATCH_ID);
+  if (!job) {
+    res.status(404).json({ ok: false, code: 'EXPORT_JOB_NOT_FOUND', error: '导出任务不存在或已过期。' });
+    return;
+  }
+  res.json({ ok: true, ...job, statusPatchId: PATCH_ID });
+}
 function fastPrepare(req, res) {
   const requestStartedAt = Date.now();
   const payload = normalizePayload(req.body || {});
@@ -180,6 +202,10 @@ express.application.post = function v188ExportPrepareFastAckRegistration(pathVal
     if (!installed) {
       installed = true;
       this.route(PREPARE_PATH).post(fastPrepare);
+      if (!statusInstalled) {
+        statusInstalled = true;
+        originalGet.call(this, STATUS_PATH, fastStatus);
+      }
     }
     return this;
   }
@@ -190,9 +216,11 @@ export function inspectV188ExportPrepareFastAck() {
   return {
     patchId: PATCH_ID,
     preparePath: PREPARE_PATH,
+    statusPath: STATUS_PATH,
     installed,
+    statusInstalled,
     mode: 'WRITE_JOB_THEN_ACK_THEN_SPAWN',
-    routeRegistration: 'DIRECT_ROUTE_POST_BYPASS_LEGACY_PREPARE',
+    routeRegistration: 'DIRECT_ROUTE_POST_BYPASS_LEGACY_PREPARE_WITH_STATUS',
     exportContractVersion: EXPORT_CONTRACT_VERSION,
     singleJobHeapMB: SINGLE_JOB_HEAP_MB,
     allJobHeapMB: ALL_JOB_HEAP_MB
