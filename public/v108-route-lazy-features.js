@@ -1,6 +1,6 @@
 (function installRouteLazyFeaturesV108(global){
-  if(global.__CE_QC_V108_ROUTE_LAZY__)return;
-  const VERSION='2026-08-17-v186-route-lazy-export-ui-v1';
+  if(global.__CE_QC_V108_ROUTE_LAZY__?.version==='2026-08-17-v187-route-lazy-export-ui-force-reload-v1')return;
+  const VERSION='2026-08-17-v187-route-lazy-export-ui-force-reload-v1';
   const loaded=new Map();
   const groups={
     shopee:[
@@ -12,18 +12,25 @@
       '/v94-business-source-truth-ui-v2.js?v=20260813-2'
     ],
     import:['/v66-import-success-whpp.js?v=20260812-1','/v96-v67-live-progress-bridge.js?v=20260813-1'],
-    reports:['/v84-async-export-ui.js?v=20260817-v186-1'],
+    reports:['/v84-async-export-ui.js?v=20260817-v187-1'],
     settings:['/v62-network-settings-runtime.js?v=20260812-1'],
     data:['/v104-fast-purge-ui.js?v=20260814-8','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
     carry:['/v99-carry-live-ui.js?v=20260814-1']
   };
 
+  function normalized(src){try{return new URL(src,location.href).href;}catch{return src;}}
   function loadScript(src){
     if(loaded.has(src))return loaded.get(src);
-    const existing=[...document.scripts].find(node=>String(node.src||'').includes(src.split('?')[0]));
-    if(existing){const p=Promise.resolve(existing);loaded.set(src,p);return p;}
+    const exact=normalized(src);
+    const path=src.split('?')[0];
+    const existing=[...document.scripts].find(node=>String(node.src||'').includes(path));
+    if(existing&&String(existing.src||'')===exact){const p=Promise.resolve(existing);loaded.set(src,p);return p;}
+    if(existing){
+      existing.dataset.ceQcRetiredVersion='1';
+      try{existing.remove();}catch{}
+    }
     const promise=new Promise((resolve,reject)=>{
-      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v108';
+      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v187';
       script.onload=()=>resolve(script);script.onerror=()=>reject(new Error(`加载页面功能失败：${src}`));document.head.appendChild(script);
     }).catch(error=>{loaded.delete(src);console.warn('[CE-QC][V108_LAZY]',error);throw error;});
     loaded.set(src,promise);return promise;
