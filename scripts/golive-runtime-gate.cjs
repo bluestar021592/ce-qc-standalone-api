@@ -60,12 +60,16 @@ must(whppRecovery, 'sameSet');
 must(podRepair, '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1');
 must(podRepair, 'POD_LOCK_FACT_REPAIR_V167');
 must(historyRefresh, '2026-08-17-v183-historical-status-refresh-center-v2');
+must(historyRefresh, '2026-08-17-v184-history-refresh-fail-fast-diagnostic-v1');
 must(historyRefresh, '/api/v183/history-refresh/summary');
 must(historyRefresh, '/api/v183/history-refresh/start');
 must(historyRefresh, 'activeBusinessProcessingDetails');
-must(historyRefresh, "status: 'WAITING'");
+must(historyRefresh, "status:'WAITING'");
 must(historyRefresh, '历史刷新已排队');
-must(historyRefresh, 'blockers: active.blockers');
+must(historyRefresh, 'blockers:active.blockers');
+must(historyRefresh, '正在进行CE接口预检');
+must(historyRefresh, 'HISTORY_REFRESH_PREFLIGHT_ZERO_EVIDENCE');
+must(historyRefresh, 'HISTORY_REFRESH_CHUNK_ZERO_SUCCESS');
 must(historyRefreshUi, '2026-08-17-v183-history-refresh-ui-v2');
 must(historyRefreshUi, '刷新状态后导出');
 must(refreshedExporter, '2026-08-17-v183-shopee-current-status-overlay-export-v1');
@@ -74,4 +78,4 @@ for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runner, persistence guards, queued V183 history refresh UI/export, WHPP recovery and CCSL POD facts repair verified');
+console.log('[GOLIVE] runtime-source gate passed; seven-business runner, persistence guards, queued V184 history refresh diagnostics/UI/export, WHPP recovery and CCSL POD facts repair verified');
