@@ -1,3 +1,4 @@
+import './v176AsyncExportRecoveryPatch.js';
 import express from 'express';
 import { getDb } from './db.js';
 
