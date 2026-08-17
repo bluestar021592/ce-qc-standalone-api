@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getRuntimeConfig, closeDb } from './db.js';
 import { createCompactPeriodBusinessWorkbook } from './v177CompactPeriodExporter.js';
-import { createShopeeCurrentStateStreamWorkbook } from './v185ShopeeCurrentStateStreamExporter.js';
+import { createShopeeTruthWorkbook } from './v191ShopeeTruthExporter.js';
 import { listCompletedWhppSnapshots } from './v87WhppExportStore.js';
 import { createShopeeTemplateWorkbook } from './shopeeTemplateExporter.js';
 
-const VERSION = '2026-08-17-v185-single-business-stream-worker-v1';
+const VERSION = '2026-08-17-v191-single-business-truth-worker-v1';
 const HEARTBEAT_MS = Math.max(3000, Math.min(15000, Number(process.env.EXPORT_SINGLE_HEARTBEAT_MS || 5000)));
 const jobFile = path.resolve(String(process.argv[2] || ''));
 const ALLOWED = new Set(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
@@ -25,7 +25,7 @@ function writeJob(patch = {}) {
     throw error;
   }
   const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
-  const temp = `${jobFile}.${process.pid}.v185.tmp`;
+  const temp = `${jobFile}.${process.pid}.v191.tmp`;
   fs.writeFileSync(temp, JSON.stringify(next, null, 2), 'utf8');
   fs.renameSync(temp, jobFile);
   return next;
@@ -76,7 +76,7 @@ try {
   const job = readJob();
   const payload = job.payload || {};
   const type = String(payload.businessType || '').trim().toUpperCase();
-  if (!ALLOWED.has(type)) throw new Error(`V185单业务导出不支持：${type || '空业务'}`);
+  if (!ALLOWED.has(type)) throw new Error(`V191单业务导出不支持：${type || '空业务'}`);
   const range = rangeOf(payload);
   startedAt = Date.now();
   stage = `正在生成 ${type} 完整表格`;
@@ -107,8 +107,8 @@ try {
     const result = await createShopeeTemplateWorkbook({ type, periodType: payload.periodType || 'custom', range, snapshots, outputDir: getRuntimeConfig().exportsDir });
     file = result.file;
   } else if (SHOPEE_TYPES.has(type)) {
-    stage = `正在读取 ${type} 首日报唯一票`; progress = 8;
-    const result = await createShopeeCurrentStateStreamWorkbook({
+    stage = `正在读取 ${type} 最新VALID日报成员`; progress = 8;
+    const result = await createShopeeTruthWorkbook({
       type,
       periodType: payload.periodType || 'custom',
       range,
@@ -119,25 +119,22 @@ try {
         const total = Math.max(1, Number(info.total || 1));
         if (phase === 'start') {
           progress = 8;
-          stage = `正在准备 ${type} 首日报唯一归属`;
+          stage = `正在准备 ${type} 最新VALID日报成员`;
         } else if (phase === 'sourceRows') {
           progress = Math.max(10, Math.min(35, 10 + Math.floor((completed / total) * 25)));
           stage = `读取 ${type} 首日报唯一票 ${completed}/${total} · 已归属${Number(info.entries || 0).toLocaleString()}票`;
-        } else if (phase === 'currentStates') {
-          progress = Math.max(36, Math.min(58, 36 + Math.floor((completed / total) * 22)));
-          stage = `匹配 ${type} 最新刷新状态 ${Math.min(completed, total)}/${total}`;
-        } else if (phase === 'finalStates') {
-          progress = Math.max(59, Math.min(66, 59 + Math.floor((completed / total) * 7)));
-          stage = `补充 ${type} 历史完成状态 ${Math.min(completed, total)}/${total}`;
+        } else if (phase === 'truth') {
+          progress = 66;
+          stage = `合并 ${type} 跨日POD/退回/1派2派3派真实状态 · 已识别${Number(info.entries || 0).toLocaleString()}/${total.toLocaleString()}票`;
         } else if (phase === 'writing') {
           progress = Math.max(67, Math.min(97, 67 + Math.floor((completed / total) * 30)));
-          stage = `一次流式写入10-Sheet完整Excel ${Math.min(completed, total).toLocaleString()}/${total.toLocaleString()}`;
+          stage = `一次流式写入V191真实状态10-Sheet Excel ${Math.min(completed, total).toLocaleString()}/${total.toLocaleString()}`;
         }
         writeJob({
           status: 'RUNNING', progress, heartbeatAt: new Date().toISOString(), currentBusiness: type,
           currentPart: 1, businessParts: 1, workerPid: process.pid, workerMode: 'SINGLE_BUSINESS_DIRECT',
-          workerVersion: VERSION, sourceRowJsonRead: true, currentStateOverlay: true,
-          onePassStreaming: true, outputContract: 'LEGACY_10_SHEETS_ONE_PASS_STREAM',
+          workerVersion: VERSION, sourceRowJsonRead: true, currentStateOverlay: true, crossDayTruth: true,
+          onePassStreaming: true, outputContract: 'LEGACY_10_SHEETS_V191_TRUTH',
           message: `${stage} · ${memoryText()}`
         });
       }
@@ -157,7 +154,7 @@ try {
     status: 'COMPLETED', progress: 100, heartbeatAt: new Date().toISOString(), currentBusiness: '',
     currentPart: 0, businessParts: 0, workerPid: process.pid, workerMode: 'SINGLE_BUSINESS_DIRECT',
     workerVersion: VERSION, outputContract: summary?.outputContract || 'ONE_WORKBOOK_PER_BUSINESS', summary,
-    message: `导出完成：${type} ${range.from} 至 ${range.to}；首日报唯一归属 + 最新状态已一次流式写入`,
+    message: `导出完成：${type} ${range.from} 至 ${range.to}；最新VALID日报 + 跨日真实状态/派次已写入`,
     files: [fileItem(file)], completedAt: new Date().toISOString()
   });
 } catch (error) {
