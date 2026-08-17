@@ -15,14 +15,20 @@ const LARGE_BUSINESS_THRESHOLD=Math.max(20000,Number(process.env.EXPORT_SPLIT_TH
 const PART_DAYS=Math.max(1,Math.min(14,Number(process.env.EXPORT_PART_DAYS||7)));
 const CHILD_HEAP_MB=Math.max(1024,Number(process.env.EXPORT_BUSINESS_HEAP_MB||2048));
 const CONCURRENCY=Math.max(1,Math.min(3,Number(process.env.EXPORT_WORKER_CONCURRENCY||2)));
-const EXPORT_PLAN_VERSION='2026-08-14-v118-overlapped-export-planning-v2';
+const CHILD_TIMEOUT_MS=Math.max(120_000,Number(process.env.EXPORT_PART_TIMEOUT_MS||300_000));
+const HEARTBEAT_MS=Math.max(5_000,Math.min(60_000,Number(process.env.EXPORT_HEARTBEAT_MS||15_000)));
+const MAX_SPLIT_DEPTH=Math.max(1,Math.min(6,Number(process.env.EXPORT_RECOVERY_SPLIT_DEPTH||4)));
+const EXPORT_PLAN_VERSION='2026-08-17-v176-heartbeat-timeout-adaptive-split-v1';
 
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
 
+function cancellationError(){const error=new Error('EXPORT_JOB_CANCELLED');error.code='EXPORT_JOB_CANCELLED';return error;}
 function readJob(){return JSON.parse(fs.readFileSync(jobFile,'utf8'));}
 function writeJob(patch){
   const current=readJob();
+  const nextStatus=String(patch?.status||'').toUpperCase();
+  if(current.cancelRequested&&!['FAILED','CANCELLED'].includes(nextStatus))throw cancellationError();
   const next={...current,...patch,updatedAt:new Date().toISOString()};
   const temp=`${jobFile}.${process.pid}.tmp`;
   fs.writeFileSync(temp,JSON.stringify(next,null,2),'utf8');
@@ -37,6 +43,24 @@ function validateRange(from,to){
   if(days>180)throw new Error('单次日期范围最多180天。');
   return {from,to,key:`${from}_${to}`};
 }
+function addDays(value,days){const date=new Date(`${value}T00:00:00Z`);date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
+function daysBetween(from,to){return Math.floor((Date.parse(`${to}T00:00:00Z`)-Date.parse(`${from}T00:00:00Z`))/86400000)+1;}
+function splitRange(range,partDays=PART_DAYS){
+  const result=[];let from=range.from;
+  while(from<=range.to){const tentative=addDays(from,partDays-1);const to=tentative<range.to?tentative:range.to;result.push({from,to,key:`${from}_${to}`});from=addDays(to,1);}
+  return result;
+}
+function splitHalf(range){
+  const days=daysBetween(range.from,range.to);
+  if(days<=1)return [range];
+  const leftDays=Math.ceil(days/2);
+  const leftTo=addDays(range.from,leftDays-1);
+  const rightFrom=addDays(leftTo,1);
+  return [
+    {from:range.from,to:leftTo,key:`${range.from}_${leftTo}`},
+    {from:rightFrom,to:range.to,key:`${rightFrom}_${range.to}`}
+  ];
+}
 function rangeOf(payload={}){
   if(payload.periodType==='custom')return validateRange(payload.fromDate,payload.toDate);
   const base=dateKey(payload.date)?new Date(`${payload.date}T12:00:00+07:00`):new Date();
@@ -49,12 +73,6 @@ function rangeOf(payload={}){
     return validateRange(formatCambodia(from),formatCambodia(to));
   }
   const day=formatCambodia(base);return {from:day,to:day,key:day};
-}
-function addDays(value,days){const date=new Date(`${value}T00:00:00Z`);date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
-function splitRange(range,partDays=PART_DAYS){
-  const result=[];let from=range.from;
-  while(from<=range.to){const tentative=addDays(from,partDays-1);const to=tentative<range.to?tentative:range.to;result.push({from,to,key:`${from}_${to}`});from=addDays(to,1);}
-  return result;
 }
 function placeholders(size){return Array.from({length:size},()=>'?').join(',');}
 
@@ -80,24 +98,93 @@ function completedBusinessCounts(range,requestedTypes=ALL_TYPES){
   return counts;
 }
 
-function spawnBusinessPart({type,range,periodType,partIndex,partCount}){
+function terminateChild(child){
+  if(!child)return;
+  try{child.kill('SIGTERM');}catch{}
+  if(process.platform==='win32'&&Number(child.pid)>0){
+    try{const killer=spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});killer.unref?.();}catch{}
+  }
+}
+function spawnBusinessPart({type,range,periodType,partIndex,partCount,depth=0}){
   return new Promise((resolve,reject)=>{
-    const resultFile=`${jobFile}.${type}.${partIndex}.${Date.now()}.result.json`;
+    const resultFile=`${jobFile}.${type}.${partIndex}.${Date.now()}.${depth}.result.json`;
     try{fs.rmSync(resultFile,{force:true});}catch{}
+    const startedAt=Date.now();
+    let settled=false;
+    let timedOut=false;
     const child=spawn(process.execPath,[`--max-old-space-size=${CHILD_HEAP_MB}`,businessWorker,resultFile,type,range.from,range.to,periodType,String(partIndex),String(partCount)],{
       cwd:getRuntimeConfig().projectRoot,env:process.env,windowsHide:true,stdio:'ignore'
     });
-    child.once('error',reject);
+    const cleanup=()=>{
+      clearInterval(heartbeat);
+      clearTimeout(timeout);
+      try{fs.rmSync(resultFile,{force:true});}catch{}
+    };
+    const finish=(error,files)=>{
+      if(settled)return;settled=true;cleanup();
+      if(error)reject(error);else resolve(files||[]);
+    };
+    const heartbeat=setInterval(()=>{
+      try{
+        writeJob({
+          status:'RUNNING',
+          heartbeatAt:new Date().toISOString(),
+          currentBusiness:type,
+          currentPart:partIndex,
+          businessParts:partCount,
+          message:`正在生成：${type} ${range.from} 至 ${range.to}（${partIndex}/${partCount}）· 已运行${Math.max(1,Math.floor((Date.now()-startedAt)/1000))}秒`
+        });
+      }catch(error){terminateChild(child);finish(error);}
+    },HEARTBEAT_MS);
+    heartbeat.unref?.();
+    const timeout=setTimeout(()=>{
+      timedOut=true;
+      terminateChild(child);
+      const error=new Error(`${type} ${range.from}~${range.to} 单分片超过${Math.ceil(CHILD_TIMEOUT_MS/60000)}分钟，自动拆分重试`);
+      error.code='EXPORT_PART_TIMEOUT';
+      finish(error);
+    },CHILD_TIMEOUT_MS);
+    timeout.unref?.();
+    child.once('error',error=>{error.code=error.code||'EXPORT_CHILD_FAILED';finish(error);});
     child.once('close',code=>{
+      if(settled||timedOut)return;
       let result=null;
       if(fs.existsSync(resultFile)){
         try{result=JSON.parse(fs.readFileSync(resultFile,'utf8'));}catch{}
-        try{fs.rmSync(resultFile,{force:true});}catch{}
       }
-      if(code!==0||!result?.ok)return reject(new Error(`${type} ${range.from}~${range.to} 导出失败：${result?.error||`child exit ${code}`}`));
-      resolve(result.files||[]);
+      if(code!==0||!result?.ok){
+        const error=new Error(`${type} ${range.from}~${range.to} 导出失败：${result?.error||`child exit ${code}`}`);
+        error.code='EXPORT_CHILD_FAILED';
+        return finish(error);
+      }
+      finish(null,result.files||[]);
     });
   });
+}
+
+async function spawnBusinessPartResilient(args,depth=0){
+  try{return await spawnBusinessPart({...args,depth});}
+  catch(error){
+    if(error?.code==='EXPORT_JOB_CANCELLED')throw error;
+    const canSplit=args.range?.from&&args.range?.to&&args.range.from<args.range.to&&depth<MAX_SPLIT_DEPTH;
+    const retryable=['EXPORT_PART_TIMEOUT','EXPORT_CHILD_FAILED'].includes(String(error?.code||''));
+    if(!canSplit||!retryable)throw error;
+    const halves=splitHalf(args.range);
+    writeJob({
+      status:'RUNNING',
+      heartbeatAt:new Date().toISOString(),
+      currentBusiness:args.type,
+      currentPart:args.partIndex,
+      businessParts:args.partCount,
+      message:`${args.type} ${args.range.from} 至 ${args.range.to} 耗时过长/失败，已自动拆成 ${halves.map(item=>`${item.from}~${item.to}`).join('、')} 重试`
+    });
+    const files=[];
+    for(let i=0;i<halves.length;i+=1){
+      const partFiles=await spawnBusinessPartResilient({...args,range:halves[i],partIndex:i+1,partCount:halves.length},depth+1);
+      files.push(...partFiles);
+    }
+    return files;
+  }
 }
 
 async function createManagementSummary(range){
@@ -125,10 +212,10 @@ async function runTasks(tasks,jobPayload){
     while(true){
       const index=cursor++;if(index>=tasks.length)return;
       const task=tasks[index];
-      writeJob({status:'RUNNING',progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),currentBusiness:task.type,currentPart:task.partIndex,businessParts:task.partCount,message:`并行生成中：${task.type} ${task.range.from} 至 ${task.range.to}（${task.partIndex}/${task.partCount}）`});
-      results[index]=await spawnBusinessPart({...task,periodType:jobPayload.periodType||'custom'});
+      writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),currentBusiness:task.type,currentPart:task.partIndex,businessParts:task.partCount,message:`并行生成中：${task.type} ${task.range.from} 至 ${task.range.to}（${task.partIndex}/${task.partCount}）`});
+      results[index]=await spawnBusinessPartResilient({...task,periodType:jobPayload.periodType||'custom'});
       completed+=1;
-      writeJob({status:'RUNNING',progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),message:`已完成 ${completed}/${tasks.length} 个业务分片；最多${Math.min(CONCURRENCY,tasks.length)}个并行`});
+      writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),message:`已完成 ${completed}/${tasks.length} 个业务分片；最多${Math.min(CONCURRENCY,tasks.length)}个并行`});
     }
   }
   await Promise.all(Array.from({length:Math.min(CONCURRENCY,tasks.length)},()=>runner()));
@@ -139,24 +226,27 @@ async function main(){
   const job=readJob();const range=rangeOf(job.payload||{});const requested=String(job.payload?.businessType||'ALL').toUpperCase();
   const types=requested==='ALL'?[...ALL_TYPES]:ALL_TYPES.includes(requested)?[requested]:[];
   if(!types.length)throw new Error(`不支持的业务板块：${requested}`);
-  writeJob({status:'RUNNING',progress:1,range,message:`正在准备 ${range.from} 至 ${range.to} 的${requested==='ALL'?'7业务':'单业务'}后台导出`,exportPlanVersion:EXPORT_PLAN_VERSION});
+  writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:1,range,message:`正在准备 ${range.from} 至 ${range.to} 的${requested==='ALL'?'7业务':'单业务'}后台导出`,exportPlanVersion:EXPORT_PLAN_VERSION,workerPid:process.pid});
   const counts=completedBusinessCounts(range,types);
   const tasks=[];
   for(const type of types){const count=Number(counts[type]||0);if(!count)continue;const parts=count>LARGE_BUSINESS_THRESHOLD?splitRange(range):[range];for(let i=0;i<parts.length;i+=1)tasks.push({type,range:parts[i],partIndex:i+1,partCount:parts.length});}
   if(!tasks.length)throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的数据。`);
 
-  // Management summary is independent of the business workbooks. Start it before
-  // child workers and let its small grouped read/write overlap with the expensive
-  // per-business Excel generation instead of serially adding to total export time.
   const managementPromise=requested==='ALL'?createManagementSummary(range):Promise.resolve('');
   const files=await runTasks(tasks,job.payload||{});
   const managementFile=await managementPromise;
   if(managementFile)files.unshift(managementFile);
 
   let finalFile=files[0]||'';
-  if(files.length>1){writeJob({status:'RUNNING',progress:96,message:'正在快速打包全部报表文件'});finalFile=path.join(getRuntimeConfig().exportsDir,`CE_QC_${range.key}_${requested}_后台导出.zip`);await zipFiles(files,finalFile);}
+  if(files.length>1){writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:96,message:'正在快速打包全部报表文件'});finalFile=path.join(getRuntimeConfig().exportsDir,`CE_QC_${range.key}_${requested}_后台导出.zip`);await zipFiles(files,finalFile);}
   const allFiles=[...new Set([...files,finalFile].filter(Boolean))].sort((a,b)=>path.basename(a).localeCompare(path.basename(b),'zh-CN'));
-  writeJob({status:'COMPLETED',progress:100,message:`导出完成：${range.from} 至 ${range.to}`,files:allFiles.map(file=>({name:path.basename(file),url:`/api/export-file?name=${encodeURIComponent(path.basename(file))}`})),completedAt:new Date().toISOString(),currentBusiness:'',currentPart:0,businessParts:0,workerConcurrency:Math.min(CONCURRENCY,tasks.length),exportPlanVersion:EXPORT_PLAN_VERSION});
+  writeJob({status:'COMPLETED',heartbeatAt:new Date().toISOString(),progress:100,message:`导出完成：${range.from} 至 ${range.to}`,files:allFiles.map(file=>({name:path.basename(file),url:`/api/export-file?name=${encodeURIComponent(path.basename(file))}`})),completedAt:new Date().toISOString(),currentBusiness:'',currentPart:0,businessParts:0,workerConcurrency:Math.min(CONCURRENCY,tasks.length),exportPlanVersion:EXPORT_PLAN_VERSION});
 }
 
-try{await main();}catch(error){try{writeJob({status:'FAILED',message:error?.message||String(error),error:error?.stack||String(error),failedAt:new Date().toISOString()});}catch{}process.exitCode=1;}finally{try{closeDb();}catch{}}
+try{await main();}catch(error){
+  try{
+    const cancelled=error?.code==='EXPORT_JOB_CANCELLED';
+    writeJob({status:'FAILED',message:cancelled?'后台导出任务已被失联恢复机制释放，可重新发起导出。':(error?.message||String(error)),error:error?.stack||String(error),failedAt:new Date().toISOString(),heartbeatAt:new Date().toISOString(),errorCode:error?.code||'EXPORT_JOB_FAILED'});
+  }catch{}
+  process.exitCode=1;
+}finally{try{closeDb();}catch{}}
