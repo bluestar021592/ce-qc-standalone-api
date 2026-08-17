@@ -11,6 +11,7 @@ const bstore = read('src/businessStore.js');
 const v109 = read('public/v109-instant-business-navigation.js');
 const v140 = read('public/v140-current-business-truth.js');
 const v108 = read('public/v108-route-lazy-features.js');
+const exportDirectClient = read('public/v190-export-direct-route-client.js');
 const asyncExportUi = read('public/v84-async-export-ui.js');
 const dashboard = read('public/dashboard-v18.js');
 const bootstrap = read('bootstrap.js');
@@ -22,7 +23,7 @@ const refreshedExporter = read('src/v183ShopeeRefreshedPeriodExporter.js');
 const streamedExporter = read('src/v185ShopeeCurrentStateStreamExporter.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
-const exportImmediateAck = read('src/v189ExportPrepareImmediateAckPatch.js');
+const exportDirect = read('src/v190ExportDirectEndpointPatch.js');
 const exportPreflight = read('src/v142AsyncExportPreflightPatch.js');
 
 const must = (source, token) => {
@@ -60,9 +61,13 @@ must(v109, '2026-08-17-v166-summary-first-navigation-throttle-v1');
 must(v109, 'MIN_BACKGROUND_HYDRATE_MS=60_000');
 must(v140, '2026-08-17-v166-current-business-truth-compact-v1');
 must(v140, '&compact=1');
-must(v108, '2026-08-17-v187-route-lazy-export-ui-force-reload-v1');
+must(v108, '2026-08-17-v190-route-lazy-direct-export-v1');
+must(v108, '/v190-export-direct-route-client.js?v=20260817-v190-1');
 must(v108, '/v84-async-export-ui.js?v=20260817-v187-1');
 must(v108, 'ceQcRetiredVersion');
+must(exportDirectClient, '2026-08-17-v190-export-direct-route-client-v1');
+must(exportDirectClient, '/api/v190/export-period/prepare');
+must(exportDirectClient, 'business&&business!==\'ALL\'');
 must(asyncExportUi, '2026-08-17-v187-export-ui-exclusive-dom-owner-v1');
 must(asyncExportUi, 'ce_qc_active_export_job_v187');
 must(asyncExportUi, "LEGACY_JOB_KEYS = ['ce_qc_active_export_job_v180','ce_qc_active_export_job_v186']");
@@ -105,17 +110,17 @@ must(singleExportWorker, 'onePassStreaming: true');
 must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(asyncExportLauncher, 'V185单业务一次流式完整报表');
-must(exportImmediateAck, '2026-08-17-v189-export-prepare-immediate-ack-v1');
-must(exportImmediateAck, 'MEMORY_ACK_THEN_ASYNC_PERSIST_THEN_SPAWN');
-must(exportImmediateAck, 'pendingJobs.set(jobId');
-must(exportImmediateAck, 'res.status(202).json');
-must(exportImmediateAck, 'void persistAndLaunch(job)');
-must(exportImmediateAck, 'originalGet.call(this, STATUS_PATH, immediateStatus)');
-must(exportPreflight, "import './v189ExportPrepareImmediateAckPatch.js';");
-must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v3');
+must(exportDirect, '2026-08-17-v190-direct-export-endpoint-v1');
+must(exportDirect, '/api/v190/export-period/prepare');
+must(exportDirect, '/api/v190/export-job/:jobId');
+must(exportDirect, 'V190_DIRECT_ROUTE_MEMORY_ACK');
+must(exportDirect, '[CE-QC][V190_EXPORT_DIRECT] PREPARE enter');
+must(exportDirect, 'injectDirectRoutes(this)');
+must(exportPreflight, "import './v190ExportDirectEndpointPatch.js';");
+must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) {
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, isolated V185 one-pass Shopee export with V187 exclusive progress owner and V189 memory-first immediate prepare/status ack, WHPP recovery and CCSL POD facts repair verified');
+console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, isolated V185 one-pass Shopee export with V187 progress owner and V190 direct single-business prepare/status endpoints, WHPP recovery and CCSL POD facts repair verified');
