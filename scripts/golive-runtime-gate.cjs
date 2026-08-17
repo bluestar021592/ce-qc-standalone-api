@@ -59,9 +59,10 @@ must(whppRecovery, "businessType='WHPP'");
 must(whppRecovery, 'sameSet');
 must(podRepair, '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1');
 must(podRepair, 'POD_LOCK_FACT_REPAIR_V167');
-must(historyRefresh, '2026-08-17-v183-historical-status-refresh-center-v1');
+must(historyRefresh, '2026-08-17-v183-historical-status-refresh-center-v2');
 must(historyRefresh, '/api/v183/history-refresh/summary');
 must(historyRefresh, '/api/v183/history-refresh/start');
+must(historyRefreshUi, '2026-08-17-v183-history-refresh-ui-v2');
 must(historyRefreshUi, '刷新状态后导出');
 must(refreshedExporter, '2026-08-17-v183-shopee-current-status-overlay-export-v1');
 
