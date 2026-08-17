@@ -6,8 +6,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-17-v183-refreshed-current-status-export-launch-v1';
-const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V183_REFRESHED_CURRENT_STATUS';
+const PATCH_ID = '2026-08-17-v185-one-pass-stream-export-launch-v1';
+const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM';
 const PREPARE_PATH = '/api/export-period/prepare';
 const STATUS_PATH = '/api/v84/export-job/:jobId';
 const RECENT_REUSE_MS = Math.max(5 * 60_000, Number(process.env.EXPORT_RESULT_REUSE_MS || 30 * 60_000));
@@ -98,7 +98,7 @@ function activeReusableJob(key, requester = '') {
   const id = activeJobs.get(activeSlot(key, requester));
   if (!id) return null;
   const job = readJob(id);
-  if (!job || String(job.payloadKey || '') !== key || String(job.requestedBy || '') !== String(requester || '')) { activeJobs.delete(activeSlot(key, requester)); return null; }
+  if (!job || String(job.payloadKey || '') !== key || String(job.requestedBy || '') !== String(requester || '') || String(job.exportContractVersion || '') !== EXPORT_CONTRACT_VERSION) { activeJobs.delete(activeSlot(key, requester)); return null; }
   if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) return { job, reused: 'ACTIVE' };
   forgetActive(job);
   return null;
@@ -140,7 +140,7 @@ function failWorkerJob(file, jobId, message, errorCode = 'EXPORT_WORKER_PROCESS_
     forgetActive(next);
     jobFileIndexCache = { at: 0, files: [] };
   } catch (error) {
-    console.error('[CE-QC][V183_EXPORT] failed to persist worker failure:', error?.stack || error);
+    console.error('[CE-QC][V185_EXPORT] failed to persist worker failure:', error?.stack || error);
   }
 }
 function launchExportWorker(file, job) {
@@ -161,7 +161,7 @@ function launchExportWorker(file, job) {
     return null;
   }
   child.once('error', error => {
-    console.error('[CE-QC][V183_EXPORT] worker spawn error:', error?.stack || error);
+    console.error('[CE-QC][V185_EXPORT] worker spawn error:', error?.stack || error);
     failWorkerJob(file, job.jobId, `后台报表进程启动失败：${error?.message || String(error)}`, 'EXPORT_WORKER_SPAWN_FAILED', error?.stack || String(error));
   });
   child.once('exit', (code, signal) => {
@@ -185,7 +185,7 @@ function enqueueExport(req, res) {
     return res.status(completed ? 200 : 202).json({
       ok: true, async: !completed, reused: reusable.reused, jobId: job.jobId, status: job.status,
       progress: Number(job.progress || 0),
-      message: completed ? '相同条件V183刷新状态完整报表已生成，直接复用现有文件' : '相同条件V183刷新状态完整报表正在后台执行，已复用当前任务',
+      message: completed ? '相同条件V185完整报表已生成，直接复用现有文件' : '相同条件V185完整报表正在后台执行，已复用当前任务',
       files: completed ? (job.files || []) : undefined,
       pollUrl: `/api/v84/export-job/${encodeURIComponent(job.jobId)}`
     });
@@ -201,7 +201,7 @@ function enqueueExport(req, res) {
     payloadKey: key,
     status: 'QUEUED',
     progress: 0,
-    message: singleBusiness ? 'V183单业务完整报表已进入全新独立后台进程' : 'V183 7业务完整报表任务已进入后台队列',
+    message: singleBusiness ? 'V185单业务一次流式完整报表已进入全新独立后台进程' : 'V185 7业务完整报表任务已进入后台队列',
     payload,
     files: [],
     createdAt: now,
@@ -223,7 +223,7 @@ function exportStatus(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true, ...job });
 }
-express.application.post = function v183AsyncExportRoute(...args) {
+express.application.post = function v185AsyncExportRoute(...args) {
   if (args[0] !== PREPARE_PATH || args.length < 2) return originalPost.apply(this, args);
   if (!installed) {
     installed = true;
