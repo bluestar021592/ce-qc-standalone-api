@@ -138,6 +138,7 @@ try {
   await importPhase('v142SevenBusinessExportPatch', './src/v142SevenBusinessExportPatch.js');
   await importPhase('v71WhppSummaryPatch', './src/v71WhppSummaryPatch.js');
   await importPhase('v84AsyncExportPatch', './src/v84AsyncExportPatch.js');
+  await importPhase('v176AsyncExportRecoveryPatch', './src/v176AsyncExportRecoveryPatch.js');
   await importPhase('v142AsyncExportPreflightPatch', './src/v142AsyncExportPreflightPatch.js');
   await importPhase('v85ShopeeWhppMetricPatch', './src/v85ShopeeWhppMetricPatch.js');
   await importPhase('v86StrictTrackStatusGate', './src/v86StrictTrackStatusGate.js');
