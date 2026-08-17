@@ -11,14 +11,11 @@ const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const businessWorker=path.join(__dirname,'v84ExportBusinessWorker.js');
 const ALL_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const UNIFIED_TYPES=Object.freeze(ALL_TYPES.filter(type=>type!=='WHPP'));
-const LARGE_BUSINESS_THRESHOLD=Math.max(20000,Number(process.env.EXPORT_SPLIT_THRESHOLD||70000));
-const PART_DAYS=Math.max(1,Math.min(14,Number(process.env.EXPORT_PART_DAYS||7)));
-const CHILD_HEAP_MB=Math.max(1024,Number(process.env.EXPORT_BUSINESS_HEAP_MB||2048));
-const CONCURRENCY=Math.max(1,Math.min(3,Number(process.env.EXPORT_WORKER_CONCURRENCY||2)));
-const CHILD_TIMEOUT_MS=Math.max(120_000,Number(process.env.EXPORT_PART_TIMEOUT_MS||300_000));
+const CHILD_HEAP_MB=Math.max(1024,Number(process.env.EXPORT_BUSINESS_HEAP_MB||1536));
+const CONCURRENCY=Math.max(1,Math.min(2,Number(process.env.EXPORT_WORKER_CONCURRENCY||1)));
+const CHILD_TIMEOUT_MS=Math.max(180_000,Number(process.env.EXPORT_BUSINESS_TIMEOUT_MS||900_000));
 const HEARTBEAT_MS=Math.max(5_000,Math.min(60_000,Number(process.env.EXPORT_HEARTBEAT_MS||15_000)));
-const MAX_SPLIT_DEPTH=Math.max(1,Math.min(6,Number(process.env.EXPORT_RECOVERY_SPLIT_DEPTH||4)));
-const EXPORT_PLAN_VERSION='2026-08-17-v176-heartbeat-timeout-adaptive-split-v1';
+const EXPORT_PLAN_VERSION='2026-08-17-v177-one-business-one-workbook-v1';
 
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
@@ -42,24 +39,6 @@ function validateRange(from,to){
   const days=Math.floor((Date.parse(`${to}T00:00:00Z`)-Date.parse(`${from}T00:00:00Z`))/86400000)+1;
   if(days>180)throw new Error('单次日期范围最多180天。');
   return {from,to,key:`${from}_${to}`};
-}
-function addDays(value,days){const date=new Date(`${value}T00:00:00Z`);date.setUTCDate(date.getUTCDate()+days);return date.toISOString().slice(0,10);}
-function daysBetween(from,to){return Math.floor((Date.parse(`${to}T00:00:00Z`)-Date.parse(`${from}T00:00:00Z`))/86400000)+1;}
-function splitRange(range,partDays=PART_DAYS){
-  const result=[];let from=range.from;
-  while(from<=range.to){const tentative=addDays(from,partDays-1);const to=tentative<range.to?tentative:range.to;result.push({from,to,key:`${from}_${to}`});from=addDays(to,1);}
-  return result;
-}
-function splitHalf(range){
-  const days=daysBetween(range.from,range.to);
-  if(days<=1)return [range];
-  const leftDays=Math.ceil(days/2);
-  const leftTo=addDays(range.from,leftDays-1);
-  const rightFrom=addDays(leftTo,1);
-  return [
-    {from:range.from,to:leftTo,key:`${range.from}_${leftTo}`},
-    {from:rightFrom,to:range.to,key:`${rightFrom}_${range.to}`}
-  ];
 }
 function rangeOf(payload={}){
   if(payload.periodType==='custom')return validateRange(payload.fromDate,payload.toDate);
@@ -88,11 +67,10 @@ function completedBusinessCounts(range,requestedTypes=ALL_TYPES){
       INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId
       INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
       WHERE b.status='VALID' AND s.status='COMPLETED'
-        AND b.reportDate BETWEEN ? AND ?
-        AND u.businessType IN (${marks})
+        AND b.reportDate BETWEEN ? AND ? AND u.businessType IN (${marks})
       GROUP BY u.businessType
     `).all(range.from,range.to,...unifiedWanted);
-    for(const row of rows){if(Object.hasOwn(counts,row.businessType))counts[row.businessType]=Number(row.count||0);}
+    for(const row of rows)if(Object.hasOwn(counts,row.businessType))counts[row.businessType]=Number(row.count||0);
   }
   if(requested.has('WHPP'))counts.WHPP=countCompletedWhppRows(range.from,range.to);
   return counts;
@@ -105,89 +83,35 @@ function terminateChild(child){
     try{const killer=spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});killer.unref?.();}catch{}
   }
 }
-function spawnBusinessPart({type,range,periodType,partIndex,partCount,depth=0}){
+
+function spawnCompleteBusiness({type,range,periodType}){
   return new Promise((resolve,reject)=>{
-    const resultFile=`${jobFile}.${type}.${partIndex}.${Date.now()}.${depth}.result.json`;
+    const resultFile=`${jobFile}.${type}.${Date.now()}.complete.result.json`;
     try{fs.rmSync(resultFile,{force:true});}catch{}
-    const startedAt=Date.now();
-    let settled=false;
-    let timedOut=false;
-    const child=spawn(process.execPath,[`--max-old-space-size=${CHILD_HEAP_MB}`,businessWorker,resultFile,type,range.from,range.to,periodType,String(partIndex),String(partCount)],{
+    const startedAt=Date.now();let settled=false;
+    const child=spawn(process.execPath,[`--max-old-space-size=${CHILD_HEAP_MB}`,businessWorker,resultFile,type,range.from,range.to,periodType,'1','1'],{
       cwd:getRuntimeConfig().projectRoot,env:process.env,windowsHide:true,stdio:'ignore'
     });
-    const cleanup=()=>{
-      clearInterval(heartbeat);
-      clearTimeout(timeout);
-      try{fs.rmSync(resultFile,{force:true});}catch{}
-    };
-    const finish=(error,files)=>{
-      if(settled)return;settled=true;cleanup();
-      if(error)reject(error);else resolve(files||[]);
-    };
+    const cleanup=()=>{clearInterval(heartbeat);clearTimeout(timeout);try{fs.rmSync(resultFile,{force:true});}catch{}};
+    const finish=(error,result)=>{if(settled)return;settled=true;cleanup();if(error)reject(error);else resolve(result||{files:[]});};
     const heartbeat=setInterval(()=>{
-      try{
-        writeJob({
-          status:'RUNNING',
-          heartbeatAt:new Date().toISOString(),
-          currentBusiness:type,
-          currentPart:partIndex,
-          businessParts:partCount,
-          message:`正在生成：${type} ${range.from} 至 ${range.to}（${partIndex}/${partCount}）· 已运行${Math.max(1,Math.floor((Date.now()-startedAt)/1000))}秒`
-        });
-      }catch(error){terminateChild(child);finish(error);}
-    },HEARTBEAT_MS);
-    heartbeat.unref?.();
+      try{writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),currentBusiness:type,currentPart:1,businessParts:1,message:`正在生成 ${type} 完整表格 · ${range.from} 至 ${range.to} · 已运行${Math.max(1,Math.floor((Date.now()-startedAt)/1000))}秒`});}
+      catch(error){terminateChild(child);finish(error);}
+    },HEARTBEAT_MS);heartbeat.unref?.();
     const timeout=setTimeout(()=>{
-      timedOut=true;
-      terminateChild(child);
-      const error=new Error(`${type} ${range.from}~${range.to} 单分片超过${Math.ceil(CHILD_TIMEOUT_MS/60000)}分钟，自动拆分重试`);
-      error.code='EXPORT_PART_TIMEOUT';
-      finish(error);
-    },CHILD_TIMEOUT_MS);
-    timeout.unref?.();
+      terminateChild(child);const error=new Error(`${type} 完整表格生成超过${Math.ceil(CHILD_TIMEOUT_MS/60000)}分钟，已停止该业务，避免拖死主系统。`);error.code='EXPORT_BUSINESS_TIMEOUT';finish(error);
+    },CHILD_TIMEOUT_MS);timeout.unref?.();
     child.once('error',error=>{error.code=error.code||'EXPORT_CHILD_FAILED';finish(error);});
     child.once('close',code=>{
-      if(settled||timedOut)return;
-      let result=null;
-      if(fs.existsSync(resultFile)){
-        try{result=JSON.parse(fs.readFileSync(resultFile,'utf8'));}catch{}
-      }
-      if(code!==0||!result?.ok){
-        const error=new Error(`${type} ${range.from}~${range.to} 导出失败：${result?.error||`child exit ${code}`}`);
-        error.code='EXPORT_CHILD_FAILED';
-        return finish(error);
-      }
-      finish(null,result.files||[]);
+      if(settled)return;
+      let result=null;if(fs.existsSync(resultFile)){try{result=JSON.parse(fs.readFileSync(resultFile,'utf8'));}catch{}}
+      if(code!==0||!result?.ok){const error=new Error(`${type} 完整表格导出失败：${result?.error||`child exit ${code}`}`);error.code='EXPORT_CHILD_FAILED';return finish(error);}
+      finish(null,result);
     });
   });
 }
 
-async function spawnBusinessPartResilient(args,depth=0){
-  try{return await spawnBusinessPart({...args,depth});}
-  catch(error){
-    if(error?.code==='EXPORT_JOB_CANCELLED')throw error;
-    const canSplit=args.range?.from&&args.range?.to&&args.range.from<args.range.to&&depth<MAX_SPLIT_DEPTH;
-    const retryable=['EXPORT_PART_TIMEOUT','EXPORT_CHILD_FAILED'].includes(String(error?.code||''));
-    if(!canSplit||!retryable)throw error;
-    const halves=splitHalf(args.range);
-    writeJob({
-      status:'RUNNING',
-      heartbeatAt:new Date().toISOString(),
-      currentBusiness:args.type,
-      currentPart:args.partIndex,
-      businessParts:args.partCount,
-      message:`${args.type} ${args.range.from} 至 ${args.range.to} 耗时过长/失败，已自动拆成 ${halves.map(item=>`${item.from}~${item.to}`).join('、')} 重试`
-    });
-    const files=[];
-    for(let i=0;i<halves.length;i+=1){
-      const partFiles=await spawnBusinessPartResilient({...args,range:halves[i],partIndex:i+1,partCount:halves.length},depth+1);
-      files.push(...partFiles);
-    }
-    return files;
-  }
-}
-
-async function createManagementSummary(range){
+async function createManagementSummary(range,businessSummaries={}){
   const db=getDb();
   const rows=db.prepare(`SELECT b.reportDate,u.businessType,COUNT(*) AS count FROM unified_import_batches b INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId INNER JOIN unified_import_rows u ON u.snapshotId=b.snapshotId WHERE b.status='VALID' AND s.status='COMPLETED' AND b.reportDate BETWEEN ? AND ? GROUP BY b.reportDate,u.businessType ORDER BY b.reportDate,u.businessType`).all(range.from,range.to).map(row=>({...row,count:Number(row.count||0)}));
   rows.push(...whppDailyCounts(range.from,range.to));
@@ -198,55 +122,58 @@ async function createManagementSummary(range){
   for(const [date,counts] of [...byDate.entries()].sort(([a],[b])=>a.localeCompare(b))){const values=Object.fromEntries(ALL_TYPES.map(type=>[type,Number(counts[type]||0)]));sheet.addRow({date,...values,total:ALL_TYPES.reduce((sum,type)=>sum+values[type],0)});}
   const totalRow=sheet.addRow({date:`${range.from} ~ ${range.to}`});
   for(let column=2;column<=ALL_TYPES.length+2;column+=1){const letter=sheet.getColumn(column).letter;totalRow.getCell(column).value={formula:`SUM(${letter}2:${letter}${Math.max(2,totalRow.number-1)})`};}
-  sheet.getRow(1).eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF195A8D'}};});
-  totalRow.font={bold:true,color:{argb:'FF18324F'}};sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter={from:'A1',to:`${sheet.getColumn(ALL_TYPES.length+2).letter}${Math.max(2,sheet.rowCount)}`};
+  sheet.getRow(1).eachCell(cell=>{cell.font={name:'Microsoft YaHei',bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF195A8D'}};});
+  totalRow.font={name:'Microsoft YaHei',bold:true,color:{argb:'FF18324F'}};sheet.views=[{state:'frozen',ySplit:1}];
+  const metric=workbook.addWorksheet('业务区间指标');
+  metric.columns=[{header:'业务',key:'business',width:18},{header:'唯一票数',key:'total',width:14},{header:'已POD',key:'pod',width:14},{header:'POD派件完成率',key:'podRate',width:18},{header:'平均派件天数',key:'averageDeliveryDays',width:18},{header:'有效天数样本',key:'validSamples',width:16},{header:'金边PP',key:'pp',width:14},{header:'外省PV',key:'pv',width:14}];
+  metric.getRow(1).eachCell(cell=>{cell.font={name:'Microsoft YaHei',bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF195A8D'}};});
+  for(const type of ALL_TYPES){const s=businessSummaries[type];if(!s)continue;metric.addRow({business:type,total:s.total??'',pod:s.pod??'',podRate:s.podRate===undefined?'':`${s.podRate}%`,averageDeliveryDays:s.averageDeliveryDays??'',validSamples:s.validDeliveryDaySamples??'',pp:s.pp??'',pv:s.pv??''});}
   const file=path.join(getRuntimeConfig().exportsDir,`CE_QC_管理汇总_${range.key}.xlsx`);await workbook.xlsx.writeFile(file);return file;
 }
+
 async function zipFiles(files,zipFile){
   await new Promise((resolve,reject)=>{const output=fs.createWriteStream(zipFile);const archive=archiver('zip',{zlib:{level:1}});output.on('close',resolve);output.on('error',reject);archive.on('error',reject);archive.pipe(output);for(const file of files)archive.file(file,{name:path.basename(file)});archive.finalize();});
 }
 
-async function runTasks(tasks,jobPayload){
-  const results=new Array(tasks.length);let cursor=0;let completed=0;
+async function runTasks(tasks,periodType){
+  const results=new Array(tasks.length);let cursor=0,completed=0;
   async function runner(){
     while(true){
       const index=cursor++;if(index>=tasks.length)return;
       const task=tasks[index];
-      writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),currentBusiness:task.type,currentPart:task.partIndex,businessParts:task.partCount,message:`并行生成中：${task.type} ${task.range.from} 至 ${task.range.to}（${task.partIndex}/${task.partCount}）`});
-      results[index]=await spawnBusinessPartResilient({...task,periodType:jobPayload.periodType||'custom'});
+      writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),currentBusiness:task.type,currentPart:1,businessParts:1,message:`正在生成 ${task.type} 完整表格（${completed+1}/${tasks.length}）`});
+      results[index]=await spawnCompleteBusiness({...task,periodType});
       completed+=1;
-      writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),message:`已完成 ${completed}/${tasks.length} 个业务分片；最多${Math.min(CONCURRENCY,tasks.length)}个并行`});
+      writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),message:`已完成 ${completed}/${tasks.length} 个业务完整表格；不再输出日期分片`});
     }
   }
   await Promise.all(Array.from({length:Math.min(CONCURRENCY,tasks.length)},()=>runner()));
-  return results.flat();
+  return results;
 }
 
 async function main(){
   const job=readJob();const range=rangeOf(job.payload||{});const requested=String(job.payload?.businessType||'ALL').toUpperCase();
   const types=requested==='ALL'?[...ALL_TYPES]:ALL_TYPES.includes(requested)?[requested]:[];
   if(!types.length)throw new Error(`不支持的业务板块：${requested}`);
-  writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:1,range,message:`正在准备 ${range.from} 至 ${range.to} 的${requested==='ALL'?'7业务':'单业务'}后台导出`,exportPlanVersion:EXPORT_PLAN_VERSION,workerPid:process.pid});
+  writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:1,range,message:`正在准备 ${range.from} 至 ${range.to} 的${requested==='ALL'?'7业务':'单业务'}完整表格`,exportPlanVersion:EXPORT_PLAN_VERSION,workerPid:process.pid,outputContract:'ONE_WORKBOOK_PER_BUSINESS'});
   const counts=completedBusinessCounts(range,types);
-  const tasks=[];
-  for(const type of types){const count=Number(counts[type]||0);if(!count)continue;const parts=count>LARGE_BUSINESS_THRESHOLD?splitRange(range):[range];for(let i=0;i<parts.length;i+=1)tasks.push({type,range:parts[i],partIndex:i+1,partCount:parts.length});}
+  const tasks=types.filter(type=>Number(counts[type]||0)>0).map(type=>({type,range}));
   if(!tasks.length)throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的数据。`);
 
-  const managementPromise=requested==='ALL'?createManagementSummary(range):Promise.resolve('');
-  const files=await runTasks(tasks,job.payload||{});
-  const managementFile=await managementPromise;
-  if(managementFile)files.unshift(managementFile);
-
+  const results=await runTasks(tasks,job.payload?.periodType||'custom');
+  const files=[];const summaries={};
+  for(let i=0;i<results.length;i+=1){files.push(...(results[i]?.files||[]));if(results[i]?.summary)summaries[tasks[i].type]=results[i].summary;}
+  if(requested==='ALL'){
+    writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:93,message:'正在生成管理汇总表'});
+    const managementFile=await createManagementSummary(range,summaries);if(managementFile)files.unshift(managementFile);
+  }
   let finalFile=files[0]||'';
-  if(files.length>1){writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:96,message:'正在快速打包全部报表文件'});finalFile=path.join(getRuntimeConfig().exportsDir,`CE_QC_${range.key}_${requested}_后台导出.zip`);await zipFiles(files,finalFile);}
-  const allFiles=[...new Set([...files,finalFile].filter(Boolean))].sort((a,b)=>path.basename(a).localeCompare(path.basename(b),'zh-CN'));
-  writeJob({status:'COMPLETED',heartbeatAt:new Date().toISOString(),progress:100,message:`导出完成：${range.from} 至 ${range.to}`,files:allFiles.map(file=>({name:path.basename(file),url:`/api/export-file?name=${encodeURIComponent(path.basename(file))}`})),completedAt:new Date().toISOString(),currentBusiness:'',currentPart:0,businessParts:0,workerConcurrency:Math.min(CONCURRENCY,tasks.length),exportPlanVersion:EXPORT_PLAN_VERSION});
+  if(files.length>1){writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:97,message:'正在打包完整业务表格'});finalFile=path.join(getRuntimeConfig().exportsDir,`CE_QC_${range.key}_${requested}_完整报表.zip`);await zipFiles(files,finalFile);}
+  const allFiles=[...new Set([...files,finalFile].filter(Boolean))];
+  writeJob({status:'COMPLETED',heartbeatAt:new Date().toISOString(),progress:100,message:`导出完成：${range.from} 至 ${range.to}；每个业务仅1个完整Excel`,files:allFiles.map(file=>({name:path.basename(file),url:`/api/export-file?name=${encodeURIComponent(path.basename(file))}`,completeWorkbook:true})),completedAt:new Date().toISOString(),currentBusiness:'',currentPart:0,businessParts:0,workerConcurrency:Math.min(CONCURRENCY,tasks.length),exportPlanVersion:EXPORT_PLAN_VERSION,outputContract:'ONE_WORKBOOK_PER_BUSINESS'});
 }
 
 try{await main();}catch(error){
-  try{
-    const cancelled=error?.code==='EXPORT_JOB_CANCELLED';
-    writeJob({status:'FAILED',message:cancelled?'后台导出任务已被失联恢复机制释放，可重新发起导出。':(error?.message||String(error)),error:error?.stack||String(error),failedAt:new Date().toISOString(),heartbeatAt:new Date().toISOString(),errorCode:error?.code||'EXPORT_JOB_FAILED'});
-  }catch{}
+  try{const cancelled=error?.code==='EXPORT_JOB_CANCELLED';writeJob({status:'FAILED',message:cancelled?'后台导出任务已被失联恢复机制释放，可重新发起导出。':(error?.message||String(error)),error:error?.stack||String(error),failedAt:new Date().toISOString(),heartbeatAt:new Date().toISOString(),errorCode:error?.code||'EXPORT_JOB_FAILED'});}catch{}
   process.exitCode=1;
 }finally{try{closeDb();}catch{}}
