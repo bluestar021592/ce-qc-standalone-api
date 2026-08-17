@@ -6,17 +6,19 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-17-v179-export-worker-launch-resilience-v1';
-const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V177';
+const PATCH_ID = '2026-08-17-v180-single-business-direct-export-launch-v1';
+const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V180';
 const PREPARE_PATH = '/api/export-period/prepare';
 const STATUS_PATH = '/api/v84/export-job/:jobId';
 const RECENT_REUSE_MS = Math.max(5 * 60_000, Number(process.env.EXPORT_RESULT_REUSE_MS || 30 * 60_000));
 const MAX_JOB_SCAN = Math.max(20, Math.min(300, Number(process.env.EXPORT_JOB_SCAN_LIMIT || 100)));
 const JOB_FILE_INDEX_CACHE_MS = Math.max(1000, Math.min(15_000, Number(process.env.EXPORT_JOB_FILE_INDEX_CACHE_MS || 5000)));
 const JOB_READ_CACHE_MAX = Math.max(16, Math.min(256, Number(process.env.EXPORT_JOB_READ_CACHE_MAX || 64)));
-const JOB_HEAP_MB = Math.max(256, Math.min(1024, Number(process.env.EXPORT_JOB_HEAP_MB || 512)));
+const ALL_JOB_HEAP_MB = Math.max(256, Math.min(1024, Number(process.env.EXPORT_JOB_HEAP_MB || 512)));
+const SINGLE_JOB_HEAP_MB = Math.max(384, Math.min(1024, Number(process.env.EXPORT_SINGLE_JOB_HEAP_MB || 768)));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workerFile = path.join(__dirname, 'v84ExportJobWorker.js');
+const singleWorkerFile = path.join(__dirname, 'v180SingleBusinessExportJobWorker.js');
 const originalPost = express.application.post;
 const originalGet = express.application.get;
 let installed = false;
@@ -147,15 +149,18 @@ function failWorkerJob(file, jobId, message, errorCode = 'EXPORT_WORKER_PROCESS_
     forgetActive(next);
     jobFileIndexCache = { at: 0, files: [] };
   } catch (error) {
-    console.error('[CE-QC][V179_EXPORT] failed to persist worker launch failure:', error?.stack || error);
+    console.error('[CE-QC][V180_EXPORT] failed to persist worker failure:', error?.stack || error);
   }
 }
 function launchExportWorker(file, job) {
   let child;
+  const singleBusiness = String(job?.payload?.businessType || 'ALL').toUpperCase() !== 'ALL';
+  const selectedWorker = singleBusiness ? singleWorkerFile : workerFile;
+  const heapMb = singleBusiness ? SINGLE_JOB_HEAP_MB : ALL_JOB_HEAP_MB;
   try {
-    child = spawn(process.execPath, [`--max-old-space-size=${JOB_HEAP_MB}`, workerFile, file], {
+    child = spawn(process.execPath, [`--max-old-space-size=${heapMb}`, selectedWorker, file], {
       cwd: getRuntimeConfig().projectRoot,
-      env: process.env,
+      env: { ...process.env, CE_QC_EXPORT_WORKER_MODE: singleBusiness ? 'SINGLE_BUSINESS_DIRECT' : 'ALL_BUSINESS_ORCHESTRATOR' },
       detached: true,
       windowsHide: true,
       stdio: 'ignore'
@@ -166,7 +171,7 @@ function launchExportWorker(file, job) {
   }
 
   child.once('error', error => {
-    console.error('[CE-QC][V179_EXPORT] worker spawn error:', error?.stack || error);
+    console.error('[CE-QC][V180_EXPORT] worker spawn error:', error?.stack || error);
     failWorkerJob(file, job.jobId, `后台报表进程启动失败：${error?.message || String(error)}`, 'EXPORT_WORKER_SPAWN_FAILED', error?.stack || String(error));
   });
   child.once('exit', (code, signal) => {
@@ -178,7 +183,7 @@ function launchExportWorker(file, job) {
     failWorkerJob(file, job.jobId, `${reason} 请重新发起导出。`, 'EXPORT_WORKER_EXITED_EARLY', reason);
   });
   child.unref();
-  return child;
+  return { child, singleBusiness, heapMb, selectedWorker };
 }
 function enqueueExport(req, res) {
   const payload = normalizePayload(req.body || {});
@@ -194,12 +199,28 @@ function enqueueExport(req, res) {
   const jobId = `EXP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
   const file = jobPath(jobId);
   const now = new Date().toISOString();
-  const job = { version: PATCH_ID, exportContractVersion: EXPORT_CONTRACT_VERSION, jobId, payloadKey: key, status: 'QUEUED', progress: 0, message: '完整报表任务已进入后台队列', payload, files: [], createdAt: now, updatedAt: now, requestedBy: requester, launcherHeapMB: JOB_HEAP_MB };
+  const singleBusiness = payload.businessType !== 'ALL';
+  const job = {
+    version: PATCH_ID,
+    exportContractVersion: EXPORT_CONTRACT_VERSION,
+    jobId,
+    payloadKey: key,
+    status: 'QUEUED',
+    progress: 0,
+    message: singleBusiness ? '单业务完整报表已进入独立后台进程' : '7业务完整报表任务已进入后台队列',
+    payload,
+    files: [],
+    createdAt: now,
+    updatedAt: now,
+    requestedBy: requester,
+    launcherHeapMB: singleBusiness ? SINGLE_JOB_HEAP_MB : ALL_JOB_HEAP_MB,
+    workerMode: singleBusiness ? 'SINGLE_BUSINESS_DIRECT' : 'ALL_BUSINESS_ORCHESTRATOR'
+  };
   writeJsonAtomic(file, job);
   rememberActive(job);
   jobFileIndexCache = { at: 0, files: [] };
   launchExportWorker(file, job);
-  res.status(202).json({ ok: true, async: true, reused: false, jobId, status: job.status, progress: job.progress, message: job.message, pollUrl: `/api/v84/export-job/${encodeURIComponent(jobId)}` });
+  res.status(202).json({ ok: true, async: true, reused: false, jobId, status: job.status, progress: job.progress, message: job.message, pollUrl: `/api/v84/export-job/${encodeURIComponent(jobId)}`, workerMode: job.workerMode });
 }
 function exportStatus(req, res) {
   const job = readJob(req.params.jobId);
@@ -208,7 +229,7 @@ function exportStatus(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true, ...job });
 }
-express.application.post = function v179AsyncExportRoute(...args) {
+express.application.post = function v180AsyncExportRoute(...args) {
   if (args[0] !== PREPARE_PATH || args.length < 2) return originalPost.apply(this, args);
   if (!installed) {
     installed = true;
@@ -217,7 +238,18 @@ express.application.post = function v179AsyncExportRoute(...args) {
   }
   return this;
 };
-export function inspectV179ExportCaches() {
-  return { activeJobs: activeJobs.size, fileIndexAgeMs: jobFileIndexCache.at ? Date.now() - jobFileIndexCache.at : null, fileCount: jobFileIndexCache.files.length, fileIndexTtlMs: JOB_FILE_INDEX_CACHE_MS, jobReadCache: jobReadCache.size, jobReadCacheMax: JOB_READ_CACHE_MAX, exportContractVersion: EXPORT_CONTRACT_VERSION, jobHeapMB: JOB_HEAP_MB, patchId: PATCH_ID };
+export function inspectV180ExportCaches() {
+  return {
+    activeJobs: activeJobs.size,
+    fileIndexAgeMs: jobFileIndexCache.at ? Date.now() - jobFileIndexCache.at : null,
+    fileCount: jobFileIndexCache.files.length,
+    fileIndexTtlMs: JOB_FILE_INDEX_CACHE_MS,
+    jobReadCache: jobReadCache.size,
+    jobReadCacheMax: JOB_READ_CACHE_MAX,
+    exportContractVersion: EXPORT_CONTRACT_VERSION,
+    allJobHeapMB: ALL_JOB_HEAP_MB,
+    singleJobHeapMB: SINGLE_JOB_HEAP_MB,
+    patchId: PATCH_ID
+  };
 }
 export const V84_ASYNC_EXPORT_PATCH_ID = PATCH_ID;
