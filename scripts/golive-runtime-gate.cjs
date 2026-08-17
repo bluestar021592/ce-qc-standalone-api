@@ -105,11 +105,13 @@ must(singleExportWorker, 'onePassStreaming: true');
 must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(asyncExportLauncher, 'V185单业务一次流式完整报表');
-must(exportFastAck, '2026-08-17-v188-export-prepare-fast-ack-v2');
+must(exportFastAck, '2026-08-17-v188-export-prepare-fast-ack-v3');
 must(exportFastAck, 'WRITE_JOB_THEN_ACK_THEN_SPAWN');
 must(exportFastAck, 'this.route(PREPARE_PATH).post(fastPrepare)');
+must(exportFastAck, "originalGet.call(this, STATUS_PATH, fastStatus)");
 must(exportFastAck, 'setImmediate(() => launchWorker');
 must(exportFastAck, 'prepareAckMs');
+must(exportFastAck, 'DIRECT_ROUTE_POST_BYPASS_LEGACY_PREPARE_WITH_STATUS');
 must(exportPreflight, "import './v188ExportPrepareFastAckPatch.js';");
 must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v2');
 
@@ -117,4 +119,4 @@ for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, isolated V185 one-pass Shopee export with V187 exclusive progress owner and V188 fast prepare ack, WHPP recovery and CCSL POD facts repair verified');
+console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, isolated V185 one-pass Shopee export with V187 exclusive progress owner and V188 fast prepare/status ack, WHPP recovery and CCSL POD facts repair verified');
