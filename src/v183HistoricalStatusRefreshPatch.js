@@ -5,13 +5,14 @@ import { CEClient } from './ceClient.js';
 import {
   processCarryFamilyForRefresh,
   applySuccessfulCarryRefresh,
-  hasActiveBusinessProcessing
+  activeBusinessProcessingDetails
 } from './carryoverRefreshScheduler.js';
 
 const VERSION = '2026-08-17-v183-historical-status-refresh-center-v2';
 const ALLOWED_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 const REFRESH_CHUNK = Math.max(100, Math.min(500, Number(process.env.HISTORY_REFRESH_CHUNK || 300)));
 const JOB_TTL_MS = Math.max(10 * 60_000, Number(process.env.HISTORY_REFRESH_JOB_TTL_MS || 2 * 60 * 60_000));
+const WAIT_POLL_MS = Math.max(1000, Math.min(10_000, Number(process.env.HISTORY_REFRESH_WAIT_POLL_MS || 2000)));
 const jobs = new Map();
 const activeByKey = new Map();
 
@@ -103,10 +104,25 @@ function cleanupJobs() {
   const cutoff = Date.now() - JOB_TTL_MS;
   for (const [id, job] of jobs) {
     const at = Date.parse(job.updatedAt || job.createdAt || '') || 0;
-    if (at && at < cutoff && !['QUEUED', 'RUNNING'].includes(String(job.status || ''))) jobs.delete(id);
+    if (at && at < cutoff && !['QUEUED', 'WAITING', 'RUNNING'].includes(String(job.status || ''))) jobs.delete(id);
   }
 }
 function writeJob(job, patch = {}) { Object.assign(job, patch, { updatedAt: new Date().toISOString() }); return job; }
+function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function blockerText(blockers = []) {
+  if (!blockers.length) return '';
+  return blockers.slice(0, 3).map(row => {
+    const family = String(row.family || row.businessType || '任务');
+    const business = String(row.businessType || '').trim();
+    const date = String(row.reportDate || '').trim();
+    const stage = String(row.currentStage || row.status || '处理中').trim();
+    const parts = [family];
+    if (business && business !== family) parts.push(business);
+    if (date) parts.push(date);
+    if (stage) parts.push(stage);
+    return parts.join(' · ');
+  }).join('；');
+}
 function terminalResult(row = {}) {
   const pod = row.是否POD === '是' || String(row.orderStatus || '') === '85' || String(row.currentState || '').toUpperCase() === 'POD';
   const returned = !pod && (row.退回状态 === '已退回' || ['RETURNED','RETURN_COMPLETED'].includes(String(row.currentState || '').toUpperCase()) || /退回|RETURN/i.test(String(row.primaryCategory || row.主分类 || '')));
@@ -142,11 +158,6 @@ async function runRefreshJob(job) {
   const db = getDb();
   const selection = job.selection;
   try {
-    if (hasActiveBusinessProcessing(db)) {
-      const error = new Error('当前七业务/扫描/轨迹任务仍在运行，请先等主任务结束再刷新历史状态。');
-      error.code = 'FOREGROUND_PROCESSING_ACTIVE';
-      throw error;
-    }
     const before = buildSummary(selection, db);
     const allRows = selectedCarryRows(db, selection);
     const rows = refreshCandidates(allRows);
@@ -154,7 +165,25 @@ async function runRefreshJob(job) {
       writeJob(job, { status: 'COMPLETED', progress: 100, message: '当前区间所有票已是POD/退回/取消终态，无需再次请求CE接口。', before, after: before, refreshed: 0, failed: 0, completedAt: new Date().toISOString() });
       return;
     }
-    writeJob(job, { status: 'RUNNING', progress: 2, message: `准备刷新 ${rows.length.toLocaleString('zh-CN')} 票非终态历史状态`, before, total: rows.length });
+
+    writeJob(job, {
+      status: 'WAITING', progress: 0, completed: 0, total: rows.length, refreshed: 0, failed: 0, before,
+      message: `历史状态刷新已排队 · 待刷新 ${rows.length.toLocaleString('zh-CN')} 票`
+    });
+
+    while (true) {
+      const active = activeBusinessProcessingDetails(db);
+      if (!active.active) break;
+      const detail = blockerText(active.blockers);
+      writeJob(job, {
+        status: 'WAITING', progress: 0, completed: 0, total: rows.length,
+        blockers: active.blockers,
+        message: `历史刷新已排队，正在等待当前任务结束${detail ? `：${detail}` : ''}。释放后会自动开始，不需要重复点击。`
+      });
+      await wait(WAIT_POLL_MS);
+    }
+
+    writeJob(job, { status: 'RUNNING', progress: 2, blockers: [], message: `开始刷新 ${rows.length.toLocaleString('zh-CN')} 票非终态历史状态`, before, total: rows.length });
     const sourceByBill = new Map(rows.map(row => [billOf(row), row]));
     const openBills = new Set(rows.filter(row => String(row.status || '').toUpperCase() === 'OPEN').map(billOf));
     const client = new CEClient();
@@ -255,6 +284,6 @@ express.application.listen = function v183HistoricalStatusRefreshListen(...args)
 };
 
 export function inspectV183HistoryRefresh() {
-  return { version: VERSION, jobs: jobs.size, active: activeByKey.size, chunk: REFRESH_CHUNK, types: [...ALLOWED_TYPES] };
+  return { version: VERSION, jobs: jobs.size, active: activeByKey.size, chunk: REFRESH_CHUNK, waitPollMs: WAIT_POLL_MS, types: [...ALLOWED_TYPES] };
 }
 export const V183_HISTORICAL_STATUS_REFRESH_ID = VERSION;
