@@ -1,11 +1,21 @@
-(function installAsyncExportUiV180(global) {
-  if (global.__CE_QC_V180_ASYNC_EXPORT_UI_INSTALLED__) return;
-  global.__CE_QC_V180_ASYNC_EXPORT_UI_INSTALLED__ = true;
+(function installAsyncExportUiV186(global) {
+  if (global.__CE_QC_V186_ASYNC_EXPORT_UI_INSTALLED__) return;
+  global.__CE_QC_V186_ASYNC_EXPORT_UI_INSTALLED__ = true;
 
-  const VERSION = '2026-08-17-v180-single-business-export-ui-v1';
-  const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v180';
+  const VERSION = '2026-08-17-v186-single-business-export-ui-poll-isolation-v1';
+  const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v186';
+  const LEGACY_JOB_KEYS = ['ce_qc_active_export_job_v180'];
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pollingJobId = '';
+  let pollEpoch = 0;
+
+  function clearLegacyJobs() {
+    try { for (const key of LEGACY_JOB_KEYS) localStorage.removeItem(key); } catch {}
+  }
+  function cancelCurrentPoll() {
+    pollEpoch += 1;
+    pollingJobId = '';
+  }
 
   function ensureBusinessOptions() {
     const select = document.getElementById('periodExportBusiness');
@@ -33,7 +43,12 @@
   function loadActiveJob() {
     try {
       const value = JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY) || 'null');
-      return value?.jobId ? value : null;
+      if (!value?.jobId) return null;
+      if (String(value.version || '') !== VERSION) {
+        localStorage.removeItem(ACTIVE_JOB_KEY);
+        return null;
+      }
+      return value;
     } catch { return null; }
   }
   function clearActiveJob(jobId = '') {
@@ -43,9 +58,9 @@
     } catch {}
   }
 
-  async function json(url, init = {}) {
+  async function json(url, init = {}, timeoutMs = 15000) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     timeout.unref?.();
     try {
       const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal, ...init });
@@ -61,7 +76,7 @@
       return payload;
     } catch (error) {
       if (error?.name === 'AbortError') {
-        const timeoutError = new Error('状态接口10秒内未响应');
+        const timeoutError = new Error(`状态接口${Math.round(timeoutMs / 1000)}秒内未响应`);
         timeoutError.code = 'POLL_TIMEOUT';
         throw timeoutError;
       }
@@ -122,7 +137,7 @@
 
   async function waitForJob(jobId, progress, files, suppliedPollUrl = '') {
     if (!jobId) throw new Error('后台没有返回导出任务编号');
-    if (pollingJobId === jobId) return null;
+    const myEpoch = ++pollEpoch;
     pollingJobId = jobId;
     const pollUrl = suppliedPollUrl || `/api/v84/export-job/${encodeURIComponent(jobId)}`;
     let networkErrors = 0;
@@ -130,19 +145,21 @@
     let unchangedCycles = 0;
     let lastGoodAt = Date.now();
     try {
-      while (true) {
+      while (myEpoch === pollEpoch) {
         try {
-          const job = await json(pollUrl);
+          const job = await json(pollUrl, {}, 15000);
+          if (myEpoch !== pollEpoch) return { cancelled: true };
           networkErrors = 0;
           lastGoodAt = Date.now();
           const status = String(job.status || '').toUpperCase();
           const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
           const part = job.currentBusiness ? ` · ${job.currentBusiness}` : '';
           const mode = job.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : '';
+          const worker = job.workerVersion ? ` · ${String(job.workerVersion).includes('v185') ? 'V185' : job.workerVersion}` : '';
           const signature = `${status}|${pct}|${job.currentBusiness || ''}|${job.message || ''}`;
           if (signature === lastSignature) unchangedCycles += 1;
           else { lastSignature = signature; unchangedCycles = 0; }
-          setProgressText(progress, `${job.message || '后台生成中'} · ${pct}%${part}${mode}`);
+          setProgressText(progress, `${job.message || '后台生成中'} · ${pct}%${part}${mode}${worker}`);
 
           if (status === 'COMPLETED') {
             const readyFiles = Array.isArray(job.files) ? job.files.filter(item => item?.url && item?.name) : [];
@@ -159,20 +176,22 @@
             throw error;
           }
         } catch (error) {
+          if (myEpoch !== pollEpoch) return { cancelled: true };
           if ([401, 403, 404].includes(Number(error.status || 0)) || ['FAILED', 'CANCELLED'].includes(String(error.code || '').toUpperCase())) throw error;
           if (/后台任务已完成，但没有返回可下载文件/.test(String(error.message || ''))) throw error;
           networkErrors += 1;
           const disconnectedSeconds = Math.max(1, Math.floor((Date.now() - lastGoodAt) / 1000));
-          setProgressText(progress, `后台完整报表仍在独立进程生成；主页面状态连接暂时中断 ${disconnectedSeconds} 秒，正在自动恢复（第 ${networkErrors} 次）…`);
+          setProgressText(progress, `当前V185导出任务 ${jobId} 仍在后台执行；状态连接暂时中断 ${disconnectedSeconds} 秒，正在恢复（第 ${networkErrors} 次）…`);
         }
         await sleep(pollDelay(unchangedCycles, networkErrors));
       }
+      return { cancelled: true };
     } finally {
-      if (pollingJobId === jobId) pollingJobId = '';
+      if (myEpoch === pollEpoch && pollingJobId === jobId) pollingJobId = '';
     }
   }
 
-  async function exportPeriodReportV180() {
+  async function exportPeriodReportV186() {
     const progress = document.getElementById('exportProgress');
     const files = document.getElementById('exportGeneratedFiles');
     const button = document.querySelector('[data-testid="export-all-reports"]');
@@ -180,19 +199,20 @@
     const payload = exportInputs();
     if (!validate(payload, progress)) return;
 
+    cancelCurrentPoll();
     files.innerHTML = '';
     const originalButtonText = button?.textContent || '';
     if (button) { button.disabled = true; button.textContent = '后台生成中…'; }
     progress.textContent = payload.businessType === 'ALL'
       ? '正在创建7业务后台完整报表任务…'
-      : `正在创建 ${payload.businessType} 独立单进程完整报表任务；最终只生成1个Excel…`;
+      : `正在创建 ${payload.businessType} V185独立流式完整报表任务；最终只生成1个Excel…`;
 
     try {
       const start = await json('/api/export-period/prepare', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload)
-      });
+      }, 20000);
 
       const readyFiles = Array.isArray(start.files) ? start.files.filter(item => item?.url && item?.name) : [];
       if (readyFiles.length) {
@@ -208,9 +228,10 @@
 
       saveActiveJob(jobId, payload, pollUrl);
       const initialPct = Math.max(0, Math.min(100, Number(start.progress || 0)));
-      progress.textContent = `${start.message || '后台完整报表任务已创建'} · ${initialPct}%${start.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : ''}`;
+      progress.textContent = `${start.message || '后台完整报表任务已创建'} · ${initialPct}%${start.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : ''} · Job ${jobId}`;
       await waitForJob(jobId, progress, files, pollUrl);
     } catch (error) {
+      if (String(error?.code || '') === 'POLL_SUPERSEDED') return;
       progress.textContent = `导出失败：${error.message}。如果后台任务已经创建，重新进入报表页会自动恢复进度。`;
     } finally {
       if (button) { button.disabled = false; button.textContent = originalButtonText || '一键导出全部报表'; }
@@ -223,7 +244,8 @@
     const progress = document.getElementById('exportProgress');
     const files = document.getElementById('exportGeneratedFiles');
     if (!progress || !files) return;
-    progress.textContent = '检测到V180未完成的完整报表任务，正在恢复进度…';
+    cancelCurrentPoll();
+    progress.textContent = `检测到V186当前完整报表任务 ${active.jobId}，正在恢复唯一进度通道…`;
     try {
       await waitForJob(active.jobId, progress, files, active.pollUrl || '');
     } catch (error) {
@@ -232,10 +254,11 @@
     }
   }
 
+  clearLegacyJobs();
   ensureBusinessOptions();
-  global.exportPeriodReport = exportPeriodReportV180;
+  global.exportPeriodReport = exportPeriodReportV186;
   global.resumeActiveExportJob = resumeActiveJob;
-  global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION, pollDelay, waitForJob };
+  global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION, pollDelay, waitForJob, cancelCurrentPoll, activeJobKey: ACTIVE_JOB_KEY };
   setTimeout(() => void resumeActiveJob(), 80);
-  console.info('[CE-QC][V180_SINGLE_BUSINESS_EXPORT_UI]', VERSION);
+  console.info('[CE-QC][V186_SINGLE_BUSINESS_EXPORT_UI]', VERSION);
 })(window);
