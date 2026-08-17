@@ -1,9 +1,9 @@
-(function installAsyncExportUiV178(global) {
-  if (global.__CE_QC_V178_ASYNC_EXPORT_UI_INSTALLED__) return;
-  global.__CE_QC_V178_ASYNC_EXPORT_UI_INSTALLED__ = true;
+(function installAsyncExportUiV180(global) {
+  if (global.__CE_QC_V180_ASYNC_EXPORT_UI_INSTALLED__) return;
+  global.__CE_QC_V180_ASYNC_EXPORT_UI_INSTALLED__ = true;
 
-  const VERSION = '2026-08-17-v178-async-export-poll-authority-v1';
-  const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v177';
+  const VERSION = '2026-08-17-v180-single-business-export-ui-v1';
+  const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v180';
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pollingJobId = '';
 
@@ -27,7 +27,7 @@
 
   function saveActiveJob(jobId, payload = {}, pollUrl = '') {
     try {
-      localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId, payload, pollUrl, savedAt: new Date().toISOString() }));
+      localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId, payload, pollUrl, savedAt: new Date().toISOString(), version: VERSION }));
     } catch {}
   }
   function loadActiveJob() {
@@ -44,17 +44,31 @@
   }
 
   async function json(url, init = {}) {
-    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', ...init });
-    const raw = await response.text();
-    let payload = {};
-    try { payload = raw ? JSON.parse(raw) : {}; } catch {}
-    if (!response.ok || payload?.ok === false) {
-      const error = new Error(payload?.error || payload?.message || (raw && !/^\s*</.test(raw) ? raw.slice(0, 240) : `HTTP ${response.status}`));
-      error.status = response.status;
-      error.code = payload?.code || `HTTP_${response.status}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    timeout.unref?.();
+    try {
+      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal, ...init });
+      const raw = await response.text();
+      let payload = {};
+      try { payload = raw ? JSON.parse(raw) : {}; } catch {}
+      if (!response.ok || payload?.ok === false) {
+        const error = new Error(payload?.error || payload?.message || (raw && !/^\s*</.test(raw) ? raw.slice(0, 240) : `HTTP ${response.status}`));
+        error.status = response.status;
+        error.code = payload?.code || `HTTP_${response.status}`;
+        throw error;
+      }
+      return payload;
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        const timeoutError = new Error('状态接口10秒内未响应');
+        timeoutError.code = 'POLL_TIMEOUT';
+        throw timeoutError;
+      }
       throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-    return payload;
   }
 
   function exportInputs() {
@@ -99,11 +113,11 @@
     if (target && target.textContent !== text) target.textContent = text;
   }
   function pollDelay(unchangedCycles, networkErrors = 0) {
-    if (document.visibilityState === 'hidden') return 5000;
-    if (networkErrors > 0) return Math.min(6500, 1700 + Math.min(networkErrors, 12) * 350);
-    if (unchangedCycles >= 5) return 2600;
-    if (unchangedCycles >= 2) return 1800;
-    return 900;
+    if (document.visibilityState === 'hidden') return 7000;
+    if (networkErrors > 0) return Math.min(12000, 4500 + Math.min(networkErrors, 10) * 650);
+    if (unchangedCycles >= 5) return 5000;
+    if (unchangedCycles >= 2) return 3500;
+    return 2500;
   }
 
   async function waitForJob(jobId, progress, files, suppliedPollUrl = '') {
@@ -114,18 +128,21 @@
     let networkErrors = 0;
     let lastSignature = '';
     let unchangedCycles = 0;
+    let lastGoodAt = Date.now();
     try {
       while (true) {
         try {
           const job = await json(pollUrl);
           networkErrors = 0;
+          lastGoodAt = Date.now();
           const status = String(job.status || '').toUpperCase();
           const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
           const part = job.currentBusiness ? ` · ${job.currentBusiness}` : '';
+          const mode = job.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : '';
           const signature = `${status}|${pct}|${job.currentBusiness || ''}|${job.message || ''}`;
           if (signature === lastSignature) unchangedCycles += 1;
           else { lastSignature = signature; unchangedCycles = 0; }
-          setProgressText(progress, `${job.message || '后台生成中'} · ${pct}%${part}`);
+          setProgressText(progress, `${job.message || '后台生成中'} · ${pct}%${part}${mode}`);
 
           if (status === 'COMPLETED') {
             const readyFiles = Array.isArray(job.files) ? job.files.filter(item => item?.url && item?.name) : [];
@@ -145,7 +162,8 @@
           if ([401, 403, 404].includes(Number(error.status || 0)) || ['FAILED', 'CANCELLED'].includes(String(error.code || '').toUpperCase())) throw error;
           if (/后台任务已完成，但没有返回可下载文件/.test(String(error.message || ''))) throw error;
           networkErrors += 1;
-          setProgressText(progress, `后台完整报表仍在生成，页面连接正在自动恢复（第 ${networkErrors} 次）…`);
+          const disconnectedSeconds = Math.max(1, Math.floor((Date.now() - lastGoodAt) / 1000));
+          setProgressText(progress, `后台完整报表仍在独立进程生成；主页面状态连接暂时中断 ${disconnectedSeconds} 秒，正在自动恢复（第 ${networkErrors} 次）…`);
         }
         await sleep(pollDelay(unchangedCycles, networkErrors));
       }
@@ -154,7 +172,7 @@
     }
   }
 
-  async function exportPeriodReportV178() {
+  async function exportPeriodReportV180() {
     const progress = document.getElementById('exportProgress');
     const files = document.getElementById('exportGeneratedFiles');
     const button = document.querySelector('[data-testid="export-all-reports"]');
@@ -165,7 +183,9 @@
     files.innerHTML = '';
     const originalButtonText = button?.textContent || '';
     if (button) { button.disabled = true; button.textContent = '后台生成中…'; }
-    progress.textContent = '正在创建后台完整报表任务：一个业务只生成1个完整Excel，请不要重复点击…';
+    progress.textContent = payload.businessType === 'ALL'
+      ? '正在创建7业务后台完整报表任务…'
+      : `正在创建 ${payload.businessType} 独立单进程完整报表任务；最终只生成1个Excel…`;
 
     try {
       const start = await json('/api/export-period/prepare', {
@@ -188,7 +208,7 @@
 
       saveActiveJob(jobId, payload, pollUrl);
       const initialPct = Math.max(0, Math.min(100, Number(start.progress || 0)));
-      progress.textContent = `${start.message || '后台完整报表任务已创建'} · ${initialPct}%`;
+      progress.textContent = `${start.message || '后台完整报表任务已创建'} · ${initialPct}%${start.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : ''}`;
       await waitForJob(jobId, progress, files, pollUrl);
     } catch (error) {
       progress.textContent = `导出失败：${error.message}。如果后台任务已经创建，重新进入报表页会自动恢复进度。`;
@@ -203,7 +223,7 @@
     const progress = document.getElementById('exportProgress');
     const files = document.getElementById('exportGeneratedFiles');
     if (!progress || !files) return;
-    progress.textContent = '检测到上次未完成的完整报表任务，正在恢复进度…';
+    progress.textContent = '检测到V180未完成的完整报表任务，正在恢复进度…';
     try {
       await waitForJob(active.jobId, progress, files, active.pollUrl || '');
     } catch (error) {
@@ -213,9 +233,9 @@
   }
 
   ensureBusinessOptions();
-  global.exportPeriodReport = exportPeriodReportV178;
+  global.exportPeriodReport = exportPeriodReportV180;
   global.resumeActiveExportJob = resumeActiveJob;
   global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION, pollDelay, waitForJob };
   setTimeout(() => void resumeActiveJob(), 80);
-  console.info('[CE-QC][V178_ASYNC_EXPORT_POLL_AUTHORITY]', VERSION);
+  console.info('[CE-QC][V180_SINGLE_BUSINESS_EXPORT_UI]', VERSION);
 })(window);
