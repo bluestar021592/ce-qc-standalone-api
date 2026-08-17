@@ -6,8 +6,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-17-v180-single-business-direct-export-launch-v1';
-const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V180';
+const PATCH_ID = '2026-08-17-v182-fresh-legacy-layout-export-launch-v1';
+const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V182_LEGACY_LAYOUT_REAL_POD_TIME';
 const PREPARE_PATH = '/api/export-period/prepare';
 const STATUS_PATH = '/api/v84/export-job/:jobId';
 const RECENT_REUSE_MS = Math.max(5 * 60_000, Number(process.env.EXPORT_RESULT_REUSE_MS || 30 * 60_000));
@@ -149,7 +149,7 @@ function failWorkerJob(file, jobId, message, errorCode = 'EXPORT_WORKER_PROCESS_
     forgetActive(next);
     jobFileIndexCache = { at: 0, files: [] };
   } catch (error) {
-    console.error('[CE-QC][V180_EXPORT] failed to persist worker failure:', error?.stack || error);
+    console.error('[CE-QC][V182_EXPORT] failed to persist worker failure:', error?.stack || error);
   }
 }
 function launchExportWorker(file, job) {
@@ -171,7 +171,7 @@ function launchExportWorker(file, job) {
   }
 
   child.once('error', error => {
-    console.error('[CE-QC][V180_EXPORT] worker spawn error:', error?.stack || error);
+    console.error('[CE-QC][V182_EXPORT] worker spawn error:', error?.stack || error);
     failWorkerJob(file, job.jobId, `后台报表进程启动失败：${error?.message || String(error)}`, 'EXPORT_WORKER_SPAWN_FAILED', error?.stack || String(error));
   });
   child.once('exit', (code, signal) => {
@@ -194,7 +194,7 @@ function enqueueExport(req, res) {
   if (reusable) {
     const job = reusable.job;
     const completed = reusable.reused === 'COMPLETED';
-    return res.status(completed ? 200 : 202).json({ ok: true, async: !completed, reused: reusable.reused, jobId: job.jobId, status: job.status, progress: Number(job.progress || 0), message: completed ? '相同条件完整报表已生成，直接复用现有文件' : '相同条件完整报表正在后台执行，已复用现有任务', files: completed ? (job.files || []) : undefined, pollUrl: `/api/v84/export-job/${encodeURIComponent(job.jobId)}` });
+    return res.status(completed ? 200 : 202).json({ ok: true, async: !completed, reused: reusable.reused, jobId: job.jobId, status: job.status, progress: Number(job.progress || 0), message: completed ? '相同条件V182完整报表已生成，直接复用现有文件' : '相同条件V182完整报表正在后台执行，已复用当前V182任务', files: completed ? (job.files || []) : undefined, pollUrl: `/api/v84/export-job/${encodeURIComponent(job.jobId)}` });
   }
   const jobId = `EXP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
   const file = jobPath(jobId);
@@ -207,7 +207,7 @@ function enqueueExport(req, res) {
     payloadKey: key,
     status: 'QUEUED',
     progress: 0,
-    message: singleBusiness ? '单业务完整报表已进入独立后台进程' : '7业务完整报表任务已进入后台队列',
+    message: singleBusiness ? 'V182单业务完整报表已进入全新独立后台进程' : 'V182 7业务完整报表任务已进入后台队列',
     payload,
     files: [],
     createdAt: now,
@@ -220,7 +220,7 @@ function enqueueExport(req, res) {
   rememberActive(job);
   jobFileIndexCache = { at: 0, files: [] };
   launchExportWorker(file, job);
-  res.status(202).json({ ok: true, async: true, reused: false, jobId, status: job.status, progress: job.progress, message: job.message, pollUrl: `/api/v84/export-job/${encodeURIComponent(jobId)}`, workerMode: job.workerMode });
+  res.status(202).json({ ok: true, async: true, reused: false, jobId, status: job.status, progress: job.progress, message: job.message, pollUrl: `/api/v84/export-job/${encodeURIComponent(jobId)}`, workerMode: job.workerMode, exportContractVersion: EXPORT_CONTRACT_VERSION });
 }
 function exportStatus(req, res) {
   const job = readJob(req.params.jobId);
@@ -229,7 +229,7 @@ function exportStatus(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true, ...job });
 }
-express.application.post = function v180AsyncExportRoute(...args) {
+express.application.post = function v182AsyncExportRoute(...args) {
   if (args[0] !== PREPARE_PATH || args.length < 2) return originalPost.apply(this, args);
   if (!installed) {
     installed = true;
