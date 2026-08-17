@@ -10,6 +10,8 @@ const storage = read('src/storage.js');
 const bstore = read('src/businessStore.js');
 const v109 = read('public/v109-instant-business-navigation.js');
 const v140 = read('public/v140-current-business-truth.js');
+const v108 = read('public/v108-route-lazy-features.js');
+const asyncExportUi = read('public/v84-async-export-ui.js');
 const dashboard = read('public/dashboard-v18.js');
 const bootstrap = read('bootstrap.js');
 const whppRecovery = read('src/v165WhppRunStateRecoveryPatch.js');
@@ -49,10 +51,20 @@ must(bstore, 'stripHeavyBusinessRow');
 must(shell, 'v67-resilient-run-guard.js?v=20260817-1');
 must(shell, 'v183HistoricalStatusRefreshPatch.js');
 must(shell, '/v183-history-refresh.js?v=20260817-1');
+must(shell, '2026-08-17-v186-export-ui-poll-isolation-shell-v1');
+must(shell, '/v108-route-lazy-features.js?v=20260817-v186-1');
 must(v109, '2026-08-17-v166-summary-first-navigation-throttle-v1');
 must(v109, 'MIN_BACKGROUND_HYDRATE_MS=60_000');
 must(v140, '2026-08-17-v166-current-business-truth-compact-v1');
 must(v140, '&compact=1');
+must(v108, '2026-08-17-v186-route-lazy-export-ui-v1');
+must(v108, '/v84-async-export-ui.js?v=20260817-v186-1');
+must(asyncExportUi, '2026-08-17-v186-single-business-export-ui-poll-isolation-v1');
+must(asyncExportUi, 'ce_qc_active_export_job_v186');
+must(asyncExportUi, 'LEGACY_JOB_KEYS');
+must(asyncExportUi, 'pollEpoch');
+must(asyncExportUi, 'cancelCurrentPoll');
+must(asyncExportUi, '当前V185导出任务');
 must(dashboard, 'renderSignatures');
 must(dashboard, 'completedProbeCache');
 must(bootstrap, 'v165WhppRunStateRecoveryPatch');
@@ -91,4 +103,4 @@ for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, isolated V185 one-pass Shopee export, WHPP recovery and CCSL POD facts repair verified');
+console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, isolated V185 one-pass Shopee export with V186 single progress channel, WHPP recovery and CCSL POD facts repair verified');
