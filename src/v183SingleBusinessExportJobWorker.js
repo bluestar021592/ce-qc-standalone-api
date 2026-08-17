@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getRuntimeConfig, closeDb } from './db.js';
 import { createCompactPeriodBusinessWorkbook } from './v177CompactPeriodExporter.js';
-import { createShopeeRefreshedPeriodWorkbook } from './v183ShopeeRefreshedPeriodExporter.js';
+import { createShopeeCurrentStateStreamWorkbook } from './v185ShopeeCurrentStateStreamExporter.js';
 import { listCompletedWhppSnapshots } from './v87WhppExportStore.js';
 import { createShopeeTemplateWorkbook } from './shopeeTemplateExporter.js';
 
-const VERSION = '2026-08-17-v183-single-business-refreshed-status-worker-v1';
+const VERSION = '2026-08-17-v185-single-business-stream-worker-v1';
 const HEARTBEAT_MS = Math.max(3000, Math.min(15000, Number(process.env.EXPORT_SINGLE_HEARTBEAT_MS || 5000)));
 const jobFile = path.resolve(String(process.argv[2] || ''));
 const ALLOWED = new Set(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
@@ -25,7 +25,7 @@ function writeJob(patch = {}) {
     throw error;
   }
   const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
-  const temp = `${jobFile}.${process.pid}.v183.tmp`;
+  const temp = `${jobFile}.${process.pid}.v185.tmp`;
   fs.writeFileSync(temp, JSON.stringify(next, null, 2), 'utf8');
   fs.renameSync(temp, jobFile);
   return next;
@@ -76,7 +76,7 @@ try {
   const job = readJob();
   const payload = job.payload || {};
   const type = String(payload.businessType || '').trim().toUpperCase();
-  if (!ALLOWED.has(type)) throw new Error(`V183单业务导出不支持：${type || '空业务'}`);
+  if (!ALLOWED.has(type)) throw new Error(`V185单业务导出不支持：${type || '空业务'}`);
   const range = rangeOf(payload);
   startedAt = Date.now();
   stage = `正在生成 ${type} 完整表格`;
@@ -107,8 +107,8 @@ try {
     const result = await createShopeeTemplateWorkbook({ type, periodType: payload.periodType || 'custom', range, snapshots, outputDir: getRuntimeConfig().exportsDir });
     file = result.file;
   } else if (SHOPEE_TYPES.has(type)) {
-    stage = `正在读取 ${type} 首日报原始字段（旧版表结构）`; progress = 10;
-    const result = await createShopeeRefreshedPeriodWorkbook({
+    stage = `正在读取 ${type} 首日报唯一票`; progress = 8;
+    const result = await createShopeeCurrentStateStreamWorkbook({
       type,
       periodType: payload.periodType || 'custom',
       range,
@@ -117,27 +117,27 @@ try {
         const phase = String(info.phase || '');
         const completed = Math.max(0, Number(info.completed || 0));
         const total = Math.max(1, Number(info.total || 1));
-        if (phase === 'sourceRows') {
+        if (phase === 'start') {
+          progress = 8;
+          stage = `正在准备 ${type} 首日报唯一归属`;
+        } else if (phase === 'sourceRows') {
           progress = Math.max(10, Math.min(35, 10 + Math.floor((completed / total) * 25)));
-          stage = `正在读取 ${type} 日报原始字段 ${completed}/${total}`;
-        } else if (phase === 'finalStates') {
-          progress = Math.max(36, Math.min(58, 36 + Math.floor((completed / total) * 22)));
-          stage = `正在匹配 ${type} 历史处理结果 ${Math.min(completed, total)}/${total}`;
-        } else if (phase === 'writing') {
-          progress = Math.max(59, Math.min(72, 59 + Math.floor((completed / total) * 13)));
-          stage = `正在生成 ${type} 旧版10-Sheet基础表 ${Math.min(completed, total)}/${total}`;
+          stage = `读取 ${type} 首日报唯一票 ${completed}/${total} · 已归属${Number(info.entries || 0).toLocaleString()}票`;
         } else if (phase === 'currentStates') {
-          progress = Math.max(73, Math.min(87, 73 + Math.floor((completed / total) * 14)));
-          stage = `正在读取 ${type} 最新刷新状态 ${Math.min(completed, total)}/${total}`;
-        } else if (phase === 'overlayWriting') {
-          progress = Math.max(88, Math.min(97, 88 + Math.floor((completed / total) * 9)));
-          stage = `正在把POD/退回/Pending最新状态写回完整Excel ${Math.min(completed, total)}/${total}`;
+          progress = Math.max(36, Math.min(58, 36 + Math.floor((completed / total) * 22)));
+          stage = `匹配 ${type} 最新刷新状态 ${Math.min(completed, total)}/${total}`;
+        } else if (phase === 'finalStates') {
+          progress = Math.max(59, Math.min(66, 59 + Math.floor((completed / total) * 7)));
+          stage = `补充 ${type} 历史完成状态 ${Math.min(completed, total)}/${total}`;
+        } else if (phase === 'writing') {
+          progress = Math.max(67, Math.min(97, 67 + Math.floor((completed / total) * 30)));
+          stage = `一次流式写入10-Sheet完整Excel ${Math.min(completed, total).toLocaleString()}/${total.toLocaleString()}`;
         }
         writeJob({
           status: 'RUNNING', progress, heartbeatAt: new Date().toISOString(), currentBusiness: type,
           currentPart: 1, businessParts: 1, workerPid: process.pid, workerMode: 'SINGLE_BUSINESS_DIRECT',
-          workerVersion: VERSION, apiRawJsonRead: false, sourceRowJsonRead: true,
-          currentStateOverlay: true, outputContract: 'LEGACY_10_SHEETS_ONE_WORKBOOK_REFRESHED_STATUS',
+          workerVersion: VERSION, sourceRowJsonRead: true, currentStateOverlay: true,
+          onePassStreaming: true, outputContract: 'LEGACY_10_SHEETS_ONE_PASS_STREAM',
           message: `${stage} · ${memoryText()}`
         });
       }
@@ -157,7 +157,7 @@ try {
     status: 'COMPLETED', progress: 100, heartbeatAt: new Date().toISOString(), currentBusiness: '',
     currentPart: 0, businessParts: 0, workerPid: process.pid, workerMode: 'SINGLE_BUSINESS_DIRECT',
     workerVersion: VERSION, outputContract: summary?.outputContract || 'ONE_WORKBOOK_PER_BUSINESS', summary,
-    message: `导出完成：${type} ${range.from} 至 ${range.to}；已叠加最新POD/退回/Pending状态`,
+    message: `导出完成：${type} ${range.from} 至 ${range.to}；首日报唯一归属 + 最新状态已一次流式写入`,
     files: [fileItem(file)], completedAt: new Date().toISOString()
   });
 } catch (error) {
