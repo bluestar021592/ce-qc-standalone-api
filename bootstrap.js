@@ -134,6 +134,7 @@ try {
   await importPhase('v55DashboardReconciliationPatch', './src/v55DashboardReconciliationPatch.js');
   await importPhase('v70ConfirmQueryResiliencePatch', './src/v70ConfirmQueryResiliencePatch.js');
   await importPhase('v141WhppDailyRetryIsolationPatch', './src/v141WhppDailyRetryIsolationPatch.js');
+  await importPhase('v165WhppRunStateRecoveryPatch', './src/v165WhppRunStateRecoveryPatch.js');
   await importPhase('v142SevenBusinessExportPatch', './src/v142SevenBusinessExportPatch.js');
   await importPhase('v71WhppSummaryPatch', './src/v71WhppSummaryPatch.js');
   await importPhase('v84AsyncExportPatch', './src/v84AsyncExportPatch.js');
@@ -145,6 +146,7 @@ try {
   await importPhase('v94ShopeeWhppSourceTruthPatch', './src/v94ShopeeWhppSourceTruthPatch.js');
   await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
   await importPhase('v161UnifiedImportRuntimeTruthPatch', './src/v161UnifiedImportRuntimeTruthPatch.js');
+  const v167Repair = await importPhase('v167CcslPodLockFactRepair', './src/v167CcslPodLockFactRepair.js');
 
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
@@ -153,6 +155,13 @@ try {
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
 
   await importServerInteractiveFirst();
+  try {
+    const startedAt = Date.now();
+    const result = v167Repair.repairLatestCcslPodLockFacts();
+    console.log(`[CE-QC][BOOT] V167 CCSL POD-lock fact repair ${Date.now()-startedAt}ms ${JSON.stringify(result)}`);
+  } catch (error) {
+    console.error('[CE-QC][BOOT] V167 CCSL POD-lock fact repair failed:', error?.stack || error);
+  }
   scheduleDeferredMaintenance({ v92, v76Repair });
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
