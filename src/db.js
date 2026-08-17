@@ -10,10 +10,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
-const SQLITE_CACHE_KIB = Math.max(8 * 1024, Math.min(256 * 1024, Number(process.env.SQLITE_CACHE_KIB || 64 * 1024)));
-const SQLITE_MMAP_BYTES = Math.max(0, Math.min(1024 * 1024 * 1024, Number(process.env.SQLITE_MMAP_BYTES || 256 * 1024 * 1024)));
+const EXPORT_WORKER_MODE = String(process.env.CE_QC_EXPORT_WORKER_MODE || '').toUpperCase();
+const IS_EXPORT_WORKER = EXPORT_WORKER_MODE === 'SINGLE_BUSINESS_DIRECT' || EXPORT_WORKER_MODE === 'ALL_BUSINESS_ORCHESTRATOR';
+const SQLITE_CACHE_KIB = Math.max(8 * 1024, Math.min(256 * 1024, Number(process.env.SQLITE_CACHE_KIB || (IS_EXPORT_WORKER ? 8 * 1024 : 64 * 1024))));
+const SQLITE_MMAP_BYTES = Math.max(0, Math.min(1024 * 1024 * 1024, Number(process.env.SQLITE_MMAP_BYTES ?? (IS_EXPORT_WORKER ? 0 : 256 * 1024 * 1024))));
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES = Math.max(1000, Math.min(16000, Number(process.env.SQLITE_WAL_AUTOCHECKPOINT_PAGES || 4000)));
 const SQLITE_JOURNAL_SIZE_LIMIT = Math.max(16 * 1024 * 1024, Math.min(256 * 1024 * 1024, Number(process.env.SQLITE_JOURNAL_SIZE_LIMIT || 64 * 1024 * 1024)));
+const SQLITE_TEMP_STORE = String(process.env.SQLITE_TEMP_STORE || (IS_EXPORT_WORKER ? 'FILE' : 'MEMORY')).toUpperCase() === 'FILE' ? 'FILE' : 'MEMORY';
 
 let db = null;
 let initialized = false;
@@ -105,12 +108,12 @@ export function ensureRuntimeDirs(cfg = getRuntimeConfig()) {
 }
 
 function configurePerformancePragmas(database) {
-  // Negative cache_size is KiB. This remains a per-connection memory ceiling,
-  // does not change the SQLite file format, and is safe for the detached export
-  // workers as well as the main API process.
+  // Export workers deliberately use a much smaller SQLite footprint so a large
+  // historical Excel export cannot starve the web/API process. The main process
+  // keeps the original performance settings when CE_QC_EXPORT_WORKER_MODE is unset.
   const statements = [
     `PRAGMA cache_size = -${Math.round(SQLITE_CACHE_KIB)}`,
-    'PRAGMA temp_store = MEMORY',
+    `PRAGMA temp_store = ${SQLITE_TEMP_STORE}`,
     `PRAGMA mmap_size = ${Math.round(SQLITE_MMAP_BYTES)}`,
     `PRAGMA wal_autocheckpoint = ${Math.round(SQLITE_WAL_AUTOCHECKPOINT_PAGES)}`,
     `PRAGMA journal_size_limit = ${Math.round(SQLITE_JOURNAL_SIZE_LIMIT)}`
