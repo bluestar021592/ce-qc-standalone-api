@@ -1,9 +1,14 @@
 (function restoreAsyncPeriodExportV178(global) {
   if (global.__CE_QC_V178_ASYNC_EXPORT_AUTHORITY__) return;
 
-  const VERSION = '2026-08-17-v178-async-export-authority-v1';
+  const VERSION = '2026-08-17-v178-async-export-authority-v2';
   const SCRIPT_ID = 'ceQcAsyncExportUiV178';
   const SCRIPT_SRC = '/v84-async-export-ui.js?v=20260817-v178-1';
+
+  function hasV178Exporter() {
+    return /v178/i.test(String(global.__CE_QC_V84_ASYNC_EXPORT_UI__?.version || ''))
+      && typeof global.exportPeriodReport === 'function';
+  }
 
   function markReady() {
     global.__CE_QC_V178_ASYNC_EXPORT_AUTHORITY__ = {
@@ -14,14 +19,15 @@
   }
 
   function loadAsyncExporter() {
-    if (global.__CE_QC_V84_ASYNC_EXPORT_UI__ && typeof global.exportPeriodReport === 'function') {
+    if (hasV178Exporter()) {
       markReady();
       return;
     }
 
     const existing = document.getElementById(SCRIPT_ID);
     if (existing) {
-      existing.addEventListener('load', markReady, { once: true });
+      if (existing.dataset.loaded === '1') markReady();
+      else existing.addEventListener('load', markReady, { once: true });
       return;
     }
 
@@ -29,7 +35,7 @@
     script.id = SCRIPT_ID;
     script.src = SCRIPT_SRC;
     script.async = false;
-    script.onload = markReady;
+    script.onload = () => { script.dataset.loaded = '1'; markReady(); };
     script.onerror = () => {
       console.error('[CE-QC][V178_ASYNC_EXPORT_AUTHORITY] failed to load', SCRIPT_SRC);
       const progress = document.getElementById('exportProgress');
@@ -38,9 +44,8 @@
     document.body.appendChild(script);
   }
 
-  // /api/export-period/prepare is authoritative asynchronous work for large ranges.
-  // The prepare response may only contain { async:true, jobId, pollUrl }. Files are
-  // returned after the background worker reaches COMPLETED. Never restore the old
-  // synchronous shim that required files in the prepare response.
+  // The prepare endpoint is asynchronous. A valid first response may only contain
+  // jobId/pollUrl and therefore must never be treated as a missing-download error.
+  // V178 deliberately replaces any older cached exporter before the user clicks.
   loadAsyncExporter();
 })(window);
