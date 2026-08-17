@@ -1,7 +1,7 @@
 (function installSevenBusinessStatusV168(global) {
   if (global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__) return;
 
-  const VERSION = '2026-08-17-v168-seven-business-completion-truth-v3';
+  const VERSION = '2026-08-17-v168-seven-business-completion-truth-v4';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   let lastTruth = null;
   let refreshBusy = false;
@@ -79,6 +79,29 @@
     return { key, label, state, date, snapshotStatus, runStatus, total };
   }
 
+  function combineShopeeStages(cn, vn, target) {
+    const states = [cn?.state, vn?.state];
+    let state = 'pending';
+    if (states.every(item => item === 'done')) state = 'done';
+    else if (states.includes('failed')) state = 'failed';
+    else if (states.includes('error')) state = 'error';
+    else if (states.includes('running')) state = 'running';
+    else if (states.includes('paused')) state = 'paused';
+    const details = `CN:${cn?.state || 'unknown'}(${cn?.total || 0}) / VN:${vn?.state || 'unknown'}(${vn?.total || 0})`;
+    return {
+      key: 'SHOPEE',
+      label: 'SHOPEE CN/VN',
+      state,
+      date: target,
+      total: Number(cn?.total || 0) + Number(vn?.total || 0),
+      snapshotStatus: state === 'done' ? 'COMPLETED' : '',
+      error: state === 'error' ? details : '',
+      details,
+      cn,
+      vn
+    };
+  }
+
   function failedStage(key, label, error) {
     return { key, label, state: 'error', date: '', total: 0, error: String(error?.message || error || '状态读取失败') };
   }
@@ -124,7 +147,7 @@
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
-        ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${stage.error || ''}">${stageText(stage)}</span>`).join('')}
+        ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${stage.details || stage.error || ''}">${stageText(stage)}</span>`).join('')}
         <span class="status-pill ${truth.complete ? 'success' : 'muted'}">${truth.complete ? '七业务已完成' : '尚未全部完成'}</span>
       </div>`;
 
@@ -135,7 +158,7 @@
         start.dataset.v168Locked = '1';
         start.disabled = true;
         start.textContent = '七业务已完成';
-        start.title = `${truth.reportDate} CCSL、SHOPEE、WHPP均已有正式结果，无需重复处理`;
+        start.title = `${truth.reportDate} CCSL、SHOPEE CN、SHOPEE VN、WHPP均已有正式结果，无需重复处理`;
       }
       if (resume) {
         resume.dataset.v168Locked = '1';
@@ -187,13 +210,24 @@
 
       const encoded = encodeURIComponent(target);
       const businessRequests = await Promise.allSettled([
-        readJson(`/api/business-state/SHOPEE?reportDate=${encoded}&compact=1`),
+        readJson(`/api/business-state/SHOPEECN?reportDate=${encoded}&compact=1`),
+        readJson(`/api/business-state/SHOPEEVN?reportDate=${encoded}&compact=1`),
         readJson(`/api/business-state/WHPP?reportDate=${encoded}&compact=1`)
       ]);
+      const cn = businessRequests[0].status === 'fulfilled'
+        ? stageFromBusiness('SHOPEECN', 'SHOPEE CN', businessRequests[0].value, target)
+        : failedStage('SHOPEECN', 'SHOPEE CN', businessRequests[0].reason);
+      const vn = businessRequests[1].status === 'fulfilled'
+        ? stageFromBusiness('SHOPEEVN', 'SHOPEE VN', businessRequests[1].value, target)
+        : failedStage('SHOPEEVN', 'SHOPEE VN', businessRequests[1].reason);
+      const shopee = combineShopeeStages(cn, vn, target);
+      const whpp = businessRequests[2].status === 'fulfilled'
+        ? stageFromBusiness('WHPP', 'WHPP本土', businessRequests[2].value, target)
+        : failedStage('WHPP', 'WHPP本土', businessRequests[2].reason);
       const stages = [
         ccslPayload ? stageFromCcsl(ccslPayload, target) : failedStage('CCSL', 'CCSL', ccslError),
-        businessRequests[0].status === 'fulfilled' ? stageFromBusiness('SHOPEE', 'SHOPEE CN/VN', businessRequests[0].value, target) : failedStage('SHOPEE', 'SHOPEE CN/VN', businessRequests[0].reason),
-        businessRequests[1].status === 'fulfilled' ? stageFromBusiness('WHPP', 'WHPP本土', businessRequests[1].value, target) : failedStage('WHPP', 'WHPP本土', businessRequests[1].reason)
+        shopee,
+        whpp
       ];
       lastTruth = { reportDate: target, stages, complete: stages.every(stage => stage.state === 'done'), checkedAt: Date.now() };
       renderTruth(lastTruth);
