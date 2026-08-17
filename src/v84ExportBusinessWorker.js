@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { listLightweightCompletedUnifiedSnapshots } from './lightweightDashboardStore.js';
 import { listCompletedWhppSnapshots } from './v87WhppExportStore.js';
 import { createShopeeTemplateWorkbook } from './shopeeTemplateExporter.js';
+import { createCompactPeriodBusinessWorkbook } from './v177CompactPeriodExporter.js';
 import { closeDb, getRuntimeConfig } from './db.js';
 
 const resultFile = path.resolve(String(process.argv[2] || ''));
@@ -21,15 +21,20 @@ function writeResult(value) {
 try {
   if (!resultFile || !allowed.has(type)) throw new Error(`不支持的业务板块：${type}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw new Error('导出日期范围无效。');
-  const range = { from, to, key: partCount > 1 ? `${from}_${to}_PART${partIndex}` : `${from}_${to}` };
-  const snapshots = type === 'WHPP'
-    ? listCompletedWhppSnapshots(from, to)
-    : listLightweightCompletedUnifiedSnapshots(from, to, [type]);
-  if (!snapshots.length) {
-    writeResult({ ok: true, type, range, rows: 0, files: [] });
+  const range = { from, to, key: `${from}_${to}` };
+  if (partCount > 1) throw new Error('V177完整报表禁止对用户输出日期分片；请由主任务按整业务重试。');
+
+  if (type === 'WHPP') {
+    const snapshots = listCompletedWhppSnapshots(from, to);
+    if (!snapshots.length) {
+      writeResult({ ok: true, type, range, rows: 0, files: [] });
+    } else {
+      const result = await createShopeeTemplateWorkbook({ type, periodType, range, snapshots, outputDir: getRuntimeConfig().exportsDir });
+      writeResult({ ok: true, type, range, rows: Number(result.audit?.rows || 0), files: [result.file], completeWorkbook: true });
+    }
   } else {
-    const result = await createShopeeTemplateWorkbook({ type, periodType, range, snapshots, outputDir: getRuntimeConfig().exportsDir });
-    writeResult({ ok: true, type, range, rows: Number(result.audit?.rows || 0), files: [result.file] });
+    const result = await createCompactPeriodBusinessWorkbook({ type, periodType, range, outputDir: getRuntimeConfig().exportsDir });
+    writeResult({ ok: true, type, range, rows: Number(result.rowCount || 0), files: [result.file], summary: result.summary || {}, completeWorkbook: true });
   }
 } catch (error) {
   writeResult({ ok: false, type, from, to, error: error?.message || String(error), stack: error?.stack || '' });
