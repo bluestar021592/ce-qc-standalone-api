@@ -1,8 +1,8 @@
 import express from 'express';
-import './v188ExportPrepareFastAckPatch.js';
+import './v189ExportPrepareImmediateAckPatch.js';
 import { auditSevenBusinessHistory } from './v142SevenBusinessHistoryAudit.js';
 
-const PATCH_ID='2026-08-17-v142-v84-async-export-preflight-v2';
+const PATCH_ID='2026-08-17-v142-v84-async-export-preflight-v3';
 const PREPARE_PATH='/api/export-period/prepare';
 const WRAPPED=Symbol.for('ce-qc.v142-async-export-preflight');
 let preflightRouteInstalled=false;
