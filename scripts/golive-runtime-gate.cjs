@@ -1,0 +1,72 @@
+const fs = require('fs');
+
+const read = p => fs.readFileSync(p, 'utf8');
+const runner = read('public/v67-resilient-run-guard.js');
+const pause = read('public/v164-unified-pause-router.js');
+const shell = read('src/v44WhppUiPatch.js');
+const v161 = read('src/v161UnifiedImportRuntimeTruthPatch.js');
+const v163 = read('src/v163ShopeeDailyIsolationPatch.js');
+const storage = read('src/storage.js');
+const bstore = read('src/businessStore.js');
+const v109 = read('public/v109-instant-business-navigation.js');
+const v140 = read('public/v140-current-business-truth.js');
+const dashboard = read('public/dashboard-v18.js');
+const bootstrap = read('bootstrap.js');
+const whppRecovery = read('src/v165WhppRunStateRecoveryPatch.js');
+const podRepair = read('src/v167CcslPodLockFactRepair.js');
+const historyRefresh = read('src/v183HistoricalStatusRefreshPatch.js');
+const historyRefreshUi = read('public/v183-history-refresh.js');
+const refreshedExporter = read('src/v183ShopeeRefreshedPeriodExporter.js');
+
+const must = (source, token) => {
+  if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`);
+};
+const forbid = (source, token) => {
+  if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`);
+};
+
+must(runner, '2026-08-17-v165-seven-business-stage-verification-v2');
+must(runner, "{ key: 'CCSL'");
+must(runner, "{ key: 'SHOPEE'");
+must(runner, "{ key: 'WHPP'");
+must(runner, '/api/run');
+must(runner, '/api/shopee/run/start');
+must(runner, '/api/whpp/run/start');
+must(runner, 'verifyWhpp');
+must(runner, 'WHPP_STAGE_NOT_FINALIZED');
+must(runner, '七业务未全部完成');
+must(pause, '/api/shopee/run/pause');
+must(pause, 'global.pauseUnified=pauseUnified');
+must(v161, '2026-08-16-v161-unified-import-runtime-truth-v1');
+must(v163, '2026-08-17-v163-shopee-daily-membership-isolation-v2');
+must(storage, 'compactStateForPersistence');
+must(storage, 'sanitizeValue');
+must(bstore, 'compactBusinessStatePayload');
+must(bstore, 'stripHeavyBusinessRow');
+must(shell, 'v67-resilient-run-guard.js?v=20260817-1');
+must(shell, 'v183HistoricalStatusRefreshPatch.js');
+must(shell, '/v183-history-refresh.js?v=20260817-1');
+must(v109, '2026-08-17-v166-summary-first-navigation-throttle-v1');
+must(v109, 'MIN_BACKGROUND_HYDRATE_MS=60_000');
+must(v140, '2026-08-17-v166-current-business-truth-compact-v1');
+must(v140, '&compact=1');
+must(dashboard, 'renderSignatures');
+must(dashboard, 'completedProbeCache');
+must(bootstrap, 'v165WhppRunStateRecoveryPatch');
+must(bootstrap, 'v167CcslPodLockFactRepair');
+must(whppRecovery, '2026-08-17-v165-whpp-run-state-recovery-v2');
+must(whppRecovery, "businessType='WHPP'");
+must(whppRecovery, 'sameSet');
+must(podRepair, '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1');
+must(podRepair, 'POD_LOCK_FACT_REPAIR_V167');
+must(historyRefresh, '2026-08-17-v183-historical-status-refresh-center-v1');
+must(historyRefresh, '/api/v183/history-refresh/summary');
+must(historyRefresh, '/api/v183/history-refresh/start');
+must(historyRefreshUi, '刷新状态后导出');
+must(refreshedExporter, '2026-08-17-v183-shopee-current-status-overlay-export-v1');
+
+for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) {
+  forbid(source, 'v148-direct-daily-runner-v1');
+}
+
+console.log('[GOLIVE] runtime-source gate passed; seven-business runner, persistence guards, V183 history refresh UI/export, WHPP recovery and CCSL POD facts repair verified');
