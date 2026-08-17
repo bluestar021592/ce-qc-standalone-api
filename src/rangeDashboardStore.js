@@ -1,8 +1,8 @@
 // Final public facade.
 // Cache-maintenance APIs stay on the preserved implementation. Dashboard reads
-// use the latest VALID + COMPLETED source selection plus V55 reconciliation.
-// The compact facade keeps bootstrap fast; full card rows are read on demand by
-// the V55 metric-detail endpoint.
+// keep the compact V58 reconciliation base, then apply V191 cross-day SHOPEE truth:
+// latest VALID source membership is preserved even when analysis is still pending,
+// and later POD/dispatch evidence is reconciled back to the original report day.
 export {
   markDashboardCacheDirty,
   refreshDashboardCacheDate,
@@ -12,4 +12,4 @@ export {
   RANGE_DASHBOARD_BUSINESS_TYPES
 } from './rangeDashboardStoreLegacy.js';
 
-export { loadRangeDashboard } from './rangeDashboardStoreV55Compact.js';
+export { loadRangeDashboard } from './rangeDashboardStoreV191.js';
