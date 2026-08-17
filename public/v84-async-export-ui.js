@@ -1,10 +1,10 @@
-(function installAsyncExportUiV186(global) {
-  if (global.__CE_QC_V186_ASYNC_EXPORT_UI_INSTALLED__) return;
-  global.__CE_QC_V186_ASYNC_EXPORT_UI_INSTALLED__ = true;
+(function installAsyncExportUiV187(global) {
+  if (global.__CE_QC_V187_ASYNC_EXPORT_UI_INSTALLED__) return;
+  global.__CE_QC_V187_ASYNC_EXPORT_UI_INSTALLED__ = true;
 
-  const VERSION = '2026-08-17-v186-single-business-export-ui-poll-isolation-v1';
-  const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v186';
-  const LEGACY_JOB_KEYS = ['ce_qc_active_export_job_v180'];
+  const VERSION = '2026-08-17-v187-export-ui-exclusive-dom-owner-v1';
+  const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v187';
+  const LEGACY_JOB_KEYS = ['ce_qc_active_export_job_v180','ce_qc_active_export_job_v186'];
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pollingJobId = '';
   let pollEpoch = 0;
@@ -15,6 +15,12 @@
   function cancelCurrentPoll() {
     pollEpoch += 1;
     pollingJobId = '';
+  }
+  function retirePreviousController() {
+    try {
+      const previous = global.__CE_QC_V84_ASYNC_EXPORT_UI__;
+      if (previous && previous.version !== VERSION && typeof previous.cancelCurrentPoll === 'function') previous.cancelCurrentPoll();
+    } catch {}
   }
 
   function ensureBusinessOptions() {
@@ -35,19 +41,64 @@
     select.value = wanted.some(([value]) => value === current) ? current : 'ALL';
   }
 
+  function claimExclusiveDom() {
+    ensureBusinessOptions();
+    const legacyProgress = document.getElementById('exportProgress');
+    let progress = document.getElementById('exportProgressV187');
+    if (legacyProgress) {
+      legacyProgress.hidden = true;
+      legacyProgress.setAttribute('aria-hidden', 'true');
+      legacyProgress.dataset.ceQcRetiredExportUi = '1';
+      if (!progress) {
+        progress = document.createElement('div');
+        progress.id = 'exportProgressV187';
+        progress.className = legacyProgress.className || 'operation-status';
+        progress.dataset.ceQcExportOwner = 'v187';
+        legacyProgress.insertAdjacentElement('afterend', progress);
+      }
+    }
+
+    const legacyFiles = document.getElementById('exportGeneratedFiles');
+    let files = document.getElementById('exportGeneratedFilesV187');
+    if (legacyFiles) {
+      legacyFiles.hidden = true;
+      legacyFiles.setAttribute('aria-hidden', 'true');
+      legacyFiles.dataset.ceQcRetiredExportUi = '1';
+      if (!files) {
+        files = document.createElement('div');
+        files.id = 'exportGeneratedFilesV187';
+        files.className = legacyFiles.className || 'export-file-list';
+        files.dataset.testid = 'export-generated-files-v187';
+        files.dataset.ceQcExportOwner = 'v187';
+        legacyFiles.insertAdjacentElement('afterend', files);
+      }
+    }
+
+    let button = document.querySelector('[data-testid="export-all-reports"]');
+    if (button && button.dataset.ceQcExportOwner !== 'v187') {
+      const clone = button.cloneNode(true);
+      clone.removeAttribute('onclick');
+      clone.dataset.ceQcExportOwner = 'v187';
+      button.replaceWith(clone);
+      clone.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void exportPeriodReportV187();
+      }, true);
+      button = clone;
+    }
+    document.documentElement.dataset.ceQcExportUiOwner = 'v187';
+    return { progress, files, button };
+  }
+
   function saveActiveJob(jobId, payload = {}, pollUrl = '') {
-    try {
-      localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId, payload, pollUrl, savedAt: new Date().toISOString(), version: VERSION }));
-    } catch {}
+    try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId, payload, pollUrl, savedAt: new Date().toISOString(), version: VERSION })); } catch {}
   }
   function loadActiveJob() {
     try {
       const value = JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY) || 'null');
       if (!value?.jobId) return null;
-      if (String(value.version || '') !== VERSION) {
-        localStorage.removeItem(ACTIVE_JOB_KEY);
-        return null;
-      }
+      if (String(value.version || '') !== VERSION) { localStorage.removeItem(ACTIVE_JOB_KEY); return null; }
       return value;
     } catch { return null; }
   }
@@ -81,9 +132,7 @@
         throw timeoutError;
       }
       throw error;
-    } finally {
-      clearTimeout(timeout);
-    }
+    } finally { clearTimeout(timeout); }
   }
 
   function exportInputs() {
@@ -97,24 +146,16 @@
       businessType: document.getElementById('periodExportBusiness')?.value || 'ALL'
     };
   }
-
   function validate(payload, progress) {
     if (payload.periodType === 'custom') {
       if (!payload.fromDate || !payload.toDate) { progress.textContent = '请选择开始日期和结束日期'; return false; }
       if (payload.fromDate > payload.toDate) { progress.textContent = '开始日期不能晚于结束日期'; return false; }
-    } else if (!payload.date) {
-      progress.textContent = '请选择基准日期';
-      return false;
-    }
+    } else if (!payload.date) { progress.textContent = '请选择基准日期'; return false; }
     return true;
   }
 
-  function escapeHtml(value = '') {
-    return String(value).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
-  }
-  function escapeAttr(value = '') {
-    return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-  }
+  function escapeHtml(value = '') { return String(value).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch])); }
+  function escapeAttr(value = '') { return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
   function fileLabel(file = {}) {
     const name = String(file.name || '');
     if (/\.zip$/i.test(name)) return '下载全部完整报表';
@@ -124,9 +165,7 @@
   function renderFiles(target, files = []) {
     target.innerHTML = files.map(file => `<a class="export-file-item" href="${escapeAttr(file.url || '')}"><span>${escapeHtml(file.name || '')}</span><b>${fileLabel(file)}</b></a>`).join('');
   }
-  function setProgressText(target, text) {
-    if (target && target.textContent !== text) target.textContent = text;
-  }
+  function setProgressText(target, text) { if (target && target.textContent !== text) target.textContent = text; }
   function pollDelay(unchangedCycles, networkErrors = 0) {
     if (document.visibilityState === 'hidden') return 7000;
     if (networkErrors > 0) return Math.min(12000, 4500 + Math.min(networkErrors, 10) * 650);
@@ -157,16 +196,14 @@
           const mode = job.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : '';
           const worker = job.workerVersion ? ` · ${String(job.workerVersion).includes('v185') ? 'V185' : job.workerVersion}` : '';
           const signature = `${status}|${pct}|${job.currentBusiness || ''}|${job.message || ''}`;
-          if (signature === lastSignature) unchangedCycles += 1;
-          else { lastSignature = signature; unchangedCycles = 0; }
-          setProgressText(progress, `${job.message || '后台生成中'} · ${pct}%${part}${mode}${worker}`);
-
+          if (signature === lastSignature) unchangedCycles += 1; else { lastSignature = signature; unchangedCycles = 0; }
+          setProgressText(progress, `[V187唯一进度] Job ${jobId} · ${job.message || '后台生成中'} · ${pct}%${part}${mode}${worker}`);
           if (status === 'COMPLETED') {
             const readyFiles = Array.isArray(job.files) ? job.files.filter(item => item?.url && item?.name) : [];
             if (!readyFiles.length) throw new Error('后台任务已完成，但没有返回可下载文件');
             renderFiles(files, readyFiles);
             clearActiveJob(jobId);
-            setProgressText(progress, `生成完成：共 ${readyFiles.length} 个完整文件，可直接下载`);
+            setProgressText(progress, `[V187唯一进度] Job ${jobId} · 生成完成：共 ${readyFiles.length} 个完整文件，可直接下载`);
             return { ...job, files: readyFiles };
           }
           if (status === 'FAILED' || status === 'CANCELLED') {
@@ -177,11 +214,11 @@
           }
         } catch (error) {
           if (myEpoch !== pollEpoch) return { cancelled: true };
-          if ([401, 403, 404].includes(Number(error.status || 0)) || ['FAILED', 'CANCELLED'].includes(String(error.code || '').toUpperCase())) throw error;
+          if ([401,403,404].includes(Number(error.status || 0)) || ['FAILED','CANCELLED'].includes(String(error.code || '').toUpperCase())) throw error;
           if (/后台任务已完成，但没有返回可下载文件/.test(String(error.message || ''))) throw error;
           networkErrors += 1;
           const disconnectedSeconds = Math.max(1, Math.floor((Date.now() - lastGoodAt) / 1000));
-          setProgressText(progress, `当前V185导出任务 ${jobId} 仍在后台执行；状态连接暂时中断 ${disconnectedSeconds} 秒，正在恢复（第 ${networkErrors} 次）…`);
+          setProgressText(progress, `[V187唯一进度] Job ${jobId} · 状态连接暂时中断 ${disconnectedSeconds} 秒，后台任务仍保留；正在恢复（第 ${networkErrors} 次）…`);
         }
         await sleep(pollDelay(unchangedCycles, networkErrors));
       }
@@ -191,74 +228,68 @@
     }
   }
 
-  async function exportPeriodReportV186() {
-    const progress = document.getElementById('exportProgress');
-    const files = document.getElementById('exportGeneratedFiles');
-    const button = document.querySelector('[data-testid="export-all-reports"]');
+  async function exportPeriodReportV187() {
+    const owned = claimExclusiveDom();
+    const { progress, files, button } = owned;
     if (!progress || !files) return;
     const payload = exportInputs();
     if (!validate(payload, progress)) return;
-
     cancelCurrentPoll();
     files.innerHTML = '';
     const originalButtonText = button?.textContent || '';
     if (button) { button.disabled = true; button.textContent = '后台生成中…'; }
     progress.textContent = payload.businessType === 'ALL'
-      ? '正在创建7业务后台完整报表任务…'
-      : `正在创建 ${payload.businessType} V185独立流式完整报表任务；最终只生成1个Excel…`;
-
+      ? '[V187唯一进度] 正在创建7业务后台完整报表任务…'
+      : `[V187唯一进度] 正在创建 ${payload.businessType} V185独立流式完整报表任务；最终只生成1个Excel…`;
     try {
       const start = await json('/api/export-period/prepare', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload)
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload)
       }, 20000);
-
       const readyFiles = Array.isArray(start.files) ? start.files.filter(item => item?.url && item?.name) : [];
       if (readyFiles.length) {
         renderFiles(files, readyFiles);
         clearActiveJob();
-        progress.textContent = `完整报表已生成：共 ${readyFiles.length} 个文件`;
+        progress.textContent = `[V187唯一进度] 完整报表已生成：共 ${readyFiles.length} 个文件`;
         return;
       }
-
       const jobId = String(start.jobId || '').trim();
       const pollUrl = String(start.pollUrl || '').trim();
       if (!jobId) throw new Error('报表请求已提交，但服务器没有返回后台任务编号');
-
       saveActiveJob(jobId, payload, pollUrl);
       const initialPct = Math.max(0, Math.min(100, Number(start.progress || 0)));
-      progress.textContent = `${start.message || '后台完整报表任务已创建'} · ${initialPct}%${start.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : ''} · Job ${jobId}`;
+      progress.textContent = `[V187唯一进度] Job ${jobId} · ${start.message || '后台完整报表任务已创建'} · ${initialPct}%${start.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : ''}`;
       await waitForJob(jobId, progress, files, pollUrl);
     } catch (error) {
-      if (String(error?.code || '') === 'POLL_SUPERSEDED') return;
-      progress.textContent = `导出失败：${error.message}。如果后台任务已经创建，重新进入报表页会自动恢复进度。`;
+      progress.textContent = `[V187唯一进度] 导出失败：${error.message}`;
     } finally {
       if (button) { button.disabled = false; button.textContent = originalButtonText || '一键导出全部报表'; }
     }
   }
 
-  async function resumeActiveJob() {
+  async function resumeActiveJobV187() {
     const active = loadActiveJob();
     if (!active?.jobId) return;
-    const progress = document.getElementById('exportProgress');
-    const files = document.getElementById('exportGeneratedFiles');
+    const { progress, files } = claimExclusiveDom();
     if (!progress || !files) return;
     cancelCurrentPoll();
-    progress.textContent = `检测到V186当前完整报表任务 ${active.jobId}，正在恢复唯一进度通道…`;
-    try {
-      await waitForJob(active.jobId, progress, files, active.pollUrl || '');
-    } catch (error) {
+    progress.textContent = `[V187唯一进度] 检测到当前完整报表任务 ${active.jobId}，正在恢复唯一进度通道…`;
+    try { await waitForJob(active.jobId, progress, files, active.pollUrl || ''); }
+    catch (error) {
       if (Number(error.status || 0) === 404) clearActiveJob(active.jobId);
-      progress.textContent = `恢复导出任务失败：${error.message}`;
+      progress.textContent = `[V187唯一进度] 恢复导出任务失败：${error.message}`;
     }
   }
 
+  retirePreviousController();
   clearLegacyJobs();
-  ensureBusinessOptions();
-  global.exportPeriodReport = exportPeriodReportV186;
-  global.resumeActiveExportJob = resumeActiveJob;
-  global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION, pollDelay, waitForJob, cancelCurrentPoll, activeJobKey: ACTIVE_JOB_KEY };
-  setTimeout(() => void resumeActiveJob(), 80);
-  console.info('[CE-QC][V186_SINGLE_BUSINESS_EXPORT_UI]', VERSION);
+  claimExclusiveDom();
+  global.exportPeriodReport = exportPeriodReportV187;
+  global.exportPeriodReportV187 = exportPeriodReportV187;
+  global.resumeActiveExportJob = resumeActiveJobV187;
+  global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION, pollDelay, waitForJob, cancelCurrentPoll, activeJobKey: ACTIVE_JOB_KEY, claimExclusiveDom };
+  document.addEventListener('click', event => {
+    if (event.target?.closest?.('[data-page="reports"],.side-link')) setTimeout(() => claimExclusiveDom(), 0);
+  }, true);
+  setTimeout(() => { claimExclusiveDom(); void resumeActiveJobV187(); }, 80);
+  console.info('[CE-QC][V187_EXPORT_UI_OWNER]', VERSION);
 })(window);
