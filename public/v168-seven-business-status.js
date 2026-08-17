@@ -1,7 +1,7 @@
 (function installSevenBusinessStatusV168(global) {
   if (global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__) return;
 
-  const VERSION = '2026-08-17-v168-seven-business-completion-truth-v2';
+  const VERSION = '2026-08-17-v168-seven-business-completion-truth-v3';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   let lastTruth = null;
   let refreshBusy = false;
@@ -18,12 +18,15 @@
     const top = normalizeDate(document.getElementById('topRangeTo')?.value || document.getElementById('dashboardRangeTo')?.value);
     if (top) return top;
     try {
-      return normalizeDate(
+      const fromState = normalizeDate(
         (typeof unifiedImportState !== 'undefined' ? unifiedImportState?.reportDate : '')
         || (typeof appState !== 'undefined' ? appState?.reportDate : '')
         || (typeof shopeeState !== 'undefined' ? shopeeState?.reportDate : '')
       );
-    } catch { return ''; }
+      if (fromState) return fromState;
+    } catch {}
+    const visibleDates = Array.from(document.querySelectorAll('input')).map(el => normalizeDate(el.value)).filter(Boolean);
+    return visibleDates.at(-1) || '';
   }
 
   async function readJson(url) {
@@ -156,27 +159,48 @@
 
   async function refreshTruth() {
     if (refreshBusy) return lastTruth;
-    const target = targetDate();
-    if (!target) return lastTruth;
     refreshBusy = true;
     try {
+      let ccslPayload = null;
+      let ccslError = null;
+      try { ccslPayload = await readJson('/api/v33/run-progress?businessType=CCSL'); }
+      catch (error) { ccslError = error; }
+
+      const target = targetDate()
+        || normalizeDate(ccslPayload?.reportDate)
+        || normalizeDate(lastTruth?.reportDate);
+
+      if (!target) {
+        lastTruth = {
+          reportDate: '',
+          stages: [
+            ccslPayload ? stageFromCcsl(ccslPayload, normalizeDate(ccslPayload?.reportDate)) : failedStage('CCSL', 'CCSL', ccslError || '无法确定日报日期'),
+            failedStage('SHOPEE', 'SHOPEE CN/VN', '无法确定日报日期'),
+            failedStage('WHPP', 'WHPP本土', '无法确定日报日期')
+          ],
+          complete: false,
+          checkedAt: Date.now()
+        };
+        renderTruth(lastTruth);
+        return lastTruth;
+      }
+
       const encoded = encodeURIComponent(target);
-      const requests = await Promise.allSettled([
-        readJson('/api/v33/run-progress?businessType=CCSL'),
+      const businessRequests = await Promise.allSettled([
         readJson(`/api/business-state/SHOPEE?reportDate=${encoded}&compact=1`),
         readJson(`/api/business-state/WHPP?reportDate=${encoded}&compact=1`)
       ]);
       const stages = [
-        requests[0].status === 'fulfilled' ? stageFromCcsl(requests[0].value, target) : failedStage('CCSL', 'CCSL', requests[0].reason),
-        requests[1].status === 'fulfilled' ? stageFromBusiness('SHOPEE', 'SHOPEE CN/VN', requests[1].value, target) : failedStage('SHOPEE', 'SHOPEE CN/VN', requests[1].reason),
-        requests[2].status === 'fulfilled' ? stageFromBusiness('WHPP', 'WHPP本土', requests[2].value, target) : failedStage('WHPP', 'WHPP本土', requests[2].reason)
+        ccslPayload ? stageFromCcsl(ccslPayload, target) : failedStage('CCSL', 'CCSL', ccslError),
+        businessRequests[0].status === 'fulfilled' ? stageFromBusiness('SHOPEE', 'SHOPEE CN/VN', businessRequests[0].value, target) : failedStage('SHOPEE', 'SHOPEE CN/VN', businessRequests[0].reason),
+        businessRequests[1].status === 'fulfilled' ? stageFromBusiness('WHPP', 'WHPP本土', businessRequests[1].value, target) : failedStage('WHPP', 'WHPP本土', businessRequests[1].reason)
       ];
       lastTruth = { reportDate: target, stages, complete: stages.every(stage => stage.state === 'done'), checkedAt: Date.now() };
       renderTruth(lastTruth);
       return lastTruth;
     } catch (error) {
       lastTruth = {
-        reportDate: target,
+        reportDate: targetDate() || normalizeDate(lastTruth?.reportDate),
         stages: [failedStage('CCSL', 'CCSL', error), failedStage('SHOPEE', 'SHOPEE CN/VN', error), failedStage('WHPP', 'WHPP本土', error)],
         complete: false,
         checkedAt: Date.now()
