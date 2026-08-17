@@ -1,7 +1,7 @@
 import express from 'express';
 import { periodRange } from './periodExporter.js';
 
-const VERSION = '2026-08-17-v174-period-export-contract-v1';
+const VERSION = '2026-08-17-v175-period-export-contract-async-safe-v1';
 const originalJson = express.response.json;
 
 function validDate(value) {
@@ -22,17 +22,23 @@ function fallbackRange(req) {
   return periodRange(periodType, date);
 }
 
-express.response.json = function v174PeriodExportContractJson(body) {
+express.response.json = function v175PeriodExportContractJson(body) {
   try {
     const req = this.req;
     if (req?.path === '/api/export-period/prepare' && body?.ok === true) {
+      // Large seven-business exports are intentionally asynchronous. Their prepare
+      // response is { async:true, jobId } and files arrive later from the V84 job
+      // status endpoint. Preserve that contract exactly instead of manufacturing
+      // files:[], which makes clients mistake a queued job for an empty result.
+      if (body.async === true && body.jobId) return originalJson.call(this, body);
+
       const current = body.range;
       const hasRange = validDate(current?.from) && validDate(current?.to);
       if (!hasRange) {
         const range = fallbackRange(req);
         if (range) body = { ...body, range };
       }
-      if (!Array.isArray(body.files)) body = { ...body, files: [] };
+      if (body.files !== undefined && !Array.isArray(body.files)) body = { ...body, files: [] };
     }
   } catch {}
   return originalJson.call(this, body);
