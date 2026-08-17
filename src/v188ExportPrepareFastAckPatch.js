@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-17-v188-export-prepare-fast-ack-v1';
+const PATCH_ID = '2026-08-17-v188-export-prepare-fast-ack-v2';
 const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM';
 const PREPARE_PATH = '/api/export-period/prepare';
 const ALL_JOB_HEAP_MB = Math.max(256, Math.min(1024, Number(process.env.EXPORT_JOB_HEAP_MB || 512)));
@@ -152,10 +152,7 @@ function fastPrepare(req, res) {
   }
 
   const ackMs = Date.now() - requestStartedAt;
-  try {
-    const persisted = { ...job, prepareAckMs: ackMs };
-    writeJsonAtomic(file, persisted);
-  } catch {}
+  try { writeJsonAtomic(file, { ...job, prepareAckMs: ackMs }); } catch {}
 
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-CE-QC-Export-Prepare', PATCH_ID);
@@ -182,7 +179,7 @@ express.application.post = function v188ExportPrepareFastAckRegistration(pathVal
   if (String(pathValue || '') === PREPARE_PATH) {
     if (!installed) {
       installed = true;
-      return originalPost.call(this, PREPARE_PATH, fastPrepare);
+      this.route(PREPARE_PATH).post(fastPrepare);
     }
     return this;
   }
@@ -195,6 +192,7 @@ export function inspectV188ExportPrepareFastAck() {
     preparePath: PREPARE_PATH,
     installed,
     mode: 'WRITE_JOB_THEN_ACK_THEN_SPAWN',
+    routeRegistration: 'DIRECT_ROUTE_POST_BYPASS_LEGACY_PREPARE',
     exportContractVersion: EXPORT_CONTRACT_VERSION,
     singleJobHeapMB: SINGLE_JOB_HEAP_MB,
     allJobHeapMB: ALL_JOB_HEAP_MB
