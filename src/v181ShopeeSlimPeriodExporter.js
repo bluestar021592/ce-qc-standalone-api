@@ -2,9 +2,14 @@ import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { getDb } from './db.js';
 
-const VERSION = '2026-08-17-v181-shopee-slim-period-export-v1';
+const VERSION = '2026-08-17-v182-shopee-legacy-layout-period-export-v1';
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 const FONT_NAME = 'Microsoft YaHei';
+const DETAIL_HEADERS = [
+  '日期', '运单编号', '下单时间', '状态标识', '状态说明', '收件省份', '区域分类', '当前门店', '当前省份',
+  '收件人', '收件人手机', '收件地址', '派件时间', '派件门店', '派件省份', '派件快递员', '异常编码', '异常描述', '备注'
+];
+const DETAIL_WIDTHS = [14, 24, 21, 11, 16, 16, 12, 20, 16, 18, 17, 42, 21, 20, 16, 18, 12, 28, 34];
 
 function dateKey(value = '') {
   const text = String(value || '').trim();
@@ -25,42 +30,35 @@ function naturalDays(from, to) {
   if (a === null || b === null || b < a) return '';
   return Math.floor((b - a) / 86400000) + 1;
 }
-function rate(a, b) { return b ? Number((Number(a || 0) * 100 / Number(b)).toFixed(2)) : 0; }
+function rate(a, b) { return b ? Number(a || 0) / Number(b) : 0; }
 function avg(values = []) {
-  const nums = values.map(Number).filter(Number.isFinite);
+  const nums = values.map(Number).filter(value => Number.isFinite(value) && value > 0);
   return nums.length ? Number((nums.reduce((sum, value) => sum + value, 0) / nums.length).toFixed(2)) : 0;
 }
 function safeFileName(value = '') { return String(value || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim(); }
 function displayType(type) { return type === 'SHOPEECN' ? 'SHOPEE CN' : type === 'SHOPEEVN' ? 'SHOPEE VN' : type; }
 function periodLabel(periodType = 'custom') { return ({ daily: '日报', weekly: '周报', monthly: '月报', custom: '自定义日期' })[periodType] || '区间报表'; }
-function iter(statement, ...params) {
-  if (typeof statement.iterate === 'function') return statement.iterate(...params);
-  return statement.all(...params);
+function normalizeHeader(value = '') { return String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[\s_\-]+/g, ''); }
+function normalizeBill(value = '') { return String(value || '').trim().toUpperCase(); }
+function safeJson(value, fallback = {}) {
+  try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
+  catch { return fallback; }
 }
-function tableColumns(db, table) {
-  try { return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => String(row.name || ''))); }
-  catch { return new Set(); }
+function rawMap(rowJson) {
+  const parsed = safeJson(rowJson, {});
+  const raw = parsed?.raw && typeof parsed.raw === 'object' ? parsed.raw : {};
+  const map = new Map();
+  for (const [key, value] of Object.entries(raw)) map.set(normalizeHeader(key), value);
+  return { parsed, map };
 }
-function quoted(name) { return `"${String(name).replaceAll('"', '""')}"`; }
-function optionalSelect(columns, alias, name) {
-  return columns.has(name) ? `${alias}.${quoted(name)} AS ${quoted(name)}` : `NULL AS ${quoted(name)}`;
-}
-function firstValue(row = {}, keys = []) {
-  for (const key of keys) {
-    const value = row?.[key];
-    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+function valueByAliases(map, aliases = []) {
+  for (const alias of aliases) {
+    const key = normalizeHeader(alias);
+    if (!map.has(key)) continue;
+    const value = map.get(key);
+    if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim();
   }
   return '';
-}
-function regionOf(row = {}) {
-  const raw = String(firstValue(row, ['region_code', 'regionCode']) || '').trim().toUpperCase();
-  if (raw === 'PP' || /PHNOM\s*PENH|金边/.test(raw)) return 'PP';
-  if (raw === 'PV' || /外省/.test(raw)) return 'PV';
-  return raw;
-}
-function returned(row = {}) {
-  const text = String(firstValue(row, ['currentMainCategory', 'primaryCategory', 'category', 'currentStatus']) || '').toUpperCase();
-  return /RETURN|退回|退件/.test(text);
 }
 function latestCompletedBatches(db, from, to) {
   const rows = db.prepare(`
@@ -72,167 +70,176 @@ function latestCompletedBatches(db, from, to) {
   `).all(from, to);
   const byDate = new Map();
   for (const row of rows) if (row.reportDate && !byDate.has(row.reportDate)) byDate.set(row.reportDate, row);
-  return [...byDate.values()];
+  return [...byDate.values()].sort((a, b) => String(a.reportDate).localeCompare(String(b.reportDate)));
 }
-function blankEntry(code, reportDate) {
-  return {
-    shipmentCode: code,
-    firstReportDate: reportDate,
-    lastReportDate: reportDate,
-    region: '',
-    recipient: '',
-    sourceRowNumber: 0,
-    pod: false,
-    podSnapshotDate: '',
-    podTime: '',
-    podDate: '',
-    podTimeSource: '',
-    deliveryNaturalDays: '',
-    podAttemptNo: 0,
-    currentAttemptNo: 0,
-    currentStatus: '未闭环',
-    latestEventTime: '',
-    latestNode: '',
-    shopCode: '',
-    shopName: ''
-  };
+function listDates(from, to) {
+  const start = dayNumber(from), end = dayNumber(to);
+  if (start === null || end === null || end < start) return [];
+  const out = [];
+  for (let time = start; time <= end; time += 86400000) out.push(new Date(time).toISOString().slice(0, 10));
+  return out;
 }
-function ensureEntry(entries, code, reportDate) {
-  const bill = String(code || '').trim().toUpperCase();
-  if (!bill) return null;
-  if (!entries.has(bill)) entries.set(bill, blankEntry(bill, reportDate));
-  const entry = entries.get(bill);
-  if (!entry.firstReportDate || reportDate < entry.firstReportDate) entry.firstReportDate = reportDate;
-  if (!entry.lastReportDate || reportDate > entry.lastReportDate) entry.lastReportDate = reportDate;
-  return entry;
-}
-function markPod(entry, reportDate) {
-  if (!entry) return;
-  entry.pod = true;
-  if (!entry.podSnapshotDate || reportDate < entry.podSnapshotDate) entry.podSnapshotDate = reportDate;
-}
-function updateLatest(entry, row, reportDate) {
-  if (!entry || reportDate < entry.lastReportDate) return;
-  entry.region = regionOf(row) || entry.region;
-  entry.recipient = String(firstValue(row, ['recipient_normalized', 'recipientNormalized', 'recipient_raw', 'recipientRaw']) || entry.recipient || '');
-  entry.sourceRowNumber = Number(firstValue(row, ['source_row_number', 'rowNumber']) || entry.sourceRowNumber || 0);
-  entry.currentStatus = String(firstValue(row, ['currentMainCategory', 'primaryCategory', 'category']) || (Number(row.isPod || 0) === 1 ? 'POD' : entry.currentStatus || '未闭环'));
-  entry.latestEventTime = String(firstValue(row, ['lastEventTime', 'latestEventTime']) || entry.latestEventTime || '');
-  entry.latestNode = String(firstValue(row, ['lastEventDesc', 'lastEvent', 'latestEventDesc']) || entry.latestNode || '');
-  entry.shopCode = String(firstValue(row, ['currentShopCode', 'targetShopCode']) || entry.shopCode || '');
-  entry.shopName = String(firstValue(row, ['shopName']) || entry.shopName || '');
-  entry.podAttemptNo = Math.max(Number(entry.podAttemptNo || 0), Number(row.podAttemptNo || 0));
-  entry.currentAttemptNo = Math.max(Number(entry.currentAttemptNo || 0), Number(row.currentAttemptNo || 0));
-  if (Number(row.isPod || 0) === 1) markPod(entry, reportDate);
-}
-function loadNormalizedRange(db, businessType, batches, onProgress = () => {}) {
-  const entries = new Map();
-  const finalCols = tableColumns(db, 'business_final_rows');
-  const wantedFinal = [
-    'isPod','currentMainCategory','primaryCategory','category','lastEventTime','lastEventDesc','lastEvent',
-    'podAttemptNo','currentAttemptNo','firstAttemptAt','currentShopCode','targetShopCode','shopName',
-    'region_code','recipient_raw','recipient_normalized','source_row_number'
-  ];
-  const finalSelect = wantedFinal.map(name => optionalSelect(finalCols, 'f', name)).join(',\n        ');
-  const dailyStmt = db.prepare(`
-    SELECT shipmentCode,regionCode,recipientRaw,recipientNormalized,rowNumber
-    FROM unified_import_rows
-    WHERE snapshotId=? AND businessType=?
-    ORDER BY shipmentCode
-  `);
-  const scanStmt = db.prepare(`
-    SELECT s.shipmentCode,s.isPod,s.orderStatus
-    FROM business_scan_results s
-    INNER JOIN unified_import_rows u
-      ON u.shipmentCode=s.shipmentCode AND u.snapshotId=? AND u.businessType=?
-    WHERE s.businessType='SHOPEE' AND s.reportDate=?
-    ORDER BY s.shipmentCode
-  `);
-  const finalStmt = db.prepare(`
-    SELECT f.shipmentCode,
-        ${finalSelect}
-    FROM business_final_rows f
-    INNER JOIN unified_import_rows u
-      ON u.shipmentCode=f.shipmentCode AND u.snapshotId=? AND u.businessType=?
-    WHERE f.businessType='SHOPEE' AND f.reportDate=?
-    ORDER BY f.shipmentCode
-  `);
-
+function sourceRows(db, businessType, batches, onProgress = () => {}) {
+  const stmt = db.prepare(`SELECT shipmentCode,regionCode,rowNumber,rowJson
+    FROM unified_import_rows WHERE snapshotId=? AND businessType=? ORDER BY rowNumber,shipmentCode`);
+  const rows = [];
+  const bills = new Set();
   for (let index = 0; index < batches.length; index += 1) {
     const batch = batches[index];
     const reportDate = String(batch.reportDate || '');
-    for (const row of iter(dailyStmt, batch.snapshotId, businessType)) {
-      const entry = ensureEntry(entries, row.shipmentCode, reportDate);
-      if (!entry) continue;
-      if (reportDate >= entry.lastReportDate) updateLatest(entry, {
-        regionCode: row.regionCode,
-        recipientRaw: row.recipientRaw,
-        recipientNormalized: row.recipientNormalized,
-        rowNumber: row.rowNumber
-      }, reportDate);
+    for (const row of stmt.iterate(batch.snapshotId, businessType)) {
+      const bill = normalizeBill(row.shipmentCode);
+      if (!bill) continue;
+      const { parsed, map } = rawMap(row.rowJson);
+      const item = {
+        reportDate,
+        shipmentCode: bill,
+        regionCode: String(row.regionCode || parsed.regionCode || '').trim().toUpperCase(),
+        rowNumber: Number(row.rowNumber || parsed.rowNumber || 0),
+        orderTime: valueByAliases(map, ['下单时间','下单日期','订单时间','订单日期','ordertime','orderdate']),
+        rawStatus: valueByAliases(map, ['状态标识','状态代码','status','statuscode']),
+        rawStatusDesc: valueByAliases(map, ['状态说明','状态描述','statusdesc','statusdescription','statusname']),
+        recipientProvince: valueByAliases(map, ['收件省份','目的省份','目的地省份','收货省份','receiverprovince','destinationprovince']),
+        currentShop: valueByAliases(map, ['当前门店','当前网点','当前站点','currentshop','currentsite']),
+        currentProvince: valueByAliases(map, ['当前省份','所在省份','currentprovince']),
+        recipient: valueByAliases(map, ['收件人','收件人姓名','收货人','收货人姓名','recipient','receiver','consignee']) || String(parsed.recipientRaw || ''),
+        recipientPhone: valueByAliases(map, ['收件人手机','收件人电话','收货人手机','收货人电话','手机号','手机号码','recipientphone','receiverphone']),
+        recipientAddress: valueByAliases(map, ['收件地址','收货地址','详细地址','地址','recipientaddress','receiveraddress']),
+        rawDeliveryTime: valueByAliases(map, ['派件时间','签收时间','POD时间','podtime','deliverytime']),
+        deliveryShop: valueByAliases(map, ['派件门店','派送门店','deliveryshop']),
+        deliveryProvince: valueByAliases(map, ['派件省份','派送省份','deliveryprovince']),
+        courier: valueByAliases(map, ['派件快递员','派送快递员','快递员','deliverycourier','courier']),
+        exceptionCode: valueByAliases(map, ['异常编码','异常代码','exceptioncode']),
+        exceptionDesc: valueByAliases(map, ['异常描述','异常说明','exceptiondesc','exceptiondescription']),
+        remark: valueByAliases(map, ['备注','remark','remarks','note'])
+      };
+      rows.push(item);
+      bills.add(bill);
     }
-    for (const row of iter(scanStmt, batch.snapshotId, businessType, reportDate)) {
-      const entry = ensureEntry(entries, row.shipmentCode, reportDate);
-      if (Number(row.isPod || 0) === 1 || String(row.orderStatus || '') === '85') markPod(entry, reportDate);
-    }
-    for (const row of iter(finalStmt, batch.snapshotId, businessType, reportDate)) {
-      const entry = ensureEntry(entries, row.shipmentCode, reportDate);
-      updateLatest(entry, row, reportDate);
-    }
-    onProgress({ phase: 'snapshots', completed: index + 1, total: batches.length, entries: entries.size });
+    onProgress({ phase: 'sourceRows', completed: index + 1, total: batches.length, entries: rows.length });
   }
-  return entries;
+  rows.sort((a, b) => a.reportDate.localeCompare(b.reportDate) || a.rowNumber - b.rowNumber || a.shipmentCode.localeCompare(b.shipmentCode));
+  return { rows, bills: [...bills] };
 }
-function fillPodLocks(db, entries, range, onProgress = () => {}) {
-  const list = [...entries.values()];
-  const chunkSize = 400;
-  let completed = 0;
-  for (let offset = 0; offset < list.length; offset += chunkSize) {
-    const chunk = list.slice(offset, offset + chunkSize);
+function loadLatestFinalStates(db, bills, to, onProgress = () => {}) {
+  const latest = new Map();
+  const chunkSize = 350;
+  for (let offset = 0; offset < bills.length; offset += chunkSize) {
+    const chunk = bills.slice(offset, offset + chunkSize);
     const marks = chunk.map(() => '?').join(',');
-    const rows = db.prepare(`SELECT shipmentCode,podTime,source FROM business_pod_locks WHERE businessType='SHOPEE' AND shipmentCode IN (${marks})`).all(...chunk.map(row => row.shipmentCode));
-    const locks = new Map(rows.map(row => [String(row.shipmentCode || '').trim().toUpperCase(), row]));
-    for (const entry of chunk) {
-      const lock = locks.get(entry.shipmentCode);
-      const lockDate = dateKey(lock?.podTime || '');
-      if (lock && lockDate && lockDate <= range.to) {
-        entry.pod = true;
-        entry.podTime = String(lock.podTime || '');
-        entry.podDate = lockDate;
-        entry.podTimeSource = 'POD锁';
-      } else if (entry.pod) {
-        entry.podDate = entry.podSnapshotDate || dateKey(entry.latestEventTime);
-        entry.podTime = entry.podDate || '';
-        entry.podTimeSource = entry.podSnapshotDate ? 'POD日报快照' : 'POD最后节点';
-      }
-      entry.deliveryNaturalDays = entry.pod && entry.podDate ? naturalDays(entry.firstReportDate, entry.podDate) : '';
-      if (entry.pod) entry.currentStatus = 'POD';
+    const rows = db.prepare(`SELECT shipmentCode,reportDate,isPod,primaryCategory,latestEventTime,latestEventDesc,latestNode,updatedAt
+      FROM business_final_rows
+      WHERE businessType='SHOPEE' AND reportDate<=? AND shipmentCode IN (${marks})
+      ORDER BY shipmentCode ASC,reportDate DESC,updatedAt DESC`).all(to, ...chunk);
+    for (const row of rows) {
+      const bill = normalizeBill(row.shipmentCode);
+      if (bill && !latest.has(bill)) latest.set(bill, row);
     }
-    completed += chunk.length;
-    onProgress({ phase: 'podLocks', completed: Math.min(completed, list.length), total: list.length, entries: list.length });
+    onProgress({ phase: 'finalStates', completed: Math.min(offset + chunk.length, bills.length), total: Math.max(1, bills.length), entries: latest.size });
   }
+  return latest;
 }
-function buildDailyStats(values) {
-  const map = new Map();
-  for (const entry of values) {
-    const date = entry.firstReportDate;
-    if (!date) continue;
-    if (!map.has(date)) map.set(date, { date, total: 0, pod: 0, pp: 0, pv: 0, returned: 0, days: [], a1: 0, a2: 0, a3: 0 });
-    const stat = map.get(date);
-    stat.total += 1;
-    if (entry.region === 'PP') stat.pp += 1;
-    if (entry.region === 'PV') stat.pv += 1;
-    if (entry.pod) {
-      stat.pod += 1;
-      const days = Number(entry.deliveryNaturalDays || 0);
-      if (days > 0) stat.days.push(days);
-      if (entry.podAttemptNo === 1) stat.a1 += 1;
-      else if (entry.podAttemptNo === 2) stat.a2 += 1;
-      else if (entry.podAttemptNo >= 3) stat.a3 += 1;
+function isPodStatus(status, desc) {
+  const code = String(status || '').trim().toUpperCase();
+  const text = String(desc || '').trim().toUpperCase();
+  return code === 'Y' || /\bPOD\b|签收|妥投/.test(text);
+}
+function isReturnStatus(status, desc) {
+  const code = String(status || '').trim().toUpperCase();
+  const text = String(desc || '').trim().toUpperCase();
+  return code === 'R' || /RETURN|退回|退件/.test(text);
+}
+function isPendingStatus(status, desc) {
+  const code = String(status || '').trim().toUpperCase();
+  return code === 'P' || /PENDING/.test(String(desc || '').toUpperCase());
+}
+function isDeliveringStatus(status, desc) {
+  const code = String(status || '').trim().toUpperCase();
+  const text = String(desc || '').trim().toUpperCase();
+  return code === 'W' || /派件|派送|DELIVER/.test(text);
+}
+function applyLatestState(row, state = null) {
+  let status = String(row.rawStatus || '').trim().toUpperCase();
+  let statusDesc = String(row.rawStatusDesc || '').trim();
+  let deliveryTime = String(row.rawDeliveryTime || '').trim();
+  let finalCategory = '';
+  if (state) {
+    finalCategory = String(state.primaryCategory || '').trim();
+    const eventText = `${finalCategory} ${state.latestEventDesc || ''} ${state.latestNode || ''}`;
+    if (Number(state.isPod || 0) === 1 || /\bPOD\b|签收|妥投/i.test(eventText)) {
+      status = 'Y'; statusDesc = 'POD';
+      deliveryTime = String(state.latestEventTime || deliveryTime || '').trim();
+    } else if (/RETURN|退回|退件/i.test(eventText)) {
+      status = 'R'; statusDesc = 'R退回';
+    } else if (/PENDING/i.test(eventText)) {
+      status = 'P'; statusDesc = 'Pending';
+    } else if (/派送|派件|DELIVER|ASSIGN/i.test(eventText)) {
+      status = 'W'; statusDesc = '分配派送中';
     }
-    if (returned(entry)) stat.returned += 1;
   }
-  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const pod = isPodStatus(status, statusDesc);
+  const returned = isReturnStatus(status, statusDesc);
+  const pending = isPendingStatus(status, statusDesc);
+  const delivering = isDeliveringStatus(status, statusDesc);
+  const podDate = pod ? dateKey(deliveryTime) : '';
+  const deliveryDays = podDate ? naturalDays(row.reportDate, podDate) : '';
+  return { ...row, status, statusDesc, deliveryTime, finalCategory, pod, returned, pending, delivering, podDate, deliveryDays };
+}
+function isStore(row) {
+  const current = `${row.currentShop || ''} ${row.deliveryShop || ''}`.trim();
+  if (!current) return false;
+  if (/\bWHPP\b|\bWHJT\d*\b/i.test(current)) return false;
+  return /(?:^|\b)(?:CP|FS)[A-Z0-9_-]*/i.test(current) || /\bSHOP\b|CO[-\s]?SHOP|PT[-\s]?SHOP/i.test(current);
+}
+function regionClass(row) {
+  if (isStore(row)) return '门店';
+  const raw = String(row.regionCode || '').toUpperCase();
+  if (raw === 'PP') return '金边';
+  if (raw === 'PV') return '外省';
+  const province = String(row.recipientProvince || '').toUpperCase();
+  if (/PHNOM\s*PENH|金边/.test(province)) return '金边';
+  return '外省';
+}
+function outputRow(row) {
+  const area = regionClass(row);
+  const recipientProvince = area === '门店' ? '门店' : (row.recipientProvince || (area === '金边' ? '金边市' : ''));
+  return [
+    row.reportDate, row.shipmentCode, row.orderTime, row.status, row.statusDesc, recipientProvince, area,
+    row.currentShop, row.currentProvince, row.recipient, row.recipientPhone, row.recipientAddress,
+    row.deliveryTime, row.deliveryShop, row.deliveryProvince, row.courier, row.exceptionCode, row.exceptionDesc, row.remark
+  ];
+}
+function emptyDay(date) {
+  return { date, total: 0, pp: 0, pv: 0, store: 0, pod: 0, notPod: 0, delivering: 0, pending: 0, returned: 0, podDays: [], missingPodTime: 0, t1: 0, t2: 0, t3: 0 };
+}
+function buildStats(rows, range) {
+  const days = new Map(listDates(range.from, range.to).map(date => [date, emptyDay(date)]));
+  const overall = emptyDay('TOTAL');
+  for (const row of rows) {
+    if (!days.has(row.reportDate)) days.set(row.reportDate, emptyDay(row.reportDate));
+    for (const stat of [days.get(row.reportDate), overall]) {
+      stat.total += 1;
+      const area = regionClass(row);
+      if (area === '金边') stat.pp += 1;
+      else if (area === '门店') stat.store += 1;
+      else stat.pv += 1;
+      if (row.pod) {
+        stat.pod += 1;
+        const d = Number(row.deliveryDays || 0);
+        if (d > 0) {
+          stat.podDays.push(d);
+          if (d === 1) stat.t1 += 1;
+          else if (d === 2) stat.t2 += 1;
+          else stat.t3 += 1;
+        } else stat.missingPodTime += 1;
+      }
+      if (row.delivering && !row.pod) stat.delivering += 1;
+      if (row.pending && !row.pod) stat.pending += 1;
+      if (row.returned && !row.pod) stat.returned += 1;
+    }
+  }
+  for (const stat of [...days.values(), overall]) stat.notPod = Math.max(0, stat.total - stat.pod);
+  return { daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)), overall };
 }
 function styleHeader(row) {
   row.height = 24;
@@ -240,138 +247,168 @@ function styleHeader(row) {
     cell.font = { name: FONT_NAME, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF195A8D' } };
     cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = { bottom: { style: 'thin', color: { argb: 'FFD8E3EC' } } };
   });
 }
-function summaryRow(sheet, label, value, note = '') {
-  const row = sheet.addRow([label, value, note]);
-  row.getCell(1).font = { name: FONT_NAME, bold: true, color: { argb: 'FF18324F' } };
-  row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAF3FA' } };
-  row.eachCell(cell => { cell.font = { ...(cell.font || {}), name: FONT_NAME }; });
+function addDetailSheet(workbook, name) {
+  const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
+  sheet.columns = DETAIL_HEADERS.map((header, index) => ({ header, width: DETAIL_WIDTHS[index] }));
+  styleHeader(sheet.getRow(1));
+  sheet.autoFilter = { from: 'A1', to: 'S1' };
+  return sheet;
+}
+function writeDetailRow(sheet, values) {
+  const row = sheet.addRow(values);
+  row.eachCell((cell, column) => {
+    cell.font = { name: FONT_NAME, size: 10 };
+    cell.alignment = { vertical: 'middle', horizontal: column <= 7 ? 'center' : 'left', wrapText: column >= 12 };
+  });
   row.commit?.();
+}
+function setLink(cell, text, targetSheet) {
+  cell.value = { text, hyperlink: `#'${targetSheet}'!A1` };
+  cell.font = { name: FONT_NAME, color: { argb: 'FF0563C1' }, underline: true };
+  cell.alignment = { horizontal: 'center', vertical: 'middle' };
+}
+function styleCard(sheet, labelCell, valueCell, rateCell, linkCell) {
+  sheet.getCell(labelCell).font = { name: FONT_NAME, bold: true, color: { argb: 'FF17365D' } };
+  sheet.getCell(valueCell).font = { name: FONT_NAME, bold: true, size: 16, color: { argb: 'FF17365D' } };
+  sheet.getCell(rateCell).font = { name: FONT_NAME, color: { argb: 'FF657B95' } };
+  [labelCell, valueCell, rateCell, linkCell].forEach(addr => { sheet.getCell(addr).alignment = { horizontal: 'center', vertical: 'middle' }; });
+}
+function writeDashboard(sheet, businessType, range, stats) {
+  const { overall, daily } = stats;
+  sheet.columns = Array.from({ length: 20 }, (_, index) => ({ width: index % 2 === 0 ? 15 : 2.5 }));
+  sheet.mergeCells('A1:T1');
+  sheet.getCell('A1').value = `${displayType(businessType)}每日数据看板`;
+  sheet.getCell('A1').font = { name: FONT_NAME, bold: true, size: 18, color: { argb: 'FF17365D' } };
+  sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.getRow(1).height = 30;
+  const cards = [
+    ['A4','A5','A6','A7','总票数',overall.total,1,'全部明细'],
+    ['C4','C5','C6','C7','金边票数',overall.pp,rate(overall.pp,overall.total),'金边明细'],
+    ['E4','E5','E6','E7','外省票数',overall.pv,rate(overall.pv,overall.total),'外省明细'],
+    ['G4','G5','G6','G7','门店票数',overall.store,rate(overall.store,overall.total),'门店明细'],
+    ['I4','I5','I6','I7','POD票数',overall.pod,rate(overall.pod,overall.total),'POD明细'],
+    ['K4','K5','K6','K7','未POD票数',overall.notPod,rate(overall.notPod,overall.total),'未POD明细'],
+    ['M4','M5','M6','M7','分配派送中',overall.delivering,rate(overall.delivering,overall.total),'分配派送中明细'],
+    ['O4','O5','O6','O7','退回票数',overall.returned,rate(overall.returned,overall.total),'退回明细'],
+    ['Q4','Q5','Q6','Q7','平均派件天数',avg(overall.podDays),overall.podDays.length ? 1 : 0,'POD明细']
+  ];
+  for (const [l,v,r,link,label,value,ratio,target] of cards) {
+    sheet.getCell(l).value = label;
+    sheet.getCell(v).value = value;
+    if (label === '平均派件天数') sheet.getCell(r).value = overall.podDays.length ? `有效POD时间 ${overall.podDays.length}票` : '无有效POD时间';
+    else { sheet.getCell(r).value = ratio; sheet.getCell(r).numFmt = '0.00%'; }
+    setLink(sheet.getCell(link), '点击查看明细', target);
+    styleCard(sheet,l,v,r,link);
+  }
+  sheet.getCell('S4').value = 'POD时间缺失'; sheet.getCell('S5').value = overall.missingPodTime; sheet.getCell('S6').value = '不计入平均天数/T1-T3';
+  styleCard(sheet,'S4','S5','S6','S7'); setLink(sheet.getCell('S7'),'查看POD明细','POD明细');
+
+  sheet.mergeCells('A9:E9'); sheet.getCell('A9').value = '每日票量';
+  sheet.mergeCells('G9:T9'); sheet.getCell('G9').value = '每日状态';
+  for (const addr of ['A9','G9']) sheet.getCell(addr).font = { name: FONT_NAME, bold: true, size: 12, color: { argb: 'FF17365D' } };
+  const volumeHeaders = ['日期','总票数','金边','外省','门店'];
+  const statusHeaders = ['日期','POD','派送中','Pending','退回','未POD','POD率','派送中率','Pending率','退回率','平均派件天数','T1','T2','T3+'];
+  volumeHeaders.forEach((value, index) => { sheet.getCell(10,index+1).value = value; });
+  statusHeaders.forEach((value, index) => { sheet.getCell(10,index+7).value = value; });
+  styleHeader(sheet.getRow(10));
+  let rowNumber = 11;
+  for (const stat of daily) {
+    const values1 = [stat.date,stat.total,stat.pp,stat.pv,stat.store];
+    const values2 = [stat.date,stat.pod,stat.delivering,stat.pending,stat.returned,stat.notPod,rate(stat.pod,stat.total),rate(stat.delivering,stat.total),rate(stat.pending,stat.total),rate(stat.returned,stat.total),stat.podDays.length ? avg(stat.podDays) : '',stat.t1,stat.t2,stat.t3];
+    values1.forEach((value,index)=>{ sheet.getCell(rowNumber,index+1).value=value; });
+    values2.forEach((value,index)=>{ sheet.getCell(rowNumber,index+7).value=value; });
+    ['M','N','O','P'].forEach(col=>{ sheet.getCell(`${col}${rowNumber}`).numFmt='0.00%'; });
+    for (let c=1;c<=20;c++) sheet.getCell(rowNumber,c).font={name:FONT_NAME,size:10};
+    rowNumber += 1;
+  }
+  sheet.getCell(`A${rowNumber+1}`).value = `日期范围：${range.from} 至 ${range.to}`;
+  sheet.getCell(`A${rowNumber+2}`).value = '派件天数口径：日报日期 → 实际POD/签收时间，自然日计算，同日=1天；POD时间缺失不强制算1天。';
+  sheet.getCell(`A${rowNumber+3}`).value = `导出引擎：${VERSION}`;
+  for (let rr=rowNumber+1;rr<=rowNumber+3;rr++) sheet.getCell(`A${rr}`).font={name:FONT_NAME,color:{argb:'FF657B95'}};
+  sheet.views = [{ state: 'frozen', ySplit: 10 }];
 }
 
 export async function createShopeeSlimPeriodWorkbook({ type, periodType = 'custom', range, outputDir, onProgress = () => {} }) {
   const businessType = String(type || '').trim().toUpperCase();
-  if (!SHOPEE_TYPES.has(businessType)) throw new Error(`V181仅支持SHOPEECN/SHOPEEVN：${businessType}`);
+  if (!SHOPEE_TYPES.has(businessType)) throw new Error(`V182仅支持SHOPEECN/SHOPEEVN：${businessType}`);
   const db = getDb();
   const batches = latestCompletedBatches(db, range.from, range.to);
   if (!batches.length) throw new Error(`${range.from} 至 ${range.to} 没有 VALID + COMPLETED 日快照。`);
 
   onProgress({ phase: 'start', completed: 0, total: batches.length, entries: 0 });
-  const entries = loadNormalizedRange(db, businessType, batches, onProgress);
-  if (!entries.size) throw new Error(`${displayType(businessType)} 在 ${range.from} 至 ${range.to} 没有可导出的业务数据。`);
-  fillPodLocks(db, entries, range, onProgress);
+  const source = sourceRows(db, businessType, batches, onProgress);
+  if (!source.rows.length) throw new Error(`${displayType(businessType)} 在 ${range.from} 至 ${range.to} 没有可导出的业务数据。`);
+  const latestStates = loadLatestFinalStates(db, source.bills, range.to, onProgress);
+  const rows = source.rows.map(row => applyLatestState(row, latestStates.get(row.shipmentCode) || null));
+  const stats = buildStats(rows, range);
 
-  const values = [...entries.values()].sort((a, b) => a.firstReportDate.localeCompare(b.firstReportDate) || a.shipmentCode.localeCompare(b.shipmentCode));
-  const daily = buildDailyStats(values);
-  const podRows = values.filter(row => row.pod);
-  const validDays = podRows.map(row => Number(row.deliveryNaturalDays)).filter(value => Number.isFinite(value) && value > 0);
-  const total = values.length;
-  const pod = podRows.length;
-  const notPod = Math.max(0, total - pod);
-  const pp = values.filter(row => row.region === 'PP').length;
-  const pv = values.filter(row => row.region === 'PV').length;
-  const returnCount = values.filter(returned).length;
-  const t1 = validDays.filter(value => value === 1).length;
-  const t2 = validDays.filter(value => value === 2).length;
-  const t3 = validDays.filter(value => value >= 3).length;
-  const a1 = podRows.filter(row => row.podAttemptNo === 1).length;
-  const a2 = podRows.filter(row => row.podAttemptNo === 2).length;
-  const a3 = podRows.filter(row => row.podAttemptNo >= 3).length;
-
-  const fileName = safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_完整统计表_${range.from}_至_${range.to}.xlsx`);
+  const fileName = safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}.xlsx`);
   const filePath = path.join(outputDir, fileName);
   const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: filePath, useStyles: true, useSharedStrings: false });
   workbook.creator = 'CE Express QC';
   workbook.created = new Date();
 
-  const summary = workbook.addWorksheet('看板汇总');
-  summary.columns = [{ width: 24 }, { width: 22 }, { width: 72 }];
-  const title = summary.addRow([`${displayType(businessType)} ${range.from} 至 ${range.to} 完整统计看板`]);
-  title.getCell(1).font = { name: FONT_NAME, size: 16, bold: true, color: { argb: 'FF0B3558' } };
-  title.commit?.();
-  summaryRow(summary, '业务板块', displayType(businessType));
-  summaryRow(summary, '日期范围', `${range.from} 至 ${range.to}`, '只读取 VALID + COMPLETED 日快照；同一运单跨日期只统计一次。');
-  summaryRow(summary, '唯一票数', total);
-  summaryRow(summary, '已POD票数', pod);
-  summaryRow(summary, '未POD票数', notPod);
-  summaryRow(summary, 'POD派件完成率', `${rate(pod, total)}%`, '已POD唯一票数 ÷ 区间唯一票数。');
-  summaryRow(summary, '平均派件天数', validDays.length ? `${avg(validDays)} 天` : '—', '首次日报日期 → POD日期，自然日口径，同日POD=1天。');
-  summaryRow(summary, '派件天数有效样本', validDays.length, 'POD时间优先读取 business_pod_locks；缺失时回退POD日报快照。');
-  summaryRow(summary, 'T1签收', t1, `${rate(t1, pod)}% / 已POD`);
-  summaryRow(summary, 'T2签收', t2, `${rate(t2, pod)}% / 已POD`);
-  summaryRow(summary, 'T3+签收', t3, `${rate(t3, pod)}% / 已POD`);
-  summaryRow(summary, '1派POD', a1, `${rate(a1, pod)}% / 已POD`);
-  summaryRow(summary, '2派POD', a2, `${rate(a2, pod)}% / 已POD`);
-  summaryRow(summary, '3派+POD', a3, `${rate(a3, pod)}% / 已POD`);
-  summaryRow(summary, '金边 PP', pp, `${rate(pp, total)}%`);
-  summaryRow(summary, '外省 PV', pv, `${rate(pv, total)}%`);
-  summaryRow(summary, '退回/退件', returnCount, `${rate(returnCount, total)}%`);
-  summaryRow(summary, '导出引擎', VERSION, 'V181不读取 business_final_rows.rawJson / API原始报文。');
-  summary.commit();
+  const dashboard = workbook.addWorksheet('每日看板');
+  const sheets = {
+    all: addDetailSheet(workbook, '全部明细'),
+    pp: addDetailSheet(workbook, '金边明细'),
+    pv: addDetailSheet(workbook, '外省明细'),
+    store: addDetailSheet(workbook, '门店明细'),
+    pod: addDetailSheet(workbook, 'POD明细'),
+    notPod: addDetailSheet(workbook, '未POD明细'),
+    delivering: addDetailSheet(workbook, '分配派送中明细'),
+    pending: addDetailSheet(workbook, 'Pending明细'),
+    returned: addDetailSheet(workbook, '退回明细')
+  };
+  writeDashboard(dashboard, businessType, range, stats);
+  dashboard.commit();
 
-  const dailySheet = workbook.addWorksheet('每日汇总');
-  dailySheet.columns = [
-    { header: '首次日报日期', key: 'date', width: 16 },
-    { header: '唯一票数', key: 'total', width: 14 },
-    { header: '已POD', key: 'pod', width: 12 },
-    { header: 'POD率', key: 'podRate', width: 14 },
-    { header: '平均派件天数', key: 'avgDays', width: 16 },
-    { header: 'T1', key: 't1', width: 10 },
-    { header: 'T2', key: 't2', width: 10 },
-    { header: 'T3+', key: 't3', width: 10 },
-    { header: '金边PP', key: 'pp', width: 12 },
-    { header: '外省PV', key: 'pv', width: 12 },
-    { header: '退回/退件', key: 'returned', width: 14 }
-  ];
-  styleHeader(dailySheet.getRow(1));
-  for (const stat of daily) {
-    const days = stat.days || [];
-    dailySheet.addRow({
-      date: stat.date, total: stat.total, pod: stat.pod, podRate: `${rate(stat.pod, stat.total)}%`,
-      avgDays: days.length ? avg(days) : '', t1: days.filter(v => v === 1).length, t2: days.filter(v => v === 2).length,
-      t3: days.filter(v => v >= 3).length, pp: stat.pp, pv: stat.pv, returned: stat.returned
-    }).commit();
+  let completed = 0;
+  for (const row of rows) {
+    const values = outputRow(row);
+    const area = regionClass(row);
+    writeDetailRow(sheets.all, values);
+    if (area === '金边') writeDetailRow(sheets.pp, values);
+    else if (area === '门店') writeDetailRow(sheets.store, values);
+    else writeDetailRow(sheets.pv, values);
+    if (row.pod) writeDetailRow(sheets.pod, values);
+    else writeDetailRow(sheets.notPod, values);
+    if (row.delivering && !row.pod) writeDetailRow(sheets.delivering, values);
+    if (row.pending && !row.pod) writeDetailRow(sheets.pending, values);
+    if (row.returned && !row.pod) writeDetailRow(sheets.returned, values);
+    completed += 1;
+    if (completed % 500 === 0 || completed === rows.length) onProgress({ phase: 'writing', completed, total: rows.length, entries: rows.length });
   }
-  dailySheet.commit();
-
-  const detail = workbook.addWorksheet('运单统计明细');
-  detail.columns = [
-    { header: '运单号', key: 'shipmentCode', width: 24 },
-    { header: '业务', key: 'businessType', width: 14 },
-    { header: '首次日报日期', key: 'firstReportDate', width: 16 },
-    { header: '最后日报日期', key: 'lastReportDate', width: 16 },
-    { header: '区域', key: 'region', width: 12 },
-    { header: '收件人', key: 'recipient', width: 26 },
-    { header: '是否POD', key: 'pod', width: 12 },
-    { header: 'POD时间', key: 'podTime', width: 22 },
-    { header: 'POD日期', key: 'podDate', width: 16 },
-    { header: '派件耗时自然日', key: 'deliveryNaturalDays', width: 18 },
-    { header: 'POD派次', key: 'podAttemptNo', width: 12 },
-    { header: '当前派次', key: 'currentAttemptNo', width: 12 },
-    { header: '当前状态', key: 'currentStatus', width: 20 },
-    { header: '最后节点', key: 'latestNode', width: 42 },
-    { header: '最后节点时间', key: 'latestEventTime', width: 22 },
-    { header: '门店编码', key: 'shopCode', width: 16 },
-    { header: '门店名称', key: 'shopName', width: 22 },
-    { header: 'POD时间来源', key: 'podTimeSource', width: 18 },
-    { header: '源行号', key: 'sourceRowNumber', width: 12 }
-  ];
-  styleHeader(detail.getRow(1));
-  for (const row of values) {
-    detail.addRow({ ...row, businessType: displayType(businessType), region: row.region === 'PP' ? '金边 PP' : row.region === 'PV' ? '外省 PV' : row.region, pod: row.pod ? '是' : '否' }).commit();
-  }
-  detail.commit();
-
-  onProgress({ phase: 'writing', completed: values.length, total: values.length, entries: values.length });
+  Object.values(sheets).forEach(sheet => sheet.commit());
   await workbook.commit();
+
   return {
     file: filePath,
     summary: {
-      type: businessType, from: range.from, to: range.to, total, pod, notPod,
-      podRate: rate(pod, total), averageDeliveryDays: avg(validDays), validDeliveryDaySamples: validDays.length,
-      t1, t2, t3, attempt1Pod: a1, attempt2Pod: a2, attempt3PlusPod: a3, pp, pv, returned: returnCount,
-      engine: VERSION, rawJsonRead: false
+      type: businessType,
+      from: range.from,
+      to: range.to,
+      total: stats.overall.total,
+      pod: stats.overall.pod,
+      notPod: stats.overall.notPod,
+      podRate: Number((rate(stats.overall.pod, stats.overall.total) * 100).toFixed(2)),
+      averageDeliveryDays: avg(stats.overall.podDays),
+      validDeliveryDaySamples: stats.overall.podDays.length,
+      missingPodTime: stats.overall.missingPodTime,
+      t1: stats.overall.t1,
+      t2: stats.overall.t2,
+      t3: stats.overall.t3,
+      pp: stats.overall.pp,
+      pv: stats.overall.pv,
+      store: stats.overall.store,
+      returned: stats.overall.returned,
+      engine: VERSION,
+      outputContract: 'LEGACY_10_SHEETS_ONE_WORKBOOK',
+      apiRawJsonRead: false,
+      sourceRowJsonRead: true
     }
   };
 }
