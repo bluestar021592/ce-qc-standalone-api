@@ -19,6 +19,7 @@ const historyRefreshUi = read('public/v183-history-refresh.js');
 const refreshedExporter = read('src/v183ShopeeRefreshedPeriodExporter.js');
 const streamedExporter = read('src/v185ShopeeCurrentStateStreamExporter.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
+const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 
 const must = (source, token) => {
   if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`);
@@ -82,9 +83,12 @@ must(streamedExporter, 'LEGACY_10_SHEETS_ONE_PASS_STREAM');
 must(singleExportWorker, '2026-08-17-v185-single-business-stream-worker-v1');
 must(singleExportWorker, 'createShopeeCurrentStateStreamWorkbook');
 must(singleExportWorker, 'onePassStreaming: true');
+must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
+must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
+must(asyncExportLauncher, 'V185单业务一次流式完整报表');
 
 for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) {
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, V185 one-pass Shopee export, WHPP recovery and CCSL POD facts repair verified');
+console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, isolated V185 one-pass Shopee export, WHPP recovery and CCSL POD facts repair verified');
