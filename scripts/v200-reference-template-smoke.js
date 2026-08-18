@@ -12,5 +12,5 @@ must(referenceAverageDays('2026-08-01','2026-08-01') === 1, 'reference same-day 
 must(referenceAverageDays('2026-08-01','2026-08-04') === 4, 'reference average must use dashboard date to actual POD date inclusive');
 const formula = internalHyperlinkFormulaForV200('POD明细', 1718, 1115);
 must(formula === 'HYPERLINK("#\'POD明细\'!A1718",1115)', 'WPS-safe internal hyperlink must match reference workbook formula syntax');
-must(V200_EXPORT_VERSION === '2026-08-18-v200-reference-template-track-attempt-v1', 'unexpected V200 version');
-console.log('[V200] reference template, WPS formula link, real dispatch-attempt and reference average-day smoke passed');
+must(V200_EXPORT_VERSION === '2026-08-18-v201-persistent-shopee-dispatch-export-v1', 'unexpected V201 tracked export version');
+console.log('[V201] reference template + WPS formula + persistent dispatch tracker export smoke passed');
