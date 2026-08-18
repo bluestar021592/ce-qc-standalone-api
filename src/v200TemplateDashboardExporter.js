@@ -3,9 +3,9 @@ import { collectV202Rows, V202_DELIVERY_TRUTH_VERSION } from './v202DeliveryTrut
 import { statsOf, bucketRows, anchorMaps, average } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 
-// Compatibility markers retained only for the updater/golive gate:
-// V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY / _V200.xlsx
-// Runtime files are V202 and no longer use the old dispatch-date attempt logic.
+// Compatibility markers retained only for updater/golive checks:
+// V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY / _V200.xlsx / _V202.xlsx
+// Runtime truth is V203: real attempts + terminal truth + manual-query evidence universe.
 export const V200_EXPORT_VERSION = V202_DELIVERY_TRUTH_VERSION;
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
 export { internalHyperlinkFormulaForV200 } from './v200ReferenceWorkbook.js';
@@ -21,13 +21,15 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
   const stats = statsOf(rows, range);
   const bucket = bucketRows(rows);
   const anchors = anchorMaps(bucket);
-  const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V202.xlsx`));
+  const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V203.xlsx`));
   await writeV200ReferenceWorkbook({ file, type: businessType, range, rows, stats, bucket, anchors, onProgress });
   return {
     file,
     summary: {
       type: businessType,
       total: stats.overall.total,
+      manualEvidenceOnly: stats.overall.evidenceOnly,
+      exportedDetailRows: rows.length,
       pod: stats.overall.pod,
       returned: stats.overall.returned,
       cancelled: stats.overall.cancelled,
@@ -45,8 +47,9 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
       engine: V202_DELIVERY_TRUTH_VERSION,
       tracking: businessType === 'SHOPEECN' || businessType === 'SHOPEEVN' ? 'REAL_DELIVERY_CYCLE_4003_70_PENDING_REDISPATCH_POD' : 'GENERIC_TERMINAL_TRUTH',
       averageRule: 'ORDER_DATE_TO_ACTUAL_POD_DATE_INCLUSIVE',
-      terminalRule: businessType === 'WHPP' ? 'POD_RETURN_CANCELLED_EXCLUDED_FROM_ANOMALY_AND_UNPOD' : 'POD_RETURN_EXCLUDED_FROM_ANOMALY_AND_UNPOD',
-      outputContract: 'V202_REFERENCE_TEMPLATE_REAL_ATTEMPT_AND_TERMINAL_TRUTH_10_SHEETS'
+      terminalRule: 'POD_RETURN_CANCELLED_EXCLUDED_FROM_ANOMALY_AND_UNPOD',
+      evidenceRule: 'MANUAL_QUERY_ROWS_INCLUDED_IN_DETAILS_BUT_EXCLUDED_FROM_OFFICIAL_DAILY_KPI_DENOMINATOR_UNLESS_DAILY_MEMBER',
+      outputContract: 'V203_REFERENCE_TEMPLATE_REAL_ATTEMPT_TERMINAL_MANUAL_EVIDENCE_10_SHEETS'
     }
   };
 }
