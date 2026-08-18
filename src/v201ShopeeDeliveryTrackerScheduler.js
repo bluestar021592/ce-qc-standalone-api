@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { getDb, nowIso } from './db.js';
 import { CEClient } from './ceClient.js';
 import {
@@ -15,6 +17,7 @@ const CE_HISTORY_MAX_BILLS = Math.max(0, Math.min(3000, Number(process.env.SHOPE
 let timer = null;
 let startupTimer = null;
 let inFlight = false;
+let workerChild = null;
 
 function meta(db, key) {
   try { return String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(key)?.value || ''); } catch { return ''; }
@@ -107,8 +110,8 @@ export async function runShopeeDeliveryTrackerSync({ reason = 'SCHEDULED' } = {}
     // Historical problem repair: older completed POD rows may never have had their
     // dispatch trajectory persisted because terminal scan status skipped tracking.
     // Only those POD rows whose attempt is still unknown are queried here. The CE
-    // history is then reduced into persistent 60/70/80 facts; export never has to
-    // call CE API to invent or recover an attempt.
+    // history is reduced into persistent 60/70/80 facts; export itself does not
+    // need to call CE API to guess or reconstruct an attempt.
     const history = await fetchMissingAttemptHistory(db, range);
     if (history.events.length) {
       result = syncShopeeDeliveryTrackingForRange({
@@ -133,19 +136,48 @@ export async function runShopeeDeliveryTrackerSync({ reason = 'SCHEDULED' } = {}
   } finally { inFlight = false; }
 }
 
+function launchWorker(reason) {
+  if (workerChild) return { started: false, reason: 'WORKER_ALREADY_RUNNING', pid: workerChild.pid || 0 };
+  const file = fileURLToPath(new URL('./v201ShopeeDeliveryTrackerWorker.js', import.meta.url));
+  try {
+    workerChild = spawn(process.execPath, [file, String(reason || 'BACKGROUND')], {
+      cwd: process.cwd(),
+      env: { ...process.env, CE_QC_SHOPEE_TRACKER_WORKER: '1' },
+      windowsHide: true,
+      detached: false,
+      stdio: ['ignore', 'inherit', 'inherit']
+    });
+    const pid = workerChild.pid || 0;
+    console.log(`[CE-QC][V201_SHOPEE_TRACKER] background worker starting reason=${reason} pid=${pid}`);
+    workerChild.once('error', error => {
+      console.error('[CE-QC][V201_SHOPEE_TRACKER_WORKER_SPAWN_FAILED]', error?.stack || error);
+      workerChild = null;
+    });
+    workerChild.once('exit', (code, signal) => {
+      console.log(`[CE-QC][V201_SHOPEE_TRACKER] background worker exited code=${code ?? 'null'}${signal ? ` signal=${signal}` : ''}`);
+      workerChild = null;
+    });
+    return { started: true, pid };
+  } catch (error) {
+    workerChild = null;
+    console.error('[CE-QC][V201_SHOPEE_TRACKER_WORKER_START_FAILED]', error?.stack || error);
+    return { started: false, reason: 'SPAWN_FAILED', error: error?.message || String(error) };
+  }
+}
+
 export function startShopeeDeliveryTrackerScheduler() {
   if (timer || startupTimer) return { started: false, reason: 'ALREADY_STARTED' };
   if (process.env.CI || process.env.NODE_ENV === 'test' || String(process.env.CE_QC_DISABLE_SHOPEE_DELIVERY_TRACKER || '') === '1') return { started: false, reason: 'DISABLED_BY_ENV' };
   ensureShopeeDeliveryTrackingSchema(getDb());
   startupTimer = setTimeout(() => {
     startupTimer = null;
-    runShopeeDeliveryTrackerSync({ reason: 'STARTUP' }).catch(error => console.error('[CE-QC][V201_SHOPEE_TRACKER_STARTUP]', error?.stack || error));
+    launchWorker('STARTUP');
   }, STARTUP_DELAY_MS);
   startupTimer.unref?.();
-  timer = setInterval(() => runShopeeDeliveryTrackerSync({ reason: 'TWO_HOUR' }).catch(error => console.error('[CE-QC][V201_SHOPEE_TRACKER_INTERVAL]', error?.stack || error)), INTERVAL_MS);
+  timer = setInterval(() => launchWorker('TWO_HOUR'), INTERVAL_MS);
   timer.unref?.();
-  console.log(`[CE-QC][V201_SHOPEE_TRACKER] scheduler ready; startupDelay=${STARTUP_DELAY_MS}ms interval=${INTERVAL_MS}ms backfillDays=${BACKFILL_DAYS} historyMaxBills=${CE_HISTORY_MAX_BILLS}`);
-  return { started: true, startupDelayMs: STARTUP_DELAY_MS, intervalMs: INTERVAL_MS, backfillDays: BACKFILL_DAYS, historyMaxBills: CE_HISTORY_MAX_BILLS };
+  console.log(`[CE-QC][V201_SHOPEE_TRACKER] scheduler ready; startupDelay=${STARTUP_DELAY_MS}ms interval=${INTERVAL_MS}ms backfillDays=${BACKFILL_DAYS} historyMaxBills=${CE_HISTORY_MAX_BILLS}; work runs outside main web process`);
+  return { started: true, startupDelayMs: STARTUP_DELAY_MS, intervalMs: INTERVAL_MS, backfillDays: BACKFILL_DAYS, historyMaxBills: CE_HISTORY_MAX_BILLS, isolatedWorker: true };
 }
 
-export function shopeeDeliveryTrackerSchedulerState() { return { started: Boolean(timer || startupTimer), inFlight, intervalMs: INTERVAL_MS, startupDelayMs: STARTUP_DELAY_MS, historyMaxBills: CE_HISTORY_MAX_BILLS, version: V201_TRACKER_SCHEDULER_VERSION }; }
+export function shopeeDeliveryTrackerSchedulerState() { return { started: Boolean(timer || startupTimer), inFlight, workerPid: workerChild?.pid || 0, intervalMs: INTERVAL_MS, startupDelayMs: STARTUP_DELAY_MS, historyMaxBills: CE_HISTORY_MAX_BILLS, version: V201_TRACKER_SCHEDULER_VERSION }; }
