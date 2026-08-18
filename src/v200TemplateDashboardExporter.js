@@ -6,6 +6,7 @@ import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 // Compatibility markers retained only for updater/golive checks:
 // V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY / _V200.xlsx / _V202.xlsx / _V203.xlsx / _V205.xlsx
 // collectV202Rows / collectV205ExportRows
+// ALL_VALID_COMPLETED_DAILY_IMPORTS_ARE_UNIONED
 // MANUAL_QUERY_ROWS_INCLUDED_IN_DETAILS_BUT_EXCLUDED_FROM_OFFICIAL_DAILY_KPI_DENOMINATOR_UNLESS_DAILY_MEMBER
 // Runtime truth is V206: V205 canonical membership + exact family evidence +
 // SHOPEE 3001-to-real-POD timing, real delivery attempts and strict terminals.
