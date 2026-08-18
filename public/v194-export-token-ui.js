@@ -1,11 +1,11 @@
 (function installV194ExportTokenUi(global) {
-  if (global.__CE_QC_V194_EXPORT_TOKEN_UI__) return;
+  const REVISION = '2026-08-18-v195-ipc-xhr-status-ui-v1';
+  if (global.__CE_QC_V194_EXPORT_TOKEN_UI_REVISION__ === REVISION) return;
   global.__CE_QC_V194_EXPORT_TOKEN_UI__ = true;
 
   // Public contract names stay V194 so old launchers remain compatible. The V195
   // revision changes transport to XHR + 5178 IPC-memory status.
   const VERSION = '2026-08-18-v194-export-token-ui-v1';
-  const REVISION = '2026-08-18-v195-ipc-xhr-status-ui-v1';
   const SIDECAR_VERSION = '2026-08-18-v194-token-status-sidecar-v1';
   const SIDECAR_REVISION = '2026-08-18-v195-ipc-memory-status-v1';
   const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v194';
