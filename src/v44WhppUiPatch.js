@@ -27,7 +27,9 @@ import './v203PublicTunnelSupervisor.js';
 import './v203DashboardIntegrityPatch.js';
 import './v205IntegrityAuditPatch.js';
 
-// Retired runtime UI compatibility marker only: /v183-history-refresh.js?v=20260818-v192-1
+// Retired runtime UI compatibility markers only:
+// /v183-history-refresh.js?v=20260818-v192-1
+// /v203-dashboard-integrity.js?v=20260818-v203-1
 // v139-carry-manual-window and v183-history-refresh are superseded by the unified carry center.
 const PATCH_ID='2026-08-18-v205-canonical-integrity-shell-v3';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs','/carryover-center']);
