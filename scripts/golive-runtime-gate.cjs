@@ -134,8 +134,9 @@ must(v200Evidence, "code === '70'");
 must(v200Evidence, "code === '60'");
 must(v200Evidence, "'派件时间'");
 must(v200Evidence, "source: '无真实派次证据'");
-must(v200Evidence, '首次真实派送');
+must(v200Evidence, 'firstDispatchDate');
 must(v200Metrics, "'POD明细'");
+must(v200Metrics, 'referenceAverageDays');
 must(v200Workbook, 'HYPERLINK');
 must(v200Workbook, "workbook.addWorksheet('每日看板'");
 must(v200Workbook, "'每日票量'");
@@ -168,4 +169,4 @@ must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V200 reproduces the 16-column reference dashboard, uses WPS-compatible HYPERLINK formulas, reads real daily POD/delivery time for average days, counts real code70/code60 dispatch dates before stored attempt fields, never fabricates attempt from elapsed days, and applies one exporter to all seven businesses');
+console.log('[GOLIVE] runtime-source gate passed; V200 reproduces the 16-column reference dashboard, uses WPS-compatible HYPERLINK formulas, calculates reference average days from the dashboard/report date to actual POD/delivery time, counts real code70/code60 dispatch dates before stored attempt fields, never fabricates attempt from elapsed days, and applies one exporter to all seven businesses');
