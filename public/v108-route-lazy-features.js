@@ -1,6 +1,6 @@
 (function installRouteLazyFeaturesV108(global){
-  if(global.__CE_QC_V108_ROUTE_LAZY__?.version==='2026-08-18-v193-route-lazy-isolated-export-v1')return;
-  const VERSION='2026-08-18-v193-route-lazy-isolated-export-v1';
+  if(global.__CE_QC_V108_ROUTE_LAZY__?.version==='2026-08-18-v194-route-lazy-token-export-v1')return;
+  const VERSION='2026-08-18-v194-route-lazy-token-export-v1';
   const loaded=new Map();
   const groups={
     shopee:[
@@ -12,7 +12,7 @@
       '/v94-business-source-truth-ui-v2.js?v=20260813-2'
     ],
     import:['/v66-import-success-whpp.js?v=20260812-1','/v96-v67-live-progress-bridge.js?v=20260813-1'],
-    reports:['/v190-export-direct-route-client.js?v=20260818-v191-1','/v84-async-export-ui.js?v=20260818-v193-1'],
+    reports:['/v190-export-direct-route-client.js?v=20260818-v191-1','/v84-async-export-ui.js?v=20260818-v193-1','/v194-export-token-ui.js?v=20260818-v194-1'],
     settings:['/v62-network-settings-runtime.js?v=20260812-1'],
     data:['/v104-fast-purge-ui.js?v=20260814-8','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
     carry:['/v99-carry-live-ui.js?v=20260814-1']
@@ -30,7 +30,7 @@
       try{existing.remove();}catch{}
     }
     const promise=new Promise((resolve,reject)=>{
-      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v193';
+      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v194';
       script.onload=()=>resolve(script);script.onerror=()=>reject(new Error(`加载页面功能失败：${src}`));document.head.appendChild(script);
     }).catch(error=>{loaded.delete(src);console.warn('[CE-QC][V108_LAZY]',error);throw error;});
     loaded.set(src,promise);return promise;
