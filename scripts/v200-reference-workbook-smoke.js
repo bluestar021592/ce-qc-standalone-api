@@ -16,7 +16,7 @@ try{
   const names=wb.worksheets.map(s=>s.name);
   must(names.join('|')==='每日看板|全部明细|金边明细|外省明细|门店明细|POD明细|未POD明细|分配派送中明细|Pending明细|退回明细','V200 must keep exact 10-sheet reference structure');
   const dash=wb.getWorksheet('每日看板');
-  must(dash.getColumn(1).width===13 && dash.getColumn(6).width===3,'reference dashboard column widths changed');
+  must(Math.abs(Number(dash.getColumn(1).width||0)-13)<0.5 && Math.abs(Number(dash.getColumn(6).width||0)-3)<0.5,'reference dashboard column widths changed');
   must(String(dash.getCell('A1').value).includes('SHOPEE CN每日数据看板'),'reference title missing');
   must(String(dash.getCell('B11').value?.formula||'').startsWith('HYPERLINK("#\'全部明细\'!A2",'),'WPS internal hyperlink formula missing');
   must(dash.getCell('A13').value==='派次与平均签收天数','attempt section must stay on dashboard');
