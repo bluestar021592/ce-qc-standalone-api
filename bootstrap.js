@@ -176,6 +176,7 @@ try {
   await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
   await importPhase('v161UnifiedImportRuntimeTruthPatch', './src/v161UnifiedImportRuntimeTruthPatch.js');
   const v167Repair = await importPhase('v167CcslPodLockFactRepair', './src/v167CcslPodLockFactRepair.js');
+  await importPhase('v201ShopeeTrackerPurgePatch', './src/v201ShopeeTrackerPurgePatch.js');
   const v201ShopeeTracker = await importPhase('v201ShopeeDeliveryTrackerScheduler', './src/v201ShopeeDeliveryTrackerScheduler.js');
 
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
