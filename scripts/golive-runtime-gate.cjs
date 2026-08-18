@@ -116,11 +116,13 @@ must(singleExportWorker, 'LEGACY_10_SHEETS_V191_TRUTH');
 must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(asyncExportLauncher, 'V185单业务一次流式完整报表');
-must(exportDirect, '2026-08-17-v190-direct-export-endpoint-v1');
+must(exportDirect, '2026-08-18-v192-direct-export-early-route-v1');
 must(exportDirect, '/api/v190/export-period/prepare');
 must(exportDirect, '/api/v190/export-job/:jobId');
-must(exportDirect, 'V190_DIRECT_ROUTE_MEMORY_ACK');
-must(exportDirect, '[CE-QC][V190_EXPORT_DIRECT] PREPARE enter');
+must(exportDirect, 'V192_DIRECT_ROUTE_MEMORY_ACK');
+must(exportDirect, '[CE-QC][V192_EXPORT_DIRECT] PREPARE enter');
+must(exportDirect, 'v192ExportDirectEarlyRouteUse');
+must(exportDirect, 'earlyRouteInstall: true');
 must(exportDirect, 'injectDirectRoutes(this)');
 must(exportPreflight, "import './v190ExportDirectEndpointPatch.js';");
 must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
@@ -129,4 +131,4 @@ for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, V192 manual history summary prevents main-thread export starvation; V191 hard-direct export UI -> V190 single-business endpoints -> V191 cross-day truth worker verified');
+console.log('[GOLIVE] runtime-source gate passed; V192 manual history summary prevents main-thread export starvation and V192 early direct route install guarantees single-business prepare/status endpoints before static app routes; V191 cross-day truth worker verified');
