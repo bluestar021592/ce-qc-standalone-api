@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID = '2026-08-17-v190-direct-export-endpoint-v1';
+const PATCH_ID = '2026-08-18-v192-direct-export-early-route-v1';
 const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM';
 const LEGACY_PREPARE_PATH = '/api/export-period/prepare';
 const PREPARE_PATH = '/api/v190/export-period/prepare';
@@ -16,6 +16,7 @@ const SINGLE_JOB_HEAP_MB = Math.max(384, Math.min(1024, Number(process.env.EXPOR
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const singleWorkerFile = path.join(__dirname, 'v183SingleBusinessExportJobWorker.js');
 const previousPost = express.application.post;
+const previousUse = express.application.use;
 const pendingJobs = new Map();
 let routesInjected = false;
 
@@ -70,7 +71,7 @@ function publicPending(job = {}) {
   };
 }
 async function writeJsonAtomic(file, value) {
-  const temp = `${file}.${process.pid}.v190.tmp`;
+  const temp = `${file}.${process.pid}.v192.tmp`;
   await fsp.writeFile(temp, JSON.stringify(value, null, 2), 'utf8');
   await fsp.rename(temp, file);
 }
@@ -135,7 +136,7 @@ async function persistAndLaunch(job) {
     file = path.join(jobsDir, `${job.jobId}.json`);
     const persisted = {
       ...job,
-      message: 'V190直连Job已确认；任务文件已持久化，正在启动V185单业务流式后台进程',
+      message: 'V192直连Job已确认；任务文件已持久化，正在启动V191单业务真实状态后台进程',
       persistedAt: new Date().toISOString(),
       persistMs: Date.now() - startedAt,
       updatedAt: new Date().toISOString()
@@ -157,14 +158,14 @@ async function persistAndLaunch(job) {
       directEndpointPatchId: PATCH_ID
     };
     pendingJobs.set(job.jobId, { job: failed, persisted: false, failed: true, file });
-    console.error('[CE-QC][V190_EXPORT_DIRECT] async persist failed:', error?.stack || error);
+    console.error('[CE-QC][V192_EXPORT_DIRECT] async persist failed:', error?.stack || error);
   }
 }
 
 function directPrepare(req, res) {
   const requestStartedAt = Date.now();
   const payload = normalizePayload(req.body || {});
-  console.log(`[CE-QC][V190_EXPORT_DIRECT] PREPARE enter business=${payload.businessType || '-'} period=${payload.periodType}`);
+  console.log(`[CE-QC][V192_EXPORT_DIRECT] PREPARE enter business=${payload.businessType || '-'} period=${payload.periodType}`);
   if (!validatePayload(payload, res)) return;
 
   const jobId = `EXP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
@@ -177,7 +178,7 @@ function directPrepare(req, res) {
     payloadKey: payloadKey(payload),
     status: 'QUEUED',
     progress: 0,
-    message: 'V190直连即时应答：Job已在内存创建；正在异步持久化并启动V185流式导出',
+    message: 'V192直连即时应答：Job已在内存创建；正在异步持久化并启动V191真实状态导出',
     payload,
     files: [],
     createdAt: now,
@@ -185,7 +186,7 @@ function directPrepare(req, res) {
     requestedBy: req.user?.username || req.user?.email || '',
     launcherHeapMB: SINGLE_JOB_HEAP_MB,
     workerMode: 'SINGLE_BUSINESS_DIRECT',
-    prepareAckMode: 'V190_DIRECT_ROUTE_MEMORY_ACK'
+    prepareAckMode: 'V192_DIRECT_ROUTE_MEMORY_ACK'
   };
 
   pendingJobs.set(jobId, { job, persisted: false, file: '' });
@@ -207,7 +208,7 @@ function directPrepare(req, res) {
     prepareAckMs: ackMs,
     patchId: PATCH_ID
   });
-  console.log(`[CE-QC][V190_EXPORT_DIRECT] ACK job=${jobId} ${ackMs}ms`);
+  console.log(`[CE-QC][V192_EXPORT_DIRECT] ACK job=${jobId} ${ackMs}ms`);
   void persistAndLaunch(job);
 }
 
@@ -230,7 +231,7 @@ async function directStatus(req, res) {
 }
 function directPing(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ ok: true, patchId: PATCH_ID, time: new Date().toISOString(), pendingJobs: pendingJobs.size });
+  res.json({ ok: true, patchId: PATCH_ID, time: new Date().toISOString(), pendingJobs: pendingJobs.size, routesInjected });
 }
 function injectDirectRoutes(app) {
   if (routesInjected) return;
@@ -238,10 +239,16 @@ function injectDirectRoutes(app) {
   app.route(PREPARE_PATH).post(directPrepare);
   app.route(STATUS_PATH).get(directStatus);
   app.route(PING_PATH).get(directPing);
-  console.log(`[CE-QC][V190_EXPORT_DIRECT] routes injected: ${PREPARE_PATH}, ${STATUS_PATH}, ${PING_PATH}`);
+  console.log(`[CE-QC][V192_EXPORT_DIRECT] routes injected early: ${PREPARE_PATH}, ${STATUS_PATH}, ${PING_PATH}`);
 }
 
-express.application.post = function v190ExportDirectEndpointRegistration(pathValue, ...handlers) {
+express.application.use = function v192ExportDirectEarlyRouteUse(...args) {
+  const candidates = args.flat().filter(value => typeof value === 'function');
+  if (!routesInjected && candidates.some(fn => fn.name === 'serveStatic')) injectDirectRoutes(this);
+  return previousUse.apply(this, args);
+};
+
+express.application.post = function v192ExportDirectEndpointRegistration(pathValue, ...handlers) {
   if (String(pathValue || '') === LEGACY_PREPARE_PATH) injectDirectRoutes(this);
   return previousPost.call(this, pathValue, ...handlers);
 };
@@ -254,7 +261,8 @@ export function inspectV190ExportDirectEndpoint() {
     statusPath: STATUS_PATH,
     pingPath: PING_PATH,
     pendingJobs: pendingJobs.size,
-    exportContractVersion: EXPORT_CONTRACT_VERSION
+    exportContractVersion: EXPORT_CONTRACT_VERSION,
+    earlyRouteInstall: true
   };
 }
 export const V190_EXPORT_DIRECT_ENDPOINT_ID = PATCH_ID;
