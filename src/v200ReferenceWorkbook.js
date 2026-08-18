@@ -99,8 +99,12 @@ function createDashboard(workbook, type, range, stats, anchors) {
     mr++;
   }
   const noteRow = mr + 1; sheet.mergeCells(noteRow, 1, noteRow, 16);
-  sheet.getCell(noteRow, 1).value = `派次口径：1派/2派/3派按真实派送周期计算。4003/轨迹70/真实开始派送开启一次派送；同一派重复扫描不加派次；本次真实派送失败后，只有再次真实开始派送才进入下一派。轨迹60“派件分配”、Pending次数、经过几天均不能单独制造派次；证据不足保留“派次未识别”。平均签收天数：下单日期→实际POD签收日期，首尾自然日都计1天。POD、退回，以及WHPP取消订单均为终态，不进入未POD/异常。未识别派次 ${o.attemptUnknown} 票。`;
-  sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=46;
+  const shopee = type === 'SHOPEECN' || type === 'SHOPEEVN';
+  const averageRule = shopee
+    ? '平均签收天数严格按真实3001金边中央仓入库节点→真实4004/轨迹80 POD计算；3001当天算第1天，首尾自然日计1天。缺3001、缺POD时间或时间倒序的票不进入平均值，禁止使用下单日期、日报日期或区间均值补算。金边/外省分别按PP/PV逐票计算。'
+    : '平均签收天数按下单日期→实际POD签收日期，首尾自然日都计1天。';
+  sheet.getCell(noteRow, 1).value = `派次口径：1派/2派/3派按真实派送周期计算。4003/轨迹70/真实开始派送开启一次派送；同一派重复扫描不加派次；本次真实派送失败后，只有再次真实开始派送才进入下一派。轨迹60“派件分配”、Pending次数、经过几天均不能单独制造派次；证据不足保留“派次未识别”。${averageRule} POD、退回，以及WHPP取消订单均为终态，不进入未POD/异常。未识别派次 ${o.attemptUnknown} 票。`;
+  sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=60;
   sheet.commit();
 }
 function detailValues(row) {
