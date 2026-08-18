@@ -27,7 +27,6 @@ const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
 
-// Seven-business processing and persistence remain mandatory.
 must(runner, '2026-08-17-v165-seven-business-stage-verification-v2');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
@@ -39,7 +38,6 @@ must(pause, 'global.pauseUnified=pauseUnified');
 must(storage, 'compactStateForPersistence');
 must(bstore, 'compactBusinessStatePayload');
 
-// Export sidecar must stay isolated from the main SQLite-serving process.
 must(v108, '/v194-export-token-ui.js?v=20260818-v195-1');
 must(tokenExportUi, '/api/v194/export-period/prepare');
 must(tokenExportUi, 'XMLHttpRequest');
@@ -49,19 +47,16 @@ must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(singleExportWorker, 'createV200ReferenceDashboardWorkbook');
 must(allBusinessChild, 'createV200ReferenceDashboardWorkbook');
 
-// V202 real delivery-attempt truth is authoritative.
 must(v202Truth, '2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v1');
-must(v202Truth, "code==='4003'");
-must(v202Truth, "code==='70'");
-must(v202Truth, "code==='150'");
-must(v202Truth, "code==='80'");
+must(v202Truth, "code === '4003'");
+must(v202Truth, "code === '70'");
+must(v202Truth, "code === '150'");
+must(v202Truth, "code === '80'");
 must(v202Truth, 'Repeated START scans while the same attempt is still open never create a new attempt');
 must(v202Truth, 'Only a NEW START after a failed attempt opens attempt 2/3+');
 must(v202Truth, 'Elapsed calendar days, code60 assignment and raw Pending count NEVER manufacture an attempt');
 must(v202Truth, "signDaySource = row.deliveryDays ? '下单时间→真实POD时间（自然日，首尾计1天）'");
 
-// Online SHOPEE analyzer/reporting must use the same real-cycle contract and must
-// never fall back to reportDate->POD elapsed days as attempt number.
 must(shopeeAnalyzer, "from './shopeeAnalyzerV33.js'");
 must(shopeeAnalyzerV33, 'resolveV202AttemptCycle');
 must(shopeeAnalyzerV33, "code==='4003'||code==='70'");
@@ -72,8 +67,6 @@ must(shopeeReporting, 'dispatchAttemptDenominator: pod.length');
 must(shopeeReporting, 'current.total - current.pod - current.returned - current.cancelled');
 forbid(shopeeReporting, "Date.parse(`${start}T00:00:00+07:00`)");
 
-// Workbook/export contract: exact reference structure, WPS links, open-unPOD only,
-// order->POD average days, and unknown attempts preserved rather than fabricated.
 must(v200Metrics, "'未POD明细': filter(openUnpod)");
 must(v200Metrics, "else if (row.returned)");
 must(v200Metrics, "else if (row.cancelled)");
@@ -88,15 +81,13 @@ must(v200Exporter, '_V202.xlsx');
 must(v200Exporter, 'ORDER_DATE_TO_ACTUAL_POD_DATE_INCLUSIVE');
 must(v200Exporter, 'POD_RETURN_CANCELLED_EXCLUDED_FROM_ANOMALY_AND_UNPOD');
 
-// One consolidated seven-business carry/anomaly center replaces the duplicated
-// Shopee-only history refresh panel and the old cross-day manual panel in runtime UI.
 must(v202Carry, '2026-08-18-v202-seven-business-carry-tracking-center-v2');
 for (const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']) must(v202Carry, `'${type}'`);
 must(v202Carry, '/api/v202/carry/summary');
 must(v202Carry, '/api/v202/carry/rows');
 must(v202Carry, '/api/v202/carry/refresh');
 must(v202Carry, '/api/v202/carry/export.xlsx');
-must(v202Carry, "if(cls.terminal) return false");
+must(v202Carry, 'if(cls.terminal) return false');
 must(v202Carry, 'while(true)');
 must(v202Carry, "status:'WAITING'");
 must(v202CarryUi, '跨日遗留追踪中心');
@@ -109,13 +100,9 @@ must(shell, '/v202-carry-tracking-center.js?v=20260818-v202-2');
 forbid(shell, '<script src="/v139-carry-manual-window.js');
 forbid(shell, '<script src="/v183-history-refresh.js');
 
-// Legacy V201 distinct-date attempt writer is disabled by default to prevent two
-// competing attempt truths. Its data can remain for audit/history comparison.
 must(v202DisableLegacy, "CE_QC_DISABLE_SHOPEE_DELIVERY_TRACKER='1'");
 must(v202DisableLegacy, 'CE_QC_ENABLE_LEGACY_V201_TRACKER');
 
-// Legacy V183 endpoints remain loadable for compatibility/migration, but are no
-// longer exposed as the runtime user-facing refresh center.
 must(historyRefresh, '/api/v183/history-refresh/summary');
 must(historyRefresh, '/api/v183/history-refresh/start');
 
