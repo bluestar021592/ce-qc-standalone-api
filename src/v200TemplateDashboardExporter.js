@@ -1,9 +1,9 @@
 import path from 'node:path';
-import { collectV200Rows, V200_EXPORT_VERSION } from './v200EvidenceData.js';
+import { collectV201TrackedRows, V201_TRACKED_EXPORT_VERSION } from './v201TrackedEvidenceData.js';
 import { statsOf, bucketRows, anchorMaps, average } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 
-export { V200_EXPORT_VERSION } from './v200EvidenceData.js';
+export const V200_EXPORT_VERSION = V201_TRACKED_EXPORT_VERSION;
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
 export { internalHyperlinkFormulaForV200 } from './v200ReferenceWorkbook.js';
 
@@ -13,12 +13,12 @@ function periodLabel(periodType = 'custom') { return ({ daily: '日报', weekly:
 
 export async function createV200ReferenceDashboardWorkbook({ type, periodType = 'custom', range, outputDir, onProgress = () => {} }) {
   const businessType = String(type || '').trim().toUpperCase();
-  const rows = await collectV200Rows(businessType, range, onProgress);
+  const rows = await collectV201TrackedRows(businessType, range, onProgress);
   if (!rows.length) throw new Error(`${displayType(businessType)} 在所选区间没有数据。`);
   const stats = statsOf(rows, range);
   const bucket = bucketRows(rows);
   const anchors = anchorMaps(bucket);
-  const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V200.xlsx`));
+  const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V201.xlsx`));
   await writeV200ReferenceWorkbook({ file, type: businessType, range, rows, stats, bucket, anchors, onProgress });
   return {
     file,
@@ -35,8 +35,9 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
       averageDays: average(stats.overall.days),
       ppAverageDays: average(stats.overall.ppDays),
       pvAverageDays: average(stats.overall.pvDays),
-      engine: V200_EXPORT_VERSION,
-      outputContract: 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY'
+      engine: V201_TRACKED_EXPORT_VERSION,
+      tracking: businessType === 'SHOPEECN' || businessType === 'SHOPEEVN' ? 'PERSISTED_SHOPEE_DISPATCH_FACTS' : 'GENERIC_V200_FACTS',
+      outputContract: 'V201_REFERENCE_TEMPLATE_PERSISTENT_SHOPEE_TRACKING_10_SHEETS'
     }
   };
 }
