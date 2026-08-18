@@ -35,7 +35,9 @@ must(ui,'SHOPEE CN · 金边 PP');
 must(ui,'SHOPEE CN · 外省 PV');
 must(ui,'SHOPEE VN · 金边 PP');
 must(ui,'SHOPEE VN · 外省 PV');
-must(ui,"Number(samples||0)>0?`${Number(value||0).toFixed(2)} 天`:'—'");
+must(ui,'pod===samples&&coverage>=99.99');
+must(ui,"averageText=!pod?'—':closed?`${Number(region.avg||0).toFixed(2)} 天`:'待补齐'");
+must(ui,'只有该区域“有效时效样本=POD票数”时才正式展示平均天数');
 must(shell,'/v206-shopee-precision.js?v=20260818-v206-1');
 
-console.log('[V206] SHOPEE precision integration smoke passed: 3001->4004/80 timing, PP/PV split, evidence coverage, export note and UI shell are wired to one truth source.');
+console.log('[V206] SHOPEE precision integration smoke passed: 3001->4004/80 timing, PP/PV split, full-coverage display gate, export note and UI shell are wired to one truth source.');
