@@ -104,9 +104,11 @@ must(streamedExporter, '2026-08-17-v185-shopee-current-state-stream-export-v1');
 must(streamedExporter, '首次日报日期');
 must(streamedExporter, 'shipment_current_state');
 must(streamedExporter, 'LEGACY_10_SHEETS_ONE_PASS_STREAM');
-must(singleExportWorker, '2026-08-17-v185-single-business-stream-worker-v1');
-must(singleExportWorker, 'createShopeeCurrentStateStreamWorkbook');
+must(singleExportWorker, '2026-08-17-v191-single-business-truth-worker-v1');
+must(singleExportWorker, 'createShopeeTruthWorkbook');
+must(singleExportWorker, 'crossDayTruth: true');
 must(singleExportWorker, 'onePassStreaming: true');
+must(singleExportWorker, 'LEGACY_10_SHEETS_V191_TRUTH');
 must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(asyncExportLauncher, 'V185单业务一次流式完整报表');
@@ -123,4 +125,4 @@ for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, isolated V185 one-pass Shopee export with V187 progress owner and V190 direct single-business prepare/status endpoints, WHPP recovery and CCSL POD facts repair verified');
+console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, V191 cross-day truth Shopee export with V187 progress owner and V190 direct single-business prepare/status endpoints, WHPP recovery and CCSL POD facts repair verified');
