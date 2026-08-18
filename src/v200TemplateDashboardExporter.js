@@ -1,12 +1,14 @@
 import path from 'node:path';
-import { collectV202Rows, V202_DELIVERY_TRUTH_VERSION } from './v202DeliveryTruth.js';
+import { collectV205ExportRows, V205_EXPORT_TRUTH_VERSION } from './v205ExportTruth.js';
 import { statsOf, bucketRows, anchorMaps, average } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 
 // Compatibility markers retained only for updater/golive checks:
-// V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY / _V200.xlsx / _V202.xlsx
-// Runtime truth is V203: real attempts + terminal truth + manual-query evidence universe.
-export const V200_EXPORT_VERSION = V202_DELIVERY_TRUTH_VERSION;
+// V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY / _V200.xlsx / _V202.xlsx / _V203.xlsx
+// Runtime truth is V205: canonical union of every VALID+COMPLETED daily import,
+// exact daily business membership + family-level CE evidence reconciliation,
+// persistent manual-query evidence, strict terminal truth and real SHOPEE attempts.
+export const V200_EXPORT_VERSION = V205_EXPORT_TRUTH_VERSION;
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
 export { internalHyperlinkFormulaForV200 } from './v200ReferenceWorkbook.js';
 
@@ -16,12 +18,12 @@ function periodLabel(periodType = 'custom') { return ({ daily: '日报', weekly:
 
 export async function createV200ReferenceDashboardWorkbook({ type, periodType = 'custom', range, outputDir, onProgress = () => {} }) {
   const businessType = String(type || '').trim().toUpperCase();
-  const rows = await collectV202Rows(businessType, range, onProgress);
+  const rows = await collectV205ExportRows(businessType, range, onProgress);
   if (!rows.length) throw new Error(`${displayType(businessType)} 在所选区间没有数据。`);
   const stats = statsOf(rows, range);
   const bucket = bucketRows(rows);
   const anchors = anchorMaps(bucket);
-  const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V203.xlsx`));
+  const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V205.xlsx`));
   await writeV200ReferenceWorkbook({ file, type: businessType, range, rows, stats, bucket, anchors, onProgress });
   return {
     file,
@@ -44,12 +46,16 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
       ppAverageDays: average(stats.overall.ppDays),
       pvAverageDays: average(stats.overall.pvDays),
       validAverageSamples: stats.overall.days.length,
-      engine: V202_DELIVERY_TRUTH_VERSION,
-      tracking: businessType === 'SHOPEECN' || businessType === 'SHOPEEVN' ? 'REAL_DELIVERY_CYCLE_4003_70_PENDING_REDISPATCH_POD' : 'GENERIC_TERMINAL_TRUTH',
+      dataIntegrityReview: rows.filter(row => row.metricEligible !== false && row.dataIntegrityReview).length,
+      canonicalRecoveredRows: rows.filter(row => row.metricEligible !== false && row.sourceOrigin === 'DAILY_CANONICAL_UNION' && Number(row.membershipSnapshotCount || 0) > 1).length,
+      engine: V205_EXPORT_TRUTH_VERSION,
+      tracking: businessType === 'SHOPEECN' || businessType === 'SHOPEEVN'
+        ? 'REAL_DELIVERY_CYCLE_4003_70_PENDING_REDISPATCH_POD'
+        : 'EXACT_DAILY_MEMBERSHIP_PLUS_CCSL_FAMILY_TRACK_TRUTH',
       averageRule: 'ORDER_DATE_TO_ACTUAL_POD_DATE_INCLUSIVE',
       terminalRule: 'POD_RETURN_CANCELLED_EXCLUDED_FROM_ANOMALY_AND_UNPOD',
-      evidenceRule: 'MANUAL_QUERY_ROWS_INCLUDED_IN_DETAILS_BUT_EXCLUDED_FROM_OFFICIAL_DAILY_KPI_DENOMINATOR_UNLESS_DAILY_MEMBER',
-      outputContract: 'V203_REFERENCE_TEMPLATE_REAL_ATTEMPT_TERMINAL_MANUAL_EVIDENCE_10_SHEETS'
+      evidenceRule: 'ALL_VALID_COMPLETED_DAILY_IMPORTS_ARE_UNIONED; FAMILY_TRACK_EVIDENCE_ENRICHES_EXACT_BUSINESS; MANUAL_QUERY_DETAIL_DOES_NOT_INFLATE_OFFICIAL_DAILY_KPI',
+      outputContract: 'V205_REFERENCE_TEMPLATE_CANONICAL_COMPLETE_REAL_ATTEMPT_TERMINAL_10_SHEETS'
     }
   };
 }
