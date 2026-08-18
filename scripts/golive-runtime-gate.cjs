@@ -53,8 +53,8 @@ must(bstore, 'compactBusinessStatePayload');
 must(bstore, 'stripHeavyBusinessRow');
 must(shell, 'v67-resilient-run-guard.js?v=20260817-1');
 must(shell, 'v183HistoricalStatusRefreshPatch.js');
-must(shell, '/v183-history-refresh.js?v=20260817-1');
-must(shell, '2026-08-18-v191-export-ui-hard-direct-owner-shell-v1');
+must(shell, '/v183-history-refresh.js?v=20260818-v192-1');
+must(shell, '2026-08-18-v192-export-unblocked-owner-shell-v1');
 must(shell, '/v108-route-lazy-features.js?v=20260818-v191-1');
 must(shell, '/v190-export-direct-route-client.js?v=20260818-v191-1');
 must(shell, '/v84-async-export-ui.js?v=20260818-v191-1');
@@ -100,7 +100,8 @@ must(historyRefresh, 'blockers:active.blockers');
 must(historyRefresh, '正在进行CE接口预检');
 must(historyRefresh, 'HISTORY_REFRESH_PREFLIGHT_ZERO_EVIDENCE');
 must(historyRefresh, 'HISTORY_REFRESH_CHUNK_ZERO_SUCCESS');
-must(historyRefreshUi, '2026-08-17-v183-history-refresh-ui-v2');
+must(historyRefreshUi, '2026-08-18-v192-history-refresh-ui-manual-read-v1');
+must(historyRefreshUi, 'automatic summary reads disabled');
 must(historyRefreshUi, '刷新状态后导出');
 must(refreshedExporter, '2026-08-17-v183-shopee-current-status-overlay-export-v1');
 must(streamedExporter, '2026-08-17-v185-shopee-current-state-stream-export-v1');
@@ -128,4 +129,4 @@ for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, V191 hard-direct export UI -> V190 single-business endpoints -> V191 cross-day truth worker, WHPP recovery and CCSL POD facts repair verified');
+console.log('[GOLIVE] runtime-source gate passed; seven-business runner, queued V184 history refresh, V192 manual history summary prevents main-thread export starvation; V191 hard-direct export UI -> V190 single-business endpoints -> V191 cross-day truth worker verified');
