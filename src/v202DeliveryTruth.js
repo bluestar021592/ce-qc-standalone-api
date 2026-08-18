@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 import { collectV200Rows } from './v200EvidenceData.js';
 
-export const V202_DELIVERY_TRUTH_VERSION = '2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v1';
+export const V202_DELIVERY_TRUTH_VERSION = '2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v2';
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 const POD_RE = /\bPOD\b|DELIVERED|签收|妥投|已妥投|Successfully delivered|4004/i;
 const RETURN_RE = /RETURN(?:ED|_COMPLETED)?|退回完成|已退回|退件完成|R退回|P4008/i;
@@ -14,6 +14,7 @@ function safeJson(value, fallback = {}) {
   try { return JSON.parse(String(value || '')) || fallback; } catch { return fallback; }
 }
 function billOf(value = '') { return String(value || '').trim().toUpperCase(); }
+function keyOf(value = '') { return String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[\s_\-]+/g, ''); }
 function dateKey(value = '') {
   const match = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);
   return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
@@ -61,7 +62,7 @@ function normalizeSyntheticTime(date = '', suffix = '12:00:00') { return dateKey
 
 /**
  * Real attempt-cycle rule:
- * - A START (4003 / code70 / confirmed dispatch-state date) opens attempt 1.
+ * - A START (4003 / code70 / daily W/Y confirmed dispatch-state date) opens attempt 1.
  * - Repeated START scans while the same attempt is still open never create a new attempt.
  * - Pending/150 closes that attempt as failed; repeated Pending on the same day is one failure fact.
  * - Only a NEW START after a failed attempt opens attempt 2/3+.
@@ -110,23 +111,49 @@ export function resolveV202AttemptCycle(events = []) {
     attemptStarts,
     failureDates,
     podAt,
-    source: podAttempt ? '真实派送周期（4003/70/派送状态→失败Pending→重新派送→POD）' : '派次证据不足，不强制归为1派',
+    source: podAttempt ? '真实派送周期（4003/70/日报W-Y派送状态→失败Pending→重新派送→POD）' : '派次证据不足，不强制归为1派',
     evidence
   };
 }
 
-function supportingDispatchDates(row = {}) {
-  const values = [];
-  const visit = value => {
-    if (!value) return;
-    if (value instanceof Set) { for (const item of value) visit(item); return; }
-    if (Array.isArray(value)) { for (const item of value) visit(item); return; }
-    if (typeof value === 'string') {
-      for (const part of value.split(/[、,|;\s]+/)) { const d = dateKey(part); if (d) values.push(d); }
+function parseDailyRaw(rowJson = {}) {
+  const parsed = safeJson(rowJson, {});
+  const raw = parsed?.raw && typeof parsed.raw === 'object' ? parsed.raw : parsed;
+  const map = new Map(Object.entries(raw || {}).map(([key, value]) => [keyOf(key), value]));
+  const get = aliases => {
+    for (const alias of aliases) {
+      const value = map.get(keyOf(alias));
+      if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim();
     }
+    return '';
   };
-  visit(row.deliveryDates); visit(row.派送中日期); visit(row.dispatchDates);
-  return [...new Set(values)].sort();
+  return { parsed, get };
+}
+function dailyDispatchEvidence(db, businessType, rows = []) {
+  const byBill = new Map(rows.map(row => [billOf(row.shipmentCode), []]));
+  const entries = new Map(rows.map(row => [billOf(row.shipmentCode), row]));
+  const bills = [...byBill.keys()].filter(Boolean);
+  for (const chunk of chunks(bills, 300)) {
+    const marks = chunk.map(() => '?').join(','); if (!marks) continue;
+    let sourceRows = [];
+    try {
+      sourceRows = db.prepare(`SELECT shipmentCode,reportDate,rowJson FROM unified_import_rows WHERE businessType=? AND shipmentCode IN (${marks}) ORDER BY shipmentCode,reportDate,rowNumber`).all(businessType, ...chunk);
+    } catch {}
+    for (const source of sourceRows) {
+      const bill = billOf(source.shipmentCode), entry = entries.get(bill); if (!entry) continue;
+      const d = dateKey(source.reportDate); if (!d || d < dateKey(entry.firstReportDate) || (dateKey(entry.podDate) && d > dateKey(entry.podDate))) continue;
+      const { get } = parseDailyRaw(source.rowJson);
+      const status = get(['状态标识','状态代码','status','statuscode']).toUpperCase();
+      const desc = get(['状态说明','状态描述','statusdesc','statusdescription','statusname']);
+      // W/Y are established JT dispatch-state evidence in this project's daily
+      // report. Assignment-only text is deliberately excluded here; code60 never
+      // becomes a delivery attempt by itself.
+      if (status === 'W' || status === 'Y' || (DELIVERY_RE.test(desc) && !/assign|分配/i.test(desc))) {
+        byBill.get(bill).push({ kind:'START', time:normalizeSyntheticTime(d,'12:00:00'), source:`日报${status || '派送中'}真实派送状态` });
+      }
+    }
+  }
+  return byBill;
 }
 function evidenceForBills(db, bills = []) {
   const map = new Map(bills.map(bill => [bill, []]));
@@ -197,11 +224,11 @@ export async function collectV202Rows(type, range, onProgress = () => {}) {
   const bills = rows.map(row => billOf(row.shipmentCode)).filter(Boolean);
   const live = evidenceForBills(db, bills);
   const saved = finalRowEvidence(db, bills);
+  const daily = dailyDispatchEvidence(db, businessType, rows);
   let classified = 0, unknown = 0, validDays = 0;
   for (const row of rows) {
     const bill = billOf(row.shipmentCode);
-    const events = [...(live.get(bill) || []), ...(saved.get(bill) || [])];
-    for (const d of supportingDispatchDates(row)) events.push({ kind:'START', time:normalizeSyntheticTime(d), source:'日报W/Y或真实派送状态日' });
+    const events = [...(live.get(bill) || []), ...(saved.get(bill) || []), ...(daily.get(bill) || [])];
     if (row.pod && dateKey(row.podTime || row.podDate)) events.push({ kind:'POD', time:row.podTime || normalizeSyntheticTime(row.podDate,'23:59:59'), source:row.podSource || 'POD事实' });
     const cycle = resolveV202AttemptCycle(events);
     row.attemptNo = row.pod ? cycle.attemptNo : 0;
