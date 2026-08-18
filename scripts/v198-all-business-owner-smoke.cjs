@@ -1,0 +1,15 @@
+const fs=require('fs');
+const single=fs.readFileSync('src/v183SingleBusinessExportJobWorker.js','utf8');
+const allChild=fs.readFileSync('src/v84ExportBusinessWorker.js','utf8');
+const exporter=fs.readFileSync('src/v198UnifiedParityExporter.js','utf8');
+const must=(source,token)=>{if(!source.includes(token))throw new Error(`V198 owner smoke missing ${token}`);};
+must(single,'createStrictUnifiedParityWorkbook');
+must(single,'2026-08-18-v198-strict-parity-worker-v1');
+must(single,'V198_UNIFIED_1TO1_STRICT_PARITY_22_SHEETS');
+must(allChild,'createStrictUnifiedParityWorkbook');
+must(allChild,'2026-08-18-v198-all-business-strict-parity-child-v1');
+must(allChild,'V198_UNIFIED_1TO1_STRICT_PARITY_22_SHEETS');
+must(exporter,"new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'])");
+must(exporter,"workbook.addWorksheet('99_一致性校验'");
+must(exporter,"workbook.addWorksheet('数据口径'");
+console.log('[V198] single + ALL business export ownership smoke passed');
