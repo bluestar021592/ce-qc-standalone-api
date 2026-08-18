@@ -16,6 +16,13 @@ function readJob() {
   if (!jobFile || !fs.existsSync(jobFile)) throw new Error('导出任务文件不存在。');
   return JSON.parse(fs.readFileSync(jobFile, 'utf8'));
 }
+function emitSidecarStatus(job) {
+  try {
+    if (typeof process.send === 'function') {
+      process.send({ type: 'CE_QC_EXPORT_JOB_UPDATE', job });
+    }
+  } catch {}
+}
 function writeJob(patch = {}) {
   const current = readJob();
   const nextStatus = String(patch.status || '').toUpperCase();
@@ -28,6 +35,7 @@ function writeJob(patch = {}) {
   const temp = `${jobFile}.${process.pid}.v191.tmp`;
   fs.writeFileSync(temp, JSON.stringify(next, null, 2), 'utf8');
   fs.renameSync(temp, jobFile);
+  emitSidecarStatus(next);
   return next;
 }
 function dateKey(value = '') { return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : ''; }
