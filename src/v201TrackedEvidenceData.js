@@ -6,6 +6,7 @@ import {
 } from './shopeeDeliveryTracker.js';
 
 export const V201_TRACKED_EXPORT_VERSION = '2026-08-18-v201-persistent-shopee-dispatch-export-v1';
+export const V201_TRACKING_SOURCE = 'PERSISTENT_SHOPEE_DISPATCH_FACTS';
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 
 export async function collectV201TrackedRows(type, range, onProgress = () => {}) {
@@ -48,6 +49,7 @@ export async function collectV201TrackedRows(type, range, onProgress = () => {})
     row.deliveryDays = trackedPod ? Number(fact.signNaturalDays || 0) : Number(row.deliveryDays || 0);
     row.dispatchToPodDays = Number(fact.dispatchToPodDays || 0);
     row.deliveryTrackingVersion = fact.trackerVersion || SHOPEE_DELIVERY_TRACKER_VERSION;
+    row.deliveryTrackingSource = V201_TRACKING_SOURCE;
     row.deliveryTrackingEvidence = fact.evidenceJson || '';
   }
   onProgress({
@@ -61,7 +63,8 @@ export async function collectV201TrackedRows(type, range, onProgress = () => {})
     a3: sync.a3 || 0,
     attemptUnknown: sync.attemptUnknown || 0,
     validSignDays: sync.validSignDays || 0,
-    trackerVersion: SHOPEE_DELIVERY_TRACKER_VERSION
+    trackerVersion: SHOPEE_DELIVERY_TRACKER_VERSION,
+    trackingSource: V201_TRACKING_SOURCE
   });
   return rows;
 }
