@@ -20,6 +20,7 @@ import './v171WhppDashboardParityPatch.js';
 import './v172WhppDetailParityPatch.js';
 import './v174PeriodExportContractPatch.js';
 import './v183HistoricalStatusRefreshPatch.js';
+import './v202DisableLegacyTrackerPatch.js';
 import './v202CarryTrackingCenterPatch.js';
 
 const PATCH_ID='2026-08-18-v202-seven-business-carry-center-shell-v1';
