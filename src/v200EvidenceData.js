@@ -121,9 +121,6 @@ function applyAttemptHistory(entry, value) {
     if (Array.isArray(node)) { node.forEach(visit); return; }
     if (typeof node !== 'object') return;
     entry.historyAttemptNo = Math.max(entry.historyAttemptNo, positiveAttempt(node.podAttemptNo, node.currentAttemptNo, node.attemptNo, node.派次));
-    const time = firstValue(node, ['firstAttemptAt', 'attemptAt', 'deliveryAt', 'eventTime', 'startAt', 'startedAt', 'date']);
-    const d = dateKey(time);
-    if (d) entry.deliveryDates.add(d);
     Object.values(node).forEach(child => { if (child && typeof child === 'object') visit(child); });
   };
   visit(parsed);
@@ -164,14 +161,14 @@ function applyAnalysisRow(entry, row = {}, reportDate = '', source = '分析结�
 }
 
 function latestValidBatches(db, from, to) {
-  const rows = db.prepare(`SELECT snapshotId,reportDate,createdAt,batchId FROM unified_import_batches WHERE status='VALID' AND reportDate BETWEEN ? AND ? ORDER BY reportDate ASC,createdAt DESC,batchId DESC`).all(from, to);
+  const rows = db.prepare(`SELECT b.snapshotId,b.reportDate,b.createdAt,b.batchId FROM unified_import_batches b INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId WHERE b.status='VALID' AND s.status='COMPLETED' AND b.reportDate BETWEEN ? AND ? ORDER BY b.reportDate ASC,b.createdAt DESC,b.batchId DESC`).all(from, to);
   const byDate = new Map();
   for (const row of rows) if (row.reportDate && !byDate.has(row.reportDate)) byDate.set(row.reportDate, row);
   return [...byDate.values()].sort((a, b) => String(a.reportDate).localeCompare(String(b.reportDate)));
 }
 function seedUnified(db, type, range, onProgress) {
   const batches = latestValidBatches(db, range.from, range.to);
-  if (!batches.length) throw new Error(`${range.from} 至 ${range.to} 没有 VALID 日报。`);
+  if (!batches.length) throw new Error(`${range.from} 至 ${range.to} 没有 VALID + COMPLETED 日快照。`);
   const stmt = db.prepare(`SELECT shipmentCode,regionCode,recipientRaw,recipientNormalized,rowNumber,rowJson FROM unified_import_rows WHERE snapshotId=? AND businessType=? ORDER BY rowNumber,shipmentCode`);
   const map = new Map();
   for (let index = 0; index < batches.length; index++) {
@@ -208,12 +205,15 @@ function seedUnified(db, type, range, onProgress) {
         entry.courier = courier || entry.courier; entry.exceptionCode = exceptionCode || entry.exceptionCode; entry.exceptionDesc = exceptionDesc || entry.exceptionDesc; entry.remark = remark || entry.remark;
       }
       if (rawDeliveryTime) entry.rawDeliveryTime = rawDeliveryTime;
-      const podByDaily = rawStatus === 'Y' || POD_RE.test(rawDesc);
+      const podByDaily = POD_RE.test(rawDesc);
       if (podByDaily) { entry.pod = true; if (rawDeliveryTime) setPodEvidence(entry, rawDeliveryTime, '日报派件/签收时间', 4); }
       if (rawStatus === 'R' || RETURN_RE.test(rawDesc)) entry.returned = true;
       if (rawStatus === 'P' || PENDING_RE.test(rawDesc)) entry.pending = true;
-      if (rawStatus === 'W' || DELIVERY_RE.test(rawDesc) || ASSIGN_RE.test(rawDesc)) {
-        entry.delivering = true; const d = dateKey(rawDeliveryTime); if (d) entry.deliveryDates.add(d);
+      const deliveryByDaily = rawStatus === 'W' || (rawStatus === 'Y' && !podByDaily) || DELIVERY_RE.test(rawDesc) || ASSIGN_RE.test(rawDesc);
+      if (deliveryByDaily) {
+        entry.delivering = true;
+        const d = dateKey(rawDeliveryTime) || dateKey(batch.reportDate);
+        if (d) entry.deliveryDates.add(d);
       }
       entry.store = entry.store || isStoreText([currentShop, deliveryShop].join(' '));
       entry.area = areaOf(entry.regionCode, entry.recipientProvince);
@@ -296,16 +296,16 @@ export function resolveV200Attempt({ pod = false, deliveryDates = [], assignDate
   if (!pod) return { attemptNo: 0, source: '' };
   const beforePod = values => [...new Set((values || []).map(dateKey).filter(Boolean))].filter(date => !podDate || date <= podDate).sort();
   const delivery = beforePod(deliveryDates), assign = beforePod(assignDates);
-  if (delivery.length) return { attemptNo: Math.min(3, delivery.length), source: '轨迹70派送日期' };
+  if (delivery.length) return { attemptNo: Math.min(3, delivery.length), source: '轨迹/日报派送日期' };
   if (assign.length) return { attemptNo: Math.min(3, assign.length), source: '轨迹60派件分配日期' };
   const podAttempt = positiveAttempt(podAttemptNo); if (podAttempt) return { attemptNo: podAttempt, source: 'POD锁定派次' };
   const history = positiveAttempt(historyAttemptNo); if (history) return { attemptNo: history, source: '历史派次记录' };
-  const current = positiveAttempt(currentAttemptNo); if (current) return { attemptNo: current, source: '当前派次记录' };
+  const current = positiveAttempt(currentAttemptNo); if (current >= 2) return { attemptNo: current, source: '当前派次记录' };
   return { attemptNo: 0, source: '无真实派次证据' };
 }
 export function resolveV200AverageDays({ firstDispatchDate = '', firstReportDate = '', podDate = '' } = {}) {
   if (!dateKey(podDate)) return 0;
-  const start = dateKey(firstDispatchDate) || dateKey(firstReportDate);
+  const start = dateKey(firstReportDate) || dateKey(firstDispatchDate);
   return start ? inclusiveDays(start, podDate) : 0;
 }
 function finalize(map) {
@@ -329,6 +329,6 @@ export async function collectV200Rows(type, range, onProgress = () => {}) {
   const db = getDb(); const map = businessType === 'WHPP' ? seedWhpp(range, onProgress) : seedUnified(db, businessType, range, onProgress);
   enrichFinalRows(db, businessType, map); enrichCurrentState(db, businessType, map); enrichPodLocks(db, businessType, map); enrichTrackRows(db, businessType, map); finalize(map);
   const rows = [...map.values()].sort((a, b) => a.firstReportDate.localeCompare(b.firstReportDate) || a.shipmentCode.localeCompare(b.shipmentCode));
-  onProgress({ phase: 'truth', completed: rows.length, total: rows.length, entries: rows.filter(row => row.evidence.size).length, validPodTimes: rows.filter(row => row.pod && row.podDate).length, trackAttempts: rows.filter(row => row.pod && /轨迹/.test(row.attemptSource)).length });
+  onProgress({ phase: 'truth', completed: rows.length, total: rows.length, entries: rows.filter(row => row.evidence.size).length, validPodTimes: rows.filter(row => row.pod && row.podDate).length, trackAttempts: rows.filter(row => row.pod && /轨迹|日报派送/.test(row.attemptSource)).length });
   return rows;
 }
