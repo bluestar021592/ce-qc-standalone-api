@@ -4,8 +4,9 @@ import { getDb, getRuntimeConfig } from './db.js';
 import { collectV202Rows, V202_DELIVERY_TRUTH_VERSION } from './v202DeliveryTruth.js';
 import { statsOf, average } from './v200Metrics.js';
 import { ensureV203ManualEvidenceSchema, V203_MANUAL_EVIDENCE_VERSION } from './v203ManualEvidenceStore.js';
+import { inspectV203PublicTunnel } from './v203PublicTunnelSupervisor.js';
 
-export const V203_DASHBOARD_INTEGRITY_VERSION='2026-08-18-v203-useful-dashboard-attempt-network-v2';
+export const V203_DASHBOARD_INTEGRITY_VERSION='2026-08-18-v203-useful-dashboard-attempt-network-v3';
 const CACHE_TTL_MS=Math.max(15_000,Math.min(10*60_000,Number(process.env.V203_ATTEMPT_CACHE_MS||60_000)));
 const cache=new Map();
 function dateKey(value=''){const m=String(value||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';}
@@ -45,8 +46,9 @@ async function attemptSummaryHandler(req,res){
 }
 function lanIps(){const out=[];for(const list of Object.values(networkInterfaces()))for(const item of list||[]){if(item.family!=='IPv4'||item.internal||/^169\.254\./.test(item.address))continue;if(/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address))out.push(item.address);}return[...new Set(out)];}
 function networkHandler(req,res){
-  const cfg=getRuntimeConfig();const ips=lanIps();const publicHostname=String(process.env.PUBLIC_HOSTNAME||'').trim();const publicOrigin=String(process.env.PUBLIC_ORIGIN||'').trim();const cfConfigured=Boolean(String(process.env.CF_ACCESS_TEAM_DOMAIN||'').trim()&&String(process.env.CF_ACCESS_AUD||'').trim());const direct=String(process.env.PUBLIC_DIRECT_ENABLED||'').trim()==='1';
-  res.setHeader('Cache-Control','no-store');res.json({ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,bind:{host:cfg.host,port:cfg.port,lanEnabled:cfg.host==='0.0.0.0',localUrl:`http://127.0.0.1:${cfg.port}`,lanUrls:ips.map(ip=>`http://${ip}:${cfg.port}`)},public:{hostname:publicHostname,origin:publicOrigin||(publicHostname?`https://${publicHostname}`:''),cloudflareAccessConfigured:cfConfigured,directPublicEnabled:direct,applicationReady:Boolean(publicHostname&&(cfConfigured||direct)),tunnelStillRequired:true,security:'公网必须保留系统账号登录；推荐Cloudflare Named Tunnel + Access。'},manualEvidenceVersion:V203_MANUAL_EVIDENCE_VERSION});
+  const cfg=getRuntimeConfig();const ips=lanIps();const publicHostname=String(process.env.PUBLIC_HOSTNAME||'').trim();const publicOrigin=String(process.env.PUBLIC_ORIGIN||'').trim();const cfConfigured=Boolean(String(process.env.CF_ACCESS_TEAM_DOMAIN||'').trim()&&String(process.env.CF_ACCESS_AUD||'').trim());const direct=String(process.env.PUBLIC_DIRECT_ENABLED||'').trim()==='1';const tunnel=inspectV203PublicTunnel();
+  const applicationReady=Boolean(publicHostname&&(cfConfigured||direct));const tunnelReady=tunnel.status==='RUNNING';
+  res.setHeader('Cache-Control','no-store');res.json({ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,bind:{host:cfg.host,port:cfg.port,lanEnabled:cfg.host==='0.0.0.0',localUrl:`http://127.0.0.1:${cfg.port}`,lanUrls:ips.map(ip=>`http://${ip}:${cfg.port}`)},public:{hostname:publicHostname,origin:publicOrigin||(publicHostname?`https://${publicHostname}`:''),cloudflareAccessConfigured:cfConfigured,directPublicEnabled:direct,applicationReady,tunnelConfigured:tunnel.configured,tunnelStatus:tunnel.status,tunnelRunning:tunnelReady,tunnelPid:tunnel.pid,publicReady:applicationReady&&tunnelReady,security:'公网必须保留系统账号登录；推荐Cloudflare Named Tunnel + Access。',lastTunnelError:tunnel.lastError||''},manualEvidenceVersion:V203_MANUAL_EVIDENCE_VERSION});
 }
 let installed=false;const previousListen=express.application.listen;
 express.application.listen=function v203DashboardIntegrityListen(...args){if(!installed){installed=true;ensureV203ManualEvidenceSchema();this.get('/api/v203/attempt-summary',attemptSummaryHandler);this.get('/api/v203/network-access',networkHandler);}return previousListen.apply(this,args);};
