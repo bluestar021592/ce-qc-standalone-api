@@ -5,7 +5,7 @@ const FONT = 'Microsoft YaHei';
 const DETAIL_SHEETS = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
 const DETAIL_HEADERS = ['日期', '运单编号', '下单时间', '状态标识', '状态说明', '收件省份', '区域分类', '当前门店', '当前省份', '收件人', '收件人手机', '收件地址', '派件时间', '派件门店', '派件省份', '派件快递员', '异常编码', '异常描述', '备注'];
 const DETAIL_WIDTHS = [12, 18, 20, 10, 12, 14, 10, 18, 12, 12, 16, 30, 20, 18, 12, 14, 12, 20, 22];
-function displayType(type) { return ({ SHOPEECN: 'SHOPEE CN', SHOPEEVN: 'SHOPEE VN' })[type] || type; }
+function displayType(type) { return ({ SHOPEECN: '中国虾皮', SHOPEEVN: '越南虾皮' })[type] || type; }
 function internalFormula(sheet, row, display) {
   const escaped = String(sheet).replaceAll("'", "''");
   const shown = typeof display === 'number' ? String(display) : `"${String(display ?? '').replaceAll('"', '""')}"`;
@@ -99,7 +99,7 @@ function createDashboard(workbook, type, range, stats, anchors) {
     mr++;
   }
   const noteRow = mr + 1; sheet.mergeCells(noteRow, 1, noteRow, 16);
-  sheet.getCell(noteRow, 1).value = `派次口径：优先使用轨迹状态码70“开始派送”的不同日期；没有70时使用状态码60“派件分配”的不同日期；再使用POD锁定派次/历史派次。禁止用“日报日期→POD日期”直接猜1/2/3派。平均签收天数：首次真实派送日期（无轨迹时用首次日报日期）→实际POD/派件时间，包含首尾自然日。未识别派次 ${o.attemptUnknown} 票。`;
+  sheet.getCell(noteRow, 1).value = `派次口径：优先使用轨迹状态码70“开始派送”的不同日期；没有70时使用状态码60“派件分配”的不同日期；再使用POD锁定派次/历史派次。禁止用“日报日期→POD日期”直接猜1/2/3派。平均签收天数：日报归属日期→实际POD/派件时间，包含首尾自然日，与参考样板同口径。未识别派次 ${o.attemptUnknown} 票。`;
   sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=34;
   sheet.commit();
 }
