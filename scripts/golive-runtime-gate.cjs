@@ -23,19 +23,17 @@ const historyRefreshUi = read('public/v183-history-refresh.js');
 const refreshedExporter = read('src/v183ShopeeRefreshedPeriodExporter.js');
 const streamedExporter = read('src/v185ShopeeCurrentStateStreamExporter.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
+const allBusinessChild = read('src/v84ExportBusinessWorker.js');
 const parityExporter = read('src/v197UnifiedParityExporter.js');
 const strictParityExporter = read('src/v198UnifiedParityExporter.js');
+const dashboardExporter = read('src/v199UnifiedDashboardExporter.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 const exportDirect = read('src/v190ExportDirectEndpointPatch.js');
 const exportSidecar = read('src/v193ExportSidecar.js');
 const exportPreflight = read('src/v142AsyncExportPreflightPatch.js');
 
-const must = (source, token) => {
-  if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`);
-};
-const forbid = (source, token) => {
-  if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`);
-};
+const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
+const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
 
 must(runner, '2026-08-17-v165-seven-business-stage-verification-v2');
 must(runner, "{ key: 'CCSL'");
@@ -104,35 +102,40 @@ must(historyRefreshUi, 'automatic summary reads disabled');
 must(refreshedExporter, '2026-08-17-v183-shopee-current-status-overlay-export-v1');
 must(streamedExporter, '2026-08-17-v185-shopee-current-state-stream-export-v1');
 must(streamedExporter, 'shipment_current_state');
+
 must(singleExportWorker, '2026-08-17-v191-single-business-truth-worker-v1');
-must(singleExportWorker, '2026-08-18-v197-unified-parity-worker-v1');
-must(singleExportWorker, '2026-08-18-v198-strict-parity-worker-v1');
-must(singleExportWorker, 'createShopeeTruthWorkbook');
-must(singleExportWorker, 'createUnifiedParityWorkbook');
-must(singleExportWorker, 'createStrictUnifiedParityWorkbook');
-must(singleExportWorker, 'V197_UNIFIED_1TO1_PARITY_20_SHEETS');
-must(singleExportWorker, 'V198_UNIFIED_1TO1_STRICT_PARITY_22_SHEETS');
-must(singleExportWorker, 'strictPodTime:true');
-must(singleExportWorker, 'crossDayTruth: true');
-must(singleExportWorker, 'onePassStreaming: true');
-must(singleExportWorker, 'LEGACY_10_SHEETS_V191_TRUTH');
+must(singleExportWorker, '2026-08-18-v199-dashboard-attempt-average-worker-v1');
+must(singleExportWorker, 'createV199UnifiedDashboardWorkbook');
+must(singleExportWorker, 'V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS');
+must(singleExportWorker, 'dashboardAttemptOnly:true');
+must(singleExportWorker, 'crossDayTruth:true');
+must(singleExportWorker, 'onePassStreaming:true');
 must(singleExportWorker, 'CE_QC_EXPORT_JOB_UPDATE');
 must(singleExportWorker, 'process.send');
+
+must(allBusinessChild, '2026-08-18-v199-all-business-dashboard-child-v1');
+must(allBusinessChild, 'createV199UnifiedDashboardWorkbook');
+must(allBusinessChild, 'V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS');
+
 must(parityExporter, '2026-08-18-v197-unified-parity-dashboard-v1');
 must(parityExporter, 'assertParityReconciliation');
 must(strictParityExporter, '2026-08-18-v198-strict-pod-parity-dashboard-v1');
-must(strictParityExporter, "attemptBasis:'首次日报日期→真实POD日期自然日（同日=1派、次日=2派、第3天及以后=3派+）'");
-must(strictParityExporter, "'金边1派'");
-must(strictParityExporter, "'外省1派'");
-must(strictParityExporter, "'1派明细'");
-must(strictParityExporter, "'2派明细'");
-must(strictParityExporter, "'3派+明细'");
 must(strictParityExporter, 'assertStrictParityReconciliation');
-must(strictParityExporter, 'POD锁 > 显式POD时间 > 扫描终态POD时间 > POD终态轨迹');
-must(strictParityExporter, '不拿普通“派件时间/最新事件时间”冒充POD时间');
-must(strictParityExporter, "workbook.addWorksheet('99_一致性校验'");
-must(strictParityExporter, "workbook.addWorksheet('数据口径'");
-must(strictParityExporter, '门店是当前位置维度，不从PP/PV剔除');
+
+must(dashboardExporter, '2026-08-18-v199-dashboard-attempt-average-v1');
+must(dashboardExporter, 'resolveAttemptForV199');
+must(dashboardExporter, '分析结果派次');
+must(dashboardExporter, '轨迹派送日期');
+must(dashboardExporter, '日报日期→POD日期兜底');
+must(dashboardExporter, '首次观察POD日报日期');
+must(dashboardExporter, '金边平均天数');
+must(dashboardExporter, '外省平均天数');
+must(dashboardExporter, '1/2/3派只在看板统计，不再创建独立派次明细Sheet');
+must(dashboardExporter, "outputContract:'V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS'");
+forbid(dashboardExporter, "'1派明细':");
+forbid(dashboardExporter, "'2派明细':");
+forbid(dashboardExporter, "'3派+明细':");
+
 must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(exportDirect, '2026-08-18-v192-direct-export-early-route-v1');
@@ -152,8 +155,6 @@ must(exportSidecar, 'MEMORY_IPC');
 must(exportPreflight, "import './v190ExportDirectEndpointPatch.js';");
 must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
-for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) {
-  forbid(source, 'v148-direct-daily-runner-v1');
-}
+for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V198 owns every single-business export, accepts only strict POD terminal time evidence for delivery days and 1/2/3 dispatch, reconciles PP/PV and detail totals, and keeps V195 IPC/XHR sidecar progress isolation');
+console.log('[GOLIVE] runtime-source gate passed; V199 keeps 1/2/3 dispatch as dashboard metrics only, calculates PP/PV average delivery days with authoritative POD evidence plus first-observed-POD fallback, prefers analyzed/track attempt evidence before date fallback, and applies the same exporter to single and ALL-business output');
