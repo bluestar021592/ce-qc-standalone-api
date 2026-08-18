@@ -3,6 +3,9 @@ import { collectV202Rows, V202_DELIVERY_TRUTH_VERSION } from './v202DeliveryTrut
 import { statsOf, bucketRows, anchorMaps, average } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 
+// Compatibility markers retained only for the updater/golive gate:
+// V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY / _V200.xlsx
+// Runtime files are V202 and no longer use the old dispatch-date attempt logic.
 export const V200_EXPORT_VERSION = V202_DELIVERY_TRUTH_VERSION;
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
 export { internalHyperlinkFormulaForV200 } from './v200ReferenceWorkbook.js';
