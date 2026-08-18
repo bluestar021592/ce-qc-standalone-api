@@ -17,7 +17,7 @@ function dateKey(value = '') {
   const m = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);
   return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
 }
-function inclusiveDays(from, to) {
+export function trackerNaturalDays(from, to) {
   const a = dateKey(from), b = dateKey(to);
   if (!a || !b || b < a) return 0;
   return Math.floor((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000) + 1;
@@ -90,11 +90,22 @@ function listFromText(value = '') {
 }
 function bestPod(current = {}, incoming = {}) {
   const candidates = [current, incoming].filter(item => dateKey(item?.podTime || item?.podDate));
-  if (!candidates.length) return { podStatus: 0, podTime: '', podDate: '', podSource: '' };
-  candidates.sort((a, b) => Number(a.priority || 99) - Number(b.priority || 99) || String(a.podTime || a.podDate).localeCompare(String(b.podTime || b.podDate)));
+  if (!candidates.length) return { podStatus: 0, podTime: '', podDate: '', podSource: '', priority: 99 };
+  candidates.sort((a, b) => Number(a.priority ?? 99) - Number(b.priority ?? 99) || String(a.podTime || a.podDate).localeCompare(String(b.podTime || b.podDate)));
   const best = candidates[0];
   const time = String(best.podTime || best.podDate || '');
-  return { podStatus: 1, podTime: time, podDate: dateKey(time), podSource: String(best.podSource || '') };
+  return { podStatus: 1, podTime: time, podDate: dateKey(time), podSource: String(best.podSource || ''), priority: Number(best.priority ?? 99) };
+}
+
+export function resolveTrackedShopeeAttempt({ dispatchDates = [], assignDates = [], podDate = '', fallbackAttempt = 0 } = {}) {
+  const cutoff = dateKey(podDate) || '9999-12-31';
+  const delivery = mergeDates(dispatchDates).filter(d => d <= cutoff);
+  const assign = mergeDates(assignDates).filter(d => d <= cutoff);
+  if (delivery.length) return { attemptNo: Math.min(3, delivery.length), attemptSource: '日报W/Y+轨迹70真实派送日期', firstDispatchDate: delivery[0], dispatchDates: delivery, assignDates: assign };
+  if (assign.length) return { attemptNo: Math.min(3, assign.length), attemptSource: '轨迹60派件分配日期', firstDispatchDate: assign[0], dispatchDates: delivery, assignDates: assign };
+  const fallback = positiveAttempt(fallbackAttempt);
+  if (fallback >= 2) return { attemptNo: fallback, attemptSource: '历史明确派次>=2兜底', firstDispatchDate: '', dispatchDates: delivery, assignDates: assign };
+  return { attemptNo: 0, attemptSource: '无真实派次证据', firstDispatchDate: '', dispatchDates: delivery, assignDates: assign };
 }
 
 export function ensureShopeeDeliveryTrackingSchema(db = getDb()) {
@@ -197,10 +208,8 @@ function seedMembership(db, fromDate, toDate, businessTypes) {
       const status = get(['状态标识','状态代码','status','statuscode']).toUpperCase();
       const desc = get(['状态说明','状态描述','statusdesc','statusdescription','statusname']);
       const deliveryTime = get(['派件时间','签收时间','POD时间','deliverytime','podtime','deliveredat']);
-      // W/Y are both JT dispatch-state evidence in the daily report. They are persisted
-      // as real observed dispatch dates; they are not treated as POD by themselves.
       if (status === 'W' || status === 'Y' || DELIVERY_RE.test(desc) || ASSIGN_RE.test(desc)) entry.dailyDispatchDates.add(batch.reportDate);
-      if (POD_RE.test(desc) && dateKey(deliveryTime)) entry.pod = { podStatus: 1, podTime: deliveryTime, podDate: dateKey(deliveryTime), podSource: '日报POD/签收时间', priority: 4 };
+      if (POD_RE.test(desc) && dateKey(deliveryTime)) entry.pod = bestPod(entry.pod, { podStatus: 1, podTime: deliveryTime, podDate: dateKey(deliveryTime), podSource: '日报POD/签收时间', priority: 4 });
     }
   }
   return { map, batches };
@@ -249,6 +258,7 @@ function enrichTrackEvidence(db, map, passedEvents = []) {
     const events = [...(byBillDb.get(entry.shipmentCode) || []), ...(byBillPassed.get(entry.shipmentCode) || [])];
     for (const row of events) {
       const time = eventTime(row), d = dateKey(time), text = eventText(row);
+      if (d && d < entry.firstReportDate) continue;
       if (d && isDeliveryEvent(row) && !CYCLE_RE.test(text)) entry.trackDispatchDates.add(d);
       if (d && isAssignEvent(row) && !CYCLE_RE.test(text)) entry.assignDates.add(d);
       if (isPodEvent(row) && d) entry.pod = bestPod(entry.pod, { podStatus: 1, podTime: time, podDate: d, podSource: '轨迹80/POD节点', priority: 1 });
@@ -259,68 +269,65 @@ function enrichTrackEvidence(db, map, passedEvents = []) {
 
 function enrichPodLocks(db, map) {
   const bills = [...new Set([...map.values()].map(entry => entry.shipmentCode))];
+  const entriesByBill = new Map();
+  for (const entry of map.values()) {
+    if (!entriesByBill.has(entry.shipmentCode)) entriesByBill.set(entry.shipmentCode, []);
+    entriesByBill.get(entry.shipmentCode).push(entry);
+  }
   for (const chunk of chunks(bills, 400)) {
     const marks = chunk.map(() => '?').join(','); if (!marks) continue;
     let rows = [];
     try { rows = db.prepare(`SELECT businessType,shipmentCode,podTime,source FROM business_pod_locks WHERE shipmentCode IN (${marks})`).all(...chunk); } catch {}
     for (const row of rows) {
       const code = billOf(row.shipmentCode), bt = String(row.businessType || '').toUpperCase();
-      for (const entry of map.values()) {
-        if (entry.shipmentCode !== code) continue;
+      for (const entry of entriesByBill.get(code) || []) {
         if (bt && ![entry.businessType, 'SHOPEE'].includes(bt)) continue;
-        if (dateKey(row.podTime)) entry.pod = bestPod(entry.pod, { podStatus: 1, podTime: row.podTime, podDate: dateKey(row.podTime), podSource: `POD锁:${row.source || ''}`, priority: 1 });
+        if (dateKey(row.podTime) && dateKey(row.podTime) >= entry.firstReportDate) entry.pod = bestPod(entry.pod, { podStatus: 1, podTime: row.podTime, podDate: dateKey(row.podTime), podSource: `POD锁:${row.source || ''}`, priority: 1 });
       }
     }
   }
 }
 
 function enrichAnalysisRows(map, rows = []) {
-  const byBill = new Map([...map.values()].map(entry => [entry.shipmentCode, entry]));
+  const byBill = new Map();
+  for (const entry of map.values()) {
+    if (!byBill.has(entry.shipmentCode)) byBill.set(entry.shipmentCode, []);
+    byBill.get(entry.shipmentCode).push(entry);
+  }
   for (const row of rows || []) {
-    const entry = byBill.get(billOf(row.shipmentCode || row.运单号));
-    if (!entry) continue;
-    entry.regionCode = entry.regionCode || String(firstValue(row, ['regionCode','区域','区域分类']) || '');
-    entry.recipientProvince = entry.recipientProvince || String(firstValue(row, ['recipientProvince','收件省份','province']) || '');
-    entry.lastState = String(firstValue(row, ['currentState','scanNormalizedState','primaryCategory','主分类','异常分类']) || entry.lastState || '');
-    entry.fallbackAttempt = Math.max(entry.fallbackAttempt, positiveAttempt(row.podAttemptNo, Number(row.currentAttemptNo) >= 2 ? row.currentAttemptNo : 0, Number(row.派次) >= 2 ? row.派次 : 0));
-    for (const d of listFromText(firstValue(row, ['派件中日期','deliveryDates']))) entry.trackDispatchDates.add(d);
-    for (const d of listFromText(firstValue(row, ['派件分配日期','assignDates']))) entry.assignDates.add(d);
-    const podLike = Number(row.isPod || 0) === 1 || row.是否POD === '是' || String(row.orderStatus || '') === '85' || String(row.currentState || '').toUpperCase() === 'POD';
-    const podTime = String(firstValue(row, ['POD时间','podTime','podClosedAt','deliveredAt','latestEventTime','最后节点时间']) || '');
-    const latestDesc = String(firstValue(row, ['latestEventDesc','最后节点','QC判断']) || '');
-    if (podLike && dateKey(podTime) && (firstValue(row, ['POD时间','podTime','podClosedAt','deliveredAt']) || POD_RE.test(latestDesc))) {
-      entry.pod = bestPod(entry.pod, { podStatus: 1, podTime, podDate: dateKey(podTime), podSource: '分析结果POD时间', priority: 2 });
+    const candidates = byBill.get(billOf(row.shipmentCode || row.运单号)) || [];
+    for (const entry of candidates) {
+      entry.regionCode = entry.regionCode || String(firstValue(row, ['regionCode','区域','区域分类']) || '');
+      entry.recipientProvince = entry.recipientProvince || String(firstValue(row, ['recipientProvince','收件省份','province']) || '');
+      entry.lastState = String(firstValue(row, ['currentState','scanNormalizedState','primaryCategory','主分类','异常分类']) || entry.lastState || '');
+      entry.fallbackAttempt = Math.max(entry.fallbackAttempt, positiveAttempt(row.podAttemptNo, Number(row.currentAttemptNo) >= 2 ? row.currentAttemptNo : 0, Number(row.派次) >= 2 ? row.派次 : 0));
+      for (const d of listFromText(firstValue(row, ['派件中日期','deliveryDates']))) if (d >= entry.firstReportDate) entry.trackDispatchDates.add(d);
+      for (const d of listFromText(firstValue(row, ['派件分配日期','assignDates']))) if (d >= entry.firstReportDate) entry.assignDates.add(d);
+      const podLike = Number(row.isPod || 0) === 1 || row.是否POD === '是' || String(row.orderStatus || '') === '85' || String(row.currentState || '').toUpperCase() === 'POD';
+      const podTime = String(firstValue(row, ['POD时间','podTime','podClosedAt','deliveredAt','latestEventTime','最后节点时间']) || '');
+      const latestDesc = String(firstValue(row, ['latestEventDesc','最后节点','QC判断']) || '');
+      if (podLike && dateKey(podTime) >= entry.firstReportDate && (firstValue(row, ['POD时间','podTime','podClosedAt','deliveredAt']) || POD_RE.test(latestDesc))) {
+        entry.pod = bestPod(entry.pod, { podStatus: 1, podTime, podDate: dateKey(podTime), podSource: '分析结果POD时间', priority: 2 });
+      }
+      entry.evidence.add('分析结果');
     }
-    entry.evidence.add('分析结果');
   }
 }
 
 function finalizeEntry(entry) {
-  const deliveryDates = mergeDates([...entry.dailyDispatchDates], [...entry.trackDispatchDates]);
-  const assignDates = mergeDates([...entry.assignDates]);
-  const cutoff = entry.pod.podDate || '9999-12-31';
-  const beforePodDelivery = deliveryDates.filter(d => d <= cutoff);
-  const beforePodAssign = assignDates.filter(d => d <= cutoff);
-  let attemptNo = 0, attemptSource = '';
-  if (beforePodDelivery.length) { attemptNo = Math.min(3, beforePodDelivery.length); attemptSource = '日报W/Y+轨迹70真实派送日期'; }
-  else if (beforePodAssign.length) { attemptNo = Math.min(3, beforePodAssign.length); attemptSource = '轨迹60派件分配日期'; }
-  else if (entry.fallbackAttempt >= 2) { attemptNo = Math.min(3, entry.fallbackAttempt); attemptSource = '历史明确派次>=2兜底'; }
-  const firstDispatchDate = beforePodDelivery[0] || beforePodAssign[0] || '';
+  const resolved = resolveTrackedShopeeAttempt({
+    dispatchDates: mergeDates([...entry.dailyDispatchDates], [...entry.trackDispatchDates]),
+    assignDates: [...entry.assignDates], podDate: entry.pod.podDate, fallbackAttempt: entry.fallbackAttempt
+  });
   const podDate = entry.pod.podDate || '';
   return {
     ...entry,
     area: regionArea(entry.regionCode, entry.recipientProvince),
-    dispatchDates: deliveryDates,
-    assignDates,
-    firstDispatchDate,
-    attemptNo,
-    attemptSource: entry.pod.podStatus ? attemptSource : attemptSource,
-    podStatus: entry.pod.podStatus ? 1 : 0,
-    podTime: entry.pod.podTime || '',
-    podDate,
-    podSource: entry.pod.podSource || '',
-    signNaturalDays: podDate ? inclusiveDays(entry.firstReportDate, podDate) : 0,
-    dispatchToPodDays: podDate && firstDispatchDate ? inclusiveDays(firstDispatchDate, podDate) : 0
+    dispatchDates: resolved.dispatchDates, assignDates: resolved.assignDates,
+    firstDispatchDate: resolved.firstDispatchDate, attemptNo: resolved.attemptNo, attemptSource: resolved.attemptSource,
+    podStatus: entry.pod.podStatus ? 1 : 0, podTime: entry.pod.podTime || '', podDate, podSource: entry.pod.podSource || '',
+    signNaturalDays: podDate ? trackerNaturalDays(entry.firstReportDate, podDate) : 0,
+    dispatchToPodDays: podDate && resolved.firstDispatchDate ? trackerNaturalDays(resolved.firstDispatchDate, podDate) : 0
   };
 }
 
@@ -333,17 +340,10 @@ function persistFacts(db, facts, { reportDate = '', snapshotId = '', reason = ''
       signNaturalDays,dispatchToPodDays,lastState,sourceSnapshotId,evidenceJson,trackerVersion,createdAt,updatedAt)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
-      firstReportDate=CASE WHEN excluded.firstReportDate<tracking.firstReportDate THEN excluded.firstReportDate ELSE tracking.firstReportDate END,
-      lastReportDate=CASE WHEN excluded.lastReportDate>tracking.lastReportDate THEN excluded.lastReportDate ELSE tracking.lastReportDate END,
-      regionCode=COALESCE(NULLIF(excluded.regionCode,''),tracking.regionCode),recipientProvince=COALESCE(NULLIF(excluded.recipientProvince,''),tracking.recipientProvince),area=COALESCE(NULLIF(excluded.area,''),tracking.area),
-      dispatchDatesJson=excluded.dispatchDatesJson,assignDatesJson=excluded.assignDatesJson,firstDispatchDate=excluded.firstDispatchDate,
-      attemptNo=excluded.attemptNo,attemptSource=excluded.attemptSource,podStatus=excluded.podStatus,podTime=excluded.podTime,podDate=excluded.podDate,podSource=excluded.podSource,
-      signNaturalDays=excluded.signNaturalDays,dispatchToPodDays=excluded.dispatchToPodDays,lastState=excluded.lastState,sourceSnapshotId=excluded.sourceSnapshotId,evidenceJson=excluded.evidenceJson,trackerVersion=excluded.trackerVersion,updatedAt=excluded.updatedAt`);
-  // SQLite table aliases are not accepted in the ON CONFLICT target on older builds;
-  // use a second prepared statement if the fast upsert syntax is unavailable.
-  const fallback = db.prepare(`INSERT OR REPLACE INTO shopee_delivery_tracking(
-      businessType,shipmentCode,firstReportDate,lastReportDate,regionCode,recipientProvince,area,dispatchDatesJson,assignDatesJson,firstDispatchDate,attemptNo,attemptSource,podStatus,podTime,podDate,podSource,signNaturalDays,dispatchToPodDays,lastState,sourceSnapshotId,evidenceJson,trackerVersion,createdAt,updatedAt)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      firstReportDate=excluded.firstReportDate,lastReportDate=excluded.lastReportDate,regionCode=excluded.regionCode,recipientProvince=excluded.recipientProvince,area=excluded.area,
+      dispatchDatesJson=excluded.dispatchDatesJson,assignDatesJson=excluded.assignDatesJson,firstDispatchDate=excluded.firstDispatchDate,attemptNo=excluded.attemptNo,attemptSource=excluded.attemptSource,
+      podStatus=excluded.podStatus,podTime=excluded.podTime,podDate=excluded.podDate,podSource=excluded.podSource,signNaturalDays=excluded.signNaturalDays,dispatchToPodDays=excluded.dispatchToPodDays,
+      lastState=excluded.lastState,sourceSnapshotId=excluded.sourceSnapshotId,evidenceJson=excluded.evidenceJson,trackerVersion=excluded.trackerVersion,updatedAt=excluded.updatedAt`);
   const daily = db.prepare(`INSERT INTO shopee_delivery_tracking_daily(businessType,reportDate,shipmentCode,attemptNo,firstDispatchDate,dispatchDatesJson,podStatus,podTime,podDate,signNaturalDays,regionCode,area,sourceSnapshotId,evidenceJson,trackerVersion,createdAt,updatedAt)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(businessType,reportDate,shipmentCode) DO UPDATE SET attemptNo=excluded.attemptNo,firstDispatchDate=excluded.firstDispatchDate,dispatchDatesJson=excluded.dispatchDatesJson,podStatus=excluded.podStatus,podTime=excluded.podTime,podDate=excluded.podDate,signNaturalDays=excluded.signNaturalDays,regionCode=excluded.regionCode,area=excluded.area,sourceSnapshotId=excluded.sourceSnapshotId,evidenceJson=excluded.evidenceJson,trackerVersion=excluded.trackerVersion,updatedAt=excluded.updatedAt`);
@@ -351,8 +351,7 @@ function persistFacts(db, facts, { reportDate = '', snapshotId = '', reason = ''
   try {
     for (const fact of facts) {
       const evidenceJson = JSON.stringify({ sources: [...fact.evidence], reason, dispatchDates: fact.dispatchDates, assignDates: fact.assignDates, podSource: fact.podSource });
-      const values = [fact.businessType,fact.shipmentCode,fact.firstReportDate,fact.lastReportDate,fact.regionCode||'',fact.recipientProvince||'',fact.area||'',JSON.stringify(fact.dispatchDates),JSON.stringify(fact.assignDates),fact.firstDispatchDate||'',fact.attemptNo||0,fact.attemptSource||'',fact.podStatus||0,fact.podTime||'',fact.podDate||'',fact.podSource||'',fact.signNaturalDays||0,fact.dispatchToPodDays||0,fact.lastState||'',snapshotId||fact.sourceSnapshotId||'',evidenceJson,SHOPEE_DELIVERY_TRACKER_VERSION,now,now];
-      try { upsert.run(...values); } catch { fallback.run(...values); }
+      upsert.run(fact.businessType,fact.shipmentCode,fact.firstReportDate,fact.lastReportDate,fact.regionCode||'',fact.recipientProvince||'',fact.area||'',JSON.stringify(fact.dispatchDates),JSON.stringify(fact.assignDates),fact.firstDispatchDate||'',fact.attemptNo||0,fact.attemptSource||'',fact.podStatus||0,fact.podTime||'',fact.podDate||'',fact.podSource||'',fact.signNaturalDays||0,fact.dispatchToPodDays||0,fact.lastState||'',snapshotId||fact.sourceSnapshotId||'',evidenceJson,SHOPEE_DELIVERY_TRACKER_VERSION,now,now);
       const observedDate = dateKey(reportDate || fact.lastReportDate || fact.firstReportDate);
       if (observedDate) daily.run(fact.businessType,observedDate,fact.shipmentCode,fact.attemptNo||0,fact.firstDispatchDate||'',JSON.stringify(fact.dispatchDates),fact.podStatus||0,fact.podTime||'',fact.podDate||'',fact.signNaturalDays||0,fact.regionCode||'',fact.area||'',snapshotId||fact.sourceSnapshotId||'',evidenceJson,SHOPEE_DELIVERY_TRACKER_VERSION,now,now);
     }
@@ -397,20 +396,24 @@ export function observeShopeeCarryRefreshRows(rows = [], { db = getDb(), reportD
   ensureShopeeDeliveryTrackingSchema(db);
   const bills = [...new Set((rows || []).map(row => billOf(row.shipmentCode || row.运单号)).filter(Boolean))];
   if (!bills.length) return { ok: true, tracked: 0 };
-  const existing = new Map();
+  const existingByBill = new Map();
   for (const chunk of chunks(bills, 300)) {
     const marks = chunk.map(() => '?').join(',');
-    for (const row of db.prepare(`SELECT * FROM shopee_delivery_tracking WHERE shipmentCode IN (${marks})`).all(...chunk)) existing.set(`${row.businessType}|${row.shipmentCode}`, row);
+    for (const row of db.prepare(`SELECT * FROM shopee_delivery_tracking WHERE shipmentCode IN (${marks})`).all(...chunk)) {
+      if (!existingByBill.has(row.shipmentCode)) existingByBill.set(row.shipmentCode, []);
+      existingByBill.get(row.shipmentCode).push(row);
+    }
   }
   const map = new Map();
   for (const row of rows) {
     const code = billOf(row.shipmentCode || row.运单号); if (!code) continue;
-    const known = [...existing.entries()].find(([key]) => key.endsWith(`|${code}`));
-    const businessType = SHOPEE_TYPES.has(String(row.businessType || '').toUpperCase()) ? String(row.businessType).toUpperCase() : known?.[1]?.businessType;
-    if (!businessType) continue;
-    const old = known?.[1] || {};
+    const candidates = existingByBill.get(code) || [];
+    const explicitType = String(row.businessType || '').toUpperCase();
+    const old = candidates.find(item => item.businessType === explicitType) || candidates[0];
+    const businessType = SHOPEE_TYPES.has(explicitType) ? explicitType : old?.businessType;
+    if (!businessType || !old) continue;
     const entry = {
-      businessType, shipmentCode: code, firstReportDate: old.firstReportDate || dateKey(row.sourceReportDate || row.reportDate || reportDate), lastReportDate: dateKey(reportDate || row.reportDate) || old.lastReportDate || '',
+      businessType, shipmentCode: code, firstReportDate: old.firstReportDate, lastReportDate: dateKey(reportDate || row.reportDate) || old.lastReportDate,
       regionCode: row.regionCode || old.regionCode || '', recipientProvince: row.recipientProvince || old.recipientProvince || '',
       dailyDispatchDates: new Set(listFromJson(old.dispatchDatesJson)), trackDispatchDates: new Set(), assignDates: new Set(listFromJson(old.assignDatesJson)),
       pod: { podStatus: Number(old.podStatus || 0), podTime: old.podTime || '', podDate: old.podDate || '', podSource: old.podSource || '', priority: old.podStatus ? 3 : 99 },
