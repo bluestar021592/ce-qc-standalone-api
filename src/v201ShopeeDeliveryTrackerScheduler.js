@@ -1,4 +1,5 @@
 import { getDb, nowIso } from './db.js';
+import { CEClient } from './ceClient.js';
 import {
   ensureShopeeDeliveryTrackingSchema,
   SHOPEE_DELIVERY_TRACKER_VERSION,
@@ -9,6 +10,8 @@ export const V201_TRACKER_SCHEDULER_VERSION = '2026-08-18-v201-shopee-delivery-t
 const INTERVAL_MS = Math.max(30 * 60_000, Number(process.env.SHOPEE_DELIVERY_TRACKER_INTERVAL_MS || 2 * 60 * 60_000));
 const STARTUP_DELAY_MS = Math.max(60_000, Number(process.env.SHOPEE_DELIVERY_TRACKER_STARTUP_DELAY_MS || 180_000));
 const BACKFILL_DAYS = Math.max(30, Math.min(365, Number(process.env.SHOPEE_DELIVERY_TRACKER_BACKFILL_DAYS || 120)));
+const CE_HISTORY_BATCH = Math.max(50, Math.min(300, Number(process.env.SHOPEE_DELIVERY_HISTORY_BATCH || 200)));
+const CE_HISTORY_MAX_BILLS = Math.max(0, Math.min(3000, Number(process.env.SHOPEE_DELIVERY_HISTORY_MAX_BILLS || 1200)));
 let timer = null;
 let startupTimer = null;
 let inFlight = false;
@@ -26,6 +29,11 @@ function dateMinusDays(date, days) {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - Math.max(0, Number(days || 0)));
   return d.toISOString().slice(0, 10);
+}
+function chunks(values = [], size = CE_HISTORY_BATCH) {
+  const out = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
 }
 function latestCompletedRange(db) {
   let latest = '';
@@ -50,8 +58,35 @@ function carryAnalysisRows(db, range) {
     }));
   } catch { return []; }
 }
+function missingAttemptBills(db, range) {
+  if (!CE_HISTORY_MAX_BILLS) return [];
+  try {
+    return db.prepare(`SELECT businessType,shipmentCode FROM shopee_delivery_tracking
+      WHERE businessType IN ('SHOPEECN','SHOPEEVN') AND firstReportDate BETWEEN ? AND ? AND podStatus=1 AND attemptNo=0
+      ORDER BY firstReportDate,shipmentCode LIMIT ?`).all(range.from, range.to, CE_HISTORY_MAX_BILLS);
+  } catch { return []; }
+}
+async function fetchMissingAttemptHistory(db, range) {
+  const missing = missingAttemptBills(db, range);
+  if (!missing.length) return { requested: 0, events: [], batches: 0, failedBatches: 0 };
+  const client = new CEClient();
+  const events = [];
+  let batches = 0, failedBatches = 0;
+  for (const batch of chunks(missing.map(row => row.shipmentCode))) {
+    try {
+      const rows = await client.trackQuery(batch);
+      events.push(...(Array.isArray(rows) ? rows : []));
+      batches += 1;
+    } catch (error) {
+      failedBatches += 1;
+      console.warn('[CE-QC][V201_SHOPEE_TRACKER_HISTORY_BATCH_FAILED]', error?.message || error);
+      if (/登录|401|403|AUTH/i.test(String(error?.message || error))) break;
+    }
+  }
+  return { requested: missing.length, events, batches, failedBatches };
+}
 
-export function runShopeeDeliveryTrackerSync({ reason = 'SCHEDULED' } = {}) {
+export async function runShopeeDeliveryTrackerSync({ reason = 'SCHEDULED' } = {}) {
   if (inFlight) return { ok: true, skipped: true, reason: 'ALREADY_RUNNING' };
   inFlight = true;
   const db = getDb();
@@ -60,7 +95,7 @@ export function runShopeeDeliveryTrackerSync({ reason = 'SCHEDULED' } = {}) {
     const range = latestCompletedRange(db);
     if (!range) return { ok: true, skipped: true, reason: 'NO_SHOPEE_COMPLETED_SNAPSHOT' };
     const carryRows = carryAnalysisRows(db, range);
-    const result = syncShopeeDeliveryTrackingForRange({
+    let result = syncShopeeDeliveryTrackingForRange({
       db,
       fromDate: range.from,
       toDate: range.to,
@@ -68,10 +103,29 @@ export function runShopeeDeliveryTrackerSync({ reason = 'SCHEDULED' } = {}) {
       analysisRows: carryRows,
       reason: `${reason}:${range.mode}:CARRY_ROWS=${carryRows.length}`
     });
+
+    // Historical problem repair: older completed POD rows may never have had their
+    // dispatch trajectory persisted because terminal scan status skipped tracking.
+    // Only those POD rows whose attempt is still unknown are queried here. The CE
+    // history is then reduced into persistent 60/70/80 facts; export never has to
+    // call CE API to invent or recover an attempt.
+    const history = await fetchMissingAttemptHistory(db, range);
+    if (history.events.length) {
+      result = syncShopeeDeliveryTrackingForRange({
+        db,
+        fromDate: range.from,
+        toDate: range.to,
+        businessTypes: ['SHOPEECN','SHOPEEVN'],
+        analysisRows: carryRows,
+        events: history.events,
+        reason: `${reason}:${range.mode}:CE_HISTORY_BACKFILL=${history.requested}`
+      });
+    }
+
     setMeta(db, 'shopee_delivery_tracker_scheduler_last_at', nowIso());
-    setMeta(db, 'shopee_delivery_tracker_scheduler_last_result', JSON.stringify({ ...result, mode: range.mode, carryRows: carryRows.length }).slice(0, 4000));
-    console.log('[CE-QC][V201_SHOPEE_TRACKER]', JSON.stringify({ reason, mode: range.mode, from: range.from, to: range.to, carryRows: carryRows.length, tracked: result.tracked, pod: result.pod, a1: result.a1, a2: result.a2, a3: result.a3, unknown: result.attemptUnknown, validSignDays: result.validSignDays }));
-    return { ok: true, ...result, mode: range.mode, carryRows: carryRows.length };
+    setMeta(db, 'shopee_delivery_tracker_scheduler_last_result', JSON.stringify({ ...result, mode: range.mode, carryRows: carryRows.length, historyRequested: history.requested, historyEvents: history.events.length, historyBatches: history.batches, historyFailedBatches: history.failedBatches }).slice(0, 4000));
+    console.log('[CE-QC][V201_SHOPEE_TRACKER]', JSON.stringify({ reason, mode: range.mode, from: range.from, to: range.to, carryRows: carryRows.length, historyRequested: history.requested, historyEvents: history.events.length, historyFailedBatches: history.failedBatches, tracked: result.tracked, pod: result.pod, a1: result.a1, a2: result.a2, a3: result.a3, unknown: result.attemptUnknown, validSignDays: result.validSignDays }));
+    return { ok: true, ...result, mode: range.mode, carryRows: carryRows.length, historyRequested: history.requested, historyEvents: history.events.length, historyFailedBatches: history.failedBatches };
   } catch (error) {
     try { setMeta(db, 'shopee_delivery_tracker_scheduler_last_error', String(error?.message || error).slice(0, 2000)); } catch {}
     console.error('[CE-QC][V201_SHOPEE_TRACKER_FAILED]', error?.stack || error);
@@ -85,13 +139,13 @@ export function startShopeeDeliveryTrackerScheduler() {
   ensureShopeeDeliveryTrackingSchema(getDb());
   startupTimer = setTimeout(() => {
     startupTimer = null;
-    runShopeeDeliveryTrackerSync({ reason: 'STARTUP' });
+    runShopeeDeliveryTrackerSync({ reason: 'STARTUP' }).catch(error => console.error('[CE-QC][V201_SHOPEE_TRACKER_STARTUP]', error?.stack || error));
   }, STARTUP_DELAY_MS);
   startupTimer.unref?.();
-  timer = setInterval(() => runShopeeDeliveryTrackerSync({ reason: 'TWO_HOUR' }), INTERVAL_MS);
+  timer = setInterval(() => runShopeeDeliveryTrackerSync({ reason: 'TWO_HOUR' }).catch(error => console.error('[CE-QC][V201_SHOPEE_TRACKER_INTERVAL]', error?.stack || error)), INTERVAL_MS);
   timer.unref?.();
-  console.log(`[CE-QC][V201_SHOPEE_TRACKER] scheduler ready; startupDelay=${STARTUP_DELAY_MS}ms interval=${INTERVAL_MS}ms backfillDays=${BACKFILL_DAYS}`);
-  return { started: true, startupDelayMs: STARTUP_DELAY_MS, intervalMs: INTERVAL_MS, backfillDays: BACKFILL_DAYS };
+  console.log(`[CE-QC][V201_SHOPEE_TRACKER] scheduler ready; startupDelay=${STARTUP_DELAY_MS}ms interval=${INTERVAL_MS}ms backfillDays=${BACKFILL_DAYS} historyMaxBills=${CE_HISTORY_MAX_BILLS}`);
+  return { started: true, startupDelayMs: STARTUP_DELAY_MS, intervalMs: INTERVAL_MS, backfillDays: BACKFILL_DAYS, historyMaxBills: CE_HISTORY_MAX_BILLS };
 }
 
-export function shopeeDeliveryTrackerSchedulerState() { return { started: Boolean(timer || startupTimer), inFlight, intervalMs: INTERVAL_MS, startupDelayMs: STARTUP_DELAY_MS, version: V201_TRACKER_SCHEDULER_VERSION }; }
+export function shopeeDeliveryTrackerSchedulerState() { return { started: Boolean(timer || startupTimer), inFlight, intervalMs: INTERVAL_MS, startupDelayMs: STARTUP_DELAY_MS, historyMaxBills: CE_HISTORY_MAX_BILLS, version: V201_TRACKER_SCHEDULER_VERSION }; }
