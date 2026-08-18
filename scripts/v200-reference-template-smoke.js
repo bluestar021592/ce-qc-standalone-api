@@ -3,9 +3,10 @@ import { referenceAverageDays } from '../src/v200Metrics.js';
 
 function must(condition, message) { if (!condition) throw new Error(message); }
 
-must(resolveV200Attempt({ pod:true, deliveryDates:['2026-08-01','2026-08-02','2026-08-03'], currentAttemptNo:1, podDate:'2026-08-03' }).attemptNo === 3, 'real code70 delivery dates must win over flattened currentAttemptNo');
-must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:['2026-08-01','2026-08-02'], podDate:'2026-08-02' }).attemptNo === 2, 'code60 assign dates must provide attempt when code70 is absent');
+must(resolveV200Attempt({ pod:true, deliveryDates:['2026-08-01','2026-08-02','2026-08-03'], currentAttemptNo:1, podDate:'2026-08-03' }).attemptNo === 3, 'real delivery dates must win over flattened currentAttemptNo');
+must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:['2026-08-01','2026-08-02'], podDate:'2026-08-02' }).attemptNo === 2, 'code60 assign dates must provide attempt when code70/daily dispatch is absent');
 must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:[], podAttemptNo:2, podDate:'2026-08-02' }).attemptNo === 2, 'podAttemptNo fallback must remain available');
+must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:[], currentAttemptNo:1, podDate:'2026-08-04' }).attemptNo === 0, 'default currentAttemptNo=1 must not fabricate first-attempt success');
 must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:[], podDate:'2026-08-04' }).attemptNo === 0, 'elapsed days must not fabricate dispatch attempt');
 must(referenceAverageDays('2026-08-01','2026-08-01') === 1, 'reference same-day POD must equal one natural day');
 must(referenceAverageDays('2026-08-01','2026-08-04') === 4, 'reference average must use dashboard date to actual POD date inclusive');
