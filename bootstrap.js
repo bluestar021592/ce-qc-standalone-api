@@ -176,6 +176,7 @@ try {
   await importPhase('v94UnifiedImportDisplayTruthPatch', './src/v94UnifiedImportDisplayTruthPatch.js');
   await importPhase('v161UnifiedImportRuntimeTruthPatch', './src/v161UnifiedImportRuntimeTruthPatch.js');
   const v167Repair = await importPhase('v167CcslPodLockFactRepair', './src/v167CcslPodLockFactRepair.js');
+  const v201ShopeeTracker = await importPhase('v201ShopeeDeliveryTrackerScheduler', './src/v201ShopeeDeliveryTrackerScheduler.js');
 
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
@@ -184,6 +185,12 @@ try {
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
 
   await importServerInteractiveFirst();
+  try {
+    const trackerStart = v201ShopeeTracker.startShopeeDeliveryTrackerScheduler();
+    console.log(`[CE-QC][BOOT] V201 SHOPEE CN/VN persistent delivery tracker ${JSON.stringify(trackerStart)}`);
+  } catch (error) {
+    console.error('[CE-QC][BOOT] V201 SHOPEE delivery tracker start failed:', error?.stack || error);
+  }
   try {
     const startedAt = Date.now();
     const result = v167Repair.repairLatestCcslPodLockFacts();
