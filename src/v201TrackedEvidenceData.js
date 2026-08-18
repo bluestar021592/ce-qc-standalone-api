@@ -14,11 +14,24 @@ export async function collectV201TrackedRows(type, range, onProgress = () => {})
   const rows = await collectV200Rows(businessType, range, onProgress);
   if (!SHOPEE_TYPES.has(businessType) || !rows.length) return rows;
 
+  // V200 already reconciles POD from locks/current state/trajectory. Pass that
+  // confirmed fact back into the new persistent tracker with explicit field names
+  // so old rows that never stored a POD timestamp can be repaired permanently.
+  const trackerAnalysisRows = rows.map(row => ({
+    ...row,
+    isPod: row.pod ? 1 : Number(row.isPod || 0),
+    是否POD: row.pod ? '是' : (row.是否POD || '否'),
+    currentState: row.pod ? 'POD' : (row.currentState || ''),
+    POD时间: row.podTime || row.POD时间 || '',
+    podTime: row.podTime || row.podTime || '',
+    podAttemptNo: Number(row.podAttemptNo || 0),
+    currentAttemptNo: Number(row.currentAttemptNo || 0)
+  }));
   const sync = syncShopeeDeliveryTrackingForRange({
     fromDate: range.from,
     toDate: range.to,
     businessTypes: [businessType],
-    analysisRows: rows,
+    analysisRows: trackerAnalysisRows,
     reason: 'V201_EXPORT_BACKFILL_AND_READ'
   });
   const facts = loadShopeeDeliveryTrackingMap({ businessType, bills: rows.map(row => row.shipmentCode) });
@@ -43,10 +56,12 @@ export async function collectV201TrackedRows(type, range, onProgress = () => {})
     row.recipientProvince = fact.recipientProvince || row.recipientProvince || '';
     row.area = fact.area || row.area || '未识别';
     row.firstDispatchDate = fact.firstDispatchDate || row.firstDispatchDate || '';
-    row.attemptNo = trackedPod ? Number(fact.attemptNo || 0) : Number(row.attemptNo || fact.attemptNo || 0);
+    // Persistent real dispatch dates take priority even when an older export row
+    // carried a default/inferred attempt value.
+    row.attemptNo = Number(fact.attemptNo || row.attemptNo || 0);
     row.trackAttemptNo = Number(fact.attemptNo || 0);
     row.attemptSource = `V201持久追踪:${fact.attemptSource || '无真实派次证据'}`;
-    row.deliveryDays = trackedPod ? Number(fact.signNaturalDays || 0) : Number(row.deliveryDays || 0);
+    if ((trackedPod || row.pod) && Number(fact.signNaturalDays || 0) > 0) row.deliveryDays = Number(fact.signNaturalDays);
     row.dispatchToPodDays = Number(fact.dispatchToPodDays || 0);
     row.deliveryTrackingVersion = fact.trackerVersion || SHOPEE_DELIVERY_TRACKER_VERSION;
     row.deliveryTrackingSource = V201_TRACKING_SOURCE;
