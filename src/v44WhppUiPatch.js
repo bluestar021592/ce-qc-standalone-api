@@ -23,11 +23,12 @@ import './v183HistoricalStatusRefreshPatch.js';
 import './v202DisableLegacyTrackerPatch.js';
 import './v202CarryTrackingCenterPatch.js';
 import './v203ManualQueryPersistencePatch.js';
+import './v203PublicTunnelSupervisor.js';
 import './v203DashboardIntegrityPatch.js';
 
 // Retired runtime UI compatibility marker only: /v183-history-refresh.js?v=20260818-v192-1
 // v139-carry-manual-window and v183-history-refresh are superseded by the unified carry center.
-const PATCH_ID='2026-08-18-v203-manual-evidence-attempt-network-shell-v1';
+const PATCH_ID='2026-08-18-v203-manual-evidence-attempt-network-shell-v2';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs','/carryover-center']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
