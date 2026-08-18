@@ -49,5 +49,5 @@ const bucket=bucketRows(rows);
 must(bucket['未POD明细'].length===1 && bucket['未POD明细'][0].shipmentCode==='OPEN1','未POD明细 must exclude POD, returned and cancelled terminal rows');
 const stats=statsOf(rows,{from:'2026-08-01',to:'2026-08-01'}).overall;
 must(stats.notPod===1 && stats.returned===1 && stats.cancelled===1,'terminal and open-unPOD counts must be mutually exclusive');
-must(V202_DELIVERY_TRUTH_VERSION==='2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v1','unexpected V202 delivery truth version');
+must(V202_DELIVERY_TRUTH_VERSION==='2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v2','unexpected V202 delivery truth version');
 console.log('[V202] real delivery cycles, order-to-POD average and terminal exclusion smoke passed');
