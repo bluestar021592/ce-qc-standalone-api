@@ -1,11 +1,14 @@
 (function v203DashboardIntegrity(global){
   'use strict';
   if(global.__CE_QC_V203_DASHBOARD_INTEGRITY__)return;
-  global.__CE_QC_V203_DASHBOARD_INTEGRITY__='2026-08-18-v203-dashboard-integrity-ui-v1';
+  global.__CE_QC_V203_DASHBOARD_INTEGRITY__='2026-08-18-v204-dashboard-integrity-ui-v2';
 
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const LABELS={CE:'CE',CEAF:'CEAF空运',TBKH:'TBKH',ALI1688:'ALI1688',SHOPEECN:'SHOPEE CN',SHOPEEVN:'SHOPEE VN',WHPP:'WHPP本土'};
-  const RETIRED_TITLES=new Set(['实时状态分布','今日核心指标复核','盘点节点分布','收件省份 / 末端地点','收件省份/末端地点']);
+  const RETIRED_TITLES=new Set([
+    '实时状态分布','今日核心指标复核','盘点节点分布','收件省份 / 末端地点','收件省份/末端地点',
+    'SHOPEE 专项指标','派送概率分布（按派次）- 百分比','派送概率分布 (按派次) - 百分比','趋势图表','SHOPEE 1/2/3派成功率趋势','网络与访问'
+  ]);
   const q=(sel,root=document)=>root.querySelector(sel);
   const qa=(sel,root=document)=>[...root.querySelectorAll(sel)];
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -14,7 +17,7 @@
   function installStyle(){
     if(q('#v203IntegrityStyle'))return;
     const style=document.createElement('style');style.id='v203IntegrityStyle';style.textContent=`
-      .v203-retired-panel{display:none!important}.v203-attempt-panel{margin:14px 0}.v203-attempt-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}.v203-attempt-head h3{margin:0;color:#123f6b}.v203-attempt-head p{margin:5px 0 0;color:#7186a0;font-size:13px}.v203-attempt-grid{display:grid;grid-template-columns:repeat(7,minmax(130px,1fr));gap:10px}.v203-attempt-card{border:1px solid #dbe7f4;border-radius:10px;padding:12px;background:#fff}.v203-attempt-card small{display:block;color:#7186a0}.v203-attempt-card b{display:block;margin-top:5px;font-size:24px;color:#0d4f87}.v203-attempt-card span{display:block;margin-top:3px;color:#52708f;font-size:12px}.v203-attempt-rule{margin-top:10px;padding:9px 11px;border-radius:8px;background:#f4f8fd;color:#536f8f;font-size:12px;line-height:1.55}.v203-attempt-rule strong{color:#173f69}.v203-track-audit{margin-top:10px;border:1px solid #dce8f5;border-radius:8px;background:#f8fbff;padding:10px;color:#536f8f;font-size:12px;line-height:1.55}.v203-audit-table{overflow:auto;max-height:260px;margin-top:8px}.v203-audit-table table{width:100%;border-collapse:collapse;min-width:780px}.v203-audit-table th,.v203-audit-table td{padding:6px 8px;border-bottom:1px solid #e5edf6;text-align:left;white-space:nowrap}.v203-network{margin-top:14px}.v203-network-grid{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:10px}.v203-network-card{border:1px solid #dce8f5;border-radius:9px;padding:12px;background:#fff}.v203-network-card small{display:block;color:#7186a0}.v203-network-card b{display:block;margin-top:5px;color:#143f69;word-break:break-all}.v203-good{color:#238451!important}.v203-warn{color:#b86a00!important}.v203-bad{color:#b43c36!important}@media(max-width:1300px){.v203-attempt-grid{grid-template-columns:repeat(4,1fr)}.v203-network-grid{grid-template-columns:1fr}}`;
+      .v203-retired-panel{display:none!important}.v203-attempt-panel{margin:14px 0}.v203-attempt-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}.v203-attempt-head h3{margin:0;color:#123f6b}.v203-attempt-head p{margin:5px 0 0;color:#7186a0;font-size:13px}.v203-attempt-grid{display:grid;grid-template-columns:repeat(7,minmax(130px,1fr));gap:10px}.v203-attempt-card{border:1px solid #dbe7f4;border-radius:10px;padding:12px;background:#fff}.v203-attempt-card small{display:block;color:#7186a0}.v203-attempt-card b{display:block;margin-top:5px;font-size:24px;color:#0d4f87}.v203-attempt-card span{display:block;margin-top:3px;color:#52708f;font-size:12px}.v203-attempt-rule{margin-top:10px;padding:9px 11px;border-radius:8px;background:#f4f8fd;color:#536f8f;font-size:12px;line-height:1.55}.v203-attempt-rule strong{color:#173f69}.v203-track-audit{margin-top:10px;border:1px solid #dce8f5;border-radius:8px;background:#f8fbff;padding:10px;color:#536f8f;font-size:12px;line-height:1.55}.v203-audit-table{overflow:auto;max-height:260px;margin-top:8px}.v203-audit-table table{width:100%;border-collapse:collapse;min-width:780px}.v203-audit-table th,.v203-audit-table td{padding:6px 8px;border-bottom:1px solid #e5edf6;text-align:left;white-space:nowrap}.v203-network{margin-top:14px}.v203-network-grid{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:10px}.v203-network-card{border:1px solid #dce8f5;border-radius:9px;padding:12px;background:#fff}.v203-network-card small{display:block;color:#7186a0}.v203-network-card b{display:block;margin-top:5px;color:#143f69;word-break:break-all}.v203-network-card span{display:block;margin-top:5px;color:#607995;font-size:12px;line-height:1.45}.v203-good{color:#238451!important}.v203-warn{color:#b86a00!important}.v203-bad{color:#b43c36!important}@media(max-width:1300px){.v203-attempt-grid{grid-template-columns:repeat(4,1fr)}.v203-network-grid{grid-template-columns:1fr}}`;
     document.head.appendChild(style);
   }
   async function api(url,opts={}){
@@ -28,7 +31,7 @@
       const matched=[...RETIRED_TITLES].some(item=>title===item||title.startsWith(`${item} `));
       if(!matched)return;
       const panel=node.closest('article.pixel-panel,article.panel,section.panel,.pixel-panel,.dashboard-panel');
-      if(panel&&!panel.classList.contains('v203-attempt-panel'))panel.classList.add('v203-retired-panel');
+      if(panel&&!panel.classList.contains('v203-attempt-panel')&&panel.id!=='v203NetworkPanel')panel.classList.add('v203-retired-panel');
     });
   }
   function trackBusinessOptions(){return TYPES.map(type=>`<option value="${type}">${LABELS[type]}</option>`).join('');}
@@ -105,7 +108,11 @@
     if(arguments[0]!==true&&Date.now()-networkLoadedAt<30000)return;networkLoadedAt=Date.now();const body=q('#v203NetworkBody');
     try{
       const data=await api('/api/v203/network-access');const lan=data.bind||{},pub=data.public||{};const lanUrls=(lan.lanUrls||[]).join(' / ')||'未检测到局域网IPv4';
-      body.innerHTML=`<div class="v203-network-grid"><div class="v203-network-card"><small>本机访问</small><b class="v203-good">${esc(lan.localUrl||'—')}</b></div><div class="v203-network-card"><small>局域网访问</small><b class="${lan.lanEnabled?'v203-good':'v203-bad'}">${esc(lanUrls)}</b><span>${lan.lanEnabled?'已监听 0.0.0.0，可供同局域网电脑访问':'当前未开启局域网监听'}</span></div><div class="v203-network-card"><small>公网访问</small><b class="${pub.applicationReady?'v203-good':'v203-warn'}">${esc(pub.origin||pub.hostname||'尚未配置域名')}</b><span>${pub.applicationReady?'应用认证配置已就绪；仍需运行Tunnel/反向代理':'需要配置公网域名 + Cloudflare Access（或明确开启Direct）'}</span></div></div><div class="v203-attempt-rule"><strong>安全边界：</strong>${esc(pub.security||'')}<br><strong>说明：</strong>局域网只需要本机服务监听与Windows防火墙放行端口；公网还必须有Cloudflare Tunnel/反向代理实际把域名接到本机，代码不能凭空替代DNS和Tunnel授权。</div>`;
+      const publicLabel=pub.publicReady?'可访问':(pub.tunnelStatus==='STARTING'?'正在建立':'未就绪');
+      const mode=pub.tunnelMode==='QUICK'?'临时Quick Tunnel':(pub.tunnelMode==='NAMED'?'固定Named Tunnel':'未启动');
+      const publicText=pub.origin||pub.configuredOrigin||pub.hostname||'暂无公网地址';
+      const publicClass=pub.publicReady?'v203-good':(pub.tunnelStatus==='FAILED'?'v203-bad':'v203-warn');
+      body.innerHTML=`<div class="v203-network-grid"><div class="v203-network-card"><small>本机访问</small><b class="v203-good">${esc(lan.localUrl||'—')}</b><span>仅当前电脑</span></div><div class="v203-network-card"><small>局域网访问</small><b class="${lan.lanEnabled?'v203-good':'v203-bad'}">${esc(lanUrls)}</b><span>${lan.lanEnabled?'已监听 0.0.0.0，同Wi‑Fi/同局域网可直接进入':'当前未开启局域网监听'}</span></div><div class="v203-network-card"><small>不同网络 / 外地访问 · ${esc(mode)}</small><b class="${publicClass}">${esc(publicText)}</b><span>${esc(publicLabel)}${pub.quickTemporary?' · 临时地址，重启后可能变化':pub.publicReady?' · 固定域名入口':''}${pub.lastTunnelError?` · ${esc(pub.lastTunnelError)}`:''}</span></div></div><div class="v203-attempt-rule"><strong>访问逻辑：</strong>本机地址只给当前电脑；192.168.x.x 给同一局域网；https 公网地址给不同网络/外地访问。<br><strong>公网安全：</strong>${esc(pub.security||'')}</div>`;
     }catch(error){body.innerHTML=`<div class="v203-bad">网络状态读取失败：${esc(error.message)}</div>`;}
   }
   function hookRangeButtons(){
