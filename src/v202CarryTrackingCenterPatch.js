@@ -9,12 +9,13 @@ import {
 } from './carryoverRefreshScheduler.js';
 import { CEClient } from './ceClient.js';
 
-export const V202_CARRY_CENTER_VERSION = '2026-08-18-v202-seven-business-carry-tracking-center-v1';
+export const V202_CARRY_CENTER_VERSION = '2026-08-18-v202-seven-business-carry-tracking-center-v2';
 const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const TYPE_SET = new Set(TYPES);
 const JOBS = new Map();
 const ACTIVE = new Map();
 const JOB_TTL = 2 * 60 * 60_000;
+const WAIT_POLL_MS = Math.max(1000, Math.min(10000, Number(process.env.V202_CARRY_WAIT_POLL_MS || 2000)));
 const CANCEL_RE = /ORDER_CANCELLED|CANCELLED|CANCELED|订单取消|已取消|取消订单/i;
 const RETURN_RE = /RETURN(?:ED|_COMPLETED)?|退回完成|已退回|R退回|P4008/i;
 const POD_RE = /\bPOD\b|DELIVERED|签收|妥投|已妥投|4004/i;
@@ -56,7 +57,7 @@ function allRows(db=getDb()) {
 function parseSelection(input={}) {
   const businessType=normalizeType(input.businessType || 'ALL');
   if(!businessType) throw new Error('业务板块无效。');
-  let fromDate=dateKey(input.fromDate), toDate=dateKey(input.toDate);
+  const fromDate=dateKey(input.fromDate), toDate=dateKey(input.toDate);
   if(fromDate && toDate && fromDate>toDate) throw new Error('开始日期不能晚于结束日期。');
   const scope=String(input.scope||'OPEN').toUpperCase();
   if(!['OPEN','ALL','CLOSED','ANOMALY'].includes(scope)) throw new Error('筛选范围无效。');
@@ -112,22 +113,30 @@ function rowsHandler(req,res){
 function cleanupJobs(){const cutoff=Date.now()-JOB_TTL;for(const[id,job]of JOBS){const at=Date.parse(job.updatedAt||job.createdAt||'')||0;if(at<cutoff&&!['QUEUED','RUNNING','WAITING'].includes(job.status))JOBS.delete(id);}}
 function patchJob(job,patch={}){Object.assign(job,patch,{updatedAt:new Date().toISOString()});return job;}
 function selectionKey(s){return `${s.businessType}|${s.fromDate||'*'}|${s.toDate||'*'}`;}
+function wait(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
+function blockerText(blockers=[]){return blockers.slice(0,3).map(row=>[row.businessType||row.family||'任务',row.reportDate||'',row.currentStage||row.status||'处理中'].filter(Boolean).join(' · ')).join('；');}
 async function runRefreshJob(job){
   const db=getDb(),selection=job.selection,key=selectionKey(selection);
   try{
-    const blockers=activeBusinessProcessingDetails(db); if(blockers.active){patchJob(job,{status:'WAITING',message:'当前有前台处理任务，等待完成后请重新点击刷新。',blockers:blockers.blockers});return;}
+    while(true){
+      const blockers=activeBusinessProcessingDetails(db);
+      if(!blockers.active)break;
+      patchJob(job,{status:'WAITING',progress:0,message:`当前有前台/后台业务处理任务，已排队等待自动继续${blockerText(blockers.blockers)?`：${blockerText(blockers.blockers)}`:''}`,blockers:blockers.blockers});
+      await wait(WAIT_POLL_MS);
+    }
     const source=filterRows(allRows(db),{...selection,scope:'OPEN'}).filter(row=>!terminalClass(row).terminal);
     if(!source.length){patchJob(job,{status:'COMPLETED',progress:100,message:'所选范围没有需要刷新的未闭环票。',before:summarize(filterRows(allRows(db),selection)),after:summarize(filterRows(allRows(db),selection)),completedAt:new Date().toISOString()});return;}
     const byType=new Map();for(const row of source){const type=String(row.businessType||'').toUpperCase();if(!byType.has(type))byType.set(type,[]);byType.get(type).push(row);}
-    const client=new CEClient();let done=0,refreshed=0,failed=0;const failedBills=[];patchJob(job,{status:'RUNNING',progress:1,total:source.length,completed:0,message:`开始刷新 ${source.length.toLocaleString('zh-CN')} 票真实最新状态`});
+    const client=new CEClient();let done=0,refreshed=0,failed=0;const failedBills=[];patchJob(job,{status:'RUNNING',progress:1,total:source.length,completed:0,blockers:[],message:`开始刷新 ${source.length.toLocaleString('zh-CN')} 票真实最新状态`});
     for(const [type,rows] of byType){
       patchJob(job,{status:'RUNNING',message:`正在刷新 ${type} · ${rows.length.toLocaleString('zh-CN')}票`,currentBusiness:type,progress:Math.max(2,Math.floor(done/source.length*90))});
-      const outcome=await processCarryFamilyForRefresh(familyOf(type),rows,{client,reportDate:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Phnom_Penh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),refreshId:`${job.jobId}-${type}`});
-      if(outcome.successfulRows?.length){applySuccessfulCarryRefresh(outcome.successfulRows,{snapshotId:job.jobId,reportDate:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Phnom_Penh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())});refreshed+=outcome.successfulRows.length;}
+      const reportDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Phnom_Penh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+      const outcome=await processCarryFamilyForRefresh(familyOf(type),rows,{client,reportDate,refreshId:`${job.jobId}-${type}`});
+      if(outcome.successfulRows?.length){applySuccessfulCarryRefresh(outcome.successfulRows,{snapshotId:job.jobId,reportDate});refreshed+=outcome.successfulRows.length;}
       failed+=outcome.failedBills?.length||0;failedBills.push(...(outcome.failedBills||[]));done+=rows.length;patchJob(job,{completed:done,refreshed,failed,progress:Math.min(95,Math.floor(done/source.length*95)),message:`已处理 ${done}/${source.length} · 成功 ${refreshed} · 待重试 ${failed}`});
     }
     setMeta(db,'v202_carry_center_last_refresh_at',nowIso());setMeta(db,'v202_carry_center_last_refresh_selection',JSON.stringify(selection));
-    const afterRows=filterRows(allRows(db),selection);patchJob(job,{status:'COMPLETED',progress:100,completed:source.length,refreshed,failed,failedBills:failedBills.slice(0,100),after:summarize(afterRows),message:`刷新完成 · 成功更新 ${refreshed} · 待重试 ${failed} · 当前未闭环 ${summarize(afterRows).open}`,completedAt:new Date().toISOString()});
+    const afterRows=filterRows(allRows(db),selection);const afterSummary=summarize(afterRows);patchJob(job,{status:'COMPLETED',progress:100,completed:source.length,refreshed,failed,failedBills:failedBills.slice(0,100),after:afterSummary,message:`刷新完成 · 成功更新 ${refreshed} · 待重试 ${failed} · 当前未闭环 ${afterSummary.open}`,completedAt:new Date().toISOString()});
   }catch(error){patchJob(job,{status:'FAILED',message:error?.message||String(error),error:error?.stack||String(error),failedAt:new Date().toISOString()});}
   finally{ACTIVE.delete(key);}
 }
@@ -148,4 +157,4 @@ async function exportHandler(req,res){
 }
 let installed=false;const previousListen=express.application.listen;
 express.application.listen=function v202CarryCenterListen(...args){if(!installed){installed=true;this.get('/api/v202/carry/summary',summaryHandler);this.get('/api/v202/carry/rows',rowsHandler);this.post('/api/v202/carry/refresh',refreshStartHandler);this.get('/api/v202/carry/refresh/:jobId',refreshJobHandler);this.get('/api/v202/carry/export.xlsx',exportHandler);}return previousListen.apply(this,args);};
-export function inspectV202CarryCenter(){return{version:V202_CARRY_CENTER_VERSION,types:TYPES,jobs:JOBS.size,active:ACTIVE.size};}
+export function inspectV202CarryCenter(){return{version:V202_CARRY_CENTER_VERSION,types:TYPES,jobs:JOBS.size,active:ACTIVE.size,waitPollMs:WAIT_POLL_MS};}
