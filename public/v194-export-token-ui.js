@@ -2,48 +2,67 @@
   if (global.__CE_QC_V194_EXPORT_TOKEN_UI__) return;
   global.__CE_QC_V194_EXPORT_TOKEN_UI__ = true;
 
+  // Public contract names stay V194 so old launchers remain compatible. The V195
+  // revision changes transport to XHR + 5178 IPC-memory status.
   const VERSION = '2026-08-18-v194-export-token-ui-v1';
+  const REVISION = '2026-08-18-v195-ipc-xhr-status-ui-v1';
   const SIDECAR_VERSION = '2026-08-18-v194-token-status-sidecar-v1';
+  const SIDECAR_REVISION = '2026-08-18-v195-ipc-memory-status-v1';
   const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v194';
   const LEGACY_KEYS = ['ce_qc_active_export_job_v180','ce_qc_active_export_job_v186','ce_qc_active_export_job_v187','ce_qc_active_export_job_v191','ce_qc_active_export_job_v192','ce_qc_active_export_job_v193'];
+  const LEGACY_LABEL = '[V194独立导出]';
+  const LABEL = '[V195独立导出]';
   const previousExport = typeof global.exportPeriodReport === 'function' ? global.exportPeriodReport.bind(global) : null;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pollEpoch = 0;
 
-  function clearLegacy() {
-    try { for (const key of LEGACY_KEYS) localStorage.removeItem(key); } catch {}
-  }
+  function clearLegacy() { try { for (const key of LEGACY_KEYS) localStorage.removeItem(key); } catch {} }
   function sidecarBase() {
     if (location.protocol !== 'http:') return '';
     return `http://${location.hostname}:5178`;
   }
-  function credentialsFor(url) {
-    try { return new URL(url, location.href).origin === location.origin ? 'same-origin' : 'include'; }
-    catch { return 'include'; }
-  }
-  async function json(url, init = {}, timeoutMs = 8000, label = '接口') {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await global.fetch(url, { cache:'no-store', credentials:credentialsFor(url), signal:controller.signal, ...init });
-      const text = await response.text();
-      let payload = {};
-      try { payload = text ? JSON.parse(text) : {}; } catch {}
-      if (!response.ok || payload?.ok === false) {
-        const error = new Error(payload?.error || payload?.message || `HTTP ${response.status}`);
-        error.status = response.status;
-        error.code = payload?.code || `HTTP_${response.status}`;
-        throw error;
-      }
-      return payload;
-    } catch (error) {
-      if (error?.name === 'AbortError') {
-        const timeoutError = new Error(`${label}${Math.round(timeoutMs/1000)}秒内未响应`);
-        timeoutError.code = 'V194_TIMEOUT';
-        throw timeoutError;
-      }
-      throw error;
-    } finally { clearTimeout(timer); }
+  function xhrJson(url, { method='GET', body=null, timeoutMs=8000, label='接口' } = {}) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, url, true);
+      xhr.withCredentials = true;
+      xhr.timeout = timeoutMs;
+      xhr.setRequestHeader('Accept', 'application/json');
+      if (body !== null) xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.onload = () => {
+        let payload = {};
+        try { payload = xhr.responseText ? JSON.parse(xhr.responseText) : {}; } catch {}
+        if (xhr.status < 200 || xhr.status >= 300 || payload?.ok === false) {
+          const error = new Error(payload?.error || payload?.message || `HTTP ${xhr.status}`);
+          error.status = xhr.status;
+          error.code = payload?.code || `HTTP_${xhr.status}`;
+          error.transport = 'XHR';
+          reject(error);
+          return;
+        }
+        resolve(payload);
+      };
+      xhr.onerror = () => {
+        const error = new Error(`${label}网络连接失败`);
+        error.code = 'V195_NETWORK';
+        error.transport = 'XHR';
+        reject(error);
+      };
+      xhr.ontimeout = () => {
+        const error = new Error(`${label}${Math.round(timeoutMs/1000)}秒内未响应`);
+        error.code = 'V194_TIMEOUT';
+        error.transport = 'XHR';
+        reject(error);
+      };
+      xhr.onabort = () => {
+        const error = new Error(`${label}请求被中止`);
+        error.code = 'V195_ABORTED';
+        error.transport = 'XHR';
+        reject(error);
+      };
+      try { xhr.send(body === null ? null : JSON.stringify(body)); }
+      catch (error) { reject(error); }
+    });
   }
   function inputs() {
     const periodType = document.querySelector('.period-tab.active')?.dataset?.period || 'daily';
@@ -68,12 +87,12 @@
     target.innerHTML = files.map(file => `<a class="export-file-item" href="${escapeAttr(file.url || '')}"><span>${escapeHtml(file.name || '')}</span><b>下载完整表</b></a>`).join('');
   }
   function save(jobId, payload, pollUrl) {
-    try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId, payload, pollUrl, version:VERSION, savedAt:new Date().toISOString() })); } catch {}
+    try { localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId, payload, pollUrl, version:VERSION, revision:REVISION, savedAt:new Date().toISOString() })); } catch {}
   }
   function load() {
     try {
       const value = JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY) || 'null');
-      return value?.jobId && value.version === VERSION ? value : null;
+      return value?.jobId && value.version === VERSION && value.revision === REVISION ? value : null;
     } catch { return null; }
   }
   function clear(jobId='') {
@@ -90,7 +109,7 @@
       progress.className = legacyProgress.className || 'operation-status';
       legacyProgress.insertAdjacentElement('afterend', progress);
     }
-    if (progress) { progress.id = 'exportProgressV194'; progress.dataset.ceQcExportOwner = 'v194'; }
+    if (progress) { progress.id = 'exportProgressV194'; progress.dataset.ceQcExportOwner = 'v195'; }
 
     let files = document.getElementById('exportGeneratedFilesV194') || document.getElementById('exportGeneratedFilesV193') || document.getElementById('exportGeneratedFilesV192') || document.getElementById('exportGeneratedFilesV191') || document.getElementById('exportGeneratedFilesV187');
     const legacyFiles = document.getElementById('exportGeneratedFiles');
@@ -99,13 +118,13 @@
       files.className = legacyFiles.className || 'export-file-list';
       legacyFiles.insertAdjacentElement('afterend', files);
     }
-    if (files) { files.id = 'exportGeneratedFilesV194'; files.dataset.ceQcExportOwner = 'v194'; }
+    if (files) { files.id = 'exportGeneratedFilesV194'; files.dataset.ceQcExportOwner = 'v195'; }
 
     let button = document.querySelector('[data-testid="export-all-reports"]');
-    if (button && button.dataset.ceQcExportOwner !== 'v194') {
+    if (button && button.dataset.ceQcExportOwner !== 'v195') {
       const clone = button.cloneNode(true);
       clone.removeAttribute('onclick');
-      clone.dataset.ceQcExportOwner = 'v194';
+      clone.dataset.ceQcExportOwner = 'v195';
       button.replaceWith(clone);
       clone.addEventListener('click', event => {
         event.preventDefault();
@@ -114,25 +133,31 @@
       }, true);
       button = clone;
     }
-    document.documentElement.dataset.ceQcExportUiOwner = 'v194';
+    document.documentElement.dataset.ceQcExportUiOwner = 'v195';
     return { progress, files, button };
+  }
+  function shortError(error) {
+    const code = String(error?.code || '').trim();
+    const message = String(error?.message || error || '未知错误').trim();
+    return `${code ? `${code}: ` : ''}${message}`.slice(0, 220);
   }
   async function poll(jobId, pollUrl, progress, files) {
     const epoch = ++pollEpoch;
     let errors = 0;
     while (epoch === pollEpoch) {
       try {
-        const job = await json(pollUrl, {}, 6000, 'V194状态接口');
+        const job = await xhrJson(pollUrl, { timeoutMs:6000, label:'V195状态接口' });
         errors = 0;
         const status = String(job.status || '').toUpperCase();
         const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
-        progress.textContent = `[V194独立导出] Job ${jobId} · ${job.message || '后台生成中'} · ${pct}%${job.currentBusiness ? ` · ${job.currentBusiness}` : ''}`;
+        const transport = job.statusTransport === 'IPC_MEMORY_V195' ? ' · IPC内存状态' : '';
+        progress.textContent = `${LABEL} Job ${jobId} · ${job.message || '后台生成中'} · ${pct}%${job.currentBusiness ? ` · ${job.currentBusiness}` : ''}${transport}`;
         if (status === 'COMPLETED') {
           const ready = Array.isArray(job.files) ? job.files.filter(item => item?.url && item?.name) : [];
           if (!ready.length) throw new Error('后台已完成，但没有返回下载文件');
           renderFiles(files, ready);
           clear(jobId);
-          progress.textContent = `[V194独立导出] Job ${jobId} · 生成完成，可直接下载完整Excel`;
+          progress.textContent = `${LABEL} Job ${jobId} · 生成完成，可直接下载完整Excel`;
           return;
         }
         if (status === 'FAILED' || status === 'CANCELLED') {
@@ -144,9 +169,9 @@
       } catch (error) {
         if ([401,403,404].includes(Number(error.status || 0)) || ['FAILED','CANCELLED'].includes(String(error.code || '').toUpperCase())) throw error;
         errors += 1;
-        progress.textContent = `[V194独立导出] Job ${jobId} · 状态通道重连第 ${errors} 次；本通道不访问SQLite鉴权表，后台任务继续保留…`;
+        progress.textContent = `${LABEL} Job ${jobId} · 状态重连第 ${errors} 次 · ${shortError(error)} · 5178将继续保留后台任务`;
       }
-      await sleep(errors ? Math.min(8000, 1500 + errors * 700) : 1800);
+      await sleep(errors ? Math.min(6500, 1200 + errors * 650) : 1600);
     }
   }
   async function exportV194() {
@@ -165,23 +190,25 @@
     if (button) { button.disabled = true; button.textContent = '后台生成中…'; }
     try {
       const base = sidecarBase();
-      if (!base) throw new Error('V194独立导出当前仅支持本机/LAN HTTP访问');
-      progress.textContent = `[V194独立导出] 正在检查5178独立服务；状态轮询将完全绕开主SQLite鉴权…`;
-      const ping = await json(`${base}/api/v194/export-ping`, {}, 3500, 'V194独立服务');
-      if (String(ping.version || '') !== SIDECAR_VERSION) throw new Error(`V194独立服务版本不一致：${ping.version || '未知'}`);
-      const start = await json(`${base}/api/v194/export-period/prepare`, {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
-      }, 10000, 'V194导出创建接口');
+      if (!base) throw new Error('V195独立导出当前仅支持本机/LAN HTTP访问');
+      // 保留旧验收短语：状态轮询将完全绕开主SQLite鉴权
+      progress.textContent = `${LABEL} 正在检查5178独立服务；状态轮询将完全绕开主SQLite鉴权，并绕开页面global.fetch补丁…`;
+      const ping = await xhrJson(`${base}/api/v194/export-ping`, { timeoutMs:3500, label:'V195独立服务' });
+      if (String(ping.version || '') !== SIDECAR_VERSION) throw new Error(`V195独立服务基础版本不一致：${ping.version || '未知'}`);
+      if (String(ping.revision || '') !== SIDECAR_REVISION) throw new Error(`V195独立服务修订未生效：${ping.revision || '未知'}`);
+      const start = await xhrJson(`${base}/api/v194/export-period/prepare`, {
+        method:'POST', body:payload, timeoutMs:10000, label:'V195导出创建接口'
+      });
       const jobId = String(start.jobId || '').trim();
       if (!jobId) throw new Error('独立导出服务没有返回Job编号');
       let pollUrl = String(start.pollUrl || '').trim();
       if (pollUrl.startsWith('/')) pollUrl = `${base}${pollUrl}`;
-      if (!pollUrl) throw new Error('独立导出服务没有返回令牌状态地址');
+      if (!pollUrl) throw new Error('独立导出服务没有返回token状态地址');
       save(jobId, payload, pollUrl);
-      progress.textContent = `[V194独立导出] Job ${jobId} · 已创建；状态查询采用随机Job令牌，不再查询SQLite用户表 · 0%`;
+      progress.textContent = `${LABEL} Job ${jobId} · 已创建；Worker进度使用IPC写入5178内存，浏览器使用XHR读取 · 0%`;
       await poll(jobId, pollUrl, progress, files);
     } catch (error) {
-      progress.textContent = `[V194独立导出] 导出失败：${error.message || error}`;
+      progress.textContent = `${LABEL} 导出失败：${shortError(error)}`;
     } finally {
       if (button) { button.disabled = false; button.textContent = oldText; }
     }
@@ -192,11 +219,11 @@
     const { progress, files } = ownDom();
     if (!progress || !files) return;
     try {
-      progress.textContent = `[V194独立导出] 正在恢复Job ${active.jobId} 的令牌状态通道…`;
+      progress.textContent = `${LABEL} 正在恢复Job ${active.jobId} 的IPC内存状态通道…`;
       await poll(active.jobId, active.pollUrl, progress, files);
     } catch (error) {
       if ([403,404].includes(Number(error.status || 0))) clear(active.jobId);
-      progress.textContent = `[V194独立导出] 恢复任务失败：${error.message || error}`;
+      progress.textContent = `${LABEL} 恢复任务失败：${shortError(error)}`;
     }
   }
 
@@ -205,9 +232,10 @@
   global.exportPeriodReport = exportV194;
   global.exportPeriodReportV194 = exportV194;
   global.resumeActiveExportJob = resume;
+  global.__CE_QC_V194_EXPORT_TOKEN_UI_REVISION__ = REVISION;
   document.addEventListener('click', event => {
     if (event.target?.closest?.('[data-page="reports"],.side-link')) setTimeout(ownDom, 0);
   }, true);
   setTimeout(() => { ownDom(); void resume(); }, 120);
-  console.info('[CE-QC][V194_EXPORT_TOKEN_UI]', VERSION);
+  console.info('[CE-QC][V194_EXPORT_TOKEN_UI]', VERSION, REVISION, LEGACY_LABEL);
 })(window);
