@@ -8,7 +8,11 @@ import { fileURLToPath } from 'node:url';
 import { accessIdentity, requireRole } from './accessControl.js';
 import { closeDb, getRuntimeConfig } from './db.js';
 
+// Keep the public V194 contract stable for existing launchers/UI, but V195 changes
+// status transport: worker -> IPC -> sidecar memory -> browser. Status polling no
+// longer reads the job JSON on every request and never queries SQLite auth tables.
 const VERSION = '2026-08-18-v194-token-status-sidecar-v1';
+const REVISION = '2026-08-18-v195-ipc-memory-status-v1';
 const PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_EXPORT_SIDECAR_PORT || 5178)));
 const HOST = String(process.env.CE_QC_EXPORT_SIDECAR_HOST || '0.0.0.0');
 const SINGLE_JOB_HEAP_MB = Math.max(384, Math.min(1024, Number(process.env.EXPORT_SINGLE_JOB_HEAP_MB || 768)));
@@ -18,9 +22,7 @@ const singleWorkerFile = path.join(__dirname, 'v183SingleBusinessExportJobWorker
 const pendingJobs = new Map();
 const app = express();
 
-function sha256(value) {
-  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
-}
+function sha256(value) { return crypto.createHash('sha256').update(String(value || '')).digest('hex'); }
 function safeJobId(value) {
   const id = String(value || '').trim();
   return /^EXP-[A-Z0-9-]{10,80}$/i.test(id) ? id : '';
@@ -60,18 +62,14 @@ function validatePayload(payload, res) {
   }
   return true;
 }
-function payloadKey(payload) {
-  return sha256(JSON.stringify({ ...payload, exportContractVersion: EXPORT_CONTRACT_VERSION }));
-}
-function jobsDir() {
-  return path.join(getRuntimeConfig().dataDir, 'export_jobs');
-}
+function payloadKey(payload) { return sha256(JSON.stringify({ ...payload, exportContractVersion: EXPORT_CONTRACT_VERSION })); }
+function jobsDir() { return path.join(getRuntimeConfig().dataDir, 'export_jobs'); }
 function jobPath(jobId) {
   const safe = safeJobId(jobId);
   return safe ? path.join(jobsDir(), `${safe}.json`) : '';
 }
 async function writeJsonAtomic(file, value) {
-  const temp = `${file}.${process.pid}.v194.tmp`;
+  const temp = `${file}.${process.pid}.v195.tmp`;
   await fsp.writeFile(temp, JSON.stringify(value, null, 2), 'utf8');
   await fsp.rename(temp, file);
 }
@@ -80,7 +78,7 @@ async function readJob(file) {
 }
 function stripPrivate(job = {}) {
   const { pollTokenHash, ...safe } = job || {};
-  return { ...safe, files: Array.isArray(safe.files) ? safe.files : [], sidecarVersion: VERSION };
+  return { ...safe, files: Array.isArray(safe.files) ? safe.files : [], sidecarVersion: VERSION, sidecarRevision: REVISION };
 }
 function tokenMatches(job, token) {
   const expected = String(job?.pollTokenHash || '');
@@ -90,17 +88,20 @@ function tokenMatches(job, token) {
   catch { return false; }
 }
 async function loadJob(jobId) {
+  // V195: memory is authoritative while the sidecar is alive. Do NOT hit the job
+  // file on every browser poll; the worker streams every writeJob update over IPC.
   const pending = pendingJobs.get(jobId);
-  if (pending && !pending.persisted) return { job: pending.job, pending };
-  const file = pending?.file || jobPath(jobId);
+  if (pending?.job) return { job: pending.job, pending, file: pending.file || jobPath(jobId), source: 'MEMORY_IPC' };
+  // Disk is only a restart/recovery fallback.
+  const file = jobPath(jobId);
   const diskJob = file ? await readJob(file) : null;
-  if (diskJob) return { job: diskJob, pending, file };
-  if (pending?.job) return { job: pending.job, pending, file };
-  return { job: null, pending, file };
+  if (diskJob) {
+    pendingJobs.set(jobId, { job: diskJob, file, persisted: true, recovered: true });
+    return { job: diskJob, pending: pendingJobs.get(jobId), file, source: 'DISK_RECOVERY' };
+  }
+  return { job: null, pending: null, file, source: 'NONE' };
 }
-function sidecarBase(req) {
-  return `${req.protocol}://${req.get('host')}`;
-}
+function sidecarBase(req) { return `${req.protocol}://${req.get('host')}`; }
 function decorateFiles(req, job, token) {
   const base = sidecarBase(req);
   return (Array.isArray(job?.files) ? job.files : []).map(item => {
@@ -112,15 +113,20 @@ function decorateFiles(req, job, token) {
 }
 function publicJob(req, job, token) {
   const safe = stripPrivate(job);
-  return { ...safe, files: decorateFiles(req, safe, token) };
+  return { ...safe, files: decorateFiles(req, safe, token), statusTransport: 'IPC_MEMORY_V195' };
+}
+function setMemoryJob(jobId, job, file = '') {
+  if (!jobId || !job) return;
+  const current = pendingJobs.get(jobId) || {};
+  pendingJobs.set(jobId, { ...current, job, file: file || current.file || jobPath(jobId), persisted: true, ipcAt: new Date().toISOString() });
 }
 async function markFailure(file, jobId, error, errorCode = 'V194_EXPORT_WORKER_FAILED') {
-  const current = await readJob(file) || pendingJobs.get(jobId)?.job;
+  const current = pendingJobs.get(jobId)?.job || await readJob(file);
   if (!current || String(current.jobId || '') !== jobId) return;
   if (!['QUEUED', 'RUNNING'].includes(String(current.status || '').toUpperCase())) return;
   const now = new Date().toISOString();
-  const failed = { ...current, status: 'FAILED', errorCode, message: error?.message || String(error), error: error?.stack || String(error), failedAt: now, updatedAt: now, sidecarVersion: VERSION };
-  pendingJobs.set(jobId, { job: failed, file, persisted: Boolean(file) });
+  const failed = { ...current, status: 'FAILED', errorCode, message: error?.message || String(error), error: error?.stack || String(error), failedAt: now, updatedAt: now, sidecarVersion: VERSION, sidecarRevision: REVISION };
+  setMemoryJob(jobId, failed, file);
   try { if (file) await writeJsonAtomic(file, failed); } catch {}
 }
 function launchWorker(file, job) {
@@ -128,20 +134,31 @@ function launchWorker(file, job) {
   try {
     child = spawn(process.execPath, [`--max-old-space-size=${SINGLE_JOB_HEAP_MB}`, singleWorkerFile, file], {
       cwd: getRuntimeConfig().projectRoot,
-      env: { ...process.env, CE_QC_EXPORT_WORKER_MODE: 'V194_ISOLATED_SINGLE_BUSINESS', CE_QC_EXPORT_PREPARE_ACK_VERSION: VERSION },
+      env: { ...process.env, CE_QC_EXPORT_WORKER_MODE: 'V194_ISOLATED_SINGLE_BUSINESS', CE_QC_EXPORT_PREPARE_ACK_VERSION: VERSION, CE_QC_EXPORT_STATUS_TRANSPORT: 'IPC_MEMORY_V195' },
       detached: false,
       windowsHide: true,
-      stdio: 'ignore'
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc']
     });
   } catch (error) {
     void markFailure(file, job.jobId, error, 'V194_EXPORT_WORKER_SPAWN_FAILED');
     return;
   }
+  child.on('message', message => {
+    if (!message || message.type !== 'CE_QC_EXPORT_JOB_UPDATE' || !message.job) return;
+    const next = message.job;
+    if (String(next.jobId || '') !== String(job.jobId || '')) return;
+    setMemoryJob(job.jobId, { ...next, sidecarRevision: REVISION }, file);
+  });
   child.once('error', error => { void markFailure(file, job.jobId, error, 'V194_EXPORT_WORKER_SPAWN_FAILED'); });
   child.once('exit', (code, signal) => {
     void (async () => {
-      const current = await readJob(file);
-      if (!current || !['QUEUED', 'RUNNING'].includes(String(current.status || '').toUpperCase())) return;
+      const inMemory = pendingJobs.get(job.jobId)?.job;
+      if (inMemory && !['QUEUED', 'RUNNING'].includes(String(inMemory.status || '').toUpperCase())) return;
+      const disk = await readJob(file);
+      if (disk && !['QUEUED', 'RUNNING'].includes(String(disk.status || '').toUpperCase())) {
+        setMemoryJob(job.jobId, disk, file);
+        return;
+      }
       const reason = new Error(code === 0
         ? 'V194后台报表进程已结束，但任务没有写入完成状态。'
         : `V194后台报表进程异常退出（code=${code ?? 'null'}${signal ? `, signal=${signal}` : ''}）。`);
@@ -156,9 +173,9 @@ async function persistAndLaunch(job) {
     const dir = jobsDir();
     await fsp.mkdir(dir, { recursive: true });
     file = jobPath(job.jobId);
-    const persisted = { ...job, persistedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), message: 'V194独立导出通道已确认；状态轮询已脱离SQLite鉴权，正在启动V191跨日真实状态后台进程' };
+    const persisted = { ...job, persistedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), sidecarRevision: REVISION, message: 'V195内存状态通道已确认；Worker进度通过IPC直送5178，不再每次轮询读取Job文件' };
     await writeJsonAtomic(file, persisted);
-    pendingJobs.set(job.jobId, { job: persisted, file, persisted: true });
+    setMemoryJob(job.jobId, persisted, file);
     launchWorker(file, persisted);
   } catch (error) {
     await markFailure(file, job.jobId, error, 'V194_EXPORT_JOB_PERSIST_FAILED');
@@ -194,17 +211,14 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '1mb' }));
 
-// Health/ping never touches SQLite. This proves port 5178 is alive even while the main DB is busy.
 app.get('/api/v194/export-ping', (req, res) => {
-  res.json({ ok: true, version: VERSION, port: PORT, pendingJobs: pendingJobs.size, worker: 'V191_CROSS_DAY_TRUTH', statusAuth: 'JOB_TOKEN_NO_SQLITE' });
+  res.json({ ok: true, version: VERSION, revision: REVISION, port: PORT, pendingJobs: pendingJobs.size, worker: 'V191_CROSS_DAY_TRUTH', statusAuth: 'JOB_TOKEN_NO_SQLITE', statusTransport: 'IPC_MEMORY_V195' });
 });
 
-// Prepare authenticates once, before the worker starts. All later polling uses a random per-job token,
-// so a heavy worker cannot block status reads by making accessIdentity query the same 2GB+ SQLite DB.
 app.post('/api/v194/export-period/prepare', accessIdentity, requireRole('OPERATOR'), (req, res) => {
   const startedAt = Date.now();
   const payload = normalizePayload(req.body || {});
-  console.log(`[CE-QC][V194_EXPORT_SIDECAR] PREPARE business=${payload.businessType || '-'} period=${payload.periodType}`);
+  console.log(`[CE-QC][V194_EXPORT_SIDECAR] PREPARE business=${payload.businessType || '-'} period=${payload.periodType} revision=${REVISION}`);
   if (!validatePayload(payload, res)) return;
   const jobId = `EXP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
   const pollToken = crypto.randomBytes(32).toString('base64url');
@@ -212,14 +226,16 @@ app.post('/api/v194/export-period/prepare', accessIdentity, requireRole('OPERATO
   const job = {
     version: VERSION,
     sidecarVersion: VERSION,
+    sidecarRevision: REVISION,
     exportContractVersion: EXPORT_CONTRACT_VERSION,
     jobId,
     payloadKey: payloadKey(payload),
     pollTokenHash: sha256(pollToken),
     pollAuth: 'TOKEN_V194_NO_SQLITE',
+    statusTransport: 'IPC_MEMORY_V195',
     status: 'QUEUED',
     progress: 0,
-    message: 'V194独立导出Job已创建；后续状态查询不再访问SQLite鉴权表',
+    message: 'V195独立导出Job已创建；状态将由Worker IPC直接写入5178内存',
     payload,
     files: [],
     createdAt: now,
@@ -234,9 +250,9 @@ app.post('/api/v194/export-period/prepare', accessIdentity, requireRole('OPERATO
   res.status(202).json({
     ok: true, async: true, jobId, status: 'QUEUED', progress: 0, message: job.message,
     pollUrl: `/api/v194/export-job/${encodeURIComponent(jobId)}?${q.toString()}`,
-    sidecarVersion: VERSION, prepareAckMs: ackMs, workerMode: job.workerMode, pollAuth: job.pollAuth
+    sidecarVersion: VERSION, sidecarRevision: REVISION, prepareAckMs: ackMs, workerMode: job.workerMode, pollAuth: job.pollAuth, statusTransport: job.statusTransport
   });
-  console.log(`[CE-QC][V194_EXPORT_SIDECAR] ACK job=${jobId} ${ackMs}ms token-status=enabled`);
+  console.log(`[CE-QC][V194_EXPORT_SIDECAR] ACK job=${jobId} ${ackMs}ms token-status=enabled ipc-memory=enabled`);
   setImmediate(() => { void persistAndLaunch(job); });
 });
 
@@ -248,7 +264,8 @@ app.get('/api/v194/export-job/:jobId', async (req, res) => {
   if (!loaded.job) return res.status(404).json({ ok: false, code: 'V194_JOB_NOT_FOUND', error: '导出任务不存在或已过期。' });
   if (!tokenMatches(loaded.job, token)) return res.status(403).json({ ok: false, code: 'V194_JOB_TOKEN_DENIED', error: '导出任务状态令牌无效。' });
   const status = String(loaded.job.status || '').toUpperCase();
-  if (!['QUEUED', 'RUNNING'].includes(status)) pendingJobs.delete(jobId);
+  res.setHeader('X-CE-QC-Export-Status-Source', loaded.source || 'MEMORY_IPC');
+  res.setHeader('X-CE-QC-Export-Revision', REVISION);
   return res.json({ ok: true, ...publicJob(req, loaded.job, token) });
 });
 
@@ -271,7 +288,7 @@ app.get('/api/v194/export-file', async (req, res) => {
 });
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(`[CE-QC][V194_EXPORT_SIDECAR] READY http://${HOST}:${PORT} · ${VERSION} · status polling does not query SQLite`);
+  console.log(`[CE-QC][V194_EXPORT_SIDECAR] READY http://${HOST}:${PORT} · ${VERSION} · ${REVISION} · status polling does not query SQLite · IPC memory status enabled`);
 });
 server.on('error', error => {
   console.error('[CE-QC][V194_EXPORT_SIDECAR] START FAILED:', error?.stack || error);
