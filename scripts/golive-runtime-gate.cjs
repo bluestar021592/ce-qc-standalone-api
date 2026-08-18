@@ -23,6 +23,7 @@ const historyRefreshUi = read('public/v183-history-refresh.js');
 const refreshedExporter = read('src/v183ShopeeRefreshedPeriodExporter.js');
 const streamedExporter = read('src/v185ShopeeCurrentStateStreamExporter.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
+const parityExporter = read('src/v197UnifiedParityExporter.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 const exportDirect = read('src/v190ExportDirectEndpointPatch.js');
 const exportSidecar = read('src/v193ExportSidecar.js');
@@ -103,12 +104,24 @@ must(refreshedExporter, '2026-08-17-v183-shopee-current-status-overlay-export-v1
 must(streamedExporter, '2026-08-17-v185-shopee-current-state-stream-export-v1');
 must(streamedExporter, 'shipment_current_state');
 must(singleExportWorker, '2026-08-17-v191-single-business-truth-worker-v1');
+must(singleExportWorker, '2026-08-18-v197-unified-parity-worker-v1');
 must(singleExportWorker, 'createShopeeTruthWorkbook');
+must(singleExportWorker, 'createUnifiedParityWorkbook');
+must(singleExportWorker, 'V197_UNIFIED_1TO1_PARITY_20_SHEETS');
 must(singleExportWorker, 'crossDayTruth: true');
 must(singleExportWorker, 'onePassStreaming: true');
 must(singleExportWorker, 'LEGACY_10_SHEETS_V191_TRUTH');
 must(singleExportWorker, 'CE_QC_EXPORT_JOB_UPDATE');
 must(singleExportWorker, 'process.send');
+must(parityExporter, '2026-08-18-v197-unified-parity-dashboard-v1');
+must(parityExporter, "attemptBasis:'日报日期→POD日期自然日（同日=1派、次日=2派、第3天及以后=3派+）'");
+must(parityExporter, "'金边1派'");
+must(parityExporter, "'外省1派'");
+must(parityExporter, "'1派明细'");
+must(parityExporter, "'2派明细'");
+must(parityExporter, "'3派+明细'");
+must(parityExporter, 'assertParityReconciliation');
+must(parityExporter, '门店是当前位置维度，不从PP/PV剔除');
 must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(exportDirect, '2026-08-18-v192-direct-export-early-route-v1');
@@ -132,4 +145,4 @@ for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE] runtime-source gate passed; V195 cache-busts the export controller, lets the IPC/XHR revision replace cached V194 UI, and keeps live worker progress in the isolated 5178 sidecar memory without per-poll SQLite or job-file reads');
+console.log('[GOLIVE] runtime-source gate passed; V197 routes every single-business export through one unified blue-white parity workbook, reconciles PP/PV and 1/2/3 dispatch totals, preserves store as an independent location dimension, and keeps V195 IPC/XHR sidecar progress isolation');
