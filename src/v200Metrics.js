@@ -6,6 +6,7 @@ export function ratio(a, b) { return b ? Number(a || 0) / Number(b) : 0; }
 function dateKey(value = '') { const m = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; }
 function dayNumber(value = '') { const k = dateKey(value); if (!k) return null; const [y,m,d] = k.split('-').map(Number); return Date.UTC(y,m-1,d); }
 function listDates(from,to){ const a=dayNumber(from),b=dayNumber(to),out=[]; if(a===null||b===null||b<a)return out; for(let t=a;t<=b;t+=86400000)out.push(new Date(t).toISOString().slice(0,10)); return out; }
+export function referenceAverageDays(firstReportDate,podDate){const a=dayNumber(firstReportDate),b=dayNumber(podDate);return a===null||b===null||b<a?0:Math.floor((b-a)/86400000)+1;}
 function emptyStat(date = '') {
   return { date, total: 0, pp: 0, pv: 0, unknown: 0, store: 0, pod: 0, notPod: 0, delivery: 0, pending: 0, returned: 0, a1: 0, a2: 0, a3: 0, attemptUnknown: 0, days: [], ppDays: [], pvDays: [], ppPod: 0, pvPod: 0, ppA1: 0, ppA2: 0, ppA3: 0, pvA1: 0, pvA2: 0, pvA3: 0 };
 }
@@ -16,15 +17,16 @@ function applyStat(stat, row) {
   if (row.pod) {
     stat.pod++;
     if (row.attemptNo === 1) stat.a1++; else if (row.attemptNo === 2) stat.a2++; else if (row.attemptNo >= 3) stat.a3++; else stat.attemptUnknown++;
-    if (row.deliveryDays > 0) stat.days.push(row.deliveryDays);
+    const referenceDays=referenceAverageDays(row.firstReportDate,row.podDate);
+    if (referenceDays > 0) stat.days.push(referenceDays);
     if (row.area === '金边') {
       stat.ppPod++;
       if (row.attemptNo === 1) stat.ppA1++; else if (row.attemptNo === 2) stat.ppA2++; else if (row.attemptNo >= 3) stat.ppA3++;
-      if (row.deliveryDays > 0) stat.ppDays.push(row.deliveryDays);
+      if (referenceDays > 0) stat.ppDays.push(referenceDays);
     } else if (row.area === '外省') {
       stat.pvPod++;
       if (row.attemptNo === 1) stat.pvA1++; else if (row.attemptNo === 2) stat.pvA2++; else if (row.attemptNo >= 3) stat.pvA3++;
-      if (row.deliveryDays > 0) stat.pvDays.push(row.deliveryDays);
+      if (referenceDays > 0) stat.pvDays.push(referenceDays);
     }
   } else stat.notPod++;
   if (row.delivering) stat.delivery++;
