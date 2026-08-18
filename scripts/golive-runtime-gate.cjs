@@ -27,6 +27,10 @@ const allBusinessChild = read('src/v84ExportBusinessWorker.js');
 const parityExporter = read('src/v197UnifiedParityExporter.js');
 const strictParityExporter = read('src/v198UnifiedParityExporter.js');
 const dashboardExporter = read('src/v199UnifiedDashboardExporter.js');
+const v200Evidence = read('src/v200EvidenceData.js');
+const v200Metrics = read('src/v200Metrics.js');
+const v200Workbook = read('src/v200ReferenceWorkbook.js');
+const v200Exporter = read('src/v200TemplateDashboardExporter.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 const exportDirect = read('src/v190ExportDirectEndpointPatch.js');
 const exportSidecar = read('src/v193ExportSidecar.js');
@@ -104,37 +108,44 @@ must(streamedExporter, '2026-08-17-v185-shopee-current-state-stream-export-v1');
 must(streamedExporter, 'shipment_current_state');
 
 must(singleExportWorker, '2026-08-17-v191-single-business-truth-worker-v1');
-must(singleExportWorker, '2026-08-18-v199-dashboard-attempt-average-worker-v1');
-must(singleExportWorker, 'createV199UnifiedDashboardWorkbook');
-must(singleExportWorker, 'V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS');
+must(singleExportWorker, '2026-08-18-v200-reference-template-track-attempt-worker-v1');
+must(singleExportWorker, 'createV200ReferenceDashboardWorkbook');
+must(singleExportWorker, 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
 must(singleExportWorker, 'dashboardAttemptOnly:true');
+must(singleExportWorker, 'wpsFormulaLinks:true');
+must(singleExportWorker, 'trackAttemptFacts:true');
 must(singleExportWorker, 'crossDayTruth:true');
 must(singleExportWorker, 'onePassStreaming:true');
 must(singleExportWorker, 'CE_QC_EXPORT_JOB_UPDATE');
 must(singleExportWorker, 'process.send');
 
-must(allBusinessChild, '2026-08-18-v199-all-business-dashboard-child-v1');
-must(allBusinessChild, 'createV199UnifiedDashboardWorkbook');
-must(allBusinessChild, 'V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS');
+must(allBusinessChild, '2026-08-18-v200-all-business-reference-child-v1');
+must(allBusinessChild, 'createV200ReferenceDashboardWorkbook');
+must(allBusinessChild, 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
 
 must(parityExporter, '2026-08-18-v197-unified-parity-dashboard-v1');
 must(parityExporter, 'assertParityReconciliation');
 must(strictParityExporter, '2026-08-18-v198-strict-pod-parity-dashboard-v1');
 must(strictParityExporter, 'assertStrictParityReconciliation');
-
 must(dashboardExporter, '2026-08-18-v199-dashboard-attempt-average-v1');
-must(dashboardExporter, 'resolveAttemptForV199');
-must(dashboardExporter, '分析结果派次');
-must(dashboardExporter, '轨迹派送日期');
-must(dashboardExporter, '日报日期→POD日期兜底');
-must(dashboardExporter, '首次观察POD日报日期');
-must(dashboardExporter, '金边平均天数');
-must(dashboardExporter, '外省平均天数');
-must(dashboardExporter, '1/2/3派只在看板统计，不再创建独立派次明细Sheet');
-must(dashboardExporter, "outputContract:'V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS'");
-forbid(dashboardExporter, "'1派明细':");
-forbid(dashboardExporter, "'2派明细':");
-forbid(dashboardExporter, "'3派+明细':");
+
+must(v200Evidence, '2026-08-18-v200-reference-template-track-attempt-v1');
+must(v200Evidence, "code === '70'");
+must(v200Evidence, "code === '60'");
+must(v200Evidence, "'派件时间'");
+must(v200Evidence, "source: '无真实派次证据'");
+must(v200Evidence, '首次真实派送');
+must(v200Metrics, "'POD明细'");
+must(v200Workbook, 'HYPERLINK');
+must(v200Workbook, "workbook.addWorksheet('每日看板'");
+must(v200Workbook, "'每日票量'");
+must(v200Workbook, "'每日状态'");
+must(v200Workbook, "'派次与平均签收天数'");
+must(v200Workbook, "const DETAIL_SHEETS = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细']");
+must(v200Workbook, "fgColor: { argb: 'FF1F4E78' }");
+must(v200Workbook, "fgColor: { argb: 'FFFFF9E6' }");
+must(v200Exporter, 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
+must(v200Exporter, '_V200.xlsx');
 
 must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
@@ -157,4 +168,4 @@ must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V199 keeps 1/2/3 dispatch as dashboard metrics only, calculates PP/PV average delivery days with authoritative POD evidence plus first-observed-POD fallback, prefers analyzed/track attempt evidence before date fallback, and applies the same exporter to single and ALL-business output');
+console.log('[GOLIVE] runtime-source gate passed; V200 reproduces the 16-column reference dashboard, uses WPS-compatible HYPERLINK formulas, reads real daily POD/delivery time for average days, counts real code70/code60 dispatch dates before stored attempt fields, never fabricates attempt from elapsed days, and applies one exporter to all seven businesses');
