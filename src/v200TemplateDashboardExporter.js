@@ -1,9 +1,9 @@
 import path from 'node:path';
-import { collectV201TrackedRows, V201_TRACKED_EXPORT_VERSION } from './v201TrackedEvidenceData.js';
+import { collectV202Rows, V202_DELIVERY_TRUTH_VERSION } from './v202DeliveryTruth.js';
 import { statsOf, bucketRows, anchorMaps, average } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 
-export const V200_EXPORT_VERSION = V201_TRACKED_EXPORT_VERSION;
+export const V200_EXPORT_VERSION = V202_DELIVERY_TRUTH_VERSION;
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
 export { internalHyperlinkFormulaForV200 } from './v200ReferenceWorkbook.js';
 
@@ -13,12 +13,12 @@ function periodLabel(periodType = 'custom') { return ({ daily: '日报', weekly:
 
 export async function createV200ReferenceDashboardWorkbook({ type, periodType = 'custom', range, outputDir, onProgress = () => {} }) {
   const businessType = String(type || '').trim().toUpperCase();
-  const rows = await collectV201TrackedRows(businessType, range, onProgress);
+  const rows = await collectV202Rows(businessType, range, onProgress);
   if (!rows.length) throw new Error(`${displayType(businessType)} 在所选区间没有数据。`);
   const stats = statsOf(rows, range);
   const bucket = bucketRows(rows);
   const anchors = anchorMaps(bucket);
-  const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V201.xlsx`));
+  const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V202.xlsx`));
   await writeV200ReferenceWorkbook({ file, type: businessType, range, rows, stats, bucket, anchors, onProgress });
   return {
     file,
@@ -26,6 +26,9 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
       type: businessType,
       total: stats.overall.total,
       pod: stats.overall.pod,
+      returned: stats.overall.returned,
+      cancelled: stats.overall.cancelled,
+      openUnpod: stats.overall.notPod,
       pp: stats.overall.pp,
       pv: stats.overall.pv,
       attempt1: stats.overall.a1,
@@ -35,9 +38,12 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
       averageDays: average(stats.overall.days),
       ppAverageDays: average(stats.overall.ppDays),
       pvAverageDays: average(stats.overall.pvDays),
-      engine: V201_TRACKED_EXPORT_VERSION,
-      tracking: businessType === 'SHOPEECN' || businessType === 'SHOPEEVN' ? 'PERSISTED_SHOPEE_DISPATCH_FACTS' : 'GENERIC_V200_FACTS',
-      outputContract: 'V201_REFERENCE_TEMPLATE_PERSISTENT_SHOPEE_TRACKING_10_SHEETS'
+      validAverageSamples: stats.overall.days.length,
+      engine: V202_DELIVERY_TRUTH_VERSION,
+      tracking: businessType === 'SHOPEECN' || businessType === 'SHOPEEVN' ? 'REAL_DELIVERY_CYCLE_4003_70_PENDING_REDISPATCH_POD' : 'GENERIC_TERMINAL_TRUTH',
+      averageRule: 'ORDER_DATE_TO_ACTUAL_POD_DATE_INCLUSIVE',
+      terminalRule: businessType === 'WHPP' ? 'POD_RETURN_CANCELLED_EXCLUDED_FROM_ANOMALY_AND_UNPOD' : 'POD_RETURN_EXCLUDED_FROM_ANOMALY_AND_UNPOD',
+      outputContract: 'V202_REFERENCE_TEMPLATE_REAL_ATTEMPT_AND_TERMINAL_TRUTH_10_SHEETS'
     }
   };
 }
