@@ -47,7 +47,7 @@ must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(singleExportWorker, 'createV200ReferenceDashboardWorkbook');
 must(allBusinessChild, 'createV200ReferenceDashboardWorkbook');
 
-must(v202Truth, '2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v1');
+must(v202Truth, '2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v2');
 must(v202Truth, "code === '4003'");
 must(v202Truth, "code === '70'");
 must(v202Truth, "code === '150'");
@@ -56,6 +56,8 @@ must(v202Truth, 'Repeated START scans while the same attempt is still open never
 must(v202Truth, 'Only a NEW START after a failed attempt opens attempt 2/3+');
 must(v202Truth, 'Elapsed calendar days, code60 assignment and raw Pending count NEVER manufacture an attempt');
 must(v202Truth, "signDaySource = row.deliveryDays ? '下单时间→真实POD时间（自然日，首尾计1天）'");
+must(v202Truth, "status === 'W' || status === 'Y'");
+must(v202Truth, 'code60 never');
 
 must(shopeeAnalyzer, "from './shopeeAnalyzerV33.js'");
 must(shopeeAnalyzerV33, 'resolveV202AttemptCycle');
@@ -108,4 +110,4 @@ must(historyRefresh, '/api/v183/history-refresh/start');
 
 for (const source of [runner, pause, shell, storage, bstore]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] V202 gate passed: real delivery cycles own 1/2/3-attempt POD, order-to-POD natural days own signing averages, POD/return/cancel terminal rows are excluded from unPOD/anomalies, and one seven-business carry center owns selective refresh + latest status + export.');
+console.log('[GOLIVE] V202 gate passed: real delivery cycles own 1/2/3-attempt POD, daily W/Y and real 4003/70 are separated from assignment-only code60, order-to-POD natural days own signing averages, POD/return/cancel terminal rows are excluded from unPOD/anomalies, and one seven-business carry center owns selective refresh + latest status + export.');
