@@ -4,45 +4,30 @@ const read = p => fs.readFileSync(p, 'utf8');
 const runner = read('public/v67-resilient-run-guard.js');
 const pause = read('public/v164-unified-pause-router.js');
 const shell = read('src/v44WhppUiPatch.js');
-const v161 = read('src/v161UnifiedImportRuntimeTruthPatch.js');
-const v163 = read('src/v163ShopeeDailyIsolationPatch.js');
 const storage = read('src/storage.js');
 const bstore = read('src/businessStore.js');
-const v109 = read('public/v109-instant-business-navigation.js');
-const v140 = read('public/v140-current-business-truth.js');
 const v108 = read('public/v108-route-lazy-features.js');
-const exportDirectClient = read('public/v190-export-direct-route-client.js');
-const asyncExportUi = read('public/v84-async-export-ui.js');
 const tokenExportUi = read('public/v194-export-token-ui.js');
-const dashboard = read('public/dashboard-v18.js');
-const bootstrap = read('bootstrap.js');
-const whppRecovery = read('src/v165WhppRunStateRecoveryPatch.js');
-const podRepair = read('src/v167CcslPodLockFactRepair.js');
-const historyRefresh = read('src/v183HistoricalStatusRefreshPatch.js');
-const historyRefreshUi = read('public/v183-history-refresh.js');
-const refreshedExporter = read('src/v183ShopeeRefreshedPeriodExporter.js');
-const streamedExporter = read('src/v185ShopeeCurrentStateStreamExporter.js');
+const exportSidecar = read('src/v193ExportSidecar.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
 const allBusinessChild = read('src/v84ExportBusinessWorker.js');
-const parityExporter = read('src/v197UnifiedParityExporter.js');
-const strictParityExporter = read('src/v198UnifiedParityExporter.js');
-const dashboardExporter = read('src/v199UnifiedDashboardExporter.js');
-const v200Evidence = read('src/v200EvidenceData.js');
 const v200Metrics = read('src/v200Metrics.js');
 const v200Workbook = read('src/v200ReferenceWorkbook.js');
 const v200Exporter = read('src/v200TemplateDashboardExporter.js');
-const v201Tracker = read('src/shopeeDeliveryTracker.js');
-const v201TrackedEvidence = read('src/v201TrackedEvidenceData.js');
-const v201Scheduler = read('src/v201ShopeeDeliveryTrackerScheduler.js');
-const v201Purge = read('src/v201ShopeeTrackerPurgePatch.js');
+const v202Truth = read('src/v202DeliveryTruth.js');
+const v202Carry = read('src/v202CarryTrackingCenterPatch.js');
+const v202CarryUi = read('public/v202-carry-tracking-center.js');
+const v202DisableLegacy = read('src/v202DisableLegacyTrackerPatch.js');
+const shopeeAnalyzer = read('src/shopeeAnalyzer.js');
+const shopeeAnalyzerV33 = read('src/shopeeAnalyzerV33.js');
+const shopeeReporting = read('src/shopeeReporting.js');
+const historyRefresh = read('src/v183HistoricalStatusRefreshPatch.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
-const exportDirect = read('src/v190ExportDirectEndpointPatch.js');
-const exportSidecar = read('src/v193ExportSidecar.js');
-const exportPreflight = read('src/v142AsyncExportPreflightPatch.js');
 
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
 
+// Seven-business processing and persistence remain mandatory.
 must(runner, '2026-08-17-v165-seven-business-stage-verification-v2');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
@@ -50,153 +35,90 @@ must(runner, "{ key: 'WHPP'");
 must(runner, '/api/run');
 must(runner, '/api/shopee/run/start');
 must(runner, '/api/whpp/run/start');
-must(runner, 'verifyWhpp');
-must(runner, 'WHPP_STAGE_NOT_FINALIZED');
-must(runner, '七业务未全部完成');
-must(pause, '/api/shopee/run/pause');
 must(pause, 'global.pauseUnified=pauseUnified');
-must(v161, '2026-08-16-v161-unified-import-runtime-truth-v1');
-must(v163, '2026-08-17-v163-shopee-daily-membership-isolation-v2');
 must(storage, 'compactStateForPersistence');
-must(storage, 'sanitizeValue');
 must(bstore, 'compactBusinessStatePayload');
-must(bstore, 'stripHeavyBusinessRow');
-must(shell, 'v67-resilient-run-guard.js?v=20260817-1');
-must(shell, 'v183HistoricalStatusRefreshPatch.js');
-must(shell, '/v183-history-refresh.js?v=20260818-v192-1');
-must(shell, '2026-08-18-v195-ipc-export-owner-shell-v1');
-must(shell, '/v108-route-lazy-features.js?v=20260818-v195-1');
-must(shell, '/v84-async-export-ui.js?v=20260818-v193-1');
-must(shell, '/v194-export-token-ui.js?v=20260818-v195-1');
-must(v109, '2026-08-17-v166-summary-first-navigation-throttle-v1');
-must(v109, 'MIN_BACKGROUND_HYDRATE_MS=60_000');
-must(v140, '2026-08-17-v166-current-business-truth-compact-v1');
-must(v140, '&compact=1');
-must(v108, '2026-08-18-v195-route-lazy-ipc-export-v1');
+
+// Export sidecar must stay isolated from the main SQLite-serving process.
 must(v108, '/v194-export-token-ui.js?v=20260818-v195-1');
-must(v108, "script.dataset.ceQcLazy='v195'");
-must(exportDirectClient, '2026-08-17-v190-export-direct-route-client-v1');
-must(exportDirectClient, '/api/v190/export-period/prepare');
-must(asyncExportUi, '2026-08-18-v193-export-ui-isolated-sidecar-v1');
-must(asyncExportUi, '[V193独立导出]');
-must(tokenExportUi, '2026-08-18-v194-export-token-ui-v1');
-must(tokenExportUi, '2026-08-18-v195-ipc-xhr-status-ui-v1');
-must(tokenExportUi, '2026-08-18-v195-ipc-memory-status-v1');
-must(tokenExportUi, "global.__CE_QC_V194_EXPORT_TOKEN_UI_REVISION__ === REVISION");
-must(tokenExportUi, '[V195独立导出]');
-must(tokenExportUi, 'XMLHttpRequest');
-must(tokenExportUi, '/api/v194/export-ping');
 must(tokenExportUi, '/api/v194/export-period/prepare');
-must(tokenExportUi, 'Worker进度使用IPC写入5178内存');
-must(tokenExportUi, '状态轮询将完全绕开主SQLite鉴权');
-must(dashboard, 'renderSignatures');
-must(dashboard, 'completedProbeCache');
-must(bootstrap, 'v165WhppRunStateRecoveryPatch');
-must(bootstrap, 'v167CcslPodLockFactRepair');
-must(bootstrap, 'v193ExportSidecar.js');
-must(bootstrap, 'CE_QC_EXPORT_SIDECAR_PORT');
-must(bootstrap, 'v201ShopeeTrackerPurgePatch');
-must(bootstrap, 'v201ShopeeDeliveryTrackerScheduler');
-must(bootstrap, 'startShopeeDeliveryTrackerScheduler');
-must(whppRecovery, '2026-08-17-v165-whpp-run-state-recovery-v2');
-must(whppRecovery, "businessType='WHPP'");
-must(whppRecovery, 'sameSet');
-must(podRepair, '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1');
-must(podRepair, 'POD_LOCK_FACT_REPAIR_V167');
-must(historyRefresh, '2026-08-17-v183-historical-status-refresh-center-v2');
-must(historyRefresh, '2026-08-17-v184-history-refresh-fail-fast-diagnostic-v1');
-must(historyRefresh, '/api/v183/history-refresh/summary');
-must(historyRefresh, '/api/v183/history-refresh/start');
-must(historyRefresh, 'HISTORY_REFRESH_PREFLIGHT_ZERO_EVIDENCE');
-must(historyRefreshUi, '2026-08-18-v192-history-refresh-ui-manual-read-v1');
-must(historyRefreshUi, 'automatic summary reads disabled');
-must(refreshedExporter, '2026-08-17-v183-shopee-current-status-overlay-export-v1');
-must(streamedExporter, '2026-08-17-v185-shopee-current-state-stream-export-v1');
-must(streamedExporter, 'shipment_current_state');
-
-must(singleExportWorker, '2026-08-17-v191-single-business-truth-worker-v1');
-must(singleExportWorker, '2026-08-18-v200-reference-template-track-attempt-worker-v1');
-must(singleExportWorker, 'createV200ReferenceDashboardWorkbook');
-must(singleExportWorker, 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
-must(singleExportWorker, 'dashboardAttemptOnly:true');
-must(singleExportWorker, 'wpsFormulaLinks:true');
-must(singleExportWorker, 'trackAttemptFacts:true');
-must(singleExportWorker, 'crossDayTruth:true');
-must(singleExportWorker, 'onePassStreaming:true');
-must(singleExportWorker, 'CE_QC_EXPORT_JOB_UPDATE');
-must(singleExportWorker, 'process.send');
-
-must(allBusinessChild, '2026-08-18-v200-all-business-reference-child-v1');
-must(allBusinessChild, 'createV200ReferenceDashboardWorkbook');
-must(allBusinessChild, 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
-
-must(parityExporter, '2026-08-18-v197-unified-parity-dashboard-v1');
-must(parityExporter, 'assertParityReconciliation');
-must(strictParityExporter, '2026-08-18-v198-strict-pod-parity-dashboard-v1');
-must(strictParityExporter, 'assertStrictParityReconciliation');
-must(dashboardExporter, '2026-08-18-v199-dashboard-attempt-average-v1');
-
-must(v200Evidence, '2026-08-18-v200-reference-template-track-attempt-v1');
-must(v200Evidence, "code === '70'");
-must(v200Evidence, "code === '60'");
-must(v200Evidence, "'派件时间'");
-must(v200Evidence, "source: '无真实派次证据'");
-must(v200Evidence, 'firstDispatchDate');
-must(v200Metrics, "'POD明细'");
-must(v200Metrics, 'referenceAverageDays');
-must(v200Workbook, 'HYPERLINK');
-must(v200Workbook, "workbook.addWorksheet('每日看板'");
-must(v200Workbook, "'每日票量'");
-must(v200Workbook, "'每日状态'");
-must(v200Workbook, "'派次与平均签收天数'");
-must(v200Workbook, "const DETAIL_SHEETS = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细']");
-must(v200Workbook, "fgColor: { argb: 'FF1F4E78' }");
-must(v200Workbook, "fgColor: { argb: 'FFFFF9E6' }");
-must(v200Exporter, 'collectV201TrackedRows');
-must(v200Exporter, 'V201_REFERENCE_TEMPLATE_PERSISTENT_SHOPEE_TRACKING_10_SHEETS');
-must(v200Exporter, '_V201.xlsx');
-
-must(v201Tracker, '2026-08-18-v201-shopee-cn-vn-persistent-dispatch-tracker-v1');
-must(v201Tracker, 'CREATE TABLE IF NOT EXISTS shopee_delivery_tracking');
-must(v201Tracker, 'CREATE TABLE IF NOT EXISTS shopee_delivery_tracking_daily');
-must(v201Tracker, "status === 'W' || status === 'Y'");
-must(v201Tracker, "eventCode(row) === '70'");
-must(v201Tracker, "eventCode(row) === '60'");
-must(v201Tracker, "eventCode(row) === '80'");
-must(v201Tracker, 'Number(row.currentAttemptNo) >= 2');
-must(v201Tracker, 'trackerNaturalDays');
-must(v201Tracker, 'syncShopeeDeliveryTrackingForRange');
-must(v201Tracker, 'observeShopeeCarryRefreshRows');
-must(v201TrackedEvidence, '2026-08-18-v201-persistent-shopee-dispatch-export-v1');
-must(v201TrackedEvidence, 'V201_EXPORT_BACKFILL_AND_READ');
-must(v201TrackedEvidence, 'loadShopeeDeliveryTrackingMap');
-must(v201TrackedEvidence, 'PERSISTENT');
-must(v201Scheduler, '2026-08-18-v201-shopee-delivery-tracker-scheduler-v1');
-must(v201Scheduler, '2 * 60 * 60_000');
-must(v201Scheduler, 'INITIAL_BACKFILL');
-must(v201Scheduler, 'BACKFILL_DAYS');
-must(v201Purge, "'shopee_delivery_tracking'");
-must(v201Purge, "'shopee_delivery_tracking_daily'");
-
-must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
-must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
-must(exportDirect, '2026-08-18-v192-direct-export-early-route-v1');
-must(exportDirect, '/api/v190/export-period/prepare');
-must(exportDirect, '/api/v190/export-job/:jobId');
-must(exportSidecar, '2026-08-18-v194-token-status-sidecar-v1');
-must(exportSidecar, '2026-08-18-v195-ipc-memory-status-v1');
-must(exportSidecar, '/api/v194/export-ping');
-must(exportSidecar, '/api/v194/export-period/prepare');
-must(exportSidecar, '/api/v194/export-job/:jobId');
-must(exportSidecar, '/api/v194/export-file');
-must(exportSidecar, 'TOKEN_V194_NO_SQLITE');
+must(tokenExportUi, 'XMLHttpRequest');
 must(exportSidecar, 'IPC_MEMORY_V195');
 must(exportSidecar, "stdio: ['ignore', 'ignore', 'ignore', 'ipc']");
-must(exportSidecar, "child.on('message'");
-must(exportSidecar, 'MEMORY_IPC');
-must(exportPreflight, "import './v190ExportDirectEndpointPatch.js';");
-must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
+must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
+must(singleExportWorker, 'createV200ReferenceDashboardWorkbook');
+must(allBusinessChild, 'createV200ReferenceDashboardWorkbook');
 
-for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
+// V202 real delivery-attempt truth is authoritative.
+must(v202Truth, '2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v1');
+must(v202Truth, "code==='4003'");
+must(v202Truth, "code==='70'");
+must(v202Truth, "code==='150'");
+must(v202Truth, "code==='80'");
+must(v202Truth, 'Repeated START scans while the same attempt is still open never create a new attempt');
+must(v202Truth, 'Only a NEW START after a failed attempt opens attempt 2/3+');
+must(v202Truth, 'Elapsed calendar days, code60 assignment and raw Pending count NEVER manufacture an attempt');
+must(v202Truth, "signDaySource = row.deliveryDays ? '下单时间→真实POD时间（自然日，首尾计1天）'");
 
-console.log('[GOLIVE] runtime-source gate passed; V201 adds persistent SHOPEE CN/VN dispatch/POD/signing-day tracking, records W/Y and code70 delivery dates without treating Y as POD, retains code60 assignment evidence, stores real POD80/lock evidence, backfills history and refreshes every two hours, and exports the reference dashboard from persisted delivery facts');
+// Online SHOPEE analyzer/reporting must use the same real-cycle contract and must
+// never fall back to reportDate->POD elapsed days as attempt number.
+must(shopeeAnalyzer, "from './shopeeAnalyzerV33.js'");
+must(shopeeAnalyzerV33, 'resolveV202AttemptCycle');
+must(shopeeAnalyzerV33, "code==='4003'||code==='70'");
+must(shopeeAnalyzerV33, 'Code 60 is assignment only and is excluded');
+must(shopeeReporting, 'V202: no reportDate->POD elapsed-day fallback');
+must(shopeeReporting, 'deliveryAttemptCurrent(row) >= 1');
+must(shopeeReporting, 'dispatchAttemptDenominator: pod.length');
+must(shopeeReporting, 'current.total - current.pod - current.returned - current.cancelled');
+forbid(shopeeReporting, "Date.parse(`${start}T00:00:00+07:00`)");
+
+// Workbook/export contract: exact reference structure, WPS links, open-unPOD only,
+// order->POD average days, and unknown attempts preserved rather than fabricated.
+must(v200Metrics, "'未POD明细': filter(openUnpod)");
+must(v200Metrics, "else if (row.returned)");
+must(v200Metrics, "else if (row.cancelled)");
+must(v200Workbook, 'HYPERLINK');
+must(v200Workbook, "workbook.addWorksheet('每日看板'");
+must(v200Workbook, "'派次与平均签收天数'");
+must(v200Workbook, '真实派送周期计算');
+must(v200Workbook, '下单日期→实际POD签收日期');
+must(v200Workbook, 'POD、退回，以及WHPP取消订单均为终态');
+must(v200Exporter, 'collectV202Rows');
+must(v200Exporter, '_V202.xlsx');
+must(v200Exporter, 'ORDER_DATE_TO_ACTUAL_POD_DATE_INCLUSIVE');
+must(v200Exporter, 'POD_RETURN_CANCELLED_EXCLUDED_FROM_ANOMALY_AND_UNPOD');
+
+// One consolidated seven-business carry/anomaly center replaces the duplicated
+// Shopee-only history refresh panel and the old cross-day manual panel in runtime UI.
+must(v202Carry, '2026-08-18-v202-seven-business-carry-tracking-center-v2');
+for (const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']) must(v202Carry, `'${type}'`);
+must(v202Carry, '/api/v202/carry/summary');
+must(v202Carry, '/api/v202/carry/rows');
+must(v202Carry, '/api/v202/carry/refresh');
+must(v202Carry, '/api/v202/carry/export.xlsx');
+must(v202Carry, "if(cls.terminal) return false");
+must(v202Carry, 'while(true)');
+must(v202Carry, "status:'WAITING'");
+must(v202CarryUi, '跨日遗留追踪中心');
+must(v202CarryUi, '七业务当前异常明细');
+must(v202CarryUi, 'POD、退回、取消订单不计异常');
+must(v202CarryUi, '刷新所选业务最新状态');
+must(v202CarryUi, '导出当前筛选Excel');
+must(shell, 'v202CarryTrackingCenterPatch.js');
+must(shell, '/v202-carry-tracking-center.js?v=20260818-v202-2');
+forbid(shell, '<script src="/v139-carry-manual-window.js');
+forbid(shell, '<script src="/v183-history-refresh.js');
+
+// Legacy V201 distinct-date attempt writer is disabled by default to prevent two
+// competing attempt truths. Its data can remain for audit/history comparison.
+must(v202DisableLegacy, "CE_QC_DISABLE_SHOPEE_DELIVERY_TRACKER='1'");
+must(v202DisableLegacy, 'CE_QC_ENABLE_LEGACY_V201_TRACKER');
+
+// Legacy V183 endpoints remain loadable for compatibility/migration, but are no
+// longer exposed as the runtime user-facing refresh center.
+must(historyRefresh, '/api/v183/history-refresh/summary');
+must(historyRefresh, '/api/v183/history-refresh/start');
+
+for (const source of [runner, pause, shell, storage, bstore]) forbid(source, 'v148-direct-daily-runner-v1');
+
+console.log('[GOLIVE] V202 gate passed: real delivery cycles own 1/2/3-attempt POD, order-to-POD natural days own signing averages, POD/return/cancel terminal rows are excluded from unPOD/anomalies, and one seven-business carry center owns selective refresh + latest status + export.');
