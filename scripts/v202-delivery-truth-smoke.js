@@ -43,11 +43,14 @@ const rows=[
   {shipmentCode:'POD1',firstReportDate:'2026-08-01',area:'金边',pod:true,returned:false,cancelled:false,terminalNormal:true,openUnpod:false,attemptNo:1,orderTime:'2026-08-01',podTime:'2026-08-01',deliveryDays:1},
   {shipmentCode:'RET1',firstReportDate:'2026-08-01',area:'外省',pod:false,returned:true,cancelled:false,terminalNormal:true,openUnpod:false},
   {shipmentCode:'CAN1',firstReportDate:'2026-08-01',area:'外省',pod:false,returned:false,cancelled:true,terminalNormal:true,openUnpod:false},
-  {shipmentCode:'OPEN1',firstReportDate:'2026-08-01',area:'金边',pod:false,returned:false,cancelled:false,terminalNormal:false,openUnpod:true,pending:true}
+  {shipmentCode:'OPEN1',firstReportDate:'2026-08-01',area:'金边',pod:false,returned:false,cancelled:false,terminalNormal:false,openUnpod:true,pending:true},
+  {shipmentCode:'MANUAL1',firstReportDate:'2026-08-01',area:'外省',pod:false,returned:false,cancelled:false,terminalNormal:false,openUnpod:true,metricEligible:false,manualEvidence:true}
 ];
 const bucket=bucketRows(rows);
-must(bucket['未POD明细'].length===1 && bucket['未POD明细'][0].shipmentCode==='OPEN1','未POD明细 must exclude POD, returned and cancelled terminal rows');
+must(bucket['未POD明细'].some(row=>row.shipmentCode==='MANUAL1'),'manual evidence must be included in exported open-unPOD detail');
 const stats=statsOf(rows,{from:'2026-08-01',to:'2026-08-01'}).overall;
-must(stats.notPod===1 && stats.returned===1 && stats.cancelled===1,'terminal and open-unPOD counts must be mutually exclusive');
-must(V202_DELIVERY_TRUTH_VERSION==='2026-08-18-v202-real-delivery-cycle-and-order-to-pod-v2','unexpected V202 delivery truth version');
-console.log('[V202] real delivery cycles, order-to-POD average and terminal exclusion smoke passed');
+must(stats.total===4,'manual evidence-only row must not inflate official daily denominator');
+must(stats.evidenceOnly===1,'manual evidence-only row must be counted separately');
+must(stats.notPod===1 && stats.returned===1 && stats.cancelled===1,'terminal and official open-unPOD counts must be mutually exclusive');
+must(V202_DELIVERY_TRUTH_VERSION==='2026-08-18-v203-real-delivery-cycle-manual-evidence-v3','unexpected V203 delivery truth version');
+console.log('[V203] real delivery cycles, order-to-POD average, terminal exclusion and manual-evidence KPI isolation smoke passed');
