@@ -142,8 +142,6 @@ function applyAnalysisRow(entry, row = {}, reportDate = '', source = '分析结�
   entry.podAttemptNo = Math.max(entry.podAttemptNo, positiveAttempt(row.podAttemptNo));
   entry.currentAttemptNo = Math.max(entry.currentAttemptNo, positiveAttempt(row.currentAttemptNo, row.派次, row.attemptNo));
   applyAttemptHistory(entry, row.attemptHistoryJson);
-  const firstAttemptAt = String(firstValue(row, ['firstAttemptAt']) || '').trim();
-  if (dateKey(firstAttemptAt)) entry.deliveryDates.add(dateKey(firstAttemptAt));
   const podLike = Number(row.isPod || 0) === 1 || row.是否POD === '是' || String(row.orderStatus || '') === '85' || String(row.currentState || row.scanNormalizedState || '').toUpperCase() === 'POD' || POD_RE.test(entry.statusDesc);
   if (podLike) {
     entry.pod = true;
