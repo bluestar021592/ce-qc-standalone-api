@@ -1,10 +1,10 @@
-(function installAsyncExportUiV187(global) {
-  if (global.__CE_QC_V187_ASYNC_EXPORT_UI_INSTALLED__) return;
-  global.__CE_QC_V187_ASYNC_EXPORT_UI_INSTALLED__ = true;
+(function installAsyncExportUiV191(global) {
+  if (global.__CE_QC_V191_ASYNC_EXPORT_UI_INSTALLED__) return;
+  global.__CE_QC_V191_ASYNC_EXPORT_UI_INSTALLED__ = true;
 
-  const VERSION = '2026-08-17-v187-export-ui-exclusive-dom-owner-v1';
-  const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v187';
-  const LEGACY_JOB_KEYS = ['ce_qc_active_export_job_v180','ce_qc_active_export_job_v186'];
+  const VERSION = '2026-08-18-v191-export-ui-hard-direct-v1';
+  const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v191';
+  const LEGACY_JOB_KEYS = ['ce_qc_active_export_job_v180','ce_qc_active_export_job_v186','ce_qc_active_export_job_v187'];
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pollingJobId = '';
   let pollEpoch = 0;
@@ -44,50 +44,57 @@
   function claimExclusiveDom() {
     ensureBusinessOptions();
     const legacyProgress = document.getElementById('exportProgress');
-    let progress = document.getElementById('exportProgressV187');
+    let progress = document.getElementById('exportProgressV187') || document.getElementById('exportProgressV191');
     if (legacyProgress) {
       legacyProgress.hidden = true;
       legacyProgress.setAttribute('aria-hidden', 'true');
       legacyProgress.dataset.ceQcRetiredExportUi = '1';
       if (!progress) {
         progress = document.createElement('div');
-        progress.id = 'exportProgressV187';
+        progress.id = 'exportProgressV191';
         progress.className = legacyProgress.className || 'operation-status';
-        progress.dataset.ceQcExportOwner = 'v187';
+        progress.dataset.ceQcExportOwner = 'v191';
         legacyProgress.insertAdjacentElement('afterend', progress);
+      } else {
+        progress.id = 'exportProgressV191';
+        progress.dataset.ceQcExportOwner = 'v191';
       }
     }
 
     const legacyFiles = document.getElementById('exportGeneratedFiles');
-    let files = document.getElementById('exportGeneratedFilesV187');
+    let files = document.getElementById('exportGeneratedFilesV187') || document.getElementById('exportGeneratedFilesV191');
     if (legacyFiles) {
       legacyFiles.hidden = true;
       legacyFiles.setAttribute('aria-hidden', 'true');
       legacyFiles.dataset.ceQcRetiredExportUi = '1';
       if (!files) {
         files = document.createElement('div');
-        files.id = 'exportGeneratedFilesV187';
+        files.id = 'exportGeneratedFilesV191';
         files.className = legacyFiles.className || 'export-file-list';
-        files.dataset.testid = 'export-generated-files-v187';
-        files.dataset.ceQcExportOwner = 'v187';
+        files.dataset.testid = 'export-generated-files-v191';
+        files.dataset.ceQcExportOwner = 'v191';
         legacyFiles.insertAdjacentElement('afterend', files);
+      } else {
+        files.id = 'exportGeneratedFilesV191';
+        files.dataset.testid = 'export-generated-files-v191';
+        files.dataset.ceQcExportOwner = 'v191';
       }
     }
 
     let button = document.querySelector('[data-testid="export-all-reports"]');
-    if (button && button.dataset.ceQcExportOwner !== 'v187') {
+    if (button && button.dataset.ceQcExportOwner !== 'v191') {
       const clone = button.cloneNode(true);
       clone.removeAttribute('onclick');
-      clone.dataset.ceQcExportOwner = 'v187';
+      clone.dataset.ceQcExportOwner = 'v191';
       button.replaceWith(clone);
       clone.addEventListener('click', event => {
         event.preventDefault();
         event.stopImmediatePropagation();
-        void exportPeriodReportV187();
+        void exportPeriodReportV191();
       }, true);
       button = clone;
     }
-    document.documentElement.dataset.ceQcExportUiOwner = 'v187';
+    document.documentElement.dataset.ceQcExportUiOwner = 'v191';
     return { progress, files, button };
   }
 
@@ -109,12 +116,12 @@
     } catch {}
   }
 
-  async function json(url, init = {}, timeoutMs = 15000) {
+  async function json(url, init = {}, timeoutMs = 15000, timeoutLabel = '接口') {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     timeout.unref?.();
     try {
-      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal, ...init });
+      const response = await global.fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal, ...init });
       const raw = await response.text();
       let payload = {};
       try { payload = raw ? JSON.parse(raw) : {}; } catch {}
@@ -127,7 +134,7 @@
       return payload;
     } catch (error) {
       if (error?.name === 'AbortError') {
-        const timeoutError = new Error(`状态接口${Math.round(timeoutMs / 1000)}秒内未响应`);
+        const timeoutError = new Error(`${timeoutLabel}${Math.round(timeoutMs / 1000)}秒内未响应`);
         timeoutError.code = 'POLL_TIMEOUT';
         throw timeoutError;
       }
@@ -178,7 +185,7 @@
     if (!jobId) throw new Error('后台没有返回导出任务编号');
     const myEpoch = ++pollEpoch;
     pollingJobId = jobId;
-    const pollUrl = suppliedPollUrl || `/api/v84/export-job/${encodeURIComponent(jobId)}`;
+    const pollUrl = suppliedPollUrl || `/api/v190/export-job/${encodeURIComponent(jobId)}`;
     let networkErrors = 0;
     let lastSignature = '';
     let unchangedCycles = 0;
@@ -186,7 +193,7 @@
     try {
       while (myEpoch === pollEpoch) {
         try {
-          const job = await json(pollUrl, {}, 15000);
+          const job = await json(pollUrl, {}, 15000, '导出状态接口');
           if (myEpoch !== pollEpoch) return { cancelled: true };
           networkErrors = 0;
           lastGoodAt = Date.now();
@@ -197,13 +204,13 @@
           const worker = job.workerVersion ? ` · ${String(job.workerVersion).includes('v185') ? 'V185' : job.workerVersion}` : '';
           const signature = `${status}|${pct}|${job.currentBusiness || ''}|${job.message || ''}`;
           if (signature === lastSignature) unchangedCycles += 1; else { lastSignature = signature; unchangedCycles = 0; }
-          setProgressText(progress, `[V187唯一进度] Job ${jobId} · ${job.message || '后台生成中'} · ${pct}%${part}${mode}${worker}`);
+          setProgressText(progress, `[V191直连进度] Job ${jobId} · ${job.message || '后台生成中'} · ${pct}%${part}${mode}${worker}`);
           if (status === 'COMPLETED') {
             const readyFiles = Array.isArray(job.files) ? job.files.filter(item => item?.url && item?.name) : [];
             if (!readyFiles.length) throw new Error('后台任务已完成，但没有返回可下载文件');
             renderFiles(files, readyFiles);
             clearActiveJob(jobId);
-            setProgressText(progress, `[V187唯一进度] Job ${jobId} · 生成完成：共 ${readyFiles.length} 个完整文件，可直接下载`);
+            setProgressText(progress, `[V191直连进度] Job ${jobId} · 生成完成：共 ${readyFiles.length} 个完整文件，可直接下载`);
             return { ...job, files: readyFiles };
           }
           if (status === 'FAILED' || status === 'CANCELLED') {
@@ -218,7 +225,7 @@
           if (/后台任务已完成，但没有返回可下载文件/.test(String(error.message || ''))) throw error;
           networkErrors += 1;
           const disconnectedSeconds = Math.max(1, Math.floor((Date.now() - lastGoodAt) / 1000));
-          setProgressText(progress, `[V187唯一进度] Job ${jobId} · 状态连接暂时中断 ${disconnectedSeconds} 秒，后台任务仍保留；正在恢复（第 ${networkErrors} 次）…`);
+          setProgressText(progress, `[V191直连进度] Job ${jobId} · 状态连接暂时中断 ${disconnectedSeconds} 秒，后台任务仍保留；正在恢复（第 ${networkErrors} 次）…`);
         }
         await sleep(pollDelay(unchangedCycles, networkErrors));
       }
@@ -228,7 +235,7 @@
     }
   }
 
-  async function exportPeriodReportV187() {
+  async function exportPeriodReportV191() {
     const owned = claimExclusiveDom();
     const { progress, files, button } = owned;
     if (!progress || !files) return;
@@ -238,58 +245,60 @@
     files.innerHTML = '';
     const originalButtonText = button?.textContent || '';
     if (button) { button.disabled = true; button.textContent = '后台生成中…'; }
-    progress.textContent = payload.businessType === 'ALL'
-      ? '[V187唯一进度] 正在创建7业务后台完整报表任务…'
-      : `[V187唯一进度] 正在创建 ${payload.businessType} V185独立流式完整报表任务；最终只生成1个Excel…`;
+    const singleBusiness = String(payload.businessType || 'ALL').toUpperCase() !== 'ALL';
+    const prepareUrl = singleBusiness ? '/api/v190/export-period/prepare' : '/api/export-period/prepare';
+    progress.textContent = singleBusiness
+      ? `[V191直连进度] 正在通过V190专用通道创建 ${payload.businessType} V185独立流式完整报表任务…`
+      : '[V191直连进度] 正在创建7业务后台完整报表任务…';
     try {
-      const start = await json('/api/export-period/prepare', {
+      const start = await json(prepareUrl, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload)
-      }, 20000);
+      }, singleBusiness ? 8000 : 20000, singleBusiness ? 'V190导出创建接口' : '七业务导出创建接口');
       const readyFiles = Array.isArray(start.files) ? start.files.filter(item => item?.url && item?.name) : [];
       if (readyFiles.length) {
         renderFiles(files, readyFiles);
         clearActiveJob();
-        progress.textContent = `[V187唯一进度] 完整报表已生成：共 ${readyFiles.length} 个文件`;
+        progress.textContent = `[V191直连进度] 完整报表已生成：共 ${readyFiles.length} 个文件`;
         return;
       }
       const jobId = String(start.jobId || '').trim();
-      const pollUrl = String(start.pollUrl || '').trim();
+      const pollUrl = String(start.pollUrl || '').trim() || (singleBusiness ? `/api/v190/export-job/${encodeURIComponent(jobId)}` : `/api/v84/export-job/${encodeURIComponent(jobId)}`);
       if (!jobId) throw new Error('报表请求已提交，但服务器没有返回后台任务编号');
       saveActiveJob(jobId, payload, pollUrl);
       const initialPct = Math.max(0, Math.min(100, Number(start.progress || 0)));
-      progress.textContent = `[V187唯一进度] Job ${jobId} · ${start.message || '后台完整报表任务已创建'} · ${initialPct}%${start.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : ''}`;
+      progress.textContent = `[V191直连进度] Job ${jobId} · ${start.message || '后台完整报表任务已创建'} · ${initialPct}%${start.workerMode === 'SINGLE_BUSINESS_DIRECT' ? ' · 独立单进程' : ''}`;
       await waitForJob(jobId, progress, files, pollUrl);
     } catch (error) {
-      progress.textContent = `[V187唯一进度] 导出失败：${error.message}`;
+      progress.textContent = `[V191直连进度] 导出失败：${error.message}`;
     } finally {
       if (button) { button.disabled = false; button.textContent = originalButtonText || '一键导出全部报表'; }
     }
   }
 
-  async function resumeActiveJobV187() {
+  async function resumeActiveJobV191() {
     const active = loadActiveJob();
     if (!active?.jobId) return;
     const { progress, files } = claimExclusiveDom();
     if (!progress || !files) return;
     cancelCurrentPoll();
-    progress.textContent = `[V187唯一进度] 检测到当前完整报表任务 ${active.jobId}，正在恢复唯一进度通道…`;
+    progress.textContent = `[V191直连进度] 检测到当前完整报表任务 ${active.jobId}，正在恢复唯一进度通道…`;
     try { await waitForJob(active.jobId, progress, files, active.pollUrl || ''); }
     catch (error) {
       if (Number(error.status || 0) === 404) clearActiveJob(active.jobId);
-      progress.textContent = `[V187唯一进度] 恢复导出任务失败：${error.message}`;
+      progress.textContent = `[V191直连进度] 恢复导出任务失败：${error.message}`;
     }
   }
 
   retirePreviousController();
   clearLegacyJobs();
   claimExclusiveDom();
-  global.exportPeriodReport = exportPeriodReportV187;
-  global.exportPeriodReportV187 = exportPeriodReportV187;
-  global.resumeActiveExportJob = resumeActiveJobV187;
+  global.exportPeriodReport = exportPeriodReportV191;
+  global.exportPeriodReportV191 = exportPeriodReportV191;
+  global.resumeActiveExportJob = resumeActiveJobV191;
   global.__CE_QC_V84_ASYNC_EXPORT_UI__ = { version: VERSION, pollDelay, waitForJob, cancelCurrentPoll, activeJobKey: ACTIVE_JOB_KEY, claimExclusiveDom };
   document.addEventListener('click', event => {
     if (event.target?.closest?.('[data-page="reports"],.side-link')) setTimeout(() => claimExclusiveDom(), 0);
   }, true);
-  setTimeout(() => { claimExclusiveDom(); void resumeActiveJobV187(); }, 80);
-  console.info('[CE-QC][V187_EXPORT_UI_OWNER]', VERSION);
+  setTimeout(() => { claimExclusiveDom(); void resumeActiveJobV191(); }, 80);
+  console.info('[CE-QC][V191_EXPORT_UI_DIRECT]', VERSION);
 })(window);
