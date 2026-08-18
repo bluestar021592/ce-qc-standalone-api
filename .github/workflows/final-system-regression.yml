@@ -32,9 +32,19 @@ jobs:
           node --check src/analyzer.js
           node --check src/shopeeAnalyzerV30.js
           node --check src/shopeeAnalyzerV31.js
+          node --check src/v205CanonicalTruth.js
+          node --check src/v205ExportTruth.js
+          node --check src/v206ShopeePrecisionTruth.js
+          node --check src/v203DashboardIntegrityPatch.js
+          node --check src/v200TemplateDashboardExporter.js
+          node --check src/v200ReferenceWorkbook.js
+          node --check src/v44WhppUiPatch.js
+          node --check public/v206-shopee-precision.js
           node --check src/reporting.js
           node --check src/rangeDashboardStoreFinal.js
           node --check src/rangeDashboardStore.js
           node --check scripts/CE_QC_Production_Audit.mjs
+      - name: Shopee precision timing regression
+        run: node --test test/v206-shopee-precision.test.js
       - name: Final state-machine regression
         run: node --test test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js
