@@ -19,6 +19,9 @@ function meta(db, key) {
 function setMeta(db, key, value) {
   db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(key, String(value ?? ''), nowIso());
 }
+function safeJson(value, fallback = {}) {
+  try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); } catch { return fallback; }
+}
 function dateMinusDays(date, days) {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - Math.max(0, Number(days || 0)));
@@ -35,6 +38,18 @@ function latestCompletedRange(db) {
   if (currentVersion !== SHOPEE_DELIVERY_TRACKER_VERSION || !trackedCount) return { from: dateMinusDays(latest, BACKFILL_DAYS - 1), to: latest, mode: 'INITIAL_BACKFILL' };
   return { from: dateMinusDays(latest, 7), to: latest, mode: 'INCREMENTAL_8_DAYS' };
 }
+function carryAnalysisRows(db, range) {
+  try {
+    return db.prepare(`SELECT shipmentCode,businessType,sourceReportDate,lastReportDate,status,stateJson FROM carryover_open_items WHERE businessType IN ('SHOPEECN','SHOPEEVN') AND sourceReportDate<=? AND lastReportDate>=?`).all(range.to, range.from).map(row => ({
+      ...safeJson(row.stateJson, {}),
+      shipmentCode: row.shipmentCode,
+      businessType: row.businessType,
+      sourceReportDate: row.sourceReportDate,
+      reportDate: row.lastReportDate,
+      carryStatus: row.status
+    }));
+  } catch { return []; }
+}
 
 export function runShopeeDeliveryTrackerSync({ reason = 'SCHEDULED' } = {}) {
   if (inFlight) return { ok: true, skipped: true, reason: 'ALREADY_RUNNING' };
@@ -44,17 +59,19 @@ export function runShopeeDeliveryTrackerSync({ reason = 'SCHEDULED' } = {}) {
     ensureShopeeDeliveryTrackingSchema(db);
     const range = latestCompletedRange(db);
     if (!range) return { ok: true, skipped: true, reason: 'NO_SHOPEE_COMPLETED_SNAPSHOT' };
+    const carryRows = carryAnalysisRows(db, range);
     const result = syncShopeeDeliveryTrackingForRange({
       db,
       fromDate: range.from,
       toDate: range.to,
       businessTypes: ['SHOPEECN','SHOPEEVN'],
-      reason: `${reason}:${range.mode}`
+      analysisRows: carryRows,
+      reason: `${reason}:${range.mode}:CARRY_ROWS=${carryRows.length}`
     });
     setMeta(db, 'shopee_delivery_tracker_scheduler_last_at', nowIso());
-    setMeta(db, 'shopee_delivery_tracker_scheduler_last_result', JSON.stringify({ ...result, mode: range.mode }).slice(0, 4000));
-    console.log('[CE-QC][V201_SHOPEE_TRACKER]', JSON.stringify({ reason, mode: range.mode, from: range.from, to: range.to, tracked: result.tracked, pod: result.pod, a1: result.a1, a2: result.a2, a3: result.a3, unknown: result.attemptUnknown, validSignDays: result.validSignDays }));
-    return { ok: true, ...result, mode: range.mode };
+    setMeta(db, 'shopee_delivery_tracker_scheduler_last_result', JSON.stringify({ ...result, mode: range.mode, carryRows: carryRows.length }).slice(0, 4000));
+    console.log('[CE-QC][V201_SHOPEE_TRACKER]', JSON.stringify({ reason, mode: range.mode, from: range.from, to: range.to, carryRows: carryRows.length, tracked: result.tracked, pod: result.pod, a1: result.a1, a2: result.a2, a3: result.a3, unknown: result.attemptUnknown, validSignDays: result.validSignDays }));
+    return { ok: true, ...result, mode: range.mode, carryRows: carryRows.length };
   } catch (error) {
     try { setMeta(db, 'shopee_delivery_tracker_scheduler_last_error', String(error?.message || error).slice(0, 2000)); } catch {}
     console.error('[CE-QC][V201_SHOPEE_TRACKER_FAILED]', error?.stack || error);
