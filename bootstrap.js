@@ -1,4 +1,6 @@
 import express from 'express';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
 
@@ -8,6 +10,32 @@ const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
 if (!process.env.DASHBOARD_CACHE_REFRESH_MS) process.env.DASHBOARD_CACHE_REFRESH_MS = String(2 * 60 * 60 * 1000);
 if (!process.env.DASHBOARD_CACHE_WARM_DAYS) process.env.DASHBOARD_CACHE_WARM_DAYS = '7';
 if (!process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS) process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = '120000';
+if (!process.env.CE_QC_EXPORT_SIDECAR_PORT) process.env.CE_QC_EXPORT_SIDECAR_PORT = '5178';
+
+let exportSidecarChild = null;
+function startExportSidecar() {
+  if (String(process.env.CE_QC_EXPORT_SIDECAR_CHILD || '') === '1') return;
+  const file = fileURLToPath(new URL('./src/v193ExportSidecar.js', import.meta.url));
+  try {
+    exportSidecarChild = spawn(process.execPath, [file], {
+      cwd: process.cwd(),
+      env: { ...process.env, CE_QC_EXPORT_SIDECAR_CHILD: '1' },
+      windowsHide: true,
+      detached: false,
+      stdio: ['ignore', 'inherit', 'inherit']
+    });
+    console.log(`[CE-QC][BOOT] V193 isolated export sidecar starting pid=${exportSidecarChild.pid || '-'} port=${process.env.CE_QC_EXPORT_SIDECAR_PORT}`);
+    exportSidecarChild.once('error', error => console.error('[CE-QC][BOOT] V193 export sidecar spawn failed:', error?.stack || error));
+    exportSidecarChild.once('exit', (code, signal) => {
+      console.log(`[CE-QC][BOOT] V193 export sidecar exited code=${code ?? 'null'}${signal ? ` signal=${signal}` : ''}`);
+      exportSidecarChild = null;
+    });
+  } catch (error) {
+    console.error('[CE-QC][BOOT] V193 export sidecar start failed:', error?.stack || error);
+  }
+}
+process.once('exit', () => { try { exportSidecarChild?.kill(); } catch {} });
+startExportSidecar();
 
 function wrapHandler(handler) {
   if (typeof handler !== 'function') return handler;
