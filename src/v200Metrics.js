@@ -15,9 +15,13 @@ function signingDays(row = {}) {
   return referenceAverageDays(row.orderTime, row.podTime || row.podDate);
 }
 function emptyStat(date = '') {
-  return { date, total: 0, pp: 0, pv: 0, unknown: 0, store: 0, pod: 0, notPod: 0, delivery: 0, pending: 0, returned: 0, cancelled: 0, terminal: 0, a1: 0, a2: 0, a3: 0, attemptUnknown: 0, days: [], ppDays: [], pvDays: [], ppPod: 0, pvPod: 0, ppA1: 0, ppA2: 0, ppA3: 0, pvA1: 0, pvA2: 0, pvA3: 0 };
+  return { date, total: 0, evidenceOnly: 0, pp: 0, pv: 0, unknown: 0, store: 0, pod: 0, notPod: 0, delivery: 0, pending: 0, returned: 0, cancelled: 0, terminal: 0, a1: 0, a2: 0, a3: 0, attemptUnknown: 0, days: [], ppDays: [], pvDays: [], ppPod: 0, pvPod: 0, ppA1: 0, ppA2: 0, ppA3: 0, pvA1: 0, pvA2: 0, pvA3: 0 };
 }
 function applyStat(stat, row) {
+  // Manual-query / track-evidence rows must be present in exported detail and
+  // tracking views, but they were not members of that official daily report. They
+  // therefore cannot change the official daily KPI denominator retroactively.
+  if (row.metricEligible === false) { stat.evidenceOnly++; return; }
   stat.total++;
   if (row.area === '金边') stat.pp++; else if (row.area === '外省') stat.pv++; else stat.unknown++;
   if (row.store) stat.store++;
