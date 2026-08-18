@@ -5,7 +5,7 @@ import { collectV202Rows, V202_DELIVERY_TRUTH_VERSION } from './v202DeliveryTrut
 import { statsOf, average } from './v200Metrics.js';
 import { ensureV203ManualEvidenceSchema, V203_MANUAL_EVIDENCE_VERSION } from './v203ManualEvidenceStore.js';
 
-export const V203_DASHBOARD_INTEGRITY_VERSION='2026-08-18-v203-useful-dashboard-attempt-network-v1';
+export const V203_DASHBOARD_INTEGRITY_VERSION='2026-08-18-v203-useful-dashboard-attempt-network-v2';
 const CACHE_TTL_MS=Math.max(15_000,Math.min(10*60_000,Number(process.env.V203_ATTEMPT_CACHE_MS||60_000)));
 const cache=new Map();
 function dateKey(value=''){const m=String(value||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';}
@@ -18,9 +18,11 @@ function summarize(type,rows,range){
   return{
     businessType:type,total:stats.total,pod:stats.pod,a1:stats.a1,a2:stats.a2,a3:stats.a3,attemptUnknown:stats.attemptUnknown,
     a1Rate:ratio(stats.a1,stats.pod),a2Rate:ratio(stats.a2,stats.pod),a3Rate:ratio(stats.a3,stats.pod),unknownRate:ratio(stats.attemptUnknown,stats.pod),
-    averageDays:average(stats.days),ppAverageDays:average(stats.ppDays),pvAverageDays:average(stats.pvDays),manualEvidenceRows:manualRows.length
+    averageDays:average(stats.days),ppAverageDays:average(stats.ppDays),pvAverageDays:average(stats.pvDays),
+    averageSamples:stats.days.length,ppAverageSamples:stats.ppDays.length,pvAverageSamples:stats.pvDays.length,manualEvidenceRows:manualRows.length
   };
 }
+function weighted(parts,field,sampleField){const denominator=parts.reduce((s,x)=>s+Number(x[sampleField]||0),0);return denominator?Number((parts.reduce((s,x)=>s+Number(x[field]||0)*Number(x[sampleField]||0),0)/denominator).toFixed(2)):0;}
 async function attemptSummaryHandler(req,res){
   try{
     const latest=latestDate();const from=dateKey(req.query.fromDate)||latest;const to=dateKey(req.query.toDate)||from;
@@ -32,12 +34,12 @@ async function attemptSummaryHandler(req,res){
     for(const type of types){const rows=await collectV202Rows(type,range);parts.push(summarize(type,rows,range));}
     const combined={
       businessType:requested==='ALL'?'SHOPEE CN+VN':requested,
-      total:parts.reduce((s,x)=>s+x.total,0),pod:parts.reduce((s,x)=>s+x.pod,0),a1:parts.reduce((s,x)=>s+x.a1,0),a2:parts.reduce((s,x)=>s+x.a2,0),a3:parts.reduce((s,x)=>s+x.a3,0),attemptUnknown:parts.reduce((s,x)=>s+x.attemptUnknown,0),manualEvidenceRows:parts.reduce((s,x)=>s+x.manualEvidenceRows,0)
+      total:parts.reduce((s,x)=>s+x.total,0),pod:parts.reduce((s,x)=>s+x.pod,0),a1:parts.reduce((s,x)=>s+x.a1,0),a2:parts.reduce((s,x)=>s+x.a2,0),a3:parts.reduce((s,x)=>s+x.a3,0),attemptUnknown:parts.reduce((s,x)=>s+x.attemptUnknown,0),manualEvidenceRows:parts.reduce((s,x)=>s+x.manualEvidenceRows,0),
+      averageSamples:parts.reduce((s,x)=>s+x.averageSamples,0),ppAverageSamples:parts.reduce((s,x)=>s+x.ppAverageSamples,0),pvAverageSamples:parts.reduce((s,x)=>s+x.pvAverageSamples,0)
     };
     combined.a1Rate=ratio(combined.a1,combined.pod);combined.a2Rate=ratio(combined.a2,combined.pod);combined.a3Rate=ratio(combined.a3,combined.pod);combined.unknownRate=ratio(combined.attemptUnknown,combined.pod);
-    const weighted=(field)=>{const denominator=parts.reduce((s,x)=>s+(x[field]>0?x.pod:0),0);return denominator?Number((parts.reduce((s,x)=>s+(x[field]>0?x[field]*x.pod:0),0)/denominator).toFixed(2)):0;};
-    combined.averageDays=weighted('averageDays');combined.ppAverageDays=weighted('ppAverageDays');combined.pvAverageDays=weighted('pvAverageDays');
-    const value={ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,truthVersion:V202_DELIVERY_TRUTH_VERSION,range,combined,parts,rule:{attempt:'真实开始派送(4003/70/日报W-Y)→本次失败Pending/150→再次真实开始派送=下一派；代码60、经过天数、Pending条数不制造派次。',average:'下单日期→真实POD日期，首尾自然日计1天。',denominator:'派次占比以POD票数为分母；证据不足单独显示，不强行算1派。'},generatedAt:new Date().toISOString()};
+    combined.averageDays=weighted(parts,'averageDays','averageSamples');combined.ppAverageDays=weighted(parts,'ppAverageDays','ppAverageSamples');combined.pvAverageDays=weighted(parts,'pvAverageDays','pvAverageSamples');
+    const value={ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,truthVersion:V202_DELIVERY_TRUTH_VERSION,range,combined,parts,rule:{attempt:'真实开始派送(4003/70/日报W-Y)→本次失败Pending/150→再次真实开始派送=下一派；代码60、经过天数、Pending条数不制造派次。',average:'下单日期→真实POD日期，首尾自然日计1天；仅有真实下单时间和POD时间的票进入平均值。',denominator:'派次占比以POD票数为分母；证据不足单独显示，不强行算1派。'},generatedAt:new Date().toISOString()};
     cache.set(key,{at:Date.now(),value});res.setHeader('Cache-Control','no-store');res.json(value);
   }catch(error){res.status(500).json({ok:false,error:error.message});}
 }
