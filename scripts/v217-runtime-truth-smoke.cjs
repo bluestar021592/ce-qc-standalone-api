@@ -1,0 +1,18 @@
+const fs=require('fs');
+const must=(condition,message)=>{if(!condition)throw new Error(`V217 runtime truth smoke failed: ${message}`);};
+const truth=fs.readFileSync('public/v217-runtime-truth.js','utf8');
+const v160=fs.readFileSync('public/v160-current-home-truth.js','utf8');
+const loader=fs.readFileSync('public/v214-home-whpp-identity-guard.js','utf8');
+must(truth.includes('V217_RUNTIME_TRUTH'),'missing V217 runtime truth marker');
+must(truth.includes('/api/state?compact=1'),'CCSL persisted-state recovery missing');
+must(truth.includes('/api/shopee/state?compact=1'),'SHOPEE persisted-state recovery missing');
+must(truth.includes('/api/unified-history'),'completed history recovery missing');
+must(truth.includes('/api/v132/whpp-fast-summary?reportDate='),'WHPP date-scoped truth fetch missing');
+must(truth.includes("localStorage.removeItem(WHPP_CACHE_KEY)"),'stale WHPP cache purge missing');
+must(truth.includes("['总览','CE','CEAF空运','TBKH','ALI1688','WHPP本土','SHOPEE CN','SHOPEE VN']"),'seven-business home ordering missing');
+must(!truth.includes('new MutationObserver'),'V217 must not install a DOM MutationObserver');
+must(v160.includes('V160 provisional zero mutation disabled'),'V160 zero-overwrite retirement missing');
+must(!v160.includes('ccslPlaceholder'),'legacy CCSL zero placeholder still active');
+must(!v160.includes('shopeePlaceholder'),'legacy SHOPEE zero placeholder still active');
+must(loader.includes('/v217-runtime-truth.js?v=20260819-v217-1'),'V217 final loader missing');
+console.log('[V217] runtime truth smoke passed: persisted dashboards win, stale WHPP cache blocked, seven-business home restored.');
