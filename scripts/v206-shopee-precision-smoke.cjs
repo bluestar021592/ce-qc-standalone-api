@@ -38,10 +38,13 @@ must(exporter,'ppAverageOfficial');
 must(exporter,'pvAverageOfficial');
 must(workbook,'平均签收天数严格按真实3001金边中央仓入库节点→真实4004/轨迹80 POD计算');
 
-must(ui,'SHOPEE CN · 金边 PP');
-must(ui,'SHOPEE CN · 外省 PV');
-must(ui,'SHOPEE VN · 金边 PP');
-must(ui,'SHOPEE VN · 外省 PV');
+// The UI builds CN/VN PP/PV labels dynamically from LABELS[type]. Validate the
+// real rendering contract instead of requiring static strings that can never occur
+// literally in this source file.
+must(ui,"SHOPEECN:'SHOPEE CN'");
+must(ui,"SHOPEEVN:'SHOPEE VN'");
+must(ui,'· 金边 PP');
+must(ui,'· 外省 PV');
 must(ui,'pod===samples&&coverage>=99.99');
 must(ui,"averageText=!pod?'—':closed?`${Number(region.avg||0).toFixed(2)} 天`:'待补齐'");
 must(ui,'只有该区域“有效时效样本=POD票数”时才正式展示平均天数');
@@ -50,4 +53,4 @@ must(guard,'自动轨迹证据补全');
 must(shell,'/v206-shopee-precision.js?v=20260819-v207-2');
 must(shell,'/v208-dashboard-final-guard.js?v=20260819-v208-1');
 
-console.log('[V209] SHOPEE precision smoke passed: real attempts, exact 3001->POD timing, PP/PV split and full-coverage-only official averages are wired end to end.');
+console.log('[V209] SHOPEE precision smoke passed: real attempts, exact 3001->POD timing, dynamic CN/VN PP/PV split and full-coverage-only official averages are wired end to end.');
