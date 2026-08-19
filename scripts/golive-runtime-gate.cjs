@@ -71,14 +71,16 @@ must(parser,"recipient.includes('TBKH')");
 must(parser,'sourceReconciliation');
 
 // V209 source archive: every import that reaches persistence must first have a verified raw
-// workbook copy. Database rebuilds must no longer depend on asking the user to re-upload history.
+// workbook copy. It lives outside normal business-data reset and self-recovers its manifest
+// from the archive directory, so rebuilding working data must not require another upload.
 must(v146,"import './v209RawImportArchivePatch.js'");
 must(v209Archive,'CREATE TABLE IF NOT EXISTS v209_import_source_archive');
 must(v209Archive,"status TEXT NOT NULL DEFAULT 'PREPARED'");
 must(v209Archive,"status='ACCEPTED'");
 must(v209Archive,'SOURCE_ARCHIVE_HASH_MISMATCH');
 must(v209Archive,'sha256File(dest)');
-must(v209Archive,"BUSINESS_DATA_TABLES.includes('v209_import_source_archive')");
+must(v209Archive,'recoverV209ArchiveManifestFromDisk');
+must(v209Archive,'Deliberately NOT added to BUSINESS_DATA_TABLES');
 must(v209Archive,'/api/v209/source-archive/status');
 must(v209ArchiveUi,'原始日报永久归档 / 可重建保障');
 must(v209ArchiveUi,'SHA-256');
@@ -192,4 +194,4 @@ must(v202DisableLegacy,"CE_QC_DISABLE_SHOPEE_DELIVERY_TRACKER='1'");
 must(v202DisableLegacy,'CE_QC_ENABLE_LEGACY_V201_TRACKER');
 for(const source of [runner,pause,shell,storage,bstore])forbid(source,'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] V209 gate passed: source-cell waybill conservation, verified raw workbook archive, clean seven-business append-only rebaseline, export membership reconciliation, real 1/2/3 delivery cycles, automatic Shopee full-history evidence capture, exact 3001-to-POD PP/PV timing, full-coverage-only official averages, terminal-safe anomalies and durable manual evidence are all wired to one QC truth path.');
+console.log('[GOLIVE] V209 gate passed: source-cell waybill conservation, recovery-safe verified raw workbook archive, clean seven-business append-only rebaseline, export membership reconciliation, real 1/2/3 delivery cycles, automatic Shopee full-history evidence capture, exact 3001-to-POD PP/PV timing, full-coverage-only official averages, terminal-safe anomalies and durable manual evidence are all wired to one QC truth path.');
