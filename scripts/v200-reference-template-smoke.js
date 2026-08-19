@@ -1,5 +1,6 @@
 import { V200_EXPORT_VERSION, internalHyperlinkFormulaForV200 } from '../src/v200TemplateDashboardExporter.js';
-import { resolveV202AttemptCycle, V202_DELIVERY_TRUTH_VERSION } from '../src/v202DeliveryTruth.js';
+import { resolveV202AttemptCycle } from '../src/v202DeliveryTruth.js';
+import { V205_EXPORT_TRUTH_VERSION } from '../src/v205ExportTruth.js';
 
 function must(condition, message) { if (!condition) throw new Error(message); }
 
@@ -17,5 +18,5 @@ must(first.attemptNo===1,'first real delivery cycle must be first-attempt POD');
 must(second.attemptNo===2,'a failed cycle plus real redispatch must be second-attempt POD');
 const formula = internalHyperlinkFormulaForV200('POD明细', 1718, 1115);
 must(formula === 'HYPERLINK("#\'POD明细\'!A1718",1115)', 'WPS-safe internal hyperlink must match reference workbook formula syntax');
-must(V200_EXPORT_VERSION === V202_DELIVERY_TRUTH_VERSION, 'V202 must own reference dashboard export truth');
-console.log('[V202] reference template + WPS formula + real delivery-cycle truth smoke passed');
+must(V200_EXPORT_VERSION === V205_EXPORT_TRUTH_VERSION, 'V205 must own reference dashboard export truth');
+console.log('[V205] reference template + WPS formula + real delivery-cycle truth smoke passed');
