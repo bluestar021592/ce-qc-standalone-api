@@ -1,0 +1,25 @@
+const fs=require('fs');
+const read=p=>fs.readFileSync(p,'utf8');
+const archive=read('src/v209RawImportArchivePatch.js');
+const bridge=read('src/v146UnifiedImportDateBridgePatch.js');
+const metrics=read('src/v200Metrics.js');
+const exporter=read('src/v200TemplateDashboardExporter.js');
+const ui=read('public/v209-source-archive-status.js');
+const shell=read('src/v44WhppUiPatch.js');
+function must(source,token){if(!source.includes(token))throw new Error(`V209 smoke missing ${token}`);}
+must(archive,'v209_import_source_archive');
+must(archive,'SOURCE_ARCHIVE_HASH_MISMATCH');
+must(archive,'sha256File(dest)');
+must(archive,'/api/v209/source-archive/status');
+must(bridge,"import './v209RawImportArchivePatch.js'");
+must(metrics,'isShopeePrecisionRow');
+must(metrics,"timingEvidenceStatus || '').toUpperCase() !== 'OK'");
+must(exporter,'FULL_COVERAGE_ONLY');
+must(exporter,'averageOfficial');
+must(exporter,'ppAverageOfficial');
+must(exporter,'pvAverageOfficial');
+must(exporter,'_V209.xlsx');
+must(ui,'原始日报永久归档 / 可重建保障');
+must(ui,'SHA-256');
+must(shell,'/v209-source-archive-status.js?v=20260819-v209-1');
+console.log('[V209] source archive and strict Shopee average integration smoke passed');
