@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import XLSX from 'xlsx';
 import { parseUnifiedDailyExcel } from '../src/unifiedExcelParser.js';
+import { __test as safetyTest } from '../src/v102UnifiedImportSafetyGatePatch.js';
 
 function workbookFile(sheets){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v207-parser-'));
@@ -54,4 +55,13 @@ test('V207 does not block a pure summary sheet with no waybill-like data',()=>{
 
 test('V207 blocks Shopee when PP/PV region cannot be established',()=>{
   assert.throws(()=>parse({Data:[['运单编号','收件人'],['SPE260816000001','SHOPEECN']]}),error=>error?.code==='SHOPEE_REGION_MISSING');
+});
+
+test('V208 source-cell conservation blocks a shipment code parked outside the parsed waybill column',()=>{
+  const t=workbookFile({Data:[['运单编号','收件人','收件省份','备注'],['TBKH000803140','TBKH','金边市',''],['','普通客户','金边市','CC260816999999']]});
+  try{
+    const parsed=parseUnifiedDailyExcel(t.file,{reportDate:'2026-08-16',originalName:'2026-08-16.xlsx'});
+    assert.equal(parsed.rows.length,1);
+    assert.throws(()=>safetyTest.assertSourceWaybillConservation(t.file,parsed),error=>error?.code==='SOURCE_WAYBILL_NOT_PRESERVED'&&error?.missingCount===1);
+  }finally{fs.rmSync(t.dir,{recursive:true,force:true});}
 });
