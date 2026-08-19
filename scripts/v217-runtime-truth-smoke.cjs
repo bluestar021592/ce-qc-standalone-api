@@ -10,6 +10,7 @@ const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const bootstrap=fs.readFileSync('src/v43BootstrapPerfPatch.js','utf8');
 const recovery=fs.readFileSync('src/v221BootstrapRecoveryPatch.js','utf8');
 const v46=fs.readFileSync('src/v46ColdStartIndexPatch.js','utf8');
+const staticCache=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const authPreload=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const ownerPatch=fs.readFileSync('src/v220LocalOwnerAccessPatch.js','utf8');
 const bootSource=fs.readFileSync('bootstrap.js','utf8');
@@ -60,6 +61,8 @@ must(!v203.includes('v203AttemptPanel'),'V203 duplicate attempt panel must not r
 must(v208.includes('v221-retired-passive'),'V208 polling overlay was not retired');
 must(!v208.includes('new MutationObserver'),'V208 must not install a document-wide observer');
 must(!v208.includes('setInterval('),'V208 must not install permanent polling');
+must(staticCache.includes('v203-dashboard-integrity|v208-dashboard-final-guard|v217-runtime-truth'),'volatile V221 runtime assets are not cache-bypassed');
+must(staticCache.includes("'no-store, no-cache, must-revalidate'"),'volatile runtime assets must be no-store so repaired code is actually loaded');
 
 // V213/5179 identity and localhost CE credential access must be installed before
 // server.js registers auth/role middleware. Local CE connect is allowed only for
@@ -72,11 +75,11 @@ must(ownerPatch.includes("req?.accessMode || '').toUpperCase() === 'LOCAL'"),'lo
 must(ownerPatch.includes('const authenticated = Boolean(req?.user'),'local CE credential access must require an authenticated user');
 must(!ownerPatch.includes("=== 'LAN'"),'local owner bypass must not weaken LAN permissions');
 
-for(const file of ['src/v220LocalOwnerAccessPatch.js','src/v221BootstrapRecoveryPatch.js','public/v203-dashboard-integrity.js','public/v208-dashboard-final-guard.js','public/v217-runtime-truth.js']){
+for(const file of ['src/v220LocalOwnerAccessPatch.js','src/v221BootstrapRecoveryPatch.js','src/v89StaticAssetCachePatch.js','public/v203-dashboard-integrity.js','public/v208-dashboard-final-guard.js','public/v217-runtime-truth.js']){
   const syntax=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
   must(syntax.status===0,`${file} syntax failed: ${syntax.stderr||syntax.stdout}`);
 }
 const preloadPos=bootSource.indexOf("await importPhase('v147TrackTimeoutConfig'");
 const serverImportPos=bootSource.indexOf('await importServerInteractiveFirst();');
 must(preloadPos>=0&&serverImportPos>preloadPos,'auth/access preload module must execute before server.js import');
-console.log('[V221] runtime stability smoke passed: persisted dashboard fallback, request-scoped identity, localhost CE reconnect, and passive UI cleanup are wired before installation.');
+console.log('[V221] runtime stability smoke passed: persisted dashboard fallback, request-scoped identity, localhost CE reconnect, passive UI cleanup, and cache-safe runtime delivery are wired before installation.');
