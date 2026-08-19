@@ -7,12 +7,13 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { getRuntimeConfig } from './db.js';
 
-export const V209_LOGIN_RELIABILITY_VERSION='2026-08-19-v213-auth-sidecar-login-v1';
+export const V209_LOGIN_RELIABILITY_VERSION='2026-08-19-v223-main-session-handoff-v1';
 const INSTALLED=Symbol.for('ce-qc.v209-login-reliability-installed');
 const WRAPPED=Symbol.for('ce-qc.v209-access-wrapped');
 const FAST_COOKIE='ce_v213_fast_session';
 const LEGACY_V212_COOKIE='ce_v212_fast_session';
 const AUTH_SIDECAR_PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_AUTH_SIDECAR_PORT||5179)));
+const HANDOFF_PATH='/api/v223/fast-auth/accept';
 let cachedV213Secret='';
 let cachedV212Secret='';
 let authSidecarChild=null;
@@ -60,6 +61,15 @@ function readFastSession(req,channel){
   return null;
 }
 function clearFastCookie(res){res.setHeader('Set-Cookie',[`${FAST_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,`${LEGACY_V212_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,'ce_v211_fast_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0','ce_internal_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0']);}
+function setFastCookie(res,token,payload){
+  const maxAge=Math.max(1,Math.floor((Number(payload?.exp||0)-Date.now())/1000));
+  res.setHeader('Set-Cookie',[
+    'ce_internal_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
+    'ce_v211_fast_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
+    `${LEGACY_V212_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+    `${FAST_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`
+  ]);
+}
 
 function shouldStartAuthSidecar(){
   if(String(process.env.CE_QC_AUTH_SIDECAR_CHILD||'')==='1')return false;
@@ -81,22 +91,48 @@ startAuthSidecar();
 
 async function v213FastIdentity(req,res,next){
   const channel=localChannel(req);if(!channel)return next();
+
+  if(req.method==='POST'&&req.path===HANDOFF_PATH){
+    const token=String(req.body?.handoffToken||'').trim();
+    const payload=verifyFastToken(token,213);
+    if(!payload||payload.channel!==channel){
+      clearFastCookie(res);
+      console.warn(`[CE-QC][V223_AUTH_HANDOFF_REJECTED] channel=${channel} valid=${Boolean(payload)} token=${Boolean(token)}`);
+      return res.status(401).json({ok:false,code:'V223_HANDOFF_REJECTED',error:'登录校验已完成，但主程序会话接管失败，请重新登录。'});
+    }
+    setFastCookie(res,token,payload);
+    console.log(`[CE-QC][V223_AUTH_HANDOFF_OK] user=${payload.user.username} channel=${channel}`);
+    return res.json({ok:true,user:payload.user,authMode:'V223_MAIN_SESSION_HANDOFF',redirect:'/'});
+  }
+
   const fast=readFastSession(req,channel);
-  if(fast){req.ceQcFastUser={...fast.user,devMode:channel==='LOCAL'};req.ceQcFastAccessMode=channel;}
-  if(req.method==='POST'&&req.path==='/api/internal-auth/logout'&&fast){clearFastCookie(res);return res.json({ok:true,authMode:'V213_ISOLATED_AUTH_SIDECAR'});}
+  if(fast){
+    req.ceQcFastUser={...fast.user,devMode:channel==='LOCAL'};
+    req.ceQcFastAccessMode=channel;
+    req.user=req.ceQcFastUser;
+    req.accessMode=channel;
+    req.cloudflareEmail='';
+  }
+  if(req.method==='POST'&&req.path==='/api/internal-auth/logout'&&fast){clearFastCookie(res);return res.json({ok:true,authMode:'V223_MAIN_SESSION_HANDOFF'});}
   // Old clients must never fall through to the legacy main-DB login path, because that
   // was the source of the 5/15 second hangs. The browser login page uses port 5179.
   if(req.method==='POST'&&req.path==='/api/internal-auth/login')return res.status(409).json({ok:false,code:'V213_USE_AUTH_SIDECAR',error:'本机登录已迁移到独立5179认证服务，请刷新登录页后重试。'});
   return next();
 }
 
-function inlineLoginScript(){return `<script>(function(){'use strict';const form=document.getElementById('login'),button=document.getElementById('submit'),error=document.getElementById('error'),hint=document.getElementById('hint');if(!form||!button||!error)return;const message=text=>{error.textContent=String(text||'');};const sidecar=location.protocol+'//'+location.hostname+':${AUTH_SIDECAR_PORT}';async function ping(){const c=new AbortController(),t=setTimeout(()=>c.abort(),1800);try{const r=await fetch(sidecar+'/api/v213/auth-ping',{credentials:'include',cache:'no-store',signal:c.signal});const p=await r.json();if(!r.ok||!p.ok)throw new Error('HTTP '+r.status);if(hint)hint.textContent='独立认证服务已就绪 · '+p.version;return true;}catch(e){message('独立登录服务5179没有响应。请重新打开CE QC；不要继续重复点登录。');return false;}finally{clearTimeout(t);}}form.addEventListener('submit',async event=>{event.preventDefault();if(button.disabled)return;message('');button.disabled=true;const original=button.textContent;button.textContent='正在连接独立登录服务…';try{if(!await ping())return;button.textContent='正在校验账号…';const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),4000);try{const body={username:String(document.getElementById('username')?.value||'').trim(),password:String(document.getElementById('password')?.value||'')};const response=await fetch(sidecar+'/api/v213/local-auth/login',{method:'POST',credentials:'include',cache:'no-store',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(body),signal:controller.signal});const text=await response.text();let payload={};try{payload=text?JSON.parse(text):{};}catch{payload={error:text||('登录服务返回 HTTP '+response.status)};}if(!response.ok||payload.ok===false){message((payload.error||payload.message||('登录失败（HTTP '+response.status+'）'))+(payload.code?' ['+payload.code+']':''));return;}button.textContent='登录成功，正在进入…';location.replace('/?login='+Date.now());}catch(err){message(err?.name==='AbortError'?'独立登录服务已连接，但账号校验4秒未完成。请看黑框 V213_AUTH_SIDECAR 的最后一行。':'登录请求失败：'+(err?.message||err));}finally{clearTimeout(timer);}}finally{if(!String(button.textContent).includes('成功')){button.disabled=false;button.textContent=original;}}});setTimeout(()=>{void ping();},100);})();</script>`;}
+function inlineLoginScript(){return `<script>(function(){'use strict';const form=document.getElementById('login'),button=document.getElementById('submit'),error=document.getElementById('error'),hint=document.getElementById('hint');if(!form||!button||!error)return;const message=text=>{error.textContent=String(text||'');};const sidecar=location.protocol+'//'+location.hostname+':${AUTH_SIDECAR_PORT}';const handoff='${HANDOFF_PATH}';async function ping(){const c=new AbortController(),t=setTimeout(()=>c.abort(),1800);try{const r=await fetch(sidecar+'/api/v213/auth-ping',{credentials:'include',cache:'no-store',signal:c.signal});const p=await r.json();if(!r.ok||!p.ok)throw new Error('HTTP '+r.status);if(hint)hint.textContent='独立认证服务已就绪 · '+p.version;return true;}catch(e){message('独立登录服务5179没有响应。请重新打开CE QC；不要继续重复点登录。');return false;}finally{clearTimeout(t);}}async function acceptHandoff(token){const c=new AbortController(),t=setTimeout(()=>c.abort(),2500);try{const r=await fetch(handoff,{method:'POST',credentials:'include',cache:'no-store',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({handoffToken:token}),signal:c.signal});const text=await r.text();let p={};try{p=text?JSON.parse(text):{};}catch{p={error:text||('HTTP '+r.status)};}if(!r.ok||p.ok===false)throw new Error((p.error||p.message||('HTTP '+r.status))+(p.code?' ['+p.code+']':''));return p;}finally{clearTimeout(t);}}form.addEventListener('submit',async event=>{event.preventDefault();if(button.disabled)return;message('');button.disabled=true;const original=button.textContent;button.textContent='正在连接独立登录服务…';try{if(!await ping())return;button.textContent='正在校验账号…';const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),4000);try{const body={username:String(document.getElementById('username')?.value||'').trim(),password:String(document.getElementById('password')?.value||'')};const response=await fetch(sidecar+'/api/v213/local-auth/login',{method:'POST',credentials:'include',cache:'no-store',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(body),signal:controller.signal});const text=await response.text();let payload={};try{payload=text?JSON.parse(text):{};}catch{payload={error:text||('登录服务返回 HTTP '+response.status)};}if(!response.ok||payload.ok===false){message((payload.error||payload.message||('登录失败（HTTP '+response.status+'）'))+(payload.code?' ['+payload.code+']':''));return;}if(!payload.handoffToken)throw new Error('独立登录服务未返回主程序接管凭证。');button.textContent='正在建立主程序会话…';await acceptHandoff(payload.handoffToken);button.textContent='登录成功，正在进入…';location.replace('/?login='+Date.now()+'&v223=1');}catch(err){message(err?.name==='AbortError'?'登录链路超时，系统没有继续进入主程序。':'登录会话接管失败：'+(err?.message||err));}finally{clearTimeout(timer);}}finally{if(!String(button.textContent).includes('成功')){button.disabled=false;button.textContent=original;}}});setTimeout(()=>{void ping();},100);})();</script>`;}
 
 export function v209LoginReliabilityPage(req,res,next){
-  if(req.method!=='GET'||req.path.startsWith('/api/')||hasSession(req)||!localLike(req)||!wantsHtml(req))return next();
+  if(req.method!=='GET'||req.path.startsWith('/api/')||!localLike(req)||!wantsHtml(req))return next();
+  const channel=localChannel(req);
+  // LOCAL/LAN web entry is now deliberately fast-session only. Do not treat the
+  // mere presence of an old database-backed cookie as authenticated; a stale old
+  // cookie was able to send the browser into the heavy accessControl DB path and
+  // leave the old login document stuck on "登录成功，正在进入…".
+  if(channel&&readFastSession(req,channel))return next();
   res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
   res.setHeader('X-CE-QC-Login-Reliability',V209_LOGIN_RELIABILITY_VERSION);
-  return res.status(200).type('html').send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CE质控系统内部登录</title><style>body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(600px,calc(100% - 48px));background:#fff;border:1px solid #dce5ef;border-radius:12px;padding:38px 42px;box-shadow:0 18px 50px #16395b18}h1{font-size:30px;margin:0 0 22px;color:#083b6d}label{display:block;margin:14px 0 6px;font-size:18px}input{box-sizing:border-box;width:100%;padding:14px 15px;border:1px solid #cbd8e5;border-radius:7px;font-size:17px}button{width:100%;margin-top:24px;border:0;border-radius:7px;background:#176fe8;color:#fff;padding:14px;font-size:18px;font-weight:700;cursor:pointer}button:disabled{opacity:.6;cursor:wait}#error{min-height:24px;color:#b42318;margin-top:12px;font-weight:600}#hint{color:#71849a;font-size:12px;margin-top:8px}</style></head><body><main class="box"><h1>CE质控系统内部登录</h1><form id="login" autocomplete="on"><label>用户名</label><input id="username" name="username" autocomplete="username" required><label>密码</label><input id="password" name="password" type="password" autocomplete="current-password" required><button id="submit" type="submit">登录</button><div id="error" role="alert"></div><div id="hint">独立认证通道 · ${V209_LOGIN_RELIABILITY_VERSION} · 5179</div></form></main>${inlineLoginScript()}</body></html>`);
+  return res.status(200).type('html').send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CE质控系统内部登录</title><style>body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(600px,calc(100% - 48px));background:#fff;border:1px solid #dce5ef;border-radius:12px;padding:38px 42px;box-shadow:0 18px 50px #16395b18}h1{font-size:30px;margin:0 0 22px;color:#083b6d}label{display:block;margin:14px 0 6px;font-size:18px}input{box-sizing:border-box;width:100%;padding:14px 15px;border:1px solid #cbd8e5;border-radius:7px;font-size:17px}button{width:100%;margin-top:24px;border:0;border-radius:7px;background:#176fe8;color:#fff;padding:14px;font-size:18px;font-weight:700;cursor:pointer}button:disabled{opacity:.6;cursor:wait}#error{min-height:24px;color:#b42318;margin-top:12px;font-weight:600}#hint{color:#71849a;font-size:12px;margin-top:8px}</style></head><body><main class="box"><h1>CE质控系统内部登录</h1><form id="login" autocomplete="on"><label>用户名</label><input id="username" name="username" autocomplete="username" required><label>密码</label><input id="password" name="password" type="password" autocomplete="current-password" required><button id="submit" type="submit">登录</button><div id="error" role="alert"></div><div id="hint">独立认证通道 · ${V209_LOGIN_RELIABILITY_VERSION} · 5179→5177</div></form></main>${inlineLoginScript()}</body></html>`);
 }
 
 export function wrapV209AccessIdentity(base){
@@ -136,4 +172,4 @@ if(!express.application[INSTALLED]){
   };
 }
 
-export const __test={hostOnly,ipOnly,cookieValue,hasSession,localChannel,localLike,inlineLoginScript,verifyFastToken,readFastSession,shouldStartAuthSidecar};
+export const __test={hostOnly,ipOnly,cookieValue,hasSession,localChannel,localLike,inlineLoginScript,verifyFastToken,readFastSession,shouldStartAuthSidecar,HANDOFF_PATH};
