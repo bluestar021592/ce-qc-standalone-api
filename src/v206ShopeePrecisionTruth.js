@@ -1,8 +1,8 @@
 import { getDb } from './db.js';
-import { collectV205ExportRows, V205_EXPORT_TRUTH_VERSION } from './v205ExportTruth.js';
+import { collectV207ExportRows, V207_EXPORT_MEMBERSHIP_VERSION } from './v207ExportMembershipTruth.js';
 import { listV203ManualEvidence } from './v203ManualEvidenceStore.js';
 
-export const V206_SHOPEE_PRECISION_VERSION='2026-08-18-v206-shopee-3001-pod-precision-v1';
+export const V206_SHOPEE_PRECISION_VERSION='2026-08-19-v207-shopee-3001-pod-no-loss-precision-v2';
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 const POD_TEXT_RE=/\bPOD\b|DELIVERED|签收|妥投|已妥投|DELIVERY\s*SUCCESSFULLY|4004/i;
 const START_3001_RE=/(?:^|[^0-9A-Z])3001(?:$|[^0-9A-Z])|TRANSPORT\s+TO\s+CENTRAL\s+WAREHOUSE\s+IN\s+PHNOM\s+PENH/i;
@@ -12,7 +12,6 @@ function billOf(value=''){return String(value||'').trim().toUpperCase();}
 function dateKey(value=''){const m=String(value||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';}
 function timeValue(value=''){const text=String(value||'').trim();if(!text)return NaN;const normalized=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)?`${text.replace(' ','T').replace(/Z|[+-]\d{2}:?\d{2}$/,'')}+07:00`:text;return Date.parse(normalized);}
 function chunks(values=[],size=240){const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;}
-function flattenText(value,depth=0){if(depth>5||value===null||value===undefined)return'';if(Array.isArray(value))return value.slice(0,500).map(v=>flattenText(v,depth+1)).join(' ');if(typeof value==='object')return Object.entries(value).slice(0,500).map(([k,v])=>`${k} ${flattenText(v,depth+1)}`).join(' ');return String(value||'');}
 function rowCode(row={}){const raw=safeJson(row.rawJson,{});return String(row.eventCode||row.trackingEventCode||row.statusCode||row.shipmentStatus||raw.eventCode||raw.trackingEventCode||raw.statusCode||raw.shipmentStatus||raw.status||'').trim().toUpperCase();}
 function rowTime(row={}){const raw=safeJson(row.rawJson,{});return String(row.eventTime||row.latestEventTime||row.lastEventTime||row.POD时间||row.podTime||raw.eventTime||raw.creationDate||raw.lastUpdateDate||raw.updatedAt||row.updatedAt||row.createdAt||'').trim();}
 function rowText(row={}){const raw=safeJson(row.rawJson,{});return [row.eventCode,row.trackingEventCode,row.statusCode,row.shipmentStatus,row.statusText,row.latestEventDesc,row.lastEventDesc,row.最后节点,row.currentState,row.scanNormalizedState,row.primaryCategory,raw.eventCode,raw.trackingEventCode,raw.statusCode,raw.shipmentStatus,raw.status,raw.statusText,raw.trackingEventDescZh,raw.trackingEventDesc,raw.trackingEventDescKm,raw.remark,raw.place,raw.locationCode,raw.eventShop].map(v=>String(v||'').trim()).filter(Boolean).join(' ');}
@@ -66,13 +65,13 @@ export function summarizeV206ShopeeTiming(rows=[]){const official=rows.filter(r=
 
 export async function collectV206ShopeeRows(type,range,onProgress=()=>{}){
   const businessType=String(type||'').trim().toUpperCase();
-  const rows=await collectV205ExportRows(businessType,range,onProgress);
+  const rows=await collectV207ExportRows(businessType,range,onProgress);
   if(!SHOPEE_TYPES.has(businessType)){for(const row of rows)row.precisionTruthVersion=V206_SHOPEE_PRECISION_VERSION;return rows;}
   const bills=[...new Set(rows.map(r=>billOf(r.shipmentCode)).filter(Boolean))];const db=getDb();const evidence=loadDbEvidence(db,businessType,bills);const manualRecords=listV203ManualEvidence({businessType,fromDate:range.from,toDate:range.to});mergeManualEvidence(evidence,manualRecords);
   let ok=0,missing3001=0,missingPod=0,invalid=0;
   for(const row of rows){row.legacyOrderToPodDays=Number(row.deliveryDays||0);const timing=resolveV206ShopeeTimingEvidence(evidence.get(billOf(row.shipmentCode))||[],row);row.timingEvidenceStatus=timing.status;row.timingStartAt=timing.startAt;row.timingPodAt=timing.podAt;row.timingStartSource=timing.startSource;row.timingPodSource=timing.podSource;row.timingEvidenceCount=timing.evidenceCount;row.deliveryDays=timing.status==='OK'?timing.days:0;row.signNaturalDays=row.deliveryDays;row.signDaySource=timing.status==='OK'?'SHOPEE末端时效：3001入库当天=第1天 → 真实4004/轨迹80 POD，首尾自然日计1天':'SHOPEE末端时效证据未闭合，不用下单时间或区间均值补算';row.precisionTruthVersion=V206_SHOPEE_PRECISION_VERSION;row.deliveryTruthVersion=V206_SHOPEE_PRECISION_VERSION;
     if(timing.status==='OK'){ok++;row.podTime=timing.podAt||row.podTime;row.podDate=dateKey(row.podTime)||row.podDate;row.remark=appendRemark(row.remark,`末端时效：3001 ${timing.startAt} → POD ${timing.podAt} = ${timing.days}天`);}else if(row.pod){if(timing.status==='MISSING_3001')missing3001++;else if(timing.status==='MISSING_POD_TIME')missingPod++;else if(timing.status==='INVALID_SEQUENCE')invalid++;row.remark=appendRemark(row.remark,`末端时效证据：${timing.status}`);}
   }
-  const timingSummary=summarizeV206ShopeeTiming(rows);onProgress({phase:'v206ShopeePrecision',completed:rows.length,total:rows.length,businessType,validTiming:ok,missing3001,missingPod,invalidSequence:invalid,timingSummary,baseVersion:V205_EXPORT_TRUTH_VERSION,version:V206_SHOPEE_PRECISION_VERSION});
+  const timingSummary=summarizeV206ShopeeTiming(rows);onProgress({phase:'v206ShopeePrecision',completed:rows.length,total:rows.length,businessType,validTiming:ok,missing3001,missingPod,invalidSequence:invalid,timingSummary,baseVersion:V207_EXPORT_MEMBERSHIP_VERSION,version:V206_SHOPEE_PRECISION_VERSION});
   return rows;
 }
