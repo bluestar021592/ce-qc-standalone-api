@@ -4,6 +4,7 @@ const truth=fs.readFileSync('public/v217-runtime-truth.js','utf8');
 const v160=fs.readFileSync('public/v160-current-home-truth.js','utf8');
 const guard=fs.readFileSync('public/v214-home-whpp-identity-guard.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
+const bootstrap=fs.readFileSync('src/v43BootstrapPerfPatch.js','utf8');
 must(truth.includes('V219_RUNTIME_STABILITY'),'missing V219 passive runtime stability marker');
 must(truth.includes('core bootstrap owns data; no startup database fan-out'),'V219 passive-runtime ownership marker missing');
 must(!truth.includes('recoverRuntimeTruth'),'retired heavy runtime recovery function must not return');
@@ -20,4 +21,8 @@ must(!v160.includes('shopeePlaceholder'),'legacy SHOPEE zero placeholder still a
 must(guard.includes('V219_UI_NAV_GUARD'),'passive navigation guard missing');
 must(!guard.includes('loadV217'),'navigation guard must not dynamically inject duplicate runtime recovery');
 must(shell.includes('/v217-runtime-truth.js?v=20260819-v219-passive-1'),'V219 passive runtime asset is not directly injected');
-console.log('[V219] runtime stability smoke passed: V43/core bootstrap is sole startup data owner; no duplicate history/business fan-out.');
+must(bootstrap.includes("pathValue === '/api/bootstrap'"),'V43 fast bootstrap route ownership missing');
+must(bootstrap.includes('CACHE_SUMMARY_ONLY'),'V43 cache-summary bootstrap mode missing');
+must(bootstrap.includes('session: { ok: true, user: publicUser(req.user), unreadNotifications: 0 }'),'bootstrap must carry authenticated request identity');
+must(bootstrap.includes('simpleHistory(60)'),'bootstrap must use bounded lightweight history instead of hydrated 120-day history');
+console.log('[V219] runtime stability smoke passed: V43/core bootstrap is sole startup data owner; bounded history, authenticated session, no duplicate history/business fan-out.');
