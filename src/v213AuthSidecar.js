@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig } from './db.js';
 
-export const V213_AUTH_SIDECAR_VERSION='2026-08-19-v213-auth-sidecar-v1';
+export const V213_AUTH_SIDECAR_VERSION='2026-08-19-v223-auth-sidecar-handoff-v1';
 const PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_AUTH_SIDECAR_PORT||5179)));
 const HOST=String(process.env.CE_QC_AUTH_SIDECAR_HOST||'0.0.0.0');
 const COOKIE='ce_v213_fast_session';
@@ -51,8 +51,15 @@ function allowedOrigin(req){
   const raw=String(req.headers.origin||'').trim();if(!raw)return{ok:true,origin:''};
   try{const u=new URL(raw);const requestHost=hostOnly(req.headers.host||'');const sameHost=u.hostname.toLowerCase()===requestHost;const appPort=u.port==='5177';return{ok:sameHost&&appPort,origin:raw};}catch{return{ok:false,origin:raw};}
 }
+function headers(req,res,status=200){
+  const allowed=allowedOrigin(req);
+  if(!allowed.ok){res.writeHead(403,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify({ok:false,code:'V213_ORIGIN_DENIED',error:'独立登录服务拒绝跨主机请求。'}));return false;}
+  const h={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-ce-qc-auth-sidecar':V213_AUTH_SIDECAR_VERSION};
+  if(allowed.origin){h['access-control-allow-origin']=allowed.origin;h['access-control-allow-credentials']='true';h['vary']='Origin';}
+  h['access-control-allow-headers']='Content-Type';h['access-control-allow-methods']='GET,POST,OPTIONS';res.writeHead(status,h);return true;
+}
 function json(req,res,status,payload,extra={}){
-  const allowed=allowedOrigin(req);if(!allowed.ok){res.writeHead(403,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify({ok:false,code:'V213_ORIGIN_DENIED',error:'独立登录服务拒绝跨主机请求。'}));return;}
+  const allowed=allowedOrigin(req);if(!allowed.ok){if(headers(req,res,403))res.end(JSON.stringify({ok:false,error:'Origin denied'}));return;}
   const h={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-ce-qc-auth-sidecar':V213_AUTH_SIDECAR_VERSION,...extra};
   if(allowed.origin){h['access-control-allow-origin']=allowed.origin;h['access-control-allow-credentials']='true';h['vary']='Origin';}
   h['access-control-allow-headers']='Content-Type';h['access-control-allow-methods']='GET,POST,OPTIONS';res.writeHead(status,h);res.end(JSON.stringify(payload));
@@ -66,15 +73,12 @@ function cookieFor(row,channel){
     'ce_v212_fast_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
     `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${HOURS*3600}`
   ];
-  return{cookies,payload,expiresAt:new Date(exp).toISOString()};
+  return{cookies,payload,token,expiresAt:new Date(exp).toISOString()};
 }
 
 const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url||'/',`http://${req.headers.host||'127.0.0.1'}`);
-  if(req.method==='OPTIONS'){
-    const allowed=allowedOrigin(req);if(!allowed.ok)return json(req,res,403,{ok:false,code:'V213_ORIGIN_DENIED'});
-    const h={'access-control-allow-origin':allowed.origin||'*','access-control-allow-credentials':'true','access-control-allow-headers':'Content-Type','access-control-allow-methods':'GET,POST,OPTIONS','cache-control':'no-store'};res.writeHead(204,h);return res.end();
-  }
+  if(req.method==='OPTIONS'){const allowed=allowedOrigin(req);if(!allowed.ok)return json(req,res,403,{ok:false,code:'V213_ORIGIN_DENIED'});const h={'access-control-allow-origin':allowed.origin||'*','access-control-allow-credentials':'true','access-control-allow-headers':'Content-Type','access-control-allow-methods':'GET,POST,OPTIONS','cache-control':'no-store'};res.writeHead(204,h);return res.end();}
   if(req.method==='GET'&&url.pathname==='/api/v213/auth-ping')return json(req,res,200,{ok:true,version:V213_AUTH_SIDECAR_VERSION,port:PORT,pid:process.pid});
   if(req.method!=='POST'||url.pathname!=='/api/v213/local-auth/login')return json(req,res,404,{ok:false,code:'V213_NOT_FOUND'});
   const channel=localChannel(req);if(!channel)return json(req,res,403,{ok:false,code:'V213_CHANNEL_DENIED',error:'当前访问来源不允许使用本机/LAN登录。'});
@@ -94,7 +98,7 @@ const server=http.createServer(async(req,res)=>{
     if(!matched)return json(req,res,401,{ok:false,code:'V213_INVALID_CREDENTIALS',error:'用户名或密码错误。'});
     const issued=cookieFor(row,channel);
     console.log(`[CE-QC][V213_AUTH_SIDECAR_LOGIN_OK] user=${username} channel=${channel} ms=${Date.now()-started}`);
-    return json(req,res,200,{ok:true,user:issued.payload.user,expiresAt:issued.expiresAt,authMode:'V213_ISOLATED_AUTH_SIDECAR'},{'set-cookie':issued.cookies});
+    return json(req,res,200,{ok:true,user:issued.payload.user,expiresAt:issued.expiresAt,authMode:'V223_ISOLATED_AUTH_SIDECAR',handoffToken:issued.token}, {'set-cookie':issued.cookies});
   }catch(error){
     console.error(`[CE-QC][V213_AUTH_SIDECAR_ERROR] ms=${Date.now()-started}`,error?.stack||error);
     const busy=/SQLITE_BUSY|database is locked/i.test(String(error?.message||error));
