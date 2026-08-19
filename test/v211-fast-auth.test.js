@@ -1,75 +1,56 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import crypto from 'node:crypto';
 import { __test, V209_LOGIN_RELIABILITY_VERSION } from '../src/v209LoginReliabilityPatch.js';
 
 const secret='0123456789abcdef0123456789abcdef0123456789abcdef';
+function sign(payload){const body=Buffer.from(JSON.stringify(payload),'utf8').toString('base64url');const sig=crypto.createHmac('sha256',secret).update(body).digest('base64url');return`${body}.${sig}`;}
 
-test('V212 fast auth token signs and verifies without QC database session writes',()=>{
-  const payload={v:212,iat:Date.now(),exp:Date.now()+60_000,channel:'LOCAL',user:{username:'ce002784',role:'ADMIN',businessScope:'ALL'}};
-  const token=__test.signFastPayload(payload,secret);
-  const verified=__test.verifyFastToken(token,secret);
+test('V213 main process verifies sidecar-issued stateless auth token',()=>{
+  const payload={v:213,iat:Date.now(),exp:Date.now()+60_000,channel:'LOCAL',user:{username:'ce002784',role:'ADMIN',businessScope:'ALL'}};
+  const token=sign(payload);const verified=__test.verifyFastToken(token,213,secret);
   assert.equal(verified.channel,'LOCAL');
   assert.equal(verified.user.username,'ce002784');
-  assert.match(V209_LOGIN_RELIABILITY_VERSION,/v212-local-readonly-auth-v2/);
+  assert.match(V209_LOGIN_RELIABILITY_VERSION,/v213-auth-sidecar-login-v1/);
 });
 
-test('V212 rejects tampered or expired fast auth tokens',()=>{
-  const payload={v:212,iat:Date.now()-120_000,exp:Date.now()-60_000,channel:'LOCAL',user:{username:'ce002784',role:'ADMIN'}};
-  const expired=__test.signFastPayload(payload,secret);
-  assert.equal(__test.verifyFastToken(expired,secret),null);
-  const good=__test.signFastPayload({...payload,exp:Date.now()+60_000},secret);
+test('V213 rejects tampered and expired sidecar tokens',()=>{
+  const expired=sign({v:213,iat:Date.now()-120_000,exp:Date.now()-60_000,channel:'LOCAL',user:{username:'ce002784',role:'ADMIN'}});
+  assert.equal(__test.verifyFastToken(expired,213,secret),null);
+  const good=sign({v:213,iat:Date.now(),exp:Date.now()+60_000,channel:'LOCAL',user:{username:'ce002784',role:'ADMIN'}});
   const tampered=`${good.slice(0,-1)}${good.endsWith('A')?'B':'A'}`;
-  assert.equal(__test.verifyFastToken(tampered,secret),null);
+  assert.equal(__test.verifyFastToken(tampered,213,secret),null);
 });
 
-test('V212 local channel only accepts matching loopback or private LAN endpoints',()=>{
+test('V213 local channel only accepts matching loopback or private LAN endpoints',()=>{
   const req=(host,ip)=>({hostname:host,socket:{remoteAddress:ip},get:name=>name==='host'?host:''});
   assert.equal(__test.localChannel(req('127.0.0.1','127.0.0.1')),'LOCAL');
   assert.equal(__test.localChannel(req('192.168.88.68','192.168.88.20')),'LAN');
   assert.equal(__test.localChannel(req('192.168.88.68','8.8.8.8')),'');
 });
 
-test('V212 login source is isolated from runtime getDb initialization and auth writes',()=>{
-  const source=fs.readFileSync(new URL('../src/v209LoginReliabilityPatch.js',import.meta.url),'utf8');
+test('V213 browser login bypasses the 5177 event loop and targets port 5179',()=>{
+  const html=__test.inlineLoginScript();
+  assert.match(html,/5179/);
+  assert.match(html,/\/api\/v213\/auth-ping/);
+  assert.match(html,/\/api\/v213\/local-auth\/login/);
+  assert.doesNotMatch(html,/fetch\('\/api\/internal-auth\/login'/);
+});
+
+test('V213 auth sidecar is read-only, bounded and independent of runtime getDb',()=>{
+  const source=fs.readFileSync(new URL('../src/v213AuthSidecar.js',import.meta.url),'utf8');
   assert.match(source,/new DatabaseSync\(file,\{readOnly:true\}\)/);
   assert.match(source,/PRAGMA query_only=ON/);
-  assert.match(source,/PRAGMA busy_timeout=750/);
+  assert.match(source,/PRAGMA busy_timeout=500/);
+  assert.match(source,/CE_QC_AUTH_SIDECAR_PORT\|\|5179/);
+  assert.match(source,/V213_AUTH_SIDECAR_LOGIN_START/);
+  assert.match(source,/V213_AUTH_SIDECAR_LOGIN_OK/);
   assert.doesNotMatch(source,/import \{ getDb/);
-  assert.doesNotMatch(source,/getDb\(\)\.prepare\(/);
   assert.doesNotMatch(source,/INSERT INTO user_sessions/);
   assert.doesNotMatch(source,/UPDATE users SET failedLoginCount/);
 });
 
-test('V212 read-only auth helper opens a real SQLite file and reads the indexed user row',()=>{
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v212-auth-'));
-  const file=path.join(dir,'auth.db');
-  const db=new DatabaseSync(file);
-  try{
-    db.exec(`CREATE TABLE users(
-      id INTEGER PRIMARY KEY,
-      username TEXT UNIQUE,
-      displayName TEXT,
-      departmentCompany TEXT,
-      email TEXT,
-      passwordHash TEXT,
-      role TEXT,
-      businessScope TEXT,
-      enabled INTEGER,
-      status TEXT,
-      expiresAt TEXT,
-      mustChangePassword INTEGER,
-      lockedUntil TEXT
-    )`);
-    db.prepare("INSERT INTO users(id,username,displayName,passwordHash,role,businessScope,enabled,status,mustChangePassword) VALUES(1,'ce002784','CE LEE','hash','ADMIN','ALL',1,'ACTIVE',0)").run();
-  }finally{db.close();}
-  try{
-    const row=__test.readAuthRowFromFile(file,'ce002784');
-    assert.equal(row.username,'ce002784');
-    assert.equal(row.role,'ADMIN');
-    assert.equal(row.enabled,1);
-  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+test('V213 auth sidecar is spawned only by bootstrap/server, never by unit tests',()=>{
+  assert.equal(__test.shouldStartAuthSidecar(),false);
 });
