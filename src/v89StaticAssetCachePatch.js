@@ -1,7 +1,7 @@
 import express from 'express';
 import './v108PerformanceIndexPatch.js';
 
-const PATCH_ID = '2026-08-19-v221-static-runtime-guard-no-store-v2';
+const PATCH_ID = '2026-08-19-v221-static-runtime-guard-no-store-v3';
 const originalUse = express.application.use;
 let installed = false;
 
@@ -12,7 +12,7 @@ function cacheableAsset(req, res, next) {
     // These small runtime guards are the emergency/stability layer. During a
     // verified code update the browser must never keep a one-day-old copy merely
     // because the query-string version stayed compatible with older smoke gates.
-    if (/\/(?:v203-dashboard-integrity|v208-dashboard-final-guard|v217-runtime-truth|v206-shopee-precision)\.js$/i.test(pathname)) {
+    if (/\/(?:v203-dashboard-integrity|v208-dashboard-final-guard|v217-runtime-truth|v206-shopee-precision|v214-home-whpp-identity-guard)\.js$/i.test(pathname)) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
