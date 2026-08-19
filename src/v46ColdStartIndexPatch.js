@@ -1,14 +1,19 @@
 import { getDb } from './db.js';
+import './v226LatestReportDateQueryPatch.js';
 import './v221BootstrapRecoveryPatch.js';
+import './v225AuthBootstrapGuardPatch.js';
+import './v227LocalHealthProbePatch.js';
+import './v228LocalLauncherRootProbePatch.js';
 
-const PATCH_ID = '2026-08-19-v224-restored-persisted-bootstrap-recovery-v1';
+const PATCH_ID = '2026-08-19-v228-runtime-acceptance-bootstrap-v4';
 
 // Cold start must never open or scan the SQLite database merely to inspect
 // optional performance indexes. The definitions stay available for explicit
 // maintenance/diagnostics, while normal server startup remains database-lazy.
-// The restored V221 bootstrap layer is loaded here intentionally, immediately
-// after V43 in bootstrap.js, so /api/bootstrap can recover persisted dashboard
-// truth from cache/legacy tables when the canonical unified pointer is unavailable.
+// V226 fixes latest-date truth. V221 owns persisted-data recovery. V225 prevents
+// stale/unauthenticated zero dashboards. V227 exposes loopback /api/health and
+// V228 makes the managed launcher's non-browser root probe report HTTP 200 while
+// real browser HTML still follows the normal authentication path.
 const REQUIRED_INDEXES = Object.freeze([
   {
     name: 'idx_unified_rows_bootstrap_cover',
@@ -34,7 +39,7 @@ export function inspectV46Indexes() {
   return { present, missing };
 }
 
-console.log('[CE-QC][V46] optional index inspection deferred; restored V221 persisted-dashboard recovery is armed after V43.');
+console.log('[CE-QC][V46] V226 date truth + V221 persisted recovery + V225 auth guard + V227 health + V228 launcher readiness armed after V43.');
 
 export const V46_COLD_START_INDEX_PATCH_ID = PATCH_ID;
 export const V46_REQUIRED_INDEXES = REQUIRED_INDEXES;
