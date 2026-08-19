@@ -8,8 +8,9 @@ import bcrypt from 'bcryptjs';
 import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig } from './db.js';
 
-export const V213_AUTH_SIDECAR_VERSION='2026-08-19-v223-auth-sidecar-handoff-v1';
+export const V213_AUTH_SIDECAR_VERSION='2026-08-19-v226-auth-sidecar-handoff-v2';
 const PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_AUTH_SIDECAR_PORT||5179)));
+const APP_PORT=Math.max(1024,Math.min(65535,Number(process.env.PORT||5177)));
 const HOST=String(process.env.CE_QC_AUTH_SIDECAR_HOST||'0.0.0.0');
 const COOKIE='ce_v213_fast_session';
 const HOURS=Math.max(1,Math.min(24,Number(process.env.CE_QC_LOCAL_FAST_SESSION_HOURS||8)));
@@ -49,7 +50,7 @@ function readAuthRow(username){
 }
 function allowedOrigin(req){
   const raw=String(req.headers.origin||'').trim();if(!raw)return{ok:true,origin:''};
-  try{const u=new URL(raw);const requestHost=hostOnly(req.headers.host||'');const sameHost=u.hostname.toLowerCase()===requestHost;const appPort=u.port==='5177';return{ok:sameHost&&appPort,origin:raw};}catch{return{ok:false,origin:raw};}
+  try{const u=new URL(raw);const requestHost=hostOnly(req.headers.host||'');const sameHost=u.hostname.toLowerCase()===requestHost;const appPort=Number(u.port||80)===APP_PORT;return{ok:sameHost&&appPort,origin:raw};}catch{return{ok:false,origin:raw};}
 }
 function headers(req,res,status=200){
   const allowed=allowedOrigin(req);
@@ -79,7 +80,7 @@ function cookieFor(row,channel){
 const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url||'/',`http://${req.headers.host||'127.0.0.1'}`);
   if(req.method==='OPTIONS'){const allowed=allowedOrigin(req);if(!allowed.ok)return json(req,res,403,{ok:false,code:'V213_ORIGIN_DENIED'});const h={'access-control-allow-origin':allowed.origin||'*','access-control-allow-credentials':'true','access-control-allow-headers':'Content-Type','access-control-allow-methods':'GET,POST,OPTIONS','cache-control':'no-store'};res.writeHead(204,h);return res.end();}
-  if(req.method==='GET'&&url.pathname==='/api/v213/auth-ping')return json(req,res,200,{ok:true,version:V213_AUTH_SIDECAR_VERSION,port:PORT,pid:process.pid});
+  if(req.method==='GET'&&url.pathname==='/api/v213/auth-ping')return json(req,res,200,{ok:true,version:V213_AUTH_SIDECAR_VERSION,port:PORT,appPort:APP_PORT,pid:process.pid});
   if(req.method!=='POST'||url.pathname!=='/api/v213/local-auth/login')return json(req,res,404,{ok:false,code:'V213_NOT_FOUND'});
   const channel=localChannel(req);if(!channel)return json(req,res,403,{ok:false,code:'V213_CHANNEL_DENIED',error:'当前访问来源不允许使用本机/LAN登录。'});
   const started=Date.now();
@@ -106,7 +107,7 @@ const server=http.createServer(async(req,res)=>{
   }
 });
 server.requestTimeout=5000;server.headersTimeout=6000;server.keepAliveTimeout=1000;
-server.listen(PORT,HOST,()=>console.log(`[CE-QC][V213_AUTH_SIDECAR] READY http://${HOST}:${PORT} · ${V213_AUTH_SIDECAR_VERSION} · login isolated from main 5177 event loop`));
+server.listen(PORT,HOST,()=>console.log(`[CE-QC][V213_AUTH_SIDECAR] READY http://${HOST}:${PORT} · main=${APP_PORT} · ${V213_AUTH_SIDECAR_VERSION} · login isolated from main event loop`));
 server.on('error',error=>{console.error('[CE-QC][V213_AUTH_SIDECAR] START FAILED:',error?.stack||error);process.exitCode=1;});
 function shutdown(){try{server.close();}catch{}}
 process.once('SIGINT',()=>{shutdown();process.exit(0);});
