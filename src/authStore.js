@@ -3,6 +3,15 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { getRuntimeConfig } from './db.js';
 
+// V221 runtime root: server.js imports authStore through CEClient before it
+// constructs the Express app. Keep the identity bridge, localhost CE credential
+// access bridge and fast /api/bootstrap registration attached here as well as in
+// bootstrap.js so Managed Desktop Launcher and `node server.js` cannot start a
+// half-wired UI. These imports are side-effect only and never modify SQLite data.
+import './v209LoginReliabilityPatch.js';
+import './v220LocalOwnerAccessPatch.js';
+import './v43BootstrapPerfPatch.js';
+
 export function getTokenFile() {
   return getRuntimeConfig().tokenFile;
 }
