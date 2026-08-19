@@ -9,6 +9,10 @@ const shell=read('src/v44WhppUiPatch.js');
 const storage=read('src/storage.js');
 const bstore=read('src/businessStore.js');
 const parser=read('src/unifiedExcelParser.js');
+const v102=read('src/v102UnifiedImportSafetyGatePatch.js');
+const v146=read('src/v146UnifiedImportDateBridgePatch.js');
+const v209Archive=read('src/v209RawImportArchivePatch.js');
+const v209ArchiveUi=read('public/v209-source-archive-status.js');
 const v42=read('src/v42WhppPatch.js');
 const v161=read('src/v161UnifiedImportRuntimeTruthPatch.js');
 const v207Integrity=read('src/v207UnifiedImportIntegrity.js');
@@ -53,7 +57,9 @@ must(exportSidecar,'IPC_MEMORY_V195');
 must(singleExportWorker,'createV200ReferenceDashboardWorkbook');
 must(allBusinessChild,'createV200ReferenceDashboardWorkbook');
 
-// V207 parser: no sheet/row/business/region may silently disappear.
+// V208 source conservation: a workbook cell that looks like a waybill cannot silently disappear.
+must(v102,'SOURCE_WAYBILL_NOT_PRESERVED');
+must(v102,'sourceWaybillReconciliation');
 must(parser,'UNRECOGNIZED_WAYBILL_SHEET');
 must(parser,'WAYBILL_COLUMN_MISSING');
 must(parser,'UNCLASSIFIED_WAYBILL');
@@ -63,6 +69,21 @@ must(parser,'SHOPEE_REGION_MISSING');
 must(parser,"recipientIndex >= 0 ? 'VALID' : 'VALID_RECIPIENT_OPTIONAL'");
 must(parser,"recipient.includes('TBKH')");
 must(parser,'sourceReconciliation');
+
+// V209 source archive: every import that reaches persistence must first have a verified raw
+// workbook copy. Database rebuilds must no longer depend on asking the user to re-upload history.
+must(v146,"import './v209RawImportArchivePatch.js'");
+must(v209Archive,'CREATE TABLE IF NOT EXISTS v209_import_source_archive');
+must(v209Archive,"status TEXT NOT NULL DEFAULT 'PREPARED'");
+must(v209Archive,"status='ACCEPTED'");
+must(v209Archive,'SOURCE_ARCHIVE_HASH_MISMATCH');
+must(v209Archive,'sha256File(dest)');
+must(v209Archive,"BUSINESS_DATA_TABLES.includes('v209_import_source_archive')");
+must(v209Archive,'/api/v209/source-archive/status');
+must(v209ArchiveUi,'原始日报永久归档 / 可重建保障');
+must(v209ArchiveUi,'SHA-256');
+must(v209ArchiveUi,'归档损坏/缺失');
+must(shell,'/v209-source-archive-status.js?v=20260819-v209-1');
 
 // V207 clean rebaseline: first new upload establishes a clean baseline; later same-day
 // reuploads can update/add but never silently remove already confirmed members.
@@ -90,9 +111,15 @@ must(v207Export,'official.length!==wanted.size');
 must(v206Truth,'collectV207ExportRows');
 must(v206Truth,'V207_EXPORT_MEMBERSHIP_VERSION');
 must(v200Exporter,'collectV206ShopeeRows');
-must(v200Exporter,'_V206.xlsx');
+must(v200Exporter,'_V209.xlsx');
+must(v200Exporter,'FULL_COVERAGE_ONLY');
+must(v200Exporter,'averageOfficial');
+must(v200Exporter,'ppAverageOfficial');
+must(v200Exporter,'pvAverageOfficial');
 must(v200Exporter,'POD_RETURN_CANCELLED_EXCLUDED_FROM_ANOMALY_AND_UNPOD');
 must(v200Metrics,"'未POD明细': filter(openUnpod)");
+must(v200Metrics,'isShopeePrecisionRow');
+must(v200Metrics,"timingEvidenceStatus || '').toUpperCase() !== 'OK'");
 must(v200Workbook,'HYPERLINK');
 must(v200Workbook,"workbook.addWorksheet('每日看板'");
 
@@ -165,4 +192,4 @@ must(v202DisableLegacy,"CE_QC_DISABLE_SHOPEE_DELIVERY_TRACKER='1'");
 must(v202DisableLegacy,'CE_QC_ENABLE_LEGACY_V201_TRACKER');
 for(const source of [runner,pause,shell,storage,bstore])forbid(source,'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] V208 gate passed: strict no-silent-drop parsing, clean seven-business rebaseline, append-only same-day membership, export membership reconciliation, real 1/2/3 delivery cycles, automatic Shopee full-history evidence capture, exact 3001-to-POD PP/PV timing, official-only dashboard values, terminal-safe anomalies and durable manual evidence are all wired to one QC truth path.');
+console.log('[GOLIVE] V209 gate passed: source-cell waybill conservation, verified raw workbook archive, clean seven-business append-only rebaseline, export membership reconciliation, real 1/2/3 delivery cycles, automatic Shopee full-history evidence capture, exact 3001-to-POD PP/PV timing, full-coverage-only official averages, terminal-safe anomalies and durable manual evidence are all wired to one QC truth path.');
