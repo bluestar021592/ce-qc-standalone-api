@@ -1,6 +1,7 @@
 const fs=require('fs');
 const read=p=>fs.readFileSync(p,'utf8');
 const truth=read('src/v206ShopeePrecisionTruth.js');
+const metrics=read('src/v200Metrics.js');
 const dashboard=read('src/v203DashboardIntegrityPatch.js');
 const exporter=read('src/v200TemplateDashboardExporter.js');
 const workbook=read('src/v200ReferenceWorkbook.js');
@@ -18,6 +19,8 @@ must(truth,"status:anyPod?'INVALID_SEQUENCE':'MISSING_POD_TIME'");
 must(truth,"row.deliveryDays=timing.status==='OK'?timing.days:0");
 must(truth,"SHOPEE末端时效：3001入库当天=第1天");
 forbid(truth,'v206NaturalDays(row.orderTime');
+must(metrics,'isShopeePrecisionRow');
+must(metrics,"timingEvidenceStatus || '').toUpperCase() !== 'OK'");
 
 must(dashboard,'collectV206ShopeeRows');
 must(dashboard,'summarizeV206ShopeeTiming');
@@ -29,8 +32,10 @@ must(dashboard,'缺3001、缺POD时间或时间倒序的票不进入平均值');
 must(dashboard,'averageOfficial');
 
 must(exporter,'collectV206ShopeeRows');
-must(exporter,'_V206.xlsx');
-must(exporter,'SHOPEE_3001_TO_ACTUAL_4004_OR_TRACK80_POD_INCLUSIVE');
+must(exporter,'_V209.xlsx');
+must(exporter,'FULL_COVERAGE_ONLY');
+must(exporter,'ppAverageOfficial');
+must(exporter,'pvAverageOfficial');
 must(workbook,'平均签收天数严格按真实3001金边中央仓入库节点→真实4004/轨迹80 POD计算');
 
 must(ui,'SHOPEE CN · 金边 PP');
@@ -45,4 +50,4 @@ must(guard,'自动轨迹证据补全');
 must(shell,'/v206-shopee-precision.js?v=20260819-v207-2');
 must(shell,'/v208-dashboard-final-guard.js?v=20260819-v208-1');
 
-console.log('[V208] SHOPEE precision integration smoke passed: 3001->4004/80 timing, PP/PV split, full-coverage display gate, competing partial average removal and automatic evidence health are wired to one truth source.');
+console.log('[V209] SHOPEE precision smoke passed: real attempts, exact 3001->POD timing, PP/PV split and full-coverage-only official averages are wired end to end.');
