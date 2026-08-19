@@ -36,12 +36,12 @@ let child=null;
 const logs=[];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function fail(message){throw new Error(`${message}\n--- server tail ---\n${logs.slice(-120).join('')}`);}
-async function waitFor(url,{timeoutMs=50000,accept=()=>true}={}){
+async function waitFor(url,{timeoutMs=50000,accept=()=>true,headers={}}={}){
   const end=Date.now()+timeoutMs;
   let last='';
   while(Date.now()<end){
     try{
-      const response=await fetch(url,{cache:'no-store'});
+      const response=await fetch(url,{cache:'no-store',headers});
       last=`HTTP ${response.status}`;
       if(accept(response))return response;
     }catch(error){last=error?.message||String(error);}
@@ -91,9 +91,13 @@ try{
   const health=await jsonRequest(`${APP_ORIGIN}/api/health`);
   if(health.payload?.scope!=='LOOPBACK_READINESS_ONLY'||health.payload?.ready!==true)fail(`loopback health did not report readiness: ${JSON.stringify(health.payload)}`);
 
-  const root=await waitFor(`${APP_ORIGIN}/`,{accept:r=>r.status===200});
+  const launcherRoot=await waitFor(`${APP_ORIGIN}/`,{accept:r=>r.status===200});
+  const launcherText=await launcherRoot.text();
+  if(!/CE QC READY/i.test(launcherText)||launcherRoot.headers.get('x-ce-qc-launcher-readiness')!=='READY_AUTH_REQUIRED')fail('non-browser launcher root probe did not return authenticated-readiness HTTP 200');
+
+  const root=await waitFor(`${APP_ORIGIN}/`,{accept:r=>r.status===200,headers:{accept:'text/html'}});
   const rootText=await root.text();
-  if(!/CE质控系统内部登录|CE QC internal sign-in/i.test(rootText))fail('unauthenticated root did not fail closed to the internal login page');
+  if(!/CE质控系统内部登录|CE QC internal sign-in/i.test(rootText))fail('browser HTML root did not fail closed to the internal login page');
 
   const sidecar=await jsonRequest(`${AUTH_ORIGIN}/api/v213/local-auth/login`,{
     method:'POST',
@@ -133,7 +137,7 @@ try{
   if(!html.includes('/v225-auth-bootstrap-guard.js'))fail('authenticated app shell is missing V225 pre-app auth/bootstrap guard');
   if(!html.includes('/app.js'))fail('authenticated app shell is missing app.js');
 
-  console.log(`[V227] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: health 200 -> auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
+  console.log(`[V228] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: launcher root 200 + health 200 -> browser login -> auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
 }finally{
   if(child&&!child.killed){try{child.kill('SIGTERM');}catch{}}
   await sleep(700);
