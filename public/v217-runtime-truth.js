@@ -1,7 +1,7 @@
 (function installV219RuntimeStability(global){
   'use strict';
   if(global.__CE_QC_V219_RUNTIME_STABILITY__)return;
-  const VERSION='2026-08-19-v219-passive-runtime-stability-v2';
+  const VERSION='2026-08-19-v221-passive-runtime-cleanup-v1';
   const WHPP_CACHE_KEY='ce_qc_v132_whpp_fast_summary';
   let patchTimer=null;
 
@@ -14,6 +14,15 @@
     try{const value=dateOnly(typeof appState!=='undefined'?appState?.reportDate:'');if(value)return value;}catch{}
     try{const value=dateOnly(typeof shopeeState!=='undefined'?shopeeState?.reportDate:'');if(value)return value;}catch{}
     return '';
+  }
+
+  function patchLayout(){
+    let style=document.getElementById('v221RuntimeCleanupStyle');
+    if(!style){
+      style=document.createElement('style');style.id='v221RuntimeCleanupStyle';
+      style.textContent='.home-admin-actions,.dashboard-range-toolbar{display:none!important}';
+      document.head.appendChild(style);
+    }
   }
 
   function patchIdentity(){
@@ -59,7 +68,7 @@
     document.querySelectorAll('.side-link').forEach(node=>node.classList.toggle('active',node.dataset.page==='whpp'));
     const title=document.getElementById('pageTitle');if(title)title.textContent='WHPP本土看板';
     if(location.pathname!=='/whpp')history.pushState({page:'whpp'},'', '/whpp');
-    page.innerHTML='<section class="v18-page-heading"><div><h2>WHPP本土看板</h2><p>当前没有已确认日报日期。历史缓存不会冒充当前日报。</p></div></section><section class="v18-panel"><div class="empty-state">请先选择已有日报日期，或完成日报导入后再查看WHPP。</div></section>';
+    page.innerHTML='<section class="v18-page-heading"><div><h2>WHPP本土看板</h2><p>当前没有已确认日报日期。历史缓存不会冒充当前日报。</p></div></section><section class="v18-panel"><div class="empty-state">当前工作底账尚未恢复到可确认日报日期；系统不会用旧缓存冒充正式数据。</div></section>';
   }
 
   function guardWhppClick(event){
@@ -69,14 +78,13 @@
     event.preventDefault();event.stopImmediatePropagation();showWhppNoDate();
   }
 
-  function patch(){patchIdentity();patchNetwork();}
+  function patch(){patchLayout();patchIdentity();patchNetwork();}
   function schedule(delay=120){clearTimeout(patchTimer);patchTimer=setTimeout(patch,delay);}
   function install(){
     // V217 previously launched a second startup recovery fan-out here: /api/unified-history
     // plus six business-state reads, twice. On the 20GB+ SQLite database that duplicated
-    // the real V43 /api/bootstrap and could block the 5177 event loop. V219 is deliberately
-    // passive: the core app owns all dashboard/bootstrap data. The only request here is one
-    // lightweight /api/session read so the authenticated username/role is never left as a UI placeholder.
+    // the real V43 /api/bootstrap and could block the 5177 event loop. V219/V221 stay
+    // deliberately passive: one bootstrap owns data and this layer only fixes presentation.
     patch();
     void refreshIdentityOnce();
     document.addEventListener('click',guardWhppClick,true);
@@ -86,7 +94,7 @@
     setTimeout(patch,500);
     setTimeout(patch,1800);
     setTimeout(patch,5000);
-    global.__CE_QC_V219_RUNTIME_STABILITY__={version:VERSION,patchIdentity,patchNetwork,currentDate,refreshIdentityOnce};
+    global.__CE_QC_V219_RUNTIME_STABILITY__={version:VERSION,patchIdentity,patchNetwork,patchLayout,currentDate,refreshIdentityOnce};
     global.__CE_QC_V217_RUNTIME_TRUTH__={disabled:true,replacedBy:VERSION};
     console.info('[CE-QC][V219_RUNTIME_STABILITY]',VERSION,'core bootstrap owns data; no startup database fan-out.');
   }
