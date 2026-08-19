@@ -1,7 +1,7 @@
 (function installV219RuntimeStability(global){
   'use strict';
   if(global.__CE_QC_V219_RUNTIME_STABILITY__)return;
-  const VERSION='2026-08-19-v221-passive-runtime-cleanup-v1';
+  const VERSION='2026-08-19-v221-passive-runtime-cleanup-v2';
   const WHPP_CACHE_KEY='ce_qc_v132_whpp_fast_summary';
   let patchTimer=null;
 
@@ -14,6 +14,9 @@
     try{const value=dateOnly(typeof appState!=='undefined'?appState?.reportDate:'');if(value)return value;}catch{}
     try{const value=dateOnly(typeof shopeeState!=='undefined'?shopeeState?.reportDate:'');if(value)return value;}catch{}
     return '';
+  }
+  function whppStateDate(){
+    try{return dateOnly(typeof businessStates!=='undefined'?businessStates?.WHPP?.reportDate:'');}catch{return'';}
   }
 
   function patchLayout(){
@@ -60,7 +63,7 @@
     target.innerHTML=`<div class="access-address-list"><div><span>本机访问</span><b>${esc(localUrl)}</b></div><div><span>同一局域网访问</span><b>${esc(lan)}</b></div><div><span>不同网络 / 外地访问</span><b>${esc(publicText)}</b></div></div>`;
   }
 
-  function showWhppNoDate(){
+  function showWhppNoDate(requestedDate='',availableDate=''){
     try{localStorage.removeItem(WHPP_CACHE_KEY);}catch{}
     let page=document.getElementById('whppFastPage');
     if(!page){page=document.createElement('section');page.id='whppFastPage';page.className='app-page v18-dashboard-page v18-business-page';document.querySelector('main.main-content')?.appendChild(page);}
@@ -68,14 +71,17 @@
     document.querySelectorAll('.side-link').forEach(node=>node.classList.toggle('active',node.dataset.page==='whpp'));
     const title=document.getElementById('pageTitle');if(title)title.textContent='WHPP本土看板';
     if(location.pathname!=='/whpp')history.pushState({page:'whpp'},'', '/whpp');
-    page.innerHTML='<section class="v18-page-heading"><div><h2>WHPP本土看板</h2><p>当前没有已确认日报日期。历史缓存不会冒充当前日报。</p></div></section><section class="v18-panel"><div class="empty-state">当前工作底账尚未恢复到可确认日报日期；系统不会用旧缓存冒充正式数据。</div></section>';
+    const req=requestedDate?`所选日期 ${requestedDate}`:'当前';
+    const available=availableDate?`；WHPP当前已确认底账日期为 ${availableDate}`:'';
+    page.innerHTML=`<section class="v18-page-heading"><div><h2>WHPP本土看板</h2><p>${req}没有同日WHPP已确认日报${available}。系统不会拿其他日期缓存冒充。</p></div></section><section class="v18-panel"><div class="empty-state">请选择WHPP实际存在的日报日期后查看；不同日期的数据不会相互顶替。</div></section>`;
   }
 
   function guardWhppClick(event){
     const link=event.target?.closest?.('.side-link[data-page="whpp"]');
     if(!link)return;
-    if(currentDate())return;
-    event.preventDefault();event.stopImmediatePropagation();showWhppNoDate();
+    const wanted=currentDate(),available=whppStateDate();
+    if(wanted&&available===wanted)return;
+    event.preventDefault();event.stopImmediatePropagation();showWhppNoDate(wanted,available);
   }
 
   function patch(){patchLayout();patchIdentity();patchNetwork();}
@@ -94,7 +100,7 @@
     setTimeout(patch,500);
     setTimeout(patch,1800);
     setTimeout(patch,5000);
-    global.__CE_QC_V219_RUNTIME_STABILITY__={version:VERSION,patchIdentity,patchNetwork,patchLayout,currentDate,refreshIdentityOnce};
+    global.__CE_QC_V219_RUNTIME_STABILITY__={version:VERSION,patchIdentity,patchNetwork,patchLayout,currentDate,whppStateDate,refreshIdentityOnce};
     global.__CE_QC_V217_RUNTIME_TRUTH__={disabled:true,replacedBy:VERSION};
     console.info('[CE-QC][V219_RUNTIME_STABILITY]',VERSION,'core bootstrap owns data; no startup database fan-out.');
   }
