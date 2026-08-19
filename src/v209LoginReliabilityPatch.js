@@ -7,7 +7,7 @@ import bcrypt from 'bcryptjs';
 import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig } from './db.js';
 
-export const V209_LOGIN_RELIABILITY_VERSION='2026-08-19-v212-local-readonly-auth-v1';
+export const V209_LOGIN_RELIABILITY_VERSION='2026-08-19-v212-local-readonly-auth-v2';
 const INSTALLED=Symbol.for('ce-qc.v209-login-reliability-installed');
 const WRAPPED=Symbol.for('ce-qc.v209-access-wrapped');
 const FAST_COOKIE='ce_v212_fast_session';
@@ -71,19 +71,20 @@ function setFastCookie(res,row,channel){
 }
 function clearFastCookie(res){res.setHeader('Set-Cookie',[`${FAST_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,'ce_v211_fast_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0']);}
 
-function readAuthRowWithoutRuntimeDb(username){
-  const file=getRuntimeConfig().dbFile;
-  // Do NOT call getDb() here. getDb() may run schema migration/performance setup on the
-  // 20+ GiB runtime database before the first query. The login page can already be served
-  // while that initialization is blocked by a writer, which is exactly why V211 timed out.
-  // A short-lived read-only SQLite connection can read the tiny indexed users table without
-  // participating in migrations, checkpoints, audit writes or user_sessions writes.
+function readAuthRowFromFile(file,username){
   const authDb=new DatabaseSync(file,{readOnly:true});
   try{
     authDb.exec('PRAGMA query_only=ON');
     authDb.exec('PRAGMA busy_timeout=750');
     return authDb.prepare("SELECT id,username,displayName,departmentCompany,email,passwordHash,role,businessScope,enabled,status,expiresAt,mustChangePassword,lockedUntil FROM users WHERE username=? AND status='ACTIVE' LIMIT 1").get(username)||null;
   }finally{try{authDb.close();}catch{}}
+}
+function readAuthRowWithoutRuntimeDb(username){
+  const file=getRuntimeConfig().dbFile;
+  // Never call getDb() from the local login path. getDb() can initialize/migrate the
+  // 20+ GiB operational database, which is why V211 could serve the login HTML yet
+  // hang on POST. This short-lived read-only handle does no migrations/checkpoints/writes.
+  return readAuthRowFromFile(file,username);
 }
 
 async function v212FastLocalAuth(req,res,next){
@@ -95,13 +96,16 @@ async function v212FastLocalAuth(req,res,next){
   const username=cleanUsername(req.body?.username),password=String(req.body?.password||'');
   if(!username||!password)return res.status(400).json({ok:false,error:'请输入用户名和密码。'});
   const started=Date.now();
+  console.log(`[CE-QC][V212_FAST_LOGIN_START] user=${username} channel=${channel}`);
   try{
     const row=readAuthRowWithoutRuntimeDb(username);
+    console.log(`[CE-QC][V212_FAST_LOGIN_READ_OK] found=${Boolean(row)} ms=${Date.now()-started}`);
     if(!row)return res.status(401).json({ok:false,error:'用户名或密码错误。'});
     if(!Number(row.enabled))return res.status(403).json({ok:false,error:'该账号已停用。'});
     if(row.expiresAt&&Date.parse(row.expiresAt)<=Date.now())return res.status(403).json({ok:false,error:'该账号已过期。'});
     if(row.lockedUntil&&Date.parse(row.lockedUntil)>Date.now())return res.status(423).json({ok:false,error:'该账号暂时锁定，请稍后再试。'});
-    const matched=await bcrypt.compare(password,String(row.passwordHash||''));
+    const matched=bcrypt.compareSync(password,String(row.passwordHash||''));
+    console.log(`[CE-QC][V212_FAST_LOGIN_PASSWORD_CHECK] matched=${matched} ms=${Date.now()-started}`);
     if(!matched)return res.status(401).json({ok:false,error:'用户名或密码错误。'});
     const issued=setFastCookie(res,row,channel);
     console.log(`[CE-QC][V212_FAST_LOGIN_OK] user=${row.username} channel=${channel} ms=${Date.now()-started}`);
@@ -113,7 +117,7 @@ async function v212FastLocalAuth(req,res,next){
   }
 }
 
-function inlineLoginScript(){return `<script>(function(){'use strict';const form=document.getElementById('login'),button=document.getElementById('submit'),error=document.getElementById('error');if(!form||!button||!error)return;const message=text=>{error.textContent=String(text||'');};form.addEventListener('submit',async event=>{event.preventDefault();if(button.disabled)return;message('');button.disabled=true;const original=button.textContent;button.textContent='正在登录…';const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),5000);try{const body={username:String(document.getElementById('username')?.value||'').trim(),password:String(document.getElementById('password')?.value||'')};const response=await fetch('/api/internal-auth/login',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(body),signal:controller.signal});const text=await response.text();let payload={};try{payload=text?JSON.parse(text):{};}catch{payload={error:text||('登录接口返回 HTTP '+response.status)};}if(!response.ok||payload.ok===false){message((payload.error||payload.message||('登录失败（HTTP '+response.status+'）'))+(payload.code?' ['+payload.code+']':''));return;}button.textContent='登录成功，正在进入…';location.replace('/?login='+Date.now());}catch(err){message(err?.name==='AbortError'?'登录接口5秒仍未返回，请把黑框中 V212_FAST_LOGIN 的一行发我。':'登录请求失败：'+(err?.message||err));}finally{clearTimeout(timer);if(!String(button.textContent).includes('成功')){button.disabled=false;button.textContent=original;}}});})();</script>`;}
+function inlineLoginScript(){return `<script>(function(){'use strict';const form=document.getElementById('login'),button=document.getElementById('submit'),error=document.getElementById('error');if(!form||!button||!error)return;const message=text=>{error.textContent=String(text||'');};form.addEventListener('submit',async event=>{event.preventDefault();if(button.disabled)return;message('');button.disabled=true;const original=button.textContent;button.textContent='正在登录…';const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),5000);try{const body={username:String(document.getElementById('username')?.value||'').trim(),password:String(document.getElementById('password')?.value||'')};const response=await fetch('/api/internal-auth/login',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(body),signal:controller.signal});const text=await response.text();let payload={};try{payload=text?JSON.parse(text):{};}catch{payload={error:text||('登录接口返回 HTTP '+response.status)};}if(!response.ok||payload.ok===false){message((payload.error||payload.message||('登录失败（HTTP '+response.status+'）'))+(payload.code?' ['+payload.code+']':''));return;}button.textContent='登录成功，正在进入…';location.replace('/?login='+Date.now());}catch(err){message(err?.name==='AbortError'?'登录接口5秒仍未返回，请看黑框最后出现的是 V212_FAST_LOGIN_START、READ_OK 还是 PASSWORD_CHECK。':'登录请求失败：'+(err?.message||err));}finally{clearTimeout(timer);if(!String(button.textContent).includes('成功')){button.disabled=false;button.textContent=original;}}});})();</script>`;}
 
 export function v209LoginReliabilityPage(req,res,next){
   if(req.method!=='GET'||req.path.startsWith('/api/')||hasSession(req)||!localLike(req)||!wantsHtml(req))return next();
@@ -161,4 +165,4 @@ if(!express.application[INSTALLED]){
   };
 }
 
-export const __test={hostOnly,ipOnly,cookieValue,hasSession,localChannel,localLike,inlineLoginScript,signFastPayload,verifyFastToken,publicUser,readAuthRowWithoutRuntimeDb};
+export const __test={hostOnly,ipOnly,cookieValue,hasSession,localChannel,localLike,inlineLoginScript,signFastPayload,verifyFastToken,publicUser,readAuthRowFromFile,readAuthRowWithoutRuntimeDb};
