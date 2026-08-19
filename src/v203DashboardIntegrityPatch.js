@@ -5,12 +5,13 @@ import { collectV206ShopeeRows, summarizeV206ShopeeTiming, V206_SHOPEE_PRECISION
 import { statsOf } from './v200Metrics.js';
 import { ensureV203ManualEvidenceSchema, V203_MANUAL_EVIDENCE_VERSION } from './v203ManualEvidenceStore.js';
 import { inspectV203PublicTunnel } from './v203PublicTunnelSupervisor.js';
+import './v208ShopeePrecisionEvidenceScheduler.js';
 
-export const V203_DASHBOARD_INTEGRITY_VERSION='2026-08-18-v206-precision-attempt-network-v6';
-const CACHE_TTL_MS=Math.max(15_000,Math.min(10*60_000,Number(process.env.V203_ATTEMPT_CACHE_MS||60_000)));
+export const V203_DASHBOARD_INTEGRITY_VERSION='2026-08-19-v208-precision-attempt-network-v7';
+const CACHE_TTL_MS=Math.max(5_000,Math.min(2*60_000,Number(process.env.V203_ATTEMPT_CACHE_MS||15_000)));
 const cache=new Map();
 function dateKey(value=''){const m=String(value||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';}
-function latestDate(){try{return String(getDb().prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate||'');}catch{return '';}}
+function latestDate(){const db=getDb();try{const d=String(db.prepare("SELECT MAX(reportDate) d FROM v207_daily_ownership WHERE businessType IN ('SHOPEECN','SHOPEEVN')").get()?.d||'');if(d)return d;}catch{}try{return String(db.prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate||'');}catch{return '';}}
 function ratio(a,b){return b?Number(((Number(a||0)/Number(b))*100).toFixed(2)):0;}
 function summarize(type,rows,range){
   const eligible=rows.filter(row=>row.metricEligible!==false);
@@ -51,9 +52,12 @@ async function attemptSummaryHandler(req,res){
     combined.a1Rate=ratio(combined.a1,combined.pod);combined.a2Rate=ratio(combined.a2,combined.pod);combined.a3Rate=ratio(combined.a3,combined.pod);combined.unknownRate=ratio(combined.attemptUnknown,combined.pod);
     combined.averageDays=weighted(parts,'averageDays','averageSamples');combined.ppAverageDays=weighted(parts,'ppAverageDays','ppAverageSamples');combined.pvAverageDays=weighted(parts,'pvAverageDays','pvAverageSamples');
     combined.timingCoverage=ratio(combined.averageSamples,combined.timingPod);combined.ppTimingCoverage=ratio(combined.ppAverageSamples,combined.ppPod);combined.pvTimingCoverage=ratio(combined.pvAverageSamples,combined.pvPod);
-    const value={ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,truthVersion:V206_SHOPEE_PRECISION_VERSION,range,combined,parts,rule:{attempt:'真实开始派送(4003/70/日报W-Y)→本次失败Pending/150→再次真实开始派送=下一派；代码60、经过天数、Pending条数不制造派次。',average:'SHOPEE末端平均签收严格使用真实3001入库节点→真实4004/轨迹80 POD；3001当天算第1天，首尾自然日计1天。缺3001、缺POD时间或时间倒序的票不进入平均值，禁止用下单时间、日报日期或区间均值补算。',region:'PP=金边、PV=外省；区域只由收件省份/区域代码决定，不按当前所在门店或最新节点改区。',denominator:'派次占比以POD票数为分母；时效覆盖率=有完整3001→POD证据的POD票/该区域POD票。',integrity:'同一天所有已完成VALID+SUPERSEDED日报批次取历史底账并集；轨迹证据同时读取精确业务与SHOPEE历史家族存储。'},generatedAt:new Date().toISOString()};
+    combined.averageOfficial=combined.timingPod===combined.averageSamples&&combined.timingCoverage>=99.99;
+    combined.ppAverageOfficial=combined.ppPod===combined.ppAverageSamples&&combined.ppTimingCoverage>=99.99;
+    combined.pvAverageOfficial=combined.pvPod===combined.pvAverageSamples&&combined.pvTimingCoverage>=99.99;
+    const value={ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,truthVersion:V206_SHOPEE_PRECISION_VERSION,range,combined,parts,rule:{attempt:'真实开始派送(4003/70/日报W-Y)→本次失败Pending/150→再次真实开始派送=下一派；代码60、经过天数、Pending条数不制造派次。',average:'SHOPEE末端平均签收严格使用真实3001入库节点→真实4004/轨迹80 POD；3001当天算第1天，首尾自然日计1天。缺3001、缺POD时间或时间倒序的票不进入平均值；覆盖率未到100%时平均值只能作为内部计算，不允许作为正式看板值显示。',region:'PP=金边、PV=外省；区域只由收件省份/区域代码决定，不按当前所在门店或最新节点改区。',denominator:'派次占比以POD票数为分母；时效覆盖率=有完整3001→POD证据的POD票/该区域POD票。',integrity:'V207按逐日新版上传建立七业务不可丢失底账；V208后台自动抓取SHOPEE完整历史轨迹，专门补齐1/2/3派和3001→POD证据。'},generatedAt:new Date().toISOString()};
     cache.set(key,{at:Date.now(),value});res.setHeader('Cache-Control','no-store');res.json(value);
-  }catch(error){res.status(500).json({ok:false,error:error.message});}
+  }catch(error){const status=error?.code==='V207_REBASELINE_INCOMPLETE'?409:500;res.status(status).json({ok:false,code:error?.code||'ATTEMPT_SUMMARY_FAILED',error:error.message,missingDates:error?.missingDates||[]});}
 }
 function lanIps(){const out=[];for(const list of Object.values(networkInterfaces()))for(const item of list||[]){if(item.family!=='IPv4'||item.internal||/^169\.254\./.test(item.address))continue;if(/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address))out.push(item.address);}return[...new Set(out)];}
 function networkHandler(req,res){
@@ -69,5 +73,6 @@ function networkHandler(req,res){
   res.setHeader('Cache-Control','no-store');res.json({ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,bind:{host:cfg.host,port:cfg.port,lanEnabled:cfg.host==='0.0.0.0',localUrl:`http://127.0.0.1:${cfg.port}`,lanUrls:ips.map(ip=>`http://${ip}:${cfg.port}`)},public:{hostname:publicHostname,origin:activeOrigin,configuredOrigin:namedOrigin,quickOrigin,cloudflareAccessConfigured:cfConfigured,directPublicEnabled:direct,applicationReady,tunnelConfigured:tunnel.configured,tunnelMode:tunnel.mode,tunnelStatus:tunnel.status,tunnelRunning:tunnelReady,tunnelPid:tunnel.pid,publicReady,security:'公网入口必须保留系统账号登录。Named Tunnel + Cloudflare Access最稳定；未配置Named Tunnel时可自动使用临时Quick Tunnel。',lastTunnelError:tunnel.lastError||'',quickTemporary:tunnel.mode==='QUICK'},manualEvidenceVersion:V203_MANUAL_EVIDENCE_VERSION});
 }
 let installed=false;const previousListen=express.application.listen;
-express.application.listen=function v206DashboardIntegrityListen(...args){if(!installed){installed=true;ensureV203ManualEvidenceSchema();this.get('/api/v203/attempt-summary',attemptSummaryHandler);this.get('/api/v203/network-access',networkHandler);}return previousListen.apply(this,args);};
+express.application.listen=function v208DashboardIntegrityListen(...args){if(!installed){installed=true;ensureV203ManualEvidenceSchema();this.get('/api/v203/attempt-summary',attemptSummaryHandler);this.get('/api/v203/network-access',networkHandler);}return previousListen.apply(this,args);};
+export function clearV203AttemptCache(){cache.clear();return true;}
 export function inspectV203DashboardIntegrity(){return{version:V203_DASHBOARD_INTEGRITY_VERSION,truthVersion:V206_SHOPEE_PRECISION_VERSION,cacheSize:cache.size,cacheTtlMs:CACHE_TTL_MS};}
