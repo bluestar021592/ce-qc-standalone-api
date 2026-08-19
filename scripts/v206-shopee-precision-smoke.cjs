@@ -5,6 +5,7 @@ const dashboard=read('src/v203DashboardIntegrityPatch.js');
 const exporter=read('src/v200TemplateDashboardExporter.js');
 const workbook=read('src/v200ReferenceWorkbook.js');
 const ui=read('public/v206-shopee-precision.js');
+const guard=read('public/v208-dashboard-final-guard.js');
 const shell=read('src/v44WhppUiPatch.js');
 const must=(source,token)=>{if(!source.includes(token))throw new Error(`V206 precision smoke missing: ${token}`);};
 const forbid=(source,token)=>{if(source.includes(token))throw new Error(`V206 precision smoke forbidden: ${token}`);};
@@ -25,6 +26,7 @@ must(dashboard,'pvAverageDays');
 must(dashboard,'ppTimingCoverage');
 must(dashboard,'pvTimingCoverage');
 must(dashboard,'缺3001、缺POD时间或时间倒序的票不进入平均值');
+must(dashboard,'averageOfficial');
 
 must(exporter,'collectV206ShopeeRows');
 must(exporter,'_V206.xlsx');
@@ -38,6 +40,9 @@ must(ui,'SHOPEE VN · 外省 PV');
 must(ui,'pod===samples&&coverage>=99.99');
 must(ui,"averageText=!pod?'—':closed?`${Number(region.avg||0).toFixed(2)} 天`:'待补齐'");
 must(ui,'只有该区域“有效时效样本=POD票数”时才正式展示平均天数');
-must(shell,'/v206-shopee-precision.js?v=20260818-v206-1');
+must(guard,"label==='平均签收天数'");
+must(guard,'自动轨迹证据补全');
+must(shell,'/v206-shopee-precision.js?v=20260819-v207-2');
+must(shell,'/v208-dashboard-final-guard.js?v=20260819-v208-1');
 
-console.log('[V206] SHOPEE precision integration smoke passed: 3001->4004/80 timing, PP/PV split, full-coverage display gate, export note and UI shell are wired to one truth source.');
+console.log('[V208] SHOPEE precision integration smoke passed: 3001->4004/80 timing, PP/PV split, full-coverage display gate, competing partial average removal and automatic evidence health are wired to one truth source.');
