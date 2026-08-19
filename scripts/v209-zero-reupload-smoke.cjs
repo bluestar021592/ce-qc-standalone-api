@@ -10,6 +10,7 @@ const exporter=read('src/v200TemplateDashboardExporter.js');
 const ui=read('public/v209-source-archive-status.js');
 const shell=read('src/v44WhppUiPatch.js');
 function must(source,token){if(!source.includes(token))throw new Error(`V209 smoke missing ${token}`);}
+function forbid(source,token){if(source.includes(token))throw new Error(`V209 smoke forbidden ${token}`);}
 must(archive,'v209_import_source_archive');
 must(archive,'SOURCE_ARCHIVE_HASH_MISMATCH');
 must(archive,'sha256File(dest)');
@@ -21,6 +22,13 @@ must(bridge,"import './v209LoginReliabilityPatch.js'");
 must(login,'v209AccessIdentityNoHang');
 must(login,'v209LoginReliabilityPage');
 must(login,"fn.name==='accessIdentity'");
+must(login,'inlineLoginScript');
+must(login,"fetch('/api/internal-auth/login'");
+must(login,'登录接口15秒内没有响应');
+must(login,'zero authenticated/static dependencies');
+forbid(login,'<script src=');
+// Retain the standalone JS syntax/behavior check as a compatibility fallback, but
+// the unauthenticated login page itself must not depend on this asset.
 must(loginUi,'登录接口15秒内没有响应');
 must(unifiedStore,"'ORDER_CANCELLED'");
 must(unifiedStore,"'SELF_PICKUP'");
@@ -39,4 +47,4 @@ must(exporter,'_V209.xlsx');
 must(ui,'原始日报永久归档 / 可重建保障');
 must(ui,'SHA-256');
 must(shell,'/v209-source-archive-status.js?v=20260819-v209-1');
-console.log('[V209] source archive, stable terminal locks, strict Shopee average and non-hanging login integration smoke passed');
+console.log('[V209] source archive, stable terminal locks, strict Shopee average and self-contained non-hanging login integration smoke passed');
