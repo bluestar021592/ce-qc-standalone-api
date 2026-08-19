@@ -2,6 +2,8 @@
   'use strict';
   if(global.__CE_QC_V221_PASSIVE_UTILITIES__)return;
   global.__CE_QC_V221_PASSIVE_UTILITIES__='2026-08-19-v221-passive-utilities-v1';
+  // Retired compatibility labels only; V221 deliberately does not recreate the old
+  // 真实1/2/3派 POD / 派次证据不足 overlay or RETIRED_TITLES DOM-hiding loop.
 
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const LABELS={CE:'CE',CEAF:'CEAF空运',TBKH:'TBKH',ALI1688:'ALI1688',SHOPEECN:'SHOPEE CN',SHOPEEVN:'SHOPEE VN',WHPP:'WHPP本土'};
