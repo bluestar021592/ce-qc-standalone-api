@@ -55,10 +55,11 @@ must(dashboard,'pvAverageOfficial');
 must(audit,"/api/v205/integrity/summary");
 must(audit,"/api/v205/integrity/deep");
 must(audit,"b.status IN ('VALID','SUPERSEDED')");
-must(audit,'sampleMissing');
-must(auditUi,'数据完整性 / 遗漏风险核查');
-must(auditUi,'历史底账');
-must(auditUi,'证据待补齐');
+must(audit,'reviewSamples');
+must(audit,'V207_REBASELINE_INCOMPLETE');
+must(auditUi,'轨迹证据 / 状态闭环完整性');
+must(auditUi,'历史日报清洁重建 / 防漏票底账');
+must(auditUi,'轨迹证据待补齐');
 must(shell,"import './v205IntegrityAuditPatch.js'");
 must(shell,'/v205-data-integrity.js?v=20260819-v207-2');
 
