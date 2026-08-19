@@ -1,10 +1,14 @@
 import { getDb } from './db.js';
+import './v221BootstrapRecoveryPatch.js';
 
-const PATCH_ID = '2026-08-12-v46-cold-start-deferred-index-check-v4';
+const PATCH_ID = '2026-08-19-v224-restored-persisted-bootstrap-recovery-v1';
 
 // Cold start must never open or scan the SQLite database merely to inspect
 // optional performance indexes. The definitions stay available for explicit
 // maintenance/diagnostics, while normal server startup remains database-lazy.
+// The restored V221 bootstrap layer is loaded here intentionally, immediately
+// after V43 in bootstrap.js, so /api/bootstrap can recover persisted dashboard
+// truth from cache/legacy tables when the canonical unified pointer is unavailable.
 const REQUIRED_INDEXES = Object.freeze([
   {
     name: 'idx_unified_rows_bootstrap_cover',
@@ -30,7 +34,7 @@ export function inspectV46Indexes() {
   return { present, missing };
 }
 
-console.log('[CE-QC][V46] optional index inspection deferred; cold start performs no database access.');
+console.log('[CE-QC][V46] optional index inspection deferred; restored V221 persisted-dashboard recovery is armed after V43.');
 
 export const V46_COLD_START_INDEX_PATCH_ID = PATCH_ID;
 export const V46_REQUIRED_INDEXES = REQUIRED_INDEXES;
