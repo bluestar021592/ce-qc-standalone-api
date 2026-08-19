@@ -1,8 +1,8 @@
 (function v206ShopeePrecision(global){
   'use strict';
   if(global.__CE_QC_V206_SHOPEE_PRECISION__)return;
-  global.__CE_QC_V206_SHOPEE_PRECISION__='2026-08-19-v221-shopee-pp-pv-average-event-v1';
-  const q=(s,r=document)=>r.querySelector(s);const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
+  global.__CE_QC_V206_SHOPEE_PRECISION__='2026-08-19-v221-shopee-pp-pv-average-event-v2';
+  const q=(s,r=document)=>r.querySelector(s);const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const LABELS={SHOPEECN:'SHOPEE CN',SHOPEEVN:'SHOPEE VN'};let busy=false,lastKey='',lastAt=0,scheduled=null;
   function visible(el){return Boolean(el&&!el.hidden&&getComputedStyle(el).display!=='none');}
   function installStyle(){if(q('#v206ShopeePrecisionStyle'))return;const s=document.createElement('style');s.id='v206ShopeePrecisionStyle';s.textContent=`
@@ -10,14 +10,19 @@
     document.head.appendChild(s);
   }
   function context(){const home=q('#homePage'),shopee=q('#shopeePage'),path=location.pathname.toLowerCase();if(visible(home))return{root:home,type:'ALL'};if(visible(shopee)){if(path.includes('shopeecn'))return{root:shopee,type:'SHOPEECN'};if(path.includes('shopeevn'))return{root:shopee,type:'SHOPEEVN'};const t=(q('#pageTitle')?.textContent||'').toUpperCase();if(t.includes('CN'))return{root:shopee,type:'SHOPEECN'};if(t.includes('VN'))return{root:shopee,type:'SHOPEEVN'};return{root:shopee,type:'ALL'};}return null;}
-  function stateDate(){try{return String(global.unifiedImportState?.reportDate||global.appState?.reportDate||global.shopeeState?.reportDate||'').slice(0,10);}catch{return'';}}
+  function stateDate(){
+    try{const d=typeof unifiedImportState!=='undefined'?unifiedImportState?.reportDate:'';if(d)return String(d).slice(0,10);}catch{}
+    try{const d=typeof appState!=='undefined'?appState?.reportDate:'';if(d)return String(d).slice(0,10);}catch{}
+    try{const d=typeof shopeeState!=='undefined'?shopeeState?.reportDate:'';if(d)return String(d).slice(0,10);}catch{}
+    return '';
+  }
   function range(){const fallback=stateDate();const from=q('#topRangeFrom')?.value||q('#dashboardRangeFrom')?.value||fallback;const to=q('#topRangeTo')?.value||q('#dashboardRangeTo')?.value||from||fallback;return{from,to};}
   function ensure(ctx){let p=q('#v206ShopeePrecisionPanel');if(p&&p.closest('.app-page')!==ctx.root){p.remove();p=null;}if(p)return p;p=document.createElement('section');p.id='v206ShopeePrecisionPanel';p.className='panel v206-precision';const anchor=q('#homeTrendGrid',ctx.root)||q('#shopeeRecipientTrends',ctx.root)||q('#shopeeTrendGrid',ctx.root)||ctx.root.firstElementChild;if(anchor?.parentNode)anchor.parentNode.insertBefore(p,anchor.nextSibling);else ctx.root.appendChild(p);return p;}
   async function api(url){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),12000);try{const res=await fetch(url,{credentials:'same-origin',cache:'no-store',signal:controller.signal});let data={};try{data=await res.json();}catch{}if(!res.ok||data.ok===false)throw new Error(data.error||`HTTP ${res.status}`);return data;}finally{clearTimeout(timer);}}
   function regionCard(label,region){const samples=Number(region.samples||0),pod=Number(region.pod||0),coverage=Number(region.coverage||0),missing=Math.max(0,pod-samples),closed=pod===samples&&coverage>=99.99;const averageText=!pod?'—':closed?`${Number(region.avg||0).toFixed(2)} 天`:'待补齐';return `<div class="v206-card"><small>${esc(label)}</small><b class="${pod&&!closed?'v206-bad':''}">${averageText}</b><span>有效时效 ${samples.toLocaleString('zh-CN')} / POD ${pod.toLocaleString('zh-CN')} · 覆盖 <strong class="${closed?'v206-ok':coverage>=95?'v206-warn':'v206-bad'}">${coverage.toFixed(2)}%</strong>${missing?` · 证据缺口 ${missing.toLocaleString('zh-CN')}票`:''}</span></div>`;}
   function partRegions(part={}){return{pp:{avg:part.ppAverageDays,samples:part.ppAverageSamples,pod:part.ppPod,coverage:part.ppTimingCoverage},pv:{avg:part.pvAverageDays,samples:part.pvAverageSamples,pod:part.pvPod,coverage:part.pvTimingCoverage}};}
   function renderCards(data,ctx){const parts=data.parts||[];if(ctx.type==='ALL'){const cards=[];for(const type of ['SHOPEECN','SHOPEEVN']){const part=parts.find(x=>x.businessType===type)||{},r=partRegions(part);cards.push(regionCard(`${LABELS[type]} · 金边 PP`,r.pp),regionCard(`${LABELS[type]} · 外省 PV`,r.pv));}return cards.join('');}const part=parts.find(x=>x.businessType===ctx.type)||data.combined||{},r=partRegions(part);return regionCard('金边 PP 平均签收',r.pp)+regionCard('外省 PV 平均签收',r.pv);}
-  function recoveryOnly(){try{return Boolean(global.unifiedImportState?.recoveredFromPersistedSummary||global.__CE_QC_BOOTSTRAP_RECOVERY_ONLY__);}catch{return false;}}
+  function recoveryOnly(){try{return Boolean(typeof unifiedImportState!=='undefined'&&unifiedImportState?.recoveredFromPersistedSummary);}catch{return false;}}
   async function render(force=false){const ctx=context();if(!ctx)return;installStyle();const r=range(),key=`${ctx.type}|${r.from}|${r.to}|${location.pathname}`;if(!force&&busy)return;if(!force&&key===lastKey&&Date.now()-lastAt<15000)return;busy=true;lastKey=key;const panel=ensure(ctx);
     if(!r.from||!r.to){panel.innerHTML='<div class="v206-head"><div><h3>SHOPEE 金边 / 外省末端平均签收天数</h3><p>当前还没有可确认的日报日期；不会用0天或旧均值代替。</p></div><span class="status-pill muted">等待底账</span></div>';busy=false;return;}
     if(recoveryOnly()){panel.innerHTML=`<div class="v206-head"><div><h3>SHOPEE 金边 / 外省末端平均签收天数</h3><p>${esc(r.from)} 至 ${esc(r.to)} · 历史汇总底账已恢复；精确3001→POD证据仍以正式成员底账为准。</p></div><span class="status-pill muted">等待精确证据</span></div><div class="v206-rule"><strong>保护规则：</strong>当前只恢复历史已保存汇总，不从汇总反推1/2/3派或平均签收天数。重新建立正式成员底账后，系统再按真实轨迹自动计算。</div>`;lastAt=Date.now();busy=false;return;}
