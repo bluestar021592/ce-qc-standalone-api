@@ -1,6 +1,7 @@
 import express from 'express';
+import './v209RawImportArchivePatch.js';
 
-export const V146_UNIFIED_IMPORT_DATE_BRIDGE_ID = '2026-08-16-v146-unified-import-date-bridge-v1';
+export const V146_UNIFIED_IMPORT_DATE_BRIDGE_ID = '2026-08-19-v209-unified-import-date-and-source-archive-bridge-v2';
 const ROUTE = '/api/import/unified-daily-report';
 
 function validDate(year, month, day) {
@@ -56,7 +57,7 @@ function normalizeImportDate(req, res, next) {
 }
 
 const previousPost = express.application.post;
-express.application.post = function v146UnifiedImportDateBridgePost(pathValue, ...handlers) {
+express.application.post = function v209UnifiedImportDateBridgePost(pathValue, ...handlers) {
   if (String(pathValue || '') === ROUTE && handlers.length) {
     return previousPost.call(this, pathValue, ...handlers.slice(0, -1), normalizeImportDate, handlers.at(-1));
   }
