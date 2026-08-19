@@ -1,16 +1,21 @@
 const fs=require('fs');
 const {spawnSync}=require('child_process');
-const must=(condition,message)=>{if(!condition)throw new Error(`V220 runtime stability smoke failed: ${message}`);};
+const must=(condition,message)=>{if(!condition)throw new Error(`V221 runtime stability smoke failed: ${message}`);};
 const truth=fs.readFileSync('public/v217-runtime-truth.js','utf8');
 const v160=fs.readFileSync('public/v160-current-home-truth.js','utf8');
 const guard=fs.readFileSync('public/v214-home-whpp-identity-guard.js','utf8');
+const v203=fs.readFileSync('public/v203-dashboard-integrity.js','utf8');
+const v208=fs.readFileSync('public/v208-dashboard-final-guard.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const bootstrap=fs.readFileSync('src/v43BootstrapPerfPatch.js','utf8');
+const recovery=fs.readFileSync('src/v221BootstrapRecoveryPatch.js','utf8');
+const v46=fs.readFileSync('src/v46ColdStartIndexPatch.js','utf8');
 const authPreload=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const ownerPatch=fs.readFileSync('src/v220LocalOwnerAccessPatch.js','utf8');
 const bootSource=fs.readFileSync('bootstrap.js','utf8');
-must(truth.includes('V219_RUNTIME_STABILITY'),'missing V219 passive runtime stability marker');
-must(truth.includes('core bootstrap owns data; no startup database fan-out'),'V219 passive-runtime ownership marker missing');
+
+must(truth.includes('V219_RUNTIME_STABILITY'),'missing passive runtime stability marker');
+must(truth.includes('core bootstrap owns data; no startup database fan-out'),'passive-runtime ownership marker missing');
 must(!truth.includes('recoverRuntimeTruth'),'retired heavy runtime recovery function must not return');
 must(!truth.includes("jsonFetch('/api/unified-history"),'startup must not hydrate historical imports from the presentation guard');
 must(!truth.includes('/api/business-state/'),'startup presentation guard must not fan out six business-state requests');
@@ -19,6 +24,7 @@ must(!truth.includes("jsonFetch('/api/shopee/state?compact=1"),'startup presenta
 must(!truth.includes('renderAll('),'presentation guard must not trigger a second full dashboard render');
 must(!truth.includes('new MutationObserver'),'runtime stability guard must not install a DOM MutationObserver');
 must(truth.includes("localStorage.removeItem(WHPP_CACHE_KEY)"),'stale WHPP cache purge missing');
+must(truth.includes('.home-admin-actions,.dashboard-range-toolbar{display:none!important}'),'duplicate home purge/range controls are not retired');
 must(v160.includes('V160 provisional zero mutation disabled'),'V160 zero-overwrite retirement missing');
 must(!v160.includes('ccslPlaceholder'),'legacy CCSL zero placeholder still active');
 must(!v160.includes('shopeePlaceholder'),'legacy SHOPEE zero placeholder still active');
@@ -26,23 +32,51 @@ must(guard.includes('V219_UI_NAV_GUARD'),'passive navigation guard compatibility
 must(guard.includes('ensureWhppHomeCard'),'WHPP home-card restoration missing');
 must(!guard.includes('new MutationObserver'),'WHPP/navigation guard must remain polling-free');
 must(!guard.includes('loadV217'),'navigation guard must not dynamically inject duplicate runtime recovery');
-must(shell.includes('/v217-runtime-truth.js?v=20260819-v219-passive-1'),'V219 passive runtime asset is not directly injected');
-must(bootstrap.includes("pathValue === '/api/bootstrap'"),'V43 fast bootstrap route ownership missing');
+must(shell.includes('/v217-runtime-truth.js?v=20260819-v219-passive-1'),'passive runtime asset is not directly injected');
+
+// V221: V43 remains the compact bootstrap base, but V221 owns final registration
+// so an empty/new canonical ledger can fall back to already-persisted QC summaries
+// instead of rendering a false all-zero dashboard.
+must(bootstrap.includes("pathValue === '/api/bootstrap'"),'V43 fast bootstrap base missing');
 must(bootstrap.includes('CACHE_SUMMARY_ONLY'),'V43 cache-summary bootstrap mode missing');
-must(bootstrap.includes('session: { ok: true, user: publicUser(req.user), unreadNotifications: 0 }'),'bootstrap must carry authenticated request identity');
-must(bootstrap.includes('simpleHistory(60)'),'bootstrap must use bounded lightweight history instead of hydrated 120-day history');
-// V220 critical ordering gate: 5179 auth identity and localhost CE credential
-// access must both be installed before the actual server.js import call. Do not
-// compare against the importServerInteractiveFirst function declaration itself.
+must(recovery.includes("pathValue === '/api/bootstrap'"),'V221 recovery-aware bootstrap registration missing');
+must(recovery.includes('PERSISTED_RECOVERY_SUMMARY'),'V221 persisted recovery response marker missing');
+must(recovery.includes('canonicalStatus()'),'V221 canonical-first gate missing');
+must(recovery.includes("tableExists('dashboard_daily_cache')"),'V221 durable dashboard-cache fallback missing');
+must(recovery.includes("tableExists('v209_import_source_archive')"),'V221 raw source archive availability summary missing');
+must(recovery.includes('session: { ok: true, user: publicUser(req.user), unreadNotifications: 0 }'),'V221 session must remain request-scoped');
+must(!recovery.includes('v209/source-archive/status'),'bootstrap must not invoke archive hash verification on first paint');
+must(v46.includes("import './v221BootstrapRecoveryPatch.js';"),'V221 must load immediately after V43 through V46');
+const v43Pos=bootSource.indexOf("await importPhase('v43BootstrapPerfPatch'");
+const v46Pos=bootSource.indexOf("await importPhase('v46ColdStartIndexPatch'");
+must(v43Pos>=0&&v46Pos>v43Pos,'V46/V221 recovery bootstrap must load after V43 base');
+
+// V221 UI cleanup: the old V203/V208 overlay loops are retired. Precision data
+// stays backend-owned and is rendered by the normal dashboard lifecycle.
+must(v203.includes('V221_PASSIVE_UTILITIES'),'V203 duplicate home overlay was not retired');
+must(!v203.includes('new MutationObserver'),'V203 must not install a document-wide observer');
+must(!v203.includes('setInterval('),'V203 must not install permanent polling');
+must(!v203.includes('v203AttemptPanel'),'V203 duplicate attempt panel must not return');
+must(v208.includes('v221-retired-passive'),'V208 polling overlay was not retired');
+must(!v208.includes('new MutationObserver'),'V208 must not install a document-wide observer');
+must(!v208.includes('setInterval('),'V208 must not install permanent polling');
+
+// V213/5179 identity and localhost CE credential access must be installed before
+// server.js registers auth/role middleware. Local CE connect is allowed only for
+// an authenticated LOCAL session; LAN/public permission boundaries remain intact.
 must(authPreload.includes("import './v209LoginReliabilityPatch.js';"),'V213/5179 identity bridge is not preloaded before server registration');
 must(authPreload.includes("import './v220LocalOwnerAccessPatch.js';"),'localhost CE credential access bridge is not preloaded before server registration');
 must(ownerPatch.includes("pathValue === '/api/ce-login'"),'local owner patch does not cover CE login route middleware');
 must(ownerPatch.includes("args[0] === '/api'"),'local owner patch does not cover global API write-role middleware');
 must(ownerPatch.includes("req?.accessMode || '').toUpperCase() === 'LOCAL'"),'local owner bypass is not restricted to localhost access mode');
+must(ownerPatch.includes('const authenticated = Boolean(req?.user'),'local CE credential access must require an authenticated user');
 must(!ownerPatch.includes("=== 'LAN'"),'local owner bypass must not weaken LAN permissions');
-const syntax=spawnSync(process.execPath,['--check','src/v220LocalOwnerAccessPatch.js'],{encoding:'utf8'});
-must(syntax.status===0,`v220LocalOwnerAccessPatch syntax failed: ${syntax.stderr||syntax.stdout}`);
+
+for(const file of ['src/v220LocalOwnerAccessPatch.js','src/v221BootstrapRecoveryPatch.js','public/v203-dashboard-integrity.js','public/v208-dashboard-final-guard.js','public/v217-runtime-truth.js']){
+  const syntax=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
+  must(syntax.status===0,`${file} syntax failed: ${syntax.stderr||syntax.stdout}`);
+}
 const preloadPos=bootSource.indexOf("await importPhase('v147TrackTimeoutConfig'");
 const serverImportPos=bootSource.indexOf('await importServerInteractiveFirst();');
 must(preloadPos>=0&&serverImportPos>preloadPos,'auth/access preload module must execute before server.js import');
-console.log('[V220] runtime stability smoke passed: V43 owns startup data; V213 identity and localhost-only CE credential access are installed before server registration.');
+console.log('[V221] runtime stability smoke passed: persisted dashboard fallback, request-scoped identity, localhost CE reconnect, and passive UI cleanup are wired before installation.');
