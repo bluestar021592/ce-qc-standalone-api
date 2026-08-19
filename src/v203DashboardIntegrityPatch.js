@@ -1,33 +1,26 @@
 import express from 'express';
 import { networkInterfaces } from 'node:os';
 import { getDb, getRuntimeConfig } from './db.js';
-import { collectV206ShopeeRows, summarizeV206ShopeeTiming, V206_SHOPEE_PRECISION_VERSION } from './v206ShopeePrecisionTruth.js';
-import { statsOf } from './v200Metrics.js';
+import { collectV205ExportRows, V205_EXPORT_TRUTH_VERSION } from './v205ExportTruth.js';
+import { statsOf, average } from './v200Metrics.js';
 import { ensureV203ManualEvidenceSchema, V203_MANUAL_EVIDENCE_VERSION } from './v203ManualEvidenceStore.js';
 import { inspectV203PublicTunnel } from './v203PublicTunnelSupervisor.js';
-import './v208ShopeePrecisionEvidenceScheduler.js';
 
-export const V203_DASHBOARD_INTEGRITY_VERSION='2026-08-19-v208-precision-attempt-network-v7';
-const CACHE_TTL_MS=Math.max(5_000,Math.min(2*60_000,Number(process.env.V203_ATTEMPT_CACHE_MS||15_000)));
+export const V203_DASHBOARD_INTEGRITY_VERSION='2026-08-18-v205-canonical-complete-attempt-network-v5';
+const CACHE_TTL_MS=Math.max(15_000,Math.min(10*60_000,Number(process.env.V203_ATTEMPT_CACHE_MS||60_000)));
 const cache=new Map();
 function dateKey(value=''){const m=String(value||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';}
-function latestDate(){const db=getDb();try{const d=String(db.prepare("SELECT MAX(reportDate) d FROM v207_daily_ownership WHERE businessType IN ('SHOPEECN','SHOPEEVN')").get()?.d||'');if(d)return d;}catch{}try{return String(db.prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate||'');}catch{return '';}}
+function latestDate(){try{return String(getDb().prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate||'');}catch{return '';}}
 function ratio(a,b){return b?Number(((Number(a||0)/Number(b))*100).toFixed(2)):0;}
 function summarize(type,rows,range){
   const eligible=rows.filter(row=>row.metricEligible!==false);
   const stats=statsOf(eligible,range).overall;
-  const timing=summarizeV206ShopeeTiming(eligible);
   const manualRows=rows.filter(row=>row.metricEligible===false);
   return{
     businessType:type,total:stats.total,pod:stats.pod,a1:stats.a1,a2:stats.a2,a3:stats.a3,attemptUnknown:stats.attemptUnknown,
     a1Rate:ratio(stats.a1,stats.pod),a2Rate:ratio(stats.a2,stats.pod),a3Rate:ratio(stats.a3,stats.pod),unknownRate:ratio(stats.attemptUnknown,stats.pod),
-    averageDays:timing.all.averageDays,ppAverageDays:timing.pp.averageDays,pvAverageDays:timing.pv.averageDays,
-    averageSamples:timing.all.samples,ppAverageSamples:timing.pp.samples,pvAverageSamples:timing.pv.samples,
-    timingPod:timing.all.pod,ppPod:timing.pp.pod,pvPod:timing.pv.pod,
-    timingCoverage:timing.all.coverageRate,ppTimingCoverage:timing.pp.coverageRate,pvTimingCoverage:timing.pv.coverageRate,
-    timingMissing:timing.all.missingTotal,ppTimingMissing:timing.pp.missingTotal,pvTimingMissing:timing.pv.missingTotal,
-    missing3001:timing.all.missing3001,missingPodTime:timing.all.missingPod,invalidTimingSequence:timing.all.invalidSequence,
-    unknownAreaPod:timing.unknown.pod,manualEvidenceRows:manualRows.length,
+    averageDays:average(stats.days),ppAverageDays:average(stats.ppDays),pvAverageDays:average(stats.pvDays),
+    averageSamples:stats.days.length,ppAverageSamples:stats.ppDays.length,pvAverageSamples:stats.pvDays.length,manualEvidenceRows:manualRows.length,
     integrityReview:eligible.filter(row=>row.dataIntegrityReview).length
   };
 }
@@ -38,26 +31,19 @@ async function attemptSummaryHandler(req,res){
     if(!from||!to||from>to)return res.status(400).json({ok:false,error:'派次看板日期范围无效。'});
     const requested=String(req.query.businessType||'ALL').toUpperCase();
     const types=requested==='SHOPEECN'||requested==='SHOPEEVN'?[requested]:['SHOPEECN','SHOPEEVN'];
-    const key=`${types.join(',')}|${from}|${to}|${V206_SHOPEE_PRECISION_VERSION}`;const old=cache.get(key);if(old&&Date.now()-old.at<CACHE_TTL_MS){res.setHeader('Cache-Control','no-store');return res.json(old.value);}
+    const key=`${types.join(',')}|${from}|${to}`;const old=cache.get(key);if(old&&Date.now()-old.at<CACHE_TTL_MS){res.setHeader('Cache-Control','no-store');return res.json(old.value);}
     const range={from,to};const parts=[];
-    for(const type of types){const rows=await collectV206ShopeeRows(type,range);parts.push(summarize(type,rows,range));}
+    for(const type of types){const rows=await collectV205ExportRows(type,range);parts.push(summarize(type,rows,range));}
     const combined={
       businessType:requested==='ALL'?'SHOPEE CN+VN':requested,
       total:parts.reduce((s,x)=>s+x.total,0),pod:parts.reduce((s,x)=>s+x.pod,0),a1:parts.reduce((s,x)=>s+x.a1,0),a2:parts.reduce((s,x)=>s+x.a2,0),a3:parts.reduce((s,x)=>s+x.a3,0),attemptUnknown:parts.reduce((s,x)=>s+x.attemptUnknown,0),manualEvidenceRows:parts.reduce((s,x)=>s+x.manualEvidenceRows,0),integrityReview:parts.reduce((s,x)=>s+x.integrityReview,0),
-      averageSamples:parts.reduce((s,x)=>s+x.averageSamples,0),ppAverageSamples:parts.reduce((s,x)=>s+x.ppAverageSamples,0),pvAverageSamples:parts.reduce((s,x)=>s+x.pvAverageSamples,0),
-      timingPod:parts.reduce((s,x)=>s+x.timingPod,0),ppPod:parts.reduce((s,x)=>s+x.ppPod,0),pvPod:parts.reduce((s,x)=>s+x.pvPod,0),
-      timingMissing:parts.reduce((s,x)=>s+x.timingMissing,0),ppTimingMissing:parts.reduce((s,x)=>s+x.ppTimingMissing,0),pvTimingMissing:parts.reduce((s,x)=>s+x.pvTimingMissing,0),
-      missing3001:parts.reduce((s,x)=>s+x.missing3001,0),missingPodTime:parts.reduce((s,x)=>s+x.missingPodTime,0),invalidTimingSequence:parts.reduce((s,x)=>s+x.invalidTimingSequence,0),unknownAreaPod:parts.reduce((s,x)=>s+x.unknownAreaPod,0)
+      averageSamples:parts.reduce((s,x)=>s+x.averageSamples,0),ppAverageSamples:parts.reduce((s,x)=>s+x.ppAverageSamples,0),pvAverageSamples:parts.reduce((s,x)=>s+x.pvAverageSamples,0)
     };
     combined.a1Rate=ratio(combined.a1,combined.pod);combined.a2Rate=ratio(combined.a2,combined.pod);combined.a3Rate=ratio(combined.a3,combined.pod);combined.unknownRate=ratio(combined.attemptUnknown,combined.pod);
     combined.averageDays=weighted(parts,'averageDays','averageSamples');combined.ppAverageDays=weighted(parts,'ppAverageDays','ppAverageSamples');combined.pvAverageDays=weighted(parts,'pvAverageDays','pvAverageSamples');
-    combined.timingCoverage=ratio(combined.averageSamples,combined.timingPod);combined.ppTimingCoverage=ratio(combined.ppAverageSamples,combined.ppPod);combined.pvTimingCoverage=ratio(combined.pvAverageSamples,combined.pvPod);
-    combined.averageOfficial=combined.timingPod===combined.averageSamples&&combined.timingCoverage>=99.99;
-    combined.ppAverageOfficial=combined.ppPod===combined.ppAverageSamples&&combined.ppTimingCoverage>=99.99;
-    combined.pvAverageOfficial=combined.pvPod===combined.pvAverageSamples&&combined.pvTimingCoverage>=99.99;
-    const value={ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,truthVersion:V206_SHOPEE_PRECISION_VERSION,range,combined,parts,rule:{attempt:'真实开始派送(4003/70/日报W-Y)→本次失败Pending/150→再次真实开始派送=下一派；代码60、经过天数、Pending条数不制造派次。',average:'SHOPEE末端平均签收严格使用真实3001入库节点→真实4004/轨迹80 POD；3001当天算第1天，首尾自然日计1天。缺3001、缺POD时间或时间倒序的票不进入平均值；覆盖率未到100%时平均值只能作为内部计算，不允许作为正式看板值显示。',region:'PP=金边、PV=外省；区域只由收件省份/区域代码决定，不按当前所在门店或最新节点改区。',denominator:'派次占比以POD票数为分母；时效覆盖率=有完整3001→POD证据的POD票/该区域POD票。',integrity:'V207按逐日新版上传建立七业务不可丢失底账；V208后台自动抓取SHOPEE完整历史轨迹，专门补齐1/2/3派和3001→POD证据。'},generatedAt:new Date().toISOString()};
+    const value={ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,truthVersion:V205_EXPORT_TRUTH_VERSION,range,combined,parts,rule:{attempt:'真实开始派送(4003/70/日报W-Y)→本次失败Pending/150→再次真实开始派送=下一派；代码60、经过天数、Pending条数不制造派次。',average:'下单日期→真实POD日期，首尾自然日计1天；仅有真实下单时间和POD时间的票进入平均值。',denominator:'派次占比以POD票数为分母；证据不足单独显示，不强行算1派。',integrity:'同一天所有VALID+COMPLETED日报批次取并集，旧批次中的有效运单不会因后续补传/部分重传而消失；轨迹证据同时读取精确业务与CCSL/SHOPEE历史家族存储。'},generatedAt:new Date().toISOString()};
     cache.set(key,{at:Date.now(),value});res.setHeader('Cache-Control','no-store');res.json(value);
-  }catch(error){const status=error?.code==='V207_REBASELINE_INCOMPLETE'?409:500;res.status(status).json({ok:false,code:error?.code||'ATTEMPT_SUMMARY_FAILED',error:error.message,missingDates:error?.missingDates||[]});}
+  }catch(error){res.status(500).json({ok:false,error:error.message});}
 }
 function lanIps(){const out=[];for(const list of Object.values(networkInterfaces()))for(const item of list||[]){if(item.family!=='IPv4'||item.internal||/^169\.254\./.test(item.address))continue;if(/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address))out.push(item.address);}return[...new Set(out)];}
 function networkHandler(req,res){
@@ -73,6 +59,5 @@ function networkHandler(req,res){
   res.setHeader('Cache-Control','no-store');res.json({ok:true,version:V203_DASHBOARD_INTEGRITY_VERSION,bind:{host:cfg.host,port:cfg.port,lanEnabled:cfg.host==='0.0.0.0',localUrl:`http://127.0.0.1:${cfg.port}`,lanUrls:ips.map(ip=>`http://${ip}:${cfg.port}`)},public:{hostname:publicHostname,origin:activeOrigin,configuredOrigin:namedOrigin,quickOrigin,cloudflareAccessConfigured:cfConfigured,directPublicEnabled:direct,applicationReady,tunnelConfigured:tunnel.configured,tunnelMode:tunnel.mode,tunnelStatus:tunnel.status,tunnelRunning:tunnelReady,tunnelPid:tunnel.pid,publicReady,security:'公网入口必须保留系统账号登录。Named Tunnel + Cloudflare Access最稳定；未配置Named Tunnel时可自动使用临时Quick Tunnel。',lastTunnelError:tunnel.lastError||'',quickTemporary:tunnel.mode==='QUICK'},manualEvidenceVersion:V203_MANUAL_EVIDENCE_VERSION});
 }
 let installed=false;const previousListen=express.application.listen;
-express.application.listen=function v208DashboardIntegrityListen(...args){if(!installed){installed=true;ensureV203ManualEvidenceSchema();this.get('/api/v203/attempt-summary',attemptSummaryHandler);this.get('/api/v203/network-access',networkHandler);}return previousListen.apply(this,args);};
-export function clearV203AttemptCache(){cache.clear();return true;}
-export function inspectV203DashboardIntegrity(){return{version:V203_DASHBOARD_INTEGRITY_VERSION,truthVersion:V206_SHOPEE_PRECISION_VERSION,cacheSize:cache.size,cacheTtlMs:CACHE_TTL_MS};}
+express.application.listen=function v205DashboardIntegrityListen(...args){if(!installed){installed=true;ensureV203ManualEvidenceSchema();this.get('/api/v203/attempt-summary',attemptSummaryHandler);this.get('/api/v203/network-access',networkHandler);}return previousListen.apply(this,args);};
+export function inspectV203DashboardIntegrity(){return{version:V203_DASHBOARD_INTEGRITY_VERSION,cacheSize:cache.size,cacheTtlMs:CACHE_TTL_MS};}

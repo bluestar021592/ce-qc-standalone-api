@@ -1,14 +1,10 @@
 import { getDb } from './db.js';
-import './v221BootstrapRecoveryPatch.js';
 
-const PATCH_ID = '2026-08-19-v221-cold-start-recovery-bootstrap-v1';
+const PATCH_ID = '2026-08-12-v46-cold-start-deferred-index-check-v4';
 
 // Cold start must never open or scan the SQLite database merely to inspect
 // optional performance indexes. The definitions stay available for explicit
 // maintenance/diagnostics, while normal server startup remains database-lazy.
-// V221 is imported here intentionally: bootstrap.js loads V46 immediately after
-// V43, so V221 can take final ownership of /api/bootstrap without changing the
-// rest of the startup order.
 const REQUIRED_INDEXES = Object.freeze([
   {
     name: 'idx_unified_rows_bootstrap_cover',
@@ -34,7 +30,7 @@ export function inspectV46Indexes() {
   return { present, missing };
 }
 
-console.log('[CE-QC][V46] optional index inspection deferred; V221 recovery bootstrap loaded after V43 without cold-start table scans.');
+console.log('[CE-QC][V46] optional index inspection deferred; cold start performs no database access.');
 
 export const V46_COLD_START_INDEX_PATCH_ID = PATCH_ID;
 export const V46_REQUIRED_INDEXES = REQUIRED_INDEXES;

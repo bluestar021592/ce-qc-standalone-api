@@ -2,7 +2,6 @@ import axios from 'axios';
 import dns from 'node:dns';
 import https from 'node:https';
 import { clearTokenSync, loadTokenSync, normalizeToken, saveTokenSync } from './authStore.js';
-import './v222RuntimeRoot.js';
 
 const DEFAULT_CE_BASE_URL = 'https://otwms.cambodianexpress.com';
 const DEFAULT_CE_DNS_SERVERS = ['1.1.1.1', '8.8.8.8'];

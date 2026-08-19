@@ -1,6 +1,5 @@
 import { V200_EXPORT_VERSION, internalHyperlinkFormulaForV200 } from '../src/v200TemplateDashboardExporter.js';
-import { resolveV202AttemptCycle } from '../src/v202DeliveryTruth.js';
-import { V206_SHOPEE_PRECISION_VERSION } from '../src/v206ShopeePrecisionTruth.js';
+import { resolveV202AttemptCycle, V202_DELIVERY_TRUTH_VERSION } from '../src/v202DeliveryTruth.js';
 
 function must(condition, message) { if (!condition) throw new Error(message); }
 
@@ -18,8 +17,5 @@ must(first.attemptNo===1,'first real delivery cycle must be first-attempt POD');
 must(second.attemptNo===2,'a failed cycle plus real redispatch must be second-attempt POD');
 const formula = internalHyperlinkFormulaForV200('POD明细', 1718, 1115);
 must(formula === 'HYPERLINK("#\'POD明细\'!A1718",1115)', 'WPS-safe internal hyperlink must match reference workbook formula syntax');
-// V202 owns the real 1/2/3 delivery-cycle state machine. V206/V209 owns the
-// final Shopee export because it layers exact 3001->real-POD timing and the
-// V207 no-loss membership ledger on top of that attempt truth.
-must(V200_EXPORT_VERSION === V206_SHOPEE_PRECISION_VERSION, 'V206/V209 precision truth must own current reference dashboard export');
-console.log('[V209] reference template + WPS formula + real V202 delivery cycles + V206 precision export ownership smoke passed');
+must(V200_EXPORT_VERSION === V202_DELIVERY_TRUTH_VERSION, 'V202 must own reference dashboard export truth');
+console.log('[V202] reference template + WPS formula + real delivery-cycle truth smoke passed');

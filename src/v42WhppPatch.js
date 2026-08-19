@@ -11,16 +11,9 @@ import { runWhppPipeline } from './whppPipeline.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb } from './db.js';
-import {
-  V207_IMPORT_INTEGRITY_VERSION,
-  inspectV207BeforeUpload,
-  commitV207Ownership,
-  loadV207CanonicalRowsForDate,
-  assertV207RuntimeMembership
-} from './v207UnifiedImportIntegrity.js';
 
-const PATCH_ID = '2026-08-19-v207-seven-business-no-loss-reupload-v1';
-const IMPORT_RULESET_VERSION = '2026-08-19-v207-no-silent-drop-and-append-only-ownership';
+const PATCH_ID = '2026-08-16-v155-fresh-import-summary-authority-v1';
+const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -35,6 +28,9 @@ function invalidateMutableSameDatePointers(reportDate) {
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
   try {
+    // A newly imported same-date source is the current truth. Mutable summary and
+    // run pointers from an older source must not shadow it; immutable export
+    // snapshots are intentionally retained for audit/history.
     db.prepare('DELETE FROM run_locks WHERE reportDate=?').run(date);
     db.prepare('DELETE FROM run_checkpoints WHERE reportDate=?').run(date);
     db.prepare('DELETE FROM history_summary WHERE reportDate=?').run(date);
@@ -55,28 +51,18 @@ async function handleUnifiedImportV42(req, res) {
       reportDate: req.body?.reportDate || '',
       originalName: req.file.originalname
     });
-    const preflight = inspectV207BeforeUpload(parsed);
-
+    // A byte-identical Excel must be reclassified after business ownership rules change.
+    // Persist the ruleset version with the hash so an old VALID batch cannot silently win
+    // simply because the source file bytes are unchanged.
     parsed.fileHash = `${parsed.fileHash}:${IMPORT_RULESET_VERSION}`;
-    const uploadedCoreRows = parsed.rows.filter(row => row.businessType !== WHPP);
-    const coreParsed = coreProjection(parsed, uploadedCoreRows);
+    const whppRows = parsed.rows.filter(row => row.businessType === WHPP);
+    const coreRows = parsed.rows.filter(row => row.businessType !== WHPP);
+    const coreParsed = coreProjection(parsed, coreRows);
     const saved = saveUnifiedImport(coreParsed, req.file.originalname);
-
-    const integrity = commitV207Ownership(parsed, {
-      sourceName: req.file.originalname,
-      batchId: saved.batchId,
-      snapshotId: saved.snapshotId,
-      fileHash: parsed.fileHash
-    });
-    const canonicalRows = loadV207CanonicalRowsForDate(parsed.reportDate);
-    const coreRows = canonicalRows.filter(row => row.businessType !== WHPP);
-    const whppRows = canonicalRows.filter(row => row.businessType === WHPP);
-    const ccslRows = coreRows.filter(row => CCSL_TYPES.has(row.businessType));
-    const shopeeRows = coreRows.filter(row => SHOPEE_TYPES.has(row.businessType));
     const queue = getUnifiedProcessingQueue(saved.batchId);
 
-    initializeCcslState(parsed.reportDate, req.file.originalname, ccslRows, queue.rows, integrity);
-    initializeShopeeState(parsed.reportDate, req.file.originalname, shopeeRows, queue.rows, integrity);
+    initializeCcslState(parsed.reportDate, req.file.originalname, coreRows.filter(row => CCSL_TYPES.has(row.businessType)), queue.rows);
+    initializeShopeeState(parsed.reportDate, req.file.originalname, coreRows.filter(row => SHOPEE_TYPES.has(row.businessType)), queue.rows);
     const whppState = saveWhppDailyImport({
       reportDate: parsed.reportDate,
       sourceName: req.file.originalname,
@@ -84,79 +70,33 @@ async function handleUnifiedImportV42(req, res) {
       batchId: saved.batchId,
       snapshotId: saved.snapshotId
     });
-
-    const runtimeReconciliation = assertV207RuntimeMembership({
-      reportDate: parsed.reportDate,
-      ccslRows,
-      shopeeRows,
-      whppRows
-    });
     invalidateMutableSameDatePointers(parsed.reportDate);
-
-    const warningList = [...(parsed.warnings || [])];
-    if (integrity.recoveredFromEarlierUpload > 0) {
-      warningList.push({
-        type: 'V207_ARCHIVE_RECOVERY',
-        count: integrity.recoveredFromEarlierUpload,
-        message: `本次文件比该日历史底账少 ${integrity.recoveredFromEarlierUpload} 票；系统已从不可丢失底账自动保留这些运单，未发生漏票。`
-      });
-    }
-    if (preflight.reclassifiedCount > 0) {
-      warningList.push({
-        type: 'V207_BUSINESS_RECLASSIFIED',
-        count: preflight.reclassifiedCount,
-        message: `本次上传有 ${preflight.reclassifiedCount} 票业务归属发生修正；V207以本次明确归属为准，同时保留历史来源审计。`
-      });
-    }
 
     res.json({
       ok: true,
       patchId: PATCH_ID,
       importRulesetVersion: IMPORT_RULESET_VERSION,
-      importIntegrityVersion: V207_IMPORT_INTEGRITY_VERSION,
       ...saved,
-      classificationCounts: integrity.canonicalCounts,
-      uploadedClassificationCounts: parsed.classificationCounts,
+      classificationCounts: parsed.classificationCounts,
       sourceReconciliation: parsed.sourceReconciliation,
-      runtimeReconciliation,
-      importIntegrity: {
-        ...integrity,
-        preflight,
-        status: integrity.reconciliation?.balanced && runtimeReconciliation.balanced
-          ? (integrity.completeReupload ? 'COMPLETE_REUPLOAD' : 'NO_LOSS_ARCHIVE_RECOVERY')
-          : 'FAILED'
-      },
-      summary: {
-        ...parsed.summary,
-        uploadedUniqueWaybills: parsed.summary?.validUniqueWaybills || parsed.rows.length,
-        canonicalUniqueWaybills: integrity.canonicalUnique,
-        recoveredFromEarlierUpload: integrity.recoveredFromEarlierUpload
-      },
-      warnings: warningList,
+      summary: parsed.summary,
+      warnings: parsed.warnings,
       sheetDiagnostics: parsed.sheetDiagnostics,
       whpp: {
         businessType: WHPP,
-        uploadedCount: Number(parsed.classificationCounts?.WHPP || 0),
-        canonicalCount: whppRows.length,
+        count: whppRows.length,
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
       },
-      architectureNote: 'V207以七业务不可丢失成员底账作为运行时入口：重新上传不会删除历史已确认运单；本次明确出现的运单可更新归属和字段；看板、扫描、轨迹、导出继续基于同一成员真值层。'
+      architectureNote: 'WHPP使用独立持久化快照；现有CCSL/SHOPEE统一快照保持兼容，首页合并展示七业务。'
     });
   } catch (error) {
-    console.error('[V42/V207][UNIFIED_IMPORT]', error);
-    res.status(400).json({
-      ok: false,
-      code: error.code || 'V207_UNIFIED_IMPORT_FAILED',
-      error: error.message || String(error),
-      shipmentCode: error.shipmentCode || '',
-      sheetDiagnostics: error.sheetDiagnostics || [],
-      checks: error.checks || []
-    });
+    console.error('[V42][UNIFIED_IMPORT]', error);
+    res.status(400).json({ ok: false, code: error.code || 'WHPP_UNIFIED_IMPORT_FAILED', error: error.message || String(error), shipmentCode: error.shipmentCode || '' });
   }
 }
 
-function initializeCcslState(reportDate, sourceName, rows, queueRows, integrity = {}) {
+function initializeCcslState(reportDate, sourceName, rows, queueRows) {
   const current = loadAppState();
   const today = rows.map(row => row.shipmentCode);
   const carry = queueRows.filter(row => CCSL_TYPES.has(String(row.businessType || '').toUpperCase()) && row.sourceType === 'HISTORICAL_CARRY').map(row => row.shipmentCode);
@@ -179,11 +119,7 @@ function initializeCcslState(reportDate, sourceName, rows, queueRows, integrity 
       duplicateCount: 0,
       businessCounts,
       importedAt: new Date().toISOString(),
-      source: 'V207_APPEND_ONLY_CANONICAL_MEMBERSHIP',
-      importIntegrity: {
-        canonicalUnique: integrity.canonicalUnique || 0,
-        recoveredFromEarlierUpload: integrity.recoveredFromEarlierUpload || 0
-      }
+      source: 'V155_UNIFIED_VALID_MEMBERSHIP'
     },
     carryBills: [...new Set(carry)], nextCarryBills: [...new Set(carry)],
     scanResults: [], scanQueryStatus: [], trackResults: [], trackEvents: [], trackQueryStatus: [], finalRows: [], needTrackBills: [],
@@ -192,7 +128,7 @@ function initializeCcslState(reportDate, sourceName, rows, queueRows, integrity 
   });
 }
 
-function initializeShopeeState(reportDate, sourceName, rows, queueRows, integrity = {}) {
+function initializeShopeeState(reportDate, sourceName, rows, queueRows) {
   const current = loadBusinessState(SHOPEE);
   const today = rows.map(row => row.shipmentCode);
   const carry = queueRows.filter(row => SHOPEE_TYPES.has(String(row.businessType || '').toUpperCase()) && row.sourceType === 'HISTORICAL_CARRY').map(row => row.shipmentCode);
@@ -202,7 +138,7 @@ function initializeShopeeState(reportDate, sourceName, rows, queueRows, integrit
     recipient_raw: row.recipientRaw || '',
     recipient_normalized: row.recipientNormalized || '',
     recipient_group: row.businessType === 'SHOPEECN' ? 'CN' : 'VN',
-    recipient_group_reason: 'V207_CANONICAL_BUSINESS_TYPE',
+    recipient_group_reason: 'UNIFIED_BUSINESS_TYPE',
     source_row_number: Number(row.rowNumber || 0),
     importStatus: 'ACCEPTED'
   }));
@@ -210,19 +146,7 @@ function initializeShopeeState(reportDate, sourceName, rows, queueRows, integrit
     ...current,
     businessType: SHOPEE, reportDate, sourceName, dailyReportReady: true,
     pnhBills: today, dailyParseRows,
-    dailyParseSummary: {
-      totalRecognized: today.length,
-      groupCounts: {
-        CN: rows.filter(row => row.businessType === 'SHOPEECN').length,
-        VN: rows.filter(row => row.businessType === 'SHOPEEVN').length
-      },
-      importedAt: new Date().toISOString(),
-      source: 'V207_APPEND_ONLY_CANONICAL_MEMBERSHIP',
-      importIntegrity: {
-        canonicalUnique: integrity.canonicalUnique || 0,
-        recoveredFromEarlierUpload: integrity.recoveredFromEarlierUpload || 0
-      }
-    },
+    dailyParseSummary: { totalRecognized: today.length, groupCounts: { CN: rows.filter(row => row.businessType === 'SHOPEECN').length, VN: rows.filter(row => row.businessType === 'SHOPEEVN').length }, importedAt: new Date().toISOString() },
     carryBills: [...new Set(carry)], nextCarryBills: [...new Set(carry)],
     scanResults: [], scanQueryStatus: [], trackResults: [], trackEvents: [], eventQueryStatus: [], exceptionItems: [], exceptionQueryStatus: [], finalRows: [], needTrackBills: [],
     processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
@@ -239,7 +163,7 @@ function coreProjection(parsed, rows) {
     classificationCounts: counts,
     sourceReconciliation: { businessTypes: [...CORE_TYPES], validUniqueWaybills: total, classifiedWaybills: total, difference: 0, balanced: true },
     summary: { ...(parsed.summary || {}), validUniqueWaybills: total },
-    warnings: [...(parsed.warnings || []), ...(parsed.rows.some(row => row.businessType === WHPP) ? [{ type: 'WHPP_SEPARATE_PERSISTENCE', message: 'WHPP本土保留独立业务快照，但成员归属已同时写入V207七业务不可丢失底账。' }] : [])]
+    warnings: [...(parsed.warnings || []), ...(parsed.rows.some(row => row.businessType === WHPP) ? [{ type: 'WHPP_SEPARATE_PERSISTENCE', message: 'WHPP本土由V42独立持久化和业务快照处理，不进入旧六板块统一快照。' }] : [])]
   };
 }
 
