@@ -32,7 +32,8 @@ must(bootstrap.includes('CACHE_SUMMARY_ONLY'),'V43 cache-summary bootstrap mode 
 must(bootstrap.includes('session: { ok: true, user: publicUser(req.user), unreadNotifications: 0 }'),'bootstrap must carry authenticated request identity');
 must(bootstrap.includes('simpleHistory(60)'),'bootstrap must use bounded lightweight history instead of hydrated 120-day history');
 // V220 critical ordering gate: 5179 auth identity and localhost CE credential
-// access must both be installed before server.js registers auth/role middleware.
+// access must both be installed before the actual server.js import call. Do not
+// compare against the importServerInteractiveFirst function declaration itself.
 must(authPreload.includes("import './v209LoginReliabilityPatch.js';"),'V213/5179 identity bridge is not preloaded before server registration');
 must(authPreload.includes("import './v220LocalOwnerAccessPatch.js';"),'localhost CE credential access bridge is not preloaded before server registration');
 must(ownerPatch.includes("pathValue === '/api/ce-login'"),'local owner patch does not cover CE login route middleware');
@@ -41,7 +42,7 @@ must(ownerPatch.includes("req?.accessMode || '').toUpperCase() === 'LOCAL'"),'lo
 must(!ownerPatch.includes("=== 'LAN'"),'local owner bypass must not weaken LAN permissions');
 const syntax=spawnSync(process.execPath,['--check','src/v220LocalOwnerAccessPatch.js'],{encoding:'utf8'});
 must(syntax.status===0,`v220LocalOwnerAccessPatch syntax failed: ${syntax.stderr||syntax.stdout}`);
-const preloadPos=bootSource.indexOf("importPhase('v147TrackTimeoutConfig'");
-const serverPos=bootSource.indexOf("importServerInteractiveFirst()");
-must(preloadPos>=0&&serverPos>preloadPos,'auth/access preload module must execute before server.js import');
+const preloadPos=bootSource.indexOf("await importPhase('v147TrackTimeoutConfig'");
+const serverImportPos=bootSource.indexOf('await importServerInteractiveFirst();');
+must(preloadPos>=0&&serverImportPos>preloadPos,'auth/access preload module must execute before server.js import');
 console.log('[V220] runtime stability smoke passed: V43 owns startup data; V213 identity and localhost-only CE credential access are installed before server registration.');
