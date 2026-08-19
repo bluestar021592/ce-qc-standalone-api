@@ -10,8 +10,8 @@ const exporter=read('src/v200TemplateDashboardExporter.js');
 const ui=read('public/v209-source-archive-status.js');
 const shell=read('src/v44WhppUiPatch.js');
 const preUpdateBackup=read('scripts/CE_QC_PreUpdate_Backup.mjs');
-function must(source,token){if(!source.includes(token))throw new Error(`V211 smoke missing ${token}`);}
-function forbid(source,token){if(source.includes(token))throw new Error(`V211 smoke forbidden ${token}`);}
+function must(source,token){if(!source.includes(token))throw new Error(`V212 smoke missing ${token}`);}
+function forbid(source,token){if(source.includes(token))throw new Error(`V212 smoke forbidden ${token}`);}
 must(archive,'v209_import_source_archive');
 must(archive,'SOURCE_ARCHIVE_HASH_MISMATCH');
 must(archive,'sha256File(dest)');
@@ -21,23 +21,33 @@ must(archive,'/api/v209/source-archive/status');
 must(bridge,"import './v209RawImportArchivePatch.js'");
 must(bridge,"import './v209LoginReliabilityPatch.js'");
 
-// V211 local/LAN auth must answer without writing into the 20+ GiB QC database.
-must(login,'2026-08-19-v211-local-fast-auth-v1');
-must(login,'v211FastLocalAuth');
-must(login,'ce_v211_fast_session');
-must(login,'V211_STATELESS_LOCAL_FAST');
+// V212 local/LAN auth must never enter the operational getDb() path. It opens a
+// short-lived query-only SQLite handle, gives up quickly on locks and signs a
+// stateless session without user/session/audit writes.
+must(login,'2026-08-19-v212-local-readonly-auth-v2');
+must(login,'v212FastLocalAuth');
+must(login,'ce_v212_fast_session');
+must(login,'V212_ISOLATED_READONLY_LOCAL_AUTH');
+must(login,'new DatabaseSync(file,{readOnly:true})');
+must(login,'PRAGMA query_only=ON');
+must(login,'PRAGMA busy_timeout=750');
+must(login,'readAuthRowWithoutRuntimeDb');
 must(login,"SELECT id,username,displayName,departmentCompany,email,passwordHash");
-must(login,'await bcrypt.compare');
+must(login,'bcrypt.compareSync');
 must(login,'signFastPayload');
 must(login,'verifyFastToken');
 must(login,'if(req.ceQcFastUser)');
-must(login,'previousUse.call(this,v211FastLocalAuth)');
-must(login,'does NOT write users, audit_logs or user_sessions before');
-forbid(login,"getDb().prepare('UPDATE users SET failedLoginCount");
-forbid(login,"getDb().prepare('INSERT INTO user_sessions");
-must(login,'登录接口15秒内没有响应');
-must(login,'本机/LAN快速登录');
-must(loginUi,'登录接口15秒内没有响应');
+must(login,'previousUse.call(this,v212FastLocalAuth)');
+must(login,'Never call getDb() from the local login path');
+forbid(login,'import { getDb');
+forbid(login,'getDb().prepare(');
+forbid(login,"INSERT INTO user_sessions");
+forbid(login,"UPDATE users SET failedLoginCount");
+must(login,'登录接口5秒仍未返回');
+must(login,'本机/LAN只读快速登录');
+// Legacy static helper is intentionally not the owner of the self-contained V212
+// login page, but must remain syntactically valid while older cached shells exist.
+must(loginUi,"fetch('/api/internal-auth/login'");
 
 // A SQLite online backup remains a valid point-in-time snapshot even when live data changes.
 must(preUpdateBackup,'online-backup+concurrent-source-change+backup-quick-check+sha256');
@@ -62,4 +72,4 @@ must(exporter,'_V209.xlsx');
 must(ui,'原始日报永久归档 / 可重建保障');
 must(ui,'SHA-256');
 must(shell,'/v209-source-archive-status.js?v=20260819-v209-1');
-console.log('[V211] source archive, stable terminal locks, strict Shopee average, concurrent-write-safe backup and stateless local/LAN fast auth smoke passed');
+console.log('[V212] source archive, stable terminal locks, strict Shopee average, concurrent-write-safe backup and isolated read-only local/LAN auth smoke passed');
