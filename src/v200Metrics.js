@@ -9,8 +9,18 @@ function listDates(from,to){ const a=dayNumber(from),b=dayNumber(to),out=[]; if(
 export function referenceAverageDays(orderDate,podDate){const a=dayNumber(orderDate),b=dayNumber(podDate);return a===null||b===null||b<a?0:Math.floor((b-a)/86400000)+1;}
 function isTerminalNormal(row = {}) { return Boolean(row.pod || row.returned || row.cancelled || row.terminalNormal); }
 function openUnpod(row = {}) { return !isTerminalNormal(row); }
+function isShopeePrecisionRow(row = {}) {
+  const type = String(row.businessType || '').trim().toUpperCase();
+  return type === 'SHOPEECN' || type === 'SHOPEEVN' || Boolean(row.timingEvidenceStatus) || /shopee-3001-pod/i.test(String(row.precisionTruthVersion || row.deliveryTruthVersion || ''));
+}
 function signingDays(row = {}) {
   const direct = Number(row.signNaturalDays || row.deliveryDays || 0);
+  if (isShopeePrecisionRow(row)) {
+    // V209 hard rule: Shopee末端时效只能来自已经闭合的3001→真实POD证据。
+    // 缺3001/缺POD/时间倒序时保持0并退出，绝不再回退到下单日期→POD。
+    if (String(row.timingEvidenceStatus || '').toUpperCase() !== 'OK') return 0;
+    return Number.isFinite(direct) && direct > 0 ? direct : 0;
+  }
   if (Number.isFinite(direct) && direct > 0) return direct;
   return referenceAverageDays(row.orderTime, row.podTime || row.podDate);
 }
