@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { __test, V209_LOGIN_RELIABILITY_VERSION } from '../src/v209LoginReliabilityPatch.js';
 
 const secret='0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -53,4 +55,19 @@ test('V213 auth sidecar is read-only, bounded and independent of runtime getDb',
 
 test('V213 auth sidecar is spawned only by bootstrap/server, never by unit tests',()=>{
   assert.equal(__test.shouldStartAuthSidecar(),false);
+});
+
+test('V214 main web process never performs the large CCSL POD-lock repair synchronously after login',()=>{
+  const source=fs.readFileSync(new URL('../src/v167CcslPodLockFactRepair.js',import.meta.url),'utf8');
+  assert.match(source,/v214-ccsl-pod-lock-worker-v1/);
+  assert.match(source,/scheduleRepairWorker\(\)/);
+  assert.match(source,/v167CcslPodLockFactRepairWorker\.js/);
+  assert.match(source,/if \(!database && String\(process\.env\.CE_QC_V167_REPAIR_WORKER/);
+  assert.match(source,/will run outside the 5177 web process/);
+});
+
+test('V214 isolated POD-lock worker is syntactically valid before installation',()=>{
+  const file=fileURLToPath(new URL('../src/v167CcslPodLockFactRepairWorker.js',import.meta.url));
+  const result=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr||result.stdout);
 });
