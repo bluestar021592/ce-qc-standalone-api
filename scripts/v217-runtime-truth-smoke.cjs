@@ -1,6 +1,6 @@
 const fs=require('fs');
 const {spawnSync}=require('child_process');
-const must=(condition,message)=>{if(!condition)throw new Error(`V221 runtime stability smoke failed: ${message}`);};
+const must=(condition,message)=>{if(!condition)throw new Error(`V222 runtime stability smoke failed: ${message}`);};
 const truth=fs.readFileSync('public/v217-runtime-truth.js','utf8');
 const v160=fs.readFileSync('public/v160-current-home-truth.js','utf8');
 const guard=fs.readFileSync('public/v214-home-whpp-identity-guard.js','utf8');
@@ -12,7 +12,9 @@ const recovery=fs.readFileSync('src/v221BootstrapRecoveryPatch.js','utf8');
 const v46=fs.readFileSync('src/v46ColdStartIndexPatch.js','utf8');
 const staticCache=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const authPreload=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
-const authRuntimeRoot=fs.readFileSync('src/authStore.js','utf8');
+const authStore=fs.readFileSync('src/authStore.js','utf8');
+const ceClient=fs.readFileSync('src/ceClient.js','utf8');
+const rawRuntimeRoot=fs.readFileSync('src/v222RuntimeRoot.js','utf8');
 const ownerPatch=fs.readFileSync('src/v220LocalOwnerAccessPatch.js','utf8');
 const bootSource=fs.readFileSync('bootstrap.js','utf8');
 
@@ -52,14 +54,18 @@ const v43Pos=bootSource.indexOf("await importPhase('v43BootstrapPerfPatch'");
 const v46Pos=bootSource.indexOf("await importPhase('v46ColdStartIndexPatch'");
 must(v43Pos>=0&&v46Pos>v43Pos,'V46/V221 recovery bootstrap must load after V43 base');
 
-// Managed Desktop can reach server.js through more than one startup path. The
-// server's own authStore dependency must therefore install the identity/access
-// bridge and both bootstrap registrations before server.js constructs the app.
-const rawV209=authRuntimeRoot.indexOf("import './v209LoginReliabilityPatch.js';");
-const rawV220=authRuntimeRoot.indexOf("import './v220LocalOwnerAccessPatch.js';");
-const rawV43=authRuntimeRoot.indexOf("import './v43BootstrapPerfPatch.js';");
-const rawV221=authRuntimeRoot.indexOf("import './v221BootstrapRecoveryPatch.js';");
-must(rawV209>=0&&rawV220>rawV209&&rawV43>rawV220&&rawV221>rawV43,'raw server runtime root must preload identity/access, V43 bootstrap, then V221 recovery');
+// V222 raw-server runtime root must not live in authStore. Putting V43/V221 in
+// authStore creates a module cycle because both patches import authStore again.
+// CEClient is imported by server.js before the Express app is constructed, so it
+// owns the cycle-free side-effect preload after authStore has initialized.
+must(!authStore.includes('v209LoginReliabilityPatch'),'authStore must remain a pure token store');
+must(!authStore.includes('v43BootstrapPerfPatch'),'authStore must not import bootstrap patches');
+must(ceClient.includes("import './v222RuntimeRoot.js';"),'CEClient does not preload the V222 raw runtime root');
+const rawV209=rawRuntimeRoot.indexOf("import './v209LoginReliabilityPatch.js';");
+const rawV220=rawRuntimeRoot.indexOf("import './v220LocalOwnerAccessPatch.js';");
+const rawV43=rawRuntimeRoot.indexOf("import './v43BootstrapPerfPatch.js';");
+const rawV221=rawRuntimeRoot.indexOf("import './v221BootstrapRecoveryPatch.js';");
+must(rawV209>=0&&rawV220>rawV209&&rawV43>rawV220&&rawV221>rawV43,'V222 raw runtime root must preload identity/access, V43 bootstrap, then V221 recovery');
 
 // V221 UI cleanup: old overlay loops remain retired.
 must(v203.includes('V221_PASSIVE_UTILITIES'),'V203 duplicate home overlay was not retired');
@@ -81,13 +87,13 @@ must(ownerPatch.includes("req?.accessMode || '').toUpperCase() === 'LOCAL'"),'lo
 must(ownerPatch.includes('const authenticated = Boolean(req?.user'),'local CE credential access must require an authenticated user');
 must(!ownerPatch.includes("=== 'LAN'"),'local owner bypass must not weaken LAN permissions');
 
-for(const file of ['src/authStore.js','src/v220LocalOwnerAccessPatch.js','src/v221BootstrapRecoveryPatch.js','src/v89StaticAssetCachePatch.js','public/v203-dashboard-integrity.js','public/v208-dashboard-final-guard.js','public/v217-runtime-truth.js']){
+for(const file of ['src/authStore.js','src/ceClient.js','src/v222RuntimeRoot.js','src/v220LocalOwnerAccessPatch.js','src/v221BootstrapRecoveryPatch.js','src/v89StaticAssetCachePatch.js','public/v203-dashboard-integrity.js','public/v208-dashboard-final-guard.js','public/v217-runtime-truth.js']){
   const syntax=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
   must(syntax.status===0,`${file} syntax failed: ${syntax.stderr||syntax.stdout}`);
 }
-const rawRootImport=spawnSync(process.execPath,['--input-type=module','-e',"process.env.CE_QC_AUTH_SIDECAR_CHILD='1'; await import('./src/authStore.js'); console.log('V221_RAW_RUNTIME_ROOT_OK');"],{encoding:'utf8',env:{...process.env,CE_QC_AUTH_SIDECAR_CHILD:'1'}});
-must(rawRootImport.status===0&&rawRootImport.stdout.includes('V221_RAW_RUNTIME_ROOT_OK'),`raw server runtime preload import failed: ${rawRootImport.stderr||rawRootImport.stdout}`);
+const rawRootImport=spawnSync(process.execPath,['--input-type=module','-e',"process.env.CE_QC_AUTH_SIDECAR_CHILD='1'; await import('./src/ceClient.js'); console.log('V222_RAW_RUNTIME_ROOT_OK');"],{encoding:'utf8',env:{...process.env,CE_QC_AUTH_SIDECAR_CHILD:'1'}});
+must(rawRootImport.status===0&&rawRootImport.stdout.includes('V222_RAW_RUNTIME_ROOT_OK'),`cycle-free raw server preload import failed: ${rawRootImport.stderr||rawRootImport.stdout}`);
 const preloadPos=bootSource.indexOf("await importPhase('v147TrackTimeoutConfig'");
 const serverImportPos=bootSource.indexOf('await importServerInteractiveFirst();');
 must(preloadPos>=0&&serverImportPos>preloadPos,'auth/access preload module must execute before server.js import');
-console.log('[V221] runtime stability smoke passed: raw server and bootstrap paths both preload identity, CE reconnect, compact bootstrap and persisted recovery without reupload.');
+console.log('[V222] runtime stability smoke passed: raw server and bootstrap paths preload identity, CE reconnect, compact bootstrap and persisted recovery without an authStore cycle.');
