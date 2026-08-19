@@ -1,7 +1,7 @@
 import express from 'express';
 import net from 'node:net';
 
-export const V209_LOGIN_RELIABILITY_VERSION='2026-08-19-v209-local-login-no-hang-v2';
+export const V209_LOGIN_RELIABILITY_VERSION='2026-08-19-v209-local-login-no-hang-v3';
 const INSTALLED=Symbol.for('ce-qc.v209-login-reliability-installed');
 const WRAPPED=Symbol.for('ce-qc.v209-access-wrapped');
 
@@ -16,12 +16,18 @@ function localLike(req){
 }
 function wantsHtml(req){return String(req.get?.('accept')||'').includes('text/html');}
 
+function inlineLoginScript(){return `<script>(function(){'use strict';const form=document.getElementById('login'),button=document.getElementById('submit'),error=document.getElementById('error');if(!form||!button||!error)return;const message=text=>{error.textContent=String(text||'');};form.addEventListener('submit',async event=>{event.preventDefault();if(button.disabled)return;message('');button.disabled=true;const original=button.textContent;button.textContent='正在登录…';const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);try{const body={username:String(document.getElementById('username')?.value||'').trim(),password:String(document.getElementById('password')?.value||'')};const response=await fetch('/api/internal-auth/login',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(body),signal:controller.signal});const text=await response.text();let payload={};try{payload=text?JSON.parse(text):{};}catch{payload={error:text||('登录接口返回 HTTP '+response.status)};}if(!response.ok||payload.ok===false){message(payload.error||payload.message||('登录失败（HTTP '+response.status+'）'));return;}button.textContent='登录成功，正在进入…';location.replace('/?login='+Date.now());}catch(err){message(err?.name==='AbortError'?'登录接口15秒内没有响应，请重新打开CE QC后再试。':'登录请求失败：'+(err?.message||err));}finally{clearTimeout(timer);if(!String(button.textContent).includes('成功')){button.disabled=false;button.textContent=original;}}});})();</script>`;}
+
 export function v209LoginReliabilityPage(req,res,next){
   if(req.method!=='GET'||req.path.startsWith('/api/')||hasSession(req)||!localLike(req)||!wantsHtml(req))return next();
   res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
   res.setHeader('X-CE-QC-Login-Reliability',V209_LOGIN_RELIABILITY_VERSION);
+  // Important: the login JS is INLINE. An unauthenticated request for an external
+  // /v209-login-reliability.js would itself pass through accessIdentity and could be
+  // replaced by the login HTML, leaving the button inert. The self-contained page
+  // therefore has zero authenticated/static dependencies before a session exists.
   return res.status(200).type('html').send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CE质控系统内部登录</title><style>
-  body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(600px,calc(100% - 48px));background:#fff;border:1px solid #dce5ef;border-radius:12px;padding:38px 42px;box-shadow:0 18px 50px #16395b18}h1{font-size:30px;margin:0 0 22px;color:#083b6d}label{display:block;margin:14px 0 6px;font-size:18px}input{box-sizing:border-box;width:100%;padding:14px 15px;border:1px solid #cbd8e5;border-radius:7px;font-size:17px}button{width:100%;margin-top:24px;border:0;border-radius:7px;background:#176fe8;color:#fff;padding:14px;font-size:18px;font-weight:700;cursor:pointer}button:disabled{opacity:.6;cursor:wait}#error{min-height:24px;color:#b42318;margin-top:12px;font-weight:600}#hint{color:#71849a;font-size:12px;margin-top:8px}</style></head><body><main class="box"><h1>CE质控系统内部登录</h1><form id="login" autocomplete="on"><label>用户名</label><input id="username" name="username" autocomplete="username" required><label>密码</label><input id="password" name="password" type="password" autocomplete="current-password" required><button id="submit" type="submit">登录</button><div id="error" role="alert"></div><div id="hint">本机登录 · ${V209_LOGIN_RELIABILITY_VERSION}</div></form></main><script src="/v209-login-reliability.js?v=20260819-v209-2"></script></body></html>`);
+  body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(600px,calc(100% - 48px));background:#fff;border:1px solid #dce5ef;border-radius:12px;padding:38px 42px;box-shadow:0 18px 50px #16395b18}h1{font-size:30px;margin:0 0 22px;color:#083b6d}label{display:block;margin:14px 0 6px;font-size:18px}input{box-sizing:border-box;width:100%;padding:14px 15px;border:1px solid #cbd8e5;border-radius:7px;font-size:17px}button{width:100%;margin-top:24px;border:0;border-radius:7px;background:#176fe8;color:#fff;padding:14px;font-size:18px;font-weight:700;cursor:pointer}button:disabled{opacity:.6;cursor:wait}#error{min-height:24px;color:#b42318;margin-top:12px;font-weight:600}#hint{color:#71849a;font-size:12px;margin-top:8px}</style></head><body><main class="box"><h1>CE质控系统内部登录</h1><form id="login" autocomplete="on"><label>用户名</label><input id="username" name="username" autocomplete="username" required><label>密码</label><input id="password" name="password" type="password" autocomplete="current-password" required><button id="submit" type="submit">登录</button><div id="error" role="alert"></div><div id="hint">本机登录 · ${V209_LOGIN_RELIABILITY_VERSION}</div></form></main>${inlineLoginScript()}</body></html>`);
 }
 
 export function wrapV209AccessIdentity(base){
@@ -54,13 +60,10 @@ if(!express.application[INSTALLED]){
     const flattened=args.flat().filter(v=>typeof v==='function');
     const hasAccess=flattened.some(fn=>fn.name==='accessIdentity'||fn.name==='v209AccessIdentityNoHang');
     if(!hasAccess)return previousUse.apply(this,args);
-    // Put the reliable local login shell immediately before accessIdentity and wrap
-    // the async access middleware so a rejected auth promise can never leave the
-    // browser waiting forever.
     previousUse.call(this,v209LoginReliabilityPage);
     const mapped=args.map(value=>Array.isArray(value)?value.map(fn=>typeof fn==='function'&&(fn.name==='accessIdentity'||fn.name==='v209AccessIdentityNoHang')?wrapV209AccessIdentity(fn):fn):typeof value==='function'&&(value.name==='accessIdentity'||value.name==='v209AccessIdentityNoHang')?wrapV209AccessIdentity(value):value);
     return previousUse.apply(this,mapped);
   };
 }
 
-export const __test={hostOnly,ipOnly,hasSession,localLike};
+export const __test={hostOnly,ipOnly,hasSession,localLike,inlineLoginScript};
