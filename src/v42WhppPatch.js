@@ -330,7 +330,7 @@ express.application.listen = function v42WhppListen(...args) {
     this.get('/api/whpp/history', (req, res) => res.json({ ok: true, businessType: WHPP, rows: listWhppHistory(req.query.limit) }));
     this.get('/api/whpp/snapshot/:id', (req, res) => { const payload = loadWhppSnapshot(req.params.id); return payload ? res.json({ ok: true, ...payload }) : res.status(404).json({ ok: false, error: 'WHPP快照不存在' }); });
     this.get('/api/whpp/metric-detail', whppDetail);
-    this.get('/api/whpp/progress', (req, res) => { const state = loadWhppState(); res.json({ ok: true, reportDate: state.reportDate, processing: state.processing, summary: state.lastRunSummary, log: (state.progressLog || []).slice(-50) });
+    this.get('/api/whpp/progress', (req, res) => { const state = loadWhppState(); res.json({ ok: true, reportDate: state.reportDate, processing: state.processing, summary: state.lastRunSummary, log: (state.progressLog || []).slice(-50) }); });
     this.post('/api/whpp/run/start', runWhpp);
     this.post('/api/whpp/run/resume', runWhpp);
     this.post('/api/whpp/run/pause', (req, res) => { const state = loadWhppState(); state.processing = { ...(state.processing || {}), paused: true }; saveWhppState(state); res.json({ ok: true, reportDate: state.reportDate, processing: state.processing }); });
