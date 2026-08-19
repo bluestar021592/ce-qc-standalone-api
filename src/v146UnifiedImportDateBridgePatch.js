@@ -1,7 +1,8 @@
 import express from 'express';
 import './v209RawImportArchivePatch.js';
+import './v209LoginReliabilityPatch.js';
 
-export const V146_UNIFIED_IMPORT_DATE_BRIDGE_ID = '2026-08-19-v209-unified-import-date-and-source-archive-bridge-v2';
+export const V146_UNIFIED_IMPORT_DATE_BRIDGE_ID = '2026-08-19-v209-unified-import-date-source-archive-login-bridge-v3';
 const ROUTE = '/api/import/unified-daily-report';
 
 function validDate(year, month, day) {
