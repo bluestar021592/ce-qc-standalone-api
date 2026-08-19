@@ -1,7 +1,7 @@
 (function installV219RuntimeStability(global){
   'use strict';
   if(global.__CE_QC_V219_RUNTIME_STABILITY__)return;
-  const VERSION='2026-08-19-v219-passive-runtime-stability-v1';
+  const VERSION='2026-08-19-v219-passive-runtime-stability-v2';
   const WHPP_CACHE_KEY='ce_qc_v132_whpp_fast_summary';
   let patchTimer=null;
 
@@ -26,6 +26,18 @@
     const name=document.getElementById('headerUserName');if(name)name.textContent=display;
     const meta=document.getElementById('headerUserRole');if(meta)meta.textContent=`${department} · ${role}`;
     const account=document.getElementById('currentAccountSummary');if(account)account.textContent=`${display} · ${role}`;
+  }
+
+  async function refreshIdentityOnce(){
+    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),1800);
+    try{
+      const response=await fetch('/api/session',{cache:'no-store',credentials:'same-origin',signal:controller.signal});
+      if(!response.ok)return;
+      const session=await response.json();
+      if(!session?.user)return;
+      try{if(typeof accessSession!=='undefined')accessSession=session;}catch{}
+      patchIdentity();
+    }catch{}finally{clearTimeout(timer);}
   }
 
   function patchNetwork(){
@@ -63,15 +75,18 @@
     // V217 previously launched a second startup recovery fan-out here: /api/unified-history
     // plus six business-state reads, twice. On the 20GB+ SQLite database that duplicated
     // the real V43 /api/bootstrap and could block the 5177 event loop. V219 is deliberately
-    // passive: the core app owns all data/bootstrap state; this guard only fixes presentation.
+    // passive: the core app owns all dashboard/bootstrap data. The only request here is one
+    // lightweight /api/session read so the authenticated username/role is never left as a UI placeholder.
     patch();
+    void refreshIdentityOnce();
     document.addEventListener('click',guardWhppClick,true);
-    document.addEventListener('click',event=>{if(event.target?.closest?.('[data-page="settings"],.top-user'))schedule(100);},true);
+    document.addEventListener('click',event=>{if(event.target?.closest?.('[data-page="settings"],.top-user')){schedule(100);void refreshIdentityOnce();}},true);
     global.addEventListener('popstate',()=>schedule(80));
     document.addEventListener('ce-qc-run-complete',()=>schedule(120));
     setTimeout(patch,500);
     setTimeout(patch,1800);
-    global.__CE_QC_V219_RUNTIME_STABILITY__={version:VERSION,patchIdentity,patchNetwork,currentDate};
+    setTimeout(patch,5000);
+    global.__CE_QC_V219_RUNTIME_STABILITY__={version:VERSION,patchIdentity,patchNetwork,currentDate,refreshIdentityOnce};
     global.__CE_QC_V217_RUNTIME_TRUTH__={disabled:true,replacedBy:VERSION};
     console.info('[CE-QC][V219_RUNTIME_STABILITY]',VERSION,'core bootstrap owns data; no startup database fan-out.');
   }
