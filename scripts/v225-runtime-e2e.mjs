@@ -88,6 +88,9 @@ try{
   child.once('exit',(code,signal)=>logs.push(`\n[child exit code=${code} signal=${signal}]\n`));
 
   await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`,{accept:r=>r.status===200});
+  const health=await jsonRequest(`${APP_ORIGIN}/api/health`);
+  if(health.payload?.scope!=='LOOPBACK_READINESS_ONLY'||health.payload?.ready!==true)fail(`loopback health did not report readiness: ${JSON.stringify(health.payload)}`);
+
   const root=await waitFor(`${APP_ORIGIN}/`,{accept:r=>r.status===200});
   const rootText=await root.text();
   if(!/CE质控系统内部登录|CE QC internal sign-in/i.test(rootText))fail('unauthenticated root did not fail closed to the internal login page');
@@ -130,7 +133,7 @@ try{
   if(!html.includes('/v225-auth-bootstrap-guard.js'))fail('authenticated app shell is missing V225 pre-app auth/bootstrap guard');
   if(!html.includes('/app.js'))fail('authenticated app shell is missing app.js');
 
-  console.log(`[V226] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
+  console.log(`[V227] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: health 200 -> auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
 }finally{
   if(child&&!child.killed){try{child.kill('SIGTERM');}catch{}}
   await sleep(700);
