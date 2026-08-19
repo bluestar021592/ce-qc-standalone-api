@@ -1,14 +1,9 @@
-(function v208DashboardFinalGuard(global){
+(function retireV208DashboardFinalGuard(global){
   'use strict';
   if(global.__CE_QC_V208_DASHBOARD_FINAL_GUARD__)return;
-  global.__CE_QC_V208_DASHBOARD_FINAL_GUARD__='2026-08-19-v208-official-only-dashboard-guard-v1';
-  const q=(s,r=document)=>r.querySelector(s);const qa=(s,r=document)=>[...r.querySelectorAll(s)];const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let busy=false,lastAt=0;
-  function style(){if(q('#v208DashGuardStyle'))return;const s=document.createElement('style');s.id='v208DashGuardStyle';s.textContent=`.v208-hidden-old-average{display:none!important}.v208-evidence-health{margin-top:9px;padding:9px 11px;border-radius:8px;background:#f4f8fd;color:#536f8f;font-size:12px;line-height:1.55}.v208-evidence-health b{color:#173f69}.v208-evidence-health .bad{color:#b43c36}.v208-evidence-health .good{color:#25834f}.v208-evidence-health .warn{color:#a86800}`;document.head.appendChild(s);}
-  function hideCompetingAverage(){const panel=q('#v203AttemptPanel');if(!panel)return;for(const card of qa('.v203-attempt-card',panel)){const label=(q('small',card)?.textContent||'').trim();if(label==='平均签收天数')card.classList.add('v208-hidden-old-average');}}
-  async function api(url){const res=await fetch(url,{credentials:'same-origin',cache:'no-store'});let data={};try{data=await res.json();}catch{}if(!res.ok||data.ok===false)throw new Error(data.error||`HTTP ${res.status}`);return data;}
-  async function renderHealth(force=false){const panel=q('#v206ShopeePrecisionPanel');if(!panel)return;if(busy)return;if(!force&&Date.now()-lastAt<30000)return;busy=true;try{const data=await api('/api/v208/shopee-evidence/status');let box=q('#v208EvidenceHealth',panel);if(!box){box=document.createElement('div');box.id='v208EvidenceHealth';box.className='v208-evidence-health';panel.appendChild(box);}const s=data.byStatus||{},pending=Number(data.pendingNotFetched||0),complete=Number(s.COMPLETE||0),open=Number(s.OPEN||0),m3001=Number(s.INCOMPLETE_3001||0),mpod=Number(s.INCOMPLETE_POD||0),none=Number(s.NO_EVENTS||0),errors=Number(s.ERROR||0);const outstanding=pending+m3001+mpod+none+errors;box.innerHTML=`<b>自动轨迹证据补全：</b> 完整 <span class="good">${complete.toLocaleString('zh-CN')}</span> · 待首次抓取 <span class="${pending?'warn':'good'}">${pending.toLocaleString('zh-CN')}</span> · 当前未POD持续追踪 ${open.toLocaleString('zh-CN')} · 缺3001 ${m3001.toLocaleString('zh-CN')} · 缺POD节点 ${mpod.toLocaleString('zh-CN')} · 无轨迹 ${none.toLocaleString('zh-CN')} · 接口失败 <span class="${errors?'bad':'good'}">${errors.toLocaleString('zh-CN')}</span>${outstanding?'。证据未闭合前，对应平均时效不会冒充正式值。':'。当前历史证据补全队列已闭合。'}`;lastAt=Date.now();}catch(error){let box=q('#v208EvidenceHealth',panel);if(!box){box=document.createElement('div');box.id='v208EvidenceHealth';box.className='v208-evidence-health';panel.appendChild(box);}box.innerHTML=`<span class="bad">自动轨迹证据状态读取失败：${esc(error.message)}。看板不会以旧值代替。</span>`;}finally{busy=false;}}
-  function tick(){style();hideCompetingAverage();renderHealth(false);}
-  function boot(){tick();const mo=new MutationObserver(()=>{clearTimeout(global.__v208DashGuardTick);global.__v208DashGuardTick=setTimeout(tick,120);});mo.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','class']});setInterval(()=>renderHealth(false),30000);}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+  global.__CE_QC_V208_DASHBOARD_FINAL_GUARD__='2026-08-19-v221-retired-passive-v1';
+  // V221 keeps this asset as a compatibility marker only. Exact SHOPEE 3001→POD
+  // timing and attempt evidence remain backend-owned; this file must not create
+  // MutationObservers, polling timers, duplicate cards, or competing averages.
+  console.info('[CE-QC][V208_RETIRED] V221 passive mode; no dashboard DOM overlay or polling.');
 })(window);
