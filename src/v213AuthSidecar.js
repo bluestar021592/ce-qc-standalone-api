@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig } from './db.js';
 
-export const V213_AUTH_SIDECAR_VERSION='2026-08-19-v213-auth-sidecar-v1';
+export const V213_AUTH_SIDECAR_VERSION='2026-08-19-v223-auth-sidecar-handoff-v1';
 const PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_AUTH_SIDECAR_PORT||5179)));
 const HOST=String(process.env.CE_QC_AUTH_SIDECAR_HOST||'0.0.0.0');
 const COOKIE='ce_v213_fast_session';
@@ -73,7 +73,7 @@ function cookieFor(row,channel){
     'ce_v212_fast_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
     `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${HOURS*3600}`
   ];
-  return{cookies,payload,expiresAt:new Date(exp).toISOString()};
+  return{cookies,payload,token,expiresAt:new Date(exp).toISOString()};
 }
 
 const server=http.createServer(async(req,res)=>{
@@ -98,7 +98,7 @@ const server=http.createServer(async(req,res)=>{
     if(!matched)return json(req,res,401,{ok:false,code:'V213_INVALID_CREDENTIALS',error:'用户名或密码错误。'});
     const issued=cookieFor(row,channel);
     console.log(`[CE-QC][V213_AUTH_SIDECAR_LOGIN_OK] user=${username} channel=${channel} ms=${Date.now()-started}`);
-    return json(req,res,200,{ok:true,user:issued.payload.user,expiresAt:issued.expiresAt,authMode:'V213_ISOLATED_AUTH_SIDECAR'}, {'set-cookie':issued.cookies});
+    return json(req,res,200,{ok:true,user:issued.payload.user,expiresAt:issued.expiresAt,authMode:'V223_ISOLATED_AUTH_SIDECAR',handoffToken:issued.token}, {'set-cookie':issued.cookies});
   }catch(error){
     console.error(`[CE-QC][V213_AUTH_SIDECAR_ERROR] ms=${Date.now()-started}`,error?.stack||error);
     const busy=/SQLITE_BUSY|database is locked/i.test(String(error?.message||error));
