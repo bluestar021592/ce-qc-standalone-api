@@ -1,9 +1,8 @@
 import { getDb, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES } from './store.js';
 
-export const V207_IMPORT_INTEGRITY_VERSION='2026-08-19-v207-seven-business-append-only-ownership-v1';
+export const V207_IMPORT_INTEGRITY_VERSION='2026-08-19-v207-seven-business-clean-rebaseline-no-loss-v2';
 export const V207_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
-const CORE_TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
 
 function safeJson(value,fallback={}){if(value&&typeof value==='object')return value;try{return JSON.parse(String(value||''))||fallback;}catch{return fallback;}}
 function billOf(value=''){return String(value||'').trim().toUpperCase();}
@@ -38,48 +37,12 @@ export function ensureV207ImportIntegritySchema(){
   return true;
 }
 
-function legacyCoreRows(reportDate){
-  const db=getDb();
-  try{return db.prepare(`SELECT r.reportDate,r.shipmentCode,r.businessType,r.regionCode,r.rowJson,b.sourceName,b.fileHash,b.batchId,b.snapshotId,b.createdAt
-    FROM unified_import_batches b JOIN unified_import_rows r ON r.batchId=b.batchId
-    WHERE b.reportDate=? AND b.status IN ('VALID','SUPERSEDED')
-    ORDER BY b.createdAt,b.batchId,r.rowNumber,r.shipmentCode`).all(reportDate);}catch{return[];}
-}
-function legacyWhppRows(reportDate){
-  const db=getDb();
-  try{return db.prepare(`SELECT reportDate,shipmentCode,businessType,'' regionCode,rowJson,'' sourceName,'' fileHash,'' batchId,'' snapshotId,createdAt
-    FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt,id`).all(reportDate);}catch{return[];}
-}
-
-function legacySeedRows(reportDate){
-  const map=new Map();
-  for(const row of [...legacyCoreRows(reportDate),...legacyWhppRows(reportDate)]){
-    const bill=billOf(row.shipmentCode);if(!bill)continue;
-    const raw=safeJson(row.rowJson,{});
-    const candidate={...raw,shipmentCode:bill,businessType:typeOf(row.businessType||raw.businessType),regionCode:String(row.regionCode||raw.regionCode||''),reportDate};
-    const stamp=String(row.createdAt||'');
-    const previous=map.get(bill);
-    if(!previous||stamp>=previous.stamp)map.set(bill,{row:candidate,stamp,meta:row});
-  }
-  return[...map.values()];
-}
-
-export function seedV207OwnershipForDate(reportDate){
-  ensureV207ImportIntegritySchema();
-  const db=getDb();
-  const existing=Number(db.prepare('SELECT COUNT(*) count FROM v207_daily_ownership WHERE reportDate=?').get(reportDate)?.count||0);
-  if(existing)return{seeded:false,existing};
-  const seed=legacySeedRows(reportDate),now=nowIso();
-  if(!seed.length)return{seeded:false,existing:0};
-  const insert=db.prepare(`INSERT OR IGNORE INTO v207_daily_ownership(reportDate,shipmentCode,businessType,regionCode,sourceName,sourceFileHash,sourceBatchId,sourceSnapshotId,rowJson,firstSeenAt,lastSeenAt,lastSeenUploadAt,seenUploadCount,recoveredFromPrior)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,1)`);
-  db.exec('BEGIN IMMEDIATE');
-  try{
-    for(const item of seed){const row=item.row,meta=item.meta;insert.run(reportDate,billOf(row.shipmentCode),typeOf(row.businessType),String(row.regionCode||''),String(meta.sourceName||'LEGACY_SEED'),String(meta.fileHash||''),String(meta.batchId||''),String(meta.snapshotId||''),JSON.stringify(row),item.stamp||now,item.stamp||now,item.stamp||now);}
-    db.exec('COMMIT');
-  }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
-  return{seeded:true,existing:0,seededRows:seed.length};
-}
+// Legacy seeding is intentionally explicit-only. During the user's clean historical
+// rebuild, the FIRST V207 upload for a date becomes that date's authoritative baseline.
+// Old V205/V206 history remains readable for dates not rebuilt yet, but it is never
+// silently copied into the new no-loss ledger because that could reintroduce old ghost
+// membership or old misclassification into the clean rebuild.
+export function seedV207OwnershipForDate(){return{seeded:false,reason:'LEGACY_AUTO_SEED_DISABLED_CLEAN_REBASELINE'};}
 
 export function inspectV207BeforeUpload(parsed={}){
   ensureV207ImportIntegritySchema();
@@ -90,7 +53,6 @@ export function inspectV207BeforeUpload(parsed={}){
   if(currentBills.size!==rows.length){const error=new Error(`V207导入前守恒失败：解析${rows.length}行，但唯一运单${currentBills.size}票。`);error.code='V207_PARSED_DUPLICATE';throw error;}
   const counts=countByType(rows);
   if(sumCounts(counts)!==rows.length){const error=new Error(`V207七业务守恒失败：唯一运单${rows.length}票，板块合计${sumCounts(counts)}票。`);error.code='V207_BUSINESS_RECONCILIATION';throw error;}
-  seedV207OwnershipForDate(reportDate);
   const prior=getDb().prepare('SELECT shipmentCode,businessType,regionCode,rowJson FROM v207_daily_ownership WHERE reportDate=? ORDER BY shipmentCode').all(reportDate);
   const priorByBill=new Map(prior.map(row=>[billOf(row.shipmentCode),row]));
   const missingFromUpload=prior.filter(row=>!currentBills.has(billOf(row.shipmentCode)));
@@ -99,6 +61,7 @@ export function inspectV207BeforeUpload(parsed={}){
   return{
     version:V207_IMPORT_INTEGRITY_VERSION,
     reportDate,
+    firstCleanBaseline:prior.length===0,
     uploadUnique:rows.length,
     uploadCounts:counts,
     priorCanonical:prior.length,
@@ -113,7 +76,10 @@ export function inspectV207BeforeUpload(parsed={}){
 export function commitV207Ownership(parsed={},meta={}){
   ensureV207ImportIntegritySchema();
   const db=getDb(),reportDate=String(parsed.reportDate||'').slice(0,10),rows=Array.isArray(parsed.rows)?parsed.rows:[],now=nowIso();
-  const previous=new Map(db.prepare('SELECT shipmentCode FROM v207_daily_ownership WHERE reportDate=?').all(reportDate).map(row=>[billOf(row.shipmentCode),true]));
+  if(!reportDate||!rows.length)throw new Error('V207不能提交空日报底账。');
+  const existingRows=db.prepare('SELECT shipmentCode FROM v207_daily_ownership WHERE reportDate=?').all(reportDate);
+  const firstCleanBaseline=existingRows.length===0;
+  const previous=new Map(existingRows.map(row=>[billOf(row.shipmentCode),true]));
   const upsert=db.prepare(`INSERT INTO v207_daily_ownership(reportDate,shipmentCode,businessType,regionCode,sourceName,sourceFileHash,sourceBatchId,sourceSnapshotId,rowJson,firstSeenAt,lastSeenAt,lastSeenUploadAt,seenUploadCount,recoveredFromPrior)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,0)
     ON CONFLICT(reportDate,shipmentCode) DO UPDATE SET businessType=excluded.businessType,regionCode=excluded.regionCode,sourceName=excluded.sourceName,sourceFileHash=excluded.sourceFileHash,sourceBatchId=excluded.sourceBatchId,sourceSnapshotId=excluded.sourceSnapshotId,rowJson=excluded.rowJson,lastSeenAt=excluded.lastSeenAt,lastSeenUploadAt=excluded.lastSeenUploadAt,seenUploadCount=v207_daily_ownership.seenUploadCount+1,recoveredFromPrior=0`);
@@ -123,12 +89,11 @@ export function commitV207Ownership(parsed={},meta={}){
     if(previous.size){const marks=[...previous.keys()];for(let i=0;i<marks.length;i+=300){const part=marks.slice(i,i+300),q=part.map(()=>'?').join(',');db.prepare(`UPDATE v207_daily_ownership SET recoveredFromPrior=1 WHERE reportDate=? AND shipmentCode IN (${q})`).run(reportDate,...part);}}
     db.exec('COMMIT');
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
-  return buildV207DailyIntegrity(reportDate,rows);
+  return{...buildV207DailyIntegrity(reportDate,rows),firstCleanBaseline};
 }
 
 export function loadV207CanonicalRowsForDate(reportDate){
   ensureV207ImportIntegritySchema();
-  seedV207OwnershipForDate(reportDate);
   return getDb().prepare('SELECT * FROM v207_daily_ownership WHERE reportDate=? ORDER BY businessType,shipmentCode').all(reportDate).map(record=>{
     const row=safeJson(record.rowJson,{});
     return{...row,shipmentCode:billOf(record.shipmentCode),businessType:typeOf(record.businessType),regionCode:String(record.regionCode||row.regionCode||''),reportDate:record.reportDate,v207RecoveredFromPrior:Boolean(record.recoveredFromPrior),v207SeenUploadCount:Number(record.seenUploadCount||1),v207LastSeenUploadAt:record.lastSeenUploadAt||'',v207OwnershipVersion:V207_IMPORT_INTEGRITY_VERSION};
@@ -138,12 +103,11 @@ export function loadV207CanonicalRowsForDate(reportDate){
 export function loadV207CanonicalRows(type,range={}){
   ensureV207ImportIntegritySchema();
   const from=String(range.from||'').slice(0,10),to=String(range.to||from).slice(0,10),businessType=typeOf(type);
-  if(from)for(let date=from;date&&date<=to;date=nextDate(date))seedV207OwnershipForDate(date);
   const params=[];let where='1=1';
   if(from&&to){where+=' AND reportDate BETWEEN ? AND ?';params.push(from,to);}if(businessType){where+=' AND businessType=?';params.push(businessType);}
   const records=getDb().prepare(`SELECT * FROM v207_daily_ownership WHERE ${where} ORDER BY reportDate,lastSeenUploadAt,shipmentCode`).all(...params);
   const byBill=new Map();
-  for(const record of records){const bill=billOf(record.shipmentCode),raw=safeJson(record.rowJson,{}),existing=byBill.get(bill);const row={...raw,shipmentCode:bill,businessType:typeOf(record.businessType),regionCode:String(record.regionCode||raw.regionCode||''),reportDate:record.reportDate,v207RecoveredFromPrior:Boolean(record.recoveredFromPrior),v207SeenUploadCount:Number(record.seenUploadCount||1),v207LastSeenUploadAt:record.lastSeenUploadAt||'',v207OwnershipVersion:V207_IMPORT_INTEGRITY_VERSION};if(!existing){byBill.set(bill,row);continue;}const first=String(existing.firstReportDate||existing.reportDate||record.reportDate),last=String(existing.lastReportDate||existing.reportDate||record.reportDate);row.firstReportDate=first<record.reportDate?first:record.reportDate;row.lastReportDate=last>record.reportDate?last:record.reportDate;byBill.set(bill,{...existing,...row,firstReportDate:row.firstReportDate,lastReportDate:row.lastReportDate});}
+  for(const record of records){const bill=billOf(record.shipmentCode),raw=safeJson(record.rowJson,{}),existing=byBill.get(bill);const row={...raw,shipmentCode:bill,businessType:typeOf(record.businessType),regionCode:String(record.regionCode||raw.regionCode||''),reportDate:record.reportDate,v207RecoveredFromPrior:Boolean(record.recoveredFromPrior),v207SeenUploadCount:Number(record.seenUploadCount||1),v207LastSeenUploadAt:record.lastSeenUploadAt||'',v207OwnershipVersion:V207_IMPORT_INTEGRITY_VERSION};if(!existing){row.firstReportDate=row.firstReportDate||record.reportDate;row.lastReportDate=row.lastReportDate||record.reportDate;byBill.set(bill,row);continue;}const first=String(existing.firstReportDate||existing.reportDate||record.reportDate),last=String(existing.lastReportDate||existing.reportDate||record.reportDate);const firstReportDate=first<record.reportDate?first:record.reportDate,lastReportDate=last>record.reportDate?last:record.reportDate;byBill.set(bill,{...existing,...row,firstReportDate,lastReportDate});}
   return[...byBill.values()];
 }
 
@@ -170,11 +134,10 @@ export function assertV207RuntimeMembership({reportDate,ccslRows=[],shopeeRows=[
   for(const row of shopeeRows)if(Object.prototype.hasOwnProperty.call(actual,typeOf(row.businessType)))actual[typeOf(row.businessType)]++;
   for(const row of whppRows)actual.WHPP++;
   const checks=V207_TYPES.map(type=>({type,expected:expected[type],actual:actual[type],passed:expected[type]===actual[type]}));
-  const duplicateRuntime=[...ccslRows,...shopeeRows,...whppRows].length!==new Set([...ccslRows,...shopeeRows,...whppRows].map(row=>billOf(row.shipmentCode))).size;
+  const all=[...ccslRows,...shopeeRows,...whppRows];
+  const duplicateRuntime=all.length!==new Set(all.map(row=>billOf(row.shipmentCode))).size;
   if(duplicateRuntime||checks.some(c=>!c.passed)){const error=new Error(`V207运行时成员对账失败：${checks.filter(c=>!c.passed).map(c=>`${c.type} ${c.actual}/${c.expected}`).join('，')||'存在重复运单'}`);error.code='V207_RUNTIME_MEMBERSHIP_MISMATCH';error.checks=checks;throw error;}
   return{version:V207_IMPORT_INTEGRITY_VERSION,reportDate,checks,total:canonical.length,balanced:true};
 }
-
-function nextDate(date){const d=new Date(`${date}T00:00:00Z`);d.setUTCDate(d.getUTCDate()+1);return d.toISOString().slice(0,10);}
 
 ensureV207ImportIntegritySchema();
