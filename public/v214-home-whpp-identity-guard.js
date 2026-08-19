@@ -1,12 +1,13 @@
 (function installV220UiNavigationGuard(global){
   'use strict';
   if(global.__CE_QC_V220_UI_NAV_GUARD__)return;
-  const VERSION='2026-08-19-v220-ui-navigation-whpp-card-v1';
+  const VERSION='2026-08-19-v221-ui-navigation-whpp-date-truth-v1';
   let patchTimer=null;
   const text=node=>String(node?.textContent||'').trim();
   const num=value=>{const n=Number(String(value??'').replace(/[,%\s]/g,''));return Number.isFinite(n)?n:0;};
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
   const pct=(value,total)=>total?`${(Number(value||0)*100/Number(total)).toFixed(2)}%`:'0.00%';
+  const dateOnly=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||'').slice(0,10))?String(value).slice(0,10):'';
   function navKey(node){
     const page=String(node?.dataset?.page||'').trim();if(page)return page;
     const label=text(node?.querySelector?.('.side-label'));
@@ -43,23 +44,30 @@
     const account=document.getElementById('currentAccountSummary');if(account)account.textContent=`${display} · ${role}`;
   }
   function findCard(grid,label){return [...(grid?.querySelectorAll?.('.v18-business-card')||[])].find(card=>text(card.querySelector('span'))===label)||null;}
+  function currentMainDate(){
+    const dom=dateOnly(document.getElementById('topRangeTo')?.value);if(dom)return dom;
+    try{const d=dateOnly(typeof unifiedImportState!=='undefined'?unifiedImportState?.reportDate:'');if(d)return d;}catch{}
+    try{const d=dateOnly(typeof appState!=='undefined'?appState?.reportDate:'');if(d)return d;}catch{}
+    return '';
+  }
+  function whppState(){try{return typeof businessStates!=='undefined'?businessStates?.WHPP:null;}catch{return null;}}
+  function whppTotal(state){return num(state?.dashboard?.metrics?.total??state?.dashboard?.totalMonitored??state?.dailyParseSummary?.totalRecognized??state?.total);}
   function ensureWhppHomeCard(){
     const home=document.getElementById('homePage');if(!home||home.hidden)return;
     const grid=home.querySelector('.v18-business-grid');if(!grid)return;
     let whpp=findCard(grid,'WHPP本土');
     if(!whpp){
       whpp=document.createElement('button');whpp.type='button';whpp.className='v18-business-card cyan';whpp.dataset.v220Business='WHPP';
-      whpp.innerHTML='<span>WHPP本土</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em>';
+      whpp.innerHTML='<span>WHPP本土</span><small>今日票数</small><b>0</b><em>该日期暂无同日WHPP</em>';
       whpp.addEventListener('click',()=>typeof global.navigateWhppPage==='function'?global.navigateWhppPage():global.navigatePage?.('whpp'));
       const cn=findCard(grid,'SHOPEE CN');if(cn)grid.insertBefore(whpp,cn);else grid.appendChild(whpp);
     }
-    const total=findCard(grid,'总览');
-    if(total){
-      const totalValue=num(total.querySelector('b')?.textContent);
-      const known=['CE','CEAF空运','TBKH','ALI1688','SHOPEE CN','SHOPEE VN'].reduce((sum,label)=>sum+num(findCard(grid,label)?.querySelector('b')?.textContent),0);
-      const residual=Math.max(0,totalValue-known);
-      if(residual>0||num(whpp.querySelector('b')?.textContent)===0){whpp.querySelector('b').textContent=fmt(residual);whpp.querySelector('em').textContent=`占总票数 ${pct(residual,totalValue)}`;}
-    }
+    const wanted=currentMainDate(),state=whppState(),available=dateOnly(state?.reportDate);
+    const sameDate=Boolean(wanted&&available===wanted);
+    const count=sameDate?whppTotal(state):0;
+    whpp.querySelector('b').textContent=fmt(count);
+    const total=findCard(grid,'总览');const totalValue=num(total?.querySelector('b')?.textContent);
+    whpp.querySelector('em').textContent=sameDate?`占总票数 ${pct(count,totalValue)}`:(wanted?`日期 ${wanted} 无同日WHPP`:'等待日报日期');
     const coreTitle=home.querySelector('.v18-core>h2');
     if(coreTitle&&/CE \+ CEAF空运 \+ TBKH \+ ALI1688/.test(coreTitle.textContent||''))coreTitle.innerHTML='核心指标总览 <small>CE + CEAF空运 + TBKH + ALI1688 + WHPP本土，不含 SHOPEE CN/VN</small>';
   }
@@ -75,7 +83,7 @@
     global.__CE_QC_V219_UI_NAV_GUARD__=global.__CE_QC_V220_UI_NAV_GUARD__;
     global.__CE_QC_V216_UI_STABILITY__=global.__CE_QC_V220_UI_NAV_GUARD__;
     global.__CE_QC_V214_HOME_WHPP_IDENTITY__=global.__CE_QC_V220_UI_NAV_GUARD__;
-    console.info('[CE-QC][V220_UI_NAV_GUARD]',VERSION,'passive navigation/identity guard active; WHPP home card restored without MutationObserver.');
+    console.info('[CE-QC][V220_UI_NAV_GUARD]',VERSION,'passive navigation/identity guard active; WHPP home card uses same-date persisted truth only.');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })(window);
