@@ -2,11 +2,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
 
 const REPORT_DATE='2026-08-16';
 const USERNAME='v225admin';
 const PASSWORD='V225-Test-Password!';
+const PROJECT_ROOT=fileURLToPath(new URL('..',import.meta.url));
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v225-'));
 const dbFile=path.join(temp,'ce_qc_monitor.db');
 const env={
@@ -75,7 +77,7 @@ try{
   business.run('WHPP','V225-WHPP',REPORT_DATE,1,'POD','SUCCESS',JSON.stringify({regionCode:'PP',currentState:'POD'}),now,now);
   closeDb();
 
-  child=spawn(process.execPath,['bootstrap.js'],{cwd:path.resolve(new URL('..',import.meta.url).pathname),env,stdio:['ignore','pipe','pipe']});
+  child=spawn(process.execPath,['bootstrap.js'],{cwd:PROJECT_ROOT,env,stdio:['ignore','pipe','pipe'],windowsHide:true});
   const collect=chunk=>logs.push(String(chunk));
   child.stdout.on('data',collect);child.stderr.on('data',collect);
   child.once('exit',(code,signal)=>logs.push(`\n[child exit code=${code} signal=${signal}]\n`));
@@ -97,6 +99,8 @@ try{
     method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({handoffToken})
   });
   if(handoff.payload?.authMode!=='V223_MAIN_SESSION_HANDOFF')fail(`unexpected handoff mode ${handoff.payload?.authMode||'-'}`);
+  const setCookie=String(handoff.response.headers.get('set-cookie')||'');
+  if(!setCookie.includes('ce_v213_fast_session='))fail('5177 handoff did not issue the main fast-session cookie');
   const cookie=`ce_v213_fast_session=${handoffToken}`;
   const authHeaders={cookie,accept:'application/json'};
 
@@ -121,9 +125,9 @@ try{
   if(!html.includes('/v225-auth-bootstrap-guard.js'))fail('authenticated app shell is missing V225 pre-app auth/bootstrap guard');
   if(!html.includes('/app.js'))fail('authenticated app shell is missing app.js');
 
-  console.log(`[V225] runtime E2E passed: 5179 auth -> 5177 handoff -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP summary -> guarded app shell.`);
+  console.log(`[V226] runtime E2E passed: 5179 auth -> 5177 handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP summary -> guarded app shell.`);
 }finally{
   if(child&&!child.killed){try{child.kill('SIGTERM');}catch{}}
-  await sleep(400);
+  await sleep(700);
   try{fs.rmSync(temp,{recursive:true,force:true});}catch{}
 }
