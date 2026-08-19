@@ -44,6 +44,8 @@ const tokenExportUi=read('public/v194-export-token-ui.js');
 const exportSidecar=read('src/v193ExportSidecar.js');
 const singleExportWorker=read('src/v183SingleBusinessExportJobWorker.js');
 const allBusinessChild=read('src/v84ExportBusinessWorker.js');
+const login=read('src/v209LoginReliabilityPatch.js');
+const loginUi=read('public/v209-login-reliability.js');
 
 // Foundation: seven-business runner + resilient storage/export path.
 must(runner,'2026-08-17-v165-seven-business-stage-verification-v2');
@@ -71,8 +73,7 @@ must(parser,"recipient.includes('TBKH')");
 must(parser,'sourceReconciliation');
 
 // V209 source archive: every import that reaches persistence must first have a verified raw
-// workbook copy. It lives outside normal business-data reset and self-recovers its manifest
-// from the archive directory, so rebuilding working data must not require another upload.
+// workbook copy. It lives outside normal business-data reset and self-recovers its manifest.
 must(v146,"import './v209RawImportArchivePatch.js'");
 must(v209Archive,'CREATE TABLE IF NOT EXISTS v209_import_source_archive');
 must(v209Archive,"status TEXT NOT NULL DEFAULT 'PREPARED'");
@@ -86,6 +87,14 @@ must(v209ArchiveUi,'原始日报永久归档 / 可重建保障');
 must(v209ArchiveUi,'SHA-256');
 must(v209ArchiveUi,'归档损坏/缺失');
 must(shell,'/v209-source-archive-status.js?v=20260819-v209-1');
+
+// V209 login shell must be installed before accessIdentity and must never hang silently.
+must(v146,"import './v209LoginReliabilityPatch.js'");
+must(login,'v209AccessIdentityNoHang');
+must(login,'v209LoginReliabilityPage');
+must(login,"fn.name==='accessIdentity'");
+must(loginUi,'登录接口15秒内没有响应');
+must(loginUi,"fetch('/api/internal-auth/login'");
 
 // V207 clean rebaseline: first new upload establishes a clean baseline; later same-day
 // reuploads can update/add but never silently remove already confirmed members.
@@ -162,14 +171,17 @@ must(v208,"COUNT(*) count FROM (SELECT DISTINCT o.businessType,o.shipmentCode");
 must(v208Worker,'runV208ShopeeEvidenceSync');
 
 // UI must expose useful QC controls only: clean rebuild progress, evidence coverage, exact
-// attempts and exact PP/PV timing. Partial timing is never presented as official average.
+// attempts and exact PP/PV timing. The labels are assembled dynamically from LABELS[type],
+// so validate the rendering contract rather than impossible static combined strings.
 must(v207Ui,'历史日报清洁重建 / 防漏票底账');
 must(v207Ui,'待重新上传');
 must(v207Ui,'已保留少传');
 must(v205Ui,'轨迹证据 / 状态闭环完整性');
 must(v205Ui,'轨迹证据待补齐');
-must(v206Ui,'SHOPEE CN · 金边 PP');
-must(v206Ui,'SHOPEE VN · 外省 PV');
+must(v206Ui,"SHOPEECN:'SHOPEE CN'");
+must(v206Ui,"SHOPEEVN:'SHOPEE VN'");
+must(v206Ui,'· 金边 PP');
+must(v206Ui,'· 外省 PV');
 must(v206Ui,'pod===samples&&coverage>=99.99');
 must(v206Ui,"'待补齐'");
 must(v208Guard,"label==='平均签收天数'");
@@ -194,4 +206,4 @@ must(v202DisableLegacy,"CE_QC_DISABLE_SHOPEE_DELIVERY_TRACKER='1'");
 must(v202DisableLegacy,'CE_QC_ENABLE_LEGACY_V201_TRACKER');
 for(const source of [runner,pause,shell,storage,bstore])forbid(source,'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] V209 gate passed: source-cell waybill conservation, recovery-safe verified raw workbook archive, clean seven-business append-only rebaseline, export membership reconciliation, real 1/2/3 delivery cycles, automatic Shopee full-history evidence capture, exact 3001-to-POD PP/PV timing, full-coverage-only official averages, terminal-safe anomalies and durable manual evidence are all wired to one QC truth path.');
+console.log('[GOLIVE] V209 gate passed: source-cell waybill conservation, recovery-safe verified raw workbook archive, non-hanging login shell, clean seven-business append-only rebaseline, export membership reconciliation, real 1/2/3 delivery cycles, automatic Shopee full-history evidence capture, exact 3001-to-POD PP/PV timing, full-coverage-only official averages, terminal-safe anomalies and durable manual evidence are all wired to one QC truth path.');
