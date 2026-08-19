@@ -186,16 +186,17 @@ if(!copyStat.exists||copyStat.size<=0)throw new Error('BACKUP_EMPTY');
 log('4/4',`Calculating backup SHA-256 for ${(copyStat.size/1024/1024).toFixed(1)} MiB...`);
 const copyHash=sha256WithProgress(copyFile);
 const fingerprintAfter=sourceFingerprint();
-if(!sameFingerprint(fingerprintBefore,fingerprintAfter)){
-  throw new Error('SOURCE_CHANGED_DURING_UPDATE_BACKUP');
+const sourceStableDuringBackup=sameFingerprint(fingerprintBefore,fingerprintAfter);
+if(!sourceStableDuringBackup){
+  log('NOTICE','Source database changed while the SQLite online backup was running. The verified point-in-time backup remains valid; exact fingerprint reuse is disabled for this backup.');
 }
 const manifest={
   createdAt:new Date().toISOString(),reason:'before-automatic-code-update',projectRoot:root,candidateRoot,
   databasePath:dbFile,backupPath:copyFile,size:copyStat.size,backupMtimeMs:copyStat.mtimeMs,sha256:copyHash,
   beforeCommit,targetCommit,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:'quick-ok',
-  verificationMode:'online-backup+stable-source-fingerprint+backup-quick-check+sha256',method:'node-sqlite-online-backup',
+  verificationMode:sourceStableDuringBackup?'online-backup+stable-source-fingerprint+backup-quick-check+sha256':'online-backup+concurrent-source-change+backup-quick-check+sha256',method:'node-sqlite-online-backup',
   sourceFingerprint:fingerprintAfter,sourceFingerprintBefore:fingerprintBefore,sourceFingerprintAfter:fingerprintAfter,
-  sourceStableDuringBackup:true,backupRatePages:BACKUP_RATE_PAGES,sourceOpenMode:'read-only',changedFiles:updateRisk.files,highRiskFiles:updateRisk.risky
+  sourceStableDuringBackup,backupRatePages:BACKUP_RATE_PAGES,sourceOpenMode:'read-only',changedFiles:updateRisk.files,highRiskFiles:updateRisk.risky
 };
 fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
 log('READY',`Verified backup ready: ${copyFile}`);
