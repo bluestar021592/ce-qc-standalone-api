@@ -8,6 +8,7 @@ const precision=read('src/v206ShopeePrecisionTruth.js');
 const audit=read('src/v205IntegrityAuditPatch.js');
 const evidenceUi=read('public/v205-data-integrity.js');
 const rebuildUi=read('public/v207-rebaseline.js');
+const v208=read('src/v208ShopeePrecisionEvidenceScheduler.js');
 const shell=read('src/v44WhppUiPatch.js');
 const must=(source,token)=>{if(!source.includes(token))throw new Error(`V207 no-loss smoke missing: ${token}`);};
 const forbid=(source,token)=>{if(source.includes(token))throw new Error(`V207 no-loss smoke forbidden: ${token}`);};
@@ -49,6 +50,8 @@ must(evidenceUi,'轨迹证据 / 状态闭环完整性');
 must(rebuildUi,'历史日报清洁重建 / 防漏票底账');
 must(rebuildUi,'待重新上传');
 must(rebuildUi,'已保留少传');
-must(shell,'/v207-rebaseline.js?v=20260819-v207-1');
+must(v208,"BUSINESS_DATA_TABLES.includes(table)");
+must(v208,"COUNT(*) count FROM (SELECT DISTINCT o.businessType,o.shipmentCode");
+must(shell,'/v207-rebaseline.js?v=20260819-v207-2');
 
-console.log('[V207] no-loss rebaseline smoke passed: strict parser, clean first baseline, append-only same-date ownership, seven-business runtime reconciliation, export gate and rebuild UI are wired.');
+console.log('[V208] no-loss rebaseline smoke passed: strict parser, clean first baseline, append-only same-date ownership, seven-business runtime reconciliation, purge-safe evidence queues, export gate and rebuild UI are wired.');
