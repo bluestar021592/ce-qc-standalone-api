@@ -4,13 +4,16 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { getDb, nowIso } from './db.js';
 import { CEClient } from './ceClient.js';
+import { BUSINESS_DATA_TABLES } from './store.js';
 
-export const V208_SHOPEE_EVIDENCE_VERSION='2026-08-19-v208-shopee-full-trajectory-evidence-v1';
+export const V208_SHOPEE_EVIDENCE_VERSION='2026-08-19-v208-shopee-full-trajectory-evidence-v2';
 const TYPES=['SHOPEECN','SHOPEEVN'];
 const BATCH_SIZE=Math.max(50,Math.min(300,Number(process.env.V208_SHOPEE_TRACK_BATCH||200)));
 const MAX_PER_RUN=Math.max(BATCH_SIZE,Math.min(20000,Number(process.env.V208_SHOPEE_TRACK_MAX_PER_RUN||6000)));
-const INTERVAL_MS=Math.max(30*60_000,Number(process.env.V208_SHOPEE_TRACK_INTERVAL_MS||2*60*60_000));
-const STARTUP_DELAY_MS=Math.max(45_000,Number(process.env.V208_SHOPEE_TRACK_STARTUP_DELAY_MS||120_000));
+// Run discovery every 15 minutes so newly re-uploaded dates do not wait two hours.
+// Candidate throttles below still prevent completed/open shipments from being hammered.
+const INTERVAL_MS=Math.max(10*60_000,Number(process.env.V208_SHOPEE_TRACK_INTERVAL_MS||15*60_000));
+const STARTUP_DELAY_MS=Math.max(30_000,Number(process.env.V208_SHOPEE_TRACK_STARTUP_DELAY_MS||60_000));
 const OPEN_REFRESH_MS=Math.max(30*60_000,Number(process.env.V208_SHOPEE_OPEN_REFRESH_MS||2*60*60_000));
 const INCOMPLETE_REFRESH_MS=Math.max(2*60*60_000,Number(process.env.V208_SHOPEE_INCOMPLETE_REFRESH_MS||12*60*60_000));
 let timer=null,startupTimer=null,workerChild=null,kickTimer=null,inFlight=false;
@@ -38,6 +41,7 @@ export function ensureV208ShopeeEvidenceSchema(db=getDb()){
   CREATE INDEX IF NOT EXISTS idx_v208_refresh_status ON v208_shopee_evidence_refresh(status,lastFetchedAt,businessType);
   CREATE TABLE IF NOT EXISTS v208_shopee_event_keys(eventKey TEXT PRIMARY KEY,businessType TEXT NOT NULL,shipmentCode TEXT NOT NULL,eventTime TEXT,eventCode TEXT,createdAt TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS idx_v208_event_bill ON v208_shopee_event_keys(businessType,shipmentCode,eventTime);`);
+  for(const table of ['v208_shopee_evidence_refresh','v208_shopee_event_keys'])if(!BUSINESS_DATA_TABLES.includes(table))BUSINESS_DATA_TABLES.push(table);
   return true;
 }
 
@@ -81,9 +85,11 @@ export async function runV208ShopeeEvidenceSync({reason='SCHEDULED',max=MAX_PER_
 
 function launchWorker(reason='BACKGROUND'){
   if(workerChild)return{started:false,reason:'WORKER_ALREADY_RUNNING',pid:workerChild.pid||0};const file=fileURLToPath(new URL('./v208ShopeePrecisionEvidenceWorker.js',import.meta.url));try{workerChild=spawn(process.execPath,[file,reason],{cwd:process.cwd(),env:{...process.env,CE_QC_V208_WORKER:'1'},windowsHide:true,detached:false,stdio:['ignore','inherit','inherit']});const pid=workerChild.pid||0;workerChild.once('error',error=>{console.error('[CE-QC][V208_WORKER_SPAWN_FAILED]',error?.stack||error);workerChild=null;});workerChild.once('exit',(code,signal)=>{console.log(`[CE-QC][V208_WORKER] exit code=${code??'null'}${signal?` signal=${signal}`:''}`);workerChild=null;});return{started:true,pid};}catch(error){workerChild=null;return{started:false,reason:'SPAWN_FAILED',error:error?.message||String(error)};}}
-export function kickV208ShopeeEvidenceBackfill(reason='IMPORT'){if(process.env.CI||process.env.NODE_ENV==='test')return{scheduled:false,reason:'TEST'};if(kickTimer||workerChild)return{scheduled:false,reason:'ALREADY_SCHEDULED_OR_RUNNING'};kickTimer=setTimeout(()=>{kickTimer=null;launchWorker(reason);},15_000);kickTimer.unref?.();return{scheduled:true,delayMs:15_000};}
-export function startV208ShopeeEvidenceScheduler(){if(timer||startupTimer)return{started:false,reason:'ALREADY_STARTED'};if(process.env.CI||process.env.NODE_ENV==='test')return{started:false,reason:'TEST'};ensureV208ShopeeEvidenceSchema(getDb());startupTimer=setTimeout(()=>{startupTimer=null;launchWorker('STARTUP');},STARTUP_DELAY_MS);startupTimer.unref?.();timer=setInterval(()=>launchWorker('TWO_HOUR'),INTERVAL_MS);timer.unref?.();console.log(`[CE-QC][V208_SHOPEE_EVIDENCE] scheduler ready interval=${INTERVAL_MS}ms maxPerRun=${MAX_PER_RUN}`);return{started:true,intervalMs:INTERVAL_MS,maxPerRun:MAX_PER_RUN};}
-function statusPayload(){const db=getDb();ensureV208ShopeeEvidenceSchema(db);const byStatus={};for(const row of db.prepare('SELECT status,COUNT(*) count FROM v208_shopee_evidence_refresh GROUP BY status').all())byStatus[row.status]=Number(row.count||0);const pending=Number(db.prepare(`SELECT COUNT(*) count FROM v207_daily_ownership o LEFT JOIN v208_shopee_evidence_refresh r ON r.businessType=o.businessType AND r.shipmentCode=o.shipmentCode WHERE o.businessType IN ('SHOPEECN','SHOPEEVN') AND r.shipmentCode IS NULL`).get()?.count||0);return{ok:true,version:V208_SHOPEE_EVIDENCE_VERSION,started:Boolean(timer||startupTimer),workerPid:workerChild?.pid||0,pendingNotFetched:pending,byStatus,lastResult:safeJson(db.prepare("SELECT value FROM app_meta WHERE key='v208_shopee_evidence_last_result'").get()?.value||'{}',{})};}
+export function kickV208ShopeeEvidenceBackfill(reason='IMPORT'){if(process.env.CI||process.env.NODE_ENV==='test')return{scheduled:false,reason:'TEST'};if(kickTimer||workerChild)return{scheduled:false,reason:'ALREADY_SCHEDULED_OR_RUNNING'};kickTimer=setTimeout(()=>{kickTimer=null;launchWorker(reason);},10_000);kickTimer.unref?.();return{scheduled:true,delayMs:10_000};}
+export function startV208ShopeeEvidenceScheduler(){if(timer||startupTimer)return{started:false,reason:'ALREADY_STARTED'};if(process.env.CI||process.env.NODE_ENV==='test')return{started:false,reason:'TEST'};ensureV208ShopeeEvidenceSchema(getDb());startupTimer=setTimeout(()=>{startupTimer=null;launchWorker('STARTUP');},STARTUP_DELAY_MS);startupTimer.unref?.();timer=setInterval(()=>launchWorker('PENDING_DISCOVERY'),INTERVAL_MS);timer.unref?.();console.log(`[CE-QC][V208_SHOPEE_EVIDENCE] scheduler ready interval=${INTERVAL_MS}ms maxPerRun=${MAX_PER_RUN}`);return{started:true,intervalMs:INTERVAL_MS,maxPerRun:MAX_PER_RUN};}
+function statusPayload(){const db=getDb();ensureV208ShopeeEvidenceSchema(db);const byStatus={};for(const row of db.prepare('SELECT status,COUNT(*) count FROM v208_shopee_evidence_refresh GROUP BY status').all())byStatus[row.status]=Number(row.count||0);const pending=Number(db.prepare(`SELECT COUNT(*) count FROM (SELECT DISTINCT o.businessType,o.shipmentCode FROM v207_daily_ownership o LEFT JOIN v208_shopee_evidence_refresh r ON r.businessType=o.businessType AND r.shipmentCode=o.shipmentCode WHERE o.businessType IN ('SHOPEECN','SHOPEEVN') AND r.shipmentCode IS NULL)`).get()?.count||0);return{ok:true,version:V208_SHOPEE_EVIDENCE_VERSION,started:Boolean(timer||startupTimer),workerPid:workerChild?.pid||0,pendingNotFetched:pending,byStatus,lastResult:safeJson(db.prepare("SELECT value FROM app_meta WHERE key='v208_shopee_evidence_last_result'").get()?.value||'{}',{})};}
 
 let routesInstalled=false;const previousListen=express.application.listen;
 express.application.listen=function v208ShopeeEvidenceListen(...args){if(!routesInstalled){routesInstalled=true;this.get('/api/v208/shopee-evidence/status',(req,res)=>{res.setHeader('Cache-Control','no-store');res.json(statusPayload());});this.post('/api/v208/shopee-evidence/start',(req,res)=>res.json({ok:true,...kickV208ShopeeEvidenceBackfill('MANUAL_API')}));startV208ShopeeEvidenceScheduler();}return previousListen.apply(this,args);};
+
+ensureV208ShopeeEvidenceSchema();
