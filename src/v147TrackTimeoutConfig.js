@@ -1,14 +1,12 @@
 import './v209LoginReliabilityPatch.js';
+import './v220LocalOwnerAccessPatch.js';
 
-export const V147_TRACK_TIMEOUT_CONFIG_ID = '2026-08-19-v220-auth-before-server-v1';
+export const V147_TRACK_TIMEOUT_CONFIG_ID = '2026-08-19-v220-auth-before-server-v2';
 
 // IMPORTANT: this module is imported by bootstrap before server.js.
-// Loading v209LoginReliabilityPatch here guarantees the V213/5179 fast-session
-// identity bridge is installed before server.js registers accessIdentity.
-// Without this ordering, the browser can successfully authenticate on 5179 but
-// every 5177 API request still looks unauthenticated, leaving the dashboard at
-// zero, the user label as a local VIEWER fallback, and CE login/settings writes
-// unusable.
+// Loading both patches here guarantees the V213/5179 fast-session identity
+// bridge and the localhost-only CE credential access bridge are installed
+// before server.js registers accessIdentity and role middleware.
 
 // Keep SHOPEE event/exception queries in fixed 50-ticket batches, but do not
 // treat a merely slow CE response as a failure too early. One request may wait
