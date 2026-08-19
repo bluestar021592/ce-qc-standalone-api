@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 
 const read = p => fs.readFileSync(p, 'utf8');
 const runner = read('public/v67-resilient-run-guard.js');
@@ -27,6 +28,9 @@ const shopeeAnalyzerV33 = read('src/shopeeAnalyzerV33.js');
 const shopeeReporting = read('src/shopeeReporting.js');
 const historyRefresh = read('src/v183HistoricalStatusRefreshPatch.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
+const authPause = read('src/v41AuthPausePatch.js');
+const authBridge = read('src/v209LoginReliabilityPatch.js');
+const authSidecar = read('src/v213AuthSidecar.js');
 
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
@@ -148,6 +152,25 @@ must(v202DisableLegacy, 'CE_QC_ENABLE_LEGACY_V201_TRACKER');
 must(historyRefresh, '/api/v183/history-refresh/summary');
 must(historyRefresh, '/api/v183/history-refresh/start');
 
+// Local/LAN login must stay independent from the 5177 operational event loop and the writable runtime DB.
+must(authPause, "import './v209LoginReliabilityPatch.js'");
+must(authBridge, '2026-08-19-v213-auth-sidecar-login-v1');
+must(authBridge, 'CE_QC_AUTH_SIDECAR_PORT||5179');
+must(authBridge, '/api/v213/auth-ping');
+must(authBridge, '/api/v213/local-auth/login');
+must(authBridge, 'req.ceQcFastUser');
+must(authBridge, "entry==='bootstrap.js'||entry==='server.js'");
+must(authSidecar, '2026-08-19-v213-auth-sidecar-v1');
+must(authSidecar, 'new DatabaseSync(file,{readOnly:true})');
+must(authSidecar, 'PRAGMA query_only=ON');
+must(authSidecar, 'PRAGMA busy_timeout=500');
+must(authSidecar, 'V213_AUTH_SIDECAR_LOGIN_OK');
+forbid(authSidecar, 'INSERT INTO user_sessions');
+forbid(authSidecar, 'UPDATE users SET failedLoginCount');
+execFileSync(process.execPath, ['--check', 'src/v209LoginReliabilityPatch.js'], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--check', 'src/v213AuthSidecar.js'], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--check', 'src/v41AuthPausePatch.js'], { stdio: 'inherit' });
+
 for (const source of [runner, pause, shell, storage, bstore]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] V203 gate passed: real delivery cycles own 1/2/3 attempt POD, manual query evidence is persistent and export-complete without altering official daily KPI denominators, terminal POD/return/cancel is excluded from anomalies/unPOD, and the UI exposes seven-business audit + useful attempt/network panels.');
+console.log('[GOLIVE] V203+V213 gate passed: stable dashboard/data truth retained; independent read-only 5179 local/LAN authentication is wired before 5177 access middleware and syntax-gated before installation.');
