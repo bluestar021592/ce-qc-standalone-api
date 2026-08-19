@@ -8,6 +8,11 @@ import bcrypt from 'bcryptjs';
 const REPORT_DATE='2026-08-16';
 const USERNAME='v225admin';
 const PASSWORD='V225-Test-Password!';
+const APP_PORT=5277;
+const AUTH_PORT=5279;
+const EXPORT_PORT=5278;
+const APP_ORIGIN=`http://127.0.0.1:${APP_PORT}`;
+const AUTH_ORIGIN=`http://127.0.0.1:${AUTH_PORT}`;
 const PROJECT_ROOT=fileURLToPath(new URL('..',import.meta.url));
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v225-'));
 const dbFile=path.join(temp,'ce_qc_monitor.db');
@@ -16,11 +21,11 @@ const env={
   DATA_DIR:temp,
   DB_FILE:dbFile,
   EXPORTS_DIR:path.join(temp,'exports'),
-  PORT:'5177',
+  PORT:String(APP_PORT),
   HOST:'127.0.0.1',
   ACCESS_MODE:'DUAL',
-  CE_QC_AUTH_SIDECAR_PORT:'5179',
-  CE_QC_EXPORT_SIDECAR_PORT:'5178',
+  CE_QC_AUTH_SIDECAR_PORT:String(AUTH_PORT),
+  CE_QC_EXPORT_SIDECAR_PORT:String(EXPORT_PORT),
   CE_QC_BACKGROUND_MAINTENANCE_ENABLED:'0',
   DASHBOARD_CACHE_STARTUP_DELAY_MS:'3600000',
   DASHBOARD_CACHE_REFRESH_MS:'7200000',
@@ -82,32 +87,32 @@ try{
   child.stdout.on('data',collect);child.stderr.on('data',collect);
   child.once('exit',(code,signal)=>logs.push(`\n[child exit code=${code} signal=${signal}]\n`));
 
-  await waitFor('http://127.0.0.1:5179/api/v213/auth-ping',{accept:r=>r.status===200});
-  const root=await waitFor('http://127.0.0.1:5177/',{accept:r=>r.status===200});
+  await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`,{accept:r=>r.status===200});
+  const root=await waitFor(`${APP_ORIGIN}/`,{accept:r=>r.status===200});
   const rootText=await root.text();
   if(!/CE质控系统内部登录|CE QC internal sign-in/i.test(rootText))fail('unauthenticated root did not fail closed to the internal login page');
 
-  const sidecar=await jsonRequest('http://127.0.0.1:5179/api/v213/local-auth/login',{
+  const sidecar=await jsonRequest(`${AUTH_ORIGIN}/api/v213/local-auth/login`,{
     method:'POST',
-    headers:{'content-type':'application/json','accept':'application/json','origin':'http://127.0.0.1:5177'},
+    headers:{'content-type':'application/json','accept':'application/json','origin':APP_ORIGIN},
     body:JSON.stringify({username:USERNAME,password:PASSWORD})
   });
   const handoffToken=String(sidecar.payload.handoffToken||'');
   if(!handoffToken)fail('sidecar login succeeded without a deterministic handoff token');
 
-  const handoff=await jsonRequest('http://127.0.0.1:5177/api/v223/fast-auth/accept',{
+  const handoff=await jsonRequest(`${APP_ORIGIN}/api/v223/fast-auth/accept`,{
     method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({handoffToken})
   });
   if(handoff.payload?.authMode!=='V223_MAIN_SESSION_HANDOFF')fail(`unexpected handoff mode ${handoff.payload?.authMode||'-'}`);
   const setCookie=String(handoff.response.headers.get('set-cookie')||'');
-  if(!setCookie.includes('ce_v213_fast_session='))fail('5177 handoff did not issue the main fast-session cookie');
+  if(!setCookie.includes('ce_v213_fast_session='))fail('main handoff did not issue the fast-session cookie');
   const cookie=`ce_v213_fast_session=${handoffToken}`;
   const authHeaders={cookie,accept:'application/json'};
 
-  const session=await jsonRequest('http://127.0.0.1:5177/api/session',{headers:authHeaders});
+  const session=await jsonRequest(`${APP_ORIGIN}/api/session`,{headers:authHeaders});
   if(session.payload?.user?.username!==USERNAME||session.payload?.user?.role!=='ADMIN')fail(`main session identity mismatch: ${JSON.stringify(session.payload?.user||{})}`);
 
-  const boot=await jsonRequest('http://127.0.0.1:5177/api/bootstrap',{headers:authHeaders});
+  const boot=await jsonRequest(`${APP_ORIGIN}/api/bootstrap`,{headers:authHeaders});
   const bootDate=String(boot.payload?.unifiedImport?.reportDate||boot.payload?.state?.reportDate||'');
   if(bootDate!==REPORT_DATE)fail(`bootstrap did not recover persisted report date; got ${bootDate||'EMPTY'}`);
   const states=boot.payload?.businessStates||{};
@@ -116,16 +121,16 @@ try{
     if(total<1)fail(`bootstrap business ${type} remained zero despite persisted fixture data`);
   }
 
-  const whpp=await jsonRequest(`http://127.0.0.1:5177/api/v71/whpp-summary?reportDate=${REPORT_DATE}`,{headers:authHeaders});
+  const whpp=await jsonRequest(`${APP_ORIGIN}/api/v71/whpp-summary?reportDate=${REPORT_DATE}`,{headers:authHeaders});
   if(Number(whpp.payload?.total||whpp.payload?.metrics?.total||0)<1)fail('WHPP lightweight summary remained zero despite persisted fixture data');
 
-  const app=await fetch('http://127.0.0.1:5177/',{headers:{cookie,accept:'text/html'},cache:'no-store'});
+  const app=await fetch(`${APP_ORIGIN}/`,{headers:{cookie,accept:'text/html'},cache:'no-store'});
   const html=await app.text();
   if(app.status!==200)fail(`authenticated app shell returned HTTP ${app.status}`);
   if(!html.includes('/v225-auth-bootstrap-guard.js'))fail('authenticated app shell is missing V225 pre-app auth/bootstrap guard');
   if(!html.includes('/app.js'))fail('authenticated app shell is missing app.js');
 
-  console.log(`[V226] runtime E2E passed: 5179 auth -> 5177 handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP summary -> guarded app shell.`);
+  console.log(`[V226] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
 }finally{
   if(child&&!child.killed){try{child.kill('SIGTERM');}catch{}}
   await sleep(700);
