@@ -3,9 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
-import { BUSINESS_DATA_TABLES } from './store.js';
 
-export const V209_RAW_IMPORT_ARCHIVE_VERSION='2026-08-19-v209-immutable-source-workbook-archive-v1';
+export const V209_RAW_IMPORT_ARCHIVE_VERSION='2026-08-19-v209-recovery-source-workbook-archive-v2';
 const ROUTE='/api/import/unified-daily-report';
 const WRAPPED=Symbol.for('ce-qc.v209-source-archive');
 let routesInstalled=false;
@@ -36,9 +35,28 @@ export function ensureV209RawImportArchiveSchema(db=getDb()){
     completedAt TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_v209_source_date_status ON v209_import_source_archive(reportDate,status,createdAt);
-  CREATE INDEX IF NOT EXISTS idx_v209_source_hash ON v209_import_source_archive(sourceFileSha256,reportDate,status);`);
-  if(!BUSINESS_DATA_TABLES.includes('v209_import_source_archive'))BUSINESS_DATA_TABLES.push('v209_import_source_archive');
+  CREATE INDEX IF NOT EXISTS idx_v209_source_hash ON v209_import_source_archive(sourceFileSha256,reportDate,status);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_v209_source_path ON v209_import_source_archive(archivePath);`);
+  // Deliberately NOT added to BUSINESS_DATA_TABLES: this is a recovery vault, not
+  // working QC state. Normal “clear/rebuild data” must never destroy the last copy
+  // of the user's source workbook or its recovery manifest.
   return true;
+}
+
+export function recoverV209ArchiveManifestFromDisk(){
+  ensureV209RawImportArchiveSchema();const db=getDb(),root=archiveRoot();fs.mkdirSync(root,{recursive:true});let recovered=0,checked=0;
+  const exists=db.prepare('SELECT archiveId FROM v209_import_source_archive WHERE archivePath=? LIMIT 1');
+  const insert=db.prepare(`INSERT OR IGNORE INTO v209_import_source_archive(archiveId,reportDate,sourceName,sourceFileSha256,archivePath,fileSize,parsedUnique,sourceWaybillCount,classificationJson,status,batchId,snapshotId,canonicalUnique,errorMessage,createdAt,completedAt)
+    VALUES(?,?,?,?,?,?,0,0,'{}','ACCEPTED','','',0,'RECOVERED_FROM_ARCHIVE_DIRECTORY',?,?)`);
+  for(const entry of fs.readdirSync(root,{withFileTypes:true})){
+    if(!entry.isDirectory()||!dateKey(entry.name))continue;const reportDate=dateKey(entry.name),dir=path.join(root,entry.name);
+    for(const fileName of fs.readdirSync(dir)){
+      if(!/\.(xlsx|xls)$/i.test(fileName))continue;const full=path.join(dir,fileName);let stat;try{stat=fs.statSync(full);if(!stat.isFile())continue;}catch{continue;}checked++;
+      if(exists.get(full))continue;
+      try{const sha=sha256File(full),created=(stat.birthtime||stat.mtime||new Date()).toISOString();insert.run(randomUUID(),reportDate,safeName(fileName),sha,full,Number(stat.size||0),created,created);recovered++;}catch(error){console.error('[CE-QC][V209_ARCHIVE_MANIFEST_RECOVERY_FAILED]',full,error?.message||error);}
+    }
+  }
+  return{checked,recovered,root};
 }
 
 function verifiedExisting(reportDate,sha){
@@ -89,12 +107,12 @@ function verifyRecord(row){
 }
 
 export function getV209ArchiveStatus({fromDate='',toDate=''}={}){
-  ensureV209RawImportArchiveSchema();const params=[];let where="status='ACCEPTED'";
+  ensureV209RawImportArchiveSchema();const recovery=recoverV209ArchiveManifestFromDisk(),params=[];let where="status='ACCEPTED'";
   const from=dateKey(fromDate),to=dateKey(toDate);if(from&&to){where+=' AND reportDate BETWEEN ? AND ?';params.push(from,to);}else if(from){where+=' AND reportDate>=?';params.push(from);}else if(to){where+=' AND reportDate<=?';params.push(to);}
   const raw=getDb().prepare(`SELECT * FROM v209_import_source_archive WHERE ${where} ORDER BY reportDate DESC,createdAt DESC`).all(...params);
   const rows=raw.map(verifyRecord),healthy=rows.filter(r=>r.archiveHealth==='VERIFIED').length,broken=rows.length-healthy;
   const dates=[...new Set(rows.map(r=>r.reportDate))];
-  return{ok:true,version:V209_RAW_IMPORT_ARCHIVE_VERSION,archiveRoot:archiveRoot(),acceptedFiles:rows.length,archivedDates:dates.length,verifiedFiles:healthy,brokenFiles:broken,allVerified:broken===0,rows:rows.map(r=>({archiveId:r.archiveId,reportDate:r.reportDate,sourceName:r.sourceName,sourceFileSha256:r.sourceFileSha256,fileSize:Number(r.fileSize||0),parsedUnique:Number(r.parsedUnique||0),sourceWaybillCount:Number(r.sourceWaybillCount||0),canonicalUnique:Number(r.canonicalUnique||0),classification:safeJson(r.classificationJson,{}),archiveHealth:r.archiveHealth,createdAt:r.createdAt,completedAt:r.completedAt}))};
+  return{ok:true,version:V209_RAW_IMPORT_ARCHIVE_VERSION,archiveRoot:archiveRoot(),acceptedFiles:rows.length,archivedDates:dates.length,verifiedFiles:healthy,brokenFiles:broken,allVerified:broken===0,recoveredManifestRows:recovery.recovered,rows:rows.map(r=>({archiveId:r.archiveId,reportDate:r.reportDate,sourceName:r.sourceName,sourceFileSha256:r.sourceFileSha256,fileSize:Number(r.fileSize||0),parsedUnique:Number(r.parsedUnique||0),sourceWaybillCount:Number(r.sourceWaybillCount||0),canonicalUnique:Number(r.canonicalUnique||0),classification:safeJson(r.classificationJson,{}),archiveHealth:r.archiveHealth,createdAt:r.createdAt,completedAt:r.completedAt}))};
 }
 
 function wrapHandler(handler){
@@ -123,4 +141,5 @@ express.application.listen=function v209RawImportArchiveListen(...args){
 };
 
 ensureV209RawImportArchiveSchema();
+try{recoverV209ArchiveManifestFromDisk();}catch(error){console.error('[CE-QC][V209_ARCHIVE_STARTUP_RECOVERY_FAILED]',error?.message||error);}
 export const __test={safeName,sha256File,verifyRecord};
