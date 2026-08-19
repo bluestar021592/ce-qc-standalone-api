@@ -1,5 +1,5 @@
 const fs=require('fs');
-const must=(condition,message)=>{if(!condition)throw new Error(`V216 UI stability smoke failed: ${message}`);};
+const must=(condition,message)=>{if(!condition)throw new Error(`V216/V218 UI stability smoke failed: ${message}`);};
 const guard=fs.readFileSync('public/v214-home-whpp-identity-guard.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const repair=fs.readFileSync('src/v167CcslPodLockFactRepair.js','utf8');
@@ -9,9 +9,12 @@ must(!guard.includes('new MutationObserver'),'final UI guard must not install a 
 must(!guard.includes("observer.observe(document.body"),'final UI guard must not observe the entire body');
 must(guard.includes("setInterval(()=>{patchNavigation();patchIdentity();},15000)"),'low-frequency idempotent recovery loop missing');
 must(guard.includes("event.target?.closest?.('.side-link"),'event-driven navigation recovery missing');
-must(shell.includes('/v214-home-whpp-identity-guard.js?v=20260819-v216-1'),'V216 cache-busted guard is not the final injected asset');
-must(shell.includes("PATCH_ID='2026-08-19-v216-ui-stability-shell-v10'"),'V216 shell marker missing');
+must(shell.includes('/v214-home-whpp-identity-guard.js?v=20260819-v218-loader-1'),'V218 cache-busted guard is not injected');
+must(shell.includes('/v217-runtime-truth.js?v=20260819-v218-direct-1'),'V217 runtime truth is not directly injected by V218 shell');
+must(shell.indexOf('/v214-home-whpp-identity-guard.js?v=20260819-v218-loader-1') < shell.indexOf('/v217-runtime-truth.js?v=20260819-v218-direct-1'),'guard must load before direct runtime truth');
+must(shell.includes("PATCH_ID='2026-08-19-v218-ui-runtime-truth-cache-bust-v1'"),'V218 shell marker missing');
+must(shell.includes("res.setHeader('Cache-Control','no-store, no-cache, must-revalidate')"),'V218 HTML no-store cache protection missing');
 must(repair.includes('scheduleRepairWorker()'),'POD-lock repair is not worker-deferred');
 must(repair.includes('v167CcslPodLockFactRepairWorker.js'),'POD-lock worker target missing');
 must(worker.includes('repairLatestCcslPodLockFacts(getDb())'),'POD-lock worker does not own the durable repair');
-console.log('[V216] UI stability smoke passed: no DOM mutation loop, cache-busted final guard, POD repair remains isolated.');
+console.log('[V218] UI stability smoke passed: fresh guard/runtime truth assets, no DOM mutation loop, POD repair remains isolated.');
