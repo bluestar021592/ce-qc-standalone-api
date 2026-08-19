@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveV206ShopeeTimingEvidence, summarizeV206ShopeeTiming, v206NaturalDays } from '../src/v206ShopeePrecisionTruth.js';
+import { statsOf } from '../src/v200Metrics.js';
 
 function ev(code,time,source='TEST'){return {eventCode:code,eventTime:time,__v206Source:source};}
 
@@ -81,4 +82,15 @@ test('V206 region timing summary uses valid POD samples only and reports coverag
   assert.equal(summary.pv.samples,1);
   assert.equal(summary.pv.averageDays,5);
   assert.equal(summary.pv.coverageRate,100);
+});
+
+test('V209 export stats never fabricate Shopee timing from orderTime when 3001 evidence is missing',()=>{
+  const rows=[
+    {businessType:'SHOPEECN',metricEligible:true,firstReportDate:'2026-08-01',pod:true,area:'金边',attemptNo:1,timingEvidenceStatus:'MISSING_3001',deliveryDays:0,signNaturalDays:0,orderTime:'2026-08-01 08:00:00',podTime:'2026-08-03 18:00:00'},
+    {businessType:'SHOPEECN',metricEligible:true,firstReportDate:'2026-08-01',pod:true,area:'金边',attemptNo:1,timingEvidenceStatus:'OK',deliveryDays:2,signNaturalDays:2,orderTime:'2026-07-20 08:00:00',podTime:'2026-08-02 18:00:00'}
+  ];
+  const stats=statsOf(rows,{from:'2026-08-01',to:'2026-08-01'}).overall;
+  assert.equal(stats.pod,2);
+  assert.deepEqual(stats.days,[2]);
+  assert.deepEqual(stats.ppDays,[2]);
 });
