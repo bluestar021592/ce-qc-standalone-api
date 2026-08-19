@@ -2,15 +2,16 @@ import { getDb } from './db.js';
 import './v226LatestReportDateQueryPatch.js';
 import './v221BootstrapRecoveryPatch.js';
 import './v225AuthBootstrapGuardPatch.js';
+import './v227LocalHealthProbePatch.js';
 
-const PATCH_ID = '2026-08-19-v226-runtime-acceptance-bootstrap-v2';
+const PATCH_ID = '2026-08-19-v227-runtime-acceptance-bootstrap-v3';
 
 // Cold start must never open or scan the SQLite database merely to inspect
 // optional performance indexes. The definitions stay available for explicit
 // maintenance/diagnostics, while normal server startup remains database-lazy.
-// V226 first fixes the meaning of "latest" to reportDate DESC, createdAt DESC.
-// V221 then owns persisted-data bootstrap recovery. V225 keeps stale/unauthenticated
-// browser shells from rendering a misleading all-zero dashboard.
+// V226 fixes latest-date truth. V221 owns persisted-data recovery. V225 prevents
+// stale/unauthenticated zero dashboards. V227 gives the local launcher a true
+// loopback readiness endpoint without opening any dashboard/data API.
 const REQUIRED_INDEXES = Object.freeze([
   {
     name: 'idx_unified_rows_bootstrap_cover',
@@ -36,7 +37,7 @@ export function inspectV46Indexes() {
   return { present, missing };
 }
 
-console.log('[CE-QC][V46] optional index inspection deferred; V226 date truth + V221 persisted recovery + V225 auth guard armed after V43.');
+console.log('[CE-QC][V46] optional index inspection deferred; V226 date truth + V221 persisted recovery + V225 auth guard + V227 loopback health armed after V43.');
 
 export const V46_COLD_START_INDEX_PATCH_ID = PATCH_ID;
 export const V46_REQUIRED_INDEXES = REQUIRED_INDEXES;
