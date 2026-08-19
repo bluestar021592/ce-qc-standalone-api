@@ -20,6 +20,7 @@ const v206Truth=read('src/v206ShopeePrecisionTruth.js');
 const v206Ui=read('public/v206-shopee-precision.js');
 const v208=read('src/v208ShopeePrecisionEvidenceScheduler.js');
 const v208Worker=read('src/v208ShopeePrecisionEvidenceWorker.js');
+const v208Guard=read('public/v208-dashboard-final-guard.js');
 const v203Integrity=read('src/v203DashboardIntegrityPatch.js');
 const v203Ui=read('public/v203-dashboard-integrity.js');
 const v203ManualStore=read('src/v203ManualEvidenceStore.js');
@@ -127,6 +128,8 @@ must(v208,'business_track_events');
 must(v208,"status='COMPLETE'");
 must(v208,"status='INCOMPLETE_3001'");
 must(v208,'/api/v208/shopee-evidence/status');
+must(v208,'BUSINESS_DATA_TABLES.includes(table)');
+must(v208,"COUNT(*) count FROM (SELECT DISTINCT o.businessType,o.shipmentCode");
 must(v208Worker,'runV208ShopeeEvidenceSync');
 
 // UI must expose useful QC controls only: clean rebuild progress, evidence coverage, exact
@@ -140,10 +143,13 @@ must(v206Ui,'SHOPEE CN · 金边 PP');
 must(v206Ui,'SHOPEE VN · 外省 PV');
 must(v206Ui,'pod===samples&&coverage>=99.99');
 must(v206Ui,"'待补齐'");
+must(v208Guard,"label==='平均签收天数'");
+must(v208Guard,'自动轨迹证据补全');
 must(v203Ui,'真实1/2/3派 POD');
 must(v203Ui,'派次证据不足');
 must(v203Ui,'RETIRED_TITLES');
-must(shell,'/v207-rebaseline.js?v=20260819-v207-1');
+must(shell,'/v207-rebaseline.js?v=20260819-v207-2');
+must(shell,'/v208-dashboard-final-guard.js?v=20260819-v208-1');
 
 // Manual-query evidence and carry/anomaly center remain durable and terminal-safe.
 must(v203ManualStore,'manual_query_evidence');
@@ -159,4 +165,4 @@ must(v202DisableLegacy,"CE_QC_DISABLE_SHOPEE_DELIVERY_TRACKER='1'");
 must(v202DisableLegacy,'CE_QC_ENABLE_LEGACY_V201_TRACKER');
 for(const source of [runner,pause,shell,storage,bstore])forbid(source,'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] V208 gate passed: strict no-silent-drop parsing, clean seven-business rebaseline, append-only same-day membership, export membership reconciliation, real 1/2/3 delivery cycles, automatic Shopee full-history evidence capture, exact 3001-to-POD PP/PV timing, terminal-safe anomalies and durable manual evidence are all wired to one QC truth path.');
+console.log('[GOLIVE] V208 gate passed: strict no-silent-drop parsing, clean seven-business rebaseline, append-only same-day membership, export membership reconciliation, real 1/2/3 delivery cycles, automatic Shopee full-history evidence capture, exact 3001-to-POD PP/PV timing, official-only dashboard values, terminal-safe anomalies and durable manual evidence are all wired to one QC truth path.');
