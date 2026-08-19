@@ -12,6 +12,7 @@ const recovery=fs.readFileSync('src/v221BootstrapRecoveryPatch.js','utf8');
 const v46=fs.readFileSync('src/v46ColdStartIndexPatch.js','utf8');
 const staticCache=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const authPreload=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
+const authRuntimeRoot=fs.readFileSync('src/authStore.js','utf8');
 const ownerPatch=fs.readFileSync('src/v220LocalOwnerAccessPatch.js','utf8');
 const bootSource=fs.readFileSync('bootstrap.js','utf8');
 
@@ -35,9 +36,8 @@ must(!guard.includes('new MutationObserver'),'WHPP/navigation guard must remain 
 must(!guard.includes('loadV217'),'navigation guard must not dynamically inject duplicate runtime recovery');
 must(shell.includes('/v217-runtime-truth.js?v=20260819-v219-passive-1'),'passive runtime asset is not directly injected');
 
-// V221: V43 remains the compact bootstrap base, but V221 owns final registration
-// so an empty/new canonical ledger can fall back to already-persisted QC summaries
-// instead of rendering a false all-zero dashboard.
+// V221: V43 remains the compact bootstrap base, while V221 owns final recovery
+// registration so old persisted QC facts can repopulate the UI without a reupload.
 must(bootstrap.includes("pathValue === '/api/bootstrap'"),'V43 fast bootstrap base missing');
 must(bootstrap.includes('CACHE_SUMMARY_ONLY'),'V43 cache-summary bootstrap mode missing');
 must(recovery.includes("pathValue === '/api/bootstrap'"),'V221 recovery-aware bootstrap registration missing');
@@ -52,8 +52,16 @@ const v43Pos=bootSource.indexOf("await importPhase('v43BootstrapPerfPatch'");
 const v46Pos=bootSource.indexOf("await importPhase('v46ColdStartIndexPatch'");
 must(v43Pos>=0&&v46Pos>v43Pos,'V46/V221 recovery bootstrap must load after V43 base');
 
-// V221 UI cleanup: the old V203/V208 overlay loops are retired. Precision data
-// stays backend-owned and is rendered by the normal dashboard lifecycle.
+// Managed Desktop can reach server.js through more than one startup path. The
+// server's own authStore dependency must therefore install the identity/access
+// bridge and both bootstrap registrations before server.js constructs the app.
+const rawV209=authRuntimeRoot.indexOf("import './v209LoginReliabilityPatch.js';");
+const rawV220=authRuntimeRoot.indexOf("import './v220LocalOwnerAccessPatch.js';");
+const rawV43=authRuntimeRoot.indexOf("import './v43BootstrapPerfPatch.js';");
+const rawV221=authRuntimeRoot.indexOf("import './v221BootstrapRecoveryPatch.js';");
+must(rawV209>=0&&rawV220>rawV209&&rawV43>rawV220&&rawV221>rawV43,'raw server runtime root must preload identity/access, V43 bootstrap, then V221 recovery');
+
+// V221 UI cleanup: old overlay loops remain retired.
 must(v203.includes('V221_PASSIVE_UTILITIES'),'V203 duplicate home overlay was not retired');
 must(!v203.includes('new MutationObserver'),'V203 must not install a document-wide observer');
 must(!v203.includes('setInterval('),'V203 must not install permanent polling');
@@ -64,9 +72,7 @@ must(!v208.includes('setInterval('),'V208 must not install permanent polling');
 must(staticCache.includes('v203-dashboard-integrity|v208-dashboard-final-guard|v217-runtime-truth'),'volatile V221 runtime assets are not cache-bypassed');
 must(staticCache.includes("'no-store, no-cache, must-revalidate'"),'volatile runtime assets must be no-store so repaired code is actually loaded');
 
-// V213/5179 identity and localhost CE credential access must be installed before
-// server.js registers auth/role middleware. Local CE connect is allowed only for
-// an authenticated LOCAL session; LAN/public permission boundaries remain intact.
+// V213/5179 identity and localhost CE credential access boundaries.
 must(authPreload.includes("import './v209LoginReliabilityPatch.js';"),'V213/5179 identity bridge is not preloaded before server registration');
 must(authPreload.includes("import './v220LocalOwnerAccessPatch.js';"),'localhost CE credential access bridge is not preloaded before server registration');
 must(ownerPatch.includes("pathValue === '/api/ce-login'"),'local owner patch does not cover CE login route middleware');
@@ -75,11 +81,13 @@ must(ownerPatch.includes("req?.accessMode || '').toUpperCase() === 'LOCAL'"),'lo
 must(ownerPatch.includes('const authenticated = Boolean(req?.user'),'local CE credential access must require an authenticated user');
 must(!ownerPatch.includes("=== 'LAN'"),'local owner bypass must not weaken LAN permissions');
 
-for(const file of ['src/v220LocalOwnerAccessPatch.js','src/v221BootstrapRecoveryPatch.js','src/v89StaticAssetCachePatch.js','public/v203-dashboard-integrity.js','public/v208-dashboard-final-guard.js','public/v217-runtime-truth.js']){
+for(const file of ['src/authStore.js','src/v220LocalOwnerAccessPatch.js','src/v221BootstrapRecoveryPatch.js','src/v89StaticAssetCachePatch.js','public/v203-dashboard-integrity.js','public/v208-dashboard-final-guard.js','public/v217-runtime-truth.js']){
   const syntax=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
   must(syntax.status===0,`${file} syntax failed: ${syntax.stderr||syntax.stdout}`);
 }
+const rawRootImport=spawnSync(process.execPath,['--input-type=module','-e',"process.env.CE_QC_AUTH_SIDECAR_CHILD='1'; await import('./src/authStore.js'); console.log('V221_RAW_RUNTIME_ROOT_OK');"],{encoding:'utf8',env:{...process.env,CE_QC_AUTH_SIDECAR_CHILD:'1'}});
+must(rawRootImport.status===0&&rawRootImport.stdout.includes('V221_RAW_RUNTIME_ROOT_OK'),`raw server runtime preload import failed: ${rawRootImport.stderr||rawRootImport.stdout}`);
 const preloadPos=bootSource.indexOf("await importPhase('v147TrackTimeoutConfig'");
 const serverImportPos=bootSource.indexOf('await importServerInteractiveFirst();');
 must(preloadPos>=0&&serverImportPos>preloadPos,'auth/access preload module must execute before server.js import');
-console.log('[V221] runtime stability smoke passed: persisted dashboard fallback, request-scoped identity, localhost CE reconnect, passive UI cleanup, and cache-safe runtime delivery are wired before installation.');
+console.log('[V221] runtime stability smoke passed: raw server and bootstrap paths both preload identity, CE reconnect, compact bootstrap and persisted recovery without reupload.');
