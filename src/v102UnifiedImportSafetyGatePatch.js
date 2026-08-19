@@ -3,9 +3,10 @@ import express from 'express';
 import XLSX from 'xlsx';
 import { classifyUnifiedBusiness, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-16-v102-pre-persistence-import-safety-v2';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-19-v208-pre-persistence-source-waybill-conservation-v3';
 const ROUTE = '/api/import/unified-daily-report';
 const WRAPPED = Symbol.for('ce-qc.v102-unified-import-safety');
+const SHIPMENT_LIKE_RE = /^(?:TBKH[A-Z0-9]{5,}|CC[A-Z0-9]{6,}|CE[A-Z0-9]{6,}|SPE[A-Z0-9]{6,})$/i;
 
 function safetyError(code, message, extra = {}) {
   const error = new Error(message);
@@ -19,9 +20,44 @@ function normalizeManualDate(value) {
   const match = text.match(/^(20\d{2})-(\d{2})-(\d{2})$/);
   return match ? text : '';
 }
+function normalizeBill(value){return String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/\s+/g,'');}
+
+function scanVisibleWorkbookWaybills(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) throw safetyError('IMPORT_SAFETY_SOURCE_MISSING', '导入安全复核无法读取临时日报文件，已停止写入数据库。');
+  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const hiddenByName = new Map((workbook.Workbook?.Sheets || []).map(item => [item.name, Number(item.Hidden || 0) > 0]));
+  const found = new Map();
+  for (const sheetName of workbook.SheetNames) {
+    if (hiddenByName.get(sheetName)) continue;
+    const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: false });
+    for (let r = 0; r < matrix.length; r += 1) {
+      const row = matrix[r] || [];
+      for (let c = 0; c < row.length; c += 1) {
+        const bill = normalizeBill(row[c]);
+        if (!SHIPMENT_LIKE_RE.test(bill)) continue;
+        if (!found.has(bill)) found.set(bill, { shipmentCode: bill, sheetName, rowNumber: r + 1, columnNumber: c + 1 });
+      }
+    }
+  }
+  return found;
+}
+
+function assertSourceWaybillConservation(filePath, parsed) {
+  const source = scanVisibleWorkbookWaybills(filePath);
+  const parsedSet = new Set((parsed?.rows || []).map(row => normalizeBill(row.shipmentCode)).filter(Boolean));
+  const missing = [...source.values()].filter(item => !parsedSet.has(item.shipmentCode));
+  if (missing.length) {
+    throw safetyError(
+      'SOURCE_WAYBILL_NOT_PRESERVED',
+      `源Excel中检测到 ${source.size} 个疑似运单号，但解析结果只完整保留 ${parsedSet.size} 票；至少 ${missing.length} 个运单未进入解析结果，已停止导入，禁止漏票。示例：${missing.slice(0, 12).map(item => item.shipmentCode).join('、')}`,
+      { sourceWaybillCount: source.size, parsedWaybillCount: parsedSet.size, missingCount: missing.length, missingSamples: missing.slice(0, 50) }
+    );
+  }
+  return { sourceWaybillCount: source.size, parsedWaybillCount: parsedSet.size, unparsedWaybillCount: 0, balanced: true };
+}
 
 function findDuplicateOwnershipConflict(filePath, parsed) {
-  const duplicateWarnings = (parsed?.warnings || []).filter(item => item?.type === 'DUPLICATE');
+  const duplicateWarnings = (parsed?.warnings || []).filter(item => ['DUPLICATE','DUPLICATE_MERGED'].includes(item?.type));
   if (!duplicateWarnings.length) return null;
   if (!filePath || !fs.existsSync(filePath)) {
     throw safetyError('IMPORT_SAFETY_SOURCE_MISSING', '导入安全复核无法读取临时日报文件，已停止写入数据库。');
@@ -29,7 +65,7 @@ function findDuplicateOwnershipConflict(filePath, parsed) {
 
   const workbook = XLSX.readFile(filePath, { cellDates: true });
   const firstByBill = new Map((parsed.rows || []).map(row => [String(row.shipmentCode || '').trim().toUpperCase(), row]));
-  const diagnostics = new Map((parsed.sheetDiagnostics || []).filter(item => item?.status === 'VALID').map(item => [item.sheetName, item]));
+  const diagnostics = new Map((parsed.sheetDiagnostics || []).filter(item => ['VALID','VALID_RECIPIENT_OPTIONAL'].includes(item?.status)).map(item => [item.sheetName, item]));
   const matrices = new Map();
 
   for (const warning of duplicateWarnings) {
@@ -75,6 +111,11 @@ export function assertUnifiedImportSafety({ filePath = '', parsed, manualReportD
   if (parsed.sourceReconciliation?.balanced !== true) {
     throw safetyError('SOURCE_CLASSIFICATION_RECONCILIATION_FAILED', '日报七业务分类总数与有效唯一运单数不一致，已停止导入。', { sourceReconciliation: parsed.sourceReconciliation });
   }
+
+  // Strongest no-loss check: scan every visible Excel cell for a shipment-like code and
+  // verify every detected code survived parser classification. This catches shifted columns,
+  // unexpected sheets and format drift before anything reaches SQLite.
+  const sourceWaybillReconciliation = assertSourceWaybillConservation(filePath, parsed);
 
   const conflicts = (parsed.warnings || []).filter(item => item?.type === 'CLASSIFICATION_CONFLICT');
   if (conflicts.length || Number(parsed.summary?.classificationConflicts || 0) > 0) {
@@ -125,6 +166,7 @@ export function assertUnifiedImportSafety({ filePath = '', parsed, manualReportD
     classifiedWaybills: classified,
     duplicateRows: Number(parsed.summary?.duplicateRows || 0),
     classificationConflicts: 0,
+    sourceWaybillReconciliation,
     readyForPersistence: true
   };
 }
@@ -148,9 +190,6 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
           parsed,
           manualReportDate: req.body?.reportDate || ''
         });
-        // V139 reuses this exact validated parse. This keeps the pre-persistence
-        // safety gate unchanged while eliminating a second full workbook parse in
-        // the final import handler.
         req.ceQcParsedUnified = parsed;
         return finalHandler.call(this, req, res, next);
       } catch (error) {
@@ -160,6 +199,7 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
           code: error?.code || 'UNIFIED_IMPORT_SAFETY_BLOCKED',
           error: error?.message || String(error),
           shipmentCode: error?.shipmentCode || '',
+          missingSamples: error?.missingSamples || [],
           gateId: V102_UNIFIED_IMPORT_SAFETY_GATE_ID
         });
       }
@@ -170,4 +210,4 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
   express.application.post = wrappedPost;
 }
 
-export const __test = { findDuplicateOwnershipConflict };
+export const __test = { findDuplicateOwnershipConflict, scanVisibleWorkbookWaybills, assertSourceWaybillConservation };
