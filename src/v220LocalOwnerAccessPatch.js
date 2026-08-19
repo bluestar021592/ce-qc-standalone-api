@@ -1,10 +1,12 @@
 import express from 'express';
 
-export const V220_LOCAL_OWNER_ACCESS_VERSION = '2026-08-19-v220-local-owner-ce-auth-v1';
+export const V220_LOCAL_OWNER_ACCESS_VERSION = '2026-08-19-v221-local-authenticated-owner-ce-auth-v2';
 const INSTALLED = Symbol.for('ce-qc.v220-local-owner-access-installed');
 
 function localOwner(req) {
-  return String(req?.accessMode || '').toUpperCase() === 'LOCAL' && Boolean(req?.user?.devMode);
+  const local = String(req?.accessMode || '').toUpperCase() === 'LOCAL';
+  const authenticated = Boolean(req?.user && (req.user.id || req.user.username || req.user.email || req.user.devMode));
+  return local && authenticated;
 }
 
 function localCeAuthPath(req) {
@@ -38,8 +40,8 @@ if (!express.application[INSTALLED]) {
   };
 
   // /api/ce-login and /api/ce-logout also carry route-level ADMIN middleware.
-  // Bypass only those middleware functions for an authenticated LOCAL devMode
-  // session; the real route handler is left untouched.
+  // Bypass only those middleware functions for an authenticated LOCAL session;
+  // LAN/public users retain normal ADMIN permission enforcement.
   const previousPost = express.application.post;
   express.application.post = function v220LocalOwnerPost(pathValue, ...handlers) {
     if ((pathValue === '/api/ce-login' || pathValue === '/api/ce-logout') && handlers.length > 1) {
