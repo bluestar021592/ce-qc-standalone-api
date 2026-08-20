@@ -13,7 +13,7 @@ const worker = fs.readFileSync(workerUrl, 'utf8');
 const business = fs.readFileSync(businessUrl, 'utf8');
 const ui = fs.readFileSync(uiUrl, 'utf8');
 
-test('V87 WHPP export reader and workers are syntax valid', () => {
+test('V87 WHPP export reader and current workers are syntax valid', () => {
   for (const url of [storeUrl, workerUrl, businessUrl, uiUrl]) {
     const check = spawnSync(process.execPath, ['--check', fileURLToPath(url)], { encoding: 'utf8' });
     assert.equal(check.status, 0, check.stderr || check.stdout);
@@ -32,25 +32,26 @@ test('WHPP export reads current normalized final rows instead of historical payl
   assert.doesNotMatch(store, /DELETE FROM|UPDATE |INSERT INTO|DROP TABLE/i);
 });
 
-test('ALL background export includes WHPP as the seventh business and splits it under the same memory cap', () => {
-  assert.match(worker, /'SHOPEEVN', 'WHPP'/);
-  assert.match(worker, /if \(type === 'WHPP'\) return countCompletedWhppRows/);
-  assert.match(worker, /const parts = count > LARGE_BUSINESS_THRESHOLD \? splitRange\(range\) : \[range\]/);
-  assert.match(worker, /whppDailyCounts\(range\.from, range\.to\)/);
-  assert.match(worker, /正在准备 .*7业务后台导出/);
-  assert.match(worker, /7业务轻量管理汇总/);
+test('ALL background export includes WHPP as the seventh business in the one-complete-workbook plan', () => {
+  assert.match(worker, /ALL_TYPES=Object\.freeze\(\['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'\]\)/);
+  assert.match(worker, /countCompletedWhppRows\(range\.from,range\.to\)/);
+  assert.match(worker, /whppDailyCounts\(range\.from,range\.to\)/);
+  assert.match(worker, /ONE_WORKBOOK_PER_BUSINESS/);
+  assert.match(worker, /7业务/);
+  assert.doesNotMatch(worker, /splitRange\(/);
 });
 
-test('isolated business worker selects the WHPP normalized range reader only for WHPP', () => {
-  assert.match(business, /type === 'WHPP'/);
-  assert.match(business, /listCompletedWhppSnapshots\(from, to\)/);
-  assert.match(business, /listLightweightCompletedUnifiedSnapshots\(from, to, \[type\]\)/);
-  assert.match(business, /'WHPP'/);
+test('isolated business worker accepts WHPP and delegates complete workbook truth to V200 exporter', () => {
+  assert.match(business, /createV200ReferenceDashboardWorkbook/);
+  assert.match(business, /new Set\(\['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'\]\)/);
+  assert.match(business, /if\(partCount>1\|\|partIndex!==1\)/);
+  assert.match(business, /realDeliveryCycleTruth:true/);
+  assert.match(business, /terminalTruth:true/);
 });
 
-test('report selector exposes CEAF and WHPP explicitly and defaults ALL to seven businesses', () => {
-  assert.match(ui, /\['ALL', '管理汇总 \+ 7业务'\]/);
-  assert.match(ui, /\['CEAF', '仅CEAF空运'\]/);
-  assert.match(ui, /\['WHPP', '仅WHPP本土'\]/);
+test('report selector exposes CEAF and WHPP explicitly and defaults ALL to seven complete business workbooks', () => {
+  assert.match(ui, /\['ALL', '管理汇总 \+ 7业务（每业务1个完整Excel）'\]/);
+  assert.match(ui, /\['CEAF', '仅CEAF空运完整表'\]/);
+  assert.match(ui, /\['WHPP', '仅WHPP本土完整表'\]/);
   assert.match(ui, /ensureBusinessOptions\(\)/);
 });
