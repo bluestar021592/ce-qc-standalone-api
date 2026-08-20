@@ -87,9 +87,22 @@ try{
   child.stdout.on('data',collect);child.stderr.on('data',collect);
   child.once('exit',(code,signal)=>logs.push(`\n[child exit code=${code} signal=${signal}]\n`));
 
+  // The auth sidecar is intentionally independent and can become reachable before
+  // the main 5277 web process finishes bootstrapping. A direct fetch here created
+  // a Windows-only race where a healthy candidate was rejected with ECONNREFUSED.
+  // Wait independently for both readiness signals before continuing the E2E chain.
   await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`,{accept:r=>r.status===200});
-  const health=await jsonRequest(`${APP_ORIGIN}/api/health`);
-  if(health.payload?.scope!=='LOOPBACK_READINESS_ONLY'||health.payload?.ready!==true)fail(`loopback health did not report readiness: ${JSON.stringify(health.payload)}`);
+  const healthResponse=await waitFor(`${APP_ORIGIN}/api/health`,{
+    timeoutMs:90000,
+    accept:r=>r.status===200,
+    headers:{accept:'application/json'}
+  });
+  const healthText=await healthResponse.text();
+  let healthPayload={};
+  try{healthPayload=healthText?JSON.parse(healthText):{};}catch{healthPayload={raw:healthText};}
+  if(healthPayload?.scope!=='LOOPBACK_READINESS_ONLY'||healthPayload?.ready!==true||healthPayload?.ok!==true){
+    fail(`loopback health did not report readiness: ${healthText.slice(0,1200)}`);
+  }
 
   const launcherRoot=await waitFor(`${APP_ORIGIN}/`,{accept:r=>r.status===200});
   const launcherText=await launcherRoot.text();
@@ -137,7 +150,7 @@ try{
   if(!html.includes('/v225-auth-bootstrap-guard.js'))fail('authenticated app shell is missing V225 pre-app auth/bootstrap guard');
   if(!html.includes('/app.js'))fail('authenticated app shell is missing app.js');
 
-  console.log(`[V228] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: launcher root 200 + health 200 -> browser login -> auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
+  console.log(`[V231] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: auth sidecar + main health independently ready -> browser login -> auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
 }finally{
   if(child&&!child.killed){try{child.kill('SIGTERM');}catch{}}
   await sleep(700);
