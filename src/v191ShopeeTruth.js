@@ -1,10 +1,13 @@
 import { getDb } from './db.js';
+import { resolveV202AttemptCycle } from './v202DeliveryTruth.js';
 
-export const V191_SHOPEE_TRUTH_VERSION = '2026-08-17-v191-shopee-cross-day-attempt-truth-v1';
+export const V191_SHOPEE_TRUTH_VERSION = '2026-08-20-v239-shopee-real-attempt-truth-v2';
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 const TERMINAL_POD = new Set(['85']);
 const TERMINAL_RETURN = new Set(['100']);
 const DELIVERY_RE = /delivery\s*assign|courier\s*assign|out\s*for\s*delivery|派件分配|分配快递员|分配派送|派送中|派件中|正在派送/i;
+const REAL_DELIVERY_START_RE = /parcel\s*start\s*to\s*deliver|out\s*for\s*delivery|派送中|派件中|正在为您派送|正在派送|deliver\s*to\s*buyer/i;
+const PENDING_RE = /\bPENDING\b|Pending|派送失败|无法联系|无人接听|地址错误|改派/i;
 const POD_RE = /\bPOD\b|delivered|签收|妥投|已妥投/i;
 const RETURN_RE = /return(?:ed|_completed)?|退回完成|已退回|退件完成/i;
 
@@ -114,7 +117,7 @@ function chooseState(current, final, scan, track) {
   const attemptNo = explicitAttempt || trackAttempt;
   const attemptSource = explicitAttempt
     ? (current?.attemptNo ? 'CURRENT_STATE_ATTEMPT' : 'FINAL_ROW_ATTEMPT')
-    : trackAttempt ? 'TRACK_DELIVERY_DATES' : '';
+    : trackAttempt ? 'TRACK_REAL_DELIVERY_CYCLE' : '';
   return {
     ...base,
     pod, returned, cancelled,
@@ -180,6 +183,17 @@ function queryScan(db, bills) {
   }
   return out;
 }
+function cycleEvent(event = {}) {
+  const text = textOfEvent(event);
+  const code = eventCodeOf(event).toUpperCase();
+  const time = timeOfEvent(event);
+  if (!dateKey(time)) return null;
+  if (code === '80' || code === '4004' || POD_RE.test(text)) return { kind: 'POD', time, source: `CE轨迹${code || 'POD'}` };
+  if (code === '86' || code === 'P4008' || RETURN_RE.test(text)) return { kind: 'RETURN', time, source: `CE轨迹${code || 'RETURN'}` };
+  if (code === '150' || PENDING_RE.test(text)) return { kind: 'FAIL', time, source: `CE轨迹${code || 'Pending'}` };
+  if (code === '70' || code === '4003' || REAL_DELIVERY_START_RE.test(text)) return { kind: 'START', time, source: `CE轨迹${code || '派送开始'}` };
+  return null;
+}
 function queryTrack(db, bills) {
   const byBill = new Map();
   for (const chunk of chunks(bills, 250)) {
@@ -197,29 +211,31 @@ function queryTrack(db, bills) {
   }
   const out = new Map();
   for (const [bill, events] of byBill) {
-    const deliveryDates = new Set();
+    const cycleEvents = [];
     let last = null;
     let latestPod = null;
     let latestReturn = null;
     for (const event of events) {
       const text = textOfEvent(event);
       const code = eventCodeOf(event);
-      const time = timeOfEvent(event);
-      const date = dateKey(time);
-      if (date && DELIVERY_RE.test(text) && !/盘点|cycle\s*count/i.test(text)) deliveryDates.add(date);
-      if (code === '80' || POD_RE.test(text)) latestPod = event;
-      if (code === '86' || RETURN_RE.test(text)) latestReturn = event;
+      const normalizedCycleEvent = cycleEvent(event);
+      if (normalizedCycleEvent) cycleEvents.push(normalizedCycleEvent);
+      if (code === '80' || code === '4004' || POD_RE.test(text)) latestPod = event;
+      if (code === '86' || code === 'P4008' || RETURN_RE.test(text)) latestReturn = event;
       last = event;
     }
     const lastCode = eventCodeOf(last || {});
     const lastText = textOfEvent(last || {});
-    const pod = lastCode === '80' || POD_RE.test(lastText) || Boolean(latestPod && !latestReturn);
-    const returned = !pod && (lastCode === '86' || RETURN_RE.test(lastText));
+    const pod = lastCode === '80' || lastCode === '4004' || POD_RE.test(lastText) || Boolean(latestPod && !latestReturn);
+    const returned = !pod && (lastCode === '86' || lastCode === 'P4008' || RETURN_RE.test(lastText));
+    const cycle = resolveV202AttemptCycle(cycleEvents);
     out.set(bill, {
       source: 'BUSINESS_TRACK_EVENTS', pod, returned, cancelled: false,
-      pending: !pod && !returned && (lastCode === '150' || /PENDING/i.test(lastText)),
+      pending: !pod && !returned && (lastCode === '150' || PENDING_RE.test(lastText)),
       delivering: !pod && !returned && DELIVERY_RE.test(lastText),
-      attemptNo: deliveryDates.size ? Math.min(3, deliveryDates.size) : 0,
+      attemptNo: pod ? Number(cycle.attemptNo || 0) : 0,
+      attemptCycleSource: cycle.source,
+      attemptEvidence: cycle.evidence || [],
       pendingCount: 0,
       eventTime: pod ? timeOfEvent(latestPod || last || {}) : timeOfEvent(last || {}),
       eventDesc: lastText, eventNode: '', category: '', updatedAt: String(last?.createdAt || ''), apiStatus: 'PERSISTED_TRACK'
