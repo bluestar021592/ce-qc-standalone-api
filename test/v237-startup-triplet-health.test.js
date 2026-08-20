@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { __test as healthTest } from '../src/v232LiveDataHealthGatePatch.js';
 
 const read=file=>fs.readFileSync(file,'utf8');
 
 test('V237 loopback health requires data plus auth 5179 and export 5178 readiness before HTTP 200',()=>{
   const source=read('src/v232LiveDataHealthGatePatch.js');
-  assert.match(source,/V237-5177-5178-5179/);
+  assert.match(source,/V245-5177-5178-5179-PERSISTED-SHOPEE/);
   assert.match(source,/\/api\/v213\/auth-ping/);
   assert.match(source,/\/api\/v194\/export-ping/);
   assert.match(source,/EXPECTED_AUTH_VERSION='2026-08-19-v226-auth-sidecar-handoff-v2'/);
@@ -28,12 +30,12 @@ test('V237 validates sidecar identity and current app/export ports instead of ac
   assert.match(source,/String\(exportPayload\.statusTransport\|\|'\'\)===EXPECTED_EXPORT_TRANSPORT/);
 });
 
-test('V237 preserves the seven-board V232 data gate and adds precise startup diagnostics',()=>{
+test('V245 preserves the seven-board V232 data gate and adds precise startup diagnostics',()=>{
   const source=read('src/v232LiveDataHealthGatePatch.js');
   for(const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']) assert.match(source,new RegExp(`'${type}'`));
   assert.match(source,/X-CE-QC-Data-Gate','V232-LIVE-PERSISTED-BOARDS/);
-  assert.match(source,/V237_STARTUP_GATE_PASS/);
-  assert.match(source,/V237_STARTUP_GATE_BLOCK/);
+  assert.match(source,/V245_STARTUP_GATE_PASS/);
+  assert.match(source,/V245_STARTUP_GATE_BLOCK/);
   assert.match(source,/auth=5179:READY/);
   assert.match(source,/export=5178:READY/);
 });
@@ -45,4 +47,31 @@ test('V237 existing isolated runtime E2E still has to reach HTTP 200 health, so 
   assert.match(runtime,/CE_QC_AUTH_SIDECAR_PORT:String\(AUTH_PORT\)/);
   assert.match(runtime,/CE_QC_EXPORT_SIDECAR_PORT:String\(EXPORT_PORT\)/);
   assert.match(runtime,/V232-LIVE-PERSISTED-BOARDS/);
+});
+
+test('V245 startup health recovers generic persisted Shopee CN/VN rows by recipient_group instead of reporting ShopeeCN zero',()=>{
+  const db=new DatabaseSync(':memory:');
+  try{
+    db.exec(`
+      CREATE TABLE business_final_rows(
+        businessType TEXT,
+        shipmentCode TEXT,
+        reportDate TEXT,
+        recipient_group TEXT
+      );
+      INSERT INTO business_final_rows VALUES
+        ('SHOPEE','CN-1','2026-08-17','CN'),
+        ('SHOPEE','CN-2','2026-08-17','CN'),
+        ('SHOPEE','VN-1','2026-08-17','VN'),
+        ('SHOPEE','VN-2','2026-08-17','VN'),
+        ('SHOPEE','VN-3','2026-08-17','VN'),
+        ('WHPP','W-1','2026-08-17','OTHER');
+    `);
+    const counts=healthTest.emptyCounts();
+    counts.SHOPEEVN=1;
+    healthTest.lightweightFallbackCounts(db,'2026-08-17',counts);
+    assert.equal(counts.SHOPEECN,2);
+    assert.equal(counts.SHOPEEVN,3);
+    assert.equal(counts.WHPP,1);
+  }finally{db.close();}
 });
