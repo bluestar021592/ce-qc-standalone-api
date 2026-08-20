@@ -10,7 +10,7 @@ import {
   v241ShopeeOverlap
 } from './v241-readonly-canonical-membership.mjs';
 
-const __filename=fileURLToPath(import.meta.url);
+const __filename=fileURLToPath(new URL(import.meta.url));
 const __dirname=path.dirname(__filename);
 const projectRoot=path.resolve(__dirname,'..');
 const DEFAULT_DATA_DIR='D:\\CE CCSL金边数据库';
@@ -34,10 +34,10 @@ function main(){
   let blocked=false;
   try{
     db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=1500;');
-    console.log('\nCE QC BUSINESS SNAPSHOT AUDIT - V241 CANONICAL MEMBERSHIP / MONOTONIC POD - STRICT READ ONLY');
+    console.log('\nCE QC BUSINESS SNAPSHOT AUDIT - V244 EFFECTIVE CURRENT / MONOTONIC POD - STRICT READ ONLY');
     console.log(`Database: ${cfg.dbFile}`);
     console.log(`Report date: ${reportDate}`);
-    console.log('Rule: archive-union + business parse source membership must be fully represented in normalized/current truth; POD may advance after the daily run but cannot regress.');
+    console.log('Rule: canonical/persisted source membership must be fully represented in normalized truth; mutable current rows are authoritative when present, while recovered Shopee rows may fall back only to their exact normalized report-date row when no current row exists.');
     const batch=v241ReadLatestValidBatch(db,reportDate);
     if(!batch){console.log('RESULT: BLOCKED_NO_VALID_BATCH');process.exitCode=10;return;}
     console.log(`Latest VALID batch: ${batch.batchId}`);
@@ -46,16 +46,17 @@ function main(){
     if(String(batch.snapshotStatus||'').toUpperCase()!=='COMPLETED')blocked=true;
 
     const types=requestedType==='ALL'?[...V241_TYPES]:[requestedType];
-    console.log('\nBUSINESS      SOURCE  LATEST  ARCHIVE  PARSE  NORMAL  NORM_POD  CURRENT  CUR_POD  POD+  REGRESS  BLANK  QUERY_MS  RESULT');
-    console.log('------------  ------  ------  -------  -----  ------  --------  -------  -------  ----  -------  -----  --------  ----------------------');
+    console.log('\nBUSINESS      SOURCE  NORMAL  OBS_CUR  FALLBACK  EFFECTIVE  NORM_POD  CUR_POD  REGRESS  TYPE_CONFLICT  BLANK  QUERY_MS  RESULT');
+    console.log('------------  ------  ------  -------  --------  ---------  --------  -------  -------  -------------  -----  --------  ----------------------');
     for(const type of types){
       const started=now();
       const row=v241AuditType(db,reportDate,type,batch);
       const elapsed=now()-started;
       if(!row.pass||elapsed>3000)blocked=true;
-      console.log(`${type.padEnd(12)}  ${String(row.sourceCount).padEnd(6)}  ${String(row.latestValidSnapshotCount).padEnd(6)}  ${String(row.archiveUnifiedCount).padEnd(7)}  ${String(row.businessParseCount).padEnd(5)}  ${String(row.normalizedCount).padEnd(6)}  ${String(row.normalizedPod).padEnd(8)}  ${String(row.currentCount).padEnd(7)}  ${String(row.currentPod).padEnd(7)}  ${String(row.podProgression).padEnd(4)}  ${String(row.podRegressionCount).padEnd(7)}  ${String(row.blankCategory).padEnd(5)}  ${elapsed.toFixed(1).padEnd(8)}  ${row.pass?(elapsed>3000?'BLOCKED_SLOW_QUERY':'CONSISTENT'):'BLOCKED_MISMATCH'}`);
-      console.log(`  current POD rate: ${pct(row.currentPod,row.sourceCount)} · normalized POD rate: ${pct(row.normalizedPod,row.sourceCount)} · declared daily total: ${row.declaredDailyCount===null?'-':row.declaredDailyCount} · recovered beyond latest VALID snapshot: ${row.recoveredBeyondLatest}`);
-      if(!row.pass)console.log(`  diagnostics: missingNormalized=${row.missingNormalizedCount} ${JSON.stringify(row.missingNormalizedSample)} missingCurrent=${row.missingCurrentCount} ${JSON.stringify(row.missingCurrentSample)} podRegression=${row.podRegressionCount} ${JSON.stringify(row.podRegressionSample)}`);
+      console.log(`${type.padEnd(12)}  ${String(row.sourceCount).padEnd(6)}  ${String(row.normalizedCount).padEnd(6)}  ${String(row.observedCurrentCount).padEnd(7)}  ${String(row.normalizedFallbackCurrentCount).padEnd(8)}  ${String(row.currentCount).padEnd(9)}  ${String(row.normalizedPod).padEnd(8)}  ${String(row.currentPod).padEnd(7)}  ${String(row.podRegressionCount).padEnd(7)}  ${String(row.currentTypeConflictCount).padEnd(13)}  ${String(row.blankCategory).padEnd(5)}  ${elapsed.toFixed(1).padEnd(8)}  ${row.pass?(elapsed>3000?'BLOCKED_SLOW_QUERY':'CONSISTENT'):'BLOCKED_MISMATCH'}`);
+      console.log(`  sourceMode=${row.sourceMode} persistedAdded=${row.persistedFinalSupplementCount} current POD rate=${pct(row.currentPod,row.sourceCount)} · normalized POD rate=${pct(row.normalizedPod,row.sourceCount)} · recovered beyond latest VALID snapshot=${row.recoveredBeyondLatest}`);
+      if(row.normalizedFallbackCurrentCount>0)console.log(`  normalized fallback current sample: ${JSON.stringify(row.normalizedFallbackSample)}`);
+      if(!row.pass)console.log(`  diagnostics: missingNormalized=${row.missingNormalizedCount} ${JSON.stringify(row.missingNormalizedSample)} missingCurrent=${row.missingCurrentCount} ${JSON.stringify(row.missingCurrentSample)} typeConflict=${row.currentTypeConflictCount} ${JSON.stringify(row.currentTypeConflictSample)} podRegression=${row.podRegressionCount} ${JSON.stringify(row.podRegressionSample)}`);
     }
     if(requestedType==='ALL'||requestedType==='SHOPEECN'||requestedType==='SHOPEEVN'){
       const overlap=v241ShopeeOverlap(db,reportDate,batch);
