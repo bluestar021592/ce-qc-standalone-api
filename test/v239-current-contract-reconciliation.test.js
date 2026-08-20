@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import { analyzeShopeeShipment } from '../src/shopeeAnalyzer.js';
 import { analyzeShipment } from '../src/analyzer.js';
+import './v241-readonly-canonical-audit.test.js';
 
 const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const shopeeBase = {
