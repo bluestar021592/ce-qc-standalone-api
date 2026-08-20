@@ -13,17 +13,18 @@ const launcher = fs.readFileSync('src/v228LocalLauncherRootProbePatch.js', 'utf8
 const liveDataHealth = fs.readFileSync('src/v232LiveDataHealthGatePatch.js', 'utf8');
 const desktopLauncher = fs.readFileSync('Start_CE_QC.ps1', 'utf8');
 const runtimeE2E = fs.readFileSync('scripts/v225-runtime-e2e.mjs', 'utf8');
+const localSevenBoard = fs.readFileSync('scripts/v233-seven-board-local-truth-smoke.mjs', 'utf8');
 
 const must = (source, token) => {
-  if (!source.includes(token)) throw new Error(`V232 recovery gate missing: ${token}`);
+  if (!source.includes(token)) throw new Error(`V233 recovery gate missing: ${token}`);
 };
 const mustNot = (source, token) => {
-  if (source.includes(token)) throw new Error(`V232 recovery gate contains forbidden legacy rule: ${token}`);
+  if (source.includes(token)) throw new Error(`V233 recovery gate contains forbidden legacy rule: ${token}`);
 };
 const run = args => {
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', env: process.env, timeout: 180000 });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`V232 command failed: node ${args.join(' ')}\n${result.stdout || ''}\n${result.stderr || ''}`);
+  if (result.status !== 0) throw new Error(`V233 command failed: node ${args.join(' ')}\n${result.stdout || ''}\n${result.stderr || ''}`);
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
 };
@@ -55,19 +56,19 @@ must(browser, 'redirectToFreshAuth');
 
 must(desktopLauncher, "scripts\\v225-local-db-truth-smoke.mjs");
 must(desktopLauncher, '$HealthUrl = "$LocalUrl/api/health"');
-must(desktopLauncher, "Invoke-WebRequest $HealthUrl");
-must(desktopLauncher, "$status -eq 200");
-must(desktopLauncher, "LOOPBACK_READINESS_ONLY");
-must(desktopLauncher, "Persisted data gate:");
-must(desktopLauncher, "HTTP 401/403/404 no longer counts as BACKEND READY.");
-must(desktopLauncher, "BACKEND READY - exact health + local data gate passed");
-mustNot(desktopLauncher, "$status -ge 200 -and $status -lt 500");
+must(desktopLauncher, 'Invoke-WebRequest $HealthUrl');
+must(desktopLauncher, '$status -eq 200');
+must(desktopLauncher, 'LOOPBACK_READINESS_ONLY');
+must(desktopLauncher, 'Persisted data gate:');
+must(desktopLauncher, 'HTTP 401/403/404 no longer counts as BACKEND READY.');
+must(desktopLauncher, 'BACKEND READY - exact health + local data gate passed');
+mustNot(desktopLauncher, '$status -ge 200 -and $status -lt 500');
 const truthGateCalls = [...desktopLauncher.matchAll(/Invoke-PersistedDataTruthGate/g)].map(match => match.index);
 const truthGate = truthGateCalls.at(-1) ?? -1;
 const startBackend = desktopLauncher.indexOf("Write-Host 'Starting backend and waiting for the exact loopback health acceptance...'");
 const openBrowser = desktopLauncher.indexOf('Start-Process $LocalUrl');
 if (truthGateCalls.length < 2 || truthGate < 0 || startBackend <= truthGate || openBrowser <= startBackend) {
-  throw new Error('V232 desktop launcher ordering invalid: local DB truth -> exact health -> browser must remain fail-closed.');
+  throw new Error('V233 desktop launcher ordering invalid: local DB truth -> exact health -> browser must remain fail-closed.');
 }
 
 must(runtimeE2E, "await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`");
@@ -80,9 +81,9 @@ must(runtimeE2E, 'Number(healthPayload?.nonZeroBusinessCount||0)!==7');
 must(runtimeE2E, '[V232] isolated runtime E2E passed');
 const authReady = runtimeE2E.indexOf("await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`");
 const appReady = runtimeE2E.indexOf("await waitFor(`${APP_ORIGIN}/api/health`");
-const loginRequest = runtimeE2E.indexOf("/api/v213/local-auth/login");
+const loginRequest = runtimeE2E.indexOf('/api/v213/local-auth/login');
 if (authReady < 0 || appReady <= authReady || loginRequest <= appReady) {
-  throw new Error('V232 runtime E2E ordering invalid: auth sidecar ready -> live seven-board health ready -> login/handoff.');
+  throw new Error('V233 runtime E2E ordering invalid: auth sidecar ready -> live seven-board health ready -> login/handoff.');
 }
 
 must(liveDataHealth, "['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']");
@@ -95,17 +96,29 @@ must(liveDataHealth, 'return res.status(503)');
 must(liveDataHealth, "scope:'LOOPBACK_READINESS_ONLY'");
 mustNot(liveDataHealth, 'status(401)');
 
+must(localSevenBoard, "['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']");
+must(localSevenBoard, 'new DatabaseSync(file,{readOnly:true})');
+must(localSevenBoard, 'PRAGMA query_only=ON');
+must(localSevenBoard, 'CE_QC_V233_LATEST_DATE=');
+must(localSevenBoard, 'CE_QC_V233_SEVEN_BOARD_TRUTH=PASS_READ_ONLY');
+must(localSevenBoard, 'CE_QC_V233_READ_ONLY=CONFIRMED');
+mustNot(localSevenBoard, 'INSERT INTO');
+mustNot(localSevenBoard, 'UPDATE ');
+mustNot(localSevenBoard, 'DELETE FROM');
+
 run(['--check', 'src/v226LatestReportDateQueryPatch.js']);
 run(['scripts/v226-latest-report-date-query-smoke.mjs']);
 run(['--check', 'src/v227LocalHealthProbePatch.js']);
 run(['--check', 'src/v228LocalLauncherRootProbePatch.js']);
 run(['--check', 'src/v232LiveDataHealthGatePatch.js']);
+run(['--check', 'scripts/v233-seven-board-local-truth-smoke.mjs']);
 run(['--check', 'src/v225AuthBootstrapGuardPatch.js']);
 run(['--check', 'public/v225-auth-bootstrap-guard.js']);
 run(['--check', 'src/v209LoginReliabilityPatch.js']);
 run(['--check', 'src/v213AuthSidecar.js']);
 run(['--test', 'test/v211-fast-auth.test.js']);
 run(['scripts/v225-local-db-truth-smoke.mjs']);
+run(['scripts/v233-seven-board-local-truth-smoke.mjs']);
 run(['scripts/v225-runtime-e2e.mjs']);
 
-console.log('[V232] candidate runtime gate passed: local DB truth -> live seven-board health -> auth handoff -> session -> latest date -> 7 business non-zero + WHPP -> guarded shell; browser cannot open on a persisted all-zero/missing-board state.');
+console.log('[V233] candidate runtime gate passed: latest local DB truth -> seven persisted non-zero boards -> live /api/health -> auth handoff -> session -> bootstrap -> WHPP -> guarded shell; no user re-upload or manual test required.');
