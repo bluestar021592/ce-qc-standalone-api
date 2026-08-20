@@ -47,8 +47,6 @@ test('dashboard patch keeps percentage subtitles semantic instead of dividing a 
   const source = fs.readFileSync(path.join(root, 'public', 'v27-dashboard-fix.js'), 'utf8');
   assert.match(source, /function normalizeRatioText\(model\)/);
   assert.match(source, /当前比率/);
-  // Optional chaining is an implementation detail; the regression guard cares
-  // that explicit %-unit metrics OR labels ending in 率/百分比 use the semantic path.
   assert.match(source, /item\?\.unit\s*===\s*'%'|item\.unit\s*===\s*'%'/);
   assert.match(source, /\(率\|百分比\)\$\/\.test\(label\)/);
 });
@@ -62,29 +60,18 @@ test('only the trend mount fix owns Shopee 1/2/3 attempt trend panel creation', 
   assert.match(trendMount, /<h2>1\/2\/3派成功率趋势<\/h2>/);
 });
 
-test('fast range dashboard and attempt trend keep the V33 fallback chain under V58 reconciliation', () => {
+test('range dashboard keeps compact V55 base but applies V191 cross-day Shopee truth with V202 real delivery cycles', () => {
   const facade = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStore.js'), 'utf8');
-  const v55Compact = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV55Compact.js'), 'utf8');
-  const v58 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV58.js'), 'utf8');
-  const v55 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV55.js'), 'utf8');
-  const v36 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV36.js'), 'utf8');
-  const v33 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV33.js'), 'utf8');
-  const trend = fs.readFileSync(path.join(root, 'src', 'v27TrendPatch.js'), 'utf8');
-
-  assert.match(facade, /rangeDashboardStoreV55Compact\.js/);
-  assert.match(v55Compact, /rangeDashboardStoreV58\.js/);
-  assert.match(v58, /rangeDashboardStoreV55\.js/);
-  assert.match(v55, /rangeDashboardStoreV36\.js/);
-  assert.match(v36, /rangeDashboardStoreV33\.js/);
-
-  for (const source of [v33, trend]) {
-    assert.match(source, /podAttemptNo/);
-    assert.match(source, /POD时间/);
-    assert.match(source, /podTime/);
-    assert.match(source, /terminalObservedAt/);
-    assert.match(source, /julianday/);
-    assert.match(source, /attemptDay/);
-  }
-  assert.match(v33, /dispatchAttemptUnclassifiedPod/);
-  assert.match(trend, /attemptUnknownPod/);
+  const v191 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV191.js'), 'utf8');
+  const truth = fs.readFileSync(path.join(root, 'src', 'v191ShopeeTruth.js'), 'utf8');
+  const delivery = fs.readFileSync(path.join(root, 'src', 'v202DeliveryTruth.js'), 'utf8');
+  assert.match(facade, /rangeDashboardStoreV191\.js/);
+  assert.match(v191, /rangeDashboardStoreV55Compact\.js/);
+  assert.match(v191, /queryShopeeAttemptFacts/);
+  assert.match(truth, /resolveV202AttemptCycle/);
+  assert.match(truth, /TRACK_REAL_DELIVERY_CYCLE/);
+  assert.match(truth, /code === '70' \|\| code === '4003'/);
+  assert.doesNotMatch(truth, /deliveryDates\.size/);
+  assert.match(delivery, /Only a NEW START after a failed attempt opens attempt 2\/3\+/);
+  assert.match(delivery, /Elapsed calendar days, code60 assignment and raw Pending count NEVER manufacture an attempt/);
 });
