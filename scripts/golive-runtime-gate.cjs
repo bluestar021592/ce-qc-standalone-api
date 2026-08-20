@@ -31,6 +31,8 @@ const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 const authPause = read('src/v41AuthPausePatch.js');
 const authBridge = read('src/v209LoginReliabilityPatch.js');
 const authSidecar = read('src/v213AuthSidecar.js');
+const startupHealth = read('src/v232LiveDataHealthGatePatch.js');
+const localProductionAudit = read('scripts/v238-local-production-readonly-gate.mjs');
 
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
@@ -154,23 +156,52 @@ must(historyRefresh, '/api/v183/history-refresh/start');
 
 // Local/LAN login must stay independent from the 5177 operational event loop and the writable runtime DB.
 must(authPause, "import './v209LoginReliabilityPatch.js'");
-must(authBridge, '2026-08-19-v213-auth-sidecar-login-v1');
+must(authBridge, '2026-08-19-v223-main-session-handoff-v1');
 must(authBridge, 'CE_QC_AUTH_SIDECAR_PORT||5179');
 must(authBridge, '/api/v213/auth-ping');
 must(authBridge, '/api/v213/local-auth/login');
+must(authBridge, "const HANDOFF_PATH='/api/v223/fast-auth/accept';");
+must(authBridge, 'V223_AUTH_HANDOFF_OK');
 must(authBridge, 'req.ceQcFastUser');
 must(authBridge, "entry==='bootstrap.js'||entry==='server.js'");
-must(authSidecar, '2026-08-19-v213-auth-sidecar-v1');
+must(authSidecar, '2026-08-19-v226-auth-sidecar-handoff-v2');
 must(authSidecar, 'new DatabaseSync(file,{readOnly:true})');
 must(authSidecar, 'PRAGMA query_only=ON');
 must(authSidecar, 'PRAGMA busy_timeout=500');
+must(authSidecar, 'handoffToken:issued.token');
 must(authSidecar, 'V213_AUTH_SIDECAR_LOGIN_OK');
 forbid(authSidecar, 'INSERT INTO user_sessions');
 forbid(authSidecar, 'UPDATE users SET failedLoginCount');
+
+// V237 startup ownership: the browser is not eligible until main data + auth + export are all exact-ready.
+must(startupHealth, 'V237-5177-5178-5179');
+must(startupHealth, '/api/v213/auth-ping');
+must(startupHealth, '/api/v194/export-ping');
+must(startupHealth, "startupState:ready?'APP_AUTH_EXPORT_READY':'STARTUP_TRIPLET_INCOMPLETE'");
+must(startupHealth, 'V237_STARTUP_GATE_PASS');
+must(startupHealth, 'V237_STARTUP_GATE_BLOCK');
+
+// V238 is a real local production-data gate, but strictly read-only and allowed to skip when no local DB exists.
+must(localProductionAudit, 'DatabaseSync(dbFile,{readOnly:true})');
+must(localProductionAudit, 'PRAGMA query_only=ON');
+must(localProductionAudit, 'CE_QC_First_Day_GoLive_Verify_ReadOnly.mjs');
+must(localProductionAudit, 'CE_QC_Business_Snapshot_Audit_ReadOnly.mjs');
+must(localProductionAudit, 'CE_QC_WHPP_Terminal_Authority_Audit_ReadOnly.mjs');
+must(localProductionAudit, 'CE_QC_V238_LOCAL_PRODUCTION_READONLY=PASS');
+must(localProductionAudit, 'CE_QC_V238_LOCAL_PRODUCTION_READONLY=SKIPPED_NO_LOCAL_DB');
+forbid(localProductionAudit, 'INSERT INTO');
+forbid(localProductionAudit, 'UPDATE ');
+forbid(localProductionAudit, 'DELETE FROM');
+
 execFileSync(process.execPath, ['--check', 'src/v209LoginReliabilityPatch.js'], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--check', 'src/v213AuthSidecar.js'], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--check', 'src/v232LiveDataHealthGatePatch.js'], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--check', 'scripts/v238-local-production-readonly-gate.mjs'], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--check', 'src/v41AuthPausePatch.js'], { stdio: 'inherit' });
 
 for (const source of [runner, pause, shell, storage, bstore]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] V203+V213 gate passed: stable dashboard/data truth retained; independent read-only 5179 local/LAN authentication is wired before 5177 access middleware and syntax-gated before installation.');
+// This executes against the real local DB only when that DB exists; otherwise CI/dev environments skip cleanly.
+execFileSync(process.execPath, ['scripts/v238-local-production-readonly-gate.mjs'], { stdio: 'inherit', env: process.env });
+
+console.log('[GOLIVE] V238 gate passed: current V223/V226 auth handoff + V237 exact 5177/5178/5179 readiness + strict real local source/normalized/current/WHPP read-only production audit are locked before installation.');
