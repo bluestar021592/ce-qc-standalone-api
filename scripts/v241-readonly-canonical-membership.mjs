@@ -135,24 +135,26 @@ export function v241CollectSourceMembership(db,reportDate,type,batch=null){
   const latest=latestValidSnapshotMembers(db,batch,type);
   const members=new Set([...archive,...parse]);
   const persisted=V241_SHOPEE_TYPES.has(type)||type==='WHPP'?persistedFinalMembers(db,reportDate,type):new Set();
-  let persistedAdded=0;
+  const persistedSupplementBills=new Set();
   if(V241_SHOPEE_TYPES.has(type)){
     const otherType=type==='SHOPEECN'?'SHOPEEVN':'SHOPEECN';
     const otherExplicit=sourceLedgerMembers(db,reportDate,otherType);
     for(const code of persisted){
       if(otherExplicit.has(code)||members.has(code))continue;
-      members.add(code);persistedAdded++;
+      members.add(code);persistedSupplementBills.add(code);
     }
   }else if(type==='WHPP'&&members.size===0){
-    for(const code of persisted){members.add(code);persistedAdded++;}
+    for(const code of persisted){members.add(code);persistedSupplementBills.add(code);}
   }
   const declared=declaredDailyCount(db,reportDate,type);
   const baseCount=new Set([...archive,...parse]).size;
+  const persistedAdded=persistedSupplementBills.size;
   const sourceMode=persistedAdded>0
     ?(baseCount>0?'CANONICAL_PLUS_PERSISTED_FINAL':'PERSISTED_FINAL_MEMBERSHIP_RECOVERY')
     :(baseCount>0?'CANONICAL_SOURCE_LEDGER':'MISSING');
   return {
     members,
+    persistedSupplementBills,
     sourceCount:members.size,
     archiveUnifiedCount:archive.size,
     businessParseCount:parse.size,
@@ -208,29 +210,64 @@ export function v241NormalizedStats(db,reportDate,type,members){
   return{count:found.size,pod:pod.size,blank:blank.size,foundBills:found,podBills:pod};
 }
 
-export function v241CurrentStats(db,type,members){
+// shipment_current_state is intentionally mutable and can be sparse for waybills that
+// are recovered from exact historical Shopee final rows after a later partial re-import.
+// For those recovered-only waybills, and only when no newer current-state row exists,
+// the exact report-date normalized row is the safe effective-current baseline. A real
+// current row always wins; an explicit cross-board current type or a POD regression can
+// never be hidden by this fallback.
+export function v241CurrentStats(db,type,members,{fallbackBills=new Set(),normalized=null}={}){
   const codes=[...members];
-  const found=new Set(),pod=new Set();
-  if(!codes.length||!v241TableExists(db,'shipment_current_state'))return{count:0,pod:0,foundBills:found,podBills:pod};
-  for(const part of chunks(codes)){
-    const marks=part.map(()=>'?').join(',');
-    let rows=[];
-    try{rows=db.prepare(`SELECT shipmentCode,businessType,state,apiStatus,stateJson,reportDate,snapshotId,lastEventTime FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...part);}catch{rows=[];}
-    for(const row of rows){const code=bill(row.shipmentCode);if(!members.has(code)||!isAllowedCurrentType(type,row.businessType))continue;found.add(code);if(currentPod(row))pod.add(code);}
+  const observedFound=new Set(),observedPod=new Set(),currentTypeConflicts=new Set();
+  if(codes.length&&v241TableExists(db,'shipment_current_state')){
+    for(const part of chunks(codes)){
+      const marks=part.map(()=>'?').join(',');
+      let rows=[];
+      try{rows=db.prepare(`SELECT shipmentCode,businessType,state,apiStatus,stateJson,reportDate,snapshotId,lastEventTime FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...part);}catch{rows=[];}
+      for(const row of rows){
+        const code=bill(row.shipmentCode);
+        if(!members.has(code))continue;
+        if(!isAllowedCurrentType(type,row.businessType)){currentTypeConflicts.add(code);continue;}
+        observedFound.add(code);
+        if(currentPod(row))observedPod.add(code);
+      }
+    }
   }
-  return{count:found.size,pod:pod.size,foundBills:found,podBills:pod};
+  const found=new Set(observedFound),pod=new Set(observedPod),normalizedFallbackBills=new Set();
+  if(normalized&&fallbackBills?.size){
+    for(const code of fallbackBills){
+      if(found.has(code)||currentTypeConflicts.has(code)||!normalized.foundBills.has(code))continue;
+      found.add(code);normalizedFallbackBills.add(code);
+      if(normalized.podBills.has(code))pod.add(code);
+    }
+  }
+  return{
+    count:found.size,
+    pod:pod.size,
+    observedCount:observedFound.size,
+    observedPod:observedPod.size,
+    normalizedFallbackCount:normalizedFallbackBills.size,
+    currentTypeConflictCount:currentTypeConflicts.size,
+    foundBills:found,
+    podBills:pod,
+    observedFoundBills:observedFound,
+    observedPodBills:observedPod,
+    normalizedFallbackBills,
+    currentTypeConflictBills:currentTypeConflicts
+  };
 }
 
 export function v241AuditType(db,reportDate,type,batch=null){
   const source=v241CollectSourceMembership(db,reportDate,type,batch);
   const normalized=v241NormalizedStats(db,reportDate,type,source.members);
-  const current=v241CurrentStats(db,type,source.members);
+  const current=v241CurrentStats(db,type,source.members,{fallbackBills:source.persistedSupplementBills,normalized});
   const missingNormalized=[...source.members].filter(code=>!normalized.foundBills.has(code));
   const missingCurrent=[...source.members].filter(code=>!current.foundBills.has(code));
   const podRegressions=[...normalized.podBills].filter(code=>!current.podBills.has(code));
   const pass=source.sourceCount===normalized.count
     && source.sourceCount===current.count
     && !source.declaredMismatch
+    && current.currentTypeConflictCount===0
     && podRegressions.length===0
     && normalized.pod<=normalized.count
     && current.pod<=current.count;
@@ -242,12 +279,18 @@ export function v241AuditType(db,reportDate,type,batch=null){
     blankCategory:normalized.blank,
     currentCount:current.count,
     currentPod:current.pod,
+    observedCurrentCount:current.observedCount,
+    observedCurrentPod:current.observedPod,
+    normalizedFallbackCurrentCount:current.normalizedFallbackCount,
+    currentTypeConflictCount:current.currentTypeConflictCount,
     podProgression:current.pod-normalized.pod,
     missingNormalizedCount:missingNormalized.length,
     missingCurrentCount:missingCurrent.length,
     podRegressionCount:podRegressions.length,
     missingNormalizedSample:missingNormalized.slice(0,8),
     missingCurrentSample:missingCurrent.slice(0,8),
+    currentTypeConflictSample:[...current.currentTypeConflictBills].slice(0,8),
+    normalizedFallbackSample:[...current.normalizedFallbackBills].slice(0,8),
     podRegressionSample:podRegressions.slice(0,8),
     pass
   };

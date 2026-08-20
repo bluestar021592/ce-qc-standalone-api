@@ -44,10 +44,10 @@ const db=new DatabaseSync(dbFile,{readOnly:true});
 let exitCode=20;
 try{
   db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=1500;');
-  console.log('\nCE QC FIRST-DAY GO-LIVE VERIFY - V241 CANONICAL MEMBERSHIP + MUTABLE CURRENT TRUTH - STRICT READ ONLY');
+  console.log('\nCE QC FIRST-DAY GO-LIVE VERIFY - V244 RECOVERED SHOPEE EFFECTIVE CURRENT TRUTH - STRICT READ ONLY');
   console.log(`Database: ${dbFile}`);
   console.log(`Database size: ${(before.size/1024/1024/1024).toFixed(2)} GB`);
-  console.log('Integrity rule: canonical source membership must survive normalized/current layers; current POD may only progress forward, never regress.');
+  console.log('Integrity rule: canonical source membership must survive normalized/current layers; current POD may only progress forward. Recovered Shopee rows may use exact normalized truth only when mutable current state has no newer row.');
 
   const reportDate=/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)?requestedDate:latestDate(db);
   console.log(`Report date: ${reportDate||'NONE'}`);
@@ -75,21 +75,24 @@ try{
     const overlap=v241ShopeeOverlap(db,reportDate,batch);
     if(overlap.count>0)allPass=false;
 
-    console.log('\nBUSINESS      SOURCE  LATEST  ARCHIVE  PARSE  DECLARED  NORMAL  NORM_POD  CURRENT  CUR_POD  POD+  REGRESS  RESULT');
-    console.log('------------  ------  ------  -------  -----  --------  ------  --------  -------  -------  ----  -------  ----------------');
+    console.log('\nBUSINESS      SOURCE  NORMAL  NORM_POD  OBS_CUR  FALLBACK  EFFECTIVE  CUR_POD  POD+  REGRESS  TYPE_CONFLICT  RESULT');
+    console.log('------------  ------  ------  --------  -------  --------  ---------  -------  ----  -------  -------------  ----------------');
     for(const row of results){
-      const declared=row.declaredDailyCount===null?'-':row.declaredDailyCount;
-      console.log(`${pad(row.type,12)}  ${pad(row.sourceCount,6)}  ${pad(row.latestValidSnapshotCount,6)}  ${pad(row.archiveUnifiedCount,7)}  ${pad(row.businessParseCount,5)}  ${pad(declared,8)}  ${pad(row.normalizedCount,6)}  ${pad(row.normalizedPod,8)}  ${pad(row.currentCount,7)}  ${pad(row.currentPod,7)}  ${pad(row.podProgression,4)}  ${pad(row.podRegressionCount,7)}  ${row.pass?'PASS':'BLOCKED'}`);
+      console.log(`${pad(row.type,12)}  ${pad(row.sourceCount,6)}  ${pad(row.normalizedCount,6)}  ${pad(row.normalizedPod,8)}  ${pad(row.observedCurrentCount,7)}  ${pad(row.normalizedFallbackCurrentCount,8)}  ${pad(row.currentCount,9)}  ${pad(row.currentPod,7)}  ${pad(row.podProgression,4)}  ${pad(row.podRegressionCount,7)}  ${pad(row.currentTypeConflictCount,13)}  ${row.pass?'PASS':'BLOCKED'}`);
+      console.log(`  sourceMode=${row.sourceMode} latest=${row.latestValidSnapshotCount} archive=${row.archiveUnifiedCount} parse=${row.businessParseCount} persistedAdded=${row.persistedFinalSupplementCount} declared=${row.declaredDailyCount===null?'-':row.declaredDailyCount}`);
+      if(row.normalizedFallbackCurrentCount>0)console.log(`  normalized fallback current sample: ${JSON.stringify(row.normalizedFallbackSample)}`);
       if(!row.pass){
-        console.log(`  ${row.type} diagnostics: missingNormalized=${row.missingNormalizedCount} ${JSON.stringify(row.missingNormalizedSample)} missingCurrent=${row.missingCurrentCount} ${JSON.stringify(row.missingCurrentSample)} podRegression=${row.podRegressionCount} ${JSON.stringify(row.podRegressionSample)}`);
+        console.log(`  ${row.type} diagnostics: missingNormalized=${row.missingNormalizedCount} ${JSON.stringify(row.missingNormalizedSample)} missingCurrent=${row.missingCurrentCount} ${JSON.stringify(row.missingCurrentSample)} typeConflict=${row.currentTypeConflictCount} ${JSON.stringify(row.currentTypeConflictSample)} podRegression=${row.podRegressionCount} ${JSON.stringify(row.podRegressionSample)}`);
       }
     }
     console.log(`SHOPEE CN/VN cross-board overlap: ${overlap.count}${overlap.count?` sample=${JSON.stringify(overlap.sample)}`:''}`);
 
     const sourceTotal=results.reduce((sum,row)=>sum+Number(row.sourceCount||0),0);
     const normalizedTotal=results.reduce((sum,row)=>sum+Number(row.normalizedCount||0),0);
+    const observedCurrentTotal=results.reduce((sum,row)=>sum+Number(row.observedCurrentCount||0),0);
+    const fallbackCurrentTotal=results.reduce((sum,row)=>sum+Number(row.normalizedFallbackCurrentCount||0),0);
     const currentTotal=results.reduce((sum,row)=>sum+Number(row.currentCount||0),0);
-    console.log(`\nTOTAL canonicalSource=${sourceTotal} normalized=${normalizedTotal} current=${currentTotal}`);
+    console.log(`\nTOTAL canonicalSource=${sourceTotal} normalized=${normalizedTotal} observedCurrent=${observedCurrentTotal} normalizedFallback=${fallbackCurrentTotal} effectiveCurrent=${currentTotal}`);
     console.log(`SLOWEST_DB_CHECK_MS: ${slowestMs.toFixed(1)}`);
     if(slowestMs>3000){console.log('PERFORMANCE_RESULT: BLOCKED_SLOW_DB_QUERY');allPass=false;}
     else if(slowestMs>1000)console.log('PERFORMANCE_RESULT: WARN_QUERY_OVER_1S');

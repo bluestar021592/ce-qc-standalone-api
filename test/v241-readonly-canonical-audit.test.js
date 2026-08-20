@@ -55,6 +55,21 @@ function fixture(){
   return db;
 }
 
+function replaceCnWithPersistedRecovery(db,{currentPodState='POD',keepSecondCurrent=true}={}){
+  db.prepare("DELETE FROM unified_import_rows WHERE businessType='SHOPEECN'").run();
+  db.prepare("DELETE FROM business_daily_parse_rows WHERE recipient_group='CN'").run();
+  db.prepare("DELETE FROM business_daily_reports WHERE businessType='SHOPEECN'").run();
+  db.prepare("DELETE FROM business_final_rows WHERE shipmentCode IN ('CN-OLD','CN-PARSE')").run();
+  db.prepare("DELETE FROM shipment_current_state WHERE shipmentCode IN ('CN-OLD','CN-PARSE')").run();
+  db.prepare("INSERT INTO business_final_rows VALUES('SHOPEECN','CN-FINAL-1','2026-08-17',1,'POD')").run();
+  db.prepare("INSERT INTO business_final_rows VALUES('SHOPEECN','CN-FINAL-2','2026-08-17',0,'Pending1次')").run();
+  db.prepare("INSERT INTO shipment_current_state VALUES('CN-FINAL-1','SHOPEECN','2026-08-18','S_NEW',?,'SUCCESS',?,'2026-08-18 10:00:00')")
+    .run(currentPodState,currentPodState==='POD'?'{"currentState":"POD"}':'{}');
+  if(keepSecondCurrent){
+    db.prepare("INSERT INTO shipment_current_state VALUES('CN-FINAL-2','SHOPEECN','2026-08-18','S_NEW','PENDING','SUCCESS','{}','2026-08-18 10:00:00')").run();
+  }
+}
+
 test('V241 canonical source membership unions completed superseded history with business parse truth',()=>{
   const db=fixture();
   try{
@@ -102,6 +117,8 @@ test('V241 current POD may advance beyond normalized daily POD without failing i
     assert.equal(ce.sourceCount,2);
     assert.equal(ce.normalizedCount,2);
     assert.equal(ce.currentCount,2);
+    assert.equal(ce.observedCurrentCount,2);
+    assert.equal(ce.normalizedFallbackCurrentCount,0);
     assert.equal(ce.normalizedPod,1);
     assert.equal(ce.currentPod,2);
     assert.equal(ce.podProgression,1);
@@ -136,15 +153,7 @@ test('V241 declared business total is a fail-closed source-membership cross-chec
 test('V242 restores a fully missing ShopeeCN source ledger from exact report-date persisted final membership',()=>{
   const db=fixture();
   try{
-    db.prepare("DELETE FROM unified_import_rows WHERE businessType='SHOPEECN'").run();
-    db.prepare("DELETE FROM business_daily_parse_rows WHERE recipient_group='CN'").run();
-    db.prepare("DELETE FROM business_daily_reports WHERE businessType='SHOPEECN'").run();
-    db.prepare("DELETE FROM business_final_rows WHERE shipmentCode IN ('CN-OLD','CN-PARSE')").run();
-    db.prepare("DELETE FROM shipment_current_state WHERE shipmentCode IN ('CN-OLD','CN-PARSE')").run();
-    db.prepare("INSERT INTO business_final_rows VALUES('SHOPEECN','CN-FINAL-1','2026-08-17',1,'POD')").run();
-    db.prepare("INSERT INTO business_final_rows VALUES('SHOPEECN','CN-FINAL-2','2026-08-17',0,'Pending1次')").run();
-    db.prepare("INSERT INTO shipment_current_state VALUES('CN-FINAL-1','SHOPEECN','2026-08-18','S_NEW','POD','SUCCESS','{\"currentState\":\"POD\"}','2026-08-18 10:00:00')").run();
-    db.prepare("INSERT INTO shipment_current_state VALUES('CN-FINAL-2','SHOPEECN','2026-08-18','S_NEW','PENDING','SUCCESS','{}','2026-08-18 10:00:00')").run();
+    replaceCnWithPersistedRecovery(db);
     const batch=v241ReadLatestValidBatch(db,'2026-08-17');
     const truth=v241CollectSourceMembership(db,'2026-08-17','SHOPEECN',batch);
     assert.equal(truth.archiveUnifiedCount,0);
@@ -156,6 +165,8 @@ test('V242 restores a fully missing ShopeeCN source ledger from exact report-dat
     const audit=v241AuditType(db,'2026-08-17','SHOPEECN',batch);
     assert.equal(audit.normalizedCount,2);
     assert.equal(audit.currentCount,2);
+    assert.equal(audit.observedCurrentCount,2);
+    assert.equal(audit.normalizedFallbackCurrentCount,0);
     assert.equal(audit.pass,true);
     assert.equal(v241ShopeeOverlap(db,'2026-08-17',batch).count,0);
   }finally{db.close();}
@@ -178,6 +189,66 @@ test('V242 supplements a partially truncated ShopeeVN ledger and excludes a bill
     const audit=v241AuditType(db,'2026-08-17','SHOPEEVN',batch);
     assert.equal(audit.pass,true);
     assert.equal(v241ShopeeOverlap(db,'2026-08-17',batch).count,0);
+  }finally{db.close();}
+});
+
+test('V244 recovered Shopee membership may use exact normalized final truth when mutable current state has no row',()=>{
+  const db=fixture();
+  try{
+    replaceCnWithPersistedRecovery(db,{keepSecondCurrent:false});
+    const batch=v241ReadLatestValidBatch(db,'2026-08-17');
+    const audit=v241AuditType(db,'2026-08-17','SHOPEECN',batch);
+    assert.equal(audit.sourceCount,2);
+    assert.equal(audit.normalizedCount,2);
+    assert.equal(audit.observedCurrentCount,1);
+    assert.equal(audit.normalizedFallbackCurrentCount,1);
+    assert.equal(audit.currentCount,2);
+    assert.equal(audit.missingCurrentCount,0);
+    assert.equal(audit.podRegressionCount,0);
+    assert.equal(audit.pass,true);
+    assert.deepEqual(audit.normalizedFallbackSample,['CN-FINAL-2']);
+  }finally{db.close();}
+});
+
+test('V244 missing mutable current state is not forgiven for canonical source-ledger members',()=>{
+  const db=fixture();
+  try{
+    db.prepare("DELETE FROM shipment_current_state WHERE shipmentCode='CN-OLD'").run();
+    const batch=v241ReadLatestValidBatch(db,'2026-08-17');
+    const audit=v241AuditType(db,'2026-08-17','SHOPEECN',batch);
+    assert.equal(audit.persistedFinalSupplementCount,0);
+    assert.equal(audit.normalizedFallbackCurrentCount,0);
+    assert.equal(audit.currentCount,1);
+    assert.equal(audit.missingCurrentCount,1);
+    assert.equal(audit.pass,false);
+  }finally{db.close();}
+});
+
+test('V244 a real current-state POD regression on a recovered bill still blocks and is never replaced by normalized fallback',()=>{
+  const db=fixture();
+  try{
+    replaceCnWithPersistedRecovery(db,{currentPodState:'PENDING',keepSecondCurrent:false});
+    const batch=v241ReadLatestValidBatch(db,'2026-08-17');
+    const audit=v241AuditType(db,'2026-08-17','SHOPEECN',batch);
+    assert.equal(audit.observedCurrentCount,1);
+    assert.equal(audit.normalizedFallbackCurrentCount,1);
+    assert.equal(audit.currentCount,2);
+    assert.equal(audit.podRegressionCount,1);
+    assert.deepEqual(audit.podRegressionSample,['CN-FINAL-1']);
+    assert.equal(audit.pass,false);
+  }finally{db.close();}
+});
+
+test('V244 an explicit cross-board current type conflicts instead of being hidden by normalized fallback',()=>{
+  const db=fixture();
+  try{
+    replaceCnWithPersistedRecovery(db,{keepSecondCurrent:false});
+    db.prepare("UPDATE shipment_current_state SET businessType='SHOPEEVN' WHERE shipmentCode='CN-FINAL-1'").run();
+    const batch=v241ReadLatestValidBatch(db,'2026-08-17');
+    const audit=v241AuditType(db,'2026-08-17','SHOPEECN',batch);
+    assert.equal(audit.currentTypeConflictCount,1);
+    assert.deepEqual(audit.currentTypeConflictSample,['CN-FINAL-1']);
+    assert.equal(audit.pass,false);
   }finally{db.close();}
 });
 
