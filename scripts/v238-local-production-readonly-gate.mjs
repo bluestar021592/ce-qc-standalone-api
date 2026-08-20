@@ -12,7 +12,7 @@ const dbFile=path.isAbsolute(String(process.env.DB_FILE||''))
 
 function out(text=''){process.stdout.write(String(text).endsWith('\n')?String(text):`${text}\n`);}
 function run(label,args,timeoutMs=120000){
-  out(`\n[V238] ${label}`);
+  out(`\n[V241] ${label}`);
   const result=spawnSync(process.execPath,args,{cwd:root,encoding:'utf8',env:process.env,windowsHide:true,timeout:timeoutMs});
   if(result.stdout)process.stdout.write(result.stdout);
   if(result.stderr)process.stderr.write(result.stderr);
@@ -45,7 +45,7 @@ function latestDate(){
 }
 
 if(!fs.existsSync(dbFile)){
-  out(`[V238] local production audit skipped: production database is not present in this environment (${dbFile}).`);
+  out(`[V241] local production audit skipped: production database is not present in this environment (${dbFile}).`);
   out('CE_QC_V238_LOCAL_PRODUCTION_READONLY=SKIPPED_NO_LOCAL_DB');
   process.exit(0);
 }
@@ -55,14 +55,14 @@ let blocked=false;
 try{
   const reportDate=latestDate();
   if(!reportDate)throw new Error('persisted production database has no recoverable report date');
-  out(`[V238] production DB=${dbFile}`);
-  out(`[V238] latest persisted reportDate=${reportDate}`);
+  out(`[V241] production DB=${dbFile}`);
+  out(`[V241] latest persisted reportDate=${reportDate}`);
 
-  const firstDay=run('latest-date source -> normalized -> current-state parity', ['scripts/CE_QC_First_Day_GoLive_Verify_ReadOnly.mjs',reportDate], 120000);
-  if(!/GO_LIVE_RESULT:\s*READY/.test(firstDay)||!/DATABASE MODIFIED:\s*NO/.test(firstDay))throw new Error('first-day read-only audit did not return READY + DATABASE MODIFIED:NO');
+  const firstDay=run('canonical source membership -> normalized coverage -> mutable current-state monotonic POD truth', ['scripts/CE_QC_First_Day_GoLive_Verify_ReadOnly.mjs',reportDate], 120000);
+  if(!/GO_LIVE_RESULT:\s*READY/.test(firstDay)||!/DATABASE MODIFIED:\s*NO/.test(firstDay)||!/SHOPEE CN\/VN cross-board overlap:\s*0/.test(firstDay))throw new Error('V241 first-day canonical read-only audit did not return READY + zero Shopee cross-board overlap + DATABASE MODIFIED:NO');
 
-  const snapshots=run('all seven business snapshot parity + bounded query speed', ['scripts/CE_QC_Business_Snapshot_Audit_ReadOnly.mjs',reportDate,'ALL'], 120000);
-  if(!/RESULT:\s*READY/.test(snapshots)||!/DATABASE MODIFIED:\s*NO/.test(snapshots))throw new Error('seven-business read-only audit did not return READY + DATABASE MODIFIED:NO');
+  const snapshots=run('all seven business canonical membership + bounded query speed', ['scripts/CE_QC_Business_Snapshot_Audit_ReadOnly.mjs',reportDate,'ALL'], 120000);
+  if(!/RESULT:\s*READY/.test(snapshots)||!/DATABASE MODIFIED:\s*NO/.test(snapshots)||!/SHOPEE CN\/VN cross-board overlap:\s*0/.test(snapshots))throw new Error('V241 seven-business canonical read-only audit did not return READY + zero Shopee cross-board overlap + DATABASE MODIFIED:NO');
 
   const whpp=run('WHPP terminal authority contradictions', ['scripts/CE_QC_WHPP_Terminal_Authority_Audit_ReadOnly.mjs'], 120000);
   if(!/RESULT:\s*READY/.test(whpp))throw new Error('WHPP terminal authority audit did not return READY');
@@ -71,8 +71,9 @@ try{
   if(before.size!==after.size||before.mtimeMs!==after.mtimeMs)throw new Error('production SQLite size/mtime changed during read-only acceptance');
 
   out(`CE_QC_V238_LATEST_DATE=${reportDate}`);
-  out('CE_QC_V238_SOURCE_NORMALIZED_CURRENT=PASS');
-  out('CE_QC_V238_SEVEN_BUSINESS_SNAPSHOT=PASS');
+  out('CE_QC_V241_CANONICAL_SOURCE_MEMBERSHIP=PASS');
+  out('CE_QC_V241_NORMALIZED_CURRENT_MONOTONIC_POD=PASS');
+  out('CE_QC_V241_SHOPEE_BOARD_ISOLATION=PASS');
   out('CE_QC_V238_WHPP_TERMINAL_AUTHORITY=PASS');
   out('CE_QC_V238_DATABASE_UNCHANGED=PASS');
   out('CE_QC_V238_LOCAL_PRODUCTION_READONLY=PASS');
