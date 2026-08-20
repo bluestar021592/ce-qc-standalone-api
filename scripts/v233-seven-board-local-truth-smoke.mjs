@@ -52,7 +52,7 @@ try{
     for(const type of REQUIRED_TYPES){
       const truth=v241CollectSourceMembership(db,reportDate,type,batch);
       counts[type]=truth.sourceCount;
-      diagnostics.push(`${type}=${truth.sourceCount}(mode=${truth.sourceMode},latest=${truth.latestValidSnapshotCount},archive=${truth.archiveUnifiedCount},parse=${truth.businessParseCount},finalFallback=${truth.persistedFinalFallbackCount},declared=${truth.declaredDailyCount??'-'})`);
+      diagnostics.push(`${type}=${truth.sourceCount}(mode=${truth.sourceMode},latest=${truth.latestValidSnapshotCount},archive=${truth.archiveUnifiedCount},parse=${truth.businessParseCount},finalCandidate=${truth.persistedFinalCandidateCount},finalAdded=${truth.persistedFinalSupplementCount},declared=${truth.declaredDailyCount??'-'})`);
     }
     const zero=REQUIRED_TYPES.filter(type=>Number(counts[type]||0)<=0);
     const overlap=v241ShopeeOverlap(db,reportDate,batch);
