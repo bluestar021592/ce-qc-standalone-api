@@ -173,15 +173,17 @@ async function startAndAccept(iteration){
   const healthResponse=await waitFor(`${APP_ORIGIN}/api/health`,{timeoutMs:90000,accept:r=>r.status===200,headers:{accept:'application/json'},logs});
   const healthText=await healthResponse.text();
   let health={};try{health=healthText?JSON.parse(healthText):{};}catch{health={raw:healthText};}
-  if(healthResponse.headers.get('x-ce-qc-data-gate')!=='V232-LIVE-PERSISTED-BOARDS'||health?.scope!=='LOOPBACK_READINESS_ONLY'||health?.ok!==true||health?.ready!==true)fail(`restart #${iteration}: live health ownership/readiness mismatch: ${healthText.slice(0,1600)}`,logs);
-  if(String(health?.reportDate||'')!==REPORT_DATE||health?.dataState!=='PERSISTED_BOARDS_READY'||Number(health?.nonZeroBusinessCount||0)!==7)fail(`restart #${iteration}: persisted health truth mismatch: ${healthText.slice(0,1600)}`,logs);
-  for(const type of REQUIRED_TYPES)if(Number(health?.businesses?.[type]||0)<1)fail(`restart #${iteration}: health ${type} remained zero`,logs);
+  const dataGate=healthResponse.headers.get('x-ce-qc-data-gate');
+  const startupGate=healthResponse.headers.get('x-ce-qc-startup-gate');
+  if(dataGate!=='V246-DATA-DIAGNOSTIC-ONLY'||startupGate!=='V246-CORE-SERVICES-FIRST'||health?.scope!=='LOOPBACK_READINESS_ONLY'||health?.ok!==true||health?.ready!==true)fail(`restart #${iteration}: V246 core health ownership/readiness mismatch: ${healthText.slice(0,1600)}`,logs);
+  if(health?.startupState!=='CORE_SERVICES_READY'||health?.dataState!=='NOT_REQUIRED_FOR_STARTUP'||health?.dataBlocking!==false||health?.startupServices?.auth?.ready!==true||health?.startupServices?.export?.ready!==true)fail(`restart #${iteration}: V246 service-first health contract mismatch: ${healthText.slice(0,1600)}`,logs);
 
-  const sidecar=await jsonRequest(`${AUTH_ORIGIN}/api/v213/local-auth/login`,{
-    method:'POST',headers:{'content-type':'application/json','accept':'application/json','origin':APP_ORIGIN},body:JSON.stringify({username:USERNAME,password:PASSWORD})
+  const login=await jsonRequest(`${APP_ORIGIN}/api/v246/internal-auth/login`,{
+    method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({username:USERNAME,password:PASSWORD})
   },logs);
-  const handoffToken=String(sidecar.payload?.handoffToken||'');
-  if(!handoffToken)fail(`restart #${iteration}: auth sidecar returned no handoff token`,logs);
+  if(login.payload?.authMode!=='V246_SAME_ORIGIN_AUTH_PROXY')fail(`restart #${iteration}: same-origin auth proxy mode mismatch: ${login.payload?.authMode||'-'}`,logs);
+  const handoffToken=String(login.payload?.handoffToken||'');
+  if(!handoffToken)fail(`restart #${iteration}: same-origin auth proxy returned no handoff token`,logs);
   const handoff=await jsonRequest(`${APP_ORIGIN}/api/v223/fast-auth/accept`,{
     method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({handoffToken})
   },logs);
@@ -198,9 +200,10 @@ async function startAndAccept(iteration){
     const total=Number(states?.[type]?.dashboard?.metrics?.total??states?.[type]?.dashboard?.totalMonitored??0);
     if(total<1)fail(`restart #${iteration}: bootstrap ${type} remained zero`,logs);
   }
-  const whpp=await jsonRequest(`${APP_ORIGIN}/api/v71/whpp-summary?reportDate=${REPORT_DATE}`,{headers:authHeaders},logs);
-  if(Number(whpp.payload?.total||whpp.payload?.metrics?.total||0)<1)fail(`restart #${iteration}: WHPP summary remained zero`,logs);
-  console.log(`[V234] restart #${iteration} accepted pid=${child.pid} authPid=${run.authPid} date=${REPORT_DATE} sevenBoards=7 WHPP=nonzero.`);
+  const whpp=await jsonRequest(`${APP_ORIGIN}/api/v132/whpp-fast-summary?reportDate=${REPORT_DATE}`,{headers:authHeaders},logs);
+  if(Number(whpp.payload?.total||whpp.payload?.metrics?.total||0)<1)fail(`restart #${iteration}: WHPP fast summary remained zero`,logs);
+  if(whpp.payload?.patchId!=='2026-08-20-v246-whpp-stable-refresh-v1')fail(`restart #${iteration}: WHPP V246 route ownership mismatch: ${whpp.payload?.patchId||'-'}`,logs);
+  console.log(`[V247] restart #${iteration} accepted pid=${child.pid} authPid=${run.authPid} V246Health=service-first sameOriginLogin=PASS date=${REPORT_DATE} sevenBoards=7 WHPP=nonzero.`);
   return run;
 }
 
@@ -211,7 +214,7 @@ try{
   await seedOnce();
   const seeded=persistedTruth();
   assertPersistedTruth('seed',seeded);
-  console.log(`[V234] seeded once at ${dbFile}; no re-seed is permitted between starts.`);
+  console.log(`[V234/V247] seeded once at ${dbFile}; no re-seed is permitted between starts.`);
 
   first=await startAndAccept(1);
   const firstMainPid=first.child.pid,firstAuthPid=first.authPid;
@@ -230,7 +233,7 @@ try{
   const finalTruth=persistedTruth();
   assertPersistedTruth('after restart #2 shutdown',finalTruth);
   if(JSON.stringify(seeded)!==JSON.stringify(finalTruth))fail(`persisted truth did not survive two full starts: seeded=${JSON.stringify(seeded)} final=${JSON.stringify(finalTruth)}`);
-  console.log(`[V234] restart persistence E2E passed: seed once -> start/login/bootstrap -> full tree stop -> same DB -> new main/auth pids -> start/login/bootstrap -> full tree stop; ${REPORT_DATE} + 7 boards + WHPP survived without re-import.`);
+  console.log(`[V247] restart persistence E2E passed: seed once -> V246 health -> same-origin login -> bootstrap -> full tree stop -> same DB -> new main/auth pids -> repeat; ${REPORT_DATE} + 7 boards + WHPP survived without re-import.`);
 }finally{
   if(active){try{await terminateProcessTree(active);}catch(error){console.error('[V234] cleanup process-tree warning:',error?.message||error);}active=null;}
   try{fs.rmSync(temp,{recursive:true,force:true});}catch{}
