@@ -23,7 +23,8 @@ const GROUPS = Object.freeze({
   SHOPEE_REAL_ATTEMPT_AND_CURRENT_SOURCE_TRUTH: [
     'test/shopee-latest-track-classification.test.js',
     'test/shopee-golive-accounting-ui.test.js',
-    'test/v94-fast-dashboard-whpp-precedence.test.js'
+    'test/v94-fast-dashboard-whpp-precedence.test.js',
+    'test/v239-current-contract-reconciliation.test.js'
   ],
   WHPP_TERMINAL_AND_RESPONSIBILITY_AUTHORITY: [
     'test/v52-whpp-source-truth-routing.test.js',
@@ -50,6 +51,9 @@ const GROUPS = Object.freeze({
 const MUST_EXIST = [
   'src/v202DeliveryTruth.js',
   'src/v203DashboardIntegrityPatch.js',
+  'src/shopeeAnalyzerV33.js',
+  'src/v191ShopeeTruth.js',
+  'src/rangeDashboardStoreV191.js',
   'src/rangeDashboardStoreV55.js',
   'src/v142SevenBusinessPeriodExporter.js',
   'src/v142AsyncExportPreflightPatch.js',
@@ -59,15 +63,15 @@ const MUST_EXIST = [
 ];
 
 for (const file of [...MUST_EXIST, ...new Set(Object.values(GROUPS).flat())]) {
-  if (!fs.existsSync(file)) throw new Error(`V235 required acceptance asset missing: ${file}`);
+  if (!fs.existsSync(file)) throw new Error(`V239 required acceptance asset missing: ${file}`);
 }
 
 const source = file => fs.readFileSync(file, 'utf8');
 const must = (text, token, label) => {
-  if (!text.includes(token)) throw new Error(`V235 ${label} missing contract token: ${token}`);
+  if (!text.includes(token)) throw new Error(`V239 ${label} missing contract token: ${token}`);
 };
 const forbid = (text, token, label) => {
-  if (text.includes(token)) throw new Error(`V235 ${label} contains forbidden token: ${token}`);
+  if (text.includes(token)) throw new Error(`V239 ${label} contains forbidden token: ${token}`);
 };
 
 const delivery = source('src/v202DeliveryTruth.js');
@@ -76,6 +80,22 @@ must(delivery, 'Repeated START scans while the same attempt is still open never 
 must(delivery, 'Only a NEW START after a failed attempt opens attempt 2/3+', 'Shopee attempt truth');
 must(delivery, 'Elapsed calendar days, code60 assignment and raw Pending count NEVER manufacture an attempt', 'Shopee attempt truth');
 must(delivery, "status === 'W' || status === 'Y'", 'Shopee daily dispatch evidence');
+
+const shopeeV33 = source('src/shopeeAnalyzerV33.js');
+must(shopeeV33, 'activePendingEpisode', 'active Pending episode');
+must(shopeeV33, "eventCode(sorted.at(-1))!=='150'", 'active Pending latest code');
+must(shopeeV33, 'reconcileSpecialNormal', 'special normal closure');
+must(shopeeV33, "carry状态:'closed_normal'", 'special normal closure');
+must(shopeeV33, "trackSkippedReason:'SPECIAL_NORMAL_DESTINATION'", 'special normal closure');
+
+const rangeTruth = source('src/v191ShopeeTruth.js');
+must(rangeTruth, "from './v202DeliveryTruth.js'", 'historical Shopee attempt truth');
+must(rangeTruth, 'resolveV202AttemptCycle', 'historical Shopee attempt truth');
+must(rangeTruth, 'TRACK_REAL_DELIVERY_CYCLE', 'historical Shopee attempt truth');
+forbid(rangeTruth, 'deliveryDates.size', 'historical Shopee attempt truth');
+forbid(rangeTruth, 'julianday', 'historical Shopee attempt truth');
+const rangeFacade=source('src/rangeDashboardStoreV191.js');
+must(rangeFacade, "from './rangeDashboardStoreV55Compact.js'", 'V191 over V55 compact truth');
 
 const attemptDashboard = source('src/v203DashboardIntegrityPatch.js');
 must(attemptDashboard, '/api/v203/attempt-summary', 'Shopee attempt dashboard');
@@ -99,6 +119,11 @@ must(preflight, 'SEVEN_BUSINESS_HISTORY_INCOMPLETE', 'async export preflight');
 const asyncExport = source('src/v84AsyncExportPatch.js');
 must(asyncExport, 'detached: true', 'async export');
 must(asyncExport, 'reusableJob', 'export resume/reuse');
+const exportWorker=source('src/v84ExportJobWorker.js');
+must(exportWorker, 'ONE_WORKBOOK_PER_BUSINESS', 'current complete-workbook export');
+forbid(exportWorker, 'splitRange(', 'current complete-workbook export');
+const exportUi=source('public/v84-async-export-ui.js');
+must(exportUi, "ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v193'", 'V193 export resume');
 
 const startupHealth = source('src/v232LiveDataHealthGatePatch.js');
 must(startupHealth, 'V237-5177-5178-5179', 'startup triplet readiness');
@@ -115,13 +140,13 @@ const candidateTest = managed.indexOf("Invoke-Exe $script:NpmExe @('run','test:g
 const candidateBackup = managed.indexOf("$candidateBackup = Join-Path $tempRoot 'scripts\\CE_QC_PreUpdate_Backup.mjs'");
 const install = managed.indexOf("@('pull','--ff-only'");
 if (candidateTest < 0 || candidateBackup <= candidateTest || install <= candidateBackup) {
-  throw new Error('V235 managed update ordering invalid: candidate test:golive -> verified DB backup -> ff-only install is mandatory.');
+  throw new Error('V239 managed update ordering invalid: candidate test:golive -> verified DB backup -> ff-only install is mandatory.');
 }
 
 const allTests = [...new Set(Object.values(GROUPS).flat())];
-console.log('[V235] final functional acceptance matrix:');
+console.log('[V239] final functional acceptance matrix:');
 for (const [name, tests] of Object.entries(GROUPS)) console.log(`  ${name}: ${tests.length} tests`);
-console.log(`[V235] executing ${allTests.length} unique test files serially as one fail-closed suite...`);
+console.log(`[V239] executing ${allTests.length} unique test files serially as one fail-closed suite...`);
 
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...allTests], {
   encoding: 'utf8',
@@ -133,15 +158,16 @@ if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);
 if (result.error) throw result.error;
 if (result.status !== 0) {
-  throw new Error(`V235 final functional acceptance failed with exit ${result.status}`);
+  throw new Error(`V239 final functional acceptance failed with exit ${result.status}`);
 }
 
 console.log('CE_QC_V235_DAY_WEEK_MONTH=PASS');
 console.log('CE_QC_V235_DASHBOARD_DETAIL_PARITY=PASS');
-console.log('CE_QC_V235_BUSINESS_RULES=PASS');
-console.log('CE_QC_V235_SHOPEE_REAL_ATTEMPTS=PASS');
+console.log('CE_QC_V239_BUSINESS_RULES=PASS');
+console.log('CE_QC_V239_SHOPEE_REAL_ATTEMPTS=PASS');
 console.log('CE_QC_V235_WHPP_AUTHORITY=PASS');
-console.log('CE_QC_V235_EXPORT_AND_RESUME=PASS');
+console.log('CE_QC_V239_EXPORT_AND_RESUME=PASS');
 console.log('CE_QC_V237_STARTUP_TRIPLET=PASS');
 console.log('CE_QC_V235_FAIL_CLOSED_UPDATE=PASS');
+console.log('CE_QC_V239_CURRENT_CONTRACT=PASS');
 console.log('CE_QC_V235_FINAL_FUNCTIONAL_ACCEPTANCE=PASS');
