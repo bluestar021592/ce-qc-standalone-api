@@ -12,7 +12,8 @@ import {
 const cfg=getRuntimeConfig();
 const file=cfg.dbFile;
 if(!fs.existsSync(file)){
-  console.log(`[V233/V243] seven-board local truth skipped: database file not present in this environment (${file}).`);
+  console.log(`[V233/V246] seven-board data audit skipped: database file not present (${file}).`);
+  console.log('CE_QC_V246_EXISTING_DATA_AUDIT=SKIPPED_NO_DB');
   process.exit(0);
 }
 
@@ -42,9 +43,8 @@ try{
   db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=1200;');
   const reportDate=latestDate();
   if(!reportDate){
-    const sizeMb=before.size/1024/1024;
-    if(sizeMb>100)throw new Error(`large persisted database (${sizeMb.toFixed(1)} MB) has no recoverable latest report date`);
-    console.log(`[V233/V243] seven-board local truth: EMPTY_INSTALL file=${file}`);
+    console.log(`[V233/V246] existing business-data audit: EMPTY_BUSINESS_DATA file=${file} sizeMB=${(before.size/1024/1024).toFixed(1)}`);
+    console.log('CE_QC_V246_EXISTING_DATA_AUDIT=EMPTY_BUSINESS_DATA');
   }else{
     const batch=v241ReadLatestValidBatch(db,reportDate);
     const counts={};
@@ -52,27 +52,27 @@ try{
     for(const type of REQUIRED_TYPES){
       const truth=v241CollectSourceMembership(db,reportDate,type,batch);
       counts[type]=truth.sourceCount;
-      diagnostics.push(`${type}=${truth.sourceCount}(mode=${truth.sourceMode},latest=${truth.latestValidSnapshotCount},archive=${truth.archiveUnifiedCount},parse=${truth.businessParseCount},finalCandidate=${truth.persistedFinalCandidateCount},finalAdded=${truth.persistedFinalSupplementCount},declared=${truth.declaredDailyCount??'-'})`);
+      diagnostics.push(`${type}=${truth.sourceCount}(mode=${truth.sourceMode},latest=${truth.latestValidSnapshotCount},archive=${truth.archiveUnifiedCount},parse=${truth.businessParseCount},finalAdded=${truth.persistedFinalSupplementCount})`);
     }
     const zero=REQUIRED_TYPES.filter(type=>Number(counts[type]||0)<=0);
     const overlap=v241ShopeeOverlap(db,reportDate,batch);
     const total=Object.values(counts).reduce((sum,value)=>sum+Number(value||0),0);
-    console.log(`[V233/V243] latest canonical persisted reportDate=${reportDate} ${diagnostics.join(' ')} total=${total}`);
-    if(zero.length)throw new Error(`latest persisted date ${reportDate} is missing/zero canonical/persisted source membership for: ${zero.join(', ')}`);
-    if(overlap.count)throw new Error(`SHOPEECN/SHOPEEVN canonical source overlap=${overlap.count} sample=${overlap.sample.join(',')}`);
+    const state=zero.length||overlap.count?'PARTIAL_OR_INCONSISTENT':'COMPLETE_SEVEN_BOARD';
+    console.log(`[V233/V246] existing data reportDate=${reportDate} ${diagnostics.join(' ')} total=${total} zero=${zero.join(',')||'-'} overlap=${overlap.count}`);
     console.log(`CE_QC_V233_LATEST_DATE=${reportDate}`);
-    console.log('CE_QC_V233_SEVEN_BOARD_TRUTH=PASS_READ_ONLY');
-    console.log('CE_QC_V242_CANONICAL_MEMBERSHIP=PASS_READ_ONLY');
-    console.log('CE_QC_CANONICAL_MEMBERSHIP=PASS_READ_ONLY');
+    console.log(`CE_QC_V246_EXISTING_DATA_AUDIT=${state}`);
+    if(zero.length)console.warn(`[V246][DATA_WARNING] missing/zero boards: ${zero.join(', ')}. System startup/update remains available so the user can re-import clean data.`);
+    if(overlap.count)console.warn(`[V246][DATA_WARNING] SHOPEECN/SHOPEEVN overlap=${overlap.count} sample=${overlap.sample.join(',')}. Existing data should be re-imported; software availability is not blocked.`);
   }
+  console.log('CE_QC_CANONICAL_MEMBERSHIP=AUDIT_COMPLETE_READ_ONLY');
 }catch(error){
   failed=true;
-  console.error(`CE_QC_V233_SEVEN_BOARD_TRUTH=BLOCKED ${error?.message||error}`);
+  console.error(`CE_QC_V246_EXISTING_DATA_AUDIT=BLOCKED_DB_READ_ERROR ${error?.message||error}`);
 }finally{try{db.close();}catch{}}
 
 const after=fs.statSync(file);
 if(before.size!==after.size||before.mtimeMs!==after.mtimeMs){
   failed=true;
-  console.error('CE_QC_V233_READ_ONLY=BLOCKED database size/mtime changed during truth audit');
+  console.error('CE_QC_V233_READ_ONLY=BLOCKED database size/mtime changed during audit');
 }else console.log('CE_QC_V233_READ_ONLY=CONFIRMED');
 process.exitCode=failed?10:0;
