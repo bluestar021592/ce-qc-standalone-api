@@ -61,10 +61,11 @@ must(desktopLauncher, "Persisted data gate:");
 must(desktopLauncher, "HTTP 401/403/404 no longer counts as BACKEND READY.");
 must(desktopLauncher, "BACKEND READY - exact health + local data gate passed");
 mustNot(desktopLauncher, "$status -ge 200 -and $status -lt 500");
-const truthGate = desktopLauncher.indexOf('Invoke-PersistedDataTruthGate');
+const truthGateCalls = [...desktopLauncher.matchAll(/Invoke-PersistedDataTruthGate/g)].map(match => match.index);
+const truthGate = truthGateCalls.at(-1) ?? -1;
 const startBackend = desktopLauncher.indexOf("Write-Host 'Starting backend and waiting for the exact loopback health acceptance...'");
 const openBrowser = desktopLauncher.indexOf('Start-Process $LocalUrl');
-if (truthGate < 0 || startBackend <= truthGate || openBrowser <= startBackend) {
+if (truthGateCalls.length < 2 || truthGate < 0 || startBackend <= truthGate || openBrowser <= startBackend) {
   throw new Error('V229 desktop launcher ordering invalid: local DB truth -> exact health -> browser must remain fail-closed.');
 }
 
