@@ -80,15 +80,16 @@ function businessParseMembers(db,reportDate,type){
   }catch{}
   return set;
 }
+function sourceLedgerMembers(db,reportDate,type){return new Set([...unifiedArchiveMembers(db,reportDate,type),...businessParseMembers(db,reportDate,type)]);}
 
-// Some older completed Shopee runs predate durable CN/VN source-row persistence. In
-// those databases the exact report-date business_final_rows are the only surviving
-// per-waybill membership ledger (V232 used this same persisted layer to recover the
-// board). Use it only when archive + parse membership for that board is completely
-// absent; never union it on top of a real source ledger, so stale derived rows cannot
-// silently inflate a valid import. Generic SHOPEE rows are accepted only when their
-// persisted recipient_group explicitly identifies CN/VN.
-function persistedFinalFallbackMembers(db,reportDate,type){
+// Older completed Shopee runs can retain exact report-date normalized membership even
+// when a later partial re-import did not persist the earlier CN/VN source rows. Those
+// exact final rows are not trusted blindly: they are split only by an explicit exact
+// businessType or persisted recipient_group, and a bill that is present in the other
+// Shopee board's canonical source ledger is excluded so the newest explicit source
+// reclassification wins. This recovers both a fully missing board and a partially
+// truncated board without using aggregate cache counts as invented membership.
+function persistedFinalMembers(db,reportDate,type){
   const set=new Set();
   if(!v241TableExists(db,'business_final_rows'))return set;
   const cols=tableColumns(db,'business_final_rows');
@@ -133,16 +134,30 @@ export function v241CollectSourceMembership(db,reportDate,type,batch=null){
   const parse=businessParseMembers(db,reportDate,type);
   const latest=latestValidSnapshotMembers(db,batch,type);
   const members=new Set([...archive,...parse]);
-  const fallback=(members.size===0&&(V241_SHOPEE_TYPES.has(type)||type==='WHPP'))?persistedFinalFallbackMembers(db,reportDate,type):new Set();
-  if(members.size===0)for(const code of fallback)members.add(code);
+  const persisted=V241_SHOPEE_TYPES.has(type)||type==='WHPP'?persistedFinalMembers(db,reportDate,type):new Set();
+  let persistedAdded=0;
+  if(V241_SHOPEE_TYPES.has(type)){
+    const otherType=type==='SHOPEECN'?'SHOPEEVN':'SHOPEECN';
+    const otherExplicit=sourceLedgerMembers(db,reportDate,otherType);
+    for(const code of persisted){
+      if(otherExplicit.has(code)||members.has(code))continue;
+      members.add(code);persistedAdded++;
+    }
+  }else if(type==='WHPP'&&members.size===0){
+    for(const code of persisted){members.add(code);persistedAdded++;}
+  }
   const declared=declaredDailyCount(db,reportDate,type);
-  const sourceMode=archive.size||parse.size?'CANONICAL_SOURCE_LEDGER':(fallback.size?'PERSISTED_FINAL_MEMBERSHIP_FALLBACK':'MISSING');
+  const baseCount=new Set([...archive,...parse]).size;
+  const sourceMode=persistedAdded>0
+    ?(baseCount>0?'CANONICAL_PLUS_PERSISTED_FINAL':'PERSISTED_FINAL_MEMBERSHIP_RECOVERY')
+    :(baseCount>0?'CANONICAL_SOURCE_LEDGER':'MISSING');
   return {
     members,
     sourceCount:members.size,
     archiveUnifiedCount:archive.size,
     businessParseCount:parse.size,
-    persistedFinalFallbackCount:fallback.size,
+    persistedFinalCandidateCount:persisted.size,
+    persistedFinalSupplementCount:persistedAdded,
     sourceMode,
     latestValidSnapshotCount:latest.size,
     declaredDailyCount:declared,
