@@ -5,17 +5,18 @@ import './v225AuthBootstrapGuardPatch.js';
 import './v227LocalHealthProbePatch.js';
 import './v228LocalLauncherRootProbePatch.js';
 import './v232LiveDataHealthGatePatch.js';
+import './v246CoreAvailabilityPatch.js';
 
-const PATCH_ID = '2026-08-20-v237-startup-triplet-readiness-v1';
+const PATCH_ID = '2026-08-20-v246-system-first-core-v1';
 
 // Cold start must never open or scan the SQLite database merely to inspect
 // optional performance indexes. The definitions stay available for explicit
 // maintenance/diagnostics, while normal server startup remains database-lazy.
 // V226 fixes latest-date truth. V221 owns persisted-data recovery. V225 prevents
 // stale/unauthenticated zero dashboards. V227 exposes loopback /api/health,
-// V228 makes the managed launcher's non-browser root probe report HTTP 200, and
-// V237 upgrades the V232 live-data health owner so browser readiness also requires
-// the exact current auth 5179 and export 5178 sidecars, not only main 5177 data.
+// V228 keeps launcher probes local, V245 keeps persisted-data diagnostics, and
+// V246 makes core startup depend on the actual 5177/5178/5179 services rather
+// than whether old business data happens to contain seven non-zero boards.
 const REQUIRED_INDEXES = Object.freeze([
   {
     name: 'idx_unified_rows_bootstrap_cover',
@@ -41,7 +42,7 @@ export function inspectV46Indexes() {
   return { present, missing };
 }
 
-console.log('[CE-QC][V46] V226 date truth + V221 persisted recovery + V225 auth guard + V227/V228 launcher probes + V237 exact 5177/5178/5179 startup readiness armed after V43.');
+console.log('[CE-QC][V46] V246 system-first core armed: exact 5177/5178/5179 service readiness can start/login with empty or partial business data; data audits remain separate diagnostics.');
 
 export const V46_COLD_START_INDEX_PATCH_ID = PATCH_ID;
 export const V46_REQUIRED_INDEXES = REQUIRED_INDEXES;
