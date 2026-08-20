@@ -42,7 +42,8 @@ const GROUPS = Object.freeze({
   ],
   FAIL_CLOSED_DESKTOP_UPDATE_ACTIVATION: [
     'test/v106-desktop-update-gate.test.js',
-    'test/v126-stable-candidate-gate.test.js'
+    'test/v126-stable-candidate-gate.test.js',
+    'test/v237-startup-triplet-health.test.js'
   ]
 });
 
@@ -53,6 +54,7 @@ const MUST_EXIST = [
   'src/v142SevenBusinessPeriodExporter.js',
   'src/v142AsyncExportPreflightPatch.js',
   'src/v84AsyncExportPatch.js',
+  'src/v232LiveDataHealthGatePatch.js',
   'tools/CE_QC_Managed_Launcher.ps1'
 ];
 
@@ -98,6 +100,12 @@ const asyncExport = source('src/v84AsyncExportPatch.js');
 must(asyncExport, 'detached: true', 'async export');
 must(asyncExport, 'reusableJob', 'export resume/reuse');
 
+const startupHealth = source('src/v232LiveDataHealthGatePatch.js');
+must(startupHealth, 'V237-5177-5178-5179', 'startup triplet readiness');
+must(startupHealth, '/api/v213/auth-ping', 'startup triplet auth readiness');
+must(startupHealth, '/api/v194/export-ping', 'startup triplet export readiness');
+must(startupHealth, "startupState:ready?'APP_AUTH_EXPORT_READY':'STARTUP_TRIPLET_INCOMPLETE'", 'startup triplet fail-closed state');
+
 const managed = source('tools/CE_QC_Managed_Launcher.ps1');
 must(managed, "Invoke-Exe $script:NpmExe @('run','test:golive')", 'managed update candidate gate');
 must(managed, 'Candidate validation did not return one clean TRUE result; installation blocked.', 'managed update candidate gate');
@@ -134,5 +142,6 @@ console.log('CE_QC_V235_BUSINESS_RULES=PASS');
 console.log('CE_QC_V235_SHOPEE_REAL_ATTEMPTS=PASS');
 console.log('CE_QC_V235_WHPP_AUTHORITY=PASS');
 console.log('CE_QC_V235_EXPORT_AND_RESUME=PASS');
+console.log('CE_QC_V237_STARTUP_TRIPLET=PASS');
 console.log('CE_QC_V235_FAIL_CLOSED_UPDATE=PASS');
 console.log('CE_QC_V235_FINAL_FUNCTIONAL_ACCEPTANCE=PASS');
