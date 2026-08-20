@@ -121,7 +121,8 @@ const criticalTests = [
   'test/v90-instant-whpp-navigation.test.js'
 ];
 const critical = runPhase('C. CRITICAL SCAN/TRACK/RESUME/WHPP-SOURCE-TRUTH/DRILLDOWN/EXPORT/PERFORMANCE REGRESSION', process.execPath, ['--test', ...criticalTests], 120000);
-const full = runNpmPhase('D. COMPLETE GO-LIVE REGRESSION SUITE', 'test:golive', 300000);
+const functional = runPhase('C2. FINAL USER-FACING FUNCTIONAL MATRIX - PERIOD/DETAIL/RULES/ATTEMPTS/WHPP/XLSX/UPDATE', process.execPath, ['scripts/v235-final-functional-acceptance.cjs'], 300000);
+const full = runNpmPhase('D. COMPLETE GO-LIVE REGRESSION SUITE', 'test:golive', 420000);
 
 const perfWarn = /PERFORMANCE_RESULT: WARN_QUERY_OVER_1S/.test(day.stdout) || /BLOCKED_SLOW_QUERY/.test(day.stdout) || /BLOCKED_SLOW_QUERY/.test(business.stdout);
 
@@ -135,9 +136,10 @@ emit(`WHPP terminal authority: ${terminal.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`SHOPEE resume integrity: ${shopeeResume.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`SHOPEE WHPP/CEAF source truth: ${shopeeWhppTruth.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`Critical scan/track/resume/WHPP-source-truth/drilldown/export tests: ${critical.pass ? 'PASS' : 'BLOCKED'}`);
+emit(`Final period/detail/rules/Shopee-attempt/WHPP/XLSX/update functional matrix: ${functional.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`Full go-live regression: ${full.pass ? 'PASS' : 'BLOCKED'}`);
 emit(`Live DB query speed: ${perfWarn ? 'WARN/BLOCKED - inspect PERF lines' : 'PASS'}`);
-emit(`ACCEPTANCE_RESULT: ${blocked ? 'BLOCKED' : 'READY_FOR_UI_AND_EXPORT_ACCEPTANCE'}`);
+emit(`ACCEPTANCE_RESULT: ${blocked ? 'BLOCKED' : 'READY_FOR_MANAGED_UPDATE'}`);
 emit(`Log: ${logFile}`);
 
 fs.writeFileSync(logFile, `${lines.join('\n')}\n`, 'utf8');
