@@ -59,9 +59,9 @@ test('V246 treats existing operational data as diagnostic while preserving stric
 });
 
 test('V246 clean reset boundary preserves accounts/configuration instead of deleting the ability to log in',()=>{
-  assert.match(purge,/retained:/);
-  assert.match(purge,/users/);
-  assert.match(purge,/roles/);
-  assert.match(purge,/system settings/i);
+  assert.match(purge,/retainedScope/);
+  assert.match(purge,/用户、角色与系统设置/);
+  assert.match(purge,/最新门店白名单/);
+  assert.match(purge,/审计日志/);
   assert.doesNotMatch(core,/DELETE FROM users/i);
 });
