@@ -7,8 +7,9 @@ import './v228LocalLauncherRootProbePatch.js';
 import './v232LiveDataHealthGatePatch.js';
 import './v246CoreAvailabilityPatch.js';
 import './v248WhppAuthorityPatch.js';
+import './v249LoginReliabilityPatch.js';
 
-const PATCH_ID = '2026-08-20-v248-whpp-authority-v1';
+const PATCH_ID = '2026-08-20-v249-direct-auth-sidecar-v1';
 
 // Cold start must never open or scan the SQLite database merely to inspect
 // optional performance indexes. The definitions stay available for explicit
@@ -16,8 +17,9 @@ const PATCH_ID = '2026-08-20-v248-whpp-authority-v1';
 // V226 fixes latest-date truth. V221 owns persisted-data recovery. V225 prevents
 // stale/unauthenticated zero dashboards. V227 exposes loopback /api/health,
 // V228 keeps launcher probes local, V245 keeps persisted-data diagnostics,
-// V246 makes core startup service-first, and V248 places the authoritative WHPP
-// fast summary after authentication but before all legacy WHPP route handlers.
+// V246 makes core startup service-first, V248 owns authenticated WHPP routing,
+// and V249 lets local/LAN browsers verify credentials directly on the isolated
+// 5179 process before a bounded 5177 session handoff.
 const REQUIRED_INDEXES = Object.freeze([
   {
     name: 'idx_unified_rows_bootstrap_cover',
@@ -43,7 +45,7 @@ export function inspectV46Indexes() {
   return { present, missing };
 }
 
-console.log('[CE-QC][V46] V248 system-first core armed: 5177/5178/5179 service readiness plus authenticated WHPP route authority; business data remains diagnostic-only for startup.');
+console.log('[CE-QC][V46] V249 system-first core armed: 5179 direct credential verification + bounded 5177 handoff + V248 authenticated WHPP authority; business data remains diagnostic-only for startup.');
 
 export const V46_COLD_START_INDEX_PATCH_ID = PATCH_ID;
 export const V46_REQUIRED_INDEXES = REQUIRED_INDEXES;
