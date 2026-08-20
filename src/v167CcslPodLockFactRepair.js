@@ -1,7 +1,12 @@
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1';
+const PATCH_ID = '2026-08-19-v214-ccsl-pod-lock-worker-v1';
 const CCSL_TYPES = ['CE', 'CEAF', 'TBKH', 'ALI1688'];
+const WORKER_DELAY_MS = Math.max(30_000, Number(process.env.CE_QC_V167_REPAIR_DELAY_MS || 120_000));
+let scheduledWorker = null;
+let repairChild = null;
 
 function latestCompletedBatch(db) {
   return db.prepare(`
@@ -76,7 +81,55 @@ function upsertPodFact(db, batch, row, now) {
   );
 }
 
+function isMainWebEntry() {
+  const entry = String(process.argv[1] || '').replaceAll('\\', '/').split('/').pop().toLowerCase();
+  return entry === 'bootstrap.js' || entry === 'server.js';
+}
+
+function launchRepairWorker() {
+  scheduledWorker = null;
+  if (repairChild) return;
+  const file = fileURLToPath(new URL('./v167CcslPodLockFactRepairWorker.js', import.meta.url));
+  try {
+    repairChild = spawn(process.execPath, [file], {
+      cwd: process.cwd(),
+      env: { ...process.env, CE_QC_V167_REPAIR_WORKER: '1' },
+      windowsHide: true,
+      detached: false,
+      stdio: ['ignore', 'inherit', 'inherit']
+    });
+    console.log(`[CE-QC][V214_STARTUP] CCSL POD-lock repair isolated worker starting pid=${repairChild.pid || '-'} after ${WORKER_DELAY_MS}ms delay`);
+    repairChild.once('error', error => {
+      console.error('[CE-QC][V214_STARTUP] CCSL POD-lock repair worker spawn failed:', error?.stack || error);
+      repairChild = null;
+    });
+    repairChild.once('exit', (code, signal) => {
+      console.log(`[CE-QC][V214_STARTUP] CCSL POD-lock repair worker exited code=${code ?? 'null'}${signal ? ` signal=${signal}` : ''}`);
+      repairChild = null;
+    });
+  } catch (error) {
+    repairChild = null;
+    console.error('[CE-QC][V214_STARTUP] CCSL POD-lock repair worker start failed:', error?.stack || error);
+  }
+}
+
+function scheduleRepairWorker() {
+  if (scheduledWorker || repairChild) return { ok: true, deferred: true, reason: 'ALREADY_SCHEDULED_OR_RUNNING', patchId: PATCH_ID };
+  scheduledWorker = setTimeout(launchRepairWorker, WORKER_DELAY_MS);
+  scheduledWorker.unref?.();
+  console.log(`[CE-QC][V214_STARTUP] CCSL POD-lock repair deferred ${WORKER_DELAY_MS}ms and will run outside the 5177 web process`);
+  return { ok: true, deferred: true, workerDelayMs: WORKER_DELAY_MS, patchId: PATCH_ID };
+}
+
 export function repairLatestCcslPodLockFacts(database = null) {
+  // bootstrap.js historically called this synchronously immediately after server.listen().
+  // On a 20+ GiB SQLite file that could monopolize the 5177 event loop exactly while the
+  // browser was trying to enter after authentication. Main web entries now only schedule
+  // a child worker; the actual repair still uses the exact same durable transaction below.
+  if (!database && String(process.env.CE_QC_V167_REPAIR_WORKER || '') !== '1' && isMainWebEntry()) {
+    return scheduleRepairWorker();
+  }
+
   const db = database || getDb();
   const batch = latestCompletedBatch(db);
   if (!batch) return { ok: true, repaired: 0, updated: 0, reason: 'NO_COMPLETED_UNIFIED_BATCH' };
