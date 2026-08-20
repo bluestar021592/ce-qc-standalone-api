@@ -2,6 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 
 export const V232_LIVE_DATA_HEALTH_GATE_VERSION='2026-08-20-v245-persisted-shopee-startup-health-v1';
+const STARTUP_GATE_COMPAT='V237-5177-5178-5179';
 const INSTALLED=Symbol.for('ce-qc.v232-live-data-health-gate-installed');
 const REQUIRED_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const APP_PORT=Math.max(1024,Math.min(65535,Number(process.env.PORT||5177)));
@@ -213,6 +214,7 @@ function liveDataHealth(req,res,next){
   res.setHeader('X-CE-QC-Health-Mode','LOOPBACK_READINESS_ONLY');
   res.setHeader('X-CE-QC-Data-Gate','V232-LIVE-PERSISTED-BOARDS');
   res.setHeader('X-CE-QC-Startup-Gate','V245-5177-5178-5179-PERSISTED-SHOPEE');
+  res.setHeader('X-CE-QC-Startup-Gate-Compat',STARTUP_GATE_COMPAT);
   return (async()=>{
     try{
       const [result,services]=await Promise.all([Promise.resolve(inspectLiveData()),inspectStartupServices()]);
