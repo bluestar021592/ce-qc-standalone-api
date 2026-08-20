@@ -113,12 +113,12 @@ if (candidateTest < 0 || candidateBackup <= candidateTest || install <= candidat
 const allTests = [...new Set(Object.values(GROUPS).flat())];
 console.log('[V235] final functional acceptance matrix:');
 for (const [name, tests] of Object.entries(GROUPS)) console.log(`  ${name}: ${tests.length} tests`);
-console.log(`[V235] executing ${allTests.length} unique test files as one fail-closed suite...`);
+console.log(`[V235] executing ${allTests.length} unique test files serially as one fail-closed suite...`);
 
-const result = spawnSync(process.execPath, ['--test', ...allTests], {
+const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...allTests], {
   encoding: 'utf8',
   env: process.env,
-  timeout: 300000,
+  timeout: 420000,
   windowsHide: true
 });
 if (result.stdout) process.stdout.write(result.stdout);
