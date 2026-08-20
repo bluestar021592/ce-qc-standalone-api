@@ -14,17 +14,18 @@ const liveDataHealth = fs.readFileSync('src/v232LiveDataHealthGatePatch.js', 'ut
 const desktopLauncher = fs.readFileSync('Start_CE_QC.ps1', 'utf8');
 const runtimeE2E = fs.readFileSync('scripts/v225-runtime-e2e.mjs', 'utf8');
 const localSevenBoard = fs.readFileSync('scripts/v233-seven-board-local-truth-smoke.mjs', 'utf8');
+const restartE2E = fs.readFileSync('scripts/v234-restart-persistence-e2e.mjs', 'utf8');
 
 const must = (source, token) => {
-  if (!source.includes(token)) throw new Error(`V233 recovery gate missing: ${token}`);
+  if (!source.includes(token)) throw new Error(`V234 recovery gate missing: ${token}`);
 };
 const mustNot = (source, token) => {
-  if (source.includes(token)) throw new Error(`V233 recovery gate contains forbidden legacy rule: ${token}`);
+  if (source.includes(token)) throw new Error(`V234 recovery gate contains forbidden legacy rule: ${token}`);
 };
-const run = args => {
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8', env: process.env, timeout: 180000 });
+const run = (args, timeout = 180000) => {
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', env: process.env, timeout });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`V233 command failed: node ${args.join(' ')}\n${result.stdout || ''}\n${result.stderr || ''}`);
+  if (result.status !== 0) throw new Error(`V234 command failed: node ${args.join(' ')}\n${result.stdout || ''}\n${result.stderr || ''}`);
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
 };
@@ -68,7 +69,7 @@ const truthGate = truthGateCalls.at(-1) ?? -1;
 const startBackend = desktopLauncher.indexOf("Write-Host 'Starting backend and waiting for the exact loopback health acceptance...'");
 const openBrowser = desktopLauncher.indexOf('Start-Process $LocalUrl');
 if (truthGateCalls.length < 2 || truthGate < 0 || startBackend <= truthGate || openBrowser <= startBackend) {
-  throw new Error('V233 desktop launcher ordering invalid: local DB truth -> exact health -> browser must remain fail-closed.');
+  throw new Error('V234 desktop launcher ordering invalid: local DB truth -> exact health -> browser must remain fail-closed.');
 }
 
 must(runtimeE2E, "await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`");
@@ -83,7 +84,7 @@ const authReady = runtimeE2E.indexOf("await waitFor(`${AUTH_ORIGIN}/api/v213/aut
 const appReady = runtimeE2E.indexOf("await waitFor(`${APP_ORIGIN}/api/health`");
 const loginRequest = runtimeE2E.indexOf('/api/v213/local-auth/login');
 if (authReady < 0 || appReady <= authReady || loginRequest <= appReady) {
-  throw new Error('V233 runtime E2E ordering invalid: auth sidecar ready -> live seven-board health ready -> login/handoff.');
+  throw new Error('V234 runtime E2E ordering invalid: auth sidecar ready -> live seven-board health ready -> login/handoff.');
 }
 
 must(liveDataHealth, "['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']");
@@ -106,12 +107,34 @@ mustNot(localSevenBoard, 'INSERT INTO');
 mustNot(localSevenBoard, 'UPDATE ');
 mustNot(localSevenBoard, 'DELETE FROM');
 
+// V234 proves persistence instead of merely assuming it: one seed only, two complete
+// process trees, the same SQLite file, new main/auth PIDs on the second start, and
+// identical seven-board truth after both full shutdowns.
+must(restartE2E, "const REPORT_DATE='2026-08-17'");
+must(restartE2E, "const REQUIRED_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'])");
+must(restartE2E, 'await waitPortsClosed([APP_PORT,AUTH_PORT,EXPORT_PORT]');
+must(restartE2E, "spawnSync('taskkill',['/PID',String(rootPid),'/T','/F']");
+must(restartE2E, 'first=await startAndAccept(1)');
+must(restartE2E, 'await terminateProcessTree(first)');
+must(restartE2E, 'second=await startAndAccept(2)');
+must(restartE2E, 'second.authPid===firstAuthPid');
+must(restartE2E, 'JSON.stringify(seeded)!==JSON.stringify(finalTruth)');
+must(restartE2E, '[V234] restart persistence E2E passed');
+const seedCalls=[...restartE2E.matchAll(/await seedOnce\(\)/g)];
+if(seedCalls.length!==1)throw new Error(`V234 restart acceptance must seed exactly once; found ${seedCalls.length}.`);
+const firstStart=restartE2E.indexOf('first=await startAndAccept(1)');
+const firstStop=restartE2E.indexOf('await terminateProcessTree(first)');
+const secondStart=restartE2E.indexOf('second=await startAndAccept(2)');
+const secondStop=restartE2E.indexOf('await terminateProcessTree(second)');
+if(firstStart<0||firstStop<=firstStart||secondStart<=firstStop||secondStop<=secondStart)throw new Error('V234 restart ordering invalid: start1 -> full stop -> same DB start2 -> full stop.');
+
 run(['--check', 'src/v226LatestReportDateQueryPatch.js']);
 run(['scripts/v226-latest-report-date-query-smoke.mjs']);
 run(['--check', 'src/v227LocalHealthProbePatch.js']);
 run(['--check', 'src/v228LocalLauncherRootProbePatch.js']);
 run(['--check', 'src/v232LiveDataHealthGatePatch.js']);
 run(['--check', 'scripts/v233-seven-board-local-truth-smoke.mjs']);
+run(['--check', 'scripts/v234-restart-persistence-e2e.mjs']);
 run(['--check', 'src/v225AuthBootstrapGuardPatch.js']);
 run(['--check', 'public/v225-auth-bootstrap-guard.js']);
 run(['--check', 'src/v209LoginReliabilityPatch.js']);
@@ -120,5 +143,6 @@ run(['--test', 'test/v211-fast-auth.test.js']);
 run(['scripts/v225-local-db-truth-smoke.mjs']);
 run(['scripts/v233-seven-board-local-truth-smoke.mjs']);
 run(['scripts/v225-runtime-e2e.mjs']);
+run(['scripts/v234-restart-persistence-e2e.mjs'], 300000);
 
-console.log('[V233] candidate runtime gate passed: latest local DB truth -> seven persisted non-zero boards -> live /api/health -> auth handoff -> session -> bootstrap -> WHPP -> guarded shell; no user re-upload or manual test required.');
+console.log('[V234] candidate runtime gate passed: latest local DB truth -> seven persisted non-zero boards -> live health/auth/bootstrap -> full process-tree restart -> same DB/live health/auth/bootstrap again -> persistence preserved without re-import.');
