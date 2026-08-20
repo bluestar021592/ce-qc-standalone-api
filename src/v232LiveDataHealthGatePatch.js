@@ -5,8 +5,11 @@ export const V232_LIVE_DATA_HEALTH_GATE_VERSION='2026-08-20-v232-live-persisted-
 const INSTALLED=Symbol.for('ce-qc.v232-live-data-health-gate-installed');
 const REQUIRED_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const CACHE_MS=10_000;
+const DIAGNOSTIC_MS=30_000;
 let cached=null;
 let cachedAt=0;
+let lastDiagnosticKey='';
+let lastDiagnosticAt=0;
 
 function ipOnly(value=''){return String(value||'').replace(/^::ffff:/,'');}
 function hostOnly(value=''){
@@ -66,7 +69,7 @@ function canonicalCounts(db,snapshotId,counts){
 }
 function lightweightFallbackCounts(db,reportDate,counts){
   if(!reportDate)return;
-  const missingBusiness= ['SHOPEECN','SHOPEEVN','WHPP'].filter(type=>n(counts[type])===0);
+  const missingBusiness=['SHOPEECN','SHOPEEVN','WHPP'].filter(type=>n(counts[type])===0);
   if(missingBusiness.length&&tableExists(db,'business_final_rows')){
     try{
       const rows=db.prepare("SELECT UPPER(COALESCE(businessType,'')) businessType,COUNT(DISTINCT shipmentCode) total FROM business_final_rows WHERE reportDate=? GROUP BY UPPER(COALESCE(businessType,''))").all(reportDate);
@@ -116,6 +119,19 @@ function inspectLiveData(){
   cachedAt=now;
   return cached;
 }
+function logGateResult(result){
+  const now=Date.now();
+  const key=[result?.dataState||'',result?.reportDate||'',...(result?.zeroBusinessTypes||[])].join('|');
+  if(key===lastDiagnosticKey&&now-lastDiagnosticAt<DIAGNOSTIC_MS)return;
+  lastDiagnosticKey=key;
+  lastDiagnosticAt=now;
+  const counts=REQUIRED_TYPES.map(type=>`${type}=${n(result?.businesses?.[type])}`).join(' ');
+  if(result?.ready){
+    console.log(`[CE-QC][V232_DATA_GATE_PASS] reportDate=${result?.reportDate||'EMPTY'} state=${result?.dataState||'-'} ${counts}`);
+  }else{
+    console.warn(`[CE-QC][V232_DATA_GATE_BLOCK] reportDate=${result?.reportDate||'EMPTY'} state=${result?.dataState||'-'} zero=${(result?.zeroBusinessTypes||[]).join(',')||'-'} ${counts}`);
+  }
+}
 function liveDataHealth(req,res,next){
   if(req.method!=='GET'||req.path!=='/api/health'||!isLoopback(req))return next();
   res.setHeader('Cache-Control','no-store');
@@ -123,11 +139,13 @@ function liveDataHealth(req,res,next){
   res.setHeader('X-CE-QC-Data-Gate','V232-LIVE-PERSISTED-BOARDS');
   try{
     const result=inspectLiveData();
+    logGateResult(result);
     if(!result.ready){
       return res.status(503).json({...result,authRequired:true,scope:'LOOPBACK_READINESS_ONLY',time:new Date().toISOString()});
     }
     return res.status(200).json({...result,authRequired:true,scope:'LOOPBACK_READINESS_ONLY',time:new Date().toISOString()});
   }catch(error){
+    console.error('[CE-QC][V232_DATA_GATE_ERROR]',error?.stack||error);
     return res.status(503).json({ok:false,ready:false,dataState:'LIVE_DATA_GATE_ERROR',error:error?.message||String(error),authRequired:true,scope:'LOOPBACK_READINESS_ONLY',version:V232_LIVE_DATA_HEALTH_GATE_VERSION,time:new Date().toISOString()});
   }
 }
