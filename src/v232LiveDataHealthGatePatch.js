@@ -1,7 +1,8 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V232_LIVE_DATA_HEALTH_GATE_VERSION='2026-08-20-v237-startup-triplet-readiness-v1';
+export const V232_LIVE_DATA_HEALTH_GATE_VERSION='2026-08-20-v245-persisted-shopee-startup-health-v1';
+const STARTUP_GATE_COMPAT='V237-5177-5178-5179';
 const INSTALLED=Symbol.for('ce-qc.v232-live-data-health-gate-installed');
 const REQUIRED_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const APP_PORT=Math.max(1024,Math.min(65535,Number(process.env.PORT||5177)));
@@ -35,6 +36,11 @@ function n(value){const parsed=Number(value||0);return Number.isFinite(parsed)?p
 function tableExists(db,name){
   try{return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name));}
   catch{return false;}
+}
+function tableColumns(db,name){
+  if(!tableExists(db,name))return new Set();
+  try{return new Set(db.prepare(`PRAGMA table_info(${name})`).all().map(row=>String(row.name||'')));}
+  catch{return new Set();}
 }
 function latestCanonical(db){
   if(!tableExists(db,'unified_import_batches'))return null;
@@ -76,15 +82,42 @@ function canonicalCounts(db,snapshotId,counts){
     for(const row of rows)applyCount(counts,row.businessType,row.total);
   }catch{}
 }
+function persistedBusinessFinalCounts(db,reportDate,counts){
+  if(!reportDate||!tableExists(db,'business_final_rows'))return;
+  const cols=tableColumns(db,'business_final_rows');
+  try{
+    if(cols.has('recipient_group')){
+      const rows=db.prepare(`
+        SELECT CASE
+          WHEN UPPER(COALESCE(businessType,''))='SHOPEECN' THEN 'SHOPEECN'
+          WHEN UPPER(COALESCE(businessType,''))='SHOPEEVN' THEN 'SHOPEEVN'
+          WHEN UPPER(COALESCE(businessType,''))='SHOPEE' AND UPPER(COALESCE(recipient_group,''))='CN' THEN 'SHOPEECN'
+          WHEN UPPER(COALESCE(businessType,''))='SHOPEE' AND UPPER(COALESCE(recipient_group,''))='VN' THEN 'SHOPEEVN'
+          WHEN UPPER(COALESCE(businessType,''))='WHPP' THEN 'WHPP'
+          ELSE ''
+        END businessType,
+        COUNT(DISTINCT shipmentCode) total
+        FROM business_final_rows
+        WHERE reportDate=?
+        GROUP BY CASE
+          WHEN UPPER(COALESCE(businessType,''))='SHOPEECN' THEN 'SHOPEECN'
+          WHEN UPPER(COALESCE(businessType,''))='SHOPEEVN' THEN 'SHOPEEVN'
+          WHEN UPPER(COALESCE(businessType,''))='SHOPEE' AND UPPER(COALESCE(recipient_group,''))='CN' THEN 'SHOPEECN'
+          WHEN UPPER(COALESCE(businessType,''))='SHOPEE' AND UPPER(COALESCE(recipient_group,''))='VN' THEN 'SHOPEEVN'
+          WHEN UPPER(COALESCE(businessType,''))='WHPP' THEN 'WHPP'
+          ELSE ''
+        END
+      `).all(reportDate);
+      for(const row of rows)applyCount(counts,row.businessType,row.total);
+      return;
+    }
+    const rows=db.prepare("SELECT UPPER(COALESCE(businessType,'')) businessType,COUNT(DISTINCT shipmentCode) total FROM business_final_rows WHERE reportDate=? AND UPPER(COALESCE(businessType,'')) IN ('SHOPEECN','SHOPEEVN','WHPP') GROUP BY UPPER(COALESCE(businessType,''))").all(reportDate);
+    for(const row of rows)applyCount(counts,row.businessType,row.total);
+  }catch{}
+}
 function lightweightFallbackCounts(db,reportDate,counts){
   if(!reportDate)return;
-  const missingBusiness=['SHOPEECN','SHOPEEVN','WHPP'].filter(type=>n(counts[type])===0);
-  if(missingBusiness.length&&tableExists(db,'business_final_rows')){
-    try{
-      const rows=db.prepare("SELECT UPPER(COALESCE(businessType,'')) businessType,COUNT(DISTINCT shipmentCode) total FROM business_final_rows WHERE reportDate=? GROUP BY UPPER(COALESCE(businessType,''))").all(reportDate);
-      for(const row of rows)applyCount(counts,row.businessType,row.total);
-    }catch{}
-  }
+  persistedBusinessFinalCounts(db,reportDate,counts);
   const missingCcsl=['CE','CEAF','TBKH','ALI1688'].filter(type=>n(counts[type])===0);
   if(missingCcsl.length&&tableExists(db,'final_rows')){
     try{
@@ -116,7 +149,7 @@ function inspectLiveData(){
     ready,
     dataState:ready?'PERSISTED_BOARDS_READY':'PERSISTED_BOARDS_INCOMPLETE',
     reportDate,
-    source:canonical?.snapshotId?'CANONICAL_PLUS_PERSISTED_SUMMARY':'PERSISTED_SUMMARY',
+    source:canonical?.snapshotId?'CANONICAL_PLUS_PERSISTED_FINAL_RECOVERY':'PERSISTED_SUMMARY_PLUS_FINAL_RECOVERY',
     snapshotId:String(canonical?.snapshotId||''),
     businesses:counts,
     zeroBusinessTypes,
@@ -170,9 +203,9 @@ function logGateResult(result,services){
   lastDiagnosticAt=now;
   const counts=REQUIRED_TYPES.map(type=>`${type}=${n(result?.businesses?.[type])}`).join(' ');
   if(result?.ready&&services?.ready){
-    console.log(`[CE-QC][V237_STARTUP_GATE_PASS] reportDate=${result?.reportDate||'EMPTY'} data=${result?.dataState||'-'} auth=5179:READY export=5178:READY ${counts}`);
+    console.log(`[CE-QC][V245_STARTUP_GATE_PASS] reportDate=${result?.reportDate||'EMPTY'} data=${result?.dataState||'-'} auth=5179:READY export=5178:READY ${counts}`);
   }else{
-    console.warn(`[CE-QC][V237_STARTUP_GATE_BLOCK] reportDate=${result?.reportDate||'EMPTY'} data=${result?.dataState||'-'} zero=${(result?.zeroBusinessTypes||[]).join(',')||'-'} auth=${services?.auth?.ready?'READY':`BLOCK(${services?.auth?.httpStatus||0}:${services?.auth?.error||services?.auth?.version||'-'})`} export=${services?.export?.ready?'READY':`BLOCK(${services?.export?.httpStatus||0}:${services?.export?.error||services?.export?.revision||'-'})`} ${counts}`);
+    console.warn(`[CE-QC][V245_STARTUP_GATE_BLOCK] reportDate=${result?.reportDate||'EMPTY'} data=${result?.dataState||'-'} zero=${(result?.zeroBusinessTypes||[]).join(',')||'-'} auth=${services?.auth?.ready?'READY':`BLOCK(${services?.auth?.httpStatus||0}:${services?.auth?.error||services?.auth?.version||'-'})`} export=${services?.export?.ready?'READY':`BLOCK(${services?.export?.httpStatus||0}:${services?.export?.error||services?.export?.revision||'-'})`} ${counts}`);
   }
 }
 function liveDataHealth(req,res,next){
@@ -180,7 +213,8 @@ function liveDataHealth(req,res,next){
   res.setHeader('Cache-Control','no-store');
   res.setHeader('X-CE-QC-Health-Mode','LOOPBACK_READINESS_ONLY');
   res.setHeader('X-CE-QC-Data-Gate','V232-LIVE-PERSISTED-BOARDS');
-  res.setHeader('X-CE-QC-Startup-Gate','V237-5177-5178-5179');
+  res.setHeader('X-CE-QC-Startup-Gate','V245-5177-5178-5179-PERSISTED-SHOPEE');
+  res.setHeader('X-CE-QC-Startup-Gate-Compat',STARTUP_GATE_COMPAT);
   return (async()=>{
     try{
       const [result,services]=await Promise.all([Promise.resolve(inspectLiveData()),inspectStartupServices()]);
@@ -189,7 +223,7 @@ function liveDataHealth(req,res,next){
       const payload={...result,ok:ready,ready,startupState:ready?'APP_AUTH_EXPORT_READY':'STARTUP_TRIPLET_INCOMPLETE',startupServices:services,authRequired:true,scope:'LOOPBACK_READINESS_ONLY',time:new Date().toISOString()};
       return res.status(ready?200:503).json(payload);
     }catch(error){
-      console.error('[CE-QC][V237_STARTUP_GATE_ERROR]',error?.stack||error);
+      console.error('[CE-QC][V245_STARTUP_GATE_ERROR]',error?.stack||error);
       return res.status(503).json({ok:false,ready:false,dataState:'LIVE_DATA_GATE_ERROR',startupState:'STARTUP_GATE_ERROR',error:error?.message||String(error),authRequired:true,scope:'LOOPBACK_READINESS_ONLY',version:V232_LIVE_DATA_HEALTH_GATE_VERSION,time:new Date().toISOString()});
     }
   })();
@@ -207,6 +241,6 @@ if(!express.application[INSTALLED]){
   };
 }
 
-console.log('[CE-QC][V237] loopback /api/health now stays 503 until persisted seven-board data, auth 5179, and export 5178 all pass exact readiness; launcher opens the browser only after the full 5177/5178/5179 startup triplet is ready.');
+console.log('[CE-QC][V245] loopback /api/health now resolves Shopee CN/VN from exact persisted final membership when the latest partial snapshot omits a board; 5177 remains 503 until all seven boards plus auth 5179 and export 5178 are ready.');
 
-export const __test={ipOnly,hostOnly,isLoopback,inspectLiveData,inspectStartupServices};
+export const __test={ipOnly,hostOnly,isLoopback,inspectLiveData,inspectStartupServices,persistedBusinessFinalCounts,lightweightFallbackCounts,emptyCounts};
