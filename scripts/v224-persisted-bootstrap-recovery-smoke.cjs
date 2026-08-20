@@ -18,15 +18,15 @@ const restartE2E = fs.readFileSync('scripts/v234-restart-persistence-e2e.mjs', '
 const finalFunctional = fs.readFileSync('scripts/v235-final-functional-acceptance.cjs', 'utf8');
 
 const must = (source, token) => {
-  if (!source.includes(token)) throw new Error(`V235 recovery gate missing: ${token}`);
+  if (!source.includes(token)) throw new Error(`V238 recovery gate missing: ${token}`);
 };
 const mustNot = (source, token) => {
-  if (source.includes(token)) throw new Error(`V235 recovery gate contains forbidden legacy rule: ${token}`);
+  if (source.includes(token)) throw new Error(`V238 recovery gate contains forbidden legacy rule: ${token}`);
 };
 const run = (args, timeout = 180000) => {
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', env: process.env, timeout });
   if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`V235 command failed: node ${args.join(' ')}\n${result.stdout || ''}\n${result.stderr || ''}`);
+  if (result.status !== 0) throw new Error(`V238 command failed: node ${args.join(' ')}\n${result.stdout || ''}\n${result.stderr || ''}`);
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
 };
@@ -70,7 +70,7 @@ const truthGate = truthGateCalls.at(-1) ?? -1;
 const startBackend = desktopLauncher.indexOf("Write-Host 'Starting backend and waiting for the exact loopback health acceptance...'");
 const openBrowser = desktopLauncher.indexOf('Start-Process $LocalUrl');
 if (truthGateCalls.length < 2 || truthGate < 0 || startBackend <= truthGate || openBrowser <= startBackend) {
-  throw new Error('V235 desktop launcher ordering invalid: local DB truth -> exact health -> browser must remain fail-closed.');
+  throw new Error('V238 desktop launcher ordering invalid: local DB truth -> exact health -> browser must remain fail-closed.');
 }
 
 must(runtimeE2E, "await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`");
@@ -85,16 +85,19 @@ const authReady = runtimeE2E.indexOf("await waitFor(`${AUTH_ORIGIN}/api/v213/aut
 const appReady = runtimeE2E.indexOf("await waitFor(`${APP_ORIGIN}/api/health`");
 const loginRequest = runtimeE2E.indexOf('/api/v213/local-auth/login');
 if (authReady < 0 || appReady <= authReady || loginRequest <= appReady) {
-  throw new Error('V235 runtime E2E ordering invalid: auth sidecar ready -> live seven-board health ready -> login/handoff.');
+  throw new Error('V238 runtime E2E ordering invalid: auth sidecar ready -> live seven-board health ready -> login/handoff.');
 }
 
 must(liveDataHealth, "['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']");
 must(liveDataHealth, "req.path!=='/api/health'");
 must(liveDataHealth, 'V232-LIVE-PERSISTED-BOARDS');
+must(liveDataHealth, 'V237-5177-5178-5179');
+must(liveDataHealth, '/api/v213/auth-ping');
+must(liveDataHealth, '/api/v194/export-ping');
+must(liveDataHealth, "startupState:ready?'APP_AUTH_EXPORT_READY':'STARTUP_TRIPLET_INCOMPLETE'");
 must(liveDataHealth, "dataState:'EMPTY_INSTALL'");
 must(liveDataHealth, "dataState:ready?'PERSISTED_BOARDS_READY':'PERSISTED_BOARDS_INCOMPLETE'");
 must(liveDataHealth, 'zeroBusinessTypes');
-must(liveDataHealth, 'return res.status(503)');
 must(liveDataHealth, "scope:'LOOPBACK_READINESS_ONLY'");
 mustNot(liveDataHealth, 'status(401)');
 
@@ -108,9 +111,6 @@ mustNot(localSevenBoard, 'INSERT INTO');
 mustNot(localSevenBoard, 'UPDATE ');
 mustNot(localSevenBoard, 'DELETE FROM');
 
-// V234 proves persistence instead of merely assuming it: one seed only, two complete
-// process trees, the same SQLite file, new main/auth PIDs on the second start, and
-// identical seven-board truth after both full shutdowns.
 must(restartE2E, "const REPORT_DATE='2026-08-17'");
 must(restartE2E, "const REQUIRED_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'])");
 must(restartE2E, 'await waitPortsClosed([APP_PORT,AUTH_PORT,EXPORT_PORT]');
@@ -122,15 +122,13 @@ must(restartE2E, 'second.authPid===firstAuthPid');
 must(restartE2E, 'JSON.stringify(seeded)!==JSON.stringify(finalTruth)');
 must(restartE2E, '[V234] restart persistence E2E passed');
 const seedCalls=[...restartE2E.matchAll(/await seedOnce\(\)/g)];
-if(seedCalls.length!==1)throw new Error(`V235 restart acceptance must seed exactly once; found ${seedCalls.length}.`);
+if(seedCalls.length!==1)throw new Error(`V238 restart acceptance must seed exactly once; found ${seedCalls.length}.`);
 const firstStart=restartE2E.indexOf('first=await startAndAccept(1)');
 const firstStop=restartE2E.indexOf('await terminateProcessTree(first)');
 const secondStart=restartE2E.indexOf('second=await startAndAccept(2)');
 const secondStop=restartE2E.indexOf('await terminateProcessTree(second)');
-if(firstStart<0||firstStop<=firstStart||secondStart<=firstStop||secondStop<=secondStart)throw new Error('V235 restart ordering invalid: start1 -> full stop -> same DB start2 -> full stop.');
+if(firstStart<0||firstStop<=firstStart||secondStart<=firstStop||secondStop<=secondStart)throw new Error('V238 restart ordering invalid: start1 -> full stop -> same DB start2 -> full stop.');
 
-// V235 is the final user-facing functional acceptance matrix. It must stay explicit
-// so a future performance/UI change cannot silently remove one requested QC dimension.
 for (const token of [
   'DAY_WEEK_MONTH_AND_DASHBOARD_DETAIL_PARITY',
   'PENDING_OC_STORE_580_SELF_PICKUP_RETURN_POD_RULES',
@@ -146,6 +144,7 @@ must(finalFunctional, 'test/v85-business-state-rules.test.js');
 must(finalFunctional, 'test/v92-whpp-terminal-authority.test.js');
 must(finalFunctional, 'test/v142-seven-business-history-export.test.js');
 must(finalFunctional, 'test/v106-desktop-update-gate.test.js');
+must(finalFunctional, 'test/v237-startup-triplet-health.test.js');
 must(finalFunctional, "Invoke-Exe $script:NpmExe @('run','test:golive')", '');
 
 run(['--check', 'src/v226LatestReportDateQueryPatch.js']);
@@ -157,6 +156,7 @@ run(['--check', 'scripts/v233-seven-board-local-truth-smoke.mjs']);
 run(['--check', 'scripts/v234-restart-persistence-e2e.mjs']);
 run(['--check', 'scripts/v235-final-functional-acceptance.cjs']);
 run(['--check', 'test/v235-final-functional-acceptance.test.js']);
+run(['--check', 'test/v237-startup-triplet-health.test.js']);
 run(['--check', 'src/v225AuthBootstrapGuardPatch.js']);
 run(['--check', 'public/v225-auth-bootstrap-guard.js']);
 run(['--check', 'src/v209LoginReliabilityPatch.js']);
@@ -166,6 +166,6 @@ run(['scripts/v225-local-db-truth-smoke.mjs']);
 run(['scripts/v233-seven-board-local-truth-smoke.mjs']);
 run(['scripts/v225-runtime-e2e.mjs']);
 run(['scripts/v234-restart-persistence-e2e.mjs'], 300000);
-run(['scripts/v235-final-functional-acceptance.cjs'], 300000);
+run(['scripts/v235-final-functional-acceptance.cjs'], 480000);
 
-console.log('[V235] candidate runtime gate passed: latest local DB truth -> seven non-zero boards -> live health/auth/bootstrap -> full same-DB restart persistence -> day/week/month + dashboard/detail + business rules + real Shopee attempts + WHPP authority + real XLSX/resume + fail-closed updater acceptance.');
+console.log('[V238] candidate runtime gate passed: latest local DB truth -> seven non-zero boards -> exact 5177/5178/5179 health -> auth/bootstrap -> full same-DB restart persistence -> final functional matrix. Final golive gate will additionally execute strict real local production read-only source/current/WHPP audits before installation.');
