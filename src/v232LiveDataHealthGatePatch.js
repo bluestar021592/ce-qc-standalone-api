@@ -57,16 +57,17 @@ function businessDailyCounts(db,reportDate,counts){
     for(const row of rows)applyCount(counts,row.businessType,row.total);
   }catch{}
 }
-function canonicalCounts(db,snapshotId,reportDate,counts){
+function canonicalCounts(db,snapshotId,counts){
   if(!snapshotId||!tableExists(db,'unified_import_rows'))return;
   try{
-    const rows=db.prepare("SELECT UPPER(COALESCE(businessType,'')) businessType,COUNT(*) total FROM unified_import_rows WHERE snapshotId=? AND (?='' OR reportDate=?) GROUP BY UPPER(COALESCE(businessType,''))").all(snapshotId,reportDate,reportDate);
+    const rows=db.prepare("SELECT UPPER(COALESCE(businessType,'')) businessType,COUNT(*) total FROM unified_import_rows WHERE snapshotId=? GROUP BY UPPER(COALESCE(businessType,''))").all(snapshotId);
     for(const row of rows)applyCount(counts,row.businessType,row.total);
   }catch{}
 }
 function lightweightFallbackCounts(db,reportDate,counts){
   if(!reportDate)return;
-  if(tableExists(db,'business_final_rows')){
+  const missingBusiness= ['SHOPEECN','SHOPEEVN','WHPP'].filter(type=>n(counts[type])===0);
+  if(missingBusiness.length&&tableExists(db,'business_final_rows')){
     try{
       const rows=db.prepare("SELECT UPPER(COALESCE(businessType,'')) businessType,COUNT(DISTINCT shipmentCode) total FROM business_final_rows WHERE reportDate=? GROUP BY UPPER(COALESCE(businessType,''))").all(reportDate);
       for(const row of rows)applyCount(counts,row.businessType,row.total);
@@ -93,7 +94,7 @@ function inspectLiveData(){
   }
   const counts=emptyCounts();
   businessDailyCounts(db,reportDate,counts);
-  canonicalCounts(db,String(canonical?.snapshotId||''),reportDate,counts);
+  canonicalCounts(db,String(canonical?.snapshotId||''),counts);
   lightweightFallbackCounts(db,reportDate,counts);
   const zeroBusinessTypes=REQUIRED_TYPES.filter(type=>n(counts[type])<=0);
   const total=Object.values(counts).reduce((sum,value)=>sum+n(value),0);
