@@ -53,8 +53,6 @@ must(inject, '/v225-auth-bootstrap-guard.js');
 must(browser, "path!=='/api/bootstrap'&&path!=='/api/session'");
 must(browser, 'redirectToFreshAuth');
 
-// Desktop-launch acceptance: the black launcher window must not print
-// BACKEND READY merely because an authenticated route returned HTTP 401.
 must(desktopLauncher, "scripts\\v225-local-db-truth-smoke.mjs");
 must(desktopLauncher, '$HealthUrl = "$LocalUrl/api/health"');
 must(desktopLauncher, "Invoke-WebRequest $HealthUrl");
@@ -72,24 +70,21 @@ if (truthGateCalls.length < 2 || truthGate < 0 || startBackend <= truthGate || o
   throw new Error('V232 desktop launcher ordering invalid: local DB truth -> exact health -> browser must remain fail-closed.');
 }
 
-// V231 runtime acceptance must not assume that 5177 is ready merely because the
-// independent 5279 auth sidecar answered first.
 must(runtimeE2E, "await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`");
 must(runtimeE2E, "await waitFor(`${APP_ORIGIN}/api/health`");
 must(runtimeE2E, 'timeoutMs:90000');
 must(runtimeE2E, "healthPayload?.scope!=='LOOPBACK_READINESS_ONLY'");
-must(runtimeE2E, '[V231] isolated runtime E2E passed');
+must(runtimeE2E, "healthResponse.headers.get('x-ce-qc-data-gate')!=='V232-LIVE-PERSISTED-BOARDS'");
+must(runtimeE2E, "healthPayload?.dataState!=='PERSISTED_BOARDS_READY'");
+must(runtimeE2E, 'Number(healthPayload?.nonZeroBusinessCount||0)!==7');
+must(runtimeE2E, '[V232] isolated runtime E2E passed');
 const authReady = runtimeE2E.indexOf("await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`");
 const appReady = runtimeE2E.indexOf("await waitFor(`${APP_ORIGIN}/api/health`");
 const loginRequest = runtimeE2E.indexOf("/api/v213/local-auth/login");
 if (authReady < 0 || appReady <= authReady || loginRequest <= appReady) {
-  throw new Error('V232 runtime E2E ordering invalid: auth sidecar ready -> main 5277 health ready -> login/handoff.');
+  throw new Error('V232 runtime E2E ordering invalid: auth sidecar ready -> live seven-board health ready -> login/handoff.');
 }
 
-// V232 closes the remaining gap between "process is alive" and "the user's
-// persisted dashboards are actually present". On a persisted installation the
-// loopback health response is 503 until all seven required business boards have
-// non-zero live persisted counts. Empty first-time installs are explicitly allowed.
 must(liveDataHealth, "['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']");
 must(liveDataHealth, "req.path!=='/api/health'");
 must(liveDataHealth, 'V232-LIVE-PERSISTED-BOARDS');
