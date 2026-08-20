@@ -164,9 +164,11 @@ async function startAndAccept(iteration){
   const run={iteration,child,logs,authPid:0};
   active=run;
 
-  const ping=await jsonRequest(`${AUTH_ORIGIN}/api/v213/auth-ping`,{},logs);
-  run.authPid=Number(ping.payload?.pid||0);
-  if(!run.authPid)fail(`restart #${iteration}: auth sidecar ping did not expose pid`,logs);
+  const pingResponse=await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`,{timeoutMs:90000,accept:r=>r.status===200,headers:{accept:'application/json'},logs});
+  const pingText=await pingResponse.text();
+  let pingPayload={};try{pingPayload=pingText?JSON.parse(pingText):{};}catch{pingPayload={raw:pingText};}
+  run.authPid=Number(pingPayload?.pid||0);
+  if(pingPayload?.ok!==true||!run.authPid)fail(`restart #${iteration}: auth sidecar readiness/pid mismatch: ${pingText.slice(0,1200)}`,logs);
 
   const healthResponse=await waitFor(`${APP_ORIGIN}/api/health`,{timeoutMs:90000,accept:r=>r.status===200,headers:{accept:'application/json'},logs});
   const healthText=await healthResponse.text();
