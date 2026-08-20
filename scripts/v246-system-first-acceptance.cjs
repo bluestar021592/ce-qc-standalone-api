@@ -15,6 +15,7 @@ const cold=fs.readFileSync('src/v46ColdStartIndexPatch.js','utf8');
 const localTruth=fs.readFileSync('scripts/v225-local-db-truth-smoke.mjs','utf8');
 const dataAudit=fs.readFileSync('scripts/v238-local-production-readonly-gate.mjs','utf8');
 const purge=fs.readFileSync('src/dataPurge.js','utf8');
+const restartE2E=fs.readFileSync('scripts/v234-restart-persistence-e2e.mjs','utf8');
 
 must(cold,"import './v246CoreAvailabilityPatch.js';");
 must(core,"const ready=Boolean(services?.ready)");
@@ -30,16 +31,22 @@ must(localTruth,'business data is diagnostic-only and may be reimported');
 must(dataAudit,'WARNING_REIMPORT_ALLOWED');
 must(dataAudit,'DatabaseSync(dbFile,{readOnly:true})');
 must(purge,"retainedScope:['数据库结构和迁移','用户、角色与系统设置'");
+must(restartE2E,'V246-DATA-DIAGNOSTIC-ONLY');
+must(restartE2E,'V246-CORE-SERVICES-FIRST');
+must(restartE2E,'/api/v246/internal-auth/login');
+must(restartE2E,'V246_SAME_ORIGIN_AUTH_PROXY');
 
 for(const file of [
   'bootstrap.js','server.js','src/v246CoreAvailabilityPatch.js','public/v246-core-usability.js',
   'src/v46ColdStartIndexPatch.js','scripts/v225-local-db-truth-smoke.mjs',
-  'scripts/v233-seven-board-local-truth-smoke.mjs','scripts/v238-local-production-readonly-gate.mjs',
+  'scripts/v233-seven-board-local-truth-smoke.mjs','scripts/v234-restart-persistence-e2e.mjs',
+  'scripts/v238-local-production-readonly-gate.mjs','test/v237-startup-triplet-health.test.js',
   'test/v246-system-first.test.js'
 ])run(['--check',file],120000);
 
 run(['--test','test/v246-system-first.test.js'],120000);
 run(['--test','test/v211-fast-auth.test.js'],120000);
+run(['--test','test/v237-startup-triplet-health.test.js'],120000);
 run(['--test','test/v241-readonly-canonical-audit.test.js'],120000);
 run(['scripts/v225-local-db-truth-smoke.mjs'],120000);
 run(['scripts/v233-seven-board-local-truth-smoke.mjs'],120000);
@@ -52,5 +59,6 @@ console.log('CE_QC_V246_INTERNAL_LOGIN=PASS');
 console.log('CE_QC_V246_CE_API_LOGIN_FEEDBACK=PASS');
 console.log('CE_QC_V246_WHPP_REFRESH=PASS');
 console.log('CE_QC_V246_EMPTY_DATA_ALLOWED=PASS');
+console.log('CE_QC_V247_RESTART_CONTRACT=PASS');
 console.log('CE_QC_V246_FULL_FUNCTIONAL_REGRESSION=PASS');
 console.log('CE_QC_V246_SYSTEM_FIRST_ACCEPTANCE=PASS');
