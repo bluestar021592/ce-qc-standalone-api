@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import {
   v241ReadLatestValidBatch,
@@ -101,4 +104,20 @@ test('V241 blocks an actual POD regression per waybill even if aggregate counts 
     assert.deepEqual(ce.podRegressionSample,['CE-OLD']);
     assert.equal(ce.pass,false);
   }finally{db.close();}
+});
+
+test('V241 WHPP read-only audit uses mutable terminal truth and does not block on historical final-row lag alone',()=>{
+  const url=new URL('../scripts/CE_QC_WHPP_Terminal_Authority_Audit_ReadOnly.mjs',import.meta.url);
+  const source=fs.readFileSync(url,'utf8');
+  const syntax=spawnSync(process.execPath,['--check',fileURLToPath(url)],{encoding:'utf8'});
+  assert.equal(syntax.status,0,syntax.stderr||syntax.stdout);
+  assert.match(source,/v241-whpp-current-terminal-readonly-v1/);
+  assert.match(source,/podLockCurrentMismatch/);
+  assert.match(source,/latestScanMismatch/);
+  assert.match(source,/latestTrackMismatch/);
+  assert.match(source,/currentTerminalCarryOpen/);
+  assert.match(source,/currentTerminalLegacyCarryActive/);
+  assert.match(source,/historical normalized final-row lag \(diagnostic only\)/);
+  assert.match(source,/const total=podLockCurrentMismatch\+latestScanMismatch\+latestTrackMismatch\+currentTerminalCarryOpen\+currentTerminalLegacyCarryActive/);
+  assert.doesNotMatch(source,/const total=.*historicalFinalLag/);
 });
