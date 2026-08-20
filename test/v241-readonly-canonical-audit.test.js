@@ -70,7 +70,7 @@ test('V241 canonical source membership unions completed superseded history with 
     assert.equal(cn.latestValidSnapshotCount,0);
     assert.equal(cn.archiveUnifiedCount,1);
     assert.equal(cn.businessParseCount,2);
-    assert.equal(cn.persistedFinalFallbackCount,0);
+    assert.equal(cn.persistedFinalSupplementCount,0);
     assert.equal(cn.sourceMode,'CANONICAL_SOURCE_LEDGER');
     assert.equal(cn.sourceCount,2);
     assert.equal(cn.declaredMismatch,false);
@@ -133,7 +133,7 @@ test('V241 declared business total is a fail-closed source-membership cross-chec
   }finally{db.close();}
 });
 
-test('V242 restores ShopeeCN membership from exact report-date persisted final rows only when source ledgers are absent',()=>{
+test('V242 restores a fully missing ShopeeCN source ledger from exact report-date persisted final membership',()=>{
   const db=fixture();
   try{
     db.prepare("DELETE FROM unified_import_rows WHERE businessType='SHOPEECN'").run();
@@ -149,12 +149,33 @@ test('V242 restores ShopeeCN membership from exact report-date persisted final r
     const truth=v241CollectSourceMembership(db,'2026-08-17','SHOPEECN',batch);
     assert.equal(truth.archiveUnifiedCount,0);
     assert.equal(truth.businessParseCount,0);
-    assert.equal(truth.persistedFinalFallbackCount,2);
-    assert.equal(truth.sourceMode,'PERSISTED_FINAL_MEMBERSHIP_FALLBACK');
+    assert.equal(truth.persistedFinalCandidateCount,2);
+    assert.equal(truth.persistedFinalSupplementCount,2);
+    assert.equal(truth.sourceMode,'PERSISTED_FINAL_MEMBERSHIP_RECOVERY');
     assert.equal(truth.sourceCount,2);
     const audit=v241AuditType(db,'2026-08-17','SHOPEECN',batch);
     assert.equal(audit.normalizedCount,2);
     assert.equal(audit.currentCount,2);
+    assert.equal(audit.pass,true);
+    assert.equal(v241ShopeeOverlap(db,'2026-08-17',batch).count,0);
+  }finally{db.close();}
+});
+
+test('V242 supplements a partially truncated ShopeeVN ledger and excludes a bill explicitly reclassified to ShopeeCN',()=>{
+  const db=fixture();
+  try{
+    db.prepare("DELETE FROM business_daily_reports WHERE businessType='SHOPEEVN'").run();
+    db.prepare("INSERT INTO business_final_rows VALUES('SHOPEEVN','VN-PERSISTED-ONLY','2026-08-17',0,'Pending1次')").run();
+    db.prepare("INSERT INTO shipment_current_state VALUES('VN-PERSISTED-ONLY','SHOPEEVN','2026-08-18','S_NEW','PENDING','SUCCESS','{}','2026-08-18 10:00:00')").run();
+    db.prepare("INSERT INTO business_final_rows VALUES('SHOPEEVN','CN-PARSE','2026-08-17',0,'Pending1次')").run();
+    const batch=v241ReadLatestValidBatch(db,'2026-08-17');
+    const vn=v241CollectSourceMembership(db,'2026-08-17','SHOPEEVN',batch);
+    assert.equal(vn.sourceMode,'CANONICAL_PLUS_PERSISTED_FINAL');
+    assert.equal(vn.persistedFinalSupplementCount,1);
+    assert.equal(vn.members.has('VN-PERSISTED-ONLY'),true);
+    assert.equal(vn.members.has('CN-PARSE'),false);
+    assert.equal(vn.sourceCount,3);
+    const audit=v241AuditType(db,'2026-08-17','SHOPEEVN',batch);
     assert.equal(audit.pass,true);
     assert.equal(v241ShopeeOverlap(db,'2026-08-17',batch).count,0);
   }finally{db.close();}
