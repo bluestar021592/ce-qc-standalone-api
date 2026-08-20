@@ -9,6 +9,7 @@ const localTruth=fs.readFileSync('scripts/v225-local-db-truth-smoke.mjs','utf8')
 const seven=fs.readFileSync('scripts/v233-seven-board-local-truth-smoke.mjs','utf8');
 const production=fs.readFileSync('scripts/v238-local-production-readonly-gate.mjs','utf8');
 const purge=fs.readFileSync('src/dataPurge.js','utf8');
+const restartE2E=fs.readFileSync('scripts/v234-restart-persistence-e2e.mjs','utf8');
 
 test('V246 startup is service-first: business data can be empty or partial without blocking 5177',()=>{
   assert.match(cold,/v246CoreAvailabilityPatch\.js/);
@@ -64,4 +65,15 @@ test('V246 clean reset boundary preserves accounts/configuration instead of dele
   assert.match(purge,/最新门店白名单/);
   assert.match(purge,/审计日志/);
   assert.doesNotMatch(core,/DELETE FROM users/i);
+});
+
+test('V247 restart E2E cannot regress to the obsolete V232 data-blocking health contract',()=>{
+  assert.match(restartE2E,/V246-DATA-DIAGNOSTIC-ONLY/);
+  assert.match(restartE2E,/V246-CORE-SERVICES-FIRST/);
+  assert.match(restartE2E,/CORE_SERVICES_READY/);
+  assert.match(restartE2E,/NOT_REQUIRED_FOR_STARTUP/);
+  assert.match(restartE2E,/\/api\/v246\/internal-auth\/login/);
+  assert.match(restartE2E,/V246_SAME_ORIGIN_AUTH_PROXY/);
+  assert.doesNotMatch(restartE2E,/healthResponse\.headers\.get\('x-ce-qc-data-gate'\)!=='V232-LIVE-PERSISTED-BOARDS'/);
+  assert.doesNotMatch(restartE2E,/health\?\.dataState!=='PERSISTED_BOARDS_READY'/);
 });
