@@ -31,10 +31,11 @@ test('desktop update candidate validates and backs up with candidate tool before
 
 test('normal startup serves first paint before optional historical maintenance',()=>{
   const bootstrap=read('bootstrap.js');
-  const server=bootstrap.indexOf("await importPhase('server', './server.js')");
+  const serverHelper=bootstrap.indexOf("return await importPhase('server', './server.js')");
   const interactive=bootstrap.indexOf('await importServerInteractiveFirst()');
   const maintenance=bootstrap.indexOf('scheduleDeferredMaintenance({ v92, v76Repair })');
-  assert.ok(server>=0&&interactive>=0&&maintenance>interactive);
+  assert.ok(serverHelper>=0&&interactive>serverHelper&&maintenance>interactive);
+  assert.match(bootstrap,/dashboard STARTUP_WARM deferred from 1500ms/);
   assert.match(bootstrap,/background maintenance disabled on normal startup/);
 });
 
