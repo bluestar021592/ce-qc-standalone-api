@@ -25,18 +25,27 @@ export function v241ReadLatestValidBatch(db,reportDate){
 
 function addBills(set,rows=[]){for(const row of rows){const code=bill(row?.shipmentCode);if(code)set.add(code);}return set;}
 
+// A partial re-import may supersede the previous batch without carrying every waybill.
+// Keep the newest completed observation for each waybill across VALID + SUPERSEDED
+// snapshots. If a waybill was reclassified, only its newest businessType wins; if it
+// disappeared from the partial re-import, its older completed membership survives.
 function unifiedArchiveMembers(db,reportDate,type){
   const set=new Set();
   if(!v241TableExists(db,'unified_import_batches')||!v241TableExists(db,'unified_import_rows')||!v241TableExists(db,'unified_snapshots'))return set;
   try{
     addBills(set,db.prepare(`
-      SELECT DISTINCT r.shipmentCode
-      FROM unified_import_batches b
-      INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId AND UPPER(COALESCE(s.status,''))='COMPLETED'
-      INNER JOIN unified_import_rows r ON r.snapshotId=b.snapshotId
-      WHERE b.reportDate=?
-        AND UPPER(COALESCE(b.status,'VALID')) IN ('VALID','SUPERSEDED')
-        AND UPPER(COALESCE(r.businessType,''))=?
+      WITH ranked AS (
+        SELECT r.shipmentCode,UPPER(COALESCE(r.businessType,'')) businessType,
+               ROW_NUMBER() OVER (
+                 PARTITION BY UPPER(COALESCE(r.shipmentCode,''))
+                 ORDER BY COALESCE(b.createdAt,'') DESC,COALESCE(b.batchId,'') DESC,COALESCE(r.id,0) DESC
+               ) rn
+        FROM unified_import_batches b
+        INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId AND UPPER(COALESCE(s.status,''))='COMPLETED'
+        INNER JOIN unified_import_rows r ON r.snapshotId=b.snapshotId
+        WHERE b.reportDate=? AND UPPER(COALESCE(b.status,'VALID')) IN ('VALID','SUPERSEDED')
+      )
+      SELECT shipmentCode FROM ranked WHERE rn=1 AND businessType=?
     `).all(reportDate,type));
   }catch{}
   return set;
@@ -87,14 +96,15 @@ export function v241CollectSourceMembership(db,reportDate,type,batch=null){
   const parse=businessParseMembers(db,reportDate,type);
   const latest=latestValidSnapshotMembers(db,batch,type);
   const members=new Set([...archive,...parse]);
-  if(type==='WHPP'&&!members.size)for(const code of parse)members.add(code);
+  const declared=declaredDailyCount(db,reportDate,type);
   return {
     members,
     sourceCount:members.size,
     archiveUnifiedCount:archive.size,
     businessParseCount:parse.size,
     latestValidSnapshotCount:latest.size,
-    declaredDailyCount:declaredDailyCount(db,reportDate,type),
+    declaredDailyCount:declared,
+    declaredMismatch:declared!==null&&declared>0&&declared!==members.size,
     recoveredBeyondLatest:[...members].filter(code=>!latest.has(code)).length
   };
 }
@@ -157,6 +167,7 @@ export function v241AuditType(db,reportDate,type,batch=null){
   const podRegressions=[...normalized.podBills].filter(code=>!current.podBills.has(code));
   const pass=source.sourceCount===normalized.count
     && source.sourceCount===current.count
+    && !source.declaredMismatch
     && podRegressions.length===0
     && normalized.pod<=normalized.count
     && current.pod<=current.count;
