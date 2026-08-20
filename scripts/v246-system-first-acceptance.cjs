@@ -11,6 +11,8 @@ const run=(args,timeout=480000)=>{
 const must=(source,token)=>{if(!source.includes(token))throw new Error(`V246 contract missing: ${token}`);};
 const core=fs.readFileSync('src/v246CoreAvailabilityPatch.js','utf8');
 const whppAuthority=fs.readFileSync('src/v248WhppAuthorityPatch.js','utf8');
+const sidecar=fs.readFileSync('src/v213AuthSidecar.js','utf8');
+const directLogin=fs.readFileSync('src/v249LoginReliabilityPatch.js','utf8');
 const client=fs.readFileSync('public/v246-core-usability.js','utf8');
 const cold=fs.readFileSync('src/v46ColdStartIndexPatch.js','utf8');
 const localTruth=fs.readFileSync('scripts/v225-local-db-truth-smoke.mjs','utf8');
@@ -20,6 +22,7 @@ const restartE2E=fs.readFileSync('scripts/v234-restart-persistence-e2e.mjs','utf
 
 must(cold,"import './v246CoreAvailabilityPatch.js';");
 must(cold,"import './v248WhppAuthorityPatch.js';");
+must(cold,"import './v249LoginReliabilityPatch.js';");
 must(core,"const ready=Boolean(services?.ready)");
 must(core,"dataState:'NOT_REQUIRED_FOR_STARTUP'");
 must(core,"dataBlocking:false");
@@ -31,6 +34,13 @@ must(whppAuthority,'V248-AFTER-ACCESS-BEFORE-LEGACY');
 must(whppAuthority,'const result=previousUse.apply(this,args)');
 must(whppAuthority,'previousUse.call(this,v248WhppAuthority)');
 must(whppAuthority,'2026-08-20-v246-whpp-stable-refresh-v1');
+must(sidecar,"V249_AUTH_PATH_VERSION='2026-08-20-v249-direct-sidecar-auth-v1'");
+must(sidecar,'persistent read-only auth DB');
+must(sidecar,"authMode:'V249_DIRECT_AUTH_SIDECAR'");
+must(directLogin,'账号校验由独立认证进程处理，不再受看板数据库任务阻塞');
+must(directLogin,"/api/v213/local-auth/login");
+must(directLogin,'const deadline=Date.now()+30000');
+must(directLogin,'账号已验证，主程序繁忙，正在等待会话接管');
 must(client,'正在登录CE系统');
 must(client,'/api/v132/whpp-fast-summary');
 must(localTruth,'business data is diagnostic-only and may be reimported');
@@ -43,17 +53,18 @@ must(restartE2E,'/api/v246/internal-auth/login');
 must(restartE2E,'V246_SAME_ORIGIN_AUTH_PROXY');
 
 for(const file of [
-  'bootstrap.js','server.js','src/v246CoreAvailabilityPatch.js','src/v248WhppAuthorityPatch.js','public/v246-core-usability.js',
-  'src/v46ColdStartIndexPatch.js','scripts/v225-local-db-truth-smoke.mjs',
-  'scripts/v233-seven-board-local-truth-smoke.mjs','scripts/v234-restart-persistence-e2e.mjs',
-  'scripts/v238-local-production-readonly-gate.mjs','test/v237-startup-triplet-health.test.js',
-  'test/v246-system-first.test.js'
+  'bootstrap.js','server.js','src/v213AuthSidecar.js','src/v246CoreAvailabilityPatch.js','src/v248WhppAuthorityPatch.js','src/v249LoginReliabilityPatch.js','public/v246-core-usability.js',
+  'src/v46ColdStartIndexPatch.js','scripts/v225-local-db-truth-smoke.mjs','scripts/v233-seven-board-local-truth-smoke.mjs',
+  'scripts/v234-restart-persistence-e2e.mjs','scripts/v238-local-production-readonly-gate.mjs','scripts/v249-direct-auth-e2e.mjs',
+  'test/v237-startup-triplet-health.test.js','test/v246-system-first.test.js','test/v249-direct-auth.test.js'
 ])run(['--check',file],120000);
 
+run(['--test','test/v249-direct-auth.test.js'],120000);
 run(['--test','test/v246-system-first.test.js'],120000);
 run(['--test','test/v211-fast-auth.test.js'],120000);
 run(['--test','test/v237-startup-triplet-health.test.js'],120000);
 run(['--test','test/v241-readonly-canonical-audit.test.js'],120000);
+run(['scripts/v249-direct-auth-e2e.mjs'],180000);
 run(['scripts/v225-local-db-truth-smoke.mjs'],120000);
 run(['scripts/v233-seven-board-local-truth-smoke.mjs'],120000);
 run(['scripts/v234-restart-persistence-e2e.mjs'],300000);
@@ -61,6 +72,8 @@ run(['scripts/v235-final-functional-acceptance.cjs'],480000);
 run(['scripts/v238-local-production-readonly-gate.mjs'],360000);
 
 console.log('CE_QC_V246_CORE_STARTUP=PASS');
+console.log('CE_QC_V249_DIRECT_AUTH_SIDECAR=PASS');
+console.log('CE_QC_V249_RESILIENT_HANDOFF=PASS');
 console.log('CE_QC_V246_INTERNAL_LOGIN=PASS');
 console.log('CE_QC_V246_CE_API_LOGIN_FEEDBACK=PASS');
 console.log('CE_QC_V248_WHPP_ROUTE_AUTHORITY=PASS');
@@ -68,4 +81,4 @@ console.log('CE_QC_V246_WHPP_REFRESH=PASS');
 console.log('CE_QC_V246_EMPTY_DATA_ALLOWED=PASS');
 console.log('CE_QC_V247_RESTART_CONTRACT=PASS');
 console.log('CE_QC_V246_FULL_FUNCTIONAL_REGRESSION=PASS');
-console.log('CE_QC_V246_SYSTEM_FIRST_ACCEPTANCE=PASS');
+console.log('CE_QC_V249_SYSTEM_FIRST_ACCEPTANCE=PASS');
