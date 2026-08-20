@@ -131,9 +131,43 @@ Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
 
+$PersistedTruthStatus = 'UNKNOWN'
+$PersistedTruthSummary = ''
+function Invoke-PersistedDataTruthGate {
+    $TruthScript = Join-Path $ProjectRoot 'scripts\v225-local-db-truth-smoke.mjs'
+    if (-not (Test-Path -LiteralPath $TruthScript)) {
+        Fail '[ERROR] Local persisted-data acceptance script is missing. Refusing to open an unverified build.' 22
+    }
+
+    Write-Host 'Verifying persisted local database truth before startup...' -ForegroundColor Cyan
+    $truthLines = @(& $NodeExe $TruthScript 2>&1 | ForEach-Object { [string]$_ })
+    $truthCode = $LASTEXITCODE
+    foreach ($line in $truthLines) {
+        if ($line) { Write-Host "       $line" -ForegroundColor DarkGray }
+    }
+    if ($truthCode -ne 0) {
+        Fail '[ERROR] Persisted database truth verification failed. Browser will not be opened.' 23
+    }
+
+    $joined = ($truthLines -join "`n")
+    if ($joined -match '\[V225\] local DB truth smoke passed:') {
+        $script:PersistedTruthStatus = 'PASS'
+    }
+    elseif ($joined -match '\[V225\] local DB truth smoke skipped: database file not present') {
+        $script:PersistedTruthStatus = 'EMPTY_INSTALL'
+    }
+    else {
+        Fail '[ERROR] Persisted database verifier did not return a recognized PASS/SKIP result. Refusing ambiguous startup.' 24
+    }
+    $script:PersistedTruthSummary = ($truthLines | Select-Object -Last 1)
+    Write-Host "Persisted data gate: $script:PersistedTruthStatus" -ForegroundColor Green
+}
+Invoke-PersistedDataTruthGate
+
 $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
 $LocalUrl = 'http://127.0.0.1:5177'
+$HealthUrl = "$LocalUrl/api/health"
 
 function Archive-BackendLogs([string]$Reason) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -170,18 +204,21 @@ function Write-BackendInitProgress([int]$Elapsed, [int]$Total) {
 
 function Wait-BackendReady($Backend, [int]$Seconds = 240) {
     $status = 0
+    $mode = ''
     for ($i = 1; $i -le $Seconds; $i++) {
         Start-Sleep -Seconds 1
         try {
-            $Response = Invoke-WebRequest $LocalUrl -UseBasicParsing -TimeoutSec 2
+            $Response = Invoke-WebRequest $HealthUrl -UseBasicParsing -TimeoutSec 2 -Headers @{ Accept = 'application/json' }
             $status = [int]$Response.StatusCode
-            if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
+            $mode = [string]$Response.Headers['X-CE-QC-Health-Mode']
+            $payload = $null
+            try { $payload = $Response.Content | ConvertFrom-Json } catch {}
+            if ($status -eq 200 -and $mode -eq 'LOOPBACK_READINESS_ONLY' -and $payload -and $payload.ok -eq $true -and $payload.ready -eq $true) {
+                return @{ Ready = $true; Status = $status; Mode = $mode }
+            }
         } catch {
             try {
-                if ($_.Exception.Response) {
-                    $status = [int]$_.Exception.Response.StatusCode
-                    if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
-                }
+                if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
             } catch {}
         }
         $alive = $false
@@ -192,7 +229,7 @@ function Wait-BackendReady($Backend, [int]$Seconds = 240) {
         }
         if (($i % 30) -eq 0) { Write-BackendInitProgress $i $Seconds }
     }
-    return @{ Ready = $false; Status = $status }
+    return @{ Ready = $false; Status = $status; Mode = $mode }
 }
 
 function Show-RecentBackendLogs {
@@ -226,7 +263,7 @@ function Get-BackendExitCode($Backend) {
 }
 
 Write-Host ''
-Write-Host 'Starting backend and waiting for the local web application...' -ForegroundColor Cyan
+Write-Host 'Starting backend and waiting for the exact loopback health acceptance...' -ForegroundColor Cyan
 Write-Host 'Large local SQLite data can require extra startup time; the launcher will wait up to 4 minutes.' -ForegroundColor DarkGray
 try { $Backend = Start-BackendInstance } catch { Fail "[ERROR] Unable to start Node.js backend: $($_.Exception.Message)" 17 }
 $Probe = Wait-BackendReady $Backend 240
@@ -244,15 +281,16 @@ if (-not $Probe.Ready -and (Test-AddressInUseLog)) {
 if (-not $Probe.Ready) {
     Archive-BackendLogs 'initial_start_failure'
     Write-Host ''
-    Write-Host '[ERROR] Backend did not become reachable on 127.0.0.1:5177.' -ForegroundColor Red
+    Write-Host '[ERROR] Backend did not pass exact /api/health readiness on 127.0.0.1:5177.' -ForegroundColor Red
+    Write-Host "Last health HTTP status: $($Probe.Status)" -ForegroundColor Red
     if (-not (Test-BackendProcessAlive $Backend)) { Write-Host "Node process exited early. Exit code: $(Get-BackendExitCode $Backend)" -ForegroundColor Red }
     else {
-        Write-Host 'Node process remained alive but initialization exceeded the safe startup window.' -ForegroundColor Red
-        Write-Host 'The bootstrap phase lines below identify exactly where initialization stopped.' -ForegroundColor Yellow
+        Write-Host 'Node process remained alive but exact health acceptance did not pass.' -ForegroundColor Red
+        Write-Host 'HTTP 401/403/404 no longer counts as BACKEND READY.' -ForegroundColor Yellow
         Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue
     }
     Show-RecentBackendLogs
-    Fail '[ERROR] CE QC startup verification failed. Send this screen to ChatGPT.' 18
+    Fail '[ERROR] CE QC startup verification failed. Browser was not opened.' 18
 }
 
 $LanIp = ''
@@ -265,10 +303,13 @@ $LanUrl = if ($LanIp) { "http://$LanIp`:5177" } else { '' }
 
 Write-Host ''
 Write-Host '===============================================' -ForegroundColor Green
-Write-Host 'BACKEND READY - local web response verified' -ForegroundColor Green
+Write-Host 'BACKEND READY - exact health + local data gate passed' -ForegroundColor Green
 Write-Host "Local URL: $LocalUrl" -ForegroundColor Green
 if ($LanUrl) { Write-Host "LAN URL: $LanUrl" -ForegroundColor Green }
-Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green
+Write-Host "Local health HTTP status: $($Probe.Status)" -ForegroundColor Green
+Write-Host "Health mode: $($Probe.Mode)" -ForegroundColor Green
+Write-Host "Persisted data gate: $PersistedTruthStatus" -ForegroundColor Green
+if ($PersistedTruthSummary) { Write-Host "Persisted data truth: $PersistedTruthSummary" -ForegroundColor DarkGray }
 Write-Host "Startup log: $LogFile"
 Write-Host "Crash archive: $CrashDir"
 Write-Host 'Automatic backend restart: ENABLED (max 5 crashes / 10 minutes).' -ForegroundColor Green
@@ -312,14 +353,15 @@ while ($true) {
         $Probe = Wait-BackendReady $Backend 120
         if ($Probe.Ready) {
             Write-Host ''
-            Write-Host 'BACKEND RECOVERED - browser can reconnect automatically.' -ForegroundColor Green
-            Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green
+            Write-Host 'BACKEND RECOVERED - exact loopback health passed.' -ForegroundColor Green
+            Write-Host "Local health HTTP status: $($Probe.Status)" -ForegroundColor Green
+            Write-Host "Health mode: $($Probe.Mode)" -ForegroundColor Green
             continue
         }
 
         Archive-BackendLogs 'restart_not_ready'
         if (Test-BackendProcessAlive $Backend) { Stop-Process -Id $Backend.Id -Force -ErrorAction SilentlyContinue }
-        Write-Host '[WARN] Restarted process did not become ready; supervisor will retry.' -ForegroundColor Red
+        Write-Host '[WARN] Restarted process did not pass exact health acceptance; supervisor will retry.' -ForegroundColor Red
     }
     catch {
         Write-Host ''
