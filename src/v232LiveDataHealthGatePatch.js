@@ -132,7 +132,7 @@ function liveDataHealth(req,res,next){
 }
 
 if(!express.application[INSTALLED]){
-  Object.defineProperty(express.application,INSTALLED],{value:true});
+  Object.defineProperty(express.application,INSTALLED,{value:true});
   const previousUse=express.application.use;
   let mounted=false;
   express.application.use=function v232LiveDataGateBeforeAccess(...args){
