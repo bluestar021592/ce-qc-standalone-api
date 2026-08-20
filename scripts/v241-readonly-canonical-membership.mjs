@@ -11,6 +11,11 @@ export function v241TableExists(db,name){
   try{return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name));}
   catch{return false;}
 }
+function tableColumns(db,name){
+  if(!v241TableExists(db,name))return new Set();
+  try{return new Set(db.prepare(`PRAGMA table_info(${name})`).all().map(row=>String(row.name||'')));}
+  catch{return new Set();}
+}
 
 export function v241ReadLatestValidBatch(db,reportDate){
   if(!v241TableExists(db,'unified_import_batches'))return null;
@@ -76,6 +81,38 @@ function businessParseMembers(db,reportDate,type){
   return set;
 }
 
+// Some older completed Shopee runs predate durable CN/VN source-row persistence. In
+// those databases the exact report-date business_final_rows are the only surviving
+// per-waybill membership ledger (V232 used this same persisted layer to recover the
+// board). Use it only when archive + parse membership for that board is completely
+// absent; never union it on top of a real source ledger, so stale derived rows cannot
+// silently inflate a valid import. Generic SHOPEE rows are accepted only when their
+// persisted recipient_group explicitly identifies CN/VN.
+function persistedFinalFallbackMembers(db,reportDate,type){
+  const set=new Set();
+  if(!v241TableExists(db,'business_final_rows'))return set;
+  const cols=tableColumns(db,'business_final_rows');
+  try{
+    if(type==='SHOPEECN'||type==='SHOPEEVN'){
+      const group=type==='SHOPEECN'?'CN':'VN';
+      if(cols.has('recipient_group')){
+        addBills(set,db.prepare(`
+          SELECT DISTINCT shipmentCode FROM business_final_rows
+          WHERE reportDate=? AND (
+            UPPER(COALESCE(businessType,''))=? OR
+            (UPPER(COALESCE(businessType,''))='SHOPEE' AND UPPER(COALESCE(recipient_group,''))=?)
+          )
+        `).all(reportDate,type,group));
+      }else{
+        addBills(set,db.prepare(`SELECT DISTINCT shipmentCode FROM business_final_rows WHERE reportDate=? AND UPPER(COALESCE(businessType,''))=?`).all(reportDate,type));
+      }
+    }else if(type==='WHPP'){
+      addBills(set,db.prepare(`SELECT DISTINCT shipmentCode FROM business_final_rows WHERE reportDate=? AND UPPER(COALESCE(businessType,''))='WHPP'`).all(reportDate));
+    }
+  }catch{}
+  return set;
+}
+
 function latestValidSnapshotMembers(db,batch,type){
   const set=new Set();
   if(!batch?.snapshotId||!v241TableExists(db,'unified_import_rows'))return set;
@@ -96,12 +133,17 @@ export function v241CollectSourceMembership(db,reportDate,type,batch=null){
   const parse=businessParseMembers(db,reportDate,type);
   const latest=latestValidSnapshotMembers(db,batch,type);
   const members=new Set([...archive,...parse]);
+  const fallback=(members.size===0&&(V241_SHOPEE_TYPES.has(type)||type==='WHPP'))?persistedFinalFallbackMembers(db,reportDate,type):new Set();
+  if(members.size===0)for(const code of fallback)members.add(code);
   const declared=declaredDailyCount(db,reportDate,type);
+  const sourceMode=archive.size||parse.size?'CANONICAL_SOURCE_LEDGER':(fallback.size?'PERSISTED_FINAL_MEMBERSHIP_FALLBACK':'MISSING');
   return {
     members,
     sourceCount:members.size,
     archiveUnifiedCount:archive.size,
     businessParseCount:parse.size,
+    persistedFinalFallbackCount:fallback.size,
+    sourceMode,
     latestValidSnapshotCount:latest.size,
     declaredDailyCount:declared,
     declaredMismatch:declared!==null&&declared>0&&declared!==members.size,
@@ -134,7 +176,13 @@ export function v241NormalizedStats(db,reportDate,type,members){
         rows=db.prepare(`SELECT shipmentCode,isPod,primaryCategory FROM business_final_rows WHERE reportDate=? AND UPPER(COALESCE(businessType,''))='WHPP' AND shipmentCode IN (${marks})`).all(reportDate,...part);
       }else if(V241_SHOPEE_TYPES.has(type)){
         if(!v241TableExists(db,'business_final_rows'))continue;
-        rows=db.prepare(`SELECT shipmentCode,isPod,primaryCategory FROM business_final_rows WHERE reportDate=? AND UPPER(COALESCE(businessType,'')) IN (?, 'SHOPEE') AND shipmentCode IN (${marks})`).all(reportDate,type,...part);
+        const cols=tableColumns(db,'business_final_rows');
+        if(cols.has('recipient_group')){
+          const group=type==='SHOPEECN'?'CN':'VN';
+          rows=db.prepare(`SELECT shipmentCode,isPod,primaryCategory FROM business_final_rows WHERE reportDate=? AND (UPPER(COALESCE(businessType,''))=? OR (UPPER(COALESCE(businessType,''))='SHOPEE' AND UPPER(COALESCE(recipient_group,''))=?)) AND shipmentCode IN (${marks})`).all(reportDate,type,group,...part);
+        }else{
+          rows=db.prepare(`SELECT shipmentCode,isPod,primaryCategory FROM business_final_rows WHERE reportDate=? AND UPPER(COALESCE(businessType,'')) IN (?, 'SHOPEE') AND shipmentCode IN (${marks})`).all(reportDate,type,...part);
+        }
       }else{
         if(!v241TableExists(db,'final_rows'))continue;
         rows=db.prepare(`SELECT shipmentCode,isPod,primaryCategory FROM final_rows WHERE reportDate=? AND shipmentCode IN (${marks})`).all(reportDate,...part);
