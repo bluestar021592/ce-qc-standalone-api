@@ -87,10 +87,6 @@ try{
   child.stdout.on('data',collect);child.stderr.on('data',collect);
   child.once('exit',(code,signal)=>logs.push(`\n[child exit code=${code} signal=${signal}]\n`));
 
-  // The auth sidecar is intentionally independent and can become reachable before
-  // the main 5277 web process finishes bootstrapping. A direct fetch here created
-  // a Windows-only race where a healthy candidate was rejected with ECONNREFUSED.
-  // Wait independently for both readiness signals before continuing the E2E chain.
   await waitFor(`${AUTH_ORIGIN}/api/v213/auth-ping`,{accept:r=>r.status===200});
   const healthResponse=await waitFor(`${APP_ORIGIN}/api/health`,{
     timeoutMs:90000,
@@ -102,6 +98,18 @@ try{
   try{healthPayload=healthText?JSON.parse(healthText):{};}catch{healthPayload={raw:healthText};}
   if(healthPayload?.scope!=='LOOPBACK_READINESS_ONLY'||healthPayload?.ready!==true||healthPayload?.ok!==true){
     fail(`loopback health did not report readiness: ${healthText.slice(0,1200)}`);
+  }
+  if(healthResponse.headers.get('x-ce-qc-data-gate')!=='V232-LIVE-PERSISTED-BOARDS'){
+    fail(`V232 live data gate did not own /api/health: headers=${JSON.stringify(Object.fromEntries(healthResponse.headers.entries()))}`);
+  }
+  if(healthPayload?.dataState!=='PERSISTED_BOARDS_READY'||String(healthPayload?.reportDate||'')!==REPORT_DATE){
+    fail(`V232 live data readiness mismatch: ${healthText.slice(0,1200)}`);
+  }
+  if(Number(healthPayload?.nonZeroBusinessCount||0)!==7||!Array.isArray(healthPayload?.zeroBusinessTypes)||healthPayload.zeroBusinessTypes.length!==0){
+    fail(`V232 did not require seven non-zero boards: ${healthText.slice(0,1200)}`);
+  }
+  for(const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']){
+    if(Number(healthPayload?.businesses?.[type]||0)<1)fail(`V232 health business ${type} remained zero: ${healthText.slice(0,1200)}`);
   }
 
   const launcherRoot=await waitFor(`${APP_ORIGIN}/`,{accept:r=>r.status===200});
@@ -150,7 +158,7 @@ try{
   if(!html.includes('/v225-auth-bootstrap-guard.js'))fail('authenticated app shell is missing V225 pre-app auth/bootstrap guard');
   if(!html.includes('/app.js'))fail('authenticated app shell is missing app.js');
 
-  console.log(`[V231] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: auth sidecar + main health independently ready -> browser login -> auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
+  console.log(`[V232] isolated runtime E2E passed on ${APP_PORT}/${AUTH_PORT}: live seven-board health -> browser login -> auth -> handoff cookie -> session ${USERNAME} -> persisted ${REPORT_DATE} -> 7 business non-zero -> WHPP -> guarded shell.`);
 }finally{
   if(child&&!child.killed){try{child.kill('SIGTERM');}catch{}}
   await sleep(700);
