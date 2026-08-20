@@ -16,7 +16,7 @@ function fixture(){
   db.exec(`
     CREATE TABLE unified_snapshots(snapshotId TEXT PRIMARY KEY,status TEXT);
     CREATE TABLE unified_import_batches(batchId TEXT PRIMARY KEY,snapshotId TEXT,reportDate TEXT,status TEXT,createdAt TEXT);
-    CREATE TABLE unified_import_rows(snapshotId TEXT,businessType TEXT,shipmentCode TEXT);
+    CREATE TABLE unified_import_rows(id INTEGER PRIMARY KEY AUTOINCREMENT,snapshotId TEXT,businessType TEXT,shipmentCode TEXT);
     CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,recipient_group TEXT);
     CREATE TABLE business_daily_reports(businessType TEXT,reportDate TEXT,totalCount INTEGER);
     CREATE TABLE final_rows(shipmentCode TEXT,reportDate TEXT,isPod INTEGER,primaryCategory TEXT);
@@ -28,7 +28,7 @@ function fixture(){
     INSERT INTO unified_import_batches VALUES
       ('B_OLD','S_OLD','2026-08-17','SUPERSEDED','2026-08-17T10:00:00Z'),
       ('B_NEW','S_NEW','2026-08-17','VALID','2026-08-17T12:00:00Z');
-    INSERT INTO unified_import_rows VALUES
+    INSERT INTO unified_import_rows(snapshotId,businessType,shipmentCode) VALUES
       ('S_OLD','CE','CE-OLD'),('S_NEW','CE','CE-NEW'),
       ('S_OLD','SHOPEECN','CN-OLD'),('S_NEW','SHOPEEVN','VN-NEW');
     INSERT INTO business_daily_parse_rows VALUES
@@ -65,16 +65,30 @@ test('V241 canonical source membership unions completed superseded history with 
     assert.equal(ce.archiveUnifiedCount,2);
     assert.equal(ce.sourceCount,2);
     assert.equal(ce.recoveredBeyondLatest,1);
+    assert.equal(ce.declaredMismatch,false);
     const cn=v241CollectSourceMembership(db,'2026-08-17','SHOPEECN',batch);
     assert.equal(cn.latestValidSnapshotCount,0);
     assert.equal(cn.archiveUnifiedCount,1);
     assert.equal(cn.businessParseCount,2);
     assert.equal(cn.sourceCount,2);
+    assert.equal(cn.declaredMismatch,false);
     const vn=v241CollectSourceMembership(db,'2026-08-17','SHOPEEVN',batch);
     assert.equal(vn.sourceCount,2);
     const whpp=v241CollectSourceMembership(db,'2026-08-17','WHPP',batch);
     assert.equal(whpp.sourceCount,1);
     assert.equal(v241ShopeeOverlap(db,'2026-08-17',batch).count,0);
+  }finally{db.close();}
+});
+
+test('V241 newest completed observation wins if a waybill was reclassified across same-day snapshots',()=>{
+  const db=fixture();
+  try{
+    db.prepare("INSERT INTO unified_import_rows(snapshotId,businessType,shipmentCode) VALUES('S_NEW','CEAF','CE-OLD')").run();
+    const batch=v241ReadLatestValidBatch(db,'2026-08-17');
+    const ce=v241CollectSourceMembership(db,'2026-08-17','CE',batch);
+    const ceaf=v241CollectSourceMembership(db,'2026-08-17','CEAF',batch);
+    assert.equal(ce.members.has('CE-OLD'),false);
+    assert.equal(ceaf.members.has('CE-OLD'),true);
   }finally{db.close();}
 });
 
@@ -102,6 +116,17 @@ test('V241 blocks an actual POD regression per waybill even if aggregate counts 
     const ce=v241AuditType(db,'2026-08-17','CE',batch);
     assert.equal(ce.podRegressionCount,1);
     assert.deepEqual(ce.podRegressionSample,['CE-OLD']);
+    assert.equal(ce.pass,false);
+  }finally{db.close();}
+});
+
+test('V241 declared business total is a fail-closed source-membership cross-check',()=>{
+  const db=fixture();
+  try{
+    db.prepare("UPDATE business_daily_reports SET totalCount=3 WHERE businessType='CE' AND reportDate='2026-08-17'").run();
+    const batch=v241ReadLatestValidBatch(db,'2026-08-17');
+    const ce=v241AuditType(db,'2026-08-17','CE',batch);
+    assert.equal(ce.declaredMismatch,true);
     assert.equal(ce.pass,false);
   }finally{db.close();}
 });
