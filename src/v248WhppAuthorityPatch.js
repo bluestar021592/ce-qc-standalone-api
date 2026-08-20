@@ -3,6 +3,7 @@ import { getDb } from './db.js';
 import { inspectV132WhppFastSummary } from './v132WhppFastIntegrationPatch.js';
 
 export const V248_WHPP_AUTHORITY_VERSION='2026-08-20-v248-whpp-after-access-authority-v1';
+const RESPONSE_PATCH_ID='2026-08-20-v246-whpp-stable-refresh-v1';
 const INSTALLED=Symbol.for('ce-qc.v248-whpp-authority-installed');
 const ROUTE='/api/v132/whpp-fast-summary';
 
@@ -33,9 +34,9 @@ function v248WhppAuthority(req,res,next){
     const payload=inspectV132WhppFastSummary(reportDate);
     res.setHeader('Cache-Control','private, max-age=3');
     res.setHeader('X-CE-QC-WHPP-Authority','V248-AFTER-ACCESS-BEFORE-LEGACY');
-    return res.json({...payload,patchId:V248_WHPP_AUTHORITY_VERSION,resolvedReportDate:reportDate||'',routeAuthority:'AFTER_ACCESS_BEFORE_LEGACY'});
+    return res.json({...payload,patchId:RESPONSE_PATCH_ID,authorityVersion:V248_WHPP_AUTHORITY_VERSION,resolvedReportDate:reportDate||'',routeAuthority:'AFTER_ACCESS_BEFORE_LEGACY'});
   }catch(error){
-    return res.status(500).json({ok:false,patchId:V248_WHPP_AUTHORITY_VERSION,code:'V248_WHPP_SUMMARY_FAILED',error:error?.message||String(error)});
+    return res.status(500).json({ok:false,patchId:RESPONSE_PATCH_ID,authorityVersion:V248_WHPP_AUTHORITY_VERSION,code:'V248_WHPP_SUMMARY_FAILED',error:error?.message||String(error)});
   }
 }
 
@@ -47,8 +48,8 @@ if(!express.application[INSTALLED]){
     const functions=args.flat().filter(value=>typeof value==='function');
     const access=functions.some(fn=>fn.name==='accessIdentity'||fn.name==='v209AccessIdentityNoHang');
     if(access&&!mounted){
-      // First let V246 mount its login/health middleware and the real access middleware.
-      // Then mount WHPP authority immediately AFTER authentication but BEFORE all legacy routes.
+      // First let V246 mount login/health and the real access middleware.
+      // Then mount WHPP authority AFTER authentication but BEFORE legacy routes.
       const result=previousUse.apply(this,args);
       mounted=true;
       previousUse.call(this,v248WhppAuthority);
@@ -60,4 +61,4 @@ if(!express.application[INSTALLED]){
 
 console.log('[CE-QC][V248] authenticated WHPP fast summary authority armed after access middleware and before legacy V137/V132 routes.');
 
-export const __test={latestWhppDate,v248WhppAuthority,ROUTE};
+export const __test={latestWhppDate,v248WhppAuthority,ROUTE,RESPONSE_PATCH_ID};
