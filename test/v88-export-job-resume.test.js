@@ -20,8 +20,9 @@ test('active background export job is persisted and automatically resumed after 
   assert.match(ui, /localStorage\.getItem\(ACTIVE_JOB_KEY/);
   assert.match(ui, /localStorage\.removeItem\(ACTIVE_JOB_KEY/);
   assert.match(ui, /saveActiveJob/);
-  assert.match(ui, /async function resumeActiveJob\(\)/);
-  assert.match(ui, /resumeActiveJob/);
+  assert.match(ui, /async function resumeActiveJobV193\(\)/);
+  assert.match(ui, /global\.resumeActiveExportJob = resumeActiveJobV193/);
+  assert.match(ui, /void resumeActiveJobV193\(\)/);
   assert.match(ui, /状态连接暂时中断/);
   assert.match(injector, /v84-async-export-ui\.js\?v=20260818-v193-1/);
 });
