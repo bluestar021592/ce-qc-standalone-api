@@ -6,12 +6,16 @@ import test from 'node:test';
 
 const read=file=>fs.readFileSync(path.resolve(file),'utf8');
 
-test('V55 facade is the canonical compact dashboard reader',()=>{
+test('V191 facade wraps the canonical compact V55 dashboard reader without replacing it',()=>{
   const facade=read('src/rangeDashboardStore.js');
-  assert.match(facade,/rangeDashboardStoreV55Compact/);
+  const v191=read('src/rangeDashboardStoreV191.js');
+  assert.match(facade,/rangeDashboardStoreV191/);
+  assert.match(v191,/rangeDashboardStoreV55Compact/);
+  assert.match(v191,/queryShopeeAttemptFacts/);
   const bootstrap=read('bootstrap.js');
+  const serverStart=bootstrap.indexOf('await importServerInteractiveFirst()');
   assert.match(bootstrap,/v55DashboardReconciliationPatch/);
-  assert.ok(bootstrap.indexOf('v55DashboardReconciliationPatch')<bootstrap.indexOf("'server'"));
+  assert.ok(serverStart>=0&&bootstrap.indexOf('v55DashboardReconciliationPatch')<serverStart);
 });
 
 test('V55 mutually excludes final CCSLCN ZT 580 and normal destinations from genuine unresolved',()=>{
