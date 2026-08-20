@@ -12,7 +12,7 @@ import {
 const cfg=getRuntimeConfig();
 const file=cfg.dbFile;
 if(!fs.existsSync(file)){
-  console.log(`[V233/V241] seven-board local truth skipped: database file not present in this environment (${file}).`);
+  console.log(`[V233/V242] seven-board local truth skipped: database file not present in this environment (${file}).`);
   process.exit(0);
 }
 
@@ -44,7 +44,7 @@ try{
   if(!reportDate){
     const sizeMb=before.size/1024/1024;
     if(sizeMb>100)throw new Error(`large persisted database (${sizeMb.toFixed(1)} MB) has no recoverable latest report date`);
-    console.log(`[V233/V241] seven-board local truth: EMPTY_INSTALL file=${file}`);
+    console.log(`[V233/V242] seven-board local truth: EMPTY_INSTALL file=${file}`);
   }else{
     const batch=v241ReadLatestValidBatch(db,reportDate);
     const counts={};
@@ -52,17 +52,17 @@ try{
     for(const type of REQUIRED_TYPES){
       const truth=v241CollectSourceMembership(db,reportDate,type,batch);
       counts[type]=truth.sourceCount;
-      diagnostics.push(`${type}=${truth.sourceCount}(latest=${truth.latestValidSnapshotCount},archive=${truth.archiveUnifiedCount},parse=${truth.businessParseCount},declared=${truth.declaredDailyCount??'-'})`);
+      diagnostics.push(`${type}=${truth.sourceCount}(mode=${truth.sourceMode},latest=${truth.latestValidSnapshotCount},archive=${truth.archiveUnifiedCount},parse=${truth.businessParseCount},finalCandidate=${truth.persistedFinalCandidateCount},finalAdded=${truth.persistedFinalSupplementCount},declared=${truth.declaredDailyCount??'-'})`);
     }
     const zero=REQUIRED_TYPES.filter(type=>Number(counts[type]||0)<=0);
     const overlap=v241ShopeeOverlap(db,reportDate,batch);
     const total=Object.values(counts).reduce((sum,value)=>sum+Number(value||0),0);
-    console.log(`[V233/V241] latest canonical persisted reportDate=${reportDate} ${diagnostics.join(' ')} total=${total}`);
-    if(zero.length)throw new Error(`latest persisted date ${reportDate} is missing/zero canonical source membership for: ${zero.join(', ')}`);
+    console.log(`[V233/V242] latest canonical persisted reportDate=${reportDate} ${diagnostics.join(' ')} total=${total}`);
+    if(zero.length)throw new Error(`latest persisted date ${reportDate} is missing/zero canonical/persisted source membership for: ${zero.join(', ')}`);
     if(overlap.count)throw new Error(`SHOPEECN/SHOPEEVN canonical source overlap=${overlap.count} sample=${overlap.sample.join(',')}`);
     console.log(`CE_QC_V233_LATEST_DATE=${reportDate}`);
     console.log('CE_QC_V233_SEVEN_BOARD_TRUTH=PASS_READ_ONLY');
-    console.log('CE_QC_V241_CANONICAL_MEMBERSHIP=PASS_READ_ONLY');
+    console.log('CE_QC_V242_CANONICAL_MEMBERSHIP=PASS_READ_ONLY');
   }
 }catch(error){
   failed=true;
