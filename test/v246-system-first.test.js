@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const core=fs.readFileSync('src/v246CoreAvailabilityPatch.js','utf8');
+const whppAuthority=fs.readFileSync('src/v248WhppAuthorityPatch.js','utf8');
 const client=fs.readFileSync('public/v246-core-usability.js','utf8');
 const cold=fs.readFileSync('src/v46ColdStartIndexPatch.js','utf8');
 const localTruth=fs.readFileSync('scripts/v225-local-db-truth-smoke.mjs','utf8');
@@ -40,12 +41,17 @@ test('V246 CE API login has immediate visible feedback and a bounded timeout',()
   assert.match(client,/CE API 登录成功/);
 });
 
-test('V246 WHPP refresh is authoritative, bounded, and does not depend on one stale daily-report date',()=>{
-  assert.match(core,/latestWhppDate/);
-  assert.match(core,/business_final_rows/);
-  assert.match(core,/business_daily_parse_rows/);
-  assert.match(core,/business_daily_reports/);
-  assert.match(core,/this\.get\('\/api\/v132\/whpp-fast-summary',v246WhppSummary\)/);
+test('V248 WHPP refresh authority is mounted after authentication and before legacy WHPP routes',()=>{
+  assert.match(cold,/v248WhppAuthorityPatch\.js/);
+  assert.match(whppAuthority,/ROUTE='\/api\/v132\/whpp-fast-summary'/);
+  assert.match(whppAuthority,/V248-AFTER-ACCESS-BEFORE-LEGACY/);
+  assert.match(whppAuthority,/const result=previousUse\.apply\(this,args\)/);
+  assert.match(whppAuthority,/previousUse\.call\(this,v248WhppAuthority\)/);
+  assert.ok(whppAuthority.indexOf('const result=previousUse.apply(this,args)')<whppAuthority.indexOf('previousUse.call(this,v248WhppAuthority)'));
+  assert.match(whppAuthority,/2026-08-20-v246-whpp-stable-refresh-v1/);
+  assert.match(whppAuthority,/business_final_rows/);
+  assert.match(whppAuthority,/business_daily_parse_rows/);
+  assert.match(whppAuthority,/business_daily_reports/);
   assert.match(client,/\/api\/v132\/whpp-fast-summary/);
   assert.match(client,/setTimeout\(\(\)=>controller\.abort\(\),7000\)/);
 });
