@@ -5,3 +5,5 @@
 .v18-date-axis{font-size:7.5px!important}
 .v18-last-label{paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
 .v18-chart-current span,.v18-chart-current small{white-space:normal!important;line-height:1.25}
+/* WHPP cached data is already visible; background refresh is intentionally silent. */
+#whppFastPage>.processing-notice.running{display:none!important}
