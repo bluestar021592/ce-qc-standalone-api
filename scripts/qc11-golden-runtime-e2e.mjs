@@ -52,9 +52,9 @@ async function waitUntil(label,probe,timeoutMs=45000){
 }
 
 try{
-  await waitUntil('golden direct-login loopback health',async()=>{
+  await waitUntil('golden 5177+5178 loopback health',async()=>{
     const {res,body}=await json(`${origin}/api/health`,{headers:{Accept:'application/json'}});
-    return res.status===200&&body.ok===true&&body.ready===true&&res.headers.get('x-ce-qc-health-mode')==='LOOPBACK_READINESS_ONLY';
+    return res.status===200&&body.ok===true&&body.ready===true&&body.coreServices==='5177+5178'&&body.exportService?.ready===true&&res.headers.get('x-ce-qc-health-mode')==='LOOPBACK_READINESS_ONLY';
   });
   await waitUntil('isolated export sidecar',async()=>{
     const {res,body}=await json(`${exportOrigin}/api/v194/export-ping`,{headers:{Accept:'application/json'}});
@@ -66,6 +66,14 @@ try{
     body:JSON.stringify({username:'qc11admin',displayName:'QC11 Admin',password:'Qc11Final!2026'})
   });
   if(bootstrap.res.status!==200||bootstrap.body.ok!==true)fail(`internal bootstrap failed ${bootstrap.res.status}: ${bootstrap.text}`);
+
+  const loginShellRes=await fetch(`${origin}/`,{headers:{Accept:'text/html'}});
+  const loginShell=await loginShellRes.text();
+  if(loginShellRes.status!==401)fail(`unauthenticated root must return login shell 401, got ${loginShellRes.status}`);
+  if(!loginShell.includes('CE质控系统内部登录'))fail('real unauthenticated root did not render the direct internal login page');
+  if(!loginShell.includes('2026-08-21-qc11-direct-5177-login-ui-v1'))fail('real login page is missing QC11 bounded browser feedback patch');
+  if(!loginShell.includes('登录超过12秒没有响应'))fail('real login page does not provide bounded visible timeout feedback');
+  if(!loginShell.includes("credentials:'same-origin'"))fail('real login page does not preserve same-origin session credentials');
 
   const wrongStarted=Date.now();
   const wrong=await json(`${origin}/api/internal-auth/login`,{
@@ -124,6 +132,7 @@ try{
   if(exportAuth.res.status!==400||exportAuth.body.code!=='V194_INVALID_DATE')fail(`5178 did not accept the direct 5177 session cookie and reach ALL-export payload validation: ${exportAuth.res.status} ${exportAuth.text}`);
 
   console.log('CE_QC_QC11_GOLDEN_HEALTH=PASS');
+  console.log('CE_QC_QC11_BROWSER_LOGIN_SHELL=PASS');
   console.log('CE_QC_QC11_DIRECT_INTERNAL_BAD_PASSWORD=PASS');
   console.log('CE_QC_QC11_DIRECT_INTERNAL_LOGIN=PASS');
   console.log('CE_QC_QC11_SESSION_SETTINGS=PASS');
