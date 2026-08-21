@@ -24,6 +24,7 @@ async function requestJson(url,options={},logs=[]){const r=await fetch(url,{cach
 function portOpen(port){return new Promise(resolve=>{const s=net.createConnection({host:'127.0.0.1',port});let done=false;const finish=v=>{if(done)return;done=true;try{s.destroy();}catch{}resolve(v)};s.setTimeout(500,()=>finish(false));s.once('connect',()=>finish(true));s.once('error',()=>finish(false));});}
 async function waitClosed(){const end=Date.now()+12000;while(Date.now()<end){if(!(await portOpen(APP_PORT))&&!(await portOpen(AUTH_PORT))&&!(await portOpen(EXPORT_PORT)))return;await sleep(250);}throw new Error('V249 process tree did not release ports');}
 async function killTree(){if(!child?.pid)return;if(process.platform==='win32')spawnSync('taskkill',['/PID',String(child.pid),'/T','/F'],{encoding:'utf8',windowsHide:true,timeout:15000});else{try{child.kill('SIGTERM');}catch{}await sleep(800);try{child.kill('SIGKILL');}catch{}}await waitClosed();}
+function extractFastCookie(headers){const values=typeof headers.getSetCookie==='function'?headers.getSetCookie():[headers.get('set-cookie')||''];for(const value of values){const match=String(value||'').match(/ce_v213_fast_session=([^;,\s]+)/);if(match)return `ce_v213_fast_session=${match[1]}`;}return '';}
 
 try{
   process.env.DATA_DIR=temp;process.env.DB_FILE=dbFile;process.env.EXPORTS_DIR=path.join(temp,'exports');process.env.NODE_ENV='test';
@@ -46,21 +47,26 @@ try{
   const directStarted=Date.now();
   const direct=await requestJson(`${AUTH_ORIGIN}/api/v213/local-auth/login`,{method:'POST',headers:{origin:APP_ORIGIN,'content-type':'application/json','accept':'application/json'},body:JSON.stringify({username:USERNAME,password:PASSWORD})},logs);
   if(!direct.r.ok||direct.p?.authMode!=='V249_DIRECT_AUTH_SIDECAR'||!direct.p?.handoffToken)fail(`V249 direct sidecar login failed: HTTP ${direct.r.status} ${direct.text}`,logs);
-  if(Date.now()-directStarted>5000)fail(`V249 direct sidecar login exceeded 5s in isolated runtime`,logs);
+  if(Date.now()-directStarted>5000)fail('V249 direct sidecar login exceeded 5s in isolated runtime',logs);
   if(direct.r.headers.get('x-ce-qc-auth-path')!=='2026-08-20-v249-direct-sidecar-auth-v1')fail('V249 auth response ownership header missing',logs);
   if(!String(direct.r.headers.get('access-control-allow-origin')||'').includes(APP_ORIGIN))fail('V249 direct browser CORS origin was not allowed',logs);
+  const cookie=extractFastCookie(direct.r.headers);
+  if(!cookie)fail('V251 cookie-first contract missing ce_v213_fast_session Set-Cookie on successful 5179 login',logs);
 
   await waitFor(`${APP_ORIGIN}/api/health`,{accept:r=>r.status===200,headers:{accept:'application/json'},logs});
-  const handoff=await requestJson(`${APP_ORIGIN}/api/v223/fast-auth/accept`,{method:'POST',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify({handoffToken:direct.p.handoffToken})},logs);
-  if(!handoff.r.ok||handoff.p?.authMode!=='V223_MAIN_SESSION_HANDOFF')fail(`V249 main handoff failed: ${handoff.text}`,logs);
-  const cookie=`ce_v213_fast_session=${direct.p.handoffToken}`;
+
+  // V251 production browser path deliberately does NOT call /api/v223/fast-auth/accept
+  // after a successful direct 5179 login. The host-scoped signed cookie issued on
+  // port 5179 must be sufficient for the 5177 middleware to accept the session.
   const session=await requestJson(`${APP_ORIGIN}/api/session`,{headers:{cookie,accept:'application/json'}},logs);
-  if(!session.r.ok||session.p?.user?.username!==USERNAME)fail(`V249 authenticated session failed: ${session.text}`,logs);
+  if(!session.r.ok||session.p?.user?.username!==USERNAME)fail(`V251 cookie-first authenticated session failed without handoff: ${session.text}`,logs);
   const app=await fetch(`${APP_ORIGIN}/`,{headers:{cookie,accept:'text/html'},cache:'no-store'});const html=await app.text();
-  if(!app.ok||/账号校验由独立认证进程处理/.test(html))fail('V249 valid fast-session still received login page',logs);
+  if(!app.ok||/CE质控系统内部登录/.test(html))fail('V251 valid direct sidecar cookie still received login page without handoff',logs);
+
   console.log(`CE_QC_V249_DIRECT_SIDECAR_LOGIN=PASS ms=${Date.now()-directStarted}`);
   console.log('CE_QC_V249_CORS_COOKIE_HANDOFF=PASS');
-  console.log('CE_QC_V249_MAIN_SESSION=PASS');
+  console.log('CE_QC_V251_COOKIE_FIRST_LOGIN=PASS');
+  console.log('CE_QC_V251_MAIN_SESSION_WITHOUT_HANDOFF=PASS');
 }finally{
   try{await killTree();}catch(e){console.error('[V249] cleanup warning:',e?.message||e);}
   try{fs.rmSync(temp,{recursive:true,force:true});}catch{}
