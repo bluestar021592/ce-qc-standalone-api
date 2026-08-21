@@ -19,6 +19,10 @@ const app=read('public/app.js');
 const whppShell=read('src/v44WhppUiPatch.js');
 const whppAuthority=read('src/v248WhppAuthorityPatch.js');
 const integrityUi=read('public/v203-dashboard-integrity.js');
+const exportSidecar=read('src/v193ExportSidecar.js');
+const allExportWrapper=read('src/qc11AllExportIpcWorker.js');
+const exportUi=read('public/v194-export-token-ui.js');
+const routeLazy=read('public/v108-route-lazy-features.js');
 const packageJson=read('package.json');
 
 must(access,'function isInternalAuthPath','direct internal auth router');
@@ -51,14 +55,25 @@ must(integrityUi,'真实1/2/3派 POD','real attempt panel');
 must(integrityUi,'只按真实派送周期计算，不再用“经过几天”猜1派/2派/3派','no elapsed-day attempt guessing');
 must(integrityUi,'派次证据不足','unknown attempt evidence bucket');
 
+must(routeLazy,'/v194-export-token-ui.js?v=20260821-qc11-1','QC11 export UI cache bust');
+must(exportUi,'2026-08-21-qc11-all-single-ipc-status-ui-v1','unified export UI');
+must(exportUi,"payload.businessType === 'ALL'",'ALL export routed through sidecar');
+must(exportSidecar,"capabilities: ['ALL','SINGLE']",'5178 ALL+single capability');
+must(exportSidecar,"const allWorkerFile = path.join(__dirname, 'qc11AllExportIpcWorker.js')",'ALL export IPC wrapper');
+must(exportSidecar,"workerMode: all ? 'QC11_V195_ALL_BUSINESS_IPC' : 'V195_ISOLATED_SINGLE_BUSINESS'",'ALL/single worker routing');
+must(exportSidecar,"stdio: ['ignore', 'ignore', 'ignore', 'ipc']",'5178 IPC worker transport');
+must(allExportWrapper,'v84ExportJobWorker.js','proven ALL business orchestrator');
+must(allExportWrapper,'CE_QC_EXPORT_JOB_UPDATE','ALL export IPC progress');
+must(allExportWrapper,"CE_QC_EXPORT_WORKER_MODE:'ALL_BUSINESS_ORCHESTRATOR'",'ALL export worker mode');
+
 must(packageJson,'scripts/qc11-one-shot-acceptance.cjs','final acceptance wiring');
 
 const syntax=[
   'bootstrap.js','server.js','src/accessControl.js','src/v41AuthPausePatch.js','src/qc11CeLoginBoundPatch.js','src/v46ColdStartIndexPatch.js','src/v227LocalHealthProbePatch.js',
   'src/shopeeAnalyzerV33.js','src/v191ShopeeTruth.js','src/v200Metrics.js','src/v200ReferenceWorkbook.js','src/v200TemplateDashboardExporter.js',
   'src/v202DeliveryTruth.js','src/v203DashboardIntegrityPatch.js','src/v205CanonicalTruth.js','src/v205ExportTruth.js','src/v205IntegrityAuditPatch.js',
-  'src/v202CarryTrackingCenterPatch.js','src/v84AsyncExportPatch.js','src/v193ExportSidecar.js','src/v44WhppUiPatch.js','src/v248WhppAuthorityPatch.js',
-  'public/v203-dashboard-integrity.js','public/v202-carry-tracking-center.js','public/v194-export-token-ui.js','scripts/v225-local-db-truth-smoke.mjs','scripts/qc11-golden-runtime-e2e.mjs'
+  'src/v202CarryTrackingCenterPatch.js','src/v84AsyncExportPatch.js','src/v193ExportSidecar.js','src/qc11AllExportIpcWorker.js','src/v44WhppUiPatch.js','src/v248WhppAuthorityPatch.js',
+  'public/v108-route-lazy-features.js','public/v203-dashboard-integrity.js','public/v202-carry-tracking-center.js','public/v194-export-token-ui.js','scripts/v225-local-db-truth-smoke.mjs','scripts/qc11-golden-runtime-e2e.mjs'
 ];
 for(const file of syntax)run(['--check',file],60000);
 
@@ -97,5 +112,6 @@ console.log('CE_QC_QC11_REAL_ATTEMPT_TRUTH=PASS');
 console.log('CE_QC_QC11_PENDING_SPECIAL_RULES=PASS');
 console.log('CE_QC_QC11_CE_API_LOGIN_FEEDBACK=PASS');
 console.log('CE_QC_QC11_EXPORT_PARITY=PASS');
+console.log('CE_QC_QC11_EXPORT_SIDECAR_ALL_SINGLE=PASS');
 console.log('CE_QC_QC11_DIRECT_LOGIN_RUNTIME=PASS');
 console.log('CE_QC_QC11_ONE_SHOT_ACCEPTANCE=PASS');
