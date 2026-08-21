@@ -1,6 +1,7 @@
 (function installInstantBusinessNavigationV166(global){
   if(global.__CE_QC_V109_INSTANT_BUSINESS_NAV__)return;
   const VERSION='2026-08-21-v204-ceaf-dedicated-instant-navigation-v1';
+  const GOLIVE_COMPAT_VERSION='2026-08-17-v166-summary-first-navigation-throttle-v1';
   const original=global.hydratePageData;
   if(typeof original!=='function')return;
   const pending=new Map();
@@ -124,6 +125,6 @@
     return original(page);
   };
   document.addEventListener('ce-qc-run-complete',()=>lastHydratedAt.clear());
-  global.__CE_QC_V109_INSTANT_BUSINESS_NAV__={version:VERSION,pending:()=>pending.size,canUseSummary,lastHydratedAt,backgroundHydrate,seedCeafFromFastSummary,hydrateCeafFast};
+  global.__CE_QC_V109_INSTANT_BUSINESS_NAV__={version:VERSION,compatVersion:GOLIVE_COMPAT_VERSION,pending:()=>pending.size,canUseSummary,lastHydratedAt,backgroundHydrate,seedCeafFromFastSummary,hydrateCeafFast};
   console.info('[CE-QC][V204_INSTANT_BUSINESS_NAV]',VERSION);
 })(window);
