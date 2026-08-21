@@ -12,6 +12,7 @@ function run(args,timeout=240000){
 
 const access=read('src/accessControl.js');
 const authPause=read('src/v41AuthPausePatch.js');
+const ceLoginBound=read('src/qc11CeLoginBoundPatch.js');
 const cold=read('src/v46ColdStartIndexPatch.js');
 const launcher=read('Start_CE_QC.ps1');
 const app=read('public/app.js');
@@ -25,6 +26,10 @@ must(access,'internal-auth','direct internal auth path family');
 must(access,'ce_internal_session','host session cookie');
 must(access,'loginInternalUser','direct login verifier');
 forbid(authPause,'v209LoginReliabilityPatch','V209 auth bridge import');
+must(authPause,"./qc11CeLoginBoundPatch.js",'bounded CE API login import');
+must(ceLoginBound,'CE_LOGIN_TIMEOUT_MS','configurable CE login timeout');
+must(ceLoginBound,'10_000','10 second CE login default');
+must(ceLoginBound,"error.code='CE_LOGIN_TIMEOUT'",'visible CE login timeout code');
 must(cold,"import './v227LocalHealthProbePatch.js'",'loopback health only');
 for(const retired of ['v221BootstrapRecoveryPatch','v225AuthBootstrapGuardPatch','v232LiveDataHealthGatePatch','v209LoginReliabilityPatch','v213AuthSidecar'])forbid(cold,retired,retired);
 must(launcher,'$HealthUrl = "$LocalUrl/api/health"','exact launcher health endpoint');
@@ -49,7 +54,7 @@ must(integrityUi,'派次证据不足','unknown attempt evidence bucket');
 must(packageJson,'scripts/qc11-one-shot-acceptance.cjs','final acceptance wiring');
 
 const syntax=[
-  'bootstrap.js','server.js','src/accessControl.js','src/v41AuthPausePatch.js','src/v46ColdStartIndexPatch.js','src/v227LocalHealthProbePatch.js',
+  'bootstrap.js','server.js','src/accessControl.js','src/v41AuthPausePatch.js','src/qc11CeLoginBoundPatch.js','src/v46ColdStartIndexPatch.js','src/v227LocalHealthProbePatch.js',
   'src/shopeeAnalyzerV33.js','src/v191ShopeeTruth.js','src/v200Metrics.js','src/v200ReferenceWorkbook.js','src/v200TemplateDashboardExporter.js',
   'src/v202DeliveryTruth.js','src/v203DashboardIntegrityPatch.js','src/v205CanonicalTruth.js','src/v205ExportTruth.js','src/v205IntegrityAuditPatch.js',
   'src/v202CarryTrackingCenterPatch.js','src/v84AsyncExportPatch.js','src/v193ExportSidecar.js','src/v44WhppUiPatch.js','src/v248WhppAuthorityPatch.js',
@@ -90,6 +95,7 @@ console.log('CE_QC_QC11_GOLDEN_SHELL=PASS');
 console.log('CE_QC_QC11_SEVEN_BUSINESS_WHPP=PASS');
 console.log('CE_QC_QC11_REAL_ATTEMPT_TRUTH=PASS');
 console.log('CE_QC_QC11_PENDING_SPECIAL_RULES=PASS');
+console.log('CE_QC_QC11_CE_API_LOGIN_FEEDBACK=PASS');
 console.log('CE_QC_QC11_EXPORT_PARITY=PASS');
 console.log('CE_QC_QC11_DIRECT_LOGIN_RUNTIME=PASS');
 console.log('CE_QC_QC11_ONE_SHOT_ACCEPTANCE=PASS');
