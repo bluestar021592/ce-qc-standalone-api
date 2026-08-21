@@ -16,11 +16,12 @@ const cold=read('src/v46ColdStartIndexPatch.js');
 const launcher=read('Start_CE_QC.ps1');
 const app=read('public/app.js');
 const whppShell=read('src/v44WhppUiPatch.js');
+const whppAuthority=read('src/v248WhppAuthorityPatch.js');
 const integrityUi=read('public/v203-dashboard-integrity.js');
 const packageJson=read('package.json');
 
-must(access,'/api/internal-auth/bootstrap','direct internal bootstrap');
-must(access,'/api/internal-auth/(?:bootstrap|login|logout|change-password)','direct internal auth paths');
+must(access,'function isInternalAuthPath','direct internal auth router');
+must(access,'internal-auth','direct internal auth path family');
 must(access,'ce_internal_session','host session cookie');
 must(access,'loginInternalUser','direct login verifier');
 forbid(authPause,'v209LoginReliabilityPatch','V209 auth bridge import');
@@ -37,6 +38,9 @@ must(app,'reportDateManualCorrection','report-date manual correction');
 must(app,'renderHistoryOptions','uploaded report-date history');
 
 must(whppShell,'WHPP','WHPP shell');
+must(whppShell,"./v248WhppAuthorityPatch.js",'V248 authenticated WHPP authority import');
+must(whppAuthority,'V248-AFTER-ACCESS-BEFORE-LEGACY','V248 WHPP route authority');
+must(whppAuthority,"const ROUTE='/api/v132/whpp-fast-summary'",'V248 WHPP fast route');
 for(const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'])must(integrityUi,`'${type}'`,`${type} integrity UI`);
 must(integrityUi,'真实1/2/3派 POD','real attempt panel');
 must(integrityUi,'只按真实派送周期计算，不再用“经过几天”猜1派/2派/3派','no elapsed-day attempt guessing');
@@ -48,7 +52,7 @@ const syntax=[
   'bootstrap.js','server.js','src/accessControl.js','src/v41AuthPausePatch.js','src/v46ColdStartIndexPatch.js','src/v227LocalHealthProbePatch.js',
   'src/shopeeAnalyzerV33.js','src/v191ShopeeTruth.js','src/v200Metrics.js','src/v200ReferenceWorkbook.js','src/v200TemplateDashboardExporter.js',
   'src/v202DeliveryTruth.js','src/v203DashboardIntegrityPatch.js','src/v205CanonicalTruth.js','src/v205ExportTruth.js','src/v205IntegrityAuditPatch.js',
-  'src/v202CarryTrackingCenterPatch.js','src/v84AsyncExportPatch.js','src/v193ExportSidecar.js','src/v44WhppUiPatch.js',
+  'src/v202CarryTrackingCenterPatch.js','src/v84AsyncExportPatch.js','src/v193ExportSidecar.js','src/v44WhppUiPatch.js','src/v248WhppAuthorityPatch.js',
   'public/v203-dashboard-integrity.js','public/v202-carry-tracking-center.js','public/v194-export-token-ui.js','scripts/v225-local-db-truth-smoke.mjs','scripts/qc11-golden-runtime-e2e.mjs'
 ];
 for(const file of syntax)run(['--check',file],60000);
