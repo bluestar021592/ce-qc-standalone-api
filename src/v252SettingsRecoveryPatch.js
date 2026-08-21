@@ -5,7 +5,7 @@ import os from 'node:os';
 import { CEClient, normalizeLoginToken } from './ceClient.js';
 import { loadToken, saveToken, summarizeToken } from './authStore.js';
 
-export const V252_SETTINGS_RECOVERY_VERSION='2026-08-21-v252-settings-recovery-v1';
+export const V252_SETTINGS_RECOVERY_VERSION='2026-08-21-v253-settings-spa-activation-v1';
 const INSTALLED=Symbol.for('ce-qc.v252-settings-recovery-installed');
 const SHELL='/api/v252/settings-shell';
 const CE_LOGIN='/api/v252/ce-login';
@@ -15,7 +15,7 @@ function localLike(req){return req.accessMode==='LOCAL'||req.accessMode==='LAN';
 function publicFastUser(user={}){return{id:user.id||'',username:user.username||'',email:user.email||'',displayName:user.displayName||'',department:user.department||user.departmentCompany||'',role:user.role||'VIEWER',businessScope:user.businessScope||'ALL'};}
 function lanIp(){for(const list of Object.values(os.networkInterfaces()))for(const item of list||[])if(item&&item.family==='IPv4'&&!item.internal&&!String(item.address||'').startsWith('169.254.'))return item.address;return '';}
 function networkInfo(req){const ip=lanIp();const publicHost=String(process.env.PUBLIC_HOSTNAME||'').trim();return{currentOrigin:`${req.protocol||'http'}://${req.get?.('host')||'127.0.0.1:5177'}`,lanUrl:ip?`http://${ip}:5177`:'',publicUrl:publicHost?`https://${publicHost}`:'',publicConfigured:Boolean(publicHost&&String(process.env.CF_ACCESS_TEAM_DOMAIN||'').trim()&&String(process.env.CF_ACCESS_AUD||'').trim())};}
-function injectClient(body){if(typeof body!=='string'||!body.includes('</body>')||body.includes('/v252-settings-recovery.js'))return body;return body.replace('</body>','  <script src="/v252-settings-recovery.js?v=20260821-v252-1"></script>\n</body>');}
+function injectClient(body){if(typeof body!=='string'||!body.includes('</body>')||body.includes('/v252-settings-recovery.js'))return body;return body.replace('</body>','  <script src="/v252-settings-recovery.js?v=20260821-v253-1"></script>\n</body>');}
 
 async function settingsShell(req,res){const token=await loadToken();return res.json({ok:true,version:V252_SETTINGS_RECOVERY_VERSION,user:publicFastUser(req.user),ceAuth:summarizeToken(token),network:networkInfo(req),dashboardRequired:false});}
 async function ceLogin(req,res){
@@ -65,5 +65,5 @@ if(!express.application[INSTALLED]){
   };
 }
 
-console.log('[CE-QC][V252] settings recovery armed after authentication: settings/CE connector no longer wait for dashboard bootstrap.');
+console.log('[CE-QC][V253] settings recovery armed after authentication: SPA navigation and dashboard rerenders cannot disable CE connector/settings fast path.');
 export const __test={SHELL,CE_LOGIN,injectClient,localLike,publicFastUser,networkInfo};
