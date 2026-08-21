@@ -1,11 +1,11 @@
 (function installV206InteractiveFirstHotfix(global){
   if(global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__)return;
-  const VERSION='2026-08-21-v207-instant-nav-and-ce-login-v1';
+  const VERSION='2026-08-21-v207-instant-nav-home-refresh-ce-login-v2';
   const FORCE_KEY='ce_qc_force_ce_relogin_v207';
   const INSTANT_PAGES=new Map([['home','/'],['ceaf','/ceaf']]);
   let applying=false;
 
-  function esc(value){return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));}
+  function esc(value){return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
   function selectedDate(){
     try{
       const dom=String(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'').slice(0,10);
@@ -85,6 +85,14 @@
       businessStates.CEAF={...current,businessType:'CEAF',viewBusinessType:'CEAF',reportDate:date,dailyReportReady:expected>0,sourceTotal:expected,total:expected,dailyParseSummary:{...(current.dailyParseSummary||{}),totalRecognized:expected,pnh:expected},dashboard:{...(current.dashboard||{}),pnh:expected,totalMonitored:expected},__v207InstantSeed:true};
     }catch{}
   }
+  function refreshHomeFast(){
+    const fast=global.__CE_QC_V89_FAST_DASHBOARD__;
+    if(!fast?.fetchSummary)return false;
+    void fast.fetchSummary(selectedDate()).then(()=>{
+      try{if(String(typeof currentPage!=='undefined'?currentPage:'')==='home'&&typeof global.renderAll==='function')global.renderAll();}catch{}
+    });
+    return true;
+  }
   function instantNavigate(page,push=true){
     const target=String(page||'').toLowerCase();
     const path=INSTANT_PAGES.get(target);
@@ -94,10 +102,8 @@
       if(typeof currentPage!=='undefined')currentPage=target;
       if(push&&location.pathname!==path)history.pushState({page:target},'',path);
       if(typeof global.renderAll==='function')global.renderAll();
-      if(target==='home'){
-        const fast=global.__CE_QC_V89_FAST_DASHBOARD__;
-        if(fast?.fetchSummary)void fast.fetchSummary(selectedDate()).then(()=>{if(String(typeof currentPage!=='undefined'?currentPage:'')==='home'&&typeof global.renderAll==='function')global.renderAll();});
-      }else if(target==='ceaf'){
+      if(target==='home')refreshHomeFast();
+      else if(target==='ceaf'){
         const nav=global.__CE_QC_V109_INSTANT_BUSINESS_NAV__;
         setTimeout(()=>{try{void nav?.hydrateCeafFast?.();}catch{}},0);
       }
@@ -132,8 +138,16 @@
   let forced=false;try{forced=sessionStorage.getItem(FORCE_KEY)==='1';}catch{}
   if(forced)queueMicrotask(forceLoginForms);
 
+  // The normal bootstrap can still be busy while WHPP is already interactive.
+  // Retry the tiny indexed home summary independently so homepage business totals
+  // do not wait for the heavyweight application refresh path.
+  [80,600,1800,4000].forEach(delay=>setTimeout(()=>{
+    const path=location.pathname.toLowerCase();
+    if(path==='/'||path==='/home')refreshHomeFast();
+  },delay));
+
   global.showLoginForms=beginRelogin;
   global.loginCe=submitLogin;
-  global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__={version:VERSION,beginRelogin,forceLoginForms,submitLogin,instantNavigate};
-  console.info('[CE-QC][V207_INSTANT_NAV_AND_CE_LOGIN]',VERSION);
+  global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__={version:VERSION,beginRelogin,forceLoginForms,submitLogin,instantNavigate,refreshHomeFast};
+  console.info('[CE-QC][V207_INSTANT_NAV_HOME_REFRESH_CE_LOGIN]',VERSION);
 })(window);
