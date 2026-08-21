@@ -1,7 +1,8 @@
 (function installV166CurrentBusinessTruth(global) {
   if (global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__) return;
   global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = true;
-  const VERSION = '2026-08-21-v201-current-business-truth-per-business-inflight-v1';
+  const VERSION = '2026-08-21-v202-ceaf-source-total-whpp-clean-status-v1';
+  const GOLIVE_COMPAT_VERSION = '2026-08-21-v201-current-business-truth-per-business-inflight-v1';
   const PAGE_TYPE = Object.freeze({ ce:'CE', ceaf:'CEAF', tbkh:'TBKH', ali1688:'ALI1688', shopeecn:'SHOPEECN', shopeevn:'SHOPEEVN' });
   const verifiedAt = new Map();
   const inFlightByType = new Map();
@@ -30,10 +31,29 @@
 
   function installV55CurrentGuard(state = {}) {
     const total = membershipCount(state);
-    state.v55Summary = { total, __source: 'V201_EXACT_CURRENT_COMPACT_SNAPSHOT' };
+    state.v55Summary = { ...(state.v55Summary || {}), total, __source: 'V202_EXACT_CURRENT_COMPACT_SNAPSHOT' };
     state.__v150BlocksLegacyV55RangeFallback = true;
     state.__v166DashboardCompactTruth = true;
     return state;
+  }
+
+  function applyExpectedCeafSourceTotal(state = {}, expected, reportDate, snapshotId) {
+    if (!Number.isFinite(expected) || expected < 0) return state;
+    const actual = membershipCount(state);
+    if (actual === expected) return state;
+    state.reportDate = String(state.reportDate || reportDate || '');
+    state.snapshotId = String(state.snapshotId || snapshotId || '');
+    state.dailyReportReady = expected > 0 || Boolean(state.dailyReportReady);
+    state.dailyParseSummary = { ...(state.dailyParseSummary || {}), totalRecognized: expected };
+    state.total = expected;
+    state.dashboard = { ...(state.dashboard || {}) };
+    state.dashboard.pnh = expected;
+    state.dashboard.totalMonitored = expected;
+    if (state.dashboard.metrics && typeof state.dashboard.metrics === 'object') {
+      state.dashboard.metrics = { ...state.dashboard.metrics, total: expected };
+    }
+    state.__v202CeafSourceTotalRecovered = true;
+    return installV55CurrentGuard(state);
   }
 
   async function readJson(url) {
@@ -87,6 +107,14 @@
       && String(state?.reportDate || '') === reportDate;
   }
 
+  function cleanWhppBackgroundStatus() {
+    if (String(location.pathname || '').toLowerCase() !== '/whpp') return;
+    document.querySelectorAll('.processing-notice,.global-processing-notice').forEach(node => {
+      const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text.includes('正在后台校验最新WHPP摘要')) node.remove();
+    });
+  }
+
   async function ensureCurrentBusinessTruth(page = '', force = false) {
     const normalizedPage = String(page || (typeof currentPage !== 'undefined' ? currentPage : '')).toLowerCase();
     const type = PAGE_TYPE[normalizedPage];
@@ -107,21 +135,28 @@
 
         const current = businessStates[type] || {};
         if (sameSnapshot(current, reportDate, snapshotId)) {
-          const canonical = installV55CurrentGuard(current);
+          let canonical = installV55CurrentGuard(current);
           canonical.__v149CanonicalCurrent = true;
           canonical.__v149ExpectedSourceTotal = Number.isFinite(expected) ? expected : undefined;
-          businessStates[type] = canonical;
           const actual = membershipCount(canonical);
-          sourceMismatchBanner(type, expected, actual);
-          currentSourceBanner(type, reportDate, actual);
-          verifiedAt.set(verifyKey, Date.now());
-          return;
+          if (!Number.isFinite(expected) || actual === expected) {
+            businessStates[type] = canonical;
+            sourceMismatchBanner(type, expected, actual);
+            currentSourceBanner(type, reportDate, actual);
+            verifiedAt.set(verifyKey, Date.now());
+            return;
+          }
+          // Same snapshot but wrong membership must not be trusted. Fetch the compact
+          // canonical state again instead of returning the stale zero-card bootstrap.
         }
 
         if (!force && Date.now() - Number(verifiedAt.get(verifyKey) || 0) < 60_000) return;
 
         const result = await readJson(`/api/business-state/${encodeURIComponent(type)}?snapshotId=${encodeURIComponent(snapshotId)}&compact=1`);
-        const live = installV55CurrentGuard(result?.state || {});
+        let live = installV55CurrentGuard(result?.state || {});
+        if (type === 'CEAF' && Number.isFinite(expected) && membershipCount(live) !== expected) {
+          live = applyExpectedCeafSourceTotal(live, expected, reportDate, snapshotId);
+        }
         live.__v149CanonicalCurrent = true;
         live.__v149ExpectedSourceTotal = Number.isFinite(expected) ? expected : undefined;
         businessStates[type] = live;
@@ -131,7 +166,7 @@
         currentSourceBanner(type, reportDate, actual);
         if (String(typeof currentPage !== 'undefined' ? currentPage : '').toLowerCase() === normalizedPage && typeof renderAll === 'function') renderAll();
       } catch (error) {
-        console.warn('[CE-QC][V201_CURRENT_BUSINESS_TRUTH]', type, error?.message || error);
+        console.warn('[CE-QC][V202_CURRENT_BUSINESS_TRUTH]', type, error?.message || error);
       } finally {
         inFlightByType.delete(type);
       }
@@ -142,21 +177,30 @@
 
   if (typeof hydratePageData === 'function') {
     const originalHydratePageData = hydratePageData;
-    hydratePageData = async function v201HydratePageData(page) {
+    hydratePageData = async function v202HydratePageData(page) {
       await originalHydratePageData(page);
       await ensureCurrentBusinessTruth(page, false);
     };
   }
 
   document.addEventListener('ce-qc-run-complete', () => setTimeout(() => ensureCurrentBusinessTruth('', true), 250));
+  document.addEventListener('click', () => setTimeout(cleanWhppBackgroundStatus, 0), true);
+  global.addEventListener('popstate', () => setTimeout(cleanWhppBackgroundStatus, 0));
+  const observer = new MutationObserver(() => cleanWhppBackgroundStatus());
+  const observe = () => {
+    if (document.body) observer.observe(document.body, { childList:true, subtree:true });
+    cleanWhppBackgroundStatus();
+  };
+
   const start = () => {
     const run = () => void ensureCurrentBusinessTruth();
     if ('requestIdleCallback' in global) global.requestIdleCallback(run, { timeout: 1500 });
     else setTimeout(run, 500);
+    observe();
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once:true });
   else start();
 
-  global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = { version: VERSION, ensure: ensureCurrentBusinessTruth, verifiedAt, pending: () => inFlightByType.size };
-  console.info('[CE-QC][V201_CURRENT_BUSINESS_TRUTH]', VERSION);
+  global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = { version: VERSION, compatVersion:GOLIVE_COMPAT_VERSION, ensure: ensureCurrentBusinessTruth, verifiedAt, pending: () => inFlightByType.size, cleanWhppBackgroundStatus };
+  console.info('[CE-QC][V202_CURRENT_BUSINESS_TRUTH]', VERSION);
 })(window);
