@@ -9,6 +9,7 @@ const bstore = read('src/businessStore.js');
 const v108 = read('public/v108-route-lazy-features.js');
 const tokenExportUi = read('public/v194-export-token-ui.js');
 const exportSidecar = read('src/v193ExportSidecar.js');
+const allExportWrapper = read('src/qc11AllExportIpcWorker.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
 const allBusinessChild = read('src/v84ExportBusinessWorker.js');
 const v200Metrics = read('src/v200Metrics.js');
@@ -42,11 +43,19 @@ must(pause, 'global.pauseUnified=pauseUnified');
 must(storage, 'compactStateForPersistence');
 must(bstore, 'compactBusinessStatePayload');
 
-must(v108, '/v194-export-token-ui.js?v=20260818-v195-1');
+must(v108, '/v194-export-token-ui.js?v=20260821-qc11-1');
+must(tokenExportUi, '2026-08-21-qc11-all-single-ipc-status-ui-v1');
 must(tokenExportUi, '/api/v194/export-period/prepare');
 must(tokenExportUi, 'XMLHttpRequest');
+must(tokenExportUi, "payload.businessType === 'ALL'");
 must(exportSidecar, 'IPC_MEMORY_V195');
+must(exportSidecar, "capabilities: ['ALL','SINGLE']");
+must(exportSidecar, "const allWorkerFile = path.join(__dirname, 'qc11AllExportIpcWorker.js')");
+must(exportSidecar, "workerMode: all ? 'QC11_V195_ALL_BUSINESS_IPC' : 'V195_ISOLATED_SINGLE_BUSINESS'");
 must(exportSidecar, "stdio: ['ignore', 'ignore', 'ignore', 'ipc']");
+must(allExportWrapper, 'v84ExportJobWorker.js');
+must(allExportWrapper, 'CE_QC_EXPORT_JOB_UPDATE');
+must(allExportWrapper, "CE_QC_EXPORT_WORKER_MODE:'ALL_BUSINESS_ORCHESTRATOR'");
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(singleExportWorker, 'createV200ReferenceDashboardWorkbook');
 must(allBusinessChild, 'createV200ReferenceDashboardWorkbook');
@@ -147,4 +156,4 @@ must(historyRefresh, '/api/v183/history-refresh/start');
 
 for (const source of [runner, pause, shell, storage, bstore]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] QC11 golden-shell gate passed: seven businesses + WHPP, real delivery cycles, current Pending/special closure, parity export, persistent manual evidence and carry tracking are present without the later auth-sidecar startup stack.');
+console.log('[GOLIVE] QC11 golden-shell gate passed: seven businesses + WHPP, real delivery cycles, current Pending/special closure, unified 5178 ALL+single parity export, persistent manual evidence and carry tracking are present without the later auth-sidecar startup stack.');
