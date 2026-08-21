@@ -10,10 +10,13 @@ function run(args,timeout=240000){
   if(result.status!==0)throw new Error(`QC11 command failed (${result.status}): node ${args.join(' ')}`);
 }
 
+const bootstrap=read('bootstrap.js');
+const server=read('server.js');
 const access=read('src/accessControl.js');
 const authPause=read('src/v41AuthPausePatch.js');
 const ceLoginBound=read('src/qc11CeLoginBoundPatch.js');
 const cold=read('src/v46ColdStartIndexPatch.js');
+const health=read('src/v227LocalHealthProbePatch.js');
 const launcher=read('Start_CE_QC.ps1');
 const app=read('public/app.js');
 const whppShell=read('src/v44WhppUiPatch.js');
@@ -36,9 +39,20 @@ must(ceLoginBound,'10_000','10 second CE login default');
 must(ceLoginBound,"error.code='CE_LOGIN_TIMEOUT'",'visible CE login timeout code');
 must(cold,"import './v227LocalHealthProbePatch.js'",'loopback health only');
 for(const retired of ['v221BootstrapRecoveryPatch','v225AuthBootstrapGuardPatch','v232LiveDataHealthGatePatch','v209LoginReliabilityPatch','v213AuthSidecar'])forbid(cold,retired,retired);
+for(const source of [bootstrap,server,authPause,cold]){
+  forbid(source,'v209LoginReliabilityPatch','retired V209 auth bridge in active startup');
+  forbid(source,'v213AuthSidecar','retired 5179 auth sidecar in active startup');
+  forbid(source,'v249LoginReliabilityPatch','retired V249 5179 login path in active startup');
+}
+must(bootstrap,"./src/v193ExportSidecar.js",'5178 export sidecar bootstrap');
+must(health,"coreServices:'5177+5178'",'5177+5178 core readiness');
+must(health,"capabilities.includes('ALL')&&capabilities.includes('SINGLE')",'5178 ALL+single health contract');
+must(health,"statusTransport==='IPC_MEMORY_V195'",'5178 IPC-memory health contract');
+must(health,"dataBlocking:false",'business data cannot block startup');
 must(launcher,'$HealthUrl = "$LocalUrl/api/health"','exact launcher health endpoint');
 must(launcher,"$status -eq 200",'exact HTTP 200 health');
 forbid(launcher,'$status -ge 200 -and $status -lt 500','old 200-499 readiness');
+forbid(launcher,'5179','retired 5179 launcher dependency');
 
 for(const token of ['首页总看板','CE看板','CEAF空运看板','TBKH看板','ALI1688看板','SHOPEE CN看板','SHOPEE VN看板','数据导入','轨迹查询','异常明细','报表导出','系统设置'])must(app,token,`UI ${token}`);
 must(app,"let exportPeriodType = 'daily'",'export period selector');
@@ -107,6 +121,7 @@ run(['--test','--test-reporter=tap',
 run(['scripts/qc11-golden-runtime-e2e.mjs'],120000);
 
 console.log('CE_QC_QC11_GOLDEN_SHELL=PASS');
+console.log('CE_QC_QC11_CORE_5177_5178=PASS');
 console.log('CE_QC_QC11_SEVEN_BUSINESS_WHPP=PASS');
 console.log('CE_QC_QC11_REAL_ATTEMPT_TRUTH=PASS');
 console.log('CE_QC_QC11_PENDING_SPECIAL_RULES=PASS');
