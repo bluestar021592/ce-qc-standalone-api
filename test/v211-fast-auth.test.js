@@ -43,14 +43,19 @@ test('V223 browser login completes 5179 auth then 5177 main-session handoff befo
   assert.doesNotMatch(html,/fetch\('\/api\/internal-auth\/login'/);
 });
 
-test('V223 auth sidecar is read-only, bounded and returns a signed handoff token',()=>{
+test('V223/V249 auth sidecar is read-only, bounded, persistent and returns a signed handoff token',()=>{
   const source=fs.readFileSync(new URL('../src/v213AuthSidecar.js',import.meta.url),'utf8');
   assert.match(source,/new DatabaseSync\(file,\{readOnly:true\}\)/);
   assert.match(source,/PRAGMA query_only=ON/);
-  assert.match(source,/PRAGMA busy_timeout=500/);
+  const busy=source.match(/PRAGMA busy_timeout=(\d+)/);
+  assert.ok(busy,'auth sidecar must set a bounded SQLite busy timeout');
+  assert.ok(Number(busy[1])>0&&Number(busy[1])<=2000,`auth sidecar busy timeout must stay interactive; got ${busy[1]}ms`);
+  assert.match(source,/let authDb=null/);
+  assert.match(source,/let authStmt=null/);
+  assert.match(source,/if\(authDb&&authStmt&&authDbFile===file\)return authDb/);
   assert.match(source,/CE_QC_AUTH_SIDECAR_PORT\|\|5179/);
-  assert.match(source,/V213_AUTH_SIDECAR_LOGIN_START/);
-  assert.match(source,/V213_AUTH_SIDECAR_LOGIN_OK/);
+  assert.match(source,/V249_AUTH_LOGIN_START/);
+  assert.match(source,/V249_AUTH_LOGIN_OK/);
   assert.match(source,/handoffToken:issued\.token/);
   assert.doesNotMatch(source,/import \{ getDb/);
   assert.doesNotMatch(source,/INSERT INTO user_sessions/);
