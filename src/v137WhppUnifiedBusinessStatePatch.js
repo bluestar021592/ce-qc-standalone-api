@@ -1,9 +1,11 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID='2026-08-15-v137-whpp-unified-business-state-v1';
+const PATCH_ID='2026-08-21-v201-whpp-summary-cache-v1';
 const LEGACY_ROUTE='/api/v132/whpp-fast-summary';
 const BUSINESS_ROUTE='/api/business-state/:businessType';
+const CACHE_MS=Math.max(10_000,Number(process.env.V201_WHPP_DASHBOARD_CACHE_MS||60_000));
+const stateCache=new Map();
 
 function dateOnly(value=''){
   const text=String(value||'').trim().slice(0,10);
@@ -13,6 +15,10 @@ function num(value){const n=Number(value||0);return Number.isFinite(n)?n:0;}
 function rate(value,total){return total?Number((num(value)*100/num(total)).toFixed(2)):0;}
 function safeJson(value,fallback={}){try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}}
 function emptyRegion(code){return {regionCode:code,total:0,pod:0,podRate:0,returned:0,cancelled:0,unresolved:0,pending1:0,pending2:0,pending3:0,oc1:0,oc2:0,oc3:0,shop:0,phnomPenhShop:0,provinceShop:0};}
+function normalizeRegion(code,row={}){
+  const total=num(row.total),shop=num(row.shop??(code==='PP'?row.phnomPenhShop:row.provinceShop));
+  return {...emptyRegion(code),...row,regionCode:code,total,pod:num(row.pod),podRate:Number.isFinite(Number(row.podRate))?Number(row.podRate):rate(row.pod,total),returned:num(row.returned),cancelled:num(row.cancelled),unresolved:num(row.unresolved),pending1:num(row.pending1),pending2:num(row.pending2),pending3:num(row.pending3),oc1:num(row.oc1),oc2:num(row.oc2),oc3:num(row.oc3),shop,phnomPenhShop:code==='PP'?num(row.phnomPenhShop??shop):0,provinceShop:code==='PV'?num(row.provinceShop??shop):0};
+}
 
 function latestDate(db,requested=''){
   const explicit=dateOnly(requested);if(explicit)return explicit;
@@ -62,9 +68,17 @@ function finalRegions(db,date){
   const out={PP:emptyRegion('PP'),PV:emptyRegion('PV'),UNKNOWN:emptyRegion('UNKNOWN')};
   for(const row of rows){
     const code=['PP','PV'].includes(String(row.regionCode))?String(row.regionCode):'UNKNOWN';
-    const total=num(row.total),shopCount=num(row.shop);
-    out[code]={regionCode:code,total,pod:num(row.pod),podRate:rate(row.pod,total),returned:num(row.returned),cancelled:num(row.cancelled),unresolved:num(row.unresolved),pending1:num(row.pending1),pending2:num(row.pending2),pending3:num(row.pending3),oc1:num(row.oc1),oc2:num(row.oc2),oc3:num(row.oc3),shop:shopCount,phnomPenhShop:code==='PP'?shopCount:0,provinceShop:code==='PV'?shopCount:0};
+    out[code]=normalizeRegion(code,row);
   }
+  return out;
+}
+
+function storedRegions(source={},expectedTotal=0){
+  const raw=source?.regions;
+  if(!raw||typeof raw!=='object')return null;
+  const out={PP:normalizeRegion('PP',raw.PP||{}),PV:normalizeRegion('PV',raw.PV||{}),UNKNOWN:normalizeRegion('UNKNOWN',raw.UNKNOWN||{})};
+  const total=num(out.PP.total)+num(out.PV.total)+num(out.UNKNOWN.total);
+  if(num(expectedTotal)>0&&total!==num(expectedTotal))return null;
   return out;
 }
 
@@ -80,6 +94,10 @@ function buildWhppUnifiedState(requested=''){
   const finalStat=db.prepare("SELECT COUNT(*) count,MAX(updatedAt) updatedAt,SUM(CASE WHEN UPPER(COALESCE(apiStatus,''))='API_PENDING_RETRY' THEN 1 ELSE 0 END) retryPending FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(reportDate)||{};
   const snapshot=db.prepare("SELECT snapshotId,runId,generatedAt FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND COALESCE(status,'VALID')='VALID' ORDER BY createdAt DESC,id DESC LIMIT 1").get(reportDate)||null;
   const run=db.prepare("SELECT runId,status,currentStage,batchIndex,totalBatches,errorMessage,updatedAt FROM business_run_locks WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||null;
+  const fingerprint=[reportDate,daily.updatedAt||'',history?.updatedAt||'',num(finalStat.count),num(finalStat.retryPending),finalStat.updatedAt||'',snapshot?.snapshotId||'',snapshot?.generatedAt||'',run?.updatedAt||''].join('|');
+  const cached=stateCache.get(reportDate);
+  if(cached&&cached.fingerprint===fingerprint&&Date.now()-cached.at<CACHE_MS)return {...cached.state,cacheHit:true};
+
   const total=num(daily.totalCount);
   const source=safeJson(history?.summaryJson,{});
   const metrics={...source,total:num(source.total??total)};
@@ -90,29 +108,34 @@ function buildWhppUnifiedState(requested=''){
   metrics.returnRate=history?num(metrics.returnRate):0;
   metrics.cancelRate=history?num(metrics.cancelRate):0;
   if(!history)metrics.unresolved=metrics.total;
-  const regions=num(finalStat.count)>0?finalRegions(db,reportDate):importedRegions(db,reportDate);
+  const exactStoredRegions=storedRegions(source,num(finalStat.count)||total);
+  const regions=exactStoredRegions||(num(finalStat.count)>0?finalRegions(db,reportDate):importedRegions(db,reportDate));
   const completed=Boolean(snapshot||history);
   const snapshotStatus=completed?(metrics.retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED'):'PENDING';
   const processing=run?{running:run.status==='running',paused:run.status==='paused',phase:run.currentStage||'',batchIndex:num(run.batchIndex),totalBatches:num(run.totalBatches),error:run.errorMessage||''}:{running:false,paused:false,phase:''};
-  return {
+  const state={
     businessType:'WHPP',viewBusinessType:'WHPP',reportDate,snapshotId:String(snapshot?.snapshotId||source.snapshotId||''),snapshotStatus,
     dailyReportReady:total>0,completed,total:metrics.total,metrics,regions,dashboard:{metrics,regions},
     dailyParseSummary:{totalRecognized:total,pnh:total,nonPnh:0,groupCounts:{}},
     currentRun:run,lastRunSummary:run?{runId:run.runId,reportDate,runStatus:run.status}:null,processing,
-    sourceTruth:'NORMALIZED_SQLITE',sourceTables:['business_daily_reports','business_final_rows','business_history_summary','business_export_snapshots'],
+    sourceTruth:exactStoredRegions?'HISTORY_SUMMARY_RECONCILED':'NORMALIZED_SQLITE',sourceTables:['business_daily_reports','business_final_rows','business_history_summary','business_export_snapshots'],
     cacheHit:false,generatedAt:new Date().toISOString(),patchId:PATCH_ID,_whppUnifiedBusinessState:true
   };
+  stateCache.set(reportDate,{fingerprint,at:Date.now(),state});
+  return state;
 }
 
 function sendBusinessState(req,res){
   const state=buildWhppUnifiedState(req.query.reportDate||req.query.date||'');
-  res.setHeader('Cache-Control','no-store');
+  res.setHeader('Cache-Control','private, max-age=10');
+  res.setHeader('Server-Timing',`v201;desc=whpp-unified-${state.cacheHit?'cache':'fresh'}`);
   return res.json({ok:true,businessType:'WHPP',reportDate:state.reportDate,snapshotId:state.snapshotId,snapshotStatus:state.snapshotStatus,state});
 }
 function sendLegacy(req,res){
   const state=buildWhppUnifiedState(req.query.reportDate||req.query.date||'');
-  res.setHeader('Cache-Control','no-store');
-  return res.json({ok:true,patchId:PATCH_ID,reportDate:state.reportDate,total:state.total,completed:state.completed,snapshotStatus:state.snapshotStatus,metrics:state.metrics,regions:state.regions,generatedAt:state.generatedAt,cacheHit:false,sourceTruth:state.sourceTruth});
+  res.setHeader('Cache-Control','private, max-age=10');
+  res.setHeader('Server-Timing',`v201;desc=whpp-fast-${state.cacheHit?'cache':'fresh'}`);
+  return res.json({ok:true,patchId:PATCH_ID,reportDate:state.reportDate,total:state.total,completed:state.completed,snapshotStatus:state.snapshotStatus,metrics:state.metrics,regions:state.regions,generatedAt:state.generatedAt,cacheHit:Boolean(state.cacheHit),sourceTruth:state.sourceTruth});
 }
 
 const previousGet=express.application.get;
