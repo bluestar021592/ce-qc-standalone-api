@@ -1,10 +1,10 @@
 (function installV166CurrentBusinessTruth(global) {
   if (global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__) return;
   global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = true;
-  const VERSION = '2026-08-17-v166-current-business-truth-compact-v1';
+  const VERSION = '2026-08-21-v201-current-business-truth-per-business-inflight-v1';
   const PAGE_TYPE = Object.freeze({ ce:'CE', ceaf:'CEAF', tbkh:'TBKH', ali1688:'ALI1688', shopeecn:'SHOPEECN', shopeevn:'SHOPEEVN' });
   const verifiedAt = new Map();
-  let inFlight = null;
+  const inFlightByType = new Map();
 
   function finiteNumber(value) {
     const n = Number(value);
@@ -30,7 +30,7 @@
 
   function installV55CurrentGuard(state = {}) {
     const total = membershipCount(state);
-    state.v55Summary = { total, __source: 'V166_EXACT_CURRENT_COMPACT_SNAPSHOT' };
+    state.v55Summary = { total, __source: 'V201_EXACT_CURRENT_COMPACT_SNAPSHOT' };
     state.__v150BlocksLegacyV55RangeFallback = true;
     state.__v166DashboardCompactTruth = true;
     return state;
@@ -91,9 +91,10 @@
     const normalizedPage = String(page || (typeof currentPage !== 'undefined' ? currentPage : '')).toLowerCase();
     const type = PAGE_TYPE[normalizedPage];
     if (!type || typeof businessStates === 'undefined') return;
-    if (inFlight) return inFlight;
+    const existing = inFlightByType.get(type);
+    if (existing) return existing;
 
-    inFlight = (async () => {
+    const task = (async () => {
       try {
         let imported = importedStateFromMemory();
         if (!imported) imported = (await readJson('/api/import/unified-latest?compact=1'))?.import || null;
@@ -119,10 +120,6 @@
 
         if (!force && Date.now() - Number(verifiedAt.get(verifyKey) || 0) < 60_000) return;
 
-        // V166: dashboard truth is exact by snapshotId but intentionally compact.
-        // Full scanResults/trackEvents/finalRows are detail data and are fetched only
-        // when the user drills into a metric; loading them on every board visit made
-        // the browser stall as the SQLite history grew.
         const result = await readJson(`/api/business-state/${encodeURIComponent(type)}?snapshotId=${encodeURIComponent(snapshotId)}&compact=1`);
         const live = installV55CurrentGuard(result?.state || {});
         live.__v149CanonicalCurrent = true;
@@ -134,17 +131,18 @@
         currentSourceBanner(type, reportDate, actual);
         if (String(typeof currentPage !== 'undefined' ? currentPage : '').toLowerCase() === normalizedPage && typeof renderAll === 'function') renderAll();
       } catch (error) {
-        console.warn('[CE-QC][V166_CURRENT_BUSINESS_TRUTH]', error?.message || error);
+        console.warn('[CE-QC][V201_CURRENT_BUSINESS_TRUTH]', type, error?.message || error);
       } finally {
-        inFlight = null;
+        inFlightByType.delete(type);
       }
     })();
-    return inFlight;
+    inFlightByType.set(type, task);
+    return task;
   }
 
   if (typeof hydratePageData === 'function') {
     const originalHydratePageData = hydratePageData;
-    hydratePageData = async function v166HydratePageData(page) {
+    hydratePageData = async function v201HydratePageData(page) {
       await originalHydratePageData(page);
       await ensureCurrentBusinessTruth(page, false);
     };
@@ -159,6 +157,6 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once:true });
   else start();
 
-  global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = { version: VERSION, ensure: ensureCurrentBusinessTruth, verifiedAt };
-  console.info('[CE-QC][V166_CURRENT_BUSINESS_TRUTH]', VERSION);
+  global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = { version: VERSION, ensure: ensureCurrentBusinessTruth, verifiedAt, pending: () => inFlightByType.size };
+  console.info('[CE-QC][V201_CURRENT_BUSINESS_TRUTH]', VERSION);
 })(window);
