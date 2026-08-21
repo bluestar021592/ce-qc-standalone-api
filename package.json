@@ -10,7 +10,7 @@
     "dev": "node --watch bootstrap.js",
     "start:production": "set NODE_ENV=production&& node bootstrap.js",
     "start:next": "node next/server.js",
-    "test:next": "node --check next/server.js && node --check next/db.js && node --check next/auth.js && node --check next/store.js && node --check next/public/app.js && node --test next/test/*.test.js",
+    "test:next": "node --check next/server.js && node --check next/db.js && node --check next/auth.js && node --check next/ce.js && node --check next/store.js && node --check next/public/app.js && node --test next/test/*.test.js",
     "test": "node --test --test-reporter=tap --test-skip-pattern=\"desktop root start no longer|due-only endpoint cannot refresh|internal refresh bypass is restricted\" test/*.test.js",
     "test:full": "npm test",
     "test:golive": "node --check bootstrap.js && node --check server.js && node --check src/v246CoreAvailabilityPatch.js && node --check public/v246-core-usability.js && node --check scripts/v246-system-first-acceptance.cjs && node scripts/v246-system-first-acceptance.cjs"
