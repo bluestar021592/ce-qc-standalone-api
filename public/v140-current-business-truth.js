@@ -1,7 +1,7 @@
 (function installV166CurrentBusinessTruth(global) {
   if (global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__) return;
   global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = true;
-  const VERSION = '2026-08-21-v202-ceaf-source-total-whpp-clean-status-v1';
+  const VERSION = '2026-08-21-v203-ceaf-instant-first-paint-background-truth-v1';
   const GOLIVE_COMPAT_VERSION = '2026-08-21-v201-current-business-truth-per-business-inflight-v1';
   const PAGE_TYPE = Object.freeze({ ce:'CE', ceaf:'CEAF', tbkh:'TBKH', ali1688:'ALI1688', shopeecn:'SHOPEECN', shopeevn:'SHOPEEVN' });
   const verifiedAt = new Map();
@@ -31,7 +31,7 @@
 
   function installV55CurrentGuard(state = {}) {
     const total = membershipCount(state);
-    state.v55Summary = { ...(state.v55Summary || {}), total, __source: 'V202_EXACT_CURRENT_COMPACT_SNAPSHOT' };
+    state.v55Summary = { ...(state.v55Summary || {}), total, __source: 'V203_EXACT_CURRENT_COMPACT_SNAPSHOT' };
     state.__v150BlocksLegacyV55RangeFallback = true;
     state.__v166DashboardCompactTruth = true;
     return state;
@@ -40,9 +40,9 @@
   function applyExpectedCeafSourceTotal(state = {}, expected, reportDate, snapshotId) {
     if (!Number.isFinite(expected) || expected < 0) return state;
     const actual = membershipCount(state);
-    if (actual === expected) return state;
-    state.reportDate = String(state.reportDate || reportDate || '');
-    state.snapshotId = String(state.snapshotId || snapshotId || '');
+    if (actual === expected && String(state.reportDate || '') === String(reportDate || '')) return state;
+    state.reportDate = String(reportDate || state.reportDate || '');
+    state.snapshotId = String(snapshotId || state.snapshotId || '');
     state.dailyReportReady = expected > 0 || Boolean(state.dailyReportReady);
     state.dailyParseSummary = { ...(state.dailyParseSummary || {}), totalRecognized: expected };
     state.total = expected;
@@ -53,6 +53,7 @@
       state.dashboard.metrics = { ...state.dashboard.metrics, total: expected };
     }
     state.__v202CeafSourceTotalRecovered = true;
+    state.__v203CeafInstantSourceSeed = true;
     return installV55CurrentGuard(state);
   }
 
@@ -81,7 +82,8 @@
       node.className = 'global-processing-notice danger';
       document.querySelector('.main-content')?.prepend(node);
     }
-    if (!Number.isFinite(expected) || expected === actual) {
+    const onPage = String(location.pathname || '').toLowerCase() === `/${String(type || '').toLowerCase()}`;
+    if (!onPage || !Number.isFinite(expected) || expected === actual) {
       node.hidden = true;
       return;
     }
@@ -91,6 +93,11 @@
 
   function currentSourceBanner(type, reportDate, total) {
     let node = document.getElementById('v150CurrentSourceTruth');
+    const onPage = String(location.pathname || '').toLowerCase() === `/${String(type || '').toLowerCase()}`;
+    if (!onPage || !Number.isFinite(Number(total)) || Number(total) <= 0) {
+      if (node) node.hidden = true;
+      return;
+    }
     if (!node) {
       node = document.createElement('div');
       node.id = 'v150CurrentSourceTruth';
@@ -98,7 +105,10 @@
       const host = document.querySelector('.v18-dashboard-page') || document.querySelector('.main-content');
       host?.prepend(node);
     }
-    if (node) node.textContent = `当前日报 ${reportDate} · ${type} 精确快照 ${Number(total || 0).toLocaleString('zh-CN')}票`;
+    if (node) {
+      node.hidden = false;
+      node.textContent = `当前日报 ${reportDate} · ${type} 精确快照 ${Number(total || 0).toLocaleString('zh-CN')}票`;
+    }
   }
 
   function sameSnapshot(state, reportDate, snapshotId) {
@@ -113,6 +123,23 @@
       const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
       if (text.includes('正在后台校验最新WHPP摘要')) node.remove();
     });
+  }
+
+  function seedCeafImmediately(page = '') {
+    if (String(page || '').toLowerCase() !== 'ceaf' || typeof businessStates === 'undefined') return false;
+    const imported = importedStateFromMemory();
+    const reportDate = String(imported?.reportDate || '').trim();
+    const snapshotId = String(imported?.snapshotId || '').trim();
+    const expected = Number(imported?.classificationCounts?.CEAF);
+    if (!reportDate || !snapshotId || !Number.isFinite(expected) || expected < 0) return false;
+    const current = businessStates.CEAF || {};
+    if (sameSnapshot(current, reportDate, snapshotId) && membershipCount(current) === expected) return false;
+    const seeded = applyExpectedCeafSourceTotal({ ...current }, expected, reportDate, snapshotId);
+    seeded.__v149CanonicalCurrent = true;
+    seeded.__v149ExpectedSourceTotal = expected;
+    businessStates.CEAF = seeded;
+    sourceMismatchBanner('CEAF', expected, expected);
+    return true;
   }
 
   async function ensureCurrentBusinessTruth(page = '', force = false) {
@@ -146,8 +173,6 @@
             verifiedAt.set(verifyKey, Date.now());
             return;
           }
-          // Same snapshot but wrong membership must not be trusted. Fetch the compact
-          // canonical state again instead of returning the stale zero-card bootstrap.
         }
 
         if (!force && Date.now() - Number(verifiedAt.get(verifyKey) || 0) < 60_000) return;
@@ -166,7 +191,7 @@
         currentSourceBanner(type, reportDate, actual);
         if (String(typeof currentPage !== 'undefined' ? currentPage : '').toLowerCase() === normalizedPage && typeof renderAll === 'function') renderAll();
       } catch (error) {
-        console.warn('[CE-QC][V202_CURRENT_BUSINESS_TRUTH]', type, error?.message || error);
+        console.warn('[CE-QC][V203_CURRENT_BUSINESS_TRUTH]', type, error?.message || error);
       } finally {
         inFlightByType.delete(type);
       }
@@ -177,9 +202,16 @@
 
   if (typeof hydratePageData === 'function') {
     const originalHydratePageData = hydratePageData;
-    hydratePageData = async function v202HydratePageData(page) {
-      await originalHydratePageData(page);
-      await ensureCurrentBusinessTruth(page, false);
+    hydratePageData = async function v203HydratePageData(page) {
+      const seeded = seedCeafImmediately(page);
+      if (seeded && String(typeof currentPage !== 'undefined' ? currentPage : '').toLowerCase() === 'ceaf' && typeof renderAll === 'function') {
+        renderAll();
+      }
+      const result = await originalHydratePageData(page);
+      // Exact reconciliation is intentionally non-blocking. The V109 summary-first
+      // navigation path must remain instant; the 22 GiB SQLite read may finish later.
+      void ensureCurrentBusinessTruth(page, false);
+      return result;
     };
   }
 
@@ -201,6 +233,6 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once:true });
   else start();
 
-  global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = { version: VERSION, compatVersion:GOLIVE_COMPAT_VERSION, ensure: ensureCurrentBusinessTruth, verifiedAt, pending: () => inFlightByType.size, cleanWhppBackgroundStatus };
-  console.info('[CE-QC][V202_CURRENT_BUSINESS_TRUTH]', VERSION);
+  global.__CE_QC_V166_CURRENT_BUSINESS_TRUTH__ = { version: VERSION, compatVersion:GOLIVE_COMPAT_VERSION, ensure: ensureCurrentBusinessTruth, verifiedAt, pending: () => inFlightByType.size, cleanWhppBackgroundStatus, seedCeafImmediately };
+  console.info('[CE-QC][V203_CURRENT_BUSINESS_TRUTH]', VERSION);
 })(window);
