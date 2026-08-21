@@ -6,7 +6,7 @@ import { loadToken, summarizeToken } from './authStore.js';
 import { publicUser } from './accessControl.js';
 import { getDbStatus } from './store.js';
 
-const PATCH_ID = '2026-08-10-v43-fast-bootstrap-v2';
+const PATCH_ID = '2026-08-21-v210-fast-bootstrap-history-window-v1';
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -60,6 +60,12 @@ function safeJson(text) {
   try { return JSON.parse(text || '{}'); } catch { return {}; }
 }
 
+function logStage(name, startedAt) {
+  const duration = Date.now() - startedAt;
+  if (duration >= 100) console.log(`[CE-QC][PERF][V210] bootstrap.${name} ${duration}ms`);
+  return duration;
+}
+
 function latestImport() {
   return getDb().prepare(`
     SELECT b.batchId,b.snapshotId,b.reportDate,b.sourceName,b.fileHash,b.createdAt,
@@ -73,21 +79,26 @@ function latestImport() {
 }
 
 function simpleHistory(limit = 60) {
+  const bounded = Math.max(1, Math.min(120, Number(limit) || 60));
   return getDb().prepare(`
-    SELECT b.reportDate,b.snapshotId,b.batchId,b.createdAt,
-           COALESCE(s.status,'IMPORTED') AS snapshotStatus
-    FROM unified_import_batches b
-    LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-    WHERE b.status='VALID'
-      AND NOT EXISTS (
-        SELECT 1 FROM unified_import_batches newer
-        WHERE newer.status='VALID'
-          AND newer.reportDate=b.reportDate
-          AND newer.createdAt>b.createdAt
-      )
-    ORDER BY b.reportDate DESC,b.createdAt DESC
+    WITH ranked AS (
+      SELECT
+        b.reportDate,b.snapshotId,b.batchId,b.sourceName,b.fileHash,b.createdAt,
+        COALESCE(s.status,'IMPORTED') AS snapshotStatus,
+        ROW_NUMBER() OVER (
+          PARTITION BY b.reportDate
+          ORDER BY b.createdAt DESC,b.batchId DESC
+        ) AS rn
+      FROM unified_import_batches b
+      LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+      WHERE b.status='VALID'
+    )
+    SELECT reportDate,snapshotId,batchId,sourceName,fileHash,createdAt,snapshotStatus
+    FROM ranked
+    WHERE rn=1
+    ORDER BY reportDate DESC,createdAt DESC
     LIMIT ?
-  `).all(Math.max(1, Math.min(120, Number(limit) || 60)));
+  `).all(bounded);
 }
 
 function importCountRows(snapshotId) {
@@ -137,7 +148,7 @@ function dashboardMetricRow(date, label, value, tab = '') {
   return { 日期: date || '', 项目: label, metricKey: label, 数值: n(value), 数值原值: n(value), 明细Tab: tab, 迷你走势数据: [] };
 }
 
-function makeCcslState(label, rows, latest) {
+function makeCcslState(label, rows, latest, dbStatus) {
   const metrics = addMetrics(rows);
   const date = latest?.reportDate || '';
   const dashboardRows = [
@@ -201,7 +212,7 @@ function makeCcslState(label, rows, latest) {
       allData: { label: '全部数据', rows: [], total },
       coreAbnormal: { label: '核心异常', rows: [], total: Math.max(0, total - metrics.pod) }
     },
-    dbStatus: getDbStatus(),
+    dbStatus,
     logs: [],
     _bootstrapCacheSummaryV43: true
   };
@@ -211,7 +222,7 @@ function shopeeRegion(rows, regionCode) {
   return addMetrics(rows.filter(row => String(row.regionCode || 'UNKNOWN').toUpperCase() === regionCode));
 }
 
-function makeShopeeState(label, rows, latest, groupRows = {}) {
+function makeShopeeState(label, rows, latest, groupRows = {}, dbStatus = {}) {
   const date = latest?.reportDate || '';
   const all = addMetrics(rows);
   const regions = {
@@ -286,7 +297,7 @@ function makeShopeeState(label, rows, latest, groupRows = {}) {
       all: { label: '全部数据', rows: [], total },
       abnormal: { label: '当前异常', rows: [], total: all.unresolved }
     },
-    dbStatus: getDbStatus(),
+    dbStatus,
     logs: [],
     _bootstrapCacheSummaryV43: true
   };
@@ -309,26 +320,43 @@ function buildNetworkInfo(req) {
 
 async function buildPayload(req) {
   const startedAt = Date.now();
-  const latest = latestImport();
-  const historyRows = simpleHistory(60);
-  const rows = mergedRows(latest);
-  const byType = Object.fromEntries(TYPES.map(type => [type, rows.filter(row => row.businessType === type)]));
 
+  let stageAt = Date.now();
+  const historyRows = simpleHistory(60);
+  let latest = historyRows[0] || null;
+  if (!latest) latest = latestImport();
+  logStage('historyLatest', stageAt);
+
+  stageAt = Date.now();
+  const rows = mergedRows(latest);
+  logStage('mergedRows', stageAt);
+
+  stageAt = Date.now();
+  const dbStatus = getDbStatus();
+  logStage('dbStatus', stageAt);
+
+  stageAt = Date.now();
+  const byType = Object.fromEntries(TYPES.map(type => [type, rows.filter(row => row.businessType === type)]));
   const businessStates = {
-    CE: makeCcslState('CE', byType.CE, latest),
-    CEAF: makeCcslState('CEAF', byType.CEAF, latest),
-    TBKH: makeCcslState('TBKH', byType.TBKH, latest),
-    ALI1688: makeCcslState('ALI1688', byType.ALI1688, latest),
-    SHOPEECN: makeShopeeState('SHOPEECN', byType.SHOPEECN, latest),
-    SHOPEEVN: makeShopeeState('SHOPEEVN', byType.SHOPEEVN, latest)
+    CE: makeCcslState('CE', byType.CE, latest, dbStatus),
+    CEAF: makeCcslState('CEAF', byType.CEAF, latest, dbStatus),
+    TBKH: makeCcslState('TBKH', byType.TBKH, latest, dbStatus),
+    ALI1688: makeCcslState('ALI1688', byType.ALI1688, latest, dbStatus),
+    SHOPEECN: makeShopeeState('SHOPEECN', byType.SHOPEECN, latest, {}, dbStatus),
+    SHOPEEVN: makeShopeeState('SHOPEEVN', byType.SHOPEEVN, latest, {}, dbStatus)
   };
 
   const ccslRows = rows.filter(row => CCSL_TYPES.has(row.businessType));
   const shopeeRows = rows.filter(row => SHOPEE_TYPES.has(row.businessType));
-  const state = makeCcslState('CCSL', ccslRows, latest);
+  const state = makeCcslState('CCSL', ccslRows, latest, dbStatus);
   state.network = buildNetworkInfo(req);
-  const shopeeState = makeShopeeState('SHOPEE', shopeeRows, latest, { CN: byType.SHOPEECN, VN: byType.SHOPEEVN });
+  const shopeeState = makeShopeeState('SHOPEE', shopeeRows, latest, { CN: byType.SHOPEECN, VN: byType.SHOPEEVN }, dbStatus);
+  logStage('buildStates', stageAt);
+
+  stageAt = Date.now();
   const token = await loadToken();
+  logStage('loadToken', stageAt);
+
   const classificationCounts = Object.fromEntries(TYPES.map(type => [type, n(addMetrics(byType[type]).total)]));
   const total = Object.values(classificationCounts).reduce((sum, value) => sum + n(value), 0);
   const unifiedImport = latest ? {
@@ -344,7 +372,7 @@ async function buildPayload(req) {
     carryover: { todayOpen: 0, historicalOpen: 0, currentOpen: 0 }
   } : null;
 
-  return {
+  const payload = {
     ok: true,
     patchId: PATCH_ID,
     bootstrapMode: 'CACHE_SUMMARY_ONLY',
@@ -358,13 +386,15 @@ async function buildPayload(req) {
     generatedAt: new Date().toISOString(),
     serverBuildMs: Date.now() - startedAt
   };
+  if (payload.serverBuildMs >= 100) console.log(`[CE-QC][PERF][V210] bootstrap.total ${payload.serverBuildMs}ms`);
+  return payload;
 }
 
 async function fastBootstrap(req, res) {
   const now = Date.now();
   if (payloadCache && now - payloadCacheAt < CACHE_TTL_MS) {
     res.setHeader('Cache-Control', 'private, max-age=5');
-    res.setHeader('X-CE-QC-Bootstrap', 'V43-HIT');
+    res.setHeader('X-CE-QC-Bootstrap', 'V210-HIT');
     res.setHeader('Server-Timing', 'bootstrap;dur=0');
     return res.json({ ...payloadCache, cacheHit: true });
   }
@@ -373,7 +403,7 @@ async function fastBootstrap(req, res) {
   payloadCache = payload;
   payloadCacheAt = Date.now();
   res.setHeader('Cache-Control', 'private, max-age=5');
-  res.setHeader('X-CE-QC-Bootstrap', 'V43-MISS');
+  res.setHeader('X-CE-QC-Bootstrap', 'V210-MISS');
   res.setHeader('Server-Timing', `bootstrap;dur=${n(payload.serverBuildMs)}`);
   return res.json({ ...payload, cacheHit: false });
 }
