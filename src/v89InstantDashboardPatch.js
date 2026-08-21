@@ -1,35 +1,18 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-13-v89-instant-dashboard-source-truth-v1';
+const PATCH_ID = '2026-08-21-v206-instant-dashboard-index-only-v1';
 const SUMMARY_ROUTE = '/api/v89/instant-dashboard';
 const DETAIL_ROUTE = '/api/v89/shopee-whpp-detail';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 const cache = new Map();
-const CACHE_MS = Math.max(5_000, Number(process.env.V89_DASHBOARD_CACHE_MS || 30_000));
+const CACHE_MS = Math.max(5_000, Number(process.env.V89_DASHBOARD_CACHE_MS || 120_000));
 
 function text(value) { return String(value ?? '').trim(); }
 function dateOnly(value) {
   const valueText = text(value).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(valueText) ? valueText : '';
 }
-function safeJson(value, fallback = {}) {
-  try { return value && typeof value === 'object' ? value : JSON.parse(String(value || '')) || fallback; }
-  catch { return fallback; }
-}
-function token(value) {
-  return String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/[\s_-]+/g, '');
-}
-function isAirMarker(value) {
-  const normalized = token(value);
-  return normalized === 'CCAF' || normalized === 'CEAF';
-}
-function rowHasExactAirMarker(row = {}) {
-  const raw = row?.raw && typeof row.raw === 'object' ? row.raw : {};
-  return Object.values(raw).some(isAirMarker);
-}
-function placeholders(size) { return Array.from({ length: size }, () => '?').join(','); }
-
 function latestBatch(db, requestedDate = '') {
   const date = dateOnly(requestedDate);
   if (date) {
@@ -76,57 +59,35 @@ function whppRawTotal(db, reportDate) {
   `).get(reportDate)?.count || 0);
 }
 
-function airCandidatesInWhpp(db, reportDate) {
-  const rows = db.prepare(`
-    SELECT shipmentCode,rowJson
+// V206 deliberately avoids the historical rowJson/rawJson LIKE scans that made a
+// 22 GiB database block the whole application for minutes. The CEAF membership is
+// already authoritative in unified_import_rows. WHPP only needs to subtract bills
+// that are present in that exact CEAF slice. Both sides of this anti-join are
+// covered by existing (businessType,reportDate,shipmentCode) and
+// (snapshotId,businessType,shipmentCode) indexes.
+function whppNetTotal(db, batch) {
+  if (!batch?.reportDate || !batch?.snapshotId) return { total: 0, raw: 0, ceafOverlap: 0 };
+  const raw = whppRawTotal(db, batch.reportDate);
+  const parsed = Number(db.prepare(`
+    SELECT COUNT(DISTINCT p.shipmentCode) AS count
+    FROM business_daily_parse_rows p
+    WHERE p.businessType='WHPP' AND p.reportDate=?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM unified_import_rows u
+        WHERE u.snapshotId=?
+          AND u.businessType='CEAF'
+          AND u.shipmentCode=p.shipmentCode
+      )
+  `).get(batch.reportDate, batch.snapshotId)?.count || 0);
+  const hasParseRows = Number(db.prepare(`
+    SELECT 1 AS ok
     FROM business_daily_parse_rows
     WHERE businessType='WHPP' AND reportDate=?
-      AND (UPPER(COALESCE(rowJson,'')) LIKE '%CCAF%' OR UPPER(COALESCE(rowJson,'')) LIKE '%CEAF%')
-  `).all(reportDate);
-  const map = new Map();
-  for (const record of rows) {
-    const shipmentCode = text(record.shipmentCode).toUpperCase();
-    if (!shipmentCode) continue;
-    const row = safeJson(record.rowJson, {});
-    if (rowHasExactAirMarker(row)) map.set(shipmentCode, row);
-  }
-  return [...map.keys()];
-}
-
-function correctAirClassification(db, batch, counts, whppTotal) {
-  const candidates = airCandidatesInWhpp(db, batch.reportDate);
-  if (!candidates.length) return { counts, whpp: whppTotal, movedToCeaf: 0, removedFromWhpp: 0, candidates: [] };
-  const currentByBill = new Map();
-  const marks = placeholders(candidates.length);
-  for (const row of db.prepare(`
-    SELECT shipmentCode,businessType
-    FROM unified_import_rows
-    WHERE snapshotId=? AND shipmentCode IN (${marks})
-  `).all(batch.snapshotId, ...candidates)) {
-    currentByBill.set(text(row.shipmentCode).toUpperCase(), text(row.businessType).toUpperCase());
-  }
-
-  const corrected = { ...counts };
-  let movedToCeaf = 0;
-  let removedFromWhpp = 0;
-  for (const bill of candidates) {
-    // A WHPP parse-row with an exact CCAF/CEAF source marker is never WHPP stock.
-    // Remove that duplicate/wrong source assignment from WHPP regardless of whether
-    // an earlier repair already created the CEAF unified row.
-    if (whppTotal - removedFromWhpp > 0) removedFromWhpp += 1;
-    const current = currentByBill.get(bill) || '';
-    if (current === 'CEAF') continue;
-    if (Object.hasOwn(corrected, current)) corrected[current] = Math.max(0, Number(corrected[current] || 0) - 1);
-    corrected.CEAF = Number(corrected.CEAF || 0) + 1;
-    movedToCeaf += 1;
-  }
-  return {
-    counts: corrected,
-    whpp: Math.max(0, Number(whppTotal || 0) - removedFromWhpp),
-    movedToCeaf,
-    removedFromWhpp,
-    candidates
-  };
+    LIMIT 1
+  `).get(batch.reportDate)?.ok || 0) === 1;
+  const total = hasParseRows ? parsed : raw;
+  return { total, raw, ceafOverlap: Math.max(0, raw - total) };
 }
 
 function whppFinalWhere() {
@@ -148,6 +109,8 @@ function whppFinalWhere() {
   `;
 }
 
+// This detailed scan is intentionally retained only for an explicit user drilldown.
+// It is never called by the homepage/first-paint summary anymore.
 function shopeeWhppCount(db, batch, type) {
   if (!batch?.snapshotId || !['SHOPEECN', 'SHOPEEVN'].includes(type)) return 0;
   return Number(db.prepare(`
@@ -166,15 +129,14 @@ function shopeeWhppCount(db, batch, type) {
 function buildSummary(requestedDate = '') {
   const db = getDb();
   const batch = latestBatch(db, requestedDate);
-  if (!batch) return { ok: true, patchId: PATCH_ID, reportDate: '', counts: {}, total: 0, shopeeWhpp: { SHOPEECN: 0, SHOPEEVN: 0 } };
+  if (!batch) return { ok: true, patchId: PATCH_ID, reportDate: '', counts: {}, total: 0, shopeeWhpp: {} };
   const cacheKey = `${batch.snapshotId}|${batch.reportDate}`;
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.at < CACHE_MS) return { ...cached.payload, cacheHit: true };
 
-  const baseCounts = importedCounts(db, batch.snapshotId);
-  const whppSource = whppRawTotal(db, batch.reportDate);
-  const correction = correctAirClassification(db, batch, baseCounts, whppSource);
-  const counts = { ...correction.counts, WHPP: correction.whpp };
+  const counts = importedCounts(db, batch.snapshotId);
+  const whpp = whppNetTotal(db, batch);
+  counts.WHPP = Number(whpp.total || 0);
   const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
   const payload = {
     ok: true,
@@ -183,15 +145,12 @@ function buildSummary(requestedDate = '') {
     snapshotId: batch.snapshotId,
     counts,
     total,
-    shopeeWhpp: {
-      SHOPEECN: shopeeWhppCount(db, batch, 'SHOPEECN'),
-      SHOPEEVN: shopeeWhppCount(db, batch, 'SHOPEEVN')
-    },
+    // Leave this object empty on first-paint summary. SHOPEE-specific WHPP truth
+    // remains available from its own state/detail route and no longer blocks home.
+    shopeeWhpp: {},
     sourceCorrection: {
-      exactAirMarkerBills: correction.candidates.length,
-      movedToCeaf: correction.movedToCeaf,
-      removedFromWhpp: correction.removedFromWhpp,
-      reason: 'WHPP source rows carrying an exact CCAF/CEAF marker are displayed as CEAF without rewriting immutable historical snapshots.'
+      removedFromWhpp: whpp.ceafOverlap,
+      reason: 'WHPP total uses indexed CEAF overlap exclusion; no raw JSON scan is executed during first paint.'
     },
     generatedAt: new Date().toISOString(),
     cacheHit: false
@@ -201,10 +160,11 @@ function buildSummary(requestedDate = '') {
 }
 
 function summaryHandler(req, res) {
+  const started = Date.now();
   try {
     const payload = buildSummary(req.query.date || req.query.reportDate || '');
-    res.setHeader('Cache-Control', 'private, max-age=10');
-    res.setHeader('Server-Timing', `v89;desc=instant-summary`);
+    res.setHeader('Cache-Control', 'private, max-age=30');
+    res.setHeader('Server-Timing', `v206;dur=${Date.now() - started}`);
     res.json(payload);
   } catch (error) {
     res.status(500).json({ ok: false, patchId: PATCH_ID, error: error?.message || String(error) });
