@@ -1,0 +1,28 @@
+name: QC11 one-shot final acceptance
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'bootstrap.js'
+      - 'server.js'
+      - 'package*.json'
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'test/**'
+      - '.github/workflows/qc11-one-shot-final.yml'
+  workflow_dispatch:
+
+jobs:
+  qc11-final:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:qc11-final

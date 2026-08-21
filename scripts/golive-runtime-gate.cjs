@@ -1,5 +1,4 @@
 const fs = require('fs');
-const { execFileSync } = require('child_process');
 
 const read = p => fs.readFileSync(p, 'utf8');
 const runner = read('public/v67-resilient-run-guard.js');
@@ -28,11 +27,6 @@ const shopeeAnalyzerV33 = read('src/shopeeAnalyzerV33.js');
 const shopeeReporting = read('src/shopeeReporting.js');
 const historyRefresh = read('src/v183HistoricalStatusRefreshPatch.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
-const authPause = read('src/v41AuthPausePatch.js');
-const authBridge = read('src/v209LoginReliabilityPatch.js');
-const authSidecar = read('src/v213AuthSidecar.js');
-const startupHealth = read('src/v232LiveDataHealthGatePatch.js');
-const localProductionAudit = read('scripts/v238-local-production-readonly-gate.mjs');
 
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
@@ -57,7 +51,6 @@ must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
 must(singleExportWorker, 'createV200ReferenceDashboardWorkbook');
 must(allBusinessChild, 'createV200ReferenceDashboardWorkbook');
 
-// V203 real attempt and signing-day truth.
 must(v202Truth, '2026-08-18-v203-real-delivery-cycle-manual-evidence-v3');
 must(v202Truth, "code === '4003'");
 must(v202Truth, "code === '70'");
@@ -76,13 +69,14 @@ must(shopeeAnalyzer, "from './shopeeAnalyzerV33.js'");
 must(shopeeAnalyzerV33, 'resolveV202AttemptCycle');
 must(shopeeAnalyzerV33, "code==='4003'||code==='70'");
 must(shopeeAnalyzerV33, 'Code 60 is assignment only and is excluded');
+must(shopeeAnalyzerV33, 'activePendingEpisode');
+must(shopeeAnalyzerV33, 'SPECIAL_NORMAL_DESTINATION');
 must(shopeeReporting, 'V202: no reportDate->POD elapsed-day fallback');
 must(shopeeReporting, 'deliveryAttemptCurrent(row) >= 1');
 must(shopeeReporting, 'dispatchAttemptDenominator: pod.length');
 must(shopeeReporting, 'current.total - current.pod - current.returned - current.cancelled');
 forbid(shopeeReporting, "Date.parse(`${start}T00:00:00+07:00`)");
 
-// Export includes manual evidence rows in detail while keeping official daily KPI membership unchanged.
 must(v200Metrics, 'if (row.metricEligible === false)');
 must(v200Metrics, 'stat.evidenceOnly++');
 must(v200Metrics, "'未POD明细': filter(openUnpod)");
@@ -101,7 +95,6 @@ must(v200Exporter, 'MANUAL_QUERY_ROWS_INCLUDED_IN_DETAILS_BUT_EXCLUDED_FROM_OFFI
 must(v200Exporter, 'ORDER_DATE_TO_ACTUAL_POD_DATE_INCLUSIVE');
 must(v200Exporter, 'POD_RETURN_CANCELLED_EXCLUDED_FROM_ANOMALY_AND_UNPOD');
 
-// Manual query is exact seven-business and persisted, not browser-only.
 must(v203ManualStore, 'manual_query_evidence');
 for (const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']) must(v203ManualStore, `'${type}'`);
 must(v203ManualStore, "sourceOrigin:'MANUAL_QUERY'");
@@ -111,7 +104,6 @@ must(v203ManualPatch, 'persistV203ManualQuery');
 must(v203ManualPatch, '/api/v203/waybill-audit');
 must(v203ManualPatch, '/api/v203/manual-evidence/status');
 
-// Total/Shopee dashboard must expose real 1/2/3 attempts and retire the low-value panels called out by QC.
 must(v203Integrity, '/api/v203/attempt-summary');
 must(v203Integrity, '/api/v203/network-access');
 must(v203Integrity, '派次占比以POD票数为分母');
@@ -125,7 +117,6 @@ must(v203Ui, '收件省份 / 末端地点');
 must(v203Ui, '精确业务板块');
 for (const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']) must(v203Ui, `'${type}'`);
 
-// One consolidated seven-business carry/anomaly center.
 must(v202Carry, '2026-08-18-v202-seven-business-carry-tracking-center-v2');
 for (const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']) must(v202Carry, `'${type}'`);
 must(v202Carry, '/api/v202/carry/summary');
@@ -154,54 +145,6 @@ must(v202DisableLegacy, 'CE_QC_ENABLE_LEGACY_V201_TRACKER');
 must(historyRefresh, '/api/v183/history-refresh/summary');
 must(historyRefresh, '/api/v183/history-refresh/start');
 
-// Local/LAN login must stay independent from the 5177 operational event loop and the writable runtime DB.
-must(authPause, "import './v209LoginReliabilityPatch.js'");
-must(authBridge, '2026-08-19-v223-main-session-handoff-v1');
-must(authBridge, 'CE_QC_AUTH_SIDECAR_PORT||5179');
-must(authBridge, '/api/v213/auth-ping');
-must(authBridge, '/api/v213/local-auth/login');
-must(authBridge, "const HANDOFF_PATH='/api/v223/fast-auth/accept';");
-must(authBridge, 'V223_AUTH_HANDOFF_OK');
-must(authBridge, 'req.ceQcFastUser');
-must(authBridge, "entry==='bootstrap.js'||entry==='server.js'");
-must(authSidecar, '2026-08-19-v226-auth-sidecar-handoff-v2');
-must(authSidecar, 'new DatabaseSync(file,{readOnly:true})');
-must(authSidecar, 'PRAGMA query_only=ON');
-must(authSidecar, 'PRAGMA busy_timeout=500');
-must(authSidecar, 'handoffToken:issued.token');
-must(authSidecar, 'V213_AUTH_SIDECAR_LOGIN_OK');
-forbid(authSidecar, 'INSERT INTO user_sessions');
-forbid(authSidecar, 'UPDATE users SET failedLoginCount');
-
-// V237 startup ownership: the browser is not eligible until main data + auth + export are all exact-ready.
-must(startupHealth, 'V237-5177-5178-5179');
-must(startupHealth, '/api/v213/auth-ping');
-must(startupHealth, '/api/v194/export-ping');
-must(startupHealth, "startupState:ready?'APP_AUTH_EXPORT_READY':'STARTUP_TRIPLET_INCOMPLETE'");
-must(startupHealth, 'V237_STARTUP_GATE_PASS');
-must(startupHealth, 'V237_STARTUP_GATE_BLOCK');
-
-// V238 is a real local production-data gate, but strictly read-only and allowed to skip when no local DB exists.
-must(localProductionAudit, 'DatabaseSync(dbFile,{readOnly:true})');
-must(localProductionAudit, 'PRAGMA query_only=ON');
-must(localProductionAudit, 'CE_QC_First_Day_GoLive_Verify_ReadOnly.mjs');
-must(localProductionAudit, 'CE_QC_Business_Snapshot_Audit_ReadOnly.mjs');
-must(localProductionAudit, 'CE_QC_WHPP_Terminal_Authority_Audit_ReadOnly.mjs');
-must(localProductionAudit, 'CE_QC_V238_LOCAL_PRODUCTION_READONLY=PASS');
-must(localProductionAudit, 'CE_QC_V238_LOCAL_PRODUCTION_READONLY=SKIPPED_NO_LOCAL_DB');
-forbid(localProductionAudit, 'INSERT INTO');
-forbid(localProductionAudit, 'UPDATE ');
-forbid(localProductionAudit, 'DELETE FROM');
-
-execFileSync(process.execPath, ['--check', 'src/v209LoginReliabilityPatch.js'], { stdio: 'inherit' });
-execFileSync(process.execPath, ['--check', 'src/v213AuthSidecar.js'], { stdio: 'inherit' });
-execFileSync(process.execPath, ['--check', 'src/v232LiveDataHealthGatePatch.js'], { stdio: 'inherit' });
-execFileSync(process.execPath, ['--check', 'scripts/v238-local-production-readonly-gate.mjs'], { stdio: 'inherit' });
-execFileSync(process.execPath, ['--check', 'src/v41AuthPausePatch.js'], { stdio: 'inherit' });
-
 for (const source of [runner, pause, shell, storage, bstore]) forbid(source, 'v148-direct-daily-runner-v1');
 
-// This executes against the real local DB only when that DB exists; otherwise CI/dev environments skip cleanly.
-execFileSync(process.execPath, ['scripts/v238-local-production-readonly-gate.mjs'], { stdio: 'inherit', env: process.env });
-
-console.log('[GOLIVE] V238 gate passed: current V223/V226 auth handoff + V237 exact 5177/5178/5179 readiness + strict real local source/normalized/current/WHPP read-only production audit are locked before installation.');
+console.log('[GOLIVE] QC11 golden-shell gate passed: seven businesses + WHPP, real delivery cycles, current Pending/special closure, parity export, persistent manual evidence and carry tracking are present without the later auth-sidecar startup stack.');
