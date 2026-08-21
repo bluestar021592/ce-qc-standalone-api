@@ -9,6 +9,7 @@ import { getDataDb, getSystemDb, nextRuntime, nowIso } from './db.js';
 import { NextCeClient, ceStatus } from './ce.js';
 import { boardRows, boardSummary, businessSummary, BUSINESSES, clearBusinessData, importDaily, latestDate, listDates } from './store.js';
 import { latestProcessRun, processReport } from './processor.js';
+import { exportFile, exportStatus, startExport } from './exporter.js';
 
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const projectRoot=path.resolve(__dirname,'..');
@@ -50,6 +51,10 @@ app.post('/api/process/start',requireRole('OPERATOR'),(req,res)=>{
   task.catch(()=>{});activeProcesses.set(reportDate,{task,progress,startedAt:nowIso()});res.status(202).json({ok:true,accepted:true,reportDate});
 });
 app.get('/api/process/status',(req,res)=>{const reportDate=String(req.query?.date||latestDate()).trim(),active=activeProcesses.get(reportDate);res.json({ok:true,reportDate,active:Boolean(active),progress:active?.progress||null,persisted:latestProcessRun(reportDate)});});
+
+app.post('/api/export/start',requireRole('VIEWER'),(req,res)=>{try{res.status(202).json({ok:true,...startExport({reportDate:String(req.body?.reportDate||latestDate()),businessType:String(req.body?.businessType||'ALL')})});}catch(error){res.status(400).json({ok:false,error:error.message});}});
+app.get('/api/export/status/:jobId',(req,res)=>{const job=exportStatus(req.params.jobId);if(!job)return res.status(404).json({ok:false,error:'导出任务不存在。'});res.json({ok:true,job,downloadUrl:job.status==='COMPLETED'?`/api/export/download/${job.jobId}`:''});});
+app.get('/api/export/download/:jobId',(req,res)=>{const file=exportFile(req.params.jobId);if(!file)return res.status(404).json({ok:false,error:'导出文件尚未生成或已不存在。'});res.download(file,path.basename(file));});
 
 app.post('/api/admin/clear-business-data',requireRole('ADMIN'),(req,res)=>{
   const phrase=String(req.body?.confirm||'');if(phrase!=='永久清除全部业务数据')return res.status(400).json({ok:false,error:'确认文字不正确。'});
