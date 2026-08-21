@@ -30,11 +30,16 @@ test('V252 CE connector fast path is local authenticated, bounded by CE client a
   assert.doesNotMatch(patch,/requireRole\(['"]ADMIN['"]\)/);
 });
 
-test('V252 browser settings owns visible CE login feedback even while main dashboard bootstrap is still loading',()=>{
+test('V253 browser settings survives SPA navigation and dashboard rerenders instead of only activating on initial /settings load',()=>{
+  assert.match(client,/2026-08-21-v253-settings-spa-activation-v1/);
   assert.match(client,/\/api\/v252\/settings-shell/);
   assert.match(client,/\/api\/v252\/ce-login/);
-  assert.match(client,/设置页已独立就绪，不再等待看板主数据加载/);
-  assert.match(client,/系统设置已就绪 · 看板数据后台加载，不影响设置/);
+  assert.match(client,/data-v253-settings-ready/);
+  assert.match(client,/for\(const name of \['pushState','replaceState'\]\)/);
+  assert.match(client,/global\.addEventListener\('popstate'/);
+  assert.match(client,/function settingsVisible\(\)/);
+  assert.match(client,/if\(settingsVisible\(\)&&lastShell&&!\$\('#networkAccessCards \[data-v253-settings-ready=/);
+  assert.doesNotMatch(client,/if\(location\.pathname!==['"]\/settings['"]\)return/);
   assert.match(client,/button\.removeAttribute\('onclick'\)/);
   assert.match(client,/CE API 登录成功/);
   assert.match(client,/最长等待12秒/);
