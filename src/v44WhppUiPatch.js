@@ -7,6 +7,7 @@ import './v51CarryDashboardPatch.js';
 import './v98CarryRefreshEndpointPatch.js';
 import './v105AsyncPurgePatch.js';
 import './v132WhppFastIntegrationPatch.js';
+import './v248WhppAuthorityPatch.js';
 import './v133ClosureRatePatch.js';
 import './v134WhppRunSupervisorPatch.js';
 import './v141WhppDailyRetryIsolationPatch.js';
@@ -31,7 +32,7 @@ import './v205IntegrityAuditPatch.js';
 // /v183-history-refresh.js?v=20260818-v192-1
 // /v203-dashboard-integrity.js?v=20260818-v203-1
 // v139-carry-manual-window and v183-history-refresh are superseded by the unified carry center.
-const PATCH_ID='2026-08-18-v205-canonical-integrity-shell-v3';
+const PATCH_ID='2026-08-21-qc11-v248-whpp-authority-shell-v1';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs','/carryover-center']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
