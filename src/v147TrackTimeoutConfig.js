@@ -1,3 +1,5 @@
+import './v203CeafFastBusinessStatePatch.js';
+
 export const V147_TRACK_TIMEOUT_CONFIG_ID = '2026-08-16-v147-track-time-budget-v2';
 
 // Keep SHOPEE event/exception queries in fixed 50-ticket batches, but do not
