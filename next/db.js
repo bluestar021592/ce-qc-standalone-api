@@ -31,16 +31,8 @@ function open(file){
   return db;
 }
 
-export function getSystemDb(){
-  if(!systemDb){systemDb=open(nextRuntime().systemDbFile);migrateSystem(systemDb);migrateLegacyUsersOnce(systemDb);}
-  return systemDb;
-}
-
-export function getDataDb(){
-  if(!dataDb){dataDb=open(nextRuntime().dataDbFile);migrateData(dataDb);}
-  return dataDb;
-}
-
+export function getSystemDb(){if(!systemDb){systemDb=open(nextRuntime().systemDbFile);migrateSystem(systemDb);migrateLegacyUsersOnce(systemDb);}return systemDb;}
+export function getDataDb(){if(!dataDb){dataDb=open(nextRuntime().dataDbFile);migrateData(dataDb);}return dataDb;}
 export function closeNextDbs(){try{systemDb?.close();}catch{}try{dataDb?.close();}catch{}systemDb=null;dataDb=null;}
 export function nowIso(){return new Date().toISOString();}
 
@@ -48,65 +40,47 @@ function migrateSystem(db){
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_meta(key TEXT PRIMARY KEY,value TEXT,updatedAt TEXT);
     CREATE TABLE IF NOT EXISTS users(
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE,
-      displayName TEXT NOT NULL,
-      departmentCompany TEXT DEFAULT '',
-      email TEXT,
-      passwordHash TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'VIEWER',
-      businessScope TEXT NOT NULL DEFAULT 'ALL',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      mustChangePassword INTEGER NOT NULL DEFAULT 0,
-      lastLoginAt TEXT,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL
+      id INTEGER PRIMARY KEY AUTOINCREMENT,username TEXT NOT NULL UNIQUE,displayName TEXT NOT NULL,
+      departmentCompany TEXT DEFAULT '',email TEXT,passwordHash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'VIEWER',
+      businessScope TEXT NOT NULL DEFAULT 'ALL',enabled INTEGER NOT NULL DEFAULT 1,mustChangePassword INTEGER NOT NULL DEFAULT 0,
+      lastLoginAt TEXT,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS sessions(
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      userId INTEGER NOT NULL,
-      sessionHash TEXT NOT NULL UNIQUE,
-      expiresAt TEXT NOT NULL,
-      revokedAt TEXT,
-      createdAt TEXT NOT NULL,
-      FOREIGN KEY(userId) REFERENCES users(id)
-    );
+    CREATE TABLE IF NOT EXISTS sessions(id INTEGER PRIMARY KEY AUTOINCREMENT,userId INTEGER NOT NULL,sessionHash TEXT NOT NULL UNIQUE,expiresAt TEXT NOT NULL,revokedAt TEXT,createdAt TEXT NOT NULL,FOREIGN KEY(userId) REFERENCES users(id));
     CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,valueJson TEXT NOT NULL,updatedAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS shop_cp_codes(shopCode TEXT PRIMARY KEY,shopName TEXT,updatedAt TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,userId INTEGER,action TEXT NOT NULL,detailJson TEXT,createdAt TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS idx_next_sessions_active ON sessions(sessionHash,expiresAt,revokedAt);
     CREATE INDEX IF NOT EXISTS idx_next_users_enabled ON users(enabled,username);
   `);
-  db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('schema_version','1',?) ON CONFLICT(key) DO UPDATE SET value='1',updatedAt=excluded.updatedAt`).run(nowIso());
+  db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('schema_version','2',?) ON CONFLICT(key) DO UPDATE SET value='2',updatedAt=excluded.updatedAt`).run(nowIso());
 }
 
 function migrateData(db){
   db.exec(`
     CREATE TABLE IF NOT EXISTS import_batches(
-      batchId TEXT PRIMARY KEY, reportDate TEXT NOT NULL, sourceName TEXT NOT NULL,
-      fileHash TEXT NOT NULL, status TEXT NOT NULL, summaryJson TEXT NOT NULL,
-      warningsJson TEXT NOT NULL, createdAt TEXT NOT NULL
+      batchId TEXT PRIMARY KEY,reportDate TEXT NOT NULL,sourceName TEXT NOT NULL,fileHash TEXT NOT NULL,status TEXT NOT NULL,
+      summaryJson TEXT NOT NULL,warningsJson TEXT NOT NULL,createdAt TEXT NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_next_import_unique ON import_batches(reportDate,fileHash,status);
     CREATE TABLE IF NOT EXISTS import_rows(
-      id INTEGER PRIMARY KEY AUTOINCREMENT,batchId TEXT NOT NULL,reportDate TEXT NOT NULL,
-      businessType TEXT NOT NULL,shipmentCode TEXT NOT NULL,regionCode TEXT,
-      recipientRaw TEXT,customerNameRaw TEXT,classificationReason TEXT,rowJson TEXT NOT NULL,createdAt TEXT NOT NULL,
-      UNIQUE(batchId,shipmentCode)
+      id INTEGER PRIMARY KEY AUTOINCREMENT,batchId TEXT NOT NULL,reportDate TEXT NOT NULL,businessType TEXT NOT NULL,
+      shipmentCode TEXT NOT NULL,regionCode TEXT,recipientRaw TEXT,customerNameRaw TEXT,classificationReason TEXT,rowJson TEXT NOT NULL,
+      createdAt TEXT NOT NULL,UNIQUE(batchId,shipmentCode)
     );
     CREATE INDEX IF NOT EXISTS idx_next_import_rows_board ON import_rows(reportDate,businessType,shipmentCode);
     CREATE TABLE IF NOT EXISTS shipment_state(
-      shipmentCode TEXT PRIMARY KEY,businessType TEXT NOT NULL,reportDate TEXT NOT NULL,
-      state TEXT NOT NULL,isPod INTEGER NOT NULL DEFAULT 0,isReturned INTEGER NOT NULL DEFAULT 0,
-      pendingDays INTEGER NOT NULL DEFAULT 0,ocDays INTEGER NOT NULL DEFAULT 0,
-      specialState TEXT,lastEventTime TEXT,lastEventDesc TEXT,stateJson TEXT NOT NULL,updatedAt TEXT NOT NULL
+      reportDate TEXT NOT NULL,shipmentCode TEXT NOT NULL,businessType TEXT NOT NULL,state TEXT NOT NULL,
+      isPod INTEGER NOT NULL DEFAULT 0,isReturned INTEGER NOT NULL DEFAULT 0,pendingDays INTEGER NOT NULL DEFAULT 0,
+      ocDays INTEGER NOT NULL DEFAULT 0,specialState TEXT,lastEventTime TEXT,lastEventDesc TEXT,stateJson TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,PRIMARY KEY(reportDate,shipmentCode)
     );
     CREATE INDEX IF NOT EXISTS idx_next_state_board ON shipment_state(reportDate,businessType,state);
+    CREATE INDEX IF NOT EXISTS idx_next_state_current_bill ON shipment_state(shipmentCode,reportDate DESC);
     CREATE TABLE IF NOT EXISTS track_events(
       id INTEGER PRIMARY KEY AUTOINCREMENT,shipmentCode TEXT NOT NULL,businessType TEXT NOT NULL,reportDate TEXT NOT NULL,
       eventCode TEXT,eventTime TEXT,eventDesc TEXT,place TEXT,rawJson TEXT NOT NULL,createdAt TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_next_track_lookup ON track_events(shipmentCode,eventTime);
+    CREATE INDEX IF NOT EXISTS idx_next_track_lookup ON track_events(reportDate,shipmentCode,eventTime);
     CREATE TABLE IF NOT EXISTS carryover(
       shipmentCode TEXT PRIMARY KEY,businessType TEXT NOT NULL,sourceReportDate TEXT NOT NULL,lastReportDate TEXT NOT NULL,
       status TEXT NOT NULL,reason TEXT,stateJson TEXT NOT NULL,updatedAt TEXT NOT NULL
@@ -129,8 +103,7 @@ function migrateLegacyUsersOnce(target){
   if(!fs.existsSync(legacyFile)){target.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES('legacy_users_migrated','1',?) ON CONFLICT(key) DO UPDATE SET value='1',updatedAt=excluded.updatedAt").run(nowIso());return;}
   let legacy;
   try{
-    legacy=new DatabaseSync(legacyFile,{readOnly:true});
-    legacy.exec('PRAGMA query_only=ON');
+    legacy=new DatabaseSync(legacyFile,{readOnly:true});legacy.exec('PRAGMA query_only=ON');
     const exists=legacy.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1").get();
     if(exists){
       const rows=legacy.prepare("SELECT username,displayName,departmentCompany,email,passwordHash,role,businessScope,enabled,mustChangePassword,lastLoginAt,createdAt,updatedAt FROM users WHERE COALESCE(status,'ACTIVE')='ACTIVE'").all();
@@ -138,7 +111,6 @@ function migrateLegacyUsersOnce(target){
       target.exec('BEGIN');
       try{for(const row of rows)insert.run(row.username,row.displayName||row.username,row.departmentCompany||'',row.email||null,row.passwordHash,row.role||'VIEWER',row.businessScope||'ALL',Number(row.enabled??1),Number(row.mustChangePassword||0),row.lastLoginAt||null,row.createdAt||nowIso(),row.updatedAt||nowIso());target.exec('COMMIT');}catch(error){target.exec('ROLLBACK');throw error;}
     }
-  }catch(error){console.error('[QC-NEXT] legacy user migration skipped:',error?.message||error);}
-  finally{try{legacy?.close();}catch{}}
+  }catch(error){console.error('[QC-NEXT] legacy user migration skipped:',error?.message||error);}finally{try{legacy?.close();}catch{}}
   target.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES('legacy_users_migrated','1',?) ON CONFLICT(key) DO UPDATE SET value='1',updatedAt=excluded.updatedAt").run(nowIso());
 }
