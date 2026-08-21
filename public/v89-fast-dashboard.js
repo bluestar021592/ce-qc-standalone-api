@@ -1,7 +1,8 @@
 (function installFastDashboardV89(global) {
   if (global.__CE_QC_V89_FAST_DASHBOARD__) return;
-  const VERSION = '2026-08-13-v94-fast-dashboard-whpp-truth-v2';
+  const VERSION = '2026-08-21-v205-fast-dashboard-interactive-first-v1';
   const CACHE_KEY = 'ce_qc_v89_instant_dashboard';
+  const STARTUP_REFRESH_DELAY_MS = 120_000;
   let summary = loadCached();
   let inflight = null;
   let rerenderedKey = '';
@@ -82,9 +83,6 @@
     const data = summaryForDate(String(model.reportDate || ''));
     const strict = strictWhppValue(data, type);
     const fromState = stateWhppValue(type);
-    // V94 normalized source truth is authoritative whenever the tiny summary has
-    // been loaded for this date. Old completed snapshots may still carry the V31
-    // broad-text WHPP count, so they are fallback only and must never override V94.
     const whppValue = strict !== null ? strict : (fromState !== null ? fromState : 0);
     const existing = core.find(row => String(row?.label || '').trim() === 'WHPP滞留包裹');
     const metric = {
@@ -187,15 +185,26 @@
   }, true);
 
   document.addEventListener('click', event => {
-    if (event.target?.closest?.('#topRangeQuery,#dashboardRangeQuery,.side-link')) setTimeout(() => void fetchSummary(currentDate()), 40);
+    const rangeAction = event.target?.closest?.('#topRangeQuery,#dashboardRangeQuery');
+    const side = event.target?.closest?.('.side-link');
+    const page = String(side?.dataset?.page || '').toLowerCase();
+    if (rangeAction || ['home','shopeecn','shopeevn'].includes(page)) setTimeout(() => void fetchSummary(currentDate()), 40);
   }, true);
-  global.addEventListener('popstate', () => setTimeout(() => void fetchSummary(currentDate()), 40));
-  global.addEventListener('ce-qc-startup-truth-ready', event => void fetchSummary(event?.detail?.reportDate || currentDate()));
+  global.addEventListener('popstate', () => {
+    const path = location.pathname.toLowerCase();
+    if (['/','/shopeecn','/shopeevn'].includes(path)) setTimeout(() => void fetchSummary(currentDate()), 40);
+  });
+  global.addEventListener('ce-qc-startup-truth-ready', event => {
+    const requested = String(event?.detail?.reportDate || currentDate());
+    if (!summaryForDate(requested)) void fetchSummary(requested);
+  });
 
   setTimeout(() => {
     installRenderHooks();
     patchVisibleHome();
-    void fetchSummary(currentDate());
+    const date = currentDate();
+    if (!summaryForDate(date)) void fetchSummary(date);
+    else setTimeout(() => void fetchSummary(currentDate()), STARTUP_REFRESH_DELAY_MS);
   }, 20);
 
   global.__CE_QC_V89_FAST_DASHBOARD__ = { version: VERSION, fetchSummary };
