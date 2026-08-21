@@ -45,8 +45,9 @@ test('V253 browser settings survives SPA navigation and dashboard rerenders inst
   assert.match(client,/最长等待12秒/);
 });
 
-test('V252 injects the recovery client into real index sendFile responses',()=>{
+test('V253 injects a cache-busted recovery client into real index sendFile responses',()=>{
   assert.match(patch,/res\.sendFile=function v252SendFile/);
   assert.match(patch,/path\.basename\(String\(file\|\|''\)\)==='index\.html'/);
-  assert.match(patch,/v252-settings-recovery\.js\?v=20260821-v252-1/);
+  assert.match(patch,/v252-settings-recovery\.js\?v=20260821-v253-1/);
+  assert.match(patch,/2026-08-21-v253-settings-spa-activation-v1/);
 });
