@@ -30,12 +30,15 @@ try{
   await waitFor(`${APP}/api/health`,{accept:r=>r.status===200,headers:{accept:'application/json'},logs});
   const cookie=`ce_v213_fast_session=${login.p.handoffToken}`;
   const settings=await fetch(`${APP}/settings`,{cache:'no-store',headers:{cookie,accept:'text/html'}});const html=await settings.text();
-  if(!settings.ok||!html.includes('/v252-settings-recovery.js?v=20260821-v252-1'))fail('V252 recovery client was not injected into real /settings HTML',logs);
+  if(!settings.ok||!html.includes('/v252-settings-recovery.js?v=20260821-v253-1'))fail('V253 recovery client was not injected into real /settings HTML',logs);
+  const root=await fetch(`${APP}/`,{cache:'no-store',headers:{cookie,accept:'text/html'}});const rootHtml=await root.text();
+  if(!root.ok||!rootHtml.includes('/v252-settings-recovery.js?v=20260821-v253-1'))fail('V253 recovery client was not injected into root HTML for SPA navigation',logs);
   const shell=await json(`${APP}/api/v252/settings-shell`,{headers:{cookie,accept:'application/json'}});
   if(!shell.r.ok||shell.p?.user?.username!==USERNAME||shell.p?.user?.role!=='VIEWER'||shell.p?.dashboardRequired!==false)fail(`V252 settings shell mismatch ${shell.text}`,logs);
   const started=Date.now();const missing=await json(`${APP}/api/v252/ce-login`,{method:'POST',headers:{cookie,'content-type':'application/json','accept':'application/json'},body:JSON.stringify({tenantId:'000000',username:'',password:''})});
   if(missing.r.status!==400||Date.now()-started>2500)fail(`V252 CE connector route did not remain fast/reachable for authenticated VIEWER: HTTP ${missing.r.status} ${missing.text}`,logs);
-  console.log('CE_QC_V252_SETTINGS_HTML_INJECT=PASS');
+  console.log('CE_QC_V253_SETTINGS_HTML_INJECT=PASS');
+  console.log('CE_QC_V253_ROOT_SPA_INJECT=PASS');
   console.log('CE_QC_V252_SETTINGS_SHELL_WITHOUT_DASHBOARD=PASS');
   console.log('CE_QC_V252_CE_CONNECTOR_ROUTE_REACHABLE=PASS');
 }finally{await cleanup();}
