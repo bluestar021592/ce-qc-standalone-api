@@ -1,0 +1,30 @@
+name: QC Next Clean Rebuild
+
+on:
+  pull_request:
+    paths:
+      - 'next/**'
+      - 'src/unifiedExcelParser.js'
+      - 'src/analyzer.js'
+      - 'src/analyzerFinal.js'
+      - 'src/analyzerV30.js'
+      - 'src/shopeeAnalyzer.js'
+      - 'src/shopeeAnalyzerV33.js'
+      - 'src/scanTerminal.js'
+      - 'src/trackBatching.js'
+      - 'package.json'
+      - '.github/workflows/qc-next.yml'
+  workflow_dispatch:
+
+jobs:
+  next-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:next
