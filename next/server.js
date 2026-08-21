@@ -8,11 +8,13 @@ import { authMiddleware, authRoutes, publicUser, requireRole } from './auth.js';
 import { getDataDb, getSystemDb, nextRuntime, nowIso } from './db.js';
 import { NextCeClient, ceStatus } from './ce.js';
 import { boardRows, boardSummary, businessSummary, BUSINESSES, clearBusinessData, importDaily, latestDate, listDates } from './store.js';
+import { latestProcessRun, processReport } from './processor.js';
 
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const projectRoot=path.resolve(__dirname,'..');
 const cfg=nextRuntime();for(const dir of [cfg.importsDir,cfg.exportsDir,cfg.tokenDir])fs.mkdirSync(dir,{recursive:true});
 const app=express();
+const activeProcesses=new Map();
 const upload=multer({dest:cfg.importsDir,limits:{fileSize:100*1024*1024,files:1},fileFilter:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();cb(['.xls','.xlsx'].includes(ext)?null:new Error('仅支持 .xls / .xlsx 日报'),['.xls','.xlsx'].includes(ext));}});
 
 app.disable('x-powered-by');
@@ -39,6 +41,15 @@ app.post('/api/import/daily',requireRole('OPERATOR'),upload.single('file'),(req,
   if(!req.file)return res.status(400).json({ok:false,error:'请选择日报Excel。'});
   try{const result=importDaily(req.file.path,{originalName:req.file.originalname,reportDate:String(req.body?.reportDate||'')});getSystemDb().prepare('INSERT INTO audit_logs(userId,action,detailJson,createdAt) VALUES(?,?,?,?)').run(req.user.id,'DAILY_IMPORT',JSON.stringify({reportDate:result.reportDate,total:result.total,classificationCounts:result.classificationCounts}),nowIso());res.json(result);}catch(error){res.status(400).json({ok:false,code:error.code||'IMPORT_FAILED',error:error.message,sheetDiagnostics:error.sheetDiagnostics||[]});}finally{try{fs.unlinkSync(req.file.path);}catch{}}
 });
+
+app.post('/api/process/start',requireRole('OPERATOR'),(req,res)=>{
+  const reportDate=String(req.body?.reportDate||latestDate()).trim();if(!reportDate)return res.status(400).json({ok:false,error:'没有可处理的日报。'});
+  if(activeProcesses.has(reportDate))return res.status(409).json({ok:false,error:'该日期正在处理。'});
+  const progress={stage:'QUEUED',done:0,total:0,message:'准备开始'};
+  const task=processReport(reportDate,{onProgress:async update=>Object.assign(progress,update)}).then(result=>{Object.assign(progress,{stage:'DONE',message:'处理完成',result});return result;}).catch(error=>{Object.assign(progress,{stage:'FAILED',message:error.message,error:error.message});throw error;}).finally(()=>setTimeout(()=>activeProcesses.delete(reportDate),30_000));
+  task.catch(()=>{});activeProcesses.set(reportDate,{task,progress,startedAt:nowIso()});res.status(202).json({ok:true,accepted:true,reportDate});
+});
+app.get('/api/process/status',(req,res)=>{const reportDate=String(req.query?.date||latestDate()).trim(),active=activeProcesses.get(reportDate);res.json({ok:true,reportDate,active:Boolean(active),progress:active?.progress||null,persisted:latestProcessRun(reportDate)});});
 
 app.post('/api/admin/clear-business-data',requireRole('ADMIN'),(req,res)=>{
   const phrase=String(req.body?.confirm||'');if(phrase!=='永久清除全部业务数据')return res.status(400).json({ok:false,error:'确认文字不正确。'});
