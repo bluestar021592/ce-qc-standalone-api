@@ -31,20 +31,16 @@ test('desktop update candidate validates and backs up with candidate tool before
 
 test('normal startup serves first paint before optional historical maintenance',()=>{
   const bootstrap=read('bootstrap.js');
-  const helperStart=bootstrap.indexOf('async function importServerInteractiveFirst()');
-  const serverImport=bootstrap.indexOf("return await importPhase('server', './server.js')",helperStart);
-  const interactiveCall=bootstrap.lastIndexOf('await importServerInteractiveFirst()');
-  const maintenanceCall=bootstrap.lastIndexOf('scheduleDeferredMaintenance({ v92, v76Repair })');
-  assert.ok(helperStart>=0&&serverImport>helperStart&&interactiveCall>serverImport&&maintenanceCall>interactiveCall);
-  assert.match(bootstrap,/dashboard STARTUP_WARM deferred from 1500ms/);
+  const server=bootstrap.indexOf("await importPhase('server', './server.js')");
+  const maintenance=bootstrap.indexOf('scheduleDeferredMaintenance({ v92, v76Repair })');
+  assert.ok(server>=0&&maintenance>server);
   assert.match(bootstrap,/background maintenance disabled on normal startup/);
 });
 
-test('purge remains backup-first and browser receives V131 queued isolated-worker lifecycle',()=>{
+test('purge remains backup-first and the browser receives an asynchronous lifecycle',()=>{
   const purge=read('src/dataPurge.js');
   const asyncPatch=read('src/v105AsyncPurgePatch.js');
   const ui=read('public/v104-fast-purge-ui.js');
-  const lazy=read('public/v108-route-lazy-features.js');
   syntax('src/dataPurge.js');
   syntax('src/v105AsyncPurgePatch.js');
   syntax('public/v104-fast-purge-ui.js');
@@ -52,13 +48,9 @@ test('purge remains backup-first and browser receives V131 queued isolated-worke
   assert.match(purge,/verifyPreparedBackupStillPresent/);
   assert.match(asyncPatch,/PREPARE_PATH = '\/api\/admin\/data-purge\/prepare'/);
   assert.match(asyncPatch,/EXECUTE_PATH = '\/api\/admin\/data-purge\/execute'/);
-  assert.match(asyncPatch,/JOB_START_DELAY_MS/);
-  assert.match(asyncPatch,/setTimeout\(async \(\) =>/);
-  assert.match(asyncPatch,/runIsolatedExecute\(req,job\)/);
-  assert.match(asyncPatch,/res\.status\(202\)\.json/);
+  assert.match(asyncPatch,/setImmediate\(async \(\) =>/);
   assert.match(ui,/安全备份正在后台执行/);
   assert.match(ui,/自动清空业务数据，无需再次点击/);
-  assert.match(lazy,/data:\['\/v104-fast-purge-ui\.js\?v=20260814-8'/);
 });
 
 test('visible-page rendering and request coalescing stay enabled',()=>{
@@ -80,16 +72,14 @@ test('large exports stay detached and identical export requests are reused',()=>
   assert.match(source,/reused: 'COMPLETED'/);
 });
 
-test('WHPP source truth protections stay present and route-lazy current assets are wired',()=>{
+test('WHPP source truth protections stay present after performance changes',()=>{
   const source=read('public/v89-fast-dashboard.js');
   const injector=read('src/v44WhppUiPatch.js');
-  const lazy=read('public/v108-route-lazy-features.js');
   syntax('public/v89-fast-dashboard.js');
   assert.match(source,/strictWhppValue/);
   assert.match(source,/const whppValue = strict !== null/);
   assert.ok(injector.indexOf('v105-fast-render.js')<injector.indexOf('v103-home-whpp-card-guard.js'));
-  assert.match(injector,/v108-route-lazy-features\.js\?v=20260818-v195-1/);
-  assert.match(lazy,/v104-fast-purge-ui\.js\?v=20260814-8/);
+  assert.match(injector,/v104-fast-purge-ui\.js\?v=20260814-4/);
 });
 
 test('static assets use browser cache while HTML remains version-controlled by the injector',()=>{

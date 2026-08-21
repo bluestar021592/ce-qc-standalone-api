@@ -50,13 +50,12 @@ test('historical stale unresolved row is rewritten as terminal POD with all anom
   assert.equal(fixed.carry状态,'closed_pod');
 });
 
-test('V92 repairs derived final/current/carry/history/snapshot layers and is loaded before actual server start',()=>{
+test('V92 repairs derived final/current/carry/history/snapshot layers and is loaded before server',()=>{
   const check=spawnSync(process.execPath,['--check',fileURLToPath(repairUrl)],{encoding:'utf8'});
   assert.equal(check.status,0,check.stderr||check.stdout);
   for(const token of ['business_final_rows','shipment_current_state','carryover_open_items','business_history_summary','business_export_snapshots','business_pod_locks']) assert.match(repairSource,new RegExp(token));
   assert.match(repairSource,/orderStatus=85/);
   assert.match(repairSource,/eventCode=80/);
   assert.match(bootstrap,/v92WhppTerminalAuthority/);
-  const serverStart=bootstrap.indexOf('await importServerInteractiveFirst()');
-  assert.ok(serverStart>=0&&bootstrap.indexOf('v92WhppTerminalAuthority')<serverStart);
+  assert.ok(bootstrap.indexOf('v92WhppTerminalAuthority')<bootstrap.indexOf("importPhase('server'"));
 });

@@ -121,7 +121,7 @@ test('managed launcher stays fast-forward only owns backend lifetime and never r
   assert.equal(pkg.ceQcUpdateGate,'v129-safe-junction-cleanup');
 });
 
-test('WHPP fast summary exposes partial snapshot retry count with current V205 shell assets',()=>{
+test('WHPP fast summary exposes partial snapshot retry count instead of treating the whole day as missing',()=>{
   const backend=read('src/v132WhppFastIntegrationPatch.js');
   const injector=read('src/v44WhppUiPatch.js');
   assert.match(backend,/v135-whpp-fast-summary-retry-v2/);
@@ -129,8 +129,10 @@ test('WHPP fast summary exposes partial snapshot retry count with current V205 s
   assert.match(backend,/retryPending/);
   assert.match(backend,/COMPLETED_WITH_RETRY/);
   assert.match(backend,/business_history_summary/);
-  assert.match(injector,/v132-whpp-seven-business-fast\.js\?v=20260817-v173-1/);
+  assert.match(injector,/v136-run-start-unblock-v24/);
+  assert.match(injector,/v132-whpp-seven-business-fast\.js\?v=20260814-2/);
   assert.match(injector,/v135-whpp-retry-aware-run\.js\?v=20260815-1/);
+  assert.doesNotMatch(injector,/v90-instant-whpp-navigation\.js/);
 });
 
 test('V133 adds the same closure-rate definition to home and all seven business boards',()=>{
@@ -171,22 +173,21 @@ test('V135 finalizes a valid WHPP snapshot even when some API rows remain retrya
   assert.match(injector,/v135WhppPartialSnapshotPatch\.js/);
 });
 
-test('V165 starts each current daily stage directly and verifies WHPP without heavyweight state preflight',()=>{
+test('V148 starts the current imported day directly without heavyweight state preflight',()=>{
   const runner=read('public/v67-resilient-run-guard.js');
   const retryUi=read('public/v135-whpp-retry-aware-run.js');
   const injector=read('src/v44WhppUiPatch.js');
-  assert.match(runner,/2026-08-17-v165-seven-business-stage-verification-v2/);
+  assert.match(runner,/v148-direct-daily-runner-v1/);
   assert.doesNotMatch(runner,/async function readStates\s*\(/);
   assert.doesNotMatch(runner,/await readStates\s*\(/);
   assert.doesNotMatch(runner,/正在检查七业务状态/);
   assert.match(runner,/start: '\/api\/run', resume: '\/api\/resume'/);
   assert.match(runner,/start: '\/api\/shopee\/run\/start', resume: '\/api\/shopee\/run\/resume'/);
   assert.match(runner,/start: '\/api\/whpp\/run\/start', resume: '\/api\/whpp\/run\/resume'/);
-  assert.match(runner,/RUN_ALREADY_COMPLETED/);
-  assert.match(runner,/verifyWhpp/);
   assert.match(retryUi,/__CE_QC_V67_RESILIENT_RUN_GUARD__\?\.targetDate/);
   assert.match(retryUi,/document\.getElementById\('reportDate'\)/);
-  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260817-1/);
+  assert.match(injector,/v67-resilient-run-guard\.js\?v=20260816-8/);
+  assert.ok(injector.indexOf('v135-whpp-retry-aware-run.js')<injector.indexOf('v132-whpp-seven-business-fast.js'));
 });
 
 test('WHPP total conservation guard remains present after fast render',()=>{

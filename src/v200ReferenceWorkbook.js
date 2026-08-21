@@ -99,8 +99,8 @@ function createDashboard(workbook, type, range, stats, anchors) {
     mr++;
   }
   const noteRow = mr + 1; sheet.mergeCells(noteRow, 1, noteRow, 16);
-  sheet.getCell(noteRow, 1).value = `派次口径：1派/2派/3派按真实派送周期计算。4003/轨迹70/真实开始派送开启一次派送；同一派重复扫描不加派次；本次真实派送失败后，只有再次真实开始派送才进入下一派。轨迹60“派件分配”、Pending次数、经过几天均不能单独制造派次；证据不足保留“派次未识别”。平均签收天数：下单日期→实际POD签收日期，首尾自然日都计1天。POD、退回，以及WHPP取消订单均为终态，不进入未POD/异常。未识别派次 ${o.attemptUnknown} 票。`;
-  sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=46;
+  sheet.getCell(noteRow, 1).value = `派次口径：优先使用轨迹状态码70“开始派送”的不同日期；没有70时使用状态码60“派件分配”的不同日期；再使用POD锁定派次/历史派次。禁止用“日报日期→POD日期”直接猜1/2/3派。平均签收天数：日报归属日期→实际POD/派件时间，包含首尾自然日，与参考样板同口径。未识别派次 ${o.attemptUnknown} 票。`;
+  sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=34;
   sheet.commit();
 }
 function detailValues(row) {
@@ -113,7 +113,7 @@ function createDetailSheet(workbook, name, rows) {
   sheet.autoFilter={from:'A1',to:'S1'};sheet.commit();
 }
 function assertMetrics(stats) {
-  for (const s of [...stats.daily, stats.overall]) { if (s.total !== s.pp+s.pv+s.unknown) throw new Error(`V202区域对账失败：${s.date}`); if (s.pod !== s.a1+s.a2+s.a3+s.attemptUnknown) throw new Error(`V202派次对账失败：${s.date}`); }
+  for (const s of [...stats.daily, stats.overall]) { if (s.total !== s.pp+s.pv+s.unknown) throw new Error(`V200区域对账失败：${s.date}`); if (s.pod !== s.a1+s.a2+s.a3+s.attemptUnknown) throw new Error(`V200派次对账失败：${s.date}`); }
 }
 export async function writeV200ReferenceWorkbook({file,type,range,rows,stats,bucket,anchors,onProgress=()=>{}}){
   assertMetrics(stats);const workbook=new ExcelJS.stream.xlsx.WorkbookWriter({filename:file,useStyles:true,useSharedStrings:false});workbook.creator='CE Express QC';createDashboard(workbook,type,range,stats,anchors);let completed=0;

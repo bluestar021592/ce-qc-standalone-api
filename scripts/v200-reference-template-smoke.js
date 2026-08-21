@@ -1,22 +1,16 @@
-import { V200_EXPORT_VERSION, internalHyperlinkFormulaForV200 } from '../src/v200TemplateDashboardExporter.js';
-import { resolveV202AttemptCycle } from '../src/v202DeliveryTruth.js';
-import { V205_EXPORT_TRUTH_VERSION } from '../src/v205ExportTruth.js';
+import { resolveV200Attempt, V200_EXPORT_VERSION, internalHyperlinkFormulaForV200 } from '../src/v200TemplateDashboardExporter.js';
+import { referenceAverageDays } from '../src/v200Metrics.js';
 
 function must(condition, message) { if (!condition) throw new Error(message); }
 
-const first = resolveV202AttemptCycle([
-  {kind:'START',time:'2026-08-01 08:00:00',source:'4003'},
-  {kind:'POD',time:'2026-08-01 16:00:00',source:'4004'}
-]);
-const second = resolveV202AttemptCycle([
-  {kind:'START',time:'2026-08-01 08:00:00',source:'4003'},
-  {kind:'FAIL',time:'2026-08-01 18:00:00',source:'150'},
-  {kind:'START',time:'2026-08-02 09:00:00',source:'70'},
-  {kind:'POD',time:'2026-08-02 16:00:00',source:'80'}
-]);
-must(first.attemptNo===1,'first real delivery cycle must be first-attempt POD');
-must(second.attemptNo===2,'a failed cycle plus real redispatch must be second-attempt POD');
+must(resolveV200Attempt({ pod:true, deliveryDates:['2026-08-01','2026-08-02','2026-08-03'], currentAttemptNo:1, podDate:'2026-08-03' }).attemptNo === 3, 'real delivery dates must win over flattened currentAttemptNo');
+must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:['2026-08-01','2026-08-02'], podDate:'2026-08-02' }).attemptNo === 2, 'code60 assign dates must provide attempt when code70/daily dispatch is absent');
+must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:[], podAttemptNo:2, podDate:'2026-08-02' }).attemptNo === 2, 'podAttemptNo fallback must remain available');
+must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:[], currentAttemptNo:1, podDate:'2026-08-04' }).attemptNo === 0, 'default currentAttemptNo=1 must not fabricate first-attempt success');
+must(resolveV200Attempt({ pod:true, deliveryDates:[], assignDates:[], podDate:'2026-08-04' }).attemptNo === 0, 'elapsed days must not fabricate dispatch attempt');
+must(referenceAverageDays('2026-08-01','2026-08-01') === 1, 'reference same-day POD must equal one natural day');
+must(referenceAverageDays('2026-08-01','2026-08-04') === 4, 'reference average must use dashboard date to actual POD date inclusive');
 const formula = internalHyperlinkFormulaForV200('POD明细', 1718, 1115);
 must(formula === 'HYPERLINK("#\'POD明细\'!A1718",1115)', 'WPS-safe internal hyperlink must match reference workbook formula syntax');
-must(V200_EXPORT_VERSION === V205_EXPORT_TRUTH_VERSION, 'V205 must own reference dashboard export truth');
-console.log('[V205] reference template + WPS formula + real delivery-cycle truth smoke passed');
+must(V200_EXPORT_VERSION === '2026-08-18-v200-reference-template-track-attempt-v1', 'unexpected V200 version');
+console.log('[V200] reference template, WPS formula link, real dispatch-attempt and reference average-day smoke passed');
