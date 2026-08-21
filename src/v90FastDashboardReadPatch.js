@@ -2,10 +2,44 @@ import express from 'express';
 import { getDb } from './db.js';
 
 const PATCH_ID = '2026-08-21-v208-fast-dashboard-index-only-first-paint-v1';
+const PERF_PATCH_ID = '2026-08-21-v209-dashboard-request-timing-v1';
 const SUMMARY_ROUTE = '/api/v89/instant-dashboard';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 const CACHE_MS = Math.max(5_000, Number(process.env.V90_DASHBOARD_CACHE_MS || 30_000));
 const cache = new Map();
+
+// V209 diagnostic only: record the real server-side duration of every slow API
+// request. This does not alter any response or database data. It lets the startup
+// log tell us exactly which route is occupying the single synchronous SQLite/main
+// process while the browser waits for all dashboards to appear together.
+const PERF_WRAP = Symbol.for('ce-qc.v209.request-timing');
+if (!express.application[PERF_WRAP]) {
+  const previousHandle = express.application.handle;
+  express.application.handle = function v209TimedExpressHandle(req, res, callback) {
+    const startedAt = Date.now();
+    const method = String(req?.method || '');
+    const url = String(req?.originalUrl || req?.url || '');
+    const selected = /^(?:\/api\/bootstrap|\/api\/v89\/instant-dashboard|\/api\/business-state\/|\/api\/state(?:\?|$)|\/api\/shopee\/state(?:\?|$)|\/api\/import\/unified-latest(?:\?|$)|\/api\/history(?:\?|$)|\/api\/unified-history(?:\?|$))/.test(url);
+    const finish = () => {
+      const duration = Date.now() - startedAt;
+      if (selected || (url.startsWith('/api/') && duration >= 250)) {
+        console.log(`[CE-QC][PERF][V209] ${method} ${url} status=${Number(res?.statusCode || 0)} duration=${duration}ms`);
+      }
+    };
+    res?.once?.('finish', finish);
+    res?.once?.('close', () => {
+      if (!res?.writableFinished) {
+        const duration = Date.now() - startedAt;
+        if (selected || (url.startsWith('/api/') && duration >= 250)) {
+          console.log(`[CE-QC][PERF][V209] ${method} ${url} closed-before-finish duration=${duration}ms`);
+        }
+      }
+    });
+    return previousHandle.call(this, req, res, callback);
+  };
+  Object.defineProperty(express.application, PERF_WRAP, { value: true, configurable: false });
+  console.log(`[CE-QC][PERF][V209] ${PERF_PATCH_ID} installed; API requests >=250ms will be timed.`);
+}
 
 const text = value => String(value ?? '').trim();
 const dateOnly = value => /^\d{4}-\d{2}-\d{2}$/.test(text(value).slice(0, 10)) ? text(value).slice(0, 10) : '';
@@ -157,3 +191,4 @@ express.application.get = function v90FastDashboardGet(pathValue, ...handlers) {
 
 export function inspectV90FastDashboard(requestedDate = '') { return buildSummary(requestedDate); }
 export const V90_FAST_DASHBOARD_READ_PATCH_ID = PATCH_ID;
+export const V209_DASHBOARD_REQUEST_TIMING_PATCH_ID = PERF_PATCH_ID;
