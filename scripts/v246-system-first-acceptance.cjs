@@ -68,7 +68,7 @@ must(restartE2E,'V246_SAME_ORIGIN_AUTH_PROXY');
 for(const file of [
   'bootstrap.js','server.js','src/v213AuthSidecar.js','src/v246CoreAvailabilityPatch.js','src/v248WhppAuthorityPatch.js','src/v249LoginReliabilityPatch.js','src/v251CookieFirstLoginPatch.js','src/v252SettingsRecoveryPatch.js','public/v246-core-usability.js','public/v252-settings-recovery.js',
   'src/v46ColdStartIndexPatch.js','scripts/v225-local-db-truth-smoke.mjs','scripts/v233-seven-board-local-truth-smoke.mjs',
-  'scripts/v234-restart-persistence-e2e.mjs','scripts/v238-local-production-readonly-gate.mjs','scripts/v249-direct-auth-e2e.mjs',
+  'scripts/v234-restart-persistence-e2e.mjs','scripts/v238-local-production-readonly-gate.mjs','scripts/v249-direct-auth-e2e.mjs','scripts/v252-settings-fast-e2e.mjs',
   'test/v237-startup-triplet-health.test.js','test/v246-system-first.test.js','test/v249-direct-auth.test.js','test/v251-cookie-first-login.test.js','test/v252-settings-recovery.test.js'
 ])run(['--check',file],120000);
 
@@ -80,6 +80,7 @@ run(['--test','test/v211-fast-auth.test.js'],120000);
 run(['--test','test/v237-startup-triplet-health.test.js'],120000);
 run(['--test','test/v241-readonly-canonical-audit.test.js'],120000);
 run(['scripts/v249-direct-auth-e2e.mjs'],180000);
+run(['scripts/v252-settings-fast-e2e.mjs'],180000);
 run(['scripts/v225-local-db-truth-smoke.mjs'],120000);
 run(['scripts/v233-seven-board-local-truth-smoke.mjs'],120000);
 run(['scripts/v234-restart-persistence-e2e.mjs'],300000);
@@ -92,6 +93,7 @@ console.log('CE_QC_V251_COOKIE_FIRST_LOGIN=PASS');
 console.log('CE_QC_V251_NO_HANDOFF_PRIMARY_PATH=PASS');
 console.log('CE_QC_V252_SETTINGS_FAST_PATH=PASS');
 console.log('CE_QC_V252_CE_CONNECTOR_FAST_PATH=PASS');
+console.log('CE_QC_V252_SETTINGS_E2E=PASS');
 console.log('CE_QC_V246_INTERNAL_LOGIN=PASS');
 console.log('CE_QC_V246_CE_API_LOGIN_FEEDBACK=PASS');
 console.log('CE_QC_V248_WHPP_ROUTE_AUTHORITY=PASS');
