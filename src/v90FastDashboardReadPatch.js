@@ -3,15 +3,66 @@ import { getDb } from './db.js';
 
 const PATCH_ID = '2026-08-21-v208-fast-dashboard-index-only-first-paint-v1';
 const PERF_PATCH_ID = '2026-08-21-v209-dashboard-request-timing-v1';
+const BOOTSTRAP_AUTHORITY_ID = '2026-08-21-v211-force-v210-bootstrap-route-v1';
 const SUMMARY_ROUTE = '/api/v89/instant-dashboard';
+const BOOTSTRAP_ROUTE = '/api/bootstrap';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 const CACHE_MS = Math.max(5_000, Number(process.env.V90_DASHBOARD_CACHE_MS || 30_000));
 const cache = new Map();
 
-// V209 diagnostic only: record the real server-side duration of every slow API
-// request. This does not alter any response or database data. It lets the startup
-// log tell us exactly which route is occupying the single synchronous SQLite/main
-// process while the browser waits for all dashboards to appear together.
+// V211: V43 is imported before this module and owns the fastBootstrap closure.
+// Extract that exact private handler through a disposable Express app, then force
+// the real /api/bootstrap route to that handler immediately before listen(). This
+// avoids any later route-registration patch accidentally restoring the old heavy
+// server bootstrap handler.
+function extractV43FastBootstrapHandler() {
+  try {
+    const probe = express();
+    const fallback = function v211BootstrapProbeFallback(req, res) { res.status(599).end(); };
+    probe.get(BOOTSTRAP_ROUTE, fallback);
+    const stack = probe.router?.stack || probe._router?.stack || [];
+    for (const layer of stack) {
+      if (layer?.route?.path !== BOOTSTRAP_ROUTE) continue;
+      for (const routeLayer of layer.route.stack || []) {
+        const handler = routeLayer?.handle;
+        if (typeof handler === 'function' && handler !== fallback) return handler;
+      }
+    }
+  } catch (error) {
+    console.warn('[CE-QC][V211] unable to extract V43 fast bootstrap handler:', error?.message || error);
+  }
+  return null;
+}
+
+const V43_FAST_BOOTSTRAP_HANDLER = extractV43FastBootstrapHandler();
+const previousListenForBootstrapAuthority = express.application.listen;
+express.application.listen = function v211ForceFastBootstrapListen(...args) {
+  try {
+    const stack = this.router?.stack || this._router?.stack || [];
+    let matched = 0;
+    let replaced = 0;
+    for (const layer of stack) {
+      if (layer?.route?.path !== BOOTSTRAP_ROUTE) continue;
+      matched += 1;
+      for (const routeLayer of layer.route.stack || []) {
+        if (!routeLayer?.method || String(routeLayer.method).toLowerCase() === 'get') {
+          if (V43_FAST_BOOTSTRAP_HANDLER && routeLayer.handle !== V43_FAST_BOOTSTRAP_HANDLER) {
+            routeLayer.handle = V43_FAST_BOOTSTRAP_HANDLER;
+            replaced += 1;
+          }
+        }
+      }
+    }
+    console.log(`[CE-QC][V211] ${BOOTSTRAP_AUTHORITY_ID} matched=${matched} replaced=${replaced} handler=${V43_FAST_BOOTSTRAP_HANDLER?.name || 'missing'}`);
+  } catch (error) {
+    console.error('[CE-QC][V211] bootstrap route authority failed:', error?.stack || error);
+  }
+  return previousListenForBootstrapAuthority.apply(this, args);
+};
+
+// V209 diagnostic: record the real server-side duration of every slow API
+// request. Include the bootstrap response authority header so the startup log can
+// prove whether V210 or the old server handler actually served the request.
 const PERF_WRAP = Symbol.for('ce-qc.v209.request-timing');
 if (!express.application[PERF_WRAP]) {
   const previousHandle = express.application.handle;
@@ -23,7 +74,8 @@ if (!express.application[PERF_WRAP]) {
     const finish = () => {
       const duration = Date.now() - startedAt;
       if (selected || (url.startsWith('/api/') && duration >= 250)) {
-        console.log(`[CE-QC][PERF][V209] ${method} ${url} status=${Number(res?.statusCode || 0)} duration=${duration}ms`);
+        const authority = url.startsWith(BOOTSTRAP_ROUTE) ? ` authority=${String(res?.getHeader?.('X-CE-QC-Bootstrap') || 'none')}` : '';
+        console.log(`[CE-QC][PERF][V209] ${method} ${url} status=${Number(res?.statusCode || 0)} duration=${duration}ms${authority}`);
       }
     };
     res?.once?.('finish', finish);
@@ -137,10 +189,6 @@ function buildSummary(requestedDate = '') {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return { ...hit.payload, cacheHit: true };
 
-  // First-paint authority is the already-classified unified import slice. CEAF is
-  // authoritative here, so there is no reason to scan rowJson/rawJson with LIKE.
-  // Those legacy scans were able to monopolize the single Node/SQLite process for
-  // minutes and made every dashboard appear to load together only after they ended.
   const counts = importedCounts(db, batch.snapshotId);
   const whppHistoryState = whppHistory(db, batch.reportDate);
   counts.WHPP = whppRawTotal(db, batch.reportDate, whppHistoryState);
@@ -153,8 +201,6 @@ function buildSummary(requestedDate = '') {
     snapshotId: batch.snapshotId,
     counts,
     total,
-    // SHOPEE WHPP responsibility is owned by its business-state/detail path. Keep
-    // first paint independent from the expensive final-row responsibility join.
     shopeeWhpp: {},
     whppSummary: fastWhppSummary(batch.reportDate, counts.WHPP, whppHistoryState),
     sourceCorrection: {
@@ -192,3 +238,4 @@ express.application.get = function v90FastDashboardGet(pathValue, ...handlers) {
 export function inspectV90FastDashboard(requestedDate = '') { return buildSummary(requestedDate); }
 export const V90_FAST_DASHBOARD_READ_PATCH_ID = PATCH_ID;
 export const V209_DASHBOARD_REQUEST_TIMING_PATCH_ID = PERF_PATCH_ID;
+export const V211_BOOTSTRAP_ROUTE_AUTHORITY_ID = BOOTSTRAP_AUTHORITY_ID;
