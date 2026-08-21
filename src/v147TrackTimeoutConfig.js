@@ -1,4 +1,5 @@
 import './v203CeafFastBusinessStatePatch.js';
+import './v204CeafInstantRoutePatch.js';
 
 export const V147_TRACK_TIMEOUT_CONFIG_ID = '2026-08-16-v147-track-time-budget-v2';
 
