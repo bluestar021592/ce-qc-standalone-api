@@ -66,7 +66,23 @@ try{
     body:JSON.stringify({username:'qc11admin',displayName:'QC11 Admin',password:'Qc11Final!2026'})
   });
   if(bootstrap.res.status!==200||bootstrap.body.ok!==true)fail(`internal bootstrap failed ${bootstrap.res.status}: ${bootstrap.text}`);
-  const cookie=(bootstrap.res.headers.get('set-cookie')||'').split(';')[0];
+
+  const wrongStarted=Date.now();
+  const wrong=await json(`${origin}/api/internal-auth/login`,{
+    method:'POST',headers:{'content-type':'application/json','origin':origin},
+    body:JSON.stringify({username:'qc11admin',password:'wrong-password'})
+  });
+  if(wrong.res.status!==401||wrong.body.ok!==false)fail(`wrong-password login must return explicit 401, got ${wrong.res.status}: ${wrong.text}`);
+  if(Date.now()-wrongStarted>5000)fail('wrong-password internal login exceeded 5 seconds');
+
+  const loginStarted=Date.now();
+  const login=await json(`${origin}/api/internal-auth/login`,{
+    method:'POST',headers:{'content-type':'application/json','origin':origin},
+    body:JSON.stringify({username:'qc11admin',password:'Qc11Final!2026'})
+  });
+  if(login.res.status!==200||login.body.ok!==true)fail(`direct internal login failed ${login.res.status}: ${login.text}`);
+  if(Date.now()-loginStarted>5000)fail('correct internal login exceeded 5 seconds');
+  const cookie=(login.res.headers.get('set-cookie')||'').split(';')[0];
   if(!/^ce_internal_session=/.test(cookie))fail('direct 5177 login did not issue ce_internal_session cookie');
 
   const session=await json(`${origin}/api/session`,{headers:{cookie,Accept:'application/json'}});
@@ -75,6 +91,14 @@ try{
   const settings=await fetch(`${origin}/settings`,{headers:{cookie}});
   const html=await settings.text();
   if(settings.status!==200||!html.includes('CE EXPRESS')||!html.includes('v203-dashboard-integrity.js'))fail('authenticated settings shell is unavailable or missing final UI layer');
+
+  const ceFeedbackStarted=Date.now();
+  const ceFeedback=await json(`${origin}/api/ce-login`,{
+    method:'POST',headers:{cookie,Accept:'application/json','content-type':'application/json','origin':origin},
+    body:JSON.stringify({username:'',password:''})
+  });
+  if(ceFeedback.res.status!==400||ceFeedback.body.ok!==false||!/CE账号和密码/.test(String(ceFeedback.body.error||'')))fail(`CE API login route did not return immediate visible validation: ${ceFeedback.res.status} ${ceFeedback.text}`);
+  if(Date.now()-ceFeedbackStarted>2500)fail('CE API login validation feedback exceeded 2.5 seconds');
 
   const attempt=await json(`${origin}/api/v203/attempt-summary?businessType=SHOPEECN`,{headers:{cookie,Accept:'application/json'}});
   if(attempt.res.status!==200||attempt.body.ok!==true)fail(`attempt-summary route failed: ${attempt.text}`);
@@ -94,8 +118,10 @@ try{
   if(exportAuth.res.status!==400||exportAuth.body.code!=='V194_SINGLE_BUSINESS_ONLY')fail(`5178 did not accept the direct 5177 session cookie: ${exportAuth.res.status} ${exportAuth.text}`);
 
   console.log('CE_QC_QC11_GOLDEN_HEALTH=PASS');
+  console.log('CE_QC_QC11_DIRECT_INTERNAL_BAD_PASSWORD=PASS');
   console.log('CE_QC_QC11_DIRECT_INTERNAL_LOGIN=PASS');
   console.log('CE_QC_QC11_SESSION_SETTINGS=PASS');
+  console.log('CE_QC_QC11_CE_API_LOGIN_FEEDBACK=PASS');
   console.log('CE_QC_QC11_ATTEMPT_ROUTE=PASS');
   console.log('CE_QC_QC11_WHPP_V248_AUTHORITY=PASS');
   console.log('CE_QC_QC11_EXPORT_SIDECAR_AUTH=PASS');
