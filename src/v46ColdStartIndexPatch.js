@@ -1,10 +1,11 @@
 import { getDb } from './db.js';
+import './v227LocalHealthProbePatch.js';
 
-const PATCH_ID = '2026-08-12-v46-cold-start-deferred-index-check-v4';
+const PATCH_ID = '2026-08-21-qc11-final-golden-health-v1';
 
-// Cold start must never open or scan the SQLite database merely to inspect
-// optional performance indexes. The definitions stay available for explicit
-// maintenance/diagnostics, while normal server startup remains database-lazy.
+// Keep the Aug-17 product shell and its direct 5177 internal login. Only the
+// loopback health probe is mounted for the desktop supervisor; no V209/V213
+// sidecar auth, no V221/V225 bootstrap guard and no V232 data-blocking gate.
 const REQUIRED_INDEXES = Object.freeze([
   {
     name: 'idx_unified_rows_bootstrap_cover',
@@ -30,7 +31,7 @@ export function inspectV46Indexes() {
   return { present, missing };
 }
 
-console.log('[CE-QC][V46] optional index inspection deferred; cold start performs no database access.');
+console.log('[CE-QC][QC11_FINAL] golden direct-login shell + loopback health probe armed; business data is never a startup blocker.');
 
 export const V46_COLD_START_INDEX_PATCH_ID = PATCH_ID;
 export const V46_REQUIRED_INDEXES = REQUIRED_INDEXES;

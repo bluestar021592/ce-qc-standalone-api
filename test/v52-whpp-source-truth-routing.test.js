@@ -18,11 +18,15 @@ test('V52 routes canonical WHPP state reads to V51 source truth after V51 runtim
   assert.match(bootstrap, /v51WhppLegacyEvidencePatch/);
 });
 
-test('WHPP completed snapshot is owned by V67 and is not restarted merely because unresolved rows remain', () => {
+test('WHPP completed snapshot is owned by V165 direct runner and already-completed backend response is verified, not restarted from unresolved count', () => {
   assert.match(autoRun, /authoritativeRunner:\s*'V67'/);
   assert.doesNotMatch(autoRun, /global\.runUnified\s*=/);
   assert.doesNotMatch(autoRun, /\/api\/whpp\/run\/start/);
-  assert.match(authoritativeRunner, /if \(!hasReport\(state, stage\.key\) \|\| completed\(state\)\)/);
-  assert.match(authoritativeRunner, /status === 'COMPLETED'/);
+  assert.match(authoritativeRunner, /2026-08-17-v165-seven-business-stage-verification-v2/);
+  assert.match(authoritativeRunner, /RUN_ALREADY_COMPLETED/);
+  assert.match(authoritativeRunner, /if \(alreadyDone\(error\)\)/);
+  assert.match(authoritativeRunner, /if \(stage\.key === 'WHPP'\) return await verifyWhpp\(target\)/);
+  assert.match(authoritativeRunner, /snapshotStatus === 'COMPLETED'/);
+  assert.match(authoritativeRunner, /snapshotStatus === 'COMPLETED_WITH_RETRY'/);
   assert.doesNotMatch(authoritativeRunner, /completed\(state\).*unresolved/);
 });

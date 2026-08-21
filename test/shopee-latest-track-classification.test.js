@@ -11,7 +11,7 @@ const base = {
   apiStatus: { shipment: 'success', event: 'success', exception: 'success' }
 };
 
-test('old source date alone never makes a parcel severe when latest node is fresh', () => {
+test('latest CE:WHPP location is an independent WHPP responsibility bucket, not a severe generic anomaly', () => {
   const row = analyzeShopeeShipment({
     ...base,
     events: [
@@ -20,9 +20,9 @@ test('old source date alone never makes a parcel severe when latest node is fres
     ]
   });
   assert.equal(row.入库无扫描节点, '否');
-  assert.equal(row.中转节点停留, '是');
+  assert.equal(row.WHPP滞留, '是');
   assert.equal(row.严重超时, '否');
-  assert.equal(row.primaryCategory, '中转节点停留');
+  assert.equal(row.primaryCategory, 'WHPP滞留包裹');
   assert.equal(row.latestEventTime, '2026-08-03 10:00:00');
 });
 
@@ -128,16 +128,28 @@ test('tracking code 80 POD and code 86 completed return are normal closed states
   assert.equal(returned.carry状态, 'closed_return');
 });
 
-test('delivery attempts are counted once per Cambodia natural day', () => {
+test('repeated delivery starts without a failed attempt stay in attempt 1', () => {
   const row = analyzeShopeeShipment({
     ...base,
     events: [
-      { eventTime: '2026-08-02 08:00:00', trackingEventDescZh: '派件分配' },
-      { eventTime: '2026-08-02 10:00:00', trackingEventDescZh: '派送中' },
-      { eventTime: '2026-08-03 09:00:00', trackingEventDescZh: 'Delivery Assign' }
+      { eventCode:'70', eventTime: '2026-08-02 08:00:00', trackingEventDescZh: '派送中' },
+      { eventCode:'70', eventTime: '2026-08-03 09:00:00', trackingEventDescZh: '再次派送中' }
+    ]
+  });
+  assert.equal(row.currentAttemptNo, 1);
+  assert.equal(row.attemptStartTimes.length, 1);
+});
+
+test('attempt 2 requires real start then failed Pending then a new real start', () => {
+  const row = analyzeShopeeShipment({
+    ...base,
+    events: [
+      { eventCode:'70', eventTime: '2026-08-02 08:00:00', trackingEventDescZh: '派送中' },
+      { eventCode:'150', eventTime: '2026-08-02 18:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
+      { eventCode:'70', eventTime: '2026-08-03 09:00:00', trackingEventDescZh: '派送中' }
     ]
   });
   assert.equal(row.currentAttemptNo, 2);
-  assert.deepEqual(row.attemptHistory, ['2026-08-02', '2026-08-03']);
-  assert.equal(row.attemptStatus, 'CALCULATED_FROM_TRACK');
+  assert.equal(row.attemptStartTimes.length, 2);
+  assert.deepEqual(row.failedAttemptDates, ['2026-08-02']);
 });

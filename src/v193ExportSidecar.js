@@ -8,17 +8,20 @@ import { fileURLToPath } from 'node:url';
 import { accessIdentity, requireRole } from './accessControl.js';
 import { closeDb, getRuntimeConfig } from './db.js';
 
-// Keep the public V194 contract stable for existing launchers/UI, but V195 changes
-// status transport: worker -> IPC -> sidecar memory -> browser. Status polling no
-// longer reads the job JSON on every request and never queries SQLite auth tables.
+// Keep the public V194/V195 contract stable for existing launchers/UI. QC11
+// extends the same 5178 token + IPC-memory transport to ALL seven businesses so
+// browser status polling never needs the busy 5177 event loop or SQLite auth.
 const VERSION = '2026-08-18-v194-token-status-sidecar-v1';
 const REVISION = '2026-08-18-v195-ipc-memory-status-v1';
 const PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_EXPORT_SIDECAR_PORT || 5178)));
 const HOST = String(process.env.CE_QC_EXPORT_SIDECAR_HOST || '0.0.0.0');
 const SINGLE_JOB_HEAP_MB = Math.max(384, Math.min(1024, Number(process.env.EXPORT_SINGLE_JOB_HEAP_MB || 768)));
-const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V191_CROSS_DAY_TRUTH';
+const ALL_WRAPPER_HEAP_MB = Math.max(192, Math.min(512, Number(process.env.EXPORT_ALL_WRAPPER_HEAP_MB || 256)));
+const EXPORT_CONTRACT_VERSION = 'QC11_V195_ALL_AND_SINGLE_PARITY';
+const BUSINESS_TYPES = new Set(['ALL','CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const singleWorkerFile = path.join(__dirname, 'v183SingleBusinessExportJobWorker.js');
+const allWorkerFile = path.join(__dirname, 'qc11AllExportIpcWorker.js');
 const pendingJobs = new Map();
 const app = express();
 
@@ -42,8 +45,8 @@ function normalizePayload(body = {}) {
   };
 }
 function validatePayload(payload, res) {
-  if (!payload.businessType || payload.businessType === 'ALL') {
-    res.status(400).json({ ok: false, code: 'V194_SINGLE_BUSINESS_ONLY', error: 'V194独立导出通道仅用于单业务完整表。' });
+  if (!BUSINESS_TYPES.has(payload.businessType)) {
+    res.status(400).json({ ok: false, code: 'V195_UNSUPPORTED_BUSINESS', error: '请选择ALL或7个有效业务板块之一。' });
     return false;
   }
   if (payload.periodType === 'custom') {
@@ -88,11 +91,8 @@ function tokenMatches(job, token) {
   catch { return false; }
 }
 async function loadJob(jobId) {
-  // V195: memory is authoritative while the sidecar is alive. Do NOT hit the job
-  // file on every browser poll; the worker streams every writeJob update over IPC.
   const pending = pendingJobs.get(jobId);
   if (pending?.job) return { job: pending.job, pending, file: pending.file || jobPath(jobId), source: 'MEMORY_IPC' };
-  // Disk is only a restart/recovery fallback.
   const file = jobPath(jobId);
   const diskJob = file ? await readJob(file) : null;
   if (diskJob) {
@@ -131,10 +131,14 @@ async function markFailure(file, jobId, error, errorCode = 'V194_EXPORT_WORKER_F
 }
 function launchWorker(file, job) {
   let child;
+  const all = String(job?.payload?.businessType || '').toUpperCase() === 'ALL';
+  const workerFile = all ? allWorkerFile : singleWorkerFile;
+  const heapMb = all ? ALL_WRAPPER_HEAP_MB : SINGLE_JOB_HEAP_MB;
+  const workerMode = all ? 'ALL_BUSINESS_ORCHESTRATOR' : 'SINGLE_BUSINESS_DIRECT';
   try {
-    child = spawn(process.execPath, [`--max-old-space-size=${SINGLE_JOB_HEAP_MB}`, singleWorkerFile, file], {
+    child = spawn(process.execPath, [`--max-old-space-size=${heapMb}`, workerFile, file], {
       cwd: getRuntimeConfig().projectRoot,
-      env: { ...process.env, CE_QC_EXPORT_WORKER_MODE: 'V194_ISOLATED_SINGLE_BUSINESS', CE_QC_EXPORT_PREPARE_ACK_VERSION: VERSION, CE_QC_EXPORT_STATUS_TRANSPORT: 'IPC_MEMORY_V195' },
+      env: { ...process.env, CE_QC_EXPORT_WORKER_MODE: workerMode, CE_QC_EXPORT_PREPARE_ACK_VERSION: VERSION, CE_QC_EXPORT_STATUS_TRANSPORT: 'IPC_MEMORY_V195' },
       detached: false,
       windowsHide: true,
       stdio: ['ignore', 'ignore', 'ignore', 'ipc']
@@ -212,7 +216,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/v194/export-ping', (req, res) => {
-  res.json({ ok: true, version: VERSION, revision: REVISION, port: PORT, pendingJobs: pendingJobs.size, worker: 'V191_CROSS_DAY_TRUTH', statusAuth: 'JOB_TOKEN_NO_SQLITE', statusTransport: 'IPC_MEMORY_V195' });
+  res.json({ ok: true, version: VERSION, revision: REVISION, port: PORT, pendingJobs: pendingJobs.size, worker: 'QC11_ALL_SINGLE_PARITY', capabilities: ['ALL','SINGLE'], statusAuth: 'JOB_TOKEN_NO_SQLITE', statusTransport: 'IPC_MEMORY_V195' });
 });
 
 app.post('/api/v194/export-period/prepare', accessIdentity, requireRole('OPERATOR'), (req, res) => {
@@ -220,6 +224,7 @@ app.post('/api/v194/export-period/prepare', accessIdentity, requireRole('OPERATO
   const payload = normalizePayload(req.body || {});
   console.log(`[CE-QC][V194_EXPORT_SIDECAR] PREPARE business=${payload.businessType || '-'} period=${payload.periodType} revision=${REVISION}`);
   if (!validatePayload(payload, res)) return;
+  const all = payload.businessType === 'ALL';
   const jobId = `EXP-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
   const pollToken = crypto.randomBytes(32).toString('base64url');
   const now = new Date().toISOString();
@@ -235,14 +240,14 @@ app.post('/api/v194/export-period/prepare', accessIdentity, requireRole('OPERATO
     statusTransport: 'IPC_MEMORY_V195',
     status: 'QUEUED',
     progress: 0,
-    message: 'V195独立导出Job已创建；状态将由Worker IPC直接写入5178内存',
+    message: all ? 'V195 7业务独立导出Job已创建；状态通过IPC写入5178内存' : 'V195单业务独立导出Job已创建；状态通过IPC写入5178内存',
     payload,
     files: [],
     createdAt: now,
     updatedAt: now,
     requestedBy: req.user?.username || req.user?.email || '',
-    launcherHeapMB: SINGLE_JOB_HEAP_MB,
-    workerMode: 'V194_ISOLATED_SINGLE_BUSINESS'
+    launcherHeapMB: all ? ALL_WRAPPER_HEAP_MB : SINGLE_JOB_HEAP_MB,
+    workerMode: all ? 'QC11_V195_ALL_BUSINESS_IPC' : 'V195_ISOLATED_SINGLE_BUSINESS'
   };
   pendingJobs.set(jobId, { job, file: '', persisted: false });
   const ackMs = Date.now() - startedAt;
@@ -252,7 +257,7 @@ app.post('/api/v194/export-period/prepare', accessIdentity, requireRole('OPERATO
     pollUrl: `/api/v194/export-job/${encodeURIComponent(jobId)}?${q.toString()}`,
     sidecarVersion: VERSION, sidecarRevision: REVISION, prepareAckMs: ackMs, workerMode: job.workerMode, pollAuth: job.pollAuth, statusTransport: job.statusTransport
   });
-  console.log(`[CE-QC][V194_EXPORT_SIDECAR] ACK job=${jobId} ${ackMs}ms token-status=enabled ipc-memory=enabled`);
+  console.log(`[CE-QC][V194_EXPORT_SIDECAR] ACK job=${jobId} ${ackMs}ms business=${payload.businessType} token-status=enabled ipc-memory=enabled`);
   setImmediate(() => { void persistAndLaunch(job); });
 });
 
@@ -263,7 +268,6 @@ app.get('/api/v194/export-job/:jobId', async (req, res) => {
   const loaded = await loadJob(jobId);
   if (!loaded.job) return res.status(404).json({ ok: false, code: 'V194_JOB_NOT_FOUND', error: '导出任务不存在或已过期。' });
   if (!tokenMatches(loaded.job, token)) return res.status(403).json({ ok: false, code: 'V194_JOB_TOKEN_DENIED', error: '导出任务状态令牌无效。' });
-  const status = String(loaded.job.status || '').toUpperCase();
   res.setHeader('X-CE-QC-Export-Status-Source', loaded.source || 'MEMORY_IPC');
   res.setHeader('X-CE-QC-Export-Revision', REVISION);
   return res.json({ ok: true, ...publicJob(req, loaded.job, token) });
@@ -288,7 +292,7 @@ app.get('/api/v194/export-file', async (req, res) => {
 });
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(`[CE-QC][V194_EXPORT_SIDECAR] READY http://${HOST}:${PORT} · ${VERSION} · ${REVISION} · status polling does not query SQLite · IPC memory status enabled`);
+  console.log(`[CE-QC][V194_EXPORT_SIDECAR] READY http://${HOST}:${PORT} · ${VERSION} · ${REVISION} · ALL+single · status polling does not query SQLite · IPC memory status enabled`);
 });
 server.on('error', error => {
   console.error('[CE-QC][V194_EXPORT_SIDECAR] START FAILED:', error?.stack || error);

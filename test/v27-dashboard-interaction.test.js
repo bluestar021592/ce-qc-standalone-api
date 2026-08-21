@@ -2,34 +2,33 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-function serverBootIndex(bootstrap) {
-  const direct = bootstrap.indexOf("import('./server.js')");
-  const phased = bootstrap.indexOf("importPhase('server', './server.js')");
-  return direct >= 0 ? direct : phased;
+function actualServerStartIndex(bootstrap) {
+  return bootstrap.indexOf('await importServerInteractiveFirst()');
 }
 
-test('V27 server routes and fast bootstrap are installed before server start', () => {
+test('V27 server routes and fast bootstrap are installed before actual server start', () => {
   const bootstrap=fs.readFileSync('bootstrap.js','utf8');
   const serverPatch=fs.readFileSync('src/v27ServerPatch.js','utf8');
   const trendPatch=fs.readFileSync('src/v27TrendPatch.js','utf8');
-  const serverIndex=serverBootIndex(bootstrap);
+  const serverIndex=actualServerStartIndex(bootstrap);
   assert.ok(serverIndex >= 0);
   assert.match(bootstrap,/v27ServerPatch\.js/);
   assert.match(bootstrap,/v27TrendPatch\.js/);
-  assert.ok(bootstrap.indexOf('v27ServerPatch.js') < serverIndex);
+  assert.ok(bootstrap.indexOf('v27ServerPatch') < serverIndex);
+  assert.ok(bootstrap.indexOf('v27TrendPatch') < serverIndex);
   assert.match(serverPatch,/\/api\/v27\/metric-detail/);
   assert.match(serverPatch,/\/api\/v27\/carry-monitor/);
   assert.match(serverPatch,/v27BootstrapHandler/);
   assert.match(trendPatch,/\/api\/v27\/trends/);
 });
 
-test('V28 SHOPEE resume deletes persisted batch audit hashes but preserves per-waybill checkpoints', () => {
+test('V28 SHOPEE resume guard is installed before actual server start and preserves per-waybill checkpoints', () => {
   const bootstrap=fs.readFileSync('bootstrap.js','utf8');
   const resumePatch=fs.readFileSync('src/v28ResumeGuardPatch.js','utf8');
-  const serverIndex=serverBootIndex(bootstrap);
+  const serverIndex=actualServerStartIndex(bootstrap);
   assert.ok(serverIndex >= 0);
   assert.match(bootstrap,/v28ResumeGuardPatch\.js/);
-  assert.ok(bootstrap.indexOf('v28ResumeGuardPatch.js') < serverIndex);
+  assert.ok(bootstrap.indexOf('v28ResumeGuardPatch') < serverIndex);
   assert.match(resumePatch,/\/api\/shopee\/run\/resume/);
   assert.match(resumePatch,/DELETE FROM business_api_batches/);
   assert.match(resumePatch,/apiBatchStatus/);
@@ -42,14 +41,14 @@ test('V28 SHOPEE resume deletes persisted batch audit hashes but preserves per-w
   assert.doesNotMatch(resumePatch,/podLocks\s*=\s*\[\]/);
 });
 
-test('V28 trends use up to seven completed valid report dates for a single-day dashboard', () => {
+test('V239 trends use up to seven latest VALID imported report dates and do not hide a current day waiting for COMPLETED', () => {
   const trendPatch=fs.readFileSync('src/v27TrendPatch.js','utf8');
   assert.match(trendPatch,/function resolveTrendWindow/);
-  assert.match(trendPatch,/s\.status='COMPLETED'/);
-  assert.match(trendPatch,/b\.status='VALID'/);
+  assert.match(trendPatch,/status='VALID'/);
+  assert.doesNotMatch(trendPatch,/s\.status='COMPLETED'/);
   assert.match(trendPatch,/LIMIT 7/);
-  assert.match(trendPatch,/b\.reportDate<=\?/);
-  assert.match(trendPatch,/loadRangeDashboard\(trendWindow\.from,trendWindow\.to\)/);
+  assert.match(trendPatch,/reportDate<=\?/);
+  assert.match(trendPatch,/historyFor\(type,requestedTo\)/);
   assert.match(trendPatch,/attemptRows\(trendWindow\.from,trendWindow\.to\)/);
   assert.match(trendPatch,/trendWindowDates/);
 });

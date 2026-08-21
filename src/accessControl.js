@@ -102,10 +102,10 @@ function loginInternalUser(req, res, channel, cloudflareEmail) {
   const password = String(req.body?.password || '');
   const row = getDb().prepare("SELECT * FROM users WHERE username=? AND status='ACTIVE'").get(username);
   const now = new Date();
+  if (row?.lockedUntil && new Date(row.lockedUntil) > now) return res.status(423).json({ ok: false, error: 'This account is temporarily locked. Please try again later.' });
   if (!row || !bcrypt.compareSync(password, row.passwordHash || '')) return loginFailure(req, res, row, 'Invalid username or password.');
   if (!Number(row.enabled)) return res.status(403).json({ ok: false, error: 'This account is disabled.' });
   if (row.expiresAt && new Date(row.expiresAt) <= now) return res.status(403).json({ ok: false, error: 'This account has expired.' });
-  if (row.lockedUntil && new Date(row.lockedUntil) > now) return res.status(423).json({ ok: false, error: 'This account is temporarily locked. Please try again later.' });
   if (channel === 'PUBLIC' && cloudflareEmail && (!row.email || row.email.toLowerCase() !== cloudflareEmail.toLowerCase())) return res.status(403).json({ ok: false, error: 'Internal account email does not match Cloudflare Access identity.' });
   getDb().prepare('UPDATE users SET failedLoginCount=0,lockedUntil=NULL,lastLoginAt=?,updatedAt=? WHERE id=?').run(nowIso(), nowIso(), row.id);
   const user = getDb().prepare("SELECT * FROM users WHERE id=? AND status='ACTIVE'").get(row.id);
@@ -114,13 +114,15 @@ function loginInternalUser(req, res, channel, cloudflareEmail) {
 }
 
 function loginFailure(req, res, row, message) {
+  let lockedNow = false;
   if (row) {
     const attempts = Number(row.failedLoginCount || 0) + 1;
     const lockedUntil = attempts >= LOGIN_LIMIT ? new Date(Date.now() + 15 * 60_000).toISOString() : null;
+    lockedNow = Boolean(lockedUntil);
     getDb().prepare('UPDATE users SET failedLoginCount=?,lockedUntil=?,updatedAt=? WHERE id=?').run(attempts, lockedUntil, nowIso(), row.id);
-    auditAction(req, lockedUntil ? 'ACCOUNT_LOCKED' : 'LOGIN_FAILED', { username: row.username });
+    auditAction(req, lockedNow ? 'ACCOUNT_LOCKED' : 'LOGIN_FAILED', { username: row.username, attempts });
   } else auditAction(req, 'LOGIN_FAILED', { username: cleanUsername(req.body?.username) });
-  return res.status(row?.lockedUntil ? 423 : 401).json({ ok: false, error: message });
+  return res.status(lockedNow ? 423 : 401).json({ ok: false, error: lockedNow ? 'This account is temporarily locked. Please try again later.' : message });
 }
 
 function changePassword(req, res, user) {

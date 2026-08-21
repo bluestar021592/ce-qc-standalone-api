@@ -1,17 +1,15 @@
 (function installV194ExportTokenUi(global) {
-  const REVISION = '2026-08-18-v195-ipc-xhr-status-ui-v1';
+  const REVISION = '2026-08-21-qc11-all-single-ipc-status-ui-v1';
   if (global.__CE_QC_V194_EXPORT_TOKEN_UI_REVISION__ === REVISION) return;
   global.__CE_QC_V194_EXPORT_TOKEN_UI__ = true;
 
-  // Public contract names stay V194 so old launchers remain compatible. The V195
-  // revision changes transport to XHR + 5178 IPC-memory status.
   const VERSION = '2026-08-18-v194-export-token-ui-v1';
   const SIDECAR_VERSION = '2026-08-18-v194-token-status-sidecar-v1';
   const SIDECAR_REVISION = '2026-08-18-v195-ipc-memory-status-v1';
   const ACTIVE_JOB_KEY = 'ce_qc_active_export_job_v194';
   const LEGACY_KEYS = ['ce_qc_active_export_job_v180','ce_qc_active_export_job_v186','ce_qc_active_export_job_v187','ce_qc_active_export_job_v191','ce_qc_active_export_job_v192','ce_qc_active_export_job_v193'];
   const LEGACY_LABEL = '[V194独立导出]';
-  const LABEL = '[V195独立导出]';
+  const LABEL = '[QC11独立导出]';
   const previousExport = typeof global.exportPeriodReport === 'function' ? global.exportPeriodReport.bind(global) : null;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pollEpoch = 0;
@@ -109,7 +107,7 @@
       progress.className = legacyProgress.className || 'operation-status';
       legacyProgress.insertAdjacentElement('afterend', progress);
     }
-    if (progress) { progress.id = 'exportProgressV194'; progress.dataset.ceQcExportOwner = 'v195'; }
+    if (progress) { progress.id = 'exportProgressV194'; progress.dataset.ceQcExportOwner = 'qc11'; }
 
     let files = document.getElementById('exportGeneratedFilesV194') || document.getElementById('exportGeneratedFilesV193') || document.getElementById('exportGeneratedFilesV192') || document.getElementById('exportGeneratedFilesV191') || document.getElementById('exportGeneratedFilesV187');
     const legacyFiles = document.getElementById('exportGeneratedFiles');
@@ -118,13 +116,13 @@
       files.className = legacyFiles.className || 'export-file-list';
       legacyFiles.insertAdjacentElement('afterend', files);
     }
-    if (files) { files.id = 'exportGeneratedFilesV194'; files.dataset.ceQcExportOwner = 'v195'; }
+    if (files) { files.id = 'exportGeneratedFilesV194'; files.dataset.ceQcExportOwner = 'qc11'; }
 
     let button = document.querySelector('[data-testid="export-all-reports"]');
-    if (button && button.dataset.ceQcExportOwner !== 'v195') {
+    if (button && button.dataset.ceQcExportOwner !== 'qc11') {
       const clone = button.cloneNode(true);
       clone.removeAttribute('onclick');
-      clone.dataset.ceQcExportOwner = 'v195';
+      clone.dataset.ceQcExportOwner = 'qc11';
       button.replaceWith(clone);
       clone.addEventListener('click', event => {
         event.preventDefault();
@@ -133,7 +131,7 @@
       }, true);
       button = clone;
     }
-    document.documentElement.dataset.ceQcExportUiOwner = 'v195';
+    document.documentElement.dataset.ceQcExportUiOwner = 'qc11';
     return { progress, files, button };
   }
   function shortError(error) {
@@ -146,11 +144,11 @@
     let errors = 0;
     while (epoch === pollEpoch) {
       try {
-        const job = await xhrJson(pollUrl, { timeoutMs:6000, label:'V195状态接口' });
+        const job = await xhrJson(pollUrl, { timeoutMs:6000, label:'QC11状态接口' });
         errors = 0;
         const status = String(job.status || '').toUpperCase();
         const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
-        const transport = job.statusTransport === 'IPC_MEMORY_V195' ? ' · IPC内存状态' : '';
+        const transport = job.statusTransport === 'IPC_MEMORY_V195' ? ' · 5178 IPC内存状态' : '';
         progress.textContent = `${LABEL} Job ${jobId} · ${job.message || '后台生成中'} · ${pct}%${job.currentBusiness ? ` · ${job.currentBusiness}` : ''}${transport}`;
         if (status === 'COMPLETED') {
           const ready = Array.isArray(job.files) ? job.files.filter(item => item?.url && item?.name) : [];
@@ -169,7 +167,7 @@
       } catch (error) {
         if ([401,403,404].includes(Number(error.status || 0)) || ['FAILED','CANCELLED'].includes(String(error.code || '').toUpperCase())) throw error;
         errors += 1;
-        progress.textContent = `${LABEL} Job ${jobId} · 状态重连第 ${errors} 次 · ${shortError(error)} · 5178将继续保留后台任务`;
+        progress.textContent = `${LABEL} Job ${jobId} · 状态重连第 ${errors} 次 · ${shortError(error)} · 5178继续保留后台任务`;
       }
       await sleep(errors ? Math.min(6500, 1200 + errors * 650) : 1600);
     }
@@ -179,25 +177,23 @@
     if (!progress || !files) return;
     const payload = inputs();
     if (!valid(payload, progress)) return;
-    if (payload.businessType === 'ALL') {
-      if (previousExport) return previousExport();
-      progress.textContent = '7业务导出控制器不可用';
-      return;
-    }
     pollEpoch += 1;
     files.innerHTML = '';
     const oldText = button?.textContent || '一键导出全部报表';
     if (button) { button.disabled = true; button.textContent = '后台生成中…'; }
     try {
       const base = sidecarBase();
-      if (!base) throw new Error('V195独立导出当前仅支持本机/LAN HTTP访问');
-      // 保留旧验收短语：状态轮询将完全绕开主SQLite鉴权
-      progress.textContent = `${LABEL} 正在检查5178独立服务；状态轮询将完全绕开主SQLite鉴权，并绕开页面global.fetch补丁…`;
-      const ping = await xhrJson(`${base}/api/v194/export-ping`, { timeoutMs:3500, label:'V195独立服务' });
-      if (String(ping.version || '') !== SIDECAR_VERSION) throw new Error(`V195独立服务基础版本不一致：${ping.version || '未知'}`);
-      if (String(ping.revision || '') !== SIDECAR_REVISION) throw new Error(`V195独立服务修订未生效：${ping.revision || '未知'}`);
+      if (!base) {
+        if (previousExport) return await previousExport();
+        throw new Error('公网HTTPS环境未找到兼容导出控制器');
+      }
+      progress.textContent = `${LABEL} 正在连接5178独立导出服务；${payload.businessType === 'ALL' ? '7业务' : payload.businessType}创建与状态查询均不占用5177看板进程…`;
+      const ping = await xhrJson(`${base}/api/v194/export-ping`, { timeoutMs:3500, label:'QC11独立导出服务' });
+      if (String(ping.version || '') !== SIDECAR_VERSION) throw new Error(`独立导出服务基础版本不一致：${ping.version || '未知'}`);
+      if (String(ping.revision || '') !== SIDECAR_REVISION) throw new Error(`独立导出服务修订未生效：${ping.revision || '未知'}`);
+      if (payload.businessType === 'ALL' && Array.isArray(ping.capabilities) && !ping.capabilities.includes('ALL')) throw new Error('当前5178服务尚未启用7业务独立导出');
       const start = await xhrJson(`${base}/api/v194/export-period/prepare`, {
-        method:'POST', body:payload, timeoutMs:10000, label:'V195导出创建接口'
+        method:'POST', body:payload, timeoutMs:10000, label:'QC11导出创建接口'
       });
       const jobId = String(start.jobId || '').trim();
       if (!jobId) throw new Error('独立导出服务没有返回Job编号');
@@ -205,7 +201,7 @@
       if (pollUrl.startsWith('/')) pollUrl = `${base}${pollUrl}`;
       if (!pollUrl) throw new Error('独立导出服务没有返回token状态地址');
       save(jobId, payload, pollUrl);
-      progress.textContent = `${LABEL} Job ${jobId} · 已创建；Worker进度使用IPC写入5178内存，浏览器使用XHR读取 · 0%`;
+      progress.textContent = `${LABEL} Job ${jobId} · 已创建；Worker进度经IPC写入5178内存 · 0%`;
       await poll(jobId, pollUrl, progress, files);
     } catch (error) {
       progress.textContent = `${LABEL} 导出失败：${shortError(error)}`;
@@ -219,7 +215,7 @@
     const { progress, files } = ownDom();
     if (!progress || !files) return;
     try {
-      progress.textContent = `${LABEL} 正在恢复Job ${active.jobId} 的IPC内存状态通道…`;
+      progress.textContent = `${LABEL} 正在恢复Job ${active.jobId} 的5178 IPC内存状态通道…`;
       await poll(active.jobId, active.pollUrl, progress, files);
     } catch (error) {
       if ([403,404].includes(Number(error.status || 0))) clear(active.jobId);
@@ -237,5 +233,5 @@
     if (event.target?.closest?.('[data-page="reports"],.side-link')) setTimeout(ownDom, 0);
   }, true);
   setTimeout(() => { ownDom(); void resume(); }, 120);
-  console.info('[CE-QC][V194_EXPORT_TOKEN_UI]', VERSION, REVISION, LEGACY_LABEL);
+  console.info('[CE-QC][QC11_EXPORT_TOKEN_UI]', VERSION, REVISION, LEGACY_LABEL);
 })(window);

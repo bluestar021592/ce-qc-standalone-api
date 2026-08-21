@@ -29,15 +29,15 @@ const PUBLIC_METRICS = Object.freeze([
   ['入库无扫描', 'inboundNoScan', 'inboundNoScan', '件'],
   ['退回件', 'returned', 'returned', '件'],
   ['退回率', 'returnRate', 'returned', '%'],
-  ['退回处理中', 'returnInProgress', 'returnInProgress', '件']
-  ,['派送中', 'deliveryStay', 'deliveryStay', '件']
-  ,['派送中率', 'deliveryStayRate', 'deliveryStay', '%']
-  ,['中转节点停留', 'transitHubStay', 'transitHubStay', '件']
-  ,['严重超时未更新', 'severeOverdue', 'severeOverdue', '件']
-  ,['外省派送中', 'pvDelivery', 'pvDelivery', '件']
-  ,['外省门店滞留', 'pvStoreRetention', 'pvStoreRetention', '件']
-  ,['外省门店入库无节点', 'pvStoreInboundNoScan', 'pvStoreInboundNoScan', '件']
-  ,['外省其他未闭环', 'pvOtherUnresolved', 'pvOtherUnresolved', '件']
+  ['退回处理中', 'returnInProgress', 'returnInProgress', '件'],
+  ['派送中', 'deliveryStay', 'deliveryStay', '件'],
+  ['派送中率', 'deliveryStayRate', 'deliveryStay', '%'],
+  ['中转节点停留', 'transitHubStay', 'transitHubStay', '件'],
+  ['严重超时未更新', 'severeOverdue', 'severeOverdue', '件'],
+  ['外省派送中', 'pvDelivery', 'pvDelivery', '件'],
+  ['外省门店滞留', 'pvStoreRetention', 'pvStoreRetention', '件'],
+  ['外省门店入库无节点', 'pvStoreInboundNoScan', 'pvStoreInboundNoScan', '件'],
+  ['外省其他未闭环', 'pvOtherUnresolved', 'pvOtherUnresolved', '件']
 ]);
 
 export function buildShopeeDashboard(state = {}) {
@@ -46,21 +46,20 @@ export function buildShopeeDashboard(state = {}) {
   const carryRows = rowsForBills(rows, state.carryBills || []);
   const nextCarryRows = rowsForBills(rows, state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || []));
   const recipientGroups = {};
-  for (const group of SHOPEE_RECIPIENT_GROUPS) {
-    recipientGroups[group] = summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRows);
-  }
+  for (const group of SHOPEE_RECIPIENT_GROUPS) recipientGroups[group] = summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRows);
 
   const reconciliation = reconcileRecipientGroups(recipientGroups);
   const current = { ...recipientGroups.ALL.metrics };
   const groups = recipientGroups.ALL.groups;
   const abnormalRows = uniqueRows([
-    ...groups.pending1, ...groups.oc1, ...groups.inboundNoScan, ...groups.returnRequired
-  ]);
+    ...groups.pending1, ...groups.oc1, ...groups.inboundNoScan, ...groups.returnRequired,
+    ...groups.transitHubStay, ...groups.severeOverdue, ...groups.retry
+  ]).filter(row => !isTerminal(row));
   current.queried = new Set([...(state.scanResults || []), ...(state.trackResults || [])].map(billOf).filter(Boolean)).size;
-  current.unpod = Math.max(0, current.total - current.pod);
+  current.unpod = Math.max(0, current.total - current.pod - current.returned - current.cancelled);
   current.abnormal = abnormalRows.length;
-  current.carry = groups.carry.length;
-  current.nextCarry = groups.nextCarry.length;
+  current.carry = groups.carry.filter(row => !isTerminal(row)).length;
+  current.nextCarry = groups.nextCarry.filter(row => !isTerminal(row)).length;
   current.pendingContinuous = groups.pendingContinuous.length;
   current.pendingNonContinuous = groups.pendingNonContinuous.length;
   current.deliveryStay = groups.deliveryStay.length;
@@ -69,6 +68,7 @@ export function buildShopeeDashboard(state = {}) {
   current.retry = groups.retry.length;
   current.returnRequired = groups.returnRequired.length;
   current.returned = groups.returned.length;
+  current.cancelled = groups.cancelled.length;
   current.transitHubStay = groups.transitHubStay.length;
   current.severeOverdue = groups.severeOverdue.length;
 
@@ -102,8 +102,9 @@ export function buildShopeeDashboard(state = {}) {
       待重试: current.retry,
       退回待处理: current.returnRequired,
       已退回: current.returned,
+      已取消: current.cancelled,
       POD: current.pod,
-      其他已识别节点: rows.filter(row => !isPod(row) && !isTrackedException(row)).length
+      其他已识别节点: rows.filter(row => !isTerminal(row) && !isTrackedException(row)).length
     },
     dashboardRows,
     detailTabs
@@ -117,9 +118,10 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
   const nextCarryRows = rowsForBills(rows, state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || []));
   const recipientGroups = suppliedGroups || Object.fromEntries(SHOPEE_RECIPIENT_GROUPS.map(group => [group, summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRows)]));
   const allGroups = recipientGroups.ALL.groups;
-  const abnormalRows = suppliedAbnormal || uniqueRows([
-    ...allGroups.pending1, ...allGroups.oc1, ...allGroups.inboundNoScan, ...allGroups.returnRequired
-  ]);
+  const abnormalRows = (suppliedAbnormal || uniqueRows([
+    ...allGroups.pending1, ...allGroups.oc1, ...allGroups.inboundNoScan, ...allGroups.returnRequired,
+    ...allGroups.transitHubStay, ...allGroups.severeOverdue, ...allGroups.retry
+  ])).filter(row => !isTerminal(row));
   const tabs = {
     shopTransit: tab('在途门店', visibleRows(allGroups.shopTransit)),
     shopArrived: tab('到达门店', visibleRows(allGroups.shopArrived)),
@@ -142,6 +144,7 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
     transitHubStay: tab('中转节点停留', visibleRows(allGroups.transitHubStay)),
     severeOverdue: tab('严重超时未更新', visibleRows(allGroups.severeOverdue)),
     returned: tab('已退回件', visibleRows(allGroups.returned)),
+    cancelled: tab('已取消订单', visibleRows(allGroups.cancelled)),
     unresolved: tab('当前未闭环', visibleRows(allGroups.unresolved)),
     returnInProgress: tab('退回处理中', visibleRows(allGroups.returnInProgress)),
     returnRequired: tab('退回待处理', visibleRows(allGroups.returnRequired)),
@@ -170,7 +173,7 @@ export function buildShopeeDetailTabs(state = {}, suppliedGroups = null, supplie
 
 export function reconcileRecipientGroups(recipientGroups = {}) {
   const checks = [];
-  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'transitHubStay', 'severeOverdue', 'returned', 'returnInProgress', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3', 'pvDelivery', 'pvStoreRetention', 'pvStoreInboundNoScan', 'pvOtherUnresolved']) {
+  for (const key of ['total', 'pod', 'pending1', 'pending2', 'pending3plus', 'oc1', 'oc2', 'oc3plus', 'inboundNoScan', 'transitHubStay', 'severeOverdue', 'returned', 'cancelled', 'returnInProgress', 'shopTransit', 'shopArrived', 'shopPending', 'shopRetention1', 'shopRetention2', 'shopRetention3', 'pvDelivery', 'pvStoreRetention', 'pvStoreInboundNoScan', 'pvOtherUnresolved']) {
     const all = Number(recipientGroups.ALL?.metrics?.[key] || 0);
     const parts = ['CN', 'VN'].reduce((sum, group) => sum + Number(recipientGroups[group]?.metrics?.[key] || 0), 0);
     checks.push({ key, all, parts, difference: all - parts, passed: all === parts });
@@ -188,23 +191,24 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
   const groupDaily = uniqueRows(select(dailyRows));
   const groupRows = uniqueRows(select(rows));
   const groups = buildGroups(groupRows, select(carryRows), select(nextCarryRows));
-  Object.assign(groups, buildStoreGroups(groupRows));
+  Object.assign(groups, buildStoreGroups(groupRows.filter(row => !isTerminal(row))));
   const regions = buildRegionSummary(groupDaily, groupRows);
-  const eligibleFirstAttempt = groupDaily.filter(row => row.API状态 !== '失败' && row.查询状态 !== 'refresh_failed' && Boolean(row.finalRowAvailable));
-  const firstAttempt = eligibleFirstAttempt.filter(row => isPod(row) && Number(row.Pending最大次数 || row.Pending次数 || 0) === 0 && Number(row.OC最大天数 || row.OC天数 || 0) === 0);
+  const eligibleFirstAttempt = groupDaily.filter(row => row.API状态 !== '失败' && row.查询状态 !== 'refresh_failed' && Boolean(row.finalRowAvailable) && deliveryAttemptCurrent(row) >= 1);
+  const firstAttempt = eligibleFirstAttempt.filter(row => isPod(row) && dispatchDayNo(row) === 1);
   const pod = groupDaily.filter(isPod);
   const returnedDaily = groupDaily.filter(isReturned);
-  const unresolved = groupDaily.filter(row => !isPod(row) && !isReturned(row));
-  const dispatchAttempt1 = groupDaily.filter(row => isPod(row) && dispatchDayNo(row) === 1);
-  const dispatchAttempt2 = groupDaily.filter(row => isPod(row) && dispatchDayNo(row) === 2);
-  const dispatchAttempt3 = groupDaily.filter(row => isPod(row) && dispatchDayNo(row) >= 3);
+  const cancelledDaily = groupDaily.filter(isCancelled);
+  const unresolved = groupDaily.filter(row => !isTerminal(row));
+  const dispatchAttempt1 = pod.filter(row => dispatchDayNo(row) === 1);
+  const dispatchAttempt2 = pod.filter(row => dispatchDayNo(row) === 2);
+  const dispatchAttempt3 = pod.filter(row => dispatchDayNo(row) >= 3);
   return {
     group,
     dailyRows: groupDaily,
     monitorRows: groupRows,
     monitorCount: groupRows.length,
     regions,
-    groups: { ...groups, all: groupDaily, pod, firstAttempt, returned: returnedDaily, unresolved },
+    groups: { ...groups, all: groupDaily, pod, firstAttempt, returned: returnedDaily, cancelled: cancelledDaily, unresolved },
     metrics: {
       total: groupDaily.length,
       pod: pod.length,
@@ -222,19 +226,22 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
       inboundNoScan: groups.inboundNoScan.length,
       returned: returnedDaily.length,
       returnRate: rate(returnedDaily.length, groupDaily.length),
+      cancelled: cancelledDaily.length,
+      cancelRate: rate(cancelledDaily.length, groupDaily.length),
       unresolved: unresolved.length,
-      accounted: pod.length + returnedDaily.length + unresolved.length,
-      accountingDifference: groupDaily.length - pod.length - returnedDaily.length - unresolved.length,
+      accounted: pod.length + returnedDaily.length + cancelledDaily.length + unresolved.length,
+      accountingDifference: groupDaily.length - pod.length - returnedDaily.length - cancelledDaily.length - unresolved.length,
       returnInProgress: groups.returnInProgress.length,
       deliveryStay: groups.deliveryStay.length,
       deliveryStayRate: rate(groups.deliveryStay.length, groupDaily.length),
       dispatchAttempt1: dispatchAttempt1.length,
       dispatchAttempt2: dispatchAttempt2.length,
       dispatchAttempt3: dispatchAttempt3.length,
-      dispatchAttemptDenominator: groupDaily.length,
-      dispatchAttempt1Rate: rate(dispatchAttempt1.length, groupDaily.length),
-      dispatchAttempt2Rate: rate(dispatchAttempt2.length, groupDaily.length),
-      dispatchAttempt3Rate: rate(dispatchAttempt3.length, groupDaily.length),
+      dispatchAttemptUnknown: pod.filter(row => dispatchDayNo(row) === 0).length,
+      dispatchAttemptDenominator: pod.length,
+      dispatchAttempt1Rate: rate(dispatchAttempt1.length, pod.length),
+      dispatchAttempt2Rate: rate(dispatchAttempt2.length, pod.length),
+      dispatchAttempt3Rate: rate(dispatchAttempt3.length, pod.length),
       transitHubStay: groups.transitHubStay.length,
       severeOverdue: groups.severeOverdue.length,
       shopTransit: groups.shopTransit.length,
@@ -242,11 +249,11 @@ function summarizeRecipientGroup(group, dailyRows, rows, carryRows, nextCarryRow
       shopPending: groups.shopPending.length,
       shopRetention1: groups.shopRetention1.length,
       shopRetention2: groups.shopRetention2.length,
-      shopRetention3: groups.shopRetention3.length
-      ,pvDelivery: groups.pvDelivery.length
-      ,pvStoreRetention: groups.pvStoreRetention.length
-      ,pvStoreInboundNoScan: groups.pvStoreInboundNoScan.length
-      ,pvOtherUnresolved: groups.pvOtherUnresolved.length
+      shopRetention3: groups.shopRetention3.length,
+      pvDelivery: groups.pvDelivery.length,
+      pvStoreRetention: groups.pvStoreRetention.length,
+      pvStoreInboundNoScan: groups.pvStoreInboundNoScan.length,
+      pvOtherUnresolved: groups.pvOtherUnresolved.length
     }
   };
 }
@@ -300,16 +307,17 @@ function tabsForRecipientGroup(group, summary) {
     transitHubStay: tab(`${label}中转节点停留`, visibleRows(groups.transitHubStay)),
     severeOverdue: tab(`${label}严重超时未更新`, visibleRows(groups.severeOverdue)),
     returned: tab(`${label}已退回件`, visibleRows(groups.returned)),
+    cancelled: tab(`${label}已取消订单`, visibleRows(groups.cancelled)),
     unresolved: tab(`${label}当前未闭环`, visibleRows(groups.unresolved)),
     attempt1: tab(`${label}1派POD`, visibleRows(groups.all.filter(row => isPod(row) && dispatchDayNo(row) === 1))),
     attempt2: tab(`${label}2派POD`, visibleRows(groups.all.filter(row => isPod(row) && dispatchDayNo(row) === 2))),
     attempt3: tab(`${label}3派及以上POD`, visibleRows(groups.all.filter(row => isPod(row) && dispatchDayNo(row) >= 3))),
-    returnInProgress: tab(`${label}退回处理中`, visibleRows(groups.returnInProgress))
-    ,deliveryStay: tab(`${label}派送中`, visibleRows(groups.deliveryStay))
-    ,pvDelivery: tab(`${label}外省派送中`, visibleRows(groups.pvDelivery))
-    ,pvStoreRetention: tab(`${label}外省门店滞留`, visibleRows(groups.pvStoreRetention))
-    ,pvStoreInboundNoScan: tab(`${label}外省门店入库无节点`, visibleRows(groups.pvStoreInboundNoScan))
-    ,pvOtherUnresolved: tab(`${label}外省其他未闭环`, visibleRows(groups.pvOtherUnresolved))
+    returnInProgress: tab(`${label}退回处理中`, visibleRows(groups.returnInProgress)),
+    deliveryStay: tab(`${label}派送中`, visibleRows(groups.deliveryStay)),
+    pvDelivery: tab(`${label}外省派送中`, visibleRows(groups.pvDelivery)),
+    pvStoreRetention: tab(`${label}外省门店滞留`, visibleRows(groups.pvStoreRetention)),
+    pvStoreInboundNoScan: tab(`${label}外省门店入库无节点`, visibleRows(groups.pvStoreInboundNoScan)),
+    pvOtherUnresolved: tab(`${label}外省其他未闭环`, visibleRows(groups.pvOtherUnresolved))
   };
 }
 
@@ -336,44 +344,46 @@ function buildDailyRows(state, finalRows) {
 }
 
 function buildGroups(rows, carryRows, nextCarryRows) {
+  const active = rows.filter(row => !isTerminal(row));
   return {
     all: rows,
     pod: rows.filter(isPod),
     firstAttempt: [],
-    pending1: rows.filter(row => Number(row.Pending次数 || row.Pending当前次数 || 0) >= 1),
-    pending2: rows.filter(row => Number(row.Pending次数 || row.Pending当前次数 || 0) >= 2),
-    pending3: rows.filter(row => Number(row.Pending次数 || row.Pending当前次数 || 0) >= 3),
-    pendingContinuous: rows.filter(row => row.Pending连续 === '是' || row.Pending连续性 === '连续'),
-    pendingNonContinuous: rows.filter(row => row.Pending不连续 === '是' || row.Pending连续性 === '不连续'),
-    oc1: rows.filter(row => Number(row.OC天数 || 0) >= 1),
-    oc2: rows.filter(row => Number(row.OC天数 || 0) >= 2),
-    oc3: rows.filter(row => Number(row.OC天数 || 0) >= 3),
-    cycle2: rows.filter(row => Number(row.盘点天数 || 0) >= 2),
-    inboundNoScan: rows.filter(row => row.入库无扫描节点 === '是' || categoryOf(row) === '入库无扫描节点'),
-    transitHubStay: rows.filter(row => row.中转节点停留 === '是' || categoryOf(row) === '中转节点停留'),
-    severeOverdue: rows.filter(row => row.严重超时 === '是' || categoryOf(row) === '严重超时未更新'),
+    pending1: active.filter(row => Number(row.Pending次数 || row.Pending当前次数 || 0) >= 1),
+    pending2: active.filter(row => Number(row.Pending次数 || row.Pending当前次数 || 0) >= 2),
+    pending3: active.filter(row => Number(row.Pending次数 || row.Pending当前次数 || 0) >= 3),
+    pendingContinuous: active.filter(row => row.Pending连续 === '是' || row.Pending连续性 === '连续'),
+    pendingNonContinuous: active.filter(row => row.Pending不连续 === '是' || row.Pending连续性 === '不连续'),
+    oc1: active.filter(row => Number(row.OC天数 || 0) >= 1),
+    oc2: active.filter(row => Number(row.OC天数 || 0) >= 2),
+    oc3: active.filter(row => Number(row.OC天数 || 0) >= 3),
+    cycle2: active.filter(row => Number(row.盘点天数 || 0) >= 2),
+    inboundNoScan: active.filter(row => row.入库无扫描节点 === '是' || categoryOf(row) === '入库无扫描节点'),
+    transitHubStay: active.filter(row => row.中转节点停留 === '是' || categoryOf(row) === '中转节点停留'),
+    severeOverdue: active.filter(row => row.严重超时 === '是' || categoryOf(row) === '严重超时未更新'),
     attempt1: rows.filter(row => isPod(row) && dispatchDayNo(row) === 1),
     attempt2: rows.filter(row => isPod(row) && dispatchDayNo(row) === 2),
     attempt3: rows.filter(row => isPod(row) && dispatchDayNo(row) >= 3),
-    deliveryStay: rows.filter(row => Number(row.派送中停留天数 || 0) > 0 || categoryOf(row) === '派送中停留'),
-    nodeStale: rows.filter(row => Number(row.节点未更新天数 || 0) > 0 || categoryOf(row) === '节点未更新'),
-    noTrack: rows.filter(row => row.无轨迹 === '是' || categoryOf(row) === '无轨迹'),
-    retry: rows.filter(row => row.查询状态 === 'refresh_failed' || row.API状态 === '失败' || ['待重试', 'API失败待重试'].includes(categoryOf(row))),
-    returnRequired: rows.filter(row => row.returnRequired === true || row.退回待处理 === '是' || ['三次Pending后未退回', '三次Pending后继续派送'].includes(categoryOf(row))),
+    deliveryStay: active.filter(row => Number(row.派送中停留天数 || 0) > 0 || categoryOf(row) === '派送中停留'),
+    nodeStale: active.filter(row => Number(row.节点未更新天数 || 0) > 0 || categoryOf(row) === '节点未更新'),
+    noTrack: active.filter(row => row.无轨迹 === '是' || categoryOf(row) === '无轨迹'),
+    retry: active.filter(row => row.查询状态 === 'refresh_failed' || row.API状态 === '失败' || ['待重试', 'API失败待重试'].includes(categoryOf(row))),
+    returnRequired: active.filter(row => row.returnRequired === true || row.退回待处理 === '是' || ['三次Pending后未退回', '三次Pending后继续派送'].includes(categoryOf(row))),
     returned: rows.filter(isReturned),
-    returnInProgress: rows.filter(row => row.退回状态 === '退回处理中' || row.currentState === 'RETURN_IN_PROGRESS'),
-    pvDelivery: rows.filter(row => pvDisposition(row) === 'PV_DELIVERY_IN_PROGRESS'),
-    pvStoreRetention: rows.filter(row => pvDisposition(row) === 'PV_STORE_RETENTION'),
-    pvStoreInboundNoScan: rows.filter(row => pvDisposition(row) === 'PV_STORE_INBOUND_NO_SCAN'),
-    pvOtherUnresolved: rows.filter(row => pvDisposition(row) === 'PV_OTHER_UNRESOLVED'),
-    carry: uniqueRows(carryRows),
-    nextCarry: uniqueRows(nextCarryRows)
+    cancelled: rows.filter(isCancelled),
+    returnInProgress: active.filter(row => row.退回状态 === '退回处理中' || row.currentState === 'RETURN_IN_PROGRESS'),
+    pvDelivery: active.filter(row => pvDisposition(row) === 'PV_DELIVERY_IN_PROGRESS'),
+    pvStoreRetention: active.filter(row => pvDisposition(row) === 'PV_STORE_RETENTION'),
+    pvStoreInboundNoScan: active.filter(row => pvDisposition(row) === 'PV_STORE_INBOUND_NO_SCAN'),
+    pvOtherUnresolved: active.filter(row => pvDisposition(row) === 'PV_OTHER_UNRESOLVED'),
+    carry: uniqueRows(carryRows).filter(row => !isTerminal(row)),
+    nextCarry: uniqueRows(nextCarryRows).filter(row => !isTerminal(row))
   };
 }
 
 function pvDisposition(row = {}) {
   if (row.pvOpenDisposition) return row.pvOpenDisposition;
-  if (normalizedRegion(row) !== 'PV' || isPod(row) || isReturned(row) || isApiFailure(row)) return '';
+  if (normalizedRegion(row) !== 'PV' || isTerminal(row) || isApiFailure(row)) return '';
   if (row.shopState === 'SHOP_ARRIVED_CURRENT') {
     return Number(row.shopRetentionNaturalDays || 0) >= 2 ? 'PV_STORE_RETENTION' : 'PV_STORE_INBOUND_NO_SCAN';
   }
@@ -414,9 +424,9 @@ function buildRecipientTrends(state, recipientGroups) {
     output[group] = {
       firstAttemptRate: getMetricTrend('SHOPEE', `${group}_首派成功率`, state.reportDate || '', 7, state, metrics.firstAttemptRate, metrics.firstAttemptRate >= 90 ? 'normal' : 'warning'),
       ocRate: getMetricTrend('SHOPEE', `${group}_OC率`, state.reportDate || '', 7, state, rate(metrics.oc1, recipientGroups[group].monitorCount), metrics.oc1 ? 'warning' : 'normal'),
-      podRate: getMetricTrend('SHOPEE', `${group}_POD率`, state.reportDate || '', 7, state, metrics.podRate, metrics.podRate >= 90 ? 'normal' : 'warning')
-      ,returnCount: getMetricTrend('SHOPEE', `${group}_退回件`, state.reportDate || '', 7, state, metrics.returned, metrics.returned ? 'warning' : 'normal')
-      ,returnRate: getMetricTrend('SHOPEE', `${group}_退回率`, state.reportDate || '', 7, state, metrics.returnRate, metrics.returned ? 'warning' : 'normal')
+      podRate: getMetricTrend('SHOPEE', `${group}_POD率`, state.reportDate || '', 7, state, metrics.podRate, metrics.podRate >= 90 ? 'normal' : 'warning'),
+      returnCount: getMetricTrend('SHOPEE', `${group}_退回件`, state.reportDate || '', 7, state, metrics.returned, metrics.returned ? 'warning' : 'normal'),
+      returnRate: getMetricTrend('SHOPEE', `${group}_退回率`, state.reportDate || '', 7, state, metrics.returnRate, metrics.returned ? 'warning' : 'normal')
     };
   }
   return output;
@@ -425,8 +435,12 @@ function buildRecipientTrends(state, recipientGroups) {
 function buildRegionSummary(dailyRows, rows) {
   const summarize = regionCode => {
     const daily = dailyRows.filter(row => normalizedRegion(row) === regionCode);
-    const monitor = rows.filter(row => normalizedRegion(row) === regionCode);
-    const pod = daily.filter(isPod).length;
+    const monitor = rows.filter(row => normalizedRegion(row) === regionCode && !isTerminal(row));
+    const podRows = daily.filter(isPod);
+    const pod = podRows.length;
+    const a1 = podRows.filter(row => dispatchDayNo(row) === 1).length;
+    const a2 = podRows.filter(row => dispatchDayNo(row) === 2).length;
+    const a3 = podRows.filter(row => dispatchDayNo(row) >= 3).length;
     return {
       regionCode,
       total: daily.length,
@@ -441,14 +455,16 @@ function buildRegionSummary(dailyRows, rows) {
       inboundNoScan: monitor.filter(row => row.入库无扫描节点 === '是').length,
       returnRequired: monitor.filter(row => row.returnRequired === true || row.退回待处理 === '是').length,
       returned: daily.filter(isReturned).length,
+      cancelled: daily.filter(isCancelled).length,
       returnInProgress: monitor.filter(row => row.退回状态 === '退回处理中' || row.currentState === 'RETURN_IN_PROGRESS').length,
-      dispatchAttempt1Count: daily.filter(row => isPod(row) && dispatchDayNo(row) === 1).length,
-      dispatchAttempt2Count: daily.filter(row => isPod(row) && dispatchDayNo(row) === 2).length,
-      dispatchAttempt3Count: daily.filter(row => isPod(row) && dispatchDayNo(row) >= 3).length,
-      dispatchAttemptDenominator: daily.length,
-      dispatchAttempt1Rate: rate(daily.filter(row => isPod(row) && dispatchDayNo(row) === 1).length, daily.length),
-      dispatchAttempt2Rate: rate(daily.filter(row => isPod(row) && dispatchDayNo(row) === 2).length, daily.length),
-      dispatchAttempt3Rate: rate(daily.filter(row => isPod(row) && dispatchDayNo(row) >= 3).length, daily.length),
+      dispatchAttempt1Count: a1,
+      dispatchAttempt2Count: a2,
+      dispatchAttempt3Count: a3,
+      dispatchAttemptUnknown: Math.max(0, pod - a1 - a2 - a3),
+      dispatchAttemptDenominator: pod,
+      dispatchAttempt1Rate: rate(a1, pod),
+      dispatchAttempt2Rate: rate(a2, pod),
+      dispatchAttempt3Rate: rate(a3, pod),
       shopTransit: monitor.filter(row => row.shopState === 'SHOP_TRANSFER_IN_PROGRESS').length,
       shopArrived: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT').length,
       shopPending: monitor.filter(row => row.shopState === 'SHOP_ARRIVED_CURRENT' && (row.storeTags || row.tags || []).includes('SHOP_PENDING')).length,
@@ -492,6 +508,7 @@ function publicShopeeRow(row = {}) {
 }
 
 function isTrackedException(row) {
+  if (isTerminal(row)) return false;
   return Number(row.Pending次数 || 0) > 0 || Number(row.OC天数 || 0) > 0 || Number(row.派送中停留天数 || 0) > 0
     || Number(row.节点未更新天数 || 0) > 0 || row.入库无扫描节点 === '是' || row.无轨迹 === '是' || row.查询状态 === 'refresh_failed';
 }
@@ -505,19 +522,26 @@ function isPod(row = {}) {
   return state === 'POD' || String(row.orderStatus || '').trim() === '85' || row.是否POD === '是';
 }
 function isReturned(row = {}) {
+  if (isPod(row)) return false;
   const state = String(row.currentState || row.scanNormalizedState || row.returnState || '').trim().toUpperCase();
-  return state === 'RETURN_COMPLETED'
-    || row.退回状态 === '已退回' || categoryOf(row) === '退回';
+  return state === 'RETURN_COMPLETED' || state === 'RETURNED' || row.退回状态 === '已退回' || categoryOf(row) === '退回';
 }
+function isCancelled(row = {}) {
+  if (isPod(row) || isReturned(row)) return false;
+  const text = [row.currentState,row.scanNormalizedState,row.primaryCategory,row.主分类,row.异常分类,row.QC判断,row.statusDesc].map(value => String(value || '')).join(' ');
+  return String(row.orderStatus || '') === '10' || row.订单取消 === '是' || /ORDER_CANCELLED|CANCELLED|CANCELED|订单取消|已取消|取消订单/i.test(text);
+}
+function isTerminal(row = {}) { return isPod(row) || isReturned(row) || isCancelled(row); }
 function dispatchDayNo(row = {}) {
-  const explicit = Number(row.dispatchDayNo || 0);
-  if (explicit > 0) return Math.min(3, explicit);
-  const start = String(row.reportDate || row.日报日期 || '').slice(0, 10);
-  const end = String(row.POD时间 || row.podTime || row.terminalObservedAt || row.lastCheckedAt || row.analysisDate || '').slice(0, 10);
-  const startMs = Date.parse(`${start}T00:00:00+07:00`);
-  const endMs = Date.parse(`${end}T00:00:00+07:00`);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
-  return Math.min(3, Math.max(1, Math.floor((endMs - startMs) / 86400000) + 1));
+  if (!isPod(row)) return 0;
+  const explicit = Number(row.dispatchDayNo || row.podAttemptNo || 0);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(3, Math.floor(explicit));
+  // V202: no reportDate->POD elapsed-day fallback. Unknown stays unknown.
+  return 0;
+}
+function deliveryAttemptCurrent(row = {}) {
+  const value = Number(row.currentAttemptNo || row.podAttemptNo || row.dispatchDayNo || 0);
+  return Number.isFinite(value) && value > 0 ? Math.min(3, Math.floor(value)) : 0;
 }
 function categoryOf(row = {}) { return row.primaryCategory || row.主分类 || row.异常分类 || '其他已识别节点'; }
 function billOf(row = {}) { return String(row.shipmentCode || row.运单号 || '').trim().toUpperCase(); }
