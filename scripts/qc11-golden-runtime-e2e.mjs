@@ -58,7 +58,7 @@ try{
   });
   await waitUntil('isolated export sidecar',async()=>{
     const {res,body}=await json(`${exportOrigin}/api/v194/export-ping`,{headers:{Accept:'application/json'}});
-    return res.status===200&&body.ok===true&&body.statusTransport==='IPC_MEMORY_V195';
+    return res.status===200&&body.ok===true&&body.statusTransport==='IPC_MEMORY_V195'&&Array.isArray(body.capabilities)&&body.capabilities.includes('ALL')&&body.capabilities.includes('SINGLE');
   });
 
   const bootstrap=await json(`${origin}/api/internal-auth/bootstrap`,{
@@ -110,12 +110,18 @@ try{
   const network=await json(`${origin}/api/v203/network-access`,{headers:{cookie,Accept:'application/json'}});
   if(network.res.status!==200||network.body.ok!==true)fail(`network/settings route failed: ${network.text}`);
 
+  const exportNoAuth=await json(`${exportOrigin}/api/v194/export-period/prepare`,{
+    method:'POST',headers:{Accept:'application/json','content-type':'application/json','origin':origin},
+    body:JSON.stringify({periodType:'daily',date:'',businessType:'ALL'})
+  });
+  if(exportNoAuth.res.status!==401)fail(`5178 prepare must reject missing internal session before payload validation: ${exportNoAuth.res.status} ${exportNoAuth.text}`);
+
   const exportAuth=await json(`${exportOrigin}/api/v194/export-period/prepare`,{
     method:'POST',
-    headers:{cookie,Accept:'application/json','content-type':'application/json','origin':'http://127.0.0.1:5177'},
-    body:JSON.stringify({periodType:'daily',date:'2026-08-21',businessType:''})
+    headers:{cookie,Accept:'application/json','content-type':'application/json','origin':origin},
+    body:JSON.stringify({periodType:'daily',date:'',businessType:'ALL'})
   });
-  if(exportAuth.res.status!==400||exportAuth.body.code!=='V194_SINGLE_BUSINESS_ONLY')fail(`5178 did not accept the direct 5177 session cookie: ${exportAuth.res.status} ${exportAuth.text}`);
+  if(exportAuth.res.status!==400||exportAuth.body.code!=='V194_INVALID_DATE')fail(`5178 did not accept the direct 5177 session cookie and reach ALL-export payload validation: ${exportAuth.res.status} ${exportAuth.text}`);
 
   console.log('CE_QC_QC11_GOLDEN_HEALTH=PASS');
   console.log('CE_QC_QC11_DIRECT_INTERNAL_BAD_PASSWORD=PASS');
@@ -124,6 +130,7 @@ try{
   console.log('CE_QC_QC11_CE_API_LOGIN_FEEDBACK=PASS');
   console.log('CE_QC_QC11_ATTEMPT_ROUTE=PASS');
   console.log('CE_QC_QC11_WHPP_V248_AUTHORITY=PASS');
+  console.log('CE_QC_QC11_EXPORT_SIDECAR_ALL_CAPABILITY=PASS');
   console.log('CE_QC_QC11_EXPORT_SIDECAR_AUTH=PASS');
 }finally{
   await stop();
