@@ -15,6 +15,7 @@ const server=read('server.js');
 const access=read('src/accessControl.js');
 const authPause=read('src/v41AuthPausePatch.js');
 const ceLoginBound=read('src/qc11CeLoginBoundPatch.js');
+const directLoginUi=read('src/qc11DirectLoginUiPatch.js');
 const cold=read('src/v46ColdStartIndexPatch.js');
 const health=read('src/v227LocalHealthProbePatch.js');
 const launcher=read('Start_CE_QC.ps1');
@@ -34,9 +35,14 @@ must(access,'ce_internal_session','host session cookie');
 must(access,'loginInternalUser','direct login verifier');
 forbid(authPause,'v209LoginReliabilityPatch','V209 auth bridge import');
 must(authPause,"./qc11CeLoginBoundPatch.js",'bounded CE API login import');
+must(authPause,"./qc11DirectLoginUiPatch.js",'bounded browser login UI import');
 must(ceLoginBound,'CE_LOGIN_TIMEOUT_MS','configurable CE login timeout');
 must(ceLoginBound,'10_000','10 second CE login default');
 must(ceLoginBound,"error.code='CE_LOGIN_TIMEOUT'",'visible CE login timeout code');
+must(directLoginUi,'2026-08-21-qc11-direct-5177-login-ui-v1','direct login UI revision');
+must(directLoginUi,'setTimeout(()=>controller.abort(),12000)','12 second browser login bound');
+must(directLoginUi,"credentials:'same-origin'",'same-origin browser session');
+must(directLoginUi,'登录超过12秒没有响应','visible browser timeout feedback');
 must(cold,"import './v227LocalHealthProbePatch.js'",'loopback health only');
 for(const retired of ['v221BootstrapRecoveryPatch','v225AuthBootstrapGuardPatch','v232LiveDataHealthGatePatch','v209LoginReliabilityPatch','v213AuthSidecar'])forbid(cold,retired,retired);
 for(const source of [bootstrap,server,authPause,cold]){
@@ -83,7 +89,7 @@ must(allExportWrapper,"CE_QC_EXPORT_WORKER_MODE:'ALL_BUSINESS_ORCHESTRATOR'",'AL
 must(packageJson,'scripts/qc11-one-shot-acceptance.cjs','final acceptance wiring');
 
 const syntax=[
-  'bootstrap.js','server.js','src/accessControl.js','src/v41AuthPausePatch.js','src/qc11CeLoginBoundPatch.js','src/v46ColdStartIndexPatch.js','src/v227LocalHealthProbePatch.js',
+  'bootstrap.js','server.js','src/accessControl.js','src/v41AuthPausePatch.js','src/qc11CeLoginBoundPatch.js','src/qc11DirectLoginUiPatch.js','src/v46ColdStartIndexPatch.js','src/v227LocalHealthProbePatch.js',
   'src/shopeeAnalyzerV33.js','src/v191ShopeeTruth.js','src/v200Metrics.js','src/v200ReferenceWorkbook.js','src/v200TemplateDashboardExporter.js',
   'src/v202DeliveryTruth.js','src/v203DashboardIntegrityPatch.js','src/v205CanonicalTruth.js','src/v205ExportTruth.js','src/v205IntegrityAuditPatch.js',
   'src/v202CarryTrackingCenterPatch.js','src/v84AsyncExportPatch.js','src/v193ExportSidecar.js','src/qc11AllExportIpcWorker.js','src/v44WhppUiPatch.js','src/v248WhppAuthorityPatch.js',
@@ -122,6 +128,7 @@ run(['scripts/qc11-golden-runtime-e2e.mjs'],120000);
 
 console.log('CE_QC_QC11_GOLDEN_SHELL=PASS');
 console.log('CE_QC_QC11_CORE_5177_5178=PASS');
+console.log('CE_QC_QC11_BROWSER_LOGIN_SHELL=PASS');
 console.log('CE_QC_QC11_SEVEN_BUSINESS_WHPP=PASS');
 console.log('CE_QC_QC11_REAL_ATTEMPT_TRUTH=PASS');
 console.log('CE_QC_QC11_PENDING_SPECIAL_RULES=PASS');
