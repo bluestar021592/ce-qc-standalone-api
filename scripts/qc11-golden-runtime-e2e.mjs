@@ -79,6 +79,10 @@ try{
   const attempt=await json(`${origin}/api/v203/attempt-summary?businessType=SHOPEECN`,{headers:{cookie,Accept:'application/json'}});
   if(attempt.res.status!==200||attempt.body.ok!==true)fail(`attempt-summary route failed: ${attempt.text}`);
 
+  const whpp=await json(`${origin}/api/v132/whpp-fast-summary`,{headers:{cookie,Accept:'application/json'}});
+  if(whpp.res.status!==200||whpp.body.ok!==true)fail(`WHPP fast summary failed: ${whpp.text}`);
+  if(whpp.res.headers.get('x-ce-qc-whpp-authority')!=='V248-AFTER-ACCESS-BEFORE-LEGACY')fail(`WHPP route is not owned by V248 authority; header=${whpp.res.headers.get('x-ce-qc-whpp-authority')||'missing'}`);
+
   const network=await json(`${origin}/api/v203/network-access`,{headers:{cookie,Accept:'application/json'}});
   if(network.res.status!==200||network.body.ok!==true)fail(`network/settings route failed: ${network.text}`);
 
@@ -93,6 +97,7 @@ try{
   console.log('CE_QC_QC11_DIRECT_INTERNAL_LOGIN=PASS');
   console.log('CE_QC_QC11_SESSION_SETTINGS=PASS');
   console.log('CE_QC_QC11_ATTEMPT_ROUTE=PASS');
+  console.log('CE_QC_QC11_WHPP_V248_AUTHORITY=PASS');
   console.log('CE_QC_QC11_EXPORT_SIDECAR_AUTH=PASS');
 }finally{
   await stop();
