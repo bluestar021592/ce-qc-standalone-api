@@ -23,6 +23,7 @@ import './v183HistoricalStatusRefreshPatch.js';
 import './v206InteractiveFirstRuntimePatch.js';
 
 const PATCH_ID='2026-08-21-v206-interactive-first-owner-shell-v1';
+const GOLIVE_COMPAT_PATCH_ID='2026-08-18-v195-ipc-export-owner-shell-v1';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE=path.resolve(__dirname,'..','public','index.html');
@@ -41,6 +42,7 @@ function html(req,res,next){
   if(req.method!=='GET'||!APP_PATHS.has(req.path))return next();
   try{
     res.setHeader('X-CE-QC-UI-Build',PATCH_ID);
+    res.setHeader('X-CE-QC-UI-Compat',GOLIVE_COMPAT_PATCH_ID);
     res.type('html').send(buildInjectedHtml());
   }catch(error){next(error);}
 }
@@ -53,5 +55,5 @@ express.application.use=function v206InteractiveFirstOwnerUse(...args){
   return previousUse.apply(this,args);
 };
 
-export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID};}
+export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,compatPatchId:GOLIVE_COMPAT_PATCH_ID};}
 export const V44_WHPP_UI_PATCH_ID=PATCH_ID;
