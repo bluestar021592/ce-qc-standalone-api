@@ -4,12 +4,13 @@ import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CEClient, normalizeLoginToken } from '../src/ceClient.js';
 import { authMiddleware, authRoutes, publicUser, requireRole } from './auth.js';
 import { getDataDb, getSystemDb, nextRuntime, nowIso } from './db.js';
+import { NextCeClient, ceStatus } from './ce.js';
 import { boardRows, boardSummary, businessSummary, BUSINESSES, clearBusinessData, importDaily, latestDate, listDates } from './store.js';
 
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
+const projectRoot=path.resolve(__dirname,'..');
 const cfg=nextRuntime();for(const dir of [cfg.importsDir,cfg.exportsDir,cfg.tokenDir])fs.mkdirSync(dir,{recursive:true});
 const app=express();
 const upload=multer({dest:cfg.importsDir,limits:{fileSize:100*1024*1024,files:1},fileFilter:(req,file,cb)=>{const ext=path.extname(file.originalname||'').toLowerCase();cb(['.xls','.xlsx'].includes(ext)?null:new Error('仅支持 .xls / .xlsx 日报'),['.xls','.xlsx'].includes(ext));}});
@@ -17,7 +18,8 @@ const upload=multer({dest:cfg.importsDir,limits:{fileSize:100*1024*1024,files:1}
 app.disable('x-powered-by');
 app.use(express.json({limit:'5mb'}));
 app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');next();});
-app.use('/assets',express.static(path.join(__dirname,'public','assets')));
+app.use('/assets',express.static(path.join(projectRoot,'public','assets'),{maxAge:0}));
+app.get('/style.css',(req,res)=>res.sendFile(path.join(__dirname,'public','style.css')));
 app.get('/login',(req,res)=>res.sendFile(path.join(__dirname,'public','login.html')));
 app.get('/api/health',(req,res)=>{
   let systemDb=true,dataDb=true;try{getSystemDb().prepare('SELECT 1').get();}catch{systemDb=false;}try{getDataDb().prepare('SELECT 1').get();}catch{dataDb=false;}
@@ -43,15 +45,16 @@ app.post('/api/admin/clear-business-data',requireRole('ADMIN'),(req,res)=>{
   const result=clearBusinessData();getSystemDb().prepare('INSERT INTO audit_logs(userId,action,detailJson,createdAt) VALUES(?,?,?,?)').run(req.user.id,'BUSINESS_DATA_CLEARED',JSON.stringify({scope:'NEXT_DATA_ONLY'}),nowIso());res.json(result);
 });
 
-app.get('/api/ce/status',(req,res)=>{const row=getSystemDb().prepare("SELECT valueJson FROM settings WHERE key='ce_api_token' LIMIT 1").get();let token=null;try{token=JSON.parse(row?.valueJson||'null');}catch{}res.json({ok:true,loggedIn:Boolean(token?.access_token),account:token?.username||token?.account||'',expiresAt:token?.expires_at?new Date(token.expires_at).toISOString():''});});
-app.post('/api/ce/login',(req,res)=>{
+app.get('/api/ce/status',(req,res)=>res.json({ok:true,...ceStatus()}));
+app.post('/api/ce/login',async(req,res)=>{
   const tenantId=String(req.body?.tenantId||'000000').trim()||'000000',username=String(req.body?.username||'').trim(),password=String(req.body?.password||'');
   if(!username||!password)return res.status(400).json({ok:false,error:'请输入CE账号和密码。'});
-  const client=new CEClient(),timer=setTimeout(()=>{},0);let done=false;
-  Promise.race([client.login({tenantId,username,password,grant_type:'password',scope:'all',type:'account'}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('CE API登录超过12秒未响应。')),12000))])
-    .then(raw=>{if(done)return;done=true;const token=normalizeLoginToken(raw,{tenantId,username});getSystemDb().prepare("INSERT INTO settings(key,valueJson,updatedAt) VALUES('ce_api_token',?,?) ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt").run(JSON.stringify(token),nowIso());getSystemDb().prepare('INSERT INTO audit_logs(userId,action,detailJson,createdAt) VALUES(?,?,?,?)').run(req.user.id,'CE_API_LOGIN',JSON.stringify({username}),nowIso());res.json({ok:true,account:username,expiresAt:token.expires_at?new Date(token.expires_at).toISOString():''});})
-    .catch(error=>{if(done)return;done=true;res.status(/12秒/.test(error.message)?504:502).json({ok:false,error:error.message});});
-  clearTimeout(timer);
+  try{
+    const client=new NextCeClient();
+    const token=await Promise.race([client.login({tenantId,username,password}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('CE API登录超过12秒未响应。')),12000))]);
+    getSystemDb().prepare('INSERT INTO audit_logs(userId,action,detailJson,createdAt) VALUES(?,?,?,?)').run(req.user.id,'CE_API_LOGIN',JSON.stringify({username}),nowIso());
+    res.json({ok:true,account:username,expiresAt:token.expires_at?new Date(token.expires_at).toISOString():''});
+  }catch(error){res.status(/12秒/.test(error.message)?504:502).json({ok:false,error:error.message});}
 });
 
 app.use(express.static(path.join(__dirname,'public'),{index:false,maxAge:0}));
