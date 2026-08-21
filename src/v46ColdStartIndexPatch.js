@@ -9,8 +9,9 @@ import './v246CoreAvailabilityPatch.js';
 import './v248WhppAuthorityPatch.js';
 import './v249LoginReliabilityPatch.js';
 import './v251CookieFirstLoginPatch.js';
+import './v252SettingsRecoveryPatch.js';
 
-const PATCH_ID = '2026-08-21-v251-cookie-first-login-v1';
+const PATCH_ID = '2026-08-21-v252-settings-recovery-v1';
 
 // Cold start must never open or scan the SQLite database merely to inspect
 // optional performance indexes. The definitions stay available for explicit
@@ -19,9 +20,10 @@ const PATCH_ID = '2026-08-21-v251-cookie-first-login-v1';
 // stale/unauthenticated zero dashboards. V227 exposes loopback /api/health,
 // V228 keeps launcher probes local, V245 keeps persisted-data diagnostics,
 // V246 makes core startup service-first, V248 owns authenticated WHPP routing,
-// V249 moved credential verification onto isolated 5179, and V251 makes the
-// host-scoped signed cookie the normal browser session path so a busy 5177
-// cannot hold the login page at "waiting for session handoff".
+// V249 moved credential verification onto isolated 5179, V251 makes the
+// host-scoped signed cookie the normal browser session path, and V252 gives
+// settings/CE connector their own authenticated fast path so dashboard bootstrap
+// can never block system settings or CE API sign-in again.
 const REQUIRED_INDEXES = Object.freeze([
   {
     name: 'idx_unified_rows_bootstrap_cover',
@@ -47,7 +49,7 @@ export function inspectV46Indexes() {
   return { present, missing };
 }
 
-console.log('[CE-QC][V46] V251 system-first core armed: 5179 direct credential verification + signed host-cookie navigation + fallback-only 5177 handoff + V248 authenticated WHPP authority.');
+console.log('[CE-QC][V46] V252 system-first core armed: cookie-first internal login + settings/CE connector fast path + V248 authenticated WHPP authority; dashboard bootstrap cannot block settings.');
 
 export const V46_COLD_START_INDEX_PATCH_ID = PATCH_ID;
 export const V46_REQUIRED_INDEXES = REQUIRED_INDEXES;
