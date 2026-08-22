@@ -35,6 +35,11 @@ jobs:
           node --check src/reporting.js
           node --check src/rangeDashboardStoreFinal.js
           node --check src/rangeDashboardStore.js
+          node --check src/v235DashboardCurrentCache.js
+          node --check src/dashboardCacheWorker.js
+          node --check public/v235-cache-ready-reload.js
           node --check scripts/CE_QC_Production_Audit.mjs
+      - name: V235 exact dashboard cache functional smoke
+        run: node scripts/v235-dashboard-cache-smoke.mjs
       - name: Final state-machine regression
         run: node --test test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js
