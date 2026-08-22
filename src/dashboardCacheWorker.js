@@ -28,18 +28,22 @@ const WORKER_ACTIVE_UNTIL_KEY = 'dashboard_cache_worker_active_until';
 const PURGE_BLOCK_KEY = 'data_purge_block_until';
 const WORKER_LEASE_MS = 5 * 60_000;
 const workerId = `${process.pid}-${Date.now()}`;
+const workerStartedAt = Date.now();
 let workerLeaseOwned = false;
 
 function writeResult(result) {
-  process.stdout.write(`${JSON.stringify({ ok: true, reason, reportDate, cacheId: V235_DASHBOARD_CURRENT_CACHE_ID, result })}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, reason, reportDate, cacheId: V235_DASHBOARD_CURRENT_CACHE_ID, elapsedMs: Date.now()-workerStartedAt, result })}\n`);
 }
 function writeSkip(skipReason) {
   writeResult({ skipped: true, reason: skipReason });
 }
 
 function activeForegroundRun(db = getDb()) {
-  if (db.prepare("SELECT 1 FROM run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get()) return true;
-  return Boolean(db.prepare("SELECT 1 FROM business_run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get());
+  // A normal "paused" run has stopped scan/track writes and may safely coexist
+  // with a read-only trend-cache build. Only actively running or paused_write
+  // states still own the SQLite write path and should delay the cache child.
+  if (db.prepare("SELECT 1 FROM run_locks WHERE status IN ('running','paused_write') LIMIT 1").get()) return true;
+  return Boolean(db.prepare("SELECT 1 FROM business_run_locks WHERE status IN ('running','paused_write') LIMIT 1").get());
 }
 
 function ownerPid(owner = '') {
@@ -105,9 +109,6 @@ function releaseWorkerLease() {
 }
 
 try {
-  // Import only marks a date dirty. Rebuilding before scan/track completion would
-  // cache an incomplete state. The existing *_RUN_COMPLETED hooks call this worker
-  // again after the unified snapshot has become COMPLETED.
   if (/^(?:UNIFIED_IMPORT|DAILY_IMPORT|SHOPEE_IMPORT)$/.test(reason)) {
     writeSkip('IMPORT_DIRTY_ONLY_WAIT_FOR_RUN_COMPLETED');
     process.exit(0);
@@ -129,13 +130,12 @@ try {
     markDashboardCacheDirty(reportDate, reason);
     result = refreshV235CurrentDashboardCacheDate(reportDate, { force: true });
   } else if (reason === 'V235_INTERACTIVE_STARTUP' || reason === 'STARTUP_WARM') {
-    // First build the latest completed date so the visible current dashboard gets
-    // real POD/return/open metrics quickly, then quietly reconcile the six prior
-    // valid dates for the seven-day trend. Everything happens in this child process.
     const dates = recentCompletedDashboardDates(7);
     const results = [];
     for (const date of dates) {
-      results.push(refreshV235CurrentDashboardCacheDate(date, { force: false }));
+      const startedAt=Date.now();
+      const item=refreshV235CurrentDashboardCacheDate(date, { force: false });
+      results.push({...item,elapsedMs:Date.now()-startedAt});
     }
     result = { mode: 'LATEST_PLUS_RECENT_7', latestDate: dates[0] || latestCompletedDashboardDate(), checked: dates.length, refreshed: results.filter(item => item.refreshed).length, results };
   } else {
@@ -149,7 +149,7 @@ try {
   closeDb();
   process.exit(0);
 } catch (error) {
-  process.stderr.write(`${JSON.stringify({ ok: false, reason, cacheId: V235_DASHBOARD_CURRENT_CACHE_ID, error: error?.stack || error?.message || String(error) })}\n`);
+  process.stderr.write(`${JSON.stringify({ ok: false, reason, cacheId: V235_DASHBOARD_CURRENT_CACHE_ID, elapsedMs: Date.now()-workerStartedAt, error: error?.stack || error?.message || String(error) })}\n`);
   try { releaseWorkerLease(); } catch {}
   try { closeDb(); } catch {}
   process.exit(1);
