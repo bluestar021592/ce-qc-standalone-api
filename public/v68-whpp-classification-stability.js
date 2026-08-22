@@ -1,14 +1,23 @@
 (function installWhppClassificationStabilityV68(global) {
   if (global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__) return;
 
-  const VERSION = '2026-08-12-v68-whpp-classification-stability-v4';
+  const VERSION = '2026-08-22-v217-whpp-classification-display-truth-v1';
   let scheduled = false;
+  let fastSyncing = false;
+  let lastFastSyncAt = 0;
 
   const num = value => {
     const parsed = Number(String(value ?? '').replace(/[,\s]/g, ''));
     return Number.isFinite(parsed) ? parsed : 0;
   };
   const fmt = value => Number(value || 0).toLocaleString('zh-CN');
+
+  function importState() {
+    try {
+      if (typeof unifiedImportState !== 'undefined') return unifiedImportState;
+    } catch {}
+    return global.unifiedImportState || null;
+  }
 
   function summaryRoot() {
     return document.getElementById('unifiedClassificationSummary');
@@ -41,14 +50,42 @@
     };
   }
 
+  function currentDate() {
+    const state = importState();
+    const value = String(
+      state?.reportDate
+      || document.getElementById('topRangeTo')?.value
+      || document.getElementById('dashboardRangeTo')?.value
+      || ''
+    ).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
+  }
+
+  function coreCountFromCards() {
+    return ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']
+      .reduce((sum, label) => sum + readCardCount(label), 0);
+  }
+
   function deriveTruth() {
     const stats = rawStats();
     const rawUnique = Math.max(0, stats.rawRows - stats.duplicateRows - stats.missingWaybillRows);
-    const core = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']
-      .reduce((sum, label) => sum + readCardCount(label), 0);
+    const core = coreCountFromCards();
+    const state = importState();
+    const counts = state?.classificationCounts || {};
+    const hasExplicitWhpp = Object.prototype.hasOwnProperty.call(counts, 'WHPP');
+
+    // V94/V216 already synchronize the canonical WHPP count into the runtime
+    // import state. Prefer that explicit value. The legacy V68 heuristic used
+    // rawRows-core, but fast bootstrap intentionally does not hydrate rawRows,
+    // so it incorrectly overwrote a real WHPP count with zero.
+    if (hasExplicitWhpp) {
+      const whppTotal = Math.max(0, num(counts.WHPP));
+      return { rawUnique, core, whppTotal, fullUnique: core + whppTotal, explicit: true };
+    }
+
     const whppTotal = rawUnique >= core ? Math.max(0, rawUnique - core) : 0;
     const fullUnique = rawUnique > 0 ? rawUnique : core + whppTotal;
-    return { rawUnique, core, whppTotal, fullUnique };
+    return { rawUnique, core, whppTotal, fullUnique, explicit: false };
   }
 
   function isWhppCard(node) {
@@ -109,12 +146,41 @@
     return true;
   }
 
+  async function syncFastWhppTruth(force = false) {
+    const date = currentDate();
+    if (!date || fastSyncing) return;
+    if (!force && Date.now() - lastFastSyncAt < 5000) return;
+    fastSyncing = true;
+    lastFastSyncAt = Date.now();
+    try {
+      const response = await fetch(`/api/v132/whpp-fast-summary?reportDate=${encodeURIComponent(date)}`, {
+        cache: 'no-store', credentials: 'same-origin'
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok === false || String(payload?.reportDate || '') !== date) return;
+      const state = importState();
+      if (!state || String(state.reportDate || '').slice(0, 10) !== date) return;
+      const total = Math.max(0, num(payload?.total ?? payload?.metrics?.total));
+      state.classificationCounts = { ...(state.classificationCounts || {}), WHPP: total };
+      const core = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']
+        .reduce((sum, type) => sum + num(state.classificationCounts?.[type]), 0);
+      state.summary = { ...(state.summary || {}), validUniqueWaybills: core + total, totalUnique: core + total };
+      state.whppClassificationDisplaySource = 'V217_WHPP_FAST_SUMMARY';
+      normalize();
+    } catch (error) {
+      console.warn('[CE-QC][V217_WHPP_CLASSIFICATION] fast WHPP sync skipped', error?.message || error);
+    } finally {
+      fastSyncing = false;
+    }
+  }
+
   function schedule() {
     if (scheduled) return;
     scheduled = true;
     const run = () => {
       scheduled = false;
       normalize();
+      void syncFastWhppTruth(false);
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
     else setTimeout(run, 0);
@@ -125,18 +191,15 @@
     if (typeof original === 'function' && !original.__v68WhppWrapped) {
       const wrapped = function () {
         const result = original.apply(this, arguments);
-        // Patch immediately from the already-rendered source counts. No API read,
-        // no delayed heavy request and no dependency on page navigation timing.
         normalize();
         schedule();
+        void syncFastWhppTruth(true);
         return result;
       };
       wrapped.__v68WhppWrapped = true;
       global.renderUnifiedImportResult = wrapped;
     }
 
-    // The initial render can occur before this compatibility script is installed.
-    // Observe only the import summary. Equality guards make our own writes inert.
     const observer = new MutationObserver(records => {
       if (records.some(record => record.target === summaryRoot() || record.target?.closest?.('#unifiedClassificationSummary'))) schedule();
     });
@@ -153,8 +216,15 @@
       pageObserver.observe(document.body, { childList: true, subtree: true });
     }
 
+    document.addEventListener('click', event => {
+      if (event.target?.closest?.('[data-page="import"],#topRangeQuery,#dashboardRangeQuery')) {
+        setTimeout(() => void syncFastWhppTruth(true), 80);
+      }
+    }, true);
+
     normalize();
     schedule();
+    void syncFastWhppTruth(true);
     console.info('[CE-QC][V68_WHPP_CLASSIFICATION_STABILITY]', VERSION);
   }
 
@@ -163,6 +233,7 @@
 
   global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__ = {
     version: VERSION,
-    refresh: normalize
+    refresh: normalize,
+    sync: syncFastWhppTruth
   };
 })(window);
