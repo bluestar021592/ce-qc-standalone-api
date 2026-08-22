@@ -35,6 +35,7 @@ jobs:
           node --check src/reporting.js
           node --check src/rangeDashboardStoreFinal.js
           node --check src/rangeDashboardStore.js
+          node --check src/v206InteractiveFirstRuntimePatch.js
           node --check src/v231MetricTruthUiInjectionPatch.js
           node --check src/v235DashboardCurrentCache.js
           node --check src/v236DashboardCurrentRead.js
@@ -45,6 +46,7 @@ jobs:
           node --check public/v234-dashboard-live.js
           node --check public/v235-cache-ready-reload.js
           node --check public/v237-dashboard-owner-guard.js
+          node --check public/v237-home-dashboard-owner.js
           node --check scripts/v237-dashboard-owner-source-smoke.cjs
           node --check scripts/CE_QC_Production_Audit.mjs
       - name: V237 exact dashboard current, region and trend smoke
