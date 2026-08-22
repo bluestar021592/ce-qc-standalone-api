@@ -4,9 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const V230_METRIC_TRUTH_ROUTE_ID = '2026-08-22-v230-daily-metric-truth-route-v1';
+export const V232_DEEP_TRUTH_CACHE_ID = '2026-08-22-v232-deep-truth-explicit-cache-v1';
 const ROUTE = '/api/v230/metric-truth';
 const TYPES = new Set(['ALL','CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
-const CACHE_MS = 120_000;
+const CACHE_MS = 4 * 60 * 60 * 1000;
 const TIMEOUT_MS = 180_000;
 const cache = new Map();
 const inflight = new Map();
@@ -58,22 +59,28 @@ async function handler(req, res) {
     if (!from || !to || from > to) return res.status(400).json({ ok:false, error:'日期范围无效' });
     const key = keyOf(businessType, from, to);
     const force = String(req.query.refresh || '') === '1';
+    const cacheOnly = String(req.query.cacheOnly || '') === '1';
     const hit = cache.get(key);
     if (!force && hit && Date.now() - hit.at < CACHE_MS) {
       res.setHeader('Cache-Control','private, max-age=30');
-      res.setHeader('X-CE-QC-Metric-Truth','V230-HIT');
-      return res.json({ ...hit.payload, cacheHit:true, routeId:V230_METRIC_TRUTH_ROUTE_ID });
+      res.setHeader('X-CE-QC-Metric-Truth','V232-HIT');
+      return res.json({ ...hit.payload, cacheHit:true, cacheReady:true, routeId:V230_METRIC_TRUTH_ROUTE_ID, cacheId:V232_DEEP_TRUTH_CACHE_ID });
+    }
+    if (cacheOnly) {
+      res.setHeader('Cache-Control','no-store');
+      res.setHeader('X-CE-QC-Metric-Truth','V232-CACHE-MISS');
+      return res.json({ ok:true, cacheHit:false, cacheReady:false, businessType, from, to, routeId:V230_METRIC_TRUTH_ROUTE_ID, cacheId:V232_DEEP_TRUTH_CACHE_ID });
     }
     const started = Date.now();
     const payload = await runWorker({ businessType, from, to });
     cache.set(key, { at:Date.now(), payload });
     res.setHeader('Cache-Control','no-store');
-    res.setHeader('X-CE-QC-Metric-Truth','V230-MISS');
+    res.setHeader('X-CE-QC-Metric-Truth','V232-DEEP-MISS');
     res.setHeader('Server-Timing', `metricTruth;dur=${Date.now()-started}`);
-    return res.json({ ...payload, cacheHit:false, routeId:V230_METRIC_TRUTH_ROUTE_ID });
+    return res.json({ ...payload, cacheHit:false, cacheReady:true, routeId:V230_METRIC_TRUTH_ROUTE_ID, cacheId:V232_DEEP_TRUTH_CACHE_ID });
   } catch (error) {
     console.error('[CE-QC][V230_METRIC_TRUTH]', error?.stack || error);
-    return res.status(500).json({ ok:false, routeId:V230_METRIC_TRUTH_ROUTE_ID, error:error?.message || String(error) });
+    return res.status(500).json({ ok:false, routeId:V230_METRIC_TRUTH_ROUTE_ID, cacheId:V232_DEEP_TRUTH_CACHE_ID, error:error?.message || String(error) });
   }
 }
 
@@ -83,7 +90,7 @@ express.application.use = function v230MetricTruthUse(...args) {
   if (!installed) {
     installed = true;
     this.get(ROUTE, handler);
-    console.info('[CE-QC][V230_METRIC_TRUTH]', V230_METRIC_TRUTH_ROUTE_ID, 'isolated daily percentage/attempt/signing-day truth enabled');
+    console.info('[CE-QC][V232_METRIC_TRUTH]', V232_DEEP_TRUTH_CACHE_ID, 'deep truth is explicit/cache-only for live dashboards');
   }
   return previousUse.apply(this, args);
 };
