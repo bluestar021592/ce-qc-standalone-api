@@ -15,7 +15,8 @@
         denominators: Array.isArray(series?.denominators) ? series.denominators : []
       }))
     };
-    container.innerHTML = '<div class="v18-chart-head"><h3></h3><span>近7天</span></div><div class="v18-chart-legend"></div><div class="v18-chart-plot"></div><div class="v18-chart-current"></div><p class="v18-chart-note">当前值与曲线最后有效节点保持一致</p>';
+    const rangeLabel=chart.rangeLabel||`${chart.dates.length||0}个有效日报日`;
+    container.innerHTML = `<div class="v18-chart-head"><h3></h3><span>${rangeLabel}</span></div><div class="v18-chart-legend"></div><div class="v18-chart-plot"></div><div class="v18-chart-current"></div><p class="v18-chart-note">当前值与曲线最后有效节点保持一致；短区间百分比直接标在每日节点上</p>`;
     container.querySelector('h3').textContent = chart.title || '趋势';
     const legend = container.querySelector('.v18-chart-legend');
     chart.series.forEach(series => { const item = document.createElement('span'); const mark = document.createElement('i'); mark.style.background = series.color; item.append(mark, document.createTextNode(series.name)); legend.appendChild(item); });
@@ -45,6 +46,10 @@
         segment.push({ x, y }); lastPoint = { x, y, value };
         const dot = svgNode('circle', { cx: x, cy: y, r: 3, fill: series.color, 'clip-path': `url(#${clipId})` }), title = svgNode('title');
         const numerator = series.numerators[index], denominator = series.denominators[index]; title.textContent = `${chart.dates[index] || '—'} · ${series.name} · ${Number.isFinite(numerator) && Number.isFinite(denominator) ? `${numerator}/${denominator} · ` : ''}${fmt(value, chart.type)}`; dot.appendChild(title); svg.appendChild(dot);
+        if(chart.type==='rate'&&chart.series.length===1&&chart.dates.length<=10){
+          const pointLabel=svgNode('text',{x,y:Math.max(11,y-6),'text-anchor':'middle',fill:series.color,'font-size':'7.5','font-weight':'700'});
+          pointLabel.textContent=fmt(value,'rate');svg.appendChild(pointLabel);
+        }
       });
       if (segment.length >= 2) svg.appendChild(svgNode('polyline', { points: segment.map(point => `${point.x},${point.y}`).join(' '), fill: 'none', stroke: series.color, 'stroke-width': '2.2', 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'clip-path': `url(#${clipId})` }));
       if (!lastPoint) return;
@@ -59,7 +64,7 @@
     });
     const availableDays = new Set(chart.series.flatMap(series => series.values.map((value, index) => value === null ? null : chart.dates[index]).filter(Boolean))).size;
     container.dataset.historyDays = String(availableDays);
-    if (availableDays < 2) container.querySelector('.v18-chart-note').textContent = `历史快照不足（${availableDays}/7），累计到2个有效日期后自动显示折线`;
+    if (availableDays < 2) container.querySelector('.v18-chart-note').textContent = `历史快照不足（${availableDays}/${Math.max(2,chart.dates.length||7)}），累计到2个有效日期后自动显示折线`;
     container.querySelector('.v18-chart-plot').appendChild(svg);
 
     const current = container.querySelector('.v18-chart-current');
