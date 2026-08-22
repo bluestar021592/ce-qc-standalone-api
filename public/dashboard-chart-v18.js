@@ -78,4 +78,19 @@
     });
   }
   global.RateTrendCardV18 = { render };
+
+  // V58 legacy drilldown still asks for /api/v61/metric-detail. That route no longer
+  // owns the current seven-business detail truth. Rewrite it to the explicit V234
+  // detail endpoint so existing card capture handlers continue to work immediately.
+  if(!global.__CE_QC_V234_DETAIL_FETCH_BRIDGE__&&typeof global.fetch==='function'){
+    global.__CE_QC_V234_DETAIL_FETCH_BRIDGE__=true;
+    const previousFetch=global.fetch.bind(global);
+    global.fetch=function v234DetailFetchBridge(input,init){
+      try{
+        if(typeof input==='string'&&input.includes('/api/v61/metric-detail?'))input=input.replace('/api/v61/metric-detail?','/api/v234/metric-detail?');
+        else if(input instanceof Request&&input.url.includes('/api/v61/metric-detail?'))input=new Request(input.url.replace('/api/v61/metric-detail?','/api/v234/metric-detail?'),input);
+      }catch(error){console.warn('[CE-QC][V234_DETAIL_BRIDGE]',error);}
+      return previousFetch(input,init);
+    };
+  }
 })(window);
