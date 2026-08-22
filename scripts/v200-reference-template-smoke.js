@@ -3,6 +3,8 @@ import { referenceAverageDays } from '../src/v200Metrics.js';
 import { V227_MULTI_BUSINESS_HISTORY_REFRESH_ID } from '../src/v227MultiBusinessHistoryRefreshPatch.js';
 import { V228_MULTI_BUSINESS_HISTORY_ROUTE_INSTALLER_ID } from '../src/v228MultiBusinessHistoryRouteInstallerPatch.js';
 import { resolveStrictShopeeAttempt, inclusiveNaturalDays, V230_ATTEMPT_SIGNING_TRUTH_ID } from '../src/v230AttemptSigningTruth.js';
+import { V230_METRIC_TRUTH_ROUTE_ID } from '../src/v230MetricTruthPatch.js';
+import { V231_METRIC_TRUTH_UI_INJECTION_ID } from '../src/v231MetricTruthUiInjectionPatch.js';
 
 function must(condition, message) { if (!condition) throw new Error(message); }
 
@@ -29,4 +31,6 @@ must(V200_EXPORT_VERSION === '2026-08-18-v200-reference-template-track-attempt-v
 must(V227_MULTI_BUSINESS_HISTORY_REFRESH_ID === '2026-08-22-v227-multi-business-history-refresh-v1', 'unexpected V227 multi-business history refresh version');
 must(V228_MULTI_BUSINESS_HISTORY_ROUTE_INSTALLER_ID === '2026-08-22-v228-multi-business-history-route-installer-v1', 'unexpected V228 multi-business route installer version');
 must(V230_ATTEMPT_SIGNING_TRUTH_ID === '2026-08-22-v230-shopee-attempt-signing-truth-v1', 'unexpected V230 attempt/signing truth version');
-console.log('[V200/V230] reference template + strict code70/code60 attempt + natural-day signing truth smoke passed');
+must(V230_METRIC_TRUTH_ROUTE_ID === '2026-08-22-v230-daily-metric-truth-route-v1', 'unexpected V230 metric truth route version');
+must(V231_METRIC_TRUTH_UI_INJECTION_ID === '2026-08-22-v231-metric-truth-ui-injection-v1', 'unexpected V231 metric truth UI version');
+console.log('[V200/V230/V231] reference template + strict attempt + natural-day signing + daily metric truth smoke passed');
