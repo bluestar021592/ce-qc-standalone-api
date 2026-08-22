@@ -14,10 +14,12 @@ assert.match(live,/__CE_QC_V237_DASHBOARD_OWNER__/,'V237 live client must declar
 assert.match(live,/querySelectorAll\?\.\('#v230MetricTruthPanel'\)/,'V237 must actively remove the retired duplicate trend panel');
 assert.match(live,/x\[key\]===null\|\|x\[key\]===undefined\?null/,'missing trend values must remain null rather than becoming zero');
 assert.match(live,/nullablePct\(x\.firstRate\)/,'missing first-attempt evidence must display dash, not 0.00%');
-assert.match(home,/v237-home-dashboard-owner-v2/,'homepage must run the V237 owner client');
+assert.match(home,/v237-home-dashboard-owner-v3/,'homepage/region owner must run the V237 v3 client');
 assert.match(home,/businessType=ALL/,'homepage charts must use V237 exact aggregate trend');
 assert.match(home,/businessType=SHOPEE/,'homepage first-attempt trend must use V237 SHOPEE truth');
 assert.match(home,/pod=num\(region\.pod\)/,'dispatch attempt percentages must use POD denominator rather than all imported tickets');
+assert.match(home,/\.region-block\.\$\{code\.toLowerCase\(\)\}/,'SHOPEE PP/PV visible blocks must be overwritten from exact region truth');
+assert.match(home,/REGION_KEYS/,'SHOPEE region cards must use an explicit metric mapping instead of displayed zero fallbacks');
 assert.match(guard,/__CE_QC_V237_DASHBOARD_OWNER__=true/,'head guard must declare ownership before legacy scripts execute');
 assert.match(guard,/\/api\\\/v27\\\/trends/,'legacy V232 trend network read must be retired on owned dashboard pages');
 assert.match(guard,/\/api\\\/v55\\\/reconciliation/,'legacy passive reconciliation network read must be retired on owned dashboard pages');
@@ -26,10 +28,10 @@ assert.match(inject,/stripScript\(body, 'v230-metric-truth-ui\.js'\)/,'duplicate
 assert.match(inject,/stripScript\(body, 'v232-card-percentages\.js'\)/,'legacy V232 card observer must be removed from delivered HTML');
 assert.match(inject,/v234-dashboard-live\.js\?v=20260822-v237-2/,'browser must receive cache-busted V237 live client');
 assert.match(inject,/v237-dashboard-owner-guard\.js\?v=20260822-v237-3/,'browser must receive head-first V237 ownership guard');
-assert.match(inject,/v237-home-dashboard-owner\.js\?v=20260822-v237-2/,'browser must receive V237 homepage owner');
+assert.match(inject,/v237-home-dashboard-owner\.js\?v=20260822-v237-3/,'browser must receive V237 homepage/region owner');
 assert.match(route,/path==='\/api\/v234\/trends'/,'V237 route patch must own the V234 trend endpoint');
 assert.match(route,/path==='\/api\/shopee\/state'/,'V237 route patch must pre-handle old compact SHOPEE state reads');
 assert.match(trend,/V237_COMPLETED_SNAPSHOT_DIRECT_OR_EXACT_CACHE/,'trend reader must use completed snapshot/cache truth');
 assert.match(runtime,/v231MetricTruthUiInjectionPatch/,'owner HTML injector must be installed before server responses');
 assert.match(runtime,/30_000/,'background cache prime must wait until first paint has settled');
-console.log('[V237] dashboard single-owner + exact homepage/business trends + no-legacy-heavy-read source smoke passed');
+console.log('[V237] dashboard single-owner + exact homepage/business/PP-PV trends + no-legacy-heavy-read source smoke passed');
