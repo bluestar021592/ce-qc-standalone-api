@@ -1,6 +1,6 @@
 import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1';
+const PATCH_ID = '2026-08-22-v235-ccsl-pod-lock-fact-repair-interactive-guard-v2';
 const CCSL_TYPES = ['CE', 'CEAF', 'TBKH', 'ALI1688'];
 
 function latestCompletedBatch(db) {
@@ -77,6 +77,15 @@ function upsertPodFact(db, batch, row, now) {
 }
 
 export function repairLatestCcslPodLockFacts(database = null) {
+  // bootstrap.js invokes this legacy repair without passing a DB. On the large
+  // production DB that synchronous loop can block every dashboard request for
+  // roughly a minute after the HTTP server is already listening. Interactive
+  // startup skips only that automatic call; explicit maintenance callers can
+  // still pass a DB instance and run the same repair logic unchanged.
+  if (!database && String(process.env.CE_QC_SKIP_STARTUP_POD_REPAIR || '') === '1') {
+    return { ok: true, skipped: true, repaired: 0, updated: 0, reason: 'INTERACTIVE_FIRST_STARTUP_SKIP' };
+  }
+
   const db = database || getDb();
   const batch = latestCompletedBatch(db);
   if (!batch) return { ok: true, repaired: 0, updated: 0, reason: 'NO_COMPLETED_UNIFIED_BATCH' };
