@@ -1,0 +1,23 @@
+const fs=require('fs');
+const assert=require('assert/strict');
+const read=p=>fs.readFileSync(p,'utf8');
+const live=read('public/v234-dashboard-live.js');
+const guard=read('public/v237-dashboard-owner-guard.js');
+const drill=read('public/v58-drilldown-runtime.js');
+const inject=read('src/v231MetricTruthUiInjectionPatch.js');
+const route=read('src/v236DashboardCurrentRoutePatch.js');
+const trend=read('src/v237DashboardTrendRead.js');
+
+assert.match(live,/__CE_QC_V237_DASHBOARD_OWNER__/,'V237 live client must declare single dashboard ownership');
+assert.match(live,/querySelectorAll\?\.\('#v230MetricTruthPanel'\)/,'V237 must actively remove the retired duplicate trend panel');
+assert.match(live,/x\[key\]===null\|\|x\[key\]===undefined\?null/,'missing trend values must remain null rather than becoming zero');
+assert.match(live,/nullablePct\(x\.firstRate\)/,'missing first-attempt evidence must display dash, not 0.00%');
+assert.match(guard,/\/api\\\/v27\\\/trends/,'legacy V232 trend network read must be retired on owned business pages');
+assert.match(guard,/\/api\\\/v55\\\/reconciliation/,'legacy passive reconciliation network read must be retired on owned business pages');
+assert.match(drill,/__CE_QC_V237_DASHBOARD_OWNER__/,'legacy drilldown observer must skip passive reconciliation on V237 pages');
+assert.match(inject,/v234-dashboard-live\.js\?v=20260822-v237-1/,'browser must receive cache-busted V237 live client');
+assert.match(inject,/v237-dashboard-owner-guard\.js\?v=20260822-v237-1/,'browser must receive V237 ownership guard');
+assert.match(route,/path==='\/api\/v234\/trends'/,'V237 route patch must own the V234 trend endpoint');
+assert.match(route,/path==='\/api\/shopee\/state'/,'V237 route patch must pre-handle old compact SHOPEE state reads');
+assert.match(trend,/V237_COMPLETED_SNAPSHOT_DIRECT_OR_EXACT_CACHE/,'trend reader must use completed snapshot/cache truth');
+console.log('[V237] dashboard single-owner + no-legacy-heavy-read source smoke passed');
