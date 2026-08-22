@@ -1,12 +1,16 @@
 import { getDb } from './db.js';
 
-export const V236_DASHBOARD_CURRENT_READ_ID='2026-08-22-v236-fresh-exact-dashboard-read-v1';
+export const V236_DASHBOARD_CURRENT_READ_ID='2026-08-22-v237-fresh-exact-dashboard-read-v2';
 export const V236_TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
+const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
+const SUMMARY_CACHE_MS=5_000;
+const summaryCache=new Map();
 const n=value=>Number.isFinite(Number(value))?Number(value):0;
 const pct=(value,total)=>total?Number((n(value)*100/n(total)).toFixed(2)):0;
 function safeJson(value){try{return value&&typeof value==='object'?value:(JSON.parse(String(value||'{}'))||{});}catch{return{};}}
 function firstNumber(obj,keys){for(const key of keys){if(obj&&obj[key]!==undefined&&obj[key]!==null&&Number.isFinite(Number(obj[key])))return Number(obj[key]);}return 0;}
-function blank(type,date=''){return{businessType:type,reportDate:date,total:0,pod:0,returned:0,cancelled:0,unresolved:0,pending1:0,pending2:0,pending3:0,pendingNonContinuous:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,delivery:0,deliveryStay:0,provinceOpen:0,attempt1:0,attempt2:0,attempt3:0,firstRate:0,ready:false};}
+function blank(type,date=''){return{businessType:type,reportDate:date,total:0,pod:0,returned:0,cancelled:0,unresolved:0,pending1:0,pending2:0,pending3:0,pendingNonContinuous:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,delivery:0,deliveryStay:0,provinceOpen:0,attempt1:0,attempt2:0,attempt3:0,firstRate:null,ready:false,regions:{}};}
 function addMetric(out,m={}){
   out.total+=firstNumber(m,['total','today','pnh','todayPnh','totalMonitored']);
   out.pod+=firstNumber(m,['pod','todayPod','scanPod','signed']);
@@ -25,7 +29,9 @@ function finish(out){
   out.unresolved=Math.max(0,out.total-out.pod-out.returned-out.cancelled);
   out.podRate=pct(out.pod,out.total);out.returnRate=pct(out.returned,out.total);out.cancelRate=pct(out.cancelled,out.total);out.unresolvedRate=pct(out.unresolved,out.total);
   out.pendingRate=pct(out.pending1,out.total);out.deliveryRate=pct(out.deliveryStay||out.delivery,out.total);out.ocRate=pct(out.oc1,out.total);out.closureRate=pct(out.pod+out.returned+out.cancelled,out.total);
-  out.firstRate=pct(out.attempt1,out.pod||out.total);return out;
+  const knownAttempts=out.attempt1+out.attempt2+out.attempt3;
+  out.firstRate=knownAttempts>0?pct(out.attempt1,out.pod||knownAttempts):null;
+  return out;
 }
 function latestBatch(reportDate=''){
   const db=getDb(),date=String(reportDate||'').slice(0,10);
@@ -39,25 +45,123 @@ function importedCounts(snapshotId=''){
 function exactCacheRows(date,snapshotId){
   try{return getDb().prepare(`SELECT businessType,regionCode,metricsJson,snapshotId,refreshedAt FROM dashboard_daily_cache WHERE reportDate=? AND snapshotId=? AND snapshotStatus='COMPLETED' ORDER BY businessType,regionCode`).all(date,snapshotId);}catch{return[];}
 }
+function directCcslRows(date,snapshotId){
+  return getDb().prepare(`
+    WITH valid AS (
+      SELECT u.businessType,u.shipmentCode,u.regionCode
+      FROM unified_import_rows u
+      WHERE u.snapshotId=? AND u.reportDate=?
+        AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')
+    )
+    SELECT v.businessType,'' AS regionCode,COUNT(*) AS total,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=0 AND (COALESCE(json_extract(f.rawJson,'$."退回状态"'),'')='已退回' OR COALESCE(f.primaryCategory,f.category,'') LIKE '%退回%') THEN 1 ELSE 0 END) AS returned,
+      0 AS cancelled,
+      SUM(CASE WHEN COALESCE(f.pendingDays,0)>=1 THEN 1 ELSE 0 END) AS pending1,
+      SUM(CASE WHEN COALESCE(f.pendingDays,0)>=2 THEN 1 ELSE 0 END) AS pending2,
+      SUM(CASE WHEN COALESCE(f.pendingDays,0)>=3 THEN 1 ELSE 0 END) AS pending3,
+      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续' THEN 1 ELSE 0 END) AS pendingNonContinuous,
+      SUM(CASE WHEN COALESCE(f.ocDays,0)>=1 THEN 1 ELSE 0 END) AS oc1,
+      SUM(CASE WHEN COALESCE(f.ocDays,0)>=2 THEN 1 ELSE 0 END) AS oc2,
+      SUM(CASE WHEN COALESCE(f.ocDays,0)>=3 THEN 1 ELSE 0 END) AS oc3,
+      SUM(CASE WHEN COALESCE(f.cycleCountDays,0)>=2 THEN 1 ELSE 0 END) AS cycle2,
+      SUM(CASE WHEN COALESCE(f.deliveringDays,0)>=1 THEN 1 ELSE 0 END) AS delivery1,
+      SUM(CASE WHEN COALESCE(f.primaryCategory,f.category,'') LIKE '%入库无扫描%' THEN 1 ELSE 0 END) AS inboundNoScan,
+      SUM(CASE WHEN UPPER(COALESCE(v.regionCode,''))='PV' AND COALESCE(f.isPod,0)=0 THEN 1 ELSE 0 END) AS provinceOpen,
+      0 AS attempt1,0 AS attempt2,0 AS attempt3
+    FROM valid v
+    LEFT JOIN final_rows f ON f.shipmentCode=v.shipmentCode AND f.reportDate=?
+    GROUP BY v.businessType
+    ORDER BY v.businessType
+  `).all(snapshotId,date,date).map(row=>({...row,metricsJson:JSON.stringify(row),snapshotId,refreshedAt:'DIRECT_NORMALIZED'}));
+}
+function directShopeeRows(date,snapshotId){
+  return getDb().prepare(`
+    WITH valid AS (
+      SELECT u.businessType,u.shipmentCode,
+        CASE WHEN UPPER(COALESCE(u.regionCode,''))='PP' THEN 'PP'
+             WHEN UPPER(COALESCE(u.regionCode,''))='PV' THEN 'PV'
+             ELSE 'UNKNOWN' END AS regionCode
+      FROM unified_import_rows u
+      WHERE u.snapshotId=? AND u.reportDate=?
+        AND u.businessType IN ('SHOPEECN','SHOPEEVN')
+    )
+    SELECT v.businessType,v.regionCode,COUNT(*) AS total,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END) AS pod,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=0 AND (COALESCE(json_extract(f.rawJson,'$."退回状态"'),'')='已退回' OR COALESCE(f.primaryCategory,'') LIKE '%退回%' OR COALESCE(json_extract(f.rawJson,'$.trackingEventDescZh'),'') LIKE '%1203--派送异常%') THEN 1 ELSE 0 END) AS returned,
+      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."订单取消"'),'')='是' OR COALESCE(f.primaryCategory,'') LIKE '%取消%' THEN 1 ELSE 0 END) AS cancelled,
+      SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=1 THEN 1 ELSE 0 END) AS pending1,
+      SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=2 THEN 1 ELSE 0 END) AS pending2,
+      SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."Pending次数"') AS INTEGER),CAST(json_extract(f.rawJson,'$."Pending当前次数"') AS INTEGER),0)>=3 THEN 1 ELSE 0 END) AS pending3,
+      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."Pending连续性"'),'')='不连续' THEN 1 ELSE 0 END) AS pendingNonContinuous,
+      SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=1 THEN 1 ELSE 0 END) AS oc1,
+      SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=2 THEN 1 ELSE 0 END) AS oc2,
+      SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),0)>=3 THEN 1 ELSE 0 END) AS oc3,
+      SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."盘点天数"') AS INTEGER),0)>=2 THEN 1 ELSE 0 END) AS cycle2,
+      SUM(CASE WHEN COALESCE(json_extract(f.rawJson,'$."入库无扫描节点"'),'')='是' OR COALESCE(f.primaryCategory,'') LIKE '%入库无扫描%' THEN 1 ELSE 0 END) AS inboundNoScan,
+      SUM(CASE WHEN COALESCE(CAST(json_extract(f.rawJson,'$."派送中停留天数"') AS INTEGER),0)>0 OR COALESCE(f.primaryCategory,'')='派送中停留' THEN 1 ELSE 0 END) AS deliveryStay,
+      SUM(CASE WHEN v.regionCode='PV' AND COALESCE(f.isPod,0)=0 THEN 1 ELSE 0 END) AS provinceOpen,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=1 AND COALESCE(f.podAttemptNo,CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0)=1 THEN 1 ELSE 0 END) AS attempt1,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=1 AND COALESCE(f.podAttemptNo,CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0)=2 THEN 1 ELSE 0 END) AS attempt2,
+      SUM(CASE WHEN COALESCE(f.isPod,0)=1 AND COALESCE(f.podAttemptNo,CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0)>=3 THEN 1 ELSE 0 END) AS attempt3
+    FROM valid v
+    LEFT JOIN business_final_rows f ON f.businessType='SHOPEE' AND f.shipmentCode=v.shipmentCode AND f.reportDate=?
+    GROUP BY v.businessType,v.regionCode
+    ORDER BY v.businessType,v.regionCode
+  `).all(snapshotId,date,date).map(row=>({...row,metricsJson:JSON.stringify(row),snapshotId,refreshedAt:'DIRECT_NORMALIZED'}));
+}
+function directRows(date,snapshotId){return[...directCcslRows(date,snapshotId),...directShopeeRows(date,snapshotId)];}
+function rowsReadyForAllTypes(rows=[]){return new Set(rows.map(row=>String(row.businessType||'').toUpperCase()).filter(type=>V236_TYPES.includes(type))).size===V236_TYPES.length;}
+function metricFromRows(type,date,rows,importedTotal=0){
+  const out=blank(type,date);const matching=rows.filter(row=>String(row.businessType||'').toUpperCase()===type);
+  if(matching.length){
+    for(const row of matching)addMetric(out,safeJson(row.metricsJson||row));
+    out.ready=true;out.snapshotId=matching[0]?.snapshotId||'';out.refreshedAt=matching.map(row=>row.refreshedAt||'').sort().at(-1)||'';
+    if(type.startsWith('SHOPEE')){
+      for(const code of ['PP','PV','UNKNOWN']){
+        const regionRows=matching.filter(row=>String(row.regionCode||'').toUpperCase()===code);
+        const region=blank(type,date);for(const row of regionRows)addMetric(region,safeJson(row.metricsJson||row));region.ready=regionRows.length>0;out.regions[code]=finish(region);
+      }
+    }
+  }else out.total=n(importedTotal);
+  return finish(out);
+}
 function whpp(date){
   const out=blank('WHPP',date);let payload={};
   try{const row=getDb().prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);if(row){payload={...safeJson(row.summaryJson)};if(payload.total===undefined)payload.total=n(row.totalCount);}}catch{}
   try{const row=getDb().prepare("SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);if(row)payload={...payload,...safeJson(row.summaryJson)};}catch{}
   addMetric(out,payload);out.ready=out.total>0||Object.keys(payload).length>0;return finish(out);
 }
+function mergeMetricList(type,date,list=[]){const out=blank(type,date);for(const item of list)addMetric(out,item||{});out.ready=list.some(item=>item?.ready);return finish(out);}
+function mergeRegions(metrics=[]){
+  const out={};for(const code of ['PP','PV','UNKNOWN'])out[code]=mergeMetricList('SHOPEE','',metrics.map(m=>m?.regions?.[code]).filter(Boolean));return out;
+}
 export function readV236CurrentSummary(reportDate=''){
-  const batch=latestBatch(reportDate);const date=batch?.reportDate||String(reportDate||'').slice(0,10);const counts=importedCounts(batch?.snapshotId||'');const rows=batch?.snapshotStatus==='COMPLETED'?exactCacheRows(date,batch.snapshotId):[];
-  const business={};
-  for(const type of V236_TYPES){
-    const out=blank(type,date);const matching=rows.filter(row=>String(row.businessType||'').toUpperCase()===type);
-    if(matching.length){for(const row of matching)addMetric(out,safeJson(row.metricsJson));out.ready=true;out.snapshotId=batch?.snapshotId||'';out.refreshedAt=matching.map(row=>row.refreshedAt||'').sort().at(-1)||'';}
-    else out.total=n(counts[type]);
-    business[type]=finish(out);
+  const batch=latestBatch(reportDate);const date=batch?.reportDate||String(reportDate||'').slice(0,10);const key=`${date}|${batch?.snapshotId||''}|${batch?.snapshotStatus||''}`;const hit=summaryCache.get(key);
+  if(hit&&Date.now()-hit.at<SUMMARY_CACHE_MS)return hit.value;
+  const counts=importedCounts(batch?.snapshotId||'');let rows=[];let source='IMPORT_ONLY';
+  if(batch?.snapshotStatus==='COMPLETED'){
+    rows=exactCacheRows(date,batch.snapshotId);
+    if(rowsReadyForAllTypes(rows))source='EXACT_DASHBOARD_CACHE';
+    else{rows=directRows(date,batch.snapshotId);source='DIRECT_NORMALIZED_COMPLETED_SNAPSHOT';}
   }
-  return{ok:true,readId:V236_DASHBOARD_CURRENT_READ_ID,reportDate:date,snapshotId:batch?.snapshotId||'',snapshotStatus:batch?.snapshotStatus||'',business,whpp:whpp(date),cacheRowCount:rows.length,readyBusinessCount:Object.values(business).filter(item=>item.ready).length};
+  const business={};for(const type of V236_TYPES)business[type]=metricFromRows(type,date,rows,counts[type]);
+  const result={ok:true,readId:V236_DASHBOARD_CURRENT_READ_ID,reportDate:date,snapshotId:batch?.snapshotId||'',snapshotStatus:batch?.snapshotStatus||'',business,whpp:whpp(date),cacheRowCount:source==='EXACT_DASHBOARD_CACHE'?rows.length:0,readSource:source,readyBusinessCount:Object.values(business).filter(item=>item.ready).length};
+  if(result.readyBusinessCount===V236_TYPES.length)summaryCache.set(key,{at:Date.now(),value:result});
+  return result;
 }
 export function stateFromV236Metric(type,m={},summary={}){
-  const common={viewBusinessType:type,reportDate:summary.reportDate||'',snapshotId:summary.snapshotId||'',snapshotStatus:m.ready?'COMPLETED':(summary.snapshotStatus||'IMPORTED'),dailyReportReady:Boolean(m.total),total:m.total,pnhBills:[],dailyParseRows:[],finalRows:[],scanResults:[],trackResults:[],trackEvents:[],carryBills:[],nextCarryBills:[],podLocks:[],historySummary:[],dailyParseSummary:{totalRecognized:m.total,pnh:m.total},processing:{running:false,paused:false,phase:m.ready?'处理完成':'状态缓存待完成'},_v236FreshExact:true};
-  if(type.startsWith('SHOPEE')){const group=type==='SHOPEECN'?'CN':'VN';const metrics={...m,dispatchAttempt1:m.attempt1,dispatchAttempt2:m.attempt2,dispatchAttempt3:m.attempt3,dispatchAttempt1Rate:pct(m.attempt1,m.pod||m.total),dispatchAttempt2Rate:pct(m.attempt2,m.pod||m.total),dispatchAttempt3Rate:pct(m.attempt3,m.pod||m.total),firstAttemptRate:m.firstRate};return{...common,businessType:'SHOPEE',dashboard:{businessType:'SHOPEE',reportDate:common.reportDate,metrics,recipientGroups:{ALL:{metrics,regions:{}},[group]:{metrics,regions:{}}},regions:{},routing:{},dashboardRows:[]},detailTabs:{all:{rows:[],total:m.total}}};}
+  const common={viewBusinessType:type,reportDate:summary.reportDate||'',snapshotId:summary.snapshotId||'',snapshotStatus:m.ready?'COMPLETED':(summary.snapshotStatus||'IMPORTED'),dailyReportReady:Boolean(m.total),total:m.total,pnhBills:[],dailyParseRows:[],finalRows:[],scanResults:[],trackResults:[],trackEvents:[],carryBills:[],nextCarryBills:[],podLocks:[],historySummary:[],dailyParseSummary:{totalRecognized:m.total,pnh:m.total},processing:{running:false,paused:false,phase:m.ready?'处理完成':'状态缓存待完成'},_v237FreshExact:true};
+  if(type.startsWith('SHOPEE')){const group=type==='SHOPEECN'?'CN':'VN';const metrics={...m,dispatchAttempt1:m.attempt1,dispatchAttempt2:m.attempt2,dispatchAttempt3:m.attempt3,dispatchAttempt1Rate:pct(m.attempt1,m.pod||m.total),dispatchAttempt2Rate:pct(m.attempt2,m.pod||m.total),dispatchAttempt3Rate:pct(m.attempt3,m.pod||m.total),firstAttemptRate:m.firstRate};const regions=m.regions||{};return{...common,businessType:'SHOPEE',dashboard:{businessType:'SHOPEE',reportDate:common.reportDate,metrics,recipientGroups:{ALL:{metrics,regions},[group]:{metrics,regions}},regions,routing:{},dashboardRows:[]},detailTabs:{all:{rows:[],total:m.total}}};}
   return{...common,businessType:type,dashboard:{pnh:m.total,totalMonitored:m.total,todayPod:m.pod,podRate:m.podRate,abnormalCount:m.unresolved,categories:{pendingTotal:m.pending1,ocTotal:m.oc1},metrics:{...m},routing:{}},detailTabs:{allData:{rows:[],total:m.total}}};
+}
+export function aggregateV236State(scope='CCSL',summary=readV236CurrentSummary()){
+  const normalized=String(scope||'CCSL').toUpperCase();
+  if(normalized==='SHOPEE'){
+    const cn=summary.business.SHOPEECN||blank('SHOPEECN',summary.reportDate),vn=summary.business.SHOPEEVN||blank('SHOPEEVN',summary.reportDate);const all=mergeMetricList('SHOPEE',summary.reportDate,[cn,vn]);all.regions=mergeRegions([cn,vn]);
+    const common={businessType:'SHOPEE',viewBusinessType:'SHOPEE',reportDate:summary.reportDate,snapshotId:summary.snapshotId,snapshotStatus:all.ready?'COMPLETED':summary.snapshotStatus,dailyReportReady:Boolean(all.total),pnhBills:[],dailyParseRows:[],finalRows:[],scanResults:[],trackResults:[],trackEvents:[],carryBills:[],nextCarryBills:[],podLocks:[],historySummary:[],dailyParseSummary:{totalRecognized:all.total,groupCounts:{CN:cn.total,VN:vn.total}},processing:{running:false,paused:false,phase:all.ready?'处理完成':'状态缓存待完成'},_v237FreshExact:true};
+    return{...common,dashboard:{businessType:'SHOPEE',reportDate:summary.reportDate,metrics:all,recipientGroups:{ALL:{metrics:all,regions:all.regions},CN:{metrics:cn,regions:cn.regions||{}},VN:{metrics:vn,regions:vn.regions||{}}},regions:all.regions,routing:{},dashboardRows:[]},detailTabs:{all:{rows:[],total:all.total}}};
+  }
+  const parts=CCSL_TYPES.map(type=>summary.business[type]||blank(type,summary.reportDate));const all=mergeMetricList('CCSL',summary.reportDate,parts);
+  return{businessType:'CCSL',viewBusinessType:'CCSL',reportDate:summary.reportDate,snapshotId:summary.snapshotId,snapshotStatus:all.ready?'COMPLETED':summary.snapshotStatus,dailyReportReady:Boolean(all.total),pnhBills:[],dailyParseRows:[],finalRows:[],scanResults:[],trackResults:[],trackEvents:[],carryBills:[],nextCarryBills:[],podLocks:[],historySummary:[],dailyParseSummary:{totalRecognized:all.total,pnh:all.total},processing:{running:false,paused:false,phase:all.ready?'处理完成':'状态缓存待完成'},dashboard:{pnh:all.total,totalMonitored:all.total,todayPod:all.pod,podRate:all.podRate,abnormalCount:all.unresolved,categories:{pendingTotal:all.pending1,ocTotal:all.oc1},metrics:all,routing:{}},detailTabs:{allData:{rows:[],total:all.total}},_v237FreshExact:true};
 }
