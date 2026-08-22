@@ -41,37 +41,42 @@ function ensureCacheSchema(db = getDb()) {
 export function latestCompletedDashboardBatch(reportDate = '') {
   const db = getDb();
   const date = String(reportDate || '').trim();
-  if (date) {
-    return db.prepare(`
-      SELECT b.batchId,b.snapshotId,b.reportDate,b.createdAt,s.status AS snapshotStatus
-      FROM unified_import_batches b
-      INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-      WHERE b.status='VALID' AND s.status='COMPLETED' AND b.reportDate=?
-      ORDER BY b.createdAt DESC,b.batchId DESC LIMIT 1
-    `).get(date) || null;
-  }
-  return db.prepare(`
-    SELECT b.batchId,b.snapshotId,b.reportDate,b.createdAt,s.status AS snapshotStatus
-    FROM unified_import_batches b
-    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-    WHERE b.status='VALID' AND s.status='COMPLETED'
-    ORDER BY b.reportDate DESC,b.createdAt DESC,b.batchId DESC LIMIT 1
-  `).get() || null;
+  const row = date
+    ? db.prepare(`
+        SELECT b.batchId,b.snapshotId,b.reportDate,b.createdAt,COALESCE(s.status,'') AS snapshotStatus
+        FROM unified_import_batches b
+        LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+        WHERE b.status='VALID' AND b.reportDate=?
+        ORDER BY b.createdAt DESC,b.batchId DESC LIMIT 1
+      `).get(date)
+    : db.prepare(`
+        SELECT b.batchId,b.snapshotId,b.reportDate,b.createdAt,COALESCE(s.status,'') AS snapshotStatus
+        FROM unified_import_batches b
+        LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+        WHERE b.status='VALID'
+        ORDER BY b.reportDate DESC,b.createdAt DESC,b.batchId DESC LIMIT 1
+      `).get();
+  return row && String(row.snapshotStatus || '').toUpperCase() === 'COMPLETED' ? row : null;
 }
 
 export function latestCompletedDashboardDate() {
-  return latestCompletedDashboardBatch()?.reportDate || '';
+  return recentCompletedDashboardDates(1)[0] || '';
 }
 
 export function recentCompletedDashboardDates(limit = 7) {
   const max = Math.max(1,Math.min(30,Number(limit)||7));
   return getDb().prepare(`
-    SELECT b.reportDate,MAX(b.createdAt) AS createdAt
-    FROM unified_import_batches b
-    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-    WHERE b.status='VALID' AND s.status='COMPLETED'
-    GROUP BY b.reportDate
-    ORDER BY b.reportDate DESC
+    WITH ranked AS (
+      SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,COALESCE(s.status,'') AS snapshotStatus,
+             ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.batchId DESC) AS rn
+      FROM unified_import_batches b
+      LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+      WHERE b.status='VALID'
+    )
+    SELECT reportDate
+    FROM ranked
+    WHERE rn=1 AND UPPER(snapshotStatus)='COMPLETED'
+    ORDER BY reportDate DESC
     LIMIT ?
   `).all(max).map(row=>String(row.reportDate||'')).filter(Boolean);
 }
@@ -174,7 +179,7 @@ export function refreshV235CurrentDashboardCacheDate(reportDate = '', options = 
   const db = getDb();
   ensureCacheSchema(db);
   const batch = latestCompletedDashboardBatch(reportDate);
-  if (!batch) return { ok:true,skipped:true,reason:'NO_COMPLETED_SNAPSHOT',reportDate:String(reportDate||'') };
+  if (!batch) return { ok:true,skipped:true,reason:'LATEST_VALID_SNAPSHOT_NOT_COMPLETED',reportDate:String(reportDate||'') };
   const fingerprint = sourceFingerprint(db,batch);
   const marker = db.prepare('SELECT snapshotId,sourceFingerprint FROM dashboard_cache_dates WHERE reportDate=?').get(batch.reportDate);
   if (!options.force && marker?.snapshotId === batch.snapshotId && marker?.sourceFingerprint === fingerprint) {
