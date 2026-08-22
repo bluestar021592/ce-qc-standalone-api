@@ -37,6 +37,9 @@ must(uiSource.includes('cacheOnly'), 'live dashboard must use cache-only deep tr
 const cardSource=fs.readFileSync('public/v232-card-percentages.js','utf8');
 new Function(cardSource);
 must(cardSource.includes('占本业务'), 'numeric-card percentage runtime token missing');
+const chartSource=fs.readFileSync('public/dashboard-chart-v18.js','utf8');
+new Function(chartSource);
+must(chartSource.includes('短区间百分比直接标在每日节点上'), 'daily percentage chart-label token missing');
 
 const formula = internalHyperlinkFormulaForV200('POD明细', 1718, 1115);
 must(formula === 'HYPERLINK("#\'POD明细\'!A1718",1115)', 'WPS-safe internal hyperlink must match reference workbook formula syntax');
@@ -49,4 +52,4 @@ must(V230_METRIC_TRUTH_ROUTE_ID === '2026-08-22-v230-daily-metric-truth-route-v1
 must(V232_DEEP_TRUTH_CACHE_ID === '2026-08-22-v232-deep-truth-explicit-cache-v1', 'unexpected V232 deep-cache version');
 must(V232_FAST_DAILY_TREND_ID === '2026-08-22-v232-fast-seven-business-daily-trends-v1', 'unexpected V232 fast trend version');
 must(V231_METRIC_TRUTH_UI_INJECTION_ID === '2026-08-22-v231-metric-truth-ui-injection-v1', 'unexpected V231 metric truth UI version');
-console.log('[V200/V230/V232] fast live trends + explicit deep truth + numeric percentages + real failed-delivery-cycle attempt smoke passed');
+console.log('[V200/V230/V232] fast live trends + explicit deep truth + numeric percentages + per-day chart labels + real failed-delivery-cycle attempt smoke passed');
