@@ -1,3 +1,5 @@
+import './v234DashboardLiveTruthPatch.js';
+
 const PATCH_ID = '2026-08-21-v206-interactive-first-runtime-v1';
 
 // The local database is very large. Dashboard cache warming competes with normal
