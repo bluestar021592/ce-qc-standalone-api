@@ -1,15 +1,17 @@
 (function installInstantBusinessNavigationV166(global){
   if(global.__CE_QC_V109_INSTANT_BUSINESS_NAV__)return;
-  const VERSION='2026-08-21-v205-ceaf-prepaint-navigation-v1';
+  const VERSION='2026-08-23-v239-single-owner-navigation-v1';
   const GOLIVE_COMPAT_VERSION='2026-08-17-v166-summary-first-navigation-throttle-v1';
   const original=global.hydratePageData;
   if(typeof original!=='function')return;
   const pending=new Map();
   const lastHydratedAt=new Map();
   const typeByPage={ce:'CE',ceaf:'CEAF',tbkh:'TBKH',ali1688:'ALI1688',shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'};
+  const OWNER_PAGES=new Set(['home','ce','ceaf','tbkh','ali1688','whpp','shopeecn','shopeevn']);
   const MIN_BACKGROUND_HYDRATE_MS=60_000;
   const FAST_SUMMARY_CACHE='ce_qc_v89_instant_dashboard';
   const CEAF_EXACT_CACHE='ce_qc_v205_ceaf_exact_state';
+  const ownerActive=()=>Boolean(global.__CE_QC_V237_DASHBOARD_OWNER__);
 
   function currentSelectedDate(){
     try{return String(historyModeDate||unifiedImportState?.reportDate||appState?.reportDate||shopeeState?.reportDate||'').slice(0,10);}catch{return '';}
@@ -86,6 +88,7 @@
     return Array.isArray(state.pnhBills)?state.pnhBills.length:0;
   }
   function seedCeafBeforeNavigation(){
+    if(ownerActive())return false;
     if(typeof businessStates==='undefined'||dashboardPeriodMode)return false;
     const date=currentSelectedDate();
     if(!date)return false;
@@ -116,6 +119,7 @@
     return String(page||'').toLowerCase()==='ceaf'?seedCeafBeforeNavigation():false;
   }
   async function hydrateCeafFast(){
+    if(ownerActive())return {ok:true,skipped:true,source:'V239_SINGLE_DASHBOARD_OWNER'};
     const date=currentSelectedDate();
     const snapshotId=selectedSnapshotId();
     const params=new URLSearchParams();
@@ -133,7 +137,8 @@
     return payload;
   }
   function backgroundHydrate(page,force=false){
-    const target=String(page||'');
+    const target=String(page||'').toLowerCase();
+    if(ownerActive()&&OWNER_PAGES.has(target))return Promise.resolve({ok:true,skipped:true,source:'V239_SINGLE_DASHBOARD_OWNER'});
     const key=snapshotKey(target);
     if(pending.has(key))return pending.get(key);
     if(!force&&Date.now()-Number(lastHydratedAt.get(key)||0)<MIN_BACKGROUND_HYDRATE_MS){
@@ -153,8 +158,12 @@
     return promise;
   }
 
-  global.hydratePageData=function v205SummaryFirstHydrate(page){
-    const target=String(page||'');
+  global.hydratePageData=function v239SingleOwnerHydrate(page){
+    const target=String(page||'').toLowerCase();
+    if(ownerActive()&&OWNER_PAGES.has(target)){
+      if(global.__CE_QC_V108_ROUTE_LAZY__?.ensurePage)void global.__CE_QC_V108_ROUTE_LAZY__.ensurePage(target);
+      return Promise.resolve({ok:true,deferred:true,source:'V239_SINGLE_DASHBOARD_OWNER'});
+    }
     const seeded=seedCeafFromFastSummary(target);
     if(seeded&&String(typeof currentPage!=='undefined'?currentPage:'').toLowerCase()==='ceaf'&&typeof global.renderAll==='function')global.renderAll();
     if(target==='ceaf'&&!dashboardPeriodMode){
@@ -173,13 +182,14 @@
   const originalNavigatePage=global.navigatePage;
   if(typeof originalNavigatePage==='function'&&!originalNavigatePage.__v205CeafPrepaint){
     const wrappedNavigatePage=function(page,...args){
-      if(String(page||'').toLowerCase()==='ceaf')seedCeafBeforeNavigation();
+      if(!ownerActive()&&String(page||'').toLowerCase()==='ceaf')seedCeafBeforeNavigation();
       return originalNavigatePage.call(this,page,...args);
     };
     wrappedNavigatePage.__v205CeafPrepaint=true;
     global.navigatePage=wrappedNavigatePage;
   }
   document.addEventListener('click',event=>{
+    if(ownerActive())return;
     const side=event.target?.closest?.('.side-link[data-page="ceaf"]');
     const card=event.target?.closest?.('.v18-business-card');
     const cardLabel=String(card?.querySelector?.('span')?.textContent||'');
@@ -187,6 +197,6 @@
   },true);
 
   document.addEventListener('ce-qc-run-complete',()=>{lastHydratedAt.clear();try{localStorage.removeItem(CEAF_EXACT_CACHE);}catch{}});
-  global.__CE_QC_V109_INSTANT_BUSINESS_NAV__={version:VERSION,compatVersion:GOLIVE_COMPAT_VERSION,pending:()=>pending.size,canUseSummary,lastHydratedAt,backgroundHydrate,seedCeafFromFastSummary,seedCeafBeforeNavigation,hydrateCeafFast};
-  console.info('[CE-QC][V205_INSTANT_BUSINESS_NAV]',VERSION);
+  global.__CE_QC_V109_INSTANT_BUSINESS_NAV__={version:VERSION,compatVersion:GOLIVE_COMPAT_VERSION,pending:()=>pending.size,canUseSummary,lastHydratedAt,backgroundHydrate,seedCeafFromFastSummary,seedCeafBeforeNavigation,hydrateCeafFast,ownerActive};
+  console.info('[CE-QC][V239_INSTANT_BUSINESS_NAV]',VERSION,'legacy dashboard hydration retired while V237/V238 owner is active');
 })(window);
