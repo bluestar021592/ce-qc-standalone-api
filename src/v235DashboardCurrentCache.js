@@ -3,6 +3,7 @@ import { getDb } from './db.js';
 export const V235_DASHBOARD_CURRENT_CACHE_ID = '2026-08-22-v235-exact-current-dashboard-cache-v1';
 const CCSL_TYPES = ['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE_TYPES = ['SHOPEECN','SHOPEEVN'];
+const REQUIRED_TYPES = [...CCSL_TYPES,...SHOPEE_TYPES];
 
 const nowIso = () => new Date().toISOString();
 const n = value => Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -60,6 +61,19 @@ export function latestCompletedDashboardBatch(reportDate = '') {
 
 export function latestCompletedDashboardDate() {
   return latestCompletedDashboardBatch()?.reportDate || '';
+}
+
+export function recentCompletedDashboardDates(limit = 7) {
+  const max = Math.max(1,Math.min(30,Number(limit)||7));
+  return getDb().prepare(`
+    SELECT b.reportDate,MAX(b.createdAt) AS createdAt
+    FROM unified_import_batches b
+    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID' AND s.status='COMPLETED'
+    GROUP BY b.reportDate
+    ORDER BY b.reportDate DESC
+    LIMIT ?
+  `).all(max).map(row=>String(row.reportDate||'')).filter(Boolean);
 }
 
 function sourceFingerprint(db, batch) {
@@ -164,13 +178,21 @@ export function refreshV235CurrentDashboardCacheDate(reportDate = '', options = 
   const fingerprint = sourceFingerprint(db,batch);
   const marker = db.prepare('SELECT snapshotId,sourceFingerprint FROM dashboard_cache_dates WHERE reportDate=?').get(batch.reportDate);
   if (!options.force && marker?.snapshotId === batch.snapshotId && marker?.sourceFingerprint === fingerprint) {
-    const count = n(db.prepare('SELECT COUNT(*) AS c FROM dashboard_daily_cache WHERE reportDate=? AND snapshotId=? AND snapshotStatus=\'COMPLETED\'').get(batch.reportDate,batch.snapshotId)?.c);
-    if (count > 0) return { ok:true,skipped:true,reason:'CURRENT_CACHE_READY',reportDate:batch.reportDate,snapshotId:batch.snapshotId,rowCount:count };
+    const readyTypes = n(db.prepare(`
+      SELECT COUNT(DISTINCT businessType) AS c
+      FROM dashboard_daily_cache
+      WHERE reportDate=? AND snapshotId=? AND snapshotStatus='COMPLETED'
+        AND businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
+    `).get(batch.reportDate,batch.snapshotId)?.c);
+    if (readyTypes === REQUIRED_TYPES.length) {
+      const count = n(db.prepare("SELECT COUNT(*) AS c FROM dashboard_daily_cache WHERE reportDate=? AND snapshotId=? AND snapshotStatus='COMPLETED'").get(batch.reportDate,batch.snapshotId)?.c);
+      return { ok:true,skipped:true,reason:'CURRENT_CACHE_READY',reportDate:batch.reportDate,snapshotId:batch.snapshotId,rowCount:count,readyTypes };
+    }
   }
 
   const rows = [...ccslRows(db,batch),...shopeeRows(db,batch)];
   const present = new Set(rows.map(row => String(row.businessType || '').toUpperCase()));
-  for (const type of [...CCSL_TYPES,...SHOPEE_TYPES]) {
+  for (const type of REQUIRED_TYPES) {
     if (!present.has(type)) rows.push({ businessType:type, regionCode:'', total:0, pod:0, returned:0, cancelled:0, pending1:0, pending2:0, pending3:0, pendingNonContinuous:0, oc1:0, oc2:0, oc3:0, cycle2:0, inboundNoScan:0, delivery1:0, deliveryStay:0, provinceOpen:0, attempt1:0, attempt2:0, attempt3:0 });
   }
   const refreshedAt = nowIso();
@@ -195,5 +217,5 @@ export function refreshV235CurrentDashboardCacheDate(reportDate = '', options = 
     try { db.exec('ROLLBACK'); } catch {}
     throw error;
   }
-  return { ok:true,refreshed:true,reportDate:batch.reportDate,snapshotId:batch.snapshotId,rowCount:rows.length,refreshedAt,cacheId:V235_DASHBOARD_CURRENT_CACHE_ID };
+  return { ok:true,refreshed:true,reportDate:batch.reportDate,snapshotId:batch.snapshotId,rowCount:rows.length,readyTypes:REQUIRED_TYPES.length,refreshedAt,cacheId:V235_DASHBOARD_CURRENT_CACHE_ID };
 }
