@@ -79,17 +79,22 @@
   }
   global.RateTrendCardV18 = { render };
 
-  // V58 legacy drilldown still asks for /api/v61/metric-detail. That route no longer
-  // owns the current seven-business detail truth. Rewrite it to the explicit V234
-  // detail endpoint so existing card capture handlers continue to work immediately.
-  if(!global.__CE_QC_V234_DETAIL_FETCH_BRIDGE__&&typeof global.fetch==='function'){
-    global.__CE_QC_V234_DETAIL_FETCH_BRIDGE__=true;
+  if(!global.__CE_QC_V234_FETCH_BRIDGE__&&typeof global.fetch==='function'){
+    global.__CE_QC_V234_FETCH_BRIDGE__=true;
     const previousFetch=global.fetch.bind(global);
-    global.fetch=function v234DetailFetchBridge(input,init){
+    const rewrite=text=>{
+      let next=String(text||'');
+      if(next.includes('/api/v61/metric-detail?'))next=next.replace('/api/v61/metric-detail?','/api/v234/metric-detail?');
+      if(next.includes('/api/v27/trends?'))next=next.replace('/api/v27/trends?','/api/v234/trends?');
+      const match=next.match(/\/api\/business-state\/(CE|CEAF|TBKH|ALI1688|SHOPEECN|SHOPEEVN)(\?[^#]*)/i);
+      if(match&&/[?&]compact=1(?:&|$)/.test(match[2]))next=next.replace(`/api/business-state/${match[1]}`,`/api/v234/business-state/${match[1]}`);
+      return next;
+    };
+    global.fetch=function v234FetchBridge(input,init){
       try{
-        if(typeof input==='string'&&input.includes('/api/v61/metric-detail?'))input=input.replace('/api/v61/metric-detail?','/api/v234/metric-detail?');
-        else if(input instanceof Request&&input.url.includes('/api/v61/metric-detail?'))input=new Request(input.url.replace('/api/v61/metric-detail?','/api/v234/metric-detail?'),input);
-      }catch(error){console.warn('[CE-QC][V234_DETAIL_BRIDGE]',error);}
+        if(typeof input==='string')input=rewrite(input);
+        else if(input instanceof Request){const next=rewrite(input.url);if(next!==input.url)input=new Request(next,input);}
+      }catch(error){console.warn('[CE-QC][V234_FETCH_BRIDGE]',error);}
       return previousFetch(input,init);
     };
   }
