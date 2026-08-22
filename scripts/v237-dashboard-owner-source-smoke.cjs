@@ -4,6 +4,7 @@ const read=p=>fs.readFileSync(p,'utf8');
 const live=read('public/v234-dashboard-live.js');
 const home=read('public/v237-home-dashboard-owner.js');
 const guard=read('public/v237-dashboard-owner-guard.js');
+const coalescer=read('public/v239-dashboard-request-coalescer.js');
 const drill=read('public/v58-drilldown-runtime.js');
 const legacyNav=read('public/v109-instant-business-navigation.js');
 const legacyV89=read('public/v89-fast-dashboard.js');
@@ -18,7 +19,7 @@ const trend=read('src/v237DashboardTrendRead.js');
 const runtime=read('src/v206InteractiveFirstRuntimePatch.js');
 const worker=read('src/dashboardCacheWorker.js');
 
-for(const [name,source] of [['v234-dashboard-live',live],['v237-home-dashboard-owner',home],['v237-dashboard-owner-guard',guard],['v109-instant-business-navigation',legacyNav],['v89-fast-dashboard',legacyV89],['routing-v48',legacyRouting],['v133-closure-rate',legacyClosure]]){
+for(const [name,source] of [['v234-dashboard-live',live],['v237-home-dashboard-owner',home],['v237-dashboard-owner-guard',guard],['v239-dashboard-request-coalescer',coalescer],['v109-instant-business-navigation',legacyNav],['v89-fast-dashboard',legacyV89],['routing-v48',legacyRouting],['v133-closure-rate',legacyClosure]]){
   assert.doesNotThrow(()=>new Function(source),`${name} must compile as browser JavaScript`);
 }
 
@@ -44,6 +45,10 @@ assert.doesNotMatch(home,/location\.reload\s*\(/,'homepage owner must never full
 assert.match(guard,/__CE_QC_V237_DASHBOARD_OWNER__=true/,'head guard must declare ownership before legacy scripts execute');
 assert.match(guard,/\/api\\\/v27\\\/trends/,'legacy V232 trend network read must be retired');
 assert.match(guard,/\/api\\\/v55\\\/reconciliation/,'legacy passive reconciliation read must be retired');
+assert.match(coalescer,/v239-current-summary-coalescer-v1/,'current-summary coalescer must be installed before dashboard clients');
+assert.match(coalescer,/CACHE_MS=15_000/,'current-summary coalescer must reuse the same fresh response for 15 seconds');
+assert.match(coalescer,/inflight\.has\(key\)/,'simultaneous current-summary reads must share one in-flight request');
+assert.match(coalescer,/url\.pathname!=='\/api\/v234\/current-summary'/,'coalescer must be narrowly scoped to current-summary only');
 assert.match(drill,/__CE_QC_V237_DASHBOARD_OWNER__/,'legacy drilldown observer must skip passive reconciliation on owner pages');
 assert.match(legacyNav,/v239-single-owner-navigation-v1/,'legacy navigation layer must recognize V239 single-owner mode');
 assert.match(legacyNav,/V239_SINGLE_DASHBOARD_OWNER/,'legacy hydratePageData must return without launching routing/CEAF reads on owner dashboards');
@@ -60,7 +65,9 @@ assert.match(shell,/\/v89-fast-dashboard\.js\?v=20260823-v239-1/,'owner shell mu
 assert.match(shell,/\/v109-instant-business-navigation\.js\?v=20260823-v239-1/,'owner shell must cache-bust retired hydration client');
 assert.match(shell,/\/v133-closure-rate\.js\?v=20260823-v239-1/,'owner shell must cache-bust owner-local closure client');
 
-assert.match(inject,/v238-dashboard-owner-ui-injection-v1/,'delivered HTML must use V238 owner injection');
+assert.match(inject,/v238-dashboard-owner-ui-injection-v1/,'delivered HTML must preserve V238 owner compatibility');
+assert.match(inject,/v239-dashboard-request-coalescer-ui-v1/,'delivered HTML must enable V239 request coalescing');
+assert.match(inject,/v239-dashboard-request-coalescer\.js\?v=20260823-v239-1/,'browser must receive cache-busted V239 coalescer in head');
 assert.match(inject,/v235-cache-ready-reload\.js/,'injector must explicitly strip the old cache-ready reload poller');
 assert.match(inject,/v234-dashboard-live\.js\?v=20260822-v238-1/,'browser must receive cache-busted V238 business owner');
 assert.match(inject,/v237-dashboard-owner-guard\.js\?v=20260822-v238-1/,'browser must receive head-first owner guard');
@@ -85,4 +92,4 @@ assert.match(worker,/recentCompletedDashboardDates\(7\)/,'child worker must prep
 assert.match(worker,/WORKER_LEASE_MS = 5 \* 60_000/,'dashboard cache lease must be bounded to five minutes');
 assert.match(worker,/cleared stale dashboard-cache lease/,'worker must recover a crashed stale lease without waiting fifteen minutes');
 
-console.log('[V239] single-owner + retired legacy hydration/V89/routing/closure + terminal-safe current + cache-only trend + observable prime smoke passed');
+console.log('[V239] single-owner + coalesced current summary + retired legacy hydration/V89/routing/closure + terminal-safe current + cache-only trend + observable prime smoke passed');
