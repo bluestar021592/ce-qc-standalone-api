@@ -2,9 +2,9 @@
   if(global.__CE_QC_V234_DASHBOARD_LIVE__)return;
   global.__CE_QC_V234_DASHBOARD_LIVE__=true;
   global.__CE_QC_V237_DASHBOARD_OWNER__=true;
-  const VERSION='2026-08-22-v237-dashboard-owner-client-v1';
+  const VERSION='2026-08-22-v238-dashboard-owner-client-v1';
   const PATH_TYPE={ce:'CE',ceaf:'CEAF',tbkh:'TBKH',ali1688:'ALI1688',shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN',whpp:'WHPP'};
-  const cache=new Map();let timer=null,activeDetail=0;
+  const cache=new Map();let timer=null,activeDetail=0,currentRetryTimer=null,trendRetryTimer=null,trendRetryCount=0;
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const num=v=>Number.isFinite(Number(v))?Number(v):0;
   const fmt=v=>num(v).toLocaleString('zh-CN');
@@ -27,9 +27,9 @@
     global.__CE_QC_V237_CURRENT_SUMMARY__=payload;
     const cards=[...root.querySelectorAll('.v18-business-grid .v18-business-card')];
     if(!m.ready){
-      notice(root,`${t} 当前日报的正式处理结果尚未完成；系统不会把“总票-POD-退回”直接伪装成全部未闭环。处理完成后自动更新。`);
+      notice(root,`${t} 当天标准化结果仍在处理中；这里只显示已确认总票，POD/退回/未闭环不会用假0填充。结果覆盖完整后自动更新。`);
       cards.forEach((card,index)=>{if(index>0)setPendingCard(card);});
-      root.querySelectorAll('.v18-core-grid .v18-metric-card').forEach(card=>{const b=card.querySelector('b'),s=card.querySelector('small');if(b)b.textContent='—';if(s)s.textContent='等待正式处理结果 · 点击暂不读取';});
+      root.querySelectorAll('.v18-core-grid .v18-metric-card').forEach(card=>{const b=card.querySelector('b'),s=card.querySelector('small');if(b)b.textContent='—';if(s)s.textContent='等待正式处理结果';});
       return;
     }
     notice(root,'');const total=num(m.total),share=v=>`占本业务 ${total?(num(v)*100/total).toFixed(2):'0.00'}%`;
@@ -47,12 +47,13 @@
     const map={'Pending不连续':'pendingNonContinuous','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','盘点2天+':'cycle2','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','已退回件':'returned','当前未闭环':'unresolved','派送中':'deliveryStay','外省未完结POD件':'provinceOpen'};
     root.querySelectorAll('.v18-core-grid .v18-metric-card').forEach(c=>{const l=label(c),key=map[l];if(!key)return;const v=num(m[key]);const b=c.querySelector('b'),s=c.querySelector('small');if(b)b.textContent=fmt(v);if(s)s.textContent=`占本业务 ${total?(v*100/total).toFixed(2):'0.00'}% · 点击查看明细`;});
   }
-  async function refreshCurrent(force=false){const r=range();if(!r.to)return;const key=`current|${r.to}`;if(!force&&cache.has(key)){applyCurrent(cache.get(key));return cache.get(key);}try{const d=await json(`/api/v234/current-summary?reportDate=${encodeURIComponent(r.to)}`);cache.set(key,d);applyCurrent(d);return d;}catch(e){notice(pageRoot(),`当前看板快速状态读取失败：${e.message}`,true);}}
+  function scheduleCurrentRetry(payload,t){clearTimeout(currentRetryTimer);const m=currentData(payload,t);if(m?.ready)return;currentRetryTimer=setTimeout(()=>{cache.delete(`current|${range().to}`);void refreshCurrent(true);},4000);}
+  async function refreshCurrent(force=false){const t=type(),r=range();if(!r.to)return;const key=`current|${r.to}`;if(!force&&cache.has(key)){const hit=cache.get(key);applyCurrent(hit,t);scheduleCurrentRetry(hit,t);return hit;}try{const d=await json(`/api/v234/current-summary?reportDate=${encodeURIComponent(r.to)}`);cache.set(key,d);applyCurrent(d,t);scheduleCurrentRetry(d,t);return d;}catch(e){notice(pageRoot(),`当前看板快速状态读取失败：${e.message}`,true);}}
   function series(name,color,values){return{name,color,values:Array.isArray(values)?values:[],numerators:[],denominators:[]};}
   function renderDaily(root,d,t){
     removeLegacyTrendPanel(root);
     let panel=root.querySelector('#v234DailyTrendTruth');if(!panel){panel=document.createElement('section');panel.id='v234DailyTrendTruth';panel.className='v232-percent-panel';const section=root.querySelector('.v18-trend-section');section?.appendChild(panel);}if(!panel)return;
-    panel.innerHTML=`<div class="v232-percent-head"><div><h3>每日百分比趋势明细</h3><p>直接读取已完成日报的正式处理结果；已有精确缓存则读取缓存，没有缓存则读取该日已完成快照的标准化结果。没有正式结果的日期显示“—”，不再当成0。</p></div><span class="v232-badge">单一数据源 · ${esc(t)}</span></div><div class="v232-table-wrap"><table class="v232-table"><thead><tr><th>日期</th><th>总票</th><th>POD</th><th>POD率</th><th>退回</th><th>退回率</th><th>Pending1+</th><th>Pending率</th><th>派送中</th><th>派送中率</th><th>OC1+率</th><th>首次妥投率</th></tr></thead><tbody>${(d.daily||[]).map(x=>x.ready?`<tr><td>${esc(x.reportDate||x.date||'—')}</td><td>${fmt(x.total)}</td><td>${fmt(x.pod)}</td><td class="rate">${pct(x.podRate)}</td><td>${fmt(x.returned)}</td><td class="rate">${pct(x.returnRate)}</td><td>${fmt(x.pending1)}</td><td class="rate">${pct(x.pendingRate)}</td><td>${fmt(x.deliveryStay||x.delivery)}</td><td class="rate">${pct(x.deliveryRate)}</td><td class="rate">${pct(x.ocRate)}</td><td class="rate">${nullablePct(x.firstRate)}</td></tr>`:`<tr><td>${esc(x.reportDate||x.date||'—')}</td><td colspan="11">— 该日正式处理结果尚未完成</td></tr>`).join('')||'<tr><td colspan="12">当前区间暂无已完成日报结果</td></tr>'}</tbody></table></div>`;
+    panel.innerHTML=`<div class="v232-percent-head"><div><h3>每日百分比趋势明细</h3><p>趋势页面只读取已生成的精确日报缓存，不在网页进程现场扫描历史运单。后台独立进程会准备最近有效日报；尚未准备好的日期显示“—”，绝不伪造成0。</p></div><span class="v232-badge">单一数据源 · ${esc(t)}</span></div><div class="v232-table-wrap"><table class="v232-table"><thead><tr><th>日期</th><th>总票</th><th>POD</th><th>POD率</th><th>退回</th><th>退回率</th><th>Pending1+</th><th>Pending率</th><th>派送中</th><th>派送中率</th><th>OC1+率</th><th>首次妥投率</th></tr></thead><tbody>${(d.daily||[]).map(x=>x.ready?`<tr><td>${esc(x.reportDate||x.date||'—')}</td><td>${fmt(x.total)}</td><td>${fmt(x.pod)}</td><td class="rate">${pct(x.podRate)}</td><td>${fmt(x.returned)}</td><td class="rate">${pct(x.returnRate)}</td><td>${fmt(x.pending1)}</td><td class="rate">${pct(x.pendingRate)}</td><td>${fmt(x.deliveryStay||x.delivery)}</td><td class="rate">${pct(x.deliveryRate)}</td><td class="rate">${pct(x.ocRate)}</td><td class="rate">${nullablePct(x.firstRate)}</td></tr>`:`<tr><td>${esc(x.reportDate||x.date||'—')}</td><td colspan="11">— 后台正在准备该日趋势缓存</td></tr>`).join('')||'<tr><td colspan="12">当前区间暂无有效日报</td></tr>'}</tbody></table></div>`;
     removeLegacyTrendPanel(root);
   }
   function renderTrends(d,t){
@@ -66,15 +67,16 @@
     }
     renderDaily(root,d,t);
   }
-  async function refreshTrends(force=false){const t=type(),r=range();if(!t||!r.to)return;const key=`trend|${t}|${r.from}|${r.to}`;if(!force&&cache.has(key)){renderTrends(cache.get(key),t);return;}try{const d=await json(`/api/v234/trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`);cache.set(key,d);renderTrends(d,t);}catch(e){console.warn('[V237 trend]',e);}}
+  function scheduleTrendRetry(d){clearTimeout(trendRetryTimer);const missing=Array.isArray(d?.missingDates)?d.missingDates.length:(d?.daily||[]).filter(x=>!x?.ready).length;if(!missing){trendRetryCount=0;return;}if(trendRetryCount>=12)return;const delay=trendRetryCount<3?3000:6000;trendRetryCount+=1;trendRetryTimer=setTimeout(()=>{const t=type(),r=range();cache.delete(`trend|${t}|${r.from}|${r.to}`);void refreshTrends(true);},delay);}
+  async function refreshTrends(force=false){const t=type(),r=range();if(!t||!r.to)return;const key=`trend|${t}|${r.from}|${r.to}`;if(!force&&cache.has(key)){const hit=cache.get(key);renderTrends(hit,t);scheduleTrendRetry(hit);return;}try{const d=await json(`/api/v234/trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`);cache.set(key,d);renderTrends(d,t);scheduleTrendRetry(d);}catch(e){console.warn('[V238 trend]',e);}}
   function tabFor(t,l){if(t.startsWith('SHOPEE')){const m={'SHOPEECN':'all','SHOPEEVN':'all','今日POD':'pod','POD率':'pod','已退回件':'returned','退回率':'returned','当前未闭环':'unresolved','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','盘点2天+':'cycle2','入库无扫描':'inboundNoScan','派送中':'deliveryStay'};return m[l]||'';}const m={'CE':'allData','CEAF':'allData','TBKH':'allData','ALI1688':'allData','签收件数':'podClosed','签收率':'podClosed','已退回件':'accountingReturned','当前未闭环':'accountingOpen','Pending1+':'pendingAll','Pending2+':'pending2plus','Pending3+':'pending3','OC1+':'ocAll','OC2+':'oc2plus','OC3+':'oc3','盘点2天+':'cycle2','入库无扫描':'inboundNoScan','入库无扫描节点':'inboundNoScan','工单':'workOrderAbnormal','外省未完结POD件':'provinceOpen'};return m[l]||'';}
   function detailHost(t){const root=pageRoot(t);if(!root)return null;let host=root.querySelector('.v234-detail-host');if(!host){host=document.createElement('section');host.className='panel v18-detail-preview v234-detail-host';root.appendChild(host);}return host;}
   async function openDetail(t,l,tab){const host=detailHost(t),r=range();if(!host||!tab)return;const id=++activeDetail;host.hidden=false;host.innerHTML=`<div class="empty-state">正在读取 ${esc(l)} 明细…</div>`;host.scrollIntoView({behavior:'smooth',block:'start'});try{const d=await json(`/api/v234/metric-detail?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}&tab=${encodeURIComponent(tab)}&page=1&pageSize=200`);if(id!==activeDetail)return;const rows=d.rows||[],fields=['shipmentCode','businessType','reportDate','regionCode','POD状态','当前分类','最新节点','最新时间'].filter(k=>rows.some(x=>x[k]!==undefined));host.innerHTML=`<div class="panel-title"><h3>${esc(l)}</h3><span>${fmt(d.total)}票</span></div><div class="preview-table-wrap">${rows.length?`<table class="preview-table"><thead><tr>${fields.map(f=>`<th>${esc(f)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${fields.map(f=>`<td>${esc(row[f]??'—')}</td>`).join('')}</tr>`).join('')}</tbody></table>`:'<div class="empty-state">该指标当前没有匹配明细</div>'}</div>`;}catch(e){if(id===activeDetail)host.innerHTML=`<div class="empty-state">明细读取失败：${esc(e.message)}</div>`;}}
   function onClick(event){const t=type();if(!t||t==='WHPP')return;const card=event.target?.closest?.('.v18-business-card,.v18-metric-card');if(!card||!pageRoot(t)?.contains(card))return;const l=label(card),tab=tabFor(t,l);if(!tab)return;event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();void openDetail(t,l,tab);}
   function schedule(ms=80,force=false){clearTimeout(timer);timer=setTimeout(()=>{removeLegacyTrendPanel(pageRoot());void refreshCurrent(force);void refreshTrends(force);},ms);}
-  document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page]'))schedule(120,false);if(event.target?.closest?.('#topRangeQuery,.top-range-query,#dashboardRangeQuery'))schedule(150,true);},true);
+  document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page]'))schedule(120,false);if(event.target?.closest?.('#topRangeQuery,.top-range-query,#dashboardRangeQuery')){trendRetryCount=0;schedule(150,true);}},true);
   global.addEventListener('click',onClick,true);
-  document.addEventListener('change',event=>{if(event.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(120,true);});
+  document.addEventListener('change',event=>{if(event.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo')){trendRetryCount=0;schedule(120,true);}});
   global.addEventListener('popstate',()=>schedule(80,false));
   const observer=new MutationObserver(records=>{
     const root=pageRoot();if(root)removeLegacyTrendPanel(root);
@@ -82,5 +84,5 @@
   });
   observer.observe(document.documentElement,{subtree:true,childList:true});
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>schedule(60,true),{once:true});else schedule(60,true);
-  console.info('[CE-QC][V237_DASHBOARD_OWNER]',VERSION);
+  console.info('[CE-QC][V238_DASHBOARD_OWNER]',VERSION,'current direct truth + cache-only trend with lightweight retry');
 })(window);
