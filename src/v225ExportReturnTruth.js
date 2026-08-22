@@ -2,7 +2,11 @@ import { getDb } from './db.js';
 import { collectV200Rows as collectBaseRows, V200_EXPORT_VERSION as BASE_EXPORT_VERSION } from './v200EvidenceData.js';
 import { isShopeePending1203ReturnEvent } from './shopeeReturnTruth.js';
 
-export const V200_EXPORT_VERSION = `${BASE_EXPORT_VERSION}+2026-08-22-v225-return-terminal-export-v1`;
+// Keep the V200 exporter contract/version stable because the launcher go-live
+// gate validates this exact identifier. V225 is an additive truth-normalization
+// layer, not a replacement of the V200 workbook contract.
+export const V200_EXPORT_VERSION = BASE_EXPORT_VERSION;
+export const V225_EXPORT_RETURN_TRUTH_ID = '2026-08-22-v225-return-terminal-export-v1';
 
 function normalizeBill(value = '') {
   return String(value || '').trim().toUpperCase();
@@ -86,7 +90,7 @@ export async function collectV200Rows(type, range, onProgress = () => {}) {
     total: rows.length,
     returned: rows.filter(row => row.returned && !row.pod).length,
     notPodActive: rows.filter(row => !row.pod && !row.returned).length,
-    engine: V200_EXPORT_VERSION
+    engine: V225_EXPORT_RETURN_TRUTH_ID
   });
   return rows;
 }
