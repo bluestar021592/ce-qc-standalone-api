@@ -1,12 +1,14 @@
 (function installFastDashboardV89(global) {
   if (global.__CE_QC_V89_FAST_DASHBOARD__) return;
-  const VERSION = '2026-08-21-v205-fast-dashboard-interactive-first-v1';
+  const VERSION = '2026-08-23-v239-retired-by-dashboard-owner-v1';
+  const LEGACY_VERSION = '2026-08-21-v205-fast-dashboard-interactive-first-v1';
   const CACHE_KEY = 'ce_qc_v89_instant_dashboard';
   const STARTUP_REFRESH_DELAY_MS = 120_000;
   let summary = loadCached();
   let inflight = null;
   let rerenderedKey = '';
 
+  const ownerActive = () => Boolean(global.__CE_QC_V237_DASHBOARD_OWNER__);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
   const fmt = value => Number(value || 0).toLocaleString('zh-CN');
 
@@ -40,6 +42,7 @@
   function businessTotal(model) { return Number(model?.cards?.[0]?.value || 0); }
 
   function patchHomeModel(model) {
+    if (ownerActive()) return model;
     const data = summaryForDate(String(model?.reportDate || ''));
     if (!data?.counts) return model;
     const labels = {
@@ -76,6 +79,7 @@
   }
 
   function patchShopeeModel(model) {
+    if (ownerActive()) return model;
     const type = String(model?.businessType || '').toUpperCase();
     if (!['SHOPEECN', 'SHOPEEVN'].includes(type)) return model;
     const remove = new Set(['580滞留包裹','CCSL580分流','CCSL580滞留包裹','CCSLCN分流','CCSLCN','CECN滞留包裹']);
@@ -95,6 +99,7 @@
   }
 
   function patchVisibleHome() {
+    if (ownerActive()) return;
     const data = summaryForDate(currentDate());
     if (!data?.counts) return;
     const map = new Map([
@@ -114,6 +119,7 @@
   }
 
   async function fetchSummary(date = '') {
+    if (ownerActive()) return global.__CE_QC_V237_LIVE_CURRENT__ || null;
     if (inflight) return inflight;
     const query = date ? `?date=${encodeURIComponent(date)}` : '';
     inflight = fetch(`/api/v89/instant-dashboard${query}`, { cache:'no-store', credentials:'same-origin' })
@@ -136,6 +142,7 @@
   }
 
   function installRenderHooks() {
+    if (ownerActive()) return;
     if (global.DashboardV18 && !global.DashboardV18.__v89Wrapped) {
       const oldHome = global.DashboardV18.renderHome;
       const oldBusiness = global.DashboardV18.renderBusiness;
@@ -185,21 +192,28 @@
   }, true);
 
   document.addEventListener('click', event => {
+    if (ownerActive()) return;
     const rangeAction = event.target?.closest?.('#topRangeQuery,#dashboardRangeQuery');
     const side = event.target?.closest?.('.side-link');
     const page = String(side?.dataset?.page || '').toLowerCase();
     if (rangeAction || ['home','shopeecn','shopeevn'].includes(page)) setTimeout(() => void fetchSummary(currentDate()), 40);
   }, true);
   global.addEventListener('popstate', () => {
+    if (ownerActive()) return;
     const path = location.pathname.toLowerCase();
     if (['/','/shopeecn','/shopeevn'].includes(path)) setTimeout(() => void fetchSummary(currentDate()), 40);
   });
   global.addEventListener('ce-qc-startup-truth-ready', event => {
+    if (ownerActive()) return;
     const requested = String(event?.detail?.reportDate || currentDate());
     if (!summaryForDate(requested)) void fetchSummary(requested);
   });
 
   setTimeout(() => {
+    if (ownerActive()) {
+      console.info('[CE-QC][V239_V89_RETIRED]', VERSION, 'legacy /api/v89/instant-dashboard polling disabled; WHPP detail click retained');
+      return;
+    }
     installRenderHooks();
     patchVisibleHome();
     const date = currentDate();
@@ -207,6 +221,6 @@
     else setTimeout(() => void fetchSummary(currentDate()), STARTUP_REFRESH_DELAY_MS);
   }, 20);
 
-  global.__CE_QC_V89_FAST_DASHBOARD__ = { version: VERSION, fetchSummary };
+  global.__CE_QC_V89_FAST_DASHBOARD__ = { version: VERSION, legacyVersion:LEGACY_VERSION, fetchSummary, retiredByOwner:ownerActive };
   console.info('[CE-QC][V89_FAST_DASHBOARD]', VERSION);
 })(window);
