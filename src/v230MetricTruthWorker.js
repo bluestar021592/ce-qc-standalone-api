@@ -14,7 +14,7 @@ function dateKey(value = '') {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
 }
 function empty(date) {
-  return { date, total:0, pod:0, returned:0, pending:0, delivering:0, activeNotPod:0, attemptPodBase:0, a1:0, a2:0, a3:0, attemptUnknown:0, signingDays:[], deliveryDays:[] };
+  return { date, total:0, pod:0, returned:0, pending:0, delivering:0, activeNotPod:0, attemptPodBase:0, a1:0, a2:0, a3:0, attemptUnknown:0, signingDays:[], deliveryDays:[], dispatchToPodDays:[] };
 }
 function apply(stat, row) {
   stat.total += 1;
@@ -31,6 +31,7 @@ function apply(stat, row) {
     }
     if (Number(row.signingDays || 0) > 0) stat.signingDays.push(Number(row.signingDays));
     if (Number(row.deliveryDays || 0) > 0) stat.deliveryDays.push(Number(row.deliveryDays));
+    if (Number(row.realDispatchToPodDays || 0) > 0) stat.dispatchToPodDays.push(Number(row.realDispatchToPodDays));
   } else if (row.returned) {
     stat.returned += 1;
   } else {
@@ -64,7 +65,8 @@ function finish(stat) {
     attempt3Rate: pct(stat.a3, attemptBase),
     firstAttemptPodRateOfTotal: pct(stat.a1, stat.total),
     averageSigningDays: average(stat.signingDays),
-    averageDeliveryDays: average(stat.deliveryDays)
+    averageDeliveryDays: average(stat.deliveryDays),
+    averageRealDispatchToPodDays: average(stat.dispatchToPodDays)
   };
 }
 function summarizeRows(rows = []) {
@@ -99,15 +101,16 @@ async function run(input = {}) {
   const aggregate = requested === 'ALL' ? summarizeRows(allRows) : business[requested];
   return {
     ok: true,
-    version: '2026-08-22-v230-daily-metric-truth-v1',
+    version: '2026-08-22-v232-daily-metric-truth-v2',
     businessType: requested,
     from,
     to,
     formula: {
-      attempt: 'SHOPEE仅使用轨迹70不同日期；无70时使用轨迹60不同日期；POD锁定明确派次仅作最后兜底；不使用日报W/Y或经过天数猜派次。',
-      attemptRate: '1/2/3派占比 = 对应派次POD件数 ÷ 当日SHOPEE已POD件数。',
-      signingDays: '签收自然天数 = 首次日报归属日期→实际POD日期，含首尾自然日；当日平均仅统计已POD且日期有效的票。',
-      deliveryDays: '派送天数 = 首次真实轨迹70/60日期→实际POD日期，含首尾自然日；无真实派送节点则留空/不参与平均。',
+      attempt: 'SHOPEE按真实派送循环识别：首次START=1派；只有出现失败/Pending后再次START才增加一派；重复START本身不增加派次。没有START时才使用ASSIGN→失败→新ASSIGN兜底；无真实循环再使用明确POD锁定派次。',
+      attemptRate: '1/2/3派占比 = 对应派次POD件数 ÷ 当日SHOPEE已POD件数；无证据POD单独列为派次未识别。',
+      signingDays: '平均签收天数 = 首次日报归属日期→实际POD日期，含首尾自然日；同日POD=1天。',
+      deliveryDays: '看板/报表派送天数沿用日报批次签收时效口径：首次日报归属日期→实际POD日期；不得拿自然天数反推1/2/3派。',
+      realDispatchToPodDays: '另保留诊断值：首次真实START/ASSIGN日期→实际POD日期，用于判断真实派送后到签收用了几天，不与日报批次签收时效混算。',
       dailyRates: 'POD/退回/Pending/派送中百分比 = 当日对应件数 ÷ 当日总票数。'
     },
     daily: aggregate.daily,
