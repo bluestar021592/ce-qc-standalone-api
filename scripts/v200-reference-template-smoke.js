@@ -1,5 +1,6 @@
 import { resolveV200Attempt, V200_EXPORT_VERSION, internalHyperlinkFormulaForV200 } from '../src/v200TemplateDashboardExporter.js';
 import { referenceAverageDays } from '../src/v200Metrics.js';
+import { V227_MULTI_BUSINESS_HISTORY_REFRESH_ID } from '../src/v227MultiBusinessHistoryRefreshPatch.js';
 
 function must(condition, message) { if (!condition) throw new Error(message); }
 
@@ -13,4 +14,5 @@ must(referenceAverageDays('2026-08-01','2026-08-04') === 4, 'reference average m
 const formula = internalHyperlinkFormulaForV200('POD明细', 1718, 1115);
 must(formula === 'HYPERLINK("#\'POD明细\'!A1718",1115)', 'WPS-safe internal hyperlink must match reference workbook formula syntax');
 must(V200_EXPORT_VERSION === '2026-08-18-v200-reference-template-track-attempt-v1', 'unexpected V200 version');
-console.log('[V200] reference template, WPS formula link, real dispatch-attempt and reference average-day smoke passed');
+must(V227_MULTI_BUSINESS_HISTORY_REFRESH_ID === '2026-08-22-v227-multi-business-history-refresh-v1', 'unexpected V227 multi-business history refresh version');
+console.log('[V200] reference template, WPS formula link, real dispatch-attempt, reference average-day and V227 multi-business history-refresh smoke passed');
