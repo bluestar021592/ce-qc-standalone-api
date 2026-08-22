@@ -1,9 +1,13 @@
 import { getDb } from './db.js';
 
 export const V230_ATTEMPT_SIGNING_TRUTH_ID = '2026-08-22-v230-shopee-attempt-signing-truth-v1';
+export const V232_ATTEMPT_CYCLE_TRUTH_ID = '2026-08-22-v232-shopee-real-delivery-cycle-v1';
 
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 const CYCLE_RE = /盘点|cycle\s*count/i;
+const START_RE = /parcel\s*start\s*to\s*deliver|out\s*for\s*delivery|开始派送|派送中|正在派送|正在为您派送/i;
+const ASSIGN_RE = /assigning\s*courier|delivery\s*assign|courier\s*assign|派件分配|分配快递员|分配派送|即将为您派送/i;
+const FAILURE_RE = /\bpending\b|delivery\s*problem|delivery\s*fail|unsuccessful|派送异常|派送失败|派件异常|未妥投|拒收|\bOC\b/i;
 
 function text(value) { return String(value ?? '').trim(); }
 function billOf(row = {}) { return text(row.shipmentCode || row.运单号 || row.waybill).toUpperCase(); }
@@ -14,6 +18,12 @@ function safeJson(value, fallback = {}) {
 function dateKey(value = '') {
   const match = text(value).match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);
   return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+}
+function timeKey(value = '') {
+  const raw = text(value);
+  const match = raw.match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return '';
+  return `${match[1]}-${match[2]}-${match[3]} ${match[4] || '00'}:${match[5] || '00'}:${match[6] || '00'}`;
 }
 function dayNumber(value = '') {
   const key = dateKey(value);
@@ -26,65 +36,142 @@ export function inclusiveNaturalDays(from, to) {
   if (a === null || b === null || b < a) return 0;
   return Math.floor((b - a) / 86400000) + 1;
 }
+function eventRaw(row = {}) { return safeJson(row.rawJson, {}); }
 function eventCode(row = {}) {
-  const raw = safeJson(row.rawJson, {});
-  return text(row.eventCode || raw.eventCode || raw.trackingEventCode || raw.statusCode);
+  const raw = eventRaw(row);
+  return text(row.eventCode || raw.eventCode || raw.statusCode);
+}
+function trackingCode(row = {}) {
+  const raw = eventRaw(row);
+  return text(row.trackingEventCode || raw.trackingEventCode);
 }
 function eventTime(row = {}) {
-  const raw = safeJson(row.rawJson, {});
+  const raw = eventRaw(row);
   return text(row.eventTime || raw.eventTime || raw.creationDate || raw.lastUpdateDate);
 }
 function eventText(row = {}) {
-  const raw = safeJson(row.rawJson, {});
-  return [raw.trackingEventDescZh, raw.trackingEventDesc, raw.trackingEventDescKm, raw.statusText, raw.remark, raw.place, raw.eventShop]
+  const raw = eventRaw(row);
+  return [row.trackingEventDescZh, row.trackingEventDesc, row.trackingEventDescKm,
+    raw.trackingEventDescZh, raw.trackingEventDesc, raw.trackingEventDescKm,
+    raw.statusText, raw.remark, raw.place, raw.eventShop]
     .map(text).filter(Boolean).join(' ');
+}
+function isRealStart(row = {}) {
+  const code = eventCode(row);
+  return code === '70' || START_RE.test(eventText(row));
+}
+function isAssign(row = {}) {
+  const code = eventCode(row);
+  return code === '60' || code === '30' || ASSIGN_RE.test(eventText(row));
+}
+function isFailure(row = {}) {
+  const code = eventCode(row);
+  return code === '150' || FAILURE_RE.test(eventText(row));
 }
 function chunks(values = [], size = 300) {
   const out = [];
   for (let index = 0; index < values.length; index += size) out.push(values.slice(index, index + size));
   return out;
 }
-function validAttemptDates(values = [], podDate = '') {
+function beforeOrOnPod(row, podDate = '') {
   const pod = dateKey(podDate);
-  return [...new Set(values.map(dateKey).filter(Boolean))].filter(date => !pod || date <= pod).sort();
+  const d = dateKey(eventTime(row));
+  return Boolean(d && (!pod || d <= pod));
 }
-export function resolveStrictShopeeAttempt({ pod = false, podDate = '', code70Dates = [], code60Dates = [], podAttemptNo = 0 } = {}) {
-  if (!pod) return { attemptNo: 0, source: '', evidenceDates: [] };
-  const delivery = validAttemptDates(code70Dates, podDate);
-  if (delivery.length) return { attemptNo: Math.min(3, delivery.length), source: '轨迹70不同派送日期', evidenceDates: delivery };
-  const assign = validAttemptDates(code60Dates, podDate);
-  if (assign.length) return { attemptNo: Math.min(3, assign.length), source: '轨迹60不同分配日期', evidenceDates: assign };
+function dedupeOrdered(events = [], podDate = '') {
+  const seen = new Set();
+  return events
+    .filter(row => beforeOrOnPod(row, podDate) && !CYCLE_RE.test(eventText(row)))
+    .sort((a, b) => timeKey(eventTime(a)).localeCompare(timeKey(eventTime(b))))
+    .filter(row => {
+      const signature = `${timeKey(eventTime(row))}|${eventCode(row)}|${trackingCode(row)}|${eventText(row)}`;
+      if (seen.has(signature)) return false;
+      seen.add(signature);
+      return true;
+    });
+}
+
+export function resolveStrictShopeeAttempt({ pod = false, podDate = '', events = [], podAttemptNo = 0 } = {}) {
+  if (!pod) return { attemptNo: 0, source: '', evidenceStarts: [], evidenceFailures: [] };
+  const ordered = dedupeOrdered(events, podDate);
+  const hasRealStart = ordered.some(isRealStart);
+  const startPredicate = hasRealStart ? isRealStart : isAssign;
+  const starts = [], failures = [];
+  let attempt = 0;
+  let active = false;
+  let failedSinceStart = false;
+
+  for (const event of ordered) {
+    if (startPredicate(event)) {
+      if (!active) {
+        attempt = 1;
+        active = true;
+        starts.push(eventTime(event));
+        failedSinceStart = false;
+      } else if (failedSinceStart) {
+        attempt = Math.min(3, attempt + 1);
+        starts.push(eventTime(event));
+        failedSinceStart = false;
+      }
+      // Repeated START/ASSIGN without a failure is the same delivery attempt.
+      continue;
+    }
+    if (active && isFailure(event)) {
+      failedSinceStart = true;
+      failures.push(eventTime(event));
+    }
+  }
+
+  if (attempt > 0) {
+    return {
+      attemptNo: attempt,
+      source: hasRealStart ? '真实派送循环：START→失败→新START' : '派件分配循环：ASSIGN→失败→新ASSIGN',
+      evidenceStarts: starts,
+      evidenceFailures: failures
+    };
+  }
   const explicit = Number(podAttemptNo || 0);
-  if (Number.isFinite(explicit) && explicit > 0) return { attemptNo: Math.min(3, Math.floor(explicit)), source: 'POD锁定明确派次', evidenceDates: [] };
-  return { attemptNo: 0, source: '无真实派次证据', evidenceDates: [] };
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return { attemptNo: Math.min(3, Math.floor(explicit)), source: 'POD锁定明确派次', evidenceStarts: [], evidenceFailures: [] };
+  }
+  return { attemptNo: 0, source: '无真实派送循环证据', evidenceStarts: [], evidenceFailures: [] };
+}
+
+function evidenceRange(rows = []) {
+  const dates = [];
+  for (const row of rows) {
+    for (const value of [row.firstReportDate, row.lastReportDate, row.podDate, row.podTime]) {
+      const d = dateKey(value);
+      if (d) dates.push(d);
+    }
+  }
+  dates.sort();
+  return { from: dates[0] || '2000-01-01', to: dates.at(-1) || '2099-12-31' };
 }
 
 function loadShopeeTrackEvidence(rows = []) {
   const db = getDb();
-  const byBill = new Map(rows.map(row => [billOf(row), { code70: [], code60: [] }]).filter(([bill]) => bill));
+  const byBill = new Map(rows.map(row => [billOf(row), []]).filter(([bill]) => bill));
   const bills = [...byBill.keys()];
+  const range = evidenceRange(rows);
   for (const chunk of chunks(bills)) {
     const marks = chunk.map(() => '?').join(',');
     let events = [];
     try {
       events = db.prepare(`
-        SELECT shipmentCode,eventTime,eventCode,rawJson
+        SELECT shipmentCode,reportDate,eventTime,eventCode,rawJson
         FROM business_track_events
-        WHERE shipmentCode IN (${marks})
+        WHERE businessType='SHOPEE'
+          AND reportDate BETWEEN ? AND ?
+          AND shipmentCode IN (${marks})
         ORDER BY shipmentCode,eventTime,id
-      `).all(...chunk);
+      `).all(range.from, range.to, ...chunk);
     } catch {
       continue;
     }
     for (const event of events) {
-      const evidence = byBill.get(billOf(event));
-      if (!evidence) continue;
-      const code = eventCode(event);
-      const time = eventTime(event);
-      const date = dateKey(time);
-      if (!date || CYCLE_RE.test(eventText(event))) continue;
-      if (code === '70') evidence.code70.push(date);
-      else if (code === '60') evidence.code60.push(date);
+      const target = byBill.get(billOf(event));
+      if (target) target.push(event);
     }
   }
   return byBill;
@@ -99,23 +186,30 @@ export function applyV230AttemptSigningTruth(businessType, rows = []) {
     row.signingDaysSource = row.signingDays > 0 ? '首次日报归属日期→实际POD日期（含首尾自然日）' : '';
 
     if (!SHOPEE_TYPES.has(type)) continue;
-    const evidence = trackEvidence.get(billOf(row)) || { code70: [], code60: [] };
+    const events = trackEvidence.get(billOf(row)) || [];
     const strict = resolveStrictShopeeAttempt({
       pod: Boolean(row.pod),
       podDate,
-      code70Dates: evidence.code70,
-      code60Dates: evidence.code60,
+      events,
       podAttemptNo: row.podAttemptNo
     });
     row.attemptNo = strict.attemptNo;
     row.attemptSource = strict.source;
-    row.attemptEvidenceDates = strict.evidenceDates;
+    row.attemptEvidenceStarts = strict.evidenceStarts;
+    row.attemptEvidenceFailures = strict.evidenceFailures;
     row.trackAttemptNo = strict.attemptNo;
-    row.track70Dates = validAttemptDates(evidence.code70, podDate);
-    row.track60Dates = validAttemptDates(evidence.code60, podDate);
-    row.firstDispatchDate = row.track70Dates[0] || row.track60Dates[0] || '';
-    row.deliveryDays = row.pod && row.firstDispatchDate && podDate ? inclusiveNaturalDays(row.firstDispatchDate, podDate) : 0;
-    row.deliveryDaysSource = row.deliveryDays > 0 ? '首次真实轨迹70/60日期→实际POD日期（含首尾自然日）' : '无真实派送日期，不计算派送天数';
+
+    const ordered = dedupeOrdered(events, podDate);
+    const firstRealStart = ordered.find(isRealStart) || ordered.find(isAssign) || null;
+    row.firstDispatchDate = firstRealStart ? dateKey(eventTime(firstRealStart)) : '';
+    row.realDispatchToPodDays = row.pod && row.firstDispatchDate && podDate ? inclusiveNaturalDays(row.firstDispatchDate, podDate) : 0;
+    row.realDispatchToPodDaysSource = row.realDispatchToPodDays > 0 ? '首次真实派送/分配节点→实际POD日期（诊断值）' : '';
+
+    // Keep the exported/dashboard "派送天数/签收天数" on the agreed cohort basis:
+    // first daily-report date -> actual POD date. A separate diagnostic field above
+    // preserves the operational first-dispatch -> POD duration without mixing names.
+    row.deliveryDays = row.signingDays;
+    row.deliveryDaysSource = row.signingDaysSource;
   }
   return rows;
 }
