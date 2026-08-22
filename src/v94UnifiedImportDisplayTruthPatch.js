@@ -4,6 +4,7 @@ import './v213FastBootstrapRoutePatch.js';
 import './v214FastTrendRoutePatch.js';
 import './v216WhppImportParityPatch.js';
 import './v217CeAuthRetentionPatch.js';
+import './v218HistoricalTerminalReconcilePatch.js';
 
 export const V94_UNIFIED_IMPORT_DISPLAY_TRUTH_ID = '2026-08-13-v94-unified-import-display-truth-v1';
 const ROUTE = '/api/import/unified-daily-report';
