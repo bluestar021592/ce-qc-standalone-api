@@ -1,3 +1,4 @@
+import './v206InteractiveFirstRuntimePatch.js';
 import dns from 'node:dns';
 import https from 'node:https';
 import { purgeCorrupted20260813Once } from './v158OneTimePurge20260813.js';
