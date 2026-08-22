@@ -3,9 +3,11 @@ import express from 'express';
 export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-22-v231-metric-truth-ui-injection-v1';
 export const V232_FAST_METRIC_UI_INJECTION_ID = '2026-08-22-v238-retired-fast-metric-ui-v1';
 export const V235_CACHE_READY_UI_INJECTION_ID = '2026-08-22-v238-dashboard-owner-ui-injection-v1';
+export const V239_DASHBOARD_REQUEST_UI_INJECTION_ID = '2026-08-23-v239-dashboard-request-coalescer-ui-v1';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260822-v238-1';
 const LIVE_MARKER = '/v234-dashboard-live.js?v=20260822-v238-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
+const COALESCER_MARKER = '/v239-dashboard-request-coalescer.js?v=20260823-v239-1';
 const HOME_MARKER = '/v237-home-dashboard-owner.js?v=20260822-v238-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 const originalSend = express.response.send;
@@ -16,10 +18,10 @@ function stripScript(body, fileName) {
 }
 
 function prepareOwnerHtml(body) {
-  // V237/V238 owns dashboard current/trend rendering. Remove duplicate legacy
+  // V237/V238/V239 owns dashboard current/trend rendering. Remove duplicate legacy
   // observers plus the old cache-ready poller that reloaded the whole page every
   // few seconds and created extra SQLite traffic.
-  for (const file of ['v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v237-dashboard-owner-guard.js','v237-home-dashboard-owner.js']) {
+  for (const file of ['v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v237-dashboard-owner-guard.js','v237-home-dashboard-owner.js','v239-dashboard-request-coalescer.js']) {
     body = stripScript(body, file);
   }
   return body
@@ -28,18 +30,22 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v238MetricTruthUiSend(body) {
+express.response.send = function v239MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
-    if (!body.includes(GUARD_MARKER)) body = body.replace('</head>', `  <script src="${GUARD_MARKER}"></script>\n</head>`);
+    const headTags=[];
+    if (!body.includes(GUARD_MARKER)) headTags.push(`  <script src="${GUARD_MARKER}"></script>`);
+    if (!body.includes(COALESCER_MARKER)) headTags.push(`  <script src="${COALESCER_MARKER}"></script>`);
+    if(headTags.length) body = body.replace('</head>', `${headTags.join('\n')}\n</head>`);
     const tags = [];
     if (!body.includes(CHART_MARKER)) tags.push(`  <script src="${CHART_MARKER}"></script>`);
     if (!body.includes(LIVE_MARKER)) tags.push(`  <script src="${LIVE_MARKER}"></script>`);
     if (!body.includes(HOME_MARKER)) tags.push(`  <script src="${HOME_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V238-UI', V235_CACHE_READY_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V239-UI', V239_DASHBOARD_REQUEST_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
 
-console.info('[CE-QC][V238_DASHBOARD_OWNER_UI]', V235_CACHE_READY_UI_INJECTION_ID, 'single dashboard owner enabled; V230/V232 + cache-ready full-page reload poller retired');
+console.info('[CE-QC][V239_DASHBOARD_OWNER_UI]', V239_DASHBOARD_REQUEST_UI_INJECTION_ID, 'single dashboard owner + current-summary coalescer enabled; V230/V232 + cache-ready full-page reload poller retired');
