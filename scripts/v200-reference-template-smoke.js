@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { resolveV200Attempt, V200_EXPORT_VERSION, internalHyperlinkFormulaForV200 } from '../src/v200TemplateDashboardExporter.js';
 import { referenceAverageDays } from '../src/v200Metrics.js';
 import { V227_MULTI_BUSINESS_HISTORY_REFRESH_ID } from '../src/v227MultiBusinessHistoryRefreshPatch.js';
@@ -5,6 +6,7 @@ import { V228_MULTI_BUSINESS_HISTORY_ROUTE_INSTALLER_ID } from '../src/v228Multi
 import { resolveStrictShopeeAttempt, inclusiveNaturalDays, V230_ATTEMPT_SIGNING_TRUTH_ID } from '../src/v230AttemptSigningTruth.js';
 import { V230_METRIC_TRUTH_ROUTE_ID } from '../src/v230MetricTruthPatch.js';
 import { V231_METRIC_TRUTH_UI_INJECTION_ID } from '../src/v231MetricTruthUiInjectionPatch.js';
+import '../src/v230MetricTruthWorker.js';
 
 function must(condition, message) { if (!condition) throw new Error(message); }
 
@@ -24,6 +26,10 @@ must(referenceAverageDays('2026-08-01','2026-08-01') === 1, 'reference same-day 
 must(referenceAverageDays('2026-08-01','2026-08-04') === 4, 'reference average must use dashboard date to actual POD date inclusive');
 must(inclusiveNaturalDays('2026-07-01','2026-07-01') === 1, 'V230 same-day signing must equal one natural day');
 must(inclusiveNaturalDays('2026-07-01','2026-07-12') === 12, 'V230 signing natural days must remain literal; long real POD durations must not be silently compressed');
+
+const uiSource = fs.readFileSync('public/v230-metric-truth-ui.js','utf8');
+new Function(uiSource);
+must(uiSource.includes('每日走势口径校验'), 'V230 browser truth panel token missing');
 
 const formula = internalHyperlinkFormulaForV200('POD明细', 1718, 1115);
 must(formula === 'HYPERLINK("#\'POD明细\'!A1718",1115)', 'WPS-safe internal hyperlink must match reference workbook formula syntax');
