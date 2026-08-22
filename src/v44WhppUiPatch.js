@@ -23,6 +23,8 @@ import './v183HistoricalStatusRefreshPatch.js';
 import './v206InteractiveFirstRuntimePatch.js';
 
 const PATCH_ID='2026-08-23-v239-single-owner-client-cache-bust-v1';
+// Retained as a source-compatibility token for the stable go-live gate.
+const V226_COMPAT_UI_BUILD='2026-08-22-v226-shared-client-ui-cache-bust-v1';
 const GOLIVE_COMPAT_PATCH_ID='2026-08-18-v195-ipc-export-owner-shell-v1';
 const APP_PATHS=new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/exceptions','/reports','/import','/data-management','/settings','/logs']);
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
@@ -58,5 +60,5 @@ express.application.use=function v206InteractiveFirstOwnerUse(...args){
   return previousUse.apply(this,args);
 };
 
-export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,compatPatchId:GOLIVE_COMPAT_PATCH_ID};}
+export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,compatPatchId:GOLIVE_COMPAT_PATCH_ID,legacyUiBuild:V226_COMPAT_UI_BUILD};}
 export const V44_WHPP_UI_PATCH_ID=PATCH_ID;
