@@ -1,6 +1,6 @@
 import express from 'express';
 import crypto from 'node:crypto';
-import { getDb, nowIso } from './db.js';
+import { getDb } from './db.js';
 import { CEClient } from './ceClient.js';
 import { runQcPipeline } from './pipeline.js';
 import {
@@ -9,12 +9,13 @@ import {
   activeBusinessProcessingDetails
 } from './carryoverRefreshScheduler.js';
 
-const VERSION = '2026-08-22-v221-full-upload-range-refresh-v1';
+const VERSION = '2026-08-22-v222-full-upload-return-recheck-v1';
 const SUMMARY_ROUTE = '/api/v183/history-refresh/summary';
 const START_ROUTE = '/api/v183/history-refresh/start';
 const JOB_ROUTE = '/api/v183/history-refresh/job/:jobId';
 const ALLOWED_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 const CHUNK_SIZE = Math.max(100, Math.min(350, Number(process.env.HISTORY_FULL_REFRESH_CHUNK || 300)));
+const SHIPMENT_TRACK_BATCH = Math.max(20, Math.min(100, Number(process.env.HISTORY_SHIPMENT_TRACK_BATCH || 50)));
 const JOB_TTL_MS = 2 * 60 * 60 * 1000;
 const jobs = new Map();
 const activeByKey = new Map();
@@ -159,7 +160,45 @@ function sortFreshEvents(rows = []) {
     return Number(a.id || 0) - Number(b.id || 0);
   });
 }
-function freshTerminalEvidence(state, shipmentCode) {
+function terminalText(row = {}) {
+  return [
+    row.currentState,row.state,row.status,row.statusName,row.statusDesc,row.statusDescription,row.shipmentStatusName,row.shipmentStatusDesc,
+    row.trackStatus,row.trackStatusName,row.trackStatusDesc,row.returnStatus,row.returnState,row.退回状态,row.状态说明,row.latestEventDesc,row.lastEventDesc
+  ].map(text).filter(Boolean).join(' ');
+}
+function terminalFromShipmentTrackRows(rows = [], shipmentCode) {
+  const bill = text(shipmentCode).toUpperCase();
+  const matched = rows.filter(row => billOf(row) === bill);
+  for (const row of matched) {
+    const orderStatus = text(row.orderStatus);
+    const code = text(row.eventCode || row.trackingEventCode || row.statusCode || row.latestTrackStatusCode || row.lastEventCode);
+    const statusText = terminalText(row).toUpperCase();
+    const returnInProgress = /RETURN_IN_PROGRESS|退回处理中|正在退回/.test(statusText);
+    if (orderStatus === '85' || code === '80' || /(^|\s)POD($|\s)|已签收|签收成功/.test(statusText)) {
+      return { reason: 'POD', source: 'CE_SHIPMENT_TRACK_POD', time: text(row.podTime || row.POD时间 || row.lastEventTime || row.latestEventTime || row.updateTime) };
+    }
+    if (!returnInProgress && (orderStatus === '100' || code === '86' || /RETURN_COMPLETED|RETURNED|已退回|退回完成/.test(statusText))) {
+      return { reason: 'RETURNED', source: 'CE_SHIPMENT_TRACK_RETURN', time: text(row.returnTime || row.退回完成时间 || row.lastEventTime || row.latestEventTime || row.updateTime) };
+    }
+  }
+  return null;
+}
+async function queryShipmentTrackEvidence(client, bills = []) {
+  const rows = [];
+  let failedBatches = 0;
+  for (let index = 0; index < bills.length; index += SHIPMENT_TRACK_BATCH) {
+    const batch = bills.slice(index, index + SHIPMENT_TRACK_BATCH);
+    try {
+      const result = await client.shipmentTrack(batch);
+      if (Array.isArray(result)) rows.push(...result);
+    } catch (error) {
+      failedBatches += 1;
+      console.warn('[CE-QC][V222] shipment-track supplemental probe failed:', error?.message || error);
+    }
+  }
+  return { rows, failedBatches };
+}
+function freshTerminalEvidence(state, shipmentTrackRows, shipmentCode) {
   const bill = text(shipmentCode).toUpperCase();
   const scans = (state.scanResults || []).filter(row => billOf(row) === bill);
   for (const row of scans) {
@@ -172,7 +211,7 @@ function freshTerminalEvidence(state, shipmentCode) {
   const code = text(last?.eventCode || last?.trackingEventCode || last?.statusCode);
   if (code === '80') return { reason: 'POD', source: 'CE_TRACK_LAST_CODE_80', time: text(last?.eventTime || last?.creationDate || last?.lastUpdateDate) };
   if (code === '86') return { reason: 'RETURNED', source: 'CE_TRACK_LAST_CODE_86', time: text(last?.eventTime || last?.creationDate || last?.lastUpdateDate) };
-  return null;
+  return terminalFromShipmentTrackRows(shipmentTrackRows, bill);
 }
 function normalizeFreshTerminal(row, evidence) {
   if (!evidence) return row;
@@ -190,6 +229,20 @@ function normalizeFreshTerminal(row, evidence) {
     freshTerminalSource: evidence.source
   };
 }
+function stripUnverifiedTerminal(row = {}) {
+  const state = text(row.currentState).toUpperCase();
+  const claimsPod = row.是否POD === '是' || state === 'POD';
+  const claimsReturn = row.退回状态 === '已退回' || ['RETURNED','RETURN_COMPLETED'].includes(state);
+  if (!claimsPod && !claimsReturn) return row;
+  return {
+    ...row,
+    是否POD: '否', POD状态: '未POD', POD时间: '',
+    currentState: 'OPEN_RECHECK_REQUIRED', 退回状态: '未退回', 退回完成时间: '', 退回时间: '',
+    primaryCategory: '需人工复核', 主分类: '需人工复核', 异常分类: '需人工复核',
+    carry状态: 'active', 跨日状态: '待复核', freshTerminalMismatch: true,
+    QC判断: '分析结果声称终态，但本次CE扫描/轨迹/shipment-track均无对应终态证据，保持非终态等待复核'
+  };
+}
 function currentRowFailed(row = {}) {
   return /失败|REFRESH_FAILED|PENDING_RETRY|SCAN_RETRY|TRACK_RETRY|待重试/i.test(`${row.API状态 || ''} ${row.查询状态 || ''} ${row.apiStatus || ''}`);
 }
@@ -198,7 +251,10 @@ async function processChunk(rows, { client, reportDate, refreshId }) {
   let pipelineError = null;
   try { await runQcPipeline({ state, client, onProgress: async () => {}, onCheckpoint: async () => {}, isPaused: async () => false }); }
   catch (error) { pipelineError = error; }
-  const allowed = new Set(rows.map(row => billOf(row)));
+
+  const bills = rows.map(row => billOf(row)).filter(Boolean);
+  const shipmentTrackProbe = await queryShipmentTrackEvidence(client, bills);
+  const allowed = new Set(bills);
   const byBill = new Map();
   for (const row of (state.finalRows?.length ? state.finalRows : state.trackResults || [])) {
     const bill = billOf(row);
@@ -206,22 +262,31 @@ async function processChunk(rows, { client, reportDate, refreshId }) {
   }
   const successfulRows = [];
   const failedBills = [];
-  let freshPod = 0, freshReturned = 0, scanReturn100 = 0, trackReturn86 = 0;
+  let freshPod = 0, freshReturned = 0, scanReturn100 = 0, trackReturn86 = 0, shipmentTrackReturned = 0, shipmentTrackPod = 0, terminalMismatch = 0;
   for (const source of rows) {
     const bill = billOf(source);
     const row = byBill.get(bill);
     if (!row) { failedBills.push(bill); continue; }
-    const evidence = freshTerminalEvidence(state, bill);
-    const normalized = normalizeFreshTerminal(row, evidence);
+    const evidence = freshTerminalEvidence(state, shipmentTrackProbe.rows, bill);
+    let normalized = evidence ? normalizeFreshTerminal(row, evidence) : stripUnverifiedTerminal(row);
+    if (normalized.freshTerminalMismatch) terminalMismatch += 1;
     successfulRows.push(normalized);
-    if (evidence?.reason === 'POD') freshPod += 1;
+    if (evidence?.reason === 'POD') {
+      freshPod += 1;
+      if (evidence.source === 'CE_SHIPMENT_TRACK_POD') shipmentTrackPod += 1;
+    }
     if (evidence?.reason === 'RETURNED') {
       freshReturned += 1;
       if (evidence.source === 'CE_CONFIRM_ORDER_STATUS_100') scanReturn100 += 1;
       if (evidence.source === 'CE_TRACK_LAST_CODE_86') trackReturn86 += 1;
+      if (evidence.source === 'CE_SHIPMENT_TRACK_RETURN') shipmentTrackReturned += 1;
     }
   }
-  return { successfulRows, failedBills, freshPod, freshReturned, scanReturn100, trackReturn86, pipelineError };
+  return {
+    successfulRows, failedBills, freshPod, freshReturned, scanReturn100, trackReturn86,
+    shipmentTrackReturned, shipmentTrackPod, shipmentTrackFailedBatches: shipmentTrackProbe.failedBatches,
+    terminalMismatch, pipelineError
+  };
 }
 function cleanupJobs() {
   const cutoff = Date.now() - JOB_TTL_MS;
@@ -242,7 +307,7 @@ async function runJob(job) {
     writeJob(job, {
       status: 'WAITING', progress: 0, before, total: candidates.length, completed: 0, refreshed: 0, failed: 0,
       uploadedTotal: allUploadedRows.length, terminalSkipped: allUploadedRows.length - candidates.length,
-      message: `已从所选区间全部上传日报读取 ${allUploadedRows.length.toLocaleString('zh-CN')} 个唯一单号；排除POD/退回/取消终态后，${candidates.length.toLocaleString('zh-CN')} 票将全部重新请求CE状态。`
+      message: `已从所选区间全部上传日报读取 ${allUploadedRows.length.toLocaleString('zh-CN')} 个唯一单号；排除POD/退回/取消终态后，${candidates.length.toLocaleString('zh-CN')} 票将全部重新请求CE扫描+轨迹+shipment-track状态。`
     });
     if (!candidates.length) {
       writeJob(job, { status: 'COMPLETED', progress: 100, after: before, message: '所选区间全部上传单号都已进入POD/退回/取消终态，无需刷新。', completedAt: new Date().toISOString() });
@@ -257,6 +322,7 @@ async function runJob(job) {
     const client = new CEClient();
     const refreshDate = cambodiaDate();
     let refreshed = 0, failed = 0, freshPod = 0, freshReturned = 0, scanReturn100 = 0, trackReturn86 = 0;
+    let shipmentTrackReturned = 0, shipmentTrackPod = 0, shipmentTrackFailedBatches = 0, terminalMismatch = 0;
     const failedSet = new Set();
     for (let offset = 0; offset < candidates.length; offset += CHUNK_SIZE) {
       const chunk = candidates.slice(offset, offset + CHUNK_SIZE);
@@ -278,21 +344,25 @@ async function runJob(job) {
       freshReturned += outcome.freshReturned;
       scanReturn100 += outcome.scanReturn100;
       trackReturn86 += outcome.trackReturn86;
+      shipmentTrackReturned += outcome.shipmentTrackReturned;
+      shipmentTrackPod += outcome.shipmentTrackPod;
+      shipmentTrackFailedBatches += outcome.shipmentTrackFailedBatches;
+      terminalMismatch += outcome.terminalMismatch;
       for (const bill of outcome.failedBills) failedSet.add(bill);
       failed = failedSet.size;
       writeJob(job, {
         status: 'RUNNING', progress: Math.max(2, Math.min(98, Math.floor(((offset + chunk.length) / candidates.length) * 98))),
         completed: Math.min(offset + chunk.length, candidates.length), refreshed, failed,
-        freshPod, freshReturned, scanReturn100, trackReturn86,
-        message: `全量非终态复核中 · 已处理 ${Math.min(offset + chunk.length, candidates.length)}/${candidates.length} · CE确认POD ${freshPod} · CE确认退回 ${freshReturned} · 待重试 ${failed}`
+        freshPod, freshReturned, scanReturn100, trackReturn86, shipmentTrackReturned, shipmentTrackPod, shipmentTrackFailedBatches, terminalMismatch,
+        message: `全量非终态复核中 · 已处理 ${Math.min(offset + chunk.length, candidates.length)}/${candidates.length} · CE确认POD ${freshPod} · CE确认退回 ${freshReturned} · shipment-track退回 ${shipmentTrackReturned} · 待重试 ${failed}`
       });
     }
     const after = buildSummary(selection, db);
     writeJob(job, {
       status: 'COMPLETED', progress: 100, completed: candidates.length, refreshed, failed, before, after,
-      freshPod, freshReturned, scanReturn100, trackReturn86,
+      freshPod, freshReturned, scanReturn100, trackReturn86, shipmentTrackReturned, shipmentTrackPod, shipmentTrackFailedBatches, terminalMismatch,
       newlyPod: Math.max(0, after.pod - before.pod), newlyReturned: Math.max(0, after.returned - before.returned),
-      message: `复核完成 · 本次从全部上传数据中重新查询 ${candidates.length.toLocaleString('zh-CN')} 票 · 新增POD ${Math.max(0, after.pod - before.pod)} · 新增退回 ${Math.max(0, after.returned - before.returned)} · CE退回证据 ${freshReturned}（扫描100=${scanReturn100}，轨迹86=${trackReturn86}）· 仍非终态 ${after.toRefresh}`,
+      message: `复核完成 · 本次从全部上传数据中重新查询 ${candidates.length.toLocaleString('zh-CN')} 票 · 新增POD ${Math.max(0, after.pod - before.pod)} · 新增退回 ${Math.max(0, after.returned - before.returned)} · CE退回证据 ${freshReturned}（扫描100=${scanReturn100}，轨迹86=${trackReturn86}，shipment-track=${shipmentTrackReturned}）· CE确认POD ${freshPod}（shipment-track=${shipmentTrackPod}）· 无新鲜终态证据但分析曾声称终态 ${terminalMismatch} · shipment-track失败批次 ${shipmentTrackFailedBatches} · 仍非终态 ${after.toRefresh}`,
       completedAt: new Date().toISOString()
     });
   } catch (error) {
@@ -305,7 +375,7 @@ function summaryHandler(req, res) {
   try {
     const selection = validateSelection(req.query || {});
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('X-CE-QC-History-Authority', 'V221-UPLOADED-RANGE');
+    res.setHeader('X-CE-QC-History-Authority', 'V222-UPLOADED-RANGE');
     res.json(buildSummary(selection));
   } catch (error) { res.status(400).json({ ok: false, error: error?.message || String(error) }); }
 }
@@ -319,8 +389,8 @@ function startHandler(req, res) {
       const active = jobs.get(activeId);
       return res.status(202).json({ ok: true, reused: true, jobId: active.jobId, status: active.status, progress: active.progress, message: active.message });
     }
-    const jobId = `HREF221-${Date.now()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-    const job = { ok: true, version: VERSION, jobId, selection, status: 'QUEUED', progress: 0, message: '已创建全上传区间非终态复核任务', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const jobId = `HREF222-${Date.now()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const job = { ok: true, version: VERSION, jobId, selection, status: 'QUEUED', progress: 0, message: '已创建全上传区间非终态复核任务（扫描+轨迹+shipment-track）', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     jobs.set(jobId, job); activeByKey.set(key, jobId); setImmediate(() => runJob(job));
     res.status(202).json({ ok: true, jobId, status: job.status, progress: 0, message: job.message });
   } catch (error) { res.status(400).json({ ok: false, error: error?.message || String(error) }); }
@@ -334,21 +404,19 @@ function jobHandler(req, res) {
 }
 
 const previousGet = express.application.get;
-express.application.get = function v221HistoryGet(pathValue, ...handlers) {
+express.application.get = function v222HistoryGet(pathValue, ...handlers) {
   const path = String(pathValue || '');
   if (path === SUMMARY_ROUTE && handlers.length) {
-    console.log('[CE-QC][V221] replaced history summary with uploaded-range authority');
+    console.log('[CE-QC][V222] replaced history summary with uploaded-range authority');
     return this.route(pathValue).get(summaryHandler);
   }
-  if (path === JOB_ROUTE && handlers.length) {
-    return this.route(pathValue).get(jobHandler);
-  }
+  if (path === JOB_ROUTE && handlers.length) return this.route(pathValue).get(jobHandler);
   return previousGet.call(this, pathValue, ...handlers);
 };
 const previousPost = express.application.post;
-express.application.post = function v221HistoryPost(pathValue, ...handlers) {
+express.application.post = function v222HistoryPost(pathValue, ...handlers) {
   if (String(pathValue || '') === START_ROUTE && handlers.length) {
-    console.log('[CE-QC][V221] replaced history refresh start with full uploaded non-terminal refresh');
+    console.log('[CE-QC][V222] full uploaded non-terminal refresh includes shipment-track return evidence');
     return this.route(pathValue).post(startHandler);
   }
   return previousPost.call(this, pathValue, ...handlers);
