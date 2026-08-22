@@ -13,6 +13,7 @@ process.env.ACCESS_MODE = 'LOCAL';
 
 const { getDb, closeDb } = await import('../src/db.js');
 const { refreshV235CurrentDashboardCacheDate, V235_DASHBOARD_CURRENT_CACHE_ID } = await import('../src/v235DashboardCurrentCache.js');
+const { readV236CurrentSummary, V236_DASHBOARD_CURRENT_READ_ID } = await import('../src/v236DashboardCurrentRead.js');
 const db = getDb();
 const date = '2026-08-21';
 const snapshotId = 'V235-SNAPSHOT-1';
@@ -45,6 +46,12 @@ insertShopee.run('N2',date,0,'退回',JSON.stringify({'退回状态':'已退回'
 insertShopee.run('V1',date,1,'POD',JSON.stringify({podAttemptNo:1}),now,now,1);
 insertShopee.run('V2',date,0,'Pending',JSON.stringify({'Pending次数':1,'Pending当前次数':1}),now,now,0);
 
+const before = readV236CurrentSummary(date);
+assert.equal(before.readId,V236_DASHBOARD_CURRENT_READ_ID);
+assert.equal(before.readyBusinessCount,0,'without cache the fresh reader must show imported totals but never fake all-open truth');
+assert.equal(before.business.SHOPEECN.total,2);
+assert.equal(before.business.SHOPEECN.ready,false);
+
 const first = refreshV235CurrentDashboardCacheDate(date,{force:true});
 assert.equal(first.ok,true);
 assert.equal(first.refreshed,true);
@@ -64,10 +71,17 @@ assert.equal(metrics('TBKH').pending1,1);
 assert.deepEqual({total:metrics('SHOPEECN').total,pod:metrics('SHOPEECN').pod,returned:metrics('SHOPEECN').returned},{total:2,pod:1,returned:1});
 assert.deepEqual({total:metrics('SHOPEEVN').total,pod:metrics('SHOPEEVN').pod,pending1:metrics('SHOPEEVN').pending1},{total:2,pod:1,pending1:1});
 
+const live = readV236CurrentSummary(date);
+assert.equal(live.readyBusinessCount,6);
+assert.deepEqual({total:live.business.SHOPEECN.total,pod:live.business.SHOPEECN.pod,returned:live.business.SHOPEECN.returned,unresolved:live.business.SHOPEECN.unresolved},{total:2,pod:1,returned:1,unresolved:0});
+assert.deepEqual({total:live.business.SHOPEEVN.total,pod:live.business.SHOPEEVN.pod,pending1:live.business.SHOPEEVN.pending1,unresolved:live.business.SHOPEEVN.unresolved},{total:2,pod:1,pending1:1,unresolved:1});
+assert.equal(live.business.CEAF.podRate,100);
+assert.equal(live.business.TBKH.pendingRate,100);
+
 const second = refreshV235CurrentDashboardCacheDate(date,{force:false});
 assert.equal(second.reason,'CURRENT_CACHE_READY');
 assert.equal(second.readyTypes,6);
 
 closeDb();
 fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V235] exact six-business dashboard cache functional smoke passed · ${V235_DASHBOARD_CURRENT_CACHE_ID}`);
+console.log(`[V235/V236] exact cache build + fresh current reader functional smoke passed · ${V235_DASHBOARD_CURRENT_CACHE_ID}`);
