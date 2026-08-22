@@ -9,7 +9,7 @@ import {
   activeBusinessProcessingDetails
 } from './carryoverRefreshScheduler.js';
 
-const VERSION = '2026-08-22-v222-full-upload-return-recheck-v1';
+const VERSION = '2026-08-22-v223-full-upload-terminal-event-lock-v1';
 const SUMMARY_ROUTE = '/api/v183/history-refresh/summary';
 const START_ROUTE = '/api/v183/history-refresh/start';
 const JOB_ROUTE = '/api/v183/history-refresh/job/:jobId';
@@ -160,6 +160,12 @@ function sortFreshEvents(rows = []) {
     return Number(a.id || 0) - Number(b.id || 0);
   });
 }
+function freshTrackEventText(row = {}) {
+  return [
+    row.trackingEventDescZh,row.trackingEventDesc,row.trackingEventDescKm,row.statusText,row.statusDesc,row.statusDescription,
+    row.remark,row.place,row.eventShop,row.locationCode
+  ].map(text).filter(Boolean).join(' ').toUpperCase();
+}
 function terminalText(row = {}) {
   return [
     row.currentState,row.state,row.status,row.statusName,row.statusDesc,row.statusDescription,row.shipmentStatusName,row.shipmentStatusDesc,
@@ -193,7 +199,7 @@ async function queryShipmentTrackEvidence(client, bills = []) {
       if (Array.isArray(result)) rows.push(...result);
     } catch (error) {
       failedBatches += 1;
-      console.warn('[CE-QC][V222] shipment-track supplemental probe failed:', error?.message || error);
+      console.warn('[CE-QC][V223] shipment-track supplemental probe failed:', error?.message || error);
     }
   }
   return { rows, failedBatches };
@@ -206,11 +212,22 @@ function freshTerminalEvidence(state, shipmentTrackRows, shipmentCode) {
     if (orderStatus === '85') return { reason: 'POD', source: 'CE_CONFIRM_ORDER_STATUS_85', time: text(row.POD时间 || row.latestEventTime) };
     if (orderStatus === '100') return { reason: 'RETURNED', source: 'CE_CONFIRM_ORDER_STATUS_100', time: text(row.退回完成时间 || row.latestEventTime) };
   }
+
+  // POD/return are terminal locks. CE can append later administrative/non-terminal
+  // trajectory rows after a genuine code80/code86. Historical refresh must not
+  // reopen that parcel merely because 80/86 is not the literal last row.
   const events = sortFreshEvents((state.trackEvents || []).filter(row => billOf(row) === bill));
-  const last = events.at(-1) || null;
-  const code = text(last?.eventCode || last?.trackingEventCode || last?.statusCode);
-  if (code === '80') return { reason: 'POD', source: 'CE_TRACK_LAST_CODE_80', time: text(last?.eventTime || last?.creationDate || last?.lastUpdateDate) };
-  if (code === '86') return { reason: 'RETURNED', source: 'CE_TRACK_LAST_CODE_86', time: text(last?.eventTime || last?.creationDate || last?.lastUpdateDate) };
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const code = text(event?.eventCode || event?.trackingEventCode || event?.statusCode);
+    const eventText = freshTrackEventText(event);
+    const eventTime = text(event?.eventTime || event?.creationDate || event?.lastUpdateDate);
+    if (code === '80') return { reason: 'POD', source: 'CE_TRACK_TERMINAL_CODE_80', time: eventTime };
+    if (code === '86') return { reason: 'RETURNED', source: 'CE_TRACK_TERMINAL_CODE_86', time: eventTime };
+    if (/RETURN_COMPLETED|(^|\s)RETURNED($|\s)|已退回|退回完成/.test(eventText) && !/RETURN_IN_PROGRESS|退回处理中|正在退回/.test(eventText)) {
+      return { reason: 'RETURNED', source: 'CE_TRACK_TERMINAL_TEXT_RETURN', time: eventTime };
+    }
+  }
   return terminalFromShipmentTrackRows(shipmentTrackRows, bill);
 }
 function normalizeFreshTerminal(row, evidence) {
@@ -262,13 +279,13 @@ async function processChunk(rows, { client, reportDate, refreshId }) {
   }
   const successfulRows = [];
   const failedBills = [];
-  let freshPod = 0, freshReturned = 0, scanReturn100 = 0, trackReturn86 = 0, shipmentTrackReturned = 0, shipmentTrackPod = 0, terminalMismatch = 0;
+  let freshPod = 0, freshReturned = 0, scanReturn100 = 0, trackReturn86 = 0, trackReturnText = 0, shipmentTrackReturned = 0, shipmentTrackPod = 0, terminalMismatch = 0;
   for (const source of rows) {
     const bill = billOf(source);
     const row = byBill.get(bill);
     if (!row) { failedBills.push(bill); continue; }
     const evidence = freshTerminalEvidence(state, shipmentTrackProbe.rows, bill);
-    let normalized = evidence ? normalizeFreshTerminal(row, evidence) : stripUnverifiedTerminal(row);
+    const normalized = evidence ? normalizeFreshTerminal(row, evidence) : stripUnverifiedTerminal(row);
     if (normalized.freshTerminalMismatch) terminalMismatch += 1;
     successfulRows.push(normalized);
     if (evidence?.reason === 'POD') {
@@ -278,12 +295,13 @@ async function processChunk(rows, { client, reportDate, refreshId }) {
     if (evidence?.reason === 'RETURNED') {
       freshReturned += 1;
       if (evidence.source === 'CE_CONFIRM_ORDER_STATUS_100') scanReturn100 += 1;
-      if (evidence.source === 'CE_TRACK_LAST_CODE_86') trackReturn86 += 1;
+      if (evidence.source === 'CE_TRACK_TERMINAL_CODE_86') trackReturn86 += 1;
+      if (evidence.source === 'CE_TRACK_TERMINAL_TEXT_RETURN') trackReturnText += 1;
       if (evidence.source === 'CE_SHIPMENT_TRACK_RETURN') shipmentTrackReturned += 1;
     }
   }
   return {
-    successfulRows, failedBills, freshPod, freshReturned, scanReturn100, trackReturn86,
+    successfulRows, failedBills, freshPod, freshReturned, scanReturn100, trackReturn86, trackReturnText,
     shipmentTrackReturned, shipmentTrackPod, shipmentTrackFailedBatches: shipmentTrackProbe.failedBatches,
     terminalMismatch, pipelineError
   };
@@ -321,7 +339,7 @@ async function runJob(job) {
     }
     const client = new CEClient();
     const refreshDate = cambodiaDate();
-    let refreshed = 0, failed = 0, freshPod = 0, freshReturned = 0, scanReturn100 = 0, trackReturn86 = 0;
+    let refreshed = 0, failed = 0, freshPod = 0, freshReturned = 0, scanReturn100 = 0, trackReturn86 = 0, trackReturnText = 0;
     let shipmentTrackReturned = 0, shipmentTrackPod = 0, shipmentTrackFailedBatches = 0, terminalMismatch = 0;
     const failedSet = new Set();
     for (let offset = 0; offset < candidates.length; offset += CHUNK_SIZE) {
@@ -344,6 +362,7 @@ async function runJob(job) {
       freshReturned += outcome.freshReturned;
       scanReturn100 += outcome.scanReturn100;
       trackReturn86 += outcome.trackReturn86;
+      trackReturnText += outcome.trackReturnText;
       shipmentTrackReturned += outcome.shipmentTrackReturned;
       shipmentTrackPod += outcome.shipmentTrackPod;
       shipmentTrackFailedBatches += outcome.shipmentTrackFailedBatches;
@@ -353,16 +372,16 @@ async function runJob(job) {
       writeJob(job, {
         status: 'RUNNING', progress: Math.max(2, Math.min(98, Math.floor(((offset + chunk.length) / candidates.length) * 98))),
         completed: Math.min(offset + chunk.length, candidates.length), refreshed, failed,
-        freshPod, freshReturned, scanReturn100, trackReturn86, shipmentTrackReturned, shipmentTrackPod, shipmentTrackFailedBatches, terminalMismatch,
-        message: `全量非终态复核中 · 已处理 ${Math.min(offset + chunk.length, candidates.length)}/${candidates.length} · CE确认POD ${freshPod} · CE确认退回 ${freshReturned} · shipment-track退回 ${shipmentTrackReturned} · 待重试 ${failed}`
+        freshPod, freshReturned, scanReturn100, trackReturn86, trackReturnText, shipmentTrackReturned, shipmentTrackPod, shipmentTrackFailedBatches, terminalMismatch,
+        message: `全量非终态复核中 · 已处理 ${Math.min(offset + chunk.length, candidates.length)}/${candidates.length} · CE确认POD ${freshPod} · CE确认退回 ${freshReturned} · 轨迹86 ${trackReturn86} · 轨迹退回文本 ${trackReturnText} · 待重试 ${failed}`
       });
     }
     const after = buildSummary(selection, db);
     writeJob(job, {
       status: 'COMPLETED', progress: 100, completed: candidates.length, refreshed, failed, before, after,
-      freshPod, freshReturned, scanReturn100, trackReturn86, shipmentTrackReturned, shipmentTrackPod, shipmentTrackFailedBatches, terminalMismatch,
+      freshPod, freshReturned, scanReturn100, trackReturn86, trackReturnText, shipmentTrackReturned, shipmentTrackPod, shipmentTrackFailedBatches, terminalMismatch,
       newlyPod: Math.max(0, after.pod - before.pod), newlyReturned: Math.max(0, after.returned - before.returned),
-      message: `复核完成 · 本次从全部上传数据中重新查询 ${candidates.length.toLocaleString('zh-CN')} 票 · 新增POD ${Math.max(0, after.pod - before.pod)} · 新增退回 ${Math.max(0, after.returned - before.returned)} · CE退回证据 ${freshReturned}（扫描100=${scanReturn100}，轨迹86=${trackReturn86}，shipment-track=${shipmentTrackReturned}）· CE确认POD ${freshPod}（shipment-track=${shipmentTrackPod}）· 无新鲜终态证据但分析曾声称终态 ${terminalMismatch} · shipment-track失败批次 ${shipmentTrackFailedBatches} · 仍非终态 ${after.toRefresh}`,
+      message: `复核完成 · 本次从全部上传数据中重新查询 ${candidates.length.toLocaleString('zh-CN')} 票 · 新增POD ${Math.max(0, after.pod - before.pod)} · 新增退回 ${Math.max(0, after.returned - before.returned)} · CE退回证据 ${freshReturned}（扫描100=${scanReturn100}，轨迹86=${trackReturn86}，轨迹退回文本=${trackReturnText}，shipment-track=${shipmentTrackReturned}）· CE确认POD ${freshPod}（shipment-track=${shipmentTrackPod}）· 无新鲜终态证据但分析曾声称终态 ${terminalMismatch} · shipment-track失败批次 ${shipmentTrackFailedBatches} · 仍非终态 ${after.toRefresh}`,
       completedAt: new Date().toISOString()
     });
   } catch (error) {
@@ -375,7 +394,7 @@ function summaryHandler(req, res) {
   try {
     const selection = validateSelection(req.query || {});
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('X-CE-QC-History-Authority', 'V222-UPLOADED-RANGE');
+    res.setHeader('X-CE-QC-History-Authority', 'V223-UPLOADED-RANGE');
     res.json(buildSummary(selection));
   } catch (error) { res.status(400).json({ ok: false, error: error?.message || String(error) }); }
 }
@@ -389,8 +408,8 @@ function startHandler(req, res) {
       const active = jobs.get(activeId);
       return res.status(202).json({ ok: true, reused: true, jobId: active.jobId, status: active.status, progress: active.progress, message: active.message });
     }
-    const jobId = `HREF222-${Date.now()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-    const job = { ok: true, version: VERSION, jobId, selection, status: 'QUEUED', progress: 0, message: '已创建全上传区间非终态复核任务（扫描+轨迹+shipment-track）', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const jobId = `HREF223-${Date.now()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const job = { ok: true, version: VERSION, jobId, selection, status: 'QUEUED', progress: 0, message: '已创建全上传区间非终态复核任务（终态事件锁）', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     jobs.set(jobId, job); activeByKey.set(key, jobId); setImmediate(() => runJob(job));
     res.status(202).json({ ok: true, jobId, status: job.status, progress: 0, message: job.message });
   } catch (error) { res.status(400).json({ ok: false, error: error?.message || String(error) }); }
@@ -404,19 +423,19 @@ function jobHandler(req, res) {
 }
 
 const previousGet = express.application.get;
-express.application.get = function v222HistoryGet(pathValue, ...handlers) {
+express.application.get = function v223HistoryGet(pathValue, ...handlers) {
   const path = String(pathValue || '');
   if (path === SUMMARY_ROUTE && handlers.length) {
-    console.log('[CE-QC][V222] replaced history summary with uploaded-range authority');
+    console.log('[CE-QC][V223] replaced history summary with uploaded-range authority');
     return this.route(pathValue).get(summaryHandler);
   }
   if (path === JOB_ROUTE && handlers.length) return this.route(pathValue).get(jobHandler);
   return previousGet.call(this, pathValue, ...handlers);
 };
 const previousPost = express.application.post;
-express.application.post = function v222HistoryPost(pathValue, ...handlers) {
+express.application.post = function v223HistoryPost(pathValue, ...handlers) {
   if (String(pathValue || '') === START_ROUTE && handlers.length) {
-    console.log('[CE-QC][V222] full uploaded non-terminal refresh includes shipment-track return evidence');
+    console.log('[CE-QC][V223] terminal POD/return events remain locked even when later administrative track rows exist');
     return this.route(pathValue).post(startHandler);
   }
   return previousPost.call(this, pathValue, ...handlers);
