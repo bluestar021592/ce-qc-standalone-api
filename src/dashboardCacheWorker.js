@@ -4,10 +4,15 @@ import { closeDb, getDb, nowIso } from './db.js';
 import {
   getDashboardCacheStatus,
   markDashboardCacheDirty,
-  refreshDashboardCacheDate,
   refreshDashboardCacheDirty,
   warmDashboardCacheRange
 } from './rangeDashboardStore.js';
+import {
+  latestCompletedDashboardDate,
+  recentCompletedDashboardDates,
+  refreshV235CurrentDashboardCacheDate,
+  V235_DASHBOARD_CURRENT_CACHE_ID
+} from './v235DashboardCurrentCache.js';
 
 const args = process.argv.slice(2);
 const valueAfter = flag => {
@@ -24,8 +29,11 @@ const PURGE_BLOCK_KEY = 'data_purge_block_until';
 const workerId = `${process.pid}-${Date.now()}`;
 let workerLeaseOwned = false;
 
+function writeResult(result) {
+  process.stdout.write(`${JSON.stringify({ ok: true, reason, reportDate, cacheId: V235_DASHBOARD_CURRENT_CACHE_ID, result })}\n`);
+}
 function writeSkip(skipReason) {
-  process.stdout.write(`${JSON.stringify({ ok: true, reason, reportDate, result: { skipped: true, reason: skipReason } })}\n`);
+  writeResult({ skipped: true, reason: skipReason });
 }
 
 function activeForegroundRun(db = getDb()) {
@@ -39,6 +47,12 @@ function acquireWorkerLease() {
   try {
     const purgeUntil = Number(db.prepare('SELECT value FROM app_meta WHERE key=?').get(PURGE_BLOCK_KEY)?.value || 0);
     if (Number.isFinite(purgeUntil) && purgeUntil > Date.now()) {
+      db.exec('ROLLBACK');
+      return false;
+    }
+    const existingUntil = Number(db.prepare('SELECT value FROM app_meta WHERE key=?').get(WORKER_ACTIVE_UNTIL_KEY)?.value || 0);
+    const existingOwner = String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(WORKER_ACTIVE_KEY)?.value || '');
+    if (existingOwner && Number.isFinite(existingUntil) && existingUntil > Date.now() && existingOwner !== workerId) {
       db.exec('ROLLBACK');
       return false;
     }
@@ -63,9 +77,7 @@ function releaseWorkerLease() {
     db.exec('BEGIN IMMEDIATE');
     try {
       const owner = String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(WORKER_ACTIVE_KEY)?.value || '');
-      if (owner === workerId) {
-        db.prepare('DELETE FROM app_meta WHERE key IN (?,?)').run(WORKER_ACTIVE_KEY, WORKER_ACTIVE_UNTIL_KEY);
-      }
+      if (owner === workerId) db.prepare('DELETE FROM app_meta WHERE key IN (?,?)').run(WORKER_ACTIVE_KEY, WORKER_ACTIVE_UNTIL_KEY);
       db.exec('COMMIT');
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch {}
@@ -76,34 +88,21 @@ function releaseWorkerLease() {
 }
 
 try {
-  // Import only marks a date dirty. Rebuilding a dashboard before scan/track
-  // completion produces a half-finished cache and competes with the foreground
-  // run on the same large SQLite file. RUN_COMPLETED will rebuild it later.
+  // Import only marks a date dirty. Rebuilding before scan/track completion would
+  // cache an incomplete state. The existing *_RUN_COMPLETED hooks call this worker
+  // again after the unified snapshot has become COMPLETED.
   if (/^(?:UNIFIED_IMPORT|DAILY_IMPORT|SHOPEE_IMPORT)$/.test(reason)) {
     writeSkip('IMPORT_DIRTY_ONLY_WAIT_FOR_RUN_COMPLETED');
     process.exit(0);
   }
 
-  // STARTUP_WARM is intentionally a true no-op. Return before asking for cache
-  // status, because getDashboardCacheStatus() itself opens SQLite. On the large
-  // local CE QC database that second connection used to compete with the first
-  // browser reads ~1.5s after startup and made the UI feel frozen again.
-  if (!reportDate && reason === 'STARTUP_WARM') {
-    writeSkip('STARTUP_WARM_DISABLED_FOR_FAST_FIRST_PAINT');
-    process.exit(0);
-  }
-
-  // Scheduled cache maintenance is subordinate to user-facing scan/track work.
-  // Read only two tiny lock tables, then leave immediately if a foreground run
-  // is active. No cache query is allowed to contend with the live business run.
   if (activeForegroundRun()) {
     writeSkip('FOREGROUND_PROCESSING_ACTIVE');
     closeDb();
     process.exit(0);
   }
-
   if (!acquireWorkerLease()) {
-    writeSkip('FULL_DATA_PURGE_ACTIVE');
+    writeSkip('CACHE_OR_PURGE_WORKER_ALREADY_ACTIVE');
     closeDb();
     process.exit(0);
   }
@@ -111,23 +110,29 @@ try {
   let result;
   if (reportDate) {
     markDashboardCacheDirty(reportDate, reason);
-    result = refreshDashboardCacheDate(reportDate, { force: true });
+    result = refreshV235CurrentDashboardCacheDate(reportDate, { force: true });
+  } else if (reason === 'V235_INTERACTIVE_STARTUP' || reason === 'STARTUP_WARM') {
+    // First build the latest completed date so the visible current dashboard gets
+    // real POD/return/open metrics quickly, then quietly reconcile the six prior
+    // valid dates for the seven-day trend. Everything happens in this child process.
+    const dates = recentCompletedDashboardDates(7);
+    const results = [];
+    for (const date of dates) {
+      results.push(refreshV235CurrentDashboardCacheDate(date, { force: false }));
+    }
+    result = { mode: 'LATEST_PLUS_RECENT_7', latestDate: dates[0] || latestCompletedDashboardDate(), checked: dates.length, refreshed: results.filter(item => item.refreshed).length, results };
   } else {
     const status = getDashboardCacheStatus();
-    if (Number(status.cachedDates || 0) === 0) {
-      // If a later scheduled refresh finds an empty cache, warm only a bounded
-      // recent window instead of scanning 180 historical days in one burst.
-      result = warmDashboardCacheRange({ days: warmDays });
-    } else {
-      result = refreshDashboardCacheDirty({ limit: 24, recentDays: 30 });
-    }
+    if (Number(status.cachedDates || 0) === 0) result = warmDashboardCacheRange({ days: warmDays });
+    else result = refreshDashboardCacheDirty({ limit: 24, recentDays: 30 });
   }
-  process.stdout.write(`${JSON.stringify({ ok: true, reason, result, cache: getDashboardCacheStatus() })}\n`);
+
+  writeResult(result);
   releaseWorkerLease();
   closeDb();
   process.exit(0);
 } catch (error) {
-  process.stderr.write(`${JSON.stringify({ ok: false, reason, error: error?.message || String(error) })}\n`);
+  process.stderr.write(`${JSON.stringify({ ok: false, reason, cacheId: V235_DASHBOARD_CURRENT_CACHE_ID, error: error?.stack || error?.message || String(error) })}\n`);
   try { releaseWorkerLease(); } catch {}
   try { closeDb(); } catch {}
   process.exit(1);
