@@ -1,5 +1,5 @@
 (function installDrilldownRuntimeV58(global){
-  const VERSION='2026-08-11-v61-canonical-drilldown-v4';
+  const VERSION='2026-08-22-v237-canonical-drilldown-v5';
   const PATH_TYPES=new Map([['/ce','CE'],['/ceaf','CEAF'],['/tbkh','TBKH'],['/ali1688','ALI1688'],['/shopeecn','SHOPEECN'],['/shopeevn','SHOPEEVN']]);
   const COMMON={
     '签收件数':'podClosed','今日POD':'podClosed','签收率':'podClosed','POD率':'podClosed','首次妥投率':'podClosed',
@@ -134,6 +134,11 @@
   }
 
   async function syncSevereMetric(){
+    // V237 already owns the live dashboard summary. The legacy reconciliation
+    // probe performs a multi-second synchronous SQLite aggregate and its DOM
+    // observer used to launch it repeatedly during first paint. Keep drilldown
+    // clicks, but never run this passive reconciliation read on V237 pages.
+    if(global.__CE_QC_V237_DASHBOARD_OWNER__||global.__CE_QC_V234_DASHBOARD_LIVE__)return;
     const type=pageBusinessType(null);if(!type||String(type).startsWith('SHOPEE'))return;
     const range=dateRange();if(!range.to)return;
     try{
@@ -161,15 +166,16 @@
     global.addEventListener('click',onClick,true);
     const observer=new MutationObserver(()=>{
       stabilizeMetrics();
+      if(global.__CE_QC_V237_DASHBOARD_OWNER__||global.__CE_QC_V234_DASHBOARD_LIVE__)return;
       clearTimeout(global.__CE_QC_V58_SYNC_TIMER__);
       global.__CE_QC_V58_SYNC_TIMER__=setTimeout(syncSevereMetric,80);
     });
     observer.observe(document.documentElement,{subtree:true,childList:true});
     stabilizeMetrics();
-    setTimeout(()=>{stabilizeMetrics();void syncSevereMetric();},100);
+    if(!(global.__CE_QC_V237_DASHBOARD_OWNER__||global.__CE_QC_V234_DASHBOARD_LIVE__))setTimeout(()=>{stabilizeMetrics();void syncSevereMetric();},100);
     setTimeout(stabilizeMetrics,500);
-    document.documentElement.dataset.v58Drilldown='4';
-    console.info('[CE-QC][DRILLDOWN_V61]',VERSION);
+    document.documentElement.dataset.v58Drilldown='5';
+    console.info('[CE-QC][DRILLDOWN_V237]',VERSION);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })(window);
