@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID='2026-08-22-v215-whpp-instant-summary-v1';
+const PATCH_ID='2026-08-22-v216-whpp-import-parity-v1';
 const ROUTE='/api/v132/whpp-fast-summary';
 const CACHE_MS=Math.max(5_000,Number(process.env.V132_WHPP_FAST_CACHE_MS||15_000));
 const cache=new Map();
@@ -58,11 +58,22 @@ function latestDate(db,requested=''){
   if(explicit)return explicit;
   return String(db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP' ORDER BY reportDate DESC LIMIT 1").get()?.reportDate||'');
 }
+function rawWhppTotal(db,reportDate,daily={},historySource={}){
+  if(daily?.totalCount!==undefined&&daily?.totalCount!==null)return num(daily.totalCount);
+  const historyTotal=Number(historySource?.total);
+  if(Number.isFinite(historyTotal)&&historyTotal>=0)return historyTotal;
+  return num(db.prepare(`
+    SELECT COUNT(DISTINCT shipmentCode) count
+    FROM business_daily_parse_rows
+    WHERE businessType='WHPP' AND reportDate=?
+  `).get(reportDate)?.count);
+}
 
 // First paint must never scan business_final_rows or JSON-extract raw evidence.
-// Those tables are large on the production database and used to make the WHPP
-// page wait minutes even though the home dashboard already knew today's count.
-// The dedicated page now reads only the tiny daily total + persisted history summary.
+// Immediately after a unified daily import WHPP can already exist in
+// business_daily_parse_rows before business_daily_reports/history is finalized.
+// Use the same lightweight fallback as the home dashboard so the dedicated WHPP
+// page cannot show 0 while the home card already shows the real count.
 function buildFastSummary(requested=''){
   const started=Date.now();
   const db=getDb();
@@ -75,14 +86,14 @@ function buildFastSummary(requested=''){
   const daily=db.prepare("SELECT totalCount,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||{};
   const history=db.prepare("SELECT summaryJson,updatedAt FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||null;
   const source=safeJson(history?.summaryJson,{});
-  const fingerprint=`${reportDate}|${daily.updatedAt||''}|${history?.updatedAt||''}`;
+  const rawTotal=rawWhppTotal(db,reportDate,daily,source);
+  const fingerprint=`${reportDate}|${rawTotal}|${daily.updatedAt||''}|${history?.updatedAt||''}`;
   const hit=cache.get(reportDate);
   if(hit&&hit.fingerprint===fingerprint&&Date.now()-hit.at<CACHE_MS){
     return {...hit.payload,cacheHit:true,serverBuildMs:Date.now()-started};
   }
 
-  const dailyTotal=num(daily.totalCount);
-  const metrics={...source,total:num(source.total??dailyTotal)};
+  const metrics={...source,total:num(source.total??rawTotal)};
   const regions=history?summaryRegions(source):summaryRegions({});
   delete metrics.accounting;
   delete metrics.snapshotId;
@@ -103,7 +114,8 @@ function buildFastSummary(requested=''){
   const snapshotStatus=history?(retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED'):'PENDING';
   const payload={
     ok:true,patchId:PATCH_ID,reportDate,total:metrics.total,completed:Boolean(history),snapshotStatus,
-    metrics,regions,generatedAt:new Date().toISOString(),cacheHit:false,summarySource:history?'BUSINESS_HISTORY_SUMMARY':'DAILY_TOTAL_PENDING'
+    metrics,regions,generatedAt:new Date().toISOString(),cacheHit:false,
+    summarySource:history?'BUSINESS_HISTORY_SUMMARY':(daily?.totalCount!==undefined&&daily?.totalCount!==null?'DAILY_TOTAL_PENDING':'PARSE_ROWS_PENDING')
   };
   cache.set(reportDate,{fingerprint,at:Date.now(),payload});
   return {...payload,serverBuildMs:Date.now()-started};
@@ -111,7 +123,7 @@ function buildFastSummary(requested=''){
 
 const previousListen=express.application.listen;
 let installed=false;
-express.application.listen=function v215WhppInstantSummaryListen(...args){
+express.application.listen=function v216WhppInstantSummaryListen(...args){
   if(!installed){
     installed=true;
     this.get(ROUTE,(req,res)=>{
@@ -120,9 +132,9 @@ express.application.listen=function v215WhppInstantSummaryListen(...args){
         const payload=buildFastSummary(req.query.reportDate||req.query.date||'');
         const duration=Date.now()-started;
         res.setHeader('Cache-Control','private, max-age=5');
-        res.setHeader('X-CE-QC-WHPP-Summary','V215');
+        res.setHeader('X-CE-QC-WHPP-Summary','V216');
         res.setHeader('Server-Timing',`whppSummary;dur=${duration}`);
-        if(duration>=250)console.log(`[CE-QC][PERF][V215] ${ROUTE} ${duration}ms reportDate=${payload.reportDate||''}`);
+        if(duration>=250)console.log(`[CE-QC][PERF][V216] ${ROUTE} ${duration}ms reportDate=${payload.reportDate||''}`);
         res.json(payload);
       }catch(error){
         res.status(500).json({ok:false,patchId:PATCH_ID,error:error?.message||String(error)});
