@@ -1,5 +1,10 @@
 (function installRoutingV48(global){
-  const VERSION='2026-08-11-v48-final-location-routing-ui-v2';
+  const VERSION='2026-08-23-v239-owner-retired-passive-routing-v1';
+  if(global.__CE_QC_V237_DASHBOARD_OWNER__){
+    global.__CE_QC_V48_ROUTING_RETIRED__={version:VERSION,reason:'V239_SINGLE_DASHBOARD_OWNER'};
+    console.info('[CE-QC][V239_ROUTING_V48_RETIRED]',VERSION,'passive /api/v48/routing scans disabled; V238 current cards own routing metrics and drilldown');
+    return;
+  }
   const PATH_TYPE={
     '/ce':'CE','/ceaf':'CEAF','/tbkh':'TBKH','/ali1688':'ALI1688'
   };
@@ -14,7 +19,7 @@
   let lastKey='';
   let lastPayload=null;
 
-  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
 
   function businessType(){return PATH_TYPE[location.pathname]||'';}
