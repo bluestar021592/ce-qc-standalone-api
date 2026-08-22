@@ -26,6 +26,7 @@ const warmDays = Math.max(1, Math.min(60, Number(process.env.DASHBOARD_CACHE_WAR
 const WORKER_ACTIVE_KEY = 'dashboard_cache_worker_active';
 const WORKER_ACTIVE_UNTIL_KEY = 'dashboard_cache_worker_active_until';
 const PURGE_BLOCK_KEY = 'data_purge_block_until';
+const WORKER_LEASE_MS = 5 * 60_000;
 const workerId = `${process.pid}-${Date.now()}`;
 let workerLeaseOwned = false;
 
@@ -41,6 +42,16 @@ function activeForegroundRun(db = getDb()) {
   return Boolean(db.prepare("SELECT 1 FROM business_run_locks WHERE status IN ('running','paused','paused_write') LIMIT 1").get());
 }
 
+function ownerPid(owner = '') {
+  const pid = Number(String(owner || '').split('-')[0]);
+  return Number.isInteger(pid) && pid > 0 ? pid : 0;
+}
+function pidAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error?.code === 'EPERM'; }
+}
+
 function acquireWorkerLease() {
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
@@ -52,11 +63,17 @@ function acquireWorkerLease() {
     }
     const existingUntil = Number(db.prepare('SELECT value FROM app_meta WHERE key=?').get(WORKER_ACTIVE_UNTIL_KEY)?.value || 0);
     const existingOwner = String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(WORKER_ACTIVE_KEY)?.value || '');
-    if (existingOwner && Number.isFinite(existingUntil) && existingUntil > Date.now() && existingOwner !== workerId) {
+    const existingPid = ownerPid(existingOwner);
+    const activeExistingLease = existingOwner && Number.isFinite(existingUntil) && existingUntil > Date.now() && existingOwner !== workerId;
+    if (activeExistingLease && pidAlive(existingPid)) {
       db.exec('ROLLBACK');
       return false;
     }
-    const until = Date.now() + 15 * 60_000;
+    if (activeExistingLease && !pidAlive(existingPid)) {
+      db.prepare('DELETE FROM app_meta WHERE key IN (?,?)').run(WORKER_ACTIVE_KEY, WORKER_ACTIVE_UNTIL_KEY);
+      process.stderr.write(`[CE-QC][V239] cleared stale dashboard-cache lease owner=${existingOwner} until=${existingUntil}\n`);
+    }
+    const until = Date.now() + WORKER_LEASE_MS;
     const upsert = db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?)
       ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`);
     upsert.run(WORKER_ACTIVE_KEY, workerId, nowIso());
