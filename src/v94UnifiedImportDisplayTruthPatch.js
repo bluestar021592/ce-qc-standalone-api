@@ -1,6 +1,7 @@
 import express from 'express';
 import { inspectV90FastDashboard } from './v90FastDashboardReadPatch.js';
 import './v213FastBootstrapRoutePatch.js';
+import './v214FastTrendRoutePatch.js';
 
 export const V94_UNIFIED_IMPORT_DISPLAY_TRUTH_ID = '2026-08-13-v94-unified-import-display-truth-v1';
 const ROUTE = '/api/import/unified-daily-report';
