@@ -28,9 +28,9 @@ function applyStat(stat, row) {
       if (row.attemptNo === 1) stat.pvA1++; else if (row.attemptNo === 2) stat.pvA2++; else if (row.attemptNo >= 3) stat.pvA3++;
       if (referenceDays > 0) stat.pvDays.push(referenceDays);
     }
-  } else stat.notPod++;
-  if (row.delivering) stat.delivery++;
-  if (row.pending) stat.pending++;
+  } else if (!row.returned) stat.notPod++;
+  if (!row.returned && row.delivering) stat.delivery++;
+  if (!row.returned && row.pending) stat.pending++;
   if (row.returned) stat.returned++;
 }
 export function statsOf(rows, range) {
@@ -51,10 +51,10 @@ export function bucketRows(rows) {
     '外省明细': filter(row => row.area === '外省'),
     '门店明细': filter(row => row.store),
     'POD明细': filter(row => row.pod),
-    '未POD明细': filter(row => !row.pod),
-    '分配派送中明细': filter(row => row.delivering),
-    'Pending明细': filter(row => row.pending),
-    '退回明细': filter(row => row.returned)
+    '未POD明细': filter(row => !row.pod && !row.returned),
+    '分配派送中明细': filter(row => !row.returned && row.delivering),
+    'Pending明细': filter(row => !row.returned && row.pending),
+    '退回明细': filter(row => row.returned && !row.pod)
   };
 }
 export function anchorMaps(bucket) {
