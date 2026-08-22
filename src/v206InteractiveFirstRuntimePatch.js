@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import './v234DashboardLiveTruthPatch.js';
+import './v236DashboardCurrentRoutePatch.js';
 
-const PATCH_ID = '2026-08-22-v235-interactive-first-runtime-v3';
+const PATCH_ID = '2026-08-22-v236-interactive-first-runtime-v4';
 
 // Normal dashboard/cache maintenance remains deferred so it cannot block the
 // synchronous SQLite web process. A tiny isolated child primes only the latest
@@ -32,17 +33,17 @@ function primeDashboardCacheInChild() {
         },
         stdio: ['ignore','ignore','ignore']
       });
-      child.once('error', error => console.warn('[CE-QC][V235] dashboard cache prime child failed:', error?.message || error));
+      child.once('error', error => console.warn('[CE-QC][V236] dashboard cache prime child failed:', error?.message || error));
       child.unref?.();
-      console.log(`[CE-QC][V235] dashboard cache prime child started pid=${child.pid || '-'}; main dashboard process stays interactive.`);
+      console.log(`[CE-QC][V236] dashboard cache prime child started pid=${child.pid || '-'}; main dashboard process stays interactive.`);
     } catch (error) {
-      console.warn('[CE-QC][V235] dashboard cache prime spawn failed:', error?.message || error);
+      console.warn('[CE-QC][V236] dashboard cache prime spawn failed:', error?.message || error);
     }
   }, 2500);
   timer.unref?.();
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V235] ${PATCH_ID} live web process cache-only; isolated latest-day cache prime scheduled; startup POD repair skipped.`);
+console.log(`[CE-QC][V236] ${PATCH_ID} fresh exact current-reader installed; isolated cache prime scheduled; startup POD repair skipped.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
