@@ -5,6 +5,8 @@ const live=read('public/v234-dashboard-live.js');
 const home=read('public/v237-home-dashboard-owner.js');
 const guard=read('public/v237-dashboard-owner-guard.js');
 const drill=read('public/v58-drilldown-runtime.js');
+const legacyNav=read('public/v109-instant-business-navigation.js');
+const legacyV89=read('public/v89-fast-dashboard.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const route=read('src/v236DashboardCurrentRoutePatch.js');
 const current=read('src/v236DashboardCurrentRead.js');
@@ -36,6 +38,12 @@ assert.match(guard,/__CE_QC_V237_DASHBOARD_OWNER__=true/,'head guard must declar
 assert.match(guard,/\/api\\\/v27\\\/trends/,'legacy V232 trend network read must be retired');
 assert.match(guard,/\/api\\\/v55\\\/reconciliation/,'legacy passive reconciliation read must be retired');
 assert.match(drill,/__CE_QC_V237_DASHBOARD_OWNER__/,'legacy drilldown observer must skip passive reconciliation on owner pages');
+assert.match(legacyNav,/v239-single-owner-navigation-v1/,'legacy navigation layer must recognize V239 single-owner mode');
+assert.match(legacyNav,/V239_SINGLE_DASHBOARD_OWNER/,'legacy hydratePageData must return without launching routing/CEAF reads on owner dashboards');
+assert.match(legacyNav,/if\(ownerActive\(\)\)return \{ok:true,skipped:true,source:'V239_SINGLE_DASHBOARD_OWNER'\}/,'legacy CEAF fast-state request must be retired under owner mode');
+assert.match(legacyV89,/v239-retired-by-dashboard-owner-v1/,'legacy V89 summary layer must be retired under owner mode');
+assert.match(legacyV89,/if \(ownerActive\(\)\) return global\.__CE_QC_V237_LIVE_CURRENT__ \|\| null/,'legacy V89 fetchSummary must not hit instant-dashboard while owner is active');
+assert.match(legacyV89,/V239_V89_RETIRED/,'runtime must log that legacy V89 polling is retired');
 
 assert.match(inject,/v238-dashboard-owner-ui-injection-v1/,'delivered HTML must use V238 owner injection');
 assert.match(inject,/v235-cache-ready-reload\.js/,'injector must explicitly strip the old cache-ready reload poller');
@@ -54,9 +62,12 @@ assert.match(cache,/normalizedDashboardCoverageReady/,'cache worker eligibility 
 assert.match(cache,/isPod=0 AND isReturned=0 AND isCancelled=0/,'terminal SHOPEE rows must be excluded from cached abnormal metrics');
 assert.match(trend,/V238_EXACT_DASHBOARD_CACHE_ONLY/,'web trend reader must be exact cache-only');
 assert.match(trend,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'trend endpoint must never perform per-day direct normalized scans in web process');
-assert.match(runtime,/v238-interactive-first-cache-prime-v1/,'runtime must install V238 cache-prime behavior');
+assert.match(runtime,/v239-interactive-first-cache-prime-observable-v1/,'runtime must install V239 observable cache-prime behavior');
 assert.match(runtime,/3_000/,'background cache child should start after short first-paint grace period');
+assert.match(runtime,/dashboard cache prime child exit code=/,'cache-prime completion/failure must be visible in startup log');
 assert.match(runtime,/CE_QC_SKIP_STARTUP_POD_REPAIR/,'startup POD repair must remain outside interactive first paint');
 assert.match(worker,/recentCompletedDashboardDates\(7\)/,'child worker must prepare recent seven valid ready dates');
+assert.match(worker,/WORKER_LEASE_MS = 5 \* 60_000/,'dashboard cache lease must be bounded to five minutes');
+assert.match(worker,/cleared stale dashboard-cache lease/,'worker must recover a crashed stale lease without waiting fifteen minutes');
 
-console.log('[V238] single-owner + terminal-safe current + cache-only trend + bounded no-reload retry source smoke passed');
+console.log('[V239] single-owner + retired legacy hydration/V89 polling + terminal-safe current + cache-only trend + observable prime smoke passed');
