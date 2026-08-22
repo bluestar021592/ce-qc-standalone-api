@@ -39,7 +39,7 @@ new Function(cardSource);
 must(cardSource.includes('占本业务'), 'numeric-card percentage runtime token missing');
 const chartSource=fs.readFileSync('public/dashboard-chart-v18.js','utf8');
 new Function(chartSource);
-must(chartSource.includes('短区间百分比直接标在每日节点上'), 'daily percentage chart-label token missing');
+must(chartSource.includes('短区间每一天的数值直接标在节点上'), 'daily value chart-label token missing');
 const outcomeSource=fs.readFileSync('public/v233-current-outcome-truth.js','utf8');
 new Function(outcomeSource);
 must(outcomeSource.includes('当前POD / 退回 / 未闭环真实状态'), 'V233 current-outcome truth token missing');
