@@ -7,6 +7,9 @@ const guard=read('public/v237-dashboard-owner-guard.js');
 const drill=read('public/v58-drilldown-runtime.js');
 const legacyNav=read('public/v109-instant-business-navigation.js');
 const legacyV89=read('public/v89-fast-dashboard.js');
+const legacyRouting=read('public/routing-v48.js');
+const legacyClosure=read('public/v133-closure-rate.js');
+const shell=read('src/v44WhppUiPatch.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const route=read('src/v236DashboardCurrentRoutePatch.js');
 const current=read('src/v236DashboardCurrentRead.js');
@@ -14,6 +17,10 @@ const cache=read('src/v235DashboardCurrentCache.js');
 const trend=read('src/v237DashboardTrendRead.js');
 const runtime=read('src/v206InteractiveFirstRuntimePatch.js');
 const worker=read('src/dashboardCacheWorker.js');
+
+for(const [name,source] of [['v234-dashboard-live',live],['v237-home-dashboard-owner',home],['v237-dashboard-owner-guard',guard],['v109-instant-business-navigation',legacyNav],['v89-fast-dashboard',legacyV89],['routing-v48',legacyRouting],['v133-closure-rate',legacyClosure]]){
+  assert.doesNotThrow(()=>new Function(source),`${name} must compile as browser JavaScript`);
+}
 
 assert.match(live,/v238-dashboard-owner-client-v1/,'business owner must run V238 client');
 assert.match(live,/__CE_QC_V237_DASHBOARD_OWNER__/,'single dashboard ownership flag must remain active');
@@ -44,6 +51,14 @@ assert.match(legacyNav,/if\(ownerActive\(\)\)return \{ok:true,skipped:true,sourc
 assert.match(legacyV89,/v239-retired-by-dashboard-owner-v1/,'legacy V89 summary layer must be retired under owner mode');
 assert.match(legacyV89,/if \(ownerActive\(\)\) return global\.__CE_QC_V237_LIVE_CURRENT__ \|\| null/,'legacy V89 fetchSummary must not hit instant-dashboard while owner is active');
 assert.match(legacyV89,/V239_V89_RETIRED/,'runtime must log that legacy V89 polling is retired');
+assert.match(legacyRouting,/v239-owner-retired-passive-routing-v1/,'legacy routing client must be retired under dashboard owner');
+assert.match(legacyRouting,/V239_ROUTING_V48_RETIRED/,'legacy routing retirement must be observable');
+assert.match(legacyClosure,/v239-owner-local-closure-v1/,'closure cards must use owner-local arithmetic');
+assert.match(legacyClosure,/if\(ownerActive\(\)\)return null/,'closure owner mode must not call the legacy closure summary route');
+assert.match(shell,/\/routing-v48\.js\?v=20260823-v239-1/,'owner shell must cache-bust retired routing client');
+assert.match(shell,/\/v89-fast-dashboard\.js\?v=20260823-v239-1/,'owner shell must cache-bust retired V89 client');
+assert.match(shell,/\/v109-instant-business-navigation\.js\?v=20260823-v239-1/,'owner shell must cache-bust retired hydration client');
+assert.match(shell,/\/v133-closure-rate\.js\?v=20260823-v239-1/,'owner shell must cache-bust owner-local closure client');
 
 assert.match(inject,/v238-dashboard-owner-ui-injection-v1/,'delivered HTML must use V238 owner injection');
 assert.match(inject,/v235-cache-ready-reload\.js/,'injector must explicitly strip the old cache-ready reload poller');
@@ -70,4 +85,4 @@ assert.match(worker,/recentCompletedDashboardDates\(7\)/,'child worker must prep
 assert.match(worker,/WORKER_LEASE_MS = 5 \* 60_000/,'dashboard cache lease must be bounded to five minutes');
 assert.match(worker,/cleared stale dashboard-cache lease/,'worker must recover a crashed stale lease without waiting fifteen minutes');
 
-console.log('[V239] single-owner + retired legacy hydration/V89 polling + terminal-safe current + cache-only trend + observable prime smoke passed');
+console.log('[V239] single-owner + retired legacy hydration/V89/routing/closure + terminal-safe current + cache-only trend + observable prime smoke passed');
