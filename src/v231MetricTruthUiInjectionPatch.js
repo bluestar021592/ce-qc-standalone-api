@@ -14,10 +14,12 @@ export const V249_WHPP_DETAIL_UI_INJECTION_ID = '2026-08-23-v249-whpp-exact-dril
 export const V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID = '2026-08-23-v251-shopee-final-render-ui-v1';
 export const V251_SHOPEE_FINAL_UI_INJECTION_ID = V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID;
 export const V252_LIFECYCLE_UI_INJECTION_ID = '2026-08-23-v252-qc-lifecycle-ui-v1';
+export const V253_DASHBOARD_FAST_UI_INJECTION_ID = '2026-08-23-v253-final-fast-dashboard-owner-v1';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260822-v238-1';
 const LIVE_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
 const COALESCER_MARKER = '/v239-dashboard-request-coalescer.js?v=20260823-v239-1';
+const V253_FAST_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v253-1';
 const V252_LIFECYCLE_MARKER = '/v252-qc-lifecycle-ui.js?v=20260823-v252-1';
 const HOME_MARKER = '/v237-home-dashboard-owner.js?v=20260823-v247-1';
 const V248_SHOPEE_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v248-1';
@@ -33,7 +35,7 @@ function stripScript(body, fileName) {
 }
 
 function prepareOwnerHtml(body) {
-  for (const file of ['v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v237-dashboard-owner-guard.js','v237-home-dashboard-owner.js','v239-dashboard-request-coalescer.js','v244-shopee-trend-owner.js','v246-qc-tracking.js','v249-whpp-detail-owner.js','v250-shopee-metric-visibility.js','v252-qc-lifecycle-ui.js']) {
+  for (const file of ['v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v237-dashboard-owner-guard.js','v237-home-dashboard-owner.js','v239-dashboard-request-coalescer.js','v244-shopee-trend-owner.js','v246-qc-tracking.js','v249-whpp-detail-owner.js','v250-shopee-metric-visibility.js','v252-qc-lifecycle-ui.js','v253-dashboard-fast-owner.js']) {
     body = stripScript(body, file);
   }
   return body
@@ -42,18 +44,19 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v252MetricTruthUiSend(body) {
+express.response.send = function v253MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
     const headTags=[];
     if (!body.includes(GUARD_MARKER)) headTags.push(`  <script src="${GUARD_MARKER}"></script>`);
     if (!body.includes(COALESCER_MARKER)) headTags.push(`  <script src="${COALESCER_MARKER}"></script>`);
+    // V253 is intentionally in <head>: legacy V89/V234 requests are redirected to
+    // indexed cache-independent endpoints before old dashboard clients can fire.
+    if (!body.includes(V253_FAST_MARKER)) headTags.push(`  <script src="${V253_FAST_MARKER}"></script>`);
     if(headTags.length) body = body.replace('</head>', `${headTags.join('\n')}\n</head>`);
     const tags = [];
     if (!body.includes(CHART_MARKER)) tags.push(`  <script src="${CHART_MARKER}"></script>`);
     if (!body.includes(LIVE_MARKER)) tags.push(`  <script src="${LIVE_MARKER}"></script>`);
-    // V252 installs its lightweight Shopee fetch policy before the older home/Shopee
-    // owners execute, then reuses V251's final renderer after those owners exist.
     if (!body.includes(V252_LIFECYCLE_MARKER)) tags.push(`  <script src="${V252_LIFECYCLE_MARKER}"></script>`);
     if (!body.includes(HOME_MARKER)) tags.push(`  <script src="${HOME_MARKER}"></script>`);
     if (!body.includes(V248_SHOPEE_MARKER)) tags.push(`  <script src="${V248_SHOPEE_MARKER}"></script>`);
@@ -72,6 +75,7 @@ express.response.send = function v252MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V250-UI', V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V251-UI', V251_SHOPEE_FINAL_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V252-UI', V252_LIFECYCLE_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V253-UI', V253_DASHBOARD_FAST_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
@@ -83,3 +87,4 @@ console.info('[CE-QC][V248_SHOPEE_TREND_UI]', V248_SHOPEE_TREND_UI_INJECTION_ID,
 console.info('[CE-QC][V249_WHPP_DETAIL_UI]', V249_WHPP_DETAIL_UI_INJECTION_ID, 'WHPP canonical-page handoff and exact V172 drilldown owner delivered last');
 console.info('[CE-QC][V251_SHOPEE_FINAL_OWNER]', V251_SHOPEE_FINAL_UI_INJECTION_ID, 'final Shopee owner wraps canonical renderAll/renderShopeePage and keeps V246 attempt/signing truth visible after every legacy rerender');
 console.info('[CE-QC][V252_LIFECYCLE_UI]', V252_LIFECYCLE_UI_INJECTION_ID, 'Shopee UI uses fast lifecycle-only reads; home replaces cramped dual attempt charts with one QC summary and exact-date PP/PV reads');
+console.info('[CE-QC][V253_DASHBOARD_FAST_OWNER]', V253_DASHBOARD_FAST_UI_INJECTION_ID, 'head-level fast read redirect + cache-independent seven-day trends + compact stale-while-revalidate render ownership enabled');
