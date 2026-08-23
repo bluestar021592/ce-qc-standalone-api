@@ -2,8 +2,9 @@ import './v264TbkhOpenAttemptLifecycle.js';
 import express from 'express';
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
+import { getV263DeliveryEvidenceStatus, requestV263DeliveryEvidenceBackfill } from './v262ShopeeStrictEvidenceBackfill.js';
 
-export const V263_DELIVERY_KPI_TREND_ID='2026-08-23-v263-three-business-delivery-kpi-trend-v2';
+export const V263_DELIVERY_KPI_TREND_ID='2026-08-23-v265-three-business-delivery-kpi-trend-v3';
 const TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const CACHE_MS=15_000;
 const memory=new Map();
@@ -36,7 +37,7 @@ export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',
   ensureV246TrackingSchema(db);
   const key=`${type}|${from}|${to}`;const hit=memory.get(key);if(hit&&Date.now()-hit.at<CACHE_MS)return hit.value;
   const dates=selectedDates(db,type,from,to);
-  if(!dates.length){const empty={ok:true,id:V263_DELIVERY_KPI_TREND_ID,businessType:type,dates:[],daily:[],ticket:[],pod:[],podRate:[],oc:[],ocRate:[],avgSigningDays:[],attempt1:[],attempt2:[],attempt3:[],attemptUnknown:[],attempt1Rate:[],attempt2Rate:[],attempt3Rate:[],attemptCoverageRate:[],signingCoverageRate:[]};memory.set(key,{at:Date.now(),value:empty});return empty;}
+  if(!dates.length){const empty={ok:true,id:V263_DELIVERY_KPI_TREND_ID,businessType:type,dates:[],daily:[],ticket:[],pod:[],podRate:[],oc:[],ocRate:[],avgSigningDays:[],attempt1:[],attempt2:[],attempt3:[],attemptUnknown:[],attempt1Rate:[],attempt2Rate:[],attempt3Rate:[],attemptCoverageRate:[],signingCoverageRate:[],evidenceStatus:getV263DeliveryEvidenceStatus(),evidenceIncomplete:false};memory.set(key,{at:Date.now(),value:empty});return empty;}
   const marks=dates.map(()=>'?').join(',');
   const cacheRows=db.prepare(`SELECT reportDate,
       SUM(COALESCE(CAST(json_extract(metricsJson,'$.total') AS REAL),0)) AS total,
@@ -75,14 +76,22 @@ export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',
       attempt1:a1,attempt2:a2,attempt3:a3,attemptUnknown:unknown,attemptEvidenceCount:known,attemptCoverageRate:pod?pct(known,pod):null,
       attempt1Rate:pod&&known?pct(a1,pod):null,attempt2Rate:pod&&known?pct(a2,pod):null,attempt3Rate:pod&&known?pct(a3,pod):null};
   });
+  const incomplete=daily.some(r=>r.pod>0&&(n(r.attemptEvidenceCount)<r.pod||n(r.signingDaysCount)<r.pod));
   const value={ok:true,id:V263_DELIVERY_KPI_TREND_ID,businessType:type,fromDate:dates[0],toDate:dates.at(-1),dates,daily,
     ticket:daily.map(r=>r.total),pod:daily.map(r=>r.pod),podRate:daily.map(r=>r.podRate),oc:daily.map(r=>r.oc),ocRate:daily.map(r=>r.ocRate),avgSigningDays:daily.map(r=>r.avgSigningDays),
     attempt1:daily.map(r=>r.attempt1),attempt2:daily.map(r=>r.attempt2),attempt3:daily.map(r=>r.attempt3),attemptUnknown:daily.map(r=>r.attemptUnknown),
     attempt1Rate:daily.map(r=>r.attempt1Rate),attempt2Rate:daily.map(r=>r.attempt2Rate),attempt3Rate:daily.map(r=>r.attempt3Rate),attemptCoverageRate:daily.map(r=>r.attemptCoverageRate),signingCoverageRate:daily.map(r=>r.signingCoverageRate),
+    evidenceIncomplete:incomplete,evidenceStatus:getV263DeliveryEvidenceStatus(),
     definitions:{attempt:'70 START优先；整票无70才用60；只有Pending/失败后出现新START才进入下一派；无证据保持未识别',signingDays:'首次日报锁定日期到实际POD日期，含首尾当天；仅可靠POD日期纳入平均'}};
   memory.set(key,{at:Date.now(),value});return value;
 }
 
-function handler(req,res){try{const data=readV263DeliveryKpiTrends(req.query.businessType,req.query.from,req.query.to);res.setHeader('Cache-Control','private,max-age=10');res.setHeader('X-CE-QC-V263',V263_DELIVERY_KPI_TREND_ID);return res.json(data);}catch(error){return res.status(400).json({ok:false,id:V263_DELIVERY_KPI_TREND_ID,error:error?.message||String(error)});}}
-function register(app){if(routeRegistered)return;routeRegistered=true;previousGet.call(app,'/api/v263/delivery-trends',handler);console.info('[CE-QC][V263_DELIVERY_KPI] route registered for TBKH + SHOPEECN + SHOPEEVN only');}
+function handler(req,res){
+  try{
+    const data=readV263DeliveryKpiTrends(req.query.businessType,req.query.from,req.query.to);
+    if(data.evidenceIncomplete)requestV263DeliveryEvidenceBackfill({businessType:data.businessType,fromDate:data.fromDate,toDate:data.toDate,reason:'DASHBOARD_LOW_COVERAGE',delayMs:250});
+    res.setHeader('Cache-Control','private,max-age=5');res.setHeader('X-CE-QC-V263',V263_DELIVERY_KPI_TREND_ID);return res.json(data);
+  }catch(error){return res.status(400).json({ok:false,id:V263_DELIVERY_KPI_TREND_ID,error:error?.message||String(error)});}
+}
+function register(app){if(routeRegistered)return;routeRegistered=true;previousGet.call(app,'/api/v263/delivery-trends',handler);console.info('[CE-QC][V263_DELIVERY_KPI] route registered for TBKH + SHOPEECN + SHOPEEVN only; low evidence coverage auto-triggers background repair.');}
 express.application.get=function v263DeliveryTrendRoute(pathValue,...handlers){if(!routeRegistered&&String(pathValue||'')==='/api/v234/trends')register(this);return previousGet.call(this,pathValue,...handlers);};
