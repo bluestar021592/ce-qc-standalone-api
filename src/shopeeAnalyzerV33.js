@@ -8,32 +8,63 @@ import {
   shopeePending1203ReturnTime,
   SHOPEE_PENDING_1203_RETURN_RULE_VERSION
 } from './shopeeReturnTruth.js';
+import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 
-export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-22-v224-shopee-pending-1203-return-v33';
+export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-23-v246-shopee-strict-attempt-cycle-v34';
+
+function withStrictAttempt(result = {}, events = []) {
+  const pod = result?.是否POD === '是' || String(result?.currentState || '').toUpperCase() === 'POD';
+  const strict = analyzeV246ShopeeAttemptCycle(events, { podDate: result?.POD时间 || result?.podTime || '' });
+  const priorStrict = /STRICT|严格/i.test(String(result?.attemptStatus || result?.attemptSource || ''))
+    ? Math.max(0, Number(result?.podAttemptNo || result?.currentAttemptNo || 0)) : 0;
+  const attemptNo = strict.attemptNo || priorStrict;
+  return {
+    ...result,
+    currentAttemptNo: attemptNo,
+    podAttemptNo: pod ? attemptNo : 0,
+    attemptStatus: attemptNo ? 'V246_STRICT_START_FAILURE_CYCLE' : 'UNKNOWN_NO_STRICT_START_EVIDENCE',
+    attemptConfidence: attemptNo ? 'HIGH' : 'UNKNOWN',
+    attemptUnknownReason: attemptNo ? '' : '轨迹没有可验证的70 START（无70时也没有60分配兜底）',
+    attemptHistory: strict.starts.map(row => row.time).filter(Boolean),
+    attemptHistoryJson: JSON.stringify({
+      version: strict.version,
+      source: strict.source,
+      startMode: strict.startMode,
+      starts: strict.starts,
+      failures: strict.failures
+    }),
+    attemptSource: attemptNo ? strict.source : '无真实派次证据',
+    strictAttemptCycleVersion: strict.version
+  };
+}
 
 /**
- * SHOPEE CN/VN locked rule:
- * If ANY trajectory event (not necessarily the last one) contains the Pending
- * 1203 delivery-problem marker, classify the parcel into the return bucket.
- * A confirmed POD remains higher priority than this business return marker.
+ * SHOPEE CN/VN locked rules:
+ * - terminal truth remains exact scan 85/100 or trajectory 80/86;
+ * - Pending 1203 return business rule remains higher than ordinary open states;
+ * - dispatch attempts are V246 strict cycles: first 70 START = attempt 1; only a
+ *   Pending/delivery-failure followed by a new START increments the attempt;
+ *   repeated START alone never increments; code 60 is fallback only if no 70 exists.
  */
 export function analyzeShopeeShipment(args = {}) {
   const base = analyzeShopeeShipmentV32(args);
   const events = Array.isArray(args.events) ? args.events : [];
   const returnEvent = findShopeePending1203ReturnEvent(events);
-  if (!returnEvent) return { ...base, analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION };
+  if (!returnEvent) {
+    return withStrictAttempt({ ...base, analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION }, events);
+  }
 
   const confirmedPod = base?.是否POD === '是'
     || String(base?.currentState || '').toUpperCase() === 'POD'
     || String(args?.scanRow?.orderStatus ?? '') === '85';
   if (confirmedPod) {
-    return {
+    return withStrictAttempt({
       ...base,
       analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
       pending1203ReturnEvidence: true,
       pending1203ReturnRuleVersion: SHOPEE_PENDING_1203_RETURN_RULE_VERSION,
       pending1203ReturnIgnoredReason: 'CONFIRMED_POD_PRIORITY'
-    };
+    }, events);
   }
 
   const returnTime = shopeePending1203ReturnTime(returnEvent);
@@ -41,7 +72,7 @@ export function analyzeShopeeShipment(args = {}) {
   const tags = [...new Set([...(Array.isArray(base?.tags) ? base.tags : []), 'RETURNED', 'SHOPEE_PENDING_1203_RETURN'])]
     .filter(tag => !/^PENDING(?:_|$)/i.test(String(tag || '')) && tag !== 'PENDING');
 
-  return {
+  return withStrictAttempt({
     ...base,
     analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
     是否POD: '否',
@@ -83,7 +114,7 @@ export function analyzeShopeeShipment(args = {}) {
     pending1203ReturnEventCode: String(returnEvent.eventCode || returnEvent.trackingEventCode || '').trim(),
     freshTerminalSource: base?.freshTerminalSource || 'SHOPEE_PENDING_1203_RETURN',
     QC判断: '轨迹历史命中 Pending 异常滞留:1203--派送异常，按SHOPEE CN/VN退回规则直接归入退回；该节点可位于轨迹中间，不要求为最后节点。'
-  };
+  }, events);
 }
 
 export { classifyShopeeScanStatus, classifyShopeeRegion };
