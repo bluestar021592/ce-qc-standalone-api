@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { classifyV246Terminal, v246InclusiveDays } from '../src/v246TrackingLedgerCore.js';
 import { analyzeV246ShopeeAttemptCycle, findV246PodDate, v246PositivePodText } from '../src/shopeeAttemptCycleV246.js';
 
@@ -68,3 +69,4 @@ assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收'),e(80,'2026
 assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收')]),'','negative POD wording must never fabricate POD date');
 
 console.log('[V246] tracking core smoke passed: true-terminal-only + immutable signing start + strict START/failure attempts + negative POD guards');
+execFileSync(process.execPath,['scripts/v252-lifecycle-smoke.mjs'],{stdio:'inherit'});
