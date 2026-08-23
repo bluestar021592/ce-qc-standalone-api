@@ -1,9 +1,9 @@
 import './v254StorageHealthPatch.js';
 import express from 'express';
 
-export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v2';
+export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v3';
 export const V232_FAST_METRIC_UI_INJECTION_ID = '2026-08-22-v238-retired-fast-metric-ui-v1';
-export const V235_CACHE_READY_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v2';
+export const V235_CACHE_READY_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v3';
 export const V239_DASHBOARD_REQUEST_UI_INJECTION_ID = '2026-08-23-v239-dashboard-request-coalescer-ui-v1';
 export const V240_DAILY_RATE_UI_INJECTION_ID = '2026-08-23-v263-retired-v234-visual-owner-v1';
 export const V244_SHOPEE_TREND_UI_INJECTION_ID = '2026-08-23-v263-retired-overlay-v1';
@@ -23,6 +23,7 @@ const CHART_MARKER = '/dashboard-chart-v18.js?v=20260823-v263-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
 const COALESCER_MARKER = '/v239-dashboard-request-coalescer.js?v=20260823-v239-1';
 const V253_FAST_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v263-1';
+const V263_GENERIC_MARKER = '/v263-generic-trend-hydrator.js?v=20260823-v263-1';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
@@ -65,6 +66,7 @@ express.response.send = function v263MetricTruthUiSend(body) {
     if(headTags.length) body = body.replace('</head>', `${headTags.join('\n')}\n</head>`);
     const tags = [];
     if (!body.includes(CHART_MARKER)) tags.push(`  <script src="${CHART_MARKER}"></script>`);
+    if (!body.includes(V263_GENERIC_MARKER)) tags.push(`  <script src="${V263_GENERIC_MARKER}"></script>`);
     if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
     if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
@@ -84,4 +86,4 @@ express.response.send = function v263MetricTruthUiSend(body) {
   return originalSend.call(this, body);
 };
 
-console.info('[CE-QC][V263_CANONICAL_DASHBOARD]', V231_METRIC_TRUTH_UI_INJECTION_ID, 'V234/V248/V251/V252/V254/V261 visual owners retired; DashboardV18 is the only visible trend owner; attempt/signing UI limited to TBKH + SHOPEECN + SHOPEEVN');
+console.info('[CE-QC][V263_CANONICAL_DASHBOARD]', V231_METRIC_TRUTH_UI_INJECTION_ID, 'V234/V248/V251/V252/V254/V261 visual owners retired; DashboardV18 owns TBKH + SHOPEECN + SHOPEEVN specialized trends; V263 generic hydrator owns CE + CEAF + ALI1688; WHPP keeps V171 dedicated trends.');
