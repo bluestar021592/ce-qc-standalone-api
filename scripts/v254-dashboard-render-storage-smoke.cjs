@@ -7,6 +7,7 @@ const chart=read('public/dashboard-chart-v18.js');
 const css=read('public/dashboard-v18.css');
 const fastOwner=read('public/v253-dashboard-fast-owner.js');
 const generic=read('public/v263-generic-trend-hydrator.js');
+const reportOwner=read('public/v267-report-export-owner.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const cachePatch=read('src/v89StaticAssetCachePatch.js');
 const storage=read('src/v254StorageHealthPatch.js');
@@ -19,11 +20,12 @@ const runtime=read('src/v206InteractiveFirstRuntimePatch.js');
 const runtimeImports=[...runtime.matchAll(/^import\s+['"]\.\/(.+?\.js)['"];?$/gm)].map(match=>`src/${match[1]}`);
 assert.ok(runtimeImports.length>=10,'V206 startup bridge must expose all direct runtime imports including V263');
 for(const file of runtimeImports)execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
-for(const file of ['public/dashboard-v18.js','public/dashboard-chart-v18.js','public/v253-dashboard-fast-owner.js','public/v263-generic-trend-hydrator.js','src/v89StaticAssetCachePatch.js','src/shopeeAttemptCycleV246.js','src/v262ShopeeStrictEvidenceBackfill.js','src/v263DeliveryKpiTrendPatch.js','src/v264TbkhOpenAttemptLifecycle.js','scripts/v262-shopee-strict-evidence-smoke.mjs','scripts/v263-delivery-kpi-trend-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['public/dashboard-v18.js','public/dashboard-chart-v18.js','public/v253-dashboard-fast-owner.js','public/v263-generic-trend-hydrator.js','public/v267-report-export-owner.js','src/v89StaticAssetCachePatch.js','src/shopeeAttemptCycleV246.js','src/v262ShopeeStrictEvidenceBackfill.js','src/v263DeliveryKpiTrendPatch.js','src/v264TbkhOpenAttemptLifecycle.js','scripts/v262-shopee-strict-evidence-smoke.mjs','scripts/v263-delivery-kpi-trend-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(dashboard),'canonical dashboard-v18 must compile');
 assert.doesNotThrow(()=>new Function(chart),'canonical dashboard chart must compile');
 assert.doesNotThrow(()=>new Function(fastOwner),'V253 fetch bridge must compile');
 assert.doesNotThrow(()=>new Function(generic),'V263 generic trend hydrator must compile');
+assert.doesNotThrow(()=>new Function(reportOwner),'V267 report export owner must compile');
 
 assert.match(dashboard,/DELIVERY_KPI_TYPES=new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'canonical UI scope must be exactly TBKH + SHOPEECN + SHOPEEVN');
 assert.match(dashboard,/\/api\/v263\/delivery-trends/,'canonical DashboardV18 must read V263 delivery KPI truth directly');
@@ -56,10 +58,25 @@ assert.match(inject,/V234\/V248\/V251\/V252\/V254\/V261 visual owners retired/,'
 for(const old of ['v234-dashboard-live.js','v237-home-dashboard-owner.js','v244-shopee-trend-owner.js','v250-shopee-metric-visibility.js','v252-qc-lifecycle-ui.js','v254-dashboard-render-rescue.js','v261-dashboard-final-owner.js'])assert.ok(inject.includes(`'${old}'`),`V263 must strip old overlay ${old}`);
 assert.doesNotMatch(inject,/tags\.push\(`\s*<script src=\\"\$\{LEGACY_GATE_/,'legacy compatibility markers must never be pushed into delivered HTML');
 assert.match(inject,/X-CE-QC-V263-UI/,'V263 canonical delivery must be observable');
+assert.match(inject,/v267-report-export-owner\.js\?v=20260823-v267-1/,'V267 report-export owner must be delivered after app.js');
+assert.match(inject,/X-CE-QC-V267-UI/,'V267 report-export owner must be observable');
 assert.match(fastOwner,/fetch acceleration only/,'V253 must be fetch-only after V263');
 assert.match(fastOwner,/function renderGeneric\(\)\{return false;\}/,'V253 generic visible rendering must be disabled');
 assert.match(fastOwner,/function renderShopee\(\)\{return false;\}/,'V253 Shopee visible rendering must be disabled');
 assert.doesNotMatch(fastOwner,/读取已落库日报数据/,'V253 must no longer create stale loading trend placeholders');
+
+// V267: report page must expose a real selectable date range, separate scope from
+// concrete anomalies, and retire controls that previously looked functional but were not.
+assert.match(reportOwner,/reportRangeFrom/,'report preview must expose selectable start date');
+assert.match(reportOwner,/reportRangeTo/,'report preview must expose selectable end date');
+assert.match(reportOwner,/loadCustomDashboardRange/,'report preview date selection must load stored period truth');
+assert.match(reportOwner,/reportDataScope/,'all/core/province groups must be separated as data scope');
+assert.match(reportOwner,/reportAnomalyType/,'concrete anomaly must have its own selector');
+assert.match(reportOwner,/ANOMALY_RE/,'concrete anomaly selector must be classified semantically');
+assert.match(reportOwner,/no-op-closure-filter/,'the legacy no-op closure control must be explicitly retired');
+assert.match(reportOwner,/duplicate-single-snapshot-export/,'duplicate lower export button must be retired in favor of the period exporter');
+assert.match(reportOwner,/不重新调用CE API/,'report preview must disclose stored-snapshot read semantics');
+assert.doesNotMatch(reportOwner,/fetch\s*\(\s*['"]\/api\//,'V267 report UI must not directly call CE or invent a second backend read path');
 
 assert.match(strictBackfill,/V263_DELIVERY_KPI_TYPES=Object\.freeze\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'evidence retry scope must be exactly the three requested businesses');
 assert.match(strictBackfill,/businessType IN \('TBKH','SHOPEECN','SHOPEEVN'\)/,'delivery evidence retry query must include TBKH and both Shopee boards');
@@ -100,4 +117,4 @@ assert.match(r2guard,/DEFAULT_SAFE_STORAGE_BYTES=8\*GIB/,'R2 zero-cost guard mus
 assert.match(r2guard,/storageClass:'STANDARD'/,'R2 must remain Standard-only');
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'secrets must never be committed');
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V265] evidence-aware full-width attempt UI + recent-first normalized evidence repair + exact three-business scope + storage safety gate passed');
+console.log('[V267/V265] report export clarity + evidence-aware delivery UI + storage safety gate passed');
