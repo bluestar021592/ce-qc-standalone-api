@@ -1,9 +1,9 @@
 import './v254StorageHealthPatch.js';
 import express from 'express';
 
-export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v3';
+export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v4';
 export const V232_FAST_METRIC_UI_INJECTION_ID = '2026-08-22-v238-retired-fast-metric-ui-v1';
-export const V235_CACHE_READY_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v3';
+export const V235_CACHE_READY_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v4';
 export const V239_DASHBOARD_REQUEST_UI_INJECTION_ID = '2026-08-23-v239-dashboard-request-coalescer-ui-v1';
 export const V240_DAILY_RATE_UI_INJECTION_ID = '2026-08-23-v263-retired-v234-visual-owner-v1';
 export const V244_SHOPEE_TREND_UI_INJECTION_ID = '2026-08-23-v263-retired-overlay-v1';
@@ -19,6 +19,7 @@ export const V253_DASHBOARD_FAST_UI_INJECTION_ID = '2026-08-23-v263-v253-fetch-b
 export const V254_DASHBOARD_RENDER_RESCUE_UI_INJECTION_ID = '2026-08-23-v263-retired-rescue-overlay-v1';
 export const V261_DASHBOARD_FINAL_UI_INJECTION_ID = '2026-08-23-v263-retired-final-overlay-v1';
 
+const DASHBOARD_MARKER = '/dashboard-v18.js?v=20260823-v263-1';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260823-v263-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
 const COALESCER_MARKER = '/v239-dashboard-request-coalescer.js?v=20260823-v239-1';
@@ -52,6 +53,7 @@ function prepareOwnerHtml(body) {
     'v252-qc-lifecycle-ui.js','v254-dashboard-render-rescue.js','v261-dashboard-final-owner.js'
   ]) body = stripScript(body, file);
   return body
+    .replace(/\/dashboard-v18\.js\?v=[^"']+/g, DASHBOARD_MARKER)
     .replace(/\/dashboard-chart-v18\.js\?v=[^"']+/g, CHART_MARKER)
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
