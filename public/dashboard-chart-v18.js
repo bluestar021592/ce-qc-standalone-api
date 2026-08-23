@@ -11,6 +11,19 @@
     const known=chart.series.reduce((sum,series)=>sum+Number(series.numerators?.[lastIndex]||0),0);
     return denominator>0?{known,denominator,unknown:Math.max(0,denominator-known),coverage:known*100/denominator}:null;
   }
+  function scheduleEvidenceRefresh(panel){
+    if(!panel||panel.dataset.v265EvidenceRefresh==='scheduled')return;
+    panel.dataset.v265EvidenceRefresh='scheduled';
+    const timer=setTimeout(()=>{
+      delete panel.dataset.v265EvidenceRefresh;
+      if(!panel.isConnected||!panel.querySelector('.v265-attempt-evidence-status.incomplete'))return;
+      try{
+        if(typeof global.renderAll==='function')global.renderAll();
+        else document.querySelector('#topRangeQueryBtn,#queryBtn,.query-btn')?.click?.();
+      }catch(error){console.warn('[CE-QC][V265_EVIDENCE_REFRESH]',error?.message||error);}
+    },15000);
+    if(typeof timer?.unref==='function')timer.unref();
+  }
   function syncAttemptEvidenceUi(container,chart){
     const evidence=latestAttemptEvidence(chart);if(!evidence)return;
     const panel=container.closest?.('#v263DeliveryKpiPanel');if(!panel)return;
@@ -23,8 +36,12 @@
       : `<b>派次证据自动补抓中</b><span>当前已识别 ${evidence.known.toLocaleString('zh-CN')}/${evidence.denominator.toLocaleString('zh-CN')} 票（${evidence.coverage.toFixed(2)}%），仍有 ${evidence.unknown.toLocaleString('zh-CN')} 票待补。下面1/2/3派比例属于当前已获取证据，不是最终结果。</span>`;
     const cards=[...panel.querySelectorAll('[data-v263-summary] .v18-metric-card')];
     for(const card of cards){
-      const label=String(card.querySelector('span')?.textContent||'');const small=card.querySelector('small');if(!small)continue;
-      if(/^[123]派/.test(label))small.textContent=complete?'真实轨迹已完整':'当前证据 · 补抓未完成';
+      const label=String(card.querySelector('span')?.textContent||'');const small=card.querySelector('small'),value=card.querySelector('b');if(!small)continue;
+      if(/^[123]派/.test(label)){
+        const currentCount=Number(String(value?.textContent||'0').replace(/[^0-9.-]/g,''))||0;
+        small.textContent=complete?'真实轨迹已完整':'当前证据 · 补抓未完成';
+        if(!complete&&value)value.textContent=currentCount>0?`${currentCount.toLocaleString('zh-CN')}票（暂）`:'待补抓';
+      }
       if(label.includes('派次未识别')){small.textContent=complete?'已清零':'待自动补轨迹证据';card.classList.toggle('v265-warning-card',!complete);}
       if(label.includes('派次证据覆盖'))small.textContent=complete?'证据完整':'未完成前不作为最终派次率';
       if(label.includes('平均签收天数')){
@@ -33,6 +50,7 @@
         small.textContent=Number.isFinite(coverage)&&coverage>=100?'真实POD日期已完整':`当前覆盖 ${Number.isFinite(coverage)?coverage.toFixed(2):'—'}% · 暂算`;
       }
     }
+    if(!complete)scheduleEvidenceRefresh(panel);
   }
 
   function render(container, chart) {
