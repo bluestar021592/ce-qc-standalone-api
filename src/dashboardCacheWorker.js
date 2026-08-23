@@ -134,10 +134,14 @@ try {
     const results = [];
     for (const date of dates) {
       const startedAt=Date.now();
-      const item=refreshV235CurrentDashboardCacheDate(date, { force: false });
+      // V242 intentionally rebuilds startup history even when an older V240
+      // marker says CURRENT_CACHE_READY. V240's formula fixes shared one cache
+      // contract id, so an already-built historical row can otherwise survive
+      // a code update and keep stale percentages indefinitely.
+      const item=refreshV235CurrentDashboardCacheDate(date, { force: true });
       results.push({...item,elapsedMs:Date.now()-startedAt});
     }
-    result = { mode: 'LATEST_PLUS_RECENT_7', latestDate: dates[0] || latestCompletedDashboardDate(), checked: dates.length, refreshed: results.filter(item => item.refreshed).length, results };
+    result = { mode: 'V242_FORCED_RECENT_7_REBUILD', latestDate: dates[0] || latestCompletedDashboardDate(), checked: dates.length, refreshed: results.filter(item => item.refreshed).length, results };
   } else {
     const status = getDashboardCacheStatus();
     if (Number(status.cachedDates || 0) === 0) result = warmDashboardCacheRange({ days: warmDays });
