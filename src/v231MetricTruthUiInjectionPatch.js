@@ -41,7 +41,8 @@ const LEGACY_GATE_V251_MARKER = '/v250-shopee-metric-visibility.js?v=20260823-v2
 const LEGACY_GATE_V253_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v253-1';
 const LEGACY_GATE_V254_MARKER = '/v254-dashboard-render-rescue.js?v=20260823-v254-1';
 const LEGACY_GATE_V261_MARKER = '/v261-dashboard-final-owner.js?v=20260823-v261-1';
-void V252_LIFECYCLE_MARKER; void HOME_MARKER; void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V253_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER;
+const LEGACY_GATE_V263_GENERIC_MARKER = '/v263-generic-trend-hydrator.js?v=20260823-v263-1';
+void V252_LIFECYCLE_MARKER; void HOME_MARKER; void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V253_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER; void LEGACY_GATE_V263_GENERIC_MARKER;
 const originalSend = express.response.send;
 
 function stripScript(body, fileName) {
