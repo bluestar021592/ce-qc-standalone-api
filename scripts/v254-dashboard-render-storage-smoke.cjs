@@ -40,4 +40,6 @@ assert.match(r2guard,/ZERO_COST_SAFE_STORAGE_LIMIT/,'R2 projected storage over s
 assert.match(r2guard,/ZERO_COST_STANDARD_ONLY/,'non-Standard storage classes must be blocked');
 assert.match(r2guard,/manualCloudflareUploadsAreOutsideAppGuard:true/,'guard must disclose that manual Cloudflare uploads are outside app control');
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'cloud/storage secrets must never be committed');
-console.log('[V256] V254 renderer/storage audit + V255 one-year retention + V256 R2 zero-cost guard smoke passed');
+execFileSync(process.execPath,['--check','scripts/v257-system-calibration-smoke.cjs'],{stdio:'pipe'});
+execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
+console.log('[V257] V254 renderer/storage audit + V255/V256 guards + core system calibration gate passed');
