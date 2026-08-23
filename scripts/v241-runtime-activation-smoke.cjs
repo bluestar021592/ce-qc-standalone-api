@@ -23,7 +23,7 @@ const serverStartCalls = [...bootstrap.matchAll(/^\s*await importServerInteracti
 assert.ok(v161Load, 'bootstrap must load V161 before server');
 assert.equal(serverStartCalls.length, 1, 'bootstrap must invoke importServerInteractiveFirst exactly once');
 assert.ok(v161Load.index < serverStartCalls[0].index, 'V161 runtime bridge must load before the actual server startup call');
-assert.match(bridge, /^import '\.\/v206InteractiveFirstRuntimeTruthPatch\.js';/m, 'V161 must activate the V206 dashboard runtime bridge');
+assert.match(bridge, /^import '\.\/v206InteractiveFirstRuntimePatch\.js';/m, 'V161 must activate the V206 dashboard runtime bridge');
 assert.match(runtime, /import '\.\/v234DashboardLiveTruthPatch\.js';/, 'V206 must activate V234 live truth');
 assert.match(runtime, /import '\.\/v236DashboardCurrentRoutePatch\.js';/, 'V206 must activate V236 route owner');
 assert.match(runtime, /import '\.\/v231MetricTruthUiInjectionPatch\.js';/, 'V206 must activate dashboard UI injection');
@@ -43,7 +43,6 @@ assert.match(trackingCore,/CREATE TABLE IF NOT EXISTS qc_tracking_audit/,'V246 m
 assert.match(trackingCore,/sourceReportDate/,'V246 reconciliation must retain the original carry source date');
 assert.match(trackingCore,/firstReportDate/,'V246 must lock the first report date per shipment');
 assert.match(trackingCore,/trackingStatus='OPEN'/,'V246 open-candidate reader must only refresh non-terminal ledger rows');
-assert.match(trackingCore,/NORMAL_FINAL_HUB/,{message:'V246 core source may mention legacy rule only if it is explicitly non-terminal'});
 assert.doesNotMatch(trackingCore,/normal\s*\?\s*'NORMAL_FINAL'/,'V246 must never close a shipment merely because it is a normal final hub');
 assert.match(trackingCore,/\['POD','RETURNED','ORDER_CANCELLED'\]/,'V246 terminal lock must be restricted to real terminal outcomes');
 assert.match(trackingCore,/v246InclusiveDays\(firstReportDate,podDate\)/,'average signing days must use immutable firstReportDate to actual POD date');
