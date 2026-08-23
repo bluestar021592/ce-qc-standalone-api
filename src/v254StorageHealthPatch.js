@@ -41,7 +41,13 @@ function compactDir(scan){return{bytes:scan.bytes,GiB:gib(scan.bytes),files:scan
 function buildReport(){
   const cfg=getRuntimeConfig();
   const dbBytes=fileSize(cfg.dbFile),walBytes=fileSize(`${cfg.dbFile}-wal`),shmBytes=fileSize(`${cfg.dbFile}-shm`);
-  const dirs={backups:scanDir(cfg.backupsDir),imports:scanDir(cfg.importsDir),exports:scanDir(cfg.exportsDir),logs:scanDir(cfg.logsDir)};
+  const dirs={
+    backups:scanDir(cfg.backupsDir),
+    imports:scanDir(cfg.importsDir),
+    evidenceArchive:scanDir(path.join(cfg.dataDir,'evidence_archive')),
+    exports:scanDir(cfg.exportsDir),
+    logs:scanDir(cfg.logsDir)
+  };
   const directoryBytes=Object.values(dirs).reduce((sum,item)=>sum+Number(item.bytes||0),0);
   return{
     ok:true,id:V254_STORAGE_HEALTH_ID,createdAt:new Date().toISOString(),dataDir:cfg.dataDir,
@@ -49,7 +55,7 @@ function buildReport(){
     directories:Object.fromEntries(Object.entries(dirs).map(([key,value])=>[key,compactDir(value)])),
     observedTotalBytes:dbBytes+walBytes+shmBytes+directoryBytes,
     observedTotalGiB:gib(dbBytes+walBytes+shmBytes+directoryBytes),
-    note:'READ_ONLY_SIZE_SCAN_NO_DELETE_NO_VACUUM_NO_CHECKPOINT'
+    note:'READ_ONLY_SIZE_SCAN_NO_DELETE_NO_VACUUM_NO_CHECKPOINT; V266 evidenceArchive included separately'
   };
 }
 
