@@ -28,8 +28,8 @@ for(const [name,source] of [
 assert.match(guard,/__CE_QC_V237_DASHBOARD_OWNER__=true/,'head guard must still declare dashboard ownership');
 assert.match(guard,/\/api\\\/v27\\\/trends/,'legacy V27 trend reads must remain retired on owner pages');
 assert.match(guard,/\/api\\\/v55\\\/reconciliation/,'legacy passive reconciliation must remain retired on owner pages');
-assert.match(route,/path==='\/api\/v234\/trends'/,'authenticated V234 trend registration point must remain present');
-assert.match(route,/path==='\/api\/shopee\/state'/,'compact Shopee state ownership must remain present');
+assert.match(route,/path\s*===\s*'\/api\/v234\/trends'/,'authenticated V234 trend registration point must remain present');
+assert.match(route,/path\s*===\s*'\/api\/shopee\/state'/,'compact Shopee state ownership must remain present');
 assert.match(coalescer,/CACHE_MS=15_000/,'current-summary reads must remain coalesced');
 
 // Preserve metric definitions. V253 changes the read path, not the business denominator.
@@ -41,13 +41,13 @@ assert.match(trend,/V240_EXACT_DAILY_RATE_CACHE_ONLY/,'legacy cache reader remai
 
 // V253 owns visible first paint. It must not wait for dashboard_daily_cache.
 assert.match(runtime,/import '\.\/v253DashboardFastPath\.js';/,'V253 fast backend must activate before server registration');
-assert.match(runtime,/primeDashboardCacheInChild\(delayMs = 60_000\)/,'cache maintenance must be delayed away from first paint');
-assert.match(runtime,/MAX_PRIME_ATTEMPTS = 4/,'delayed maintenance retry count must remain bounded');
+assert.match(runtime,/primeDashboardCacheInChild\(delayMs\s*=\s*60_000\)/,'cache maintenance must be delayed away from first paint');
+assert.match(runtime,/MAX_PRIME_ATTEMPTS\s*=\s*4/,'delayed maintenance retry count must remain bounded');
 assert.match(runtime,/dashboard cache prime child exit code=/,'delayed cache maintenance must remain observable');
 assert.match(runtime,/CE_QC_SKIP_STARTUP_POD_REPAIR/,'startup POD repair must remain outside interactive first paint');
 assert.doesNotMatch(fastPath,/dashboard_daily_cache/,'V253 visible trend path must be cache-independent');
 assert.match(fastPath,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'V253 must expose cache-independent trend ownership');
-assert.match(fastPath,/path === '\/api\/v234\/trends'/,'V253 endpoints must register only when the authenticated dashboard route is registered');
+assert.match(fastPath,/!registered\s*&&\s*path\s*===\s*'\/api\/v234\/trends'/,'V253 endpoints must register only when the authenticated dashboard route is registered');
 
 // V253 must arrive in <head> before older dashboard clients and redirect their slow reads.
 assert.match(inject,/v253-dashboard-fast-owner\.js\?v=20260823-v253-1/,'V253 owner must be cache-busted into delivered HTML');
@@ -60,7 +60,7 @@ assert.match(fastOwner,/sessionStorage/,'repeat navigation must reuse last confi
 assert.match(fastOwner,/removeHomeLegacyAttempts/,'obsolete homepage dual attempt charts must be removed');
 
 // The old cache worker remains a bounded background maintenance job only.
-assert.match(worker,/WORKER_LEASE_MS = 5 \* 60_000/,'dashboard cache lease must remain bounded to five minutes');
+assert.match(worker,/WORKER_LEASE_MS\s*=\s*5\s*\*\s*60_000/,'dashboard cache lease must remain bounded to five minutes');
 assert.match(worker,/cleared stale dashboard-cache lease/,'worker must still recover stale cache leases');
 
 console.log('[V253/V247] cache-independent first paint + retained V240 metric contract + single-owner performance guards passed');
