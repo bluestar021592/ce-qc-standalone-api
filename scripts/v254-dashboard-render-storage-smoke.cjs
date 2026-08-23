@@ -3,6 +3,7 @@ const assert=require('assert/strict');
 const {execFileSync}=require('child_process');
 const read=p=>fs.readFileSync(p,'utf8');
 const ui=read('public/v254-dashboard-render-rescue.js');
+const finalUi=read('public/v261-dashboard-final-owner.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const storage=read('src/v254StorageHealthPatch.js');
 const r2guard=read('src/v256R2ZeroCostGuard.js');
@@ -16,9 +17,26 @@ assert.match(ui,/function renderCard\(/,'V254 must own a self-contained chart re
 assert.match(ui,/id='v254DailyTrendTruth'|#v254DailyTrendTruth/,'V254 must render a daily truth table');
 assert.match(ui,/\/api\/v253\/trends/,'generic boards must read V253 cache-independent trends');
 assert.match(ui,/\/api\/v246\/shopee-trends/,'Shopee rescue must read the locked lifecycle endpoint');
-assert.match(inject,/v254-dashboard-render-rescue\.js\?v=20260823-v254-1/,'V254 rescue must be cache-busted into delivered HTML');
-assert.match(inject,/X-CE-QC-V254-UI/,'V254 delivery must be observable');
-assert.ok(inject.indexOf('V251_SHOPEE_FINAL_MARKER')<inject.indexOf('V254_RENDER_MARKER'),'V254 rescue marker must be defined after final Shopee owner marker');
+assert.match(inject,/v254-dashboard-render-rescue\.js\?v=20260823-v254-1/,'V254 rescue must remain available before final ownership');
+assert.match(inject,/X-CE-QC-V254-UI/,'V254 delivery must remain observable');
+assert.ok(inject.indexOf('V251_SHOPEE_FINAL_MARKER')<inject.indexOf('V254_RENDER_MARKER'),'V254 rescue marker must be defined after legacy Shopee owner marker');
+
+execFileSync(process.execPath,['--check','public/v261-dashboard-final-owner.js'],{stdio:'pipe'});
+assert.doesNotThrow(()=>new Function(finalUi),'V261 final dashboard owner must compile as browser JavaScript');
+assert.match(finalUi,/v261-dashboard-final-owner-v1/,'V261 final owner version must be explicit');
+assert.match(finalUi,/\.side-link\.active\[data-page\]/,'V261 must resolve SPA business from visible active navigation, not pathname only');
+assert.match(finalUi,/\/api\/v253\/trends/,'V261 generic boards must use V253 truth');
+assert.match(finalUi,/\/api\/v246\/shopee-trends/,'V261 Shopee boards must use V246 lifecycle truth');
+assert.match(finalUi,/平均签收天数趋势/,'V261 Shopee operational trends must include average signing days');
+assert.match(finalUi,/1\/2\/3派签收占POD趋势/,'V261 must render one full-width strict attempt trend');
+assert.match(finalUi,/v261ShopeeAttemptPanel/,'V261 must own the Shopee attempt panel');
+assert.match(finalUi,/v247HomeShopeeAttempts/,'V261 must remove the duplicate home Shopee attempt chart block');
+assert.match(finalUi,/removeLegacyTrendBlocks/,'V261 must remove stale loading/legacy trend surfaces before final render');
+assert.match(inject,/v261-dashboard-final-owner\.js\?v=20260823-v261-1/,'V261 final owner must be cache-busted into delivered HTML');
+assert.match(inject,/X-CE-QC-V261-UI/,'V261 delivery must be observable');
+assert.ok(inject.indexOf('V254_RENDER_MARKER')<inject.indexOf('V261_FINAL_OWNER_MARKER'),'V261 marker must be defined after V254 rescue marker');
+assert.ok(inject.indexOf('V254_RENDER_MARKER')<inject.indexOf('V261_FINAL_OWNER_MARKER')&&inject.indexOf('V261_FINAL_OWNER_MARKER')<inject.indexOf('DRILLDOWN_MARKER'),'V261 final marker ordering must remain stable');
+
 assert.match(inject,/import '\.\/v254StorageHealthPatch\.js';/,'read-only storage health audit must activate with the UI runtime');
 assert.match(storage,/READ_ONLY_SIZE_SCAN_NO_DELETE_NO_VACUUM_NO_CHECKPOINT/,'storage audit must explicitly remain read-only');
 assert.doesNotMatch(storage,/fs\.(?:unlinkSync|rmSync|unlink|rm)\s*\(/,'storage audit must not execute file deletion APIs');
@@ -40,4 +58,4 @@ assert.match(r2guard,/manualCloudflareUploadsAreOutsideAppGuard:true/,'guard mus
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'cloud/storage secrets must never be committed');
 execFileSync(process.execPath,['--check','scripts/v257-system-calibration-smoke.cjs'],{stdio:'pipe'});
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V260] runtime-import syntax gate + V254 readonly storage audit + V256 zero-cost guard + V257 system calibration + startup-safe V255 exclusion passed');
+console.log('[V261] runtime syntax + visible-page final dashboard owner + V254 readonly storage + V256 zero-cost + V257 system calibration gate passed');
