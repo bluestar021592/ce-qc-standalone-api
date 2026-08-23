@@ -21,7 +21,7 @@ process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED = '0';
 process.env.CE_QC_SKIP_STARTUP_POD_REPAIR = '1';
 
 let primeAttempts = 0;
-const MAX_PRIME_ATTEMPTS = 3;
+const MAX_PRIME_ATTEMPTS = 4;
 const RETRYABLE_RESULT = /FOREGROUND_PROCESSING_ACTIVE|CACHE_OR_PURGE_WORKER_ALREADY_ACTIVE/;
 
 function primeDashboardCacheInChild(delayMs = 60_000) {
