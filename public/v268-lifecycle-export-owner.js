@@ -1,7 +1,7 @@
 (function installV268LifecycleExportOwner(global){
   if(global.__CE_QC_V268_LIFECYCLE_EXPORT__)return;
   global.__CE_QC_V268_LIFECYCLE_EXPORT__=true;
-  const ID='2026-08-23-v269-navigation-safe-lifecycle-export-v1';
+  const ID='2026-08-23-v271-navigation-safe-lifecycle-export-v2';
   const TYPES=['ALL','CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
   let exportBusy=false;
   let observer=null;
@@ -9,6 +9,10 @@
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const text=n=>String(n?.textContent||'').trim();
   const byId=id=>document.getElementById(id);
+  function loadV271(){
+    if(global.__CE_QC_V271_CANONICAL_INTEGRITY__||document.getElementById('v271CanonicalIntegrityScript'))return;
+    const s=document.createElement('script');s.id='v271CanonicalIntegrityScript';s.src='/v271-canonical-integrity-owner.js?v=20260823-v271-1';s.async=false;(document.body||document.documentElement).appendChild(s);
+  }
   function khDate(date=new Date()){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Phnom_Penh',year:'numeric',month:'2-digit',day:'2-digit'}).format(date);}
   function dateKey(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||''))?String(value):'';}
   async function api(url,options={}){const r=await fetch(url,{cache:'no-store',credentials:'same-origin',...options});const raw=await r.text();let j={};try{j=raw?JSON.parse(raw):{};}catch{}if(!r.ok||j.ok===false)throw new Error(j.error||j.message||`HTTP ${r.status}`);return j;}
@@ -100,7 +104,6 @@
 
   function simplifyTrackingPanel(){
     const panel=byId('v246TrackingPanel');if(!panel||panel.dataset.v268Initialized==='1')return;
-    // Mark first so our own textContent changes cannot cause a recursive observer loop.
     panel.dataset.v268Initialized='1';
     const h=panel.querySelector('h3');if(h&&h.textContent!=='自动持续追踪 / 导出数据保鲜')h.textContent='自动持续追踪 / 导出数据保鲜';
     const description='日报第一次出现即锁定进QC追踪账本；未POD、未完成退回、未取消的票会持续自动刷新。每2小时刷新OPEN票，02:00复核最近30天；漏跑会在开机后补跑。正式导出时系统会再自动刷新所选区间的非终态票，成功后才生成Excel。';
@@ -118,7 +121,7 @@
     const target=importPage.querySelector('.page-heading')||importPage.firstElementChild;target?.insertAdjacentElement('afterend',note);
   }
 
-  function enhance(){ensureSevenBusinessOptions();retireDuplicatePanels();simplifyTrackingPanel();addUnifiedNote();}
+  function enhance(){ensureSevenBusinessOptions();retireDuplicatePanels();simplifyTrackingPanel();addUnifiedNote();loadV271();}
   function scheduleEnhance(){
     if(enhanceQueued)return;
     enhanceQueued=true;
@@ -145,10 +148,8 @@
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scheduleEnhance,{once:true});else scheduleEnhance();
   observer=new MutationObserver(records=>{
-    // Child additions from SPA page switches need enhancement. Our own already-marked
-    // text replacements must not recursively occupy the main thread.
     if(records.some(r=>[...r.addedNodes].some(n=>n.nodeType===1)))scheduleEnhance();
   });
   observer.observe(document.documentElement,{subtree:true,childList:true});
-  console.info('[CE-QC][V269_NAVIGATION_SAFE]',ID,'lifecycle/export consolidation is idempotent; observer reacts only to element additions and never intercepts sidebar clicks.');
+  console.info('[CE-QC][V271_NAVIGATION_SAFE]',ID,'V271 canonical integrity owner loaded without click interception; lifecycle/export consolidation remains idempotent.');
 })(window);
