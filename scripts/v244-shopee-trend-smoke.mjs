@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v248-shopee-'));
+const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v251-shopee-'));
 process.env.DATA_DIR=tempRoot;
-process.env.DB_FILE=path.join(tempRoot,'v248-shopee-smoke.db');
+process.env.DB_FILE=path.join(tempRoot,'v251-shopee-smoke.db');
 process.env.ACCESS_MODE='LOCAL';
 process.env.SQLITE_MMAP_BYTES='0';
 process.env.SQLITE_CACHE_KIB='8192';
@@ -27,9 +27,9 @@ const fixtures=[
   {date:'2026-08-23',podDates:['2026-08-23'],attempts:[0],ocOpen:0}
 ];
 for(let i=0;i<fixtures.length;i++){
-  const f=fixtures[i],date=f.date,snapshotId=`V248-S${i+1}`,batchId=`V248-B${i+1}`,now=`${date}T23:00:00.000Z`;
+  const f=fixtures[i],date=f.date,snapshotId=`V251-S${i+1}`,batchId=`V251-B${i+1}`,now=`${date}T23:00:00.000Z`;
   db.prepare('INSERT INTO unified_snapshots(snapshotId,batchId,reportDate,status,payloadJson,createdAt) VALUES(?,?,?,?,?,?)').run(snapshotId,batchId,date,'COMPLETED','{}',now);
-  db.prepare('INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?)').run(batchId,snapshotId,date,'v248-smoke.xlsx',`hash-${i}`,'VALID','{}','[]',now);
+  db.prepare('INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?)').run(batchId,snapshotId,date,'v251-smoke.xlsx',`hash-${i}`,'VALID','{}','[]',now);
   const insertImport=db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const insertFinal=db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,rawJson,createdAt,updatedAt,podAttemptNo)
@@ -76,6 +76,7 @@ const lastSeven=readV247ShopeeTrends('SHOPEECN',dates.at(-1),dates.at(-1));
 assert.deepEqual(lastSeven.dates,dates,'single-day dashboard selection must still expose up to seven recent locked report dates');
 
 const owner=fs.readFileSync('public/v244-shopee-trend-owner.js','utf8');
+const finalOwner=fs.readFileSync('public/v250-shopee-metric-visibility.js','utf8');
 const injection=fs.readFileSync('src/v231MetricTruthUiInjectionPatch.js','utf8');
 assert.doesNotThrow(()=>new Function(owner),'V248 Shopee browser owner must compile');
 assert.match(owner,/v248-shopee-spa-operational-trend-owner-v1/,'Shopee page owner must identify the SPA-aware V248 build');
@@ -84,10 +85,19 @@ assert.match(owner,/__v248ShopeeOwner/,'navigatePage must be wrapped so SPA navi
 assert.match(owner,/addEventListener\('popstate'/,'browser back\/forward navigation must reactivate the Shopee owner');
 assert.match(owner,/attributeFilter:\['hidden'\]/,'Shopee page visibility changes must reactivate the owner after SPA render');
 assert.match(owner,/\/api\/v246\/shopee-trends\?businessType=/,'independent Shopee page must read the V246\/V247 locked-ledger endpoint');
-assert.match(owner,/title:'平均签收天数趋势'/,'independent Shopee page third operational trend must be average signing days');
-assert.match(owner,/title:'OC数量趋势'/,'independent Shopee page fourth operational trend must be current OC quantity');
-assert.match(injection,/v244-shopee-trend-owner\.js\?v=20260823-v248-1/,'V248 Shopee owner must be cache-busted into delivered HTML');
-assert.match(injection,/X-CE-QC-V248-UI/,'V248 delivered HTML must expose an observable response header');
+
+assert.doesNotThrow(()=>new Function(finalOwner),'V251 final Shopee owner must compile as browser JavaScript');
+assert.match(finalOwner,/v251-shopee-final-render-owner-v1/,'final Shopee owner must identify V251');
+assert.match(finalOwner,/global\.renderShopeePage=wrapped/,'V251 must wrap canonical renderShopeePage so legacy rerenders cannot win');
+assert.match(finalOwner,/global\.renderAll=wrapped/,'V251 must also wrap renderAll because background state refresh can rerender Shopee');
+for(const label of ['票数趋势','POD数量趋势','平均签收天数趋势','OC数量趋势','签收天数覆盖','平均签收天数','1/2/3派签收占POD趋势','派次证据覆盖','派次未识别POD'])assert.ok(finalOwner.includes(label),`V251 final Shopee owner missing ${label}`);
+assert.match(finalOwner,/首次真实70 START=1派/,'V251 UI must expose the strict first-attempt rule');
+assert.match(finalOwner,/150 Pending\/派送失败后/,'V251 UI must explain that a new attempt requires failure evidence before a new START');
+assert.match(finalOwner,/row\.podDaysCount/,'V251 daily table must expose signing-day evidence coverage');
+assert.match(finalOwner,/row\.attemptCoverageRate/,'V251 attempt table must expose strict-attempt evidence coverage');
+assert.match(finalOwner,/\/api\/v246\/shopee-trends\?businessType=/,'V251 must read the locked-ledger endpoint directly');
+assert.match(injection,/v250-shopee-metric-visibility\.js\?v=20260823-v251-1/,'V251 final Shopee owner must be cache-busted into delivered HTML');
+assert.match(injection,/X-CE-QC-V251-UI/,'V251 delivered HTML must expose an observable response header');
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V248] SHOPEECN/SHOPEEVN smoke passed: locked cohort + later POD correction + true current OC + immutable average signing days + strict 1/2/3 attempts + SPA navigation activation');
+console.log('[V251] SHOPEECN/SHOPEEVN smoke passed: locked cohort + immutable signing days + strict 1/2/3 attempts + final canonical render ownership');
