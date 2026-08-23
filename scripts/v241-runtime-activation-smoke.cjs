@@ -66,14 +66,16 @@ assert.match(trackingCore,/applyV246StrictAttemptEvidence/,'V246 must support au
 assert.match(trackingCore,/V246_STRICT_TRACK:/,'V246 strict track evidence must be persisted with explicit ownership');
 assert.match(trackingCore,/readV246ShopeeDailyTruth/,'Shopee dashboard must have a ledger-backed daily truth reader');
 
-assert.match(trackingRuntime,/CAMBODIA_0200_30DAY_AUTO/,'V246 must own a Cambodia 02:00 rolling 30-day refresh');
+assert.match(trackingRuntime,/CAMBODIA_0200_30DAY_AUTO/,'V246 must own a Cambodia 02:00 rolling 30-day reconciliation');
 assert.match(trackingRuntime,/clock\.minuteOfDay<120/,'V246 scheduler must not run the daily deep refresh before 02:00');
 assert.match(trackingRuntime,/v246_daily_0200_success_date/,'V246 must remember the successful 02:00 day and support missed-run catch-up');
 assert.match(trackingRuntime,/v246_daily_0200_failed_at/,'V246 must persist failed 02:00 attempts for retry backoff');
 assert.match(trackingRuntime,/SCHEDULE_RETRY_MS/,'V246 must cool down repeated automatic failures instead of retrying every minute');
 assert.match(trackingRuntime,/scheduledFailureCoolingDown/,'V246 scheduler must enforce failure cooldown');
-assert.match(trackingRuntime,/STARTUP_30DAY_ANTI_LEAK/,'V246 must perform startup anti-leak reconciliation');
+assert.match(trackingRuntime,/STARTUP_90DAY_ANTI_LEAK/,'V246 must seed recent historical omissions on startup before daily catch-up');
 assert.match(trackingRuntime,/HOURLY_ANTI_LEAK_RECONCILE/,'V246 must continuously audit missing/reopened tracking rows while the app is running');
+assert.match(trackingRuntime,/listAllOpenTrackingRows/,'nightly tracking must continue all admitted OPEN parcels even after they age beyond 30 days');
+assert.match(trackingRuntime,/automaticAllOpen/,'02:00 job must use all-open candidates after the rolling 30-day reconciliation');
 assert.match(trackingRuntime,/collectV200Rows/,'V246 must enrich safe POD/signing evidence after status refresh');
 assert.match(trackingRuntime,/backfillShopeeStrictTrack/,'V246 must actively backfill real Shopee attempt cycles from historical trajectory');
 assert.match(trackingRuntime,/queryTrackWithFallback/,'strict attempt backfill must isolate failing track batches rather than fail the whole range');
@@ -98,4 +100,4 @@ assert.match(inject,/v244-shopee-trend-owner\.js\?v=20260823-v246-1/,'Shopee own
 assert.match(inject,/v246-qc-tracking\.js\?v=20260823-v246-1/,'V246 tracking control must be injected');
 assert.match(inject,/X-CE-QC-V246-UI/,'V246 UI response header must be observable');
 
-console.log('[V246] continuous QC tracking gate passed: source-union anti-leak + true-terminal-only + locked first-report signing days + strict START/failure attempts + 02:00 catch-up/backoff + one-click/custom reconciliation');
+console.log('[V246] continuous QC tracking gate passed: source-union anti-leak + true-terminal-only + all-open nightly tracking + locked first-report signing days + strict START/failure attempts + 02:00 catch-up/backoff + one-click/custom reconciliation');
