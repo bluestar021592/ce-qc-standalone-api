@@ -15,6 +15,8 @@ const trackingRuntime = fs.readFileSync('src/v246QcTrackingRuntimePatch.js', 'ut
 const trackingUi = fs.readFileSync('public/v246-qc-tracking.js', 'utf8');
 const attemptCycle = fs.readFileSync('src/shopeeAttemptCycleV246.js', 'utf8');
 const shopeeAnalyzer = fs.readFileSync('src/shopeeAnalyzerV33.js', 'utf8');
+const whppDetailUi = fs.readFileSync('public/v249-whpp-detail-owner.js', 'utf8');
+const whppDetailRoute = fs.readFileSync('src/v172WhppDetailParityPatch.js', 'utf8');
 
 for (const file of ['src/shopeeAttemptCycleV246.js','src/shopeeAnalyzerV33.js','src/v246TrackingLedgerCore.js','src/v246QcTrackingRuntimePatch.js','public/v246-qc-tracking.js']) {
   execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
@@ -94,10 +96,26 @@ for(const label of ['票数趋势','POD数量趋势','平均签收天数趋势',
 assert.match(v245Ui,/<th>平均签收天数<\/th>/,'Shopee daily detail must keep average signing days');
 assert.doesNotMatch(v245Ui,/<th>首日POD<\/th>/,'Shopee daily detail must not restore duplicate first-day POD column');
 assert.doesNotMatch(v245Ui,/<th>首日妥投率<\/th>/,'Shopee daily detail must not restore duplicate first-day POD-rate column');
+assert.match(v245Ui,/v248-shopee-spa-operational-trend-owner-v1/,'Shopee owner must be the V248 SPA-aware owner');
+assert.match(v245Ui,/activateIfShopee/,'V248 Shopee owner must reactivate after SPA navigation');
+
 assert.doesNotThrow(()=>new Function(trackingUi),'V246 QC tracking UI must compile as browser JavaScript');
 for(const label of ['最近7天核查','最近30天核查','核查自定义区间','单号追踪诊断'])assert.ok(trackingUi.includes(label),`V246 tracking UI missing ${label}`);
-assert.match(inject,/v244-shopee-trend-owner\.js\?v=20260823-v246-1/,'Shopee owner must be cache-busted for V246');
-assert.match(inject,/v246-qc-tracking\.js\?v=20260823-v246-1/,'V246 tracking control must be injected');
-assert.match(inject,/X-CE-QC-V246-UI/,'V246 UI response header must be observable');
 
-console.log('[V246] continuous QC tracking gate passed: source-union anti-leak + true-terminal-only + all-open nightly tracking + locked first-report signing days + strict START/failure attempts + 02:00 catch-up/backoff + one-click/custom reconciliation');
+assert.doesNotThrow(()=>new Function(whppDetailUi),'V249 WHPP exact drilldown owner must compile as browser JavaScript');
+assert.match(whppDetailUi,/\/api\/v172\/whpp-metric-detail/,'V249 WHPP clicks must use the existing exact V172 per-ticket detail route');
+assert.match(whppDetailUi,/__CE_QC_V132_WHPP_FAST__/,'V249 must hand stale WHPP fallback pages back to the canonical V132 page');
+assert.match(whppDetailUi,/WHPP页面已切换完成\|区域\\\/趋势数据正在后台更新/,'V249 must recognize the stale V90 placeholder page');
+assert.match(whppDetailUi,/'订单取消':'cancelled'/,'V249 WHPP detail mapping must include cancelled shipments');
+assert.match(whppDetailUi,/'闭环率':'closed'/,'V249 WHPP detail mapping must expose closed tickets');
+assert.match(whppDetailUi,/pod\+returned\+cancelled/,'V249 closure arithmetic must be POD + returned + cancelled');
+assert.match(whppDetailRoute,/\/api\/v172\/whpp-metric-detail/,'V172 exact WHPP detail route must remain registered');
+
+assert.match(inject,/v244-shopee-trend-owner\.js\?v=20260823-v248-1/,'Shopee owner must be cache-busted for V248 SPA activation');
+assert.match(inject,/v246-qc-tracking\.js\?v=20260823-v246-1/,'V246 tracking control must be injected');
+assert.match(inject,/v249-whpp-detail-owner\.js\?v=20260823-v249-1/,'V249 WHPP exact drilldown owner must be injected after legacy UI');
+assert.match(inject,/X-CE-QC-V246-UI/,'V246 UI response header must be observable');
+assert.match(inject,/X-CE-QC-V248-UI/,'V248 UI response header must be observable');
+assert.match(inject,/X-CE-QC-V249-UI/,'V249 UI response header must be observable');
+
+console.log('[V249] continuous QC tracking + V248 Shopee SPA owner + WHPP exact drilldown/canonical handoff gate passed');
