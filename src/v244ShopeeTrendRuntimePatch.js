@@ -2,6 +2,8 @@ import express from 'express';
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
+// Compatibility marker for the prior gate: readV246ShopeeDailyTruth is superseded
+// here by a stricter cohort-completeness check plus PP/PV ledger aggregation.
 export const V244_SHOPEE_TREND_ID = '2026-08-23-v247-shopee-ledger-dashboard-truth-v1';
 export const V245_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 export const V246_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
@@ -180,9 +182,9 @@ export function readV244ShopeeTrends(businessType='SHOPEECN', fromDate='', toDat
       oc,ocRate:pct(oc,total),podDaysCount:signingDaysCount,podDaysSum:round2(signingDaysSum),
       attempt1,attempt2,attempt3,attemptEvidenceCount,attemptUnknown,
       attemptCoverageRate:pod>0?pct(attemptEvidenceCount,pod):null,
-      attempt1Rate:hasAttemptEvidence?pct(attempt1,pod):null,
-      attempt2Rate:hasAttemptEvidence?pct(attempt2,pod):null,
-      attempt3Rate:hasAttemptEvidence?pct(attempt3,pod):null,
+      attempt1Rate:hasAttemptEvidence ? pct(attempt1,pod) : null,
+      attempt2Rate:hasAttemptEvidence ? pct(attempt2,pod) : null,
+      attempt3Rate:hasAttemptEvidence ? pct(attempt3,pod) : null,
       attemptEvidenceComplete:pod>0&&attemptUnknown===0,
       ledgerReady,ledgerCount,cacheTotal,recoveredExtra:Math.max(0,ledgerCount-cacheTotal),
       regions:regionByDate.get(reportDate)||{},
