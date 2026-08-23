@@ -4,7 +4,7 @@ import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { ensureV246TrackingSchema, applyV246StrictAttemptEvidence } from './v246TrackingLedgerCore.js';
 import { activeBusinessProcessingDetails, cambodiaClock } from './carryoverRefreshScheduler.js';
 
-export const V262_SHOPEE_STRICT_EVIDENCE_ID='2026-08-23-v265-three-business-evidence-priority-v3';
+export const V262_SHOPEE_STRICT_EVIDENCE_ID='2026-08-23-v265-three-business-evidence-priority-v4';
 export const V263_DELIVERY_KPI_TYPES=Object.freeze(['TBKH','SHOPEECN','SHOPEEVN']);
 const TYPE_SET=new Set(V263_DELIVERY_KPI_TYPES);
 const LOOKBACK_DAYS=Math.max(30,Math.min(400,Number(process.env.V262_STRICT_LOOKBACK_DAYS||400)));
@@ -75,13 +75,14 @@ function unknownCandidates(db,{businessType='',fromDate='',toDate=''}={}){
   const to=requestedTo&&requestedTo<today?requestedTo:today;
   const type=TYPE_SET.has(String(businessType||'').toUpperCase())?String(businessType).toUpperCase():'';
   const retryBefore=new Date(Date.now()-UNKNOWN_RETRY_MS).toISOString();
-  return db.prepare(`SELECT shipmentCode,businessType,firstReportDate,lastImportedDate,podDate,attemptNo,attemptSource,signingDays,lastCheckedAt,terminalReason
+  return db.prepare(`SELECT shipmentCode,businessType,firstReportDate,lastImportedDate,podDate,attemptNo,attemptSource,signingDays,lastCheckedAt,lastRepairReason,terminalReason
     FROM qc_tracking_ledger
     WHERE terminalReason='POD' AND businessType IN ('TBKH','SHOPEECN','SHOPEEVN')
       AND (?='' OR businessType=?)
       AND (attemptNo=0 OR podDate='' OR podDate IS NULL OR signingDays IS NULL OR signingDays<=0)
-      AND firstReportDate BETWEEN ? AND ? AND (lastCheckedAt='' OR lastCheckedAt IS NULL OR lastCheckedAt<=?)
-    ORDER BY firstReportDate DESC,CASE WHEN lastCheckedAt='' OR lastCheckedAt IS NULL THEN 0 ELSE 1 END,lastCheckedAt,shipmentCode LIMIT ?`).all(type,type,from,to,retryBefore,MAX_PER_RUN).filter(v262ShouldRetryStrictRow);
+      AND firstReportDate BETWEEN ? AND ?
+      AND (COALESCE(lastRepairReason,'') NOT LIKE 'V265:%' OR lastCheckedAt='' OR lastCheckedAt IS NULL OR lastCheckedAt<=?)
+    ORDER BY firstReportDate DESC,CASE WHEN COALESCE(lastRepairReason,'') NOT LIKE 'V265:%' THEN 0 WHEN lastCheckedAt='' OR lastCheckedAt IS NULL THEN 1 ELSE 2 END,lastCheckedAt,shipmentCode LIMIT ?`).all(type,type,from,to,retryBefore,MAX_PER_RUN).filter(v262ShouldRetryStrictRow);
 }
 
 export function getV263DeliveryEvidenceStatus(){return{...lastRunResult,running};}
@@ -112,6 +113,6 @@ function start(){
   if(process.env.CI||process.env.NODE_ENV==='test'||String(process.env.CE_QC_DISABLE_V262_STRICT_BACKFILL||'')==='1')return;
   startTimer=setTimeout(async()=>{const r=await runV262ShopeeStrictEvidenceBackfill({reason:'STARTUP_RECENT_FIRST'});if(r?.skipped&&r.reason==='FOREGROUND_PROCESSING_ACTIVE')retryIfBlocked();},START_DELAY_MS);startTimer.unref?.();
   periodicTimer=setInterval(async()=>{const r=await runV262ShopeeStrictEvidenceBackfill({reason:'TWO_HOUR_AUTO'});if(r?.skipped&&r.reason==='FOREGROUND_PROCESSING_ACTIVE')retryIfBlocked();},PERIODIC_MS);periodicTimer.unref?.();
-  console.log(`[CE-QC][V263_DELIVERY_EVIDENCE] ${V262_SHOPEE_STRICT_EVIDENCE_ID} enabled for TBKH + SHOPEECN + SHOPEEVN only: recent dates first, stored-track first + CE retry, startup ${Math.round(START_DELAY_MS/1000)}s, ${LOOKBACK_DAYS}d lookback, every ${Math.round(PERIODIC_MS/3600000)}h.`);
+  console.log(`[CE-QC][V263_DELIVERY_EVIDENCE] ${V262_SHOPEE_STRICT_EVIDENCE_ID} enabled for TBKH + SHOPEECN + SHOPEEVN only: legacy unknowns rechecked once under V265, recent dates first, stored-track first + CE retry, startup ${Math.round(START_DELAY_MS/1000)}s, ${LOOKBACK_DAYS}d lookback, every ${Math.round(PERIODIC_MS/3600000)}h.`);
 }
 start();
