@@ -26,15 +26,17 @@ const V253_FAST_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v263-1';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
-// Compatibility-only source markers for pre-V263 gates. These files/versions are
-// not pushed into delivered HTML after V263 canonical ownership.
+// Compatibility-only source markers for pre-V263 gates. They remain ordered for
+// old source assertions, but are stripped and never injected after V263.
+const V252_LIFECYCLE_MARKER = '/v252-qc-lifecycle-ui.js?v=20260823-v252-1';
+const HOME_MARKER = '/v237-home-dashboard-owner.js?v=20260823-v247-1';
 const LEGACY_GATE_V234_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const LEGACY_GATE_V248_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v248-1';
 const LEGACY_GATE_V251_MARKER = '/v250-shopee-metric-visibility.js?v=20260823-v251-1';
 const LEGACY_GATE_V253_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v253-1';
 const LEGACY_GATE_V254_MARKER = '/v254-dashboard-render-rescue.js?v=20260823-v254-1';
 const LEGACY_GATE_V261_MARKER = '/v261-dashboard-final-owner.js?v=20260823-v261-1';
-void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V253_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER;
+void V252_LIFECYCLE_MARKER; void HOME_MARKER; void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V253_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER;
 const originalSend = express.response.send;
 
 function stripScript(body, fileName) {
@@ -69,9 +71,11 @@ express.response.send = function v263MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V240-UI', V240_DAILY_RATE_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V245-UI', V245_SHOPEE_TREND_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V246-UI', V246_TRACKING_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V247-UI', V247_HOME_LEDGER_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V248-UI', V248_SHOPEE_TREND_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V249-UI', V249_WHPP_DETAIL_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V251-UI', V251_SHOPEE_FINAL_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V252-UI', V252_LIFECYCLE_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V253-UI', V253_DASHBOARD_FAST_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V254-UI', V254_DASHBOARD_RENDER_RESCUE_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V261-UI', V261_DASHBOARD_FINAL_UI_INJECTION_ID);
