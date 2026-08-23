@@ -4,6 +4,7 @@ const {execFileSync}=require('child_process');
 const read=p=>fs.readFileSync(p,'utf8');
 const dashboard=read('public/dashboard-v18.js');
 const chart=read('public/dashboard-chart-v18.js');
+const css=read('public/dashboard-v18.css');
 const fastOwner=read('public/v253-dashboard-fast-owner.js');
 const generic=read('public/v263-generic-trend-hydrator.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
@@ -11,13 +12,14 @@ const cachePatch=read('src/v89StaticAssetCachePatch.js');
 const storage=read('src/v254StorageHealthPatch.js');
 const r2guard=read('src/v256R2ZeroCostGuard.js');
 const strictBackfill=read('src/v262ShopeeStrictEvidenceBackfill.js');
+const attemptCycle=read('src/shopeeAttemptCycleV246.js');
 const trend=read('src/v263DeliveryKpiTrendPatch.js');
 const runtime=read('src/v206InteractiveFirstRuntimePatch.js');
 
 const runtimeImports=[...runtime.matchAll(/^import\s+['"]\.\/(.+?\.js)['"];?$/gm)].map(match=>`src/${match[1]}`);
 assert.ok(runtimeImports.length>=10,'V206 startup bridge must expose all direct runtime imports including V263');
 for(const file of runtimeImports)execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
-for(const file of ['public/dashboard-v18.js','public/dashboard-chart-v18.js','public/v253-dashboard-fast-owner.js','public/v263-generic-trend-hydrator.js','src/v89StaticAssetCachePatch.js','src/v262ShopeeStrictEvidenceBackfill.js','src/v263DeliveryKpiTrendPatch.js','scripts/v262-shopee-strict-evidence-smoke.mjs','scripts/v263-delivery-kpi-trend-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['public/dashboard-v18.js','public/dashboard-chart-v18.js','public/v253-dashboard-fast-owner.js','public/v263-generic-trend-hydrator.js','src/v89StaticAssetCachePatch.js','src/shopeeAttemptCycleV246.js','src/v262ShopeeStrictEvidenceBackfill.js','src/v263DeliveryKpiTrendPatch.js','src/v264TbkhOpenAttemptLifecycle.js','scripts/v262-shopee-strict-evidence-smoke.mjs','scripts/v263-delivery-kpi-trend-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(dashboard),'canonical dashboard-v18 must compile');
 assert.doesNotThrow(()=>new Function(chart),'canonical dashboard chart must compile');
 assert.doesNotThrow(()=>new Function(fastOwner),'V253 fetch bridge must compile');
@@ -31,15 +33,23 @@ assert.match(dashboard,/70 START优先/,'UI must disclose strict START evidence 
 assert.match(dashboard,/function renderHome\(/,'home must remain canonical DashboardV18');
 assert.doesNotMatch(dashboard,/派送概率分布（按派次）/,'home must not duplicate the three-business attempt mechanism');
 assert.match(chart,/type === 'days'/,'shared chart renderer must support signing-day values');
+assert.match(chart,/adaptiveAttemptMax/,'low-coverage attempt chart must use readable adaptive scale instead of pinning sub-1% evidence to a 0-100 axis');
+assert.match(chart,/v265-attempt-evidence-status/,'attempt chart must disclose evidence completion status');
+assert.match(chart,/待补抓/,'zero values under incomplete evidence must not be presented as final 0%');
+assert.match(chart,/当前曲线只表示已获得的真实轨迹证据，不作为最终派次率/,'incomplete attempt curves must be explicitly provisional');
+assert.match(css,/#v263DeliveryKpiPanel \.v18-chart-grid\{grid-template-columns:minmax\(0,1fr\)!important/,'attempt chart must occupy the full panel width');
+assert.match(css,/v265-attempt-evidence-status\.incomplete/,'incomplete evidence must have a visible status treatment');
+assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)!important/,'delivery KPI summary must use a balanced four-column layout');
 
 assert.match(generic,/PAGE_TYPE=\{ce:'CE',ceaf:'CEAF',ali1688:'ALI1688'\}/,'generic hydrator must be scoped to CE + CEAF + ALI1688 only');
 assert.match(generic,/\/api\/v253\/trends/,'generic non-target boards must use V253 cache-independent truth');
 assert.doesNotMatch(generic,/TBKH|SHOPEECN|SHOPEEVN|WHPP/,'generic hydrator must not compete with the three specialized boards or WHPP dedicated owner');
 assert.doesNotMatch(generic,/读取已落库日报数据/,'generic hydrator must not create indefinite loading placeholders');
-assert.match(inject,/v263-generic-trend-hydrator\.js\?v=20260823-v263-1/,'generic hydrator must be delivered after canonical dashboard scripts');
+assert.match(inject,/v263-generic-trend-hydrator\.js\?v=20260823-v263-1/,'legacy resource-version gate marker must remain source-compatible while live delivery uses the newer marker');
 
 assert.match(cachePatch,/CORE_LIVE_ASSET_RE/,'critical dashboard assets must have an explicit live-cache rule');
-assert.match(cachePatch,/Clear-Site-Data', '\"cache\"'/,'HTML navigation must clear only browser HTTP cache after V263 upgrade');
+assert.match(cachePatch,/dashboard-v18\\\.css/,'dashboard layout CSS must be no-store together with core JS');
+assert.match(cachePatch,/Clear-Site-Data', '\"cache\"'/,'HTML navigation must clear only browser HTTP cache after dashboard upgrade');
 assert.match(cachePatch,/no-store, max-age=0, must-revalidate/,'critical core dashboard assets must not remain in 24-hour cache');
 
 assert.match(inject,/V234\/V248\/V251\/V252\/V254\/V261 visual owners retired/,'UI delivery must explicitly retire all historical visual trend owners');
@@ -58,13 +68,22 @@ assert.match(strictBackfill,/保留已锁定派次并补POD日期\/签收天数/
 assert.match(strictBackfill,/business_track_events/,'stored trajectory must be used before CE retry');
 assert.match(strictBackfill,/CE_TRACK_RETRY_UNKNOWN/,'remaining missing evidence must retry CE trajectory');
 assert.match(strictBackfill,/TWO_HOUR_AUTO/,'attempt/signing evidence retry must remain continuous');
+assert.match(strictBackfill,/START_DELAY_MS[\s\S]*20_000/,'first automatic evidence pass must start quickly instead of waiting four minutes');
+assert.match(strictBackfill,/ORDER BY firstReportDate DESC/,'recent report dates must be repaired before old history');
+assert.match(strictBackfill,/requestV263DeliveryEvidenceBackfill/,'dashboard must be able to request a low-coverage repair without blocking first paint');
+assert.match(strictBackfill,/nodeCode|eventStatusCode|operationCode|scanCode/,'CE event wrappers must normalize alternate real node-code fields');
 assert.doesNotMatch(strictBackfill,/businessType IN \('CE','CEAF'|businessType IN \('ALI1688'|businessType IN \('WHPP'/,'other boards must not enter attempt/signing evidence retry');
+assert.match(attemptCycle,/CODE_KEY_RE/,'strict attempt analyzer must recursively normalize CE node-code keys');
+assert.match(attemptCycle,/nodeCode|scanCode|operationCode/,'strict attempt analyzer must support alternate real CE code fields');
+assert.match(attemptCycle,/only when the whole trajectory has no code 70 may code 60 be fallback/,'70-first and whole-trajectory 60 fallback rule must remain explicit');
 
 assert.match(trend,/new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'V263 read endpoint scope must be exact');
 assert.match(trend,/signingDaysSum/,'average signing days must come from locked per-shipment signing days');
 assert.match(trend,/attemptNo=1/,'reader must expose first-attempt POD evidence');
 assert.match(trend,/attemptNo=2/,'reader must expose second-attempt POD evidence');
 assert.match(trend,/attemptNo>=3/,'reader must expose third-plus attempt POD evidence');
+assert.match(trend,/evidenceIncomplete/,'read model must disclose incomplete evidence instead of presenting partial numbers as final');
+assert.match(trend,/DASHBOARD_LOW_COVERAGE/,'low-coverage dashboard reads must trigger scoped background repair');
 assert.match(runtime,/import '\.\/v263DeliveryKpiTrendPatch\.js';/,'V263 trend route must activate in normal runtime');
 
 execFileSync(process.execPath,['scripts/v262-shopee-strict-evidence-smoke.mjs'],{stdio:'inherit'});
@@ -81,4 +100,4 @@ assert.match(r2guard,/DEFAULT_SAFE_STORAGE_BYTES=8\*GIB/,'R2 zero-cost guard mus
 assert.match(r2guard,/storageClass:'STANDARD'/,'R2 must remain Standard-only');
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'secrets must never be committed');
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V263] canonical DashboardV18 + scoped generic trends + legacy visual owners retired + cache reset + exact three-business attempt/signing tracking + storage safety gate passed');
+console.log('[V265] evidence-aware full-width attempt UI + recent-first normalized evidence repair + exact three-business scope + storage safety gate passed');
