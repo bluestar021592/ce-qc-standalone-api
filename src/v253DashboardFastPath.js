@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
-export const V253_DASHBOARD_FAST_PATH_ID='2026-08-23-v253-cache-independent-dashboard-fastpath-v3';
+export const V253_DASHBOARD_FAST_PATH_ID='2026-08-23-v259-scoped-dashboard-fastpath-v4';
 const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','ALL']);
 const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
@@ -17,6 +17,7 @@ const dateKey=value=>{const s=String(value||'').slice(0,10);return /^\d{4}-\d{2}
 function blank(type,date=''){return{businessType:type,reportDate:date,total:0,pod:0,ocCurrent:0,sameDayPod:0,podRate:0,ocRate:0,sameDayPodRate:0,ready:false,matched:0};}
 function finish(row){row.total=n(row.total);row.pod=n(row.pod);row.ocCurrent=n(row.ocCurrent);row.sameDayPod=n(row.sameDayPod);row.matched=n(row.matched);row.podRate=pct(row.pod,row.total);row.ocRate=pct(row.ocCurrent,row.total);row.sameDayPodRate=pct(row.sameDayPod,row.total);row.ready=row.total===0?true:row.matched>=row.total;return row;}
 function merge(type,date,rows=[]){const out=blank(type,date);const valid=rows.filter(Boolean);for(const row of valid){out.total+=n(row.total);out.pod+=n(row.pod);out.ocCurrent+=n(row.ocCurrent);out.sameDayPod+=n(row.sameDayPod);out.matched+=n(row.matched);}out.ready=valid.length>0&&valid.every(row=>row.ready);out.podRate=pct(out.pod,out.total);out.ocRate=pct(out.ocCurrent,out.total);out.sameDayPodRate=pct(out.sameDayPod,out.total);return out;}
+function scopeOf(requested,allowed){const scope=(Array.isArray(requested)?requested:[]).filter(type=>allowed.includes(type));return scope.length?scope:allowed;}
 
 function selectedDates(type,from,to,db=getDb()){
   const single=from===to;
@@ -34,10 +35,10 @@ function latestBatches(dates,db=getDb()){
 }
 function valuesCte(dates,batches){const pairs=dates.map(d=>[d,batches.get(d)||'']).filter(([,s])=>s);if(!pairs.length)return null;return{sql:pairs.map(()=>'(?,?)').join(','),params:pairs.flat()};}
 
-function ccslFallback(dates,batches,db=getDb()){
-  const cte=valuesCte(dates,batches);const out=new Map();if(!cte)return out;
+function ccslFallback(dates,batches,requestedTypes=CCSL_TYPES,db=getDb()){
+  const cte=valuesCte(dates,batches);const out=new Map();if(!cte)return out;const scope=scopeOf(requestedTypes,CCSL_TYPES),typeMarks=scope.map(()=>'?').join(',');
   const rows=db.prepare(`WITH latest(reportDate,snapshotId) AS (VALUES ${cte.sql}), valid AS (
-    SELECT l.reportDate,u.businessType,u.shipmentCode FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate WHERE u.businessType IN ('CE','CEAF','TBKH','ALI1688')
+    SELECT l.reportDate,u.businessType,u.shipmentCode FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate WHERE u.businessType IN (${typeMarks})
   ), facts AS (
     SELECT v.reportDate,v.businessType,v.shipmentCode,f.shipmentCode AS matchedBill,COALESCE(f.isPod,0) isPod,COALESCE(f.ocDays,0) ocDays,COALESCE(f.primaryCategory,f.category,'') category,COALESCE(f.rawJson,'{}') rawJson,
       REPLACE(SUBSTR(COALESCE(NULLIF(json_extract(f.rawJson,'$."POD时间"'),''),NULLIF(json_extract(f.rawJson,'$.podTime'),''),NULLIF(json_extract(f.rawJson,'$."签收时间"'),''),NULLIF(f.lastEventTime,''),''),1,10),'/','-') podDate
@@ -45,14 +46,14 @@ function ccslFallback(dates,batches,db=getDb()){
   ) SELECT reportDate,businessType,COUNT(*) total,COUNT(matchedBill) matched,SUM(isPod) pod,
     SUM(CASE WHEN isPod=1 AND podDate=reportDate THEN 1 ELSE 0 END) sameDayPod,
     SUM(CASE WHEN isPod=0 AND (ocDays>=1 OR UPPER(TRIM(category))='OC' OR UPPER(TRIM(category)) LIKE 'OC%' OR category LIKE '%OC滞留%' OR UPPER(COALESCE(json_extract(rawJson,'$."当前状态"'),''))='OC' OR UPPER(COALESCE(json_extract(rawJson,'$."状态标识"'),''))='OC') THEN 1 ELSE 0 END) ocCurrent
-    FROM facts GROUP BY reportDate,businessType`).all(...cte.params);
+    FROM facts GROUP BY reportDate,businessType`).all(...cte.params,...scope);
   for(const raw of rows){const row=finish({...blank(raw.businessType,raw.reportDate),...raw});out.set(`${row.reportDate}|${row.businessType}`,row);}return out;
 }
 
-function shopeeFallback(dates,batches,db=getDb()){
-  ensureV246TrackingSchema(db);const cte=valuesCte(dates,batches);const out=new Map();if(!cte)return out;
+function shopeeFallback(dates,batches,requestedTypes=SHOPEE_TYPES,db=getDb()){
+  ensureV246TrackingSchema(db);const cte=valuesCte(dates,batches);const out=new Map();if(!cte)return out;const scope=scopeOf(requestedTypes,SHOPEE_TYPES),typeMarks=scope.map(()=>'?').join(',');
   const rows=db.prepare(`WITH latest(reportDate,snapshotId) AS (VALUES ${cte.sql}), valid AS (
-    SELECT l.reportDate,u.businessType,u.shipmentCode FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate WHERE u.businessType IN ('SHOPEECN','SHOPEEVN')
+    SELECT l.reportDate,u.businessType,u.shipmentCode FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate WHERE u.businessType IN (${typeMarks})
   ), facts AS (
     SELECT v.reportDate,v.businessType,v.shipmentCode,l.shipmentCode ledgerBill,f.shipmentCode finalBill,
       CASE WHEN l.terminalReason='POD' THEN 1 ELSE COALESCE(f.isPod,0) END isPod,
@@ -60,7 +61,7 @@ function shopeeFallback(dates,batches,db=getDb()){
       CASE WHEN l.trackingStatus='OPEN' AND (UPPER(TRIM(COALESCE(l.currentState,'')))='OC' OR UPPER(TRIM(COALESCE(l.currentCategory,'')))='OC' OR UPPER(TRIM(COALESCE(l.currentCategory,''))) LIKE 'OC%' OR COALESCE(l.currentCategory,'') LIKE '%OC滞留%' OR UPPER(COALESCE(json_extract(l.currentStateJson,'$."当前状态"'),''))='OC' OR UPPER(COALESCE(json_extract(l.currentStateJson,'$."状态标识"'),''))='OC') THEN 1
         WHEN (l.shipmentCode IS NULL OR l.trackingStatus='OPEN') AND COALESCE(f.isPod,0)=0 AND (UPPER(TRIM(COALESCE(f.primaryCategory,'')))='OC' OR UPPER(TRIM(COALESCE(f.primaryCategory,''))) LIKE 'OC%' OR COALESCE(f.primaryCategory,'') LIKE '%OC滞留%' OR UPPER(COALESCE(json_extract(f.rawJson,'$."当前状态"'),''))='OC') THEN 1 ELSE 0 END isOc
     FROM valid v LEFT JOIN qc_tracking_ledger l ON l.shipmentCode=v.shipmentCode AND l.businessType=v.businessType LEFT JOIN business_final_rows f ON f.businessType='SHOPEE' AND f.shipmentCode=v.shipmentCode AND f.reportDate=v.reportDate
-  ) SELECT reportDate,businessType,COUNT(*) total,SUM(CASE WHEN ledgerBill IS NOT NULL OR finalBill IS NOT NULL THEN 1 ELSE 0 END) matched,SUM(isPod) pod,SUM(isOc) ocCurrent,SUM(CASE WHEN isPod=1 AND podDate=reportDate THEN 1 ELSE 0 END) sameDayPod FROM facts GROUP BY reportDate,businessType`).all(...cte.params);
+  ) SELECT reportDate,businessType,COUNT(*) total,SUM(CASE WHEN ledgerBill IS NOT NULL OR finalBill IS NOT NULL THEN 1 ELSE 0 END) matched,SUM(isPod) pod,SUM(isOc) ocCurrent,SUM(CASE WHEN isPod=1 AND podDate=reportDate THEN 1 ELSE 0 END) sameDayPod FROM facts GROUP BY reportDate,businessType`).all(...cte.params,...scope);
   for(const raw of rows){const row=finish({...blank(raw.businessType,raw.reportDate),...raw});out.set(`${row.reportDate}|${row.businessType}`,row);}return out;
 }
 
@@ -83,7 +84,8 @@ export function readV253DashboardTrends(businessType='ALL',fromDate='',toDate=''
   const type=String(businessType||'ALL').toUpperCase(),to=dateKey(toDate),from=dateKey(fromDate)||to;if(!TYPES.has(type))throw new Error('业务板块无效');if(!from||!to||from>to)throw new Error('日期范围无效');const key=`T|${type}|${from}|${to}`,hit=memory.get(key);if(hit&&Date.now()-hit.at<CACHE_MS)return{...hit.value,memoryCacheHit:true};
   const db=getDb(),dates=selectedDates(type,from,to,db),batches=latestBatches(dates,db);
   const needCcsl=CCSL_TYPES.includes(type)||type==='CCSL'||type==='ALL';const needShopee=SHOPEE_TYPES.includes(type)||type==='SHOPEE'||type==='ALL';const needWhpp=type==='WHPP'||type==='ALL';
-  const ccsl=needCcsl?ccslFallback(dates,batches,db):new Map(),shopee=needShopee?shopeeFallback(dates,batches,db):new Map(),whpp=needWhpp?whppFallback(dates,batches,db):new Map();
+  const ccslScope=CCSL_TYPES.includes(type)?[type]:CCSL_TYPES,shopeeScope=SHOPEE_TYPES.includes(type)?[type]:SHOPEE_TYPES;
+  const ccsl=needCcsl?ccslFallback(dates,batches,ccslScope,db):new Map(),shopee=needShopee?shopeeFallback(dates,batches,shopeeScope,db):new Map(),whpp=needWhpp?whppFallback(dates,batches,db):new Map();
   const pick=(date,t)=>t==='WHPP'?whpp.get(`${date}|WHPP`)||blank('WHPP',date):CCSL_TYPES.includes(t)?ccsl.get(`${date}|${t}`)||blank(t,date):SHOPEE_TYPES.includes(t)?shopee.get(`${date}|${t}`)||blank(t,date):null;
   const daily=dates.map(date=>{if(CCSL_TYPES.includes(type)||SHOPEE_TYPES.includes(type)||type==='WHPP')return pick(date,type);if(type==='CCSL')return merge('CCSL',date,CCSL_TYPES.map(t=>pick(date,t)));if(type==='SHOPEE')return merge('SHOPEE',date,SHOPEE_TYPES.map(t=>pick(date,t)));return merge('ALL',date,[...CCSL_TYPES.map(t=>pick(date,t)),...SHOPEE_TYPES.map(t=>pick(date,t)),pick(date,'WHPP')]);});
   const value=(row,key)=>row?.ready?n(row[key]):null;const result={ok:true,readId:V253_DASHBOARD_FAST_PATH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:dates[0]||from,toDate:dates.at(-1)||to,dates,daily,ticket:daily.map(r=>value(r,'total')),pod:daily.map(r=>value(r,'pod')),podRate:daily.map(r=>value(r,'podRate')),oc:daily.map(r=>value(r,'ocCurrent')),ocRate:daily.map(r=>value(r,'ocRate')),sameDayPod:daily.map(r=>value(r,'sameDayPod')),sameDayPodRate:daily.map(r=>value(r,'sameDayPodRate')),missingDates:daily.filter(r=>!r.ready).map(r=>r.reportDate),source:'V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE',definitions:{podRate:'POD/当日总票',ocRate:'当前真实OC/当日总票',sameDayPodRate:'首日报当日完成POD/当日总票'}};memory.set(key,{at:Date.now(),value:result});return result;
@@ -102,5 +104,5 @@ export function readV253InstantSummary(requestedDate=''){
   const counts=Object.fromEntries(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].map(t=>[t,0]));for(const row of db.prepare('SELECT businessType,COUNT(*) c FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(batch.snapshotId)){if(Object.hasOwn(counts,row.businessType))counts[row.businessType]=n(row.c);}const raw=n(db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(batch.reportDate)?.totalCount)||n(db.prepare("SELECT COUNT(DISTINCT shipmentCode) c FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(batch.reportDate)?.c);const overlap=n(db.prepare(`SELECT COUNT(DISTINCT u.shipmentCode) c FROM unified_import_rows u WHERE u.snapshotId=? AND u.businessType='CEAF' AND EXISTS(SELECT 1 FROM business_daily_parse_rows p WHERE p.businessType='WHPP' AND p.reportDate=? AND p.shipmentCode=u.shipmentCode)`).get(batch.snapshotId,batch.reportDate)?.c);counts.WHPP=Math.max(0,raw-overlap);const total=Object.values(counts).reduce((s,v)=>s+n(v),0);const result={ok:true,patchId:V253_DASHBOARD_FAST_PATH_ID,reportDate:batch.reportDate,snapshotId:batch.snapshotId,counts,total,shopeeWhpp:{},sourceCorrection:{removedFromWhpp:overlap,reason:'V253 drives overlap lookup from the small indexed CEAF slice; no WHPP-wide anti-join on first paint.'},generatedAt:new Date().toISOString(),cacheHit:false};memory.set(key,{at:Date.now(),value:result});return result;
 }
 
-function register(app){if(registered)return;registered=true;previousGet.call(app,'/api/v253/trends',(req,res)=>{try{const data=readV253DashboardTrends(req.query.businessType,req.query.from,req.query.to);res.setHeader('Cache-Control','private,max-age=15');res.setHeader('X-CE-QC-V253',V253_DASHBOARD_FAST_PATH_ID);res.json(data);}catch(error){res.status(500).json({ok:false,error:error?.message||String(error),readId:V253_DASHBOARD_FAST_PATH_ID});}});previousGet.call(app,'/api/v253/instant-dashboard',(req,res)=>{try{const data=readV253InstantSummary(req.query.date||req.query.reportDate||'');res.setHeader('Cache-Control','private,max-age=30');res.setHeader('X-CE-QC-V253',V253_DASHBOARD_FAST_PATH_ID);res.json(data);}catch(error){res.status(500).json({ok:false,error:error?.message||String(error),readId:V253_DASHBOARD_FAST_PATH_ID});}});previousGet.call(app,'/api/v253/shopee-region',(req,res)=>{try{const data=readV253ShopeeRegion(req.query.businessType,req.query.date||req.query.to);res.setHeader('Cache-Control','private,max-age=30');res.setHeader('X-CE-QC-V253',V253_DASHBOARD_FAST_PATH_ID);res.json(data);}catch(error){res.status(500).json({ok:false,error:error?.message||String(error),readId:V253_DASHBOARD_FAST_PATH_ID});}});console.info('[CE-QC][V253]',V253_DASHBOARD_FAST_PATH_ID,'registered cache-independent trend, instant-summary and indexed exact-region endpoints after auth middleware');}
+function register(app){if(registered)return;registered=true;previousGet.call(app,'/api/v253/trends',(req,res)=>{try{const data=readV253DashboardTrends(req.query.businessType,req.query.from,req.query.to);res.setHeader('Cache-Control','private,max-age=15');res.setHeader('X-CE-QC-V253',V253_DASHBOARD_FAST_PATH_ID);res.json(data);}catch(error){res.status(500).json({ok:false,error:error?.message||String(error),readId:V253_DASHBOARD_FAST_PATH_ID});}});previousGet.call(app,'/api/v253/instant-dashboard',(req,res)=>{try{const data=readV253InstantSummary(req.query.date||req.query.reportDate||'');res.setHeader('Cache-Control','private,max-age=30');res.setHeader('X-CE-QC-V253',V253_DASHBOARD_FAST_PATH_ID);res.json(data);}catch(error){res.status(500).json({ok:false,error:error?.message||String(error),readId:V253_DASHBOARD_FAST_PATH_ID});}});previousGet.call(app,'/api/v253/shopee-region',(req,res)=>{try{const data=readV253ShopeeRegion(req.query.businessType,req.query.date||req.query.to);res.setHeader('Cache-Control','private,max-age=30');res.setHeader('X-CE-QC-V253',V253_DASHBOARD_FAST_PATH_ID);res.json(data);}catch(error){res.status(500).json({ok:false,error:error?.message||String(error),readId:V253_DASHBOARD_FAST_PATH_ID});}});console.info('[CE-QC][V253]',V253_DASHBOARD_FAST_PATH_ID,'registered scoped cache-independent trend, instant-summary and indexed exact-region endpoints after auth middleware');}
 express.application.get=function v253DashboardFastPathGet(pathValue,...handlers){const path=String(pathValue||'');if(!registered&&path==='/api/v234/trends')register(this);return previousGet.call(this,pathValue,...handlers);};
