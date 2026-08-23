@@ -21,6 +21,7 @@
   const series=(name,color,values,numerators=[],denominators=[])=>({name,color,values:Array.isArray(values)?values:[],numerators,denominators});
   function values(data,key,fallback=[]){const daily=Array.isArray(data?.daily)?data.daily:[];return daily.length?daily.map(r=>r?.ready?(r[key]===null||r[key]===undefined?null:n(r[key])):null):fallback;}
   function render(data,t){
+    if(global.__CE_QC_V271_CANONICAL_INTEGRITY__)return false;
     const r=root();if(!r||r.hidden||type()!==t)return false;
     const section=r.querySelector('.v18-trend-section');const renderer=global.RateTrendCardV18?.render;if(!section||typeof renderer!=='function')return false;
     let cards=[...section.querySelectorAll('.v18-chart-card')].slice(0,4);
@@ -35,6 +36,7 @@
     cards.forEach((card,i)=>renderer(card,specs[i]));section.dataset.v263Generic=t;return true;
   }
   async function refresh(force=false){
+    if(global.__CE_QC_V271_CANONICAL_INTEGRITY__)return;
     if(busy)return;const t=type(),rg=range(),r=root();if(!t||!rg.to||!r||r.hidden)return;const key=`${t}|${rg.from}|${rg.to}`;if(!force&&lastKey===key&&r.querySelector('.v18-trend-section')?.dataset?.v263Generic===t)return;
     busy=true;try{const response=await fetch(`/api/v253/trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});const data=await response.json();if(!response.ok||data?.ok===false)throw new Error(data?.error||`HTTP ${response.status}`);if(render(data,t))lastKey=key;}catch(error){console.warn('[CE-QC][V263_GENERIC_TREND]',t,error?.message||error);}finally{busy=false;}
   }
@@ -43,11 +45,11 @@
     document.addEventListener('click',e=>{if(e.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,#dashboardRangeQuery'))schedule(80,true);},true);
     document.addEventListener('change',e=>{if(e.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(100,true);},true);
     global.addEventListener('popstate',()=>schedule(80,true));
-    const observer=new MutationObserver(records=>{if(busy||!type())return;const relevant=records.some(record=>[...record.addedNodes].some(node=>node?.nodeType===1&&(node.matches?.('.v18-trend-section')||node.querySelector?.('.v18-trend-section'))));if(relevant)schedule(60,false);});
+    const observer=new MutationObserver(records=>{if(global.__CE_QC_V271_CANONICAL_INTEGRITY__||busy||!type())return;const relevant=records.some(record=>[...record.addedNodes].some(node=>node?.nodeType===1&&(node.matches?.('.v18-trend-section')||node.querySelector?.('.v18-trend-section'))));if(relevant)schedule(60,false);});
     if(document.body)observer.observe(document.body,{subtree:true,childList:true});
     [50,350,1000].forEach(ms=>setTimeout(()=>refresh(false),ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V263_GENERIC_TREND_HYDRATOR__={version:VERSION,refresh,scope:['CE','CEAF','ALI1688']};
-  console.info('[CE-QC][V263_GENERIC_TREND]',VERSION,'scoped to CE + CEAF + ALI1688 only; no attempt/signing metrics');
+  console.info('[CE-QC][V263_GENERIC_TREND]',VERSION,'scoped to CE + CEAF + ALI1688 only; yields visible rendering when V271 canonical owner is present.');
 })(window);
