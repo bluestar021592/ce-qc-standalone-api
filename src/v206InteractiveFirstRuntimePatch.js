@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import './v234DashboardLiveTruthPatch.js';
 import './v236DashboardCurrentRoutePatch.js';
 import './v231MetricTruthUiInjectionPatch.js';
+import './v244ShopeeTrendRuntimePatch.js';
 
 const PATCH_ID = '2026-08-23-v242-force-rebuild-retry-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
