@@ -71,7 +71,9 @@
     const legend = container.querySelector('.v18-chart-legend');
     chart.series.forEach(series => { const item = document.createElement('span'); const mark = document.createElement('i'); mark.style.background = series.color; item.append(mark, document.createTextNode(series.name)); legend.appendChild(item); });
 
-    const width = 360, height = 158, pad = { l: 42, r: 54, t: 18, b: 30 };
+    const measuredWidth=Math.round(container.getBoundingClientRect?.().width||0);
+    const width = attemptChart ? Math.max(640,Math.min(1400,measuredWidth>80?measuredWidth-20:960)) : 360;
+    const height = 158, pad = { l: 42, r: attemptChart?72:54, t: 18, b: 30 };
     const svg = svgNode('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': chart.title || '趋势' });
     const clipId = `v18clip-${Math.random().toString(36).slice(2)}`;
     const defs = svgNode('defs'), clip = svgNode('clipPath', { id: clipId });
