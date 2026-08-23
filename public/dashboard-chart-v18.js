@@ -1,6 +1,6 @@
 (function (global) {
   const svgNs = 'http://www.w3.org/2000/svg';
-  const fmt = (value, type) => value === null ? '—' : type === 'rate' ? `${Number(value).toFixed(2)}%` : Math.round(value).toLocaleString('zh-CN');
+  const fmt = (value, type) => value === null ? '—' : type === 'rate' ? `${Number(value).toFixed(2)}%` : type === 'days' ? `${Number(value).toFixed(2)}天` : Math.round(value).toLocaleString('zh-CN');
   const lastTwo = values => values.filter(value => value !== null).slice(-2);
   const svgNode = (tag, attrs = {}) => { const node = document.createElementNS(svgNs, tag); Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value)); return node; };
 
@@ -28,7 +28,7 @@
     clip.appendChild(svgNode('rect', { x: pad.l, y: pad.t, width: width - pad.l - pad.r, height: height - pad.t - pad.b })); defs.appendChild(clip); svg.appendChild(defs);
     const all = chart.series.flatMap(series => series.values).filter(value => value !== null);
     const maxData = Math.max(...all, 1);
-    const max = chart.type === 'rate' ? (chart.oc ? Math.max(3, maxData * 1.25) : 100) : Math.max(1000, Math.ceil(maxData / 1000) * 1000);
+    const max = chart.type === 'rate' ? (chart.oc ? Math.max(3, maxData * 1.25) : 100) : chart.type === 'days' ? Math.max(3, Math.ceil(maxData * 1.25 * 10) / 10) : Math.max(1000, Math.ceil(maxData / 1000) * 1000);
     for (let index = 0; index <= 3; index += 1) {
       const y = pad.t + (height - pad.t - pad.b) * index / 3;
       svg.appendChild(svgNode('line', { x1: pad.l, x2: width - pad.r, y1: y, y2: y, class: 'v18-grid' }));
@@ -72,7 +72,8 @@
       const valid = lastTwo(series.values), value = valid.at(-1) ?? null, previous = valid.at(-2) ?? null, delta = value === null || previous === null ? null : value - previous;
       const item = document.createElement('div'); item.dataset.series = series.name; item.innerHTML = '<span></span><b></b><small></small>';
       item.querySelector('span').textContent = `${series.name} 当前`; item.querySelector('b').style.color = series.color; item.querySelector('b').textContent = fmt(value, chart.type);
-      item.querySelector('small').textContent = delta === null ? '较昨日 —' : `较昨日 ${delta >= 0 ? '↑' : '↓'}${Math.abs(delta).toFixed(2)}${chart.type === 'rate' ? '%' : ''}`;
+      const deltaUnit = chart.type === 'rate' ? '%' : chart.type === 'days' ? '天' : '';
+      item.querySelector('small').textContent = delta === null ? '较昨日 —' : `较昨日 ${delta >= 0 ? '↑' : '↓'}${Math.abs(delta).toFixed(2)}${deltaUnit}`;
       current.appendChild(item);
       if (global.DashboardDataAdapterV18 && value !== global.DashboardDataAdapterV18.last(series.values)) container.dataset.bindingError = 'true';
     });
