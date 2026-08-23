@@ -10,6 +10,7 @@ export const V245_SHOPEE_TREND_UI_INJECTION_ID = V244_SHOPEE_TREND_UI_INJECTION_
 export const V248_SHOPEE_TREND_UI_INJECTION_ID = V244_SHOPEE_TREND_UI_INJECTION_ID;
 export const V246_TRACKING_UI_INJECTION_ID = '2026-08-23-v246-qc-tracking-ui-v1';
 export const V247_HOME_LEDGER_UI_INJECTION_ID = '2026-08-23-v247-home-ledger-truth-ui-v1';
+export const V249_WHPP_DETAIL_UI_INJECTION_ID = '2026-08-23-v249-whpp-exact-drilldown-ui-v1';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260822-v238-1';
 const LIVE_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
@@ -17,6 +18,7 @@ const COALESCER_MARKER = '/v239-dashboard-request-coalescer.js?v=20260823-v239-1
 const HOME_MARKER = '/v237-home-dashboard-owner.js?v=20260823-v247-1';
 const V248_SHOPEE_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v248-1';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
+const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 const originalSend = express.response.send;
 
@@ -26,7 +28,7 @@ function stripScript(body, fileName) {
 }
 
 function prepareOwnerHtml(body) {
-  for (const file of ['v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v237-dashboard-owner-guard.js','v237-home-dashboard-owner.js','v239-dashboard-request-coalescer.js','v244-shopee-trend-owner.js','v246-qc-tracking.js']) {
+  for (const file of ['v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v237-dashboard-owner-guard.js','v237-home-dashboard-owner.js','v239-dashboard-request-coalescer.js','v244-shopee-trend-owner.js','v246-qc-tracking.js','v249-whpp-detail-owner.js']) {
     body = stripScript(body, file);
   }
   return body
@@ -35,7 +37,7 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v248MetricTruthUiSend(body) {
+express.response.send = function v249MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
     const headTags=[];
@@ -48,6 +50,7 @@ express.response.send = function v248MetricTruthUiSend(body) {
     if (!body.includes(HOME_MARKER)) tags.push(`  <script src="${HOME_MARKER}"></script>`);
     if (!body.includes(V248_SHOPEE_MARKER)) tags.push(`  <script src="${V248_SHOPEE_MARKER}"></script>`);
     if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
+    if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V238-UI', V235_CACHE_READY_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V239-UI', V239_DASHBOARD_REQUEST_UI_INJECTION_ID);
@@ -56,6 +59,7 @@ express.response.send = function v248MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V246-UI', V246_TRACKING_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V247-UI', V247_HOME_LEDGER_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V248-UI', V248_SHOPEE_TREND_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V249-UI', V249_WHPP_DETAIL_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
@@ -64,3 +68,4 @@ console.info('[CE-QC][V240_DASHBOARD_OWNER_UI]', V240_DAILY_RATE_UI_INJECTION_ID
 console.info('[CE-QC][V246_TRACKING_UI]', V246_TRACKING_UI_INJECTION_ID, 'Shopee locked first-report signing days + real attempt evidence + global QC anti-leak reconciliation panel enabled');
 console.info('[CE-QC][V247_HOME_LEDGER_UI]', V247_HOME_LEDGER_UI_INJECTION_ID, 'home uses V246 locked Shopee ledger for attempt trend and region distribution; duplicate first-day assessment removed');
 console.info('[CE-QC][V248_SHOPEE_TREND_UI]', V248_SHOPEE_TREND_UI_INJECTION_ID, 'SHOPEECN/VN SPA navigation now activates operational trends and strict attempt evidence');
+console.info('[CE-QC][V249_WHPP_DETAIL_UI]', V249_WHPP_DETAIL_UI_INJECTION_ID, 'WHPP canonical-page handoff and exact V172 drilldown owner delivered last');
