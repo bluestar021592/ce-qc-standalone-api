@@ -19,7 +19,9 @@ assert.match(inject,/X-CE-QC-V254-UI/,'V254 delivery must be observable');
 assert.ok(inject.indexOf('V251_SHOPEE_FINAL_MARKER')<inject.indexOf('V254_RENDER_MARKER'),'V254 rescue marker must be defined after final Shopee owner marker');
 assert.match(inject,/import '\.\/v254StorageHealthPatch\.js';/,'read-only storage health audit must activate with the UI runtime');
 assert.match(storage,/READ_ONLY_SIZE_SCAN_NO_DELETE_NO_VACUUM_NO_CHECKPOINT/,'storage audit must explicitly remain read-only');
-assert.doesNotMatch(storage,/fs\.unlinkSync|fs\.rmSync|VACUUM|wal_checkpoint/i,'storage audit must not delete, vacuum, or checkpoint user data');
+assert.doesNotMatch(storage,/fs\.(?:unlinkSync|rmSync|unlink|rm)\s*\(/,'storage audit must not execute file deletion APIs');
+assert.doesNotMatch(storage,/\bgetDb\s*\(/,'storage audit must not open the business SQLite database');
+assert.doesNotMatch(storage,/(?:\.exec|\.prepare|\.pragma)\s*\(\s*['"`]\s*(?:VACUUM|PRAGMA\s+wal_checkpoint|wal_checkpoint)/i,'storage audit must not execute VACUUM or WAL checkpoint SQL');
 assert.match(storage,/storage_health_latest\.json/,'storage audit must leave one small inspectable report');
 assert.match(runtime,/import '\.\/v255RetentionStorageGuard\.js';/,'V255 storage guard must activate in normal runtime');
 assert.match(retention,/BUSINESS_RETENTION_DAYS=400/,'business hot retention must cover at least one year with safety buffer');
@@ -42,4 +44,4 @@ assert.match(r2guard,/manualCloudflareUploadsAreOutsideAppGuard:true/,'guard mus
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'cloud/storage secrets must never be committed');
 execFileSync(process.execPath,['--check','scripts/v257-system-calibration-smoke.cjs'],{stdio:'pipe'});
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V257] V254 renderer/storage audit + V255/V256 guards + core system calibration gate passed');
+console.log('[V258] V254 readonly storage audit + V255/V256 guards + V257 core system calibration gate passed');
