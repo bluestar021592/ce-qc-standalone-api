@@ -5,5 +5,25 @@
 .v18-date-axis{font-size:7.5px!important}
 .v18-last-label{paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round}
 .v18-chart-current span,.v18-chart-current small{white-space:normal!important;line-height:1.25}
+/* V265: the three-business delivery evidence panel must read like one complete management block, not a quarter-width orphan chart. */
+#v263DeliveryKpiPanel{overflow:visible}
+#v263DeliveryKpiPanel>[data-v263-summary],#v263DeliveryKpiPanel .v18-core-grid[data-v263-summary]{grid-template-columns:repeat(4,minmax(0,1fr))!important;border-bottom:1px solid #e8eff7}
+#v263DeliveryKpiPanel [data-v263-summary] .v18-metric-card{height:96px;padding:12px 15px}
+#v263DeliveryKpiPanel [data-v263-summary] .v18-metric-card b{font-size:23px}
+#v263DeliveryKpiPanel .v18-chart-grid{grid-template-columns:minmax(0,1fr)!important;padding:14px 16px 8px}
+#v263DeliveryKpiPanel .v18-chart-card{width:100%!important;height:338px!important;box-sizing:border-box}
+#v263DeliveryKpiPanel .v18-chart-plot{height:170px!important}
+#v263DeliveryKpiPanel .v18-chart-current{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding-top:10px}
+#v263DeliveryKpiPanel .v18-chart-current span,#v263DeliveryKpiPanel .v18-chart-current small{font-size:11px}
+#v263DeliveryKpiPanel .v18-chart-current b{font-size:20px;margin:2px 0}
+#v263DeliveryKpiPanel .operation-status{margin:4px 16px 12px;padding:10px 12px;border-radius:6px;background:#f6f9fd;color:#647a95;line-height:1.6;font-size:12px}
+#v263DeliveryKpiPanel .preview-table-wrap{margin:0 16px 16px;overflow:auto;border:1px solid #e1eaf4;border-radius:7px}
+.v265-attempt-evidence-status{margin:14px 16px 0;padding:12px 14px;border-radius:7px;display:flex;align-items:flex-start;gap:12px;line-height:1.55;font-size:12px}
+.v265-attempt-evidence-status b{font-size:13px;white-space:nowrap}
+.v265-attempt-evidence-status.incomplete{background:#fff8e8;border:1px solid #f1d28a;color:#805d12}
+.v265-attempt-evidence-status.complete{background:#edf9f3;border:1px solid #a8ddc4;color:#176b49}
+#v263DeliveryKpiPanel .v265-warning-card{background:#fffaf0}
+#v263DeliveryKpiPanel .v265-warning-card i,#v263DeliveryKpiPanel .v265-warning-card b{color:#d88900}
+@media(max-width:1100px){#v263DeliveryKpiPanel>[data-v263-summary],#v263DeliveryKpiPanel .v18-core-grid[data-v263-summary]{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 /* WHPP cached data is already visible; background refresh is intentionally silent. */
 #whppFastPage>.processing-notice.running{display:none!important}
