@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+const root=await fsp.mkdtemp(path.join(os.tmpdir(),'ce-qc-v266-'));
+process.env.NODE_ENV='test';
+process.env.DATA_DIR=root;
+process.env.DB_FILE=path.join(root,'ce_qc_monitor.db');
+const source=fs.readFileSync('src/v266EvergreenEvidenceArchive.js','utf8');
+const mod=await import(`../src/v266EvergreenEvidenceArchive.js?smoke=${Date.now()}`);
+const paths=mod.getV266EvidenceArchivePaths();
+assert.equal(mod.V266_MIN_RETENTION_DAYS,366,'evergreen evidence must retain at least one full year plus leap-day margin');
+assert.match(mod.V266_RETENTION_POLICY,/NO_AUTOMATIC_ARCHIVE_DELETE/,'archive must never be automatically purged by a normal upgrade');
+assert.match(source,/CEClient\.prototype\.postJson/,'every successful operational CE postJson response must enter raw evidence archiving');
+assert.match(source,/gzipAsync/,'CE raw evidence must be compressed outside the main SQLite database');
+assert.match(source,/PRESERVE_BEFORE_TEMP_DELETE/,'uploaded source must be archived before multer temp deletion');
+assert.match(source,/source_uploads/,'source upload archive must be separate from derived database state');
+assert.match(source,/ce_api/,'CE API evidence archive must be independently replayable');
+assert.doesNotMatch(source,/rmSync\(|fsPromises\.rm\(|rmdir\(/,'V266 must not contain any archive purge implementation');
+
+await fsp.mkdir(paths.importsRoot,{recursive:true});
+const temp=path.join(paths.importsRoot,'multer-temp-source');
+await fsp.writeFile(temp,Buffer.from([0x50,0x4b,0x03,0x04,0x56,0x32,0x36,0x36]));
+await fsp.unlink(temp);
+assert.equal(fs.existsSync(temp),false,'normal temp deletion should still complete after source preservation');
+const months=fs.existsSync(paths.sourceRoot)?await fsp.readdir(paths.sourceRoot):[];
+assert.ok(months.length>=1,'source archive month folder must be created');
+const files=await fsp.readdir(path.join(paths.sourceRoot,months[0]));
+const metaName=files.find(name=>name.endsWith('.meta.json'));
+const sourceName=files.find(name=>name.endsWith('.xlsx'));
+assert.ok(metaName&&sourceName,'source content and immutable metadata must both survive temp deletion');
+const meta=JSON.parse(await fsp.readFile(path.join(paths.sourceRoot,months[0],metaName),'utf8'));
+assert.equal(meta.kind,'SOURCE_UPLOAD');
+assert.equal(meta.sha256,path.basename(sourceName,'.xlsx'));
+assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime()>=366*24*60*60*1000,'retention horizon must be >=366 days');
+assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
+
+await fsp.rm(root,{recursive:true,force:true});
+console.log('[V266] evergreen evidence smoke passed: source survives temp deletion + 366d retention + compressed CE replay archive + no automatic purge');
