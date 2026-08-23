@@ -1,8 +1,9 @@
-(function installV245ShopeeTrendOwner(global){
+(function installV248ShopeeTrendOwner(global){
   if(global.__CE_QC_V245_SHOPEE_TREND_OWNER__)return;
   global.__CE_QC_V245_SHOPEE_TREND_OWNER__=true;
   global.__CE_QC_V244_SHOPEE_TREND_OWNER__=true;
-  const VERSION='2026-08-23-v245-shopee-operational-attempt-ui-v1';
+  global.__CE_QC_V248_SHOPEE_TREND_OWNER__=true;
+  const VERSION='2026-08-23-v248-shopee-spa-operational-trend-owner-v1';
   const PATH_TYPE={shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'};
   const cache=new Map();
   let timer=null;
@@ -57,12 +58,12 @@
     card.querySelector('.v18-chart-plot').appendChild(svg);
     const last=points.at(-1)?.v??null,prev=points.at(-2)?.v??null,delta=last===null||prev===null?null:last-prev;
     const current=card.querySelector('.v18-chart-current');const box=document.createElement('div');box.innerHTML='<span></span><b></b><small></small>';box.querySelector('span').textContent=`${label} 当前`;box.querySelector('b').textContent=fmt(last,kind);box.querySelector('b').style.color='#1677ff';box.querySelector('small').textContent=delta===null?'较昨日 —':`较昨日 ${delta>=0?'↑':'↓'}${kind==='days'?Math.abs(delta).toFixed(2)+'天':Math.round(Math.abs(delta)).toLocaleString('zh-CN')}`;current.appendChild(box);
-    card.querySelector('.v18-chart-note').textContent=points.length<2?`有效节点不足（${points.length}/${Math.max(2,dates.length||7)}），累计到2个有效日期后显示折线`:'按每日真实日报成员与POD结果计算；当前值与曲线最后有效节点保持一致';
-    card.dataset.v245=VERSION;
+    card.querySelector('.v18-chart-note').textContent=points.length<2?`有效节点不足（${points.length}/${Math.max(2,dates.length||7)}），累计到2个有效日期后显示折线`:'按每日锁定日报成员与持续追踪事实计算；当前值与曲线最后有效节点保持一致';
+    card.dataset.v248=VERSION;
   }
 
   function removeDuplicateAssessmentCards(r){
-    const duplicate=new Set(['首日POD','首日妥投率','首日POD妥投率']);
+    const duplicate=new Set(['首日POD','首日妥投率','首日POD妥投率','首次妥投率']);
     r.querySelectorAll('.v18-business-card,.v18-metric-card').forEach(card=>{const label=String(card.querySelector('span')?.textContent||'').trim();if(duplicate.has(label))card.remove();});
   }
 
@@ -71,8 +72,8 @@
     const rows=(data.daily||[]).map(x=>`<tr><td>${esc(x.reportDate)}</td><td>${fmt(x.total)}</td><td>${fmt(x.pod)}</td><td class="v240-rate">${pct(x.podRate)}</td><td>${fmt(x.oc)}</td><td class="v240-oc">${pct(x.ocRate)}</td><td class="v245-avg-days">${fmt(x.avgPodDays,'days')}</td></tr>`).join('');
     let panel=r.querySelector('#v234DailyTrendTruth');
     if(!panel){panel=document.createElement('section');panel.id='v234DailyTrendTruth';const trend=r.querySelector('.v18-trend-section');(trend||r).appendChild(panel);}
-    panel.innerHTML=`<div class="v240-trend-head"><div><h3>每日趋势明细</h3><p>固定口径：POD率 = POD ÷ 当日总票；OC率 = 当日当前OC ÷ 当日总票；平均签收天数 = 日报/首次入库日期 → 实际POD日期（含首尾当天）。</p></div><span class="v240-source">${esc(data.businessType)} · 精确日报</span></div><div class="v240-table-wrap"><table class="v240-table"><thead><tr><th>日期</th><th>总票</th><th>POD</th><th>POD率</th><th>当日OC</th><th>OC率</th><th>平均签收天数</th></tr></thead><tbody>${rows||'<tr><td class="v240-missing" colspan="7">当前区间暂无有效日报</td></tr>'}</tbody></table></div>`;
-    panel.dataset.v245=VERSION;
+    panel.innerHTML=`<div class="v240-trend-head"><div><h3>每日趋势明细</h3><p>固定口径：POD率 = POD ÷ 锁定日报成员总票；OC率 = 当前真实OC ÷ 锁定日报成员总票；平均签收天数 = 第一次日报日期 → 实际POD日期（含首尾当天）。</p></div><span class="v240-source">${esc(data.businessType)} · V246持续追踪账本</span></div><div class="v240-table-wrap"><table class="v240-table"><thead><tr><th>日期</th><th>总票</th><th>POD</th><th>POD率</th><th>当日OC</th><th>OC率</th><th>平均签收天数</th></tr></thead><tbody>${rows||'<tr><td class="v240-missing" colspan="7">当前区间暂无有效日报</td></tr>'}</tbody></table></div>`;
+    panel.dataset.v248=VERSION;
   }
 
   function findAttemptHost(r){
@@ -86,9 +87,9 @@
     ensureStyle();
     let host=findAttemptHost(r);
     if(!host){host=document.createElement('section');host.className='v18-panel';const daily=r.querySelector('#v234DailyTrendTruth'),trend=r.querySelector('.v18-trend-section');if(daily?.parentNode)daily.parentNode.insertBefore(host,daily.nextSibling);else(trend||r).appendChild(host);}
-    host.id='v245ShopeeAttemptTruth';host.classList.add('v18-panel');host.dataset.v245ShopeeAttempt=VERSION;
+    host.id='v245ShopeeAttemptTruth';host.classList.add('v18-panel');host.dataset.v248ShopeeAttempt=VERSION;
     const rows=(data.daily||[]).map(x=>`<tr><td>${esc(x.reportDate)}</td><td>${fmt(x.pod)}</td><td>${fmt(x.attempt1)}</td><td>${pct(x.attempt1Rate)}</td><td>${fmt(x.attempt2)}</td><td>${pct(x.attempt2Rate)}</td><td>${fmt(x.attempt3)}</td><td>${pct(x.attempt3Rate)}</td><td class="v245-unknown">${fmt(x.attemptUnknown)}</td></tr>`).join('');
-    host.innerHTML=`<div class="v245-attempt-head"><div><h2>1/2/3派签收占POD趋势</h2><p>1/2/3派只使用真实派次证据；占比 = 对应派次已POD票数 ÷ 当日POD。无法确认派次的已POD票单独列为“派次未识别POD”，不再把无证据显示成真实0%。</p></div><span class="v245-attempt-tag">${esc(data.businessType)} · 真实派次</span></div><article class="v18-chart-card v245-attempt-chart"></article><div class="v245-attempt-table-wrap"><table><thead><tr><th>日期</th><th>POD</th><th>1派签收</th><th>1派占POD</th><th>2派签收</th><th>2派占POD</th><th>3派+签收</th><th>3派+占POD</th><th>派次未识别POD</th></tr></thead><tbody>${rows||'<tr><td colspan="9">当前区间暂无有效日报</td></tr>'}</tbody></table></div>`;
+    host.innerHTML=`<div class="v245-attempt-head"><div><h2>1/2/3派签收占POD趋势</h2><p>1/2/3派只使用真实派次证据；占比 = 对应派次已POD票数 ÷ 当日POD。无法确认派次的已POD票单独列为“派次未识别POD”，不再把无证据显示成真实0%。</p></div><span class="v245-attempt-tag">${esc(data.businessType)} · V246严格派次</span></div><article class="v18-chart-card v245-attempt-chart"></article><div class="v245-attempt-table-wrap"><table><thead><tr><th>日期</th><th>POD</th><th>1派签收</th><th>1派占POD</th><th>2派签收</th><th>2派占POD</th><th>3派+签收</th><th>3派+占POD</th><th>派次未识别POD</th></tr></thead><tbody>${rows||'<tr><td colspan="9">当前区间暂无有效日报</td></tr>'}</tbody></table></div>`;
     const chart=host.querySelector('.v245-attempt-chart');
     if(global.RateTrendCardV18?.render){
       global.RateTrendCardV18.render(chart,{title:`${data.businessType} 1/2/3派签收占POD趋势`,type:'rate',dates:data.dates||[],series:[
@@ -108,7 +109,7 @@
       renderCard(cards[1],{title:'POD数量趋势',label:'POD数量',dates,values:data.pod||[]});
       renderCard(cards[2],{title:'平均签收天数趋势',label:'平均签收天数',kind:'days',dates,values:data.avgPodDays||[]});
       renderCard(cards[3],{title:'OC数量趋势',label:'OC数量',dates,values:data.oc||[]});
-      section.dataset.v245ShopeeTrend=VERSION;
+      section.dataset.v248ShopeeTrend=VERSION;
     }}
     renderDaily(data,r);
     renderAttempts(data,r);
@@ -120,19 +121,45 @@
     const key=`${t}|${rg.from}|${rg.to}`;
     if(!force&&cache.has(key)){render(cache.get(key));return;}
     try{
-      const response=await fetch(`/api/v245/shopee-trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});
+      const response=await fetch(`/api/v246/shopee-trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});
       const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.error||`HTTP ${response.status}`);
       cache.set(key,data);render(data);
-    }catch(error){console.warn('[V245 Shopee trend]',error);}
+    }catch(error){console.warn('[V248 Shopee trend]',error);}
   }
-  function schedule(delay=500){clearTimeout(timer);timer=setTimeout(()=>void refresh(true),delay);}
+  function schedule(delay=180){clearTimeout(timer);timer=setTimeout(()=>void refresh(true),delay);}
+  function activateIfShopee(delay=80){if(type())schedule(delay);}
   function bind(){
-    if(!type())return;
-    for(const id of ['topRangeFrom','topRangeTo','dashboardRangeFrom','dashboardRangeTo'])document.getElementById(id)?.addEventListener('change',()=>schedule(700));
-    schedule(900);
-    const r=root();if(r&&global.MutationObserver){const observer=new MutationObserver(()=>{const text=String(r.textContent||'');if(/当前没有可验证的1\/2\/3派证据|历史快照不足（0\//.test(text))schedule(180);});observer.observe(r,{childList:true,subtree:true});}
+    for(const id of ['topRangeFrom','topRangeTo','dashboardRangeFrom','dashboardRangeTo']){
+      const node=document.getElementById(id);if(node&&!node.dataset.v248ShopeeBound){node.dataset.v248ShopeeBound='1';node.addEventListener('change',()=>activateIfShopee(160));}
+    }
+    const r=root();
+    if(r&&global.MutationObserver&&!r.__v248ShopeeObserver){
+      const observer=new MutationObserver(records=>{
+        if(!type()||r.hidden)return;
+        const becameVisible=records.some(record=>record.type==='attributes'&&record.attributeName==='hidden');
+        const text=String(r.textContent||'');
+        const legacy=/当前没有可验证的1\/2\/3派证据|历史快照不足（0\/|正在读取派次趋势|首次妥投率趋势|首日POD妥投率趋势/.test(text);
+        if(becameVisible||legacy)schedule(becameVisible?80:180);
+      });
+      observer.observe(r,{attributes:true,attributeFilter:['hidden'],childList:true,subtree:true});
+      r.__v248ShopeeObserver=observer;
+    }
+    if(!document.documentElement.dataset.v248ShopeeNavBound){
+      document.documentElement.dataset.v248ShopeeNavBound='1';
+      document.addEventListener('click',event=>{
+        if(event.target?.closest?.('.side-link[data-page="shopeecn"],.side-link[data-page="shopeevn"],.v18-business-card'))setTimeout(()=>activateIfShopee(60),0);
+      },true);
+      global.addEventListener('popstate',()=>setTimeout(()=>activateIfShopee(60),0));
+    }
+    const previousNavigate=global.navigatePage;
+    if(typeof previousNavigate==='function'&&!previousNavigate.__v248ShopeeOwner){
+      const wrapped=function(page,...args){const result=previousNavigate.call(this,page,...args);if(['shopeecn','shopeevn'].includes(String(page||'').toLowerCase()))schedule(60);return result;};
+      wrapped.__v248ShopeeOwner=true;global.navigatePage=wrapped;
+    }
+    activateIfShopee(120);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   const previousFetch=global.fetch?.bind(global);
-  if(previousFetch){global.fetch=function v245ShopeeTrendFetchBridge(input,init){const text=typeof input==='string'?input:String(input?.url||'');const promise=previousFetch(input,init);if(type()&&text.includes('/api/v234/trends?'))promise.then(()=>schedule(350)).catch(()=>{});return promise;};}
+  if(previousFetch){global.fetch=function v248ShopeeTrendFetchBridge(input,init){const text=typeof input==='string'?input:String(input?.url||'');const promise=previousFetch(input,init);if(type()&&text.includes('/api/v234/trends?'))promise.then(()=>schedule(120)).catch(()=>{});return promise;};}
+  console.info('[CE-QC][V248_SHOPEE_TREND_OWNER]',VERSION,'SPA navigation aware; SHOPEECN/VN operational charts and strict attempts read V246 locked ledger truth');
 })(window);
