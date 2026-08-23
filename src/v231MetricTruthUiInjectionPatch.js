@@ -23,6 +23,7 @@ export const V254_DASHBOARD_RENDER_RESCUE_UI_INJECTION_ID = '2026-08-23-v254-das
 export const V261_DASHBOARD_FINAL_UI_INJECTION_ID = '2026-08-23-v261-dashboard-final-owner-v1';
 export const V267_REPORT_EXPORT_UI_INJECTION_ID = '2026-08-23-v267-report-export-clarity-v1';
 export const V268_LIFECYCLE_EXPORT_UI_INJECTION_ID = '2026-08-23-v268-auto-lifecycle-export-freshness-v1';
+export const V269_NAVIGATION_SAFE_UI_INJECTION_ID = '2026-08-23-v269-navigation-safe-lifecycle-export-v1';
 
 const DASHBOARD_MARKER = '/dashboard-v18.js?v=20260823-v263-2';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260823-v263-2';
@@ -33,7 +34,7 @@ const V263_GENERIC_MARKER = '/v263-generic-trend-hydrator.js?v=20260823-v263-2';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const V267_REPORT_MARKER = '/v267-report-export-owner.js?v=20260823-v267-1';
-const V268_LIFECYCLE_EXPORT_MARKER = '/v268-lifecycle-export-owner.js?v=20260823-v268-1';
+const V268_LIFECYCLE_EXPORT_MARKER = '/v268-lifecycle-export-owner.js?v=20260823-v269-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 // Compatibility-only source markers for pre-V263 gates. They remain ordered for
 // old source assertions, but are stripped and never injected after V263.
@@ -46,7 +47,8 @@ const LEGACY_GATE_V253_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v253-1
 const LEGACY_GATE_V254_MARKER = '/v254-dashboard-render-rescue.js?v=20260823-v254-1';
 const LEGACY_GATE_V261_MARKER = '/v261-dashboard-final-owner.js?v=20260823-v261-1';
 const LEGACY_GATE_V263_GENERIC_MARKER = '/v263-generic-trend-hydrator.js?v=20260823-v263-1';
-void V252_LIFECYCLE_MARKER; void HOME_MARKER; void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V253_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER; void LEGACY_GATE_V263_GENERIC_MARKER;
+const LEGACY_GATE_V268_MARKER = '/v268-lifecycle-export-owner.js?v=20260823-v268-1';
+void V252_LIFECYCLE_MARKER; void HOME_MARKER; void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V253_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER; void LEGACY_GATE_V263_GENERIC_MARKER; void LEGACY_GATE_V268_MARKER;
 const originalSend = express.response.send;
 
 function stripScript(body, fileName) {
@@ -96,8 +98,9 @@ express.response.send = function v263MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V263-UI', V263_CANONICAL_DASHBOARD_UI_ID);
     this.setHeader?.('X-CE-QC-V267-UI', V267_REPORT_EXPORT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V268-UI', V268_LIFECYCLE_EXPORT_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V269-UI', V269_NAVIGATION_SAFE_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
 
-console.info('[CE-QC][V263_CANONICAL_DASHBOARD]', V263_CANONICAL_DASHBOARD_UI_ID, 'V234/V248/V251/V252/V254/V261 visual owners retired; DashboardV18 owns TBKH + SHOPEECN + SHOPEEVN specialized trends; V263 generic hydrator owns CE + CEAF + ALI1688; WHPP keeps V171 dedicated trends; V267 owns report-export clarity; V268 consolidates lifecycle controls and auto-refreshes OPEN shipments before formal export.');
+console.info('[CE-QC][V263_CANONICAL_DASHBOARD]', V263_CANONICAL_DASHBOARD_UI_ID, 'V234/V248/V251/V252/V254/V261 visual owners retired; DashboardV18 owns TBKH + SHOPEECN + SHOPEEVN specialized trends; V263 generic hydrator owns CE + CEAF + ALI1688; WHPP keeps V171 dedicated trends; V267 owns report-export clarity; V269 keeps V268 lifecycle/export consolidation navigation-safe.');
