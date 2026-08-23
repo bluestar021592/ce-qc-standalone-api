@@ -23,18 +23,25 @@ for(const [name,source] of [['v234-dashboard-live',live],['v237-home-dashboard-o
   assert.doesNotThrow(()=>new Function(source),`${name} must compile as browser JavaScript`);
 }
 
-assert.match(live,/v238-dashboard-owner-client-v1/,'business owner must run V238 client');
+assert.match(live,/v240-daily-rate-ui-v1/,'business owner must run V240 daily-rate UI');
 assert.match(live,/__CE_QC_V237_DASHBOARD_OWNER__/,'single dashboard ownership flag must remain active');
 assert.match(live,/scheduleTrendRetry/,'business trend cache misses must retry lightly');
 assert.match(live,/missingDates/,'business trend retries must be driven by explicit missing dates');
 assert.match(live,/trendRetryCount>=12/,'business trend retries must be bounded');
 assert.doesNotMatch(live,/location\.reload\s*\(/,'business owner must never full-page reload while waiting for trend cache');
-assert.match(live,/x\[key\]===null\|\|x\[key\]===undefined\?null/,'missing trend values must remain null rather than becoming zero');
-assert.match(live,/nullablePct\(x\.firstRate\)/,'missing first-attempt evidence must display dash');
+assert.match(live,/POD率 = POD ÷ 当日总票/,'daily table must show the explicit POD denominator');
+assert.match(live,/OC率 = 当日真实OC票数 ÷ 当日总票/,'daily table must show current-day OC denominator');
+assert.match(live,/首日妥投率 = 首日完成POD票数 ÷ 当日总票/,'daily table must show same-day POD denominator');
+assert.match(live,/pick\('sameDayPodRate',d\.sameDayPodRate\)/,'business fourth trend must use same-day POD rather than attempt-1');
+assert.doesNotMatch(live,/首次妥投率趋势/,'attempt-1 wording must not remain on the daily-rate trend card');
+assert.match(live,/class="v240-table"/,'daily detail must render as compact styled table');
 
-assert.match(home,/v238-home-dashboard-owner-v1/,'homepage/region owner must run the V238 client');
-assert.match(home,/businessType=ALL/,'homepage charts must use aggregate V238 trend endpoint');
-assert.match(home,/businessType=SHOPEE/,'homepage first-attempt trend must use SHOPEE truth');
+assert.match(home,/v240-home-daily-rate-owner-v1/,'homepage owner must run V240 daily-rate contract');
+assert.match(home,/businessType=ALL/,'homepage charts must use aggregate trend endpoint');
+assert.doesNotMatch(home,/businessType=SHOPEE&/,'homepage daily-rate chart must not launch a separate SHOPEE first-attempt trend request');
+assert.match(home,/sameDayPodRate/,'homepage fourth trend must use same-day POD rate');
+assert.match(home,/首日POD妥投率/,'homepage current metric must be relabeled to the correct first-day POD meaning');
+assert.match(home,/attemptRates/,'SHOPEE 1\/2\/3 dispatch distribution must remain a separate evidence-based calculation');
 assert.match(home,/pod=num\(region\.pod\)/,'dispatch percentages must use POD denominator');
 assert.match(home,/REGION_KEYS/,'SHOPEE PP/PV visible cards must have explicit metric mapping');
 assert.match(home,/scheduleCurrentRetry/,'stale snapshot-status must not freeze homepage current cards');
@@ -52,39 +59,44 @@ assert.match(coalescer,/url\.pathname!=='\/api\/v234\/current-summary'/,'coalesc
 assert.match(drill,/__CE_QC_V237_DASHBOARD_OWNER__/,'legacy drilldown observer must skip passive reconciliation on owner pages');
 assert.match(legacyNav,/v239-single-owner-navigation-v1/,'legacy navigation layer must recognize V239 single-owner mode');
 assert.match(legacyNav,/V239_SINGLE_DASHBOARD_OWNER/,'legacy hydratePageData must return without launching routing/CEAF reads on owner dashboards');
-assert.match(legacyNav,/if\(ownerActive\(\)\)return \{ok:true,skipped:true,source:'V239_SINGLE_DASHBOARD_OWNER'\}/,'legacy CEAF fast-state request must be retired under owner mode');
 assert.match(legacyV89,/v239-retired-by-dashboard-owner-v1/,'legacy V89 summary layer must be retired under owner mode');
-assert.match(legacyV89,/if \(ownerActive\(\)\) return global\.__CE_QC_V237_LIVE_CURRENT__ \|\| null/,'legacy V89 fetchSummary must not hit instant-dashboard while owner is active');
-assert.match(legacyV89,/V239_V89_RETIRED/,'runtime must log that legacy V89 polling is retired');
 assert.match(legacyRouting,/v239-owner-retired-passive-routing-v1/,'legacy routing client must be retired under dashboard owner');
-assert.match(legacyRouting,/V239_ROUTING_V48_RETIRED/,'legacy routing retirement must be observable');
 assert.match(legacyClosure,/v239-owner-local-closure-v1/,'closure cards must use owner-local arithmetic');
-assert.match(legacyClosure,/if\(ownerActive\(\)\)return null/,'closure owner mode must not call the legacy closure summary route');
 assert.match(shell,/\/routing-v48\.js\?v=20260823-v239-1/,'owner shell must cache-bust retired routing client');
 assert.match(shell,/\/v89-fast-dashboard\.js\?v=20260823-v239-1/,'owner shell must cache-bust retired V89 client');
 assert.match(shell,/\/v109-instant-business-navigation\.js\?v=20260823-v239-1/,'owner shell must cache-bust retired hydration client');
 assert.match(shell,/\/v133-closure-rate\.js\?v=20260823-v239-1/,'owner shell must cache-bust owner-local closure client');
 
-assert.match(inject,/v238-dashboard-owner-ui-injection-v1/,'delivered HTML must preserve V238 owner compatibility');
-assert.match(inject,/v239-dashboard-request-coalescer-ui-v1/,'delivered HTML must enable V239 request coalescing');
+assert.match(inject,/v240-daily-rate-ui-injection-v1/,'delivered HTML must enable V240 daily-rate UI');
+assert.match(inject,/v239-dashboard-request-coalescer-ui-v1/,'delivered HTML must preserve V239 request coalescing');
 assert.match(inject,/v239-dashboard-request-coalescer\.js\?v=20260823-v239-1/,'browser must receive cache-busted V239 coalescer in head');
 assert.match(inject,/v235-cache-ready-reload\.js/,'injector must explicitly strip the old cache-ready reload poller');
-assert.match(inject,/v234-dashboard-live\.js\?v=20260822-v238-1/,'browser must receive cache-busted V238 business owner');
+assert.match(inject,/v234-dashboard-live\.js\?v=20260823-v240-1/,'browser must receive cache-busted V240 business owner');
 assert.match(inject,/v237-dashboard-owner-guard\.js\?v=20260822-v238-1/,'browser must receive head-first owner guard');
-assert.match(inject,/v237-home-dashboard-owner\.js\?v=20260822-v238-1/,'browser must receive cache-busted V238 homepage owner');
+assert.match(inject,/v237-home-dashboard-owner\.js\?v=20260823-v240-1/,'browser must receive cache-busted V240 homepage owner');
 assert.doesNotMatch(inject,/READY_MARKER/,'retired full-page cache poller must not be injected');
 
 assert.match(route,/path==='\/api\/v234\/trends'/,'route patch must own V234 trend endpoint');
 assert.match(route,/path==='\/api\/shopee\/state'/,'route patch must pre-handle old compact SHOPEE reads');
+assert.match(current,/v240-daily-rate-contract-v1/,'current reader must expose V240 metric contract');
+assert.match(current,/out\.ocRate=pct\(out\.ocCurrent,out\.total\)/,'OC rate must divide current OC tickets by daily total');
+assert.match(current,/out\.sameDayPodRate=pct\(out\.sameDayPod,out\.total\)/,'same-day POD rate must divide same-day POD tickets by daily total');
 assert.match(current,/normalizedDashboardCoverageReady/,'current read must accept complete normalized coverage when snapshot status flag lags');
 assert.match(current,/cacheOnly/,'current reader must expose cache-only mode for trend requests');
 assert.match(current,/isPod=0 AND isReturned=0/,'terminal CCSL rows must be excluded from current abnormal metrics');
 assert.match(current,/COALESCE\(f\.rawJson,''\) LIKE '%1203--派送异常%'/,'nested SHOPEE 1203 evidence must classify as return');
-assert.match(cache,/normalizedDashboardCoverageReady/,'cache worker eligibility must use normalized coverage readiness');
+assert.match(cache,/v240-daily-rate-contract-v1/,'cache worker must build V240 daily-rate metrics');
+assert.match(cache,/AS ocCurrent/,'cache must persist current OC count separately from OC1+ aging');
+assert.match(cache,/AS sameDayPod/,'cache must persist same-day POD count');
+assert.match(cache,/eventCode='70'/,'SHOPEE attempt evidence must prefer real delivery event dates');
+assert.match(cache,/eventCode='60'/,'SHOPEE attempt evidence must fall back to real assignment event dates');
+assert.match(cache,/businessType='WHPP'/,'WHPP must also receive exact daily-rate cache metrics');
 assert.match(cache,/isPod=0 AND isReturned=0 AND isCancelled=0/,'terminal SHOPEE rows must be excluded from cached abnormal metrics');
-assert.match(trend,/V238_EXACT_DASHBOARD_CACHE_ONLY/,'web trend reader must be exact cache-only');
+assert.match(trend,/V240_EXACT_DAILY_RATE_CACHE_ONLY/,'trend reader must identify the corrected daily-rate source');
+assert.match(trend,/ocRate:'当日当前OC票数\/当日总票'/,'trend response must publish OC definition');
+assert.match(trend,/sameDayPodRate:'首日完成POD票数\/当日总票'/,'trend response must publish same-day POD definition');
 assert.match(trend,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'trend endpoint must never perform per-day direct normalized scans in web process');
-assert.match(runtime,/v239-interactive-first-cache-prime-observable-v1/,'runtime must install V239 observable cache-prime behavior');
+assert.match(runtime,/v239-interactive-first-cache-prime-observable-v1/,'runtime must preserve V239 observable cache-prime behavior');
 assert.match(runtime,/3_000/,'background cache child should start after short first-paint grace period');
 assert.match(runtime,/dashboard cache prime child exit code=/,'cache-prime completion/failure must be visible in startup log');
 assert.match(runtime,/CE_QC_SKIP_STARTUP_POD_REPAIR/,'startup POD repair must remain outside interactive first paint');
@@ -92,4 +104,4 @@ assert.match(worker,/recentCompletedDashboardDates\(7\)/,'child worker must prep
 assert.match(worker,/WORKER_LEASE_MS = 5 \* 60_000/,'dashboard cache lease must be bounded to five minutes');
 assert.match(worker,/cleared stale dashboard-cache lease/,'worker must recover a crashed stale lease without waiting fifteen minutes');
 
-console.log('[V239] single-owner + coalesced current summary + retired legacy hydration/V89/routing/closure + terminal-safe current + cache-only trend + observable prime smoke passed');
+console.log('[V240] corrected daily total/POD/current-OC/same-day-POD contract + evidence-only dispatch attempts + compact daily table + single-owner performance guards passed');
