@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
-export const V263_DELIVERY_KPI_TREND_ID='2026-08-23-v263-three-business-delivery-kpi-trend-v1';
+export const V263_DELIVERY_KPI_TREND_ID='2026-08-23-v263-three-business-delivery-kpi-trend-v2';
 const TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const CACHE_MS=15_000;
 const memory=new Map();
@@ -53,7 +53,14 @@ export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',
       SUM(CASE WHEN terminalReason='POD' AND attemptNo=0 THEN 1 ELSE 0 END) AS attemptUnknown,
       SUM(CASE WHEN terminalReason='POD' AND signingDays>0 THEN signingDays ELSE 0 END) AS signingDaysSum,
       SUM(CASE WHEN terminalReason='POD' AND signingDays>0 THEN 1 ELSE 0 END) AS signingDaysCount,
-      SUM(CASE WHEN trackingStatus='OPEN' AND (UPPER(TRIM(COALESCE(currentState,'')))='OC' OR UPPER(TRIM(COALESCE(currentCategory,''))) LIKE 'OC%') THEN 1 ELSE 0 END) AS ocCurrent
+      SUM(CASE WHEN trackingStatus='OPEN' AND (
+        UPPER(TRIM(COALESCE(currentState,'')))='OC'
+        OR UPPER(TRIM(COALESCE(currentCategory,'')))='OC'
+        OR UPPER(TRIM(COALESCE(currentCategory,''))) LIKE 'OC%'
+        OR COALESCE(currentCategory,'') LIKE '%OC滞留%'
+        OR UPPER(COALESCE(json_extract(currentStateJson,'$."当前状态"'),''))='OC'
+        OR UPPER(COALESCE(json_extract(currentStateJson,'$."状态标识"'),''))='OC'
+      ) THEN 1 ELSE 0 END) AS ocCurrent
     FROM qc_tracking_ledger WHERE businessType=? AND firstReportDate IN (${marks}) GROUP BY firstReportDate`).all(type,...dates);
   const ledgerByDate=new Map(ledgerRows.map(r=>[String(r.reportDate||''),r]));
   const daily=dates.map(reportDate=>{
