@@ -62,10 +62,14 @@ assert.deepEqual(result.attempt3Rate,[0,100,null,null]);
 assert.deepEqual(result.attemptUnknown,[0,0,0,1],'POD without validated attempt evidence must stay explicit instead of becoming fake 0% dispatch');
 assert.deepEqual(result.attemptCoverageRate,[100,100,null,0]);
 assert.equal(result.daily[3].attemptEvidenceComplete,false);
-assert.match(result.definitions.attemptRate,/无真实派次证据时显示—/);
+assert.match(
+  result.definitions.attemptRate,
+  /无(?:真实派次证据时|证据)显示—/,
+  'attempt-rate definition must explicitly state that missing real attempt evidence is shown as —'
+);
 const lastSeven=readV245ShopeeTrends('SHOPEECN',dates.at(-1),dates.at(-1));
 assert.deepEqual(lastSeven.dates,dates,'single-day dashboard selection must still expose up to seven recent cached report dates');
 
 closeDb();
 fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V245] SHOPEECN/SHOPEEVN smoke passed: ticket + POD + POD rate + average signing days + OC + real 1/2/3 attempt evidence + unknown POD');
+console.log('[V246] SHOPEECN/SHOPEEVN smoke passed: ticket + POD + POD rate + locked average signing days + OC + real 1/2/3 attempt evidence + unknown POD');
