@@ -1,5 +1,6 @@
 const fs = require('fs');
 const assert = require('assert/strict');
+const { execFileSync } = require('child_process');
 
 const read = path => fs.readFileSync(path, 'utf8');
 const dashboard = read('src/v253DashboardFastPath.js');
@@ -52,4 +53,7 @@ assert.ok(special.includes("['CCSL580', { state: 'CCSL580_RETENTION', label: '58
 assert.ok(facts.includes('const pendingDates = distinctEventDates(pendingEvents);'), 'Pending must de-duplicate repeated events by calendar date');
 assert.ok(facts.includes('pendingNonContinuous: pendingDates.length >= 2 && !pendingDateContinuity'), 'Pending discontinuity must be based on distinct dates');
 
-console.log('[V257] system calibration gate passed: 7-board isolation + daily denominators + Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup');
+// 7) Lifecycle/export consolidation is part of the same production gate.
+execFileSync(process.execPath, ['scripts/v268-lifecycle-export-smoke.cjs'], { stdio: 'inherit' });
+
+console.log('[V257] system calibration gate passed: 7-board isolation + daily denominators + Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
