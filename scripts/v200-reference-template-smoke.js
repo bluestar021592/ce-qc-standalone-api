@@ -5,7 +5,7 @@ import { V227_MULTI_BUSINESS_HISTORY_REFRESH_ID } from '../src/v227MultiBusiness
 import { V228_MULTI_BUSINESS_HISTORY_ROUTE_INSTALLER_ID } from '../src/v228MultiBusinessHistoryRouteInstallerPatch.js';
 import { resolveStrictShopeeAttempt, inclusiveNaturalDays, V230_ATTEMPT_SIGNING_TRUTH_ID, V232_ATTEMPT_CYCLE_TRUTH_ID } from '../src/v230AttemptSigningTruth.js';
 import { V230_METRIC_TRUTH_ROUTE_ID, V232_DEEP_TRUTH_CACHE_ID } from '../src/v230MetricTruthPatch.js';
-import { V231_METRIC_TRUTH_UI_INJECTION_ID } from '../src/v231MetricTruthUiInjectionPatch.js';
+import { V231_METRIC_TRUTH_UI_INJECTION_ID, V263_CANONICAL_DASHBOARD_UI_ID } from '../src/v231MetricTruthUiInjectionPatch.js';
 import { V232_FAST_DAILY_TREND_ID } from '../src/v214FastTrendRoutePatch.js';
 import '../src/v230MetricTruthWorker.js';
 
@@ -55,7 +55,8 @@ must(V232_ATTEMPT_CYCLE_TRUTH_ID === '2026-08-22-v232-shopee-real-delivery-cycle
 must(V230_METRIC_TRUTH_ROUTE_ID === '2026-08-22-v230-daily-metric-truth-route-v1', 'unexpected V230 metric truth route version');
 must(V232_DEEP_TRUTH_CACHE_ID === '2026-08-22-v232-deep-truth-explicit-cache-v1', 'unexpected V232 deep-cache version');
 must(V232_FAST_DAILY_TREND_ID === '2026-08-22-v232-fast-seven-business-daily-trends-v1', 'unexpected V232 fast trend version');
-// V231 is an HTML/UI delivery bridge and legitimately advances when canonical dashboard
-// ownership changes. Gate the supported V263 family instead of pinning one obsolete build.
-must(/^2026-08-23-v263-canonical-dashboard-delivery-v\d+$/.test(V231_METRIC_TRUTH_UI_INJECTION_ID), 'unexpected V231/V263 canonical dashboard UI family');
+// Keep the original V231 contract stable for legacy gates while separately proving
+// that the V263 canonical dashboard delivery layer is present.
+must(V231_METRIC_TRUTH_UI_INJECTION_ID === '2026-08-22-v231-metric-truth-ui-injection-v1', 'unexpected V231 metric truth UI version');
+must(/^2026-08-23-v263-canonical-dashboard-delivery-v\d+$/.test(V263_CANONICAL_DASHBOARD_UI_ID), 'unexpected V263 canonical dashboard UI family');
 console.log('[V200/V230/V232/V233] fast trends + numeric percentages + strict attempt cycles + current outcome truth smoke passed');
