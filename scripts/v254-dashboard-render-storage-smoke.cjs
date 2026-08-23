@@ -7,6 +7,9 @@ const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const storage=read('src/v254StorageHealthPatch.js');
 const r2guard=read('src/v256R2ZeroCostGuard.js');
 const runtime=read('src/v206InteractiveFirstRuntimePatch.js');
+const runtimeImports=[...runtime.matchAll(/^import\s+['"]\.\/(.+?\.js)['"];?$/gm)].map(match=>`src/${match[1]}`);
+assert.ok(runtimeImports.length>=8,'V206 startup bridge must expose its direct runtime imports');
+for(const file of runtimeImports){execFileSync(process.execPath,['--check',file],{stdio:'pipe'});}
 assert.doesNotThrow(()=>new Function(ui),'V254 rescue renderer must compile as browser JavaScript');
 assert.match(ui,/v254-dashboard-render-rescue-v1/,'V254 rescue owner version must be explicit');
 assert.match(ui,/function renderCard\(/,'V254 must own a self-contained chart renderer');
@@ -37,4 +40,4 @@ assert.match(r2guard,/manualCloudflareUploadsAreOutsideAppGuard:true/,'guard mus
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'cloud/storage secrets must never be committed');
 execFileSync(process.execPath,['--check','scripts/v257-system-calibration-smoke.cjs'],{stdio:'pipe'});
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V260] V254 readonly storage audit + V256 zero-cost guard + V257 system calibration + startup-safe V255 exclusion passed');
+console.log('[V260] runtime-import syntax gate + V254 readonly storage audit + V256 zero-cost guard + V257 system calibration + startup-safe V255 exclusion passed');
