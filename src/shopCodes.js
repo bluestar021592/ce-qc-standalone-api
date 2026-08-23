@@ -11,7 +11,9 @@ import {
   seedLatestShopWhitelist
 } from './shopWhitelist.js';
 
+export const SHOP_CODE_RUNTIME_VERSION = '2026-08-23-v270-user-upload-authoritative-merge-v1';
 const SHOP_CODE_RE = /(?:^|[^A-Z0-9])((?:CP|FS)\s*\d{6}|(?:PV|PNH)\s*\d{3})(?![A-Z0-9])/gi;
+const SHOP_LIKE_RE = /\b(?:CP|FS|PV|PNH)\s*[A-Z0-9-]{2,12}\b/gi;
 const SHOP_INBOUND_RE = /入库|到达网点|货物到达|到达门店|抵达|\bINBOUND\b|\bARRIV(?:E|ED|AL)?\b|\bRECEIVED\b/i;
 const SHOP_OUTBOUND_RE = /离开网点|货物离开|下一个网点|发往|转往|转运至|送往|\bOUTBOUND\b|\bDEPART(?:ED|URE)?\b|\bLEFT\b|\bNEXT\s+(?:STATION|SITE|BRANCH|NODE)\b/i;
 const NORMAL_FINAL_HUB_CODES = new Set(['CCSLCN', 'CCSLPDD']);
@@ -20,45 +22,103 @@ export function ensureDefaultShopCodes() {
   return seedLatestShopWhitelist(getDb());
 }
 
+/**
+ * Runtime authority rule (V270):
+ * 1) signed/builtin whitelist is the safe baseline;
+ * 2) rows explicitly uploaded by ADMIN into shop_cp_codes are merged on top;
+ * 3) uploaded names therefore take effect immediately for every later trajectory
+ *    classification without requiring a restart or a daily-report re-upload.
+ *
+ * Never return latestShopCodeMap() alone: doing so made a successful user import
+ * visible in SQLite/UI while silently excluding it from actual shop classification.
+ */
 export function getShopCodeMap() {
   const db = getDb();
   seedLatestShopWhitelist(db);
-
-  const signed = latestShopCodeMap();
-  if (signed.size) return signed;
-
-  return loadPersistedShopCodeMap(db);
+  const merged = latestShopCodeMap();
+  const persisted = loadAllPersistedShopCodes(db);
+  for (const [code, name] of persisted) merged.set(code, name);
+  return merged;
 }
 
 export function getShopCodeSummary() {
   const db = getDb();
   const seeded = seedLatestShopWhitelist(db);
-  const map = latestShopCodeMap();
-  const count = map.size || loadPersistedShopCodeMap(db).size;
+  const builtin = latestShopCodeMap();
+  const persisted = loadAllPersistedShopCodes(db);
+  const merged = new Map(builtin);
+  for (const [code, name] of persisted) merged.set(code, name);
+  let userCount = 0;
+  let latestUserUpdateAt = '';
+  try {
+    const row = db.prepare(`SELECT COUNT(*) count, MAX(updatedAt) latest FROM shop_cp_codes WHERE COALESCE(sourceFile,'') NOT LIKE 'whitelist:%'`).get();
+    userCount = Number(row?.count || 0);
+    latestUserUpdateAt = String(row?.latest || '');
+  } catch {}
   return {
-    count,
+    count: merged.size,
+    builtinCount: builtin.size,
+    persistedCount: persisted.size,
+    userUploadedCount: userCount,
+    latestUserUpdateAt,
     version: seeded?.version || SHOP_WHITELIST_VERSION,
+    runtimeVersion: SHOP_CODE_RUNTIME_VERSION,
     sourceSha256: seeded?.sourceSha256 || SHOP_WHITELIST_SOURCE_SHA256,
-    source: map.size ? SHOP_WHITELIST_SOURCE_KIND : 'SQLITE_PERSISTED'
+    source: userCount > 0 ? 'BUILTIN_PLUS_ADMIN_UPLOAD' : (builtin.size ? SHOP_WHITELIST_SOURCE_KIND : 'SQLITE_PERSISTED'),
+    authority: 'ADMIN_UPLOAD_OVERRIDES_BUILTIN'
   };
 }
 
 export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
   const wb = XLSX.readFile(filePath, { cellDates: false });
   const found = new Map();
+  const conflicts = [];
+  const invalidCandidates = [];
+  let nonEmptyRows = 0;
   for (const sheetName of wb.SheetNames || []) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: false, defval: '' });
-    for (const row of rows) {
-      const cells = (row || []).map(cell => String(cell || '').trim()).filter(Boolean);
+    for (let index = 0; index < rows.length; index += 1) {
+      const cells = (rows[index] || []).map(cell => String(cell || '').normalize('NFKC').trim()).filter(Boolean);
+      if (!cells.length) continue;
+      nonEmptyRows += 1;
       const text = cells.join(' ');
       const structured = new Set(cells.map(normalizeShopCode).filter(isSupportedShopCode));
-      for (const code of extractShopCodes(text, structured)) {
-        found.set(code, pickShopName(cells, code));
+      const codes = extractShopCodes(text, structured);
+      if (!codes.length) {
+        const looksLike = [...text.toUpperCase().matchAll(SHOP_LIKE_RE)].map(match => normalizeShopCode(match[0]));
+        if (looksLike.length && !/门店编码|门店名称|POD\s*Data/i.test(text)) {
+          invalidCandidates.push({ sheetName, rowNumber: index + 1, values: looksLike.slice(0, 5) });
+        }
+        continue;
+      }
+      for (const code of codes) {
+        const name = pickShopName(cells, code);
+        const previous = found.get(code);
+        if (previous && normalizeShopName(previous) !== normalizeShopName(name)) {
+          conflicts.push({ sheetName, rowNumber: index + 1, shopCode: code, firstName: previous, secondName: name });
+          continue;
+        }
+        found.set(code, name);
       }
     }
   }
+  if (conflicts.length) {
+    const sample = conflicts.slice(0, 5).map(row => `${row.shopCode}:“${row.firstName}”/“${row.secondName}”`).join('；');
+    const error = new Error(`门店CP码文件存在同码不同名称冲突，已阻止导入：${sample}`);
+    error.code = 'SHOP_CODE_NAME_CONFLICT';
+    error.conflicts = conflicts;
+    throw error;
+  }
+  if (!found.size) {
+    const error = new Error('没有识别到有效门店编码。支持格式：CP/FS+6位数字、PV/PNH+3位数字。');
+    error.code = 'NO_VALID_SHOP_CODES';
+    error.invalidCandidates = invalidCandidates;
+    throw error;
+  }
 
   const db = getDb();
+  seedLatestShopWhitelist(db);
+  const before = loadAllPersistedShopCodes(db);
   const now = nowIso();
   const stmt = db.prepare(`
     INSERT INTO shop_cp_codes(shopCode, shopName, sourceFile, createdAt, updatedAt)
@@ -68,8 +128,38 @@ export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
       sourceFile=excluded.sourceFile,
       updatedAt=excluded.updatedAt
   `);
-  for (const [code, name] of found) stmt.run(code, name, sourceFile || '', now, now);
-  return { imported: found.size, total: getShopCodeSummary().count };
+  let added = 0;
+  let updated = 0;
+  let unchanged = 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const [code, name] of found) {
+      const old = before.get(code);
+      if (!old) added += 1;
+      else if (normalizeShopName(old) !== normalizeShopName(name)) updated += 1;
+      else unchanged += 1;
+      stmt.run(code, name, sourceFile || '', now, now);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  const summary = getShopCodeSummary();
+  return {
+    imported: found.size,
+    added,
+    updated,
+    unchanged,
+    invalidCandidateRows: invalidCandidates.length,
+    invalidCandidates: invalidCandidates.slice(0, 20),
+    total: summary.count,
+    userUploadedCount: summary.userUploadedCount,
+    runtimeVersion: SHOP_CODE_RUNTIME_VERSION,
+    authority: summary.authority,
+    effectiveImmediately: true,
+    nonEmptyRows
+  };
 }
 
 export function detectShopInfo({ events = [], shopCodeMap = null, lastEvent = null } = {}) {
@@ -169,9 +259,20 @@ export function extractShopCodes(text, codeSet) {
   return out;
 }
 
+function loadAllPersistedShopCodes(db) {
+  const out = new Map();
+  try {
+    const legacy = db.prepare('SELECT shopCode, shopName FROM shop_cp_codes ORDER BY shopCode').all();
+    for (const row of legacy || []) {
+      const code = normalizeShopCode(row.shopCode);
+      if (isSupportedShopCode(code)) out.set(code, String(row.shopName || code).trim() || code);
+    }
+  } catch {}
+  return out;
+}
+
 function loadPersistedShopCodeMap(db) {
   const out = new Map();
-
   try {
     const active = db.prepare(`
       SELECT e.shopCode, e.shopName
@@ -185,20 +286,7 @@ function loadPersistedShopCodeMap(db) {
       if (isSupportedShopCode(code)) out.set(code, String(row.shopName || code).trim() || code);
     }
   } catch {}
-
-  // The production database already contains the full current set (including CP/FS/PV/PNH)
-  // in shop_cp_codes. Use it as a durable fallback when the signed source workbook/JSON is not
-  // present in a clean source checkout. Never truncate this persisted set during startup.
-  if (!out.size) {
-    try {
-      const legacy = db.prepare('SELECT shopCode, shopName FROM shop_cp_codes ORDER BY shopCode').all();
-      for (const row of legacy || []) {
-        const code = normalizeShopCode(row.shopCode);
-        if (isSupportedShopCode(code)) out.set(code, String(row.shopName || code).trim() || code);
-      }
-    } catch {}
-  }
-
+  if (!out.size) return loadAllPersistedShopCodes(db);
   return out;
 }
 
@@ -236,6 +324,10 @@ function normalizeNodeCode(value) {
 
 function normalizeShopCode(value) {
   return normalizeLatestShopCode(value);
+}
+
+function normalizeShopName(value) {
+  return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toUpperCase();
 }
 
 function cleanNodeLabel(value) {
