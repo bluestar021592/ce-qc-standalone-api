@@ -5,8 +5,9 @@ export const V232_FAST_METRIC_UI_INJECTION_ID = '2026-08-22-v238-retired-fast-me
 export const V235_CACHE_READY_UI_INJECTION_ID = '2026-08-22-v238-dashboard-owner-ui-injection-v1';
 export const V239_DASHBOARD_REQUEST_UI_INJECTION_ID = '2026-08-23-v239-dashboard-request-coalescer-ui-v1';
 export const V240_DAILY_RATE_UI_INJECTION_ID = '2026-08-23-v240-daily-rate-ui-injection-v1';
-export const V244_SHOPEE_TREND_UI_INJECTION_ID = '2026-08-23-v246-shopee-locked-tracking-ui-v1';
+export const V244_SHOPEE_TREND_UI_INJECTION_ID = '2026-08-23-v248-shopee-spa-operational-ui-v1';
 export const V245_SHOPEE_TREND_UI_INJECTION_ID = V244_SHOPEE_TREND_UI_INJECTION_ID;
+export const V248_SHOPEE_TREND_UI_INJECTION_ID = V244_SHOPEE_TREND_UI_INJECTION_ID;
 export const V246_TRACKING_UI_INJECTION_ID = '2026-08-23-v246-qc-tracking-ui-v1';
 export const V247_HOME_LEDGER_UI_INJECTION_ID = '2026-08-23-v247-home-ledger-truth-ui-v1';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260822-v238-1';
@@ -14,7 +15,7 @@ const LIVE_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
 const COALESCER_MARKER = '/v239-dashboard-request-coalescer.js?v=20260823-v239-1';
 const HOME_MARKER = '/v237-home-dashboard-owner.js?v=20260823-v247-1';
-const V246_SHOPEE_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v246-1';
+const V248_SHOPEE_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v248-1';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 const originalSend = express.response.send;
@@ -34,7 +35,7 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v247MetricTruthUiSend(body) {
+express.response.send = function v248MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
     const headTags=[];
@@ -45,7 +46,7 @@ express.response.send = function v247MetricTruthUiSend(body) {
     if (!body.includes(CHART_MARKER)) tags.push(`  <script src="${CHART_MARKER}"></script>`);
     if (!body.includes(LIVE_MARKER)) tags.push(`  <script src="${LIVE_MARKER}"></script>`);
     if (!body.includes(HOME_MARKER)) tags.push(`  <script src="${HOME_MARKER}"></script>`);
-    if (!body.includes(V246_SHOPEE_MARKER)) tags.push(`  <script src="${V246_SHOPEE_MARKER}"></script>`);
+    if (!body.includes(V248_SHOPEE_MARKER)) tags.push(`  <script src="${V248_SHOPEE_MARKER}"></script>`);
     if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V238-UI', V235_CACHE_READY_UI_INJECTION_ID);
@@ -54,6 +55,7 @@ express.response.send = function v247MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V245-UI', V245_SHOPEE_TREND_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V246-UI', V246_TRACKING_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V247-UI', V247_HOME_LEDGER_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V248-UI', V248_SHOPEE_TREND_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
@@ -61,3 +63,4 @@ express.response.send = function v247MetricTruthUiSend(body) {
 console.info('[CE-QC][V240_DASHBOARD_OWNER_UI]', V240_DAILY_RATE_UI_INJECTION_ID, 'single dashboard owner + corrected daily rate contract + current-summary coalescer enabled');
 console.info('[CE-QC][V246_TRACKING_UI]', V246_TRACKING_UI_INJECTION_ID, 'Shopee locked first-report signing days + real attempt evidence + global QC anti-leak reconciliation panel enabled');
 console.info('[CE-QC][V247_HOME_LEDGER_UI]', V247_HOME_LEDGER_UI_INJECTION_ID, 'home uses V246 locked Shopee ledger for attempt trend and region distribution; duplicate first-day assessment removed');
+console.info('[CE-QC][V248_SHOPEE_TREND_UI]', V248_SHOPEE_TREND_UI_INJECTION_ID, 'SHOPEECN/VN SPA navigation now activates operational trends and strict attempt evidence');
