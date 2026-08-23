@@ -26,14 +26,15 @@ const V253_FAST_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v263-1';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
-// Compatibility-only source markers for pre-V263 gates. These files are stripped
-// and are NOT pushed into delivered HTML after V263 canonical ownership.
+// Compatibility-only source markers for pre-V263 gates. These files/versions are
+// not pushed into delivered HTML after V263 canonical ownership.
 const LEGACY_GATE_V234_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const LEGACY_GATE_V248_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v248-1';
 const LEGACY_GATE_V251_MARKER = '/v250-shopee-metric-visibility.js?v=20260823-v251-1';
+const LEGACY_GATE_V253_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v253-1';
 const LEGACY_GATE_V254_MARKER = '/v254-dashboard-render-rescue.js?v=20260823-v254-1';
 const LEGACY_GATE_V261_MARKER = '/v261-dashboard-final-owner.js?v=20260823-v261-1';
-void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER;
+void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V253_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER;
 const originalSend = express.response.send;
 
 function stripScript(body, fileName) {
