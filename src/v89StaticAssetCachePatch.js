@@ -1,11 +1,11 @@
 import express from 'express';
 import './v108PerformanceIndexPatch.js';
 
-const PATCH_ID = '2026-08-23-v263-core-dashboard-cache-reset-v1';
+const PATCH_ID = '2026-08-23-v265-core-dashboard-cache-reset-v2';
 const originalUse = express.application.use;
 let installed = false;
 
-const CORE_LIVE_ASSET_RE = /\/(?:app|dashboard-v18|dashboard-chart-v18|dashboard-data-adapter-v18)\.js$/i;
+const CORE_LIVE_ASSET_RE = /\/(?:app|dashboard-v18|dashboard-chart-v18|dashboard-data-adapter-v18)\.js$|\/dashboard-v18\.css$/i;
 
 function cacheableAsset(req, res, next) {
   const pathname = String(req.path || req.url || '').split('?')[0];
@@ -13,9 +13,9 @@ function cacheableAsset(req, res, next) {
   const accept = String(req.headers?.accept || '');
   const htmlNavigation = pathname === '/' || /\.html$/i.test(pathname) || accept.includes('text/html');
 
-  // Dashboard logic must never remain stuck behind the previous 24-hour versioned
-  // asset cache. Clearing only the HTTP cache does not touch cookies, login state,
-  // localStorage or the SQLite database.
+  // Dashboard logic and layout must never remain stuck behind a previous 24-hour
+  // versioned asset cache. Clearing only HTTP cache does not touch cookies,
+  // login state, localStorage or the SQLite database.
   if (htmlNavigation) {
     res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
@@ -34,7 +34,7 @@ function cacheableAsset(req, res, next) {
   next();
 }
 
-express.application.use = function v263StaticAssetCacheUse(...args) {
+express.application.use = function v265StaticAssetCacheUse(...args) {
   const candidates = args.flat().filter(value => typeof value === 'function');
   if (!installed && candidates.some(fn => fn.name === 'serveStatic')) {
     installed = true;
