@@ -1,14 +1,14 @@
 (function installV252QcLifecycleUi(global){
   if(global.__CE_QC_V252_LIFECYCLE_UI__)return;
   global.__CE_QC_V252_LIFECYCLE_UI__=true;
-  const VERSION='2026-08-23-v252-qc-lifecycle-ui-v1';
+  const VERSION='2026-08-23-v252-qc-lifecycle-ui-v2';
   const nativeFetch=global.fetch.bind(global);
-  let timer=null,rendering=false,lastHomeKey='';
+  let timer=null,rendering=false;
   const num=value=>Number.isFinite(Number(value))?Number(value):0;
   const fmt=value=>Math.round(num(value)).toLocaleString('zh-CN');
   const pct=value=>value===null||value===undefined?'—':`${num(value).toFixed(2)}%`;
   const days=value=>value===null||value===undefined?'—':`${num(value).toFixed(2)}天`;
-  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
   const path=()=>String(location.pathname||'/').toLowerCase().replace(/\/+$/,'')||'/';
   const businessType=()=>path()==='/shopeecn'?'SHOPEECN':path()==='/shopeevn'?'SHOPEEVN':'';
   const onHome=()=>path()==='/'||path()==='/home';
@@ -59,14 +59,17 @@
   function findOldHomeHost(root){for(const h of root.querySelectorAll('h2,h3,h4')){if(/SHOPEE\s*1\s*\/\s*2\s*\/\s*3派|1\s*\/\s*2\s*\/\s*3派.*趋势/.test(String(h.textContent||'')))return h.closest('section')||h.closest('article');}return root.querySelector('#v247HomeShopeeAttempts');}
   function renderHomeSummary(cn,vn,date){
     const root=document.getElementById('homePage');if(!root||root.hidden)return;ensureStyle();
-    let host=findOldHomeHost(root)||root.querySelector('#v252HomeShopeeLifecycle');
+    const existing=root.querySelector('#v252HomeShopeeLifecycle');
+    const stale=findOldHomeHost(root);
+    if(existing&&stale&&stale!==existing)stale.remove();
+    let host=existing||stale;
     if(!host){host=document.createElement('section');const trend=root.querySelector('.v18-trend-section');(trend?.parentNode||root).insertBefore(host,trend?.nextSibling||null);}
     host.id='v252HomeShopeeLifecycle';host.className='v18-panel';host.dataset.v252=VERSION;
     host.innerHTML=`<div class="v252-head"><div><h2>SHOPEE 派次与签收摘要</h2><p>首页只看当前QC结果；7天详细趋势进入 CN/VN 看板。派次来自持续轨迹：70 START → Pending/失败 → 新START；平均签收天数按第一次日报日期 → 实际POD日期（含首尾当天）。</p></div><span class="v252-tag">持续追踪账本</span></div><div class="v252-wrap"><table><thead><tr><th>板块</th><th>首日报成员</th><th>当前POD</th><th>1派签收 / 占POD</th><th>2派签收 / 占POD</th><th>3派+ / 占POD</th><th>派次证据覆盖</th><th>未识别POD</th><th>平均签收天数</th><th>签收天数覆盖</th><th>账本状态</th></tr></thead><tbody>${summaryRow('SHOPEE CN',cn,date)}${summaryRow('SHOPEE VN',vn,date)}</tbody></table></div>`;
   }
   function setDispatchGroup(node,region){if(!node)return;const rates=[region?.attempt1Rate,region?.attempt2Rate,region?.attempt3Rate];[...node.querySelectorAll(':scope > span')].forEach((span,index)=>{const value=rates[index],bar=span.querySelector('i b'),em=span.querySelector('em');if(bar)bar.style.width=value===null||value===undefined?'0%':`${Math.max(0,Math.min(100,num(value)))}%`;if(em)em.textContent=value===null||value===undefined?'—':`${num(value).toFixed(2)}%`;});}
   function renderHomeRegions(cn,vn,date){const root=document.getElementById('homePage');if(!root||root.hidden)return;const c=latest(cn,date),v=latest(vn,date),map={'CN-PP':c?.regions?.PP,'CN-PV':c?.regions?.PV,'VN-PP':v?.regions?.PP,'VN-PV':v?.regions?.PV};root.querySelectorAll('.v18-dispatch-grid > div').forEach(node=>setDispatchGroup(node,map[String(node.querySelector('h3')?.textContent||'').trim()]));}
-  async function refreshHome(){const rg=range();if(!onHome()||!rg.to)return;const key=`${rg.from}|${rg.to}`;try{const [cn,vn]=await Promise.all([read('SHOPEECN',rg,0,false),read('SHOPEEVN',rg,0,false)]);renderHomeSummary(cn,vn,rg.to);lastHomeKey=key;Promise.all([read('SHOPEECN',{from:rg.to,to:rg.to},1,true),read('SHOPEEVN',{from:rg.to,to:rg.to},1,true)]).then(([c,v])=>renderHomeRegions(c,v,rg.to)).catch(error=>console.warn('[CE-QC][V252_HOME_REGION]',error?.message||error));}catch(error){console.warn('[CE-QC][V252_HOME_SUMMARY]',error?.message||error);}}
+  async function refreshHome(){const rg=range();if(!onHome()||!rg.to)return;try{const [cn,vn]=await Promise.all([read('SHOPEECN',rg,0,false),read('SHOPEEVN',rg,0,false)]);renderHomeSummary(cn,vn,rg.to);Promise.all([read('SHOPEECN',{from:rg.to,to:rg.to},1,true),read('SHOPEEVN',{from:rg.to,to:rg.to},1,true)]).then(([c,v])=>renderHomeRegions(c,v,rg.to)).catch(error=>console.warn('[CE-QC][V252_HOME_REGION]',error?.message||error));}catch(error){console.warn('[CE-QC][V252_HOME_SUMMARY]',error?.message||error);}}
   async function refreshBusiness(){const type=businessType(),rg=range();if(!type||!rg.to)return;try{const data=await read(type,rg,0,false);const owner=global.__CE_QC_V251_SHOPEE_FINAL_OWNER__;if(owner?.render)owner.render(data);}catch(error){console.warn('[CE-QC][V252_SHOPEE_PAGE]',error?.message||error);}}
   function refresh(){if(rendering)return;rendering=true;Promise.resolve(onHome()?refreshHome():refreshBusiness()).finally(()=>{rendering=false;});}
   function schedule(delay=50){clearTimeout(timer);timer=setTimeout(refresh,delay);}
@@ -81,5 +84,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V252_LIFECYCLE_UI__={version:VERSION,refresh,read,nativeFetch};
-  console.info('[CE-QC][V252_LIFECYCLE_UI]',VERSION,'Shopee pages read regions=0 lifecycle facts; home uses compact attempt/signing summary and exact-date PP/PV only');
+  console.info('[CE-QC][V252_LIFECYCLE_UI]',VERSION,'Shopee pages read regions=0 lifecycle facts; home uses one compact attempt/signing summary and exact-date PP/PV only');
 })(window);
