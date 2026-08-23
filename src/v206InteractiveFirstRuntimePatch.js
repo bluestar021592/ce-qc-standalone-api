@@ -9,8 +9,9 @@ import './v252LifecycleCoordinator.js';
 import './v253DashboardFastPath.js';
 import './v254StorageHealthPatch.js';
 import './v255RetentionStorageGuard.js';
+import './v256R2ZeroCostGuard.js';
 
-const PATCH_ID = '2026-08-23-v255-storage-safe-dashboard-runtime-v1';
+const PATCH_ID = '2026-08-23-v256-zero-cost-cloud-storage-runtime-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
 // V253 first paint no longer depends on dashboard_daily_cache. Keep the old cache
@@ -72,6 +73,6 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V255] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; V254 read-only storage audit and V255 one-year retention/storage guard are active while dashboard first paint remains cache-independent.`);
+console.log(`[CE-QC][V256] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; V254 read-only storage audit, V255 one-year retention guard and V256 R2 zero-cost upload guard are active while dashboard first paint remains cache-independent.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
