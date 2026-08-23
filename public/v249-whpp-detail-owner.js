@@ -14,7 +14,7 @@
     const value=String(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'').slice(0,10);
     if(/^\d{4}-\d{2}-\d{2}$/.test(value))return value;
     try{
-      const fallback=String(global.__CE_QC_V132_WHPP_FAST__?.fetchSummary?.reportDate||unifiedImportState?.reportDate||appState?.reportDate||shopeeState?.reportDate||'').slice(0,10);
+      const fallback=String(unifiedImportState?.reportDate||appState?.reportDate||shopeeState?.reportDate||'').slice(0,10);
       return /^\d{4}-\d{2}-\d{2}$/.test(fallback)?fallback:'';
     }catch{return '';}
   };
@@ -117,7 +117,8 @@
       const button=document.createElement('button');button.className='v18-business-card green v249-whpp-closure-card';
       if(card)card.replaceWith(button);else grid.appendChild(button);card=button;
     }
-    card.dataset.whppTab='closed';card.innerHTML=`<span>闭环率</span><small>当前比率</small><b>${rate.toFixed(2).replace(/\.00$/,'')}%</b><em>已闭环 ${fmt(closed)} / 总票 ${fmt(total)}</em>`;
+    const desired=`<span>闭环率</span><small>当前比率</small><b>${rate.toFixed(2).replace(/\.00$/,'')}%</b><em>已闭环 ${fmt(closed)} / 总票 ${fmt(total)}</em>`;
+    card.dataset.whppTab='closed';if(card.innerHTML!==desired)card.innerHTML=desired;
   }
   function markClickable(root){
     root?.querySelectorAll?.('[data-whpp-tab],.v18-business-card,.v18-metric-card,.region-block button').forEach(node=>{
@@ -130,6 +131,7 @@
     const canonical=document.getElementById('whppFastPage');
     const fallback=fallbackRoot();
     const fallbackText=String(fallback?.textContent||'');
+    // V249 stale fallback markers: WHPP页面已切换完成|区域\/趋势数据正在后台更新
     const needsHandoff=Boolean(owner?.navigate)&&(!canonical||canonical.hidden||/WHPP页面已切换完成|区域\/趋势数据正在后台更新/.test(fallbackText));
     if(needsHandoff&&!handoffBusy){
       handoffBusy=true;
