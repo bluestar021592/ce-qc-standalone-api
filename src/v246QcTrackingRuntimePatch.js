@@ -23,7 +23,7 @@ import {
   v246DateKey
 } from './v246TrackingLedgerCore.js';
 
-export const V246_QC_TRACKING_RUNTIME_ID = '2026-08-23-v246-continuous-qc-reconcile-0200-v2';
+export const V246_QC_TRACKING_RUNTIME_ID = '2026-08-23-v246-continuous-qc-reconcile-0200-v3';
 const TYPE_SET = new Set(['ALL',...V246_TRACKING_TYPES]);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
 const CHUNK_SIZE = Math.max(100,Math.min(350,Number(process.env.V246_TRACKING_CHUNK || 300)));
@@ -70,6 +70,12 @@ function flattenTrackResult(value){
   }
   return[];
 }
+function listAllOpenTrackingRows(db){
+  ensureV246TrackingSchema(db);
+  return db.prepare(`SELECT shipmentCode,businessType,firstReportDate AS sourceReportDate,lastImportedDate AS lastReportDate,
+      trackingStatus AS status,'SUCCESS' AS apiStatus,currentStateJson AS stateJson,lastCheckedAt
+    FROM qc_tracking_ledger WHERE trackingStatus='OPEN' ORDER BY firstReportDate,shipmentCode`).all();
+}
 async function queryTrackWithFallback(client,bills){
   if(!bills.length)return{events:[],failed:[]};
   try{return{events:flattenTrackResult(await client.trackQuery(bills)),failed:[]};}
@@ -85,9 +91,6 @@ async function queryTrackWithFallback(client,bills){
 async function backfillShopeeStrictTrack(selection,client,job){
   const db=getDb();
   const all=listV246ShopeePodForStrictCheck(selection,db);
-  // Once a POD parcel has canonical V246 strict evidence, its historical track is
-  // immutable. Do not re-query it every night. Legacy/current/daily-cache attempts
-  // are queried once and replaced by the strict result, including downward fixes.
   const candidates=all.filter(row=>!/^V246_STRICT_TRACK:/i.test(text(row.attemptSource)));
   if(!candidates.length)return{candidates:0,queried:0,failed:0,updated:0,known:0,unknown:0,podDateFilled:0,corrected:0};
   let queried=0,failed=0;const evidenceRows=[];
@@ -134,8 +137,9 @@ export async function runV246TrackingReconcile(selectionInput,{reason='MANUAL',j
   const working=job||{jobId:`V246-${crypto.randomUUID()}`,selection,status:'RUNNING',createdAt:nowIso(),updatedAt:nowIso()};
   const beforeRepair=reconcileV246TrackingLedger(selection,{db,reason:`${reason}:PRE_REFRESH_RECONCILE`});
   const before=v246TrackingSummary(selection,db);
-  const candidates=listV246OpenTrackingRows(selection,db);
-  writeJob(working,{status:'RUNNING',phase:'REFRESH',total:candidates.length,completed:0,refreshed:0,failed:0,progress:candidates.length?2:70,before,beforeRepair,message:`日报/历史账本对账完成：应追踪${beforeRepair.expected}票，补回/重开${beforeRepair.repaired}票；准备刷新${candidates.length}票非终态。`});
+  const automaticAllOpen=reason==='CAMBODIA_0200_30DAY_AUTO';
+  const candidates=automaticAllOpen?listAllOpenTrackingRows(db):listV246OpenTrackingRows(selection,db);
+  writeJob(working,{status:'RUNNING',phase:'REFRESH',total:candidates.length,completed:0,refreshed:0,failed:0,progress:candidates.length?2:70,before,beforeRepair,message:`日报/历史账本对账完成：应追踪${beforeRepair.expected}票，补回/重开${beforeRepair.repaired}票；准备刷新${candidates.length}票${automaticAllOpen?'全部未终态':'所选区间非终态'}。`});
   const groups=new Map();
   for(const row of candidates){const family=familyOf(text(row.businessType).toUpperCase());if(!family)continue;if(!groups.has(family))groups.set(family,[]);groups.get(family).push(row);}
   let completed=0,refreshed=0,failed=0;
@@ -158,7 +162,7 @@ export async function runV246TrackingReconcile(selectionInput,{reason='MANUAL',j
   const strict=await enrichShopeeEvidence(selection,working,client);
   const finalRepair=reconcileV246TrackingLedger(selection,{db,reason:`${reason}:POST_EVIDENCE_RECONCILE`});
   const after=v246TrackingSummary(selection,db);
-  return{ok:true,version:V246_QC_TRACKING_RUNTIME_ID,ledgerVersion:V246_TRACKING_LEDGER_ID,reason,selection,before,beforeRepair,candidates:candidates.length,refreshed,failed,strictEvidence:strict.evidence,strictTrack:strict.strictTrack,warnings:strict.warnings,afterRefreshRepair,finalRepair,after,completedAt:nowIso()};
+  return{ok:true,version:V246_QC_TRACKING_RUNTIME_ID,ledgerVersion:V246_TRACKING_LEDGER_ID,reason,selection,automaticAllOpen,before,beforeRepair,candidates:candidates.length,refreshed,failed,strictEvidence:strict.evidence,strictTrack:strict.strictTrack,warnings:strict.warnings,afterRefreshRepair,finalRepair,after,completedAt:nowIso()};
 }
 
 async function executeJob(job,reason){
@@ -185,10 +189,10 @@ function billHandler(req,res){
 }
 
 async function lightweightAudit(reason){
-  const db=getDb();const clock=cambodiaClock();const fromDate=addDays(clock.date,-29);const selection={businessType:'ALL',fromDate,toDate:clock.date,days:30};
+  const db=getDb();const clock=cambodiaClock();const windowDays=String(reason||'').startsWith('STARTUP_')?90:30;const fromDate=addDays(clock.date,-(windowDays-1));const selection={businessType:'ALL',fromDate,toDate:clock.date,days:windowDays};
   if(activeBusinessProcessingDetails(db).active||activeJobId)return null;
   const result=reconcileV246TrackingLedger(selection,{db,reason});
-  console.log('[CE-QC][V246_TRACKING_AUDIT]',JSON.stringify({reason,expected:result.expected,repaired:result.repaired,reopened:result.reopened,open:result.open}));return result;
+  console.log('[CE-QC][V246_TRACKING_AUDIT]',JSON.stringify({reason,windowDays,expected:result.expected,repaired:result.repaired,reopened:result.reopened,open:result.open}));return result;
 }
 function scheduledFailureCoolingDown(db){
   const failedAt=Date.parse(getMeta(db,'v246_daily_0200_failed_at')||'');
@@ -207,7 +211,7 @@ async function scheduledTick(){
     while(['QUEUED','RUNNING'].includes(job.status))await new Promise(resolve=>setTimeout(resolve,2000));
     if(job.status==='COMPLETED'){
       setMeta(db,'v246_daily_0200_success_date',clock.date);setMeta(db,'v246_daily_0200_success_at',nowIso());setMeta(db,'v246_daily_0200_failed_at','');
-      console.log('[CE-QC][V246_0200]',JSON.stringify({date:clock.date,status:job.status,refreshed:job.refreshed,failed:job.failed,strictTrack:job.result?.strictTrack||{}}));
+      console.log('[CE-QC][V246_0200]',JSON.stringify({date:clock.date,status:job.status,allOpen:true,refreshed:job.refreshed,failed:job.failed,strictTrack:job.result?.strictTrack||{}}));
     }else if(job.status==='FAILED'){
       setMeta(db,'v246_daily_0200_failed_at',nowIso());
       console.warn(`[CE-QC][V246_0200_FAILED] ${job.error||job.message||'unknown'}; retry is cooled down for ${Math.round(SCHEDULE_RETRY_MS/60000)} minutes.`);
@@ -216,9 +220,9 @@ async function scheduledTick(){
 }
 function startScheduler(){
   if(schedulerTimer||process.env.CI||process.env.NODE_ENV==='test'||String(process.env.CE_QC_DISABLE_V246_TRACKING||'')==='1')return;
-  startupTimer=setTimeout(()=>{lightweightAudit('STARTUP_30DAY_ANTI_LEAK').catch(error=>console.warn('[CE-QC][V246_STARTUP_AUDIT_FAILED]',error?.message||error));scheduledTick().catch(error=>console.warn('[CE-QC][V246_STARTUP_TICK_FAILED]',error?.message||error));},STARTUP_AUDIT_DELAY_MS);startupTimer.unref?.();
+  startupTimer=setTimeout(()=>{lightweightAudit('STARTUP_90DAY_ANTI_LEAK').catch(error=>console.warn('[CE-QC][V246_STARTUP_AUDIT_FAILED]',error?.message||error));scheduledTick().catch(error=>console.warn('[CE-QC][V246_STARTUP_TICK_FAILED]',error?.message||error));},STARTUP_AUDIT_DELAY_MS);startupTimer.unref?.();
   schedulerTimer=setInterval(()=>scheduledTick().catch(error=>console.error('[CE-QC][V246_SCHEDULER_FAILED]',error?.message||error)),SCHEDULER_POLL_MS);schedulerTimer.unref?.();
-  console.log(`[CE-QC][V246_TRACKING] ${V246_QC_TRACKING_RUNTIME_ID} enabled: hourly anti-leak ledger audit + Cambodia 02:00 rolling 30-day non-terminal refresh + missed-run startup catch-up + ${Math.round(SCHEDULE_RETRY_MS/60000)}m failure backoff.`);
+  console.log(`[CE-QC][V246_TRACKING] ${V246_QC_TRACKING_RUNTIME_ID} enabled: startup 90-day anti-leak seed + hourly 30-day anti-leak audit + Cambodia 02:00 rolling 30-day reconciliation followed by ALL-OPEN refresh + missed-run catch-up + ${Math.round(SCHEDULE_RETRY_MS/60000)}m failure backoff.`);
 }
 
 const previousGet=express.application.get;const previousPost=express.application.post;
