@@ -11,7 +11,8 @@ export const V248_SHOPEE_TREND_UI_INJECTION_ID = V244_SHOPEE_TREND_UI_INJECTION_
 export const V246_TRACKING_UI_INJECTION_ID = '2026-08-23-v246-qc-tracking-ui-v1';
 export const V247_HOME_LEDGER_UI_INJECTION_ID = '2026-08-23-v247-home-ledger-truth-ui-v1';
 export const V249_WHPP_DETAIL_UI_INJECTION_ID = '2026-08-23-v249-whpp-exact-drilldown-ui-v1';
-export const V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID = '2026-08-23-v250-shopee-metric-visibility-ui-v1';
+export const V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID = '2026-08-23-v251-shopee-final-render-ui-v1';
+export const V251_SHOPEE_FINAL_UI_INJECTION_ID = V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID;
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260822-v238-1';
 const LIVE_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
@@ -20,7 +21,7 @@ const HOME_MARKER = '/v237-home-dashboard-owner.js?v=20260823-v247-1';
 const V248_SHOPEE_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v248-1';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
-const V250_SHOPEE_VISIBILITY_MARKER = '/v250-shopee-metric-visibility.js?v=20260823-v250-1';
+const V251_SHOPEE_FINAL_MARKER = '/v250-shopee-metric-visibility.js?v=20260823-v251-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 const originalSend = express.response.send;
 
@@ -39,7 +40,7 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v250MetricTruthUiSend(body) {
+express.response.send = function v251MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
     const headTags=[];
@@ -53,7 +54,7 @@ express.response.send = function v250MetricTruthUiSend(body) {
     if (!body.includes(V248_SHOPEE_MARKER)) tags.push(`  <script src="${V248_SHOPEE_MARKER}"></script>`);
     if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
     if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
-    if (!body.includes(V250_SHOPEE_VISIBILITY_MARKER)) tags.push(`  <script src="${V250_SHOPEE_VISIBILITY_MARKER}"></script>`);
+    if (!body.includes(V251_SHOPEE_FINAL_MARKER)) tags.push(`  <script src="${V251_SHOPEE_FINAL_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V238-UI', V235_CACHE_READY_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V239-UI', V239_DASHBOARD_REQUEST_UI_INJECTION_ID);
@@ -64,6 +65,7 @@ express.response.send = function v250MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V248-UI', V248_SHOPEE_TREND_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V249-UI', V249_WHPP_DETAIL_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V250-UI', V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V251-UI', V251_SHOPEE_FINAL_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
@@ -73,4 +75,4 @@ console.info('[CE-QC][V246_TRACKING_UI]', V246_TRACKING_UI_INJECTION_ID, 'Shopee
 console.info('[CE-QC][V247_HOME_LEDGER_UI]', V247_HOME_LEDGER_UI_INJECTION_ID, 'home uses V246 locked Shopee ledger for attempt trend and region distribution; duplicate first-day assessment removed');
 console.info('[CE-QC][V248_SHOPEE_TREND_UI]', V248_SHOPEE_TREND_UI_INJECTION_ID, 'SHOPEECN/VN SPA navigation now activates operational trends and strict attempt evidence');
 console.info('[CE-QC][V249_WHPP_DETAIL_UI]', V249_WHPP_DETAIL_UI_INJECTION_ID, 'WHPP canonical-page handoff and exact V172 drilldown owner delivered last');
-console.info('[CE-QC][V250_SHOPEE_METRIC_VISIBILITY]', V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID, 'Shopee average signing days and strict 1/2/3 attempt truth are forced visible even when legacy hidden state survives SPA navigation');
+console.info('[CE-QC][V251_SHOPEE_FINAL_OWNER]', V251_SHOPEE_FINAL_UI_INJECTION_ID, 'final Shopee owner wraps canonical renderAll/renderShopeePage and keeps V246 attempt/signing truth visible after every legacy rerender');
