@@ -1,0 +1,1 @@
+Temporary CI validation marker for V253. Do not merge; branch exists only to trigger pull_request go-live-preflight checks.
