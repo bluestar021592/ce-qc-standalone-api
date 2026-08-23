@@ -4,7 +4,7 @@ import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { ensureV246TrackingSchema, applyV246StrictAttemptEvidence } from './v246TrackingLedgerCore.js';
 import { activeBusinessProcessingDetails, cambodiaClock } from './carryoverRefreshScheduler.js';
 
-export const V262_SHOPEE_STRICT_EVIDENCE_ID='2026-08-23-v263-three-business-attempt-signing-retry-v1';
+export const V262_SHOPEE_STRICT_EVIDENCE_ID='2026-08-23-v263-three-business-attempt-signing-retry-v2';
 export const V263_DELIVERY_KPI_TYPES=Object.freeze(['TBKH','SHOPEECN','SHOPEEVN']);
 const TYPE_SET=new Set(V263_DELIVERY_KPI_TYPES);
 const LOOKBACK_DAYS=Math.max(30,Math.min(400,Number(process.env.V262_STRICT_LOOKBACK_DAYS||400)));
@@ -24,7 +24,11 @@ function safeJson(v){try{return v&&typeof v==='object'?v:JSON.parse(String(v||'{
 function eventBill(row={}){return billOf(row.shipmentCode||row.运单号||row.waybill||row.waybillNo||row.billCode||row.trackingNo||row.orderNo);}
 
 export function v262ShouldRetryStrictRow(row={}){
-  return String(row.terminalReason||'').toUpperCase()==='POD'&&TYPE_SET.has(String(row.businessType||'').toUpperCase())&&Number(row.attemptNo||0)===0;
+  const target=String(row.terminalReason||'').toUpperCase()==='POD'&&TYPE_SET.has(String(row.businessType||'').toUpperCase());
+  if(!target)return false;
+  const attemptMissing=Number(row.attemptNo||0)===0;
+  const signingMissing=!dateKey(row.podDate)||!Number.isFinite(Number(row.signingDays))||Number(row.signingDays||0)<=0;
+  return attemptMissing||signingMissing;
 }
 
 export function normalizeV262TrackPayload(value,inheritedBill='',out=[],seen=new WeakSet(),depth=0){
@@ -57,12 +61,18 @@ async function queryWithFallback(client,bills){
   try{return{events:normalizeV262TrackPayload(await client.trackQuery(bills)),failed:[]};}
   catch(error){if(bills.length===1)return{events:[],failed:[{shipmentCode:bills[0],error:error?.message||String(error)}]};const mid=Math.ceil(bills.length/2),left=await queryWithFallback(client,bills.slice(0,mid)),right=await queryWithFallback(client,bills.slice(mid));return{events:[...left.events,...right.events],failed:[...left.failed,...right.failed]};}
 }
-function evidenceRow(row,strict){return{shipmentCode:billOf(row.shipmentCode),businessType:row.businessType,attemptNo:strict.attemptNo,source:strict.source,startMode:strict.startMode,starts:strict.starts,failures:strict.failures,podDate:strict.podDate||row.podDate||''};}
+function evidenceRow(row,strict){
+  const lockedAttempt=Math.max(0,Math.min(3,Number(row.attemptNo||0)));
+  const attemptNo=lockedAttempt>0?lockedAttempt:strict.attemptNo;
+  const source=lockedAttempt>0?'保留已锁定派次并补POD日期/签收天数':strict.source;
+  return{shipmentCode:billOf(row.shipmentCode),businessType:row.businessType,attemptNo,source,startMode:strict.startMode,starts:strict.starts,failures:strict.failures,podDate:strict.podDate||row.podDate||''};
+}
 function unknownCandidates(db){
   ensureV246TrackingSchema(db);const today=cambodiaClock().date,from=addDays(today,-(LOOKBACK_DAYS-1)),retryBefore=new Date(Date.now()-UNKNOWN_RETRY_MS).toISOString();
-  return db.prepare(`SELECT shipmentCode,businessType,firstReportDate,lastImportedDate,podDate,attemptNo,attemptSource,lastCheckedAt,terminalReason
+  return db.prepare(`SELECT shipmentCode,businessType,firstReportDate,lastImportedDate,podDate,attemptNo,attemptSource,signingDays,lastCheckedAt,terminalReason
     FROM qc_tracking_ledger
-    WHERE terminalReason='POD' AND businessType IN ('TBKH','SHOPEECN','SHOPEEVN') AND attemptNo=0
+    WHERE terminalReason='POD' AND businessType IN ('TBKH','SHOPEECN','SHOPEEVN')
+      AND (attemptNo=0 OR podDate='' OR podDate IS NULL OR signingDays IS NULL OR signingDays<=0)
       AND firstReportDate BETWEEN ? AND ? AND (lastCheckedAt='' OR lastCheckedAt IS NULL OR lastCheckedAt<=?)
     ORDER BY CASE WHEN lastCheckedAt='' OR lastCheckedAt IS NULL THEN 0 ELSE 1 END,lastCheckedAt,firstReportDate,shipmentCode LIMIT ?`).all(from,today,retryBefore,MAX_PER_RUN).filter(v262ShouldRetryStrictRow);
 }
@@ -72,7 +82,7 @@ export async function runV262ShopeeStrictEvidenceBackfill({client=new CEClient()
   running=true;const startedAt=nowIso();try{
     const candidates=unknownCandidates(db);if(!candidates.length)return{ok:true,id:V262_SHOPEE_STRICT_EVIDENCE_ID,reason,startedAt,candidates:0,localKnown:0,apiQueried:0,apiFailed:0,known:0,unknown:0};
     let localKnown=0,apiQueried=0,apiFailed=0;const localEvidence=[],unresolved=[];
-    for(let offset=0;offset<candidates.length;offset+=CHUNK){const chunk=candidates.slice(offset,offset+CHUNK),bills=chunk.map(r=>billOf(r.shipmentCode)),local=localEventsForBills(db,bills);for(const row of chunk){const strict=analyzeV246ShopeeAttemptCycle(local.get(billOf(row.shipmentCode))||[],{podDate:row.podDate||''});if(strict.attemptNo>0){localKnown+=1;localEvidence.push(evidenceRow(row,strict));}else unresolved.push(row);}}
+    for(let offset=0;offset<candidates.length;offset+=CHUNK){const chunk=candidates.slice(offset,offset+CHUNK),bills=chunk.map(r=>billOf(r.shipmentCode)),local=localEventsForBills(db,bills);for(const row of chunk){const strict=analyzeV246ShopeeAttemptCycle(local.get(billOf(row.shipmentCode))||[],{podDate:row.podDate||''});if(strict.attemptNo>0||strict.podDate){if(strict.attemptNo>0)localKnown+=1;localEvidence.push(evidenceRow(row,strict));}else unresolved.push(row);}}
     let localApplied={updated:0,known:0,unknown:0,podDateFilled:0,corrected:0};if(localEvidence.length)localApplied=applyV246StrictAttemptEvidence(localEvidence,{db,reason:`V263:${reason}:LOCAL_STORED_TRACK`});
     const apiEvidence=[];
     for(let offset=0;offset<unresolved.length;offset+=CHUNK){const chunk=unresolved.slice(offset,offset+CHUNK),bills=chunk.map(r=>billOf(r.shipmentCode));const outcome=await queryWithFallback(client,bills);apiQueried+=bills.length;apiFailed+=outcome.failed.length;const byBill=new Map();for(const event of outcome.events){const bill=eventBill(event);if(!bill)continue;if(!byBill.has(bill))byBill.set(bill,[]);byBill.get(bill).push(event);}const failed=new Set(outcome.failed.map(r=>billOf(r.shipmentCode)));for(const row of chunk){const bill=billOf(row.shipmentCode);if(failed.has(bill))continue;const strict=analyzeV246ShopeeAttemptCycle(byBill.get(bill)||[],{podDate:row.podDate||''});apiEvidence.push(evidenceRow(row,strict));}}
@@ -87,6 +97,6 @@ function start(){
   if(process.env.CI||process.env.NODE_ENV==='test'||String(process.env.CE_QC_DISABLE_V262_STRICT_BACKFILL||'')==='1')return;
   startTimer=setTimeout(async()=>{const r=await runV262ShopeeStrictEvidenceBackfill({reason:'STARTUP_AUTO'});if(r?.skipped&&r.reason==='FOREGROUND_PROCESSING_ACTIVE')retryIfBlocked();},START_DELAY_MS);startTimer.unref?.();
   periodicTimer=setInterval(async()=>{const r=await runV262ShopeeStrictEvidenceBackfill({reason:'TWO_HOUR_AUTO'});if(r?.skipped&&r.reason==='FOREGROUND_PROCESSING_ACTIVE')retryIfBlocked();},PERIODIC_MS);periodicTimer.unref?.();
-  console.log(`[CE-QC][V263_DELIVERY_EVIDENCE] ${V262_SHOPEE_STRICT_EVIDENCE_ID} enabled for TBKH + SHOPEECN + SHOPEEVN only: stored-track first + CE retry for POD attemptNo=0; ${LOOKBACK_DAYS}d lookback, every ${Math.round(PERIODIC_MS/3600000)}h.`);
+  console.log(`[CE-QC][V263_DELIVERY_EVIDENCE] ${V262_SHOPEE_STRICT_EVIDENCE_ID} enabled for TBKH + SHOPEECN + SHOPEEVN only: stored-track first + CE retry for missing attempt OR POD/signing evidence; ${LOOKBACK_DAYS}d lookback, every ${Math.round(PERIODIC_MS/3600000)}h.`);
 }
 start();
