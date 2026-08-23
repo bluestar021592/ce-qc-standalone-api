@@ -69,7 +69,7 @@ assert.equal(before.business.CE.pending1,0,'CCSL POD historical Pending must not
 assert.equal(before.business.ALI1688.returned,1);
 assert.equal(before.business.ALI1688.pending1,0,'CCSL returned shipment must not remain current Pending');
 assert.equal(before.business.CE.sameDayPod,1,'same-day POD must count only POD completed on the report date');
-assert.equal(before.business.CE.firstDayPodRate,100,'single CE row POD on report date must be 100% first-day POD');
+assert.equal(before.business.CE.sameDayPodRate,100,'single CE row POD on report date must be 100% first-day POD');
 assert.equal(before.business.CEAF.sameDayPod,0,'POD completed before report date must not count as first-day POD');
 assert.equal(before.business.SHOPEECN.sameDayPod,1,'SHOPEE same-day POD evidence must be read from POD time');
 assert.equal(before.business.SHOPEEVN.sameDayPod,0,'SHOPEE POD from prior day must not count as first-day POD');
@@ -111,11 +111,11 @@ assert.deepEqual({date:trendAfter.daily[0].reportDate,total:trendAfter.daily[0].
 assert.equal(trendAfter.ticket[0],3);
 assert.equal(trendAfter.podRate[0],33.33);
 assert.equal(trendAfter.ocRate[0],0);
-assert.equal(trendAfter.firstRate[0],33.33,'first-day POD rate must use total daily tickets as denominator');
+assert.equal(trendAfter.sameDayPodRate[0],33.33,'first-day POD rate must use total daily tickets as denominator');
 
 const vnTrend = readV237DashboardTrends('SHOPEEVN',date,date);
 assert.equal(vnTrend.ocRate[0],50,'daily OC trend must use current OC / daily total');
-assert.equal(vnTrend.firstRate[0],0,'prior-day POD must not count as first-day POD for the report date');
+assert.equal(vnTrend.sameDayPodRate[0],0,'prior-day POD must not count as first-day POD for the report date');
 
 const second = refreshV235CurrentDashboardCacheDate(date,{force:false});
 assert.equal(second.reason,'CURRENT_CACHE_READY');
