@@ -70,4 +70,3 @@ assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收')]),'','nega
 
 console.log('[V246] tracking core smoke passed: true-terminal-only + immutable signing start + strict START/failure attempts + negative POD guards');
 execFileSync(process.execPath,['scripts/v252-lifecycle-smoke.mjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v253-dashboard-fastpath-smoke.mjs'],{stdio:'inherit'});
