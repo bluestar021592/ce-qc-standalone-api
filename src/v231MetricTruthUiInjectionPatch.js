@@ -1,3 +1,4 @@
+import './v254StorageHealthPatch.js';
 import express from 'express';
 
 export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-22-v231-metric-truth-ui-injection-v1';
@@ -15,6 +16,7 @@ export const V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID = '2026-08-23-v251-sh
 export const V251_SHOPEE_FINAL_UI_INJECTION_ID = V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID;
 export const V252_LIFECYCLE_UI_INJECTION_ID = '2026-08-23-v252-qc-lifecycle-ui-v1';
 export const V253_DASHBOARD_FAST_UI_INJECTION_ID = '2026-08-23-v253-final-fast-dashboard-owner-v1';
+export const V254_DASHBOARD_RENDER_RESCUE_UI_INJECTION_ID = '2026-08-23-v254-dashboard-render-rescue-ui-v1';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260822-v238-1';
 const LIVE_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
@@ -26,6 +28,7 @@ const V248_SHOPEE_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v248-1';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const V251_SHOPEE_FINAL_MARKER = '/v250-shopee-metric-visibility.js?v=20260823-v251-1';
+const V254_RENDER_MARKER = '/v254-dashboard-render-rescue.js?v=20260823-v254-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 const originalSend = express.response.send;
 
@@ -35,7 +38,7 @@ function stripScript(body, fileName) {
 }
 
 function prepareOwnerHtml(body) {
-  for (const file of ['v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v237-dashboard-owner-guard.js','v237-home-dashboard-owner.js','v239-dashboard-request-coalescer.js','v244-shopee-trend-owner.js','v246-qc-tracking.js','v249-whpp-detail-owner.js','v250-shopee-metric-visibility.js','v252-qc-lifecycle-ui.js','v253-dashboard-fast-owner.js']) {
+  for (const file of ['v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v237-dashboard-owner-guard.js','v237-home-dashboard-owner.js','v239-dashboard-request-coalescer.js','v244-shopee-trend-owner.js','v246-qc-tracking.js','v249-whpp-detail-owner.js','v250-shopee-metric-visibility.js','v252-qc-lifecycle-ui.js','v253-dashboard-fast-owner.js','v254-dashboard-render-rescue.js']) {
     body = stripScript(body, file);
   }
   return body
@@ -44,7 +47,7 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v253MetricTruthUiSend(body) {
+express.response.send = function v254MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
     const headTags=[];
@@ -63,6 +66,9 @@ express.response.send = function v253MetricTruthUiSend(body) {
     if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
     if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
     if (!body.includes(V251_SHOPEE_FINAL_MARKER)) tags.push(`  <script src="${V251_SHOPEE_FINAL_MARKER}"></script>`);
+    // V254 is deliberately last. It is a self-contained rescue renderer and cannot
+    // be overwritten by earlier legacy/dashboard owners after they finish loading.
+    if (!body.includes(V254_RENDER_MARKER)) tags.push(`  <script src="${V254_RENDER_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V238-UI', V235_CACHE_READY_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V239-UI', V239_DASHBOARD_REQUEST_UI_INJECTION_ID);
@@ -76,6 +82,7 @@ express.response.send = function v253MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V251-UI', V251_SHOPEE_FINAL_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V252-UI', V252_LIFECYCLE_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V253-UI', V253_DASHBOARD_FAST_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V254-UI', V254_DASHBOARD_RENDER_RESCUE_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
@@ -88,3 +95,4 @@ console.info('[CE-QC][V249_WHPP_DETAIL_UI]', V249_WHPP_DETAIL_UI_INJECTION_ID, '
 console.info('[CE-QC][V251_SHOPEE_FINAL_OWNER]', V251_SHOPEE_FINAL_UI_INJECTION_ID, 'final Shopee owner wraps canonical renderAll/renderShopeePage and keeps V246 attempt/signing truth visible after every legacy rerender');
 console.info('[CE-QC][V252_LIFECYCLE_UI]', V252_LIFECYCLE_UI_INJECTION_ID, 'Shopee UI uses fast lifecycle-only reads; home replaces cramped dual attempt charts with one QC summary and exact-date PP/PV reads');
 console.info('[CE-QC][V253_DASHBOARD_FAST_OWNER]', V253_DASHBOARD_FAST_UI_INJECTION_ID, 'head-level fast read redirect + cache-independent seven-day trends + compact stale-while-revalidate render ownership enabled');
+console.info('[CE-QC][V254_RENDER_RESCUE_UI]', V254_DASHBOARD_RENDER_RESCUE_UI_INJECTION_ID, 'final self-contained renderer + daily truth table + read-only storage health audit enabled');
