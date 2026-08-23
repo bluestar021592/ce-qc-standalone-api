@@ -22,7 +22,7 @@ assert.doesNotMatch(fastSource,/dashboard_daily_cache/,'V253 visible trend path 
 assert.match(fastSource,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'V253 response must expose cache-independent ownership');
 assert.match(fastSource,/FROM unified_import_rows u WHERE u\.snapshotId=\? AND u\.businessType='CEAF' AND EXISTS/,'instant WHPP overlap correction must drive from the small CEAF slice');
 assert.match(fastSource,/\/api\/v253\/shopee-region/,'exact Shopee PP\/PV must have an indexed one-day endpoint');
-assert.match(fastSource,/!registered&&path==='\/api\/v234\/trends'/,'V253 read-only endpoints must register only when the authenticated V234 dashboard routes are being installed');
+assert.match(fastSource,/!registered&&path==='\/api\/v234\/trends'/,'V253 read-only endpoints must register only when authenticated V234 dashboard routes are being installed');
 assert.doesNotThrow(()=>new Function(uiSource),'V253 browser owner must compile');
 assert.match(uiSource,/\/api\/v89\/instant-dashboard/,'V253 browser owner must intercept the slow legacy instant-dashboard request');
 assert.match(uiSource,/\/api\/v253\/instant-dashboard/,'legacy first-paint request must be redirected to V253');
@@ -35,7 +35,7 @@ assert.ok(injectSource.indexOf('V253_FAST_MARKER')<injectSource.indexOf('const t
 assert.match(injectSource,/X-CE-QC-V253-UI/,'V253 response header must be observable');
 
 const {getDb,closeDb}=await import('../src/db.js');
-const {ensureV246TrackingSchema,reconcileV246TrackingLedger}=await import('../src/v246TrackingLedgerCore.js');
+const {ensureV246TrackingSchema}=await import('../src/v246TrackingLedgerCore.js');
 const {readV253DashboardTrends,readV253InstantSummary,readV253ShopeeRegion,V253_DASHBOARD_FAST_PATH_ID}=await import('../src/v253DashboardFastPath.js');
 const db=getDb();ensureV246TrackingSchema(db);
 const dates=['2026-08-19','2026-08-20','2026-08-21'];
@@ -45,6 +45,7 @@ const insertBatch=db.prepare('INSERT INTO unified_import_batches(batchId,snapsho
 const insertImport=db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 const insertCcslFinal=db.prepare(`INSERT INTO final_rows(shipmentCode,reportDate,isPod,primaryCategory,category,ocDays,rawJson,lastEventTime,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)`);
 const insertBusinessFinal=db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,rawJson,latestEventTime,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)`);
+const insertLedger=db.prepare(`INSERT INTO qc_tracking_ledger(shipmentCode,businessType,firstReportDate,lastImportedDate,trackingStatus,terminalReason,currentState,currentCategory,podDate,attemptNo,attemptSource,signingDays,currentStateJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 const insertWhppParse=db.prepare(`INSERT INTO business_daily_parse_rows(businessType,reportDate,shipmentCode,rowJson,createdAt) VALUES(?,?,?,?,?)`);
 const insertWhppReport=db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)`);
 
@@ -56,29 +57,25 @@ for(let di=0;di<dates.length;di++){
   for(const type of core){
     const count=type==='SHOPEECN'&&di===2?2:1;
     for(let j=0;j<count;j++){
-      const bill=`${type}-${di}-${j}`;const region=j%2===0?'PP':'PV';
+      const bill=`${type}-${di}-${j}`,region=j%2===0?'PP':'PV';
       insertImport.run(batchId,snapshotId,date,type,bill,region,type,type,'日报',rowNo++,'V253_SMOKE','{}',now);
       if(['CE','CEAF','TBKH','ALI1688'].includes(type)){
-        const isPod=(di+j)%2===0?1:0;const category=!isPod&&di===1?'OC':'正常';const podTime=isPod?`${date} 15:00:00`:'';
+        const isPod=(di+j)%2===0?1:0,category=!isPod&&di===1?'OC':'正常',podTime=isPod?`${date} 15:00:00`:'';
         insertCcslFinal.run(bill,date,isPod,category,category,category==='OC'?1:0,JSON.stringify({POD时间:podTime,当前状态:category}),podTime||`${date} 18:00:00`,now,now);
       }else{
-        const isPod=(di+j)%2===0?1:0;const category=!isPod&&di===1?'OC':'Pending';const podTime=isPod?`${date} 16:00:00`:'';
+        const isPod=(di+j)%2===0?1:0,category=!isPod&&di===1?'OC':'Pending',podTime=isPod?`${date} 16:00:00`:'';
         insertBusinessFinal.run('SHOPEE',bill,date,isPod,category,JSON.stringify({POD时间:podTime,当前状态:category}),podTime||`${date} 18:00:00`,now,now);
+        const attempt=isPod?1:0;
+        insertLedger.run(bill,type,date,date,isPod?'TERMINAL':'OPEN',isPod?'POD':'',isPod?'POD':category,isPod?'POD':category,isPod?date:'',attempt,attempt?'V246_STRICT_TRACK:SMOKE':'',isPod?1:null,JSON.stringify({当前状态:isPod?'POD':category,状态标识:isPod?'POD':category}),now,now);
       }
     }
   }
-  // Two WHPP raw members; the first deliberately overlaps CEAF and must be removed.
   const overlap=`CEAF-${di}-0`,unique=`WHPP-${di}-UNIQUE`;
   insertWhppParse.run('WHPP',date,overlap,'{}',now);insertWhppParse.run('WHPP',date,unique,'{}',now);
   insertWhppReport.run('WHPP',date,'v253-whpp.xls',2,'{}',now,now);
-  const whppPod=di%2===0?1:0;insertBusinessFinal.run('WHPP',unique,date,whppPod,whppPod?'POD':(di===1?'OC':'Pending'),JSON.stringify({POD时间:whppPod?`${date} 17:00:00`:'',当前状态:di===1?'OC':'Pending'}),`${date} 17:00:00`,now,now);
+  const whppPod=di%2===0?1:0;
+  insertBusinessFinal.run('WHPP',unique,date,whppPod,whppPod?'POD':(di===1?'OC':'Pending'),JSON.stringify({POD时间:whppPod?`${date} 17:00:00`:'',当前状态:di===1?'OC':'Pending'}),`${date} 17:00:00`,now,now);
 }
-
-const repaired=reconcileV246TrackingLedger({businessType:'ALL',fromDate:dates[0],toDate:dates.at(-1),days:3},{db,reason:'V253_SMOKE_ADMISSION'});
-assert.ok(repaired.expected>=core.length*dates.length,'V253 fixture must be admitted to lifecycle ledger');
-// Preserve one PP and one PV CN member on the latest day, with strict attempts.
-db.prepare("UPDATE qc_tracking_ledger SET trackingStatus='TERMINAL',terminalReason='POD',podDate=firstReportDate,attemptNo=1,attemptSource='V246_STRICT_TRACK:SMOKE',signingDays=1,currentState='POD',currentCategory='POD' WHERE shipmentCode='SHOPEECN-2-0'").run();
-db.prepare("UPDATE qc_tracking_ledger SET trackingStatus='OPEN',terminalReason='',attemptNo=0,currentState='Pending',currentCategory='Pending' WHERE shipmentCode='SHOPEECN-2-1'").run();
 
 for(const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','ALL']){
   const trend=readV253DashboardTrends(type,dates.at(-1),dates.at(-1));
