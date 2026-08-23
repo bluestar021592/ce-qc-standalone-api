@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
-export const V253_DASHBOARD_FAST_PATH_ID='2026-08-23-v253-cache-independent-dashboard-fastpath-v1';
+export const V253_DASHBOARD_FAST_PATH_ID='2026-08-23-v253-cache-independent-dashboard-fastpath-v2';
 const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','ALL']);
 const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
@@ -52,7 +52,7 @@ function ccslFallback(dates,batches,db=getDb()){
 function shopeeFallback(dates,batches,db=getDb()){
   ensureV246TrackingSchema(db);const cte=valuesCte(dates,batches);const out=new Map();if(!cte)return out;
   const rows=db.prepare(`WITH latest(reportDate,snapshotId) AS (VALUES ${cte.sql}), valid AS (
-    SELECT l.reportDate,u.businessType,UPPER(TRIM(u.shipmentCode)) shipmentCode FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate WHERE u.businessType IN ('SHOPEECN','SHOPEEVN')
+    SELECT l.reportDate,u.businessType,u.shipmentCode FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate WHERE u.businessType IN ('SHOPEECN','SHOPEEVN')
   ), facts AS (
     SELECT v.reportDate,v.businessType,v.shipmentCode,l.shipmentCode ledgerBill,f.shipmentCode finalBill,
       CASE WHEN l.terminalReason='POD' THEN 1 ELSE COALESCE(f.isPod,0) END isPod,
@@ -66,11 +66,10 @@ function shopeeFallback(dates,batches,db=getDb()){
 
 function whppFallback(dates,batches,db=getDb()){
   const out=new Map();if(!dates.length)return out;const marks=dates.map(()=>'?').join(',');const batchRows=dates.map(d=>[d,batches.get(d)||'']);const batchCase=`CASE p.reportDate ${batchRows.map(()=>`WHEN ? THEN ?`).join(' ')} ELSE '' END`;
-  const params=[...batchRows.flat(),...dates];
   const rows=db.prepare(`WITH valid AS (
     SELECT DISTINCT p.reportDate,UPPER(TRIM(p.shipmentCode)) shipmentCode FROM business_daily_parse_rows p
     WHERE p.businessType='WHPP' AND p.reportDate IN (${marks}) AND TRIM(COALESCE(p.shipmentCode,''))<>''
-      AND NOT EXISTS (SELECT 1 FROM unified_import_rows u WHERE u.snapshotId=(${batchCase}) AND u.businessType='CEAF' AND UPPER(TRIM(u.shipmentCode))=UPPER(TRIM(p.shipmentCode)))
+      AND NOT EXISTS (SELECT 1 FROM unified_import_rows u WHERE u.snapshotId=(${batchCase}) AND u.businessType='CEAF' AND u.shipmentCode=UPPER(TRIM(p.shipmentCode)))
   ), facts AS (
     SELECT v.reportDate,v.shipmentCode,f.shipmentCode matchedBill,COALESCE(f.isPod,0) isPod,COALESCE(f.primaryCategory,'') category,COALESCE(f.rawJson,'{}') rawJson,
       REPLACE(SUBSTR(COALESCE(NULLIF(json_extract(f.rawJson,'$."POD时间"'),''),NULLIF(json_extract(f.rawJson,'$.podTime'),''),NULLIF(json_extract(f.rawJson,'$."签收时间"'),''),NULLIF(f.latestEventTime,''),''),1,10),'/','-') podDate
@@ -82,7 +81,9 @@ function whppFallback(dates,batches,db=getDb()){
 
 export function readV253DashboardTrends(businessType='ALL',fromDate='',toDate=''){
   const type=String(businessType||'ALL').toUpperCase(),to=dateKey(toDate),from=dateKey(fromDate)||to;if(!TYPES.has(type))throw new Error('业务板块无效');if(!from||!to||from>to)throw new Error('日期范围无效');const key=`T|${type}|${from}|${to}`,hit=memory.get(key);if(hit&&Date.now()-hit.at<CACHE_MS)return{...hit.value,memoryCacheHit:true};
-  const db=getDb(),dates=selectedDates(type,from,to,db),batches=latestBatches(dates,db),ccsl=ccslFallback(dates,batches,db),shopee=shopeeFallback(dates,batches,db),whpp=whppFallback(dates,batches,db);
+  const db=getDb(),dates=selectedDates(type,from,to,db),batches=latestBatches(dates,db);
+  const needCcsl=CCSL_TYPES.includes(type)||type==='CCSL'||type==='ALL';const needShopee=SHOPEE_TYPES.includes(type)||type==='SHOPEE'||type==='ALL';const needWhpp=type==='WHPP'||type==='ALL';
+  const ccsl=needCcsl?ccslFallback(dates,batches,db):new Map(),shopee=needShopee?shopeeFallback(dates,batches,db):new Map(),whpp=needWhpp?whppFallback(dates,batches,db):new Map();
   const pick=(date,t)=>t==='WHPP'?whpp.get(`${date}|WHPP`)||blank('WHPP',date):CCSL_TYPES.includes(t)?ccsl.get(`${date}|${t}`)||blank(t,date):SHOPEE_TYPES.includes(t)?shopee.get(`${date}|${t}`)||blank(t,date):null;
   const daily=dates.map(date=>{if(CCSL_TYPES.includes(type)||SHOPEE_TYPES.includes(type)||type==='WHPP')return pick(date,type);if(type==='CCSL')return merge('CCSL',date,CCSL_TYPES.map(t=>pick(date,t)));if(type==='SHOPEE')return merge('SHOPEE',date,SHOPEE_TYPES.map(t=>pick(date,t)));return merge('ALL',date,[...CCSL_TYPES.map(t=>pick(date,t)),...SHOPEE_TYPES.map(t=>pick(date,t)),pick(date,'WHPP')]);});
   const value=(row,key)=>row?.ready?n(row[key]):null;const result={ok:true,readId:V253_DASHBOARD_FAST_PATH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:dates[0]||from,toDate:dates.at(-1)||to,dates,daily,ticket:daily.map(r=>value(r,'total')),pod:daily.map(r=>value(r,'pod')),podRate:daily.map(r=>value(r,'podRate')),oc:daily.map(r=>value(r,'ocCurrent')),ocRate:daily.map(r=>value(r,'ocRate')),sameDayPod:daily.map(r=>value(r,'sameDayPod')),sameDayPodRate:daily.map(r=>value(r,'sameDayPodRate')),missingDates:daily.filter(r=>!r.ready).map(r=>r.reportDate),source:'V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE',definitions:{podRate:'POD/当日总票',ocRate:'当前真实OC/当日总票',sameDayPodRate:'首日报当日完成POD/当日总票'}};memory.set(key,{at:Date.now(),value:result});return result;
@@ -91,7 +92,7 @@ export function readV253DashboardTrends(businessType='ALL',fromDate='',toDate=''
 function latestBatchForDate(date,db=getDb()){return db.prepare("SELECT snapshotId,reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate=? ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(date)||null;}
 export function readV253ShopeeRegion(type,date){
   const businessType=String(type||'').toUpperCase(),reportDate=dateKey(date);if(!SHOPEE_TYPES.includes(businessType)||!reportDate)throw new Error('Shopee区域参数无效');const key=`R|${businessType}|${reportDate}`,hit=memory.get(key);if(hit&&Date.now()-hit.at<CACHE_MS)return hit.value;const db=getDb();ensureV246TrackingSchema(db);const batch=latestBatchForDate(reportDate,db);if(!batch)return{ok:true,businessType,dates:[reportDate],daily:[{reportDate,regions:{}}]};
-  const rows=db.prepare(`SELECT CASE WHEN UPPER(COALESCE(u.regionCode,''))='PP' THEN 'PP' WHEN UPPER(COALESCE(u.regionCode,''))='PV' THEN 'PV' ELSE 'UNKNOWN' END regionCode,COUNT(*) total,SUM(CASE WHEN l.terminalReason='POD' THEN 1 ELSE 0 END) pod,SUM(CASE WHEN l.terminalReason='POD' AND l.attemptNo=1 THEN 1 ELSE 0 END) attempt1,SUM(CASE WHEN l.terminalReason='POD' AND l.attemptNo=2 THEN 1 ELSE 0 END) attempt2,SUM(CASE WHEN l.terminalReason='POD' AND l.attemptNo>=3 THEN 1 ELSE 0 END) attempt3 FROM qc_tracking_ledger l LEFT JOIN unified_import_rows u ON u.snapshotId=? AND u.businessType=? AND UPPER(TRIM(u.shipmentCode))=l.shipmentCode WHERE l.businessType=? AND l.firstReportDate=? GROUP BY regionCode`).all(batch.snapshotId,businessType,businessType,reportDate);
+  const rows=db.prepare(`SELECT CASE WHEN UPPER(COALESCE(u.regionCode,''))='PP' THEN 'PP' WHEN UPPER(COALESCE(u.regionCode,''))='PV' THEN 'PV' ELSE 'UNKNOWN' END regionCode,COUNT(*) total,SUM(CASE WHEN l.terminalReason='POD' THEN 1 ELSE 0 END) pod,SUM(CASE WHEN l.terminalReason='POD' AND l.attemptNo=1 THEN 1 ELSE 0 END) attempt1,SUM(CASE WHEN l.terminalReason='POD' AND l.attemptNo=2 THEN 1 ELSE 0 END) attempt2,SUM(CASE WHEN l.terminalReason='POD' AND l.attemptNo>=3 THEN 1 ELSE 0 END) attempt3 FROM qc_tracking_ledger l LEFT JOIN unified_import_rows u ON u.snapshotId=? AND u.businessType=? AND u.shipmentCode=l.shipmentCode WHERE l.businessType=? AND l.firstReportDate=? GROUP BY regionCode`).all(batch.snapshotId,businessType,businessType,reportDate);
   const regions={};for(const raw of rows){const total=n(raw.total),pod=n(raw.pod),a1=n(raw.attempt1),a2=n(raw.attempt2),a3=n(raw.attempt3),known=a1+a2+a3;regions[String(raw.regionCode||'UNKNOWN').toUpperCase()]={total,pod,attempt1:a1,attempt2:a2,attempt3:a3,attemptUnknown:Math.max(0,pod-known),attemptCoverageRate:pod?pct(known,pod):null,attempt1Rate:pod&&known?pct(a1,pod):null,attempt2Rate:pod&&known?pct(a2,pod):null,attempt3Rate:pod&&known?pct(a3,pod):null};}
   const result={ok:true,readId:V253_DASHBOARD_FAST_PATH_ID,businessType,fromDate:reportDate,toDate:reportDate,dates:[reportDate],daily:[{reportDate,regions,ledgerReady:true}],regionsIncluded:true,exact:true};memory.set(key,{at:Date.now(),value:result});return result;
 }
