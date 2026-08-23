@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v246-ledger-'));
 process.env.DATA_DIR=tempRoot;
@@ -33,8 +34,6 @@ const insertCarry=db.prepare(`INSERT INTO carryover_open_items(shipmentCode,busi
 insertCarry.run('TBKH-LEAK-NORMAL','TBKH','2026-08-01','2026-08-01',snapshotId,snapshotId,'CLOSED','SUCCESS','NORMAL_FINAL',JSON.stringify({currentState:'NORMAL_FINAL',primaryCategory:'正常分流节点',latestEventDesc:'正常分流，未签收'}),now,now);
 insertCarry.run('TBKH-RETURN-OPEN','TBKH','2026-08-01','2026-08-01',snapshotId,snapshotId,'CLOSED','SUCCESS','RETURNED',JSON.stringify({currentState:'RETURN_IN_PROGRESS',退回状态:'退回处理中',latestEventDesc:'正在退回'}),now,now);
 insertCarry.run('TBKH-TRUE-POD','TBKH','2026-08-01','2026-08-01',snapshotId,snapshotId,'CLOSED','SUCCESS','POD',JSON.stringify({currentState:'POD',orderStatus:'85',是否POD:'是',POD时间:'2026-08-03 12:00:00'}),now,now);
-// Simulates a bill that was admitted on an earlier valid upload but disappeared
-// from the latest daily snapshot after a re-upload. It must remain QC source truth.
 insertCarry.run('TBKH-OLD-UPLOAD-ONLY','TBKH','2026-08-02','2026-08-02','OLD-SNAPSHOT','OLD-SNAPSHOT','CLOSED','SUCCESS','NORMAL_FINAL',JSON.stringify({currentState:'NORMAL_FINAL',primaryCategory:'正常分流节点',latestEventDesc:'未签收'}),now,now);
 
 const result=reconcileV246TrackingLedger({businessType:'TBKH',fromDate:'2026-08-01',toDate:'2026-08-03',days:3},{db,reason:'V246_LEDGER_SMOKE'});
@@ -58,7 +57,6 @@ assert.equal(Number(pod.signingDays),3,'signing days must be immutable first-rep
 const summary=v246TrackingSummary({businessType:'TBKH',fromDate:'2026-08-01',toDate:'2026-08-03',days:3},db);
 assert.equal(summary.total,4);assert.equal(summary.open,3);assert.equal(summary.pod,1);
 
-// Authoritative strict evidence must be able to CORRECT a legacy attempt downwards.
 db.prepare("UPDATE qc_tracking_ledger SET attemptNo=3,attemptSource='LEGACY_DISTINCT_DELIVERY_DATES' WHERE shipmentCode='TBKH-TRUE-POD'").run();
 const corrected=applyV246StrictAttemptEvidence([{shipmentCode:'TBKH-TRUE-POD',attemptNo:1,source:'轨迹70严格START/失败循环',podDate:'2026-08-03',starts:[{time:'2026-08-02 09:00:00',code:'70'}],failures:[]}],{db,reason:'V246_STRICT_CORRECTION_SMOKE'});
 assert.equal(corrected.corrected,1);
@@ -69,3 +67,7 @@ assert.equal(Number(correctedRow.signingDays),3);
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
 console.log('[V246] ledger reconcile smoke passed: historical-source union + false-close reopen + true terminal lock + immutable signing days + strict attempt correction');
+
+// Keep package.json/dependencies unchanged. The existing V246 gate explicitly
+// chains the V247 dashboard truth smoke as a fresh process so its DB/env are isolated.
+execFileSync(process.execPath,['scripts/v247-home-ledger-smoke.mjs'],{stdio:'inherit'});
