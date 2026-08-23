@@ -13,6 +13,7 @@ import {
   refreshV235CurrentDashboardCacheDate,
   V235_DASHBOARD_CURRENT_CACHE_ID
 } from './v235DashboardCurrentCache.js';
+import { readV237DashboardTrends } from './v237DashboardTrendRead.js';
 
 const args = process.argv.slice(2);
 const valueAfter = flag => {
@@ -27,6 +28,9 @@ const WORKER_ACTIVE_KEY = 'dashboard_cache_worker_active';
 const WORKER_ACTIVE_UNTIL_KEY = 'dashboard_cache_worker_active_until';
 const PURGE_BLOCK_KEY = 'data_purge_block_until';
 const WORKER_LEASE_MS = 5 * 60_000;
+const TREND_AUDIT_ID = '2026-08-23-v243-post-rebuild-flat-series-audit-v1';
+const TREND_AUDIT_META_KEY = 'v243_trend_audit_latest';
+const AUDIT_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','ALL'];
 const workerId = `${process.pid}-${Date.now()}`;
 const workerStartedAt = Date.now();
 let workerLeaseOwned = false;
@@ -108,6 +112,57 @@ function releaseWorkerLease() {
   workerLeaseOwned = false;
 }
 
+function uniqueCount(rows, key) {
+  return new Set(rows.map(row => row?.[key]).filter(value => value !== null && value !== undefined).map(value => String(value))).size;
+}
+
+function auditRecentTrendSeries(dates = []) {
+  const ordered = [...new Set(dates.map(value => String(value || '').slice(0,10)).filter(Boolean))].sort();
+  if (!ordered.length) return { auditId: TREND_AUDIT_ID, fromDate: '', toDate: '', dates: [], byType: {}, suspiciousFlatSeries: [] };
+  const fromDate = ordered[0], toDate = ordered.at(-1);
+  const byType = {};
+  const suspiciousFlatSeries = [];
+  for (const type of AUDIT_TYPES) {
+    const trend = readV237DashboardTrends(type, fromDate, toDate);
+    const ready = (trend.daily || []).filter(row => row?.ready);
+    const flatRateKeys = ['podRate','ocRate','sameDayPodRate'].filter(key => ready.length >= 3 && uniqueCount(ready,key) <= 1);
+    const suspicious = ready.length >= 3 && flatRateKeys.length === 3 && ready.some(row => Number(row.total || 0) > 0);
+    const daily = ready.map(row => ({
+      reportDate: row.reportDate,
+      total: Number(row.total || 0),
+      pod: Number(row.pod || 0),
+      podRate: Number(row.podRate || 0),
+      ocCurrent: Number(row.ocCurrent || 0),
+      ocRate: Number(row.ocRate || 0),
+      sameDayPod: Number(row.sameDayPod || 0),
+      sameDayPodRate: Number(row.sameDayPodRate || 0)
+    }));
+    byType[type] = {
+      readyDates: ready.length,
+      missingDates: Array.isArray(trend.missingDates) ? trend.missingDates : [],
+      unique: {
+        total: uniqueCount(ready,'total'),
+        podRate: uniqueCount(ready,'podRate'),
+        ocRate: uniqueCount(ready,'ocRate'),
+        sameDayPodRate: uniqueCount(ready,'sameDayPodRate')
+      },
+      flatRateKeys,
+      status: suspicious ? 'SUSPICIOUS_FLAT_SERIES' : (ready.length ? 'OK' : 'NO_READY_DATES'),
+      daily
+    };
+    if (suspicious) suspiciousFlatSeries.push(type);
+  }
+  const audit = { auditId: TREND_AUDIT_ID, fromDate, toDate, dates: ordered, byType, suspiciousFlatSeries };
+  try {
+    getDb().prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`)
+      .run(TREND_AUDIT_META_KEY, JSON.stringify(audit), nowIso());
+  } catch (error) {
+    audit.persistError = error?.message || String(error);
+  }
+  return audit;
+}
+
 try {
   if (/^(?:UNIFIED_IMPORT|DAILY_IMPORT|SHOPEE_IMPORT)$/.test(reason)) {
     writeSkip('IMPORT_DIRTY_ONLY_WAIT_FOR_RUN_COMPLETED');
@@ -141,7 +196,15 @@ try {
       const item=refreshV235CurrentDashboardCacheDate(date, { force: true });
       results.push({...item,elapsedMs:Date.now()-startedAt});
     }
-    result = { mode: 'V242_FORCED_RECENT_7_REBUILD', latestDate: dates[0] || latestCompletedDashboardDate(), checked: dates.length, refreshed: results.filter(item => item.refreshed).length, results };
+    const audit = auditRecentTrendSeries(dates);
+    result = {
+      mode: 'V243_FORCED_RECENT_7_REBUILD_WITH_AUDIT',
+      latestDate: dates[0] || latestCompletedDashboardDate(),
+      checked: dates.length,
+      refreshed: results.filter(item => item.refreshed).length,
+      results,
+      audit
+    };
   } else {
     const status = getDashboardCacheStatus();
     if (Number(status.cachedDates || 0) === 0) result = warmDashboardCacheRange({ days: warmDays });
