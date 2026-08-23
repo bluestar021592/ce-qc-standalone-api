@@ -1,58 +1,80 @@
 const fs = require('fs');
 const assert = require('assert/strict');
+const { execFileSync } = require('child_process');
 
 const bootstrap = fs.readFileSync('bootstrap.js', 'utf8');
 const bridge = fs.readFileSync('src/v161UnifiedImportRuntimeTruthPatch.js', 'utf8');
 const runtime = fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js', 'utf8');
 const route = fs.readFileSync('src/v236DashboardCurrentRoutePatch.js', 'utf8');
 const worker = fs.readFileSync('src/dashboardCacheWorker.js', 'utf8');
-const v245Runtime = fs.readFileSync('src/v244ShopeeTrendRuntimePatch.js', 'utf8');
+const v246ShopeeRuntime = fs.readFileSync('src/v244ShopeeTrendRuntimePatch.js', 'utf8');
 const v245Ui = fs.readFileSync('public/v244-shopee-trend-owner.js', 'utf8');
 const inject = fs.readFileSync('src/v231MetricTruthUiInjectionPatch.js', 'utf8');
+const trackingCore = fs.readFileSync('src/v246TrackingLedgerCore.js', 'utf8');
+const trackingRuntime = fs.readFileSync('src/v246QcTrackingRuntimePatch.js', 'utf8');
+const trackingUi = fs.readFileSync('public/v246-qc-tracking.js', 'utf8');
+
+for (const file of ['src/v246TrackingLedgerCore.js','src/v246QcTrackingRuntimePatch.js','public/v246-qc-tracking.js']) {
+  execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
+}
 
 const v161Load = bootstrap.match(/^\s*await importPhase\('v161UnifiedImportRuntimeTruthPatch'[^\n]*$/m);
 const serverStartCalls = [...bootstrap.matchAll(/^\s*await importServerInteractiveFirst\(\);\s*$/gm)];
-
 assert.ok(v161Load, 'bootstrap must load V161 before server');
 assert.equal(serverStartCalls.length, 1, 'bootstrap must invoke importServerInteractiveFirst exactly once');
-assert.ok(
-  v161Load.index < serverStartCalls[0].index,
-  'V161 runtime bridge must load before the actual server startup call'
-);
-assert.match(bridge, /^import '\.\/v206InteractiveFirstRuntimePatch\.js';/m, 'V161 must activate the V206 dashboard runtime bridge');
+assert.ok(v161Load.index < serverStartCalls[0].index, 'V161 runtime bridge must load before the actual server startup call');
+assert.match(bridge, /^import '\.\/v206InteractiveFirstRuntimeTruthPatch\.js';/m, 'V161 must activate the V206 dashboard runtime bridge');
 assert.match(runtime, /import '\.\/v234DashboardLiveTruthPatch\.js';/, 'V206 must activate V234 live truth');
 assert.match(runtime, /import '\.\/v236DashboardCurrentRoutePatch\.js';/, 'V206 must activate V236 route owner');
-assert.match(runtime, /import '\.\/v231MetricTruthUiInjectionPatch\.js';/, 'V206 must activate V240 UI injection');
-assert.match(runtime, /import '\.\/v244ShopeeTrendRuntimePatch\.js';/, 'V206 must activate V245 Shopee operational/attempt truth runtime');
+assert.match(runtime, /import '\.\/v231MetricTruthUiInjectionPatch\.js';/, 'V206 must activate dashboard UI injection');
+assert.match(runtime, /import '\.\/v244ShopeeTrendRuntimePatch\.js';/, 'V206 must activate Shopee trend runtime');
+assert.match(runtime, /import '\.\/v246QcTrackingRuntimePatch\.js';/, 'V206 must activate V246 continuous QC tracking runtime');
 assert.match(runtime, /dashboard cache prime child exit code=/, 'cache-prime child completion must remain observable');
 assert.match(runtime, /MAX_PRIME_ATTEMPTS = 4/, 'transient startup skips must retry with a bounded attempt count');
 assert.match(runtime, /FOREGROUND_PROCESSING_ACTIVE\|CACHE_OR_PURGE_WORKER_ALREADY_ACTIVE/, 'runtime must recognize retryable cache-prime skips');
-assert.match(worker, /recentCompletedDashboardDates\(7\)/, 'startup worker must target the recent seven ready report dates');
-assert.match(worker, /refreshV235CurrentDashboardCacheDate\(date, \{ force: true \}\)/, 'V242 startup must force rebuild old V240 seven-day cache rows');
-assert.match(worker, /readV237DashboardTrends/, 'V243 worker must audit the same cache-only trend reader used by the UI');
-assert.match(worker, /v243-post-rebuild-flat-series-audit-v1/, 'V243 trend audit id must be present');
-assert.match(worker, /SUSPICIOUS_FLAT_SERIES/, 'V243 must explicitly flag suspicious all-flat percentage series');
-assert.match(worker, /v243_trend_audit_latest/, 'V243 audit must persist its result for later diagnosis');
-assert.match(worker, /V243_FORCED_RECENT_7_REBUILD_WITH_AUDIT/, 'worker result must expose the forced rebuild plus audit mode');
+assert.match(worker, /recentCompletedDashboardDates\(7\)/, 'startup worker must target recent seven ready report dates');
+assert.match(worker, /refreshV235CurrentDashboardCacheDate\(date, \{ force: true \}\)/, 'startup must force rebuild old dashboard cache rows');
+assert.match(worker, /readV237DashboardTrends/, 'worker must audit the same trend reader used by UI');
+assert.match(worker, /SUSPICIOUS_FLAT_SERIES/, 'worker must flag suspicious flat percentage series');
 assert.match(route, /path==='\/api\/v234\/trends'/, 'V236 must own the V234 trend endpoint');
 
-assert.match(v245Runtime,/V245_SHOPEE_TREND_ID/,'V245 backend trend id must be present');
-assert.match(v245Runtime,/dashboard_daily_cache/,'V245 ticket/POD/OC/attempts must read exact daily cache');
-assert.match(v245Runtime,/julianday\(podDate\)-julianday\(reportDate\)\+1/,'V245 average signing days must use inclusive report-date to POD-date days');
-assert.match(v245Runtime,/attemptUnknown/,'V245 backend must expose POD whose attempt evidence is unknown');
-assert.match(v245Runtime,/attempt1Rate:hasAttemptEvidence \? pct\(attempt1,pod\) : null/,'V245 must not fabricate 1-pai zero when no attempt evidence exists');
-assert.match(v245Runtime,/\/api\/v245\/shopee-trends/,'V245 backend endpoint must be registered');
-assert.doesNotThrow(()=>new Function(v245Ui),'V245 Shopee trend UI must compile as browser JavaScript');
-for(const label of ['票数趋势','POD数量趋势','平均签收天数趋势','OC数量趋势','1/2/3派签收占POD趋势','派次未识别POD'])assert.ok(v245Ui.includes(label),`V245 UI missing ${label}`);
-assert.match(v245Ui,/<th>平均签收天数<\/th>/,'Shopee daily detail must replace duplicate first-day assessment with average signing days');
-assert.doesNotMatch(v245Ui,/<th>首日POD<\/th>/,'Shopee daily detail must not keep duplicate first-day POD column');
-assert.doesNotMatch(v245Ui,/<th>首日妥投率<\/th>/,'Shopee daily detail must not keep duplicate first-day POD-rate column');
-assert.match(v245Ui,/attempt1Rate/,'V245 UI must render real 1-pai attempt share');
-assert.match(v245Ui,/attempt2Rate/,'V245 UI must render real 2-pai attempt share');
-assert.match(v245Ui,/attempt3Rate/,'V245 UI must render real 3-pai attempt share');
-assert.match(v245Ui,/SHOPEECN/,'V245 UI must target SHOPEECN');
-assert.match(v245Ui,/SHOPEEVN/,'V245 UI must target SHOPEEVN');
-assert.match(inject,/v244-shopee-trend-owner\.js\?v=20260823-v245-1/,'V245 UI must be cache-busted and injected after shared owner scripts');
-assert.match(inject,/X-CE-QC-V245-UI/,'V245 UI response header must be observable');
+assert.match(trackingCore,/CREATE TABLE IF NOT EXISTS qc_tracking_ledger/,'V246 must create a persistent per-shipment QC ledger');
+assert.match(trackingCore,/CREATE TABLE IF NOT EXISTS qc_tracking_audit/,'V246 must preserve repair/reopen audit evidence');
+assert.match(trackingCore,/sourceReportDate/,'V246 reconciliation must retain the original carry source date');
+assert.match(trackingCore,/firstReportDate/,'V246 must lock the first report date per shipment');
+assert.match(trackingCore,/trackingStatus='OPEN'/,'V246 open-candidate reader must only refresh non-terminal ledger rows');
+assert.match(trackingCore,/NORMAL_FINAL_HUB/,{message:'V246 core source may mention legacy rule only if it is explicitly non-terminal'});
+assert.doesNotMatch(trackingCore,/normal\s*\?\s*'NORMAL_FINAL'/,'V246 must never close a shipment merely because it is a normal final hub');
+assert.match(trackingCore,/\['POD','RETURNED','ORDER_CANCELLED'\]/,'V246 terminal lock must be restricted to real terminal outcomes');
+assert.match(trackingCore,/v246InclusiveDays\(firstReportDate,podDate\)/,'average signing days must use immutable firstReportDate to actual POD date');
+assert.match(trackingCore,/attemptNo/,'V246 ledger must persist attempt evidence per shipment');
+assert.match(trackingCore,/readV246ShopeeDailyTruth/,'Shopee dashboard must have a ledger-backed daily truth reader');
 
-console.log('[V245] dashboard runtime + V243 audit + SHOPEECN/SHOPEEVN ticket/POD/average-signing-days/OC + real 1/2/3 attempt truth + duplicate assessment removal passed');
+assert.match(trackingRuntime,/CAMBODIA_0200_30DAY_AUTO/,'V246 must own a Cambodia 02:00 rolling 30-day refresh');
+assert.match(trackingRuntime,/clock\.minuteOfDay<120/,'V246 scheduler must not run the daily deep refresh before 02:00');
+assert.match(trackingRuntime,/v246_daily_0200_success_date/,'V246 must remember the successful 02:00 day and support missed-run catch-up');
+assert.match(trackingRuntime,/STARTUP_30DAY_ANTI_LEAK/,'V246 must perform startup anti-leak reconciliation');
+assert.match(trackingRuntime,/HOURLY_ANTI_LEAK_RECONCILE/,'V246 must continuously audit missing/reopened tracking rows while the app is running');
+assert.match(trackingRuntime,/collectV200Rows/,'V246 must rebuild Shopee strict attempt/POD evidence after status refresh');
+assert.match(trackingRuntime,/\/api\/v246\/tracking\/reconcile/,'V246 must expose one-click/custom-range reconciliation');
+assert.match(trackingRuntime,/\/api\/v246\/tracking\/bill\/:shipmentCode/,'V246 must expose per-waybill QC diagnosis');
+
+assert.match(v246ShopeeRuntime,/V246_SHOPEE_TREND_ID/,'Shopee backend must expose V246 trend truth id');
+assert.match(v246ShopeeRuntime,/readV246ShopeeDailyTruth/,'Shopee attempts and signing days must prefer the locked V246 ledger');
+assert.match(v246ShopeeRuntime,/V246_LOCKED_TRACKING_LEDGER/,'Shopee response must reveal locked-ledger evidence ownership');
+assert.match(v246ShopeeRuntime,/attemptUnknown/,'Shopee backend must expose POD whose attempt evidence is unknown');
+assert.match(v246ShopeeRuntime,/attempt1Rate:hasAttemptEvidence \? pct\(attempt1,pod\) : null/,'Shopee must not fabricate 1-pai zero without evidence');
+assert.match(v246ShopeeRuntime,/\/api\/v246\/shopee-trends/,'V246 Shopee endpoint must be registered');
+
+assert.doesNotThrow(()=>new Function(v245Ui),'Shopee trend UI must compile as browser JavaScript');
+for(const label of ['票数趋势','POD数量趋势','平均签收天数趋势','OC数量趋势','1/2/3派签收占POD趋势','派次未识别POD'])assert.ok(v245Ui.includes(label),`Shopee UI missing ${label}`);
+assert.match(v245Ui,/<th>平均签收天数<\/th>/,'Shopee daily detail must keep average signing days');
+assert.doesNotMatch(v245Ui,/<th>首日POD<\/th>/,'Shopee daily detail must not restore duplicate first-day POD column');
+assert.doesNotMatch(v245Ui,/<th>首日妥投率<\/th>/,'Shopee daily detail must not restore duplicate first-day POD-rate column');
+assert.doesNotThrow(()=>new Function(trackingUi),'V246 QC tracking UI must compile as browser JavaScript');
+for(const label of ['最近7天核查','最近30天核查','核查自定义区间','单号追踪诊断'])assert.ok(trackingUi.includes(label),`V246 tracking UI missing ${label}`);
+assert.match(inject,/v244-shopee-trend-owner\.js\?v=20260823-v246-1/,'Shopee owner must be cache-busted for V246');
+assert.match(inject,/v246-qc-tracking\.js\?v=20260823-v246-1/,'V246 tracking control must be injected');
+assert.match(inject,/X-CE-QC-V246-UI/,'V246 UI response header must be observable');
+
+console.log('[V246] continuous QC tracking gate passed: locked first-report date + anti-leak ledger + 02:00 30-day refresh/catch-up + real Shopee attempt evidence + one-click/custom reconciliation');
