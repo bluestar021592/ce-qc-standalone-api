@@ -4,7 +4,7 @@ import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
 // Compatibility marker for the prior gate: readV246ShopeeDailyTruth is superseded
 // here by a stricter cohort-completeness check plus PP/PV ledger aggregation.
-export const V244_SHOPEE_TREND_ID = '2026-08-23-v247-shopee-ledger-dashboard-truth-v1';
+export const V244_SHOPEE_TREND_ID = '2026-08-23-v247-shopee-ledger-dashboard-truth-v2';
 export const V245_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 export const V246_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 export const V247_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
@@ -58,7 +58,8 @@ function emptyPayload(type) {
       ocRate:'V246锁定账本当前真实OC/首次日报成员总票',
       avgPodDays:'每票第一次日报日期锁定后至实际POD日期，含首尾当天；后续日报不得重置起算日',
       attemptRate:'真实派次证据对应已POD票数/当日POD；无证据显示—，未识别POD单独列出',
-      trackingLedger:'V246每票持续追踪账本：非POD/退回完成/取消终态不得提前结案；历史补POD后原日报日期同步更新'
+      trackingLedger:'V246每票持续追踪账本：非POD/退回完成/取消终态不得提前结案；历史补POD后原日报日期同步更新',
+      regionTruth:'PP/PV取该票在对应首次日报日最后一次VALID+COMPLETED上传中的有效区域；后续漏票不能抹掉此前区域证据'
     }
   };
 }
@@ -93,16 +94,19 @@ function ledgerRegions(db,type,dates){
   if(!dates.length)return new Map();
   const marks=dates.map(()=>'?').join(',');
   const rows=db.prepare(`
-    WITH source_region AS (
-      SELECT reportDate,UPPER(TRIM(shipmentCode)) AS shipmentCode,
-        CASE
-          WHEN SUM(CASE WHEN UPPER(COALESCE(regionCode,''))='PP' THEN 1 ELSE 0 END)>0 THEN 'PP'
-          WHEN SUM(CASE WHEN UPPER(COALESCE(regionCode,''))='PV' THEN 1 ELSE 0 END)>0 THEN 'PV'
-          ELSE 'UNKNOWN'
-        END AS regionCode
-      FROM unified_import_rows
-      WHERE businessType=? AND reportDate IN (${marks}) AND TRIM(COALESCE(shipmentCode,''))<>''
-      GROUP BY reportDate,UPPER(TRIM(shipmentCode))
+    WITH valid_rows AS (
+      SELECT u.reportDate,UPPER(TRIM(u.shipmentCode)) AS shipmentCode,
+        CASE WHEN UPPER(COALESCE(u.regionCode,''))='PP' THEN 'PP' WHEN UPPER(COALESCE(u.regionCode,''))='PV' THEN 'PV' ELSE 'UNKNOWN' END AS regionCode,
+        ROW_NUMBER() OVER (
+          PARTITION BY u.reportDate,UPPER(TRIM(u.shipmentCode))
+          ORDER BY b.createdAt DESC,b.batchId DESC,u.rowNumber DESC
+        ) AS rn
+      FROM unified_import_rows u
+      INNER JOIN unified_import_batches b ON b.batchId=u.batchId AND b.snapshotId=u.snapshotId AND b.status='VALID'
+      INNER JOIN unified_snapshots s ON s.snapshotId=u.snapshotId AND s.status='COMPLETED'
+      WHERE u.businessType=? AND u.reportDate IN (${marks}) AND TRIM(COALESCE(u.shipmentCode,''))<>''
+    ), source_region AS (
+      SELECT reportDate,shipmentCode,regionCode FROM valid_rows WHERE rn=1
     )
     SELECT l.firstReportDate AS reportDate,COALESCE(r.regionCode,'UNKNOWN') AS regionCode,
       COUNT(*) AS total,
