@@ -12,15 +12,16 @@ import './v254StorageHealthPatch.js';
 // module is rewritten and directly syntax-gated. Storage health remains read-only.
 import './v256R2ZeroCostGuard.js';
 import './v262ShopeeStrictEvidenceBackfill.js';
+import './v263DeliveryKpiTrendPatch.js';
 
-const PATCH_ID = '2026-08-23-v262-shopee-strict-evidence-runtime-v1';
+const PATCH_ID = '2026-08-23-v263-three-business-delivery-kpi-runtime-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
 // V253 first paint no longer depends on dashboard_daily_cache. Keep the old cache
 // builder only as delayed maintenance so it cannot compete with normal page reads.
 // V246/V252 persistent tracking still owns import admission, two-hour OPEN refresh
-// synchronization and the Cambodia 02:00 deep reconciliation. V262 adds a separate
-// background pass for Shopee POD rows whose strict attempt evidence is still unknown.
+// synchronization and the Cambodia 02:00 deep reconciliation. V263 adds a separate
+// background evidence pass and read model only for TBKH + SHOPEECN + SHOPEEVN.
 process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = String(24 * 60 * 60 * 1000);
 process.env.DASHBOARD_CACHE_REFRESH_MS = String(4 * 60 * 60 * 1000);
 process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED = '0';
@@ -76,6 +77,6 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V262] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; V254 read-only storage audit, V256 R2 zero-cost guard and V262 stored-track-first Shopee strict evidence retry are active; broken V255 retention remains excluded.`);
+console.log(`[CE-QC][V263] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; attempt/signing tracking is restricted to TBKH + SHOPEECN + SHOPEEVN; V254 read-only storage audit and V256 R2 zero-cost guard remain active; broken V255 retention remains excluded.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
