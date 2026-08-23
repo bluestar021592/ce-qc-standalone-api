@@ -7,9 +7,10 @@ const finalUi=read('public/v261-dashboard-final-owner.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const storage=read('src/v254StorageHealthPatch.js');
 const r2guard=read('src/v256R2ZeroCostGuard.js');
+const strictBackfill=read('src/v262ShopeeStrictEvidenceBackfill.js');
 const runtime=read('src/v206InteractiveFirstRuntimePatch.js');
 const runtimeImports=[...runtime.matchAll(/^import\s+['"]\.\/(.+?\.js)['"];?$/gm)].map(match=>`src/${match[1]}`);
-assert.ok(runtimeImports.length>=8,'V206 startup bridge must expose its direct runtime imports');
+assert.ok(runtimeImports.length>=9,'V206 startup bridge must expose all direct runtime imports including V262');
 for(const file of runtimeImports){execFileSync(process.execPath,['--check',file],{stdio:'pipe'});}
 assert.doesNotThrow(()=>new Function(ui),'V254 rescue renderer must compile as browser JavaScript');
 assert.match(ui,/v254-dashboard-render-rescue-v1/,'V254 rescue owner version must be explicit');
@@ -37,6 +38,18 @@ assert.match(inject,/X-CE-QC-V261-UI/,'V261 delivery must be observable');
 assert.ok(inject.indexOf('V254_RENDER_MARKER')<inject.indexOf('V261_FINAL_OWNER_MARKER'),'V261 marker must be defined after V254 rescue marker');
 assert.ok(inject.indexOf('V254_RENDER_MARKER')<inject.indexOf('V261_FINAL_OWNER_MARKER')&&inject.indexOf('V261_FINAL_OWNER_MARKER')<inject.indexOf('DRILLDOWN_MARKER'),'V261 final marker ordering must remain stable');
 
+execFileSync(process.execPath,['--check','src/v262ShopeeStrictEvidenceBackfill.js'],{stdio:'pipe'});
+execFileSync(process.execPath,['--check','scripts/v262-shopee-strict-evidence-smoke.mjs'],{stdio:'pipe'});
+execFileSync(process.execPath,['scripts/v262-shopee-strict-evidence-smoke.mjs'],{stdio:'inherit'});
+assert.match(runtime,/import '\.\/v262ShopeeStrictEvidenceBackfill\.js';/,'V262 strict evidence retry must activate in normal runtime');
+assert.match(strictBackfill,/attemptNo=0/,'V262 must target only POD rows whose strict attempt remains unknown');
+assert.match(strictBackfill,/business_track_events/,'V262 must prefer stored business trajectory evidence before CE network retry');
+assert.match(strictBackfill,/FROM track_events/,'V262 must also reuse legacy stored trajectory evidence when available');
+assert.match(strictBackfill,/normalizeV262TrackPayload/,'V262 must normalize nested CE trajectory response wrappers');
+assert.match(strictBackfill,/CE_TRACK_RETRY_UNKNOWN/,'V262 must retry CE only for remaining unknown evidence');
+assert.match(strictBackfill,/PERIODIC_AUTO/,'unknown POD evidence must continue retrying after startup instead of being permanently sealed');
+assert.doesNotMatch(strictBackfill,/attemptNo\s*>\s*0[^\n]*UPDATE|WHERE[^\n]*attemptNo\s*>\s*0/i,'V262 must not select already-known attempts for rewriting');
+
 assert.match(inject,/import '\.\/v254StorageHealthPatch\.js';/,'read-only storage health audit must activate with the UI runtime');
 assert.match(storage,/READ_ONLY_SIZE_SCAN_NO_DELETE_NO_VACUUM_NO_CHECKPOINT/,'storage audit must explicitly remain read-only');
 assert.doesNotMatch(storage,/fs\.(?:unlinkSync|rmSync|unlink|rm)\s*\(/,'storage audit must not execute file deletion APIs');
@@ -58,4 +71,4 @@ assert.match(r2guard,/manualCloudflareUploadsAreOutsideAppGuard:true/,'guard mus
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'cloud/storage secrets must never be committed');
 execFileSync(process.execPath,['--check','scripts/v257-system-calibration-smoke.cjs'],{stdio:'pipe'});
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V261] runtime syntax + visible-page final dashboard owner + V254 readonly storage + V256 zero-cost + V257 system calibration gate passed');
+console.log('[V262] runtime syntax + V261 final dashboard + stored-track-first Shopee evidence retry + V254 readonly storage + V256 zero-cost + V257 calibration gate passed');
