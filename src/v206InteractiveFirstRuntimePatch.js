@@ -5,13 +5,16 @@ import './v236DashboardCurrentRoutePatch.js';
 import './v231MetricTruthUiInjectionPatch.js';
 import './v244ShopeeTrendRuntimePatch.js';
 import './v246QcTrackingRuntimePatch.js';
+import './v252LifecycleCoordinator.js';
 
-const PATCH_ID = '2026-08-23-v246-continuous-qc-tracking-runtime-v1';
+const PATCH_ID = '2026-08-23-v252-continuous-qc-lifecycle-runtime-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
 // Keep expensive dashboard cache maintenance outside the synchronous web process.
-// V246 continuous QC reconciliation runs independently with an hourly anti-leak
-// ledger audit and a Cambodia 02:00 rolling 30-day non-terminal refresh.
+// V246/V252 persistent tracking runs independently: daily-import admission is
+// immediate, legacy OPEN-carry network refresh stays on its two-hour cadence,
+// and V252 synchronizes the QC ledger / POD date / strict Shopee attempt evidence
+// immediately after those refreshes plus the Cambodia 02:00 deep catch-up.
 process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = String(24 * 60 * 60 * 1000);
 process.env.DASHBOARD_CACHE_REFRESH_MS = String(4 * 60 * 60 * 1000);
 process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED = '0';
@@ -67,6 +70,6 @@ function primeDashboardCacheInChild(delayMs = 3_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V246] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; dashboard cache remains isolated, while persistent QC tracking owns anti-leak reconciliation and 02:00 catch-up.`);
+console.log(`[CE-QC][V246] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; dashboard cache remains isolated, while V246/V252 persistent QC tracking owns import admission, anti-leak reconciliation, two-hour refresh synchronization and 02:00 catch-up.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
