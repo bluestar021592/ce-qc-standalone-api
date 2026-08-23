@@ -5,6 +5,7 @@ import './v236DashboardCurrentRoutePatch.js';
 import './v231MetricTruthUiInjectionPatch.js';
 
 const PATCH_ID = '2026-08-23-v242-force-rebuild-retry-v1';
+const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
 // Keep all expensive maintenance outside the synchronous web process. The
 // visible current dashboard can read exact normalized truth directly; the child
@@ -64,6 +65,6 @@ function primeDashboardCacheInChild(delayMs = 3_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V242] ${PATCH_ID} current truth is direct/cache; recent seven-day trend cache is force-rebuilt in child after 3s and transient startup skips retry automatically.`);
+console.log(`[CE-QC][V242] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; current truth is direct/cache; recent seven-day trend cache is force-rebuilt in child after 3s and transient startup skips retry automatically.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
