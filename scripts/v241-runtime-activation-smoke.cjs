@@ -25,7 +25,11 @@ assert.match(runtime, /MAX_PRIME_ATTEMPTS = 4/, 'transient startup skips must re
 assert.match(runtime, /FOREGROUND_PROCESSING_ACTIVE\|CACHE_OR_PURGE_WORKER_ALREADY_ACTIVE/, 'runtime must recognize retryable cache-prime skips');
 assert.match(worker, /recentCompletedDashboardDates\(7\)/, 'startup worker must target the recent seven ready report dates');
 assert.match(worker, /refreshV235CurrentDashboardCacheDate\(date, \{ force: true \}\)/, 'V242 startup must force rebuild old V240 seven-day cache rows');
-assert.match(worker, /V242_FORCED_RECENT_7_REBUILD/, 'worker result must expose the V242 forced rebuild mode');
+assert.match(worker, /readV237DashboardTrends/, 'V243 worker must audit the same cache-only trend reader used by the UI');
+assert.match(worker, /v243-post-rebuild-flat-series-audit-v1/, 'V243 trend audit id must be present');
+assert.match(worker, /SUSPICIOUS_FLAT_SERIES/, 'V243 must explicitly flag suspicious all-flat percentage series');
+assert.match(worker, /v243_trend_audit_latest/, 'V243 audit must persist its result for later diagnosis');
+assert.match(worker, /V243_FORCED_RECENT_7_REBUILD_WITH_AUDIT/, 'worker result must expose the forced rebuild plus audit mode');
 assert.match(route, /path==='\/api\/v234\/trends'/, 'V236 must own the V234 trend endpoint');
 
-console.log('[V242] dashboard runtime activation + forced recent seven-day cache rebuild + bounded retry passed');
+console.log('[V243] dashboard runtime activation + forced recent seven-day rebuild + bounded retry + post-rebuild flat-series audit passed');
