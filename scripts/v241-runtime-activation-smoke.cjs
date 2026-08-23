@@ -5,6 +5,7 @@ const bootstrap = fs.readFileSync('bootstrap.js', 'utf8');
 const bridge = fs.readFileSync('src/v161UnifiedImportRuntimeTruthPatch.js', 'utf8');
 const runtime = fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js', 'utf8');
 const route = fs.readFileSync('src/v236DashboardCurrentRoutePatch.js', 'utf8');
+const worker = fs.readFileSync('src/dashboardCacheWorker.js', 'utf8');
 
 const v161Load = bootstrap.match(/^\s*await importPhase\('v161UnifiedImportRuntimeTruthPatch'[^\n]*$/m);
 const serverStartCalls = [...bootstrap.matchAll(/^\s*await importServerInteractiveFirst\(\);\s*$/gm)];
@@ -19,7 +20,12 @@ assert.match(bridge, /^import '\.\/v206InteractiveFirstRuntimePatch\.js';/m, 'V1
 assert.match(runtime, /import '\.\/v234DashboardLiveTruthPatch\.js';/, 'V206 must activate V234 live truth');
 assert.match(runtime, /import '\.\/v236DashboardCurrentRoutePatch\.js';/, 'V206 must activate V236 route owner');
 assert.match(runtime, /import '\.\/v231MetricTruthUiInjectionPatch\.js';/, 'V206 must activate V240 UI injection');
-assert.match(runtime, /dashboard cache prime child exit code=/, 'V239 child completion must remain observable');
+assert.match(runtime, /dashboard cache prime child exit code=/, 'cache-prime child completion must remain observable');
+assert.match(runtime, /MAX_PRIME_ATTEMPTS = 4/, 'transient startup skips must retry with a bounded attempt count');
+assert.match(runtime, /FOREGROUND_PROCESSING_ACTIVE\|CACHE_OR_PURGE_WORKER_ALREADY_ACTIVE/, 'runtime must recognize retryable cache-prime skips');
+assert.match(worker, /recentCompletedDashboardDates\(7\)/, 'startup worker must target the recent seven ready report dates');
+assert.match(worker, /refreshV235CurrentDashboardCacheDate\(date, \{ force: true \}\)/, 'V242 startup must force rebuild old V240 seven-day cache rows');
+assert.match(worker, /V242_FORCED_RECENT_7_REBUILD/, 'worker result must expose the V242 forced rebuild mode');
 assert.match(route, /path==='\/api\/v234\/trends'/, 'V236 must own the V234 trend endpoint');
 
-console.log('[V241] dashboard runtime activation order passed: V161 -> V206/V239/V240 -> server -> V234 trends');
+console.log('[V242] dashboard runtime activation + forced recent seven-day cache rebuild + bounded retry passed');
