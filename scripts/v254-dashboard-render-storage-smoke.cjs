@@ -5,6 +5,7 @@ const read=p=>fs.readFileSync(p,'utf8');
 const dashboard=read('public/dashboard-v18.js');
 const chart=read('public/dashboard-chart-v18.js');
 const fastOwner=read('public/v253-dashboard-fast-owner.js');
+const generic=read('public/v263-generic-trend-hydrator.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const cachePatch=read('src/v89StaticAssetCachePatch.js');
 const storage=read('src/v254StorageHealthPatch.js');
@@ -16,10 +17,11 @@ const runtime=read('src/v206InteractiveFirstRuntimePatch.js');
 const runtimeImports=[...runtime.matchAll(/^import\s+['"]\.\/(.+?\.js)['"];?$/gm)].map(match=>`src/${match[1]}`);
 assert.ok(runtimeImports.length>=10,'V206 startup bridge must expose all direct runtime imports including V263');
 for(const file of runtimeImports)execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
-for(const file of ['public/dashboard-v18.js','public/dashboard-chart-v18.js','public/v253-dashboard-fast-owner.js','src/v89StaticAssetCachePatch.js','src/v262ShopeeStrictEvidenceBackfill.js','src/v263DeliveryKpiTrendPatch.js','scripts/v262-shopee-strict-evidence-smoke.mjs','scripts/v263-delivery-kpi-trend-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['public/dashboard-v18.js','public/dashboard-chart-v18.js','public/v253-dashboard-fast-owner.js','public/v263-generic-trend-hydrator.js','src/v89StaticAssetCachePatch.js','src/v262ShopeeStrictEvidenceBackfill.js','src/v263DeliveryKpiTrendPatch.js','scripts/v262-shopee-strict-evidence-smoke.mjs','scripts/v263-delivery-kpi-trend-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(dashboard),'canonical dashboard-v18 must compile');
 assert.doesNotThrow(()=>new Function(chart),'canonical dashboard chart must compile');
 assert.doesNotThrow(()=>new Function(fastOwner),'V253 fetch bridge must compile');
+assert.doesNotThrow(()=>new Function(generic),'V263 generic trend hydrator must compile');
 
 assert.match(dashboard,/DELIVERY_KPI_TYPES=new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'canonical UI scope must be exactly TBKH + SHOPEECN + SHOPEEVN');
 assert.match(dashboard,/\/api\/v263\/delivery-trends/,'canonical DashboardV18 must read V263 delivery KPI truth directly');
@@ -29,6 +31,12 @@ assert.match(dashboard,/70 START优先/,'UI must disclose strict START evidence 
 assert.match(dashboard,/function renderHome\(/,'home must remain canonical DashboardV18');
 assert.doesNotMatch(dashboard,/派送概率分布（按派次）/,'home must not duplicate the three-business attempt mechanism');
 assert.match(chart,/type === 'days'/,'shared chart renderer must support signing-day values');
+
+assert.match(generic,/PAGE_TYPE=\{ce:'CE',ceaf:'CEAF',ali1688:'ALI1688'\}/,'generic hydrator must be scoped to CE + CEAF + ALI1688 only');
+assert.match(generic,/\/api\/v253\/trends/,'generic non-target boards must use V253 cache-independent truth');
+assert.doesNotMatch(generic,/TBKH|SHOPEECN|SHOPEEVN|WHPP/,'generic hydrator must not compete with the three specialized boards or WHPP dedicated owner');
+assert.doesNotMatch(generic,/读取已落库日报数据/,'generic hydrator must not create indefinite loading placeholders');
+assert.match(inject,/v263-generic-trend-hydrator\.js\?v=20260823-v263-1/,'generic hydrator must be delivered after canonical dashboard scripts');
 
 assert.match(cachePatch,/CORE_LIVE_ASSET_RE/,'critical dashboard assets must have an explicit live-cache rule');
 assert.match(cachePatch,/Clear-Site-Data', '\"cache\"'/,'HTML navigation must clear only browser HTTP cache after V263 upgrade');
@@ -73,4 +81,4 @@ assert.match(r2guard,/DEFAULT_SAFE_STORAGE_BYTES=8\*GIB/,'R2 zero-cost guard mus
 assert.match(r2guard,/storageClass:'STANDARD'/,'R2 must remain Standard-only');
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'secrets must never be committed');
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V263] canonical DashboardV18 + all legacy visual owners retired + cache reset + exact three-business attempt/signing tracking + storage safety gate passed');
+console.log('[V263] canonical DashboardV18 + scoped generic trends + legacy visual owners retired + cache reset + exact three-business attempt/signing tracking + storage safety gate passed');
