@@ -12,14 +12,14 @@ import {
   v246DateKey
 } from './v246TrackingLedgerCore.js';
 
-export const V252_LIFECYCLE_COORDINATOR_ID='2026-08-23-v252-qc-lifecycle-coordinator-v2';
+export const V252_LIFECYCLE_COORDINATOR_ID='2026-08-23-v252-qc-lifecycle-coordinator-v3';
 const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
 const POLL_MS=60_000;
 const STARTUP_SYNC_DELAY_MS=Math.max(30_000,Math.min(180_000,Number(process.env.V252_STARTUP_SYNC_DELAY_MS||45_000)));
 const LOCAL_AUDIT_MS=30*60_000;
 const STRICT_CHUNK=Math.max(10,Math.min(100,Number(process.env.V252_STRICT_TRACK_CHUNK||50)));
 const STRICT_MAX_PER_SYNC=Math.max(200,Math.min(3000,Number(process.env.V252_STRICT_MAX_PER_SYNC||1200)));
-let timer=null,startupTimer=null,syncing=false,lastLocalAuditAt=0,lastCarrySeen='';
+let timer=null,startupTimer=null,syncing=false,lastLocalAuditAt=0,lastCarrySeen='',lastCarryRowSeen='';
 
 const text=value=>String(value??'').trim();
 const billOf=value=>text(value).toUpperCase();
@@ -27,6 +27,7 @@ const dateKey=value=>v246DateKey(value);
 function addDays(date,days){const key=dateKey(date);if(!key)return'';const d=new Date(`${key}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
 function getMeta(db,key){try{return text(db.prepare('SELECT value FROM app_meta WHERE key=?').get(key)?.value);}catch{return'';}}
 function setMeta(db,key,value){db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(key,String(value??''),nowIso());}
+function latestCarryRowAt(db){try{return text(db.prepare('SELECT MAX(updatedAt) value FROM carryover_open_items').get()?.value);}catch{return'';}}
 function eventBill(row={}){return billOf(row.shipmentCode||row.运单号||row.waybill||row.waybillNo||row.billCode||row.trackingNo);}
 function flattenTrackResult(value){if(Array.isArray(value))return value;if(!value||typeof value!=='object')return[];for(const key of ['data','rows','list','records','events','result']){const child=value[key];if(Array.isArray(child))return child.flatMap(item=>Array.isArray(item)?item:[item]);if(child&&typeof child==='object'){const nested=flattenTrackResult(child);if(nested.length)return nested;}}return[];}
 async function queryTrackWithFallback(client,bills){if(!bills.length)return{events:[],failed:[]};try{return{events:flattenTrackResult(await client.trackQuery(bills)),failed:[]};}catch(error){if(bills.length===1)return{events:[],failed:[{shipmentCode:bills[0],error:error?.message||String(error)}]};const mid=Math.ceil(bills.length/2),left=await queryTrackWithFallback(client,bills.slice(0,mid)),right=await queryTrackWithFallback(client,bills.slice(mid));return{events:[...left.events,...right.events],failed:[...left.failed,...right.failed]};}}
@@ -34,15 +35,21 @@ async function queryTrackWithFallback(client,bills){if(!bills.length)return{even
 function trackingSelection(days=30){const today=cambodiaClock().date;return{businessType:'ALL',fromDate:addDays(today,-(days-1)),toDate:today,days};}
 function strictCandidates(db){
   ensureV246TrackingSchema(db);
-  return db.prepare(`SELECT shipmentCode,businessType,firstReportDate,lastImportedDate,trackingStatus,terminalReason,podDate,attemptNo,attemptSource,lastCheckedAt
-    FROM qc_tracking_ledger
-    WHERE businessType IN ('SHOPEECN','SHOPEEVN')
+  return db.prepare(`SELECT l.shipmentCode,l.businessType,l.firstReportDate,l.lastImportedDate,l.trackingStatus,l.terminalReason,l.podDate,l.attemptNo,l.attemptSource,l.lastCheckedAt,
+      MAX(COALESCE(s.updatedAt,''),COALESCE(c.updatedAt,'')) AS sourceUpdatedAt
+    FROM qc_tracking_ledger l
+    LEFT JOIN shipment_current_state s ON s.shipmentCode=l.shipmentCode
+    LEFT JOIN carryover_open_items c ON c.shipmentCode=l.shipmentCode
+    WHERE l.businessType IN ('SHOPEECN','SHOPEEVN')
       AND (
-        (trackingStatus='OPEN' AND attemptSource NOT LIKE 'V246_STRICT_TRACK:V252_OPEN:%')
+        (l.trackingStatus='OPEN' AND (
+          l.attemptSource NOT LIKE 'V246_STRICT_TRACK:V252_OPEN:%'
+          OR MAX(COALESCE(s.updatedAt,''),COALESCE(c.updatedAt,''))>COALESCE(l.lastCheckedAt,'')
+        ))
         OR
-        (terminalReason='POD' AND (attemptSource LIKE 'V246_STRICT_TRACK:V252_OPEN:%' OR attemptSource NOT LIKE 'V246_STRICT_TRACK:%'))
+        (l.terminalReason='POD' AND (l.attemptSource LIKE 'V246_STRICT_TRACK:V252_OPEN:%' OR l.attemptSource NOT LIKE 'V246_STRICT_TRACK:%'))
       )
-    ORDER BY CASE WHEN terminalReason='POD' THEN 0 ELSE 1 END, updatedAt DESC, firstReportDate DESC
+    ORDER BY CASE WHEN l.terminalReason='POD' THEN 0 ELSE 1 END, sourceUpdatedAt DESC,l.updatedAt DESC,l.firstReportDate DESC
     LIMIT ?`).all(STRICT_MAX_PER_SYNC);
 }
 
@@ -80,6 +87,12 @@ async function syncEvidence(selection,{reason='V252_SYNC',client=new CEClient()}
   return{ok:true,reason,repair,evidence,strict,finalRepair,warnings};
 }
 
+function lightweightLedgerAudit(days=90,reason='V252_LIGHT_AUDIT'){
+  const db=getDb(),selection=trackingSelection(days),result=reconcileV246TrackingLedger(selection,{db,reason});
+  setMeta(db,'v252_lifecycle_last_audit_at',nowIso());
+  return result;
+}
+
 async function admitImportedDate(reportDate){
   const date=dateKey(reportDate);if(!date)return null;const db=getDb();
   const selection={businessType:'ALL',fromDate:date,toDate:date,days:1};
@@ -90,13 +103,16 @@ async function admitImportedDate(reportDate){
 }
 
 async function lifecycleTick(){
-  if(syncing)return;const db=getDb(),now=Date.now(),carryAt=getMeta(db,'carry_refresh_last_success_at');const carryChanged=Boolean(carryAt&&carryAt!==lastCarrySeen),localDue=now-lastLocalAuditAt>=LOCAL_AUDIT_MS;if(!carryChanged&&!localDue)return;if(activeBusinessProcessingDetails(db).active)return;syncing=true;try{const reason=carryChanged?'V252_AFTER_TWO_HOUR_OPEN_REFRESH':'V252_30MIN_LOCAL_AUDIT';const selection=trackingSelection(30);const result=await syncEvidence(selection,{reason});if(!result?.skipped){lastLocalAuditAt=Date.now();if(carryChanged)lastCarrySeen=carryAt;console.log('[CE-QC][V252_LIFECYCLE_SYNC]',JSON.stringify({reason,strict:result.strict,repair:result.finalRepair?.repaired||0,warnings:result.warnings||[]}));}}catch(error){console.warn('[CE-QC][V252_LIFECYCLE_SYNC_FAILED]',error?.message||error);}finally{syncing=false;}}
+  if(syncing)return;const db=getDb(),now=Date.now(),carryAt=getMeta(db,'carry_refresh_last_success_at'),carryRowAt=latestCarryRowAt(db);const carryChanged=Boolean(carryAt&&carryAt!==lastCarrySeen),stateChanged=Boolean(carryRowAt&&carryRowAt!==lastCarryRowSeen),localDue=now-lastLocalAuditAt>=LOCAL_AUDIT_MS;if(!carryChanged&&!stateChanged&&!localDue)return;if(activeBusinessProcessingDetails(db).active)return;syncing=true;try{
+    if(carryChanged||stateChanged){const reason=carryChanged?'V252_AFTER_TWO_HOUR_OPEN_REFRESH':'V252_AFTER_CARRY_STATE_CHANGE',result=await syncEvidence(trackingSelection(30),{reason});if(!result?.skipped){lastCarrySeen=carryAt||lastCarrySeen;lastCarryRowSeen=carryRowAt||lastCarryRowSeen;lastLocalAuditAt=Date.now();console.log('[CE-QC][V252_LIFECYCLE_SYNC]',JSON.stringify({reason,strict:result.strict,repair:result.finalRepair?.repaired||0,warnings:result.warnings||[]}));}}
+    else if(localDue){const result=lightweightLedgerAudit(90,'V252_30MIN_ANTI_LEAK_AUDIT');lastLocalAuditAt=Date.now();console.log('[CE-QC][V252_LIGHT_AUDIT]',JSON.stringify({expected:result.expected,repaired:result.repaired,reopened:result.reopened,open:result.open}));}
+  }catch(error){console.warn('[CE-QC][V252_LIFECYCLE_SYNC_FAILED]',error?.message||error);}finally{syncing=false;}}
 
 const previousPost=express.application.post;
 function importAdmissionMiddleware(req,res,next){const originalJson=res.json.bind(res);res.json=function v252ImportAdmissionJson(payload){if(!res.locals.__v252AdmissionQueued&&res.statusCode<400&&payload?.reportDate){res.locals.__v252AdmissionQueued=true;setImmediate(()=>admitImportedDate(payload.reportDate).catch(error=>console.warn('[CE-QC][V252_IMPORT_ADMISSION_FAILED]',error?.message||error)));}return originalJson(payload);};next();}
 express.application.post=function v252LifecyclePost(pathValue,...handlers){if(String(pathValue||'')==='/api/import/unified-daily-report')return previousPost.call(this,pathValue,importAdmissionMiddleware,...handlers);return previousPost.call(this,pathValue,...handlers);};
 
-function start(){if(timer||process.env.CI||process.env.NODE_ENV==='test'||String(process.env.CE_QC_DISABLE_V246_TRACKING||'')==='1')return;lastCarrySeen=getMeta(getDb(),'carry_refresh_last_success_at');startupTimer=setTimeout(()=>{syncing=true;syncEvidence(trackingSelection(30),{reason:'V252_STARTUP_CATCHUP'}).then(result=>{if(!result?.skipped){lastLocalAuditAt=Date.now();lastCarrySeen=getMeta(getDb(),'carry_refresh_last_success_at');console.log('[CE-QC][V252_STARTUP_CATCHUP]',JSON.stringify({strict:result.strict,repair:result.finalRepair?.repaired||0}));}}).catch(error=>console.warn('[CE-QC][V252_STARTUP_CATCHUP_FAILED]',error?.message||error)).finally(()=>{syncing=false;});},STARTUP_SYNC_DELAY_MS);startupTimer.unref?.();timer=setInterval(()=>lifecycleTick().catch(error=>console.warn('[CE-QC][V252_TICK_FAILED]',error?.message||error)),POLL_MS);timer.unref?.();console.log('[CE-QC][V252_LIFECYCLE]',V252_LIFECYCLE_COORDINATOR_ID,'import admission + post-carry ledger sync + bounded strict Shopee attempt/signing evidence enabled');}
+function start(){if(timer||process.env.CI||process.env.NODE_ENV==='test'||String(process.env.CE_QC_DISABLE_V246_TRACKING||'')==='1')return;const db=getDb();lastCarrySeen=getMeta(db,'carry_refresh_last_success_at');lastCarryRowSeen=latestCarryRowAt(db);lastLocalAuditAt=Date.now();startupTimer=setTimeout(()=>{try{const result=lightweightLedgerAudit(90,'V252_STARTUP_90DAY_ADMISSION_AUDIT');lastLocalAuditAt=Date.now();console.log('[CE-QC][V252_STARTUP_AUDIT]',JSON.stringify({expected:result.expected,repaired:result.repaired,reopened:result.reopened,open:result.open}));}catch(error){console.warn('[CE-QC][V252_STARTUP_AUDIT_FAILED]',error?.message||error);}},STARTUP_SYNC_DELAY_MS);startupTimer.unref?.();timer=setInterval(()=>lifecycleTick().catch(error=>console.warn('[CE-QC][V252_TICK_FAILED]',error?.message||error)),POLL_MS);timer.unref?.();console.log('[CE-QC][V252_LIFECYCLE]',V252_LIFECYCLE_COORDINATOR_ID,'import admission + state-change/two-hour ledger sync + changed-OPEN strict attempt tracking + lightweight anti-leak audit enabled');}
 start();
 
-export const V252_LIFECYCLE_TEST_API={admitImportedDate,syncEvidence,refreshStrictAttempts,lifecycleTick};
+export const V252_LIFECYCLE_TEST_API={admitImportedDate,syncEvidence,refreshStrictAttempts,lifecycleTick,lightweightLedgerAudit};
