@@ -35,8 +35,6 @@ function insertLedger({code,date,status='OPEN',reason='',state='OPEN',category='
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(code,'SHOPEECN',date,date,status,reason,state,category,podDate,attempt,attempt?`V246_STRICT_TRACK:SMOKE`:'',signingDays,JSON.stringify({currentState:state,primaryCategory:category}),now,now);
 }
 
-// Day 1 deliberately simulates stale dashboard cache: cache says 2 total / 0 POD,
-// but the immutable QC ledger recovered 3 original members and 2 later became POD.
 const d1='2026-08-20';const b1=seedBatch(d1,1,[{code:'CN-A',region:'PP'},{code:'CN-B',region:'PV'},{code:'CN-RECOVERED',region:'PP'}]);
 db.prepare('INSERT INTO dashboard_daily_cache(reportDate,businessType,regionCode,metricsJson,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt) VALUES(?,?,?,?,?,?,?,?)')
   .run(d1,'SHOPEECN','',JSON.stringify({total:2,pod:0,ocCurrent:0}),b1.snapshotId,'COMPLETED','STALE-V240',b1.now);
@@ -44,8 +42,6 @@ insertLedger({code:'CN-A',date:d1,status:'TERMINAL',reason:'POD',state:'POD',cat
 insertLedger({code:'CN-B',date:d1,status:'TERMINAL',reason:'POD',state:'POD',category:'POD',podDate:'2026-08-22',attempt:2,signingDays:3});
 insertLedger({code:'CN-RECOVERED',date:d1,status:'OPEN',state:'OC',category:'OC'});
 
-// Day 2 simulates an incomplete ledger build: cache has 2 members, ledger only 1.
-// V247 must not expose partial attempt/signing truth as if complete.
 const d2='2026-08-21';const b2=seedBatch(d2,2,[{code:'CN-PARTIAL-1',region:'PP'},{code:'CN-PARTIAL-2',region:'PV'}]);
 db.prepare('INSERT INTO dashboard_daily_cache(reportDate,businessType,regionCode,metricsJson,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt) VALUES(?,?,?,?,?,?,?,?)')
   .run(d2,'SHOPEECN','',JSON.stringify({total:2,pod:1,ocCurrent:1}),b2.snapshotId,'COMPLETED','STALE-V240',b2.now);
@@ -77,5 +73,16 @@ assert.equal(second.pod,1,'while ledger is incomplete, preserve complete cached 
 assert.equal(second.avgPodDays,null,'partial ledger must not publish a misleading average signing day');
 assert.equal(second.attempt1,0);assert.equal(second.attempt1Rate,null,'partial ledger must not publish a misleading attempt rate');
 
+const home=fs.readFileSync('public/v237-home-dashboard-owner.js','utf8');
+const injection=fs.readFileSync('src/v231MetricTruthUiInjectionPatch.js','utf8');
+assert.match(home,/\/api\/v246\/shopee-trends\?businessType=/,'home must request the V246/V247 locked Shopee truth endpoint');
+assert.match(home,/POD数量趋势/,'home trend must expose POD quantity instead of duplicate first-day assessment');
+assert.match(home,/OC数量趋势/,'home trend must expose current OC quantity');
+assert.match(home,/removeDuplicateHomeAssessment/,'home must remove duplicate first-day POD assessment cards');
+assert.match(home,/regions\?\.PP/,'home dispatch distribution must use locked-ledger PP/PV region truth');
+assert.doesNotMatch(home,/首日POD妥投率趋势/,'home must no longer render the duplicate first-day POD trend');
+assert.match(injection,/v237-home-dashboard-owner\.js\?v=20260823-v247-1/,'V247 home owner must be cache-busted');
+assert.match(injection,/X-CE-QC-V247-UI/,'V247 UI response must expose an observable header');
+
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V247] home Shopee locked-ledger smoke passed: recovered missing member + historical POD correction + locked signing days + strict attempts + region truth + partial-ledger guard');
+console.log('[V247] home Shopee locked-ledger smoke passed: recovered missing member + historical POD correction + locked signing days + strict attempts + PP/PV region truth + partial-ledger guard + cache-busted home owner');
