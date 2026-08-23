@@ -7,8 +7,10 @@ import './v244ShopeeTrendRuntimePatch.js';
 import './v246QcTrackingRuntimePatch.js';
 import './v252LifecycleCoordinator.js';
 import './v253DashboardFastPath.js';
+import './v254StorageHealthPatch.js';
+import './v255RetentionStorageGuard.js';
 
-const PATCH_ID = '2026-08-23-v253-cache-independent-dashboard-runtime-v1';
+const PATCH_ID = '2026-08-23-v255-storage-safe-dashboard-runtime-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
 // V253 first paint no longer depends on dashboard_daily_cache. Keep the old cache
@@ -70,6 +72,6 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V253] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; first paint is cache-independent while V246/V252 tracking and delayed dashboard cache maintenance continue independently.`);
+console.log(`[CE-QC][V255] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; V254 read-only storage audit and V255 one-year retention/storage guard are active while dashboard first paint remains cache-independent.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
