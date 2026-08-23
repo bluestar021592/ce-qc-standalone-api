@@ -6,10 +6,14 @@ const bridge = fs.readFileSync('src/v161UnifiedImportRuntimeTruthPatch.js', 'utf
 const runtime = fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js', 'utf8');
 const route = fs.readFileSync('src/v236DashboardCurrentRoutePatch.js', 'utf8');
 
-assert.match(bootstrap, /importPhase\('v161UnifiedImportRuntimeTruthPatch'/, 'bootstrap must load V161 before server');
+const v161Load = bootstrap.match(/^\s*await importPhase\('v161UnifiedImportRuntimeTruthPatch'[^\n]*$/m);
+const serverStartCalls = [...bootstrap.matchAll(/^\s*await importServerInteractiveFirst\(\);\s*$/gm)];
+
+assert.ok(v161Load, 'bootstrap must load V161 before server');
+assert.equal(serverStartCalls.length, 1, 'bootstrap must invoke importServerInteractiveFirst exactly once');
 assert.ok(
-  bootstrap.indexOf("importPhase('v161UnifiedImportRuntimeTruthPatch'") < bootstrap.indexOf('importServerInteractiveFirst()'),
-  'V161 runtime bridge must load before server registration'
+  v161Load.index < serverStartCalls[0].index,
+  'V161 runtime bridge must load before the actual server startup call'
 );
 assert.match(bridge, /^import '\.\/v206InteractiveFirstRuntimePatch\.js';/m, 'V161 must activate the V206 dashboard runtime bridge');
 assert.match(runtime, /import '\.\/v234DashboardLiveTruthPatch\.js';/, 'V206 must activate V234 live truth');
