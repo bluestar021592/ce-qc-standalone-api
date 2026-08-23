@@ -2,9 +2,9 @@ import express from 'express';
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
-// Compatibility marker for the prior gate: readV246ShopeeDailyTruth is superseded
-// here by a stricter cohort-completeness check plus PP/PV ledger aggregation.
-export const V244_SHOPEE_TREND_ID = '2026-08-23-v247-shopee-ledger-dashboard-truth-v2';
+// Compatibility marker for prior gates: V252 keeps the V246 locked cohort while
+// allowing lightweight lifecycle-only reads to skip expensive PP/PV source joins.
+export const V244_SHOPEE_TREND_ID = '2026-08-23-v252-shopee-lifecycle-dashboard-truth-v1';
 export const V245_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 export const V246_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 export const V247_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
@@ -22,8 +22,9 @@ const dateKey = value => {
 const round2 = value => Number(n(value).toFixed(2));
 const pct = (value,total) => total > 0 ? round2(n(value) * 100 / n(total)) : null;
 
-function selectedDates(type, from, to, db = getDb()) {
+function selectedDates(type, from, to, db = getDb(), { exact = false } = {}) {
   ensureV246TrackingSchema(db);
+  if (exact) return [to];
   if (from === to) {
     return db.prepare(`
       SELECT reportDate FROM (
@@ -54,12 +55,12 @@ function emptyPayload(type) {
     dates:[],daily:[],ticket:[],pod:[],podRate:[],avgPodDays:[],oc:[],ocRate:[],
     attempt1:[],attempt2:[],attempt3:[],attempt1Rate:[],attempt2Rate:[],attempt3Rate:[],attemptUnknown:[],attemptCoverageRate:[],ledgerReady:[],
     definitions:{
-      podRate:'V246锁定账本POD/首次日报成员总票；账本未完成前不把部分账本冒充完整历史真值',
-      ocRate:'V246锁定账本当前真实OC/首次日报成员总票',
-      avgPodDays:'每票第一次日报日期锁定后至实际POD日期，含首尾当天；后续日报不得重置起算日',
+      podRate:'V246/V252锁定账本POD/首次日报成员总票；账本未完成前不把部分账本冒充完整历史真值',
+      ocRate:'V246/V252锁定账本当前真实OC/首次日报成员总票',
+      avgPodDays:'每票第一次日报日期锁定后至实际POD日期，含首尾当天；后续日报与刷新不得重置起算日',
       attemptRate:'真实派次证据对应已POD票数/当日POD；无证据显示—，未识别POD单独列出',
-      trackingLedger:'V246每票持续追踪账本：非POD/退回完成/取消终态不得提前结案；历史补POD后原日报日期同步更新',
-      regionTruth:'PP/PV取该票在对应首次日报日最后一次VALID+COMPLETED上传中的有效区域；后续漏票不能抹掉此前区域证据'
+      trackingLedger:'日报导入立即入账；非POD/退回完成/取消终态持续追踪；两小时OPEN刷新后V252立即同步POD日期、签收天数与严格派次',
+      regionTruth:'PP/PV仅在调用方明确需要时读取；取首次日报日最后一次VALID+COMPLETED上传中的有效区域'
     }
   };
 }
@@ -133,20 +134,22 @@ function ledgerRegions(db,type,dates){
   return byDate;
 }
 
-export function readV244ShopeeTrends(businessType='SHOPEECN', fromDate='', toDate='') {
+export function readV244ShopeeTrends(businessType='SHOPEECN', fromDate='', toDate='', options={}) {
   const type = String(businessType || '').toUpperCase();
   const to = dateKey(toDate);
   const from = dateKey(fromDate) || to;
-  if (!TYPES.has(type)) throw new Error('V247仅支持SHOPEECN/SHOPEEVN');
+  const includeRegions = options?.includeRegions !== false;
+  const exact = options?.exact === true;
+  if (!TYPES.has(type)) throw new Error('V252仅支持SHOPEECN/SHOPEEVN');
   if (!from || !to || from > to) throw new Error('日期范围无效');
-  const key = `${type}|${from}|${to}`;
+  const key = `${type}|${from}|${to}|R${includeRegions?1:0}|E${exact?1:0}`;
   const hit = memory.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
 
   const db=getDb();ensureV246TrackingSchema(db);
-  const dates = selectedDates(type,from,to,db);
+  const dates = selectedDates(type,from,to,db,{exact});
   if (!dates.length) {
-    const empty = emptyPayload(type);
+    const empty = {...emptyPayload(type),regionsIncluded:includeRegions,exact};
     memory.set(key,{at:Date.now(),value:empty});
     return empty;
   }
@@ -163,7 +166,7 @@ export function readV244ShopeeTrends(businessType='SHOPEECN', fromDate='', toDat
   `).all(type,...dates);
   const cacheByDate=new Map(cacheRows.map(row=>[String(row.reportDate||''),row]));
   const lockedByDate=ledgerOverall(db,type,dates);
-  const regionByDate=ledgerRegions(db,type,dates);
+  const regionByDate=includeRegions?ledgerRegions(db,type,dates):new Map();
 
   const daily=dates.map(reportDate=>{
     const c=cacheByDate.get(reportDate)||{};
@@ -191,12 +194,12 @@ export function readV244ShopeeTrends(businessType='SHOPEECN', fromDate='', toDat
       attempt3Rate:hasAttemptEvidence ? pct(attempt3,pod) : null,
       attemptEvidenceComplete:pod>0&&attemptUnknown===0,
       ledgerReady,ledgerCount,cacheTotal,recoveredExtra:Math.max(0,ledgerCount-cacheTotal),
-      regions:regionByDate.get(reportDate)||{},
+      regions:includeRegions?(regionByDate.get(reportDate)||{}):{},
       evidenceSource:ledgerReady?'V246_LOCKED_TRACKING_LEDGER':'V246_LEDGER_PREPARING_NO_PARTIAL_TRUTH'
     };
   });
   const value={
-    ...emptyPayload(type),fromDate:dates[0],toDate:dates.at(-1),dates,daily,
+    ...emptyPayload(type),fromDate:dates[0],toDate:dates.at(-1),dates,daily,regionsIncluded:includeRegions,exact,
     ticket:daily.map(row=>row.total),pod:daily.map(row=>row.pod),podRate:daily.map(row=>row.podRate),avgPodDays:daily.map(row=>row.avgPodDays),
     oc:daily.map(row=>row.oc),ocRate:daily.map(row=>row.ocRate),attempt1:daily.map(row=>row.attempt1),attempt2:daily.map(row=>row.attempt2),attempt3:daily.map(row=>row.attempt3),
     attempt1Rate:daily.map(row=>row.attempt1Rate),attempt2Rate:daily.map(row=>row.attempt2Rate),attempt3Rate:daily.map(row=>row.attempt3Rate),attemptUnknown:daily.map(row=>row.attemptUnknown),
@@ -212,9 +215,12 @@ export const readV247ShopeeTrends = readV244ShopeeTrends;
 
 function handler(req,res){
   try {
-    const data = readV247ShopeeTrends(req.query.businessType,req.query.from,req.query.to);
+    const includeRegions=String(req.query.regions??'1')!=='0';
+    const exact=String(req.query.exact??'0')==='1';
+    const data = readV247ShopeeTrends(req.query.businessType,req.query.from,req.query.to,{includeRegions,exact});
     res.setHeader('Cache-Control','private,max-age=10');
     res.setHeader('X-CE-QC-Shopee-Trend',V247_SHOPEE_TREND_ID);
+    res.setHeader('X-CE-QC-Shopee-Regions',includeRegions?'included':'skipped');
     return res.json(data);
   } catch (error) {
     return res.status(500).json({ok:false,readId:V247_SHOPEE_TREND_ID,error:error?.message||String(error)});
@@ -229,7 +235,7 @@ express.application.get = function v247ShopeeTrendRoute(pathValue,...handlers){
     previousGet.call(this,'/api/v246/shopee-trends',handler);
     previousGet.call(this,'/api/v245/shopee-trends',handler);
     previousGet.call(this,'/api/v244/shopee-trends',handler);
-    console.info('[CE-QC][V247]',V247_SHOPEE_TREND_ID,'registered Shopee locked-ledger dashboard truth endpoints');
+    console.info('[CE-QC][V252]',V247_SHOPEE_TREND_ID,'registered fast lifecycle metrics with optional exact PP/PV region truth');
   }
   return previousGet.call(this,pathValue,...handlers);
 };
