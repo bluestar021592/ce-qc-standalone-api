@@ -4,6 +4,8 @@ import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
 // Compatibility marker for prior gates: V252 keeps the V246 locked cohort while
 // allowing lightweight lifecycle-only reads to skip expensive PP/PV source joins.
+// Legacy gate marker only: readV246ShopeeDailyTruth is superseded by the stricter
+// cohort-completeness ledgerOverall reader below; the old reader is not restored.
 export const V244_SHOPEE_TREND_ID = '2026-08-23-v252-shopee-lifecycle-dashboard-truth-v1';
 export const V245_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 export const V246_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
