@@ -22,6 +22,7 @@ assert.doesNotMatch(fastSource,/dashboard_daily_cache/,'V253 visible trend path 
 assert.match(fastSource,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'V253 response must expose cache-independent ownership');
 assert.match(fastSource,/FROM unified_import_rows u WHERE u\.snapshotId=\? AND u\.businessType='CEAF' AND EXISTS/,'instant WHPP overlap correction must drive from the small CEAF slice');
 assert.match(fastSource,/\/api\/v253\/shopee-region/,'exact Shopee PP\/PV must have an indexed one-day endpoint');
+assert.match(fastSource,/!registered&&path==='\/api\/v234\/trends'/,'V253 read-only endpoints must register only when the authenticated V234 dashboard routes are being installed');
 assert.doesNotThrow(()=>new Function(uiSource),'V253 browser owner must compile');
 assert.match(uiSource,/\/api\/v89\/instant-dashboard/,'V253 browser owner must intercept the slow legacy instant-dashboard request');
 assert.match(uiSource,/\/api\/v253\/instant-dashboard/,'legacy first-paint request must be redirected to V253');
@@ -99,4 +100,4 @@ assert.equal(region.daily[0].regions.PV.total,1);
 assert.equal(region.daily[0].regions.PP.attempt1,1,'exact PP region must read strict attempt evidence from indexed lifecycle ledger');
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V253] dashboard fastpath smoke passed: no dashboard cache dependency + all boards multi-day trends + fast WHPP overlap + indexed exact Shopee regions + head-level stale-while-revalidate owner');
+console.log('[V253] dashboard fastpath smoke passed: no dashboard cache dependency + all boards multi-day trends + fast WHPP overlap + indexed exact Shopee regions + authenticated head-level stale-while-revalidate owner');
