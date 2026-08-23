@@ -1,10 +1,11 @@
 (function installV268LifecycleExportOwner(global){
   if(global.__CE_QC_V268_LIFECYCLE_EXPORT__)return;
   global.__CE_QC_V268_LIFECYCLE_EXPORT__=true;
-  const ID='2026-08-23-v268-auto-lifecycle-export-freshness-v1';
+  const ID='2026-08-23-v269-navigation-safe-lifecycle-export-v1';
   const TYPES=['ALL','CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
   let exportBusy=false;
   let observer=null;
+  let enhanceQueued=false;
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const text=n=>String(n?.textContent||'').trim();
   const byId=id=>document.getElementById(id);
@@ -38,7 +39,8 @@
   }
   function progressMessage(message,tone=''){
     const n=byId('exportProgress');if(!n)return;
-    n.textContent=message;n.dataset.v268Tone=tone;
+    if(n.textContent!==message)n.textContent=message;
+    if(n.dataset.v268Tone!==tone)n.dataset.v268Tone=tone;
   }
 
   async function reconcileBeforeExport(selection){
@@ -75,30 +77,38 @@
     const select=byId('periodExportBusiness');if(!select||select.dataset.v268Seven==='1')return;
     const labels={ALL:'全部7业务',CE:'CE',CEAF:'CEAF空运',TBKH:'TBKH',ALI1688:'ALI1688',WHPP:'WHPP本土',SHOPEECN:'SHOPEE CN',SHOPEEVN:'SHOPEE VN'};
     const old=String(select.value||'ALL').toUpperCase();
+    select.dataset.v268Seven='1';
     select.innerHTML=TYPES.map(v=>`<option value="${v}">${labels[v]}</option>`).join('');
     select.value=TYPES.includes(old)?old:'ALL';
-    select.dataset.v268Seven='1';
   }
 
   function retireDuplicatePanels(){
-    const old=byId('v183HistoryRefreshPanel');if(old){old.hidden=true;old.dataset.v268Retired='duplicate-history-refresh';}
+    const old=byId('v183HistoryRefreshPanel');
+    if(old&&old.dataset.v268Retired!=='duplicate-history-refresh'){
+      old.dataset.v268Retired='duplicate-history-refresh';old.hidden=true;
+    }
     const importPage=byId('importPage')||document.querySelector('[data-page-root="import"]');
-    const scope=importPage||document;
-    [...scope.querySelectorAll('section,.panel,article')].forEach(panel=>{
+    if(!importPage)return;
+    [...importPage.querySelectorAll('section,.panel,article')].forEach(panel=>{
+      if(panel.dataset.v268Retired)return;
       const heading=panel.querySelector('h2,h3,.panel-title');
-      if(heading&&/跨日遗留独立处理/.test(text(heading))){panel.hidden=true;panel.dataset.v268Retired='duplicate-carryover-manual';}
+      if(heading&&/跨日遗留独立处理/.test(text(heading))){
+        panel.dataset.v268Retired='duplicate-carryover-manual';panel.hidden=true;
+      }
     });
   }
 
   function simplifyTrackingPanel(){
-    const panel=byId('v246TrackingPanel');if(!panel)return;
-    const h=panel.querySelector('h3');if(h)h.textContent='自动持续追踪 / 导出数据保鲜';
-    const p=panel.querySelector('.v246-head p');if(p)p.textContent='日报第一次出现即锁定进QC追踪账本；未POD、未完成退回、未取消的票会持续自动刷新。每2小时刷新OPEN票，02:00复核最近30天；漏跑会在开机后补跑。正式导出时系统会再自动刷新所选区间的非终态票，成功后才生成Excel。';
-    const b7=byId('v2467'),b30=byId('v24630');if(b7)b7.hidden=true;if(b30)b30.hidden=true;
-    const run=byId('v246Run');if(run){run.textContent='立即补核一次';run.classList.remove('primary');}
-    const read=byId('v246Read');if(read)read.textContent='查看追踪状态';
-    const status=byId('v246Status');if(status&&!panel.dataset.v268Initialized){status.textContent='正常情况下无需手动操作：昨天遗留的OPEN票会继续自动追踪；导出也会自动做最后一次状态刷新。只有排查异常时才需要“查看追踪状态/立即补核一次”。';}
+    const panel=byId('v246TrackingPanel');if(!panel||panel.dataset.v268Initialized==='1')return;
+    // Mark first so our own textContent changes cannot cause a recursive observer loop.
     panel.dataset.v268Initialized='1';
+    const h=panel.querySelector('h3');if(h&&h.textContent!=='自动持续追踪 / 导出数据保鲜')h.textContent='自动持续追踪 / 导出数据保鲜';
+    const description='日报第一次出现即锁定进QC追踪账本；未POD、未完成退回、未取消的票会持续自动刷新。每2小时刷新OPEN票，02:00复核最近30天；漏跑会在开机后补跑。正式导出时系统会再自动刷新所选区间的非终态票，成功后才生成Excel。';
+    const p=panel.querySelector('.v246-head p');if(p&&p.textContent!==description)p.textContent=description;
+    const b7=byId('v2467'),b30=byId('v24630');if(b7)b7.hidden=true;if(b30)b30.hidden=true;
+    const run=byId('v246Run');if(run){if(run.textContent!=='立即补核一次')run.textContent='立即补核一次';run.classList.remove('primary');}
+    const read=byId('v246Read');if(read&&read.textContent!=='查看追踪状态')read.textContent='查看追踪状态';
+    const status=byId('v246Status');if(status)status.textContent='正常情况下无需手动操作：昨天遗留的OPEN票会继续自动追踪；导出也会自动做最后一次状态刷新。只有排查异常时才需要“查看追踪状态/立即补核一次”。';
   }
 
   function addUnifiedNote(){
@@ -109,6 +119,11 @@
   }
 
   function enhance(){ensureSevenBusinessOptions();retireDuplicatePanels();simplifyTrackingPanel();addUnifiedNote();}
+  function scheduleEnhance(){
+    if(enhanceQueued)return;
+    enhanceQueued=true;
+    queueMicrotask(()=>{enhanceQueued=false;enhance();});
+  }
 
   const original=typeof global.exportPeriodReport==='function'?global.exportPeriodReport:null;
   if(original&&!original.__v268Wrapped){
@@ -128,7 +143,12 @@
     wrapped.__v268Wrapped=true;wrapped.__v268Original=original;global.exportPeriodReport=wrapped;
   }
 
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',enhance,{once:true});else queueMicrotask(enhance);
-  observer=new MutationObserver(()=>enhance());observer.observe(document.documentElement,{subtree:true,childList:true});
-  console.info('[CE-QC][V268_LIFECYCLE_EXPORT]',ID,'manual carryover + duplicate history-refresh UI consolidated; period export auto-reconciles OPEN shipments before workbook generation.');
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scheduleEnhance,{once:true});else scheduleEnhance();
+  observer=new MutationObserver(records=>{
+    // Child additions from SPA page switches need enhancement. Our own already-marked
+    // text replacements must not recursively occupy the main thread.
+    if(records.some(r=>[...r.addedNodes].some(n=>n.nodeType===1)))scheduleEnhance();
+  });
+  observer.observe(document.documentElement,{subtree:true,childList:true});
+  console.info('[CE-QC][V269_NAVIGATION_SAFE]',ID,'lifecycle/export consolidation is idempotent; observer reacts only to element additions and never intercepts sidebar clicks.');
 })(window);
