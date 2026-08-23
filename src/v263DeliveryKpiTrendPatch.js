@@ -1,3 +1,4 @@
+import './v264TbkhOpenAttemptLifecycle.js';
 import express from 'express';
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
