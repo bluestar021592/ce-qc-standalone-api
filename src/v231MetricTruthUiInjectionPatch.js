@@ -1,11 +1,11 @@
 import './v254StorageHealthPatch.js';
 import express from 'express';
 
-export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v1';
+export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v2';
 export const V232_FAST_METRIC_UI_INJECTION_ID = '2026-08-22-v238-retired-fast-metric-ui-v1';
-export const V235_CACHE_READY_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v1';
+export const V235_CACHE_READY_UI_INJECTION_ID = '2026-08-23-v263-canonical-dashboard-delivery-v2';
 export const V239_DASHBOARD_REQUEST_UI_INJECTION_ID = '2026-08-23-v239-dashboard-request-coalescer-ui-v1';
-export const V240_DAILY_RATE_UI_INJECTION_ID = '2026-08-23-v240-daily-rate-ui-injection-v1';
+export const V240_DAILY_RATE_UI_INJECTION_ID = '2026-08-23-v263-retired-v234-visual-owner-v1';
 export const V244_SHOPEE_TREND_UI_INJECTION_ID = '2026-08-23-v263-retired-overlay-v1';
 export const V245_SHOPEE_TREND_UI_INJECTION_ID = V244_SHOPEE_TREND_UI_INJECTION_ID;
 export const V248_SHOPEE_TREND_UI_INJECTION_ID = V244_SHOPEE_TREND_UI_INJECTION_ID;
@@ -15,25 +15,25 @@ export const V249_WHPP_DETAIL_UI_INJECTION_ID = '2026-08-23-v249-whpp-exact-dril
 export const V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID = '2026-08-23-v263-retired-overlay-v1';
 export const V251_SHOPEE_FINAL_UI_INJECTION_ID = V250_SHOPEE_METRIC_VISIBILITY_UI_INJECTION_ID;
 export const V252_LIFECYCLE_UI_INJECTION_ID = '2026-08-23-v263-retired-visual-overlay-v1';
-export const V253_DASHBOARD_FAST_UI_INJECTION_ID = '2026-08-23-v253-final-fast-dashboard-owner-v1';
+export const V253_DASHBOARD_FAST_UI_INJECTION_ID = '2026-08-23-v263-v253-fetch-bridge-only-v1';
 export const V254_DASHBOARD_RENDER_RESCUE_UI_INJECTION_ID = '2026-08-23-v263-retired-rescue-overlay-v1';
 export const V261_DASHBOARD_FINAL_UI_INJECTION_ID = '2026-08-23-v263-retired-final-overlay-v1';
 
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260823-v263-1';
-const LIVE_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
 const COALESCER_MARKER = '/v239-dashboard-request-coalescer.js?v=20260823-v239-1';
-const V253_FAST_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v253-1';
+const V253_FAST_MARKER = '/v253-dashboard-fast-owner.js?v=20260823-v263-1';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 // Compatibility-only source markers for pre-V263 gates. These files are stripped
 // and are NOT pushed into delivered HTML after V263 canonical ownership.
+const LEGACY_GATE_V234_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
 const LEGACY_GATE_V248_MARKER = '/v244-shopee-trend-owner.js?v=20260823-v248-1';
 const LEGACY_GATE_V251_MARKER = '/v250-shopee-metric-visibility.js?v=20260823-v251-1';
 const LEGACY_GATE_V254_MARKER = '/v254-dashboard-render-rescue.js?v=20260823-v254-1';
 const LEGACY_GATE_V261_MARKER = '/v261-dashboard-final-owner.js?v=20260823-v261-1';
-void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER;
+void LEGACY_GATE_V234_MARKER; void LEGACY_GATE_V248_MARKER; void LEGACY_GATE_V251_MARKER; void LEGACY_GATE_V254_MARKER; void LEGACY_GATE_V261_MARKER;
 const originalSend = express.response.send;
 
 function stripScript(body, fileName) {
@@ -42,16 +42,13 @@ function stripScript(body, fileName) {
 }
 
 function prepareOwnerHtml(body) {
-  // Remove every historical dashboard/trend overlay. V263 makes the base
-  // DashboardV18.renderBusiness path the only visible trend owner.
   for (const file of [
-    'v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js',
+    'v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v234-dashboard-live.js',
     'v237-home-dashboard-owner.js','v244-shopee-trend-owner.js','v250-shopee-metric-visibility.js',
     'v252-qc-lifecycle-ui.js','v254-dashboard-render-rescue.js','v261-dashboard-final-owner.js'
   ]) body = stripScript(body, file);
   return body
     .replace(/\/dashboard-chart-v18\.js\?v=[^"']+/g, CHART_MARKER)
-    .replace(/\/v234-dashboard-live\.js\?v=[^"']+/g, LIVE_MARKER)
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
@@ -65,10 +62,10 @@ express.response.send = function v263MetricTruthUiSend(body) {
     if(headTags.length) body = body.replace('</head>', `${headTags.join('\n')}\n</head>`);
     const tags = [];
     if (!body.includes(CHART_MARKER)) tags.push(`  <script src="${CHART_MARKER}"></script>`);
-    if (!body.includes(LIVE_MARKER)) tags.push(`  <script src="${LIVE_MARKER}"></script>`);
     if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
     if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
+    this.setHeader?.('X-CE-QC-V240-UI', V240_DAILY_RATE_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V245-UI', V245_SHOPEE_TREND_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V246-UI', V246_TRACKING_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V248-UI', V248_SHOPEE_TREND_UI_INJECTION_ID);
@@ -82,4 +79,4 @@ express.response.send = function v263MetricTruthUiSend(body) {
   return originalSend.call(this, body);
 };
 
-console.info('[CE-QC][V263_CANONICAL_DASHBOARD]', V231_METRIC_TRUTH_UI_INJECTION_ID, 'legacy visual overlays retired; DashboardV18 is the single visible owner; attempt/signing UI limited to TBKH + SHOPEECN + SHOPEEVN');
+console.info('[CE-QC][V263_CANONICAL_DASHBOARD]', V231_METRIC_TRUTH_UI_INJECTION_ID, 'V234/V248/V251/V252/V254/V261 visual owners retired; DashboardV18 is the only visible trend owner; attempt/signing UI limited to TBKH + SHOPEECN + SHOPEEVN');
