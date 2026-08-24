@@ -30,15 +30,16 @@ assert.equal(v283.canonicalLegacyFileHash(legacySha),legacySha,'V283 must preser
 assert.equal(v283.canonicalLegacyFileHash(`prefix:${legacySha}`),'','V283 must reject hashes that do not begin with the exact SHA-256');
 assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplay\.js';/,'V283 decorated-hash replay must be activated in the normal startup chain');
 assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'V283 post-evidence-seed retry must be activated in the normal startup chain');
+assert.match(activation,/import '\.\/v284DailyMembershipAudit\.js';/,'V284 real-db read-only audit must be activated after startup');
 assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
-// V284 must be validated on every go-live candidate because it changes only the
-// dashboard truth reader, not the source archive. The regression deliberately
-// assigns ledger firstReportDate values different from the daily report date; the
+// V284 must be validated on every go-live candidate. The regression deliberately
+// gives ledger rows a firstReportDate different from the daily report date; the
 // requested day must still render from exact latest-VALID daily membership.
 for(const file of [
   'src/v284DailyMembershipTruth.js',
+  'src/v284DailyMembershipAudit.js',
   'src/v273DashboardTruthReadPatch.js',
   'src/v244ShopeeTrendRuntimePatch.js',
   'src/rangeDashboardStoreV284.js',
@@ -64,4 +65,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283/V284] evergreen evidence + legacy decorated SHA replay + daily-membership trend/range truth smoke passed');
+console.log('[V266/V283/V284] evergreen evidence + legacy decorated SHA replay + daily-membership trend/range truth + real-db audit activation smoke passed');
