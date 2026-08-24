@@ -4,6 +4,15 @@ import { fileURLToPath } from 'node:url';
 
 const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
 
+// RECOVERY SAFE MODE (temporary): production data is preserved, but automatic
+// large-database maintenance is not allowed to compete with the local web UI.
+// Manual reads/imports remain available once the page is reachable. These flags
+// are consumed by V147/V246/V252/V254/V262/V264 startup schedulers only.
+process.env.CE_QC_RECOVERY_SAFE_MODE = '1';
+process.env.CE_QC_DISABLE_V246_TRACKING = '1';
+process.env.CE_QC_DISABLE_V262_STRICT_BACKFILL = '1';
+process.env.CE_QC_DISABLE_STARTUP_STORAGE_SCAN = '1';
+
 // Normal operation is interactive-first. Dashboard cache maintenance must never
 // compete with users every ten minutes on the same local SQLite file. Two hours
 // matches the QC refresh requirement; an empty cache warms only the recent week.
@@ -130,6 +139,7 @@ function scheduleDeferredMaintenance({ v92, v76Repair }) {
 
 try {
   console.log(`[CE-QC][BOOT] bootstrap pid=${process.pid} node=${process.version}`);
+  console.log('[CE-QC][RECOVERY_SAFE_MODE] automatic tracking/evidence/history/storage startup maintenance disabled; UI/API availability has priority.');
   await importPhase('v157CeNetworkDnsPatch', './src/v157CeNetworkDnsPatch.js');
   await importPhase('v147TrackTimeoutConfig', './src/v147TrackTimeoutConfig.js');
   await importPhase('v27ServerPatch', './src/v27ServerPatch.js');
