@@ -13,6 +13,7 @@ const source=fs.readFileSync('src/v266EvergreenEvidenceArchive.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const coverageSource=fs.readFileSync('src/v284MembershipEvidenceCoverage.js','utf8');
 const priorityRefreshSource=fs.readFileSync('src/v284PriorityUnprovenRefresh.js','utf8');
+const visibleBridgeSource=fs.readFileSync('src/v286V253TrendTruthBridge.js','utf8');
 const backupSource=fs.readFileSync('scripts/CE_QC_PreUpdate_Backup.mjs','utf8');
 const mod=await import(`../src/v266EvergreenEvidenceArchive.js?smoke=${Date.now()}`);
 const v283=await import(`../src/v283LegacyDecoratedHashReplay.js?smoke=${Date.now()}`);
@@ -35,17 +36,16 @@ assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplay\.js';/,'V283 
 assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'V283 post-evidence-seed retry must be activated in the normal startup chain');
 assert.match(activation,/import '\.\/v284DailyMembershipAudit\.js';/,'V284 real-db read-only audit must be activated after startup');
 assert.match(activation,/import '\.\/v284PriorityUnprovenRefresh\.js';/,'V284 bounded unproven-member refresh must be activated after the read-only audit');
+assert.match(activation,/import '\.\/v286V253TrendTruthBridge\.js';/,'V286 visible V253 trend bridge must be armed before server/V253 route registration');
 assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
-// V284 must be validated on every go-live candidate. The regression deliberately
-// gives ledger rows a firstReportDate different from the daily report date; the
-// requested day must still render from exact latest-VALID daily membership.
 for(const file of [
   'src/v284DailyMembershipTruth.js',
   'src/v284MembershipEvidenceCoverage.js',
   'src/v284DailyMembershipAudit.js',
   'src/v284PriorityUnprovenRefresh.js',
+  'src/v286V253TrendTruthBridge.js',
   'src/v273DashboardTruthReadPatch.js',
   'src/v244ShopeeTrendRuntimePatch.js',
   'src/rangeDashboardStoreV284.js',
@@ -54,12 +54,17 @@ for(const file of [
   'scripts/v284-evidence-coverage-smoke.mjs',
   'scripts/v285-preupdate-backup-freeze-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
-assert.match(coverageSource,/ledger admission alone is not analysis proof/,'V284 must explicitly distinguish ledger admission from proven analysis');
+assert.match(coverageSource,/WHPP/,'V286 proven coverage must include WHPP daily members instead of silently omitting the seventh business');
+assert.match(coverageSource,/wf\.shipmentCode/,'V286 WHPP proof must accept WHPP final-row evidence when ledger proof is absent');
 assert.match(coverageSource,/lastCheckedAt/,'checked lifecycle state must be part of proven-evidence ownership');
 assert.match(priorityRefreshSource,/MAX_TARGETS=100/,'priority evidence repair must remain hard-limited to 100 shipments');
 assert.match(priorityRefreshSource,/FOREGROUND_PROCESSING_ACTIVE/,'priority evidence repair must yield to active production processing');
 assert.match(priorityRefreshSource,/processCarryFamilyForRefresh/,'priority evidence repair must reuse the existing production carry refresh pipeline');
+assert.match(priorityRefreshSource,/\['WHPP',open\.filter/,'V286 bounded priority repair must route WHPP gaps through the existing WHPP carry pipeline');
 assert.match(priorityRefreshSource,/if\(targets\.length>MAX_TARGETS\)/,'large evidence gaps must be skipped rather than causing an unbounded startup refresh');
+assert.match(visibleBridgeSource,/\/api\/v253\/trends/,'V286 must own the trend endpoint still requested by the visible dashboard');
+assert.match(visibleBridgeSource,/readV284ProvenDashboardTrends/,'V286 visible V253 trends must delegate to proven daily membership truth');
+assert.match(visibleBridgeSource,/legacy V253 trend SQL is not registered/,'V286 bridge must explicitly suppress the legacy visible trend authority');
 assert.match(backupSource,/BEGIN IMMEDIATE/,'V285 high-risk pre-update backup must freeze SQLite writers before copying the production DB');
 assert.match(backupSource,/SOURCE_CHANGED_DURING_WRITE_FREEZE/,'V285 must still reject a source fingerprint change even while the write freeze is held');
 assert.match(backupSource,/backupQuickCheck:'ok'/,'V285 must retain structural verification of the frozen backup');
@@ -86,4 +91,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283/V284/V285] evergreen evidence + legacy SHA replay + daily membership + proven-evidence coverage + bounded targeted repair + frozen verified pre-update backup gate passed');
+console.log('[V266/V283/V284/V285/V286] evergreen evidence + archive replay + seven-business proven coverage + visible V253 truth bridge + bounded targeted repair + frozen verified backup gate passed');
