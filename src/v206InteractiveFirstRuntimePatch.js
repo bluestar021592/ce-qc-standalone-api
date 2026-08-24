@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+// V290 MUST be the first CE-QC runtime dependency. It protects the web process
+// before V281/V283/V284/V246/V252/V262/V264 register automatic maintenance timers.
+import './v290StartupMaintenanceGuard.js';
 import './v266EvergreenEvidenceArchive.js';
 import './v234DashboardLiveTruthPatch.js';
 import './v236DashboardCurrentRoutePatch.js';
@@ -7,10 +10,10 @@ import './v231MetricTruthUiInjectionPatch.js';
 import './v244ShopeeTrendRuntimePatch.js';
 import './v246QcTrackingRuntimePatch.js';
 import './v252LifecycleCoordinator.js';
-// V289 restores the exact last-known-good first-paint module structure from
-// commit 88439846. V286/V288 remain available as retired diagnostic modules but
-// are deliberately NOT imported into the interactive startup chain. Seven-business
-// V284/V286 truth stays in the read/data layer and is not rolled back here.
+// V289 restored the last-known-good first-paint module structure from 88439846.
+// V286/V288 remain retired diagnostic modules and are deliberately NOT imported.
+// V290 now protects that known-good structure from automatic large-SQLite startup
+// maintenance without changing any seven-business business truth.
 import './v253DashboardFastPath.js';
 import './v254StorageHealthPatch.js';
 // V255 retention guard is intentionally disabled from startup until its standalone
@@ -19,15 +22,13 @@ import './v256R2ZeroCostGuard.js';
 import './v262ShopeeStrictEvidenceBackfill.js';
 import './v263DeliveryKpiTrendPatch.js';
 
-const PATCH_ID = '2026-08-24-v289-known-good-first-paint-runtime-v1';
+const PATCH_ID = '2026-08-24-v290-first-paint-main-thread-protection-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
-// Keep first paint on the same proven runtime structure that was working before
-// the V286/V288 startup-hook experiments. Dashboard cache remains delayed
-// maintenance only; V246/V252 persistent tracking still owns import admission,
-// two-hour OPEN refresh synchronization and Cambodia 02:00 deep reconciliation.
-// V284/V286 daily-membership/proven evidence truth remains active through its
-// existing read models/audits and is intentionally not changed by this rollback.
+// Interactive first paint is authoritative. Automatic heavy database maintenance
+// is staggered by V290; dashboard cache remains child-process maintenance only.
+// V246/V252 lifecycle logic, V284/V286 daily-membership truth and all historical
+// import evidence remain intact.
 process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = String(24 * 60 * 60 * 1000);
 process.env.DASHBOARD_CACHE_REFRESH_MS = String(4 * 60 * 60 * 1000);
 process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED = '0';
@@ -37,7 +38,7 @@ let primeAttempts = 0;
 const MAX_PRIME_ATTEMPTS = 4;
 const RETRYABLE_RESULT = /FOREGROUND_PROCESSING_ACTIVE|CACHE_OR_PURGE_WORKER_ALREADY_ACTIVE/;
 
-function primeDashboardCacheInChild(delayMs = 60_000) {
+function primeDashboardCacheInChild(delayMs = 5 * 60_000) {
   if (String(process.env.CE_QC_DASHBOARD_CACHE_CHILD || '') === '1') return;
   if (primeAttempts >= MAX_PRIME_ATTEMPTS) return;
   const workerFile = fileURLToPath(new URL('./dashboardCacheWorker.js', import.meta.url));
@@ -73,7 +74,7 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
           primeDashboardCacheInChild(60_000);
         }
       });
-      console.log(`[CE-QC][V239] dashboard cache prime child exit observable; maintenance child started pid=${child.pid || '-'} after ${Math.round(delayMs/1000)}s; first paint uses the restored known-good V253 runtime structure.`);
+      console.log(`[CE-QC][V239] dashboard cache prime child exit observable; maintenance child started pid=${child.pid || '-'} after ${Math.round(delayMs/1000)}s; V290 keeps first paint free of automatic DB maintenance.`);
     } catch (error) {
       console.warn('[CE-QC][V253] delayed cache maintenance spawn failed:', error?.message || error);
       if (primeAttempts < MAX_PRIME_ATTEMPTS) primeDashboardCacheInChild(60_000);
@@ -83,6 +84,6 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V289] ${PATCH_ID} restores the 88439846 first-paint startup structure; V286/V288 Express startup hooks are retired from normal runtime; V284/V286 seven-business data truth remains preserved.`);
+console.log(`[CE-QC][V290] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; first five minutes prioritize HTTP/UI while automatic large SQLite maintenance is deferred or moved to child processes; V284/V286 truth is unchanged.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
