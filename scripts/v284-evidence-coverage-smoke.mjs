@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 process.env.NODE_ENV='test';
 const { ensureV246TrackingSchema }=await import('../src/v246TrackingLedgerCore.js');
+const { invalidateV284DailyMembershipTruth }=await import('../src/v284DailyMembershipTruth.js');
 const { readV284EvidenceCoverage,readV284ProvenDashboardTrends,summarizeV284ProvenRange }=await import('../src/v284MembershipEvidenceCoverage.js');
+
+// This smoke is imported after other V284 smokes inside the same go-live Node
+// process. Those smokes use different in-memory SQLite handles but may reuse the
+// same report date. Production uses one persistent DB; test fixtures must never
+// inherit another fixture's 30-second hot membership cache.
+invalidateV284DailyMembershipTruth();
 
 const db=new DatabaseSync(':memory:');
 db.exec(`
@@ -47,6 +54,7 @@ assert.equal(whppTrend.daily[0].podRate,100);
 assert.equal(whppTrend.daily[0].ready,true,'WHPP visible trend must no longer be forced to 0% coverage');
 
 db.prepare("UPDATE qc_tracking_ledger SET currentState='Pending',currentCategory='Pending',lastCheckedAt=?,updatedAt=? WHERE shipmentCode='ADMITTED-ONLY'").run(now,now);
+invalidateV284DailyMembershipTruth();
 coverage=readV284EvidenceCoverage(date,date,db);ce=coverage.byType.get(`${date}|CE|ALL`);
 assert.ok(ce,'CE daily evidence coverage aggregate must remain addressable after evidence refresh');
 assert.equal(ce.proven,2,'checked current-state evidence may promote admitted member to proven analysis');
@@ -65,5 +73,6 @@ assert.equal(range.analysisPending,0);
 assert.equal(range.analysisComplete,true);
 assert.deepEqual(range.missingDates,[]);
 
+invalidateV284DailyMembershipTruth();
 db.close();
-console.log('[V286] seven-business evidence coverage smoke passed · WHPP proven final evidence + ALL totals + ready/ledgerReady synchronization');
+console.log('[V286] seven-business evidence coverage smoke passed · isolated fixture cache + WHPP proven final evidence + ALL totals + ready/ledgerReady synchronization');
