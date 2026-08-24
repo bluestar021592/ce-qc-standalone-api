@@ -17,7 +17,10 @@ const injectSource=fs.readFileSync('src/v231MetricTruthUiInjectionPatch.js','utf
 const fastSource=fs.readFileSync('src/v253DashboardFastPath.js','utf8');
 const uiSource=fs.readFileSync('public/v253-dashboard-fast-owner.js','utf8');
 assert.match(runtimeSource,/import '\.\/v253DashboardFastPath\.js';/,'V253 backend fast path must activate before server registration');
-assert.match(runtimeSource,/primeDashboardCacheInChild\(delayMs = 60_000\)/,'legacy cache maintenance must be delayed away from first paint');
+const cacheDelayMatch=runtimeSource.match(/primeDashboardCacheInChild\(delayMs\s*=\s*([^)]+)\)/);
+assert.ok(cacheDelayMatch,'legacy cache maintenance must expose an explicit default startup delay');
+const cacheDelayMs=Function(`"use strict";return (${cacheDelayMatch[1]});`)();
+assert.ok(Number.isFinite(cacheDelayMs)&&cacheDelayMs>=60_000,`legacy cache maintenance must stay away from first paint by at least 60s; got ${cacheDelayMs}`);
 assert.doesNotMatch(fastSource,/dashboard_daily_cache/,'V253 visible trend path must not depend on dashboard_daily_cache');
 assert.match(fastSource,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'V253 response must expose cache-independent ownership');
 assert.match(fastSource,/FROM unified_import_rows u WHERE u\.snapshotId=\? AND u\.businessType='CEAF' AND EXISTS/,'instant WHPP overlap correction must drive from the small CEAF slice');
@@ -27,9 +30,9 @@ assert.doesNotThrow(()=>new Function(uiSource),'V253 browser owner must compile'
 assert.match(uiSource,/\/api\/v89\/instant-dashboard/,'V253 browser owner must intercept the slow legacy instant-dashboard request');
 assert.match(uiSource,/\/api\/v253\/instant-dashboard/,'legacy first-paint request must be redirected to V253');
 assert.match(uiSource,/\/api\/v234\/trends/,'V253 must intercept old cache-dependent trend reads');
-assert.match(uiSource,/\/api\/v253\/trends/,'all business trends must use cache-independent V253');
+assert.match(uiSource,/\/api\/v253\/trends/,'V253 compatibility interception point must remain present even when V290/V289 route visible trends onward to proven truth');
 assert.match(uiSource,/removeHomeLegacyAttempts/,'home must remove the obsolete dual Shopee attempt chart block');
-assert.match(uiSource,/sessionStorage/,'repeat navigation must use stale-while-revalidate session data instead of blank loading');
+assert.match(uiSource,/sessionStorage/,'repeat navigation must retain the stale-while-revalidate compatibility session helper');
 assert.match(injectSource,/v253-dashboard-fast-owner\.js\?v=20260823-v253-1/,'V253 browser owner must be cache-busted into delivered HTML');
 assert.ok(injectSource.indexOf('V253_FAST_MARKER')<injectSource.indexOf('const tags = []'),'V253 must be injected in head before body dashboard clients');
 assert.match(injectSource,/X-CE-QC-V253-UI/,'V253 response header must be observable');
@@ -97,4 +100,4 @@ assert.equal(region.daily[0].regions.PV.total,1);
 assert.equal(region.daily[0].regions.PP.attempt1,1,'exact PP region must read strict attempt evidence from indexed lifecycle ledger');
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V253] dashboard fastpath smoke passed: no dashboard cache dependency + all boards multi-day trends + fast WHPP overlap + indexed exact Shopee regions + authenticated head-level stale-while-revalidate owner');
+console.log('[V253/V290] dashboard fastpath smoke passed: no dashboard cache dependency + minimum startup delay + all boards multi-day trends + fast WHPP overlap + indexed exact Shopee regions + authenticated owner');
