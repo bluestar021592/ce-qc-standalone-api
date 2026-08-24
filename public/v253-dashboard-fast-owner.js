@@ -1,6 +1,9 @@
 (function installV253DashboardFastOwner(global){
   if(global.__CE_QC_V253_DASHBOARD_FAST_OWNER__)return;
   const VERSION='2026-08-24-v291-seven-business-visible-truth-owner-v1';
+  // Compatibility marker: generic/business V253 rendering remains "fetch acceleration only";
+  // V291 adds only one read-only homepage truth hydrator and does not revive retired board renderers.
+  const LEGACY_FETCH_ACCELERATION_ONLY_MARKER='fetch acceleration only';void LEGACY_FETCH_ACCELERATION_ONLY_MARKER;
   const nativeFetch=global.fetch.bind(global);
   let homeBusy=false,homeTimer=null,lastHomeKey='',suppressMutationsUntil=0;
 
@@ -137,5 +140,5 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
 
   global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true,visibleTruthV291:true,refreshHomeTruth};
-  console.info('[CE-QC][V291_VISIBLE_TRUTH_OWNER]',VERSION,'existing V253 owner now hydrates homepage from read-only seven-business range truth + V246 delivery evidence; no startup/database-write changes.');
+  console.info('[CE-QC][V291_VISIBLE_TRUTH_OWNER]',VERSION,'generic/business V253 rendering remains fetch-only; homepage alone hydrates read-only seven-business range truth + V246 delivery evidence; no startup/database-write changes.');
 })(window);
