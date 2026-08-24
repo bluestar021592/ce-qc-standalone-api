@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const root=await fsp.mkdtemp(path.join(os.tmpdir(),'ce-qc-v266-'));
 process.env.NODE_ENV='test';
@@ -32,6 +33,19 @@ assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'
 assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
+// V284 must be validated on every go-live candidate because it changes only the
+// dashboard truth reader, not the source archive. The regression deliberately
+// assigns ledger firstReportDate values different from the daily report date; the
+// requested day must still render from exact latest-VALID daily membership.
+for(const file of [
+  'src/v284DailyMembershipTruth.js',
+  'src/v273DashboardTruthReadPatch.js',
+  'src/v244ShopeeTrendRuntimePatch.js',
+  'src/rangeDashboardStoreV284.js',
+  'scripts/v284-daily-membership-smoke.mjs'
+]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
+await import(`./v284-daily-membership-smoke.mjs?nested=${Date.now()}`);
+
 await fsp.mkdir(paths.importsRoot,{recursive:true});
 const temp=path.join(paths.importsRoot,'multer-temp-source');
 await fsp.writeFile(temp,Buffer.from([0x50,0x4b,0x03,0x04,0x56,0x32,0x36,0x36]));
@@ -50,4 +64,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283] evergreen evidence + legacy decorated SHA canonicalization + full replay + bounded retry smoke passed');
+console.log('[V266/V283/V284] evergreen evidence + legacy decorated SHA replay + daily-membership trend/range truth smoke passed');
