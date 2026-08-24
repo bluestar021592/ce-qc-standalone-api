@@ -1,4 +1,6 @@
 import './v254StorageHealthPatch.js';
+import './v273DashboardTruthReadPatch.js';
+import './v273ImportCompletenessGuard.js';
 import express from 'express';
 
 // Preserve historical exported IDs so old safety gates can continue identifying
@@ -25,7 +27,8 @@ export const V267_REPORT_EXPORT_UI_INJECTION_ID = '2026-08-23-v267-report-export
 export const V268_LIFECYCLE_EXPORT_UI_INJECTION_ID = '2026-08-23-v268-auto-lifecycle-export-freshness-v1';
 export const V269_NAVIGATION_SAFE_UI_INJECTION_ID = '2026-08-23-v269-navigation-safe-lifecycle-export-v1';
 export const V271_CANONICAL_INTEGRITY_UI_INJECTION_ID = '2026-08-23-v271-canonical-integrity-owner-v1';
-export const V272_LAYOUT_TREND_UI_INJECTION_ID = '2026-08-24-v272-layout-trend-finalizer-v1';
+export const V272_LAYOUT_TREND_UI_INJECTION_ID = '2026-08-24-v273-single-visible-trend-owner-v1';
+export const V273_DASHBOARD_TRUTH_UI_INJECTION_ID = '2026-08-24-v273-ledger-backed-seven-business-trends-v1';
 
 const DASHBOARD_MARKER = '/dashboard-v18.js?v=20260823-v263-2';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260823-v263-2';
@@ -38,7 +41,7 @@ const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const V267_REPORT_MARKER = '/v267-report-export-owner.js?v=20260823-v267-1';
 const V268_LIFECYCLE_EXPORT_MARKER = '/v268-lifecycle-export-owner.js?v=20260823-v269-1';
 const V271_CANONICAL_INTEGRITY_MARKER = '/v271-canonical-integrity-owner.js?v=20260824-v272-1';
-const V272_LAYOUT_TREND_MARKER = '/v272-layout-trend-finalizer.js?v=20260824-v272-1';
+const V272_LAYOUT_TREND_MARKER = '/v272-layout-trend-finalizer.js?v=20260824-v273-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 // Compatibility-only source markers for pre-V263 gates. They remain ordered for
 // old source assertions, but are stripped and never injected after V263.
@@ -73,7 +76,7 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v272MetricTruthUiSend(body) {
+express.response.send = function v273MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
     const headTags=[];
@@ -88,8 +91,6 @@ express.response.send = function v272MetricTruthUiSend(body) {
     if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
     if (!body.includes(V267_REPORT_MARKER)) tags.push(`  <script src="${V267_REPORT_MARKER}"></script>`);
     if (!body.includes(V268_LIFECYCLE_EXPORT_MARKER)) tags.push(`  <script src="${V268_LIFECYCLE_EXPORT_MARKER}"></script>`);
-    // V271 must execute before V272: V272 wraps the already-canonical DashboardV18
-    // owner and supplies snapshot-first/nonblank rendering plus final layout polish.
     if (!body.includes(V271_CANONICAL_INTEGRITY_MARKER)) tags.push(`  <script src="${V271_CANONICAL_INTEGRITY_MARKER}"></script>`);
     if (!body.includes(V272_LAYOUT_TREND_MARKER)) tags.push(`  <script src="${V272_LAYOUT_TREND_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
@@ -110,10 +111,11 @@ express.response.send = function v272MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V269-UI', V269_NAVIGATION_SAFE_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V271-UI', V271_CANONICAL_INTEGRITY_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V272-UI', V272_LAYOUT_TREND_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V273-UI', V273_DASHBOARD_TRUTH_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
 
 // Historical gate marker kept intentionally: these owners are still stripped from delivered HTML.
 const V263_RETIRED_VISUAL_OWNERS_MARKER = 'V234/V248/V251/V252/V254/V261 visual owners retired';
-console.info('[CE-QC][V272_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'ordered V271->V272 visible delivery: compact settings layout, snapshot-first trends, finite retry/no-data states, exact specialized TBKH+Shopee attempt panels, and WHPP standalone trend hydration.');
+console.info('[CE-QC][V273_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'single visible trend owner + ledger-backed seven-business trend truth + same-date reupload completeness protection.');
