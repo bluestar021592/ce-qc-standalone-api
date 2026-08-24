@@ -10,7 +10,7 @@ const backend=read('src/v273DashboardTruthReadPatch.js');
 const importGuard=read('src/v273ImportCompletenessGuard.js');
 const parser=read('src/unifiedExcelParser.js');
 const archiveReplay=read('src/v281ArchivedHistoricalReparse.js');
-for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v89StaticAssetCachePatch.js','src/v273DashboardTruthReadPatch.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js','src/v281ArchivedHistoricalReparse.js','scripts/v281-archive-replay-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v89StaticAssetCachePatch.js','src/v273DashboardTruthReadPatch.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js','src/v281ArchivedHistoricalReparse.js','scripts/v281-archive-replay-smoke.mjs','scripts/v281-archive-failure-recovery-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(ui),'V273 browser runtime must compile');
 assert.doesNotThrow(()=>new Function(speed),'V275 compatibility asset must compile');
 assert.match(ui,/2026-08-24-v273-single-visible-trend-owner-v1/);
@@ -47,9 +47,6 @@ assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
 assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260824-v273-1/,'V273 owner cache key must remain');
 assert.match(inject,/X-CE-QC-V274-UI/,'V274 guard must remain observable in response headers');
 
-// V280 keeps the V279 single-parse + post-COMMIT acknowledgement path, and fixes
-// Excel workbooks whose stored !ref is much larger than their real populated area.
-// Import observability must identify request/upload/census/parse/commit boundaries.
 assert.match(delivery,/2026-08-24-v280-sparse-excel-precommit-observability-v1/,'V280 sparse-range backend patch must be active');
 assert.match(delivery,/import '\.\/v281ArchivedHistoricalReparse\.js';/,'V281 archive replay must be activated in the normal runtime patch chain');
 assert.doesNotMatch(delivery,/express\.response\.sendFile\s*=/,'V280 must preserve native SPA sendFile');
@@ -96,10 +93,7 @@ assert.match(parser,/NOT_FOUND_OPTIONAL/,'recipient column may be absent without
 assert.match(parser,/hasShipmentValues/,'sheet discovery must be driven by actual waybill presence');
 assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipient-column absence must no longer skip the sheet');
 
-// V281 bypasses the flaky browser upload path only by replaying the exact SHA-256
-// source already archived by V266. It must never guess among files or shrink old
-// membership. Historical repair is intentionally isolated from current/carry state.
-assert.match(archiveReplay,/2026-08-24-v281-archive-backed-same-hash-history-reparse-v2/,'V281 historical-only archive replay version must be active');
+assert.match(archiveReplay,/2026-08-24-v281-archive-backed-same-hash-history-reparse-v3/,'V281 atomic historical-only archive replay version must be active');
 assert.match(archiveReplay,/V281_PRIORITY_REPORT_DATE\s*=\s*'2026-08-17'/,'V281 must target the currently blocked historical report date only');
 assert.match(archiveReplay,/findV281ArchivedSourceByHash/,'V281 must locate evidence only by exact archived SHA-256');
 assert.match(archiveReplay,/parsed\.fileHash/,'V281 must verify the parsed archive hash against the old batch hash');
@@ -119,8 +113,12 @@ assert.match(historicalSaver,/shipment_daily_snapshots/,'historical replay must 
 assert.match(historicalSaver,/unified_import_rows/,'historical replay must rebuild unified import rows');
 assert.match(historicalSaver,/unified_snapshots/,'historical replay must rebuild unified snapshot payload');
 assert.match(archiveReplay,/currentStatePreserved:\s*true/,'successful replay must explicitly report current-state preservation');
+assert.match(archiveReplay,/INVALID_V281_FAILED:/,'post-save verification failure must invalidate the new batch before restoring old VALID');
+assert.match(archiveReplay,/rejectedNewBatchId/,'failure result must identify any rejected committed batch');
+assert.match(archiveReplay,/if \(!superseded\) throw new Error/,'old-batch supersede finalization must be verified');
 assert.match(archiveReplay,/process\.env\.NODE_ENV === 'test' \|\| process\.env\.CI/,'candidate tests must not run the production archive replay timer');
 
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-replay-smoke.mjs'],{stdio:'inherit'});
-console.log('[V281/V280/V274/V273] historical-only same-hash archive replay + current-state preservation + sparse Excel range + staged import timing + ledger-first hot trends + reupload protection gate passed');
+execFileSync(process.execPath,['scripts/v281-archive-failure-recovery-smoke.mjs'],{stdio:'inherit'});
+console.log('[V281/V280/V274/V273] atomic historical-only same-hash archive replay + current-state preservation + failed-replay recovery + sparse Excel range + staged import timing + ledger-first hot trends + reupload protection gate passed');
