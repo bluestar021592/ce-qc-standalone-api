@@ -5,10 +5,11 @@ const read=p=>fs.readFileSync(p,'utf8');
 const ui=read('public/v272-layout-trend-finalizer.js');
 const speed=read('public/v274-trend-speed-guard.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
+const delivery=read('src/v89StaticAssetCachePatch.js');
 const backend=read('src/v273DashboardTruthReadPatch.js');
 const importGuard=read('src/v273ImportCompletenessGuard.js');
 const parser=read('src/unifiedExcelParser.js');
-for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v273DashboardTruthReadPatch.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v89StaticAssetCachePatch.js','src/v273DashboardTruthReadPatch.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(ui),'V273 browser runtime must compile');
 assert.doesNotThrow(()=>new Function(speed),'V275 import/trend guard must compile');
 assert.match(ui,/2026-08-24-v273-single-visible-trend-owner-v1/);
@@ -59,6 +60,16 @@ assert.match(inject,/v274-trend-speed-guard\.js\?v=20260824-v274-1/,'V275 import
 const p273=inject.indexOf('V272_LAYOUT_TREND_MARKER');const p274=inject.indexOf('V274_TREND_SPEED_MARKER');assert.ok(p273>=0&&p274>p273,'V275 guard must be delivered after V273 trend owner');
 assert.match(inject,/X-CE-QC-V274-UI/,'V274/V275 guard must remain observable in response headers');
 
+// V276 delivery contract: SPA routes are served through sendFile(index.html),
+// while the canonical UI injector owns res.send(). The index response must be
+// routed through the current res.send implementation or late browser owners are
+// installed in the backend but never delivered to /import, /reports, etc.
+assert.match(delivery,/2026-08-24-v276-sendfile-ui-owner-delivery-v1/,'V276 delivery bridge must be active');
+assert.match(delivery,/express\.response\.sendFile\s*=\s*function v276OwnerAwareSendFile/,'SPA sendFile must be bridged');
+assert.match(delivery,/path\.basename\(target\)\.toLowerCase\(\) !== 'index\.html'/,'only index.html may be intercepted');
+assert.match(delivery,/this\.send\(html\)/,'index.html must pass through the current canonical send injector');
+assert.match(delivery,/CORE_LIVE_ASSET_RE[\s\S]*v274-trend-speed-guard/,'V275 browser owner must remain no-store');
+
 // Final-history reupload contract: parser fixes must be able to repair the exact
 // same source workbook, but an incomplete reupload can never replace a larger
 // valid day or exchange old bills for different ones. A separate workbook census
@@ -77,4 +88,4 @@ assert.match(parser,/hasShipmentValues/,'sheet discovery must be driven by actua
 assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipient-column absence must no longer skip the sheet');
 
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
-console.log('[V275/V274/V273] fast import confirmation + ledger-first hot trends + single visible row + source census + final reupload protection gate passed');
+console.log('[V276/V275/V274/V273] sendFile UI delivery + fast import confirmation + ledger-first hot trends + reupload protection gate passed');
