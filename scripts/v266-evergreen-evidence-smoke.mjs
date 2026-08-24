@@ -11,6 +11,8 @@ process.env.DATA_DIR=root;
 process.env.DB_FILE=path.join(root,'ce_qc_monitor.db');
 const source=fs.readFileSync('src/v266EvergreenEvidenceArchive.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
+const coverageSource=fs.readFileSync('src/v284MembershipEvidenceCoverage.js','utf8');
+const priorityRefreshSource=fs.readFileSync('src/v284PriorityUnprovenRefresh.js','utf8');
 const mod=await import(`../src/v266EvergreenEvidenceArchive.js?smoke=${Date.now()}`);
 const v283=await import(`../src/v283LegacyDecoratedHashReplay.js?smoke=${Date.now()}`);
 const v283Retry=await import(`../src/v283LegacyDecoratedHashReplayRetry.js?smoke=${Date.now()}`);
@@ -31,6 +33,7 @@ assert.equal(v283.canonicalLegacyFileHash(`prefix:${legacySha}`),'','V283 must r
 assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplay\.js';/,'V283 decorated-hash replay must be activated in the normal startup chain');
 assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'V283 post-evidence-seed retry must be activated in the normal startup chain');
 assert.match(activation,/import '\.\/v284DailyMembershipAudit\.js';/,'V284 real-db read-only audit must be activated after startup');
+assert.match(activation,/import '\.\/v284PriorityUnprovenRefresh\.js';/,'V284 bounded unproven-member refresh must be activated after the read-only audit');
 assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
@@ -39,13 +42,23 @@ await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 // requested day must still render from exact latest-VALID daily membership.
 for(const file of [
   'src/v284DailyMembershipTruth.js',
+  'src/v284MembershipEvidenceCoverage.js',
   'src/v284DailyMembershipAudit.js',
+  'src/v284PriorityUnprovenRefresh.js',
   'src/v273DashboardTruthReadPatch.js',
   'src/v244ShopeeTrendRuntimePatch.js',
   'src/rangeDashboardStoreV284.js',
-  'scripts/v284-daily-membership-smoke.mjs'
+  'scripts/v284-daily-membership-smoke.mjs',
+  'scripts/v284-evidence-coverage-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
+assert.match(coverageSource,/ledger admission alone is not analysis proof/,'V284 must explicitly distinguish ledger admission from proven analysis');
+assert.match(coverageSource,/lastCheckedAt/,'checked lifecycle state must be part of proven-evidence ownership');
+assert.match(priorityRefreshSource,/MAX_TARGETS=100/,'priority evidence repair must remain hard-limited to 100 shipments');
+assert.match(priorityRefreshSource,/FOREGROUND_PROCESSING_ACTIVE/,'priority evidence repair must yield to active production processing');
+assert.match(priorityRefreshSource,/processCarryFamilyForRefresh/,'priority evidence repair must reuse the existing production carry refresh pipeline');
+assert.match(priorityRefreshSource,/if\(targets\.length>MAX_TARGETS\)/,'large evidence gaps must be skipped rather than causing an unbounded startup refresh');
 await import(`./v284-daily-membership-smoke.mjs?nested=${Date.now()}`);
+await import(`./v284-evidence-coverage-smoke.mjs?nested=${Date.now()}`);
 
 await fsp.mkdir(paths.importsRoot,{recursive:true});
 const temp=path.join(paths.importsRoot,'multer-temp-source');
@@ -65,4 +78,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283/V284] evergreen evidence + legacy decorated SHA replay + daily-membership trend/range truth + real-db audit activation smoke passed');
+console.log('[V266/V283/V284] evergreen evidence + legacy SHA replay + daily membership + proven-evidence coverage + bounded targeted repair gate passed');
