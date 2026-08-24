@@ -1,17 +1,12 @@
 (function installV253DashboardFastOwner(global){
   if(global.__CE_QC_V253_DASHBOARD_FAST_OWNER__)return;
-  const VERSION='2026-08-24-v289-known-good-shell-v273-trends-v1';
+  const VERSION='2026-08-23-v263-v253-fetch-bridge-only-v1';
   const nativeFetch=global.fetch.bind(global);
 
   function rewriteUrl(raw){
     if(!raw)return raw;let u;try{u=new URL(raw,location.origin);}catch{return raw;}
     if(u.pathname==='/api/v89/instant-dashboard'){u.pathname='/api/v253/instant-dashboard';return u.pathname+u.search;}
-    // V289 keeps the known-good browser owner but routes every legacy visible
-    // trend URL to the already-authenticated V273 compatibility endpoint, whose
-    // production reader delegates to V284/V286 proven seven-business truth.
-    if(u.pathname==='/api/v234/trends'||u.pathname==='/api/v253/trends'){
-      u.pathname='/api/v273/trends';return u.pathname+u.search;
-    }
+    if(u.pathname==='/api/v234/trends'){u.pathname='/api/v253/trends';return u.pathname+u.search;}
     if(u.pathname==='/api/v246/shopee-trends'&&u.searchParams.get('regions')==='1'&&u.searchParams.get('exact')==='1'){
       const businessType=u.searchParams.get('businessType')||'';const date=u.searchParams.get('to')||u.searchParams.get('from')||'';
       return `/api/v253/shopee-region?businessType=${encodeURIComponent(businessType)}&date=${encodeURIComponent(date)}`;
@@ -34,7 +29,6 @@
 
   // Compatibility-only session cache helper retained for old source gates. V263
   // canonical DashboardV18 no longer uses V253 to paint visible trend DOM.
-  // Historical gate wording retained: fetch acceleration only.
   function cacheGet(key,maxAge=10*60_000){try{const item=JSON.parse(sessionStorage.getItem(key)||'null');return item&&Date.now()-Number(item.at||0)<=maxAge?item.data:null;}catch{return null;}}
   void cacheGet;
 
@@ -55,6 +49,6 @@
   function bind(){removeHomeLegacyAttempts();document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page]'))setTimeout(removeHomeLegacyAttempts,40);},true);}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
 
-  global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true,visibleTrendRoute:'/api/v273/trends'};
-  console.info('[CE-QC][V289_DASHBOARD_FETCH]',VERSION,'fetch acceleration only; visible V234/V253 trend requests route to V273 -> V284/V286 proven truth; no Express route hook.');
+  global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true};
+  console.info('[CE-QC][V253_DASHBOARD_FAST_OWNER]',VERSION,'fetch acceleration only; visible trend rendering retired to canonical DashboardV18');
 })(window);
