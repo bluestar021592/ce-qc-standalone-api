@@ -1,6 +1,7 @@
 import express from 'express';
 import fs from 'node:fs/promises';
 import './v108PerformanceIndexPatch.js';
+import './v281ArchivedHistoricalReparse.js';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 import { getUnifiedProcessingQueue, saveUnifiedImport } from './unifiedImportStore.js';
 import { loadState, saveState } from './storage.js';
