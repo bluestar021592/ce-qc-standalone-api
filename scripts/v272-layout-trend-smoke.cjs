@@ -4,6 +4,8 @@ const {execFileSync}=require('child_process');
 const read=p=>fs.readFileSync(p,'utf8');
 const ui=read('public/v272-layout-trend-finalizer.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
+const importGuard=read('src/v273ImportCompletenessGuard.js');
+const parser=read('src/unifiedExcelParser.js');
 execFileSync(process.execPath,['--check','public/v272-layout-trend-finalizer.js'],{stdio:'pipe'});
 execFileSync(process.execPath,['--check','src/v231MetricTruthUiInjectionPatch.js'],{stdio:'pipe'});
 execFileSync(process.execPath,['--check','src/v273DashboardTruthReadPatch.js'],{stdio:'pipe'});
@@ -30,5 +32,19 @@ assert.match(inject,/import '\.\/v273DashboardTruthReadPatch\.js';/);
 assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
 assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260824-v273-1/,'browser must receive a new cache key');
 assert.match(inject,/X-CE-QC-V273-UI/,'V273 must be observable in response headers');
+
+// Final-history reupload contract: parser fixes must be able to repair the exact
+// same source workbook, but an incomplete reupload can never replace a larger
+// valid day. The guard must execute after multer/V252 middleware and immediately
+// before the final importer so validation happens before any database commit.
+assert.match(importGuard,/V273_SAME_DATE_REUPLOAD_SHRINK_BLOCKED/,'smaller same-date reuploads must be rejected');
+assert.match(importGuard,/V273_REPARSE_PENDING:/,'same source hash must be temporarily released only for a parser-repair reimport');
+assert.match(importGuard,/previous\.fileHash===parsed\.fileHash&&comparison\.difference>0/,'same file must be reparsed when the fixed parser recovers more waybills');
+assert.match(importGuard,/handlers\.slice\(0,last\),guard,responseTruth,handlers\[last\]/,'completeness guard must run after upload middleware and before final import handler');
+assert.match(importGuard,/recoverInterruptedSameHashRepairs/,'interrupted same-file repair must recover safely on startup');
+assert.match(parser,/NOT_FOUND_OPTIONAL/,'recipient column may be absent without silently discarding a whole sheet');
+assert.match(parser,/hasShipmentValues/,'sheet discovery must be driven by actual waybill presence');
+assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipient-column absence must no longer skip the sheet');
+
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
-console.log('[V273] single visible trend owner + ledger-backed trend truth + final reupload completeness gate passed');
+console.log('[V273] single visible trend owner + ledger-backed trend truth + final reupload completeness/same-file repair gate passed');
