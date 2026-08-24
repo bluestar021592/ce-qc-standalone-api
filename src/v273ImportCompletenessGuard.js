@@ -3,7 +3,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V273_IMPORT_COMPLETENESS_ID='2026-08-24-v273-final-history-reupload-completeness-v1';
+export const V273_IMPORT_COMPLETENESS_ID='2026-08-24-v273-final-history-reupload-completeness-v2';
 const previousPost=express.application.post;
 
 export function compareV273ReuploadCounts(newCount,previousCount){
@@ -16,7 +16,8 @@ function latestValidCount(reportDate,db=getDb()){
 }
 async function guard(req,res,next){
   try{
-    const filePath=String(req.file?.path||'');if(!filePath||!fs.existsSync(filePath))return next();
+    const filePath=String(req.file?.path||'');
+    if(!filePath||!fs.existsSync(filePath))return res.status(422).json({ok:false,code:'V273_IMPORT_FILE_NOT_READY',error:'日报文件尚未完成接收，已阻止入库。'});
     const requestedDate=String(req.body?.reportDate||'').slice(0,10);
     const parsed=parseUnifiedDailyExcel(filePath,{reportDate:requestedDate,originalName:req.file?.originalname||''});
     const previous=latestValidCount(parsed.reportDate);
@@ -29,7 +30,10 @@ async function guard(req,res,next){
 }
 function responseTruth(req,res,next){const originalJson=res.json.bind(res);res.json=function(payload){if(res.statusCode<400&&payload&&req.v273ImportCompleteness)payload.importCompleteness=req.v273ImportCompleteness;return originalJson(payload);};next();}
 express.application.post=function v273ImportPost(pathValue,...handlers){
-  if(String(pathValue||'')==='/api/import/unified-daily-report'&&handlers.length>=2)return previousPost.call(this,pathValue,handlers[0],guard,responseTruth,...handlers.slice(1));
+  if(String(pathValue||'')==='/api/import/unified-daily-report'&&handlers.length>=1){
+    const last=handlers.length-1;
+    return previousPost.call(this,pathValue,...handlers.slice(0,last),guard,responseTruth,handlers[last]);
+  }
   return previousPost.call(this,pathValue,...handlers);
 };
-console.info('[CE-QC][V273_IMPORT_COMPLETENESS]',V273_IMPORT_COMPLETENESS_ID,'same-date reupload cannot silently shrink; parser/source/classification counts checked before commit.');
+console.info('[CE-QC][V273_IMPORT_COMPLETENESS]',V273_IMPORT_COMPLETENESS_ID,'guard runs after upload middleware and immediately before final import commit; same-date reupload cannot silently shrink.');
