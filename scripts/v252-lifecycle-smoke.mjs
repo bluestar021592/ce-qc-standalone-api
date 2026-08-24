@@ -63,10 +63,12 @@ let cn=db.prepare("SELECT * FROM qc_tracking_ledger WHERE shipmentCode='CN-V252-
 assert.equal(Number(cn.attemptNo),1);
 assert.match(cn.attemptSource,/^V246_STRICT_TRACK:V252_OPEN:/,'OPEN attempt must be explicitly marked provisional-current, not final POD evidence');
 
-// The next-day state refresh changes only CN. Because carryover updatedAt is newer
-// than the last strict-track check, V252 must query this OPEN parcel again and see
-// Pending/failure -> new START as the current second attempt before POD exists.
-db.prepare("UPDATE carryover_open_items SET updatedAt='2026-08-24T00:00:00.000Z' WHERE shipmentCode='CN-V252-LIFE-1'").run();
+// The next state refresh must always be newer than the first strict-track check.
+// Never hard-code a calendar timestamp here: once wall-clock time passes that value,
+// the smoke would falsely conclude that a genuinely newer OPEN state is stale.
+const firstCheckedAt=Date.parse(cn.lastCheckedAt||'')||Date.now();
+const refreshedAt=new Date(firstCheckedAt+60_000).toISOString();
+db.prepare("UPDATE carryover_open_items SET updatedAt=? WHERE shipmentCode='CN-V252-LIFE-1'").run(refreshedAt);
 const secondClient={trackQuery:async bills=>bills.flatMap(bill=>bill==='CN-V252-LIFE-1'?[
   {shipmentCode:bill,eventCode:'70',eventTime:'2026-08-21 09:00:00',trackingEventDescZh:'开始派送'},
   {shipmentCode:bill,eventCode:'150',eventTime:'2026-08-21 18:00:00',trackingEventDescZh:'Pending 无人接听'},
