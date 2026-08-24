@@ -98,8 +98,8 @@ assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipien
 
 // V281 bypasses the flaky browser upload path only by replaying the exact SHA-256
 // source already archived by V266. It must never guess among files or shrink old
-// membership. Failed/interrupted repairs must restore the old VALID batch.
-assert.match(archiveReplay,/2026-08-24-v281-archive-backed-same-hash-history-reparse-v1/,'V281 archive replay version must be active');
+// membership. Historical repair is intentionally isolated from current/carry state.
+assert.match(archiveReplay,/2026-08-24-v281-archive-backed-same-hash-history-reparse-v2/,'V281 historical-only archive replay version must be active');
 assert.match(archiveReplay,/V281_PRIORITY_REPORT_DATE\s*=\s*'2026-08-17'/,'V281 must target the currently blocked historical report date only');
 assert.match(archiveReplay,/findV281ArchivedSourceByHash/,'V281 must locate evidence only by exact archived SHA-256');
 assert.match(archiveReplay,/parsed\.fileHash/,'V281 must verify the parsed archive hash against the old batch hash');
@@ -110,8 +110,17 @@ assert.match(archiveReplay,/V281_REPARSE_PENDING:/,'V281 must use a recoverable 
 assert.match(archiveReplay,/recoverPending/,'V281 must recover interrupted pending repairs on the next startup');
 assert.match(archiveReplay,/SUPERSEDED_V281:/,'V281 must retain old batch history after successful replacement');
 assert.match(archiveReplay,/V281_ARCHIVE_REPLAY_REPAIRED/,'successful archive replay must be explicitly logged');
+assert.match(archiveReplay,/saveV281HistoricalImport/,'V281 must use a dedicated historical-only writer');
+assert.doesNotMatch(archiveReplay,/import \{[^}]*saveUnifiedImport[^}]*\} from '\.\/unifiedImportStore\.js'/,'V281 must never call normal current-state import writer');
+const historicalSaver=(archiveReplay.match(/export function saveV281HistoricalImport[\s\S]*?export async function replayV281ArchivedReportDate/)||[''])[0];
+assert.ok(historicalSaver,'V281 historical-only saver source must be present');
+assert.doesNotMatch(historicalSaver,/shipment_current_state|carryover_open_items/,'historical-only saver must never write current-state or carryover tables');
+assert.match(historicalSaver,/shipment_daily_snapshots/,'historical replay must rebuild daily snapshot facts');
+assert.match(historicalSaver,/unified_import_rows/,'historical replay must rebuild unified import rows');
+assert.match(historicalSaver,/unified_snapshots/,'historical replay must rebuild unified snapshot payload');
+assert.match(archiveReplay,/currentStatePreserved:\s*true/,'successful replay must explicitly report current-state preservation');
 assert.match(archiveReplay,/process\.env\.NODE_ENV === 'test' \|\| process\.env\.CI/,'candidate tests must not run the production archive replay timer');
 
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-replay-smoke.mjs'],{stdio:'inherit'});
-console.log('[V281/V280/V274/V273] archive same-hash replay + sparse Excel range + staged import timing + ledger-first hot trends + reupload protection gate passed');
+console.log('[V281/V280/V274/V273] historical-only same-hash archive replay + current-state preservation + sparse Excel range + staged import timing + ledger-first hot trends + reupload protection gate passed');
