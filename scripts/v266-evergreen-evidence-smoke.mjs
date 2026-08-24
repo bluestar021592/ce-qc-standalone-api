@@ -12,6 +12,7 @@ const source=fs.readFileSync('src/v266EvergreenEvidenceArchive.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const mod=await import(`../src/v266EvergreenEvidenceArchive.js?smoke=${Date.now()}`);
 const v283=await import(`../src/v283LegacyDecoratedHashReplay.js?smoke=${Date.now()}`);
+const v283Retry=await import(`../src/v283LegacyDecoratedHashReplayRetry.js?smoke=${Date.now()}`);
 const paths=mod.getV266EvidenceArchivePaths();
 assert.equal(mod.V266_MIN_RETENTION_DAYS,366,'evergreen evidence must retain at least one full year plus leap-day margin');
 assert.match(mod.V266_RETENTION_POLICY,/NO_AUTOMATIC_ARCHIVE_DELETE/,'archive must never be automatically purged by a normal upgrade');
@@ -27,6 +28,8 @@ assert.equal(v283.canonicalLegacyFileHash(`${legacySha}:2026-08-13-v77-ceaf-whpp
 assert.equal(v283.canonicalLegacyFileHash(legacySha),legacySha,'V283 must preserve an already canonical SHA-256');
 assert.equal(v283.canonicalLegacyFileHash(`prefix:${legacySha}`),'','V283 must reject hashes that do not begin with the exact SHA-256');
 assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplay\.js';/,'V283 decorated-hash replay must be activated in the normal startup chain');
+assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'V283 post-evidence-seed retry must be activated in the normal startup chain');
+assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
 await fsp.mkdir(paths.importsRoot,{recursive:true});
@@ -47,4 +50,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283] evergreen evidence + legacy decorated SHA canonicalization + full replay smoke passed');
+console.log('[V266/V283] evergreen evidence + legacy decorated SHA canonicalization + full replay + bounded retry smoke passed');
