@@ -5,7 +5,7 @@ import XLSX from 'xlsx';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V281_ARCHIVED_HISTORICAL_REPARSE_ID = '2026-08-24-v281-archive-backed-same-hash-history-reparse-v2';
+export const V281_ARCHIVED_HISTORICAL_REPARSE_ID = '2026-08-24-v281-archive-backed-same-hash-history-reparse-v3';
 export const V281_PRIORITY_REPORT_DATE = '2026-08-17';
 const CELL_ADDRESS_RE = /^[A-Z]{1,3}[1-9]\d*$/;
 const WAYBILL_CELL_RE = /^(?:TBKH|SPE|CC|CE)[A-Z0-9]{8,}$/;
@@ -242,22 +242,30 @@ export async function replayV281ArchivedReportDate(reportDate, options = {}) {
     return result;
   }
 
+  let saved = null;
   try {
     const saveStarted = Date.now();
-    const saved = await saveFn(parsed, `V281_ARCHIVE_REPLAY_${reportDate}_${path.basename(archivePath)}`);
+    saved = await saveFn(parsed, `V281_ARCHIVE_REPLAY_${reportDate}_${path.basename(archivePath)}`);
     const saveMs = Date.now() - saveStarted;
     const newCount = Number(db.prepare('SELECT COUNT(*) count FROM unified_import_rows WHERE batchId=?').get(saved.batchId)?.count || 0);
     if (!saved?.batchId || String(saved.reportDate || '') !== reportDate || String(saved.fileHash || '').toLowerCase() !== String(batch.fileHash).toLowerCase() || newCount !== assessment.parsedCount) {
       throw new Error(`V281 replay post-save verification failed: newCount=${newCount}, expected=${assessment.parsedCount}`);
     }
-    db.prepare('UPDATE unified_import_batches SET status=? WHERE batchId=? AND status=?').run(`SUPERSEDED_V281:${saved.batchId}`, batch.batchId, pending);
+    const superseded = db.prepare('UPDATE unified_import_batches SET status=? WHERE batchId=? AND status=?').run(`SUPERSEDED_V281:${saved.batchId}`, batch.batchId, pending).changes;
+    if (!superseded) throw new Error('V281 replay could not finalize old historical batch status');
     try { globalThis.__CE_QC_REFRESH_V274_TRENDS__?.(); } catch {}
     const result = { ok: true, repaired: true, reportDate, oldBatchId: batch.batchId, newBatchId: saved.batchId, fileHash: batch.fileHash, previousCount: assessment.previousCount, newCount, recovered: newCount - assessment.previousCount, currentStatePreserved: true, censusMs, parseMs, saveMs, durationMs: Date.now() - startedAt };
     logger.info?.('[CE-QC][V281_ARCHIVE_REPLAY_REPAIRED]', JSON.stringify(result));
     return result;
   } catch (error) {
+    if (saved?.batchId) {
+      try {
+        db.prepare("UPDATE unified_import_batches SET status=? WHERE batchId=? AND status='VALID'")
+          .run(`INVALID_V281_FAILED:${batch.batchId}`, saved.batchId);
+      } catch {}
+    }
     try { db.prepare("UPDATE unified_import_batches SET status='VALID' WHERE batchId=? AND status=?").run(batch.batchId, pending); } catch {}
-    const result = { ok: false, repaired: false, reason: 'REPLAY_SAVE_FAILED', reportDate, batchId: batch.batchId, error: error?.message || String(error), durationMs: Date.now() - startedAt };
+    const result = { ok: false, repaired: false, reason: 'REPLAY_SAVE_FAILED', reportDate, batchId: batch.batchId, rejectedNewBatchId: saved?.batchId || '', error: error?.message || String(error), durationMs: Date.now() - startedAt };
     logger.error?.('[CE-QC][V281_ARCHIVE_REPLAY_FAILED]', JSON.stringify(result));
     return result;
   }
@@ -274,4 +282,4 @@ function schedulePriorityReplay() {
 }
 
 schedulePriorityReplay();
-console.info('[CE-QC][V281_ARCHIVE_REPLAY]', V281_ARCHIVED_HISTORICAL_REPARSE_ID, `priority=${V281_PRIORITY_REPORT_DATE}`, 'exact same-file-hash archive replay; historical tables only; shipment_current_state and carryover_open_items are never written; old membership must remain a full subset and row count never shrinks.');
+console.info('[CE-QC][V281_ARCHIVE_REPLAY]', V281_ARCHIVED_HISTORICAL_REPARSE_ID, `priority=${V281_PRIORITY_REPORT_DATE}`, 'exact same-file-hash archive replay; historical tables only; shipment_current_state and carryover_open_items are never written; old membership must remain a full subset; failed post-save verification invalidates the new batch before restoring the old VALID batch.');
