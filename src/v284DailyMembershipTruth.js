@@ -136,9 +136,21 @@ function queryWhppRegionFacts(from,to,db) {
   let rows=[];
   try {
     rows=db.prepare(`
-      WITH valid AS (
-        SELECT DISTINCT reportDate,UPPER(TRIM(shipmentCode)) shipmentCode
-        FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? AND TRIM(COALESCE(shipmentCode,''))<>''
+      WITH ranked AS (
+        SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
+               ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.batchId DESC) rn
+        FROM unified_import_batches b
+        WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
+      ), latest AS (SELECT reportDate,snapshotId FROM ranked WHERE rn=1), valid AS (
+        SELECT DISTINCT p.reportDate,UPPER(TRIM(p.shipmentCode)) shipmentCode
+        FROM business_daily_parse_rows p
+        LEFT JOIN latest l ON l.reportDate=p.reportDate
+        WHERE p.businessType='WHPP' AND p.reportDate BETWEEN ? AND ? AND TRIM(COALESCE(p.shipmentCode,''))<>''
+          AND NOT EXISTS (
+            SELECT 1 FROM unified_import_rows u
+            WHERE u.snapshotId=l.snapshotId AND u.reportDate=p.reportDate AND u.businessType='CEAF'
+              AND UPPER(TRIM(u.shipmentCode))=UPPER(TRIM(p.shipmentCode))
+          )
       ), joined AS (
         SELECT v.reportDate,v.shipmentCode,l.shipmentCode ledgerBill,f.shipmentCode finalBill,
           CASE WHEN l.shipmentCode IS NOT NULL THEN CASE WHEN l.terminalReason='POD' THEN 1 ELSE 0 END ELSE COALESCE(f.isPod,0) END isPod,
@@ -156,7 +168,7 @@ function queryWhppRegionFacts(from,to,db) {
         SUM(CASE WHEN isPod=1 AND attemptNo=1 THEN 1 ELSE 0 END) attempt1,SUM(CASE WHEN isPod=1 AND attemptNo=2 THEN 1 ELSE 0 END) attempt2,SUM(CASE WHEN isPod=1 AND attemptNo>=3 THEN 1 ELSE 0 END) attempt3,SUM(CASE WHEN isPod=1 AND attemptNo=0 THEN 1 ELSE 0 END) attemptUnknown,
         SUM(CASE WHEN isPod=1 AND signingDays>0 THEN signingDays ELSE 0 END) signingDaysSum,SUM(CASE WHEN isPod=1 AND signingDays>0 THEN 1 ELSE 0 END) signingDaysCount
       FROM joined GROUP BY reportDate ORDER BY reportDate
-    `).all(from,to);
+    `).all(from,to,from,to);
   } catch { return []; }
   return rows.map(row=>finishFact({...emptyFact('WHPP',String(row.reportDate||''),'UNKNOWN'),...row}));
 }
@@ -219,4 +231,4 @@ export function summarizeV284Range(fromDate,toDate,db=getDb()) {
 export function invalidateV284DailyMembershipTruth(){cache.clear();}
 
 globalThis.__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__=invalidateV284DailyMembershipTruth;
-console.info('[CE-QC][V284_DAILY_MEMBERSHIP]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'daily denominator=latest VALID report membership; status truth=V246 ledger first, legacy final rows fallback; firstReportDate is no longer used as daily cohort membership.');
+console.info('[CE-QC][V284_DAILY_MEMBERSHIP]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'daily denominator=latest VALID report membership; WHPP excludes same-day latest-VALID CEAF overlap; status truth=V246 ledger first, legacy final rows fallback; firstReportDate is no longer used as daily cohort membership.');
