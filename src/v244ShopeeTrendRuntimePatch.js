@@ -56,7 +56,7 @@ export function readV244ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate=
       podRate:'V284当天最新VALID日报成员中的当前POD/当日成员总票；状态以V246账本优先，旧final仅缺失回退',
       ocRate:'V284当天日报成员中的当前真实OC/当日成员总票',
       avgPodDays:'签收天数沿用V246锁定首次日报日期到实际POD日期，含首尾当天；日报覆盖未完成时显示—',
-      attemptRate:'真实派次证据对应已POD票数/当日POD；无证据或日报覆盖未完成时显示—，未识别POD单独列出',
+      attemptRate:'真实派次证据对应已POD票数/当日POD；无证据显示—；日报覆盖未完成时也显示—，未识别POD单独列出',
       trackingLedger:'日报成员决定分母；V246账本决定当前状态/POD/派次，firstReportDate不再决定趋势日期',
       regionTruth:'PP/PV来自当天最新VALID日报成员，状态仍以V246账本为权威'
     }
