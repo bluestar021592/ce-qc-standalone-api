@@ -39,9 +39,10 @@ for(const [name,marker] of [
   ['V283','replayV283LegacyDecoratedHash'],
   ['V284 audit','auditV284PriorityRange'],
   ['V284 priority','refreshV284PriorityUnproven'],
-  ['V254 storage','const report=buildReport()']
+  ['V254 storage rule','V254_STORAGE_SIZE_SCAN']
 ]) assert.ok(guard.includes(marker),`${name} automatic startup work must be recognized by V290`);
 for(const task of ['v281-replay','v283-replay','v284-audit','v284-priority','v254-storage'])assert.ok(guard.includes(`child:'${task}'`),`${task} must be relocated to the maintenance child`);
+assert.match(guard,/V254_STORAGE_SIZE_SCAN[\s\S]*child:'v254-storage'/,'V254 synchronous storage scan must be explicitly relocated to its child worker');
 assert.match(guard,/V283_LEGACY_REPLAY_PRIMARY[\s\S]*whenDelay:d=>Number\(d\)<30_000/,'V283 primary and post-seed retry must not collapse onto one child launch');
 assert.match(guard,/V283_LEGACY_REPLAY_POST_SEED[\s\S]*whenDelay:d=>Number\(d\)>=30_000/,'V283 post-seed retry must remain later than the primary replay');
 assert.match(launcher,/spawn\(process\.execPath/,'V290 must launch isolated Node child processes rather than execute heavy automatic work on the 5177 event loop');
