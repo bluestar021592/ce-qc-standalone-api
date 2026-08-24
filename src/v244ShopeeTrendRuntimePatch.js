@@ -1,8 +1,6 @@
 import express from 'express';
-import {
-  V284_DAILY_MEMBERSHIP_TRUTH_ID,
-  readV284ShopeeTrends
-} from './v284DailyMembershipTruth.js';
+import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
+import { readV284ProvenShopeeTrends } from './v284MembershipEvidenceCoverage.js';
 
 // Historical export names remain stable for the browser and old code, but V284
 // replaces the old firstReportDate cohort with exact daily latest-VALID membership.
@@ -46,19 +44,19 @@ function legacyCoverage(row={}){
 }
 
 export function readV244ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate='',options={}) {
-  const result=readV284ShopeeTrends(businessType,fromDate,toDate,options);
+  const result=readV284ProvenShopeeTrends(businessType,fromDate,toDate,options);
   const daily=(result.daily||[]).map(legacyCoverage);
   return {
     ...result,
     daily,
     readId:V247_SHOPEE_TREND_ID,
     definitions:{
-      podRate:'V284当天最新VALID日报成员中的当前POD/当日成员总票；状态以V246账本优先，旧final仅缺失回退',
+      podRate:'V284当天最新VALID日报成员中的当前POD/当日成员总票；状态以已验证V246账本优先，旧final仅缺失回退',
       ocRate:'V284当天日报成员中的当前真实OC/当日成员总票',
       avgPodDays:'签收天数沿用V246锁定首次日报日期到实际POD日期，含首尾当天；日报覆盖未完成时显示—',
       attemptRate:'真实派次证据对应已POD票数/当日POD；无证据显示—；日报覆盖未完成时也显示—，未识别POD单独列出',
-      trackingLedger:'日报成员决定分母；V246账本决定当前状态/POD/派次，firstReportDate不再决定趋势日期',
-      regionTruth:'PP/PV来自当天最新VALID日报成员，状态仍以V246账本为权威'
+      trackingLedger:'日报成员决定分母；V246已验证账本事实决定当前状态/POD/派次；空OPEN占位账本不算已分析，firstReportDate不再决定趋势日期',
+      regionTruth:'PP/PV来自当天最新VALID日报成员，状态仍以已验证V246账本为权威'
     }
   };
 }
@@ -87,7 +85,7 @@ express.application.get=function v284ShopeeTrendRoute(pathValue,...handlers){
     previousGet.call(this,'/api/v246/shopee-trends',handler);
     previousGet.call(this,'/api/v245/shopee-trends',handler);
     previousGet.call(this,'/api/v244/shopee-trends',handler);
-    console.info('[CE-QC][V284_SHOPEE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered daily-membership lifecycle metrics with optional exact PP/PV truth + guarded legacy coverage aliases.');
+    console.info('[CE-QC][V284_SHOPEE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered daily-membership lifecycle metrics with proven-evidence coverage + guarded legacy aliases.');
   }
   return previousGet.call(this,pathValue,...handlers);
 };
