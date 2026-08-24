@@ -4,7 +4,7 @@ import XLSX from 'xlsx';
 import { getDb, nowIso } from './db.js';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V273_IMPORT_COMPLETENESS_ID='2026-08-24-v273-final-history-reupload-completeness-v5';
+export const V273_IMPORT_COMPLETENESS_ID='2026-08-24-v279-final-history-reupload-completeness-v6';
 const previousPost=express.application.post;
 const WAYBILL_CELL_RE=/^(?:TBKH|SPE|CC|CE)[A-Z0-9]{8,}$/;
 const normBill=v=>String(v??'').normalize('NFKC').trim().toUpperCase().replace(/[\s-]+/g,'');
@@ -66,18 +66,29 @@ function finalizeRepair(req,success,db=getDb()){
   req.v273SameHashRepair=null;
 }
 async function guard(req,res,next){
+  const startedAt=Date.now();
   try{
     const filePath=String(req.file?.path||'');
     if(!filePath||!fs.existsSync(filePath))return res.status(422).json({ok:false,code:'V273_IMPORT_FILE_NOT_READY',error:'日报文件尚未完成接收，已阻止入库。'});
     const requestedDate=String(req.body?.reportDate||'').slice(0,10);
+    const censusStarted=Date.now();
     const census=readV273SourceWaybillCensus(filePath);
+    const censusMs=Date.now()-censusStarted;
+    const parseStarted=Date.now();
     const parsed=parseUnifiedDailyExcel(filePath,{reportDate:requestedDate,originalName:req.file?.originalname||''});
+    const parseMs=Date.now()-parseStarted;
+    // V279: hand the already validated parse to the final import handler. The
+    // previous V278 path parsed the same workbook a second time before COMMIT.
+    req.v279UnifiedParsed=parsed;
+    const membershipStarted=Date.now();
     const previous=latestValidMembership(parsed.reportDate);
+    const membershipLookupMs=Date.now()-membershipStarted;
     const newBills=(parsed.rows||[]).map(row=>row.shipmentCode);
     const sourceCoverage=compareV273ParsedToCensus(newBills,census.bills);
     const comparison=compareV273ReuploadCounts(parsed.summary?.validUniqueWaybills,previous.count);
     const membership=compareV273Membership(newBills,previous.bills);
-    req.v273ImportCompleteness={id:V273_IMPORT_COMPLETENESS_ID,reportDate:parsed.reportDate,sourceWaybillCensus:census.count,rawRows:Number(parsed.summary?.rawRows||0),validUniqueWaybills:Number(parsed.summary?.validUniqueWaybills||0),classifiedWaybills:Number(parsed.sourceReconciliation?.classifiedWaybills||0),previousValidWaybills:previous.count,previousBatchId:previous.batchId,sameSourceFile:previous.fileHash===parsed.fileHash,sourceMissingCount:sourceCoverage.missingCount,sourceMissingBills:sourceCoverage.missingBills.slice(0,50),missingPreviousCount:membership.missingPreviousCount,missingPreviousBills:membership.missingPreviousBills.slice(0,50),sheetDiagnostics:parsed.sheetDiagnostics||[],sourceSheetCensus:census.sheets};
+    req.v273ImportCompleteness={id:V273_IMPORT_COMPLETENESS_ID,reportDate:parsed.reportDate,sourceWaybillCensus:census.count,rawRows:Number(parsed.summary?.rawRows||0),validUniqueWaybills:Number(parsed.summary?.validUniqueWaybills||0),classifiedWaybills:Number(parsed.sourceReconciliation?.classifiedWaybills||0),previousValidWaybills:previous.count,previousBatchId:previous.batchId,sameSourceFile:previous.fileHash===parsed.fileHash,sourceMissingCount:sourceCoverage.missingCount,sourceMissingBills:sourceCoverage.missingBills.slice(0,50),missingPreviousCount:membership.missingPreviousCount,missingPreviousBills:membership.missingPreviousBills.slice(0,50),sheetDiagnostics:parsed.sheetDiagnostics||[],sourceSheetCensus:census.sheets,timing:{censusMs,parseMs,membershipLookupMs,totalGuardMs:Date.now()-startedAt}};
+    console.info('[CE-QC][V279_IMPORT_PRECOMMIT]',JSON.stringify({reportDate:parsed.reportDate,rows:Number(parsed.summary?.validUniqueWaybills||0),censusMs,parseMs,membershipLookupMs,totalGuardMs:Date.now()-startedAt}));
     if(!sourceCoverage.ok)return res.status(422).json({ok:false,code:'V273_SOURCE_WAYBILL_CENSUS_MISMATCH',error:`源Excel可识别到${census.count}个运单，但正式解析漏掉${sourceCoverage.missingCount}个。已阻止入库，禁止静默漏单。`,completeness:req.v273ImportCompleteness});
     if(!parsed.sourceReconciliation?.balanced)return res.status(422).json({ok:false,code:'V273_CLASSIFICATION_NOT_BALANCED',error:'日报分类守恒失败，已阻止入库。',completeness:req.v273ImportCompleteness});
     if(!comparison.ok)return res.status(409).json({ok:false,code:'V273_SAME_DATE_REUPLOAD_SHRINK_BLOCKED',error:`${parsed.reportDate}重新上传文件只有${comparison.newCount}个唯一运单，少于当前有效批次${comparison.previousCount}个。为防止历史单号再次丢失，本次已拒绝覆盖。请上传完整原始日报。`,completeness:req.v273ImportCompleteness});
@@ -97,4 +108,4 @@ express.application.post=function v273ImportPost(pathValue,...handlers){
   return previousPost.call(this,pathValue,...handlers);
 };
 if(process.env.NODE_ENV!=='test'&&!process.env.CI)setImmediate(()=>recoverInterruptedSameHashRepairs());
-console.info('[CE-QC][V273_IMPORT_COMPLETENESS]',V273_IMPORT_COMPLETENESS_ID,'independent source census + parser/classification conservation + same-date membership superset; same-file parser repair allowed, silent loss blocked; successful import refreshes V274 hot trend facts.');
+console.info('[CE-QC][V273_IMPORT_COMPLETENESS]',V273_IMPORT_COMPLETENESS_ID,'independent source census + parser/classification conservation + same-date membership superset; validated parse is reused by V279 final handler; same-file parser repair allowed, silent loss blocked.');
