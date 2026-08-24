@@ -26,6 +26,7 @@ const backupRoot=path.join(dataDir,'backups','pre_update');
 const BACKUP_RATE_PAGES=Math.max(1024,Math.min(32768,Number(process.env.CE_QC_UPDATE_BACKUP_RATE_PAGES||8192)));
 const REUSE_SCAN_LIMIT=Math.max(1,Math.min(100,Number(process.env.CE_QC_UPDATE_BACKUP_REUSE_SCAN_LIMIT||30)));
 const LOW_RISK_BACKUP_MAX_AGE_MS=Math.max(60*60*1000,Math.min(7*24*60*60*1000,Number(process.env.CE_QC_LOW_RISK_BACKUP_MAX_AGE_MS||24*60*60*1000)));
+const SOURCE_LOCK_TIMEOUT_MS=Math.max(5000,Math.min(120000,Number(process.env.CE_QC_UPDATE_BACKUP_LOCK_TIMEOUT_MS||30000)));
 const SHA_BUFFER_BYTES=16*1024*1024;
 
 // Progress intentionally goes to stderr. Older managed launchers pipe stdout to
@@ -112,6 +113,22 @@ function sha256WithProgress(file){
   return hash.digest('hex');
 }
 
+function acquireSourceWriteFreeze(){
+  const lockDb=new DatabaseSync(dbFile,{timeout:SOURCE_LOCK_TIMEOUT_MS});
+  try{
+    lockDb.exec(`PRAGMA busy_timeout=${SOURCE_LOCK_TIMEOUT_MS}; BEGIN IMMEDIATE;`);
+    return lockDb;
+  }catch(error){
+    try{lockDb.close();}catch{}
+    throw new Error(`SOURCE_WRITE_FREEZE_FAILED:${error?.message||error}`);
+  }
+}
+function releaseSourceWriteFreeze(lockDb){
+  if(!lockDb)return;
+  try{lockDb.exec('ROLLBACK;');}catch{}
+  try{lockDb.close();}catch{}
+}
+
 if(!fs.existsSync(dbFile)){
   log('SKIP',`Database not found: ${dbFile}`);
   console.log(JSON.stringify({ok:true,skipped:true,reason:'DATABASE_NOT_FOUND',dbFile,root}));
@@ -152,51 +169,63 @@ if(updateRisk.files.length>0&&!updateRisk.highRisk&&recentBackup){
 if(updateRisk.highRisk)log('POLICY',`High-risk update touches persistent-data code; full backup required: ${updateRisk.risky.join(', ')}`);
 else if(!recentBackup)log('POLICY','No recent verified backup is available; full backup required even for low-risk update.');
 
-const dir=path.join(backupRoot,stamp());
-fs.mkdirSync(dir,{recursive:true});
-const copyFile=path.join(dir,'ce_qc_monitor.db');
-log('1/4',`Opening source SQLite read-only: ${dbFile}`);
-const source=new DatabaseSync(dbFile,{readOnly:true,timeout:10000});
+log('LOCK',`Freezing SQLite writers with BEGIN IMMEDIATE (timeout ${SOURCE_LOCK_TIMEOUT_MS}ms)...`);
+const writeFreeze=acquireSourceWriteFreeze();
+const sourceLockAcquiredAt=new Date().toISOString();
 try{
-  source.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');
-  log('2/4',`Creating SQLite online backup in ${BACKUP_RATE_PAGES} page batches...`);
-  let nextReport=5;
-  let lastPct=-1;
-  await backup(source,copyFile,{rate:BACKUP_RATE_PAGES,progress:({totalPages,remainingPages})=>{
-    if(!Number.isFinite(totalPages)||totalPages<=0)return;
-    const pct=Math.max(0,Math.min(100,Math.floor(((totalPages-remainingPages)/totalPages)*100)));
-    if(pct!==lastPct&&(pct>=nextReport||remainingPages===0)){
-      lastPct=pct;
-      log('2/4',`SQLite backup ${remainingPages===0?100:pct}%`);
-      while(nextReport<=pct)nextReport+=5;
-    }
-  }});
-}finally{source.close();}
+  const lockedFingerprintBefore=sourceFingerprint();
+  log('LOCK','Write freeze acquired; source state is now quiescent for verified backup.');
+  const dir=path.join(backupRoot,stamp());
+  fs.mkdirSync(dir,{recursive:true});
+  const copyFile=path.join(dir,'ce_qc_monitor.db');
+  log('1/4',`Opening source SQLite read-only: ${dbFile}`);
+  const source=new DatabaseSync(dbFile,{readOnly:true,timeout:10000});
+  try{
+    source.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');
+    log('2/4',`Creating SQLite online backup in ${BACKUP_RATE_PAGES} page batches...`);
+    let nextReport=5;
+    let lastPct=-1;
+    await backup(source,copyFile,{rate:BACKUP_RATE_PAGES,progress:({totalPages,remainingPages})=>{
+      if(!Number.isFinite(totalPages)||totalPages<=0)return;
+      const pct=Math.max(0,Math.min(100,Math.floor(((totalPages-remainingPages)/totalPages)*100)));
+      if(pct!==lastPct&&(pct>=nextReport||remainingPages===0)){
+        lastPct=pct;
+        log('2/4',`SQLite backup ${remainingPages===0?100:pct}%`);
+        while(nextReport<=pct)nextReport+=5;
+      }
+    }});
+  }finally{source.close();}
 
-log('3/4','Opening backup read-only and running quick structural check...');
-const verify=new DatabaseSync(copyFile,{readOnly:true,timeout:10000});
-try{
-  verify.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');
-  const quick=verify.prepare('PRAGMA quick_check(1)').get()?.quick_check||'';
-  if(quick!=='ok')throw new Error(`BACKUP_QUICK_CHECK_FAILED:${quick}`);
-}finally{verify.close();}
+  log('3/4','Opening backup read-only and running quick structural check...');
+  const verify=new DatabaseSync(copyFile,{readOnly:true,timeout:10000});
+  try{
+    verify.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');
+    const quick=verify.prepare('PRAGMA quick_check(1)').get()?.quick_check||'';
+    if(quick!=='ok')throw new Error(`BACKUP_QUICK_CHECK_FAILED:${quick}`);
+  }finally{verify.close();}
 
-const copyStat=fileStat(copyFile);
-if(!copyStat.exists||copyStat.size<=0)throw new Error('BACKUP_EMPTY');
-log('4/4',`Calculating backup SHA-256 for ${(copyStat.size/1024/1024).toFixed(1)} MiB...`);
-const copyHash=sha256WithProgress(copyFile);
-const fingerprintAfter=sourceFingerprint();
-if(!sameFingerprint(fingerprintBefore,fingerprintAfter)){
-  throw new Error('SOURCE_CHANGED_DURING_UPDATE_BACKUP');
+  const copyStat=fileStat(copyFile);
+  if(!copyStat.exists||copyStat.size<=0)throw new Error('BACKUP_EMPTY');
+  log('4/4',`Calculating backup SHA-256 for ${(copyStat.size/1024/1024).toFixed(1)} MiB...`);
+  const copyHash=sha256WithProgress(copyFile);
+  const fingerprintAfter=sourceFingerprint();
+  if(!sameFingerprint(lockedFingerprintBefore,fingerprintAfter)){
+    const detail=JSON.stringify({before:lockedFingerprintBefore,after:fingerprintAfter});
+    throw new Error(`SOURCE_CHANGED_DURING_WRITE_FREEZE:${detail}`);
+  }
+  const manifest={
+    createdAt:new Date().toISOString(),reason:'before-automatic-code-update',projectRoot:root,candidateRoot,
+    databasePath:dbFile,backupPath:copyFile,size:copyStat.size,backupMtimeMs:copyStat.mtimeMs,sha256:copyHash,
+    beforeCommit,targetCommit,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:'quick-ok',
+    verificationMode:'sqlite-write-freeze+online-backup+stable-source-fingerprint+backup-quick-check+sha256',method:'node-sqlite-online-backup-with-begin-immediate-freeze',
+    sourceFingerprint:fingerprintAfter,sourceFingerprintBefore:lockedFingerprintBefore,sourceFingerprintAfter:fingerprintAfter,
+    sourceStableDuringBackup:true,sourceWriteFreeze:'BEGIN_IMMEDIATE',sourceLockAcquiredAt,sourceLockTimeoutMs:SOURCE_LOCK_TIMEOUT_MS,
+    backupRatePages:BACKUP_RATE_PAGES,sourceOpenMode:'read-only-backup-reader+separate-write-freeze-connection',changedFiles:updateRisk.files,highRiskFiles:updateRisk.risky
+  };
+  fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
+  log('READY',`Verified backup ready under write freeze: ${copyFile}`);
+  console.log(JSON.stringify({ok:true,...manifest}));
+}finally{
+  releaseSourceWriteFreeze(writeFreeze);
+  log('LOCK','SQLite write freeze released.');
 }
-const manifest={
-  createdAt:new Date().toISOString(),reason:'before-automatic-code-update',projectRoot:root,candidateRoot,
-  databasePath:dbFile,backupPath:copyFile,size:copyStat.size,backupMtimeMs:copyStat.mtimeMs,sha256:copyHash,
-  beforeCommit,targetCommit,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:'quick-ok',
-  verificationMode:'online-backup+stable-source-fingerprint+backup-quick-check+sha256',method:'node-sqlite-online-backup',
-  sourceFingerprint:fingerprintAfter,sourceFingerprintBefore:fingerprintBefore,sourceFingerprintAfter:fingerprintAfter,
-  sourceStableDuringBackup:true,backupRatePages:BACKUP_RATE_PAGES,sourceOpenMode:'read-only',changedFiles:updateRisk.files,highRiskFiles:updateRisk.risky
-};
-fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
-log('READY',`Verified backup ready: ${copyFile}`);
-console.log(JSON.stringify({ok:true,...manifest}));
