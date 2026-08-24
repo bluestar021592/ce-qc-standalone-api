@@ -7,16 +7,10 @@ import './v231MetricTruthUiInjectionPatch.js';
 import './v244ShopeeTrendRuntimePatch.js';
 import './v246QcTrackingRuntimePatch.js';
 import './v252LifecycleCoordinator.js';
-// V287 keeps the historical V286 module in the startup chain only as a no-op
-// compatibility marker. It no longer wraps express.application.get.
-import './v286V253TrendTruthBridge.js';
-// V288 arms a one-shot express.use hook that inserts static CSS/JS/image serving
-// immediately before accessIdentity, then restores express.use. This prevents
-// render-blocking browser assets from waiting on SQLite-backed session reads.
-import './v288StaticAssetPreAuthPatch.js';
-// The historical V253 backend remains available for instant-summary/region and
-// compatibility reads, but visible browser trends are routed to /api/v273/trends
-// by the fetch-only frontend bridge.
+// V289 restores the exact last-known-good first-paint module structure from
+// commit 88439846. V286/V288 remain available as retired diagnostic modules but
+// are deliberately NOT imported into the interactive startup chain. Seven-business
+// V284/V286 truth stays in the read/data layer and is not rolled back here.
 import './v253DashboardFastPath.js';
 import './v254StorageHealthPatch.js';
 // V255 retention guard is intentionally disabled from startup until its standalone
@@ -25,18 +19,15 @@ import './v256R2ZeroCostGuard.js';
 import './v262ShopeeStrictEvidenceBackfill.js';
 import './v263DeliveryKpiTrendPatch.js';
 
-const PATCH_ID = '2026-08-24-v288-static-preauth-safe-visible-trend-runtime-v1';
+const PATCH_ID = '2026-08-24-v289-known-good-first-paint-runtime-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
-// V253 first paint no longer depends on dashboard_daily_cache. Keep the old cache
-// builder only as delayed maintenance so it cannot compete with normal page reads.
-// Visible browser trends now request /api/v273/trends directly through the frontend
-// fetch bridge. V273 delegates to V284 proven seven-business truth. V288 separately
-// removes CSS/JS/image requests from the DB-backed accessIdentity critical path while
-// keeping HTML navigation and every API authenticated.
-// V246/V252 persistent tracking still owns import admission, two-hour OPEN refresh
-// synchronization and Cambodia 02:00 deep reconciliation. V263 adds attempt/signing
-// evidence only for TBKH + SHOPEECN + SHOPEEVN.
+// Keep first paint on the same proven runtime structure that was working before
+// the V286/V288 startup-hook experiments. Dashboard cache remains delayed
+// maintenance only; V246/V252 persistent tracking still owns import admission,
+// two-hour OPEN refresh synchronization and Cambodia 02:00 deep reconciliation.
+// V284/V286 daily-membership/proven evidence truth remains active through its
+// existing read models/audits and is intentionally not changed by this rollback.
 process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = String(24 * 60 * 60 * 1000);
 process.env.DASHBOARD_CACHE_REFRESH_MS = String(4 * 60 * 60 * 1000);
 process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED = '0';
@@ -82,7 +73,7 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
           primeDashboardCacheInChild(60_000);
         }
       });
-      console.log(`[CE-QC][V239] dashboard cache maintenance child started pid=${child.pid || '-'} after ${Math.round(delayMs/1000)}s; visible browser trends use V273 -> V284 proven truth; cache child is maintenance/audit only.`);
+      console.log(`[CE-QC][V239] dashboard cache prime child exit observable; maintenance child started pid=${child.pid || '-'} after ${Math.round(delayMs/1000)}s; first paint uses the restored known-good V253 runtime structure.`);
     } catch (error) {
       console.warn('[CE-QC][V253] delayed cache maintenance spawn failed:', error?.message || error);
       if (primeAttempts < MAX_PRIME_ATTEMPTS) primeDashboardCacheInChild(60_000);
@@ -92,6 +83,6 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V288] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; static CSS/JS/image assets no longer wait on SQLite session reads; HTML/API remain authenticated; visible browser trends use V273 -> V284/V286 proven seven-business truth.`);
+console.log(`[CE-QC][V289] ${PATCH_ID} restores the 88439846 first-paint startup structure; V286/V288 Express startup hooks are retired from normal runtime; V284/V286 seven-business data truth remains preserved.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
