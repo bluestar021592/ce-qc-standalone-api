@@ -66,8 +66,13 @@ assert.match(delivery,/setImmediate\(\(\) => \{ void finishUnifiedCompatibility/
 assert.match(delivery,/V280_IMPORT_COMPAT_DONE/,'background compatibility completion must be observable');
 assert.match(delivery,/CORE_LIVE_ASSET_RE/,'core cache-reset protection must remain');
 
-assert.match(importGuard,/2026-08-24-v280-sparse-excel-range-import-v7/,'V280 sparse Excel import guard must be active');
+assert.match(importGuard,/2026-08-24-v282-column-bound-source-census-v1/,'V282 column-bound source census guard must be active');
 assert.match(importGuard,/CELL_ADDRESS_RE/,'sparse census must enumerate actual worksheet cells');
+assert.match(importGuard,/SHIPMENT_HEADERS/,'blocking source census must bind to recognized shipment headers');
+assert.match(importGuard,/findShipmentBinding/,'source census must resolve the actual shipment column before counting');
+assert.match(importGuard,/allCellWaybillCandidates/,'all-cell candidates must remain diagnostic evidence');
+assert.match(importGuard,/ignoredOffColumnCandidates/,'off-column waybill-like strings must be diagnosed instead of silently discarded');
+assert.match(importGuard,/sourceMissingDetails/,'true missing shipment-column rows must expose exact source locations');
 assert.match(importGuard,/scannedCells/,'sparse census must expose actual scanned cell count');
 assert.match(importGuard,/originalRef/,'inflated source !ref must be observable');
 assert.match(importGuard,/safeRange/,'derived safe worksheet range must be observable');
@@ -75,12 +80,13 @@ assert.match(importGuard,/withSparseSheetToJson/,'formal parser must be clamped 
 assert.match(importGuard,/range: sparse\.range/,'sheet_to_json must receive derived sparse safe range');
 assert.match(importGuard,/V280_IMPORT_GUARD_START/,'post-upload guard start must be observable');
 assert.match(importGuard,/V280_IMPORT_CENSUS_START/,'census start must be observable');
-assert.match(importGuard,/V280_IMPORT_CENSUS_DONE/,'census end must be observable');
+assert.match(importGuard,/V282_IMPORT_CENSUS_DONE/,'column-bound census end must be observable');
+assert.match(importGuard,/V282_TRUE_SOURCE_MISMATCH/,'true shipment-column source loss must remain explicitly blocked and logged');
 assert.match(importGuard,/V280_IMPORT_PARSE_START/,'formal parse start must be observable');
 assert.match(importGuard,/V280_IMPORT_PARSE_DONE/,'formal parse end must be observable');
 assert.match(importGuard,/V280_IMPORT_PRECOMMIT/,'pre-COMMIT aggregate timing must be observable');
 assert.match(importGuard,/req\.v279UnifiedParsed\s*=\s*parsed/,'validated parse must still be handed to final handler');
-assert.match(importGuard,/V273_SOURCE_WAYBILL_CENSUS_MISMATCH/,'independent workbook census must block parser-side source loss');
+assert.match(importGuard,/V273_SOURCE_WAYBILL_CENSUS_MISMATCH/,'independent shipment-column census must block true parser-side source loss');
 assert.match(importGuard,/readV273SourceWaybillCensus/,'source workbook waybills must be counted independently from normal parser');
 assert.match(importGuard,/V273_SAME_DATE_REUPLOAD_SHRINK_BLOCKED/,'smaller same-date reuploads must be rejected');
 assert.match(importGuard,/V273_SAME_DATE_MEMBERSHIP_LOSS_BLOCKED/,'same-date reupload must preserve every prior valid waybill');
@@ -93,10 +99,12 @@ assert.match(parser,/NOT_FOUND_OPTIONAL/,'recipient column may be absent without
 assert.match(parser,/hasShipmentValues/,'sheet discovery must be driven by actual waybill presence');
 assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipient-column absence must no longer skip the sheet');
 
-assert.match(archiveReplay,/2026-08-24-v281-archive-backed-same-hash-history-reparse-v3/,'V281 atomic historical-only archive replay version must be active');
+assert.match(archiveReplay,/2026-08-24-v282-archive-replay-column-bound-census-v4/,'V282 archive replay must use column-bound source census');
 assert.match(archiveReplay,/V281_PRIORITY_REPORT_DATE\s*=\s*'2026-08-17'/,'V281 must target the currently blocked historical report date only');
 assert.match(archiveReplay,/findV281ArchivedSourceByHash/,'V281 must locate evidence only by exact archived SHA-256');
 assert.match(archiveReplay,/parsed\.fileHash/,'V281 must verify the parsed archive hash against the old batch hash');
+assert.match(archiveReplay,/diagnosticCount/,'archive replay must preserve all-cell diagnostic candidate count');
+assert.match(archiveReplay,/ignoredOffColumnCount/,'archive replay must diagnose off-column waybill-like references without blocking');
 assert.match(archiveReplay,/missingPrevious/,'V281 must reject any loss of previous batch membership');
 assert.match(archiveReplay,/missingFromParse/,'V281 must independently reject source-census rows missing from formal parse');
 assert.match(archiveReplay,/parsedCount >= previousCount/,'V281 must never allow a shrinking replay');
@@ -121,4 +129,4 @@ assert.match(archiveReplay,/process\.env\.NODE_ENV === 'test' \|\| process\.env\
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-replay-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-failure-recovery-smoke.mjs'],{stdio:'inherit'});
-console.log('[V281/V280/V274/V273] atomic historical-only same-hash archive replay + current-state preservation + failed-replay recovery + sparse Excel range + staged import timing + ledger-first hot trends + reupload protection gate passed');
+console.log('[V282/V280/V274/V273] shipment-column source census + all-cell diagnostics + atomic historical replay + current-state preservation + failed-replay recovery + sparse Excel range + staged import timing + ledger-first hot trends passed');
