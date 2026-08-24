@@ -13,10 +13,31 @@ export const V247_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 const previousGet=express.application.get;
 let routeRegistered=false;
 
+function legacyCoverage(row={}){
+  const pod=Number(row.pod||0);
+  const known=Number(row.attempt1||0)+Number(row.attempt2||0)+Number(row.attempt3||0);
+  const attemptUnknown=Math.max(Number(row.attemptUnknown||0),Math.max(0,pod-known));
+  const signingDaysCount=Number(row.signingDaysCount||row.podDaysCount||0);
+  const signingDaysSum=Number(row.signingDaysSum||row.podDaysSum||0);
+  const regions={};
+  for(const [key,value] of Object.entries(row.regions||{})) regions[key]=legacyCoverage({...value,regions:{}});
+  return {
+    ...row,
+    regions,
+    podDaysCount:signingDaysCount,
+    podDaysSum:signingDaysSum,
+    attemptEvidenceCount:Math.min(pod,known),
+    attemptUnknown,
+    attemptEvidenceComplete:pod>0&&attemptUnknown===0
+  };
+}
+
 export function readV244ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate='',options={}) {
   const result=readV284ShopeeTrends(businessType,fromDate,toDate,options);
+  const daily=(result.daily||[]).map(legacyCoverage);
   return {
     ...result,
+    daily,
     readId:V247_SHOPEE_TREND_ID,
     definitions:{
       podRate:'V284当天最新VALID日报成员中的当前POD/当日成员总票；状态以V246账本优先，旧final仅缺失回退',
@@ -53,7 +74,7 @@ express.application.get=function v284ShopeeTrendRoute(pathValue,...handlers){
     previousGet.call(this,'/api/v246/shopee-trends',handler);
     previousGet.call(this,'/api/v245/shopee-trends',handler);
     previousGet.call(this,'/api/v244/shopee-trends',handler);
-    console.info('[CE-QC][V284_SHOPEE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered daily-membership lifecycle metrics with optional exact PP/PV truth.');
+    console.info('[CE-QC][V284_SHOPEE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered daily-membership lifecycle metrics with optional exact PP/PV truth + legacy coverage aliases.');
   }
   return previousGet.call(this,pathValue,...handlers);
 };
