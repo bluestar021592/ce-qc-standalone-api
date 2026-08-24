@@ -1,0 +1,1 @@
+V281 CI probe only. No runtime code changes. Validate npm run test:golive including historical-only archive replay and current-state preservation.
