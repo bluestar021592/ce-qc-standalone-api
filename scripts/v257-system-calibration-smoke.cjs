@@ -5,6 +5,7 @@ const { execFileSync } = require('child_process');
 const read = path => fs.readFileSync(path, 'utf8');
 const dashboard = read('src/v253DashboardFastPath.js');
 const shopee = read('src/v244ShopeeTrendRuntimePatch.js');
+const v284 = read('src/v284DailyMembershipTruth.js');
 const tracking = read('src/v246TrackingLedgerCore.js');
 const analyzer = read('src/analyzerV30.js');
 const facts = read('src/trajectoryFacts.js');
@@ -23,14 +24,20 @@ assert.ok(dashboard.includes('row.podRate=pct(row.pod,row.total);row.ocRate=pct(
 assert.ok(dashboard.includes("definitions:{podRate:'POD/当日总票',ocRate:'当前真实OC/当日总票',sameDayPodRate:'首日报当日完成POD/当日总票'}"), 'dashboard API must publish locked daily denominator definitions');
 
 // 3) Shopee 1/2/3-attempt percentages require real POD attempt evidence; missing evidence is null/—, never fake 0%.
-assert.ok(shopee.includes("SUM(CASE WHEN terminalReason='POD' AND attemptNo=1 THEN 1 ELSE 0 END) AS attempt1"), 'attempt 1 must come from locked POD ledger evidence');
-assert.ok(shopee.includes("SUM(CASE WHEN terminalReason='POD' AND attemptNo=2 THEN 1 ELSE 0 END) AS attempt2"), 'attempt 2 must come from locked POD ledger evidence');
-assert.ok(shopee.includes("SUM(CASE WHEN terminalReason='POD' AND attemptNo>=3 THEN 1 ELSE 0 END) AS attempt3"), 'attempt 3+ must come from locked POD ledger evidence');
-assert.ok(shopee.includes('const hasAttemptEvidence=pod>0&&attemptEvidenceCount>0;'), 'Shopee trend must distinguish POD from attempt evidence coverage');
-assert.ok(shopee.includes('attempt1Rate:hasAttemptEvidence ? pct(attempt1,pod) : null'), 'missing attempt-1 evidence must stay unavailable');
-assert.ok(shopee.includes('attempt2Rate:hasAttemptEvidence ? pct(attempt2,pod) : null'), 'missing attempt-2 evidence must stay unavailable');
-assert.ok(shopee.includes('attempt3Rate:hasAttemptEvidence ? pct(attempt3,pod) : null'), 'missing attempt-3 evidence must stay unavailable');
-assert.ok(shopee.includes("evidenceSource:ledgerReady?'V246_LOCKED_TRACKING_LEDGER':'V246_LEDGER_PREPARING_NO_PARTIAL_TRUTH'"), 'partial ledger must never masquerade as historical truth');
+// V284 moved the SQL authority out of the compatibility route into the shared daily-membership truth reader.
+// The daily cohort is the latest VALID report membership, while attempt truth remains V246-ledger-first.
+assert.ok(shopee.includes('readV284ShopeeTrends'), 'Shopee compatibility route must delegate to V284 daily-membership truth');
+assert.ok(v284.includes('LEFT JOIN qc_tracking_ledger l ON l.shipmentCode=v.shipmentCode AND l.businessType=v.businessType'), 'daily membership must join V246 ledger by shipmentCode/businessType instead of grouping by firstReportDate');
+assert.ok(v284.includes("CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.attemptNo,0)"), 'when V246 ledger exists, attempt number must come from locked ledger evidence');
+assert.ok(v284.includes("WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') THEN COALESCE(NULLIF(sf.podAttemptNo,0),NULLIF(sf.currentAttemptNo,0)"), 'legacy Shopee final-row attempt may be used only as fallback when the ledger row is absent');
+assert.ok(v284.includes('SUM(CASE WHEN isPod=1 AND attemptNo=1 THEN 1 ELSE 0 END) attempt1'), 'attempt 1 must be counted only from POD rows with real attempt evidence');
+assert.ok(v284.includes('SUM(CASE WHEN isPod=1 AND attemptNo=2 THEN 1 ELSE 0 END) attempt2'), 'attempt 2 must be counted only from POD rows with real attempt evidence');
+assert.ok(v284.includes('SUM(CASE WHEN isPod=1 AND attemptNo>=3 THEN 1 ELSE 0 END) attempt3'), 'attempt 3+ must be counted only from POD rows with real attempt evidence');
+assert.ok(v284.includes('const hasAttempt=row.pod>0&&known>0;'), 'Shopee trend must distinguish POD from attempt evidence coverage');
+assert.ok(v284.includes('row.attempt1Rate=hasAttempt?pct(row.attempt1,row.pod):null'), 'missing attempt-1 evidence must stay unavailable');
+assert.ok(v284.includes('row.attempt2Rate=hasAttempt?pct(row.attempt2,row.pod):null'), 'missing attempt-2 evidence must stay unavailable');
+assert.ok(v284.includes('row.attempt3Rate=hasAttempt?pct(row.attempt3,row.pod):null'), 'missing attempt-3 evidence must stay unavailable');
+assert.ok(v284.includes("daily denominator=latest VALID report membership; status truth=V246 ledger first"), 'V284 authority must explicitly keep daily membership and lifecycle truth separate');
 
 // 4) Tracking admission and terminal truth must cover all seven boards and close only real terminal evidence.
 assert.ok(tracking.includes("export const V246_TRACKING_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);"), 'tracking ledger must cover all seven physical boards');
@@ -56,4 +63,4 @@ assert.ok(facts.includes('pendingNonContinuous: pendingDates.length >= 2 && !pen
 // 7) Lifecycle/export consolidation is part of the same production gate.
 execFileSync(process.execPath, ['scripts/v268-lifecycle-export-smoke.cjs'], { stdio: 'inherit' });
 
-console.log('[V257] system calibration gate passed: 7-board isolation + daily denominators + Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
+console.log('[V257/V284] system calibration gate passed: 7-board isolation + daily membership denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
