@@ -2,7 +2,7 @@ import './v254StorageHealthPatch.js';
 import express from 'express';
 
 // Preserve historical exported IDs so old safety gates can continue identifying
-// their original contracts. V263 has its own explicit canonical-dashboard ID.
+// their original contracts. New UI generations keep explicit independent IDs.
 export const V231_METRIC_TRUTH_UI_INJECTION_ID = '2026-08-22-v231-metric-truth-ui-injection-v1';
 export const V263_CANONICAL_DASHBOARD_UI_ID = '2026-08-23-v263-canonical-dashboard-delivery-v5';
 export const V232_FAST_METRIC_UI_INJECTION_ID = '2026-08-22-v238-retired-fast-metric-ui-v1';
@@ -24,6 +24,8 @@ export const V261_DASHBOARD_FINAL_UI_INJECTION_ID = '2026-08-23-v261-dashboard-f
 export const V267_REPORT_EXPORT_UI_INJECTION_ID = '2026-08-23-v267-report-export-clarity-v1';
 export const V268_LIFECYCLE_EXPORT_UI_INJECTION_ID = '2026-08-23-v268-auto-lifecycle-export-freshness-v1';
 export const V269_NAVIGATION_SAFE_UI_INJECTION_ID = '2026-08-23-v269-navigation-safe-lifecycle-export-v1';
+export const V271_CANONICAL_INTEGRITY_UI_INJECTION_ID = '2026-08-23-v271-canonical-integrity-owner-v1';
+export const V272_LAYOUT_TREND_UI_INJECTION_ID = '2026-08-24-v272-layout-trend-finalizer-v1';
 
 const DASHBOARD_MARKER = '/dashboard-v18.js?v=20260823-v263-2';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260823-v263-2';
@@ -35,6 +37,8 @@ const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const V267_REPORT_MARKER = '/v267-report-export-owner.js?v=20260823-v267-1';
 const V268_LIFECYCLE_EXPORT_MARKER = '/v268-lifecycle-export-owner.js?v=20260823-v269-1';
+const V271_CANONICAL_INTEGRITY_MARKER = '/v271-canonical-integrity-owner.js?v=20260824-v272-1';
+const V272_LAYOUT_TREND_MARKER = '/v272-layout-trend-finalizer.js?v=20260824-v272-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
 // Compatibility-only source markers for pre-V263 gates. They remain ordered for
 // old source assertions, but are stripped and never injected after V263.
@@ -60,7 +64,8 @@ function prepareOwnerHtml(body) {
   for (const file of [
     'v230-metric-truth-ui.js','v232-card-percentages.js','v235-cache-ready-reload.js','v234-dashboard-live.js',
     'v237-home-dashboard-owner.js','v244-shopee-trend-owner.js','v250-shopee-metric-visibility.js',
-    'v252-qc-lifecycle-ui.js','v254-dashboard-render-rescue.js','v261-dashboard-final-owner.js'
+    'v252-qc-lifecycle-ui.js','v254-dashboard-render-rescue.js','v261-dashboard-final-owner.js',
+    'v271-canonical-integrity-owner.js','v272-layout-trend-finalizer.js'
   ]) body = stripScript(body, file);
   return body
     .replace(/\/dashboard-v18\.js\?v=[^"']+/g, DASHBOARD_MARKER)
@@ -68,7 +73,7 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v263MetricTruthUiSend(body) {
+express.response.send = function v272MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
     const headTags=[];
@@ -83,6 +88,10 @@ express.response.send = function v263MetricTruthUiSend(body) {
     if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
     if (!body.includes(V267_REPORT_MARKER)) tags.push(`  <script src="${V267_REPORT_MARKER}"></script>`);
     if (!body.includes(V268_LIFECYCLE_EXPORT_MARKER)) tags.push(`  <script src="${V268_LIFECYCLE_EXPORT_MARKER}"></script>`);
+    // V271 must execute before V272: V272 wraps the already-canonical DashboardV18
+    // owner and supplies snapshot-first/nonblank rendering plus final layout polish.
+    if (!body.includes(V271_CANONICAL_INTEGRITY_MARKER)) tags.push(`  <script src="${V271_CANONICAL_INTEGRITY_MARKER}"></script>`);
+    if (!body.includes(V272_LAYOUT_TREND_MARKER)) tags.push(`  <script src="${V272_LAYOUT_TREND_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V240-UI', V240_DAILY_RATE_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V245-UI', V245_SHOPEE_TREND_UI_INJECTION_ID);
@@ -99,8 +108,10 @@ express.response.send = function v263MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V267-UI', V267_REPORT_EXPORT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V268-UI', V268_LIFECYCLE_EXPORT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V269-UI', V269_NAVIGATION_SAFE_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V271-UI', V271_CANONICAL_INTEGRITY_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V272-UI', V272_LAYOUT_TREND_UI_INJECTION_ID);
   }
   return originalSend.call(this, body);
 };
 
-console.info('[CE-QC][V263_CANONICAL_DASHBOARD]', V263_CANONICAL_DASHBOARD_UI_ID, 'V234/V248/V251/V252/V254/V261 visual owners retired; DashboardV18 owns TBKH + SHOPEECN + SHOPEEVN specialized trends; V263 generic hydrator owns CE + CEAF + ALI1688; WHPP keeps V171 dedicated trends; V267 owns report-export clarity; V269 keeps V268 lifecycle/export consolidation navigation-safe.');
+console.info('[CE-QC][V272_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, 'ordered V271->V272 visible delivery: compact settings layout, snapshot-first trends, finite retry/no-data states, exact specialized TBKH+Shopee attempt panels, and WHPP standalone trend hydration.');
