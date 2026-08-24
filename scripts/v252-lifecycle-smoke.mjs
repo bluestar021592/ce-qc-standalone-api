@@ -15,6 +15,7 @@ const runtimeSource=fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js','u
 const lifecycleSource=fs.readFileSync('src/v252LifecycleCoordinator.js','utf8');
 const carrySource=fs.readFileSync('src/carryoverRefreshScheduler.js','utf8');
 const trendSource=fs.readFileSync('src/v244ShopeeTrendRuntimePatch.js','utf8');
+const v284Source=fs.readFileSync('src/v284DailyMembershipTruth.js','utf8');
 
 assert.match(runtimeSource,/import '\.\/v252LifecycleCoordinator\.js';/,'interactive runtime must activate the V252 lifecycle coordinator before server registration');
 assert.match(lifecycleSource,/\/api\/import\/unified-daily-report/,'successful daily import must be intercepted for immediate ledger admission');
@@ -30,9 +31,15 @@ assert.match(lifecycleSource,/collectV200Rows/,'post-refresh lifecycle sync must
 assert.match(lifecycleSource,/lightweightLedgerAudit/,'idle anti-leak checks must not repeatedly launch heavy trajectory work');
 assert.match(carrySource,/CARRY_REFRESH_INTERVAL_MS = 2 \* 60 \* 60 \* 1000/,'online OPEN parcels must retain the existing two-hour network refresh cadence');
 assert.match(carrySource,/WHERE status='OPEN'/,'two-hour scheduler must refresh only non-terminal carryover parcels');
-assert.match(trendSource,/includeRegions = options\?\.includeRegions !== false/,'Shopee lifecycle reader must support skipping historical PP\/PV joins');
-assert.match(trendSource,/includeRegions\?ledgerRegions/,'PP\/PV SQL must only run when explicitly needed');
+
+// Visible Shopee daily/region trends moved from V252's firstReportDate reader to
+// V284 exact daily membership. Lifecycle admission remains V252; chart cohorts do not.
+assert.match(trendSource,/readV284ShopeeTrends/,'Shopee lifecycle endpoint must delegate visible trend truth to V284');
+assert.match(trendSource,/includeRegions=String\(req\.query\.regions/,'Shopee endpoint must retain optional PP\/PV region reads');
 assert.match(trendSource,/exact=String\(req\.query\.exact/,'exact-date lightweight reads must be supported');
+assert.match(v284Source,/const exact=options\?\.exact===true,includeRegions=options\?\.includeRegions!==false/,'V284 must explicitly support exact-date and optional region truth');
+assert.match(v284Source,/CASE WHEN UPPER\(COALESCE\(u\.regionCode,''\)\)='PP' THEN 'PP'/,'PP/PV must come from the exact daily report membership');
+assert.match(v284Source,/LEFT JOIN qc_tracking_ledger l ON l\.shipmentCode=v\.shipmentCode AND l\.businessType=v\.businessType/,'daily region members must still use V246 ledger status/attempt truth');
 
 const {getDb,closeDb}=await import('../src/db.js');
 const {ensureV246TrackingSchema,applyV246StrictAttemptEvidence}=await import('../src/v246TrackingLedgerCore.js');
@@ -63,9 +70,6 @@ let cn=db.prepare("SELECT * FROM qc_tracking_ledger WHERE shipmentCode='CN-V252-
 assert.equal(Number(cn.attemptNo),1);
 assert.match(cn.attemptSource,/^V246_STRICT_TRACK:V252_OPEN:/,'OPEN attempt must be explicitly marked provisional-current, not final POD evidence');
 
-// The next state refresh must always be newer than the first strict-track check.
-// Never hard-code a calendar timestamp here: once wall-clock time passes that value,
-// the smoke would falsely conclude that a genuinely newer OPEN state is stale.
 const firstCheckedAt=Date.parse(cn.lastCheckedAt||'')||Date.now();
 const refreshedAt=new Date(firstCheckedAt+60_000).toISOString();
 db.prepare("UPDATE carryover_open_items SET updatedAt=? WHERE shipmentCode='CN-V252-LIFE-1'").run(refreshedAt);
@@ -79,8 +83,6 @@ assert.ok(secondStrict.open.changed>=1,'refreshed OPEN state must trigger a new 
 cn=db.prepare("SELECT * FROM qc_tracking_ledger WHERE shipmentCode='CN-V252-LIFE-1'").get();
 assert.equal(Number(cn.attemptNo),2,'OPEN parcel must become current attempt 2 after Pending/failure then a new START');
 
-// Now the same next-day lifecycle becomes POD. Final POD evidence must replace the
-// provisional OPEN marker, keep attempt 2, and calculate first-report -> POD = 2 days.
 db.prepare("UPDATE qc_tracking_ledger SET trackingStatus='TERMINAL',terminalReason='POD',podDate='2026-08-22',signingDays=2 WHERE shipmentCode='CN-V252-LIFE-1'").run();
 const finalApplied=applyV246StrictAttemptEvidence([{shipmentCode:'CN-V252-LIFE-1',attemptNo:2,source:'轨迹70严格START/失败循环',podDate:'2026-08-22',startMode:'TRACK_70',starts:[{time:'2026-08-21 09:00:00',code:'70'},{time:'2026-08-22 09:00:00',code:'70'}],failures:[{time:'2026-08-21 18:00:00',code:'150'}]}],{db,reason:'V252_FINAL_SMOKE'});
 assert.equal(finalApplied.updated,1);
@@ -91,4 +93,4 @@ assert.match(cn.attemptSource,/^V246_STRICT_TRACK:/);
 assert.doesNotMatch(cn.attemptSource,/V252_OPEN:/,'POD must replace provisional current-attempt evidence with final full-history evidence');
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V252] lifecycle smoke passed: import admission -> OPEN attempt1 -> refreshed OPEN attempt2 -> final attempt2 POD + 2-day signing');
+console.log('[V252/V284] lifecycle smoke passed: import admission -> OPEN attempt1 -> refreshed OPEN attempt2 -> final attempt2 POD + 2-day signing; visible trends use exact daily membership');
