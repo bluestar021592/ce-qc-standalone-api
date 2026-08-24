@@ -41,10 +41,7 @@ assert.match(trend,/V240_EXACT_DAILY_RATE_CACHE_ONLY/,'legacy cache reader remai
 
 // V253 owns visible first paint. It must not wait for dashboard_daily_cache.
 assert.match(runtime,/import '\.\/v253DashboardFastPath\.js';/,'V253 fast backend must activate before server registration');
-const cacheDelayMatch=runtime.match(/primeDashboardCacheInChild\(delayMs\s*=\s*([^)]+)\)/);
-assert.ok(cacheDelayMatch,'cache maintenance must expose an explicit default startup delay');
-const cacheDelayMs=Function(`"use strict";return (${cacheDelayMatch[1]});`)();
-assert.ok(Number.isFinite(cacheDelayMs)&&cacheDelayMs>=60_000,`cache maintenance must be delayed away from first paint by at least 60s; got ${cacheDelayMs}`);
+assert.match(runtime,/primeDashboardCacheInChild\(delayMs\s*=\s*60_000\)/,'cache maintenance must be delayed away from first paint');
 assert.match(runtime,/MAX_PRIME_ATTEMPTS\s*=\s*4/,'delayed maintenance retry count must remain bounded');
 assert.match(runtime,/dashboard cache prime child exit code=/,'delayed cache maintenance must remain observable');
 assert.match(runtime,/CE_QC_SKIP_STARTUP_POD_REPAIR/,'startup POD repair must remain outside interactive first paint');
@@ -58,12 +55,12 @@ assert.match(inject,/X-CE-QC-V253-UI/,'V253 delivery must be observable in respo
 assert.match(fastOwner,/\/api\/v89\/instant-dashboard/,'legacy slow first-paint summary must be intercepted');
 assert.match(fastOwner,/\/api\/v253\/instant-dashboard/,'first-paint summary must use V253');
 assert.match(fastOwner,/\/api\/v234\/trends/,'legacy cache-dependent trend reads must be intercepted');
-assert.match(fastOwner,/\/api\/v253\/trends/,'visible trend reads must keep the V253 compatibility interception point');
-assert.match(fastOwner,/sessionStorage/,'repeat navigation must retain the compatibility session-cache helper');
+assert.match(fastOwner,/\/api\/v253\/trends/,'visible trend reads must use V253');
+assert.match(fastOwner,/sessionStorage/,'repeat navigation must reuse last confirmed data while refreshing');
 assert.match(fastOwner,/removeHomeLegacyAttempts/,'obsolete homepage dual attempt charts must be removed');
 
 // The old cache worker remains a bounded background maintenance job only.
 assert.match(worker,/WORKER_LEASE_MS\s*=\s*5\s*\*\s*60_000/,'dashboard cache lease must remain bounded to five minutes');
 assert.match(worker,/cleared stale dashboard-cache lease/,'worker must still recover stale cache leases');
 
-console.log('[V253/V247/V290] cache-independent first paint + retained V240 metric contract + minimum cache-delay safety + single-owner performance guards passed');
+console.log('[V253/V247] cache-independent first paint + retained V240 metric contract + single-owner performance guards passed');
