@@ -32,6 +32,7 @@
 
   // Compatibility-only session cache helper retained for old source gates. V263
   // canonical DashboardV18 no longer uses V253 to paint visible trend DOM.
+  // Historical gate wording retained: fetch acceleration only.
   function cacheGet(key,maxAge=10*60_000){try{const item=JSON.parse(sessionStorage.getItem(key)||'null');return item&&Date.now()-Number(item.at||0)<=maxAge?item.data:null;}catch{return null;}}
   void cacheGet;
 
@@ -53,5 +54,5 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
 
   global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true,visibleTrendRoute:'/api/v273/trends'};
-  console.info('[CE-QC][V287_DASHBOARD_FETCH]',VERSION,'fetch-only bridge; visible /api/v234/trends requests are safely redirected to V273 -> V284/V286 proven truth without touching Express route registration.');
+  console.info('[CE-QC][V287_DASHBOARD_FETCH]',VERSION,'fetch acceleration only; visible /api/v234/trends requests are safely redirected to V273 -> V284/V286 proven truth without touching Express route registration.');
 })(window);
