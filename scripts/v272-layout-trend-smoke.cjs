@@ -28,10 +28,6 @@ assert.match(ui,/hydrateWhppStandalone/,'WHPP must have an explicit standalone h
 assert.doesNotMatch(ui,/\/api\/v253\/trends\?businessType=WHPP/,'WHPP visible trends must no longer rely on incomplete historical final_rows');
 assert.doesNotMatch(ui,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V273 must never intercept navigation');
 
-// V274 performance contract: expected daily membership and tracking facts are
-// grouped separately. Never join every report member to the large tracking ledger
-// on a page request. Startup/background prewarm and a hot memory window keep page
-// switches fast while the 2-hour lifecycle remains the source of current state.
 assert.match(backend,/v274-ledger-first-hot-seven-business-trends-v3/,'V274 backend must be active');
 assert.match(backend,/function expectedUnifiedCounts/,'daily expected totals must be counted independently');
 assert.match(backend,/function ledgerFacts/,'tracking truth must be grouped directly from the lifecycle ledger');
@@ -41,41 +37,32 @@ assert.match(backend,/prewarm\(1200\)/,'recent seven-day facts must prewarm shor
 assert.match(backend,/startPeriodicPrewarm/,'hot facts must be refreshed in background instead of on page navigation');
 assert.match(backend,/Server-Timing/,'runtime trend duration must be observable');
 
-// V275 keeps the V274 trend cleanup and also stops unified-import UX from waiting
-// for legacy compatibility saves after the safe VALID batch is already committed.
+// V275 remains a compiled compatibility asset, but V278 no longer depends on
+// injecting it into SPA navigation. Fast import confirmation is now backend-owned.
 assert.match(speed,/2026-08-24-v275-fast-import-confirmation-and-trend-guard-v1/);
-assert.match(speed,/LOADING_RE/,'duplicate loading rows must be identified explicitly');
-assert.match(speed,/v272-skeleton-grid/,'obsolete skeleton rows must be removed');
-assert.match(speed,/waitForCommittedImport/,'unified import must poll the authoritative latest VALID batch');
-assert.match(speed,/\/api\/import\/unified-latest\?compact=1/,'commit confirmation must read the existing lightweight latest-import endpoint');
-assert.match(speed,/日报已安全写入数据库/,'UI must distinguish committed import from slower compatibility follow-up');
-assert.match(speed,/当前日报仍在处理，请不要重复点击导入/,'double-submit must be blocked while one import is active');
-assert.match(speed,/global\.importUnifiedExcel=importUnifiedExcelV275/,'V275 must own the visible unified import action');
-assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V275 must never intercept navigation');
+assert.match(speed,/waitForCommittedImport/);
+assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V275 asset must never intercept navigation');
 
 assert.match(inject,/import '\.\/v273DashboardTruthReadPatch\.js';/);
 assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
 assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260824-v273-1/,'V273 owner cache key must remain');
-assert.match(inject,/v274-trend-speed-guard\.js\?v=20260824-v274-1/,'V275 import/trend guard must remain available to the canonical injector');
-assert.match(inject,/X-CE-QC-V274-UI/,'V274/V275 guard must remain observable in response headers');
+assert.match(inject,/X-CE-QC-V274-UI/,'V274 guard must remain observable in response headers');
 
-// V277 delivery contract: V276 proved that routing the whole SPA through the
-// late canonical res.send() injector can stall /import before app.js finishes.
-// Keep the native SPA body and append only the tested V275 import confirmation
-// script. The wrapper must use the original send implementation captured before
-// late owner patching, so unrelated dashboard owners cannot block page startup.
-assert.match(delivery,/2026-08-24-v277-safe-direct-v275-delivery-v1/,'V277 safe delivery must be active');
-assert.match(delivery,/express\.response\.sendFile\s*=\s*function v277SafeDirectV275SendFile/,'index sendFile must use the safe direct V275 wrapper');
-assert.match(delivery,/V275_DIRECT_MARKER\s*=\s*['"]\/v274-trend-speed-guard\.js\?v=20260824-v277-1['"]/,'V275 must have a fresh direct-delivery cache key');
-assert.match(delivery,/originalSend\.call\(this, html\)/,'index.html must bypass the late multi-owner send injector');
-assert.doesNotMatch(delivery,/this\.send\(html\)/,'V277 must not repeat the V276 recursive late-owner delivery path');
-assert.match(delivery,/path\.basename\(target\)\.toLowerCase\(\) !== 'index\.html'/,'non-index files must retain native sendFile');
-assert.match(delivery,/CORE_LIVE_ASSET_RE[\s\S]*v274-trend-speed-guard/,'V275 browser owner must remain no-store');
+// V278 restores native SPA delivery: no sendFile override, no direct V275 script
+// injection. The unified import route is replaced only at registration time so
+// V273 source/membership guards still wrap the final handler. SQLite COMMIT is the
+// acknowledgement boundary; legacy CCSL/SHOPEE state saves continue afterward.
+assert.match(delivery,/2026-08-24-v278-native-spa-backend-fast-import-ack-v1/,'V278 backend fast-ack patch must be active');
+assert.doesNotMatch(delivery,/express\.response\.sendFile\s*=/,'V278 must preserve native SPA sendFile');
+assert.doesNotMatch(delivery,/V275_DIRECT_MARKER/,'V278 must not inject V275 into index.html');
+assert.match(delivery,/express\.application\.post\s*=\s*function v278FastUnifiedImportPost/,'V278 must replace only the unified import final handler');
+assert.match(delivery,/previousPost\.call\(this, pathValue, \.\.\.handlers\.slice\(0, last\), fastUnifiedImportHandler\)/,'existing V273 and upload middleware chain must remain ahead of V278 handler');
+assert.match(delivery,/const saved = saveUnifiedImport\(parsed, req\.file\.originalname\)/,'SQLite durable save must occur before acknowledgement');
+assert.match(delivery,/compatibilityPending: true, ack: 'SQLITE_COMMITTED'/,'response must explicitly identify the post-COMMIT acknowledgement boundary');
+assert.match(delivery,/setImmediate\(\(\) => \{ void finishUnifiedCompatibility/,'slow compatibility state saves must continue after response');
+assert.match(delivery,/V278_IMPORT_COMPAT_DONE/,'background compatibility completion must be observable');
+assert.match(delivery,/CORE_LIVE_ASSET_RE/,'core cache-reset protection must remain');
 
-// Final-history reupload contract: parser fixes must be able to repair the exact
-// same source workbook, but an incomplete reupload can never replace a larger
-// valid day or exchange old bills for different ones. A separate workbook census
-// prevents an unknown header/parser edge case from silently losing source bills.
 assert.match(importGuard,/V273_SOURCE_WAYBILL_CENSUS_MISMATCH/,'independent workbook census must block parser-side source loss');
 assert.match(importGuard,/readV273SourceWaybillCensus/,'source workbook waybills must be counted independently from the normal parser');
 assert.match(importGuard,/V273_SAME_DATE_REUPLOAD_SHRINK_BLOCKED/,'smaller same-date reuploads must be rejected');
@@ -90,4 +77,4 @@ assert.match(parser,/hasShipmentValues/,'sheet discovery must be driven by actua
 assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipient-column absence must no longer skip the sheet');
 
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
-console.log('[V277/V275/V274/V273] safe SPA load + direct fast import confirmation + ledger-first hot trends + reupload protection gate passed');
+console.log('[V278/V274/V273] native SPA + backend post-COMMIT fast import ack + ledger-first hot trends + reupload protection gate passed');
