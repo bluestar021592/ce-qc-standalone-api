@@ -10,7 +10,7 @@ const importGuard=read('src/v273ImportCompletenessGuard.js');
 const parser=read('src/unifiedExcelParser.js');
 for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v273DashboardTruthReadPatch.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(ui),'V273 browser runtime must compile');
-assert.doesNotThrow(()=>new Function(speed),'V274 trend speed guard must compile');
+assert.doesNotThrow(()=>new Function(speed),'V275 import/trend guard must compile');
 assert.match(ui,/2026-08-24-v273-single-visible-trend-owner-v1/);
 assert.match(ui,/#settingsPage \.settings-grid\{align-items:start!important/,'settings cards must not stretch into blank lower areas');
 assert.match(ui,/snapshotFallback\(section,model\)/,'working snapshot must remain visible while background truth refresh runs');
@@ -40,20 +40,24 @@ assert.match(backend,/prewarm\(1200\)/,'recent seven-day facts must prewarm shor
 assert.match(backend,/startPeriodicPrewarm/,'hot facts must be refreshed in background instead of on page navigation');
 assert.match(backend,/Server-Timing/,'runtime trend duration must be observable');
 
-// V274 is a cleanup guard, not another renderer. It only removes obsolete
-// loading-only rows after V273 has supplied the canonical chart row.
-assert.match(speed,/2026-08-24-v274-single-row-fast-trend-guard-v1/);
+// V275 keeps the V274 trend cleanup and also stops unified-import UX from waiting
+// for legacy compatibility saves after the safe VALID batch is already committed.
+assert.match(speed,/2026-08-24-v275-fast-import-confirmation-and-trend-guard-v1/);
 assert.match(speed,/LOADING_RE/,'duplicate loading rows must be identified explicitly');
 assert.match(speed,/v272-skeleton-grid/,'obsolete skeleton rows must be removed');
-assert.match(speed,/keeps one visible trend row/,'single-row contract must remain documented');
-assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V274 must never intercept navigation');
+assert.match(speed,/waitForCommittedImport/,'unified import must poll the authoritative latest VALID batch');
+assert.match(speed,/\/api\/import\/unified-latest\?compact=1/,'commit confirmation must read the existing lightweight latest-import endpoint');
+assert.match(speed,/日报已安全写入数据库/,'UI must distinguish committed import from slower compatibility follow-up');
+assert.match(speed,/当前日报仍在处理，请不要重复点击导入/,'double-submit must be blocked while one import is active');
+assert.match(speed,/global\.importUnifiedExcel=importUnifiedExcelV275/,'V275 must own the visible unified import action');
+assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V275 must never intercept navigation');
 
 assert.match(inject,/import '\.\/v273DashboardTruthReadPatch\.js';/);
 assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
 assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260824-v273-1/,'V273 owner cache key must remain');
-assert.match(inject,/v274-trend-speed-guard\.js\?v=20260824-v274-1/,'V274 speed guard must load after V273 owner');
-const p273=inject.indexOf('V272_LAYOUT_TREND_MARKER');const p274=inject.indexOf('V274_TREND_SPEED_MARKER');assert.ok(p273>=0&&p274>p273,'V274 cleanup guard must be delivered after V273 trend owner');
-assert.match(inject,/X-CE-QC-V274-UI/,'V274 must be observable in response headers');
+assert.match(inject,/v274-trend-speed-guard\.js\?v=20260824-v274-1/,'V275 import/trend guard must load after V273 owner');
+const p273=inject.indexOf('V272_LAYOUT_TREND_MARKER');const p274=inject.indexOf('V274_TREND_SPEED_MARKER');assert.ok(p273>=0&&p274>p273,'V275 guard must be delivered after V273 trend owner');
+assert.match(inject,/X-CE-QC-V274-UI/,'V274/V275 guard must remain observable in response headers');
 
 // Final-history reupload contract: parser fixes must be able to repair the exact
 // same source workbook, but an incomplete reupload can never replace a larger
@@ -73,4 +77,4 @@ assert.match(parser,/hasShipmentValues/,'sheet discovery must be driven by actua
 assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipient-column absence must no longer skip the sheet');
 
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
-console.log('[V274/V273] ledger-first hot trends + single visible row + source census + final reupload protection gate passed');
+console.log('[V275/V274/V273] fast import confirmation + ledger-first hot trends + single visible row + source census + final reupload protection gate passed');
