@@ -1,5 +1,6 @@
 import { loadRangeDashboard as loadRangeDashboardV191 } from './rangeDashboardStoreV191.js';
-import { V284_DAILY_MEMBERSHIP_TRUTH_ID, summarizeV284Range } from './v284DailyMembershipTruth.js';
+import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
+import { summarizeV284ProvenRange as summarizeV284Range } from './v284MembershipEvidenceCoverage.js';
 
 const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
@@ -18,7 +19,7 @@ export function loadRangeDashboard(fromDate,toDate){
   range.sourceDates=truth.dates;
   range.dates=truth.dates;
   range.v284Coverage=truth.daily.map(row=>({reportDate:row.reportDate,businessType:row.businessType,total:row.total,matched:row.matched,coverageRate:row.coverageRate,ready:row.ready}));
-  return {...range,queryMode:`${range.queryMode||'SQL'}+DAILY_MEMBERSHIP_LEDGER_V284`,dailyTruthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP',analysisSelection:'V246_LEDGER_FIRST_FINAL_FALLBACK'};
+  return {...range,queryMode:`${range.queryMode||'SQL'}+DAILY_MEMBERSHIP_PROVEN_LEDGER_V284`,dailyTruthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,evidenceCoverageId:truth.evidenceCoverageId,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK'};
 }
 
 function patchState(state,fact,dailyRows=[]){
@@ -34,7 +35,7 @@ function patchState(state,fact,dailyRows=[]){
   state.snapshotStatus=state.sourceDates.length?(state.analysisComplete?'COMPLETED':'PARTIAL'):'EMPTY';
   state.dailyReportReady=state.sourceDates.length>0;
   state.dailyParseSummary={...(state.dailyParseSummary||{}),totalRecognized:fact.total,sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending};
-  state.sourceCoverage={sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending,analysisComplete:state.analysisComplete,sourceDates:state.sourceDates,analyzedDates:state.analyzedDates,missingAnalysisDates:missingDates,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP',analysisSelection:'V246_LEDGER_FIRST_FINAL_FALLBACK'};
+  state.sourceCoverage={sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending,analysisComplete:state.analysisComplete,sourceDates:state.sourceDates,analyzedDates:state.analyzedDates,missingAnalysisDates:missingDates,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK'};
   const summaries=[state.v55Summary,state.dashboard?.v55Summary,state.dashboard?.metrics].filter(Boolean);
   for(const summary of summaries) patchMetrics(summary,fact);
   if(state.dashboard){
@@ -80,4 +81,4 @@ function patchDashboardRows(rows,f){
   for(const row of rows){const label=String(row?.项目||row?.metricKey||row?.label||'').trim();if(!values.has(label))continue;const value=Number(values.get(label)||0);row.数值=value;row.数值原值=value;row.value=value;}
 }
 
-console.info('[CE-QC][V284_RANGE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'range cards/coverage use daily latest-VALID membership + V246 ledger; legacy completed/final rows no longer decide whether a whole day is zero.');
+console.info('[CE-QC][V284_RANGE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'range cards/coverage use daily latest-VALID membership + proven V246 lifecycle evidence; admitted-only OPEN placeholders do not count as analyzed.');
