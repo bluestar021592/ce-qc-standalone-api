@@ -88,7 +88,7 @@ async function guard(req,res,next){
 }
 function responseTruth(req,res,next){
   const originalJson=res.json.bind(res);let finalized=false;
-  const finish=success=>{if(finalized)return;finalized=true;finalizeRepair(req,success);};
+  const finish=success=>{if(finalized)return;finalized=true;finalizeRepair(req,success);if(success){try{globalThis.__CE_QC_REFRESH_V274_TRENDS__?.();}catch{}}};
   res.json=function(payload){const success=res.statusCode<400;if(success&&payload&&req.v273ImportCompleteness){payload.importCompleteness=req.v273ImportCompleteness;if(req.v273SameHashRepair)payload.importCompleteness.sameFileReparsed=true;}const out=originalJson(payload);finish(success);return out;};
   res.once('finish',()=>finish(res.statusCode<400));res.once('close',()=>{if(!res.writableEnded)finish(false);});next();
 }
@@ -97,4 +97,4 @@ express.application.post=function v273ImportPost(pathValue,...handlers){
   return previousPost.call(this,pathValue,...handlers);
 };
 if(process.env.NODE_ENV!=='test'&&!process.env.CI)setImmediate(()=>recoverInterruptedSameHashRepairs());
-console.info('[CE-QC][V273_IMPORT_COMPLETENESS]',V273_IMPORT_COMPLETENESS_ID,'independent source census + parser/classification conservation + same-date membership superset; same-file parser repair allowed, silent loss blocked.');
+console.info('[CE-QC][V273_IMPORT_COMPLETENESS]',V273_IMPORT_COMPLETENESS_ID,'independent source census + parser/classification conservation + same-date membership superset; same-file parser repair allowed, silent loss blocked; successful import refreshes V274 hot trend facts.');
