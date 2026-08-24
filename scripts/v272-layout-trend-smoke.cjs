@@ -31,10 +31,10 @@ assert.doesNotMatch(ui,/\/api\/v253\/trends\?businessType=WHPP/,'WHPP visible tr
 assert.doesNotMatch(ui,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V273 must never intercept navigation');
 
 // V284 supersedes V274's firstReportDate aggregation. Daily cohort membership must
-// come from the latest VALID report for each date, while V246 ledger remains the
-// preferred lifecycle/status/attempt truth for those exact daily members.
+// come from the latest VALID report for each date, while V246 proven lifecycle truth
+// remains the preferred status/attempt source for those exact daily members.
 assert.match(backend,/V284_DAILY_MEMBERSHIP_TRUTH_ID/,'V284 backend authority must be active through the historical V273 route');
-assert.match(backend,/readV284DashboardTrends/,'V273 compatibility route must delegate to V284 daily-membership truth');
+assert.match(backend,/readV284ProvenDashboardTrends/,'V273 compatibility route must delegate to V284 proven daily-membership truth');
 assert.match(membership,/2026-08-24-v284-daily-membership-ledger-truth-v1/,'V284 daily-membership truth module must be the active implementation');
 assert.match(membership,/ROW_NUMBER\(\) OVER\(PARTITION BY b\.reportDate ORDER BY b\.createdAt DESC,b\.batchId DESC\) rn/,'each date must select its newest VALID source membership exactly once');
 assert.match(membership,/LEFT JOIN qc_tracking_ledger l ON l\.shipmentCode=v\.shipmentCode AND l\.businessType=v\.businessType/,'daily report members must join V246 lifecycle truth by shipment/business instead of firstReportDate');
@@ -136,4 +136,4 @@ assert.match(archiveReplay,/process\.env\.NODE_ENV === 'test' \|\| process\.env\
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-replay-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-failure-recovery-smoke.mjs'],{stdio:'inherit'});
-console.log('[V284/V282/V280/V273] daily-membership trend truth + shipment-column source census + atomic historical replay + current-state preservation + failed-replay recovery + sparse Excel range + staged import timing passed');
+console.log('[V284/V282/V280/V273] proven daily-membership trend truth + shipment-column source census + atomic historical replay + current-state preservation + failed-replay recovery + sparse Excel range + staged import timing passed');
