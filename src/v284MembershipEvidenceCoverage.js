@@ -33,8 +33,14 @@ function proofRows(fromDate,toDate,db=getDb()){
       UNION ALL
       SELECT DISTINCT p.reportDate,'WHPP' businessType,UPPER(TRIM(p.shipmentCode)) shipmentCode,'UNKNOWN' regionCode
       FROM business_daily_parse_rows p
+      LEFT JOIN latest l ON l.reportDate=p.reportDate
       WHERE p.businessType='WHPP' AND p.reportDate BETWEEN ? AND ?
         AND TRIM(COALESCE(p.shipmentCode,''))<>''
+        AND NOT EXISTS (
+          SELECT 1 FROM unified_import_rows u
+          WHERE u.snapshotId=l.snapshotId AND u.reportDate=p.reportDate AND u.businessType='CEAF'
+            AND UPPER(TRIM(u.shipmentCode))=UPPER(TRIM(p.shipmentCode))
+        )
     )
     SELECT v.reportDate,v.businessType,v.regionCode,v.shipmentCode,
       CASE WHEN l.shipmentCode IS NOT NULL AND (
@@ -123,4 +129,4 @@ export function summarizeV284ProvenRange(fromDate,toDate,db=getDb()){
   return {...base,daily,byType,ccsl,shopee,whpp,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,sourceTotal,analyzedTotal,analysisPending:Math.max(0,sourceTotal-analyzedTotal),missingDates,analysisComplete:missingDates.length===0&&analyzedTotal>=sourceTotal};
 }
 
-console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,'all seven businesses are covered; WHPP daily members use WHPP ledger/final evidence; ledger admission alone is not analysis proof.');
+console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,'all seven businesses are covered with the same daily membership rules; WHPP excludes latest-VALID CEAF overlap and uses WHPP ledger/final evidence; ledger admission alone is not analysis proof.');
