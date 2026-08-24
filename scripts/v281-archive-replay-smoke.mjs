@@ -26,13 +26,14 @@ try {
   const rawFile = path.join(temp, 'source.xlsx');
   const workbook = XLSX.utils.book_new();
   const sheet = XLSX.utils.aoa_to_sheet([
-    ['运单号', '日报日期'],
-    ['CC260817000001', reportDate],
-    ['CE260817000002', reportDate],
-    ['TBKH260817000003', reportDate]
+    ['运单号', '日报日期', '备注/关联单号'],
+    ['CC260817000001', reportDate, 'CE999999999999'],
+    ['CE260817000002', reportDate, ''],
+    ['TBKH260817000003', reportDate, '']
   ]);
   // Simulate a workbook whose declared used range is much larger than the real
-  // populated cells. V281 must still parse the actual three rows safely.
+  // populated cells. The extra CE... value is intentionally outside the shipment
+  // column and must remain diagnostic evidence only, never a blocking source bill.
   sheet['!ref'] = 'A1:Z5000';
   XLSX.utils.book_append_sheet(workbook, sheet, '日报');
   XLSX.writeFile(workbook, rawFile);
@@ -46,7 +47,10 @@ try {
   assert.equal(found, archivedFile, 'V281 must locate the exact same-hash archived source');
 
   const census = readV281SparseWaybillCensus(found);
-  assert.equal(census.count, 3, 'sparse source census must see exactly three real waybills');
+  assert.equal(census.count, 3, 'blocking census must count exactly the three shipment-column waybills');
+  assert.equal(census.diagnosticCount, 4, 'all-cell diagnostics must still retain the off-column CE-like reference');
+  assert.equal(census.ignoredOffColumnCount, 1, 'one off-column waybill-like reference must be explicitly diagnosed');
+  assert.equal(census.sheets[0]?.shipmentColumn, 'A');
   const parsed = parseV281ArchivedSparse(found, reportDate);
   assert.equal(parsed.reportDate, reportDate);
   assert.equal(parsed.fileHash, hash);
@@ -62,6 +66,8 @@ try {
   });
   assert.equal(safe.ok, true);
   assert.equal(safe.difference, 1);
+  assert.equal(safe.sourceDiagnosticCount, 4);
+  assert.equal(safe.ignoredOffColumnCount, 1);
 
   const unsafe = assessV281Replay({
     reportDate,
@@ -156,8 +162,6 @@ try {
   oldRow.run('BOLD', 'SOLD', reportDate, 'CE', 'CC260817000001', 'PP', '', '', '日报', 2, '', '{}', '2026-08-17T10:00:00Z', '', '', '');
   oldRow.run('BOLD', 'SOLD', reportDate, 'WHPP', 'CE260817000002', 'PV', '', '', '日报', 3, '', '{}', '2026-08-17T10:00:00Z', '', '', '');
 
-  // These are deliberately newer than the historical report. V281 must never
-  // regress either table while repairing 2026-08-17 history.
   db.prepare(`INSERT INTO shipment_current_state(shipmentCode,businessType,reportDate,state,stateJson,updatedAt) VALUES(?,?,?,?,?,?)`)
     .run('CC260817000001', 'CE', '2026-08-21', 'POD', '{"marker":"CURRENT_0821"}', '2026-08-21T20:00:00Z');
   db.prepare(`INSERT INTO carryover_open_items(shipmentCode,businessType,sourceReportDate,lastReportDate,status,stateJson,updatedAt) VALUES(?,?,?,?,?,?,?)`)
@@ -195,7 +199,7 @@ try {
   assert.ok(logs.some(row => String(row.join(' ')).includes('V281_ARCHIVE_REPLAY_REPAIRED')));
   db.close();
 
-  console.log(`[V281] historical-only same-hash replay smoke passed · ${V281_ARCHIVED_HISTORICAL_REPARSE_ID} · recovered 1 row · current/carry state unchanged`);
+  console.log(`[V282] column-bound historical replay smoke passed · ${V281_ARCHIVED_HISTORICAL_REPARSE_ID} · real=3 diagnostic=4 offColumn=1 · recovered 1 row · current/carry unchanged`);
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });
 }
