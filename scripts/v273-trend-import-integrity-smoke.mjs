@@ -14,22 +14,36 @@ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v273-'));
 try{
   const file=path.join(temp,'2026-08-17.xlsx');
   const wb=XLSX.utils.book_new();
-  const ws=XLSX.utils.aoa_to_sheet([
+  // This sheet intentionally has NO recipient/customer column. It verifies that
+  // a valid waybill sheet can no longer be silently skipped only because the
+  // recipient header is absent.
+  const noRecipient=XLSX.utils.aoa_to_sheet([
+    ['运单号','日报日期'],
+    ['CC260817000001','2026-08-17'],
+    ['CE260817000002','2026-08-17'],
+    ['TBKH000000003','2026-08-17']
+  ]);
+  XLSX.utils.book_append_sheet(wb,noRecipient,'无收件人列');
+  // CEAF still requires the real strong customer-name rule, so keep that case
+  // on a separate normal sheet rather than accidentally making 客户名称 count as
+  // a recipient header in the no-recipient fixture above.
+  const ceaf=XLSX.utils.aoa_to_sheet([
     ['运单号','客户名称','日报日期'],
-    ['CC260817000001','','2026-08-17'],
-    ['CE260817000002','','2026-08-17'],
-    ['TBKH000000003','','2026-08-17'],
     ['CC260817000004','CCAF','2026-08-17']
   ]);
-  XLSX.utils.book_append_sheet(wb,ws,'日报');XLSX.writeFile(wb,file);
+  XLSX.utils.book_append_sheet(wb,ceaf,'CEAF');
+  XLSX.writeFile(wb,file);
+
   const census=readV273SourceWaybillCensus(file);
   assert.equal(census.count,4,'independent workbook census must see all visible waybill-shaped cells');
   const parsed=parseUnifiedDailyExcel(file,{reportDate:'2026-08-17',originalName:'2026-08-17.xlsx'});
   assert.equal(parsed.summary.validUniqueWaybills,4,'sheet without recipient column must not be silently skipped');
   assert.equal(parsed.classificationCounts.CE,1);assert.equal(parsed.classificationCounts.WHPP,1);assert.equal(parsed.classificationCounts.TBKH,1);assert.equal(parsed.classificationCounts.CEAF,1);
   assert.equal(parsed.sourceReconciliation.balanced,true);
-  assert.equal(parsed.sheetDiagnostics[0].status,'VALID');
-  assert.match(parsed.sheetDiagnostics[0].reason,/收件人列未识别/);
+  const noRecipientDiag=parsed.sheetDiagnostics.find(row=>row.sheetName==='无收件人列');
+  assert.equal(noRecipientDiag?.status,'VALID');
+  assert.match(String(noRecipientDiag?.reason||''),/收件人列未识别/);
+  assert.equal(noRecipientDiag?.detectedColumns?.recipientDetection,'NOT_FOUND_OPTIONAL');
   assert.equal(compareV273ParsedToCensus(parsed.rows.map(r=>r.shipmentCode),census.bills).ok,true);
   assert.equal(compareV273ParsedToCensus(parsed.rows.slice(0,3).map(r=>r.shipmentCode),census.bills).ok,false,'source census must catch a parser-side missing bill');
   assert.equal(compareV273ReuploadCounts(1200,1000).ok,true);
@@ -58,5 +72,5 @@ try{
   assert.equal(trends.daily[1].ready,true);assert.equal(trends.daily[1].ocRate,100);
   assert.deepEqual(trends.missingDates,[],'ledger-backed generic trends must not stay blank when final_rows history is missing');
   db.close();
-  console.log('[V273] source census + no-recipient preservation + anti-shrink/membership-loss + ledger-backed CE trend truth passed');
+  console.log('[V273] source census + true no-recipient preservation + anti-shrink/membership-loss + ledger-backed CE trend truth passed');
 }finally{fs.rmSync(temp,{recursive:true,force:true});}
