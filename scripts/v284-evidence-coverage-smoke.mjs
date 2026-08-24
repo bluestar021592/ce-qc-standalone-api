@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 process.env.NODE_ENV='test';
 const { ensureV246TrackingSchema }=await import('../src/v246TrackingLedgerCore.js');
-const { readV284EvidenceCoverage,readV284ProvenDashboardTrends }=await import('../src/v284MembershipEvidenceCoverage.js');
+const { readV284EvidenceCoverage,readV284ProvenDashboardTrends,summarizeV284ProvenRange }=await import('../src/v284MembershipEvidenceCoverage.js');
 
 const db=new DatabaseSync(':memory:');
 db.exec(`
@@ -10,6 +10,8 @@ CREATE TABLE unified_import_batches(batchId TEXT,snapshotId TEXT,reportDate TEXT
 CREATE TABLE unified_import_rows(id INTEGER PRIMARY KEY AUTOINCREMENT,batchId TEXT,snapshotId TEXT,reportDate TEXT,businessType TEXT,shipmentCode TEXT,regionCode TEXT);
 CREATE TABLE final_rows(shipmentCode TEXT,reportDate TEXT,isPod INTEGER,primaryCategory TEXT,category TEXT,rawJson TEXT,lastEventTime TEXT,pendingDays INTEGER,ocDays INTEGER,cycleCountDays INTEGER,shopState TEXT,shopRetentionNaturalDays INTEGER);
 CREATE TABLE business_final_rows(businessType TEXT,shipmentCode TEXT,reportDate TEXT,isPod INTEGER,currentMainCategory TEXT,primaryCategory TEXT,rawJson TEXT,latestEventTime TEXT,podAttemptNo INTEGER,currentAttemptNo INTEGER,shopState TEXT,shopRetentionNaturalDays INTEGER);
+CREATE TABLE business_daily_reports(businessType TEXT,reportDate TEXT,totalCount INTEGER);
+CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT);
 `);
 ensureV246TrackingSchema(db);
 const date='2026-08-17',now='2026-08-24T00:00:00Z';
@@ -17,20 +19,32 @@ db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('B17','S1
 const imp=db.prepare('INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode) VALUES(?,?,?,?,?,?)');
 imp.run('B17','S17',date,'CE','PROVEN-POD','PP');
 imp.run('B17','S17',date,'CE','ADMITTED-ONLY','PV');
+db.prepare('INSERT INTO business_daily_reports VALUES(?,?,?)').run('WHPP',date,1);
+db.prepare('INSERT INTO business_daily_parse_rows VALUES(?,?,?)').run('WHPP',date,'WHPP-PROVEN');
+db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,currentMainCategory,primaryCategory,rawJson,latestEventTime,podAttemptNo,currentAttemptNo,shopState,shopRetentionNaturalDays) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run('WHPP','WHPP-PROVEN',date,1,'POD','POD',JSON.stringify({'POD时间':`${date} 12:00:00`}),`${date} 12:00:00`,0,0,'',0);
 const ins=db.prepare(`INSERT INTO qc_tracking_ledger(shipmentCode,businessType,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,terminalReason,terminalAt,currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastCheckedAt,lastRepairReason,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 ins.run('PROVEN-POD','CE','2026-08-10',date,'SOLD','S17','TERMINAL','POD',now,'POD','POD',now,date,0,'',8,'{}','{}',now,'SMOKE',now,now);
 ins.run('ADMITTED-ONLY','CE',date,date,'S17','S17','OPEN','','','OPEN','OPEN','','',0,'',null,'{}','{}','','V252_STARTUP_90DAY_ADMISSION_AUDIT',now,now);
 
 let coverage=readV284EvidenceCoverage(date,date,db);
 let ce=coverage.byType.get(`${date}|CE|ALL`);
+const whpp=coverage.byType.get(`${date}|WHPP|ALL`);
 assert.ok(ce,'CE daily evidence coverage aggregate must exist under the canonical date|business|ALL key');
 assert.equal(ce.total,2);
 assert.equal(ce.proven,1,'empty OPEN admission ledger must not count as analyzed');
+assert.ok(whpp,'WHPP must be included in seven-business proven coverage');
+assert.equal(whpp.total,1);
+assert.equal(whpp.proven,1,'WHPP final-row evidence must prove the daily WHPP member');
 assert.equal(coverage.unproven.length,1);
 assert.equal(coverage.unproven[0].shipmentCode,'ADMITTED-ONLY');
 let trend=readV284ProvenDashboardTrends('CE',date,date,db);
 assert.equal(trend.daily[0].ready,false,'proven daily truth must stay incomplete while one member is admission-only OPEN');
 assert.equal(trend.daily[0].ledgerReady,false,'legacy ledgerReady alias must follow proven readiness, not raw admission presence');
+const whppTrend=readV284ProvenDashboardTrends('WHPP',date,date,db);
+assert.equal(whppTrend.daily[0].total,1);
+assert.equal(whppTrend.daily[0].matched,1);
+assert.equal(whppTrend.daily[0].podRate,100);
+assert.equal(whppTrend.daily[0].ready,true,'WHPP visible trend must no longer be forced to 0% coverage');
 
 db.prepare("UPDATE qc_tracking_ledger SET currentState='Pending',currentCategory='Pending',lastCheckedAt=?,updatedAt=? WHERE shipmentCode='ADMITTED-ONLY'").run(now,now);
 coverage=readV284EvidenceCoverage(date,date,db);ce=coverage.byType.get(`${date}|CE|ALL`);
@@ -40,6 +54,16 @@ assert.equal(coverage.unproven.length,0);
 trend=readV284ProvenDashboardTrends('CE',date,date,db);
 assert.equal(trend.daily[0].ready,true,'checked state must promote the daily cohort to proven ready');
 assert.equal(trend.daily[0].ledgerReady,true,'legacy ledgerReady alias must promote together with proven readiness');
+const all=readV284ProvenDashboardTrends('ALL',date,date,db);
+assert.equal(all.daily[0].total,3,'ALL visible trend must include CE + WHPP physical daily membership');
+assert.equal(all.daily[0].matched,3,'ALL proven coverage must include WHPP instead of leaving the day incomplete');
+assert.equal(all.daily[0].ready,true);
+const range=summarizeV284ProvenRange(date,date,db);
+assert.equal(range.sourceTotal,3,'seven-business range source total must include WHPP');
+assert.equal(range.analyzedTotal,3);
+assert.equal(range.analysisPending,0);
+assert.equal(range.analysisComplete,true);
+assert.deepEqual(range.missingDates,[]);
 
 db.close();
-console.log('[V284] evidence coverage smoke passed · canonical key + admission-only OPEN stays unproven + ready/ledgerReady stay synchronized');
+console.log('[V286] seven-business evidence coverage smoke passed · WHPP proven final evidence + ALL totals + ready/ledgerReady synchronization');
