@@ -23,6 +23,9 @@ import './v262ShopeeStrictEvidenceBackfill.js';
 import './v263DeliveryKpiTrendPatch.js';
 
 const PATCH_ID = '2026-08-24-v290-first-paint-main-thread-protection-v1';
+// Compatibility/audit marker: V290 keeps, rather than replaces, the V289
+// 88439846 first-paint structure.
+const V289_KNOWN_GOOD_RUNTIME_MARKER = '2026-08-24-v289-known-good-first-paint-runtime-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
 // Interactive first paint is authoritative. Automatic heavy database maintenance
@@ -84,6 +87,6 @@ function primeDashboardCacheInChild(delayMs = 5 * 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V290] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; first five minutes prioritize HTTP/UI while automatic large SQLite maintenance is deferred or moved to child processes; V284/V286 truth is unchanged.`);
+console.log(`[CE-QC][V290] ${PATCH_ID} preserves ${V289_KNOWN_GOOD_RUNTIME_MARKER} + ${LEGACY_OBSERVABLE_PATCH_ID}; first five minutes prioritize HTTP/UI while automatic large SQLite maintenance is deferred or moved to child processes; V284/V286 truth is unchanged.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
