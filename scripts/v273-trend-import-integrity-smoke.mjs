@@ -8,6 +8,7 @@ process.env.NODE_ENV='test';
 const {parseUnifiedDailyExcel}=await import('../src/unifiedExcelParser.js');
 const {compareV273ReuploadCounts}=await import('../src/v273ImportCompletenessGuard.js');
 const {readV273DashboardTrends,V273_DASHBOARD_TRUTH_ID}=await import('../src/v273DashboardTruthReadPatch.js');
+const {ensureV246TrackingSchema}=await import('../src/v246TrackingLedgerCore.js');
 
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v273-'));
 try{
@@ -35,12 +36,11 @@ try{
     CREATE TABLE unified_import_rows(id INTEGER PRIMARY KEY AUTOINCREMENT,batchId TEXT,snapshotId TEXT,reportDate TEXT,businessType TEXT,shipmentCode TEXT);
     CREATE TABLE business_daily_reports(businessType TEXT,reportDate TEXT);
     CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT);`);
+  ensureV246TrackingSchema(db);
   db.prepare("INSERT INTO unified_import_batches VALUES(?,?,?,?,?)").run('B20','S20','2026-08-20','VALID','2026-08-20T10:00:00Z');
   db.prepare("INSERT INTO unified_import_batches VALUES(?,?,?,?,?)").run('B21','S21','2026-08-21','VALID','2026-08-21T10:00:00Z');
   db.prepare("INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode) VALUES(?,?,?,?,?)").run('B20','S20','2026-08-20','CE','CC20');
   db.prepare("INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode) VALUES(?,?,?,?,?)").run('B21','S21','2026-08-21','CE','CC21');
-  // reader creates the V246 ledger schema on demand.
-  readV273DashboardTrends('CE','2026-08-21','2026-08-21',db);
   const now='2026-08-24T00:00:00Z';
   const ins=db.prepare(`INSERT INTO qc_tracking_ledger(shipmentCode,businessType,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,terminalReason,terminalAt,currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastCheckedAt,lastRepairReason,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   ins.run('CC20','CE','2026-08-20','2026-08-20','S20','S20','TERMINAL','POD',now,'POD','POD',now,'2026-08-20',0,'',1,'{}','{}',now,'TEST',now,now);
