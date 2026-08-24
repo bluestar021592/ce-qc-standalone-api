@@ -11,6 +11,7 @@ process.env.DATA_DIR=root;
 process.env.DB_FILE=path.join(root,'ce_qc_monitor.db');
 const source=fs.readFileSync('src/v266EvergreenEvidenceArchive.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
+const runtime=fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js','utf8');
 const coverageSource=fs.readFileSync('src/v284MembershipEvidenceCoverage.js','utf8');
 const priorityRefreshSource=fs.readFileSync('src/v284PriorityUnprovenRefresh.js','utf8');
 const visibleBridgeSource=fs.readFileSync('src/v286V253TrendTruthBridge.js','utf8');
@@ -25,7 +26,7 @@ assert.match(source,/CEClient\.prototype\.postJson/,'every successful operationa
 assert.match(source,/gzipAsync/,'CE raw evidence must be compressed outside the main SQLite database');
 assert.match(source,/PRESERVE_BEFORE_TEMP_DELETE/,'uploaded source must be archived before multer temp deletion');
 assert.match(source,/source_uploads/,'source upload archive must be separate from derived database state');
-assert.match(source,/ce_api/,'CE API evidence archive must be independently replayable');
+assert.match(source,/ce_api/,'CE raw evidence archive must be independently replayable');
 assert.doesNotMatch(source,/rmSync\(|fsPromises\.rm\(|rmdir\(/,'V266 must not contain any archive purge implementation');
 
 const legacySha='8abc5f1b423f7dfab2d910f3de79067cae0a06cb683103a9d6c3df462f0b34c8';
@@ -36,7 +37,11 @@ assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplay\.js';/,'V283 
 assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'V283 post-evidence-seed retry must be activated in the normal startup chain');
 assert.match(activation,/import '\.\/v284DailyMembershipAudit\.js';/,'V284 real-db read-only audit must be activated after startup');
 assert.match(activation,/import '\.\/v284PriorityUnprovenRefresh\.js';/,'V284 bounded unproven-member refresh must be activated after the read-only audit');
-assert.match(activation,/import '\.\/v286V253TrendTruthBridge\.js';/,'V286 visible V253 trend bridge must be armed before server/V253 route registration');
+const bridgeImport="import './v286V253TrendTruthBridge.js';";
+const v253Import="import './v253DashboardFastPath.js';";
+assert.ok(runtime.includes(bridgeImport),'V286 visible V253 trend bridge must be activated in the interactive-first runtime');
+assert.ok(runtime.includes(v253Import),'V253 compatibility fastpath must remain present');
+assert.ok(runtime.indexOf(bridgeImport)<runtime.indexOf(v253Import),'V286 bridge must execute before V253 captures express.application.get; reversing this order would expose legacy trend SQL again');
 assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
@@ -46,6 +51,7 @@ for(const file of [
   'src/v284DailyMembershipAudit.js',
   'src/v284PriorityUnprovenRefresh.js',
   'src/v286V253TrendTruthBridge.js',
+  'src/v206InteractiveFirstRuntimePatch.js',
   'src/v273DashboardTruthReadPatch.js',
   'src/v244ShopeeTrendRuntimePatch.js',
   'src/rangeDashboardStoreV284.js',
@@ -57,6 +63,7 @@ for(const file of [
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 assert.match(coverageSource,/WHPP/,'V286 proven coverage must include WHPP daily members instead of silently omitting the seventh business');
 assert.match(coverageSource,/wf\.shipmentCode/,'V286 WHPP proof must accept WHPP final-row evidence when ledger proof is absent');
+assert.match(coverageSource,/u\.businessType='CEAF'/,'V286 WHPP proven membership must inherit same-day CEAF overlap exclusion');
 assert.match(coverageSource,/lastCheckedAt/,'checked lifecycle state must be part of proven-evidence ownership');
 assert.match(priorityRefreshSource,/MAX_TARGETS=100/,'priority evidence repair must remain hard-limited to 100 shipments');
 assert.match(priorityRefreshSource,/FOREGROUND_PROCESSING_ACTIVE/,'priority evidence repair must yield to active production processing');
@@ -93,4 +100,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283/V284/V285/V286] evergreen evidence + archive replay + seven-business proven coverage + live V253 route substitution + bounded targeted repair + frozen verified backup gate passed');
+console.log('[V266/V283/V284/V285/V286] evergreen evidence + archive replay + seven-business proven coverage + pre-V253 live route substitution + bounded targeted repair + frozen verified backup gate passed');
