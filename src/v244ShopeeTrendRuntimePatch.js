@@ -1,6 +1,6 @@
 import express from 'express';
 import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
-import { readV284ProvenShopeeTrends } from './v284MembershipEvidenceCoverage.js';
+import { readV284ProvenShopeeTrends as readV284ShopeeTrends } from './v284MembershipEvidenceCoverage.js';
 
 // Historical export names remain stable for the browser and old code, but V284
 // replaces the old firstReportDate cohort with exact daily latest-VALID membership.
@@ -24,9 +24,6 @@ function legacyCoverage(row={}){
   return {
     ...row,
     regions,
-    // Compatibility fields consumed by V251/V252 UI. On an incomplete daily
-    // cohort, preserve known POD + coverage diagnostics but never publish partial
-    // signing averages or 1/2/3-pai rates as if the whole day were analyzed.
     podDaysCount:ready?signingDaysCount:0,
     podDaysSum:ready?signingDaysSum:0,
     avgPodDays:ready?row.avgPodDays:null,
@@ -44,7 +41,7 @@ function legacyCoverage(row={}){
 }
 
 export function readV244ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate='',options={}) {
-  const result=readV284ProvenShopeeTrends(businessType,fromDate,toDate,options);
+  const result=readV284ShopeeTrends(businessType,fromDate,toDate,options);
   const daily=(result.daily||[]).map(legacyCoverage);
   return {
     ...result,
