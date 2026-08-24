@@ -59,13 +59,17 @@ function buildReport(){
   };
 }
 
-const timer=setTimeout(()=>{
-  try{
-    const report=buildReport();
-    console.log('[CE-QC][V254_STORAGE]',JSON.stringify(report));
-    try{fs.mkdirSync(getRuntimeConfig().logsDir,{recursive:true});fs.writeFileSync(path.join(getRuntimeConfig().logsDir,'storage_health_latest.json'),JSON.stringify(report,null,2));}catch{}
-  }catch(error){console.warn('[CE-QC][V254_STORAGE] scan failed:',error?.message||error);}
-},15000);
-timer.unref?.();
+if(String(process.env.CE_QC_DISABLE_STARTUP_STORAGE_SCAN||'')!=='1'){
+  const timer=setTimeout(()=>{
+    try{
+      const report=buildReport();
+      console.log('[CE-QC][V254_STORAGE]',JSON.stringify(report));
+      try{fs.mkdirSync(getRuntimeConfig().logsDir,{recursive:true});fs.writeFileSync(path.join(getRuntimeConfig().logsDir,'storage_health_latest.json'),JSON.stringify(report,null,2));}catch{}
+    }catch(error){console.warn('[CE-QC][V254_STORAGE] scan failed:',error?.message||error);}
+  },15000);
+  timer.unref?.();
+}else{
+  console.log('[CE-QC][RECOVERY_SAFE_MODE] V254 automatic full-directory size scan skipped; readV254StorageHealth remains available on demand.');
+}
 
 export function readV254StorageHealth(){return buildReport();}
