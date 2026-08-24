@@ -71,6 +71,8 @@ try{
   assert.equal(trends.daily[0].ready,true);assert.equal(trends.daily[0].podRate,100);assert.equal(trends.daily[0].sameDayPodRate,100);
   assert.equal(trends.daily[1].ready,true);assert.equal(trends.daily[1].ocRate,100);
   assert.deepEqual(trends.missingDates,[],'ledger-backed generic trends must not stay blank when final_rows history is missing');
+  const hot=readV273DashboardTrends('CE','2026-08-21','2026-08-21',db);
+  assert.equal(hot.memoryCacheHit,true,'second identical trend read must return from V274 hot memory without rescanning SQLite');
   db.close();
-  console.log('[V273] source census + true no-recipient preservation + anti-shrink/membership-loss + ledger-backed CE trend truth passed');
+  console.log('[V274/V273] source census + reupload protection + ledger-first CE trend truth + hot cache hit passed');
 }finally{fs.rmSync(temp,{recursive:true,force:true});}
