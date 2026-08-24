@@ -10,6 +10,10 @@ import './v252LifecycleCoordinator.js';
 // V287 keeps the historical V286 module in the startup chain only as a no-op
 // compatibility marker. It no longer wraps express.application.get.
 import './v286V253TrendTruthBridge.js';
+// V288 arms a one-shot express.use hook that inserts static CSS/JS/image serving
+// immediately before accessIdentity, then restores express.use. This prevents
+// render-blocking browser assets from waiting on SQLite-backed session reads.
+import './v288StaticAssetPreAuthPatch.js';
 // The historical V253 backend remains available for instant-summary/region and
 // compatibility reads, but visible browser trends are routed to /api/v273/trends
 // by the fetch-only frontend bridge.
@@ -21,14 +25,15 @@ import './v256R2ZeroCostGuard.js';
 import './v262ShopeeStrictEvidenceBackfill.js';
 import './v263DeliveryKpiTrendPatch.js';
 
-const PATCH_ID = '2026-08-24-v287-safe-visible-trend-fetch-runtime-v1';
+const PATCH_ID = '2026-08-24-v288-static-preauth-safe-visible-trend-runtime-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
 // V253 first paint no longer depends on dashboard_daily_cache. Keep the old cache
 // builder only as delayed maintenance so it cannot compete with normal page reads.
 // Visible browser trends now request /api/v273/trends directly through the frontend
-// fetch bridge. V273 delegates to V284 proven seven-business truth. This avoids the
-// V286 global Express hook while preserving the seven-business daily-membership fix.
+// fetch bridge. V273 delegates to V284 proven seven-business truth. V288 separately
+// removes CSS/JS/image requests from the DB-backed accessIdentity critical path while
+// keeping HTML navigation and every API authenticated.
 // V246/V252 persistent tracking still owns import admission, two-hour OPEN refresh
 // synchronization and Cambodia 02:00 deep reconciliation. V263 adds attempt/signing
 // evidence only for TBKH + SHOPEECN + SHOPEEVN.
@@ -87,6 +92,6 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V287] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; V286 global Express hook is retired; visible browser trends use V273 -> V284/V286 proven seven-business truth; V266 evidence archive, V246/V252 lifecycle tracking, V254 read-only storage audit and V256 R2 zero-cost guard remain active.`);
+console.log(`[CE-QC][V288] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; static CSS/JS/image assets no longer wait on SQLite session reads; HTML/API remain authenticated; visible browser trends use V273 -> V284/V286 proven seven-business truth.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
