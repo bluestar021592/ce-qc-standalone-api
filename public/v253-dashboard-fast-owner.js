@@ -6,7 +6,7 @@
   function rewriteUrl(raw){
     if(!raw)return raw;let u;try{u=new URL(raw,location.origin);}catch{return raw;}
     if(u.pathname==='/api/v89/instant-dashboard'){u.pathname='/api/v253/instant-dashboard';return u.pathname+u.search;}
-    // V287: visible trend reads bypass the historical V253 trend SQL entirely.
+    // V287: visible trend reads bypass the historical /api/v253/trends endpoint.
     // /api/v273/trends is already the authenticated compatibility route backed by
     // V284/V286 proven seven-business daily-membership truth.
     if(u.pathname==='/api/v234/trends'){u.pathname='/api/v273/trends';return u.pathname+u.search;}
