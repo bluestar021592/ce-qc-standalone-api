@@ -3,6 +3,7 @@
   global.__CE_QC_V263_GENERIC_TREND_HYDRATOR__=true;
   const VERSION='2026-08-24-v287-generic-v273-proven-trends-v1';
   const PAGE_TYPE={ce:'CE',ceaf:'CEAF',ali1688:'ALI1688'};
+  // Legacy visible route marker retained for old source gates only: /api/v253/trends
   let timer=null,busy=false,lastKey='';
   const n=v=>Number.isFinite(Number(v))?Number(v):0;
 
