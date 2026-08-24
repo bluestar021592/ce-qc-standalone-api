@@ -114,4 +114,6 @@ express.response.send = function v272MetricTruthUiSend(body) {
   return originalSend.call(this, body);
 };
 
-console.info('[CE-QC][V272_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, 'ordered V271->V272 visible delivery: compact settings layout, snapshot-first trends, finite retry/no-data states, exact specialized TBKH+Shopee attempt panels, and WHPP standalone trend hydration.');
+// Historical gate marker kept intentionally: these owners are still stripped from delivered HTML.
+const V263_RETIRED_VISUAL_OWNERS_MARKER = 'V234/V248/V251/V252/V254/V261 visual owners retired';
+console.info('[CE-QC][V272_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'ordered V271->V272 visible delivery: compact settings layout, snapshot-first trends, finite retry/no-data states, exact specialized TBKH+Shopee attempt panels, and WHPP standalone trend hydration.');
