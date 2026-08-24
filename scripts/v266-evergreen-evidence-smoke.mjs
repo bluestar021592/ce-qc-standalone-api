@@ -11,7 +11,9 @@ process.env.DATA_DIR=root;
 process.env.DB_FILE=path.join(root,'ce_qc_monitor.db');
 const source=fs.readFileSync('src/v266EvergreenEvidenceArchive.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
+const bootstrap=fs.readFileSync('bootstrap.js','utf8');
 const runtime=fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js','utf8');
+const storageSource=fs.readFileSync('src/v254StorageHealthPatch.js','utf8');
 const coverageSource=fs.readFileSync('src/v284MembershipEvidenceCoverage.js','utf8');
 const priorityRefreshSource=fs.readFileSync('src/v284PriorityUnprovenRefresh.js','utf8');
 const retiredV286Source=fs.readFileSync('src/v286V253TrendTruthBridge.js','utf8');
@@ -36,14 +38,25 @@ const legacySha='8abc5f1b423f7dfab2d910f3de79067cae0a06cb683103a9d6c3df462f0b34c
 assert.equal(v283.canonicalLegacyFileHash(`${legacySha}:2026-08-13-v77-ceaf-whpp-source-authority`),legacySha,'V283 must strip only the legacy authority suffix and retain the exact leading SHA-256');
 assert.equal(v283.canonicalLegacyFileHash(legacySha),legacySha,'V283 must preserve an already canonical SHA-256');
 assert.equal(v283.canonicalLegacyFileHash(`prefix:${legacySha}`),'','V283 must reject hashes that do not begin with the exact SHA-256');
-assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplay\.js';/,'V283 decorated-hash replay must be activated in the normal startup chain');
-assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'V283 post-evidence-seed retry must be activated in the normal startup chain');
-assert.match(activation,/import '\.\/v284DailyMembershipAudit\.js';/,'V284 real-db read-only audit must remain activated after startup');
-assert.match(activation,/import '\.\/v284PriorityUnprovenRefresh\.js';/,'V284 bounded unproven-member refresh must remain activated after the read-only audit');
+
+// Recovery safe mode is deliberately runtime-only: it preserves the V283/V284
+// code and persisted database state, but automatic startup replay/audit/refresh
+// must yield until the local UI is reachable again.
+assert.match(bootstrap,/CE_QC_RECOVERY_SAFE_MODE\s*=\s*'1'/,'recovery startup must explicitly prioritize UI availability');
+assert.match(bootstrap,/CE_QC_DISABLE_V246_TRACKING\s*=\s*'1'/,'automatic V246/V252/V264 tracking schedulers must stay off in recovery mode');
+assert.match(bootstrap,/CE_QC_DISABLE_V262_STRICT_BACKFILL\s*=\s*'1'/,'automatic V262 evidence backfill must stay off in recovery mode');
+assert.match(bootstrap,/CE_QC_DISABLE_STARTUP_STORAGE_SCAN\s*=\s*'1'/,'startup storage scan must stay off in recovery mode');
+assert.match(activation,/CE_QC_RECOVERY_SAFE_MODE/,'V147 must honor recovery safe mode');
+assert.match(activation,/await import\('\.\/v283LegacyDecoratedHashReplay\.js'\)/,'V283 replay implementation must remain available outside recovery safe mode');
+assert.match(activation,/await import\('\.\/v283LegacyDecoratedHashReplayRetry\.js'\)/,'V283 retry implementation must remain available outside recovery safe mode');
+assert.match(activation,/await import\('\.\/v284DailyMembershipAudit\.js'\)/,'V284 audit implementation must remain available outside recovery safe mode');
+assert.match(activation,/await import\('\.\/v284PriorityUnprovenRefresh\.js'\)/,'V284 priority repair implementation must remain available outside recovery safe mode');
+assert.match(storageSource,/CE_QC_DISABLE_STARTUP_STORAGE_SCAN/,'V254 must skip the automatic recursive disk scan in recovery safe mode');
+assert.match(storageSource,/export function readV254StorageHealth\(\)/,'manual/read-only storage health must remain available');
 
 // Emergency recovery rule: restore the exact 88439846 first-paint/browser shell
-// while preserving current V284/V286 stored-data truth. V286/V288 experimental
-// Express hooks may remain inspectable in the repository but must not execute.
+// while preserving current stored-data truth. V286/V288 experimental Express
+// hooks may remain inspectable in the repository but must not execute.
 assert.match(runtime,/import '\.\/v253DashboardFastPath\.js';/,'known-good V253 backend fastpath must remain in normal startup');
 assert.doesNotMatch(runtime,/^\s*import '\.\/v286V253TrendTruthBridge\.js';/m,'retired V286 Express route-hook module must not execute in normal startup');
 assert.doesNotMatch(runtime,/^\s*import '\.\/v288StaticAssetPreAuthPatch\.js';/m,'retired V288 express.use experiment must not execute in normal startup');
@@ -53,10 +66,13 @@ assert.doesNotMatch(retiredV286Source,/express\.application\.get\s*=/,'retired V
 assert.match(retiredV288Source,/SAFE_ASSET_RE/,'retired V288 implementation remains inspectable but is not startup-active');
 assert.match(fastOwnerSource,/\/api\/v253\/trends/,'recovered V253 browser owner must match the last confirmed 88439846 shell');
 assert.match(genericTrendSource,/\/api\/v253\/trends/,'recovered generic trend hydrator must match the last confirmed 88439846 shell');
-assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
+assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must remain available for later controlled use');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
 for(const file of [
+  'bootstrap.js',
+  'src/v147TrackTimeoutConfig.js',
+  'src/v254StorageHealthPatch.js',
   'src/v284DailyMembershipTruth.js',
   'src/v284MembershipEvidenceCoverage.js',
   'src/v284DailyMembershipAudit.js',
@@ -72,15 +88,15 @@ for(const file of [
   'scripts/v284-evidence-coverage-smoke.mjs',
   'scripts/v285-preupdate-backup-freeze-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
-assert.match(coverageSource,/WHPP/,'V286 proven coverage must include WHPP daily members instead of silently omitting the seventh business');
-assert.match(coverageSource,/wf\.shipmentCode/,'V286 WHPP proof must accept WHPP final-row evidence when ledger proof is absent');
-assert.match(coverageSource,/u\.businessType='CEAF'/,'V286 WHPP proven membership must inherit same-day CEAF overlap exclusion');
-assert.match(coverageSource,/lastCheckedAt/,'checked lifecycle state must be part of proven-evidence ownership');
-assert.match(priorityRefreshSource,/MAX_TARGETS=100/,'priority evidence repair must remain hard-limited to 100 shipments');
+assert.match(coverageSource,/WHPP/,'V286 proven coverage code remains preserved in repository while automatic startup work is paused');
+assert.match(coverageSource,/wf\.shipmentCode/,'WHPP final-row evidence code must remain preserved');
+assert.match(coverageSource,/u\.businessType='CEAF'/,'WHPP/CEAF overlap protection must remain preserved');
+assert.match(coverageSource,/lastCheckedAt/,'checked lifecycle state must remain part of proven-evidence ownership');
+assert.match(priorityRefreshSource,/MAX_TARGETS=100/,'priority evidence repair must remain hard-limited to 100 shipments when re-enabled');
 assert.match(priorityRefreshSource,/FOREGROUND_PROCESSING_ACTIVE/,'priority evidence repair must yield to active production processing');
-assert.match(priorityRefreshSource,/processCarryFamilyForRefresh/,'priority evidence repair must reuse the existing production carry refresh pipeline');
-assert.match(priorityRefreshSource,/\['WHPP',open\.filter/,'V286 bounded priority repair must route WHPP gaps through the existing WHPP carry pipeline');
-assert.match(priorityRefreshSource,/if\(targets\.length>MAX_TARGETS\)/,'large evidence gaps must be skipped rather than causing an unbounded startup refresh');
+assert.match(priorityRefreshSource,/processCarryFamilyForRefresh/,'priority evidence repair implementation must remain preserved');
+assert.match(priorityRefreshSource,/\['WHPP',open\.filter/,'WHPP bounded repair path must remain preserved');
+assert.match(priorityRefreshSource,/if\(targets\.length>MAX_TARGETS\)/,'large evidence gaps must remain bounded');
 assert.match(backupSource,/BEGIN IMMEDIATE/,'V285 high-risk pre-update backup must freeze SQLite writers before copying the production DB');
 assert.match(backupSource,/SOURCE_CHANGED_DURING_WRITE_FREEZE/,'V285 must still reject a source fingerprint change even while the write freeze is held');
 assert.match(backupSource,/backupQuickCheck:'ok'/,'V285 must retain structural verification of the frozen backup');
@@ -107,4 +123,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[RECOVERY/V266/V283/V284/V285/V286] 88439846 first-paint shell restored + seven-business data truth preserved + frozen verified backup gate passed');
+console.log('[RECOVERY-SAFE/V266/V283/V284/V285/V286] 88439846 browser shell + automatic startup maintenance paused + stored data truth preserved + frozen backup gate passed');
