@@ -1,9 +1,15 @@
 import './v203CeafFastBusinessStatePatch.js';
 import './v204CeafInstantRoutePatch.js';
-import './v283LegacyDecoratedHashReplay.js';
-import './v283LegacyDecoratedHashReplayRetry.js';
-import './v284DailyMembershipAudit.js';
-import './v284PriorityUnprovenRefresh.js';
+
+const RECOVERY_SAFE_MODE=String(process.env.CE_QC_RECOVERY_SAFE_MODE||'')==='1';
+if(!RECOVERY_SAFE_MODE){
+  await import('./v283LegacyDecoratedHashReplay.js');
+  await import('./v283LegacyDecoratedHashReplayRetry.js');
+  await import('./v284DailyMembershipAudit.js');
+  await import('./v284PriorityUnprovenRefresh.js');
+}else{
+  console.log('[CE-QC][RECOVERY_SAFE_MODE] V283 archive replay + V284 startup audit/priority refresh skipped on automatic startup; persisted database state is unchanged.');
+}
 
 export const V147_TRACK_TIMEOUT_CONFIG_ID = '2026-08-16-v147-track-time-budget-v2';
 
