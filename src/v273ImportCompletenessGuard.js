@@ -4,11 +4,17 @@ import XLSX from 'xlsx';
 import { getDb, nowIso } from './db.js';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V273_IMPORT_COMPLETENESS_ID = '2026-08-24-v280-sparse-excel-range-import-v7';
+export const V273_IMPORT_COMPLETENESS_ID = '2026-08-24-v282-column-bound-source-census-v1';
 const previousPost = express.application.post;
 const WAYBILL_CELL_RE = /^(?:TBKH|SPE|CC|CE)[A-Z0-9]{8,}$/;
 const CELL_ADDRESS_RE = /^[A-Z]{1,3}[1-9]\d*$/;
+const SHIPMENT_HEADERS = [
+  '运单号', '运单编号', '单号', '面单号', '快递单号', '物流单号',
+  'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'
+];
 const normBill = value => String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/[\s-]+/g, '');
+const normalizeHeader = value => String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/[\s_\-]+/g, '');
+const normalizedShipmentHeaders = SHIPMENT_HEADERS.map(normalizeHeader);
 
 function meaningfulCellValue(cell) {
   if (!cell || typeof cell !== 'object') return '';
@@ -51,6 +57,58 @@ function withSparseSheetToJson(callback) {
   }
 }
 
+function buildHeaderRows(sheet = {}) {
+  const rows = Array.from({ length: 30 }, () => []);
+  let maxColumn = -1;
+  for (const [address, cell] of Object.entries(sheet || {})) {
+    if (!CELL_ADDRESS_RE.test(address)) continue;
+    const decoded = XLSX.utils.decode_cell(address);
+    if (!Number.isFinite(decoded?.r) || !Number.isFinite(decoded?.c) || decoded.r >= 30) continue;
+    const value = meaningfulCellValue(cell);
+    if (!String(value).trim()) continue;
+    rows[decoded.r][decoded.c] = value;
+    maxColumn = Math.max(maxColumn, decoded.c);
+  }
+  for (const range of sheet['!merges'] || []) {
+    if (range.s.r >= 30) continue;
+    const source = rows[range.s.r]?.[range.s.c];
+    if (!String(source ?? '').trim()) continue;
+    for (let r = range.s.r; r <= Math.min(range.e.r, 29); r += 1) {
+      rows[r] ||= [];
+      for (let c = range.s.c; c <= range.e.c; c += 1) {
+        if (!String(rows[r][c] ?? '').trim()) rows[r][c] = source;
+        maxColumn = Math.max(maxColumn, c);
+      }
+    }
+  }
+  return { rows, maxColumn };
+}
+
+function findShipmentBinding(sheet = {}) {
+  const { rows } = buildHeaderRows(sheet);
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const headers = (rows[rowIndex] || []).map(normalizeHeader);
+    let columnIndex = -1;
+    for (const alias of normalizedShipmentHeaders) {
+      columnIndex = headers.findIndex(header => header === alias);
+      if (columnIndex >= 0) break;
+    }
+    if (columnIndex < 0) continue;
+    let hasWaybillBelow = false;
+    for (const [address, cell] of Object.entries(sheet || {})) {
+      if (!CELL_ADDRESS_RE.test(address)) continue;
+      const decoded = XLSX.utils.decode_cell(address);
+      if (decoded.c !== columnIndex || decoded.r <= rowIndex || decoded.r > rowIndex + 80) continue;
+      if (WAYBILL_CELL_RE.test(normBill(meaningfulCellValue(cell)))) {
+        hasWaybillBelow = true;
+        break;
+      }
+    }
+    if (hasWaybillBelow) return { headerRow: rowIndex, columnIndex, header: String(rows[rowIndex]?.[columnIndex] || '') };
+  }
+  return null;
+}
+
 export function compareV273ReuploadCounts(newCount, previousCount) {
   const next = Math.max(0, Number(newCount || 0));
   const prev = Math.max(0, Number(previousCount || 0));
@@ -67,12 +125,17 @@ export function compareV273Membership(newBills = [], previousBills = []) {
 export function readV273SourceWaybillCensus(filePath) {
   const workbook = XLSX.readFile(filePath, { cellDates: false, dense: false });
   const bills = new Set();
+  const diagnosticBills = new Set();
+  const locations = new Map();
   const sheets = [];
+  let ignoredOffColumnCount = 0;
   for (const sheetName of workbook.SheetNames) {
     const meta = workbook.Workbook?.Sheets?.find(item => item.name === sheetName);
     if (Number(meta?.Hidden || 0) > 0) continue;
     const sheet = workbook.Sheets[sheetName] || {};
+    const binding = findShipmentBinding(sheet);
     const local = new Set();
+    const broad = new Map();
     let scannedCells = 0;
     for (const [address, cell] of Object.entries(sheet)) {
       if (!CELL_ADDRESS_RE.test(address)) continue;
@@ -80,28 +143,60 @@ export function readV273SourceWaybillCensus(filePath) {
       if (!String(value).trim()) continue;
       scannedCells += 1;
       const bill = normBill(value);
-      if (WAYBILL_CELL_RE.test(bill)) {
-        bills.add(bill);
-        local.add(bill);
-      }
+      if (!WAYBILL_CELL_RE.test(bill)) continue;
+      diagnosticBills.add(bill);
+      if (!broad.has(bill)) broad.set(bill, []);
+      broad.get(bill).push(address);
+      const decoded = XLSX.utils.decode_cell(address);
+      if (!binding || decoded.c !== binding.columnIndex || decoded.r <= binding.headerRow) continue;
+      bills.add(bill);
+      local.add(bill);
+      if (!locations.has(bill)) locations.set(bill, []);
+      locations.get(bill).push({ sheetName, address, header: binding.header });
     }
+    const ignored = [...broad.entries()]
+      .filter(([bill]) => !local.has(bill))
+      .flatMap(([bill, addresses]) => addresses.map(address => ({ bill, address })))
+      .slice(0, 20);
+    ignoredOffColumnCount += [...broad.keys()].filter(bill => !local.has(bill)).length;
     const sparse = sparseMeaningfulRange(sheet);
     sheets.push({
       sheetName,
       waybillCandidates: local.size,
+      allCellWaybillCandidates: broad.size,
+      ignoredOffColumnCandidates: [...broad.keys()].filter(bill => !local.has(bill)).length,
+      ignoredOffColumnSamples: ignored,
+      shipmentHeader: binding?.header || '',
+      shipmentHeaderRow: binding ? binding.headerRow + 1 : null,
+      shipmentColumn: binding ? XLSX.utils.encode_col(binding.columnIndex) : '',
       scannedCells,
       originalRef: String(sheet['!ref'] || ''),
       safeRange: sparse ? XLSX.utils.encode_range(sparse.range) : ''
     });
   }
-  return { count: bills.size, bills: [...bills].sort(), sheets };
+  return {
+    count: bills.size,
+    bills: [...bills].sort(),
+    locations: Object.fromEntries([...locations.entries()]),
+    diagnosticCount: diagnosticBills.size,
+    diagnosticBills: [...diagnosticBills].sort(),
+    ignoredOffColumnCount,
+    sheets
+  };
 }
 
-export function compareV273ParsedToCensus(parsedBills = [], censusBills = []) {
+export function compareV273ParsedToCensus(parsedBills = [], censusBills = [], locations = {}) {
   const parsed = new Set((parsedBills || []).map(normBill).filter(Boolean));
   const census = [...new Set((censusBills || []).map(normBill).filter(Boolean))];
   const missing = census.filter(bill => !parsed.has(bill));
-  return { ok: missing.length === 0, parsedCount: parsed.size, censusCount: census.length, missingCount: missing.length, missingBills: missing };
+  return {
+    ok: missing.length === 0,
+    parsedCount: parsed.size,
+    censusCount: census.length,
+    missingCount: missing.length,
+    missingBills: missing,
+    missingDetails: missing.flatMap(bill => (locations?.[bill] || []).map(item => ({ bill, ...item }))).slice(0, 50)
+  };
 }
 
 function latestValidMembership(reportDate, db = getDb()) {
@@ -160,7 +255,7 @@ async function guard(req, res, next) {
     console.info('[CE-QC][V280_IMPORT_CENSUS_START]', JSON.stringify({ requestedDate }));
     const census = readV273SourceWaybillCensus(filePath);
     const censusMs = Date.now() - censusStarted;
-    console.info('[CE-QC][V280_IMPORT_CENSUS_DONE]', JSON.stringify({ requestedDate, waybills: census.count, censusMs, sheets: census.sheets }));
+    console.info('[CE-QC][V282_IMPORT_CENSUS_DONE]', JSON.stringify({ requestedDate, shipmentColumnWaybills: census.count, allCellCandidates: census.diagnosticCount, ignoredOffColumnCount: census.ignoredOffColumnCount, censusMs, sheets: census.sheets }));
 
     const parseStarted = Date.now();
     console.info('[CE-QC][V280_IMPORT_PARSE_START]', JSON.stringify({ requestedDate }));
@@ -173,13 +268,15 @@ async function guard(req, res, next) {
     const previous = latestValidMembership(parsed.reportDate);
     const membershipLookupMs = Date.now() - membershipStarted;
     const newBills = (parsed.rows || []).map(row => row.shipmentCode);
-    const sourceCoverage = compareV273ParsedToCensus(newBills, census.bills);
+    const sourceCoverage = compareV273ParsedToCensus(newBills, census.bills, census.locations);
     const comparison = compareV273ReuploadCounts(parsed.summary?.validUniqueWaybills, previous.count);
     const membership = compareV273Membership(newBills, previous.bills);
     req.v273ImportCompleteness = {
       id: V273_IMPORT_COMPLETENESS_ID,
       reportDate: parsed.reportDate,
       sourceWaybillCensus: census.count,
+      sourceAllCellCandidateCount: census.diagnosticCount,
+      ignoredOffColumnCandidateCount: census.ignoredOffColumnCount,
       rawRows: Number(parsed.summary?.rawRows || 0),
       validUniqueWaybills: Number(parsed.summary?.validUniqueWaybills || 0),
       classifiedWaybills: Number(parsed.sourceReconciliation?.classifiedWaybills || 0),
@@ -188,15 +285,19 @@ async function guard(req, res, next) {
       sameSourceFile: previous.fileHash === parsed.fileHash,
       sourceMissingCount: sourceCoverage.missingCount,
       sourceMissingBills: sourceCoverage.missingBills.slice(0, 50),
+      sourceMissingDetails: sourceCoverage.missingDetails.slice(0, 50),
       missingPreviousCount: membership.missingPreviousCount,
       missingPreviousBills: membership.missingPreviousBills.slice(0, 50),
       sheetDiagnostics: parsed.sheetDiagnostics || [],
       sourceSheetCensus: census.sheets,
       timing: { censusMs, parseMs, membershipLookupMs, totalGuardMs: Date.now() - startedAt }
     };
-    console.info('[CE-QC][V280_IMPORT_PRECOMMIT]', JSON.stringify({ reportDate: parsed.reportDate, rows: Number(parsed.summary?.validUniqueWaybills || 0), censusMs, parseMs, membershipLookupMs, totalGuardMs: Date.now() - startedAt }));
+    console.info('[CE-QC][V280_IMPORT_PRECOMMIT]', JSON.stringify({ reportDate: parsed.reportDate, rows: Number(parsed.summary?.validUniqueWaybills || 0), shipmentColumnWaybills: census.count, allCellCandidates: census.diagnosticCount, ignoredOffColumnCount: census.ignoredOffColumnCount, censusMs, parseMs, membershipLookupMs, totalGuardMs: Date.now() - startedAt }));
 
-    if (!sourceCoverage.ok) return res.status(422).json({ ok: false, code: 'V273_SOURCE_WAYBILL_CENSUS_MISMATCH', error: `源Excel可识别到${census.count}个运单，但正式解析漏掉${sourceCoverage.missingCount}个。已阻止入库，禁止静默漏单。`, completeness: req.v273ImportCompleteness });
+    if (!sourceCoverage.ok) {
+      console.error('[CE-QC][V282_TRUE_SOURCE_MISMATCH]', JSON.stringify({ reportDate: parsed.reportDate, missingBills: sourceCoverage.missingBills.slice(0, 50), missingDetails: sourceCoverage.missingDetails.slice(0, 50) }));
+      return res.status(422).json({ ok: false, code: 'V273_SOURCE_WAYBILL_CENSUS_MISMATCH', error: `源Excel运单列可识别到${census.count}个唯一运单，但正式解析漏掉${sourceCoverage.missingCount}个。已阻止入库，禁止静默漏单。`, completeness: req.v273ImportCompleteness });
+    }
     if (!parsed.sourceReconciliation?.balanced) return res.status(422).json({ ok: false, code: 'V273_CLASSIFICATION_NOT_BALANCED', error: '日报分类守恒失败，已阻止入库。', completeness: req.v273ImportCompleteness });
     if (!comparison.ok) return res.status(409).json({ ok: false, code: 'V273_SAME_DATE_REUPLOAD_SHRINK_BLOCKED', error: `${parsed.reportDate}重新上传文件只有${comparison.newCount}个唯一运单，少于当前有效批次${comparison.previousCount}个。为防止历史单号再次丢失，本次已拒绝覆盖。请上传完整原始日报。`, completeness: req.v273ImportCompleteness });
     if (!membership.ok) return res.status(409).json({ ok: false, code: 'V273_SAME_DATE_MEMBERSHIP_LOSS_BLOCKED', error: `${parsed.reportDate}重新上传文件缺少当前有效批次中的${membership.missingPreviousCount}个运单。即使总票更多也不允许覆盖，以防历史单号被替换或丢失。`, completeness: req.v273ImportCompleteness });
@@ -244,4 +345,4 @@ express.application.post = function v273ImportPost(pathValue, ...handlers) {
 };
 
 if (process.env.NODE_ENV !== 'test' && !process.env.CI) setImmediate(() => recoverInterruptedSameHashRepairs());
-console.info('[CE-QC][V273_IMPORT_COMPLETENESS]', V273_IMPORT_COMPLETENESS_ID, 'sparse-cell source census + sparse-range parser guard + same-date membership superset; validated parse reused by final handler; silent loss blocked.');
+console.info('[CE-QC][V273_IMPORT_COMPLETENESS]', V273_IMPORT_COMPLETENESS_ID, 'V282 shipment-column-bound source census + all-cell diagnostics + sparse-range parser guard + same-date membership superset; true source loss remains blocked.');
