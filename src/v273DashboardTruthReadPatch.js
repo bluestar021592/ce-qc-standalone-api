@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
-export const V273_DASHBOARD_TRUTH_ID='2026-08-24-v274-ledger-first-hot-seven-business-trends-v2';
+export const V273_DASHBOARD_TRUTH_ID='2026-08-24-v274-ledger-first-hot-seven-business-trends-v3';
 const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','ALL']);
 const UNIFIED_TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
@@ -35,10 +35,12 @@ export function readV273DashboardTrends(businessType='ALL',fromDate='',toDate=''
  const value=(r,k)=>r?.ready?n(r[k]):null;const result={ok:true,id:V273_DASHBOARD_TRUTH_ID,businessType:type,fromDate:dates[0]||from,toDate:dates.at(-1)||to,dates,daily,ticket:daily.map(r=>n(r.total)),pod:daily.map(r=>value(r,'pod')),podRate:daily.map(r=>value(r,'podRate')),oc:daily.map(r=>value(r,'ocCurrent')),ocRate:daily.map(r=>value(r,'ocRate')),sameDayPod:daily.map(r=>value(r,'sameDayPod')),sameDayPodRate:daily.map(r=>value(r,'sameDayPodRate')),coverageRate:daily.map(r=>r.coverageRate),missingDates:daily.filter(r=>!r.ready).map(r=>r.reportDate),source:'LATEST_VALID_DAILY_COUNTS_PLUS_V246_LEDGER_AGGREGATES',definitions:{podRate:'当前已POD/当日日报总票',ocRate:'当前真实OC/当日日报总票',sameDayPodRate:'日报当日完成POD/当日日报总票'}};memory.set(key,{at:Date.now(),value:result});return result;
 }
 export function invalidateV274DashboardHotFacts(){memory.clear();}
-globalThis.__CE_QC_INVALIDATE_V274_TRENDS__=invalidateV274DashboardHotFacts;
 function latestReportDate(db=getDb()){try{return String(db.prepare(`SELECT MAX(reportDate) reportDate FROM (SELECT reportDate FROM unified_import_batches WHERE status='VALID' UNION ALL SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP')`).get()?.reportDate||'');}catch{return'';}}
 function prewarm(delay=0){if(prewarmRunning)return;prewarmRunning=true;const run=()=>{try{const db=getDb(),to=latestReportDate(db);if(!to)return;for(const type of ['ALL','CE','CEAF','ALI1688','WHPP','TBKH','SHOPEECN','SHOPEEVN']){try{readV273DashboardTrends(type,to,to,db);}catch{}}console.info('[CE-QC][V274_TREND_HOT] prewarmed recent seven-day trend facts for all visible boards.');}catch(e){console.warn('[CE-QC][V274_TREND_HOT] prewarm failed:',e?.message||e);}finally{prewarmRunning=false;}};if(delay>0)setTimeout(run,delay).unref?.();else run();}
-function startPeriodicPrewarm(){if(prewarmTimer)return;prewarmTimer=setInterval(()=>{memory.clear();prewarm();},60_000);prewarmTimer.unref?.();}
+function refreshHotFacts(){memory.clear();prewarm(30);}
+globalThis.__CE_QC_INVALIDATE_V274_TRENDS__=invalidateV274DashboardHotFacts;
+globalThis.__CE_QC_REFRESH_V274_TRENDS__=refreshHotFacts;
+function startPeriodicPrewarm(){if(prewarmTimer)return;prewarmTimer=setInterval(refreshHotFacts,60_000);prewarmTimer.unref?.();}
 function handler(req,res){try{const started=Date.now(),data=readV273DashboardTrends(req.query.businessType,req.query.from,req.query.to);res.setHeader('Cache-Control','private,max-age=15');res.setHeader('X-CE-QC-V274',V273_DASHBOARD_TRUTH_ID);res.setHeader('Server-Timing',`v274;dur=${Date.now()-started}`);res.json(data);}catch(e){res.status(400).json({ok:false,id:V273_DASHBOARD_TRUTH_ID,error:e?.message||String(e)});}}
 function register(app){if(registered)return;registered=true;previousGet.call(app,'/api/v273/trends',handler);console.info('[CE-QC][V274_TRENDS]',V273_DASHBOARD_TRUTH_ID,'registered after auth; ledger-first aggregates + 60s hot memory + startup/background prewarm.');prewarm(1200);startPeriodicPrewarm();}
 express.application.get=function v273Route(pathValue,...handlers){if(!registered&&String(pathValue||'')==='/api/v234/trends')register(this);return previousGet.call(this,pathValue,...handlers);};
