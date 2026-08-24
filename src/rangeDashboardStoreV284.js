@@ -4,12 +4,11 @@ import { summarizeV284ProvenRange as summarizeV284Range } from './v284Membership
 
 const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
-const PHYSICAL_TYPES=[...CCSL_TYPES,...SHOPEE_TYPES,'WHPP'];
 
 export function loadRangeDashboard(fromDate,toDate){
   const range=loadRangeDashboardV191(fromDate,toDate);
   const truth=summarizeV284Range(range.fromDate||fromDate,range.toDate||toDate);
-  for(const type of PHYSICAL_TYPES) patchState(range.states?.[type],truth.byType[type],truth.daily.filter(row=>row.businessType===type));
+  for(const type of [...CCSL_TYPES,...SHOPEE_TYPES]) patchState(range.states?.[type],truth.byType[type],truth.daily.filter(row=>row.businessType===type));
   patchState(range.aggregates?.CCSL,truth.ccsl,truth.daily.filter(row=>CCSL_TYPES.includes(row.businessType)));
   patchState(range.aggregates?.SHOPEE,truth.shopee,truth.daily.filter(row=>SHOPEE_TYPES.includes(row.businessType)));
   range.sourceTotal=truth.sourceTotal;
@@ -20,7 +19,7 @@ export function loadRangeDashboard(fromDate,toDate){
   range.sourceDates=truth.dates;
   range.dates=truth.dates;
   range.v284Coverage=truth.daily.map(row=>({reportDate:row.reportDate,businessType:row.businessType,total:row.total,matched:row.matched,coverageRate:row.coverageRate,ready:row.ready}));
-  return {...range,queryMode:`${range.queryMode||'SQL'}+SEVEN_BUSINESS_DAILY_MEMBERSHIP_PROVEN_LEDGER_V286`,dailyTruthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,evidenceCoverageId:truth.evidenceCoverageId,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP_ALL_SEVEN',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK'};
+  return {...range,queryMode:`${range.queryMode||'SQL'}+DAILY_MEMBERSHIP_PROVEN_LEDGER_V284`,dailyTruthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,evidenceCoverageId:truth.evidenceCoverageId,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK'};
 }
 
 function patchState(state,fact,dailyRows=[]){
@@ -36,7 +35,7 @@ function patchState(state,fact,dailyRows=[]){
   state.snapshotStatus=state.sourceDates.length?(state.analysisComplete?'COMPLETED':'PARTIAL'):'EMPTY';
   state.dailyReportReady=state.sourceDates.length>0;
   state.dailyParseSummary={...(state.dailyParseSummary||{}),totalRecognized:fact.total,sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending};
-  state.sourceCoverage={sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending,analysisComplete:state.analysisComplete,sourceDates:state.sourceDates,analyzedDates:state.analyzedDates,missingAnalysisDates:missingDates,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP_ALL_SEVEN',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK'};
+  state.sourceCoverage={sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending,analysisComplete:state.analysisComplete,sourceDates:state.sourceDates,analyzedDates:state.analyzedDates,missingAnalysisDates:missingDates,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK'};
   const summaries=[state.v55Summary,state.dashboard?.v55Summary,state.dashboard?.metrics].filter(Boolean);
   for(const summary of summaries) patchMetrics(summary,fact);
   if(state.dashboard){
@@ -82,4 +81,4 @@ function patchDashboardRows(rows,f){
   for(const row of rows){const label=String(row?.项目||row?.metricKey||row?.label||'').trim();if(!values.has(label))continue;const value=Number(values.get(label)||0);row.数值=value;row.数值原值=value;row.value=value;}
 }
 
-console.info('[CE-QC][V284_RANGE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'range cards/coverage use all seven daily latest-VALID memberships + proven V246 lifecycle/final evidence; WHPP is no longer omitted from completion truth.');
+console.info('[CE-QC][V284_RANGE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'range cards/coverage use daily latest-VALID membership + proven V246 lifecycle evidence; admitted-only OPEN placeholders do not count as analyzed.');
