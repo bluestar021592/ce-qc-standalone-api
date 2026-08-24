@@ -15,6 +15,7 @@ const runtime=fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js','utf8');
 const coverageSource=fs.readFileSync('src/v284MembershipEvidenceCoverage.js','utf8');
 const priorityRefreshSource=fs.readFileSync('src/v284PriorityUnprovenRefresh.js','utf8');
 const visibleBridgeSource=fs.readFileSync('src/v286V253TrendTruthBridge.js','utf8');
+const staticPreauthSource=fs.readFileSync('src/v288StaticAssetPreAuthPatch.js','utf8');
 const backupSource=fs.readFileSync('scripts/CE_QC_PreUpdate_Backup.mjs','utf8');
 const mod=await import(`../src/v266EvergreenEvidenceArchive.js?smoke=${Date.now()}`);
 const v283=await import(`../src/v283LegacyDecoratedHashReplay.js?smoke=${Date.now()}`);
@@ -38,10 +39,12 @@ assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'
 assert.match(activation,/import '\.\/v284DailyMembershipAudit\.js';/,'V284 real-db read-only audit must be activated after startup');
 assert.match(activation,/import '\.\/v284PriorityUnprovenRefresh\.js';/,'V284 bounded unproven-member refresh must be activated after the read-only audit');
 const bridgeImport="import './v286V253TrendTruthBridge.js';";
+const staticImport="import './v288StaticAssetPreAuthPatch.js';";
 const v253Import="import './v253DashboardFastPath.js';";
-assert.ok(runtime.includes(bridgeImport),'V286 visible V253 trend bridge must be activated in the interactive-first runtime');
+assert.ok(runtime.includes(bridgeImport),'V286 compatibility marker must remain activated in the interactive-first runtime');
+assert.ok(runtime.includes(staticImport),'V288 static pre-auth protection must be activated before server registration');
 assert.ok(runtime.includes(v253Import),'V253 compatibility fastpath must remain present');
-assert.ok(runtime.indexOf(bridgeImport)<runtime.indexOf(v253Import),'V286 bridge must execute before V253 captures express.application.get; reversing this order would expose legacy trend SQL again');
+assert.ok(runtime.indexOf(staticImport)<runtime.indexOf(v253Import),'V288 static pre-auth hook must arm before later server/V253 registration work');
 assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
@@ -51,6 +54,7 @@ for(const file of [
   'src/v284DailyMembershipAudit.js',
   'src/v284PriorityUnprovenRefresh.js',
   'src/v286V253TrendTruthBridge.js',
+  'src/v288StaticAssetPreAuthPatch.js',
   'src/v206InteractiveFirstRuntimePatch.js',
   'src/v273DashboardTruthReadPatch.js',
   'src/v244ShopeeTrendRuntimePatch.js',
@@ -59,7 +63,8 @@ for(const file of [
   'scripts/v284-daily-membership-smoke.mjs',
   'scripts/v284-evidence-coverage-smoke.mjs',
   'scripts/v285-preupdate-backup-freeze-smoke.mjs',
-  'scripts/v286-visible-v253-route-smoke.mjs'
+  'scripts/v286-visible-v253-route-smoke.mjs',
+  'scripts/v288-static-preauth-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 assert.match(coverageSource,/WHPP/,'V286 proven coverage must include WHPP daily members instead of silently omitting the seventh business');
 assert.match(coverageSource,/wf\.shipmentCode/,'V286 WHPP proof must accept WHPP final-row evidence when ledger proof is absent');
@@ -70,9 +75,16 @@ assert.match(priorityRefreshSource,/FOREGROUND_PROCESSING_ACTIVE/,'priority evid
 assert.match(priorityRefreshSource,/processCarryFamilyForRefresh/,'priority evidence repair must reuse the existing production carry refresh pipeline');
 assert.match(priorityRefreshSource,/\['WHPP',open\.filter/,'V286 bounded priority repair must route WHPP gaps through the existing WHPP carry pipeline');
 assert.match(priorityRefreshSource,/if\(targets\.length>MAX_TARGETS\)/,'large evidence gaps must be skipped rather than causing an unbounded startup refresh');
-assert.match(visibleBridgeSource,/\/api\/v253\/trends/,'V286 must own the trend endpoint still requested by the visible dashboard');
-assert.match(visibleBridgeSource,/readV284ProvenDashboardTrends/,'V286 visible V253 trends must delegate to proven daily membership truth');
-assert.match(visibleBridgeSource,/legacy V253 trend SQL is not registered/,'V286 bridge must explicitly suppress the legacy visible trend authority');
+// V286 remains as a retired compatibility marker; V287 owns the visible trend rewrite.
+assert.match(visibleBridgeSource,/\/api\/v253\/trends/,'retired V286 source must preserve the historical endpoint marker for auditability');
+assert.doesNotMatch(visibleBridgeSource,/express\.application\.get\s*=/,'retired V286 must never restore the global Express route hook');
+// V288 must be narrowly scoped: static GET/HEAD assets only, no HTML/API exposure,
+// and its temporary express.use hook must self-restore once accessIdentity is registered.
+assert.match(staticPreauthSource,/SAFE_ASSET_RE/,'V288 must explicitly whitelist static asset extensions');
+assert.match(staticPreauthSource,/index:false/,'V288 pre-auth static serving must never expose directory index HTML');
+assert.match(staticPreauthSource,/fn\.name==='accessIdentity'/,'V288 must insert immediately before accessIdentity');
+assert.match(staticPreauthSource,/express\.application\.use=previousUse/,'V288 must restore express.use immediately after insertion');
+assert.doesNotMatch(staticPreauthSource,/html\|/i,'V288 static extension whitelist must not include HTML');
 assert.match(backupSource,/BEGIN IMMEDIATE/,'V285 high-risk pre-update backup must freeze SQLite writers before copying the production DB');
 assert.match(backupSource,/SOURCE_CHANGED_DURING_WRITE_FREEZE/,'V285 must still reject a source fingerprint change even while the write freeze is held');
 assert.match(backupSource,/backupQuickCheck:'ok'/,'V285 must retain structural verification of the frozen backup');
@@ -81,6 +93,7 @@ await import(`./v284-daily-membership-smoke.mjs?nested=${Date.now()}`);
 await import(`./v284-evidence-coverage-smoke.mjs?nested=${Date.now()}`);
 await import(`./v285-preupdate-backup-freeze-smoke.mjs?nested=${Date.now()}`);
 await import(`./v286-visible-v253-route-smoke.mjs?nested=${Date.now()}`);
+await import(`./v288-static-preauth-smoke.mjs?nested=${Date.now()}`);
 
 await fsp.mkdir(paths.importsRoot,{recursive:true});
 const temp=path.join(paths.importsRoot,'multer-temp-source');
@@ -100,4 +113,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283/V284/V285/V286] evergreen evidence + archive replay + seven-business proven coverage + pre-V253 live route substitution + bounded targeted repair + frozen verified backup gate passed');
+console.log('[V266/V283/V284/V285/V286/V287/V288] evergreen evidence + archive replay + seven-business proven coverage + safe V273 visible trends + static pre-auth rendering + bounded targeted repair + frozen verified backup gate passed');
