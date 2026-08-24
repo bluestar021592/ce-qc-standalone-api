@@ -1,20 +1,37 @@
 import fs from 'node:fs';
 import express from 'express';
+import XLSX from 'xlsx';
 import { getDb, nowIso } from './db.js';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V273_IMPORT_COMPLETENESS_ID='2026-08-24-v273-final-history-reupload-completeness-v4';
+export const V273_IMPORT_COMPLETENESS_ID='2026-08-24-v273-final-history-reupload-completeness-v5';
 const previousPost=express.application.post;
+const WAYBILL_CELL_RE=/^(?:TBKH|SPE|CC|CE)[A-Z0-9]{8,}$/;
+const normBill=v=>String(v??'').normalize('NFKC').trim().toUpperCase().replace(/[\s-]+/g,'');
 
 export function compareV273ReuploadCounts(newCount,previousCount){
   const next=Math.max(0,Number(newCount||0)),prev=Math.max(0,Number(previousCount||0));
   return{ok:prev===0||next>=prev,newCount:next,previousCount:prev,difference:next-prev};
 }
 export function compareV273Membership(newBills=[],previousBills=[]){
-  const next=new Set((newBills||[]).map(v=>String(v||'').trim().toUpperCase()).filter(Boolean));
-  const prev=[...new Set((previousBills||[]).map(v=>String(v||'').trim().toUpperCase()).filter(Boolean))];
+  const next=new Set((newBills||[]).map(normBill).filter(Boolean));
+  const prev=[...new Set((previousBills||[]).map(normBill).filter(Boolean))];
   const missingPreviousBills=prev.filter(bill=>!next.has(bill));
   return{ok:missingPreviousBills.length===0,newCount:next.size,previousCount:prev.length,missingPreviousCount:missingPreviousBills.length,missingPreviousBills};
+}
+export function readV273SourceWaybillCensus(filePath){
+  const workbook=XLSX.readFile(filePath,{cellDates:false});const bills=new Set(),sheets=[];
+  for(const sheetName of workbook.SheetNames){
+    const meta=workbook.Workbook?.Sheets?.find(item=>item.name===sheetName);if(Number(meta?.Hidden||0)>0)continue;
+    const matrix=XLSX.utils.sheet_to_json(workbook.Sheets[sheetName],{header:1,defval:'',raw:false});const local=new Set();
+    for(const row of matrix){for(const cell of row||[]){const bill=normBill(cell);if(WAYBILL_CELL_RE.test(bill)){bills.add(bill);local.add(bill);}}}
+    sheets.push({sheetName,waybillCandidates:local.size});
+  }
+  return{count:bills.size,bills:[...bills].sort(),sheets};
+}
+export function compareV273ParsedToCensus(parsedBills=[],censusBills=[]){
+  const parsed=new Set((parsedBills||[]).map(normBill).filter(Boolean));const census=[...new Set((censusBills||[]).map(normBill).filter(Boolean))];const missing=census.filter(bill=>!parsed.has(bill));
+  return{ok:missing.length===0,parsedCount:parsed.size,censusCount:census.length,missingCount:missing.length,missingBills:missing};
 }
 function latestValidMembership(reportDate,db=getDb()){
   const batch=db.prepare("SELECT batchId,fileHash FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(reportDate);
@@ -53,12 +70,15 @@ async function guard(req,res,next){
     const filePath=String(req.file?.path||'');
     if(!filePath||!fs.existsSync(filePath))return res.status(422).json({ok:false,code:'V273_IMPORT_FILE_NOT_READY',error:'日报文件尚未完成接收，已阻止入库。'});
     const requestedDate=String(req.body?.reportDate||'').slice(0,10);
+    const census=readV273SourceWaybillCensus(filePath);
     const parsed=parseUnifiedDailyExcel(filePath,{reportDate:requestedDate,originalName:req.file?.originalname||''});
     const previous=latestValidMembership(parsed.reportDate);
     const newBills=(parsed.rows||[]).map(row=>row.shipmentCode);
+    const sourceCoverage=compareV273ParsedToCensus(newBills,census.bills);
     const comparison=compareV273ReuploadCounts(parsed.summary?.validUniqueWaybills,previous.count);
     const membership=compareV273Membership(newBills,previous.bills);
-    req.v273ImportCompleteness={id:V273_IMPORT_COMPLETENESS_ID,reportDate:parsed.reportDate,rawRows:Number(parsed.summary?.rawRows||0),validUniqueWaybills:Number(parsed.summary?.validUniqueWaybills||0),classifiedWaybills:Number(parsed.sourceReconciliation?.classifiedWaybills||0),previousValidWaybills:previous.count,previousBatchId:previous.batchId,sameSourceFile:previous.fileHash===parsed.fileHash,missingPreviousCount:membership.missingPreviousCount,missingPreviousBills:membership.missingPreviousBills.slice(0,50),sheetDiagnostics:parsed.sheetDiagnostics||[]};
+    req.v273ImportCompleteness={id:V273_IMPORT_COMPLETENESS_ID,reportDate:parsed.reportDate,sourceWaybillCensus:census.count,rawRows:Number(parsed.summary?.rawRows||0),validUniqueWaybills:Number(parsed.summary?.validUniqueWaybills||0),classifiedWaybills:Number(parsed.sourceReconciliation?.classifiedWaybills||0),previousValidWaybills:previous.count,previousBatchId:previous.batchId,sameSourceFile:previous.fileHash===parsed.fileHash,sourceMissingCount:sourceCoverage.missingCount,sourceMissingBills:sourceCoverage.missingBills.slice(0,50),missingPreviousCount:membership.missingPreviousCount,missingPreviousBills:membership.missingPreviousBills.slice(0,50),sheetDiagnostics:parsed.sheetDiagnostics||[],sourceSheetCensus:census.sheets};
+    if(!sourceCoverage.ok)return res.status(422).json({ok:false,code:'V273_SOURCE_WAYBILL_CENSUS_MISMATCH',error:`源Excel可识别到${census.count}个运单，但正式解析漏掉${sourceCoverage.missingCount}个。已阻止入库，禁止静默漏单。`,completeness:req.v273ImportCompleteness});
     if(!parsed.sourceReconciliation?.balanced)return res.status(422).json({ok:false,code:'V273_CLASSIFICATION_NOT_BALANCED',error:'日报分类守恒失败，已阻止入库。',completeness:req.v273ImportCompleteness});
     if(!comparison.ok)return res.status(409).json({ok:false,code:'V273_SAME_DATE_REUPLOAD_SHRINK_BLOCKED',error:`${parsed.reportDate}重新上传文件只有${comparison.newCount}个唯一运单，少于当前有效批次${comparison.previousCount}个。为防止历史单号再次丢失，本次已拒绝覆盖。请上传完整原始日报。`,completeness:req.v273ImportCompleteness});
     if(!membership.ok)return res.status(409).json({ok:false,code:'V273_SAME_DATE_MEMBERSHIP_LOSS_BLOCKED',error:`${parsed.reportDate}重新上传文件缺少当前有效批次中的${membership.missingPreviousCount}个运单。即使总票更多也不允许覆盖，以防历史单号被替换或丢失。`,completeness:req.v273ImportCompleteness});
@@ -77,4 +97,4 @@ express.application.post=function v273ImportPost(pathValue,...handlers){
   return previousPost.call(this,pathValue,...handlers);
 };
 if(process.env.NODE_ENV!=='test'&&!process.env.CI)setImmediate(()=>recoverInterruptedSameHashRepairs());
-console.info('[CE-QC][V273_IMPORT_COMPLETENESS]',V273_IMPORT_COMPLETENESS_ID,'guard runs after upload and before commit; same-file parser repairs are safely re-imported; count shrink or prior-waybill loss is blocked.');
+console.info('[CE-QC][V273_IMPORT_COMPLETENESS]',V273_IMPORT_COMPLETENESS_ID,'independent source census + parser/classification conservation + same-date membership superset; same-file parser repair allowed, silent loss blocked.');
