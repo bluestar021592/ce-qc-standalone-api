@@ -61,8 +61,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     const headerIndex = findHeaderRow(matrix);
     if (headerIndex < 0) {
       sheetDiagnostics.push({
-        sheetName, status: 'SKIPPED', reason: '前30行未找到可识别的运单号+收件人表头', headerRow: null,
-        detectedColumns: {}, missingFields: ['waybill', 'recipient'],
+        sheetName, status: 'SKIPPED', reason: '前30行未找到可识别的运单号表头或其下没有有效运单', headerRow: null,
+        detectedColumns: {}, missingFields: ['waybill'],
         sampleHeaders: matrix.slice(0, 30).map(row => row.filter(Boolean).slice(0, 12)).filter(row => row.length).slice(0, 8)
       });
       continue;
@@ -75,25 +75,25 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     let recipientDetection = 'HEADER_ALIAS';
     if (recipientIndex < 0) {
       recipientIndex = detectRecipientColumnByValues(matrix, headerIndex, shipmentIndex);
-      recipientDetection = recipientIndex >= 0 ? 'VALUE_HEURISTIC' : 'NOT_FOUND';
+      recipientDetection = recipientIndex >= 0 ? 'VALUE_HEURISTIC' : 'NOT_FOUND_OPTIONAL';
     }
-    if (shipmentIndex < 0 || recipientIndex < 0) {
+    const customerNameIndex = findColumn(headers, CUSTOMER_NAME_HEADERS);
+    if (shipmentIndex < 0) {
       sheetDiagnostics.push({
-        sheetName, status: 'SKIPPED', reason: shipmentIndex < 0 ? '未识别运单号列' : '未识别收件人列', headerRow: headerIndex + 1,
-        detectedColumns: { waybill: shipmentIndex, recipient: recipientIndex },
-        missingFields: [shipmentIndex < 0 ? 'waybill' : 'recipient'], sampleHeaders: originalHeaders.slice(0, 16)
+        sheetName, status: 'SKIPPED', reason: '未识别运单号列', headerRow: headerIndex + 1,
+        detectedColumns: { waybill: shipmentIndex, recipient: recipientIndex, customerName: customerNameIndex },
+        missingFields: ['waybill'], sampleHeaders: originalHeaders.slice(0, 16)
       });
       continue;
     }
 
-    const customerNameIndex = findColumn(headers, CUSTOMER_NAME_HEADERS);
     const regionIndex = findColumn(headers, REGION_HEADERS);
     const explicitDateIndex = findColumn(headers, EXPLICIT_REPORT_DATE_HEADERS);
     const transactionDateIndex = explicitDateIndex >= 0 ? -1 : findColumn(headers, TRANSACTION_DATE_HEADERS);
     const detectedColumns = {
       waybill: shipmentIndex,
       recipient: recipientIndex,
-      recipientHeader: originalHeaders[recipientIndex] || '',
+      recipientHeader: recipientIndex >= 0 ? (originalHeaders[recipientIndex] || '') : '',
       recipientDetection,
       customerName: customerNameIndex,
       customerNameHeader: customerNameIndex >= 0 ? originalHeaders[customerNameIndex] : '',
@@ -104,7 +104,15 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       transactionDate: transactionDateIndex,
       transactionDateHeader: transactionDateIndex >= 0 ? originalHeaders[transactionDateIndex] : ''
     };
-    sheetDiagnostics.push({ sheetName, status: 'VALID', reason: '识别成功', headerRow: headerIndex + 1, detectedColumns, missingFields: [], sampleHeaders: originalHeaders.slice(0, 16) });
+    sheetDiagnostics.push({
+      sheetName,
+      status: 'VALID',
+      reason: recipientIndex >= 0 ? '识别成功' : '识别成功；收件人列未识别，继续按客户名称与运单号强规则逐票分类',
+      headerRow: headerIndex + 1,
+      detectedColumns,
+      missingFields: recipientIndex >= 0 ? [] : ['recipient_optional'],
+      sampleHeaders: originalHeaders.slice(0, 16)
+    });
 
     for (let index = headerIndex + 1; index < matrix.length; index += 1) {
       const row = matrix[index] || [];
@@ -112,7 +120,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       rawRows += 1;
 
       const shipmentCode = normalizeShipmentCode(row[shipmentIndex]);
-      const recipientRaw = String(row[recipientIndex] ?? '').trim();
+      const recipientRaw = recipientIndex >= 0 ? String(row[recipientIndex] ?? '').trim() : '';
       const recipientNormalized = normalizeRecipient(recipientRaw);
       const customerNameRaw = customerNameIndex >= 0 ? String(row[customerNameIndex] ?? '').trim() : '';
       const customerNameNormalized = normalizeCustomerName(customerNameRaw);
@@ -137,7 +145,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
 
       if (!recipientRaw) {
         missingRecipientWarnings += 1;
-        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人为空，但仍按客户名称与运单号前缀继续精确分类；不影响有效票数。' });
+        warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人为空或未识别，但仍按客户名称与运单号前缀继续精确分类；无法精确分类时整份日报会被拒绝。' });
       }
 
       const matches = classifyMatches(shipmentCode, recipientNormalized, customerNameNormalized);
@@ -147,7 +155,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       }
       const classification = classifyBusiness(shipmentCode, recipientNormalized, customerNameNormalized);
       if (!classification) {
-        const error = new Error(`运单 ${shipmentCode} 未命中任何业务板块。CE必须CC开头，WHPP本土必须CE开头；已阻止静默归CE。`);
+        const error = new Error(`运单 ${shipmentCode} 未命中任何业务板块。收件人列缺失时也不会丢票：系统已读取该运单，但因无法精确归类而阻止整份日报入库。`);
         error.code = 'UNCLASSIFIED_WAYBILL_PREFIX';
         error.shipmentCode = shipmentCode;
         error.sheetName = sheetName;
@@ -177,7 +185,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   }
 
   if (!details.length) {
-    const error = new Error('未识别到同时包含运单号和收件人字段的日报数据，请查看逐Sheet诊断');
+    const error = new Error('未识别到有效运单号数据，请查看逐Sheet诊断');
     error.sheetDiagnostics = sheetDiagnostics;
     throw error;
   }
@@ -254,9 +262,16 @@ function findHeaderRow(matrix) {
     const headers = (matrix[i] || []).map(normalizeHeader);
     const shipmentIndex = findColumn(headers, SHIPMENT_HEADERS);
     if (shipmentIndex < 0) continue;
-    if (findColumn(headers, RECIPIENT_HEADERS) >= 0 || detectRecipientColumnByValues(matrix, i, shipmentIndex) >= 0) return i;
+    if (hasShipmentValues(matrix, i, shipmentIndex)) return i;
   }
   return -1;
+}
+
+function hasShipmentValues(matrix, headerIndex, shipmentIndex) {
+  for (let rowIndex = headerIndex + 1; rowIndex < Math.min(matrix.length, headerIndex + 80); rowIndex += 1) {
+    if (normalizeShipmentCode(matrix[rowIndex]?.[shipmentIndex])) return true;
+  }
+  return false;
 }
 
 function findColumn(headers, aliases) {
@@ -324,10 +339,6 @@ function classifyMatches(shipmentCode, recipient, customerName) {
   if (recipient.includes('ALI1688')) matches.push('ALI1688');
   if (shipmentCode.startsWith('TBKH')) matches.push('TBKH');
 
-  // CE/CC prefixes are fallback ownership rules. They must not be counted as a
-  // classification conflict when a stronger recipient/customer rule already
-  // identified the parcel. This is what prevents normal Shopee/ALI rows from
-  // generating hundreds of false "classification conflict" warnings.
   if (!matches.length) {
     if (shipmentCode.startsWith('CE')) matches.push('WHPP');
     else if (shipmentCode.startsWith('CC')) matches.push('CE');
