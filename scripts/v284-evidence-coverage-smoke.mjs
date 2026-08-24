@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 process.env.NODE_ENV='test';
 const { ensureV246TrackingSchema }=await import('../src/v246TrackingLedgerCore.js');
-const { readV284EvidenceCoverage }=await import('../src/v284MembershipEvidenceCoverage.js');
+const { readV284EvidenceCoverage,readV284ProvenDashboardTrends }=await import('../src/v284MembershipEvidenceCoverage.js');
 
 const db=new DatabaseSync(':memory:');
 db.exec(`
@@ -28,12 +28,18 @@ assert.equal(ce.total,2);
 assert.equal(ce.proven,1,'empty OPEN admission ledger must not count as analyzed');
 assert.equal(coverage.unproven.length,1);
 assert.equal(coverage.unproven[0].shipmentCode,'ADMITTED-ONLY');
+let trend=readV284ProvenDashboardTrends('CE',date,date,db);
+assert.equal(trend.daily[0].ready,false,'proven daily truth must stay incomplete while one member is admission-only OPEN');
+assert.equal(trend.daily[0].ledgerReady,false,'legacy ledgerReady alias must follow proven readiness, not raw admission presence');
 
 db.prepare("UPDATE qc_tracking_ledger SET currentState='Pending',currentCategory='Pending',lastCheckedAt=?,updatedAt=? WHERE shipmentCode='ADMITTED-ONLY'").run(now,now);
 coverage=readV284EvidenceCoverage(date,date,db);ce=coverage.byType.get(`${date}|CE|ALL`);
 assert.ok(ce,'CE daily evidence coverage aggregate must remain addressable after evidence refresh');
 assert.equal(ce.proven,2,'checked current-state evidence may promote admitted member to proven analysis');
 assert.equal(coverage.unproven.length,0);
+trend=readV284ProvenDashboardTrends('CE',date,date,db);
+assert.equal(trend.daily[0].ready,true,'checked state must promote the daily cohort to proven ready');
+assert.equal(trend.daily[0].ledgerReady,true,'legacy ledgerReady alias must promote together with proven readiness');
 
 db.close();
-console.log('[V284] evidence coverage smoke passed · canonical date|business|ALL key + admission-only OPEN stays unproven until checked/current/final evidence exists');
+console.log('[V284] evidence coverage smoke passed · canonical key + admission-only OPEN stays unproven + ready/ledgerReady stay synchronized');
