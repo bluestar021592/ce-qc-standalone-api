@@ -1,12 +1,11 @@
-import fs from 'node:fs';
+import crypto from 'node:crypto';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import XLSX from 'xlsx';
-import { getDb, getRuntimeConfig } from './db.js';
+import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
-import { saveUnifiedImport } from './unifiedImportStore.js';
 
-export const V281_ARCHIVED_HISTORICAL_REPARSE_ID = '2026-08-24-v281-archive-backed-same-hash-history-reparse-v1';
+export const V281_ARCHIVED_HISTORICAL_REPARSE_ID = '2026-08-24-v281-archive-backed-same-hash-history-reparse-v2';
 export const V281_PRIORITY_REPORT_DATE = '2026-08-17';
 const CELL_ADDRESS_RE = /^[A-Z]{1,3}[1-9]\d*$/;
 const WAYBILL_CELL_RE = /^(?:TBKH|SPE|CC|CE)[A-Z0-9]{8,}$/;
@@ -141,9 +140,64 @@ function recoverPending(db, reportDate) {
   }
 }
 
+export function saveV281HistoricalImport(parsed, sourceName, db = getDb()) {
+  if (!parsed?.sourceReconciliation?.balanced) throw new Error('V281 historical replay classification reconciliation failed');
+  const batchId = `BATCH-${crypto.randomUUID()}`;
+  const snapshotId = `SNAP-${crypto.randomUUID()}`;
+  const createdAt = nowIso();
+  const payload = {
+    reportDate: parsed.reportDate,
+    dateDetectionSource: parsed.dateDetectionSource,
+    dateCandidates: parsed.dateCandidates,
+    dateConflict: parsed.dateConflict,
+    containerFormat: parsed.containerFormat,
+    classificationCounts: parsed.classificationCounts,
+    sourceReconciliation: parsed.sourceReconciliation,
+    regionCounts: parsed.regionCounts,
+    summary: parsed.summary,
+    sheetDiagnostics: parsed.sheetDiagnostics,
+    rows: parsed.rows,
+    historicalReplay: { id: V281_ARCHIVED_HISTORICAL_REPARSE_ID, currentStatePreserved: true }
+  };
+  const existingValid = Number(db.prepare("SELECT COUNT(*) count FROM unified_import_batches WHERE reportDate=? AND status='VALID'").get(parsed.reportDate)?.count || 0);
+  if (existingValid > 0) throw new Error(`V281 historical replay expected zero VALID batches after pending transition, found ${existingValid}`);
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt,dateDetectionSource,dateCandidatesJson,dateWasManuallyCorrected,regionCountsJson) VALUES(?,?,?,?,?,'VALID',?,?,?,?,?,?,?)`)
+      .run(batchId, snapshotId, parsed.reportDate, sourceName, parsed.fileHash, JSON.stringify(parsed.summary || {}), JSON.stringify(parsed.warnings || []), createdAt, parsed.dateDetectionSource || '', JSON.stringify(parsed.dateCandidates || []), parsed.dateWasManuallyCorrected ? 1 : 0, JSON.stringify(parsed.regionCounts || {}));
+    const insertRow = db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt,classificationSource,classificationMatchedValue,classificationWarning) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const insertDaily = db.prepare(`INSERT INTO shipment_daily_snapshots(snapshotId,batchId,reportDate,businessType,shipmentCode,regionCode,classificationSource,rowJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?)`);
+    for (const row of parsed.rows || []) {
+      const rowJson = JSON.stringify(row);
+      insertRow.run(batchId, snapshotId, parsed.reportDate, row.businessType, row.shipmentCode, row.regionCode, row.recipientRaw, row.recipientNormalized, row.sheetName, row.rowNumber, row.classificationReason, rowJson, createdAt, row.classificationSource || '', row.classificationMatchedValue || '', row.classificationWarning || '');
+      insertDaily.run(snapshotId, batchId, parsed.reportDate, row.businessType, row.shipmentCode, row.regionCode, row.classificationSource || '', rowJson, createdAt);
+    }
+    db.prepare(`INSERT INTO unified_snapshots(snapshotId,batchId,reportDate,status,payloadJson,createdAt) VALUES(?,?,?,'IMPORTED',?,?)`)
+      .run(snapshotId, batchId, parsed.reportDate, JSON.stringify(payload), createdAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return {
+    batchId,
+    snapshotId,
+    reportDate: parsed.reportDate,
+    fileHash: parsed.fileHash,
+    classificationCounts: parsed.classificationCounts,
+    sourceReconciliation: parsed.sourceReconciliation,
+    regionCounts: parsed.regionCounts,
+    summary: parsed.summary,
+    warnings: parsed.warnings,
+    historicalReplay: true,
+    currentStatePreserved: true
+  };
+}
+
 export async function replayV281ArchivedReportDate(reportDate, options = {}) {
   const db = options.db || getDb();
-  const saveFn = options.saveFn || saveUnifiedImport;
+  const saveFn = options.saveFn || ((parsed, sourceName) => saveV281HistoricalImport(parsed, sourceName, db));
   const sourceRoot = options.sourceRoot || path.join(getRuntimeConfig().dataDir, 'evidence_archive', 'source_uploads');
   const logger = options.logger || console;
   const startedAt = Date.now();
@@ -174,7 +228,8 @@ export async function replayV281ArchivedReportDate(reportDate, options = {}) {
     return { ok: false, skipped: true, reason: 'SAFETY_CHECK_FAILED', reportDate, batchId: batch.batchId, censusMs, parseMs, ...assessment };
   }
   if (assessment.difference <= 0) {
-    const result = { ok: true, skipped: true, reason: 'NO_RECOVERED_ROWS', reportDate, batchId: batch.batchId, censusMs, parseMs, ...assessment };
+    try { globalThis.__CE_QC_REFRESH_V274_TRENDS__?.(); } catch {}
+    const result = { ok: true, skipped: true, reason: 'NO_RECOVERED_ROWS', reportDate, batchId: batch.batchId, trendsRefreshed: true, censusMs, parseMs, ...assessment };
     logger.info?.('[CE-QC][V281_ARCHIVE_REPLAY]', JSON.stringify(result));
     return result;
   }
@@ -197,7 +252,7 @@ export async function replayV281ArchivedReportDate(reportDate, options = {}) {
     }
     db.prepare('UPDATE unified_import_batches SET status=? WHERE batchId=? AND status=?').run(`SUPERSEDED_V281:${saved.batchId}`, batch.batchId, pending);
     try { globalThis.__CE_QC_REFRESH_V274_TRENDS__?.(); } catch {}
-    const result = { ok: true, repaired: true, reportDate, oldBatchId: batch.batchId, newBatchId: saved.batchId, fileHash: batch.fileHash, previousCount: assessment.previousCount, newCount, recovered: newCount - assessment.previousCount, censusMs, parseMs, saveMs, durationMs: Date.now() - startedAt };
+    const result = { ok: true, repaired: true, reportDate, oldBatchId: batch.batchId, newBatchId: saved.batchId, fileHash: batch.fileHash, previousCount: assessment.previousCount, newCount, recovered: newCount - assessment.previousCount, currentStatePreserved: true, censusMs, parseMs, saveMs, durationMs: Date.now() - startedAt };
     logger.info?.('[CE-QC][V281_ARCHIVE_REPLAY_REPAIRED]', JSON.stringify(result));
     return result;
   } catch (error) {
@@ -219,4 +274,4 @@ function schedulePriorityReplay() {
 }
 
 schedulePriorityReplay();
-console.info('[CE-QC][V281_ARCHIVE_REPLAY]', V281_ARCHIVED_HISTORICAL_REPARSE_ID, `priority=${V281_PRIORITY_REPORT_DATE}`, 'same-file-hash archive replay is allowed only when old membership is a full subset, source census is complete, classification is balanced, and row count never shrinks.');
+console.info('[CE-QC][V281_ARCHIVE_REPLAY]', V281_ARCHIVED_HISTORICAL_REPARSE_ID, `priority=${V281_PRIORITY_REPORT_DATE}`, 'exact same-file-hash archive replay; historical tables only; shipment_current_state and carryover_open_items are never written; old membership must remain a full subset and row count never shrinks.');
