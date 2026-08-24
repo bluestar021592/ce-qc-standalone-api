@@ -7,8 +7,8 @@ import {
   summarizeV284Range
 } from './v284DailyMembershipTruth.js';
 
-export const V284_EVIDENCE_COVERAGE_ID='2026-08-24-v284-admitted-vs-proven-coverage-v1';
-const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+export const V284_EVIDENCE_COVERAGE_ID='2026-08-24-v286-seven-business-proven-coverage-v1';
+const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const CCSL=['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE=['SHOPEECN','SHOPEEVN'];
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
@@ -30,6 +30,11 @@ function proofRows(fromDate,toDate,db=getDb()){
       FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate
       WHERE u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
         AND TRIM(COALESCE(u.shipmentCode,''))<>''
+      UNION ALL
+      SELECT DISTINCT p.reportDate,'WHPP' businessType,UPPER(TRIM(p.shipmentCode)) shipmentCode,'UNKNOWN' regionCode
+      FROM business_daily_parse_rows p
+      WHERE p.businessType='WHPP' AND p.reportDate BETWEEN ? AND ?
+        AND TRIM(COALESCE(p.shipmentCode,''))<>''
     )
     SELECT v.reportDate,v.businessType,v.regionCode,v.shipmentCode,
       CASE WHEN l.shipmentCode IS NOT NULL AND (
@@ -39,13 +44,15 @@ function proofRows(fromDate,toDate,db=getDb()){
            ) THEN 1
            WHEN v.businessType IN ('SHOPEECN','SHOPEEVN') AND sf.shipmentCode IS NOT NULL THEN 1
            WHEN v.businessType IN ('CE','CEAF','TBKH','ALI1688') AND cf.shipmentCode IS NOT NULL THEN 1
+           WHEN v.businessType='WHPP' AND wf.shipmentCode IS NOT NULL THEN 1
            ELSE 0 END proven
     FROM valid v
     LEFT JOIN qc_tracking_ledger l ON l.shipmentCode=v.shipmentCode AND l.businessType=v.businessType
     LEFT JOIN final_rows cf ON v.businessType IN ('CE','CEAF','TBKH','ALI1688') AND cf.shipmentCode=v.shipmentCode AND cf.reportDate=v.reportDate
     LEFT JOIN business_final_rows sf ON v.businessType IN ('SHOPEECN','SHOPEEVN') AND sf.businessType='SHOPEE' AND sf.shipmentCode=v.shipmentCode AND sf.reportDate=v.reportDate
+    LEFT JOIN business_final_rows wf ON v.businessType='WHPP' AND wf.businessType='WHPP' AND wf.shipmentCode=v.shipmentCode AND wf.reportDate=v.reportDate
     ORDER BY v.reportDate,v.businessType,v.regionCode,v.shipmentCode
-  `).all(fromDate,toDate).map(row=>({...row,proven:Number(row.proven||0)}));
+  `).all(fromDate,toDate,fromDate,toDate).map(row=>({...row,proven:Number(row.proven||0)}));
 }
 
 export function readV284EvidenceCoverage(fromDate,toDate,db=getDb()){
@@ -64,15 +71,9 @@ function patchFact(row,proven){
   const out={...row,matched:Math.min(n(row.total),Math.max(0,n(proven)))};
   out.coverageRate=pct(out.matched,out.total);
   out.ready=out.total===0||out.matched>=out.total;
-  // Keep historical compatibility aliases synchronized with the stricter
-  // proven-evidence readiness result. An admitted-but-unchecked OPEN ledger row
-  // must never remain ledgerReady=true after proven coverage downgrades the day.
   out.ledgerReady=out.ready;
-  // Attempt evidence coverage has POD as its denominator. A zero-POD day has no
-  // denominator and must stay unavailable (null/—), while POD>0 with no attempt
-  // evidence is a real 0% coverage result.
   if(n(out.pod)===0)out.attemptCoverageRate=null;
-  if('evidenceSource' in out)out.evidenceSource=out.ready?'V284_PROVEN_DAILY_MEMBERSHIP_V246_LEDGER':'V284_PROVEN_EVIDENCE_COVERAGE_INCOMPLETE';
+  if('evidenceSource' in out)out.evidenceSource=out.ready?'V286_PROVEN_SEVEN_BUSINESS_DAILY_MEMBERSHIP':'V286_PROVEN_EVIDENCE_COVERAGE_INCOMPLETE';
   return out;
 }
 function aggregateFact(source,type){
@@ -116,9 +117,10 @@ export function readV284ProvenShopeeTrends(businessType='SHOPEECN',fromDate='',t
 export function summarizeV284ProvenRange(fromDate,toDate,db=getDb()){
   const base=summarizeV284Range(fromDate,toDate,db),daily=readV284ProvenDailyFacts(fromDate,toDate,db),byType={};
   for(const type of TYPES)byType[type]=aggregateFact(daily.filter(r=>r.businessType===type),type);
-  const ccsl=aggregateFact(CCSL.map(t=>byType[t]),'CCSL'),shopee=aggregateFact(SHOPEE.map(t=>byType[t]),'SHOPEE');
+  const ccsl=aggregateFact(CCSL.map(t=>byType[t]),'CCSL'),shopee=aggregateFact(SHOPEE.map(t=>byType[t]),'SHOPEE'),whpp=byType.WHPP||aggregateFact([],'WHPP');
   const dates=[...new Set(daily.map(r=>r.reportDate))].sort();const missingDates=dates.filter(date=>daily.some(r=>r.reportDate===date&&r.total>0&&!r.ready));
-  return {...base,daily,byType,ccsl,shopee,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,sourceTotal:ccsl.total+shopee.total,analyzedTotal:ccsl.matched+shopee.matched,analysisPending:Math.max(0,ccsl.total+shopee.total-ccsl.matched-shopee.matched),missingDates,analysisComplete:missingDates.length===0&&(ccsl.matched+shopee.matched)>=ccsl.total+shopee.total};
+  const sourceTotal=ccsl.total+shopee.total+whpp.total,analyzedTotal=ccsl.matched+shopee.matched+whpp.matched;
+  return {...base,daily,byType,ccsl,shopee,whpp,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,sourceTotal,analyzedTotal,analysisPending:Math.max(0,sourceTotal-analyzedTotal),missingDates,analysisComplete:missingDates.length===0&&analyzedTotal>=sourceTotal};
 }
 
-console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,'ledger admission alone is not analysis proof; terminal/checked/current-state or final-row evidence is required before a daily member is marked analyzed.');
+console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,'all seven businesses are covered; WHPP daily members use WHPP ledger/final evidence; ledger admission alone is not analysis proof.');
