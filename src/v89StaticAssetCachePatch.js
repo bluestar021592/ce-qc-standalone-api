@@ -7,7 +7,7 @@ import { loadState, saveState } from './storage.js';
 import { resetRunForReport } from './store.js';
 import { SHOPEE, loadBusinessState, resetBusinessRunForReport, saveBusinessState } from './businessStore.js';
 
-const PATCH_ID = '2026-08-24-v279-single-parse-precommit-timing-v1';
+const PATCH_ID = '2026-08-24-v280-sparse-excel-precommit-observability-v1';
 const originalUse = express.application.use;
 const previousPost = express.application.post;
 let installed = false;
@@ -38,7 +38,7 @@ function cacheableAsset(req, res, next) {
   next();
 }
 
-express.application.use = function v279StaticAssetCacheUse(...args) {
+express.application.use = function v280StaticAssetCacheUse(...args) {
   const candidates = args.flat().filter(value => typeof value === 'function');
   if (!installed && candidates.some(fn => fn.name === 'serveStatic')) {
     installed = true;
@@ -46,6 +46,15 @@ express.application.use = function v279StaticAssetCacheUse(...args) {
   }
   return originalUse.apply(this, args);
 };
+
+function observeUnifiedImportRequest(req, res, next) {
+  req.v280RequestStartedAt = Date.now();
+  console.info('[CE-QC][V280_IMPORT_REQUEST_START]', JSON.stringify({
+    contentLength: Number(req.headers?.['content-length'] || 0),
+    contentType: String(req.headers?.['content-type'] || '').slice(0, 100)
+  }));
+  next();
+}
 
 function safeJsonRow(row = {}) {
   try {
@@ -122,42 +131,48 @@ async function finishUnifiedCompatibility({ parsed, saved, sourceName, filePath 
     saveBusinessState(shopeeState, SHOPEE);
 
     try { globalThis.__CE_QC_REFRESH_V274_TRENDS__?.(); } catch {}
-    console.info('[CE-QC][V279_IMPORT_COMPAT_DONE]', JSON.stringify({ reportDate: parsed.reportDate, batchId: saved.batchId, durationMs: Date.now() - startedAt }));
+    console.info('[CE-QC][V280_IMPORT_COMPAT_DONE]', JSON.stringify({ reportDate: parsed.reportDate, batchId: saved.batchId, durationMs: Date.now() - startedAt }));
   } catch (error) {
-    console.error('[CE-QC][V279_IMPORT_COMPAT_FAILED]', JSON.stringify({ reportDate: parsed?.reportDate || '', batchId: saved?.batchId || '', error: error?.message || String(error) }));
+    console.error('[CE-QC][V280_IMPORT_COMPAT_FAILED]', JSON.stringify({ reportDate: parsed?.reportDate || '', batchId: saved?.batchId || '', error: error?.message || String(error) }));
   } finally {
     if (filePath) await fs.unlink(filePath).catch(() => {});
   }
 }
 
 async function fastUnifiedImportHandler(req, res) {
-  const startedAt=Date.now();
+  const startedAt = Date.now();
   try {
     if (!req.file) throw new Error('没有收到综合日报Excel文件');
-    const parseReuseStarted=Date.now();
-    const parsed = req.v279UnifiedParsed || parseUnifiedDailyExcel(req.file.path, { reportDate: req.body.reportDate || '', originalName: req.file.originalname });
-    const parseReuseMs=Date.now()-parseReuseStarted;
-    const reusedValidatedParse=Boolean(req.v279UnifiedParsed);
-    const saveStarted=Date.now();
+    const uploadReceivedMs = req.v280RequestStartedAt ? Date.now() - req.v280RequestStartedAt : null;
+    console.info('[CE-QC][V280_IMPORT_UPLOAD_DONE]', JSON.stringify({ sourceName: req.file.originalname || '', bytes: Number(req.file.size || 0), uploadReceivedMs }));
+
+    const parseReuseStarted = Date.now();
+    const parsed = req.v280UnifiedParsed || req.v279UnifiedParsed || parseUnifiedDailyExcel(req.file.path, { reportDate: req.body.reportDate || '', originalName: req.file.originalname });
+    const parseReuseMs = Date.now() - parseReuseStarted;
+    const reusedValidatedParse = Boolean(req.v280UnifiedParsed || req.v279UnifiedParsed);
+
+    const saveStarted = Date.now();
+    console.info('[CE-QC][V280_IMPORT_COMMIT_START]', JSON.stringify({ reportDate: parsed.reportDate, rows: Number(parsed.summary?.validUniqueWaybills || 0), reusedValidatedParse }));
     const saved = saveUnifiedImport(parsed, req.file.originalname);
-    const sqliteCommitMs=Date.now()-saveStarted;
-    console.info('[CE-QC][V279_IMPORT_COMMIT]',JSON.stringify({reportDate:parsed.reportDate,batchId:saved.batchId,rows:Number(parsed.summary?.validUniqueWaybills||0),reusedValidatedParse,parseReuseMs,sqliteCommitMs,totalHandlerMs:Date.now()-startedAt}));
-    res.json({ ok: true, ...saved, compatibilityPending: true, ack: 'SQLITE_COMMITTED', importTiming:{reusedValidatedParse,parseReuseMs,sqliteCommitMs,totalHandlerMs:Date.now()-startedAt} });
+    const sqliteCommitMs = Date.now() - saveStarted;
+    console.info('[CE-QC][V280_IMPORT_COMMIT_DONE]', JSON.stringify({ reportDate: parsed.reportDate, batchId: saved.batchId, rows: Number(parsed.summary?.validUniqueWaybills || 0), reusedValidatedParse, parseReuseMs, sqliteCommitMs, totalHandlerMs: Date.now() - startedAt, totalRequestMs: req.v280RequestStartedAt ? Date.now() - req.v280RequestStartedAt : null }));
+
+    res.json({ ok: true, ...saved, compatibilityPending: true, ack: 'SQLITE_COMMITTED', importTiming: { reusedValidatedParse, parseReuseMs, sqliteCommitMs, totalHandlerMs: Date.now() - startedAt, totalRequestMs: req.v280RequestStartedAt ? Date.now() - req.v280RequestStartedAt : null } });
     setImmediate(() => { void finishUnifiedCompatibility({ parsed, saved, sourceName: req.file.originalname, filePath: req.file.path }); });
   } catch (error) {
-    console.error('[CE-QC][V279_IMPORT_COMMIT_FAILED]',JSON.stringify({error:error?.message||String(error),durationMs:Date.now()-startedAt}));
+    console.error('[CE-QC][V280_IMPORT_COMMIT_FAILED]', JSON.stringify({ error: error?.message || String(error), durationMs: Date.now() - startedAt, totalRequestMs: req.v280RequestStartedAt ? Date.now() - req.v280RequestStartedAt : null }));
     if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
     if (!res.headersSent) res.status(400).json({ ok: false, error: error.message, sheetDiagnostics: error.sheetDiagnostics || [] });
   }
 }
 
-express.application.post = function v279FastUnifiedImportPost(pathValue, ...handlers) {
+express.application.post = function v280FastUnifiedImportPost(pathValue, ...handlers) {
   if (String(pathValue || '') === '/api/import/unified-daily-report' && handlers.length >= 1) {
     const last = handlers.length - 1;
-    return previousPost.call(this, pathValue, ...handlers.slice(0, last), fastUnifiedImportHandler);
+    return previousPost.call(this, pathValue, observeUnifiedImportRequest, ...handlers.slice(0, last), fastUnifiedImportHandler);
   }
   return previousPost.call(this, pathValue, ...handlers);
 };
 
 export const V89_STATIC_ASSET_CACHE_PATCH_ID = PATCH_ID;
-console.info('[CE-QC][V279_IMPORT_FAST_ACK]', PATCH_ID, 'native SPA preserved; V273 validated parse reused once; SQLite COMMIT timing observable; compatibility state saves continue in background.');
+console.info('[CE-QC][V280_IMPORT_FAST_ACK]', PATCH_ID, 'native SPA preserved; upload/census/parse/COMMIT timing observable; V273 validated parse reused; sparse Excel range guard active; compatibility state saves continue in background.');
