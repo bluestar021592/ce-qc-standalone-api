@@ -11,7 +11,7 @@ const importGuard=read('src/v273ImportCompletenessGuard.js');
 const parser=read('src/unifiedExcelParser.js');
 for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v89StaticAssetCachePatch.js','src/v273DashboardTruthReadPatch.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(ui),'V273 browser runtime must compile');
-assert.doesNotThrow(()=>new Function(speed),'V275 import/trend guard must compile');
+assert.doesNotThrow(()=>new Function(speed),'V275 compatibility asset must compile');
 assert.match(ui,/2026-08-24-v273-single-visible-trend-owner-v1/);
 assert.match(ui,/#settingsPage \.settings-grid\{align-items:start!important/,'settings cards must not stretch into blank lower areas');
 assert.match(ui,/snapshotFallback\(section,model\)/,'working snapshot must remain visible while background truth refresh runs');
@@ -37,8 +37,6 @@ assert.match(backend,/prewarm\(1200\)/,'recent seven-day facts must prewarm shor
 assert.match(backend,/startPeriodicPrewarm/,'hot facts must be refreshed in background instead of on page navigation');
 assert.match(backend,/Server-Timing/,'runtime trend duration must be observable');
 
-// V275 remains a compiled compatibility asset, but V278 no longer depends on
-// injecting it into SPA navigation. Fast import confirmation is now backend-owned.
 assert.match(speed,/2026-08-24-v275-fast-import-confirmation-and-trend-guard-v1/);
 assert.match(speed,/waitForCommittedImport/);
 assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V275 asset must never intercept navigation');
@@ -48,33 +46,39 @@ assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
 assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260824-v273-1/,'V273 owner cache key must remain');
 assert.match(inject,/X-CE-QC-V274-UI/,'V274 guard must remain observable in response headers');
 
-// V278 restores native SPA delivery: no sendFile override, no direct V275 script
-// injection. The unified import route is replaced only at registration time so
-// V273 source/membership guards still wrap the final handler. SQLite COMMIT is the
-// acknowledgement boundary; legacy CCSL/SHOPEE state saves continue afterward.
-assert.match(delivery,/2026-08-24-v278-native-spa-backend-fast-import-ack-v1/,'V278 backend fast-ack patch must be active');
-assert.doesNotMatch(delivery,/express\.response\.sendFile\s*=/,'V278 must preserve native SPA sendFile');
-assert.doesNotMatch(delivery,/V275_DIRECT_MARKER/,'V278 must not inject V275 into index.html');
-assert.match(delivery,/express\.application\.post\s*=\s*function v278FastUnifiedImportPost/,'V278 must replace only the unified import final handler');
-assert.match(delivery,/previousPost\.call\(this, pathValue, \.\.\.handlers\.slice\(0, last\), fastUnifiedImportHandler\)/,'existing V273 and upload middleware chain must remain ahead of V278 handler');
+// V279 keeps native SPA delivery and backend post-COMMIT acknowledgement, but
+// removes V278's duplicate full workbook parse. V273 is still the independent
+// source census + parser authority and hands that validated parse to the final
+// import handler. Stage timings must make the next bottleneck directly visible.
+assert.match(delivery,/2026-08-24-v279-single-parse-precommit-timing-v1/,'V279 single-parse backend patch must be active');
+assert.doesNotMatch(delivery,/express\.response\.sendFile\s*=/,'V279 must preserve native SPA sendFile');
+assert.doesNotMatch(delivery,/V275_DIRECT_MARKER/,'V279 must not inject V275 into index.html');
+assert.match(delivery,/express\.application\.post\s*=\s*function v279FastUnifiedImportPost/,'V279 must replace only unified import final handler');
+assert.match(delivery,/previousPost\.call\(this, pathValue, \.\.\.handlers\.slice\(0, last\), fastUnifiedImportHandler\)/,'existing V273 and upload middleware chain must remain ahead of V279 handler');
+assert.match(importGuard,/req\.v279UnifiedParsed=parsed/,'V273 must pass its validated parse to V279');
+assert.match(delivery,/req\.v279UnifiedParsed \|\| parseUnifiedDailyExcel/,'V279 must reuse V273 validated parse and only fall back defensively');
+assert.match(delivery,/reusedValidatedParse/,'V279 response must expose whether duplicate parsing was eliminated');
+assert.match(importGuard,/V279_IMPORT_PRECOMMIT/,'pre-COMMIT census and parse timings must be logged');
+assert.match(delivery,/V279_IMPORT_COMMIT/,'SQLite COMMIT timing must be logged');
+assert.match(delivery,/sqliteCommitMs/,'SQLite COMMIT duration must be observable');
 assert.match(delivery,/const saved = saveUnifiedImport\(parsed, req\.file\.originalname\)/,'SQLite durable save must occur before acknowledgement');
-assert.match(delivery,/compatibilityPending: true, ack: 'SQLITE_COMMITTED'/,'response must explicitly identify the post-COMMIT acknowledgement boundary');
+assert.match(delivery,/compatibilityPending: true, ack: 'SQLITE_COMMITTED'/,'response must explicitly identify post-COMMIT acknowledgement boundary');
 assert.match(delivery,/setImmediate\(\(\) => \{ void finishUnifiedCompatibility/,'slow compatibility state saves must continue after response');
-assert.match(delivery,/V278_IMPORT_COMPAT_DONE/,'background compatibility completion must be observable');
+assert.match(delivery,/V279_IMPORT_COMPAT_DONE/,'background compatibility completion must be observable');
 assert.match(delivery,/CORE_LIVE_ASSET_RE/,'core cache-reset protection must remain');
 
 assert.match(importGuard,/V273_SOURCE_WAYBILL_CENSUS_MISMATCH/,'independent workbook census must block parser-side source loss');
-assert.match(importGuard,/readV273SourceWaybillCensus/,'source workbook waybills must be counted independently from the normal parser');
+assert.match(importGuard,/readV273SourceWaybillCensus/,'source workbook waybills must be counted independently from normal parser');
 assert.match(importGuard,/V273_SAME_DATE_REUPLOAD_SHRINK_BLOCKED/,'smaller same-date reuploads must be rejected');
-assert.match(importGuard,/V273_SAME_DATE_MEMBERSHIP_LOSS_BLOCKED/,'same-date reupload must preserve every prior valid waybill, not only the count');
-assert.match(importGuard,/V273_REPARSE_PENDING:/,'same source hash must be temporarily released only for a parser-repair reimport');
-assert.match(importGuard,/previous\.fileHash===parsed\.fileHash&&comparison\.difference>0/,'same file must be reparsed when the fixed parser recovers more waybills');
+assert.match(importGuard,/V273_SAME_DATE_MEMBERSHIP_LOSS_BLOCKED/,'same-date reupload must preserve every prior valid waybill');
+assert.match(importGuard,/V273_REPARSE_PENDING:/,'same source hash repair state must remain protected');
+assert.match(importGuard,/previous\.fileHash===parsed\.fileHash&&comparison\.difference>0/,'same-file parser repair must remain');
 assert.match(importGuard,/handlers\.slice\(0,last\),guard,responseTruth,handlers\[last\]/,'completeness guard must run after upload middleware and before final import handler');
 assert.match(importGuard,/recoverInterruptedSameHashRepairs/,'interrupted same-file repair must recover safely on startup');
-assert.match(importGuard,/process\.env\.NODE_ENV!==['"]test['"]&&!process\.env\.CI/,'gate tests must never run recovery against the real production database');
+assert.match(importGuard,/process\.env\.NODE_ENV!==['"]test['"]&&!process\.env\.CI/,'tests must never run recovery against real production database');
 assert.match(parser,/NOT_FOUND_OPTIONAL/,'recipient column may be absent without silently discarding a whole sheet');
 assert.match(parser,/hasShipmentValues/,'sheet discovery must be driven by actual waybill presence');
 assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipient-column absence must no longer skip the sheet');
 
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
-console.log('[V278/V274/V273] native SPA + backend post-COMMIT fast import ack + ledger-first hot trends + reupload protection gate passed');
+console.log('[V279/V274/V273] single-parse pre-COMMIT timing + backend fast ack + ledger-first hot trends + reupload protection gate passed');
