@@ -32,6 +32,21 @@ async function run(){
       console.info('[CE-QC][V290_MAINTENANCE_WORKER_RESULT]',JSON.stringify({task,reason,result}));
       break;
     }
+    case 'v254-storage':{
+      const fs=await import('node:fs');
+      const path=await import('node:path');
+      const { readV254StorageHealth }=await import('./v254StorageHealthPatch.js');
+      const { getRuntimeConfig }=await import('./db.js');
+      const result=readV254StorageHealth();
+      try{
+        const cfg=getRuntimeConfig();
+        fs.mkdirSync(cfg.logsDir,{recursive:true});
+        fs.writeFileSync(path.join(cfg.logsDir,'storage_health_latest.json'),JSON.stringify(result,null,2));
+      }catch(error){console.warn('[CE-QC][V290_STORAGE_WRITE_FAILED]',error?.message||error);}
+      console.info('[CE-QC][V254_STORAGE]',JSON.stringify(result));
+      console.info('[CE-QC][V290_MAINTENANCE_WORKER_RESULT]',JSON.stringify({task,reason,ok:result?.ok,observedTotalGiB:result?.observedTotalGiB,createdAt:result?.createdAt}));
+      break;
+    }
     default:throw new Error(`Unknown V290 maintenance task: ${task||'(empty)'}`);
   }
 }
