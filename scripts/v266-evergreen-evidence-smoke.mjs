@@ -13,6 +13,7 @@ const source=fs.readFileSync('src/v266EvergreenEvidenceArchive.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const coverageSource=fs.readFileSync('src/v284MembershipEvidenceCoverage.js','utf8');
 const priorityRefreshSource=fs.readFileSync('src/v284PriorityUnprovenRefresh.js','utf8');
+const backupSource=fs.readFileSync('scripts/CE_QC_PreUpdate_Backup.mjs','utf8');
 const mod=await import(`../src/v266EvergreenEvidenceArchive.js?smoke=${Date.now()}`);
 const v283=await import(`../src/v283LegacyDecoratedHashReplay.js?smoke=${Date.now()}`);
 const v283Retry=await import(`../src/v283LegacyDecoratedHashReplayRetry.js?smoke=${Date.now()}`);
@@ -48,8 +49,10 @@ for(const file of [
   'src/v273DashboardTruthReadPatch.js',
   'src/v244ShopeeTrendRuntimePatch.js',
   'src/rangeDashboardStoreV284.js',
+  'scripts/CE_QC_PreUpdate_Backup.mjs',
   'scripts/v284-daily-membership-smoke.mjs',
-  'scripts/v284-evidence-coverage-smoke.mjs'
+  'scripts/v284-evidence-coverage-smoke.mjs',
+  'scripts/v285-preupdate-backup-freeze-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 assert.match(coverageSource,/ledger admission alone is not analysis proof/,'V284 must explicitly distinguish ledger admission from proven analysis');
 assert.match(coverageSource,/lastCheckedAt/,'checked lifecycle state must be part of proven-evidence ownership');
@@ -57,8 +60,13 @@ assert.match(priorityRefreshSource,/MAX_TARGETS=100/,'priority evidence repair m
 assert.match(priorityRefreshSource,/FOREGROUND_PROCESSING_ACTIVE/,'priority evidence repair must yield to active production processing');
 assert.match(priorityRefreshSource,/processCarryFamilyForRefresh/,'priority evidence repair must reuse the existing production carry refresh pipeline');
 assert.match(priorityRefreshSource,/if\(targets\.length>MAX_TARGETS\)/,'large evidence gaps must be skipped rather than causing an unbounded startup refresh');
+assert.match(backupSource,/BEGIN IMMEDIATE/,'V285 high-risk pre-update backup must freeze SQLite writers before copying the production DB');
+assert.match(backupSource,/SOURCE_CHANGED_DURING_WRITE_FREEZE/,'V285 must still reject a source fingerprint change even while the write freeze is held');
+assert.match(backupSource,/backupQuickCheck:'ok'/,'V285 must retain structural verification of the frozen backup');
+assert.match(backupSource,/sha256WithProgress/,'V285 must retain full SHA-256 verification of the frozen backup');
 await import(`./v284-daily-membership-smoke.mjs?nested=${Date.now()}`);
 await import(`./v284-evidence-coverage-smoke.mjs?nested=${Date.now()}`);
+await import(`./v285-preupdate-backup-freeze-smoke.mjs?nested=${Date.now()}`);
 
 await fsp.mkdir(paths.importsRoot,{recursive:true});
 const temp=path.join(paths.importsRoot,'multer-temp-source');
@@ -78,4 +86,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283/V284] evergreen evidence + legacy SHA replay + daily membership + proven-evidence coverage + bounded targeted repair gate passed');
+console.log('[V266/V283/V284/V285] evergreen evidence + legacy SHA replay + daily membership + proven-evidence coverage + bounded targeted repair + frozen verified pre-update backup gate passed');
