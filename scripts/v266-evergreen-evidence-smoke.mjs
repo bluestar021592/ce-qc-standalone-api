@@ -52,7 +52,8 @@ for(const file of [
   'scripts/CE_QC_PreUpdate_Backup.mjs',
   'scripts/v284-daily-membership-smoke.mjs',
   'scripts/v284-evidence-coverage-smoke.mjs',
-  'scripts/v285-preupdate-backup-freeze-smoke.mjs'
+  'scripts/v285-preupdate-backup-freeze-smoke.mjs',
+  'scripts/v286-visible-v253-route-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 assert.match(coverageSource,/WHPP/,'V286 proven coverage must include WHPP daily members instead of silently omitting the seventh business');
 assert.match(coverageSource,/wf\.shipmentCode/,'V286 WHPP proof must accept WHPP final-row evidence when ledger proof is absent');
@@ -72,6 +73,7 @@ assert.match(backupSource,/sha256WithProgress/,'V285 must retain full SHA-256 ve
 await import(`./v284-daily-membership-smoke.mjs?nested=${Date.now()}`);
 await import(`./v284-evidence-coverage-smoke.mjs?nested=${Date.now()}`);
 await import(`./v285-preupdate-backup-freeze-smoke.mjs?nested=${Date.now()}`);
+await import(`./v286-visible-v253-route-smoke.mjs?nested=${Date.now()}`);
 
 await fsp.mkdir(paths.importsRoot,{recursive:true});
 const temp=path.join(paths.importsRoot,'multer-temp-source');
@@ -91,4 +93,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283/V284/V285/V286] evergreen evidence + archive replay + seven-business proven coverage + visible V253 truth bridge + bounded targeted repair + frozen verified backup gate passed');
+console.log('[V266/V283/V284/V285/V286] evergreen evidence + archive replay + seven-business proven coverage + live V253 route substitution + bounded targeted repair + frozen verified backup gate passed');
