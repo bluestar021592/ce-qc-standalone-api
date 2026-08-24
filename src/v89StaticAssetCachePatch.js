@@ -3,11 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import './v108PerformanceIndexPatch.js';
 
-const PATCH_ID = '2026-08-24-v276-sendfile-ui-owner-delivery-v1';
+const PATCH_ID = '2026-08-24-v277-safe-direct-v275-delivery-v1';
 const originalUse = express.application.use;
 const originalSendFile = express.response.sendFile;
+const originalSend = express.response.send;
 let installed = false;
 
+const V275_DIRECT_MARKER = '/v274-trend-speed-guard.js?v=20260824-v277-1';
 const CORE_LIVE_ASSET_RE = /\/(?:app|dashboard-v18|dashboard-chart-v18|dashboard-data-adapter-v18)\.js$|\/dashboard-v18\.css$|\/(?:v271-canonical-integrity-owner|v272-layout-trend-finalizer|v274-trend-speed-guard)\.js$/i;
 
 function cacheableAsset(req, res, next) {
@@ -16,9 +18,6 @@ function cacheableAsset(req, res, next) {
   const accept = String(req.headers?.accept || '');
   const htmlNavigation = pathname === '/' || /\.html$/i.test(pathname) || accept.includes('text/html');
 
-  // Dashboard logic and layout must never remain stuck behind a previous 24-hour
-  // versioned asset cache. Clearing only HTTP cache does not touch cookies,
-  // login state, localStorage or the SQLite database.
   if (htmlNavigation) {
     res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
@@ -37,7 +36,7 @@ function cacheableAsset(req, res, next) {
   next();
 }
 
-express.application.use = function v276StaticAssetCacheUse(...args) {
+express.application.use = function v277StaticAssetCacheUse(...args) {
   const candidates = args.flat().filter(value => typeof value === 'function');
   if (!installed && candidates.some(fn => fn.name === 'serveStatic')) {
     installed = true;
@@ -46,25 +45,27 @@ express.application.use = function v276StaticAssetCacheUse(...args) {
   return originalUse.apply(this, args);
 };
 
-// SPA routes such as /import are served with res.sendFile(index.html). The
-// canonical dashboard/import owner injector patches res.send(), so a raw
-// sendFile stream can bypass every late UI owner even though the backend patch
-// is installed. Route index.html through res.send() so V273/V274/V275 scripts
-// are actually delivered to the browser. Non-SPA files keep native sendFile.
-express.response.sendFile = function v276OwnerAwareSendFile(filePath, options, callback) {
+// V276 routed index.html through the later patched res.send() owner chain. On the
+// real desktop SPA that could stall navigation before app.js finished. V277 keeps
+// the native page shape and only adds the already-tested V275 import confirmation
+// script at the end of index.html. It deliberately calls the original send()
+// captured before late UI-owner patching, so /import cannot inherit unrelated
+// dashboard injectors while loading.
+express.response.sendFile = function v277SafeDirectV275SendFile(filePath, options, callback) {
   const target = String(filePath || '');
   if (path.basename(target).toLowerCase() !== 'index.html') {
     return originalSendFile.call(this, filePath, options, callback);
   }
 
   const done = typeof callback === 'function' ? callback : null;
-  fs.promises.readFile(target, 'utf8').then(html => {
+  fs.promises.readFile(target, 'utf8').then(source => {
     if (this.headersSent) return;
+    let html = String(source || '');
+    if (!html.includes(V275_DIRECT_MARKER)) {
+      html = html.replace('</body>', `  <script src="${V275_DIRECT_MARKER}"></script>\n</body>`);
+    }
     this.type('html');
-    // Use the current response.send implementation at request time. V231
-    // installs its canonical owner injector there, so this deliberately does
-    // not capture an earlier send() reference.
-    this.send(html);
+    originalSend.call(this, html);
     done?.();
   }).catch(error => {
     if (done) return done(error);
