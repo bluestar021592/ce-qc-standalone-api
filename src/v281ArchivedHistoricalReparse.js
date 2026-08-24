@@ -5,11 +5,17 @@ import XLSX from 'xlsx';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
-export const V281_ARCHIVED_HISTORICAL_REPARSE_ID = '2026-08-24-v281-archive-backed-same-hash-history-reparse-v3';
+export const V281_ARCHIVED_HISTORICAL_REPARSE_ID = '2026-08-24-v282-archive-replay-column-bound-census-v4';
 export const V281_PRIORITY_REPORT_DATE = '2026-08-17';
 const CELL_ADDRESS_RE = /^[A-Z]{1,3}[1-9]\d*$/;
 const WAYBILL_CELL_RE = /^(?:TBKH|SPE|CC|CE)[A-Z0-9]{8,}$/;
+const SHIPMENT_HEADERS = [
+  '运单号', '运单编号', '单号', '面单号', '快递单号', '物流单号',
+  'waybill', 'waybillno', 'waybillnumber', 'trackingno', 'trackingnumber', 'shipmentcode'
+];
 const normBill = value => String(value ?? '').normalize('NFKC').trim().toUpperCase().replace(/[\s-]+/g, '');
+const normalizeHeader = value => String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/[\s_\-]+/g, '');
+const normalizedShipmentHeaders = SHIPMENT_HEADERS.map(normalizeHeader);
 
 function meaningfulCellValue(cell) {
   if (!cell || typeof cell !== 'object') return '';
@@ -35,6 +41,50 @@ function sparseMeaningfulRange(sheet = {}) {
     : null;
 }
 
+function buildHeaderRows(sheet = {}) {
+  const rows = Array.from({ length: 30 }, () => []);
+  for (const [address, cell] of Object.entries(sheet || {})) {
+    if (!CELL_ADDRESS_RE.test(address)) continue;
+    const decoded = XLSX.utils.decode_cell(address);
+    if (!Number.isFinite(decoded?.r) || !Number.isFinite(decoded?.c) || decoded.r >= 30) continue;
+    const value = meaningfulCellValue(cell);
+    if (!String(value).trim()) continue;
+    rows[decoded.r][decoded.c] = value;
+  }
+  for (const range of sheet['!merges'] || []) {
+    if (range.s.r >= 30) continue;
+    const source = rows[range.s.r]?.[range.s.c];
+    if (!String(source ?? '').trim()) continue;
+    for (let r = range.s.r; r <= Math.min(range.e.r, 29); r += 1) {
+      rows[r] ||= [];
+      for (let c = range.s.c; c <= range.e.c; c += 1) if (!String(rows[r][c] ?? '').trim()) rows[r][c] = source;
+    }
+  }
+  return rows;
+}
+
+function findShipmentBinding(sheet = {}) {
+  const rows = buildHeaderRows(sheet);
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const headers = (rows[rowIndex] || []).map(normalizeHeader);
+    let columnIndex = -1;
+    for (const alias of normalizedShipmentHeaders) {
+      columnIndex = headers.findIndex(header => header === alias);
+      if (columnIndex >= 0) break;
+    }
+    if (columnIndex < 0) continue;
+    let hasWaybillBelow = false;
+    for (const [address, cell] of Object.entries(sheet || {})) {
+      if (!CELL_ADDRESS_RE.test(address)) continue;
+      const decoded = XLSX.utils.decode_cell(address);
+      if (decoded.c !== columnIndex || decoded.r <= rowIndex || decoded.r > rowIndex + 80) continue;
+      if (WAYBILL_CELL_RE.test(normBill(meaningfulCellValue(cell)))) { hasWaybillBelow = true; break; }
+    }
+    if (hasWaybillBelow) return { headerRow: rowIndex, columnIndex, header: String(rows[rowIndex]?.[columnIndex] || '') };
+  }
+  return null;
+}
+
 export function parseV281ArchivedSparse(filePath, reportDate) {
   const original = XLSX.utils.sheet_to_json;
   XLSX.utils.sheet_to_json = function v281SparseSheetToJson(sheet, options = {}) {
@@ -53,12 +103,16 @@ export function parseV281ArchivedSparse(filePath, reportDate) {
 export function readV281SparseWaybillCensus(filePath) {
   const workbook = XLSX.readFile(filePath, { cellDates: false, dense: false });
   const bills = new Set();
+  const diagnosticBills = new Set();
   const sheets = [];
+  let ignoredOffColumnCount = 0;
   for (const sheetName of workbook.SheetNames) {
     const meta = workbook.Workbook?.Sheets?.find(item => item.name === sheetName);
     if (Number(meta?.Hidden || 0) > 0) continue;
     const sheet = workbook.Sheets[sheetName] || {};
+    const binding = findShipmentBinding(sheet);
     const local = new Set();
+    const broad = new Set();
     let scannedCells = 0;
     for (const [address, cell] of Object.entries(sheet)) {
       if (!CELL_ADDRESS_RE.test(address)) continue;
@@ -66,14 +120,37 @@ export function readV281SparseWaybillCensus(filePath) {
       if (!String(value).trim()) continue;
       scannedCells += 1;
       const bill = normBill(value);
-      if (WAYBILL_CELL_RE.test(bill)) {
-        bills.add(bill);
-        local.add(bill);
-      }
+      if (!WAYBILL_CELL_RE.test(bill)) continue;
+      diagnosticBills.add(bill);
+      broad.add(bill);
+      const decoded = XLSX.utils.decode_cell(address);
+      if (!binding || decoded.c !== binding.columnIndex || decoded.r <= binding.headerRow) continue;
+      bills.add(bill);
+      local.add(bill);
     }
-    sheets.push({ sheetName, waybillCandidates: local.size, scannedCells, originalRef: String(sheet['!ref'] || '') });
+    const ignored = [...broad].filter(bill => !local.has(bill));
+    ignoredOffColumnCount += ignored.length;
+    sheets.push({
+      sheetName,
+      waybillCandidates: local.size,
+      allCellWaybillCandidates: broad.size,
+      ignoredOffColumnCandidates: ignored.length,
+      ignoredOffColumnSamples: ignored.slice(0, 20),
+      shipmentHeader: binding?.header || '',
+      shipmentHeaderRow: binding ? binding.headerRow + 1 : null,
+      shipmentColumn: binding ? XLSX.utils.encode_col(binding.columnIndex) : '',
+      scannedCells,
+      originalRef: String(sheet['!ref'] || '')
+    });
   }
-  return { count: bills.size, bills: [...bills].sort(), sheets };
+  return {
+    count: bills.size,
+    bills: [...bills].sort(),
+    diagnosticCount: diagnosticBills.size,
+    diagnosticBills: [...diagnosticBills].sort(),
+    ignoredOffColumnCount,
+    sheets
+  };
 }
 
 export async function findV281ArchivedSourceByHash(sourceRoot, fileHash) {
@@ -117,6 +194,8 @@ export function assessV281Replay({ reportDate, fileHash, previousBills = [], par
     missingPreviousCount: missingPrevious.length,
     missingPreviousBills: missingPrevious.slice(0, 50),
     sourceCensusCount: Number(census?.count || censusBills.length || 0),
+    sourceDiagnosticCount: Number(census?.diagnosticCount || 0),
+    ignoredOffColumnCount: Number(census?.ignoredOffColumnCount || 0),
     sourceMissingCount: missingFromParse.length,
     sourceMissingBills: missingFromParse.slice(0, 50)
   };
@@ -223,7 +302,7 @@ export async function replayV281ArchivedReportDate(reportDate, options = {}) {
   const parsed = parseV281ArchivedSparse(archivePath, reportDate);
   const parseMs = Date.now() - parseStarted;
   const assessment = assessV281Replay({ reportDate, fileHash: batch.fileHash, previousBills, parsed, census });
-  logger.info?.('[CE-QC][V281_ARCHIVE_REPLAY_CHECK]', JSON.stringify({ reportDate, batchId: batch.batchId, archivePath, censusMs, parseMs, ...assessment }));
+  logger.info?.('[CE-QC][V282_ARCHIVE_REPLAY_CHECK]', JSON.stringify({ reportDate, batchId: batch.batchId, archivePath, censusMs, parseMs, ...assessment, sheets: census.sheets }));
   if (!assessment.ok) {
     return { ok: false, skipped: true, reason: 'SAFETY_CHECK_FAILED', reportDate, batchId: batch.batchId, censusMs, parseMs, ...assessment };
   }
@@ -282,4 +361,4 @@ function schedulePriorityReplay() {
 }
 
 schedulePriorityReplay();
-console.info('[CE-QC][V281_ARCHIVE_REPLAY]', V281_ARCHIVED_HISTORICAL_REPARSE_ID, `priority=${V281_PRIORITY_REPORT_DATE}`, 'exact same-file-hash archive replay; historical tables only; shipment_current_state and carryover_open_items are never written; old membership must remain a full subset; failed post-save verification invalidates the new batch before restoring the old VALID batch.');
+console.info('[CE-QC][V281_ARCHIVE_REPLAY]', V281_ARCHIVED_HISTORICAL_REPARSE_ID, `priority=${V281_PRIORITY_REPORT_DATE}`, 'V282 exact same-file-hash archive replay; blocking census is bound to recognized shipment columns while all-cell candidates remain diagnostics; historical tables only; current/carry state never written.');
