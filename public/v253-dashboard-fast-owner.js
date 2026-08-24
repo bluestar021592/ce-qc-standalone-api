@@ -1,12 +1,15 @@
 (function installV253DashboardFastOwner(global){
   if(global.__CE_QC_V253_DASHBOARD_FAST_OWNER__)return;
-  const VERSION='2026-08-23-v263-v253-fetch-bridge-only-v1';
+  const VERSION='2026-08-24-v287-safe-v273-trend-fetch-bridge-v1';
   const nativeFetch=global.fetch.bind(global);
 
   function rewriteUrl(raw){
     if(!raw)return raw;let u;try{u=new URL(raw,location.origin);}catch{return raw;}
     if(u.pathname==='/api/v89/instant-dashboard'){u.pathname='/api/v253/instant-dashboard';return u.pathname+u.search;}
-    if(u.pathname==='/api/v234/trends'){u.pathname='/api/v253/trends';return u.pathname+u.search;}
+    // V287: visible trend reads bypass the historical V253 trend SQL entirely.
+    // /api/v273/trends is already the authenticated compatibility route backed by
+    // V284/V286 proven seven-business daily-membership truth.
+    if(u.pathname==='/api/v234/trends'){u.pathname='/api/v273/trends';return u.pathname+u.search;}
     if(u.pathname==='/api/v246/shopee-trends'&&u.searchParams.get('regions')==='1'&&u.searchParams.get('exact')==='1'){
       const businessType=u.searchParams.get('businessType')||'';const date=u.searchParams.get('to')||u.searchParams.get('from')||'';
       return `/api/v253/shopee-region?businessType=${encodeURIComponent(businessType)}&date=${encodeURIComponent(date)}`;
@@ -49,6 +52,6 @@
   function bind(){removeHomeLegacyAttempts();document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page]'))setTimeout(removeHomeLegacyAttempts,40);},true);}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
 
-  global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true};
-  console.info('[CE-QC][V253_DASHBOARD_FAST_OWNER]',VERSION,'fetch acceleration only; visible trend rendering retired to canonical DashboardV18');
+  global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true,visibleTrendRoute:'/api/v273/trends'};
+  console.info('[CE-QC][V287_DASHBOARD_FETCH]',VERSION,'fetch-only bridge; visible /api/v234/trends requests are safely redirected to V273 -> V284/V286 proven truth without touching Express route registration.');
 })(window);
