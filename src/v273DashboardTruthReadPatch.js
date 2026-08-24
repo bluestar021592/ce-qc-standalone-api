@@ -1,46 +1,67 @@
 import express from 'express';
 import { getDb } from './db.js';
-import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
+import {
+  V284_DAILY_MEMBERSHIP_TRUTH_ID,
+  readV284DashboardTrends,
+  invalidateV284DailyMembershipTruth
+} from './v284DailyMembershipTruth.js';
 
-export const V273_DASHBOARD_TRUTH_ID='2026-08-24-v274-ledger-first-hot-seven-business-trends-v3';
-const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','ALL']);
-const UNIFIED_TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
-const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
-const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
-const CACHE_MS=60_000;
-const memory=new Map();
-const previousGet=express.application.get;
-let registered=false,prewarmRunning=false,trackingReady=false,prewarmTimer=null;
-const n=v=>Number.isFinite(Number(v))?Number(v):0;
-const pct=(v,t)=>t?Number((n(v)*100/n(t)).toFixed(2)):0;
-const dateKey=v=>{const s=String(v||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:'';};
-function blank(type,date=''){return{businessType:type,reportDate:date,total:0,matched:0,pod:0,ocCurrent:0,sameDayPod:0,podRate:0,ocRate:0,sameDayPodRate:0,ready:false,coverageRate:0};}
-function finish(row){row.total=n(row.total);row.matched=n(row.matched);row.pod=n(row.pod);row.ocCurrent=n(row.ocCurrent);row.sameDayPod=n(row.sameDayPod);row.coverageRate=pct(row.matched,row.total);row.podRate=pct(row.pod,row.total);row.ocRate=pct(row.ocCurrent,row.total);row.sameDayPodRate=pct(row.sameDayPod,row.total);row.ready=row.total===0||row.matched>=row.total;return row;}
-function merge(type,date,rows=[]){const out=blank(type,date),valid=rows.filter(Boolean);for(const row of valid){out.total+=n(row.total);out.matched+=n(row.matched);out.pod+=n(row.pod);out.ocCurrent+=n(row.ocCurrent);out.sameDayPod+=n(row.sameDayPod);}return finish(out);}
-function ensureTracking(db){if(!trackingReady){ensureV246TrackingSchema(db);trackingReady=true;}}
-function selectedDates(type,from,to,db){const single=from===to,includeWhpp=['WHPP','ALL'].includes(type);const base=single?'reportDate<=?':'reportDate BETWEEN ? AND ?';const order=single?'DESC':'ASC',limit=single?7:180;let rows=[];if(includeWhpp){const sql=`SELECT reportDate FROM (SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND ${base} UNION SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND ${base}) ORDER BY reportDate ${order} LIMIT ${limit}`;rows=single?db.prepare(sql).all(to,to):db.prepare(sql).all(from,to,from,to);}else{const sql=`SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND ${base} ORDER BY reportDate ${order} LIMIT ${limit}`;rows=single?db.prepare(sql).all(to):db.prepare(sql).all(from,to);}const dates=rows.map(r=>String(r.reportDate||'')).filter(Boolean);return single?dates.sort():dates;}
-function latestBatches(dates,db){if(!dates.length)return new Map();const marks=dates.map(()=>'?').join(',');const rows=db.prepare(`WITH ranked AS (SELECT reportDate,snapshotId,createdAt,batchId,ROW_NUMBER() OVER(PARTITION BY reportDate ORDER BY createdAt DESC,batchId DESC) rn FROM unified_import_batches WHERE status='VALID' AND reportDate IN (${marks})) SELECT reportDate,snapshotId FROM ranked WHERE rn=1`).all(...dates);return new Map(rows.map(r=>[String(r.reportDate||''),String(r.snapshotId||'')]));}
-function expectedUnifiedCounts(dates,batches,scope,db){const out=new Map();if(!dates.length||!scope.length)return out;const marks=scope.map(()=>'?').join(',');const stmt=db.prepare(`SELECT businessType,COUNT(*) total FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN (${marks}) GROUP BY businessType`);for(const d of dates){const snapshot=batches.get(d)||'';if(!snapshot)continue;for(const row of stmt.all(snapshot,d,...scope))out.set(`${d}|${String(row.businessType||'').toUpperCase()}`,n(row.total));}return out;}
-function expectedWhppCounts(dates,db){const out=new Map();if(!dates.length)return out;const stmt=db.prepare(`SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) total FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''`);for(const d of dates)out.set(`${d}|WHPP`,n(stmt.get(d)?.total));return out;}
-function ledgerFacts(dates,scope,db){const out=new Map();if(!dates.length||!scope.length)return out;ensureTracking(db);const dm=dates.map(()=>'?').join(','),tm=scope.map(()=>'?').join(',');const rows=db.prepare(`SELECT firstReportDate reportDate,businessType,COUNT(*) matched,
- SUM(CASE WHEN terminalReason='POD' THEN 1 ELSE 0 END) pod,
- SUM(CASE WHEN terminalReason='POD' AND podDate=firstReportDate THEN 1 ELSE 0 END) sameDayPod,
- SUM(CASE WHEN trackingStatus='OPEN' AND (UPPER(TRIM(COALESCE(currentState,'')))='OC' OR UPPER(TRIM(COALESCE(currentCategory,'')))='OC' OR UPPER(TRIM(COALESCE(currentCategory,''))) LIKE 'OC%' OR COALESCE(currentCategory,'') LIKE '%OC滞留%') THEN 1 ELSE 0 END) ocCurrent
- FROM qc_tracking_ledger WHERE firstReportDate IN (${dm}) AND businessType IN (${tm}) GROUP BY firstReportDate,businessType`).all(...dates,...scope);for(const raw of rows)out.set(`${raw.reportDate}|${raw.businessType}`,raw);return out;}
-function buildFacts(dates,batches,scope,includeWhpp,db){const expected=expectedUnifiedCounts(dates,batches,scope,db),whppExpected=includeWhpp?expectedWhppCounts(dates,db):new Map(),ledger=ledgerFacts(dates,[...scope,...(includeWhpp?['WHPP']:[])],db),out=new Map();for(const d of dates){for(const t of scope){const l=ledger.get(`${d}|${t}`)||{},row=finish({...blank(t,d),...l,total:n(expected.get(`${d}|${t}`))});out.set(`${d}|${t}`,row);}if(includeWhpp){const l=ledger.get(`${d}|WHPP`)||{},row=finish({...blank('WHPP',d),...l,total:n(whppExpected.get(`${d}|WHPP`))});out.set(`${d}|WHPP`,row);}}return out;}
-export function readV273DashboardTrends(businessType='ALL',fromDate='',toDate='',db=getDb()){
- const type=String(businessType||'ALL').toUpperCase(),to=dateKey(toDate),from=dateKey(fromDate)||to;if(!TYPES.has(type))throw new Error('业务板块无效');if(!from||!to||from>to)throw new Error('日期范围无效');const key=`${type}|${from}|${to}`,hit=memory.get(key);if(hit&&Date.now()-hit.at<CACHE_MS)return{...hit.value,memoryCacheHit:true};const dates=selectedDates(type,from,to,db),batches=latestBatches(dates,db);
- const scope=UNIFIED_TYPES.includes(type)?[type]:type==='CCSL'?CCSL_TYPES:type==='SHOPEE'?SHOPEE_TYPES:type==='ALL'?UNIFIED_TYPES:[];const facts=buildFacts(dates,batches,scope,type==='WHPP'||type==='ALL',db);const pick=(d,t)=>facts.get(`${d}|${t}`)||blank(t,d);
- const daily=dates.map(d=>{if(UNIFIED_TYPES.includes(type))return pick(d,type);if(type==='WHPP')return pick(d,'WHPP');if(type==='CCSL')return merge('CCSL',d,CCSL_TYPES.map(t=>pick(d,t)));if(type==='SHOPEE')return merge('SHOPEE',d,SHOPEE_TYPES.map(t=>pick(d,t)));return merge('ALL',d,[...UNIFIED_TYPES.map(t=>pick(d,t)),pick(d,'WHPP')]);});
- const value=(r,k)=>r?.ready?n(r[k]):null;const result={ok:true,id:V273_DASHBOARD_TRUTH_ID,businessType:type,fromDate:dates[0]||from,toDate:dates.at(-1)||to,dates,daily,ticket:daily.map(r=>n(r.total)),pod:daily.map(r=>value(r,'pod')),podRate:daily.map(r=>value(r,'podRate')),oc:daily.map(r=>value(r,'ocCurrent')),ocRate:daily.map(r=>value(r,'ocRate')),sameDayPod:daily.map(r=>value(r,'sameDayPod')),sameDayPodRate:daily.map(r=>value(r,'sameDayPodRate')),coverageRate:daily.map(r=>r.coverageRate),missingDates:daily.filter(r=>!r.ready).map(r=>r.reportDate),source:'LATEST_VALID_DAILY_COUNTS_PLUS_V246_LEDGER_AGGREGATES',definitions:{podRate:'当前已POD/当日日报总票',ocRate:'当前真实OC/当日日报总票',sameDayPodRate:'日报当日完成POD/当日日报总票'}};memory.set(key,{at:Date.now(),value:result});return result;
+// Keep the historical export name because the browser and older gates import it,
+// but the actual authority from V284 onward is daily report membership joined to
+// V246 lifecycle truth. firstReportDate is evidence metadata, never daily cohort membership.
+export const V273_DASHBOARD_TRUTH_ID = V284_DAILY_MEMBERSHIP_TRUTH_ID;
+const previousGet = express.application.get;
+let registered=false,prewarmRunning=false,prewarmTimer=null;
+
+export function readV273DashboardTrends(businessType='ALL',fromDate='',toDate='',db=getDb()) {
+  return readV284DashboardTrends(businessType,fromDate,toDate,db);
 }
-export function invalidateV274DashboardHotFacts(){memory.clear();}
-function latestReportDate(db=getDb()){try{return String(db.prepare(`SELECT MAX(reportDate) reportDate FROM (SELECT reportDate FROM unified_import_batches WHERE status='VALID' UNION ALL SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP')`).get()?.reportDate||'');}catch{return'';}}
-function prewarm(delay=0){if(prewarmRunning)return;prewarmRunning=true;const run=()=>{try{const db=getDb(),to=latestReportDate(db);if(!to)return;for(const type of ['ALL','CE','CEAF','ALI1688','WHPP','TBKH','SHOPEECN','SHOPEEVN']){try{readV273DashboardTrends(type,to,to,db);}catch{}}console.info('[CE-QC][V274_TREND_HOT] prewarmed recent seven-day trend facts for all visible boards.');}catch(e){console.warn('[CE-QC][V274_TREND_HOT] prewarm failed:',e?.message||e);}finally{prewarmRunning=false;}};if(delay>0)setTimeout(run,delay).unref?.();else run();}
-function refreshHotFacts(){memory.clear();prewarm(30);}
+export function invalidateV274DashboardHotFacts(){
+  invalidateV284DailyMembershipTruth();
+}
+function latestReportDate(db=getDb()){
+  try{return String(db.prepare(`SELECT MAX(reportDate) reportDate FROM (SELECT reportDate FROM unified_import_batches WHERE status='VALID' UNION ALL SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP')`).get()?.reportDate||'');}
+  catch{return'';}
+}
+function prewarm(delay=0){
+  if(prewarmRunning)return;
+  prewarmRunning=true;
+  const run=()=>{
+    try{
+      const db=getDb(),to=latestReportDate(db);
+      if(!to)return;
+      for(const type of ['ALL','CE','CEAF','ALI1688','WHPP','TBKH','SHOPEECN','SHOPEEVN']){
+        try{readV284DashboardTrends(type,to,to,db);}catch{}
+      }
+      console.info('[CE-QC][V284_TREND_HOT] prewarmed recent seven-day membership+ledger trend facts for all visible boards.');
+    }catch(error){console.warn('[CE-QC][V284_TREND_HOT] prewarm failed:',error?.message||error);}
+    finally{prewarmRunning=false;}
+  };
+  if(delay>0)setTimeout(run,delay).unref?.();else run();
+}
+function refreshHotFacts(){invalidateV284DailyMembershipTruth();prewarm(30);}
 globalThis.__CE_QC_INVALIDATE_V274_TRENDS__=invalidateV274DashboardHotFacts;
 globalThis.__CE_QC_REFRESH_V274_TRENDS__=refreshHotFacts;
 function startPeriodicPrewarm(){if(prewarmTimer)return;prewarmTimer=setInterval(refreshHotFacts,60_000);prewarmTimer.unref?.();}
-function handler(req,res){try{const started=Date.now(),data=readV273DashboardTrends(req.query.businessType,req.query.from,req.query.to);res.setHeader('Cache-Control','private,max-age=15');res.setHeader('X-CE-QC-V274',V273_DASHBOARD_TRUTH_ID);res.setHeader('Server-Timing',`v274;dur=${Date.now()-started}`);res.json(data);}catch(e){res.status(400).json({ok:false,id:V273_DASHBOARD_TRUTH_ID,error:e?.message||String(e)});}}
-function register(app){if(registered)return;registered=true;previousGet.call(app,'/api/v273/trends',handler);console.info('[CE-QC][V274_TRENDS]',V273_DASHBOARD_TRUTH_ID,'registered after auth; ledger-first aggregates + 60s hot memory + startup/background prewarm.');prewarm(1200);startPeriodicPrewarm();}
-express.application.get=function v273Route(pathValue,...handlers){if(!registered&&String(pathValue||'')==='/api/v234/trends')register(this);return previousGet.call(this,pathValue,...handlers);};
+function handler(req,res){
+  try{
+    const started=Date.now(),data=readV284DashboardTrends(req.query.businessType,req.query.from,req.query.to);
+    res.setHeader('Cache-Control','private,max-age=15');
+    res.setHeader('X-CE-QC-V284',V284_DAILY_MEMBERSHIP_TRUTH_ID);
+    res.setHeader('X-CE-QC-V274',V284_DAILY_MEMBERSHIP_TRUTH_ID);
+    res.setHeader('Server-Timing',`v284;dur=${Date.now()-started}`);
+    res.json(data);
+  }catch(error){res.status(400).json({ok:false,id:V284_DAILY_MEMBERSHIP_TRUTH_ID,error:error?.message||String(error)});}
+}
+function register(app){
+  if(registered)return;
+  registered=true;
+  previousGet.call(app,'/api/v273/trends',handler);
+  console.info('[CE-QC][V284_TRENDS]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered after auth; daily latest-VALID membership + V246 ledger-first facts + final-row fallback.');
+  prewarm(1200);
+  startPeriodicPrewarm();
+}
+express.application.get=function v284TrendRoute(pathValue,...handlers){
+  if(!registered&&String(pathValue||'')==='/api/v234/trends')register(this);
+  return previousGet.call(this,pathValue,...handlers);
+};
