@@ -1,9 +1,9 @@
 (function installV272LayoutTrendFinalizer(global){
   if(global.__CE_QC_V272_LAYOUT_TREND_FINALIZER__)return;
   global.__CE_QC_V272_LAYOUT_TREND_FINALIZER__=true;
-  const ID='2026-08-24-v272-layout-trend-finalizer-v1';
+  const ID='2026-08-24-v273-single-visible-trend-owner-v1';
   const SPECIAL=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
-  const GENERIC=new Set(['CE','CEAF','ALI1688','WHPP']);
+  const GENERIC=new Set(['CE','CEAF','ALI1688','WHPP','ALL']);
   const COLORS={blue:'#1677ff',green:'#16a36a',orange:'#ff8a00',purple:'#6d4aff'};
   const retries=new Map();
   const byId=id=>document.getElementById(id);
@@ -49,16 +49,16 @@
   function status(section,text,tone=''){
     if(!section)return;let n=section.querySelector('.v272-status');if(!n){n=document.createElement('div');n.className='v272-status';section.querySelector('h2')?.insertAdjacentElement('afterend',n);}n.className=`v272-status ${tone}`.trim();n.textContent=text;
   }
+  function removeTrendBodies(section){section?.querySelectorAll('.v18-chart-grid,.v272-trend-grid,.v272-skeleton-grid,.v272-empty').forEach(n=>n.remove());}
   function skeleton(section){
-    if(!section)return;section.querySelector('.v272-trend-grid')?.remove();section.querySelector('.v272-empty')?.remove();if(section.querySelector('.v272-skeleton-grid'))return;
-    const n=document.createElement('div');n.className='v272-skeleton-grid';n.innerHTML='<div class="v272-skeleton"></div>'.repeat(4);section.appendChild(n);
+    if(!section)return;removeTrendBodies(section);const n=document.createElement('div');n.className='v272-skeleton-grid';n.innerHTML='<div class="v272-skeleton"></div>'.repeat(4);section.appendChild(n);
   }
-  function clearLoading(section){section?.querySelector('.v272-skeleton-grid')?.remove();section?.querySelector('.v271-trend-status')?.remove();}
+  function clearLoading(section){section?.querySelectorAll('.v272-skeleton-grid,.v271-trend-status').forEach(n=>n.remove());}
   function draw(section,specs){
-    const render=renderer();if(typeof render!=='function')throw new Error('走势图组件尚未就绪');clearLoading(section);section.querySelector('.v272-empty')?.remove();section.querySelector('.v18-chart-grid')?.remove();section.querySelector('.v272-trend-grid')?.remove();
+    const render=renderer();if(typeof render!=='function')throw new Error('走势图组件尚未就绪');clearLoading(section);removeTrendBodies(section);
     const grid=document.createElement('div');grid.className='v272-trend-grid';grid.innerHTML=specs.map(()=>'<article class="v18-chart-card"></article>').join('');section.appendChild(grid);[...grid.children].forEach((node,i)=>render(node,specs[i]));
   }
-  function noData(section,message){clearLoading(section);section.querySelector('.v18-chart-grid')?.remove();section.querySelector('.v272-trend-grid')?.remove();let n=section.querySelector('.v272-empty');if(!n){n=document.createElement('div');n.className='v272-empty';section.appendChild(n);}n.innerHTML=`<div><b>暂无可绘制趋势</b><br>${message}</div>`;}
+  function noData(section,message){clearLoading(section);removeTrendBodies(section);const n=document.createElement('div');n.className='v272-empty';n.innerHTML=`<div><b>暂无可绘制趋势</b><br>${message}</div>`;section.appendChild(n);}
   function hasUseful(values=[]){return values.some(v=>v!==null&&v!==undefined&&Number.isFinite(Number(v)));}
 
   function genericSpecs(type,data){
@@ -98,12 +98,12 @@
   function retry(key,fn){const n=retries.get(key)||0;if(n>=2)return;retries.set(key,n+1);setTimeout(fn,n?6000:1800);}
 
   async function hydrate(root,model,type){
-    if(!root||!root.isConnected)return;const section=findSection(root);if(!section)return;const rg=range(model),key=`${type}|${rg.from}|${rg.to}|${Date.now()}`;root.dataset.v272Key=key;root.dataset.v271TrendKey=`V272_OWNER_${key}`;root.dataset.v263Request=`V272_OWNER_${key}`;snapshotFallback(section,model);
+    if(!root||!root.isConnected)return;const section=findSection(root);if(!section)return;const rg=range(model),key=`${type}|${rg.from}|${rg.to}|${Date.now()}`;root.dataset.v272Key=key;root.dataset.v271TrendKey=`V273_OWNER_${key}`;root.dataset.v263Request=`V273_OWNER_${key}`;snapshotFallback(section,model);
     try{
-      const special=SPECIAL.has(type),url=special?`/api/v263/delivery-trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`:`/api/v253/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,data=await api(url);if(root.dataset.v272Key!==key)return;
+      const special=SPECIAL.has(type),url=special?`/api/v263/delivery-trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`:`/api/v273/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,data=await api(url);if(root.dataset.v272Key!==key)return;
       const dates=data.dates||[],specs=special?specialSpecs(data):genericSpecs(type,data),useful=dates.length&&specs.some(spec=>spec.series.some(s=>hasUseful(s.values)));
       if(!useful){noData(section,'当前选择范围内没有足够的已落库日报事实。后续日报增加后会自动出现，不会把缺失数据画成0。');status(section,'当前范围暂无可绘制历史数据。','warn');}
-      else{draw(section,specs);const missing=Array.isArray(data.missingDates)?data.missingDates.length:(data.daily||[]).filter(r=>r.ledgerReady===false).length;status(section,missing?`已显示 ${dates.length} 个有效日报；其中 ${missing} 天仍在补全，缺失值显示“—”。`:`已显示 ${dates.length} 个有效日报，走势图已更新。`,missing?'warn':'ok');}
+      else{draw(section,specs);const missing=Array.isArray(data.missingDates)?data.missingDates.length:(data.daily||[]).filter(r=>r.ledgerReady===false).length;status(section,missing?`已显示 ${dates.length} 个有效日报；其中 ${missing} 天状态覆盖仍在补全，缺失值显示“—”。`:`已显示 ${dates.length} 个有效日报，走势图已更新。`,missing?'warn':'ok');}
       if(special)renderAttempt(root,type,data);
     }catch(error){if(root.dataset.v272Key!==key)return;status(section,`走势图暂未更新：${error?.name==='AbortError'?'读取超时，系统将自动重试':error?.message||error}`,'error');retry(`${type}|${rg.from}|${rg.to}`,()=>hydrate(root,model,type));}
   }
@@ -112,7 +112,7 @@
   function activeType(){const t=String(byId('pageTitle')?.textContent||'').toUpperCase();if(t.includes('SHOPEE CN'))return'SHOPEECN';if(t.includes('SHOPEE VN'))return'SHOPEEVN';if(t.includes('WHPP'))return'WHPP';if(t.includes('CEAF'))return'CEAF';if(t.includes('TBKH'))return'TBKH';if(t.includes('ALI1688'))return'ALI1688';if(/^CE看板/.test(t))return'CE';if(t.includes('首页'))return'ALL';return'';}
   async function hydrateWhppStandalone(){
     if(activeType()!=='WHPP')return;const root=visibleRoot();if(!root||root.querySelector('[data-v272-whpp="ready"]'))return;const rg={from:date(byId('topRangeFrom')?.value),to:date(byId('topRangeTo')?.value)};if(!rg.to)return;const heading=[...root.querySelectorAll('h2,h3')].find(h=>/区域与趋势|趋势图表/.test(String(h.textContent||'')));const panel=heading?.closest('section,article,.panel');if(!panel)return;panel.dataset.v272Whpp='ready';panel.querySelectorAll('p,.empty-state').forEach(n=>{if(/后台更新|正在读取|SHOPEE/.test(n.textContent||''))n.classList.add('v272-legacy-hidden');});let host=panel.querySelector('.v272-whpp-host');if(!host){host=document.createElement('div');host.className='v272-whpp-host';panel.appendChild(host);}host.innerHTML='<div class="v272-status">正在读取WHPP最近有效日报…</div><div class="v272-skeleton-grid">'+ '<div class="v272-skeleton"></div>'.repeat(4)+'</div>';
-    try{const data=await api(`/api/v253/trends?businessType=WHPP&from=${encodeURIComponent(rg.from||rg.to)}&to=${encodeURIComponent(rg.to)}`);host.innerHTML='';const statusNode=document.createElement('div');statusNode.className='v272-status ok';statusNode.textContent=`已显示 ${(data.dates||[]).length} 个有效日报，走势图已更新。`;host.appendChild(statusNode);const grid=document.createElement('div');grid.className='v272-trend-grid';const specs=genericSpecs('WHPP',data);grid.innerHTML=specs.map(()=>'<article class="v18-chart-card"></article>').join('');host.appendChild(grid);[...grid.children].forEach((n,i)=>renderer()?.(n,specs[i]));}catch(e){host.innerHTML=`<div class="v272-status error">WHPP走势图暂未更新：${String(e?.message||e).replace(/[<>]/g,'')}</div><div class="v272-empty">系统会自动重试，不再长期保留空白区域。</div>`;panel.dataset.v272Whpp='';setTimeout(hydrateWhppStandalone,5000);}
+    try{const data=await api(`/api/v273/trends?businessType=WHPP&from=${encodeURIComponent(rg.from||rg.to)}&to=${encodeURIComponent(rg.to)}`);host.innerHTML='';const statusNode=document.createElement('div');statusNode.className='v272-status ok';statusNode.textContent=`已显示 ${(data.dates||[]).length} 个有效日报，走势图已更新。`;host.appendChild(statusNode);const grid=document.createElement('div');grid.className='v272-trend-grid';const specs=genericSpecs('WHPP',data);grid.innerHTML=specs.map(()=>'<article class="v18-chart-card"></article>').join('');host.appendChild(grid);[...grid.children].forEach((n,i)=>renderer()?.(n,specs[i]));}catch(e){host.innerHTML=`<div class="v272-status error">WHPP走势图暂未更新：${String(e?.message||e).replace(/[<>]/g,'')}</div><div class="v272-empty">系统会自动重试，不再长期保留空白区域。</div>`;panel.dataset.v272Whpp='';setTimeout(hydrateWhppStandalone,5000);}
   }
 
   function polishSettings(){installStyle();const page=byId('settingsPage');if(!page)return;page.querySelector('.settings-grid')?.classList.add('v272-settings-clean');}
@@ -120,8 +120,8 @@
 
   function installWrappers(){
     if(!global.DashboardV18||global.DashboardV18.__v272Wrapped)return false;const prevBusiness=global.DashboardV18.renderBusiness?.bind(global.DashboardV18),prevHome=global.DashboardV18.renderHome?.bind(global.DashboardV18);if(!prevBusiness||!prevHome)return false;
-    global.DashboardV18.renderBusiness=function(root,model){const out=prevBusiness(root,model);const type=String(model?.businessType||'').toUpperCase();if(SPECIAL.has(type)||GENERIC.has(type))queueMicrotask(()=>hydrate(root,model,type));return out;};
-    global.DashboardV18.renderHome=function(root,model){const out=prevHome(root,model);queueMicrotask(()=>hydrate(root,model,'ALL'));queueMicrotask(()=>hideLegacyAttempt(root));return out;};
+    global.DashboardV18.renderBusiness=function(root,model){const out=prevBusiness(root,model);root.dataset.v271TrendKey=`V273_SUPERSEDED_${Date.now()}`;root.dataset.v263Request=`V273_SUPERSEDED_${Date.now()}`;const type=String(model?.businessType||'').toUpperCase();if(SPECIAL.has(type)||GENERIC.has(type))queueMicrotask(()=>hydrate(root,model,type));return out;};
+    global.DashboardV18.renderHome=function(root,model){const out=prevHome(root,model);root.dataset.v271HomeKey=`V273_SUPERSEDED_${Date.now()}`;root.dataset.v271TrendKey=`V273_SUPERSEDED_${Date.now()}`;queueMicrotask(()=>hydrate(root,model,'ALL'));queueMicrotask(()=>hideLegacyAttempt(root));return out;};
     global.DashboardV18.__v272Wrapped=true;return true;
   }
   function boot(){installStyle();if(!installWrappers()){setTimeout(boot,120);return;}polishSettings();retireLegacyEverywhere();setTimeout(hydrateWhppStandalone,180);}
@@ -129,5 +129,5 @@
   document.addEventListener('click',e=>{if(e.target?.closest?.('.side-link[data-page],#topRangeQuery'))setTimeout(()=>{polishSettings();retireLegacyEverywhere();hydrateWhppStandalone();},120);},false);
   const observer=new MutationObserver(records=>{if(records.some(r=>[...r.addedNodes].some(n=>n.nodeType===1))){polishSettings();retireLegacyEverywhere();setTimeout(hydrateWhppStandalone,80);}});observer.observe(document.documentElement,{subtree:true,childList:true});
   global.__CE_QC_V272_LAYOUT_TREND_FINALIZER__={id:ID,hydrateWhppStandalone};
-  console.info('[CE-QC][V272_LAYOUT_TREND]',ID,'settings cards compact/aligned; snapshot-first stale-while-revalidate trends; no giant blank charts; legacy attempt placeholders retired.');
+  console.info('[CE-QC][V273_LAYOUT_TREND]',ID,'single visible trend owner; V271 async results invalidated; V273 ledger-backed trends; no duplicate loading row.');
 })(window);
