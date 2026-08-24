@@ -45,16 +45,16 @@ try{
   assert.equal(compareV273Membership(['CC1','CC2','CC3'],['CC1','CC2']).ok,true);
   assert.equal(compareV273Membership(['CC1','CC3','CC4'],['CC1','CC2']).ok,false,'larger reupload must still be blocked if it drops an old bill');
 
-  // V280 regression: some real Excel files retain a massively inflated !ref due
-  // to historical formatting. The source census must inspect only actual cells,
-  // never materialize the blank rectangle described by !ref.
+  // V280 regression: create a worksheet whose stored used-range is far larger
+  // than the two populated rows. Keep the synthetic range bounded so the test
+  // itself stays fast on the Windows launcher while still proving sparse scan.
   const inflatedFile=path.join(temp,'inflated-used-range.xlsx');
   const inflatedBook=XLSX.utils.book_new();
   const inflatedSheet=XLSX.utils.aoa_to_sheet([
     ['运单号','日报日期'],
     ['CC260817009999','2026-08-17']
   ]);
-  inflatedSheet['!ref']='A1:XFD500000';
+  inflatedSheet['!ref']='A1:Z2000';
   XLSX.utils.book_append_sheet(inflatedBook,inflatedSheet,'虚高范围');
   XLSX.writeFile(inflatedBook,inflatedFile);
   const inflatedStarted=Date.now();
@@ -63,6 +63,8 @@ try{
   assert.equal(inflatedCensus.count,1,'inflated !ref workbook must still preserve the real waybill');
   assert.ok(inflatedMs<3000,`sparse census must not traverse inflated blank range; took ${inflatedMs}ms`);
   assert.ok(Number(inflatedCensus.sheets?.[0]?.scannedCells||0)<20,'sparse census must scan actual populated cells only');
+  assert.match(String(inflatedCensus.sheets?.[0]?.originalRef||''),/Z2000/,'test workbook must retain an inflated used-range');
+  assert.doesNotMatch(String(inflatedCensus.sheets?.[0]?.safeRange||''),/Z2000/,'derived safe range must shrink back to populated cells');
   console.log(`[V280] inflated-used-range sparse census passed in ${inflatedMs}ms`);
 
   const db=new DatabaseSync(':memory:');
