@@ -56,18 +56,20 @@ assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediat
 assert.match(inject,/import '\.\/v273DashboardTruthReadPatch\.js';/);
 assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
 assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260824-v273-1/,'V273 owner cache key must remain');
-assert.match(inject,/v274-trend-speed-guard\.js\?v=20260824-v274-1/,'V275 import/trend guard must load after V273 owner');
-const p273=inject.indexOf('V272_LAYOUT_TREND_MARKER');const p274=inject.indexOf('V274_TREND_SPEED_MARKER');assert.ok(p273>=0&&p274>p273,'V275 guard must be delivered after V273 trend owner');
+assert.match(inject,/v274-trend-speed-guard\.js\?v=20260824-v274-1/,'V275 import/trend guard must remain available to the canonical injector');
 assert.match(inject,/X-CE-QC-V274-UI/,'V274/V275 guard must remain observable in response headers');
 
-// V276 delivery contract: SPA routes are served through sendFile(index.html),
-// while the canonical UI injector owns res.send(). The index response must be
-// routed through the current res.send implementation or late browser owners are
-// installed in the backend but never delivered to /import, /reports, etc.
-assert.match(delivery,/2026-08-24-v276-sendfile-ui-owner-delivery-v1/,'V276 delivery bridge must be active');
-assert.match(delivery,/express\.response\.sendFile\s*=\s*function v276OwnerAwareSendFile/,'SPA sendFile must be bridged');
-assert.match(delivery,/path\.basename\(target\)\.toLowerCase\(\) !== 'index\.html'/,'only index.html may be intercepted');
-assert.match(delivery,/this\.send\(html\)/,'index.html must pass through the current canonical send injector');
+// V277 delivery contract: V276 proved that routing the whole SPA through the
+// late canonical res.send() injector can stall /import before app.js finishes.
+// Keep the native SPA body and append only the tested V275 import confirmation
+// script. The wrapper must use the original send implementation captured before
+// late owner patching, so unrelated dashboard owners cannot block page startup.
+assert.match(delivery,/2026-08-24-v277-safe-direct-v275-delivery-v1/,'V277 safe delivery must be active');
+assert.match(delivery,/express\.response\.sendFile\s*=\s*function v277SafeDirectV275SendFile/,'index sendFile must use the safe direct V275 wrapper');
+assert.match(delivery,/V275_DIRECT_MARKER\s*=\s*['"]\/v274-trend-speed-guard\.js\?v=20260824-v277-1['"]/,'V275 must have a fresh direct-delivery cache key');
+assert.match(delivery,/originalSend\.call\(this, html\)/,'index.html must bypass the late multi-owner send injector');
+assert.doesNotMatch(delivery,/this\.send\(html\)/,'V277 must not repeat the V276 recursive late-owner delivery path');
+assert.match(delivery,/path\.basename\(target\)\.toLowerCase\(\) !== 'index\.html'/,'non-index files must retain native sendFile');
 assert.match(delivery,/CORE_LIVE_ASSET_RE[\s\S]*v274-trend-speed-guard/,'V275 browser owner must remain no-store');
 
 // Final-history reupload contract: parser fixes must be able to repair the exact
@@ -88,4 +90,4 @@ assert.match(parser,/hasShipmentValues/,'sheet discovery must be driven by actua
 assert.doesNotMatch(parser,/shipmentIndex < 0 \|\| recipientIndex < 0/,'recipient-column absence must no longer skip the sheet');
 
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
-console.log('[V276/V275/V274/V273] sendFile UI delivery + fast import confirmation + ledger-first hot trends + reupload protection gate passed');
+console.log('[V277/V275/V274/V273] safe SPA load + direct fast import confirmation + ledger-first hot trends + reupload protection gate passed');
