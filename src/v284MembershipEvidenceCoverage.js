@@ -64,6 +64,11 @@ function patchFact(row,proven){
   const out={...row,matched:Math.min(n(row.total),Math.max(0,n(proven)))};
   out.coverageRate=pct(out.matched,out.total);
   out.ready=out.total===0||out.matched>=out.total;
+  // Keep historical compatibility aliases synchronized with the stricter
+  // proven-evidence readiness result. An admitted-but-unchecked OPEN ledger row
+  // must never remain ledgerReady=true after proven coverage downgrades the day.
+  out.ledgerReady=out.ready;
+  if('evidenceSource' in out)out.evidenceSource=out.ready?'V284_PROVEN_DAILY_MEMBERSHIP_V246_LEDGER':'V284_PROVEN_EVIDENCE_COVERAGE_INCOMPLETE';
   return out;
 }
 function aggregateFact(source,type){
