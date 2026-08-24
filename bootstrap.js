@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +14,59 @@ process.env.CE_QC_RECOVERY_SAFE_MODE = '1';
 process.env.CE_QC_DISABLE_V246_TRACKING = '1';
 process.env.CE_QC_DISABLE_V262_STRICT_BACKFILL = '1';
 process.env.CE_QC_DISABLE_STARTUP_STORAGE_SCAN = '1';
+
+// Recovery resource policy: keep the large authoritative SQLite database on D:,
+// but reduce resident RAM and use disk-backed SQLite temp work. New export files
+// go to a persistent C: runtime directory so D: is reserved for source data,
+// evidence and the primary database.
+if (!process.env.SQLITE_CACHE_KIB) process.env.SQLITE_CACHE_KIB = '32768';
+if (!process.env.SQLITE_MMAP_BYTES) process.env.SQLITE_MMAP_BYTES = '0';
+if (!process.env.SQLITE_TEMP_STORE) process.env.SQLITE_TEMP_STORE = 'FILE';
+const runtimeRoot = process.env.LOCALAPPDATA
+  ? path.join(process.env.LOCALAPPDATA, 'CE_QC_RUNTIME')
+  : path.resolve(process.cwd(), 'runtime');
+if (!process.env.EXPORTS_DIR) process.env.EXPORTS_DIR = path.join(runtimeRoot, 'exports');
+try { fs.mkdirSync(process.env.EXPORTS_DIR, { recursive: true }); } catch {}
+
+function cleanupOrphanPreUpdateBackups() {
+  const defaultDataDir = 'D:\\CE CCSL金边数据库';
+  const configured = String(process.env.DATA_DIR || defaultDataDir).trim();
+  const dataDir = path.isAbsolute(configured) ? path.normalize(configured) : path.resolve(process.cwd(), configured);
+  const root = path.join(dataDir, 'backups', 'pre_update');
+  const graceMs = 30 * 60 * 1000;
+  if (!fs.existsSync(root)) return { removed: 0, freedBytes: 0, root };
+  let removed = 0;
+  let freedBytes = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const dir = path.join(root, entry.name);
+    const manifest = path.join(dir, 'manifest.json');
+    const dbCopy = path.join(dir, 'ce_qc_monitor.db');
+    if (fs.existsSync(manifest) || !fs.existsSync(dbCopy)) continue;
+    let stat;
+    try { stat = fs.statSync(dbCopy); } catch { continue; }
+    if (Date.now() - Number(stat.mtimeMs || 0) < graceMs) continue;
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      removed += 1;
+      freedBytes += Number(stat.size || 0);
+      console.log(`[CE-QC][STORAGE_RECOVERY] removed orphan pre-update backup ${dir} (${(Number(stat.size || 0) / 1024 / 1024 / 1024).toFixed(2)} GiB)`);
+    } catch (error) {
+      console.warn('[CE-QC][STORAGE_RECOVERY] orphan backup cleanup failed:', dir, error?.message || error);
+    }
+  }
+  return { removed, freedBytes, root };
+}
+
+const storageRecovery = cleanupOrphanPreUpdateBackups();
+console.log('[CE-QC][RESOURCE_POLICY]', JSON.stringify({
+  sqliteCacheKiB: Number(process.env.SQLITE_CACHE_KIB),
+  sqliteMmapBytes: Number(process.env.SQLITE_MMAP_BYTES),
+  sqliteTempStore: process.env.SQLITE_TEMP_STORE,
+  exportsDir: process.env.EXPORTS_DIR,
+  orphanBackupDirsRemoved: storageRecovery.removed,
+  orphanBackupGiBFreed: Number((storageRecovery.freedBytes / 1024 / 1024 / 1024).toFixed(2))
+}));
 
 // Normal operation is interactive-first. Dashboard cache maintenance must never
 // compete with users every ten minutes on the same local SQLite file. Two hours
