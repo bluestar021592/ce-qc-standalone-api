@@ -9,7 +9,9 @@ process.env.NODE_ENV='test';
 process.env.DATA_DIR=root;
 process.env.DB_FILE=path.join(root,'ce_qc_monitor.db');
 const source=fs.readFileSync('src/v266EvergreenEvidenceArchive.js','utf8');
+const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const mod=await import(`../src/v266EvergreenEvidenceArchive.js?smoke=${Date.now()}`);
+const v283=await import(`../src/v283LegacyDecoratedHashReplay.js?smoke=${Date.now()}`);
 const paths=mod.getV266EvidenceArchivePaths();
 assert.equal(mod.V266_MIN_RETENTION_DAYS,366,'evergreen evidence must retain at least one full year plus leap-day margin');
 assert.match(mod.V266_RETENTION_POLICY,/NO_AUTOMATIC_ARCHIVE_DELETE/,'archive must never be automatically purged by a normal upgrade');
@@ -19,6 +21,12 @@ assert.match(source,/PRESERVE_BEFORE_TEMP_DELETE/,'uploaded source must be archi
 assert.match(source,/source_uploads/,'source upload archive must be separate from derived database state');
 assert.match(source,/ce_api/,'CE API evidence archive must be independently replayable');
 assert.doesNotMatch(source,/rmSync\(|fsPromises\.rm\(|rmdir\(/,'V266 must not contain any archive purge implementation');
+
+const legacySha='8abc5f1b423f7dfab2d910f3de79067cae0a06cb683103a9d6c3df462f0b34c8';
+assert.equal(v283.canonicalLegacyFileHash(`${legacySha}:2026-08-13-v77-ceaf-whpp-source-authority`),legacySha,'V283 must strip only the legacy authority suffix and retain the exact leading SHA-256');
+assert.equal(v283.canonicalLegacyFileHash(legacySha),legacySha,'V283 must preserve an already canonical SHA-256');
+assert.equal(v283.canonicalLegacyFileHash(`prefix:${legacySha}`),'','V283 must reject hashes that do not begin with the exact SHA-256');
+assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplay\.js';/,'V283 decorated-hash replay must be activated in the normal startup chain');
 
 await fsp.mkdir(paths.importsRoot,{recursive:true});
 const temp=path.join(paths.importsRoot,'multer-temp-source');
@@ -38,4 +46,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266] evergreen evidence smoke passed: source survives temp deletion + 366d retention + compressed CE replay archive + no automatic purge');
+console.log('[V266/V283] evergreen evidence + legacy decorated SHA canonicalization smoke passed');
