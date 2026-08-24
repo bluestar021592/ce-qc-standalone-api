@@ -7,11 +7,12 @@ import './v231MetricTruthUiInjectionPatch.js';
 import './v244ShopeeTrendRuntimePatch.js';
 import './v246QcTrackingRuntimePatch.js';
 import './v252LifecycleCoordinator.js';
-// V287 deliberately keeps the historical V253 backend registration untouched.
-// Visible browser trend fetches are routed to /api/v273/trends by the fetch-only
-// frontend bridge, where V273 already delegates to V284/V286 proven truth.
-// Do not globally wrap express.application.get here: that can affect login/static/
-// SPA route registration and is unnecessary for visible trend authority.
+// V287 keeps the historical V286 module in the startup chain only as a no-op
+// compatibility marker. It no longer wraps express.application.get.
+import './v286V253TrendTruthBridge.js';
+// The historical V253 backend remains available for instant-summary/region and
+// compatibility reads, but visible browser trends are routed to /api/v273/trends
+// by the fetch-only frontend bridge.
 import './v253DashboardFastPath.js';
 import './v254StorageHealthPatch.js';
 // V255 retention guard is intentionally disabled from startup until its standalone
@@ -86,6 +87,6 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V287] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; no global Express trend hook; visible browser trends use V273 -> V284/V286 proven seven-business truth; V266 evidence archive, V246/V252 lifecycle tracking, V254 read-only storage audit and V256 R2 zero-cost guard remain active.`);
+console.log(`[CE-QC][V287] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; V286 global Express hook is retired; visible browser trends use V273 -> V284/V286 proven seven-business truth; V266 evidence archive, V246/V252 lifecycle tracking, V254 read-only storage audit and V256 R2 zero-cost guard remain active.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
