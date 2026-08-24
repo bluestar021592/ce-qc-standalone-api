@@ -18,14 +18,15 @@ assert.ok(dashboard.includes("const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];"), 'Sh
 assert.ok(dashboard.includes("p.businessType='WHPP'"), 'WHPP must read only WHPP daily parse rows');
 assert.ok(dashboard.includes("u.businessType='CEAF'"), 'WHPP fallback must explicitly de-duplicate CEAF overlap');
 assert.ok(dashboard.includes('NOT EXISTS'), 'WHPP/CEAF overlap must be excluded instead of double-counted');
+assert.ok(v284.includes("p.businessType='WHPP'"), 'V284 WHPP daily membership must stay bound to WHPP parse rows');
+assert.ok(v284.includes("u.businessType='CEAF'"), 'V284 must inherit the historical WHPP/CEAF overlap exclusion instead of losing it during truth consolidation');
+assert.ok(v284.includes('NOT EXISTS'), 'V284 WHPP daily membership must exclude CEAF overlap before any metric is calculated');
 
 // 2) Every daily percentage must use that same daily row as its denominator.
 assert.ok(dashboard.includes('row.podRate=pct(row.pod,row.total);row.ocRate=pct(row.ocCurrent,row.total);row.sameDayPodRate=pct(row.sameDayPod,row.total);'), 'daily POD/OC/same-day POD rates must divide by the same row total');
 assert.ok(dashboard.includes("definitions:{podRate:'POD/当日总票',ocRate:'当前真实OC/当日总票',sameDayPodRate:'首日报当日完成POD/当日总票'}"), 'dashboard API must publish locked daily denominator definitions');
 
 // 3) Shopee 1/2/3-attempt percentages require real POD attempt evidence; missing evidence is null/—, never fake 0%.
-// V284 moved the SQL authority out of the compatibility route into the shared daily-membership truth reader.
-// The daily cohort is the latest VALID report membership, while attempt truth remains V246-ledger-first.
 assert.ok(shopee.includes('readV284ShopeeTrends'), 'Shopee compatibility route must delegate to V284 daily-membership truth');
 assert.ok(v284.includes('LEFT JOIN qc_tracking_ledger l ON l.shipmentCode=v.shipmentCode AND l.businessType=v.businessType'), 'daily membership must join V246 ledger by shipmentCode/businessType instead of grouping by firstReportDate');
 assert.ok(v284.includes("CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.attemptNo,0)"), 'when V246 ledger exists, attempt number must come from locked ledger evidence');
@@ -37,7 +38,8 @@ assert.ok(v284.includes('const hasAttempt=row.pod>0&&known>0;'), 'Shopee trend m
 assert.ok(v284.includes('row.attempt1Rate=hasAttempt?pct(row.attempt1,row.pod):null'), 'missing attempt-1 evidence must stay unavailable');
 assert.ok(v284.includes('row.attempt2Rate=hasAttempt?pct(row.attempt2,row.pod):null'), 'missing attempt-2 evidence must stay unavailable');
 assert.ok(v284.includes('row.attempt3Rate=hasAttempt?pct(row.attempt3,row.pod):null'), 'missing attempt-3 evidence must stay unavailable');
-assert.ok(v284.includes("daily denominator=latest VALID report membership; status truth=V246 ledger first"), 'V284 authority must explicitly keep daily membership and lifecycle truth separate');
+assert.ok(v284.includes('daily denominator=latest VALID report membership;'), 'V284 authority must explicitly retain latest-VALID daily membership');
+assert.ok(v284.includes('status truth=V246 ledger first'), 'V284 authority must explicitly keep V246 lifecycle truth ahead of legacy final rows');
 
 // 4) Tracking admission and terminal truth must cover all seven boards and close only real terminal evidence.
 assert.ok(tracking.includes("export const V246_TRACKING_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);"), 'tracking ledger must cover all seven physical boards');
@@ -63,4 +65,4 @@ assert.ok(facts.includes('pendingNonContinuous: pendingDates.length >= 2 && !pen
 // 7) Lifecycle/export consolidation is part of the same production gate.
 execFileSync(process.execPath, ['scripts/v268-lifecycle-export-smoke.cjs'], { stdio: 'inherit' });
 
-console.log('[V257/V284] system calibration gate passed: 7-board isolation + daily membership denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
+console.log('[V257/V284/V286] system calibration gate passed: 7-board isolation + WHPP/CEAF de-dup inheritance + daily membership denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
