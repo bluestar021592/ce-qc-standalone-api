@@ -8,6 +8,7 @@ const runtime = fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js', 'utf8
 const route = fs.readFileSync('src/v236DashboardCurrentRoutePatch.js', 'utf8');
 const worker = fs.readFileSync('src/dashboardCacheWorker.js', 'utf8');
 const v246ShopeeRuntime = fs.readFileSync('src/v244ShopeeTrendRuntimePatch.js', 'utf8');
+const v284 = fs.readFileSync('src/v284DailyMembershipTruth.js', 'utf8');
 const v245Ui = fs.readFileSync('public/v244-shopee-trend-owner.js', 'utf8');
 const inject = fs.readFileSync('src/v231MetricTruthUiInjectionPatch.js', 'utf8');
 const trackingCore = fs.readFileSync('src/v246TrackingLedgerCore.js', 'utf8');
@@ -18,7 +19,7 @@ const shopeeAnalyzer = fs.readFileSync('src/shopeeAnalyzerV33.js', 'utf8');
 const whppDetailUi = fs.readFileSync('public/v249-whpp-detail-owner.js', 'utf8');
 const whppDetailRoute = fs.readFileSync('src/v172WhppDetailParityPatch.js', 'utf8');
 
-for (const file of ['src/shopeeAttemptCycleV246.js','src/shopeeAnalyzerV33.js','src/v246TrackingLedgerCore.js','src/v246QcTrackingRuntimePatch.js','public/v246-qc-tracking.js']) {
+for (const file of ['src/shopeeAttemptCycleV246.js','src/shopeeAnalyzerV33.js','src/v246TrackingLedgerCore.js','src/v246QcTrackingRuntimePatch.js','src/v244ShopeeTrendRuntimePatch.js','src/v284DailyMembershipTruth.js','public/v246-qc-tracking.js']) {
   execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
 }
 
@@ -66,7 +67,7 @@ assert.match(trackingCore,/v246InclusiveDays\(firstReportDate,podDate\)/,'averag
 assert.match(trackingCore,/listV246ShopeePodForStrictCheck/,'V246 must enumerate POD rows requiring strict track evidence');
 assert.match(trackingCore,/applyV246StrictAttemptEvidence/,'V246 must support authoritative strict-attempt corrections, including downward correction');
 assert.match(trackingCore,/V246_STRICT_TRACK:/,'V246 strict track evidence must be persisted with explicit ownership');
-assert.match(trackingCore,/readV246ShopeeDailyTruth/,'Shopee dashboard must have a ledger-backed daily truth reader');
+assert.match(trackingCore,/readV246ShopeeDailyTruth/,'V246 ledger core must retain its per-first-admission lifecycle truth helper for tracking/export compatibility');
 
 assert.match(trackingRuntime,/CAMBODIA_0200_30DAY_AUTO/,'V246 must own a Cambodia 02:00 rolling 30-day reconciliation');
 assert.match(trackingRuntime,/clock\.minuteOfDay<120/,'V246 scheduler must not run the daily deep refresh before 02:00');
@@ -84,12 +85,17 @@ assert.match(trackingRuntime,/queryTrackWithFallback/,'strict attempt backfill m
 assert.match(trackingRuntime,/\/api\/v246\/tracking\/reconcile/,'V246 must expose one-click/custom-range reconciliation');
 assert.match(trackingRuntime,/\/api\/v246\/tracking\/bill\/:shipmentCode/,'V246 must expose per-waybill QC diagnosis');
 
-assert.match(v246ShopeeRuntime,/V246_SHOPEE_TREND_ID/,'Shopee backend must expose V246 trend truth id');
-assert.match(v246ShopeeRuntime,/readV246ShopeeDailyTruth/,'Shopee attempts and signing days must prefer the locked V246 ledger');
-assert.match(v246ShopeeRuntime,/V246_LOCKED_TRACKING_LEDGER/,'Shopee response must reveal locked-ledger evidence ownership');
-assert.match(v246ShopeeRuntime,/attemptUnknown/,'Shopee backend must expose POD whose attempt evidence is unknown');
-assert.match(v246ShopeeRuntime,/attempt1Rate:hasAttemptEvidence \? pct\(attempt1,pod\) : null/,'Shopee must not fabricate 1-pai zero without evidence');
-assert.match(v246ShopeeRuntime,/\/api\/v246\/shopee-trends/,'V246 Shopee endpoint must be registered');
+// V284 owns visible Shopee daily cohorts. The compatibility route keeps the old
+// endpoint/export names, while V246 ledger remains the first status/attempt source.
+assert.match(v246ShopeeRuntime,/V246_SHOPEE_TREND_ID/,'Shopee backend must retain the historical V246 trend export name');
+assert.match(v246ShopeeRuntime,/readV284ShopeeTrends/,'Shopee compatibility endpoint must delegate to V284 daily-membership truth');
+assert.match(v246ShopeeRuntime,/legacyCoverage/,'old Shopee UI evidence-coverage fields must be preserved without changing truth');
+assert.match(v246ShopeeRuntime,/attemptEvidenceComplete/,'Shopee compatibility response must expose attempt evidence completeness');
+assert.match(v246ShopeeRuntime,/\/api\/v246\/shopee-trends/,'V246 Shopee endpoint must remain registered');
+assert.match(v284,/LEFT JOIN qc_tracking_ledger l ON l\.shipmentCode=v\.shipmentCode AND l\.businessType=v\.businessType/,'V284 daily members must join the V246 ledger by shipment/business');
+assert.match(v284,/CASE WHEN l\.shipmentCode IS NOT NULL THEN COALESCE\(l\.attemptNo,0\)/,'ledger attemptNo must outrank legacy final-row attempt fields');
+assert.match(v284,/row\.attempt1Rate=hasAttempt\?pct\(row\.attempt1,row\.pod\):null/,'Shopee must not fabricate 1-pai zero without evidence');
+assert.match(v284,/source:'LATEST_VALID_DAILY_MEMBERSHIP_JOIN_V246_LEDGER_FINAL_FALLBACK'/,'visible daily truth must disclose latest-VALID membership + ledger-first ownership');
 
 assert.doesNotThrow(()=>new Function(v245Ui),'Shopee trend UI must compile as browser JavaScript');
 for(const label of ['票数趋势','POD数量趋势','平均签收天数趋势','OC数量趋势','1/2/3派签收占POD趋势','派次未识别POD'])assert.ok(v245Ui.includes(label),`Shopee UI missing ${label}`);
@@ -118,4 +124,4 @@ assert.match(inject,/X-CE-QC-V246-UI/,'V246 UI response header must be observabl
 assert.match(inject,/X-CE-QC-V248-UI/,'V248 UI response header must be observable');
 assert.match(inject,/X-CE-QC-V249-UI/,'V249 UI response header must be observable');
 
-console.log('[V249] continuous QC tracking + V248 Shopee SPA owner + WHPP exact drilldown/canonical handoff gate passed');
+console.log('[V284/V249] daily-membership Shopee truth + continuous QC tracking + V248 SPA owner + WHPP exact drilldown/canonical handoff gate passed');
