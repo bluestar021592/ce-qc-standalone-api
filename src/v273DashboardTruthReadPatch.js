@@ -2,16 +2,16 @@ import express from 'express';
 import { getDb } from './db.js';
 import {
   V284_DAILY_MEMBERSHIP_TRUTH_ID,
-  readV284DashboardTrends,
   invalidateV284DailyMembershipTruth
 } from './v284DailyMembershipTruth.js';
+import { readV284ProvenDashboardTrends } from './v284MembershipEvidenceCoverage.js';
 
 // Keep the historical export name because the browser and older gates import it,
 // but the actual authority from V284 onward is daily report membership joined to
 // V246 lifecycle truth. firstReportDate is evidence metadata, never daily cohort membership.
 export const V273_DASHBOARD_TRUTH_ID = V284_DAILY_MEMBERSHIP_TRUTH_ID;
 // Compatibility markers for pre-V284 static gates. They are deliberately NOT the
-// production algorithm; V284DailyMembershipTruth owns the actual membership join.
+// production algorithm; V284 daily-membership + evidence-coverage readers own production.
 const LEGACY_V274_MARKER='2026-08-24-v274-ledger-first-hot-seven-business-trends-v3';
 const CACHE_MS=60_000;
 const compatMemory=new Map();
@@ -69,7 +69,7 @@ let registered=false,prewarmRunning=false,prewarmTimer=null;
 
 export function readV273DashboardTrends(businessType='ALL',fromDate='',toDate='',db=getDb()) {
   return hasFullV284Schema(db)
-    ? readV284DashboardTrends(businessType,fromDate,toDate,db)
+    ? readV284ProvenDashboardTrends(businessType,fromDate,toDate,db)
     : compatRead(businessType,fromDate,toDate,db);
 }
 export function invalidateV274DashboardHotFacts(){
@@ -90,7 +90,7 @@ function prewarm(delay=0){
       for(const type of ['ALL','CE','CEAF','ALI1688','WHPP','TBKH','SHOPEECN','SHOPEEVN']){
         try{readV273DashboardTrends(type,to,to,db);}catch{}
       }
-      console.info('[CE-QC][V284_TREND_HOT] prewarmed recent seven-day membership+ledger trend facts for all visible boards.');
+      console.info('[CE-QC][V284_TREND_HOT] prewarmed recent seven-day membership+proven-ledger trend facts for all visible boards.');
     }catch(error){console.warn('[CE-QC][V284_TREND_HOT] prewarm failed:',error?.message||error);}
     finally{prewarmRunning=false;}
   };
@@ -114,7 +114,7 @@ function register(app){
   if(registered)return;
   registered=true;
   previousGet.call(app,'/api/v273/trends',handler);
-  console.info('[CE-QC][V284_TRENDS]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered after auth; daily latest-VALID membership + V246 ledger-first facts + final-row fallback.');
+  console.info('[CE-QC][V284_TRENDS]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered after auth; daily latest-VALID membership + proven V246 ledger facts + final-row fallback.');
   prewarm(1200);
   startPeriodicPrewarm();
 }
