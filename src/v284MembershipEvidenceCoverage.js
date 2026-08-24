@@ -126,7 +126,7 @@ export function summarizeV284ProvenRange(fromDate,toDate,db=getDb()){
   const ccsl=aggregateFact(CCSL.map(t=>byType[t]),'CCSL'),shopee=aggregateFact(SHOPEE.map(t=>byType[t]),'SHOPEE'),whpp=byType.WHPP||aggregateFact([],'WHPP');
   const dates=[...new Set(daily.map(r=>r.reportDate))].sort();const missingDates=dates.filter(date=>daily.some(r=>r.reportDate===date&&r.total>0&&!r.ready));
   const sourceTotal=ccsl.total+shopee.total+whpp.total,analyzedTotal=ccsl.matched+shopee.matched+whpp.matched;
-  return {...base,daily,byType,ccsl,shopee,whpp,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,sourceTotal,analyzedTotal,analysisPending:Math.max(0,sourceTotal-analyzedTotal),missingDates,analysisComplete:missingDates.length===0&&analyzedTotal>=sourceTotal};
+  return {...base,dates,daily,byType,ccsl,shopee,whpp,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,sourceTotal,analyzedTotal,analysisPending:Math.max(0,sourceTotal-analyzedTotal),missingDates,analysisComplete:missingDates.length===0&&analyzedTotal>=sourceTotal};
 }
 
 console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,'all seven businesses are covered with the same daily membership rules; WHPP excludes latest-VALID CEAF overlap and uses WHPP ledger/final evidence; ledger admission alone is not analysis proof.');
