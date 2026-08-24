@@ -22,16 +22,18 @@ ins.run('PROVEN-POD','CE','2026-08-10',date,'SOLD','S17','TERMINAL','POD',now,'P
 ins.run('ADMITTED-ONLY','CE',date,date,'S17','S17','OPEN','','','OPEN','OPEN','','',0,'',null,'{}','{}','','V252_STARTUP_90DAY_ADMISSION_AUDIT',now,now);
 
 let coverage=readV284EvidenceCoverage(date,date,db);
-let ce=coverage.byType.get(`${date}|CE`);
+let ce=coverage.byType.get(`${date}|CE|ALL`);
+assert.ok(ce,'CE daily evidence coverage aggregate must exist under the canonical date|business|ALL key');
 assert.equal(ce.total,2);
 assert.equal(ce.proven,1,'empty OPEN admission ledger must not count as analyzed');
 assert.equal(coverage.unproven.length,1);
 assert.equal(coverage.unproven[0].shipmentCode,'ADMITTED-ONLY');
 
 db.prepare("UPDATE qc_tracking_ledger SET currentState='Pending',currentCategory='Pending',lastCheckedAt=?,updatedAt=? WHERE shipmentCode='ADMITTED-ONLY'").run(now,now);
-coverage=readV284EvidenceCoverage(date,date,db);ce=coverage.byType.get(`${date}|CE`);
+coverage=readV284EvidenceCoverage(date,date,db);ce=coverage.byType.get(`${date}|CE|ALL`);
+assert.ok(ce,'CE daily evidence coverage aggregate must remain addressable after evidence refresh');
 assert.equal(ce.proven,2,'checked current-state evidence may promote admitted member to proven analysis');
 assert.equal(coverage.unproven.length,0);
 
 db.close();
-console.log('[V284] evidence coverage smoke passed · admission-only OPEN stays unproven until checked/current/final evidence exists');
+console.log('[V284] evidence coverage smoke passed · canonical date|business|ALL key + admission-only OPEN stays unproven until checked/current/final evidence exists');
