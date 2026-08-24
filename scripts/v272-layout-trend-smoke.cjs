@@ -7,10 +7,11 @@ const speed=read('public/v274-trend-speed-guard.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const delivery=read('src/v89StaticAssetCachePatch.js');
 const backend=read('src/v273DashboardTruthReadPatch.js');
+const membership=read('src/v284DailyMembershipTruth.js');
 const importGuard=read('src/v273ImportCompletenessGuard.js');
 const parser=read('src/unifiedExcelParser.js');
 const archiveReplay=read('src/v281ArchivedHistoricalReparse.js');
-for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v89StaticAssetCachePatch.js','src/v273DashboardTruthReadPatch.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js','src/v281ArchivedHistoricalReparse.js','scripts/v281-archive-replay-smoke.mjs','scripts/v281-archive-failure-recovery-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v89StaticAssetCachePatch.js','src/v273DashboardTruthReadPatch.js','src/v284DailyMembershipTruth.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js','src/v281ArchivedHistoricalReparse.js','scripts/v281-archive-replay-smoke.mjs','scripts/v281-archive-failure-recovery-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(ui),'V273 browser runtime must compile');
 assert.doesNotThrow(()=>new Function(speed),'V275 compatibility asset must compile');
 assert.match(ui,/2026-08-24-v273-single-visible-trend-owner-v1/);
@@ -29,11 +30,17 @@ assert.match(ui,/hydrateWhppStandalone/,'WHPP must have an explicit standalone h
 assert.doesNotMatch(ui,/\/api\/v253\/trends\?businessType=WHPP/,'WHPP visible trends must no longer rely on incomplete historical final_rows');
 assert.doesNotMatch(ui,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V273 must never intercept navigation');
 
-assert.match(backend,/v274-ledger-first-hot-seven-business-trends-v3/,'V274 backend must be active');
-assert.match(backend,/function expectedUnifiedCounts/,'daily expected totals must be counted independently');
-assert.match(backend,/function ledgerFacts/,'tracking truth must be grouped directly from the lifecycle ledger');
-assert.doesNotMatch(backend,/unified_import_rows[\s\S]{0,500}JOIN\s+qc_tracking_ledger/i,'page reads must not perform a member-by-member daily-report-to-ledger join');
-assert.match(backend,/const CACHE_MS=60_000/,'hot trend facts must remain reusable for one minute');
+// V284 supersedes V274's firstReportDate aggregation. Daily cohort membership must
+// come from the latest VALID report for each date, while V246 ledger remains the
+// preferred lifecycle/status/attempt truth for those exact daily members.
+assert.match(backend,/V284_DAILY_MEMBERSHIP_TRUTH_ID/,'V284 backend authority must be active through the historical V273 route');
+assert.match(backend,/readV284DashboardTrends/,'V273 compatibility route must delegate to V284 daily-membership truth');
+assert.match(membership,/2026-08-24-v284-daily-membership-ledger-truth-v1/,'V284 daily-membership truth module must be the active implementation');
+assert.match(membership,/ROW_NUMBER\(\) OVER\(PARTITION BY b\.reportDate ORDER BY b\.createdAt DESC,b\.batchId DESC\) rn/,'each date must select its newest VALID source membership exactly once');
+assert.match(membership,/LEFT JOIN qc_tracking_ledger l ON l\.shipmentCode=v\.shipmentCode AND l\.businessType=v\.businessType/,'daily report members must join V246 lifecycle truth by shipment/business instead of firstReportDate');
+assert.match(membership,/source:'LATEST_VALID_DAILY_MEMBERSHIP_JOIN_V246_LEDGER_FINAL_FALLBACK'/,'V284 API must expose its daily-membership + ledger authority');
+assert.doesNotMatch(membership,/GROUP BY\s+firstReportDate/i,'firstReportDate must never group visible daily trends again');
+assert.match(membership,/const CACHE_MS = 30_000/,'V284 daily truth may use bounded hot-memory reuse without changing cohort membership');
 assert.match(backend,/prewarm\(1200\)/,'recent seven-day facts must prewarm shortly after backend start');
 assert.match(backend,/startPeriodicPrewarm/,'hot facts must be refreshed in background instead of on page navigation');
 assert.match(backend,/Server-Timing/,'runtime trend duration must be observable');
@@ -45,7 +52,7 @@ assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediat
 assert.match(inject,/import '\.\/v273DashboardTruthReadPatch\.js';/);
 assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
 assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260824-v273-1/,'V273 owner cache key must remain');
-assert.match(inject,/X-CE-QC-V274-UI/,'V274 guard must remain observable in response headers');
+assert.match(inject,/X-CE-QC-V274-UI/,'V274/V284 compatibility guard must remain observable in response headers');
 
 assert.match(delivery,/2026-08-24-v280-sparse-excel-precommit-observability-v1/,'V280 sparse-range backend patch must be active');
 assert.match(delivery,/import '\.\/v281ArchivedHistoricalReparse\.js';/,'V281 archive replay must be activated in the normal runtime patch chain');
@@ -129,4 +136,4 @@ assert.match(archiveReplay,/process\.env\.NODE_ENV === 'test' \|\| process\.env\
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-replay-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-failure-recovery-smoke.mjs'],{stdio:'inherit'});
-console.log('[V282/V280/V274/V273] shipment-column source census + all-cell diagnostics + atomic historical replay + current-state preservation + failed-replay recovery + sparse Excel range + staged import timing + ledger-first hot trends passed');
+console.log('[V284/V282/V280/V273] daily-membership trend truth + shipment-column source census + atomic historical replay + current-state preservation + failed-replay recovery + sparse Excel range + staged import timing passed');
