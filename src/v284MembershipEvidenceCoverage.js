@@ -68,6 +68,10 @@ function patchFact(row,proven){
   // proven-evidence readiness result. An admitted-but-unchecked OPEN ledger row
   // must never remain ledgerReady=true after proven coverage downgrades the day.
   out.ledgerReady=out.ready;
+  // Attempt evidence coverage has POD as its denominator. A zero-POD day has no
+  // denominator and must stay unavailable (null/—), while POD>0 with no attempt
+  // evidence is a real 0% coverage result.
+  if(n(out.pod)===0)out.attemptCoverageRate=null;
   if('evidenceSource' in out)out.evidenceSource=out.ready?'V284_PROVEN_DAILY_MEMBERSHIP_V246_LEDGER':'V284_PROVEN_EVIDENCE_COVERAGE_INCOMPLETE';
   return out;
 }
@@ -75,7 +79,7 @@ function aggregateFact(source,type){
   const rows=(source||[]).filter(Boolean),out={businessType:type,reportDate:rows.at(-1)?.reportDate||'',total:0,matched:0,pod:0,sameDayPod:0,ocCurrent:0,pendingNonContinuous:0,pending3:0,oc1:0,oc2:0,cycle2:0,shopRetention2:0,workOrder:0,inboundNoScan:0,provinceOpen:0,returned:0,attempt1:0,attempt2:0,attempt3:0,attemptUnknown:0,signingDaysSum:0,signingDaysCount:0};
   for(const row of rows)for(const k of ['total','matched','pod','sameDayPod','ocCurrent','pendingNonContinuous','pending3','oc1','oc2','cycle2','shopRetention2','workOrder','inboundNoScan','provinceOpen','returned','attempt1','attempt2','attempt3','attemptUnknown','signingDaysSum','signingDaysCount'])out[k]+=n(row[k]);
   out.coverageRate=pct(out.matched,out.total);out.podRate=pct(out.pod,out.total);out.sameDayPodRate=pct(out.sameDayPod,out.total);out.ocRate=pct(out.ocCurrent,out.total);out.ready=out.total===0||out.matched>=out.total;
-  const known=out.attempt1+out.attempt2+out.attempt3;out.attemptUnknown=Math.max(out.attemptUnknown,Math.max(0,out.pod-known));out.attemptCoverageRate=out.pod?pct(Math.min(out.pod,known),out.pod):0;const hasAttempt=out.pod>0&&known>0;out.attempt1Rate=hasAttempt?pct(out.attempt1,out.pod):null;out.attempt2Rate=hasAttempt?pct(out.attempt2,out.pod):null;out.attempt3Rate=hasAttempt?pct(out.attempt3,out.pod):null;out.avgPodDays=out.signingDaysCount?Number((out.signingDaysSum/out.signingDaysCount).toFixed(2)):null;return out;
+  const known=out.attempt1+out.attempt2+out.attempt3;out.attemptUnknown=Math.max(out.attemptUnknown,Math.max(0,out.pod-known));out.attemptCoverageRate=out.pod?pct(Math.min(out.pod,known),out.pod):null;const hasAttempt=out.pod>0&&known>0;out.attempt1Rate=hasAttempt?pct(out.attempt1,out.pod):null;out.attempt2Rate=hasAttempt?pct(out.attempt2,out.pod):null;out.attempt3Rate=hasAttempt?pct(out.attempt3,out.pod):null;out.avgPodDays=out.signingDaysCount?Number((out.signingDaysSum/out.signingDaysCount).toFixed(2)):null;return out;
 }
 
 export function readV284ProvenDailyFacts(fromDate,toDate,db=getDb()){
@@ -106,7 +110,7 @@ export function readV284ProvenShopeeTrends(businessType='SHOPEECN',fromDate='',t
     const regions={};for(const [region,value]of Object.entries(row.regions||{}))regions[region]=patchFact(value,coverage.byRegion.get(key(row.reportDate,type,region))?.proven||0);
     return {...patchFact(row,coverage.byType.get(key(row.reportDate,type))?.proven||0),regions};
   });
-  return {...base,daily,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,pod:daily.map(r=>r.ready?r.pod:null),podRate:daily.map(r=>r.ready?r.podRate:null),avgPodDays:daily.map(r=>r.ready?r.avgPodDays:null),oc:daily.map(r=>r.ready?r.ocCurrent:null),ocRate:daily.map(r=>r.ready?r.ocRate:null),attempt1:daily.map(r=>r.ready?r.attempt1:null),attempt2:daily.map(r=>r.ready?r.attempt2:null),attempt3:daily.map(r=>r.ready?r.attempt3:null),attempt1Rate:daily.map(r=>r.ready?r.attempt1Rate:null),attempt2Rate:daily.map(r=>r.ready?r.attempt2Rate:null),attempt3Rate:daily.map(r=>r.ready?r.attempt3Rate:null),attemptUnknown:daily.map(r=>r.ready?r.attemptUnknown:null),attemptCoverageRate:daily.map(r=>r.ready?r.attemptCoverageRate:null),ledgerReady:daily.map(r=>r.ready),coverageRate:daily.map(r=>r.coverageRate)};
+  return {...base,daily,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,pod:daily.map(r=>r.ready?r.pod:null),podRate:daily.map(r=>r.ready?r.podRate:null),avgPodDays:daily.map(r=>r.ready?r.avgPodDays:null),oc:daily.map(r=>r.ready?r.ocCurrent:null),ocRate:daily.map(r=>r.ready?r.ocRate:null),attempt1:daily.map(r=>r.ready?r.attempt1:null),attempt2:daily.map(r=>r.ready?r.attempt2:null),attempt3:daily.map(r=>r.ready?r.attempt3:null),attempt1Rate:daily.map(r=>r.ready?r.attempt1Rate:null),attempt2Rate:daily.map(r=>r.ready?r.attempt2Rate:null),attempt3Rate:daily.map(r=>r.ready?r.attempt3Rate:null),attemptUnknown:daily.map(r=>r.ready?r.attemptUnknown:null),attemptCoverageRate:daily.map(r=>r.ready&&n(r.pod)>0?r.attemptCoverageRate:null),ledgerReady:daily.map(r=>r.ready),coverageRate:daily.map(r=>r.coverageRate)};
 }
 
 export function summarizeV284ProvenRange(fromDate,toDate,db=getDb()){
