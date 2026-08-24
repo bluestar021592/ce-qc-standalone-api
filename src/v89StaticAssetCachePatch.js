@@ -1,11 +1,11 @@
 import express from 'express';
 import './v108PerformanceIndexPatch.js';
 
-const PATCH_ID = '2026-08-23-v265-core-dashboard-cache-reset-v2';
+const PATCH_ID = '2026-08-24-v274-core-dashboard-cache-reset-v3';
 const originalUse = express.application.use;
 let installed = false;
 
-const CORE_LIVE_ASSET_RE = /\/(?:app|dashboard-v18|dashboard-chart-v18|dashboard-data-adapter-v18)\.js$|\/dashboard-v18\.css$/i;
+const CORE_LIVE_ASSET_RE = /\/(?:app|dashboard-v18|dashboard-chart-v18|dashboard-data-adapter-v18)\.js$|\/dashboard-v18\.css$|\/(?:v271-canonical-integrity-owner|v272-layout-trend-finalizer|v274-trend-speed-guard)\.js$/i;
 
 function cacheableAsset(req, res, next) {
   const pathname = String(req.path || req.url || '').split('?')[0];
@@ -34,7 +34,7 @@ function cacheableAsset(req, res, next) {
   next();
 }
 
-express.application.use = function v265StaticAssetCacheUse(...args) {
+express.application.use = function v274StaticAssetCacheUse(...args) {
   const candidates = args.flat().filter(value => typeof value === 'function');
   if (!installed && candidates.some(fn => fn.name === 'serveStatic')) {
     installed = true;
