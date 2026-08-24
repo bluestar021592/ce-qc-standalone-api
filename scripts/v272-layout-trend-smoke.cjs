@@ -31,7 +31,7 @@ assert.doesNotMatch(ui,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePr
 // grouped separately. Never join every report member to the large tracking ledger
 // on a page request. Startup/background prewarm and a hot memory window keep page
 // switches fast while the 2-hour lifecycle remains the source of current state.
-assert.match(backend,/v274-ledger-first-hot-seven-business-trends-v2/,'V274 backend must be active');
+assert.match(backend,/v274-ledger-first-hot-seven-business-trends-v3/,'V274 backend must be active');
 assert.match(backend,/function expectedUnifiedCounts/,'daily expected totals must be counted independently');
 assert.match(backend,/function ledgerFacts/,'tracking truth must be grouped directly from the lifecycle ledger');
 assert.doesNotMatch(backend,/unified_import_rows[\s\S]{0,500}JOIN\s+qc_tracking_ledger/i,'page reads must not perform a member-by-member daily-report-to-ledger join');
