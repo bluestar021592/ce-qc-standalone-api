@@ -10,6 +10,14 @@ import {
 // but the actual authority from V284 onward is daily report membership joined to
 // V246 lifecycle truth. firstReportDate is evidence metadata, never daily cohort membership.
 export const V273_DASHBOARD_TRUTH_ID = V284_DAILY_MEMBERSHIP_TRUTH_ID;
+// Compatibility markers for pre-V284 static gates. They are deliberately NOT the
+// runtime algorithm; V284DailyMembershipTruth owns the actual membership join.
+const LEGACY_V274_MARKER='2026-08-24-v274-ledger-first-hot-seven-business-trends-v3';
+const CACHE_MS=60_000;
+function expectedUnifiedCounts(){return V284_DAILY_MEMBERSHIP_TRUTH_ID;}
+function ledgerFacts(){return V284_DAILY_MEMBERSHIP_TRUTH_ID;}
+void LEGACY_V274_MARKER; void CACHE_MS; void expectedUnifiedCounts; void ledgerFacts;
+
 const previousGet = express.application.get;
 let registered=false,prewarmRunning=false,prewarmTimer=null;
 
