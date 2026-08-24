@@ -41,18 +41,18 @@ assert.match(activation,/import '\.\/v283LegacyDecoratedHashReplayRetry\.js';/,'
 assert.match(activation,/import '\.\/v284DailyMembershipAudit\.js';/,'V284 real-db read-only audit must remain activated after startup');
 assert.match(activation,/import '\.\/v284PriorityUnprovenRefresh\.js';/,'V284 bounded unproven-member refresh must remain activated after the read-only audit');
 
-// V289 rollback rule: preserve the last-known-good 88439846 first-paint module
-// structure. V286/V288 may remain in the repository for audit/history, but normal
-// interactive startup must not execute either Express-hook experiment.
+// Emergency recovery rule: restore the exact 88439846 first-paint/browser shell
+// while preserving current V284/V286 stored-data truth. V286/V288 experimental
+// Express hooks may remain inspectable in the repository but must not execute.
 assert.match(runtime,/import '\.\/v253DashboardFastPath\.js';/,'known-good V253 backend fastpath must remain in normal startup');
 assert.doesNotMatch(runtime,/^\s*import '\.\/v286V253TrendTruthBridge\.js';/m,'retired V286 Express route-hook module must not execute in normal startup');
 assert.doesNotMatch(runtime,/^\s*import '\.\/v288StaticAssetPreAuthPatch\.js';/m,'retired V288 express.use experiment must not execute in normal startup');
-assert.match(runtime,/v289-known-good-first-paint-runtime-v1/,'runtime must identify the known-good first-paint rollback explicitly');
+assert.match(runtime,/2026-08-23-v266-evergreen-evidence-runtime-v1/,'runtime must match the last confirmed 88439846 first-paint structure');
 assert.match(retiredV286Source,/global Express route hook retired/,'V286 file must remain a no-op historical marker if inspected directly');
 assert.doesNotMatch(retiredV286Source,/express\.application\.get\s*=/,'retired V286 must never restore the global Express route hook');
 assert.match(retiredV288Source,/SAFE_ASSET_RE/,'retired V288 implementation remains inspectable but is not startup-active');
-assert.match(fastOwnerSource,/\/api\/v273\/trends/,'V253 browser fetch bridge must keep visible V234 trend reads on V273 proven truth');
-assert.match(genericTrendSource,/\/api\/v273\/trends/,'generic CE\/CEAF\/ALI1688 trend hydrator must keep V273 proven truth');
+assert.match(fastOwnerSource,/\/api\/v253\/trends/,'recovered V253 browser owner must match the last confirmed 88439846 shell');
+assert.match(genericTrendSource,/\/api\/v253\/trends/,'recovered generic trend hydrator must match the last confirmed 88439846 shell');
 assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must be the bounded post-evidence-seed retry');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 
@@ -107,4 +107,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[V266/V283/V284/V285/V286/V289] evergreen evidence + archive replay + seven-business proven coverage + known-good first-paint runtime rollback + bounded targeted repair + frozen verified backup gate passed');
+console.log('[RECOVERY/V266/V283/V284/V285/V286] 88439846 first-paint shell restored + seven-business data truth preserved + frozen verified backup gate passed');
