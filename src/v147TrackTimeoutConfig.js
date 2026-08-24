@@ -4,7 +4,6 @@ import './v283LegacyDecoratedHashReplay.js';
 import './v283LegacyDecoratedHashReplayRetry.js';
 import './v284DailyMembershipAudit.js';
 import './v284PriorityUnprovenRefresh.js';
-import './v286V253TrendTruthBridge.js';
 
 export const V147_TRACK_TIMEOUT_CONFIG_ID = '2026-08-16-v147-track-time-budget-v2';
 
