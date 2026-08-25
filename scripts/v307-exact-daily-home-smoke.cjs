@@ -1,0 +1,17 @@
+const fs=require('fs');
+const assert=require('assert/strict');
+const {execFileSync}=require('child_process');
+const ui=fs.readFileSync('public/v307-exact-daily-home-owner.js','utf8');
+const inject=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
+execFileSync(process.execPath,['--check','public/v307-exact-daily-home-owner.js'],{stdio:'pipe'});
+execFileSync(process.execPath,['--check','src/v295FirstAttemptUiInjectionPatch.js'],{stdio:'pipe'});
+assert.match(ui,/2026-08-25-v307-exact-daily-seven-business-home-v1/);
+for(const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'])assert.ok(ui.includes(`'${type}'`),`V307 missing ${type}`);
+assert.match(ui,/\/api\/v253\/trends\?businessType=/,'V307 must read canonical exact daily membership rows');
+assert.match(ui,/find\(row=>date\(row\?\.reportDate\)===d\)/,'V307 must select the requested date, not the latest returned row');
+assert.match(ui,/TYPES\.reduce\(\(sum,type\)=>sum\+num\(states\[type\]\?\.total\),0\)/,'V307 total must equal the seven visible business cards');
+assert.match(ui,/LABELS=\{/,'V307 must own every visible business card');
+assert.doesNotMatch(ui,/\/api\/period-dashboard/,'single-day V307 must never reintroduce period-dashboard mixed-date ownership');
+assert.match(inject,/v307-exact-daily-home-owner\.js\?v=20260825-v307-1/,'V307 UI must be injected after exact daily/stability owners');
+assert.match(inject,/X-CE-QC-V307-UI/,'V307 response header must be observable');
+console.log('[V307] exact single-day seven-business home smoke passed · all seven cards and total share one requested-date membership source · no period-dashboard overwrite');
