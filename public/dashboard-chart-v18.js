@@ -124,14 +124,14 @@
       const baseY = Math.max(13, Math.min(height - pad.b - 4, lastPoint.y - 7));
       const candidates = [baseY];
       for (let step = 1; step <= 8; step += 1) candidates.push(baseY + step * 13, baseY - step * 13);
-      const labelY = candidates.map(value => Math.max(13, Math.min(height - pad.b - 4, value))).find(value => !placedLabels.some(y => Math.abs(y - value) < 12)) ?? (16 + seriesIndex * 14);
+      const labelY = candidates.map(value => Math.max(13,Math.min(height-pad.b-4,value))).find(value=>!placedLabels.some(y=>Math.abs(y-value)<12))??(16+seriesIndex*14);
       placedLabels.push(labelY);
       const label = svgNode('text', { x: width - 4, y: labelY, fill: series.color, class: 'v18-last-label', 'text-anchor': 'end', stroke:'#fff', 'stroke-width':'2.5', 'paint-order':'stroke' }); label.textContent = fmt(lastPoint.value, chart.type); svg.appendChild(label);
     });
     const availableDays = new Set(chart.series.flatMap(series => series.values.map((value, index) => value === null ? null : chart.dates[index]).filter(Boolean))).size;
     container.dataset.historyDays = String(availableDays);
     if (availableDays < 2) container.querySelector('.v18-chart-note').textContent = `当前选择范围内只有 ${availableDays} 个有效日报点；有值就显示，不把缺失日期补成0`;
-    if(attemptChart&&attemptEvidence&&attemptEvidence.coverage<100)container.querySelector('.v18-chart-note').textContent=`派次证据补抓中：已识别 ${attemptEvidence.known}/${attemptEvidence.denominator}（${attemptEvidence.coverage.toFixed(2)}%）；未完整日期保持“—”，不绘制部分样本派次率。`;
+    if(attemptChart&&attemptEvidence&&attemptEvidence.coverage<100)container.querySelector('.v18-chart-note').textContent=`派次证据补抓中：已识别 ${attemptEvidence.known}/${attemptEvidence.denominator}（${attemptEvidence.coverage.toFixed(2)}%）；当前曲线只表示已获得的真实轨迹证据，不作为最终派次率；未完整日期保持“—”，不绘制部分样本派次率。`;
     const plot=container.querySelector('.v18-chart-plot');
     plot.style.overflowX='auto';
     plot.style.overflowY='hidden';
