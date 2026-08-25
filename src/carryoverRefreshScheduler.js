@@ -45,12 +45,25 @@ function normalizeDynamicCarryRow(row = {}) {
       异常分类: '逆向处理中',
       currentState: 'RETURN_IN_PROGRESS',
       退回状态: '退回处理中',
+      matchedRule: 'V294_KEEP_OPEN_RETURN_IN_PROGRESS',
       dynamicCarryRule: 'KEEP_OPEN_UNTIL_RETURN_86'
     };
   }
   const cancelled = state === 'ORDER_CANCELLED' || row.订单取消 === '是' || row.取消状态 === '已取消' || String(row.orderStatus || '') === '10' || /订单取消/.test(category);
   if (cancelled) {
     return { ...row, matchedRule: 'NORMAL_FINAL_HUB', dynamicTerminalReason: 'ORDER_CANCELLED', dynamicCarryRule: 'CLOSE_CANCELLED' };
+  }
+  const normalTransit = row.matchedRule === 'NORMAL_FINAL_HUB' || category === '正常分流节点' || state === 'NORMAL_FINAL';
+  if (normalTransit) {
+    return {
+      ...row,
+      dynamicOriginalCategory: category,
+      primaryCategory: category === '正常分流节点' ? '正常运输中' : (row.primaryCategory || '正常运输中'),
+      主分类: row.主分类 === '正常分流节点' ? '正常运输中' : (row.主分类 || '正常运输中'),
+      异常分类: row.异常分类 === '正常分流节点' ? '' : row.异常分类,
+      matchedRule: 'V294_KEEP_OPEN_NORMAL_TRANSIT',
+      dynamicCarryRule: 'KEEP_OPEN_NORMAL_TRANSIT_UNTIL_TRUE_TERMINAL'
+    };
   }
   return row;
 }
@@ -105,9 +118,7 @@ export function activeBusinessProcessingDetails(db = getDb()) {
   return { active: blockers.length > 0, heartbeatMs: ACTIVE_RUN_HEARTBEAT_MS, blockers };
 }
 
-export function hasActiveBusinessProcessing(db = getDb()) {
-  return activeBusinessProcessingDetails(db).active;
-}
+export function hasActiveBusinessProcessing(db = getDb()) { return activeBusinessProcessingDetails(db).active; }
 
 export function loadOpenCarryRows(db = getDb()) {
   return db.prepare(`SELECT shipmentCode,UPPER(COALESCE(businessType,'')) businessType,
