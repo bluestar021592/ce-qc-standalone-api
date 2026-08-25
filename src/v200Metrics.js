@@ -31,7 +31,6 @@ export function completeSigningAverage(values = [], pod = 0) {
 }
 function dateKey(value = '') { const m = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; }
 function dayNumber(value = '') { const k = dateKey(value); if (!k) return null; const [y,m,d] = k.split('-').map(Number); return Date.UTC(y,m-1,d); }
-function listDates(from,to){ const a=dayNumber(from),b=dayNumber(to),out=[]; if(a===null||b===null||b<a)return out; for(let t=a;t<=b;t+=86400000)out.push(new Date(t).toISOString().slice(0,10)); return out; }
 export function referenceAverageDays(firstReportDate,podDate){const a=dayNumber(firstReportDate),b=dayNumber(podDate);return a===null||b===null||b<a?0:Math.floor((b-a)/86400000)+1;}
 function emptyStat(date = '') {
   return {
@@ -74,7 +73,9 @@ function membershipDatesForRow(row, range) {
   return legacy && (!from || legacy >= from) && (!to || legacy <= to) ? [legacy] : [];
 }
 export function statsOf(rows, range) {
-  const dailyMap = new Map(listDates(range.from, range.to).map(date => [date, emptyStat(date)]));
+  // Do not fabricate zero-report calendar dates. Visible trends and exports must
+  // contain exactly the effective daily report-membership dates in the range.
+  const dailyMap = new Map();
   const overall = emptyStat(`${range.from} 至 ${range.to}`);
   for (const row of rows) {
     const membershipDates = membershipDatesForRow(row, range);
