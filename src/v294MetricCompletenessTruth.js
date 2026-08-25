@@ -1,4 +1,4 @@
-export const V294_METRIC_COMPLETENESS_ID = '2026-08-25-v294-complete-pod-evidence-before-metrics-v1';
+export const V294_METRIC_COMPLETENESS_ID = '2026-08-25-v294-complete-pod-evidence-before-metrics-v2';
 
 const n = value => Number.isFinite(Number(value)) ? Number(value) : 0;
 const pct = (value, total) => total ? Number((n(value) * 100 / n(total)).toFixed(2)) : null;
@@ -41,10 +41,14 @@ export function enforceV294MetricCompleteness(row = {}) {
 export function applyV294MetricCompletenessToLegacyTarget(target = {}, fact = {}) {
   if (!target || typeof target !== 'object') return target;
   const f = enforceV294MetricCompleteness(fact);
+  const publishAttempt = Boolean(f.attemptEvidenceComplete);
   Object.assign(target, {
-    dispatchAttempt1: n(f.attempt1),
-    dispatchAttempt2: n(f.attempt2),
-    dispatchAttempt3: n(f.attempt3),
+    dispatchAttempt1: publishAttempt ? n(f.attempt1) : null,
+    dispatchAttempt2: publishAttempt ? n(f.attempt2) : null,
+    dispatchAttempt3: publishAttempt ? n(f.attempt3) : null,
+    dispatchAttempt1Known: n(f.attempt1),
+    dispatchAttempt2Known: n(f.attempt2),
+    dispatchAttempt3Known: n(f.attempt3),
     dispatchAttemptUnclassifiedPod: n(f.attemptUnknown),
     dispatchAttemptDenominator: n(f.pod),
     dispatchAttempt1Rate: f.attempt1Rate,
@@ -62,4 +66,4 @@ export function applyV294MetricCompletenessToLegacyTarget(target = {}, fact = {}
 }
 
 console.info('[CE-QC][V294_METRIC_COMPLETENESS]', V294_METRIC_COMPLETENESS_ID,
-  '1/2/3 attempt rates publish only when every POD has attempt evidence; average POD days publishes only when every POD has a real signing-day value.');
+  '1/2/3 attempt counts and rates publish only when every POD has attempt evidence; average POD days publishes only when every POD has a real signing-day value; partial counts remain diagnostic-only fields.');
