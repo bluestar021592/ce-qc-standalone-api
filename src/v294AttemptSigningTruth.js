@@ -7,7 +7,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const V294_ATTEMPT_SIGNING_TRUTH_ID = '2026-08-25-v294-tbkh-shopee-attempt-signing-truth-v1';
+export const V294_ATTEMPT_SIGNING_TRUTH_ID = '2026-08-25-v294-tbkh-shopee-attempt-signing-truth-v2';
 export const V294_ATTEMPT_TYPES = Object.freeze(['TBKH','SHOPEECN','SHOPEEVN']);
 const TYPE_SET = new Set(V294_ATTEMPT_TYPES);
 
@@ -55,8 +55,11 @@ export function resolveV294SigningDays(firstReportDate, podDate) {
   return first && pod ? (v246InclusiveDays(first, pod) ?? 0) : 0;
 }
 
-function globalFirstMembershipDates(type, bills, db) {
-  const result = new Map();
+function membershipTruth(type, bills, range, db) {
+  const firstDates = new Map();
+  const dailyDates = new Map(bills.map(bill => [bill, []]));
+  const from = dateKey(range?.from || range?.fromDate);
+  const to = dateKey(range?.to || range?.toDate);
   for (const part of chunks(bills, 220)) {
     const marks = part.map(() => '?').join(',');
     if (!marks) continue;
@@ -72,14 +75,25 @@ function globalFirstMembershipDates(type, bills, db) {
         JOIN unified_import_rows u ON u.snapshotId=r.snapshotId AND u.reportDate=r.reportDate
         WHERE r.rn=1 AND TRIM(COALESCE(u.shipmentCode,''))<>''
       )
-      SELECT shipmentCode,MIN(reportDate) firstReportDate
+      SELECT shipmentCode,reportDate
       FROM valid
       WHERE businessType=? AND shipmentCode IN (${marks})
-      GROUP BY shipmentCode
+      ORDER BY shipmentCode,reportDate
     `).all(type, ...part);
-    for (const row of rows) result.set(billOf(row.shipmentCode), dateKey(row.firstReportDate));
+    for (const row of rows) {
+      const bill = billOf(row.shipmentCode);
+      const date = dateKey(row.reportDate);
+      if (!bill || !date) continue;
+      const old = firstDates.get(bill);
+      if (!old || date < old) firstDates.set(bill, date);
+      if ((!from || date >= from) && (!to || date <= to)) {
+        if (!dailyDates.has(bill)) dailyDates.set(bill, []);
+        if (!dailyDates.get(bill).includes(date)) dailyDates.get(bill).push(date);
+      }
+    }
   }
-  return result;
+  for (const dates of dailyDates.values()) dates.sort();
+  return { firstDates, dailyDates };
 }
 
 function ledgerRows(type, bills, db) {
@@ -117,11 +131,11 @@ function trackEventsByBill(type, bills, db) {
   return result;
 }
 
-export function applyV294ExportAttemptSigningTruth(businessType, rows = [], { db = getDb() } = {}) {
+export function applyV294ExportAttemptSigningTruth(businessType, rows = [], { db = getDb(), range = {} } = {}) {
   const type = text(businessType).toUpperCase();
   if (!TYPE_SET.has(type) || !rows.length) return rows;
   const bills = [...new Set(rows.map(row => billOf(row?.shipmentCode || row?.运单号)).filter(Boolean))];
-  const firstDates = globalFirstMembershipDates(type, bills, db);
+  const membership = membershipTruth(type, bills, range, db);
   const ledger = ledgerRows(type, bills, db);
   const events = trackEventsByBill(type, bills, db);
 
@@ -129,7 +143,9 @@ export function applyV294ExportAttemptSigningTruth(businessType, rows = [], { db
     const bill = billOf(row?.shipmentCode || row?.运单号);
     if (!bill) continue;
     const locked = ledger.get(bill) || {};
-    const firstReportDate = firstDates.get(bill) || dateKey(locked.firstReportDate) || dateKey(row.firstReportDate);
+    const originalRangeDate = dateKey(row.firstReportDate);
+    const firstReportDate = membership.firstDates.get(bill) || dateKey(locked.firstReportDate) || originalRangeDate;
+    const dailyMembershipDates = membership.dailyDates.get(bill) || [];
     const pod = Boolean(row.pod) || text(locked.terminalReason).toUpperCase() === 'POD';
     const podDate = dateKey(locked.podDate) || dateKey(row.podDate || row.podTime || row.POD时间);
     const stateJson = safeJson(locked.currentStateJson, {});
@@ -144,13 +160,15 @@ export function applyV294ExportAttemptSigningTruth(businessType, rows = [], { db
     const signingDays = pod ? resolveV294SigningDays(firstReportDate, podDate) : 0;
 
     if (firstReportDate) row.firstReportDate = firstReportDate;
+    row.dailyMembershipDates = dailyMembershipDates.length ? dailyMembershipDates : (originalRangeDate ? [originalRangeDate] : []);
+    row.dailyMembershipSource = '所选区间内每个日期的最新VALID综合日报精确成员';
     if (podDate) row.podDate = podDate;
     row.attemptNo = attempt.attemptNo;
     row.trackAttemptNo = attempt.attemptNo;
     row.attemptSource = attempt.source;
     row.attemptEvidenceComplete = attempt.proven;
     row.signingDays = signingDays;
-    row.signingDaysSource = signingDays > 0 ? '全量最新VALID日报首次归属日期→真实POD日期（含首尾自然日）' : '';
+    row.signingDaysSource = signingDays > 0 ? '全量最新VALID日报生命周期首次归属日期→真实POD日期（含首尾自然日）' : '';
     row.deliveryDays = signingDays;
     row.deliveryDaysSource = row.signingDaysSource;
     row.v294TruthId = V294_ATTEMPT_SIGNING_TRUTH_ID;
@@ -209,4 +227,4 @@ export function backfillV294StrictAttemptsFromSavedEvidence({ reportDate = '', b
 }
 
 console.info('[CE-QC][V294_ATTEMPT_SIGNING_TRUTH]', V294_ATTEMPT_SIGNING_TRUTH_ID,
-  'TBKH + SHOPEECN + SHOPEEVN use one strict 70 START→failure/Pending→new START rule; 60 is fallback only when no 70; no elapsed-day attempt guessing.');
+  'TBKH + SHOPEECN + SHOPEEVN share strict 70 START→failure/Pending→new START truth; daily export membership is exact latest VALID per date, while signing days use immutable lifecycle first date.');
