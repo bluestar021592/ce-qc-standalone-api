@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-v294-purge-'));
@@ -57,9 +58,10 @@ try {
     nextState: { logs: [] }
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  const worker = new URL('./CE_QC_PurgeDeleteWorker.mjs', import.meta.url);
-  const run = spawnSync(process.execPath, [worker.pathname, encoded], {
-    cwd: path.resolve(new URL('..', import.meta.url).pathname),
+  const worker = fileURLToPath(new URL('./CE_QC_PurgeDeleteWorker.mjs', import.meta.url));
+  const projectRoot = fileURLToPath(new URL('..', import.meta.url));
+  const run = spawnSync(process.execPath, [worker, encoded], {
+    cwd: projectRoot,
     encoding: 'utf8',
     env: { ...process.env, NODE_ENV: 'test', DATA_DIR: root }
   });
