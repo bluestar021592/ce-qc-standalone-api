@@ -70,10 +70,7 @@ assert.match(trajectory,/detectShopInfo/,'shared trajectory facts must expose cu
 assert.match(shopeeV30,/buildTrajectoryFacts/,'SHOPEE CN\/VN must use the same trajectory fact layer');
 assert.match(analyzerV30,/buildTrajectoryFacts/,'CE\/CEAF\/TBKH\/ALI1688 must use the same trajectory fact layer');
 
-// Store recognition may enrich the state, but business routing remains an upstream
-// report/waybill responsibility. The shared store engine is deliberately unaware
-// of business board names, preventing one physical store from merging TBKH/Shopee/
-// CE/CEAF/ALI1688 shipments into the same board.
 assert.doesNotMatch(storeFlow,/SHOPEECN|SHOPEEVN|TBKH|ALI1688|CEAF|businessType\s*=/,'store recognition must never reclassify a shipment into a business board');
 
+execFileSync(process.execPath,['scripts/v307-exact-daily-home-smoke.cjs'],{stdio:'inherit'});
 console.log('[V306] authoritative store routing smoke passed · 95 unique codes + 26 aliases · code first/name alias second · CE/CEAF/TBKH/ALI1688 + SHOPEE CN/VN share store facts without cross-board rerouting');
