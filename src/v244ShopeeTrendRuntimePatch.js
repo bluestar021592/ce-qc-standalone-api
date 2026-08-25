@@ -1,6 +1,7 @@
 import express from 'express';
 import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
 import { readV284ProvenShopeeTrends as readV284ShopeeTrends } from './v284MembershipEvidenceCoverage.js';
+import { enforceV294MetricCompleteness, V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
 
 // Historical export names remain stable for the browser and old code, but V284
 // replaces the old firstReportDate cohort with exact daily latest-VALID membership.
@@ -13,30 +14,34 @@ let routeRegistered=false;
 
 function legacyCoverage(row={}){
   const ready=row.ready!==false;
-  const pod=Number(row.pod||0);
-  const rawA1=Number(row.attempt1||0),rawA2=Number(row.attempt2||0),rawA3=Number(row.attempt3||0);
+  const complete=enforceV294MetricCompleteness(row);
+  const pod=Number(complete.pod||0);
+  const rawA1=Number(complete.attempt1||0),rawA2=Number(complete.attempt2||0),rawA3=Number(complete.attempt3||0);
   const known=rawA1+rawA2+rawA3;
-  const rawUnknown=Math.max(Number(row.attemptUnknown||0),Math.max(0,pod-known));
-  const signingDaysCount=Number(row.signingDaysCount||row.podDaysCount||0);
-  const signingDaysSum=Number(row.signingDaysSum||row.podDaysSum||0);
+  const rawUnknown=Math.max(Number(complete.attemptUnknown||0),Math.max(0,pod-known));
+  const signingDaysCount=Number(complete.signingDaysCount||complete.podDaysCount||0);
+  const signingDaysSum=Number(complete.signingDaysSum||complete.podDaysSum||0);
   const regions={};
   for(const [key,value] of Object.entries(row.regions||{})) regions[key]=legacyCoverage({...value,regions:{}});
   return {
-    ...row,
+    ...complete,
     regions,
     podDaysCount:ready?signingDaysCount:0,
     podDaysSum:ready?signingDaysSum:0,
-    avgPodDays:ready?row.avgPodDays:null,
+    avgPodDays:ready?complete.avgPodDays:null,
     attempt1:ready?rawA1:0,
     attempt2:ready?rawA2:0,
     attempt3:ready?rawA3:0,
-    attempt1Rate:ready?row.attempt1Rate:null,
-    attempt2Rate:ready?row.attempt2Rate:null,
-    attempt3Rate:ready?row.attempt3Rate:null,
-    attemptCoverageRate:ready?row.attemptCoverageRate:null,
+    attempt1Rate:ready?complete.attempt1Rate:null,
+    attempt2Rate:ready?complete.attempt2Rate:null,
+    attempt3Rate:ready?complete.attempt3Rate:null,
+    attemptCoverageRate:ready?complete.attemptCoverageRate:null,
     attemptEvidenceCount:ready?Math.min(pod,known):0,
     attemptUnknown:ready?rawUnknown:0,
-    attemptEvidenceComplete:ready&&pod>0&&rawUnknown===0
+    attemptEvidenceComplete:ready&&complete.attemptEvidenceComplete,
+    signingEvidenceComplete:ready&&complete.signingEvidenceComplete,
+    signingCoverageRate:ready?complete.signingCoverageRate:null,
+    metricCompletenessId:V294_METRIC_COMPLETENESS_ID
   };
 }
 
@@ -46,13 +51,24 @@ export function readV244ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate=
   return {
     ...result,
     daily,
+    avgPodDays:daily.map(r=>r.ready?r.avgPodDays:null),
+    attempt1:daily.map(r=>r.ready?r.attempt1:null),
+    attempt2:daily.map(r=>r.ready?r.attempt2:null),
+    attempt3:daily.map(r=>r.ready?r.attempt3:null),
+    attempt1Rate:daily.map(r=>r.ready?r.attempt1Rate:null),
+    attempt2Rate:daily.map(r=>r.ready?r.attempt2Rate:null),
+    attempt3Rate:daily.map(r=>r.ready?r.attempt3Rate:null),
+    attemptUnknown:daily.map(r=>r.ready?r.attemptUnknown:null),
+    attemptCoverageRate:daily.map(r=>r.ready&&Number(r.pod||0)>0?r.attemptCoverageRate:null),
+    signingCoverageRate:daily.map(r=>r.ready&&Number(r.pod||0)>0?r.signingCoverageRate:null),
+    metricCompletenessId:V294_METRIC_COMPLETENESS_ID,
     readId:V247_SHOPEE_TREND_ID,
     definitions:{
       podRate:'V284当天最新VALID日报成员中的当前POD/当日成员总票；状态以已验证V246账本优先，旧final仅缺失回退',
       ocRate:'V284当天日报成员中的当前真实OC/当日成员总票',
-      avgPodDays:'签收天数沿用V246锁定首次日报日期到实际POD日期，含首尾当天；日报覆盖未完成时显示—',
-      attemptRate:'真实派次证据对应已POD票数/当日POD；无证据显示—；日报覆盖未完成时也显示—，未识别POD单独列出',
-      trackingLedger:'日报成员决定分母；V246已验证账本事实决定当前状态/POD/派次；空OPEN占位账本不算已分析，firstReportDate不再决定趋势日期',
+      avgPodDays:'生命周期首次进入最新VALID日报日期到实际POD日期，含首尾当天；当天全部POD都有真实POD日期才发布平均值，否则显示—',
+      attemptRate:'TBKH/SHOPEE统一真实70 START→失败或Pending→新START；全轨迹没有70才允许60兜底。当天全部POD派次证据完整才发布1/2/3派率，否则显示—并单列证据覆盖率',
+      trackingLedger:'日报成员决定分母；V246/V294已验证账本事实决定当前状态/POD/派次；空OPEN占位账本不算已分析，firstReportDate不再决定趋势日期',
       regionTruth:'PP/PV来自当天最新VALID日报成员，状态仍以已验证V246账本为权威'
     }
   };
@@ -70,6 +86,7 @@ function handler(req,res){
     res.setHeader('X-CE-QC-Shopee-Trend',V247_SHOPEE_TREND_ID);
     res.setHeader('X-CE-QC-Shopee-Regions',includeRegions?'included':'skipped');
     res.setHeader('X-CE-QC-V284',V284_DAILY_MEMBERSHIP_TRUTH_ID);
+    res.setHeader('X-CE-QC-V294-Metric-Completeness',V294_METRIC_COMPLETENESS_ID);
     return res.json(data);
   }catch(error){return res.status(500).json({ok:false,readId:V247_SHOPEE_TREND_ID,error:error?.message||String(error)});}
 }
@@ -82,7 +99,7 @@ express.application.get=function v284ShopeeTrendRoute(pathValue,...handlers){
     previousGet.call(this,'/api/v246/shopee-trends',handler);
     previousGet.call(this,'/api/v245/shopee-trends',handler);
     previousGet.call(this,'/api/v244/shopee-trends',handler);
-    console.info('[CE-QC][V284_SHOPEE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered daily-membership lifecycle metrics with proven-evidence coverage + guarded legacy aliases.');
+    console.info('[CE-QC][V294_SHOPEE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,V294_METRIC_COMPLETENESS_ID,'registered daily-membership lifecycle metrics with proven-evidence coverage + complete-POD metric publication gate.');
   }
   return previousGet.call(this,pathValue,...handlers);
 };

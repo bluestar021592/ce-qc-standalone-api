@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import { average, ratio, anchor } from './v200Metrics.js';
+import { ratio, anchor, completeAttemptRatio, completeSigningAverage } from './v200Metrics.js';
 
 const FONT = 'Microsoft YaHei';
 const DETAIL_SHEETS = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
@@ -33,7 +33,7 @@ function styleDashboardDataCell(cell, clickable = false, percent = false) {
   cell.font = { name: FONT, size: 10, bold: clickable, color: clickable ? { argb: 'FF0B57D0' } : { argb: 'FF000000' } };
   cell.alignment = { horizontal: 'center', vertical: 'middle' };
   if (clickable) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9E6' } };
-  if (percent) cell.numFmt = '0.00%';
+  if (percent && typeof cell.value === 'number') cell.numFmt = '0.00%';
 }
 function mergePair(sheet, row, col) { sheet.mergeCells(row, col, row, col + 1); }
 function writeCard(sheet, pairIndex, label, value, percent, target, fill) {
@@ -91,20 +91,23 @@ function createDashboard(workbook, type, range, stats, anchors) {
   const metricRows = [o, ...stats.daily]; let mr = metricHeaderRow + 1;
   for (let index = 0; index < metricRows.length; index++) {
     const d = metricRows[index];
-    const values = [index===0?'区间汇总':d.date,d.a1,ratio(d.a1,d.pod),d.a2,ratio(d.a2,d.pod),d.a3,ratio(d.a3,d.pod),d.days.length?average(d.days):'',d.ppA1,d.ppA2,d.ppA3,d.ppDays.length?average(d.ppDays):'',d.pvA1,d.pvA2,d.pvA3,d.pvDays.length?average(d.pvDays):''];
+    const a1Rate = completeAttemptRatio(d, d.a1), a2Rate = completeAttemptRatio(d, d.a2), a3Rate = completeAttemptRatio(d, d.a3);
+    const totalAverage = completeSigningAverage(d.days, d.pod), ppAverage = completeSigningAverage(d.ppDays, d.ppPod), pvAverage = completeSigningAverage(d.pvDays, d.pvPod);
+    const values = [index===0?'区间汇总':d.date,d.a1,a1Rate===null?'—':a1Rate,d.a2,a2Rate===null?'—':a2Rate,d.a3,a3Rate===null?'—':a3Rate,totalAverage===null?'—':totalAverage,d.ppA1,d.ppA2,d.ppA3,ppAverage===null?'—':ppAverage,d.pvA1,d.pvA2,d.pvA3,pvAverage===null?'—':pvAverage];
     values.forEach((value, i) => { const c = sheet.getCell(mr, i + 1); c.value = value; styleDashboardDataCell(c, false, [3,5,7].includes(i+1)); });
-    for (const col of [3,5,7]) sheet.getCell(mr,col).numFmt='0.00%';
-    for (const col of [8,12,16]) sheet.getCell(mr,col).numFmt='0.00';
+    for (const col of [3,5,7]) if (typeof sheet.getCell(mr,col).value === 'number') sheet.getCell(mr,col).numFmt='0.00%';
+    for (const col of [8,12,16]) if (typeof sheet.getCell(mr,col).value === 'number') sheet.getCell(mr,col).numFmt='0.00';
     if (index===0) for (let col=1;col<=16;col++){const c=sheet.getCell(mr,col);c.font={name:FONT,size:10,bold:true,color:{argb:'FF0B57D0'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFF9E6'}};}
     mr++;
   }
   const noteRow = mr + 1; sheet.mergeCells(noteRow, 1, noteRow, 16);
-  sheet.getCell(noteRow, 1).value = `派次口径：优先使用轨迹状态码70“开始派送”的不同日期；没有70时使用状态码60“派件分配”的不同日期；再使用POD锁定派次/历史派次。禁止用“日报日期→POD日期”直接猜1/2/3派。平均签收天数：日报归属日期→实际POD/派件时间，包含首尾自然日，与参考样板同口径。未识别派次 ${o.attemptUnknown} 票。`;
-  sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=34;
+  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派；无真实证据时显示“—”，禁止按经过天数猜1/2/3派。平均签收天数：生命周期首次进入最新VALID日报日期→真实POD日期，包含首尾自然日；任一POD缺少真实POD日期时该平均值显示“—”。未识别派次 ${o.attemptUnknown} 票。`;
+  sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=42;
   sheet.commit();
 }
 function detailValues(row) {
-  return [row.firstReportDate,row.shipmentCode,row.orderTime,row.statusCode,row.statusDesc,row.recipientProvince,row.area,row.currentShop,row.currentProvince,row.recipient,row.recipientPhone,row.recipientAddress,row.pod?row.podTime:(row.rawDeliveryTime||''),row.deliveryShop,row.deliveryProvince,row.courier,row.exceptionCode,row.exceptionDesc,row.remark];
+  const reportMembershipDate = Array.isArray(row.dailyMembershipDates) && row.dailyMembershipDates.length ? row.dailyMembershipDates[0] : row.firstReportDate;
+  return [reportMembershipDate,row.shipmentCode,row.orderTime,row.statusCode,row.statusDesc,row.recipientProvince,row.area,row.currentShop,row.currentProvince,row.recipient,row.recipientPhone,row.recipientAddress,row.pod?row.podTime:(row.rawDeliveryTime||''),row.deliveryShop,row.deliveryProvince,row.courier,row.exceptionCode,row.exceptionDesc,row.remark];
 }
 function createDetailSheet(workbook, name, rows) {
   const sheet=workbook.addWorksheet(name,{views:[{state:'frozen',ySplit:1}]});DETAIL_WIDTHS.forEach((width,index)=>{sheet.getColumn(index+1).width=width;});

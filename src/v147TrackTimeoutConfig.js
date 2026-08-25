@@ -1,5 +1,8 @@
 import './v203CeafFastBusinessStatePatch.js';
 import './v204CeafInstantRoutePatch.js';
+import './v294CleanReuploadIntegrity.js';
+import './v294PostProcessAttemptBackfillPatch.js';
+import './v294CarryoverSchedulerActivation.js';
 
 const RECOVERY_SAFE_MODE=String(process.env.CE_QC_RECOVERY_SAFE_MODE||'')==='1';
 if(!RECOVERY_SAFE_MODE){

@@ -82,9 +82,25 @@
     if(!root)return;[...root.querySelectorAll('h2,h3')].forEach(h=>{const t=String(h.textContent||'').replace(/\s+/g,'');if(/^(SHOPEE)?1\/2\/3派成功率趋势/.test(t)||/^SHOPEE1\/2\/3派签收占POD趋势/.test(t)){const box=h.closest('section,article,.panel');if(box&&!box.matches('#v272AttemptPanel,#v271AttemptPanel'))box.classList.add('v272-legacy-hidden');}});root.querySelector('#v271AttemptPanel')?.classList.add('v272-legacy-hidden');root.querySelector('#v263DeliveryKpiPanel')?.classList.add('v272-legacy-hidden');
   }
   function renderAttempt(root,type,data){
-    hideLegacyAttempt(root);root.querySelector('#v272AttemptPanel')?.remove();const last=(data.daily||[]).at(-1)||{},pod=num(last.pod),known=num(last.attemptEvidenceCount),unknown=Math.max(0,pod-known),complete=pod===0||known>=pod;
-    const panel=document.createElement('section');panel.id='v272AttemptPanel';panel.className='v18-panel v272-attempt-panel';panel.innerHTML=`<h2>1/2/3派与平均签收天数 <small>${type} · 真实轨迹持续跟踪</small></h2><div class="v272-status ${complete?'ok':'warn'}">${complete?'当前POD的派次证据已覆盖。':`正在自动补抓派次证据：已识别 ${fmt(known)}/${fmt(pod)}，待补 ${fmt(unknown)}。未补完前不把0当最终结论。`}</div><div class="v272-attempt-summary"><div><span>当前POD</span><b>${fmt(pod)}</b></div><div><span>1派签收</span><b>${complete||num(last.attempt1)>0?fmt(last.attempt1):'待补抓'}</b></div><div><span>2派签收</span><b>${complete||num(last.attempt2)>0?fmt(last.attempt2):'待补抓'}</b></div><div><span>3派+签收</span><b>${complete||num(last.attempt3)>0?fmt(last.attempt3):'待补抓'}</b></div><div><span>平均签收天数</span><b>${last.avgSigningDays==null?'待补抓':`${Number(last.avgSigningDays).toFixed(2)}天`}</b></div><div><span>签收天数覆盖</span><b>${pct(last.signingCoverageRate)}</b></div></div>`;
-    const evidence=known>0&&(data.dates||[]).length>0;if(evidence){const chart=document.createElement('div');chart.className='v272-attempt-chart';chart.innerHTML='<article class="v18-chart-card"></article>';panel.appendChild(chart);renderer()?.(chart.firstElementChild,{title:'1/2/3派签收占POD趋势',type:'rate',dates:data.dates||[],evidenceIncomplete:!complete,series:[series('1派',COLORS.blue,data.attempt1Rate||[],data.attempt1||[],data.pod||[]),series('2派',COLORS.green,data.attempt2Rate||[],data.attempt2||[],data.pod||[]),series('3派+',COLORS.orange,data.attempt3Rate||[],data.attempt3||[],data.pod||[])]});}else{const empty=document.createElement('div');empty.className='v272-empty';empty.innerHTML='<div><b>当前暂无可验证的1/2/3派轨迹证据</b><br>系统继续自动补抓；这不代表1派、2派、3派为0。</div>';panel.appendChild(empty);}
+    hideLegacyAttempt(root);root.querySelector('#v272AttemptPanel')?.remove();
+    const last=(data.daily||[]).at(-1)||{};
+    const ledgerReady=last.ledgerReady!==false;
+    const pod=ledgerReady?num(last.pod):null;
+    const known=ledgerReady?num(last.attemptEvidenceCount):0;
+    const attemptComplete=ledgerReady&&Boolean(last.attemptEvidenceComplete ?? (pod===0||known>=pod));
+    const signingComplete=ledgerReady&&Boolean(last.signingEvidenceComplete ?? (pod===0||last.avgSigningDays!=null));
+    const unknown=ledgerReady&&pod!=null?Math.max(0,pod-known):0;
+    const fullComplete=ledgerReady&&attemptComplete&&signingComplete;
+    const statusText=!ledgerReady
+      ?'当前日报状态事实仍在验证，未完成前POD、派次和平均签收天数统一显示“—”。'
+      :!attemptComplete
+        ?`正在补全派次证据：已识别 ${fmt(known)}/${fmt(pod)}，待补 ${fmt(unknown)}。未覆盖全部POD前1/2/3派件数与比例统一显示“—”。`
+        :!signingComplete
+          ?'派次证据已覆盖当前POD；签收日期证据仍在补全，平均签收天数暂显示“—”。'
+          :'当前POD的派次与签收天数证据已完整覆盖。';
+    const panel=document.createElement('section');panel.id='v272AttemptPanel';panel.className='v18-panel v272-attempt-panel';panel.innerHTML=`<h2>1/2/3派与平均签收天数 <small>${type} · 真实轨迹持续跟踪</small></h2><div class="v272-status ${fullComplete?'ok':'warn'}">${statusText}</div><div class="v272-attempt-summary"><div><span>当前POD</span><b>${ledgerReady?fmt(pod):'—'}</b></div><div><span>1派签收</span><b>${attemptComplete?fmt(last.attempt1):'—'}</b></div><div><span>2派签收</span><b>${attemptComplete?fmt(last.attempt2):'—'}</b></div><div><span>3派+签收</span><b>${attemptComplete?fmt(last.attempt3):'—'}</b></div><div><span>平均签收天数</span><b>${signingComplete&&last.avgSigningDays!=null?`${Number(last.avgSigningDays).toFixed(2)}天`:'—'}</b></div><div><span>签收天数覆盖</span><b>${ledgerReady?pct(last.signingCoverageRate):'—'}</b></div></div>`;
+    const evidence=[...(data.attempt1Rate||[]),...(data.attempt2Rate||[]),...(data.attempt3Rate||[])].some(v=>v!==null&&v!==undefined&&Number.isFinite(Number(v)));
+    if(evidence){const chart=document.createElement('div');chart.className='v272-attempt-chart';chart.innerHTML='<article class="v18-chart-card"></article>';panel.appendChild(chart);renderer()?.(chart.firstElementChild,{title:'1/2/3派签收占POD趋势',type:'rate',dates:data.dates||[],evidenceIncomplete:Boolean(data.evidenceIncomplete),series:[series('1派',COLORS.blue,data.attempt1Rate||[],data.attempt1||[],data.pod||[]),series('2派',COLORS.green,data.attempt2Rate||[],data.attempt2||[],data.pod||[]),series('3派+',COLORS.orange,data.attempt3Rate||[],data.attempt3||[],data.pod||[])]});}else{const empty=document.createElement('div');empty.className='v272-empty';empty.innerHTML='<div><b>当前暂无可验证的1/2/3派轨迹证据</b><br>系统继续自动补抓；证据未完整前显示“—”，这不代表1派、2派、3派为0。</div>';panel.appendChild(empty);}
     const preview=root.querySelector('.v18-detail-preview');preview?.parentNode?.insertBefore(panel,preview);if(!panel.isConnected)root.appendChild(panel);
   }
 
@@ -103,7 +119,7 @@
       const special=SPECIAL.has(type),url=special?`/api/v263/delivery-trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`:`/api/v273/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,data=await api(url);if(root.dataset.v272Key!==key)return;
       const dates=data.dates||[],specs=special?specialSpecs(data):genericSpecs(type,data),useful=dates.length&&specs.some(spec=>spec.series.some(s=>hasUseful(s.values)));
       if(!useful){noData(section,'当前选择范围内没有足够的已落库日报事实。后续日报增加后会自动出现，不会把缺失数据画成0。');status(section,'当前范围暂无可绘制历史数据。','warn');}
-      else{draw(section,specs);const missing=Array.isArray(data.missingDates)?data.missingDates.length:(data.daily||[]).filter(r=>r.ledgerReady===false).length;status(section,missing?`已显示 ${dates.length} 个有效日报；其中 ${missing} 天状态覆盖仍在补全，缺失值显示“—”。`:`已显示 ${dates.length} 个有效日报，走势图已更新。`,missing?'warn':'ok');}
+      else{draw(section,specs);const missing=Array.isArray(data.missingDates)?data.missingDates.length:(data.daily||[]).filter(r=>r.ledgerReady===false||r.evidenceIncomplete===true).length;status(section,missing?`已显示 ${dates.length} 个有效日报；其中 ${missing} 天状态/派次/签收证据仍在补全，缺失指标显示“—”。`:`已显示 ${dates.length} 个有效日报，走势图已更新。`,missing?'warn':'ok');}
       if(special)renderAttempt(root,type,data);
     }catch(error){if(root.dataset.v272Key!==key)return;status(section,`走势图暂未更新：${error?.name==='AbortError'?'读取超时，系统将自动重试':error?.message||error}`,'error');retry(`${type}|${rg.from}|${rg.to}`,()=>hydrate(root,model,type));}
   }

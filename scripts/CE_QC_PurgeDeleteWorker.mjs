@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import '../src/v294CleanReuploadIntegrity.js';
 import { BUSINESS_DATA_TABLES } from '../src/store.js';
 
 function statFingerprint(file){

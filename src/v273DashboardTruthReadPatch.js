@@ -5,13 +5,9 @@ import {
   invalidateV284DailyMembershipTruth
 } from './v284DailyMembershipTruth.js';
 import { readV284ProvenDashboardTrends } from './v284MembershipEvidenceCoverage.js';
+import { enforceV294MetricCompleteness, V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
 
-// Keep the historical export name because the browser and older gates import it,
-// but the actual authority from V284 onward is daily report membership joined to
-// V246 lifecycle truth. firstReportDate is evidence metadata, never daily cohort membership.
 export const V273_DASHBOARD_TRUTH_ID = V284_DAILY_MEMBERSHIP_TRUTH_ID;
-// Compatibility markers for pre-V284 static gates. They are deliberately NOT the
-// production algorithm; V284 daily-membership + evidence-coverage readers own production.
 const LEGACY_V274_MARKER='2026-08-24-v274-ledger-first-hot-seven-business-trends-v3';
 const CACHE_MS=60_000;
 const compatMemory=new Map();
@@ -24,10 +20,6 @@ function hasColumn(db,table,column){try{return db.prepare(`PRAGMA table_info(${t
 function hasTable(db,table){try{return Boolean(db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=?").get(table));}catch{return false;}}
 function hasFullV284Schema(db){return hasColumn(db,'unified_import_rows','regionCode')&&hasTable(db,'final_rows')&&hasTable(db,'business_final_rows');}
 
-// Legacy-test fallback only. Some long-lived unit fixtures intentionally define a
-// tiny pre-V284 schema without regionCode/final tables. Production never enters
-// this path. Keep it so candidate gates can verify old parser/import protections
-// without forcing their unrelated in-memory schema to emulate the whole app DB.
 function expectedUnifiedCounts(db,dates,type){
   const out=new Map();
   if(!dates.length)return out;
@@ -48,10 +40,10 @@ function ledgerFacts(db,dates,type){
   return out;
 }
 function compatRead(businessType,fromDate,toDate,db){
-  const type=String(businessType||'ALL').toUpperCase(),to=dateKey(toDate),from=dateKey(fromDate)||to;
-  const key=`C|${type}|${from}|${to}`;const hit=compatMemory.get(key);if(hit&&Date.now()-hit.at<CACHE_MS)return{...hit.value,memoryCacheHit:true};
-  const single=from===to;
-  const dateRows=single?db.prepare("SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate<=? ORDER BY reportDate DESC LIMIT 7").all(to):db.prepare("SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate BETWEEN ? AND ? ORDER BY reportDate").all(from,to);
+  const type=String(businessType||'ALL').toUpperCase(),to=dateKey(toDate),explicitFrom=dateKey(fromDate),from=explicitFrom||to;
+  const key=`C|${type}|${from}|${to}|${explicitFrom?'EXACT':'RECENT'}`;const hit=compatMemory.get(key);if(hit&&Date.now()-hit.at<CACHE_MS)return{...hit.value,memoryCacheHit:true};
+  const exact=Boolean(explicitFrom);
+  const dateRows=exact?db.prepare("SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate BETWEEN ? AND ? ORDER BY reportDate").all(from,to):db.prepare("SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate<=? ORDER BY reportDate DESC LIMIT 7").all(to);
   const dates=dateRows.map(row=>String(row.reportDate||'')).filter(Boolean).sort();
   const counts=expectedUnifiedCounts(db,dates,type),facts=ledgerFacts(db,dates,type);
   const daily=dates.map(reportDate=>{
@@ -64,13 +56,67 @@ function compatRead(businessType,fromDate,toDate,db){
   compatMemory.set(key,{at:Date.now(),value:result});return result;
 }
 
+function strictMetricResult(result={}){
+  const daily=(result.daily||[]).map(row=>enforceV294MetricCompleteness(row));
+  return {
+    ...result,
+    daily,
+    avgPodDays:daily.map(row=>row.ready===false?null:row.avgPodDays),
+    attempt1:daily.map(row=>row.ready===false||!row.attemptEvidenceComplete?null:n(row.attempt1)),
+    attempt2:daily.map(row=>row.ready===false||!row.attemptEvidenceComplete?null:n(row.attempt2)),
+    attempt3:daily.map(row=>row.ready===false||!row.attemptEvidenceComplete?null:n(row.attempt3)),
+    attemptUnknown:daily.map(row=>row.ready===false?null:n(row.attemptUnknown)),
+    attempt1Rate:daily.map(row=>row.ready===false?null:row.attempt1Rate),
+    attempt2Rate:daily.map(row=>row.ready===false?null:row.attempt2Rate),
+    attempt3Rate:daily.map(row=>row.ready===false?null:row.attempt3Rate),
+    attemptCoverageRate:daily.map(row=>row.ready===false?null:row.attemptCoverageRate),
+    signingCoverageRate:daily.map(row=>row.ready===false?null:row.signingCoverageRate),
+    metricCompletenessId:V294_METRIC_COMPLETENESS_ID
+  };
+}
+function exactRequestedRange(result={},fromDate='',toDate=''){
+  const from=dateKey(fromDate),to=dateKey(toDate);
+  if(!from||!to)return result;
+  const daily=(result.daily||[]).filter(row=>{const d=dateKey(row.reportDate);return d&&d>=from&&d<=to;});
+  const dates=daily.map(row=>dateKey(row.reportDate)).filter(Boolean);
+  const val=(row,key)=>row?.ready===false?null:(row?.[key]===null||row?.[key]===undefined?null:Number(row[key]));
+  return {
+    ...result,
+    fromDate:from,
+    toDate:to,
+    dates,
+    daily,
+    ticket:daily.map(row=>n(row.total)),
+    pod:daily.map(row=>val(row,'pod')),
+    podRate:daily.map(row=>val(row,'podRate')),
+    oc:daily.map(row=>val(row,'ocCurrent')),
+    ocRate:daily.map(row=>val(row,'ocRate')),
+    sameDayPod:daily.map(row=>val(row,'sameDayPod')),
+    sameDayPodRate:daily.map(row=>val(row,'sameDayPodRate')),
+    coverageRate:daily.map(row=>row.coverageRate),
+    avgPodDays:daily.map(row=>row.ready===false?null:row.avgPodDays),
+    attempt1:daily.map(row=>row.ready===false||!row.attemptEvidenceComplete?null:n(row.attempt1)),
+    attempt2:daily.map(row=>row.ready===false||!row.attemptEvidenceComplete?null:n(row.attempt2)),
+    attempt3:daily.map(row=>row.ready===false||!row.attemptEvidenceComplete?null:n(row.attempt3)),
+    attemptUnknown:daily.map(row=>row.ready===false?null:n(row.attemptUnknown)),
+    attempt1Rate:daily.map(row=>row.ready===false?null:row.attempt1Rate),
+    attempt2Rate:daily.map(row=>row.ready===false?null:row.attempt2Rate),
+    attempt3Rate:daily.map(row=>row.ready===false?null:row.attempt3Rate),
+    attemptCoverageRate:daily.map(row=>row.ready===false?null:row.attemptCoverageRate),
+    signingCoverageRate:daily.map(row=>row.ready===false?null:row.signingCoverageRate),
+    missingDates:daily.filter(row=>row.ready===false).map(row=>row.reportDate),
+    exactRequestedRange:true
+  };
+}
+
 const previousGet = express.application.get;
 let registered=false,prewarmRunning=false,prewarmTimer=null;
 
 export function readV273DashboardTrends(businessType='ALL',fromDate='',toDate='',db=getDb()) {
-  return hasFullV284Schema(db)
-    ? readV284ProvenDashboardTrends(businessType,fromDate,toDate,db)
+  const base=hasFullV284Schema(db)
+    ? strictMetricResult(readV284ProvenDashboardTrends(businessType,fromDate,toDate,db))
     : compatRead(businessType,fromDate,toDate,db);
+  return exactRequestedRange(base,fromDate,toDate);
 }
 export function invalidateV274DashboardHotFacts(){
   compatMemory.clear();
@@ -88,10 +134,10 @@ function prewarm(delay=0){
       const db=getDb(),to=latestReportDate(db);
       if(!to)return;
       for(const type of ['ALL','CE','CEAF','ALI1688','WHPP','TBKH','SHOPEECN','SHOPEEVN']){
-        try{readV273DashboardTrends(type,to,to,db);}catch{}
+        try{readV273DashboardTrends(type,'',to,db);}catch{}
       }
-      console.info('[CE-QC][V284_TREND_HOT] prewarmed recent seven-day membership+proven-ledger trend facts for all visible boards.');
-    }catch(error){console.warn('[CE-QC][V284_TREND_HOT] prewarm failed:',error?.message||error);}
+      console.info('[CE-QC][V294_TREND_HOT] prewarmed recent seven-day membership+proven-ledger trend facts with complete-POD metric publication gate.');
+    }catch(error){console.warn('[CE-QC][V294_TREND_HOT] prewarm failed:',error?.message||error);}
     finally{prewarmRunning=false;}
   };
   if(delay>0)setTimeout(run,delay).unref?.();else run();
@@ -106,6 +152,7 @@ function handler(req,res){
     res.setHeader('Cache-Control','private,max-age=15');
     res.setHeader('X-CE-QC-V284',V284_DAILY_MEMBERSHIP_TRUTH_ID);
     res.setHeader('X-CE-QC-V274',V284_DAILY_MEMBERSHIP_TRUTH_ID);
+    res.setHeader('X-CE-QC-V294-Metric-Completeness',V294_METRIC_COMPLETENESS_ID);
     res.setHeader('Server-Timing',`v284;dur=${Date.now()-started}`);
     res.json(data);
   }catch(error){res.status(400).json({ok:false,id:V284_DAILY_MEMBERSHIP_TRUTH_ID,error:error?.message||String(error)});}
@@ -114,7 +161,7 @@ function register(app){
   if(registered)return;
   registered=true;
   previousGet.call(app,'/api/v273/trends',handler);
-  console.info('[CE-QC][V284_TRENDS]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered after auth; daily latest-VALID membership + proven V246 ledger facts + final-row fallback.');
+  console.info('[CE-QC][V294_TRENDS]',V284_DAILY_MEMBERSHIP_TRUTH_ID,V294_METRIC_COMPLETENESS_ID,'registered after auth; exact user-selected daily membership range + proven ledger + complete-POD attempt/signing metric gate.');
   prewarm(1200);
   startPeriodicPrewarm();
 }
