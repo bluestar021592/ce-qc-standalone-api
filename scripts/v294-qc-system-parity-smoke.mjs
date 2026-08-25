@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { ensureV246TrackingSchema } from '../src/v246TrackingLedgerCore.js';
 import { applyV294ExportAttemptSigningTruth } from '../src/v294AttemptSigningTruth.js';
 import { statsOf, completeAttemptRatio, completeSigningAverage } from '../src/v200Metrics.js';
 import { enforceV294MetricCompleteness } from '../src/v294MetricCompletenessTruth.js';
+
+for (const file of ['src/v263DeliveryKpiTrendPatch.js','public/v271-canonical-integrity-owner.js','public/v253-dashboard-fast-owner.js']) {
+  execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+}
 
 const db = new DatabaseSync(':memory:');
 try {
@@ -127,6 +132,8 @@ try {
   const startupSource=fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js',import.meta.url),'utf8');
   const carryActivationSource=fs.readFileSync(new URL('../src/v294CarryoverSchedulerActivation.js',import.meta.url),'utf8');
   const postProcessSource=fs.readFileSync(new URL('../src/v294PostProcessAttemptBackfillPatch.js',import.meta.url),'utf8');
+  const specialUiSource=fs.readFileSync(new URL('../public/v271-canonical-integrity-owner.js',import.meta.url),'utf8');
+  const homeUiSource=fs.readFileSync(new URL('../public/v253-dashboard-fast-owner.js',import.meta.url),'utf8');
 
   assert.match(trendSource,/enforceV294MetricCompleteness/,'generic dashboard trend must use complete evidence publication gate');
   assert.match(shopeeTrendSource,/enforceV294MetricCompleteness/,'Shopee trend must use same complete evidence gate');
@@ -145,8 +152,12 @@ try {
   assert.match(carryActivationSource,/server\.once\('listening', activate\)/,'carry scheduler must wait for a real bound/listening server before background activation');
   assert.match(postProcessSource,/fromDate: date/,'automatic post-run attempt repair must be limited to the completed report date, not full-history synchronous scanning');
   assert.match(postProcessSource,/typesForPath/,'automatic post-run repair must limit CCSL to TBKH and SHOPEE runs to CN/VN');
+  assert.match(specialUiSource,/attemptComplete\?fmt\(last\.attempt1\):'—'/,'special business board must render —, not a partial 1-pai count, until all POD attempts are proven');
+  assert.match(specialUiSource,/signingComplete&&last\.avgSigningDays!=null/,'special business board must gate average signing days on complete POD signing evidence');
+  assert.match(specialUiSource,/r\.ledgerReady===false\|\|r\.evidenceIncomplete===true/,'special business trend status must include attempt/signing incompleteness, not only ledger membership coverage');
+  assert.match(homeUiSource,/r\?\.ledgerReady===false\|\|r\?\.evidenceIncomplete===true/,'homepage CN/VN attempt trend must honor the same V294 evidence-complete signal');
 
-  console.log('[V294] QC system parity smoke passed · canonical TBKH/CN/VN page + trends + range + export share latest-VALID daily membership, strict attempts, complete-POD signing gates, and runtime wiring is production-active');
+  console.log('[V294] QC system parity smoke passed · canonical TBKH/CN/VN page + homepage + trends + range + export share latest-VALID daily membership, strict attempts, complete-POD signing gates, and runtime wiring is production-active');
 } finally {
   db.close();
 }
