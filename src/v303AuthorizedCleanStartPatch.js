@@ -5,14 +5,13 @@ import path from 'node:path';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES } from './store.js';
 
-export const V303_AUTHORIZED_CLEAN_START_ID='2026-08-25-v303-authorized-clean-start-v1';
+export const V303_AUTHORIZED_CLEAN_START_ID='2026-08-25-v303-authorized-clean-start-v2';
 export const V303_AUTHORIZATION='V303_USER_AUTHORIZED_FULL_CLEAN_20260825';
 const DONE_KEY='v303_authorized_clean_start_done';
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
 let inFlight=null;
 
-function tableExists(db,name){return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name));}
 function setMeta(db,key,value){db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(key,String(value??''),nowIso());}
 function getMeta(db,key){return String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(key)?.value||'');}
 function samePath(a,b){try{return path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();}catch{return false;}}
@@ -78,16 +77,19 @@ export async function performV303AuthorizedCleanStart({db=getDb(),cfg=getRuntime
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
   finally{if(foreignKeysBefore)try{db.exec('PRAGMA foreign_keys=ON');}catch{}}
 
+  // Remove old D-side archives/backups first. That creates the maximum free space
+  // for SQLite VACUUM, then the database itself is physically compacted before the
+  // one-shot DONE marker is written. A transient VACUUM failure is retried by the
+  // browser; new uploads are never exposed until real disk reclamation succeeds.
   const fileCleanup=await cleanRuntimeFiles(cfg);
-  let vacuum='ok';
   try{db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.exec('VACUUM');db.exec('PRAGMA wal_checkpoint(TRUNCATE)');}
-  catch(error){vacuum=`warning:${error?.message||error}`;}
+  catch(error){throw new Error(`业务数据已清空，但SQLite磁盘空间回收尚未完成：${error?.message||error}`);}
   const integrity=String(db.prepare('PRAGMA quick_check(1)').get()?.quick_check||'');
   if(integrity!=='ok')throw new Error(`清空后SQLite校验失败：${integrity||'unknown'}`);
   setMeta(db,DONE_KEY,V303_AUTHORIZED_CLEAN_START_ID);
   setMeta(db,'v303_authorized_clean_start_completed_at',nowIso());
   try{globalThis.__CE_QC_INVALIDATE_V295_FIRST_ATTEMPT__?.('V303_AUTHORIZED_CLEAN_START');}catch{}
-  return {ok:true,alreadyDone:false,cleared:true,id:V303_AUTHORIZED_CLEAN_START_ID,deletedRows,vacuum,integrity,fileCleanupWarnings:fileCleanup.warnings,storage:{dbFile:cfg.dbFile,importsDir:cfg.importsDir,exportsDir:cfg.exportsDir,backupsDir:cfg.backupsDir,logsDir:cfg.logsDir,evidenceArchiveDir:cfg.evidenceArchiveDir}};
+  return {ok:true,alreadyDone:false,cleared:true,id:V303_AUTHORIZED_CLEAN_START_ID,deletedRows,vacuum:'ok',integrity,fileCleanupWarnings:fileCleanup.warnings,storage:{dbFile:cfg.dbFile,importsDir:cfg.importsDir,exportsDir:cfg.exportsDir,backupsDir:cfg.backupsDir,logsDir:cfg.logsDir,evidenceArchiveDir:cfg.evidenceArchiveDir}};
 }
 
 async function routeHandler(req,res){
@@ -106,4 +108,4 @@ express.application.post=function v303AuthorizedCleanStartPost(route,...handlers
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V303_AUTHORIZED_CLEAN_START]',V303_AUTHORIZED_CLEAN_START_ID,'route armed; destructive work occurs only after an authenticated ADMIN browser sends the explicit user-authorized marker.');
+console.info('[CE-QC][V303_AUTHORIZED_CLEAN_START]',V303_AUTHORIZED_CLEAN_START_ID,'route armed; destructive work occurs only after an authenticated ADMIN browser sends the explicit user-authorized marker; DONE requires VACUUM + quick_check success.');
