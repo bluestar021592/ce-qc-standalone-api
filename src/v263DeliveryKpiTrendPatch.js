@@ -6,7 +6,7 @@ import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
 import { enforceV294MetricCompleteness, V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
 import { getV263DeliveryEvidenceStatus, requestV263DeliveryEvidenceBackfill } from './v262ShopeeStrictEvidenceBackfill.js';
 
-export const V263_DELIVERY_KPI_TREND_ID='2026-08-25-v294-three-business-daily-membership-kpi-trend-v6';
+export const V263_DELIVERY_KPI_TREND_ID='2026-08-25-v294-three-business-daily-membership-kpi-trend-v7';
 const TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const CACHE_MS=15_000;
 const memory=new Map();
@@ -65,6 +65,10 @@ function strictDaily(row={}){
     metricCompletenessId:V294_METRIC_COMPLETENESS_ID
   };
 }
+function exactRequestedDaily(rows=[],from='',to=''){
+  if(!from||!to)return rows;
+  return rows.filter(row=>{const d=dateKey(row.reportDate);return d&&d>=from&&d<=to;});
+}
 
 export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',db=getDb()){
   const type=String(businessType||'').toUpperCase();
@@ -76,7 +80,8 @@ export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',
   if(hit&&Date.now()-hit.at<CACHE_MS)return hit.value;
 
   const base=readV284ProvenDashboardTrends(type,from,to,db);
-  const daily=(base.daily||[]).map(strictDaily);
+  const daily=exactRequestedDaily((base.daily||[]).map(strictDaily),from,to);
+  const dates=daily.map(row=>dateKey(row.reportDate)).filter(Boolean);
   const evidenceIncomplete=daily.some(row=>row.evidenceIncomplete);
   const value={
     ...base,
@@ -85,6 +90,10 @@ export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',
     truthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,
     metricCompletenessId:V294_METRIC_COMPLETENESS_ID,
     businessType:type,
+    fromDate:from,
+    toDate:to,
+    exactRequestedRange:true,
+    dates,
     daily,
     ticket:daily.map(r=>r.total),
     pod:daily.map(r=>r.pod),
@@ -103,9 +112,9 @@ export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',
     signingCoverageRate:daily.map(r=>r.signingCoverageRate),
     evidenceIncomplete,
     evidenceStatus:getV263DeliveryEvidenceStatus(),
-    source:'LATEST_VALID_DAILY_MEMBERSHIP + PROVEN_LIFECYCLE_TRUTH + COMPLETE_POD_METRIC_GATE',
+    source:'EXACT_REQUESTED_LATEST_VALID_DAILY_MEMBERSHIP + PROVEN_LIFECYCLE_TRUTH + COMPLETE_POD_METRIC_GATE',
     definitions:{
-      membership:'每个日期只使用该日最新VALID日报成员作为分母；firstReportDate只用于生命周期与签收天数，不决定日趋势归属',
+      membership:'用户选择几天就只返回这几天中真实存在的最新VALID日报成员；firstReportDate只用于生命周期与签收天数，不决定日趋势归属',
       attempt:'TBKH/SHOPEE统一：70 START优先；整票无70才用60；只有Pending/失败后出现新START才进入下一派；全部POD派次证据完整才发布1/2/3派件数与比例，否则显示—；已识别数量只作为覆盖诊断字段保留',
       signingDays:'生命周期首次进入最新VALID日报日期到真实POD日期，含首尾当天；全部POD都有真实签收天数才发布平均值，否则显示—',
       status:'日报成员决定分母；整日状态事实未全部验证时POD/OC/派次/签收指标统一不发布局部数字，只保留精确票数分母和诊断字段'
@@ -132,7 +141,7 @@ function register(app){
   if(routeRegistered)return;
   routeRegistered=true;
   previousGet.call(app,'/api/v263/delivery-trends',handler);
-  console.info('[CE-QC][V294_DELIVERY_KPI]',V263_DELIVERY_KPI_TREND_ID,V284_DAILY_MEMBERSHIP_TRUTH_ID,V294_METRIC_COMPLETENESS_ID,'TBKH + SHOPEECN + SHOPEEVN use exact latest-VALID daily membership, proven lifecycle truth, and complete-POD attempt/signing publication gates.');
+  console.info('[CE-QC][V294_DELIVERY_KPI]',V263_DELIVERY_KPI_TREND_ID,V284_DAILY_MEMBERSHIP_TRUTH_ID,V294_METRIC_COMPLETENESS_ID,'TBKH + SHOPEECN + SHOPEEVN use exact user-selected latest-VALID daily membership, proven lifecycle truth, and complete-POD attempt/signing publication gates.');
 }
 express.application.get=function v263DeliveryTrendRoute(pathValue,...handlers){
   if(!routeRegistered&&String(pathValue||'')==='/api/v234/trends')register(this);
