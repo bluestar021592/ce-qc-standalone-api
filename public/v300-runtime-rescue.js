@@ -1,6 +1,6 @@
 (function installV300RuntimeRescue(global){
   if(global.__CE_QC_V300_RUNTIME_RESCUE__)return;
-  const VERSION='2026-08-25-v300-single-sidebar-exact-shopee-owner-v2';
+  const VERSION='2026-08-25-v300-single-sidebar-exact-shopee-owner-v1';
   const LEGACY_SHOPEE_IDS=['v234DailyTrendTruth','v245ShopeeAttemptTruth','v250ShopeeAttemptTruth','v251ShopeeAttemptTruth','v263DeliveryKpiPanel','v271AttemptPanel'];
   let navTimer=null,trendTimer=null,firstTimer=null,lastFirstKey='',fetchWrapped=false,observer=null;
   const date=v=>String(v||'').slice(0,10);
