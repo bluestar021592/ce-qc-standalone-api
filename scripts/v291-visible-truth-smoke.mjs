@@ -11,6 +11,7 @@ for (const file of [
 const rangeSource=fs.readFileSync(new URL('../src/rangeDashboardStoreV284.js',import.meta.url),'utf8');
 const rangeFacade=fs.readFileSync(new URL('../src/rangeDashboardStore.js',import.meta.url),'utf8');
 const v295Range=fs.readFileSync(new URL('../src/rangeDashboardStoreV295.js',import.meta.url),'utf8');
+const v295MetricSource=fs.readFileSync(new URL('../src/v295FirstAttemptMetric.js',import.meta.url),'utf8');
 const v295Truth=fs.readFileSync(new URL('../src/v295FirstAttemptTruth.js',import.meta.url),'utf8');
 const v295Route=fs.readFileSync(new URL('../src/v295FirstAttemptRoutePatch.js',import.meta.url),'utf8');
 const v295Invalidation=fs.readFileSync(new URL('../src/v295FirstAttemptInvalidationPatch.js',import.meta.url),'utf8');
@@ -43,6 +44,7 @@ assert.equal(firstAttempt.firstAttemptRate,33.33,'first-attempt success must be 
 const incomplete=summarizeV295FirstAttemptMembers([{pod:true,attemptNo:0},{pod:false,attemptNo:1}],{});
 assert.equal(incomplete.firstAttemptRate,null,'POD without real attempt evidence must fail closed instead of publishing 0%');
 assert.equal(incomplete.firstAttemptEvidenceComplete,false);
+assert.equal(incomplete.firstAttemptUnknownPod,1,'POD without a proven START must be diagnosed explicitly');
 const merged=mergeV295FirstAttemptFacts('CCSL',[firstAttempt,firstAttempt]);
 assert.equal(merged.firstAttemptRate,33.33,'range aggregate must preserve numerator/denominator semantics');
 
@@ -54,7 +56,8 @@ assert.doesNotMatch(v295Range,/sameDayPodRate/,'V295 first-attempt publication m
 assert.match(v295Truth,/analyzeV246ShopeeAttemptCycle/,'V295 first-attempt truth must use the locked real START/failure cycle');
 assert.match(v295Truth,/latestUnifiedMembership/,'V295 denominator membership must come from latest VALID daily reports');
 assert.match(v295Truth,/businessType='WHPP'/,'V295 must retain WHPP first-attempt support');
-assert.match(v295Truth,/firstAttemptUnknownPod/,'V295 must detect POD rows whose real attempt is unproven');
+assert.match(v295MetricSource,/firstAttemptUnknownPod/,'V295 metric owner must diagnose POD rows whose real attempt is unproven');
+assert.match(v295Truth,/summarizeV295FirstAttemptMembers/,'V295 range truth must delegate each daily membership cohort to the metric owner that diagnoses unproven POD attempts');
 assert.match(v295Route,/\/api\/v253\/trends/,'generic/home trend API must receive V295 first-attempt overlay');
 assert.match(v295Route,/\/api\/v263\/delivery-trends/,'TBKH/CN/VN trend API must receive the same V295 first-attempt overlay');
 assert.match(v295Route,/requestedTruth/,'single-day card summary must honor requested day even when V253 returns a recent-7-day trend');
@@ -74,4 +77,4 @@ assert.match(ownerSource,/result\?\.aggregates\?\.HOME/,'homepage core metrics m
 assert.match(ownerSource,/证据未完成的日期保持“—”/,'incomplete attempt evidence must stay blank instead of being rendered as real 0%');
 assert.doesNotMatch(v295Ui,/method\s*:\s*['"](?:POST|PUT|PATCH|DELETE)/i,'V295 visible owner must remain read-only');
 
-console.log('[V295] visible truth smoke passed · WHPP/HOME preserved · 首次妥投率=首派成功/首派尝试 · 首日POD独立 · missing START/POD attempt evidence => — · same-day reruns invalidate cache · V253/V263/range/UI share V295 truth');
+console.log('[V295.6] visible truth smoke passed · WHPP/HOME preserved · 首次妥投率=首派成功/首派尝试 · 首日POD独立 · missing START/POD attempt evidence => — · same-day reruns invalidate cache · V253/V263/range/UI share V295 truth');
