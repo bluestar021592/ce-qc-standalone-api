@@ -120,17 +120,33 @@ try {
 
   const trendSource=fs.readFileSync(new URL('../src/v273DashboardTruthReadPatch.js',import.meta.url),'utf8');
   const shopeeTrendSource=fs.readFileSync(new URL('../src/v244ShopeeTrendRuntimePatch.js',import.meta.url),'utf8');
+  const deliveryTrendSource=fs.readFileSync(new URL('../src/v263DeliveryKpiTrendPatch.js',import.meta.url),'utf8');
   const rangeFacade=fs.readFileSync(new URL('../src/rangeDashboardStore.js',import.meta.url),'utf8');
   const exportSource=fs.readFileSync(new URL('../src/v225ExportReturnTruth.js',import.meta.url),'utf8');
   const exportSummarySource=fs.readFileSync(new URL('../src/v200TemplateDashboardExporter.js',import.meta.url),'utf8');
+  const startupSource=fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js',import.meta.url),'utf8');
+  const carryActivationSource=fs.readFileSync(new URL('../src/v294CarryoverSchedulerActivation.js',import.meta.url),'utf8');
+  const postProcessSource=fs.readFileSync(new URL('../src/v294PostProcessAttemptBackfillPatch.js',import.meta.url),'utf8');
+
   assert.match(trendSource,/enforceV294MetricCompleteness/,'generic dashboard trend must use complete evidence publication gate');
   assert.match(shopeeTrendSource,/enforceV294MetricCompleteness/,'Shopee trend must use same complete evidence gate');
+  assert.match(deliveryTrendSource,/readV284ProvenDashboardTrends/,'TBKH/CN/VN canonical page endpoint must delegate to V284 exact daily-membership + proven lifecycle truth');
+  assert.match(deliveryTrendSource,/enforceV294MetricCompleteness/,'TBKH/CN/VN canonical page endpoint must apply the same complete-POD metric gate');
+  assert.doesNotMatch(deliveryTrendSource,/dashboard_daily_cache/,'TBKH/CN/VN canonical page endpoint must not fall back to stale dashboard_daily_cache truth');
+  assert.doesNotMatch(deliveryTrendSource,/GROUP BY firstReportDate/,'TBKH/CN/VN daily trend must never group visible cohorts by lifecycle firstReportDate');
+  assert.match(deliveryTrendSource,/attempt1:attemptEvidenceComplete\?knownAttempt1:null/,'partial attempt evidence must not publish partial 1-pai counts as final page metrics');
+  assert.match(deliveryTrendSource,/avgSigningDays:ledgerReady&&signingEvidenceComplete\?complete\.avgPodDays:null/,'partial signing evidence must not publish a partial average');
   assert.match(rangeFacade,/rangeDashboardStoreV294/,'range/dashboard cards must pass through V294 parity wrapper');
   assert.match(exportSource,/applyV294ExportAttemptSigningTruth/,'export detail/dashboard must use V294 attempt/signing truth');
   assert.match(exportSummarySource,/completeAttemptRatio/,'export job summary must not publish partial attempt rates');
   assert.match(exportSummarySource,/completeSigningAverage/,'export job summary must not publish partial signing average');
+  assert.match(startupSource,/v294PostProcessAttemptBackfillPatch\.js/,'real bootstrap chain must activate V294 post-process parity before server startup');
+  assert.match(startupSource,/v294CarryoverSchedulerActivation\.js/,'real bootstrap chain must activate V294 carry scheduler before server startup');
+  assert.match(carryActivationSource,/server\.once\('listening', activate\)/,'carry scheduler must wait for a real bound/listening server before background activation');
+  assert.match(postProcessSource,/fromDate: date/,'automatic post-run attempt repair must be limited to the completed report date, not full-history synchronous scanning');
+  assert.match(postProcessSource,/typesForPath/,'automatic post-run repair must limit CCSL to TBKH and SHOPEE runs to CN/VN');
 
-  console.log('[V294] QC system parity smoke passed · TBKH=2派 from core track_events, CN=1派, VN=3派, daily membership date is separate from lifecycle signing origin, partial evidence publishes —');
+  console.log('[V294] QC system parity smoke passed · canonical TBKH/CN/VN page + trends + range + export share latest-VALID daily membership, strict attempts, complete-POD signing gates, and runtime wiring is production-active');
 } finally {
   db.close();
 }
