@@ -2,7 +2,7 @@ import express from 'express';
 import { backfillV294StrictAttemptsFromSavedEvidence } from './v294AttemptSigningTruth.js';
 import { repairV294CarryoverLifecycle } from './v294CarryoverLifecycleTruth.js';
 
-export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID = '2026-08-25-v294-post-process-attempt-backfill-v3';
+export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID = '2026-08-25-v294-post-process-attempt-backfill-v4';
 const previousPost = express.application.post;
 const ROUTES = new Set(['/api/run','/api/run/start','/api/resume','/api/run/resume','/api/shopee/run/start','/api/shopee/run/resume']);
 let inFlight = false;
@@ -10,6 +10,18 @@ let queued = null;
 
 function typesForPath(path='') {
   return String(path).startsWith('/api/shopee/') ? ['SHOPEECN','SHOPEEVN'] : ['TBKH'];
+}
+function responseReportDate(req, payload={}) {
+  return String(
+    payload?.run?.reportDate
+    || payload?.summary?.reportDate
+    || payload?.state?.reportDate
+    || payload?.import?.reportDate
+    || payload?.reportDate
+    || req?.body?.reportDate
+    || req?.body?.date
+    || ''
+  ).slice(0,10);
 }
 
 function runBackfill(reportDate, businessTypes) {
@@ -46,7 +58,7 @@ function responseHook(req, res, next) {
   let handled = false;
   res.json = function v294PostProcessJson(payload) {
     const success = res.statusCode < 400 && payload?.ok !== false;
-    const reportDate = String(payload?.run?.reportDate || payload?.summary?.reportDate || payload?.state?.reportDate || '').slice(0, 10);
+    const reportDate = responseReportDate(req,payload);
     const out = originalJson(payload);
     if (success && reportDate && !handled) {
       handled = true;
