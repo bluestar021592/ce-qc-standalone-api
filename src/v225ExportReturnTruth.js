@@ -89,7 +89,7 @@ export async function collectV200Rows(type, range, onProgress = () => {}) {
   // V230 remains for compatibility, then V294 is the final authority for
   // TBKH + SHOPEE CN/VN so export uses the same strict lifecycle truth as dashboard/trend.
   applyV230AttemptSigningTruth(businessType, rows);
-  applyV294ExportAttemptSigningTruth(businessType, rows);
+  applyV294ExportAttemptSigningTruth(businessType, rows, { range });
   onProgress({
     phase: 'returnAttemptSigningTruth',
     completed: rows.length,
