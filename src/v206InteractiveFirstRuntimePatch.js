@@ -14,8 +14,14 @@ import './v254StorageHealthPatch.js';
 import './v256R2ZeroCostGuard.js';
 import './v262ShopeeStrictEvidenceBackfill.js';
 import './v263DeliveryKpiTrendPatch.js';
+// V294 runtime wiring is loaded before server.js registers routes/listen. The
+// post-process repair is date-scoped and delayed until after the response; the
+// carry scheduler itself waits for the real server listening event and protects
+// the first two minutes of interactive startup.
+import './v294PostProcessAttemptBackfillPatch.js';
+import './v294CarryoverSchedulerActivation.js';
 
-const PATCH_ID = '2026-08-23-v266-evergreen-evidence-runtime-v1';
+const PATCH_ID = '2026-08-25-v294-interactive-first-runtime-wiring-v1';
 const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prime-observable-v1';
 
 // V253 first paint no longer depends on dashboard_daily_cache. Keep the old cache
@@ -81,6 +87,6 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
 }
 primeDashboardCacheInChild();
 
-console.log(`[CE-QC][V266] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; V266 evergreen source/API evidence archive prevents future mechanism upgrades from requiring daily-report re-upload; attempt/signing tracking remains restricted to TBKH + SHOPEECN + SHOPEEVN; V254 read-only storage audit and V256 R2 zero-cost guard remain active; broken V255 retention remains excluded.`);
+console.log(`[CE-QC][V294] ${PATCH_ID} preserves ${LEGACY_OBSERVABLE_PATCH_ID}; recovery-safe first paint remains authoritative, V294 date-scoped post-process parity is active, and OPEN carry scheduling is armed only after server listening.`);
 
 export const V206_INTERACTIVE_FIRST_RUNTIME_PATCH_ID = PATCH_ID;
