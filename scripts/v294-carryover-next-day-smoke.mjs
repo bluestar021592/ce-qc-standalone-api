@@ -54,9 +54,10 @@ try{
   const v147=fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js',import.meta.url),'utf8');
   const importStore=fs.readFileSync(new URL('../src/unifiedImportStore.js',import.meta.url),'utf8');
   assert.match(activation,/startCarryoverRefreshScheduler\(\)/,'formal listen patch must actually start carry scheduler');
+  assert.match(activation,/server\.once\('listening', activate\)/,'scheduler must not begin until the HTTP server is actually listening');
   assert.match(v147,/v294CarryoverSchedulerActivation\.js/,'startup chain must install carry scheduler activation before server routes run');
   assert.match(importStore,/HISTORICAL_CARRY/,'next daily processing queue must retain prior OPEN shipments as historical carry');
   assert.match(importStore,/FROM carryover_open_items c WHERE c\.status='OPEN'/,'processing queue must source unresolved carry independently of whether the shipment appears in next-day Excel');
 
-  console.log('[V294] carryover next-day smoke passed · OPEN survives into next day, 00:05 + two-hour scheduler is activated, return-in-progress stays OPEN until exact completion');
+  console.log('[V294] carryover next-day smoke passed · OPEN survives into next day, 00:05 + two-hour scheduler activates only after server listen, return-in-progress stays OPEN until exact completion');
 }finally{db.close();}
