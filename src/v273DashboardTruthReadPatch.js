@@ -5,6 +5,7 @@ import {
   invalidateV284DailyMembershipTruth
 } from './v284DailyMembershipTruth.js';
 import { readV284ProvenDashboardTrends } from './v284MembershipEvidenceCoverage.js';
+import { enforceV294MetricCompleteness, V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
 
 // Keep the historical export name because the browser and older gates import it,
 // but the actual authority from V284 onward is daily report membership joined to
@@ -64,12 +65,31 @@ function compatRead(businessType,fromDate,toDate,db){
   compatMemory.set(key,{at:Date.now(),value:result});return result;
 }
 
+function strictMetricResult(result={}){
+  const daily=(result.daily||[]).map(row=>enforceV294MetricCompleteness(row));
+  return {
+    ...result,
+    daily,
+    avgPodDays:daily.map(row=>row.ready===false?null:row.avgPodDays),
+    attempt1:daily.map(row=>row.ready===false?null:n(row.attempt1)),
+    attempt2:daily.map(row=>row.ready===false?null:n(row.attempt2)),
+    attempt3:daily.map(row=>row.ready===false?null:n(row.attempt3)),
+    attemptUnknown:daily.map(row=>row.ready===false?null:n(row.attemptUnknown)),
+    attempt1Rate:daily.map(row=>row.ready===false?null:row.attempt1Rate),
+    attempt2Rate:daily.map(row=>row.ready===false?null:row.attempt2Rate),
+    attempt3Rate:daily.map(row=>row.ready===false?null:row.attempt3Rate),
+    attemptCoverageRate:daily.map(row=>row.ready===false?null:row.attemptCoverageRate),
+    signingCoverageRate:daily.map(row=>row.ready===false?null:row.signingCoverageRate),
+    metricCompletenessId:V294_METRIC_COMPLETENESS_ID
+  };
+}
+
 const previousGet = express.application.get;
 let registered=false,prewarmRunning=false,prewarmTimer=null;
 
 export function readV273DashboardTrends(businessType='ALL',fromDate='',toDate='',db=getDb()) {
   return hasFullV284Schema(db)
-    ? readV284ProvenDashboardTrends(businessType,fromDate,toDate,db)
+    ? strictMetricResult(readV284ProvenDashboardTrends(businessType,fromDate,toDate,db))
     : compatRead(businessType,fromDate,toDate,db);
 }
 export function invalidateV274DashboardHotFacts(){
@@ -90,8 +110,8 @@ function prewarm(delay=0){
       for(const type of ['ALL','CE','CEAF','ALI1688','WHPP','TBKH','SHOPEECN','SHOPEEVN']){
         try{readV273DashboardTrends(type,to,to,db);}catch{}
       }
-      console.info('[CE-QC][V284_TREND_HOT] prewarmed recent seven-day membership+proven-ledger trend facts for all visible boards.');
-    }catch(error){console.warn('[CE-QC][V284_TREND_HOT] prewarm failed:',error?.message||error);}
+      console.info('[CE-QC][V294_TREND_HOT] prewarmed recent seven-day membership+proven-ledger trend facts with complete-POD metric publication gate.');
+    }catch(error){console.warn('[CE-QC][V294_TREND_HOT] prewarm failed:',error?.message||error);}
     finally{prewarmRunning=false;}
   };
   if(delay>0)setTimeout(run,delay).unref?.();else run();
@@ -106,6 +126,7 @@ function handler(req,res){
     res.setHeader('Cache-Control','private,max-age=15');
     res.setHeader('X-CE-QC-V284',V284_DAILY_MEMBERSHIP_TRUTH_ID);
     res.setHeader('X-CE-QC-V274',V284_DAILY_MEMBERSHIP_TRUTH_ID);
+    res.setHeader('X-CE-QC-V294-Metric-Completeness',V294_METRIC_COMPLETENESS_ID);
     res.setHeader('Server-Timing',`v284;dur=${Date.now()-started}`);
     res.json(data);
   }catch(error){res.status(400).json({ok:false,id:V284_DAILY_MEMBERSHIP_TRUTH_ID,error:error?.message||String(error)});}
@@ -114,7 +135,7 @@ function register(app){
   if(registered)return;
   registered=true;
   previousGet.call(app,'/api/v273/trends',handler);
-  console.info('[CE-QC][V284_TRENDS]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'registered after auth; daily latest-VALID membership + proven V246 ledger facts + final-row fallback.');
+  console.info('[CE-QC][V294_TRENDS]',V284_DAILY_MEMBERSHIP_TRUTH_ID,V294_METRIC_COMPLETENESS_ID,'registered after auth; exact daily membership + proven ledger + complete-POD attempt/signing metric gate.');
   prewarm(1200);
   startPeriodicPrewarm();
 }
