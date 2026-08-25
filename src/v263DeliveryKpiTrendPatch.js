@@ -15,6 +15,11 @@ let routeRegistered=false;
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
 const dateKey=v=>{const m=String(v||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';};
 
+// Compatibility/source contract for the preserved V254/V263 go-live gate:
+// the upstream V284 daily fact is built from locked per-shipment evidence and carries
+// signingDaysSum/signingDaysCount plus strict attempt buckets equivalent to
+// attemptNo=1, attemptNo=2 and attemptNo>=3. V294 only decides whether those
+// already-locked aggregates are complete enough to publish; it does not reclassify them.
 function strictDaily(row={}){
   const complete=enforceV294MetricCompleteness(row);
   const ledgerReady=complete.ready!==false;
@@ -27,6 +32,11 @@ function strictDaily(row={}){
   const knownAttempt1=ledgerReady?n(complete.attempt1):0;
   const knownAttempt2=ledgerReady?n(complete.attempt2):0;
   const knownAttempt3=ledgerReady?n(complete.attempt3):0;
+  const signingDaysCount=Math.max(0,n(complete.signingDaysCount));
+  const signingDaysSum=Math.max(0,n(complete.signingDaysSum));
+  const avgSigningDays=ledgerReady&&signingEvidenceComplete&&signingDaysCount>0
+    ? Number((signingDaysSum/signingDaysCount).toFixed(2))
+    : null;
   return {
     ...complete,
     total:n(complete.total),
@@ -44,8 +54,10 @@ function strictDaily(row={}){
     ledgerCount:n(complete.matched),
     sourceTotal:n(complete.total),
     cacheTotal:n(complete.total),
-    avgSigningDays:ledgerReady&&signingEvidenceComplete?complete.avgPodDays:null,
-    avgPodDays:ledgerReady&&signingEvidenceComplete?complete.avgPodDays:null,
+    signingDaysSum,
+    signingDaysCount,
+    avgSigningDays,
+    avgPodDays:avgSigningDays,
     attempt1Known:knownAttempt1,
     attempt2Known:knownAttempt2,
     attempt3Known:knownAttempt3,
