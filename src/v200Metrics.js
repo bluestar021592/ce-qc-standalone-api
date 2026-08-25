@@ -3,6 +3,18 @@ export function average(values = []) {
   return usable.length ? Number((usable.reduce((sum, value) => sum + value, 0) / usable.length).toFixed(2)) : 0;
 }
 export function ratio(a, b) { return b ? Number(a || 0) / Number(b) : 0; }
+export function completeAttemptRatio(stat = {}, numerator = 0) {
+  const pod = Math.max(0, Number(stat.pod || 0));
+  const unknown = Math.max(0, Number(stat.attemptUnknown || 0));
+  if (!pod || unknown > 0) return null;
+  return ratio(numerator, pod);
+}
+export function completeSigningAverage(values = [], pod = 0) {
+  const expected = Math.max(0, Number(pod || 0));
+  const usable = values.map(Number).filter(value => Number.isFinite(value) && value > 0);
+  if (!expected || usable.length !== expected) return null;
+  return average(usable);
+}
 function dateKey(value = '') { const m = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; }
 function dayNumber(value = '') { const k = dateKey(value); if (!k) return null; const [y,m,d] = k.split('-').map(Number); return Date.UTC(y,m-1,d); }
 function listDates(from,to){ const a=dayNumber(from),b=dayNumber(to),out=[]; if(a===null||b===null||b<a)return out; for(let t=a;t<=b;t+=86400000)out.push(new Date(t).toISOString().slice(0,10)); return out; }
