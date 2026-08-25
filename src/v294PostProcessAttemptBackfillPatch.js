@@ -8,7 +8,7 @@ const ROUTES = new Set(['/api/run','/api/run/start','/api/resume','/api/run/resu
 let inFlight = false;
 let queued = null;
 
-function scopesForPath(path='') {
+function typesForPath(path='') {
   if(String(path).startsWith('/api/shopee/'))return {carryTypes:['SHOPEECN','SHOPEEVN'],attemptTypes:['SHOPEECN','SHOPEEVN']};
   return {carryTypes:['CE','CEAF','TBKH','ALI1688'],attemptTypes:['TBKH']};
 }
@@ -54,7 +54,7 @@ function responseHook(req, res, next) {
     const out = originalJson(payload);
     if (success && reportDate && !handled) {
       handled = true;
-      runBackfill(reportDate, scopesForPath(req.path));
+      runBackfill(reportDate, typesForPath(req.path));
     }
     return out;
   };
