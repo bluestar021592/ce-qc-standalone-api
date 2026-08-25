@@ -10,10 +10,14 @@ function dateKey(value=''){return String(value||'').slice(0,10);}
 function overlayPayload(req,payload={}){
   if (!payload || payload.ok === false) return payload;
   const type = String(req.query?.businessType || payload.businessType || 'ALL').toUpperCase();
-  const from = dateKey(req.query?.from || payload.fromDate || payload.requestedFromDate || req.query?.to);
-  const to = dateKey(req.query?.to || payload.toDate || payload.requestedToDate || from);
-  if (!from || !to) return payload;
-  const truth = readV295FirstAttemptTrends(type, from, to);
+  const requestedFrom = dateKey(req.query?.from || payload.requestedFromDate || payload.fromDate || req.query?.to);
+  const requestedTo = dateKey(req.query?.to || payload.requestedToDate || payload.toDate || requestedFrom);
+  if (!requestedFrom || !requestedTo) return payload;
+  const payloadDates = Array.isArray(payload.dates) ? payload.dates.map(dateKey).filter(Boolean) : [];
+  const trendFrom = payloadDates[0] || dateKey(payload.fromDate) || requestedFrom;
+  const trendTo = payloadDates.at(-1) || dateKey(payload.toDate) || requestedTo;
+  const truth = readV295FirstAttemptTrends(type, trendFrom, trendTo);
+  const requestedTruth = (trendFrom === requestedFrom && trendTo === requestedTo) ? truth : readV295FirstAttemptTrends(type, requestedFrom, requestedTo);
   const byDate = new Map((truth.daily || []).map(row => [String(row.reportDate || ''), row]));
   const daily = Array.isArray(payload.daily) ? payload.daily.map(row => {
     const fact = byDate.get(String(row?.reportDate || ''));
@@ -32,7 +36,7 @@ function overlayPayload(req,payload={}){
       firstAttemptMetricId: V295_FIRST_ATTEMPT_METRIC_ID
     };
   }) : [];
-  const summary = truth.firstAttemptSummary || {};
+  const summary = requestedTruth.firstAttemptSummary || {};
   return {
     ...payload,
     daily,
@@ -41,7 +45,7 @@ function overlayPayload(req,payload={}){
     firstAttemptRate: daily.map(row => row.firstAttemptRate ?? null),
     firstAttemptEvidenceComplete: daily.map(row => row.firstAttemptEvidenceComplete === true),
     firstAttemptSummary: summary,
-    firstAttemptDefinition: truth.definition,
+    firstAttemptDefinition: requestedTruth.definition || truth.definition,
     firstAttemptTruthId: V295_FIRST_ATTEMPT_TRUTH_ID,
     firstAttemptMetricId: V295_FIRST_ATTEMPT_METRIC_ID
   };
