@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { collectV200Rows, V200_EXPORT_VERSION } from './v225ExportReturnTruth.js';
-import { statsOf, bucketRows, anchorMaps, average } from './v200Metrics.js';
+import { statsOf, bucketRows, anchorMaps, completeAttemptRatio, completeSigningAverage } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
+import { V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
 
 export { V200_EXPORT_VERSION } from './v225ExportReturnTruth.js';
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
@@ -20,21 +21,34 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
   const anchors = anchorMaps(bucket);
   const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V200.xlsx`));
   await writeV200ReferenceWorkbook({ file, type: businessType, range, rows, stats, bucket, anchors, onProgress });
+  const overall = stats.overall;
+  const attempt1Rate = completeAttemptRatio(overall, overall.a1);
+  const attempt2Rate = completeAttemptRatio(overall, overall.a2);
+  const attempt3Rate = completeAttemptRatio(overall, overall.a3);
+  const averageDays = completeSigningAverage(overall.days, overall.pod);
+  const ppAverageDays = completeSigningAverage(overall.ppDays, overall.ppPod);
+  const pvAverageDays = completeSigningAverage(overall.pvDays, overall.pvPod);
   return {
     file,
     summary: {
       type: businessType,
-      total: stats.overall.total,
-      pod: stats.overall.pod,
-      pp: stats.overall.pp,
-      pv: stats.overall.pv,
-      attempt1: stats.overall.a1,
-      attempt2: stats.overall.a2,
-      attempt3: stats.overall.a3,
-      attemptUnknown: stats.overall.attemptUnknown,
-      averageDays: average(stats.overall.days),
-      ppAverageDays: average(stats.overall.ppDays),
-      pvAverageDays: average(stats.overall.pvDays),
+      total: overall.total,
+      pod: overall.pod,
+      pp: overall.pp,
+      pv: overall.pv,
+      attempt1: overall.a1,
+      attempt2: overall.a2,
+      attempt3: overall.a3,
+      attemptUnknown: overall.attemptUnknown,
+      attempt1Rate,
+      attempt2Rate,
+      attempt3Rate,
+      attemptEvidenceComplete: overall.pod === 0 || overall.attemptUnknown === 0,
+      averageDays,
+      ppAverageDays,
+      pvAverageDays,
+      signingEvidenceComplete: overall.pod === 0 || overall.days.length === overall.pod,
+      metricCompletenessId: V294_METRIC_COMPLETENESS_ID,
       engine: V200_EXPORT_VERSION,
       outputContract: 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY'
     }
