@@ -1,6 +1,7 @@
-export const BUILTIN_SHOP_WHITELIST_VERSION = 'SHOP-WL-2026-08-03-95';
+export const BUILTIN_SHOP_WHITELIST_VERSION = 'SHOP-WL-2026-08-25-95-ALIASES';
 export const BUILTIN_SHOP_WHITELIST_SOURCE_FILE = '门店CP白名单_标准化_执行副本_95码_2026-08-05.xlsx';
 export const BUILTIN_SHOP_WHITELIST_SOURCE_SHA256 = '6a6f634a2f12de7df7218b19d15c504e82088ecfb91c2d170e77a7eb66989e4c';
+export const BUILTIN_SHOP_ALIAS_COUNT = 26;
 
 const RAW = `
 CP000457|Veng Sreng Co-Shop
@@ -100,6 +101,34 @@ PV042|SHV-PT
 PV043|CE Chrey Thum shop (财通 CE速递)
 `;
 
+const SOURCE_ALIASES = Object.freeze({
+  CP000517: Object.freeze(['ChamPuvoan Ekareach2 co-shop']),
+  CP000521: Object.freeze(['Phsar Chak Angrae Kraom co shop']),
+  CP000526: Object.freeze(['Toul Tompoung 1 co shop']),
+  CP000531: Object.freeze(['Orussey Street 63 Co-shop']),
+  CP000532: Object.freeze(['Phsar Olympic co-shop']),
+  CP000533: Object.freeze(['Chaom Chau III co-shop']),
+  CP000535: Object.freeze(['CE Chbar Ampov I co-shop']),
+  CP000536: Object.freeze(['Beung Salang co-shop']),
+  CP000538: Object.freeze(['Wat Phneat co-shop']),
+  CP000539: Object.freeze(['Toul Sangke I co-shop']),
+  CP000540: Object.freeze(['Lucky 168 (oppo) phone shop']),
+  CP000541: Object.freeze(['Preaek Chrey']),
+  CP000542: Object.freeze(['Phsar Tuol Kork']),
+  CP000544: Object.freeze(['Borey Phnom Penh Sok San co-shop']),
+  CP000549: Object.freeze(['Champuvoan Borey Lorn City']),
+  CP000551: Object.freeze(['Phsar Tuol Sangke co-shop']),
+  CP000552: Object.freeze(['Samrong Andet Street 72P Co-shop']),
+  CP000554: Object.freeze(['Boeung Tompong I']),
+  CP000556: Object.freeze(['Borey Peng Im']),
+  CP000573: Object.freeze(['Spandek chamkar daung Co-Shop']),
+  CP000580: Object.freeze(['CE Wat Angtaminh Co-shop']),
+  CP000583: Object.freeze(['Phsa Champuvoan Co-shop']),
+  CP000584: Object.freeze(['Prey Thear co shop']),
+  CP000586: Object.freeze(['Borey New World Chhouk VA 1', 'Borey New world Chhouk Va I']),
+  CP000587: Object.freeze(['SHV Prey Nob national road 4 Km 183 (西港泛美XGFM)'])
+});
+
 export const BUILTIN_SHOP_STORES = Object.freeze(RAW.trim().split('\n').map(line => {
   const separator = line.indexOf('|');
   const code = line.slice(0, separator).trim().toUpperCase();
@@ -108,11 +137,15 @@ export const BUILTIN_SHOP_STORES = Object.freeze(RAW.trim().split('\n').map(line
     shop_code: code,
     canonical_name: name,
     prefix: code.match(/^[A-Z]+/)?.[0] || '',
-    aliases: [],
+    aliases: SOURCE_ALIASES[code] || Object.freeze([]),
     classification_enabled: true
   });
 }));
 
+const allAliases = BUILTIN_SHOP_STORES.flatMap(row => row.aliases || []);
 if (BUILTIN_SHOP_STORES.length !== 95 || new Set(BUILTIN_SHOP_STORES.map(row => row.shop_code)).size !== 95) {
   throw new Error('内置门店白名单必须保持95个唯一有效编码。');
+}
+if (allAliases.length !== BUILTIN_SHOP_ALIAS_COUNT) {
+  throw new Error(`内置门店别名数量异常：${allAliases.length}/${BUILTIN_SHOP_ALIAS_COUNT}`);
 }
