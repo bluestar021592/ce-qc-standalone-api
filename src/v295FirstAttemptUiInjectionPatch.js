@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-25-v303-authorized-clean-start-injection-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-25-v3051-authorized-clean-start-injection-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -8,6 +8,7 @@ const STABILITY_MARKER='/v301-runtime-stability.js?v=20260825-v301-1';
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
 void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
+// V300 recursive observer is no longer delivered. V301 remains the only DOM-stability owner.
 express.response.send=function v295FirstAttemptUiSend(body){
   if(typeof body==='string'&&body.includes('</body>')&&body.includes('CE Express')){
     const tags=[];
@@ -27,4 +28,4 @@ express.response.send=function v295FirstAttemptUiSend(body){
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V303_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'final HTML receives V303 authorized clean-start first, then V302 exact daily, V299 first-attempt and V301 stability owners.');
+console.info('[CE-QC][V305.1_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'final HTML receives V303 authorized clean-start first, then V302 exact daily, V299 first-attempt and V301 stability owners; V300 recursive observer is no longer delivered.');
