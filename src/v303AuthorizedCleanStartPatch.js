@@ -8,6 +8,8 @@ import { BUSINESS_DATA_TABLES } from './store.js';
 export const V303_AUTHORIZED_CLEAN_START_ID='2026-08-25-v303-authorized-clean-start-v2';
 export const V303_AUTHORIZATION='V303_USER_AUTHORIZED_FULL_CLEAN_20260825';
 const DONE_KEY='v303_authorized_clean_start_done';
+const DONE_VALUE='USER_AUTHORIZED_20260825_COMPLETE';
+const PRIOR_DONE_VALUES=new Set(['2026-08-25-v303-authorized-clean-start-v1','2026-08-25-v303-authorized-clean-start-v2',DONE_VALUE]);
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
 let inFlight=null;
@@ -50,7 +52,10 @@ async function cleanRuntimeFiles(cfg){
 
 export async function performV303AuthorizedCleanStart({db=getDb(),cfg=getRuntimeConfig(),actor='ADMIN'}={}){
   const existingDone=getMeta(db,DONE_KEY);
-  if(existingDone===V303_AUTHORIZED_CLEAN_START_ID){
+  if(PRIOR_DONE_VALUES.has(existingDone)){
+    // Never clear again after any revision of this one user-authorized campaign.
+    // This protects every new upload made after the first successful clean start.
+    if(existingDone!==DONE_VALUE)setMeta(db,DONE_KEY,DONE_VALUE);
     return {ok:true,alreadyDone:true,cleared:false,id:V303_AUTHORIZED_CLEAN_START_ID,storage:{dbFile:cfg.dbFile,importsDir:cfg.importsDir,exportsDir:cfg.exportsDir,backupsDir:cfg.backupsDir,logsDir:cfg.logsDir,evidenceArchiveDir:cfg.evidenceArchiveDir}};
   }
 
@@ -86,7 +91,7 @@ export async function performV303AuthorizedCleanStart({db=getDb(),cfg=getRuntime
   catch(error){throw new Error(`业务数据已清空，但SQLite磁盘空间回收尚未完成：${error?.message||error}`);}
   const integrity=String(db.prepare('PRAGMA quick_check(1)').get()?.quick_check||'');
   if(integrity!=='ok')throw new Error(`清空后SQLite校验失败：${integrity||'unknown'}`);
-  setMeta(db,DONE_KEY,V303_AUTHORIZED_CLEAN_START_ID);
+  setMeta(db,DONE_KEY,DONE_VALUE);
   setMeta(db,'v303_authorized_clean_start_completed_at',nowIso());
   try{globalThis.__CE_QC_INVALIDATE_V295_FIRST_ATTEMPT__?.('V303_AUTHORIZED_CLEAN_START');}catch{}
   return {ok:true,alreadyDone:false,cleared:true,id:V303_AUTHORIZED_CLEAN_START_ID,deletedRows,vacuum:'ok',integrity,fileCleanupWarnings:fileCleanup.warnings,storage:{dbFile:cfg.dbFile,importsDir:cfg.importsDir,exportsDir:cfg.exportsDir,backupsDir:cfg.backupsDir,logsDir:cfg.logsDir,evidenceArchiveDir:cfg.evidenceArchiveDir}};
@@ -108,4 +113,4 @@ express.application.post=function v303AuthorizedCleanStartPost(route,...handlers
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V303_AUTHORIZED_CLEAN_START]',V303_AUTHORIZED_CLEAN_START_ID,'route armed; destructive work occurs only after an authenticated ADMIN browser sends the explicit user-authorized marker; DONE requires VACUUM + quick_check success.');
+console.info('[CE-QC][V303_AUTHORIZED_CLEAN_START]',V303_AUTHORIZED_CLEAN_START_ID,'route armed; destructive work occurs only after an authenticated ADMIN browser sends the explicit user-authorized marker; DONE is campaign-stable and requires VACUUM + quick_check success.');
