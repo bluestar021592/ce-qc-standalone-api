@@ -1,8 +1,8 @@
 (function installV253DashboardFastOwner(global){
   if(global.__CE_QC_V253_DASHBOARD_FAST_OWNER__)return;
-  const VERSION='2026-08-24-v291-seven-business-visible-truth-owner-v1';
+  const VERSION='2026-08-25-v293-density-home-attempt-dedupe-v1';
   // Compatibility marker: generic/business V253 rendering remains "fetch acceleration only";
-  // V291 adds only one read-only homepage truth hydrator and does not revive retired board renderers.
+  // V291+ only adds one read-only homepage truth hydrator and does not revive retired board renderers.
   const LEGACY_FETCH_ACCELERATION_ONLY_MARKER='fetch acceleration only';void LEGACY_FETCH_ACCELERATION_ONLY_MARKER;
   const nativeFetch=global.fetch.bind(global);
   let homeBusy=false,homeTimer=null,lastHomeKey='',suppressMutationsUntil=0;
@@ -37,14 +37,18 @@
   const fmt=v=>n(v).toLocaleString('zh-CN');
   const pct=(v,t)=>t?`${(n(v)*100/n(t)).toFixed(2)}%`:'0.00%';
   const date=v=>String(v||'').slice(0,10);
+  const HOME_ATTEMPT_HEADING_RE=/SHOPEE\s*1\s*\/\s*2\s*\/\s*3派(?:成功率|签收占POD)?趋势/i;
 
+  function directHeading(node){
+    return [...(node?.children||[])].find(child=>/^H[1-4]$/.test(String(child?.tagName||'')))?.textContent||'';
+  }
+  function homeAttemptSections(root){
+    return [...(root?.querySelectorAll?.('section')||[])].filter(node=>HOME_ATTEMPT_HEADING_RE.test(String(directHeading(node)||'')));
+  }
   function removeHomeLegacyAttempts(){
     const root=document.getElementById('homePage');if(!root||root.hidden)return;
-    const candidates=[...root.querySelectorAll('section,article,.v18-panel')];
-    for(const node of candidates){
-      const heading=[...node.querySelectorAll('h1,h2,h3,h4')].map(h=>String(h.textContent||'')).join(' ');
-      if(/SHOPEE\s*1\s*\/\s*2\s*\/\s*3派签收占POD趋势/i.test(heading)&&node.dataset.v291HomeAttempts!=='1')node.remove();
-    }
+    const sections=homeAttemptSections(root);const authoritative=sections.find(node=>node.dataset.v291HomeAttempts==='1')||null;
+    for(const node of sections){if(node!==authoritative)node.remove();}
   }
 
   function visibleHome(){const root=document.getElementById('homePage');return root&&!root.hidden&&getComputedStyle(root).display!=='none'?root:null;}
@@ -93,11 +97,9 @@
   function seriesValues(data,key){
     if(Array.isArray(data?.[key]))return data[key];const daily=Array.isArray(data?.daily)?data.daily:[];return daily.map(row=>row?.ledgerReady===false?null:(row?.[key]??null));
   }
-  function findAttemptSection(root){
-    return [...root.querySelectorAll('section,.v18-panel')].find(node=>/SHOPEE\s*1\s*\/\s*2\s*\/\s*3派/i.test(String(node.querySelector('h1,h2,h3,h4')?.textContent||'')))||null;
-  }
+  function findAttemptSection(root){return homeAttemptSections(root).find(node=>node.dataset.v291HomeAttempts==='1')||null;}
   function ensureAttemptSection(root){
-    let section=findAttemptSection(root);if(section)return section;
+    removeHomeLegacyAttempts();let section=findAttemptSection(root);if(section)return section;
     section=document.createElement('section');section.className='v18-panel';section.dataset.v291HomeAttempts='1';section.innerHTML='<h2>SHOPEE 1/2/3派签收占POD趋势</h2><div class="operation-status"></div><div class="v18-chart-grid"><article class="v18-chart-card"></article><article class="v18-chart-card"></article></div>';
     root.appendChild(section);return section;
   }
@@ -112,6 +114,7 @@
   function patchHomeAttempts(root,cn,vn){
     const section=ensureAttemptSection(root);section.dataset.v291HomeAttempts='1';let grid=section.querySelector('.v18-chart-grid');if(!grid){grid=document.createElement('div');grid.className='v18-chart-grid';section.appendChild(grid);}while(grid.querySelectorAll('.v18-chart-card').length<2){const card=document.createElement('article');card.className='v18-chart-card';grid.appendChild(card);}const cards=[...grid.querySelectorAll('.v18-chart-card')];renderAttemptCard(cards[0],'SHOPEE CN',cn);renderAttemptCard(cards[1],'SHOPEE VN',vn);
     const status=section.querySelector('.operation-status,.v271-trend-status,.v272-status');const incomplete=[cn,vn].some(data=>(data?.daily||[]).some(r=>r?.ledgerReady===false));if(status)status.textContent=incomplete?'真实派次证据按日显示；证据未完成的日期保持“—”，不再整块显示0%。':'SHOPEE CN/VN真实1/2/3派证据已按所选日期范围显示。';
+    removeHomeLegacyAttempts();
   }
   async function refreshHomeTruth(force=false){
     const root=visibleHome(),rg=selectedRange();if(!root||!rg.to||!rg.from||homeBusy)return;const key=`${rg.from}|${rg.to}`;if(!force&&lastHomeKey===key&&root.dataset.v291VisibleTruth===key)return;
@@ -122,7 +125,7 @@
         json(`/api/v263/delivery-trends?businessType=SHOPEEVN&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`)
       ]);
       if(!root.isConnected||!visibleHome())return;suppressMutationsUntil=Date.now()+700;patchBusinessCards(root,period);patchHomeCore(root,period);patchHomeAttempts(root,cn,vn);root.dataset.v291VisibleTruth=key;lastHomeKey=key;
-    }catch(error){console.warn('[CE-QC][V291_VISIBLE_HOME]',error?.message||error);}finally{homeBusy=false;}
+    }catch(error){console.warn('[CE-QC][V293_VISIBLE_HOME]',error?.message||error);}finally{homeBusy=false;}
   }
   function scheduleHome(ms=120,force=false){clearTimeout(homeTimer);homeTimer=setTimeout(()=>refreshHomeTruth(force),ms);}
 
@@ -134,11 +137,11 @@
     document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,#dashboardRangeQuery'))scheduleHome(120,true);},true);
     document.addEventListener('change',event=>{if(event.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))scheduleHome(150,true);},true);
     global.addEventListener('popstate',()=>scheduleHome(120,true));
-    const observer=new MutationObserver(records=>{if(Date.now()<suppressMutationsUntil||!visibleHome())return;const relevant=records.some(record=>[...record.addedNodes].some(node=>node?.nodeType===1&&(node.matches?.('.v18-business-grid,.v18-core-grid,.v18-trend-section')||node.querySelector?.('.v18-business-grid,.v18-core-grid,.v18-trend-section'))));if(relevant)scheduleHome(180,true);});if(document.body)observer.observe(document.body,{subtree:true,childList:true});
+    const observer=new MutationObserver(records=>{if(Date.now()<suppressMutationsUntil||!visibleHome())return;const relevant=records.some(record=>[...record.addedNodes].some(node=>node?.nodeType===1));if(relevant){removeHomeLegacyAttempts();scheduleHome(180,true);}});if(document.body)observer.observe(document.body,{subtree:true,childList:true});
     setTimeout(()=>scheduleHome(0,true),900);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
 
-  global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true,visibleTruthV291:true,refreshHomeTruth};
-  console.info('[CE-QC][V291_VISIBLE_TRUTH_OWNER]',VERSION,'generic/business V253 rendering remains fetch-only; homepage alone hydrates read-only seven-business range truth + V246 delivery evidence; no startup/database-write changes.');
+  global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true,visibleTruthV291:true,visibleTruthV293:true,refreshHomeTruth};
+  console.info('[CE-QC][V293_VISIBLE_TRUTH_OWNER]',VERSION,'generic/business V253 rendering remains fetch-only; homepage removes duplicate empty attempt shells and hydrates one read-only CN/VN V246 attempt panel + seven-business range truth; no startup/database-write changes.');
 })(window);
