@@ -27,3 +27,19 @@
 @media(max-width:1100px){#v263DeliveryKpiPanel>[data-v263-summary],#v263DeliveryKpiPanel .v18-core-grid[data-v263-summary]{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 /* WHPP cached data is already visible; background refresh is intentionally silent. */
 #whppFastPage>.processing-notice.running{display:none!important}
+
+/* V292: density-first dashboard layout. Empty grid tracks are never reserved. */
+.v18-mid-grid:has(> :only-child){grid-template-columns:minmax(0,1fr)!important}
+.v18-mid-grid:has(> :only-child)>:only-child{grid-column:1/-1;width:100%}
+.v18-special-grid:has(> :only-child){grid-template-columns:minmax(0,1fr)}
+.v18-chart-grid:has(> .v18-chart-card:first-child:last-child){grid-template-columns:minmax(0,1fr)!important}
+.v18-chart-grid:has(> .v18-chart-card:nth-child(2):last-child){grid-template-columns:repeat(2,minmax(0,1fr))!important}
+.v18-chart-grid:has(> .v18-chart-card:nth-child(3):last-child){grid-template-columns:repeat(3,minmax(0,1fr))!important}
+.v18-chart-grid:has(> .v18-chart-card:nth-child(4):last-child){grid-template-columns:repeat(4,minmax(0,1fr))!important}
+[data-v291-home-attempts="1"] .v18-chart-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+[data-v291-home-attempts="1"] .v18-chart-card{width:100%!important}
+.v18-dispatch-grid:has(> :first-child:last-child){grid-template-columns:minmax(0,1fr)}
+.v18-dispatch-grid:has(> :nth-child(2):last-child){grid-template-columns:repeat(2,minmax(0,1fr))}
+.v18-dispatch-grid:has(> :nth-child(3):last-child){grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:1100px){.v18-chart-grid:has(> .v18-chart-card:nth-child(3):last-child),.v18-chart-grid:has(> .v18-chart-card:nth-child(4):last-child){grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media(max-width:720px){.v18-chart-grid,.v18-chart-grid:has(> .v18-chart-card:nth-child(2):last-child),.v18-chart-grid:has(> .v18-chart-card:nth-child(3):last-child),.v18-chart-grid:has(> .v18-chart-card:nth-child(4):last-child),[data-v291-home-attempts="1"] .v18-chart-grid{grid-template-columns:minmax(0,1fr)!important}.v18-special-grid,.v18-dispatch-grid{grid-template-columns:minmax(0,1fr)!important}}
