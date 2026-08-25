@@ -2,11 +2,32 @@ import express from 'express';
 import { readV295FirstAttemptTrends, V295_FIRST_ATTEMPT_TRUTH_ID } from './v295FirstAttemptTruth.js';
 import { V295_FIRST_ATTEMPT_METRIC_ID } from './v295FirstAttemptMetric.js';
 
-export const V295_FIRST_ATTEMPT_ROUTE_ID = '2026-08-25-v295-first-attempt-api-overlay-v1';
+export const V295_FIRST_ATTEMPT_ROUTE_ID = '2026-08-25-v297-first-attempt-exact-visible-api-v2';
 const TARGETS = new Set(['/api/v253/trends','/api/v263/delivery-trends']);
+const DIRECT_PATH = '/api/v295/first-attempt-trends';
 const previousGet = express.application.get;
+let directRegistered = false;
 
 function dateKey(value=''){return String(value||'').slice(0,10);}
+function directHandler(req,res){
+  try {
+    const type = String(req.query?.businessType || 'HOME').toUpperCase();
+    const from = dateKey(req.query?.from || req.query?.to);
+    const to = dateKey(req.query?.to || from);
+    if (!from || !to || from > to) throw new Error('V295日期范围无效');
+    const data = readV295FirstAttemptTrends(type, from, to);
+    res.setHeader?.('Cache-Control','private,max-age=5');
+    res.setHeader?.('X-CE-QC-V295-First-Attempt',V295_FIRST_ATTEMPT_ROUTE_ID);
+    return res.json(data);
+  } catch (error) {
+    return res.status(400).json({ok:false,id:V295_FIRST_ATTEMPT_ROUTE_ID,error:error?.message||String(error)});
+  }
+}
+function ensureDirectRoute(app){
+  if(directRegistered)return;
+  directRegistered=true;
+  previousGet.call(app,DIRECT_PATH,directHandler);
+}
 function overlayPayload(req,payload={}){
   if (!payload || payload.ok === false) return payload;
   const type = String(req.query?.businessType || payload.businessType || 'ALL').toUpperCase();
@@ -65,9 +86,10 @@ function responseHook(req,res,next){
   next();
 }
 express.application.get = function v295FirstAttemptRouteRegistration(pathValue,...handlers){
+  ensureDirectRoute(this);
   const path = String(pathValue || '');
   if (TARGETS.has(path) && handlers.length) return previousGet.call(this,pathValue,responseHook,...handlers);
   return previousGet.call(this,pathValue,...handlers);
 };
 
-console.info('[CE-QC][V295_FIRST_ATTEMPT_ROUTE]',V295_FIRST_ATTEMPT_ROUTE_ID,'V253/V263 trend responses publish real first-attempt success separately from same-day POD.');
+console.info('[CE-QC][V295_FIRST_ATTEMPT_ROUTE]',V295_FIRST_ATTEMPT_ROUTE_ID,'exact /api/v295/first-attempt-trends serves HOME/CCSL/SHOPEE and each business directly; V253/V263 overlays remain compatibility-only.');
