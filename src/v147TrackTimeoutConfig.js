@@ -3,6 +3,9 @@ import './v204CeafInstantRoutePatch.js';
 import './v294CleanReuploadIntegrity.js';
 import './v294PostProcessAttemptBackfillPatch.js';
 import './v294CarryoverSchedulerActivation.js';
+import './v295FirstAttemptRoutePatch.js';
+import './v295FirstAttemptInvalidationPatch.js';
+import './v295FirstAttemptUiInjectionPatch.js';
 
 const RECOVERY_SAFE_MODE=String(process.env.CE_QC_RECOVERY_SAFE_MODE||'')==='1';
 if(!RECOVERY_SAFE_MODE){
