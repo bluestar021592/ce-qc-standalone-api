@@ -105,7 +105,7 @@
   }
   function renderAttemptCard(card,label,data){
     const renderer=global.RateTrendCardV18?.render;if(typeof renderer!=='function'||!card)return;
-    const dates=data?.dates||[],pod=seriesValues(data,'pod');renderer(card,{title:`${label} 1/2/3派签收占POD趋势`,type:'rate',dates,evidenceIncomplete:(data?.daily||[]).some(r=>r?.ledgerReady===false),series:[
+    const dates=data?.dates||[],pod=seriesValues(data,'pod');renderer(card,{title:`${label} 1/2/3派签收占POD趋势`,type:'rate',dates,evidenceIncomplete:(data?.daily||[]).some(r=>r?.ledgerReady===false||r?.evidenceIncomplete===true),series:[
       {name:'1派',color:'#1677ff',values:seriesValues(data,'attempt1Rate'),numerators:seriesValues(data,'attempt1'),denominators:pod},
       {name:'2派',color:'#16a36a',values:seriesValues(data,'attempt2Rate'),numerators:seriesValues(data,'attempt2'),denominators:pod},
       {name:'3派+',color:'#ff8a00',values:seriesValues(data,'attempt3Rate'),numerators:seriesValues(data,'attempt3'),denominators:pod}
@@ -113,7 +113,7 @@
   }
   function patchHomeAttempts(root,cn,vn){
     const section=ensureAttemptSection(root);section.dataset.v291HomeAttempts='1';let grid=section.querySelector('.v18-chart-grid');if(!grid){grid=document.createElement('div');grid.className='v18-chart-grid';section.appendChild(grid);}while(grid.querySelectorAll('.v18-chart-card').length<2){const card=document.createElement('article');card.className='v18-chart-card';grid.appendChild(card);}const cards=[...grid.querySelectorAll('.v18-chart-card')];renderAttemptCard(cards[0],'SHOPEE CN',cn);renderAttemptCard(cards[1],'SHOPEE VN',vn);
-    const status=section.querySelector('.operation-status,.v271-trend-status,.v272-status');const incomplete=[cn,vn].some(data=>(data?.daily||[]).some(r=>r?.ledgerReady===false));if(status)status.textContent=incomplete?'真实派次证据按日显示；证据未完成的日期保持“—”，不再整块显示0%。':'SHOPEE CN/VN真实1/2/3派证据已按所选日期范围显示。';
+    const status=section.querySelector('.operation-status,.v271-trend-status,.v272-status');const incomplete=[cn,vn].some(data=>(data?.daily||[]).some(r=>r?.ledgerReady===false||r?.evidenceIncomplete===true));if(status)status.textContent=incomplete?'真实派次证据按日显示；证据未完成的日期保持“—”，不再整块显示0%。':'SHOPEE CN/VN真实1/2/3派证据已按所选日期范围显示。';
     removeHomeLegacyAttempts();
   }
   async function refreshHomeTruth(force=false){
