@@ -1,6 +1,6 @@
 (function installV295FirstAttemptUi(global){
   if(global.__CE_QC_V295_FIRST_ATTEMPT_UI__)return;
-  const VERSION='2026-08-25-v298-exact-visible-truth-nav-authority-v1';
+  const VERSION='2026-08-25-v298-exact-visible-truth-nav-authority-v2';
   const DASHBOARD_CSS='/dashboard-v18.css?v=20260825-v296-1';
   const FIRST_ATTEMPT_API='/api/v295/first-attempt-trends';
   const NAV_ITEMS=[
@@ -18,6 +18,11 @@
     if(!css){css=document.createElement('link');css.rel='stylesheet';document.head.appendChild(css);}
     if(String(css.getAttribute('href')||'')!==DASHBOARD_CSS)css.setAttribute('href',DASHBOARD_CSS);
     css.dataset.v296DashboardCss='1';
+    if(!document.getElementById('v298ExactTrendGuard')){
+      const guard=document.createElement('style');guard.id='v298ExactTrendGuard';
+      guard.textContent='.v18-trend-section:has(.v272-status.error) .v272-trend-grid{display:none!important}';
+      document.head.appendChild(guard);
+    }
     const logo=document.querySelector('[data-testid="ce-express-logo"],.sidebar-brand img');
     if(logo&&logo.dataset.v296Logo!=='ready'){
       logo.dataset.v296Logo='ready';
@@ -110,13 +115,13 @@
     try{const payload=await loadExact(type,rg,force);lastPayload=payload;lastKey=key;applyPayload(payload);setTimeout(()=>applyPayload(payload),350);setTimeout(()=>applyPayload(payload),1200);}
     catch(error){console.warn('[CE-QC][V298_FIRST_ATTEMPT_UI]',error?.message||error);if(lastKey!==key){lastPayload={type,range:rg,trend:{dates:[],firstAttemptRate:[],firstAttemptSuccess:[],firstAttemptEligible:[],firstAttemptEvidenceComplete:[]},summary:null};lastKey=key;}applyPayload(lastPayload);}
   }
-  function schedule(ms=1600,force=true){clearTimeout(timer);timer=setTimeout(()=>refresh(force),ms);}
+  function schedule(ms=7200,force=true){clearTimeout(timer);timer=setTimeout(()=>refresh(force),ms);}
   function mutationRelevant(r){if(r.type==='characterData')return Boolean(r.target?.parentElement?.closest?.('.v18-metric-card,.v18-trend-section,#v271AttemptPanel,#v272AttemptPanel'));return[...r.addedNodes].some(n=>n?.nodeType===1&&(n.matches?.('.v18-metric-card,.v18-trend-section,#v271AttemptPanel,#v272AttemptPanel')||n.querySelector?.('.v18-metric-card,.v18-trend-section,#v271AttemptPanel,#v272AttemptPanel')));}
   function bind(){
     ensureVisibleAssets();canonicalizeNav();
-    document.addEventListener('click',e=>{if(e.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,#dashboardRangeQuery')){setTimeout(canonicalizeNav,40);schedule(1700,true);}},true);
-    document.addEventListener('change',e=>{if(e.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(1700,true);},true);
-    global.addEventListener('popstate',()=>schedule(1700,true));
+    document.addEventListener('click',e=>{if(e.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,#dashboardRangeQuery')){setTimeout(canonicalizeNav,40);schedule(7200,true);}},true);
+    document.addEventListener('change',e=>{if(e.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(7200,true);},true);
+    global.addEventListener('popstate',()=>schedule(7200,true));
     const o=new MutationObserver(records=>{
       if(records.some(r=>r.target?.closest?.('.side-nav')||[...r.addedNodes].some(n=>n?.nodeType===1&&n.closest?.('.side-nav'))))canonicalizeNav();
       if(records.some(r=>r.type==='characterData'&&r.target?.parentElement?.closest?.('#headerUserRole')))canonicalizeNav();
@@ -124,9 +129,9 @@
       if(records.some(mutationRelevant)&&lastPayload&&lastKey===`${activeType()}|${range().from}|${range().to}`)setTimeout(()=>applyPayload(lastPayload),80);
     });
     if(document.body)o.observe(document.body,{subtree:true,childList:true,characterData:true});
-    setTimeout(canonicalizeNav,120);setTimeout(canonicalizeNav,700);setTimeout(()=>refresh(true),2200);
+    setTimeout(canonicalizeNav,120);setTimeout(canonicalizeNav,700);setTimeout(()=>refresh(true),7200);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V295_FIRST_ATTEMPT_UI__={version:VERSION,refresh,ensureVisibleAssets,canonicalizeNav};
-  console.info('[CE-QC][V298_FIRST_ATTEMPT_UI]',VERSION,'精确首派真值延后到主趋势请求之后读取；同范围请求单飞并短缓存；侧栏由一套规范菜单强制接管，遗留重复入口不会保留。');
+  console.info('[CE-QC][V298_FIRST_ATTEMPT_UI]',VERSION,'主趋势拥有完整6.5秒读取窗口后才启动首派真值；同范围首派请求单飞并短缓存；主趋势读取失败时旧范围走势图隐藏；侧栏由一套规范菜单强制接管。');
 })(window);
