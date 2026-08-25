@@ -1,6 +1,7 @@
 import { loadRangeDashboard as loadRangeDashboardV191 } from './rangeDashboardStoreV191.js';
 import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
 import { summarizeV284ProvenRange as summarizeV284Range, readV284ProvenShopeeTrends } from './v284MembershipEvidenceCoverage.js';
+import { mergeV293WhppHistoricalRange, V293_WHPP_HISTORICAL_RANGE_TRUTH_ID } from './v293WhppHistoricalRangeTruth.js';
 
 const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
@@ -10,7 +11,8 @@ const pct=(v,t)=>t?Number((n(v)*100/n(t)).toFixed(2)):0;
 
 export function loadRangeDashboard(fromDate,toDate){
   const range=loadRangeDashboardV191(fromDate,toDate);
-  const truth=summarizeV284Range(range.fromDate||fromDate,range.toDate||toDate);
+  const resolvedFrom=range.fromDate||fromDate,resolvedTo=range.toDate||toDate;
+  const truth=summarizeV284Range(resolvedFrom,resolvedTo);
   range.states ||= {};
   range.aggregates ||= {};
 
@@ -22,7 +24,7 @@ export function loadRangeDashboard(fromDate,toDate){
   for(const type of SHOPEE_TYPES){
     const dailyRows=truth.daily.filter(row=>row.businessType===type);
     patchState(range.states?.[type],truth.byType[type],dailyRows);
-    const trend=readV284ProvenShopeeTrends(type,truth.dates?.[0]||range.fromDate||fromDate,truth.dates?.at(-1)||range.toDate||toDate,{includeRegions:true});
+    const trend=readV284ProvenShopeeTrends(type,truth.dates?.[0]||resolvedFrom,truth.dates?.at(-1)||resolvedTo,{includeRegions:true});
     const regions=aggregateRegions(trend.daily||[]);
     shopeeRegionFacts[type]=regions;
     patchShopeeExactNested(range.states?.[type],type,truth.byType[type],regions);
@@ -32,22 +34,35 @@ export function loadRangeDashboard(fromDate,toDate){
   patchState(range.aggregates?.SHOPEE,truth.shopee,truth.daily.filter(row=>SHOPEE_TYPES.includes(row.businessType)));
   patchShopeeAggregateNested(range.aggregates?.SHOPEE,truth,shopeeRegionFacts);
 
+  // V293: historical WHPP parse rows can be rotated while the WHPP daily ledger
+  // and completed history summary remain intact. Keep canonical V284 rows whenever
+  // they exist with the full daily denominator; only fill missing/shrunk WHPP days
+  // from those preserved read-only history tables.
+  const whppDaily=mergeV293WhppHistoricalRange(truth.daily.filter(row=>row.businessType==='WHPP'),resolvedFrom,resolvedTo);
+  const visibleWhpp=mergeFacts('WHPP',whppDaily);
+  const visibleDaily=[...truth.daily.filter(row=>row.businessType!=='WHPP'),...whppDaily]
+    .sort((a,b)=>String(a.reportDate||'').localeCompare(String(b.reportDate||''))||String(a.businessType||'').localeCompare(String(b.businessType||'')));
+  const visibleDates=[...new Set([...truth.dates,...whppDaily.map(row=>row.reportDate)].filter(Boolean))].sort();
+
   // V291: WHPP and the homepage operational aggregate are first-class read-only
   // range states. This does not alter SQLite or redefine CCSL. HOME is explicitly
   // CE+CEAF+TBKH+ALI1688+WHPP, matching the visible homepage core-card definition.
-  range.states.WHPP=buildTruthState('WHPP',truth.whpp,truth.daily.filter(row=>row.businessType==='WHPP'));
-  const homeFact=mergeFacts('HOME',[truth.ccsl,truth.whpp]);
-  range.aggregates.HOME=buildTruthState('HOME',homeFact,truth.daily.filter(row=>CCSL_TYPES.includes(row.businessType)||row.businessType==='WHPP'));
+  range.states.WHPP=buildTruthState('WHPP',visibleWhpp,whppDaily);
+  const homeFact=mergeFacts('HOME',[truth.ccsl,visibleWhpp]);
+  range.aggregates.HOME=buildTruthState('HOME',homeFact,visibleDaily.filter(row=>CCSL_TYPES.includes(row.businessType)||row.businessType==='WHPP'));
 
-  range.sourceTotal=truth.sourceTotal;
-  range.analyzedTotal=truth.analyzedTotal;
-  range.analysisPending=truth.analysisPending;
-  range.missingAnalysisDates=truth.missingDates;
-  range.analysisComplete=truth.analysisComplete;
-  range.sourceDates=truth.dates;
-  range.dates=truth.dates;
-  range.v284Coverage=truth.daily.map(row=>({reportDate:row.reportDate,businessType:row.businessType,total:row.total,matched:row.matched,coverageRate:row.coverageRate,ready:row.ready}));
-  return {...range,queryMode:`${range.queryMode||'SQL'}+DAILY_MEMBERSHIP_PROVEN_LEDGER_V284+V291_SEVEN_BUSINESS_VISIBLE_TRUTH`,dailyTruthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,evidenceCoverageId:truth.evidenceCoverageId,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK',visibleTruthId:'2026-08-24-v291-seven-business-visible-truth-v1'};
+  const visibleSourceTotal=n(truth.ccsl?.total)+n(truth.shopee?.total)+n(visibleWhpp.total);
+  const visibleAnalyzedTotal=n(truth.ccsl?.matched)+n(truth.shopee?.matched)+n(visibleWhpp.matched);
+  const visibleMissingDates=visibleDates.filter(reportDate=>visibleDaily.some(row=>row.reportDate===reportDate&&n(row.total)>0&&!row.ready));
+  range.sourceTotal=visibleSourceTotal;
+  range.analyzedTotal=visibleAnalyzedTotal;
+  range.analysisPending=Math.max(0,visibleSourceTotal-visibleAnalyzedTotal);
+  range.missingAnalysisDates=visibleMissingDates;
+  range.analysisComplete=visibleMissingDates.length===0&&visibleAnalyzedTotal>=visibleSourceTotal;
+  range.sourceDates=visibleDates;
+  range.dates=visibleDates;
+  range.v284Coverage=visibleDaily.map(row=>({reportDate:row.reportDate,businessType:row.businessType,total:row.total,matched:row.matched,coverageRate:row.coverageRate,ready:row.ready,historyFallback:Boolean(row.historyFallback)}));
+  return {...range,queryMode:`${range.queryMode||'SQL'}+DAILY_MEMBERSHIP_PROVEN_LEDGER_V284+V291_SEVEN_BUSINESS_VISIBLE_TRUTH+V293_WHPP_HISTORY_RANGE`,dailyTruthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,evidenceCoverageId:truth.evidenceCoverageId,whppHistoricalTruthId:V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP_WITH_PRESERVED_WHPP_HISTORY_FALLBACK',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK',visibleTruthId:'2026-08-25-v293-seven-business-visible-truth-v2'};
 }
 
 function buildTruthState(type,fact,dailyRows=[]){
@@ -95,7 +110,7 @@ function patchState(state,fact,dailyRows=[]){
   state.snapshotStatus=state.sourceDates.length?(state.analysisComplete?'COMPLETED':'PARTIAL'):'EMPTY';
   state.dailyReportReady=state.sourceDates.length>0;
   state.dailyParseSummary={...(state.dailyParseSummary||{}),totalRecognized:fact.total,sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending};
-  state.sourceCoverage={sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending,analysisComplete:state.analysisComplete,sourceDates:state.sourceDates,analyzedDates:state.analyzedDates,missingAnalysisDates:missingDates,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK'};
+  state.sourceCoverage={sourceTotal:fact.total,analyzedTotal:fact.matched,analysisPending:state.analysisPending,analysisComplete:state.analysisComplete,sourceDates:state.sourceDates,analyzedDates:state.analyzedDates,missingAnalysisDates:missingDates,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP_WITH_PRESERVED_WHPP_HISTORY_FALLBACK',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK'};
   state.dashboard ||= {};
   const summaries=[state.v55Summary,state.dashboard?.v55Summary,state.dashboard?.metrics].filter(Boolean);
   for(const summary of summaries)patchMetrics(summary,fact);
@@ -180,4 +195,4 @@ function patchDashboardRows(rows,f){
   for(const row of rows){const label=String(row?.项目||row?.metricKey||row?.label||'').trim();if(!values.has(label))continue;const value=Number(values.get(label)||0);row.数值=value;row.数值原值=value;row.value=value;}
 }
 
-console.info('[CE-QC][V291_VISIBLE_TRUTH]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'range exposes WHPP + HOME(CE/CEAF/TBKH/ALI1688/WHPP) and writes proven Shopee truth into visible recipient/region metrics; read-only, no database mutation.');
+console.info('[CE-QC][V293_VISIBLE_TRUTH]',V284_DAILY_MEMBERSHIP_TRUTH_ID,V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,'range exposes full WHPP historical period + HOME(CE/CEAF/TBKH/ALI1688/WHPP) and writes proven Shopee truth into visible recipient/region metrics; read-only, no database mutation.');
