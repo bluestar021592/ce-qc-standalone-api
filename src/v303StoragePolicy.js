@@ -7,8 +7,9 @@ function runtimeRoot(){
   if(String(process.env.CE_QC_RUNTIME_DIR||'').trim())return path.resolve(String(process.env.CE_QC_RUNTIME_DIR).trim());
   if(String(process.env.EXPORTS_DIR||'').trim())return path.dirname(path.resolve(String(process.env.EXPORTS_DIR).trim()));
   if(process.platform==='win32'){
-    const base=String(process.env.LOCALAPPDATA||'').trim()||path.join(String(process.env.SystemDrive||'C:'),'CE_QC_RUNTIME');
-    return path.join(base,'CE_QC_RUNTIME');
+    const local=String(process.env.LOCALAPPDATA||'').trim();
+    if(local)return path.join(local,'CE_QC_RUNTIME');
+    return path.join(String(process.env.SystemDrive||'C:'),'CE_QC_RUNTIME');
   }
   return path.join(os.homedir(),'.ce-qc-runtime');
 }
