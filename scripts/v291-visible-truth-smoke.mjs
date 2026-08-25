@@ -70,7 +70,7 @@ assert.match(v147,/v295FirstAttemptRoutePatch\.js/,'real bootstrap chain must ac
 assert.match(v147,/v295FirstAttemptInvalidationPatch\.js/,'real bootstrap chain must activate same-day cache invalidation');
 assert.match(v147,/v295FirstAttemptUiInjectionPatch\.js/,'real bootstrap chain must activate V295 visible UI owner');
 assert.match(v295Injection,/v295-first-attempt-ui\.js\?v=20260825-v298-1/,'V298 visible owner must be cache-busted so browsers cannot reuse the V297 script');
-assert.match(v295Ui,/2026-08-25-v298-exact-visible-truth-nav-authority-v1/,'V298 authoritative visible owner must be active');
+assert.match(v295Ui,/2026-08-25-v298-exact-visible-truth-nav-authority-v2/,'V298.1 authoritative visible owner must be active');
 assert.match(v295Ui,/FIRST_ATTEMPT_API='\/api\/v295\/first-attempt-trends'/,'visible first-attempt card and chart must use the dedicated exact API');
 assert.match(v295Ui,/const NAV_ITEMS=\[/,'sidebar must be rebuilt from one explicit canonical navigation authority');
 assert.match(v295Ui,/WHPP本土看板/,'canonical sidebar must keep WHPP as a first-class board');
@@ -78,7 +78,9 @@ assert.match(v295Ui,/nav\.innerHTML=NAV_ITEMS\.map/,'duplicate/retired sidebar n
 assert.match(v295Ui,/navPending=true/,'sidebar mutations arriving during a repair pass must schedule another canonical pass');
 assert.doesNotMatch(v295Ui,/遗留异常动态/,'retired legacy navigation entry must never exist in the V298 canonical menu');
 assert.match(v295Ui,/const cache=new Map\(\),inflight=new Map\(\)/,'same exact first-attempt range must coalesce to one in-flight request');
-assert.match(v295Ui,/setTimeout\(\(\)=>refresh\(true\),2200\)/,'cold first-attempt truth must wait until the primary dashboard trend request gets the event loop first');
+assert.match(v295Ui,/setTimeout\(\(\)=>refresh\(true\),7200\)/,'cold first-attempt truth must wait beyond the primary 6.5-second trend window instead of contending with it');
+assert.match(v295Ui,/v298ExactTrendGuard/,'exact-range primary trend errors must activate a stale-chart visibility guard');
+assert.match(v295Ui,/v272-status\.error\) \.v272-trend-grid/,'when exact-range primary trend read fails, stale saved-range chart bodies must be hidden');
 assert.doesNotMatch(v295Ui,/\[80,500,1400,2800\]/,'V298 must not hammer synchronous SQLite with four forced cold first-attempt reads during first paint');
 assert.doesNotMatch(v295Ui,/\/api\/v253\/trends\?businessType=ALL/,'homepage first-attempt trend must not use seven-business ALL truth when the card scope is HOME');
 assert.match(v295Ui,/首次妥投率趋势/,'visible trends must show a dedicated first-attempt success trend');
@@ -92,4 +94,4 @@ assert.match(ownerSource,/result\?\.aggregates\?\.HOME/,'homepage core metrics m
 assert.match(ownerSource,/证据未完成的日期保持“—”/,'incomplete attempt evidence must stay blank instead of being rendered as real 0%');
 assert.doesNotMatch(v295Ui,/method\s*:\s*['"](?:POST|PUT|PATCH|DELETE)/i,'V295/V298 visible owner must remain read-only');
 
-console.log('[V298/V295.6] visible truth smoke passed · exact HOME/business first-attempt API + authoritative canonical sidebar + delayed/coalesced first-attempt read + 首次妥投率=首派成功/首派尝试 + missing START/POD attempt evidence => —');
+console.log('[V298.1/V295.6] visible truth smoke passed · exact HOME/business first-attempt API + authoritative canonical sidebar + full primary trend window before delayed/coalesced first-attempt read + stale-range trend guard + 首次妥投率=首派成功/首派尝试 + missing START/POD attempt evidence => —');
