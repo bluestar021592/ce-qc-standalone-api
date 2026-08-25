@@ -1,13 +1,15 @@
 import { getDb } from './db.js';
 import { collectV200Rows as collectBaseRows, V200_EXPORT_VERSION as BASE_EXPORT_VERSION } from './v200EvidenceData.js';
+import { listCompletedWhppSnapshots } from './v87WhppExportStore.js';
 import { isShopeePending1203ReturnEvent } from './shopeeReturnTruth.js';
 import { applyV230AttemptSigningTruth, V230_ATTEMPT_SIGNING_TRUTH_ID } from './v230AttemptSigningTruth.js';
 import { applyV294ExportAttemptSigningTruth, V294_ATTEMPT_SIGNING_TRUTH_ID } from './v294AttemptSigningTruth.js';
 
 export const V200_EXPORT_VERSION = BASE_EXPORT_VERSION;
-export const V225_EXPORT_RETURN_TRUTH_ID = '2026-08-25-v294-zero-loss-three-way-export-parity-v2';
+export const V225_EXPORT_RETURN_TRUTH_ID = '2026-08-25-v294-zero-loss-three-way-export-parity-v3';
 const UNIFIED_TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
 const STRICT_DELIVERY_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
+const DAILY_MEMBERSHIP_TYPES=new Set([...UNIFIED_TYPES,'WHPP']);
 
 function normalizeBill(value = '') { return String(value || '').trim().toUpperCase(); }
 function dateKey(value=''){const m=String(value||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';}
@@ -45,7 +47,6 @@ function normalizeTerminalExclusion(rows) {
 }
 
 function exactUnifiedMembership(type, range, db=getDb()){
-  if(!UNIFIED_TYPES.has(type))return {datesByBill:new Map(),expectedOccurrences:null,dates:[]};
   const from=dateKey(range?.from),to=dateKey(range?.to);
   if(!from||!to||from>to)throw new Error('V294导出日期范围无效');
   const rows=db.prepare(`
@@ -60,13 +61,45 @@ function exactUnifiedMembership(type, range, db=getDb()){
     WHERE UPPER(TRIM(u.businessType))=? AND TRIM(COALESCE(u.shipmentCode,''))<>''
     ORDER BY l.reportDate,shipmentCode
   `).all(from,to,type);
-  const datesByBill=new Map(),dates=new Set();
-  for(const row of rows){const bill=normalizeBill(row.shipmentCode),date=dateKey(row.reportDate);if(!bill||!date)continue;if(!datesByBill.has(bill))datesByBill.set(bill,[]);datesByBill.get(bill).push(date);dates.add(date);}
-  return {datesByBill,expectedOccurrences:rows.length,dates:[...dates].sort()};
+  const datesByBill=new Map(),dates=new Set(),countByDate=new Map();
+  for(const row of rows){
+    const bill=normalizeBill(row.shipmentCode),date=dateKey(row.reportDate);if(!bill||!date)continue;
+    if(!datesByBill.has(bill))datesByBill.set(bill,[]);datesByBill.get(bill).push(date);dates.add(date);countByDate.set(date,(countByDate.get(date)||0)+1);
+  }
+  return {datesByBill,expectedOccurrences:rows.length,dates:[...dates].sort(),countByDate};
+}
+function exactWhppMembership(range,db=getDb()){
+  const from=dateKey(range?.from),to=dateKey(range?.to);
+  if(!from||!to||from>to)throw new Error('V294 WHPP导出日期范围无效');
+  const snapshots=listCompletedWhppSnapshots(from,to);
+  const datesByBill=new Map(),countByDate=new Map();let expectedOccurrences=0;
+  for(const snapshot of snapshots){
+    const reportDate=dateKey(snapshot.reportDate);if(!reportDate)continue;
+    const dailyBills=new Set();
+    for(const row of snapshot.payload?.finalRows||[]){
+      const bill=normalizeBill(row.shipmentCode||row.运单号);if(!bill||dailyBills.has(bill))continue;
+      dailyBills.add(bill);expectedOccurrences+=1;
+      if(!datesByBill.has(bill))datesByBill.set(bill,[]);datesByBill.get(bill).push(reportDate);
+    }
+    countByDate.set(reportDate,dailyBills.size);
+  }
+  const reports=db.prepare(`SELECT reportDate,totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate`).all(from,to);
+  for(const report of reports){
+    const d=dateKey(report.reportDate),expected=Math.max(0,Number(report.totalCount||0)),actual=countByDate.get(d)||0;
+    if(expected!==actual)throw new Error(`V294_WHPP_EXPORT_DAILY_MEMBERSHIP_MISMATCH:${d}:expected=${expected}:actual=${actual}`);
+  }
+  const missingReportDates=[...countByDate.keys()].filter(d=>!reports.some(row=>dateKey(row.reportDate)===d));
+  if(missingReportDates.length)throw new Error(`V294_WHPP_EXPORT_REPORT_LEDGER_MISSING:${missingReportDates.join(',')}`);
+  return {datesByBill,expectedOccurrences,dates:[...countByDate.keys()].sort(),countByDate};
+}
+function exactMembership(type,range,db=getDb()){
+  if(UNIFIED_TYPES.has(type))return exactUnifiedMembership(type,range,db);
+  if(type==='WHPP')return exactWhppMembership(range,db);
+  return {datesByBill:new Map(),expectedOccurrences:null,dates:[],countByDate:new Map()};
 }
 function applyExactMembershipAndExpand(type,rows,range,db=getDb()){
-  if(!UNIFIED_TYPES.has(type))return rows;
-  const membership=exactUnifiedMembership(type,range,db);
+  if(!DAILY_MEMBERSHIP_TYPES.has(type))return rows;
+  const membership=exactMembership(type,range,db);
   const byBill=new Map(rows.map(row=>[normalizeBill(row.shipmentCode||row.运单号),row]));
   const missing=[];
   for(const bill of membership.datesByBill.keys())if(!byBill.has(bill))missing.push(bill);
@@ -103,7 +136,7 @@ export async function collectV200Rows(type, range, onProgress = () => {}) {
   assertStrictEvidenceComplete(businessType,rows);
   applyExactMembershipAndExpand(businessType,rows,range);
   const uniqueDailyKeys=new Set(rows.map(row=>`${dateKey(row.reportMembershipDate||row.dailyMembershipDates?.[0])}|${normalizeBill(row.shipmentCode)}`));
-  if(UNIFIED_TYPES.has(businessType)&&uniqueDailyKeys.size!==rows.length)throw new Error(`V294_EXPORT_DUPLICATE_DAILY_MEMBER:${businessType}:${rows.length-uniqueDailyKeys.size}`);
+  if(DAILY_MEMBERSHIP_TYPES.has(businessType)&&uniqueDailyKeys.size!==rows.length)throw new Error(`V294_EXPORT_DUPLICATE_DAILY_MEMBER:${businessType}:${rows.length-uniqueDailyKeys.size}`);
   onProgress({
     phase: 'returnAttemptSigningTruth',
     completed: rows.length,
