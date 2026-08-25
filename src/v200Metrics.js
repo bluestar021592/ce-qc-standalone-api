@@ -33,12 +33,23 @@ function applyStat(stat, row) {
   if (!row.returned && row.pending) stat.pending++;
   if (row.returned) stat.returned++;
 }
+function membershipDatesForRow(row, range) {
+  const from = dateKey(range?.from), to = dateKey(range?.to);
+  const exact = [...new Set((Array.isArray(row?.dailyMembershipDates) ? row.dailyMembershipDates : []).map(dateKey).filter(Boolean))]
+    .filter(date => (!from || date >= from) && (!to || date <= to)).sort();
+  if (exact.length) return exact;
+  const legacy = dateKey(row?.firstReportDate);
+  return legacy && (!from || legacy >= from) && (!to || legacy <= to) ? [legacy] : [];
+}
 export function statsOf(rows, range) {
   const dailyMap = new Map(listDates(range.from, range.to).map(date => [date, emptyStat(date)]));
   const overall = emptyStat(`${range.from} 至 ${range.to}`);
   for (const row of rows) {
-    if (!dailyMap.has(row.firstReportDate)) dailyMap.set(row.firstReportDate, emptyStat(row.firstReportDate));
-    applyStat(dailyMap.get(row.firstReportDate), row);
+    const membershipDates = membershipDatesForRow(row, range);
+    for (const date of membershipDates) {
+      if (!dailyMap.has(date)) dailyMap.set(date, emptyStat(date));
+      applyStat(dailyMap.get(date), row);
+    }
     applyStat(overall, row);
   }
   return { daily: [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date)), overall };
@@ -61,7 +72,10 @@ export function anchorMaps(bucket) {
   const result = {};
   for (const [name, rows] of Object.entries(bucket)) {
     const map = new Map();
-    for (let index = 0; index < rows.length; index++) if (!map.has(rows[index].firstReportDate)) map.set(rows[index].firstReportDate, index + 2);
+    for (let index = 0; index < rows.length; index++) {
+      const dates = [...new Set((Array.isArray(rows[index]?.dailyMembershipDates) ? rows[index].dailyMembershipDates : [rows[index]?.firstReportDate]).map(dateKey).filter(Boolean))];
+      for (const date of dates) if (!map.has(date)) map.set(date, index + 2);
+    }
     result[name] = map;
   }
   return result;
