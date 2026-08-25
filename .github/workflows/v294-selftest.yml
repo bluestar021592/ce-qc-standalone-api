@@ -1,0 +1,28 @@
+name: V294 self-test
+
+on:
+  push:
+    branches:
+      - chatgpt-v294-selftest-20260825
+  workflow_dispatch:
+
+jobs:
+  golive:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        shell: pwsh
+        run: npm install --no-audit --no-fund
+      - name: Run V294 go-live gate
+        shell: pwsh
+        run: npm run test:golive
