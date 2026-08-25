@@ -7,7 +7,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const V294_ATTEMPT_SIGNING_TRUTH_ID = '2026-08-25-v294-tbkh-shopee-attempt-signing-truth-v3';
+export const V294_ATTEMPT_SIGNING_TRUTH_ID = '2026-08-25-v294-tbkh-shopee-attempt-signing-truth-v4';
 export const V294_ATTEMPT_TYPES = Object.freeze(['TBKH','SHOPEECN','SHOPEEVN']);
 const TYPE_SET = new Set(V294_ATTEMPT_TYPES);
 
@@ -199,20 +199,26 @@ function earliestValidReportDate(db, fallback = '') {
   return dateKey(row?.reportDate) || dateKey(fallback);
 }
 
-export function backfillV294StrictAttemptsFromSavedEvidence({ reportDate = '', businessTypes = V294_ATTEMPT_TYPES, db = getDb(), reason = 'V294_POST_PROCESS' } = {}) {
+export function backfillV294StrictAttemptsFromSavedEvidence({ reportDate = '', fromDate = '', businessTypes = V294_ATTEMPT_TYPES, db = getDb(), reason = 'V294_POST_PROCESS' } = {}) {
   const toDate = dateKey(reportDate);
   if (!toDate) return { ok: false, skipped: true, reason: 'REPORT_DATE_MISSING' };
-  const fromDate = earliestValidReportDate(db, toDate) || toDate;
+  const requestedFrom = dateKey(fromDate);
+  const resolvedFrom = requestedFrom || earliestValidReportDate(db, toDate) || toDate;
+  if (resolvedFrom > toDate) return { ok: false, skipped: true, reason: 'DATE_RANGE_INVALID', fromDate: resolvedFrom, toDate };
   const types = [...new Set((businessTypes || []).map(value => text(value).toUpperCase()).filter(type => TYPE_SET.has(type)))];
   ensureV246TrackingSchema(db);
   const summary = [];
 
   for (const type of types) {
-    const reconcile = reconcileV246TrackingLedger({ businessType: type, fromDate, toDate }, { db, reason: `${reason}:RECONCILE:${type}` });
+    // Post-process callers pass fromDate=reportDate so a completed daily run only
+    // reconciles that day's membership. Existing earlier lifecycle first dates are
+    // preserved by V246 min-date reconciliation. Explicit/manual callers may omit
+    // fromDate to perform the historical backfill when desired.
+    const reconcile = reconcileV246TrackingLedger({ businessType: type, fromDate: resolvedFrom, toDate }, { db, reason: `${reason}:RECONCILE:${type}` });
     const podRows = db.prepare(`SELECT shipmentCode,businessType,firstReportDate,lastImportedDate,podDate,attemptNo,attemptSource,currentStateJson
       FROM qc_tracking_ledger
       WHERE businessType=? AND terminalReason='POD' AND firstReportDate<=? AND lastImportedDate>=?
-      ORDER BY shipmentCode`).all(type, toDate, fromDate);
+      ORDER BY shipmentCode`).all(type, toDate, resolvedFrom);
     const bills = podRows.map(row => billOf(row.shipmentCode)).filter(Boolean);
     const events = trackEventsByBill(type, bills, db);
     const evidenceRows = [];
@@ -238,11 +244,11 @@ export function backfillV294StrictAttemptsFromSavedEvidence({ reportDate = '', b
     const applied = evidenceRows.length
       ? applyV246StrictAttemptEvidence(evidenceRows, { db, reason: `${reason}:SAVED_TRACK:${type}` })
       : { updated: 0, known: 0, unknown: 0, podDateFilled: 0, corrected: 0 };
-    summary.push({ businessType: type, fromDate, toDate, reconciled: reconcile.expected, pod: podRows.length, strictCandidates: evidenceRows.length, unknown, ...applied });
+    summary.push({ businessType: type, fromDate: resolvedFrom, toDate, reconciled: reconcile.expected, pod: podRows.length, strictCandidates: evidenceRows.length, unknown, ...applied });
   }
 
-  return { ok: true, version: V294_ATTEMPT_SIGNING_TRUTH_ID, fromDate, toDate, summary, completedAt: nowIso() };
+  return { ok: true, version: V294_ATTEMPT_SIGNING_TRUTH_ID, fromDate: resolvedFrom, toDate, summary, completedAt: nowIso() };
 }
 
 console.info('[CE-QC][V294_ATTEMPT_SIGNING_TRUTH]', V294_ATTEMPT_SIGNING_TRUTH_ID,
-  'TBKH + SHOPEECN + SHOPEEVN share strict 70 START→failure/Pending→new START truth; TBKH reads core track_events (plus legacy TBKH evidence), SHOPEE reads business_track_events; daily export membership is exact latest VALID per date, signing days use immutable lifecycle first date.');
+  'TBKH + SHOPEECN + SHOPEEVN share strict 70 START→failure/Pending→new START truth; TBKH reads core track_events (plus legacy TBKH evidence), SHOPEE reads business_track_events; daily export membership is exact latest VALID per date, signing days use immutable lifecycle first date; post-run repair can be date-scoped to protect UI responsiveness.');
