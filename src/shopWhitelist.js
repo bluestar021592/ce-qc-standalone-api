@@ -31,19 +31,34 @@ if (SHOP_WHITELIST_AVAILABLE) {
   payload = JSON.parse(raw.toString('utf8'));
 }
 
-export const SHOP_WHITELIST_VERSION = String(payload.version || BUILTIN_SHOP_WHITELIST_VERSION);
-export const SHOP_WHITELIST_SOURCE_KIND = SHOP_WHITELIST_AVAILABLE ? 'SIGNED_FILE' : 'BUILTIN_EXECUTION_COPY';
-export const SHOP_WHITELIST_SOURCE_SHA256 = String(payload.source_sha256 || '');
+const BUILTIN_BY_CODE = new Map(BUILTIN_SHOP_STORES.map(row => [normalizeShopCode(row.shop_code), row]));
+const payloadSourceSha = String(payload.source_sha256 || '');
+const sameAuthoritativeWorkbook = payloadSourceSha === BUILTIN_SHOP_WHITELIST_SOURCE_SHA256;
+export const SHOP_WHITELIST_VERSION = sameAuthoritativeWorkbook
+  ? BUILTIN_SHOP_WHITELIST_VERSION
+  : String(payload.version || BUILTIN_SHOP_WHITELIST_VERSION);
+export const SHOP_WHITELIST_SOURCE_KIND = SHOP_WHITELIST_AVAILABLE
+  ? (sameAuthoritativeWorkbook ? 'SIGNED_FILE_PLUS_EXECUTION_ALIASES' : 'SIGNED_FILE')
+  : 'BUILTIN_EXECUTION_COPY';
+export const SHOP_WHITELIST_SOURCE_SHA256 = String(payload.source_sha256 || BUILTIN_SHOP_WHITELIST_SOURCE_SHA256 || '');
 export const SHOP_WHITELIST_FILE_SHA256 = loadedFileSha256 || EXPECTED_WHITELIST_FILE_SHA256;
 export const SHOP_WHITELIST_PREFIXES = Object.freeze(['CP', 'FS', 'PV', 'PNH']);
 export const LATEST_SHOP_STORES = Object.freeze((payload.stores || [])
   .filter(row => row.classification_enabled === true)
-  .map(row => Object.freeze({
-    code: normalizeShopCode(row.shop_code),
-    name: String(row.canonical_name || row.shop_code || '').trim(),
-    prefix: String(row.prefix || '').toUpperCase(),
-    aliases: Object.freeze((row.aliases || []).map(value => String(value || '').trim()).filter(Boolean))
-  }))
+  .map(row => {
+    const code = normalizeShopCode(row.shop_code);
+    const builtin = BUILTIN_BY_CODE.get(code);
+    const aliases = [...new Set([
+      ...(row.aliases || []),
+      ...(sameAuthoritativeWorkbook ? (builtin?.aliases || []) : [])
+    ].map(value => String(value || '').trim()).filter(Boolean))];
+    return Object.freeze({
+      code,
+      name: String(row.canonical_name || builtin?.canonical_name || row.shop_code || '').trim(),
+      prefix: String(row.prefix || builtin?.prefix || '').toUpperCase(),
+      aliases: Object.freeze(aliases)
+    });
+  })
   .filter(row => isSupportedShopCode(row.code)));
 
 const STORE_BY_CODE = new Map(LATEST_SHOP_STORES.map(row => [row.code, row]));
@@ -53,6 +68,18 @@ export function normalizeShopCode(value) {
     .normalize('NFKC')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/\s+/g, '')
+    .trim()
+    .toUpperCase();
+}
+
+export function normalizeShopAlias(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/^\s*CEL?\s*:\s*/i, '')
+    .replace(/[【】\[\]（）()]/g, ' ')
+    .replace(/[,_/\\|]+/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim()
     .toUpperCase();
 }
@@ -78,6 +105,20 @@ export function latestShopCodeMap() {
   return new Map(LATEST_SHOP_STORES.map(row => [row.code, row.name || row.code]));
 }
 
+export function latestShopAliasMap() {
+  const candidates = new Map();
+  for (const store of LATEST_SHOP_STORES) {
+    for (const rawName of [store.name, ...(store.aliases || [])]) {
+      const key = normalizeShopAlias(rawName);
+      if (!key) continue;
+      const existing = candidates.get(key);
+      if (!existing) candidates.set(key, { code: store.code, name: store.name || store.code, ambiguous: false });
+      else if (existing.code !== store.code) candidates.set(key, { code: '', name: '', ambiguous: true });
+    }
+  }
+  return new Map([...candidates].filter(([, row]) => !row.ambiguous && row.code));
+}
+
 /**
  * Seed the signed whitelist when its source JSON is present.
  *
@@ -101,7 +142,7 @@ export function seedLatestShopWhitelist(db) {
       fileSha256=excluded.fileSha256,
       active=1,
       storeCount=excluded.storeCount
-  `).run(SHOP_WHITELIST_VERSION, String(payload.source_file || ''), SHOP_WHITELIST_SOURCE_SHA256, SHOP_WHITELIST_FILE_SHA256, LATEST_SHOP_STORES.length, now);
+  `).run(SHOP_WHITELIST_VERSION, String(payload.source_file || BUILTIN_SHOP_WHITELIST_SOURCE_FILE || ''), SHOP_WHITELIST_SOURCE_SHA256, SHOP_WHITELIST_FILE_SHA256, LATEST_SHOP_STORES.length, now);
   db.prepare('UPDATE shop_whitelist_versions SET active=0 WHERE version<>?').run(SHOP_WHITELIST_VERSION);
 
   const entry = db.prepare(`
@@ -132,6 +173,7 @@ export function seedLatestShopWhitelist(db) {
     sourceSha256: SHOP_WHITELIST_SOURCE_SHA256,
     fileSha256: SHOP_WHITELIST_FILE_SHA256,
     count: LATEST_SHOP_STORES.length,
+    aliasCount: LATEST_SHOP_STORES.reduce((sum, row) => sum + row.aliases.length, 0),
     source: SHOP_WHITELIST_SOURCE_KIND
   };
 }
