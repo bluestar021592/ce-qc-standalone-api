@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { getShopCodeMap, isNormalFinalHubCode } from './shopCodes.js';
+import { getShopCodeMap, getShopAliasMap, detectShopInfo, isNormalFinalHubCode } from './shopCodes.js';
 import { SHOP_WHITELIST_VERSION } from './shopWhitelist.js';
 
 const PENDING_RE = /pending|派送失败|无法联系|无人接听|地址错误|改派/i;
@@ -12,6 +12,7 @@ const STRUCTURED_SHOP_CODE_RE = /(?:^|[^A-Z0-9])((?:CP|FS)\s*\d{6}|(?:PV|PNH)\s*
 
 export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = '', isPod = false, isReturned = false } = {}) {
   const whitelist = getShopCodeMap();
+  const aliases = getShopAliasMap();
   const sorted = [...(events || [])]
     .map((event, index) => ({ event, index }))
     .sort((a, b) => eventKey(a.event).localeCompare(eventKey(b.event)) || a.index - b.index)
@@ -21,20 +22,22 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
   for (const event of sorted) {
     const action = eventAction(event);
     const codes = structuredCodes(event).filter(code => whitelist.has(code));
-    const target = codes.at(-1) || '';
-    const current = codes[0] || '';
+    const aliasFact = codes.length ? null : detectShopInfo({ events: [event], shopCodeMap: whitelist, shopAliasMap: aliases, lastEvent: event });
+    const aliasCode = aliasFact?.isShop ? aliasFact.shopCode : '';
+    const target = codes.at(-1) || aliasCode || '';
+    const current = codes[0] || aliasCode || '';
+    const matchSource = codes.length ? 'CODE' : (aliasFact?.shopMatchSource || '');
 
     if (action === 'OUTBOUND' && target) {
       if (cycle?.state && cycle.state !== 'CLOSED') cycle.state = 'CLOSED';
-      cycle = newCycle(shipmentCode, target, whitelist.get(target), event);
+      cycle = newCycle(shipmentCode, target, whitelist.get(target), event, matchSource);
       continue;
     }
     if (action === 'INBOUND' && target) {
-      // The trajectory API may return an explicit store-arrival node even when
-      // the preceding transfer node is absent from the returned history. An
-      // exact whitelist inbound is sufficient proof of actual store arrival.
+      // An exact code OR an unambiguous name/alias from the same authoritative
+      // 95-store workbook is sufficient proof of actual store arrival.
       if (!cycle || cycle.targetShopCode !== target || cycle.state === 'CLOSED') {
-        cycle = newCycle(shipmentCode, target, whitelist.get(target), event);
+        cycle = newCycle(shipmentCode, target, whitelist.get(target), event, matchSource);
       }
       cycle.currentShopCode = target;
       cycle.shopArrivedAt = event.eventTime || '';
@@ -42,7 +45,8 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
       cycle.pending = false;
       cycle.oc = false;
       cycle.state = 'SHOP_ARRIVED_CURRENT';
-      cycle.reason = 'STRUCTURED_WHITELIST_INBOUND';
+      cycle.shopMatchSource = matchSource || cycle.shopMatchSource || 'CODE';
+      cycle.reason = matchSource === 'NAME_ALIAS' ? 'AUTHORITATIVE_NAME_ALIAS_INBOUND' : 'STRUCTURED_WHITELIST_INBOUND';
       continue;
     }
     if (cycle?.state === 'SHOP_ARRIVED_CURRENT' && PENDING_RE.test(eventText(event))) {
@@ -100,6 +104,7 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
     targetShopCode: cycle.targetShopCode,
     currentShopCode: cycle.currentShopCode,
     shopName: cycle.shopName,
+    shopMatchSource: cycle.shopMatchSource || '',
     shopCycleId: cycle.shopCycleId,
     shopTransferStartedAt: cycle.shopTransferStartedAt,
     shopArrivedAt: cycle.shopArrivedAt,
@@ -118,19 +123,20 @@ export function analyzeStoreFlow({ shipmentCode = '', events = [], reportDate = 
 
 export function emptyStoreFlow() {
   return {
-    targetShopCode: '', currentShopCode: '', shopName: '', shopCycleId: '',
+    targetShopCode: '', currentShopCode: '', shopName: '', shopMatchSource: '', shopCycleId: '',
     shopTransferStartedAt: '', shopArrivedAt: '', shopLastEventAt: '', shopPendingAt: '', shopOcAt: '',
     shopTransferNaturalDays: 0, shopAgeNaturalDays: 0, shopRetentionNaturalDays: 0, shopState: '', shopStateReason: 'NO_STORE_CYCLE',
     whitelistVersion: SHOP_WHITELIST_VERSION, storeTags: []
   };
 }
 
-function newCycle(shipmentCode, code, name, event) {
+function newCycle(shipmentCode, code, name, event, matchSource = 'CODE') {
   const startedAt = event.eventTime || '';
   return {
     targetShopCode: code,
     currentShopCode: '',
     shopName: name || code,
+    shopMatchSource: matchSource || 'CODE',
     shopCycleId: crypto.createHash('sha256').update(`${shipmentCode}|${code}|${startedAt}`).digest('hex').slice(0, 20),
     shopTransferStartedAt: startedAt,
     shopArrivedAt: '',
@@ -140,7 +146,7 @@ function newCycle(shipmentCode, code, name, event) {
     pending: false,
     oc: false,
     state: 'SHOP_TRANSFER_IN_PROGRESS',
-    reason: 'STRUCTURED_WHITELIST_OUTBOUND'
+    reason: matchSource === 'NAME_ALIAS' ? 'AUTHORITATIVE_NAME_ALIAS_OUTBOUND' : 'STRUCTURED_WHITELIST_OUTBOUND'
   };
 }
 
