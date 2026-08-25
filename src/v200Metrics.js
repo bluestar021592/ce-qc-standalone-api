@@ -3,11 +3,25 @@ export function average(values = []) {
   return usable.length ? Number((usable.reduce((sum, value) => sum + value, 0) / usable.length).toFixed(2)) : 0;
 }
 export function ratio(a, b) { return b ? Number(a || 0) / Number(b) : 0; }
-export function completeAttemptRatio(stat = {}, numerator = 0) {
-  const pod = Math.max(0, Number(stat.pod || 0));
-  const unknown = Math.max(0, Number(stat.attemptUnknown || 0));
-  if (!pod || unknown > 0) return null;
-  return ratio(numerator, pod);
+export function completeAttemptPublication(stat = {}, {
+  podKey = 'pod', a1Key = 'a1', a2Key = 'a2', a3Key = 'a3', unknownKey = 'attemptUnknown'
+} = {}) {
+  const pod = Math.max(0, Number(stat[podKey] || 0));
+  const a1 = Math.max(0, Number(stat[a1Key] || 0));
+  const a2 = Math.max(0, Number(stat[a2Key] || 0));
+  const a3 = Math.max(0, Number(stat[a3Key] || 0));
+  const unknown = Math.max(0, Number(stat[unknownKey] || 0), pod - a1 - a2 - a3);
+  return { pod, a1, a2, a3, unknown, complete: pod === 0 || (unknown === 0 && a1 + a2 + a3 === pod) };
+}
+export function completeAttemptRatio(stat = {}, numerator = 0, options = {}) {
+  const publication = completeAttemptPublication(stat, options);
+  if (!publication.pod || !publication.complete) return null;
+  return ratio(numerator, publication.pod);
+}
+export function completeAttemptCount(stat = {}, numerator = 0, options = {}) {
+  const publication = completeAttemptPublication(stat, options);
+  if (publication.pod > 0 && !publication.complete) return null;
+  return Number(numerator || 0);
 }
 export function completeSigningAverage(values = [], pod = 0) {
   const expected = Math.max(0, Number(pod || 0));
@@ -20,7 +34,13 @@ function dayNumber(value = '') { const k = dateKey(value); if (!k) return null; 
 function listDates(from,to){ const a=dayNumber(from),b=dayNumber(to),out=[]; if(a===null||b===null||b<a)return out; for(let t=a;t<=b;t+=86400000)out.push(new Date(t).toISOString().slice(0,10)); return out; }
 export function referenceAverageDays(firstReportDate,podDate){const a=dayNumber(firstReportDate),b=dayNumber(podDate);return a===null||b===null||b<a?0:Math.floor((b-a)/86400000)+1;}
 function emptyStat(date = '') {
-  return { date, total: 0, pp: 0, pv: 0, unknown: 0, store: 0, pod: 0, notPod: 0, delivery: 0, pending: 0, returned: 0, a1: 0, a2: 0, a3: 0, attemptUnknown: 0, days: [], ppDays: [], pvDays: [], ppPod: 0, pvPod: 0, ppA1: 0, ppA2: 0, ppA3: 0, pvA1: 0, pvA2: 0, pvA3: 0 };
+  return {
+    date, total: 0, pp: 0, pv: 0, unknown: 0, store: 0, pod: 0, notPod: 0, delivery: 0, pending: 0, returned: 0,
+    a1: 0, a2: 0, a3: 0, attemptUnknown: 0, days: [],
+    ppDays: [], pvDays: [], ppPod: 0, pvPod: 0,
+    ppA1: 0, ppA2: 0, ppA3: 0, ppAttemptUnknown: 0,
+    pvA1: 0, pvA2: 0, pvA3: 0, pvAttemptUnknown: 0
+  };
 }
 function applyStat(stat, row) {
   stat.total++;
@@ -33,11 +53,11 @@ function applyStat(stat, row) {
     if (referenceDays > 0) stat.days.push(referenceDays);
     if (row.area === '金边') {
       stat.ppPod++;
-      if (row.attemptNo === 1) stat.ppA1++; else if (row.attemptNo === 2) stat.ppA2++; else if (row.attemptNo >= 3) stat.ppA3++;
+      if (row.attemptNo === 1) stat.ppA1++; else if (row.attemptNo === 2) stat.ppA2++; else if (row.attemptNo >= 3) stat.ppA3++; else stat.ppAttemptUnknown++;
       if (referenceDays > 0) stat.ppDays.push(referenceDays);
     } else if (row.area === '外省') {
       stat.pvPod++;
-      if (row.attemptNo === 1) stat.pvA1++; else if (row.attemptNo === 2) stat.pvA2++; else if (row.attemptNo >= 3) stat.pvA3++;
+      if (row.attemptNo === 1) stat.pvA1++; else if (row.attemptNo === 2) stat.pvA2++; else if (row.attemptNo >= 3) stat.pvA3++; else stat.pvAttemptUnknown++;
       if (referenceDays > 0) stat.pvDays.push(referenceDays);
     }
   } else if (!row.returned) stat.notPod++;
