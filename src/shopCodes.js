@@ -6,12 +6,14 @@ import {
   SHOP_WHITELIST_AVAILABLE,
   SHOP_WHITELIST_SOURCE_KIND,
   normalizeShopCode as normalizeLatestShopCode,
+  normalizeShopAlias,
   isSupportedShopCode,
   latestShopCodeMap,
+  latestShopAliasMap,
   seedLatestShopWhitelist
 } from './shopWhitelist.js';
 
-export const SHOP_CODE_RUNTIME_VERSION = '2026-08-23-v270-user-upload-authoritative-merge-v1';
+export const SHOP_CODE_RUNTIME_VERSION = '2026-08-25-v306-authoritative-code-name-alias-v1';
 const SHOP_CODE_RE = /(?:^|[^A-Z0-9])((?:CP|FS)\s*\d{6}|(?:PV|PNH)\s*\d{3})(?![A-Z0-9])/gi;
 const SHOP_LIKE_RE = /\b(?:CP|FS|PV|PNH)\s*[A-Z0-9-]{2,12}\b/gi;
 const SHOP_INBOUND_RE = /入库|到达网点|货物到达|到达门店|抵达|\bINBOUND\b|\bARRIV(?:E|ED|AL)?\b|\bRECEIVED\b/i;
@@ -23,14 +25,11 @@ export function ensureDefaultShopCodes() {
 }
 
 /**
- * Runtime authority rule (V270):
- * 1) signed/builtin whitelist is the safe baseline;
- * 2) rows explicitly uploaded by ADMIN into shop_cp_codes are merged on top;
- * 3) uploaded names therefore take effect immediately for every later trajectory
- *    classification without requiring a restart or a daily-report re-upload.
- *
- * Never return latestShopCodeMap() alone: doing so made a successful user import
- * visible in SQLite/UI while silently excluding it from actual shop classification.
+ * Runtime authority rule (V306):
+ * 1) shop code is the strongest identity and never changes a shipment's business board;
+ * 2) the signed 95-code workbook is the safe baseline;
+ * 3) every alternate name from that same workbook is an alias for the SAME code;
+ * 4) ADMIN-uploaded canonical names still override display names without weakening code identity.
  */
 export function getShopCodeMap() {
   const db = getDb();
@@ -38,6 +37,41 @@ export function getShopCodeMap() {
   const merged = latestShopCodeMap();
   const persisted = loadAllPersistedShopCodes(db);
   for (const [code, name] of persisted) merged.set(code, name);
+  return merged;
+}
+
+export function getShopAliasMap() {
+  const db = getDb();
+  seedLatestShopWhitelist(db);
+  const codeMap = getShopCodeMap();
+  const merged = latestShopAliasMap();
+  const blocked = new Set();
+  const add = (rawName, rawCode) => {
+    const code = normalizeShopCode(rawCode);
+    const key = normalizeShopAlias(rawName);
+    if (!key || !isSupportedShopCode(code) || blocked.has(key)) return;
+    const name = codeMap.get(code) || code;
+    const prior = merged.get(key);
+    if (prior && prior.code !== code) {
+      merged.delete(key);
+      blocked.add(key);
+      return;
+    }
+    merged.set(key, { code, name });
+  };
+  try {
+    for (const row of db.prepare('SELECT shopCode, shopName FROM shop_cp_codes ORDER BY shopCode').all() || []) add(row.shopName, row.shopCode);
+  } catch {}
+  try {
+    const rows = db.prepare(`
+      SELECT a.shopCode, a.alias
+      FROM shop_whitelist_aliases a
+      JOIN shop_whitelist_versions v ON v.version=a.version
+      WHERE v.active=1
+      ORDER BY a.shopCode,a.alias
+    `).all();
+    for (const row of rows || []) add(row.alias, row.shopCode);
+  } catch {}
   return merged;
 }
 
@@ -59,13 +93,14 @@ export function getShopCodeSummary() {
     count: merged.size,
     builtinCount: builtin.size,
     persistedCount: persisted.size,
+    aliasCount: getShopAliasMap().size,
     userUploadedCount: userCount,
     latestUserUpdateAt,
     version: seeded?.version || SHOP_WHITELIST_VERSION,
     runtimeVersion: SHOP_CODE_RUNTIME_VERSION,
     sourceSha256: seeded?.sourceSha256 || SHOP_WHITELIST_SOURCE_SHA256,
     source: userCount > 0 ? 'BUILTIN_PLUS_ADMIN_UPLOAD' : (builtin.size ? SHOP_WHITELIST_SOURCE_KIND : 'SQLITE_PERSISTED'),
-    authority: 'ADMIN_UPLOAD_OVERRIDES_BUILTIN'
+    authority: 'SHOP_CODE_FIRST_ALIAS_SECOND_BUSINESS_BOARD_UNCHANGED'
   };
 }
 
@@ -162,8 +197,9 @@ export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
   };
 }
 
-export function detectShopInfo({ events = [], shopCodeMap = null, lastEvent = null } = {}) {
+export function detectShopInfo({ events = [], shopCodeMap = null, shopAliasMap = null, lastEvent = null } = {}) {
   const codeMap = shopCodeMap || getShopCodeMap();
+  const aliasMap = shopAliasMap || getShopAliasMap();
   const effectiveLast = lastEvent || lastEffectiveEvent(events);
   if (!effectiveLast) return { isShop: false, matchedRule: 'NO_EFFECTIVE_EVENT' };
 
@@ -176,7 +212,7 @@ export function detectShopInfo({ events = [], shopCodeMap = null, lastEvent = nu
   }
 
   const supportedTargetCode = extractSupportedShopCodes(evidence.targetNode)[0] || '';
-  const matched = matchTargetShop(evidence.targetNode, codeMap);
+  const matched = matchTargetShop(evidence.targetNode, codeMap, aliasMap);
   if (!matched) {
     if (supportedTargetCode) {
       return { isShop: false, unknownShopCode: supportedTargetCode, ...evidence, matchedRule: 'UNKNOWN_SHOP_CODE' };
@@ -189,6 +225,8 @@ export function detectShopInfo({ events = [], shopCodeMap = null, lastEvent = nu
     isShop: true,
     shopCode: matched.code,
     shopName: matched.name,
+    shopMatchSource: matched.source,
+    shopMatchedAlias: matched.alias || '',
     shopStatus: inbound ? '门店入库' : '门店途中',
     shopActionType: inbound ? '门店入库' : '门店途中',
     matchedCodes: [matched.code],
@@ -290,12 +328,30 @@ function loadPersistedShopCodeMap(db) {
   return out;
 }
 
-function matchTargetShop(targetNode, codeMap) {
+function matchTargetShop(targetNode, codeMap, aliasMap) {
   const target = String(targetNode || '').trim();
   if (!target) return null;
   const codeSet = new Set(codeMap.keys());
   const code = extractShopCodes(target, codeSet)[0];
-  if (code && !isNormalFinalHubCode(code)) return { code, name: codeMap.get(code) || code };
+  if (code && !isNormalFinalHubCode(code)) return { code, name: codeMap.get(code) || code, source: 'CODE', alias: '' };
+
+  const normalized = normalizeShopAlias(target);
+  const direct = aliasMap.get(normalized);
+  if (direct?.code) return { code: direct.code, name: codeMap.get(direct.code) || direct.name || direct.code, source: 'NAME_ALIAS', alias: normalized };
+
+  // Some CE descriptions append operational words after the node name. Allow a
+  // unique long alias to match as a substring, but never use short names this way.
+  const matches = [];
+  for (const [aliasKey, row] of aliasMap) {
+    if (aliasKey.length < 5) continue;
+    if (normalized.includes(aliasKey) || aliasKey.includes(normalized)) matches.push({ aliasKey, row });
+  }
+  const uniqueCodes = [...new Set(matches.map(item => item.row.code))];
+  if (uniqueCodes.length === 1) {
+    const winner = matches.sort((a, b) => b.aliasKey.length - a.aliasKey.length)[0];
+    const matchedCode = winner.row.code;
+    return { code: matchedCode, name: codeMap.get(matchedCode) || winner.row.name || matchedCode, source: 'NAME_ALIAS', alias: winner.aliasKey };
+  }
   return null;
 }
 
