@@ -7,7 +7,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const V294_ATTEMPT_SIGNING_TRUTH_ID = '2026-08-25-v294-tbkh-shopee-attempt-signing-truth-v2';
+export const V294_ATTEMPT_SIGNING_TRUTH_ID = '2026-08-25-v294-tbkh-shopee-attempt-signing-truth-v3';
 export const V294_ATTEMPT_TYPES = Object.freeze(['TBKH','SHOPEECN','SHOPEEVN']);
 const TYPE_SET = new Set(V294_ATTEMPT_TYPES);
 
@@ -27,10 +27,6 @@ const chunks = (values, size = 250) => {
   return out;
 };
 const strictSource = value => /^V246_STRICT_TRACK:/i.test(text(value)) || /严格.*START|START.*失败.*START/i.test(text(value));
-
-function sourceTrackType(type) {
-  return type === 'SHOPEECN' || type === 'SHOPEEVN' ? 'SHOPEE' : type;
-}
 
 export function resolveV294Attempt({ pod = false, podDate = '', events = [], ledgerAttemptNo = 0, ledgerAttemptSource = '', podAttemptNo = 0 } = {}) {
   if (!pod) return { attemptNo: 0, source: '', proven: true, strict: null };
@@ -109,24 +105,46 @@ function ledgerRows(type, bills, db) {
   return result;
 }
 
+function pushEvents(result, rows = []) {
+  for (const row of rows) {
+    const bill = billOf(row.shipmentCode);
+    if (!bill) continue;
+    if (!result.has(bill)) result.set(bill, []);
+    result.get(bill).push(row);
+  }
+}
+
 function trackEventsByBill(type, bills, db) {
   const result = new Map(bills.map(bill => [bill, []]));
-  const trackType = sourceTrackType(type);
   for (const part of chunks(bills, 220)) {
     const marks = part.map(() => '?').join(',');
     if (!marks) continue;
-    let rows = [];
-    try {
-      rows = db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,id
-        FROM business_track_events
-        WHERE businessType=? AND shipmentCode IN (${marks})
-        ORDER BY shipmentCode,eventTime,id`).all(trackType, ...part);
-    } catch {}
-    for (const row of rows) {
-      const bill = billOf(row.shipmentCode);
-      if (!result.has(bill)) result.set(bill, []);
-      result.get(bill).push(row);
+    if (type === 'TBKH') {
+      // Unified CCSL processing persists CE/CEAF/TBKH/ALI trajectory rows in
+      // the core track_events table. Read this authoritative store first.
+      try {
+        pushEvents(result, db.prepare(`SELECT shipmentCode,eventTime,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,rawJson,id
+          FROM track_events
+          WHERE shipmentCode IN (${marks})
+          ORDER BY shipmentCode,eventTime,id`).all(...part));
+      } catch {}
+      // Historical versions may also have written business-specific TBKH rows.
+      // Include them as compatible evidence; V246 strict analyzer deduplicates
+      // repeated events by time/code/text before counting attempts.
+      try {
+        pushEvents(result, db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,id
+          FROM business_track_events
+          WHERE businessType='TBKH' AND shipmentCode IN (${marks})
+          ORDER BY shipmentCode,eventTime,id`).all(...part));
+      } catch {}
+      continue;
     }
+    try {
+      pushEvents(result, db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,id
+        FROM business_track_events
+        WHERE businessType='SHOPEE' AND shipmentCode IN (${marks})
+        ORDER BY shipmentCode,eventTime,id`).all(...part));
+    } catch {}
   }
   return result;
 }
@@ -227,4 +245,4 @@ export function backfillV294StrictAttemptsFromSavedEvidence({ reportDate = '', b
 }
 
 console.info('[CE-QC][V294_ATTEMPT_SIGNING_TRUTH]', V294_ATTEMPT_SIGNING_TRUTH_ID,
-  'TBKH + SHOPEECN + SHOPEEVN share strict 70 START→failure/Pending→new START truth; daily export membership is exact latest VALID per date, while signing days use immutable lifecycle first date.');
+  'TBKH + SHOPEECN + SHOPEEVN share strict 70 START→failure/Pending→new START truth; TBKH reads core track_events (plus legacy TBKH evidence), SHOPEE reads business_track_events; daily export membership is exact latest VALID per date, signing days use immutable lifecycle first date.');
