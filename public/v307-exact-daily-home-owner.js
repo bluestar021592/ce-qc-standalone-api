@@ -1,12 +1,13 @@
 (function installV307ExactDailyHomeOwner(global){
   if(global.__CE_QC_V307_EXACT_DAILY_HOME_OWNER__)return;
-  const VERSION='2026-08-25-v307-exact-daily-seven-business-home-v1';
+  const VERSION='2026-08-25-v307-exact-daily-seven-business-home-v2';
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const LABELS={
     '总览':'ALL','CE':'CE','CEAF空运':'CEAF','TBKH':'TBKH','ALI1688':'ALI1688',
     'SHOPEE CN':'SHOPEECN','SHOPEE VN':'SHOPEEVN','WHPP本土':'WHPP'
   };
   const cache=new Map();
+  const CACHE_MS=6*60*60*1000;
   let seq=0,timer=null;
   const date=v=>String(v||'').slice(0,10);
   const num=v=>Number.isFinite(Number(v))?Number(v):0;
@@ -21,7 +22,7 @@
   async function json(url){const r=await fetch(url,{cache:'no-store',credentials:'same-origin'});const raw=await r.text();let j={};try{j=raw?JSON.parse(raw):{};}catch{}if(!r.ok||j?.ok===false)throw new Error(j?.error||j?.message||`HTTP ${r.status}`);return j;}
   function exactRow(data,d){return (Array.isArray(data?.daily)?data.daily:[]).find(row=>date(row?.reportDate)===d)||null;}
   async function loadExact(d){
-    const hit=cache.get(d);if(hit&&Date.now()-hit.at<30000)return hit.value;
+    const hit=cache.get(d);if(hit&&Date.now()-hit.at<CACHE_MS)return hit.value;
     const rows=await Promise.all(TYPES.map(async type=>{
       const data=await json(`/api/v253/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(d)}&to=${encodeURIComponent(d)}`);
       const row=exactRow(data,d);
@@ -47,13 +48,14 @@
     }
     grid.dataset.v307ExactTotal=String(data.total);grid.dataset.v307ExactDate=data.date;return true;
   }
-  async function apply(force=false){
+  async function apply(){
     const root=visibleHome(),rg=range();if(!root||!rg.from||rg.from!==rg.to)return;
     const my=++seq;try{const data=await loadExact(rg.to);if(my!==seq||!visibleHome()||range().to!==data.date)return;patchDateCaption(root,data.date);patchCards(root,data);root.dataset.v307ExactDaily=data.date;}catch(error){console.warn('[CE-QC][V307_EXACT_DAILY_HOME]',error?.message||error);}
   }
-  function schedule(ms=250){clearTimeout(timer);timer=setTimeout(()=>apply(true),ms);}
+  function schedule(ms=250){clearTimeout(timer);timer=setTimeout(()=>apply(),ms);}
   function bind(){
-    schedule(500);setInterval(()=>{const rg=range(),root=visibleHome();if(root&&rg.from&&rg.from===rg.to&&root.dataset.v307ExactDaily!==rg.to)schedule(0);else if(root&&rg.from===rg.to)schedule(0);},2000);
+    schedule(500);
+    setInterval(()=>{const rg=range(),root=visibleHome();if(root&&rg.from&&rg.from===rg.to)schedule(0);},3000);
     document.addEventListener('click',e=>{if(e.target?.closest?.('#topRangeQuery,.top-range-query,#dashboardRangeQuery,.side-link[data-page]')){schedule(350);setTimeout(()=>schedule(0),1200);}},true);
     document.addEventListener('change',e=>{if(e.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(350);},true);
     global.addEventListener('ce:exact-date-loaded',()=>{cache.clear();schedule(50);setTimeout(()=>schedule(0),900);});
@@ -61,5 +63,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V307_EXACT_DAILY_HOME_OWNER__={version:VERSION,apply,loadExact,types:[...TYPES]};
-  console.info('[CE-QC][V307_EXACT_DAILY_HOME]',VERSION,'single-day homepage total and all seven business cards are recomputed from the same exact V253 daily membership rows; late period-dashboard WHPP/total mutations cannot leave mixed dates.');
+  console.info('[CE-QC][V307_EXACT_DAILY_HOME]',VERSION,'single-day homepage total and all seven business cards are recomputed from the same exact V253 daily membership rows; the stable daily membership cache prevents extra background load while late period-dashboard WHPP/total mutations cannot leave mixed dates.');
 })(window);
