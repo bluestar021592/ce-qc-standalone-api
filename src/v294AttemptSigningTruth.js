@@ -1,0 +1,212 @@
+import { getDb, nowIso } from './db.js';
+import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
+import {
+  ensureV246TrackingSchema,
+  reconcileV246TrackingLedger,
+  applyV246StrictAttemptEvidence,
+  v246InclusiveDays
+} from './v246TrackingLedgerCore.js';
+
+export const V294_ATTEMPT_SIGNING_TRUTH_ID = '2026-08-25-v294-tbkh-shopee-attempt-signing-truth-v1';
+export const V294_ATTEMPT_TYPES = Object.freeze(['TBKH','SHOPEECN','SHOPEEVN']);
+const TYPE_SET = new Set(V294_ATTEMPT_TYPES);
+
+const text = value => String(value ?? '').trim();
+const billOf = value => text(value).toUpperCase();
+const dateKey = value => {
+  const match = text(value).match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+};
+const safeJson = (value, fallback = {}) => {
+  if (value && typeof value === 'object') return value;
+  try { return JSON.parse(String(value || '')) || fallback; } catch { return fallback; }
+};
+const chunks = (values, size = 250) => {
+  const out = [];
+  for (let index = 0; index < values.length; index += size) out.push(values.slice(index, index + size));
+  return out;
+};
+const strictSource = value => /^V246_STRICT_TRACK:/i.test(text(value)) || /严格.*START|START.*失败.*START/i.test(text(value));
+
+function sourceTrackType(type) {
+  return type === 'SHOPEECN' || type === 'SHOPEEVN' ? 'SHOPEE' : type;
+}
+
+export function resolveV294Attempt({ pod = false, podDate = '', events = [], ledgerAttemptNo = 0, ledgerAttemptSource = '', podAttemptNo = 0 } = {}) {
+  if (!pod) return { attemptNo: 0, source: '', proven: true, strict: null };
+  const strict = analyzeV246ShopeeAttemptCycle(events, { podDate });
+  if (strict.attemptNo > 0) {
+    return { attemptNo: strict.attemptNo, source: strict.source, proven: true, strict };
+  }
+  const ledgerNo = Math.max(0, Math.min(3, Number(ledgerAttemptNo || 0)));
+  if (ledgerNo > 0 && strictSource(ledgerAttemptSource)) {
+    return { attemptNo: ledgerNo, source: text(ledgerAttemptSource), proven: true, strict };
+  }
+  const explicit = Math.max(0, Math.min(3, Number(podAttemptNo || 0)));
+  if (explicit > 0) {
+    return { attemptNo: explicit, source: 'POD锁定明确派次', proven: true, strict };
+  }
+  return { attemptNo: 0, source: '无真实START/失败循环或明确POD派次证据', proven: false, strict };
+}
+
+export function resolveV294SigningDays(firstReportDate, podDate) {
+  const first = dateKey(firstReportDate);
+  const pod = dateKey(podDate);
+  return first && pod ? (v246InclusiveDays(first, pod) ?? 0) : 0;
+}
+
+function globalFirstMembershipDates(type, bills, db) {
+  const result = new Map();
+  for (const part of chunks(bills, 220)) {
+    const marks = part.map(() => '?').join(',');
+    if (!marks) continue;
+    const rows = db.prepare(`
+      WITH ranked AS (
+        SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
+               ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.batchId DESC) rn
+        FROM unified_import_batches b
+        WHERE b.status='VALID'
+      ), valid AS (
+        SELECT r.reportDate,UPPER(TRIM(u.shipmentCode)) shipmentCode,UPPER(TRIM(u.businessType)) businessType
+        FROM ranked r
+        JOIN unified_import_rows u ON u.snapshotId=r.snapshotId AND u.reportDate=r.reportDate
+        WHERE r.rn=1 AND TRIM(COALESCE(u.shipmentCode,''))<>''
+      )
+      SELECT shipmentCode,MIN(reportDate) firstReportDate
+      FROM valid
+      WHERE businessType=? AND shipmentCode IN (${marks})
+      GROUP BY shipmentCode
+    `).all(type, ...part);
+    for (const row of rows) result.set(billOf(row.shipmentCode), dateKey(row.firstReportDate));
+  }
+  return result;
+}
+
+function ledgerRows(type, bills, db) {
+  ensureV246TrackingSchema(db);
+  const result = new Map();
+  for (const part of chunks(bills, 300)) {
+    const marks = part.map(() => '?').join(',');
+    if (!marks) continue;
+    const rows = db.prepare(`SELECT shipmentCode,businessType,firstReportDate,lastImportedDate,terminalReason,podDate,attemptNo,attemptSource,signingDays,currentStateJson,lastCheckedAt
+      FROM qc_tracking_ledger WHERE businessType=? AND shipmentCode IN (${marks})`).all(type, ...part);
+    for (const row of rows) result.set(billOf(row.shipmentCode), row);
+  }
+  return result;
+}
+
+function trackEventsByBill(type, bills, db) {
+  const result = new Map(bills.map(bill => [bill, []]));
+  const trackType = sourceTrackType(type);
+  for (const part of chunks(bills, 220)) {
+    const marks = part.map(() => '?').join(',');
+    if (!marks) continue;
+    let rows = [];
+    try {
+      rows = db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,id
+        FROM business_track_events
+        WHERE businessType=? AND shipmentCode IN (${marks})
+        ORDER BY shipmentCode,eventTime,id`).all(trackType, ...part);
+    } catch {}
+    for (const row of rows) {
+      const bill = billOf(row.shipmentCode);
+      if (!result.has(bill)) result.set(bill, []);
+      result.get(bill).push(row);
+    }
+  }
+  return result;
+}
+
+export function applyV294ExportAttemptSigningTruth(businessType, rows = [], { db = getDb() } = {}) {
+  const type = text(businessType).toUpperCase();
+  if (!TYPE_SET.has(type) || !rows.length) return rows;
+  const bills = [...new Set(rows.map(row => billOf(row?.shipmentCode || row?.运单号)).filter(Boolean))];
+  const firstDates = globalFirstMembershipDates(type, bills, db);
+  const ledger = ledgerRows(type, bills, db);
+  const events = trackEventsByBill(type, bills, db);
+
+  for (const row of rows) {
+    const bill = billOf(row?.shipmentCode || row?.运单号);
+    if (!bill) continue;
+    const locked = ledger.get(bill) || {};
+    const firstReportDate = firstDates.get(bill) || dateKey(locked.firstReportDate) || dateKey(row.firstReportDate);
+    const pod = Boolean(row.pod) || text(locked.terminalReason).toUpperCase() === 'POD';
+    const podDate = dateKey(locked.podDate) || dateKey(row.podDate || row.podTime || row.POD时间);
+    const stateJson = safeJson(locked.currentStateJson, {});
+    const attempt = resolveV294Attempt({
+      pod,
+      podDate,
+      events: events.get(bill) || [],
+      ledgerAttemptNo: locked.attemptNo,
+      ledgerAttemptSource: locked.attemptSource,
+      podAttemptNo: row.podAttemptNo || stateJson.podAttemptNo
+    });
+    const signingDays = pod ? resolveV294SigningDays(firstReportDate, podDate) : 0;
+
+    if (firstReportDate) row.firstReportDate = firstReportDate;
+    if (podDate) row.podDate = podDate;
+    row.attemptNo = attempt.attemptNo;
+    row.trackAttemptNo = attempt.attemptNo;
+    row.attemptSource = attempt.source;
+    row.attemptEvidenceComplete = attempt.proven;
+    row.signingDays = signingDays;
+    row.signingDaysSource = signingDays > 0 ? '全量最新VALID日报首次归属日期→真实POD日期（含首尾自然日）' : '';
+    row.deliveryDays = signingDays;
+    row.deliveryDaysSource = row.signingDaysSource;
+    row.v294TruthId = V294_ATTEMPT_SIGNING_TRUTH_ID;
+  }
+  return rows;
+}
+
+function earliestValidReportDate(db, fallback = '') {
+  const row = db.prepare("SELECT MIN(reportDate) reportDate FROM unified_import_batches WHERE status='VALID'").get();
+  return dateKey(row?.reportDate) || dateKey(fallback);
+}
+
+export function backfillV294StrictAttemptsFromSavedEvidence({ reportDate = '', businessTypes = V294_ATTEMPT_TYPES, db = getDb(), reason = 'V294_POST_PROCESS' } = {}) {
+  const toDate = dateKey(reportDate);
+  if (!toDate) return { ok: false, skipped: true, reason: 'REPORT_DATE_MISSING' };
+  const fromDate = earliestValidReportDate(db, toDate) || toDate;
+  const types = [...new Set((businessTypes || []).map(value => text(value).toUpperCase()).filter(type => TYPE_SET.has(type)))];
+  ensureV246TrackingSchema(db);
+  const summary = [];
+
+  for (const type of types) {
+    const reconcile = reconcileV246TrackingLedger({ businessType: type, fromDate, toDate }, { db, reason: `${reason}:RECONCILE:${type}` });
+    const podRows = db.prepare(`SELECT shipmentCode,businessType,firstReportDate,lastImportedDate,podDate,attemptNo,attemptSource,currentStateJson
+      FROM qc_tracking_ledger
+      WHERE businessType=? AND terminalReason='POD' AND firstReportDate<=? AND lastImportedDate>=?
+      ORDER BY shipmentCode`).all(type, toDate, fromDate);
+    const bills = podRows.map(row => billOf(row.shipmentCode)).filter(Boolean);
+    const events = trackEventsByBill(type, bills, db);
+    const evidenceRows = [];
+    let unknown = 0;
+    for (const row of podRows) {
+      const bill = billOf(row.shipmentCode);
+      const strict = analyzeV246ShopeeAttemptCycle(events.get(bill) || [], { podDate: row.podDate || '' });
+      if (strict.attemptNo > 0) {
+        evidenceRows.push({
+          shipmentCode: bill,
+          businessType: type,
+          attemptNo: strict.attemptNo,
+          source: strict.source,
+          startMode: strict.startMode,
+          starts: strict.starts,
+          failures: strict.failures,
+          podDate: strict.podDate || row.podDate || ''
+        });
+      } else {
+        unknown += 1;
+      }
+    }
+    const applied = evidenceRows.length
+      ? applyV246StrictAttemptEvidence(evidenceRows, { db, reason: `${reason}:SAVED_TRACK:${type}` })
+      : { updated: 0, known: 0, unknown: 0, podDateFilled: 0, corrected: 0 };
+    summary.push({ businessType: type, fromDate, toDate, reconciled: reconcile.expected, pod: podRows.length, strictCandidates: evidenceRows.length, unknown, ...applied });
+  }
+
+  return { ok: true, version: V294_ATTEMPT_SIGNING_TRUTH_ID, fromDate, toDate, summary, completedAt: nowIso() };
+}
+
+console.info('[CE-QC][V294_ATTEMPT_SIGNING_TRUTH]', V294_ATTEMPT_SIGNING_TRUTH_ID,
+  'TBKH + SHOPEECN + SHOPEEVN use one strict 70 START→failure/Pending→new START rule; 60 is fallback only when no 70; no elapsed-day attempt guessing.');
