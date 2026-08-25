@@ -33,7 +33,7 @@
     status.classList.toggle('complete',complete);status.classList.toggle('incomplete',!complete);
     status.innerHTML=complete
       ? `<b>派次证据已完整</b><span>已识别 ${evidence.known.toLocaleString('zh-CN')}/${evidence.denominator.toLocaleString('zh-CN')} 票，可以作为正式1/2/3派结果。</span>`
-      : `<b>派次证据自动补抓中</b><span>当前已识别 ${evidence.known.toLocaleString('zh-CN')}/${evidence.denominator.toLocaleString('zh-CN')} 票（${evidence.coverage.toFixed(2)}%），仍有 ${evidence.unknown.toLocaleString('zh-CN')} 票待补。证据未完整前1/2/3派件数与比例统一显示“—”，不发布部分样本结果。</span>`;
+      : `<b>派次证据自动补抓中</b><span>当前已识别 ${evidence.known.toLocaleString('zh-CN')}/${evidence.denominator.toLocaleString('zh-CN')} 票（${evidence.coverage.toFixed(2)}%），仍有 ${evidence.unknown.toLocaleString('zh-CN')} 票待补抓。证据未完整前1/2/3派件数与比例统一显示“—”，不发布部分样本结果。</span>`;
     if(!complete)scheduleEvidenceRefresh(panel);
   }
   function pointSpacing(chart){
