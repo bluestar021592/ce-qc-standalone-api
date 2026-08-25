@@ -142,7 +142,9 @@ try {
   assert.doesNotMatch(deliveryTrendSource,/dashboard_daily_cache/,'TBKH/CN/VN canonical page endpoint must not fall back to stale dashboard_daily_cache truth');
   assert.doesNotMatch(deliveryTrendSource,/GROUP BY firstReportDate/,'TBKH/CN/VN daily trend must never group visible cohorts by lifecycle firstReportDate');
   assert.match(deliveryTrendSource,/attempt1:attemptEvidenceComplete\?knownAttempt1:null/,'partial attempt evidence must not publish partial 1-pai counts as final page metrics');
-  assert.match(deliveryTrendSource,/avgSigningDays:ledgerReady&&signingEvidenceComplete\?complete\.avgPodDays:null/,'partial signing evidence must not publish a partial average');
+  assert.match(deliveryTrendSource,/const avgSigningDays=ledgerReady&&signingEvidenceComplete&&signingDaysCount>0/,'partial signing evidence must gate the published average on complete evidence');
+  assert.match(deliveryTrendSource,/signingDaysSum\/signingDaysCount/,'published signing average must come from the locked per-shipment signing-day sum/count');
+  assert.match(deliveryTrendSource,/avgPodDays:avgSigningDays/,'legacy avgPodDays alias must inherit the same gated signing average');
   assert.match(rangeFacade,/rangeDashboardStoreV294/,'range/dashboard cards must pass through V294 parity wrapper');
   assert.match(exportSource,/applyV294ExportAttemptSigningTruth/,'export detail/dashboard must use V294 attempt/signing truth');
   assert.match(exportSummarySource,/completeAttemptRatio/,'export job summary must not publish partial attempt rates');
@@ -157,7 +159,7 @@ try {
   assert.match(specialUiSource,/r\.ledgerReady===false\|\|r\.evidenceIncomplete===true/,'special business trend status must include attempt/signing incompleteness, not only ledger membership coverage');
   assert.match(homeUiSource,/r\?\.ledgerReady===false\|\|r\?\.evidenceIncomplete===true/,'homepage CN/VN attempt trend must honor the same V294 evidence-complete signal');
 
-  console.log('[V294] QC system parity smoke passed · canonical TBKH/CN/VN page + homepage + trends + range + export share latest-VALID daily membership, strict attempts, complete-POD signing gates, and runtime wiring is production-active');
+  console.log('[V295.9/V294] QC system parity smoke passed · canonical TBKH/CN/VN page + homepage + trends + range + export share latest-VALID daily membership, strict attempts, complete-POD signing gates, and runtime wiring is production-active');
 } finally {
   db.close();
 }
