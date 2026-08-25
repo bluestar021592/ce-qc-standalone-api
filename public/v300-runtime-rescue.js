@@ -1,12 +1,13 @@
 (function installV300RuntimeRescue(global){
   if(global.__CE_QC_V300_RUNTIME_RESCUE__)return;
-  const VERSION='2026-08-25-v300-single-sidebar-exact-shopee-owner-v1';
+  const VERSION='2026-08-25-v300-single-sidebar-exact-shopee-owner-v2';
   const LEGACY_SHOPEE_IDS=['v234DailyTrendTruth','v245ShopeeAttemptTruth','v250ShopeeAttemptTruth','v251ShopeeAttemptTruth','v263DeliveryKpiPanel','v271AttemptPanel'];
   let navTimer=null,trendTimer=null,firstTimer=null,lastFirstKey='',fetchWrapped=false,observer=null;
   const date=v=>String(v||'').slice(0,10);
   const page=()=>String(location.pathname||'/').toLowerCase().replace(/\/+$/,'')||'/';
   const specialPage=()=>['/tbkh','/shopeecn','/shopeevn'].includes(page());
   const shopeePage=()=>['/shopeecn','/shopeevn'].includes(page());
+  const activeBusinessType=()=>({'/tbkh':'TBKH','/shopeecn':'SHOPEECN','/shopeevn':'SHOPEEVN'})[page()]||'';
   function range(){
     const to=date(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
     const from=date(document.getElementById('topRangeFrom')?.value||document.getElementById('dashboardRangeFrom')?.value||to);
@@ -60,6 +61,21 @@
       card.dataset.v300FirstAttemptPending='1';
     });
   }
+  function patchCard(root,label,value,ratio=''){
+    if(!root)return;root.querySelectorAll('.v18-business-card,.v18-metric-card').forEach(card=>{
+      if(String(card.querySelector('span')?.textContent||'').trim()!==label)return;
+      const b=card.querySelector('b'),em=card.querySelector('em'),small=card.querySelector('small');if(b)b.textContent=value;if(ratio&&em)em.textContent=ratio;if(ratio&&small&&/当前|占本业务|查看/.test(String(small.textContent||'')))small.textContent=ratio;card.dataset.v300ExactTruth='1';
+    });
+  }
+  function syncSpecialSummary(data){
+    const type=activeBusinessType();if(!type||String(data?.businessType||'').toUpperCase()!==type)return;
+    const rg=range(),rows=Array.isArray(data?.daily)?data.daily:[],row=rows.filter(item=>{const d=date(item?.reportDate);return d&&d>=rg.from&&d<=rg.to;}).at(-1);if(!row)return;
+    const root=activeRoot();if(!root)return;const total=Number(row.total||0),pod=row.pod===null||row.pod===undefined?null:Number(row.pod),rate=row.podRate===null||row.podRate===undefined?null:Number(row.podRate);
+    if(Number.isFinite(total))patchCard(root,type,total.toLocaleString('zh-CN'),'占本业务 100.00%');
+    if(Number.isFinite(pod))patchCard(root,'今日POD',pod.toLocaleString('zh-CN'),Number.isFinite(rate)?`占本业务 ${rate.toFixed(2)}%`:'');
+    if(Number.isFinite(rate))patchCard(root,'POD率',`${rate.toFixed(2)}%`,`当前比率 ${rate.toFixed(2)}%`);
+    root.dataset.v300SpecialTruth=`${type}|${row.reportDate||''}`;
+  }
   function wrongSpecialTrend(){
     if(!specialPage())return false;
     const root=activeRoot(),section=root?.querySelector('.v18-trend-section');if(!section)return false;
@@ -72,25 +88,28 @@
     return false;
   }
   function enforceExactTrend(force=false){
-    unwrapV251();removeLegacyShopee();blankUnprovenFirstAttempt();
+    const wrong=wrongSpecialTrend();unwrapV251();removeLegacyShopee();blankUnprovenFirstAttempt();
     const root=activeRoot(),section=root?.querySelector('.v18-trend-section');
     if(section){delete section.dataset.v248ShopeeTrend;delete section.dataset.v251ShopeeTrend;}
     const owner=global.__CE_QC_V272_LAYOUT_TREND_FINALIZER__;
-    if(owner?.rehydrateVisible&&(force||wrongSpecialTrend()))owner.rehydrateVisible();
+    if(owner?.rehydrateVisible&&(force||wrong))owner.rehydrateVisible();
   }
   function scheduleTrend(delay=50,force=false){clearTimeout(trendTimer);trendTimer=setTimeout(()=>enforceExactTrend(force),delay);}
-  function exactLegacyShopeeFetch(){
+  function installFetchBridge(){
     if(fetchWrapped||typeof global.fetch!=='function')return;fetchWrapped=true;
     const previous=global.fetch.bind(global);
     global.fetch=function v300ExactLegacyShopeeFetch(input,init){
+      let requestText='';
       try{
-        const raw=typeof input==='string'?input:String(input?.url||'');
+        const raw=typeof input==='string'?input:String(input?.url||'');requestText=raw;
         if(raw.includes('/api/v246/shopee-trends')&&!/[?&]exact=/.test(raw)){
           const u=new URL(raw,location.href),from=date(u.searchParams.get('from')),to=date(u.searchParams.get('to'));
-          if(from&&from===to){u.searchParams.set('exact','1');const next=u.pathname+u.search;if(typeof input==='string')input=next;else input=new Request(next,input);}
+          if(from&&from===to){u.searchParams.set('exact','1');const next=u.pathname+u.search;requestText=next;if(typeof input==='string')input=next;else input=new Request(next,input);}
         }
       }catch{}
-      return previous(input,init);
+      const promise=previous(input,init);
+      if(requestText.includes('/api/v263/delivery-trends'))promise.then(response=>{try{return response.clone().json();}catch{return null;}}).then(data=>{if(data?.ok!==false)syncSpecialSummary(data);}).catch(()=>{});
+      return promise;
     };
   }
   function firstKey(){const rg=range();return`${page()}|${rg.from}|${rg.to}`;}
@@ -102,7 +121,7 @@
   }
   function scheduleFirst(delay=120){clearTimeout(firstTimer);firstTimer=setTimeout(triggerFirstAttempt,delay);}
   function bind(){
-    installStyle();exactLegacyShopeeFetch();unwrapV251();cleanupSidebar();removeLegacyShopee();blankUnprovenFirstAttempt();scheduleTrend(120,true);scheduleFirst(250);
+    installStyle();installFetchBridge();unwrapV251();cleanupSidebar();removeLegacyShopee();blankUnprovenFirstAttempt();scheduleTrend(120,true);scheduleFirst(250);
     document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,#dashboardRangeQuery')){scheduleNav(30);lastFirstKey='';scheduleTrend(120,true);scheduleFirst(250);}},true);
     document.addEventListener('change',event=>{if(event.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo')){lastFirstKey='';scheduleTrend(120,true);scheduleFirst(250);}},true);
     global.addEventListener('popstate',()=>{lastFirstKey='';scheduleNav(30);scheduleTrend(120,true);scheduleFirst(250);});
@@ -122,6 +141,6 @@
     [300,1000,2500,6000].forEach(ms=>setTimeout(()=>{cleanupSidebar();removeLegacyShopee();blankUnprovenFirstAttempt();if(specialPage()&&wrongSpecialTrend())scheduleTrend(20,true);triggerFirstAttempt();},ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
-  global.__CE_QC_V300_RUNTIME_RESCUE__={version:VERSION,cleanupSidebar,enforceExactTrend,removeLegacyShopee,triggerFirstAttempt};
-  console.info('[CE-QC][V300_RUNTIME_RESCUE]',VERSION,'single canonical sidebar; retired Shopee 7-day owners are hidden/removed; legacy single-day V246 reads are forced exact; V299 exact trend owner automatically wins; first-attempt card is blanked until real evidence arrives.');
+  global.__CE_QC_V300_RUNTIME_RESCUE__={version:VERSION,cleanupSidebar,enforceExactTrend,removeLegacyShopee,triggerFirstAttempt,syncSpecialSummary};
+  console.info('[CE-QC][V300_RUNTIME_RESCUE]',VERSION,'single canonical sidebar; retired Shopee 7-day owners are hidden/removed; legacy single-day V246 reads are forced exact; V299 exact trend owner automatically wins; exact V263 POD truth also repairs the visible special-board POD cards; first-attempt card is blanked until real evidence arrives.');
 })(window);
