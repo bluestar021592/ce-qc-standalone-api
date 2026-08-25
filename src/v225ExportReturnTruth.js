@@ -2,9 +2,10 @@ import { getDb } from './db.js';
 import { collectV200Rows as collectBaseRows, V200_EXPORT_VERSION as BASE_EXPORT_VERSION } from './v200EvidenceData.js';
 import { isShopeePending1203ReturnEvent } from './shopeeReturnTruth.js';
 import { applyV230AttemptSigningTruth, V230_ATTEMPT_SIGNING_TRUTH_ID } from './v230AttemptSigningTruth.js';
+import { applyV294ExportAttemptSigningTruth, V294_ATTEMPT_SIGNING_TRUTH_ID } from './v294AttemptSigningTruth.js';
 
 // Keep the V200 exporter contract/version stable because the launcher go-live
-// gate validates this exact identifier. V225/V230 are additive truth-normalization
+// gate validates this exact identifier. V225/V230/V294 are additive truth-normalization
 // layers, not replacements of the V200 workbook contract.
 export const V200_EXPORT_VERSION = BASE_EXPORT_VERSION;
 export const V225_EXPORT_RETURN_TRUTH_ID = '2026-08-22-v225-return-terminal-export-v1';
@@ -85,15 +86,18 @@ export async function collectV200Rows(type, range, onProgress = () => {}) {
   const rows = await collectBaseRows(businessType, range, onProgress);
   applyShopee1203SavedTrackTruth(businessType, rows);
   normalizeTerminalExclusion(rows);
+  // V230 remains for compatibility, then V294 is the final authority for
+  // TBKH + SHOPEE CN/VN so export uses the same strict lifecycle truth as dashboard/trend.
   applyV230AttemptSigningTruth(businessType, rows);
+  applyV294ExportAttemptSigningTruth(businessType, rows);
   onProgress({
     phase: 'returnAttemptSigningTruth',
     completed: rows.length,
     total: rows.length,
     returned: rows.filter(row => row.returned && !row.pod).length,
     notPodActive: rows.filter(row => !row.pod && !row.returned).length,
-    unknownAttemptPod: rows.filter(row => row.pod && ['SHOPEECN','SHOPEEVN'].includes(businessType) && !Number(row.attemptNo || 0)).length,
-    engine: `${V225_EXPORT_RETURN_TRUTH_ID}+${V230_ATTEMPT_SIGNING_TRUTH_ID}`
+    unknownAttemptPod: rows.filter(row => row.pod && ['TBKH','SHOPEECN','SHOPEEVN'].includes(businessType) && !Number(row.attemptNo || 0)).length,
+    engine: `${V225_EXPORT_RETURN_TRUTH_ID}+${V230_ATTEMPT_SIGNING_TRUTH_ID}+${V294_ATTEMPT_SIGNING_TRUTH_ID}`
   });
   return rows;
 }
