@@ -11,30 +11,38 @@ const membership=read('src/v284DailyMembershipTruth.js');
 const importGuard=read('src/v273ImportCompletenessGuard.js');
 const parser=read('src/unifiedExcelParser.js');
 const archiveReplay=read('src/v281ArchivedHistoricalReparse.js');
-for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v89StaticAssetCachePatch.js','src/v273DashboardTruthReadPatch.js','src/v284DailyMembershipTruth.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js','src/v281ArchivedHistoricalReparse.js','scripts/v281-archive-replay-smoke.mjs','scripts/v281-archive-failure-recovery-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
-assert.doesNotThrow(()=>new Function(ui),'V273 browser runtime must compile');
+const firstAttemptRoute=read('src/v295FirstAttemptRoutePatch.js');
+for(const file of ['public/v272-layout-trend-finalizer.js','public/v274-trend-speed-guard.js','src/v231MetricTruthUiInjectionPatch.js','src/v89StaticAssetCachePatch.js','src/v273DashboardTruthReadPatch.js','src/v284DailyMembershipTruth.js','src/v273ImportCompletenessGuard.js','src/unifiedExcelParser.js','src/v281ArchivedHistoricalReparse.js','src/v295FirstAttemptRoutePatch.js','scripts/v281-archive-replay-smoke.mjs','scripts/v281-archive-failure-recovery-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+assert.doesNotThrow(()=>new Function(ui),'V299 browser runtime must compile');
 assert.doesNotThrow(()=>new Function(speed),'V275 compatibility asset must compile');
-assert.match(ui,/2026-08-24-v273-single-visible-trend-owner-v1/);
+assert.match(ui,/2026-08-25-v299-fast-exact-all-board-trend-owner-v1/);
 assert.match(ui,/#settingsPage \.settings-grid\{align-items:start!important/,'settings cards must not stretch into blank lower areas');
-assert.match(ui,/snapshotFallback\(section,model\)/,'working snapshot must remain visible while background truth refresh runs');
-assert.match(ui,/已先显示当前已保存快照，后台正在刷新最近有效日报/,'snapshot-first state must be visible in Chinese');
+assert.match(ui,/snapshotFallback\(section\)/,'selected-range loading state must replace any stale saved-range chart body');
+assert.match(ui,/正在按所选日期读取走势图/,'loading state must describe the exact selected range in Chinese');
 assert.match(ui,/removeTrendBodies/,'one trend owner must remove old and loading grids before redrawing');
-assert.match(ui,/V273_SUPERSEDED_/,'V271 asynchronous visible trend result must be invalidated synchronously');
-assert.match(ui,/\/api\/v273\/trends/,'generic and home trends must use ledger-backed truth');
-assert.match(ui,/暂无可绘制趋势/,'no-data must be explicit instead of a permanent blank chart');
-assert.match(ui,/读取超时，系统将自动重试/,'timeouts must be finite and visible');
+assert.match(ui,/V299_SUPERSEDED_/,'older asynchronous visible trend result must be invalidated synchronously');
+assert.match(ui,/\/api\/v253\/trends/,'all boards must have a bounded fast latest-VALID first-paint route');
+assert.match(ui,/function exactSlice\(data=\{\},from='',to=''\)/,'V253 compatibility recent-day payload must be sliced back to the exact selected range');
+assert.match(ui,/d>=from&&d<=to/,'fast trend must never leak dates outside the selected range');
+assert.match(ui,/STRICT_DELAY_MS=16000/,'strict ledger refinement must wait until fast chart and first-attempt read have had priority');
+assert.match(ui,/\/api\/v273\/trends/,'generic and home trends must still refine from ledger-backed truth');
+assert.match(ui,/\/api\/v263\/delivery-trends/,'TBKH and Shopee trends must still refine from strict delivery truth');
+assert.match(ui,/基础走势图已按所选日期显示/,'strict timeout must keep the exact fast chart visible instead of blanking the board');
+assert.match(ui,/暂无可绘制趋势/,'true no-data must remain explicit instead of a permanent blank chart');
 assert.match(ui,/SPECIAL=new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'attempt/signing scope must remain exact');
-assert.match(ui,/GENERIC=new Set\(\['CE','CEAF','ALI1688','WHPP','ALL'\]\)/,'generic scope must include home ALL and exclude specialized boards');
+assert.match(ui,/GENERIC=new Set\(\['CE','CEAF','ALI1688','WHPP','ALL'\]\)/,'generic scope must include home ALL and WHPP');
+assert.match(ui,/ALL_BOARDS=new Set\(\[\.\.\.SPECIAL,\.\.\.GENERIC\]\)/,'one owner must cover all eight visible board scopes');
 assert.match(ui,/当前暂无可验证的1\/2\/3派轨迹证据/,'missing attempt evidence must not be drawn as fake zero');
-assert.match(ui,/hydrateWhppStandalone/,'WHPP must have an explicit standalone hydration path');
-assert.doesNotMatch(ui,/\/api\/v253\/trends\?businessType=WHPP/,'WHPP visible trends must no longer rely on incomplete historical final_rows');
-assert.doesNotMatch(ui,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V273 must never intercept navigation');
+assert.match(ui,/hydrateWhppStandalone/,'WHPP must retain an explicit standalone fallback hydration path');
+assert.match(ui,/fastUrl\('WHPP',rg\)/,'WHPP standalone fallback must also use the bounded fast exact path before strict work');
+assert.doesNotMatch(ui,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'V299 must never intercept navigation');
+assert.match(firstAttemptRoute,/2026-08-25-v299-first-attempt-direct-only-v3/,'first-attempt truth must be direct-only so it cannot block primary trend routes');
+assert.doesNotMatch(firstAttemptRoute,/TARGETS\s*=|responseHook\(|overlayPayload\(/,'V253/V263 must not synchronously execute first-attempt truth during primary chart paint');
 
-// V284 supersedes V274's firstReportDate aggregation. Daily cohort membership must
-// come from the latest VALID report for each date, while V246 proven lifecycle truth
-// remains the preferred status/attempt source for those exact daily members.
-assert.match(backend,/V284_DAILY_MEMBERSHIP_TRUTH_ID/,'V284 backend authority must be active through the historical V273 route');
-assert.match(backend,/readV284ProvenDashboardTrends/,'V273 compatibility route must delegate to V284 proven daily-membership truth');
+// V284 remains the strict evidence authority. V299 changes only the visible read
+// order: latest-VALID exact chart first, then the same strict V284 ledger truth.
+assert.match(backend,/V284_DAILY_MEMBERSHIP_TRUTH_ID/,'V284 backend authority must remain active through the historical V273 route');
+assert.match(backend,/readV284ProvenDashboardTrends/,'V273 strict refinement must delegate to V284 proven daily-membership truth');
 assert.match(membership,/2026-08-24-v284-daily-membership-ledger-truth-v1/,'V284 daily-membership truth module must be the active implementation');
 assert.match(membership,/ROW_NUMBER\(\) OVER\(PARTITION BY b\.reportDate ORDER BY b\.createdAt DESC,b\.batchId DESC\) rn/,'each date must select its newest VALID source membership exactly once');
 assert.match(membership,/LEFT JOIN qc_tracking_ledger l ON l\.shipmentCode=v\.shipmentCode AND l\.businessType=v\.businessType/,'daily report members must join V246 lifecycle truth by shipment/business instead of firstReportDate');
@@ -51,7 +59,8 @@ assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediat
 
 assert.match(inject,/import '\.\/v273DashboardTruthReadPatch\.js';/);
 assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
-assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260824-v273-1/,'V273 owner cache key must remain');
+assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260825-v299-1/,'V299 owner cache key must force browsers off the old V273 asset');
+assert.match(inject,/V273_LAYOUT_TREND_COMPAT_MARKER/,'historical V273 source marker must remain for compatibility gates only');
 assert.match(inject,/X-CE-QC-V274-UI/,'V274/V284 compatibility guard must remain observable in response headers');
 
 assert.match(delivery,/2026-08-24-v280-sparse-excel-precommit-observability-v1/,'V280 sparse-range backend patch must be active');
@@ -136,4 +145,4 @@ assert.match(archiveReplay,/process\.env\.NODE_ENV === 'test' \|\| process\.env\
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-replay-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-failure-recovery-smoke.mjs'],{stdio:'inherit'});
-console.log('[V284/V282/V280/V273] proven daily-membership trend truth + shipment-column source census + atomic historical replay + current-state preservation + failed-replay recovery + sparse Excel range + staged import timing passed');
+console.log('[V299/V284/V282/V280/V273] all-board fast exact trend first paint + strict daily-membership refinement + shipment-column source census + atomic historical replay + current-state preservation + failed-replay recovery passed');
