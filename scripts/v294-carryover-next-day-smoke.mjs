@@ -75,3 +75,5 @@ try{
 
   console.log('[V294] carryover next-day smoke passed · OPEN survives next day, 00:05 + 2h scheduler starts after listen, return-in-progress and normal transit remain OPEN until exact terminal evidence');
 }finally{db.close();}
+
+await import('./v294-final-qc-contract-smoke.mjs');
