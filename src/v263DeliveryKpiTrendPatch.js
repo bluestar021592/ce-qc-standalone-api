@@ -6,7 +6,7 @@ import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
 import { enforceV294MetricCompleteness, V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
 import { getV263DeliveryEvidenceStatus, requestV263DeliveryEvidenceBackfill } from './v262ShopeeStrictEvidenceBackfill.js';
 
-export const V263_DELIVERY_KPI_TREND_ID='2026-08-25-v294-three-business-daily-membership-kpi-trend-v4';
+export const V263_DELIVERY_KPI_TREND_ID='2026-08-25-v294-three-business-daily-membership-kpi-trend-v5';
 const TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const CACHE_MS=15_000;
 const memory=new Map();
@@ -22,6 +22,9 @@ function strictDaily(row={}){
   const attemptEvidenceComplete=ledgerReady&&Boolean(complete.attemptEvidenceComplete);
   const signingEvidenceComplete=ledgerReady&&Boolean(complete.signingEvidenceComplete);
   const evidenceIncomplete=!ledgerReady||!attemptEvidenceComplete||!signingEvidenceComplete;
+  const knownAttempt1=ledgerReady?n(complete.attempt1):0;
+  const knownAttempt2=ledgerReady?n(complete.attempt2):0;
+  const knownAttempt3=ledgerReady?n(complete.attempt3):0;
   return {
     ...complete,
     total:n(complete.total),
@@ -34,9 +37,12 @@ function strictDaily(row={}){
     cacheTotal:n(complete.total),
     avgSigningDays:ledgerReady&&signingEvidenceComplete?complete.avgPodDays:null,
     avgPodDays:ledgerReady&&signingEvidenceComplete?complete.avgPodDays:null,
-    attempt1:ledgerReady?n(complete.attempt1):0,
-    attempt2:ledgerReady?n(complete.attempt2):0,
-    attempt3:ledgerReady?n(complete.attempt3):0,
+    attempt1Known:knownAttempt1,
+    attempt2Known:knownAttempt2,
+    attempt3Known:knownAttempt3,
+    attempt1:attemptEvidenceComplete?knownAttempt1:null,
+    attempt2:attemptEvidenceComplete?knownAttempt2:null,
+    attempt3:attemptEvidenceComplete?knownAttempt3:null,
     attemptUnknown:ledgerReady?n(complete.attemptUnknown):pod,
     attemptEvidenceCount:ledgerReady?n(complete.attemptEvidenceCount):0,
     attemptCoverageRate:ledgerReady&&pod>0?complete.attemptCoverageRate:null,
@@ -77,9 +83,9 @@ export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',
     oc:daily.map(r=>r.ledgerReady?r.ocCurrent:null),
     ocRate:daily.map(r=>r.ledgerReady?r.ocRate:null),
     avgSigningDays:daily.map(r=>r.ledgerReady&&r.signingEvidenceComplete?r.avgSigningDays:null),
-    attempt1:daily.map(r=>r.ledgerReady?r.attempt1:null),
-    attempt2:daily.map(r=>r.ledgerReady?r.attempt2:null),
-    attempt3:daily.map(r=>r.ledgerReady?r.attempt3:null),
+    attempt1:daily.map(r=>r.ledgerReady&&r.attemptEvidenceComplete?r.attempt1:null),
+    attempt2:daily.map(r=>r.ledgerReady&&r.attemptEvidenceComplete?r.attempt2:null),
+    attempt3:daily.map(r=>r.ledgerReady&&r.attemptEvidenceComplete?r.attempt3:null),
     attemptUnknown:daily.map(r=>r.ledgerReady?r.attemptUnknown:null),
     attempt1Rate:daily.map(r=>r.ledgerReady&&r.attemptEvidenceComplete?r.attempt1Rate:null),
     attempt2Rate:daily.map(r=>r.ledgerReady&&r.attemptEvidenceComplete?r.attempt2Rate:null),
@@ -91,7 +97,7 @@ export function readV263DeliveryKpiTrends(businessType='',fromDate='',toDate='',
     source:'LATEST_VALID_DAILY_MEMBERSHIP + PROVEN_LIFECYCLE_TRUTH + COMPLETE_POD_METRIC_GATE',
     definitions:{
       membership:'每个日期只使用该日最新VALID日报成员作为分母；firstReportDate只用于生命周期与签收天数，不决定日趋势归属',
-      attempt:'TBKH/SHOPEE统一：70 START优先；整票无70才用60；只有Pending/失败后出现新START才进入下一派；全部POD派次证据完整才发布1/2/3派率，否则显示—',
+      attempt:'TBKH/SHOPEE统一：70 START优先；整票无70才用60；只有Pending/失败后出现新START才进入下一派；全部POD派次证据完整才发布1/2/3派件数与比例，否则显示—；已识别数量只作为覆盖诊断字段保留',
       signingDays:'生命周期首次进入最新VALID日报日期到真实POD日期，含首尾当天；全部POD都有真实签收天数才发布平均值，否则显示—',
       status:'日报成员决定分母；已验证V246/V294生命周期账本或对应最终事实决定当前POD/OC/退回状态'
     }
