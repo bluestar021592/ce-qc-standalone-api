@@ -36,11 +36,13 @@ assert.match(owner,/records\.some\(r=>\[\.\.\.r\.addedNodes\]/,'MutationObserver
 assert.doesNotMatch(owner,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'lifecycle owner must never swallow navigation events');
 assert.match(owner,/without click interception/,'runtime log must explicitly disclose click safety');
 
-// V270/V271: user-uploaded CP codes are authoritative for shop trajectory classification,
-// but are deliberately independent from the seven-business daily-report classifier.
-assert.match(shops,/SHOP_CODE_RUNTIME_VERSION = '2026-08-23-v270-user-upload-authoritative-merge-v1'/,'V270 shop-code authority must remain active');
-assert.match(shops,/const persisted = loadAllPersistedShopCodes\(db\);[\s\S]*merged\.set\(code, name\)/,'persisted ADMIN CP codes must merge over builtin codes at runtime');
-assert.match(shops,/authority: 'ADMIN_UPLOAD_OVERRIDES_BUILTIN'/,'shop summary must disclose ADMIN upload authority');
+// V306 keeps the useful V270 ADMIN-override behavior, but expands runtime authority
+// to the signed 95-code + alias map and explicitly forbids store recognition from
+// changing the seven-business daily-report board assignment.
+assert.match(shops,/SHOP_CODE_RUNTIME_VERSION = '2026-08-25-v306-authoritative-code-name-alias-v1'/,'V306 authoritative code/name/alias shop runtime must remain active');
+assert.match(shops,/const persisted = loadAllPersistedShopCodes\(db\);[\s\S]*merged\.set\(code, name\)/,'persisted ADMIN CP codes must continue to merge over builtin display names at runtime');
+assert.match(shops,/ADMIN-uploaded canonical names still override display names/,'V306 must explicitly preserve the V270 ADMIN display-name override contract');
+assert.match(shops,/authority: 'SHOP_CODE_FIRST_ALIAS_SECOND_BUSINESS_BOARD_UNCHANGED'/,'shop summary must disclose code-first, alias-second, business-board-unchanged authority');
 assert.match(shops,/effectiveImmediately: true/,'successful CP-code import must become effective immediately');
 assert.match(shops,/SHOP_CODE_NAME_CONFLICT/,'same CP code with conflicting names must block import');
 assert.match(shops,/NO_VALID_SHOP_CODES/,'invalid CP workbooks must be rejected rather than silently accepted');
@@ -76,4 +78,4 @@ assert.match(inject,/X-CE-QC-V269-UI/,'V269 navigation-safe delivery must remain
 assert.match(tracking,/每小时做一次防漏对账/,'existing V246 background anti-leak tracking must remain active');
 assert.match(tracking,/02:00执行最近30天非终态自动刷新/,'existing V246 nightly OPEN refresh contract must remain active');
 assert.match(history,/刷新状态后导出/,'legacy V183 refresh/export source remains for compatibility but is visually retired');
-console.log('[V271/V270/V269] classification authority + CP-code integrity + Chinese status clarity + canonical dashboard trend ownership + lifecycle freshness gate passed');
+console.log('[V306.1/V271/V270/V269] authoritative shop code+alias routing + preserved ADMIN display-name override + seven-board classification isolation + lifecycle freshness gate passed');
