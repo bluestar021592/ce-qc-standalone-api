@@ -1,7 +1,10 @@
 const fs=require('fs');
 const assert=require('assert/strict');
+const {execFileSync}=require('child_process');
 const css=fs.readFileSync('public/dashboard-v18.css','utf8');
 const owner=fs.readFileSync('public/v253-dashboard-fast-owner.js','utf8');
+const v301=fs.readFileSync('public/v301-runtime-stability.js','utf8');
+const inject=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
 
 assert.match(css,/V292: density-first dashboard layout/,'V292 density rules must remain identifiable');
 assert.match(css,/\.v18-mid-grid:has\(> :only-child\)\{grid-template-columns:minmax\(0,1fr\)!important\}/,'single mid-grid panel must consume the full row');
@@ -20,4 +23,20 @@ assert.doesNotMatch(owner,/querySelectorAll\('section,article,\.v18-panel'\)/,'r
 assert.match(owner,/if\(node!==authoritative\)node\.remove\(\)/,'only non-authoritative duplicate attempt sections may be removed');
 assert.doesNotMatch(css,/\.brand|\.sidebar|\.side-logo|\.logo-area/,'V292 density patch must not touch permanent CE brand/sidebar layout');
 
-console.log('[V292/V293] dashboard density smoke passed · 1/2/3/4 modules consume 100% row width · only one real CN/VN attempt section remains · chart articles are never deleted by dedupe');
+execFileSync(process.execPath,['--check','public/v301-runtime-stability.js'],{stdio:'pipe'});
+assert.doesNotThrow(()=>new Function(v301),'V301 browser runtime must compile');
+assert.match(v301,/2026-08-25-v301-nonrecursive-runtime-stability-v1/,'V301 runtime stability owner must identify itself');
+assert.match(v301,/observer\.disconnect\(\)/,'DOM observer must disconnect before V301 performs its own repairs');
+assert.match(v301,/finally\{observe\(\);\}/,'observer must be restored only after the repair mutation batch is finished');
+assert.match(v301,/v301FirstAttemptPending==='1'/,'first-attempt placeholder must have an idempotence guard');
+assert.match(v301,/if\(already\)return/,'re-applying the same first-attempt placeholder must be a no-op');
+assert.doesNotMatch(v301,/characterData:true/,'V301 must not observe characterData while also rewriting metric text');
+assert.match(v301,/childList:true/,'V301 only needs structural mutation observation to detect legacy owner reinsertion');
+assert.match(v301,/__CE_QC_V300_RUNTIME_RESCUE__=\{version:'disabled-by-v301'\}/,'a stale V300 tag must be neutralized before its recursive observer can install');
+assert.match(v301,/searchParams\.set\('exact','1'\)/,'single-day legacy Shopee requests remain forced exact');
+assert.match(v301,/__CE_QC_V272_LAYOUT_TREND_FINALIZER__/,'V299 exact-range trend owner remains authoritative after V301 repair');
+assert.match(inject,/v301-runtime-stability\.js\?v=20260825-v301-1/,'delivered HTML must cache-bust to the new nonrecursive V301 owner');
+assert.match(inject,/V300 recursive observer is no longer delivered/,'injection source must explicitly retire the recursive V300 owner');
+assert.match(inject,/X-CE-QC-V301-UI/,'V301 delivery must be observable in response headers');
+
+console.log('[V301/V292/V293] dashboard density + runtime stability smoke passed · 1/2/3/4 modules use full width · one sidebar · nonrecursive DOM repair · first-attempt placeholder idempotent · stale V300 observer retired');
