@@ -43,3 +43,5 @@
 .v18-dispatch-grid:has(> :nth-child(3):last-child){grid-template-columns:repeat(3,minmax(0,1fr))}
 @media(max-width:1100px){.v18-chart-grid:has(> .v18-chart-card:nth-child(3):last-child),.v18-chart-grid:has(> .v18-chart-card:nth-child(4):last-child){grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 @media(max-width:720px){.v18-chart-grid,.v18-chart-grid:has(> .v18-chart-card:nth-child(2):last-child),.v18-chart-grid:has(> .v18-chart-card:nth-child(3):last-child),.v18-chart-grid:has(> .v18-chart-card:nth-child(4):last-child),[data-v291-home-attempts="1"] .v18-chart-grid{grid-template-columns:minmax(0,1fr)!important}.v18-special-grid,.v18-dispatch-grid{grid-template-columns:minmax(0,1fr)!important}}
+
+/* V296: force the verified updater to carry the canonical V18 stylesheet; screenshot-rescue marker only, no data or metric behavior. */
