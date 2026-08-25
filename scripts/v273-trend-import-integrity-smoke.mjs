@@ -81,14 +81,24 @@ try{
   const ins=db.prepare(`INSERT INTO qc_tracking_ledger(shipmentCode,businessType,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,terminalReason,terminalAt,currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastCheckedAt,lastRepairReason,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   ins.run('CC20','CE','2026-08-20','2026-08-20','S20','S20','TERMINAL','POD',now,'POD','POD',now,'2026-08-20',0,'',1,'{}','{}',now,'TEST',now,now);
   ins.run('CC21','CE','2026-08-21','2026-08-21','S21','S21','OPEN','', '', 'OC','OC',now,'',0,'',null,'{}','{}',now,'TEST',now,now);
+
+  // No explicit from-date means the dashboard's recent-history mode and must retain both available days.
+  const recent=readV273DashboardTrends('CE','', '2026-08-21',db);
+  assert.equal(recent.id,V273_DASHBOARD_TRUTH_ID);
+  assert.deepEqual(recent.dates,['2026-08-20','2026-08-21']);
+  assert.equal(recent.daily[0].ready,true);assert.equal(recent.daily[0].podRate,100);assert.equal(recent.daily[0].sameDayPodRate,100);
+  assert.equal(recent.daily[1].ready,true);assert.equal(recent.daily[1].ocRate,100);
+  assert.deepEqual(recent.missingDates,[],'ledger-backed recent trends must not stay blank when final_rows history is missing');
+
+  // An explicit user-selected single-day range is exact: never leak the previous day into that request.
   const trends=readV273DashboardTrends('CE','2026-08-21','2026-08-21',db);
   assert.equal(trends.id,V273_DASHBOARD_TRUTH_ID);
-  assert.deepEqual(trends.dates,['2026-08-20','2026-08-21']);
-  assert.equal(trends.daily[0].ready,true);assert.equal(trends.daily[0].podRate,100);assert.equal(trends.daily[0].sameDayPodRate,100);
-  assert.equal(trends.daily[1].ready,true);assert.equal(trends.daily[1].ocRate,100);
-  assert.deepEqual(trends.missingDates,[],'ledger-backed generic trends must not stay blank when final_rows history is missing');
+  assert.deepEqual(trends.dates,['2026-08-21']);
+  assert.equal(trends.daily[0].ready,true);assert.equal(trends.daily[0].ocRate,100);
+  assert.deepEqual(trends.missingDates,[],'ledger-backed exact trends must not stay blank when final_rows history is missing');
+  assert.equal(trends.exactRequestedRange,true,'explicit from/to must preserve exact selected-range semantics');
   const hot=readV273DashboardTrends('CE','2026-08-21','2026-08-21',db);
-  assert.equal(hot.memoryCacheHit,true,'second identical trend read must return from V274 hot memory without rescanning SQLite');
+  assert.equal(hot.memoryCacheHit,true,'second identical exact trend read must return from V274 hot memory without rescanning SQLite');
   db.close();
-  console.log('[V280/V274/V273] sparse source census + reupload protection + ledger-first CE trend truth + hot cache hit passed');
+  console.log('[V295.4/V280/V274/V273] sparse source census + reupload protection + ledger-first CE recent history + exact selected range + hot cache hit passed');
 }finally{fs.rmSync(temp,{recursive:true,force:true});}
