@@ -39,7 +39,9 @@ new Function(cardSource);
 must(cardSource.includes('占本业务'), 'numeric-card percentage runtime token missing');
 const chartSource=fs.readFileSync('public/dashboard-chart-v18.js','utf8');
 new Function(chartSource);
-must(chartSource.includes('短区间每一天的数值直接标在节点上'), 'daily value chart-label token missing');
+must(chartSource.includes("chart.type==='rate'||chart.type==='days'||chart.dates.length<=14"), 'V294 chart must label every valid percentage point, including multi-series 1/2/3 attempt charts');
+must(chartSource.includes("plot.style.overflowX='auto'"), 'V294 long custom date ranges must expand horizontally instead of compressing the trend');
+must(chartSource.includes('按所选日报日期逐日绘制'), 'V294 chart note must describe exact selected-report-day rendering');
 const outcomeSource=fs.readFileSync('public/v233-current-outcome-truth.js','utf8');
 new Function(outcomeSource);
 must(outcomeSource.includes('当前POD / 退回 / 未闭环真实状态'), 'V233 current-outcome truth token missing');
@@ -55,8 +57,6 @@ must(V232_ATTEMPT_CYCLE_TRUTH_ID === '2026-08-22-v232-shopee-real-delivery-cycle
 must(V230_METRIC_TRUTH_ROUTE_ID === '2026-08-22-v230-daily-metric-truth-route-v1', 'unexpected V230 metric truth route version');
 must(V232_DEEP_TRUTH_CACHE_ID === '2026-08-22-v232-deep-truth-explicit-cache-v1', 'unexpected V232 deep-cache version');
 must(V232_FAST_DAILY_TREND_ID === '2026-08-22-v232-fast-seven-business-daily-trends-v1', 'unexpected V232 fast trend version');
-// Keep the original V231 contract stable for legacy gates while separately proving
-// that the V263 canonical dashboard delivery layer is present.
 must(V231_METRIC_TRUTH_UI_INJECTION_ID === '2026-08-22-v231-metric-truth-ui-injection-v1', 'unexpected V231 metric truth UI version');
 must(/^2026-08-23-v263-canonical-dashboard-delivery-v\d+$/.test(V263_CANONICAL_DASHBOARD_UI_ID), 'unexpected V263 canonical dashboard UI family');
-console.log('[V200/V230/V232/V233] fast trends + numeric percentages + strict attempt cycles + current outcome truth smoke passed');
+console.log('[V200/V294] strict attempt cycles + current outcome truth + full percentage point labels + long custom-range trend readability smoke passed');
