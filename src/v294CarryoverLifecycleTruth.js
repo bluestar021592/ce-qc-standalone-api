@@ -1,10 +1,11 @@
 import { getDb, nowIso } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
-export const V294_CARRYOVER_LIFECYCLE_TRUTH_ID = '2026-08-25-v294-return-in-progress-stays-open-v1';
+export const V294_CARRYOVER_LIFECYCLE_TRUTH_ID = '2026-08-25-v294-return-in-progress-stays-open-v2';
 
 const text = value => String(value ?? '').trim();
 const upper = value => text(value).toUpperCase();
+const dateKey = value => { const match=text(value).match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/); return match?`${match[1]}-${match[2]}-${match[3]}`:''; };
 function safeJson(value, fallback = {}) {
   if (value && typeof value === 'object') return value;
   try { return JSON.parse(String(value || '')) || fallback; } catch { return fallback; }
@@ -42,14 +43,20 @@ export function hasV294ExactReturnCompletion(payload = {}) {
   return false;
 }
 
-export function repairV294CarryoverLifecycle({ reportDate = '', db = getDb(), reason = 'V294_POST_PROCESS' } = {}) {
+export function repairV294CarryoverLifecycle({ reportDate = '', businessTypes = [], db = getDb(), reason = 'V294_POST_PROCESS' } = {}) {
   ensureV246TrackingSchema(db);
+  const date = dateKey(reportDate);
+  const types = [...new Set((businessTypes || []).map(upper).filter(Boolean))];
+  const params = [];
+  let scopeSql = '';
+  if (date) { scopeSql += ' AND (o.lastReportDate=? OR c.reportDate=?)'; params.push(date,date); }
+  if (types.length) { scopeSql += ` AND UPPER(COALESCE(o.businessType,'')) IN (${types.map(()=>'?').join(',')})`; params.push(...types); }
   const rows = db.prepare(`SELECT o.shipmentCode,o.businessType,o.status,o.closeReason,o.stateJson AS carryJson,
-      c.state AS currentState,c.stateJson AS currentJson
+      c.state AS currentState,c.reportDate AS currentReportDate,c.stateJson AS currentJson
     FROM carryover_open_items o
     LEFT JOIN shipment_current_state c ON c.shipmentCode=o.shipmentCode
-    WHERE UPPER(COALESCE(o.status,''))='CLOSED' AND UPPER(COALESCE(o.closeReason,'')) IN ('RETURNED','RETURN_COMPLETED')`).all();
-  if (!rows.length) return { ok: true, version: V294_CARRYOVER_LIFECYCLE_TRUTH_ID, reportDate, scanned: 0, reopened: 0, bills: [] };
+    WHERE UPPER(COALESCE(o.status,''))='CLOSED' AND UPPER(COALESCE(o.closeReason,'')) IN ('RETURNED','RETURN_COMPLETED')${scopeSql}`).all(...params);
+  if (!rows.length) return { ok: true, version: V294_CARRYOVER_LIFECYCLE_TRUTH_ID, reportDate: date, businessTypes: types, scanned: 0, reopened: 0, bills: [] };
 
   const now = nowIso();
   const reopenCarry = db.prepare(`UPDATE carryover_open_items SET status='OPEN',closeReason='',updatedAt=? WHERE shipmentCode=?`);
@@ -91,8 +98,8 @@ export function repairV294CarryoverLifecycle({ reportDate = '', db = getDb(), re
     throw error;
   }
 
-  return { ok: true, version: V294_CARRYOVER_LIFECYCLE_TRUTH_ID, reportDate, scanned: rows.length, reopened: reopened.length, bills: reopened.slice(0, 50) };
+  return { ok: true, version: V294_CARRYOVER_LIFECYCLE_TRUTH_ID, reportDate: date, businessTypes: types, scanned: rows.length, reopened: reopened.length, bills: reopened.slice(0, 50) };
 }
 
 console.info('[CE-QC][V294_CARRYOVER_LIFECYCLE]', V294_CARRYOVER_LIFECYCLE_TRUTH_ID,
-  'return-in-progress is never a completed return; falsely closed RETURNED carry rows are reopened until exact 100/86/已退回/退回完成 evidence exists.');
+  'return-in-progress is never a completed return; falsely closed RETURNED carry rows are reopened until exact 100/86/已退回/退回完成 evidence exists; automatic post-run repair is scoped to the completed date/business family.');
