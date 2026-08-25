@@ -5,7 +5,7 @@ import { summarizeV295FirstAttemptMembers, mergeV295FirstAttemptFacts } from '..
 
 for (const file of [
   'src/v295FirstAttemptMetric.js','src/v295FirstAttemptTruth.js','src/rangeDashboardStoreV295.js',
-  'src/v295FirstAttemptRoutePatch.js','src/v295FirstAttemptUiInjectionPatch.js','public/v295-first-attempt-ui.js'
+  'src/v295FirstAttemptRoutePatch.js','src/v295FirstAttemptInvalidationPatch.js','src/v295FirstAttemptUiInjectionPatch.js','public/v295-first-attempt-ui.js'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 
 const rangeSource=fs.readFileSync(new URL('../src/rangeDashboardStoreV284.js',import.meta.url),'utf8');
@@ -13,6 +13,7 @@ const rangeFacade=fs.readFileSync(new URL('../src/rangeDashboardStore.js',import
 const v295Range=fs.readFileSync(new URL('../src/rangeDashboardStoreV295.js',import.meta.url),'utf8');
 const v295Truth=fs.readFileSync(new URL('../src/v295FirstAttemptTruth.js',import.meta.url),'utf8');
 const v295Route=fs.readFileSync(new URL('../src/v295FirstAttemptRoutePatch.js',import.meta.url),'utf8');
+const v295Invalidation=fs.readFileSync(new URL('../src/v295FirstAttemptInvalidationPatch.js',import.meta.url),'utf8');
 const v295Ui=fs.readFileSync(new URL('../public/v295-first-attempt-ui.js',import.meta.url),'utf8');
 const v147=fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js',import.meta.url),'utf8');
 const ownerSource=fs.readFileSync(new URL('../public/v253-dashboard-fast-owner.js',import.meta.url),'utf8');
@@ -57,7 +58,10 @@ assert.match(v295Truth,/firstAttemptUnknownPod/,'V295 must detect POD rows whose
 assert.match(v295Route,/\/api\/v253\/trends/,'generic/home trend API must receive V295 first-attempt overlay');
 assert.match(v295Route,/\/api\/v263\/delivery-trends/,'TBKH/CN/VN trend API must receive the same V295 first-attempt overlay');
 assert.match(v295Route,/requestedTruth/,'single-day card summary must honor requested day even when V253 returns a recent-7-day trend');
+assert.match(v295Invalidation,/__CE_QC_INVALIDATE_V295_FIRST_ATTEMPT__/,'successful mutations must invalidate V295 cached truth');
+assert.match(v295Invalidation,/import\|purge\|clear\|reset\|run\|resume\|refresh/,'same-day reupload and rerun paths must invalidate V295 cache');
 assert.match(v147,/v295FirstAttemptRoutePatch\.js/,'real bootstrap chain must activate V295 API truth before server route registration');
+assert.match(v147,/v295FirstAttemptInvalidationPatch\.js/,'real bootstrap chain must activate same-day cache invalidation');
 assert.match(v147,/v295FirstAttemptUiInjectionPatch\.js/,'real bootstrap chain must activate V295 visible UI owner');
 assert.match(v295Ui,/首次妥投率趋势/,'visible trends must show a dedicated first-attempt success trend');
 assert.match(v295Ui,/真实首派证据不足，不显示0%/,'missing first-attempt evidence must visibly render dash semantics, not fake zero');
@@ -70,4 +74,4 @@ assert.match(ownerSource,/result\?\.aggregates\?\.HOME/,'homepage core metrics m
 assert.match(ownerSource,/证据未完成的日期保持“—”/,'incomplete attempt evidence must stay blank instead of being rendered as real 0%');
 assert.doesNotMatch(v295Ui,/method\s*:\s*['"](?:POST|PUT|PATCH|DELETE)/i,'V295 visible owner must remain read-only');
 
-console.log('[V295] visible truth smoke passed · WHPP/HOME preserved · 首次妥投率=首派成功/首派尝试 · 首日POD独立 · missing START/POD attempt evidence => — · V253/V263/range/UI all share V295 truth');
+console.log('[V295] visible truth smoke passed · WHPP/HOME preserved · 首次妥投率=首派成功/首派尝试 · 首日POD独立 · missing START/POD attempt evidence => — · same-day reruns invalidate cache · V253/V263/range/UI share V295 truth');
