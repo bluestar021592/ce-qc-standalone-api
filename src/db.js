@@ -32,6 +32,11 @@ export function getRuntimeConfig() {
     : '未检测到D盘，当前数据临时保存到项目data目录。建议检查数据保存路径。';
   const preferredDbFile = resolveProjectPath(process.env.DB_FILE || path.join(dataDir, 'ce_qc_monitor.db'));
   const dbFile = isPathRootAvailable(preferredDbFile) ? preferredDbFile : path.join(fallbackDataDir, 'ce_qc_monitor.db');
+  const exportsDir = process.env.EXPORTS_DIR ? resolveProjectPath(process.env.EXPORTS_DIR) : path.join(dataDir, 'exports');
+  const backupsDir = process.env.BACKUPS_DIR ? resolveProjectPath(process.env.BACKUPS_DIR) : path.join(dataDir, 'backups');
+  const importsDir = process.env.IMPORTS_DIR ? resolveProjectPath(process.env.IMPORTS_DIR) : path.join(dataDir, 'imports');
+  const logsDir = process.env.LOGS_DIR ? resolveProjectPath(process.env.LOGS_DIR) : path.join(dataDir, 'logs');
+  const evidenceArchiveDir = process.env.EVIDENCE_ARCHIVE_DIR ? resolveProjectPath(process.env.EVIDENCE_ARCHIVE_DIR) : path.join(dataDir, 'evidence_archive');
   const accessMode = String(process.env.ACCESS_MODE || 'DUAL').toUpperCase();
   const host = accessMode === 'DUAL' ? (process.env.HOST || '0.0.0.0') : '127.0.0.1';
   const port = Number(process.env.PORT || 5177);
@@ -41,11 +46,12 @@ export function getRuntimeConfig() {
     port,
     dataDir,
     dbFile,
-    backupsDir: path.join(dataDir, 'backups'),
-    exportsDir: process.env.EXPORTS_DIR ? resolveProjectPath(process.env.EXPORTS_DIR) : path.join(dataDir, 'exports'),
-    longJsonExportsDir: path.join(process.env.EXPORTS_DIR ? resolveProjectPath(process.env.EXPORTS_DIR) : path.join(dataDir, 'exports'), 'long_json'),
-    importsDir: path.join(dataDir, 'imports'),
-    logsDir: path.join(dataDir, 'logs'),
+    backupsDir,
+    exportsDir,
+    longJsonExportsDir: path.join(exportsDir, 'long_json'),
+    importsDir,
+    logsDir,
+    evidenceArchiveDir,
     tokenDir: path.join(dataDir, 'token'),
     tokenFile: path.join(dataDir, 'token', 'token.json'),
     usingFallbackDataDir: !dataRootAvailable,
@@ -102,7 +108,7 @@ export function nowIso() {
 }
 
 export function ensureRuntimeDirs(cfg = getRuntimeConfig()) {
-  for (const dir of [cfg.dataDir, cfg.backupsDir, cfg.exportsDir, cfg.longJsonExportsDir, cfg.importsDir, cfg.logsDir, cfg.tokenDir]) {
+  for (const dir of [cfg.dataDir, cfg.backupsDir, cfg.exportsDir, cfg.longJsonExportsDir, cfg.importsDir, cfg.logsDir, cfg.evidenceArchiveDir, cfg.tokenDir]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
