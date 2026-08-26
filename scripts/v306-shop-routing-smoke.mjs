@@ -78,4 +78,8 @@ execFileSync(process.execPath,['scripts/v309-ui-integrity-smoke.cjs'],{stdio:'in
 execFileSync(process.execPath,['scripts/v310-ui-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v311-shopee-recovery-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v314-shopee-throughput-smoke.mjs'],{stdio:'inherit'});
-console.log('[V306/V307/V308/V309/V310/V311/V314] authoritative shop routing + exact daily home + nonblocking dashboard + single-nav + backend-aware recovery + bounded SHOPEE throughput gates passed');
+for (const file of ['src/trackBatching.js','src/v314ModuleRedirectPatch.js','src/v315OperationalDataRefreshPatch.js','scripts/v316-ccsl-no-freeze-smoke.mjs']) {
+  execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
+}
+execFileSync(process.execPath,['scripts/v316-ccsl-no-freeze-smoke.mjs'],{stdio:'inherit'});
+console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316] authoritative routing + exact daily home + nonblocking dashboard + recovery + bounded throughput + CCSL hard no-freeze gates passed');
