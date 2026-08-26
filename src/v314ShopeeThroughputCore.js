@@ -1,4 +1,4 @@
-export const V314_SHOPEE_THROUGHPUT_CORE_ID = '2026-08-26-v314-bounded-prefetch-fast-checkpoint-v1';
+export const V314_SHOPEE_THROUGHPUT_CORE_ID = '2026-08-26-v314-bounded-prefetch-fast-checkpoint-v2';
 
 export function clampInt(value, min, max, fallback) {
   const parsed = Number(value);
@@ -33,13 +33,22 @@ function successfulBills(statusRows = []) {
     .filter(Boolean));
 }
 
+function planBatches(sourceBills = [], completed = new Set(), width = 50, mode = 'stable-filter') {
+  const source = cleanShipmentCodes(sourceBills);
+  if (mode === 'compact-pending') return splitFixedBatches(source.filter(code => !completed.has(code)), width);
+  return splitFixedBatches(source, width)
+    .map(batch => batch.filter(code => !completed.has(code)))
+    .filter(batch => batch.length);
+}
+
 export function createBoundedPrefetchPool({
   getSourceBills,
   getStatusRows = () => [],
   batchSize,
   concurrency,
   query,
-  label = 'SHOPEE'
+  label = 'SHOPEE',
+  planMode = 'stable-filter'
 }) {
   const width = Math.max(1, Number(batchSize || 1));
   const limit = Math.max(1, Number(concurrency || 1));
@@ -84,8 +93,7 @@ export function createBoundedPrefetchPool({
     if (launched) return;
     launched = true;
     const completed = successfulBills(getStatusRows() || []);
-    let batches = splitFixedBatches(getSourceBills() || [], width)
-      .filter(batch => !batch.every(code => completed.has(code)));
+    let batches = planBatches(getSourceBills() || [], completed, width, planMode);
     plannedKeys = new Set(batches.map(batchKey));
     const focusKey = batchKey(focusBatch);
     if (focusKey && plannedKeys.has(focusKey)) {
@@ -94,6 +102,7 @@ export function createBoundedPrefetchPool({
         ...batches.filter(batch => batchKey(batch) !== focusKey)
       ];
     }
+    console.info('[CE-QC][V314_PREFETCH]', JSON.stringify({ label, batchSize: width, concurrency: limit, batches: batches.length, completedBills: completed.size, planMode }));
     for (const batch of batches) enqueue(batch);
   }
 
@@ -118,6 +127,7 @@ export function createBoundedPrefetchPool({
     label,
     batchSize: width,
     concurrency: limit,
+    planMode,
     request,
     stats: () => ({ active, queued: queue.length, cached: cache.size, planned: plannedKeys.size, launched })
   };
@@ -137,7 +147,9 @@ export function createShopeeThroughputClient(state = {}, client, options = {}) {
       batchSize: 350,
       concurrency: options.confirmConcurrency || V314_CONFIRM_CONCURRENCY,
       query: confirmQuery,
-      label: 'confirm-query'
+      label: 'confirm-query',
+      // Native queryShopeeConfirmApi compacts all unfinished bills before slicing 350.
+      planMode: 'compact-pending'
     });
   }
   if (trackQuery) {
@@ -147,7 +159,9 @@ export function createShopeeThroughputClient(state = {}, client, options = {}) {
       batchSize: 50,
       concurrency: options.eventConcurrency || V314_EVENT_CONCURRENCY,
       query: trackQuery,
-      label: 'tms-shipment-event-query'
+      label: 'tms-shipment-event-query',
+      // Native queryShopeeApi keeps stable 50-ticket chunks then removes completed bills.
+      planMode: 'stable-filter'
     });
   }
   if (exceptionQuery) {
@@ -157,7 +171,8 @@ export function createShopeeThroughputClient(state = {}, client, options = {}) {
       batchSize: 50,
       concurrency: options.exceptionConcurrency || V314_EXCEPTION_CONCURRENCY,
       query: exceptionQuery,
-      label: 'exception-item-query'
+      label: 'exception-item-query',
+      planMode: 'stable-filter'
     });
   }
 
