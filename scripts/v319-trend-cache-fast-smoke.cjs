@@ -12,8 +12,11 @@ const owner=fs.readFileSync('public/v320-history-trend-owner.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const injection=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
 
-assert.match(backend,/2026-08-26-v321-single-day-cache-multiday-history-v3/);
+assert.match(backend,/2026-08-26-v323-real-app-trend-route-v4/);
 assert.match(backend,/\/api\/v319\/trends/,'V319 compatibility endpoint must remain registered');
+assert.match(backend,/registeredApps=new WeakSet\(\)/,'route must register per real Express app, not via one prototype-time flag');
+assert.match(backend,/isRealApp\(app\)/,'prototype-time getter calls must not consume route registration');
+assert.doesNotMatch(backend,/let registered=false/,'global one-shot route flag caused production 404 and must stay retired');
 assert.match(backend,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'single-day first paint must be dashboard-cache-only');
 assert.match(backend,/if\(from===to\)return singleDayCache\(type,to\)/,'single-day path must never enter history scans');
 assert.match(backend,/readV320HistoricalDailyWithDispatch/,'explicit multi-day trend must still use persisted history + dispatch overlay');
@@ -32,4 +35,4 @@ assert.match(owner,/2026-08-26-v321-exact-range-trend-owner-v1/);assert.match(ow
 assert.doesNotMatch(owner,/\[1800,3500\]/);assert.doesNotMatch(owner,/setInterval\(/);assert.doesNotMatch(owner,/\/api\/v273\/trends|\/api\/v263\/delivery-trends|trackQuery|confirmQuery/);
 assert.match(activation,/import '\.\/v319TrendCacheFastPatch\.js';[\s\S]*import '\.\/v295FirstAttemptUiInjectionPatch\.js';/);
 assert.match(injection,/V319_TREND_CACHE_MARKER[\s\S]*V320_HISTORY_TREND_MARKER/);assert.match(injection,/v320-history-trend-owner\.js\?v=20260826-v321-1/);assert.match(injection,/X-CE-QC-V321-UI/);
-console.log('[V321] trend availability smoke passed · single-day cache-only · explicit multi-day history · no startup auto-backfill · no forced rescan/polling');
+console.log('[V323] trend availability smoke passed · concrete-app route registration · single-day cache-only · explicit multi-day history · no startup auto-backfill');
