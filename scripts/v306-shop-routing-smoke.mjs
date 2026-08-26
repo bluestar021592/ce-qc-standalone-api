@@ -69,7 +69,6 @@ assert.match(trajectory,/analyzeStoreFlow/,'shared trajectory facts must feed th
 assert.match(trajectory,/detectShopInfo/,'shared trajectory facts must expose current store identity');
 assert.match(shopeeV30,/buildTrajectoryFacts/,'SHOPEE CN\/VN must use the same trajectory fact layer');
 assert.match(analyzerV30,/buildTrajectoryFacts/,'CE\/CEAF\/TBKH\/ALI1688 must use the same trajectory fact layer');
-
 assert.doesNotMatch(storeFlow,/SHOPEECN|SHOPEEVN|TBKH|ALI1688|CEAF|businessType\s*=/,'store recognition must never reclassify a shipment into a business board');
 
 execFileSync(process.execPath,['scripts/v307-exact-daily-home-smoke.cjs'],{stdio:'inherit'});
@@ -78,11 +77,15 @@ execFileSync(process.execPath,['scripts/v309-ui-integrity-smoke.cjs'],{stdio:'in
 execFileSync(process.execPath,['scripts/v310-ui-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v311-shopee-recovery-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v314-shopee-throughput-smoke.mjs'],{stdio:'inherit'});
-for (const file of ['src/trackBatching.js','src/v314ModuleRedirectPatch.js','src/v315OperationalDataRefreshPatch.js','src/v316BatchPolicyPreload.js','scripts/v316-ccsl-no-freeze-smoke.mjs','src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','public/v317-ccsl-recovery-owner.js','scripts/v317-ccsl-restart-recovery-smoke.mjs','public/v318-single-sidebar-owner.js','scripts/v318-single-sidebar-smoke.cjs','src/v319TrendCacheFastPatch.js','public/v319-trend-cache-first.js','scripts/v319-trend-cache-fast-smoke.cjs']) {
-  execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
-}
+for (const file of [
+  'src/trackBatching.js','src/v314ModuleRedirectPatch.js','src/v315OperationalDataRefreshPatch.js','src/v316BatchPolicyPreload.js','scripts/v316-ccsl-no-freeze-smoke.mjs',
+  'src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','public/v317-ccsl-recovery-owner.js','scripts/v317-ccsl-restart-recovery-smoke.mjs',
+  'public/v318-single-sidebar-owner.js','scripts/v318-single-sidebar-smoke.cjs','src/v319TrendCacheFastPatch.js','public/v319-trend-cache-first.js','scripts/v319-trend-cache-fast-smoke.cjs',
+  'src/v320HistoricalDailyTruth.js','src/v320DispatchSigningTruth.js','src/v320HistoricalExportRows.js','src/v225ExportReturnTruth.js','src/v200Metrics.js','src/v308DeliveryDailyFastPath.js','src/v308DashboardReadBridgeInjection.js','public/v308-dashboard-read-bridge.js','public/v320-history-trend-owner.js','scripts/v320-history-metric-export-smoke.mjs'
+]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v316-ccsl-no-freeze-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v317-ccsl-restart-recovery-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v318-single-sidebar-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v319-trend-cache-fast-smoke.cjs'],{stdio:'inherit'});
-console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316/V317/V318/V319] authoritative routing + exact daily home + nonblocking dashboard + recovery + bounded throughput + CCSL hard no-freeze + restart recovery + single-sidebar integrity + cache-only trend first-paint gates passed');
+execFileSync(process.execPath,['scripts/v320-history-metric-export-smoke.mjs'],{stdio:'inherit'});
+console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316/V317/V318/V319/V320] authoritative routing + exact daily home + nonblocking dashboard + recovery + bounded throughput + CCSL no-freeze + restart recovery + single-sidebar + full persisted history + dispatch-to-signing average + nonblocking export gates passed');
