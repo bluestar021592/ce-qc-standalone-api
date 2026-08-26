@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-26-v319-cache-only-trend-injection-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-26-v320-full-history-trend-injection-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -12,11 +12,11 @@ const V311_RECOVERY_MARKER='/v311-shopee-recovery-owner.js?v=20260826-v313-1';
 const V317_CCSL_RECOVERY_MARKER='/v317-ccsl-recovery-owner.js?v=20260826-v317-2';
 const V318_SINGLE_SIDEBAR_MARKER='/v318-single-sidebar-owner.js?v=20260826-v318-1';
 const V319_TREND_CACHE_MARKER='/v319-trend-cache-first.js?v=20260826-v319-1';
+const V320_HISTORY_TREND_MARKER='/v320-history-trend-owner.js?v=20260826-v320-1';
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
 void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
-// V300 recursive observer is no longer delivered. V301 remains the only DOM-stability owner.
-express.response.send=function v295FirstAttemptUiSend(body){
+express.response.send=function v320FirstAttemptUiSend(body){
   if(typeof body==='string'&&body.includes('</body>')&&body.includes('CE Express')){
     const tags=[];
     if(!body.includes(CLEAN_START_MARKER))tags.push(`  <script src="${CLEAN_START_MARKER}"></script>`);
@@ -30,6 +30,7 @@ express.response.send=function v295FirstAttemptUiSend(body){
     if(!body.includes(V317_CCSL_RECOVERY_MARKER))tags.push(`  <script src="${V317_CCSL_RECOVERY_MARKER}"></script>`);
     if(!body.includes(V318_SINGLE_SIDEBAR_MARKER))tags.push(`  <script src="${V318_SINGLE_SIDEBAR_MARKER}"></script>`);
     if(!body.includes(V319_TREND_CACHE_MARKER))tags.push(`  <script src="${V319_TREND_CACHE_MARKER}"></script>`);
+    if(!body.includes(V320_HISTORY_TREND_MARKER))tags.push(`  <script src="${V320_HISTORY_TREND_MARKER}"></script>`);
     if(tags.length)body=body.replace('</body>',`${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V295-UI',V295_FIRST_ATTEMPT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V300-UI','2026-08-25-v300-single-sidebar-exact-shopee-owner-v1');
@@ -45,7 +46,8 @@ express.response.send=function v295FirstAttemptUiSend(body){
     this.setHeader?.('X-CE-QC-V317-UI','2026-08-26-v317-ccsl-restart-auto-recovery-v2');
     this.setHeader?.('X-CE-QC-V318-UI','2026-08-26-v318-single-sidebar-hard-owner-v1');
     this.setHeader?.('X-CE-QC-V319-UI','2026-08-26-v319-cache-only-exact-trend-client-v1');
+    this.setHeader?.('X-CE-QC-V320-UI','2026-08-26-v320-full-history-trend-owner-v1');
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V319_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V318 keeps one canonical sidebar; V319 reroutes only V299/V307 trend reads to exact cache-only dashboard facts so page navigation cannot block on heavyweight evidence joins.');
+console.info('[CE-QC][V320_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V320 keeps V316/V317/V318/V319 protections and adds the final full-history trend owner after the cache route shim.');
