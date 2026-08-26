@@ -66,11 +66,12 @@
     return /SHOPEE CN\/VN\s*待处理/i.test(text)&&/尚未全部完成/i.test(text);
   }
   async function autoResumeUnified(){
-    if(!needsUnifiedResume()||typeof global.resumeUnified!=='function')return;
-    const reportDate=currentImportDate();const now=Date.now();if(now-lastResumeAt<60000&&reportDate===lastResumeDate)return;
+    if(global.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__)return false;
+    if(!needsUnifiedResume()||typeof global.resumeUnified!=='function')return false;
+    const reportDate=currentImportDate();const now=Date.now();if(now-lastResumeAt<60000&&reportDate===lastResumeDate)return false;
     lastResumeAt=now;lastResumeDate=reportDate;
-    try{console.info('[CE-QC][V309_AUTO_RESUME] resuming incomplete unified processing',reportDate||'current');await global.resumeUnified();}
-    catch(error){console.warn('[CE-QC][V309_AUTO_RESUME]',error?.message||error);}
+    try{console.info('[CE-QC][V309_AUTO_RESUME] resuming incomplete unified processing',reportDate||'current');await global.resumeUnified();return true;}
+    catch(error){console.warn('[CE-QC][V309_AUTO_RESUME]',error?.message||error);return false;}
   }
   function scheduleBoard(ms=200){clearTimeout(boardTimer);boardTimer=setTimeout(()=>{canonicalSidebar();patchShopeeBoard();},ms);}
   function scheduleResume(ms=1400){clearTimeout(resumeTimer);resumeTimer=setTimeout(()=>autoResumeUnified(),ms);}
@@ -84,5 +85,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V309_UI_INTEGRITY__={version:VERSION,canonicalSidebar,patchShopeeBoard,autoResumeUnified};
-  console.info('[CE-QC][V309_UI_INTEGRITY]',VERSION,'one canonical sidebar; incomplete unified SHOPEE processing resumes once from persisted checkpoints; SHOPEE CN/VN total is patched from exact V308 daily membership and daily attempt/signing table is kept before trends.');
+  console.info('[CE-QC][V309_UI_INTEGRITY]',VERSION,'one canonical sidebar; legacy auto-resume yields to the canonical V311+ backend-truth owner; SHOPEE CN/VN total is patched from exact V308 daily membership and daily attempt/signing table is kept before trends.');
 })(window);
