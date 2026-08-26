@@ -1,6 +1,6 @@
 (function installV317CcslRecoveryOwner(global){
   if(global.__CE_QC_V317_CCSL_RECOVERY_OWNER__)return;
-  const VERSION='2026-08-26-v317-ccsl-restart-auto-recovery-v1';
+  const VERSION='2026-08-26-v317-ccsl-restart-auto-recovery-v2';
   let busy=false,lastRunAt=0,timer=null;
   const date=value=>String(value||'').trim().replace(/\//g,'-').slice(0,10);
   function reportDate(){
@@ -59,7 +59,7 @@
     show('waiting',status);
   }
   async function tick(force=false){
-    if(busy||location.pathname!=='/import')return;
+    if(busy)return;
     const now=Date.now();if(!force&&now-lastRunAt<7000)return;lastRunAt=now;busy=true;
     try{
       let status=await call('status');sync(status);
@@ -78,9 +78,9 @@
     [350,1400,3500].forEach(ms=>setTimeout(()=>tick(true),ms));
     timer=setInterval(()=>tick(false),8000);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(()=>tick(true),200);});
-    document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page="import"],#topRangeQuery,.top-range-query'))setTimeout(()=>tick(true),300);},true);
+    document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query'))setTimeout(()=>tick(true),300);},true);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V317_CCSL_RECOVERY_OWNER__={version:VERSION,tick,reportDate,directStart,sync};
-  console.info('[CE-QC][V317_CCSL_RECOVERY_UI]',VERSION,'CCSL restart recovery is independent of SHOPEE completion and respects explicit pause state.');
+  console.info('[CE-QC][V317_CCSL_RECOVERY_UI]',VERSION,'CCSL restart recovery runs from every application page, is independent of SHOPEE completion, and respects explicit pause state.');
 })(window);
