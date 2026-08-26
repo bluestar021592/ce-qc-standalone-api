@@ -75,4 +75,5 @@ assert.doesNotMatch(storeFlow,/SHOPEECN|SHOPEEVN|TBKH|ALI1688|CEAF|businessType\
 execFileSync(process.execPath,['scripts/v307-exact-daily-home-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v308-dashboard-performance-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v309-ui-integrity-smoke.cjs'],{stdio:'inherit'});
-console.log('[V306/V307/V308/V309] authoritative shop routing + exact daily home + nonblocking dashboard + single-nav/auto-resume integrity gates passed');
+execFileSync(process.execPath,['scripts/v310-ui-smoke.cjs'],{stdio:'inherit'});
+console.log('[V306/V307/V308/V309/V310] authoritative shop routing + exact daily home + nonblocking dashboard + single-nav + persistent auto-resume gates passed');
