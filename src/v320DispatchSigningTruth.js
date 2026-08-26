@@ -2,7 +2,7 @@ import { getDb } from './db.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { v246InclusiveDays } from './v246TrackingLedgerCore.js';
 
-export const V320_DISPATCH_SIGNING_TRUTH_ID='2026-08-26-v320-real-dispatch-start-to-pod-v1';
+export const V320_DISPATCH_SIGNING_TRUTH_ID='2026-08-26-v320-real-dispatch-start-to-pod-v2';
 const STRICT=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const text=v=>String(v??'').trim();
 const billOf=v=>text(v).toUpperCase();
@@ -24,7 +24,7 @@ function eventsByBill(type,bills,db){
 }
 function fallbackDispatchAt(row={}){return text(row.firstAttemptAt||row.dispatchStartAt||row.deliveryStartAt||row.首次派件时间||row.首次派送时间||'');}
 export function resolveV320DispatchSigningDays({events=[],podDate='',firstAttemptAt=''}={}){
-  const pod=dateKey(podDate);if(!pod)return{days:0,dispatchDate:'',source:'POD日期缺失'};
+  const pod=dateKey(podDate);if(!pod)return{days:0,dispatchDate:'',source:'POD日期缺失',strict:analyzeV246ShopeeAttemptCycle(events,{podDate:''})};
   const strict=analyzeV246ShopeeAttemptCycle(events,{podDate:pod});
   const firstStart=text(strict.starts?.[0]?.time||firstAttemptAt||'');
   const dispatch=dateKey(firstStart);if(!dispatch)return{days:0,dispatchDate:'',source:'真实派件START缺失',strict};
@@ -34,7 +34,14 @@ export function resolveV320DispatchSigningDays({events=[],podDate='',firstAttemp
 export function applyV320DispatchSigningTruth(businessType,rows=[],{db=getDb()}={}){
   const type=text(businessType).toUpperCase();if(!STRICT.has(type)||!rows.length)return rows;
   const bills=[...new Set(rows.map(r=>billOf(r?.shipmentCode||r?.运单号)).filter(Boolean))],events=eventsByBill(type,bills,db);
-  for(const row of rows){if(!row?.pod)continue;const bill=billOf(row.shipmentCode||row.运单号),podDate=dateKey(row.podDate||row.podTime||row.POD时间);const truth=resolveV320DispatchSigningDays({events:events.get(bill)||[],podDate,firstAttemptAt:fallbackDispatchAt(row)});row.dispatchStartDate=truth.dispatchDate;row.dispatchStartAt=truth.dispatchAt||'';row.signingDays=truth.days;row.deliveryDays=truth.days;row.signingDaysSource=truth.days>0?truth.source:'';row.deliveryDaysSource=row.signingDaysSource;row.dispatchSigningEvidenceComplete=truth.days>0;row.v320DispatchSigningTruthId=V320_DISPATCH_SIGNING_TRUTH_ID;}
+  for(const row of rows){
+    if(!row?.pod)continue;
+    const bill=billOf(row.shipmentCode||row.运单号),podDate=dateKey(row.podDate||row.podTime||row.POD时间),truth=resolveV320DispatchSigningDays({events:events.get(bill)||[],podDate,firstAttemptAt:fallbackDispatchAt(row)}),strictNo=Number(truth.strict?.attemptNo||0),explicitNo=Math.max(0,Math.min(3,Number(row.podAttemptNo||row.currentAttemptNo||row.attemptNo||0)));
+    if(strictNo>0){row.attemptNo=strictNo;row.trackAttemptNo=strictNo;row.attemptSource=truth.strict.source;row.attemptEvidenceComplete=true;}
+    else if(explicitNo>0){row.attemptNo=explicitNo;row.trackAttemptNo=explicitNo;row.attemptSource=row.attemptSource||'已保存明确派次';row.attemptEvidenceComplete=true;}
+    else{row.attemptNo=0;row.trackAttemptNo=0;row.attemptSource='无真实START/失败循环或明确派次证据';row.attemptEvidenceComplete=false;}
+    row.dispatchStartDate=truth.dispatchDate;row.dispatchStartAt=truth.dispatchAt||'';row.signingDays=truth.days;row.deliveryDays=truth.days;row.signingDaysSource=truth.days>0?truth.source:'';row.deliveryDaysSource=row.signingDaysSource;row.dispatchSigningEvidenceComplete=truth.days>0;row.v320DispatchSigningTruthId=V320_DISPATCH_SIGNING_TRUTH_ID;
+  }
   return rows;
 }
-console.info('[CE-QC][V320_DISPATCH_SIGNING_TRUTH]',V320_DISPATCH_SIGNING_TRUTH_ID,'average day source corrected from report-date→POD to real first dispatch START→POD; missing dispatch evidence is excluded from the average instead of blanking the whole day.');
+console.info('[CE-QC][V320_DISPATCH_SIGNING_TRUTH]',V320_DISPATCH_SIGNING_TRUTH_ID,'strict 1/2/3 attempt and average dispatch→POD days share the same saved event truth; missing samples remain unknown instead of blanking valid sample averages.');
