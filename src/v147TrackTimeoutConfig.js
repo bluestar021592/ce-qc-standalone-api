@@ -1,4 +1,5 @@
 import './v314ModuleRedirectPatch.js';
+import './v315OperationalDataRefreshPatch.js';
 import './v303StoragePolicy.js';
 import './v303AuthorizedCleanStartPatch.js';
 import './v311ShopeeIncompleteRecoveryPatch.js';
