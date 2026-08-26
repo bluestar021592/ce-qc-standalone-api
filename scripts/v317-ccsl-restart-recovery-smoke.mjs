@@ -31,16 +31,18 @@ assert.match(backend,/createOrRecoverRun\(date/,'missing run locks must be creat
 assert.match(backend,/updateRunLock\(date,'failed'/,'finished-without-snapshot must become recoverable rather than falsely complete');
 assert.doesNotMatch(backend,/DELETE FROM (?:scan_results|track_events|run_checkpoints|unified_import_rows)/,'restart recovery must never delete persisted evidence/checkpoints/import membership');
 
+assert.match(client,/2026-08-26-v317-ccsl-restart-auto-recovery-v2/,'all-page V317 recovery owner must be active');
 assert.match(client,/\/api\/v317\/ccsl-recovery/);
 assert.match(client,/\/api\/run\/start/,'V317 must directly attach/start the CCSL backend run after preparing persisted recovery state');
 assert.doesNotMatch(client,/SHOPEE CN\/VN\s*待处理/,'CCSL recovery must not depend on SHOPEE being pending');
 assert.match(client,/status\.paused/,'explicit pause state must be respected by the client owner');
+assert.doesNotMatch(client,/location\.pathname\s*!==\s*['"]\/import['"]/,'restart continuation must not depend on the user opening the import page');
 assert.match(activation,/v317CcslIncompleteRecoveryPatch\.js/,'V317 backend patch must load before server route registration');
-assert.match(injection,/v317-ccsl-recovery-owner\.js/,'V317 browser recovery owner must be injected into the managed UI');
+assert.match(injection,/v317-ccsl-recovery-owner\.js\?v=20260826-v317-2/,'V317 browser owner must be cache-busted and injected');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/,'fresh unified import intentionally resets the run lock, so restart recovery must recreate it from persisted current-day membership');
 assert.match(server,/createOrRecoverRun\(reportDate/,'native CCSL execution must remain checkpoint-recoverable');
 
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686,'2026-08-06 screenshot CCSL routing total must be CE+CEAF+TBKH+ALI1688, not the full 6098 import');
 
-console.log('[V317] CCSL restart recovery smoke passed · latest VALID date wins · no-lock/running/failed resume · finished-without-snapshot reopens · explicit pause respected · completed snapshot never reruns · 2026-08-06 CCSL queue=2686');
+console.log('[V317] CCSL restart recovery smoke passed · latest VALID date wins · no-lock/running/failed resume · finished-without-snapshot reopens · explicit pause respected · completed snapshot never reruns · all-page continuation · 2026-08-06 CCSL queue=2686');
