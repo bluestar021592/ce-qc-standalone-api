@@ -73,4 +73,5 @@ assert.match(analyzerV30,/buildTrajectoryFacts/,'CE\/CEAF\/TBKH\/ALI1688 must us
 assert.doesNotMatch(storeFlow,/SHOPEECN|SHOPEEVN|TBKH|ALI1688|CEAF|businessType\s*=/,'store recognition must never reclassify a shipment into a business board');
 
 execFileSync(process.execPath,['scripts/v307-exact-daily-home-smoke.cjs'],{stdio:'inherit'});
-console.log('[V306] authoritative store routing smoke passed · 95 unique codes + 26 aliases · code first/name alias second · CE/CEAF/TBKH/ALI1688 + SHOPEE CN/VN share store facts without cross-board rerouting');
+execFileSync(process.execPath,['scripts/v308-dashboard-performance-smoke.mjs'],{stdio:'inherit'});
+console.log('[V306/V307/V308] authoritative shop routing + exact daily home + nonblocking dashboard/Shopee daily KPI gates passed');
