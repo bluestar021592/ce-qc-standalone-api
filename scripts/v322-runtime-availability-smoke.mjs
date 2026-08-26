@@ -24,6 +24,21 @@ const {getDb,closeDb}=await import('../src/db.js');
 const {loadRangeDashboard}=await import('../src/rangeDashboardStoreV320.js');
 const {readV322RunProgress}=await import('../src/v322WebAvailabilityPatch.js');
 const db=getDb(),date='2026-08-06',snapshotId='V322-S',batchId='V322-B',now=`${date}T23:00:00.000Z`;
+// dashboard_daily_cache is a runtime-maintained table rather than a base migration
+// table in some isolated test databases. Create only the minimal production-compatible
+// shape required by this fixture so the smoke tests the V322 read path, not unrelated
+// cache-worker schema creation order.
+db.exec(`CREATE TABLE IF NOT EXISTS dashboard_daily_cache(
+  reportDate TEXT NOT NULL,
+  businessType TEXT NOT NULL,
+  regionCode TEXT NOT NULL DEFAULT '',
+  metricsJson TEXT NOT NULL,
+  snapshotId TEXT NOT NULL DEFAULT '',
+  snapshotStatus TEXT NOT NULL DEFAULT '',
+  sourceFingerprint TEXT NOT NULL DEFAULT '',
+  refreshedAt TEXT NOT NULL,
+  PRIMARY KEY(reportDate,businessType,regionCode)
+)`);
 db.prepare('INSERT INTO unified_snapshots(snapshotId,batchId,reportDate,status,payloadJson,createdAt) VALUES(?,?,?,?,?,?)').run(snapshotId,batchId,date,'COMPLETED','{}',now);
 db.prepare('INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?)').run(batchId,snapshotId,date,'v322.xlsx','v322-hash','VALID','{}','[]',now);
 const insRow=db.prepare('INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)');
