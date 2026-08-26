@@ -76,4 +76,5 @@ execFileSync(process.execPath,['scripts/v307-exact-daily-home-smoke.cjs'],{stdio
 execFileSync(process.execPath,['scripts/v308-dashboard-performance-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v309-ui-integrity-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v310-ui-smoke.cjs'],{stdio:'inherit'});
-console.log('[V306/V307/V308/V309/V310] authoritative shop routing + exact daily home + nonblocking dashboard + single-nav + persistent auto-resume gates passed');
+execFileSync(process.execPath,['scripts/v311-shopee-recovery-smoke.cjs'],{stdio:'inherit'});
+console.log('[V306/V307/V308/V309/V310/V311] authoritative shop routing + exact daily home + nonblocking dashboard + single-nav + persistent/backend-aware auto-resume gates passed');
