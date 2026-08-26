@@ -1,4 +1,5 @@
 import express from 'express';
+import './v320EvidenceAutoBackfill.js';
 import { readV320HistoricalDailyWithDispatch } from './v320DispatchMetricOverlay.js';
 import { V320_HISTORICAL_DAILY_TRUTH_ID } from './v320HistoricalDailyTruth.js';
 
@@ -23,6 +24,6 @@ function handler(req,res){
 function register(app){
   if(registered)return;registered=true;
   previousGet.call(app,'/api/v319/trends',handler);
-  console.info('[CE-QC][V320_TREND_HISTORY_FIRST]',V319_TREND_CACHE_FAST_ID,'V319 endpoint unions unified + legacy persisted history and overlays saved strict dispatch evidence; page reads remain local SQLite only.');
+  console.info('[CE-QC][V320_TREND_HISTORY_FIRST]',V319_TREND_CACHE_FAST_ID,'V319 endpoint unions unified + legacy persisted history and overlays saved strict dispatch evidence; missing terminal-POD starts backfill separately after listen.');
 }
 express.application.get=function v320TrendHistoryFastRoute(pathValue,...handlers){if(!registered)register(this);return previousGet.call(this,pathValue,...handlers);};
