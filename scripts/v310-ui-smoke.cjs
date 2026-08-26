@@ -1,0 +1,17 @@
+const fs=require('fs');
+const assert=require('assert/strict');
+const {execFileSync}=require('child_process');
+const ui=fs.readFileSync('public/v310-unified-resume-owner.js','utf8');
+const inject=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
+execFileSync(process.execPath,['--check','public/v310-unified-resume-owner.js'],{stdio:'pipe'});
+assert.match(ui,/2026-08-26-v310-persistent-shopee-resume-owner-v1/);
+assert.match(ui,/setInterval\(\(\)=>ensureShopeeResume\(false\),5000\)/,'V310 must keep checking after slow bootstrap or a later partial stop');
+assert.match(ui,/global\.resumeShopee\(\)/,'V310 must resume the persisted SHOPEE checkpoint directly');
+assert.match(ui,/now-lastResumeAt<15000/,'V310 retries must be rate limited');
+assert.match(ui,/SHOPEE CN\\\/VN\\s\*待处理/,'V310 must detect the persisted pending label');
+assert.match(ui,/SHOPEE\\s\*正在处理/,'V310 must avoid duplicate resume while backend is already active');
+assert.match(ui,/SHOPEE CN\/VN 处理中/,'V310 must correct the stale pending badge while the real run is active');
+assert.doesNotMatch(ui,/new MutationObserver/,'V310 must not reintroduce recursive DOM observers');
+assert.match(inject,/v310-unified-resume-owner\.js\?v=20260826-v310-1/,'V310 must be delivered after the existing stability owners');
+assert.match(inject,/X-CE-QC-V310-UI/,'V310 response header must be observable');
+console.log('[V310] persistent unified resume smoke passed · late bootstrap safe · direct SHOPEE checkpoint resume · 5s watchdog · stale pending badge corrected');
