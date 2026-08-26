@@ -1,3 +1,4 @@
+import './v316BatchPolicyPreload.js';
 import './v314ModuleRedirectPatch.js';
 import './v315OperationalDataRefreshPatch.js';
 import './v303StoragePolicy.js';
@@ -33,11 +34,11 @@ export const V305_SHOPEE_FAST_BATCH_POLICY_ID = '2026-08-25-v305-shopee-fast-bou
 // policy allowed one bad 50-ticket batch to occupy as much as 135 seconds and
 // three transport retries, which made a 4k-5k ticket day look frozen even while
 // checkpoints were still advancing. V305 keeps per-waybill failure checkpoints
-// but fails a genuinely slow batch forward much sooner: 15s/request, one retry,
-// 45s total batch budget. Failed tickets stay in the retry center and therefore
-// are not lost from the daily-report denominator or later reconciliation.
-if (!process.env.REQUEST_TIMEOUT_MS) process.env.REQUEST_TIMEOUT_MS = '15000';
-if (!process.env.CE_TRACK_BATCH_BUDGET_MS) process.env.CE_TRACK_BATCH_BUDGET_MS = '45000';
+// but fails a genuinely slow batch forward much sooner. V316 preloads the common
+// 12s request / 25s hard batch budget before pipeline evaluation; these fallbacks
+// remain only for compatibility if v147 is imported outside the normal bootstrap.
+if (!process.env.REQUEST_TIMEOUT_MS) process.env.REQUEST_TIMEOUT_MS = '12000';
+if (!process.env.CE_TRACK_BATCH_BUDGET_MS) process.env.CE_TRACK_BATCH_BUDGET_MS = '25000';
 if (!process.env.CE_TRANSIENT_RETRIES) process.env.CE_TRANSIENT_RETRIES = '1';
 if (!process.env.CE_TRANSIENT_RETRY_DELAY_MS) process.env.CE_TRANSIENT_RETRY_DELAY_MS = '400';
 
