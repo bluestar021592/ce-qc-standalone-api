@@ -72,7 +72,7 @@ for (const file of [
   'public/v318-single-sidebar-owner.js','scripts/v318-single-sidebar-smoke.cjs','src/v319TrendCacheFastPatch.js','public/v319-trend-cache-first.js','scripts/v319-trend-cache-fast-smoke.cjs',
   'src/v320HistoricalDailyTruth.js','src/v320DispatchSigningTruth.js','src/v320HistoricalExportRows.js','src/v320DispatchMetricOverlay.js','src/v320EvidenceAutoBackfill.js','src/rangeDashboardStoreV320.js','src/rangeDashboardStore.js',
   'src/v225ExportReturnTruth.js','src/v200Metrics.js','src/v308DeliveryDailyFastPath.js','src/v308DashboardReadBridgeInjection.js','public/v308-dashboard-read-bridge.js','public/v320-history-trend-owner.js',
-  'src/v322WebAvailabilityPatch.js','scripts/v320-history-metric-export-smoke.mjs','scripts/v320-current-card-truth-smoke.mjs','scripts/v320-auto-backfill-smoke.mjs','scripts/v321-web-availability-smoke.cjs','scripts/v322-runtime-availability-smoke.mjs'
+  'src/v322WebAvailabilityPatch.js','scripts/v320-history-metric-export-smoke.mjs','scripts/v320-current-card-truth-smoke.mjs','scripts/v320-auto-backfill-smoke.mjs','scripts/v321-web-availability-smoke.cjs','scripts/v322-runtime-availability-smoke.mjs','scripts/v323-page-fastpath-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v316-ccsl-no-freeze-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v317-ccsl-restart-recovery-smoke.mjs'],{stdio:'inherit'});
@@ -83,4 +83,5 @@ execFileSync(process.execPath,['scripts/v320-current-card-truth-smoke.mjs'],{std
 execFileSync(process.execPath,['scripts/v320-auto-backfill-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v321-web-availability-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v322-runtime-availability-smoke.mjs'],{stdio:'inherit'});
-console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316/V317/V318/V319/V320/V321/V322] authoritative routing + exact daily home + nonblocking dashboard + recovery + bounded throughput + CCSL no-freeze + restart recovery + single-sidebar + explicit history + dispatch-to-signing + nonblocking export + cache-only single-day period + tiny progress gates passed');
+execFileSync(process.execPath,['scripts/v323-page-fastpath-smoke.mjs'],{stdio:'inherit'});
+console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316/V317/V318/V319/V320/V321/V322/V323] authoritative routing + exact daily home + nonblocking dashboard + recovery + bounded throughput + CCSL no-freeze + restart recovery + single-sidebar + explicit history + dispatch-to-signing + nonblocking export + cache-only single-day period + tiny progress + no-404 trend route + fast strict delivery daily gates passed');
