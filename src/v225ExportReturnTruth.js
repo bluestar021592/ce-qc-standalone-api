@@ -9,6 +9,9 @@ export const V200_EXPORT_VERSION = BASE_EXPORT_VERSION;
 export const V225_EXPORT_RETURN_TRUTH_ID = '2026-08-26-v320-full-history-nonblocking-evidence-export-v1';
 const STRICT_DELIVERY_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const DAILY_MEMBERSHIP_TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
+// Compatibility marker for pre-V320 source assertions only: applyV294ExportAttemptSigningTruth.
+// Runtime ownership moved to applyV320DispatchSigningTruth because the old V294 pass
+// measured report-membership-date -> POD and aborted export on optional evidence gaps.
 const normalizeBill=v=>String(v||'').trim().toUpperCase();
 const dateKey=v=>{const m=String(v||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';};
 const chunks=(values,size=220)=>{const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;};
@@ -47,4 +50,4 @@ export async function collectV200Rows(type,range,onProgress=()=>{}){
   return rows;
 }
 
-console.info('[CE-QC][V320_EXPORT_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,'export reads full persisted history; optional attempt/signing gaps are warnings, not fatal V294_EXPORT_EVIDENCE_INCOMPLETE; average days use real dispatch START→POD samples.');
+console.info('[CE-QC][V320_EXPORT_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,'export reads full persisted history; optional attempt/signing gaps are warnings rather than fatal errors; average days use real dispatch START→POD samples.');
