@@ -7,6 +7,8 @@ import './v294PostProcessAttemptBackfillPatch.js';
 import './v294CarryoverSchedulerActivation.js';
 import './v295FirstAttemptRoutePatch.js';
 import './v295FirstAttemptInvalidationPatch.js';
+import './v308DeliveryDailyFastPath.js';
+import './v308DashboardReadBridgeInjection.js';
 import './v295FirstAttemptUiInjectionPatch.js';
 
 const RECOVERY_SAFE_MODE=String(process.env.CE_QC_RECOVERY_SAFE_MODE||'')==='1';
