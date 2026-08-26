@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-26-v325-stable-home-cards-injection-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-26-v327-shared-shopee-history-injection-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -12,12 +12,12 @@ const V311_RECOVERY_MARKER='/v311-shopee-recovery-owner.js?v=20260826-v313-1';
 const V317_CCSL_RECOVERY_MARKER='/v317-ccsl-recovery-owner.js?v=20260826-v317-2';
 const V318_SINGLE_SIDEBAR_MARKER='/v318-single-sidebar-owner.js?v=20260826-v318-1';
 const V319_TREND_CACHE_MARKER='/v319-trend-cache-first.js?v=20260826-v319-1';
-const V320_HISTORY_TREND_MARKER='/v320-history-trend-owner.js?v=20260826-v324-1';
+const V320_HISTORY_TREND_MARKER='/v320-history-trend-owner.js?v=20260826-v327-1';
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
 void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
 // V300 recursive observer is no longer delivered. V301 remains the nonrecursive runtime-stability owner.
-express.response.send=function v325FirstAttemptUiSend(body){
+express.response.send=function v327FirstAttemptUiSend(body){
   if(typeof body==='string'&&body.includes('</body>')&&body.includes('CE Express')){
     const tags=[];
     if(!body.includes(CLEAN_START_MARKER))tags.push(`  <script src="${CLEAN_START_MARKER}"></script>`);
@@ -47,10 +47,11 @@ express.response.send=function v325FirstAttemptUiSend(body){
     this.setHeader?.('X-CE-QC-V317-UI','2026-08-26-v317-ccsl-restart-auto-recovery-v2');
     this.setHeader?.('X-CE-QC-V318-UI','2026-08-26-v318-single-sidebar-hard-owner-v1');
     this.setHeader?.('X-CE-QC-V319-UI','2026-08-26-v319-cache-only-exact-trend-client-v1');
-    this.setHeader?.('X-CE-QC-V320-UI','2026-08-26-v324-auto-full-uploaded-shopee-trend-ui-v1');
+    this.setHeader?.('X-CE-QC-V320-UI','2026-08-26-v327-shared-history-trend-ui-v1');
     this.setHeader?.('X-CE-QC-V324-UI','2026-08-26-v324-auto-full-uploaded-history-v1');
     this.setHeader?.('X-CE-QC-V325-UI','2026-08-26-v325-single-owner-stable-home-cards-v1');
+    this.setHeader?.('X-CE-QC-V327-UI','2026-08-26-v327-shared-shopee-history-ui-v1');
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V325_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'single-day home cards are cache-busted to the V325 single canonical owner; V316/V317/V318/V324 protections retained.');
+console.info('[CE-QC][V327_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V325 stable home retained; Shopee history trend cache-busted to the shared single-read V327 owner.');
