@@ -1,12 +1,13 @@
 import express from 'express';
-import { readV320HistoricalDaily, V320_HISTORICAL_DAILY_TRUTH_ID } from './v320HistoricalDailyTruth.js';
+import { readV320HistoricalDailyWithDispatch } from './v320DispatchMetricOverlay.js';
+import { V320_HISTORICAL_DAILY_TRUTH_ID } from './v320HistoricalDailyTruth.js';
 
-export const V319_TREND_CACHE_FAST_ID='2026-08-26-v320-history-first-trend-v2';
+export const V319_TREND_CACHE_FAST_ID='2026-08-26-v320-history-dispatch-overlay-trend-v3';
 const previousGet=express.application.get;
 let registered=false;
 
 export function readV319TrendCacheFast(businessType='ALL',fromDate='',toDate='',db){
-  return readV320HistoricalDaily(businessType,fromDate,toDate,{db,expandSingle:true});
+  return readV320HistoricalDailyWithDispatch(businessType,fromDate,toDate,{db,expandSingle:true});
 }
 function handler(req,res){
   try{
@@ -22,6 +23,6 @@ function handler(req,res){
 function register(app){
   if(registered)return;registered=true;
   previousGet.call(app,'/api/v319/trends',handler);
-  console.info('[CE-QC][V320_TREND_HISTORY_FIRST]',V319_TREND_CACHE_FAST_ID,'V319 endpoint now unions unified + legacy persisted history; a single selected day keeps current cards exact while trend consumers receive all saved dates through that day, without CE/evidence network work.');
+  console.info('[CE-QC][V320_TREND_HISTORY_FIRST]',V319_TREND_CACHE_FAST_ID,'V319 endpoint unions unified + legacy persisted history and overlays saved strict dispatch evidence; page reads remain local SQLite only.');
 }
 express.application.get=function v320TrendHistoryFastRoute(pathValue,...handlers){if(!registered)register(this);return previousGet.call(this,pathValue,...handlers);};
