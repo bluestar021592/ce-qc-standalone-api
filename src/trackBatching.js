@@ -1,8 +1,9 @@
 export const TRACK_QUERY_BATCH_SIZE = 50;
 const DEFAULT_TRANSIENT_RETRIES = Math.max(1, Math.min(5, Number(process.env.CE_TRANSIENT_RETRIES || 3)));
 const DEFAULT_TRANSIENT_DELAY_MS = Math.max(200, Math.min(5000, Number(process.env.CE_TRANSIENT_RETRY_DELAY_MS || 800)));
-const DEFAULT_BATCH_TIME_BUDGET_MS = Math.max(30000, Math.min(180000, Number(process.env.CE_TRACK_BATCH_BUDGET_MS || 90000)));
-const MIN_REQUEST_WINDOW_MS = 15000;
+const MIN_BATCH_TIME_BUDGET_MS = Math.max(250, Math.min(30000, Number(process.env.CE_MIN_BATCH_BUDGET_MS || 5000)));
+const DEFAULT_BATCH_TIME_BUDGET_MS = Math.max(MIN_BATCH_TIME_BUDGET_MS, Math.min(180000, Number(process.env.CE_TRACK_BATCH_BUDGET_MS || 90000)));
+const MAX_REQUEST_WINDOW_MS = 15000;
 const TRACK_FALLBACK_SIZES = Object.freeze([25, 10, 5, 1]);
 
 export function splitTrackBatches(shipmentCodes = [], batchSize = TRACK_QUERY_BATCH_SIZE) {
@@ -78,20 +79,46 @@ function budgetError(apiName, batch, budgetMs) {
   return error;
 }
 
+function requestWindowMs(budgetMs) {
+  return Math.min(MAX_REQUEST_WINDOW_MS, Math.max(100, Math.floor(Number(budgetMs || DEFAULT_BATCH_TIME_BUDGET_MS) / 4)));
+}
+
+async function queryWithinHardDeadline(query, batch, apiName, deadlineAt, budgetMs) {
+  if (!deadlineAt) return query(batch);
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw budgetError(apiName, batch, budgetMs);
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => query(batch)),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(budgetError(apiName, batch, budgetMs)), remaining);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function withTransientRetry(query, batch, onLog, retries = DEFAULT_TRANSIENT_RETRIES, delayMs = DEFAULT_TRANSIENT_DELAY_MS, apiName = 'CE接口', deadlineAt = 0, budgetMs = DEFAULT_BATCH_TIME_BUDGET_MS) {
   let attempt = 0;
+  const minWindow = requestWindowMs(budgetMs);
   while (true) {
     const remaining = deadlineAt ? deadlineAt - Date.now() : Number.POSITIVE_INFINITY;
-    if (deadlineAt && remaining < MIN_REQUEST_WINDOW_MS) throw budgetError(apiName, batch, budgetMs);
+    if (deadlineAt && remaining < minWindow) throw budgetError(apiName, batch, budgetMs);
     try {
-      return await query(batch);
+      // Do not rely on the HTTP client's socket timeout alone. A DNS/TLS/socket
+      // promise can occasionally remain pending without resolving or rejecting.
+      // The batch wall-clock deadline is authoritative so one bad CE request can
+      // never freeze thousands of later shipments or leave the UI on one batch.
+      return await queryWithinHardDeadline(query, batch, apiName, deadlineAt, budgetMs);
     } catch (error) {
       if (isAuthenticationFailure(error) || error?.runStatus) throw error;
       if (error?.code === 'BATCH_TIME_BUDGET_EXCEEDED') throw error;
       if (!isTransientTransportError(error) || attempt >= retries) throw error;
       attempt += 1;
       const backoff = Math.min(8000, delayMs * attempt);
-      if (deadlineAt && Date.now() + backoff + MIN_REQUEST_WINDOW_MS > deadlineAt) {
+      if (deadlineAt && Date.now() + backoff + minWindow > deadlineAt) {
         await onLog(`${apiName}已完成网络补偿尝试 ${attempt}/${retries}，当前${batch.length}票批次达到时间预算，将保存失败票并继续后续批次。`);
         throw budgetError(apiName, batch, budgetMs);
       }
@@ -115,8 +142,9 @@ export async function queryBatchWithFallback({
 }) {
   const original = [...batch];
   const fallback = effectiveFallbackSizes(apiName, fallbackSizes);
-  const effectiveBudgetMs = Math.max(30000, Math.min(180000, Number(batchTimeBudgetMs || DEFAULT_BATCH_TIME_BUDGET_MS)));
+  const effectiveBudgetMs = Math.max(MIN_BATCH_TIME_BUDGET_MS, Math.min(180000, Number(batchTimeBudgetMs || DEFAULT_BATCH_TIME_BUDGET_MS)));
   const effectiveDeadlineAt = deadlineAt || (Date.now() + effectiveBudgetMs);
+  const minWindow = requestWindowMs(effectiveBudgetMs);
   try {
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'running' }, onLog);
     // CE's read-only query endpoints can occasionally reset the TLS socket before
@@ -134,7 +162,7 @@ export async function queryBatchWithFallback({
     // stop immediately, preserve checkpoints, and let the run pause for login.
     if (error?.runStatus || isAuthenticationFailure(error)) throw error;
     await onLog(`${apiName}批次失败：原批次${original.length}票，原因：${error?.message || error}`);
-    if (error?.code === 'BATCH_TIME_BUDGET_EXCEEDED' || Date.now() + MIN_REQUEST_WINDOW_MS >= effectiveDeadlineAt) {
+    if (error?.code === 'BATCH_TIME_BUDGET_EXCEEDED' || Date.now() + minWindow >= effectiveDeadlineAt) {
       await onLog(`${apiName}本批时间预算已用完：${original.length}票已保存为待重试，主流程立即继续下一批。`);
       return { successes: [], failures: [{ batch: original, error }] };
     }
@@ -148,7 +176,7 @@ export async function queryBatchWithFallback({
     const successes = [];
     const failures = [];
     for (const child of splitBatchesAtSize(original, fallbackSize)) {
-      if (Date.now() + MIN_REQUEST_WINDOW_MS >= effectiveDeadlineAt) {
+      if (Date.now() + minWindow >= effectiveDeadlineAt) {
         const timeout = budgetError(apiName, child, effectiveBudgetMs);
         failures.push({ batch: child, error: timeout });
         continue;
