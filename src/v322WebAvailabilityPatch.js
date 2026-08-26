@@ -1,9 +1,10 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V322_WEB_AVAILABILITY_ID='2026-08-26-v322-tiny-progress-period-availability-v1';
+export const V322_WEB_AVAILABILITY_ID='2026-08-26-v322-tiny-progress-period-availability-v2';
 const previousGet=express.application.get;
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
+const first=(...values)=>{for(const v of values)if(v!==undefined&&v!==null&&v!==''&&Number.isFinite(Number(v)))return Number(v);return 0;};
 const text=v=>String(v??'').trim();
 const safeJson=v=>{try{return v&&typeof v==='object'?v:(JSON.parse(String(v||'{}'))||{});}catch{return{};}};
 const has=v=>v!==undefined&&v!==null&&v!==''&&Number.isFinite(Number(v));
@@ -21,11 +22,11 @@ export function readV322RunProgress(businessType='CCSL',db=getDb()){
   const checkpoint=latestCheckpoint(db,type,date,text(lock.runId)),payload=safeJson(checkpoint.payloadJson),last=payload.lastRunSummary||{},snapshotId=text(latest.reportDate)===date?text(latest.snapshotId):text((()=>{try{return db.prepare("SELECT snapshotId FROM unified_import_batches WHERE status='VALID' AND reportDate=? ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(date)?.snapshotId;}catch{return'';}})());
   const sourceTotal=type==='SHOPEE'?shopeeSourceTotal(db,date,snapshotId):ccslSourceTotal(db,date,snapshotId);
   const scanTotal=has(payload.scanTotal)?n(payload.scanTotal):has(last.scanPool)?n(last.scanPool):sourceTotal;
-  const trackTotal=has(payload.trackTotal)?n(payload.trackTotal):has(last.needTrack)?n(last.needTrack):Math.max(0,n(payload.trackDone,payload.trackResults)+n(payload.trackRetry,last.trackRetry));
-  const scan=bounded(scanTotal,n(payload.scanDone,payload.scanResults),n(payload.scanRetry,last.scanRetry),n(payload.scanObserved));
-  const track=bounded(trackTotal,n(payload.trackDone,payload.trackResults),n(payload.trackRetry,last.trackRetry),n(payload.trackObserved));
+  const trackTotal=has(payload.trackTotal)?n(payload.trackTotal):has(last.needTrack)?n(last.needTrack):Math.max(0,first(payload.trackDone,payload.trackResults)+first(payload.trackRetry,last.trackRetry));
+  const scan=bounded(scanTotal,first(payload.scanDone,payload.scanResults),first(payload.scanRetry,last.scanRetry),first(payload.scanObserved));
+  const track=bounded(trackTotal,first(payload.trackDone,payload.trackResults),first(payload.trackRetry,last.trackRetry),first(payload.trackObserved));
   const phase=text(lock.currentStage||checkpoint.stage)||'待处理',isTrack=/轨迹|track|shipment-event|exception-item/i.test(phase),status=text(lock.status).toLowerCase();
-  return{ok:true,version:V322_WEB_AVAILABILITY_ID,progressRule:'V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN',businessType:type,reportDate:date,running:status==='running',paused:status==='paused',phase,batchIndex:n(lock.batchIndex,checkpoint.batchIndex),totalBatches:n(lock.totalBatches,checkpoint.totalBatches),dailyTotal:sourceTotal,podLockSkipped:Math.max(0,sourceTotal-scan.total),scanDone:scan.done,scanRetry:scan.retry,scanObserved:scan.observed,scanTotal:scan.total,trackDone:track.done,trackRetry:track.retry,trackObserved:track.observed,trackTotal:track.total,done:isTrack?track.done:scan.done,retry:isTrack?track.retry:scan.retry,total:isTrack?track.total:scan.total,runId:text(lock.runId),runStatus:text(payload.runStatus||last.runStatus||lock.status||checkpoint.status),lastMessage:text(lock.errorMessage||checkpoint.errorMessage),generatedAt:new Date().toISOString()};
+  return{ok:true,version:V322_WEB_AVAILABILITY_ID,progressRule:'V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN',businessType:type,reportDate:date,running:status==='running',paused:status==='paused',phase,batchIndex:first(lock.batchIndex,checkpoint.batchIndex),totalBatches:first(lock.totalBatches,checkpoint.totalBatches),dailyTotal:sourceTotal,podLockSkipped:Math.max(0,sourceTotal-scan.total),scanDone:scan.done,scanRetry:scan.retry,scanObserved:scan.observed,scanTotal:scan.total,trackDone:track.done,trackRetry:track.retry,trackObserved:track.observed,trackTotal:track.total,done:isTrack?track.done:scan.done,retry:isTrack?track.retry:scan.retry,total:isTrack?track.total:scan.total,runId:text(lock.runId),runStatus:text(payload.runStatus||last.runStatus||lock.status||checkpoint.status),lastMessage:text(lock.errorMessage||checkpoint.errorMessage),generatedAt:new Date().toISOString()};
 }
 function progressHandler(req,res){const started=Date.now();try{res.setHeader('Cache-Control','private,max-age=1');res.setHeader('X-CE-QC-V322',V322_WEB_AVAILABILITY_ID);const data=readV322RunProgress(req.query.businessType);res.setHeader('Server-Timing',`v322progress;dur=${Date.now()-started}`);return res.json(data);}catch(error){return res.status(200).json({ok:true,version:V322_WEB_AVAILABILITY_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:'',running:false,paused:false,phase:'状态读取暂缓',done:0,retry:0,total:0,error:text(error?.message||error),generatedAt:new Date().toISOString()});}}
 express.application.get=function v322AvailabilityGet(pathValue,...handlers){if(String(pathValue||'')==='/api/v33/run-progress')return previousGet.call(this,pathValue,progressHandler);return previousGet.call(this,pathValue,...handlers);};
