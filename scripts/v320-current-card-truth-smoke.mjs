@@ -17,6 +17,17 @@ process.env.DATA_DIR=tempRoot;process.env.DB_FILE=path.join(tempRoot,'current.db
 const {getDb,closeDb}=await import('../src/db.js');
 const {readV320HistoricalDailyWithDispatch}=await import('../src/v320DispatchMetricOverlay.js');
 const db=getDb();
+db.exec(`CREATE TABLE IF NOT EXISTS dashboard_daily_cache (
+  reportDate TEXT NOT NULL,
+  businessType TEXT NOT NULL,
+  regionCode TEXT NOT NULL DEFAULT '',
+  metricsJson TEXT NOT NULL,
+  snapshotId TEXT NOT NULL DEFAULT '',
+  snapshotStatus TEXT NOT NULL DEFAULT '',
+  sourceFingerprint TEXT NOT NULL DEFAULT '',
+  refreshedAt TEXT NOT NULL,
+  PRIMARY KEY(reportDate,businessType,regionCode)
+)`);
 const batch=db.prepare('INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?)');
 const snap=db.prepare('INSERT INTO unified_snapshots(snapshotId,batchId,reportDate,status,payloadJson,createdAt) VALUES(?,?,?,?,?,?)');
 const member=db.prepare('INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)');
