@@ -14,20 +14,21 @@ const runtime=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const backend=fs.readFileSync('src/v308DeliveryDailyFastPath.js','utf8');
 assert.match(ui,/\/api\/v263\/delivery-trends/,'bridge must still intercept old heavy special-board reader');
 assert.match(ui,/\/api\/v308\/delivery-daily/,'TBKH/CN/VN must use the persisted daily reader');
-assert.match(ui,/inFlight=new Map\(\)/,'duplicate trend GETs must remain coalesced');
+assert.match(ui,/inFlight=new Map\(\)/,'duplicate GETs must remain coalesced');
 assert.match(ui,/6500/,'UI reads must retain a finite timeout');
-for(const label of ['平均派件→签收天数','1派','2派','3派+','未识别POD','派次样本','签收天数样本'])assert.ok(ui.includes(label),`V320 Shopee daily table missing ${label}`);
-assert.doesNotMatch(ui,/signingReady&&row\.avgSigningDays/,'average days must no longer be hidden behind 100% signing coverage');
-assert.doesNotMatch(ui,/attemptReady\)/,'known attempt counts must no longer be globally hidden by an all-POD gate');
-assert.match(ui,/setInterval\(\(\)=>\{if\(activeShopeeType\(\)\)loadTable\(true\);\},10000\)/,'visible Shopee table must refresh automatically while evidence backfills');
-assert.match(inject,/v308-dashboard-read-bridge\.js\?v=20260826-v320-2/,'corrected auto-refresh bridge must be cache-busted');
+for(const label of ['平均派件→签收天数','1派','2派','3派+','未识别POD','派次样本','签收天数样本'])assert.ok(ui.includes(label),`V321 Shopee daily table missing ${label}`);
+assert.doesNotMatch(ui,/signingReady&&row\.avgSigningDays/,'average days must not be hidden behind 100% signing coverage');
+assert.doesNotMatch(ui,/setInterval\(\(\)=>\{if\(activeShopeeType\(\)\)loadTable\(true\);\},10000\)/,'10s polling must remain retired');
+assert.doesNotMatch(ui,/setTimeout\(\(\)=>schedule\(0,true\),1000\)/,'duplicate forced follow-up read must remain retired');
+assert.match(inject,/v308-dashboard-read-bridge\.js\?v=20260826-v321-1/,'no-poll bridge must be cache-busted');
 assert.match(runtime,/import '\.\/v308DeliveryDailyFastPath\.js';/,'daily backend path must activate in normal runtime');
 assert.match(runtime,/import '\.\/v308DashboardReadBridgeInjection\.js';/,'UI bridge injection must activate in normal runtime');
-assert.match(backend,/readV320HistoricalDailyWithDispatch/,'V308 daily table must use persisted history plus saved strict dispatch evidence');
+assert.match(backend,/readV320HistoricalDailyWithDispatch/,'daily table must use persisted history plus saved strict dispatch evidence');
+assert.match(backend,/expandSingle:false/,'single-day detail must remain single-day');
 
-const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v320-v308-'));
+const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v321-v308-'));
 process.env.DATA_DIR=tempRoot;
-process.env.DB_FILE=path.join(tempRoot,'v320-v308.db');
+process.env.DB_FILE=path.join(tempRoot,'v321-v308.db');
 process.env.ACCESS_MODE='LOCAL';
 process.env.SQLITE_MMAP_BYTES='0';
 process.env.SQLITE_CACHE_KIB='8192';
@@ -44,8 +45,8 @@ const insFinal=db.prepare(`INSERT INTO business_final_rows(businessType,shipment
 const dates=['2026-08-01','2026-08-02'];
 for(let di=0;di<dates.length;di++){
   const d=dates[di],snap=`S${di}`,batch=`B${di}`,now=`${d}T23:00:00.000Z`;
-  insSnap.run(snap,batch,d,'COMPLETED','{}',now);insBatch.run(batch,snap,d,'v320.xls',`h${di}`,'VALID','{}','[]',now);
-  for(let j=1;j<=4;j++)insRow.run(batch,snap,d,'SHOPEEVN',`VN-${di}-${j}`,j%2?'PP':'PV','SHOPEEVN','SHOPEEVN','日报',j,'V320','{}',now);
+  insSnap.run(snap,batch,d,'COMPLETED','{}',now);insBatch.run(batch,snap,d,'v321.xls',`h${di}`,'VALID','{}','[]',now);
+  for(let j=1;j<=4;j++)insRow.run(batch,snap,d,'SHOPEEVN',`VN-${di}-${j}`,j%2?'PP':'PV','SHOPEEVN','SHOPEEVN','日报',j,'V321','{}',now);
 }
 function final(date,bill,{pod=false,podDate='',start='',attempt=0,category='' }={}){
   const latest=podDate?`${podDate} 18:00:00`:`${date} 18:00:00`;
@@ -55,7 +56,6 @@ function final(date,bill,{pod=false,podDate='',start='',attempt=0,category='' }=
 final('2026-08-01','VN-0-1',{pod:true,podDate:'2026-08-01',start:'2026-08-01 09:00:00',attempt:1});
 final('2026-08-01','VN-0-2',{pod:true,podDate:'2026-08-01',start:'2026-08-01 10:00:00',attempt:2});
 final('2026-08-01','VN-0-3',{category:'OC'});final('2026-08-01','VN-0-4',{});
-// Three PODs on 08-02: two have real dispatch starts (2 days and 1 day), one is missing the start.
 final('2026-08-02','VN-1-1',{pod:true,podDate:'2026-08-02',start:'2026-08-01 09:00:00',attempt:1});
 final('2026-08-02','VN-1-2',{pod:true,podDate:'2026-08-02',start:'2026-08-02 09:00:00',attempt:2});
 final('2026-08-02','VN-1-3',{pod:true,podDate:'2026-08-02',start:'',attempt:0});
@@ -67,12 +67,14 @@ const elapsed=performance.now()-started;
 assert.equal(result.id,V308_DELIVERY_DAILY_FAST_ID);
 assert.deepEqual(result.dates,dates);
 assert.equal(result.daily[0].total,4);assert.equal(result.daily[0].pod,2);assert.equal(result.daily[0].ocCurrent,1);
-assert.equal(result.daily[0].avgDispatchSigningDays,1,'same-day real dispatch→POD samples must average to 1 day');
+assert.equal(result.daily[0].avgDispatchSigningDays,1);
 assert.equal(result.daily[1].total,4);assert.equal(result.daily[1].pod,3);assert.equal(result.daily[1].attempt1,1);assert.equal(result.daily[1].attempt2,1);assert.equal(result.daily[1].attemptUnknown,1);
-assert.equal(result.daily[1].signingSampleCount,2,'missing start evidence must remain a diagnostic sample gap');
-assert.equal(result.daily[1].avgDispatchSigningDays,1.5,'valid 2-day and 1-day samples must publish 1.5 even though only 2/3 PODs have signing-day evidence');
-assert.equal(result.daily[1].signingEvidenceComplete,false,'coverage diagnostic may be incomplete without blanking the sample average');
+assert.equal(result.daily[1].signingSampleCount,2);
+assert.equal(result.daily[1].avgDispatchSigningDays,1.5);
+assert.equal(result.daily[1].signingEvidenceComplete,false);
 assert.ok(elapsed<1000,`two-day persisted-history fixture should remain lightweight, got ${elapsed.toFixed(1)}ms`);
+const oneDay=readV308DeliveryDaily('SHOPEEVN','2026-08-02','2026-08-02',db);
+assert.deepEqual(oneDay.dates,['2026-08-02'],'single-day selection must never expand earlier history');
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V320/V308] persisted-history daily smoke passed · real dispatch→POD sample average publishes under partial coverage · auto-refresh enabled · ${elapsed.toFixed(1)}ms`);
+console.log(`[V321/V308] exact-range daily smoke passed · real dispatch→POD sample average · single-day stays single-day · no UI polling · ${elapsed.toFixed(1)}ms`);
