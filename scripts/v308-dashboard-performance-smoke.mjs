@@ -5,7 +5,7 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { execFileSync } from 'node:child_process';
 
-for(const file of ['src/v308DeliveryDailyFastPath.js','src/v308DashboardReadBridgeInjection.js','public/v308-dashboard-read-bridge.js','src/v320HistoricalDailyTruth.js','src/v147TrackTimeoutConfig.js']){
+for(const file of ['src/v308DeliveryDailyFastPath.js','src/v308DashboardReadBridgeInjection.js','public/v308-dashboard-read-bridge.js','src/v320HistoricalDailyTruth.js','src/v320DispatchMetricOverlay.js','src/v320EvidenceAutoBackfill.js','src/v147TrackTimeoutConfig.js']){
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 const ui=fs.readFileSync('public/v308-dashboard-read-bridge.js','utf8');
@@ -19,10 +19,11 @@ assert.match(ui,/6500/,'UI reads must retain a finite timeout');
 for(const label of ['平均派件→签收天数','1派','2派','3派+','未识别POD','派次样本','签收天数样本'])assert.ok(ui.includes(label),`V320 Shopee daily table missing ${label}`);
 assert.doesNotMatch(ui,/signingReady&&row\.avgSigningDays/,'average days must no longer be hidden behind 100% signing coverage');
 assert.doesNotMatch(ui,/attemptReady\)/,'known attempt counts must no longer be globally hidden by an all-POD gate');
-assert.match(inject,/v308-dashboard-read-bridge\.js\?v=20260826-v320-1/,'corrected bridge must be cache-busted');
+assert.match(ui,/setInterval\(\(\)=>\{if\(activeShopeeType\(\)\)loadTable\(true\);\},10000\)/,'visible Shopee table must refresh automatically while evidence backfills');
+assert.match(inject,/v308-dashboard-read-bridge\.js\?v=20260826-v320-2/,'corrected auto-refresh bridge must be cache-busted');
 assert.match(runtime,/import '\.\/v308DeliveryDailyFastPath\.js';/,'daily backend path must activate in normal runtime');
 assert.match(runtime,/import '\.\/v308DashboardReadBridgeInjection\.js';/,'UI bridge injection must activate in normal runtime');
-assert.match(backend,/readV320HistoricalDaily/,'V308 daily table must use the persisted-history authority');
+assert.match(backend,/readV320HistoricalDailyWithDispatch/,'V308 daily table must use persisted history plus saved strict dispatch evidence');
 
 const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v320-v308-'));
 process.env.DATA_DIR=tempRoot;
@@ -74,4 +75,4 @@ assert.equal(result.daily[1].signingEvidenceComplete,false,'coverage diagnostic 
 assert.ok(elapsed<1000,`two-day persisted-history fixture should remain lightweight, got ${elapsed.toFixed(1)}ms`);
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V320/V308] persisted-history daily smoke passed · real dispatch→POD sample average publishes under partial coverage · ${elapsed.toFixed(1)}ms`);
+console.log(`[V320/V308] persisted-history daily smoke passed · real dispatch→POD sample average publishes under partial coverage · auto-refresh enabled · ${elapsed.toFixed(1)}ms`);
