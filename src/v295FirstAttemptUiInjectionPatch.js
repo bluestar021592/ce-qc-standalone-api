@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-26-v317-ccsl-restart-recovery-injection-v2';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-26-v318-single-sidebar-hard-owner-injection-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -10,6 +10,7 @@ const V309_UI_MARKER='/v309-ui-integrity.js?v=20260826-v309-1';
 const V310_RESUME_MARKER='/v310-unified-resume-owner.js?v=20260826-v310-1';
 const V311_RECOVERY_MARKER='/v311-shopee-recovery-owner.js?v=20260826-v313-1';
 const V317_CCSL_RECOVERY_MARKER='/v317-ccsl-recovery-owner.js?v=20260826-v317-2';
+const V318_SINGLE_SIDEBAR_MARKER='/v318-single-sidebar-owner.js?v=20260826-v318-1';
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
 void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
@@ -26,6 +27,7 @@ express.response.send=function v295FirstAttemptUiSend(body){
     if(!body.includes(V310_RESUME_MARKER))tags.push(`  <script src="${V310_RESUME_MARKER}"></script>`);
     if(!body.includes(V311_RECOVERY_MARKER))tags.push(`  <script src="${V311_RECOVERY_MARKER}"></script>`);
     if(!body.includes(V317_CCSL_RECOVERY_MARKER))tags.push(`  <script src="${V317_CCSL_RECOVERY_MARKER}"></script>`);
+    if(!body.includes(V318_SINGLE_SIDEBAR_MARKER))tags.push(`  <script src="${V318_SINGLE_SIDEBAR_MARKER}"></script>`);
     if(tags.length)body=body.replace('</body>',`${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V295-UI',V295_FIRST_ATTEMPT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V300-UI','2026-08-25-v300-single-sidebar-exact-shopee-owner-v1');
@@ -39,7 +41,8 @@ express.response.send=function v295FirstAttemptUiSend(body){
     this.setHeader?.('X-CE-QC-V312-UI','2026-08-26-v312-direct-http-shopee-resume-v1');
     this.setHeader?.('X-CE-QC-V313-UI','2026-08-26-v313-single-source-shopee-completion-v1');
     this.setHeader?.('X-CE-QC-V317-UI','2026-08-26-v317-ccsl-restart-auto-recovery-v2');
+    this.setHeader?.('X-CE-QC-V318-UI','2026-08-26-v318-single-sidebar-hard-owner-v1');
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V317_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V313 remains canonical SHOPEE completion owner; V317 adds independent all-page CCSL restart recovery from persisted current-day membership/checkpoints and respects explicit pause.');
+console.info('[CE-QC][V318_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V317 keeps checkpoint-safe CCSL restart recovery; V318 is the final sidebar owner and removes every duplicate legacy navigation wrapper while unifying the all-complete status banner.');
