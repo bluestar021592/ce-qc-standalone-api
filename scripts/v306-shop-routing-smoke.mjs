@@ -15,63 +15,23 @@ import {
 } from '../src/shopWhitelist.js';
 import { detectShopInfo, SHOP_CODE_RUNTIME_VERSION } from '../src/shopCodes.js';
 
-for (const file of ['src/shopWhitelistBuiltin.js','src/shopWhitelist.js','src/shopCodes.js','src/storeFlow.js','src/trajectoryFacts.js']) {
-  execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
-}
-
+for (const file of ['src/shopWhitelistBuiltin.js','src/shopWhitelist.js','src/shopCodes.js','src/storeFlow.js','src/trajectoryFacts.js']) execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const SOURCE_SHA='6a6f634a2f12de7df7218b19d15c504e82088ecfb91c2d170e77a7eb66989e4c';
-assert.equal(BUILTIN_SHOP_WHITELIST_SOURCE_SHA256,SOURCE_SHA,'V306 must remain bound to the user authoritative 95-store workbook');
-assert.equal(BUILTIN_SHOP_STORES.length,95,'authoritative workbook must contain 95 store codes');
-assert.equal(new Set(BUILTIN_SHOP_STORES.map(row=>row.shop_code)).size,95,'all 95 store codes must be unique');
-assert.equal(BUILTIN_SHOP_ALIAS_COUNT,26,'all 26 alternate names from the authoritative workbook must be retained');
-assert.match(BUILTIN_SHOP_WHITELIST_VERSION,/95-ALIASES/,'V306 alias-aware whitelist version must be active');
-assert.match(SHOP_CODE_RUNTIME_VERSION,/v306-authoritative-code-name-alias/,'V306 runtime shop owner must be active');
-assert.equal(LATEST_SHOP_STORES.length,95,'signed/builtin execution set must still expose all 95 stores');
+assert.equal(BUILTIN_SHOP_WHITELIST_SOURCE_SHA256,SOURCE_SHA);assert.equal(BUILTIN_SHOP_STORES.length,95);assert.equal(new Set(BUILTIN_SHOP_STORES.map(row=>row.shop_code)).size,95);assert.equal(BUILTIN_SHOP_ALIAS_COUNT,26);assert.match(BUILTIN_SHOP_WHITELIST_VERSION,/95-ALIASES/);assert.match(SHOP_CODE_RUNTIME_VERSION,/v306-authoritative-code-name-alias/);assert.equal(LATEST_SHOP_STORES.length,95);
+const codeMap=latestShopCodeMap(),aliasMap=latestShopAliasMap(),aliasCode=name=>aliasMap.get(normalizeShopAlias(name))?.code||'';
+assert.equal(aliasCode('Lucky 168 (oppo) phone shop'),'CP000540');assert.equal(aliasCode('Borey New world Chhouk Va I'),'CP000586');assert.equal(aliasCode('Phsa Champuvoan Co-shop'),'CP000583');assert.equal(aliasCode('KSV-PT Shop'),'PNH033');assert.equal(aliasCode('SHV-PT'),'PV042');
+const byAlias=detectShopInfo({events:[{eventTime:'2026-08-25 10:00:00',trackingEventDescZh:'货物到达网点【Lucky 168 (oppo) phone shop】'}],shopCodeMap:codeMap,shopAliasMap:aliasMap});assert.equal(byAlias.isShop,true);assert.equal(byAlias.shopCode,'CP000540');assert.equal(byAlias.shopName,codeMap.get('CP000540'));assert.equal(byAlias.shopMatchSource,'NAME_ALIAS');assert.equal(byAlias.shopStatus,'门店入库');
+const byCode=detectShopInfo({events:[{eventTime:'2026-08-25 11:00:00',trackingEventDescZh:'货物到达网点【CP000583】'}],shopCodeMap:codeMap,shopAliasMap:aliasMap});assert.equal(byCode.isShop,true);assert.equal(byCode.shopCode,'CP000583');assert.equal(byCode.shopMatchSource,'CODE');
+const storeFlow=fs.readFileSync(new URL('../src/storeFlow.js',import.meta.url),'utf8'),trajectory=fs.readFileSync(new URL('../src/trajectoryFacts.js',import.meta.url),'utf8'),shopeeV30=fs.readFileSync(new URL('../src/shopeeAnalyzerV30.js',import.meta.url),'utf8'),analyzerV30=fs.readFileSync(new URL('../src/analyzerV30.js',import.meta.url),'utf8');assert.match(storeFlow,/getShopAliasMap/);assert.match(storeFlow,/detectShopInfo/);assert.match(storeFlow,/AUTHORITATIVE_NAME_ALIAS_INBOUND/);assert.match(storeFlow,/AUTHORITATIVE_NAME_ALIAS_OUTBOUND/);assert.match(trajectory,/analyzeStoreFlow/);assert.match(trajectory,/detectShopInfo/);assert.match(shopeeV30,/buildTrajectoryFacts/);assert.match(analyzerV30,/buildTrajectoryFacts/);assert.doesNotMatch(storeFlow,/SHOPEECN|SHOPEEVN|TBKH|ALI1688|CEAF|businessType\s*=/);
 
-const codeMap=latestShopCodeMap();
-const aliasMap=latestShopAliasMap();
-const aliasCode=name=>aliasMap.get(normalizeShopAlias(name))?.code||'';
-assert.equal(aliasCode('Lucky 168 (oppo) phone shop'),'CP000540');
-assert.equal(aliasCode('Borey New world Chhouk Va I'),'CP000586');
-assert.equal(aliasCode('Phsa Champuvoan Co-shop'),'CP000583');
-assert.equal(aliasCode('KSV-PT Shop'),'PNH033');
-assert.equal(aliasCode('SHV-PT'),'PV042');
-
-const byAlias=detectShopInfo({events:[{eventTime:'2026-08-25 10:00:00',trackingEventDescZh:'货物到达网点【Lucky 168 (oppo) phone shop】'}],shopCodeMap:codeMap,shopAliasMap:aliasMap});
-assert.equal(byAlias.isShop,true);
-assert.equal(byAlias.shopCode,'CP000540');
-assert.equal(byAlias.shopName,codeMap.get('CP000540'));
-assert.equal(byAlias.shopMatchSource,'NAME_ALIAS');
-assert.equal(byAlias.shopStatus,'门店入库');
-const byCode=detectShopInfo({events:[{eventTime:'2026-08-25 11:00:00',trackingEventDescZh:'货物到达网点【CP000583】'}],shopCodeMap:codeMap,shopAliasMap:aliasMap});
-assert.equal(byCode.isShop,true);assert.equal(byCode.shopCode,'CP000583');assert.equal(byCode.shopMatchSource,'CODE');
-
-const storeFlow=fs.readFileSync(new URL('../src/storeFlow.js',import.meta.url),'utf8');
-const trajectory=fs.readFileSync(new URL('../src/trajectoryFacts.js',import.meta.url),'utf8');
-const shopeeV30=fs.readFileSync(new URL('../src/shopeeAnalyzerV30.js',import.meta.url),'utf8');
-const analyzerV30=fs.readFileSync(new URL('../src/analyzerV30.js',import.meta.url),'utf8');
-assert.match(storeFlow,/getShopAliasMap/);assert.match(storeFlow,/detectShopInfo/);assert.match(storeFlow,/AUTHORITATIVE_NAME_ALIAS_INBOUND/);assert.match(storeFlow,/AUTHORITATIVE_NAME_ALIAS_OUTBOUND/);assert.match(trajectory,/analyzeStoreFlow/);assert.match(trajectory,/detectShopInfo/);assert.match(shopeeV30,/buildTrajectoryFacts/);assert.match(analyzerV30,/buildTrajectoryFacts/);assert.doesNotMatch(storeFlow,/SHOPEECN|SHOPEEVN|TBKH|ALI1688|CEAF|businessType\s*=/);
-
-execFileSync(process.execPath,['scripts/v307-exact-daily-home-smoke.cjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v308-dashboard-performance-smoke.mjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v309-ui-integrity-smoke.cjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v310-ui-smoke.cjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v311-shopee-recovery-smoke.cjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v314-shopee-throughput-smoke.mjs'],{stdio:'inherit'});
-for (const file of [
+for(const script of ['scripts/v307-exact-daily-home-smoke.cjs','scripts/v308-dashboard-performance-smoke.mjs','scripts/v309-ui-integrity-smoke.cjs','scripts/v310-ui-smoke.cjs','scripts/v311-shopee-recovery-smoke.cjs','scripts/v314-shopee-throughput-smoke.mjs'])execFileSync(process.execPath,[script],{stdio:'inherit'});
+for(const file of [
   'src/trackBatching.js','src/v314ModuleRedirectPatch.js','src/v315OperationalDataRefreshPatch.js','src/v316BatchPolicyPreload.js','scripts/v316-ccsl-no-freeze-smoke.mjs',
   'src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','public/v317-ccsl-recovery-owner.js','scripts/v317-ccsl-restart-recovery-smoke.mjs',
   'public/v318-single-sidebar-owner.js','scripts/v318-single-sidebar-smoke.cjs','src/v319TrendCacheFastPatch.js','public/v319-trend-cache-first.js','scripts/v319-trend-cache-fast-smoke.cjs',
   'src/v320HistoricalDailyTruth.js','src/v320DispatchSigningTruth.js','src/v320HistoricalExportRows.js','src/v320DispatchMetricOverlay.js','src/v320EvidenceAutoBackfill.js','src/rangeDashboardStoreV320.js','src/rangeDashboardStore.js',
   'src/v225ExportReturnTruth.js','src/v200Metrics.js','src/v308DeliveryDailyFastPath.js','src/v308DashboardReadBridgeInjection.js','public/v308-dashboard-read-bridge.js','public/v320-history-trend-owner.js',
-  'scripts/v320-history-metric-export-smoke.mjs','scripts/v320-current-card-truth-smoke.mjs','scripts/v320-auto-backfill-smoke.mjs','scripts/v321-web-availability-smoke.cjs'
+  'src/v322WebAvailabilityPatch.js','scripts/v320-history-metric-export-smoke.mjs','scripts/v320-current-card-truth-smoke.mjs','scripts/v320-auto-backfill-smoke.mjs','scripts/v321-web-availability-smoke.cjs','scripts/v322-runtime-availability-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v316-ccsl-no-freeze-smoke.mjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v317-ccsl-restart-recovery-smoke.mjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v318-single-sidebar-smoke.cjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v319-trend-cache-fast-smoke.cjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v320-history-metric-export-smoke.mjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v320-current-card-truth-smoke.mjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v320-auto-backfill-smoke.mjs'],{stdio:'inherit'});
-execFileSync(process.execPath,['scripts/v321-web-availability-smoke.cjs'],{stdio:'inherit'});
-console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316/V317/V318/V319/V320/V321] routing + exact daily home + recovery + bounded throughput + no-freeze + single-sidebar + full-history explicit-range truth + dispatch-to-signing average + nonblocking export + web-availability gates passed');
+for(const script of ['scripts/v316-ccsl-no-freeze-smoke.mjs','scripts/v317-ccsl-restart-recovery-smoke.mjs','scripts/v318-single-sidebar-smoke.cjs','scripts/v319-trend-cache-fast-smoke.cjs','scripts/v320-history-metric-export-smoke.mjs','scripts/v320-current-card-truth-smoke.mjs','scripts/v320-auto-backfill-smoke.mjs','scripts/v321-web-availability-smoke.cjs','scripts/v322-runtime-availability-smoke.mjs'])execFileSync(process.execPath,[script],{stdio:'inherit'});
+console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316/V317/V318/V319/V320/V321/V322] routing + exact daily home + recovery + bounded throughput + no-freeze + single-sidebar + explicit history + dispatch-to-signing + nonblocking export + cache-only single-day period + tiny progress gates passed');
