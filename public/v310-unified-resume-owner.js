@@ -21,6 +21,7 @@
     });
   }
   async function ensureShopeeResume(force=false){
+    if(global.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__)return false;
     const s=state();
     const signature=`${s.pending}|${s.active}|${s.completed}`;
     if(signature!==lastSeenState){lastSeenState=signature;console.info('[CE-QC][V310_RESUME_STATE]',signature);}
@@ -52,5 +53,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V310_UNIFIED_RESUME_OWNER__={version:VERSION,ensureShopeeResume,patchVisibleStatus,state};
-  console.info('[CE-QC][V310_UNIFIED_RESUME_OWNER]',VERSION,'persistent 5s checkpoint-safe SHOPEE resume watchdog; retries after partial scan/track phase stops and updates stale pending badge while backend is active.');
+  console.info('[CE-QC][V310_UNIFIED_RESUME_OWNER]',VERSION,'legacy persistent watchdog remains for compatibility but yields to the canonical V311+ backend-truth recovery owner when present.');
 })(window);
