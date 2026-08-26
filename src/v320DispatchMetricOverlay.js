@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 import { readV320HistoricalDaily, V320_HISTORICAL_DAILY_TRUTH_ID } from './v320HistoricalDailyTruth.js';
 
-export const V320_DISPATCH_METRIC_OVERLAY_ID='2026-08-26-v320-ledger-dispatch-overlay-v1';
+export const V320_DISPATCH_METRIC_OVERLAY_ID='2026-08-26-v320-ledger-dispatch-overlay-v2';
 const TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
 const pct=(a,b)=>b?Number((n(a)*100/n(b)).toFixed(2)):null;
@@ -15,8 +15,8 @@ function overlayRows(type,dates,db){
   try{
     const rows=db.prepare(`WITH facts AS (
       SELECT f.reportDate,f.shipmentCode,COALESCE(f.isPod,0) isPod,
-        COALESCE(NULLIF(f.podAttemptNo,0),NULLIF(CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0),NULLIF(l.attemptNo,0),0) attemptNo,
-        COALESCE(NULLIF(f.firstAttemptAt,''),NULLIF(json_extract(f.rawJson,'$.firstAttemptAt'),''),NULLIF(json_extract(f.rawJson,'$."首次派件时间"'),''),NULLIF(json_extract(f.rawJson,'$."首次派送时间"'),''),NULLIF(json_extract(l.evidenceJson,'$.starts[0].time'),''),NULLIF(json_extract(l.currentStateJson,'$.firstAttemptAt'),''),'') dispatchAt,
+        COALESCE(NULLIF(f.podAttemptNo,0),NULLIF(CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),0),NULLIF(json_array_length(f.attemptHistoryJson),0),NULLIF(l.attemptNo,0),0) attemptNo,
+        COALESCE(NULLIF(f.firstAttemptAt,''),NULLIF(json_extract(f.rawJson,'$.firstAttemptAt'),''),NULLIF(json_extract(f.rawJson,'$."首次派件时间"'),''),NULLIF(json_extract(f.rawJson,'$."首次派送时间"'),''),NULLIF(json_extract(f.attemptHistoryJson,'$[0]'),''),NULLIF(json_extract(l.evidenceJson,'$.starts[0].time'),''),NULLIF(json_extract(l.currentStateJson,'$.firstAttemptAt'),''),'') dispatchAt,
         COALESCE(NULLIF(json_extract(f.rawJson,'$."POD时间"'),''),NULLIF(json_extract(f.rawJson,'$.podTime'),''),NULLIF(json_extract(f.rawJson,'$."签收时间"'),''),NULLIF(l.podDate,''),CASE WHEN COALESCE(f.isPod,0)=1 THEN f.latestEventTime ELSE '' END,'') podAt
       FROM business_final_rows f
       LEFT JOIN qc_tracking_ledger l ON l.shipmentCode=f.shipmentCode AND l.businessType=?
@@ -61,4 +61,4 @@ export function readV320HistoricalDailyWithDispatch(businessType='ALL',fromDate=
   return {...base,id:V320_HISTORICAL_DAILY_TRUTH_ID,daily,dates:daily.map(r=>r.reportDate),dispatchMetricOverlayId:V320_DISPATCH_METRIC_OVERLAY_ID};
 }
 
-console.info('[CE-QC][V320_DISPATCH_METRIC_OVERLAY]',V320_DISPATCH_METRIC_OVERLAY_ID,'historical Shopee daily metrics reuse saved strict ledger starts/attempts; valid dispatch→POD samples publish immediately without a 100% coverage gate.');
+console.info('[CE-QC][V320_DISPATCH_METRIC_OVERLAY]',V320_DISPATCH_METRIC_OVERLAY_ID,'historical Shopee daily metrics reuse persisted attemptHistory + strict ledger starts/attempts before any background network repair; valid dispatch→POD samples publish immediately.');
