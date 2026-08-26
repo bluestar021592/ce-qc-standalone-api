@@ -82,6 +82,30 @@ await assert.rejects(()=>retryClient.trackQuery(['A','B']),/ETIMEDOUT/);
 assert.equal((await retryClient.trackQuery(['A','B'])).length,2);
 assert.equal(retryCalls,2,'failed prefetch must remain retryable and never become a false success cache');
 
+// Resume shapes must match the native pipeline exactly. Confirm-query compacts all
+// unfinished bills before slicing 350; event/exception keep stable 50-ticket chunks
+// and remove only already-completed bills inside each chunk.
+const resumeCodes=Array.from({length:400},(_,index)=>`R${String(index+1).padStart(4,'0')}`);
+const confirmDone=resumeCodes.slice(0,10).map(shipmentCode=>({shipmentCode,status:'success'}));
+const eventDone=resumeCodes.slice(0,5).map(shipmentCode=>({shipmentCode,status:'success'}));
+const resumeCalls=[];
+const resumeState={businessType:'SHOPEE',scanPool:resumeCodes,scanQueryStatus:confirmDone,needTrackBills:resumeCodes,eventQueryStatus:eventDone,exceptionQueryStatus:[]};
+const resumeClient=createShopeeThroughputClient(resumeState,{
+  async confirmQuery(codes){resumeCalls.push(['confirm',codes]);return codes.map(shipmentCode=>({shipmentCode}));},
+  async trackQuery(codes){resumeCalls.push(['event',codes]);return codes.map(shipmentCode=>({shipmentCode}));},
+  async exceptionQuery(codes){return codes.map(shipmentCode=>({shipmentCode}));}
+},{confirmConcurrency:2,eventConcurrency:4});
+const confirmDoneSet=new Set(confirmDone.map(row=>row.shipmentCode));
+const expectedConfirm=splitFixedBatches(resumeCodes.filter(code=>!confirmDoneSet.has(code)),350);
+for(const batch of expectedConfirm) await resumeClient.confirmQuery(batch);
+const actualConfirm=resumeCalls.filter(([kind])=>kind==='confirm').map(([,codes])=>codes.join(','));
+assert.deepEqual(actualConfirm.sort(),expectedConfirm.map(codes=>codes.join(',')).sort(),'partial confirm resume must not prefetch overlapping stale 350-ticket shapes');
+const eventDoneSet=new Set(eventDone.map(row=>row.shipmentCode));
+const expectedEvent=splitFixedBatches(resumeCodes,50).map(batch=>batch.filter(code=>!eventDoneSet.has(code))).filter(batch=>batch.length);
+for(const batch of expectedEvent) await resumeClient.trackQuery(batch);
+const actualEvent=resumeCalls.filter(([kind])=>kind==='event').map(([,codes])=>codes.join(','));
+assert.deepEqual(actualEvent.sort(),expectedEvent.map(codes=>codes.join(',')).sort(),'partial event resume must preserve native stable 50-ticket chunks without duplicate requests');
+
 assert.equal(checkpointStrideForPhase('tms-shipment-event-query'),4);
 assert.equal(checkpointStrideForPhase('exception-item-query'),4);
 assert.equal(checkpointStrideForPhase('SHOPEE订单扫描'),2);
@@ -90,4 +114,4 @@ assert.equal(shouldUseFastCheckpoint({businessType:'SHOPEE',processing:{running:
 assert.equal(shouldUseFastCheckpoint({businessType:'SHOPEE',processing:{running:true,phase:'tms-shipment-event-query',batchIndex:14,totalBatches:14}},'SHOPEE'),false,'final batch must always persist full truth');
 assert.equal(shouldUseFastCheckpoint({businessType:'SHOPEE',processing:{running:false,phase:'完成',batchIndex:1,totalBatches:1}},'SHOPEE'),false,'completion must never use a lightweight checkpoint');
 
-console.log(`[V314] SHOPEE throughput smoke passed · 670 tickets => ${batches.length} fixed 50-ticket event batches · bounded concurrency ${maxActive}/4 · ${elapsed.toFixed(1)}ms synthetic vs ~560ms serial · failed batches retryable · full mirror throttled 4x but final truth always canonical`);
+console.log(`[V314] SHOPEE throughput smoke passed · 670 tickets => ${batches.length} fixed 50-ticket event batches · bounded concurrency ${maxActive}/4 · ${elapsed.toFixed(1)}ms synthetic vs ~560ms serial · failed batches retryable · partial-resume batch shapes exact · full mirror throttled 4x but final truth always canonical`);
