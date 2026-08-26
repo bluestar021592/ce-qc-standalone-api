@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-26-v311-backend-aware-shopee-recovery-injection-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-26-v312-direct-http-shopee-recovery-injection-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -8,7 +8,7 @@ const STABILITY_MARKER='/v301-runtime-stability.js?v=20260825-v301-1';
 const V307_HOME_MARKER='/v307-exact-daily-home-owner.js?v=20260825-v307-1';
 const V309_UI_MARKER='/v309-ui-integrity.js?v=20260826-v309-1';
 const V310_RESUME_MARKER='/v310-unified-resume-owner.js?v=20260826-v310-1';
-const V311_RECOVERY_MARKER='/v311-shopee-recovery-owner.js?v=20260826-v311-1';
+const V311_RECOVERY_MARKER='/v311-shopee-recovery-owner.js?v=20260826-v312-1';
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
 void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
@@ -34,7 +34,8 @@ express.response.send=function v295FirstAttemptUiSend(body){
     this.setHeader?.('X-CE-QC-V309-UI','2026-08-26-v309-single-nav-auto-resume-shopee-total-v1');
     this.setHeader?.('X-CE-QC-V310-UI','2026-08-26-v310-persistent-shopee-resume-owner-v1');
     this.setHeader?.('X-CE-QC-V311-UI','2026-08-26-v311-backend-aware-shopee-recovery-v1');
+    this.setHeader?.('X-CE-QC-V312-UI','2026-08-26-v312-direct-http-shopee-resume-v1');
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V311_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V311 backend-aware recovery runs after V310 and reopens only finished-without-valid-snapshot SHOPEE runs; prior exact-truth owners remain intact.');
+console.info('[CE-QC][V312_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V312 keeps backend-aware V311 lock repair but bypasses stale browser runInFlight/app-state wrappers and POSTs the real SHOPEE resume endpoint directly; prior exact-truth owners remain intact.');
