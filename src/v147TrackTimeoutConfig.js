@@ -12,6 +12,7 @@ import './v294PostProcessAttemptBackfillPatch.js';
 import './v294CarryoverSchedulerActivation.js';
 import './v295FirstAttemptRoutePatch.js';
 import './v295FirstAttemptInvalidationPatch.js';
+import './v322WebAvailabilityPatch.js';
 import './v308DeliveryDailyFastPath.js';
 import './v308DashboardReadBridgeInjection.js';
 import './v319TrendCacheFastPatch.js';
