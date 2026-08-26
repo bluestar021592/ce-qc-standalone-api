@@ -1,0 +1,62 @@
+import express from 'express';
+import { getDb, nowIso } from './db.js';
+import { SHOPEE, createOrRecoverBusinessRun, getBusinessRunStatus, updateBusinessRunLock } from './businessStore.js';
+
+export const V311_SHOPEE_INCOMPLETE_RECOVERY_ID='2026-08-26-v311-reopen-finished-without-snapshot-v1';
+const originalPost=express.application.post;
+const installedApps=new WeakSet();
+
+function latestShopeeDate(db){
+  return String(db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType=? ORDER BY reportDate DESC LIMIT 1").get(SHOPEE)?.reportDate||'');
+}
+function validSnapshot(db,reportDate){
+  return db.prepare("SELECT snapshotId,reconciliationStatus,status,generatedAt FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(SHOPEE,reportDate)||null;
+}
+function dailyExists(db,reportDate){
+  return Boolean(db.prepare('SELECT 1 FROM business_daily_reports WHERE businessType=? AND reportDate=? LIMIT 1').get(SHOPEE,reportDate));
+}
+
+export function inspectV311ShopeeRecovery({db=getDb(),reportDate=''}={}){
+  const date=String(reportDate||'').trim()||latestShopeeDate(db);
+  if(!date)return{ok:true,reportDate:'',dailyExists:false,complete:false,needsResume:false,reason:'NO_SHOPEE_DAILY'};
+  const hasDaily=dailyExists(db,date);
+  const snapshot=hasDaily?validSnapshot(db,date):null;
+  const lock=hasDaily?getBusinessRunStatus(SHOPEE,date).lock:null;
+  const complete=Boolean(snapshot&&String(snapshot.reconciliationStatus||'COMPLETED').toUpperCase()==='COMPLETED');
+  return{ok:true,reportDate:date,dailyExists:hasDaily,complete,needsResume:Boolean(hasDaily&&!complete),snapshotId:snapshot?.snapshotId||'',lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),updatedAt:lock.updatedAt||''}:null};
+}
+
+export function prepareV311ShopeeRecovery({db=getDb(),reportDate='',actor='V311'}={}){
+  const before=inspectV311ShopeeRecovery({db,reportDate});
+  if(!before.dailyExists||before.complete)return{...before,prepared:false};
+  const date=before.reportDate;
+  let lock=before.lock;
+  if(lock?.status==='finished'){
+    updateBusinessRunLock(SHOPEE,date,'failed','V311 reopened a finished SHOPEE run because no VALID COMPLETED snapshot exists for this report date.');
+  }else if(!lock){
+    const outcome=createOrRecoverBusinessRun(SHOPEE,date,{lockedBy:String(actor||'V311')});
+    if(!outcome.ok)return{...before,prepared:false,error:outcome.error||outcome.code||'RUN_PREPARE_FAILED'};
+  }
+  const after=inspectV311ShopeeRecovery({db,reportDate:date});
+  try{db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v311_last_shopee_recovery',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(JSON.stringify({reportDate:date,before:lock?.status||'NONE',after:after.lock?.status||'NONE',at:nowIso()}),nowIso());}catch{}
+  return{...after,prepared:true,reopenedFrom:lock?.status||'NONE'};
+}
+
+function routeHandler(req,res){
+  try{
+    const action=String(req.body?.action||'status').toLowerCase();
+    const reportDate=String(req.body?.reportDate||'').trim();
+    const result=action==='prepare'?prepareV311ShopeeRecovery({reportDate,actor:req.user?.username||req.user?.email||'V311'}):inspectV311ShopeeRecovery({reportDate});
+    return res.json(result);
+  }catch(error){return res.status(500).json({ok:false,error:`V311 SHOPEE恢复检查失败：${error?.message||error}`});}
+}
+
+express.application.post=function v311ShopeeIncompleteRecoveryPost(route,...handlers){
+  if(!installedApps.has(this)){
+    installedApps.add(this);
+    originalPost.call(this,'/api/v311/shopee-recovery',routeHandler);
+  }
+  return originalPost.call(this,route,...handlers);
+};
+
+console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,'finished run locks without a VALID COMPLETED SHOPEE snapshot are reopened as failed/recoverable without deleting scan/track checkpoints or daily membership.');
