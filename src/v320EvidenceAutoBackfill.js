@@ -4,7 +4,7 @@ import { CEClient } from './ceClient.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { ensureV246TrackingSchema, applyV246StrictAttemptEvidence } from './v246TrackingLedgerCore.js';
 
-export const V320_EVIDENCE_AUTO_BACKFILL_ID='2026-08-26-v320-terminal-pod-auto-track-backfill-v2';
+export const V320_EVIDENCE_AUTO_BACKFILL_ID='2026-08-26-v320-terminal-pod-auto-track-backfill-v3';
 const CHUNK=50,CONCURRENCY=4,MAX_DAYS=180,FOREGROUND_RETRY_MS=60_000,NETWORK_RETRY_MS=15*60_000;
 const runtimeEntry=String(process.argv[1]||'');
 const REAL_RUNTIME=/(?:^|[\\/])(bootstrap|server)\.js$/i.test(runtimeEntry);
@@ -18,7 +18,7 @@ function isoMinusDays(date,days){const t=Date.parse(`${date}T00:00:00Z`);return 
 function historicalRange(db){ensureV246TrackingSchema(db);const row=db.prepare(`SELECT MIN(firstReportDate) minDate,MAX(lastImportedDate) maxDate FROM qc_tracking_ledger WHERE businessType IN ('SHOPEECN','SHOPEEVN')`).get()||{};const to=dateKey(row.maxDate),min=dateKey(row.minDate);if(!to)return null;const floor=isoMinusDays(to,MAX_DAYS-1),from=min&&min>floor?min:floor;return{fromDate:from,toDate:to};}
 function processingBusy(db){try{if(db.prepare("SELECT 1 FROM run_locks WHERE status IN ('running','paused') LIMIT 1").get())return true;}catch{}try{if(db.prepare("SELECT 1 FROM business_run_locks WHERE status IN ('running','paused') LIMIT 1").get())return true;}catch{}return false;}
 function localBackfillFromLedger(db,range){
-  let updated=0;const rows=db.prepare(`SELECT shipmentCode,businessType,attemptNo,evidenceJson,lastCheckedAt FROM qc_tracking_ledger WHERE terminalReason='POD' AND businessType IN ('SHOPEECN','SHOPEEVN') AND firstReportDate<=? AND lastImportedDate>=? AND attemptNo>0 AND TRIM(COALESCE(json_extract(evidenceJson,'$.starts[0].time'),''))<>''`).all(range.toDate,range.fromDate);
+  let updated=0;const rows=db.prepare(`SELECT shipmentCode,businessType,attemptNo,evidenceJson,lastCheckedAt FROM qc_tracking_ledger WHERE terminalReason='POD' AND businessType IN ('SHOPEECN','SHOPEEVN') AND firstReportDate<=? AND lastImportedDate>=? AND attemptNo>0 AND TRIM(COALESCE(CASE WHEN json_valid(evidenceJson) THEN json_extract(evidenceJson,'$.starts[0].time') END,''))<>''`).all(range.toDate,range.fromDate);
   const stmt=db.prepare(`UPDATE business_final_rows SET
     firstAttemptAt=CASE WHEN TRIM(COALESCE(firstAttemptAt,''))='' THEN ? ELSE firstAttemptAt END,
     podAttemptNo=CASE WHEN COALESCE(isPod,0)=1 AND ? > 0 THEN ? ELSE podAttemptNo END,
@@ -35,7 +35,7 @@ function candidates(db,range){
   return db.prepare(`SELECT l.shipmentCode,l.businessType,l.podDate,l.attemptNo,l.evidenceJson FROM qc_tracking_ledger l
     WHERE l.terminalReason='POD' AND l.businessType IN ('SHOPEECN','SHOPEEVN')
       AND l.firstReportDate<=? AND l.lastImportedDate>=?
-      AND (COALESCE(l.attemptNo,0)<=0 OR TRIM(COALESCE(json_extract(l.evidenceJson,'$.starts[0].time'),''))='')
+      AND (COALESCE(l.attemptNo,0)<=0 OR TRIM(COALESCE(CASE WHEN json_valid(l.evidenceJson) THEN json_extract(l.evidenceJson,'$.starts[0].time') END,''))='')
     ORDER BY l.firstReportDate,l.shipmentCode`).all(range.toDate,range.fromDate);
 }
 function eventBill(row={}){return billOf(row.shipmentCode||row.运单号||row.waybill||row.waybillNo||row.billCode||row.trackingNo);}
