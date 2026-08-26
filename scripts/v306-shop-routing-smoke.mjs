@@ -78,7 +78,7 @@ execFileSync(process.execPath,['scripts/v309-ui-integrity-smoke.cjs'],{stdio:'in
 execFileSync(process.execPath,['scripts/v310-ui-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v311-shopee-recovery-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v314-shopee-throughput-smoke.mjs'],{stdio:'inherit'});
-for (const file of ['src/trackBatching.js','src/v314ModuleRedirectPatch.js','src/v315OperationalDataRefreshPatch.js','scripts/v316-ccsl-no-freeze-smoke.mjs']) {
+for (const file of ['src/trackBatching.js','src/v314ModuleRedirectPatch.js','src/v315OperationalDataRefreshPatch.js','src/v316BatchPolicyPreload.js','scripts/v316-ccsl-no-freeze-smoke.mjs']) {
   execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 }
 execFileSync(process.execPath,['scripts/v316-ccsl-no-freeze-smoke.mjs'],{stdio:'inherit'});
