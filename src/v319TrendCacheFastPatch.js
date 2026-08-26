@@ -1,9 +1,8 @@
 import express from 'express';
-import './v320EvidenceAutoBackfill.js';
 import { readV320HistoricalDailyWithDispatch } from './v320DispatchMetricOverlay.js';
 import { V320_HISTORICAL_DAILY_TRUTH_ID } from './v320HistoricalDailyTruth.js';
 
-export const V319_TREND_CACHE_FAST_ID='2026-08-26-v321-exact-range-availability-first-v1';
+export const V319_TREND_CACHE_FAST_ID='2026-08-26-v321-exact-range-availability-first-v2';
 const previousGet=express.application.get;
 let registered=false;
 
@@ -25,6 +24,6 @@ function handler(req,res){
 function register(app){
   if(registered)return;registered=true;
   previousGet.call(app,'/api/v319/trends',handler);
-  console.info('[CE-QC][V321_TREND_AVAILABILITY_FIRST]',V319_TREND_CACHE_FAST_ID,'trend endpoint reads only the exact user-selected date range; selecting one day never expands into a full-history synchronous SQLite scan.');
+  console.info('[CE-QC][V321_TREND_AVAILABILITY_FIRST]',V319_TREND_CACHE_FAST_ID,'trend endpoint reads only the exact user-selected date range; selecting one day never expands into a full-history synchronous SQLite scan; startup auto-evidence backfill is not loaded into the web process.');
 }
 express.application.get=function v321TrendAvailabilityRoute(pathValue,...handlers){if(!registered)register(this);return previousGet.call(this,pathValue,...handlers);};
