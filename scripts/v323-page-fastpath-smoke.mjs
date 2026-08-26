@@ -35,9 +35,17 @@ db.prepare('INSERT INTO qc_tracking_ledger(shipmentCode,businessType,terminalRea
 
 const {readV308DeliveryDaily}=await import('../src/v308DeliveryDailyFastPath.js');
 const {readV319TrendCacheFast}=await import('../src/v319TrendCacheFastPatch.js');
+const express=(await import('express')).default;
+const app=express();app.get('/v323-route-probe',(req,res)=>res.end('ok'));
+const routePaths=(app._router?.stack||[]).map(layer=>layer?.route?.path).filter(Boolean);
+assert.ok(routePaths.includes('/api/v319/trends'),'concrete Express app must actually contain /api/v319/trends');
+assert.ok(routePaths.includes('/api/v308/delivery-daily'),'concrete Express app must actually contain /api/v308/delivery-daily');
+assert.equal(routePaths.filter(v=>v==='/api/v319/trends').length,1,'trend route must register exactly once per app');
+assert.equal(routePaths.filter(v=>v==='/api/v308/delivery-daily').length,1,'delivery route must register exactly once per app');
+
 let started=performance.now();const daily=readV308DeliveryDaily('SHOPEECN',date,date,db),dailyMs=performance.now()-started;
 assert.equal(daily.daily.length,1);assert.equal(daily.daily[0].attempt1,1);assert.equal(daily.daily[0].avgDispatchSigningDays,2);assert.equal(daily.daily[0].signingSampleCount,1);assert.match(daily.source,/V323_SINGLE_DAY/);assert.ok(dailyMs<500,`V323 single-day delivery fixture must stay <500ms, got ${dailyMs.toFixed(1)}ms`);
 started=performance.now();const trend=readV319TrendCacheFast('ALL',date,date,db),trendMs=performance.now()-started;
 assert.equal(trend.dates.length,1);assert.equal(trend.ticket[0],6);assert.match(trend.source,/V323_SINGLE_DAY_DASHBOARD_CACHE_ONLY/);assert.ok(trendMs<300,`V323 single-day trend fixture must stay <300ms, got ${trendMs.toFixed(1)}ms`);
 closeDb();fs.rmSync(root,{recursive:true,force:true});
-console.log(`[V323] page fast-path smoke passed · trend=${trendMs.toFixed(1)}ms · delivery=${dailyMs.toFixed(1)}ms · real-app route registration · strict START→POD average`);
+console.log(`[V323] page fast-path smoke passed · trend=${trendMs.toFixed(1)}ms · delivery=${dailyMs.toFixed(1)}ms · concrete routes present exactly once · strict START→POD average`);
