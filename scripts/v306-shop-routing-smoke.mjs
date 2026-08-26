@@ -78,9 +78,10 @@ execFileSync(process.execPath,['scripts/v309-ui-integrity-smoke.cjs'],{stdio:'in
 execFileSync(process.execPath,['scripts/v310-ui-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v311-shopee-recovery-smoke.cjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v314-shopee-throughput-smoke.mjs'],{stdio:'inherit'});
-for (const file of ['src/trackBatching.js','src/v314ModuleRedirectPatch.js','src/v315OperationalDataRefreshPatch.js','src/v316BatchPolicyPreload.js','scripts/v316-ccsl-no-freeze-smoke.mjs','src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','public/v317-ccsl-recovery-owner.js','scripts/v317-ccsl-restart-recovery-smoke.mjs']) {
+for (const file of ['src/trackBatching.js','src/v314ModuleRedirectPatch.js','src/v315OperationalDataRefreshPatch.js','src/v316BatchPolicyPreload.js','scripts/v316-ccsl-no-freeze-smoke.mjs','src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','public/v317-ccsl-recovery-owner.js','scripts/v317-ccsl-restart-recovery-smoke.mjs','public/v318-single-sidebar-owner.js','scripts/v318-single-sidebar-smoke.cjs']) {
   execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 }
 execFileSync(process.execPath,['scripts/v316-ccsl-no-freeze-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v317-ccsl-restart-recovery-smoke.mjs'],{stdio:'inherit'});
-console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316/V317] authoritative routing + exact daily home + nonblocking dashboard + recovery + bounded throughput + CCSL hard no-freeze + restart recovery gates passed');
+execFileSync(process.execPath,['scripts/v318-single-sidebar-smoke.cjs'],{stdio:'inherit'});
+console.log('[V306/V307/V308/V309/V310/V311/V314/V315/V316/V317/V318] authoritative routing + exact daily home + nonblocking dashboard + recovery + bounded throughput + CCSL hard no-freeze + restart recovery + single-sidebar integrity gates passed');
