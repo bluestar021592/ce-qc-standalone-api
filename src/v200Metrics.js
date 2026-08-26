@@ -23,15 +23,16 @@ export function completeAttemptCount(stat = {}, numerator = 0, options = {}) {
   if (publication.pod > 0 && !publication.complete) return null;
   return Number(numerator || 0);
 }
+// V320: "average signing days" is a sample average, not a coverage gate.
+// Unknown PODs stay visible in diagnostics but do not erase the valid sample.
 export function completeSigningAverage(values = [], pod = 0) {
-  const expected = Math.max(0, Number(pod || 0));
+  void pod;
   const usable = values.map(Number).filter(value => Number.isFinite(value) && value > 0);
-  if (!expected || usable.length !== expected) return null;
-  return average(usable);
+  return usable.length ? average(usable) : null;
 }
 function dateKey(value = '') { const m = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; }
 function dayNumber(value = '') { const k = dateKey(value); if (!k) return null; const [y,m,d] = k.split('-').map(Number); return Date.UTC(y,m-1,d); }
-export function referenceAverageDays(firstReportDate,podDate){const a=dayNumber(firstReportDate),b=dayNumber(podDate);return a===null||b===null||b<a?0:Math.floor((b-a)/86400000)+1;}
+export function referenceAverageDays(dispatchStartDate,podDate){const a=dayNumber(dispatchStartDate),b=dayNumber(podDate);return a===null||b===null||b<a?0:Math.floor((b-a)/86400000)+1;}
 function emptyStat(date = '') {
   return {
     date, total: 0, pp: 0, pv: 0, unknown: 0, store: 0, pod: 0, notPod: 0, delivery: 0, pending: 0, returned: 0,
@@ -48,7 +49,8 @@ function applyStat(stat, row) {
   if (row.pod) {
     stat.pod++;
     if (row.attemptNo === 1) stat.a1++; else if (row.attemptNo === 2) stat.a2++; else if (row.attemptNo >= 3) stat.a3++; else stat.attemptUnknown++;
-    const referenceDays=referenceAverageDays(row.firstReportDate,row.podDate);
+    const explicitDays=Number(row.signingDays||row.deliveryDays||0);
+    const referenceDays=explicitDays>0?explicitDays:referenceAverageDays(row.dispatchStartDate||row.firstDispatchDate,row.podDate);
     if (referenceDays > 0) stat.days.push(referenceDays);
     if (row.area === '金边') {
       stat.ppPod++;
@@ -73,8 +75,6 @@ function membershipDatesForRow(row, range) {
   return legacy && (!from || legacy >= from) && (!to || legacy <= to) ? [legacy] : [];
 }
 export function statsOf(rows, range) {
-  // Do not fabricate zero-report calendar dates. Visible trends and exports must
-  // contain exactly the effective daily report-membership dates in the range.
   const dailyMap = new Map();
   const overall = emptyStat(`${range.from} 至 ${range.to}`);
   for (const row of rows) {
