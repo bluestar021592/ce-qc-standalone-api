@@ -2,32 +2,40 @@ const fs=require('fs');
 const assert=require('assert/strict');
 const {execFileSync}=require('child_process');
 
-for(const file of ['src/v319TrendCacheFastPatch.js','public/v319-trend-cache-first.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptUiInjectionPatch.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v319TrendCacheFastPatch.js','src/v320HistoricalDailyTruth.js','public/v319-trend-cache-first.js','public/v320-history-trend-owner.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptUiInjectionPatch.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const backend=fs.readFileSync('src/v319TrendCacheFastPatch.js','utf8');
+const history=fs.readFileSync('src/v320HistoricalDailyTruth.js','utf8');
 const client=fs.readFileSync('public/v319-trend-cache-first.js','utf8');
+const owner=fs.readFileSync('public/v320-history-trend-owner.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const injection=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
 
-assert.match(backend,/2026-08-26-v319-cache-only-exact-trend-v1/);
-assert.match(backend,/\/api\/v319\/trends/,'V319 fast trend endpoint must be registered');
-assert.match(backend,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'first-paint trends must read only persisted dashboard cache truth');
-assert.match(backend,/if\(explicitFrom\)/,'explicit selected range must not silently expand to recent seven days');
-assert.match(backend,/reportDate BETWEEN \? AND \?/,'explicit date range must remain exact');
-assert.match(backend,/ticket:daily\.map\(row=>n\(row\.total\)\)/,'ticket trend remains visible even while stricter evidence readiness is incomplete');
-assert.match(backend,/missingDates:daily\.filter\(row=>!row\.ready\)/,'incomplete evidence must remain explicit rather than fabricated');
-assert.doesNotMatch(backend,/readV253DashboardTrends|readV284ProvenDashboardTrends|client\.|trackQuery|confirmQuery/,'V319 page read must not execute heavyweight reconciliation or CE network calls');
+assert.match(backend,/2026-08-26-v320-history-first-trend-v2/);
+assert.match(backend,/\/api\/v319\/trends/,'V319 compatibility endpoint must remain registered');
+assert.match(backend,/readV320HistoricalDaily/,'V319 endpoint must delegate to V320 persisted-history truth');
+assert.match(history,/shipment_daily_snapshots/,'historical trend authority must include preserved daily snapshots');
+assert.match(history,/business_daily_parse_rows/,'historical trend authority must include legacy business daily rows');
+assert.match(history,/business_history_summary/,'date census must retain old business history summaries');
+assert.match(history,/history_summary/,'date census must retain old CCSL history summaries');
+assert.match(history,/expandSingle/,'one selected current day may expand only the history panel, not current cards');
+assert.match(history,/avgDispatchSigningDays/,'daily truth must expose dispatch→POD average days');
+assert.doesNotMatch(history,/trackQuery|confirmQuery|exceptionQuery|axios|fetch\(/,'V320 history read must not execute CE network calls');
 
 assert.match(client,/2026-08-26-v319-cache-only-exact-trend-client-v1/);
-assert.match(client,/TARGET='\/api\/v253\/trends'/,'only the legacy V299/V307 trend endpoint is intercepted');
-assert.match(client,/REPLACEMENT='\/api\/v319\/trends'/,'legacy trend reads must be transparently redirected to V319');
-assert.match(client,/if\(!isTarget\(input\)\)return originalFetch\(input,init\)/,'all unrelated requests must remain untouched');
-assert.match(client,/if\(response\.status!==404\)return response/,'a real V319 response must never fall through to the heavyweight legacy query');
-assert.match(client,/return originalFetch\(input,init\)/,'404 compatibility fallback must retain V253 as last resort');
-assert.doesNotMatch(client,/preventDefault|stopPropagation|stopImmediatePropagation/,'trend routing must not interfere with UI navigation');
+assert.match(client,/TARGET='\/api\/v253\/trends'/,'legacy V299/V307 request interception must remain narrow');
+assert.match(client,/REPLACEMENT='\/api\/v319\/trends'/,'legacy trend reads must still redirect to the V319 compatibility endpoint');
+assert.match(client,/if\(response\.status!==404\)return response/,'a real V319/V320 response must never fall into heavyweight V253');
+assert.doesNotMatch(client,/preventDefault|stopPropagation|stopImmediatePropagation/,'trend routing must not interfere with navigation');
 
-assert.match(activation,/import '\.\/v319TrendCacheFastPatch\.js';[\s\S]*import '\.\/v295FirstAttemptUiInjectionPatch\.js';/,'backend V319 route must activate before UI injection wiring');
-assert.match(injection,/V318_SINGLE_SIDEBAR_MARKER[\s\S]*V319_TREND_CACHE_MARKER/,'V319 browser shim must load after V318 sidebar owner');
-assert.match(injection,/v319-trend-cache-first\.js\?v=20260826-v319-1/,'V319 UI must be cache-busted');
-assert.match(injection,/X-CE-QC-V319-UI/,'V319 must remain observable in response headers');
+assert.match(owner,/2026-08-26-v320-full-history-trend-owner-v1/);
+assert.match(owner,/\/api\/v319\/trends/,'final visible owner must read the persisted-history endpoint');
+assert.match(owner,/平均派件→签收天数趋势/,'Shopee/TBKH trend must support real dispatch→POD average days');
+assert.match(owner,/已显示.*个已保存日报日期/,'visible status must report how many historical report dates were drawn');
+assert.doesNotMatch(owner,/\/api\/v273\/trends|\/api\/v263\/delivery-trends|trackQuery|confirmQuery/,'final V320 trend owner must not start strict/network work');
 
-console.log('[V319] trend cache-fast smoke passed · exact selected range · cache-only first paint · V253 fallback only on 404 · no CE/evidence work on page navigation');
+assert.match(activation,/import '\.\/v319TrendCacheFastPatch\.js';[\s\S]*import '\.\/v295FirstAttemptUiInjectionPatch\.js';/,'V319/V320 backend route must activate before UI injection');
+assert.match(injection,/V319_TREND_CACHE_MARKER[\s\S]*V320_HISTORY_TREND_MARKER/,'V320 visible history owner must load after the V319 route shim');
+assert.match(injection,/v320-history-trend-owner\.js\?v=20260826-v320-1/,'V320 visible owner must be cache-busted');
+assert.match(injection,/X-CE-QC-V320-UI/,'V320 must be observable in response headers');
+
+console.log('[V319/V320] trend routing smoke passed · legacy V253 shim preserved · full persisted history owner wins · no CE/evidence work on page navigation');
