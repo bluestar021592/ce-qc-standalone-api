@@ -1,13 +1,13 @@
 (function installV138CcslScanProgress(global){
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
-  const VERSION='2026-08-27-v332-selected-date-complete-progress-v1';
+  const VERSION='2026-08-27-v333-persistent-selected-date-ccsl-detail-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
 
   global.__CE_QC_V96_V67_LIVE_PROGRESS_BRIDGE__=true;
 
-  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
   const normalizeDate=value=>{const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
   const selectedReportDate=()=>normalizeDate(document.getElementById('reportDate')?.value||document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
@@ -21,7 +21,7 @@
     return '待处理';
   };
 
-  async function read(type){
+  async function read(type='CCSL'){
     try{
       const normalizedType=String(type||'CCSL').toUpperCase();
       const reportDate=normalizedType==='CCSL'?selectedReportDate():'';
@@ -52,7 +52,7 @@
     const skipped=Number(progress.podLockSkipped||0);
     const pillClass=status==='已完成'?'success':(status==='待重试'?'warning':'warning');
     return `<span class="status-pill ${pillClass}">${esc(progress.businessType||'CCSL')} ${esc(status)}</span>`
-      +`<p>当前阶段：${esc(status==='已完成'?'完成':(progress.phase||status))}</p>`
+      +`<p>当前阶段：${esc(status==='已完成'?'已完成':(progress.phase||status))}</p>`
       +`<p>订单扫描：成功 ${fmt(progress.scanDone)} / ${fmt(progress.scanTotal)}${Number(progress.scanRetry||0)?` · 待重试 ${fmt(progress.scanRetry)}`:''} · 单批最大100</p>`
       +`<p>轨迹查询：成功 ${fmt(progress.trackDone)} / ${fmt(progress.trackTotal)}${Number(progress.trackRetry||0)?` · 待重试 ${fmt(progress.trackRetry)}`:''} · 单批最大50</p>`
       +(skipped?`<p class="muted">历史POD锁直接闭环 ${fmt(skipped)} 票，无需重复请求CE接口。</p>`:'')
@@ -77,27 +77,16 @@
     if(!progress)return;
     const status=document.getElementById('ccslRunStatus');
     const button=document.querySelector('[data-testid="global-auto-process"]');
-    if(status){status.innerHTML=markup(progress);status.dataset.v332ProgressState=statusText(progress)==='已完成'?'done':'active';}
+    if(status){status.innerHTML=markup(progress);status.dataset.v333ProgressState=statusText(progress)==='已完成'?'done':'active';}
     if(button&&button.disabled&&progress.running){
       const p=phase(progress);
       button.textContent=`${progress.businessType||'CCSL'} ${p.label} ${p.done}/${p.total}${p.retry?` · 重试${p.retry}`:''}`;
     }
   }
 
-  async function tick(){
-    if(polling||location.pathname!=='/import')return;
-    polling=true;
-    try{
-      const [ccsl,shopee]=await Promise.all([read('CCSL'),read('SHOPEE')]);
-      const active=[ccsl,shopee].find(item=>item?.running===true);
-      if(active)render(active);
-      else if(ccsl?.complete===true||ccsl?.zeroTicketDay===true||ccsl?.runId)render(ccsl);
-    }finally{polling=false;}
-  }
-
   function installStaticMarkupBridge(){
     const original=global.runStatusMarkup;
-    if(typeof original!=='function'||original.__v138TruthfulProgress)return;
+    if(typeof original!=='function'||original.__v333TruthfulProgress)return;
     const wrapped=function(state){
       const type=String(state?.businessType||'CCSL').toUpperCase()==='SHOPEE'?'SHOPEE':'CCSL';
       const live=progressByType.get(type);
@@ -105,16 +94,35 @@
       if((live?.runId||live?.complete===true||live?.zeroTicketDay===true)&&sameDate)return markup(live);
       return original.apply(this,arguments);
     };
-    wrapped.__v138TruthfulProgress=true;
+    wrapped.__v333TruthfulProgress=true;
     global.runStatusMarkup=wrapped;
+  }
+
+  async function tick(){
+    installStaticMarkupBridge();
+    const page=document.getElementById('importPage');
+    if(polling||!page||page.hidden)return;
+    polling=true;
+    try{
+      const ccsl=await read('CCSL');
+      if(ccsl?.running===true||ccsl?.complete===true||ccsl?.zeroTicketDay===true||ccsl?.runId)render(ccsl);
+    }finally{polling=false;}
+  }
+
+  function enforceLastTruth(){
+    installStaticMarkupBridge();
+    const page=document.getElementById('importPage');
+    const live=progressByType.get('CCSL');
+    if(page&&!page.hidden&&live&&(live.running===true||live.complete===true||live.zeroTicketDay===true||live.runId))render(live);
   }
 
   function install(){
     installStaticMarkupBridge();
     setInterval(tick,POLL_MS);
-    setTimeout(tick,150);
+    setInterval(enforceLastTruth,250);
+    [100,450,1200].forEach(ms=>setTimeout(tick,ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,phase,progressByType,selectedReportDate};
-  console.info('[CE-QC][V332_CCSL_FINAL_PROGRESS]',VERSION,'CCSL progress reads the selected report date and renders proven zero-ticket completion as green completed instead of stale 0/0 pending.');
+  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,phase,progressByType,selectedReportDate,enforceLastTruth};
+  console.info('[CE-QC][V333_CCSL_DETAIL_OWNER]',VERSION,'V138 is the only owner of #ccslRunStatus; SPA route text cannot disable polling and late legacy runStatusMarkup assignments are continuously re-wrapped.');
 })(window);
