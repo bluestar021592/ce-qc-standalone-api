@@ -64,4 +64,6 @@ closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
 // test:golive already executes this V253 smoke. Chain the newest regression suites here so the launcher candidate gate cannot miss them even if package.json still lists the legacy test set.
 execFileSync(process.execPath,['scripts/v335-per-business-daily-membership-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v334-history-unification-smoke.mjs'],{stdio:'inherit'});
-console.log('[V335/V253] first-paint smoke passed · same-day CN/VN/CEAF snapshots stay independent · single-day V253 is nonblocking · WHPP de-dup uses CEAF own snapshot · V334 remains history owner · V335/V334 chained golive regressions passed');
+execFileSync(process.execPath,['scripts/v334-generic-history-worker-runtime-smoke.mjs'],{stdio:'inherit',timeout:120000});
+execFileSync(process.execPath,['scripts/v334-first-attempt-worker-runtime-smoke.mjs'],{stdio:'inherit',timeout:120000});
+console.log('[V335/V253] first-paint smoke passed · same-day CN/VN/CEAF snapshots stay independent · single-day V253 is nonblocking · WHPP de-dup uses CEAF own snapshot · isolated V334 history workers execute successfully · V335/V334 chained golive regressions passed');
