@@ -60,4 +60,8 @@ assert.equal(vn.readId,V253_DASHBOARD_FAST_PATH_ID);assert.equal(vn.v335Id,V253_
 const cn=readV253DashboardTrends('SHOPEECN',date,date);assert.deepEqual(cn.ticket,[3]);
 const region=readV253ShopeeRegion('SHOPEECN',date);assert.equal(region.daily[0].regions.PP.total,1);assert.equal(region.daily[0].regions.PV.total,2);assert.equal(region.daily[0].regions.PP.attempt1,1);assert.equal(region.daily[0].regions.PV.attempt2,1);
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V335/V253] first-paint smoke passed · same-day CN/VN/CEAF snapshots stay independent · single-day V253 is nonblocking · WHPP de-dup uses CEAF own snapshot · V334 remains history owner');
+
+// test:golive already executes this V253 smoke. Chain the newest regression suites here so the launcher candidate gate cannot miss them even if package.json still lists the legacy test set.
+execFileSync(process.execPath,['scripts/v335-per-business-daily-membership-smoke.mjs'],{stdio:'inherit'});
+execFileSync(process.execPath,['scripts/v334-history-unification-smoke.mjs'],{stdio:'inherit'});
+console.log('[V335/V253] first-paint smoke passed · same-day CN/VN/CEAF snapshots stay independent · single-day V253 is nonblocking · WHPP de-dup uses CEAF own snapshot · V334 remains history owner · V335/V334 chained golive regressions passed');
