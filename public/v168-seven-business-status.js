@@ -1,7 +1,7 @@
 (function installSevenBusinessStatusV168(global) {
   if (global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__) return;
 
-  const VERSION = '2026-08-27-v331-seven-business-selected-date-zero-ticket-v1';
+  const VERSION = '2026-08-27-v333-canonical-seven-business-owner-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   let lastTruth = null;
   let refreshBusy = false;
@@ -38,31 +38,54 @@
     return payload;
   }
 
-  function stageFromCcsl(payload, target) {
+  async function postJson(url, body) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+      body: JSON.stringify(body || {})
+    });
+    const text = await response.text();
+    let payload = {};
+    try { payload = text ? JSON.parse(text) : {}; } catch {}
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
+    return payload;
+  }
+
+  function stageFromCcslRecovery(payload, target) {
     const date = normalizeDate(payload?.reportDate || target);
-    const runStatus = String(payload?.runStatus || '').toLowerCase();
-    const phase = String(payload?.phase || '').trim();
-    const running = Boolean(payload?.running);
-    const paused = Boolean(payload?.paused);
-    const scanTotal = Math.max(0, Number(payload?.scanTotal || 0));
-    const scanObserved = Math.max(0, Number(payload?.scanObserved ?? payload?.scanDone ?? 0));
-    const trackTotal = Math.max(0, Number(payload?.trackTotal || 0));
-    const trackObserved = Math.max(0, Number(payload?.trackObserved ?? payload?.trackDone ?? 0));
-    const dailyTotal = Math.max(0, Number(payload?.dailyTotal || 0));
-    const podLockSkipped = Math.max(0, Number(payload?.podLockSkipped || 0));
-    const provenDone = payload?.complete === true || payload?.zeroTicketDay === true;
-    const explicitDone = /finished|completed|complete|done|success|succeeded/.test(runStatus)
-      || /完成|finished|completed|complete/i.test(phase);
-    const countsDone = dailyTotal > 0
-      && !running && !paused
-      && ((scanTotal > 0 && scanObserved >= scanTotal) || (scanTotal === 0 && podLockSkipped >= dailyTotal))
-      && (trackTotal === 0 || trackObserved >= trackTotal);
+    const lockStatus = String(payload?.lock?.status || '').toLowerCase();
     let state = 'pending';
-    if (date === target && (provenDone || explicitDone || countsDone)) state = 'done';
-    else if (date === target && running) state = 'running';
-    else if (date === target && paused) state = 'paused';
-    else if (date === target && /failed|error/.test(runStatus)) state = 'failed';
-    return { key: 'CCSL', label: 'CCSL', state, date, runStatus, phase, total: dailyTotal, complete: provenDone, zeroTicketDay: Boolean(payload?.zeroTicketDay) };
+    if (date === target && payload?.complete === true) state = 'done';
+    else if (date === target && payload?.paused === true) state = 'paused';
+    else if (date === target && lockStatus === 'running') state = 'running';
+    else if (date === target && lockStatus === 'failed') state = 'failed';
+    return {
+      key: 'CCSL', label: 'CCSL', state, date,
+      total: Number(payload?.sourceTotal || 0),
+      complete: payload?.complete === true,
+      zeroTicketDay: Boolean(payload?.zeroTicketDay),
+      runStatus: lockStatus,
+      details: payload?.zeroTicketDay ? 'VALID日报CCSL=0票，已闭环' : String(payload?.action || '')
+    };
+  }
+
+  function stageFromShopeeRecovery(payload, target) {
+    const date = normalizeDate(payload?.reportDate || target);
+    const lockStatus = String(payload?.lock?.status || '').toLowerCase();
+    let state = 'pending';
+    if (date === target && payload?.complete === true) state = 'done';
+    else if (date === target && lockStatus === 'running') state = 'running';
+    else if (date === target && lockStatus === 'paused') state = 'paused';
+    else if (date === target && lockStatus === 'failed') state = 'failed';
+    return {
+      key: 'SHOPEE', label: 'SHOPEE CN/VN', state, date,
+      complete: payload?.complete === true,
+      runStatus: lockStatus,
+      snapshotId: String(payload?.snapshotId || ''),
+      details: payload?.complete === true ? 'VALID + COMPLETED 正式快照' : String(payload?.reason || '')
+    };
   }
 
   function stageFromBusiness(key, label, payload, target) {
@@ -78,29 +101,6 @@
     else if (date === target && (runStatus === 'paused' || processing.paused)) state = 'paused';
     else if (date === target && (runStatus === 'failed' || processing.error)) state = 'failed';
     return { key, label, state, date, snapshotStatus, runStatus, total };
-  }
-
-  function combineShopeeStages(cn, vn, target) {
-    const states = [cn?.state, vn?.state];
-    let state = 'pending';
-    if (states.every(item => item === 'done')) state = 'done';
-    else if (states.includes('failed')) state = 'failed';
-    else if (states.includes('error')) state = 'error';
-    else if (states.includes('running')) state = 'running';
-    else if (states.includes('paused')) state = 'paused';
-    const details = `CN:${cn?.state || 'unknown'}(${cn?.total || 0}) / VN:${vn?.state || 'unknown'}(${vn?.total || 0})`;
-    return {
-      key: 'SHOPEE',
-      label: 'SHOPEE CN/VN',
-      state,
-      date: target,
-      total: Number(cn?.total || 0) + Number(vn?.total || 0),
-      snapshotStatus: state === 'done' ? 'COMPLETED' : '',
-      error: state === 'error' ? details : '',
-      details,
-      cn,
-      vn
-    };
   }
 
   function failedStage(key, label, error) {
@@ -145,6 +145,7 @@
     const node = ensureSummaryNode();
     if (!node || !truth) return;
     const stages = truth.stages || [];
+    node.dataset.v333Owner = 'canonical';
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
@@ -159,7 +160,7 @@
         start.dataset.v168Locked = '1';
         start.disabled = true;
         start.textContent = '七业务已完成';
-        start.title = `${truth.reportDate} CCSL、SHOPEE CN、SHOPEE VN、WHPP均已有正式结果，无需重复处理`;
+        start.title = `${truth.reportDate} CCSL、SHOPEE CN/VN、WHPP均已有正式结果，无需重复处理`;
       }
       if (resume) {
         resume.dataset.v168Locked = '1';
@@ -185,25 +186,12 @@
     if (refreshBusy) return lastTruth;
     refreshBusy = true;
     try {
-      const requestedTarget = targetDate();
-      let ccslPayload = null;
-      let ccslError = null;
-      try {
-        const ccslUrl = requestedTarget
-          ? `/api/v33/run-progress?businessType=CCSL&reportDate=${encodeURIComponent(requestedTarget)}`
-          : '/api/v33/run-progress?businessType=CCSL';
-        ccslPayload = await readJson(ccslUrl);
-      } catch (error) { ccslError = error; }
-
-      const target = requestedTarget
-        || normalizeDate(ccslPayload?.reportDate)
-        || normalizeDate(lastTruth?.reportDate);
-
+      const target = targetDate();
       if (!target) {
         lastTruth = {
           reportDate: '',
           stages: [
-            ccslPayload ? stageFromCcsl(ccslPayload, normalizeDate(ccslPayload?.reportDate)) : failedStage('CCSL', 'CCSL', ccslError || '无法确定日报日期'),
+            failedStage('CCSL', 'CCSL', '无法确定日报日期'),
             failedStage('SHOPEE', 'SHOPEE CN/VN', '无法确定日报日期'),
             failedStage('WHPP', 'WHPP本土', '无法确定日报日期')
           ],
@@ -215,26 +203,21 @@
       }
 
       const encoded = encodeURIComponent(target);
-      const businessRequests = await Promise.allSettled([
-        readJson(`/api/business-state/SHOPEECN?reportDate=${encoded}&compact=1`),
-        readJson(`/api/business-state/SHOPEEVN?reportDate=${encoded}&compact=1`),
+      const requests = await Promise.allSettled([
+        postJson('/api/v317/ccsl-recovery', { action: 'status', reportDate: target }),
+        postJson('/api/v311/shopee-recovery', { action: 'status', reportDate: target }),
         readJson(`/api/business-state/WHPP?reportDate=${encoded}&compact=1`)
       ]);
-      const cn = businessRequests[0].status === 'fulfilled'
-        ? stageFromBusiness('SHOPEECN', 'SHOPEE CN', businessRequests[0].value, target)
-        : failedStage('SHOPEECN', 'SHOPEE CN', businessRequests[0].reason);
-      const vn = businessRequests[1].status === 'fulfilled'
-        ? stageFromBusiness('SHOPEEVN', 'SHOPEE VN', businessRequests[1].value, target)
-        : failedStage('SHOPEEVN', 'SHOPEE VN', businessRequests[1].reason);
-      const shopee = combineShopeeStages(cn, vn, target);
-      const whpp = businessRequests[2].status === 'fulfilled'
-        ? stageFromBusiness('WHPP', 'WHPP本土', businessRequests[2].value, target)
-        : failedStage('WHPP', 'WHPP本土', businessRequests[2].reason);
-      const stages = [
-        ccslPayload ? stageFromCcsl(ccslPayload, target) : failedStage('CCSL', 'CCSL', ccslError),
-        shopee,
-        whpp
-      ];
+      const ccsl = requests[0].status === 'fulfilled'
+        ? stageFromCcslRecovery(requests[0].value, target)
+        : failedStage('CCSL', 'CCSL', requests[0].reason);
+      const shopee = requests[1].status === 'fulfilled'
+        ? stageFromShopeeRecovery(requests[1].value, target)
+        : failedStage('SHOPEE', 'SHOPEE CN/VN', requests[1].reason);
+      const whpp = requests[2].status === 'fulfilled'
+        ? stageFromBusiness('WHPP', 'WHPP本土', requests[2].value, target)
+        : failedStage('WHPP', 'WHPP本土', requests[2].reason);
+      const stages = [ccsl, shopee, whpp];
       lastTruth = { reportDate: target, stages, complete: stages.every(stage => stage.state === 'done'), checkedAt: Date.now() };
       renderTruth(lastTruth);
       return lastTruth;
@@ -246,7 +229,7 @@
         checkedAt: Date.now()
       };
       renderTruth(lastTruth);
-      console.warn('[CE-QC][V168] seven-business truth refresh failed:', error?.message || error);
+      console.warn('[CE-QC][V333] seven-business truth refresh failed:', error?.message || error);
       return lastTruth;
     } finally {
       refreshBusy = false;
@@ -260,8 +243,6 @@
       const truth = await refreshTruth();
       if (truth?.complete) {
         renderTruth(truth);
-        const status = document.getElementById('ccslRunStatus');
-        if (status) status.innerHTML = '<span class="status-pill success">七业务均已有正式结果，本次未重复请求接口。</span>';
         return { ok: true, skipped: true, code: 'SEVEN_BUSINESS_ALREADY_COMPLETED', reportDate: truth.reportDate };
       }
       return original.apply(this, args);
@@ -283,19 +264,22 @@
     timer = setInterval(() => {
       const page = document.getElementById('importPage');
       if (page && !page.hidden && document.visibilityState === 'visible') refreshTruth();
-    }, 30000);
+    }, 2000);
   }
 
   function install() {
     wrapRunnersWhenReady();
-    setTimeout(refreshTruth, 400);
-    document.addEventListener('ce-qc-run-complete', () => setTimeout(refreshTruth, 150));
+    [150, 600, 1600].forEach(ms => setTimeout(refreshTruth, ms));
+    document.addEventListener('ce-qc-run-complete', () => setTimeout(refreshTruth, 100));
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') setTimeout(refreshTruth, 100);
+      if (document.visibilityState === 'visible') setTimeout(refreshTruth, 80);
     });
+    document.addEventListener('click', event => {
+      if (event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query')) setTimeout(refreshTruth, 120);
+    }, true);
     schedule();
     global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__ = { version: VERSION, refresh: refreshTruth, get lastTruth() { return lastTruth; } };
-    console.info('[CE-QC][V168_SEVEN_BUSINESS_STATUS]', VERSION);
+    console.info('[CE-QC][V333_SEVEN_BUSINESS_STATUS]', VERSION, 'V168 is the only owner of #sevenBusinessStageSummary and reads CCSL/SHOPEE canonical recovery truth for the selected date.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
