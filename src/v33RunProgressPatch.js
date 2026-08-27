@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const VERSION = '2026-08-16-v149-tiny-run-progress-compat-v2+v155-runtime-scan-pool-fallback-v2+v156-run-membership-repair-v2';
+const VERSION = '2026-08-27-v331-ccsl-progress-selected-date-zero-ticket-v1';
 const CCSL_RUN_ROUTES = new Set(['/api/run','/api/run/start','/api/resume','/api/run/resume']);
 
 function parseJson(value, fallback = {}) {
@@ -33,6 +33,10 @@ function sameMembers(left = [], right = []) {
   if (a.length !== b.length) return false;
   const set = new Set(a);
   return b.every(value => set.has(value));
+}
+function normalizeReportDate(value) {
+  const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
 }
 function phaseIsTrack(phase = '') { return /轨迹|track|shipment-event|exception-item/i.test(String(phase || '')); }
 function targetTotal(primary, secondary, fallback = 0) {
@@ -152,25 +156,62 @@ function repairCcslMembershipBeforeRun(req, res, next) {
   }
 }
 
-function ccslProgress(db) {
-  const reportDate = db.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value
-    || db.prepare('SELECT reportDate FROM daily_reports ORDER BY updatedAt DESC,reportDate DESC LIMIT 1').get()?.reportDate
+function ccslProgress(db, requestedReportDate = '') {
+  const requested = normalizeReportDate(requestedReportDate);
+  const reportDate = requested
     || latestValidReportDate(db)
+    || db.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value
+    || db.prepare('SELECT reportDate FROM daily_reports ORDER BY updatedAt DESC,reportDate DESC LIMIT 1').get()?.reportDate
     || '';
   if (!reportDate) return emptyProgress('CCSL');
+  const validSnapshotId = latestValidSnapshotId(db, reportDate);
   const lock = db.prepare('SELECT * FROM run_locks WHERE reportDate=?').get(reportDate) || {};
   const checkpoint = lock.runId
     ? db.prepare('SELECT payloadJson,stage,batchIndex,totalBatches,status,errorMessage,updatedAt FROM run_checkpoints WHERE reportDate=? AND runId=? ORDER BY updatedAt DESC,rowid DESC LIMIT 1').get(reportDate, lock.runId)
     : null;
   const payload = parseJson(checkpoint?.payloadJson, {});
   const mirroredTotal = db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount;
-  const unifiedTotal = unifiedCcslTotal(db, reportDate);
-  const sourceTotal = hasCount(mirroredTotal) && Number(mirroredTotal) > 0 ? Number(mirroredTotal) : unifiedTotal;
+  const unifiedTotal = validSnapshotId ? unifiedCcslTotal(db, reportDate) : 0;
+  const sourceTotal = validSnapshotId
+    ? unifiedTotal
+    : (hasCount(mirroredTotal) ? Math.max(0, Number(mirroredTotal)) : 0);
+  const zeroTicketDay = Boolean(validSnapshotId) && sourceTotal === 0;
+
+  if (zeroTicketDay) {
+    const completed = progressShape({
+      businessType:'CCSL',
+      reportDate,
+      lock:{},
+      checkpoint:null,
+      payload:{ runStatus:'completed' },
+      sourceTotal:0,
+      persistedTrackTotal:0
+    });
+    return {
+      ...completed,
+      progressRule:'V331_SELECTED_DATE_VALID_UNIFIED_ZERO_TICKET_COMPLETE',
+      canonicalSource:'LATEST_VALID_UNIFIED',
+      complete:true,
+      zeroTicketDay:true,
+      running:false,
+      paused:false,
+      phase:'已完成',
+      runStatus:'completed',
+      lastMessage:'当日有效日报CCSL为0票，无需启动订单扫描或轨迹查询。'
+    };
+  }
+
   const phase = String(lock.currentStage || checkpoint?.stage || '').trim() || '待处理';
   const persistedTrackTotal = phaseIsTrack(phase)
     ? num(db.prepare('SELECT COUNT(DISTINCT shipmentCode) count FROM scan_results WHERE reportDate=? AND COALESCE(isPod,0)=0').get(reportDate)?.count)
     : undefined;
-  return progressShape({ businessType:'CCSL', reportDate, lock, checkpoint, payload, sourceTotal, persistedTrackTotal });
+  return {
+    ...progressShape({ businessType:'CCSL', reportDate, lock, checkpoint, payload, sourceTotal, persistedTrackTotal }),
+    progressRule:'V331_SELECTED_DATE_VALID_UNIFIED_PROGRESS',
+    canonicalSource:validSnapshotId ? 'LATEST_VALID_UNIFIED' : 'LEGACY_DAILY',
+    complete:false,
+    zeroTicketDay:false
+  };
 }
 
 function shopeeProgress(db) {
@@ -253,14 +294,14 @@ function progressShape({ businessType, reportDate, lock = {}, checkpoint = null,
 }
 
 function emptyProgress(businessType) {
-  return { ok:true, version:VERSION, progressRule:'V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_BOUNDED', businessType, reportDate:'', running:false, paused:false, phase:'待处理', batchIndex:0, totalBatches:0, dailyTotal:0, podLockSkipped:0, scanDone:0, scanRetry:0, scanObserved:0, scanTotal:0, trackDone:0, trackRetry:0, trackObserved:0, trackTotal:0, done:0, retry:0, total:0, runId:'', runStatus:'', lastMessage:'', generatedAt:new Date().toISOString() };
+  return { ok:true, version:VERSION, progressRule:'V149_RUN_LOCK_PLUS_TINY_CHECKPOINT_BOUNDED', businessType, reportDate:'', running:false, paused:false, phase:'待处理', batchIndex:0, totalBatches:0, dailyTotal:0, podLockSkipped:0, scanDone:0, scanRetry:0, scanObserved:0, scanTotal:0, trackDone:0, trackRetry:0, trackObserved:0, trackTotal:0, done:0, retry:0, total:0, runId:'', runStatus:'', complete:false, zeroTicketDay:false, lastMessage:'', generatedAt:new Date().toISOString() };
 }
 
 function progressHandler(req, res) {
   const type = String(req.query.businessType || 'CCSL').trim().toUpperCase() === 'SHOPEE' ? 'SHOPEE' : 'CCSL';
   const db = getDb();
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.json(type === 'SHOPEE' ? shopeeProgress(db) : ccslProgress(db));
+  res.json(type === 'SHOPEE' ? shopeeProgress(db) : ccslProgress(db, req.query.reportDate));
 }
 
 const previousPost = express.application.post;
