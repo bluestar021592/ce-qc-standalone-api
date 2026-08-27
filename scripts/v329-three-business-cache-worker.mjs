@@ -18,9 +18,7 @@ function ledgerMap(db,bills){
   const out=new Map();
   for(const part of chunks(bills)){
     const marks=part.map(()=>'?').join(',');if(!marks)continue;
-    try{
-      for(const r of db.prepare(`SELECT shipmentCode,firstReportDate,podDate,signingDays,attemptNo,attemptSource,terminalReason FROM qc_tracking_ledger WHERE businessType=? AND shipmentCode IN (${marks})`).all(type,...part))out.set(bill(r.shipmentCode),r);
-    }catch{}
+    try{for(const r of db.prepare(`SELECT shipmentCode,firstReportDate,podDate,signingDays,attemptNo,attemptSource,terminalReason FROM qc_tracking_ledger WHERE businessType=? AND shipmentCode IN (${marks})`).all(type,...part))out.set(bill(r.shipmentCode),r);}catch{}
   }
   return out;
 }
@@ -29,15 +27,10 @@ function bestAttempts(base,ledger,old,pod){const choices=[base,ledger,old].map(v
 
 function buildRows(db,baseline,members){
   const useful=(baseline.daily||[]).filter(r=>Number(r.total||0)>0),dates=new Map(useful.map(r=>[date(r.reportDate),r])),firstByBill=new Map(),membersByDate=new Map();
-  for(const m of members){
-    const b=bill(m.shipmentCode),d=date(m.reportDate);if(!b||!d||!dates.has(d))continue;
-    if(!firstByBill.has(b)||d<firstByBill.get(b))firstByBill.set(b,d);
-    if(!membersByDate.has(d))membersByDate.set(d,[]);
-    membersByDate.get(d).push(b);
-  }
+  for(const m of members){const b=bill(m.shipmentCode),d=date(m.reportDate);if(!b||!d||!dates.has(d))continue;if(!firstByBill.has(b)||d<firstByBill.get(b))firstByBill.set(b,d);if(!membersByDate.has(d))membersByDate.set(d,[]);membersByDate.get(d).push(b);}
   const led=ledgerMap(db,[...firstByBill.keys()]),old=oldAttemptMap(db,baseline.fromDate||useful[0]?.reportDate||to,baseline.toDate||to),out=[];
   for(const row of useful){
-    const d=date(row.reportDate),acc={a1:0,a2:0,a3:0,sum:0,count:0,firstEligible:0,firstSuccess:0};
+    const d=date(row.reportDate),acc={a1:0,a2:0,a3:0,sum:0,count:0,firstEligible:0,firstSuccess:0,strictPodKnown:0};
     for(const b of membersByDate.get(d)||[]){
       const l=led.get(b);if(!l)continue;
       const strictAttempt=strict(l.attemptSource)&&Number(l.attemptNo||0)>0;
@@ -46,15 +39,14 @@ function buildRows(db,baseline,members){
         const p=date(l.podDate),start=date(l.firstReportDate)||firstByBill.get(b)||d,days=Number(l.signingDays||0)>0?Number(l.signingDays):inclusive(start,p);
         if(days>0){acc.sum+=days;acc.count++;}
         if(strictAttempt){
+          acc.strictPodKnown++;
           const a=Number(l.attemptNo||0);
-          if(a===1){acc.a1++;acc.firstSuccess++;}
-          else if(a===2)acc.a2++;
-          else if(a>=3)acc.a3++;
+          if(a===1){acc.a1++;acc.firstSuccess++;}else if(a===2)acc.a2++;else if(a>=3)acc.a3++;
         }
       }
     }
-    const attempts=bestAttempts([row.attempt1,row.attempt2,row.attempt3],[acc.a1,acc.a2,acc.a3],old.get(d),Number(row.pod||0));
-    out.push({reportDate:d,total:Number(row.total||0),pod:Number(row.pod||0),ocCurrent:Number(row.ocCurrent||0),sameDayPod:Number(row.sameDayPod||0),attempt1:attempts[0],attempt2:attempts[1],attempt3:attempts[2],signingDaysSum:acc.sum,signingDaysCount:acc.count,firstAttemptEligible:acc.firstEligible,firstAttemptSuccess:acc.firstSuccess,ready:row.ready!==false});
+    const pod=Number(row.pod||0),attempts=bestAttempts([row.attempt1,row.attempt2,row.attempt3],[acc.a1,acc.a2,acc.a3],old.get(d),pod),firstAttemptUnknownPod=Math.max(0,pod-acc.strictPodKnown);
+    out.push({reportDate:d,total:Number(row.total||0),pod,ocCurrent:Number(row.ocCurrent||0),sameDayPod:Number(row.sameDayPod||0),attempt1:attempts[0],attempt2:attempts[1],attempt3:attempts[2],signingDaysSum:acc.sum,signingDaysCount:acc.count,firstAttemptEligible:acc.firstEligible,firstAttemptSuccess:acc.firstSuccess,firstAttemptUnknownPod,ready:row.ready!==false});
   }
   return out;
 }
@@ -63,17 +55,12 @@ function runLegacyRepair(){return new Promise(resolve=>{const child=fork(workerV
 async function main(){
   if(!TYPE_SET.has(type)||!date(to))throw new Error('V329 worker requires --type=TBKH|SHOPEECN|SHOPEEVN and --to=YYYY-MM-DD');
   send({status:'RUNNING',phase:'CACHE_BUILD',cacheReady:false,cacheVersion:0,message:`${type} 正在独立进程建立历史缓存`});
-  let db=getDb();
-  const baseline=readV328ThreeBusinessHistory(type,to,db),members=listV328HistoricalMembers(type,baseline.fromDate||to,baseline.toDate||to,db),initial=buildRows(db,baseline,members);
+  let db=getDb();const baseline=readV328ThreeBusinessHistory(type,to,db),members=listV328HistoricalMembers(type,baseline.fromDate||to,baseline.toDate||to,db),initial=buildRows(db,baseline,members);
   writeV329ThreeBusinessDailyCache(type,initial,db,'V334_BASELINE_PERSISTED_HISTORY_STRICT_MEMBER_FIRST_ATTEMPT');
   send({status:'RUNNING',phase:'CACHE_READY',cacheReady:true,cacheVersion:1,total:initial.reduce((s,r)=>s+r.pod,0),completed:0,message:`${type} 历史缓存已就绪，后台继续补派次/POD/首次START证据`});
-  closeDb();
-  const repair=await runLegacyRepair();
-  db=getDb();clearV328ThreeBusinessHistoryCache();
-  const finalRows=buildRows(db,baseline,members);
-  writeV329ThreeBusinessDailyCache(type,finalRows,db,'V334_FINAL_SAVED_MEMBERS_STRICT_START_POD');
-  const pod=finalRows.reduce((s,r)=>s+r.pod,0),attemptKnown=finalRows.reduce((s,r)=>s+r.attempt1+r.attempt2+r.attempt3,0),signingKnown=finalRows.reduce((s,r)=>s+r.signingDaysCount,0),firstEligible=finalRows.reduce((s,r)=>s+r.firstAttemptEligible,0),firstSuccess=finalRows.reduce((s,r)=>s+r.firstAttemptSuccess,0),firstUnknownPod=Math.max(0,pod-attemptKnown);
-  send({status:repair.code===0?'COMPLETED':'FAILED',phase:repair.code===0?'DONE':'PARTIAL_DONE',cacheReady:true,cacheVersion:2,total:pod,completed:pod,known:attemptKnown,signingKnown,firstEligible,firstSuccess,firstUnknownPod,unresolved:Math.max(0,pod-attemptKnown),signingUnresolved:Math.max(0,pod-signingKnown),message:`${type} 历史缓存完成；派次 ${attemptKnown}/${pod}，签收天数 ${signingKnown}/${pod}，首派尝试 ${firstEligible}，首派成功 ${firstSuccess}，POD首派证据待补 ${firstUnknownPod}`});
-  if(repair.code!==0)process.exitCode=1;
+  closeDb();const repair=await runLegacyRepair();db=getDb();clearV328ThreeBusinessHistoryCache();
+  const finalRows=buildRows(db,baseline,members);writeV329ThreeBusinessDailyCache(type,finalRows,db,'V334_FINAL_SAVED_MEMBERS_STRICT_START_POD');
+  const pod=finalRows.reduce((s,r)=>s+r.pod,0),attemptKnown=finalRows.reduce((s,r)=>s+r.attempt1+r.attempt2+r.attempt3,0),signingKnown=finalRows.reduce((s,r)=>s+r.signingDaysCount,0),firstEligible=finalRows.reduce((s,r)=>s+r.firstAttemptEligible,0),firstSuccess=finalRows.reduce((s,r)=>s+r.firstAttemptSuccess,0),firstUnknownPod=finalRows.reduce((s,r)=>s+r.firstAttemptUnknownPod,0);
+  send({status:repair.code===0?'COMPLETED':'FAILED',phase:repair.code===0?'DONE':'PARTIAL_DONE',cacheReady:true,cacheVersion:2,total:pod,completed:pod,known:attemptKnown,signingKnown,firstEligible,firstSuccess,firstUnknownPod,unresolved:Math.max(0,pod-attemptKnown),signingUnresolved:Math.max(0,pod-signingKnown),message:`${type} 历史缓存完成；派次 ${attemptKnown}/${pod}，签收天数 ${signingKnown}/${pod}，首派尝试 ${firstEligible}，首派成功 ${firstSuccess}，严格首派POD证据待补 ${firstUnknownPod}`});if(repair.code!==0)process.exitCode=1;
 }
 try{await main();}catch(error){send({status:'FAILED',phase:'FAILED',cacheReady:false,message:error?.message||String(error)});process.exitCode=1;}finally{try{closeDb();}catch{}}
