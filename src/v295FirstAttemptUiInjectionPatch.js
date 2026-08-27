@@ -1,9 +1,10 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v334-canonical-detail-history-ownership-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v334-canonical-detail-history-ownership-v2';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
-const MARKER='/v295-first-attempt-ui.js?v=20260825-v299-1';
+const MARKER='/v295-first-attempt-ui.js?v=20260827-v334-1';
+const V299_FIRST_ATTEMPT_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v299-1';
 const STABILITY_MARKER='/v301-runtime-stability.js?v=20260825-v301-1';
 const V307_HOME_MARKER='/v307-exact-daily-home-owner.js?v=20260826-v325-1';
 const V309_UI_MARKER='/v309-ui-integrity.js?v=20260826-v309-1';
@@ -22,7 +23,7 @@ const V320_HISTORY_TREND_V329_COMPAT_MARKER='/v320-history-trend-owner.js?v=2026
 const V328_ATTEMPT_MARKER='/v328-three-business-attempt-owner.js?v=20260827-v329-1';
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
-void V311_RECOVERY_V332_COMPAT_MARKER;void V311_RECOVERY_COMPAT_MARKER;void V317_CCSL_RECOVERY_V332_COMPAT_MARKER;void V317_CCSL_RECOVERY_V330_COMPAT_MARKER;void V317_CCSL_RECOVERY_COMPAT_MARKER;void V320_HISTORY_TREND_V329_COMPAT_MARKER;void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
+void V299_FIRST_ATTEMPT_COMPAT_MARKER;void V311_RECOVERY_V332_COMPAT_MARKER;void V311_RECOVERY_COMPAT_MARKER;void V317_CCSL_RECOVERY_V332_COMPAT_MARKER;void V317_CCSL_RECOVERY_V330_COMPAT_MARKER;void V317_CCSL_RECOVERY_COMPAT_MARKER;void V320_HISTORY_TREND_V329_COMPAT_MARKER;void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
 // V300 recursive observer is no longer delivered. V301 remains the nonrecursive runtime-stability owner.
 // Recovery owners remain active for checkpoint continuation, but V334 keeps canonical status/detail/history ownership isolated.
 express.response.send=function v334FirstAttemptUiSend(body){
@@ -57,4 +58,4 @@ express.response.send=function v334FirstAttemptUiSend(body){
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V334_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V138 canonical V317 detail + V168 canonical summary + V320 saved-history trend ownership are browser-cache busted together.');
+console.info('[CE-QC][V334_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V138 canonical V317 detail + V168 canonical summary + V320 saved-history trend + V295 saved-history first-attempt trend are browser-cache busted together.');
