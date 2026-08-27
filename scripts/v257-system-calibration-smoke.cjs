@@ -25,8 +25,10 @@ assert.ok(v284.includes('NOT EXISTS'), 'V284 WHPP daily membership must exclude 
 assert.ok(v284.includes('PARTITION BY reportDate,businessType ORDER BY createdAt DESC,batchId DESC'), 'V284 unified membership must rank latest VALID snapshots independently per date+business');
 
 // 2) Every daily percentage must use that same daily row as its denominator.
-assert.ok(dashboard.includes('row.podRate=pct(row.pod,row.total);row.ocRate=pct(row.ocCurrent,row.total);row.sameDayPodRate=pct(row.sameDayPod,row.total);'), 'daily POD/OC/same-day POD rates must divide by the same row total');
-assert.ok(dashboard.includes("definitions:{podRate:'POD/当日总票',ocRate:'当前真实OC/当日总票',sameDayPodRate:'首日报当日完成POD/当日总票'}"), 'dashboard API must publish locked daily denominator definitions');
+assert.ok(dashboard.includes('out.podRate=pct(out.pod,out.total);out.ocRate=pct(out.ocCurrent,out.total);out.sameDayPodRate=pct(out.sameDayPod,out.total);'), 'daily POD/OC/same-day POD rates must divide by the same row total');
+assert.ok(dashboard.includes("podRate:'POD/当日总票'"), 'dashboard API must publish the POD denominator definition');
+assert.ok(dashboard.includes("ocRate:'当前真实OC/当日总票'"), 'dashboard API must publish the OC denominator definition');
+assert.ok(dashboard.includes("sameDayPodRate:'首日报当日完成POD/当日总票'"), 'dashboard API must publish the same-day POD denominator definition');
 
 // 3) Shopee 1/2/3-attempt percentages require real POD attempt evidence; missing evidence is null/—, never fake 0%.
 assert.ok(shopee.includes('readV284ShopeeTrends'), 'Shopee compatibility route must delegate to V284 daily-membership truth');
@@ -68,4 +70,4 @@ assert.ok(facts.includes('pendingNonContinuous: pendingDates.length >= 2 && !pen
 // 7) Lifecycle/export consolidation is part of the same production gate.
 execFileSync(process.execPath, ['scripts/v268-lifecycle-export-smoke.cjs'], { stdio: 'inherit' });
 
-console.log('[V257/V335/V286] system calibration gate passed: 7-board isolation + per-business same-date membership + WHPP/CEAF exact de-dup + daily denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
+console.log('[V257/V335/V286] system calibration gate passed: 7-board isolation + per-business same-date membership + WHPP/CEAF exact de-dup + locked row denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
