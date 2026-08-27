@@ -1,6 +1,6 @@
 (function installV334HistoryTrendOwner(global){
   if(global.__CE_QC_V320_HISTORY_TREND_OWNER__)return;
-  const VERSION='2026-08-27-v334-all-visible-board-saved-history-owner-v3',COLORS={blue:'#1677ff',green:'#16a36a',orange:'#ff8a00',purple:'#6d4aff'};
+  const VERSION='2026-08-27-v334-all-visible-board-saved-history-owner-v3',V334_THREE_BUSINESS_COMPAT_VERSION='2026-08-27-v334-three-business-saved-history-hard-owner-v2',COLORS={blue:'#1677ff',green:'#16a36a',orange:'#ff8a00',purple:'#6d4aff'};void V334_THREE_BUSINESS_COMPAT_VERSION;
   const ATTEMPT_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']),GENERIC_TYPES=new Set(['CE','CEAF','ALI1688','WHPP','ALL']),AUTO_HISTORY_TYPES=new Set([...ATTEMPT_TYPES,...GENERIC_TYPES]);
   let running=false,lastKey='',timer=null,genericRetryTimer=null;const genericHistory=new Map();
   const date=v=>String(v||'').slice(0,10),num=v=>Number.isFinite(Number(v))?Number(v):0,nullable=v=>v===null||v===undefined||!Number.isFinite(Number(v))?null:Number(v);
