@@ -14,11 +14,11 @@ for(const file of files)execFileSync(process.execPath,['--check',file],{stdio:'p
 const read=file=>fs.readFileSync(file,'utf8');
 const cache=read('src/v329ThreeBusinessDailyCache.js'),worker=read('scripts/v329-three-business-cache-worker.mjs'),genericCache=read('src/v334GenericHistoryCache.js'),genericWorker=read('scripts/v334-generic-history-cache-worker.mjs'),genericCoord=read('src/v334GenericHistoryCoordinator.js'),genericRoute=read('src/v334GenericTrendRoutePatch.js'),trendOwner=read('public/v320-history-trend-owner.js'),firstUi=read('public/v295-first-attempt-ui.js'),dailyUi=read('public/v308-dashboard-read-bridge.js'),attemptUi=read('public/v328-three-business-attempt-owner.js'),ccslDetail=read('public/v138-ccsl-scan-progress.js'),seven=read('public/v168-seven-business-status.js'),activation=read('src/v147TrackTimeoutConfig.js'),inject=read('src/v295FirstAttemptUiInjectionPatch.js'),headInject=read('src/v308DashboardReadBridgeInjection.js');
 
-assert.match(cache,/firstAttemptEligible/);assert.match(cache,/firstAttemptSuccess/);assert.match(cache,/firstAttemptRate/);assert.match(cache,/signingDaysSum\/signingDaysCount/);
+assert.match(cache,/firstAttemptEligible/);assert.match(cache,/firstAttemptSuccess/);assert.match(cache,/firstAttemptUnknownPod/);assert.match(cache,/firstAttemptEvidenceComplete/);assert.match(cache,/firstAttemptRate/);assert.match(cache,/UPDATE v329_three_business_daily_cache SET firstAttemptUnknownPod=pod/,'old cache rows must migrate conservatively to unknown until the strict worker rebuilds them');assert.match(cache,/signingDaysSum\/signingDaysCount/);
 assert.doesNotMatch(worker,/v295FirstAttemptTruth|readV295FirstAttemptTrends|LATEST_VALID_DAILY_MEMBERSHIP/,'historical first-attempt worker must not derive old dates from current VALID V295 membership');
 assert.match(worker,/listV328HistoricalMembers/,'worker must start from each saved historical daily membership');
 assert.match(worker,/strictAttempt=strict\(l\.attemptSource\)&&Number\(l\.attemptNo\|\|0\)>0/,'only saved V246 strict START evidence may create first-attempt eligibility');
-assert.match(worker,/if\(strictAttempt\)acc\.firstEligible\+\+/);assert.match(worker,/if\(a===1\)\{acc\.a1\+\+;acc\.firstSuccess\+\+;\}/);
+assert.match(worker,/if\(strictAttempt\)acc\.firstEligible\+\+/);assert.match(worker,/acc\.strictPodKnown\+\+/);assert.match(worker,/if\(a===1\)\{acc\.a1\+\+;acc\.firstSuccess\+\+;\}/);assert.match(worker,/firstAttemptUnknownPod=Math\.max\(0,pod-acc\.strictPodKnown\)/,'legacy attempt counts must never mark strict first-attempt POD evidence complete');
 assert.match(worker,/V334_FINAL_SAVED_MEMBERS_STRICT_START_POD/);
 
 for(const token of ['CE','CEAF','ALI1688','WHPP','ALL'])assert.ok(genericCache.includes(`'${token}'`),`generic history cache missing ${token}`);
@@ -28,10 +28,11 @@ assert.match(genericRoute,/V334_GENERIC_CACHE_ONLY/);assert.match(genericRoute,/
 assert.doesNotMatch(genericRoute,/readV320HistoricalDaily|readV320HistoricalDailyWithDispatch/,'web history route must never scan heavy persisted history directly');
 assert.match(genericRoute,/historyAll\|\|from!==to/,'generic history wrapper must preserve normal one-day fast cards');
 
-assert.match(trendOwner,/v334-all-visible-board-saved-history-owner-v3/);assert.match(trendOwner,/AUTO_HISTORY_TYPES=new Set\(\[\.\.\.ATTEMPT_TYPES,\.\.\.GENERIC_TYPES\]\)/);
-assert.match(trendOwner,/GENERIC_TYPES=new Set\(\['CE','CEAF','ALI1688','WHPP','ALL'\]\)/);assert.match(trendOwner,/history=all/);
+assert.match(trendOwner,/v334-all-visible-board-saved-history-owner-v4/);assert.match(trendOwner,/v334-three-business-saved-history-hard-owner-v2/);assert.match(trendOwner,/AUTO_HISTORY_TYPES=new Set\(\[\.\.\.ATTEMPT_TYPES,\.\.\.GENERIC_TYPES\]\)/);
+assert.match(trendOwner,/GENERIC_TYPES=new Set\(\['CE','CEAF','ALI1688','WHPP','ALL'\]\)/);assert.match(trendOwner,/readGenericHistory[\s\S]*history=all/);
 assert.match(trendOwner,/claimV272Ownership/);assert.match(trendOwner,/setInterval\(enforceHistoryOwner,750\)/);assert.match(trendOwner,/页面保持可操作/);
-assert.match(firstUi,/v334-saved-history-first-attempt-owner-v1/);assert.match(firstUi,/__CE_QC_V328_HISTORY_PAYLOADS__/);assert.match(firstUi,/cachedHistoryTrend/);assert.match(firstUi,/firstAttemptEligible/);assert.match(firstUi,/firstAttemptSuccess/);
+assert.match(trendOwner,/function staleOneDayNotice/);for(const oldText of ['历史数据不足','数据库目前只有','当前只有','至少导入'])assert.ok(trendOwner.includes(oldText),`history owner must evict stale one-day notice: ${oldText}`);assert.match(trendOwner,/data\?\.dates\?\.length>1&&\(!section\.querySelector\('\.v320-history-grid'\)\|\|staleOneDayNotice\(section\)\)/,'multiple saved dates must defeat both a removed grid and a stale one-day warning');
+assert.match(firstUi,/v334-saved-history-first-attempt-owner-v1/);assert.match(firstUi,/__CE_QC_V328_HISTORY_PAYLOADS__/);assert.match(firstUi,/cachedHistoryTrend/);assert.match(firstUi,/firstAttemptEligible/);assert.match(firstUi,/firstAttemptSuccess/);assert.match(firstUi,/firstAttemptEvidenceComplete/);
 assert.match(dailyUi,/pageTitle/);assert.match(attemptUi,/pageTitle/);
 
 const canonicalPos=ccslDetail.indexOf('/api/v317/ccsl-recovery'),legacyPos=ccslDetail.indexOf('/api/v33/run-progress');assert.ok(canonicalPos>=0&&legacyPos>canonicalPos,'CCSL detail must read V317 canonical truth before legacy batch progress');
@@ -44,11 +45,11 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v334-unified-'));process.
 const {getDb,closeDb}=await import('../src/db.js');const db=getDb();
 const {writeV329ThreeBusinessDailyCache,readV329ThreeBusinessDailyCache}=await import('../src/v329ThreeBusinessDailyCache.js');
 writeV329ThreeBusinessDailyCache('SHOPEECN',[
-  {reportDate:'2026-07-13',total:10,pod:8,attempt1:5,attempt2:2,attempt3:1,signingDaysSum:20,signingDaysCount:8,firstAttemptEligible:9,firstAttemptSuccess:5,ready:true},
-  {reportDate:'2026-07-14',total:5,pod:3,attempt1:1,attempt2:1,attempt3:0,signingDaysSum:4,signingDaysCount:2,firstAttemptEligible:3,firstAttemptSuccess:1,ready:true}
+  {reportDate:'2026-07-13',total:10,pod:8,attempt1:5,attempt2:2,attempt3:1,signingDaysSum:20,signingDaysCount:8,firstAttemptEligible:9,firstAttemptSuccess:5,firstAttemptUnknownPod:0,ready:true},
+  {reportDate:'2026-07-14',total:5,pod:3,attempt1:1,attempt2:1,attempt3:0,signingDaysSum:4,signingDaysCount:2,firstAttemptEligible:3,firstAttemptSuccess:1,firstAttemptUnknownPod:1,ready:true}
 ],db,'V334_TEST_STRICT_MEMBERS');
-const cn=readV329ThreeBusinessDailyCache('SHOPEECN','2026-07-14',db);assert.deepEqual(cn.dates,['2026-07-13','2026-07-14']);assert.equal(cn.daily[0].firstAttemptEligible,9);assert.equal(cn.daily[0].firstAttemptSuccess,5);assert.equal(cn.daily[0].firstAttemptRate,55.56);assert.equal(cn.daily[0].avgSigningDays,2.5);assert.equal(cn.daily[1].firstAttemptRate,null,'missing strict POD attempt evidence must remain unknown, never fake zero');assert.equal(cn.daily[1].avgSigningDays,2,'partial real signing samples must remain visible');
+const cn=readV329ThreeBusinessDailyCache('SHOPEECN','2026-07-14',db);assert.deepEqual(cn.dates,['2026-07-13','2026-07-14']);assert.equal(cn.daily[0].firstAttemptEligible,9);assert.equal(cn.daily[0].firstAttemptSuccess,5);assert.equal(cn.daily[0].firstAttemptUnknownPod,0);assert.equal(cn.daily[0].firstAttemptEvidenceComplete,true);assert.equal(cn.daily[0].firstAttemptRate,55.56);assert.equal(cn.daily[0].avgSigningDays,2.5);assert.equal(cn.daily[1].firstAttemptUnknownPod,1);assert.equal(cn.daily[1].firstAttemptEvidenceComplete,false);assert.equal(cn.daily[1].firstAttemptRate,null,'missing strict POD START evidence must remain unknown even when legacy attempt counts exist');assert.equal(cn.daily[1].avgSigningDays,2,'partial real signing samples must remain visible');
 const {writeV334GenericHistoryCache,readV334GenericHistoryCache}=await import('../src/v334GenericHistoryCache.js');
 writeV334GenericHistoryCache('CE',[{reportDate:'2026-08-05',total:20,pod:18,ocCurrent:1,sameDayPod:12,ready:true},{reportDate:'2026-08-06',total:25,pod:22,ocCurrent:2,sameDayPod:15,ready:true}],db,'V334_TEST_GENERIC');const ce=readV334GenericHistoryCache('CE','2026-08-06',db);assert.deepEqual(ce.dates,['2026-08-05','2026-08-06']);assert.equal(ce.daily[0].podRate,90);assert.equal(ce.daily[1].ocRate,8);
 closeDb();fs.rmSync(root,{recursive:true,force:true});
-console.log('[V334] history unification smoke passed · CCSL canonical truth first · 8 visible boards keep saved history separate from current-day cards · historical first-attempt uses saved members + strict V246 START evidence');
+console.log('[V334] history unification smoke passed · CCSL canonical truth first · stale one-day notices are evicted · 8 visible boards keep saved history separate from current-day cards · historical first-attempt requires strict saved-member START coverage');
