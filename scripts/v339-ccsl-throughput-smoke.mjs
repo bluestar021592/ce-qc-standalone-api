@@ -13,8 +13,8 @@ import { resolveV314Target } from '../src/v314ModuleRedirectPatch.js';
 for(const file of ['src/v339CcslThroughputCore.js','src/v340CcslStorageCheckpoint.js','src/v314PipelineThroughput.js','src/v314ModuleRedirectPatch.js','src/pipeline.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.equal(V339_CCSL_CONFIRM_CONCURRENCY,1,'CCSL confirm remote lane must default to exactly one 350-ticket request');
 assert.match(V339_CCSL_THROUGHPUT_CORE_ID,/v340-ccsl-single-lane-rolling-prefetch/);
-assert.match(V340_CCSL_FAST_CHECKPOINT_ID,/v340-ccsl-light-checkpoint/);
-assert.match(resolveV314Target('./src/storage.js','file:///C:/CE/app/server.js'),/v340CcslStorageCheckpoint\.js$/,'production server must use V340 lightweight CCSL storage checkpoints');
+assert.match(V340_CCSL_FAST_CHECKPOINT_ID,/v341-ccsl-light-checkpoint-fail-open/);
+assert.match(resolveV314Target('./src/storage.js','file:///C:/CE/app/server.js'),/v340CcslStorageCheckpoint\.js$/,'production server must use lightweight CCSL storage checkpoints');
 
 const wrapper=fs.readFileSync('src/v314PipelineThroughput.js','utf8');
 const pipeline=fs.readFileSync('src/pipeline.js','utf8');
@@ -28,6 +28,10 @@ assert.match(checkpointWrapper,/SCAN_FULL_MIRROR_STRIDE=4/);
 assert.match(checkpointWrapper,/TRACK_FULL_MIRROR_STRIDE=8/);
 assert.match(checkpointWrapper,/run_locks/);
 assert.match(checkpointWrapper,/run_checkpoints/);
+assert.match(checkpointWrapper,/FAIL_OPEN_BUSINESS_PIPELINE_CONTINUES/,'light checkpoint failures must never abort CCSL');
+assert.match(checkpointWrapper,/V341_CCSL_CHECKPOINT_SKIPPED/,'skipped checkpoint must remain observable');
+const lightBody=checkpointWrapper.slice(checkpointWrapper.indexOf('function lightCheckpoint'),checkpointWrapper.indexOf('export async function saveState'));
+assert.doesNotMatch(lightBody,/BEGIN IMMEDIATE|ROLLBACK|throw error/,'light progress persistence must not own a SQLite transaction or throw into the QC pipeline');
 assert.match(pipeline,/const ORDER_BATCH_SIZE = Number\(process\.env\.ORDER_BATCH_SIZE \|\| 350\)/);
 assert.match(pipeline,/Promise\.all\(Array\.from\(\{ length: Math\.max\(1, TRACK_CONCURRENCY\) \}/,'CCSL trajectory must retain native bounded worker concurrency');
 
@@ -89,4 +93,4 @@ await assert.rejects(()=>hangClient.confirmQuery(h2),error=>error?.code==='V339_
 assert.equal((await hangClient.confirmQuery(h3)).length,350,'third 350-ticket batch must complete after hung second batch is hard-released');
 assert.ok(hangCalls.includes('H0701'),'later primary batch must reach CE after the hung rolling request budget expires');
 
-console.log(`[V340] CCSL throughput smoke passed · scan=350 single remote lane + rolling prefetch · ${elapsed.toFixed(1)}ms with simulated checkpoint overlap · scan full mirror every 4 · track full mirror every 8 · hung batch fail-forward · native track=50x4 retained`);
+console.log(`[V341] CCSL throughput smoke passed · scan=350 single remote lane + rolling prefetch · ${elapsed.toFixed(1)}ms with simulated checkpoint overlap · scan full mirror every 4 · track full mirror every 8 · lightweight checkpoint fail-open · hung batch fail-forward · native track=50x4 retained`);
