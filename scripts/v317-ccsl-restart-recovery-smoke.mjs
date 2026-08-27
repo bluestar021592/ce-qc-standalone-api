@@ -73,9 +73,9 @@ assert.match(client,/status\.paused/,'explicit pause state must be respected by 
 assert.doesNotMatch(client,/location\.pathname\s*!==\s*['"]\/import['"]/,'restart continuation must not depend on the user opening the import page');
 
 assert.match(shopeeClient,/2026-08-27-v332-shopee-status-style-ownership-v1/,'SHOPEE owner must synchronize its own status pill color');
-assert.match(shopeeClient,/setTextByMatch\(\/SHOPEE CN\\\/VN[\s\S]*'SHOPEE CN\/VN 已完成','done'\)/,'SHOPEE completion must explicitly apply done styling');
+assert.equal(shopeeClient.includes("setTextByMatch(/SHOPEE CN\\/VN\\s*(待处理|处理中|已完成)/i,'SHOPEE CN/VN 已完成','done')"),true,'SHOPEE completion must explicitly apply done styling');
 assert.match(shopeeClient,/node\.classList\.remove\('success','warning','danger','muted'\)/,'SHOPEE status synchronizer must replace stale classes');
-assert.doesNotMatch(shopeeClient,/setTextByMatch\(\/\^尚未全部完成\$\//,'SHOPEE completion must never independently claim overall seven-business completion');
+assert.equal(shopeeClient.includes('setTextByMatch(/^尚未全部完成$/'),false,'SHOPEE completion must never independently claim overall seven-business completion');
 assert.match(shopeeClient,/Overall completion is owned only by V168/,'overall completion ownership must be documented and isolated');
 
 assert.match(progressUi,/2026-08-27-v332-selected-date-complete-progress-v1/,'legacy CCSL progress owner must use selected-date V332 truth');
