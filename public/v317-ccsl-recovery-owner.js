@@ -1,12 +1,14 @@
 (function installV317CcslRecoveryOwner(global){
   if(global.__CE_QC_V317_CCSL_RECOVERY_OWNER__)return;
-  const VERSION='2026-08-26-v317-ccsl-restart-auto-recovery-v2';
+  const VERSION='2026-08-27-v332-ccsl-completion-visual-sync-v1';
   let busy=false,lastRunAt=0,timer=null;
   const date=value=>String(value||'').trim().replace(/\//g,'-').slice(0,10);
   function reportDate(){
+    const selected=date(document.getElementById('reportDate')?.value||document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
+    if(selected)return selected;
     const text=String(document.getElementById('fileStatus')?.textContent||'');
-    const hit=text.match(/20\d{2}-\d{2}-\d{2}/)?.[0];if(hit)return date(hit);
-    return date(document.getElementById('reportDate')?.value||document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
+    const hit=text.match(/20\d{2}-\d{2}-\d{2}/)?.[0];
+    return date(hit||'');
   }
   async function call(action){
     const response=await fetch('/api/v317/ccsl-recovery',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',cache:'no-store',body:JSON.stringify({action,reportDate:reportDate()})});
@@ -22,10 +24,17 @@
     if(code==='RUN_ALREADY_ACTIVE')return{ok:true,alreadyRunning:true,code};
     const error=new Error(data?.error||data?.message||`CCSL续跑失败（HTTP ${response.status}）`);error.code=code;throw error;
   }
-  function setCcslBadge(value){
+  function setCcslBadge(value,state='pending'){
+    const className=state==='done'?'success':state==='failed'?'danger':(state==='running'||state==='paused'?'warning':'muted');
     document.querySelectorAll('#importPage .status-pill,#importPage span,#importPage b').forEach(node=>{
       const t=String(node.textContent||'').replace(/\s+/g,' ').trim();
-      if(/^CCSL\s*(待处理|处理中|已暂停|已完成)/i.test(t))node.textContent=value;
+      if(!/^CCSL\s*(待处理|处理中|已暂停|已完成)/i.test(t))return;
+      node.textContent=value;
+      if(node.classList?.contains('status-pill')){
+        node.classList.remove('success','warning','danger','muted');
+        node.classList.add(className);
+        node.dataset.v332CcslState=state;
+      }
     });
   }
   function show(mode,status={}){
@@ -36,25 +45,26 @@
     const stage=String(lock.currentStage||'').trim();
     const progress=stage?` · ${stage}${total>0?` ${batch}/${total}`:''}`:'';
     if(mode==='complete'){
-      setCcslBadge('CCSL 已完成');
+      setCcslBadge('CCSL 已完成','done');
       if(detail){
         detail.innerHTML=status.zeroTicketDay
-          ?'<span class="status-pill success">CCSL 已完成 · 当日0票，无需处理</span><p>有效日报已确认CCSL队列为0，不创建处理任务、不重试、不要求空快照。</p>'
-          :'<span class="status-pill success">CCSL 已完成 · 正式快照已生成</span>';
+          ?'<span class="status-pill success">CCSL 已完成 · 当日0票，无需处理</span><p>当前阶段：已完成</p><p>有效日报已确认CCSL队列为0，不创建处理任务、不重试、不要求空快照。</p>'
+          :'<span class="status-pill success">CCSL 已完成 · 正式快照已生成</span><p>当前阶段：已完成</p>';
+        detail.dataset.v332CcslState='done';
       }
       return;
     }
     if(mode==='paused'){
-      setCcslBadge('CCSL 已暂停');
+      setCcslBadge('CCSL 已暂停','paused');
       if(detail)detail.innerHTML=`<span class="status-pill warning">CCSL 已暂停 · 保留断点 ${sourceTotal.toLocaleString('zh-CN')} 票</span>`;
       return;
     }
     if(mode==='running'){
-      setCcslBadge('CCSL 处理中');
+      setCcslBadge('CCSL 处理中','running');
       if(detail)detail.innerHTML=`<span class="status-pill warning">CCSL 正在恢复并继续处理${progress}</span><p>当日CCSL队列：${sourceTotal.toLocaleString('zh-CN')} 票 · 已保存成功票不会重复请求</p>`;
       return;
     }
-    setCcslBadge('CCSL 待处理');
+    setCcslBadge('CCSL 待处理','pending');
   }
   function sync(status={}){
     if(status.complete)return show('complete',status);
@@ -86,5 +96,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V317_CCSL_RECOVERY_OWNER__={version:VERSION,tick,reportDate,directStart,sync};
-  console.info('[CE-QC][V317_CCSL_RECOVERY_UI]',VERSION,'valid zero-ticket CCSL days render completed without starting/retrying a run; nonzero incomplete days resume checkpoint-safely and explicit pause remains respected.');
+  console.info('[CE-QC][V317_CCSL_RECOVERY_UI]',VERSION,'selected-date CCSL truth owns both text and pill color; valid zero-ticket days are green completed and cannot remain grey/pending; nonzero incomplete days remain checkpoint-safe.');
 })(window);
