@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v330-active-owner-observability-v2';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v330-active-owner-observability-v3';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -9,14 +9,15 @@ const V307_HOME_MARKER='/v307-exact-daily-home-owner.js?v=20260826-v325-1';
 const V309_UI_MARKER='/v309-ui-integrity.js?v=20260826-v309-1';
 const V310_RESUME_MARKER='/v310-unified-resume-owner.js?v=20260826-v310-1';
 const V311_RECOVERY_MARKER='/v311-shopee-recovery-owner.js?v=20260826-v313-1';
-const V317_CCSL_RECOVERY_MARKER='/v317-ccsl-recovery-owner.js?v=20260826-v317-2';
+const V317_CCSL_RECOVERY_MARKER='/v317-ccsl-recovery-owner.js?v=20260827-v330-1';
+const V317_CCSL_RECOVERY_COMPAT_MARKER='/v317-ccsl-recovery-owner.js?v=20260826-v317-2';
 const V318_SINGLE_SIDEBAR_MARKER='/v318-single-sidebar-owner.js?v=20260826-v318-1';
 const V319_TREND_CACHE_MARKER='/v319-trend-cache-first.js?v=20260826-v319-1';
 const V320_HISTORY_TREND_MARKER='/v320-history-trend-owner.js?v=20260827-v329-1';
 const V328_ATTEMPT_MARKER='/v328-three-business-attempt-owner.js?v=20260827-v329-1';
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
-void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
+void V317_CCSL_RECOVERY_COMPAT_MARKER;void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
 // V300 recursive observer is no longer delivered. V301 remains the nonrecursive runtime-stability owner.
 express.response.send=function v330FirstAttemptUiSend(body){
   if(typeof body==='string'&&body.includes('</body>')&&body.includes('CE Express')){
@@ -40,10 +41,11 @@ express.response.send=function v330FirstAttemptUiSend(body){
     this.setHeader?.('X-CE-QC-V309-UI','2026-08-26-v309-single-nav-auto-resume-shopee-total-v1');
     this.setHeader?.('X-CE-QC-V310-UI','2026-08-26-v310-persistent-shopee-resume-owner-v1');
     this.setHeader?.('X-CE-QC-V313-UI','2026-08-26-v313-single-source-shopee-completion-v1');
+    this.setHeader?.('X-CE-QC-V317-UI','2026-08-27-v330-zero-ticket-ccsl-recovery-ui-v1');
     this.setHeader?.('X-CE-QC-V318-UI','2026-08-26-v318-single-sidebar-hard-owner-v1');
     this.setHeader?.('X-CE-QC-V325-UI','2026-08-26-v325-single-owner-stable-home-cards-v1');
     this.setHeader?.('X-CE-QC-V329-UI','2026-08-27-v329-three-business-cache-ui-v1');
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V330_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V301 nonrecursive stability + active V309/V310/V313/V318/V325 owners + TBKH/CN/VN history/trend/attempt cache UI.');
+console.info('[CE-QC][V330_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V301 nonrecursive stability + zero-ticket CCSL closure + active V309/V310/V313/V318/V325 owners + TBKH/CN/VN history/trend/attempt cache UI.');
