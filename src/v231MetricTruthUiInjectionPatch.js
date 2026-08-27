@@ -40,13 +40,14 @@ const V263_GENERIC_MARKER = '/v263-generic-trend-hydrator.js?v=20260823-v263-2';
 const V246_TRACKING_MARKER = '/v246-qc-tracking.js?v=20260823-v246-1';
 const V249_WHPP_DETAIL_MARKER = '/v249-whpp-detail-owner.js?v=20260823-v249-1';
 const V267_REPORT_MARKER = '/v267-report-export-owner.js?v=20260823-v267-1';
-const V268_LIFECYCLE_EXPORT_MARKER = '/v268-lifecycle-export-owner.js?v=20260823-v269-1';
+const V268_LIFECYCLE_EXPORT_MARKER = '/v268-lifecycle-export-owner.js?v=20260827-v330-1';
+const V268_LIFECYCLE_EXPORT_COMPAT_MARKER = '/v268-lifecycle-export-owner.js?v=20260823-v269-1';
 const V271_CANONICAL_INTEGRITY_MARKER = '/v271-canonical-integrity-owner.js?v=20260824-v272-1';
 const V272_LAYOUT_TREND_MARKER = '/v272-layout-trend-finalizer.js?v=20260825-v299-1';
 const V273_LAYOUT_TREND_COMPAT_MARKER = '/v272-layout-trend-finalizer.js?v=20260824-v273-1';
 const V274_TREND_SPEED_MARKER = '/v274-trend-speed-guard.js?v=20260824-v274-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
-void V271_CANONICAL_INTEGRITY_MARKER; void V273_LAYOUT_TREND_COMPAT_MARKER;
+void V268_LIFECYCLE_EXPORT_COMPAT_MARKER; void V271_CANONICAL_INTEGRITY_MARKER; void V273_LAYOUT_TREND_COMPAT_MARKER;
 // Compatibility-only source markers for pre-V263 gates. They remain ordered for
 // old source assertions, but are stripped and never injected after V263/V330.
 const V252_LIFECYCLE_MARKER = '/v252-qc-lifecycle-ui.js?v=20260823-v252-1';
@@ -125,4 +126,4 @@ express.response.send = function v330MetricTruthUiSend(body) {
 
 // Historical gate marker kept intentionally: these owners are still stripped from delivered HTML.
 const V263_RETIRED_VISUAL_OWNERS_MARKER = 'V234/V248/V251/V252/V254/V261 visual owners retired';
-console.info('[CE-QC][V330_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'V271 network trend owner retired; fast exact selected-range/cache-only owners are authoritative; duplicate loading/retry loops remain retired.');
+console.info('[CE-QC][V299_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'V330 retires V271 network trend owner; fast exact selected-range/cache-only owners are authoritative; duplicate loading/retry loops remain retired.');
