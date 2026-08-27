@@ -8,7 +8,6 @@ import {
   createCcslThroughputClient,
   splitFixedBatches,
   V314_ALL_BUSINESS_THROUGHPUT_CORE_ID,
-  V314_EVENT_CONCURRENCY,
   V314_CONFIRM_CONCURRENCY,
   V339_CCSL_CONFIRM_CONCURRENCY
 } from '../src/v314ShopeeThroughputCore.js';
@@ -16,14 +15,14 @@ import { resolveV314Target } from '../src/v314ModuleRedirectPatch.js';
 
 for(const file of ['src/v314ShopeeThroughputCore.js','src/v314PipelineThroughput.js','src/v339CcslThroughputCore.js','src/v314ModuleRedirectPatch.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.match(V314_ALL_BUSINESS_THROUGHPUT_CORE_ID,/all-business-350-scan-50x4-track/);
-assert.equal(V314_EVENT_CONCURRENCY,4,'all-business track prefetch must default to four 50-ticket requests');
 assert.equal(V314_CONFIRM_CONCURRENCY,2,'Shopee confirm keeps bounded x2');
 assert.equal(V339_CCSL_CONFIRM_CONCURRENCY,1,'CCSL confirm remains one remote 350 lane');
 assert.match(resolveV314Target('./src/pipeline.js','file:///C:/CE/app/server.js'),/v314PipelineThroughput\.js$/);
 const wrapper=fs.readFileSync('src/v314PipelineThroughput.js','utf8'),compat=fs.readFileSync('src/v339CcslThroughputCore.js','utf8');
 assert.match(wrapper,/createUnifiedThroughputClient/,'production must have one throughput owner');
+assert.match(wrapper,/createUnifiedThroughputClient\(state,options\.client,\{trackConcurrency:4\}\)/,'production must force 50-ticket tracking to x4 even if a legacy environment still says TRACK_CONCURRENCY=1');
 assert.doesNotMatch(wrapper,/createShopeeThroughputClient|createCcslThroughputClient/,'production wrapper must not branch into layered business-specific throughput implementations');
-assert.match(wrapper,/scanBatchSize:350/);assert.match(wrapper,/trackBatchSize:50/);assert.match(wrapper,/trackConcurrency:V314_EVENT_CONCURRENCY/);
+assert.match(wrapper,/scanBatchSize:350/);assert.match(wrapper,/trackBatchSize:50/);assert.match(wrapper,/trackConcurrency:4/);
 assert.match(compat,/Compatibility module only/);assert.doesNotMatch(compat,/function createCcslThroughputClient/,'old CCSL file must be a compatibility re-export, not a second implementation');
 
 async function trackCase(businessType){
@@ -47,7 +46,6 @@ async function confirmCase(businessType,expectedConcurrency){
 }
 await confirmCase('SHOPEE',2);await confirmCase('CCSL',1);
 
-// Compatibility aliases must route into the exact same core behavior.
 const aliasRaw={async trackQuery(codes){return codes.map(shipmentCode=>({shipmentCode}));}};
 assert.ok(createShopeeThroughputClient({businessType:'SHOPEE',needTrackBills:['A']},aliasRaw).__ceQcThroughputPools.track);
 assert.ok(createCcslThroughputClient({businessType:'CCSL',needTrackBills:['B']},aliasRaw).__ceQcThroughputPools.track);
