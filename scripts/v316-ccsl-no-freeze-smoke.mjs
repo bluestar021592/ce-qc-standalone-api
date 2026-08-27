@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.CE_MIN_BATCH_BUDGET_MS = '80';
 process.env.CE_CONFIRM_HARD_BUDGET_MS = '180';
-const { queryBatchWithFallback } = await import(`../src/trackBatching.js?v316=${Date.now()}`);
+const { queryBatchWithFallback, splitTrackBatches, TRACK_QUERY_BATCH_SIZE } = await import(`../src/trackBatching.js?v338=${Date.now()}`);
 
 const logs = [];
 const startedAt = Date.now();
@@ -24,9 +24,7 @@ assert.deepEqual(hung.failures[0].batch, ['A','B','C']);
 assert.equal(hung.failures[0].error?.code, 'BATCH_TIME_BUDGET_EXCEEDED');
 assert.ok(logs.some(line => line.includes('主流程立即继续下一批')));
 
-// V337 regression: even if a stale module/preload path asks confirm-query for a
-// very large generic budget, the batching core itself must cap confirm-query. This
-// is the exact production failure mode where one daily scan batch appeared frozen.
+// Confirm-query hard cap remains independent of preload order.
 const hardCapStarted = Date.now();
 const hardCapped = await queryBatchWithFallback({
   batch: ['CAP-1','CAP-2','CAP-3'],
@@ -63,15 +61,16 @@ assert.equal(attempts, 2);
 assert.equal(recovered.successes.length, 1);
 assert.equal(recovered.failures.length, 0);
 
-// End-to-end batch-loop regression: batch 2 never settles, yet batch 3 must run.
-const syntheticBills = Array.from({ length: 300 }, (_, index) => `WB${String(index + 1).padStart(4, '0')}`);
+// Exact production batch-loop regression: three 350-ticket scan batches. Batch 2
+// never settles, but the third 350-ticket batch must still execute.
+const syntheticBills = Array.from({ length: 1050 }, (_, index) => `WB${String(index + 1).padStart(4, '0')}`);
 const syntheticSuccess = [];
 const syntheticFailed = [];
-for (let offset = 0; offset < syntheticBills.length; offset += 100) {
-  const batch = syntheticBills.slice(offset, offset + 100);
+for (let offset = 0; offset < syntheticBills.length; offset += 350) {
+  const batch = syntheticBills.slice(offset, offset + 350);
   const outcome = await queryBatchWithFallback({
     batch,
-    query: async codes => offset === 100 ? new Promise(() => {}) : codes.map(shipmentCode => ({ shipmentCode })),
+    query: async codes => offset === 350 ? new Promise(() => {}) : codes.map(shipmentCode => ({ shipmentCode })),
     apiName: 'otwms-order-confirm-query',
     fallbackSizes: [100,50,10,1],
     transientRetries: 0,
@@ -80,44 +79,61 @@ for (let offset = 0; offset < syntheticBills.length; offset += 100) {
   syntheticSuccess.push(...outcome.successes.flatMap(item => item.batch));
   syntheticFailed.push(...outcome.failures.flatMap(item => item.batch));
 }
-assert.equal(syntheticSuccess.length, 200, 'later CCSL batches must continue after one hung batch');
-assert.equal(syntheticFailed.length, 100, 'only the hung batch should enter retry center');
-assert.equal(syntheticSuccess.at(-1), 'WB0300', 'the final later batch must be reached');
+assert.equal(syntheticSuccess.length, 700, 'later 350-ticket CCSL scan batch must continue after one hung batch');
+assert.equal(syntheticFailed.length, 350, 'only the hung 350-ticket scan batch should enter retry center');
+assert.equal(syntheticSuccess.at(-1), 'WB1050', 'the final later 350-ticket batch must be reached');
+
+assert.equal(TRACK_QUERY_BATCH_SIZE,50,'trajectory queries must remain fixed at 50 tickets');
+assert.deepEqual(splitTrackBatches(Array.from({length:120},(_,i)=>`TR${i+1}`)).map(batch=>batch.length),[50,50,20]);
 
 const v147 = fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js', import.meta.url), 'utf8');
 const preload = fs.readFileSync(new URL('../src/v316BatchPolicyPreload.js', import.meta.url), 'utf8');
 const v315 = fs.readFileSync(new URL('../src/v315OperationalDataRefreshPatch.js', import.meta.url), 'utf8');
+const restore = fs.readFileSync(new URL('../src/v338CcslBatchPolicyRestore.js', import.meta.url), 'utf8');
 const redirect = fs.readFileSync(new URL('../src/v314ModuleRedirectPatch.js', import.meta.url), 'utf8');
 const pipeline = fs.readFileSync(new URL('../src/pipeline.js', import.meta.url), 'utf8');
 const batching = fs.readFileSync(new URL('../src/trackBatching.js', import.meta.url), 'utf8');
+const ui = fs.readFileSync(new URL('../public/v138-ccsl-scan-progress.js', import.meta.url), 'utf8');
+const shell = fs.readFileSync(new URL('../src/v44WhppUiPatch.js', import.meta.url), 'utf8');
 
 const preloadImport = v147.indexOf("import './v316BatchPolicyPreload.js';");
 const redirectImport = v147.indexOf("import './v314ModuleRedirectPatch.js';");
 const v315Import = v147.indexOf("import './v315OperationalDataRefreshPatch.js';");
+const restoreImport = v147.indexOf("import './v338CcslBatchPolicyRestore.js';");
 const schedulerImport = v147.indexOf("import './v294CarryoverSchedulerActivation.js';");
-assert.ok(preloadImport >= 0, 'V316 preload must be activated');
-assert.ok(preloadImport < redirectImport && preloadImport < v315Import && preloadImport < schedulerImport, 'V316 bounded policy must execute before every pipeline/scheduler preload path');
-assert.match(preload, /process\.env\.ORDER_BATCH_SIZE = '100'/);
+assert.ok(preloadImport >= 0, 'V338 preload must be activated');
+assert.ok(preloadImport < redirectImport && preloadImport < v315Import, 'V338 canonical policy must load before legacy pipeline-adjacent modules');
+assert.ok(v315Import < restoreImport && restoreImport < schedulerImport, 'V338 final 350/50 restore must execute after legacy V315 and before carryover pipeline preload');
+assert.match(preload, /process\.env\.ORDER_BATCH_SIZE = '350'/);
+assert.match(preload, /process\.env\.CONFIRM_QUERY_BATCH_SIZE = '350'/);
+assert.match(preload, /trackBatchSize: 50/);
 assert.match(preload, /process\.env\.REQUEST_TIMEOUT_MS = '12000'/);
 assert.match(preload, /process\.env\.CE_TRACK_BATCH_BUDGET_MS = '25000'/);
 assert.match(preload, /process\.env\.CE_TRANSIENT_RETRIES = '1'/);
-assert.ok(v315Import < schedulerImport, 'V315 operational refresh must load before carryover scheduler');
-assert.match(v315, /process\.env\.ORDER_BATCH_SIZE = '100'/);
+assert.match(restore, /process\.env\.ORDER_BATCH_SIZE='350'/);
+assert.match(restore, /process\.env\.CONFIRM_QUERY_BATCH_SIZE='350'/);
+assert.match(restore, /finalTrackBatchSize:50/);
+assert.ok(v315Import < schedulerImport, 'V315 operational refresh must still load before carryover scheduler');
+assert.match(v315, /TRACK_CHUNK = 50/);
 assert.match(redirect, /carryoverRefreshScheduler\.js/);
 assert.match(redirect, /specifier === '\.\/pipeline\.js'/);
 assert.match(pipeline, /const ORDER_BATCH_SIZE = Number\(process\.env\.ORDER_BATCH_SIZE \|\| 350\)/);
+assert.match(batching, /export const TRACK_QUERY_BATCH_SIZE = 50/);
 assert.match(batching, /queryWithinHardDeadline/);
 assert.match(batching, /Promise\.race/);
-assert.match(batching,/CONFIRM_HARD_BUDGET_MS/,'V337 batching core must own confirm hard cap independent of preload order');
-assert.match(batching,/isConfirmQuery \? Math\.min\(requestedBudgetMs, CONFIRM_HARD_BUDGET_MS\)/,'V337 confirm request must be capped inside the batching core');
-assert.match(batching,/CONFIRM_MAX_TRANSIENT_RETRIES = 1/,'V337 confirm-query may perform at most one transport compensation attempt');
+assert.match(batching,/CONFIRM_HARD_BUDGET_MS/,'batching core must own confirm hard cap independent of preload order');
+assert.match(batching,/isConfirmQuery \? Math\.min\(requestedBudgetMs, CONFIRM_HARD_BUDGET_MS\)/,'confirm request must be capped inside the batching core');
+assert.match(batching,/CONFIRM_MAX_TRANSIENT_RETRIES = 1/,'confirm-query may perform at most one transport compensation attempt');
+assert.match(ui,/batchMax:350/,'running scan UI must show 350 tickets per scan batch');
+assert.match(ui,/单批最大350/,'completed/detail UI must show scan batch maximum 350');
+assert.match(ui,/单批最大50/,'completed/detail UI must show trajectory batch maximum 50');
+assert.match(shell,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'HTML shell must cache-bust the V338 350/50 progress owner');
 
 const sampleTotal = 5453;
 const alreadyCompleted = 2100;
-const boundedBatches = Math.ceil(sampleTotal / 100);
-assert.equal(boundedBatches, 55);
-assert.notEqual(boundedBatches, 16, '5453 tickets must no longer run as 350-ticket/16-batch CCSL mode');
+const boundedBatches = Math.ceil(sampleTotal / 350);
+assert.equal(boundedBatches, 16, '5453 tickets must run as 16 CCSL scan batches at 350 tickets per batch');
 const firstPending = alreadyCompleted + 1;
 assert.equal(firstPending, 2101, 'the persisted 2100 successful bills must resume at the next uncompleted bill');
 
-console.log(`[V337/V316] CCSL no-freeze smoke passed · never-settling batch released in ${elapsedMs}ms · stale long confirm budget hard-capped in ${hardCapElapsedMs}ms · bad middle batch failed forward and WB0300 completed · checkpoint resumes at ${firstPending}`);
+console.log(`[V338/V316] CCSL batch policy smoke passed · scan=350 · trajectory=50 · 5453=>${boundedBatches} scan batches · never-settling 350-ticket middle batch failed forward and WB1050 completed · checkpoint resumes at ${firstPending}`);
