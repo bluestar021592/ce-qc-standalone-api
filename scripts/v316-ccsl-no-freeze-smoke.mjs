@@ -110,11 +110,14 @@ assert.match(preload, /trackBatchSize: 50/);
 assert.match(preload, /process\.env\.REQUEST_TIMEOUT_MS = '12000'/);
 assert.match(preload, /process\.env\.CE_TRACK_BATCH_BUDGET_MS = '25000'/);
 assert.match(preload, /process\.env\.CE_TRANSIENT_RETRIES = '1'/);
+assert.match(v315, /process\.env\.ORDER_BATCH_SIZE = '350'/,'V315 must never shrink CCSL order scan below 350');
+assert.match(v315, /process\.env\.CONFIRM_QUERY_BATCH_SIZE = '350'/,'V315 confirm-query batch must remain 350');
+assert.doesNotMatch(v315, /process\.env\.(?:ORDER_BATCH_SIZE|CONFIRM_QUERY_BATCH_SIZE) = '100'/,'V315 legacy 100-ticket scan policy must not reappear');
+assert.match(v315, /TRACK_CHUNK = 50/,'V315 strict evidence trajectory chunk remains 50');
 assert.match(restore, /process\.env\.ORDER_BATCH_SIZE='350'/);
 assert.match(restore, /process\.env\.CONFIRM_QUERY_BATCH_SIZE='350'/);
 assert.match(restore, /finalTrackBatchSize:50/);
 assert.ok(v315Import < schedulerImport, 'V315 operational refresh must still load before carryover scheduler');
-assert.match(v315, /TRACK_CHUNK = 50/);
 assert.match(redirect, /carryoverRefreshScheduler\.js/);
 assert.match(redirect, /specifier === '\.\/pipeline\.js'/);
 assert.match(pipeline, /const ORDER_BATCH_SIZE = Number\(process\.env\.ORDER_BATCH_SIZE \|\| 350\)/);
@@ -136,4 +139,4 @@ assert.equal(boundedBatches, 16, '5453 tickets must run as 16 CCSL scan batches 
 const firstPending = alreadyCompleted + 1;
 assert.equal(firstPending, 2101, 'the persisted 2100 successful bills must resume at the next uncompleted bill');
 
-console.log(`[V338/V316] CCSL batch policy smoke passed · scan=350 · trajectory=50 · 5453=>${boundedBatches} scan batches · never-settling 350-ticket middle batch failed forward and WB1050 completed · checkpoint resumes at ${firstPending}`);
+console.log(`[V338/V316] CCSL batch policy smoke passed · scan=350 · trajectory=50 · V315 locked to 350 · 5453=>${boundedBatches} scan batches · never-settling 350-ticket middle batch failed forward and WB1050 completed · checkpoint resumes at ${firstPending}`);
