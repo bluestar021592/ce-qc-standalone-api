@@ -1,7 +1,7 @@
 (function installSevenBusinessStatusV168(global) {
   if (global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__) return;
 
-  const VERSION = '2026-08-17-v168-seven-business-completion-truth-v4';
+  const VERSION = '2026-08-27-v331-seven-business-selected-date-zero-ticket-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   let lastTruth = null;
   let refreshBusy = false;
@@ -50,6 +50,7 @@
     const trackObserved = Math.max(0, Number(payload?.trackObserved ?? payload?.trackDone ?? 0));
     const dailyTotal = Math.max(0, Number(payload?.dailyTotal || 0));
     const podLockSkipped = Math.max(0, Number(payload?.podLockSkipped || 0));
+    const provenDone = payload?.complete === true || payload?.zeroTicketDay === true;
     const explicitDone = /finished|completed|complete|done|success|succeeded/.test(runStatus)
       || /完成|finished|completed|complete/i.test(phase);
     const countsDone = dailyTotal > 0
@@ -57,11 +58,11 @@
       && ((scanTotal > 0 && scanObserved >= scanTotal) || (scanTotal === 0 && podLockSkipped >= dailyTotal))
       && (trackTotal === 0 || trackObserved >= trackTotal);
     let state = 'pending';
-    if (date === target && (explicitDone || countsDone)) state = 'done';
+    if (date === target && (provenDone || explicitDone || countsDone)) state = 'done';
     else if (date === target && running) state = 'running';
     else if (date === target && paused) state = 'paused';
     else if (date === target && /failed|error/.test(runStatus)) state = 'failed';
-    return { key: 'CCSL', label: 'CCSL', state, date, runStatus, phase, total: dailyTotal };
+    return { key: 'CCSL', label: 'CCSL', state, date, runStatus, phase, total: dailyTotal, complete: provenDone, zeroTicketDay: Boolean(payload?.zeroTicketDay) };
   }
 
   function stageFromBusiness(key, label, payload, target) {
@@ -184,12 +185,17 @@
     if (refreshBusy) return lastTruth;
     refreshBusy = true;
     try {
+      const requestedTarget = targetDate();
       let ccslPayload = null;
       let ccslError = null;
-      try { ccslPayload = await readJson('/api/v33/run-progress?businessType=CCSL'); }
-      catch (error) { ccslError = error; }
+      try {
+        const ccslUrl = requestedTarget
+          ? `/api/v33/run-progress?businessType=CCSL&reportDate=${encodeURIComponent(requestedTarget)}`
+          : '/api/v33/run-progress?businessType=CCSL';
+        ccslPayload = await readJson(ccslUrl);
+      } catch (error) { ccslError = error; }
 
-      const target = targetDate()
+      const target = requestedTarget
         || normalizeDate(ccslPayload?.reportDate)
         || normalizeDate(lastTruth?.reportDate);
 
