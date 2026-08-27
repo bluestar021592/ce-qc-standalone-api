@@ -17,7 +17,9 @@ for (const file of [
   'src/v314ShopeeThroughputCore.js',
   'src/v314PipelineThroughput.js',
   'src/v314BusinessStoreCheckpoint.js',
-  'src/v314ModuleRedirectPatch.js'
+  'src/v314ModuleRedirectPatch.js',
+  'src/v339CcslThroughputCore.js',
+  'scripts/v339-ccsl-throughput-smoke.mjs'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 
 assert.equal(V314_EVENT_CONCURRENCY,4,'SHOPEE event reads default to bounded concurrency 4');
@@ -34,6 +36,8 @@ const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const nativePipeline=fs.readFileSync('src/pipeline.js','utf8');
 const nativeStore=fs.readFileSync('src/businessStore.js','utf8');
 assert.match(pipelineWrapper,/createShopeeThroughputClient/,'production pipeline wrapper must use bounded prefetch client');
+assert.match(pipelineWrapper,/createCcslThroughputClient/,'production pipeline wrapper must activate bounded CCSL prefetch client');
+assert.match(pipelineWrapper,/V339_CCSL_THROUGHPUT/,'V339 CCSL throughput must be observable at startup');
 assert.match(storeWrapper,/shouldUseFastCheckpoint/,'production business store wrapper must throttle heavy full mirrors');
 assert.match(storeWrapper,/business_run_locks/,'light checkpoints must keep visible run progress current');
 assert.match(storeWrapper,/business_run_checkpoints/,'light checkpoints must remain auditable');
@@ -114,4 +118,5 @@ assert.equal(shouldUseFastCheckpoint({businessType:'SHOPEE',processing:{running:
 assert.equal(shouldUseFastCheckpoint({businessType:'SHOPEE',processing:{running:true,phase:'tms-shipment-event-query',batchIndex:14,totalBatches:14}},'SHOPEE'),false,'final batch must always persist full truth');
 assert.equal(shouldUseFastCheckpoint({businessType:'SHOPEE',processing:{running:false,phase:'完成',batchIndex:1,totalBatches:1}},'SHOPEE'),false,'completion must never use a lightweight checkpoint');
 
-console.log(`[V314] SHOPEE throughput smoke passed · 670 tickets => ${batches.length} fixed 50-ticket event batches · bounded concurrency ${maxActive}/4 · ${elapsed.toFixed(1)}ms synthetic vs ~560ms serial · failed batches retryable · partial-resume batch shapes exact · full mirror throttled 4x but final truth always canonical`);
+execFileSync(process.execPath,['scripts/v339-ccsl-throughput-smoke.mjs'],{stdio:'inherit'});
+console.log(`[V314/V339] throughput smoke passed · SHOPEE 670 tickets => ${batches.length} fixed 50-ticket event batches · bounded concurrency ${maxActive}/4 · ${elapsed.toFixed(1)}ms synthetic vs ~560ms serial · CCSL 350x2 hard-bounded prefetch regression chained`);
