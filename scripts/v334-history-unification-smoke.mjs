@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const files=[
+  'src/v329ThreeBusinessDailyCache.js','scripts/v329-three-business-cache-worker.mjs',
+  'src/v334GenericHistoryCache.js','scripts/v334-generic-history-cache-worker.mjs','src/v334GenericHistoryCoordinator.js','src/v334GenericTrendRoutePatch.js',
+  'public/v308-dashboard-read-bridge.js','public/v320-history-trend-owner.js','public/v295-first-attempt-ui.js','public/v328-three-business-attempt-owner.js',
+  'public/v138-ccsl-scan-progress.js','public/v168-seven-business-status.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptUiInjectionPatch.js','src/v308DashboardReadBridgeInjection.js'
+];
+for(const file of files)execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+const read=file=>fs.readFileSync(file,'utf8');
+const cache=read('src/v329ThreeBusinessDailyCache.js'),worker=read('scripts/v329-three-business-cache-worker.mjs'),genericCache=read('src/v334GenericHistoryCache.js'),genericWorker=read('scripts/v334-generic-history-cache-worker.mjs'),genericCoord=read('src/v334GenericHistoryCoordinator.js'),genericRoute=read('src/v334GenericTrendRoutePatch.js'),trendOwner=read('public/v320-history-trend-owner.js'),firstUi=read('public/v295-first-attempt-ui.js'),dailyUi=read('public/v308-dashboard-read-bridge.js'),attemptUi=read('public/v328-three-business-attempt-owner.js'),ccslDetail=read('public/v138-ccsl-scan-progress.js'),seven=read('public/v168-seven-business-status.js'),activation=read('src/v147TrackTimeoutConfig.js'),inject=read('src/v295FirstAttemptUiInjectionPatch.js'),headInject=read('src/v308DashboardReadBridgeInjection.js');
+
+assert.match(cache,/firstAttemptEligible/);assert.match(cache,/firstAttemptSuccess/);assert.match(cache,/firstAttemptRate/);assert.match(cache,/signingDaysSum\/signingDaysCount/);
+assert.doesNotMatch(worker,/v295FirstAttemptTruth|readV295FirstAttemptTrends|LATEST_VALID_DAILY_MEMBERSHIP/,'historical first-attempt worker must not derive old dates from current VALID V295 membership');
+assert.match(worker,/listV328HistoricalMembers/,'worker must start from each saved historical daily membership');
+assert.match(worker,/strictAttempt=strict\(l\.attemptSource\)&&Number\(l\.attemptNo\|\|0\)>0/,'only saved V246 strict START evidence may create first-attempt eligibility');
+assert.match(worker,/if\(strictAttempt\)acc\.firstEligible\+\+/);assert.match(worker,/if\(a===1\)\{acc\.a1\+\+;acc\.firstSuccess\+\+;\}/);
+assert.match(worker,/V334_FINAL_SAVED_MEMBERS_STRICT_START_POD/);
+
+for(const token of ['CE','CEAF','ALI1688','WHPP','ALL'])assert.ok(genericCache.includes(`'${token}'`),`generic history cache missing ${token}`);
+assert.match(genericWorker,/readV320HistoricalDailyWithDispatch/);assert.match(genericWorker,/V334_ISOLATED_V320_PERSISTED_HISTORY/);
+assert.match(genericCoord,/fork\(workerPath/);assert.match(genericCoord,/CE_QC_V334_GENERIC_HISTORY_CHILD/);
+assert.match(genericRoute,/V334_GENERIC_CACHE_ONLY/);assert.match(genericRoute,/readV334GenericHistoryCache/);assert.match(genericRoute,/requestV334GenericHistoryBuild/);
+assert.doesNotMatch(genericRoute,/readV320HistoricalDaily|readV320HistoricalDailyWithDispatch/,'web history route must never scan heavy persisted history directly');
+assert.match(genericRoute,/historyAll\|\|from!==to/,'generic history wrapper must preserve normal one-day fast cards');
+
+assert.match(trendOwner,/v334-all-visible-board-saved-history-owner-v3/);assert.match(trendOwner,/AUTO_HISTORY_TYPES=new Set\(\[\.\.\.ATTEMPT_TYPES,\.\.\.GENERIC_TYPES\]\)/);
+assert.match(trendOwner,/GENERIC_TYPES=new Set\(\['CE','CEAF','ALI1688','WHPP','ALL'\]\)/);assert.match(trendOwner,/history=all/);
+assert.match(trendOwner,/claimV272Ownership/);assert.match(trendOwner,/setInterval\(enforceHistoryOwner,750\)/);assert.match(trendOwner,/页面保持可操作/);
+assert.match(firstUi,/v334-saved-history-first-attempt-owner-v1/);assert.match(firstUi,/__CE_QC_V328_HISTORY_PAYLOADS__/);assert.match(firstUi,/cachedHistoryTrend/);assert.match(firstUi,/firstAttemptEligible/);assert.match(firstUi,/firstAttemptSuccess/);
+assert.match(dailyUi,/pageTitle/);assert.match(attemptUi,/pageTitle/);
+
+const canonicalPos=ccslDetail.indexOf('/api/v317/ccsl-recovery'),legacyPos=ccslDetail.indexOf('/api/v33/run-progress');assert.ok(canonicalPos>=0&&legacyPos>canonicalPos,'CCSL detail must read V317 canonical truth before legacy batch progress');
+assert.match(ccslDetail,/truth\.complete===true\|\|truth\.zeroTicketDay===true/);assert.match(ccslDetail,/所选日期没有CCSL有效日报\/票据，不创建订单扫描或轨迹查询任务/);assert.match(ccslDetail,/当日有效日报CCSL为0票，无需启动订单扫描或轨迹查询/);
+assert.match(seven,/stages\.every\(stage => stage\.state === 'done'\)/);assert.match(seven,/if \(stage\.state === 'done'\) return 'success'/);assert.match(seven,/truth\.complete \? 'success' : 'muted'/);
+assert.match(activation,/import '\.\/v334GenericTrendRoutePatch\.js';[\s\S]*import '\.\/v319TrendCacheFastPatch\.js';/,'V334 wrapper must install before V319 registers its concrete route');
+assert.match(inject,/v295-first-attempt-ui\.js\?v=20260827-v334-1/);assert.match(inject,/v320-history-trend-owner\.js\?v=20260827-v334-1/);assert.match(inject,/v328-three-business-attempt-owner\.js\?v=20260827-v334-1/);assert.match(headInject,/v308-dashboard-read-bridge\.js\?v=20260827-v334-1/);
+
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v334-unified-'));process.env.DATA_DIR=root;process.env.DB_FILE=path.join(root,'v334.db');process.env.ACCESS_MODE='LOCAL';process.env.SQLITE_MMAP_BYTES='0';process.env.SQLITE_CACHE_KIB='8192';process.env.NODE_ENV='test';process.env.CE_QC_DISABLE_V246_TRACKING='1';
+const {getDb,closeDb}=await import('../src/db.js');const db=getDb();
+const {writeV329ThreeBusinessDailyCache,readV329ThreeBusinessDailyCache}=await import('../src/v329ThreeBusinessDailyCache.js');
+writeV329ThreeBusinessDailyCache('SHOPEECN',[
+  {reportDate:'2026-07-13',total:10,pod:8,attempt1:5,attempt2:2,attempt3:1,signingDaysSum:20,signingDaysCount:8,firstAttemptEligible:9,firstAttemptSuccess:5,ready:true},
+  {reportDate:'2026-07-14',total:5,pod:3,attempt1:1,attempt2:1,attempt3:0,signingDaysSum:4,signingDaysCount:2,firstAttemptEligible:3,firstAttemptSuccess:1,ready:true}
+],db,'V334_TEST_STRICT_MEMBERS');
+const cn=readV329ThreeBusinessDailyCache('SHOPEECN','2026-07-14',db);assert.deepEqual(cn.dates,['2026-07-13','2026-07-14']);assert.equal(cn.daily[0].firstAttemptEligible,9);assert.equal(cn.daily[0].firstAttemptSuccess,5);assert.equal(cn.daily[0].firstAttemptRate,55.56);assert.equal(cn.daily[0].avgSigningDays,2.5);assert.equal(cn.daily[1].firstAttemptRate,null,'missing strict POD attempt evidence must remain unknown, never fake zero');assert.equal(cn.daily[1].avgSigningDays,2,'partial real signing samples must remain visible');
+const {writeV334GenericHistoryCache,readV334GenericHistoryCache}=await import('../src/v334GenericHistoryCache.js');
+writeV334GenericHistoryCache('CE',[{reportDate:'2026-08-05',total:20,pod:18,ocCurrent:1,sameDayPod:12,ready:true},{reportDate:'2026-08-06',total:25,pod:22,ocCurrent:2,sameDayPod:15,ready:true}],db,'V334_TEST_GENERIC');const ce=readV334GenericHistoryCache('CE','2026-08-06',db);assert.deepEqual(ce.dates,['2026-08-05','2026-08-06']);assert.equal(ce.daily[0].podRate,90);assert.equal(ce.daily[1].ocRate,8);
+closeDb();fs.rmSync(root,{recursive:true,force:true});
+console.log('[V334] history unification smoke passed · CCSL canonical truth first · 8 visible boards keep saved history separate from current-day cards · historical first-attempt uses saved members + strict V246 START evidence');
