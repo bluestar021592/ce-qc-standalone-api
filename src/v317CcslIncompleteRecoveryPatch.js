@@ -3,7 +3,7 @@ import { getDb, nowIso } from './db.js';
 import { createOrRecoverRun, getRunStatus, updateRunLock } from './store.js';
 import { chooseCcslReportDate, ccslRecoveryDecision, V317_CCSL_RECOVERY_POLICY_ID } from './v317CcslRecoveryPolicy.js';
 
-export const V317_CCSL_INCOMPLETE_RECOVERY_ID='2026-08-26-v317-ccsl-restart-auto-recovery-v1';
+export const V317_CCSL_INCOMPLETE_RECOVERY_ID='2026-08-27-v333-selected-date-ccsl-recovery-v1';
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
 
@@ -43,7 +43,7 @@ function ccslMemberCount(db,reportDate,batch=null){
 export function inspectV317CcslRecovery({db=getDb(),reportDate=''}={}){
   const canonical=resolveDate(db);
   const requested=String(reportDate||'').trim();
-  const date=canonical||requested;
+  const date=requested||canonical;
   if(!date)return{ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,reportDate:'',dailyExists:false,sourceTotal:0,complete:false,paused:false,needsResume:false,action:'NO_DAILY',reason:'NO_CCSL_DAILY'};
   const validBatch=latestValidUnifiedBatch(db,date);
   const sourceTotal=ccslMemberCount(db,date,validBatch);
@@ -94,4 +94,4 @@ express.application.post=function v317CcslIncompleteRecoveryPost(route,...handle
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,'current VALID unified CCSL membership survives restart; valid zero-ticket CCSL days close immediately without creating/retrying a run; nonzero incomplete days resume from checkpoints.');
+console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,'explicit selected reportDate wins for UI truth; fallback still uses latest VALID/current persisted date; zero-ticket closure and checkpoint-safe recovery remain unchanged.');
