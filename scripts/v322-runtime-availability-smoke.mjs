@@ -46,10 +46,15 @@ const types=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 for(let i=0;i<types.length;i++)insRow.run(batchId,snapshotId,date,types[i],`V322-${types[i]}`,'PP',types[i],types[i],'日报',i+1,'V322','{}',now);
 const cache=db.prepare('INSERT INTO dashboard_daily_cache(reportDate,businessType,regionCode,metricsJson,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt) VALUES(?,?,?,?,?,?,?,?)');
 for(const type of [...types,'WHPP'])cache.run(date,type,'',JSON.stringify({total:1,pod:1,returned:0,cancelled:0,sameDayPod:1,ocCurrent:0,pending1:0,pending2:0,pending3:0,pendingNonContinuous:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,delivery1:0,deliveryStay:0,provinceOpen:0,attempt1:type.startsWith('SHOPEE')?1:0,attempt2:0,attempt3:0}),snapshotId,'COMPLETED','V322',now);
+// V335 no longer accepts a WHPP row merely because it is stamped with an unrelated
+// unified snapshot. WHPP has its own source ledger, so the fixture must provide that
+// independent daily source explicitly. This locks seven-board isolation instead of
+// resurrecting the retired globally-shared snapshot assumption.
+db.prepare('INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)').run('WHPP',date,'v322-whpp.xlsx',1,JSON.stringify({total:1,pod:1,sameDayPod:1,ocCurrent:0}),now,now);
 
 let started=performance.now();const range=loadRangeDashboard(date,date),rangeMs=performance.now()-started;
 assert.equal(range.queryMode,'V322_SINGLE_DAY_DASHBOARD_CACHE_ONLY');assert.equal(range.dates.length,1);assert.equal(range.dates[0],date);assert.equal(range.sourceTotal,7);assert.ok(rangeMs<500,`single-day period dashboard must stay sub-500ms in fixture, got ${rangeMs.toFixed(1)}ms`);
 started=performance.now();const progress=readV322RunProgress('CCSL',db),progressMs=performance.now()-started;
 assert.equal(progress.progressRule,'V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN');assert.equal(progress.dailyTotal,4);assert.ok(progressMs<200,`tiny run progress must stay sub-200ms in fixture, got ${progressMs.toFixed(1)}ms`);
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V322] runtime availability smoke passed · single-day period=${rangeMs.toFixed(1)}ms · tiny progress=${progressMs.toFixed(1)}ms · no large fact-table scans`);
+console.log(`[V322/V335] runtime availability smoke passed · independent WHPP source + six unified businesses = 7 · single-day period=${rangeMs.toFixed(1)}ms · tiny progress=${progressMs.toFixed(1)}ms · no large fact-table scans`);
