@@ -69,7 +69,7 @@ assert.doesNotMatch(shopeeClient,/getElementById\('ccslRunStatus'\)/,'SHOPEE mus
 assert.doesNotMatch(shopeeClient,/getElementById\('sevenBusinessStageSummary'\)/,'SHOPEE must never acquire the V168 summary DOM');
 assert.doesNotMatch(shopeeClient,/querySelectorAll\('#importPage \.status-pill/,'SHOPEE must not scan/repaint canonical pills');
 
-assert.match(progressUi,/2026-08-27-v334-canonical-v317-ccsl-detail-v1/,'V138 must use canonical V317 truth before legacy progress');
+assert.match(progressUi,/2026-08-27-v338-ccsl-350-scan-50-track-ui-v1/,'V138 must retain canonical V317 truth while publishing the V338 350/50 UI owner');
 assert.match(progressUi,/const selectedReportDate=.*reportDate[\s\S]*topRangeTo[\s\S]*dashboardRangeTo/,'V138 must derive selected date from the current UI');
 assert.match(progressUi,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action:'status',[\s\S]*reportDate:reportDate\|\|''/,'V138 detail must read the same selected-date V317 truth as the green summary');
 const canonicalPos=progressUi.indexOf("/api/v317/ccsl-recovery"),legacyPos=progressUi.indexOf("/api/v33/run-progress");
@@ -83,6 +83,10 @@ assert.match(progressUi,/if\(polling\|\|!page\|\|page\.hidden\)return/,'V138 mus
 assert.doesNotMatch(progressUi,/location\.pathname!=='\/import'/,'SPA URL text must not disable CCSL detail polling');
 assert.match(progressUi,/setInterval\(enforceLastTruth,250\)/,'saved canonical CCSL detail must be re-enforced against late legacy repaint races');
 assert.match(progressUi,/const ccsl=await read\('CCSL'\)/,'CCSL detail owner must not render SHOPEE into the CCSL panel');
+assert.match(progressUi,/batchMax:350/,'V138 scan phase must expose 350-ticket batches');
+assert.match(progressUi,/batchMax:50/,'V138 trajectory phase must expose 50-ticket batches');
+assert.match(progressUi,/单批最大350/,'V138 visible scan detail must say 350 tickets per batch');
+assert.match(progressUi,/单批最大50/,'V138 visible trajectory detail must say 50 tickets per batch');
 
 assert.match(sevenStatus,/2026-08-27-v333-canonical-seven-business-owner-v1/,'V168 must be the one canonical summary owner');
 assert.match(sevenStatus,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical CCSL recovery truth for the selected date');
@@ -95,14 +99,14 @@ assert.match(sevenStatus,/node\.dataset\.v333Owner = 'canonical'/,'summary DOM m
 assert.match(sevenStatus,/}, 2000\);/,'canonical summary must refresh fast enough to defeat stale legacy state without heavy polling');
 
 assert.match(activation,/v317CcslIncompleteRecoveryPatch\.js/,'V317 backend route must remain production-active');
-assert.match(injection,/2026-08-27-v334-canonical-detail-history-ownership-v1/,'V334 response injection must be observable');
+assert.match(injection,/2026-08-27-v334-canonical-detail-history-ownership-v1/,'V334 response injection must remain observable as the compatibility injection owner');
 assert.match(injection,/v311-shopee-recovery-owner\.js\?v=20260827-v333-1/);
 assert.match(injection,/v317-ccsl-recovery-owner\.js\?v=20260827-v333-1/);
 assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must load V334 history hard owner');
 assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v329-1/,'V329 history owner compatibility marker remains source-visible');
 assert.match(injection,/X-CE-QC-V334-UI/,'V334 response header must be observable');
-assert.match(htmlOwner,/2026-08-27-v334-canonical-detail-history-owner-cache-bust-v1/,'HTML owner must publish V334 build');
-assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v334-1/,'browser must load V334 CCSL detail owner');
+assert.match(htmlOwner,/2026-08-27-v334-canonical-detail-history-owner-cache-bust-v1/,'HTML owner must retain V334 compatibility build identity');
+assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'browser must load the V338 CCSL 350/50 detail owner');
 assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260827-v333-1/,'browser must retain V333 canonical seven-business owner');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
@@ -110,4 +114,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V334/V333/V317] canonical CCSL detail smoke passed · V138 reads V317 first · zero-ticket/no-daily cannot fall through to legacy V33 pending 0/0');
+console.log('[V338/V334/V333/V317] canonical CCSL detail smoke passed · V138 reads V317 first · scan=350 · trajectory=50 · zero-ticket/no-daily cannot fall through to legacy V33 pending 0/0');
