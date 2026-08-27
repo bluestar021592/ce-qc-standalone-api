@@ -10,14 +10,15 @@ import {
 } from './v314ShopeeThroughputCore.js';
 export * from './pipeline.js';
 
-export const V314_PIPELINE_THROUGHPUT_ID='2026-08-27-v343-all-business-throughput-pipeline-v1';
-// Compatibility name only; CCSL is no longer owned by a separate runtime core.
+export const V314_PIPELINE_THROUGHPUT_ID='2026-08-27-v343-all-business-throughput-pipeline-v2';
 export const V339_CCSL_PIPELINE_THROUGHPUT_ID=V314_PIPELINE_THROUGHPUT_ID;
 
 export async function runQcPipeline(options={}){
   const state=options.state||{};
   if(!options.client)return runOriginalQcPipeline(options);
-  const client=createUnifiedThroughputClient(state,options.client);
+  // Production policy is explicit instead of inheriting an old TRACK_CONCURRENCY=1
+  // environment left by an earlier CCSL-only runtime.
+  const client=createUnifiedThroughputClient(state,options.client,{trackConcurrency:4});
   return runOriginalQcPipeline({...options,client});
 }
 
@@ -28,12 +29,12 @@ console.info('[CE-QC][V343_ALL_BUSINESS_THROUGHPUT]',JSON.stringify({
   shopeeScanConcurrency:V314_CONFIRM_CONCURRENCY,
   ccslScanRemoteConcurrency:V339_CCSL_CONFIRM_CONCURRENCY,
   trackBatchSize:50,
-  trackConcurrency:V314_EVENT_CONCURRENCY,
+  trackConcurrency:4,
   exceptionBatchSize:50,
   exceptionConcurrency:V314_EXCEPTION_CONCURRENCY,
   ccslConfirmHardBudgetMs:V339_CCSL_CONFIRM_HARD_BUDGET_MS,
   policy:'ONE_ACTIVE_THROUGHPUT_OWNER_ALL_BUSINESSES_SCAN_350_TRACK_50_X4_CCSL_CONFIRM_SINGLE_REMOTE_LANE'
 }));
-// Stable startup labels retained for old diagnostics; both point to the same owner.
+void V314_EVENT_CONCURRENCY;
 console.info('[CE-QC][V314_SHOPEE_THROUGHPUT]',V314_PIPELINE_THROUGHPUT_ID);
 console.info('[CE-QC][V340_CCSL_THROUGHPUT]',V314_PIPELINE_THROUGHPUT_ID);
