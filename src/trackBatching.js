@@ -4,6 +4,8 @@ const DEFAULT_TRANSIENT_DELAY_MS = Math.max(200, Math.min(5000, Number(process.e
 const MIN_BATCH_TIME_BUDGET_MS = Math.max(250, Math.min(30000, Number(process.env.CE_MIN_BATCH_BUDGET_MS || 5000)));
 const DEFAULT_BATCH_TIME_BUDGET_MS = Math.max(MIN_BATCH_TIME_BUDGET_MS, Math.min(180000, Number(process.env.CE_TRACK_BATCH_BUDGET_MS || 90000)));
 const MAX_REQUEST_WINDOW_MS = 15000;
+const CONFIRM_HARD_BUDGET_MS = Math.max(100, Math.min(30000, Number(process.env.CE_CONFIRM_HARD_BUDGET_MS || 18000)));
+const CONFIRM_MAX_TRANSIENT_RETRIES = 1;
 const TRACK_FALLBACK_SIZES = Object.freeze([25, 10, 5, 1]);
 
 export function splitTrackBatches(shipmentCodes = [], batchSize = TRACK_QUERY_BATCH_SIZE) {
@@ -142,7 +144,16 @@ export async function queryBatchWithFallback({
 }) {
   const original = [...batch];
   const fallback = effectiveFallbackSizes(apiName, fallbackSizes);
-  const effectiveBudgetMs = Math.max(MIN_BATCH_TIME_BUDGET_MS, Math.min(180000, Number(batchTimeBudgetMs || DEFAULT_BATCH_TIME_BUDGET_MS)));
+  const isConfirmQuery = /confirm-query/i.test(String(apiName || ''));
+  const requestedBudgetMs = Math.max(MIN_BATCH_TIME_BUDGET_MS, Math.min(180000, Number(batchTimeBudgetMs || DEFAULT_BATCH_TIME_BUDGET_MS)));
+  // V337: confirm-query is the first-stage gate for thousands of CCSL tickets. It
+  // must never inherit a stale 90s module default just because preload order changed.
+  // Cap it here, inside the batching core, so one dead DNS/TLS/socket promise cannot
+  // leave the whole daily run apparently frozen on a single batch.
+  const effectiveBudgetMs = isConfirmQuery ? Math.min(requestedBudgetMs, CONFIRM_HARD_BUDGET_MS) : requestedBudgetMs;
+  const effectiveTransientRetries = isConfirmQuery
+    ? Math.min(CONFIRM_MAX_TRANSIENT_RETRIES, Math.max(0, Number(transientRetries || 0)))
+    : transientRetries;
   const effectiveDeadlineAt = deadlineAt || (Date.now() + effectiveBudgetMs);
   const minWindow = requestWindowMs(effectiveBudgetMs);
   try {
@@ -152,7 +163,7 @@ export async function queryBatchWithFallback({
     // several times before treating the waybills as failed. A wall-clock budget is
     // shared by the original request and every fallback child so one bad batch can
     // never freeze thousands of later waybills.
-    const events = await withTransientRetry(query, original, onLog, transientRetries, transientDelayMs, apiName, effectiveDeadlineAt, effectiveBudgetMs);
+    const events = await withTransientRetry(query, original, onLog, effectiveTransientRetries, transientDelayMs, apiName, effectiveDeadlineAt, effectiveBudgetMs);
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'success', resultCount: (events || []).length }, onLog);
     return { successes: [{ batch: original, events: events || [] }], failures: [] };
   } catch (error) {
@@ -188,7 +199,7 @@ export async function queryBatchWithFallback({
         onAttempt,
         apiName,
         fallbackSizes: fallback.filter(size => size < fallbackSize),
-        transientRetries,
+        transientRetries: effectiveTransientRetries,
         transientDelayMs,
         batchTimeBudgetMs: effectiveBudgetMs,
         deadlineAt: effectiveDeadlineAt
