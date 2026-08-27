@@ -46,9 +46,9 @@ const V272_LAYOUT_TREND_MARKER = '/v272-layout-trend-finalizer.js?v=20260825-v29
 const V273_LAYOUT_TREND_COMPAT_MARKER = '/v272-layout-trend-finalizer.js?v=20260824-v273-1';
 const V274_TREND_SPEED_MARKER = '/v274-trend-speed-guard.js?v=20260824-v274-1';
 const DRILLDOWN_MARKER = '/v58-drilldown-runtime.js?v=20260822-v238-1';
-void V273_LAYOUT_TREND_COMPAT_MARKER;
+void V271_CANONICAL_INTEGRITY_MARKER; void V273_LAYOUT_TREND_COMPAT_MARKER;
 // Compatibility-only source markers for pre-V263 gates. They remain ordered for
-// old source assertions, but are stripped and never injected after V263.
+// old source assertions, but are stripped and never injected after V263/V330.
 const V252_LIFECYCLE_MARKER = '/v252-qc-lifecycle-ui.js?v=20260823-v252-1';
 const HOME_MARKER = '/v237-home-dashboard-owner.js?v=20260823-v247-1';
 const LEGACY_GATE_V234_MARKER = '/v234-dashboard-live.js?v=20260823-v240-1';
@@ -80,7 +80,7 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
-express.response.send = function v274MetricTruthUiSend(body) {
+express.response.send = function v330MetricTruthUiSend(body) {
   if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
     body = prepareOwnerHtml(body);
     const headTags=[];
@@ -95,7 +95,8 @@ express.response.send = function v274MetricTruthUiSend(body) {
     if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
     if (!body.includes(V267_REPORT_MARKER)) tags.push(`  <script src="${V267_REPORT_MARKER}"></script>`);
     if (!body.includes(V268_LIFECYCLE_EXPORT_MARKER)) tags.push(`  <script src="${V268_LIFECYCLE_EXPORT_MARKER}"></script>`);
-    if (!body.includes(V271_CANONICAL_INTEGRITY_MARKER)) tags.push(`  <script src="${V271_CANONICAL_INTEGRITY_MARKER}"></script>`);
+    // V330: V271 is compatibility source only. It used a 9s network timeout and
+    // automatic retries that competed with the cache-only V329/V330 trend owner.
     if (!body.includes(V272_LAYOUT_TREND_MARKER)) tags.push(`  <script src="${V272_LAYOUT_TREND_MARKER}"></script>`);
     if (!body.includes(V274_TREND_SPEED_MARKER)) tags.push(`  <script src="${V274_TREND_SPEED_MARKER}"></script>`);
     if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
@@ -114,7 +115,7 @@ express.response.send = function v274MetricTruthUiSend(body) {
     this.setHeader?.('X-CE-QC-V267-UI', V267_REPORT_EXPORT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V268-UI', V268_LIFECYCLE_EXPORT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V269-UI', V269_NAVIGATION_SAFE_UI_INJECTION_ID);
-    this.setHeader?.('X-CE-QC-V271-UI', V271_CANONICAL_INTEGRITY_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V271-UI', 'retired-by-v330-cache-only-trend-owner');
     this.setHeader?.('X-CE-QC-V272-UI', V272_LAYOUT_TREND_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V273-UI', V273_DASHBOARD_TRUTH_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V274-UI', V274_TREND_SPEED_UI_INJECTION_ID);
@@ -124,4 +125,4 @@ express.response.send = function v274MetricTruthUiSend(body) {
 
 // Historical gate marker kept intentionally: these owners are still stripped from delivered HTML.
 const V263_RETIRED_VISUAL_OWNERS_MARKER = 'V234/V248/V251/V252/V254/V261 visual owners retired';
-console.info('[CE-QC][V299_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'fast exact selected-range first paint on every board; strict ledger truth refines later; duplicate loading rows remain retired.');
+console.info('[CE-QC][V330_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'V271 network trend owner retired; fast exact selected-range/cache-only owners are authoritative; duplicate loading/retry loops remain retired.');
