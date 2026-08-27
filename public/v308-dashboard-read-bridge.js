@@ -1,6 +1,6 @@
 (function installV334DashboardReadBridge(global){
   if(global.__CE_QC_V308_DASHBOARD_READ_BRIDGE__)return;
-  const VERSION='2026-08-27-v334-three-business-cache-ui-spa-title-v1',SPECIAL=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
+  const VERSION='2026-08-27-v334-three-business-cache-ui-spa-title-v1',V329_COMPAT_VERSION='2026-08-27-v329-three-business-cache-ui-v1',SPECIAL=new Set(['TBKH','SHOPEECN','SHOPEEVN']);void V329_COMPAT_VERSION;
   const nativeFetch=global.fetch.bind(global),inFlight=new Map();let tableTimer=null,lastTableKey='',evidenceTimer=null,evidenceWatchKey='',evidencePolls=0,evidenceCacheVersion=0;
   const date=v=>String(v||'').slice(0,10),num=v=>Number.isFinite(Number(v))?Number(v):0,fmt=v=>Number.isFinite(Number(v))?Number(v).toLocaleString('zh-CN'):'—',pct=v=>v===null||v===undefined||!Number.isFinite(Number(v))?'—':`${Number(v).toFixed(2)}%`,esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
   const labelOf=t=>t==='TBKH'?'TBKH':t==='SHOPEECN'?'SHOPEE CN':'SHOPEE VN';
