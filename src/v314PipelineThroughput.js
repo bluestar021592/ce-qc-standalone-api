@@ -15,7 +15,7 @@ import {
 export * from './pipeline.js';
 
 export const V314_PIPELINE_THROUGHPUT_ID = '2026-08-26-v314-shopee-prefetch-pipeline-v1';
-export const V339_CCSL_PIPELINE_THROUGHPUT_ID = '2026-08-27-v339-ccsl-350x2-prefetch-track50x4-v2';
+export const V339_CCSL_PIPELINE_THROUGHPUT_ID = '2026-08-27-v340-ccsl-350-single-lane-rolling-track50x4-v1';
 
 export async function runQcPipeline(options = {}) {
   const state = options.state || {};
@@ -38,13 +38,14 @@ console.info('[CE-QC][V314_SHOPEE_THROUGHPUT]', JSON.stringify({
   policy: 'BOUNDED_PREFETCH_KEEP_NATIVE_BATCH_CHECKPOINT_RETRY_SEMANTICS'
 }));
 
-console.info('[CE-QC][V339_CCSL_THROUGHPUT]', JSON.stringify({
+console.info('[CE-QC][V340_CCSL_THROUGHPUT]', JSON.stringify({
   id: V339_CCSL_PIPELINE_THROUGHPUT_ID,
   core: V339_CCSL_THROUGHPUT_CORE_ID,
   scanBatchSize: 350,
-  scanConcurrency: V339_CCSL_CONFIRM_CONCURRENCY,
+  scanRemoteConcurrency: V339_CCSL_CONFIRM_CONCURRENCY,
+  rollingPrefetch: true,
   trackBatchSize: 50,
   trackConcurrency: Math.max(1, Number(process.env.TRACK_CONCURRENCY || 4)),
   confirmHardBudgetMs: V339_CCSL_CONFIRM_HARD_BUDGET_MS,
-  policy: 'CCSL_CONFIRM_350_X2_HARD_BOUNDED_PREFETCH_ORDERED_NATIVE_COMMIT_TRACK_50_X4_FAIL_FORWARD'
+  policy: 'CCSL_CONFIRM_350_SINGLE_REMOTE_LANE_OVERLAP_LOCAL_CHECKPOINT_TRACK_50_X4_FAIL_FORWARD'
 }));
