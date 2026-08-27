@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
-export const V284_DAILY_MEMBERSHIP_TRUTH_ID = '2026-08-24-v284-daily-membership-ledger-truth-v1';
+export const V284_DAILY_MEMBERSHIP_TRUTH_ID = '2026-08-27-v335-per-business-latest-valid-membership-v1';
 export const V284_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const UNIFIED_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
 const CCSL_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688']);
@@ -50,18 +50,24 @@ function validRange(fromDate,toDate) {
 function queryUnifiedRegionFacts(from,to,db) {
   ensureV246TrackingSchema(db);
   const rows=db.prepare(`
-    WITH ranked AS (
-      SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
-             ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.batchId DESC) rn
+    WITH candidates AS (
+      SELECT DISTINCT b.reportDate,b.snapshotId,b.createdAt,b.batchId,u.businessType
       FROM unified_import_batches b
+      JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate
       WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
+        AND u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
+        AND TRIM(COALESCE(u.shipmentCode,''))<>''
+    ), ranked AS (
+      SELECT reportDate,snapshotId,createdAt,batchId,businessType,
+             ROW_NUMBER() OVER(PARTITION BY reportDate,businessType ORDER BY createdAt DESC,batchId DESC) rn
+      FROM candidates
     ), latest AS (
-      SELECT reportDate,snapshotId FROM ranked WHERE rn=1
+      SELECT reportDate,snapshotId,businessType FROM ranked WHERE rn=1
     ), valid AS (
-      SELECT DISTINCT l.reportDate,u.businessType,UPPER(TRIM(u.shipmentCode)) shipmentCode,
+      SELECT DISTINCT l.reportDate,l.businessType,UPPER(TRIM(u.shipmentCode)) shipmentCode,
         CASE WHEN UPPER(COALESCE(u.regionCode,''))='PP' THEN 'PP' WHEN UPPER(COALESCE(u.regionCode,''))='PV' THEN 'PV' ELSE 'UNKNOWN' END regionCode
-      FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate
-      WHERE u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN') AND TRIM(COALESCE(u.shipmentCode,''))<>''
+      FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate AND u.businessType=l.businessType
+      WHERE TRIM(COALESCE(u.shipmentCode,''))<>''
     ), joined AS (
       SELECT v.*,
         CASE WHEN l.shipmentCode IS NOT NULL OR cf.shipmentCode IS NOT NULL OR sf.shipmentCode IS NOT NULL THEN 1 ELSE 0 END matched,
@@ -136,11 +142,16 @@ function queryWhppRegionFacts(from,to,db) {
   let rows=[];
   try {
     rows=db.prepare(`
-      WITH ranked AS (
-        SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
-               ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.batchId DESC) rn
+      WITH ceaf_candidates AS (
+        SELECT DISTINCT b.reportDate,b.snapshotId,b.createdAt,b.batchId
         FROM unified_import_batches b
-        WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
+        JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate
+        WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ? AND u.businessType='CEAF'
+          AND TRIM(COALESCE(u.shipmentCode,''))<>''
+      ), ranked AS (
+        SELECT reportDate,snapshotId,createdAt,batchId,
+               ROW_NUMBER() OVER(PARTITION BY reportDate ORDER BY createdAt DESC,batchId DESC) rn
+        FROM ceaf_candidates
       ), latest AS (SELECT reportDate,snapshotId FROM ranked WHERE rn=1), valid AS (
         SELECT DISTINCT p.reportDate,UPPER(TRIM(p.shipmentCode)) shipmentCode
         FROM business_daily_parse_rows p
@@ -173,13 +184,28 @@ function queryWhppRegionFacts(from,to,db) {
   return rows.map(row=>finishFact({...emptyFact('WHPP',String(row.reportDate||''),'UNKNOWN'),...row}));
 }
 
-function sourceDates(from,to,includeWhpp,db) {
-  const rows=includeWhpp?db.prepare(`SELECT reportDate FROM (SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate BETWEEN ? AND ? UNION SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ?) ORDER BY reportDate`).all(from,to,from,to):db.prepare(`SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate BETWEEN ? AND ? ORDER BY reportDate`).all(from,to);
-  return rows.map(row=>String(row.reportDate||'')).filter(Boolean);
+function wantedTypes(type) {
+  const t=String(type||'ALL').toUpperCase();
+  if(t==='CCSL')return [...CCSL_TYPES];
+  if(t==='SHOPEE')return [...SHOPEE_TYPES];
+  if(UNIFIED_TYPES.includes(t))return [t];
+  return [...UNIFIED_TYPES];
+}
+function sourceDates(from,to,type,db) {
+  const t=String(type||'ALL').toUpperCase();
+  if(t==='WHPP') return db.prepare(`SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate`).all(from,to).map(row=>String(row.reportDate||'')).filter(Boolean);
+  const types=wantedTypes(t),marks=types.map(()=>'?').join(',');
+  const unified=db.prepare(`SELECT DISTINCT b.reportDate FROM unified_import_batches b JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ? AND u.businessType IN (${marks}) AND TRIM(COALESCE(u.shipmentCode,''))<>'' ORDER BY b.reportDate`).all(from,to,...types).map(row=>String(row.reportDate||'')).filter(Boolean);
+  if(t!=='ALL')return unified;
+  const whpp=db.prepare(`SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ?`).all(from,to).map(row=>String(row.reportDate||'')).filter(Boolean);
+  return [...new Set([...unified,...whpp])].sort();
 }
 function recentDates(to,type,limit,db) {
-  const includeWhpp=type==='WHPP'||type==='ALL';
-  const rows=includeWhpp?db.prepare(`SELECT reportDate FROM (SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate<=? UNION SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate<=?) ORDER BY reportDate DESC LIMIT ?`).all(to,to,limit):db.prepare(`SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate<=? ORDER BY reportDate DESC LIMIT ?`).all(to,limit);
+  const t=String(type||'ALL').toUpperCase();
+  if(t==='WHPP')return db.prepare(`SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate<=? ORDER BY reportDate DESC LIMIT ?`).all(to,limit).map(row=>String(row.reportDate||'')).filter(Boolean).sort();
+  const types=wantedTypes(t),marks=types.map(()=>'?').join(',');
+  if(t!=='ALL')return db.prepare(`SELECT DISTINCT b.reportDate FROM unified_import_batches b JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate WHERE b.status='VALID' AND b.reportDate<=? AND u.businessType IN (${marks}) AND TRIM(COALESCE(u.shipmentCode,''))<>'' ORDER BY b.reportDate DESC LIMIT ?`).all(to,...types,limit).map(row=>String(row.reportDate||'')).filter(Boolean).sort();
+  const rows=db.prepare(`SELECT reportDate FROM (SELECT DISTINCT b.reportDate reportDate FROM unified_import_batches b JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate WHERE b.status='VALID' AND b.reportDate<=? AND u.businessType IN (${marks}) AND TRIM(COALESCE(u.shipmentCode,''))<>'' UNION SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate<=?) ORDER BY reportDate DESC LIMIT ?`).all(to,...types,to,limit);
   return rows.map(row=>String(row.reportDate||'')).filter(Boolean).sort();
 }
 
@@ -196,7 +222,7 @@ export function readV284DailyFacts(fromDate,toDate,db=getDb()) {
 export function readV284DashboardTrends(businessType='ALL',fromDate='',toDate='',db=getDb()) {
   const type=String(businessType||'ALL').toUpperCase(); const to=dateKey(toDate),from=dateKey(fromDate)||to;
   if(!['ALL','CCSL','SHOPEE',...V284_TYPES].includes(type))throw new Error('V284业务板块无效'); if(!from||!to||from>to)throw new Error('V284日期范围无效');
-  const dates=from===to?recentDates(to,type,7,db):sourceDates(from,to,type==='WHPP'||type==='ALL',db);
+  const dates=from===to?recentDates(to,type,7,db):sourceDates(from,to,type,db);
   if(!dates.length)return{ok:true,id:V284_DAILY_MEMBERSHIP_TRUTH_ID,businessType:type,dates:[],daily:[],ticket:[],pod:[],podRate:[],oc:[],ocRate:[],sameDayPod:[],sameDayPodRate:[],coverageRate:[],missingDates:[]};
   const facts=readV284DailyFacts(dates[0],dates.at(-1),db); const map=new Map(facts.map(row=>[`${row.reportDate}|${row.businessType}`,row]));
   const pick=(d,t)=>map.get(`${d}|${t}`)||emptyFact(t,d);
@@ -207,17 +233,17 @@ export function readV284DashboardTrends(businessType='ALL',fromDate='',toDate=''
     return mergeFacts('ALL',d,[...UNIFIED_TYPES.map(t=>pick(d,t)),pick(d,'WHPP')]);
   });
   const val=(r,k)=>r.ready?n(r[k]):null;
-  return {ok:true,id:V284_DAILY_MEMBERSHIP_TRUTH_ID,businessType:type,fromDate:dates[0],toDate:dates.at(-1),dates,daily,ticket:daily.map(r=>n(r.total)),pod:daily.map(r=>val(r,'pod')),podRate:daily.map(r=>val(r,'podRate')),oc:daily.map(r=>val(r,'ocCurrent')),ocRate:daily.map(r=>val(r,'ocRate')),sameDayPod:daily.map(r=>val(r,'sameDayPod')),sameDayPodRate:daily.map(r=>val(r,'sameDayPodRate')),coverageRate:daily.map(r=>r.coverageRate),missingDates:daily.filter(r=>!r.ready).map(r=>r.reportDate),source:'LATEST_VALID_DAILY_MEMBERSHIP_JOIN_V246_LEDGER_FINAL_FALLBACK',definitions:{podRate:'当前已POD/当日日报成员总票',ocRate:'当前真实OC/当日日报成员总票',sameDayPodRate:'日报当日完成POD/当日日报成员总票'}};
+  return {ok:true,id:V284_DAILY_MEMBERSHIP_TRUTH_ID,businessType:type,fromDate:dates[0],toDate:dates.at(-1),dates,daily,ticket:daily.map(r=>n(r.total)),pod:daily.map(r=>val(r,'pod')),podRate:daily.map(r=>val(r,'podRate')),oc:daily.map(r=>val(r,'ocCurrent')),ocRate:daily.map(r=>val(r,'ocRate')),sameDayPod:daily.map(r=>val(r,'sameDayPod')),sameDayPodRate:daily.map(r=>val(r,'sameDayPodRate')),coverageRate:daily.map(r=>r.coverageRate),missingDates:daily.filter(r=>!r.ready).map(r=>r.reportDate),source:'PER_BUSINESS_LATEST_VALID_DAILY_MEMBERSHIP_JOIN_V246_LEDGER_FINAL_FALLBACK',definitions:{podRate:'当前已POD/当日日报成员总票',ocRate:'当前真实OC/当日日报成员总票',sameDayPodRate:'日报当日完成POD/当日日报成员总票'}};
 }
 export function readV284ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate='',options={},db=getDb()) {
   const type=String(businessType||'').toUpperCase(),to=dateKey(toDate),from=dateKey(fromDate)||to; if(!SHOPEE_TYPES.includes(type))throw new Error('V284仅支持SHOPEECN/SHOPEEVN'); if(!from||!to||from>to)throw new Error('V284日期范围无效');
-  const exact=options?.exact===true,includeRegions=options?.includeRegions!==false; const dates=exact?[to]:(from===to?recentDates(to,type,7,db):sourceDates(from,to,false,db));
+  const exact=options?.exact===true,includeRegions=options?.includeRegions!==false; const dates=exact?[to]:(from===to?recentDates(to,type,7,db):sourceDates(from,to,type,db));
   if(!dates.length)return{ok:true,readId:V284_DAILY_MEMBERSHIP_TRUTH_ID,businessType:type,dates:[],daily:[],ticket:[],pod:[],podRate:[],avgPodDays:[],oc:[],ocRate:[],attempt1:[],attempt2:[],attempt3:[],attempt1Rate:[],attempt2Rate:[],attempt3Rate:[],attemptUnknown:[],attemptCoverageRate:[],ledgerReady:[],regionsIncluded:includeRegions,exact};
   const regionFacts=readV284RegionFacts(dates[0],dates.at(-1),db).rows.filter(row=>row.businessType===type&&dates.includes(row.reportDate));
   const daily=dates.map(date=>{
     const regions=regionFacts.filter(row=>row.reportDate===date); const all=mergeFacts(type,date,regions);
     const regionMap={}; if(includeRegions)for(const region of ['PP','PV','UNKNOWN'])regionMap[region]=finishFact({...emptyFact(type,date,region),...(regions.find(r=>r.regionCode===region)||{})});
-    return {...all,oc:all.ocCurrent,ledgerReady:all.ready,ledgerCount:all.matched,cacheTotal:all.total,recoveredExtra:0,regions:regionMap,evidenceSource:all.ready?'V284_DAILY_MEMBERSHIP_V246_LEDGER':'V284_MEMBERSHIP_COVERAGE_INCOMPLETE'};
+    return {...all,oc:all.ocCurrent,ledgerReady:all.ready,ledgerCount:all.matched,cacheTotal:all.total,recoveredExtra:0,regions:regionMap,evidenceSource:all.ready?'V284_PER_BUSINESS_DAILY_MEMBERSHIP_V246_LEDGER':'V284_MEMBERSHIP_COVERAGE_INCOMPLETE'};
   });
   return {ok:true,readId:V284_DAILY_MEMBERSHIP_TRUTH_ID,businessType:type,fromDate:dates[0],toDate:dates.at(-1),dates,daily,regionsIncluded:includeRegions,exact,ticket:daily.map(r=>r.total),pod:daily.map(r=>r.ready?r.pod:null),podRate:daily.map(r=>r.ready?r.podRate:null),avgPodDays:daily.map(r=>r.ready?r.avgPodDays:null),oc:daily.map(r=>r.ready?r.ocCurrent:null),ocRate:daily.map(r=>r.ready?r.ocRate:null),attempt1:daily.map(r=>r.ready?r.attempt1:null),attempt2:daily.map(r=>r.ready?r.attempt2:null),attempt3:daily.map(r=>r.ready?r.attempt3:null),attempt1Rate:daily.map(r=>r.ready?r.attempt1Rate:null),attempt2Rate:daily.map(r=>r.ready?r.attempt2Rate:null),attempt3Rate:daily.map(r=>r.ready?r.attempt3Rate:null),attemptUnknown:daily.map(r=>r.ready?r.attemptUnknown:null),attemptCoverageRate:daily.map(r=>r.ready?r.attemptCoverageRate:null),ledgerReady:daily.map(r=>r.ready),coverageRate:daily.map(r=>r.coverageRate)};
 }
@@ -225,10 +251,10 @@ export function summarizeV284Range(fromDate,toDate,db=getDb()) {
   const {from,to}=validRange(fromDate,toDate); const daily=readV284DailyFacts(from,to,db); const byType={};
   for(const type of UNIFIED_TYPES)byType[type]=mergeFacts(type,to,daily.filter(row=>row.businessType===type));
   const ccsl=mergeFacts('CCSL',to,CCSL_TYPES.map(type=>byType[type])); const shopee=mergeFacts('SHOPEE',to,SHOPEE_TYPES.map(type=>byType[type]));
-  const dates=sourceDates(from,to,false,db); const missingDates=dates.filter(date=>UNIFIED_TYPES.some(type=>{const row=daily.find(r=>r.reportDate===date&&r.businessType===type);return row&&row.total>0&&!row.ready;}));
+  const dates=sourceDates(from,to,'ALL',db); const missingDates=dates.filter(date=>UNIFIED_TYPES.some(type=>{const row=daily.find(r=>r.reportDate===date&&r.businessType===type);return row&&row.total>0&&!row.ready;}));
   return {id:V284_DAILY_MEMBERSHIP_TRUTH_ID,fromDate:from,toDate:to,dates,daily,byType,ccsl,shopee,sourceTotal:ccsl.total+shopee.total,analyzedTotal:ccsl.matched+shopee.matched,analysisPending:Math.max(0,ccsl.total+shopee.total-ccsl.matched-shopee.matched),missingDates,analysisComplete:missingDates.length===0&&(ccsl.matched+shopee.matched)>=ccsl.total+shopee.total};
 }
 export function invalidateV284DailyMembershipTruth(){cache.clear();}
 
 globalThis.__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__=invalidateV284DailyMembershipTruth;
-console.info('[CE-QC][V284_DAILY_MEMBERSHIP]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'daily denominator=latest VALID report membership; WHPP excludes same-day latest-VALID CEAF overlap; status truth=V246 ledger first, legacy final rows fallback; firstReportDate is no longer used as daily cohort membership.');
+console.info('[CE-QC][V284_DAILY_MEMBERSHIP]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'daily denominator=latest VALID report membership PER BUSINESS per date; unrelated same-day imports cannot zero another business; WHPP excludes overlap against the latest VALID CEAF report for that date; status truth=V246 ledger first, legacy final rows fallback.');
