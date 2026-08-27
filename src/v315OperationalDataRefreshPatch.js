@@ -5,14 +5,13 @@ import { CEClient } from './ceClient.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { ensureV246TrackingSchema, applyV246StrictAttemptEvidence } from './v246TrackingLedgerCore.js';
 
-export const V315_OPERATIONAL_DATA_REFRESH_ID = '2026-08-26-v315-bounded-ccsl-export-refresh-v1';
+export const V315_OPERATIONAL_DATA_REFRESH_ID = '2026-08-27-v338-bounded-ccsl-export-refresh-350-50-v1';
 
-// V315 is imported before the carryover scheduler. That scheduler imports the
-// pipeline very early, so the batch policy must be fixed here before pipeline.js
-// can snapshot its module constants. 100-ticket confirm batches give visible,
-// bounded progress and failed batches remain explicit retry-center records.
-process.env.ORDER_BATCH_SIZE = '100';
-process.env.CONFIRM_QUERY_BATCH_SIZE = '100';
+// V315 is imported before the carryover scheduler. Keep its environment policy
+// identical to the production CCSL pipeline so no module-evaluation order can
+// shrink order scanning back to 100 tickets: order/confirm scan=350, trajectory=50.
+process.env.ORDER_BATCH_SIZE = '350';
+process.env.CONFIRM_QUERY_BATCH_SIZE = '350';
 process.env.REQUEST_TIMEOUT_MS = '12000';
 process.env.CONFIRM_QUERY_TIMEOUT_MS = '12000';
 process.env.CONFIRM_QUERY_BATCH_BUDGET_MS = '25000';
@@ -210,10 +209,11 @@ express.application.get=function v315OperationalGet(pathValue,...handlers){
 console.info('[CE-QC][V315_OPERATIONAL_DATA_REFRESH]',JSON.stringify({
   id:V315_OPERATIONAL_DATA_REFRESH_ID,
   orderBatchSize:Number(process.env.ORDER_BATCH_SIZE),
+  confirmQueryBatchSize:Number(process.env.CONFIRM_QUERY_BATCH_SIZE),
   confirmTimeoutMs:Number(process.env.CONFIRM_QUERY_TIMEOUT_MS),
   requestTimeoutMs:Number(process.env.REQUEST_TIMEOUT_MS),
   trackConcurrency:Number(process.env.TRACK_CONCURRENCY),
   strictEvidenceChunk:TRACK_CHUNK,
   strictEvidenceConcurrency:TRACK_CONCURRENCY,
-  policy:'BOUNDED_PROGRESS_FAIL_FORWARD_RECHECK_INCOMPLETE_TERMINAL_POD'
+  policy:'CCSL_SCAN_350_TRACK_50_BOUNDED_PROGRESS_FAIL_FORWARD_RECHECK_INCOMPLETE_TERMINAL_POD'
 }));
