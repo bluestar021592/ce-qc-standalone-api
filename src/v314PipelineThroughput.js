@@ -1,51 +1,39 @@
 import { runQcPipeline as runOriginalQcPipeline } from './pipeline.js';
 import {
-  createShopeeThroughputClient,
-  V314_SHOPEE_THROUGHPUT_CORE_ID,
+  createUnifiedThroughputClient,
+  V314_ALL_BUSINESS_THROUGHPUT_CORE_ID,
   V314_CONFIRM_CONCURRENCY,
   V314_EVENT_CONCURRENCY,
-  V314_EXCEPTION_CONCURRENCY
-} from './v314ShopeeThroughputCore.js';
-import {
-  createCcslThroughputClient,
-  V339_CCSL_THROUGHPUT_CORE_ID,
+  V314_EXCEPTION_CONCURRENCY,
   V339_CCSL_CONFIRM_CONCURRENCY,
   V339_CCSL_CONFIRM_HARD_BUDGET_MS
-} from './v339CcslThroughputCore.js';
+} from './v314ShopeeThroughputCore.js';
 export * from './pipeline.js';
 
-export const V314_PIPELINE_THROUGHPUT_ID = '2026-08-26-v314-shopee-prefetch-pipeline-v1';
-export const V339_CCSL_PIPELINE_THROUGHPUT_ID = '2026-08-27-v340-ccsl-350-single-lane-rolling-track50x4-v1';
+export const V314_PIPELINE_THROUGHPUT_ID='2026-08-27-v343-all-business-throughput-pipeline-v1';
+// Compatibility name only; CCSL is no longer owned by a separate runtime core.
+export const V339_CCSL_PIPELINE_THROUGHPUT_ID=V314_PIPELINE_THROUGHPUT_ID;
 
-export async function runQcPipeline(options = {}) {
-  const state = options.state || {};
-  if (!options.client) return runOriginalQcPipeline(options);
-  const isShopee = String(state.businessType || '').toUpperCase() === 'SHOPEE';
-  const client = isShopee
-    ? createShopeeThroughputClient(state, options.client)
-    : createCcslThroughputClient(state, options.client);
-  return runOriginalQcPipeline({ ...options, client });
+export async function runQcPipeline(options={}){
+  const state=options.state||{};
+  if(!options.client)return runOriginalQcPipeline(options);
+  const client=createUnifiedThroughputClient(state,options.client);
+  return runOriginalQcPipeline({...options,client});
 }
 
-console.info('[CE-QC][V314_SHOPEE_THROUGHPUT]', JSON.stringify({
-  id: V314_PIPELINE_THROUGHPUT_ID,
-  core: V314_SHOPEE_THROUGHPUT_CORE_ID,
-  confirmConcurrency: V314_CONFIRM_CONCURRENCY,
-  eventConcurrency: V314_EVENT_CONCURRENCY,
-  exceptionConcurrency: V314_EXCEPTION_CONCURRENCY,
-  eventBatchSize: 50,
-  exceptionBatchSize: 50,
-  policy: 'BOUNDED_PREFETCH_KEEP_NATIVE_BATCH_CHECKPOINT_RETRY_SEMANTICS'
+console.info('[CE-QC][V343_ALL_BUSINESS_THROUGHPUT]',JSON.stringify({
+  id:V314_PIPELINE_THROUGHPUT_ID,
+  core:V314_ALL_BUSINESS_THROUGHPUT_CORE_ID,
+  scanBatchSize:350,
+  shopeeScanConcurrency:V314_CONFIRM_CONCURRENCY,
+  ccslScanRemoteConcurrency:V339_CCSL_CONFIRM_CONCURRENCY,
+  trackBatchSize:50,
+  trackConcurrency:V314_EVENT_CONCURRENCY,
+  exceptionBatchSize:50,
+  exceptionConcurrency:V314_EXCEPTION_CONCURRENCY,
+  ccslConfirmHardBudgetMs:V339_CCSL_CONFIRM_HARD_BUDGET_MS,
+  policy:'ONE_ACTIVE_THROUGHPUT_OWNER_ALL_BUSINESSES_SCAN_350_TRACK_50_X4_CCSL_CONFIRM_SINGLE_REMOTE_LANE'
 }));
-
-console.info('[CE-QC][V340_CCSL_THROUGHPUT]', JSON.stringify({
-  id: V339_CCSL_PIPELINE_THROUGHPUT_ID,
-  core: V339_CCSL_THROUGHPUT_CORE_ID,
-  scanBatchSize: 350,
-  scanRemoteConcurrency: V339_CCSL_CONFIRM_CONCURRENCY,
-  rollingPrefetch: true,
-  trackBatchSize: 50,
-  trackConcurrency: Math.max(1, Number(process.env.TRACK_CONCURRENCY || 4)),
-  confirmHardBudgetMs: V339_CCSL_CONFIRM_HARD_BUDGET_MS,
-  policy: 'CCSL_CONFIRM_350_SINGLE_REMOTE_LANE_OVERLAP_LOCAL_CHECKPOINT_TRACK_50_X4_FAIL_FORWARD'
-}));
+// Stable startup labels retained for old diagnostics; both point to the same owner.
+console.info('[CE-QC][V314_SHOPEE_THROUGHPUT]',V314_PIPELINE_THROUGHPUT_ID);
+console.info('[CE-QC][V340_CCSL_THROUGHPUT]',V314_PIPELINE_THROUGHPUT_ID);
