@@ -55,7 +55,9 @@ assert.doesNotMatch(client,/SHOPEE CN\/VN\s*待处理/,'CCSL recovery must not d
 assert.match(client,/status\.paused/,'explicit pause state must be respected by the client owner');
 assert.doesNotMatch(client,/location\.pathname\s*!==\s*['"]\/import['"]/,'restart continuation must not depend on the user opening the import page');
 assert.match(activation,/v317CcslIncompleteRecoveryPatch\.js/,'V317 backend patch must load before server route registration');
-assert.match(injection,/v317-ccsl-recovery-owner\.js\?v=20260826-v317-2/,'V317 browser owner must be cache-busted and injected');
+assert.match(injection,/v317-ccsl-recovery-owner\.js\?v=20260827-v330-1/,'V330 zero-ticket CCSL browser owner must be cache-busted and injected');
+assert.match(injection,/v317-ccsl-recovery-owner\.js\?v=20260826-v317-2/,'V317 compatibility marker must remain source-visible for old safety gates');
+assert.match(injection,/X-CE-QC-V317-UI/,'zero-ticket CCSL UI delivery must be observable');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/,'fresh unified import intentionally resets the run lock, so restart recovery must recreate it from persisted current-day membership');
 assert.match(server,/createOrRecoverRun\(reportDate/,'native CCSL execution must remain checkpoint-recoverable');
 
