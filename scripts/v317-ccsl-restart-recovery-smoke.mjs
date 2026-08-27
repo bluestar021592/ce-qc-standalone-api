@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { chooseCcslReportDate, ccslRecoveryDecision, V317_CCSL_RECOVERY_POLICY_ID } from '../src/v317CcslRecoveryPolicy.js';
+import { coreSnapshotCompletionDecision } from '../src/v142SevenBusinessHistoryAudit.js';
 
-for(const file of ['src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','public/v317-ccsl-recovery-owner.js']){
+for(const file of ['src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','public/v317-ccsl-recovery-owner.js','src/v142SevenBusinessHistoryAudit.js']){
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
@@ -17,9 +18,13 @@ assert.deepEqual(ccslRecoveryDecision({hasDaily:true,complete:false,lockStatus:'
 assert.deepEqual(ccslRecoveryDecision({hasDaily:true,complete:false,lockStatus:'paused'}),{complete:false,paused:true,needsResume:false,action:'PAUSED'},'explicit user pause must never be auto-resumed');
 assert.deepEqual(ccslRecoveryDecision({hasDaily:true,complete:true,lockStatus:'finished'}),{complete:true,paused:false,needsResume:false,action:'COMPLETE'},'VALID COMPLETED snapshot must never be rerun');
 assert.deepEqual(ccslRecoveryDecision({hasDaily:true,complete:false,lockStatus:'failed',validUnified:true,sourceTotal:0}),{complete:true,paused:false,needsResume:false,action:'ZERO_TICKET_COMPLETE',zeroTicketDay:true},'a valid unified day with zero CCSL members must close without creating or resuming a run');
+assert.deepEqual(coreSnapshotCompletionDecision({validBatch:true,snapshotCompleted:false,ccslTotal:0,coveredCcsl:0}),{complete:true,reason:'VALID_ZERO_CCSL_TICKETS',zeroTicketDay:true,legacyCoverageRecovered:false},'history integrity must not block a valid zero-ticket CCSL day');
+assert.deepEqual(coreSnapshotCompletionDecision({validBatch:true,snapshotCompleted:false,ccslTotal:120,coveredCcsl:120}),{complete:true,reason:'LEGACY_FINAL_ROWS_FULL_COVERAGE',zeroTicketDay:false,legacyCoverageRecovered:true},'legacy nonzero CCSL day may be recovered only when every imported member has a final row');
+assert.equal(coreSnapshotCompletionDecision({validBatch:true,snapshotCompleted:false,ccslTotal:120,coveredCcsl:119}).complete,false,'one missing CCSL final row must continue to fail closed');
 
 const backend=fs.readFileSync(new URL('../src/v317CcslIncompleteRecoveryPatch.js',import.meta.url),'utf8');
 const client=fs.readFileSync(new URL('../public/v317-ccsl-recovery-owner.js',import.meta.url),'utf8');
+const audit=fs.readFileSync(new URL('../src/v142SevenBusinessHistoryAudit.js',import.meta.url),'utf8');
 const activation=fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js',import.meta.url),'utf8');
 const injection=fs.readFileSync(new URL('../src/v295FirstAttemptUiInjectionPatch.js',import.meta.url),'utf8');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
@@ -34,6 +39,12 @@ assert.match(backend,/ZERO_CCSL_TICKETS/,'zero-ticket closure must be explicitly
 assert.match(backend,/createOrRecoverRun\(date/,'missing run locks must be created without deleting imported membership');
 assert.match(backend,/updateRunLock\(date,'failed'/,'finished-without-snapshot must become recoverable rather than falsely complete');
 assert.doesNotMatch(backend,/DELETE FROM (?:scan_results|track_events|run_checkpoints|unified_import_rows)/,'restart recovery must never delete persisted evidence/checkpoints/import membership');
+
+assert.match(audit,/CCSL_TYPES = \['CE','CEAF','TBKH','ALI1688'\]/,'history integrity must separate the CCSL execution queue from Shopee daily membership');
+assert.match(audit,/VALID_ZERO_CCSL_TICKETS/,'valid zero-ticket dates must auto-close for export integrity');
+assert.match(audit,/LEGACY_FINAL_ROWS_FULL_COVERAGE/,'old nonzero dates may recover only from exact full final-row coverage');
+assert.match(audit,/covered>=total/,'legacy recovery must require full coverage, never a partial threshold');
+assert.match(audit,/if\(!coreCompletion\.complete\)issues\.push\('CORE_SNAPSHOT_NOT_COMPLETED'\)/,'only genuinely incomplete nonzero CCSL dates may block export');
 
 assert.match(client,/2026-08-26-v317-ccsl-restart-auto-recovery-v2/,'all-page V317 recovery owner must be active');
 assert.match(client,/\/api\/v317\/ccsl-recovery/);
@@ -51,4 +62,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/,'native CCSL execution must
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686,'2026-08-06 screenshot CCSL routing total must be CE+CEAF+TBKH+ALI1688, not the full 6098 import');
 
-console.log('[V330/V317] CCSL restart recovery smoke passed · valid 0-ticket days close without run/retry/snapshot · nonzero incomplete days remain checkpoint-safe · explicit pause respected');
+console.log('[V330/V317] CCSL restart + history integrity smoke passed · valid 0-ticket days close without run/retry/snapshot · legacy nonzero days recover only from exact final-row coverage · partial evidence still blocks export');
