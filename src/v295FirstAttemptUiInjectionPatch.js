@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v330-three-business-cache-injection-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v330-active-owner-observability-v2';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -37,8 +37,13 @@ express.response.send=function v330FirstAttemptUiSend(body){
     if(tags.length)body=body.replace('</body>',`${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V295-UI',V295_FIRST_ATTEMPT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V301-UI','2026-08-25-v301-nonrecursive-runtime-stability-v1');
+    this.setHeader?.('X-CE-QC-V309-UI','2026-08-26-v309-single-nav-auto-resume-shopee-total-v1');
+    this.setHeader?.('X-CE-QC-V310-UI','2026-08-26-v310-persistent-shopee-resume-owner-v1');
+    this.setHeader?.('X-CE-QC-V313-UI','2026-08-26-v313-single-source-shopee-completion-v1');
+    this.setHeader?.('X-CE-QC-V318-UI','2026-08-26-v318-single-sidebar-hard-owner-v1');
+    this.setHeader?.('X-CE-QC-V325-UI','2026-08-26-v325-single-owner-stable-home-cards-v1');
     this.setHeader?.('X-CE-QC-V329-UI','2026-08-27-v329-three-business-cache-ui-v1');
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V330_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V301 nonrecursive stability + TBKH/CN/VN history table, trend and 1/2/3 attempt chart reuse one nonblocking cache payload.');
+console.info('[CE-QC][V330_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V301 nonrecursive stability + active V309/V310/V313/V318/V325 owners + TBKH/CN/VN history/trend/attempt cache UI.');
