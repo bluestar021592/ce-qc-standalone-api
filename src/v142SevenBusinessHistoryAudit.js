@@ -1,7 +1,8 @@
 import { getDb } from './db.js';
 
-export const V142_HISTORY_AUDIT_ID = '2026-08-16-v142-seven-business-history-audit-v2';
+export const V142_HISTORY_AUDIT_ID = '2026-08-27-v142-seven-business-history-audit-v3-v330-zero-ticket';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+const CCSL_TYPES = ['CE','CEAF','TBKH','ALI1688'];
 const ALL_TYPES = [...CORE_TYPES,'WHPP'];
 
 function iso(value='') { const text=String(value||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:''; }
@@ -22,6 +23,24 @@ function coreCounts(db,snapshotId){
   if(!snapshotId)return result;
   for(const row of db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(snapshotId)) if(Object.hasOwn(result,row.businessType))result[row.businessType]=Number(row.count||0);
   return result;
+}
+function ccslCoverage(db,reportDate,snapshotId,ccslTotal){
+  const total=Number(ccslTotal||0);
+  if(total<=0)return {sourceTotal:0,covered:0,complete:true};
+  if(!snapshotId||!tableExists(db,'final_rows'))return {sourceTotal:total,covered:0,complete:false};
+  const covered=count(db,`SELECT COUNT(DISTINCT u.shipmentCode) count
+    FROM unified_import_rows u
+    JOIN final_rows f ON f.reportDate=? AND f.shipmentCode=u.shipmentCode
+    WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')`,reportDate,snapshotId,reportDate);
+  return {sourceTotal:total,covered,complete:covered>=total};
+}
+export function coreSnapshotCompletionDecision({validBatch=false,snapshotCompleted=false,ccslTotal=0,coveredCcsl=0}={}){
+  const total=Number(ccslTotal||0),covered=Number(coveredCcsl||0);
+  if(!validBatch)return {complete:false,reason:'NO_VALID_CORE_BATCH',zeroTicketDay:false,legacyCoverageRecovered:false};
+  if(snapshotCompleted)return {complete:true,reason:'FORMAL_CORE_SNAPSHOT_COMPLETED',zeroTicketDay:total===0,legacyCoverageRecovered:false};
+  if(total===0)return {complete:true,reason:'VALID_ZERO_CCSL_TICKETS',zeroTicketDay:true,legacyCoverageRecovered:false};
+  if(covered>=total)return {complete:true,reason:'LEGACY_FINAL_ROWS_FULL_COVERAGE',zeroTicketDay:false,legacyCoverageRecovered:true};
+  return {complete:false,reason:'CORE_SNAPSHOT_NOT_COMPLETED',zeroTicketDay:false,legacyCoverageRecovered:false};
 }
 function whppDay(db,reportDate){
   const report=tableExists(db,'business_daily_reports')?db.prepare("SELECT totalCount,sourceFile,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate):null;
@@ -56,19 +75,24 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
     if(!batch){missing.push(reportDate);days.push({reportDate,status:'MISSING_CORE_IMPORT'});continue;}
     const counts=coreCounts(db,batch.snapshotId);
     const coreTotal=Object.values(counts).reduce((a,b)=>a+Number(b||0),0);
+    const ccslTotal=CCSL_TYPES.reduce((sum,type)=>sum+Number(counts[type]||0),0);
+    const coverage=ccslCoverage(db,reportDate,batch.snapshotId,ccslTotal);
+    const coreCompletion=coreSnapshotCompletionDecision({validBatch:true,snapshotCompleted:String(batch.snapshotStatus||'')==='COMPLETED',ccslTotal,coveredCcsl:coverage.covered});
     const whpp=whppDay(db,reportDate);
     const air=airMismatch(db,reportDate,batch.snapshotId);
     const issues=[];
-    if(String(batch.snapshotStatus||'')!=='COMPLETED')issues.push('CORE_SNAPSHOT_NOT_COMPLETED');
+    if(!coreCompletion.complete)issues.push('CORE_SNAPSHOT_NOT_COMPLETED');
+    if(coreCompletion.zeroTicketDay)warnings.push({reportDate,type:'CCSL_ZERO_TICKET_DAY_AUTO_CLOSED',count:0});
+    else if(coreCompletion.legacyCoverageRecovered)warnings.push({reportDate,type:'CORE_LEGACY_STATUS_RECOVERED_BY_FULL_FINAL_COVERAGE',count:coverage.covered});
     if(!whpp.reportPresent)issues.push('WHPP_DAILY_REPORT_MISSING');
     if(whpp.reported>0&&!whpp.snapshotPresent)issues.push('WHPP_SNAPSHOT_MISSING');
     if(whpp.dailyRows!==whpp.reported)issues.push('WHPP_DAILY_COUNT_MISMATCH');
     if(whpp.snapshotPresent&&whpp.finalRows<whpp.dailyRows)issues.push('WHPP_FINAL_ROWS_INCOMPLETE');
     if(air.mismatch>0)issues.push('CEAF_SOURCE_MEMBERSHIP_MISMATCH');
-    if(issues.length)incomplete.push({reportDate,issues,ceafMissingBills:air.missingBills});
+    if(issues.length)incomplete.push({reportDate,issues,ceafMissingBills:air.missingBills,ccslTotal,ccslFinalCoverage:coverage.covered,coreCompletion:coreCompletion.reason});
     if(whpp.retryPending>0)warnings.push({reportDate,type:'WHPP_RETRY_PENDING',count:whpp.retryPending});
     totalImported+=coreTotal+whpp.reported; totalWhpp+=whpp.reported; totalRetry+=whpp.retryPending;
-    days.push({reportDate,status:issues.length?'CHECK_REQUIRED':'OK',snapshotId:batch.snapshotId,snapshotStatus:batch.snapshotStatus,coreCounts:counts,coreTotal,whpp,air,issues});
+    days.push({reportDate,status:issues.length?'CHECK_REQUIRED':'OK',snapshotId:batch.snapshotId,snapshotStatus:batch.snapshotStatus,coreCounts:counts,coreTotal,ccslTotal,ccslFinalCoverage:coverage.covered,coreCompletion,whpp,air,issues});
   }
   const openCarry=count(db,"SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate BETWEEN ? AND ?",from,to);
   const closedCarry=count(db,"SELECT COUNT(*) count FROM carryover_open_items WHERE status='CLOSED' AND sourceReportDate BETWEEN ? AND ?",from,to);
