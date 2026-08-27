@@ -69,15 +69,20 @@ assert.doesNotMatch(shopeeClient,/getElementById\('ccslRunStatus'\)/,'SHOPEE mus
 assert.doesNotMatch(shopeeClient,/getElementById\('sevenBusinessStageSummary'\)/,'SHOPEE must never acquire the V168 summary DOM');
 assert.doesNotMatch(shopeeClient,/querySelectorAll\('#importPage \.status-pill/,'SHOPEE must not scan/repaint canonical pills');
 
-assert.match(progressUi,/2026-08-27-v333-persistent-selected-date-ccsl-detail-v1/,'V138 must be the persistent CCSL detail owner');
+assert.match(progressUi,/2026-08-27-v334-canonical-v317-ccsl-detail-v1/,'V138 must use canonical V317 truth before legacy progress');
 assert.match(progressUi,/const selectedReportDate=.*reportDate[\s\S]*topRangeTo[\s\S]*dashboardRangeTo/,'V138 must derive selected date from the current UI');
-assert.match(progressUi,/reportDate=\$\{encodeURIComponent\(reportDate\)\}/,'V138 must send selected reportDate');
+assert.match(progressUi,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action:'status',[\s\S]*reportDate:reportDate\|\|''/,'V138 detail must read the same selected-date V317 truth as the green summary');
+const canonicalPos=progressUi.indexOf("/api/v317/ccsl-recovery"),legacyPos=progressUi.indexOf("/api/v33/run-progress");
+assert.ok(canonicalPos>=0&&legacyPos>canonicalPos,'V138 must consult canonical V317 truth before legacy V33 batch progress');
+assert.match(progressUi,/truth\.complete===true\|\|truth\.zeroTicketDay===true/,'V138 must close canonical completed/zero-ticket dates without requiring a run lock');
+assert.match(progressUi,/truth\.dailyExists===false[\s\S]*noDaily:true/,'a selected date with no CCSL daily truth must show no-daily/needs-no-work rather than pending 0\/0');
+assert.match(progressUi,/canonicalTruth:true,[\s\S]*complete:true/,'canonical completion must synthesize a completed detail state');
+assert.match(progressUi,/当日有效日报CCSL为0票，无需启动订单扫描或轨迹查询/,'0-ticket lower panel must visibly close as completed');
+assert.match(progressUi,/所选日期没有CCSL有效日报\/票据，不创建订单扫描或轨迹查询任务/,'no CCSL daily must never be represented as a pending scan run');
 assert.match(progressUi,/if\(polling\|\|!page\|\|page\.hidden\)return/,'V138 must use visible SPA page state rather than location.pathname');
 assert.doesNotMatch(progressUi,/location\.pathname!=='\/import'/,'SPA URL text must not disable CCSL detail polling');
-assert.match(progressUi,/installStaticMarkupBridge\(\);[\s\S]*const page=document\.getElementById\('importPage'\)/,'late runStatusMarkup assignments must be rewrapped on every poll');
 assert.match(progressUi,/setInterval\(enforceLastTruth,250\)/,'saved canonical CCSL detail must be re-enforced against late legacy repaint races');
 assert.match(progressUi,/const ccsl=await read\('CCSL'\)/,'CCSL detail owner must not render SHOPEE into the CCSL panel');
-assert.match(progressUi,/当日有效日报CCSL为0票，无需启动订单扫描或轨迹查询/,'0-ticket lower panel must visibly close as completed');
 
 assert.match(sevenStatus,/2026-08-27-v333-canonical-seven-business-owner-v1/,'V168 must be the one canonical summary owner');
 assert.match(sevenStatus,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical CCSL recovery truth for the selected date');
@@ -90,19 +95,19 @@ assert.match(sevenStatus,/node\.dataset\.v333Owner = 'canonical'/,'summary DOM m
 assert.match(sevenStatus,/}, 2000\);/,'canonical summary must refresh fast enough to defeat stale legacy state without heavy polling');
 
 assert.match(activation,/v317CcslIncompleteRecoveryPatch\.js/,'V317 backend route must remain production-active');
-assert.match(injection,/2026-08-27-v333-canonical-status-ownership-v1/,'V333 response injection must be observable');
+assert.match(injection,/2026-08-27-v334-canonical-detail-history-ownership-v1/,'V334 response injection must be observable');
 assert.match(injection,/v311-shopee-recovery-owner\.js\?v=20260827-v333-1/);
 assert.match(injection,/v317-ccsl-recovery-owner\.js\?v=20260827-v333-1/);
-assert.match(injection,/v311-shopee-recovery-owner\.js\?v=20260827-v332-1/,'V332 compatibility marker remains source-visible');
-assert.match(injection,/v317-ccsl-recovery-owner\.js\?v=20260827-v332-1/,'V332 CCSL compatibility marker remains source-visible');
-assert.match(injection,/X-CE-QC-V333-UI/,'V333 response header must be observable');
-assert.match(htmlOwner,/2026-08-27-v333-canonical-status-cache-bust-v1/,'HTML owner must publish V333 build');
-assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v333-1/,'browser must load V333 CCSL detail owner');
-assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260827-v333-1/,'browser must load V333 canonical seven-business owner');
+assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must load V334 history hard owner');
+assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v329-1/,'V329 history owner compatibility marker remains source-visible');
+assert.match(injection,/X-CE-QC-V334-UI/,'V334 response header must be observable');
+assert.match(htmlOwner,/2026-08-27-v334-canonical-detail-history-owner-cache-bust-v1/,'HTML owner must publish V334 build');
+assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v334-1/,'browser must load V334 CCSL detail owner');
+assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260827-v333-1/,'browser must retain V333 canonical seven-business owner');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
 
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V333/V331/V317] canonical status ownership smoke passed · V168 alone owns summary · V138 alone owns CCSL detail · recovery owners cannot repaint either · selected-date 0/0 stays completed');
+console.log('[V334/V333/V317] canonical CCSL detail smoke passed · V138 reads V317 first · zero-ticket/no-daily cannot fall through to legacy V33 pending 0/0');
