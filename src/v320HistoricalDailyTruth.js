@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-export const V320_HISTORICAL_DAILY_TRUTH_ID='2026-08-26-v320-persisted-history-dispatch-signing-v1';
+export const V320_HISTORICAL_DAILY_TRUTH_ID='2026-08-27-v335-per-business-latest-valid-history-v1';
 const STANDARD=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const TYPES=new Set([...STANDARD,'CCSL','SHOPEE','ALL']);
 const CORE=new Set(['CE','CEAF','TBKH','ALI1688']);
@@ -46,7 +46,20 @@ export function listV320HistoricalDates({fromDate='',toDate='',expandSingle=true
 
 function latestUnifiedCounts(db,dates){
   const out=new Map();if(!dates.length||!hasTable(db,'unified_import_batches')||!hasTable(db,'unified_import_rows'))return out;const m=marks(dates);
-  const sql=`WITH ranked AS (SELECT reportDate,snapshotId,createdAt,batchId,ROW_NUMBER() OVER(PARTITION BY reportDate ORDER BY createdAt DESC,batchId DESC) rn FROM unified_import_batches WHERE status='VALID' AND reportDate IN (${m})) SELECT r.reportDate,UPPER(TRIM(u.businessType)) businessType,COUNT(DISTINCT UPPER(TRIM(u.shipmentCode))) total FROM ranked r JOIN unified_import_rows u ON u.snapshotId=r.snapshotId AND u.reportDate=r.reportDate WHERE r.rn=1 GROUP BY r.reportDate,UPPER(TRIM(u.businessType))`;
+  const sql=`WITH candidates AS (
+    SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,UPPER(TRIM(u.businessType)) businessType
+    FROM unified_import_batches b JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate
+    WHERE b.status='VALID' AND b.reportDate IN (${m}) AND TRIM(COALESCE(u.shipmentCode,''))<>''
+    GROUP BY b.reportDate,b.snapshotId,b.createdAt,b.batchId,UPPER(TRIM(u.businessType))
+  ), ranked AS (
+    SELECT reportDate,snapshotId,createdAt,batchId,businessType,
+      ROW_NUMBER() OVER(PARTITION BY reportDate,businessType ORDER BY createdAt DESC,batchId DESC) rn
+    FROM candidates
+  )
+  SELECT r.reportDate,r.businessType,COUNT(DISTINCT UPPER(TRIM(u.shipmentCode))) total
+  FROM ranked r JOIN unified_import_rows u ON u.snapshotId=r.snapshotId AND u.reportDate=r.reportDate AND UPPER(TRIM(u.businessType))=r.businessType
+  WHERE r.rn=1 AND TRIM(COALESCE(u.shipmentCode,''))<>''
+  GROUP BY r.reportDate,r.businessType`;
   for(const r of rows(db,sql,dates))out.set(`${dateKey(r.reportDate)}|${String(r.businessType||'').toUpperCase()}`,n(r.total));return out;
 }
 function snapshotCounts(db,dates){
@@ -99,8 +112,8 @@ export function readV320HistoricalDaily(businessType='ALL',fromDate='',toDate=''
   return{ok:true,id:V320_HISTORICAL_DAILY_TRUTH_ID,readId:V320_HISTORICAL_DAILY_TRUTH_ID,businessType:type,requestedFromDate:from,requestedToDate:to,historyExpanded:from===to&&options.expandSingle!==false,fromDate:dates[0]||from,toDate:dates.at(-1)||to,dates,daily,
     ticket:daily.map(r=>n(r.total)),pod:daily.map(r=>n(r.pod)),podRate:daily.map(r=>r.podRate),oc:daily.map(r=>n(r.ocCurrent)),ocRate:daily.map(r=>r.ocRate),sameDayPod:daily.map(r=>n(r.sameDayPod)),sameDayPodRate:daily.map(r=>r.sameDayPodRate),
     avgDispatchSigningDays:daily.map(r=>r.avgDispatchSigningDays),avgSigningDays:daily.map(r=>r.avgDispatchSigningDays),attempt1:daily.map(r=>n(r.attempt1)),attempt2:daily.map(r=>n(r.attempt2)),attempt3:daily.map(r=>n(r.attempt3)),attemptCoverageRate:daily.map(r=>r.attemptCoverageRate),signingSampleCount:daily.map(r=>n(r.dispatchSigningDaysCount)),
-    source:'V320_PERSISTED_HISTORY_UNION_READ_ONLY',definitions:{history:'单日看板仍显示所选日期；逐日明细与走势图在起止日期相同时自动展示数据库中截至该日的全部已保存历史日期（最多180日）',averageDays:'平均派件→签收天数=真实首次派件START/firstAttemptAt到真实POD日期的自然日平均；同日=1天；仅缺失证据的票不参与平均，不再因为覆盖率不足把整日平均值隐藏为—',readPolicy:'只读已落库日报、历史快照和最终结果；页面读取不调用CE接口'}
+    source:'V320_PERSISTED_HISTORY_UNION_READ_ONLY',definitions:{history:'单日看板仍显示所选日期；逐日明细与走势图在起止日期相同时自动展示数据库中截至该日的全部已保存历史日期（最多180日）',averageDays:'平均派件→签收天数=真实首次派件START/firstAttemptAt到真实POD日期的自然日平均；同日=1天；仅缺失证据的票不参与平均，不再因为覆盖率不足把整日平均值隐藏为—',readPolicy:'只读已落库日报、历史快照和最终结果；同一天各业务独立选择自己的最新VALID日报；页面读取不调用CE接口'}
   };
 }
 
-console.info('[CE-QC][V320_HISTORICAL_DAILY_TRUTH]',V320_HISTORICAL_DAILY_TRUTH_ID,'historical dates are unioned from persisted current+legacy ledgers; daily dispatch→POD average publishes from real known samples without requiring 100% coverage.');
+console.info('[CE-QC][V320_HISTORICAL_DAILY_TRUTH]',V320_HISTORICAL_DAILY_TRUTH_ID,'historical membership selects the latest VALID snapshot independently per reportDate+businessType; later CN/VN/CEAF imports cannot erase same-date siblings.');
