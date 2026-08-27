@@ -1,4 +1,4 @@
-export const V339_CCSL_THROUGHPUT_CORE_ID='2026-08-27-v339-ccsl-hard-bounded-confirm-prefetch-v3';
+export const V339_CCSL_THROUGHPUT_CORE_ID='2026-08-27-v340-ccsl-single-lane-rolling-prefetch-v1';
 
 function clampInt(value,min,max,fallback){
   const parsed=Number(value);
@@ -6,7 +6,12 @@ function clampInt(value,min,max,fallback){
   return Math.max(min,Math.min(max,Math.trunc(parsed)));
 }
 
-export const V339_CCSL_CONFIRM_CONCURRENCY=clampInt(process.env.CCSL_CONFIRM_CONCURRENCY,1,2,2);
+// CE confirm-query proved stable at 350 tickets, but two simultaneous 350-ticket
+// requests can overload the remote endpoint and turn most of a day into false
+// retry rows. Keep exactly one remote confirm request in flight. The pool still
+// starts the next 350-ticket request as soon as the previous remote call settles,
+// so it overlaps local row processing/checkpoint work without overlapping CE calls.
+export const V339_CCSL_CONFIRM_CONCURRENCY=clampInt(process.env.CCSL_CONFIRM_CONCURRENCY,1,1,1);
 export const V339_CCSL_CONFIRM_HARD_BUDGET_MS=clampInt(process.env.CE_CONFIRM_HARD_BUDGET_MS,1000,30000,18000);
 
 function clean(values=[]){
@@ -28,7 +33,7 @@ function boundedQuery(query,batch,budgetMs){
   let timer;
   const timeout=new Promise((_,reject)=>{
     timer=setTimeout(()=>{
-      const error=new Error(`V339 CCSL confirm prefetch exceeded ${budgetMs}ms`);
+      const error=new Error(`V340 CCSL confirm rolling prefetch exceeded ${budgetMs}ms`);
       error.code='V339_CCSL_PREFETCH_HARD_TIMEOUT';
       reject(error);
     },budgetMs);
@@ -40,7 +45,7 @@ export function createCcslThroughputClient(state={},client,options={}){
   if(!client||typeof client!=='object'||typeof client.confirmQuery!=='function')return client;
   const rawConfirm=client.confirmQuery.bind(client);
   const width=350;
-  const limit=clampInt(options.confirmConcurrency,1,2,V339_CCSL_CONFIRM_CONCURRENCY);
+  const limit=clampInt(options.confirmConcurrency,1,1,V339_CCSL_CONFIRM_CONCURRENCY);
   const budget=clampInt(options.hardBudgetMs,50,30000,V339_CCSL_CONFIRM_HARD_BUDGET_MS);
   const cache=new Map();
   const queue=[];
@@ -77,7 +82,7 @@ export function createCcslThroughputClient(state={},client,options={}){
     plannedKeys=new Set(batches.map(key));
     const focusKey=key(focusBatch);
     if(focusKey&&plannedKeys.has(focusKey))batches=[...batches.filter(batch=>key(batch)===focusKey),...batches.filter(batch=>key(batch)!==focusKey)];
-    console.info('[CE-QC][V339_CCSL_PREFETCH]',JSON.stringify({batchSize:width,concurrency:limit,batches:batches.length,completedBills:completed.size,hardBudgetMs:budget,planMode:'stable-filter'}));
+    console.info('[CE-QC][V340_CCSL_ROLLING_PREFETCH]',JSON.stringify({batchSize:width,remoteConcurrency:limit,batches:batches.length,completedBills:completed.size,hardBudgetMs:budget,planMode:'stable-filter',policy:'ONE_REMOTE_350_AT_A_TIME_OVERLAP_LOCAL_CHECKPOINT'}));
     for(const batch of batches)enqueue(batch);
   }
   async function request(codes=[]){
@@ -85,8 +90,8 @@ export function createCcslThroughputClient(state={},client,options={}){
     if(!batch.length)return[];
     launch(batch);
     const k=key(batch);
-    // Adaptive fallback children must remain under the native V337/V338
-    // queryBatchWithFallback owner instead of being prefetched.
+    // Adaptive fallback children remain under the native V337/V338 owner and are
+    // never prefetched, preserving its exact retry and checkpoint semantics.
     if(!plannedKeys.has(k))return rawConfirm(batch);
     const entry=cache.get(k)||enqueue(batch);
     const settled=await entry.settled;
