@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 
 process.env.CE_MIN_BATCH_BUDGET_MS = '80';
+process.env.CE_CONFIRM_HARD_BUDGET_MS = '180';
 const { queryBatchWithFallback } = await import(`../src/trackBatching.js?v316=${Date.now()}`);
 
 const logs = [];
@@ -22,6 +23,24 @@ assert.equal(hung.failures.length, 1);
 assert.deepEqual(hung.failures[0].batch, ['A','B','C']);
 assert.equal(hung.failures[0].error?.code, 'BATCH_TIME_BUDGET_EXCEEDED');
 assert.ok(logs.some(line => line.includes('主流程立即继续下一批')));
+
+// V337 regression: even if a stale module/preload path asks confirm-query for a
+// very large generic budget, the batching core itself must cap confirm-query. This
+// is the exact production failure mode where one daily scan batch appeared frozen.
+const hardCapStarted = Date.now();
+const hardCapped = await queryBatchWithFallback({
+  batch: ['CAP-1','CAP-2','CAP-3'],
+  query: async () => new Promise(() => {}),
+  apiName: 'otwms-order-confirm-query',
+  fallbackSizes: [],
+  transientRetries: 5,
+  batchTimeBudgetMs: 5000
+});
+const hardCapElapsedMs = Date.now() - hardCapStarted;
+assert.ok(hardCapElapsedMs < 1500, `confirm-query core cap must override stale long budget, elapsed=${hardCapElapsedMs}ms`);
+assert.equal(hardCapped.successes.length,0);
+assert.equal(hardCapped.failures.length,1);
+assert.equal(hardCapped.failures[0].error?.code,'BATCH_TIME_BUDGET_EXCEEDED');
 
 let attempts = 0;
 const recovered = await queryBatchWithFallback({
@@ -89,6 +108,9 @@ assert.match(redirect, /specifier === '\.\/pipeline\.js'/);
 assert.match(pipeline, /const ORDER_BATCH_SIZE = Number\(process\.env\.ORDER_BATCH_SIZE \|\| 350\)/);
 assert.match(batching, /queryWithinHardDeadline/);
 assert.match(batching, /Promise\.race/);
+assert.match(batching,/CONFIRM_HARD_BUDGET_MS/,'V337 batching core must own confirm hard cap independent of preload order');
+assert.match(batching,/isConfirmQuery \? Math\.min\(requestedBudgetMs, CONFIRM_HARD_BUDGET_MS\)/,'V337 confirm request must be capped inside the batching core');
+assert.match(batching,/CONFIRM_MAX_TRANSIENT_RETRIES = 1/,'V337 confirm-query may perform at most one transport compensation attempt');
 
 const sampleTotal = 5453;
 const alreadyCompleted = 2100;
@@ -98,4 +120,4 @@ assert.notEqual(boundedBatches, 16, '5453 tickets must no longer run as 350-tick
 const firstPending = alreadyCompleted + 1;
 assert.equal(firstPending, 2101, 'the persisted 2100 successful bills must resume at the next uncompleted bill');
 
-console.log(`[V316] CCSL no-freeze smoke passed · never-settling batch released in ${elapsedMs}ms · bad middle batch failed forward and WB0300 completed · 5453 tickets => ${boundedBatches} bounded batches · checkpoint resumes at ${firstPending}`);
+console.log(`[V337/V316] CCSL no-freeze smoke passed · never-settling batch released in ${elapsedMs}ms · stale long confirm budget hard-capped in ${hardCapElapsedMs}ms · bad middle batch failed forward and WB0300 completed · checkpoint resumes at ${firstPending}`);
