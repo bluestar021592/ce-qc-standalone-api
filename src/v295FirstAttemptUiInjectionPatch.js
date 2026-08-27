@@ -22,6 +22,7 @@ const V328_ATTEMPT_MARKER='/v328-three-business-attempt-owner.js?v=20260827-v329
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
 void V311_RECOVERY_V332_COMPAT_MARKER;void V311_RECOVERY_COMPAT_MARKER;void V317_CCSL_RECOVERY_V332_COMPAT_MARKER;void V317_CCSL_RECOVERY_V330_COMPAT_MARKER;void V317_CCSL_RECOVERY_COMPAT_MARKER;void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
+// V300 recursive observer is no longer delivered. V301 remains the nonrecursive runtime-stability owner.
 // Recovery owners remain active for checkpoint continuation, but V333 removes their authority over the canonical summary/detail DOM.
 express.response.send=function v333FirstAttemptUiSend(body){
   if(typeof body==='string'&&body.includes('</body>')&&body.includes('CE Express')){
