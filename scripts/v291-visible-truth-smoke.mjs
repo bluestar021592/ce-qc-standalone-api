@@ -5,7 +5,7 @@ import { summarizeV295FirstAttemptMembers, mergeV295FirstAttemptFacts } from '..
 
 for (const file of [
   'src/v295FirstAttemptMetric.js','src/v295FirstAttemptTruth.js','src/rangeDashboardStoreV295.js',
-  'src/v295FirstAttemptRoutePatch.js','src/v295FirstAttemptInvalidationPatch.js','src/v295FirstAttemptUiInjectionPatch.js','public/v295-first-attempt-ui.js','public/v300-runtime-rescue.js'
+  'src/v295FirstAttemptRoutePatch.js','src/v295FirstAttemptInvalidationPatch.js','src/v295FirstAttemptUiInjectionPatch.js','public/v295-first-attempt-ui.js','public/v301-runtime-stability.js'
 ]) execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 
 const rangeSource=fs.readFileSync(new URL('../src/rangeDashboardStoreV284.js',import.meta.url),'utf8');
@@ -17,11 +17,11 @@ const v295Route=fs.readFileSync(new URL('../src/v295FirstAttemptRoutePatch.js',i
 const v295Invalidation=fs.readFileSync(new URL('../src/v295FirstAttemptInvalidationPatch.js',import.meta.url),'utf8');
 const v295Injection=fs.readFileSync(new URL('../src/v295FirstAttemptUiInjectionPatch.js',import.meta.url),'utf8');
 const v295Ui=fs.readFileSync(new URL('../public/v295-first-attempt-ui.js',import.meta.url),'utf8');
-const v300Ui=fs.readFileSync(new URL('../public/v300-runtime-rescue.js',import.meta.url),'utf8');
+const v301Ui=fs.readFileSync(new URL('../public/v301-runtime-stability.js',import.meta.url),'utf8');
 const v147=fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js',import.meta.url),'utf8');
 const ownerSource=fs.readFileSync(new URL('../public/v253-dashboard-fast-owner.js',import.meta.url),'utf8');
 assert.doesNotThrow(()=>new Function(v295Ui),'V299 first-attempt browser owner must compile');
-assert.doesNotThrow(()=>new Function(v300Ui),'V300 final runtime rescue must compile');
+assert.doesNotThrow(()=>new Function(v301Ui),'V301 runtime stability owner must compile');
 
 const sixBusinessRangeTotal=27303;
 const whppRangeTotal=22+36+156+25+140;
@@ -73,8 +73,10 @@ assert.match(v147,/v295FirstAttemptRoutePatch\.js/,'real bootstrap chain must ac
 assert.match(v147,/v295FirstAttemptInvalidationPatch\.js/,'real bootstrap chain must activate same-day cache invalidation');
 assert.match(v147,/v295FirstAttemptUiInjectionPatch\.js/,'real bootstrap chain must activate V295 visible UI owner');
 assert.match(v295Injection,/v295-first-attempt-ui\.js\?v=20260825-v298-1/,'V298 compatibility cache marker must remain source-visible');
-assert.match(v295Injection,/v300-runtime-rescue\.js\?v=20260825-v300-1/,'V300 final runtime rescue must be injected after V299 visible owner');
-assert.match(v295Injection,/X-CE-QC-V300-UI/,'delivered HTML must expose V300 runtime-rescue observability');
+assert.match(v295Injection,/v301-runtime-stability\.js\?v=20260825-v301-1/,'V301 nonrecursive runtime stability owner must be injected after V299 visible owner');
+assert.match(v295Injection,/V300 recursive observer is no longer delivered/,'V300 recursive runtime rescue must remain explicitly retired');
+assert.doesNotMatch(v295Injection,/X-CE-QC-V300-UI/,'delivered HTML must not advertise the retired V300 runtime rescue');
+assert.match(v295Injection,/X-CE-QC-V329-UI/,'delivered HTML must expose the current three-business cache UI owner');
 assert.match(v295Ui,/2026-08-25-v298-exact-visible-truth-nav-authority-v2/,'V298.1 authoritative visible owner must remain active under V299 trend architecture');
 assert.match(v295Ui,/FIRST_ATTEMPT_API='\/api\/v295\/first-attempt-trends'/,'visible first-attempt card and chart must use the dedicated exact API');
 assert.match(v295Ui,/const NAV_ITEMS=\[/,'sidebar must be rebuilt from one explicit canonical navigation authority');
@@ -83,7 +85,7 @@ assert.match(v295Ui,/nav\.innerHTML=NAV_ITEMS\.map/,'duplicate/retired sidebar n
 assert.match(v295Ui,/navPending=true/,'sidebar mutations arriving during a repair pass must schedule another canonical pass');
 assert.doesNotMatch(v295Ui,/遗留异常动态/,'retired legacy navigation entry must never exist in the canonical menu');
 assert.match(v295Ui,/const cache=new Map\(\),inflight=new Map\(\)/,'same exact first-attempt range must coalesce to one in-flight request');
-assert.match(v295Ui,/setTimeout\(\(\)=>refresh\(true\),7200\)/,'cold first-attempt truth must wait until fast primary trend paint has priority unless V300 sees the primary trend ready earlier');
+assert.match(v295Ui,/setTimeout\(\(\)=>refresh\(true\),7200\)/,'cold first-attempt truth must wait until fast primary trend paint has priority unless V301 sees the primary trend ready earlier');
 assert.match(v295Ui,/v298ExactTrendGuard/,'exact-range primary trend errors must retain stale-chart visibility protection');
 assert.match(v295Ui,/v272-status\.error\) \.v272-trend-grid/,'if every trend channel fails, stale chart bodies must stay hidden');
 assert.doesNotMatch(v295Ui,/\[80,500,1400,2800\]/,'visible owner must not hammer synchronous SQLite with four forced cold first-attempt reads during first paint');
@@ -92,17 +94,17 @@ assert.match(v295Ui,/首次妥投率趋势/,'visible trends must show a dedicate
 assert.match(v295Ui,/真实首派证据不足，不显示0%/,'missing first-attempt evidence must visibly render dash semantics, not fake zero');
 assert.match(v295Ui,/首派成功 .*首派尝试/,'visible card note must disclose numerator and denominator');
 
-assert.match(v300Ui,/2026-08-25-v300-single-sidebar-exact-shopee-owner-v1/,'V300 single-sidebar/exact-Shopee owner must identify itself');
-assert.match(v300Ui,/sidebar\.querySelectorAll\('\.side-link,\.side-sub,\.side-group,\.side-group-title'\)/,'V300 must delete legacy sidebar entries that were appended outside the canonical nav');
-assert.match(v300Ui,/navs\.slice\(1\)\.forEach\(node=>node\.remove\(\)\)/,'V300 must collapse multiple sidebar nav containers to exactly one');
-for(const id of ['v234DailyTrendTruth','v245ShopeeAttemptTruth','v250ShopeeAttemptTruth','v251ShopeeAttemptTruth','v263DeliveryKpiPanel','v271AttemptPanel'])assert.ok(v300Ui.includes(id),`V300 must retire stale Shopee owner ${id}`);
-assert.match(v300Ui,/__v251Original/,'V300 must unwrap the retired V251 renderAll/renderShopeePage wrappers when they survive an old SPA session');
-assert.match(v300Ui,/searchParams\.set\('exact','1'\)/,'legacy single-day V246 Shopee reads must be forced to the exact selected day');
-assert.match(v300Ui,/__CE_QC_V272_LAYOUT_TREND_FINALIZER__/,'V300 must hand visible charts back to the V299 exact-range owner');
-assert.match(v300Ui,/rehydrateVisible/,'legacy chart mutation must trigger exact-range rehydration instead of leaving seven-day data visible');
-assert.match(v300Ui,/首派真实证据读取中，不沿用POD率/,'before real first-attempt truth arrives the old POD-rate-looking value must be blanked immediately');
-assert.match(v300Ui,/\.v272-status\.ok/,'V300 must wait for the primary fast trend paint before starting the heavy first-attempt read');
-assert.doesNotMatch(v300Ui,/method\s*:\s*['"](?:POST|PUT|PATCH|DELETE)/i,'V300 runtime rescue must remain read-only');
+assert.match(v301Ui,/2026-08-25-v301-nonrecursive-runtime-stability-v1/,'V301 nonrecursive stability owner must identify itself');
+assert.match(v301Ui,/disabled-by-v301/,'V301 must poison-pill any stale cached V300 tab before its recursive observer can install');
+for(const id of ['v234DailyTrendTruth','v245ShopeeAttemptTruth','v250ShopeeAttemptTruth','v251ShopeeAttemptTruth','v263DeliveryKpiPanel','v271AttemptPanel'])assert.ok(v301Ui.includes(id),`V301 must retire stale Shopee owner ${id}`);
+assert.match(v301Ui,/navs\.slice\(1\)\.forEach\(n=>n\.remove\(\)\)/,'V301 must collapse multiple sidebar nav containers to exactly one');
+assert.match(v301Ui,/__v251Original/,'V301 must unwrap the retired V251 renderAll/renderShopeePage wrappers when they survive an old SPA session');
+assert.match(v301Ui,/searchParams\.set\('exact','1'\)/,'legacy single-day V246 Shopee reads must be forced to the exact selected day');
+assert.match(v301Ui,/__CE_QC_V272_LAYOUT_TREND_FINALIZER__/,'V301 must hand visible charts back to the V299 exact-range owner');
+assert.match(v301Ui,/首派真实证据读取中，不沿用POD率/,'before real first-attempt truth arrives the old POD-rate-looking value must be blanked immediately');
+assert.match(v301Ui,/\.v272-status\.ok/,'V301 must wait for the primary fast trend paint before starting the heavy first-attempt read');
+assert.match(v301Ui,/observer\.disconnect\(\)/,'V301 must disconnect its observer while repairing DOM to avoid recursive mutation storms');
+assert.doesNotMatch(v301Ui,/method\s*:\s*['"](?:POST|PUT|PATCH|DELETE)/i,'V301 runtime stability owner must remain read-only');
 
 assert.match(ownerSource,/result\?\.sourceTotal/,'visible homepage total must consume seven-business period sourceTotal');
 assert.match(ownerSource,/result\?\.states\?\.WHPP\?\.sourceTotal/,'visible homepage must consume WHPP period membership');
@@ -111,4 +113,4 @@ assert.match(ownerSource,/result\?\.aggregates\?\.HOME/,'homepage core metrics m
 assert.match(ownerSource,/证据未完成的日期保持“—”/,'incomplete attempt evidence must stay blank instead of being rendered as real 0%');
 assert.doesNotMatch(v295Ui,/method\s*:\s*['"](?:POST|PUT|PATCH|DELETE)/i,'visible first-attempt owner must remain read-only');
 
-console.log('[V300/V299/V295.6] visible truth smoke passed · one sidebar only + retired legacy Shopee daily/attempt owners + single-day V246 forced exact + V299 exact trend wins after legacy mutation + first-attempt stays — until real START/POD evidence arrives');
+console.log('[V301/V299/V295.6] visible truth smoke passed · V300 recursive owner retired + V301 nonrecursive stability + one sidebar only + stale V271/V263/V251 owners retired + first-attempt stays — until real START/POD evidence arrives');
