@@ -4,10 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
 import { V328_ATTEMPT_TYPES, clearV328ThreeBusinessHistoryCache } from './v328ThreeBusinessHistoryFast.js';
 
-export const V328_EVIDENCE_COORDINATOR_ID='2026-08-27-v334-three-business-history-coordinator-v2';
+export const V328_EVIDENCE_COORDINATOR_ID='2026-08-27-v335-three-business-history-observable-v1';
 const TYPE_SET=new Set(V328_ATTEMPT_TYPES);
-const states=new Map(V328_ATTEMPT_TYPES.map(type=>[type,{businessType:type,status:'IDLE',phase:'WAITING',toDate:'',total:0,completed:0,queried:0,failed:0,known:0,unresolved:0,signingKnown:0,signingUnresolved:0,cacheReady:false,cacheBlocked:false,cacheVersion:0,message:'',updatedAt:'',completedAt:''}]));
-const queue=new Map();let child=null,currentType='',generation=0,childGeneration=0;
+const WORKER_TIMEOUT_MS=120_000;
+const states=new Map(V328_ATTEMPT_TYPES.map(type=>[type,{businessType:type,status:'IDLE',phase:'WAITING',toDate:'',total:0,completed:0,queried:0,failed:0,known:0,unresolved:0,signingKnown:0,signingUnresolved:0,cacheReady:false,cacheBlocked:false,cacheVersion:0,message:'',updatedAt:'',completedAt:'',startedAt:'',durationMs:0}]));
+const queue=new Map();let child=null,currentType='',generation=0,childGeneration=0,workerTimer=null,workerStartedAt=0;
 const workerPath=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../scripts/v329-three-business-cache-worker.mjs');
 const now=()=>new Date().toISOString();
 function patch(type,value={}){const old=states.get(type)||{businessType:type};states.set(type,{...old,...value,businessType:type,updatedAt:now()});return states.get(type);}
@@ -18,35 +19,36 @@ function clearSmallCaches(type=''){
     if(tableExists(db,'v329_three_business_daily_cache')){if(all)db.exec('DELETE FROM v329_three_business_daily_cache');else db.prepare('DELETE FROM v329_three_business_daily_cache WHERE businessType=?').run(target);}
     if(tableExists(db,'v328_attempt_daily_cache')){if(all)db.exec('DELETE FROM v328_attempt_daily_cache');else db.prepare('DELETE FROM v328_attempt_daily_cache WHERE businessType=?').run(target);}
     clearV328ThreeBusinessHistoryCache();
-  }catch(error){console.warn('[CE-QC][V334_THREE_HISTORY_INVALIDATE]',type,error?.message||error);}
+  }catch(error){console.warn('[CE-QC][V335_THREE_HISTORY_INVALIDATE]',type,error?.message||error);}
 }
+function clearTimer(){if(workerTimer){clearTimeout(workerTimer);workerTimer=null;}}
 function spawnNext(){
   if(child||!queue.size)return;
-  const [type,toDate]=queue.entries().next().value;queue.delete(type);currentType=type;childGeneration=generation;
-  patch(type,{status:'STARTING',phase:'STARTING',toDate,cacheReady:false,cacheVersion:0,message:'启动独立历史缓存/派次签收校准'});
-  child=fork(workerPath,[`--type=${type}`,`--to=${toDate}`],{env:{...process.env,CE_QC_V329_CHILD:'1'},stdio:['ignore','ignore','ignore','ipc']});
-  child.on('message',message=>{
+  const [type,toDate]=queue.entries().next().value;queue.delete(type);currentType=type;childGeneration=generation;workerStartedAt=Date.now();
+  patch(type,{status:'STARTING',phase:'STARTING',toDate,cacheReady:false,cacheVersion:0,message:'启动独立历史缓存/派次签收校准',startedAt:now(),durationMs:0});
+  console.info('[CE-QC][V335_THREE_HISTORY_WORKER_START]',JSON.stringify({type,toDate,generation}));
+  const running=fork(workerPath,[`--type=${type}`,`--to=${toDate}`],{env:{...process.env,CE_QC_V329_CHILD:'1'},stdio:['ignore','ignore','ignore','ipc']});child=running;
+  workerTimer=setTimeout(()=>{if(child!==running)return;const durationMs=Date.now()-workerStartedAt;patch(type,{status:'FAILED',phase:'TIMEOUT',cacheReady:false,message:`历史缓存worker超过${WORKER_TIMEOUT_MS/1000}秒，已终止并允许重试`,durationMs});console.warn('[CE-QC][V335_THREE_HISTORY_WORKER_TIMEOUT]',JSON.stringify({type,toDate,durationMs,generation}));try{running.kill();}catch{}},WORKER_TIMEOUT_MS);workerTimer.unref?.();
+  running.on('message',message=>{
     if(message?.kind!=='V328_EVIDENCE_PROGRESS'||childGeneration!==generation)return;
-    const status=String(message.status||'RUNNING').toUpperCase();
-    patch(type,{...message,status,cacheBlocked:message.cacheReady?false:states.get(type)?.cacheBlocked,completedAt:status==='COMPLETED'?now():states.get(type)?.completedAt||''});
+    const status=String(message.status||'RUNNING').toUpperCase(),durationMs=Date.now()-workerStartedAt;
+    patch(type,{...message,status,cacheBlocked:message.cacheReady?false:states.get(type)?.cacheBlocked,completedAt:status==='COMPLETED'?now():states.get(type)?.completedAt||'',durationMs});
     if(message.cacheReady){try{clearV328ThreeBusinessHistoryCache();}catch{}}
+    if(status==='COMPLETED')console.info('[CE-QC][V335_THREE_HISTORY_WORKER_DONE]',JSON.stringify({type,toDate,durationMs,rows:message.rowCount??message.total??0}));
   });
-  child.on('error',error=>{if(childGeneration===generation)patch(type,{status:'FAILED',phase:'FAILED',message:error?.message||String(error)});});
-  child.on('exit',code=>{
-    const stale=childGeneration!==generation,state=states.get(type)||{},queuedAgain=queue.has(type);
-    if(stale){
-      clearSmallCaches(type);
-      patch(type,{status:queuedAgain?'QUEUED':'IDLE',phase:queuedAgain?'QUEUED':'STALE_AFTER_MUTATION',cacheReady:false,cacheBlocked:true,cacheVersion:0,completedAt:'',message:queuedAgain?'历史成员已变化，等待新一轮独立缓存':'历史成员已变化，旧worker结果已丢弃；下次读取将重新建立缓存'});
-    }else if(['STARTING','RUNNING','QUEUED'].includes(String(state.status||'').toUpperCase())){
-      patch(type,{status:code===0?'COMPLETED':'FAILED',phase:code===0?'DONE':'FAILED',cacheReady:code===0||Boolean(state.cacheReady),cacheBlocked:code===0?false:Boolean(state.cacheBlocked),message:code===0?(state.message||'后台校准完成'):`后台校准子进程退出 code=${code}`});
-    }
-    child=null;currentType='';setTimeout(spawnNext,500).unref?.();
+  running.on('error',error=>{if(childGeneration===generation){const durationMs=Date.now()-workerStartedAt;patch(type,{status:'FAILED',phase:'FAILED',message:error?.message||String(error),durationMs});console.warn('[CE-QC][V335_THREE_HISTORY_WORKER_FAILED]',JSON.stringify({type,toDate,durationMs,error:error?.message||String(error)}));}});
+  running.on('exit',code=>{
+    clearTimer();const durationMs=Date.now()-workerStartedAt,stale=childGeneration!==generation,state=states.get(type)||{},queuedAgain=queue.has(type);
+    if(stale){clearSmallCaches(type);patch(type,{status:queuedAgain?'QUEUED':'IDLE',phase:queuedAgain?'QUEUED':'STALE_AFTER_MUTATION',cacheReady:false,cacheBlocked:true,cacheVersion:0,completedAt:'',message:queuedAgain?'历史成员已变化，等待新一轮独立缓存':'历史成员已变化，旧worker结果已丢弃；下次读取将重新建立缓存',durationMs});}
+    else if(['STARTING','RUNNING','QUEUED'].includes(String(state.status||'').toUpperCase()))patch(type,{status:code===0?'COMPLETED':'FAILED',phase:code===0?'DONE':'FAILED',cacheReady:code===0||Boolean(state.cacheReady),cacheBlocked:code===0?false:Boolean(state.cacheBlocked),message:code===0?(state.message||'后台校准完成'):`后台校准子进程退出 code=${code}`,durationMs});
+    if(code!==0&&String(states.get(type)?.phase||'')!=='TIMEOUT')console.warn('[CE-QC][V335_THREE_HISTORY_WORKER_EXIT]',JSON.stringify({type,toDate,code,durationMs,status:states.get(type)?.status}));
+    child=null;currentType='';workerStartedAt=0;setTimeout(spawnNext,500).unref?.();
   });
 }
 export function invalidateV328EvidenceRepair(reason='HISTORY_MEMBERSHIP_MUTATION'){
   generation+=1;queue.clear();clearSmallCaches();
   for(const type of TYPE_SET)patch(type,{status:'IDLE',phase:'INVALIDATED',toDate:'',cacheReady:false,cacheBlocked:true,cacheVersion:0,completedAt:'',message:`历史缓存已失效：${reason}`});
-  if(child){try{child.kill();}catch{}}
+  if(child){try{child.kill();}catch{}}clearTimer();
   return{ok:true,id:V328_EVIDENCE_COORDINATOR_ID,generation,reason};
 }
 export function requestV328EvidenceRepair(businessType='',toDate=''){
@@ -59,4 +61,4 @@ export function requestV328EvidenceRepair(businessType='',toDate=''){
 }
 export function inspectV328EvidenceRepair(businessType=''){const type=String(businessType||'').toUpperCase();if(TYPE_SET.has(type))return{id:V328_EVIDENCE_COORDINATOR_ID,generation,...states.get(type)};return{id:V328_EVIDENCE_COORDINATOR_ID,generation,runningType:currentType,queue:[...queue.keys()],types:Object.fromEntries([...states.entries()])};}
 globalThis.__CE_QC_INVALIDATE_V329_THREE_BUSINESS_HISTORY__=invalidateV328EvidenceRepair;
-console.info('[CE-QC][V334_THREE_HISTORY_COORDINATOR]',V328_EVIDENCE_COORDINATOR_ID,'TBKH/CN/VN history cache is invalidated on membership mutations; stale child results are killed/cleared and cannot become authoritative.');
+console.info('[CE-QC][V335_THREE_HISTORY_COORDINATOR]',V328_EVIDENCE_COORDINATOR_ID,'TBKH/CN/VN history workers are observable and bounded to 120s; stale children cannot republish old history and failed workers can be retried.');
