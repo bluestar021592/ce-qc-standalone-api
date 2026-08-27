@@ -1,6 +1,6 @@
 (function installV138CcslScanProgress(global){
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
-  const VERSION='2026-08-16-v156-ccsl-final-progress-truth-v1';
+  const VERSION='2026-08-27-v332-selected-date-complete-progress-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
@@ -9,8 +9,11 @@
 
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
+  const normalizeDate=value=>{const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
+  const selectedReportDate=()=>normalizeDate(document.getElementById('reportDate')?.value||document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
   const statusText=progress=>{
     const status=String(progress?.runStatus||'').toLowerCase();
+    if(progress?.complete===true||progress?.zeroTicketDay===true)return '已完成';
     if(progress?.running)return '正在处理';
     if(progress?.paused||status==='paused')return '已暂停';
     if(status==='finished'||status==='completed')return '已完成';
@@ -20,10 +23,13 @@
 
   async function read(type){
     try{
-      const response=await fetch(`/api/v33/run-progress?businessType=${encodeURIComponent(type)}`,{cache:'no-store',credentials:'same-origin'});
+      const normalizedType=String(type||'CCSL').toUpperCase();
+      const reportDate=normalizedType==='CCSL'?selectedReportDate():'';
+      const suffix=reportDate?`&reportDate=${encodeURIComponent(reportDate)}`:'';
+      const response=await fetch(`/api/v33/run-progress?businessType=${encodeURIComponent(normalizedType)}${suffix}`,{cache:'no-store',credentials:'same-origin'});
       if(!response.ok)return null;
       const value=await response.json();
-      if(value?.ok!==false)progressByType.set(type,value);
+      if(value?.ok!==false)progressByType.set(normalizedType,value);
       return value;
     }catch{return null;}
   }
@@ -37,6 +43,11 @@
 
   function finalMarkup(progress={}){
     const status=statusText(progress);
+    if(progress?.zeroTicketDay===true&&status==='已完成'){
+      return `<span class="status-pill success">${esc(progress.businessType||'CCSL')} 已完成</span>`
+        +'<p>当前阶段：已完成</p>'
+        +'<p>当日有效日报CCSL为0票，无需启动订单扫描或轨迹查询。</p>';
+    }
     const failed=Number(progress.scanRetry||0)+Number(progress.trackRetry||0);
     const skipped=Number(progress.podLockSkipped||0);
     const pillClass=status==='已完成'?'success':(status==='待重试'?'warning':'warning');
@@ -66,7 +77,7 @@
     if(!progress)return;
     const status=document.getElementById('ccslRunStatus');
     const button=document.querySelector('[data-testid="global-auto-process"]');
-    if(status)status.innerHTML=markup(progress);
+    if(status){status.innerHTML=markup(progress);status.dataset.v332ProgressState=statusText(progress)==='已完成'?'done':'active';}
     if(button&&button.disabled&&progress.running){
       const p=phase(progress);
       button.textContent=`${progress.businessType||'CCSL'} ${p.label} ${p.done}/${p.total}${p.retry?` · 重试${p.retry}`:''}`;
@@ -80,7 +91,7 @@
       const [ccsl,shopee]=await Promise.all([read('CCSL'),read('SHOPEE')]);
       const active=[ccsl,shopee].find(item=>item?.running===true);
       if(active)render(active);
-      else if(ccsl?.runId)render(ccsl);
+      else if(ccsl?.complete===true||ccsl?.zeroTicketDay===true||ccsl?.runId)render(ccsl);
     }finally{polling=false;}
   }
 
@@ -91,7 +102,7 @@
       const type=String(state?.businessType||'CCSL').toUpperCase()==='SHOPEE'?'SHOPEE':'CCSL';
       const live=progressByType.get(type);
       const sameDate=!live?.reportDate||!state?.reportDate||String(live.reportDate)===String(state.reportDate);
-      if(live?.runId&&sameDate)return markup(live);
+      if((live?.runId||live?.complete===true||live?.zeroTicketDay===true)&&sameDate)return markup(live);
       return original.apply(this,arguments);
     };
     wrapped.__v138TruthfulProgress=true;
@@ -104,6 +115,6 @@
     setTimeout(tick,150);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,phase,progressByType};
-  console.info('[CE-QC][V156_CCSL_FINAL_PROGRESS]',VERSION);
+  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,phase,progressByType,selectedReportDate};
+  console.info('[CE-QC][V332_CCSL_FINAL_PROGRESS]',VERSION,'CCSL progress reads the selected report date and renders proven zero-ticket completion as green completed instead of stale 0/0 pending.');
 })(window);
