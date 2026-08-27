@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v334-canonical-detail-history-ownership-v2';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v334-canonical-detail-history-ownership-v3';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -20,10 +20,11 @@ const V318_SINGLE_SIDEBAR_MARKER='/v318-single-sidebar-owner.js?v=20260826-v318-
 const V319_TREND_CACHE_MARKER='/v319-trend-cache-first.js?v=20260826-v319-1';
 const V320_HISTORY_TREND_MARKER='/v320-history-trend-owner.js?v=20260827-v334-1';
 const V320_HISTORY_TREND_V329_COMPAT_MARKER='/v320-history-trend-owner.js?v=20260827-v329-1';
-const V328_ATTEMPT_MARKER='/v328-three-business-attempt-owner.js?v=20260827-v329-1';
+const V328_ATTEMPT_MARKER='/v328-three-business-attempt-owner.js?v=20260827-v334-1';
+const V328_ATTEMPT_V329_COMPAT_MARKER='/v328-three-business-attempt-owner.js?v=20260827-v329-1';
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
-void V299_FIRST_ATTEMPT_COMPAT_MARKER;void V311_RECOVERY_V332_COMPAT_MARKER;void V311_RECOVERY_COMPAT_MARKER;void V317_CCSL_RECOVERY_V332_COMPAT_MARKER;void V317_CCSL_RECOVERY_V330_COMPAT_MARKER;void V317_CCSL_RECOVERY_COMPAT_MARKER;void V320_HISTORY_TREND_V329_COMPAT_MARKER;void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
+void V299_FIRST_ATTEMPT_COMPAT_MARKER;void V311_RECOVERY_V332_COMPAT_MARKER;void V311_RECOVERY_COMPAT_MARKER;void V317_CCSL_RECOVERY_V332_COMPAT_MARKER;void V317_CCSL_RECOVERY_V330_COMPAT_MARKER;void V317_CCSL_RECOVERY_COMPAT_MARKER;void V320_HISTORY_TREND_V329_COMPAT_MARKER;void V328_ATTEMPT_V329_COMPAT_MARKER;void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
 // V300 recursive observer is no longer delivered. V301 remains the nonrecursive runtime-stability owner.
 // Recovery owners remain active for checkpoint continuation, but V334 keeps canonical status/detail/history ownership isolated.
 express.response.send=function v334FirstAttemptUiSend(body){
@@ -58,4 +59,4 @@ express.response.send=function v334FirstAttemptUiSend(body){
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V334_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V138 canonical V317 detail + V168 canonical summary + V320 saved-history trend + V295 saved-history first-attempt trend are browser-cache busted together.');
+console.info('[CE-QC][V334_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V138 canonical V317 detail + V168 canonical summary + V320 saved-history trend + V295 first-attempt + V328 attempt trend owners are browser-cache busted together.');
