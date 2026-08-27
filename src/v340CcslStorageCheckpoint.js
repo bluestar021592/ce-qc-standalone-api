@@ -2,7 +2,7 @@ import * as originalStorage from './storage.js';
 import { getDb, nowIso } from './db.js';
 export * from './storage.js';
 
-export const V340_CCSL_FAST_CHECKPOINT_ID='2026-08-27-v340-ccsl-light-checkpoint-large-db-v1';
+export const V340_CCSL_FAST_CHECKPOINT_ID='2026-08-27-v341-ccsl-light-checkpoint-fail-open-v1';
 const SCAN_FULL_MIRROR_STRIDE=4;
 const TRACK_FULL_MIRROR_STRIDE=8;
 
@@ -52,8 +52,10 @@ function lightCheckpoint(state={}){
   const now=nowIso();
   const counts=progressCounts(state);
   const db=getDb();
-  db.exec('BEGIN IMMEDIATE');
   try{
+    // Progress persistence is deliberately non-transactional and fail-open.
+    // It is an optimization only; authoritative facts are written by periodic/full
+    // mirrors. A busy/locked SQLite progress write must never abort the QC run.
     db.prepare(`UPDATE run_locks SET status='running',currentStage=?,batchIndex=?,totalBatches=?,errorMessage='',updatedAt=? WHERE reportDate=? AND runId=?`)
       .run(processing.phase||'',Number(processing.batchIndex||0),Number(processing.totalBatches||0),now,date,runId);
     db.prepare(`INSERT INTO run_checkpoints(runId,reportDate,stage,batchIndex,totalBatches,status,payloadJson,errorMessage,createdAt,updatedAt)
@@ -70,8 +72,17 @@ function lightCheckpoint(state={}){
           runStatus:'running'
         }
       }),now,now);
-    db.exec('COMMIT');
-  }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
+  }catch(error){
+    console.warn('[CE-QC][V341_CCSL_CHECKPOINT_SKIPPED]',JSON.stringify({
+      reportDate:date,
+      runId,
+      phase:String(processing.phase||''),
+      batchIndex:Number(processing.batchIndex||0),
+      code:String(error?.code||''),
+      message:String(error?.message||error||'').slice(0,300),
+      policy:'FAIL_OPEN_BUSINESS_PIPELINE_CONTINUES'
+    }));
+  }
   return state;
 }
 
@@ -80,12 +91,13 @@ export async function saveState(state={}){
   return originalStorage.saveState(state);
 }
 
-console.info('[CE-QC][V340_CCSL_FAST_CHECKPOINT]',JSON.stringify({
+console.info('[CE-QC][V341_CCSL_FAST_CHECKPOINT]',JSON.stringify({
   id:V340_CCSL_FAST_CHECKPOINT_ID,
   scanFullMirrorEveryBatches:SCAN_FULL_MIRROR_STRIDE,
   trackFullMirrorEveryBatches:TRACK_FULL_MIRROR_STRIDE,
   finalBatchAlwaysFullMirror:true,
   lightCheckpointWrites:'run_locks+run_checkpoints only',
+  lightCheckpointFailurePolicy:'FAIL_OPEN_NEVER_ABORT_CCSL',
   factTruth:'full mirror checkpoints + final snapshot remain authoritative',
   policy:'LARGE_DB_AVOID_FULL_STATE_REWRITE_EVERY_BATCH'
 }));
