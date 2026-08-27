@@ -15,6 +15,7 @@ import './v295FirstAttemptInvalidationPatch.js';
 import './v322WebAvailabilityPatch.js';
 import './v308DeliveryDailyFastPath.js';
 import './v308DashboardReadBridgeInjection.js';
+import './v334GenericTrendRoutePatch.js';
 import './v319TrendCacheFastPatch.js';
 import './v295FirstAttemptUiInjectionPatch.js';
 
