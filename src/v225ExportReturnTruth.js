@@ -6,14 +6,14 @@ import { collectV320HistoricalExportRows, V320_HISTORICAL_EXPORT_ROWS_ID } from 
 import { applyV320DispatchSigningTruth, V320_DISPATCH_SIGNING_TRUTH_ID } from './v320DispatchSigningTruth.js';
 
 export const V200_EXPORT_VERSION = BASE_EXPORT_VERSION;
-export const V225_EXPORT_RETURN_TRUTH_ID = '2026-08-26-v320-full-history-nonblocking-evidence-export-v1';
+export const V225_EXPORT_RETURN_TRUTH_ID = '2026-08-27-v329-first-report-pod-export-signing-v1';
 const STRICT_DELIVERY_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const DAILY_MEMBERSHIP_TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 // Compatibility marker for pre-V320 source assertions only: applyV294ExportAttemptSigningTruth.
-// Runtime ownership moved to applyV320DispatchSigningTruth because the old V294 pass
-// measured report-membership-date -> POD and aborted export on optional evidence gaps.
 const normalizeBill=v=>String(v||'').trim().toUpperCase();
 const dateKey=v=>{const m=String(v||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';};
+const dayNumber=value=>{const d=dateKey(value);if(!d)return null;const [y,m,day]=d.split('-').map(Number);return Date.UTC(y,m-1,day);};
+const inclusiveDays=(a,b)=>{const x=dayNumber(a),y=dayNumber(b);return x===null||y===null||y<x?0:Math.floor((y-x)/86400000)+1;};
 const chunks=(values,size=220)=>{const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;};
 function markReturned(row,source='退回终态'){if(!row||row.pod)return row;row.returned=true;row.pending=false;row.delivering=false;row.statusCode=row.statusCode||'R';row.statusDesc='RETURNED';row.returnSource=source;if(row.evidence?.add)row.evidence.add(source);return row;}
 function applyShopee1203SavedTrackTruth(type,rows){
@@ -22,6 +22,7 @@ function applyShopee1203SavedTrackTruth(type,rows){
   return rows;
 }
 function normalizeTerminalExclusion(rows){for(const row of rows){if(!row)continue;if(row.pod){row.returned=false;row.pending=false;row.delivering=false;continue;}if(row.returned){row.pending=false;row.delivering=false;row.statusCode=row.statusCode||'R';row.statusDesc=row.statusDesc||'RETURNED';}}return rows;}
+function applyV329FirstReportSigning(rows){for(const row of rows){if(!row?.pod)continue;const first=dateKey(row.firstReportDate||row.lifecycleFirstReportDate||row.dailyMembershipDates?.[0]),pod=dateKey(row.podDate||row.podTime||row.POD时间),days=inclusiveDays(first,pod);row.signingDays=days;row.deliveryDays=days;row.signingDaysSource=days>0?'首次日报锁定日期→实际POD日期（含首尾）':'';row.deliveryDaysSource=row.signingDaysSource;row.signingEvidenceComplete=days>0;row.v329SigningTruth='FIRST_REPORT_LOCK_TO_ACTUAL_POD';}return rows;}
 function normalizeMembershipDates(row,range){const from=dateKey(range?.from),to=dateKey(range?.to),dates=[...new Set((Array.isArray(row?.dailyMembershipDates)?row.dailyMembershipDates:[row?.firstReportDate]).map(dateKey).filter(Boolean))].filter(d=>(!from||d>=from)&&(!to||d<=to)).sort();return dates;}
 function expandDailyMembership(rows,range){const expanded=[];for(const row of rows){const dates=normalizeMembershipDates(row,range);for(const reportDate of dates)expanded.push({...row,reportMembershipDate:reportDate,dailyMembershipDates:[reportDate]});}return expanded;}
 function evidenceDiagnostics(type,rows){
@@ -33,14 +34,12 @@ export async function collectV200Rows(type,range,onProgress=()=>{}){
   const businessType=String(type||'').trim().toUpperCase();
   let rows=await collectV320HistoricalExportRows(businessType,range,onProgress);
   applyShopee1203SavedTrackTruth(businessType,rows);normalizeTerminalExclusion(rows);
-  // Keep the historical V230 pass for compatibility, then V320 overwrites attempt/signing
-  // with the corrected saved-event rule: real first dispatch START -> real POD.
+  // Attempts remain strict START/failure-cycle truth. V329 then overwrites only the
+  // signing-day field with the user KPI: first report lock -> actual POD inclusive.
   applyV230AttemptSigningTruth(businessType,rows);
   applyV320DispatchSigningTruth(businessType,rows,{db:getDb()});
+  applyV329FirstReportSigning(rows);
   const diag=evidenceDiagnostics(businessType,rows);
-  // V320 deliberately does NOT fail the whole workbook just because optional
-  // attempt/signing evidence is incomplete. Known values are exported; unknowns
-  // remain explicit. True source-membership loss is still guarded below.
   for(const row of rows){row.exportEvidencePartial=diag.partial;row.exportAttemptMissing=diag.attemptMissing;row.exportSigningMissing=diag.signingMissing;row.v320ExportTruthId=V225_EXPORT_RETURN_TRUTH_ID;}
   rows=DAILY_MEMBERSHIP_TYPES.has(businessType)?expandDailyMembership(rows,range):rows;
   const keys=rows.map(row=>`${dateKey(row.reportMembershipDate||row.dailyMembershipDates?.[0])}|${normalizeBill(row.shipmentCode)}`),unique=new Set(keys.filter(key=>!key.startsWith('|')));
@@ -50,4 +49,4 @@ export async function collectV200Rows(type,range,onProgress=()=>{}){
   return rows;
 }
 
-console.info('[CE-QC][V320_EXPORT_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,'export reads full persisted history; optional attempt/signing gaps are warnings rather than fatal errors; average days use real dispatch START→POD samples.');
+console.info('[CE-QC][V329_EXPORT_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,'attempts use strict START/failure cycles; signing days use first report locked date -> actual POD inclusive; missing POD dates remain explicit rather than fabricated.');
