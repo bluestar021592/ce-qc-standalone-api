@@ -15,10 +15,10 @@ export function ccslRecoveryDecision({hasDaily=false,complete=false,lockStatus='
   if(validUnified&&Number.isFinite(total)&&total===0){
     return{complete:true,paused:false,needsResume:false,action:'ZERO_TICKET_COMPLETE',zeroTicketDay:true};
   }
-  if(!hasDaily)return{complete:false,paused:false,needsResume:false,action:'NO_DAILY',zeroTicketDay:false};
-  if(complete)return{complete:true,paused:false,needsResume:false,action:'COMPLETE',zeroTicketDay:false};
-  if(status==='paused')return{complete:false,paused:true,needsResume:false,action:'PAUSED',zeroTicketDay:false};
-  if(status==='finished')return{complete:false,paused:false,needsResume:true,action:'REOPEN_FINISHED',zeroTicketDay:false};
-  if(status)return{complete:false,paused:false,needsResume:true,action:'RESUME_EXISTING',zeroTicketDay:false};
-  return{complete:false,paused:false,needsResume:true,action:'CREATE_AND_RESUME',zeroTicketDay:false};
+  if(!hasDaily)return{complete:false,paused:false,needsResume:false,action:'NO_DAILY'};
+  if(complete)return{complete:true,paused:false,needsResume:false,action:'COMPLETE'};
+  if(status==='paused')return{complete:false,paused:true,needsResume:false,action:'PAUSED'};
+  if(status==='finished')return{complete:false,paused:false,needsResume:true,action:'REOPEN_FINISHED'};
+  if(status)return{complete:false,paused:false,needsResume:true,action:'RESUME_EXISTING'};
+  return{complete:false,paused:false,needsResume:true,action:'CREATE_AND_RESUME'};
 }
