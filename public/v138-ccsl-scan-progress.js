@@ -1,6 +1,6 @@
 (function installV138CcslScanProgress(global){
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
-  const VERSION='2026-08-27-v334-canonical-v317-ccsl-detail-v1';
+  const VERSION='2026-08-27-v338-ccsl-350-scan-50-track-ui-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
@@ -65,7 +65,7 @@
 
   function phase(progress={}){
     const raw=String(progress.phase||'').trim();
-    if(/扫描|scan|order/i.test(raw))return {label:'订单扫描',done:Number(progress.scanDone||0),retry:Number(progress.scanRetry||0),observed:Number(progress.scanObserved||0),total:Number(progress.scanTotal||0),batchMax:100};
+    if(/扫描|scan|order/i.test(raw))return {label:'订单扫描',done:Number(progress.scanDone||0),retry:Number(progress.scanRetry||0),observed:Number(progress.scanObserved||0),total:Number(progress.scanTotal||0),batchMax:350};
     if(/轨迹|track/i.test(raw))return {label:'轨迹查询',done:Number(progress.trackDone||0),retry:Number(progress.trackRetry||0),observed:Number(progress.trackObserved||0),total:Number(progress.trackTotal||0),batchMax:50};
     return {label:raw||'准备处理',done:Number(progress.done||0),retry:Number(progress.retry||0),observed:Number(progress.done||0)+Number(progress.retry||0),total:Number(progress.total||0),batchMax:0};
   }
@@ -95,7 +95,7 @@
     const pillClass=status==='已完成'?'success':(status==='待重试'?'warning':'warning');
     return `<span class="status-pill ${pillClass}">${esc(progress.businessType||'CCSL')} ${esc(status)}</span>`
       +`<p>当前阶段：${esc(status==='已完成'?'已完成':(progress.phase||status))}</p>`
-      +`<p>订单扫描：成功 ${fmt(progress.scanDone)} / ${fmt(progress.scanTotal)}${Number(progress.scanRetry||0)?` · 待重试 ${fmt(progress.scanRetry)}`:''} · 单批最大100</p>`
+      +`<p>订单扫描：成功 ${fmt(progress.scanDone)} / ${fmt(progress.scanTotal)}${Number(progress.scanRetry||0)?` · 待重试 ${fmt(progress.scanRetry)}`:''} · 单批最大350</p>`
       +`<p>轨迹查询：成功 ${fmt(progress.trackDone)} / ${fmt(progress.trackTotal)}${Number(progress.trackRetry||0)?` · 待重试 ${fmt(progress.trackRetry)}`:''} · 单批最大50</p>`
       +(skipped?`<p class="muted">历史POD锁直接闭环 ${fmt(skipped)} 票，无需重复请求CE接口。</p>`:'')
       +(failed?`<p class="muted">仍有 ${fmt(failed)} 票接口待重试，不能按完整完成处理。</p>`:'');
@@ -107,7 +107,7 @@
     const batchText=batches>0?` · 当前批次 ${batch||1}/${batches}`:'';
     const retryText=p.retry>0?` · <b>待重试 ${fmt(p.retry)}</b>`:'';
     const last=String(progress.lastMessage||'').trim();
-    const scanHint=p.label==='订单扫描'?'<p class="muted">当日日报与历史跨日遗留已分离；CE扫描单批最多100票，失败票在主流程结束后至少补偿重试3轮。</p>':'';
+    const scanHint=p.label==='订单扫描'?'<p class="muted">当日日报与历史跨日遗留已分离；CE订单扫描固定350票/批，轨迹查询固定50票/批；失败票按限时失败前进机制进入补偿重试，不阻塞后续批次。</p>':'';
     return `<span class="status-pill warning">${esc(progress.businessType||'CCSL')} 正在处理 · ${esc(p.label)}</span>`
       +`<p>${esc(p.label)}：成功 ${fmt(p.done)} / ${fmt(p.total)}${retryText}${batchText}</p>`
       +`<p class="muted">已产生结果 ${fmt(p.observed)} / ${fmt(p.total)}${p.batchMax?` · 单批最大${p.batchMax}`:''}</p>`
@@ -168,5 +168,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
   global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth};
-  console.info('[CE-QC][V334_CCSL_DETAIL_OWNER]',VERSION,'V138 first reads canonical V317 selected-date truth; zero-ticket/no-daily states cannot fall through to legacy V33 0/0 pending progress.');
+  console.info('[CE-QC][V338_CCSL_DETAIL_OWNER]',VERSION,'V138 canonical selected-date truth; CCSL scan=350 tickets/batch and trajectory=50 tickets/batch.');
 })(window);
