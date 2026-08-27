@@ -16,11 +16,13 @@ assert.ok(dashboard.includes("const TYPES=new Set(['CE','CEAF','TBKH','ALI1688',
 assert.ok(dashboard.includes("const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];"), 'CCSL aggregate must contain CE/CEAF/TBKH/ALI1688 only');
 assert.ok(dashboard.includes("const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];"), 'Shopee aggregate must keep CN/VN separate');
 assert.ok(dashboard.includes("p.businessType='WHPP'"), 'WHPP must read only WHPP daily parse rows');
-assert.ok(dashboard.includes("u.businessType='CEAF'"), 'WHPP fallback must explicitly de-duplicate CEAF overlap');
-assert.ok(dashboard.includes('NOT EXISTS'), 'WHPP/CEAF overlap must be excluded instead of double-counted');
+assert.ok(dashboard.includes("u.businessType='CEAF'"), 'WHPP de-dup must explicitly compare against CEAF membership');
+assert.ok(dashboard.includes("latestBatchForType(date,'CEAF'"), 'WHPP de-dup must resolve CEAF own latest same-date VALID snapshot instead of the globally latest unrelated batch');
+assert.ok(dashboard.includes('Math.max(0,raw-overlap)'), 'WHPP/CEAF overlap must be subtracted exactly once instead of double-counted');
 assert.ok(v284.includes("p.businessType='WHPP'"), 'V284 WHPP daily membership must stay bound to WHPP parse rows');
 assert.ok(v284.includes("u.businessType='CEAF'"), 'V284 must inherit the historical WHPP/CEAF overlap exclusion instead of losing it during truth consolidation');
 assert.ok(v284.includes('NOT EXISTS'), 'V284 WHPP daily membership must exclude CEAF overlap before any metric is calculated');
+assert.ok(v284.includes('PARTITION BY reportDate,businessType ORDER BY createdAt DESC,batchId DESC'), 'V284 unified membership must rank latest VALID snapshots independently per date+business');
 
 // 2) Every daily percentage must use that same daily row as its denominator.
 assert.ok(dashboard.includes('row.podRate=pct(row.pod,row.total);row.ocRate=pct(row.ocCurrent,row.total);row.sameDayPodRate=pct(row.sameDayPod,row.total);'), 'daily POD/OC/same-day POD rates must divide by the same row total');
@@ -38,7 +40,8 @@ assert.ok(v284.includes('const hasAttempt=row.pod>0&&known>0;'), 'Shopee trend m
 assert.ok(v284.includes('row.attempt1Rate=hasAttempt?pct(row.attempt1,row.pod):null'), 'missing attempt-1 evidence must stay unavailable');
 assert.ok(v284.includes('row.attempt2Rate=hasAttempt?pct(row.attempt2,row.pod):null'), 'missing attempt-2 evidence must stay unavailable');
 assert.ok(v284.includes('row.attempt3Rate=hasAttempt?pct(row.attempt3,row.pod):null'), 'missing attempt-3 evidence must stay unavailable');
-assert.ok(v284.includes('daily denominator=latest VALID report membership;'), 'V284 authority must explicitly retain latest-VALID daily membership');
+assert.ok(v284.includes('daily denominator=latest VALID report membership PER BUSINESS per date;'), 'V284 authority must explicitly retain per-business latest-VALID daily membership');
+assert.ok(v284.includes('unrelated same-day imports cannot zero another business'), 'V284 authority must lock same-date sibling-business isolation');
 assert.ok(v284.includes('status truth=V246 ledger first'), 'V284 authority must explicitly keep V246 lifecycle truth ahead of legacy final rows');
 
 // 4) Tracking admission and terminal truth must cover all seven boards and close only real terminal evidence.
@@ -65,4 +68,4 @@ assert.ok(facts.includes('pendingNonContinuous: pendingDates.length >= 2 && !pen
 // 7) Lifecycle/export consolidation is part of the same production gate.
 execFileSync(process.execPath, ['scripts/v268-lifecycle-export-smoke.cjs'], { stdio: 'inherit' });
 
-console.log('[V257/V284/V286] system calibration gate passed: 7-board isolation + WHPP/CEAF de-dup inheritance + daily membership denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
+console.log('[V257/V335/V286] system calibration gate passed: 7-board isolation + per-business same-date membership + WHPP/CEAF exact de-dup + daily denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
