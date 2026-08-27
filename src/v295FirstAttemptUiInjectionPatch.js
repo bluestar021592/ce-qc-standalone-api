@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v334-canonical-detail-history-ownership-v3';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v334-canonical-detail-history-ownership-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
