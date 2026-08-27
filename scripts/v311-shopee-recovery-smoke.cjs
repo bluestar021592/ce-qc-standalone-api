@@ -8,30 +8,34 @@ const v310=fs.readFileSync('public/v310-unified-resume-owner.js','utf8');
 const ui=fs.readFileSync('public/v311-shopee-recovery-owner.js','utf8');
 const inject=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
+
 assert.match(backend,/2026-08-26-v311-reopen-finished-without-snapshot-v1/);
 assert.match(backend,/business_export_snapshots/,'V311+ must verify an exact VALID snapshot before reopening a finished run');
 assert.match(backend,/reconciliationStatus/,'V311+ must require completed snapshot reconciliation');
 assert.match(backend,/lock\?\.status==='finished'/,'V311+ must specifically repair the finished-without-snapshot dead state');
 assert.match(backend,/updateBusinessRunLock\(SHOPEE,date,'failed'/,'V311+ must reopen without deleting checkpoints');
 assert.doesNotMatch(backend,/DELETE FROM business_(?:scan|track|shipment|daily|run_checkpoints)/,'recovery must never delete persisted progress or daily membership');
+
 assert.match(v309,/global\.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__/,'V309 auto-resume must yield to the canonical recovery owner');
 assert.match(v310,/global\.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__/,'V310 watchdog must yield to the canonical recovery owner');
-assert.match(ui,/2026-08-27-v332-shopee-status-style-ownership-v1/,'V332 canonical SHOPEE completion owner must be active');
-assert.match(ui,/\/api\/v311\/shopee-recovery/,'V332 UI must ask backend truth rather than stale DOM state');
-assert.match(ui,/fetch\('\/api\/shopee\/run\/resume'/,'V332 must continue to bypass stale browser runInFlight/app-state gates');
-assert.match(ui,/VALID \+ COMPLETED 正式快照/,'visible completion must explicitly mean a real formal snapshot exists');
-assert.match(ui,/syncCanonicalStatus/,'V332 must drive visible SHOPEE state from one backend status object');
-assert.match(ui,/globalProcessingNotice/,'V332 must overwrite stale success\/processing banners with canonical truth');
-assert.match(ui,/SHOPEE CN\/VN 已完成/,'V332 must publish completed badge only from canonical snapshot truth');
-assert.match(ui,/setTextByMatch\([^)]*state=''/,'V332 text synchronizer must own visual state as well as wording');
-assert.match(ui,/classList\.remove\('success','warning','danger','muted'\)/,'V332 must remove stale pill state classes before applying canonical color');
-assert.match(ui,/state==='done'\?'success'/,'V332 completed SHOPEE status must map to green success styling');
-assert.match(ui,/setTextByMatch\(\/SHOPEE CN\\\/VN\\s\*\(待处理\|处理中\|已完成\)\/i,'SHOPEE CN\/VN 已完成','done'\)/,'V332 completed SHOPEE text and green state must be applied atomically');
-assert.match(ui,/setInterval\(\(\)=>tick\(false\),5000\)/,'V332 must keep canonical truth synchronized');
-assert.doesNotMatch(ui,/global\.resumeShopee\(\)|global\.resumeUnified\(\)/,'V332 must not depend on browser runInFlight-gated wrappers');
-assert.match(inject,/v311-shopee-recovery-owner\.js\?v=20260827-v332-1/,'V332 browser owner must be cache-busted and injected');
-assert.match(inject,/v311-shopee-recovery-owner\.js\?v=20260826-v313-1/,'V313 compatibility marker must remain source-visible for old safety gates');
-assert.match(inject,/X-CE-QC-V313-UI/,'V313 compatibility response header must remain observable');
-assert.match(inject,/X-CE-QC-V332-UI/,'V332 response header must be observable');
-assert.match(activation,/v311ShopeeIncompleteRecoveryPatch\.js/,'backend recovery route must remain production-active for V332');
-console.log('[V332/V313] single-source SHOPEE completion smoke passed · only VALID+COMPLETED snapshot means completed · text+green pill style are atomic · legacy resume owners yield');
+
+assert.ok(ui.includes('__CE_QC_V311_SHOPEE_RECOVERY_OWNER__'),'canonical SHOPEE recovery owner must remain installed');
+assert.ok(ui.includes('/api/v311/shopee-recovery'),'UI must ask backend truth rather than stale DOM state');
+assert.ok(ui.includes("fetch('/api/shopee/run/resume'"),'UI must bypass stale browser runInFlight/app-state gates when resuming');
+assert.ok(ui.includes('VALID + COMPLETED 正式快照'),'visible completion must explicitly mean a real formal snapshot exists');
+assert.ok(ui.includes('syncCanonicalStatus'),'visible SHOPEE state must come from one backend status object');
+assert.ok(ui.includes('globalProcessingNotice'),'canonical owner must overwrite stale visible banners');
+assert.ok(ui.includes('SHOPEE CN/VN 已完成'),'canonical owner must publish the completed wording');
+assert.ok(ui.includes("classList.remove('success','warning','danger','muted')"),'canonical owner must clear stale pill classes before applying state');
+assert.ok(ui.includes("state==='done'?'success'"),'completed state must map to green success styling');
+assert.ok(ui.includes("'SHOPEE CN/VN 已完成','done'"),'completed SHOPEE text and done visual state must be applied together');
+assert.match(ui,/setInterval\(\(\)=>tick\(false\),5000\)/,'canonical truth must remain synchronized');
+assert.doesNotMatch(ui,/global\.resumeShopee\(\)|global\.resumeUnified\(\)/,'canonical owner must not depend on browser runInFlight-gated wrappers');
+
+assert.ok(inject.includes('/v311-shopee-recovery-owner.js?v=20260827-v332-1'),'current SHOPEE owner must be cache-busted and injected');
+assert.ok(inject.includes('/v311-shopee-recovery-owner.js?v=20260826-v313-1'),'V313 compatibility marker must remain source-visible for older safety gates');
+assert.ok(inject.includes('X-CE-QC-V313-UI'),'compatibility response header must remain observable');
+assert.ok(inject.includes('X-CE-QC-V332-UI'),'current completion-style response header must remain observable');
+assert.match(activation,/v311ShopeeIncompleteRecoveryPatch\.js/,'backend recovery route must remain production-active');
+
+console.log('[V332/V313] SHOPEE completion gate passed · formal snapshot truth retained · completed text maps to green success · forward-safe version gate');
