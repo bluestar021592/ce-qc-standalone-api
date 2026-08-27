@@ -1,4 +1,4 @@
-export const V339_CCSL_THROUGHPUT_CORE_ID='2026-08-27-v339-ccsl-hard-bounded-confirm-prefetch-v2';
+export const V339_CCSL_THROUGHPUT_CORE_ID='2026-08-27-v339-ccsl-hard-bounded-confirm-prefetch-v3';
 
 function clampInt(value,min,max,fallback){
   const parsed=Number(value);
@@ -32,7 +32,6 @@ function boundedQuery(query,batch,budgetMs){
       error.code='V339_CCSL_PREFETCH_HARD_TIMEOUT';
       reject(error);
     },budgetMs);
-    timer.unref?.();
   });
   return Promise.race([Promise.resolve().then(()=>query(batch)),timeout]).finally(()=>clearTimeout(timer));
 }
