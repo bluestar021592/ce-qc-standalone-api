@@ -32,21 +32,28 @@ assert.match(route,/path\s*===\s*'\/api\/v234\/trends'/,'authenticated V234 tren
 assert.match(route,/path\s*===\s*'\/api\/shopee\/state'/,'compact Shopee state ownership must remain present');
 assert.match(coalescer,/CACHE_MS=15_000/,'current-summary reads must remain coalesced');
 
-// Preserve metric definitions. V253 changes the read path, not the business denominator.
+// Preserve metric definitions. V335 changes same-date source ownership, not the business denominator.
 assert.match(current,/out\.ocRate=pct\(out\.ocCurrent,out\.total\)/,'OC rate must remain current OC / daily total');
 assert.match(current,/out\.sameDayPodRate=pct\(out\.sameDayPod,out\.total\)/,'same-day POD rate must remain same-day POD / daily total');
-assert.match(cache,/AS ocCurrent/,'cache maintenance must retain current OC evidence');
-assert.match(cache,/AS sameDayPod/,'cache maintenance must retain same-day POD evidence');
+assert.match(current,/latestBatchForType\(date,type\)/,'current cards must select latest VALID snapshots independently per business');
+assert.match(current,/PER_BUSINESS_LATEST_VALID/,'current summary must expose per-business source ownership');
+assert.match(cache,/AS ocCurrent/,'legacy cache maintenance must retain current OC evidence');
+assert.match(cache,/AS sameDayPod/,'legacy cache maintenance must retain same-day POD evidence');
 assert.match(trend,/V240_EXACT_DAILY_RATE_CACHE_ONLY/,'legacy cache reader remains available as maintenance/fallback evidence');
 
-// V253 owns visible first paint. It must not wait for dashboard_daily_cache.
+// V253 now owns only nonblocking first paint. Same-day truth comes from V236 per-business ownership; saved history is owned by V334/V320.
 assert.match(runtime,/import '\.\/v253DashboardFastPath\.js';/,'V253 fast backend must activate before server registration');
 assert.match(runtime,/primeDashboardCacheInChild\(delayMs\s*=\s*60_000\)/,'cache maintenance must be delayed away from first paint');
 assert.match(runtime,/MAX_PRIME_ATTEMPTS\s*=\s*4/,'delayed maintenance retry count must remain bounded');
 assert.match(runtime,/dashboard cache prime child exit code=/,'delayed cache maintenance must remain observable');
 assert.match(runtime,/CE_QC_SKIP_STARTUP_POD_REPAIR/,'startup POD repair must remain outside interactive first paint');
-assert.doesNotMatch(fastPath,/dashboard_daily_cache/,'V253 visible trend path must be cache-independent');
-assert.match(fastPath,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'V253 must expose cache-independent trend ownership');
+assert.doesNotMatch(fastPath,/dashboard_daily_cache/,'V253 visible first-paint path must not trust legacy global dashboard cache');
+assert.match(fastPath,/V253_V335_FIRST_PAINT_ID='2026-08-27-v335-per-business-first-paint-v1'/,'V253 must expose V335 per-business first-paint ownership');
+assert.match(fastPath,/readV236CurrentSummary/,'same-day V253 truth must reuse per-business V236 current truth');
+assert.match(fastPath,/V335_PER_BUSINESS_SINGLE_DAY_FIRST_PAINT_NO_HISTORY_SCAN/,'same-day V253 must not scan saved history');
+assert.match(fastPath,/readV284DashboardTrends/,'explicit multi-day ranges may use canonical daily membership truth');
+assert.doesNotMatch(fastPath,/function latestBatches\(/,'retired one-global-snapshot-per-date helper must not return');
+assert.doesNotMatch(fastPath,/PARTITION BY reportDate ORDER BY createdAt DESC/,'same-date businesses must never share one global latest snapshot');
 assert.match(fastPath,/!registered\s*&&\s*path\s*===\s*'\/api\/v234\/trends'/,'V253 endpoints must register only when the authenticated dashboard route is registered');
 
 // V253 must arrive in <head> before older dashboard clients and redirect their slow reads.
@@ -55,12 +62,12 @@ assert.match(inject,/X-CE-QC-V253-UI/,'V253 delivery must be observable in respo
 assert.match(fastOwner,/\/api\/v89\/instant-dashboard/,'legacy slow first-paint summary must be intercepted');
 assert.match(fastOwner,/\/api\/v253\/instant-dashboard/,'first-paint summary must use V253');
 assert.match(fastOwner,/\/api\/v234\/trends/,'legacy cache-dependent trend reads must be intercepted');
-assert.match(fastOwner,/\/api\/v253\/trends/,'visible trend reads must use V253');
+assert.match(fastOwner,/\/api\/v253\/trends/,'visible same-day fast reads must use V253 before V334 history owner paints saved trends');
 assert.match(fastOwner,/sessionStorage/,'repeat navigation must reuse last confirmed data while refreshing');
 assert.match(fastOwner,/removeHomeLegacyAttempts/,'obsolete homepage dual attempt charts must be removed');
 
-// The old cache worker remains a bounded background maintenance job only.
+// The old cache worker remains a bounded background maintenance job only; it is not canonical same-date ownership anymore.
 assert.match(worker,/WORKER_LEASE_MS\s*=\s*5\s*\*\s*60_000/,'dashboard cache lease must remain bounded to five minutes');
 assert.match(worker,/cleared stale dashboard-cache lease/,'worker must still recover stale cache leases');
 
-console.log('[V253/V247] cache-independent first paint + retained V240 metric contract + single-owner performance guards passed');
+console.log('[V335/V253/V247] per-business first paint + retained metric contract + single-owner performance guards passed');
