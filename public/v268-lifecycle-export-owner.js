@@ -1,7 +1,7 @@
 (function installV268LifecycleExportOwner(global){
   if(global.__CE_QC_V268_LIFECYCLE_EXPORT__)return;
   global.__CE_QC_V268_LIFECYCLE_EXPORT__=true;
-  const ID='2026-08-23-v271-navigation-safe-lifecycle-export-v2';
+  const ID='2026-08-27-v330-navigation-safe-lifecycle-export-v3';
   const TYPES=['ALL','CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
   let exportBusy=false;
   let observer=null;
@@ -9,9 +9,14 @@
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const text=n=>String(n?.textContent||'').trim();
   const byId=id=>document.getElementById(id);
+  const V271_RETIRED_MARKER='/v271-canonical-integrity-owner.js?v=20260823-v271-1';
+  void V271_RETIRED_MARKER;
   function loadV271(){
-    if(global.__CE_QC_V271_CANONICAL_INTEGRITY__||document.getElementById('v271CanonicalIntegrityScript'))return;
-    const s=document.createElement('script');s.id='v271CanonicalIntegrityScript';s.src='/v271-canonical-integrity-owner.js?v=20260823-v271-1';s.async=false;(document.body||document.documentElement).appendChild(s);
+    // V330: the old V271 owner performed its own 9s trend reads and automatic retries,
+    // competing with the cache-only V329/V330 owner. Keep a poison pill for stale tabs,
+    // but never append the legacy script in a fresh session.
+    if(!global.__CE_QC_V271_CANONICAL_INTEGRITY__)global.__CE_QC_V271_CANONICAL_INTEGRITY__={id:'retired-by-v330',retired:true};
+    document.getElementById('v271CanonicalIntegrityScript')?.remove();
   }
   function khDate(date=new Date()){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Phnom_Penh',year:'numeric',month:'2-digit',day:'2-digit'}).format(date);}
   function dateKey(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||''))?String(value):'';}
@@ -151,5 +156,5 @@
     if(records.some(r=>[...r.addedNodes].some(n=>n.nodeType===1)))scheduleEnhance();
   });
   observer.observe(document.documentElement,{subtree:true,childList:true});
-  console.info('[CE-QC][V271_NAVIGATION_SAFE]',ID,'V271 canonical integrity owner loaded without click interception; lifecycle/export consolidation remains idempotent.');
+  console.info('[CE-QC][V271_NAVIGATION_SAFE]',ID,'V271 trend owner retired without click interception; lifecycle/export consolidation remains idempotent and cache-only dashboard ownership stays authoritative.');
 })(window);
