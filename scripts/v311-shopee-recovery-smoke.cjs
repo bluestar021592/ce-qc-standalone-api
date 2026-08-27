@@ -1,11 +1,12 @@
 const fs=require('fs');
 const assert=require('assert/strict');
 const {execFileSync}=require('child_process');
-for(const file of ['src/v311ShopeeIncompleteRecoveryPatch.js','public/v309-ui-integrity.js','public/v310-unified-resume-owner.js','public/v311-shopee-recovery-owner.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v311ShopeeIncompleteRecoveryPatch.js','public/v309-ui-integrity.js','public/v310-unified-resume-owner.js','public/v311-shopee-recovery-owner.js','public/v168-seven-business-status.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const backend=fs.readFileSync('src/v311ShopeeIncompleteRecoveryPatch.js','utf8');
 const v309=fs.readFileSync('public/v309-ui-integrity.js','utf8');
 const v310=fs.readFileSync('public/v310-unified-resume-owner.js','utf8');
 const ui=fs.readFileSync('public/v311-shopee-recovery-owner.js','utf8');
+const seven=fs.readFileSync('public/v168-seven-business-status.js','utf8');
 const inject=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 
@@ -19,23 +20,28 @@ assert.doesNotMatch(backend,/DELETE FROM business_(?:scan|track|shipment|daily|r
 assert.match(v309,/global\.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__/,'V309 auto-resume must yield to the canonical recovery owner');
 assert.match(v310,/global\.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__/,'V310 watchdog must yield to the canonical recovery owner');
 
-assert.ok(ui.includes('__CE_QC_V311_SHOPEE_RECOVERY_OWNER__'),'canonical SHOPEE recovery owner must remain installed');
-assert.ok(ui.includes('/api/v311/shopee-recovery'),'UI must ask backend truth rather than stale DOM state');
-assert.ok(ui.includes("fetch('/api/shopee/run/resume'"),'UI must bypass stale browser runInFlight/app-state gates when resuming');
-assert.ok(ui.includes('VALID + COMPLETED 正式快照'),'visible completion must explicitly mean a real formal snapshot exists');
-assert.ok(ui.includes('syncCanonicalStatus'),'visible SHOPEE state must come from one backend status object');
-assert.ok(ui.includes('globalProcessingNotice'),'canonical owner must overwrite stale visible banners');
-assert.ok(ui.includes('SHOPEE CN/VN 已完成'),'canonical owner must publish the completed wording');
-assert.ok(ui.includes("classList.remove('success','warning','danger','muted')"),'canonical owner must clear stale pill classes before applying state');
-assert.ok(ui.includes("state==='done'?'success'"),'completed state must map to green success styling');
-assert.ok(ui.includes("'SHOPEE CN/VN 已完成','done'"),'completed SHOPEE text and done visual state must be applied together');
-assert.match(ui,/setInterval\(\(\)=>tick\(false\),5000\)/,'canonical truth must remain synchronized');
-assert.doesNotMatch(ui,/global\.resumeShopee\(\)|global\.resumeUnified\(\)/,'canonical owner must not depend on browser runInFlight-gated wrappers');
+assert.ok(ui.includes('2026-08-27-v333-shopee-recovery-no-summary-mutation-v1'),'V333 SHOPEE recovery owner must be active');
+assert.ok(ui.includes('__CE_QC_V311_SHOPEE_RECOVERY_OWNER__'),'SHOPEE recovery owner must remain installed');
+assert.ok(ui.includes('/api/v311/shopee-recovery'),'recovery UI must ask backend truth rather than stale DOM state');
+assert.ok(ui.includes("fetch('/api/shopee/run/resume'"),'recovery UI must bypass stale browser runInFlight/app-state gates when resuming');
+assert.ok(ui.includes('VALID + COMPLETED 正式快照'),'SHOPEE completion notice must still mean a real formal snapshot exists');
+assert.ok(ui.includes('syncCanonicalStatus'),'recovery state must still come from one backend status object');
+assert.ok(ui.includes('globalProcessingNotice'),'SHOPEE recovery may own its process notice');
+assert.doesNotMatch(ui,/getElementById\('ccslRunStatus'\)/,'SHOPEE recovery must never mutate the CCSL detail panel');
+assert.doesNotMatch(ui,/sevenBusinessStageSummary/,'SHOPEE recovery must never mutate the canonical seven-business summary');
+assert.doesNotMatch(ui,/querySelectorAll\('#importPage \.status-pill/,'SHOPEE recovery must not scan/repaint status pills owned by V168/V138');
+assert.match(ui,/setInterval\(\(\)=>tick\(false\),5000\)/,'recovery truth must remain synchronized');
+assert.doesNotMatch(ui,/global\.resumeShopee\(\)|global\.resumeUnified\(\)/,'recovery owner must not depend on browser runInFlight-gated wrappers');
 
-assert.ok(inject.includes('/v311-shopee-recovery-owner.js?v=20260827-v332-1'),'current SHOPEE owner must be cache-busted and injected');
+assert.match(seven,/2026-08-27-v333-canonical-seven-business-owner-v1/,'V168 V333 must own canonical summary text and colors');
+assert.match(seven,/postJson\('\/api\/v311\/shopee-recovery',[\s\S]*action: 'status'/,'V168 must read the same canonical SHOPEE recovery truth used by the recovery owner');
+assert.match(seven,/stageFromShopeeRecovery/,'V168 must derive SHOPEE stage from canonical recovery payload');
+
+assert.ok(inject.includes('/v311-shopee-recovery-owner.js?v=20260827-v333-1'),'V333 SHOPEE recovery owner must be cache-busted and injected');
+assert.ok(inject.includes('/v311-shopee-recovery-owner.js?v=20260827-v332-1'),'V332 compatibility marker must remain source-visible for older safety gates');
 assert.ok(inject.includes('/v311-shopee-recovery-owner.js?v=20260826-v313-1'),'V313 compatibility marker must remain source-visible for older safety gates');
-assert.ok(inject.includes('X-CE-QC-V313-UI'),'compatibility response header must remain observable');
-assert.ok(inject.includes('X-CE-QC-V332-UI'),'current completion-style response header must remain observable');
+assert.ok(inject.includes('X-CE-QC-V332-UI'),'V332 compatibility response header must remain observable');
+assert.ok(inject.includes('X-CE-QC-V333-UI'),'V333 response header must be observable');
 assert.match(activation,/v311ShopeeIncompleteRecoveryPatch\.js/,'backend recovery route must remain production-active');
 
-console.log('[V332/V313] SHOPEE completion gate passed · formal snapshot truth retained · completed text maps to green success · forward-safe version gate');
+console.log('[V333/V313] SHOPEE recovery isolation smoke passed · recovery stays checkpoint-safe · V168 alone owns summary · CCSL detail is never repainted by SHOPEE');
