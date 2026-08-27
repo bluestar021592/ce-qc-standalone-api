@@ -1,5 +1,5 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v329-three-business-cache-injection-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v330-three-business-cache-injection-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
@@ -18,7 +18,7 @@ const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
 void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
 // V300 recursive observer is no longer delivered. V301 remains the nonrecursive runtime-stability owner.
-express.response.send=function v329FirstAttemptUiSend(body){
+express.response.send=function v330FirstAttemptUiSend(body){
   if(typeof body==='string'&&body.includes('</body>')&&body.includes('CE Express')){
     const tags=[];
     if(!body.includes(CLEAN_START_MARKER))tags.push(`  <script src="${CLEAN_START_MARKER}"></script>`);
@@ -36,8 +36,9 @@ express.response.send=function v329FirstAttemptUiSend(body){
     if(!body.includes(V328_ATTEMPT_MARKER))tags.push(`  <script src="${V328_ATTEMPT_MARKER}"></script>`);
     if(tags.length)body=body.replace('</body>',`${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V295-UI',V295_FIRST_ATTEMPT_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V301-UI','2026-08-25-v301-nonrecursive-runtime-stability-v1');
     this.setHeader?.('X-CE-QC-V329-UI','2026-08-27-v329-three-business-cache-ui-v1');
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V329_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'TBKH/CN/VN history table, trend and 1/2/3 attempt chart reuse one nonblocking cache payload.');
+console.info('[CE-QC][V330_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,'V301 nonrecursive stability + TBKH/CN/VN history table, trend and 1/2/3 attempt chart reuse one nonblocking cache payload.');
