@@ -1,6 +1,6 @@
 (function installV311ShopeeRecoveryOwner(global){
   if(global.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__)return;
-  const VERSION='2026-08-26-v313-single-source-shopee-completion-v1';
+  const VERSION='2026-08-27-v332-shopee-status-style-ownership-v1';
   let busy=false,lastRunAt=0,timer=null;
   const date=v=>String(v||'').slice(0,10);
   function reportDate(){
@@ -20,9 +20,16 @@
     if(code==='RUN_ALREADY_ACTIVE')return{ok:true,alreadyRunning:true,code};
     const error=new Error(data?.error||data?.message||`SHOPEE续跑失败（HTTP ${response.status}）`);error.code=code;throw error;
   }
-  function setTextByMatch(re,value){
+  function setTextByMatch(re,value,state=''){
     document.querySelectorAll('#importPage .status-pill,#importPage span,#importPage b').forEach(node=>{
-      const t=String(node.textContent||'').replace(/\s+/g,' ').trim();if(re.test(t))node.textContent=value;
+      const t=String(node.textContent||'').replace(/\s+/g,' ').trim();if(!re.test(t))return;
+      node.textContent=value;
+      if(state&&node.classList?.contains('status-pill')){
+        const cls=state==='done'?'success':state==='failed'?'danger':(state==='running'||state==='paused'?'warning':'muted');
+        node.classList.remove('success','warning','danger','muted');
+        node.classList.add(cls);
+        node.dataset.v332ShopeeState=state;
+      }
     });
   }
   function canonicalNotice(mode,status={}){
@@ -34,20 +41,20 @@
     if(mode==='complete'){
       if(top){top.hidden=false;top.className='global-processing-notice success';top.innerHTML='<span><strong>SHOPEE处理完成</strong> · 已生成 VALID + COMPLETED 正式快照</span>';top.dataset.v313Truth='complete';}
       if(detail){detail.innerHTML='<span class="status-pill success">SHOPEE 已完成 · 正式快照已生成</span>';detail.dataset.v313Truth='complete';}
-      setTextByMatch(/SHOPEE CN\/VN\s*(待处理|处理中|已完成)/i,'SHOPEE CN/VN 已完成');
-      setTextByMatch(/^尚未全部完成$/,'全部完成');
+      setTextByMatch(/SHOPEE CN\/VN\s*(待处理|处理中|已完成)/i,'SHOPEE CN/VN 已完成','done');
+      // Overall completion is owned only by V168 after CCSL + SHOPEE CN/VN + WHPP are aligned to the same date.
       return;
     }
     if(mode==='running'){
       if(top){top.hidden=false;top.className='global-processing-notice warning';top.innerHTML=`<span><strong>SHOPEE处理中</strong>${progress}</span>`;top.dataset.v313Truth='running';}
       if(detail){detail.innerHTML=`<span class="status-pill warning">SHOPEE 正在处理${progress}</span>`;detail.dataset.v313Truth='running';}
-      setTextByMatch(/SHOPEE CN\/VN\s*(待处理|处理中|已完成)/i,'SHOPEE CN/VN 处理中');
+      setTextByMatch(/SHOPEE CN\/VN\s*(待处理|处理中|已完成)/i,'SHOPEE CN/VN 处理中','running');
       return;
     }
     if(mode==='waiting'){
       if(top){top.hidden=false;top.className='global-processing-notice warning';top.innerHTML='<span><strong>SHOPEE尚未完成</strong> · 正在从已保存断点恢复</span>';top.dataset.v313Truth='waiting';}
       if(detail){detail.innerHTML='<span class="status-pill warning">SHOPEE 尚未完成 · 正在恢复断点</span>';detail.dataset.v313Truth='waiting';}
-      setTextByMatch(/SHOPEE CN\/VN\s*(待处理|处理中|已完成)/i,'SHOPEE CN/VN 待处理');
+      setTextByMatch(/SHOPEE CN\/VN\s*(待处理|处理中|已完成)/i,'SHOPEE CN/VN 待处理','pending');
     }
   }
   function syncCanonicalStatus(status={}){
@@ -87,5 +94,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__={version:VERSION,tick,reportDate,directResume,syncCanonicalStatus,canonicalNotice};
-  console.info('[CE-QC][V313_RECOVERY_UI]',VERSION,'the only authoritative visible SHOPEE completion state is backend VALID+COMPLETED snapshot truth; legacy V309/V310 resume owners yield to this owner, so top notice and bottom badges cannot disagree.');
+  console.info('[CE-QC][V313_RECOVERY_UI]',VERSION,'SHOPEE owner synchronizes text + pill color only for SHOPEE; overall seven-business completion remains exclusively owned by aligned V168 truth.');
 })(window);
