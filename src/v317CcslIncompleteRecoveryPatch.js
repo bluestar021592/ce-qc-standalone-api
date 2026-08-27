@@ -19,6 +19,9 @@ function latestDailyDate(db){return String(db.prepare('SELECT reportDate FROM da
 function resolveDate(db){
   return chooseCcslReportDate({latestValidUnified:latestValidUnifiedDate(db),currentState:currentStateDate(db),lastProcessed:lastProcessedDate(db),latestDaily:latestDailyDate(db)});
 }
+function latestValidUnifiedBatch(db,reportDate){
+  return db.prepare("SELECT batchId,snapshotId,reportDate FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(reportDate)||null;
+}
 function latestValidSnapshot(db,reportDate){
   return db.prepare(`SELECT snapshotId,runId,status,reconciliationStatus,generatedAt
     FROM export_snapshots
@@ -27,8 +30,9 @@ function latestValidSnapshot(db,reportDate){
       AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
     ORDER BY id DESC LIMIT 1`).get(reportDate)||null;
 }
-function ccslMemberCount(db,reportDate){
-  const snapshotId=String(db.prepare("SELECT snapshotId FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(reportDate)?.snapshotId||'');
+function ccslMemberCount(db,reportDate,batch=null){
+  const resolved=batch||latestValidUnifiedBatch(db,reportDate);
+  const snapshotId=String(resolved?.snapshotId||'');
   if(snapshotId){
     return Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) count FROM unified_import_rows
       WHERE snapshotId=? AND reportDate=? AND businessType IN ('CE','CEAF','TBKH','ALI1688')`).get(snapshotId,reportDate)?.count||0);
@@ -41,15 +45,17 @@ export function inspectV317CcslRecovery({db=getDb(),reportDate=''}={}){
   const requested=String(reportDate||'').trim();
   const date=canonical||requested;
   if(!date)return{ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,reportDate:'',dailyExists:false,sourceTotal:0,complete:false,paused:false,needsResume:false,action:'NO_DAILY',reason:'NO_CCSL_DAILY'};
-  const sourceTotal=ccslMemberCount(db,date);
-  const hasDaily=sourceTotal>0||Boolean(db.prepare('SELECT 1 FROM daily_reports WHERE reportDate=? LIMIT 1').get(date));
-  const snapshot=hasDaily?latestValidSnapshot(db,date):null;
-  const lock=hasDaily?getRunStatus(date).lock:null;
-  const decision=ccslRecoveryDecision({hasDaily,complete:Boolean(snapshot),lockStatus:lock?.status||''});
+  const validBatch=latestValidUnifiedBatch(db,date);
+  const sourceTotal=ccslMemberCount(db,date,validBatch);
+  const hasDaily=Boolean(validBatch)||sourceTotal>0||Boolean(db.prepare('SELECT 1 FROM daily_reports WHERE reportDate=? LIMIT 1').get(date));
+  const snapshot=sourceTotal>0&&hasDaily?latestValidSnapshot(db,date):null;
+  const lock=sourceTotal>0&&hasDaily?getRunStatus(date).lock:null;
+  const decision=ccslRecoveryDecision({hasDaily,complete:Boolean(snapshot),lockStatus:lock?.status||'',validUnified:Boolean(validBatch),sourceTotal});
   return{
     ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,
-    reportDate:date,dailyExists:hasDaily,sourceTotal,complete:decision.complete,paused:decision.paused,
-    needsResume:decision.needsResume,action:decision.action,snapshotId:snapshot?.snapshotId||'',
+    reportDate:date,dailyExists:hasDaily,validUnified:Boolean(validBatch),sourceTotal,complete:decision.complete,paused:decision.paused,
+    needsResume:decision.needsResume,action:decision.action,zeroTicketDay:Boolean(decision.zeroTicketDay),
+    reason:decision.zeroTicketDay?'VALID_UNIFIED_ZERO_CCSL_TICKETS':'',snapshotId:snapshot?.snapshotId||'',
     lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),updatedAt:lock.updatedAt||''}:null
   };
 }
@@ -88,4 +94,4 @@ express.application.post=function v317CcslIncompleteRecoveryPost(route,...handle
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,'current VALID unified CCSL membership survives process restart; incomplete non-paused CCSL runs are prepared for checkpoint-safe automatic continuation without deleting scan/track evidence.');
+console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,'current VALID unified CCSL membership survives restart; valid zero-ticket CCSL days close immediately without creating/retrying a run; nonzero incomplete days resume from checkpoints.');
