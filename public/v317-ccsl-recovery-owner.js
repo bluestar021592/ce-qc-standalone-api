@@ -37,7 +37,11 @@
     const progress=stage?` · ${stage}${total>0?` ${batch}/${total}`:''}`:'';
     if(mode==='complete'){
       setCcslBadge('CCSL 已完成');
-      if(detail)detail.innerHTML='<span class="status-pill success">CCSL 已完成 · 正式快照已生成</span>';
+      if(detail){
+        detail.innerHTML=status.zeroTicketDay
+          ?'<span class="status-pill success">CCSL 已完成 · 当日0票，无需处理</span><p>有效日报已确认CCSL队列为0，不创建处理任务、不重试、不要求空快照。</p>'
+          :'<span class="status-pill success">CCSL 已完成 · 正式快照已生成</span>';
+      }
       return;
     }
     if(mode==='paused'){
@@ -82,5 +86,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V317_CCSL_RECOVERY_OWNER__={version:VERSION,tick,reportDate,directStart,sync};
-  console.info('[CE-QC][V317_CCSL_RECOVERY_UI]',VERSION,'CCSL restart recovery runs from every application page, is independent of SHOPEE completion, and respects explicit pause state.');
+  console.info('[CE-QC][V317_CCSL_RECOVERY_UI]',VERSION,'valid zero-ticket CCSL days render completed without starting/retrying a run; nonzero incomplete days resume checkpoint-safely and explicit pause remains respected.');
 })(window);
