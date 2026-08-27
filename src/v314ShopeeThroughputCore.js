@@ -1,4 +1,5 @@
 export const V314_SHOPEE_THROUGHPUT_CORE_ID = '2026-08-26-v314-bounded-prefetch-fast-checkpoint-v2';
+export const V339_CCSL_THROUGHPUT_CORE_ID = '2026-08-27-v339-ccsl-bounded-confirm-prefetch-v1';
 
 export function clampInt(value, min, max, fallback) {
   const parsed = Number(value);
@@ -9,6 +10,7 @@ export function clampInt(value, min, max, fallback) {
 export const V314_EVENT_CONCURRENCY = clampInt(process.env.SHOPEE_EVENT_CONCURRENCY, 1, 4, 4);
 export const V314_EXCEPTION_CONCURRENCY = clampInt(process.env.SHOPEE_EXCEPTION_CONCURRENCY, 1, 4, 4);
 export const V314_CONFIRM_CONCURRENCY = clampInt(process.env.SHOPEE_CONFIRM_CONCURRENCY, 1, 2, 2);
+export const V339_CCSL_CONFIRM_CONCURRENCY = clampInt(process.env.CCSL_CONFIRM_CONCURRENCY, 1, 2, 2);
 
 export function cleanShipmentCodes(values = []) {
   return [...new Set((values || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean))];
@@ -131,6 +133,32 @@ export function createBoundedPrefetchPool({
     request,
     stats: () => ({ active, queued: queue.length, cached: cache.size, planned: plannedKeys.size, launched })
   };
+}
+
+export function createCcslThroughputClient(state = {}, client, options = {}) {
+  if (!client || typeof client !== 'object') return client;
+  const confirmQuery = typeof client.confirmQuery === 'function' ? client.confirmQuery.bind(client) : null;
+  if (!confirmQuery) return client;
+  const pool = createBoundedPrefetchPool({
+    getSourceBills: () => state.scanPool || state.pnhBills || [],
+    getStatusRows: () => state.scanQueryStatus || [],
+    batchSize: 350,
+    concurrency: options.confirmConcurrency || V339_CCSL_CONFIRM_CONCURRENCY,
+    query: confirmQuery,
+    label: 'CCSL-confirm-query',
+    // CCSL pipeline keeps stable 350-ticket source chunks, then removes bills
+    // already proven successful inside each chunk. Match that shape exactly so
+    // checkpoint resume and adaptive fallback semantics are unchanged.
+    planMode: 'stable-filter'
+  });
+  return new Proxy(client, {
+    get(target, prop) {
+      if (prop === 'confirmQuery') return codes => pool.request(codes);
+      if (prop === '__v339CcslConfirmPool') return pool;
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
 }
 
 export function createShopeeThroughputClient(state = {}, client, options = {}) {
