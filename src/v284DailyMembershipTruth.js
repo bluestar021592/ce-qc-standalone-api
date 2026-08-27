@@ -5,6 +5,7 @@ export const V284_DAILY_MEMBERSHIP_TRUTH_ID = '2026-08-27-v335-per-business-late
 // Legacy source-gate compatibility markers only. The old global-date ranking is retired and MUST NOT execute.
 // 2026-08-24-v284-daily-membership-ledger-truth-v1
 // ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.batchId DESC) rn
+// source:'LATEST_VALID_DAILY_MEMBERSHIP_JOIN_V246_LEDGER_FINAL_FALLBACK'
 // V335 executable membership ranking is reportDate + businessType, so later same-date imports cannot erase sibling businesses.
 export const V284_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const UNIFIED_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
