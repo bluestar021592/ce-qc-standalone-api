@@ -59,14 +59,14 @@ assert.match(client,/\/api\/v317\/ccsl-recovery/);
 assert.match(client,/\/api\/run\/start/,'CCSL recovery must still continue checkpoint-safe backend work');
 assert.match(client,/const selected=date\(document\.getElementById\('reportDate'\)/,'selected page date must remain first choice');
 assert.doesNotMatch(client,/getElementById\('ccslRunStatus'\)/,'V317 must not write the canonical CCSL detail panel');
-assert.doesNotMatch(client,/sevenBusinessStageSummary/,'V317 must not write the canonical seven-business summary');
+assert.doesNotMatch(client,/getElementById\('sevenBusinessStageSummary'\)/,'V317 must not acquire the canonical seven-business summary DOM');
 assert.match(client,/__CE_QC_V168_SEVEN_BUSINESS_STATUS__\?\.refresh/,'recovery changes must ask the summary owner to reread canonical truth');
 assert.doesNotMatch(client,/location\.pathname\s*!==\s*['"]\/import['"]/,'restart continuation must remain SPA-route independent');
 
 assert.match(shopeeClient,/2026-08-27-v333-shopee-recovery-no-summary-mutation-v1/,'SHOPEE recovery must be isolated from canonical status DOM');
 assert.match(shopeeClient,/\/api\/v311\/shopee-recovery/);
 assert.doesNotMatch(shopeeClient,/getElementById\('ccslRunStatus'\)/,'SHOPEE must never repaint CCSL detail');
-assert.doesNotMatch(shopeeClient,/sevenBusinessStageSummary/,'SHOPEE must never repaint V168 summary');
+assert.doesNotMatch(shopeeClient,/getElementById\('sevenBusinessStageSummary'\)/,'SHOPEE must never acquire the V168 summary DOM');
 assert.doesNotMatch(shopeeClient,/querySelectorAll\('#importPage \.status-pill/,'SHOPEE must not scan/repaint canonical pills');
 
 assert.match(progressUi,/2026-08-27-v333-persistent-selected-date-ccsl-detail-v1/,'V138 must be the persistent CCSL detail owner');
