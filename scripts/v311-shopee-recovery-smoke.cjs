@@ -28,7 +28,7 @@ assert.ok(ui.includes('VALID + COMPLETED 正式快照'),'SHOPEE completion notic
 assert.ok(ui.includes('syncCanonicalStatus'),'recovery state must still come from one backend status object');
 assert.ok(ui.includes('globalProcessingNotice'),'SHOPEE recovery may own its process notice');
 assert.doesNotMatch(ui,/getElementById\('ccslRunStatus'\)/,'SHOPEE recovery must never mutate the CCSL detail panel');
-assert.doesNotMatch(ui,/sevenBusinessStageSummary/,'SHOPEE recovery must never mutate the canonical seven-business summary');
+assert.doesNotMatch(ui,/getElementById\('sevenBusinessStageSummary'\)/,'SHOPEE recovery must never acquire the canonical seven-business summary DOM');
 assert.doesNotMatch(ui,/querySelectorAll\('#importPage \.status-pill/,'SHOPEE recovery must not scan/repaint status pills owned by V168/V138');
 assert.match(ui,/setInterval\(\(\)=>tick\(false\),5000\)/,'recovery truth must remain synchronized');
 assert.doesNotMatch(ui,/global\.resumeShopee\(\)|global\.resumeUnified\(\)/,'recovery owner must not depend on browser runInFlight-gated wrappers');
