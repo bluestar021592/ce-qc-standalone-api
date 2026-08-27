@@ -86,4 +86,5 @@ for(const [type,total] of [['SHOPEECN',2],['SHOPEEVN',3],['CEAF',1]]){
 assert.match(V320_HISTORICAL_DAILY_TRUTH_ID,/v335-per-business-latest-valid-history/);
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V335] per-business same-date membership runtime smoke passed · later CN cannot zero VN/CEAF · foreign CN-stamped VN zero cache is rejected · V308 restores VN own POD/region facts · V236 current + V284 canonical + V320 history all select independent latest VALID snapshots');
+execFileSync(process.execPath,['scripts/v336-launcher-safe-update-smoke.cjs'],{stdio:'inherit'});
+console.log('[V335/V336] per-business same-date membership runtime smoke passed · later CN cannot zero VN/CEAF · foreign CN-stamped VN zero cache is rejected · V308 restores VN own POD/region facts · V236 current + V284 canonical + V320 history select independent latest VALID snapshots · V336 launcher safety gate chained');
