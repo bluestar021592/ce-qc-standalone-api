@@ -29,4 +29,20 @@ assert.ok(backupDb > stopRuntime, 'SQLite backup must happen after current runti
 assert.ok(installExact > backupDb, 'live code must not change before verified SQLite backup');
 assert.ok(verifyInstalled > installExact, 'installed candidate must be verified after exact-SHA install');
 
-console.log('[V336] launcher safety smoke passed · exact candidate tested before install · test DB isolated · SQLite backup hash+quick_check verified · exact SHA installed · local startup verified · automatic code+DB rollback armed');
+const managed = fs.readFileSync('tools/CE_QC_Managed_Launcher.ps1', 'utf8');
+assert.ok(managed.includes('function Invoke-ResilientGitHubFetch'), 'managed launcher must own bounded GitHub fetch recovery');
+assert.ok(managed.includes('Resolve-DnsName github.com'), 'managed launcher must query explicit DNS when Windows DNS fails');
+assert.ok(managed.includes("foreach ($server in @('1.1.1.1','8.8.8.8'))"), 'managed launcher must have independent public DNS resolvers');
+assert.ok(managed.includes('http.curloptResolve=$script:GitHubCurlResolve'), 'managed launcher must bypass broken resolver without changing TLS hostname');
+assert.ok(managed.includes("for ($attempt = 1; $attempt -le 3; $attempt++)"), 'managed launcher must retry normal fetch before DNS fallback');
+assert.ok(managed.includes("Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')"), 'resolved Git transport must also be used for install pull');
+assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b|hosts\s*file/i.test(managed), 'managed launcher must never modify Windows DNS or hosts file');
+
+const repair = fs.readFileSync('tools/CE_QC_Repair_Managed_Launcher_Git_Fatal.cmd', 'utf8');
+assert.ok(repair.includes('Resolve-DnsName github.com'), 'emergency recovery must resolve GitHub independently');
+assert.ok(repair.includes('http.curloptResolve=github.com:443:'), 'emergency recovery must use temporary curl resolver override');
+assert.ok(repair.includes('CE_QC_Managed_Launcher.ps1'), 'emergency recovery must hand off to the existing verified managed updater');
+assert.ok(repair.includes(':restore_resolver'), 'temporary repo resolver config must always be restored');
+assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b/i.test(repair), 'emergency recovery must not alter adapter DNS');
+
+console.log('[V336] launcher safety smoke passed · exact candidate tested before install · test DB isolated · SQLite backup hash+quick_check verified · exact SHA installed · local startup verified · automatic code+DB rollback armed · managed launcher retries GitHub and uses temporary explicit-DNS fallback without system DNS mutation');
