@@ -3,7 +3,7 @@ import { getDb } from './db.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
 
-export const V352_WHPP_VISIBLE_TRUTH_OWNER_ID = '2026-08-28-v352-whpp-visible-single-truth-owner-v2';
+export const V352_WHPP_VISIBLE_TRUTH_OWNER_ID = '2026-08-28-v352-whpp-visible-single-truth-owner-v3';
 const SUMMARY_ROUTES = new Set(['/api/v132/whpp-fast-summary', '/api/v71/whpp-summary']);
 const DETAIL_ROUTES = new Set(['/api/v172/whpp-metric-detail', '/api/whpp/metric-detail']);
 const originalListen = express.application.listen;
@@ -99,8 +99,11 @@ function loadFacts(db, reportDate) {
 
 export function buildV352WhppVisibleDashboard({ reportDate = '', membershipRows = [], finalRows = [] } = {}) {
   const members = uniqueRows(membershipRows);
-  const memberSet = new Set(members.map(billOf));
-  const facts = uniqueRows(finalRows.map(normalizeSqlFinalFact)).filter(row => memberSet.has(billOf(row)));
+  const memberByBill = new Map(members.map(row => [billOf(row), row]));
+  const memberSet = new Set(memberByBill.keys());
+  const facts = uniqueRows(finalRows.map(normalizeSqlFinalFact))
+    .filter(row => memberSet.has(billOf(row)))
+    .map(row => ({ ...(memberByBill.get(billOf(row)) || {}), ...row }));
   const dashboard = buildWhppDashboard({
     businessType: 'WHPP',
     reportDate: dateOnly(reportDate),
@@ -245,7 +248,7 @@ console.log('[CE-QC][V352_WHPP_VISIBLE_TRUTH_OWNER]', JSON.stringify({
   summaryRoutes: [...SUMMARY_ROUTES],
   detailRoutes: [...DETAIL_ROUTES],
   membershipTruth: 'LATEST_VALID_UNIFIED_THEN_STANDARD_DAILY',
-  finalTruth: 'CURRENT_MEMBERS_ONLY_BUSINESS_FINAL_ROWS_WITH_SQL_ISPOD_IN_MEMORY_NORMALIZATION',
+  finalTruth: 'CURRENT_MEMBERS_ONLY_BUSINESS_FINAL_ROWS_WITH_SQL_ISPOD_IN_MEMORY_NORMALIZATION_AND_MEMBERSHIP_REGION_MERGE',
   invariant: 'TOP_EQUALS_PP_PLUS_PV_PLUS_UNKNOWN',
   summaryPayload: 'METRICS_REGIONS_ACCOUNTING_ONLY_DETAILS_LAZY',
   databaseWrites: false,
