@@ -8,6 +8,7 @@ import {
 } from './v295FirstAttemptMetric.js';
 
 export const V295_FIRST_ATTEMPT_TRUTH_ID = '2026-08-25-v295-first-attempt-range-truth-v1';
+export const V295_FIRST_ATTEMPT_QUERY_POLICY_ID = '2026-08-28-v344-index-friendly-shipment-lookups-v1';
 export const V295_FIRST_ATTEMPT_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const CCSL_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = Object.freeze(['SHOPEECN','SHOPEEVN']);
@@ -100,6 +101,9 @@ function ledgerByKey(rows, db) {
   return result;
 }
 
+// shipmentCode is normalized before persistence throughout the pipeline. Keep the indexed
+// column bare in large fact/event-table lookups; wrapping it in UPPER(TRIM(...)) forced
+// repeated full scans on the multi-gigabyte production SQLite database.
 function fallbackPodByMembership(rows, from, to, db) {
   const keys = new Set(rows.map(row => `${row.reportDate}|${row.businessType}|${row.shipmentCode}`));
   const out = new Map();
@@ -107,7 +111,7 @@ function fallbackPodByMembership(rows, from, to, db) {
   for (const part of chunks(bills, 220)) {
     const marks = part.map(() => '?').join(',');
     try {
-      for (const row of db.prepare(`SELECT reportDate,shipmentCode,isPod FROM final_rows WHERE reportDate BETWEEN ? AND ? AND UPPER(TRIM(shipmentCode)) IN (${marks})`).all(from, to, ...part)) {
+      for (const row of db.prepare(`SELECT reportDate,shipmentCode,isPod FROM final_rows WHERE reportDate BETWEEN ? AND ? AND shipmentCode IN (${marks})`).all(from, to, ...part)) {
         if (!Number(row.isPod || 0)) continue;
         for (const type of CCSL_TYPES) {
           const key = `${dateKey(row.reportDate)}|${type}|${billOf(row.shipmentCode)}`;
@@ -116,7 +120,7 @@ function fallbackPodByMembership(rows, from, to, db) {
       }
     } catch {}
     try {
-      for (const row of db.prepare(`SELECT reportDate,shipmentCode,isPod FROM business_final_rows WHERE businessType='SHOPEE' AND reportDate BETWEEN ? AND ? AND UPPER(TRIM(shipmentCode)) IN (${marks})`).all(from, to, ...part)) {
+      for (const row of db.prepare(`SELECT reportDate,shipmentCode,isPod FROM business_final_rows WHERE businessType='SHOPEE' AND reportDate BETWEEN ? AND ? AND shipmentCode IN (${marks})`).all(from, to, ...part)) {
         if (!Number(row.isPod || 0)) continue;
         for (const type of SHOPEE_TYPES) {
           const key = `${dateKey(row.reportDate)}|${type}|${billOf(row.shipmentCode)}`;
@@ -125,7 +129,7 @@ function fallbackPodByMembership(rows, from, to, db) {
       }
     } catch {}
     try {
-      for (const row of db.prepare(`SELECT reportDate,shipmentCode,isPod FROM business_final_rows WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? AND UPPER(TRIM(shipmentCode)) IN (${marks})`).all(from, to, ...part)) {
+      for (const row of db.prepare(`SELECT reportDate,shipmentCode,isPod FROM business_final_rows WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? AND shipmentCode IN (${marks})`).all(from, to, ...part)) {
         if (!Number(row.isPod || 0)) continue;
         const key = `${dateKey(row.reportDate)}|WHPP|${billOf(row.shipmentCode)}`;
         if (keys.has(key)) out.set(key, true);
@@ -152,7 +156,7 @@ function eventsByKey(rows, db) {
     const marks = part.map(() => '?').join(',');
     try {
       const found = db.prepare(`SELECT shipmentCode,eventTime,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,rawJson,id
-        FROM track_events WHERE UPPER(TRIM(shipmentCode)) IN (${marks}) ORDER BY shipmentCode,eventTime,id`).all(...part);
+        FROM track_events WHERE shipmentCode IN (${marks}) ORDER BY shipmentCode,eventTime,id`).all(...part);
       for (const event of found) for (const type of CCSL_TYPES) if (groupedBills.get(type)?.has(billOf(event.shipmentCode))) pushEvent(out, `${type}|${billOf(event.shipmentCode)}`, event);
     } catch {}
   }
@@ -161,7 +165,7 @@ function eventsByKey(rows, db) {
     const marks = part.map(() => '?').join(',');
     try {
       const found = db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,id FROM business_track_events
-        WHERE businessType='SHOPEE' AND UPPER(TRIM(shipmentCode)) IN (${marks}) ORDER BY shipmentCode,eventTime,id`).all(...part);
+        WHERE businessType='SHOPEE' AND shipmentCode IN (${marks}) ORDER BY shipmentCode,eventTime,id`).all(...part);
       for (const event of found) for (const type of SHOPEE_TYPES) if (groupedBills.get(type)?.has(billOf(event.shipmentCode))) pushEvent(out, `${type}|${billOf(event.shipmentCode)}`, event);
     } catch {}
   }
@@ -170,7 +174,7 @@ function eventsByKey(rows, db) {
     const marks = part.map(() => '?').join(',');
     try {
       const found = db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,id FROM business_track_events
-        WHERE businessType='WHPP' AND UPPER(TRIM(shipmentCode)) IN (${marks}) ORDER BY shipmentCode,eventTime,id`).all(...part);
+        WHERE businessType='WHPP' AND shipmentCode IN (${marks}) ORDER BY shipmentCode,eventTime,id`).all(...part);
       for (const event of found) pushEvent(out, `WHPP|${billOf(event.shipmentCode)}`, event);
     } catch {}
   }
@@ -222,7 +226,7 @@ export function summarizeV295FirstAttemptRange(fromDate, toDate, db = getDb()) {
   const home = mergeV295FirstAttemptFacts('HOME', [...CCSL_TYPES.map(type => byType[type]), byType.WHPP], { reportDate: to });
   const all = mergeV295FirstAttemptFacts('ALL', V295_FIRST_ATTEMPT_TYPES.map(type => byType[type]), { reportDate: to });
   const dates = [...new Set(members.map(row => row.reportDate))].sort();
-  const value = { ok: true, id: V295_FIRST_ATTEMPT_TRUTH_ID, metricId: V295_FIRST_ATTEMPT_METRIC_ID, fromDate: from, toDate: to, dates, daily, byType, ccsl, shopee, home, all, source: 'LATEST_VALID_DAILY_MEMBERSHIP + SAVED_REAL_TRACK_START/FAILURE_CYCLE + TERMINAL_POD_TRUTH' };
+  const value = { ok: true, id: V295_FIRST_ATTEMPT_TRUTH_ID, queryPolicyId: V295_FIRST_ATTEMPT_QUERY_POLICY_ID, metricId: V295_FIRST_ATTEMPT_METRIC_ID, fromDate: from, toDate: to, dates, daily, byType, ccsl, shopee, home, all, source: 'LATEST_VALID_DAILY_MEMBERSHIP + SAVED_REAL_TRACK_START/FAILURE_CYCLE + TERMINAL_POD_TRUTH' };
   cache.set(key, { at: Date.now(), value });
   return value;
 }
@@ -242,6 +246,7 @@ export function readV295FirstAttemptTrends(businessType = 'ALL', fromDate = '', 
   return {
     ok: true,
     id: V295_FIRST_ATTEMPT_TRUTH_ID,
+    queryPolicyId: V295_FIRST_ATTEMPT_QUERY_POLICY_ID,
     metricId: V295_FIRST_ATTEMPT_METRIC_ID,
     businessType: type,
     fromDate: truth.fromDate,
@@ -260,3 +265,4 @@ export function readV295FirstAttemptTrends(businessType = 'ALL', fromDate = '', 
 export function invalidateV295FirstAttemptTruth() { cache.clear(); }
 globalThis.__CE_QC_INVALIDATE_V295_FIRST_ATTEMPT__ = invalidateV295FirstAttemptTruth;
 console.info('[CE-QC][V295_FIRST_ATTEMPT_TRUTH]', V295_FIRST_ATTEMPT_TRUTH_ID, '首次妥投率=第一次派送成功/第一次派送尝试；首日POD保持独立；真实START缺失时不发布伪0%。');
+console.info('[CE-QC][V344_FIRST_ATTEMPT_INDEXED_QUERY]', V295_FIRST_ATTEMPT_QUERY_POLICY_ID, 'large final/event fact lookups keep shipmentCode bare so SQLite shipment indexes remain usable; metric semantics unchanged.');
