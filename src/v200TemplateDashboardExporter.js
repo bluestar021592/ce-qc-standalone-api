@@ -8,11 +8,14 @@ export { V200_EXPORT_VERSION } from './v225ExportReturnTruth.js';
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
 export { internalHyperlinkFormulaForV200 } from './v200ReferenceWorkbook.js';
 
+const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 function safeFileName(value = '') { return String(value || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim(); }
 function displayType(type) { return ({ SHOPEECN: 'SHOPEE CN', SHOPEEVN: 'SHOPEE VN' })[type] || type; }
 function periodLabel(periodType = 'custom') { return ({ daily: '日报', weekly: '周报', monthly: '月报', custom: '自定义日期' })[periodType] || '区间报表'; }
 function dateKey(value = '') { const m = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; }
 function membershipDate(row = {}) { return dateKey(row.reportMembershipDate || row.dailyMembershipDates?.[0] || row.firstReportDate); }
+function positiveDays(value) { const n = Number(value); return Number.isFinite(n) && n > 0; }
+function realAttempt(value) { const n = Number(value); return Number.isFinite(n) && n >= 1 && n <= 3; }
 
 export function assertV200ExportRange(rows = [], range = {}) {
   const from = dateKey(range.from), to = dateKey(range.to);
@@ -28,6 +31,52 @@ export function assertV200ExportRange(rows = [], range = {}) {
   return true;
 }
 
+export function assertShopeeExportTruth(businessType, rows = [], stats = {}) {
+  const type = String(businessType || '').toUpperCase();
+  if (!SHOPEE_TYPES.has(type)) return true;
+  const podRows = rows.filter(row => row?.pod === true);
+  const missingAttempt = podRows.filter(row => !realAttempt(row.attemptNo));
+  const missingPodDate = podRows.filter(row => !dateKey(row.podDate || row.podTime || row.POD时间));
+  const missingSigningDays = podRows.filter(row => !positiveDays(row.signingDays || row.deliveryDays));
+  const unknownRegion = rows.filter(row => !['金边', '外省'].includes(String(row.area || '')));
+  const o = stats.overall || {};
+  const reconciliation = {
+    total: Number(o.total || 0), pp: Number(o.pp || 0), pv: Number(o.pv || 0), unknown: Number(o.unknown || 0),
+    pod: Number(o.pod || 0), returned: Number(o.returned || 0), notPod: Number(o.notPod || 0),
+    a1: Number(o.a1 || 0), a2: Number(o.a2 || 0), a3: Number(o.a3 || 0), attemptUnknown: Number(o.attemptUnknown || 0),
+    signingSamples: Array.isArray(o.days) ? o.days.length : 0,
+    ppPod: Number(o.ppPod || 0), pvPod: Number(o.pvPod || 0),
+    ppSigningSamples: Array.isArray(o.ppDays) ? o.ppDays.length : 0,
+    pvSigningSamples: Array.isArray(o.pvDays) ? o.pvDays.length : 0
+  };
+  const failures = [];
+  if (unknownRegion.length || reconciliation.unknown !== 0 || reconciliation.pp + reconciliation.pv !== reconciliation.total) failures.push(`REGION:${unknownRegion.length}/${reconciliation.unknown}`);
+  if (reconciliation.pod + reconciliation.returned + reconciliation.notPod !== reconciliation.total) failures.push(`STATUS:${reconciliation.pod}+${reconciliation.returned}+${reconciliation.notPod}!=${reconciliation.total}`);
+  if (missingAttempt.length || reconciliation.attemptUnknown !== 0 || reconciliation.a1 + reconciliation.a2 + reconciliation.a3 !== reconciliation.pod) failures.push(`ATTEMPT:${missingAttempt.length}/${reconciliation.attemptUnknown}`);
+  if (missingPodDate.length) failures.push(`POD_DATE:${missingPodDate.length}`);
+  if (missingSigningDays.length || reconciliation.signingSamples !== reconciliation.pod) failures.push(`SIGNING:${missingSigningDays.length}/${reconciliation.signingSamples}/${reconciliation.pod}`);
+  if (reconciliation.ppSigningSamples !== reconciliation.ppPod) failures.push(`PP_SIGNING:${reconciliation.ppSigningSamples}/${reconciliation.ppPod}`);
+  if (reconciliation.pvSigningSamples !== reconciliation.pvPod) failures.push(`PV_SIGNING:${reconciliation.pvSigningSamples}/${reconciliation.pvPod}`);
+  for (const day of stats.daily || []) {
+    const total = Number(day.total || 0), pod = Number(day.pod || 0), returned = Number(day.returned || 0), notPod = Number(day.notPod || 0);
+    const a1 = Number(day.a1 || 0), a2 = Number(day.a2 || 0), a3 = Number(day.a3 || 0), unknown = Number(day.attemptUnknown || 0);
+    if (Number(day.pp || 0) + Number(day.pv || 0) !== total || Number(day.unknown || 0) !== 0) failures.push(`DAY_REGION:${day.date}`);
+    if (pod + returned + notPod !== total) failures.push(`DAY_STATUS:${day.date}`);
+    if (a1 + a2 + a3 !== pod || unknown !== 0) failures.push(`DAY_ATTEMPT:${day.date}`);
+    if ((day.days || []).length !== pod) failures.push(`DAY_SIGNING:${day.date}`);
+    if ((day.ppDays || []).length !== Number(day.ppPod || 0)) failures.push(`DAY_PP_SIGNING:${day.date}`);
+    if ((day.pvDays || []).length !== Number(day.pvPod || 0)) failures.push(`DAY_PV_SIGNING:${day.date}`);
+  }
+  if (failures.length) {
+    const sample = [...missingAttempt, ...missingPodDate, ...missingSigningDays, ...unknownRegion].slice(0, 8).map(row => String(row.shipmentCode || row.运单号 || '')).filter(Boolean);
+    const error = new Error(`SHOPEE_EXPORT_TRUTH_INCOMPLETE:${type}:${[...new Set(failures)].join('|')}${sample.length ? `:sample=${sample.join(',')}` : ''}`);
+    error.code = 'SHOPEE_EXPORT_TRUTH_INCOMPLETE';
+    error.diagnostics = { businessType: type, failures: [...new Set(failures)], reconciliation, sample };
+    throw error;
+  }
+  return true;
+}
+
 export async function createV200ReferenceDashboardWorkbook({ type, periodType = 'custom', range, outputDir, onProgress = () => {} }) {
   const businessType = String(type || '').trim().toUpperCase();
   const rows = await collectV200Rows(businessType, range, onProgress);
@@ -38,17 +87,18 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
   if (Number(stats.overall.total || 0) !== rows.length || dailyTotal !== rows.length) {
     throw new Error(`V200_EXPORT_MEMBERSHIP_TOTAL_MISMATCH:rows=${rows.length}:overall=${stats.overall.total}:daily=${dailyTotal}`);
   }
+  assertShopeeExportTruth(businessType, rows, stats);
   const bucket = bucketRows(rows);
   const anchors = anchorMaps(bucket);
   const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V200.xlsx`));
   await writeV200ReferenceWorkbook({ file, type: businessType, range, rows, stats, bucket, anchors, onProgress });
   const overall = stats.overall;
-  const attempt1Rate = completeAttemptRatio(overall, overall.a1);
-  const attempt2Rate = completeAttemptRatio(overall, overall.a2);
-  const attempt3Rate = completeAttemptRatio(overall, overall.a3);
-  const averageDays = completeSigningAverage(overall.days, overall.pod);
-  const ppAverageDays = completeSigningAverage(overall.ppDays, overall.ppPod);
-  const pvAverageDays = completeSigningAverage(overall.pvDays, overall.pvPod);
+  const attempt1Rate = overall.pod ? completeAttemptRatio(overall, overall.a1) : 0;
+  const attempt2Rate = overall.pod ? completeAttemptRatio(overall, overall.a2) : 0;
+  const attempt3Rate = overall.pod ? completeAttemptRatio(overall, overall.a3) : 0;
+  const averageDays = overall.pod ? completeSigningAverage(overall.days, overall.pod) : 0;
+  const ppAverageDays = overall.ppPod ? completeSigningAverage(overall.ppDays, overall.ppPod) : 0;
+  const pvAverageDays = overall.pvPod ? completeSigningAverage(overall.pvDays, overall.pvPod) : 0;
   return {
     file,
     summary: {
@@ -56,6 +106,11 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
       range: { from: dateKey(range.from), to: dateKey(range.to) },
       total: overall.total,
       pod: overall.pod,
+      notPod: overall.notPod,
+      returned: overall.returned,
+      delivery: overall.delivery,
+      pending: overall.pending,
+      store: overall.store,
       pp: overall.pp,
       pv: overall.pv,
       attempt1: overall.a1,
