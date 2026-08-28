@@ -8,7 +8,7 @@ const CYCLE_RE = /盘点|cycle\s*count/i;
 const START_RE = /parcel\s*start\s*to\s*deliver|out\s*for\s*delivery|开始派送|派送中|正在派送|正在为您派送/i;
 const ASSIGN_RE = /assigning\s*courier|delivery\s*assign|courier\s*assign|派件分配|分配快递员|分配派送|即将为您派送/i;
 const FAILURE_RE = /\bpending\b|delivery\s*problem|delivery\s*fail|unsuccessful|派送异常|派送失败|派件异常|未妥投|拒收|\bOC\b/i;
-const POD_RE = /\bPOD\b|delivered|successfully\s*delivered|签收|妥投|已妥投/i;
+const POD_RE = /\bPOD\b|successfully\s+delivered|delivered\s+successfully|parcel\s+(?:has\s+been\s+)?delivered|签收|妥投|已妥投/i;
 
 function text(value) { return String(value ?? '').trim(); }
 function billOf(row = {}) { return text(row.shipmentCode || row.运单号 || row.waybill).toUpperCase(); }
@@ -147,23 +147,10 @@ export function resolveStrictShopeeAttempt({ pod = false, podDate = '', events =
   return { attemptNo: 0, source: '无真实派送循环证据', evidenceStarts: [], evidenceFailures: [] };
 }
 
-function evidenceRange(rows = []) {
-  const dates = [];
-  for (const row of rows) {
-    for (const value of [row.firstReportDate, row.lastReportDate, row.podDate, row.podTime]) {
-      const d = dateKey(value);
-      if (d) dates.push(d);
-    }
-  }
-  dates.sort();
-  return { from: dates[0] || '2000-01-01', to: dates.at(-1) || '2099-12-31' };
-}
-
 function loadShopeeTrackEvidence(rows = []) {
   const db = getDb();
   const byBill = new Map(rows.map(row => [billOf(row), []]).filter(([bill]) => bill));
   const bills = [...byBill.keys()];
-  const range = evidenceRange(rows);
   for (const chunk of chunks(bills)) {
     const marks = chunk.map(() => '?').join(',');
     let events = [];
@@ -172,20 +159,18 @@ function loadShopeeTrackEvidence(rows = []) {
         SELECT shipmentCode,reportDate,eventTime,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,rawJson
         FROM business_track_events
         WHERE businessType='SHOPEE'
-          AND reportDate BETWEEN ? AND ?
           AND shipmentCode IN (${marks})
         ORDER BY shipmentCode,eventTime,id
-      `).all(range.from, range.to, ...chunk);
+      `).all(...chunk);
     } catch {
       try {
         events = db.prepare(`
           SELECT shipmentCode,reportDate,eventTime,eventCode,rawJson
           FROM business_track_events
           WHERE businessType='SHOPEE'
-            AND reportDate BETWEEN ? AND ?
             AND shipmentCode IN (${marks})
           ORDER BY shipmentCode,eventTime,id
-        `).all(range.from, range.to, ...chunk);
+        `).all(...chunk);
       } catch {
         continue;
       }
