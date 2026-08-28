@@ -116,6 +116,7 @@ try {
   assert.match(storeSource, /COALESCE\(SUM\(CASE WHEN status='OPEN' AND sourceReportDate=\? THEN 1 ELSE 0 END\),0\) todayOpen/, 'carryover summary must aggregate in one SQL scan');
   assert.doesNotMatch(storeSource, /const one = \(sql, \.\.\.params\)/, 'carryover summary must not regress to four repeated count queries');
   assert.match(storeSource, /options\?\.reuseExactDuplicate === true && exactSameFile/, 'exact duplicate reuse must be opt-in only; normal UI reupload must overwrite');
+  assert.match(storeSource, /UPDATE unified_snapshots SET status='SUPERSEDED' WHERE reportDate=\? AND status IN \('IMPORTED','COMPLETED','INVALID_FAILED_RECONCILIATION'\)/, 'same-date reupload must retire every old visible unified snapshot for that date');
   assert.match(storeSource, /UPDATE unified_import_batches SET status='SUPERSEDED' WHERE reportDate=\? AND status='VALID'/, 'same-date reupload must supersede the previous VALID daily batch');
   assert.match(storeSource, /sameDateOverwrite:\s*Boolean\(previousValid\)/, 'import result must expose same-date overwrite truth');
   assert.match(storeSource, /replacedSameFile:\s*exactSameFile/, 'same-file overwrite must be observable without skipping the write');
@@ -142,7 +143,7 @@ try {
   assert.ok(ccslStage >= 0 && shopeeStage > ccslStage && whppStage > shopeeStage, 'all-business auto run order must stay CCSL -> SHOPEE -> WHPP so WHPP is never double-run');
   assert.equal((runnerSource.match(/\/api\/whpp\/run\/start/g) || []).length, 1, 'WHPP start endpoint must appear exactly once in the browser orchestration');
 
-  console.log(`[V346/V294] zero-loss import smoke passed · same-date/same-file reupload overwrites by default · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
+  console.log(`[V346/V294] zero-loss import smoke passed · same-date/same-file reupload overwrites by default · old same-date completed snapshots retire · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
 } finally {
   try { fs.rmSync(file, { force: true }); } catch {}
   try { fs.rmSync(bloatedFile, { force: true }); } catch {}
