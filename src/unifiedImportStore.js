@@ -25,6 +25,7 @@ export function saveUnifiedImport(parsed, sourceName, options = {}) {
   const sqliteStartedAt = Date.now();
   db.exec('BEGIN IMMEDIATE');
   try {
+    db.prepare("UPDATE unified_snapshots SET status='SUPERSEDED' WHERE reportDate=? AND status IN ('IMPORTED','COMPLETED','INVALID_FAILED_RECONCILIATION')").run(parsed.reportDate);
     db.prepare("UPDATE unified_import_batches SET status='SUPERSEDED' WHERE reportDate=? AND status='VALID'").run(parsed.reportDate);
     db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt,dateDetectionSource,dateCandidatesJson,dateWasManuallyCorrected,regionCountsJson) VALUES(?,?,?,?,?,'VALID',?,?,?,?,?,?,?)`)
       .run(batchId, snapshotId, parsed.reportDate, sourceName, parsed.fileHash, JSON.stringify(parsed.summary), JSON.stringify(parsed.warnings), createdAt, parsed.dateDetectionSource || '', JSON.stringify(parsed.dateCandidates || []), parsed.dateWasManuallyCorrected ? 1 : 0, JSON.stringify(parsed.regionCounts || {}));
