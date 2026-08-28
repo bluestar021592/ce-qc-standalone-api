@@ -1,9 +1,11 @@
 import { normalizeEvent } from './analyzer.js';
 import { queryBatchWithFallback, queryTrackBatchWithFallback, splitTrackBatches } from './trackBatching.js';
+import { createUnifiedThroughputClient } from './v314ShopeeThroughputCore.js';
 import { analyzeWhppShipment, isWhppCancelledRow } from './whppAnalyzer.js';
 import { isSpecialCategory } from './specialNode.js';
 
 const CONFIRM_BATCH_SIZE = 350;
+export const WHPP_THROUGHPUT_POLICY_ID = '2026-08-28-v346-whpp-independent-350-scan-50x4-evidence-v1';
 
 export async function runWhppPipeline({
   state,
@@ -22,6 +24,17 @@ export async function runWhppPipeline({
   const podLocks = new Set(cleanCodes(state.podLocks || []));
 
   state.businessType = 'WHPP';
+  // The WHPP stage is intentionally independent from CCSL, but it must obey the
+  // same bounded CE endpoint policy. scanPool must be the exact today+carry pool so
+  // speculative 350-ticket batches have identical boundaries to the real loop.
+  state.scanPool = allBills;
+  const throughputClient = createUnifiedThroughputClient(state, client, {
+    businessType: 'WHPP',
+    confirmConcurrency: 1,
+    trackConcurrency: 4,
+    exceptionConcurrency: 4
+  });
+  console.info('[CE-QC][WHPP_THROUGHPUT]', WHPP_THROUGHPUT_POLICY_ID, JSON.stringify({ scanBatchSize: 350, scanConcurrency: 1, trackBatchSize: 50, trackConcurrency: 4, exceptionBatchSize: 50, exceptionConcurrency: 4, independentStage: true }));
   state.processing = { running: true, paused: false, phase: 'WHPP订单扫描', batchIndex: 0, totalBatches: Math.ceil(allBills.length / CONFIRM_BATCH_SIZE), runId };
   state.lastRunSummary = { businessType: 'WHPP', reportDate, runId, today: today.length, carry: carry.length, totalQuery: allBills.length, startedAt: startedAt.toISOString() };
   await checkpoint(state, onCheckpoint);
@@ -38,7 +51,7 @@ export async function runWhppPipeline({
     await onProgress(`WHPP订单扫描 ${offset + 1}-${Math.min(offset + batch.length, scanPending.length)} / ${scanPending.length}`);
     const outcome = await queryBatchWithFallback({
       batch,
-      query: codes => client.confirmQuery(codes),
+      query: codes => throughputClient.confirmQuery(codes),
       apiName: 'whpp-confirm-query',
       fallbackSizes: [100, 50, 10, 1],
       onLog: onProgress
@@ -89,7 +102,7 @@ export async function runWhppPipeline({
     state, bills: needTrack, rowsByBill: eventRows, statuses: eventStatuses,
     rowsKey: 'trackEvents', statusKey: 'eventQueryStatus',
     phase: 'WHPP轨迹查询', apiName: 'whpp-track-query',
-    query: codes => client.trackQuery(codes), normalize: row => ({ ...normalizeEvent(row), reportDate }),
+    query: codes => throughputClient.trackQuery(codes), normalize: row => ({ ...normalizeEvent(row), reportDate }),
     onProgress, onCheckpoint, isPaused
   });
   state.trackEvents = flattenRows(eventRows);
@@ -101,7 +114,7 @@ export async function runWhppPipeline({
     state, bills: needException, rowsByBill: exceptionRows, statuses: exceptionStatuses,
     rowsKey: 'exceptionItems', statusKey: 'exceptionQueryStatus',
     phase: 'WHPP订单取消/异常查询', apiName: 'whpp-exception-item-query',
-    query: codes => client.exceptionQuery(codes), normalize: row => ({ ...row, shipmentCode: billOf(row), reportDate }),
+    query: codes => throughputClient.exceptionQuery(codes), normalize: row => ({ ...row, shipmentCode: billOf(row), reportDate }),
     onProgress, onCheckpoint, isPaused
   });
   state.exceptionItems = flattenRows(exceptionRows);
