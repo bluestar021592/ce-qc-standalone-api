@@ -2,9 +2,9 @@ import './v206InteractiveFirstRuntimePatch.js';
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-16-v161-unified-import-runtime-truth-v1';
+const PATCH_ID = '2026-08-28-v345-unified-seven-business-runtime-truth-v1';
 const TARGETS = new Set(['/api/bootstrap', '/api/import/unified-latest']);
-const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const WRAPPED = Symbol.for('ce-qc.v161-unified-import-runtime-truth');
 
 function safeJson(value, fallback = {}) {
