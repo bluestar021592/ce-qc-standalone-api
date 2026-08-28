@@ -62,3 +62,4 @@ assert.equal(stopped.stillRetry,236);
 assert.equal(stopped.stopReason,'NO_PROGRESS');
 
 console.log('[V350] WHPP retry fast-ack smoke passed · HTTP finish precedes SQLite selection · 236 auto-drains as 200+36 · zero-progress stops after one pass · LF/CRLF safe · no DB schema change');
+await import('./v351-whpp-unified-dashboard-bridge-smoke.mjs');
