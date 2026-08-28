@@ -198,6 +198,14 @@ export async function saveState(state={}){
   return result;
 }
 
+export function resetV347CheckpointRuntimeForTest(){
+  try{progressDb?.close();}catch{}
+  progressDb=null;
+  progressDbPath='';
+  liveState=null;
+  lastPersistedFactSignature='';
+}
+
 console.info('[CE-QC][V347_CCSL_FAST_CHECKPOINT]',JSON.stringify({
   id:V340_CCSL_FAST_CHECKPOINT_ID,
   scanFullMirrorEveryBatches:SCAN_FULL_MIRROR_STRIDE,
