@@ -3,9 +3,7 @@ import * as originalStorage from './storage.js';
 import { getRuntimeConfig, nowIso } from './db.js';
 export * from './storage.js';
 
-export const V340_CCSL_FAST_CHECKPOINT_ID='2026-08-28-v347-ccsl-hotpath-nonblocking-checkpoint-v1';
-const SCAN_FULL_MIRROR_STRIDE=4;
-const TRACK_FULL_MIRROR_STRIDE=8;
+export const V340_CCSL_FAST_CHECKPOINT_ID='2026-08-28-v348-ccsl-final-only-authoritative-mirror-v1';
 const FULL_MIRROR_WARN_MS=1000;
 
 let progressDb=null;
@@ -90,19 +88,14 @@ function getProgressDb(){
 
 export function shouldUseCcslLightCheckpoint(state={}){
   const processing=state.processing||{};
-  if(!processing.running||processing.paused||processing.error)return false;
-  const index=Math.max(0,Number(processing.batchIndex||0));
-  const total=Math.max(0,Number(processing.totalBatches||0));
-  if(!total)return false;
-  // Phase initialization (batchIndex=0) only needs the run-lock/checkpoint counters.
-  // The authoritative current facts are already recoverable from the previous full
-  // mirror and the imported daily membership, so never full-mirror merely to say
-  // "starting scan/track".
-  if(index===0)return true;
-  if(index>=total)return false;
-  const phase=String(processing.phase||'');
-  const stride=isTrackPhase(phase)?TRACK_FULL_MIRROR_STRIDE:(isScanPhase(phase)?SCAN_FULL_MIRROR_STRIDE:1);
-  return stride>1&&index%stride!==0;
+  // V348: every save while a run is active is progress/checkpoint-only. The
+  // authoritative fact mirror is written exactly once after processing.running
+  // becomes false. This removes the old 4-scan/8-track synchronous full mirrors
+  // that froze the 15+ GiB production database at 1400, 2800, ... tickets.
+  // If the process crashes mid-run, the imported membership remains authoritative
+  // and the unfinished API work is safely re-queried on resume rather than risking
+  // a UI/event-loop freeze during normal processing.
+  return Boolean(processing.running&&!processing.paused&&!processing.error);
 }
 
 function lightCheckpoint(state={}){
@@ -135,9 +128,9 @@ function lightCheckpoint(state={}){
         }
       }),now,now);
     const elapsedMs=Date.now()-started;
-    if(elapsedMs>=250)console.warn('[CE-QC][V347_CCSL_LIGHT_CHECKPOINT_SLOW]',JSON.stringify({reportDate:date,runId,phase:String(processing.phase||''),batchIndex:Number(processing.batchIndex||0),elapsedMs}));
+    if(elapsedMs>=250)console.warn('[CE-QC][V348_CCSL_LIGHT_CHECKPOINT_SLOW]',JSON.stringify({reportDate:date,runId,phase:String(processing.phase||''),batchIndex:Number(processing.batchIndex||0),elapsedMs}));
   }catch(error){
-    console.warn('[CE-QC][V347_CCSL_CHECKPOINT_SKIPPED]',JSON.stringify({
+    console.warn('[CE-QC][V348_CCSL_CHECKPOINT_SKIPPED]',JSON.stringify({
       reportDate:date,
       runId,
       phase:String(processing.phase||''),
@@ -168,10 +161,14 @@ export async function saveState(state={}){
   const signature=factSignature(state);
 
   // onProgress only changes human-readable logs / the displayed batch pointer.
-  // Facts are persisted by the subsequent onCheckpoint. Avoid a redundant SQLite
-  // write before the CE request has even started; this was the 1400/3679 freeze path.
+  // Facts are persisted by the subsequent zero-wait light checkpoint. Avoid a
+  // redundant SQLite write before the CE request has even started.
   if(isProgressOnlySave(state,signature))return state;
 
+  // V348: while the pipeline is active, never enter originalStorage.saveState().
+  // All in-run saves are bounded zero-wait checkpoints. The one authoritative
+  // SQLite fact mirror occurs only after running=false at normal completion/pause/
+  // terminal error handling. This is the key 1400-ticket freeze elimination.
   if(shouldUseCcslLightCheckpoint(state)){
     const result=lightCheckpoint(state);
     lastPersistedFactSignature=signature;
@@ -184,7 +181,7 @@ export async function saveState(state={}){
   lastPersistedFactSignature=signature;
   if(elapsedMs>=FULL_MIRROR_WARN_MS){
     const processing=state.processing||{};
-    console.warn('[CE-QC][V347_CCSL_FULL_MIRROR_TIMING]',JSON.stringify({
+    console.warn('[CE-QC][V348_CCSL_FINAL_MIRROR_TIMING]',JSON.stringify({
       reportDate:String(state.reportDate||''),
       runId:currentRunId(state),
       phase:String(processing.phase||''),
@@ -206,17 +203,16 @@ export function resetV347CheckpointRuntimeForTest(){
   lastPersistedFactSignature='';
 }
 
-console.info('[CE-QC][V347_CCSL_FAST_CHECKPOINT]',JSON.stringify({
+console.info('[CE-QC][V348_CCSL_FAST_CHECKPOINT]',JSON.stringify({
   id:V340_CCSL_FAST_CHECKPOINT_ID,
-  scanFullMirrorEveryBatches:SCAN_FULL_MIRROR_STRIDE,
-  trackFullMirrorEveryBatches:TRACK_FULL_MIRROR_STRIDE,
-  finalBatchAlwaysFullMirror:true,
+  inRunFullMirror:false,
+  authoritativeFullMirrorPolicy:'FINAL_ONLY_AFTER_RUNNING_FALSE',
   progressOnlySqliteWrites:false,
   lightCheckpointBusyTimeoutMs:0,
   pauseReadPolicy:'IN_MEMORY_WHILE_ACTIVE',
   lightCheckpointWrites:'run_locks+run_checkpoints only',
   lightCheckpointFailurePolicy:'ZERO_WAIT_FAIL_OPEN_NEVER_ABORT_CCSL',
   fullMirrorSlowLogMs:FULL_MIRROR_WARN_MS,
-  factTruth:'periodic/full mirror checkpoints + final snapshot remain authoritative; skipped light progress may only cause safe API re-query after a crash',
-  policy:'LARGE_DB_HOT_PATH_NEVER_BLOCKS_ON_PROGRESS_SQLITE'
+  factTruth:'zero-wait progress checkpoints during active run + one final authoritative mirror after running=false; crash may re-query unfinished API work but cannot fabricate facts',
+  policy:'LARGE_DB_ACTIVE_PIPELINE_NEVER_RUNS_SYNCHRONOUS_FULL_MIRROR'
 }));
