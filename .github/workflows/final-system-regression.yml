@@ -36,11 +36,16 @@ jobs:
           node --check src/rangeDashboardStoreFinal.js
           node --check src/rangeDashboardStore.js
           node --check src/v206InteractiveFirstRuntimePatch.js
+          node --check src/v230AttemptSigningTruth.js
           node --check src/v231MetricTruthUiInjectionPatch.js
           node --check src/v235DashboardCurrentCache.js
           node --check src/v236DashboardCurrentRead.js
           node --check src/v236DashboardCurrentRoutePatch.js
           node --check src/v237DashboardTrendRead.js
+          node --check src/v253DashboardFastPath.js
+          node --check src/v320HistoricalExportRows.js
+          node --check src/v200TemplateDashboardExporter.js
+          node --check src/v200ReferenceWorkbook.js
           node --check src/dashboardCacheWorker.js
           node --check src/whppMembershipRecovery.js
           node --check public/v58-drilldown-runtime.js
@@ -50,9 +55,15 @@ jobs:
           node --check public/v237-home-dashboard-owner.js
           node --check scripts/v237-dashboard-owner-source-smoke.cjs
           node --check scripts/whpp-membership-recovery-smoke.mjs
+          node --check scripts/whpp-visible-truth-smoke.mjs
+          node --check scripts/shopee-export-truth-smoke.mjs
           node --check scripts/CE_QC_Production_Audit.mjs
       - name: WHPP verified-backup membership recovery smoke
         run: node scripts/whpp-membership-recovery-smoke.mjs
+      - name: WHPP visible truth smoke
+        run: node scripts/whpp-visible-truth-smoke.mjs
+      - name: Shopee export truth smoke
+        run: node scripts/shopee-export-truth-smoke.mjs
       - name: V237 exact dashboard current, region and trend smoke
         run: node scripts/v235-dashboard-cache-smoke.mjs
       - name: V237 single dashboard owner source smoke
