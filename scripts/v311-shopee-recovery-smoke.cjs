@@ -1,8 +1,9 @@
 const fs=require('fs');
 const assert=require('assert/strict');
 const {execFileSync}=require('child_process');
-for(const file of ['src/v311ShopeeIncompleteRecoveryPatch.js','public/v309-ui-integrity.js','public/v310-unified-resume-owner.js','public/v311-shopee-recovery-owner.js','public/v168-seven-business-status.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v311ShopeeIncompleteRecoveryPatch.js','src/businessStore.js','public/v309-ui-integrity.js','public/v310-unified-resume-owner.js','public/v311-shopee-recovery-owner.js','public/v168-seven-business-status.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const backend=fs.readFileSync('src/v311ShopeeIncompleteRecoveryPatch.js','utf8');
+const businessStore=fs.readFileSync('src/businessStore.js','utf8');
 const v309=fs.readFileSync('public/v309-ui-integrity.js','utf8');
 const v310=fs.readFileSync('public/v310-unified-resume-owner.js','utf8');
 const ui=fs.readFileSync('public/v311-shopee-recovery-owner.js','utf8');
@@ -16,6 +17,13 @@ assert.match(backend,/reconciliationStatus/,'V311+ must require completed snapsh
 assert.match(backend,/lock\?\.status==='finished'/,'V311+ must specifically repair the finished-without-snapshot dead state');
 assert.match(backend,/updateBusinessRunLock\(SHOPEE,date,'failed'/,'V311+ must reopen without deleting checkpoints');
 assert.doesNotMatch(backend,/DELETE FROM business_(?:scan|track|shipment|daily|run_checkpoints)/,'recovery must never delete persisted progress or daily membership');
+
+assert.match(businessStore,/const finalByBill = new Map/,'Shopee state save must index final rows once instead of rescanning per carry ticket');
+assert.match(businessStore,/const priorCarryByBill = new Map/,'Shopee state save must index historical carry rows once');
+assert.match(businessStore,/const final = finalByBill\.get\(bill\) \|\| priorCarryByBill\.get\(bill\) \|\| \{\}/,'active carry persistence must use O(1) indexed lookup');
+assert.doesNotMatch(businessStore,/state\.finalRows\.find\(row => billOf\(row\) === bill\) \|\| state\.priorCarryRows\.find/,'O(N²) per-ticket carry lookup must never return');
+assert.match(businessStore,/\[CE-QC\]\[BUSINESS_STATE_STAGE\] save_done/,'production must expose Shopee state-save timing');
+assert.match(businessStore,/serializeMs=/,'state JSON serialization must be separately timed');
 
 assert.match(v309,/global\.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__/,'V309 auto-resume must yield to the canonical recovery owner');
 assert.match(v310,/global\.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__/,'V310 watchdog must yield to the canonical recovery owner');
@@ -44,4 +52,4 @@ assert.ok(inject.includes('X-CE-QC-V332-UI'),'V332 compatibility response header
 assert.ok(inject.includes('X-CE-QC-V333-UI'),'V333 response header must be observable');
 assert.match(activation,/v311ShopeeIncompleteRecoveryPatch\.js/,'backend recovery route must remain production-active');
 
-console.log('[V333/V313] SHOPEE recovery isolation smoke passed · recovery stays checkpoint-safe · V168 alone owns summary · CCSL detail is never repainted by SHOPEE');
+console.log('[V345/V333/V313] SHOPEE recovery isolation smoke passed · recovery stays checkpoint-safe · carry persistence is linear-time · V168 alone owns summary · CCSL detail is never repainted by SHOPEE');
