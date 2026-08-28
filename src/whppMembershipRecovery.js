@@ -47,6 +47,15 @@ function tableExists(db, name) {
   try { return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name)); }
   catch { return false; }
 }
+function validSha(value) {
+  return /^[a-f0-9]{64}$/i.test(String(value || ''));
+}
+function insideRoot(root, target) {
+  try {
+    const rel = path.relative(path.resolve(root), path.resolve(target));
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  } catch { return false; }
+}
 function currentHistoryTotal(db, reportDate) {
   try {
     const row = db.prepare("SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
@@ -88,13 +97,26 @@ export function listVerifiedWhppBackupCandidates(backupsDir = getRuntimeConfig()
     const manifestPath = path.join(root, name, 'manifest.json');
     let manifest = {};
     try { manifest = safeJson(fs.readFileSync(manifestPath, 'utf8'), {}); } catch { continue; }
-    const quickOk = String(manifest.backupQuickCheck || '').toLowerCase() === 'ok' || String(manifest.integrity || '').toLowerCase().includes('quick-ok');
-    const stable = manifest.sourceStableDuringBackup !== false;
-    const backupPath = String(manifest.backupPath || path.join(root, name, 'ce_qc_monitor.db')).trim();
-    if (!quickOk || !stable || !backupPath || !fs.existsSync(backupPath)) continue;
+
+    // Mirror CE_QC_PreUpdate_Backup.mjs verifiedBackupEntry. Recovery accepts
+    // only updater-created, source-stable, structurally verified backups. The
+    // SHA is not recomputed here because multi-GiB hashing on every startup would
+    // block the service; the updater already calculated and recorded it while the
+    // source was write-frozen.
+    if (String(manifest.reason || '') !== 'before-automatic-code-update') continue;
+    if (!validSha(manifest.sha256)) continue;
+    if (manifest.sourceStableDuringBackup !== true) continue;
+    if (String(manifest.backupQuickCheck || '').toLowerCase() !== 'ok') continue;
+    if (!['ok', 'quick-ok'].includes(String(manifest.integrity || '').toLowerCase())) continue;
+
+    const backupPath = String(manifest.backupPath || '').trim();
+    if (!backupPath || !insideRoot(root, backupPath) || !fs.existsSync(backupPath)) continue;
     try {
       const stat = fs.statSync(backupPath);
       if (!stat.isFile() || stat.size <= 0) continue;
+      if (Number(manifest.size || 0) !== Number(stat.size || 0)) continue;
+      const manifestMtime = Number(manifest.backupMtimeMs);
+      if (Number.isFinite(manifestMtime) && Math.abs(manifestMtime - Number(stat.mtimeMs || 0)) > 1) continue;
       candidates.push({ backupPath, manifestPath, name, manifest, size: stat.size, mtimeMs: stat.mtimeMs });
     } catch {}
   }
@@ -109,6 +131,8 @@ export function inspectVerifiedWhppBackup(backupPath, reportDate, options = {}) 
     backup = new DatabaseSync(backupPath, { readOnly: true });
     backup.exec('PRAGMA query_only=ON');
     backup.exec('PRAGMA busy_timeout=1000');
+    const quick = String(backup.prepare('PRAGMA quick_check(1)').get()?.quick_check || '');
+    if (quick !== 'ok') return { ok: false, reason: 'WHPP_BACKUP_QUICK_CHECK_FAILED', quickCheck: quick };
     if (!tableExists(backup, 'business_daily_reports') || !tableExists(backup, 'business_daily_parse_rows')) return { ok: false, reason: 'WHPP_TABLES_MISSING' };
     const daily = backup.prepare("SELECT reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);
     if (!daily) return { ok: false, reason: 'WHPP_DAILY_HEADER_MISSING' };
@@ -188,6 +212,8 @@ function writeRecoveredWhppMembership(db, candidate, backupInfo) {
   }
   const verified = currentStandardCount(db, date);
   if (verified !== backupInfo.rowCount) throw new Error(`WHPP membership recovery post-check failed ${verified}/${backupInfo.rowCount}`);
+  try { globalThis.__CE_QC_REFRESH_V274_TRENDS__?.(); } catch {}
+  try { globalThis.__CE_QC_INVALIDATE_DASHBOARD_CACHE__?.({ businessType: 'WHPP', reportDate: date }); } catch {}
   return verified;
 }
 
@@ -266,7 +292,7 @@ console.log('[CE-QC][WHPP_MEMBERSHIP_RECOVERY]', JSON.stringify({
   id: RECOVERY_ID,
   source: 'VERIFIED_PRE_UPDATE_SQLITE_ONLY',
   scope: 'BUSINESS_DAILY_REPORTS+BUSINESS_DAILY_PARSE_ROWS_ONLY',
-  rejects: 'ZERO_BACKUP|HEADER_ROW_MISMATCH|HISTORY_TOTAL_MISMATCH|CURRENT_FACT_CONFLICT',
+  rejects: 'UNVERIFIED_MANIFEST|ZERO_BACKUP|QUICK_CHECK_FAIL|HEADER_ROW_MISMATCH|HISTORY_TOTAL_MISMATCH|CURRENT_FACT_CONFLICT',
   currentFactsMutation: false,
   currentStateMutation: false,
   carryoverMutation: false,
