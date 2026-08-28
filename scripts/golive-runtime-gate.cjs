@@ -60,9 +60,11 @@ must(v161, "TYPES.reduce((sum, type) => sum + num(counts[type]), 0)");
 must(v163, '2026-08-17-v163-shopee-daily-membership-isolation-v2');
 must(storage, 'compactStateForPersistence');
 must(storage, 'sanitizeValue');
-must(storage, 'mergeUnifiedWhppMembership');
-must(storage, "businessType='WHPP'");
-must(storage, 'unifiedWhppSnapshotId');
+// WHPP is the seventh business in unified truth, but execution is deliberately a
+// dedicated third stage. Folding WHPP into CCSL state would query the same ticket
+// once in /api/run and again in /api/whpp/run/start.
+forbid(storage, 'mergeUnifiedWhppMembership');
+forbid(storage, 'unifiedWhppSnapshotId');
 must(bstore, 'compactBusinessStatePayload');
 must(bstore, 'stripHeavyBusinessRow');
 must(bstore, 'finalByBill');
@@ -183,4 +185,4 @@ must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business runtime truth includes WHPP; WHPP unified members join the real CCSL state; state persistence remains bounded; V200 uses one exporter contract for all seven businesses');
+console.log('[GOLIVE] runtime-source gate passed; seven-business truth includes WHPP while WHPP remains a dedicated third execution stage; state persistence remains bounded; V200 uses one exporter contract for all seven businesses');
