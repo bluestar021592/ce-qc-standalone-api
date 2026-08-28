@@ -1,5 +1,6 @@
 const fs = require('fs');
 const assert = require('assert');
+const { spawnSync } = require('child_process');
 
 const source = fs.readFileSync('tools/CE_QC_Start.ps1', 'utf8');
 assert.ok(source.includes("2026-08-27-v336-candidate-gate-db-rollback-v1"), 'V336 safe update marker missing');
@@ -37,6 +38,12 @@ assert.ok(managed.includes('http.curloptResolve=$script:GitHubCurlResolve'), 'ma
 assert.ok(managed.includes("for ($attempt = 1; $attempt -le 3; $attempt++)"), 'managed launcher must retry normal fetch before DNS fallback');
 assert.ok(managed.includes("Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')"), 'resolved Git transport must also be used for install pull');
 assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b|hosts\s*file/i.test(managed), 'managed launcher must never modify Windows DNS or hosts file');
+
+if (process.platform === 'win32') {
+  const parse = "$errors=$null;$tokens=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/CE_QC_Managed_Launcher.ps1'),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 41}";
+  const parsed = spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',parse],{encoding:'utf8'});
+  assert.strictEqual(parsed.status,0,`managed launcher PowerShell parse failed: ${parsed.stderr || parsed.stdout}`);
+}
 
 const repair = fs.readFileSync('tools/CE_QC_Repair_Managed_Launcher_Git_Fatal.cmd', 'utf8');
 assert.ok(repair.includes('Resolve-DnsName github.com'), 'emergency recovery must resolve GitHub independently');
