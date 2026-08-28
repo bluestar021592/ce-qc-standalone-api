@@ -150,8 +150,8 @@ function queryWhppRegionFacts(from,to,db) {
       WITH valid AS (
         SELECT DISTINCT p.reportDate,UPPER(TRIM(p.shipmentCode)) shipmentCode,
           CASE
-            WHEN UPPER(COALESCE(json_extract(p.rowJson,'$.regionCode'),json_extract(p.rowJson,'$.区域'),''))='PP' THEN 'PP'
-            WHEN UPPER(COALESCE(json_extract(p.rowJson,'$.regionCode'),json_extract(p.rowJson,'$.区域'),''))='PV' THEN 'PV'
+            WHEN UPPER(COALESCE(json_extract(p.rowJson,'$.regionCode'),json_extract(p.rowJson,'$.区域'),'')) IN ('PP','PNH','PHNOM PENH','金边') THEN 'PP'
+            WHEN UPPER(COALESCE(json_extract(p.rowJson,'$.regionCode'),json_extract(p.rowJson,'$.区域'),'')) IN ('PV','PROVINCE','外省') THEN 'PV'
             ELSE 'UNKNOWN'
           END regionCode
         FROM business_daily_parse_rows p
@@ -166,7 +166,7 @@ function queryWhppRegionFacts(from,to,db) {
           CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.podDate,'') ELSE REPLACE(SUBSTR(COALESCE(NULLIF(json_extract(f.rawJson,'$."POD时间"'),''),NULLIF(json_extract(f.rawJson,'$.podTime'),''),NULLIF(json_extract(f.rawJson,'$."签收时间"'),''),NULLIF(f.latestEventTime,''),''),1,10),'/','-') END podDate,
           CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.currentCategory,l.currentState,'') ELSE COALESCE(f.primaryCategory,'') END category,
           CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.currentStateJson,'{}') ELSE COALESCE(f.rawJson,'{}') END stateJson,
-          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.attemptNo,0) ELSE COALESCE(NULLIF(f.podAttemptNo,0),NULLIF(f.currentAttemptNo,0),CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),CAST(json_extract(f.rawJson,'$.currentAttemptNo') AS INTEGER),0) END attemptNo,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.attemptNo,0) ELSE COALESCE(CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),CAST(json_extract(f.rawJson,'$.currentAttemptNo') AS INTEGER),CAST(json_extract(f.rawJson,'$.attemptNo') AS INTEGER),0) END attemptNo,
           CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.signingDays,0) ELSE COALESCE(CAST(json_extract(f.rawJson,'$.signingDays') AS INTEGER),CAST(json_extract(f.rawJson,'$.deliveryDays') AS INTEGER),0) END signingDays,
           CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(CAST(json_extract(l.currentStateJson,'$."Pending天数"') AS INTEGER),CAST(json_extract(l.currentStateJson,'$.pendingDays') AS INTEGER),0)
                ELSE COALESCE(CAST(json_extract(f.rawJson,'$."Pending天数"') AS INTEGER),CAST(json_extract(f.rawJson,'$.pendingDays') AS INTEGER),0) END pendingDays,
@@ -275,7 +275,7 @@ export function readV284ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate=
     const regionMap={}; if(includeRegions)for(const region of ['PP','PV','UNKNOWN'])regionMap[region]=finishFact({...emptyFact(type,date,region),...(regions.find(r=>r.regionCode===region)||{})});
     return {...all,oc:all.ocCurrent,ledgerReady:all.ready,ledgerCount:all.matched,cacheTotal:all.total,recoveredExtra:0,regions:regionMap,evidenceSource:all.ready?'V284_PER_BUSINESS_DAILY_MEMBERSHIP_V246_LEDGER':'V284_MEMBERSHIP_COVERAGE_INCOMPLETE'};
   });
-  return {ok:true,readId:V284_DAILY_MEMBERSHIP_TRUTH_ID,businessType:type,fromDate:dates[0],toDate:dates.at(-1),dates,daily,regionsIncluded:includeRegions,exact,ticket:daily.map(r=>r.total),pod:daily.map(r=>r.ready?r.pod:null),podRate:daily.map(r=>r.ready?r.podRate:null),avgPodDays:daily.map(r=>r.ready?r.avgPodDays:null),oc:daily.map(r=>r.ready?r.ocCurrent:null),ocRate:daily.map(r=>r.ready?r.ocRate:null),attempt1:daily.map(r=>r.ready?r.attempt1:null),attempt2:daily.map(r=>r.ready?r.attempt2:null),attempt3:daily.map(r=>r.ready?r.attempt3:null),attempt1Rate:daily.map(r=>r.ready?r.attempt1Rate:null),attempt2Rate:daily.map(r=>r.ready?r.attempt2Rate:null),attempt3Rate:daily.map(r=>r.ready?r.attempt3Rate:null),attemptUnknown:daily.map(r=>r.ready?r.attemptUnknown:null),attemptCoverageRate:daily.map(r=>r.attemptCoverageRate),ledgerReady:daily.map(r=>r.ready),coverageRate:daily.map(r=>r.coverageRate)};
+  return {ok:true,readId:V284_DAILY_MEMBERSHIP_TRUTH_ID,businessType:type,fromDate:dates[0],toDate:dates.at(-1),dates,daily,regionsIncluded:includeRegions,exact,ticket:daily.map(r=>r.total),pod:daily.map(r=>r.ready?r.pod:null),podRate:daily.map(r=>r.ready?r.podRate:null),avgPodDays:daily.map(r=>r.ready?r.avgPodDays:null),oc:daily.map(r=>r.ready?r.ocCurrent:null),ocRate:daily.map(r=>r.ready?r.ocRate:null),attempt1:daily.map(r=>r.ready?r.attempt1:null),attempt2:daily.map(r=>r.ready?r.attempt2:null),attempt3:daily.map(r=>r.ready?r.attempt3:null),attempt1Rate:daily.map(r=>r.ready?r.attempt1Rate:null),attempt2Rate:daily.map(r=>r.ready?r.attempt2Rate:null),attempt3Rate:daily.map(r=>r.ready?r.attempt3Rate:null),attemptUnknown:daily.map(r=>r.ready?r.attemptUnknown:null),attemptCoverageRate:daily.map(r=>r.ready?r.attemptCoverageRate:null),ledgerReady:daily.map(r=>r.ready),coverageRate:daily.map(r=>r.coverageRate)};
 }
 export function summarizeV284Range(fromDate,toDate,db=getDb()) {
   const {from,to}=validRange(fromDate,toDate); const daily=readV284DailyFacts(from,to,db); const byType={};
