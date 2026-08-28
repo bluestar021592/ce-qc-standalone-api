@@ -14,7 +14,6 @@ const {
   parseUnifiedDailyExcel,
   getUnifiedEffectiveSheetRange
 } = await import('../src/unifiedExcelParser.js');
-const { isExcludedBill } = await import('../src/storage.js');
 
 const file = path.join(os.tmpdir(), `ce-qc-v294-zero-loss-${process.pid}-${Date.now()}.xlsx`);
 const bloatedFile = path.join(os.tmpdir(), `ce-qc-v294-bloated-range-${process.pid}-${Date.now()}.xlsx`);
@@ -85,7 +84,6 @@ try {
   assert.equal(parsed.sheetDiagnostics[0]?.rangeClamped, true);
   assert.equal(parsed.sheetDiagnostics[0]?.effectiveRange, 'A1:E9');
   assert.ok(parseElapsedMs < 5000, `inflated worksheet range must parse quickly, got ${parseElapsedMs}ms`);
-  assert.equal(isExcludedBill('CE260810000002'), false, 'CE-prefixed WHPP member must remain eligible for the real CCSL 350/50 pipeline');
 
   const reuseStartedAt = Date.now();
   const reused = parseUnifiedDailyExcel(bloatedFile, {
@@ -122,13 +120,21 @@ try {
   assert.match(runtimeSource, /TYPES\s*=\s*\[[^\]]*'WHPP'/, 'bootstrap/import runtime truth counts must include WHPP');
 
   const storageSource = fs.readFileSync(new URL('../src/storage.js', import.meta.url), 'utf8');
-  assert.match(storageSource, /mergeUnifiedWhppMembership\(loadAppState\(\)\)/, 'real CCSL state load must merge WHPP from the current unified batch');
-  assert.match(storageSource, /businessType='WHPP'/, 'WHPP current and historical open members must be loaded from normalized SQLite truth');
-  assert.match(storageSource, /unifiedWhppSnapshotId/, 'WHPP membership merge must be once per unified snapshot, not once per checkpoint');
-  assert.match(storageSource, /pnhBills = cleanMainBills\(\[\.\.\.\(state\.pnhBills/, 'WHPP daily members must join the actual CCSL scan pool input');
-  assert.match(storageSource, /carryBills = cleanMainBills\(\[\.\.\.\(state\.carryBills/, 'historical OPEN WHPP must join the actual CCSL carry scan pool input');
+  assert.doesNotMatch(storageSource, /mergeUnifiedWhppMembership|unifiedWhppSnapshotId/, 'WHPP must not be merged into the CCSL state because it has its own execution stage');
 
-  console.log(`[V345/V294] zero-loss import smoke passed · inflated UsedRange clamped · duplicate parse reused · WHPP joins seven-business reconciliation and real CCSL 350/50 state · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
+  const serverSource = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  assert.match(serverSource, /\['CE',\s*'CEAF',\s*'TBKH',\s*'ALI1688'\]\.includes\(row\.businessType\)/, 'CCSL import state must remain limited to its four execution businesses');
+  assert.doesNotMatch(serverSource, /\['CE',\s*'CEAF',\s*'TBKH',\s*'ALI1688',\s*'WHPP'\]/, 'WHPP must never be silently folded into the CCSL run');
+
+  const runnerSource = fs.readFileSync(new URL('../public/v67-resilient-run-guard.js', import.meta.url), 'utf8');
+  assert.match(runnerSource, /async function runWhppStage\(date\)/, 'WHPP must retain its dedicated third execution stage');
+  assert.match(runnerSource, /'\/api\/whpp\/run\/start'/, 'WHPP dedicated stage must call its own runner endpoint');
+  const ccslStage = runnerSource.indexOf('await runCcslStage(date)');
+  const shopeeStage = runnerSource.indexOf('await runShopeeStage(date)');
+  const whppStage = runnerSource.indexOf('await runWhppStage(date)');
+  assert.ok(ccslStage >= 0 && shopeeStage > ccslStage && whppStage > shopeeStage, 'all-business auto run order must stay CCSL -> SHOPEE -> WHPP so WHPP is never double-run');
+
+  console.log(`[V345/V294] zero-loss import smoke passed · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
 } finally {
   try { fs.rmSync(file, { force: true }); } catch {}
   try { fs.rmSync(bloatedFile, { force: true }); } catch {}
