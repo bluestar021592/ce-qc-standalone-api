@@ -57,3 +57,4 @@ assert.equal(dashboard.accounting.balanced, true);
 assert.equal(dashboard.regions.PP.total + dashboard.regions.PV.total + dashboard.regions.UNKNOWN.total, 236);
 
 console.log('[V351] WHPP unified-dashboard bridge smoke passed · exact 236 membership survives stale-zero history · cards and drilldowns share one truth · final facts recompute POD/return/cancel/open · normalized repair is membership-only · future unified imports mirror normalized WHPP daily · no DB schema change');
+await import('./v352-whpp-visible-single-truth-smoke.mjs');
