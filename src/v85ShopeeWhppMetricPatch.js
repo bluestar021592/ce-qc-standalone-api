@@ -1,3 +1,4 @@
+import './v351WhppUnifiedDashboardBridgePatch.js';
 import express from 'express';
 import { getDb } from './db.js';
 
