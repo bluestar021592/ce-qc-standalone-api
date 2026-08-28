@@ -1,9 +1,8 @@
 import express from 'express';
 import { getDb } from './db.js';
 import { buildWhppDashboard } from './whppReporting.js';
-import { saveWhppDailyImport } from './whppStore.js';
 
-export const V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID = '2026-08-28-v351-whpp-unified-membership-dashboard-bridge-v2';
+export const V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID = '2026-08-28-v351-whpp-unified-membership-dashboard-bridge-v3';
 const SUMMARY_ROUTE = '/api/v71/whpp-summary';
 const DETAIL_ROUTES = ['/api/v172/whpp-metric-detail', '/api/whpp/metric-detail'];
 const UNIFIED_IMPORT_ROUTE = '/api/import/unified-daily-report';
@@ -131,9 +130,6 @@ function summaryForDate(reportDate = '') {
   const date = requested || unified.reportDate;
   if (!date) return null;
   const standard = loadStandardWhppMembership(date, db);
-  // Latest VALID unified membership is canonical whenever that report date exists,
-  // including a legitimate zero-WHPP day. Older standard rows/history must not
-  // override a newer unified classification.
   const membershipRows = unified.present ? unified.rows : standard.rows;
   if (!unified.present && !standard.present) return null;
   const finalRows = loadWhppFinalRows(date, db);
@@ -155,8 +151,10 @@ function summaryForDate(reportDate = '') {
     truthSource: unified.present ? 'LATEST_VALID_UNIFIED_MEMBERSHIP' : 'WHPP_STANDARD_DAILY',
     unifiedMembership: unified.present ? unified.bills.length : null,
     standardMembership: standard.present ? Number(standard.daily?.totalCount || standard.bills.length || 0) : null,
+    standardRows: standard.bills.length,
     finalEvidenceRows: finalRows.length,
     staleHistoryRejected: staleHistory,
+    needsNormalizedRepair: unified.present && (!standard.present || Number(standard.daily?.totalCount || 0) !== unified.bills.length || standard.bills.length !== unified.bills.length),
     patchId: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID
   };
 }
@@ -171,15 +169,51 @@ export function ensureV351WhppNormalizedDaily(reportDate = '') {
     const set = new Set(standard.bills); return unified.bills.every(code => set.has(code));
   })();
   if (sameMembers) return { repaired: false, reason: 'STANDARD_DAILY_CURRENT', reportDate: unified.reportDate, total: unified.bills.length };
-  const state = saveWhppDailyImport({
-    reportDate: unified.reportDate,
-    sourceName: unified.sourceName,
-    rows: unified.rows,
-    batchId: unified.batchId,
-    snapshotId: unified.snapshotId
+
+  // Membership-only repair: never rewrite current state, carryover, final facts,
+  // scan/track evidence, run locks, or snapshots. Existing completed truth stays intact.
+  const now = new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt)
+      VALUES('WHPP',?,?,?,?,?,?)
+      ON CONFLICT(businessType,reportDate) DO UPDATE SET sourceFile=excluded.sourceFile,totalCount=excluded.totalCount,summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
+      .run(unified.reportDate, unified.sourceName, unified.bills.length, JSON.stringify({ batchId: unified.batchId, snapshotId: unified.snapshotId, total: unified.bills.length, source: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID }), now, now);
+    db.prepare(`DELETE FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?`).run(unified.reportDate);
+    const insert = db.prepare(`INSERT INTO business_daily_parse_rows(
+      businessType,reportDate,shipmentCode,sheetName,rowNumber,source_row_number,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,rawText,rowJson,createdAt
+    ) VALUES('WHPP',?,?,?,?,?,?,?,?,?,?,?,?)`);
+    for (const row of unified.rows) {
+      insert.run(
+        unified.reportDate,
+        billOf(row),
+        row.sheetName || '',
+        Number(row.rowNumber || 0),
+        Number(row.source_row_number || row.rowNumber || 0),
+        row.recipientRaw || row.recipient_raw || '',
+        row.recipientNormalized || row.recipient_normalized || '',
+        'WHPP',
+        row.classificationReason || 'LATEST_VALID_UNIFIED_MEMBERSHIP',
+        '',
+        JSON.stringify({ ...row, businessType: 'WHPP', reportDate: unified.reportDate }),
+        now
+      );
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  console.log('[CE-QC][V351_WHPP_BRIDGE_REPAIRED]', JSON.stringify({ reportDate: unified.reportDate, total: unified.bills.length, batchId: unified.batchId, scope: 'MEMBERSHIP_TABLES_ONLY' }));
+  return { repaired: true, reason: 'UNIFIED_TO_WHPP_STANDARD_DAILY_MEMBERSHIP_ONLY', reportDate: unified.reportDate, total: unified.bills.length };
+}
+
+function scheduleNormalizedRepair(summary) {
+  if (!summary?.needsNormalizedRepair || !summary?.reportDate) return;
+  setImmediate(() => {
+    try { ensureV351WhppNormalizedDaily(summary.reportDate); }
+    catch (error) { console.error('[CE-QC][V351_WHPP_BACKGROUND_MEMBERSHIP_REPAIR]', error?.stack || error); }
   });
-  console.log('[CE-QC][V351_WHPP_BRIDGE_REPAIRED]', JSON.stringify({ reportDate: unified.reportDate, total: unified.bills.length, batchId: unified.batchId }));
-  return { repaired: true, reason: 'UNIFIED_TO_WHPP_STANDARD_DAILY', reportDate: unified.reportDate, total: unified.bills.length, state };
 }
 
 function summaryHandler(req, res, next) {
@@ -188,6 +222,7 @@ function summaryHandler(req, res, next) {
     if (!summary) return next();
     res.setHeader('Cache-Control', 'no-store');
     res.json({ ok: true, ...summary });
+    scheduleNormalizedRepair(summary);
   } catch (error) {
     console.error('[CE-QC][V351_WHPP_SUMMARY]', error?.stack || error);
     next();
@@ -223,6 +258,7 @@ function detailHandler(req, res, next) {
       truthSource: summary.truthSource,
       rows: rows.slice(start, start + pageSize)
     });
+    scheduleNormalizedRepair(summary);
   } catch (error) {
     console.error('[CE-QC][V351_WHPP_DETAIL]', error?.stack || error);
     next();
@@ -270,6 +306,8 @@ console.log('[CE-QC][V351_WHPP_UNIFIED_DASHBOARD_BRIDGE]', JSON.stringify({
   summaryTruth: 'LATEST_VALID_UNIFIED_MEMBERSHIP_THEN_STANDARD_DAILY',
   detailTruth: 'SAME_CANONICAL_DASHBOARD_DETAIL_TABS',
   staleZeroHistory: 'REJECT_IF_TOTAL_MISMATCH',
-  futureUnifiedImport: 'MIRROR_WHPP_STANDARD_DAILY_BEFORE_RESPONSE',
-  databaseSchemaChange: false
+  existingDateRepair: 'ASYNC_MEMBERSHIP_TABLES_ONLY_AFTER_RESPONSE',
+  futureUnifiedImport: 'MIRROR_WHPP_STANDARD_DAILY_MEMBERSHIP_ONLY_BEFORE_RESPONSE',
+  databaseSchemaChange: false,
+  factMutation: false
 }));
