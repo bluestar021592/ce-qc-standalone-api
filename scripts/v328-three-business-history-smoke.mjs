@@ -4,18 +4,157 @@ import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { execFileSync } from 'node:child_process';
-for(const f of ['src/v328ThreeBusinessHistoryFast.js','src/v329ThreeBusinessDailyCache.js','src/v328EvidenceRepairCoordinator.js','scripts/v329-three-business-cache-worker.mjs','src/v308DeliveryDailyFastPath.js','public/v308-dashboard-read-bridge.js','public/v320-history-trend-owner.js','public/v295-first-attempt-ui.js'])execFileSync(process.execPath,['--check',f],{stdio:'pipe'});
-const heavy=fs.readFileSync('src/v328ThreeBusinessHistoryFast.js','utf8'),cache=fs.readFileSync('src/v329ThreeBusinessDailyCache.js','utf8'),backend=fs.readFileSync('src/v308DeliveryDailyFastPath.js','utf8'),coord=fs.readFileSync('src/v328EvidenceRepairCoordinator.js','utf8'),worker=fs.readFileSync('scripts/v329-three-business-cache-worker.mjs','utf8'),ui=fs.readFileSync('public/v308-dashboard-read-bridge.js','utf8'),trendUi=fs.readFileSync('public/v320-history-trend-owner.js','utf8'),firstUi=fs.readFileSync('public/v295-first-attempt-ui.js','utf8');
-for(const t of ['TBKH','SHOPEECN','SHOPEEVN','unified_import_rows','shipment_daily_snapshots','business_daily_parse_rows'])assert.ok(heavy.includes(t));assert.match(cache,/v329_three_business_daily_cache/);assert.match(cache,/firstAttemptEligible/);assert.match(cache,/firstAttemptSuccess/);assert.match(cache,/首次妥投率=真实首派成功票÷真实首派START尝试票/);assert.match(cache,/signingDaysSum\/signingDaysCount/,'history average must use proven signing samples rather than divide by all POD');assert.match(cache,/只要存在真实签收天数样本就发布样本平均/,'partial real signing coverage must remain visible while unresolved tickets stay diagnosed');
-assert.match(backend,/V308_DELIVERY_DAILY_FAST_ID='[^']*three-business-signing-region-current[^']*'/,'active current path must expose the signing-region behavior contract');assert.match(backend,/readV236CurrentSummary\(date\)/,'single-day path must use selected business current truth');assert.doesNotMatch(backend,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'foreign same-date cache ownership must not turn current metrics into zero');assert.match(backend,/readV329ThreeBusinessDailyCache/);assert.doesNotMatch(backend,/readV328ThreeBusinessHistory/);assert.match(backend,/signingSum\/signingCount/,'single-day fast path must use the same proven signing-sample denominator');assert.match(backend,/signingSampleAvailable=pod>0&&signingCount>0/,'single-day fallback must publish a real signing sample average as soon as at least one proven POD date exists');assert.match(backend,/evidenceIncomplete:pod>0&&\(attemptUnknown>0\|\|!signingComplete\)/,'partial evidence must stay diagnosed while real sample averages remain visible');assert.match(backend,/ppAvgSigningDays/);assert.match(backend,/pvAvgSigningDays/);assert.match(backend,/V343_SINGLE_DAY_PER_BUSINESS_CURRENT_STRICT_LEDGER_REGION/);
-assert.match(coord,/v329-three-business-cache-worker\.mjs/);assert.doesNotMatch(worker,/readV295FirstAttemptTrends|v295FirstAttemptTruth/,'isolated history worker must not use current VALID V295 membership for old report dates');assert.match(worker,/listV328HistoricalMembers/);assert.match(worker,/strictAttempt=strict\(l\.attemptSource\)&&Number\(l\.attemptNo\|\|0\)>0/);assert.match(worker,/firstAttemptEligible/);assert.match(worker,/firstAttemptSuccess/);assert.match(worker,/V334_FINAL_SAVED_MEMBERS_STRICT_START_POD/);assert.match(ui,/平均签收天数/);assert.match(ui,/金边PP平均签收天数/);assert.match(ui,/外省PV平均签收天数/);assert.match(ui,/Pending\/失败后再次START/);assert.doesNotMatch(trendUi,/fetch\(`\/api\/v308\/delivery-daily[^`]*history=all/,'TBKH/CN/VN trend owner must reuse the V308-published history payload rather than request history again');
-assert.match(trendUi,/2026-08-27-v334-three-business-saved-history-hard-owner-v2/,'V334 compatibility marker must remain active');assert.match(trendUi,/2026-08-27-v334-all-visible-board-saved-history-owner-v3/,'V334 all-visible-board history owner must be active');
-assert.match(trendUi,/document\.getElementById\('pageTitle'\)[\s\S]*title\.includes\('SHOPEE CN'\)[\s\S]*title\.includes\('SHOPEE VN'\)[\s\S]*title\.includes\('TBKH'\)/,'SPA-visible page title must win over stale location.pathname for business identity');
-assert.match(trendUi,/__CE_QC_V272_LAYOUT_TREND_FINALIZER__/,'V334 must explicitly take over repeated V272 rehydrate calls');
-assert.match(trendUi,/owner\.rehydrateVisible=function v334HistoryAwareRehydrate/,'V301->V272 rehydrate must delegate special single-day pages to saved history');
-assert.match(trendUi,/cancelLegacyTrendPaint\(root\(\)\);return apply\(true\)/,'single-day saved-history boards must cancel legacy exact-day repaint before applying history');
-assert.match(trendUi,/section\.querySelector\('\.v320-history-grid'\)/,'history owner must detect and repair a legacy repaint that removed its visible grid');
-assert.match(trendUi,/setInterval\(enforceHistoryOwner,750\)/,'hard owner must repair late V272/V301 repaint races without a database request');
-assert.match(trendUi,/d\.data\?\.dates\?\.length[\s\S]*cancelLegacyTrendPaint\(r\)[\s\S]*draw\(s,d\.type,d\.data/,'history payload event must invalidate pending exact-day V272 paint before drawing saved dates');
-assert.match(firstUi,/2026-08-27-v334-saved-history-first-attempt-owner-v1/,'V334 first-attempt UI owner must be cache-busted');assert.match(firstUi,/__CE_QC_V328_HISTORY_PAYLOADS__/,'first-attempt trend must reuse the exact same history payload as the table/main trends');assert.match(firstUi,/cachedHistoryTrend/);assert.match(firstUi,/firstAttemptEligible/);assert.match(firstUi,/firstAttemptSuccess/);assert.match(firstUi,/ce:v328-history-data/,'history payload publication must trigger first-attempt repaint after V320 has redrawn its grid');assert.match(firstUi,/setTimeout\(\(\)=>renderTrend\(lastPayload\?\.trend\|\|\{\},type,rg\),90\)/,'first-attempt card must repaint after the V320 history owner event listener');
-const root=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v329-'));process.env.DATA_DIR=root;process.env.DB_FILE=path.join(root,'v329.db');process.env.ACCESS_MODE='LOCAL';process.env.SQLITE_MMAP_BYTES='0';process.env.SQLITE_CACHE_KIB='8192';process.env.NODE_ENV='test';process.env.CE_QC_DISABLE_V246_TRACKING='1';const {getDb,closeDb}=await import('../src/db.js');const db=getDb(),{writeV329ThreeBusinessDailyCache}=await import('../src/v329ThreeBusinessDailyCache.js');for(const type of ['TBKH','SHOPEECN','SHOPEEVN'])writeV329ThreeBusinessDailyCache(type,[{reportDate:'2026-07-01',total:2,pod:1,ocCurrent:1,sameDayPod:1,attempt1:1,signingDaysSum:1,signingDaysCount:1,firstAttemptEligible:2,firstAttemptSuccess:1,ready:true},{reportDate:'2026-07-02',total:2,pod:1,attempt2:1,signingDaysSum:2,signingDaysCount:1,firstAttemptEligible:2,firstAttemptSuccess:0,ready:true},{reportDate:'2026-07-03',total:4,pod:3,attempt1:2,signingDaysSum:7,signingDaysCount:2,firstAttemptEligible:3,firstAttemptSuccess:2,ready:true}],db,'V334_TEST');const {readV308DeliveryDaily}=await import('../src/v308DeliveryDailyFastPath.js');for(const type of ['TBKH','SHOPEECN','SHOPEEVN']){const s=performance.now(),data=readV308DeliveryDaily(type,'2026-07-03','2026-07-03',db,{historyAll:true});assert.deepEqual(data.dates,['2026-07-01','2026-07-02','2026-07-03']);assert.equal(data.daily[0].attempt1,1);assert.equal(data.daily[0].avgSigningDays,1);assert.equal(data.daily[0].firstAttemptEligible,2);assert.equal(data.daily[0].firstAttemptSuccess,1);assert.equal(data.daily[0].firstAttemptRate,50);assert.equal(data.daily[1].attempt2,1);assert.equal(data.daily[1].avgSigningDays,2);assert.equal(data.daily[1].firstAttemptRate,0);assert.equal(data.daily[2].signingSampleCount,2);assert.equal(data.daily[2].signingEvidenceComplete,false);assert.equal(data.daily[2].evidenceIncomplete,true);assert.equal(data.daily[2].firstAttemptRate,null,'incomplete POD attempt evidence must not publish a fabricated historical first-attempt percentage');assert.equal(data.daily[2].avgSigningDays,3.5,'2 proven POD dates out of 3 must publish 7/2=3.5 days instead of blanking the whole date');assert.ok(performance.now()-s<100);}closeDb();fs.rmSync(root,{recursive:true,force:true});console.log('[V343/V334/V329] three-business saved history + per-business current truth + strict historical-member first-attempt truth + SPA hard ownership + partial proven signing averages + PP/PV current contract smoke passed');
+
+const syntax = [
+  'src/v328ThreeBusinessHistoryFast.js',
+  'src/v329ThreeBusinessDailyCache.js',
+  'src/v328EvidenceRepairCoordinator.js',
+  'scripts/v329-three-business-cache-worker.mjs',
+  'src/v308DeliveryDailyFastPath.js',
+  'public/v308-dashboard-read-bridge.js',
+  'public/v320-history-trend-owner.js',
+  'public/v295-first-attempt-ui.js'
+];
+for (const file of syntax) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+
+const read = file => fs.readFileSync(file, 'utf8');
+const heavy = read('src/v328ThreeBusinessHistoryFast.js');
+const cacheSource = read('src/v329ThreeBusinessDailyCache.js');
+const backend = read('src/v308DeliveryDailyFastPath.js');
+const coordinator = read('src/v328EvidenceRepairCoordinator.js');
+const worker = read('scripts/v329-three-business-cache-worker.mjs');
+const ui = read('public/v308-dashboard-read-bridge.js');
+const trendUi = read('public/v320-history-trend-owner.js');
+const firstUi = read('public/v295-first-attempt-ui.js');
+
+// Saved historical membership remains independent for TBKH/CN/VN.
+for (const token of ['TBKH','SHOPEECN','SHOPEEVN','unified_import_rows','shipment_daily_snapshots','business_daily_parse_rows']) {
+  assert.ok(heavy.includes(token), `historical membership source missing ${token}`);
+}
+
+// Compact history cache owns strict first-attempt + signing samples + regional signing sums.
+for (const token of [
+  'v329_three_business_daily_cache',
+  'firstAttemptEligible',
+  'firstAttemptSuccess',
+  'firstAttemptUnknownPod',
+  'firstAttemptEvidenceComplete',
+  'signingDaysSum',
+  'signingDaysCount',
+  'ppSigningDaysSum',
+  'ppSigningDaysCount',
+  'pvSigningDaysSum',
+  'pvSigningDaysCount',
+  'ppAvgSigningDays',
+  'pvAvgSigningDays'
+]) assert.ok(cacheSource.includes(token), `three-business cache missing ${token}`);
+assert.match(cacheSource, /只要存在真实签收天数样本就发布样本平均/);
+
+// Web current path must stay per-business and must never reconstruct heavy history.
+assert.match(backend, /readV236CurrentSummary\(date\)/);
+assert.doesNotMatch(backend, /readV236CurrentSummary\(date,\{cacheOnly:true\}\)/);
+assert.match(backend, /readV329ThreeBusinessDailyCache/);
+assert.match(backend, /strictDailyEvidence/);
+assert.match(backend, /attemptSource LIKE 'V246_STRICT_TRACK%'/);
+assert.match(backend, /signingSampleAvailable=pod>0&&signingCount>0/);
+assert.match(backend, /ppAvgSigningDays/);
+assert.match(backend, /pvAvgSigningDays/);
+assert.doesNotMatch(backend, /readV328ThreeBusinessHistory|readV320HistoricalDailyWithDispatch/);
+
+// Isolated worker must derive old dates from saved members + strict ledger, not current V295 truth.
+assert.match(coordinator, /v329-three-business-cache-worker\.mjs/);
+assert.doesNotMatch(worker, /readV295FirstAttemptTrends|v295FirstAttemptTruth/);
+for (const token of [
+  'listV328HistoricalMembers',
+  'strict(l.attemptSource)',
+  'firstAttemptEligible',
+  'firstAttemptSuccess',
+  'firstAttemptUnknownPod',
+  'regionMap',
+  "region==='PP'",
+  "region==='PV'",
+  'ppSigningDaysSum',
+  'pvSigningDaysSum',
+  'writeV329ThreeBusinessDailyCache'
+]) assert.ok(worker.includes(token), `isolated history worker missing ${token}`);
+
+// All visible history/attempt cards share one payload; no duplicate heavy history request is allowed.
+for (const label of ['平均签收天数','金边PP平均签收天数','外省PV平均签收天数']) assert.ok(ui.includes(label));
+assert.match(ui, /Pending\/失败后再次START/);
+assert.match(trendUi, /__CE_QC_V328_HISTORY_PAYLOADS__/);
+assert.match(trendUi, /function specialCached/);
+assert.doesNotMatch(trendUi, /fetch\(`\/api\/v308\/delivery-daily[^`]*history=all/);
+assert.match(trendUi, /document\.getElementById\('pageTitle'\)/);
+assert.match(trendUi, /claimV272Ownership/);
+assert.match(trendUi, /setInterval\(enforceHistoryOwner,750\)/);
+assert.match(firstUi, /__CE_QC_V328_HISTORY_PAYLOADS__/);
+assert.match(firstUi, /cachedHistoryTrend/);
+assert.match(firstUi, /firstAttemptEligible/);
+assert.match(firstUi, /firstAttemptSuccess/);
+assert.match(firstUi, /ce:v328-history-data/);
+
+// Runtime fixture: cache-only history must publish strict attempts and real sample averages,
+// including PP/PV split, without production DB/network.
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-three-history-'));
+process.env.DATA_DIR = root;
+process.env.DB_FILE = path.join(root, 'history.db');
+process.env.ACCESS_MODE = 'LOCAL';
+process.env.SQLITE_MMAP_BYTES = '0';
+process.env.SQLITE_CACHE_KIB = '8192';
+process.env.NODE_ENV = 'test';
+process.env.CE_QC_DISABLE_V246_TRACKING = '1';
+
+const { getDb, closeDb } = await import('../src/db.js');
+const { writeV329ThreeBusinessDailyCache } = await import('../src/v329ThreeBusinessDailyCache.js');
+const { readV308DeliveryDaily } = await import('../src/v308DeliveryDailyFastPath.js');
+const db = getDb();
+
+for (const type of ['TBKH','SHOPEECN','SHOPEEVN']) {
+  writeV329ThreeBusinessDailyCache(type, [
+    {
+      reportDate:'2026-07-01',total:2,pod:1,ocCurrent:1,sameDayPod:1,
+      attempt1:1,attempt2:0,attempt3:0,
+      signingDaysSum:1,signingDaysCount:1,
+      ppSigningDaysSum:1,ppSigningDaysCount:1,pvSigningDaysSum:0,pvSigningDaysCount:0,
+      firstAttemptEligible:2,firstAttemptSuccess:1,firstAttemptUnknownPod:0,ready:true
+    },
+    {
+      reportDate:'2026-07-02',total:2,pod:1,ocCurrent:0,sameDayPod:0,
+      attempt1:0,attempt2:1,attempt3:0,
+      signingDaysSum:2,signingDaysCount:1,
+      ppSigningDaysSum:0,ppSigningDaysCount:0,pvSigningDaysSum:2,pvSigningDaysCount:1,
+      firstAttemptEligible:2,firstAttemptSuccess:0,firstAttemptUnknownPod:0,ready:true
+    },
+    {
+      reportDate:'2026-07-03',total:4,pod:3,ocCurrent:0,sameDayPod:0,
+      attempt1:2,attempt2:0,attempt3:0,
+      signingDaysSum:7,signingDaysCount:2,
+      ppSigningDaysSum:2,ppSigningDaysCount:1,pvSigningDaysSum:5,pvSigningDaysCount:1,
+      firstAttemptEligible:3,firstAttemptSuccess:2,firstAttemptUnknownPod:1,ready:true
+    }
+  ], db, 'BEHAVIOR_FIXTURE');
+}
+
+for (const type of ['TBKH','SHOPEECN','SHOPEEVN']) {
+  const started = performance.now();
+  const data = readV308DeliveryDaily(type, '2026-07-03', '2026-07-03', db, { historyAll:true });
+  assert.deepEqual(data.dates, ['2026-07-01','2026-07-02','2026-07-03']);
+  assert.equal(data.daily[0].attempt1, 1);
+  assert.equal(data.daily[0].avgSigningDays, 1);
+  assert.equal(data.daily[0].firstAttemptRate, 50);
+  assert.equal(data.daily[1].attempt2, 1);
+  assert.equal(data.daily[1].avgSigningDays, 2);
+  assert.equal(data.daily[1].firstAttemptRate, 0);
+  assert.equal(data.daily[2].signingSampleCount, 2);
+  assert.equal(data.daily[2].signingEvidenceComplete, false);
+  assert.equal(data.daily[2].evidenceIncomplete, true);
+  assert.equal(data.daily[2].firstAttemptRate, null);
+  assert.equal(data.daily[2].avgSigningDays, 3.5);
+  assert.equal(data.daily[2].ppAvgSigningDays, 2);
+  assert.equal(data.daily[2].pvAvgSigningDays, 5);
+  assert.ok(performance.now() - started < 100);
+}
+
+closeDb();
+fs.rmSync(root, { recursive:true, force:true });
+console.log('[THREE_BUSINESS_HISTORY] behavior smoke passed · saved membership · strict attempts · partial real signing samples · PP/PV averages · shared cache-only UI · no release-name coupling');
