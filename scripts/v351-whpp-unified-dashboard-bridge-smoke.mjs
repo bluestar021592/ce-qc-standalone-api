@@ -10,7 +10,13 @@ const v85 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v85ShopeeWhppMetr
 
 assert.match(V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, /v351-whpp-unified-membership-dashboard-bridge/);
 assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351 must load before server route registration');
-assert.match(source, /unified_import_batches[\s\S]*status='VALID'/, 'WHPP current membership must come from latest VALID unified import');
+assert.match(source, /unified_import_batches[\s\S]*status='VALID'/, 'WHPP current membership must inspect the latest VALID unified import');
+assert.match(source, /if \(rows\.length\)[\s\S]*LATEST_VALID_UNIFIED_MEMBERSHIP/, 'only a non-empty WHPP unified partition may become authoritative');
+assert.match(source, /UNIFIED_WHPP_EMPTY_KEEP_STANDARD/, 'an empty unified WHPP partition must never erase preserved standard membership');
+assert.match(source, /WHPP_STANDARD_DAILY_ROWS/, 'zero unified WHPP must first preserve existing standard WHPP daily members');
+assert.match(source, /WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL/, 'a previously erased standard membership may self-heal only from a full fact set matching completed history total');
+assert.match(source, /factRows\.length !== expected/, 'partial final facts must never be promoted to membership');
+assert.match(source, /business_scan_results/, 'fact-based membership recovery must reuse saved scan region evidence when available');
 assert.match(source, /INSERT INTO business_daily_reports/, 'future unified imports must mirror WHPP normalized daily header');
 assert.match(source, /INSERT INTO business_daily_parse_rows/, 'future unified imports must mirror WHPP normalized daily members');
 assert.match(source, /UNIFIED_IMPORT_ROUTE[\s\S]*ensureV351WhppNormalizedDaily/, 'unified import response must trigger WHPP normalized bridge');
@@ -56,5 +62,5 @@ assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
 assert.equal(dashboard.regions.PP.total + dashboard.regions.PV.total + dashboard.regions.UNKNOWN.total, 236);
 
-console.log('[V351] WHPP unified-dashboard bridge smoke passed · exact 236 membership survives stale-zero history · cards and drilldowns share one truth · final facts recompute POD/return/cancel/open · normalized repair is membership-only · future unified imports mirror normalized WHPP daily · no DB schema change');
+console.log('[V351] WHPP unified-dashboard bridge smoke passed · zero unified WHPP can no longer erase standard membership · erased membership recovers only from complete preserved facts matching history total · exact 236 cards/drilldowns remain one truth · membership repair only · no DB schema change');
 await import('./v352-whpp-visible-single-truth-smoke.mjs');
