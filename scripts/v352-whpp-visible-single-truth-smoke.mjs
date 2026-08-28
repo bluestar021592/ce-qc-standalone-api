@@ -19,8 +19,15 @@ assert.match(source, /\/api\/v71\/whpp-summary/, 'legacy V71 summary route must 
 assert.match(source, /\/api\/v172\/whpp-metric-detail/, 'visible drilldown must share V352 truth');
 assert.match(source, /Number\(row\.isPod \|\| 0\) === 1/, 'persisted SQL isPod must be restored in memory');
 assert.match(source, /normalized\.是否POD = '是'/, 'SQL POD must map to WHPP dashboard aliases');
+assert.match(source, /memberSet\.has\(billOf\(row\)\)/, 'final facts must be bounded to current WHPP membership');
 assert.match(source, /TOP_EQUALS_PP_PLUS_PV_PLUS_UNKNOWN/, 'visible aggregate/region invariant must be explicit');
 assert.doesNotMatch(source, /INSERT INTO|UPDATE\s+business_|DELETE FROM/, 'V352 visible owner must stay read-only');
+const summaryStart = source.indexOf('function summaryPayload');
+const summaryEnd = source.indexOf('function summaryHandler', summaryStart);
+assert.ok(summaryStart >= 0 && summaryEnd > summaryStart, 'V352 summary payload source must exist');
+const summarySource = source.slice(summaryStart, summaryEnd);
+assert.match(summarySource, /slimDashboard/, 'first paint must use a slim summary object');
+assert.doesNotMatch(summarySource, /detailTabs/, 'first-paint summary must not serialize per-ticket drilldown arrays');
 
 const membershipRows = [];
 for (let i = 0; i < 139; i += 1) membershipRows.push({ shipmentCode: `CEPP${String(i + 1).padStart(6, '0')}`, reportDate: '2026-08-14', businessType: 'WHPP', regionCode: 'PP' });
@@ -35,6 +42,8 @@ for (let i = 0; i < 62; i += 1) finalRows.push({ shipmentCode: `CEPV${String(i +
 for (let i = 62; i < 66; i += 1) finalRows.push({ shipmentCode: `CEPV${String(i + 1).padStart(6, '0')}`, isPod: 0, currentState: 'RETURNED', primaryCategory: '退回', 退回状态: '已退回' });
 for (let i = 66; i < 94; i += 1) finalRows.push({ shipmentCode: `CEPV${String(i + 1).padStart(6, '0')}`, isPod: 0, currentState: 'ORDER_CANCELLED', primaryCategory: '订单取消', 订单取消: '是' });
 for (let i = 94; i < 97; i += 1) finalRows.push({ shipmentCode: `CEPV${String(i + 1).padStart(6, '0')}`, isPod: 0, currentState: 'PENDING', primaryCategory: 'Pending', Pending当前次数: 1 });
+// A stale same-day final row that is not in the 236-member daily set must never affect visible WHPP metrics.
+finalRows.push({ shipmentCode: 'CE_STALE_NOT_IN_MEMBERSHIP', isPod: 1, currentState: 'POD', regionCode: 'PP' });
 
 const dashboard = buildV352WhppVisibleDashboard({ reportDate: '2026-08-14', membershipRows, finalRows });
 assertV352WhppVisibleConsistency(dashboard);
@@ -62,4 +71,4 @@ assert.equal(dashboard.accounting.accounted, 236);
 assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
 
-console.log('[V352] WHPP visible single-truth smoke passed · exact production-shaped 236 = PP139 + PV97 · SQL isPod-only facts restore POD186 · returned19 · unresolved3 · top=regions=drilldowns · read-only · no DB schema change');
+console.log('[V352] WHPP visible single-truth smoke passed · exact production-shaped 236 = PP139 + PV97 · SQL isPod-only facts restore POD186 · returned19 · unresolved3 · stale nonmember facts excluded · top=regions=drilldowns · slim first paint · read-only · no DB schema change');
