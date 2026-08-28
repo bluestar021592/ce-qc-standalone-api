@@ -1,5 +1,4 @@
 import { createDatabaseBackup } from './backup.js';
-import { getDb } from './db.js';
 import { loadAppState, resetAppState, saveAppState } from './store.js';
 
 // Do not initialize or materialize persisted app_state during module import.
@@ -9,7 +8,7 @@ import { loadAppState, resetAppState, saveAppState } from './store.js';
 // request actually needs the full mutable state.
 
 export async function loadState() {
-  return normalizeState(mergeUnifiedWhppMembership(loadAppState()));
+  return normalizeState(loadAppState());
 }
 
 export async function saveState(state) {
@@ -26,16 +25,10 @@ export async function saveState(state) {
   // normalized rows back to the caller. server.js creates the immutable snapshot
   // immediately after saveState(), therefore this also prevents a duplicate-only
   // snapshot reconciliation failure without re-querying CE APIs.
-  const merged = mergeUnifiedWhppMembership(state);
-  const normalized = normalizeState(merged);
+  const normalized = normalizeState(state);
   if (state && typeof state === 'object') {
     state.finalRows = normalized.finalRows;
     state.finalDiversionRows = normalized.finalDiversionRows;
-    state.dailyParseRows = normalized.dailyParseRows;
-    state.dailyParseSummary = normalized.dailyParseSummary;
-    state.pnhBills = normalized.pnhBills;
-    state.carryBills = normalized.carryBills;
-    state.unifiedWhppSnapshotId = normalized.unifiedWhppSnapshotId;
   }
   saveAppState(compactStateForPersistence(normalized));
 }
@@ -85,8 +78,7 @@ export function normalizeState(s = {}) {
     currentRun: s.currentRun || null,
     logs: Array.isArray(s.logs) ? s.logs.slice(-300) : [],
     lastRunSummary: s.lastRunSummary || s.lastRun || null,
-    lastRun: s.lastRun || s.lastRunSummary || null,
-    unifiedWhppSnapshotId: String(s.unifiedWhppSnapshotId || '')
+    lastRun: s.lastRun || s.lastRunSummary || null
   };
 }
 
@@ -103,54 +95,6 @@ export function cleanAnyBills(list) {
 export function isExcludedBill(value) {
   const wb = String(value || '').trim().toUpperCase();
   return /^SPE/.test(wb) || /^WHPP/.test(wb) || /WHPP/.test(wb);
-}
-
-function mergeUnifiedWhppMembership(state = {}) {
-  if (!state || typeof state !== 'object') return state;
-  const reportDate = String(state.reportDate || '').trim();
-  if (!reportDate) return state;
-  let batch;
-  try {
-    batch = getDb().prepare("SELECT snapshotId FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC LIMIT 1").get(reportDate);
-  } catch {
-    return state;
-  }
-  const snapshotId = String(batch?.snapshotId || '');
-  if (!snapshotId || String(state.unifiedWhppSnapshotId || '') === snapshotId) return state;
-
-  let whppRows = [];
-  let historicalWhpp = [];
-  try {
-    whppRows = getDb().prepare("SELECT rowJson FROM unified_import_rows WHERE snapshotId=? AND businessType='WHPP' ORDER BY shipmentCode")
-      .all(snapshotId)
-      .map(row => parseJson(row.rowJson, null))
-      .filter(Boolean)
-      .map(row => ({ ...row, result: row.result || 'PNH', reason: row.reason || row.classificationReason || '统一日报WHPP成员' }));
-    historicalWhpp = getDb().prepare("SELECT shipmentCode FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' AND sourceReportDate<? ORDER BY sourceReportDate,shipmentCode")
-      .all(reportDate)
-      .map(row => String(row.shipmentCode || '').trim().toUpperCase())
-      .filter(Boolean);
-  } catch (error) {
-    console.warn('[CE-QC][WHPP_UNIFIED_MEMBERSHIP] merge skipped:', error?.message || error);
-    return state;
-  }
-
-  const dailyByBill = new Map((state.dailyParseRows || []).map(row => [rowBill(row), row]).filter(([bill]) => bill));
-  for (const row of whppRows) {
-    const bill = rowBill(row);
-    if (bill) dailyByBill.set(bill, row);
-  }
-  const dailyParseRows = [...dailyByBill.values()];
-  const pnhBills = cleanMainBills([...(state.pnhBills || []), ...whppRows.map(rowBill)]);
-  const carryBills = cleanMainBills([...(state.carryBills || []), ...historicalWhpp]);
-  const summary = {
-    ...(state.dailyParseSummary || {}),
-    totalRecognized: pnhBills.length,
-    pnh: pnhBills.length,
-    whpp: whppRows.length
-  };
-  console.info('[CE-QC][WHPP_UNIFIED_MEMBERSHIP]', JSON.stringify({ reportDate, snapshotId, todayWhpp: whppRows.length, historicalWhpp: historicalWhpp.length, ccslTodayTotal: pnhBills.length }));
-  return { ...state, dailyParseRows, dailyParseSummary: summary, pnhBills, carryBills, unifiedWhppSnapshotId: snapshotId };
 }
 
 function normalizeRows(rows) {
@@ -232,8 +176,4 @@ function sanitizeValue(value, depth = 0) {
 function truncateString(value, limit) {
   const text = String(value ?? '');
   return text.length > limit ? `${text.slice(0, limit)}...[TRUNCATED ${text.length - limit}]` : text;
-}
-
-function parseJson(text, fallback) {
-  try { return JSON.parse(text); } catch { return fallback; }
 }
