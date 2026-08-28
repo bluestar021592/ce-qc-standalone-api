@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildV351WhppDashboard, loadV351UnifiedWhppMembership, V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID } from '../src/v351WhppUnifiedDashboardBridgePatch.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'v351WhppUnifiedDashboardBridgePatch.js'), 'utf8').replace(/\r\n/g, '\n');
 const v85 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v85ShopeeWhppMetricPatch.js'), 'utf8').replace(/\r\n/g, '\n');
+const v132 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v132WhppFastIntegrationPatch.js'), 'utf8').replace(/\r\n/g, '\n');
+execFileSync(process.execPath, ['--check', path.join(__dirname, '..', 'src', 'v132WhppFastIntegrationPatch.js')], { stdio: 'pipe' });
 
 assert.match(V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, /v351-whpp-unified-membership-dashboard-bridge/);
 assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351 must load before server route registration');
+assert.match(v132, /import \{ loadV351UnifiedWhppMembership \} from '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'primary V132 visible summary must share V351 membership authority');
+assert.match(v132, /const membership=loadV351UnifiedWhppMembership\(reportDate,db\)/, 'V132 must delegate WHPP membership selection to the zero-safe V351 owner');
 assert.match(source, /unified_import_batches[\s\S]*status='VALID'/, 'WHPP current membership must inspect the latest VALID unified import');
 assert.match(source, /if \(rows\.length\)[\s\S]*LATEST_VALID_UNIFIED_MEMBERSHIP/, 'only a non-empty WHPP unified partition may become authoritative');
 assert.match(source, /UNIFIED_WHPP_EMPTY_KEEP_STANDARD/, 'an empty unified WHPP partition must never erase preserved standard membership');
@@ -103,5 +108,5 @@ assert.equal(partialFacts.present, false, '235/236 preserved facts must not be p
 assert.equal(partialFacts.rows.length, 0);
 assert.equal(partialFacts.membershipSource, 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD');
 
-console.log('[V351] WHPP unified-dashboard bridge smoke passed · zero unified WHPP can no longer erase standard membership · erased membership recovers only from complete 236/236 preserved facts with PP/PV region evidence · 235/236 partial facts fail closed · exact 236 cards/drilldowns remain one truth · membership repair only · no DB schema change');
+console.log('[V351] WHPP unified-dashboard bridge smoke passed · primary V132 shares the zero-safe membership owner · zero unified WHPP can no longer erase standard membership · erased membership recovers only from complete 236/236 preserved facts with PP/PV region evidence · 235/236 partial facts fail closed · exact 236 cards/drilldowns remain one truth · membership repair only · no DB schema change');
 await import('./v352-whpp-visible-single-truth-smoke.mjs');
