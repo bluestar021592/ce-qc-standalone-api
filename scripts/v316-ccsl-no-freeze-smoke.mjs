@@ -89,14 +89,14 @@ assert.equal(syntheticSuccess.at(-1), 'WB1050', 'the final later 350-ticket batc
 assert.equal(TRACK_QUERY_BATCH_SIZE,50,'trajectory queries must remain fixed at 50 tickets');
 assert.deepEqual(splitTrackBatches(Array.from({length:120},(_,i)=>`TR${i+1}`)).map(batch=>batch.length),[50,50,20]);
 
-// V347 production hot-path regression. The browser/server may emit many progress
-// strings while one 350-ticket request is pending. Those progress-only saves must
-// not touch SQLite. Real lightweight checkpoints must use zero-wait lock handling,
-// so another SQLite writer can never freeze the Node event loop or the CE deadline.
+// V348 production hot-path regression. Progress and all in-run fact checkpoints
+// must be zero-wait lightweight writes. In particular, the historical batch-4
+// boundary (1400 tickets) must NEVER call originalStorage.saveState() on the large
+// database. One authoritative mirror is allowed only after running=false.
 const oldDbFile = process.env.DB_FILE;
 const oldDataDir = process.env.DATA_DIR;
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-v347-'));
-const tempDbFile = path.join(tempDir, 'v347.db');
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-v348-'));
+const tempDbFile = path.join(tempDir, 'v348.db');
 const seedDb = new DatabaseSync(tempDbFile);
 seedDb.exec(`
   CREATE TABLE run_locks(
@@ -107,18 +107,18 @@ seedDb.exec(`
   );
 `);
 seedDb.prepare(`INSERT INTO run_locks(reportDate,runId,status,currentStage,batchIndex,totalBatches,errorMessage,updatedAt) VALUES(?,?,'running','订单扫描',0,4,'','x')`)
-  .run('2026-08-11','V347-RUN');
+  .run('2026-08-11','V348-RUN');
 seedDb.close();
 process.env.DB_FILE = tempDbFile;
 process.env.DATA_DIR = tempDir;
-const checkpointRuntime = await import(`../src/v340CcslStorageCheckpoint.js?v347=${Date.now()}`);
+const checkpointRuntime = await import(`../src/v340CcslStorageCheckpoint.js?v348=${Date.now()}`);
 try {
-  const completed = Array.from({length:350},(_,i)=>({shipmentCode:`V347-${String(i+1).padStart(4,'0')}`,status:'success'}));
+  const completed = Array.from({length:350},(_,i)=>({shipmentCode:`V348-${String(i+1).padStart(4,'0')}`,status:'success'}));
   const state = {
     reportDate:'2026-08-11',
-    currentRun:{runId:'V347-RUN'},
+    currentRun:{runId:'V348-RUN'},
     processing:{running:true,paused:false,phase:'订单扫描',batchIndex:1,totalBatches:4,error:''},
-    scanPool:Array.from({length:1400},(_,i)=>`V347-${String(i+1).padStart(4,'0')}`),
+    scanPool:Array.from({length:1400},(_,i)=>`V348-${String(i+1).padStart(4,'0')}`),
     scanQueryStatus:completed,
     scanResults:completed.map(row=>({运单号:row.shipmentCode})),
     podLocks:[],needTrackBills:[],trackQueryStatus:[],trackResults:[],trackEvents:[],finalRows:[],nextCarryBills:[]
@@ -137,9 +137,9 @@ try {
   inspect.close();
 
   // New facts require a real light checkpoint. Hold a competing writer lock and
-  // prove V347 returns immediately instead of inheriting the main 3000ms busy wait.
-  state.scanQueryStatus.push(...Array.from({length:350},(_,i)=>({shipmentCode:`V347-${String(i+351).padStart(4,'0')}`,status:'success'})));
-  state.scanResults.push(...Array.from({length:350},(_,i)=>({运单号:`V347-${String(i+351).padStart(4,'0')}`})));
+  // prove V348 returns immediately instead of inheriting the main busy wait.
+  state.scanQueryStatus.push(...Array.from({length:350},(_,i)=>({shipmentCode:`V348-${String(i+351).padStart(4,'0')}`,status:'success'})));
+  state.scanResults.push(...Array.from({length:350},(_,i)=>({运单号:`V348-${String(i+351).padStart(4,'0')}`})));
   const blocker = new DatabaseSync(tempDbFile);
   blocker.exec('PRAGMA busy_timeout = 0');
   blocker.exec('BEGIN IMMEDIATE');
@@ -151,6 +151,18 @@ try {
   assert.equal(live,state,'active-run pause checks must reuse the in-memory state instead of parsing full app_state');
   blocker.exec('ROLLBACK');
   blocker.close();
+
+  // This is the exact historical freeze boundary: batch 4/4 = 1400 tickets.
+  // The fixture intentionally lacks app_state/fact tables, so any attempted full
+  // mirror would throw. V348 must stay lightweight and simply advance run_locks.
+  state.scanQueryStatus.push(...Array.from({length:700},(_,i)=>({shipmentCode:`V348-${String(i+701).padStart(4,'0')}`,status:'success'})));
+  state.scanResults.push(...Array.from({length:700},(_,i)=>({运单号:`V348-${String(i+701).padStart(4,'0')}`})));
+  state.processing.batchIndex=4;
+  await checkpointRuntime.saveState(state);
+  inspect = new DatabaseSync(tempDbFile);
+  assert.equal(inspect.prepare(`SELECT batchIndex FROM run_locks WHERE reportDate='2026-08-11'`).get().batchIndex,4,'batch 4/4 must remain a light checkpoint; no in-run full mirror allowed');
+  inspect.close();
+  assert.equal(checkpointRuntime.shouldUseCcslLightCheckpoint(state),true,'all running CCSL saves must stay lightweight, including the final scan batch');
 } finally {
   checkpointRuntime.resetV347CheckpointRuntimeForTest();
   if (oldDbFile === undefined) delete process.env.DB_FILE; else process.env.DB_FILE = oldDbFile;
@@ -194,11 +206,13 @@ assert.ok(v315Import < schedulerImport, 'V315 operational refresh must still loa
 assert.match(redirect, /carryoverRefreshScheduler\.js/);
 assert.match(redirect, /specifier === '\.\/pipeline\.js'/);
 assert.match(redirect, /v340CcslStorageCheckpoint\.js/,'server storage must remain redirected through the CCSL hot-path checkpoint owner');
-assert.match(checkpointSource,/v347-ccsl-hotpath-nonblocking-checkpoint/);
+assert.match(checkpointSource,/v348-ccsl-final-only-authoritative-mirror/);
 assert.match(checkpointSource,/progressOnlySqliteWrites:false/,'progress-only text/log saves must stay out of SQLite');
 assert.match(checkpointSource,/PRAGMA busy_timeout = 0/,'light checkpoint must never inherit a blocking SQLite busy timeout');
 assert.match(checkpointSource,/IN_MEMORY_WHILE_ACTIVE/,'pause polling must remain in-memory during active CCSL processing');
-assert.match(checkpointSource,/V347_CCSL_FULL_MIRROR_TIMING/,'slow authoritative full mirrors must remain observable');
+assert.match(checkpointSource,/inRunFullMirror:false/,'no synchronous full mirror may run while CCSL processing is active');
+assert.match(checkpointSource,/FINAL_ONLY_AFTER_RUNNING_FALSE/,'authoritative CCSL full mirror must be final-only');
+assert.match(checkpointSource,/V348_CCSL_FINAL_MIRROR_TIMING/,'the one authoritative final mirror must remain observable');
 assert.match(pipeline, /const ORDER_BATCH_SIZE = Number\(process\.env\.ORDER_BATCH_SIZE \|\| 350\)/);
 assert.match(batching, /export const TRACK_QUERY_BATCH_SIZE = 50/);
 assert.match(batching, /queryWithinHardDeadline/);
@@ -218,4 +232,4 @@ assert.equal(boundedBatches, 16, '5453 tickets must run as 16 CCSL scan batches 
 const firstPending = alreadyCompleted + 1;
 assert.equal(firstPending, 2101, 'the persisted 2100 successful bills must resume at the next uncompleted bill');
 
-console.log(`[V347/V338/V316] CCSL no-freeze smoke passed · scan=350 · trajectory=50 · progress-only SQLite writes=0 · locked light checkpoint fail-open · pause reads=in-memory · 5453=>${boundedBatches} scan batches · never-settling middle batch failed forward and WB1050 completed · checkpoint resumes at ${firstPending}`);
+console.log(`[V348/V338/V316] CCSL no-freeze smoke passed · scan=350 · trajectory=50 · all in-run saves are zero-wait light checkpoints · batch 4/4=1400 never full-mirrors · one final authoritative mirror only after running=false · locked checkpoint fail-open · pause reads=in-memory · 5453=>${boundedBatches} scan batches · never-settling middle batch failed forward and WB1050 completed · safe crash recovery may re-query unfinished API work`);
