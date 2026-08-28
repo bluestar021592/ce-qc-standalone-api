@@ -1,6 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 import { buildWhppDashboard } from './whppReporting.js';
+import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
 
 const PATCH_ID='2026-08-22-v216-whpp-import-parity-v1';
 const ROUTE='/api/v132/whpp-fast-summary';
@@ -47,22 +48,15 @@ function latestDate(db,requested=''){
   return dateOnly(db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP' ORDER BY reportDate DESC LIMIT 1").get()?.reportDate||'');
 }
 function loadUnifiedMembership(db,reportDate){
-  const batch=db.prepare(`SELECT batchId,snapshotId,sourceName FROM unified_import_batches
-    WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC LIMIT 1`).get(reportDate);
-  if(!batch)return {present:false,rows:[],source:'WHPP_STANDARD_DAILY'};
-  const rows=uniqueRows(db.prepare(`SELECT shipmentCode,regionCode,rowJson FROM unified_import_rows
-    WHERE batchId=? AND businessType='WHPP' ORDER BY shipmentCode`).all(batch.batchId).map(row=>{
-      const raw=safeJson(row.rowJson,{});
-      return {
-        ...raw,
-        shipmentCode:String(row.shipmentCode||'').trim().toUpperCase(),
-        运单号:String(row.shipmentCode||'').trim().toUpperCase(),
-        businessType:'WHPP',
-        reportDate,
-        regionCode:row.regionCode||raw.regionCode||raw.区域||''
-      };
-    }));
-  return {present:true,rows,source:'LATEST_VALID_UNIFIED_MEMBERSHIP',batchId:String(batch.batchId||''),snapshotId:String(batch.snapshotId||'')};
+  const membership=loadV351UnifiedWhppMembership(reportDate,db);
+  return {
+    present:Boolean(membership.present),
+    rows:membership.rows||[],
+    source:membership.membershipSource||(membership.present?'LATEST_VALID_UNIFIED_MEMBERSHIP':'WHPP_STANDARD_DAILY'),
+    batchId:String(membership.batchId||''),
+    snapshotId:String(membership.snapshotId||''),
+    recoveredFromPreservedWhpp:Boolean(membership.recoveredFromPreservedWhpp)
+  };
 }
 function loadStandardMembership(db,reportDate){
   const daily=db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
@@ -71,7 +65,7 @@ function loadStandardMembership(db,reportDate){
     WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row=>({
       ...safeJson(row.rowJson,{}),shipmentCode:row.shipmentCode,运单号:row.shipmentCode,businessType:'WHPP',reportDate
     })));
-  return {present:true,rows,source:'WHPP_STANDARD_DAILY'};
+  return {present:rows.length>0,rows,source:rows.length?'WHPP_STANDARD_DAILY':'EMPTY'};
 }
 function loadFinalFacts(db,reportDate,membershipRows=[]){
   const members=uniqueRows(membershipRows);
