@@ -28,6 +28,65 @@ function Get-GitText([string[]]$GitArguments) {
   return $text
 }
 
+# Remote Git operations use a one-process-only resolver override when Windows DNS is
+# unhealthy. No adapter DNS settings, hosts file, global Git config, or repository
+# business data are modified by this fallback.
+function Invoke-RemoteGit([string[]]$GitArguments, [switch]$AllowFailure) {
+  $args = @()
+  if (-not [string]::IsNullOrWhiteSpace([string]$script:GitHubCurlResolve)) {
+    $args += @('-c', "http.curloptResolve=$script:GitHubCurlResolve")
+  }
+  $args += $GitArguments
+  if ($AllowFailure) { return (Invoke-Exe $script:GitExe $args -AllowFailure) }
+  Invoke-Exe $script:GitExe $args | Out-Null
+}
+
+function Get-GitHubFallbackAddresses {
+  $addresses = @()
+  $resolve = Get-Command Resolve-DnsName -ErrorAction SilentlyContinue
+  if (-not $resolve) { return @() }
+  foreach ($server in @('1.1.1.1','8.8.8.8')) {
+    try {
+      $rows = @(Resolve-DnsName github.com -Server $server -Type A -DnsOnly -QuickTimeout -ErrorAction Stop)
+      foreach ($row in $rows) {
+        $ip = [string]$row.IPAddress
+        if ($ip -match '^\d{1,3}(\.\d{1,3}){3}$') { $addresses += $ip }
+      }
+    } catch {
+      Write-ManagedLog "[UPDATE] Explicit DNS query via $server failed; continuing fallback chain." DarkYellow
+    }
+  }
+  return @($addresses | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+function Invoke-ResilientGitHubFetch {
+  $script:GitHubCurlResolve = $null
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $code = Invoke-Exe $script:GitExe @('fetch','--quiet','origin','main') -AllowFailure
+    if ($code -eq 0) {
+      if ($attempt -gt 1) { Write-ManagedLog "[UPDATE] GitHub fetch recovered on normal retry $attempt/3." Green }
+      return $true
+    }
+    if ($attempt -lt 3) {
+      Write-ManagedLog "[UPDATE] GitHub fetch attempt $attempt/3 failed; retrying without changing system settings." DarkYellow
+      Start-Sleep -Seconds $attempt
+    }
+  }
+
+  $fallbackAddresses = @(Get-GitHubFallbackAddresses)
+  foreach ($ip in $fallbackAddresses) {
+    $script:GitHubCurlResolve = "github.com:443:$ip"
+    Write-ManagedLog "[UPDATE] Windows DNS still cannot reach GitHub; retrying through explicit DNS result $ip." DarkCyan
+    $code = Invoke-RemoteGit @('fetch','--quiet','origin','main') -AllowFailure
+    if ($code -eq 0) {
+      Write-ManagedLog '[UPDATE] GitHub fetch recovered through temporary explicit DNS fallback.' Green
+      return $true
+    }
+  }
+  $script:GitHubCurlResolve = $null
+  return $false
+}
+
 function Test-TrackedTreeClean {
   $text = Get-GitText @('status','--porcelain','--untracked-files=no')
   return [string]::IsNullOrWhiteSpace($text)
@@ -139,6 +198,7 @@ function Invoke-SafeAutoUpdate {
   $script:GitExe = $git.Source
   $script:NpmExe = $npm.Source
   $script:NodeExe = $node.Source
+  $script:GitHubCurlResolve = $null
 
   if (-not (Test-TrackedTreeClean)) {
     Write-ManagedLog '[UPDATE] Tracked project files have local changes; automatic update is skipped to avoid overwriting work.' Yellow
@@ -147,13 +207,12 @@ function Invoke-SafeAutoUpdate {
 
   $current = Get-GitText @('rev-parse','HEAD')
   try {
-    $fetchCode = Invoke-Exe $script:GitExe @('fetch','--quiet','origin','main') -AllowFailure
-    if ($fetchCode -ne 0) {
-      Write-ManagedLog '[UPDATE] GitHub is temporarily unreachable; starting current installed version.' Yellow
+    if (-not (Invoke-ResilientGitHubFetch)) {
+      Write-ManagedLog '[UPDATE] GitHub remains unreachable after retries and explicit DNS fallback; starting current installed version.' Yellow
       return
     }
   } catch {
-    Write-ManagedLog '[UPDATE] GitHub fetch failed; starting current installed version.' Yellow
+    Write-ManagedLog ("[UPDATE] GitHub fetch recovery chain failed; starting current installed version. " + $_.Exception.Message) Yellow
     return
   }
   $remote = Get-GitText @('rev-parse','origin/main')
@@ -180,7 +239,7 @@ function Invoke-SafeAutoUpdate {
 
   $dependencyFiles = Get-GitText @('diff','--name-only',$current,$remote,'--','package.json','package-lock.json')
   Write-ManagedLog '[UPDATE] Installing verified fast-forward update...' Cyan
-  Invoke-Exe $script:GitExe @('pull','--ff-only','--quiet','origin','main') | Out-Null
+  Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')
   if (-not [string]::IsNullOrWhiteSpace($dependencyFiles)) {
     Write-ManagedLog '[UPDATE] Dependencies changed; refreshing node_modules...' Cyan
     Invoke-Exe $script:NpmExe @('ci','--prefer-offline','--no-audit','--no-fund') | Out-Null
