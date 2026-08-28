@@ -14,6 +14,7 @@ const {
   parseUnifiedDailyExcel,
   getUnifiedEffectiveSheetRange
 } = await import('../src/unifiedExcelParser.js');
+const { isExcludedBill } = await import('../src/storage.js');
 
 const file = path.join(os.tmpdir(), `ce-qc-v294-zero-loss-${process.pid}-${Date.now()}.xlsx`);
 const bloatedFile = path.join(os.tmpdir(), `ce-qc-v294-bloated-range-${process.pid}-${Date.now()}.xlsx`);
@@ -84,6 +85,7 @@ try {
   assert.equal(parsed.sheetDiagnostics[0]?.rangeClamped, true);
   assert.equal(parsed.sheetDiagnostics[0]?.effectiveRange, 'A1:E9');
   assert.ok(parseElapsedMs < 5000, `inflated worksheet range must parse quickly, got ${parseElapsedMs}ms`);
+  assert.equal(isExcludedBill('CE260810000002'), false, 'CE-prefixed WHPP member must remain eligible for the real CCSL 350/50 pipeline');
 
   const reuseStartedAt = Date.now();
   const reused = parseUnifiedDailyExcel(bloatedFile, {
@@ -109,12 +111,24 @@ try {
   assert.match(parserSource, /\[CE-QC\]\[UNIFIED_IMPORT_STAGE\].*sheet_matrix/, 'live parser must expose import-stage timing diagnostics');
 
   const storeSource = fs.readFileSync(new URL('../src/unifiedImportStore.js', import.meta.url), 'utf8');
+  assert.match(storeSource, /BUSINESS_TYPES\s*=\s*Object\.freeze\(\[[^\]]*'WHPP'/, 'unified snapshot reconciliation must count WHPP as the seventh business');
+  assert.match(storeSource, /七板块合计/, 'source reconciliation error must describe the real seven-business contract');
   assert.match(storeSource, /\[CE-QC\]\[UNIFIED_IMPORT_STAGE\]\s*sqlite_write/, 'SQLite write stage must be timed');
   assert.match(storeSource, /\[CE-QC\]\[UNIFIED_IMPORT_STAGE\]\s*carryover_queue/, 'carryover queue stage must be timed');
   assert.match(storeSource, /COALESCE\(SUM\(CASE WHEN status='OPEN' AND sourceReportDate=\? THEN 1 ELSE 0 END\),0\) todayOpen/, 'carryover summary must aggregate in one SQL scan');
   assert.doesNotMatch(storeSource, /const one = \(sql, \.\.\.params\)/, 'carryover summary must not regress to four repeated count queries');
 
-  console.log(`[V294] zero-loss import smoke passed · inflated UsedRange clamped · duplicate parse reused · seven-business classification unchanged · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
+  const runtimeSource = fs.readFileSync(new URL('../src/v161UnifiedImportRuntimeTruthPatch.js', import.meta.url), 'utf8');
+  assert.match(runtimeSource, /TYPES\s*=\s*\[[^\]]*'WHPP'/, 'bootstrap/import runtime truth counts must include WHPP');
+
+  const storageSource = fs.readFileSync(new URL('../src/storage.js', import.meta.url), 'utf8');
+  assert.match(storageSource, /mergeUnifiedWhppMembership\(loadAppState\(\)\)/, 'real CCSL state load must merge WHPP from the current unified batch');
+  assert.match(storageSource, /businessType='WHPP'/, 'WHPP current and historical open members must be loaded from normalized SQLite truth');
+  assert.match(storageSource, /unifiedWhppSnapshotId/, 'WHPP membership merge must be once per unified snapshot, not once per checkpoint');
+  assert.match(storageSource, /pnhBills = cleanMainBills\(\[\.\.\.\(state\.pnhBills/, 'WHPP daily members must join the actual CCSL scan pool input');
+  assert.match(storageSource, /carryBills = cleanMainBills\(\[\.\.\.\(state\.carryBills/, 'historical OPEN WHPP must join the actual CCSL carry scan pool input');
+
+  console.log(`[V345/V294] zero-loss import smoke passed · inflated UsedRange clamped · duplicate parse reused · WHPP joins seven-business reconciliation and real CCSL 350/50 state · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
 } finally {
   try { fs.rmSync(file, { force: true }); } catch {}
   try { fs.rmSync(bloatedFile, { force: true }); } catch {}
