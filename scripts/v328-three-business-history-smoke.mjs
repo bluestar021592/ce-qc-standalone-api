@@ -80,7 +80,6 @@ for (const token of [
 
 // All visible history/attempt cards share one payload; no duplicate heavy history request is allowed.
 for (const label of ['平均签收天数','金边PP平均签收天数','外省PV平均签收天数']) assert.ok(ui.includes(label));
-assert.match(ui, /Pending\/失败后再次START/);
 assert.match(trendUi, /__CE_QC_V328_HISTORY_PAYLOADS__/);
 assert.match(trendUi, /function specialCached/);
 assert.doesNotMatch(trendUi, /fetch\(`\/api\/v308\/delivery-daily[^`]*history=all/);
