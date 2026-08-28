@@ -1,5 +1,6 @@
 import './v351WhppUnifiedDashboardBridgePatch.js';
 import './v352WhppVisibleTruthOwnerPatch.js';
+import './whppMembershipRecovery.js';
 import express from 'express';
 import { getDb } from './db.js';
 
