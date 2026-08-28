@@ -36,22 +36,28 @@ export function loadBusinessState(businessType = SHOPEE) {
 }
 
 export function saveBusinessState(state = {}, businessType = state.businessType || SHOPEE) {
+  const startedAt = Date.now();
   const type = normalizeType(businessType);
   const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
   const persisted = compactBusinessStatePayload(normalized);
+  const serializeStartedAt = Date.now();
+  const persistedJson = JSON.stringify(persisted);
+  const serializeMs = Date.now() - serializeStartedAt;
   const db = getDb();
   const now = nowIso();
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
       ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
-      .run(type, JSON.stringify(persisted), now);
+      .run(type, persistedJson, now);
     mirrorBusinessTables(db, normalized, type, now);
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
+    console.warn(`[CE-QC][BUSINESS_STATE_STAGE] save_failed type=${type} elapsedMs=${Date.now() - startedAt} serializeMs=${serializeMs} priorCarry=${normalized.priorCarryRows.length} error=${error?.message || error}`);
     throw error;
   }
+  console.info(`[CE-QC][BUSINESS_STATE_STAGE] save_done type=${type} elapsedMs=${Date.now() - startedAt} serializeMs=${serializeMs} bytes=${Buffer.byteLength(persistedJson,'utf8')} priorCarry=${normalized.priorCarryRows.length} activeCarry=${normalized.nextCarryBills.length || normalized.carryBills.length}`);
   return normalized;
 }
 
@@ -451,6 +457,8 @@ function mirrorBusinessTables(db, state, type, now) {
 
   const active = new Set(state.nextCarryBills.length ? state.nextCarryBills : state.carryBills);
   const podSet = new Set(state.podLocks);
+  const finalByBill = new Map((state.finalRows || []).map(row => [billOf(row), row]).filter(([bill]) => bill));
+  const priorCarryByBill = new Map((state.priorCarryRows || []).map(row => [billOf(row), row]).filter(([bill]) => bill));
   for (const row of db.prepare("SELECT shipmentCode FROM business_carry_bills WHERE businessType=? AND status='active'").all(type)) {
     if (!active.has(row.shipmentCode) || podSet.has(row.shipmentCode)) db.prepare("UPDATE business_carry_bills SET status=?,updatedAt=? WHERE businessType=? AND shipmentCode=? AND status='active'").run(podSet.has(row.shipmentCode) ? 'closed_pod' : 'closed_normal', now, type, row.shipmentCode);
   }
@@ -458,7 +466,7 @@ function mirrorBusinessTables(db, state, type, now) {
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(businessType,shipmentCode,reportDate) DO UPDATE SET status='active',primaryCategory=excluded.primaryCategory,lastEventTime=excluded.lastEventTime,lastEventDesc=excluded.lastEventDesc,lastCheckedDate=excluded.lastCheckedDate,lastRunId=excluded.lastRunId,retryStatus=excluded.retryStatus,reason=excluded.reason,recipient_raw=excluded.recipient_raw,recipient_normalized=excluded.recipient_normalized,recipient_group=excluded.recipient_group,recipient_group_reason=excluded.recipient_group_reason,source_row_number=excluded.source_row_number,rawJson=excluded.rawJson,updatedAt=excluded.updatedAt`);
   for (const bill of active) {
     if (podSet.has(bill)) continue;
-    const final = state.finalRows.find(row => billOf(row) === bill) || state.priorCarryRows.find(row => billOf(row) === bill) || {};
+    const final = finalByBill.get(bill) || priorCarryByBill.get(bill) || {};
     carryStmt.run(type, bill, date || '__active__', final.sourceDate || date, 'active', final.primaryCategory || final.异常分类 || '', JSON.stringify(final.tags || []), final.latestEventTime || final.最后节点时间 || '', final.latestEventDesc || final.最后节点 || '', date, state.currentRun?.runId || state.lastRunSummary?.runId || '', final.查询状态 === 'refresh_failed' ? 'refresh_failed' : '', final.QC判断 || '', final.recipient_raw || '', final.recipient_normalized || '', recipientGroup(final), final.recipient_group_reason || '', Number(final.source_row_number || final.rowNumber || 0), JSON.stringify(final), now, now);
   }
   for (const row of state.finalRows) {
