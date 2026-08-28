@@ -115,6 +115,10 @@ try {
   assert.match(storeSource, /\[CE-QC\]\[UNIFIED_IMPORT_STAGE\]\s*carryover_queue/, 'carryover queue stage must be timed');
   assert.match(storeSource, /COALESCE\(SUM\(CASE WHEN status='OPEN' AND sourceReportDate=\? THEN 1 ELSE 0 END\),0\) todayOpen/, 'carryover summary must aggregate in one SQL scan');
   assert.doesNotMatch(storeSource, /const one = \(sql, \.\.\.params\)/, 'carryover summary must not regress to four repeated count queries');
+  assert.match(storeSource, /options\?\.reuseExactDuplicate === true && exactSameFile/, 'exact duplicate reuse must be opt-in only; normal UI reupload must overwrite');
+  assert.match(storeSource, /UPDATE unified_import_batches SET status='SUPERSEDED' WHERE reportDate=\? AND status='VALID'/, 'same-date reupload must supersede the previous VALID daily batch');
+  assert.match(storeSource, /sameDateOverwrite:\s*Boolean\(previousValid\)/, 'import result must expose same-date overwrite truth');
+  assert.match(storeSource, /replacedSameFile:\s*exactSameFile/, 'same-file overwrite must be observable without skipping the write');
 
   const runtimeSource = fs.readFileSync(new URL('../src/v161UnifiedImportRuntimeTruthPatch.js', import.meta.url), 'utf8');
   assert.match(runtimeSource, /TYPES\s*=\s*\[[^\]]*'WHPP'/, 'bootstrap/import runtime truth counts must include WHPP');
@@ -125,6 +129,7 @@ try {
   const serverSource = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   assert.match(serverSource, /\['CE',\s*'CEAF',\s*'TBKH',\s*'ALI1688'\]\.includes\(row\.businessType\)/, 'CCSL import state must remain limited to its four execution businesses');
   assert.doesNotMatch(serverSource, /\['CE',\s*'CEAF',\s*'TBKH',\s*'ALI1688',\s*'WHPP'\]/, 'WHPP must never be silently folded into the CCSL run');
+  assert.match(serverSource, /saveUnifiedImport\(parsed,\s*req\.file\.originalname\)/, 'normal UI daily upload must use default overwrite mode without opting into duplicate reuse');
 
   const runnerSource = fs.readFileSync(new URL('../public/v67-resilient-run-guard.js', import.meta.url), 'utf8');
   assert.match(runnerSource, /async function runStage\(stage, preferResume, target\)/, 'seven-business runner must use the current generic stage executor');
@@ -137,7 +142,7 @@ try {
   assert.ok(ccslStage >= 0 && shopeeStage > ccslStage && whppStage > shopeeStage, 'all-business auto run order must stay CCSL -> SHOPEE -> WHPP so WHPP is never double-run');
   assert.equal((runnerSource.match(/\/api\/whpp\/run\/start/g) || []).length, 1, 'WHPP start endpoint must appear exactly once in the browser orchestration');
 
-  console.log(`[V346/V294] zero-loss import smoke passed · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
+  console.log(`[V346/V294] zero-loss import smoke passed · same-date/same-file reupload overwrites by default · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
 } finally {
   try { fs.rmSync(file, { force: true }); } catch {}
   try { fs.rmSync(bloatedFile, { force: true }); } catch {}
