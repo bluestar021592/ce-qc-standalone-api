@@ -33,7 +33,9 @@ function styleDashboardDataCell(cell, clickable = false, percent = false) {
   cell.font = { name: FONT, size: 10, bold: clickable, color: clickable ? { argb: 'FF0B57D0' } : { argb: 'FF000000' } };
   cell.alignment = { horizontal: 'center', vertical: 'middle' };
   if (clickable) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9E6' } };
-  if (percent && typeof cell.value === 'number') cell.numFmt = '0.00%';
+  // Formula-backed hyperlink cells are objects, not numbers. Percentage format
+  // must therefore be applied from the semantic flag, not typeof cell.value.
+  if (percent) cell.numFmt = '0.00%';
 }
 function mergePair(sheet, row, col) { sheet.mergeCells(row, col, row, col + 1); }
 function writeCard(sheet, pairIndex, label, value, percent, target, fill) {
@@ -48,7 +50,7 @@ function writeCard(sheet, pairIndex, label, value, percent, target, fill) {
 }
 function createDashboard(workbook, type, range, stats, anchors) {
   const sheet = workbook.addWorksheet('每日看板', { views: [{ state: 'frozen', ySplit: 10, xSplit: 1 }] });
-  const widths = [13, 10, 10, 10, 10, 3, 13, 10, 11, 10, 10, 11, 11, 11, 11, 11];
+  const widths = [13, 10, 12, 10, 12, 10, 12, 14, 11, 11, 11, 14, 11, 11, 11, 14];
   widths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
   sheet.mergeCells('A1:P2');
   const title = sheet.getCell('A1'); title.value = `${displayType(type)}每日数据看板`; title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } }; title.font = { name: FONT, size: 18, bold: true, color: { argb: 'FFFFFFFF' } }; title.alignment = { horizontal: 'center', vertical: 'middle' };
