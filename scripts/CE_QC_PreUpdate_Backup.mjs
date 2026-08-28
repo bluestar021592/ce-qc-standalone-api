@@ -85,6 +85,7 @@ function isHighRiskPath(file=''){
   if(value==='scripts/CE_QC_PreUpdate_Backup.mjs')return false;
   return /(^|\/)(db\.js|server\.js)$/i.test(value)
     || /(^|\/).*store\.js$/i.test(value)
+    || /(^|\/)v340CcslStorageCheckpoint\.js$/i.test(value)
     || /migration|schema|dataPurge|purgeDeleteWorker|fresh-start-reset|database-repair/i.test(value)
     || /unifiedImportStore|carryoverStore|businessStore|whppStore|authStore/i.test(value);
 }
@@ -135,8 +136,14 @@ if(!fs.existsSync(dbFile)){
   process.exit(0);
 }
 fs.mkdirSync(backupRoot,{recursive:true});
+const updateRisk=classifyUpdate(changedFiles());
 const fingerprintBefore=sourceFingerprint();
-const reusable=findReusableBackup(fingerprintBefore);
+
+// Exact-fingerprint reuse is deliberately a low-risk optimization only. If the
+// candidate changes persistence/storage hot-path code, make a fresh online backup
+// even when the live DB happens to be byte-identical to a previous verified copy.
+// This keeps every high-risk code switch paired with its own frozen source snapshot.
+const reusable=updateRisk.highRisk?null:findReusableBackup(fingerprintBefore);
 if(reusable){
   log('REUSE',`Database unchanged; reusing verified backup: ${reusable.backupPath}`);
   const reuseDir=path.join(backupRoot,`${stamp()}-reuse`);
@@ -148,7 +155,7 @@ if(reusable){
     backupQuickCheck:reusable.manifest.backupQuickCheck||'ok',integrity:reusable.manifest.integrity||'quick-ok',
     verificationMode:'exact-source-fingerprint+verified-backup-reuse',method:'verified-backup-reuse',
     sourceFingerprint:fingerprintBefore,sourceFingerprintBefore:fingerprintBefore,sourceFingerprintAfter:fingerprintBefore,
-    sourceStableDuringBackup:true,reusedFromManifest:reusable.manifestPath
+    sourceStableDuringBackup:true,reusedFromManifest:reusable.manifestPath,changedFiles:updateRisk.files,highRiskFiles:[]
   };
   fs.writeFileSync(path.join(reuseDir,'manifest.json'),JSON.stringify(reuseManifest,null,2),'utf8');
   log('READY','Verified existing backup reused; no database copy was repeated.');
@@ -156,7 +163,6 @@ if(reusable){
   process.exit(0);
 }
 
-const updateRisk=classifyUpdate(changedFiles());
 const recentBackup=findRecentVerifiedBackup();
 if(updateRisk.files.length>0&&!updateRisk.highRisk&&recentBackup){
   const skipDir=path.join(backupRoot,`${stamp()}-low-risk-skip`);fs.mkdirSync(skipDir,{recursive:true});
@@ -166,7 +172,7 @@ if(updateRisk.files.length>0&&!updateRisk.highRisk&&recentBackup){
   console.log(JSON.stringify({ok:true,skipped:true,reason:'LOW_RISK_UPDATE_RECENT_VERIFIED_BACKUP',...manifest}));
   process.exit(0);
 }
-if(updateRisk.highRisk)log('POLICY',`High-risk update touches persistent-data code; full backup required: ${updateRisk.risky.join(', ')}`);
+if(updateRisk.highRisk)log('POLICY',`High-risk update touches persistent-data code; fresh full backup required (reuse disabled): ${updateRisk.risky.join(', ')}`);
 else if(!recentBackup)log('POLICY','No recent verified backup is available; full backup required even for low-risk update.');
 
 log('LOCK',`Freezing SQLite writers with BEGIN IMMEDIATE (timeout ${SOURCE_LOCK_TIMEOUT_MS}ms)...`);
@@ -220,7 +226,8 @@ try{
     verificationMode:'sqlite-write-freeze+online-backup+stable-source-fingerprint+backup-quick-check+sha256',method:'node-sqlite-online-backup-with-begin-immediate-freeze',
     sourceFingerprint:fingerprintAfter,sourceFingerprintBefore:lockedFingerprintBefore,sourceFingerprintAfter:fingerprintAfter,
     sourceStableDuringBackup:true,sourceWriteFreeze:'BEGIN_IMMEDIATE',sourceLockAcquiredAt,sourceLockTimeoutMs:SOURCE_LOCK_TIMEOUT_MS,
-    backupRatePages:BACKUP_RATE_PAGES,sourceOpenMode:'read-only-backup-reader+separate-write-freeze-connection',changedFiles:updateRisk.files,highRiskFiles:updateRisk.risky
+    backupRatePages:BACKUP_RATE_PAGES,sourceOpenMode:'read-only-backup-reader+separate-write-freeze-connection',changedFiles:updateRisk.files,highRiskFiles:updateRisk.risky,
+    highRiskFreshBackupRequired:updateRisk.highRisk,verifiedBackupReuseAllowed:!updateRisk.highRisk
   };
   fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
   log('READY',`Verified backup ready under write freeze: ${copyFile}`);
