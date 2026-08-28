@@ -37,7 +37,14 @@ assert.ok(managed.includes("foreach ($server in @('1.1.1.1','8.8.8.8'))"), 'mana
 assert.ok(managed.includes('http.curloptResolve=$script:GitHubCurlResolve'), 'managed launcher must bypass broken resolver without changing TLS hostname');
 assert.ok(managed.includes("for ($attempt = 1; $attempt -le 3; $attempt++)"), 'managed launcher must retry normal fetch before DNS fallback');
 assert.ok(managed.includes("Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')"), 'resolved Git transport must also be used for install pull');
-assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b|hosts\s*file/i.test(managed), 'managed launcher must never modify Windows DNS or hosts file');
+
+// Security gate must detect real mutation commands, not harmless comments/log text such as
+// "hosts file is not modified". Strip PowerShell comments before checking command patterns.
+const managedCode = managed.replace(/^\s*#.*$/gm, '');
+const mutatesSystemDns = /\bSet-DnsClientServerAddress\b|\bnetsh\s+interface\s+[^\r\n]*\bdns\b/i.test(managedCode);
+const writesHosts = /\b(?:Set-Content|Add-Content|Out-File)\b[^\r\n]*(?:\\drivers\\etc\\hosts|\bhosts\b)|\[IO\.File\]::(?:WriteAllText|AppendAllText)\([^\r\n]*(?:\\drivers\\etc\\hosts|\bhosts\b)/i.test(managedCode);
+assert.ok(!mutatesSystemDns, 'managed launcher must never modify Windows adapter DNS');
+assert.ok(!writesHosts, 'managed launcher must never write the Windows hosts file');
 
 if (process.platform === 'win32') {
   const parse = "$errors=$null;$tokens=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/CE_QC_Managed_Launcher.ps1'),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 41}";
