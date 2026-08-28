@@ -8,14 +8,20 @@ const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN
 let ccslSnapshotCache = { snapshotId: '', state: null };
 
 export function saveUnifiedImport(parsed, sourceName) {
+  const stageStartedAt = Date.now();
   assertSourceReconciliation(parsed);
   const db = getDb();
   const existing = db.prepare('SELECT * FROM unified_import_batches WHERE reportDate=? AND fileHash=? AND status=? ORDER BY createdAt DESC LIMIT 1').get(parsed.reportDate, parsed.fileHash, 'VALID');
-  if (existing) return hydrateBatch(existing, true);
+  if (existing) {
+    const hydrated = hydrateBatch(existing, true);
+    console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] sqlite_duplicate elapsedMs=${Date.now() - stageStartedAt} reportDate=${parsed.reportDate} batchId=${existing.batchId}`);
+    return hydrated;
+  }
   const batchId = `BATCH-${crypto.randomUUID()}`;
   const snapshotId = `SNAP-${crypto.randomUUID()}`;
   const createdAt = nowIso();
   const payload = { reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, containerFormat: parsed.containerFormat, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, rows: parsed.rows };
+  const sqliteStartedAt = Date.now();
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare("UPDATE unified_import_batches SET status='SUPERSEDED' WHERE reportDate=? AND status='VALID'").run(parsed.reportDate);
@@ -36,9 +42,14 @@ export function saveUnifiedImport(parsed, sourceName) {
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
+    console.warn(`[CE-QC][UNIFIED_IMPORT_STAGE] sqlite_write_failed elapsedMs=${Date.now() - sqliteStartedAt} reportDate=${parsed.reportDate} rows=${parsed.rows.length} error=${error?.message || error}`);
     throw error;
   }
-  return { batchId, snapshotId, reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, dateWasManuallyCorrected: parsed.dateWasManuallyCorrected, containerFormat: parsed.containerFormat, fileHash: parsed.fileHash, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, warnings: parsed.warnings, carryover: carryoverSummary(parsed.reportDate), duplicateFile: false };
+  const sqliteElapsedMs = Date.now() - sqliteStartedAt;
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] sqlite_write elapsedMs=${sqliteElapsedMs} reportDate=${parsed.reportDate} rows=${parsed.rows.length} batchId=${batchId}`);
+  const carryover = carryoverSummary(parsed.reportDate);
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] store_done elapsedMs=${Date.now() - stageStartedAt} reportDate=${parsed.reportDate} rows=${parsed.rows.length} batchId=${batchId}`);
+  return { batchId, snapshotId, reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, dateWasManuallyCorrected: parsed.dateWasManuallyCorrected, containerFormat: parsed.containerFormat, fileHash: parsed.fileHash, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, warnings: parsed.warnings, carryover, duplicateFile: false };
 }
 
 export function getLatestUnifiedImport() {
@@ -79,13 +90,18 @@ function hydrateBatch(row, duplicateFile) {
 }
 
 export function getUnifiedProcessingQueue(batchId) {
+  const stageStartedAt = Date.now();
   const db = getDb();
   const batch = db.prepare('SELECT * FROM unified_import_batches WHERE batchId=?').get(batchId);
   if (!batch) throw new Error('导入批次不存在');
+  const queryStartedAt = Date.now();
   const rows = db.prepare(`SELECT c.shipmentCode,c.businessType,c.sourceReportDate,c.lastReportDate,c.status,c.apiStatus,c.stateJson,
     CASE WHEN c.sourceReportDate=? THEN 'TODAY' ELSE 'HISTORICAL_CARRY' END sourceType
     FROM carryover_open_items c WHERE c.status='OPEN' ORDER BY c.sourceReportDate,c.shipmentCode`).all(batch.reportDate);
-  return { batchId, snapshotId: batch.snapshotId, reportDate: batch.reportDate, rows, summary: carryoverSummary(batch.reportDate) };
+  const queryElapsedMs = Date.now() - queryStartedAt;
+  const summary = carryoverSummary(batch.reportDate);
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] carryover_queue elapsedMs=${Date.now() - stageStartedAt} queryMs=${queryElapsedMs} reportDate=${batch.reportDate} rows=${rows.length} historical=${summary.historicalOpen} today=${summary.todayOpen}`);
+  return { batchId, snapshotId: batch.snapshotId, reportDate: batch.reportDate, rows, summary };
 }
 
 export function updateCarryoverResults({ snapshotId, reportDate, rows = [] }) {
@@ -118,14 +134,21 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [] }) {
 }
 
 export function carryoverSummary(reportDate) {
-  const db = getDb();
-  const one = (sql, ...params) => Number(db.prepare(sql).get(...params)?.count || 0);
-  return {
-    todayOpen: one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate=?", reportDate),
-    historicalOpen: one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate<?", reportDate),
-    rechecked: one("SELECT COUNT(*) count FROM carryover_open_items WHERE lastReportDate=? AND sourceReportDate<?", reportDate, reportDate),
-    currentOpen: one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND lastReportDate<=?", reportDate)
+  const startedAt = Date.now();
+  const row = getDb().prepare(`SELECT
+    COALESCE(SUM(CASE WHEN status='OPEN' AND sourceReportDate=? THEN 1 ELSE 0 END),0) todayOpen,
+    COALESCE(SUM(CASE WHEN status='OPEN' AND sourceReportDate<? THEN 1 ELSE 0 END),0) historicalOpen,
+    COALESCE(SUM(CASE WHEN lastReportDate=? AND sourceReportDate<? THEN 1 ELSE 0 END),0) rechecked,
+    COALESCE(SUM(CASE WHEN status='OPEN' AND lastReportDate<=? THEN 1 ELSE 0 END),0) currentOpen
+    FROM carryover_open_items`).get(reportDate, reportDate, reportDate, reportDate, reportDate) || {};
+  const summary = {
+    todayOpen: Number(row.todayOpen || 0),
+    historicalOpen: Number(row.historicalOpen || 0),
+    rechecked: Number(row.rechecked || 0),
+    currentOpen: Number(row.currentOpen || 0)
   };
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] carryover_summary elapsedMs=${Date.now() - startedAt} reportDate=${reportDate} today=${summary.todayOpen} historical=${summary.historicalOpen} current=${summary.currentOpen}`);
+  return summary;
 }
 
 export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shopeeSnapshot = null }) {
