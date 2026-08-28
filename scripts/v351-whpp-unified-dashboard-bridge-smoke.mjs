@@ -13,6 +13,8 @@ assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351
 assert.match(source, /unified_import_batches[\s\S]*status='VALID'/, 'WHPP current membership must come from latest VALID unified import');
 assert.match(source, /saveWhppDailyImport\(/, 'future unified imports must mirror WHPP into normalized daily storage');
 assert.match(source, /UNIFIED_IMPORT_ROUTE[\s\S]*ensureV351WhppNormalizedDaily/, 'unified import response must trigger WHPP normalized bridge');
+assert.match(source, /DETAIL_ROUTES[\s\S]*\/api\/whpp\/metric-detail/, 'WHPP card drilldown must use the same V351 canonical truth');
+assert.match(source, /summary\.dashboard\?\.detailTabs/, 'detail rows must come from the same dashboard used for cards');
 assert.match(source, /staleHistoryRejected/, 'stale history mismatch must be observable');
 assert.doesNotMatch(source, /historySummary\.total\s*\?\?\s*daily/, 'stale history total must never override canonical membership');
 
@@ -36,9 +38,14 @@ assert.equal(dashboard.metrics.returned, 20);
 assert.equal(dashboard.metrics.cancelled, 5);
 assert.equal(dashboard.metrics.unresolved, 11);
 assert.equal(dashboard.metrics.pending1, 11);
+assert.equal(dashboard.detailTabs.all.total, 236, 'WHPP 236 card must drill into the same 236 membership rows');
+assert.equal(dashboard.detailTabs.pod.total, 200);
+assert.equal(dashboard.detailTabs.returned.total, 20);
+assert.equal(dashboard.detailTabs.cancelled.total, 5);
+assert.equal(dashboard.detailTabs.unresolved.total, 11);
 assert.equal(dashboard.accounting.accounted, 236);
 assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
 assert.equal(dashboard.regions.PP.total + dashboard.regions.PV.total + dashboard.regions.UNKNOWN.total, 236);
 
-console.log('[V351] WHPP unified-dashboard bridge smoke passed · exact 236 membership survives stale-zero history · final facts recompute POD/return/cancel/open · future unified imports mirror normalized WHPP daily · no DB schema change');
+console.log('[V351] WHPP unified-dashboard bridge smoke passed · exact 236 membership survives stale-zero history · cards and drilldowns share one truth · final facts recompute POD/return/cancel/open · future unified imports mirror normalized WHPP daily · no DB schema change');
