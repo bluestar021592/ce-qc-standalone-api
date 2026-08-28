@@ -10,6 +10,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'v352WhppVisibleTruthOwnerPatch.js'), 'utf8').replace(/\r\n/g, '\n');
+const v132Source = fs.readFileSync(path.join(__dirname, '..', 'src', 'v132WhppFastIntegrationPatch.js'), 'utf8').replace(/\r\n/g, '\n');
 const v85 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v85ShopeeWhppMetricPatch.js'), 'utf8').replace(/\r\n/g, '\n');
 
 assert.match(V352_WHPP_VISIBLE_TRUTH_OWNER_ID, /v352-whpp-visible-single-truth-owner/);
@@ -29,6 +30,23 @@ assert.ok(summaryStart >= 0 && summaryEnd > summaryStart, 'V352 summary payload 
 const summarySource = source.slice(summaryStart, summaryEnd);
 assert.match(summarySource, /slimDashboard/, 'first paint must use a slim summary object');
 assert.doesNotMatch(summarySource, /detailTabs/, 'first-paint summary must not serialize per-ticket drilldown arrays');
+
+// The primary WHPP browser calls V132. That older route is registered earlier than
+// the V352 listen-time wrapper, so it must itself use current membership + final
+// facts instead of stale business_history_summary metrics.
+assert.match(v132Source, /import \{ buildWhppDashboard \} from '\.\/whppReporting\.js';/, 'V132 must build the same canonical WHPP dashboard');
+assert.match(v132Source, /loadUnifiedMembership/, 'V132 must read latest valid unified WHPP membership');
+assert.match(v132Source, /loadFinalFacts/, 'V132 must read current WHPP final facts');
+assert.match(v132Source, /memberSet\.has\(billOf\(row\)\)/, 'V132 final facts must be bounded to selected membership');
+assert.match(v132Source, /normalized\.是否POD='是'/, 'V132 must restore SQL isPod into dashboard aliases');
+assert.match(v132Source, /assertVisibleConsistency\(dashboard\)/, 'V132 must reject top/region divergence');
+assert.match(v132Source, /Cache-Control','no-store/, 'V132 visible truth must not be browser-cached as a stale summary');
+const v132BuildStart = v132Source.indexOf('function buildFastSummary');
+const v132BuildEnd = v132Source.indexOf('const previousListen', v132BuildStart);
+assert.ok(v132BuildStart >= 0 && v132BuildEnd > v132BuildStart, 'V132 canonical summary builder must exist');
+const v132Build = v132Source.slice(v132BuildStart, v132BuildEnd);
+assert.doesNotMatch(v132Build, /const metrics=\{\.\.\.source/, 'V132 must never publish stale history summary metrics as visible truth');
+assert.match(v132Build, /const metrics=\{\.\.\.dashboard\.metrics,retryPending\}/, 'V132 top cards must come from the same dashboard object as regions');
 
 const membershipRows = [];
 for (let i = 0; i < 139; i += 1) membershipRows.push({ shipmentCode: `CEPP${String(i + 1).padStart(6, '0')}`, reportDate: '2026-08-14', businessType: 'WHPP', regionCode: 'PP' });
@@ -76,4 +94,4 @@ assert.equal(dashboard.accounting.accounted, 236);
 assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
 
-console.log('[V352] WHPP visible single-truth smoke passed · exact production-shaped 236 = PP139 + PV97 · SQL isPod-only facts restore POD186 · returned19 · unresolved3 · PV Pending stays in PV · stale nonmember facts excluded · top=regions=drilldowns · slim first paint · read-only · no DB schema change');
+console.log('[V352] WHPP visible single-truth smoke passed · primary V132 route uses current membership/final facts · exact production-shaped 236 = PP139 + PV97 · SQL isPod-only facts restore POD186 · returned19 · unresolved3 · PV Pending stays in PV · stale nonmember facts excluded · top=regions=drilldowns · slim first paint · read-only · no DB schema change');
