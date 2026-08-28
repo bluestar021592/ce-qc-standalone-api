@@ -320,7 +320,12 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     warnings,
     sheetDiagnostics
   };
-  recentUnifiedParse = { key: cacheKey, cachedAt: Date.now(), parsed: parsedResult };
+  const cacheEntry = { key: cacheKey, cachedAt: Date.now(), parsed: parsedResult };
+  recentUnifiedParse = cacheEntry;
+  const releaseTimer = setTimeout(() => {
+    if (recentUnifiedParse === cacheEntry) recentUnifiedParse = null;
+  }, UNIFIED_PARSE_REUSE_TTL_MS);
+  releaseTimer.unref?.();
   return parsedResult;
 }
 
