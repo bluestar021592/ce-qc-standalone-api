@@ -9,8 +9,10 @@ const source=fs.readFileSync(path.join(__dirname,'..','src','v143WhppRetryQueueP
 
 assert.match(V143_WHPP_RETRY_QUEUE_PATCH_ID,/v350-whpp-retry-fast-ack-auto-drain/);
 assert.match(source,/function runHandler\(req,res\)\{try\{const limit=[\s\S]*?startRetryJob\(limit,res\);res\.status\(202\)\.json\(\{ok:true,patchId:PATCH_ID,started:true,fastAck:true,autoDrain:true,job\}\)/,'POST must acknowledge without queue summary work');
-const runHandlerSource=source.match(/function runHandler\(req,res\)\{[\s\S]*?\n\nlet installed=/)?.[0]||'';
-assert.ok(runHandlerSource,'runHandler source must exist');
+const runHandlerStart=source.indexOf('function runHandler(req,res){');
+const runHandlerEnd=source.indexOf('let installed=',runHandlerStart);
+assert.ok(runHandlerStart>=0&&runHandlerEnd>runHandlerStart,'runHandler source must exist');
+const runHandlerSource=source.slice(runHandlerStart,runHandlerEnd);
 assert.doesNotMatch(runHandlerSource,/pendingRows\(|queueSummary\(/,'POST hot path must not synchronously scan retry SQLite before 202');
 assert.match(source,/response\?\.once\)response\.once\('finish',\(\)=>setImmediate\(launch\)\)/,'SQLite retry work must start only after the HTTP response finish event');
 assert.doesNotMatch(source,/UPPER\(COALESCE\(c?\.?apiStatus/,'retry predicates must not wrap apiStatus in UPPER/COALESCE');
@@ -59,4 +61,4 @@ assert.equal(stopped.passes,1);
 assert.equal(stopped.stillRetry,236);
 assert.equal(stopped.stopReason,'NO_PROGRESS');
 
-console.log('[V350] WHPP retry fast-ack smoke passed · HTTP finish precedes SQLite selection · 236 auto-drains as 200+36 · zero-progress stops after one pass · no DB schema change');
+console.log('[V350] WHPP retry fast-ack smoke passed · HTTP finish precedes SQLite selection · 236 auto-drains as 200+36 · zero-progress stops after one pass · LF/CRLF safe · no DB schema change');
