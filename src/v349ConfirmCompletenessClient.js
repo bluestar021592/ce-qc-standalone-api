@@ -1,8 +1,9 @@
 import { CEClient } from './ceClient.js';
 
-export const V349_CONFIRM_COMPLETENESS_ID='2026-08-28-v349-confirm-partial-response-recovery-v2';
+export const V349_CONFIRM_COMPLETENESS_ID='2026-08-28-v349-confirm-partial-response-recovery-v3';
 
 const FALLBACK_SIZES=Object.freeze([100,50,10,1]);
+const NO_SCAN_CONFIRM_MAX_BATCH=10;
 const DEFAULT_RECOVERY_BUDGET_MS=Math.max(2000,Math.min(10000,Number(process.env.CE_CONFIRM_PARTIAL_RECOVERY_BUDGET_MS||8000)));
 const CECLIENT_PATCH=Symbol.for('ce-qc.v349-confirm-completeness');
 
@@ -52,13 +53,14 @@ export async function recoverPartialConfirmResponse(rawConfirm,shipmentCodes,opt
   const initial=await rawConfirm(requested);
   const output=[];
   const rowsByCode=new Map();
+  const confirmedNoScan=new Set();
   appendRows(rowsByCode,output,initial,requestedSet);
   let missing=requested.filter(code=>!rowsByCode.has(code));
   if(!missing.length)return output;
 
-  // Keep the partial-response compensation comfortably below the surrounding
-  // confirm-query hard deadline. Missing children are sequential so CCSL/WHPP keep
-  // one remote confirm lane; already-returned waybills are never requested again.
+  // Keep partial-response compensation inside the surrounding confirm hard limit.
+  // Children are sequential so CCSL/WHPP retain one remote confirm lane; already
+  // returned waybills are never requested again.
   const budgetMs=Math.max(1000,Math.min(10000,Number(options.recoveryBudgetMs||DEFAULT_RECOVERY_BUDGET_MS)));
   const deadlineAt=Date.now()+budgetMs;
   const label=String(options.label||'CE-confirm');
@@ -76,6 +78,16 @@ export async function recoverPartialConfirmResponse(rawConfirm,shipmentCodes,opt
       try{
         const rows=await withDeadline(()=>rawConfirm(child),deadlineAt);
         appendRows(rowsByCode,output,rows,new Set(child));
+        // Only a successfully completed small compensation request can prove that
+        // an omitted waybill has no confirm-row evidence. Transport-failed or
+        // never-attempted children remain absent from output so the canonical
+        // pipeline keeps them in the real API retry center.
+        if(child.length<=NO_SCAN_CONFIRM_MAX_BATCH){
+          for(const code of child){
+            if(rowsByCode.has(code))confirmedNoScan.delete(code);
+            else confirmedNoScan.add(code);
+          }
+        }
       }catch(error){
         if(isAuthError(error))throw error;
       }
@@ -83,19 +95,24 @@ export async function recoverPartialConfirmResponse(rawConfirm,shipmentCodes,opt
     missing=requested.filter(code=>!rowsByCode.has(code));
   }
 
-  // A successful confirm endpoint that has no row for a waybill is not a transport
-  // failure. Preserve that distinction explicitly: canonical scan analysis treats
-  // blank orderStatus as no-scan evidence and continues trajectory lookup.
-  for(const code of missing){
+  const explicitNoRecord=missing.filter(code=>confirmedNoScan.has(code));
+  const unresolvedRetry=missing.filter(code=>!confirmedNoScan.has(code));
+  for(const code of explicitNoRecord){
     output.push({
       shipmentCode:code,
       orderStatus:'',
       ceQcSyntheticNoScanEvidence:true,
-      confirmQueryEvidence:'NO_RECORD_AFTER_PARTIAL_RECOVERY',
+      confirmQueryEvidence:'NO_RECORD_AFTER_SUCCESSFUL_SMALL_BATCH_RECOVERY',
       confirmQueryRecoveryOwner:V349_CONFIRM_COMPLETENESS_ID
     });
   }
-  console.warn('[CE-QC][V349_CONFIRM_PARTIAL_DONE]',JSON.stringify({label,requested:requested.length,recovered:requested.length-missing.length,explicitNoRecord:missing.length}));
+  console.warn('[CE-QC][V349_CONFIRM_PARTIAL_DONE]',JSON.stringify({
+    label,
+    requested:requested.length,
+    recovered:requested.length-missing.length,
+    explicitNoRecord:explicitNoRecord.length,
+    unresolvedRetry:unresolvedRetry.length
+  }));
   return output;
 }
 
@@ -131,4 +148,14 @@ export function createConfirmCompletenessClient(client,options={}){
 }
 
 const ceClientInstalled=installCeClientConfirmCompleteness();
-console.info('[CE-QC][V349_CONFIRM_COMPLETENESS]',JSON.stringify({id:V349_CONFIRM_COMPLETENESS_ID,fallbackSizes:FALLBACK_SIZES,recoveryBudgetMs:DEFAULT_RECOVERY_BUDGET_MS,ceClientBoundaryInstalled:ceClientInstalled,successfulPartialResponse:'RECOVER_MISSING_THEN_EXPLICIT_NO_SCAN_EVIDENCE',trueRequestFailure:'V345_RETRY_CENTER',scope:'CCSL+SHOPEE+WHPP+RETRY_CENTER'}));
+console.info('[CE-QC][V349_CONFIRM_COMPLETENESS]',JSON.stringify({
+  id:V349_CONFIRM_COMPLETENESS_ID,
+  fallbackSizes:FALLBACK_SIZES,
+  noScanConfirmMaxBatch:NO_SCAN_CONFIRM_MAX_BATCH,
+  recoveryBudgetMs:DEFAULT_RECOVERY_BUDGET_MS,
+  ceClientBoundaryInstalled:ceClientInstalled,
+  successfulPartialResponse:'RECOVER_MISSING_SMALL_SUCCESSFUL_OMISSION_TO_NO_SCAN',
+  compensationFailure:'PRESERVE_AS_REAL_API_RETRY',
+  trueRequestFailure:'V345_RETRY_CENTER',
+  scope:'CCSL+SHOPEE+WHPP+RETRY_CENTER'
+}));
