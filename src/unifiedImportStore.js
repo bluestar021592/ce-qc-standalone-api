@@ -7,14 +7,15 @@ import { loadAppState } from './store.js';
 const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
 let ccslSnapshotCache = { snapshotId: '', state: null };
 
-export function saveUnifiedImport(parsed, sourceName) {
+export function saveUnifiedImport(parsed, sourceName, options = {}) {
   const stageStartedAt = Date.now();
   assertSourceReconciliation(parsed);
   const db = getDb();
-  const existing = db.prepare('SELECT * FROM unified_import_batches WHERE reportDate=? AND fileHash=? AND status=? ORDER BY createdAt DESC LIMIT 1').get(parsed.reportDate, parsed.fileHash, 'VALID');
-  if (existing) {
-    const hydrated = hydrateBatch(existing, true);
-    console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] sqlite_duplicate elapsedMs=${Date.now() - stageStartedAt} reportDate=${parsed.reportDate} batchId=${existing.batchId}`);
+  const previousValid = db.prepare("SELECT * FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC LIMIT 1").get(parsed.reportDate);
+  const exactSameFile = Boolean(previousValid && String(previousValid.fileHash || '') === String(parsed.fileHash || ''));
+  if (options?.reuseExactDuplicate === true && exactSameFile) {
+    const hydrated = hydrateBatch(previousValid, true);
+    console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] sqlite_duplicate_explicit_reuse elapsedMs=${Date.now() - stageStartedAt} reportDate=${parsed.reportDate} batchId=${previousValid.batchId}`);
     return hydrated;
   }
   const batchId = `BATCH-${crypto.randomUUID()}`;
@@ -46,10 +47,10 @@ export function saveUnifiedImport(parsed, sourceName) {
     throw error;
   }
   const sqliteElapsedMs = Date.now() - sqliteStartedAt;
-  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] sqlite_write elapsedMs=${sqliteElapsedMs} reportDate=${parsed.reportDate} rows=${parsed.rows.length} batchId=${batchId}`);
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] sqlite_write elapsedMs=${sqliteElapsedMs} reportDate=${parsed.reportDate} rows=${parsed.rows.length} batchId=${batchId} overwrite=${previousValid ? 1 : 0} sameFile=${exactSameFile ? 1 : 0}`);
   const carryover = carryoverSummary(parsed.reportDate);
   console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] store_done elapsedMs=${Date.now() - stageStartedAt} reportDate=${parsed.reportDate} rows=${parsed.rows.length} batchId=${batchId}`);
-  return { batchId, snapshotId, reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, dateWasManuallyCorrected: parsed.dateWasManuallyCorrected, containerFormat: parsed.containerFormat, fileHash: parsed.fileHash, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, warnings: parsed.warnings, carryover, duplicateFile: false };
+  return { batchId, snapshotId, reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, dateWasManuallyCorrected: parsed.dateWasManuallyCorrected, containerFormat: parsed.containerFormat, fileHash: parsed.fileHash, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, warnings: parsed.warnings, carryover, duplicateFile: false, sameDateOverwrite: Boolean(previousValid), replacedSameFile: exactSameFile, replacedBatchId: previousValid?.batchId || '' };
 }
 
 export function getLatestUnifiedImport() {
