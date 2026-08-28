@@ -5,10 +5,11 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { execFileSync } from 'node:child_process';
 
-for(const file of ['src/rangeDashboardStoreV320.js','src/v322WebAvailabilityPatch.js','src/v147TrackTimeoutConfig.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/rangeDashboardStoreV320.js','src/v322WebAvailabilityPatch.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptTruth.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const rangeSource=fs.readFileSync('src/rangeDashboardStoreV320.js','utf8');
 const progressSource=fs.readFileSync('src/v322WebAvailabilityPatch.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
+const firstAttemptSource=fs.readFileSync('src/v295FirstAttemptTruth.js','utf8');
 assert.match(rangeSource,/V322_SINGLE_DAY_DASHBOARD_CACHE_ONLY/);
 assert.match(rangeSource,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'single-day period dashboard must use the tiny completed-cache reader');
 assert.match(rangeSource,/requestedFrom===requestedTo\)return fastSingleDay\(requestedTo\)/,'single-day must return before historical V295/V294 work');
@@ -17,6 +18,16 @@ assert.match(progressSource,/V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN/);
 assert.doesNotMatch(progressSource,/FROM\s+(?:scan_results|business_scan_results|final_rows|business_final_rows)/i,'run-progress must not count large fact tables');
 assert.match(progressSource,/\/api\/v33\/run-progress/,'V322 must replace the legacy progress handler');
 assert.match(activation,/v322WebAvailabilityPatch\.js/,'V322 web availability guard must activate before server route registration');
+// V344: large first-attempt fact/event lookups must keep shipmentCode bare so the
+// existing SQLite shipment indexes remain usable. Function-wrapped columns cause full scans.
+assert.match(firstAttemptSource,/V295_FIRST_ATTEMPT_QUERY_POLICY_ID\s*=\s*'2026-08-28-v344-index-friendly-shipment-lookups-v1'/);
+assert.match(firstAttemptSource,/FROM track_events WHERE shipmentCode IN/);
+assert.match(firstAttemptSource,/businessType='SHOPEE' AND shipmentCode IN/);
+assert.match(firstAttemptSource,/businessType='WHPP' AND shipmentCode IN/);
+assert.match(firstAttemptSource,/FROM final_rows WHERE reportDate BETWEEN \? AND \? AND shipmentCode IN/);
+assert.doesNotMatch(firstAttemptSource,/FROM track_events WHERE UPPER\(TRIM\(shipmentCode\)\) IN/,'V295 track-event reads must not disable shipment indexes');
+assert.doesNotMatch(firstAttemptSource,/FROM business_track_events[\s\S]{0,120}UPPER\(TRIM\(shipmentCode\)\) IN/,'V295 business event reads must not disable shipment indexes');
+assert.doesNotMatch(firstAttemptSource,/FROM (?:business_)?final_rows[\s\S]{0,160}UPPER\(TRIM\(shipmentCode\)\) IN/,'V295 final-row reads must not disable shipment indexes');
 
 const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v322-'));
 process.env.DATA_DIR=tempRoot;process.env.DB_FILE=path.join(tempRoot,'v322.db');process.env.ACCESS_MODE='LOCAL';process.env.SQLITE_MMAP_BYTES='0';process.env.SQLITE_CACHE_KIB='8192';process.env.NODE_ENV='test';process.env.CE_QC_DISABLE_V246_TRACKING='1';
@@ -57,4 +68,4 @@ assert.equal(range.queryMode,'V322_SINGLE_DAY_DASHBOARD_CACHE_ONLY');assert.equa
 started=performance.now();const progress=readV322RunProgress('CCSL',db),progressMs=performance.now()-started;
 assert.equal(progress.progressRule,'V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN');assert.equal(progress.dailyTotal,4);assert.ok(progressMs<200,`tiny run progress must stay sub-200ms in fixture, got ${progressMs.toFixed(1)}ms`);
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V322/V335] runtime availability smoke passed · independent WHPP source + six unified businesses = 7 · single-day period=${rangeMs.toFixed(1)}ms · tiny progress=${progressMs.toFixed(1)}ms · no large fact-table scans`);
+console.log(`[V344/V322/V335] runtime availability smoke passed · V295 shipment lookups remain index-friendly · independent WHPP source + six unified businesses = 7 · single-day period=${rangeMs.toFixed(1)}ms · tiny progress=${progressMs.toFixed(1)}ms · no large fact-table scans`);
