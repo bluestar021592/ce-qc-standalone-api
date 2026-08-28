@@ -25,7 +25,7 @@ console.log('[CE-QC][V350_WHPP_RETRY]', JSON.stringify({
   autoDrain:true,
   batchSize:MAX_BATCH,
   maxPasses:MAX_AUTO_DRAIN_PASSES,
-  policy:'POST_ACK_BEFORE_SQLITE_SELECT_THEN_AUTO_DRAIN_200_UNTIL_EMPTY_OR_NO_PROGRESS'
+  policy:'HTTP_FINISH_BEFORE_SQLITE_SELECT_THEN_AUTO_DRAIN_200_UNTIL_EMPTY_OR_NO_PROGRESS'
 }));
 
 function clean(values=[]){return [...new Set((values||[]).map(v=>String(v||'').trim().toUpperCase()).filter(Boolean))];}
@@ -44,14 +44,14 @@ function pendingRows(limit=MAX_BATCH){
   return db.prepare(`SELECT c.shipmentCode,c.businessType,c.sourceReportDate,c.lastReportDate,c.status,c.apiStatus,c.closeReason,c.stateJson,c.updatedAt,f.rawJson AS finalRawJson
     FROM carryover_open_items c
     LEFT JOIN business_final_rows f ON f.businessType='WHPP' AND f.shipmentCode=c.shipmentCode AND f.reportDate=c.sourceReportDate
-    WHERE c.businessType='WHPP' AND c.status='OPEN' AND c.apiStatus IN (${FAILURE_SQL})
+    WHERE c.businessType='WHPP' AND c.status='OPEN' AND c.apiStatus COLLATE NOCASE IN (${FAILURE_SQL})
     ORDER BY c.sourceReportDate ASC,c.updatedAt ASC,c.shipmentCode ASC LIMIT ?`).all(...FAILED_STATUSES,Math.max(1,Math.min(MAX_BATCH,Number(limit||MAX_BATCH))));
 }
 function queueSummary(){
   const db=getDb();
   const byDate=db.prepare(`SELECT sourceReportDate reportDate,COUNT(*) count
     FROM carryover_open_items
-    WHERE businessType='WHPP' AND status='OPEN' AND apiStatus IN (${FAILURE_SQL})
+    WHERE businessType='WHPP' AND status='OPEN' AND apiStatus COLLATE NOCASE IN (${FAILURE_SQL})
     GROUP BY sourceReportDate ORDER BY sourceReportDate`).all(...FAILED_STATUSES).map(row=>({reportDate:String(row.reportDate||''),count:Number(row.count||0)}));
   const total=byDate.reduce((sum,row)=>sum+Number(row.count||0),0);
   return {total,byDate,oldestDate:String(byDate[0]?.reportDate||'')};
@@ -182,11 +182,11 @@ export async function runV350WhppAutoDrain({batchSize=MAX_BATCH,maxPasses=MAX_AU
   return {initialTotal,passes,processed,recovered,closed,stillRetry:remaining,stopReason};
 }
 
-function startRetryJob(limit){
+function startRetryJob(limit,response=null){
   if(retryJob.running)return jobView();
   const id=`WHPP-RETRY-${Date.now()}`;
   setJob({id,running:true,phase:'启动中',total:0,resolved:0,recovered:0,closed:0,stillRetry:0,startedAt:new Date().toISOString(),completedAt:'',error:'',passes:0,stopReason:''});
-  setImmediate(async()=>{
+  const launch=async()=>{
     try{
       const result=await runV350WhppAutoDrain({batchSize:limit,onJob:patch=>setJob(patch)});
       const phase=result.stillRetry===0?'全部重试完成':result.stopReason==='NO_PROGRESS'?'仍有真实接口失败':result.stopReason==='MAX_PASSES'?'达到安全批次上限':'本轮完成';
@@ -194,12 +194,13 @@ function startRetryJob(limit){
     }catch(error){
       setJob({running:false,phase:authError(error)?'需要重新登录CE':'后台重试失败',completedAt:new Date().toISOString(),error:String(error?.message||error)});
     }
-  });
+  };
+  if(response?.once)response.once('finish',()=>setImmediate(launch));else setImmediate(launch);
   return jobView();
 }
 
 function listHandler(req,res){try{const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.query?.limit||MAX_BATCH)));const rows=pendingRows(limit).map(row=>({shipmentCode:row.shipmentCode,sourceReportDate:row.sourceReportDate,lastReportDate:row.lastReportDate,apiStatus:row.apiStatus,state:safeJson(row.stateJson,{}).primaryCategory||safeJson(row.finalRawJson,{}).primaryCategory||'接口待重试'}));res.setHeader('Cache-Control','no-store');res.json({ok:true,patchId:PATCH_ID,summary:queueSummary(),job:jobView(),rows});}catch(error){res.status(500).json({ok:false,error:error.message||String(error)});}}
-function runHandler(req,res){try{const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.body?.limit||MAX_BATCH)));const job=startRetryJob(limit);res.status(202).json({ok:true,patchId:PATCH_ID,started:true,fastAck:true,autoDrain:true,job});}catch(error){const status=authError(error)?409:500;res.status(status).json({ok:false,code:authError(error)?'AUTH_REQUIRED':'WHPP_RETRY_FAILED',error:error.message||String(error)});}}
+function runHandler(req,res){try{const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.body?.limit||MAX_BATCH)));const job=startRetryJob(limit,res);res.status(202).json({ok:true,patchId:PATCH_ID,started:true,fastAck:true,autoDrain:true,job});}catch(error){const status=authError(error)?409:500;res.status(status).json({ok:false,code:authError(error)?'AUTH_REQUIRED':'WHPP_RETRY_FAILED',error:error.message||String(error)});}}
 
 let installed=false;const previousListen=express.application.listen;express.application.listen=function v143WhppRetryListen(...args){if(!installed){installed=true;this.get('/api/v143/whpp-retry-queue',listHandler);this.post('/api/v143/whpp-retry-queue/recheck',runHandler);}return previousListen.apply(this,args);};
 
