@@ -51,11 +51,16 @@ export function getUnifiedEffectiveSheetRange(sheet = {}) {
 export function parseUnifiedDailyExcel(filePath, options = {}) {
   const parseStartedAt = Date.now();
   const stat = fs.statSync(filePath);
+  const manualDateForCache = normalizeDate(options.reportDate);
+  const fallbackReferenceForCache = manualDateForCache
+    ? ''
+    : (normalizeDate(options.referenceDate) || normalizeDate(options.lastReportDate));
   const cacheKey = [
     path.resolve(filePath),
     Number(stat.size || 0),
     Number(stat.mtimeMs || 0),
-    normalizeDate(options.reportDate),
+    manualDateForCache,
+    fallbackReferenceForCache,
     String(options.originalName || '')
   ].join('|');
   if (recentUnifiedParse?.key === cacheKey && Date.now() - recentUnifiedParse.cachedAt <= UNIFIED_PARSE_REUSE_TTL_MS) {
@@ -84,7 +89,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   let missingRecipientWarnings = 0;
   let classificationConflicts = 0;
 
-  const manualDate = normalizeDate(options.reportDate);
+  const manualDate = manualDateForCache;
   const explicitDateCandidates = new Map();
   const transactionDateCandidates = new Map();
 
