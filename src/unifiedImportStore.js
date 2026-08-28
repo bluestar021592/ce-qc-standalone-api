@@ -4,7 +4,7 @@ import { SHOPEE, getMatchingBusinessSnapshot, loadBusinessState } from './busine
 import { analyzeStoreFlow } from './storeFlow.js';
 import { loadAppState } from './store.js';
 
-const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
+const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
 let ccslSnapshotCache = { snapshotId: '', state: null };
 
 export function saveUnifiedImport(parsed, sourceName) {
@@ -522,7 +522,7 @@ function buildSourceReconciliation(classificationCounts = {}, validUniqueWaybill
 function assertSourceReconciliation(parsed = {}) {
   const sourceReconciliation = parsed.sourceReconciliation || buildSourceReconciliation(parsed.classificationCounts, parsed.summary?.validUniqueWaybills);
   if (sourceReconciliation.balanced === true) return;
-  const error = new Error(`日报源数据分类守恒失败：有效唯一运单${Number(sourceReconciliation.validUniqueWaybills || 0)}票，六板块合计${Number(sourceReconciliation.classifiedWaybills || 0)}票`);
+  const error = new Error(`日报源数据分类守恒失败：有效唯一运单${Number(sourceReconciliation.validUniqueWaybills || 0)}票，七板块合计${Number(sourceReconciliation.classifiedWaybills || 0)}票`);
   error.code = 'SOURCE_CLASSIFICATION_RECONCILIATION_FAILED';
   error.sourceReconciliation = sourceReconciliation;
   throw error;
