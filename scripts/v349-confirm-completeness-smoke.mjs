@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { CEClient } from '../src/ceClient.js';
-import { resolveScanTerminal } from '../src/scanTerminal.js';
+import { classifyScanTerminal } from '../src/scanTerminal.js';
 import {
   V349_CONFIRM_COMPLETENESS_ID,
   recoverPartialConfirmResponse,
@@ -43,9 +43,10 @@ const whppRows=await recoverPartialConfirmResponse(async codes=>{
 const synthetic=whppRows.filter(row=>row.ceQcSyntheticNoScanEvidence);
 assert.equal(synthetic.length,140,'still-absent WHPP waybills must become explicit no-scan evidence, not interface failures');
 for(const row of synthetic.slice(0,5)){
-  const terminal=resolveScanTerminal({scanRow:row,scanOk:true});
-  assert.equal(terminal.scanFailed,false,'successful endpoint absence is not a transport failure');
+  const terminal=classifyScanTerminal(row,'success');
+  assert.equal(terminal.currentState,'OPEN_TRACK_REQUIRED','successful endpoint absence must remain an open shipment, not API retry');
   assert.equal(terminal.trackRequired,true,'no-scan evidence must continue to trajectory lookup');
+  assert.equal(terminal.scanTerminalReason,'ORDER_STATUS_UNKNOWN');
 }
 
 // True transport failure semantics are untouched: the initial request exception
