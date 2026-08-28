@@ -3,11 +3,12 @@ import { getDb } from './db.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { saveWhppDailyImport } from './whppStore.js';
 
-export const V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID = '2026-08-28-v351-whpp-unified-membership-dashboard-bridge-v1';
+export const V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID = '2026-08-28-v351-whpp-unified-membership-dashboard-bridge-v2';
 const SUMMARY_ROUTE = '/api/v71/whpp-summary';
+const DETAIL_ROUTES = ['/api/v172/whpp-metric-detail', '/api/whpp/metric-detail'];
 const UNIFIED_IMPORT_ROUTE = '/api/import/unified-daily-report';
 const WRAPPED_POST = Symbol.for('ce-qc.v351-whpp-unified-import-post');
-let summaryInstalled = false;
+let readRoutesInstalled = false;
 
 function dateOnly(value = '') {
   const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
@@ -28,6 +29,23 @@ function uniqueRows(rows = []) {
   }
   return [...map.values()];
 }
+function regionOf(row = {}) {
+  const value = String(row.regionCode || row.区域 || '').trim().toUpperCase();
+  return value === 'PP' ? 'PP' : value === 'PV' ? 'PV' : 'UNKNOWN';
+}
+function normalizeTab(value = 'all') {
+  const raw = String(value || 'all').trim();
+  const aliases = {
+    podRate: 'pod', returnRate: 'returned', cancelRate: 'cancelled',
+    '签收率': 'pod', '签收件数': 'pod', '今日POD': 'pod', 'POD率': 'pod',
+    '已退回件': 'returned', '当前未闭环': 'unresolved', '订单取消': 'cancelled',
+    'Pending不连续': 'pendingNonContinuous', 'Pending1+': 'pending1', 'Pending2+': 'pending2', 'Pending3+': 'pending3',
+    'OC1+': 'oc1', 'OC2+': 'oc2', 'OC3+': 'oc3', '盘点2天+': 'cycle2', '入库无扫描': 'inboundNoScan',
+    '派送中': 'delivery', '工单': 'workOrder', 'CCSLCN': 'ccslCnDiversion', 'CEZT': 'ccslZtDiversion',
+    'CCSL580': 'ccsl580Retention', '金边门店': 'phnomPenhShop', '外省门店': 'provinceShop'
+  };
+  return aliases[raw] || raw || 'all';
+}
 
 function latestUnifiedDate(db) {
   return String(db.prepare(`SELECT MAX(reportDate) reportDate FROM unified_import_batches WHERE status='VALID'`).get()?.reportDate || '');
@@ -40,14 +58,17 @@ export function loadV351UnifiedWhppMembership(reportDate = '', db = getDb()) {
     WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC LIMIT 1`).get(date);
   if (!batch) return { present: false, reportDate: date, batchId: '', snapshotId: '', sourceName: '', rows: [], bills: [] };
   const rows = uniqueRows(db.prepare(`SELECT shipmentCode,regionCode,rowJson FROM unified_import_rows
-    WHERE batchId=? AND businessType='WHPP' ORDER BY shipmentCode`).all(batch.batchId).map(row => ({
-      ...safeJson(row.rowJson, {}),
-      shipmentCode: String(row.shipmentCode || '').trim().toUpperCase(),
-      运单号: String(row.shipmentCode || '').trim().toUpperCase(),
-      businessType: 'WHPP',
-      reportDate: date,
-      regionCode: row.regionCode || safeJson(row.rowJson, {}).regionCode || ''
-    })));
+    WHERE batchId=? AND businessType='WHPP' ORDER BY shipmentCode`).all(batch.batchId).map(row => {
+      const raw = safeJson(row.rowJson, {});
+      return {
+        ...raw,
+        shipmentCode: String(row.shipmentCode || '').trim().toUpperCase(),
+        运单号: String(row.shipmentCode || '').trim().toUpperCase(),
+        businessType: 'WHPP',
+        reportDate: date,
+        regionCode: row.regionCode || raw.regionCode || ''
+      };
+    }));
   return {
     present: true,
     reportDate: date,
@@ -72,20 +93,23 @@ function loadStandardWhppMembership(reportDate, db) {
 
 function loadWhppFinalRows(reportDate, db) {
   return uniqueRows(db.prepare(`SELECT shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,rawJson
-    FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
-      ...safeJson(row.rawJson, {}),
-      shipmentCode: row.shipmentCode,
-      运单号: row.shipmentCode,
-      businessType: 'WHPP',
-      reportDate,
-      isPod: Number(row.isPod || 0),
-      primaryCategory: row.primaryCategory || safeJson(row.rawJson, {}).primaryCategory || '',
-      apiStatus: row.apiStatus || '',
-      carryStatus: row.carryStatus || '',
-      latestEventTime: row.latestEventTime || safeJson(row.rawJson, {}).latestEventTime || '',
-      latestEventDesc: row.latestEventDesc || safeJson(row.rawJson, {}).latestEventDesc || '',
-      latestNode: row.latestNode || safeJson(row.rawJson, {}).latestNode || ''
-    })));
+    FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => {
+      const raw = safeJson(row.rawJson, {});
+      return {
+        ...raw,
+        shipmentCode: row.shipmentCode,
+        运单号: row.shipmentCode,
+        businessType: 'WHPP',
+        reportDate,
+        isPod: Number(row.isPod || 0),
+        primaryCategory: row.primaryCategory || raw.primaryCategory || '',
+        apiStatus: row.apiStatus || '',
+        carryStatus: row.carryStatus || '',
+        latestEventTime: row.latestEventTime || raw.latestEventTime || '',
+        latestEventDesc: row.latestEventDesc || raw.latestEventDesc || '',
+        latestNode: row.latestNode || raw.latestNode || ''
+      };
+    }));
 }
 
 export function buildV351WhppDashboard({ reportDate = '', membershipRows = [], finalRows = [] } = {}) {
@@ -170,11 +194,47 @@ function summaryHandler(req, res, next) {
   }
 }
 
+function detailHandler(req, res, next) {
+  try {
+    const summary = summaryForDate(req.query?.reportDate || req.query?.date || '');
+    if (!summary) return next();
+    const tab = normalizeTab(req.query?.tab || req.query?.metric || 'all');
+    const detail = summary.dashboard?.detailTabs?.[tab] || summary.dashboard?.detailTabs?.all || { label: tab, rows: [], total: 0 };
+    const region = String(req.query?.region || '').trim().toUpperCase();
+    let rows = Array.isArray(detail.rows) ? detail.rows : [];
+    if (region === 'PP' || region === 'PV') rows = rows.filter(row => regionOf(row) === region);
+    const page = Math.max(1, Number(req.query?.page || 1));
+    const pageSize = Math.max(1, Math.min(1000, Number(req.query?.pageSize || 300)));
+    const start = (page - 1) * pageSize;
+    const regionLabel = region === 'PP' ? '本省PP' : region === 'PV' ? '外省PV' : '';
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      ok: true,
+      patchId: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID,
+      businessType: 'WHPP',
+      reportDate: summary.reportDate,
+      tab,
+      region,
+      label: `${regionLabel}${regionLabel ? ' · ' : ''}${detail.label || tab}`,
+      total: rows.length,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(rows.length / pageSize)),
+      truthSource: summary.truthSource,
+      rows: rows.slice(start, start + pageSize)
+    });
+  } catch (error) {
+    console.error('[CE-QC][V351_WHPP_DETAIL]', error?.stack || error);
+    next();
+  }
+}
+
 const previousListen = express.application.listen;
 express.application.listen = function v351WhppUnifiedDashboardBridgeListen(...args) {
-  if (!summaryInstalled) {
-    summaryInstalled = true;
+  if (!readRoutesInstalled) {
+    readRoutesInstalled = true;
     this.get(SUMMARY_ROUTE, summaryHandler);
+    for (const route of DETAIL_ROUTES) this.get(route, detailHandler);
   }
   return previousListen.apply(this, args);
 };
@@ -208,6 +268,7 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED_POST]) {
 console.log('[CE-QC][V351_WHPP_UNIFIED_DASHBOARD_BRIDGE]', JSON.stringify({
   id: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID,
   summaryTruth: 'LATEST_VALID_UNIFIED_MEMBERSHIP_THEN_STANDARD_DAILY',
+  detailTruth: 'SAME_CANONICAL_DASHBOARD_DETAIL_TABS',
   staleZeroHistory: 'REJECT_IF_TOTAL_MISMATCH',
   futureUnifiedImport: 'MIRROR_WHPP_STANDARD_DAILY_BEFORE_RESPONSE',
   databaseSchemaChange: false
