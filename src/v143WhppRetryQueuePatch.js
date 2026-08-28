@@ -8,13 +8,25 @@ import { isSpecialCategory } from './specialNode.js';
 import { queryTrackBatchWithFallback } from './trackBatching.js';
 import { loadWhppState, saveWhppState } from './whppStore.js';
 
-const PATCH_ID='2026-08-16-v143-whpp-independent-retry-queue-v2';
+const PATCH_ID='2026-08-28-v350-whpp-retry-fast-ack-auto-drain-v1';
 const MAX_BATCH=200;
+const MAX_AUTO_DRAIN_PASSES=20;
+const FAILED_STATUSES=['API_PENDING_RETRY','FAILED','RETRY','API_RETRY_EXHAUSTED'];
+const FAILURE_SQL=FAILED_STATUSES.map(()=>'?').join(',');
 const client=new CEClient();
 const retryJob={
   id:'',running:false,phase:'空闲',total:0,resolved:0,recovered:0,closed:0,stillRetry:0,
-  startedAt:'',completedAt:'',error:''
+  startedAt:'',completedAt:'',error:'',passes:0,stopReason:''
 };
+
+console.log('[CE-QC][V350_WHPP_RETRY]', JSON.stringify({
+  id:PATCH_ID,
+  fastAck:true,
+  autoDrain:true,
+  batchSize:MAX_BATCH,
+  maxPasses:MAX_AUTO_DRAIN_PASSES,
+  policy:'POST_ACK_BEFORE_SQLITE_SELECT_THEN_AUTO_DRAIN_200_UNTIL_EMPTY_OR_NO_PROGRESS'
+}));
 
 function clean(values=[]){return [...new Set((values||[]).map(v=>String(v||'').trim().toUpperCase()).filter(Boolean))];}
 function bill(row={}){return String(row.shipmentCode||row.运单号||row.waybill||'').trim().toUpperCase();}
@@ -32,13 +44,16 @@ function pendingRows(limit=MAX_BATCH){
   return db.prepare(`SELECT c.shipmentCode,c.businessType,c.sourceReportDate,c.lastReportDate,c.status,c.apiStatus,c.closeReason,c.stateJson,c.updatedAt,f.rawJson AS finalRawJson
     FROM carryover_open_items c
     LEFT JOIN business_final_rows f ON f.businessType='WHPP' AND f.shipmentCode=c.shipmentCode AND f.reportDate=c.sourceReportDate
-    WHERE c.businessType='WHPP' AND c.status='OPEN' AND UPPER(COALESCE(c.apiStatus,'')) IN ('API_PENDING_RETRY','FAILED','RETRY','API_RETRY_EXHAUSTED')
-    ORDER BY c.sourceReportDate ASC,c.updatedAt ASC,c.shipmentCode ASC LIMIT ?`).all(Math.max(1,Math.min(MAX_BATCH,Number(limit||MAX_BATCH))));
+    WHERE c.businessType='WHPP' AND c.status='OPEN' AND c.apiStatus IN (${FAILURE_SQL})
+    ORDER BY c.sourceReportDate ASC,c.updatedAt ASC,c.shipmentCode ASC LIMIT ?`).all(...FAILED_STATUSES,Math.max(1,Math.min(MAX_BATCH,Number(limit||MAX_BATCH))));
 }
 function queueSummary(){
   const db=getDb();
-  const total=Number(db.prepare(`SELECT COUNT(*) count FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' AND UPPER(COALESCE(apiStatus,'')) IN ('API_PENDING_RETRY','FAILED','RETRY','API_RETRY_EXHAUSTED')`).get()?.count||0);
-  const byDate=db.prepare(`SELECT sourceReportDate reportDate,COUNT(*) count FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' AND UPPER(COALESCE(apiStatus,'')) IN ('API_PENDING_RETRY','FAILED','RETRY','API_RETRY_EXHAUSTED') GROUP BY sourceReportDate ORDER BY sourceReportDate`).all().map(row=>({reportDate:String(row.reportDate||''),count:Number(row.count||0)}));
+  const byDate=db.prepare(`SELECT sourceReportDate reportDate,COUNT(*) count
+    FROM carryover_open_items
+    WHERE businessType='WHPP' AND status='OPEN' AND apiStatus IN (${FAILURE_SQL})
+    GROUP BY sourceReportDate ORDER BY sourceReportDate`).all(...FAILED_STATUSES).map(row=>({reportDate:String(row.reportDate||''),count:Number(row.count||0)}));
+  const total=byDate.reduce((sum,row)=>sum+Number(row.count||0),0);
   return {total,byDate,oldestDate:String(byDate[0]?.reportDate||'')};
 }
 
@@ -142,25 +157,49 @@ async function recheck(limit=MAX_BATCH,onProgress=()=>{}){
   return {processed:results.length,recovered,closed,stillRetry:results.length-recovered,results};
 }
 
+export async function runV350WhppAutoDrain({batchSize=MAX_BATCH,maxPasses=MAX_AUTO_DRAIN_PASSES,recheckFn=recheck,summaryFn=queueSummary,onJob=()=>{}}={}){
+  const first=summaryFn()||{};const initialTotal=Number(first.total||0);let remaining=initialTotal;let passes=0;let processed=0;let recovered=0;let closed=0;let stopReason=remaining?'':'EMPTY';
+  onJob({phase:remaining?'后台自动排空':'无待重试',total:initialTotal,resolved:0,recovered:0,closed:0,stillRetry:remaining,passes:0,stopReason});
+  while(remaining>0&&passes<maxPasses){
+    passes+=1;const before=remaining;const completedBefore=Math.max(0,initialTotal-before);const recoveredBefore=recovered;const closedBefore=closed;
+    onJob({phase:`后台自动排空 · 第${passes}批`,passes,total:initialTotal,stillRetry:before});
+    const result=await recheckFn(batchSize,progress=>onJob({
+      phase:`后台自动排空 · 第${passes}批 · ${progress.phase||'处理中'}`,
+      resolved:Math.min(initialTotal,completedBefore+Number(progress.resolved||0)),
+      total:initialTotal,
+      recovered:recoveredBefore+Number(progress.recovered||0),
+      closed:closedBefore+Number(progress.closed||0),
+      stillRetry:before,
+      passes
+    }));
+    processed+=Number(result.processed||0);recovered+=Number(result.recovered||0);closed+=Number(result.closed||0);
+    const afterSummary=summaryFn()||{};const after=Number(afterSummary.total||0);const reduced=before-after;remaining=after;
+    onJob({phase:`后台自动排空 · 第${passes}批完成`,resolved:Math.min(initialTotal,initialTotal-remaining),total:initialTotal,recovered,closed,stillRetry:remaining,passes});
+    if(remaining<=0){stopReason='EMPTY';break;}
+    if(Number(result.processed||0)<=0||Number(result.recovered||0)<=0||reduced<=0){stopReason='NO_PROGRESS';break;}
+  }
+  if(!stopReason&&remaining>0)stopReason='MAX_PASSES';
+  return {initialTotal,passes,processed,recovered,closed,stillRetry:remaining,stopReason};
+}
+
 function startRetryJob(limit){
   if(retryJob.running)return jobView();
-  const selected=pendingRows(limit);
-  if(!selected.length){setJob({id:'',running:false,phase:'无待重试',total:0,resolved:0,recovered:0,closed:0,stillRetry:0,startedAt:'',completedAt:new Date().toISOString(),error:''});return jobView();}
   const id=`WHPP-RETRY-${Date.now()}`;
-  setJob({id,running:true,phase:'准备中',total:selected.length,resolved:0,recovered:0,closed:0,stillRetry:selected.length,startedAt:new Date().toISOString(),completedAt:'',error:''});
+  setJob({id,running:true,phase:'启动中',total:0,resolved:0,recovered:0,closed:0,stillRetry:0,startedAt:new Date().toISOString(),completedAt:'',error:'',passes:0,stopReason:''});
   setImmediate(async()=>{
     try{
-      const result=await recheck(selected.length,progress=>setJob({phase:progress.phase||retryJob.phase,resolved:Number(progress.resolved||0),total:Number(progress.total||retryJob.total),recovered:Number(progress.recovered??retryJob.recovered),closed:Number(progress.closed??retryJob.closed)}));
-      setJob({running:false,phase:'本批完成',total:result.processed,resolved:result.processed,recovered:result.recovered,closed:result.closed,stillRetry:result.stillRetry,completedAt:new Date().toISOString(),error:''});
+      const result=await runV350WhppAutoDrain({batchSize:limit,onJob:patch=>setJob(patch)});
+      const phase=result.stillRetry===0?'全部重试完成':result.stopReason==='NO_PROGRESS'?'仍有真实接口失败':result.stopReason==='MAX_PASSES'?'达到安全批次上限':'本轮完成';
+      setJob({running:false,phase,total:result.initialTotal,resolved:Math.max(0,result.initialTotal-result.stillRetry),recovered:result.recovered,closed:result.closed,stillRetry:result.stillRetry,passes:result.passes,stopReason:result.stopReason,completedAt:new Date().toISOString(),error:''});
     }catch(error){
-      setJob({running:false,phase:authError(error)?'需要重新登录CE':'本批失败',completedAt:new Date().toISOString(),error:String(error?.message||error)});
+      setJob({running:false,phase:authError(error)?'需要重新登录CE':'后台重试失败',completedAt:new Date().toISOString(),error:String(error?.message||error)});
     }
   });
   return jobView();
 }
 
 function listHandler(req,res){try{const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.query?.limit||MAX_BATCH)));const rows=pendingRows(limit).map(row=>({shipmentCode:row.shipmentCode,sourceReportDate:row.sourceReportDate,lastReportDate:row.lastReportDate,apiStatus:row.apiStatus,state:safeJson(row.stateJson,{}).primaryCategory||safeJson(row.finalRawJson,{}).primaryCategory||'接口待重试'}));res.setHeader('Cache-Control','no-store');res.json({ok:true,patchId:PATCH_ID,summary:queueSummary(),job:jobView(),rows});}catch(error){res.status(500).json({ok:false,error:error.message||String(error)});}}
-function runHandler(req,res){try{const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.body?.limit||MAX_BATCH)));const job=startRetryJob(limit);res.status(job.running?202:200).json({ok:true,patchId:PATCH_ID,started:job.running,job,summary:queueSummary()});}catch(error){const status=authError(error)?409:500;res.status(status).json({ok:false,code:authError(error)?'AUTH_REQUIRED':'WHPP_RETRY_FAILED',error:error.message||String(error)});}}
+function runHandler(req,res){try{const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.body?.limit||MAX_BATCH)));const job=startRetryJob(limit);res.status(202).json({ok:true,patchId:PATCH_ID,started:true,fastAck:true,autoDrain:true,job});}catch(error){const status=authError(error)?409:500;res.status(status).json({ok:false,code:authError(error)?'AUTH_REQUIRED':'WHPP_RETRY_FAILED',error:error.message||String(error)});}}
 
 let installed=false;const previousListen=express.application.listen;express.application.listen=function v143WhppRetryListen(...args){if(!installed){installed=true;this.get('/api/v143/whpp-retry-queue',listHandler);this.post('/api/v143/whpp-retry-queue/recheck',runHandler);}return previousListen.apply(this,args);};
 
