@@ -148,3 +148,9 @@ try {
   try { fs.rmSync(file, { force: true }); } catch {}
   try { fs.rmSync(bloatedFile, { force: true }); } catch {}
 }
+
+// Managed-launcher go-live verification must execute the regression that protects
+// a dedicated WHPP daily membership from an unrelated unified batch whose WHPP
+// partition is empty. This also executes the V352 production-shaped 236-ticket
+// visible-truth smoke through the V351 smoke's final import.
+await import('./v351-whpp-unified-dashboard-bridge-smoke.mjs');
