@@ -8,11 +8,12 @@ import {
   createConfirmCompletenessClient
 } from '../src/v349ConfirmCompletenessClient.js';
 
-assert.match(V349_CONFIRM_COMPLETENESS_ID,/v349-confirm-partial-response-recovery-v2/);
+assert.match(V349_CONFIRM_COMPLETENESS_ID,/v349-confirm-partial-response-recovery-v3/);
 assert.equal(CEClient.prototype.confirmQuery.name,'v349CompleteConfirmQuery','V349 must install once at the CEClient boundary so WHPP/retry-center cannot miss the owner');
 
 // Exact production symptom: 362 requested, HTTP succeeds, but only 23 waybills are
-// present in the response. V349 must never mark the other 339 as transport failures.
+// present in the response. V349 must never mark the other 339 as transport failures
+// when bounded child queries can recover them.
 const bills=Array.from({length:362},(_,i)=>`CE349${String(i+1).padStart(6,'0')}`);
 const firstReturned=new Set(bills.slice(0,23));
 const calls=[];
@@ -30,9 +31,9 @@ assert.ok(calls.slice(1).every(batch=>batch.length<=100),'partial-response child
 assert.ok(calls.slice(1).flat().every(code=>!firstReturned.has(code)),'the 23 already returned waybills must never be queried again');
 assert.equal(fullRows.filter(row=>row.ceQcSyntheticNoScanEvidence).length,0,'recoverable missing rows must not be fabricated as no-scan evidence');
 
-// WHPP symptom: a successful response can still omit many waybills. If bounded
-// compensation still yields no scan record, represent the absence as explicit scan
-// evidence and continue trajectory/anomaly analysis rather than refresh_failed.
+// WHPP symptom: a successful response can still omit many waybills. Successful
+// small compensation requests that also omit them prove no scan-row evidence; those
+// bills must continue trajectory/anomaly analysis rather than refresh_failed.
 const whppBills=Array.from({length:144},(_,i)=>`CE130826${String(i+1).padStart(5,'0')}`);
 let whppCalls=0;
 const whppRows=await recoverPartialConfirmResponse(async codes=>{
@@ -41,7 +42,7 @@ const whppRows=await recoverPartialConfirmResponse(async codes=>{
   return [];
 },whppBills,{label:'WHPP-144-partial-regression',recoveryBudgetMs:8000});
 const synthetic=whppRows.filter(row=>row.ceQcSyntheticNoScanEvidence);
-assert.equal(synthetic.length,140,'still-absent WHPP waybills must become explicit no-scan evidence, not interface failures');
+assert.equal(synthetic.length,140,'small successful omissions must become explicit no-scan evidence, not interface failures');
 for(const row of synthetic.slice(0,5)){
   const terminal=classifyScanTerminal(row,'success');
   assert.equal(terminal.currentState,'OPEN_TRACK_REQUIRED','successful endpoint absence must remain an open shipment, not API retry');
@@ -49,8 +50,22 @@ for(const row of synthetic.slice(0,5)){
   assert.equal(terminal.scanTerminalReason,'ORDER_STATUS_UNKNOWN');
 }
 
-// True transport failure semantics are untouched: the initial request exception
-// must bubble to canonical V345/V346 fallback/retry rather than be hidden by V349.
+// If the parent response was partial but every compensation request itself fails,
+// V349 must NOT fabricate no-scan evidence. Omitted codes remain absent from the
+// returned rows so canonical pipeline code keeps them as genuine interface retries.
+let compensationCalls=0;
+const compensationFailureRows=await recoverPartialConfirmResponse(async codes=>{
+  compensationCalls+=1;
+  if(compensationCalls===1)return [{shipmentCode:codes[0],orderStatus:'50'}];
+  const error=new Error('child transport failed');
+  error.code='ECONNRESET';
+  throw error;
+},['CF1','CF2','CF3','CF4'],{label:'CHILD-FAIL-TRUTH',recoveryBudgetMs:1000});
+assert.deepEqual(compensationFailureRows.map(row=>row.shipmentCode),['CF1'],'failed compensation must leave CF2-CF4 absent for the real retry center');
+assert.equal(compensationFailureRows.some(row=>row.ceQcSyntheticNoScanEvidence),false,'failed compensation must never be mislabeled as no-scan evidence');
+
+// True parent transport failure semantics are untouched: the initial request
+// exception bubbles to canonical V345/V346 fallback/retry rather than being hidden.
 let transportCalls=0;
 await assert.rejects(
   ()=>recoverPartialConfirmResponse(async()=>{
@@ -77,4 +92,4 @@ assert.match(whpp,/createUnifiedThroughputClient/,'WHPP must remain its independ
 assert.match(whpp,/CONFIRM_BATCH_SIZE = 350/,'WHPP scan batch remains 350');
 assert.match(whpp,/trackConcurrency: 4/,'WHPP trajectory remains 50x4 via V346');
 
-console.log(`[V349] partial confirm completeness smoke passed · exact CCSL 362→23 recovery · already-returned 23 never re-requested · WHPP 144 omissions become no-scan trajectory evidence · true transport failure still bubbles to V345/V346 · CEClient boundary owner active`);
+console.log(`[V349] partial confirm completeness smoke passed · exact CCSL 362→23 recovery · already-returned 23 never re-requested · WHPP 144 successful omissions become no-scan trajectory evidence · failed compensation stays real retry · true parent failure still bubbles to V345/V346 · CEClient boundary owner active`);
