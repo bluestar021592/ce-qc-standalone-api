@@ -28,6 +28,8 @@ const EXPLICIT_REPORT_DATE_HEADERS = [
 const TRANSACTION_DATE_HEADERS = [
   '入库日期', '下单日期', '下单时间', '订单日期', '日期', 'ordertime', 'orderdate', 'date', 'inbounddate'
 ];
+const UNIFIED_PARSE_REUSE_TTL_MS = 30_000;
+let recentUnifiedParse = null;
 
 export function getUnifiedEffectiveSheetRange(sheet = {}) {
   let maxRow = -1;
@@ -48,6 +50,22 @@ export function getUnifiedEffectiveSheetRange(sheet = {}) {
 
 export function parseUnifiedDailyExcel(filePath, options = {}) {
   const parseStartedAt = Date.now();
+  const stat = fs.statSync(filePath);
+  const cacheKey = [
+    path.resolve(filePath),
+    Number(stat.size || 0),
+    Number(stat.mtimeMs || 0),
+    normalizeDate(options.reportDate),
+    String(options.originalName || '')
+  ].join('|');
+  if (recentUnifiedParse?.key === cacheKey && Date.now() - recentUnifiedParse.cachedAt <= UNIFIED_PARSE_REUSE_TTL_MS) {
+    const parsed = recentUnifiedParse.parsed;
+    recentUnifiedParse = null;
+    console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] parse_cache_hit elapsedMs=${Date.now() - parseStartedAt} reportDate=${parsed?.reportDate || ''} rows=${Number(parsed?.summary?.validUniqueWaybills || 0)}`);
+    return parsed;
+  }
+  recentUnifiedParse = null;
+
   const fileBuffer = fs.readFileSync(filePath);
   const signature = fileBuffer.subarray(0, 4).toString('hex').toUpperCase();
   const containerFormat = signature.startsWith('504B') ? 'OOXML_ZIP' : (signature.startsWith('D0CF11E0') ? 'OLE_XLS' : 'UNKNOWN');
@@ -278,7 +296,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   const parseElapsedMs = Date.now() - parseStartedAt;
   console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] parse_done elapsedMs=${parseElapsedMs} reportDate=${reportDate} rows=${details.length} rawRows=${rawRows} sheets=${sheetDiagnostics.length}`);
 
-  return {
+  const parsedResult = {
     reportDate,
     dateDetectionSource,
     dateWasManuallyCorrected: Boolean(manualDate),
@@ -297,6 +315,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     warnings,
     sheetDiagnostics
   };
+  recentUnifiedParse = { key: cacheKey, cachedAt: Date.now(), parsed: parsedResult };
+  return parsedResult;
 }
 
 function findHeaderRow(matrix) {
