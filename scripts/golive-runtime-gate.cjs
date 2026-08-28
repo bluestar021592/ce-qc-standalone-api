@@ -51,12 +51,22 @@ must(runner, 'WHPP_STAGE_NOT_FINALIZED');
 must(runner, '七业务未全部完成');
 must(pause, '/api/shopee/run/pause');
 must(pause, 'global.pauseUnified=pauseUnified');
-must(v161, '2026-08-16-v161-unified-import-runtime-truth-v1');
+// V161 is a long-lived route owner. Verify its current contract, not an obsolete
+// release label: bootstrap/import runtime truth must count all seven businesses,
+// including WHPP, and must derive counts from normalized unified_import_rows.
+must(v161, "const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']");
+must(v161, "SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType");
+must(v161, "TYPES.reduce((sum, type) => sum + num(counts[type]), 0)");
 must(v163, '2026-08-17-v163-shopee-daily-membership-isolation-v2');
 must(storage, 'compactStateForPersistence');
 must(storage, 'sanitizeValue');
+must(storage, 'mergeUnifiedWhppMembership');
+must(storage, "businessType='WHPP'");
+must(storage, 'unifiedWhppSnapshotId');
 must(bstore, 'compactBusinessStatePayload');
 must(bstore, 'stripHeavyBusinessRow');
+must(bstore, 'finalByBill');
+must(bstore, 'priorCarryByBill');
 must(shell, 'v67-resilient-run-guard.js?v=20260817-1');
 must(shell, 'v183HistoricalStatusRefreshPatch.js');
 must(shell, '/v183-history-refresh.js?v=20260822-v226-1');
@@ -173,4 +183,4 @@ must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V200 reproduces the 16-column reference dashboard, uses WPS-compatible HYPERLINK formulas, calculates reference average days from the dashboard/report date to actual POD/delivery time, counts real code70/code60 dispatch dates before stored attempt fields, never fabricates attempt from elapsed days, and applies one exporter to all seven businesses');
+console.log('[GOLIVE] runtime-source gate passed; seven-business runtime truth includes WHPP; WHPP unified members join the real CCSL state; state persistence remains bounded; V200 uses one exporter contract for all seven businesses');
