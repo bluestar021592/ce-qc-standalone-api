@@ -127,14 +127,17 @@ try {
   assert.doesNotMatch(serverSource, /\['CE',\s*'CEAF',\s*'TBKH',\s*'ALI1688',\s*'WHPP'\]/, 'WHPP must never be silently folded into the CCSL run');
 
   const runnerSource = fs.readFileSync(new URL('../public/v67-resilient-run-guard.js', import.meta.url), 'utf8');
-  assert.match(runnerSource, /async function runWhppStage\(date\)/, 'WHPP must retain its dedicated third execution stage');
-  assert.match(runnerSource, /'\/api\/whpp\/run\/start'/, 'WHPP dedicated stage must call its own runner endpoint');
-  const ccslStage = runnerSource.indexOf('await runCcslStage(date)');
-  const shopeeStage = runnerSource.indexOf('await runShopeeStage(date)');
-  const whppStage = runnerSource.indexOf('await runWhppStage(date)');
+  assert.match(runnerSource, /async function runStage\(stage, preferResume, target\)/, 'seven-business runner must use the current generic stage executor');
+  assert.match(runnerSource, /\{ key: 'WHPP', label: 'WHPP本土', start: '\/api\/whpp\/run\/start', resume: '\/api\/whpp\/run\/resume' \}/, 'WHPP must retain its dedicated third execution stage and endpoints');
+  assert.match(runnerSource, /if \(stage\.key === 'WHPP'\) return await verifyWhpp\(target\)/, 'WHPP stage must verify its own finalized snapshot before being accepted');
+  assert.match(runnerSource, /for \(const stage of stages\)[\s\S]*await runStage\(stage, mode === 'resume', target\)/, 'all stages must execute through the same bounded ordered runner');
+  const ccslStage = runnerSource.indexOf("{ key: 'CCSL'");
+  const shopeeStage = runnerSource.indexOf("{ key: 'SHOPEE'");
+  const whppStage = runnerSource.indexOf("{ key: 'WHPP'");
   assert.ok(ccslStage >= 0 && shopeeStage > ccslStage && whppStage > shopeeStage, 'all-business auto run order must stay CCSL -> SHOPEE -> WHPP so WHPP is never double-run');
+  assert.equal((runnerSource.match(/\/api\/whpp\/run\/start/g) || []).length, 1, 'WHPP start endpoint must appear exactly once in the browser orchestration');
 
-  console.log(`[V345/V294] zero-loss import smoke passed · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
+  console.log(`[V346/V294] zero-loss import smoke passed · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
 } finally {
   try { fs.rmSync(file, { force: true }); } catch {}
   try { fs.rmSync(bloatedFile, { force: true }); } catch {}
