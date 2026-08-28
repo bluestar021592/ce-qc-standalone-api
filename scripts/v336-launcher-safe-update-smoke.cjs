@@ -41,8 +41,9 @@ assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b|hosts\s*fil
 const repair = fs.readFileSync('tools/CE_QC_Repair_Managed_Launcher_Git_Fatal.cmd', 'utf8');
 assert.ok(repair.includes('Resolve-DnsName github.com'), 'emergency recovery must resolve GitHub independently');
 assert.ok(repair.includes('http.curloptResolve=github.com:443:'), 'emergency recovery must use temporary curl resolver override');
+assert.ok(repair.includes('GIT_CONFIG_KEY_0=http.curloptResolve'), 'bootstrap resolver must be passed only through the child process environment');
 assert.ok(repair.includes('CE_QC_Managed_Launcher.ps1'), 'emergency recovery must hand off to the existing verified managed updater');
-assert.ok(repair.includes(':restore_resolver'), 'temporary repo resolver config must always be restored');
+assert.ok(!repair.includes('config --local --add http.curloptResolve'), 'emergency recovery must not persist the resolver in repository config');
 assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b/i.test(repair), 'emergency recovery must not alter adapter DNS');
 
-console.log('[V336] launcher safety smoke passed · exact candidate tested before install · test DB isolated · SQLite backup hash+quick_check verified · exact SHA installed · local startup verified · automatic code+DB rollback armed · managed launcher retries GitHub and uses temporary explicit-DNS fallback without system DNS mutation');
+console.log('[V336] launcher safety smoke passed · exact candidate tested before install · test DB isolated · SQLite backup hash+quick_check verified · exact SHA installed · local startup verified · automatic code+DB rollback armed · managed launcher retries GitHub and uses process-local explicit-DNS fallback without system DNS mutation');
