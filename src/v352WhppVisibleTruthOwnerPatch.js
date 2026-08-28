@@ -109,7 +109,7 @@ export function buildV352WhppVisibleDashboard({ reportDate = '', membershipRows 
     dailyParseRows: members,
     finalRows: facts
   });
-  assertVisibleConsistency(dashboard);
+  assertV352WhppVisibleConsistency(dashboard);
   return dashboard;
 }
 
