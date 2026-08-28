@@ -8,6 +8,7 @@ const CYCLE_RE = /盘点|cycle\s*count/i;
 const START_RE = /parcel\s*start\s*to\s*deliver|out\s*for\s*delivery|开始派送|派送中|正在派送|正在为您派送/i;
 const ASSIGN_RE = /assigning\s*courier|delivery\s*assign|courier\s*assign|派件分配|分配快递员|分配派送|即将为您派送/i;
 const FAILURE_RE = /\bpending\b|delivery\s*problem|delivery\s*fail|unsuccessful|派送异常|派送失败|派件异常|未妥投|拒收|\bOC\b/i;
+const POD_RE = /\bPOD\b|successfully\s+delivered|delivered\s+successfully|parcel\s+(?:has\s+been\s+)?delivered|签收|妥投|已妥投/i;
 
 function text(value) { return String(value ?? '').trim(); }
 function billOf(row = {}) { return text(row.shipmentCode || row.运单号 || row.waybill).toUpperCase(); }
@@ -68,6 +69,10 @@ function isFailure(row = {}) {
   const code = eventCode(row);
   return code === '150' || FAILURE_RE.test(eventText(row));
 }
+function isPodEvent(row = {}) {
+  const code = eventCode(row);
+  return code === '80' || code === '85' || POD_RE.test(eventText(row));
+}
 function chunks(values = [], size = 300) {
   const out = [];
   for (let index = 0; index < values.length; index += size) out.push(values.slice(index, index + size));
@@ -89,6 +94,12 @@ function dedupeOrdered(events = [], podDate = '') {
       seen.add(signature);
       return true;
     });
+}
+function firstPodEvidence(events = []) {
+  return [...events]
+    .filter(isPodEvent)
+    .filter(row => dateKey(eventTime(row)))
+    .sort((a, b) => timeKey(eventTime(a)).localeCompare(timeKey(eventTime(b))))[0] || null;
 }
 
 export function resolveStrictShopeeAttempt({ pod = false, podDate = '', events = [], podAttemptNo = 0 } = {}) {
@@ -113,7 +124,6 @@ export function resolveStrictShopeeAttempt({ pod = false, podDate = '', events =
         starts.push(eventTime(event));
         failedSinceStart = false;
       }
-      // Repeated START/ASSIGN without a failure is the same delivery attempt.
       continue;
     }
     if (active && isFailure(event)) {
@@ -137,37 +147,33 @@ export function resolveStrictShopeeAttempt({ pod = false, podDate = '', events =
   return { attemptNo: 0, source: '无真实派送循环证据', evidenceStarts: [], evidenceFailures: [] };
 }
 
-function evidenceRange(rows = []) {
-  const dates = [];
-  for (const row of rows) {
-    for (const value of [row.firstReportDate, row.lastReportDate, row.podDate, row.podTime]) {
-      const d = dateKey(value);
-      if (d) dates.push(d);
-    }
-  }
-  dates.sort();
-  return { from: dates[0] || '2000-01-01', to: dates.at(-1) || '2099-12-31' };
-}
-
 function loadShopeeTrackEvidence(rows = []) {
   const db = getDb();
   const byBill = new Map(rows.map(row => [billOf(row), []]).filter(([bill]) => bill));
   const bills = [...byBill.keys()];
-  const range = evidenceRange(rows);
   for (const chunk of chunks(bills)) {
     const marks = chunk.map(() => '?').join(',');
     let events = [];
     try {
       events = db.prepare(`
-        SELECT shipmentCode,reportDate,eventTime,eventCode,rawJson
+        SELECT shipmentCode,reportDate,eventTime,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,rawJson
         FROM business_track_events
         WHERE businessType='SHOPEE'
-          AND reportDate BETWEEN ? AND ?
           AND shipmentCode IN (${marks})
         ORDER BY shipmentCode,eventTime,id
-      `).all(range.from, range.to, ...chunk);
+      `).all(...chunk);
     } catch {
-      continue;
+      try {
+        events = db.prepare(`
+          SELECT shipmentCode,reportDate,eventTime,eventCode,rawJson
+          FROM business_track_events
+          WHERE businessType='SHOPEE'
+            AND shipmentCode IN (${marks})
+          ORDER BY shipmentCode,eventTime,id
+        `).all(...chunk);
+      } catch {
+        continue;
+      }
     }
     for (const event of events) {
       const target = byBill.get(billOf(event));
@@ -181,17 +187,29 @@ export function applyV230AttemptSigningTruth(businessType, rows = []) {
   const type = text(businessType).toUpperCase();
   const trackEvidence = SHOPEE_TYPES.has(type) ? loadShopeeTrackEvidence(rows) : new Map();
   for (const row of rows) {
-    const podDate = dateKey(row.podDate || row.POD时间 || row.podTime);
+    const events = SHOPEE_TYPES.has(type) ? (trackEvidence.get(billOf(row)) || []) : [];
+    let podDate = dateKey(row.podDate || row.POD时间 || row.podTime);
+    if (row.pod && !podDate && events.length) {
+      const podEvent = firstPodEvidence(events);
+      const recoveredTime = podEvent ? eventTime(podEvent) : '';
+      const recoveredDate = dateKey(recoveredTime);
+      if (recoveredDate) {
+        podDate = recoveredDate;
+        row.podDate = recoveredDate;
+        row.podTime = recoveredTime || recoveredDate;
+        row.podSource = row.podSource || '已保存轨迹真实POD节点';
+        row.podDateRecoveredFromTrack = true;
+      }
+    }
     row.signingDays = row.pod && podDate ? inclusiveNaturalDays(row.firstReportDate, podDate) : 0;
     row.signingDaysSource = row.signingDays > 0 ? '首次日报归属日期→实际POD日期（含首尾自然日）' : '';
 
     if (!SHOPEE_TYPES.has(type)) continue;
-    const events = trackEvidence.get(billOf(row)) || [];
     const strict = resolveStrictShopeeAttempt({
       pod: Boolean(row.pod),
       podDate,
       events,
-      podAttemptNo: row.podAttemptNo
+      podAttemptNo: Math.max(Number(row.podAttemptNo || 0), Number(row.currentAttemptNo || 0), Number(row.attemptNo || 0))
     });
     row.attemptNo = strict.attemptNo;
     row.attemptSource = strict.source;
@@ -204,10 +222,6 @@ export function applyV230AttemptSigningTruth(businessType, rows = []) {
     row.firstDispatchDate = firstRealStart ? dateKey(eventTime(firstRealStart)) : '';
     row.realDispatchToPodDays = row.pod && row.firstDispatchDate && podDate ? inclusiveNaturalDays(row.firstDispatchDate, podDate) : 0;
     row.realDispatchToPodDaysSource = row.realDispatchToPodDays > 0 ? '首次真实派送/分配节点→实际POD日期（诊断值）' : '';
-
-    // Keep the exported/dashboard "派送天数/签收天数" on the agreed cohort basis:
-    // first daily-report date -> actual POD date. A separate diagnostic field above
-    // preserves the operational first-dispatch -> POD duration without mixing names.
     row.deliveryDays = row.signingDays;
     row.deliveryDaysSource = row.signingDaysSource;
   }

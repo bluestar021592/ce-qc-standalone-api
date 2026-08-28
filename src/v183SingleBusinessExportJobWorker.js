@@ -19,7 +19,22 @@ function writeJob(patch={}){const current=readJob(),nextStatus=String(patch.stat
 function dateKey(v=''){return /^\d{4}-\d{2}-\d{2}$/.test(String(v||''))?String(v):'';}
 function formatCambodia(d){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Phnom_Penh',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);}
 function validateRange(from,to){if(!dateKey(from)||!dateKey(to)||from>to)throw new Error('导出日期范围无效。');const days=Math.floor((Date.parse(`${to}T00:00:00Z`)-Date.parse(`${from}T00:00:00Z`))/86400000)+1;if(days>180)throw new Error('单次日期范围最多180天。');return{from,to,key:`${from}_${to}`};}
-function rangeOf(p={}){if(p.periodType==='custom')return validateRange(p.fromDate,p.toDate);const base=dateKey(p.date)?new Date(`${p.date}T12:00:00+07:00`):new Date();if(p.periodType==='weekly'){const day=(base.getDay()+6)%7,from=new Date(base);from.setDate(base.getDate()-day);const to=new Date(from);to.setDate(from.getDate()+6);return validateRange(formatCambodia(from),formatCambodia(to));}if(p.periodType==='monthly'){const from=new Date(base.getFullYear(),base.getMonth(),1,12),to=new Date(base.getFullYear(),base.getMonth()+1,0,12);return validateRange(formatCambodia(from),formatCambodia(to));}const d=formatCambodia(base);return{from:d,to:d,key:d};}
+function rangeOf(p={}){
+  // The two visible date inputs are authoritative. Older UI owners can still send
+  // periodType='daily' while also sending explicit fromDate/toDate; previously the
+  // worker ignored those visible dates and reused payload.date, producing a valid
+  // workbook for the wrong historical range. Never do that again.
+  const explicitFrom=dateKey(p.fromDate),explicitTo=dateKey(p.toDate);
+  if(explicitFrom||explicitTo){
+    if(!explicitFrom||!explicitTo)throw new Error('导出开始日期和结束日期必须同时有效。');
+    return validateRange(explicitFrom,explicitTo);
+  }
+  if(p.periodType==='custom')return validateRange(p.fromDate,p.toDate);
+  const base=dateKey(p.date)?new Date(`${p.date}T12:00:00+07:00`):new Date();
+  if(p.periodType==='weekly'){const day=(base.getDay()+6)%7,from=new Date(base);from.setDate(base.getDate()-day);const to=new Date(from);to.setDate(from.getDate()+6);return validateRange(formatCambodia(from),formatCambodia(to));}
+  if(p.periodType==='monthly'){const from=new Date(base.getFullYear(),base.getMonth(),1,12),to=new Date(base.getFullYear(),base.getMonth()+1,0,12);return validateRange(formatCambodia(from),formatCambodia(to));}
+  const d=formatCambodia(base);return{from:d,to:d,key:d};
+}
 function memoryText(){const m=process.memoryUsage(),mb=v=>Math.max(0,Math.round(Number(v||0)/1024/1024));return`RSS ${mb(m.rss)}MB / Heap ${mb(m.heapUsed)}MB`;}
 function fileItem(file){const name=path.basename(String(file||''));return{name,url:`/api/export-file?name=${encodeURIComponent(name)}`,completeWorkbook:true};}
 let heartbeat=null,stage='准备中',progress=2,startedAt=Date.now();

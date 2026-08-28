@@ -147,46 +147,71 @@ function queryWhppRegionFacts(from,to,db) {
   let rows=[];
   try {
     rows=db.prepare(`
-      WITH ceaf_candidates AS (
-        SELECT DISTINCT b.reportDate,b.snapshotId,b.createdAt,b.batchId
-        FROM unified_import_batches b
-        JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate
-        WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ? AND u.businessType='CEAF'
-          AND TRIM(COALESCE(u.shipmentCode,''))<>''
-      ), ranked AS (
-        SELECT reportDate,snapshotId,createdAt,batchId,
-               ROW_NUMBER() OVER(PARTITION BY reportDate ORDER BY createdAt DESC,batchId DESC) rn
-        FROM ceaf_candidates
-      ), latest AS (SELECT reportDate,snapshotId FROM ranked WHERE rn=1), valid AS (
-        SELECT DISTINCT p.reportDate,UPPER(TRIM(p.shipmentCode)) shipmentCode
+      WITH valid AS (
+        SELECT DISTINCT p.reportDate,UPPER(TRIM(p.shipmentCode)) shipmentCode,
+          CASE
+            WHEN UPPER(COALESCE(json_extract(p.rowJson,'$.regionCode'),json_extract(p.rowJson,'$.区域'),'')) IN ('PP','PNH','PHNOM PENH','金边') THEN 'PP'
+            WHEN UPPER(COALESCE(json_extract(p.rowJson,'$.regionCode'),json_extract(p.rowJson,'$.区域'),'')) IN ('PV','PROVINCE','外省') THEN 'PV'
+            ELSE 'UNKNOWN'
+          END regionCode
         FROM business_daily_parse_rows p
-        LEFT JOIN latest l ON l.reportDate=p.reportDate
         WHERE p.businessType='WHPP' AND p.reportDate BETWEEN ? AND ? AND TRIM(COALESCE(p.shipmentCode,''))<>''
-          AND NOT EXISTS (
-            SELECT 1 FROM unified_import_rows u
-            WHERE u.snapshotId=l.snapshotId AND u.reportDate=p.reportDate AND u.businessType='CEAF'
-              AND UPPER(TRIM(u.shipmentCode))=UPPER(TRIM(p.shipmentCode))
-          )
       ), joined AS (
-        SELECT v.reportDate,v.shipmentCode,l.shipmentCode ledgerBill,f.shipmentCode finalBill,
+        SELECT v.reportDate,v.shipmentCode,v.regionCode,l.shipmentCode ledgerBill,f.shipmentCode finalBill,
           CASE WHEN l.shipmentCode IS NOT NULL THEN CASE WHEN l.terminalReason='POD' THEN 1 ELSE 0 END ELSE COALESCE(f.isPod,0) END isPod,
-          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.podDate,'') ELSE REPLACE(SUBSTR(COALESCE(NULLIF(json_extract(f.rawJson,'$."POD时间"'),''),NULLIF(json_extract(f.rawJson,'$.podTime'),''),NULLIF(f.latestEventTime,''),''),1,10),'/','-') END podDate,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN CASE WHEN l.terminalReason='RETURNED' THEN 1 ELSE 0 END
+               ELSE CASE WHEN COALESCE(json_extract(f.rawJson,'$."退回状态"'),'')='已退回' OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) IN ('RETURNED','RETURN_COMPLETED') OR UPPER(COALESCE(f.primaryCategory,'')) IN ('RETURNED','RETURN','退回') THEN 1 ELSE 0 END END isReturned,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN CASE WHEN l.trackingStatus='TERMINAL' THEN 1 ELSE 0 END
+               ELSE CASE WHEN COALESCE(f.isPod,0)=1 OR COALESCE(json_extract(f.rawJson,'$."退回状态"'),'')='已退回' OR UPPER(COALESCE(json_extract(f.rawJson,'$.currentState'),'')) IN ('RETURNED','RETURN_COMPLETED','ORDER_CANCELLED') THEN 1 ELSE 0 END END isTerminal,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.podDate,'') ELSE REPLACE(SUBSTR(COALESCE(NULLIF(json_extract(f.rawJson,'$."POD时间"'),''),NULLIF(json_extract(f.rawJson,'$.podTime'),''),NULLIF(json_extract(f.rawJson,'$."签收时间"'),''),NULLIF(f.latestEventTime,''),''),1,10),'/','-') END podDate,
           CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.currentCategory,l.currentState,'') ELSE COALESCE(f.primaryCategory,'') END category,
           CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.currentStateJson,'{}') ELSE COALESCE(f.rawJson,'{}') END stateJson,
-          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.attemptNo,0) ELSE 0 END attemptNo,
-          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.signingDays,0) ELSE 0 END signingDays,
-          CASE WHEN l.shipmentCode IS NOT NULL THEN CASE WHEN l.trackingStatus='TERMINAL' THEN 1 ELSE 0 END ELSE CASE WHEN COALESCE(f.isPod,0)=1 THEN 1 ELSE 0 END END isTerminal
-        FROM valid v LEFT JOIN qc_tracking_ledger l ON l.shipmentCode=v.shipmentCode AND l.businessType='WHPP'
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.attemptNo,0) ELSE COALESCE(CAST(json_extract(f.rawJson,'$.podAttemptNo') AS INTEGER),CAST(json_extract(f.rawJson,'$.currentAttemptNo') AS INTEGER),CAST(json_extract(f.rawJson,'$.attemptNo') AS INTEGER),0) END attemptNo,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.signingDays,0) ELSE COALESCE(CAST(json_extract(f.rawJson,'$.signingDays') AS INTEGER),CAST(json_extract(f.rawJson,'$.deliveryDays') AS INTEGER),0) END signingDays,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(CAST(json_extract(l.currentStateJson,'$."Pending天数"') AS INTEGER),CAST(json_extract(l.currentStateJson,'$.pendingDays') AS INTEGER),0)
+               ELSE COALESCE(CAST(json_extract(f.rawJson,'$."Pending天数"') AS INTEGER),CAST(json_extract(f.rawJson,'$.pendingDays') AS INTEGER),0) END pendingDays,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(CAST(json_extract(l.currentStateJson,'$."OC天数"') AS INTEGER),CAST(json_extract(l.currentStateJson,'$.ocDays') AS INTEGER),0)
+               ELSE COALESCE(CAST(json_extract(f.rawJson,'$."OC天数"') AS INTEGER),CAST(json_extract(f.rawJson,'$.ocDays') AS INTEGER),0) END ocDays,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(CAST(json_extract(l.currentStateJson,'$."盘点天数"') AS INTEGER),CAST(json_extract(l.currentStateJson,'$.cycleCountDays') AS INTEGER),0)
+               ELSE COALESCE(CAST(json_extract(f.rawJson,'$."盘点天数"') AS INTEGER),CAST(json_extract(f.rawJson,'$.cycleCountDays') AS INTEGER),0) END cycleDays,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(json_extract(l.currentStateJson,'$.shopState'),'') ELSE COALESCE(json_extract(f.rawJson,'$.shopState'),'') END shopState,
+          CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(CAST(json_extract(l.currentStateJson,'$.shopRetentionNaturalDays') AS INTEGER),CAST(json_extract(l.currentStateJson,'$."门店滞留天数"') AS INTEGER),0)
+               ELSE COALESCE(CAST(json_extract(f.rawJson,'$.shopRetentionNaturalDays') AS INTEGER),CAST(json_extract(f.rawJson,'$."门店滞留天数"') AS INTEGER),0) END shopRetentionDays
+        FROM valid v
+        LEFT JOIN qc_tracking_ledger l ON l.shipmentCode=v.shipmentCode AND l.businessType='WHPP'
         LEFT JOIN business_final_rows f ON f.businessType='WHPP' AND f.shipmentCode=v.shipmentCode AND f.reportDate=v.reportDate
-      ) SELECT reportDate,'WHPP' businessType,'UNKNOWN' regionCode,COUNT(*) total,SUM(CASE WHEN ledgerBill IS NOT NULL OR finalBill IS NOT NULL THEN 1 ELSE 0 END) matched,SUM(isPod) pod,
+      ), classified AS (
+        SELECT *,
+          CASE WHEN UPPER(TRIM(category)) IN ('SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION') OR category IN ('仓库自提','自提','CECN滞留包裹','CEZT滞留包裹','580滞留包裹') THEN 1 ELSE 0 END isSpecial,
+          CASE WHEN COALESCE(json_extract(stateJson,'$."Pending不连续"'),'')='是' OR COALESCE(json_extract(stateJson,'$.pendingFactDateContinuity'),'')='不连续' OR COALESCE(json_extract(stateJson,'$."Pending事实连续性"'),'')='不连续' OR COALESCE(json_extract(stateJson,'$."Pending连续性"'),'')='不连续' THEN 1 ELSE 0 END pendingNonContinuousFlag,
+          CASE WHEN UPPER(TRIM(category))='OC' OR UPPER(TRIM(category)) LIKE 'OC%' OR category LIKE '%OC滞留%' OR UPPER(COALESCE(json_extract(stateJson,'$."当前状态"'),''))='OC' OR UPPER(COALESCE(json_extract(stateJson,'$."状态标识"'),''))='OC' THEN 1 ELSE 0 END ocFlag
+        FROM joined
+      )
+      SELECT reportDate,'WHPP' businessType,regionCode,COUNT(*) total,
+        SUM(CASE WHEN ledgerBill IS NOT NULL OR finalBill IS NOT NULL THEN 1 ELSE 0 END) matched,
+        SUM(isPod) pod,
         SUM(CASE WHEN isPod=1 AND podDate=reportDate THEN 1 ELSE 0 END) sameDayPod,
-        SUM(CASE WHEN isTerminal=0 AND (UPPER(TRIM(category))='OC' OR UPPER(TRIM(category)) LIKE 'OC%' OR category LIKE '%OC滞留%' OR UPPER(COALESCE(json_extract(stateJson,'$."当前状态"'),''))='OC') THEN 1 ELSE 0 END) ocCurrent,
-        SUM(CASE WHEN isPod=1 AND attemptNo=1 THEN 1 ELSE 0 END) attempt1,SUM(CASE WHEN isPod=1 AND attemptNo=2 THEN 1 ELSE 0 END) attempt2,SUM(CASE WHEN isPod=1 AND attemptNo>=3 THEN 1 ELSE 0 END) attempt3,SUM(CASE WHEN isPod=1 AND attemptNo=0 THEN 1 ELSE 0 END) attemptUnknown,
-        SUM(CASE WHEN isPod=1 AND signingDays>0 THEN signingDays ELSE 0 END) signingDaysSum,SUM(CASE WHEN isPod=1 AND signingDays>0 THEN 1 ELSE 0 END) signingDaysCount
-      FROM joined GROUP BY reportDate ORDER BY reportDate
-    `).all(from,to,from,to);
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND ocFlag=1 THEN 1 ELSE 0 END) ocCurrent,
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND pendingNonContinuousFlag=1 THEN 1 ELSE 0 END) pendingNonContinuous,
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND pendingDays>=3 THEN 1 ELSE 0 END) pending3,
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND (ocDays>=1 OR ocFlag=1) THEN 1 ELSE 0 END) oc1,
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND ocDays>=2 THEN 1 ELSE 0 END) oc2,
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND cycleDays>=2 THEN 1 ELSE 0 END) cycle2,
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND shopState='SHOP_ARRIVED_CURRENT' AND shopRetentionDays>=2 THEN 1 ELSE 0 END) shopRetention2,
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND category LIKE '%工单%' THEN 1 ELSE 0 END) workOrder,
+        SUM(CASE WHEN isTerminal=0 AND isSpecial=0 AND (category LIKE '%入库无扫描%' OR COALESCE(json_extract(stateJson,'$."入库无扫描节点"'),'')='是') THEN 1 ELSE 0 END) inboundNoScan,
+        SUM(CASE WHEN regionCode='PV' AND isTerminal=0 AND isSpecial=0 AND isReturned=0 THEN 1 ELSE 0 END) provinceOpen,
+        SUM(isReturned) returned,
+        SUM(CASE WHEN isPod=1 AND attemptNo=1 THEN 1 ELSE 0 END) attempt1,
+        SUM(CASE WHEN isPod=1 AND attemptNo=2 THEN 1 ELSE 0 END) attempt2,
+        SUM(CASE WHEN isPod=1 AND attemptNo>=3 THEN 1 ELSE 0 END) attempt3,
+        SUM(CASE WHEN isPod=1 AND attemptNo=0 THEN 1 ELSE 0 END) attemptUnknown,
+        SUM(CASE WHEN isPod=1 AND signingDays>0 THEN signingDays ELSE 0 END) signingDaysSum,
+        SUM(CASE WHEN isPod=1 AND signingDays>0 THEN 1 ELSE 0 END) signingDaysCount
+      FROM classified GROUP BY reportDate,regionCode ORDER BY reportDate,regionCode
+    `).all(from,to);
   } catch { return []; }
-  return rows.map(row=>finishFact({...emptyFact('WHPP',String(row.reportDate||''),'UNKNOWN'),...row}));
+  return rows.map(row=>finishFact({...emptyFact('WHPP',String(row.reportDate||''),String(row.regionCode||'UNKNOWN')),...row}));
 }
 
 function wantedTypes(type) {
@@ -262,4 +287,4 @@ export function summarizeV284Range(fromDate,toDate,db=getDb()) {
 export function invalidateV284DailyMembershipTruth(){cache.clear();}
 
 globalThis.__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__=invalidateV284DailyMembershipTruth;
-console.info('[CE-QC][V284_DAILY_MEMBERSHIP]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'daily denominator=latest VALID report membership PER BUSINESS per date; unrelated same-day imports cannot zero another business; WHPP excludes overlap against the latest VALID CEAF report for that date; status truth=V246 ledger first, legacy final rows fallback.');
+console.info('[CE-QC][V284_DAILY_MEMBERSHIP]',V284_DAILY_MEMBERSHIP_TRUTH_ID,'daily denominator=latest VALID report membership PER BUSINESS per date; unrelated same-day imports cannot zero another business; WHPP uses its dedicated daily membership without CEAF subtraction; status truth=V246 ledger first, legacy final rows fallback.');

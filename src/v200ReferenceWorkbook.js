@@ -33,7 +33,7 @@ function styleDashboardDataCell(cell, clickable = false, percent = false) {
   cell.font = { name: FONT, size: 10, bold: clickable, color: clickable ? { argb: 'FF0B57D0' } : { argb: 'FF000000' } };
   cell.alignment = { horizontal: 'center', vertical: 'middle' };
   if (clickable) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9E6' } };
-  if (percent && typeof cell.value === 'number') cell.numFmt = '0.00%';
+  if (percent) cell.numFmt = '0.00%';
 }
 function mergePair(sheet, row, col) { sheet.mergeCells(row, col, row, col + 1); }
 function writeCard(sheet, pairIndex, label, value, percent, target, fill) {
@@ -48,7 +48,7 @@ function writeCard(sheet, pairIndex, label, value, percent, target, fill) {
 }
 function createDashboard(workbook, type, range, stats, anchors) {
   const sheet = workbook.addWorksheet('每日看板', { views: [{ state: 'frozen', ySplit: 10, xSplit: 1 }] });
-  const widths = [13, 10, 10, 10, 10, 3, 13, 10, 11, 10, 10, 11, 11, 11, 11, 11];
+  const widths = [13, 10, 12, 10, 12, 10, 12, 14, 11, 11, 11, 14, 11, 11, 11, 14];
   widths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
   sheet.mergeCells('A1:P2');
   const title = sheet.getCell('A1'); title.value = `${displayType(type)}每日数据看板`; title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } }; title.font = { name: FONT, size: 18, bold: true, color: { argb: 'FFFFFFFF' } }; title.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -91,17 +91,22 @@ function createDashboard(workbook, type, range, stats, anchors) {
   const metricRows = [o, ...stats.daily]; let mr = metricHeaderRow + 1;
   for (let index = 0; index < metricRows.length; index++) {
     const d = metricRows[index];
-    const a1Rate = completeAttemptRatio(d, d.a1), a2Rate = completeAttemptRatio(d, d.a2), a3Rate = completeAttemptRatio(d, d.a3);
-    const totalAverage = completeSigningAverage(d.days, d.pod), ppAverage = completeSigningAverage(d.ppDays, d.ppPod), pvAverage = completeSigningAverage(d.pvDays, d.pvPod);
-    const values = [index===0?'区间汇总':d.date,d.a1,a1Rate===null?'—':a1Rate,d.a2,a2Rate===null?'—':a2Rate,d.a3,a3Rate===null?'—':a3Rate,totalAverage===null?'—':totalAverage,d.ppA1,d.ppA2,d.ppA3,ppAverage===null?'—':ppAverage,d.pvA1,d.pvA2,d.pvA3,pvAverage===null?'—':pvAverage];
+    const a1Rate = d.pod ? completeAttemptRatio(d, d.a1) : 0, a2Rate = d.pod ? completeAttemptRatio(d, d.a2) : 0, a3Rate = d.pod ? completeAttemptRatio(d, d.a3) : 0;
+    const totalAverage = d.pod ? completeSigningAverage(d.days, d.pod) : 0;
+    const ppAverage = d.ppPod ? completeSigningAverage(d.ppDays, d.ppPod) : 0;
+    const pvAverage = d.pvPod ? completeSigningAverage(d.pvDays, d.pvPod) : 0;
+    if ([a1Rate,a2Rate,a3Rate,totalAverage,ppAverage,pvAverage].some(value => value === null || value === undefined || !Number.isFinite(Number(value)))) {
+      throw new Error(`V200_VERIFIED_METRIC_MISSING:${d.date}`);
+    }
+    const values = [index===0?'区间汇总':d.date,d.a1,a1Rate,d.a2,a2Rate,d.a3,a3Rate,totalAverage,d.ppA1,d.ppA2,d.ppA3,ppAverage,d.pvA1,d.pvA2,d.pvA3,pvAverage];
     values.forEach((value, i) => { const c = sheet.getCell(mr, i + 1); c.value = value; styleDashboardDataCell(c, false, [3,5,7].includes(i+1)); });
-    for (const col of [3,5,7]) if (typeof sheet.getCell(mr,col).value === 'number') sheet.getCell(mr,col).numFmt='0.00%';
-    for (const col of [8,12,16]) if (typeof sheet.getCell(mr,col).value === 'number') sheet.getCell(mr,col).numFmt='0.00';
+    for (const col of [3,5,7]) sheet.getCell(mr,col).numFmt='0.00%';
+    for (const col of [8,12,16]) sheet.getCell(mr,col).numFmt='0.00';
     if (index===0) for (let col=1;col<=16;col++){const c=sheet.getCell(mr,col);c.font={name:FONT,size:10,bold:true,color:{argb:'FF0B57D0'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFF9E6'}};}
     mr++;
   }
   const noteRow = mr + 1; sheet.mergeCells(noteRow, 1, noteRow, 16);
-  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派；无真实证据时显示“—”，禁止按经过天数猜1/2/3派。平均签收天数：生命周期首次进入最新VALID日报日期→真实POD日期，包含首尾自然日；任一POD缺少真实POD日期时该平均值显示“—”。未识别派次 ${o.attemptUnknown} 票。`;
+  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派。平均签收天数：生命周期首次进入最新VALID日报日期→真实POD日期，包含首尾自然日。导出前必须完成POD日期、派次、区域及签收天数对账，缺少真实证据时整份报表拒绝生成，不以空白、横线或默认1替代。`;
   sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=42;
   sheet.commit();
 }
