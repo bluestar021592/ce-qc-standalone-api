@@ -6,7 +6,6 @@ title CE QC APP - Launcher DNS Recovery
 set "APP=%LOCALAPPDATA%\CE_QC_LAUNCHER\app"
 set "LAUNCHER=%APP%\tools\CE_QC_Managed_Launcher.ps1"
 set "IPS=%TEMP%\CE_QC_GITHUB_IPS_%RANDOM%_%RANDOM%.txt"
-set "OLD=%TEMP%\CE_QC_GIT_RESOLVE_%RANDOM%_%RANDOM%.txt"
 set "FALLBACK_RESOLVE="
 set "LAUNCH_EC=1"
 
@@ -21,10 +20,6 @@ where git.exe >nul 2>&1
 if errorlevel 1 goto :missing_git
 where powershell.exe >nul 2>&1
 if errorlevel 1 goto :missing_powershell
-
-rem Preserve any existing repository-local curl resolver setting. The fallback is
-rem temporary and is always restored after the managed launcher exits.
-git -C "%APP%" config --local --get-all http.curloptResolve > "%OLD%" 2>nul
 
 echo [1/4] Checking GitHub with bounded retries...
 for /L %%A in (1,1,3) do (
@@ -52,10 +47,10 @@ goto :fetch_failed
 
 :github_ready
 if defined FALLBACK_RESOLVE (
-  echo [UPDATE] Temporary Git resolver fallback enabled for this recovery only.
-  git -C "%APP%" config --local --unset-all http.curloptResolve >nul 2>&1
-  git -C "%APP%" config --local --add http.curloptResolve "%FALLBACK_RESOLVE%"
-  if errorlevel 1 goto :resolver_config_failed
+  echo [UPDATE] Temporary Git resolver fallback enabled for this recovery process only.
+  set "GIT_CONFIG_COUNT=1"
+  set "GIT_CONFIG_KEY_0=http.curloptResolve"
+  set "GIT_CONFIG_VALUE_0=%FALLBACK_RESOLVE%"
 ) else (
   echo [UPDATE] Normal GitHub connectivity is available.
 )
@@ -65,18 +60,9 @@ echo       It will test the exact candidate, protect SQLite, then install only i
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%LAUNCHER%"
 set "LAUNCH_EC=%ERRORLEVEL%"
 
-echo [4/4] Restoring temporary Git resolver settings...
-call :restore_resolver
+echo [4/4] Recovery process finished. No Windows DNS or persistent Git setting was changed.
 if exist "%IPS%" del /q "%IPS%" >nul 2>&1
-if exist "%OLD%" del /q "%OLD%" >nul 2>&1
 exit /b %LAUNCH_EC%
-
-:restore_resolver
-git -C "%APP%" config --local --unset-all http.curloptResolve >nul 2>&1
-if exist "%OLD%" (
-  for /f "usebackq delims=" %%R in ("%OLD%") do git -C "%APP%" config --local --add http.curloptResolve "%%R" >nul 2>&1
-)
-exit /b 0
 
 :missing_app
 echo [ERROR] CE QC installed app was not found:
@@ -96,21 +82,13 @@ goto :failed
 echo [ERROR] Windows PowerShell was not found.
 goto :failed
 
-:resolver_config_failed
-echo [ERROR] Temporary Git resolver could not be configured.
-goto :failed_restore
-
 :fetch_failed
 echo [ERROR] GitHub is still unreachable after normal retries and explicit DNS fallback.
 echo         Current CE QC data was not modified.
-goto :failed_restore
-
-:failed_restore
-call :restore_resolver
+goto :failed
 
 :failed
 if exist "%IPS%" del /q "%IPS%" >nul 2>&1
-if exist "%OLD%" del /q "%OLD%" >nul 2>&1
 echo.
 echo Recovery stopped safely. No business-data purge was performed.
 echo Press any key to close...
