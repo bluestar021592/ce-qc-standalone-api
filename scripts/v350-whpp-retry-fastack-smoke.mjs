@@ -8,12 +8,13 @@ const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const source=fs.readFileSync(path.join(__dirname,'..','src','v143WhppRetryQueuePatch.js'),'utf8');
 
 assert.match(V143_WHPP_RETRY_QUEUE_PATCH_ID,/v350-whpp-retry-fast-ack-auto-drain/);
-assert.match(source,/function runHandler\(req,res\)\{try\{const limit=[\s\S]*?startRetryJob\(limit\);res\.status\(202\)\.json\(\{ok:true,patchId:PATCH_ID,started:true,fastAck:true,autoDrain:true,job\}\)/,'POST must acknowledge before any queue summary is read');
+assert.match(source,/function runHandler\(req,res\)\{try\{const limit=[\s\S]*?startRetryJob\(limit,res\);res\.status\(202\)\.json\(\{ok:true,patchId:PATCH_ID,started:true,fastAck:true,autoDrain:true,job\}\)/,'POST must acknowledge without queue summary work');
 const runHandlerSource=source.match(/function runHandler\(req,res\)\{[\s\S]*?\n\nlet installed=/)?.[0]||'';
 assert.ok(runHandlerSource,'runHandler source must exist');
 assert.doesNotMatch(runHandlerSource,/pendingRows\(|queueSummary\(/,'POST hot path must not synchronously scan retry SQLite before 202');
-assert.match(source,/setImmediate\(async\(\)=>\{/,'retry work must move behind the HTTP acknowledgement');
-assert.doesNotMatch(source,/UPPER\(COALESCE\(c?\.?apiStatus/,'retry predicates must keep apiStatus bare instead of wrapping it in functions');
+assert.match(source,/response\?\.once\)response\.once\('finish',\(\)=>setImmediate\(launch\)\)/,'SQLite retry work must start only after the HTTP response finish event');
+assert.doesNotMatch(source,/UPPER\(COALESCE\(c?\.?apiStatus/,'retry predicates must not wrap apiStatus in UPPER/COALESCE');
+assert.match(source,/apiStatus COLLATE NOCASE IN/,'case-insensitive failure semantics must be preserved without UPPER/COALESCE');
 assert.match(source,/MAX_BATCH=200/,'WHPP retry batches remain bounded at 200');
 assert.match(source,/NO_PROGRESS/,'auto drain must stop when a pass makes no progress');
 
@@ -58,4 +59,4 @@ assert.equal(stopped.passes,1);
 assert.equal(stopped.stillRetry,236);
 assert.equal(stopped.stopReason,'NO_PROGRESS');
 
-console.log('[V350] WHPP retry fast-ack smoke passed · POST returns before SQLite selection · 236 auto-drains as 200+36 · zero-progress stops after one pass · no DB schema change');
+console.log('[V350] WHPP retry fast-ack smoke passed · HTTP finish precedes SQLite selection · 236 auto-drains as 200+36 · zero-progress stops after one pass · no DB schema change');
