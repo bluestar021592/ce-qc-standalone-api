@@ -1,7 +1,7 @@
-export const V314_ALL_BUSINESS_THROUGHPUT_CORE_ID='2026-08-27-v343-all-business-350-scan-50x4-track-v1';
+export const V314_ALL_BUSINESS_THROUGHPUT_CORE_ID='2026-08-28-v345-all-business-bounded-retry-350-scan-50x4-track-v1';
 export const V314_SHOPEE_THROUGHPUT_CORE_ID=V314_ALL_BUSINESS_THROUGHPUT_CORE_ID;
 // Compatibility export name retained for older imports; implementation is no longer separate.
-export const V339_CCSL_THROUGHPUT_CORE_ID='2026-08-27-v340-ccsl-single-lane-rolling-prefetch-v2-consolidated-all-business';
+export const V339_CCSL_THROUGHPUT_CORE_ID='2026-08-28-v345-ccsl-single-lane-bounded-retry-consolidated-all-business';
 
 export function clampInt(value,min,max,fallback){const parsed=Number(value);if(!Number.isFinite(parsed))return fallback;return Math.max(min,Math.min(max,Math.trunc(parsed)));}
 export const V314_EVENT_CONCURRENCY=clampInt(process.env.TRACK_CONCURRENCY||process.env.SHOPEE_EVENT_CONCURRENCY,1,4,4);
@@ -28,10 +28,23 @@ function runWithBudget(query,batch,budgetMs){
 export function createBoundedPrefetchPool({getSourceBills,getStatusRows=()=>[],batchSize,concurrency,query,label='CE-QC',planMode='stable-filter',hardBudgetMs=0}){
   const width=Math.max(1,Number(batchSize||1)),limit=Math.max(1,Number(concurrency||1)),cache=new Map(),queue=[];let active=0,launched=false,plannedKeys=new Set();
   function pump(){while(active<limit&&queue.length){const job=queue.shift();active+=1;runWithBudget(query,job.batch,hardBudgetMs).then(value=>job.finish({ok:true,value}),error=>job.finish({ok:false,error})).finally(()=>{active-=1;pump();});}}
-  function enqueue(batch){const clean=cleanShipmentCodes(batch);if(!clean.length)return null;const key=batchKey(clean);if(cache.has(key))return cache.get(key);let finish;const settled=new Promise(resolve=>{finish=resolve;}),entry={key,batch:clean,settled};cache.set(key,entry);queue.push({key,batch:clean,finish});pump();return entry;}
-  function launch(focusBatch=[]){if(launched)return;launched=true;const completed=successfulBills(getStatusRows()||[]);let batches=planBatches(getSourceBills()||[],completed,width,planMode);plannedKeys=new Set(batches.map(batchKey));const focusKey=batchKey(focusBatch);if(focusKey&&plannedKeys.has(focusKey))batches=[...batches.filter(batch=>batchKey(batch)===focusKey),...batches.filter(batch=>batchKey(batch)!==focusKey)];console.info('[CE-QC][THROUGHPUT_PREFETCH]',JSON.stringify({label,batchSize:width,concurrency:limit,batches:batches.length,completedBills:completed.size,planMode,hardBudgetMs:Number(hardBudgetMs||0)}));for(const batch of batches)enqueue(batch);}
-  async function request(codes=[]){const batch=cleanShipmentCodes(codes);if(!batch.length)return[];launch(batch);const key=batchKey(batch);if(!plannedKeys.has(key))return query(batch);const entry=cache.get(key)||enqueue(batch),settled=await entry.settled;if(!settled.ok){cache.delete(key);throw settled.error;}return settled.value;}
-  return{label,batchSize:width,concurrency:limit,planMode,request,stats:()=>({active,queued:queue.length,cached:cache.size,planned:plannedKeys.size,launched,batchSize:width,concurrency:limit,hardBudgetMs:Number(hardBudgetMs||0)})};
+  function enqueue(batch,priority=false){
+    const clean=cleanShipmentCodes(batch);if(!clean.length)return null;const key=batchKey(clean);if(cache.has(key))return cache.get(key);
+    let finish;const settled=new Promise(resolve=>{finish=resolve;}),entry={key,batch:clean,settled};cache.set(key,entry);
+    const job={key,batch:clean,finish};if(priority)queue.unshift(job);else queue.push(job);pump();return entry;
+  }
+  function launch(focusBatch=[]){if(launched)return;launched=true;const completed=successfulBills(getStatusRows()||[]);let batches=planBatches(getSourceBills()||[],completed,width,planMode);plannedKeys=new Set(batches.map(batchKey));const focusKey=batchKey(focusBatch);if(focusKey&&plannedKeys.has(focusKey))batches=[...batches.filter(batch=>batchKey(batch)===focusKey),...batches.filter(batch=>batchKey(batch)!==focusKey)];console.info('[CE-QC][THROUGHPUT_PREFETCH]',JSON.stringify({label,batchSize:width,concurrency:limit,batches:batches.length,completedBills:completed.size,planMode,hardBudgetMs:Number(hardBudgetMs||0),allRequestsBounded:true}));for(const batch of batches)enqueue(batch,false);}
+  async function request(codes=[]){
+    const batch=cleanShipmentCodes(codes);if(!batch.length)return[];launch(batch);const key=batchKey(batch);
+    // Every real network request must use this same scheduler. Adaptive retry/fallback
+    // children are not part of the speculative prefetch plan, but letting them call
+    // the raw client directly would exceed the declared x1/x2/x4 concurrency limits.
+    // Put demand/fallback work at the front so it is bounded without waiting behind
+    // every speculative future batch.
+    const entry=cache.get(key)||enqueue(batch,!plannedKeys.has(key));
+    const settled=await entry.settled;if(!settled.ok){cache.delete(key);throw settled.error;}return settled.value;
+  }
+  return{label,batchSize:width,concurrency:limit,planMode,request,stats:()=>({active,queued:queue.length,cached:cache.size,planned:plannedKeys.size,launched,batchSize:width,concurrency:limit,hardBudgetMs:Number(hardBudgetMs||0),allRequestsBounded:true})};
 }
 
 export function createUnifiedThroughputClient(state={},client,options={}){
@@ -41,7 +54,7 @@ export function createUnifiedThroughputClient(state={},client,options={}){
   const trackQuery=typeof client.trackQuery==='function'?client.trackQuery.bind(client):null;
   const exceptionQuery=typeof client.exceptionQuery==='function'?client.exceptionQuery.bind(client):null;
   if(confirmQuery)pools.confirm=createBoundedPrefetchPool({getSourceBills:()=>state.scanPool||state.pnhBills||[],getStatusRows:()=>state.scanQueryStatus||[],batchSize:350,concurrency:isShopee?(options.confirmConcurrency||V314_CONFIRM_CONCURRENCY):(options.confirmConcurrency||V339_CCSL_CONFIRM_CONCURRENCY),query:confirmQuery,label:`${isShopee?'SHOPEE':'CCSL'}-confirm-350`,planMode:isShopee?'compact-pending':'stable-filter',hardBudgetMs:isShopee?0:(options.hardBudgetMs||V339_CCSL_CONFIRM_HARD_BUDGET_MS)});
-  if(trackQuery)pools.track=createBoundedPrefetchPool({getSourceBills:()=>state.needTrackBills||[],getStatusRows:()=>isShopee?(state.eventQueryStatus||[]):(state.trackQueryStatus||[]),batchSize:50,concurrency:options.trackConcurrency||options.eventConcurrency||V314_EVENT_CONCURRENCY,query:trackQuery,label:`${isShopee?'SHOPEE':'CCSL'}-track-50`,planMode:'stable-filter'});
+  if(trackQuery)pools.track=createBoundedPrefetchPool({getSourceBills:()=>state.needTrackBills||[],getStatusRows:()=>isShopee?(state.eventQueryStatus||[]):(state.trackQueryStatus||[]),batchSize:50,concurrency:options.trackConcurrency||options.eventConcurrency||V314_EVENT_CONCURRENCY,query:trackQuery,label:`${isShopee?'SHOPEE':'CCSL'}-track-50`,planMode:isShopee?'stable-filter':'compact-pending'});
   if(exceptionQuery)pools.exception=createBoundedPrefetchPool({getSourceBills:()=>state.needTrackBills||[],getStatusRows:()=>state.exceptionQueryStatus||[],batchSize:50,concurrency:options.exceptionConcurrency||V314_EXCEPTION_CONCURRENCY,query:exceptionQuery,label:`${isShopee?'SHOPEE':'CCSL'}-exception-50`,planMode:'stable-filter'});
   return new Proxy(client,{get(target,prop){if(prop==='confirmQuery'&&pools.confirm)return codes=>pools.confirm.request(codes);if(prop==='trackQuery'&&pools.track)return codes=>pools.track.request(codes);if(prop==='exceptionQuery'&&pools.exception)return codes=>pools.exception.request(codes);if(prop==='__v314Pools')return pools;if(prop==='__v339CcslConfirmPool')return pools.confirm;if(prop==='__ceQcThroughputPools')return pools;const value=Reflect.get(target,prop,target);return typeof value==='function'?value.bind(target):value;}});
 }
@@ -53,4 +66,4 @@ export function createCcslThroughputClient(state={},client,options={}){return cr
 export function checkpointStrideForPhase(phase=''){const value=String(phase||'');if(/tms-shipment-event-query|exception-item-query/i.test(value))return 4;if(/SHOPEE.*订单扫描|订单扫描/i.test(value))return 2;return 1;}
 export function shouldUseFastCheckpoint(state={},businessType=''){if(String(businessType||state.businessType||'').toUpperCase()!=='SHOPEE')return false;const processing=state.processing||{};if(!processing.running||processing.paused)return false;const index=Math.max(0,Number(processing.batchIndex||0)),total=Math.max(0,Number(processing.totalBatches||0));if(!index||!total||index>=total)return false;const stride=checkpointStrideForPhase(processing.phase||'');return stride>1&&index%stride!==0;}
 
-console.info('[CE-QC][ALL_BUSINESS_THROUGHPUT_CORE]',V314_ALL_BUSINESS_THROUGHPUT_CORE_ID,'all businesses use 350-ticket confirm batches and 50-ticket track batches; track prefetch is bounded x4; CCSL confirm remains one remote 350 lane for endpoint safety.');
+console.info('[CE-QC][ALL_BUSINESS_THROUGHPUT_CORE]',V314_ALL_BUSINESS_THROUGHPUT_CORE_ID,'all businesses use 350-ticket confirm batches and 50-ticket track batches; track prefetch is bounded x4; fallback/retry requests stay inside the same bounded owner; CCSL confirm remains one remote 350 lane for endpoint safety.');
