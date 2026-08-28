@@ -3,7 +3,7 @@ import { getDb } from './db.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
 
-export const V352_WHPP_VISIBLE_TRUTH_OWNER_ID = '2026-08-28-v352-whpp-visible-single-truth-owner-v1';
+export const V352_WHPP_VISIBLE_TRUTH_OWNER_ID = '2026-08-28-v352-whpp-visible-single-truth-owner-v2';
 const SUMMARY_ROUTES = new Set(['/api/v132/whpp-fast-summary', '/api/v71/whpp-summary']);
 const DETAIL_ROUTES = new Set(['/api/v172/whpp-metric-detail', '/api/whpp/metric-detail']);
 const originalListen = express.application.listen;
@@ -99,7 +99,8 @@ function loadFacts(db, reportDate) {
 
 export function buildV352WhppVisibleDashboard({ reportDate = '', membershipRows = [], finalRows = [] } = {}) {
   const members = uniqueRows(membershipRows);
-  const facts = uniqueRows(finalRows.map(normalizeSqlFinalFact));
+  const memberSet = new Set(members.map(billOf));
+  const facts = uniqueRows(finalRows.map(normalizeSqlFinalFact)).filter(row => memberSet.has(billOf(row)));
   const dashboard = buildWhppDashboard({
     businessType: 'WHPP',
     reportDate: dateOnly(reportDate),
@@ -147,10 +148,12 @@ function buildCanonical(reportDate = '') {
     const dashboard = buildV352WhppVisibleDashboard({ reportDate: date, membershipRows: [], finalRows: [] });
     return { reportDate: date, dashboard, membershipSource: 'EMPTY', finalEvidenceRows: 0, completed: false, buildMs: Date.now() - startedAt };
   }
-  const finalRows = loadFacts(db, date);
+  const rawFinalRows = loadFacts(db, date);
+  const memberSet = new Set(uniqueRows(membershipRows).map(billOf));
+  const finalRows = rawFinalRows.filter(row => memberSet.has(billOf(row)));
   const dashboard = buildV352WhppVisibleDashboard({ reportDate: date, membershipRows, finalRows });
   const history = db.prepare(`SELECT 1 ok FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(date);
-  const completed = membershipRows.length === 0 ? Boolean(history) : finalRows.length >= membershipRows.length;
+  const completed = membershipRows.length === 0 ? Boolean(history) : finalRows.length >= uniqueRows(membershipRows).length;
   return {
     reportDate: date,
     dashboard,
@@ -164,7 +167,15 @@ function buildCanonical(reportDate = '') {
 function summaryPayload(reportDate = '') {
   const canonical = buildCanonical(reportDate);
   const metrics = { ...canonical.dashboard.metrics, retryPending: 0 };
+  const regions = canonical.dashboard.regions;
   const snapshotStatus = canonical.completed ? 'COMPLETED' : (metrics.total > 0 ? 'PENDING' : 'EMPTY');
+  const slimDashboard = {
+    businessType: 'WHPP',
+    reportDate: canonical.reportDate,
+    metrics,
+    regions,
+    accounting: canonical.dashboard.accounting
+  };
   return {
     ok: true,
     patchId: V352_WHPP_VISIBLE_TRUTH_OWNER_ID,
@@ -173,9 +184,9 @@ function summaryPayload(reportDate = '') {
     completed: canonical.completed,
     snapshotStatus,
     metrics,
-    regions: canonical.dashboard.regions,
-    state: { reportDate: canonical.reportDate, dailyReportReady: Number(metrics.total || 0) >= 0, snapshotStatus },
-    dashboard: canonical.dashboard,
+    regions,
+    state: { reportDate: canonical.reportDate, dailyReportReady: true, snapshotStatus },
+    dashboard: slimDashboard,
     truthSource: canonical.membershipSource,
     finalEvidenceRows: canonical.finalEvidenceRows,
     serverBuildMs: canonical.buildMs,
@@ -234,8 +245,9 @@ console.log('[CE-QC][V352_WHPP_VISIBLE_TRUTH_OWNER]', JSON.stringify({
   summaryRoutes: [...SUMMARY_ROUTES],
   detailRoutes: [...DETAIL_ROUTES],
   membershipTruth: 'LATEST_VALID_UNIFIED_THEN_STANDARD_DAILY',
-  finalTruth: 'BUSINESS_FINAL_ROWS_WITH_SQL_ISPOD_IN_MEMORY_NORMALIZATION',
+  finalTruth: 'CURRENT_MEMBERS_ONLY_BUSINESS_FINAL_ROWS_WITH_SQL_ISPOD_IN_MEMORY_NORMALIZATION',
   invariant: 'TOP_EQUALS_PP_PLUS_PV_PLUS_UNKNOWN',
+  summaryPayload: 'METRICS_REGIONS_ACCOUNTING_ONLY_DETAILS_LAZY',
   databaseWrites: false,
   databaseSchemaChange: false
 }));
