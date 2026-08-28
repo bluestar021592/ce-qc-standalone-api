@@ -18,8 +18,10 @@ const {getDb,closeDb}=await import('../src/db.js');
 const {readV236CurrentSummary}=await import('../src/v236DashboardCurrentRead.js');
 const {readV284DailyFacts,V284_DAILY_MEMBERSHIP_TRUTH_ID}=await import('../src/v284DailyMembershipTruth.js');
 const {readV320HistoricalDaily,V320_HISTORICAL_DAILY_TRUTH_ID}=await import('../src/v320HistoricalDailyTruth.js');
-const {readV308DeliveryDaily,V308_DELIVERY_DAILY_FAST_ID}=await import('../src/v308DeliveryDailyFastPath.js');
+const {readV308DeliveryDaily}=await import('../src/v308DeliveryDailyFastPath.js');
+const {ensureV246TrackingSchema}=await import('../src/v246TrackingLedgerCore.js');
 const db=getDb();
+ensureV246TrackingSchema(db);
 db.exec(`CREATE TABLE IF NOT EXISTS dashboard_daily_cache (
  reportDate TEXT NOT NULL,businessType TEXT NOT NULL,regionCode TEXT NOT NULL DEFAULT '',metricsJson TEXT NOT NULL,
  snapshotId TEXT NOT NULL DEFAULT '',snapshotStatus TEXT NOT NULL DEFAULT '',sourceFingerprint TEXT NOT NULL DEFAULT '',refreshedAt TEXT NOT NULL,
@@ -31,13 +33,21 @@ const member=db.prepare('INSERT INTO unified_import_rows(batchId,snapshotId,repo
 const cache=db.prepare('INSERT INTO dashboard_daily_cache(reportDate,businessType,regionCode,metricsJson,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt) VALUES(?,?,?,?,?,?,?,?)');
 const shopeeFact=db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,recipient_group,rawJson,latestEventTime,createdAt,updatedAt,podAttemptNo) VALUES('SHOPEE',?,?,?,?,?,?,?,?,?,?)`);
 const ccslFact=db.prepare(`INSERT INTO final_rows(shipmentCode,reportDate,isPod,primaryCategory,category,ocDays,rawJson,lastEventTime,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)`);
+const ledger=db.prepare(`INSERT INTO qc_tracking_ledger(
+ shipmentCode,businessType,firstReportDate,lastImportedDate,trackingStatus,terminalReason,terminalAt,currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,createdAt,updatedAt
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 function seed(type,id,count,pod,createdAt){
   const date='2026-08-07',s=`S-${id}`,b=`B-${id}`;snap.run(s,b,date,'COMPLETED','{}',createdAt);batch.run(b,s,date,`${type}.xls`,id,'VALID','{}','[]',createdAt);
   for(let i=1;i<=count;i++){
-    const bill=`${type}-${i}`,isPod=i<=pod?1:0;member.run(b,s,date,type,bill,'PP',type,type,'日报',i,'TEST','{}',createdAt);
+    const bill=`${type}-${i}`,isPod=i<=pod?1:0,region=(type==='SHOPEEVN'&&i===2)?'PV':'PP';
+    member.run(b,s,date,type,bill,region,type,type,'日报',i,'TEST','{}',createdAt);
     if(type==='SHOPEECN'||type==='SHOPEEVN'){
       const group=type==='SHOPEECN'?'CN':'VN',podTime=isPod?'2026-08-07 18:00:00':'';
       shopeeFact.run(bill,date,isPod,isPod?'POD':'Pending',group,JSON.stringify({POD时间:podTime,当前状态:isPod?'POD':'Pending',podAttemptNo:isPod?1:0}),podTime||'2026-08-07 19:00:00',createdAt,createdAt,isPod?1:0);
+      if(isPod){
+        const firstReportDate=region==='PV'?'2026-08-06':'2026-08-07',signingDays=region==='PV'?2:1;
+        ledger.run(bill,type,firstReportDate,date,'TERMINAL','POD',podTime,'POD','POD',podTime,date,1,'V246_STRICT_TRACK_TEST',signingDays,createdAt,createdAt);
+      }
     }else{
       ccslFact.run(bill,date,isPod,isPod?'POD':'Pending',isPod?'POD':'Pending',0,JSON.stringify({POD时间:isPod?'2026-08-07 18:00:00':''}),isPod?'2026-08-07 18:00:00':'2026-08-07 19:00:00',createdAt,createdAt);
     }
@@ -65,10 +75,16 @@ assert.equal(current.business.CEAF.total,1,'later unrelated imports must not zer
 assert.notEqual(current.snapshotIds.SHOPEECN,current.snapshotIds.SHOPEEVN,'CN and VN are allowed to have different same-date source snapshots');
 
 const v308=readV308DeliveryDaily('SHOPEEVN','2026-08-07','2026-08-07',db);
-assert.match(V308_DELIVERY_DAILY_FAST_ID,/v335-three-business-per-business-current/);
+// Validate the contract, not a release-name string: future owner revisions must not fail
+// the gate merely because an internal Vxxx identifier changed.
 assert.equal(v308.daily[0].total,3,'V308 VN board must preserve VN own daily total when legacy cache belongs to CN snapshot');
 assert.equal(v308.daily[0].pod,2,'V308 VN board must fall back to VN own normalized POD facts instead of showing 0');
-assert.equal(v308.daily[0].regions.PP.total,3);
+assert.equal(v308.daily[0].regions.PP.total,2,'VN PP membership must remain independently visible');
+assert.equal(v308.daily[0].regions.PV.total,1,'VN PV membership must remain independently visible');
+assert.equal(v308.daily[0].ppSigningSampleCount,1,'PP signing average must use the real PP POD sample');
+assert.equal(v308.daily[0].pvSigningSampleCount,1,'PV signing average must use the real PV POD sample');
+assert.equal(v308.daily[0].ppAvgSigningDays,1,'PP average signing days must use the same inclusive first-report-to-POD rule');
+assert.equal(v308.daily[0].pvAvgSigningDays,2,'PV average signing days must use the same inclusive first-report-to-POD rule');
 
 const daily=readV284DailyFacts('2026-08-07','2026-08-07',db);
 const byType=Object.fromEntries(daily.map(row=>[row.businessType,row]));
@@ -87,4 +103,4 @@ assert.match(V320_HISTORICAL_DAILY_TRUTH_ID,/v335-per-business-latest-valid-hist
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
 execFileSync(process.execPath,['scripts/v336-launcher-safe-update-smoke.cjs'],{stdio:'inherit'});
-console.log('[V335/V336] per-business same-date membership runtime smoke passed · later CN cannot zero VN/CEAF · foreign CN-stamped VN zero cache is rejected · V308 restores VN own POD/region facts · V236 current + V284 canonical + V320 history select independent latest VALID snapshots · V336 launcher safety gate chained');
+console.log('[V335/V336] per-business same-date membership runtime smoke passed · later CN cannot zero VN/CEAF · foreign CN-stamped VN zero cache is rejected · V308 restores VN own POD/region facts · Shopee PP/PV signing averages use real strict-ledger samples · V236 current + V284 canonical + V320 history select independent latest VALID snapshots · V336 launcher safety gate chained');
