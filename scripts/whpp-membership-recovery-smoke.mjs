@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 process.env.NODE_ENV = 'test';
-const { recoverWhppMembershipFromVerifiedBackups, inspectVerifiedWhppBackup } = await import('../src/whppMembershipRecovery.js');
+const {
+  listVerifiedWhppBackupCandidates,
+  recoverWhppMembershipFromVerifiedBackups,
+  inspectVerifiedWhppBackup
+} = await import('../src/whppMembershipRecovery.js');
 
 function createCurrentDb(filePath, reportDate, expectedTotal = 236) {
   const db = new DatabaseSync(filePath);
@@ -72,6 +77,7 @@ function createCurrentDb(filePath, reportDate, expectedTotal = 236) {
 }
 
 function createBackupDb(filePath, reportDate, total = 236) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const db = new DatabaseSync(filePath);
   db.exec(`
     CREATE TABLE business_daily_reports(
@@ -115,12 +121,49 @@ function createBackupDb(filePath, reportDate, total = 236) {
   db.close();
 }
 
+function sha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function writeVerifiedManifest(backupsDir, backupPath, name = '20260828-215500', overrides = {}) {
+  const dir = path.join(backupsDir, 'pre_update', name);
+  fs.mkdirSync(dir, { recursive: true });
+  const stat = fs.statSync(backupPath);
+  const manifest = {
+    createdAt: '2026-08-28T14:55:00.000Z',
+    reason: 'before-automatic-code-update',
+    databasePath: path.join(path.dirname(backupsDir), 'ce_qc_monitor.db'),
+    backupPath,
+    size: stat.size,
+    backupMtimeMs: stat.mtimeMs,
+    sha256: sha256(backupPath),
+    backupQuickCheck: 'ok',
+    integrity: 'quick-ok',
+    sourceStableDuringBackup: true,
+    method: 'node-sqlite-online-backup-with-begin-immediate-freeze',
+    ...overrides
+  };
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  return { dir, manifest };
+}
+
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-whpp-recovery-'));
 try {
   const reportDate = '2026-08-14';
   const currentPath = path.join(temp, 'current.db');
-  const backupPath = path.join(temp, 'backup.db');
+  const backupsDir = path.join(temp, 'backups');
+  const backupDir = path.join(backupsDir, 'pre_update', '20260828-215500');
+  const backupPath = path.join(backupDir, 'ce_qc_monitor.db');
   createBackupDb(backupPath, reportDate, 236);
+  writeVerifiedManifest(backupsDir, backupPath);
+
+  // A newer but unverified manifest must never shadow or qualify as a recovery source.
+  writeVerifiedManifest(backupsDir, backupPath, '20260828-220000', { sha256: 'bad-sha', integrity: 'failed' });
+  const discovered = listVerifiedWhppBackupCandidates(backupsDir);
+  assert.equal(discovered.length, 1, 'only the genuinely verified pre-update backup may qualify');
+  assert.equal(discovered[0].name, '20260828-215500');
+  assert.equal(discovered[0].backupPath, backupPath);
+
   const db = createCurrentDb(currentPath, reportDate, 236);
 
   // Production-shaped damage: normalized WHPP membership is zero, unified batch
@@ -138,14 +181,14 @@ try {
   assert.equal(inspected.residualFactCount, 173);
   assert.deepEqual(inspected.regionCounts, { PP: 118, PV: 118, UNKNOWN: 0 });
 
-  const result = recoverWhppMembershipFromVerifiedBackups(reportDate, {
-    db,
-    candidates: [{ backupPath, name: '20260828-215500', manifest: { backupQuickCheck: 'ok', sourceStableDuringBackup: true } }]
-  });
+  let trendRefreshes = 0;
+  globalThis.__CE_QC_REFRESH_V274_TRENDS__ = () => { trendRefreshes += 1; };
+  const result = recoverWhppMembershipFromVerifiedBackups(reportDate, { db, backupsDir });
   assert.equal(result.ok, true);
   assert.equal(result.repaired, true);
   assert.equal(result.total, 236);
   assert.deepEqual(result.regionCounts, { PP: 118, PV: 118, UNKNOWN: 0 });
+  assert.equal(trendRefreshes, 1, 'membership recovery must invalidate trend truth once');
 
   const restoredHeader = db.prepare(`SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=?`).get(reportDate);
   assert.equal(Number(restoredHeader.totalCount || 0), 236);
@@ -155,16 +198,15 @@ try {
   const restoredPv = Number(db.prepare(`SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND json_extract(rowJson,'$.regionCode')='PV'`).get(reportDate)?.count || 0);
   assert.equal(restoredPp, 118);
   assert.equal(restoredPv, 118);
+  assert.equal(Number(db.prepare(`SELECT COUNT(*) count FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?`).get(reportDate)?.count || 0), 173,
+    'recovery must preserve the partial final-fact set unchanged');
 
   // Repair is idempotent: once 236 members exist, another run must not rewrite them.
-  const second = recoverWhppMembershipFromVerifiedBackups(reportDate, {
-    db,
-    candidates: [{ backupPath, name: '20260828-215500' }]
-  });
+  const second = recoverWhppMembershipFromVerifiedBackups(reportDate, { db, backupsDir });
   assert.equal(second.repaired, false);
   assert.equal(second.reason, 'STANDARD_WHPP_MEMBERSHIP_PRESENT');
   assert.equal(second.total, 236);
-
+  assert.equal(trendRefreshes, 1, 'idempotent recheck must not invalidate trends again');
   db.close();
 
   // Safety gate: a backup with 236 members must be rejected if preserved history
@@ -176,7 +218,17 @@ try {
   assert.equal(mismatch.reason, 'WHPP_BACKUP_HISTORY_TOTAL_MISMATCH');
   mismatchDb.close();
 
-  console.log('[WHPP_RECOVERY_SMOKE] PASS production-zero-membership -> restored 236 exact members · PP=118 PV=118 · partial final facts preserved · mismatch safety gate PASS');
+  // Manifest safety: the real discovery path must reject an unstable backup even
+  // when the DB itself is structurally valid.
+  const unstableRoot = path.join(temp, 'unstable-backups');
+  const unstablePath = path.join(unstableRoot, 'pre_update', '20260828-215500', 'ce_qc_monitor.db');
+  fs.mkdirSync(path.dirname(unstablePath), { recursive: true });
+  fs.copyFileSync(backupPath, unstablePath);
+  writeVerifiedManifest(unstableRoot, unstablePath, '20260828-215500', { sourceStableDuringBackup: false });
+  assert.equal(listVerifiedWhppBackupCandidates(unstableRoot).length, 0, 'unstable backup must be rejected before SQLite inspection');
+
+  console.log('[WHPP_RECOVERY_SMOKE] PASS verified-manifest discovery · production-zero-membership -> restored 236 exact members · PP=118 PV=118 · 173 partial final facts preserved · mismatch/unstable safety gates PASS');
 } finally {
+  delete globalThis.__CE_QC_REFRESH_V274_TRENDS__;
   fs.rmSync(temp, { recursive: true, force: true });
 }
