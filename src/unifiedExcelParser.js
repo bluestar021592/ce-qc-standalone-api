@@ -29,11 +29,33 @@ const TRANSACTION_DATE_HEADERS = [
   '入库日期', '下单日期', '下单时间', '订单日期', '日期', 'ordertime', 'orderdate', 'date', 'inbounddate'
 ];
 
+export function getUnifiedEffectiveSheetRange(sheet = {}) {
+  let maxRow = -1;
+  let maxColumn = -1;
+  for (const [address, cell] of Object.entries(sheet || {})) {
+    if (!address || address.startsWith('!') || !isMeaningfulWorksheetCell(cell)) continue;
+    let point;
+    try { point = XLSX.utils.decode_cell(address); } catch { continue; }
+    if (!Number.isInteger(point?.r) || !Number.isInteger(point?.c) || point.r < 0 || point.c < 0) continue;
+    if (point.r > maxRow) maxRow = point.r;
+    if (point.c > maxColumn) maxColumn = point.c;
+  }
+  if (maxRow < 0 || maxColumn < 0) return null;
+  // Keep A1 as the origin so existing rowNumber/header row semantics stay absolute,
+  // while clamping only the inflated tail of a legacy XLS/OOXML UsedRange.
+  return { s: { r: 0, c: 0 }, e: { r: maxRow, c: maxColumn } };
+}
+
 export function parseUnifiedDailyExcel(filePath, options = {}) {
+  const parseStartedAt = Date.now();
   const fileBuffer = fs.readFileSync(filePath);
   const signature = fileBuffer.subarray(0, 4).toString('hex').toUpperCase();
   const containerFormat = signature.startsWith('504B') ? 'OOXML_ZIP' : (signature.startsWith('D0CF11E0') ? 'OLE_XLS' : 'UNKNOWN');
+  const sourceLabel = path.basename(String(options.originalName || filePath || ''));
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] parse_start file=${sourceLabel} bytes=${fileBuffer.length} container=${containerFormat}`);
+  const workbookStartedAt = Date.now();
   const workbook = XLSX.readFile(filePath, { cellDates: true });
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] workbook_read elapsedMs=${Date.now() - workbookStartedAt} sheets=${workbook.SheetNames.length}`);
   const details = [];
   const warnings = [];
   const sheetDiagnostics = [];
@@ -51,9 +73,24 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const hidden = Number(workbook.Workbook?.Sheets?.find(item => item.name === sheetName)?.Hidden || 0) > 0;
-    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-    if (hidden || !matrix.some(row => row.some(value => String(value ?? '').trim()))) {
-      sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: hidden ? '隐藏Sheet' : '空Sheet', headerRow: null, detectedColumns: {}, missingFields: [] });
+    const originalRange = String(sheet?.['!ref'] || '');
+    if (hidden) {
+      sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: '隐藏Sheet', headerRow: null, detectedColumns: {}, missingFields: [], originalRange, effectiveRange: '', rangeClamped: false });
+      continue;
+    }
+    const effectiveRangeObject = getUnifiedEffectiveSheetRange(sheet);
+    if (!effectiveRangeObject) {
+      sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: '空Sheet', headerRow: null, detectedColumns: {}, missingFields: [], originalRange, effectiveRange: '', rangeClamped: Boolean(originalRange) });
+      continue;
+    }
+    const effectiveRange = XLSX.utils.encode_range(effectiveRangeObject);
+    const rangeClamped = Boolean(originalRange && originalRange !== effectiveRange);
+    const matrixStartedAt = Date.now();
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, range: effectiveRangeObject });
+    const matrixElapsedMs = Date.now() - matrixStartedAt;
+    console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] sheet_matrix sheet=${JSON.stringify(sheetName)} elapsedMs=${matrixElapsedMs} originalRef=${originalRange || '-'} effectiveRef=${effectiveRange} clamped=${rangeClamped ? 1 : 0} rows=${matrix.length}`);
+    if (!matrix.some(row => row.some(value => String(value ?? '').trim()))) {
+      sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: '空Sheet', headerRow: null, detectedColumns: {}, missingFields: [], originalRange, effectiveRange, rangeClamped, matrixElapsedMs });
       continue;
     }
 
@@ -63,7 +100,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       sheetDiagnostics.push({
         sheetName, status: 'SKIPPED', reason: '前30行未找到可识别的运单号表头或其下没有有效运单', headerRow: null,
         detectedColumns: {}, missingFields: ['waybill'],
-        sampleHeaders: matrix.slice(0, 30).map(row => row.filter(Boolean).slice(0, 12)).filter(row => row.length).slice(0, 8)
+        sampleHeaders: matrix.slice(0, 30).map(row => row.filter(Boolean).slice(0, 12)).filter(row => row.length).slice(0, 8),
+        originalRange, effectiveRange, rangeClamped, matrixElapsedMs
       });
       continue;
     }
@@ -82,7 +120,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       sheetDiagnostics.push({
         sheetName, status: 'SKIPPED', reason: '未识别运单号列', headerRow: headerIndex + 1,
         detectedColumns: { waybill: shipmentIndex, recipient: recipientIndex, customerName: customerNameIndex },
-        missingFields: ['waybill'], sampleHeaders: originalHeaders.slice(0, 16)
+        missingFields: ['waybill'], sampleHeaders: originalHeaders.slice(0, 16),
+        originalRange, effectiveRange, rangeClamped, matrixElapsedMs
       });
       continue;
     }
@@ -111,7 +150,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
       headerRow: headerIndex + 1,
       detectedColumns,
       missingFields: recipientIndex >= 0 ? [] : ['recipient_optional'],
-      sampleHeaders: originalHeaders.slice(0, 16)
+      sampleHeaders: originalHeaders.slice(0, 16),
+      originalRange, effectiveRange, rangeClamped, matrixElapsedMs
     });
 
     for (let index = headerIndex + 1; index < matrix.length; index += 1) {
@@ -235,6 +275,8 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     UNKNOWN: details.filter(row => !['PP', 'PV'].includes(row.regionCode)).length
   };
   const allDateCandidates = mergeDateCandidates(explicitSorted, transactionSorted);
+  const parseElapsedMs = Date.now() - parseStartedAt;
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] parse_done elapsedMs=${parseElapsedMs} reportDate=${reportDate} rows=${details.length} rawRows=${rawRows} sheets=${sheetDiagnostics.length}`);
 
   return {
     reportDate,
@@ -250,7 +292,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     classificationCounts,
     sourceReconciliation,
     regionCounts,
-    summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, classificationConflicts },
+    summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, classificationConflicts, parseElapsedMs },
     rows: details,
     warnings,
     sheetDiagnostics
@@ -416,4 +458,13 @@ function propagateMergedHeaderCells(sheet, matrix) {
       for (let column = range.s.c; column <= range.e.c; column += 1) matrix[row][column] ||= value;
     }
   }
+}
+
+function isMeaningfulWorksheetCell(cell) {
+  if (!cell || typeof cell !== 'object') return false;
+  if (String(cell.f || '').trim()) return true;
+  const value = cell.v;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return true;
+  if (typeof value === 'number' || typeof value === 'boolean') return true;
+  return String(value ?? '').trim() !== '';
 }
