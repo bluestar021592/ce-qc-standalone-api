@@ -1,6 +1,6 @@
 import './v351WhppUnifiedDashboardBridgePatch.js';
 import './v352WhppVisibleTruthOwnerPatch.js';
-import './whppMembershipRecovery.js';
+import { runStartupWhppMembershipRecovery } from './whppMembershipRecovery.js';
 import express from 'express';
 import { getDb } from './db.js';
 
@@ -9,6 +9,23 @@ const ROUTE = '/api/v85/shopee-whpp-retention';
 const TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
 const originalListen = express.application.listen;
 let installed = false;
+
+// WHPP membership is immutable daily input truth. If an earlier bad bridge erased
+// only the normalized membership, restore it from a verified pre-update backup
+// before server.js registers the dashboard routes. This deliberately runs before
+// first paint so the browser can never cache a false WHPP=0 for the selected day.
+if (process.env.NODE_ENV !== 'test' && !process.env.CI) {
+  try {
+    const recovery = runStartupWhppMembershipRecovery();
+    if (recovery.some(item => item?.repaired)) {
+      try { globalThis.__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__?.(); } catch {}
+      try { globalThis.__CE_QC_INVALIDATE_DASHBOARD_CACHE__?.({ businessType: 'WHPP' }); } catch {}
+      console.log('[CE-QC][WHPP_FIRST_READ_RECOVERY]', JSON.stringify(recovery));
+    }
+  } catch (error) {
+    console.error('[CE-QC][WHPP_FIRST_READ_RECOVERY_FAILED]', error?.stack || error);
+  }
+}
 
 function normalizeDate(value) {
   const text = String(value || '').slice(0, 10);
