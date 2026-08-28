@@ -10,8 +10,13 @@ const {
   compareV273ParsedToCensus,
   compareV273Membership
 } = await import('../src/v273ImportCompletenessGuard.js');
+const {
+  parseUnifiedDailyExcel,
+  getUnifiedEffectiveSheetRange
+} = await import('../src/unifiedExcelParser.js');
 
 const file = path.join(os.tmpdir(), `ce-qc-v294-zero-loss-${process.pid}-${Date.now()}.xlsx`);
+const bloatedFile = path.join(os.tmpdir(), `ce-qc-v294-bloated-range-${process.pid}-${Date.now()}.xlsx`);
 try {
   const ws = XLSX.utils.aoa_to_sheet([
     ['运单号', '备注'],
@@ -40,12 +45,58 @@ try {
   assert.equal(replacedMember.ok, false, 'same/higher count cannot replace an old member silently');
   assert.equal(replacedMember.missingPreviousCount, 1);
 
+  const rangeOnlySheet = XLSX.utils.aoa_to_sheet([
+    ['标题'],
+    ['运单编号', '下单时间', '收件人', '省份标识', '客户名称'],
+    ['CC260810000001', '2026-08-10', '', 'PP1', '']
+  ]);
+  rangeOnlySheet['!ref'] = 'A1:XFD1048576';
+  assert.equal(
+    XLSX.utils.encode_range(getUnifiedEffectiveSheetRange(rangeOnlySheet)),
+    'A1:E3',
+    'inflated worksheet metadata must clamp to populated cells before materialization'
+  );
+
+  const bloatedSheet = XLSX.utils.aoa_to_sheet([
+    ['2026-08-10 综合日报'],
+    ['运单编号', '下单时间', '收件人', '省份标识', '客户名称'],
+    ['CC260810000001', '2026-08-10', '', 'PP1', ''],
+    ['CE260810000002', '2026-08-10', '', 'PV1', ''],
+    ['TBKH000000001', '2026-08-10', '', 'PP', ''],
+    ['SPE260810000001', '2026-08-10', 'ShopeeCN', 'PV', ''],
+    ['SPE260810000002', '2026-08-10', 'ShopeeVN', 'PV', ''],
+    ['CC260810000003', '2026-08-10', '', 'PP', 'CCAF Customer'],
+    ['CC260810000004', '2026-08-10', 'ALI1688', 'PV', '']
+  ]);
+  bloatedSheet['!ref'] = 'A1:AZ5000';
+  const bloatedBook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(bloatedBook, bloatedSheet, '日报');
+  XLSX.writeFile(bloatedBook, bloatedFile);
+
+  const parseStartedAt = Date.now();
+  const parsed = parseUnifiedDailyExcel(bloatedFile, { reportDate: '2026-08-10', originalName: '8-10.xls' });
+  const parseElapsedMs = Date.now() - parseStartedAt;
+  assert.equal(parsed.summary.validUniqueWaybills, 7);
+  assert.equal(parsed.sourceReconciliation.balanced, true);
+  for (const type of ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']) {
+    assert.equal(parsed.classificationCounts[type], 1, `${type} classification must survive range clamp`);
+  }
+  assert.equal(parsed.sheetDiagnostics[0]?.rangeClamped, true);
+  assert.equal(parsed.sheetDiagnostics[0]?.effectiveRange, 'A1:E9');
+  assert.ok(parseElapsedMs < 5000, `inflated worksheet range must parse quickly, got ${parseElapsedMs}ms`);
+
   const source = fs.readFileSync(new URL('../src/v273ImportCompletenessGuard.js', import.meta.url), 'utf8');
   assert.match(source, /V273_SOURCE_WAYBILL_CENSUS_MISMATCH/);
   assert.match(source, /V273_SAME_DATE_MEMBERSHIP_LOSS_BLOCKED/);
   assert.match(source, /已阻止入库，禁止静默漏单/);
 
-  console.log('[V294] zero-loss import smoke passed · shipment-column census blocks even 1 missing bill; off-column references do not create false positives; same-date membership loss is blocked');
+  const parserSource = fs.readFileSync(new URL('../src/unifiedExcelParser.js', import.meta.url), 'utf8');
+  assert.match(parserSource, /getUnifiedEffectiveSheetRange\(sheet\)/, 'live parser must derive the populated range');
+  assert.match(parserSource, /sheet_to_json\(sheet,\s*\{[^}]*range:\s*effectiveRangeObject/, 'live parser must materialize only the effective range');
+  assert.match(parserSource, /\[CE-QC\]\[UNIFIED_IMPORT_STAGE\].*sheet_matrix/, 'live parser must expose import-stage timing diagnostics');
+
+  console.log(`[V294] zero-loss import smoke passed · inflated UsedRange clamped without changing seven-business classification · parse=${parseElapsedMs}ms`);
 } finally {
   try { fs.rmSync(file, { force: true }); } catch {}
+  try { fs.rmSync(bloatedFile, { force: true }); } catch {}
 }
