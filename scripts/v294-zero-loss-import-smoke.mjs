@@ -85,17 +85,31 @@ try {
   assert.equal(parsed.sheetDiagnostics[0]?.effectiveRange, 'A1:E9');
   assert.ok(parseElapsedMs < 5000, `inflated worksheet range must parse quickly, got ${parseElapsedMs}ms`);
 
+  const reuseStartedAt = Date.now();
+  const reused = parseUnifiedDailyExcel(bloatedFile, { reportDate: '2026-08-10', originalName: '8-10.xls' });
+  const reuseElapsedMs = Date.now() - reuseStartedAt;
+  assert.equal(reused, parsed, 'guard parse and real import parse must reuse the exact same parsed object once');
+  assert.ok(reuseElapsedMs < 1000, `second parse of the same upload must be a cache reuse, got ${reuseElapsedMs}ms`);
+
   const source = fs.readFileSync(new URL('../src/v273ImportCompletenessGuard.js', import.meta.url), 'utf8');
   assert.match(source, /V273_SOURCE_WAYBILL_CENSUS_MISMATCH/);
   assert.match(source, /V273_SAME_DATE_MEMBERSHIP_LOSS_BLOCKED/);
   assert.match(source, /已阻止入库，禁止静默漏单/);
+  assert.match(source, /withSparseSheetToJson\(\(\)\s*=>\s*parseUnifiedDailyExcel/, 'zero-loss guard must keep its independent sparse safety net');
 
   const parserSource = fs.readFileSync(new URL('../src/unifiedExcelParser.js', import.meta.url), 'utf8');
   assert.match(parserSource, /getUnifiedEffectiveSheetRange\(sheet\)/, 'live parser must derive the populated range');
   assert.match(parserSource, /sheet_to_json\(sheet,\s*\{[^}]*range:\s*effectiveRangeObject/, 'live parser must materialize only the effective range');
+  assert.match(parserSource, /parse_cache_hit/, 'live parser must reuse the guarded parse for the real write stage');
   assert.match(parserSource, /\[CE-QC\]\[UNIFIED_IMPORT_STAGE\].*sheet_matrix/, 'live parser must expose import-stage timing diagnostics');
 
-  console.log(`[V294] zero-loss import smoke passed · inflated UsedRange clamped without changing seven-business classification · parse=${parseElapsedMs}ms`);
+  const storeSource = fs.readFileSync(new URL('../src/unifiedImportStore.js', import.meta.url), 'utf8');
+  assert.match(storeSource, /\[CE-QC\]\[UNIFIED_IMPORT_STAGE\]\s*sqlite_write/, 'SQLite write stage must be timed');
+  assert.match(storeSource, /\[CE-QC\]\[UNIFIED_IMPORT_STAGE\]\s*carryover_queue/, 'carryover queue stage must be timed');
+  assert.match(storeSource, /COALESCE\(SUM\(CASE WHEN status='OPEN' AND sourceReportDate=\? THEN 1 ELSE 0 END\),0\) todayOpen/, 'carryover summary must aggregate in one SQL scan');
+  assert.doesNotMatch(storeSource, /const one = \(sql, \.\.\.params\)/, 'carryover summary must not regress to four repeated count queries');
+
+  console.log(`[V294] zero-loss import smoke passed · inflated UsedRange clamped · duplicate parse reused · seven-business classification unchanged · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
 } finally {
   try { fs.rmSync(file, { force: true }); } catch {}
   try { fs.rmSync(bloatedFile, { force: true }); } catch {}
