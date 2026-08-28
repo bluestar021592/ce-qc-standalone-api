@@ -46,6 +46,20 @@ const writesHosts = /\b(?:Set-Content|Add-Content|Out-File)\b[^\r\n]*(?:\\driver
 assert.ok(!mutatesSystemDns, 'managed launcher must never modify Windows adapter DNS');
 assert.ok(!writesHosts, 'managed launcher must never write the Windows hosts file');
 
+// V347 changes the live SQLite persistence hot path. It must never be treated as a
+// low-risk code-only update merely because a previous verified DB copy has the same
+// source fingerprint. Every such candidate gets a fresh frozen online backup.
+const preUpdateBackup = fs.readFileSync('scripts/CE_QC_PreUpdate_Backup.mjs','utf8');
+assert.ok(/v340CcslStorageCheckpoint\\\.js\$/.test(preUpdateBackup) || preUpdateBackup.includes('v340CcslStorageCheckpoint\\.js$'), 'V347 persistence wrapper must be classified as high risk');
+assert.ok(preUpdateBackup.includes('const updateRisk=classifyUpdate(changedFiles());'), 'update risk must be assessed before backup reuse');
+assert.ok(preUpdateBackup.includes('const reusable=updateRisk.highRisk?null:findReusableBackup(fingerprintBefore);'), 'high-risk updates must disable exact-fingerprint backup reuse');
+assert.ok(preUpdateBackup.includes('fresh full backup required (reuse disabled)'), 'high-risk backup policy must be observable in updater output');
+assert.ok(preUpdateBackup.includes('highRiskFreshBackupRequired:updateRisk.highRisk'), 'fresh high-risk backup requirement must be recorded in manifest');
+assert.ok(preUpdateBackup.includes('verifiedBackupReuseAllowed:!updateRisk.highRisk'), 'manifest must disclose that high-risk backup reuse is forbidden');
+const riskIndex = preUpdateBackup.indexOf('const updateRisk=classifyUpdate(changedFiles());');
+const reusableIndex = preUpdateBackup.indexOf('const reusable=updateRisk.highRisk?null:findReusableBackup(fingerprintBefore);');
+assert.ok(riskIndex >= 0 && reusableIndex > riskIndex, 'high-risk classification must happen before reuse lookup');
+
 if (process.platform === 'win32') {
   const parse = "$errors=$null;$tokens=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/CE_QC_Managed_Launcher.ps1'),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 41}";
   const parsed = spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',parse],{encoding:'utf8'});
@@ -60,4 +74,4 @@ assert.ok(repair.includes('CE_QC_Managed_Launcher.ps1'), 'emergency recovery mus
 assert.ok(!repair.includes('config --local --add http.curloptResolve'), 'emergency recovery must not persist the resolver in repository config');
 assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b/i.test(repair), 'emergency recovery must not alter adapter DNS');
 
-console.log('[V336] launcher safety smoke passed · exact candidate tested before install · test DB isolated · SQLite backup hash+quick_check verified · exact SHA installed · local startup verified · automatic code+DB rollback armed · managed launcher retries GitHub and uses process-local explicit-DNS fallback without system DNS mutation');
+console.log('[V347/V336] launcher safety smoke passed · exact candidate tested before install · V347 persistence hot-path forces fresh SQLite backup · backup hash+quick_check verified · exact SHA installed · local startup verified · automatic code+DB rollback armed · managed launcher retries GitHub and uses process-local explicit-DNS fallback without system DNS mutation');
