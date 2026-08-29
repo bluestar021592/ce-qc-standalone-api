@@ -27,9 +27,22 @@ assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351
 
 // Fresh/current WHPP truth must be correct before V351 is needed.
 assert.match(v42, /function existingWhppDailyMembership\(reportDate\)/, 'V42 must verify an existing same-date WHPP cohort before an empty reimport can overwrite it');
+assert.match(v42, /headerPresent: true, present, incomplete: !present/, 'V42 preflight must distinguish an absent WHPP header from a damaged existing header');
 assert.match(v42, /const present = actual === expected/, 'V42 must treat exact header/member equality as complete, including an explicit 0/0 day');
 assert.doesNotMatch(v42, /expected > 0 && actual === expected/, 'V42 must never demote a confirmed 0/0 WHPP day into a missing cohort');
-assert.match(v42, /const preservedWhpp = whppRows\.length === 0 \? existingWhppDailyMembership\(parsed\.reportDate\)/, 'empty WHPP partitions must inspect preserved standard membership at the write boundary');
+assert.match(v42, /const preservedWhpp = whppRows\.length === 0[\s\S]*existingWhppDailyMembership\(parsed\.reportDate\)/, 'empty WHPP partitions must inspect preserved standard membership before persistence');
+assert.match(v42, /if \(whppRows\.length === 0 && preservedWhpp\.headerPresent && preservedWhpp\.incomplete\)/, 'damaged existing WHPP plus incoming zero WHPP must fail closed');
+assert.match(v42, /error\.code = 'WHPP_STANDARD_DAILY_INCOMPLETE'/, 'V42 must expose the same explicit incomplete-membership error used by current readers');
+assert.match(v42, /已阻止空WHPP日报覆盖/, 'V42 error must make the destructive overwrite prevention observable');
+const v42PreflightIndex = v42.indexOf('const preservedWhpp = whppRows.length === 0');
+const v42GuardIndex = v42.indexOf("error.code = 'WHPP_STANDARD_DAILY_INCOMPLETE'");
+const v42CoreProjectionIndex = v42.indexOf('const coreParsed = coreProjection(parsed, coreRows)');
+const v42SaveIndex = v42.indexOf('const saved = saveUnifiedImport(coreParsed, req.file.originalname)');
+const v42CcslInitIndex = v42.indexOf('initializeCcslState(parsed.reportDate');
+assert.ok(v42PreflightIndex >= 0 && v42GuardIndex > v42PreflightIndex, 'WHPP integrity preflight must exist before the blocking error branch');
+assert.ok(v42CoreProjectionIndex > v42GuardIndex, 'WHPP integrity guard must run before core snapshot projection/write preparation');
+assert.ok(v42SaveIndex > v42GuardIndex, 'WHPP integrity guard must run before saveUnifiedImport performs any persistence');
+assert.ok(v42CcslInitIndex > v42SaveIndex, 'CCSL state initialization must remain after the validated unified persistence point');
 assert.match(v42, /if \(preservedWhpp\.present\)[\s\S]*PRESERVED_EXISTING_COMPLETE_DAILY_MEMBERSHIP[\s\S]*else \{[\s\S]*saveWhppDailyImport\(/, 'V42 must skip destructive WHPP daily writes when any complete same-date cohort, including zero, is preserved');
 assert.match(v42, /invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged \}\)/, 'same-date invalidation must know whether WHPP actually changed');
 assert.match(v42, /if \(whppChanged\) \{[\s\S]*businessType='WHPP'/, 'WHPP run/history pointers must survive an unrelated empty-WHPP reimport');
@@ -178,7 +191,7 @@ const noBatchPartialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({
 assert.equal(noBatchPartialFacts.present, false, 'missing batch must not weaken exact-count safety');
 assert.equal(noBatchPartialFacts.membershipSource, 'NO_VALID_UNIFIED_BATCH');
 
-console.log('[V351] WHPP source-truth smoke passed · V42 preserves any complete same-date membership including exact zero · V94 no V216 repair · V161 direct standard daily first · exact zero stays zero · 235/236 standard fails closed · V351 disaster/history fallback only when standard header is missing · exact 236/236 facts recover · partial facts fail closed');
+console.log('[V351] WHPP source-truth smoke passed · V42 validates damaged same-date WHPP before any write · empty-WHPP reimport cannot erase 236/235 evidence · complete same-date membership including exact zero is preserved · V94 no V216 repair · V161 direct standard daily first · V351 disaster/history fallback only when standard header is missing · exact 236/236 facts recover · partial facts fail closed');
 await import('./v352-whpp-visible-single-truth-smoke.mjs');
 await import('./whpp-visible-truth-smoke.mjs');
 await import('./shopee-history-region-signing-smoke.mjs');
