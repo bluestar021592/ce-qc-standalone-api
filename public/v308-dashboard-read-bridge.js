@@ -7,7 +7,7 @@
   let tableTimer=null,lastTableKey='',evidenceTimer=null,evidenceWatchKey='',evidencePolls=0,evidenceCacheVersion=0;
   const date=v=>String(v||'').slice(0,10),num=v=>Number.isFinite(Number(v))?Number(v):0,fmt=v=>Number.isFinite(Number(v))?Number(v).toLocaleString('zh-CN'):'—';
   const pct=v=>v===null||v===undefined||!Number.isFinite(Number(v))?'—':`${Number(v).toFixed(2)}%`;
-  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const labelOf=t=>t==='TBKH'?'TBKH':t==='SHOPEECN'?'SHOPEE CN':'SHOPEE VN';
   const isShopee=t=>t==='SHOPEECN'||t==='SHOPEEVN';
 
