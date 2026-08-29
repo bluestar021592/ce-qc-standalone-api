@@ -91,7 +91,9 @@ assert.match(progressUi,/单批最大50/,'V138 visible trajectory detail must sa
 assert.match(sevenStatus,/2026-08-27-v333-canonical-seven-business-owner-v1/,'V168 must be the one canonical summary owner');
 assert.match(sevenStatus,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical CCSL recovery truth for the selected date');
 assert.match(sevenStatus,/postJson\('\/api\/v311\/shopee-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical SHOPEE recovery truth for the same selected date');
-assert.match(sevenStatus,/readJson\(`\/api\/business-state\/WHPP\?reportDate=\$\{encoded\}&compact=1`\)/,'V168 must align WHPP to the same date');
+assert.match(sevenStatus,/readJson\(`\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}`\)/,'V168 must align WHPP to the same selected date through the canonical WHPP visible summary');
+assert.doesNotMatch(sevenStatus,/readJson\(`\/api\/business-state\/WHPP\?reportDate=\$\{encoded\}&compact=1`\)/,'V168 must not fall back to the stale snapshot-only WHPP state owner');
+assert.match(sevenStatus,/payload\?\.completed === true/,'V168 must honor canonical zero-work WHPP completion directly from V132');
 assert.match(sevenStatus,/stages\.every\(stage => stage\.state === 'done'\)/,'overall completion must be computed from the same canonical stage objects shown in the pills');
 assert.match(sevenStatus,/if \(stage\.state === 'done'\) return 'success'/,'every completed stage must be green');
 assert.match(sevenStatus,/truth\.complete \? 'success' : 'muted'/,'overall completed state must also be green');
@@ -114,4 +116,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V338/V334/V333/V317] canonical CCSL detail smoke passed · V138 reads V317 first · scan=350 · trajectory=50 · zero-ticket/no-daily cannot fall through to legacy V33 pending 0/0');
+console.log('[V338/V334/V333/V317] canonical CCSL detail smoke passed · V138 reads V317 first · V168 reads canonical V132 WHPP completion · scan=350 · trajectory=50 · zero-ticket/no-daily cannot fall through to legacy V33 pending 0/0');
