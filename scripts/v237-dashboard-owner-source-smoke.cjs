@@ -41,6 +41,16 @@ assert.match(cache,/AS ocCurrent/,'legacy cache maintenance must retain current 
 assert.match(cache,/AS sameDayPod/,'legacy cache maintenance must retain same-day POD evidence');
 assert.match(trend,/V240_EXACT_DAILY_RATE_CACHE_ONLY/,'legacy cache reader remains available as maintenance/fallback evidence');
 
+// V236 may still serve six-business compact states even if WHPP is damaged, but
+// its shared current-summary endpoint must never publish a numeric WHPP fallback.
+assert.match(current,/SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP'/,'V236 WHPP summary must start from the dedicated standard daily header');
+assert.match(current,/COUNT\(DISTINCT shipmentCode\)[\s\S]*business_daily_parse_rows WHERE businessType='WHPP'/,'V236 must verify the exact distinct WHPP member count');
+assert.match(current,/if\(expected!==actual\)[\s\S]*out\.membershipIncomplete=true[\s\S]*WHPP_STANDARD_DAILY_INCOMPLETE/,'V236 must mark 236\/235 as incomplete instead of merging historical metrics');
+assert.match(current,/membershipSource=expected===0\?'WHPP_STANDARD_DAILY_ZERO':'WHPP_STANDARD_DAILY'/,'V236 must keep exact 0\/0 as a real current truth');
+assert.match(route,/if\(data\.whpp\?\.membershipIncomplete\)[\s\S]*res\.status\(409\)/,'V234 current-summary must expose WHPP membership damage as 409');
+assert.match(route,/function statePayload\(type,req,res\)[\s\S]*const metric=data\.business\[type\]/,'six-business compact states must continue reading their own metrics independently of WHPP');
+assert.doesNotMatch(route,/function statePayload\(type,req,res\)[\s\S]*membershipIncomplete[\s\S]*return res\.json/,'WHPP damage must not be injected as a blocker into per-business compact state responses');
+
 // V253 now owns only nonblocking first paint. Same-day truth comes from V236 per-business ownership; saved history is owned by V334/V320.
 assert.match(runtime,/import '\.\/v253DashboardFastPath\.js';/,'V253 fast backend must activate before server registration');
 assert.match(runtime,/primeDashboardCacheInChild\(delayMs\s*=\s*60_000\)/,'cache maintenance must be delayed away from first paint');
@@ -70,4 +80,4 @@ assert.match(fastOwner,/removeHomeLegacyAttempts/,'obsolete homepage dual attemp
 assert.match(worker,/WORKER_LEASE_MS\s*=\s*5\s*\*\s*60_000/,'dashboard cache lease must remain bounded to five minutes');
 assert.match(worker,/cleared stale dashboard-cache lease/,'worker must still recover stale cache leases');
 
-console.log('[V335/V253/V247] per-business first paint + retained metric contract + single-owner performance guards passed');
+console.log('[V335/V253/V247] per-business first paint + membership-safe V236 WHPP summary + retained metric contract + single-owner performance guards passed');
