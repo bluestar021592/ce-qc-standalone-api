@@ -93,7 +93,7 @@ try {
 
   const canonical = loadV351UnifiedWhppMembership(reportDate, db);
   assert.equal(canonical.batchPresent, true, 'latest unified sibling batch should be present');
-  assert.equal(canonical.present, true, 'zero WHPP in latest unified must fall back to preserved standard membership');
+  assert.equal(canonical.present, true, 'zero WHPP in latest unified may fall back to the complete preserved standard cohort');
   assert.equal(canonical.rows.length, 236);
   assert.equal(canonical.membershipSource, 'WHPP_STANDARD_DAILY_ROWS');
   let dashboard = buildV352WhppVisibleDashboard({ reportDate, membershipRows: canonical.rows, finalRows: [] });
@@ -101,9 +101,8 @@ try {
   assert.equal(Number(dashboard.regions?.PP?.total || 0), 118);
   assert.equal(Number(dashboard.regions?.PV?.total || 0), 118);
 
-  // Production damage shape from 2026-08-14: the VALID unified batch and the
-  // normalized WHPP membership can both be absent after an update, while the
-  // completed WHPP history total and the exact final-fact cohort are preserved.
+  // Production damage shape: both the VALID unified batch and normalized WHPP
+  // membership can be absent, while exact completed history/final facts remain.
   db.exec(`DELETE FROM unified_import_batches; DELETE FROM business_daily_reports; DELETE FROM business_daily_parse_rows;`);
   const insertFact = db.prepare(`INSERT INTO business_final_rows(
     businessType,reportDate,shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,rawJson
@@ -115,7 +114,7 @@ try {
   }
   const noBatch = loadV351UnifiedWhppMembership(reportDate, db);
   assert.equal(noBatch.batchPresent, false, 'damage fixture intentionally has no VALID unified batch');
-  assert.equal(noBatch.present, true, 'missing unified batch must not force a real WHPP day to zero');
+  assert.equal(noBatch.present, true, 'missing unified batch may recover only exact preserved WHPP facts when the standard header is absent');
   assert.equal(noBatch.membershipSource, 'WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL');
   assert.equal(noBatch.rows.length, 236, 'exact final-fact cohort must recover all 236 WHPP members');
   dashboard = buildV352WhppVisibleDashboard({ reportDate, membershipRows: noBatch.rows, finalRows: [] });
@@ -125,11 +124,15 @@ try {
   assert.equal(Number(dashboard.regions?.UNKNOWN?.total || 0), 0);
 
   const homeSource = fs.readFileSync(new URL('../src/v253DashboardFastPath.js', import.meta.url), 'utf8');
-  assert.match(homeSource, /loadV351UnifiedWhppMembership/);
+  assert.match(homeSource, /SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP'/, 'home must read the direct WHPP daily header first');
+  assert.match(homeSource, /if\(expected===actual\)/, 'home must require exact standard header/member equality');
+  assert.match(homeSource, /WHPP_STANDARD_DAILY_ZERO/, 'home must keep exact standard zero authoritative');
+  assert.match(homeSource, /WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED/, 'home must fail closed on a partial standard cohort');
+  assert.match(homeSource, /else\{[\s\S]*loadV351UnifiedWhppMembership\(date,db\)/, 'home may call V351 only when the standard daily header is absent');
   assert.match(homeSource, /removedFromWhpp:0/);
   assert.ok(!homeSource.includes('Math.max(0,raw-overlap)'), 'home WHPP must not subtract CEAF overlap from visible WHPP total');
 
-  console.log('[WHPP_VISIBLE_TRUTH_SMOKE] PASS sibling-unified-zero -> standard 236 · NO VALID unified + no normalized rows -> exact history/final facts 236 · production PP139 PV97 · home reads V351 canonical WHPP truth');
+  console.log('[WHPP_VISIBLE_TRUTH_SMOKE] PASS standard WHPP is primary · exact zero stays zero · incomplete standard fails closed · V351 only recovers missing-header history · production PP139 PV97 · home never subtracts CEAF overlap');
 } finally {
   try { db?.close(); } catch {}
   fs.rmSync(temp, { recursive: true, force: true });
