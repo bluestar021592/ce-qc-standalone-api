@@ -50,8 +50,6 @@ function normalizeSqlFinalFact(row = {}) {
   const normalized = { ...row };
   const sqlPod = Number(row.isPod || 0) === 1;
   if (sqlPod) {
-    // business_final_rows.isPod is persisted terminal evidence. Older rawJson can
-    // legitimately omit UI aliases, so restore those aliases in memory only.
     normalized.isPod = 1;
     normalized.是否POD = '是';
     normalized.POD状态 = 'POD';
@@ -68,8 +66,15 @@ function loadStandardMembership(db, reportDate) {
     ...safeJson(row.rowJson, {}), shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: 'WHPP', reportDate
   })));
   const expected = Number(daily.totalCount || 0);
-  const present = rows.length > 0 && (!expected || expected === rows.length);
-  return { present, rows: present ? rows : [], totalCount: expected, source: present ? 'WHPP_STANDARD_DAILY' : 'EMPTY', expected, actual: rows.length };
+  const present = expected === rows.length;
+  return {
+    present,
+    rows: present ? rows : [],
+    totalCount: expected,
+    source: present ? (expected === 0 ? 'WHPP_STANDARD_DAILY_ZERO' : 'WHPP_STANDARD_DAILY') : 'INCOMPLETE',
+    expected,
+    actual: rows.length
+  };
 }
 
 function latestDate(db) {
@@ -156,9 +161,8 @@ function buildCanonical(reportDate = '') {
     return { reportDate: '', dashboard, membershipSource: 'EMPTY', finalEvidenceRows: 0, completed: false, buildMs: Date.now() - startedAt };
   }
 
-  // saveWhppDailyImport writes this standard cohort during the same unified-import
-  // request. Read it directly first. V351 is now only a safe history/disaster
-  // fallback for dates whose normalized daily membership is absent or incomplete.
+  // The normalized WHPP daily cohort is primary, including an exact persisted
+  // zero. V351 is only for dates whose standard cohort is missing/incomplete.
   const standard = loadStandardMembership(db, date);
   const fallback = standard.present
     ? { present: false, rows: [], membershipSource: 'STANDARD_PRIMARY_NO_FALLBACK' }
@@ -173,11 +177,11 @@ function buildCanonical(reportDate = '') {
   const finalRows = rawFinalRows.filter(row => memberSet.has(billOf(row)));
   const dashboard = buildV352WhppVisibleDashboard({ reportDate: date, membershipRows, finalRows });
   const history = db.prepare(`SELECT 1 ok FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(date);
-  const completed = membershipRows.length === 0 ? Boolean(history) : finalRows.length >= uniqueRows(membershipRows).length;
+  const completed = membershipRows.length === 0 ? standard.present || Boolean(history) : finalRows.length >= uniqueRows(membershipRows).length;
   return {
     reportDate: date,
     dashboard,
-    membershipSource: standard.present ? 'WHPP_STANDARD_DAILY' : (fallback.membershipSource || 'V351_SAFE_FALLBACK'),
+    membershipSource: standard.present ? standard.source : (fallback.membershipSource || 'V351_SAFE_FALLBACK'),
     finalEvidenceRows: finalRows.length,
     completed,
     buildMs: Date.now() - startedAt
@@ -264,7 +268,7 @@ console.log('[CE-QC][V352_WHPP_VISIBLE_TRUTH_OWNER]', JSON.stringify({
   id: V352_WHPP_VISIBLE_TRUTH_OWNER_ID,
   summaryRoutes: [...SUMMARY_ROUTES],
   detailRoutes: [...DETAIL_ROUTES],
-  membershipTruth: 'WHPP_STANDARD_DAILY_THEN_V351_SAFE_HISTORY_DISASTER_FALLBACK',
+  membershipTruth: 'WHPP_STANDARD_DAILY_INCLUDING_EXACT_ZERO_THEN_V351_SAFE_HISTORY_DISASTER_FALLBACK',
   finalTruth: 'CURRENT_MEMBERS_ONLY_BUSINESS_FINAL_ROWS_WITH_SQL_ISPOD_IN_MEMORY_NORMALIZATION_AND_MEMBERSHIP_REGION_MERGE',
   invariant: 'TOP_EQUALS_PP_PLUS_PV_PLUS_UNKNOWN',
   summaryPayload: 'METRICS_REGIONS_ACCOUNTING_ONLY_DETAILS_LAZY',
