@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 
 export const V329_THREE_BUSINESS_DAILY_CACHE_ID='2026-08-27-v343-three-business-cache-revision-region-signing-v1';
-export const V329_THREE_BUSINESS_CACHE_REVISION='2026-08-27-signing-region-cache-v1';
+export const V329_THREE_BUSINESS_CACHE_REVISION='2026-08-29-member-aligned-region-signing-v2';
 export const V329_THREE_BUSINESS_TYPES=Object.freeze(['TBKH','SHOPEECN','SHOPEEVN']);
 const TYPES=new Set(V329_THREE_BUSINESS_TYPES);
 const SHOPEE=new Set(['SHOPEECN','SHOPEEVN']);
@@ -87,7 +87,7 @@ export function readV329ThreeBusinessDailyCache(businessType='',toDate='',db=get
   const type=String(businessType||'').toUpperCase(),to=dateKey(toDate),from=dateKey(fromDate);if(!TYPES.has(type))throw new Error('V329历史缓存仅支持TBKH、SHOPEECN、SHOPEEVN');if(!to)throw new Error('日期无效');ensureV329ThreeBusinessDailyCache(db);let rows=[];
   if(hasTable(db,'v329_three_business_daily_cache')){try{rows=from?db.prepare(`SELECT * FROM v329_three_business_daily_cache WHERE businessType=? AND reportDate BETWEEN ? AND ? AND total>0 AND cacheRevision=? ORDER BY reportDate`).all(type,from,to,V329_THREE_BUSINESS_CACHE_REVISION):db.prepare(`SELECT * FROM v329_three_business_daily_cache WHERE businessType=? AND reportDate<=? AND total>0 AND cacheRevision=? ORDER BY reportDate`).all(type,to,V329_THREE_BUSINESS_CACHE_REVISION);}catch{rows=[];}}
   if(!rows.length&&!from)rows=oldV328Fallback(type,to,db);const daily=rows.map(row=>finish(type,row)),dates=daily.map(r=>r.reportDate);
-  return{ok:true,id:V329_THREE_BUSINESS_DAILY_CACHE_ID,cacheRevision:V329_THREE_BUSINESS_CACHE_REVISION,businessType:type,requestedFromDate:from||to,requestedToDate:to,fromDate:dates[0]||to,toDate:dates.at(-1)||to,dates,daily,historyExpanded:true,availableDayCount:dates.length,evidenceIncomplete:daily.some(r=>r.evidenceIncomplete),source:rows.length?String(rows[0].source||'V329_DAILY_CACHE'):'V329_CACHE_EMPTY',definitions:{history:'TBKH、SHOPEE CN、SHOPEE VN页面只读取独立子进程生成的轻量历史缓存；缓存逻辑升级后旧派生缓存自动失效并重建，不需要重新上传日报。',attempts:'每票初始1派；只有Pending/失败后再次START才加1派；未再次START不增加派次。',firstAttempt:'首次妥投率=真实首派成功票÷真实首派START尝试票；只有保存的严格START证据覆盖后发布。',averageDays:'平均签收天数=有真实POD日期样本的已完成POD包裹之(实际POD日期-首次日报锁定日期+1)总和÷真实签收天数样本数；未POD和缺少真实POD日期的票不参与平均。',regionAverage:'SHOPEE CN/VN同一平均签收逻辑按最新VALID日报区域拆分：PP=金边，PV=外省；区域未知不强行归类。',publication:'只要存在真实签收天数样本就发布样本平均；缺证据票继续后台补核，不伪造0。'}};
+  return{ok:true,id:V329_THREE_BUSINESS_DAILY_CACHE_ID,cacheRevision:V329_THREE_BUSINESS_CACHE_REVISION,businessType:type,requestedFromDate:from||to,requestedToDate:to,fromDate:dates[0]||to,toDate:dates.at(-1)||to,dates,daily,historyExpanded:true,availableDayCount:dates.length,evidenceIncomplete:daily.some(r=>r.evidenceIncomplete),source:rows.length?String(rows[0].source||'V329_DAILY_CACHE'):'V329_CACHE_EMPTY',definitions:{history:'TBKH、SHOPEE CN、SHOPEE VN页面只读取独立子进程生成的轻量历史缓存；缓存逻辑升级后旧派生缓存自动失效并重建，不需要重新上传日报。',attempts:'每票初始1派；只有Pending/失败后再次START才加1派；未再次START不增加派次。',firstAttempt:'首次妥投率=真实首派成功票÷真实首派START尝试票；只有保存的严格START证据覆盖后发布。',averageDays:'平均签收天数=已POD且同时具备真实首次派送START时间与真实POD时间的包裹，其自然日签收天数(首次派送START日到POD日，含首尾日)总和÷真实样本数；缺少真实START或POD时间的票不参与平均，不使用旧的首次日报日期替代。',regionAverage:'SHOPEE CN/VN按同一真实START→POD自然日逻辑拆分：PP=金边，PV=外省；区域未知不强行归类，缺证据不伪造0。',publication:'只要存在真实签收天数样本就发布样本平均；缺证据票继续后台补核，不伪造0。'}};
 }
 
 console.info('[CE-QC][V329_THREE_BUSINESS_DAILY_CACHE]',V329_THREE_BUSINESS_DAILY_CACHE_ID,V329_THREE_BUSINESS_CACHE_REVISION,'derived history cache auto-invalidates stale code revisions and persists PP/PV signing-day samples for Shopee.');

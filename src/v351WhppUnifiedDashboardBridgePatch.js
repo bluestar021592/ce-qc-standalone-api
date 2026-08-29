@@ -45,108 +45,120 @@ function normalizeTab(value = 'all') {
   };
   return aliases[raw] || raw || 'all';
 }
-
-function latestUnifiedDate(db) {
-  return String(db.prepare(`SELECT MAX(reportDate) reportDate FROM unified_import_batches WHERE status='VALID'`).get()?.reportDate || '');
-}
-
-function historyTotal(reportDate, db) {
-  const row = db.prepare(`SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(reportDate);
-  const summary = safeJson(row?.summaryJson, {});
-  for (const key of ['total', 'today', 'todayTotal', 'pnh', 'todayPnh']) {
-    const value = Number(summary?.[key]);
-    if (Number.isFinite(value) && value > 0) return value;
+function latestKnownDate(db) {
+  for (const sql of [
+    "SELECT MAX(reportDate) reportDate FROM unified_import_batches WHERE status='VALID'",
+    "SELECT MAX(reportDate) reportDate FROM business_daily_reports WHERE businessType='WHPP'",
+    "SELECT MAX(reportDate) reportDate FROM business_history_summary WHERE businessType='WHPP'"
+  ]) {
+    try {
+      const value = dateOnly(db.prepare(sql).get()?.reportDate || '');
+      if (value) return value;
+    } catch {}
   }
+  return '';
+}
+function historyTotal(reportDate, db) {
+  try {
+    const row = db.prepare(`SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(reportDate);
+    const summary = safeJson(row?.summaryJson, {});
+    for (const key of ['total', 'today', 'todayTotal', 'pnh', 'todayPnh']) {
+      const value = Number(summary?.[key]);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+  } catch {}
   return 0;
 }
-
 function loadPreservedWhppMembership(reportDate, db) {
-  const standardRows = uniqueRows(db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows
-    WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
-      ...safeJson(row.rowJson, {}),
-      shipmentCode: row.shipmentCode,
-      运单号: row.shipmentCode,
-      businessType: 'WHPP',
-      reportDate
-    })));
-  if (standardRows.length) {
-    return { rows: standardRows, source: 'WHPP_STANDARD_DAILY_ROWS', historyTotal: historyTotal(reportDate, db) };
-  }
+  let standardRows = [];
+  try {
+    standardRows = uniqueRows(db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows
+      WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
+        ...safeJson(row.rowJson, {}), shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: 'WHPP', reportDate
+      })));
+  } catch {}
+  if (standardRows.length) return { rows: standardRows, source: 'WHPP_STANDARD_DAILY_ROWS', historyTotal: historyTotal(reportDate, db) };
 
-  // A previous bad zero-member bridge could have deleted only the normalized
-  // WHPP daily membership while leaving final facts/history untouched. Recover
-  // membership only when the preserved final-row count exactly matches the old
-  // completed history total; never infer membership from a partial fact set.
+  // Never infer a full daily membership from a partial fact set. Recovery from
+  // final facts is allowed only when the unique fact count exactly equals the
+  // previously completed WHPP history total for the same date.
   const expected = historyTotal(reportDate, db);
   if (!expected) return { rows: [], source: '', historyTotal: 0 };
-
-  const scanRows = db.prepare(`SELECT shipmentCode,rawJson FROM business_scan_results
-    WHERE businessType='WHPP' AND reportDate=?`).all(reportDate);
+  let scanRows = [];
+  try { scanRows = db.prepare(`SELECT shipmentCode,rawJson FROM business_scan_results WHERE businessType='WHPP' AND reportDate=?`).all(reportDate); } catch {}
   const scanByBill = new Map(scanRows.map(row => [String(row.shipmentCode || '').trim().toUpperCase(), safeJson(row.rawJson, {})]));
-  const factRows = uniqueRows(db.prepare(`SELECT shipmentCode,rawJson FROM business_final_rows
-    WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => {
-      const raw = safeJson(row.rawJson, {});
-      const bill = String(row.shipmentCode || '').trim().toUpperCase();
-      const scan = scanByBill.get(bill) || {};
-      const region = String(raw.regionCode || raw.区域 || scan.regionCode || scan.region_code || scan.区域 || '').trim().toUpperCase();
-      return {
-        ...scan,
-        ...raw,
-        shipmentCode: bill,
-        运单号: bill,
-        businessType: 'WHPP',
-        reportDate,
-        regionCode: region === 'PP' || region === 'PV' ? region : ''
-      };
-    }));
+  let factRows = [];
+  try {
+    factRows = uniqueRows(db.prepare(`SELECT shipmentCode,rawJson FROM business_final_rows
+      WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => {
+        const raw = safeJson(row.rawJson, {});
+        const code = String(row.shipmentCode || '').trim().toUpperCase();
+        const scan = scanByBill.get(code) || {};
+        const region = String(raw.regionCode || raw.区域 || scan.regionCode || scan.region_code || scan.区域 || '').trim().toUpperCase();
+        return { ...scan, ...raw, shipmentCode: code, 运单号: code, businessType: 'WHPP', reportDate, regionCode: region === 'PP' || region === 'PV' ? region : '' };
+      }));
+  } catch {}
   if (factRows.length !== expected) return { rows: [], source: '', historyTotal: expected };
   return { rows: factRows, source: 'WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL', historyTotal: expected };
 }
 
 export function loadV351UnifiedWhppMembership(reportDate = '', db = getDb()) {
-  const date = dateOnly(reportDate) || dateOnly(latestUnifiedDate(db));
+  const date = dateOnly(reportDate) || latestKnownDate(db);
   if (!date) return { present: false, batchPresent: false, reportDate: '', batchId: '', snapshotId: '', sourceName: '', membershipSource: 'EMPTY', rows: [], bills: [] };
-  const batch = db.prepare(`SELECT batchId,snapshotId,reportDate,sourceName FROM unified_import_batches
-    WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC LIMIT 1`).get(date);
-  if (!batch) return { present: false, batchPresent: false, reportDate: date, batchId: '', snapshotId: '', sourceName: '', membershipSource: 'NO_VALID_UNIFIED_BATCH', rows: [], bills: [] };
-  const rows = uniqueRows(db.prepare(`SELECT shipmentCode,regionCode,rowJson FROM unified_import_rows
-    WHERE batchId=? AND businessType='WHPP' ORDER BY shipmentCode`).all(batch.batchId).map(row => {
-      const raw = safeJson(row.rowJson, {});
-      return {
-        ...raw,
-        shipmentCode: String(row.shipmentCode || '').trim().toUpperCase(),
-        运单号: String(row.shipmentCode || '').trim().toUpperCase(),
-        businessType: 'WHPP',
-        reportDate: date,
-        regionCode: row.regionCode || raw.regionCode || ''
-      };
-    }));
-  if (rows.length) {
+  let batch = null;
+  try {
+    batch = db.prepare(`SELECT batchId,snapshotId,reportDate,sourceName FROM unified_import_batches
+      WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1`).get(date);
+  } catch {}
+
+  // A missing VALID unified batch is not evidence that WHPP had zero shipments.
+  // Older imported dates may only retain the dedicated WHPP normalized rows, or
+  // an exact completed-history/final-fact cohort. Use those preserved sources.
+  if (!batch) {
+    const preserved = loadPreservedWhppMembership(date, db);
     return {
-      present: true,
-      batchPresent: true,
+      present: preserved.rows.length > 0,
+      batchPresent: false,
       reportDate: date,
-      batchId: String(batch.batchId || ''),
-      snapshotId: String(batch.snapshotId || ''),
-      sourceName: String(batch.sourceName || ''),
-      membershipSource: 'LATEST_VALID_UNIFIED_MEMBERSHIP',
-      recoveredFromPreservedWhpp: false,
-      rows,
-      bills: rows.map(billOf)
+      batchId: '', snapshotId: '', sourceName: '',
+      membershipSource: preserved.source || 'NO_VALID_UNIFIED_BATCH',
+      recoveredFromPreservedWhpp: Boolean(preserved.rows.length),
+      historyTotal: preserved.historyTotal || 0,
+      rows: preserved.rows,
+      bills: preserved.rows.map(billOf)
     };
   }
 
-  // Important: a VALID unified batch with zero WHPP rows is not evidence that
-  // WHPP had zero shipments. WHPP is a dedicated business stage. Never let an
-  // empty unified partition erase an existing WHPP daily membership.
+  let rows = [];
+  try {
+    rows = uniqueRows(db.prepare(`SELECT shipmentCode,regionCode,rowJson FROM unified_import_rows
+      WHERE batchId=? AND businessType='WHPP' ORDER BY shipmentCode`).all(batch.batchId).map(row => {
+        const raw = safeJson(row.rowJson, {});
+        return {
+          ...raw,
+          shipmentCode: String(row.shipmentCode || '').trim().toUpperCase(),
+          运单号: String(row.shipmentCode || '').trim().toUpperCase(),
+          businessType: 'WHPP', reportDate: date,
+          regionCode: row.regionCode || raw.regionCode || ''
+        };
+      }));
+  } catch {}
+  if (rows.length) {
+    return {
+      present: true, batchPresent: true, reportDate: date,
+      batchId: String(batch.batchId || ''), snapshotId: String(batch.snapshotId || ''), sourceName: String(batch.sourceName || ''),
+      membershipSource: 'LATEST_VALID_UNIFIED_MEMBERSHIP', recoveredFromPreservedWhpp: false,
+      rows, bills: rows.map(billOf)
+    };
+  }
+
+  // Likewise, a VALID sibling import with zero WHPP rows must not erase WHPP.
   const preserved = loadPreservedWhppMembership(date, db);
   return {
     present: preserved.rows.length > 0,
     batchPresent: true,
     reportDate: date,
-    batchId: String(batch.batchId || ''),
-    snapshotId: String(batch.snapshotId || ''),
-    sourceName: String(batch.sourceName || ''),
+    batchId: String(batch.batchId || ''), snapshotId: String(batch.snapshotId || ''), sourceName: String(batch.sourceName || ''),
     membershipSource: preserved.source || 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD',
     recoveredFromPreservedWhpp: Boolean(preserved.rows.length),
     historyTotal: preserved.historyTotal || 0,
@@ -156,134 +168,114 @@ export function loadV351UnifiedWhppMembership(reportDate = '', db = getDb()) {
 }
 
 function loadStandardWhppMembership(reportDate, db) {
-  const daily = db.prepare(`SELECT reportDate,sourceFile,totalCount,summaryJson FROM business_daily_reports
-    WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(reportDate);
+  let daily = null;
+  try { daily = db.prepare(`SELECT reportDate,sourceFile,totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(reportDate); } catch {}
   if (!daily) return { present: false, daily: null, rows: [], bills: [] };
-  const rows = uniqueRows(db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows
-    WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
+  let rows = [];
+  try {
+    rows = uniqueRows(db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
       ...safeJson(row.rowJson, {}), shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: 'WHPP', reportDate
     })));
-  return { present: true, daily, rows, bills: rows.map(billOf) };
+  } catch {}
+  return { present: rows.length > 0, daily, rows, bills: rows.map(billOf) };
 }
-
 function loadWhppFinalRows(reportDate, db) {
-  return uniqueRows(db.prepare(`SELECT shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,rawJson
-    FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => {
-      const raw = safeJson(row.rawJson, {});
-      return {
-        ...raw,
-        shipmentCode: row.shipmentCode,
-        运单号: row.shipmentCode,
-        businessType: 'WHPP',
-        reportDate,
-        isPod: Number(row.isPod || 0),
-        primaryCategory: row.primaryCategory || raw.primaryCategory || '',
-        apiStatus: row.apiStatus || '',
-        carryStatus: row.carryStatus || '',
-        latestEventTime: row.latestEventTime || raw.latestEventTime || '',
-        latestEventDesc: row.latestEventDesc || raw.latestEventDesc || '',
-        latestNode: row.latestNode || raw.latestNode || ''
-      };
-    }));
+  let rows = [];
+  try { rows = db.prepare(`SELECT shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,rawJson FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate); } catch {}
+  return uniqueRows(rows.map(row => {
+    const raw = safeJson(row.rawJson, {});
+    const normalized = {
+      ...raw, shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: 'WHPP', reportDate,
+      isPod: Number(row.isPod || 0), primaryCategory: row.primaryCategory || raw.primaryCategory || '', apiStatus: row.apiStatus || '', carryStatus: row.carryStatus || '',
+      latestEventTime: row.latestEventTime || raw.latestEventTime || '', latestEventDesc: row.latestEventDesc || raw.latestEventDesc || '', latestNode: row.latestNode || raw.latestNode || ''
+    };
+    if (normalized.isPod === 1) {
+      normalized.是否POD = '是';
+      normalized.POD状态 = 'POD';
+      normalized.currentState = 'POD';
+      if (!String(normalized.primaryCategory || '').trim()) normalized.primaryCategory = 'POD';
+    }
+    return normalized;
+  }));
 }
 
 export function buildV351WhppDashboard({ reportDate = '', membershipRows = [], finalRows = [] } = {}) {
   const members = uniqueRows(membershipRows);
-  return buildWhppDashboard({
-    businessType: 'WHPP',
-    reportDate: dateOnly(reportDate),
-    dailyReportReady: true,
-    pnhBills: members.map(billOf),
-    dailyParseRows: members,
-    finalRows: uniqueRows(finalRows)
-  });
+  return buildWhppDashboard({ businessType: 'WHPP', reportDate: dateOnly(reportDate), dailyReportReady: true, pnhBills: members.map(billOf), dailyParseRows: members, finalRows: uniqueRows(finalRows) });
 }
-
 function summaryForDate(reportDate = '') {
   const db = getDb();
   const requested = dateOnly(reportDate);
-  const unified = loadV351UnifiedWhppMembership(requested, db);
-  const date = requested || unified.reportDate;
+  const canonical = loadV351UnifiedWhppMembership(requested, db);
+  const date = requested || canonical.reportDate;
   if (!date) return null;
   const standard = loadStandardWhppMembership(date, db);
-  const membershipRows = unified.present ? unified.rows : standard.rows;
-  if (!unified.present && !standard.present) return null;
+  const membershipRows = canonical.present ? canonical.rows : standard.rows;
+  if (!canonical.present && !standard.present) return null;
   const finalRows = loadWhppFinalRows(date, db);
   const dashboard = buildV351WhppDashboard({ reportDate: date, membershipRows, finalRows });
-  const history = db.prepare(`SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(date);
+  let history = null;
+  try { history = db.prepare(`SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(date); } catch {}
   const historySummary = safeJson(history?.summaryJson, {});
   const staleHistory = Boolean(history && Number(historySummary.total ?? -1) !== Number(dashboard.metrics.total || 0));
   return {
     reportDate: date,
-    total: Number(dashboard.metrics.total || 0),
-    metrics: dashboard.metrics,
-    regions: dashboard.regions,
+    total: Number(dashboard.metrics.total || 0), metrics: dashboard.metrics, regions: dashboard.regions,
     regionPvUnresolved: Number(dashboard.regions?.PV?.unresolved || 0),
     activeStoreRetention: Number((dashboard.detailTabs?.phnomPenhShop?.rows || []).filter(row => Number(row.shopRetentionNaturalDays || 0) >= 2).length + (dashboard.detailTabs?.provinceShop?.rows || []).filter(row => Number(row.shopRetentionNaturalDays || 0) >= 2).length),
     selfPickup: Number((dashboard.detailTabs?.normalDiversion?.rows || []).filter(row => String(row.specialState || row.primaryCategory || row.主分类 || '').toUpperCase() === 'SELF_PICKUP').length),
     completed: Boolean(history) && !staleHistory,
-    state: { reportDate: date, dailyReportReady: true, snapshotStatus: history && !staleHistory ? 'COMPLETED' : 'RECONCILED_FROM_UNIFIED' },
+    state: { reportDate: date, dailyReportReady: true, snapshotStatus: history && !staleHistory ? 'COMPLETED' : 'RECONCILED_FROM_PRESERVED_WHPP' },
     dashboard,
-    truthSource: unified.present ? unified.membershipSource || 'LATEST_VALID_UNIFIED_MEMBERSHIP' : 'WHPP_STANDARD_DAILY',
-    unifiedMembership: unified.present ? unified.bills.length : null,
+    truthSource: canonical.present ? canonical.membershipSource || 'PRESERVED_WHPP_MEMBERSHIP' : 'WHPP_STANDARD_DAILY',
+    unifiedMembership: canonical.present ? canonical.bills.length : null,
     standardMembership: standard.present ? Number(standard.daily?.totalCount || standard.bills.length || 0) : null,
-    standardRows: standard.bills.length,
-    finalEvidenceRows: finalRows.length,
-    staleHistoryRejected: staleHistory,
-    needsNormalizedRepair: unified.present && (!standard.present || Number(standard.daily?.totalCount || 0) !== unified.bills.length || standard.bills.length !== unified.bills.length),
+    standardRows: standard.bills.length, finalEvidenceRows: finalRows.length, staleHistoryRejected: staleHistory,
+    needsNormalizedRepair: canonical.present && (!standard.present || Number(standard.daily?.totalCount || 0) !== canonical.bills.length || standard.bills.length !== canonical.bills.length),
     patchId: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID
   };
 }
 
 export function ensureV351WhppNormalizedDaily(reportDate = '') {
   const db = getDb();
-  const unified = loadV351UnifiedWhppMembership(reportDate, db);
-  if (!unified.present) return { repaired: false, reason: unified.batchPresent ? 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD' : 'NO_VALID_UNIFIED_BATCH', reportDate: unified.reportDate || dateOnly(reportDate) };
-  const standard = loadStandardWhppMembership(unified.reportDate, db);
+  const canonical = loadV351UnifiedWhppMembership(reportDate, db);
+  if (!canonical.present) return { repaired: false, reason: canonical.batchPresent ? 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD' : 'NO_SAFE_PRESERVED_WHPP_MEMBERSHIP', reportDate: canonical.reportDate || dateOnly(reportDate) };
+  const standard = loadStandardWhppMembership(canonical.reportDate, db);
   const standardCount = standard.present ? Number(standard.daily?.totalCount || 0) : -1;
-  const sameMembers = standard.present && standardCount === unified.bills.length && standard.bills.length === unified.bills.length && (() => {
-    const set = new Set(standard.bills); return unified.bills.every(code => set.has(code));
+  const sameMembers = standard.present && standardCount === canonical.bills.length && standard.bills.length === canonical.bills.length && (() => {
+    const set = new Set(standard.bills); return canonical.bills.every(code => set.has(code));
   })();
-  if (sameMembers) return { repaired: false, reason: 'STANDARD_DAILY_CURRENT', reportDate: unified.reportDate, total: unified.bills.length };
+  if (sameMembers) return { repaired: false, reason: 'STANDARD_DAILY_CURRENT', reportDate: canonical.reportDate, total: canonical.bills.length };
 
-  // Membership-only repair: never rewrite current state, carryover, final facts,
-  // scan/track evidence, run locks, or snapshots. Existing completed truth stays intact.
+  // Membership-only repair. Never rewrite current state, carryover, final facts,
+  // scan/track evidence, run locks or snapshots.
   const now = new Date().toISOString();
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt)
       VALUES('WHPP',?,?,?,?,?,?)
       ON CONFLICT(businessType,reportDate) DO UPDATE SET sourceFile=excluded.sourceFile,totalCount=excluded.totalCount,summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
-      .run(unified.reportDate, unified.sourceName, unified.bills.length, JSON.stringify({ batchId: unified.batchId, snapshotId: unified.snapshotId, total: unified.bills.length, source: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, membershipSource: unified.membershipSource || '' }), now, now);
-    db.prepare(`DELETE FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?`).run(unified.reportDate);
+      .run(canonical.reportDate, canonical.sourceName, canonical.bills.length, JSON.stringify({ batchId: canonical.batchId, snapshotId: canonical.snapshotId, total: canonical.bills.length, source: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, membershipSource: canonical.membershipSource || '' }), now, now);
+    db.prepare(`DELETE FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?`).run(canonical.reportDate);
     const insert = db.prepare(`INSERT INTO business_daily_parse_rows(
       businessType,reportDate,shipmentCode,sheetName,rowNumber,source_row_number,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,rawText,rowJson,createdAt
     ) VALUES('WHPP',?,?,?,?,?,?,?,?,?,?,?,?)`);
-    for (const row of unified.rows) {
+    for (const row of canonical.rows) {
       insert.run(
-        unified.reportDate,
-        billOf(row),
-        row.sheetName || '',
-        Number(row.rowNumber || 0),
-        Number(row.source_row_number || row.rowNumber || 0),
-        row.recipientRaw || row.recipient_raw || '',
-        row.recipientNormalized || row.recipient_normalized || '',
-        'WHPP',
-        row.classificationReason || unified.membershipSource || 'LATEST_VALID_UNIFIED_MEMBERSHIP',
-        '',
-        JSON.stringify({ ...row, businessType: 'WHPP', reportDate: unified.reportDate }),
-        now
+        canonical.reportDate, billOf(row), row.sheetName || '', Number(row.rowNumber || 0), Number(row.source_row_number || row.rowNumber || 0),
+        row.recipientRaw || row.recipient_raw || '', row.recipientNormalized || row.recipient_normalized || '', 'WHPP',
+        row.classificationReason || canonical.membershipSource || 'PRESERVED_WHPP_MEMBERSHIP', '',
+        JSON.stringify({ ...row, businessType: 'WHPP', reportDate: canonical.reportDate }), now
       );
     }
     db.exec('COMMIT');
   } catch (error) {
-    db.exec('ROLLBACK');
+    try { db.exec('ROLLBACK'); } catch {}
     throw error;
   }
-  console.log('[CE-QC][V351_WHPP_BRIDGE_REPAIRED]', JSON.stringify({ reportDate: unified.reportDate, total: unified.bills.length, batchId: unified.batchId, membershipSource: unified.membershipSource || '', scope: 'MEMBERSHIP_TABLES_ONLY' }));
-  return { repaired: true, reason: unified.recoveredFromPreservedWhpp ? 'RESTORED_PRESERVED_WHPP_MEMBERSHIP_ONLY' : 'UNIFIED_TO_WHPP_STANDARD_DAILY_MEMBERSHIP_ONLY', reportDate: unified.reportDate, total: unified.bills.length };
+  console.log('[CE-QC][V351_WHPP_BRIDGE_REPAIRED]', JSON.stringify({ reportDate: canonical.reportDate, total: canonical.bills.length, batchId: canonical.batchId, membershipSource: canonical.membershipSource || '', scope: 'MEMBERSHIP_TABLES_ONLY' }));
+  return { repaired: true, reason: canonical.recoveredFromPreservedWhpp ? 'RESTORED_PRESERVED_WHPP_MEMBERSHIP_ONLY' : 'UNIFIED_TO_WHPP_STANDARD_DAILY_MEMBERSHIP_ONLY', reportDate: canonical.reportDate, total: canonical.bills.length };
 }
-
 function scheduleNormalizedRepair(summary) {
   if (!summary?.needsNormalizedRepair || !summary?.reportDate) return;
   setImmediate(() => {
@@ -291,7 +283,6 @@ function scheduleNormalizedRepair(summary) {
     catch (error) { console.error('[CE-QC][V351_WHPP_BACKGROUND_MEMBERSHIP_REPAIR]', error?.stack || error); }
   });
 }
-
 function summaryHandler(req, res, next) {
   try {
     const summary = summaryForDate(req.query?.reportDate || '');
@@ -304,7 +295,6 @@ function summaryHandler(req, res, next) {
     next();
   }
 }
-
 function detailHandler(req, res, next) {
   try {
     const summary = summaryForDate(req.query?.reportDate || req.query?.date || '');
@@ -320,18 +310,9 @@ function detailHandler(req, res, next) {
     const regionLabel = region === 'PP' ? '本省PP' : region === 'PV' ? '外省PV' : '';
     res.setHeader('Cache-Control', 'no-store');
     res.json({
-      ok: true,
-      patchId: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID,
-      businessType: 'WHPP',
-      reportDate: summary.reportDate,
-      tab,
-      region,
+      ok: true, patchId: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, businessType: 'WHPP', reportDate: summary.reportDate, tab, region,
       label: `${regionLabel}${regionLabel ? ' · ' : ''}${detail.label || tab}`,
-      total: rows.length,
-      page,
-      pageSize,
-      totalPages: Math.max(1, Math.ceil(rows.length / pageSize)),
-      truthSource: summary.truthSource,
+      total: rows.length, page, pageSize, totalPages: Math.max(1, Math.ceil(rows.length / pageSize)), truthSource: summary.truthSource,
       rows: rows.slice(start, start + pageSize)
     });
     scheduleNormalizedRepair(summary);
@@ -379,11 +360,11 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED_POST]) {
 
 console.log('[CE-QC][V351_WHPP_UNIFIED_DASHBOARD_BRIDGE]', JSON.stringify({
   id: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID,
-  summaryTruth: 'NONEMPTY_VALID_UNIFIED_MEMBERSHIP_THEN_PRESERVED_WHPP_STANDARD_OR_VERIFIED_FACTS',
+  summaryTruth: 'VALID_UNIFIED_WHPP_OR_PRESERVED_STANDARD_OR_EXACT_HISTORY_MATCHED_FINAL_FACTS_WITH_OR_WITHOUT_UNIFIED_BATCH',
   detailTruth: 'SAME_CANONICAL_DASHBOARD_DETAIL_TABS',
   staleZeroHistory: 'REJECT_IF_TOTAL_MISMATCH',
   existingDateRepair: 'ASYNC_MEMBERSHIP_TABLES_ONLY_AFTER_RESPONSE',
-  futureUnifiedImport: 'ZERO_WHPP_PARTITION_NEVER_ERASES_STANDARD_DAILY',
+  futureUnifiedImport: 'ZERO_OR_MISSING_UNIFIED_WHPP_NEVER_ERASES_PRESERVED_DAILY_TRUTH',
   databaseSchemaChange: false,
   factMutation: false
 }));

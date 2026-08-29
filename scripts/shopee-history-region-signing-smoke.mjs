@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { resolveShopeeHistoricalRegions, resolveShopeeSigningSamples } from '../src/shopeeHistoricalSigningTruth.js';
+
+const db=new DatabaseSync(':memory:');
+db.exec(`
+CREATE TABLE unified_import_batches(batchId TEXT,snapshotId TEXT,reportDate TEXT,status TEXT,createdAt TEXT);
+CREATE TABLE unified_import_rows(batchId TEXT,snapshotId TEXT,reportDate TEXT,businessType TEXT,shipmentCode TEXT,regionCode TEXT,rowJson TEXT);
+CREATE TABLE shipment_daily_snapshots(reportDate TEXT,businessType TEXT,shipmentCode TEXT,rowJson TEXT);
+CREATE TABLE business_daily_parse_rows(reportDate TEXT,businessType TEXT,shipmentCode TEXT,recipient_group TEXT,recipient_raw TEXT,recipient_normalized TEXT,rowJson TEXT);
+CREATE TABLE business_final_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,latestEventTime TEXT,firstAttemptAt TEXT,attemptHistoryJson TEXT,rawJson TEXT);
+CREATE TABLE qc_tracking_ledger(shipmentCode TEXT,businessType TEXT,firstReportDate TEXT,podDate TEXT,signingDays REAL,attemptNo INTEGER,attemptSource TEXT,terminalReason TEXT,evidenceJson TEXT);
+CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT);
+`);
+const d='2026-08-14';
+db.prepare(`INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?)`).run(d,'SHOPEEVN','VN-PV-1','SHOPEEVN','','',JSON.stringify({businessType:'SHOPEEVN',regionCode:'PV'}));
+db.prepare(`INSERT INTO shipment_daily_snapshots VALUES(?,?,?,?)`).run(d,'SHOPEEVN','VN-PP-1',JSON.stringify({businessType:'SHOPEEVN',regionCode:'PP'}));
+db.prepare(`INSERT INTO unified_import_batches VALUES(?,?,?,?,?)`).run('B1','S1',d,'VALID','2026-08-14T23:00:00Z');
+db.prepare(`INSERT INTO unified_import_rows VALUES(?,?,?,?,?,?,?)`).run('B1','S1',d,'SHOPEEVN','VN-U-1','PP','{}');
+db.prepare(`INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?)`).run(d,'SHOPEEVN','VN-U-1','SHOPEEVN','','',JSON.stringify({businessType:'SHOPEEVN',regionCode:'PV'}));
+db.prepare(`INSERT INTO business_final_rows VALUES(?,?,?,?,?,?,?,?)`).run('SHOPEEVN',d,'VN-PV-1',1,'2026-08-14T18:00:00Z','2026-08-10T08:00:00Z','[]',JSON.stringify({POD时间:'2026-08-14T18:00:00Z'}));
+db.prepare(`INSERT INTO business_final_rows VALUES(?,?,?,?,?,?,?,?)`).run('SHOPEEVN',d,'VN-PP-1',1,'2026-08-14T18:00:00Z','2026-08-12T08:00:00Z','[]',JSON.stringify({POD时间:'2026-08-14T18:00:00Z'}));
+db.prepare(`INSERT INTO business_final_rows VALUES(?,?,?,?,?,?,?,?)`).run('SHOPEEVN',d,'VN-LEGACY-STORED',1,'2026-08-14T18:00:00Z','','[]',JSON.stringify({POD时间:'2026-08-14T18:00:00Z'}));
+db.prepare(`INSERT INTO qc_tracking_ledger VALUES(?,?,?,?,?,?,?,?,?)`).run('VN-LEGACY-STORED','SHOPEEVN','2026-08-06',d,9,0,'','POD','{}');
+const members=[{reportDate:d,shipmentCode:'VN-PV-1'},{reportDate:d,shipmentCode:'VN-PP-1'},{reportDate:d,shipmentCode:'VN-U-1'},{reportDate:d,shipmentCode:'VN-LEGACY-STORED'}];
+const regions=resolveShopeeHistoricalRegions(db,'SHOPEEVN',d,d);
+assert.equal(regions.get(`${d}|VN-PV-1`),'PV');
+assert.equal(regions.get(`${d}|VN-PP-1`),'PP');
+assert.equal(regions.get(`${d}|VN-U-1`),'PP','latest VALID unified region must beat stale fallback');
+const signing=resolveShopeeSigningSamples(db,'SHOPEEVN',d,d,members);
+assert.equal(signing.get(`${d}|VN-PV-1`),5);
+assert.equal(signing.get(`${d}|VN-PP-1`),3);
+assert.equal(signing.has(`${d}|VN-U-1`),false,'no real dispatch/POD pair must remain unavailable');
+assert.equal(signing.has(`${d}|VN-LEGACY-STORED`),false,'legacy stored signingDays without real dispatch START must never be published');
+console.log('[SHOPEE_HISTORY_REGION_SIGNING_SMOKE] PASS persisted region fallback · unified priority · real dispatch->POD days 5/3 · legacy first-report signingDays rejected · no fabricated sample');
+db.close();
