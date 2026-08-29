@@ -1,7 +1,7 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-29-v339-authoritative-three-stage-runner-v1';
+  const VERSION = '2026-08-29-v354-authoritative-three-stage-resume-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   let busy = false;
 
@@ -52,6 +52,14 @@
       throw error;
     }
     return payload;
+  }
+
+  async function postJson(url, body) {
+    return jsonFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    });
   }
 
   function isAuth(error) {
@@ -114,7 +122,7 @@
     const button = runButton();
     if (button) {
       button.disabled = busy;
-      button.textContent = busy ? (text || '七业务处理中…') : '开始全自动';
+      button.textContent = busy ? (text || '七业务处理中…') : '开始全自动处理';
     }
   }
 
@@ -123,26 +131,55 @@
     return jsonFetch(`/api/v132/whpp-fast-summary${query}`);
   }
 
-  async function verifyWhpp(target) {
-    const payload = await readWhppSummary(target);
+  function whppCompletion(payload, target) {
     const state = payload?.state || {};
     const date = normalizeDate(state.reportDate || payload?.reportDate || payload?.reportDateLocal || '');
     const total = Number(state.total ?? payload?.total ?? state.dailyParseSummary?.totalRecognized ?? 0);
     const snapshotStatus = String(state.snapshotStatus || payload?.snapshotStatus || '').toUpperCase();
     const completed = Boolean(state.completed === true || payload?.completed === true || COMPLETE_SNAPSHOT.has(snapshotStatus));
     const retryPending = Number(payload?.metrics?.retryPending ?? state?.metrics?.retryPending ?? 0);
+    return { date, total, snapshotStatus, completed, retryPending, reportDate: date || target };
+  }
 
-    if (target && date && date !== target) {
-      const error = new Error(`WHPP当前正式结果日期为${date}，等待${target}完成。`);
+  async function verifyWhpp(target) {
+    const payload = await readWhppSummary(target);
+    const truth = whppCompletion(payload, target);
+    if (target && truth.date && truth.date !== target) {
+      const error = new Error(`WHPP当前正式结果日期为${truth.date}，等待${target}完成。`);
       error.code = 'WHPP_SUMMARY_DATE_MISMATCH';
       throw error;
     }
-    if (total > 0 && !completed) {
-      const error = new Error(`WHPP本土${total}票仍在生成正式快照，七业务不能提前标记完成。`);
+    if (!truth.completed) {
+      const error = new Error(truth.total > 0
+        ? `WHPP本土${truth.total}票仍在生成正式快照，七业务不能提前标记完成。`
+        : 'WHPP本土当前尚未返回明确完成标记；0票也不能在没有正式完成语义时自动跳过。');
       error.code = 'WHPP_STAGE_NOT_FINALIZED';
       throw error;
     }
-    return { label: 'WHPP本土', ok: true, verified: true, total, snapshotStatus, completed, retryPending, reportDate: date || target };
+    return { label: 'WHPP本土', ok: true, verified: true, ...truth };
+  }
+
+  async function canonicalStageTruth(stage, target) {
+    try {
+      if (stage.key === 'CCSL') {
+        const payload = await postJson('/api/v317/ccsl-recovery', { action: 'status', reportDate: target || '' });
+        const date = normalizeDate(payload?.reportDate || target);
+        return { done: Boolean((!target || date === target) && payload?.complete === true), date, payload };
+      }
+      if (stage.key === 'SHOPEE') {
+        const payload = await postJson('/api/v311/shopee-recovery', { action: 'status', reportDate: target || '' });
+        const date = normalizeDate(payload?.reportDate || target);
+        return { done: Boolean((!target || date === target) && payload?.complete === true), date, payload };
+      }
+      if (stage.key === 'WHPP') {
+        const verified = await verifyWhpp(target);
+        return { done: true, date: normalizeDate(verified.reportDate || target), payload: verified };
+      }
+    } catch (error) {
+      if (isAuth(error)) throw error;
+      return { done: false, error };
+    }
+    return { done: false };
   }
 
   function whppStillPending(error) {
@@ -198,11 +235,7 @@
       if (attempt) await wait(700 * attempt);
       setStatus(`${stage.label}${attempt ? `自动续跑 ${attempt + 1}/3` : '处理中'}…`);
       try {
-        await jsonFetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reportDate: target || '' })
-        });
+        await postJson(url, { reportDate: target || '' });
         if (stage.key === 'WHPP') return await waitForWhppFinalized(target);
         return { label: stage.label, ok: true };
       } catch (error) {
@@ -232,11 +265,9 @@
     const target = targetDate();
     setUnifiedStage('CCSL', true, target);
     setBusy(true, `正在启动 ${target || '当日'} 七业务处理…`);
-    setStatus(`正在启动 ${target || '当日'} 七业务处理：CCSL → SHOPEE → WHPP`);
+    setStatus(`正在核对 ${target || '当日'} 七业务断点：CCSL → SHOPEE → WHPP`);
     const results = [];
     try {
-      // V339: one authoritative browser owner only. The three execution stages
-      // cover all seven businesses and always share the same reportDate.
       const stages = [
         { key: 'CCSL', label: 'CCSL（CE/CEAF/TBKH/ALI1688）', start: '/api/run', resume: '/api/resume' },
         { key: 'SHOPEE', label: 'SHOPEE CN/VN', start: '/api/shopee/run/start', resume: '/api/shopee/run/resume' },
@@ -247,22 +278,33 @@
         const stage = stages[index];
         setUnifiedStage(stage.key, true, target);
         setBusy(true, `${stage.label}处理中…`);
+        const truth = await canonicalStageTruth(stage, target);
+        if (truth.done) {
+          setStatus(`第 ${index + 1}/3 步：${stage.label}已有正式结果，跳过重复处理，继续下一阶段`);
+          results.push({ label: stage.label, ok: true, skipped: true, canonicalComplete: true });
+          continue;
+        }
         setStatus(`第 ${index + 1}/3 步：${stage.label}正在处理，完成后自动进入下一步`);
         const result = await runStage(stage, mode === 'resume', target);
         results.push(result);
+        if (result.ok === false) break;
       }
 
       const failed = results.filter(item => item.ok === false);
-      if (failed.length) {
+      const allThreeResolved = results.length === 3 && failed.length === 0;
+      if (!allThreeResolved) {
         setUnifiedStage('FAILED', false, target);
-        setStatus(`七业务未全部完成：${failed.map(item => `${item.label}：${item.error || '失败'}`).join('；')}。已完成断点保留。`, 'danger');
+        const message = failed.length
+          ? failed.map(item => `${item.label}：${item.error || '失败'}`).join('；')
+          : '尚有阶段未完成';
+        setStatus(`七业务未全部完成：${message}。已完成断点保留。`, 'danger');
       } else {
         setUnifiedStage('DONE', false, target);
         setStatus('七业务当日日报处理完成：CCSL → SHOPEE → WHPP均已验证正式结果。', 'success');
       }
-      document.dispatchEvent(new CustomEvent('ce-qc-run-complete', { detail: { results, reportDate: target, complete: failed.length === 0 } }));
+      document.dispatchEvent(new CustomEvent('ce-qc-run-complete', { detail: { results, reportDate: target, complete: allThreeResolved } }));
       try { if (typeof global.refresh === 'function') await global.refresh(); } catch {}
-      return { ok: failed.length === 0, results, reportDate: target };
+      return { ok: allThreeResolved, results, reportDate: target };
     } catch (error) {
       setUnifiedStage('ERROR', false, target);
       const text = isAuth(error)
@@ -278,8 +320,8 @@
   function install() {
     global.runUnified = () => execute('start');
     global.resumeUnified = () => execute('resume');
-    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute, targetDate, verifyWhpp, readWhppSummary };
-    console.info('[CE-QC][V339_THREE_STAGE_RUNNER]', VERSION, 'Single owner: CCSL -> SHOPEE -> WHPP; WHPP completion reads canonical V132 summary.');
+    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute, targetDate, verifyWhpp, readWhppSummary, canonicalStageTruth };
+    console.info('[CE-QC][V354_THREE_STAGE_RUNNER]', VERSION, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and WHPP requires explicit canonical completion even at 0 tickets.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
