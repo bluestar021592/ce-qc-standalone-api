@@ -94,13 +94,16 @@
     const snapshotStatus = String(view.snapshotStatus || payload?.snapshotStatus || '').toUpperCase();
     const runStatus = String(view.runStatus || view.currentRun?.status || '').toLowerCase();
     const processing = view.processing || {};
-    const total = Number(view.total ?? view.dailyParseSummary?.totalRecognized ?? 0);
+    const total = Number(view.total ?? payload?.total ?? view.dailyParseSummary?.totalRecognized ?? 0);
     let state = 'pending';
-    if (date === target && (COMPLETE_SNAPSHOT.has(snapshotStatus) || view.completed === true)) state = 'done';
+    if (date === target && (COMPLETE_SNAPSHOT.has(snapshotStatus) || view.completed === true || payload?.completed === true)) state = 'done';
     else if (date === target && (runStatus === 'running' || processing.running)) state = 'running';
     else if (date === target && (runStatus === 'paused' || processing.paused)) state = 'paused';
     else if (date === target && (runStatus === 'failed' || processing.error)) state = 'failed';
-    return { key, label, state, date, snapshotStatus, runStatus, total };
+    return {
+      key, label, state, date, snapshotStatus, runStatus, total,
+      details: String(payload?.summarySource || payload?.truthSource || '')
+    };
   }
 
   function failedStage(key, label, error) {
@@ -206,7 +209,7 @@
       const requests = await Promise.allSettled([
         postJson('/api/v317/ccsl-recovery', { action: 'status', reportDate: target }),
         postJson('/api/v311/shopee-recovery', { action: 'status', reportDate: target }),
-        readJson(`/api/business-state/WHPP?reportDate=${encoded}&compact=1`)
+        readJson(`/api/v132/whpp-fast-summary?reportDate=${encoded}`)
       ]);
       const ccsl = requests[0].status === 'fulfilled'
         ? stageFromCcslRecovery(requests[0].value, target)
@@ -279,7 +282,7 @@
     }, true);
     schedule();
     global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__ = { version: VERSION, refresh: refreshTruth, get lastTruth() { return lastTruth; } };
-    console.info('[CE-QC][V333_SEVEN_BUSINESS_STATUS]', VERSION, 'V168 is the only owner of #sevenBusinessStageSummary and reads CCSL/SHOPEE canonical recovery truth for the selected date.');
+    console.info('[CE-QC][V333_SEVEN_BUSINESS_STATUS]', VERSION, 'V168 owns #sevenBusinessStageSummary and reads CCSL/SHOPEE recovery truth plus the same canonical V132 WHPP summary used by the visible WHPP board.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
