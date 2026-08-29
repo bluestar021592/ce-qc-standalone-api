@@ -6,7 +6,9 @@ for (const file of [
   'src/v317CcslIncompleteRecoveryPatch.js',
   'src/v311ShopeeIncompleteRecoveryPatch.js',
   'src/v137WhppUnifiedBusinessStatePatch.js',
-  'public/v159-current-import-stability.js'
+  'src/v132WhppFastIntegrationPatch.js',
+  'public/v159-current-import-stability.js',
+  'public/v168-seven-business-status.js'
 ]) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
 
 const cleanSource = fs.readFileSync(new URL('../src/v294CleanReuploadIntegrity.js', import.meta.url), 'utf8');
@@ -17,7 +19,9 @@ const bootstrapSource = fs.readFileSync(new URL('../bootstrap.js', import.meta.u
 const ccslRecoverySource = fs.readFileSync(new URL('../src/v317CcslIncompleteRecoveryPatch.js', import.meta.url), 'utf8');
 const shopeeRecoverySource = fs.readFileSync(new URL('../src/v311ShopeeIncompleteRecoveryPatch.js', import.meta.url), 'utf8');
 const whppStateSource = fs.readFileSync(new URL('../src/v137WhppUnifiedBusinessStatePatch.js', import.meta.url), 'utf8');
+const whppCanonicalSource = fs.readFileSync(new URL('../src/v132WhppFastIntegrationPatch.js', import.meta.url), 'utf8');
 const currentImportUiSource = fs.readFileSync(new URL('../public/v159-current-import-stability.js', import.meta.url), 'utf8');
+const sevenBusinessSource = fs.readFileSync(new URL('../public/v168-seven-business-status.js', import.meta.url), 'utf8');
 
 assert.match(cleanSource, /qc_tracking_ledger/);
 assert.match(cleanSource, /qc_tracking_audit/);
@@ -29,8 +33,8 @@ assert.match(purgeWorkerSource, /v294CleanReuploadIntegrity\.js/);
 assert.match(purgeWorkerSource, /BUSINESS_DATA_TABLES\.filter/);
 
 // Same-date reupload keeps immutable audit snapshots. Completion must therefore
-// be tied to the newly-created current run, never to any older snapshot that
-// happens to share the same reportDate.
+// be tied to the newly-created current run for CCSL/SHOPEE, never to any older
+// same-date snapshot. The legacy WHPP business-state route follows the same rule.
 assert.match(ccslRecoverySource, /WHERE reportDate=\? AND runId=\? AND snapshotType='dashboard'/);
 assert.match(ccslRecoverySource, /latestValidSnapshot\(db,date,lock\?\.runId\|\|''\)/);
 assert.match(shopeeRecoverySource, /businessType=\? AND reportDate=\? AND runId=\?/);
@@ -38,6 +42,20 @@ assert.match(shopeeRecoverySource, /validSnapshot\(db,date,lock\?\.runId\|\|''\)
 assert.match(whppStateSource, /businessType='WHPP' AND reportDate=\? AND runId=\?/);
 assert.match(whppStateSource, /const completed=Boolean\(snapshot\)/);
 assert.doesNotMatch(whppStateSource, /const completed=Boolean\(snapshot\|\|history\)/);
+
+// Visible WHPP completion is different: after an identical same-day reupload,
+// the current normalized membership may already have final evidence for every
+// member. In that zero-work case the canonical V132 summary is authoritative and
+// no duplicate WHPP API run is required merely to mint another snapshot.
+assert.match(whppCanonicalSource, /const memberCount=uniqueRows\(membershipRows\)\.length/);
+assert.match(whppCanonicalSource, /const completed=memberCount===0\?standard\.present\|\|Boolean\(history\):facts\.length>=memberCount/);
+assert.match(whppCanonicalSource, /Cache-Control','no-store/);
+assert.match(sevenBusinessSource, /\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}/,
+  'V168 must read the same canonical WHPP summary as the visible board');
+assert.doesNotMatch(sevenBusinessSource, /readJson\(`\/api\/business-state\/WHPP\?reportDate=\$\{encoded\}`\)/,
+  'V168 must not use the legacy snapshot-only WHPP status route');
+assert.match(sevenBusinessSource, /payload\?\.completed === true/,
+  'V168 must accept canonical current-membership completion without requiring a duplicate run snapshot');
 
 // A successful fresh import owns the active selected date. This prevents the
 // homepage range owner from immediately repainting the new 8/15 import with old
@@ -66,4 +84,4 @@ assert.ok(serverLoaderStart >= 0, 'interactive-first server loader function must
 assert.ok(serverLoaderEnd > serverLoaderStart, 'interactive-first server loader must end before deferred maintenance function');
 assert.ok(serverImportIndex > serverLoaderStart && serverImportIndex < serverLoaderEnd, 'interactive-first server loader must actually import server.js');
 
-console.log('[V295.8/V294] clean reupload integrity smoke passed · modified owners parse cleanly · current-run snapshot binding + fresh-import date synchronization verified · retained same-date audit snapshots cannot falsely close the new lifecycle');
+console.log('[V295.8/V294] clean reupload integrity smoke passed · current-run snapshot binding + fresh-import date synchronization + canonical zero-work WHPP completion verified · retained same-date audit snapshots cannot falsely close the new lifecycle');
