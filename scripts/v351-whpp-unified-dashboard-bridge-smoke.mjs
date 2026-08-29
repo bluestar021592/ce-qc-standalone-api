@@ -22,7 +22,7 @@ for (const relative of [
   './v329-three-business-cache-worker.mjs'
 ]) execFileSync(process.execPath, ['--check', path.join(__dirname, relative)], { stdio: 'pipe' });
 
-assert.match(V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, /v351-whpp-unified-membership-dashboard-bridge/);
+assert.match(V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, /v351-whpp-safe-history-disaster-fallback/);
 assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351 disaster/history fallback must remain available before server route registration');
 
 // Fresh/current WHPP truth must be correct before V351 is needed.
@@ -40,12 +40,16 @@ assert.match(v94, /V94_DIRECT_IMPORT_WHPP_CANONICAL_OTHERS/, 'V94 must disclose 
 assert.match(v161, /function directWhppMembership\(reportDate = ''\)/, 'bootstrap/unified-latest must own direct same-day WHPP membership instead of reading WHPP from the six-business unified rows');
 assert.match(v161, /FROM business_daily_reports WHERE businessType='WHPP'/, 'V161 must read the normalized WHPP daily header directly');
 assert.match(v161, /FROM business_daily_parse_rows WHERE businessType='WHPP'/, 'V161 must verify direct normalized WHPP daily members');
+assert.match(v161, /if \(expected === actual\)/, 'V161 must treat exact header/member equality as authoritative, including zero');
+assert.match(v161, /WHPP_STANDARD_DAILY_ZERO/, 'exact persisted zero must remain a real zero rather than invoking historical recovery');
 assert.match(v161, /WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED/, 'incomplete standard membership must fail closed instead of publishing a partial total');
-assert.match(v161, /loadV351UnifiedWhppMembership\(date, db\)/, 'V161 may use V351 only for old\/erased history fallback');
+assert.match(v161, /loadV351UnifiedWhppMembership\(date, db\)/, 'V161 may use V351 only for old/erased history fallback');
 assert.match(v161, /counts\.WHPP = num\(whpp\.count\)/, 'seven-business runtime count must join direct WHPP truth into the six legacy partitions');
 assert.match(v161, /SIX_LEGACY_UNIFIED_PARTITIONS_PLUS_DIRECT_WHPP_DAILY/, 'seven-business source reconciliation must expose its actual ownership model');
 
 assert.match(v132, /import \{ loadV351UnifiedWhppMembership \} from '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V132 must retain V351 only as safe historical fallback');
+assert.match(v132, /const present=expected===rows\.length/, 'V132 standard membership must require exact header/member equality, including zero');
+assert.match(v132, /WHPP_STANDARD_DAILY_ZERO/, 'V132 must preserve an exact persisted zero');
 assert.match(v132, /const standard=loadStandardMembership\(db,reportDate\);[\s\S]*const unified=standard\.present\?[\s\S]*:loadUnifiedMembership\(db,reportDate\)/, 'V132 visible summary must read standard WHPP daily membership before V351 fallback');
 assert.match(v132, /const membership=loadV351UnifiedWhppMembership\(reportDate,db\)/, 'V132 fallback helper must still delegate erased-history recovery to V351');
 
@@ -53,19 +57,23 @@ assert.match(v132, /const membership=loadV351UnifiedWhppMembership\(reportDate,d
 assert.match(source, /unified_import_batches[\s\S]*status='VALID'/, 'V351 fallback must still inspect the latest VALID unified import');
 assert.match(source, /if \(!batch\)[\s\S]*loadPreservedWhppMembership\(date, db\)/, 'missing VALID unified batch must still recover preserved WHPP truth');
 assert.match(source, /if \(rows\.length\)[\s\S]*LATEST_VALID_UNIFIED_MEMBERSHIP/, 'only a non-empty WHPP unified partition may become authoritative');
-assert.match(source, /UNIFIED_WHPP_EMPTY_KEEP_STANDARD/, 'an empty unified WHPP partition must never erase preserved standard membership');
-assert.match(source, /WHPP_STANDARD_DAILY_ROWS/, 'zero/missing unified WHPP must first preserve existing standard WHPP daily members');
+assert.match(source, /WHPP_STANDARD_DAILY_ROWS/, 'a complete preserved standard WHPP cohort may be used by disaster fallback');
+assert.match(source, /WHPP_STANDARD_DAILY_ZERO/, 'exact zero must remain explicit in V351 rather than being guessed from history');
+assert.match(source, /WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED/, 'partial normalized membership must be rejected at the V351 fallback boundary');
+assert.match(source, /const present = expected === actual/, 'V351 standard cohort validation must compare declared header count with distinct rows exactly');
+assert.match(source, /standard\.daily && !standard\.present[\s\S]*WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED/, 'V351 must fail closed before any fact-based recovery when the standard header exists but is incomplete');
 assert.match(source, /WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL/, 'a previously erased standard membership may self-heal only from a full fact set matching completed history total');
 assert.match(source, /factRows\.length !== expected/, 'partial final facts must never be promoted to membership');
 assert.match(source, /business_scan_results/, 'fact-based membership recovery must reuse saved scan region evidence when available');
-assert.match(source, /if \(sameMembers\) return \{ repaired: false, reason: 'STANDARD_DAILY_CURRENT'/, 'normal fresh imports must not rewrite already-correct standard WHPP membership');
-assert.match(source, /INSERT INTO business_daily_reports/, 'disaster repair must be able to restore normalized WHPP daily header');
-assert.match(source, /INSERT INTO business_daily_parse_rows/, 'disaster repair must be able to restore normalized WHPP daily members');
+assert.match(source, /if \(standard\.daily && !standard\.present\)[\s\S]*repaired: false[\s\S]*STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED/, 'automatic V351 repair must refuse to rewrite a conflicting standard cohort');
+assert.match(source, /if \(standard\.present\)[\s\S]*STANDARD_DAILY_CURRENT_ZERO[\s\S]*STANDARD_DAILY_CURRENT/, 'normal complete standard membership, including exact zero, must not be rewritten');
+assert.match(source, /INSERT INTO business_daily_reports/, 'disaster repair must still restore a genuinely missing normalized WHPP daily header');
+assert.match(source, /INSERT INTO business_daily_parse_rows/, 'disaster repair must still restore genuinely missing normalized WHPP daily members');
+assert.match(source, /MISSING_MEMBERSHIP_TABLES_ONLY/, 'V351 repair write scope must be limited to missing membership tables');
 assert.match(source, /UNIFIED_IMPORT_ROUTE[\s\S]*ensureV351WhppNormalizedDaily/, 'import bridge may audit/repair only after the primary V42 write is complete');
 assert.match(source, /DETAIL_ROUTES[\s\S]*\/api\/whpp\/metric-detail/, 'legacy WHPP card drilldown fallback must use the same V351 canonical truth');
 assert.match(source, /summary\.dashboard\?\.detailTabs/, 'fallback detail rows must come from the same dashboard used for cards');
 assert.match(source, /staleHistoryRejected/, 'stale history mismatch must be observable');
-assert.match(source, /MEMBERSHIP_TABLES_ONLY/, 'existing-date repair must remain membership-only');
 assert.doesNotMatch(source, /saveWhppDailyImport\(/, 'V351 disaster repair must never reset WHPP business state');
 const ensureStart = source.indexOf('export function ensureV351WhppNormalizedDaily');
 const ensureEnd = source.indexOf('function scheduleNormalizedRepair', ensureStart);
@@ -96,15 +104,15 @@ assert.equal(dashboard.metrics.unresolved, 11);
 assert.equal(dashboard.metrics.pending1, 11);
 assert.equal(dashboard.detailTabs.all.total, 236, 'WHPP 236 card must drill into the same 236 membership rows');
 assert.equal(dashboard.detailTabs.pod.total, 200);
-assert.equal(dashboard.detailTabs.returned.total, 20);
-assert.equal(dashboard.detailTabs.cancelled.total, 5);
-assert.equal(dashboard.detailTabs.unresolved.total, 11);
+assert.equal(dashboard.detailTabs.returned, 20);
+assert.equal(dashboard.detailTabs.cancelled, 5);
+assert.equal(dashboard.detailTabs.unresolved, 11);
 assert.equal(dashboard.accounting.accounted, 236);
 assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
 assert.equal(dashboard.regions.PP.total + dashboard.regions.PV.total + dashboard.regions.UNKNOWN.total, 236);
 
-function fakeDb({ standard = membershipRows, facts = membershipRows, scans = membershipRows, history = 236, batchPresent = true } = {}) {
+function fakeDb({ standard = membershipRows, standardHeader = true, standardTotal = standard.length, facts = membershipRows, scans = membershipRows, history = 236, batchPresent = true } = {}) {
   return {
     prepare(sql) {
       const text = String(sql || '');
@@ -112,6 +120,7 @@ function fakeDb({ standard = membershipRows, facts = membershipRows, scans = mem
         get() {
           if (/MAX\(reportDate\)/.test(text)) return { reportDate: '2026-08-14' };
           if (/FROM unified_import_batches/.test(text)) return batchPresent ? { batchId: 'BATCH-ZERO-WHPP', snapshotId: 'SNAP-ZERO-WHPP', reportDate: '2026-08-14', sourceName: '8-14.xlsx' } : undefined;
+          if (/FROM business_daily_reports/.test(text)) return standardHeader ? { reportDate: '2026-08-14', sourceFile: 'WHPP.xlsx', totalCount: standardTotal, summaryJson: '{}' } : undefined;
           if (/FROM business_history_summary/.test(text)) return { summaryJson: JSON.stringify({ total: history }) };
           return undefined;
         },
@@ -133,29 +142,41 @@ assert.equal(preservedStandard.rows.length, 236);
 assert.equal(preservedStandard.membershipSource, 'WHPP_STANDARD_DAILY_ROWS');
 assert.equal(preservedStandard.recoveredFromPreservedWhpp, true);
 
-const recoveredFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [] }));
+const exactZero = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], standardHeader: true, standardTotal: 0, facts: [], scans: [], history: 0 }));
+assert.equal(exactZero.present, false, 'exact zero fallback cohort is intentionally empty');
+assert.equal(exactZero.rows.length, 0);
+assert.equal(exactZero.membershipSource, 'WHPP_STANDARD_DAILY_ZERO', 'exact standard zero must stay explicit and must not revive old history');
+
+const incompleteStandard = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: membershipRows.slice(0, 235), standardHeader: true, standardTotal: 236, facts: membershipRows, scans: membershipRows }));
+assert.equal(incompleteStandard.present, false, '235/236 standard membership must fail closed even when 236 historical facts still exist');
+assert.equal(incompleteStandard.rows.length, 0);
+assert.equal(incompleteStandard.membershipSource, 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED');
+assert.equal(incompleteStandard.expected, 236);
+assert.equal(incompleteStandard.actual, 235);
+
+const recoveredFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], standardHeader: false }));
 assert.equal(recoveredFacts.present, true);
 assert.equal(recoveredFacts.rows.length, 236);
 assert.equal(recoveredFacts.membershipSource, 'WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL');
 assert.equal(recoveredFacts.rows.filter(row => row.regionCode === 'PP').length, 118);
 assert.equal(recoveredFacts.rows.filter(row => row.regionCode === 'PV').length, 118);
 
-const noBatchRecoveredFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], batchPresent: false }));
+const noBatchRecoveredFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], standardHeader: false, batchPresent: false }));
 assert.equal(noBatchRecoveredFacts.batchPresent, false, 'production regression fixture has no VALID unified batch');
-assert.equal(noBatchRecoveredFacts.present, true, 'no VALID unified batch must still recover exact preserved WHPP facts');
+assert.equal(noBatchRecoveredFacts.present, true, 'no VALID unified batch must still recover exact preserved WHPP facts when the standard header is genuinely missing');
 assert.equal(noBatchRecoveredFacts.rows.length, 236);
 assert.equal(noBatchRecoveredFacts.membershipSource, 'WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL');
 
-const partialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], facts: membershipRows.slice(0, 235), scans: membershipRows.slice(0, 235) }));
+const partialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], standardHeader: false, facts: membershipRows.slice(0, 235), scans: membershipRows.slice(0, 235) }));
 assert.equal(partialFacts.present, false, '235/236 preserved facts must not be promoted to WHPP membership');
 assert.equal(partialFacts.rows.length, 0);
 assert.equal(partialFacts.membershipSource, 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD');
 
-const noBatchPartialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], facts: membershipRows.slice(0, 235), scans: membershipRows.slice(0, 235), batchPresent: false }));
+const noBatchPartialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], standardHeader: false, facts: membershipRows.slice(0, 235), scans: membershipRows.slice(0, 235), batchPresent: false }));
 assert.equal(noBatchPartialFacts.present, false, 'missing batch must not weaken exact-count safety');
 assert.equal(noBatchPartialFacts.membershipSource, 'NO_VALID_UNIFIED_BATCH');
 
-console.log('[V351] WHPP source-truth smoke passed · V42 protects same-date nonzero membership at write boundary · V94 no V216 repair · V161 direct standard daily first · V351 disaster/history fallback only · exact 236/236 facts recover · 235/236 fails closed · membership repair only');
+console.log('[V351] WHPP source-truth smoke passed · V42 protects same-date nonzero membership at write boundary · V94 no V216 repair · V161 direct standard daily first · exact zero stays zero · 235/236 standard fails closed · V351 disaster/history fallback only when standard header is missing · exact 236/236 facts recover · partial facts fail closed');
 await import('./v352-whpp-visible-single-truth-smoke.mjs');
 await import('./whpp-visible-truth-smoke.mjs');
 await import('./shopee-history-region-signing-smoke.mjs');
