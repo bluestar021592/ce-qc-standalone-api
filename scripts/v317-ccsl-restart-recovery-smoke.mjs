@@ -69,7 +69,7 @@ assert.doesNotMatch(shopeeClient,/getElementById\('ccslRunStatus'\)/,'SHOPEE mus
 assert.doesNotMatch(shopeeClient,/getElementById\('sevenBusinessStageSummary'\)/,'SHOPEE must never acquire the V168 summary DOM');
 assert.doesNotMatch(shopeeClient,/querySelectorAll\('#importPage \.status-pill/,'SHOPEE must not scan/repaint canonical pills');
 
-assert.match(progressUi,/2026-08-27-v338-ccsl-350-scan-50-track-ui-v1/,'V138 must retain canonical V317 truth while publishing the V338 350/50 UI owner');
+assert.match(progressUi,/2026-08-29-v341-ccsl-progress-owner-guard-v1/,'V138 must retain canonical V317 truth while publishing the V341 unified owner guard');
 assert.match(progressUi,/const selectedReportDate=.*reportDate[\s\S]*topRangeTo[\s\S]*dashboardRangeTo/,'V138 must derive selected date from the current UI');
 assert.match(progressUi,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action:'status',[\s\S]*reportDate:reportDate\|\|''/,'V138 detail must read the same selected-date V317 truth as the green summary');
 const canonicalPos=progressUi.indexOf("/api/v317/ccsl-recovery"),legacyPos=progressUi.indexOf("/api/v33/run-progress");
@@ -116,4 +116,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V338/V334/V333/V317] canonical CCSL detail smoke passed · V138 reads V317 first · V168 reads canonical V132 WHPP completion · scan=350 · trajectory=50 · zero-ticket/no-daily cannot fall through to legacy V33 pending 0/0');
+console.log('[V341/V334/V333/V317] canonical CCSL detail smoke passed · V138 reads V317 first · V168 reads canonical V132 WHPP completion · scan=350 · trajectory=50 · zero-ticket/no-daily cannot fall through to legacy V33 pending 0/0');
