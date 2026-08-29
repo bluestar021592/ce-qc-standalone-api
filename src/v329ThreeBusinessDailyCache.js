@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 
 export const V329_THREE_BUSINESS_DAILY_CACHE_ID='2026-08-27-v343-three-business-cache-revision-region-signing-v1';
-export const V329_THREE_BUSINESS_CACHE_REVISION='2026-08-27-signing-region-cache-v1';
+export const V329_THREE_BUSINESS_CACHE_REVISION='2026-08-29-member-aligned-region-signing-v2';
 export const V329_THREE_BUSINESS_TYPES=Object.freeze(['TBKH','SHOPEECN','SHOPEEVN']);
 const TYPES=new Set(V329_THREE_BUSINESS_TYPES);
 const SHOPEE=new Set(['SHOPEECN','SHOPEEVN']);
