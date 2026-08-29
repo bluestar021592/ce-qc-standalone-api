@@ -45,10 +45,21 @@ assert.doesNotMatch(whppStateSource, /const completed=Boolean\(snapshot\|\|histo
 
 // Visible WHPP completion is different: after an identical same-day reupload,
 // the current normalized membership may already have final evidence for every
-// member. In that zero-work case the canonical V132 summary is authoritative and
-// no duplicate WHPP API run is required merely to mint another snapshot.
+// member. A finalized current lifecycle/daily marker is authoritative, while
+// full member evidence and exact zero remain safe zero-work completion paths.
 assert.match(whppCanonicalSource, /const memberCount=uniqueRows\(membershipRows\)\.length/);
-assert.match(whppCanonicalSource, /const completed=memberCount===0\?standard\.present\|\|Boolean\(history\):facts\.length>=memberCount/);
+assert.match(whppCanonicalSource, /function completionDecision\(/,
+  'V132 must centralize WHPP completion semantics instead of duplicating stale inline predicates');
+assert.match(whppCanonicalSource, /standard\?\.finalized/,
+  'V132 must honor the persistent current daily finalization marker');
+assert.match(whppCanonicalSource, /lifecycle\?\.complete/,
+  'V132 must honor the current finalized WHPP lifecycle for the same cohort');
+assert.match(whppCanonicalSource, /num\(memberCount\)===0&&Boolean\(standard\?\.present\|\|historyPresent\)/,
+  'V132 must retain explicit exact-zero completion semantics');
+assert.match(whppCanonicalSource, /num\(memberCount\)>0&&num\(finalEvidenceRows\)>=num\(memberCount\)/,
+  'V132 must still accept full current-member final evidence as zero-work completion');
+assert.match(whppCanonicalSource, /completionDecision\(\{standard,memberCount,finalEvidenceRows:facts\.length,historyPresent:Boolean\(history\),lifecycle,retryPending\}\)/,
+  'visible WHPP summary must use the same centralized lifecycle-aware completion decision');
 assert.match(whppCanonicalSource, /Cache-Control','no-store/);
 assert.match(sevenBusinessSource, /\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}/,
   'V168 must read the same canonical WHPP summary as the visible board');
@@ -84,4 +95,4 @@ assert.ok(serverLoaderStart >= 0, 'interactive-first server loader function must
 assert.ok(serverLoaderEnd > serverLoaderStart, 'interactive-first server loader must end before deferred maintenance function');
 assert.ok(serverImportIndex > serverLoaderStart && serverImportIndex < serverLoaderEnd, 'interactive-first server loader must actually import server.js');
 
-console.log('[V295.8/V294] clean reupload integrity smoke passed · current-run snapshot binding + fresh-import date synchronization + canonical zero-work WHPP completion verified · retained same-date audit snapshots cannot falsely close the new lifecycle');
+console.log('[V295.8/V294] clean reupload integrity smoke passed · current-run snapshot binding + fresh-import date synchronization + canonical lifecycle-aware zero-work WHPP completion verified · retained same-date audit snapshots cannot falsely close the new lifecycle');
