@@ -23,6 +23,8 @@ assert.match(source, /normalized\.是否POD = '是'/, 'SQL POD must map to WHPP 
 assert.match(source, /memberSet\.has\(billOf\(row\)\)/, 'final facts must be bounded to current WHPP membership');
 assert.match(source, /memberByBill/, 'membership region truth must be merged into final facts before region metrics');
 assert.match(source, /TOP_EQUALS_PP_PLUS_PV_PLUS_UNKNOWN/, 'visible aggregate/region invariant must be explicit');
+assert.match(source, /const standard = loadStandardMembership\(db, date\);[\s\S]*const fallback = standard\.present[\s\S]*loadV351UnifiedWhppMembership\(date, db\)/, 'V352 must read direct normalized WHPP daily membership before V351 fallback');
+assert.match(source, /WHPP_STANDARD_DAILY_THEN_V351_SAFE_HISTORY_DISASTER_FALLBACK/, 'V352 must declare V351 as fallback rather than primary membership truth');
 assert.doesNotMatch(source, /INSERT INTO|UPDATE\s+business_|DELETE FROM/, 'V352 visible owner must stay read-only');
 const summaryStart = source.indexOf('function summaryPayload');
 const summaryEnd = source.indexOf('function summaryHandler', summaryStart);
@@ -35,7 +37,9 @@ assert.doesNotMatch(summarySource, /detailTabs/, 'first-paint summary must not s
 // the V352 listen-time wrapper, so it must itself use current membership + final
 // facts instead of stale business_history_summary metrics.
 assert.match(v132Source, /import \{ buildWhppDashboard \} from '\.\/whppReporting\.js';/, 'V132 must build the same canonical WHPP dashboard');
-assert.match(v132Source, /loadUnifiedMembership/, 'V132 must read latest valid unified WHPP membership');
+assert.match(v132Source, /loadUnifiedMembership/, 'V132 must retain V351 only as the safe fallback path');
+assert.match(v132Source, /const standard=loadStandardMembership\(db,reportDate\);[\s\S]*const unified=standard\.present\?\{present:false,rows:\[\],source:'STANDARD_PRIMARY_NO_FALLBACK'\}:loadUnifiedMembership\(db,reportDate\)/, 'V132 must use the normalized WHPP daily cohort before invoking V351 fallback');
+assert.match(v132Source, /const membershipRows=standard\.present\?standard\.rows:unified\.rows/, 'V132 selected membership must prefer direct standard daily rows');
 assert.match(v132Source, /loadFinalFacts/, 'V132 must read current WHPP final facts');
 assert.match(v132Source, /memberSet\.has\(billOf\(row\)\)/, 'V132 final facts must be bounded to selected membership');
 assert.match(v132Source, /normalized\.是否POD='是'/, 'V132 must restore SQL isPod into dashboard aliases');
@@ -94,4 +98,4 @@ assert.equal(dashboard.accounting.accounted, 236);
 assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
 
-console.log('[V352] WHPP visible single-truth smoke passed · primary V132 route uses current membership/final facts · exact production-shaped 236 = PP139 + PV97 · SQL isPod-only facts restore POD186 · returned19 · unresolved3 · PV Pending stays in PV · stale nonmember facts excluded · top=regions=drilldowns · slim first paint · read-only · no DB schema change');
+console.log('[V352] WHPP visible single-truth smoke passed · direct normalized WHPP daily membership is primary · V351 is history/disaster fallback only · exact production-shaped 236 = PP139 + PV97 · SQL isPod-only facts restore POD186 · returned19 · unresolved3 · PV Pending stays in PV · stale nonmember facts excluded · top=regions=drilldowns · slim first paint · read-only · no DB schema change');
