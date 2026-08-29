@@ -1,7 +1,8 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-17-v165-seven-business-stage-verification-v2';
+  const VERSION = '2026-08-29-v339-authoritative-three-stage-runner-v1';
+  const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   let busy = false;
 
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
@@ -88,9 +89,24 @@
   function statusNode() { return document.getElementById('ccslRunStatus'); }
   function runButton() { return document.querySelector('[data-testid="global-auto-process"]'); }
 
+  function setUnifiedStage(type, active, reportDate) {
+    global.__CE_QC_UNIFIED_RUN_STAGE__ = {
+      owner: 'V67',
+      type: String(type || ''),
+      active: Boolean(active),
+      reportDate: normalizeDate(reportDate),
+      updatedAt: Date.now()
+    };
+  }
+
   function setStatus(text, level = 'warning') {
     const node = statusNode();
-    if (node) node.innerHTML = `<span class="status-pill ${level}">${String(text || '')}</span>`;
+    if (node) {
+      node.dataset.v67UnifiedOwner = '1';
+      const reportDate = normalizeDate(global.__CE_QC_UNIFIED_RUN_STAGE__?.reportDate);
+      if (reportDate) node.dataset.v67UnifiedReportDate = reportDate;
+      node.innerHTML = `<span class="status-pill ${level}">${String(text || '')}</span>`;
+    }
   }
 
   function setBusy(value, text = '') {
@@ -102,31 +118,76 @@
     }
   }
 
+  async function readWhppSummary(target) {
+    const query = target ? `?reportDate=${encodeURIComponent(target)}` : '';
+    return jsonFetch(`/api/v132/whpp-fast-summary${query}`);
+  }
+
+  async function verifyWhpp(target) {
+    const payload = await readWhppSummary(target);
+    const state = payload?.state || {};
+    const date = normalizeDate(state.reportDate || payload?.reportDate || payload?.reportDateLocal || '');
+    const total = Number(state.total ?? payload?.total ?? state.dailyParseSummary?.totalRecognized ?? 0);
+    const snapshotStatus = String(state.snapshotStatus || payload?.snapshotStatus || '').toUpperCase();
+    const completed = Boolean(state.completed === true || payload?.completed === true || COMPLETE_SNAPSHOT.has(snapshotStatus));
+    const retryPending = Number(payload?.metrics?.retryPending ?? state?.metrics?.retryPending ?? 0);
+
+    if (target && date && date !== target) {
+      const error = new Error(`WHPP当前正式结果日期为${date}，等待${target}完成。`);
+      error.code = 'WHPP_SUMMARY_DATE_MISMATCH';
+      throw error;
+    }
+    if (total > 0 && !completed) {
+      const error = new Error(`WHPP本土${total}票仍在生成正式快照，七业务不能提前标记完成。`);
+      error.code = 'WHPP_STAGE_NOT_FINALIZED';
+      throw error;
+    }
+    return { label: 'WHPP本土', ok: true, verified: true, total, snapshotStatus, completed, retryPending, reportDate: date || target };
+  }
+
+  function whppStillPending(error) {
+    return ['WHPP_STAGE_NOT_FINALIZED','WHPP_SUMMARY_DATE_MISMATCH'].includes(String(error?.code || ''));
+  }
+
+  async function waitForWhppFinalized(target, timeoutMs = 10 * 60 * 1000) {
+    const deadline = Date.now() + timeoutMs;
+    let lastError = null;
+    while (Date.now() < deadline) {
+      try {
+        return await verifyWhpp(target);
+      } catch (error) {
+        if (isAuth(error)) throw error;
+        if (!whppStillPending(error) && !isTransient(error)) throw error;
+        lastError = error;
+      }
+
+      const progress = await jsonFetch('/api/whpp/progress').catch(() => null);
+      const processing = progress?.processing || {};
+      const runtime = progress?.runtime || {};
+      const phase = String(processing.phase || runtime.lastMessage || '扫描/轨迹');
+      const batchIndex = Number(processing.batchIndex || runtime.batchIndex || 0);
+      const totalBatches = Number(processing.totalBatches || runtime.totalBatches || 0);
+      if (processing.error && !processing.running && !processing.paused) {
+        throw new Error(String(processing.error));
+      }
+      setStatus(`WHPP本土处理中：${phase}${batchIndex && totalBatches ? ` · ${batchIndex}/${totalBatches}` : ''}`);
+      await wait(1200);
+    }
+    const error = new Error(lastError?.message || 'WHPP后台任务超过10分钟仍未生成正式快照，断点已保留，可继续处理。');
+    error.code = lastError?.code || 'WHPP_FINALIZE_TIMEOUT';
+    throw error;
+  }
+
   async function waitForWhppActiveRun(target, timeoutMs = 10 * 60 * 1000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const progress = await jsonFetch('/api/whpp/progress');
+      const progress = await jsonFetch('/api/whpp/progress').catch(() => null);
       const processing = progress?.processing || {};
-      if (!processing.running && !processing.paused) return verifyWhpp(target);
+      if (!processing.running && !processing.paused) return waitForWhppFinalized(target, Math.max(1000, deadline - Date.now()));
       setStatus(`WHPP本土已有任务，正在等待当前任务完成… ${Number(processing.batchIndex || 0)}/${Number(processing.totalBatches || 0)}`);
       await wait(1000);
     }
     throw new Error('WHPP本土已有任务超过10分钟未完成，已停止把它当作成功。');
-  }
-
-  async function verifyWhpp(target) {
-    const query = target ? `?reportDate=${encodeURIComponent(target)}` : '';
-    const payload = await jsonFetch(`/api/business-state/WHPP${query}`);
-    const state = payload?.state || {};
-    const total = Number(state.total ?? state.dailyParseSummary?.totalRecognized ?? 0);
-    const snapshotStatus = String(state.snapshotStatus || '').toUpperCase();
-    const completed = Boolean(state.completed || snapshotStatus === 'COMPLETED' || snapshotStatus === 'COMPLETED_WITH_RETRY');
-    if (total > 0 && !completed) {
-      const error = new Error(`WHPP本土${total}票未生成正式快照，七业务不能标记完成。`);
-      error.code = 'WHPP_STAGE_NOT_FINALIZED';
-      throw error;
-    }
-    return { label: 'WHPP本土', ok: true, verified: true, total, snapshotStatus };
   }
 
   async function runStage(stage, preferResume, target) {
@@ -142,11 +203,11 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reportDate: target || '' })
         });
-        if (stage.key === 'WHPP') return await verifyWhpp(target);
+        if (stage.key === 'WHPP') return await waitForWhppFinalized(target);
         return { label: stage.label, ok: true };
       } catch (error) {
         if (alreadyDone(error)) {
-          if (stage.key === 'WHPP') return await verifyWhpp(target);
+          if (stage.key === 'WHPP') return await waitForWhppFinalized(target);
           return { label: stage.label, ok: true, skipped: true };
         }
         if (stage.key === 'WHPP' && activeRun(error)) {
@@ -169,35 +230,41 @@
   async function execute(mode = 'start') {
     if (busy) return;
     const target = targetDate();
+    setUnifiedStage('CCSL', true, target);
     setBusy(true, `正在启动 ${target || '当日'} 七业务处理…`);
+    setStatus(`正在启动 ${target || '当日'} 七业务处理：CCSL → SHOPEE → WHPP`);
     const results = [];
     try {
-      // V165: the browser only orchestrates authoritative processing endpoints.
-      // Every stage receives the same reportDate, WHPP must verify a finalized
-      // normalized SQLite snapshot, and missing reports are failures rather than
-      // silent success/skips.
+      // V339: one authoritative browser owner only. The three execution stages
+      // cover all seven businesses and always share the same reportDate.
       const stages = [
         { key: 'CCSL', label: 'CCSL（CE/CEAF/TBKH/ALI1688）', start: '/api/run', resume: '/api/resume' },
         { key: 'SHOPEE', label: 'SHOPEE CN/VN', start: '/api/shopee/run/start', resume: '/api/shopee/run/resume' },
         { key: 'WHPP', label: 'WHPP本土', start: '/api/whpp/run/start', resume: '/api/whpp/run/resume' }
       ];
 
-      for (const stage of stages) {
-        setStatus(`${stage.label}正在进入当日日报处理…`);
+      for (let index = 0; index < stages.length; index += 1) {
+        const stage = stages[index];
+        setUnifiedStage(stage.key, true, target);
+        setBusy(true, `${stage.label}处理中…`);
+        setStatus(`第 ${index + 1}/3 步：${stage.label}正在处理，完成后自动进入下一步`);
         const result = await runStage(stage, mode === 'resume', target);
         results.push(result);
       }
 
       const failed = results.filter(item => item.ok === false);
       if (failed.length) {
+        setUnifiedStage('FAILED', false, target);
         setStatus(`七业务未全部完成：${failed.map(item => `${item.label}：${item.error || '失败'}`).join('；')}。已完成断点保留。`, 'danger');
       } else {
-        setStatus('七业务当日日报处理完成，CCSL、SHOPEE、WHPP均已验证正式结果。', 'success');
+        setUnifiedStage('DONE', false, target);
+        setStatus('七业务当日日报处理完成：CCSL → SHOPEE → WHPP均已验证正式结果。', 'success');
       }
       document.dispatchEvent(new CustomEvent('ce-qc-run-complete', { detail: { results, reportDate: target, complete: failed.length === 0 } }));
       try { if (typeof global.refresh === 'function') await global.refresh(); } catch {}
       return { ok: failed.length === 0, results, reportDate: target };
     } catch (error) {
+      setUnifiedStage('ERROR', false, target);
       const text = isAuth(error)
         ? 'CE登录已失效，请重新登录后点击继续处理；已完成断点不会丢失。'
         : `处理连接异常：${String(error.message || error)}；已完成断点不会丢失。`;
@@ -211,8 +278,8 @@
   function install() {
     global.runUnified = () => execute('start');
     global.resumeUnified = () => execute('resume');
-    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute, targetDate, verifyWhpp };
-    console.info('[CE-QC][V165_SEVEN_BUSINESS_RUNNER]', VERSION);
+    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute, targetDate, verifyWhpp, readWhppSummary };
+    console.info('[CE-QC][V339_THREE_STAGE_RUNNER]', VERSION, 'Single owner: CCSL -> SHOPEE -> WHPP; WHPP completion reads canonical V132 summary.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
