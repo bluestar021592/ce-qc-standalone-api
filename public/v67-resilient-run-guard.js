@@ -3,11 +3,13 @@
 
   const VERSION = '2026-08-29-v355-authoritative-whpp-auto-resume-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-v1';
+  const RECOVERY_TRIGGER_REVISION = '2026-08-29-v355-visible-import-watch-v2';
   // Source-only compatibility token for the stable gate: void execute('resume')
   // Runtime uses the awaited retryable handoff below so a failed WHPP continuation can retry.
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   const autoRecoveryDates = new Set();
   let busy = false;
+  let autoRecoveryTimer = null;
 
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
   function normalizeDate(value) {
@@ -316,8 +318,12 @@
       if (document.visibilityState === 'visible') setTimeout(() => { void recoverPendingWhpp('visibility'); }, 250);
     });
     document.addEventListener('click', event => {
-      if (event.target?.closest?.('.side-link[data-page="import"]')) setTimeout(() => { void recoverPendingWhpp('import-navigation'); }, 500);
+      if (event.target?.closest?.('[data-page="import"]')) setTimeout(() => { void recoverPendingWhpp('import-navigation'); }, 500);
     }, true);
+    if (autoRecoveryTimer) clearInterval(autoRecoveryTimer);
+    autoRecoveryTimer = setInterval(() => {
+      if (importPageVisible() && !busy) void recoverPendingWhpp('visible-import-watch');
+    }, 2500);
   }
 
   async function execute(mode = 'start') {
@@ -383,6 +389,7 @@
     global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = {
       version: VERSION,
       architecture: ARCHITECTURE,
+      recoveryTriggerRevision: RECOVERY_TRIGGER_REVISION,
       singleOwner: true,
       run: execute,
       targetDate,
@@ -392,7 +399,7 @@
       recoverPendingWhpp
     };
     scheduleAutoRecovery();
-    console.info('[CE-QC][V355_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and a pending WHPP stage auto-resumes on the visible import page.');
+    console.info('[CE-QC][V355_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, RECOVERY_TRIGGER_REVISION, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and a pending WHPP stage auto-resumes whenever the import page is actually visible.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
