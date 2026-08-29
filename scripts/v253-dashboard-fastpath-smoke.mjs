@@ -14,7 +14,7 @@ assert.match(fastSource,/V253_V335_FIRST_PAINT_ID='2026-08-27-v335-per-business-
 assert.match(fastSource,/readV236CurrentSummary/,'single-day first paint must consume per-business current truth');
 assert.match(fastSource,/readV284DashboardTrends/,'explicit ranges may delegate to canonical per-business daily truth');
 assert.match(fastSource,/V335_PER_BUSINESS_SINGLE_DAY_FIRST_PAINT_NO_HISTORY_SCAN/,'same-day first paint must not scan historical tables');
-assert.match(fastSource,/latestBatchForType\(date,'CEAF'/,'WHPP overlap must locate CEAF own same-date snapshot');
+assert.match(fastSource,/latestBatchForType\(date,'CEAF'/,'WHPP overlap diagnostic must locate CEAF own same-date snapshot');
 assert.doesNotMatch(fastSource,/function latestBatches\(/,'retired global latest-batch-per-date helper must not return');
 assert.doesNotMatch(fastSource,/PARTITION BY reportDate ORDER BY createdAt DESC/,'V253 must not select one global snapshot for all same-date businesses');
 assert.doesNotMatch(fastSource,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'retired V253 multi-day ownership must stay retired');
@@ -49,8 +49,10 @@ db.prepare('INSERT INTO business_daily_reports(businessType,reportDate,sourceFil
 const {readV253DashboardTrends,readV253InstantSummary,readV253ShopeeRegion,V253_DASHBOARD_FAST_PATH_ID,V253_V335_FIRST_PAINT_ID}=await import('../src/v253DashboardFastPath.js');
 const instant=readV253InstantSummary(date);
 assert.equal(instant.v335Id,V253_V335_FIRST_PAINT_ID);
-assert.deepEqual({cn:instant.counts.SHOPEECN,vn:instant.counts.SHOPEEVN,ceaf:instant.counts.CEAF,whpp:instant.counts.WHPP},{cn:3,vn:2,ceaf:1,whpp:1},'later CN import must not zero VN/CEAF and WHPP must de-dup against CEAF own snapshot');
-assert.notEqual(instant.snapshotIds.SHOPEECN,instant.snapshotIds.SHOPEEVN);assert.equal(instant.sourceCorrection.removedFromWhpp,1);
+assert.deepEqual({cn:instant.counts.SHOPEECN,vn:instant.counts.SHOPEEVN,ceaf:instant.counts.CEAF,whpp:instant.counts.WHPP},{cn:3,vn:2,ceaf:1,whpp:2},'later CN import must not zero VN/CEAF and WHPP must keep its complete independent daily membership');
+assert.notEqual(instant.snapshotIds.SHOPEECN,instant.snapshotIds.SHOPEEVN);
+assert.equal(instant.sourceCorrection.removedFromWhpp,0,'CEAF overlap must never subtract independent WHPP members');
+assert.equal(instant.sourceCorrection.ceafOverlapDiagnostic,1,'CEAF overlap remains visible as a diagnostic only');
 const vn=readV253DashboardTrends('SHOPEEVN',date,date);assert.equal(vn.readId,V253_DASHBOARD_FAST_PATH_ID);assert.equal(vn.v335Id,V253_V335_FIRST_PAINT_ID);assert.deepEqual(vn.dates,[date]);assert.deepEqual(vn.ticket,[2]);
 const cn=readV253DashboardTrends('SHOPEECN',date,date);assert.deepEqual(cn.ticket,[3]);
 const region=readV253ShopeeRegion('SHOPEECN',date);assert.equal(region.daily[0].regions.PP.total,1);assert.equal(region.daily[0].regions.PV.total,2);assert.equal(region.daily[0].regions.PP.attempt1,1);assert.equal(region.daily[0].regions.PV.attempt2,1);
@@ -62,4 +64,4 @@ execFileSync(process.execPath,['scripts/v334-history-unification-smoke.mjs'],{st
 execFileSync(process.execPath,['scripts/v334-generic-history-worker-runtime-smoke.mjs'],{stdio:'inherit',timeout:120000});
 execFileSync(process.execPath,['scripts/v334-first-attempt-worker-runtime-smoke.mjs'],{stdio:'inherit',timeout:120000});
 execFileSync(process.execPath,['scripts/v314-shopee-throughput-smoke.mjs'],{stdio:'inherit',timeout:120000});
-console.log('[V343/V335/V253] first-paint + history + all-business throughput gate passed · per-business same-day truth · WHPP de-dup · isolated history workers · 350 scan / 50x4 track verified');
+console.log('[V343/V335/V253] first-paint + history + all-business throughput gate passed · per-business same-day truth · WHPP independent membership with CEAF overlap diagnostic · isolated history workers · 350 scan / 50x4 track verified');
