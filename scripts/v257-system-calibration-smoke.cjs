@@ -16,12 +16,20 @@ assert.ok(dashboard.includes("const TYPES=new Set(['CE','CEAF','TBKH','ALI1688',
 assert.ok(dashboard.includes("const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];"), 'CCSL aggregate must contain CE/CEAF/TBKH/ALI1688 only');
 assert.ok(dashboard.includes("const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];"), 'Shopee aggregate must keep CN/VN separate');
 assert.ok(dashboard.includes("p.businessType='WHPP'"), 'WHPP must read only WHPP daily parse rows');
-assert.ok(dashboard.includes("u.businessType='CEAF'"), 'WHPP de-dup must explicitly compare against CEAF membership');
-assert.ok(dashboard.includes("latestBatchForType(date,'CEAF'"), 'WHPP de-dup must resolve CEAF own latest same-date VALID snapshot instead of the globally latest unrelated batch');
-assert.ok(dashboard.includes('Math.max(0,raw-overlap)'), 'WHPP/CEAF overlap must be subtracted exactly once instead of double-counted');
+assert.ok(dashboard.includes("u.businessType='CEAF'"), 'WHPP/CEAF overlap may remain observable as a diagnostic');
+assert.ok(dashboard.includes("latestBatchForType(date,'CEAF'"), 'WHPP overlap diagnostic must resolve CEAF own latest same-date VALID snapshot');
+assert.ok(dashboard.includes('return{count,raw:count,overlap'), 'WHPP visible count must preserve the complete independent WHPP membership while retaining overlap diagnostic');
+assert.ok(dashboard.includes('removedFromWhpp:0'), 'CEAF overlap must never subtract an independent WHPP member');
+assert.ok(dashboard.includes('ceafOverlapDiagnostic:whpp.overlap'), 'CEAF overlap must remain diagnostic-only');
+assert.ok(!dashboard.includes('Math.max(0,raw-overlap)'), 'retired WHPP minus CEAF arithmetic must not return');
 assert.ok(v284.includes("p.businessType='WHPP'"), 'V284 WHPP daily membership must stay bound to WHPP parse rows');
-assert.ok(v284.includes("u.businessType='CEAF'"), 'V284 must inherit the historical WHPP/CEAF overlap exclusion instead of losing it during truth consolidation');
-assert.ok(v284.includes('NOT EXISTS'), 'V284 WHPP daily membership must exclude CEAF overlap before any metric is calculated');
+assert.ok(v284.includes('WHPP uses its dedicated daily membership without CEAF subtraction'), 'V284 must publish independent WHPP daily membership without CEAF subtraction');
+const whppQueryStart=v284.indexOf('function queryWhppRegionFacts');
+const whppQueryEnd=v284.indexOf('export function readV284RegionFacts',whppQueryStart);
+assert.ok(whppQueryStart>=0&&whppQueryEnd>whppQueryStart,'V284 dedicated WHPP region query must remain present');
+const whppQuery=v284.slice(whppQueryStart,whppQueryEnd);
+assert.ok(!whppQuery.includes("businessType='CEAF'"),'V284 WHPP membership query must not subtract CEAF members');
+assert.ok(!whppQuery.includes('NOT EXISTS'),'V284 WHPP membership query must not exclude overlap by anti-join');
 assert.ok(v284.includes('PARTITION BY reportDate,businessType ORDER BY createdAt DESC,batchId DESC'), 'V284 unified membership must rank latest VALID snapshots independently per date+business');
 
 // 2) Every daily percentage must use that same daily row as its denominator.
@@ -70,4 +78,4 @@ assert.ok(facts.includes('pendingNonContinuous: pendingDates.length >= 2 && !pen
 // 7) Lifecycle/export consolidation is part of the same production gate.
 execFileSync(process.execPath, ['scripts/v268-lifecycle-export-smoke.cjs'], { stdio: 'inherit' });
 
-console.log('[V257/V335/V286] system calibration gate passed: 7-board isolation + per-business same-date membership + WHPP/CEAF exact de-dup + locked row denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
+console.log('[V257/V335/V286] system calibration gate passed: 7-board isolation + per-business same-date membership + independent WHPP truth with CEAF diagnostic-only overlap + locked row denominators + ledger-first Shopee evidence rates + terminal truth + special-node exclusions + Pending date de-dup + V268 lifecycle/export freshness');
