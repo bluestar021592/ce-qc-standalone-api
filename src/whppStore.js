@@ -26,9 +26,9 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
   const db = getDb();
   const now = nowIso();
   const unique = uniqueRows(rows).map(row => ({ ...row, businessType: WHPP, reportDate }));
+  const todayBills = new Set(unique.map(billOf));
   const prior = loadWhppState();
   const carryBills = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' ORDER BY shipmentCode").all().map(row => row.shipmentCode);
-  const podLocks = db.prepare("SELECT shipmentCode FROM shipment_current_state WHERE businessType='WHPP' AND state='POD' ORDER BY shipmentCode").all().map(row => row.shipmentCode);
 
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -69,6 +69,24 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
     throw error;
   }
 
+  // POD locks are needed only for today's WHPP members (plus any defensive OPEN
+  // carry inconsistency), never for every WHPP shipment ever seen. The old global
+  // businessType/state scan became unbounded as the 18+ GiB database accumulated.
+  // Both sides below start from small indexed membership sets and probe the
+  // shipmentCode primary key, keeping a new daily import proportional to the day.
+  const podLocks = db.prepare(`
+    SELECT d.shipmentCode
+    FROM business_daily_parse_rows d
+    JOIN shipment_current_state s ON s.shipmentCode=d.shipmentCode
+    WHERE d.businessType='WHPP' AND d.reportDate=? AND UPPER(COALESCE(s.state,''))='POD'
+    UNION
+    SELECT c.shipmentCode
+    FROM carryover_open_items c
+    JOIN shipment_current_state s ON s.shipmentCode=c.shipmentCode
+    WHERE c.businessType='WHPP' AND c.status='OPEN' AND UPPER(COALESCE(s.state,''))='POD'
+    ORDER BY shipmentCode
+  `).all(reportDate).map(row => row.shipmentCode);
+
   const state = saveWhppState({
     ...emptyWhppState(),
     reportDate,
@@ -78,7 +96,7 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
     dailyReportReady: true,
     pnhBills: unique.map(billOf),
     dailyParseRows: unique,
-    carryBills: [...new Set(carryBills.filter(bill => !unique.some(row => billOf(row) === bill)))],
+    carryBills: [...new Set(carryBills.filter(bill => !todayBills.has(bill)))],
     nextCarryBills: [...new Set(carryBills)],
     podLocks,
     previousReportDate: prior.reportDate || '',
