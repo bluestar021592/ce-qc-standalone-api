@@ -23,8 +23,10 @@ assert.match(source, /normalized\.是否POD = '是'/, 'SQL POD must map to WHPP 
 assert.match(source, /memberSet\.has\(billOf\(row\)\)/, 'final facts must be bounded to current WHPP membership');
 assert.match(source, /memberByBill/, 'membership region truth must be merged into final facts before region metrics');
 assert.match(source, /TOP_EQUALS_PP_PLUS_PV_PLUS_UNKNOWN/, 'visible aggregate/region invariant must be explicit');
+assert.match(source, /const expected = Number\(daily\.totalCount \|\| 0\);[\s\S]*const present = expected === rows\.length;/, 'V352 standard membership must require exact header/member equality');
+assert.match(source, /WHPP_STANDARD_DAILY_ZERO/, 'V352 must keep exact persisted zero as a real daily truth');
 assert.match(source, /const standard = loadStandardMembership\(db, date\);[\s\S]*const fallback = standard\.present[\s\S]*loadV351UnifiedWhppMembership\(date, db\)/, 'V352 must read direct normalized WHPP daily membership before V351 fallback');
-assert.match(source, /WHPP_STANDARD_DAILY_THEN_V351_SAFE_HISTORY_DISASTER_FALLBACK/, 'V352 must declare V351 as fallback rather than primary membership truth');
+assert.match(source, /WHPP_STANDARD_DAILY_INCLUDING_EXACT_ZERO_THEN_V351_SAFE_HISTORY_DISASTER_FALLBACK/, 'V352 must declare exact-zero standard daily truth before V351 fallback');
 assert.doesNotMatch(source, /INSERT INTO|UPDATE\s+business_|DELETE FROM/, 'V352 visible owner must stay read-only');
 const summaryStart = source.indexOf('function summaryPayload');
 const summaryEnd = source.indexOf('function summaryHandler', summaryStart);
@@ -38,6 +40,8 @@ assert.doesNotMatch(summarySource, /detailTabs/, 'first-paint summary must not s
 // facts instead of stale business_history_summary metrics.
 assert.match(v132Source, /import \{ buildWhppDashboard \} from '\.\/whppReporting\.js';/, 'V132 must build the same canonical WHPP dashboard');
 assert.match(v132Source, /loadUnifiedMembership/, 'V132 must retain V351 only as the safe fallback path');
+assert.match(v132Source, /const present=expected===rows\.length/, 'V132 must require exact standard header/member equality');
+assert.match(v132Source, /WHPP_STANDARD_DAILY_ZERO/, 'V132 must keep exact persisted zero authoritative');
 assert.match(v132Source, /const standard=loadStandardMembership\(db,reportDate\);[\s\S]*const unified=standard\.present\?\{present:false,rows:\[\],source:'STANDARD_PRIMARY_NO_FALLBACK'\}:loadUnifiedMembership\(db,reportDate\)/, 'V132 must use the normalized WHPP daily cohort before invoking V351 fallback');
 assert.match(v132Source, /const membershipRows=standard\.present\?standard\.rows:unified\.rows/, 'V132 selected membership must prefer direct standard daily rows');
 assert.match(v132Source, /loadFinalFacts/, 'V132 must read current WHPP final facts');
@@ -57,15 +61,12 @@ for (let i = 0; i < 139; i += 1) membershipRows.push({ shipmentCode: `CEPP${Stri
 for (let i = 0; i < 97; i += 1) membershipRows.push({ shipmentCode: `CEPV${String(i + 1).padStart(6, '0')}`, reportDate: '2026-08-14', businessType: 'WHPP', regionCode: 'PV' });
 
 const finalRows = [];
-// Exact visible PP facts from the production screenshot: 139 total, 124 POD, 15 returned.
 for (let i = 0; i < 124; i += 1) finalRows.push({ shipmentCode: `CEPP${String(i + 1).padStart(6, '0')}`, isPod: 1 });
 for (let i = 124; i < 139; i += 1) finalRows.push({ shipmentCode: `CEPP${String(i + 1).padStart(6, '0')}`, isPod: 0, currentState: 'RETURNED', primaryCategory: '退回', 退回状态: '已退回' });
-// Exact visible PV facts: 97 total, 62 POD, 4 returned, 3 unresolved; remaining 28 are terminal cancellations.
 for (let i = 0; i < 62; i += 1) finalRows.push({ shipmentCode: `CEPV${String(i + 1).padStart(6, '0')}`, isPod: 1 });
 for (let i = 62; i < 66; i += 1) finalRows.push({ shipmentCode: `CEPV${String(i + 1).padStart(6, '0')}`, isPod: 0, currentState: 'RETURNED', primaryCategory: '退回', 退回状态: '已退回' });
 for (let i = 66; i < 94; i += 1) finalRows.push({ shipmentCode: `CEPV${String(i + 1).padStart(6, '0')}`, isPod: 0, currentState: 'ORDER_CANCELLED', primaryCategory: '订单取消', 订单取消: '是' });
 for (let i = 94; i < 97; i += 1) finalRows.push({ shipmentCode: `CEPV${String(i + 1).padStart(6, '0')}`, isPod: 0, currentState: 'PENDING', primaryCategory: 'Pending', Pending当前次数: 1 });
-// A stale same-day final row that is not in the 236-member daily set must never affect visible WHPP metrics.
 finalRows.push({ shipmentCode: 'CE_STALE_NOT_IN_MEMBERSHIP', isPod: 1, currentState: 'POD', regionCode: 'PP' });
 
 const dashboard = buildV352WhppVisibleDashboard({ reportDate: '2026-08-14', membershipRows, finalRows });
@@ -98,4 +99,9 @@ assert.equal(dashboard.accounting.accounted, 236);
 assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
 
-console.log('[V352] WHPP visible single-truth smoke passed · direct normalized WHPP daily membership is primary · V351 is history/disaster fallback only · exact production-shaped 236 = PP139 + PV97 · SQL isPod-only facts restore POD186 · returned19 · unresolved3 · PV Pending stays in PV · stale nonmember facts excluded · top=regions=drilldowns · slim first paint · read-only · no DB schema change');
+const zeroDashboard = buildV352WhppVisibleDashboard({ reportDate: '2026-08-15', membershipRows: [], finalRows: [] });
+assertV352WhppVisibleConsistency(zeroDashboard);
+assert.equal(zeroDashboard.metrics.total, 0, 'an exact standard zero must remain zero without resurrecting historical members');
+assert.equal(zeroDashboard.accounting.balanced, true);
+
+console.log('[V352] WHPP visible single-truth smoke passed · exact normalized standard membership including zero is primary · V351 is missing/history disaster fallback only · production-shaped 236 = PP139 + PV97 · SQL isPod-only facts restore POD186 · stale nonmember facts excluded · top=regions=drilldowns · read-only');
