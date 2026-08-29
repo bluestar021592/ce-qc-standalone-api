@@ -24,17 +24,17 @@ let whppRunPromise = null;
 
 function existingWhppDailyMembership(reportDate) {
   const date = String(reportDate || '').slice(0, 10);
-  if (!date) return { present: false, count: 0, expected: 0, actual: 0 };
+  if (!date) return { headerPresent: false, present: false, incomplete: false, count: 0, expected: 0, actual: 0 };
   const db = getDb();
   const daily = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);
-  if (!daily) return { present: false, count: 0, expected: 0, actual: 0 };
+  if (!daily) return { headerPresent: false, present: false, incomplete: false, count: 0, expected: 0, actual: 0 };
   const expected = Number(daily.totalCount || 0);
   const actual = Number(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(date)?.count || 0);
   // A persisted header is authoritative only when its exact member count agrees.
   // This intentionally includes 0/0: a confirmed zero-WHPP day is real truth and
   // must not be rewritten or have its WHPP run/history pointers cleared later.
   const present = actual === expected;
-  return { present, count: present ? actual : 0, expected, actual };
+  return { headerPresent: true, present, incomplete: !present, count: present ? actual : 0, expected, actual };
 }
 
 function invalidateMutableSameDatePointers(reportDate, { whppChanged = true } = {}) {
@@ -87,6 +87,22 @@ async function handleUnifiedImportV42(req, res) {
     // simply because the source file bytes are unchanged.
     parsed.fileHash = `${parsed.fileHash}:${IMPORT_RULESET_VERSION}`;
     const whppRows = parsed.rows.filter(row => row.businessType === WHPP);
+
+    // Fail closed before *any* persistence. If an existing same-date WHPP header
+    // says 236 while only 235 normalized members remain, an incoming sibling file
+    // with zero WHPP rows is not evidence that WHPP became zero. Do not let that
+    // upload overwrite either the damaged WHPP evidence or the six-business state.
+    const preservedWhpp = whppRows.length === 0
+      ? existingWhppDailyMembership(parsed.reportDate)
+      : { headerPresent: false, present: false, incomplete: false, count: 0, expected: 0, actual: 0 };
+    if (whppRows.length === 0 && preservedWhpp.headerPresent && preservedWhpp.incomplete) {
+      const error = new Error(`WHPP标准日报成员不完整：日报头${preservedWhpp.expected}票，成员${preservedWhpp.actual}票；已阻止空WHPP日报覆盖。`);
+      error.code = 'WHPP_STANDARD_DAILY_INCOMPLETE';
+      error.expected = preservedWhpp.expected;
+      error.actual = preservedWhpp.actual;
+      throw error;
+    }
+
     const coreRows = parsed.rows.filter(row => row.businessType !== WHPP);
     const coreParsed = coreProjection(parsed, coreRows);
     const saved = saveUnifiedImport(coreParsed, req.file.originalname);
@@ -95,7 +111,6 @@ async function handleUnifiedImportV42(req, res) {
     initializeCcslState(parsed.reportDate, req.file.originalname, coreRows.filter(row => CCSL_TYPES.has(row.businessType)), queue.rows);
     initializeShopeeState(parsed.reportDate, req.file.originalname, coreRows.filter(row => SHOPEE_TYPES.has(row.businessType)), queue.rows);
 
-    const preservedWhpp = whppRows.length === 0 ? existingWhppDailyMembership(parsed.reportDate) : { present: false, count: 0 };
     const whppChanged = whppRows.length > 0 || !preservedWhpp.present;
     let whppState;
     let effectiveWhppCount;
@@ -150,11 +165,11 @@ async function handleUnifiedImportV42(req, res) {
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
       },
-      architectureNote: 'WHPP使用独立持久化快照；非空日报直接落库；同日空WHPP分区不得擦除既有完整成员（包括明确0票）；导入后立即失效当前看板/趋势只读缓存；现有CCSL/SHOPEE统一快照保持兼容。'
+      architectureNote: 'WHPP使用独立持久化快照；写入前先校验同日WHPP完整性；非空日报直接落库；同日空WHPP分区不得擦除既有完整或损坏证据；导入后立即失效当前看板/趋势只读缓存；现有CCSL/SHOPEE统一快照保持兼容。'
     });
   } catch (error) {
     console.error('[V42][UNIFIED_IMPORT]', error);
-    res.status(400).json({ ok: false, code: error.code || 'WHPP_UNIFIED_IMPORT_FAILED', error: error.message || String(error), shipmentCode: error.shipmentCode || '' });
+    res.status(400).json({ ok: false, code: error.code || 'WHPP_UNIFIED_IMPORT_FAILED', error: error.message || String(error), expected: error.expected ?? null, actual: error.actual ?? null, shipmentCode: error.shipmentCode || '' });
   }
 }
 
