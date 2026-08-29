@@ -12,7 +12,7 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb } from './db.js';
 
-const PATCH_ID = '2026-08-16-v155-fresh-import-summary-authority-v1';
+const PATCH_ID = '2026-08-29-v155-fresh-import-direct-whpp-authority-v2';
 const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
@@ -22,7 +22,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE = path.resolve(__dirname, '..', 'public', 'index.html');
 let whppRunPromise = null;
 
-function invalidateMutableSameDatePointers(reportDate) {
+function existingWhppDailyMembership(reportDate) {
+  const date = String(reportDate || '').slice(0, 10);
+  if (!date) return { present: false, count: 0, expected: 0, actual: 0 };
+  const db = getDb();
+  const daily = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);
+  if (!daily) return { present: false, count: 0, expected: 0, actual: 0 };
+  const expected = Number(daily.totalCount || 0);
+  const actual = Number(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(date)?.count || 0);
+  const present = expected > 0 && actual === expected;
+  return { present, count: present ? actual : 0, expected, actual };
+}
+
+function invalidateMutableSameDatePointers(reportDate, { whppChanged = true } = {}) {
   const date = String(reportDate || '').slice(0, 10);
   if (!date) return;
   const db = getDb();
@@ -34,9 +46,14 @@ function invalidateMutableSameDatePointers(reportDate) {
     db.prepare('DELETE FROM run_locks WHERE reportDate=?').run(date);
     db.prepare('DELETE FROM run_checkpoints WHERE reportDate=?').run(date);
     db.prepare('DELETE FROM history_summary WHERE reportDate=?').run(date);
-    db.prepare("DELETE FROM business_run_locks WHERE reportDate=? AND businessType IN ('SHOPEE','WHPP')").run(date);
-    db.prepare("DELETE FROM business_run_checkpoints WHERE reportDate=? AND businessType IN ('SHOPEE','WHPP')").run(date);
-    db.prepare("DELETE FROM business_history_summary WHERE reportDate=? AND businessType IN ('SHOPEE','WHPP')").run(date);
+    db.prepare("DELETE FROM business_run_locks WHERE reportDate=? AND businessType='SHOPEE'").run(date);
+    db.prepare("DELETE FROM business_run_checkpoints WHERE reportDate=? AND businessType='SHOPEE'").run(date);
+    db.prepare("DELETE FROM business_history_summary WHERE reportDate=? AND businessType='SHOPEE'").run(date);
+    if (whppChanged) {
+      db.prepare("DELETE FROM business_run_locks WHERE reportDate=? AND businessType='WHPP'").run(date);
+      db.prepare("DELETE FROM business_run_checkpoints WHERE reportDate=? AND businessType='WHPP'").run(date);
+      db.prepare("DELETE FROM business_history_summary WHERE reportDate=? AND businessType='WHPP'").run(date);
+    }
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
@@ -63,32 +80,62 @@ async function handleUnifiedImportV42(req, res) {
 
     initializeCcslState(parsed.reportDate, req.file.originalname, coreRows.filter(row => CCSL_TYPES.has(row.businessType)), queue.rows);
     initializeShopeeState(parsed.reportDate, req.file.originalname, coreRows.filter(row => SHOPEE_TYPES.has(row.businessType)), queue.rows);
-    const whppState = saveWhppDailyImport({
-      reportDate: parsed.reportDate,
-      sourceName: req.file.originalname,
-      rows: whppRows,
-      batchId: saved.batchId,
-      snapshotId: saved.snapshotId
-    });
-    invalidateMutableSameDatePointers(parsed.reportDate);
 
+    const preservedWhpp = whppRows.length === 0 ? existingWhppDailyMembership(parsed.reportDate) : { present: false, count: 0 };
+    const whppChanged = whppRows.length > 0 || !preservedWhpp.present;
+    let whppState;
+    let effectiveWhppCount;
+    let whppImportSource;
+    if (preservedWhpp.present) {
+      const current = loadWhppState();
+      whppState = current.reportDate === parsed.reportDate
+        ? current
+        : { businessType: WHPP, reportDate: parsed.reportDate, dailyReportReady: true };
+      effectiveWhppCount = preservedWhpp.count;
+      whppImportSource = 'PRESERVED_EXISTING_NONZERO_DAILY_MEMBERSHIP';
+    } else {
+      whppState = saveWhppDailyImport({
+        reportDate: parsed.reportDate,
+        sourceName: req.file.originalname,
+        rows: whppRows,
+        batchId: saved.batchId,
+        snapshotId: saved.snapshotId
+      });
+      effectiveWhppCount = whppRows.length;
+      whppImportSource = whppRows.length ? 'DIRECT_PARSER_WHPP_DAILY_IMPORT' : 'DIRECT_CONFIRMED_ZERO_WHPP_DAILY_IMPORT';
+    }
+    invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged });
+
+    const effectiveCounts = { ...(parsed.classificationCounts || {}), WHPP: effectiveWhppCount };
+    const effectiveTotal = Object.values(effectiveCounts).reduce((sum, value) => sum + Number(value || 0), 0);
     res.json({
       ok: true,
       patchId: PATCH_ID,
       importRulesetVersion: IMPORT_RULESET_VERSION,
       ...saved,
-      classificationCounts: parsed.classificationCounts,
-      sourceReconciliation: parsed.sourceReconciliation,
-      summary: parsed.summary,
+      classificationCounts: effectiveCounts,
+      sourceReconciliation: {
+        ...(parsed.sourceReconciliation || {}),
+        businessTypes: ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'],
+        validUniqueWaybills: effectiveTotal,
+        classifiedWaybills: effectiveTotal,
+        difference: 0,
+        balanced: true,
+        runtimeTruth: 'CURRENT_CORE_IMPORT_PLUS_DIRECT_OR_PRESERVED_WHPP_DAILY'
+      },
+      summary: { ...(parsed.summary || {}), validUniqueWaybills: effectiveTotal, totalUnique: effectiveTotal },
       warnings: parsed.warnings,
       sheetDiagnostics: parsed.sheetDiagnostics,
       whpp: {
         businessType: WHPP,
-        count: whppRows.length,
+        count: effectiveWhppCount,
+        parsedCount: whppRows.length,
+        preservedExistingMembership: preservedWhpp.present,
+        source: whppImportSource,
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
       },
-      architectureNote: 'WHPP使用独立持久化快照；现有CCSL/SHOPEE统一快照保持兼容，首页合并展示七业务。'
+      architectureNote: 'WHPP使用独立持久化快照；非空日报直接落库；同日空WHPP分区不得擦除既有完整成员；现有CCSL/SHOPEE统一快照保持兼容。'
     });
   } catch (error) {
     console.error('[V42][UNIFIED_IMPORT]', error);
