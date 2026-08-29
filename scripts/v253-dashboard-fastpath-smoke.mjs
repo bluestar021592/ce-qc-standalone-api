@@ -4,8 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-for(const file of ['src/v253DashboardFastPath.js','src/v236DashboardCurrentRead.js','src/v284DailyMembershipTruth.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v42WhppPatch.js','src/v253DashboardFastPath.js','src/v236DashboardCurrentRead.js','src/v284DailyMembershipTruth.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const fastSource=fs.readFileSync('src/v253DashboardFastPath.js','utf8');
+const v236Source=fs.readFileSync('src/v236DashboardCurrentRead.js','utf8');
+const v284Source=fs.readFileSync('src/v284DailyMembershipTruth.js','utf8');
+const v42Source=fs.readFileSync('src/v42WhppPatch.js','utf8');
 const uiSource=fs.readFileSync('public/v253-dashboard-fast-owner.js','utf8');
 const runtimeSource=fs.readFileSync('src/v206InteractiveFirstRuntimePatch.js','utf8');
 const injectSource=fs.readFileSync('src/v231MetricTruthUiInjectionPatch.js','utf8');
@@ -22,6 +25,12 @@ assert.match(fastSource,/function validateWhppRangeMembership\(type,rows=\[\]\)/
 assert.match(fastSource,/error\.code='WHPP_TREND_MEMBERSHIP_MISMATCH'/,'trend totals that disagree with strict WHPP daily membership must fail closed');
 assert.match(fastSource,/const conflict=error\?\.code==='WHPP_STANDARD_DAILY_INCOMPLETE'\|\|error\?\.code==='WHPP_TREND_MEMBERSHIP_MISMATCH'/,'trend membership damage must surface as an explicit conflict response');
 assert.match(fastSource,/error\?\.code==='WHPP_STANDARD_DAILY_INCOMPLETE'\?409:500/,'instant WHPP membership damage must surface as an explicit conflict response');
+assert.match(fastSource,/export function invalidateV253DashboardFastPath\(\)\{memory\.clear\(\);\}/,'V253 must expose immediate in-memory cache invalidation after a successful import');
+assert.match(v236Source,/export function invalidateV236CurrentSummary\(\)\{summaryCache\.clear\(\);\}/,'V236 must expose current-summary cache invalidation after a successful import');
+assert.match(v284Source,/globalThis\.__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__=invalidateV284DailyMembershipTruth/,'V284 range cache invalidation must remain globally callable by the import owner');
+assert.match(v42Source,/function invalidateDashboardReadCaches\(\)/,'V42 daily import owner must centrally invalidate read caches');
+for(const token of ['__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__','__CE_QC_INVALIDATE_V253_DASHBOARD_FAST_PATH__','__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__'])assert.ok(v42Source.includes(token),`V42 import cache invalidation missing ${token}`);
+assert.match(v42Source,/invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged \}\);\s*invalidateDashboardReadCaches\(\);/,'dashboard caches must be invalidated only after same-date persistence and pointer changes finish');
 assert.doesNotMatch(fastSource,/function latestBatches\(/,'retired global latest-batch-per-date helper must not return');
 assert.doesNotMatch(fastSource,/PARTITION BY reportDate ORDER BY createdAt DESC/,'V253 must not select one global snapshot for all same-date businesses');
 assert.doesNotMatch(fastSource,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'retired V253 multi-day ownership must stay retired');
@@ -67,6 +76,20 @@ const vn=readV253DashboardTrends('SHOPEEVN',date,date);assert.equal(vn.readId,V2
 const cn=readV253DashboardTrends('SHOPEECN',date,date);assert.deepEqual(cn.ticket,[3]);
 const region=readV253ShopeeRegion('SHOPEECN',date);assert.equal(region.daily[0].regions.PP.total,1);assert.equal(region.daily[0].regions.PV.total,2);assert.equal(region.daily[0].regions.PP.attempt1,1);assert.equal(region.daily[0].regions.PV.attempt2,1);
 
+// Same-date membership changes must not wait for the 10s/30s read-cache TTLs.
+whppParse.run('WHPP',date,'WHPP-THIRD',JSON.stringify({shipmentCode:'WHPP-THIRD',businessType:'WHPP',reportDate:date}),'2026-08-07T23:30:00Z');
+db.prepare("UPDATE business_daily_reports SET totalCount=3,updatedAt=? WHERE businessType='WHPP' AND reportDate=?").run('2026-08-07T23:30:00Z',date);
+assert.equal(readV253InstantSummary(date).counts.WHPP,2,'fixture must prove a cached first-paint value exists before explicit invalidation');
+for(const name of ['__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__','__CE_QC_INVALIDATE_V253_DASHBOARD_FAST_PATH__','__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__']){
+  assert.equal(typeof globalThis[name],'function',`${name} must be installed before the import owner can invalidate caches`);
+  globalThis[name]();
+}
+const freshAfterInvalidate=readV253InstantSummary(date);
+assert.equal(freshAfterInvalidate.counts.WHPP,3,'after import cache invalidation the first paint must immediately expose the new exact 3/3 WHPP membership');
+assert.equal(freshAfterInvalidate.sourceCorrection.membershipSource,'WHPP_STANDARD_DAILY');
+const freshTrendAfterInvalidate=readV253DashboardTrends('WHPP',date,date);
+assert.deepEqual(freshTrendAfterInvalidate.ticket,[3],'after import cache invalidation WHPP trend must immediately use the same new 3/3 membership');
+
 const zeroDate='2026-08-08';
 whppDaily.run('WHPP',zeroDate,'whpp-zero.xls',0,'{}','2026-08-08T22:00:00Z','2026-08-08T22:00:00Z');
 const zero=readV253InstantSummary(zeroDate);
@@ -103,4 +126,4 @@ execFileSync(process.execPath,['scripts/v334-history-unification-smoke.mjs'],{st
 execFileSync(process.execPath,['scripts/v334-generic-history-worker-runtime-smoke.mjs'],{stdio:'inherit',timeout:120000});
 execFileSync(process.execPath,['scripts/v334-first-attempt-worker-runtime-smoke.mjs'],{stdio:'inherit',timeout:120000});
 execFileSync(process.execPath,['scripts/v314-shopee-throughput-smoke.mjs'],{stdio:'inherit',timeout:120000});
-console.log('[V343/V335/V253] first-paint + trend + history + all-business throughput gate passed · WHPP 2/2 direct daily · exact 0/0 stays zero on cards+trend · 236/235 rejects cards+single-day+range trends · CEAF overlap diagnostic only · isolated history workers · 350 scan / 50x4 track verified');
+console.log('[V343/V335/V253] first-paint + trend + history + all-business throughput gate passed · WHPP direct daily exact membership · exact 0/0 stays zero · 236/235 rejects cards+trends · same-date cache invalidation exposes new truth immediately · CEAF overlap diagnostic only · isolated history workers · 350 scan / 50x4 track verified');
