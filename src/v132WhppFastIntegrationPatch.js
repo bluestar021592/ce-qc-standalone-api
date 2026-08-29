@@ -4,6 +4,7 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
 
 const PATCH_ID='2026-08-22-v216-whpp-import-parity-v1';
+const STATUS_REVISION='2026-08-29-v358-whpp-lightweight-status-v1';
 const ROUTE='/api/v132/whpp-fast-summary';
 
 function dateOnly(value=''){
@@ -123,6 +124,50 @@ function assertVisibleConsistency(dashboard={}){
     throw error;
   }
 }
+function countFinalEvidence(db,reportDate,{standard,unified}={}){
+  try{
+    if(standard?.present){
+      return num(db.prepare(`SELECT COUNT(DISTINCT f.shipmentCode) count
+        FROM business_final_rows f
+        INNER JOIN business_daily_parse_rows d
+          ON d.businessType='WHPP' AND d.reportDate=? AND d.shipmentCode=f.shipmentCode
+        WHERE f.businessType='WHPP' AND f.reportDate=?`).get(reportDate,reportDate)?.count);
+    }
+    if(unified?.present&&unified.batchId){
+      return num(db.prepare(`SELECT COUNT(DISTINCT f.shipmentCode) count
+        FROM business_final_rows f
+        INNER JOIN unified_import_rows u
+          ON u.batchId=? AND u.businessType='WHPP' AND u.shipmentCode=f.shipmentCode
+        WHERE f.businessType='WHPP' AND f.reportDate=?`).get(unified.batchId,reportDate)?.count);
+    }
+  }catch{}
+  return 0;
+}
+function buildFastStatus(requested=''){
+  const started=Date.now();
+  const db=getDb();
+  const reportDate=latestDate(db,requested);
+  if(!reportDate)return{ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',finalEvidenceRows:0,summarySource:'EMPTY',serverBuildMs:Date.now()-started};
+  const standard=loadStandardMembership(db,reportDate);
+  const unified=standard.present?{present:false,rows:[],source:'STANDARD_PRIMARY_NO_FALLBACK',batchId:''}:loadUnifiedMembership(db,reportDate);
+  const memberCount=standard.present?standard.rows.length:uniqueRows(unified.rows).length;
+  const finalEvidenceRows=countFinalEvidence(db,reportDate,{standard,unified});
+  let historyPresent=false;
+  let retryPending=0;
+  try{
+    const history=db.prepare("SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
+    historyPresent=Boolean(history);
+    retryPending=num(safeJson(history?.summaryJson,{}).retryPending);
+  }catch{}
+  const completed=memberCount===0?standard.present||historyPresent:finalEvidenceRows>=memberCount;
+  const snapshotStatus=completed?(retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED'):(memberCount>0?'PENDING':'EMPTY');
+  return{
+    ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate,total:memberCount,completed,snapshotStatus,retryPending,
+    finalEvidenceRows,summarySource:standard.present?standard.source:(unified.present?unified.source:'EMPTY'),
+    normalizedDailyPresent:Boolean(standard.present),unifiedFallbackPresent:Boolean(unified.present),serverBuildMs:Date.now()-started,
+    state:{reportDate,dailyReportReady:Boolean(standard.present||unified.present),snapshotStatus,completed,total:memberCount}
+  };
+}
 function buildFastSummary(requested=''){
   const started=Date.now();
   const db=getDb();
@@ -161,6 +206,7 @@ function buildFastSummary(requested=''){
   return {
     ok:true,
     patchId:PATCH_ID,
+    statusRevision:STATUS_REVISION,
     reportDate,
     total:num(metrics.total),
     completed,
@@ -185,12 +231,13 @@ express.application.listen=function v216WhppInstantSummaryListen(...args){
     this.get(ROUTE,(req,res)=>{
       const started=Date.now();
       try{
-        const payload=buildFastSummary(req.query.reportDate||req.query.date||'');
+        const compact=String(req.query.compact||req.query.statusOnly||'')==='1';
+        const payload=compact?buildFastStatus(req.query.reportDate||req.query.date||''):buildFastSummary(req.query.reportDate||req.query.date||'');
         const duration=Date.now()-started;
         res.setHeader('Cache-Control','no-store');
-        res.setHeader('X-CE-QC-WHPP-Summary','V352');
+        res.setHeader('X-CE-QC-WHPP-Summary',compact?'V358-STATUS':'V352');
         res.setHeader('Server-Timing',`whppSummary;dur=${duration}`);
-        if(duration>=250)console.log(`[CE-QC][PERF][WHPP_VISIBLE_TRUTH] ${ROUTE} ${duration}ms reportDate=${payload.reportDate||''}`);
+        if(duration>=250)console.log(`[CE-QC][PERF][WHPP_VISIBLE_TRUTH] ${ROUTE} ${duration}ms reportDate=${payload.reportDate||''} compact=${compact?1:0}`);
         res.json(payload);
       }catch(error){
         res.status(500).json({ok:false,patchId:PATCH_ID,code:error?.code||'WHPP_VISIBLE_TRUTH_ERROR',error:error?.message||String(error)});
@@ -201,6 +248,6 @@ express.application.listen=function v216WhppInstantSummaryListen(...args){
 };
 
 export function inspectV132WhppFastSummary(reportDate=''){
-  return buildFastSummary(reportDate);
+  return buildFastStatus(reportDate);
 }
 export const V132_WHPP_FAST_INTEGRATION_PATCH_ID=PATCH_ID;
