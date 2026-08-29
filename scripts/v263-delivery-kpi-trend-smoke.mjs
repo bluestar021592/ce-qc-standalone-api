@@ -4,12 +4,13 @@ process.env.NODE_ENV='test';
 const {readV263DeliveryKpiTrends,V263_DELIVERY_KPI_TREND_ID}=await import('../src/v263DeliveryKpiTrendPatch.js');
 const {applyV264TbkhOpenEvidence,v264ShouldTrackTbkhOpen,V264_TBKH_OPEN_ATTEMPT_ID}=await import('../src/v264TbkhOpenAttemptLifecycle.js');
 const {ensureV246TrackingSchema}=await import('../src/v246TrackingLedgerCore.js');
+const {writeV329ThreeBusinessDailyCache}=await import('../src/v329ThreeBusinessDailyCache.js');
 
 const db=new DatabaseSync(':memory:');
 ensureV246TrackingSchema(db);
 
-// V263 now reads V284 latest-VALID daily membership + V246 lifecycle truth.
-// The smoke fixture must seed that real source contract instead of the retired dashboard cache.
+// V263 reads V284 latest-VALID daily membership/status truth, while signing averages
+// are overlaid from V329 real START->POD cache before V294 completeness publication.
 db.exec(`
   CREATE TABLE unified_import_batches(
     batchId INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,8 +59,14 @@ const ins=db.prepare(`INSERT INTO qc_tracking_ledger(
 function add(bill,date,{attempt=0,days=null,pod=true,oc=false}={}){
  ins.run(bill,'TBKH',date,date,'S','S',pod?'TERMINAL':'OPEN',pod?'POD':'',pod?now:'',pod?'POD':(oc?'OC':'OPEN'),oc?'OC':'',now,pod?date:'',attempt,attempt?`V246_STRICT_TRACK:test`:'',days,'{}','{}',now,'TEST',now,now);
 }
+// Legacy lifecycle signingDays deliberately differ from the strict V329 signing cache below.
 add('T20-1','2026-08-20',{attempt:1,days:1});add('T20-2','2026-08-20',{attempt:2,days:2});add('T20-3','2026-08-20',{attempt:0,days:1});add('T20-4','2026-08-20',{pod:false,oc:true});
 add('T21-1','2026-08-21',{attempt:1,days:1});add('T21-2','2026-08-21',{attempt:1,days:1});add('T21-3','2026-08-21',{attempt:2,days:2});add('T21-4','2026-08-21',{attempt:3,days:3});
+
+writeV329ThreeBusinessDailyCache('TBKH',[
+  {reportDate:'2026-08-20',total:4,pod:3,ocCurrent:1,attempt1:1,attempt2:1,attempt3:0,signingDaysSum:5,signingDaysCount:3,ready:true},
+  {reportDate:'2026-08-21',total:4,pod:4,ocCurrent:0,attempt1:2,attempt2:1,attempt3:1,signingDaysSum:6,signingDaysCount:4,ready:true}
+],db,'V263_STRICT_START_POD_SMOKE');
 
 assert.match(V264_TBKH_OPEN_ATTEMPT_ID,/v264-tbkh-open-attempt-lifecycle/);
 assert.equal(v264ShouldTrackTbkhOpen({businessType:'TBKH',trackingStatus:'OPEN'}),true,'TBKH OPEN must enter continuous attempt tracking');
@@ -81,10 +88,12 @@ assert.equal(data.daily[0].attempt3,null,'incomplete POD attempt evidence must n
 assert.equal(data.daily[0].attempt1Known,1);assert.equal(data.daily[0].attempt2Known,1);assert.equal(data.daily[0].attempt3Known,0);
 assert.equal(data.daily[0].attemptUnknown,1,'OPEN current attempt must not be counted as POD attempt success');
 assert.equal(data.daily[0].attemptCoverageRate,66.67);assert.equal(data.daily[0].attemptEvidenceComplete,false);
-assert.equal(data.daily[0].avgSigningDays,1.33);assert.equal(data.daily[0].signingCoverageRate,100);assert.equal(data.daily[0].signingEvidenceComplete,true);
-assert.equal(data.daily[1].attempt1,2);assert.equal(data.daily[1].attempt2,1);assert.equal(data.daily[1].attempt3,1);assert.equal(data.daily[1].attemptUnknown,0);assert.equal(data.daily[1].attemptCoverageRate,100);assert.equal(data.daily[1].avgSigningDays,1.75);
+assert.equal(data.daily[0].avgSigningDays,1.67,'V263 must use strict V329 START-to-POD samples, not legacy lifecycle signingDays');assert.equal(data.daily[0].signingCoverageRate,100);assert.equal(data.daily[0].signingEvidenceComplete,true);
+assert.equal(data.daily[1].attempt1,2);assert.equal(data.daily[1].attempt2,1);assert.equal(data.daily[1].attempt3,1);assert.equal(data.daily[1].attemptUnknown,0);assert.equal(data.daily[1].attemptCoverageRate,100);assert.equal(data.daily[1].avgSigningDays,1.5,'second day must also publish strict V329 START-to-POD average');
+assert.equal(data.daily[0].strictSigningTruth,'V329_REAL_START_TO_POD_CACHE');
 assert.equal(data.evidenceIncomplete,true,'range must disclose any incomplete attempt/signing day');
+assert.match(data.definitions.signingDays,/真实首次派送START日期到真实POD日期/);
 assert.throws(()=>readV263DeliveryKpiTrends('CE','2026-08-21','2026-08-21',db),/仅支持TBKH、SHOPEECN、SHOPEEVN/);
 
 db.close();
-console.log('[V295.3/V264/V263] latest-VALID membership + TBKH OPEN strict attempt lifecycle + complete-POD publication gate + signing trend + exact three-business scope passed');
+console.log('[V295.3/V264/V263] latest-VALID membership + TBKH OPEN strict attempt lifecycle + V329 START-to-POD signing + complete-POD publication gate + exact three-business scope passed');
