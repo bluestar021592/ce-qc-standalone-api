@@ -71,7 +71,9 @@ function loadStandardMembership(db,reportDate){
     WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row=>({
       ...safeJson(row.rowJson,{}),shipmentCode:row.shipmentCode,运单号:row.shipmentCode,businessType:'WHPP',reportDate
     })));
-  return {present:rows.length>0,rows,source:rows.length?'WHPP_STANDARD_DAILY':'EMPTY'};
+  const expected=num(daily.totalCount);
+  const present=rows.length>0&&(!expected||expected===rows.length);
+  return {present,rows:present?rows:[],source:present?'WHPP_STANDARD_DAILY':'EMPTY',expected,actual:rows.length};
 }
 function loadFinalFacts(db,reportDate,membershipRows=[]){
   const members=uniqueRows(membershipRows);
@@ -130,9 +132,13 @@ function buildFastSummary(requested=''){
     return {ok:true,patchId:PATCH_ID,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',metrics:{...dashboard.metrics,retryPending:0},regions:dashboard.regions,accounting:dashboard.accounting,dashboard:{businessType:'WHPP',reportDate:'',metrics:{...dashboard.metrics,retryPending:0},regions:dashboard.regions,accounting:dashboard.accounting},summarySource:'EMPTY',generatedAt:new Date().toISOString(),serverBuildMs:Date.now()-started};
   }
 
-  const unified=loadUnifiedMembership(db,reportDate);
+  // Fresh imports write WHPP directly into business_daily_reports +
+  // business_daily_parse_rows. That normalized daily membership is the primary
+  // authority. V351 is retained only as a disaster/history fallback when the
+  // standard daily cohort is genuinely missing or internally incomplete.
   const standard=loadStandardMembership(db,reportDate);
-  const membershipRows=unified.present?unified.rows:standard.rows;
+  const unified=standard.present?{present:false,rows:[],source:'STANDARD_PRIMARY_NO_FALLBACK'}:loadUnifiedMembership(db,reportDate);
+  const membershipRows=standard.present?standard.rows:unified.rows;
   const facts=loadFinalFacts(db,reportDate,membershipRows);
   const dashboard=buildWhppDashboard({
     businessType:'WHPP',
@@ -164,7 +170,7 @@ function buildFastSummary(requested=''){
     accounting:dashboard.accounting,
     state:{reportDate,dailyReportReady:true,snapshotStatus},
     dashboard:slimDashboard,
-    summarySource:unified.present?unified.source:(standard.present?standard.source:'EMPTY'),
+    summarySource:standard.present?standard.source:(unified.present?unified.source:'EMPTY'),
     finalEvidenceRows:facts.length,
     generatedAt:new Date().toISOString(),
     serverBuildMs:Date.now()-started
