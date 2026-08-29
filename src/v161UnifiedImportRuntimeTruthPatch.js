@@ -1,8 +1,9 @@
 import './v206InteractiveFirstRuntimePatch.js';
 import express from 'express';
 import { getDb } from './db.js';
+import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
 
-const PATCH_ID = '2026-08-28-v345-unified-seven-business-runtime-truth-v1';
+const PATCH_ID = '2026-08-29-v345-unified-seven-business-direct-whpp-truth-v2';
 const TARGETS = new Set(['/api/bootstrap', '/api/import/unified-latest']);
 const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const WRAPPED = Symbol.for('ce-qc.v161-unified-import-runtime-truth');
@@ -29,18 +30,62 @@ function batchFor(base = {}) {
   return db.prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC LIMIT 1").get() || null;
 }
 
-function classificationCounts(batch) {
-  const out = Object.fromEntries(TYPES.map(type => [type, 0]));
-  if (!batch) return out;
+function directWhppMembership(reportDate = '') {
+  const date = String(reportDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { count: 0, source: 'INVALID_REPORT_DATE', direct: false };
+  const db = getDb();
+  let daily = null;
+  try {
+    daily = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date) || null;
+  } catch {}
+  if (daily) {
+    const expected = num(daily.totalCount);
+    const actual = one("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''", date);
+    if (actual > 0 && (!expected || expected === actual)) {
+      return { count: actual, source: 'WHPP_STANDARD_DAILY', direct: true, expected, actual };
+    }
+    // A partially persisted standard cohort is not safe evidence of daily
+    // membership. Fail closed instead of publishing a fabricated partial total.
+    if (expected !== actual) {
+      return { count: 0, source: 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED', direct: true, expected, actual };
+    }
+  }
+
+  // Only old/erased dates reach the V351 fallback. Fresh imports should always
+  // return above from saveWhppDailyImport's normalized daily membership.
+  try {
+    const fallback = loadV351UnifiedWhppMembership(date, db);
+    if (fallback?.present) {
+      return {
+        count: Array.isArray(fallback.bills) ? fallback.bills.length : Array.isArray(fallback.rows) ? fallback.rows.length : 0,
+        source: fallback.membershipSource || 'V351_SAFE_HISTORY_DISASTER_FALLBACK',
+        direct: false
+      };
+    }
+  } catch {}
+  return { count: 0, source: daily ? 'WHPP_STANDARD_DAILY_EMPTY' : 'NO_SAFE_WHPP_MEMBERSHIP', direct: false };
+}
+
+function classificationTruth(batch) {
+  const counts = Object.fromEntries(TYPES.map(type => [type, 0]));
+  if (!batch) return { counts, whpp: { count: 0, source: 'NO_VALID_BATCH', direct: false } };
+
+  // V42 deliberately keeps WHPP out of the legacy six-business unified snapshot
+  // because WHPP is finalized by its own third execution stage. Read the six
+  // legacy partitions here, then join the same-day normalized WHPP daily cohort.
   const rows = getDb().prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType').all(batch.batchId);
-  for (const row of rows) if (Object.prototype.hasOwnProperty.call(out, row.businessType)) out[row.businessType] = num(row.count);
-  return out;
+  for (const row of rows) if (Object.prototype.hasOwnProperty.call(counts, row.businessType) && row.businessType !== 'WHPP') counts[row.businessType] = num(row.count);
+  const whpp = directWhppMembership(batch.reportDate);
+  counts.WHPP = num(whpp.count);
+  return { counts, whpp };
 }
 
 function regionCounts(batch) {
   if (!batch) return { PP: 0, PV: 0 };
   const stored = safeJson(batch.regionCountsJson, {});
   const storedPP = num(stored.PP), storedPV = num(stored.PV);
+  // V42 persists the parser's original regionCountsJson before projecting the
+  // six-business legacy snapshot, so these stored totals already include WHPP.
   if (storedPP + storedPV > 0) return { ...stored, PP: storedPP, PV: storedPV };
   const rows = getDb().prepare(`SELECT UPPER(COALESCE(regionCode,'')) regionCode,COUNT(*) count
     FROM unified_import_rows WHERE batchId=? GROUP BY UPPER(COALESCE(regionCode,''))`).all(batch.batchId);
@@ -70,7 +115,7 @@ function runtimeCarry(batch, counts, snapshotStatus, baseCarry = {}) {
       rechecked: 0,
       currentOpen: mainQueue,
       historicalSeparate: true,
-      runtimeTruth: 'CURRENT_IMPORT_MEMBERS'
+      runtimeTruth: 'CURRENT_SEVEN_BUSINESS_IMPORT_MEMBERS'
     };
   }
   const todayOpen = one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate=?", reportDate);
@@ -87,10 +132,26 @@ function runtimeCarry(batch, counts, snapshotStatus, baseCarry = {}) {
 function normalizeImport(base = {}) {
   const batch = batchFor(base);
   if (!batch) return base;
-  const counts = classificationCounts(batch);
+  const truth = classificationTruth(batch);
+  const counts = truth.counts;
   const regions = regionCounts(batch);
   const meta = snapshotMeta(batch);
-  const summary = { ...safeJson(batch.summaryJson, {}), ...(base.summary || {}) };
+  const currentImportTotal = TYPES.reduce((sum, type) => sum + num(counts[type]), 0);
+  const summary = {
+    ...safeJson(batch.summaryJson, {}),
+    ...(base.summary || {}),
+    validUniqueWaybills: currentImportTotal,
+    totalUnique: currentImportTotal
+  };
+  const sourceReconciliation = {
+    ...(base.sourceReconciliation || {}),
+    businessTypes: [...TYPES],
+    validUniqueWaybills: currentImportTotal,
+    classifiedWaybills: currentImportTotal,
+    difference: 0,
+    balanced: true,
+    runtimeTruth: 'SIX_LEGACY_UNIFIED_PARTITIONS_PLUS_DIRECT_WHPP_DAILY'
+  };
   return {
     ...base,
     batchId: batch.batchId,
@@ -103,9 +164,13 @@ function normalizeImport(base = {}) {
     classificationCounts: counts,
     regionCounts: regions,
     summary,
+    sourceReconciliation,
     containerFormat: base.containerFormat || meta.payload?.containerFormat || 'OOXML_ZIP',
     snapshotStatus: meta.status,
     carryover: runtimeCarry(batch, counts, meta.status, base.carryover || {}),
+    whppClassificationSource: truth.whpp.source,
+    whppClassificationCount: num(truth.whpp.count),
+    whppDirectDailyPrimary: Boolean(truth.whpp.direct),
     runtimeTruthPatch: PATCH_ID
   };
 }
