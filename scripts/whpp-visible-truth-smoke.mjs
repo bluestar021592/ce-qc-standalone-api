@@ -127,12 +127,12 @@ try {
   assert.match(homeSource, /SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP'/, 'home must read the direct WHPP daily header first');
   assert.match(homeSource, /if\(expected===actual\)/, 'home must require exact standard header/member equality');
   assert.match(homeSource, /WHPP_STANDARD_DAILY_ZERO/, 'home must keep exact standard zero authoritative');
-  assert.match(homeSource, /WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED/, 'home must fail closed on a partial standard cohort');
+  assert.match(homeSource, /error\.code='WHPP_STANDARD_DAILY_INCOMPLETE'/, 'home must explicitly reject a partial standard cohort instead of publishing a numeric fallback');
   assert.match(homeSource, /else\{[\s\S]*loadV351UnifiedWhppMembership\(date,db\)/, 'home may call V351 only when the standard daily header is absent');
   assert.match(homeSource, /removedFromWhpp:0/);
   assert.ok(!homeSource.includes('Math.max(0,raw-overlap)'), 'home WHPP must not subtract CEAF overlap from visible WHPP total');
 
-  console.log('[WHPP_VISIBLE_TRUTH_SMOKE] PASS standard WHPP is primary · exact zero stays zero · incomplete standard fails closed · V351 only recovers missing-header history · production PP139 PV97 · home never subtracts CEAF overlap');
+  console.log('[WHPP_VISIBLE_TRUTH_SMOKE] PASS standard WHPP is primary · exact zero stays zero · incomplete standard throws explicit WHPP_STANDARD_DAILY_INCOMPLETE · V351 only recovers missing-header history · production PP139 PV97 · home never subtracts CEAF overlap');
 } finally {
   try { db?.close(); } catch {}
   fs.rmSync(temp, { recursive: true, force: true });
