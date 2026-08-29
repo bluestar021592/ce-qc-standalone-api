@@ -27,8 +27,10 @@ assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351
 
 // Fresh/current WHPP truth must be correct before V351 is needed.
 assert.match(v42, /function existingWhppDailyMembership\(reportDate\)/, 'V42 must verify an existing same-date WHPP cohort before an empty reimport can overwrite it');
+assert.match(v42, /const present = actual === expected/, 'V42 must treat exact header/member equality as complete, including an explicit 0/0 day');
+assert.doesNotMatch(v42, /expected > 0 && actual === expected/, 'V42 must never demote a confirmed 0/0 WHPP day into a missing cohort');
 assert.match(v42, /const preservedWhpp = whppRows\.length === 0 \? existingWhppDailyMembership\(parsed\.reportDate\)/, 'empty WHPP partitions must inspect preserved standard membership at the write boundary');
-assert.match(v42, /if \(preservedWhpp\.present\)[\s\S]*PRESERVED_EXISTING_NONZERO_DAILY_MEMBERSHIP[\s\S]*else \{[\s\S]*saveWhppDailyImport\(/, 'V42 must skip destructive WHPP daily writes when a complete nonzero same-date cohort is preserved');
+assert.match(v42, /if \(preservedWhpp\.present\)[\s\S]*PRESERVED_EXISTING_COMPLETE_DAILY_MEMBERSHIP[\s\S]*else \{[\s\S]*saveWhppDailyImport\(/, 'V42 must skip destructive WHPP daily writes when any complete same-date cohort, including zero, is preserved');
 assert.match(v42, /invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged \}\)/, 'same-date invalidation must know whether WHPP actually changed');
 assert.match(v42, /if \(whppChanged\) \{[\s\S]*businessType='WHPP'/, 'WHPP run/history pointers must survive an unrelated empty-WHPP reimport');
 assert.match(v42, /classificationCounts: effectiveCounts/, 'immediate import response must publish effective seven-business WHPP truth, not parser zero after preservation');
@@ -104,9 +106,9 @@ assert.equal(dashboard.metrics.unresolved, 11);
 assert.equal(dashboard.metrics.pending1, 11);
 assert.equal(dashboard.detailTabs.all.total, 236, 'WHPP 236 card must drill into the same 236 membership rows');
 assert.equal(dashboard.detailTabs.pod.total, 200);
-assert.equal(dashboard.detailTabs.returned, 20);
-assert.equal(dashboard.detailTabs.cancelled, 5);
-assert.equal(dashboard.detailTabs.unresolved, 11);
+assert.equal(dashboard.detailTabs.returned.total, 20);
+assert.equal(dashboard.detailTabs.cancelled.total, 5);
+assert.equal(dashboard.detailTabs.unresolved.total, 11);
 assert.equal(dashboard.accounting.accounted, 236);
 assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
@@ -176,7 +178,7 @@ const noBatchPartialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({
 assert.equal(noBatchPartialFacts.present, false, 'missing batch must not weaken exact-count safety');
 assert.equal(noBatchPartialFacts.membershipSource, 'NO_VALID_UNIFIED_BATCH');
 
-console.log('[V351] WHPP source-truth smoke passed · V42 protects same-date nonzero membership at write boundary · V94 no V216 repair · V161 direct standard daily first · exact zero stays zero · 235/236 standard fails closed · V351 disaster/history fallback only when standard header is missing · exact 236/236 facts recover · partial facts fail closed');
+console.log('[V351] WHPP source-truth smoke passed · V42 preserves any complete same-date membership including exact zero · V94 no V216 repair · V161 direct standard daily first · exact zero stays zero · 235/236 standard fails closed · V351 disaster/history fallback only when standard header is missing · exact 236/236 facts recover · partial facts fail closed');
 await import('./v352-whpp-visible-single-truth-smoke.mjs');
 await import('./whpp-visible-truth-smoke.mjs');
 await import('./shopee-history-region-signing-smoke.mjs');
