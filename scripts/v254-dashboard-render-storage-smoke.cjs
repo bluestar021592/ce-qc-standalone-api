@@ -96,9 +96,9 @@ assert.match(attemptCycle,/only when the whole trajectory has no code 70 may cod
 
 assert.match(trend,/new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'V263 read endpoint scope must be exact');
 assert.match(trend,/signingDaysSum/,'average signing days must come from locked per-shipment signing days');
-assert.match(trend,/attemptNo=1/,'reader must expose first-attempt POD evidence');
-assert.match(trend,/attemptNo=2/,'reader must expose second-attempt POD evidence');
-assert.match(trend,/attemptNo>=3/,'reader must expose third-plus attempt POD evidence');
+assert.match(trend,/attempt1Known:knownAttempt1[\s\S]*attempt1:attemptEvidenceComplete\?knownAttempt1:null/,'reader must retain first-attempt evidence and publish it only when complete');
+assert.match(trend,/attempt2Known:knownAttempt2[\s\S]*attempt2:attemptEvidenceComplete\?knownAttempt2:null/,'reader must retain second-attempt evidence and publish it only when complete');
+assert.match(trend,/attempt3Known:knownAttempt3[\s\S]*attempt3:attemptEvidenceComplete\?knownAttempt3:null/,'reader must retain third-plus attempt evidence and publish it only when complete');
 assert.match(trend,/evidenceIncomplete/,'read model must disclose incomplete evidence instead of presenting partial numbers as final');
 assert.match(trend,/DASHBOARD_LOW_COVERAGE/,'low-coverage dashboard reads must trigger scoped background repair');
 assert.match(runtime,/import '\.\/v263DeliveryKpiTrendPatch\.js';/,'V263 trend route must activate in normal runtime');
