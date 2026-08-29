@@ -5,6 +5,7 @@ import { WHPP, loadWhppState, saveWhppState, finalizeWhppState } from './whppSto
 
 const PATCH_ID = '2026-08-14-v134-whpp-run-supervisor-v1';
 const BACKEND_CONTINUITY_REVISION = '2026-08-29-v357-whpp-backend-final-stage-continuity-v1';
+const SELECTED_DATE_CONTINUITY_REVISION = '2026-08-29-v359-selected-date-whpp-backend-continuity-v1';
 const START_PATHS = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
 const PROGRESS_PATH = '/api/whpp/progress';
 const WHPP_REQUEST_TIMEOUT_MS = Math.max(8_000, Math.min(45_000, Number(process.env.WHPP_REQUEST_TIMEOUT_MS || 20_000)));
@@ -223,7 +224,11 @@ async function maybeAutoResumeWhpp(reason = 'backend-watch') {
       import('./v132WhppFastIntegrationPatch.js'),
       import('./v165WhppRunStateRecoveryPatch.js')
     ]);
-    const ccsl = ccslModule.inspectV317CcslRecovery({ reportDate: '' });
+    const selectedHint = typeof ccslModule.inspectV317ExplicitReportDateHint === 'function'
+      ? ccslModule.inspectV317ExplicitReportDateHint({ maxAgeMs: 60_000 })
+      : null;
+    const hintedDate = selectedHint?.fresh ? dateOnly(selectedHint.reportDate) : '';
+    const ccsl = ccslModule.inspectV317CcslRecovery({ reportDate: hintedDate });
     const reportDate = dateOnly(ccsl?.reportDate);
     if (!reportDate || ccsl?.complete !== true) return false;
 
@@ -250,7 +255,10 @@ async function maybeAutoResumeWhpp(reason = 'backend-watch') {
     const started = launchWhpp('resume');
     console.log('[CE-QC][V357_WHPP_BACKEND_CONTINUITY]', JSON.stringify({
       revision: BACKEND_CONTINUITY_REVISION,
+      selectedDateRevision: SELECTED_DATE_CONTINUITY_REVISION,
       reportDate,
+      reportDateSource: hintedDate ? 'VISIBLE_BROWSER_STATUS_HINT' : 'CANONICAL_FALLBACK',
+      hintAgeMs: Number(selectedHint?.ageMs || 0),
       reason,
       ccslComplete: true,
       shopeeComplete: true,
@@ -298,6 +306,7 @@ function startHandler(mode) {
         accepted: true,
         patchId: PATCH_ID,
         backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
+        selectedDateContinuityRevision: SELECTED_DATE_CONTINUITY_REVISION,
         reportDate: started.reportDate,
         processing: { running: true, phase: started.phase },
         runtime: started,
@@ -341,6 +350,7 @@ function progressHandler(req, res) {
     ok: true,
     patchId: PATCH_ID,
     backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
+    selectedDateContinuityRevision: SELECTED_DATE_CONTINUITY_REVISION,
     reportDate: state.reportDate,
     processing,
     runtimeActive,
@@ -378,6 +388,7 @@ export function inspectV134WhppRuntime() {
   return {
     patchId: PATCH_ID,
     backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
+    selectedDateContinuityRevision: SELECTED_DATE_CONTINUITY_REVISION,
     requestTimeoutMs: WHPP_REQUEST_TIMEOUT_MS,
     runtimeActive: Boolean(runtimePromise && runtime.active),
     runtime: publicRuntime(runtimePromise && runtime.active ? runtime : lastRuntime),
@@ -394,3 +405,4 @@ export function inspectV134WhppRuntime() {
 export { maybeAutoResumeWhpp as recoverV357PendingWhppFinalStage };
 export const V134_WHPP_RUN_SUPERVISOR_PATCH_ID = PATCH_ID;
 export const V357_WHPP_BACKEND_CONTINUITY_REVISION = BACKEND_CONTINUITY_REVISION;
+export const V359_WHPP_SELECTED_DATE_CONTINUITY_REVISION = SELECTED_DATE_CONTINUITY_REVISION;
