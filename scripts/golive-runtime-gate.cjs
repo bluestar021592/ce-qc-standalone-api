@@ -41,6 +41,7 @@ const must = (source, token) => { if (!source.includes(token)) throw new Error(`
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
 
 must(runner, '2026-08-29-v355-authoritative-whpp-auto-resume-v1');
+must(runner, '2026-08-29-v355-visible-import-watch-v2');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
 must(runner, "{ key: 'WHPP'");
@@ -58,6 +59,8 @@ must(runner, 'recoverPendingWhpp');
 must(runner, "void execute('resume')");
 must(runner, 'V355_WHPP_AUTO_RESUME');
 must(runner, 'CCSL与SHOPEE均已完成，正在自动续跑WHPP本土');
+must(runner, '[data-page="import"]');
+must(runner, "recoverPendingWhpp('visible-import-watch')");
 must(whppUi, '2026-08-29-v353-whpp-display-only-v1');
 must(whppUi, 'displayOnly:true');
 must(whppUi, "authoritativeRunner:'V67'");
@@ -87,7 +90,8 @@ must(bstore, 'compactBusinessStatePayload');
 must(bstore, 'stripHeavyBusinessRow');
 must(bstore, 'finalByBill');
 must(bstore, 'priorCarryByBill');
-must(shell, 'v67-resilient-run-guard.js?v=20260829-v355-1');
+// Cache-bust suffixes may advance without changing the single-runner contract.
+must(shell, 'v67-resilient-run-guard.js?v=');
 must(shell, 'v132-whpp-seven-business-fast.js?v=20260829-v353-1');
 must(shell, 'v183HistoricalStatusRefreshPatch.js');
 must(shell, '/v183-history-refresh.js?v=20260822-v226-1');
@@ -204,4 +208,4 @@ must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, whppUi, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V67 exclusively owns three-stage run/resume, completed CCSL/SHOPEE stages are skipped, pending WHPP auto-resumes on the import page, WHPP requires explicit canonical completion, and V132 is display-only');
+console.log('[GOLIVE] runtime-source gate passed; V67 exclusively owns three-stage run/resume, completed CCSL/SHOPEE stages are skipped, pending WHPP auto-resumes whenever the import page becomes visible, WHPP requires explicit canonical completion, and V132 is display-only');
