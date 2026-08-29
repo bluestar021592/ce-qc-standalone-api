@@ -64,6 +64,17 @@ function invalidateMutableSameDatePointers(reportDate, { whppChanged = true } = 
   }
 }
 
+function invalidateDashboardReadCaches() {
+  for (const name of [
+    '__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__',
+    '__CE_QC_INVALIDATE_V253_DASHBOARD_FAST_PATH__',
+    '__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__'
+  ]) {
+    try { if (typeof globalThis[name] === 'function') globalThis[name](); }
+    catch (error) { console.warn('[CE-QC][V42][CACHE_INVALIDATE]', name, error?.message || error); }
+  }
+}
+
 async function handleUnifiedImportV42(req, res) {
   try {
     if (!req.file) throw new Error('没有收到综合日报Excel文件');
@@ -108,6 +119,7 @@ async function handleUnifiedImportV42(req, res) {
       whppImportSource = whppRows.length ? 'DIRECT_PARSER_WHPP_DAILY_IMPORT' : 'DIRECT_CONFIRMED_ZERO_WHPP_DAILY_IMPORT';
     }
     invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged });
+    invalidateDashboardReadCaches();
 
     const effectiveCounts = { ...(parsed.classificationCounts || {}), WHPP: effectiveWhppCount };
     const effectiveTotal = Object.values(effectiveCounts).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -138,7 +150,7 @@ async function handleUnifiedImportV42(req, res) {
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
       },
-      architectureNote: 'WHPP使用独立持久化快照；非空日报直接落库；同日空WHPP分区不得擦除既有完整成员（包括明确0票）；现有CCSL/SHOPEE统一快照保持兼容。'
+      architectureNote: 'WHPP使用独立持久化快照；非空日报直接落库；同日空WHPP分区不得擦除既有完整成员（包括明确0票）；导入后立即失效当前看板/趋势只读缓存；现有CCSL/SHOPEE统一快照保持兼容。'
     });
   } catch (error) {
     console.error('[V42][UNIFIED_IMPORT]', error);
