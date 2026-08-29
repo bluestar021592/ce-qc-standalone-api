@@ -8,6 +8,19 @@ const originalGet=express.application.get;
 function currentHandler(req,res){
   try{
     const data=readV236CurrentSummary(String(req.query.reportDate||'').slice(0,10));
+    if(data.whpp?.membershipIncomplete){
+      res.setHeader('Cache-Control','no-store');
+      res.setHeader('X-CE-QC-Current-Read',V236_DASHBOARD_CURRENT_READ_ID);
+      return res.status(409).json({
+        ok:false,
+        routeId:V236_DASHBOARD_CURRENT_ROUTE_ID,
+        code:data.whpp.errorCode||'WHPP_STANDARD_DAILY_INCOMPLETE',
+        error:`WHPP标准日报成员不完整：日报头${Number(data.whpp.expected||0)}票，成员${Number(data.whpp.actual||0)}票`,
+        reportDate:data.reportDate,
+        expected:Number(data.whpp.expected||0),
+        actual:Number(data.whpp.actual||0)
+      });
+    }
     res.setHeader('Cache-Control','no-store');
     res.setHeader('X-CE-QC-Current-Read',V236_DASHBOARD_CURRENT_READ_ID);
     return res.json(data);
