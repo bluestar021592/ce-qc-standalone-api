@@ -1,8 +1,9 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-29-v354-authoritative-three-stage-resume-v1';
+  const VERSION = '2026-08-29-v355-authoritative-whpp-auto-resume-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
+  const autoRecoveryDates = new Set();
   let busy = false;
 
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
@@ -29,6 +30,11 @@
         || (typeof shopeeState !== 'undefined' ? shopeeState?.reportDate : '')
       );
     } catch { return ''; }
+  }
+
+  function importPageVisible() {
+    const page = document.getElementById('importPage');
+    return Boolean(page && !page.hidden && document.visibilityState !== 'hidden');
   }
 
   async function jsonFetch(url, options = {}) {
@@ -260,6 +266,48 @@
     return { label: stage.label, ok: false, error: lastError?.message || String(lastError || '处理失败') };
   }
 
+  async function recoverPendingWhpp(reason = 'startup') {
+    if (busy || !importPageVisible()) return false;
+    const target = targetDate();
+    if (!target || autoRecoveryDates.has(target)) return false;
+    const ccslStage = { key: 'CCSL' };
+    const shopeeStage = { key: 'SHOPEE' };
+    const whppStage = { key: 'WHPP' };
+    let ccsl;
+    let shopee;
+    let whpp;
+    try {
+      ccsl = await canonicalStageTruth(ccslStage, target);
+      if (!ccsl.done) return false;
+      shopee = await canonicalStageTruth(shopeeStage, target);
+      if (!shopee.done) return false;
+      whpp = await canonicalStageTruth(whppStage, target);
+      if (whpp.done) {
+        autoRecoveryDates.add(target);
+        return false;
+      }
+      if (whpp.error && !whppStillPending(whpp.error) && !isTransient(whpp.error)) return false;
+    } catch (error) {
+      if (isAuth(error)) return false;
+      return false;
+    }
+    autoRecoveryDates.add(target);
+    setStatus(`检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土…`);
+    console.info('[CE-QC][V355_WHPP_AUTO_RESUME]', { reportDate: target, reason });
+    void execute('resume');
+    return true;
+  }
+
+  function scheduleAutoRecovery() {
+    [900, 2500, 6000, 12000].forEach(ms => setTimeout(() => { void recoverPendingWhpp(`startup-${ms}`); }, ms));
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') setTimeout(() => { void recoverPendingWhpp('visibility'); }, 250);
+    });
+    document.addEventListener('click', event => {
+      if (event.target?.closest?.('.side-link[data-page="import"]')) setTimeout(() => { void recoverPendingWhpp('import-navigation'); }, 500);
+    }, true);
+  }
+
   async function execute(mode = 'start') {
     if (busy) return;
     const target = targetDate();
@@ -320,8 +368,9 @@
   function install() {
     global.runUnified = () => execute('start');
     global.resumeUnified = () => execute('resume');
-    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute, targetDate, verifyWhpp, readWhppSummary, canonicalStageTruth };
-    console.info('[CE-QC][V354_THREE_STAGE_RUNNER]', VERSION, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and WHPP requires explicit canonical completion even at 0 tickets.');
+    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute, targetDate, verifyWhpp, readWhppSummary, canonicalStageTruth, recoverPendingWhpp };
+    scheduleAutoRecovery();
+    console.info('[CE-QC][V355_THREE_STAGE_RUNNER]', VERSION, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and a pending WHPP stage auto-resumes on the import page.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
