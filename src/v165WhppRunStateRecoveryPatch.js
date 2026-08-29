@@ -1,9 +1,11 @@
 import express from 'express';
 import { getDb } from './db.js';
 import { loadWhppState, saveWhppState } from './whppStore.js';
+import { ensureV351WhppNormalizedDaily } from './v351WhppUnifiedDashboardBridgePatch.js';
 import './v134WhppRunSupervisorPatch.js';
 
 const PATCH_ID = '2026-08-17-v165-whpp-run-state-recovery-v2';
+const NORMALIZED_BRIDGE_REVISION = '2026-08-29-v358-whpp-requested-date-normalized-bridge-v1';
 const RUN_ROUTES = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
 const WRAPPED = Symbol.for('ce-qc.v165-whpp-run-state-recovery');
 const INTERRUPTED_RUN_REASON = 'PROCESS_RESTART_INTERRUPTED';
@@ -92,9 +94,39 @@ function normalizedDaily(reportDate = '') {
   return { daily, rows, bills, summary: safeJson(daily.summaryJson, {}) };
 }
 
+function ensureRequestedNormalizedDaily(reportDate = '') {
+  const requested = dateOnly(reportDate);
+  if (!requested) return { attempted: false, repaired: false, reason: 'REPORT_DATE_MISSING' };
+  if (normalizedDaily(requested)) return { attempted: false, repaired: false, reason: 'STANDARD_DAILY_ALREADY_PRESENT', reportDate: requested };
+  const bridge = ensureV351WhppNormalizedDaily(requested);
+  if (bridge?.repaired) {
+    console.log('[CE-QC][V358_WHPP_NORMALIZED_BRIDGE]', JSON.stringify({
+      revision: NORMALIZED_BRIDGE_REVISION,
+      reportDate: requested,
+      repaired: true,
+      reason: bridge.reason || '',
+      total: Number(bridge.total || 0)
+    }));
+  } else {
+    console.log('[CE-QC][V358_WHPP_NORMALIZED_BRIDGE]', JSON.stringify({
+      revision: NORMALIZED_BRIDGE_REVISION,
+      reportDate: requested,
+      repaired: false,
+      reason: bridge?.reason || 'NO_SAFE_MEMBERSHIP'
+    }));
+  }
+  return { attempted: true, ...bridge };
+}
+
 function recoverWhppState(reportDate = '') {
-  const normalized = normalizedDaily(reportDate);
-  if (!normalized) return { recovered: false, reason: 'NO_NORMALIZED_DAILY' };
+  const requested = dateOnly(reportDate);
+  let normalized = normalizedDaily(requested);
+  let bridge = null;
+  if (!normalized && requested) {
+    bridge = ensureRequestedNormalizedDaily(requested);
+    normalized = normalizedDaily(requested);
+  }
+  if (!normalized) return { recovered: false, reason: 'NO_NORMALIZED_DAILY', reportDate: requested, bridge };
   const expected = Number(normalized.daily.totalCount || 0);
   if (normalized.bills.length !== expected) {
     const error = new Error(`WHPP标准日报成员对账失败：日报${expected}票，成员表${normalized.bills.length}票。`);
@@ -105,7 +137,7 @@ function recoverWhppState(reportDate = '') {
   const sameDate = dateOnly(current.reportDate) === dateOnly(normalized.daily.reportDate);
   const sameMembers = sameSet(current.pnhBills || [], normalized.bills);
   if (sameDate && current.dailyReportReady && sameMembers) {
-    return { recovered: false, reason: 'STATE_ALREADY_CURRENT', state: current, expected };
+    return { recovered: false, reason: 'STATE_ALREADY_CURRENT', state: current, expected, bridge };
   }
 
   const db = getDb();
@@ -142,19 +174,29 @@ function recoverWhppState(reportDate = '') {
     currentRun: null,
     lastRunSummary: null,
     lastRun: null,
-    v165RecoveredFromNormalizedDaily: { patchId: PATCH_ID, reportDate: normalized.daily.reportDate, expected, recoveredAt: now }
+    v165RecoveredFromNormalizedDaily: { patchId: PATCH_ID, revision: NORMALIZED_BRIDGE_REVISION, reportDate: normalized.daily.reportDate, expected, recoveredAt: now }
   });
-  return { recovered: true, reason: 'NORMALIZED_SQLITE_REHYDRATE', state, expected };
+  return { recovered: true, reason: 'NORMALIZED_SQLITE_REHYDRATE', state, expected, bridge };
 }
 
 function recoverMiddleware(req, res, next) {
   try {
     const requested = dateOnly(req.body?.reportDate || req.query?.reportDate || '');
     const result = recoverWhppState(requested);
+    if (requested && result.reason === 'NO_NORMALIZED_DAILY') {
+      return res.status(409).json({
+        ok: false,
+        code: 'WHPP_REPORT_MISSING',
+        error: `WHPP本土${requested}日报成员无法从当前有效日报安全恢复，已停止错误日期运行。`,
+        patchId: PATCH_ID,
+        normalizedBridgeRevision: NORMALIZED_BRIDGE_REVISION,
+        recovery: result
+      });
+    }
     req.ceQcV165WhppRecovery = result;
     next();
   } catch (error) {
-    res.status(409).json({ ok: false, code: error.code || 'WHPP_RUN_STATE_RECOVERY_FAILED', error: error.message || String(error), patchId: PATCH_ID });
+    res.status(409).json({ ok: false, code: error.code || 'WHPP_RUN_STATE_RECOVERY_FAILED', error: error.message || String(error), patchId: PATCH_ID, normalizedBridgeRevision: NORMALIZED_BRIDGE_REVISION });
   }
 }
 
@@ -171,3 +213,4 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
 
 export { recoverWhppState as recoverV165WhppRunState };
 export const V165_WHPP_RUN_STATE_RECOVERY_ID = PATCH_ID;
+export const V165_WHPP_NORMALIZED_BRIDGE_REVISION = NORMALIZED_BRIDGE_REVISION;
