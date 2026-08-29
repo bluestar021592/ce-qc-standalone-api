@@ -48,6 +48,10 @@ jobs:
           node --check src/v200ReferenceWorkbook.js
           node --check src/dashboardCacheWorker.js
           node --check src/whppMembershipRecovery.js
+          node --check src/v351WhppUnifiedDashboardBridgePatch.js
+          node --check src/v329ThreeBusinessDailyCache.js
+          node --check src/shopeeHistoricalSigningTruth.js
+          node --check scripts/v329-three-business-cache-worker.mjs
           node --check public/v58-drilldown-runtime.js
           node --check public/v234-dashboard-live.js
           node --check public/v235-cache-ready-reload.js
@@ -56,10 +60,14 @@ jobs:
           node --check scripts/v237-dashboard-owner-source-smoke.cjs
           node --check scripts/whpp-membership-recovery-smoke.mjs
           node --check scripts/whpp-visible-truth-smoke.mjs
+          node --check scripts/v351-whpp-unified-dashboard-bridge-smoke.mjs
+          node --check scripts/shopee-history-region-signing-smoke.mjs
           node --check scripts/shopee-export-truth-smoke.mjs
           node --check scripts/CE_QC_Production_Audit.mjs
       - name: WHPP verified-backup membership recovery smoke
         run: node scripts/whpp-membership-recovery-smoke.mjs
+      - name: WHPP membership, visible truth and Shopee PP/PV signing smoke
+        run: node scripts/v351-whpp-unified-dashboard-bridge-smoke.mjs
       - name: WHPP visible truth smoke
         run: node scripts/whpp-visible-truth-smoke.mjs
       - name: Shopee export truth smoke
