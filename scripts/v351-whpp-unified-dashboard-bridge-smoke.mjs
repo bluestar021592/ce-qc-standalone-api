@@ -10,15 +10,19 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'v351WhppUnifie
 const v85 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v85ShopeeWhppMetricPatch.js'), 'utf8').replace(/\r\n/g, '\n');
 const v132 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v132WhppFastIntegrationPatch.js'), 'utf8').replace(/\r\n/g, '\n');
 execFileSync(process.execPath, ['--check', path.join(__dirname, '..', 'src', 'v132WhppFastIntegrationPatch.js')], { stdio: 'pipe' });
+execFileSync(process.execPath, ['--check', path.join(__dirname, '..', 'src', 'v351WhppUnifiedDashboardBridgePatch.js')], { stdio: 'pipe' });
+execFileSync(process.execPath, ['--check', path.join(__dirname, '..', 'src', 'shopeeHistoricalSigningTruth.js')], { stdio: 'pipe' });
+execFileSync(process.execPath, ['--check', path.join(__dirname, 'v329-three-business-cache-worker.mjs')], { stdio: 'pipe' });
 
 assert.match(V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, /v351-whpp-unified-membership-dashboard-bridge/);
 assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351 must load before server route registration');
 assert.match(v132, /import \{ loadV351UnifiedWhppMembership \} from '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'primary V132 visible summary must share V351 membership authority');
 assert.match(v132, /const membership=loadV351UnifiedWhppMembership\(reportDate,db\)/, 'V132 must delegate WHPP membership selection to the zero-safe V351 owner');
 assert.match(source, /unified_import_batches[\s\S]*status='VALID'/, 'WHPP current membership must inspect the latest VALID unified import');
+assert.match(source, /if \(!batch\)[\s\S]*loadPreservedWhppMembership\(date, db\)/, 'missing VALID unified batch must still recover preserved WHPP truth');
 assert.match(source, /if \(rows\.length\)[\s\S]*LATEST_VALID_UNIFIED_MEMBERSHIP/, 'only a non-empty WHPP unified partition may become authoritative');
 assert.match(source, /UNIFIED_WHPP_EMPTY_KEEP_STANDARD/, 'an empty unified WHPP partition must never erase preserved standard membership');
-assert.match(source, /WHPP_STANDARD_DAILY_ROWS/, 'zero unified WHPP must first preserve existing standard WHPP daily members');
+assert.match(source, /WHPP_STANDARD_DAILY_ROWS/, 'zero/missing unified WHPP must first preserve existing standard WHPP daily members');
 assert.match(source, /WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL/, 'a previously erased standard membership may self-heal only from a full fact set matching completed history total');
 assert.match(source, /factRows\.length !== expected/, 'partial final facts must never be promoted to membership');
 assert.match(source, /business_scan_results/, 'fact-based membership recovery must reuse saved scan region evidence when available');
@@ -67,18 +71,18 @@ assert.equal(dashboard.accounting.difference, 0);
 assert.equal(dashboard.accounting.balanced, true);
 assert.equal(dashboard.regions.PP.total + dashboard.regions.PV.total + dashboard.regions.UNKNOWN.total, 236);
 
-function fakeDb({ standard = membershipRows, facts = membershipRows, scans = membershipRows, history = 236 } = {}) {
+function fakeDb({ standard = membershipRows, facts = membershipRows, scans = membershipRows, history = 236, batchPresent = true } = {}) {
   return {
     prepare(sql) {
       const text = String(sql || '');
       return {
-        get(...args) {
+        get() {
           if (/MAX\(reportDate\)/.test(text)) return { reportDate: '2026-08-14' };
-          if (/FROM unified_import_batches/.test(text)) return { batchId: 'BATCH-ZERO-WHPP', snapshotId: 'SNAP-ZERO-WHPP', reportDate: '2026-08-14', sourceName: '8-14.xlsx' };
+          if (/FROM unified_import_batches/.test(text)) return batchPresent ? { batchId: 'BATCH-ZERO-WHPP', snapshotId: 'SNAP-ZERO-WHPP', reportDate: '2026-08-14', sourceName: '8-14.xlsx' } : undefined;
           if (/FROM business_history_summary/.test(text)) return { summaryJson: JSON.stringify({ total: history }) };
           return undefined;
         },
-        all(...args) {
+        all() {
           if (/FROM unified_import_rows/.test(text)) return [];
           if (/FROM business_daily_parse_rows/.test(text)) return standard.map(row => ({ shipmentCode: row.shipmentCode, rowJson: JSON.stringify(row) }));
           if (/FROM business_scan_results/.test(text)) return scans.map(row => ({ shipmentCode: row.shipmentCode, rawJson: JSON.stringify({ regionCode: row.regionCode }) }));
@@ -103,10 +107,22 @@ assert.equal(recoveredFacts.membershipSource, 'WHPP_FINAL_FACTS_MATCH_HISTORY_TO
 assert.equal(recoveredFacts.rows.filter(row => row.regionCode === 'PP').length, 118);
 assert.equal(recoveredFacts.rows.filter(row => row.regionCode === 'PV').length, 118);
 
+const noBatchRecoveredFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], batchPresent: false }));
+assert.equal(noBatchRecoveredFacts.batchPresent, false, 'production regression fixture has no VALID unified batch');
+assert.equal(noBatchRecoveredFacts.present, true, 'no VALID unified batch must still recover exact preserved WHPP facts');
+assert.equal(noBatchRecoveredFacts.rows.length, 236);
+assert.equal(noBatchRecoveredFacts.membershipSource, 'WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL');
+
 const partialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], facts: membershipRows.slice(0, 235), scans: membershipRows.slice(0, 235) }));
 assert.equal(partialFacts.present, false, '235/236 preserved facts must not be promoted to WHPP membership');
 assert.equal(partialFacts.rows.length, 0);
 assert.equal(partialFacts.membershipSource, 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD');
 
-console.log('[V351] WHPP unified-dashboard bridge smoke passed · primary V132 shares the zero-safe membership owner · zero unified WHPP can no longer erase standard membership · erased membership recovers only from complete 236/236 preserved facts with PP/PV region evidence · 235/236 partial facts fail closed · exact 236 cards/drilldowns remain one truth · membership repair only · no DB schema change');
+const noBatchPartialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({ standard: [], facts: membershipRows.slice(0, 235), scans: membershipRows.slice(0, 235), batchPresent: false }));
+assert.equal(noBatchPartialFacts.present, false, 'missing batch must not weaken exact-count safety');
+assert.equal(noBatchPartialFacts.membershipSource, 'NO_VALID_UNIFIED_BATCH');
+
+console.log('[V351] WHPP unified-dashboard bridge smoke passed · V132 shares zero-safe membership · missing/zero unified WHPP cannot erase preserved truth · exact 236/236 facts recover with or without unified batch · 235/236 fails closed · cards/drilldowns one truth · membership repair only');
 await import('./v352-whpp-visible-single-truth-smoke.mjs');
+await import('./whpp-visible-truth-smoke.mjs');
+await import('./shopee-history-region-signing-smoke.mjs');
