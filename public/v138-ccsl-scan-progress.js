@@ -1,6 +1,6 @@
 (function installV138CcslScanProgress(global){
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
-  const VERSION='2026-08-27-v338-ccsl-350-scan-50-track-ui-v1';
+  const VERSION='2026-08-29-v341-ccsl-progress-owner-guard-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
@@ -11,6 +11,24 @@
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
   const normalizeDate=value=>{const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
   const selectedReportDate=()=>normalizeDate(document.getElementById('reportDate')?.value||document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
+
+  function unifiedOwnsLegacyStatus(node){
+    if(!node)return false;
+    const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
+    if(stage?.owner==='V67'&&stage.active===true){
+      return String(stage.type||'').toUpperCase()!=='CCSL';
+    }
+    if(node.dataset.v67UnifiedOwner!=='1')return false;
+    const ownerDate=normalizeDate(node.dataset.v67UnifiedReportDate||'');
+    const currentDate=selectedReportDate();
+    if(ownerDate&&currentDate&&ownerDate!==currentDate){
+      delete node.dataset.v67UnifiedOwner;
+      delete node.dataset.v67UnifiedReportDate;
+      return false;
+    }
+    return true;
+  }
+
   const statusText=progress=>{
     const status=String(progress?.runStatus||'').toLowerCase();
     if(progress?.noDaily===true)return '无日报';
@@ -119,6 +137,7 @@
     if(!progress)return;
     const status=document.getElementById('ccslRunStatus');
     const button=document.querySelector('[data-testid="global-auto-process"]');
+    if(status&&unifiedOwnsLegacyStatus(status))return;
     if(status){status.innerHTML=markup(progress);status.dataset.v334ProgressState=statusText(progress)==='已完成'?'done':(progress.noDaily?'no-daily':'active');}
     if(button&&button.disabled&&progress.running){
       const p=phase(progress);
@@ -130,6 +149,8 @@
     const original=global.runStatusMarkup;
     if(typeof original!=='function'||original.__v334TruthfulProgress)return;
     const wrapped=function(state){
+      const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
+      if(stage?.owner==='V67'&&stage.active===true&&String(stage.type||'').toUpperCase()!=='CCSL')return original.apply(this,arguments);
       const type=String(state?.businessType||'CCSL').toUpperCase()==='SHOPEE'?'SHOPEE':'CCSL';
       const live=progressByType.get(type);
       const sameDate=!live?.reportDate||!state?.reportDate||String(live.reportDate)===String(state.reportDate);
@@ -167,6 +188,6 @@
     [100,450,1200].forEach(ms=>setTimeout(tick,ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth};
-  console.info('[CE-QC][V338_CCSL_DETAIL_OWNER]',VERSION,'V138 canonical selected-date truth; CCSL scan=350 tickets/batch and trajectory=50 tickets/batch.');
+  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus};
+  console.info('[CE-QC][V341_CCSL_DETAIL_OWNER]',VERSION,'CCSL progress keeps 350/50 detail but yields #ccslRunStatus to unified Shopee/WHPP/final status.');
 })(window);
