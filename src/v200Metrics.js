@@ -23,8 +23,8 @@ export function completeAttemptCount(stat = {}, numerator = 0, options = {}) {
   if (publication.pod > 0 && !publication.complete) return null;
   return Number(numerator || 0);
 }
-// V329: denominator is ALL completed POD tickets. If even one POD ticket lacks
-// a real first-report-lock/POD date pair, the exact average is not publishable.
+// Exact workbook publication requires a real signing-day sample for every completed POD ticket.
+// For TBKH/SHOPEE CN/VN those samples come from the same real dispatch START -> POD truth as 1/2/3派.
 export function completeSigningAverage(values = [], pod = 0) {
   const expected = Math.max(0, Number(pod || 0));
   const usable = values.map(Number).filter(value => Number.isFinite(value) && value > 0);
@@ -35,6 +35,15 @@ export function completeSigningAverage(values = [], pod = 0) {
 function dateKey(value = '') { const m = String(value || '').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; }
 function dayNumber(value = '') { const k = dateKey(value); if (!k) return null; const [y,m,d] = k.split('-').map(Number); return Date.UTC(y,m-1,d); }
 export function referenceAverageDays(firstReportDate,podDate){const a=dayNumber(firstReportDate),b=dayNumber(podDate);return a===null||b===null||b<a?0:Math.floor((b-a)/86400000)+1;}
+const STRICT_SIGNING_TYPES = new Set(['TBKH','SHOPEECN','SHOPEEVN']);
+function signingDaysForMetric(row = {}) {
+  const type = String(row.businessType || '').trim().toUpperCase();
+  if (STRICT_SIGNING_TYPES.has(type)) {
+    const days = Number(row.signingDays || row.deliveryDays || 0);
+    return Number.isFinite(days) && days > 0 ? days : 0;
+  }
+  return referenceAverageDays(row.firstReportDate || row.lifecycleFirstReportDate, row.podDate || row.podTime);
+}
 function emptyStat(date = '') {
   return {
     date, total: 0, pp: 0, pv: 0, unknown: 0, store: 0, pod: 0, notPod: 0, delivery: 0, pending: 0, returned: 0,
@@ -51,18 +60,16 @@ function applyStat(stat, row) {
   if (row.pod) {
     stat.pod++;
     if (row.attemptNo === 1) stat.a1++; else if (row.attemptNo === 2) stat.a2++; else if (row.attemptNo >= 3) stat.a3++; else stat.attemptUnknown++;
-    // Exact user KPI: first daily-report locked date -> actual POD date, inclusive.
-    // Do not reuse legacy dispatch-START signingDays here.
-    const referenceDays=referenceAverageDays(row.firstReportDate||row.lifecycleFirstReportDate,row.podDate||row.podTime);
-    if (referenceDays > 0) stat.days.push(referenceDays);
+    const signingDays = signingDaysForMetric(row);
+    if (signingDays > 0) stat.days.push(signingDays);
     if (row.area === '金边') {
       stat.ppPod++;
       if (row.attemptNo === 1) stat.ppA1++; else if (row.attemptNo === 2) stat.ppA2++; else if (row.attemptNo >= 3) stat.ppA3++; else stat.ppAttemptUnknown++;
-      if (referenceDays > 0) stat.ppDays.push(referenceDays);
+      if (signingDays > 0) stat.ppDays.push(signingDays);
     } else if (row.area === '外省') {
       stat.pvPod++;
       if (row.attemptNo === 1) stat.pvA1++; else if (row.attemptNo === 2) stat.pvA2++; else if (row.attemptNo >= 3) stat.pvA3++; else stat.pvAttemptUnknown++;
-      if (referenceDays > 0) stat.pvDays.push(referenceDays);
+      if (signingDays > 0) stat.pvDays.push(signingDays);
     }
   } else if (!row.returned) stat.notPod++;
   if (!row.returned && row.delivering) stat.delivery++;
