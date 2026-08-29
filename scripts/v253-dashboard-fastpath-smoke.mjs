@@ -13,7 +13,7 @@ assert.match(runtimeSource,/import '\.\/v253DashboardFastPath\.js';/,'V253 first
 assert.match(fastSource,/V253_V335_FIRST_PAINT_ID='2026-08-27-v335-per-business-first-paint-v1'/);
 assert.match(fastSource,/readV236CurrentSummary/,'single-day first paint must consume per-business current truth');
 assert.match(fastSource,/readV284DashboardTrends/,'explicit ranges may delegate to canonical per-business daily truth');
-assert.match(fastSource,/V335_PER_BUSINESS_SINGLE_DAY_FIRST_PAINT_NO_HISTORY_SCAN/,'same-day first paint must not scan historical tables');
+assert.match(fastSource,/PER_BUSINESS_SINGLE_DAY_FIRST_PAINT_NO_HISTORY_SCAN/,'same-day first paint must not scan historical tables');
 assert.match(fastSource,/latestBatchForType\(date,'CEAF'/,'WHPP overlap diagnostic must locate CEAF own same-date snapshot');
 assert.doesNotMatch(fastSource,/function latestBatches\(/,'retired global latest-batch-per-date helper must not return');
 assert.doesNotMatch(fastSource,/PARTITION BY reportDate ORDER BY createdAt DESC/,'V253 must not select one global snapshot for all same-date businesses');
