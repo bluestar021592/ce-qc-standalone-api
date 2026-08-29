@@ -22,13 +22,15 @@ function resolveDate(db){
 function latestValidUnifiedBatch(db,reportDate){
   return db.prepare("SELECT batchId,snapshotId,reportDate FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(reportDate)||null;
 }
-function latestValidSnapshot(db,reportDate){
+function latestValidSnapshot(db,reportDate,runId=''){
+  const currentRunId=String(runId||'').trim();
+  if(!currentRunId)return null;
   return db.prepare(`SELECT snapshotId,runId,status,reconciliationStatus,generatedAt
     FROM export_snapshots
-    WHERE reportDate=? AND snapshotType='dashboard'
+    WHERE reportDate=? AND runId=? AND snapshotType='dashboard'
       AND COALESCE(status,'VALID')='VALID'
       AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
-    ORDER BY id DESC LIMIT 1`).get(reportDate)||null;
+    ORDER BY id DESC LIMIT 1`).get(reportDate,currentRunId)||null;
 }
 function ccslMemberCount(db,reportDate,batch=null){
   const resolved=batch||latestValidUnifiedBatch(db,reportDate);
@@ -48,8 +50,8 @@ export function inspectV317CcslRecovery({db=getDb(),reportDate=''}={}){
   const validBatch=latestValidUnifiedBatch(db,date);
   const sourceTotal=ccslMemberCount(db,date,validBatch);
   const hasDaily=Boolean(validBatch)||sourceTotal>0||Boolean(db.prepare('SELECT 1 FROM daily_reports WHERE reportDate=? LIMIT 1').get(date));
-  const snapshot=sourceTotal>0&&hasDaily?latestValidSnapshot(db,date):null;
   const lock=sourceTotal>0&&hasDaily?getRunStatus(date).lock:null;
+  const snapshot=sourceTotal>0&&hasDaily?latestValidSnapshot(db,date,lock?.runId||''):null;
   const decision=ccslRecoveryDecision({hasDaily,complete:Boolean(snapshot),lockStatus:lock?.status||'',validUnified:Boolean(validBatch),sourceTotal});
   return{
     ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,
@@ -94,4 +96,4 @@ express.application.post=function v317CcslIncompleteRecoveryPost(route,...handle
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,'explicit selected reportDate wins for UI truth; fallback still uses latest VALID/current persisted date; zero-ticket closure and checkpoint-safe recovery remain unchanged.');
+console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,'explicit selected reportDate wins for UI truth; completion snapshots are bound to the current runId so retained same-date audit snapshots cannot close a fresh reupload lifecycle.');

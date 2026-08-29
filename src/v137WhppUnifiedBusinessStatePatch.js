@@ -92,9 +92,10 @@ function buildWhppUnifiedState(requested=''){
   const daily=db.prepare("SELECT totalCount,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||{};
   const history=db.prepare("SELECT summaryJson,updatedAt FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||null;
   const finalStat=db.prepare("SELECT COUNT(*) count,MAX(updatedAt) updatedAt,SUM(CASE WHEN UPPER(COALESCE(apiStatus,''))='API_PENDING_RETRY' THEN 1 ELSE 0 END) retryPending FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(reportDate)||{};
-  const snapshot=db.prepare("SELECT snapshotId,runId,generatedAt FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND COALESCE(status,'VALID')='VALID' ORDER BY createdAt DESC,id DESC LIMIT 1").get(reportDate)||null;
   const run=db.prepare("SELECT runId,status,currentStage,batchIndex,totalBatches,errorMessage,updatedAt FROM business_run_locks WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||null;
-  const fingerprint=[reportDate,daily.updatedAt||'',history?.updatedAt||'',num(finalStat.count),num(finalStat.retryPending),finalStat.updatedAt||'',snapshot?.snapshotId||'',snapshot?.generatedAt||'',run?.updatedAt||''].join('|');
+  const currentRunId=String(run?.runId||'').trim();
+  const snapshot=currentRunId?db.prepare("SELECT snapshotId,runId,generatedAt FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND runId=? AND COALESCE(status,'VALID')='VALID' ORDER BY createdAt DESC,id DESC LIMIT 1").get(reportDate,currentRunId)||null:null;
+  const fingerprint=[reportDate,daily.updatedAt||'',history?.updatedAt||'',num(finalStat.count),num(finalStat.retryPending),finalStat.updatedAt||'',currentRunId,snapshot?.snapshotId||'',snapshot?.generatedAt||'',run?.updatedAt||''].join('|');
   const cached=stateCache.get(reportDate);
   if(cached&&cached.fingerprint===fingerprint&&Date.now()-cached.at<CACHE_MS)return {...cached.state,cacheHit:true};
 
@@ -110,11 +111,11 @@ function buildWhppUnifiedState(requested=''){
   if(!history)metrics.unresolved=metrics.total;
   const exactStoredRegions=storedRegions(source,num(finalStat.count)||total);
   const regions=exactStoredRegions||(num(finalStat.count)>0?finalRegions(db,reportDate):importedRegions(db,reportDate));
-  const completed=Boolean(snapshot||history);
+  const completed=Boolean(snapshot);
   const snapshotStatus=completed?(metrics.retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED'):'PENDING';
   const processing=run?{running:run.status==='running',paused:run.status==='paused',phase:run.currentStage||'',batchIndex:num(run.batchIndex),totalBatches:num(run.totalBatches),error:run.errorMessage||''}:{running:false,paused:false,phase:''};
   const state={
-    businessType:'WHPP',viewBusinessType:'WHPP',reportDate,snapshotId:String(snapshot?.snapshotId||source.snapshotId||''),snapshotStatus,
+    businessType:'WHPP',viewBusinessType:'WHPP',reportDate,snapshotId:String(snapshot?.snapshotId||''),snapshotStatus,
     dailyReportReady:total>0,completed,total:metrics.total,metrics,regions,dashboard:{metrics,regions},
     dailyParseSummary:{totalRecognized:total,pnh:total,nonPnh:0,groupCounts:{}},
     currentRun:run,lastRunSummary:run?{runId:run.runId,reportDate,runStatus:run.status}:null,processing,

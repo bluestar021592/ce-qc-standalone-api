@@ -9,8 +9,10 @@ const installedApps=new WeakSet();
 function latestShopeeDate(db){
   return String(db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType=? ORDER BY reportDate DESC LIMIT 1").get(SHOPEE)?.reportDate||'');
 }
-function validSnapshot(db,reportDate){
-  return db.prepare("SELECT snapshotId,reconciliationStatus,status,generatedAt FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(SHOPEE,reportDate)||null;
+function validSnapshot(db,reportDate,runId=''){
+  const currentRunId=String(runId||'').trim();
+  if(!currentRunId)return null;
+  return db.prepare("SELECT snapshotId,runId,reconciliationStatus,status,generatedAt FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND runId=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(SHOPEE,reportDate,currentRunId)||null;
 }
 function dailyExists(db,reportDate){
   return Boolean(db.prepare('SELECT 1 FROM business_daily_reports WHERE businessType=? AND reportDate=? LIMIT 1').get(SHOPEE,reportDate));
@@ -20,8 +22,8 @@ export function inspectV311ShopeeRecovery({db=getDb(),reportDate=''}={}){
   const date=String(reportDate||'').trim()||latestShopeeDate(db);
   if(!date)return{ok:true,reportDate:'',dailyExists:false,complete:false,needsResume:false,reason:'NO_SHOPEE_DAILY'};
   const hasDaily=dailyExists(db,date);
-  const snapshot=hasDaily?validSnapshot(db,date):null;
   const lock=hasDaily?getBusinessRunStatus(SHOPEE,date).lock:null;
+  const snapshot=hasDaily?validSnapshot(db,date,lock?.runId||''):null;
   const complete=Boolean(snapshot&&String(snapshot.reconciliationStatus||'COMPLETED').toUpperCase()==='COMPLETED');
   return{ok:true,reportDate:date,dailyExists:hasDaily,complete,needsResume:Boolean(hasDaily&&!complete),snapshotId:snapshot?.snapshotId||'',lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),updatedAt:lock.updatedAt||''}:null};
 }
@@ -59,4 +61,4 @@ express.application.post=function v311ShopeeIncompleteRecoveryPost(route,...hand
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,'finished run locks without a VALID COMPLETED SHOPEE snapshot are reopened as failed/recoverable without deleting scan/track checkpoints or daily membership.');
+console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,'completion snapshots are bound to the current SHOPEE runId; retained same-date audit snapshots remain historical evidence and cannot close a fresh reupload lifecycle.');

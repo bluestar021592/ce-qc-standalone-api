@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+
+for (const file of [
+  'src/v317CcslIncompleteRecoveryPatch.js',
+  'src/v311ShopeeIncompleteRecoveryPatch.js',
+  'src/v137WhppUnifiedBusinessStatePatch.js',
+  'public/v159-current-import-stability.js'
+]) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
 
 const cleanSource = fs.readFileSync(new URL('../src/v294CleanReuploadIntegrity.js', import.meta.url), 'utf8');
 const activationSource = fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js', import.meta.url), 'utf8');
 const purgeSource = fs.readFileSync(new URL('../src/dataPurge.js', import.meta.url), 'utf8');
 const purgeWorkerSource = fs.readFileSync(new URL('./CE_QC_PurgeDeleteWorker.mjs', import.meta.url), 'utf8');
 const bootstrapSource = fs.readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
+const ccslRecoverySource = fs.readFileSync(new URL('../src/v317CcslIncompleteRecoveryPatch.js', import.meta.url), 'utf8');
+const shopeeRecoverySource = fs.readFileSync(new URL('../src/v311ShopeeIncompleteRecoveryPatch.js', import.meta.url), 'utf8');
+const whppStateSource = fs.readFileSync(new URL('../src/v137WhppUnifiedBusinessStatePatch.js', import.meta.url), 'utf8');
+const currentImportUiSource = fs.readFileSync(new URL('../public/v159-current-import-stability.js', import.meta.url), 'utf8');
 
 assert.match(cleanSource, /qc_tracking_ledger/);
 assert.match(cleanSource, /qc_tracking_audit/);
@@ -15,6 +27,27 @@ assert.match(purgeSource, /BUSINESS_DATA_TABLES/);
 assert.match(purgeSource, /BUSINESS_DATA_TABLES\.filter/);
 assert.match(purgeWorkerSource, /v294CleanReuploadIntegrity\.js/);
 assert.match(purgeWorkerSource, /BUSINESS_DATA_TABLES\.filter/);
+
+// Same-date reupload keeps immutable audit snapshots. Completion must therefore
+// be tied to the newly-created current run, never to any older snapshot that
+// happens to share the same reportDate.
+assert.match(ccslRecoverySource, /WHERE reportDate=\? AND runId=\? AND snapshotType='dashboard'/);
+assert.match(ccslRecoverySource, /latestValidSnapshot\(db,date,lock\?\.runId\|\|''\)/);
+assert.match(shopeeRecoverySource, /businessType=\? AND reportDate=\? AND runId=\?/);
+assert.match(shopeeRecoverySource, /validSnapshot\(db,date,lock\?\.runId\|\|''\)/);
+assert.match(whppStateSource, /businessType='WHPP' AND reportDate=\? AND runId=\?/);
+assert.match(whppStateSource, /const completed=Boolean\(snapshot\)/);
+assert.doesNotMatch(whppStateSource, /const completed=Boolean\(snapshot\|\|history\)/);
+
+// A successful fresh import owns the active selected date. This prevents the
+// homepage range owner from immediately repainting the new 8/15 import with old
+// 8/14 range cards, while the one-time gate leaves later historical queries alone.
+for (const id of ['reportDate','topRangeFrom','topRangeTo','dashboardRangeFrom','dashboardRangeTo']) {
+  assert.ok(currentImportUiSource.includes(`'${id}'`), `V159 must synchronize ${id} to the fresh import date`);
+}
+assert.match(currentImportUiSource, /syncSelectedDateToCurrentImport\(\{force:true\}\)/);
+assert.match(currentImportUiSource, /__CE_QC_V253_DASHBOARD_FAST_OWNER__\?\.refresh/);
+assert.match(currentImportUiSource, /selectedDateSyncDone/);
 
 // A raw first-occurrence search for importPhase('server', ...) is misleading because
 // the helper function is defined before the startup sequence. Verify both semantics:
@@ -33,4 +66,4 @@ assert.ok(serverLoaderStart >= 0, 'interactive-first server loader function must
 assert.ok(serverLoaderEnd > serverLoaderStart, 'interactive-first server loader must end before deferred maintenance function');
 assert.ok(serverImportIndex > serverLoaderStart && serverImportIndex < serverLoaderEnd, 'interactive-first server loader must actually import server.js');
 
-console.log('[V295.8/V294] clean reupload integrity smoke passed · runtime bootstrap order + real server loader verified · main purge and isolated SQLite purge worker both clear qc_tracking_ledger + qc_tracking_audit');
+console.log('[V295.8/V294] clean reupload integrity smoke passed · modified owners parse cleanly · current-run snapshot binding + fresh-import date synchronization verified · retained same-date audit snapshots cannot falsely close the new lifecycle');

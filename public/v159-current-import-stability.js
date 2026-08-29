@@ -8,10 +8,11 @@
   let routeGuardBusy=false;
   let routeGuardQueued=false;
   let resultRefreshBusy=false;
+  let selectedDateSyncDone=false;
 
   const num=value=>{const parsed=Number(value||0);return Number.isFinite(parsed)?parsed:0;};
   const fmt=value=>num(value).toLocaleString('zh-CN');
-  const dateOnly=value=>{const text=String(value||'').trim().slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
+  const dateOnly=value=>{const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
 
   function currentImport(){
     try{return typeof unifiedImportState!=='undefined'&&unifiedImportState?unifiedImportState:null;}catch{return null;}
@@ -75,6 +76,36 @@
       imported.carryover.currentOpen=num(imported.carryover.todayOpen);
       imported.carryover.rechecked=0;
     }
+    return changed;
+  }
+
+  function syncSelectedDateToCurrentImport({force=false}={}){
+    const imported=currentImport();
+    const current=dateOnly(imported?.reportDate||document.getElementById('reportDate')?.value||'');
+    if(!current)return false;
+    if(!force&&selectedDateSyncDone)return false;
+    const reportInput=dateOnly(document.getElementById('reportDate')?.value||'');
+    const topTo=dateOnly(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
+    if(!force&&reportInput&&reportInput!==current)return false;
+    if(!force&&topTo&&topTo>=current){selectedDateSyncDone=true;return false;}
+    for(const id of ['reportDate','topRangeFrom','topRangeTo','dashboardRangeFrom','dashboardRangeTo']){
+      const node=document.getElementById(id);
+      if(node)node.value=current;
+    }
+    try{if(typeof historyModeDate!=='undefined')historyModeDate=current;}catch{}
+    try{if(typeof dashboardPeriodRange!=='undefined')dashboardPeriodRange={fromDate:current,toDate:current};}catch{}
+    selectedDateSyncDone=true;
+    return true;
+  }
+  function refreshSelectedDashboard(){
+    setTimeout(()=>{
+      try{global.__CE_QC_V253_DASHBOARD_FAST_OWNER__?.refresh?.();}catch{}
+      try{global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.();}catch{}
+    },100);
+  }
+  function alignInitialCurrentImport(){
+    const changed=syncSelectedDateToCurrentImport();
+    if(changed){global.renderAll?.();refreshSelectedDashboard();}
     return changed;
   }
 
@@ -170,7 +201,7 @@
 
     const oldImport=global.importUnifiedExcel;
     if(typeof oldImport==='function'&&!oldImport.__v159Wrapped){
-      const wrapped=async function(){let before='';try{before=String(unifiedImportState?.snapshotId||'');}catch{}const result=await oldImport.apply(this,arguments);let after='';try{after=String(unifiedImportState?.snapshotId||'');}catch{}if(after&&(after!==before||currentImport()?.reportDate)){seedCurrentImport();normalizeImportStatus();global.renderAll?.();}return result;};
+      const wrapped=async function(){let before='';try{before=String(unifiedImportState?.snapshotId||'');}catch{}const result=await oldImport.apply(this,arguments);let after='';try{after=String(unifiedImportState?.snapshotId||'');}catch{}if(after&&(after!==before||currentImport()?.reportDate)){seedCurrentImport();normalizeImportStatus();syncSelectedDateToCurrentImport({force:true});global.renderAll?.();refreshSelectedDashboard();}return result;};
       wrapped.__v159Wrapped=true;global.importUnifiedExcel=wrapped;
     }
   }
@@ -183,9 +214,10 @@
     observer.observe(document.querySelector('.app-shell')||document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden']});
     global.addEventListener('popstate',queueRouteGuard);
     document.addEventListener('ce-qc-run-complete',()=>{seedCurrentImport();queueRouteGuard();void refreshAllResultTruth();});
-    setTimeout(()=>{if(seedCurrentImport())global.renderAll?.();normalizeImportStatus();queueRouteGuard();},80);
-    global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,refreshResults:refreshAllResultTruth,routeGuard:restoreRouteOwnership};
-    console.info('[CE-QC][V159_CURRENT_IMPORT_STABILITY]',VERSION);
+    setTimeout(()=>{if(seedCurrentImport())global.renderAll?.();normalizeImportStatus();queueRouteGuard();alignInitialCurrentImport();},80);
+    setTimeout(()=>alignInitialCurrentImport(),700);
+    global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,refreshResults:refreshAllResultTruth,routeGuard:restoreRouteOwnership,syncSelectedDate:syncSelectedDateToCurrentImport};
+    console.info('[CE-QC][V159_CURRENT_IMPORT_STABILITY]',VERSION,'fresh import owns the active selected date once; historical manual date queries remain user-controlled afterwards.');
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
