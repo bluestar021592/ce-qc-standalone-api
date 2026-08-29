@@ -323,15 +323,20 @@ function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
   const apiBatchStatus = db.prepare('SELECT runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt FROM business_api_batches WHERE businessType=? AND reportDate=? ORDER BY updatedAt').all(type, date)
     .map(row => ({ ...row, shipmentCodes: parseJsonSafe(row.shipmentCodesJson, []) }));
   const podLocks = db.prepare('SELECT shipmentCode FROM business_pod_locks WHERE businessType=? ORDER BY shipmentCode').all(type).map(row => row.shipmentCode);
+  // Only unresolved carry belongs in the mutable current state. Loading every
+  // historical carry row forced large installations to read/JSON-parse months of
+  // closed history whenever a new Shopee day was imported or started. The schema
+  // already has idx_business_carry_active(businessType,status,shipmentCode), so
+  // keep this hydration strictly on the indexed active subset.
   const carryRowsRaw = rowsFromJson(db,
-    'SELECT rawJson FROM business_carry_bills WHERE businessType=? ORDER BY updatedAt DESC',
+    "SELECT rawJson FROM business_carry_bills WHERE businessType=? AND status='active' ORDER BY updatedAt DESC",
     [type]);
   const carryByBill = new Map();
   for (const row of carryRowsRaw) {
     const bill = billOf(row);
     if (bill && !carryByBill.has(bill)) carryByBill.set(bill, row);
   }
-  const carryRows = [...carryByBill.values()].filter(row => !String(row.carry状态 || row.status || '').startsWith('closed'));
+  const carryRows = [...carryByBill.values()];
   const carryBills = carryRows.map(billOf).filter(Boolean);
   const run = db.prepare('SELECT * FROM business_run_locks WHERE businessType=? AND reportDate=?').get(type, date) || null;
   const historyRows = db.prepare('SELECT summaryJson FROM business_history_summary WHERE businessType=? ORDER BY reportDate DESC LIMIT 30').all(type)
