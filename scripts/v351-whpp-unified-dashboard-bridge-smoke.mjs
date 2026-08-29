@@ -9,16 +9,48 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'v351WhppUnifiedDashboardBridgePatch.js'), 'utf8').replace(/\r\n/g, '\n');
 const v85 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v85ShopeeWhppMetricPatch.js'), 'utf8').replace(/\r\n/g, '\n');
 const v132 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v132WhppFastIntegrationPatch.js'), 'utf8').replace(/\r\n/g, '\n');
-execFileSync(process.execPath, ['--check', path.join(__dirname, '..', 'src', 'v132WhppFastIntegrationPatch.js')], { stdio: 'pipe' });
-execFileSync(process.execPath, ['--check', path.join(__dirname, '..', 'src', 'v351WhppUnifiedDashboardBridgePatch.js')], { stdio: 'pipe' });
-execFileSync(process.execPath, ['--check', path.join(__dirname, '..', 'src', 'shopeeHistoricalSigningTruth.js')], { stdio: 'pipe' });
-execFileSync(process.execPath, ['--check', path.join(__dirname, 'v329-three-business-cache-worker.mjs')], { stdio: 'pipe' });
+const v161 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v161UnifiedImportRuntimeTruthPatch.js'), 'utf8').replace(/\r\n/g, '\n');
+const v42 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v42WhppPatch.js'), 'utf8').replace(/\r\n/g, '\n');
+const v94 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v94UnifiedImportDisplayTruthPatch.js'), 'utf8').replace(/\r\n/g, '\n');
+for (const relative of [
+  '../src/v42WhppPatch.js',
+  '../src/v94UnifiedImportDisplayTruthPatch.js',
+  '../src/v132WhppFastIntegrationPatch.js',
+  '../src/v161UnifiedImportRuntimeTruthPatch.js',
+  '../src/v351WhppUnifiedDashboardBridgePatch.js',
+  '../src/shopeeHistoricalSigningTruth.js',
+  './v329-three-business-cache-worker.mjs'
+]) execFileSync(process.execPath, ['--check', path.join(__dirname, relative)], { stdio: 'pipe' });
 
 assert.match(V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID, /v351-whpp-unified-membership-dashboard-bridge/);
-assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351 must load before server route registration');
-assert.match(v132, /import \{ loadV351UnifiedWhppMembership \} from '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'primary V132 visible summary must share V351 membership authority');
-assert.match(v132, /const membership=loadV351UnifiedWhppMembership\(reportDate,db\)/, 'V132 must delegate WHPP membership selection to the zero-safe V351 owner');
-assert.match(source, /unified_import_batches[\s\S]*status='VALID'/, 'WHPP current membership must inspect the latest VALID unified import');
+assert.match(v85, /import '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V351 disaster/history fallback must remain available before server route registration');
+
+// Fresh/current WHPP truth must be correct before V351 is needed.
+assert.match(v42, /function existingWhppDailyMembership\(reportDate\)/, 'V42 must verify an existing same-date WHPP cohort before an empty reimport can overwrite it');
+assert.match(v42, /const preservedWhpp = whppRows\.length === 0 \? existingWhppDailyMembership\(parsed\.reportDate\)/, 'empty WHPP partitions must inspect preserved standard membership at the write boundary');
+assert.match(v42, /if \(preservedWhpp\.present\)[\s\S]*PRESERVED_EXISTING_NONZERO_DAILY_MEMBERSHIP[\s\S]*else \{[\s\S]*saveWhppDailyImport\(/, 'V42 must skip destructive WHPP daily writes when a complete nonzero same-date cohort is preserved');
+assert.match(v42, /invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged \}\)/, 'same-date invalidation must know whether WHPP actually changed');
+assert.match(v42, /if \(whppChanged\) \{[\s\S]*businessType='WHPP'/, 'WHPP run/history pointers must survive an unrelated empty-WHPP reimport');
+assert.match(v42, /classificationCounts: effectiveCounts/, 'immediate import response must publish effective seven-business WHPP truth, not parser zero after preservation');
+
+assert.doesNotMatch(v94, /v216WhppImportParityPatch/, 'retired V216 response repair must not remain in the runtime import chain');
+assert.match(v94, /const directWhpp = num\(directCounts\.WHPP\)/, 'V94 immediate import display must preserve V42 direct/effective WHPP count');
+assert.match(v94, /V94_DIRECT_IMPORT_WHPP_CANONICAL_OTHERS/, 'V94 must disclose direct WHPP ownership');
+
+assert.match(v161, /function directWhppMembership\(reportDate = ''\)/, 'bootstrap/unified-latest must own direct same-day WHPP membership instead of reading WHPP from the six-business unified rows');
+assert.match(v161, /FROM business_daily_reports WHERE businessType='WHPP'/, 'V161 must read the normalized WHPP daily header directly');
+assert.match(v161, /FROM business_daily_parse_rows WHERE businessType='WHPP'/, 'V161 must verify direct normalized WHPP daily members');
+assert.match(v161, /WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED/, 'incomplete standard membership must fail closed instead of publishing a partial total');
+assert.match(v161, /loadV351UnifiedWhppMembership\(date, db\)/, 'V161 may use V351 only for old\/erased history fallback');
+assert.match(v161, /counts\.WHPP = num\(whpp\.count\)/, 'seven-business runtime count must join direct WHPP truth into the six legacy partitions');
+assert.match(v161, /SIX_LEGACY_UNIFIED_PARTITIONS_PLUS_DIRECT_WHPP_DAILY/, 'seven-business source reconciliation must expose its actual ownership model');
+
+assert.match(v132, /import \{ loadV351UnifiedWhppMembership \} from '\.\/v351WhppUnifiedDashboardBridgePatch\.js';/, 'V132 must retain V351 only as safe historical fallback');
+assert.match(v132, /const standard=loadStandardMembership\(db,reportDate\);[\s\S]*const unified=standard\.present\?[\s\S]*:loadUnifiedMembership\(db,reportDate\)/, 'V132 visible summary must read standard WHPP daily membership before V351 fallback');
+assert.match(v132, /const membership=loadV351UnifiedWhppMembership\(reportDate,db\)/, 'V132 fallback helper must still delegate erased-history recovery to V351');
+
+// V351 is now a disaster/history bridge, not the normal fresh-import owner.
+assert.match(source, /unified_import_batches[\s\S]*status='VALID'/, 'V351 fallback must still inspect the latest VALID unified import');
 assert.match(source, /if \(!batch\)[\s\S]*loadPreservedWhppMembership\(date, db\)/, 'missing VALID unified batch must still recover preserved WHPP truth');
 assert.match(source, /if \(rows\.length\)[\s\S]*LATEST_VALID_UNIFIED_MEMBERSHIP/, 'only a non-empty WHPP unified partition may become authoritative');
 assert.match(source, /UNIFIED_WHPP_EMPTY_KEEP_STANDARD/, 'an empty unified WHPP partition must never erase preserved standard membership');
@@ -26,14 +58,15 @@ assert.match(source, /WHPP_STANDARD_DAILY_ROWS/, 'zero/missing unified WHPP must
 assert.match(source, /WHPP_FINAL_FACTS_MATCH_HISTORY_TOTAL/, 'a previously erased standard membership may self-heal only from a full fact set matching completed history total');
 assert.match(source, /factRows\.length !== expected/, 'partial final facts must never be promoted to membership');
 assert.match(source, /business_scan_results/, 'fact-based membership recovery must reuse saved scan region evidence when available');
-assert.match(source, /INSERT INTO business_daily_reports/, 'future unified imports must mirror WHPP normalized daily header');
-assert.match(source, /INSERT INTO business_daily_parse_rows/, 'future unified imports must mirror WHPP normalized daily members');
-assert.match(source, /UNIFIED_IMPORT_ROUTE[\s\S]*ensureV351WhppNormalizedDaily/, 'unified import response must trigger WHPP normalized bridge');
-assert.match(source, /DETAIL_ROUTES[\s\S]*\/api\/whpp\/metric-detail/, 'WHPP card drilldown must use the same V351 canonical truth');
-assert.match(source, /summary\.dashboard\?\.detailTabs/, 'detail rows must come from the same dashboard used for cards');
+assert.match(source, /if \(sameMembers\) return \{ repaired: false, reason: 'STANDARD_DAILY_CURRENT'/, 'normal fresh imports must not rewrite already-correct standard WHPP membership');
+assert.match(source, /INSERT INTO business_daily_reports/, 'disaster repair must be able to restore normalized WHPP daily header');
+assert.match(source, /INSERT INTO business_daily_parse_rows/, 'disaster repair must be able to restore normalized WHPP daily members');
+assert.match(source, /UNIFIED_IMPORT_ROUTE[\s\S]*ensureV351WhppNormalizedDaily/, 'import bridge may audit/repair only after the primary V42 write is complete');
+assert.match(source, /DETAIL_ROUTES[\s\S]*\/api\/whpp\/metric-detail/, 'legacy WHPP card drilldown fallback must use the same V351 canonical truth');
+assert.match(source, /summary\.dashboard\?\.detailTabs/, 'fallback detail rows must come from the same dashboard used for cards');
 assert.match(source, /staleHistoryRejected/, 'stale history mismatch must be observable');
-assert.match(source, /MEMBERSHIP_TABLES_ONLY/, 'existing-date repair must be membership-only');
-assert.doesNotMatch(source, /saveWhppDailyImport\(/, 'V351 repair must not reset WHPP business state');
+assert.match(source, /MEMBERSHIP_TABLES_ONLY/, 'existing-date repair must remain membership-only');
+assert.doesNotMatch(source, /saveWhppDailyImport\(/, 'V351 disaster repair must never reset WHPP business state');
 const ensureStart = source.indexOf('export function ensureV351WhppNormalizedDaily');
 const ensureEnd = source.indexOf('function scheduleNormalizedRepair', ensureStart);
 assert.ok(ensureStart >= 0 && ensureEnd > ensureStart, 'V351 normalized repair source must exist');
@@ -122,7 +155,7 @@ const noBatchPartialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({
 assert.equal(noBatchPartialFacts.present, false, 'missing batch must not weaken exact-count safety');
 assert.equal(noBatchPartialFacts.membershipSource, 'NO_VALID_UNIFIED_BATCH');
 
-console.log('[V351] WHPP unified-dashboard bridge smoke passed · V132 shares zero-safe membership · missing/zero unified WHPP cannot erase preserved truth · exact 236/236 facts recover with or without unified batch · 235/236 fails closed · cards/drilldowns one truth · membership repair only');
+console.log('[V351] WHPP source-truth smoke passed · V42 protects same-date nonzero membership at write boundary · V94 no V216 repair · V161 direct standard daily first · V351 disaster/history fallback only · exact 236/236 facts recover · 235/236 fails closed · membership repair only');
 await import('./v352-whpp-visible-single-truth-smoke.mjs');
 await import('./whpp-visible-truth-smoke.mjs');
 await import('./shopee-history-region-signing-smoke.mjs');
