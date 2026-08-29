@@ -1,6 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 import { loadWhppState, saveWhppState } from './whppStore.js';
+import './v134WhppRunSupervisorPatch.js';
 
 const PATCH_ID = '2026-08-17-v165-whpp-run-state-recovery-v2';
 const RUN_ROUTES = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
