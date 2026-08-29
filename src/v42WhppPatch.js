@@ -30,7 +30,10 @@ function existingWhppDailyMembership(reportDate) {
   if (!daily) return { present: false, count: 0, expected: 0, actual: 0 };
   const expected = Number(daily.totalCount || 0);
   const actual = Number(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(date)?.count || 0);
-  const present = expected > 0 && actual === expected;
+  // A persisted header is authoritative only when its exact member count agrees.
+  // This intentionally includes 0/0: a confirmed zero-WHPP day is real truth and
+  // must not be rewritten or have its WHPP run/history pointers cleared later.
+  const present = actual === expected;
   return { present, count: present ? actual : 0, expected, actual };
 }
 
@@ -92,7 +95,7 @@ async function handleUnifiedImportV42(req, res) {
         ? current
         : { businessType: WHPP, reportDate: parsed.reportDate, dailyReportReady: true };
       effectiveWhppCount = preservedWhpp.count;
-      whppImportSource = 'PRESERVED_EXISTING_NONZERO_DAILY_MEMBERSHIP';
+      whppImportSource = 'PRESERVED_EXISTING_COMPLETE_DAILY_MEMBERSHIP';
     } else {
       whppState = saveWhppDailyImport({
         reportDate: parsed.reportDate,
@@ -135,7 +138,7 @@ async function handleUnifiedImportV42(req, res) {
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
       },
-      architectureNote: 'WHPP使用独立持久化快照；非空日报直接落库；同日空WHPP分区不得擦除既有完整成员；现有CCSL/SHOPEE统一快照保持兼容。'
+      architectureNote: 'WHPP使用独立持久化快照；非空日报直接落库；同日空WHPP分区不得擦除既有完整成员（包括明确0票）；现有CCSL/SHOPEE统一快照保持兼容。'
     });
   } catch (error) {
     console.error('[V42][UNIFIED_IMPORT]', error);
