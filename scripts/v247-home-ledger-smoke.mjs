@@ -13,6 +13,7 @@ process.env.CE_QC_DISABLE_V246_TRACKING='1';
 
 const {getDb,closeDb}=await import('../src/db.js');
 const {ensureV246TrackingSchema}=await import('../src/v246TrackingLedgerCore.js');
+const {writeV329ThreeBusinessDailyCache}=await import('../src/v329ThreeBusinessDailyCache.js');
 const db=getDb();ensureV246TrackingSchema(db);
 db.exec(`CREATE TABLE IF NOT EXISTS dashboard_daily_cache(
   reportDate TEXT NOT NULL,businessType TEXT NOT NULL,regionCode TEXT NOT NULL DEFAULT '',metricsJson TEXT NOT NULL,
@@ -39,9 +40,14 @@ const d1='2026-08-20';const b1=seedBatch(d1,1,[{code:'CN-A',region:'PP'},{code:'
 // Deliberately stale cache claims only 2; V284 must ignore it for source membership.
 db.prepare('INSERT INTO dashboard_daily_cache(reportDate,businessType,regionCode,metricsJson,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt) VALUES(?,?,?,?,?,?,?,?)')
   .run(d1,'SHOPEECN','',JSON.stringify({total:2,pod:0,ocCurrent:0}),b1.snapshotId,'COMPLETED','STALE-V240',b1.now);
-insertLedger({code:'CN-A',date:d1,status:'TERMINAL',reason:'POD',state:'POD',category:'POD',podDate:d1,attempt:1,signingDays:1});
-insertLedger({code:'CN-B',date:d1,status:'TERMINAL',reason:'POD',state:'POD',category:'POD',podDate:'2026-08-22',attempt:2,signingDays:3});
+// Legacy ledger signingDays are deliberately present for compatibility, but the visible
+// average must come only from the V329 real first-dispatch START -> real POD cache.
+insertLedger({code:'CN-A',date:d1,status:'TERMINAL',reason:'POD',state:'POD',category:'POD',podDate:d1,attempt:1,signingDays:9});
+insertLedger({code:'CN-B',date:d1,status:'TERMINAL',reason:'POD',state:'POD',category:'POD',podDate:'2026-08-22',attempt:2,signingDays:9});
 insertLedger({code:'CN-RECOVERED',date:d1,status:'OPEN',state:'OC',category:'OC'});
+writeV329ThreeBusinessDailyCache('SHOPEECN',[
+  {reportDate:d1,total:3,pod:2,ocCurrent:1,attempt1:1,attempt2:1,attempt3:0,signingDaysSum:4,signingDaysCount:2,ppSigningDaysSum:1,ppSigningDaysCount:1,pvSigningDaysSum:3,pvSigningDaysCount:1,ready:true}
+],db,'V247_REAL_START_TO_POD_SMOKE');
 
 // A newer rejected re-upload deliberately flips CN-A from PP to PV. Region truth
 // must ignore this batch and keep the latest VALID source membership (PP).
@@ -70,7 +76,7 @@ assert.equal(first.recoveredExtra,0,'V284 no longer invents source membership fr
 assert.equal(first.pod,2,'later POD must update the exact original daily member wherever it appears in lifecycle truth');
 assert.equal(first.podRate,66.67);
 assert.equal(first.oc,1,'still-open OC from the locked ledger must remain visible');
-assert.equal(first.avgPodDays,2,'inclusive signing days must average locked 1-day and 3-day PODs');
+assert.equal(first.avgPodDays,2,'strict START-to-POD samples must average real 1-day and 3-day PODs instead of legacy ledger signingDays');
 assert.equal(first.attempt1,1);assert.equal(first.attempt2,1);assert.equal(first.attempt3,0);
 assert.equal(first.attempt1Rate,50);assert.equal(first.attempt2Rate,50);assert.equal(first.attemptUnknown,0);
 assert.equal(first.regions.PP.total,2,'invalid re-upload must not flip CN-A away from its valid PP evidence');
@@ -107,4 +113,4 @@ assert.match(injection,/v237-home-dashboard-owner\.js\?v=20260823-v247-1/,'V247 
 assert.match(injection,/X-CE-QC-V247-UI/,'V247 UI response must expose an observable header');
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V284/V247] home Shopee smoke passed: latest-VALID daily membership + later POD/current OC + locked signing days/strict attempts + VALID PP-PV truth + incomplete-coverage masking + corrected home totals/trends');
+console.log('[V284/V247/V329] home Shopee smoke passed: latest-VALID daily membership + later POD/current OC + strict START-to-POD signing samples + strict attempts + VALID PP-PV truth + incomplete-coverage masking + corrected home totals/trends');
