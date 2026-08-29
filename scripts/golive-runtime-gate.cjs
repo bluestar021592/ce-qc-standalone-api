@@ -66,11 +66,15 @@ must(runner, "recoverPendingWhpp('visible-import-watch')");
 // Browser V67 remains the sole UI run/resume owner, but the backend must also
 // close the final WHPP stage after launcher/browser restarts. This is not a
 // second three-stage runner: it can only start WHPP after canonical CCSL and
-// SHOPEE completion truth is already proven for the same report date.
+// SHOPEE completion truth is already proven for the exact selected report date.
 must(whppSupervisor, '2026-08-14-v134-whpp-run-supervisor-v1');
 must(whppSupervisor, '2026-08-29-v357-whpp-backend-final-stage-continuity-v1');
+must(whppSupervisor, '2026-08-29-v359-selected-date-whpp-backend-continuity-v1');
 must(whppSupervisor, 'maybeAutoResumeWhpp');
-must(whppSupervisor, "inspectV317CcslRecovery({ reportDate: '' })");
+must(whppSupervisor, 'inspectV317ExplicitReportDateHint');
+must(whppSupervisor, 'selectedHint?.fresh');
+must(whppSupervisor, 'VISIBLE_BROWSER_STATUS_HINT');
+must(whppSupervisor, 'inspectV317CcslRecovery({ reportDate: hintedDate })');
 must(whppSupervisor, 'inspectV311ShopeeRecovery({ reportDate })');
 must(whppSupervisor, 'inspectV132WhppFastSummary(reportDate)');
 must(whppSupervisor, 'recoverV165WhppRunState(reportDate)');
@@ -231,4 +235,4 @@ must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V67 owns browser three-stage run/resume, V134 provides backend-only WHPP final-stage continuity after canonical CCSL+SHOPEE completion, WHPP requires explicit canonical completion, and V132 is display-only');
+console.log('[GOLIVE] runtime-source gate passed; V67 owns browser three-stage run/resume, V134 provides backend-only WHPP final-stage continuity for the exact visible report date after canonical CCSL+SHOPEE completion, WHPP requires explicit canonical completion, and V132 is display-only');
