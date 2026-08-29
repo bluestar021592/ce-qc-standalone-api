@@ -3,17 +3,28 @@ import { CEClient } from './ceClient.js';
 import { runWhppPipeline } from './whppPipeline.js';
 import { WHPP, loadWhppState, saveWhppState, finalizeWhppState } from './whppStore.js';
 
-const PATCH_ID = '2026-08-14-v134-whpp-run-supervisor-v1';
+const PATCH_ID = '2026-08-29-v357-whpp-backend-final-stage-continuity-v1';
 const START_PATHS = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
 const PROGRESS_PATH = '/api/whpp/progress';
 const WHPP_REQUEST_TIMEOUT_MS = Math.max(8_000, Math.min(45_000, Number(process.env.WHPP_REQUEST_TIMEOUT_MS || 20_000)));
+const AUTO_RESUME_POLL_MS = 5_000;
+const AUTO_RESUME_COOLDOWN_MS = 30_000;
 const LOG_LIMIT = 120;
+const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
 
 let runtimePromise = null;
 let runtime = idleRuntime();
 let lastRuntime = idleRuntime();
+let autoResumeBusy = false;
+let autoResumeTimer = null;
+let lastAutoResumeAt = 0;
+let lastAutoResumeKey = '';
 
 function nowIso() { return new Date().toISOString(); }
+function dateOnly(value = '') {
+  const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
 function idleRuntime() {
   return {
     active: false,
@@ -124,9 +135,6 @@ function launchWhpp(mode = 'start') {
     throw error;
   }
   const client = new CEClient();
-  // WHPP uses a dedicated CEClient instance. Shortening only this instance prevents
-  // one remote confirm-query from holding a 350-waybill batch for the global 45s
-  // timeout before fallback/resume can make progress.
   if (client?.http?.defaults) client.http.defaults.timeout = WHPP_REQUEST_TIMEOUT_MS;
   const log = [];
   const startedAt = nowIso();
@@ -204,6 +212,73 @@ function launchWhpp(mode = 'start') {
   return publicRuntime(runtime);
 }
 
+async function maybeAutoResumeWhpp(reason = 'backend-watch') {
+  if (autoResumeBusy || (runtimePromise && runtime.active)) return false;
+  autoResumeBusy = true;
+  try {
+    const [ccslModule, shopeeModule, summaryModule, recoveryModule] = await Promise.all([
+      import('./v317CcslIncompleteRecoveryPatch.js'),
+      import('./v311ShopeeIncompleteRecoveryPatch.js'),
+      import('./v132WhppFastIntegrationPatch.js'),
+      import('./v165WhppRunStateRecoveryPatch.js')
+    ]);
+    const ccsl = ccslModule.inspectV317CcslRecovery({ reportDate: '' });
+    const reportDate = dateOnly(ccsl?.reportDate);
+    if (!reportDate || ccsl?.complete !== true) return false;
+
+    const shopee = shopeeModule.inspectV311ShopeeRecovery({ reportDate });
+    if (shopee?.complete !== true) return false;
+
+    const before = summaryModule.inspectV132WhppFastSummary(reportDate);
+    const beforeStatus = String(before?.snapshotStatus || before?.state?.snapshotStatus || '').toUpperCase();
+    if (before?.completed === true || COMPLETE_SNAPSHOT.has(beforeStatus)) return false;
+
+    const key = `${reportDate}:${Number(before?.total || 0)}:${Number(before?.finalEvidenceRows || 0)}:${beforeStatus}`;
+    const now = Date.now();
+    if (key === lastAutoResumeKey && now - lastAutoResumeAt < AUTO_RESUME_COOLDOWN_MS) return false;
+
+    const recovered = recoveryModule.recoverV165WhppRunState(reportDate);
+    if (String(recovered?.reason || '') === 'NO_NORMALIZED_DAILY') return false;
+
+    const afterRecovery = summaryModule.inspectV132WhppFastSummary(reportDate);
+    const afterStatus = String(afterRecovery?.snapshotStatus || afterRecovery?.state?.snapshotStatus || '').toUpperCase();
+    if (afterRecovery?.completed === true || COMPLETE_SNAPSHOT.has(afterStatus)) return false;
+
+    lastAutoResumeKey = key;
+    lastAutoResumeAt = now;
+    const started = launchWhpp('resume');
+    console.log('[CE-QC][V357_WHPP_BACKEND_CONTINUITY]', JSON.stringify({
+      reportDate,
+      reason,
+      ccslComplete: true,
+      shopeeComplete: true,
+      whppSnapshotStatus: afterStatus || 'PENDING',
+      whppTotal: Number(afterRecovery?.total || 0),
+      runtime: started
+    }));
+    return true;
+  } catch (error) {
+    console.warn('[CE-QC][V357_WHPP_BACKEND_CONTINUITY] skipped:', error?.message || error);
+    return false;
+  } finally {
+    autoResumeBusy = false;
+  }
+}
+
+function scheduleBackendContinuity(server) {
+  if (autoResumeTimer) return;
+  [1200, 3500, 8000].forEach(ms => {
+    const timer = setTimeout(() => { void maybeAutoResumeWhpp(`server-ready-${ms}`); }, ms);
+    timer.unref?.();
+  });
+  autoResumeTimer = setInterval(() => { void maybeAutoResumeWhpp('backend-watch'); }, AUTO_RESUME_POLL_MS);
+  autoResumeTimer.unref?.();
+  server?.once?.('close', () => {
+    if (autoResumeTimer) clearInterval(autoResumeTimer);
+    autoResumeTimer = null;
+  });
+}
+
 function startHandler(mode) {
   return (req, res) => {
     try {
@@ -249,9 +324,6 @@ function progressHandler(req, res) {
       heartbeatAt: runtime.heartbeatAt || persisted.lastCheckpointAt || ''
     };
   } else if (stale) {
-    // A persisted running=true can survive a backend restart. Expose it as not
-    // running so V132 immediately calls resume instead of waiting five minutes for
-    // a Promise that no longer exists.
     processing = {
       ...persisted,
       running: false,
@@ -271,6 +343,14 @@ function progressHandler(req, res) {
     stale,
     runtime: publicRuntime(runtimeActive ? runtime : lastRuntime),
     requestTimeoutMs: WHPP_REQUEST_TIMEOUT_MS,
+    backendContinuity: {
+      enabled: true,
+      pollMs: AUTO_RESUME_POLL_MS,
+      cooldownMs: AUTO_RESUME_COOLDOWN_MS,
+      busy: autoResumeBusy,
+      lastAttemptAt: lastAutoResumeAt,
+      lastKey: lastAutoResumeKey
+    },
     summary: state.lastRunSummary,
     log: (state.progressLog || []).slice(-50)
   });
@@ -278,17 +358,16 @@ function progressHandler(req, res) {
 
 const previousListen = express.application.listen;
 let installed = false;
-express.application.listen = function v134WhppRunSupervisorListen(...args) {
+express.application.listen = function v357WhppRunSupervisorListen(...args) {
   if (!installed) {
     installed = true;
-    // Register before the V42 listen wrapper adds its legacy long-request routes;
-    // Express uses the first matching handler, so these supervised routes win while
-    // the legacy routes remain available as a compatibility fallback in source.
     this.get(PROGRESS_PATH, progressHandler);
     this.post('/api/whpp/run/start', startHandler('start'));
     this.post('/api/whpp/run/resume', startHandler('resume'));
   }
-  return previousListen.apply(this, args);
+  const server = previousListen.apply(this, args);
+  scheduleBackendContinuity(server);
+  return server;
 };
 
 export function inspectV134WhppRuntime() {
@@ -296,7 +375,16 @@ export function inspectV134WhppRuntime() {
     patchId: PATCH_ID,
     requestTimeoutMs: WHPP_REQUEST_TIMEOUT_MS,
     runtimeActive: Boolean(runtimePromise && runtime.active),
-    runtime: publicRuntime(runtimePromise && runtime.active ? runtime : lastRuntime)
+    runtime: publicRuntime(runtimePromise && runtime.active ? runtime : lastRuntime),
+    backendContinuity: {
+      enabled: true,
+      pollMs: AUTO_RESUME_POLL_MS,
+      cooldownMs: AUTO_RESUME_COOLDOWN_MS,
+      busy: autoResumeBusy,
+      lastAttemptAt: lastAutoResumeAt,
+      lastKey: lastAutoResumeKey
+    }
   };
 }
+export { maybeAutoResumeWhpp as recoverV357PendingWhppFinalStage };
 export const V134_WHPP_RUN_SUPERVISOR_PATCH_ID = PATCH_ID;
