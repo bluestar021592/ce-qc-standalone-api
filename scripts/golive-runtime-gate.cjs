@@ -5,6 +5,7 @@ const runner = read('public/v67-resilient-run-guard.js');
 const whppUi = read('public/v132-whpp-seven-business-fast.js');
 const pause = read('public/v164-unified-pause-router.js');
 const shell = read('src/v44WhppUiPatch.js');
+const whppSupervisor = read('src/v134WhppRunSupervisorPatch.js');
 const v161 = read('src/v161UnifiedImportRuntimeTruthPatch.js');
 const v163 = read('src/v163ShopeeDailyIsolationPatch.js');
 const storage = read('src/storage.js');
@@ -61,6 +62,27 @@ must(runner, 'V355_WHPP_AUTO_RESUME');
 must(runner, 'CCSL与SHOPEE均已完成，正在自动续跑WHPP本土');
 must(runner, '[data-page="import"]');
 must(runner, "recoverPendingWhpp('visible-import-watch')");
+
+// Browser V67 remains the sole UI run/resume owner, but the backend must also
+// close the final WHPP stage after launcher/browser restarts. This is not a
+// second three-stage runner: it can only start WHPP after canonical CCSL and
+// SHOPEE completion truth is already proven for the same report date.
+must(whppSupervisor, '2026-08-14-v134-whpp-run-supervisor-v1');
+must(whppSupervisor, '2026-08-29-v357-whpp-backend-final-stage-continuity-v1');
+must(whppSupervisor, 'maybeAutoResumeWhpp');
+must(whppSupervisor, "inspectV317CcslRecovery({ reportDate: '' })");
+must(whppSupervisor, 'inspectV311ShopeeRecovery({ reportDate })');
+must(whppSupervisor, 'inspectV132WhppFastSummary(reportDate)');
+must(whppSupervisor, 'recoverV165WhppRunState(reportDate)');
+must(whppSupervisor, "launchWhpp('resume')");
+must(whppSupervisor, "this.post('/api/whpp/run/start'");
+must(whppSupervisor, "this.post('/api/whpp/run/resume'");
+must(whppSupervisor, "setInterval(() => { void maybeAutoResumeWhpp('backend-watch'); }, AUTO_RESUME_POLL_MS)");
+must(whppSupervisor, 'runtimePromise && runtime.active');
+forbid(whppSupervisor, '/api/run');
+forbid(whppSupervisor, '/api/shopee/run/start');
+forbid(whppSupervisor, 'global.runUnified');
+
 must(whppUi, '2026-08-29-v353-whpp-display-only-v1');
 must(whppUi, 'displayOnly:true');
 must(whppUi, "authoritativeRunner:'V67'");
@@ -72,6 +94,7 @@ forbid(whppUi, '/api/whpp/run/start');
 forbid(whppUi, '[data-testid="global-auto-process"]');
 must(pause, '/api/shopee/run/pause');
 must(pause, 'global.pauseUnified=pauseUnified');
+
 // V161 is a long-lived route owner. Verify its current contract, not an obsolete
 // release label: bootstrap/import runtime truth must count all seven businesses,
 // including WHPP, and must derive counts from normalized unified_import_rows.
@@ -206,6 +229,6 @@ must(exportSidecar, 'MEMORY_IPC');
 must(exportPreflight, "import './v190ExportDirectEndpointPatch.js';");
 must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
-for (const source of [runner, whppUi, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
+for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V67 exclusively owns three-stage run/resume, completed CCSL/SHOPEE stages are skipped, pending WHPP auto-resumes whenever the import page becomes visible, WHPP requires explicit canonical completion, and V132 is display-only');
+console.log('[GOLIVE] runtime-source gate passed; V67 owns browser three-stage run/resume, V134 provides backend-only WHPP final-stage continuity after canonical CCSL+SHOPEE completion, WHPP requires explicit canonical completion, and V132 is display-only');
