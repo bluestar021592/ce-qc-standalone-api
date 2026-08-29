@@ -135,8 +135,9 @@ try {
   const runnerSource = fs.readFileSync(new URL('../public/v67-resilient-run-guard.js', import.meta.url), 'utf8');
   assert.match(runnerSource, /async function runStage\(stage, preferResume, target\)/, 'seven-business runner must use the current generic stage executor');
   assert.match(runnerSource, /\{ key: 'WHPP', label: 'WHPP本土', start: '\/api\/whpp\/run\/start', resume: '\/api\/whpp\/run\/resume' \}/, 'WHPP must retain its dedicated third execution stage and endpoints');
-  assert.match(runnerSource, /if \(stage\.key === 'WHPP'\) return await verifyWhpp\(target\)/, 'WHPP stage must verify its own finalized snapshot before being accepted');
-  assert.match(runnerSource, /for \(const stage of stages\)[\s\S]*await runStage\(stage, mode === 'resume', target\)/, 'all stages must execute through the same bounded ordered runner');
+  assert.match(runnerSource, /async function waitForWhppFinalized\(target,[\s\S]*return await verifyWhpp\(target\)/, 'WHPP finalized wait must verify its own canonical snapshot before being accepted');
+  assert.match(runnerSource, /if \(stage\.key === 'WHPP'\) return await waitForWhppFinalized\(target\)/, 'WHPP stage must wait for its finalized snapshot after start/resume');
+  assert.match(runnerSource, /for \(let index = 0; index < stages\.length; index \+= 1\)[\s\S]*const stage = stages\[index\][\s\S]*await runStage\(stage, mode === 'resume', target\)/, 'all stages must execute through the same bounded ordered runner');
   const ccslStage = runnerSource.indexOf("{ key: 'CCSL'");
   const shopeeStage = runnerSource.indexOf("{ key: 'SHOPEE'");
   const whppStage = runnerSource.indexOf("{ key: 'WHPP'");
