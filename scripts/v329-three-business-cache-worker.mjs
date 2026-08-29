@@ -53,7 +53,7 @@ function buildRows(db,baseline,members){
       }
     }
     const pod=Number(row.pod||0),attempts=bestAttempts([row.attempt1,row.attempt2,row.attempt3],[acc.a1,acc.a2,acc.a3],old.get(d),pod),firstAttemptUnknownPod=Math.max(0,pod-acc.strictPodKnown);
-    const baselineCount=Number(row.signingDaysCount||row.dispatchSigningDaysCount||0),baselineSum=Number(row.signingDaysSum||row.dispatchSigningDaysSum||0),useBaseline=baselineCount>acc.count&&baselineSum>0;
+    const baselineCount=Number(row.signingDaysCount||row.dispatchSigningDaysCount||0),baselineSum=Number(row.signingDaysSum||row.dispatchSigningDaysSum||0),useBaseline=!SHOPEE.has(type)&&baselineCount>acc.count&&baselineSum>0;
     out.push({reportDate:d,total:Number(row.total||0),pod,ocCurrent:Number(row.ocCurrent||0),sameDayPod:Number(row.sameDayPod||0),attempt1:attempts[0],attempt2:attempts[1],attempt3:attempts[2],signingDaysSum:useBaseline?baselineSum:acc.sum,signingDaysCount:useBaseline?baselineCount:acc.count,ppSigningDaysSum:acc.ppSum,ppSigningDaysCount:acc.ppCount,pvSigningDaysSum:acc.pvSum,pvSigningDaysCount:acc.pvCount,firstAttemptEligible:acc.firstEligible,firstAttemptSuccess:acc.firstSuccess,firstAttemptUnknownPod,ready:row.ready!==false});
   }
   return out;
