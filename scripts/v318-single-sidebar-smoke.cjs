@@ -28,9 +28,10 @@ assert.doesNotMatch(legacy,/getElementById\('sevenBusinessStageSummary'\)/,'reti
 assert.match(legacy,/__CE_QC_V168_SEVEN_BUSINESS_STATUS__\?\.refresh/,'legacy source may only ask V168 to refresh canonical truth');
 assert.match(legacy,/__CE_QC_V138_CCSL_SCAN_PROGRESS__\?\.enforceLastTruth/,'legacy source may only ask V138 to re-enforce CCSL detail truth');
 assert.doesNotMatch(shell,/v169-seven-business-legacy-status-sync\.js/,'retired V169 bridge must not be loaded in production runtime');
-assert.match(shell,/v168-seven-business-status\.js\?v=20260829-single-owner-1/,'canonical V168 status-only owner must be loaded instead');
+assert.match(shell,/v168-seven-business-status\.js\?v=20260830-v360-1/,'canonical V168 status-only owner must be cache-busted to the current verified-completion sync build');
+assert.match(shell,/v67-resilient-run-guard\.js\?v=20260830-v360-1/,'single V67 runner must be cache-busted with the matching current-run finalization acknowledgement build');
 
 assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must remain delivered');
 assert.match(inject,/X-CE-QC-V318-UI/,'V318 response header must be observable');
 
-console.log('[SINGLE-RUNNER/V318] single-sidebar + status ownership smoke passed · V169 runtime bridge retired · exact 15-item nav · unified completion banner remains canonical');
+console.log('[SINGLE-RUNNER/V360/V318] single-sidebar + status ownership smoke passed · V169 runtime bridge retired · exact 15-item nav · verified WHPP completion banner remains canonical');
