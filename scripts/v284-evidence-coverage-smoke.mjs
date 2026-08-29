@@ -28,7 +28,7 @@ CREATE TABLE unified_import_rows(id INTEGER PRIMARY KEY AUTOINCREMENT,batchId TE
 CREATE TABLE final_rows(shipmentCode TEXT,reportDate TEXT,isPod INTEGER,primaryCategory TEXT,category TEXT,rawJson TEXT,lastEventTime TEXT,pendingDays INTEGER,ocDays INTEGER,cycleCountDays INTEGER,shopState TEXT,shopRetentionNaturalDays INTEGER);
 CREATE TABLE business_final_rows(businessType TEXT,shipmentCode TEXT,reportDate TEXT,isPod INTEGER,currentMainCategory TEXT,primaryCategory TEXT,rawJson TEXT,latestEventTime TEXT,podAttemptNo INTEGER,currentAttemptNo INTEGER,shopState TEXT,shopRetentionNaturalDays INTEGER);
 CREATE TABLE business_daily_reports(businessType TEXT,reportDate TEXT,totalCount INTEGER);
-CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT);
+CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,rowJson TEXT);
 `);
 ensureV246TrackingSchema(db);
 const date='2026-08-17',now='2026-08-24T00:00:00Z';
@@ -42,7 +42,7 @@ imp.run('B17','S17',date,'CE','ADMITTED-ONLY','PV');
 // overlaps WHPP to prove overlap is diagnostic-only, never subtraction.
 imp.run('B17-CEAF','S17-CEAF',date,'CEAF','WHPP-PROVEN','PP');
 db.prepare('INSERT INTO business_daily_reports VALUES(?,?,?)').run('WHPP',date,1);
-db.prepare('INSERT INTO business_daily_parse_rows VALUES(?,?,?)').run('WHPP',date,'WHPP-PROVEN');
+db.prepare('INSERT INTO business_daily_parse_rows VALUES(?,?,?,?)').run('WHPP',date,'WHPP-PROVEN',JSON.stringify({regionCode:'PP'}));
 db.prepare(`INSERT INTO final_rows(shipmentCode,reportDate,isPod,primaryCategory,category,rawJson,lastEventTime,pendingDays,ocDays,cycleCountDays,shopState,shopRetentionNaturalDays) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run('WHPP-PROVEN',date,0,'OPEN','OPEN','{}',now,0,0,0,'',0);
 db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,currentMainCategory,primaryCategory,rawJson,latestEventTime,podAttemptNo,currentAttemptNo,shopState,shopRetentionNaturalDays) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run('WHPP','WHPP-PROVEN',date,1,'POD','POD',JSON.stringify({'POD时间':`${date} 12:00:00`}),`${date} 12:00:00`,0,0,'',0);
 const ins=db.prepare(`INSERT INTO qc_tracking_ledger(shipmentCode,businessType,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,terminalReason,terminalAt,currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastCheckedAt,lastRepairReason,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
