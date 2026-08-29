@@ -276,39 +276,31 @@
     if (busy || !importPageVisible()) return false;
     const target = targetDate();
     if (!target || autoRecoveryDates.has(target)) return false;
-    const ccslStage = { key: 'CCSL' };
-    const shopeeStage = { key: 'SHOPEE' };
-    const whppStage = { key: 'WHPP' };
-    let ccsl;
-    let shopee;
-    let whpp;
-    try {
-      ccsl = await canonicalStageTruth(ccslStage, target);
-      if (!ccsl.done) return false;
-      shopee = await canonicalStageTruth(shopeeStage, target);
-      if (!shopee.done) return false;
-      whpp = await canonicalStageTruth(whppStage, target);
-      if (whpp.done) {
-        autoRecoveryDates.add(target);
-        return false;
-      }
-      if (whpp.error && !whppStillPending(whpp.error) && !isTransient(whpp.error)) return false;
-    } catch (error) {
-      if (isAuth(error)) return false;
-      return false;
-    }
-
     autoRecoveryDates.add(target);
-    setStatus(`检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土…`);
-    console.info('[CE-QC][V355_WHPP_AUTO_RESUME]', { reportDate: target, reason });
     try {
+      const ccslStage = { key: 'CCSL' };
+      const shopeeStage = { key: 'SHOPEE' };
+      const whppStage = { key: 'WHPP' };
+      const ccsl = await canonicalStageTruth(ccslStage, target);
+      if (!ccsl.done) return false;
+      const shopee = await canonicalStageTruth(shopeeStage, target);
+      if (!shopee.done) return false;
+      const whpp = await canonicalStageTruth(whppStage, target);
+      if (whpp.done) return false;
+      if (whpp.error && !whppStillPending(whpp.error) && !isTransient(whpp.error)) return false;
+
+      setStatus(`检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土…`);
+      console.info('[CE-QC][V355_WHPP_AUTO_RESUME]', { reportDate: target, reason });
       const result = await execute('resume');
-      if (!result?.ok) autoRecoveryDates.delete(target);
       return Boolean(result?.ok);
     } catch (error) {
-      autoRecoveryDates.delete(target);
-      console.warn('[CE-QC][V355_WHPP_AUTO_RESUME] retryable handoff failed:', error?.message || error);
+      if (!isAuth(error)) console.warn('[CE-QC][V355_WHPP_AUTO_RESUME] retryable handoff failed:', error?.message || error);
       return false;
+    } finally {
+      // The guard is only for one in-flight preflight/execute cycle. Never pin a
+      // report date permanently: a same-date re-import creates a new lifecycle and
+      // must be allowed to auto-run WHPP again if its canonical truth becomes pending.
+      autoRecoveryDates.delete(target);
     }
   }
 
