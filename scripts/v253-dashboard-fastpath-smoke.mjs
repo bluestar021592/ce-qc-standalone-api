@@ -15,6 +15,9 @@ assert.match(fastSource,/readV236CurrentSummary/,'single-day first paint must co
 assert.match(fastSource,/readV284DashboardTrends/,'explicit ranges may delegate to canonical per-business daily truth');
 assert.match(fastSource,/PER_BUSINESS_SINGLE_DAY_FIRST_PAINT_NO_HISTORY_SCAN/,'same-day first paint must not scan historical tables');
 assert.match(fastSource,/latestBatchForType\(date,'CEAF'/,'WHPP overlap diagnostic must locate CEAF own same-date snapshot');
+assert.match(fastSource,/WHPP_STANDARD_DAILY_ZERO/,'exact 0\/0 WHPP standard daily membership must remain a real zero');
+assert.match(fastSource,/error\.code='WHPP_STANDARD_DAILY_INCOMPLETE'/,'incomplete WHPP standard membership must reject first paint instead of looking like zero');
+assert.match(fastSource,/error\?\.code==='WHPP_STANDARD_DAILY_INCOMPLETE'\?409:500/,'WHPP membership damage must surface as an explicit conflict response');
 assert.doesNotMatch(fastSource,/function latestBatches\(/,'retired global latest-batch-per-date helper must not return');
 assert.doesNotMatch(fastSource,/PARTITION BY reportDate ORDER BY createdAt DESC/,'V253 must not select one global snapshot for all same-date businesses');
 assert.doesNotMatch(fastSource,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'retired V253 multi-day ownership must stay retired');
@@ -41,21 +44,42 @@ seed('SHOPEEVN','VN',{PP:{total:1,pod:1,attempt1:1},PV:{total:1,pod:0}},'2026-08
 seed('CEAF','CEAF',{'':{total:1,pod:0}},'2026-08-07T21:00:00Z');
 seed('SHOPEECN','CN',{PP:{total:1,pod:1,attempt1:1},PV:{total:2,pod:1,attempt2:1}},'2026-08-07T23:00:00Z');
 const whppParse=db.prepare('INSERT INTO business_daily_parse_rows(businessType,reportDate,shipmentCode,rowJson,createdAt) VALUES(?,?,?,?,?)');
+const whppDaily=db.prepare('INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)');
 whppParse.run('WHPP',date,'CEAF--1','{}','2026-08-07T22:00:00Z');
 whppParse.run('WHPP',date,'WHPP-UNIQUE','{}','2026-08-07T22:00:00Z');
 db.prepare("UPDATE unified_import_rows SET shipmentCode='CEAF--1' WHERE snapshotId='S-CEAF'").run();
-db.prepare('INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)').run('WHPP',date,'whpp.xls',2,'{}','2026-08-07T22:00:00Z','2026-08-07T22:00:00Z');
+whppDaily.run('WHPP',date,'whpp.xls',2,'{}','2026-08-07T22:00:00Z','2026-08-07T22:00:00Z');
 
 const {readV253DashboardTrends,readV253InstantSummary,readV253ShopeeRegion,V253_DASHBOARD_FAST_PATH_ID,V253_V335_FIRST_PAINT_ID}=await import('../src/v253DashboardFastPath.js');
 const instant=readV253InstantSummary(date);
 assert.equal(instant.v335Id,V253_V335_FIRST_PAINT_ID);
 assert.deepEqual({cn:instant.counts.SHOPEECN,vn:instant.counts.SHOPEEVN,ceaf:instant.counts.CEAF,whpp:instant.counts.WHPP},{cn:3,vn:2,ceaf:1,whpp:2},'later CN import must not zero VN/CEAF and WHPP must keep its complete independent daily membership');
+assert.equal(instant.sourceCorrection.membershipSource,'WHPP_STANDARD_DAILY','2\/2 WHPP standard membership must be the first-paint authority');
 assert.notEqual(instant.snapshotIds.SHOPEECN,instant.snapshotIds.SHOPEEVN);
 assert.equal(instant.sourceCorrection.removedFromWhpp,0,'CEAF overlap must never subtract independent WHPP members');
 assert.equal(instant.sourceCorrection.ceafOverlapDiagnostic,1,'CEAF overlap remains visible as a diagnostic only');
 const vn=readV253DashboardTrends('SHOPEEVN',date,date);assert.equal(vn.readId,V253_DASHBOARD_FAST_PATH_ID);assert.equal(vn.v335Id,V253_V335_FIRST_PAINT_ID);assert.deepEqual(vn.dates,[date]);assert.deepEqual(vn.ticket,[2]);
 const cn=readV253DashboardTrends('SHOPEECN',date,date);assert.deepEqual(cn.ticket,[3]);
 const region=readV253ShopeeRegion('SHOPEECN',date);assert.equal(region.daily[0].regions.PP.total,1);assert.equal(region.daily[0].regions.PV.total,2);assert.equal(region.daily[0].regions.PP.attempt1,1);assert.equal(region.daily[0].regions.PV.attempt2,1);
+
+const zeroDate='2026-08-08';
+whppDaily.run('WHPP',zeroDate,'whpp-zero.xls',0,'{}','2026-08-08T22:00:00Z','2026-08-08T22:00:00Z');
+const zero=readV253InstantSummary(zeroDate);
+assert.equal(zero.counts.WHPP,0,'exact 0\/0 WHPP daily membership must publish real zero');
+assert.equal(zero.sourceCorrection.membershipSource,'WHPP_STANDARD_DAILY_ZERO');
+assert.equal(zero.sourceCorrection.whppDirectStandard,true);
+assert.equal(zero.sourceCorrection.whppExpected,0);
+assert.equal(zero.sourceCorrection.whppActual,0);
+
+const damagedDate='2026-08-09';
+whppDaily.run('WHPP',damagedDate,'whpp-damaged.xls',236,'{}','2026-08-09T22:00:00Z','2026-08-09T22:00:00Z');
+for(let i=1;i<=235;i++){const code=`CE-DAMAGED-${String(i).padStart(4,'0')}`;whppParse.run('WHPP',damagedDate,code,JSON.stringify({shipmentCode:code,businessType:'WHPP',reportDate:damagedDate}),'2026-08-09T22:00:00Z');}
+assert.throws(
+  ()=>readV253InstantSummary(damagedDate),
+  error=>error?.code==='WHPP_STANDARD_DAILY_INCOMPLETE'&&error?.expected===236&&error?.actual===235,
+  '236 header / 235 members must reject first paint; it must never look like WHPP=0 or WHPP=235'
+);
+
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
 
 // This smoke is already in test:golive. Keep all current high-value regressions chained here so the Windows candidate gate cannot install a build that has not executed them.
@@ -64,4 +88,4 @@ execFileSync(process.execPath,['scripts/v334-history-unification-smoke.mjs'],{st
 execFileSync(process.execPath,['scripts/v334-generic-history-worker-runtime-smoke.mjs'],{stdio:'inherit',timeout:120000});
 execFileSync(process.execPath,['scripts/v334-first-attempt-worker-runtime-smoke.mjs'],{stdio:'inherit',timeout:120000});
 execFileSync(process.execPath,['scripts/v314-shopee-throughput-smoke.mjs'],{stdio:'inherit',timeout:120000});
-console.log('[V343/V335/V253] first-paint + history + all-business throughput gate passed · per-business same-day truth · WHPP independent membership with CEAF overlap diagnostic · isolated history workers · 350 scan / 50x4 track verified');
+console.log('[V343/V335/V253] first-paint + history + all-business throughput gate passed · WHPP 2/2 direct daily · exact 0/0 stays zero · 236/235 rejects instead of fabricating zero · CEAF overlap diagnostic only · isolated history workers · 350 scan / 50x4 track verified');
