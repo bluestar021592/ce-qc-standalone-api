@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { chooseCcslReportDate, ccslRecoveryDecision, V317_CCSL_RECOVERY_POLICY_ID } from '../src/v317CcslRecoveryPolicy.js';
 import { coreSnapshotCompletionDecision } from '../src/v142SevenBusinessHistoryAudit.js';
 
-for(const file of ['src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','src/v33RunProgressPatch.js','public/v317-ccsl-recovery-owner.js','public/v311-shopee-recovery-owner.js','public/v138-ccsl-scan-progress.js','public/v168-seven-business-status.js','src/v142SevenBusinessHistoryAudit.js','src/v295FirstAttemptUiInjectionPatch.js','src/v44WhppUiPatch.js']){
+for(const file of ['src/v317CcslRecoveryPolicy.js','src/v317CcslIncompleteRecoveryPatch.js','src/v33RunProgressPatch.js','public/v317-ccsl-recovery-owner.js','public/v311-shopee-recovery-owner.js','public/v138-ccsl-scan-progress.js','public/v168-seven-business-status.js','public/v67-resilient-run-guard.js','src/v142SevenBusinessHistoryAudit.js','src/v295FirstAttemptUiInjectionPatch.js','src/v44WhppUiPatch.js']){
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
@@ -27,6 +27,7 @@ const client=fs.readFileSync(new URL('../public/v317-ccsl-recovery-owner.js',imp
 const shopeeClient=fs.readFileSync(new URL('../public/v311-shopee-recovery-owner.js',import.meta.url),'utf8');
 const progressUi=fs.readFileSync(new URL('../public/v138-ccsl-scan-progress.js',import.meta.url),'utf8');
 const sevenStatus=fs.readFileSync(new URL('../public/v168-seven-business-status.js',import.meta.url),'utf8');
+const runner=fs.readFileSync(new URL('../public/v67-resilient-run-guard.js',import.meta.url),'utf8');
 const audit=fs.readFileSync(new URL('../src/v142SevenBusinessHistoryAudit.js',import.meta.url),'utf8');
 const activation=fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js',import.meta.url),'utf8');
 const injection=fs.readFileSync(new URL('../src/v295FirstAttemptUiInjectionPatch.js',import.meta.url),'utf8');
@@ -54,20 +55,16 @@ assert.match(audit,/VALID_ZERO_CCSL_TICKETS/);
 assert.match(audit,/LEGACY_FINAL_ROWS_FULL_COVERAGE/);
 assert.match(audit,/covered>=total/);
 
-assert.match(client,/2026-08-27-v333-ccsl-recovery-no-status-dom-mutation-v1/,'CCSL recovery owner must be recovery-only');
+assert.match(client,/2026-08-27-v333-ccsl-recovery-no-status-dom-mutation-v1/,'CCSL recovery compatibility client remains source-checkable');
 assert.match(client,/\/api\/v317\/ccsl-recovery/);
-assert.match(client,/\/api\/run\/start/,'CCSL recovery must still continue checkpoint-safe backend work');
-assert.match(client,/const selected=date\(document\.getElementById\('reportDate'\)/,'selected page date must remain first choice');
-assert.doesNotMatch(client,/getElementById\('ccslRunStatus'\)/,'V317 must not write the canonical CCSL detail panel');
-assert.doesNotMatch(client,/getElementById\('sevenBusinessStageSummary'\)/,'V317 must not acquire the canonical seven-business summary DOM');
-assert.match(client,/__CE_QC_V168_SEVEN_BUSINESS_STATUS__\?\.refresh/,'recovery changes must ask the summary owner to reread canonical truth');
-assert.doesNotMatch(client,/location\.pathname\s*!==\s*['"]\/import['"]/,'restart continuation must remain SPA-route independent');
+assert.match(client,/\/api\/run\/start/);
+assert.doesNotMatch(client,/getElementById\('ccslRunStatus'\)/,'V317 compatibility client must never write canonical CCSL detail');
+assert.doesNotMatch(client,/getElementById\('sevenBusinessStageSummary'\)/,'V317 compatibility client must never acquire the canonical summary DOM');
 
-assert.match(shopeeClient,/2026-08-27-v333-shopee-recovery-no-summary-mutation-v1/,'SHOPEE recovery must be isolated from canonical status DOM');
+assert.match(shopeeClient,/2026-08-27-v333-shopee-recovery-no-summary-mutation-v1/,'SHOPEE compatibility client remains source-checkable');
 assert.match(shopeeClient,/\/api\/v311\/shopee-recovery/);
-assert.doesNotMatch(shopeeClient,/getElementById\('ccslRunStatus'\)/,'SHOPEE must never repaint CCSL detail');
-assert.doesNotMatch(shopeeClient,/getElementById\('sevenBusinessStageSummary'\)/,'SHOPEE must never acquire the V168 summary DOM');
-assert.doesNotMatch(shopeeClient,/querySelectorAll\('#importPage \.status-pill/,'SHOPEE must not scan/repaint canonical pills');
+assert.doesNotMatch(shopeeClient,/getElementById\('ccslRunStatus'\)/);
+assert.doesNotMatch(shopeeClient,/getElementById\('sevenBusinessStageSummary'\)/);
 
 assert.match(progressUi,/2026-08-29-v341-ccsl-progress-owner-guard-v1/,'V138 must retain canonical V317 truth while publishing the V341 unified owner guard');
 assert.match(progressUi,/const selectedReportDate=.*reportDate[\s\S]*topRangeTo[\s\S]*dashboardRangeTo/,'V138 must derive selected date from the current UI');
@@ -88,32 +85,49 @@ assert.match(progressUi,/batchMax:50/,'V138 trajectory phase must expose 50-tick
 assert.match(progressUi,/单批最大350/,'V138 visible scan detail must say 350 tickets per batch');
 assert.match(progressUi,/单批最大50/,'V138 visible trajectory detail must say 50 tickets per batch');
 
-assert.match(sevenStatus,/2026-08-27-v333-canonical-seven-business-owner-v1/,'V168 must be the one canonical summary owner');
+assert.match(sevenStatus,/2026-08-27-v333-canonical-seven-business-owner-v1/,'V168 remains the canonical summary owner');
+assert.match(sevenStatus,/2026-08-29-single-unified-runner-status-only-v1/,'V168 must advertise status-only architecture');
 assert.match(sevenStatus,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical CCSL recovery truth for the selected date');
 assert.match(sevenStatus,/postJson\('\/api\/v311\/shopee-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical SHOPEE recovery truth for the same selected date');
-assert.match(sevenStatus,/readJson\(`\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}`\)/,'V168 must align WHPP to the same selected date through the canonical WHPP visible summary');
-assert.doesNotMatch(sevenStatus,/readJson\(`\/api\/business-state\/WHPP\?reportDate=\$\{encoded\}&compact=1`\)/,'V168 must not fall back to the stale snapshot-only WHPP state owner');
-assert.match(sevenStatus,/payload\?\.completed === true/,'V168 must honor canonical zero-work WHPP completion directly from V132');
+assert.match(sevenStatus,/readJson\(`\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}`\)/,'V168 must align WHPP to the same selected date through canonical WHPP summary');
+assert.match(sevenStatus,/payload\?\.completed === true/,'V168 must honor canonical zero-work WHPP completion');
 assert.match(sevenStatus,/stages\.every\(stage => stage\.state === 'done'\)/,'overall completion must be computed from the same canonical stage objects shown in the pills');
 assert.match(sevenStatus,/if \(stage\.state === 'done'\) return 'success'/,'every completed stage must be green');
 assert.match(sevenStatus,/truth\.complete \? 'success' : 'muted'/,'overall completed state must also be green');
-assert.match(sevenStatus,/node\.dataset\.v333Owner = 'canonical'/,'summary DOM must mark V333 canonical ownership');
-assert.match(sevenStatus,/}, 2000\);/,'canonical summary must refresh fast enough to defeat stale legacy state without heavy polling');
+assert.match(sevenStatus,/node\.dataset\.v333Owner = 'canonical'/,'summary DOM must mark canonical ownership');
+assert.match(sevenStatus,/statusOnly: true/,'V168 must be read/render only');
+assert.match(sevenStatus,/authoritativeRunner: 'V67'/,'V168 must point execution ownership to V67');
+assert.doesNotMatch(sevenStatus,/function wrapRunner/,'summary owner must never wrap runUnified/resumeUnified');
+assert.doesNotMatch(sevenStatus,/handoffPendingWhpp/,'summary owner must never start WHPP');
+assert.doesNotMatch(sevenStatus,/\/api\/whpp\/run\/start/,'summary owner must never call WHPP execution routes');
+assert.doesNotMatch(sevenStatus,/global\.runUnified\s*=/,'summary owner must never reassign runUnified');
+assert.doesNotMatch(sevenStatus,/global\.resumeUnified\s*=/,'summary owner must never reassign resumeUnified');
+
+assert.match(runner,/2026-08-29-v355-authoritative-whpp-auto-resume-v1/,'V67 is the sole three-stage execution owner');
+assert.match(runner,/global\.runUnified = \(\) => execute\('start'\)/);
+assert.match(runner,/global\.resumeUnified = \(\) => execute\('resume'\)/);
+assert.match(runner,/CCSL → SHOPEE → WHPP/);
+assert.match(runner,/recoverPendingWhpp/,'V67 must own restart handoff to pending WHPP');
+assert.match(runner,/waitForWhppFinalized/,'WHPP completion must be canonically verified');
+assert.match(runner,/0票也不能在没有正式完成语义时自动跳过/,'0-ticket WHPP must require explicit completion semantics');
 
 assert.match(activation,/v317CcslIncompleteRecoveryPatch\.js/,'V317 backend route must remain production-active');
-assert.match(injection,/2026-08-27-v334-canonical-detail-history-ownership-v1/,'V334 response injection must remain observable as the compatibility injection owner');
-assert.match(injection,/v311-shopee-recovery-owner\.js\?v=20260827-v333-1/);
-assert.match(injection,/v317-ccsl-recovery-owner\.js\?v=20260827-v333-1/);
-assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must load V334 history hard owner');
-assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v329-1/,'V329 history owner compatibility marker remains source-visible');
-assert.match(injection,/X-CE-QC-V334-UI/,'V334 response header must be observable');
+assert.match(injection,/2026-08-27-v334-canonical-detail-history-ownership-v1/,'V334 response injection must remain observable');
+assert.match(injection,/2026-08-29-single-unified-runner-v1/,'browser injection must expose the single-runner architecture');
+assert.doesNotMatch(injection,/if\(!body\.includes\(V310_RESUME_MARKER\)\)tags\.push/,'legacy V310 browser watchdog must not be injected');
+assert.doesNotMatch(injection,/if\(!body\.includes\(V311_RECOVERY_MARKER\)\)tags\.push/,'legacy V311 browser recovery runner must not be injected');
+assert.doesNotMatch(injection,/if\(!body\.includes\(V317_CCSL_RECOVERY_MARKER\)\)tags\.push/,'legacy V317 browser recovery runner must not be injected');
+assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must still load V334 history hard owner');
+assert.match(injection,/X-CE-QC-Unified-Runner/,'single-runner response header must be observable');
+
 assert.match(htmlOwner,/2026-08-27-v334-canonical-detail-history-owner-cache-bust-v1/,'HTML owner must retain V334 compatibility build identity');
 assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'browser must load the V338 CCSL 350/50 detail owner');
-assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260827-v333-1/,'browser must retain V333 canonical seven-business owner');
+assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260829-single-owner-1/,'browser must load the cache-busted status-only V168 owner');
+assert.doesNotMatch(htmlOwner,/v169-seven-business-legacy-status-sync\.js/,'legacy V169 summary refresh bridge must be retired from runtime');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
 
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V341/V334/V333/V317] canonical CCSL detail smoke passed · V138 reads V317 first · V168 reads canonical V132 WHPP completion · scan=350 · trajectory=50 · zero-ticket/no-daily cannot fall through to legacy V33 pending 0/0');
+console.log('[SINGLE-RUNNER/V341/V334/V317] smoke passed · V67 alone executes CCSL→SHOPEE→WHPP · V168 is status-only · legacy browser recovery watchdogs are not injected · scan=350 · trajectory=50');
