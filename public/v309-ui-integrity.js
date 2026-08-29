@@ -1,11 +1,12 @@
 (function installV309UiIntegrity(global){
   if(global.__CE_QC_V309_UI_INTEGRITY__)return;
   const VERSION='2026-08-26-v309-single-nav-auto-resume-shopee-total-v1';
+  const ARCHITECTURE='2026-08-29-ui-only-no-unified-trigger-v1';
   const NAV_ITEMS=[
     ['home','首页总看板','home','/'],['ce','CE看板','package','/ce'],['ceaf','CEAF空运看板','package','/ceaf'],['tbkh','TBKH看板','package','/tbkh'],['ali1688','ALI1688看板','package','/ali1688'],['whpp','WHPP本土看板','package','/whpp'],
     ['shopeecn','SHOPEE CN看板','bag','/shopeecn'],['shopeevn','SHOPEE VN看板','bag','/shopeevn'],['import','数据导入','database','/import'],['tracking','轨迹查询','route','/tracking'],['exceptions','异常明细','alert','/exceptions'],['reports','报表导出','clipboard','/reports'],['data-management','数据管理','database','/data-management'],['settings','系统设置','settings','/settings'],['logs','操作日志','clipboard','/logs']
   ];
-  let navRepairing=false,boardTimer=null,resumeTimer=null,lastResumeAt=0,lastResumeDate='';
+  let navRepairing=false,boardTimer=null;
   const date=v=>String(v||'').slice(0,10);
   const fmt=v=>Number.isFinite(Number(v))?Number(v).toLocaleString('zh-CN'):'—';
   const path=()=>String(location.pathname||'/').toLowerCase().replace(/\/+$/,'')||'/';
@@ -56,34 +57,16 @@
       else if(trend?.parentNode&&table.nextElementSibling!==trend)trend.parentNode.insertBefore(table,trend);
     }catch(error){console.warn('[CE-QC][V309_SHOPEE_BOARD]',error?.name==='AbortError'?'timeout':error?.message||error);}finally{clearTimeout(timer);}
   }
-  function currentImportDate(){
-    const input=date(document.getElementById('reportDate')?.value||'');if(input)return input;
-    const text=String(document.getElementById('fileStatus')?.textContent||'');return date(text.match(/20\d{2}-\d{2}-\d{2}/)?.[0]||'');
-  }
-  function needsUnifiedResume(){
-    const page=document.getElementById('importPage');if(!page)return false;const text=String(page.textContent||'').replace(/\s+/g,' ');
-    if(/SHOPEE CN\/VN\s*(已完成|处理中|已暂停)/i.test(text))return false;
-    return /SHOPEE CN\/VN\s*待处理/i.test(text)&&/尚未全部完成/i.test(text);
-  }
-  async function autoResumeUnified(){
-    if(global.__CE_QC_V311_SHOPEE_RECOVERY_OWNER__)return false;
-    if(!needsUnifiedResume()||typeof global.resumeUnified!=='function')return false;
-    const reportDate=currentImportDate();const now=Date.now();if(now-lastResumeAt<60000&&reportDate===lastResumeDate)return false;
-    lastResumeAt=now;lastResumeDate=reportDate;
-    try{console.info('[CE-QC][V309_AUTO_RESUME] resuming incomplete unified processing',reportDate||'current');await global.resumeUnified();return true;}
-    catch(error){console.warn('[CE-QC][V309_AUTO_RESUME]',error?.message||error);return false;}
-  }
   function scheduleBoard(ms=200){clearTimeout(boardTimer);boardTimer=setTimeout(()=>{canonicalSidebar();patchShopeeBoard();},ms);}
-  function scheduleResume(ms=1400){clearTimeout(resumeTimer);resumeTimer=setTimeout(()=>autoResumeUnified(),ms);}
   function bind(){
-    canonicalSidebar();scheduleBoard(400);scheduleResume(1800);
-    [900,2200,5000].forEach(ms=>setTimeout(()=>{canonicalSidebar();patchShopeeBoard();autoResumeUnified();},ms));
+    canonicalSidebar();scheduleBoard(400);
+    [900,2200,5000].forEach(ms=>setTimeout(()=>{canonicalSidebar();patchShopeeBoard();},ms));
     setInterval(()=>{const sidebar=document.querySelector('.sidebar'),nav=sidebar?.querySelector('.side-nav');if(document.querySelectorAll('.sidebar').length!==1||sidebar?.querySelectorAll('.side-nav').length!==1||!nav||nav.querySelectorAll('.side-link').length!==NAV_ITEMS.length)canonicalSidebar();},2500);
-    document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,#dashboardRangeQuery,[data-testid="global-auto-process"]')){scheduleBoard(180);scheduleResume(1200);}},true);
+    document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,#dashboardRangeQuery,[data-testid="global-auto-process"]'))scheduleBoard(180);},true);
     document.addEventListener('change',event=>{if(event.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))scheduleBoard(180);},true);
-    global.addEventListener('popstate',()=>{scheduleBoard(180);scheduleResume(900);});
+    global.addEventListener('popstate',()=>scheduleBoard(180));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
-  global.__CE_QC_V309_UI_INTEGRITY__={version:VERSION,canonicalSidebar,patchShopeeBoard,autoResumeUnified};
-  console.info('[CE-QC][V309_UI_INTEGRITY]',VERSION,'one canonical sidebar; legacy auto-resume yields to the canonical V311+ backend-truth owner; SHOPEE CN/VN total is patched from exact V308 daily membership and daily attempt/signing table is kept before trends.');
+  global.__CE_QC_V309_UI_INTEGRITY__={version:VERSION,architecture:ARCHITECTURE,uiOnly:true,authoritativeRunner:'V67',canonicalSidebar,patchShopeeBoard};
+  console.info('[CE-QC][V309_UI_INTEGRITY]',VERSION,ARCHITECTURE,'one canonical sidebar and exact SHOPEE daily totals only; V309 never triggers unified processing. V67 exclusively owns run/resume and automatic continuation.');
 })(window);
