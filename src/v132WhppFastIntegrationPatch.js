@@ -4,8 +4,9 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
 
 const PATCH_ID='2026-08-22-v216-whpp-import-parity-v1';
-const STATUS_REVISION='2026-08-29-v358-whpp-lightweight-status-v1';
+const STATUS_REVISION='2026-08-30-v361-whpp-finalized-lifecycle-status-v1';
 const ROUTE='/api/v132/whpp-fast-summary';
+const COMPLETE_SNAPSHOT=new Set(['COMPLETED','COMPLETED_WITH_RETRY']);
 
 function dateOnly(value=''){
   const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);
@@ -66,15 +67,72 @@ function loadUnifiedMembership(db,reportDate){
   };
 }
 function loadStandardMembership(db,reportDate){
-  const daily=db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
-  if(!daily)return {present:false,rows:[],source:'EMPTY'};
+  const daily=db.prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
+  if(!daily)return {present:false,rows:[],source:'EMPTY',summary:{},sourceSnapshotId:'',finalized:false,finalizedSnapshotId:''};
   const rows=uniqueRows(db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows
     WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row=>({
       ...safeJson(row.rowJson,{}),shipmentCode:row.shipmentCode,运单号:row.shipmentCode,businessType:'WHPP',reportDate
     })));
   const expected=num(daily.totalCount);
   const present=expected===rows.length;
-  return {present,rows:present?rows:[],source:present?(expected===0?'WHPP_STANDARD_DAILY_ZERO':'WHPP_STANDARD_DAILY'):'INCOMPLETE',expected,actual:rows.length};
+  const summary=safeJson(daily.summaryJson,{});
+  const finalizedStatus=String(summary.snapshotStatus||'').toUpperCase();
+  const finalizedSnapshotId=String(summary.finalizedSnapshotId||'');
+  const finalized=Boolean(summary.completed===true&&COMPLETE_SNAPSHOT.has(finalizedStatus)&&finalizedSnapshotId);
+  return {
+    present,
+    rows:present?rows:[],
+    source:present?(expected===0?'WHPP_STANDARD_DAILY_ZERO':'WHPP_STANDARD_DAILY'):'INCOMPLETE',
+    expected,
+    actual:rows.length,
+    summary,
+    sourceSnapshotId:String(summary.snapshotId||summary.batchId||''),
+    finalized,
+    finalizedSnapshotId,
+    finalizedStatus
+  };
+}
+function loadCurrentLifecycleCompletion(db,reportDate,memberCount,sourceSnapshotId=''){
+  try{
+    const row=db.prepare(`SELECT
+      json_extract(valueJson,'$.reportDate') reportDate,
+      json_extract(valueJson,'$.snapshotStatus') snapshotStatus,
+      json_extract(valueJson,'$.snapshotId') snapshotId,
+      json_extract(valueJson,'$.sourceSnapshotId') sourceSnapshotId,
+      json_array_length(valueJson,'$.pnhBills') memberCount
+      FROM business_states WHERE businessType='WHPP' LIMIT 1`).get();
+    const stateDate=dateOnly(row?.reportDate||'');
+    const snapshotStatus=String(row?.snapshotStatus||'').toUpperCase();
+    const snapshotId=String(row?.snapshotId||'');
+    const stateSourceSnapshotId=String(row?.sourceSnapshotId||'');
+    const stateMemberCount=num(row?.memberCount);
+    const sourceMatches=!sourceSnapshotId||stateSourceSnapshotId===sourceSnapshotId;
+    const complete=Boolean(
+      stateDate===reportDate&&
+      stateMemberCount===num(memberCount)&&
+      sourceMatches&&
+      COMPLETE_SNAPSHOT.has(snapshotStatus)&&
+      snapshotId
+    );
+    return {complete,stateDate,snapshotStatus,snapshotId,stateSourceSnapshotId,stateMemberCount,sourceMatches};
+  }catch{
+    return {complete:false,stateDate:'',snapshotStatus:'',snapshotId:'',stateSourceSnapshotId:'',stateMemberCount:0,sourceMatches:false};
+  }
+}
+function completionDecision({standard,memberCount,finalEvidenceRows,historyPresent,lifecycle,retryPending=0}={}){
+  if(standard?.finalized){
+    return {completed:true,snapshotStatus:retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED',completionSource:'CURRENT_DAILY_FINALIZATION_MARKER'};
+  }
+  if(lifecycle?.complete){
+    return {completed:true,snapshotStatus:retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED',completionSource:'CURRENT_FINALIZED_WHPP_STATE'};
+  }
+  if(num(memberCount)===0&&Boolean(standard?.present||historyPresent)){
+    return {completed:true,snapshotStatus:retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED',completionSource:standard?.present?'EXACT_ZERO_DAILY':'ZERO_HISTORY'};
+  }
+  if(num(memberCount)>0&&num(finalEvidenceRows)>=num(memberCount)){
+    return {completed:true,snapshotStatus:retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED',completionSource:'FULL_MEMBER_FINAL_EVIDENCE'};
+  }
+  return {completed:false,snapshotStatus:num(memberCount)>0?'PENDING':'EMPTY',completionSource:'PENDING'};
 }
 function loadFinalFacts(db,reportDate,membershipRows=[]){
   const members=uniqueRows(membershipRows);
@@ -147,7 +205,7 @@ function buildFastStatus(requested=''){
   const started=Date.now();
   const db=getDb();
   const reportDate=latestDate(db,requested);
-  if(!reportDate)return{ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',finalEvidenceRows:0,summarySource:'EMPTY',serverBuildMs:Date.now()-started};
+  if(!reportDate)return{ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',finalEvidenceRows:0,summarySource:'EMPTY',completionSource:'EMPTY',serverBuildMs:Date.now()-started};
   const standard=loadStandardMembership(db,reportDate);
   const unified=standard.present?{present:false,rows:[],source:'STANDARD_PRIMARY_NO_FALLBACK',batchId:''}:loadUnifiedMembership(db,reportDate);
   const memberCount=standard.present?standard.rows.length:uniqueRows(unified.rows).length;
@@ -159,13 +217,15 @@ function buildFastStatus(requested=''){
     historyPresent=Boolean(history);
     retryPending=num(safeJson(history?.summaryJson,{}).retryPending);
   }catch{}
-  const completed=memberCount===0?standard.present||historyPresent:finalEvidenceRows>=memberCount;
-  const snapshotStatus=completed?(retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED'):(memberCount>0?'PENDING':'EMPTY');
+  const lifecycle=standard.present?loadCurrentLifecycleCompletion(db,reportDate,memberCount,standard.sourceSnapshotId):{complete:false};
+  const decision=completionDecision({standard,memberCount,finalEvidenceRows,historyPresent,lifecycle,retryPending});
   return{
-    ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate,total:memberCount,completed,snapshotStatus,retryPending,
-    finalEvidenceRows,summarySource:standard.present?standard.source:(unified.present?unified.source:'EMPTY'),
+    ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate,total:memberCount,completed:decision.completed,snapshotStatus:decision.snapshotStatus,retryPending,
+    finalEvidenceRows,completionSource:decision.completionSource,
+    lifecycleSnapshotStatus:lifecycle.snapshotStatus||'',lifecycleSnapshotId:lifecycle.snapshotId||'',dailyFinalizedSnapshotId:standard.finalizedSnapshotId||'',
+    summarySource:standard.present?standard.source:(unified.present?unified.source:'EMPTY'),
     normalizedDailyPresent:Boolean(standard.present),unifiedFallbackPresent:Boolean(unified.present),serverBuildMs:Date.now()-started,
-    state:{reportDate,dailyReportReady:Boolean(standard.present||unified.present),snapshotStatus,completed,total:memberCount}
+    state:{reportDate,dailyReportReady:Boolean(standard.present||unified.present),snapshotStatus:decision.snapshotStatus,completed:decision.completed,total:memberCount}
   };
 }
 function buildFastSummary(requested=''){
@@ -174,7 +234,7 @@ function buildFastSummary(requested=''){
   const reportDate=latestDate(db,requested);
   if(!reportDate){
     const dashboard=buildWhppDashboard({businessType:'WHPP',reportDate:'',dailyReportReady:true,pnhBills:[],dailyParseRows:[],finalRows:[]});
-    return {ok:true,patchId:PATCH_ID,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',metrics:{...dashboard.metrics,retryPending:0},regions:dashboard.regions,accounting:dashboard.accounting,dashboard:{businessType:'WHPP',reportDate:'',metrics:{...dashboard.metrics,retryPending:0},regions:dashboard.regions,accounting:dashboard.accounting},summarySource:'EMPTY',generatedAt:new Date().toISOString(),serverBuildMs:Date.now()-started};
+    return {ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',metrics:{...dashboard.metrics,retryPending:0},regions:dashboard.regions,accounting:dashboard.accounting,dashboard:{businessType:'WHPP',reportDate:'',metrics:{...dashboard.metrics,retryPending:0},regions:dashboard.regions,accounting:dashboard.accounting},summarySource:'EMPTY',completionSource:'EMPTY',generatedAt:new Date().toISOString(),serverBuildMs:Date.now()-started};
   }
 
   // Fresh imports write WHPP directly into business_daily_reports +
@@ -199,9 +259,9 @@ function buildFastSummary(requested=''){
   const historySource=safeJson(history?.summaryJson,{});
   const retryPending=num(historySource.retryPending);
   const memberCount=uniqueRows(membershipRows).length;
-  const completed=memberCount===0?standard.present||Boolean(history):facts.length>=memberCount;
+  const lifecycle=standard.present?loadCurrentLifecycleCompletion(db,reportDate,memberCount,standard.sourceSnapshotId):{complete:false};
+  const decision=completionDecision({standard,memberCount,finalEvidenceRows:facts.length,historyPresent:Boolean(history),lifecycle,retryPending});
   const metrics={...dashboard.metrics,retryPending};
-  const snapshotStatus=completed?(retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED'):(metrics.total>0?'PENDING':'EMPTY');
   const slimDashboard={businessType:'WHPP',reportDate,metrics,regions:dashboard.regions,accounting:dashboard.accounting};
   return {
     ok:true,
@@ -209,12 +269,16 @@ function buildFastSummary(requested=''){
     statusRevision:STATUS_REVISION,
     reportDate,
     total:num(metrics.total),
-    completed,
-    snapshotStatus,
+    completed:decision.completed,
+    snapshotStatus:decision.snapshotStatus,
+    completionSource:decision.completionSource,
+    lifecycleSnapshotStatus:lifecycle.snapshotStatus||'',
+    lifecycleSnapshotId:lifecycle.snapshotId||'',
+    dailyFinalizedSnapshotId:standard.finalizedSnapshotId||'',
     metrics,
     regions:dashboard.regions,
     accounting:dashboard.accounting,
-    state:{reportDate,dailyReportReady:true,snapshotStatus},
+    state:{reportDate,dailyReportReady:true,snapshotStatus:decision.snapshotStatus,completed:decision.completed,total:num(metrics.total)},
     dashboard:slimDashboard,
     summarySource:standard.present?standard.source:(unified.present?unified.source:'EMPTY'),
     finalEvidenceRows:facts.length,
@@ -235,12 +299,12 @@ express.application.listen=function v216WhppInstantSummaryListen(...args){
         const payload=compact?buildFastStatus(req.query.reportDate||req.query.date||''):buildFastSummary(req.query.reportDate||req.query.date||'');
         const duration=Date.now()-started;
         res.setHeader('Cache-Control','no-store');
-        res.setHeader('X-CE-QC-WHPP-Summary',compact?'V358-STATUS':'V352');
+        res.setHeader('X-CE-QC-WHPP-Summary',compact?'V361-STATUS':'V361');
         res.setHeader('Server-Timing',`whppSummary;dur=${duration}`);
         if(duration>=250)console.log(`[CE-QC][PERF][WHPP_VISIBLE_TRUTH] ${ROUTE} ${duration}ms reportDate=${payload.reportDate||''} compact=${compact?1:0}`);
         res.json(payload);
       }catch(error){
-        res.status(500).json({ok:false,patchId:PATCH_ID,code:error?.code||'WHPP_VISIBLE_TRUTH_ERROR',error:error?.message||String(error)});
+        res.status(500).json({ok:false,patchId:PATCH_ID,statusRevision:STATUS_REVISION,code:error?.code||'WHPP_VISIBLE_TRUTH_ERROR',error:error?.message||String(error)});
       }
     });
   }
