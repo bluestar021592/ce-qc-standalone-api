@@ -57,12 +57,12 @@ function strictSigningCache(type,fromDate,toDate){
   }catch{return new Map();}
 }
 function patchRegionSigning(region={},sum=0,count=0){
-  const pod=n(region.pod),c=n(count),s=n(sum);
-  return {...region,signingDaysSum:s,signingDaysCount:c,podDaysSum:s,podDaysCount:c,avgPodDays:avg(s,c),signingCoverageRate:pod>0?pct(c,pod):null,signingEvidenceComplete:pod===0||c>=pod};
+  const pod=n(region.pod),c=n(count),s=n(sum),complete=pod===0||c>=pod;
+  return {...region,signingDaysSum:s,signingDaysCount:c,podDaysSum:s,podDaysCount:c,avgPodDays:avg(s,c),signingCoverageRate:pod>0?pct(c,pod):null,signingEvidenceComplete:complete,signingSampleAvailable:pod>0&&c>0,evidenceIncomplete:Boolean(region.evidenceIncomplete||(pod>0&&!complete))};
 }
 function strictSigningOverlay(row={},cached=null){
-  const out=legacyCoverage(row),pod=n(out.pod),c=n(cached?.signingDaysCount),s=n(cached?.signingDaysSum);
-  out.signingDaysSum=s;out.signingDaysCount=c;out.podDaysSum=s;out.podDaysCount=c;out.avgPodDays=avg(s,c);out.signingCoverageRate=pod>0?pct(c,pod):null;out.signingEvidenceComplete=pod===0||c>=pod;
+  const out=legacyCoverage(row),pod=n(out.pod),c=n(cached?.signingDaysCount),s=n(cached?.signingDaysSum),complete=pod===0||c>=pod;
+  out.signingDaysSum=s;out.signingDaysCount=c;out.podDaysSum=s;out.podDaysCount=c;out.avgPodDays=avg(s,c);out.signingCoverageRate=pod>0?pct(c,pod):null;out.signingEvidenceComplete=complete;out.signingSampleAvailable=pod>0&&c>0;out.evidenceIncomplete=Boolean(out.evidenceIncomplete||(pod>0&&!complete));
   if(out.regions?.PP)out.regions.PP=patchRegionSigning(out.regions.PP,cached?.ppSigningDaysSum,cached?.ppSigningDaysCount);
   if(out.regions?.PV)out.regions.PV=patchRegionSigning(out.regions.PV,cached?.pvSigningDaysSum,cached?.pvSigningDaysCount);
   if(out.regions?.UNKNOWN)out.regions.UNKNOWN=patchRegionSigning(out.regions.UNKNOWN,0,0);
