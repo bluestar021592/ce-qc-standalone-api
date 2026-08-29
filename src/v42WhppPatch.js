@@ -37,6 +37,31 @@ function existingWhppDailyMembership(reportDate) {
   return { headerPresent: true, present, incomplete: !present, count: present ? actual : 0, expected, actual };
 }
 
+function releaseSameFileSupersededSlot(reportDate, fileHash) {
+  const date = String(reportDate || '').slice(0, 10);
+  const hash = String(fileHash || '').trim();
+  if (!date || !hash) return 0;
+  const db = getDb();
+  const rows = db.prepare("SELECT batchId FROM unified_import_batches WHERE reportDate=? AND fileHash=? AND status='SUPERSEDED' ORDER BY createdAt,batchId").all(date, hash);
+  if (!rows.length) return 0;
+  const update = db.prepare("UPDATE unified_import_batches SET status=? WHERE batchId=? AND status='SUPERSEDED'");
+  let changed = 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const row of rows) {
+      const batchId = String(row.batchId || '').trim();
+      if (!batchId) continue;
+      changed += Number(update.run(`SUPERSEDED:${batchId}`, batchId)?.changes || 0);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+  if (changed) console.log(`[CE-QC][V42][REUPLOAD_SLOT_RELEASED] reportDate=${date} fileHash=${hash.slice(0, 16)} retired=${changed}`);
+  return changed;
+}
+
 function invalidateMutableSameDatePointers(reportDate, { whppChanged = true } = {}) {
   const date = String(reportDate || '').slice(0, 10);
   if (!date) return;
@@ -105,6 +130,12 @@ async function handleUnifiedImportV42(req, res) {
 
     const coreRows = parsed.rows.filter(row => row.businessType !== WHPP);
     const coreParsed = coreProjection(parsed, coreRows);
+    // The legacy unique index includes status, so a third upload of the exact same
+    // date/file would otherwise collide when the current VALID row becomes the next
+    // literal SUPERSEDED row. Preserve every audit batch, but move already-retired
+    // duplicates to an immutable per-batch retired status before the canonical store
+    // performs its atomic VALID -> SUPERSEDED -> new VALID replacement.
+    const releasedSupersededSlots = releaseSameFileSupersededSlot(parsed.reportDate, coreParsed.fileHash);
     const saved = saveUnifiedImport(coreParsed, req.file.originalname);
     const queue = getUnifiedProcessingQueue(saved.batchId);
 
@@ -143,6 +174,7 @@ async function handleUnifiedImportV42(req, res) {
       patchId: PATCH_ID,
       importRulesetVersion: IMPORT_RULESET_VERSION,
       ...saved,
+      releasedSupersededSlots,
       classificationCounts: effectiveCounts,
       sourceReconciliation: {
         ...(parsed.sourceReconciliation || {}),
@@ -165,7 +197,7 @@ async function handleUnifiedImportV42(req, res) {
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
       },
-      architectureNote: 'WHPP使用独立持久化快照；写入前先校验同日WHPP完整性；非空日报直接落库；同日空WHPP分区不得擦除既有完整或损坏证据；导入后立即失效当前看板/趋势只读缓存；现有CCSL/SHOPEE统一快照保持兼容。'
+      architectureNote: 'WHPP使用独立持久化快照；同日同文件可重复安全覆盖并保留历史批次；写入前先校验同日WHPP完整性；非空日报直接落库；同日空WHPP分区不得擦除既有完整或损坏证据；导入后立即失效当前看板/趋势只读缓存；现有CCSL/SHOPEE统一快照保持兼容。'
     });
   } catch (error) {
     console.error('[V42][UNIFIED_IMPORT]', error);
