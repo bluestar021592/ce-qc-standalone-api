@@ -17,30 +17,31 @@ const key=(d,t,r='ALL')=>`${d}|${t}|${r}`;
 
 function proofRows(fromDate,toDate,db=getDb()){
   return db.prepare(`
-    WITH ranked AS (
-      SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,
-        ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.batchId DESC) rn
+    WITH candidates AS (
+      SELECT DISTINCT b.reportDate,b.snapshotId,b.createdAt,b.batchId,u.businessType
       FROM unified_import_batches b
+      JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate
       WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
-    ), latest AS (SELECT reportDate,snapshotId FROM ranked WHERE rn=1),
-    valid AS (
-      SELECT DISTINCT l.reportDate,u.businessType,UPPER(TRIM(u.shipmentCode)) shipmentCode,
+        AND u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
+        AND TRIM(COALESCE(u.shipmentCode,''))<>''
+    ), ranked AS (
+      SELECT reportDate,snapshotId,createdAt,batchId,businessType,
+        ROW_NUMBER() OVER(PARTITION BY reportDate,businessType ORDER BY createdAt DESC,batchId DESC) rn
+      FROM candidates
+    ), latest AS (
+      SELECT reportDate,snapshotId,businessType FROM ranked WHERE rn=1
+    ), valid AS (
+      SELECT DISTINCT l.reportDate,l.businessType,UPPER(TRIM(u.shipmentCode)) shipmentCode,
         CASE WHEN UPPER(COALESCE(u.regionCode,''))='PP' THEN 'PP'
              WHEN UPPER(COALESCE(u.regionCode,''))='PV' THEN 'PV' ELSE 'UNKNOWN' END regionCode
-      FROM latest l JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate
-      WHERE u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
-        AND TRIM(COALESCE(u.shipmentCode,''))<>''
+      FROM latest l
+      JOIN unified_import_rows u ON u.snapshotId=l.snapshotId AND u.reportDate=l.reportDate AND u.businessType=l.businessType
+      WHERE TRIM(COALESCE(u.shipmentCode,''))<>''
       UNION ALL
       SELECT DISTINCT p.reportDate,'WHPP' businessType,UPPER(TRIM(p.shipmentCode)) shipmentCode,'UNKNOWN' regionCode
       FROM business_daily_parse_rows p
-      LEFT JOIN latest l ON l.reportDate=p.reportDate
       WHERE p.businessType='WHPP' AND p.reportDate BETWEEN ? AND ?
         AND TRIM(COALESCE(p.shipmentCode,''))<>''
-        AND NOT EXISTS (
-          SELECT 1 FROM unified_import_rows u
-          WHERE u.snapshotId=l.snapshotId AND u.reportDate=p.reportDate AND u.businessType='CEAF'
-            AND UPPER(TRIM(u.shipmentCode))=UPPER(TRIM(p.shipmentCode))
-        )
     )
     SELECT v.reportDate,v.businessType,v.regionCode,v.shipmentCode,
       CASE WHEN l.shipmentCode IS NOT NULL AND (
@@ -129,4 +130,4 @@ export function summarizeV284ProvenRange(fromDate,toDate,db=getDb()){
   return {...base,dates,daily,byType,ccsl,shopee,whpp,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,sourceTotal,analyzedTotal,analysisPending:Math.max(0,sourceTotal-analyzedTotal),missingDates,analysisComplete:missingDates.length===0&&analyzedTotal>=sourceTotal};
 }
 
-console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,'all seven businesses are covered with the same daily membership rules; WHPP excludes latest-VALID CEAF overlap and uses WHPP ledger/final evidence; ledger admission alone is not analysis proof.');
+console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,'all seven businesses use per-date+per-business latest VALID membership; WHPP keeps its full dedicated daily membership without CEAF subtraction and uses WHPP ledger/final evidence; ledger admission alone is not analysis proof.');
