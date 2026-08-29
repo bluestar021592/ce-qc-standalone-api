@@ -3,7 +3,9 @@
 
   const VERSION = '2026-08-27-v333-canonical-seven-business-owner-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-status-only-v1';
+  const COMPLETION_SYNC_REVISION = '2026-08-30-v360-verified-whpp-status-sync-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
+  const RUN_VERIFIED_GRACE_MS = 10 * 60 * 1000;
   let lastTruth = null;
   let refreshBusy = false;
   let timer = null;
@@ -86,7 +88,27 @@
     };
   }
 
-  function stageFromWhpp(payload, target) {
+  function runnerVerifiedCompletion(target, ccsl, shopee) {
+    const marker = global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ || {};
+    const stage = global.__CE_QC_UNIFIED_RUN_STAGE__ || {};
+    const markerDate = normalizeDate(marker.reportDate || '');
+    const stageDate = normalizeDate(stage.reportDate || '');
+    const age = Date.now() - Number(marker.verifiedAt || 0);
+    return Boolean(
+      target
+      && ccsl?.state === 'done'
+      && shopee?.state === 'done'
+      && marker.owner === 'V67'
+      && markerDate === target
+      && age >= 0 && age <= RUN_VERIFIED_GRACE_MS
+      && stage.owner === 'V67'
+      && stage.active === false
+      && String(stage.type || '').toUpperCase() === 'DONE'
+      && stageDate === target
+    );
+  }
+
+  function stageFromWhpp(payload, target, verifiedByRunner = false) {
     const view = payload?.state || {};
     const date = normalizeDate(view.reportDate || payload?.reportDate || '');
     const snapshotStatus = String(view.snapshotStatus || payload?.snapshotStatus || '').toUpperCase();
@@ -94,13 +116,19 @@
     const processing = view.processing || {};
     const total = Number(view.total ?? payload?.total ?? view.dailyParseSummary?.totalRecognized ?? 0);
     let state = 'pending';
+    let details = String(payload?.summarySource || payload?.truthSource || '');
     if (date === target && (COMPLETE_SNAPSHOT.has(snapshotStatus) || view.completed === true || payload?.completed === true)) state = 'done';
+    else if (verifiedByRunner) {
+      state = 'done';
+      details = 'V67已验证当前WHPP后台任务在finalizeWhppState成功后完成；等待摘要读取同步。';
+    }
     else if (date === target && (runStatus === 'running' || processing.running)) state = 'running';
     else if (date === target && (runStatus === 'paused' || processing.paused)) state = 'paused';
     else if (date === target && (runStatus === 'failed' || processing.error)) state = 'failed';
     return {
-      key: 'WHPP', label: 'WHPP本土', state, date, snapshotStatus, runStatus, total,
-      details: String(payload?.summarySource || payload?.truthSource || '')
+      key: 'WHPP', label: 'WHPP本土', state, date: date || (verifiedByRunner ? target : ''), snapshotStatus, runStatus, total,
+      verifiedByRunner,
+      details
     };
   }
 
@@ -148,6 +176,7 @@
     const stages = truth.stages || [];
     node.dataset.v333Owner = 'canonical';
     node.dataset.executionOwner = 'V67';
+    node.dataset.completionSyncRevision = COMPLETION_SYNC_REVISION;
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
@@ -216,9 +245,12 @@
       const shopee = requests[1].status === 'fulfilled'
         ? stageFromShopeeRecovery(requests[1].value, target)
         : failedStage('SHOPEE', 'SHOPEE CN/VN', requests[1].reason);
+      const verifiedByRunner = runnerVerifiedCompletion(target, ccsl, shopee);
       const whpp = requests[2].status === 'fulfilled'
-        ? stageFromWhpp(requests[2].value, target)
-        : failedStage('WHPP', 'WHPP本土', requests[2].reason);
+        ? stageFromWhpp(requests[2].value, target, verifiedByRunner)
+        : (verifiedByRunner
+          ? stageFromWhpp({}, target, true)
+          : failedStage('WHPP', 'WHPP本土', requests[2].reason));
       const stages = [ccsl, shopee, whpp];
       lastTruth = { reportDate: target, stages, complete: stages.every(stage => stage.state === 'done'), checkedAt: Date.now() };
       renderTruth(lastTruth);
@@ -259,12 +291,13 @@
     global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__ = {
       version: VERSION,
       architecture: ARCHITECTURE,
+      completionSyncRevision: COMPLETION_SYNC_REVISION,
       statusOnly: true,
       authoritativeRunner: 'V67',
       refresh: refreshTruth,
       get lastTruth() { return lastTruth; }
     };
-    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, 'V168 only renders canonical CCSL/SHOPEE/WHPP status; it never wraps or starts unified processing. V67 exclusively owns run/resume.');
+    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, COMPLETION_SYNC_REVISION, 'V168 only renders canonical CCSL/SHOPEE/WHPP status; it never wraps or starts unified processing. A same-page V67 verified completion may bridge the short summary-read lag only while CCSL+SHOPEE remain canonically complete for the same date.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
