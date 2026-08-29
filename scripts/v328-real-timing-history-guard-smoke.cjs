@@ -3,14 +3,15 @@ for(const file of ['src/v328ThreeBusinessHistoryFast.js','src/v329ThreeBusinessD
 const legacy=fs.readFileSync('src/v328ThreeBusinessHistoryFast.js','utf8'),cache=fs.readFileSync('src/v329ThreeBusinessDailyCache.js','utf8'),coordinator=fs.readFileSync('src/v328EvidenceRepairCoordinator.js','utf8'),worker=fs.readFileSync('scripts/v329-three-business-cache-worker.mjs','utf8'),backend=fs.readFileSync('src/v308DeliveryDailyFastPath.js','utf8'),ui=fs.readFileSync('public/v308-dashboard-read-bridge.js','utf8'),attempt=fs.readFileSync('src/shopeeAttemptCycleV246.js','utf8');
 assert.match(legacy,/NULLIF\(ledgerPodDate,''\)/,'legacy isolated builder still requires real POD evidence');
 assert.doesNotMatch(legacy,/CASE WHEN finalPod=1 THEN NULLIF\(latestEventTime,''\) ELSE '' END/,'ordinary latestEventTime cannot impersonate POD');
-assert.match(cache,/实际POD日期-首次日报锁定日期\+1|actual POD|首次日报锁定日期/);
+assert.match(cache,/真实首次派送START时间/,'visible Shopee average must use real dispatch START evidence');
+assert.match(cache,/真实POD时间/,'visible Shopee average must use real POD evidence');
+assert.doesNotMatch(cache,/首次日报锁定日期/,'visible Shopee average must not fall back to the first report date');
 assert.match(cache,/signingComplete/);
-assert.match(worker,/l\.signingDays/);
-assert.match(worker,/firstReportDate/);
-assert.match(worker,/inclusive\(start,p\)/);
+assert.match(worker,/resolveShopeeSigningSamples/,'history worker must use the extracted real START-to-POD sample owner for Shopee');
+assert.match(worker,/SHOPEE\.has\(type\)\?resolveShopeeSigningSamples/);
 assert.match(coordinator,/v329-three-business-cache-worker\.mjs/);
 assert.doesNotMatch(backend,/readV328ThreeBusinessHistory/,'main web route must not run the heavy legacy builder');
-assert.match(ui,/平均签收天数=实际POD日期−首次日报锁定日期\+1/);
+assert.match(ui,/平均签收天数=真实POD日期−真实首次派送START日期\+1/);
 
 // Guard the actual dispatch-attempt behavior instead of a fixed Chinese UI sentence.
 // Attempt 1 starts on the first real START; only failure/Pending evidence may allow a later START to advance the attempt number.
@@ -24,4 +25,4 @@ assert.match(attempt,/else if \(failedSinceStart\)/,'a repeated START must not i
 assert.match(attempt,/if \(attemptNo > 0 && isFailure\(event\)\) \{[\s\S]*failedSinceStart = true/,'Pending or delivery-failure evidence must arm the next START as the next attempt');
 assert.match(attempt,/attemptNo = Math\.min\(3, attemptNo \+ 1\)/,'attempt number must remain capped at 3 where 3 means 3+');
 
-console.log('[V329] metric guard passed · visible average=first report lock→actual POD inclusive · strict START/failure attempt behavior locked in source · heavy history builder isolated from web process');
+console.log('[V329] metric guard passed · visible average=real dispatch START→actual POD inclusive · strict START/failure attempt behavior locked in source · heavy history builder isolated from web process');

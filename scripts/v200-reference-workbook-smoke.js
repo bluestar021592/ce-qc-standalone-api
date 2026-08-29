@@ -6,7 +6,7 @@ import { writeV200ReferenceWorkbook } from '../src/v200ReferenceWorkbook.js';
 import { statsOf, bucketRows, anchorMaps, completeSigningAverage } from '../src/v200Metrics.js';
 
 function must(condition,message){if(!condition)throw new Error(message);}
-const row={firstReportDate:'2026-08-01',dispatchStartDate:'2026-08-02',firstDispatchDate:'2026-08-02',shipmentCode:'TEST001',orderTime:'2026-08-01 08:00:00',statusCode:'Y',statusDesc:'POD',recipientProvince:'Phnom Penh',area:'金边',currentShop:'',currentProvince:'Phnom Penh',recipient:'测试',recipientPhone:'',recipientAddress:'',pod:true,podTime:'2026-08-03 10:00:00',podDate:'2026-08-03',rawDeliveryTime:'2026-08-03 10:00:00',deliveryShop:'',deliveryProvince:'',courier:'',exceptionCode:'',exceptionDesc:'',remark:'',store:false,returned:false,pending:false,delivering:false,attemptNo:1,signingDays:2,deliveryDays:2};
+const row={businessType:'SHOPEECN',firstReportDate:'2026-08-01',dispatchStartDate:'2026-08-02',firstDispatchDate:'2026-08-02',shipmentCode:'TEST001',orderTime:'2026-08-01 08:00:00',statusCode:'Y',statusDesc:'POD',recipientProvince:'Phnom Penh',area:'金边',currentShop:'',currentProvince:'Phnom Penh',recipient:'测试',recipientPhone:'',recipientAddress:'',pod:true,podTime:'2026-08-03 10:00:00',podDate:'2026-08-03',rawDeliveryTime:'2026-08-03 10:00:00',deliveryShop:'',deliveryProvince:'',courier:'',exceptionCode:'',exceptionDesc:'',remark:'',store:false,returned:false,pending:false,delivering:false,attemptNo:1,signingDays:2,deliveryDays:2,dispatchSigningEvidenceComplete:true};
 const rows=[row],range={from:'2026-08-01',to:'2026-08-01'};
 const stats=statsOf(rows,range),bucket=bucketRows(rows),anchors=anchorMaps(bucket);
 const file=path.join(os.tmpdir(),`ce-qc-v200-${process.pid}.xlsx`);
@@ -21,8 +21,8 @@ try{
   must(String(dash.getCell('B11').value?.formula||'').startsWith('HYPERLINK("#\'全部明细\'!A2",'),'WPS internal hyperlink formula missing');
   must(dash.getCell('A13').value==='派次与平均签收天数','attempt section must stay on dashboard');
   must(!names.some(name=>/^[123]派|金边[123]派|外省[123]派/.test(name)),'attempt detail sheets must not be created');
-  must(stats.overall.days[0]===3,'average days must use first report lock 08-01 to actual POD 08-03 inclusive, not dispatch start 08-02');
-  must(completeSigningAverage(stats.overall.days,stats.overall.pod)===3,'exact average denominator must equal completed POD count');
-  must(completeSigningAverage([],1)===null,'missing POD signing date must keep exact average unknown');
-  console.log('[V200/V329] generated reference workbook structure/style/link + first-report-lock-to-POD exact average smoke passed');
+  must(stats.overall.days[0]===2,'SHOPEE average days must use real dispatch START 08-02 to actual POD 08-03 inclusive, not first-report date 08-01');
+  must(completeSigningAverage(stats.overall.days,stats.overall.pod)===2,'exact average denominator must equal completed POD count');
+  must(completeSigningAverage([],1)===null,'missing real START/POD signing evidence must keep exact average unknown');
+  console.log('[V200/V329] generated reference workbook structure/style/link + strict START-to-POD exact average smoke passed');
 }finally{try{fs.rmSync(file,{force:true});}catch{}}

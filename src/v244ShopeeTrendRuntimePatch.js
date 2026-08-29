@@ -1,7 +1,9 @@
 import express from 'express';
+import { getDb } from './db.js';
 import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
 import { readV284ProvenShopeeTrends as readV284ShopeeTrends } from './v284MembershipEvidenceCoverage.js';
 import { enforceV294MetricCompleteness, V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
+import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.js';
 
 // Historical export names remain stable for the browser and old code, but V284
 // replaces the old firstReportDate cohort with exact daily latest-VALID membership.
@@ -11,6 +13,9 @@ export const V246_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 export const V247_SHOPEE_TREND_ID = V244_SHOPEE_TREND_ID;
 const previousGet=express.application.get;
 let routeRegistered=false;
+const n=value=>Number.isFinite(Number(value))?Number(value):0;
+const pct=(value,total)=>total?Number((n(value)*100/n(total)).toFixed(2)):null;
+const avg=(sum,count)=>n(count)>0?Number((n(sum)/n(count)).toFixed(2)):null;
 
 function legacyCoverage(row={}){
   const ready=row.ready!==false;
@@ -45,9 +50,31 @@ function legacyCoverage(row={}){
   };
 }
 
+function strictSigningCache(type,fromDate,toDate){
+  try{
+    const data=readV329ThreeBusinessDailyCache(type,toDate,getDb(),fromDate);
+    return new Map((data.daily||[]).map(row=>[String(row.reportDate||''),row]));
+  }catch{return new Map();}
+}
+function patchRegionSigning(region={},sum=0,count=0){
+  const pod=n(region.pod),c=n(count),s=n(sum),complete=pod===0||c>=pod;
+  return {...region,signingDaysSum:s,signingDaysCount:c,podDaysSum:s,podDaysCount:c,avgPodDays:avg(s,c),signingCoverageRate:pod>0?pct(c,pod):null,signingEvidenceComplete:complete,signingSampleAvailable:pod>0&&c>0,evidenceIncomplete:Boolean(region.evidenceIncomplete||(pod>0&&!complete))};
+}
+function strictSigningOverlay(row={},cached=null){
+  const out=legacyCoverage(row),pod=n(out.pod),c=n(cached?.signingDaysCount),s=n(cached?.signingDaysSum),complete=pod===0||c>=pod;
+  out.signingDaysSum=s;out.signingDaysCount=c;out.podDaysSum=s;out.podDaysCount=c;out.avgPodDays=avg(s,c);out.signingCoverageRate=pod>0?pct(c,pod):null;out.signingEvidenceComplete=complete;out.signingSampleAvailable=pod>0&&c>0;out.evidenceIncomplete=Boolean(out.evidenceIncomplete||(pod>0&&!complete));
+  if(out.regions?.PP)out.regions.PP=patchRegionSigning(out.regions.PP,cached?.ppSigningDaysSum,cached?.ppSigningDaysCount);
+  if(out.regions?.PV)out.regions.PV=patchRegionSigning(out.regions.PV,cached?.pvSigningDaysSum,cached?.pvSigningDaysCount);
+  if(out.regions?.UNKNOWN)out.regions.UNKNOWN=patchRegionSigning(out.regions.UNKNOWN,0,0);
+  out.signingTruth='V329_REAL_START_TO_POD_CACHE';
+  return out;
+}
+
 export function readV244ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate='',options={}) {
-  const result=readV284ShopeeTrends(businessType,fromDate,toDate,options);
-  const daily=(result.daily||[]).map(legacyCoverage);
+  const type=String(businessType||'').toUpperCase();
+  const result=readV284ShopeeTrends(type,fromDate,toDate,options);
+  const signing=strictSigningCache(type,result.fromDate||fromDate,result.toDate||toDate);
+  const daily=(result.daily||[]).map(row=>strictSigningOverlay(row,signing.get(String(row.reportDate||''))||null));
   return {
     ...result,
     daily,
@@ -66,10 +93,10 @@ export function readV244ShopeeTrends(businessType='SHOPEECN',fromDate='',toDate=
     definitions:{
       podRate:'V284当天最新VALID日报成员中的当前POD/当日成员总票；状态以已验证V246账本优先，旧final仅缺失回退',
       ocRate:'V284当天日报成员中的当前真实OC/当日成员总票',
-      avgPodDays:'生命周期首次进入最新VALID日报日期到实际POD日期，含首尾当天；当天全部POD都有真实POD日期才发布平均值，否则显示—',
+      avgPodDays:'真实首次派送START日期到真实POD日期，含首尾自然日；仅使用V329严格START→POD缓存中的真实样本，缺START或POD证据时保持未知，不再用首次日报日期替代',
       attemptRate:'TBKH/SHOPEE统一真实70 START→失败或Pending→新START；全轨迹没有70才允许60兜底。当天全部POD派次证据完整才发布1/2/3派率；无真实派次证据时显示—，证据不完整也显示—并单列证据覆盖率',
-      trackingLedger:'日报成员决定分母；V246/V294已验证账本事实决定当前状态/POD/派次；空OPEN占位账本不算已分析，firstReportDate不再决定趋势日期',
-      regionTruth:'PP/PV来自当天最新VALID日报成员，状态仍以已验证V246账本为权威'
+      trackingLedger:'日报成员决定分母；V246/V294已验证账本事实决定当前状态/POD/派次；空OPEN占位账本不算已分析，firstReportDate不再决定趋势日期或签收天数',
+      regionTruth:'PP/PV来自当天最新VALID日报成员；PP/PV平均签收天数与总平均同源于V329真实START→POD样本'
     }
   };
 }
@@ -99,7 +126,7 @@ express.application.get=function v284ShopeeTrendRoute(pathValue,...handlers){
     previousGet.call(this,'/api/v246/shopee-trends',handler);
     previousGet.call(this,'/api/v245/shopee-trends',handler);
     previousGet.call(this,'/api/v244/shopee-trends',handler);
-    console.info('[CE-QC][V294_SHOPEE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,V294_METRIC_COMPLETENESS_ID,'registered daily-membership lifecycle metrics with proven-evidence coverage + complete-POD metric publication gate.');
+    console.info('[CE-QC][V294_SHOPEE]',V284_DAILY_MEMBERSHIP_TRUTH_ID,V294_METRIC_COMPLETENESS_ID,'registered daily-membership lifecycle metrics with strict V329 START-to-POD signing overlay.');
   }
   return previousGet.call(this,pathValue,...handlers);
 };

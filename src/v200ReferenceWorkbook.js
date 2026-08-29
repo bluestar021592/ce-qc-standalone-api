@@ -106,7 +106,7 @@ function createDashboard(workbook, type, range, stats, anchors) {
     mr++;
   }
   const noteRow = mr + 1; sheet.mergeCells(noteRow, 1, noteRow, 16);
-  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派。平均签收天数：生命周期首次进入最新VALID日报日期→真实POD日期，包含首尾自然日。导出前必须完成POD日期、派次、区域及签收天数对账，缺少真实证据时整份报表拒绝生成，不以空白、横线或默认1替代。`;
+  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在整票没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派。平均签收天数：真实首次派送START日期→真实POD日期，包含首尾自然日；SHOPEE CN/VN的总平均与PP/PV平均使用完全相同的真实样本。导出前必须完成POD日期、派次、区域及签收天数对账，缺少真实证据时整份报表拒绝生成，不以空白、横线或默认1替代。`;
   sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=42;
   sheet.commit();
 }

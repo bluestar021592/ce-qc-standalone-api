@@ -10,6 +10,7 @@ const syntax = [
   'src/v329ThreeBusinessDailyCache.js',
   'src/v328EvidenceRepairCoordinator.js',
   'scripts/v329-three-business-cache-worker.mjs',
+  'src/shopeeHistoricalSigningTruth.js',
   'src/v308DeliveryDailyFastPath.js',
   'public/v308-dashboard-read-bridge.js',
   'public/v320-history-trend-owner.js',
@@ -23,6 +24,7 @@ const cacheSource = read('src/v329ThreeBusinessDailyCache.js');
 const backend = read('src/v308DeliveryDailyFastPath.js');
 const coordinator = read('src/v328EvidenceRepairCoordinator.js');
 const worker = read('scripts/v329-three-business-cache-worker.mjs');
+const signingTruth = read('src/shopeeHistoricalSigningTruth.js');
 const ui = read('public/v308-dashboard-read-bridge.js');
 const trendUi = read('public/v320-history-trend-owner.js');
 const firstUi = read('public/v295-first-attempt-ui.js');
@@ -32,7 +34,7 @@ for (const token of ['TBKH','SHOPEECN','SHOPEEVN','unified_import_rows','shipmen
   assert.ok(heavy.includes(token), `historical membership source missing ${token}`);
 }
 
-// Compact history cache owns strict first-attempt + signing samples + regional signing sums.
+// Compact history cache owns strict first-attempt + real START-to-POD signing samples + regional sums.
 for (const token of [
   'v329_three_business_daily_cache',
   'firstAttemptEligible',
@@ -49,6 +51,9 @@ for (const token of [
   'pvAvgSigningDays'
 ]) assert.ok(cacheSource.includes(token), `three-business cache missing ${token}`);
 assert.match(cacheSource, /只要存在真实签收天数样本就发布样本平均/);
+assert.match(cacheSource, /真实首次派送START时间/);
+assert.match(cacheSource, /真实POD时间/);
+assert.doesNotMatch(cacheSource, /首次日报锁定日期/);
 
 // Web current path must stay per-business and must never reconstruct heavy history.
 assert.match(backend, /readV236CurrentSummary\(date\)/);
@@ -56,12 +61,13 @@ assert.doesNotMatch(backend, /readV236CurrentSummary\(date,\{cacheOnly:true\}\)/
 assert.match(backend, /readV329ThreeBusinessDailyCache/);
 assert.match(backend, /strictDailyEvidence/);
 assert.match(backend, /attemptSource LIKE 'V246_STRICT_TRACK%'/);
+assert.match(backend, /json_extract\(evidenceJson,'\$\.starts\[0\]\.time'\)/);
 assert.match(backend, /signingSampleAvailable=pod>0&&signingCount>0/);
 assert.match(backend, /ppAvgSigningDays/);
 assert.match(backend, /pvAvgSigningDays/);
 assert.doesNotMatch(backend, /readV328ThreeBusinessHistory|readV320HistoricalDailyWithDispatch/);
 
-// Isolated worker must derive old dates from saved members + strict ledger, not current V295 truth.
+// Isolated worker must derive old dates from saved members + strict evidence, not current V295 truth.
 assert.match(coordinator, /v329-three-business-cache-worker\.mjs/);
 assert.doesNotMatch(worker, /readV295FirstAttemptTrends|v295FirstAttemptTruth/);
 for (const token of [
@@ -70,16 +76,20 @@ for (const token of [
   'firstAttemptEligible',
   'firstAttemptSuccess',
   'firstAttemptUnknownPod',
-  'regionMap',
+  'resolveShopeeHistoricalRegions',
+  'resolveShopeeSigningSamples',
   "region==='PP'",
   "region==='PV'",
   'ppSigningDaysSum',
   'pvSigningDaysSum',
   'writeV329ThreeBusinessDailyCache'
 ]) assert.ok(worker.includes(token), `isolated history worker missing ${token}`);
+assert.match(signingTruth, /strictLedgerStart/);
+assert.match(signingTruth, /inclusive\(start,pod\)/);
 
 // All visible history/attempt cards share one payload; no duplicate heavy history request is allowed.
-for (const label of ['平均签收天数','金边PP平均签收天数','外省PV平均签收天数']) assert.ok(ui.includes(label));
+for (const label of ['平均签收天数','金边PP平均签收天数','外省PV平均签收天数','真实首次派送START']) assert.ok(ui.includes(label));
+assert.doesNotMatch(ui, /首次日报锁定日期/);
 assert.match(trendUi, /__CE_QC_V328_HISTORY_PAYLOADS__/);
 assert.match(trendUi, /function specialCached/);
 assert.doesNotMatch(trendUi, /fetch\(`\/api\/v308\/delivery-daily[^`]*history=all/);
@@ -156,4 +166,4 @@ for (const type of ['TBKH','SHOPEECN','SHOPEEVN']) {
 
 closeDb();
 fs.rmSync(root, { recursive:true, force:true });
-console.log('[THREE_BUSINESS_HISTORY] behavior smoke passed · saved membership · strict attempts · partial real signing samples · PP/PV averages · shared cache-only UI · no release-name coupling');
+console.log('[THREE_BUSINESS_HISTORY] behavior smoke passed · saved membership · strict attempts · partial real START-to-POD samples · PP/PV averages · shared cache-only UI · no release-name coupling');
