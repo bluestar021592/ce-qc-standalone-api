@@ -7,7 +7,7 @@ const MARKER='/v295-first-attempt-ui.js?v=20260827-v334-1';
 const V299_FIRST_ATTEMPT_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v299-1';
 const STABILITY_MARKER='/v301-runtime-stability.js?v=20260825-v301-1';
 const V307_HOME_MARKER='/v307-exact-daily-home-owner.js?v=20260826-v325-1';
-const V309_UI_MARKER='/v309-ui-integrity.js?v=20260826-v309-1';
+const V309_UI_MARKER='/v309-ui-integrity.js?v=20260829-ui-only-1';
 const V310_RESUME_MARKER='/v310-unified-resume-owner.js?v=20260826-v310-1';
 const V311_RECOVERY_MARKER='/v311-shopee-recovery-owner.js?v=20260827-v333-1';
 const V311_RECOVERY_V332_COMPAT_MARKER='/v311-shopee-recovery-owner.js?v=20260827-v332-1';
@@ -25,16 +25,15 @@ const V328_ATTEMPT_V329_COMPAT_MARKER='/v328-three-business-attempt-owner.js?v=2
 const V300_COMPAT_MARKER='/v300-runtime-rescue.js?v=20260825-v300-1';
 const V298_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v298-1';
 const SINGLE_RUNNER_MARKER='2026-08-29-single-unified-runner-v1';
-void V299_FIRST_ATTEMPT_COMPAT_MARKER;void V310_RESUME_MARKER;void V311_RECOVERY_MARKER;void V311_RECOVERY_V332_COMPAT_MARKER;void V311_RECOVERY_COMPAT_MARKER;void V317_CCSL_RECOVERY_MARKER;void V317_CCSL_RECOVERY_V332_COMPAT_MARKER;void V317_CCSL_RECOVERY_V330_COMPAT_MARKER;void V317_CCSL_RECOVERY_COMPAT_MARKER;void V320_HISTORY_TREND_V329_COMPAT_MARKER;void V328_ATTEMPT_V329_COMPAT_MARKER;void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
+void CLEAN_START_MARKER;void V299_FIRST_ATTEMPT_COMPAT_MARKER;void V310_RESUME_MARKER;void V311_RECOVERY_MARKER;void V311_RECOVERY_V332_COMPAT_MARKER;void V311_RECOVERY_COMPAT_MARKER;void V317_CCSL_RECOVERY_MARKER;void V317_CCSL_RECOVERY_V332_COMPAT_MARKER;void V317_CCSL_RECOVERY_V330_COMPAT_MARKER;void V317_CCSL_RECOVERY_COMPAT_MARKER;void V320_HISTORY_TREND_V329_COMPAT_MARKER;void V328_ATTEMPT_V329_COMPAT_MARKER;void V300_COMPAT_MARKER;void V298_COMPAT_MARKER;
 
 // V67 is the only browser execution owner for CCSL -> SHOPEE -> WHPP.
-// The historical V310/V311/V317 browser watchdogs remain in the repository for
-// compatibility and diagnostics, but are intentionally NOT injected at runtime.
-// Their backend recovery/status routes remain active and are read by V67/V168.
+// Historical V310/V311/V317 browser watchdogs remain source-compatible but are
+// intentionally not injected. The one-time V303 destructive clean-start client is
+// also retired from normal runtime after its authorized migration window.
 express.response.send=function v334FirstAttemptUiSend(body){
   if(typeof body==='string'&&body.includes('</body>')&&body.includes('CE Express')){
     const tags=[];
-    if(!body.includes(CLEAN_START_MARKER))tags.push(`  <script src="${CLEAN_START_MARKER}"></script>`);
     if(!body.includes(EXACT_DAILY_MARKER))tags.push(`  <script src="${EXACT_DAILY_MARKER}"></script>`);
     if(!body.includes(MARKER))tags.push(`  <script src="${MARKER}"></script>`);
     if(!body.includes(STABILITY_MARKER))tags.push(`  <script src="${STABILITY_MARKER}"></script>`);
@@ -47,7 +46,7 @@ express.response.send=function v334FirstAttemptUiSend(body){
     if(tags.length)body=body.replace('</body>',`${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V295-UI',V295_FIRST_ATTEMPT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V301-UI','2026-08-25-v301-nonrecursive-runtime-stability-v1');
-    this.setHeader?.('X-CE-QC-V309-UI','2026-08-26-v309-single-nav-auto-resume-shopee-total-v1');
+    this.setHeader?.('X-CE-QC-V309-UI','2026-08-29-ui-only-no-unified-trigger-v1');
     this.setHeader?.('X-CE-QC-V318-UI','2026-08-26-v318-single-sidebar-hard-owner-v1');
     this.setHeader?.('X-CE-QC-V325-UI','2026-08-26-v325-single-owner-stable-home-cards-v1');
     this.setHeader?.('X-CE-QC-V329-UI','2026-08-27-v329-three-business-cache-ui-v1');
@@ -58,4 +57,4 @@ express.response.send=function v334FirstAttemptUiSend(body){
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V334_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,SINGLE_RUNNER_MARKER,'V67 is the sole unified execution owner; V168 status and V138 CCSL detail remain read-only browser owners.');
+console.info('[CE-QC][V334_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,SINGLE_RUNNER_MARKER,'V67 is the sole unified execution owner; legacy recovery watchdogs and the completed one-time clean-start client are not injected.');
