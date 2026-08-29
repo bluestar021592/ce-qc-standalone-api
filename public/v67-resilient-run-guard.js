@@ -2,6 +2,7 @@
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
   const VERSION = '2026-08-29-v355-authoritative-whpp-auto-resume-v1';
+  const ARCHITECTURE = '2026-08-29-single-unified-runner-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   const autoRecoveryDates = new Set();
   let busy = false;
@@ -12,7 +13,8 @@
     return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
   }
   function targetDate() {
-    const importPage = location.pathname === '/import' || document.getElementById('importPage')?.classList?.contains('active');
+    const importPageNode = document.getElementById('importPage');
+    const importPage = location.pathname === '/import' || Boolean(importPageNode && !importPageNode.hidden);
     if (importPage) {
       const inputDate = normalizeDate(document.getElementById('reportDate')?.value);
       if (inputDate) return inputDate;
@@ -291,11 +293,19 @@
       if (isAuth(error)) return false;
       return false;
     }
+
     autoRecoveryDates.add(target);
     setStatus(`检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土…`);
     console.info('[CE-QC][V355_WHPP_AUTO_RESUME]', { reportDate: target, reason });
-    void execute('resume');
-    return true;
+    try {
+      const result = await execute('resume');
+      if (!result?.ok) autoRecoveryDates.delete(target);
+      return Boolean(result?.ok);
+    } catch (error) {
+      autoRecoveryDates.delete(target);
+      console.warn('[CE-QC][V355_WHPP_AUTO_RESUME] retryable handoff failed:', error?.message || error);
+      return false;
+    }
   }
 
   function scheduleAutoRecovery() {
@@ -309,7 +319,7 @@
   }
 
   async function execute(mode = 'start') {
-    if (busy) return;
+    if (busy) return { ok: false, busy: true };
     const target = targetDate();
     setUnifiedStage('CCSL', true, target);
     setBusy(true, `正在启动 ${target || '当日'} 七业务处理…`);
@@ -368,9 +378,19 @@
   function install() {
     global.runUnified = () => execute('start');
     global.resumeUnified = () => execute('resume');
-    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = { version: VERSION, run: execute, targetDate, verifyWhpp, readWhppSummary, canonicalStageTruth, recoverPendingWhpp };
+    global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = {
+      version: VERSION,
+      architecture: ARCHITECTURE,
+      singleOwner: true,
+      run: execute,
+      targetDate,
+      verifyWhpp,
+      readWhppSummary,
+      canonicalStageTruth,
+      recoverPendingWhpp
+    };
     scheduleAutoRecovery();
-    console.info('[CE-QC][V355_THREE_STAGE_RUNNER]', VERSION, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and a pending WHPP stage auto-resumes on the import page.');
+    console.info('[CE-QC][V355_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and a pending WHPP stage auto-resumes on the visible import page.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
