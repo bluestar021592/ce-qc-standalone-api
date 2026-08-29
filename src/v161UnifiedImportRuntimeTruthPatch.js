@@ -41,14 +41,12 @@ function directWhppMembership(reportDate = '') {
   if (daily) {
     const expected = num(daily.totalCount);
     const actual = one("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''", date);
-    if (actual > 0 && (!expected || expected === actual)) {
-      return { count: actual, source: 'WHPP_STANDARD_DAILY', direct: true, expected, actual };
+    if (expected === actual) {
+      return { count: actual, source: actual > 0 ? 'WHPP_STANDARD_DAILY' : 'WHPP_STANDARD_DAILY_ZERO', direct: true, expected, actual };
     }
     // A partially persisted standard cohort is not safe evidence of daily
     // membership. Fail closed instead of publishing a fabricated partial total.
-    if (expected !== actual) {
-      return { count: 0, source: 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED', direct: true, expected, actual };
-    }
+    return { count: 0, source: 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED', direct: true, expected, actual };
   }
 
   // Only old/erased dates reach the V351 fallback. Fresh imports should always
@@ -63,7 +61,7 @@ function directWhppMembership(reportDate = '') {
       };
     }
   } catch {}
-  return { count: 0, source: daily ? 'WHPP_STANDARD_DAILY_EMPTY' : 'NO_SAFE_WHPP_MEMBERSHIP', direct: false };
+  return { count: 0, source: 'NO_SAFE_WHPP_MEMBERSHIP', direct: false };
 }
 
 function classificationTruth(batch) {
@@ -137,6 +135,7 @@ function normalizeImport(base = {}) {
   const regions = regionCounts(batch);
   const meta = snapshotMeta(batch);
   const currentImportTotal = TYPES.reduce((sum, type) => sum + num(counts[type]), 0);
+  const whppIncomplete = truth.whpp.source === 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED';
   const summary = {
     ...safeJson(batch.summaryJson, {}),
     ...(base.summary || {}),
@@ -148,8 +147,8 @@ function normalizeImport(base = {}) {
     businessTypes: [...TYPES],
     validUniqueWaybills: currentImportTotal,
     classifiedWaybills: currentImportTotal,
-    difference: 0,
-    balanced: true,
+    difference: whppIncomplete ? num(truth.whpp.expected) - num(truth.whpp.actual) : 0,
+    balanced: !whppIncomplete,
     runtimeTruth: 'SIX_LEGACY_UNIFIED_PARTITIONS_PLUS_DIRECT_WHPP_DAILY'
   };
   return {
@@ -171,6 +170,7 @@ function normalizeImport(base = {}) {
     whppClassificationSource: truth.whpp.source,
     whppClassificationCount: num(truth.whpp.count),
     whppDirectDailyPrimary: Boolean(truth.whpp.direct),
+    whppMembershipIncomplete: whppIncomplete,
     runtimeTruthPatch: PATCH_ID
   };
 }
