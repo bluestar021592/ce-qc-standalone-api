@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 import { buildWhppDashboard } from './whppReporting.js';
 
-export const V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID = '2026-08-28-v351-whpp-unified-membership-dashboard-bridge-v3';
+export const V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID = '2026-08-29-v351-whpp-safe-history-disaster-fallback-v4';
 const SUMMARY_ROUTE = '/api/v71/whpp-summary';
 const DETAIL_ROUTES = ['/api/v172/whpp-metric-detail', '/api/whpp/metric-detail'];
 const UNIFIED_IMPORT_ROUTE = '/api/import/unified-daily-report';
@@ -70,18 +70,37 @@ function historyTotal(reportDate, db) {
   return 0;
 }
 function loadPreservedWhppMembership(reportDate, db) {
-  let standardRows = [];
-  try {
-    standardRows = uniqueRows(db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows
-      WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
-        ...safeJson(row.rowJson, {}), shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: 'WHPP', reportDate
-      })));
-  } catch {}
-  if (standardRows.length) return { rows: standardRows, source: 'WHPP_STANDARD_DAILY_ROWS', historyTotal: historyTotal(reportDate, db) };
+  // A normalized daily header is authoritative only when its declared total and
+  // distinct member rows match exactly. Never turn a partial 235/236 cohort into
+  // a new canonical 235-member day. Exact zero is a valid standard daily truth,
+  // but it is represented as an empty fallback cohort because primary readers
+  // own current exact-zero publication.
+  const standard = loadStandardWhppMembership(reportDate, db);
+  if (standard.daily && standard.present && standard.rows.length) {
+    return {
+      rows: standard.rows,
+      source: 'WHPP_STANDARD_DAILY_ROWS',
+      historyTotal: historyTotal(reportDate, db),
+      expected: standard.expected,
+      actual: standard.actual
+    };
+  }
+  if (standard.daily && standard.present && standard.expected === 0) {
+    return { rows: [], source: 'WHPP_STANDARD_DAILY_ZERO', historyTotal: historyTotal(reportDate, db), expected: 0, actual: 0 };
+  }
+  if (standard.daily && !standard.present) {
+    return {
+      rows: [],
+      source: 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED',
+      historyTotal: historyTotal(reportDate, db),
+      expected: standard.expected,
+      actual: standard.actual
+    };
+  }
 
   // Never infer a full daily membership from a partial fact set. Recovery from
-  // final facts is allowed only when the unique fact count exactly equals the
-  // previously completed WHPP history total for the same date.
+  // final facts is allowed only when there is no standard daily header and the
+  // unique fact count exactly equals the previously completed WHPP history total.
   const expected = historyTotal(reportDate, db);
   if (!expected) return { rows: [], source: '', historyTotal: 0 };
   let scanRows = [];
@@ -124,6 +143,8 @@ export function loadV351UnifiedWhppMembership(reportDate = '', db = getDb()) {
       membershipSource: preserved.source || 'NO_VALID_UNIFIED_BATCH',
       recoveredFromPreservedWhpp: Boolean(preserved.rows.length),
       historyTotal: preserved.historyTotal || 0,
+      expected: preserved.expected,
+      actual: preserved.actual,
       rows: preserved.rows,
       bills: preserved.rows.map(billOf)
     };
@@ -162,6 +183,8 @@ export function loadV351UnifiedWhppMembership(reportDate = '', db = getDb()) {
     membershipSource: preserved.source || 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD',
     recoveredFromPreservedWhpp: Boolean(preserved.rows.length),
     historyTotal: preserved.historyTotal || 0,
+    expected: preserved.expected,
+    actual: preserved.actual,
     rows: preserved.rows,
     bills: preserved.rows.map(billOf)
   };
@@ -170,14 +193,25 @@ export function loadV351UnifiedWhppMembership(reportDate = '', db = getDb()) {
 function loadStandardWhppMembership(reportDate, db) {
   let daily = null;
   try { daily = db.prepare(`SELECT reportDate,sourceFile,totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(reportDate); } catch {}
-  if (!daily) return { present: false, daily: null, rows: [], bills: [] };
+  if (!daily) return { present: false, daily: null, rows: [], bills: [], expected: null, actual: 0, source: 'MISSING' };
   let rows = [];
   try {
     rows = uniqueRows(db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
       ...safeJson(row.rowJson, {}), shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: 'WHPP', reportDate
     })));
   } catch {}
-  return { present: rows.length > 0, daily, rows, bills: rows.map(billOf) };
+  const expected = Number(daily.totalCount || 0);
+  const actual = rows.length;
+  const present = expected === actual;
+  return {
+    present,
+    daily,
+    rows: present ? rows : [],
+    bills: present ? rows.map(billOf) : [],
+    expected,
+    actual,
+    source: present ? (expected === 0 ? 'WHPP_STANDARD_DAILY_ZERO' : 'WHPP_STANDARD_DAILY') : 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED'
+  };
 }
 function loadWhppFinalRows(reportDate, db) {
   let rows = [];
@@ -227,11 +261,11 @@ function summaryForDate(reportDate = '') {
     completed: Boolean(history) && !staleHistory,
     state: { reportDate: date, dailyReportReady: true, snapshotStatus: history && !staleHistory ? 'COMPLETED' : 'RECONCILED_FROM_PRESERVED_WHPP' },
     dashboard,
-    truthSource: canonical.present ? canonical.membershipSource || 'PRESERVED_WHPP_MEMBERSHIP' : 'WHPP_STANDARD_DAILY',
+    truthSource: canonical.present ? canonical.membershipSource || 'PRESERVED_WHPP_MEMBERSHIP' : standard.source,
     unifiedMembership: canonical.present ? canonical.bills.length : null,
-    standardMembership: standard.present ? Number(standard.daily?.totalCount || standard.bills.length || 0) : null,
+    standardMembership: standard.present ? Number(standard.daily?.totalCount ?? standard.bills.length ?? 0) : null,
     standardRows: standard.bills.length, finalEvidenceRows: finalRows.length, staleHistoryRejected: staleHistory,
-    needsNormalizedRepair: canonical.present && (!standard.present || Number(standard.daily?.totalCount || 0) !== canonical.bills.length || standard.bills.length !== canonical.bills.length),
+    needsNormalizedRepair: canonical.present && !standard.present && !standard.daily,
     patchId: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID
   };
 }
@@ -239,16 +273,30 @@ function summaryForDate(reportDate = '') {
 export function ensureV351WhppNormalizedDaily(reportDate = '') {
   const db = getDb();
   const canonical = loadV351UnifiedWhppMembership(reportDate, db);
-  if (!canonical.present) return { repaired: false, reason: canonical.batchPresent ? 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD' : 'NO_SAFE_PRESERVED_WHPP_MEMBERSHIP', reportDate: canonical.reportDate || dateOnly(reportDate) };
-  const standard = loadStandardWhppMembership(canonical.reportDate, db);
-  const standardCount = standard.present ? Number(standard.daily?.totalCount || 0) : -1;
-  const sameMembers = standard.present && standardCount === canonical.bills.length && standard.bills.length === canonical.bills.length && (() => {
-    const set = new Set(standard.bills); return canonical.bills.every(code => set.has(code));
-  })();
-  if (sameMembers) return { repaired: false, reason: 'STANDARD_DAILY_CURRENT', reportDate: canonical.reportDate, total: canonical.bills.length };
+  const date = canonical.reportDate || dateOnly(reportDate);
+  const standard = date ? loadStandardWhppMembership(date, db) : { present: false, daily: null, rows: [], bills: [], source: 'MISSING' };
+  if (standard.daily && !standard.present) {
+    return {
+      repaired: false,
+      reason: 'STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED',
+      reportDate: date,
+      expected: standard.expected,
+      actual: standard.actual
+    };
+  }
+  if (standard.present) {
+    return {
+      repaired: false,
+      reason: standard.expected === 0 ? 'STANDARD_DAILY_CURRENT_ZERO' : 'STANDARD_DAILY_CURRENT',
+      reportDate: date,
+      total: standard.actual
+    };
+  }
+  if (!canonical.present) return { repaired: false, reason: canonical.batchPresent ? 'UNIFIED_WHPP_EMPTY_KEEP_STANDARD' : 'NO_SAFE_PRESERVED_WHPP_MEMBERSHIP', reportDate: date };
 
-  // Membership-only repair. Never rewrite current state, carryover, final facts,
-  // scan/track evidence, run locks or snapshots.
+  // Membership-only repair is allowed only when the normalized daily header is
+  // genuinely absent and a safe V351 disaster source exists. Never rewrite an
+  // incomplete/conflicting standard cohort to a smaller count.
   const now = new Date().toISOString();
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -273,7 +321,7 @@ export function ensureV351WhppNormalizedDaily(reportDate = '') {
     try { db.exec('ROLLBACK'); } catch {}
     throw error;
   }
-  console.log('[CE-QC][V351_WHPP_BRIDGE_REPAIRED]', JSON.stringify({ reportDate: canonical.reportDate, total: canonical.bills.length, batchId: canonical.batchId, membershipSource: canonical.membershipSource || '', scope: 'MEMBERSHIP_TABLES_ONLY' }));
+  console.log('[CE-QC][V351_WHPP_BRIDGE_REPAIRED]', JSON.stringify({ reportDate: canonical.reportDate, total: canonical.bills.length, batchId: canonical.batchId, membershipSource: canonical.membershipSource || '', scope: 'MISSING_MEMBERSHIP_TABLES_ONLY' }));
   return { repaired: true, reason: canonical.recoveredFromPreservedWhpp ? 'RESTORED_PRESERVED_WHPP_MEMBERSHIP_ONLY' : 'UNIFIED_TO_WHPP_STANDARD_DAILY_MEMBERSHIP_ONLY', reportDate: canonical.reportDate, total: canonical.bills.length };
 }
 function scheduleNormalizedRepair(summary) {
@@ -360,10 +408,11 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED_POST]) {
 
 console.log('[CE-QC][V351_WHPP_UNIFIED_DASHBOARD_BRIDGE]', JSON.stringify({
   id: V351_WHPP_UNIFIED_DASHBOARD_BRIDGE_ID,
-  summaryTruth: 'VALID_UNIFIED_WHPP_OR_PRESERVED_STANDARD_OR_EXACT_HISTORY_MATCHED_FINAL_FACTS_WITH_OR_WITHOUT_UNIFIED_BATCH',
+  summaryTruth: 'EXACT_STANDARD_DAILY_OR_SAFE_HISTORY_DISASTER_RECOVERY_WHEN_STANDARD_HEADER_MISSING',
   detailTruth: 'SAME_CANONICAL_DASHBOARD_DETAIL_TABS',
   staleZeroHistory: 'REJECT_IF_TOTAL_MISMATCH',
-  existingDateRepair: 'ASYNC_MEMBERSHIP_TABLES_ONLY_AFTER_RESPONSE',
+  incompleteStandard: 'FAIL_CLOSED_NEVER_REWRITE_TO_SMALLER_COUNT',
+  existingDateRepair: 'MISSING_MEMBERSHIP_TABLES_ONLY_AFTER_RESPONSE',
   futureUnifiedImport: 'ZERO_OR_MISSING_UNIFIED_WHPP_NEVER_ERASES_PRESERVED_DAILY_TRUTH',
   databaseSchemaChange: false,
   factMutation: false
