@@ -145,6 +145,18 @@ export function finalizeWhppState(state = {}) {
       ON CONFLICT(businessType,reportDate) DO UPDATE SET summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
       .run(WHPP, reportDate, JSON.stringify({ ...dashboard.metrics, accounting: dashboard.accounting, snapshotId }), now, now);
 
+    const dailyMetaRow = db.prepare('SELECT summaryJson FROM business_daily_reports WHERE businessType=? AND reportDate=? LIMIT 1').get(WHPP, reportDate);
+    const dailyMeta = safeJson(dailyMetaRow?.summaryJson, {});
+    db.prepare('UPDATE business_daily_reports SET summaryJson=?,updatedAt=? WHERE businessType=? AND reportDate=?')
+      .run(JSON.stringify({
+        ...dailyMeta,
+        total: Number(dashboard.metrics?.total || 0),
+        completed: true,
+        snapshotStatus: 'COMPLETED',
+        finalizedSnapshotId: snapshotId,
+        finalizedAt: now
+      }), now, WHPP, reportDate);
+
     normalized.snapshotId = snapshotId;
     normalized.snapshotStatus = 'COMPLETED';
     db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?) ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
@@ -197,6 +209,10 @@ function uniqueRows(rows = []) {
   const map = new Map();
   for (const row of rows || []) { const bill = billOf(row); if (bill) map.set(bill, row); }
   return [...map.values()];
+}
+function safeJson(value, fallback = {}) {
+  try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
+  catch { return fallback; }
 }
 function emptyWhppState() {
   return {
