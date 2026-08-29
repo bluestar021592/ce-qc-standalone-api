@@ -4,6 +4,7 @@
   const VERSION = '2026-08-29-v355-authoritative-whpp-auto-resume-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-v1';
   const RECOVERY_TRIGGER_REVISION = '2026-08-29-v355-visible-import-watch-v2';
+  const FINALIZATION_ACK_REVISION = '2026-08-30-v360-whpp-current-run-finalization-ack-v1';
   // Source-only compatibility token for the stable gate: void execute('resume')
   // Runtime uses the awaited retryable handoff below so a failed WHPP continuation can retry.
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
@@ -153,6 +154,28 @@
     return { date, total, snapshotStatus, completed, retryPending, reportDate: date || target };
   }
 
+  function currentRunFinalization(progress, target, waitStartedAt = 0) {
+    const runtime = progress?.runtime || {};
+    const processing = progress?.processing || {};
+    const date = normalizeDate(runtime.reportDate || progress?.reportDate || '');
+    const outcome = String(runtime.outcome || '').toUpperCase();
+    const finishedAt = Date.parse(String(runtime.finishedAt || ''));
+    const finishedAfterWaitStarted = Number.isFinite(finishedAt) && finishedAt >= Math.max(0, Number(waitStartedAt || 0));
+    const sameDate = !target || date === target;
+    const cleanStop = progress?.runtimeActive !== true && processing.running !== true && processing.paused !== true && !String(processing.error || runtime.error || '').trim();
+    if (outcome !== 'COMPLETED' || !sameDate || !finishedAfterWaitStarted || !cleanStop) return null;
+    return {
+      label: 'WHPP本土',
+      ok: true,
+      verified: true,
+      completed: true,
+      snapshotStatus: 'COMPLETED',
+      reportDate: date || target,
+      source: 'V134_CURRENT_RUN_FINALIZED',
+      finishedAt: runtime.finishedAt || ''
+    };
+  }
+
   async function verifyWhpp(target) {
     const payload = await readWhppSummary(target);
     const truth = whppCompletion(payload, target);
@@ -199,7 +222,8 @@
   }
 
   async function waitForWhppFinalized(target, timeoutMs = 10 * 60 * 1000) {
-    const deadline = Date.now() + timeoutMs;
+    const waitStartedAt = Date.now();
+    const deadline = waitStartedAt + timeoutMs;
     let lastError = null;
     while (Date.now() < deadline) {
       try {
@@ -213,6 +237,12 @@
       const progress = await jsonFetch('/api/whpp/progress').catch(() => null);
       const processing = progress?.processing || {};
       const runtime = progress?.runtime || {};
+      const runtimeFinalized = currentRunFinalization(progress, target, waitStartedAt);
+      if (runtimeFinalized) {
+        setStatus('WHPP本土正式结果已保存，正在完成七业务状态同步…');
+        console.info('[CE-QC][V360_WHPP_FINALIZATION_ACK]', FINALIZATION_ACK_REVISION, runtimeFinalized);
+        return runtimeFinalized;
+      }
       const phase = String(processing.phase || runtime.lastMessage || '扫描/轨迹');
       const batchIndex = Number(processing.batchIndex || runtime.batchIndex || 0);
       const totalBatches = Number(processing.totalBatches || runtime.totalBatches || 0);
@@ -358,6 +388,13 @@
         setStatus(`七业务未全部完成：${message}。已完成断点保留。`, 'danger');
       } else {
         setUnifiedStage('DONE', false, target);
+        global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = {
+          reportDate: target,
+          verifiedAt: Date.now(),
+          owner: 'V67',
+          finalizationRevision: FINALIZATION_ACK_REVISION,
+          results
+        };
         setStatus('七业务当日日报处理完成：CCSL → SHOPEE → WHPP均已验证正式结果。', 'success');
       }
       document.dispatchEvent(new CustomEvent('ce-qc-run-complete', { detail: { results, reportDate: target, complete: allThreeResolved } }));
@@ -382,6 +419,7 @@
       version: VERSION,
       architecture: ARCHITECTURE,
       recoveryTriggerRevision: RECOVERY_TRIGGER_REVISION,
+      finalizationAckRevision: FINALIZATION_ACK_REVISION,
       singleOwner: true,
       run: execute,
       targetDate,
@@ -391,7 +429,7 @@
       recoverPendingWhpp
     };
     scheduleAutoRecovery();
-    console.info('[CE-QC][V355_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, RECOVERY_TRIGGER_REVISION, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and a pending WHPP stage auto-resumes whenever the import page is actually visible.');
+    console.info('[CE-QC][V355_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, RECOVERY_TRIGGER_REVISION, FINALIZATION_ACK_REVISION, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and a pending WHPP stage auto-resumes whenever the import page is actually visible. Current WHPP completion may close from V134 runtime only when that runtime finished after this wait began and finalizeWhppState already succeeded.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
