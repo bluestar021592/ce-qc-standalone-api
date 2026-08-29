@@ -29,8 +29,9 @@ void CLEAN_START_MARKER;void V299_FIRST_ATTEMPT_COMPAT_MARKER;void V310_RESUME_M
 
 // V67 is the only browser execution owner for CCSL -> SHOPEE -> WHPP.
 // Historical V310/V311/V317 browser watchdogs remain source-compatible but are
-// intentionally not injected. The one-time V303 destructive clean-start client is
-// also retired from normal runtime after its authorized migration window.
+// intentionally not injected. V300 recursive observer is no longer delivered.
+// The one-time V303 destructive clean-start client is also retired from normal
+// runtime after its authorized migration window.
 express.response.send=function v334FirstAttemptUiSend(body){
   if(typeof body==='string'&&body.includes('</body>')&&body.includes('CE Express')){
     const tags=[];
