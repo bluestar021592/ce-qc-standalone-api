@@ -65,15 +65,21 @@ try{
   const v147=fs.readFileSync(new URL('../src/v147TrackTimeoutConfig.js',import.meta.url),'utf8');
   const importStore=fs.readFileSync(new URL('../src/unifiedImportStore.js',import.meta.url),'utf8');
   const scheduler=fs.readFileSync(new URL('../src/carryoverRefreshScheduler.js',import.meta.url),'utf8');
+  const businessStore=fs.readFileSync(new URL('../src/businessStore.js',import.meta.url),'utf8');
+  const whppStore=fs.readFileSync(new URL('../src/whppStore.js',import.meta.url),'utf8');
   assert.match(activation,/startCarryoverRefreshScheduler\(\)/,'formal listen patch must actually start carry scheduler');
   assert.match(activation,/server\.once\('listening', activate\)/,'scheduler must not begin until the HTTP server is actually listening');
   assert.match(v147,/v294CarryoverSchedulerActivation\.js/,'startup chain must install carry scheduler activation before server routes run');
   assert.match(importStore,/HISTORICAL_CARRY/,'next daily processing queue must retain prior OPEN shipments as historical carry');
   assert.match(importStore,/FROM carryover_open_items c WHERE c\.status='OPEN'/,'processing queue must source unresolved carry independently of whether the shipment appears in next-day Excel');
-  assert.match(scheduler,/V294_KEEP_OPEN_NORMAL_TRANSIT/,'automatic carry refresh must normalize normal transit so legacy NORMAL_FINAL closure cannot remove it from tracking');
+  assert.match(scheduler,/V294_KEEP_OPEN_NORMAL_TRANSIT/,'automatic carry refresh must normalize normal routing nodes so legacy NORMAL_FINAL closure cannot remove it from tracking');
   assert.match(scheduler,/KEEP_OPEN_NORMAL_TRANSIT_UNTIL_TRUE_TERMINAL/);
+  assert.match(businessStore,/SELECT rawJson FROM business_carry_bills WHERE businessType=\? AND status='active' ORDER BY updatedAt DESC/,'SHOPEE state hydration must read only indexed active carry, never months of closed carry history');
+  assert.doesNotMatch(businessStore,/SELECT rawJson FROM business_carry_bills WHERE businessType=\? ORDER BY updatedAt DESC/,'unbounded SHOPEE carry-history hydration must stay retired');
+  assert.match(whppStore,/JOIN shipment_current_state s ON s\.shipmentCode=d\.shipmentCode/,'WHPP import POD locks must be resolved from current daily membership');
+  assert.doesNotMatch(whppStore,/SELECT shipmentCode FROM shipment_current_state WHERE businessType='WHPP' AND state='POD'/,'WHPP import must never full-scan all historical POD shipment state');
 
-  console.log('[V294] carryover next-day smoke passed · OPEN survives next day, 00:05 + 2h scheduler starts after listen, return-in-progress and normal transit remain OPEN until exact terminal evidence');
+  console.log('[V294] carryover next-day smoke passed · OPEN survives next day · daily import hydration is bounded to active/current membership · 00:05 + 2h scheduler remains intact');
 }finally{db.close();}
 
 await import('./v294-final-qc-contract-smoke.mjs');
