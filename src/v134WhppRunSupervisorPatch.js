@@ -3,7 +3,8 @@ import { CEClient } from './ceClient.js';
 import { runWhppPipeline } from './whppPipeline.js';
 import { WHPP, loadWhppState, saveWhppState, finalizeWhppState } from './whppStore.js';
 
-const PATCH_ID = '2026-08-29-v357-whpp-backend-final-stage-continuity-v1';
+const PATCH_ID = '2026-08-14-v134-whpp-run-supervisor-v1';
+const BACKEND_CONTINUITY_REVISION = '2026-08-29-v357-whpp-backend-final-stage-continuity-v1';
 const START_PATHS = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
 const PROGRESS_PATH = '/api/whpp/progress';
 const WHPP_REQUEST_TIMEOUT_MS = Math.max(8_000, Math.min(45_000, Number(process.env.WHPP_REQUEST_TIMEOUT_MS || 20_000)));
@@ -248,6 +249,7 @@ async function maybeAutoResumeWhpp(reason = 'backend-watch') {
     lastAutoResumeAt = now;
     const started = launchWhpp('resume');
     console.log('[CE-QC][V357_WHPP_BACKEND_CONTINUITY]', JSON.stringify({
+      revision: BACKEND_CONTINUITY_REVISION,
       reportDate,
       reason,
       ccslComplete: true,
@@ -295,6 +297,7 @@ function startHandler(mode) {
         ok: true,
         accepted: true,
         patchId: PATCH_ID,
+        backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
         reportDate: started.reportDate,
         processing: { running: true, phase: started.phase },
         runtime: started,
@@ -337,6 +340,7 @@ function progressHandler(req, res) {
   res.json({
     ok: true,
     patchId: PATCH_ID,
+    backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
     reportDate: state.reportDate,
     processing,
     runtimeActive,
@@ -358,7 +362,7 @@ function progressHandler(req, res) {
 
 const previousListen = express.application.listen;
 let installed = false;
-express.application.listen = function v357WhppRunSupervisorListen(...args) {
+express.application.listen = function v134WhppRunSupervisorListen(...args) {
   if (!installed) {
     installed = true;
     this.get(PROGRESS_PATH, progressHandler);
@@ -373,6 +377,7 @@ express.application.listen = function v357WhppRunSupervisorListen(...args) {
 export function inspectV134WhppRuntime() {
   return {
     patchId: PATCH_ID,
+    backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
     requestTimeoutMs: WHPP_REQUEST_TIMEOUT_MS,
     runtimeActive: Boolean(runtimePromise && runtime.active),
     runtime: publicRuntime(runtimePromise && runtime.active ? runtime : lastRuntime),
@@ -388,3 +393,4 @@ export function inspectV134WhppRuntime() {
 }
 export { maybeAutoResumeWhpp as recoverV357PendingWhppFinalStage };
 export const V134_WHPP_RUN_SUPERVISOR_PATCH_ID = PATCH_ID;
+export const V357_WHPP_BACKEND_CONTINUITY_REVISION = BACKEND_CONTINUITY_REVISION;
