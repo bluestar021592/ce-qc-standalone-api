@@ -4,10 +4,14 @@ import { createOrRecoverRun, getRunStatus, updateRunLock } from './store.js';
 import { chooseCcslReportDate, ccslRecoveryDecision, V317_CCSL_RECOVERY_POLICY_ID } from './v317CcslRecoveryPolicy.js';
 
 export const V317_CCSL_INCOMPLETE_RECOVERY_ID='2026-08-27-v333-selected-date-ccsl-recovery-v1';
+const V317_EXPLICIT_REPORT_DATE_HINT_REVISION='2026-08-29-v359-selected-report-date-runtime-hint-v1';
+const EXPLICIT_REPORT_DATE_HINT_TTL_MS=60_000;
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
+let lastExplicitReportDateHint={reportDate:'',updatedAt:0};
 
 function parseJson(value,fallback={}){try{return JSON.parse(String(value||''))||fallback;}catch{return fallback;}}
+function normalizeDate(value=''){const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';}
 function latestValidUnifiedDate(db){
   return String(db.prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC,batchId DESC LIMIT 1").get()?.reportDate||'');
 }
@@ -40,6 +44,25 @@ function ccslMemberCount(db,reportDate,batch=null){
       WHERE snapshotId=? AND reportDate=? AND businessType IN ('CE','CEAF','TBKH','ALI1688')`).get(snapshotId,reportDate)?.count||0);
   }
   return Number(db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount||0);
+}
+
+function rememberExplicitReportDate(reportDate=''){
+  const date=normalizeDate(reportDate);
+  if(!date)return;
+  lastExplicitReportDateHint={reportDate:date,updatedAt:Date.now()};
+}
+
+export function inspectV317ExplicitReportDateHint({maxAgeMs=EXPLICIT_REPORT_DATE_HINT_TTL_MS}={}){
+  const reportDate=normalizeDate(lastExplicitReportDateHint.reportDate);
+  const updatedAt=Number(lastExplicitReportDateHint.updatedAt||0);
+  const ageMs=updatedAt?Math.max(0,Date.now()-updatedAt):Number.POSITIVE_INFINITY;
+  return{
+    revision:V317_EXPLICIT_REPORT_DATE_HINT_REVISION,
+    reportDate,
+    updatedAt,
+    ageMs,
+    fresh:Boolean(reportDate&&updatedAt&&ageMs<=Math.max(1,Number(maxAgeMs||EXPLICIT_REPORT_DATE_HINT_TTL_MS)))
+  };
 }
 
 export function inspectV317CcslRecovery({db=getDb(),reportDate=''}={}){
@@ -81,6 +104,7 @@ function routeHandler(req,res){
   try{
     const action=String(req.body?.action||'status').toLowerCase();
     const reportDate=String(req.body?.reportDate||'').trim();
+    if(reportDate)rememberExplicitReportDate(reportDate);
     const result=action==='prepare'
       ?prepareV317CcslRecovery({reportDate,actor:req.user?.username||req.user?.email||'V317'})
       :inspectV317CcslRecovery({reportDate});
@@ -97,3 +121,4 @@ express.application.post=function v317CcslIncompleteRecoveryPost(route,...handle
 };
 
 console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,'explicit selected reportDate wins for UI truth; completion snapshots are bound to the current runId so retained same-date audit snapshots cannot close a fresh reupload lifecycle.');
+console.info('[CE-QC][V359_SELECTED_REPORT_DATE_HINT]',V317_EXPLICIT_REPORT_DATE_HINT_REVISION,'explicit browser status reads keep a short-lived in-memory selected-date hint so backend WHPP continuity can resume the exact visible date without scanning or guessing historical dates.');
