@@ -2,6 +2,7 @@ const fs = require('fs');
 
 const read = p => fs.readFileSync(p, 'utf8');
 const runner = read('public/v67-resilient-run-guard.js');
+const whppUi = read('public/v132-whpp-seven-business-fast.js');
 const pause = read('public/v164-unified-pause-router.js');
 const shell = read('src/v44WhppUiPatch.js');
 const v161 = read('src/v161UnifiedImportRuntimeTruthPatch.js');
@@ -39,17 +40,29 @@ const exportPreflight = read('src/v142AsyncExportPreflightPatch.js');
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
 
-must(runner, '2026-08-29-v339-authoritative-three-stage-runner-v1');
+must(runner, '2026-08-29-v354-authoritative-three-stage-resume-v1');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
 must(runner, "{ key: 'WHPP'");
 must(runner, '/api/run');
 must(runner, '/api/shopee/run/start');
 must(runner, '/api/whpp/run/start');
+must(runner, 'canonicalStageTruth');
+must(runner, "payload?.complete === true");
+must(runner, '0票也不能在没有正式完成语义时自动跳过');
 must(runner, 'verifyWhpp');
 must(runner, 'waitForWhppFinalized');
 must(runner, 'WHPP_STAGE_NOT_FINALIZED');
 must(runner, '七业务未全部完成');
+must(whppUi, '2026-08-29-v353-whpp-display-only-v1');
+must(whppUi, 'displayOnly:true');
+must(whppUi, "authoritativeRunner:'V67'");
+must(whppUi, "document.getElementById('reportDate')");
+forbid(whppUi, 'global.runUnified=');
+forbid(whppUi, 'global.resumeUnified=');
+forbid(whppUi, 'ensureWhppCompleted');
+forbid(whppUi, '/api/whpp/run/start');
+forbid(whppUi, '[data-testid="global-auto-process"]');
 must(pause, '/api/shopee/run/pause');
 must(pause, 'global.pauseUnified=pauseUnified');
 // V161 is a long-lived route owner. Verify its current contract, not an obsolete
@@ -70,7 +83,8 @@ must(bstore, 'compactBusinessStatePayload');
 must(bstore, 'stripHeavyBusinessRow');
 must(bstore, 'finalByBill');
 must(bstore, 'priorCarryByBill');
-must(shell, 'v67-resilient-run-guard.js?v=20260817-1');
+must(shell, 'v67-resilient-run-guard.js?v=20260829-v354-1');
+must(shell, 'v132-whpp-seven-business-fast.js?v=20260829-v353-1');
 must(shell, 'v183HistoricalStatusRefreshPatch.js');
 must(shell, '/v183-history-refresh.js?v=20260822-v226-1');
 must(shell, '2026-08-22-v226-shared-client-ui-cache-bust-v1');
@@ -184,6 +198,6 @@ must(exportSidecar, 'MEMORY_IPC');
 must(exportPreflight, "import './v190ExportDirectEndpointPatch.js';");
 must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
-for (const source of [runner, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
+for (const source of [runner, whppUi, pause, shell, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; seven-business truth includes WHPP while WHPP remains a dedicated third execution stage; state persistence remains bounded; V200 uses one exporter contract for all seven businesses');
+console.log('[GOLIVE] runtime-source gate passed; V67 exclusively owns three-stage run/resume, completed CCSL/SHOPEE stages are skipped, WHPP requires explicit canonical completion, and V132 is display-only');
