@@ -39,7 +39,7 @@ const exportPreflight = read('src/v142AsyncExportPreflightPatch.js');
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
 
-must(runner, '2026-08-17-v165-seven-business-stage-verification-v2');
+must(runner, '2026-08-29-v339-authoritative-three-stage-runner-v1');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
 must(runner, "{ key: 'WHPP'");
@@ -47,6 +47,7 @@ must(runner, '/api/run');
 must(runner, '/api/shopee/run/start');
 must(runner, '/api/whpp/run/start');
 must(runner, 'verifyWhpp');
+must(runner, 'waitForWhppFinalized');
 must(runner, 'WHPP_STAGE_NOT_FINALIZED');
 must(runner, '七业务未全部完成');
 must(pause, '/api/shopee/run/pause');
