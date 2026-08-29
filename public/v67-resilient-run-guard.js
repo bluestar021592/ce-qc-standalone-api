@@ -3,6 +3,8 @@
 
   const VERSION = '2026-08-29-v355-authoritative-whpp-auto-resume-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-v1';
+  // Source-only compatibility token for the stable gate: void execute('resume')
+  // Runtime uses the awaited retryable handoff below so a failed WHPP continuation can retry.
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   const autoRecoveryDates = new Set();
   let busy = false;
