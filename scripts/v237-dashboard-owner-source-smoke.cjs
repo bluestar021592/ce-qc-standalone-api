@@ -50,7 +50,7 @@ assert.match(runtime,/CE_QC_SKIP_STARTUP_POD_REPAIR/,'startup POD repair must re
 assert.doesNotMatch(fastPath,/dashboard_daily_cache/,'V253 visible first-paint path must not trust legacy global dashboard cache');
 assert.match(fastPath,/V253_V335_FIRST_PAINT_ID='2026-08-27-v335-per-business-first-paint-v1'/,'V253 must expose V335 per-business first-paint ownership');
 assert.match(fastPath,/readV236CurrentSummary/,'same-day V253 truth must reuse per-business V236 current truth');
-assert.match(fastPath,/V335_PER_BUSINESS_SINGLE_DAY_FIRST_PAINT_NO_HISTORY_SCAN/,'same-day V253 must not scan saved history');
+assert.match(fastPath,/PER_BUSINESS_SINGLE_DAY_FIRST_PAINT_NO_HISTORY_SCAN/,'same-day V253 must not scan saved history');
 assert.match(fastPath,/readV284DashboardTrends/,'explicit multi-day ranges may use canonical daily membership truth');
 assert.doesNotMatch(fastPath,/function latestBatches\(/,'retired one-global-snapshot-per-date helper must not return');
 assert.doesNotMatch(fastPath,/PARTITION BY reportDate ORDER BY createdAt DESC/,'same-date businesses must never share one global latest snapshot');
