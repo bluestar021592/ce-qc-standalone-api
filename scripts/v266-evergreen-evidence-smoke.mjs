@@ -90,7 +90,13 @@ for(const file of [
 ]) execFileSync(process.execPath,['--check',file],{stdio:'inherit'});
 assert.match(coverageSource,/WHPP/,'V286 proven coverage code remains preserved in repository while automatic startup work is paused');
 assert.match(coverageSource,/wf\.shipmentCode/,'WHPP final-row evidence code must remain preserved');
-assert.match(coverageSource,/u\.businessType='CEAF'/,'WHPP/CEAF overlap protection must remain preserved');
+assert.match(coverageSource,/PARTITION BY reportDate,businessType ORDER BY createdAt DESC,batchId DESC/,'V286 evidence coverage must use per-date+per-business latest VALID membership');
+assert.match(coverageSource,/WHPP keeps its full dedicated daily membership without CEAF subtraction/,'WHPP evidence coverage must preserve the full independent WHPP cohort');
+const coverageWhppStart=coverageSource.indexOf("SELECT DISTINCT p.reportDate,'WHPP' businessType");
+const coverageWhppEnd=coverageSource.indexOf('SELECT v.reportDate,v.businessType',coverageWhppStart);
+assert.ok(coverageWhppStart>=0&&coverageWhppEnd>coverageWhppStart,'V286 WHPP evidence union must remain present');
+const coverageWhppUnion=coverageSource.slice(coverageWhppStart,coverageWhppEnd);
+assert.doesNotMatch(coverageWhppUnion,/CEAF|NOT EXISTS/,'V286 WHPP evidence membership must not subtract CEAF overlap');
 assert.match(coverageSource,/lastCheckedAt/,'checked lifecycle state must remain part of proven-evidence ownership');
 assert.match(priorityRefreshSource,/MAX_TARGETS=100/,'priority evidence repair must remain hard-limited to 100 shipments when re-enabled');
 assert.match(priorityRefreshSource,/FOREGROUND_PROCESSING_ACTIVE/,'priority evidence repair must yield to active production processing');
@@ -123,4 +129,4 @@ assert.ok(new Date(meta.retainUntil).getTime()-new Date(meta.capturedAt).getTime
 assert.match(meta.policy,/NO_AUTOMATIC_ARCHIVE_DELETE/);
 
 await fsp.rm(root,{recursive:true,force:true});
-console.log('[RECOVERY-SAFE/V266/V283/V284/V285/V286] 88439846 browser shell + automatic startup maintenance paused + stored data truth preserved + frozen backup gate passed');
+console.log('[RECOVERY-SAFE/V266/V283/V284/V285/V286] 88439846 browser shell + automatic startup maintenance paused + per-business/independent-WHPP stored data truth preserved + frozen backup gate passed');
