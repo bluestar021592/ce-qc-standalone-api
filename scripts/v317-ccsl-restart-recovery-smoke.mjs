@@ -87,10 +87,15 @@ assert.match(progressUi,/单批最大50/,'V138 visible trajectory detail must sa
 
 assert.match(sevenStatus,/2026-08-27-v333-canonical-seven-business-owner-v1/,'V168 remains the canonical summary owner');
 assert.match(sevenStatus,/2026-08-29-single-unified-runner-status-only-v1/,'V168 must advertise status-only architecture');
+assert.match(sevenStatus,/2026-08-30-v360-verified-whpp-status-sync-v1/,'V168 must expose the current-run WHPP completion sync contract');
 assert.match(sevenStatus,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical CCSL recovery truth for the selected date');
 assert.match(sevenStatus,/postJson\('\/api\/v311\/shopee-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical SHOPEE recovery truth for the same selected date');
 assert.match(sevenStatus,/readJson\(`\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}`\)/,'V168 must align WHPP to the same selected date through canonical WHPP summary');
 assert.match(sevenStatus,/payload\?\.completed === true/,'V168 must honor canonical zero-work WHPP completion');
+assert.match(sevenStatus,/runnerVerifiedCompletion\(target, ccsl, shopee\)/,'V168 may bridge only a current V67-verified completion for the same date');
+assert.match(sevenStatus,/marker\.owner === 'V67'/,'runner completion bridge must be owned by V67');
+assert.match(sevenStatus,/stage\.active === false[\s\S]*String\(stage\.type \|\| ''\)\.toUpperCase\(\) === 'DONE'/,'V168 must require V67 DONE before bridging a short summary lag');
+assert.match(sevenStatus,/ccsl\?\.state === 'done'[\s\S]*shopee\?\.state === 'done'/,'V168 must never let an old WHPP completion bridge a fresh same-date reimport whose earlier stages are pending');
 assert.match(sevenStatus,/stages\.every\(stage => stage\.state === 'done'\)/,'overall completion must be computed from the same canonical stage objects shown in the pills');
 assert.match(sevenStatus,/if \(stage\.state === 'done'\) return 'success'/,'every completed stage must be green');
 assert.match(sevenStatus,/truth\.complete \? 'success' : 'muted'/,'overall completed state must also be green');
@@ -104,11 +109,17 @@ assert.doesNotMatch(sevenStatus,/global\.runUnified\s*=/,'summary owner must nev
 assert.doesNotMatch(sevenStatus,/global\.resumeUnified\s*=/,'summary owner must never reassign resumeUnified');
 
 assert.match(runner,/2026-08-29-v355-authoritative-whpp-auto-resume-v1/,'V67 is the sole three-stage execution owner');
+assert.match(runner,/2026-08-30-v360-whpp-current-run-finalization-ack-v1/,'V67 must expose the current-run finalization acknowledgement');
 assert.match(runner,/global\.runUnified = \(\) => execute\('start'\)/);
 assert.match(runner,/global\.resumeUnified = \(\) => execute\('resume'\)/);
 assert.match(runner,/CCSL → SHOPEE → WHPP/);
 assert.match(runner,/recoverPendingWhpp/,'V67 must own restart handoff to pending WHPP');
 assert.match(runner,/waitForWhppFinalized/,'WHPP completion must be canonically verified');
+assert.match(runner,/function currentRunFinalization/,'V67 must recognize only the backend runtime that finalized during the current wait');
+assert.match(runner,/outcome !== 'COMPLETED'/,'runtime acknowledgement requires explicit V134 COMPLETED outcome');
+assert.match(runner,/finishedAt >= Math\.max\(0, Number\(waitStartedAt \|\| 0\)\)/,'an old completed runtime cannot close a new same-date run');
+assert.match(runner,/progress\?\.runtimeActive !== true[\s\S]*processing\.running !== true[\s\S]*!String\(processing\.error \|\| runtime\.error \|\| ''\)\.trim\(\)/,'runtime completion must be stopped and error-free');
+assert.match(runner,/__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__/,'V67 must publish the verified completion marker consumed by status-only V168');
 assert.match(runner,/0票也不能在没有正式完成语义时自动跳过/,'0-ticket WHPP must require explicit completion semantics');
 
 assert.match(activation,/v317CcslIncompleteRecoveryPatch\.js/,'V317 backend route must remain production-active');
@@ -122,7 +133,8 @@ assert.match(injection,/X-CE-QC-Unified-Runner/,'single-runner response header m
 
 assert.match(htmlOwner,/2026-08-27-v334-canonical-detail-history-owner-cache-bust-v1/,'HTML owner must retain V334 compatibility build identity');
 assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'browser must load the V338 CCSL 350/50 detail owner');
-assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260829-single-owner-1/,'browser must load the cache-busted status-only V168 owner');
+assert.match(htmlOwner,/v67-resilient-run-guard\.js\?v=20260830-v360-1/,'browser must load the current V360 V67 runner without stale static cache');
+assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260830-v360-1/,'browser must load the current V360 status-only V168 owner without stale static cache');
 assert.doesNotMatch(htmlOwner,/v169-seven-business-legacy-status-sync\.js/,'legacy V169 summary refresh bridge must be retired from runtime');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
@@ -130,4 +142,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[SINGLE-RUNNER/V341/V334/V317] smoke passed · V67 alone executes CCSL→SHOPEE→WHPP · V168 is status-only · legacy browser recovery watchdogs are not injected · scan=350 · trajectory=50');
+console.log('[SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · V67 alone executes CCSL→SHOPEE→WHPP · V134 current-run finalize acknowledgement closes only the run that finished after this wait began · V168 is status-only and may bridge only the same verified completion · scan=350 · trajectory=50');
