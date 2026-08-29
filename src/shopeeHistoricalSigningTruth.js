@@ -89,8 +89,7 @@ export function resolveShopeeSigningSamples(db,businessType='',fromDate='',toDat
     const start=strictLedgerStart(ledger.evidenceJson)||text(final.firstAttemptAt)||firstHistoryTime(final.attemptHistoryJson)||text(raw.strictFirstAttemptAt||raw.firstAttemptAt||raw['首次派件时间']||raw['首次派送时间']);
     const pod=text(raw['POD时间']||raw.podTime||raw['签收时间']||ledger.podDate||lock.podTime||(Number(final.isPod||0)===1?final.latestEventTime:''));
     const days=inclusive(start,pod);
-    if(days>0){out.set(k,days);continue;}
-    const stored=Number(ledger.signingDays||0);if(Number.isFinite(stored)&&stored>0)out.set(k,stored);
+    if(days>0)out.set(k,days);
   }
   return out;
 }
