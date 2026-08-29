@@ -1,42 +1,70 @@
-(function installWhppRetryAwareRunV135(global){
+(function installWhppRetryAwareCompatV135(global){
   if(global.__CE_QC_V135_WHPP_RETRY_RUN__)return;
-  const VERSION='2026-08-15-v136-whpp-retry-aware-run-v2';
-  let busy=false;
-  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
+
+  const VERSION='2026-08-29-v340-whpp-retry-ui-compat-v1';
   const normalizeDate=value=>{const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
+
   function selectedDate(){
     const runnerDate=normalizeDate(global.__CE_QC_V67_RESILIENT_RUN_GUARD__?.targetDate?.());
     if(runnerDate)return runnerDate;
-    const importPage=location.pathname==='/import'||document.getElementById('importPage')?.classList?.contains('active');
-    if(importPage){
-      const inputDate=normalizeDate(document.getElementById('reportDate')?.value);
-      if(inputDate)return inputDate;
-      try{const imported=normalizeDate(unifiedImportState?.reportDate);if(imported)return imported;}catch{}
-    }
+    const input=normalizeDate(document.getElementById('reportDate')?.value);
+    if(input)return input;
     const dom=normalizeDate(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
     if(dom)return dom;
     try{return normalizeDate(unifiedImportState?.reportDate||appState?.reportDate||shopeeState?.reportDate||'');}catch{return '';}
   }
-  async function jsonFetch(url,options={}){const response=await fetch(url,{cache:'no-store',credentials:'same-origin',...options});const text=await response.text();let payload={};try{payload=text?JSON.parse(text):{};}catch{}if(!response.ok||payload?.ok===false){const error=new Error(payload.error||payload.message||`HTTP ${response.status}`);error.status=response.status;error.code=payload.code||`HTTP_${response.status}`;error.payload=payload;throw error;}return payload;}
-  async function summary(){const date=selectedDate();return jsonFetch(`/api/v132/whpp-fast-summary${date?`?reportDate=${encodeURIComponent(date)}`:''}`);}
-  function retryCount(value){return Number(value?.metrics?.retryPending||0);}
-  function status(text,level='warning'){const node=document.getElementById('ccslRunStatus');if(node)node.innerHTML=`<span class="status-pill ${level}">${esc(text)}</span>`;}
-  function setBusy(value){busy=Boolean(value);const button=document.querySelector('[data-testid="global-auto-process"]');if(button){button.disabled=busy;button.textContent=busy?'七业务处理中…':'开始全自动处理';}}
-  function retryBanner(value){const page=document.getElementById('whppFastPage');if(!page)return;page.querySelector('.v135-whpp-retry-banner')?.remove();const retry=retryCount(value);if(!value?.completed||retry<=0)return;const heading=page.querySelector('.v18-page-heading');if(!heading)return;const banner=document.createElement('div');banner.className='processing-notice warning v135-whpp-retry-banner';banner.innerHTML=`<b>WHPP快照已生成</b><span>${retry.toLocaleString('zh-CN')}票接口暂时失败，已保留断点；点击“继续处理”只重试这些票，不影响其余已完成数据。</span>`;heading.insertAdjacentElement('afterend',banner);}
-  async function waitForWhpp(maxMs=300000){const deadline=Date.now()+maxMs;while(Date.now()<deadline){const progress=await jsonFetch('/api/whpp/progress').catch(()=>null);if(progress?.processing?.running){const rt=progress.runtime||{};const phase=progress.processing?.phase||rt.lastMessage||'扫描/轨迹';const idx=Number(progress.processing?.batchIndex||rt.batchIndex||0),total=Number(progress.processing?.totalBatches||rt.totalBatches||0);status(`WHPP本土处理中：${phase}${idx&&total?` · ${idx}/${total}`:''}`);await wait(1200);continue;}const value=await summary().catch(()=>null);if(value?.completed)return value;if(progress?.processing?.error)throw new Error(progress.processing.error);await wait(1200);}throw new Error('WHPP后台任务超过等待时间，断点已保存，可继续处理');}
-  async function ensureWhpp(){let value=await summary();const total=Number(value.total||0);if(total<=0)return {ok:true,skipped:true,summary:value,partial:false};let retry=retryCount(value);if(value.completed&&retry<=0)return {ok:true,summary:value,partial:false};const progress=await jsonFetch('/api/whpp/progress').catch(()=>null);if(progress?.processing?.running){value=await waitForWhpp();retry=retryCount(value);retryBanner(value);return {ok:true,summary:value,partial:retry>0,retryPending:retry};}
-    const endpoint=value.completed?'/api/whpp/run/resume':'/api/whpp/run/start';status(value.completed?`WHPP已有快照，正在只重试 ${retry} 票接口失败运单…`:'WHPP尚未生成快照，正在启动扫描/轨迹…');
-    try{await jsonFetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch(error){if(error.code!=='WHPP_RUN_ALREADY_ACTIVE')throw error;}
-    value=await waitForWhpp();retry=retryCount(value);retryBanner(value);if(!value.completed)throw new Error(`WHPP ${Number(value.total||0).toLocaleString('zh-CN')}票仍未生成可用快照`);return {ok:true,summary:value,partial:retry>0,retryPending:retry};
+
+  async function jsonFetch(url){
+    const response=await fetch(url,{cache:'no-store',credentials:'same-origin'});
+    const text=await response.text();
+    let payload={};
+    try{payload=text?JSON.parse(text):{};}catch{}
+    if(!response.ok||payload?.ok===false)throw new Error(payload.error||payload.message||`HTTP ${response.status}`);
+    return payload;
   }
-  async function runSeven(mode='start'){if(busy)return {ok:false,busy:true};setBusy(true);status(`正在启动 ${selectedDate()||'当前日报'} 七业务处理，请勿重复点击`);try{const base=global.__CE_QC_V67_RESILIENT_RUN_GUARD__?.run;if(typeof base!=='function')throw new Error('七业务基础处理器尚未就绪，请刷新页面后重试');const baseResult=await base(mode);const whpp=await ensureWhpp();const failed=(baseResult?.results||[]).filter(item=>item?.ok===false&&!/WHPP/i.test(String(item?.label||'')));if(failed.length)status(`WHPP快照已生成，但${failed.map(item=>item.label).join('、')}仍有待重试批次。`,'warning');else if(whpp.partial)status(`七业务快照已生成：WHPP仍有 ${Number(whpp.retryPending||0)} 票接口待重试，断点已保留；其他已完成数据正常可用。`,'warning');else status('七业务处理完成：WHPP最终快照已验证。','success');document.dispatchEvent(new CustomEvent('ce-qc-run-complete',{detail:{...(baseResult||{}),reportDate:selectedDate(),whppVerified:true,whppPartial:Boolean(whpp.partial),whppRetryPending:Number(whpp.retryPending||0)}}));try{if(typeof global.refresh==='function')await global.refresh();}catch{}return {ok:failed.length===0&&!whpp.partial,baseResult,whpp};}catch(error){status(`七业务处理未完成：${error.message}`,'danger');return {ok:false,error:error.message};}finally{setBusy(false);}}
-  function intercept(event){const button=event.target?.closest?.('button');if(!button)return;const inline=String(button.getAttribute('onclick')||'');if(!button.matches('[data-testid="global-auto-process"]')&&!/\b(?:runUnified|resumeUnified)\s*\(/.test(inline))return;event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();void runSeven(/resumeUnified/.test(inline)?'resume':'start');}
-  document.addEventListener('click',intercept,true);
-  function bindGlobals(){global.runUnified=()=>runSeven('start');global.resumeUnified=()=>runSeven('resume');}
-  bindGlobals();setTimeout(bindGlobals,40);setTimeout(bindGlobals,250);
-  document.addEventListener('ce-qc-run-complete',()=>{void summary().then(value=>{retryBanner(value);if(retryCount(value)>0)status(`七业务快照已生成：WHPP仍有 ${retryCount(value)} 票接口待重试，断点已保留。`,'warning');}).catch(()=>{});});
-  document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page="whpp"]'))setTimeout(()=>{void summary().then(retryBanner).catch(()=>{});},120);},true);
-  global.__CE_QC_V135_WHPP_RETRY_RUN__={version:VERSION,run:runSeven,ensureWhpp,fetchSummary:summary,selectedDate};
-  console.info('[CE-QC][V135_WHPP_RETRY_RUN]',VERSION);
+
+  async function summary(){
+    const date=selectedDate();
+    return jsonFetch(`/api/v132/whpp-fast-summary${date?`?reportDate=${encodeURIComponent(date)}`:''}`);
+  }
+
+  function retryCount(value){return Number(value?.metrics?.retryPending||value?.state?.metrics?.retryPending||0);}
+
+  function retryBanner(value){
+    const page=document.getElementById('whppFastPage');
+    if(!page)return;
+    page.querySelector('.v135-whpp-retry-banner')?.remove();
+    const retry=retryCount(value);
+    const completed=Boolean(value?.completed===true||value?.state?.completed===true);
+    if(!completed||retry<=0)return;
+    const heading=page.querySelector('.v18-page-heading');
+    if(!heading)return;
+    const banner=document.createElement('div');
+    banner.className='processing-notice warning v135-whpp-retry-banner';
+    banner.innerHTML=`<b>WHPP快照已生成</b><span>${retry.toLocaleString('zh-CN')}票接口暂时失败，断点已保留；使用统一“继续处理”即可只补偿未完成票。</span>`;
+    heading.insertAdjacentElement('afterend',banner);
+  }
+
+  async function refreshBanner(){
+    try{retryBanner(await summary());}catch{}
+  }
+
+  // V340 intentionally does NOT wrap runUnified/resumeUnified and does NOT
+  // start WHPP itself. V67 is the only owner of CCSL -> SHOPEE -> WHPP.
+  document.addEventListener('ce-qc-run-complete',()=>setTimeout(refreshBanner,120));
+  document.addEventListener('click',event=>{
+    if(event.target?.closest?.('.side-link[data-page="whpp"]'))setTimeout(refreshBanner,120);
+  },true);
+  [250,900].forEach(ms=>setTimeout(refreshBanner,ms));
+
+  global.__CE_QC_V135_WHPP_RETRY_RUN__={
+    version:VERSION,
+    compatibilityOnly:true,
+    authoritativeRunner:'V67',
+    canonicalSummary:'/api/v132/whpp-fast-summary',
+    fetchSummary:summary,
+    selectedDate,
+    refreshBanner
+  };
+  console.info('[CE-QC][V340_WHPP_RETRY_COMPAT]',VERSION,'No duplicate runner; V67 owns WHPP execution.');
 })(window);
