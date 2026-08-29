@@ -43,9 +43,15 @@ function normalizeSqlFinalFact(row={}){
 function latestDate(db,requested=''){
   const explicit=dateOnly(requested);
   if(explicit)return explicit;
-  const unified=dateOnly(db.prepare("SELECT MAX(reportDate) reportDate FROM unified_import_batches WHERE status='VALID'").get()?.reportDate||'');
-  if(unified)return unified;
-  return dateOnly(db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP' ORDER BY reportDate DESC LIMIT 1").get()?.reportDate||'');
+  const candidates=[];
+  for(const sql of [
+    "SELECT MAX(reportDate) reportDate FROM unified_import_batches WHERE status='VALID'",
+    "SELECT MAX(reportDate) reportDate FROM business_daily_reports WHERE businessType='WHPP'",
+    "SELECT MAX(reportDate) reportDate FROM business_history_summary WHERE businessType='WHPP'"
+  ]){
+    try{const d=dateOnly(db.prepare(sql).get()?.reportDate||'');if(d)candidates.push(d);}catch{}
+  }
+  return candidates.sort().at(-1)||'';
 }
 function loadUnifiedMembership(db,reportDate){
   const membership=loadV351UnifiedWhppMembership(reportDate,db);
