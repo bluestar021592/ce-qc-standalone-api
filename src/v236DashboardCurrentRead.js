@@ -123,7 +123,35 @@ function directShopeeRows(date,snapshotId){
 }
 function directRowsForType(type,date,snapshotId){const rows=type.startsWith('SHOPEE')?directShopeeRows(date,snapshotId):directCcslRows(date,snapshotId);return rows.filter(row=>String(row.businessType||'').toUpperCase()===type);}
 function metricFromRows(type,date,rows,importedTotal=0){const out=blank(type,date),matching=rows.filter(row=>String(row.businessType||'').toUpperCase()===type);if(matching.length){for(const row of matching)addMetric(out,safeJson(row.metricsJson||row));out.ready=true;out.snapshotId=matching[0]?.snapshotId||'';out.refreshedAt=matching.map(row=>row.refreshedAt||'').sort().at(-1)||'';if(type.startsWith('SHOPEE'))for(const code of ['PP','PV','UNKNOWN']){const regionRows=matching.filter(row=>String(row.regionCode||'').toUpperCase()===code),region=blank(type,date);for(const row of regionRows)addMetric(region,safeJson(row.metricsJson||row));region.ready=regionRows.length>0;out.regions[code]=finish(region);}}else out.total=n(importedTotal);return finish(out);}
-function whpp(date,rows=[]){const cached=rows.filter(row=>String(row.businessType||'').toUpperCase()==='WHPP');if(cached.length){const out=blank('WHPP',date);for(const row of cached)addMetric(out,safeJson(row.metricsJson||row));out.ready=true;out.snapshotId=cached[0]?.snapshotId||'';out.refreshedAt=cached.map(row=>row.refreshedAt||'').sort().at(-1)||'';return finish(out);}const out=blank('WHPP',date);let payload={};try{const row=getDb().prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);if(row){payload={...safeJson(row.summaryJson)};if(payload.total===undefined)payload.total=n(row.totalCount);}}catch{}try{const row=getDb().prepare("SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);if(row)payload={...payload,...safeJson(row.summaryJson)};}catch{}addMetric(out,payload);out.ready=out.total>0||Object.keys(payload).length>0;return finish(out);}
+function whpp(date,rows=[]){
+  const cached=rows.filter(row=>String(row.businessType||'').toUpperCase()==='WHPP');
+  if(cached.length){const out=blank('WHPP',date);for(const row of cached)addMetric(out,safeJson(row.metricsJson||row));out.ready=true;out.snapshotId=cached[0]?.snapshotId||'';out.refreshedAt=cached.map(row=>row.refreshedAt||'').sort().at(-1)||'';return finish(out);}
+  const out=blank('WHPP',date);
+  let daily=null;
+  try{daily=getDb().prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date)||null;}catch{}
+  if(!daily)return finish(out);
+  const expected=n(daily.totalCount);
+  let actual=0;
+  try{actual=n(getDb().prepare("SELECT COUNT(DISTINCT shipmentCode) c FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(date)?.c);}catch{}
+  out.expected=expected;out.actual=actual;
+  if(expected!==actual){
+    out.membershipIncomplete=true;
+    out.errorCode='WHPP_STANDARD_DAILY_INCOMPLETE';
+    out.membershipSource='WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED';
+    out.ready=false;
+    return finish(out);
+  }
+  let payload={...safeJson(daily.summaryJson)};
+  if(expected>0){
+    try{const row=getDb().prepare("SELECT summaryJson FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);if(row)payload={...payload,...safeJson(row.summaryJson)};}catch{}
+  }
+  payload.total=expected;
+  addMetric(out,payload);
+  out.ready=true;
+  out.membershipIncomplete=false;
+  out.membershipSource=expected===0?'WHPP_STANDARD_DAILY_ZERO':'WHPP_STANDARD_DAILY';
+  return finish(out);
+}
 function mergeMetricList(type,date,list=[]){const out=blank(type,date);for(const item of list)addMetric(out,item||{});out.ready=list.some(item=>item?.ready);return finish(out);}
 function mergeRegions(metrics=[]){const out={};for(const code of ['PP','PV','UNKNOWN'])out[code]=mergeMetricList('SHOPEE','',metrics.map(m=>m?.regions?.[code]).filter(Boolean));return out;}
 
@@ -145,4 +173,4 @@ export function aggregateV236State(scope='CCSL',summary=readV236CurrentSummary()
 export function invalidateV236CurrentSummary(){summaryCache.clear();}
 globalThis.__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__=invalidateV236CurrentSummary;
 
-console.info('[CE-QC][V236_CURRENT_SUMMARY]',V236_DASHBOARD_CURRENT_READ_ID,'same-date current cards select the latest VALID snapshot independently for each business; unrelated imports cannot zero CN/VN/TBKH/CE siblings.');
+console.info('[CE-QC][V236_CURRENT_SUMMARY]',V236_DASHBOARD_CURRENT_READ_ID,'same-date current cards select the latest VALID snapshot independently per business; WHPP summary validates exact standard membership and never overlays history onto an incomplete/zero cohort.');
