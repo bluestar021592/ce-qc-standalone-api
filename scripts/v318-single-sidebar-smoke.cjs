@@ -22,14 +22,15 @@ assert.doesNotMatch(ui,/new MutationObserver/,'sidebar repair must remain pollin
 assert.match(ui,/七业务处理完成/,'all-complete banner must not remain SHOPEE-only after all owners report complete');
 assert.match(ui,/CCSL、SHOPEE CN\/VN、WHPP本土均已完成/);
 
-assert.match(legacy,/2026-08-27-v333-legacy-status-no-dom-owner-v1/,'V169 must be compatibility-only under V333');
-assert.doesNotMatch(legacy,/getElementById\('ccslRunStatus'\)/,'retired V169 must never acquire the CCSL detail panel');
-assert.doesNotMatch(legacy,/getElementById\('sevenBusinessStageSummary'\)/,'retired V169 must never acquire the canonical summary');
-assert.match(legacy,/__CE_QC_V168_SEVEN_BUSINESS_STATUS__\?\.refresh/,'legacy bridge may only ask V168 to refresh canonical truth');
-assert.match(legacy,/__CE_QC_V138_CCSL_SCAN_PROGRESS__\?\.enforceLastTruth/,'legacy bridge may only ask V138 to re-enforce CCSL detail truth');
-assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260827-v333-1/,'browser must not reuse cached V169 DOM-writing bundle');
+assert.match(legacy,/2026-08-27-v333-legacy-status-no-dom-owner-v1/,'V169 source remains available only for rollback diagnostics');
+assert.doesNotMatch(legacy,/getElementById\('ccslRunStatus'\)/,'retired V169 source must never acquire the CCSL detail panel');
+assert.doesNotMatch(legacy,/getElementById\('sevenBusinessStageSummary'\)/,'retired V169 source must never acquire the canonical summary');
+assert.match(legacy,/__CE_QC_V168_SEVEN_BUSINESS_STATUS__\?\.refresh/,'legacy source may only ask V168 to refresh canonical truth');
+assert.match(legacy,/__CE_QC_V138_CCSL_SCAN_PROGRESS__\?\.enforceLastTruth/,'legacy source may only ask V138 to re-enforce CCSL detail truth');
+assert.doesNotMatch(shell,/v169-seven-business-legacy-status-sync\.js/,'retired V169 bridge must not be loaded in production runtime');
+assert.match(shell,/v168-seven-business-status\.js\?v=20260829-single-owner-1/,'canonical V168 status-only owner must be loaded instead');
 
-assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must be delivered after V317 recovery owner');
+assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must remain delivered');
 assert.match(inject,/X-CE-QC-V318-UI/,'V318 response header must be observable');
 
-console.log('[V333/V318/V169] single-sidebar + status ownership smoke passed · V169 cannot repaint CCSL detail · exact 15-item nav · unified completion banner');
+console.log('[SINGLE-RUNNER/V318] single-sidebar + status ownership smoke passed · V169 runtime bridge retired · exact 15-item nav · unified completion banner remains canonical');
