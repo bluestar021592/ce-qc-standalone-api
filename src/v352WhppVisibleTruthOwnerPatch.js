@@ -63,17 +63,28 @@ function normalizeSqlFinalFact(row = {}) {
 
 function loadStandardMembership(db, reportDate) {
   const daily = db.prepare(`SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1`).get(reportDate);
-  if (!daily) return { present: false, rows: [] };
-  const rows = db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
+  if (!daily) return { present: false, rows: [], source: 'EMPTY', expected: 0, actual: 0 };
+  const rows = uniqueRows(db.prepare(`SELECT shipmentCode,rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode`).all(reportDate).map(row => ({
     ...safeJson(row.rowJson, {}), shipmentCode: row.shipmentCode, 运单号: row.shipmentCode, businessType: 'WHPP', reportDate
-  }));
-  return { present: true, rows: uniqueRows(rows), totalCount: Number(daily.totalCount || 0) };
+  })));
+  const expected = Number(daily.totalCount || 0);
+  const present = rows.length > 0 && (!expected || expected === rows.length);
+  return { present, rows: present ? rows : [], totalCount: expected, source: present ? 'WHPP_STANDARD_DAILY' : 'EMPTY', expected, actual: rows.length };
 }
 
 function latestDate(db) {
-  const unified = String(db.prepare(`SELECT MAX(reportDate) reportDate FROM unified_import_batches WHERE status='VALID'`).get()?.reportDate || '');
-  if (dateOnly(unified)) return dateOnly(unified);
-  return dateOnly(db.prepare(`SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP' ORDER BY reportDate DESC LIMIT 1`).get()?.reportDate || '');
+  const candidates = [];
+  for (const sql of [
+    `SELECT MAX(reportDate) reportDate FROM business_daily_reports WHERE businessType='WHPP'`,
+    `SELECT MAX(reportDate) reportDate FROM unified_import_batches WHERE status='VALID'`,
+    `SELECT MAX(reportDate) reportDate FROM business_history_summary WHERE businessType='WHPP'`
+  ]) {
+    try {
+      const value = dateOnly(db.prepare(sql).get()?.reportDate || '');
+      if (value) candidates.push(value);
+    } catch {}
+  }
+  return candidates.sort().at(-1) || '';
 }
 
 function loadFacts(db, reportDate) {
@@ -144,10 +155,16 @@ function buildCanonical(reportDate = '') {
     const dashboard = buildV352WhppVisibleDashboard({ reportDate: '', membershipRows: [], finalRows: [] });
     return { reportDate: '', dashboard, membershipSource: 'EMPTY', finalEvidenceRows: 0, completed: false, buildMs: Date.now() - startedAt };
   }
-  const unified = loadV351UnifiedWhppMembership(date, db);
+
+  // saveWhppDailyImport writes this standard cohort during the same unified-import
+  // request. Read it directly first. V351 is now only a safe history/disaster
+  // fallback for dates whose normalized daily membership is absent or incomplete.
   const standard = loadStandardMembership(db, date);
-  const membershipRows = unified.present ? unified.rows : standard.rows;
-  if (!unified.present && !standard.present) {
+  const fallback = standard.present
+    ? { present: false, rows: [], membershipSource: 'STANDARD_PRIMARY_NO_FALLBACK' }
+    : loadV351UnifiedWhppMembership(date, db);
+  const membershipRows = standard.present ? standard.rows : (fallback.rows || []);
+  if (!standard.present && !fallback.present) {
     const dashboard = buildV352WhppVisibleDashboard({ reportDate: date, membershipRows: [], finalRows: [] });
     return { reportDate: date, dashboard, membershipSource: 'EMPTY', finalEvidenceRows: 0, completed: false, buildMs: Date.now() - startedAt };
   }
@@ -160,7 +177,7 @@ function buildCanonical(reportDate = '') {
   return {
     reportDate: date,
     dashboard,
-    membershipSource: unified.present ? 'LATEST_VALID_UNIFIED_MEMBERSHIP' : 'WHPP_STANDARD_DAILY',
+    membershipSource: standard.present ? 'WHPP_STANDARD_DAILY' : (fallback.membershipSource || 'V351_SAFE_FALLBACK'),
     finalEvidenceRows: finalRows.length,
     completed,
     buildMs: Date.now() - startedAt
@@ -247,7 +264,7 @@ console.log('[CE-QC][V352_WHPP_VISIBLE_TRUTH_OWNER]', JSON.stringify({
   id: V352_WHPP_VISIBLE_TRUTH_OWNER_ID,
   summaryRoutes: [...SUMMARY_ROUTES],
   detailRoutes: [...DETAIL_ROUTES],
-  membershipTruth: 'LATEST_VALID_UNIFIED_THEN_STANDARD_DAILY',
+  membershipTruth: 'WHPP_STANDARD_DAILY_THEN_V351_SAFE_HISTORY_DISASTER_FALLBACK',
   finalTruth: 'CURRENT_MEMBERS_ONLY_BUSINESS_FINAL_ROWS_WITH_SQL_ISPOD_IN_MEMORY_NORMALIZATION_AND_MEMBERSHIP_REGION_MERGE',
   invariant: 'TOP_EQUALS_PP_PLUS_PV_PLUS_UNKNOWN',
   summaryPayload: 'METRICS_REGIONS_ACCOUNTING_ONLY_DETAILS_LAZY',
