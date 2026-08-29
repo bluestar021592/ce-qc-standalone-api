@@ -72,8 +72,8 @@ function loadStandardMembership(db,reportDate){
       ...safeJson(row.rowJson,{}),shipmentCode:row.shipmentCode,运单号:row.shipmentCode,businessType:'WHPP',reportDate
     })));
   const expected=num(daily.totalCount);
-  const present=rows.length>0&&(!expected||expected===rows.length);
-  return {present,rows:present?rows:[],source:present?'WHPP_STANDARD_DAILY':'EMPTY',expected,actual:rows.length};
+  const present=expected===rows.length;
+  return {present,rows:present?rows:[],source:present?(expected===0?'WHPP_STANDARD_DAILY_ZERO':'WHPP_STANDARD_DAILY'):'INCOMPLETE',expected,actual:rows.length};
 }
 function loadFinalFacts(db,reportDate,membershipRows=[]){
   const members=uniqueRows(membershipRows);
@@ -134,8 +134,8 @@ function buildFastSummary(requested=''){
 
   // Fresh imports write WHPP directly into business_daily_reports +
   // business_daily_parse_rows. That normalized daily membership is the primary
-  // authority. V351 is retained only as a disaster/history fallback when the
-  // standard daily cohort is genuinely missing or internally incomplete.
+  // authority, including an exact persisted zero. V351 is retained only as a
+  // disaster/history fallback when the standard cohort is missing/incomplete.
   const standard=loadStandardMembership(db,reportDate);
   const unified=standard.present?{present:false,rows:[],source:'STANDARD_PRIMARY_NO_FALLBACK'}:loadUnifiedMembership(db,reportDate);
   const membershipRows=standard.present?standard.rows:unified.rows;
@@ -154,7 +154,7 @@ function buildFastSummary(requested=''){
   const historySource=safeJson(history?.summaryJson,{});
   const retryPending=num(historySource.retryPending);
   const memberCount=uniqueRows(membershipRows).length;
-  const completed=memberCount===0?Boolean(history):facts.length>=memberCount;
+  const completed=memberCount===0?standard.present||Boolean(history):facts.length>=memberCount;
   const metrics={...dashboard.metrics,retryPending};
   const snapshotStatus=completed?(retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED'):(metrics.total>0?'PENDING':'EMPTY');
   const slimDashboard={businessType:'WHPP',reportDate,metrics,regions:dashboard.regions,accounting:dashboard.accounting};
