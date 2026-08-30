@@ -22,7 +22,7 @@ import './v174PeriodExportContractPatch.js';
 import './v183HistoricalStatusRefreshPatch.js';
 import './v206InteractiveFirstRuntimePatch.js';
 
-const PATCH_ID='2026-08-30-v366-atomic-import-ui-cache-bust-v1';
+const PATCH_ID='2026-08-27-v334-canonical-detail-history-owner-cache-bust-v1';
 const V226_COMPAT_UI_BUILD='2026-08-22-v226-shared-client-ui-cache-bust-v1';
 const GOLIVE_COMPAT_PATCH_ID='2026-08-18-v195-ipc-export-owner-shell-v1';
 const SINGLE_RUNNER_UI_BUILD='2026-08-29-single-unified-runner-v1';
