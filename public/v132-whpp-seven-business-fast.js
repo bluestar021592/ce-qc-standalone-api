@@ -1,6 +1,7 @@
 (function installWhppSevenBusinessFastV132(global){
   if(global.__CE_QC_V132_WHPP_FAST__)return;
-  const VERSION='2026-08-30-v361-canonical-completion-display-v1';
+  const VERSION='2026-08-29-v353-whpp-display-only-v1';
+  const REVISION='2026-08-30-v361-canonical-completion-display-v1';
   const CACHE_KEY='ce_qc_v132_whpp_fast_summary';
   let currentSummary=readCache();
   let trendRequest=0;
@@ -47,8 +48,8 @@
     global.addEventListener('popstate',()=>{if(location.pathname==='/whpp')void navigate(false);});
     document.addEventListener('ce-qc-run-complete',()=>{void fetchFast(selectedDate()).then(value=>{if(location.pathname==='/whpp')render(value);}).catch(()=>{});});
     if(location.pathname==='/whpp')void navigate(false);
-    global.__CE_QC_V132_WHPP_FAST__={version:VERSION,displayOnly:true,authoritativeRunner:'V67',navigate,fetchSummary:fetchFast,selectedDate,openDetail,mountTrends};
-    console.info('[CE-QC][V361_WHPP_CANONICAL_COMPLETION]',VERSION,'WHPP page reads canonical nested state completion; V67 exclusively owns unified run/resume and WHPP execution.');
+    global.__CE_QC_V132_WHPP_FAST__={version:VERSION,revision:REVISION,displayOnly:true,authoritativeRunner:'V67',navigate,fetchSummary:fetchFast,selectedDate,openDetail,mountTrends};
+    console.info('[CE-QC][V361_WHPP_CANONICAL_COMPLETION]',REVISION,'WHPP page reads canonical nested state completion; V67 exclusively owns unified run/resume and WHPP execution.');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,20),{once:true});else setTimeout(install,20);
 })(window);
