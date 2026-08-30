@@ -84,7 +84,7 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
     FROM carryover_open_items c
     JOIN shipment_current_state s ON s.shipmentCode=c.shipmentCode
     WHERE c.businessType='WHPP' AND c.status='OPEN' AND UPPER(COALESCE(s.state,''))='POD'
-    ORDER BY shipmentCode
+    ORDER BY 1
   `).all(reportDate).map(row => row.shipmentCode);
 
   const state = saveWhppState({
