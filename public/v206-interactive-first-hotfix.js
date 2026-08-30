@@ -1,6 +1,6 @@
 (function installV206InteractiveFirstHotfix(global){
   if(global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__)return;
-  const VERSION='2026-08-21-v207-instant-nav-home-refresh-ce-login-v2';
+  const VERSION='2026-08-30-v375-canonical-v67-run-controls-v1';
   const FORCE_KEY='ce_qc_force_ce_relogin_v207';
   const INSTANT_PAGES=new Map([['home','/'],['ceaf','/ceaf']]);
   let applying=false;
@@ -111,7 +111,26 @@
     }catch(error){console.warn('[CE-QC][V207_INSTANT_NAV]',target,error);return false;}
   }
 
+  function runCanonicalUnified(mode='start'){
+    const owner=global.__CE_QC_V67_RESILIENT_RUN_GUARD__;
+    if(owner?.run){
+      void owner.run(mode==='resume'?'resume':'start');
+      return true;
+    }
+    const status=document.getElementById('ccslRunStatus');
+    if(status)status.innerHTML='<span class="status-pill danger">统一处理入口尚未加载完成，请刷新页面后再开始；日报数据不会丢失。</span>';
+    console.error('[CE-QC][V375_CANONICAL_RUN_CONTROL] V67 owner unavailable; legacy duplicate runner blocked.');
+    return false;
+  }
+
   document.addEventListener('click',event=>{
+    const autoButton=event.target?.closest?.('[data-testid="global-auto-process"]');
+    const resumeButton=event.target?.closest?.('button[onclick="resumeUnified()"]');
+    if(autoButton||resumeButton){
+      event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
+      runCanonicalUnified(resumeButton?'resume':'start');
+      return;
+    }
     const side=event.target?.closest?.('.side-link');
     const page=String(side?.dataset?.page||'').toLowerCase();
     if(side&&INSTANT_PAGES.has(page)){
@@ -148,6 +167,6 @@
 
   global.showLoginForms=beginRelogin;
   global.loginCe=submitLogin;
-  global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__={version:VERSION,beginRelogin,forceLoginForms,submitLogin,instantNavigate,refreshHomeFast};
-  console.info('[CE-QC][V207_INSTANT_NAV_HOME_REFRESH_CE_LOGIN]',VERSION);
+  global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__={version:VERSION,beginRelogin,forceLoginForms,submitLogin,instantNavigate,refreshHomeFast,runCanonicalUnified};
+  console.info('[CE-QC][V375_CANONICAL_RUN_CONTROL]',VERSION,'full-auto and resume buttons are capture-bound to V67; legacy app.js duplicate runner cannot execute.');
 })(window);
