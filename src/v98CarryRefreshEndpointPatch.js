@@ -1,9 +1,11 @@
 import express from 'express';
 import { startCarryoverRefreshScheduler } from './carryoverRefreshScheduler.js';
 import { getDb } from './db.js';
+import { SHOPEE, loadBusinessState, saveBusinessState } from './businessStore.js';
+import { WHPP, loadWhppState, saveWhppState } from './whppStore.js';
 
 export const V98_CARRY_REFRESH_ENDPOINT_ID = '2026-08-14-v98-backend-owned-open-carry-refresh-v4';
-export const V98_RUNTIME_CARRY_HYDRATION_ID = '2026-08-30-v374-runtime-carry-hydration-v1';
+export const V98_RUNTIME_CARRY_HYDRATION_ID = '2026-08-30-v374-runtime-carry-hydration-v2';
 
 const CCSL_RUN_ROUTES = new Set(['/api/run','/api/run/start','/api/resume','/api/run/resume']);
 const SHOPEE_RUN_ROUTES = new Set(['/api/shopee/run/start','/api/shopee/run/resume']);
@@ -30,16 +32,23 @@ function latestValidReportDate(db) {
   `).get()?.reportDate || '');
 }
 
-function loadOpenCarryRows(db, reportDate, businessTypes) {
+function loadOpenCarryRows(db, reportDate, businessTypes, businessStateType = '') {
   if (!reportDate || !businessTypes.length) return [];
   const placeholders = businessTypes.map(() => '?').join(',');
+  const joinBusinessDaily = businessStateType === SHOPEE
+    ? "LEFT JOIN business_daily_parse_rows b ON b.businessType='SHOPEE' AND b.reportDate=c.sourceReportDate AND b.shipmentCode=c.shipmentCode"
+    : '';
   return db.prepare(`
-    SELECT shipmentCode,businessType,sourceReportDate,lastReportDate,stateJson
-    FROM carryover_open_items
-    WHERE UPPER(COALESCE(status,''))='OPEN'
-      AND sourceReportDate<?
-      AND UPPER(COALESCE(businessType,'')) IN (${placeholders})
-    ORDER BY sourceReportDate,shipmentCode
+    SELECT c.shipmentCode,c.businessType,c.sourceReportDate,c.lastReportDate,c.stateJson,
+           s.businessType AS currentBusinessType,s.stateJson AS currentStateJson
+           ${businessStateType === SHOPEE ? ',b.recipient_group AS historicalRecipientGroup,b.rowJson AS historicalRowJson' : ''}
+    FROM carryover_open_items c
+    LEFT JOIN shipment_current_state s ON s.shipmentCode=c.shipmentCode
+    ${joinBusinessDaily}
+    WHERE UPPER(COALESCE(c.status,''))='OPEN'
+      AND c.sourceReportDate<?
+      AND UPPER(COALESCE(c.businessType,'')) IN (${placeholders})
+    ORDER BY c.sourceReportDate,c.shipmentCode
   `).all(reportDate, ...businessTypes);
 }
 
@@ -48,21 +57,29 @@ function uniqueBills(rows = []) {
 }
 
 function inferShopeePriorRow(row = {}) {
-  const saved = parseJson(row.stateJson, {});
+  const carrySaved = parseJson(row.stateJson, {});
+  const currentSaved = parseJson(row.currentStateJson, {});
+  const historicalSaved = parseJson(row.historicalRowJson, {});
+  const saved = { ...carrySaved, ...historicalSaved, ...currentSaved };
   const storedType = String(row.businessType || '').trim().toUpperCase();
+  const currentType = String(row.currentBusinessType || '').trim().toUpperCase();
   const embeddedType = String(saved.businessType || saved.sourceBusinessType || '').trim().toUpperCase();
-  const recipientGroup = String(saved.recipient_group || saved.recipientGroup || '').trim().toUpperCase();
+  const historicalGroup = String(row.historicalRecipientGroup || '').trim().toUpperCase();
+  const recipientGroup = String(saved.recipient_group || saved.recipientGroup || historicalGroup || '').trim().toUpperCase();
   const resolvedType = ['SHOPEECN','SHOPEEVN'].includes(storedType)
     ? storedType
-    : (['SHOPEECN','SHOPEEVN'].includes(embeddedType)
-        ? embeddedType
-        : (recipientGroup === 'CN' ? 'SHOPEECN' : (recipientGroup === 'VN' ? 'SHOPEEVN' : 'SHOPEE')));
+    : (['SHOPEECN','SHOPEEVN'].includes(currentType)
+        ? currentType
+        : (['SHOPEECN','SHOPEEVN'].includes(embeddedType)
+            ? embeddedType
+            : (recipientGroup === 'CN' ? 'SHOPEECN' : (recipientGroup === 'VN' ? 'SHOPEEVN' : 'SHOPEE'))));
+  const resolvedGroup = recipientGroup || (resolvedType === 'SHOPEECN' ? 'CN' : (resolvedType === 'SHOPEEVN' ? 'VN' : 'OTHER'));
   return {
     ...saved,
     shipmentCode: String(row.shipmentCode || '').trim().toUpperCase(),
     运单号: String(row.shipmentCode || '').trim().toUpperCase(),
     businessType: resolvedType,
-    recipient_group: recipientGroup || (resolvedType === 'SHOPEECN' ? 'CN' : (resolvedType === 'SHOPEEVN' ? 'VN' : 'OTHER')),
+    recipient_group: ['CN','VN'].includes(resolvedGroup) ? resolvedGroup : 'OTHER',
     recipient_group_reason: saved.recipient_group_reason || 'V374_HISTORICAL_OPEN_REHYDRATE',
     sourceDate: row.sourceReportDate || '',
     sourceReportDate: row.sourceReportDate || '',
@@ -71,42 +88,15 @@ function inferShopeePriorRow(row = {}) {
   };
 }
 
-function rewriteAppStateCarry(db, reportDate) {
+function rewriteCcslCarry(db, reportDate) {
   const row = db.prepare("SELECT valueJson FROM app_state WHERE key='current'").get();
-  if (!row) return { count: 0, changed: false };
+  if (!row) return { count: 0, changed: false, legacy: 0 };
   const state = parseJson(row.valueJson, {});
   const date = normalizeDate(state.reportDate) || reportDate;
-  if (!date) return { count: 0, changed: false };
+  if (!date) return { count: 0, changed: false, legacy: 0 };
   const carryRows = loadOpenCarryRows(db, date, CCSL_TYPES);
   const carryBills = uniqueBills(carryRows);
-  const previous = [...new Set((state.carryBills || state.nextCarryBills || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean))];
-  const changed = previous.length !== carryBills.length || previous.some((bill, index) => bill !== carryBills[index]);
-  if (changed || normalizeDate(state.reportDate) !== date) {
-    const next = {
-      ...state,
-      reportDate: date,
-      carryBills,
-      nextCarryBills: carryBills,
-      carryHydration: {
-        source: V98_RUNTIME_CARRY_HYDRATION_ID,
-        hydratedAt: new Date().toISOString(),
-        historicalOpen: carryBills.length,
-        acceptedBusinessTypes: CCSL_TYPES
-      }
-    };
-    db.prepare("UPDATE app_state SET valueJson=?,updatedAt=? WHERE key='current'").run(JSON.stringify(next), new Date().toISOString());
-  }
-  return { count: carryBills.length, changed };
-}
-
-function rewriteBusinessStateCarry(db, businessType, reportDate, businessTypes) {
-  const row = db.prepare('SELECT valueJson FROM business_states WHERE businessType=?').get(businessType);
-  if (!row) return { count: 0, changed: false };
-  const state = parseJson(row.valueJson, {});
-  const date = normalizeDate(state.reportDate) || reportDate;
-  if (!date) return { count: 0, changed: false };
-  const carryRows = loadOpenCarryRows(db, date, businessTypes);
-  const carryBills = uniqueBills(carryRows);
+  const legacy = carryRows.filter(item => String(item.businessType || '').toUpperCase() === 'CCSL').length;
   const previous = [...new Set((state.carryBills || state.nextCarryBills || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean))];
   const changed = previous.length !== carryBills.length || previous.some((bill, index) => bill !== carryBills[index]);
   const next = {
@@ -118,24 +108,78 @@ function rewriteBusinessStateCarry(db, businessType, reportDate, businessTypes) 
       source: V98_RUNTIME_CARRY_HYDRATION_ID,
       hydratedAt: new Date().toISOString(),
       historicalOpen: carryBills.length,
-      acceptedBusinessTypes: businessTypes
+      legacyBusinessRows: legacy,
+      acceptedBusinessTypes: CCSL_TYPES
     }
   };
-  if (businessType === 'SHOPEE') next.priorCarryRows = carryRows.map(inferShopeePriorRow);
-  if (changed || normalizeDate(state.reportDate) !== date || businessType === 'SHOPEE') {
-    db.prepare('UPDATE business_states SET valueJson=?,updatedAt=? WHERE businessType=?').run(JSON.stringify(next), new Date().toISOString(), businessType);
+  if (changed || normalizeDate(state.reportDate) !== date) {
+    db.prepare("UPDATE app_state SET valueJson=?,updatedAt=? WHERE key='current'").run(JSON.stringify(next), new Date().toISOString());
   }
-  return { count: carryBills.length, changed };
+  return { count: carryBills.length, changed, legacy };
+}
+
+function rewriteShopeeCarry(db, reportDate) {
+  const state = loadBusinessState(SHOPEE);
+  const date = normalizeDate(state.reportDate) || reportDate;
+  if (!date) return { count: 0, changed: false, legacy: 0, unresolvedGroup: 0 };
+  const carryRows = loadOpenCarryRows(db, date, SHOPEE_TYPES, SHOPEE);
+  const priorCarryRows = carryRows.map(inferShopeePriorRow);
+  const eligible = priorCarryRows.filter(row => ['CN','VN'].includes(String(row.recipient_group || '').toUpperCase()));
+  const carryBills = uniqueBills(eligible);
+  const legacy = carryRows.filter(item => String(item.businessType || '').toUpperCase() === 'SHOPEE').length;
+  const unresolvedGroup = priorCarryRows.length - eligible.length;
+  const previous = [...new Set((state.carryBills || state.nextCarryBills || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean))];
+  const changed = previous.length !== carryBills.length || previous.some((bill, index) => bill !== carryBills[index]);
+  const next = {
+    ...state,
+    reportDate: date,
+    carryBills,
+    nextCarryBills: carryBills,
+    priorCarryRows: eligible,
+    carryHydration: {
+      source: V98_RUNTIME_CARRY_HYDRATION_ID,
+      hydratedAt: new Date().toISOString(),
+      historicalOpen: carryBills.length,
+      legacyBusinessRows: legacy,
+      unresolvedGroup,
+      acceptedBusinessTypes: SHOPEE_TYPES
+    }
+  };
+  saveBusinessState(next, SHOPEE);
+  return { count: carryBills.length, changed, legacy, unresolvedGroup };
+}
+
+function rewriteWhppCarry(db, reportDate) {
+  const state = loadWhppState();
+  const date = normalizeDate(state.reportDate) || reportDate;
+  if (!date) return { count: 0, changed: false, legacy: 0 };
+  const carryRows = loadOpenCarryRows(db, date, WHPP_TYPES);
+  const carryBills = uniqueBills(carryRows);
+  const previous = [...new Set((state.carryBills || state.nextCarryBills || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean))];
+  const changed = previous.length !== carryBills.length || previous.some((bill, index) => bill !== carryBills[index]);
+  saveWhppState({
+    ...state,
+    reportDate: date,
+    carryBills,
+    nextCarryBills: carryBills,
+    carryHydration: {
+      source: V98_RUNTIME_CARRY_HYDRATION_ID,
+      hydratedAt: new Date().toISOString(),
+      historicalOpen: carryBills.length,
+      acceptedBusinessTypes: WHPP_TYPES
+    }
+  });
+  return { count: carryBills.length, changed, legacy: 0 };
 }
 
 function hydrateRuntimeCarry(kind) {
   const db = getDb();
   const reportDate = latestValidReportDate(db);
-  if (!reportDate) return { reportDate: '', count: 0, changed: false };
-  if (kind === 'CCSL') return { reportDate, ...rewriteAppStateCarry(db, reportDate) };
-  if (kind === 'SHOPEE') return { reportDate, ...rewriteBusinessStateCarry(db, 'SHOPEE', reportDate, SHOPEE_TYPES) };
-  if (kind === 'WHPP') return { reportDate, ...rewriteBusinessStateCarry(db, 'WHPP', reportDate, WHPP_TYPES) };
-  return { reportDate, count: 0, changed: false };
+  if (!reportDate) return { reportDate: '', count: 0, changed: false, legacy: 0 };
+  if (kind === 'CCSL') return { reportDate, ...rewriteCcslCarry(db, reportDate) };
+  if (kind === 'SHOPEE') return { reportDate, ...rewriteShopeeCarry(db, reportDate) };
+  if (kind === 'WHPP') return { reportDate, ...rewriteWhppCarry(db, reportDate) };
+  return { reportDate, count: 0, changed: false, legacy: 0 };
 }
 
 function carryHydrationMiddleware(kind) {
@@ -143,7 +187,7 @@ function carryHydrationMiddleware(kind) {
     try {
       const hydrated = hydrateRuntimeCarry(kind);
       res.setHeader('X-CE-QC-Carry-Hydration', `${kind}:${hydrated.count}`);
-      console.log(`[CE-QC][V374][CARRY_HYDRATE] business=${kind} reportDate=${hydrated.reportDate || '-'} historicalOpen=${hydrated.count} changed=${hydrated.changed ? 1 : 0}`);
+      console.log(`[CE-QC][V374][CARRY_HYDRATE] business=${kind} reportDate=${hydrated.reportDate || '-'} historicalOpen=${hydrated.count} legacy=${hydrated.legacy || 0} unresolvedGroup=${hydrated.unresolvedGroup || 0} changed=${hydrated.changed ? 1 : 0}`);
       next();
     } catch (error) {
       console.error(`[CE-QC][V374][CARRY_HYDRATE_FAILED] business=${kind}`, error);
