@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { runAtomicUnifiedImportWithDbV366 } from '../src/v366AtomicUnifiedImport.js';
 
-for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
+for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v146UnifiedImportDateBridgePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
@@ -91,13 +91,15 @@ function fakeResponse(){
 const v42=fs.readFileSync(new URL('../src/v42WhppPatch.js',import.meta.url),'utf8');
 const v44=fs.readFileSync(new URL('../src/v44WhppUiPatch.js',import.meta.url),'utf8');
 const v102=fs.readFileSync(new URL('../src/v102UnifiedImportSafetyGatePatch.js',import.meta.url),'utf8');
+const v146Bridge=fs.readFileSync(new URL('../src/v146UnifiedImportDateBridgePatch.js',import.meta.url),'utf8');
 const v366=fs.readFileSync(new URL('../src/v366AtomicUnifiedImport.js',import.meta.url),'utf8');
 const v146=fs.readFileSync(new URL('../public/v146-unified-import-date-status.js',import.meta.url),'utf8');
 const v67=fs.readFileSync(new URL('../public/v67-resilient-run-guard.js',import.meta.url),'utf8');
 const v168=fs.readFileSync(new URL('../public/v168-seven-business-status.js',import.meta.url),'utf8');
 const v132=fs.readFileSync(new URL('../public/v132-whpp-seven-business-fast.js',import.meta.url),'utf8');
+const bootstrap=fs.readFileSync(new URL('../bootstrap.js',import.meta.url),'utf8');
 
-assert.match(v42,/2026-08-30-v366-seven-business-atomic-whpp-rehydrate-v1/,'real unified import owner must include atomic WHPP rehydration');
+assert.match(v42,/2026-08-30-v366-seven-business-atomic-whpp-rehydrate-v2/,'real unified import owner must include atomic WHPP rehydration v2');
 assert.match(v42,/const stageStatus = `STAGING:\$\{batchId\}`/,'new daily batch must start invisible as STAGING');
 assert.match(v42,/UPDATE unified_import_batches SET status='VALID' WHERE batchId=\? AND status=\?/,'STAGING batch must have one explicit VALID commit point');
 assert.match(v42,/FAILED_STAGING:/,'failed new-day writes must never become current VALID truth');
@@ -143,6 +145,8 @@ assert.ok(stagedAt>=0&&ccslAt>stagedAt&&shopeeAt>ccslAt&&whppAt>shopeeAt&&activa
 assert.match(v102,/2026-08-30-v366-pre-persistence-atomic-import-safety-v3/,'pre-persistence owner must install the V366 atomic gate');
 assert.match(v102,/runAtomicUnifiedImportV366/,'the real unified-import final handler must execute through the atomic owner');
 assert.match(v102,/return await runAtomicUnifiedImportV366\(finalHandler, req, res, next\)/,'V102 must await the atomic owner before returning any import result');
+assert.match(v146Bridge,/2026-08-16-v146-unified-import-date-bridge-v1/,'server-side date bridge must remain installed between safety and final import ownership');
+assert.match(v146Bridge,/normalizeImportDate/,'date bridge must normalize the target report date before persistence');
 assert.match(v366,/2026-08-30-v366-atomic-seven-business-import-v2/,'atomic transaction owner version must be active');
 assert.match(v366,/runAtomicUnifiedImportWithDbV366/,'the exact production atomic core must be directly executable by go-live tests');
 assert.match(v366,/originalExec\('BEGIN IMMEDIATE'\)/,'atomic owner must hold one outer write transaction');
@@ -153,6 +157,11 @@ assert.match(v366,/originalExec\('ROLLBACK'\)/,'any incomplete import must have 
 assert.match(v366,/innerRollbackSeen/,'an inner rollback request must poison the outer success path');
 assert.match(v366,/nestedDepth !== 0/,'unbalanced nested transactions must block commit');
 assert.match(v366,/UNIFIED_IMPORT_ALREADY_ACTIVE/,'concurrent daily imports must be rejected instead of interleaving writes');
+
+const bootstrapV102=bootstrap.indexOf("importPhase('v102UnifiedImportSafetyGatePatch'");
+const bootstrapV146=bootstrap.indexOf("importPhase('v146UnifiedImportDateBridgePatch'");
+const bootstrapV42=bootstrap.indexOf("importPhase('v42WhppPatch'");
+assert.ok(bootstrapV102>=0&&bootstrapV146>bootstrapV102&&bootstrapV42>bootstrapV146,'production bootstrap route ownership must remain V102 safety/atomic → V146 date bridge → V42 final importer');
 
 assert.match(v146,/2026-08-30-v366-atomic-seven-business-import-ui-v1/,'browser import owner must isolate pending dates and wait for atomic commit');
 assert.match(v146,/let candidateTarget=''/,'filename-recognized date must live outside the committed report-date input');
@@ -174,4 +183,4 @@ assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require cano
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V365/V366] exact daily transition + executable atomic persistence gate passed · real DatabaseSync commit/rollback behavior proven · candidate date stays noncanonical · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
+console.log('[V365/V366] exact daily transition + executable atomic persistence gate passed · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · candidate date stays noncanonical · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
