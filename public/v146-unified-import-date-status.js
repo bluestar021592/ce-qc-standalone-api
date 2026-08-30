@@ -1,7 +1,7 @@
 (function installV146UnifiedImportDateStatus(global){
   if(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__)return;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__={};
-  const VERSION='2026-08-30-v364-pending-date-isolation-v1';
+  const VERSION='2026-08-30-v365-seven-business-import-ui-v1';
   const ROUTE='/api/import/unified-daily-report';
   const originalFetch=global.fetch.bind(global);
   let candidateTarget='';
@@ -28,6 +28,9 @@
   }
   function status(){return document.getElementById('fileStatus');}
   function selectedFile(){return document.getElementById('excelFile')?.files?.[0]||null;}
+  function committedImport(){
+    try{return typeof unifiedImportState!=='undefined'&&unifiedImportState?unifiedImportState:null;}catch{return null;}
+  }
   function committedDate(){
     try{
       return normalizeDate(typeof unifiedImportState!=='undefined'?unifiedImportState?.reportDate:'')
@@ -55,6 +58,23 @@
     const palette=kind==='error'?['#fff1f1','#c43737','#f0c2c2']:kind==='success'?['#edf9f1','#16864d','#bfe7cf']:['#eef5ff','#245f9d','#c9dcf6'];
     node.innerHTML=`<div data-v146-import-status="${kind}" style="margin-top:8px;padding:10px 12px;border:1px solid ${palette[2]};border-radius:7px;background:${palette[0]};color:${palette[1]};line-height:1.55"><b>${title}</b>${detail?`<div style="margin-top:3px;font-size:12px">${detail}</div>`:''}</div>`;
   }
+  function syncSevenBusinessClassification(payload=committedImport()){
+    const counts=payload?.classificationCounts||{};
+    const grid=document.querySelector('#unifiedClassificationSummary .unified-count-grid');
+    if(grid&&!grid.querySelector('[data-testid="classification-whpp"]')){
+      const cell=document.createElement('div');
+      cell.innerHTML=`<span>WHPP本土</span><b data-testid="classification-whpp">${Number(counts.WHPP||0).toLocaleString('zh-CN')}</b>`;
+      grid.appendChild(cell);
+    }else if(grid){
+      const target=grid.querySelector('[data-testid="classification-whpp"]');
+      if(target)target.textContent=Number(counts.WHPP||0).toLocaleString('zh-CN');
+    }
+    const heading=document.querySelector('#importPage .page-heading p');
+    if(heading&&/五个独立业务队列|五业务/.test(heading.textContent||''))heading.textContent='一次上传综合日报，系统一次确认七业务分类并建立独立处理队列';
+    const empty=document.querySelector('#unifiedClassificationSummary .unified-empty-state span');
+    if(empty&&/六业务|五业务/.test(empty.textContent||''))empty.textContent='选择综合日报后，这里会显示七业务分类、PP/PV和数据质量统计。';
+  }
+  function scheduleSevenBusinessClassification(payload){[50,250,900].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(payload),ms));}
   function markSelected(){
     const file=selectedFile();if(!file)return;
     candidateTarget=filenameDate(file.name)||'';
@@ -112,6 +132,7 @@
       }else{
         candidateTarget='';
         show('success',`${payload.reportDate} 日报已完整提交`,`七业务分类和 CCSL → SHOPEE → WHPP 三阶段处理入口均已切换到新日期。`);
+        scheduleSevenBusinessClassification(payload);
       }
       return response;
     }catch(error){
@@ -125,6 +146,8 @@
       setImportButtonBusy(false);
     }
   };
+  [200,900,1800].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(),ms));
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.version=VERSION;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.getPendingDate=()=>pendingTarget||candidateTarget;
+  global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.syncClassification=syncSevenBusinessClassification;
 })(window);
