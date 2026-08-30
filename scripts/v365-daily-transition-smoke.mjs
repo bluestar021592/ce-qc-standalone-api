@@ -1,9 +1,26 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 
 for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+}
+
+// V366 relies on temporarily owning DatabaseSync.exec so legacy nested
+// BEGIN/COMMIT calls can stay inside one outer import transaction. Prove that
+// capability on the exact Node sqlite driver used by production before go-live.
+{
+  const probe=new DatabaseSync(':memory:');
+  const original=probe.exec.bind(probe);
+  let intercepted=0;
+  probe.exec=function v366DriverProbe(sql){intercepted+=1;return original(sql);};
+  probe.exec('CREATE TABLE v366_probe(id INTEGER PRIMARY KEY,value TEXT)');
+  probe.exec("INSERT INTO v366_probe(value) VALUES('ok')");
+  assert.equal(intercepted,2,'node:sqlite DatabaseSync.exec must be overrideable by the atomic import owner');
+  assert.equal(probe.prepare('SELECT value FROM v366_probe').get()?.value,'ok','overridden exec must still execute real SQLite statements');
+  delete probe.exec;
+  probe.close();
 }
 
 const v42=fs.readFileSync(new URL('../src/v42WhppPatch.js',import.meta.url),'utf8');
@@ -15,7 +32,7 @@ const v67=fs.readFileSync(new URL('../public/v67-resilient-run-guard.js',import.
 const v168=fs.readFileSync(new URL('../public/v168-seven-business-status.js',import.meta.url),'utf8');
 const v132=fs.readFileSync(new URL('../public/v132-whpp-seven-business-fast.js',import.meta.url),'utf8');
 
-assert.match(v42,/2026-08-30-v364-seven-business-import-commit-gate-v2/,'real unified import owner must be the V364 commit gate');
+assert.match(v42,/2026-08-30-v366-seven-business-atomic-whpp-rehydrate-v1/,'real unified import owner must include atomic WHPP rehydration');
 assert.match(v42,/const stageStatus = `STAGING:\$\{batchId\}`/,'new daily batch must start invisible as STAGING');
 assert.match(v42,/UPDATE unified_import_batches SET status='VALID' WHERE batchId=\? AND status=\?/,'STAGING batch must have one explicit VALID commit point');
 assert.match(v42,/FAILED_STAGING:/,'failed new-day writes must never become current VALID truth');
@@ -29,13 +46,40 @@ assert.match(v42,/shopeePriorCarryRows/,'Shopee historical carry must retain CN\
 assert.match(v42,/recipient_group: businessType === 'SHOPEECN' \? 'CN' : 'VN'/,'historical Shopee carry must stay eligible under the canonical CN\/VN state filter');
 assert.match(v42,/priorCarryRows, needTrackBills/,'Shopee state save must receive the retained historical carry rows');
 
+// A pre-existing complete WHPP daily membership must not be treated as a mere
+// count. It must be rehydrated into WHPP's current processing state for the same
+// target date, otherwise CCSL/Shopee can move to the new day while WHPP stays old.
+assert.match(v42,/function loadPreservedWhppDailyRows\(reportDate\)/,'preserved WHPP daily membership must be loadable as exact rows');
+assert.match(v42,/WHPP_PRESERVED_MEMBERSHIP_REHYDRATE_MISMATCH/,'preserved WHPP rehydration must fail closed on count mismatch');
+assert.match(v42,/REHYDRATED_EXISTING_COMPLETE_DAILY_MEMBERSHIP/,'preserved WHPP membership must be explicitly rehydrated');
+const preservedBranch=v42.slice(v42.indexOf('if (preservedWhpp.present) {'),v42.indexOf('} else {',v42.indexOf('if (preservedWhpp.present) {')));
+assert.match(preservedBranch,/loadPreservedWhppDailyRows\(parsed\.reportDate\)/,'preserved WHPP branch must load exact target-date rows');
+assert.match(preservedBranch,/saveWhppDailyImport\(\{/,'preserved WHPP branch must rebuild WHPP current processing state');
+assert.match(preservedBranch,/reportDate: parsed\.reportDate/,'rehydrated WHPP processing state must be target-date bound');
+
+// Do not trust a successful function return alone. Before the response can carry
+// importCommitted=true, the route must re-read the normalized DB and prove all
+// seven memberships plus CCSL/SHOPEE/WHPP current dates are aligned.
+assert.match(v42,/function verifyAtomicImportPersistence\(/,'import must verify persisted truth before success');
+assert.match(v42,/IMPORT_VERIFY_CCSL_QUEUE_MISMATCH/,'CCSL normalized queue membership must be verified');
+assert.match(v42,/IMPORT_VERIFY_SHOPEE_QUEUE_MISMATCH/,'SHOPEE normalized queue membership and CN\/VN split must be verified');
+assert.match(v42,/IMPORT_VERIFY_WHPP_QUEUE_MISMATCH/,'WHPP normalized daily membership must be verified');
+assert.match(v42,/IMPORT_VERIFY_CCSL_STATE_DATE_MISMATCH/,'CCSL current-state date must be verified');
+assert.match(v42,/IMPORT_VERIFY_SHOPEE_STATE_DATE_MISMATCH/,'SHOPEE current-state date must be verified');
+assert.match(v42,/IMPORT_VERIFY_WHPP_STATE_DATE_MISMATCH/,'WHPP current-state date must be verified');
+assert.match(v42,/const verification = verifyAtomicImportPersistence\(/,'persisted verification must run in the real import path');
+const verifyAt=v42.indexOf('const verification = verifyAtomicImportPersistence(');
+const responseCommitAt=v42.indexOf('importCommitted: true',verifyAt);
+assert.ok(verifyAt>=0&&responseCommitAt>verifyAt,'DB persistence verification must happen before importCommitted=true is returned');
+
 const handler=v42.slice(v42.indexOf('async function handleUnifiedImportV42'));
 const stagedAt=handler.indexOf('stageUnifiedCoreImport(coreParsed');
 const ccslAt=handler.indexOf('initializeCcslState(');
 const shopeeAt=handler.indexOf('initializeShopeeState(');
 const whppAt=handler.indexOf('saveWhppDailyImport({');
 const activateAt=handler.indexOf('activateUnifiedCoreImport(staged)');
-assert.ok(stagedAt>=0&&ccslAt>stagedAt&&shopeeAt>ccslAt&&whppAt>shopeeAt&&activateAt>whppAt,'08-15→08-16 transition must remain STAGING until CCSL, SHOPEE and WHPP queues are all ready');
+const persistenceAt=handler.indexOf('verifyAtomicImportPersistence(');
+assert.ok(stagedAt>=0&&ccslAt>stagedAt&&shopeeAt>ccslAt&&whppAt>shopeeAt&&activateAt>whppAt&&persistenceAt>activateAt,'08-15→08-16 transition must remain STAGING until CCSL, SHOPEE and WHPP queues are ready, then verify persisted truth');
 
 assert.match(v102,/2026-08-30-v366-pre-persistence-atomic-import-safety-v3/,'pre-persistence owner must install the V366 atomic gate');
 assert.match(v102,/runAtomicUnifiedImportV366/,'the real unified-import final handler must execute through the atomic owner');
@@ -70,4 +114,4 @@ assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require cano
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V365/V366] exact daily transition + atomic commit gate passed · candidate date stays noncanonical · explicit commit acknowledgement required · seven classifications and three queues succeed together · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
+console.log('[V365/V366] exact daily transition + atomic persistence gate passed · driver override proven · candidate date stays noncanonical · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
