@@ -1,11 +1,11 @@
-$ErrorActionPreference = 'Stop'
-$Host.UI.RawUI.WindowTitle = 'CE QC CANDIDATE ONLY VALIDATION'
-$V367_CANDIDATE_ONLY_ID = '2026-08-30-v367-isolated-candidate-only-no-live-mutation-v1'
-
 param(
   [string]$CandidateRef = '',
   [string]$ExpectedSha = ''
 )
+
+$ErrorActionPreference = 'Stop'
+$Host.UI.RawUI.WindowTitle = 'CE QC CANDIDATE ONLY VALIDATION'
+$V367_CANDIDATE_ONLY_ID = '2026-08-30-v367-isolated-candidate-only-no-live-mutation-v1'
 
 function Run-Git([string[]]$Arguments, [switch]$AllowFailure) {
   & git @Arguments
