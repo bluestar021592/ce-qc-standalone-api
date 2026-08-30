@@ -93,4 +93,13 @@ assert.match(whpp,/CONFIRM_BATCH_SIZE = 350/,'WHPP scan batch remains 350');
 assert.match(whpp,/trackConcurrency: 4/,'WHPP trajectory remains 50x4 via V346');
 
 console.log(`[V349] partial confirm completeness smoke passed · exact CCSL 362→23 recovery · already-returned 23 never re-requested · WHPP 144 successful omissions become no-scan trajectory evidence · failed compensation stays real retry · true parent failure still bubbles to V345/V346 · CEClient boundary owner active`);
+
+await import('./v314-shopee-throughput-smoke.mjs');
+await import('./v339-ccsl-throughput-smoke.mjs');
+await import('./v346-whpp-throughput-smoke.mjs');
+await import('./v367-candidate-only-safety-smoke.cjs');
+await import('./v368-atomic-store-boundary-smoke.mjs');
+await import('./v369-failed-staging-rollback-smoke.mjs');
+await import('./v370-post-import-scanpool-runtime-smoke.mjs');
+await import('./v371-scanpool-source-runtime-smoke.mjs');
 await import('./v350-whpp-retry-fastack-smoke.mjs');

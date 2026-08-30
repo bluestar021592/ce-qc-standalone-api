@@ -1,7 +1,7 @@
 (function installV146UnifiedImportDateStatus(global){
   if(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__)return;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__={};
-  const VERSION='2026-08-30-v365-seven-business-import-ui-v1';
+  const VERSION='2026-08-30-v366-atomic-seven-business-import-ui-v1';
   const ROUTE='/api/import/unified-daily-report';
   const originalFetch=global.fetch.bind(global);
   let candidateTarget='';
@@ -104,7 +104,7 @@
     restoreCommittedDate();
     showCandidateSource();
     setImportButtonBusy(true);
-    show('info',`正在导入 ${pendingTarget||'当前'} 日报…`,`正在执行日期校验、七业务分类、CCSL/SHOPEE/WHPP队列保存和最终VALID切换。完成前不会替换上一份日报。`);
+    show('info',`正在导入 ${pendingTarget||'当前'} 日报…`,`正在执行日期校验、七业务分类、CCSL/SHOPEE/WHPP队列保存和最终原子提交。完成前不会替换上一份日报。`);
   },true);
 
   global.fetch=async function v146UnifiedImportFetch(input,init){
@@ -120,10 +120,10 @@
         target=pendingTarget||candidateTarget||filenameDate(file?.name||'')||normalizeDate(body.get('reportDate')||'')||target;
         if(target)body.set('reportDate',target);
       }
-      show('info',`正在导入 ${target||'当前'} 日报…`,`新日期仍处于待确认状态；后台全部保存成功前，页面继续使用上一份正式日报。`);
+      show('info',`正在导入 ${target||'当前'} 日报…`,`新日期仍处于待确认状态；后台七业务和三个处理队列全部原子提交前，页面继续使用上一份正式日报。`);
       const response=await originalFetch(input,init);
       let payload=null;try{payload=await response.clone().json();}catch{}
-      committed=Boolean(response.ok&&payload?.ok!==false&&payload?.importCommitted!==false&&payload?.reportDate);
+      committed=Boolean(response.ok&&payload?.ok===true&&payload?.importCommitted===true&&payload?.reportDate);
       if(!committed){
         const message=String(payload?.error||`HTTP ${response.status}`);
         show('error',`${target||'本次'} 日报导入未完成`,`${message}。上一份成功日报继续生效；不会进入半分类、半扫描状态。`);
@@ -131,7 +131,7 @@
         showCandidateSource();
       }else{
         candidateTarget='';
-        show('success',`${payload.reportDate} 日报已完整提交`,`七业务分类和 CCSL → SHOPEE → WHPP 三阶段处理入口均已切换到新日期。`);
+        show('success',`${payload.reportDate} 日报已完整提交`,`七业务分类和 CCSL → SHOPEE → WHPP 三阶段处理入口均已原子切换到新日期。`);
         scheduleSevenBusinessClassification(payload);
       }
       return response;

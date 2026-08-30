@@ -1,9 +1,11 @@
 import fs from 'fs';
 import express from 'express';
 import XLSX from 'xlsx';
+import { closeDb } from './db.js';
 import { classifyUnifiedBusiness, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
+import { runAtomicUnifiedImportV366, V366_ATOMIC_UNIFIED_IMPORT_ID } from './v366AtomicUnifiedImport.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-16-v102-pre-persistence-import-safety-v2';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-30-v366-pre-persistence-atomic-import-safety-v4';
 const ROUTE = '/api/import/unified-daily-report';
 const WRAPPED = Symbol.for('ce-qc.v102-unified-import-safety');
 
@@ -120,6 +122,7 @@ export function assertUnifiedImportSafety({ filePath = '', parsed, manualReportD
   return {
     ok: true,
     gateId: V102_UNIFIED_IMPORT_SAFETY_GATE_ID,
+    atomicImportId: V366_ATOMIC_UNIFIED_IMPORT_ID,
     reportDate: parsed.reportDate,
     validUniqueWaybills: validUnique,
     classifiedWaybills: classified,
@@ -136,7 +139,7 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
     const finalHandler = handlers.pop();
     if (typeof finalHandler !== 'function') return previousPost.call(this, pathValue, ...handlers, finalHandler);
 
-    const guardedFinalHandler = function v102UnifiedImportSafety(req, res, next) {
+    const guardedFinalHandler = async function v102UnifiedImportSafety(req, res, next) {
       try {
         if (!req?.file?.path) return finalHandler.call(this, req, res, next);
         const parsed = parseUnifiedDailyExcel(req.file.path, {
@@ -148,19 +151,30 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
           parsed,
           manualReportDate: req.body?.reportDate || ''
         });
-        // V139 reuses this exact validated parse. This keeps the pre-persistence
-        // safety gate unchanged while eliminating a second full workbook parse in
-        // the final import handler.
+        // The final V42 owner parses/normalizes the same upload again, but every
+        // persistence write now runs inside V366's single outer transaction. Its
+        // success JSON is buffered until the outer COMMIT completes, so no client
+        // can observe a half-switched report date or half-created processing queue.
         req.ceQcParsedUnified = parsed;
-        return finalHandler.call(this, req, res, next);
+        return await runAtomicUnifiedImportV366(finalHandler, req, res, next);
       } catch (error) {
+        const rollbackFatal = error?.code === 'ATOMIC_IMPORT_ROLLBACK_FAILED';
+        if (rollbackFatal) {
+          // Closing a DatabaseSync connection with an active transaction causes
+          // SQLite to roll it back. closeDb also clears the module singleton so the
+          // next request opens a clean connection instead of inheriting a lock.
+          try { closeDb(); } catch (closeError) {
+            console.error('[CE-QC][V102_ATOMIC_DB_CLOSE_FAILED]', closeError?.message || closeError);
+          }
+        }
         console.error('[CE-QC][V102_IMPORT_SAFETY]', error?.code || '', error?.message || error);
-        return res.status(400).json({
+        return res.status(rollbackFatal ? 500 : 400).json({
           ok: false,
           code: error?.code || 'UNIFIED_IMPORT_SAFETY_BLOCKED',
           error: error?.message || String(error),
           shipmentCode: error?.shipmentCode || '',
-          gateId: V102_UNIFIED_IMPORT_SAFETY_GATE_ID
+          gateId: V102_UNIFIED_IMPORT_SAFETY_GATE_ID,
+          atomicImportId: V366_ATOMIC_UNIFIED_IMPORT_ID
         });
       }
     };
