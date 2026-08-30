@@ -75,4 +75,5 @@ await import('./v346-whpp-throughput-smoke.mjs');
 await import('./v367-candidate-only-safety-smoke.cjs');
 await import('./v368-atomic-store-boundary-smoke.mjs');
 await import('./v369-failed-staging-rollback-smoke.mjs');
+await import('./v370-post-import-scanpool-runtime-smoke.mjs');
 await import('./v350-whpp-retry-fastack-smoke.mjs');
