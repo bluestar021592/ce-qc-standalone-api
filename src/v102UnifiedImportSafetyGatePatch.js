@@ -1,10 +1,11 @@
 import fs from 'fs';
 import express from 'express';
 import XLSX from 'xlsx';
+import { closeDb } from './db.js';
 import { classifyUnifiedBusiness, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 import { runAtomicUnifiedImportV366, V366_ATOMIC_UNIFIED_IMPORT_ID } from './v366AtomicUnifiedImport.js';
 
-export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-30-v366-pre-persistence-atomic-import-safety-v3';
+export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-30-v366-pre-persistence-atomic-import-safety-v4';
 const ROUTE = '/api/import/unified-daily-report';
 const WRAPPED = Symbol.for('ce-qc.v102-unified-import-safety');
 
@@ -157,8 +158,17 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
         req.ceQcParsedUnified = parsed;
         return await runAtomicUnifiedImportV366(finalHandler, req, res, next);
       } catch (error) {
+        const rollbackFatal = error?.code === 'ATOMIC_IMPORT_ROLLBACK_FAILED';
+        if (rollbackFatal) {
+          // Closing a DatabaseSync connection with an active transaction causes
+          // SQLite to roll it back. closeDb also clears the module singleton so the
+          // next request opens a clean connection instead of inheriting a lock.
+          try { closeDb(); } catch (closeError) {
+            console.error('[CE-QC][V102_ATOMIC_DB_CLOSE_FAILED]', closeError?.message || closeError);
+          }
+        }
         console.error('[CE-QC][V102_IMPORT_SAFETY]', error?.code || '', error?.message || error);
-        return res.status(400).json({
+        return res.status(rollbackFatal ? 500 : 400).json({
           ok: false,
           code: error?.code || 'UNIFIED_IMPORT_SAFETY_BLOCKED',
           error: error?.message || String(error),
