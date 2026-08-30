@@ -93,4 +93,13 @@ assert.match(whpp,/CONFIRM_BATCH_SIZE = 350/,'WHPP scan batch remains 350');
 assert.match(whpp,/trackConcurrency: 4/,'WHPP trajectory remains 50x4 via V346');
 
 console.log(`[V349] partial confirm completeness smoke passed · exact CCSL 362→23 recovery · already-returned 23 never re-requested · WHPP 144 successful omissions become no-scan trajectory evidence · failed compensation stays real retry · true parent failure still bubbles to V345/V346 · CEClient boundary owner active`);
+
+// Go-live throughput hard gate. These mature runtime smokes actually execute the
+// bounded schedulers, so a future change cannot silently turn the UI's 350/50 text
+// into a different production batch size or fold WHPP back into CCSL/SHOPEE.
+await import('./v314-shopee-throughput-smoke.mjs');
+await import('./v339-ccsl-throughput-smoke.mjs');
+await import('./v346-whpp-throughput-smoke.mjs');
+
+// Preserve the existing WHPP retry -> source truth -> visible truth regression chain.
 await import('./v350-whpp-retry-fastack-smoke.mjs');
