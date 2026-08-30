@@ -25,6 +25,13 @@ function executePool(statements, state, cleanName) {
   return Array.from(context.result || []);
 }
 
+function executeWhppPool(statements, state) {
+  const context = { state: structuredClone(state), cleanCodes: clean, result: null };
+  vm.createContext(context);
+  vm.runInContext(`${statements}\nresult = allBills;`, context, { timeout: 1000 });
+  return Array.from(context.result || []);
+}
+
 function batchSizes(values, size) {
   const sizes = [];
   for (let offset = 0; offset < values.length; offset += size) sizes.push(values.slice(offset, offset + size).length);
@@ -55,8 +62,7 @@ const shopeeStatements = [
 const whppStatements = [
   must(whpp, /const today = cleanCodes\(state\.pnhBills \|\| \[\]\);/, 'WHPP today membership'),
   must(whpp, /const carry = cleanCodes\(state\.carryBills \|\| state\.nextCarryBills \|\| \[\]\);/, 'WHPP carry membership'),
-  must(whpp, /const allBills = cleanCodes\(\[\.\.\.today, \.\.\.carry\]\);/, 'WHPP rebuilt allBills'),
-  'const scanPool = allBills;'
+  must(whpp, /const allBills = cleanCodes\(\[\.\.\.today, \.\.\.carry\]\);/, 'WHPP rebuilt allBills')
 ].join('\n');
 assert.match(whpp, /state\.scanPool = allBills;/, 'WHPP must publish rebuilt allBills as scanPool');
 
@@ -78,10 +84,7 @@ const shopeePool = executePool(shopeeStatements, staleState, 'cleanAnyBills');
 assert.equal(shopeePool.length, 702, 'SHOPEE must ignore the empty saved scanPool and rebuild 700 today + 2 carry');
 assert.deepEqual(batchSizes(shopeePool, 350), [350, 350, 2], 'SHOPEE rebuilt pool must preserve 350-ticket boundaries');
 
-const whppContext = { state: structuredClone(staleState), cleanCodes: clean, scanPool: null };
-vm.createContext(whppContext);
-vm.runInContext(`${whppStatements}\nscanPool = allBills;`, whppContext, { timeout: 1000 });
-const whppPool = Array.from(whppContext.scanPool || []);
+const whppPool = executeWhppPool(whppStatements, staleState);
 assert.equal(whppPool.length, 702, 'WHPP must ignore the empty saved scanPool and rebuild 700 today + 2 carry');
 assert.deepEqual(batchSizes(whppPool, 350), [350, 350, 2], 'WHPP rebuilt pool must preserve 350-ticket boundaries');
 
