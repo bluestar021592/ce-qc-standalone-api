@@ -32,5 +32,5 @@ if (!globalThis[INSTALL_KEY]) {
     }
   });
   globalThis[INSTALL_KEY] = true;
-  console.info('[CE-QC][V340_MODULE_REDIRECT]', V314_MODULE_REDIRECT_ID, 'server pipeline uses stable CCSL rolling prefetch; CCSL storage uses lightweight in-run checkpoints; SHOPEE businessStore keeps its existing throttled mirror owner.');
+  console.info('[CE-QC][V340_MODULE_REDIRECT]', V314_MODULE_REDIRECT_ID, 'server pipeline uses stable all-business 350 scan / 50x4 tracking; CCSL and SHOPEE both use lightweight in-run checkpoints with authoritative full mirrors only at safe boundaries.');
 }
