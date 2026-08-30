@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
-for (const file of ['src/v42WhppPatch.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
+for (const file of ['src/v42WhppPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
 const v42=fs.readFileSync(new URL('../src/v42WhppPatch.js',import.meta.url),'utf8');
+const v102=fs.readFileSync(new URL('../src/v102UnifiedImportSafetyGatePatch.js',import.meta.url),'utf8');
+const v366=fs.readFileSync(new URL('../src/v366AtomicUnifiedImport.js',import.meta.url),'utf8');
 const v146=fs.readFileSync(new URL('../public/v146-unified-import-date-status.js',import.meta.url),'utf8');
 const v67=fs.readFileSync(new URL('../public/v67-resilient-run-guard.js',import.meta.url),'utf8');
 const v168=fs.readFileSync(new URL('../public/v168-seven-business-status.js',import.meta.url),'utf8');
@@ -34,6 +36,19 @@ const whppAt=handler.indexOf('saveWhppDailyImport({');
 const activateAt=handler.indexOf('activateUnifiedCoreImport(staged)');
 assert.ok(stagedAt>=0&&ccslAt>stagedAt&&shopeeAt>ccslAt&&whppAt>shopeeAt&&activateAt>whppAt,'08-15→08-16 transition must remain STAGING until CCSL, SHOPEE and WHPP queues are all ready');
 
+assert.match(v102,/2026-08-30-v366-pre-persistence-atomic-import-safety-v3/,'pre-persistence owner must install the V366 atomic gate');
+assert.match(v102,/runAtomicUnifiedImportV366/,'the real unified-import final handler must execute through the atomic owner');
+assert.match(v102,/return await runAtomicUnifiedImportV366\(finalHandler, req, res, next\)/,'V102 must await the atomic owner before returning any import result');
+assert.match(v366,/2026-08-30-v366-atomic-seven-business-import-v1/,'atomic transaction owner version must be active');
+assert.match(v366,/originalExec\('BEGIN IMMEDIATE'\)/,'atomic owner must hold one outer write transaction');
+assert.match(v366,/res\.json = function v366BufferedJson/,'success or failure JSON must be buffered until commit or rollback');
+assert.match(v366,/const explicitCommit = payload\?\.importCommitted === true/,'outer transaction must require explicit backend commit acknowledgement');
+assert.match(v366,/originalExec\('COMMIT'\)/,'all seven-business writes must commit only at the outer owner');
+assert.match(v366,/originalExec\('ROLLBACK'\)/,'any incomplete import must have an outer rollback path');
+assert.match(v366,/innerRollbackSeen/,'an inner rollback request must poison the outer success path');
+assert.match(v366,/nestedDepth !== 0/,'unbalanced nested transactions must block commit');
+assert.match(v366,/UNIFIED_IMPORT_ALREADY_ACTIVE/,'concurrent daily imports must be rejected instead of interleaving writes');
+
 assert.match(v146,/2026-08-30-v365-seven-business-import-ui-v1/,'browser import owner must isolate pending filename dates');
 assert.match(v146,/let candidateTarget=''/,'filename-recognized date must live outside the committed report-date input');
 assert.match(v146,/#detectFilenameDateButton/,'filename detection itself must be intercepted');
@@ -52,4 +67,4 @@ assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require cano
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V365] exact daily transition gate passed · candidate date is noncanonical until commit · seven classifications visible · CCSL/Shopee historical carry preserved · scan/track queues initialize before VALID switch · WHPP remains final canonical stage');
+console.log('[V365/V366] exact daily transition + atomic commit gate passed · candidate date stays noncanonical · seven classifications and three queues must succeed together · any inner failure rolls back · WHPP remains final canonical stage');
