@@ -1,16 +1,23 @@
 (function installV206InteractiveFirstHotfix(global){
   if(global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__)return;
   const VERSION='2026-08-30-v375-canonical-v67-run-controls-v1';
+  const STATUS_STABILITY_REVISION='2026-08-30-v377-unified-status-display-lock-v1';
   const FORCE_KEY='ce_qc_force_ce_relogin_v207';
   const INSTANT_PAGES=new Map([['home','/'],['ceaf','/ceaf']]);
+  const STAGE_LABELS={CCSL:'CCSL',SHOPEE:'SHOPEE CN/VN',WHPP:'WHPP本土'};
+  const STAGE_ORDER=['CCSL','SHOPEE','WHPP'];
   let applying=false;
+  let statusApplying=false;
 
   function esc(value){return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+  function normalizeDate(value){const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';}
   function selectedDate(){
     try{
-      const dom=String(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'').slice(0,10);
-      if(/^\d{4}-\d{2}-\d{2}$/.test(dom))return dom;
-      return String(historyModeDate||unifiedImportState?.reportDate||appState?.reportDate||shopeeState?.reportDate||'').slice(0,10);
+      const importDate=normalizeDate(document.getElementById('reportDate')?.value||'');
+      if(importDate)return importDate;
+      const dom=normalizeDate(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
+      if(dom)return dom;
+      return normalizeDate(historyModeDate||unifiedImportState?.reportDate||appState?.reportDate||shopeeState?.reportDate||'');
     }catch{return '';}
   }
   function loginMarkup(){
@@ -123,6 +130,88 @@
     return false;
   }
 
+  function unifiedDisplayState(){
+    const date=selectedDate();
+    if(!date)return null;
+    const stage=global.__CE_QC_UNIFIED_RUN_STAGE__||{};
+    const stageDate=normalizeDate(stage.reportDate||'');
+    const stageKey=String(stage.type||'').toUpperCase();
+    if(stage.owner==='V67'&&stage.active===true&&(!stageDate||stageDate===date)&&STAGE_ORDER.includes(stageKey)){
+      return {mode:'running',date,key:stageKey,label:STAGE_LABELS[stageKey]||stageKey};
+    }
+    const marker=global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__||{};
+    const markerDate=normalizeDate(marker.reportDate||'');
+    if(marker.owner==='V67'&&markerDate===date&&stage.owner==='V67'&&stage.active===false&&String(stage.type||'').toUpperCase()==='DONE'&&(!stageDate||stageDate===date)){
+      return {mode:'done',date,source:'V67'};
+    }
+    const truth=global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth;
+    if(normalizeDate(truth?.reportDate||'')===date&&truth?.complete===true&&Array.isArray(truth?.stages)&&truth.stages.every(item=>item?.state==='done')){
+      return {mode:'done',date,source:'V168'};
+    }
+    return null;
+  }
+
+  function stageSummaryMarkup(activeKey=''){
+    const activeIndex=STAGE_ORDER.indexOf(activeKey);
+    const pills=STAGE_ORDER.map((key,index)=>{
+      const label=STAGE_LABELS[key];
+      if(activeIndex<0)return `<span class="status-pill muted">${label} 待处理</span>`;
+      if(index<activeIndex)return `<span class="status-pill success">${label} 已完成</span>`;
+      if(index===activeIndex)return `<span class="status-pill warning">${label} 处理中</span>`;
+      return `<span class="status-pill muted">${label} 待处理</span>`;
+    }).join('');
+    return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><strong style="color:#0b3158">七业务处理状态</strong>${pills}<span class="status-pill muted">尚未全部完成</span></div>`;
+  }
+
+  function completedSummaryMarkup(){
+    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><strong style="color:#0b3158">七业务处理状态</strong>'+
+      '<span class="status-pill success">CCSL 已完成</span><span class="status-pill success">SHOPEE CN/VN 已完成</span><span class="status-pill success">WHPP本土 已完成</span><span class="status-pill success">七业务已完成</span></div>';
+  }
+
+  function clearStatusLock(){
+    const button=document.querySelector('[data-testid="global-auto-process"]');
+    const resume=document.querySelector('button[onclick="resumeUnified()"]');
+    if(button?.dataset.v377StatusLock==='1'){
+      delete button.dataset.v377StatusLock;
+      if(button.dataset.v168Locked!=='1'){button.disabled=false;button.textContent='开始全自动处理';}
+    }
+    if(resume?.dataset.v377StatusLock==='1'){
+      delete resume.dataset.v377StatusLock;
+      if(resume.dataset.v168Locked!=='1')resume.disabled=false;
+    }
+  }
+
+  function stabilizeUnifiedStatus(){
+    if(statusApplying)return;
+    const page=document.getElementById('importPage');
+    if(!page||page.hidden)return;
+    statusApplying=true;
+    try{
+      const state=unifiedDisplayState();
+      if(!state){clearStatusLock();return;}
+      const summary=document.getElementById('sevenBusinessStageSummary');
+      const status=document.getElementById('ccslRunStatus');
+      const button=document.querySelector('[data-testid="global-auto-process"]');
+      const resume=document.querySelector('button[onclick="resumeUnified()"]');
+      if(state.mode==='running'){
+        if(summary){summary.dataset.v377StatusLock='1';summary.innerHTML=stageSummaryMarkup(state.key);}
+        if(button){button.dataset.v377StatusLock='1';button.disabled=true;button.textContent=`${state.label}处理中…`;}
+        if(resume){resume.dataset.v377StatusLock='1';resume.disabled=true;}
+        if(status&&state.key!=='CCSL'){
+          status.dataset.v377StatusLock='1';
+          status.innerHTML=`<span class="status-pill warning">${state.label} 处理中</span><p>当前阶段：${state.label}</p><p>正在按CCSL → SHOPEE → WHPP唯一流程执行，完成后自动进入下一阶段。</p>`;
+        }
+        return;
+      }
+      if(state.mode==='done'){
+        if(summary){summary.dataset.v377StatusLock='1';summary.innerHTML=completedSummaryMarkup();}
+        if(button){button.dataset.v377StatusLock='1';button.disabled=true;button.textContent='七业务已完成';button.title=`${state.date} CCSL、SHOPEE CN/VN、WHPP均已完成`;}
+        if(resume){resume.dataset.v377StatusLock='1';resume.disabled=true;resume.title='七业务均已完成，无需继续处理';}
+        if(status){status.dataset.v377StatusLock='1';status.innerHTML='<span class="status-pill success">七业务已完成</span><p>当前阶段：已完成</p><p>CCSL → SHOPEE → WHPP 均已验证正式结果，无需重复处理。</p>';}
+      }
+    }finally{statusApplying=false;}
+  }
+
   document.addEventListener('click',event=>{
     const autoButton=event.target?.closest?.('[data-testid="global-auto-process"]');
     const resumeButton=event.target?.closest?.('button[onclick="resumeUnified()"]');
@@ -152,6 +241,7 @@
   const observer=new MutationObserver(()=>{
     let forced=false;try{forced=sessionStorage.getItem(FORCE_KEY)==='1';}catch{}
     if(forced)queueMicrotask(forceLoginForms);
+    queueMicrotask(stabilizeUnifiedStatus);
   });
   observer.observe(document.documentElement,{subtree:true,childList:true});
   let forced=false;try{forced=sessionStorage.getItem(FORCE_KEY)==='1';}catch{}
@@ -165,8 +255,11 @@
     if(path==='/'||path==='/home')refreshHomeFast();
   },delay));
 
+  [120,500,1200].forEach(delay=>setTimeout(stabilizeUnifiedStatus,delay));
+  setInterval(stabilizeUnifiedStatus,250);
+
   global.showLoginForms=beginRelogin;
   global.loginCe=submitLogin;
-  global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__={version:VERSION,beginRelogin,forceLoginForms,submitLogin,instantNavigate,refreshHomeFast,runCanonicalUnified};
-  console.info('[CE-QC][V375_CANONICAL_RUN_CONTROL]',VERSION,'full-auto and resume buttons are capture-bound to V67; legacy app.js duplicate runner cannot execute.');
+  global.__CE_QC_V206_INTERACTIVE_FIRST_HOTFIX__={version:VERSION,statusStabilityRevision:STATUS_STABILITY_REVISION,beginRelogin,forceLoginForms,submitLogin,instantNavigate,refreshHomeFast,runCanonicalUnified,stabilizeUnifiedStatus};
+  console.info('[CE-QC][V375_CANONICAL_RUN_CONTROL]',VERSION,STATUS_STABILITY_REVISION,'full-auto and resume buttons are capture-bound to V67; unified status display is locked to the active V67 stage and final verified completion so legacy polling cannot flicker backward.');
 })(window);
