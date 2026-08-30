@@ -88,3 +88,7 @@ const noop = async () => {};
 }
 
 console.log('[V370] post-import scanPool runtime smoke passed · CCSL/SHOPEE/WHPP all rebuild an empty saved scanPool from committed daily membership and actually invoke confirm-query · POD terminal fixture correctly skips trajectory');
+
+// Full-dependency continuation: once V370 proves the real three pipeline entries,
+// immediately run the exact historical 08-15 -> 08-16 production Excel parser gate.
+await import('./v372-historical-0815-0816-classification-runtime-smoke.mjs');
