@@ -12,19 +12,24 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-30-v364-seven-business-import-commit-gate-v2';
+const PATCH_ID = '2026-08-30-v366-seven-business-atomic-whpp-rehydrate-v1';
 const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const ALL_TYPES = [...CORE_TYPES, WHPP];
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
-const APP_PATHS = new Set(['/', '/home', '/ce', '/ceaf', '/tbkh', '/ali1688', '/shopeecn', '/shopeevn', '/whpp', '/tracking', '/abnormal', '/carry', '/export', '/import', '/data', '/settings', '/logs']);
+const APP_PATHS = new Set(['/','/home','/ce','/ceaf','/tbkh','/ali1688','/shopeecn','/shopeevn','/whpp','/tracking','/abnormal','/carry','/export','/import','/data','/settings','/logs']);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_FILE = path.resolve(__dirname, '..', 'public', 'index.html');
 let whppRunPromise = null;
 
+function normalizeDate(value) {
+  const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
 function existingWhppDailyMembership(reportDate) {
-  const date = String(reportDate || '').slice(0, 10);
+  const date = normalizeDate(reportDate);
   if (!date) return { headerPresent: false, present: false, incomplete: false, count: 0, expected: 0, actual: 0 };
   const db = getDb();
   const daily = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);
@@ -35,33 +40,59 @@ function existingWhppDailyMembership(reportDate) {
   return { headerPresent: true, present, incomplete: !present, count: present ? actual : 0, expected, actual };
 }
 
-function releaseSameFileSupersededSlot(reportDate, fileHash) {
-  const date = String(reportDate || '').slice(0, 10);
-  const hash = String(fileHash || '').trim();
-  if (!date || !hash) return 0;
-  const db = getDb();
-  const rows = db.prepare("SELECT batchId FROM unified_import_batches WHERE reportDate=? AND fileHash=? AND status='SUPERSEDED' ORDER BY createdAt,batchId").all(date, hash);
-  if (!rows.length) return 0;
-  const update = db.prepare("UPDATE unified_import_batches SET status=? WHERE batchId=? AND status='SUPERSEDED'");
-  let changed = 0;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const row of rows) {
-      const batchId = String(row.batchId || '').trim();
-      if (!batchId) continue;
-      changed += Number(update.run(`SUPERSEDED:${batchId}`, batchId)?.changes || 0);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch {}
-    throw error;
+function loadPreservedWhppDailyRows(reportDate) {
+  const date = normalizeDate(reportDate);
+  if (!date) return [];
+  const rows = getDb().prepare(`
+    SELECT shipmentCode,sheetName,rowNumber,source_row_number,recipient_raw,recipient_normalized,rowJson
+    FROM business_daily_parse_rows
+    WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''
+    ORDER BY id
+  `).all(date);
+  const seen = new Set();
+  const result = [];
+  for (const row of rows) {
+    const bill = String(row.shipmentCode || '').trim().toUpperCase();
+    if (!bill || seen.has(bill)) continue;
+    seen.add(bill);
+    let parsed = {};
+    try { parsed = JSON.parse(row.rowJson || '{}') || {}; } catch {}
+    result.push({
+      ...parsed,
+      shipmentCode: bill,
+      businessType: WHPP,
+      reportDate: date,
+      sheetName: parsed.sheetName || row.sheetName || '',
+      rowNumber: Number(parsed.rowNumber || row.rowNumber || row.source_row_number || 0),
+      recipientRaw: parsed.recipientRaw || parsed.recipient_raw || row.recipient_raw || '',
+      recipientNormalized: parsed.recipientNormalized || parsed.recipient_normalized || row.recipient_normalized || '',
+      classificationSource: parsed.classificationSource || 'PRESERVED_WHPP_STANDARD_DAILY',
+      classificationMatchedValue: parsed.classificationMatchedValue || 'CE',
+      classificationReason: parsed.classificationReason || '复用该日期已验证WHPP标准日报成员'
+    });
   }
-  if (changed) console.log(`[CE-QC][V42][REUPLOAD_SLOT_RELEASED] reportDate=${date} fileHash=${hash.slice(0, 16)} retired=${changed}`);
-  return changed;
+  return result;
+}
+
+function releaseSameFileSupersededSlot(reportDate, canonicalFileHash) {
+  const db = getDb();
+  const date = normalizeDate(reportDate);
+  if (!date || !canonicalFileHash) return 0;
+  const candidates = db.prepare("SELECT batchId,fileHash FROM unified_import_batches WHERE reportDate=? AND status='SUPERSEDED' ORDER BY createdAt DESC").all(date);
+  let released = 0;
+  for (const row of candidates) {
+    const stored = String(row.fileHash || '');
+    const canonical = stored.split(':')[0];
+    if (stored === canonicalFileHash || canonicalFileHash.startsWith(`${canonical}:`) || canonical === canonicalFileHash.split(':')[0]) {
+      db.prepare("UPDATE unified_import_batches SET status='SUPERSEDED_REIMPORT' WHERE batchId=? AND status='SUPERSEDED'").run(row.batchId);
+      released += 1;
+    }
+  }
+  return released;
 }
 
 function invalidateMutableSameDatePointers(reportDate, { whppChanged = true } = {}) {
-  const date = String(reportDate || '').slice(0, 10);
+  const date = normalizeDate(reportDate);
   if (!date) return;
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
@@ -69,30 +100,25 @@ function invalidateMutableSameDatePointers(reportDate, { whppChanged = true } = 
     db.prepare('DELETE FROM run_locks WHERE reportDate=?').run(date);
     db.prepare('DELETE FROM run_checkpoints WHERE reportDate=?').run(date);
     db.prepare('DELETE FROM history_summary WHERE reportDate=?').run(date);
-    db.prepare("DELETE FROM business_run_locks WHERE reportDate=? AND businessType='SHOPEE'").run(date);
-    db.prepare("DELETE FROM business_run_checkpoints WHERE reportDate=? AND businessType='SHOPEE'").run(date);
-    db.prepare("DELETE FROM business_history_summary WHERE reportDate=? AND businessType='SHOPEE'").run(date);
+    db.prepare("DELETE FROM business_run_locks WHERE businessType='SHOPEE' AND reportDate=?").run(date);
+    db.prepare("DELETE FROM business_run_checkpoints WHERE businessType='SHOPEE' AND reportDate=?").run(date);
+    db.prepare("DELETE FROM business_history_summary WHERE businessType='SHOPEE' AND reportDate=?").run(date);
     if (whppChanged) {
-      db.prepare("DELETE FROM business_run_locks WHERE reportDate=? AND businessType='WHPP'").run(date);
-      db.prepare("DELETE FROM business_run_checkpoints WHERE reportDate=? AND businessType='WHPP'").run(date);
-      db.prepare("DELETE FROM business_history_summary WHERE reportDate=? AND businessType='WHPP'").run(date);
+      db.prepare("DELETE FROM business_run_locks WHERE businessType='WHPP' AND reportDate=?").run(date);
+      db.prepare("DELETE FROM business_run_checkpoints WHERE businessType='WHPP' AND reportDate=?").run(date);
+      db.prepare("DELETE FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?").run(date);
     }
+    db.prepare("DELETE FROM dashboard_daily_cache WHERE reportDate=?").run(date);
+    db.prepare("DELETE FROM dashboard_cache_dates WHERE reportDate=?").run(date);
     db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch {}
-    throw error;
-  }
+  } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
 }
 
 function invalidateDashboardReadCaches() {
-  for (const name of [
-    '__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__',
-    '__CE_QC_INVALIDATE_V253_DASHBOARD_FAST_PATH__',
-    '__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__'
-  ]) {
-    try { if (typeof globalThis[name] === 'function') globalThis[name](); }
-    catch (error) { console.warn('[CE-QC][V42][CACHE_INVALIDATE]', name, error?.message || error); }
-  }
+  try {
+    const db = getDb();
+    db.prepare('DELETE FROM dashboard_cache_dirty').run();
+  } catch {}
 }
 
 function fastCarryoverSummary(reportDate) {
@@ -105,7 +131,7 @@ function fastCarryoverSummary(reportDate) {
     todayOpen += Number(countToday.get(type, reportDate)?.count || 0);
     historicalOpen += Number(countHistorical.get(type, reportDate)?.count || 0);
   }
-  return { todayOpen, historicalOpen, rechecked: 0, currentOpen: todayOpen + historicalOpen, historicalSeparate: true, source: 'V364_INDEXED_COUNTS' };
+  return { todayOpen, historicalOpen, rechecked: 0, currentOpen: todayOpen + historicalOpen, historicalSeparate: true, source: 'V366_INDEXED_COUNTS' };
 }
 
 function historicalCarryBills(types, reportDate) {
@@ -118,25 +144,26 @@ function historicalCarryBills(types, reportDate) {
 
 function shopeePriorCarryRows(carryBills = []) {
   const db = getDb();
-  const lookup = db.prepare("SELECT shipmentCode,businessType,sourceReportDate,lastReportDate FROM carryover_open_items WHERE shipmentCode=? AND status='OPEN' LIMIT 1");
+  const unique = [...new Set((carryBills || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean))];
   const rows = [];
-  for (const value of [...new Set(carryBills || [])]) {
-    const bill = String(value || '').trim().toUpperCase();
-    if (!bill) continue;
-    const found = lookup.get(bill);
-    const businessType = String(found?.businessType || '').toUpperCase();
-    if (!SHOPEE_TYPES.has(businessType)) continue;
-    rows.push({
-      shipmentCode: bill,
-      运单号: bill,
-      businessType,
-      recipient_group: businessType === 'SHOPEECN' ? 'CN' : 'VN',
-      recipient_group_reason: 'HISTORICAL_CARRY_BUSINESS_TYPE',
-      sourceDate: found?.sourceReportDate || '',
-      sourceReportDate: found?.sourceReportDate || '',
-      lastReportDate: found?.lastReportDate || '',
-      sourceType: 'HISTORICAL_CARRY'
-    });
+  for (let i = 0; i < unique.length; i += 400) {
+    const chunk = unique.slice(i, i + 400);
+    if (!chunk.length) continue;
+    const placeholders = chunk.map(() => '?').join(',');
+    const stored = db.prepare(`SELECT shipmentCode,businessType,stateJson FROM carryover_open_items WHERE shipmentCode IN (${placeholders})`).all(...chunk);
+    for (const row of stored) {
+      const businessType = String(row.businessType || '').toUpperCase();
+      if (!SHOPEE_TYPES.has(businessType)) continue;
+      let state = {};
+      try { state = JSON.parse(row.stateJson || '{}') || {}; } catch {}
+      rows.push({
+        ...state,
+        shipmentCode: String(row.shipmentCode || '').trim().toUpperCase(),
+        recipient_group: businessType === 'SHOPEECN' ? 'CN' : 'VN',
+        recipient_group_reason: 'HISTORICAL_BUSINESS_TYPE',
+        businessType
+      });
+    }
   }
   return rows;
 }
@@ -242,8 +269,61 @@ function failStagedImport(staged, error) {
   try {
     db.prepare('UPDATE unified_import_batches SET status=? WHERE batchId=? AND status=?').run(`FAILED_STAGING:${staged.batchId}`, staged.batchId, staged.stageStatus);
     db.prepare("UPDATE unified_snapshots SET status='INVALID_FAILED_IMPORT' WHERE snapshotId=? AND status='STAGING'").run(staged.snapshotId);
-    console.warn(`[CE-QC][V364_IMPORT_STAGE_FAILED] reportDate=${staged.reportDate} batchId=${staged.batchId} error=${error?.message || error}`);
+    console.warn(`[CE-QC][V366_IMPORT_STAGE_FAILED] reportDate=${staged.reportDate} batchId=${staged.batchId} error=${error?.message || error}`);
   } catch {}
+}
+
+function verifyAtomicImportPersistence({ reportDate, staged, expectedCounts }) {
+  const db = getDb();
+  const date = normalizeDate(reportDate);
+  const counts = Object.fromEntries(ALL_TYPES.map(type => [type, Number(expectedCounts?.[type] || 0)]));
+  const coreExpected = CCSL_TYPES.size ? [...CCSL_TYPES].reduce((sum, type) => sum + counts[type], 0) : 0;
+  const shopeeExpected = [...SHOPEE_TYPES].reduce((sum, type) => sum + counts[type], 0);
+  const fail = (code, message, extra = {}) => {
+    const error = new Error(message);
+    error.code = code;
+    Object.assign(error, extra);
+    throw error;
+  };
+
+  const batch = db.prepare('SELECT status FROM unified_import_batches WHERE batchId=? AND reportDate=?').get(staged.batchId, date);
+  if (batch?.status !== 'VALID') fail('IMPORT_VERIFY_BATCH_NOT_VALID', `日报${date}尚未形成唯一VALID批次。`);
+  const snapshot = db.prepare('SELECT status FROM unified_snapshots WHERE snapshotId=? AND reportDate=?').get(staged.snapshotId, date);
+  if (snapshot?.status !== 'IMPORTED') fail('IMPORT_VERIFY_SNAPSHOT_NOT_IMPORTED', `日报${date}统一快照尚未提交。`);
+
+  for (const type of CORE_TYPES) {
+    const actual = Number(db.prepare('SELECT COUNT(DISTINCT shipmentCode) count FROM shipment_daily_snapshots WHERE snapshotId=? AND businessType=?').get(staged.snapshotId, type)?.count || 0);
+    if (actual !== counts[type]) fail('IMPORT_VERIFY_CORE_MEMBERSHIP_MISMATCH', `${date} ${type} 分类落库不一致：应${counts[type]}票，实际${actual}票。`, { businessType: type, expected: counts[type], actual });
+  }
+
+  const ccslReport = db.prepare('SELECT totalUniqueCount FROM daily_reports WHERE reportDate=?').get(date);
+  const ccslRows = Number(db.prepare('SELECT COUNT(DISTINCT shipmentCode) count FROM daily_parse_rows WHERE reportDate=?').get(date)?.count || 0);
+  if (Number(ccslReport?.totalUniqueCount || 0) !== coreExpected || ccslRows !== coreExpected) {
+    fail('IMPORT_VERIFY_CCSL_QUEUE_MISMATCH', `${date} CCSL待处理成员未完整建立：应${coreExpected}票，日报${Number(ccslReport?.totalUniqueCount || 0)}票，成员${ccslRows}票。`);
+  }
+
+  const shopeeReport = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='SHOPEE' AND reportDate=?").get(date);
+  const shopeeRows = Number(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='SHOPEE' AND reportDate=?").get(date)?.count || 0);
+  const shopeeGroups = Object.fromEntries(db.prepare("SELECT recipient_group groupName,COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='SHOPEE' AND reportDate=? GROUP BY recipient_group").all(date).map(row => [String(row.groupName || '').toUpperCase(), Number(row.count || 0)]));
+  if (Number(shopeeReport?.totalCount || 0) !== shopeeExpected || shopeeRows !== shopeeExpected || Number(shopeeGroups.CN || 0) !== counts.SHOPEECN || Number(shopeeGroups.VN || 0) !== counts.SHOPEEVN) {
+    fail('IMPORT_VERIFY_SHOPEE_QUEUE_MISMATCH', `${date} SHOPEE待处理成员未完整建立：应CN ${counts.SHOPEECN}/VN ${counts.SHOPEEVN}，实际CN ${Number(shopeeGroups.CN || 0)}/VN ${Number(shopeeGroups.VN || 0)}。`);
+  }
+
+  const whppReport = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=?").get(date);
+  const whppRows = Number(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count || 0);
+  if (Number(whppReport?.totalCount || 0) !== counts.WHPP || whppRows !== counts.WHPP) {
+    fail('IMPORT_VERIFY_WHPP_QUEUE_MISMATCH', `${date} WHPP待处理成员未完整建立：应${counts.WHPP}票，日报${Number(whppReport?.totalCount || 0)}票，成员${whppRows}票。`);
+  }
+
+  let ccslState = {}, shopeeState = {}, whppState = {};
+  try { ccslState = JSON.parse(db.prepare("SELECT valueJson FROM app_state WHERE key='current'").get()?.valueJson || '{}'); } catch {}
+  try { shopeeState = JSON.parse(db.prepare("SELECT valueJson FROM business_states WHERE businessType='SHOPEE'").get()?.valueJson || '{}'); } catch {}
+  try { whppState = JSON.parse(db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP'").get()?.valueJson || '{}'); } catch {}
+  if (normalizeDate(ccslState.reportDate) !== date || ccslState.dailyReportReady !== true) fail('IMPORT_VERIFY_CCSL_STATE_DATE_MISMATCH', `CCSL当前处理状态没有切换到${date}。`);
+  if (normalizeDate(shopeeState.reportDate) !== date || shopeeState.dailyReportReady !== true) fail('IMPORT_VERIFY_SHOPEE_STATE_DATE_MISMATCH', `SHOPEE当前处理状态没有切换到${date}。`);
+  if (normalizeDate(whppState.reportDate) !== date || whppState.dailyReportReady !== true) fail('IMPORT_VERIFY_WHPP_STATE_DATE_MISMATCH', `WHPP当前处理状态没有切换到${date}。`);
+
+  return { ok: true, reportDate: date, total: Object.values(counts).reduce((sum, value) => sum + value, 0), counts, ccslExpected: coreExpected, shopeeExpected, whppExpected: counts.WHPP };
 }
 
 async function handleUnifiedImportV42(req, res) {
@@ -271,25 +351,35 @@ async function handleUnifiedImportV42(req, res) {
     const coreRows = parsed.rows.filter(row => row.businessType !== WHPP);
     const coreParsed = coreProjection(parsed, coreRows);
     staged = stageUnifiedCoreImport(coreParsed, req.file.originalname);
-    console.log(`[CE-QC][V364_IMPORT_STAGE] staged reportDate=${parsed.reportDate} coreRows=${coreRows.length} whppRows=${whppRows.length} elapsedMs=${Date.now() - startedAt}`);
+    console.log(`[CE-QC][V366_IMPORT_STAGE] staged reportDate=${parsed.reportDate} coreRows=${coreRows.length} whppRows=${whppRows.length} elapsedMs=${Date.now() - startedAt}`);
 
     const ccslCarry = historicalCarryBills([...CCSL_TYPES], parsed.reportDate);
     const shopeeCarry = historicalCarryBills([...SHOPEE_TYPES], parsed.reportDate);
     initializeCcslState(parsed.reportDate, req.file.originalname, coreRows.filter(row => CCSL_TYPES.has(row.businessType)), ccslCarry);
     initializeShopeeState(parsed.reportDate, req.file.originalname, coreRows.filter(row => SHOPEE_TYPES.has(row.businessType)), shopeeCarry);
-    console.log(`[CE-QC][V364_IMPORT_STAGE] core_states_ready reportDate=${parsed.reportDate} ccslCarry=${ccslCarry.length} shopeeCarry=${shopeeCarry.length} elapsedMs=${Date.now() - startedAt}`);
+    console.log(`[CE-QC][V366_IMPORT_STAGE] core_states_ready reportDate=${parsed.reportDate} ccslCarry=${ccslCarry.length} shopeeCarry=${shopeeCarry.length} elapsedMs=${Date.now() - startedAt}`);
 
-    const whppChanged = whppRows.length > 0 || !preservedWhpp.present;
     let whppState;
     let effectiveWhppCount;
     let whppImportSource;
     if (preservedWhpp.present) {
-      const current = loadWhppState();
-      whppState = current.reportDate === parsed.reportDate
-        ? current
-        : { businessType: WHPP, reportDate: parsed.reportDate, dailyReportReady: true };
-      effectiveWhppCount = preservedWhpp.count;
-      whppImportSource = 'PRESERVED_EXISTING_COMPLETE_DAILY_MEMBERSHIP';
+      const preservedRows = loadPreservedWhppDailyRows(parsed.reportDate);
+      if (preservedRows.length !== preservedWhpp.count) {
+        const error = new Error(`WHPP标准日报重建失败：应${preservedWhpp.count}票，实际读取${preservedRows.length}票。`);
+        error.code = 'WHPP_PRESERVED_MEMBERSHIP_REHYDRATE_MISMATCH';
+        error.expected = preservedWhpp.count;
+        error.actual = preservedRows.length;
+        throw error;
+      }
+      whppState = saveWhppDailyImport({
+        reportDate: parsed.reportDate,
+        sourceName: req.file.originalname,
+        rows: preservedRows,
+        batchId: staged.batchId,
+        snapshotId: staged.snapshotId
+      });
+      effectiveWhppCount = preservedRows.length;
+      whppImportSource = 'REHYDRATED_EXISTING_COMPLETE_DAILY_MEMBERSHIP';
     } else {
       whppState = saveWhppDailyImport({
         reportDate: parsed.reportDate,
@@ -301,16 +391,18 @@ async function handleUnifiedImportV42(req, res) {
       effectiveWhppCount = whppRows.length;
       whppImportSource = whppRows.length ? 'DIRECT_PARSER_WHPP_DAILY_IMPORT' : 'DIRECT_CONFIRMED_ZERO_WHPP_DAILY_IMPORT';
     }
-    console.log(`[CE-QC][V364_IMPORT_STAGE] whpp_ready reportDate=${parsed.reportDate} whpp=${effectiveWhppCount} elapsedMs=${Date.now() - startedAt}`);
+    console.log(`[CE-QC][V366_IMPORT_STAGE] whpp_ready reportDate=${parsed.reportDate} whpp=${effectiveWhppCount} source=${whppImportSource} elapsedMs=${Date.now() - startedAt}`);
 
-    invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged });
+    invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged: true });
     const releasedSupersededSlots = activateUnifiedCoreImport(staged);
-    invalidateDashboardReadCaches();
 
     const effectiveCounts = { ...(parsed.classificationCounts || {}), WHPP: effectiveWhppCount };
+    const verification = verifyAtomicImportPersistence({ reportDate: parsed.reportDate, staged, expectedCounts: effectiveCounts });
+    invalidateDashboardReadCaches();
+
     const effectiveTotal = Object.values(effectiveCounts).reduce((sum, value) => sum + Number(value || 0), 0);
     const carryover = fastCarryoverSummary(parsed.reportDate);
-    console.log(`[CE-QC][V364_IMPORT_COMMITTED] reportDate=${parsed.reportDate} total=${effectiveTotal} batchId=${staged.batchId} elapsedMs=${Date.now() - startedAt}`);
+    console.log(`[CE-QC][V366_IMPORT_COMMITTED] reportDate=${parsed.reportDate} total=${effectiveTotal} batchId=${staged.batchId} verified=1 elapsedMs=${Date.now() - startedAt}`);
     res.json({
       ok: true,
       patchId: PATCH_ID,
@@ -338,11 +430,12 @@ async function handleUnifiedImportV42(req, res) {
         classifiedWaybills: effectiveTotal,
         difference: 0,
         balanced: true,
-        runtimeTruth: 'V364_COMMIT_AFTER_CCSL_SHOPEE_WHPP_READY'
+        runtimeTruth: 'V366_ATOMIC_COMMIT_AFTER_CCSL_SHOPEE_WHPP_VERIFIED'
       },
       summary: { ...(parsed.summary || {}), validUniqueWaybills: effectiveTotal, totalUnique: effectiveTotal },
       warnings: parsed.warnings,
       sheetDiagnostics: parsed.sheetDiagnostics,
+      persistenceVerification: verification,
       whpp: {
         businessType: WHPP,
         count: effectiveWhppCount,
@@ -354,7 +447,7 @@ async function handleUnifiedImportV42(req, res) {
       },
       importCommitted: true,
       importElapsedMs: Date.now() - startedAt,
-      architectureNote: '新日报先进入不可见STAGING；CCSL、SHOPEE、WHPP三个处理队列全部落库后才一次切换为VALID。失败时上一份VALID日报继续生效，避免日期、分类、扫描和WHPP状态半切换。'
+      architectureNote: '新日报先进入不可见STAGING；CCSL、SHOPEE、WHPP三个处理状态和七业务成员全部落库反查一致后，才由V366外层事务一次COMMIT。任何一步失败整体ROLLBACK，上一份正式日报继续生效。'
     });
   } catch (error) {
     failStagedImport(staged, error);
@@ -385,7 +478,7 @@ function initializeCcslState(reportDate, sourceName, rows, carryBills) {
       duplicateCount: 0,
       businessCounts,
       importedAt: new Date().toISOString(),
-      source: 'V364_COMMITTED_UNIFIED_MEMBERSHIP'
+      source: 'V366_COMMITTED_UNIFIED_MEMBERSHIP'
     },
     nonPnhBills: [], excludedBills: [], duplicateBills: [],
     carryBills: [...new Set(carryBills || [])], nextCarryBills: [...new Set(carryBills || [])], podLocks,
@@ -418,7 +511,7 @@ function initializeShopeeState(reportDate, sourceName, rows, carryBills) {
       totalRecognized: today.length,
       groupCounts: { CN: rows.filter(row => row.businessType === 'SHOPEECN').length, VN: rows.filter(row => row.businessType === 'SHOPEEVN').length },
       importedAt: new Date().toISOString(),
-      source: 'V364_COMMITTED_UNIFIED_MEMBERSHIP'
+      source: 'V366_COMMITTED_UNIFIED_MEMBERSHIP'
     },
     recipientConflicts: [], recipientReconciliation: null,
     carryBills: [...new Set(carryBills || [])], nextCarryBills: [...new Set(carryBills || [])], podLocks,
