@@ -8,8 +8,9 @@ import { getShopCodeMap } from './shopCodes.js';
 import { isSpecialCategory } from './specialNode.js';
 import { queryTrackBatchWithFallback } from './trackBatching.js';
 import { updateCarryoverResults } from './unifiedImportStore.js';
+import { reconcileCcslPartialRetryLedger } from './ccslPartialRetryLedger.js';
 
-const PATCH_ID = '2026-08-16-v145-seven-business-retry-center-v1';
+const PATCH_ID = '2026-08-30-v145-ccsl-partial-retry-ledger-v2';
 const MAX_BATCH = 200;
 const BUSINESS_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const NON_WHPP_TYPES = new Set(BUSINESS_TYPES.filter(type => type !== 'WHPP'));
@@ -163,8 +164,32 @@ function startJob(businessType,limit){
   return jobView();
 }
 
-function listHandler(req,res){try{const type=String(req.query?.businessType||'ALL').toUpperCase();const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.query?.limit||MAX_BATCH)));const rows=pendingRows({businessType:type,limit}).map(row=>({shipmentCode:row.shipmentCode,businessType:row.businessType,sourceReportDate:row.sourceReportDate,lastReportDate:row.lastReportDate,apiStatus:row.apiStatus,stage:stageOf(row),updatedAt:row.updatedAt}));res.setHeader('Cache-Control','no-store');res.json({ok:true,patchId:PATCH_ID,summary:queueSummary(type),job:jobView(),rows});}catch(error){res.status(500).json({ok:false,error:error.message||String(error)});}}
-function runHandler(req,res){try{const type=String(req.body?.businessType||'ALL').toUpperCase();if(type==='WHPP')return res.status(409).json({ok:false,code:'USE_WHPP_ENGINE',error:'WHPP失败票由现有WHPP补扫引擎处理。'});if(type!=='ALL'&&!NON_WHPP_TYPES.has(type))return res.status(400).json({ok:false,error:'业务类型无效。'});const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.body?.limit||MAX_BATCH)));const job=startJob(type,limit);res.status(job.running?202:200).json({ok:true,patchId:PATCH_ID,started:job.running,job,summary:queueSummary(type)});}catch(error){res.status(authError(error)?409:500).json({ok:false,code:authError(error)?'AUTH_REQUIRED':'SEVEN_RETRY_FAILED',error:error.message||String(error)});}}
+function reconcileExistingCcslPartialFailure(){
+  try{return reconcileCcslPartialRetryLedger();}
+  catch(error){console.error('[CE-QC][V145] CCSL partial retry ledger reconciliation failed:',error);return {ok:false,error:String(error?.message||error)};}
+}
+
+function listHandler(req,res){
+  try{
+    const reconciliation=reconcileExistingCcslPartialFailure();
+    const type=String(req.query?.businessType||'ALL').toUpperCase();
+    const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.query?.limit||MAX_BATCH)));
+    const rows=pendingRows({businessType:type,limit}).map(row=>({shipmentCode:row.shipmentCode,businessType:row.businessType,sourceReportDate:row.sourceReportDate,lastReportDate:row.lastReportDate,apiStatus:row.apiStatus,stage:stageOf(row),updatedAt:row.updatedAt}));
+    res.setHeader('Cache-Control','no-store');
+    res.json({ok:true,patchId:PATCH_ID,reconciliation,summary:queueSummary(type),job:jobView(),rows});
+  }catch(error){res.status(500).json({ok:false,error:error.message||String(error)});}
+}
+function runHandler(req,res){
+  try{
+    const reconciliation=reconcileExistingCcslPartialFailure();
+    const type=String(req.body?.businessType||'ALL').toUpperCase();
+    if(type==='WHPP')return res.status(409).json({ok:false,code:'USE_WHPP_ENGINE',error:'WHPP失败票由现有WHPP补扫引擎处理。'});
+    if(type!=='ALL'&&!NON_WHPP_TYPES.has(type))return res.status(400).json({ok:false,error:'业务类型无效。'});
+    const limit=Math.max(1,Math.min(MAX_BATCH,Number(req.body?.limit||MAX_BATCH)));
+    const job=startJob(type,limit);
+    res.status(job.running?202:200).json({ok:true,patchId:PATCH_ID,reconciliation,started:job.running,job,summary:queueSummary(type)});
+  }catch(error){res.status(authError(error)?409:500).json({ok:false,code:authError(error)?'AUTH_REQUIRED':'SEVEN_RETRY_FAILED',error:error.message||String(error)});}
+}
 
 let installed=false;const previousListen=express.application.listen;express.application.listen=function v145SevenBusinessRetryListen(...args){if(!installed){installed=true;this.get('/api/v145/retry-center',listHandler);this.post('/api/v145/retry-center/recheck',runHandler);}return previousListen.apply(this,args);};
 
