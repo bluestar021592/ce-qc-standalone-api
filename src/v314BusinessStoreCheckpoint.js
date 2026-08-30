@@ -94,8 +94,9 @@ function lightCheckpoint(state = {}, businessType = '') {
   const startedAt = Date.now();
   try {
     const db = getProgressDb();
-    // Do not wrap progress-only writes in BEGIN IMMEDIATE. Each statement is tiny,
-    // zero-wait and disposable. A busy database must never hold up CE API batches.
+    // Do not wrap progress-only writes in an immediate writer transaction. Each
+    // statement is tiny, zero-wait and disposable. A busy database must never
+    // hold up CE API batches.
     db.prepare(`UPDATE business_run_locks
       SET status='running',currentStage=?,batchIndex=?,totalBatches=?,errorMessage='',updatedAt=?
       WHERE businessType=? AND reportDate=? AND runId=?`)
