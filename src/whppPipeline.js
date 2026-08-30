@@ -22,27 +22,31 @@ export async function runWhppPipeline({
   const allBills = cleanCodes([...today, ...carry]);
   const dailyByBill = new Map((state.dailyParseRows || []).map(row => [billOf(row), row]));
   const podLocks = new Set(cleanCodes(state.podLocks || []));
+  const lockedPodBills = new Set(allBills.filter(bill => podLocks.has(bill)));
+  const activeScanBills = allBills.filter(bill => !lockedPodBills.has(bill));
 
   state.businessType = 'WHPP';
-  // The WHPP stage is intentionally independent from CCSL, but it must obey the
-  // same bounded CE endpoint policy. scanPool must be the exact today+carry pool so
-  // speculative 350-ticket batches have identical boundaries to the real loop.
-  state.scanPool = allBills;
+  // Persisted POD locks are terminal evidence. They must not be re-scanned or
+  // reopened by a transient CE response on a later run/day. scanPool therefore
+  // contains only still-open tickets; V314 keeps the exact bounded 350 lane.
+  state.scanPool = activeScanBills;
   const throughputClient = createUnifiedThroughputClient(state, client, {
     businessType: 'WHPP',
     confirmConcurrency: 1,
     trackConcurrency: 4,
     exceptionConcurrency: 4
   });
-  console.info('[CE-QC][WHPP_THROUGHPUT]', WHPP_THROUGHPUT_POLICY_ID, JSON.stringify({ scanBatchSize: 350, scanConcurrency: 1, trackBatchSize: 50, trackConcurrency: 4, exceptionBatchSize: 50, exceptionConcurrency: 4, independentStage: true }));
-  state.processing = { running: true, paused: false, phase: 'WHPP订单扫描', batchIndex: 0, totalBatches: Math.ceil(allBills.length / CONFIRM_BATCH_SIZE), runId };
-  state.lastRunSummary = { businessType: 'WHPP', reportDate, runId, today: today.length, carry: carry.length, totalQuery: allBills.length, startedAt: startedAt.toISOString() };
+  console.info('[CE-QC][WHPP_THROUGHPUT]', WHPP_THROUGHPUT_POLICY_ID, JSON.stringify({ scanBatchSize: 350, scanConcurrency: 1, trackBatchSize: 50, trackConcurrency: 4, exceptionBatchSize: 50, exceptionConcurrency: 4, independentStage: true, podLocked: lockedPodBills.size }));
+  state.processing = { running: true, paused: false, phase: 'WHPP订单扫描', batchIndex: 0, totalBatches: Math.ceil(activeScanBills.length / CONFIRM_BATCH_SIZE), runId };
+  state.lastRunSummary = { businessType: 'WHPP', reportDate, runId, today: today.length, carry: carry.length, totalQuery: allBills.length, podLocked: lockedPodBills.size, startedAt: startedAt.toISOString() };
   await checkpoint(state, onCheckpoint);
-  await onProgress(`WHPP本土开始：今日日报 ${today.length}票，跨日 ${carry.length}票，查询池 ${allBills.length}票`);
+  await onProgress(`WHPP本土开始：今日日报 ${today.length}票，跨日 ${carry.length}票，处理池 ${allBills.length}票，POD锁 ${lockedPodBills.size}票，待扫描 ${activeScanBills.length}票`);
 
   const scanRows = new Map(uniqueRows(state.scanResults || []).map(row => [billOf(row), row]));
   const scanStatuses = statusMap(state.scanQueryStatus || []);
-  const scanPending = allBills.filter(bill => scanStatuses.get(bill)?.status !== 'success');
+  for (const bill of lockedPodBills) scanStatuses.set(bill, podLockStatus(bill, reportDate, scanStatuses.get(bill)));
+  state.scanQueryStatus = [...scanStatuses.values()];
+  const scanPending = activeScanBills.filter(bill => scanStatuses.get(bill)?.status !== 'success');
 
   for (let offset = 0; offset < scanPending.length; offset += CONFIRM_BATCH_SIZE) {
     await waitIfPaused(state, isPaused, onProgress, onCheckpoint);
@@ -82,18 +86,18 @@ export async function runWhppPipeline({
     await checkpoint(state, onCheckpoint);
   }
 
-  const scanFailed = allBills.filter(bill => scanStatuses.get(bill)?.status !== 'success');
-  const podOrReturnTerminal = new Set(allBills.filter(bill => ['85','100'].includes(String(scanRows.get(bill)?.orderStatus ?? '').trim())));
-  const cancelledByScan = new Set(allBills.filter(bill => String(scanRows.get(bill)?.orderStatus ?? '').trim() === '10'));
-  const scanTerminal = new Set([...podOrReturnTerminal, ...cancelledByScan]);
-  const needTrack = allBills.filter(bill => !scanTerminal.has(bill) && scanStatuses.get(bill)?.status === 'success' && !podLocks.has(bill));
+  const scanFailed = activeScanBills.filter(bill => scanStatuses.get(bill)?.status !== 'success');
+  const podOrReturnTerminal = new Set(activeScanBills.filter(bill => ['85','100'].includes(String(scanRows.get(bill)?.orderStatus ?? '').trim())));
+  const cancelledByScan = new Set(activeScanBills.filter(bill => String(scanRows.get(bill)?.orderStatus ?? '').trim() === '10'));
+  const scanTerminal = new Set([...lockedPodBills, ...podOrReturnTerminal, ...cancelledByScan]);
+  const needTrack = activeScanBills.filter(bill => !scanTerminal.has(bill) && scanStatuses.get(bill)?.status === 'success');
   // A scan-side orderStatus=10 is already sufficient to close cancellation, but
   // exception-item/query is still queried to enrich reason/sub-reason/report-shop
   // details. Failure of this enrichment must not reopen a confirmed cancellation.
   const needException = cleanCodes([...needTrack, ...cancelledByScan]);
   state.needTrackBills = needTrack;
   state.needExceptionBills = needException;
-  await onProgress(`WHPP订单扫描完成：扫描终态 ${scanTerminal.size}票，进入轨迹 ${needTrack.length}票，取消/异常查询 ${needException.length}票，扫描待重试 ${scanFailed.length}票`);
+  await onProgress(`WHPP订单扫描完成：POD锁 ${lockedPodBills.size}票，扫描终态 ${podOrReturnTerminal.size + cancelledByScan.size}票，进入轨迹 ${needTrack.length}票，取消/异常查询 ${needException.length}票，扫描待重试 ${scanFailed.length}票`);
   await checkpoint(state, onCheckpoint);
 
   const eventRows = new Map(groupRows((state.trackEvents || []).map(row => ({ ...normalizeEvent(row), reportDate }))));
@@ -130,7 +134,9 @@ export async function runWhppPipeline({
     const scanRow = scanRows.get(bill) || { shipmentCode: bill, 运单号: bill, orderStatus: '' };
     const dailyRow = dailyByBill.get(bill) || {};
     let result;
-    if (failedBills.has(bill)) {
+    if (lockedPodBills.has(bill)) {
+      result = lockedPodResult({ bill, dailyRow, scanRow, reportDate });
+    } else if (failedBills.has(bill)) {
       result = {
         ...dailyRow,
         ...scanRow,
@@ -181,6 +187,7 @@ export async function runWhppPipeline({
     businessType: 'WHPP', reportDate, runId,
     today: today.length, carry: carry.length, totalQuery: allBills.length,
     pod: finalRows.filter(isPod).length,
+    podLocked: lockedPodBills.size,
     returned: finalRows.filter(isReturned).length,
     cancelled: finalRows.filter(isWhppCancelledRow).length,
     needTrack: needTrack.length,
@@ -261,8 +268,59 @@ function flattenRows(map) { return [...map.values()].flat(); }
 function statusMap(rows = []) { return new Map((rows || []).map(row => [billOf(row), row]).filter(([bill]) => bill)); }
 function successStatus(bill, reportDate, resultCount) { return { businessType: 'WHPP', shipmentCode: bill, reportDate, status: 'success', resultCount: Number(resultCount || 0), errorMessage: '', checkedAt: new Date().toISOString() }; }
 function failedStatus(bill, reportDate, errorMessage) { return { businessType: 'WHPP', shipmentCode: bill, reportDate, status: 'failed', resultCount: 0, errorMessage: String(errorMessage || ''), checkedAt: new Date().toISOString() }; }
+function podLockStatus(bill, reportDate, prior = {}) { return { ...prior, businessType: 'WHPP', shipmentCode: bill, reportDate, status: 'success', resultCount: Number(prior?.resultCount || 0), errorMessage: '', skipped: true, skipReason: 'POD_LOCK', checkedAt: prior?.checkedAt || new Date().toISOString() }; }
 function failureMap(failures = []) { const map = new Map(); for (const failure of failures || []) for (const bill of failure.batch || []) map.set(String(bill).toUpperCase(), failure.error || new Error('API_FAILED')); return map; }
 function selectConfirmRow(rows = []) { return rows.find(row => String(row?.orderStatus ?? '') === '85') || rows.find(row => String(row?.orderStatus ?? '') === '100') || rows.find(row => String(row?.orderStatus ?? '') === '10') || rows.at(-1) || null; }
+function lockedPodResult({ bill, dailyRow = {}, scanRow = {}, reportDate = '' }) {
+  const tags = [...new Set([...(Array.isArray(scanRow.tags) ? scanRow.tags : []), 'POD_LOCK'])];
+  return {
+    ...dailyRow,
+    ...scanRow,
+    shipmentCode: bill,
+    运单号: bill,
+    businessType: 'WHPP',
+    reportDate,
+    currentState: 'POD',
+    scanNormalizedState: 'POD',
+    primaryCategory: 'POD',
+    主分类: 'POD',
+    异常分类: 'POD',
+    是否POD: '是',
+    POD状态: 'POD',
+    退回状态: '未退回',
+    订单取消: '否',
+    取消状态: '',
+    查询状态: 'pod_locked',
+    API状态: 'POD_LOCK',
+    trackRequired: false,
+    trackSkippedReason: 'POD_LOCK',
+    terminalEvidenceSource: 'POD_LOCK',
+    carry状态: 'closed_pod',
+    跨日状态: '已闭环',
+    入库无扫描节点: '否',
+    无轨迹: '否',
+    Pending状态: '否',
+    Pending次数: 0,
+    Pending当前次数: 0,
+    pendingDistinctDayCount: 0,
+    Pending日期: '',
+    Pending连续: '否',
+    Pending连续性: '',
+    Pending不连续: '否',
+    OC状态: '否',
+    OC天数: 0,
+    盘点状态: '否',
+    盘点天数: 0,
+    派送中停留天数: 0,
+    shopRetentionNaturalDays: 0,
+    shopState: '',
+    pvOpenDisposition: '',
+    退回待处理: '否',
+    returnRequired: false,
+    tags,
+    QC判断: 'WHPP历史POD锁已确认签收，保持POD闭环；不重复扫描，不进入轨迹/异常查询'
+  };
+}
 function isPod(row = {}) { return row.是否POD === '是' || row.POD状态 === 'POD' || String(row.currentState || '').toUpperCase() === 'POD'; }
 function isReturned(row = {}) { return row.退回状态 === '已退回' || ['RETURNED','RETURN_COMPLETED'].includes(String(row.currentState || '').toUpperCase()) || String(row.primaryCategory || row.主分类 || '') === '退回'; }
-function isClosed(row = {}) { return isPod(row) || isReturned(row) || isWhppCancelledRow(row) || isSpecialCategory(row) || row.primaryCategory === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB'; }
+function isClosed(row = {}) { return isPod(row) || isReturned(row) || isWhppCancelledRow(row) || isSpecialCategory(row) || row.primaryCategory === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL'; }
