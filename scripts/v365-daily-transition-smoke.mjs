@@ -2,9 +2,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { runAtomicUnifiedImportWithDbV366 } from '../src/v366AtomicUnifiedImport.js';
 
 for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+}
+
+function fakeResponse(){
+  let sent=null;
+  const res={
+    statusCode:200,
+    status(code){this.statusCode=Number(code||200);return this;},
+    json(payload){sent={statusCode:this.statusCode,payload};return this;}
+  };
+  return {res,read:()=>sent};
 }
 
 // V366 relies on temporarily owning DatabaseSync.exec so legacy nested
@@ -21,6 +32,60 @@ for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102Unifi
   assert.equal(probe.prepare('SELECT value FROM v366_probe').get()?.value,'ok','overridden exec must still execute real SQLite statements');
   delete probe.exec;
   probe.close();
+}
+
+// Execute the exact production transaction algorithm with real in-memory
+// DatabaseSync. A successful nested legacy transaction must survive only after
+// explicit importCommitted=true.
+{
+  const db=new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE truth(id INTEGER PRIMARY KEY,value TEXT); INSERT INTO truth(id,value) VALUES(1,'08-15');");
+  const out=fakeResponse();
+  await runAtomicUnifiedImportWithDbV366(async (_req,res)=>{
+    db.exec('BEGIN IMMEDIATE');
+    db.prepare('UPDATE truth SET value=? WHERE id=1').run('08-16');
+    db.exec('COMMIT');
+    res.json({ok:true,importCommitted:true,reportDate:'2026-08-16'});
+  },{},out.res,()=>{},db,{useGlobalLock:false});
+  assert.equal(db.prepare('SELECT value FROM truth WHERE id=1').get()?.value,'08-16','explicitly committed daily transition must persist');
+  assert.equal(out.read()?.statusCode,200,'successful atomic transition must stay HTTP 200');
+  assert.equal(out.read()?.payload?.importCommitted,true,'successful atomic transition must preserve explicit commit acknowledgement');
+  db.close();
+}
+
+// Missing commit acknowledgement must roll every nested write back and keep the
+// previous official day intact.
+{
+  const db=new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE truth(id INTEGER PRIMARY KEY,value TEXT); INSERT INTO truth(id,value) VALUES(1,'08-15');");
+  const out=fakeResponse();
+  await runAtomicUnifiedImportWithDbV366(async (_req,res)=>{
+    db.exec('BEGIN IMMEDIATE');
+    db.prepare('UPDATE truth SET value=? WHERE id=1').run('BROKEN-08-16');
+    db.exec('COMMIT');
+    res.json({ok:true,reportDate:'2026-08-16'});
+  },{},out.res,()=>{},db,{useGlobalLock:false});
+  assert.equal(db.prepare('SELECT value FROM truth WHERE id=1').get()?.value,'08-15','missing importCommitted=true must restore previous-day truth');
+  assert.equal(out.read()?.statusCode,500,'missing explicit commit acknowledgement must be blocked');
+  assert.equal(out.read()?.payload?.code,'ATOMIC_IMPORT_COMMIT_BLOCKED');
+  db.close();
+}
+
+// Even if a downstream owner mistakenly returns success after requesting an
+// inner rollback, the outer owner must reject the success and preserve 08-15.
+{
+  const db=new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE truth(id INTEGER PRIMARY KEY,value TEXT); INSERT INTO truth(id,value) VALUES(1,'08-15');");
+  const out=fakeResponse();
+  await runAtomicUnifiedImportWithDbV366(async (_req,res)=>{
+    db.exec('BEGIN IMMEDIATE');
+    db.prepare('UPDATE truth SET value=? WHERE id=1').run('BROKEN-ROLLBACK');
+    db.exec('ROLLBACK');
+    res.json({ok:true,importCommitted:true,reportDate:'2026-08-16'});
+  },{},out.res,()=>{},db,{useGlobalLock:false});
+  assert.equal(db.prepare('SELECT value FROM truth WHERE id=1').get()?.value,'08-15','inner rollback request must poison outer success');
+  assert.equal(out.read()?.statusCode,500,'inner rollback followed by success must be blocked');
+  db.close();
 }
 
 const v42=fs.readFileSync(new URL('../src/v42WhppPatch.js',import.meta.url),'utf8');
@@ -46,9 +111,6 @@ assert.match(v42,/shopeePriorCarryRows/,'Shopee historical carry must retain CN\
 assert.match(v42,/recipient_group: businessType === 'SHOPEECN' \? 'CN' : 'VN'/,'historical Shopee carry must stay eligible under the canonical CN\/VN state filter');
 assert.match(v42,/priorCarryRows, needTrackBills/,'Shopee state save must receive the retained historical carry rows');
 
-// A pre-existing complete WHPP daily membership must not be treated as a mere
-// count. It must be rehydrated into WHPP's current processing state for the same
-// target date, otherwise CCSL/Shopee can move to the new day while WHPP stays old.
 assert.match(v42,/function loadPreservedWhppDailyRows\(reportDate\)/,'preserved WHPP daily membership must be loadable as exact rows');
 assert.match(v42,/WHPP_PRESERVED_MEMBERSHIP_REHYDRATE_MISMATCH/,'preserved WHPP rehydration must fail closed on count mismatch');
 assert.match(v42,/REHYDRATED_EXISTING_COMPLETE_DAILY_MEMBERSHIP/,'preserved WHPP membership must be explicitly rehydrated');
@@ -57,9 +119,6 @@ assert.match(preservedBranch,/loadPreservedWhppDailyRows\(parsed\.reportDate\)/,
 assert.match(preservedBranch,/saveWhppDailyImport\(\{/,'preserved WHPP branch must rebuild WHPP current processing state');
 assert.match(preservedBranch,/reportDate: parsed\.reportDate/,'rehydrated WHPP processing state must be target-date bound');
 
-// Do not trust a successful function return alone. Before the response can carry
-// importCommitted=true, the route must re-read the normalized DB and prove all
-// seven memberships plus CCSL/SHOPEE/WHPP current dates are aligned.
 assert.match(v42,/function verifyAtomicImportPersistence\(/,'import must verify persisted truth before success');
 assert.match(v42,/IMPORT_VERIFY_CCSL_QUEUE_MISMATCH/,'CCSL normalized queue membership must be verified');
 assert.match(v42,/IMPORT_VERIFY_SHOPEE_QUEUE_MISMATCH/,'SHOPEE normalized queue membership and CN\/VN split must be verified');
@@ -84,7 +143,8 @@ assert.ok(stagedAt>=0&&ccslAt>stagedAt&&shopeeAt>ccslAt&&whppAt>shopeeAt&&activa
 assert.match(v102,/2026-08-30-v366-pre-persistence-atomic-import-safety-v3/,'pre-persistence owner must install the V366 atomic gate');
 assert.match(v102,/runAtomicUnifiedImportV366/,'the real unified-import final handler must execute through the atomic owner');
 assert.match(v102,/return await runAtomicUnifiedImportV366\(finalHandler, req, res, next\)/,'V102 must await the atomic owner before returning any import result');
-assert.match(v366,/2026-08-30-v366-atomic-seven-business-import-v1/,'atomic transaction owner version must be active');
+assert.match(v366,/2026-08-30-v366-atomic-seven-business-import-v2/,'atomic transaction owner version must be active');
+assert.match(v366,/runAtomicUnifiedImportWithDbV366/,'the exact production atomic core must be directly executable by go-live tests');
 assert.match(v366,/originalExec\('BEGIN IMMEDIATE'\)/,'atomic owner must hold one outer write transaction');
 assert.match(v366,/res\.json = function v366BufferedJson/,'success or failure JSON must be buffered until commit or rollback');
 assert.match(v366,/const explicitCommit = payload\?\.importCommitted === true/,'outer transaction must require explicit backend commit acknowledgement');
@@ -114,4 +174,4 @@ assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require cano
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V365/V366] exact daily transition + atomic persistence gate passed · driver override proven · candidate date stays noncanonical · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
+console.log('[V365/V366] exact daily transition + executable atomic persistence gate passed · real DatabaseSync commit/rollback behavior proven · candidate date stays noncanonical · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
