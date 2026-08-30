@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
-for (const file of ['src/v42WhppPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
+for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
 const v42=fs.readFileSync(new URL('../src/v42WhppPatch.js',import.meta.url),'utf8');
+const v44=fs.readFileSync(new URL('../src/v44WhppUiPatch.js',import.meta.url),'utf8');
 const v102=fs.readFileSync(new URL('../src/v102UnifiedImportSafetyGatePatch.js',import.meta.url),'utf8');
 const v366=fs.readFileSync(new URL('../src/v366AtomicUnifiedImport.js',import.meta.url),'utf8');
 const v146=fs.readFileSync(new URL('../public/v146-unified-import-date-status.js',import.meta.url),'utf8');
@@ -49,15 +50,17 @@ assert.match(v366,/innerRollbackSeen/,'an inner rollback request must poison the
 assert.match(v366,/nestedDepth !== 0/,'unbalanced nested transactions must block commit');
 assert.match(v366,/UNIFIED_IMPORT_ALREADY_ACTIVE/,'concurrent daily imports must be rejected instead of interleaving writes');
 
-assert.match(v146,/2026-08-30-v365-seven-business-import-ui-v1/,'browser import owner must isolate pending filename dates');
+assert.match(v146,/2026-08-30-v366-atomic-seven-business-import-ui-v1/,'browser import owner must isolate pending dates and wait for atomic commit');
 assert.match(v146,/let candidateTarget=''/,'filename-recognized date must live outside the committed report-date input');
 assert.match(v146,/#detectFilenameDateButton/,'filename detection itself must be intercepted');
 assert.match(v146,/restoreCommittedDate\(\)/,'pending selection must restore the last committed business date');
 assert.match(v146,/body\.set\('reportDate',target\)/,'captured candidate date must still be submitted to the backend');
-assert.match(v146,/payload\?\.importCommitted!==false/,'browser may switch only after backend commit acknowledgement');
+assert.match(v146,/payload\?\.ok===true&&payload\?\.importCommitted===true/,'browser may switch only after explicit successful atomic commit acknowledgement');
+assert.doesNotMatch(v146,/importCommitted!==false/,'undefined commit acknowledgement must never be treated as success');
 assert.match(v146,/classification-whpp/,'import result must visibly include WHPP as business seven');
 assert.match(v146,/正在导入并确认七业务/,'long import must expose a single non-repeatable in-flight action');
 assert.match(v146,/__CE_QC_PENDING_IMPORT_DATE__/,'pending date must be observable without becoming canonical processing truth');
+assert.match(v44,/v146-unified-import-date-status\.js\?v=20260830-v366-1/,'HTML owner must force the browser to load the V366 import UI instead of a cached older script');
 
 for (const source of [v67,v168,v132]) {
   assert.match(source,/reportDate/,'all processing\/status owners must remain date-bound');
@@ -67,4 +70,4 @@ assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require cano
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V365/V366] exact daily transition + atomic commit gate passed · candidate date stays noncanonical · seven classifications and three queues must succeed together · any inner failure rolls back · WHPP remains final canonical stage');
+console.log('[V365/V366] exact daily transition + atomic commit gate passed · candidate date stays noncanonical · explicit commit acknowledgement required · seven classifications and three queues succeed together · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
