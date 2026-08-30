@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-export const V366_ATOMIC_UNIFIED_IMPORT_ID = '2026-08-30-v366-atomic-seven-business-import-v2';
+export const V366_ATOMIC_UNIFIED_IMPORT_ID = '2026-08-30-v366-atomic-seven-business-import-v3';
 
 const LOCK_KEY = Symbol.for('ce-qc.v366-atomic-unified-import-lock');
 
@@ -65,6 +65,24 @@ export async function runAtomicUnifiedImportWithDbV366(finalHandler, req, res, n
     } catch {}
   };
 
+  const rollbackOuter = () => {
+    if (!outerActive && db.isTransaction !== true) return null;
+    let rollbackError = null;
+    try { originalExec('ROLLBACK'); }
+    catch (error) { rollbackError = error; }
+    const stateKnown = typeof db.isTransaction === 'boolean';
+    const stillActive = stateKnown ? db.isTransaction === true : Boolean(rollbackError);
+    outerActive = stillActive;
+    if (!rollbackError || !stillActive) {
+      outerActive = false;
+      return null;
+    }
+    const fatal = new Error(`SQLite整体回滚失败，事务状态无法确认：${safeMessage(rollbackError)}`);
+    fatal.code = 'ATOMIC_IMPORT_ROLLBACK_FAILED';
+    fatal.rollbackError = safeMessage(rollbackError);
+    return fatal;
+  };
+
   try {
     db.exec = function v366AtomicExec(sql, ...args) {
       const command = txCommand(sql);
@@ -120,8 +138,8 @@ export async function runAtomicUnifiedImportWithDbV366(finalHandler, req, res, n
       outerActive = false;
       console.log(`[CE-QC][V366_ATOMIC_IMPORT_COMMIT] reportDate=${payload?.reportDate || ''} nestedDepth=${nestedDepth}`);
     } else {
-      try { originalExec('ROLLBACK'); } catch {}
-      outerActive = false;
+      const rollbackFailure = rollbackOuter();
+      if (rollbackFailure) throw rollbackFailure;
       if (bufferedStatus < 400 && !handlerError) {
         const reason = nestingLeak
           ? `内部事务未闭合 nestedDepth=${nestedDepth}`
@@ -144,9 +162,9 @@ export async function runAtomicUnifiedImportWithDbV366(finalHandler, req, res, n
     }
   } catch (error) {
     handlerError = handlerError || error;
-    if (outerActive) {
-      try { originalExec('ROLLBACK'); } catch {}
-      outerActive = false;
+    if (outerActive || db.isTransaction === true) {
+      const rollbackFailure = rollbackOuter();
+      if (rollbackFailure) handlerError = rollbackFailure;
     }
   } finally {
     res.json = originalJson;
