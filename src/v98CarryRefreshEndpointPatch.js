@@ -5,7 +5,7 @@ import { SHOPEE, loadBusinessState, saveBusinessState } from './businessStore.js
 import { WHPP, loadWhppState, saveWhppState } from './whppStore.js';
 
 export const V98_CARRY_REFRESH_ENDPOINT_ID = '2026-08-14-v98-backend-owned-open-carry-refresh-v4';
-export const V98_RUNTIME_CARRY_HYDRATION_ID = '2026-08-30-v374-runtime-carry-hydration-v2';
+export const V98_RUNTIME_CARRY_HYDRATION_ID = '2026-08-30-v374-runtime-carry-hydration-v3';
 
 const CCSL_RUN_ROUTES = new Set(['/api/run','/api/run/start','/api/resume','/api/run/resume']);
 const SHOPEE_RUN_ROUTES = new Set(['/api/shopee/run/start','/api/shopee/run/resume']);
@@ -123,7 +123,13 @@ function rewriteShopeeCarry(db, reportDate) {
   const date = normalizeDate(state.reportDate) || reportDate;
   if (!date) return { count: 0, changed: false, legacy: 0, unresolvedGroup: 0 };
   const carryRows = loadOpenCarryRows(db, date, SHOPEE_TYPES, SHOPEE);
-  const priorCarryRows = carryRows.map(inferShopeePriorRow);
+  const priorByBill = new Map();
+  for (const row of carryRows.map(inferShopeePriorRow)) {
+    const bill = String(row.shipmentCode || '').trim().toUpperCase();
+    if (!bill || priorByBill.has(bill)) continue;
+    priorByBill.set(bill, row);
+  }
+  const priorCarryRows = [...priorByBill.values()];
   const eligible = priorCarryRows.filter(row => ['CN','VN'].includes(String(row.recipient_group || '').toUpperCase()));
   const carryBills = uniqueBills(eligible);
   const legacy = carryRows.filter(item => String(item.businessType || '').toUpperCase() === 'SHOPEE').length;
@@ -196,6 +202,74 @@ function carryHydrationMiddleware(kind) {
   };
 }
 
+function latestRetryTruth(db, businessType, reportDate) {
+  const type = String(businessType || 'CCSL').toUpperCase() === 'SHOPEE' ? 'SHOPEE' : 'CCSL';
+  const date = normalizeDate(reportDate);
+  if (!date) return { scanRetry: 0, trackRetry: 0 };
+  let checkpoint = null;
+  if (type === 'SHOPEE') {
+    const lock = db.prepare("SELECT runId FROM business_run_locks WHERE businessType='SHOPEE' AND reportDate=?").get(date);
+    if (lock?.runId) checkpoint = db.prepare("SELECT payloadJson FROM business_run_checkpoints WHERE businessType='SHOPEE' AND reportDate=? AND runId=? ORDER BY updatedAt DESC,id DESC LIMIT 1").get(date, lock.runId);
+  } else {
+    const lock = db.prepare('SELECT runId FROM run_locks WHERE reportDate=?').get(date);
+    if (lock?.runId) checkpoint = db.prepare('SELECT payloadJson FROM run_checkpoints WHERE reportDate=? AND runId=? ORDER BY updatedAt DESC,rowid DESC LIMIT 1').get(date, lock.runId);
+  }
+  const payload = parseJson(checkpoint?.payloadJson, {});
+  const last = payload.lastRunSummary && typeof payload.lastRunSummary === 'object' ? payload.lastRunSummary : {};
+  const scanRetry = Math.max(0, Number(payload.scanRetry || 0), Number(last.scanRetry || 0), Array.isArray(last.retryBills) && !Number(last.trackRetry || 0) ? Number(last.retryBills.length || 0) : 0);
+  const trackRetry = Math.max(0, Number(payload.trackRetry || 0), Number(last.trackRetry || 0));
+  return { scanRetry, trackRetry };
+}
+
+function correctedProgressCount(totalValue, doneValue, retryValue, observedValue, canonicalRetryValue) {
+  const total = Math.max(0, Number(totalValue) || 0);
+  const observed = Math.min(total, Math.max(0, Number(observedValue) || 0, Number(doneValue) || 0));
+  const retry = Math.min(total, Math.max(0, Number(retryValue) || 0, Number(canonicalRetryValue) || 0));
+  const done = Math.min(Math.max(0, total - retry), Math.max(0, Number(doneValue) || 0, observed - retry));
+  return { total, observed: Math.max(observed, Math.min(total, done + retry)), retry, done };
+}
+
+function correctProgressPayload(value = {}) {
+  if (!value || typeof value !== 'object' || value.ok === false) return value;
+  const businessType = String(value.businessType || 'CCSL').toUpperCase() === 'SHOPEE' ? 'SHOPEE' : 'CCSL';
+  const reportDate = normalizeDate(value.reportDate || '');
+  if (!reportDate) return value;
+  const truth = latestRetryTruth(getDb(), businessType, reportDate);
+  const scan = correctedProgressCount(value.scanTotal, value.scanDone, value.scanRetry, value.scanObserved, truth.scanRetry);
+  const track = correctedProgressCount(value.trackTotal, value.trackDone, value.trackRetry, value.trackObserved, truth.trackRetry);
+  const isTrack = /轨迹|track|shipment-event|exception-item/i.test(String(value.phase || ''));
+  return {
+    ...value,
+    progressRule: `${String(value.progressRule || '')}+V374_RETRY_FIRST_TRUTH`,
+    scanDone: scan.done,
+    scanRetry: scan.retry,
+    scanObserved: scan.observed,
+    scanTotal: scan.total,
+    trackDone: track.done,
+    trackRetry: track.retry,
+    trackObserved: track.observed,
+    trackTotal: track.total,
+    done: isTrack ? track.done : scan.done,
+    retry: isTrack ? track.retry : scan.retry,
+    total: isTrack ? track.total : scan.total,
+    retryTruthSource: V98_RUNTIME_CARRY_HYDRATION_ID
+  };
+}
+
+function wrapProgressHandler(handler) {
+  if (typeof handler !== 'function' || handler.__v374ProgressTruth) return handler;
+  const wrapped = function v374ProgressTruthHandler(req, res, next) {
+    const originalJson = res.json.bind(res);
+    res.json = value => {
+      res.json = originalJson;
+      return originalJson(correctProgressPayload(value));
+    };
+    return handler.call(this, req, res, next);
+  };
+  Object.defineProperty(wrapped, '__v374ProgressTruth', { value: true });
+  return wrapped;
+}
+
 // Keep using the existing V98 owner instead of stacking another runtime patch.
 const previousPost = express.application.post;
 express.application.post = function v98CarryHydrationPost(pathValue, ...handlers) {
@@ -203,6 +277,14 @@ express.application.post = function v98CarryHydrationPost(pathValue, ...handlers
   if (SHOPEE_RUN_ROUTES.has(pathValue)) return previousPost.call(this, pathValue, carryHydrationMiddleware('SHOPEE'), ...handlers);
   if (WHPP_RUN_ROUTES.has(pathValue)) return previousPost.call(this, pathValue, carryHydrationMiddleware('WHPP'), ...handlers);
   return previousPost.call(this, pathValue, ...handlers);
+};
+
+const previousGet = express.application.get;
+express.application.get = function v98RetryTruthGet(pathValue, ...handlers) {
+  if (pathValue === '/api/v33/run-progress' && handlers.length) {
+    return previousGet.call(this, pathValue, ...handlers.map(wrapProgressHandler));
+  }
+  return previousGet.call(this, pathValue, ...handlers);
 };
 
 // No HTTP bypass route exists. The refresh scheduler lives inside the same Node
