@@ -39,11 +39,35 @@
     }catch{return '';}
   }
   function targetDate(){return pendingTarget||candidateTarget||filenameDate(selectedFile()?.name||'')||committedDate();}
-  function restoreCommittedDate(){
-    const date=committedDate();
+  function syncCommittedTruth(payload=null){
+    const payloadDate=normalizeDate(payload?.reportDate||'');
+    if(payload&&payloadDate&&payload?.importCommitted===true){
+      try{if(typeof unifiedImportState!=='undefined')unifiedImportState=payload;}catch{}
+      try{if(typeof appState!=='undefined'&&payload?.state)appState=payload.state;}catch{}
+      try{if(typeof shopeeState!=='undefined'&&payload?.shopeeState)shopeeState=payload.shopeeState;}catch{}
+      try{if(typeof historyModeDate!=='undefined')historyModeDate=payloadDate;}catch{}
+    }
+    const date=payloadDate||committedDate();
     const input=document.getElementById('reportDate');
-    if(input){input.value=date||'';input.readOnly=true;}
+    const pending=Boolean(global.__CE_QC_PENDING_IMPORT_DATE__?.active);
+    if(input&&date&&(!pending||payload?.importCommitted===true)){
+      input.value=date;
+      input.readOnly=true;
+    }
+    return date;
   }
+  function scheduleCommittedTruth(payload=null){
+    [0,80,250,900,1800].forEach(ms=>setTimeout(()=>{
+      const date=syncCommittedTruth(payload);
+      if(payload?.importCommitted===true&&date){
+        try{global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.();}catch{}
+        if(location.pathname==='/whpp'){
+          try{global.__CE_QC_V132_WHPP_FAST__?.fetchSummary?.(date)?.then?.(()=>global.__CE_QC_V132_WHPP_FAST__?.navigate?.(false)).catch?.(()=>{});}catch{}
+        }
+      }
+    },ms));
+  }
+  function restoreCommittedDate(){syncCommittedTruth();}
   function showCandidateSource(){
     const source=document.getElementById('dateDetectionSource');
     if(source&&candidateTarget)source.textContent=`识别来源：文件名（待导入确认 ${candidateTarget}）`;
@@ -113,6 +137,7 @@
     if(!isImport)return originalFetch(input,init);
     let target=pendingTarget||candidateTarget||filenameDate(selectedFile()?.name||'')||targetDate();
     let committed=false;
+    let payload=null;
     try{
       const body=init?.body;
       if(body instanceof FormData){
@@ -122,17 +147,23 @@
       }
       show('info',`正在导入 ${target||'当前'} 日报…`,`新日期仍处于待确认状态；后台七业务和三个处理队列全部原子提交前，页面继续使用上一份正式日报。`);
       const response=await originalFetch(input,init);
-      let payload=null;try{payload=await response.clone().json();}catch{}
-      committed=Boolean(response.ok&&payload?.ok===true&&payload?.importCommitted===true&&payload?.reportDate);
+      try{payload=await response.clone().json();}catch{}
+      const responseDate=normalizeDate(payload?.reportDate||'');
+      const requestedDate=normalizeDate(target||'');
+      committed=Boolean(response.ok&&payload?.ok===true&&payload?.importCommitted===true&&responseDate&&(!requestedDate||responseDate===requestedDate));
       if(!committed){
-        const message=String(payload?.error||`HTTP ${response.status}`);
+        const mismatch=response.ok&&payload?.ok===true&&payload?.importCommitted===true&&requestedDate&&responseDate&&requestedDate!==responseDate;
+        const message=mismatch?`后端提交日期 ${responseDate} 与待导入日期 ${requestedDate} 不一致`:String(payload?.error||`HTTP ${response.status}`);
         show('error',`${target||'本次'} 日报导入未完成`,`${message}。上一份成功日报继续生效；不会进入半分类、半扫描状态。`);
         restoreCommittedDate();
         showCandidateSource();
       }else{
+        syncCommittedTruth(payload);
         candidateTarget='';
-        show('success',`${payload.reportDate} 日报已完整提交`,`七业务分类和 CCSL → SHOPEE → WHPP 三阶段处理入口均已原子切换到新日期。`);
+        show('success',`${responseDate} 日报已完整提交`,`七业务分类和 CCSL → SHOPEE → WHPP 三阶段处理入口均已原子切换到新日期。`);
         scheduleSevenBusinessClassification(payload);
+        scheduleCommittedTruth(payload);
+        try{document.dispatchEvent(new CustomEvent('ce-qc-unified-import-committed',{detail:{reportDate:responseDate,snapshotId:String(payload?.snapshotId||'')}}));}catch{}
       }
       return response;
     }catch(error){
@@ -144,10 +175,18 @@
       pendingTarget='';
       if(global.__CE_QC_PENDING_IMPORT_DATE__)global.__CE_QC_PENDING_IMPORT_DATE__.active=false;
       setImportButtonBusy(false);
+      if(committed)scheduleCommittedTruth(payload);
+      else scheduleCommittedTruth();
     }
   };
+
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleCommittedTruth();});
+  global.addEventListener('popstate',()=>scheduleCommittedTruth());
+  document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page]'))setTimeout(()=>scheduleCommittedTruth(),80);},true);
+  [100,400,1200,3000].forEach(ms=>setTimeout(()=>syncCommittedTruth(),ms));
   [200,900,1800].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(),ms));
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.version=VERSION;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.getPendingDate=()=>pendingTarget||candidateTarget;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.syncClassification=syncSevenBusinessClassification;
+  global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.syncCommittedTruth=syncCommittedTruth;
 })(window);
