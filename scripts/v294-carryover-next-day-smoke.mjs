@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { dueCarryRefreshReason, loadOpenCarryRows } from '../src/carryoverRefreshScheduler.js';
 import { ensureV246TrackingSchema } from '../src/v246TrackingLedgerCore.js';
 import { repairV294CarryoverLifecycle } from '../src/v294CarryoverLifecycleTruth.js';
+import { runWhppPipeline } from '../src/whppPipeline.js';
 
 const db=new DatabaseSync(':memory:');
 try{
@@ -79,7 +80,41 @@ try{
   assert.match(whppStore,/JOIN shipment_current_state s ON s\.shipmentCode=d\.shipmentCode/,'WHPP import POD locks must be resolved from current daily membership');
   assert.doesNotMatch(whppStore,/SELECT shipmentCode FROM shipment_current_state WHERE businessType='WHPP' AND state='POD'/,'WHPP import must never full-scan all historical POD shipment state');
 
-  console.log('[V294] carryover next-day smoke passed · OPEN survives next day · daily import hydration is bounded to active/current membership · 00:05 + 2h scheduler remains intact');
+  // A persisted WHPP POD lock is already terminal evidence. A stale/failed prior
+  // scan status must not re-open the ticket, trigger CE calls, or push it into carry.
+  const lockedBill='WHPP-POD-LOCK-SMOKE';
+  let confirmCalls=0,trackCalls=0,exceptionCalls=0;
+  const lockedState={
+    reportDate:'2026-08-25',
+    pnhBills:[lockedBill],carryBills:[],nextCarryBills:[],
+    dailyParseRows:[{shipmentCode:lockedBill,运单号:lockedBill,regionCode:'PP'}],
+    podLocks:[lockedBill],
+    scanResults:[{shipmentCode:lockedBill,运单号:lockedBill,orderStatus:'70'}],
+    scanQueryStatus:[{shipmentCode:lockedBill,status:'failed',errorMessage:'STALE_SCAN_FAILURE'}],
+    trackEvents:[],eventQueryStatus:[],exceptionItems:[],exceptionQueryStatus:[]
+  };
+  const lockedRun=await runWhppPipeline({
+    state:lockedState,
+    client:{
+      async confirmQuery(){confirmCalls+=1;throw new Error('POD lock must not be rescanned');},
+      async trackQuery(){trackCalls+=1;throw new Error('POD lock must not be tracked');},
+      async exceptionQuery(){exceptionCalls+=1;throw new Error('POD lock must not query exceptions');}
+    },
+    onProgress:async()=>{},onCheckpoint:async()=>{},isPaused:async()=>false
+  });
+  assert.equal(confirmCalls,0,'persisted WHPP POD lock must be removed from 350 confirm scan pool');
+  assert.equal(trackCalls,0,'persisted WHPP POD lock must never enter 50x4 tracking');
+  assert.equal(exceptionCalls,0,'persisted WHPP POD lock must never enter exception query');
+  assert.equal(lockedRun.summary.retry,0,'stale scan failure on a POD lock must not keep WHPP pending');
+  assert.equal(lockedRun.summary.pod,1);
+  assert.equal(lockedRun.state.processing.phase,'完成');
+  assert.deepEqual(lockedRun.state.nextCarryBills,[],'POD lock must remain closed and never re-enter carry');
+  assert.equal(lockedRun.state.finalRows[0]?.currentState,'POD');
+  assert.equal(lockedRun.state.finalRows[0]?.terminalEvidenceSource,'POD_LOCK');
+  assert.equal(lockedRun.state.scanQueryStatus[0]?.status,'success','POD lock satisfies scan-stage completion without a remote CE call');
+  assert.equal(lockedRun.state.scanQueryStatus[0]?.skipReason,'POD_LOCK');
+
+  console.log('[V294] carryover next-day smoke passed · OPEN survives next day · daily import hydration is bounded to active/current membership · WHPP POD locks stay terminal without rescanning · 00:05 + 2h scheduler remains intact');
 }finally{db.close();}
 
 await import('./v294-final-qc-contract-smoke.mjs');
