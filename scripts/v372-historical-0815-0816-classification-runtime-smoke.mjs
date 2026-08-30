@@ -142,3 +142,6 @@ assert.equal(HISTORICAL_TRUTH['2026-08-16'].SHOPEEVN, 0, 'a legitimate zero-coun
 assert.equal(HISTORICAL_TRUTH['2026-08-16'].WHPP, 42, 'WHPP must remain visible as the seventh 2026-08-16 classification');
 
 console.log('[V372] historical 08-15→08-16 production-parser classification smoke passed · 08-15=5266 [1197,76,2127,167,814,730,155] · 08-16=5210 [1978,13,1917,186,1074,0,42] · actual parseUnifiedDailyExcel used · exact seven-business split reconciled · WHPP=42 visible · legitimate SHOPEEVN=0 retained');
+
+// Follow the historical exact-count gate with a real OLE/BIFF8 .xls parser check.
+await import('./v373-real-biff8-xls-import-smoke.mjs');
