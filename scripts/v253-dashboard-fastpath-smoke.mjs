@@ -30,7 +30,11 @@ assert.match(v236Source,/export function invalidateV236CurrentSummary\(\)\{summa
 assert.match(v284Source,/globalThis\.__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__=invalidateV284DailyMembershipTruth/,'V284 range cache invalidation must remain globally callable by the import owner');
 assert.match(v42Source,/function invalidateDashboardReadCaches\(\)/,'V42 daily import owner must centrally invalidate read caches');
 for(const token of ['__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__','__CE_QC_INVALIDATE_V253_DASHBOARD_FAST_PATH__','__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__'])assert.ok(v42Source.includes(token),`V42 import cache invalidation missing ${token}`);
-assert.match(v42Source,/invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged \}\);\s*invalidateDashboardReadCaches\(\);/,'dashboard caches must be invalidated only after same-date persistence and pointer changes finish');
+const pointerInvalidateAt=v42Source.indexOf('invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged: true });');
+const activateAt=v42Source.indexOf('const releasedSupersededSlots = activateUnifiedCoreImport(staged);');
+const verifyAt=v42Source.indexOf('const verification = verifyAtomicImportPersistence(');
+const cacheInvalidateAt=v42Source.indexOf('invalidateDashboardReadCaches();',verifyAt);
+assert.ok(pointerInvalidateAt>=0&&activateAt>pointerInvalidateAt&&verifyAt>activateAt&&cacheInvalidateAt>verifyAt,'dashboard caches must invalidate only after pointer cleanup, VALID activation and persisted-truth verification');
 assert.doesNotMatch(fastSource,/function latestBatches\(/,'retired global latest-batch-per-date helper must not return');
 assert.doesNotMatch(fastSource,/PARTITION BY reportDate ORDER BY createdAt DESC/,'V253 must not select one global snapshot for all same-date businesses');
 assert.doesNotMatch(fastSource,/V253_BULK_NORMALIZED_READ_NO_DASHBOARD_CACHE/,'retired V253 multi-day ownership must stay retired');
@@ -71,7 +75,7 @@ assert.equal(instant.sourceCorrection.membershipSource,'WHPP_STANDARD_DAILY','2\
 assert.notEqual(instant.snapshotIds.SHOPEECN,instant.snapshotIds.SHOPEEVN);
 assert.equal(instant.sourceCorrection.removedFromWhpp,0,'CEAF overlap must never subtract independent WHPP members');
 assert.equal(instant.sourceCorrection.ceafOverlapDiagnostic,1,'CEAF overlap remains visible as a diagnostic only');
-const whppTrend=readV253DashboardTrends('WHPP',date,date);assert.deepEqual(whppTrend.ticket,[2]);assert.equal(whppTrend.daily[0].membershipSource,'WHPP_STANDARD_DAILY','single-day WHPP trend must share the exact standard membership owner');
+const whppTrend=readV253DashboardTrends('WHPP',date,date);assert.deepEqual(whppTrend.ticket,[2]);assert.equal(whppTrend.daily[0].membershipSource,'WHPP_STANDARD_DAILY','single-day WHPP trend must share the exact standard membership owner as instant cards');
 const vn=readV253DashboardTrends('SHOPEEVN',date,date);assert.equal(vn.readId,V253_DASHBOARD_FAST_PATH_ID);assert.equal(vn.v335Id,V253_V335_FIRST_PAINT_ID);assert.deepEqual(vn.dates,[date]);assert.deepEqual(vn.ticket,[2]);
 const cn=readV253DashboardTrends('SHOPEECN',date,date);assert.deepEqual(cn.ticket,[3]);
 const region=readV253ShopeeRegion('SHOPEECN',date);assert.equal(region.daily[0].regions.PP.total,1);assert.equal(region.daily[0].regions.PV.total,2);assert.equal(region.daily[0].regions.PP.attempt1,1);assert.equal(region.daily[0].regions.PV.attempt2,1);
