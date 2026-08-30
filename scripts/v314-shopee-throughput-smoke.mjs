@@ -14,12 +14,13 @@ import {
 import { queryBatchWithFallback, queryTrackBatchWithFallback } from '../src/trackBatching.js';
 import { resolveV314Target } from '../src/v314ModuleRedirectPatch.js';
 
-for(const file of ['src/v314ShopeeThroughputCore.js','src/v314PipelineThroughput.js','src/v339CcslThroughputCore.js','src/v314ModuleRedirectPatch.js','src/trackBatching.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v314ShopeeThroughputCore.js','src/v314PipelineThroughput.js','src/v339CcslThroughputCore.js','src/v314ModuleRedirectPatch.js','src/v314BusinessStoreCheckpoint.js','src/trackBatching.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.match(V314_ALL_BUSINESS_THROUGHPUT_CORE_ID,/all-business-bounded-retry-350-scan-50x4-track/);
 assert.equal(V314_CONFIRM_CONCURRENCY,2,'Shopee confirm keeps bounded x2');
 assert.equal(V339_CCSL_CONFIRM_CONCURRENCY,1,'CCSL confirm remains one remote 350 lane');
 assert.match(resolveV314Target('./src/pipeline.js','file:///C:/CE/app/server.js'),/v314PipelineThroughput\.js$/);
-const wrapper=fs.readFileSync('src/v314PipelineThroughput.js','utf8'),compat=fs.readFileSync('src/v339CcslThroughputCore.js','utf8'),core=fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8');
+assert.match(resolveV314Target('./src/businessStore.js','file:///C:/CE/app/server.js'),/v314BusinessStoreCheckpoint\.js$/);
+const wrapper=fs.readFileSync('src/v314PipelineThroughput.js','utf8'),compat=fs.readFileSync('src/v339CcslThroughputCore.js','utf8'),core=fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8'),store=fs.readFileSync('src/v314BusinessStoreCheckpoint.js','utf8');
 assert.match(wrapper,/createUnifiedThroughputClient/,'production must have one throughput owner');
 assert.match(wrapper,/createUnifiedThroughputClient\(state,options\.client,\{trackConcurrency:4\}\)/,'production must force 50-ticket tracking to x4 even if a legacy environment still says TRACK_CONCURRENCY=1');
 assert.doesNotMatch(wrapper,/createShopeeThroughputClient|createCcslThroughputClient/,'production wrapper must not branch into layered business-specific throughput implementations');
@@ -28,6 +29,22 @@ assert.match(compat,/Compatibility module only/);assert.doesNotMatch(compat,/fun
 assert.doesNotMatch(core,/if\(!plannedKeys\.has\(key\)\)return query\(batch\)/,'fallback/on-demand requests must never bypass the bounded scheduler');
 assert.match(core,/enqueue\(batch,!plannedKeys\.has\(key\)\)/,'fallback/on-demand requests must enter the same scheduler with priority');
 assert.match(core,/planMode:isShopee\?'stable-filter':'compact-pending'/,'CCSL track resume must compact pending tickets exactly like pipeline.js');
+
+// SHOPEE runtime persistence must not become a second throughput limiter. Every
+// active save is a tiny zero-wait checkpoint; only pause/error/final boundaries
+// may enter the authoritative full business mirror.
+assert.match(store,/DatabaseSync/,'SHOPEE progress checkpoints must use a dedicated SQLite connection');
+assert.match(store,/PRAGMA busy_timeout = 0/,'SHOPEE progress writes must never wait on the main writer lock');
+assert.match(store,/inRunFullMirror: false/,'active SHOPEE processing must never perform periodic full mirrors');
+assert.match(store,/authoritativeFullMirrorPolicy: 'PAUSE_ERROR_OR_FINAL_ONLY'/);
+assert.match(store,/export function loadBusinessState/,'active pause reads must be served by the V314 owner');
+assert.match(store,/liveState\?\.processing\?\.running/,'active SHOPEE pause polling must use in-memory state');
+assert.match(store,/if \(shouldUseLightCheckpoint\(state, type\)\) return lightCheckpoint\(state, type\)/);
+assert.match(store,/ZERO_WAIT_FAIL_OPEN_NEVER_ABORT_SHOPEE/,'progress SQLite contention must not abort CE API processing');
+assert.match(store,/finalMirrorFailurePolicy: 'FAIL_CLOSED'/,'authoritative final persistence must remain fail-closed');
+assert.doesNotMatch(store,/scanFullMirrorEveryBatches|eventExceptionFullMirrorEveryBatches/,'old 2-scan/4-track full mirror cadence must be retired');
+assert.doesNotMatch(store,/shouldUseFastCheckpoint/,'legacy stride selector must no longer own runtime persistence');
+assert.doesNotMatch(store,/BEGIN IMMEDIATE/,'progress checkpoint path must not grab an immediate SQLite writer lock');
 
 async function trackCase(businessType){
   const bills=Array.from({length:670},(_,i)=>`${businessType}-${String(i+1).padStart(4,'0')}`);let active=0,maxActive=0,calls=0;
@@ -106,4 +123,4 @@ await confirmCase('SHOPEE',2);await confirmCase('CCSL',1);
 const aliasRaw={async trackQuery(codes){return codes.map(shipmentCode=>({shipmentCode}));}};
 assert.ok(createShopeeThroughputClient({businessType:'SHOPEE',needTrackBills:['A']},aliasRaw).__ceQcThroughputPools.track);
 assert.ok(createCcslThroughputClient({businessType:'CCSL',needTrackBills:['B']},aliasRaw).__ceQcThroughputPools.track);
-console.log(`[V345] all-business throughput smoke passed · scan=350 for all · SHOPEE confirm x2 · CCSL confirm single lane including fallback · track=50x4 including fallback · CCSL resume boundaries exact · synthetic track ${shopeeTrack.toFixed(1)}/${ccslTrack.toFixed(1)}ms`);
+console.log(`[V345] all-business throughput + SHOPEE final-only checkpoint smoke passed · scan=350 for all · SHOPEE confirm x2 · CCSL confirm single lane including fallback · track=50x4 including fallback · SHOPEE active SQLite checkpoint zero-wait/fail-open · synthetic track ${shopeeTrack.toFixed(1)}/${ccslTrack.toFixed(1)}ms`);
