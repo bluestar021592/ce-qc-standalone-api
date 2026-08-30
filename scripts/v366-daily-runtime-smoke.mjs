@@ -21,9 +21,12 @@ process.env.SQLITE_CACHE_KIB=8192;
 
 let server=null;
 try {
-  // Import order mirrors bootstrap: V102 owns the safety/atomic wrapper first;
-  // V42 then replaces the endpoint's real final handler while preserving V102.
+  // Mirror the real bootstrap route-owner order exactly. V102 owns the
+  // pre-persistence safety + atomic wrapper, V146 inserts normalized report-date
+  // middleware, then V42 replaces only the final handler with the seven-business
+  // importer while preserving both earlier owners.
   await import('../src/v102UnifiedImportSafetyGatePatch.js');
+  await import('../src/v146UnifiedImportDateBridgePatch.js');
   await import('../src/v42WhppPatch.js');
   const { getDb, closeDb }=await import('../src/db.js');
   const { saveAppState, loadAppState }=await import('../src/store.js');
@@ -88,7 +91,7 @@ try {
   app.post('/api/import/unified-daily-report',
     (req,_res,next)=>{
       req.file={path:reportFile,originalname:'8-16.xls'};
-      req.body={reportDate:'2026-08-16'};
+      req.body={reportDate:'2026/08/16'};
       next();
     },
     (_req,res)=>res.status(599).json({ok:false,error:'V42 owner was not installed'})
@@ -102,6 +105,8 @@ try {
   const response=await fetch(`http://127.0.0.1:${port}/api/import/unified-daily-report`,{method:'POST'});
   const payload=await response.json();
   assert.equal(response.status,200,JSON.stringify(payload));
+  assert.equal(response.headers.get('x-ce-qc-import-date'),'2026-08-16','V146 bridge must normalize the request date before V102/V42 persistence');
+  assert.ok(response.headers.get('x-ce-qc-import-date-bridge'),'V146 date bridge header must prove the real middleware ran');
   assert.equal(payload.ok,true);
   assert.equal(payload.importCommitted,true);
   assert.equal(payload.reportDate,'2026-08-16');
@@ -128,7 +133,7 @@ try {
   assert.equal(Number(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate='2026-08-16'").get()?.count||0),1);
   assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM unified_import_batches WHERE reportDate='2026-08-16' AND status='VALID'").get()?.count||0),1,'08-16 must expose exactly one VALID unified batch');
 
-  console.log('[V366 RUNTIME] PASS 08-15→08-16 · six combined + preserved WHPP = seven · CCSL/SHOPEE/WHPP current states all 08-16 · normalized queue counts 4/2/1 · explicit atomic commit verified');
+  console.log('[V366 RUNTIME] PASS exact bootstrap route chain V102→V146→V42 · 08-15→08-16 · six combined + preserved WHPP = seven · CCSL/SHOPEE/WHPP current states all 08-16 · normalized queue counts 4/2/1 · explicit atomic commit verified');
 
   await new Promise(resolve=>server.close(resolve));
   server=null;
