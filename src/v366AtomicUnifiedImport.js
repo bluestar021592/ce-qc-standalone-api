@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-export const V366_ATOMIC_UNIFIED_IMPORT_ID = '2026-08-30-v366-atomic-seven-business-import-v1';
+export const V366_ATOMIC_UNIFIED_IMPORT_ID = '2026-08-30-v366-atomic-seven-business-import-v2';
 
 const LOCK_KEY = Symbol.for('ce-qc.v366-atomic-unified-import-lock');
 
@@ -24,8 +24,18 @@ function safeMessage(error) {
 }
 
 export async function runAtomicUnifiedImportV366(finalHandler, req, res, next) {
+  return runAtomicUnifiedImportWithDbV366(finalHandler, req, res, next, getDb(), { useGlobalLock: true });
+}
+
+// Exported so the go-live gate can execute the exact production transaction
+// algorithm against an in-memory node:sqlite DatabaseSync. Production always
+// enters through runAtomicUnifiedImportV366 above and therefore uses the real
+// singleton database plus the global single-import lock.
+export async function runAtomicUnifiedImportWithDbV366(finalHandler, req, res, next, db, options = {}) {
   if (typeof finalHandler !== 'function') throw new TypeError('V366 requires the final unified-import handler.');
-  if (globalThis[LOCK_KEY]) {
+  if (!db || typeof db.exec !== 'function') throw new TypeError('V366 requires a SQLite database with exec().');
+  const useGlobalLock = options.useGlobalLock !== false;
+  if (useGlobalLock && globalThis[LOCK_KEY]) {
     return res.status(409).json({
       ok: false,
       code: 'UNIFIED_IMPORT_ALREADY_ACTIVE',
@@ -34,7 +44,6 @@ export async function runAtomicUnifiedImportV366(finalHandler, req, res, next) {
     });
   }
 
-  const db = getDb();
   const hadOwnExec = Object.prototype.hasOwnProperty.call(db, 'exec');
   const previousOwnExec = hadOwnExec ? db.exec : null;
   const originalExec = db.exec.bind(db);
@@ -47,7 +56,7 @@ export async function runAtomicUnifiedImportV366(finalHandler, req, res, next) {
   let handlerResult;
   let handlerError = null;
 
-  globalThis[LOCK_KEY] = token;
+  if (useGlobalLock) globalThis[LOCK_KEY] = token;
 
   const restoreExec = () => {
     try {
@@ -142,7 +151,7 @@ export async function runAtomicUnifiedImportV366(finalHandler, req, res, next) {
   } finally {
     res.json = originalJson;
     restoreExec();
-    if (globalThis[LOCK_KEY] === token) delete globalThis[LOCK_KEY];
+    if (useGlobalLock && globalThis[LOCK_KEY] === token) delete globalThis[LOCK_KEY];
   }
 
   if (handlerError) throw handlerError;
