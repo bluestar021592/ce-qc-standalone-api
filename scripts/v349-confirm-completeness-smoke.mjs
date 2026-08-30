@@ -101,5 +101,10 @@ await import('./v314-shopee-throughput-smoke.mjs');
 await import('./v339-ccsl-throughput-smoke.mjs');
 await import('./v346-whpp-throughput-smoke.mjs');
 
+// Candidate-only validation itself is a release safety contract: full go-live tests
+// may run against a detached temporary SHA, but the live runtime, live SQLite and
+// installed worktree must not be mutable from that validation path.
+await import('./v367-candidate-only-safety-smoke.cjs');
+
 // Preserve the existing WHPP retry -> source truth -> visible truth regression chain.
 await import('./v350-whpp-retry-fastack-smoke.mjs');
