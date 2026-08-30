@@ -2,6 +2,7 @@
   if(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__)return;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__={};
   const VERSION='2026-08-30-v366-atomic-seven-business-import-ui-v1';
+  const FILE_DATE_REVISION='2026-08-30-v379-file-date-conflict-guard-v2';
   const ROUTE='/api/import/unified-daily-report';
   const originalFetch=global.fetch.bind(global);
   let candidateTarget='';
@@ -20,10 +21,28 @@
     match=text.match(/^(\d{1,2})-(\d{1,2})$/);if(match)return validDate(new Date().getFullYear(),match[1],match[2]);
     return '';
   }
+  function inferredYear(month){
+    let raw='';
+    try{
+      raw=String((typeof unifiedImportState!=='undefined'&&unifiedImportState?.reportDate)
+        ||(typeof appState!=='undefined'&&appState?.reportDate)
+        ||(typeof shopeeState!=='undefined'&&shopeeState?.reportDate)
+        ||document.getElementById('reportDate')?.value||'');
+    }catch{}
+    const normalized=String(raw||'').normalize('NFKC').trim().replace(/[年/.]/g,'-').replace(/月/g,'-').replace(/日/g,'').replace(/\s+/g,'');
+    const match=normalized.match(/^(20\d{2})-(\d{1,2})-(\d{1,2})$/);
+    let year=match?Number(match[1]):new Date().getFullYear();
+    const baseMonth=match?Number(match[2]):0;
+    const nextMonth=Number(month||0);
+    if(baseMonth===12&&nextMonth===1)year+=1;
+    else if(baseMonth===1&&nextMonth===12)year-=1;
+    return year;
+  }
   function filenameDate(name=''){
     const base=String(name||'').normalize('NFKC').replace(/\.(xlsx|xls)$/i,'');
-    let match=base.match(/(?:^|[^0-9])(20\d{2})[年._\-/](\d{1,2})[月._\-/](\d{1,2})(?:日|[^0-9]|$)/);if(match)return validDate(match[1],match[2],match[3]);
-    match=base.match(/(?:^|[^0-9])(\d{1,2})[._\-/](\d{1,2})(?:[^0-9]|$)/);if(match)return validDate(new Date().getFullYear(),match[1],match[2]);
+    let match=base.match(/(?:^|[^0-9])(20\d{2})\s*(?:年|[._\-/])\s*(\d{1,2})\s*(?:月|[._\-/])\s*(\d{1,2})(?:\s*日|[^0-9]|$)/);if(match)return validDate(match[1],match[2],match[3]);
+    match=base.match(/(?:^|[^0-9])(20\d{2})(\d{2})(\d{2})(?:[^0-9]|$)/);if(match)return validDate(match[1],match[2],match[3]);
+    match=base.match(/(?:^|[^0-9])(\d{1,2})\s*(?:月|[._\-/])\s*(\d{1,2})(?:\s*日|[^0-9]|$)/);if(match)return validDate(inferredYear(match[1]),match[1],match[2]);
     return '';
   }
   function status(){return document.getElementById('fileStatus');}
@@ -38,7 +57,23 @@
         ||normalizeDate(typeof shopeeState!=='undefined'?shopeeState?.reportDate:'');
     }catch{return '';}
   }
-  function targetDate(){return pendingTarget||candidateTarget||filenameDate(selectedFile()?.name||'')||committedDate();}
+  function resetStaleDateOverride(){
+    try{if(typeof reportDateManualCorrection!=='undefined')reportDateManualCorrection=false;}catch{}
+    try{if(typeof reportDateOverrideSource!=='undefined')reportDateOverrideSource='';}catch{}
+  }
+  function manualOverrideDate(){
+    try{
+      const enabled=typeof reportDateManualCorrection!=='undefined'&&reportDateManualCorrection===true;
+      const source=typeof reportDateOverrideSource!=='undefined'?String(reportDateOverrideSource||''):'';
+      if(enabled&&source==='manual')return normalizeDate(document.getElementById('reportDate')?.value||'');
+    }catch{}
+    return '';
+  }
+  function targetDate(){
+    const file=selectedFile();
+    if(file)return pendingTarget||manualOverrideDate()||candidateTarget||filenameDate(file.name);
+    return pendingTarget||manualOverrideDate()||candidateTarget||committedDate();
+  }
   function syncCommittedTruth(payload=null){
     const payloadDate=normalizeDate(payload?.reportDate||'');
     if(payload&&payloadDate&&payload?.importCommitted===true){
@@ -70,7 +105,12 @@
   function restoreCommittedDate(){syncCommittedTruth();}
   function showCandidateSource(){
     const source=document.getElementById('dateDetectionSource');
-    if(source&&candidateTarget)source.textContent=`识别来源：文件名（待导入确认 ${candidateTarget}）`;
+    if(!source)return;
+    const manual=manualOverrideDate();
+    const file=selectedFile();
+    if(manual){source.textContent=`识别来源：手动修正（待导入确认 ${manual}）`;return;}
+    if(candidateTarget){source.textContent=`识别来源：文件名（待导入确认 ${candidateTarget}）`;return;}
+    if(file){source.textContent=`识别来源：文件名未含可确认日期（导入时从Excel内容识别；不会沿用 ${committedDate()||'上一份正式日报'}）`;return;}
   }
   function setImportButtonBusy(value){
     importBusy=Boolean(value);
@@ -101,51 +141,65 @@
   function scheduleSevenBusinessClassification(payload){[50,250,900].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(payload),ms));}
   function markSelected(){
     const file=selectedFile();if(!file)return;
+    resetStaleDateOverride();
+    pendingTarget='';
     candidateTarget=filenameDate(file.name)||'';
     restoreCommittedDate();
     showCandidateSource();
-    setTimeout(()=>show('info',candidateTarget?`已选择 ${candidateTarget} 日报，尚未写入数据库`:'已选择日报，等待后台识别日期',`文件：${file.name}。当前正式日报仍保持 ${committedDate()||'上一成功日期'}；只有七业务分类和三个处理队列全部保存成功后才切换。`),0);
+    setTimeout(()=>show('info',candidateTarget?`已选择 ${candidateTarget} 日报，尚未写入数据库`:'已选择日报，导入时从Excel内容确认日期',candidateTarget?`文件：${file.name}。当前正式日报仍保持 ${committedDate()||'上一成功日期'}；只有七业务分类和三个处理队列全部保存成功后才切换。`:`文件：${file.name}。文件名未给出可确认日期，系统不会沿用 ${committedDate()||'上一成功日期'}；导入时由Excel内容确定新日期。`),0);
   }
 
   document.addEventListener('change',event=>{if(event.target?.id==='excelFile')markSelected();},true);
   document.addEventListener('click',event=>{
     const detect=event.target?.closest?.('#detectFilenameDateButton');
     if(detect){
+      event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
       const file=selectedFile();
-      candidateTarget=filenameDate(file?.name||'')||candidateTarget;
+      candidateTarget=filenameDate(file?.name||'')||'';
       setTimeout(()=>{
         restoreCommittedDate();
         showCandidateSource();
         if(candidateTarget)show('info',`文件名识别到 ${candidateTarget}，等待导入确认`,`这只是待导入日期，不会提前改变当前七业务、扫描、轨迹或WHPP的正式日期。`);
+        else if(file)show('info','文件名未含可确认日期，等待Excel内容识别',`文件：${file.name}。系统不会把当前正式日报 ${committedDate()||'上一成功日期'} 当成这份新文件的日期。`);
       },0);
       return;
     }
     const button=event.target?.closest?.('[data-testid="combined-daily-import"]');if(!button)return;
     if(importBusy){event.preventDefault();event.stopImmediatePropagation();return;}
     const file=selectedFile();if(!file)return;
-    pendingTarget=candidateTarget||filenameDate(file.name)||normalizeDate(document.getElementById('reportDate')?.value||'');
-    global.__CE_QC_PENDING_IMPORT_DATE__={reportDate:pendingTarget,committedReportDate:committedDate(),startedAt:Date.now(),active:true};
+    const manualTarget=manualOverrideDate();
+    pendingTarget=manualTarget||candidateTarget||filenameDate(file.name);
+    global.__CE_QC_PENDING_IMPORT_DATE__={reportDate:pendingTarget,committedReportDate:committedDate(),startedAt:Date.now(),active:true,source:manualTarget?'manual':candidateTarget?'filename':'workbook'};
     restoreCommittedDate();
     showCandidateSource();
     setImportButtonBusy(true);
-    show('info',`正在导入 ${pendingTarget||'当前'} 日报…`,`正在执行日期校验、七业务分类、CCSL/SHOPEE/WHPP队列保存和最终原子提交。完成前不会替换上一份日报。`);
+    show('info',pendingTarget?`正在导入 ${pendingTarget} 日报…`:'正在从Excel内容识别日报日期…','正在执行日期校验、七业务分类、CCSL/SHOPEE/WHPP队列保存和最终原子提交。完成前不会替换上一份日报，也不会沿用上一天日期。');
   },true);
 
   global.fetch=async function v146UnifiedImportFetch(input,init){
     const url=typeof input==='string'?input:String(input?.url||'');
     const isImport=url.includes(ROUTE);
     if(!isImport)return originalFetch(input,init);
-    let target=pendingTarget||candidateTarget||filenameDate(selectedFile()?.name||'')||targetDate();
+    const selectedManual=manualOverrideDate();
+    let target=pendingTarget||selectedManual||candidateTarget||filenameDate(selectedFile()?.name||'');
     let committed=false;
     let payload=null;
     try{
       const body=init?.body;
       if(body instanceof FormData){
         const file=body.get('file');
-        target=pendingTarget||candidateTarget||filenameDate(file?.name||'')||normalizeDate(body.get('reportDate')||'')||target;
-        if(target)body.set('reportDate',target);
+        const fileTarget=filenameDate(file?.name||'');
+        const manualTarget=manualOverrideDate();
+        target=pendingTarget||manualTarget||candidateTarget||fileTarget;
+        if(target){
+          body.set('reportDate',target);
+          body.set('reportDateSource',manualTarget&&target===manualTarget?'manual':'current-file');
+        }else{
+          body.delete('reportDate');
+          body.delete('reportDateSource');
+        }
       }
-      show('info',`正在导入 ${target||'当前'} 日报…`,`新日期仍处于待确认状态；后台七业务和三个处理队列全部原子提交前，页面继续使用上一份正式日报。`);
+      show('info',target?`正在导入 ${target} 日报…`:'正在从Excel内容识别日报日期…','新日期仍处于待确认状态；后台七业务和三个处理队列全部原子提交前，页面继续使用上一份正式日报。');
       const response=await originalFetch(input,init);
       try{payload=await response.clone().json();}catch{}
       const responseDate=normalizeDate(payload?.reportDate||'');
@@ -153,13 +207,15 @@
       committed=Boolean(response.ok&&payload?.ok===true&&payload?.importCommitted===true&&responseDate&&(!requestedDate||responseDate===requestedDate));
       if(!committed){
         const mismatch=response.ok&&payload?.ok===true&&payload?.importCommitted===true&&requestedDate&&responseDate&&requestedDate!==responseDate;
-        const message=mismatch?`后端提交日期 ${responseDate} 与待导入日期 ${requestedDate} 不一致`:String(payload?.error||`HTTP ${response.status}`);
+        const missingDate=response.ok&&payload?.ok===true&&payload?.importCommitted===true&&!responseDate;
+        const message=mismatch?`后端提交日期 ${responseDate} 与待导入日期 ${requestedDate} 不一致`:missingDate?'后端已返回提交成功但没有可确认的日报日期，浏览器已阻止切换':String(payload?.error||`HTTP ${response.status}`);
         show('error',`${target||'本次'} 日报导入未完成`,`${message}。上一份成功日报继续生效；不会进入半分类、半扫描状态。`);
         restoreCommittedDate();
         showCandidateSource();
       }else{
         syncCommittedTruth(payload);
         candidateTarget='';
+        resetStaleDateOverride();
         show('success',`${responseDate} 日报已完整提交`,`七业务分类和 CCSL → SHOPEE → WHPP 三阶段处理入口均已原子切换到新日期。`);
         scheduleSevenBusinessClassification(payload);
         scheduleCommittedTruth(payload);
@@ -186,7 +242,9 @@
   [100,400,1200,3000].forEach(ms=>setTimeout(()=>syncCommittedTruth(),ms));
   [200,900,1800].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(),ms));
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.version=VERSION;
+  global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.fileDateRevision=FILE_DATE_REVISION;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.getPendingDate=()=>pendingTarget||candidateTarget;
+  global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.detectFilenameDate=filenameDate;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.syncClassification=syncSevenBusinessClassification;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.syncCommittedTruth=syncCommittedTruth;
 })(window);

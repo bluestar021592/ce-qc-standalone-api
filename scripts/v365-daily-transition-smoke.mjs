@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { runAtomicUnifiedImportWithDbV366 } from '../src/v366AtomicUnifiedImport.js';
+import { resolveUnifiedImportDate } from '../src/v146UnifiedImportDateBridgePatch.js';
 
 for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v146UnifiedImportDateBridgePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
@@ -88,6 +89,20 @@ function fakeResponse(){
   db.close();
 }
 
+// V379 server-side guard: a stale previous-day request can never override a
+// newly selected file date unless the operator explicitly chose manual mode.
+{
+  const conflict=resolveUnifiedImportDate({requestDateValue:'2026-08-16',filename:'2026-08-17.xls',requestSource:'current-file'});
+  assert.equal(conflict.ok,false,'stale 08-16 request date must be rejected against an 08-17 filename');
+  assert.equal(conflict.code,'UNIFIED_IMPORT_DATE_CONFLICT');
+  const filenameOnly=resolveUnifiedImportDate({filename:'2026-08-17.xls'});
+  assert.equal(filenameOnly.ok,true);
+  assert.equal(filenameOnly.reportDate,'2026-08-17','filename-only import must use the new file date');
+  const explicitManual=resolveUnifiedImportDate({requestDateValue:'2026-08-16',filename:'2026-08-17.xls',requestSource:'manual'});
+  assert.equal(explicitManual.ok,true,'explicit manual correction must remain available');
+  assert.equal(explicitManual.reportDate,'2026-08-16');
+}
+
 const v42=fs.readFileSync(new URL('../src/v42WhppPatch.js',import.meta.url),'utf8');
 const v44=fs.readFileSync(new URL('../src/v44WhppUiPatch.js',import.meta.url),'utf8');
 const v102=fs.readFileSync(new URL('../src/v102UnifiedImportSafetyGatePatch.js',import.meta.url),'utf8');
@@ -126,7 +141,7 @@ assert.match(v42,/IMPORT_VERIFY_CCSL_QUEUE_MISMATCH/,'CCSL normalized queue memb
 assert.match(v42,/IMPORT_VERIFY_SHOPEE_QUEUE_MISMATCH/,'SHOPEE normalized queue membership and CN\/VN split must be verified');
 assert.match(v42,/IMPORT_VERIFY_WHPP_QUEUE_MISMATCH/,'WHPP normalized daily membership must be verified');
 assert.match(v42,/IMPORT_VERIFY_CCSL_STATE_DATE_MISMATCH/,'CCSL current-state date must be verified');
-assert.match(v42,/IMPORT_VERIFY_SHOPEE_STATE_DATE_MISMATCH/,'SHOPEE current-state date must be verified');
+assert.match(v42,/IMPORT_VERIFY_SHOPEE_STATE_DATE_MISMATCH/,'SHOPEE normalized queue membership and CN\/VN split must be verified');
 assert.match(v42,/IMPORT_VERIFY_WHPP_STATE_DATE_MISMATCH/,'WHPP current-state date must be verified');
 assert.match(v42,/const verification = verifyAtomicImportPersistence\(/,'persisted verification must run in the real import path');
 const verifyAt=v42.indexOf('const verification = verifyAtomicImportPersistence(');
@@ -148,7 +163,10 @@ assert.match(v102,/return await runAtomicUnifiedImportV366\(finalHandler, req, r
 assert.match(v102,/ATOMIC_IMPORT_ROLLBACK_FAILED/,'rollback failure must be treated as a fatal import error');
 assert.match(v102,/closeDb\(\)/,'rollback failure must reset the singleton SQLite connection');
 assert.match(v146Bridge,/2026-08-16-v146-unified-import-date-bridge-v1/,'server-side date bridge must remain installed between safety and final import ownership');
-assert.match(v146Bridge,/normalizeImportDate/,'date bridge must normalize the target report date before persistence');
+assert.match(v146Bridge,/2026-08-30-v379-request-file-date-conflict-guard-v1/,'server-side bridge must reject stale request-date/file-date conflicts');
+assert.match(v146Bridge,/UNIFIED_IMPORT_DATE_CONFLICT/,'server-side bridge must expose an explicit date conflict code');
+assert.match(v146Bridge,/requestSource: req\.body\?\.reportDateSource/,'server-side bridge must receive the current-file/manual source marker');
+assert.match(v146Bridge,/source === 'manual'/,'only explicit manual correction may override a conflicting filename date');
 assert.match(v366,/2026-08-30-v366-atomic-seven-business-import-v3/,'atomic transaction owner version must include rollback-failure detection');
 assert.match(v366,/runAtomicUnifiedImportWithDbV366/,'the exact production atomic core must be directly executable by go-live tests');
 assert.match(v366,/originalExec\('BEGIN IMMEDIATE'\)/,'atomic owner must hold one outer write transaction');
@@ -168,16 +186,38 @@ const bootstrapV42=bootstrap.indexOf("importPhase('v42WhppPatch'");
 assert.ok(bootstrapV102>=0&&bootstrapV146>bootstrapV102&&bootstrapV42>bootstrapV146,'production bootstrap route ownership must remain V102 safety/atomic → V146 date bridge → V42 final importer');
 
 assert.match(v146,/2026-08-30-v366-atomic-seven-business-import-ui-v1/,'browser import owner must isolate pending dates and wait for atomic commit');
+assert.match(v146,/2026-08-30-v379-file-date-conflict-guard-v2/,'browser import owner must include current-file fail-closed plus server conflict-source ownership');
 assert.match(v146,/let candidateTarget=''/,'filename-recognized date must live outside the committed report-date input');
 assert.match(v146,/#detectFilenameDateButton/,'filename detection itself must be intercepted');
 assert.match(v146,/restoreCommittedDate\(\)/,'pending selection must restore the last committed business date');
 assert.match(v146,/body\.set\('reportDate',target\)/,'captured candidate date must still be submitted to the backend');
+assert.match(v146,/body\.set\('reportDateSource',manualTarget&&target===manualTarget\?'manual':'current-file'\)/,'frontend must label explicit manual override separately from the current file date');
+assert.match(v146,/body\.delete\('reportDate'\)/,'an unrecognized new file must delete any stale prior reportDate so backend workbook detection remains authoritative');
+assert.match(v146,/if\(file\)return pendingTarget\|\|manualOverrideDate\(\)\|\|candidateTarget\|\|filenameDate\(file\.name\)/,'selected new files must fail closed instead of falling back to the committed previous day');
+assert.match(v146,/pendingTarget=manualTarget\|\|candidateTarget\|\|filenameDate\(file\.name\)/,'import click must use only explicit current-file manual override or the selected file date');
+assert.doesNotMatch(v146,/pendingTarget=.*normalizeDate\(document\.getElementById\('reportDate'\)/,'new selected files must never inherit the previous committed reportDate input');
+assert.match(v146,/resetStaleDateOverride\(\);[\s\S]*candidateTarget=filenameDate\(file\.name\)/,'choosing a new file must clear stale filename/manual override state before deciding its date');
+assert.match(v146,/文件名未含可确认日期/,'unknown filenames must visibly explain workbook-content detection instead of pretending the previous day is current');
 assert.match(v146,/payload\?\.ok===true&&payload\?\.importCommitted===true/,'browser may switch only after explicit successful atomic commit acknowledgement');
 assert.doesNotMatch(v146,/importCommitted!==false/,'undefined commit acknowledgement must never be treated as success');
 assert.match(v146,/classification-whpp/,'import result must visibly include WHPP as business seven');
 assert.match(v146,/正在导入并确认七业务/,'long import must expose a single non-repeatable in-flight action');
 assert.match(v146,/__CE_QC_PENDING_IMPORT_DATE__/,'pending date must be observable without becoming canonical processing truth');
 assert.match(v44,/v146-unified-import-date-status\.js\?v=20260830-v366-1/,'HTML owner must force the browser to load the V366 import UI instead of a cached older script');
+assert.match(v44,/datefix=20260830-v379-1/,'HTML owner must cache-bust the V379 new-file date conflict guard');
+
+const parserStart=v146.indexOf('  function validDate');
+const parserEnd=v146.indexOf('  function status');
+assert.ok(parserStart>=0&&parserEnd>parserStart,'V379 filename parser helpers must remain extractable for go-live regression');
+const detectFilenameDate=new Function('document','unifiedImportState','appState','shopeeState',`${v146.slice(parserStart,parserEnd)};return filenameDate;`)(
+  {getElementById(){return {value:'2026-08-16'};}},
+  {reportDate:'2026-08-16'},
+  null,
+  null
+);
+assert.equal(detectFilenameDate('8-17.xls'),'2026-08-17','real operator filename 8-17.xls must advance from committed 08-16 to 08-17');
+assert.equal(detectFilenameDate('08-17.xls'),'2026-08-17','zero-padded 08-17.xls must resolve to 08-17');
+assert.equal(detectFilenameDate('8月17日.xls'),'2026-08-17','Chinese 8月17日.xls must resolve to 08-17');
 
 for (const source of [v67,v168,v132]) {
   assert.match(source,/reportDate/,'all processing\/status owners must remain date-bound');
@@ -187,4 +227,4 @@ assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require cano
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V365/V366] exact daily transition + executable atomic persistence gate passed · real DatabaseSync commit/rollback behavior proven · rollback failure cannot be silently swallowed · production route order V102→V146→V42 locked · candidate date stays noncanonical · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
+console.log('[V365/V366/V379] exact daily transition + frontend fail-closed + backend request/file conflict guard + executable atomic persistence gate passed · 8-17.xls/08-17.xls/8月17日.xls resolve to 2026-08-17 · stale 08-16 request cannot override 08-17 filename · explicit manual correction remains available · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
