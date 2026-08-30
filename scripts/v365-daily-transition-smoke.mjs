@@ -142,18 +142,22 @@ const activateAt=handler.indexOf('activateUnifiedCoreImport(staged)');
 const persistenceAt=handler.indexOf('verifyAtomicImportPersistence(');
 assert.ok(stagedAt>=0&&ccslAt>stagedAt&&shopeeAt>ccslAt&&whppAt>shopeeAt&&activateAt>whppAt&&persistenceAt>activateAt,'08-15→08-16 transition must remain STAGING until CCSL, SHOPEE and WHPP queues are ready, then verify persisted truth');
 
-assert.match(v102,/2026-08-30-v366-pre-persistence-atomic-import-safety-v3/,'pre-persistence owner must install the V366 atomic gate');
+assert.match(v102,/2026-08-30-v366-pre-persistence-atomic-import-safety-v4/,'pre-persistence owner must install the V366 atomic gate and rollback-failure reset');
 assert.match(v102,/runAtomicUnifiedImportV366/,'the real unified-import final handler must execute through the atomic owner');
 assert.match(v102,/return await runAtomicUnifiedImportV366\(finalHandler, req, res, next\)/,'V102 must await the atomic owner before returning any import result');
+assert.match(v102,/ATOMIC_IMPORT_ROLLBACK_FAILED/,'rollback failure must be treated as a fatal import error');
+assert.match(v102,/closeDb\(\)/,'rollback failure must reset the singleton SQLite connection');
 assert.match(v146Bridge,/2026-08-16-v146-unified-import-date-bridge-v1/,'server-side date bridge must remain installed between safety and final import ownership');
 assert.match(v146Bridge,/normalizeImportDate/,'date bridge must normalize the target report date before persistence');
-assert.match(v366,/2026-08-30-v366-atomic-seven-business-import-v2/,'atomic transaction owner version must be active');
+assert.match(v366,/2026-08-30-v366-atomic-seven-business-import-v3/,'atomic transaction owner version must include rollback-failure detection');
 assert.match(v366,/runAtomicUnifiedImportWithDbV366/,'the exact production atomic core must be directly executable by go-live tests');
 assert.match(v366,/originalExec\('BEGIN IMMEDIATE'\)/,'atomic owner must hold one outer write transaction');
 assert.match(v366,/res\.json = function v366BufferedJson/,'success or failure JSON must be buffered until commit or rollback');
 assert.match(v366,/const explicitCommit = payload\?\.importCommitted === true/,'outer transaction must require explicit backend commit acknowledgement');
 assert.match(v366,/originalExec\('COMMIT'\)/,'all seven-business writes must commit only at the outer owner');
 assert.match(v366,/originalExec\('ROLLBACK'\)/,'any incomplete import must have an outer rollback path');
+assert.match(v366,/ATOMIC_IMPORT_ROLLBACK_FAILED/,'a failed SQLite rollback must never be silently reported as safe');
+assert.match(v366,/db\.isTransaction/,'rollback verification must inspect the real SQLite transaction state');
 assert.match(v366,/innerRollbackSeen/,'an inner rollback request must poison the outer success path');
 assert.match(v366,/nestedDepth !== 0/,'unbalanced nested transactions must block commit');
 assert.match(v366,/UNIFIED_IMPORT_ALREADY_ACTIVE/,'concurrent daily imports must be rejected instead of interleaving writes');
@@ -183,4 +187,4 @@ assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require cano
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V365/V366] exact daily transition + executable atomic persistence gate passed · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · candidate date stays noncanonical · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
+console.log('[V365/V366] exact daily transition + executable atomic persistence gate passed · real DatabaseSync commit/rollback behavior proven · rollback failure cannot be silently swallowed · production route order V102→V146→V42 locked · candidate date stays noncanonical · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
