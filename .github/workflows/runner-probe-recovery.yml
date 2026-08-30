@@ -1,0 +1,28 @@
+name: CE QC recovery runner probe
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Runner alive
+        run: |
+          echo "ubuntu runner alive"
+          uname -a
+          node --version || true
+
+  windows-probe:
+    runs-on: windows-latest
+    steps:
+      - name: Runner alive
+        shell: pwsh
+        run: |
+          Write-Host "windows runner alive"
+          node --version
