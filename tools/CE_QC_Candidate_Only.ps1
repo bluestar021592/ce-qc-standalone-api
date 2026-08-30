@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Host.UI.RawUI.WindowTitle = 'CE QC CANDIDATE ONLY VALIDATION'
-$V367_CANDIDATE_ONLY_ID = '2026-08-30-v367-isolated-candidate-only-no-live-mutation-v1'
+$V367_CANDIDATE_ONLY_ID = '2026-08-30-v367-isolated-candidate-only-exact-sha-v2'
 
 function Run-Git([string[]]$Arguments, [switch]$AllowFailure) {
   & git @Arguments
@@ -58,8 +58,14 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'npm is not in
 $CandidateRef = ([string]$CandidateRef).Trim()
 if (-not $CandidateRef) { $CandidateRef = ([string]$env:CE_QC_CANDIDATE_REF).Trim() }
 if (-not $CandidateRef) { $CandidateRef = 'recovery/20260830-daily-chain' }
-$ExpectedSha = ([string]$ExpectedSha).Trim()
-if (-not $ExpectedSha) { $ExpectedSha = ([string]$env:CE_QC_CANDIDATE_SHA).Trim() }
+$ExpectedSha = ([string]$ExpectedSha).Trim().ToLowerInvariant()
+if (-not $ExpectedSha) { $ExpectedSha = ([string]$env:CE_QC_CANDIDATE_SHA).Trim().ToLowerInvariant() }
+if (-not $ExpectedSha) {
+  throw 'CANDIDATE_SHA_REQUIRED: candidate-only validation refuses a moving branch without an explicit exact SHA.'
+}
+if ($ExpectedSha -notmatch '^[0-9a-f]{40}$') {
+  throw "CANDIDATE_SHA_INVALID: expected a full 40-character Git SHA, got '$ExpectedSha'."
+}
 
 $LiveHeadBefore = Git-Text @('rev-parse','HEAD')
 $TrackedBefore = (@(& git status --porcelain --untracked-files=no) | Out-String).Trim()
@@ -72,11 +78,9 @@ if ($FetchCode -ne 0) {
   throw 'Candidate fetch failed. Live runtime/code/database were not changed.'
 }
 
-$CandidateSha = Git-Text @('rev-parse','FETCH_HEAD')
-if ($ExpectedSha) {
-  if ($CandidateSha.ToLowerInvariant() -ne $ExpectedSha.ToLowerInvariant()) {
-    throw "Candidate SHA mismatch. Expected $ExpectedSha, fetched $CandidateSha. Live runtime/code/database were not changed."
-  }
+$CandidateSha = (Git-Text @('rev-parse','FETCH_HEAD')).ToLowerInvariant()
+if ($CandidateSha -ne $ExpectedSha) {
+  throw "Candidate SHA mismatch. Expected $ExpectedSha, fetched $CandidateSha. Live runtime/code/database were not changed."
 }
 Write-Host "Exact candidate SHA: $CandidateSha" -ForegroundColor Cyan
 
