@@ -10,7 +10,9 @@ for (const file of ['src/whppPipeline.js','src/v314ShopeeThroughputCore.js','src
 assert.match(WHPP_THROUGHPUT_POLICY_ID, /whpp-independent-350-scan-50x4-evidence/);
 const source = fs.readFileSync('src/whppPipeline.js', 'utf8');
 assert.match(source, /const CONFIRM_BATCH_SIZE = 350/);
-assert.match(source, /state\.scanPool = allBills/);
+assert.match(source, /const lockedPodBills = new Set\(allBills\.filter\(bill => podLocks\.has\(bill\)\)\)/,'persisted WHPP POD locks must be explicit terminal evidence');
+assert.match(source, /const activeScanBills = allBills\.filter\(bill => !lockedPodBills\.has\(bill\)\)/,'POD locks must be removed before the confirm scan pool is built');
+assert.match(source, /state\.scanPool = activeScanBills/,'V314 confirm prefetch must see only still-open WHPP tickets');
 assert.match(source, /createUnifiedThroughputClient\(state, client, \{/);
 assert.match(source, /businessType: 'WHPP'/);
 assert.match(source, /confirmConcurrency: 1/);
@@ -21,8 +23,11 @@ assert.match(source, /query: codes => throughputClient\.trackQuery\(codes\)/);
 assert.match(source, /query: codes => throughputClient\.exceptionQuery\(codes\)/);
 assert.match(source, /\['85','100'\]\.includes/,'POD and return must be scan-side terminal');
 assert.match(source, /orderStatus \?\? ''\)\.trim\(\) === '10'/,'cancelled order must be scan-side terminal');
-assert.match(source, /!scanTerminal\.has\(bill\).*scanStatuses\.get\(bill\)\?\.status === 'success'.*!podLocks\.has\(bill\)/s,'only successful nonterminal non-POD-lock bills may enter tracking');
+assert.match(source, /const scanTerminal = new Set\(\[\.\.\.lockedPodBills, \.\.\.podOrReturnTerminal, \.\.\.cancelledByScan\]\)/,'POD locks must participate in WHPP terminal closure');
+assert.match(source, /const needTrack = activeScanBills\.filter\(bill => !scanTerminal\.has\(bill\) && scanStatuses\.get\(bill\)\?\.status === 'success'\)/,'only successful nonterminal still-open bills may enter tracking');
 assert.match(source, /const needException = cleanCodes\(\[\.\.\.needTrack, \.\.\.cancelledByScan\]\)/,'cancelled WHPP bills may get exception enrichment without entering tracking');
+assert.match(source, /if \(lockedPodBills\.has\(bill\)\) \{\s*result = lockedPodResult/,'POD lock must win before failed/retry classification');
+assert.match(source, /terminalEvidenceSource: 'POD_LOCK'/,'final rows must preserve explicit POD-lock evidence');
 
 // WHPP confirm-query: exact 350-ticket planning and a single remote lane.
 {
@@ -96,4 +101,4 @@ assert.match(source, /const needException = cleanCodes\(\[\.\.\.needTrack, \.\.\
   assert.ok(maxActive <= 4, `WHPP fallback must never exceed x4, observed ${maxActive}`);
 }
 
-console.log('[V346] WHPP throughput smoke passed · independent third stage · scan=350x1 · compact resume exact · track=50x4 · exception=50x4 · terminals excluded · fallback bounded');
+console.log('[V346] WHPP throughput smoke passed · POD locks terminal before scan · independent third stage · scan=350x1 · compact resume exact · track=50x4 · exception=50x4 · fallback bounded');
