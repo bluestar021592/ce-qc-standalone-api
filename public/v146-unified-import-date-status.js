@@ -1,9 +1,10 @@
 (function installV146UnifiedImportDateStatus(global){
   if(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__)return;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__={};
-  const VERSION='2026-08-30-v363-pending-date-commit-gate-v1';
+  const VERSION='2026-08-30-v364-pending-date-isolation-v1';
   const ROUTE='/api/import/unified-daily-report';
   const originalFetch=global.fetch.bind(global);
+  let candidateTarget='';
   let pendingTarget='';
   let importBusy=false;
 
@@ -34,11 +35,15 @@
         ||normalizeDate(typeof shopeeState!=='undefined'?shopeeState?.reportDate:'');
     }catch{return '';}
   }
-  function targetDate(){return pendingTarget||normalizeDate(document.getElementById('reportDate')?.value||'')||filenameDate(selectedFile()?.name||'');}
+  function targetDate(){return pendingTarget||candidateTarget||filenameDate(selectedFile()?.name||'')||committedDate();}
   function restoreCommittedDate(){
     const date=committedDate();
     const input=document.getElementById('reportDate');
-    if(input&&date){input.value=date;input.readOnly=true;}
+    if(input){input.value=date||'';input.readOnly=true;}
+  }
+  function showCandidateSource(){
+    const source=document.getElementById('dateDetectionSource');
+    if(source&&candidateTarget)source.textContent=`识别来源：文件名（待导入确认 ${candidateTarget}）`;
   }
   function setImportButtonBusy(value){
     importBusy=Boolean(value);
@@ -51,22 +56,33 @@
     node.innerHTML=`<div data-v146-import-status="${kind}" style="margin-top:8px;padding:10px 12px;border:1px solid ${palette[2]};border-radius:7px;background:${palette[0]};color:${palette[1]};line-height:1.55"><b>${title}</b>${detail?`<div style="margin-top:3px;font-size:12px">${detail}</div>`:''}</div>`;
   }
   function markSelected(){
-    const file=selectedFile();if(!file)return;const date=normalizeDate(document.getElementById('reportDate')?.value||'')||filenameDate(file.name);
-    setTimeout(()=>show('info',date?`已选择 ${date} 日报，尚未写入数据库`:'已选择日报，等待确认日期',`文件：${file.name}。当前正式日报仍保持 ${committedDate()||'上一成功日期'}；只有七业务分类和三个处理队列全部保存成功后才切换。`),0);
+    const file=selectedFile();if(!file)return;
+    candidateTarget=filenameDate(file.name)||'';
+    restoreCommittedDate();
+    showCandidateSource();
+    setTimeout(()=>show('info',candidateTarget?`已选择 ${candidateTarget} 日报，尚未写入数据库`:'已选择日报，等待后台识别日期',`文件：${file.name}。当前正式日报仍保持 ${committedDate()||'上一成功日期'}；只有七业务分类和三个处理队列全部保存成功后才切换。`),0);
   }
 
   document.addEventListener('change',event=>{if(event.target?.id==='excelFile')markSelected();},true);
   document.addEventListener('click',event=>{
+    const detect=event.target?.closest?.('#detectFilenameDateButton');
+    if(detect){
+      const file=selectedFile();
+      candidateTarget=filenameDate(file?.name||'')||candidateTarget;
+      setTimeout(()=>{
+        restoreCommittedDate();
+        showCandidateSource();
+        if(candidateTarget)show('info',`文件名识别到 ${candidateTarget}，等待导入确认`,`这只是待导入日期，不会提前改变当前七业务、扫描、轨迹或WHPP的正式日期。`);
+      },0);
+      return;
+    }
     const button=event.target?.closest?.('[data-testid="combined-daily-import"]');if(!button)return;
     if(importBusy){event.preventDefault();event.stopImmediatePropagation();return;}
     const file=selectedFile();if(!file)return;
-    pendingTarget=normalizeDate(document.getElementById('reportDate')?.value||'')||filenameDate(file.name);
+    pendingTarget=candidateTarget||filenameDate(file.name)||normalizeDate(document.getElementById('reportDate')?.value||'');
     global.__CE_QC_PENDING_IMPORT_DATE__={reportDate:pendingTarget,committedReportDate:committedDate(),startedAt:Date.now(),active:true};
-    // Do not let V67/V168/V132 treat a filename candidate as the current business
-    // date while the POST is still writing. The fetch wrapper below sends the
-    // captured target date in FormData, while the visible current-state owners keep
-    // reading the last committed date until the backend returns importCommitted.
     restoreCommittedDate();
+    showCandidateSource();
     setImportButtonBusy(true);
     show('info',`正在导入 ${pendingTarget||'当前'} 日报…`,`正在执行日期校验、七业务分类、CCSL/SHOPEE/WHPP队列保存和最终VALID切换。完成前不会替换上一份日报。`);
   },true);
@@ -75,28 +91,33 @@
     const url=typeof input==='string'?input:String(input?.url||'');
     const isImport=url.includes(ROUTE);
     if(!isImport)return originalFetch(input,init);
-    let target=pendingTarget||filenameDate(selectedFile()?.name||'')||targetDate();
+    let target=pendingTarget||candidateTarget||filenameDate(selectedFile()?.name||'')||targetDate();
+    let committed=false;
     try{
       const body=init?.body;
       if(body instanceof FormData){
         const file=body.get('file');
-        target=pendingTarget||filenameDate(file?.name||'')||normalizeDate(body.get('reportDate')||'')||target;
+        target=pendingTarget||candidateTarget||filenameDate(file?.name||'')||normalizeDate(body.get('reportDate')||'')||target;
         if(target)body.set('reportDate',target);
       }
       show('info',`正在导入 ${target||'当前'} 日报…`,`新日期仍处于待确认状态；后台全部保存成功前，页面继续使用上一份正式日报。`);
       const response=await originalFetch(input,init);
       let payload=null;try{payload=await response.clone().json();}catch{}
-      if(!response.ok||payload?.ok===false||payload?.importCommitted===false){
+      committed=Boolean(response.ok&&payload?.ok!==false&&payload?.importCommitted!==false&&payload?.reportDate);
+      if(!committed){
         const message=String(payload?.error||`HTTP ${response.status}`);
         show('error',`${target||'本次'} 日报导入未完成`,`${message}。上一份成功日报继续生效；不会进入半分类、半扫描状态。`);
         restoreCommittedDate();
-      }else if(payload?.reportDate){
+        showCandidateSource();
+      }else{
+        candidateTarget='';
         show('success',`${payload.reportDate} 日报已完整提交`,`七业务分类和 CCSL → SHOPEE → WHPP 三阶段处理入口均已切换到新日期。`);
       }
       return response;
     }catch(error){
       show('error',`${target||'本次'} 日报导入请求失败`,`${error?.message||error}。上一份正式日报继续生效。`);
       restoreCommittedDate();
+      showCandidateSource();
       throw error;
     }finally{
       pendingTarget='';
@@ -105,5 +126,5 @@
     }
   };
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.version=VERSION;
-  global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.getPendingDate=()=>pendingTarget;
+  global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.getPendingDate=()=>pendingTarget||candidateTarget;
 })(window);
