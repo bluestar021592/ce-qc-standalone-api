@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 import { updateCarryoverResults } from './unifiedImportStore.js';
 
-export const CCSL_PARTIAL_RETRY_LEDGER_ID = '2026-08-30-ccsl-partial-retry-ledger-v1';
+export const CCSL_PARTIAL_RETRY_LEDGER_ID = '2026-08-30-ccsl-partial-retry-ledger-v2';
 
 function cleanBill(value = '') {
   return String(value || '').trim().toUpperCase();
@@ -93,6 +93,12 @@ export function reconcileCcslPartialRetryLedger() {
   const reportDate = String(state.reportDate || '').trim();
   if (!reportDate) return { ok: true, skipped: true, reason: 'NO_CCSL_REPORT_DATE', rowsApplied: 0, failedScan: 0, failedTrack: 0 };
 
+  const latest = db.prepare("SELECT reportDate,snapshotId FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC,batchId DESC LIMIT 1").get() || {};
+  const latestReportDate = String(latest.reportDate || '').trim();
+  if (latestReportDate && latestReportDate !== reportDate) {
+    return { ok: true, skipped: true, reason: 'STALE_CCSL_STATE', reportDate, latestReportDate, rowsApplied: 0, failedScan: 0, failedTrack: 0 };
+  }
+
   const runStatus = String(state.lastRunSummary?.runStatus || state.lastRun?.runStatus || '').trim().toUpperCase();
   const phase = String(state.processing?.phase || '').trim();
   const collected = collectCcslPartialLedgerRows(state);
@@ -101,8 +107,8 @@ export function reconcileCcslPartialRetryLedger() {
   if (!partial) return { ok: true, skipped: true, reason: 'NO_PARTIAL_API_FAILURE', rowsApplied: 0, failedScan: 0, failedTrack: 0 };
   if (!collected.rows.length) return { ok: true, skipped: true, reason: 'NO_PARTIAL_ROWS', rowsApplied: 0, failedScan: collected.failedScanBills.length, failedTrack: collected.failedTrackBills.length };
 
-  const runId = String(state.currentRun?.runId || state.lastRunSummary?.runId || state.lastRun?.runId || 'RECOVERY').trim();
-  const snapshotId = `PARTIAL-${reportDate}-${runId}`;
+  const snapshotId = String(latest.snapshotId || '').trim();
+  if (!snapshotId) return { ok: true, skipped: true, reason: 'NO_VALID_UNIFIED_SNAPSHOT', reportDate, rowsApplied: 0, failedScan: collected.failedScanBills.length, failedTrack: collected.failedTrackBills.length };
   const summary = updateCarryoverResults({ snapshotId, reportDate, rows: collected.rows });
   return {
     ok: true,
