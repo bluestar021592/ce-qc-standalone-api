@@ -106,5 +106,9 @@ await import('./v346-whpp-throughput-smoke.mjs');
 // installed worktree must not be mutable from that validation path.
 await import('./v367-candidate-only-safety-smoke.cjs');
 
+// The atomic import depends on all three business stores sharing one SQLite singleton
+// and keeping their nested transactions interceptable by V366.
+await import('./v368-atomic-store-boundary-smoke.mjs');
+
 // Preserve the existing WHPP retry -> source truth -> visible truth regression chain.
 await import('./v350-whpp-retry-fastack-smoke.mjs');
