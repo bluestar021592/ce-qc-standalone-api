@@ -1,20 +1,21 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
-import { saveUnifiedImport, getUnifiedProcessingQueue } from './unifiedImportStore.js';
-import { loadAppState, saveAppState } from './store.js';
-import { SHOPEE, loadBusinessState, saveBusinessState } from './businessStore.js';
+import { saveAppState } from './store.js';
+import { SHOPEE, saveBusinessState } from './businessStore.js';
 import { CEClient } from './ceClient.js';
 import { runWhppPipeline } from './whppPipeline.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
-import { getDb } from './db.js';
+import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-29-v155-fresh-import-direct-whpp-authority-v2';
+const PATCH_ID = '2026-08-30-v363-seven-business-import-commit-gate-v1';
 const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+const ALL_TYPES = [...CORE_TYPES, WHPP];
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
 const APP_PATHS = new Set(['/', '/home', '/ce', '/ceaf', '/tbkh', '/ali1688', '/shopeecn', '/shopeevn', '/whpp', '/tracking', '/abnormal', '/carry', '/export', '/import', '/data', '/settings', '/logs']);
@@ -30,9 +31,6 @@ function existingWhppDailyMembership(reportDate) {
   if (!daily) return { headerPresent: false, present: false, incomplete: false, count: 0, expected: 0, actual: 0 };
   const expected = Number(daily.totalCount || 0);
   const actual = Number(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(date)?.count || 0);
-  // A persisted header is authoritative only when its exact member count agrees.
-  // This intentionally includes 0/0: a confirmed zero-WHPP day is real truth and
-  // must not be rewritten or have its WHPP run/history pointers cleared later.
   const present = actual === expected;
   return { headerPresent: true, present, incomplete: !present, count: present ? actual : 0, expected, actual };
 }
@@ -68,9 +66,6 @@ function invalidateMutableSameDatePointers(reportDate, { whppChanged = true } = 
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
   try {
-    // A newly imported same-date source is the current truth. Mutable summary and
-    // run pointers from an older source must not shadow it; immutable export
-    // snapshots are intentionally retained for audit/history.
     db.prepare('DELETE FROM run_locks WHERE reportDate=?').run(date);
     db.prepare('DELETE FROM run_checkpoints WHERE reportDate=?').run(date);
     db.prepare('DELETE FROM history_summary WHERE reportDate=?').run(date);
@@ -100,23 +95,143 @@ function invalidateDashboardReadCaches() {
   }
 }
 
+function fastCarryoverSummary(reportDate) {
+  const db = getDb();
+  let todayOpen = 0;
+  let historicalOpen = 0;
+  const countToday = db.prepare("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND businessType=? AND sourceReportDate=?");
+  const countHistorical = db.prepare("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND businessType=? AND sourceReportDate<?");
+  for (const type of ALL_TYPES) {
+    todayOpen += Number(countToday.get(type, reportDate)?.count || 0);
+    historicalOpen += Number(countHistorical.get(type, reportDate)?.count || 0);
+  }
+  return { todayOpen, historicalOpen, rechecked: 0, currentOpen: todayOpen + historicalOpen, historicalSeparate: true, source: 'V363_INDEXED_COUNTS' };
+}
+
+function historicalCarryBills(types, reportDate) {
+  const db = getDb();
+  const stmt = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE status='OPEN' AND businessType=? AND sourceReportDate<? ORDER BY sourceReportDate,shipmentCode");
+  const bills = [];
+  for (const type of types) for (const row of stmt.all(type, reportDate)) bills.push(String(row.shipmentCode || '').trim().toUpperCase());
+  return [...new Set(bills.filter(Boolean))];
+}
+
+function podBillsForMembership(bills = []) {
+  const db = getDb();
+  const unique = [...new Set((bills || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean))];
+  const found = [];
+  for (let i = 0; i < unique.length; i += 400) {
+    const chunk = unique.slice(i, i + 400);
+    if (!chunk.length) continue;
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db.prepare(`SELECT shipmentCode FROM shipment_current_state WHERE shipmentCode IN (${placeholders}) AND UPPER(COALESCE(state,''))='POD'`).all(...chunk);
+    found.push(...rows.map(row => String(row.shipmentCode || '').trim().toUpperCase()));
+  }
+  return [...new Set(found.filter(Boolean))];
+}
+
+function stageUnifiedCoreImport(parsed, sourceName) {
+  const db = getDb();
+  const batchId = `BATCH-${crypto.randomUUID()}`;
+  const snapshotId = `SNAP-${crypto.randomUUID()}`;
+  const stageStatus = `STAGING:${batchId}`;
+  const createdAt = nowIso();
+  const payload = {
+    reportDate: parsed.reportDate,
+    dateDetectionSource: parsed.dateDetectionSource,
+    dateCandidates: parsed.dateCandidates,
+    dateConflict: parsed.dateConflict,
+    containerFormat: parsed.containerFormat,
+    classificationCounts: parsed.classificationCounts,
+    sourceReconciliation: parsed.sourceReconciliation,
+    regionCounts: parsed.regionCounts,
+    summary: parsed.summary,
+    sheetDiagnostics: parsed.sheetDiagnostics,
+    rows: parsed.rows
+  };
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt,dateDetectionSource,dateCandidatesJson,dateWasManuallyCorrected,regionCountsJson)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      batchId, snapshotId, parsed.reportDate, sourceName, parsed.fileHash, stageStatus,
+      JSON.stringify(parsed.summary || {}), JSON.stringify(parsed.warnings || []), createdAt,
+      parsed.dateDetectionSource || '', JSON.stringify(parsed.dateCandidates || []), parsed.dateWasManuallyCorrected ? 1 : 0,
+      JSON.stringify(parsed.regionCounts || {})
+    );
+    const insertRow = db.prepare(`INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt,classificationSource,classificationMatchedValue,classificationWarning)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const insertDaily = db.prepare(`INSERT INTO shipment_daily_snapshots(snapshotId,batchId,reportDate,businessType,shipmentCode,regionCode,classificationSource,rowJson,createdAt)
+      VALUES(?,?,?,?,?,?,?,?,?)`);
+    const upsertCurrent = db.prepare(`INSERT INTO shipment_current_state(shipmentCode,businessType,reportDate,snapshotId,state,apiStatus,lastEventTime,stateJson,updatedAt)
+      VALUES(?,?,?,?,?,'PENDING_SCAN','',?,?)
+      ON CONFLICT(shipmentCode) DO UPDATE SET businessType=excluded.businessType,reportDate=excluded.reportDate,snapshotId=excluded.snapshotId,
+        state=CASE WHEN UPPER(COALESCE(shipment_current_state.state,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED') THEN shipment_current_state.state ELSE 'PENDING_SCAN' END,
+        apiStatus=CASE WHEN UPPER(COALESCE(shipment_current_state.state,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED') THEN shipment_current_state.apiStatus ELSE 'PENDING_SCAN' END,
+        lastEventTime=CASE WHEN UPPER(COALESCE(shipment_current_state.state,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED') THEN shipment_current_state.lastEventTime ELSE '' END,
+        stateJson=CASE WHEN UPPER(COALESCE(shipment_current_state.state,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED') THEN shipment_current_state.stateJson ELSE excluded.stateJson END,
+        updatedAt=excluded.updatedAt`);
+    const upsertCarry = db.prepare(`INSERT INTO carryover_open_items(shipmentCode,businessType,sourceReportDate,lastReportDate,sourceSnapshotId,lastSnapshotId,status,apiStatus,closeReason,stateJson,createdAt,updatedAt)
+      VALUES(?,?,?,?,?,?,'OPEN','PENDING_SCAN','',?,?,?)
+      ON CONFLICT(shipmentCode) DO UPDATE SET businessType=excluded.businessType,lastReportDate=excluded.lastReportDate,lastSnapshotId=excluded.lastSnapshotId,
+        status=CASE WHEN carryover_open_items.status='CLOSED' AND UPPER(COALESCE(carryover_open_items.closeReason,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','SELF_PICKUP') THEN 'CLOSED' ELSE 'OPEN' END,
+        apiStatus=CASE WHEN carryover_open_items.status='CLOSED' AND UPPER(COALESCE(carryover_open_items.closeReason,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','SELF_PICKUP') THEN carryover_open_items.apiStatus ELSE 'PENDING_SCAN' END,
+        closeReason=CASE WHEN carryover_open_items.status='CLOSED' AND UPPER(COALESCE(carryover_open_items.closeReason,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','SELF_PICKUP') THEN carryover_open_items.closeReason ELSE '' END,
+        stateJson=CASE WHEN carryover_open_items.status='CLOSED' AND UPPER(COALESCE(carryover_open_items.closeReason,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','SELF_PICKUP') THEN carryover_open_items.stateJson ELSE excluded.stateJson END,
+        updatedAt=excluded.updatedAt`);
+    for (const row of parsed.rows) {
+      const rowJson = JSON.stringify(row);
+      insertRow.run(batchId, snapshotId, parsed.reportDate, row.businessType, row.shipmentCode, row.regionCode, row.recipientRaw, row.recipientNormalized, row.sheetName, row.rowNumber, row.classificationReason, rowJson, createdAt, row.classificationSource || '', row.classificationMatchedValue || '', row.classificationWarning || '');
+      insertDaily.run(snapshotId, batchId, parsed.reportDate, row.businessType, row.shipmentCode, row.regionCode, row.classificationSource || '', rowJson, createdAt);
+      upsertCurrent.run(row.shipmentCode, row.businessType, parsed.reportDate, snapshotId, 'PENDING_SCAN', rowJson, createdAt);
+      upsertCarry.run(row.shipmentCode, row.businessType, parsed.reportDate, parsed.reportDate, snapshotId, snapshotId, rowJson, createdAt, createdAt);
+    }
+    db.prepare(`INSERT INTO unified_snapshots(snapshotId,batchId,reportDate,status,payloadJson,createdAt) VALUES(?,?,?,'STAGING',?,?)`).run(snapshotId, batchId, parsed.reportDate, JSON.stringify(payload), createdAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+  return { batchId, snapshotId, reportDate: parsed.reportDate, sourceName, fileHash: parsed.fileHash, stageStatus, createdAt };
+}
+
+function activateUnifiedCoreImport(staged) {
+  const db = getDb();
+  const releasedSupersededSlots = releaseSameFileSupersededSlot(staged.reportDate, staged.fileHash);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare("UPDATE unified_snapshots SET status='SUPERSEDED' WHERE reportDate=? AND snapshotId<>? AND status IN ('IMPORTED','COMPLETED','INVALID_FAILED_RECONCILIATION')").run(staged.reportDate, staged.snapshotId);
+    db.prepare("UPDATE unified_import_batches SET status='SUPERSEDED' WHERE reportDate=? AND batchId<>? AND status='VALID'").run(staged.reportDate, staged.batchId);
+    db.prepare("UPDATE unified_import_batches SET status='VALID' WHERE batchId=? AND status=?").run(staged.batchId, staged.stageStatus);
+    db.prepare("UPDATE unified_snapshots SET status='IMPORTED' WHERE snapshotId=? AND status='STAGING'").run(staged.snapshotId);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+  return releasedSupersededSlots;
+}
+
+function failStagedImport(staged, error) {
+  if (!staged?.batchId) return;
+  const db = getDb();
+  try {
+    db.prepare('UPDATE unified_import_batches SET status=? WHERE batchId=? AND status=?').run(`FAILED_STAGING:${staged.batchId}`, staged.batchId, staged.stageStatus);
+    db.prepare("UPDATE unified_snapshots SET status='INVALID_FAILED_IMPORT' WHERE snapshotId=? AND status='STAGING'").run(staged.snapshotId);
+    console.warn(`[CE-QC][V363_IMPORT_STAGE_FAILED] reportDate=${staged.reportDate} batchId=${staged.batchId} error=${error?.message || error}`);
+  } catch {}
+}
+
 async function handleUnifiedImportV42(req, res) {
+  const startedAt = Date.now();
+  let staged = null;
   try {
     if (!req.file) throw new Error('没有收到综合日报Excel文件');
     const parsed = parseUnifiedDailyExcel(req.file.path, {
       reportDate: req.body?.reportDate || '',
       originalName: req.file.originalname
     });
-    // A byte-identical Excel must be reclassified after business ownership rules change.
-    // Persist the ruleset version with the hash so an old VALID batch cannot silently win
-    // simply because the source file bytes are unchanged.
     parsed.fileHash = `${parsed.fileHash}:${IMPORT_RULESET_VERSION}`;
     const whppRows = parsed.rows.filter(row => row.businessType === WHPP);
-
-    // Fail closed before *any* persistence. If an existing same-date WHPP header
-    // says 236 while only 235 normalized members remain, an incoming sibling file
-    // with zero WHPP rows is not evidence that WHPP became zero. Do not let that
-    // upload overwrite either the damaged WHPP evidence or the six-business state.
     const preservedWhpp = whppRows.length === 0
       ? existingWhppDailyMembership(parsed.reportDate)
       : { headerPresent: false, present: false, incomplete: false, count: 0, expected: 0, actual: 0 };
@@ -130,17 +245,14 @@ async function handleUnifiedImportV42(req, res) {
 
     const coreRows = parsed.rows.filter(row => row.businessType !== WHPP);
     const coreParsed = coreProjection(parsed, coreRows);
-    // The legacy unique index includes status, so a third upload of the exact same
-    // date/file would otherwise collide when the current VALID row becomes the next
-    // literal SUPERSEDED row. Preserve every audit batch, but move already-retired
-    // duplicates to an immutable per-batch retired status before the canonical store
-    // performs its atomic VALID -> SUPERSEDED -> new VALID replacement.
-    const releasedSupersededSlots = releaseSameFileSupersededSlot(parsed.reportDate, coreParsed.fileHash);
-    const saved = saveUnifiedImport(coreParsed, req.file.originalname);
-    const queue = getUnifiedProcessingQueue(saved.batchId);
+    staged = stageUnifiedCoreImport(coreParsed, req.file.originalname);
+    console.log(`[CE-QC][V363_IMPORT_STAGE] staged reportDate=${parsed.reportDate} coreRows=${coreRows.length} whppRows=${whppRows.length} elapsedMs=${Date.now() - startedAt}`);
 
-    initializeCcslState(parsed.reportDate, req.file.originalname, coreRows.filter(row => CCSL_TYPES.has(row.businessType)), queue.rows);
-    initializeShopeeState(parsed.reportDate, req.file.originalname, coreRows.filter(row => SHOPEE_TYPES.has(row.businessType)), queue.rows);
+    const ccslCarry = historicalCarryBills([...CCSL_TYPES], parsed.reportDate);
+    const shopeeCarry = historicalCarryBills([...SHOPEE_TYPES], parsed.reportDate);
+    initializeCcslState(parsed.reportDate, req.file.originalname, coreRows.filter(row => CCSL_TYPES.has(row.businessType)), ccslCarry);
+    initializeShopeeState(parsed.reportDate, req.file.originalname, coreRows.filter(row => SHOPEE_TYPES.has(row.businessType)), shopeeCarry);
+    console.log(`[CE-QC][V363_IMPORT_STAGE] core_states_ready reportDate=${parsed.reportDate} ccslCarry=${ccslCarry.length} shopeeCarry=${shopeeCarry.length} elapsedMs=${Date.now() - startedAt}`);
 
     const whppChanged = whppRows.length > 0 || !preservedWhpp.present;
     let whppState;
@@ -158,32 +270,50 @@ async function handleUnifiedImportV42(req, res) {
         reportDate: parsed.reportDate,
         sourceName: req.file.originalname,
         rows: whppRows,
-        batchId: saved.batchId,
-        snapshotId: saved.snapshotId
+        batchId: staged.batchId,
+        snapshotId: staged.snapshotId
       });
       effectiveWhppCount = whppRows.length;
       whppImportSource = whppRows.length ? 'DIRECT_PARSER_WHPP_DAILY_IMPORT' : 'DIRECT_CONFIRMED_ZERO_WHPP_DAILY_IMPORT';
     }
+    console.log(`[CE-QC][V363_IMPORT_STAGE] whpp_ready reportDate=${parsed.reportDate} whpp=${effectiveWhppCount} elapsedMs=${Date.now() - startedAt}`);
+
     invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged });
+    const releasedSupersededSlots = activateUnifiedCoreImport(staged);
     invalidateDashboardReadCaches();
 
     const effectiveCounts = { ...(parsed.classificationCounts || {}), WHPP: effectiveWhppCount };
     const effectiveTotal = Object.values(effectiveCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const carryover = fastCarryoverSummary(parsed.reportDate);
+    console.log(`[CE-QC][V363_IMPORT_COMMITTED] reportDate=${parsed.reportDate} total=${effectiveTotal} batchId=${staged.batchId} elapsedMs=${Date.now() - startedAt}`);
     res.json({
       ok: true,
       patchId: PATCH_ID,
       importRulesetVersion: IMPORT_RULESET_VERSION,
-      ...saved,
+      batchId: staged.batchId,
+      snapshotId: staged.snapshotId,
+      reportDate: parsed.reportDate,
+      sourceName: req.file.originalname,
+      fileHash: parsed.fileHash,
+      dateDetectionSource: parsed.dateDetectionSource,
+      dateCandidates: parsed.dateCandidates,
+      dateConflict: parsed.dateConflict,
+      dateWasManuallyCorrected: parsed.dateWasManuallyCorrected,
+      containerFormat: parsed.containerFormat,
+      regionCounts: parsed.regionCounts,
+      carryover,
+      duplicateFile: false,
+      sameDateOverwrite: releasedSupersededSlots >= 0,
       releasedSupersededSlots,
       classificationCounts: effectiveCounts,
       sourceReconciliation: {
         ...(parsed.sourceReconciliation || {}),
-        businessTypes: ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'],
+        businessTypes: [...ALL_TYPES],
         validUniqueWaybills: effectiveTotal,
         classifiedWaybills: effectiveTotal,
         difference: 0,
         balanced: true,
-        runtimeTruth: 'CURRENT_CORE_IMPORT_PLUS_DIRECT_OR_PRESERVED_WHPP_DAILY'
+        runtimeTruth: 'V363_COMMIT_AFTER_CCSL_SHOPEE_WHPP_READY'
       },
       summary: { ...(parsed.summary || {}), validUniqueWaybills: effectiveTotal, totalUnique: effectiveTotal },
       warnings: parsed.warnings,
@@ -197,24 +327,26 @@ async function handleUnifiedImportV42(req, res) {
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
       },
-      architectureNote: 'WHPP使用独立持久化快照；同日同文件可重复安全覆盖并保留历史批次；写入前先校验同日WHPP完整性；非空日报直接落库；同日空WHPP分区不得擦除既有完整或损坏证据；导入后立即失效当前看板/趋势只读缓存；现有CCSL/SHOPEE统一快照保持兼容。'
+      importCommitted: true,
+      importElapsedMs: Date.now() - startedAt,
+      architectureNote: '新日报先进入不可见STAGING；CCSL、SHOPEE、WHPP三个处理队列全部落库后才一次切换为VALID。失败时上一份VALID日报继续生效，避免日期、分类、扫描和WHPP状态半切换。'
     });
   } catch (error) {
+    failStagedImport(staged, error);
     console.error('[V42][UNIFIED_IMPORT]', error);
     res.status(400).json({ ok: false, code: error.code || 'WHPP_UNIFIED_IMPORT_FAILED', error: error.message || String(error), expected: error.expected ?? null, actual: error.actual ?? null, shipmentCode: error.shipmentCode || '' });
   }
 }
 
-function initializeCcslState(reportDate, sourceName, rows, queueRows) {
-  const current = loadAppState();
+function initializeCcslState(reportDate, sourceName, rows, carryBills) {
   const today = rows.map(row => row.shipmentCode);
-  const carry = queueRows.filter(row => CCSL_TYPES.has(String(row.businessType || '').toUpperCase()) && row.sourceType === 'HISTORICAL_CARRY').map(row => row.shipmentCode);
+  const allMembers = [...new Set([...today, ...(carryBills || [])])];
+  const podLocks = podBillsForMembership(allMembers);
   const businessCounts = Object.fromEntries([...CCSL_TYPES].map(type => [type, rows.filter(row => String(row.businessType || '').toUpperCase() === type).length]));
   saveAppState({
-    ...current,
     businessType: 'CCSL', reportDate, sourceName, dailyReportReady: true,
     pnhBills: today,
-    dailyParseRows: rows.map(row => ({ ...row, result: 'PNH', 运单号: row.shipmentCode })),
+    dailyParseRows: rows.map(row => ({ ...row, result: 'PNH', reason: row.classificationReason, 运单号: row.shipmentCode })),
     dailyParseSummary: {
       totalRecognized: today.length,
       totalUniqueCount: today.length,
@@ -228,19 +360,21 @@ function initializeCcslState(reportDate, sourceName, rows, queueRows) {
       duplicateCount: 0,
       businessCounts,
       importedAt: new Date().toISOString(),
-      source: 'V155_UNIFIED_VALID_MEMBERSHIP'
+      source: 'V363_COMMITTED_UNIFIED_MEMBERSHIP'
     },
-    carryBills: [...new Set(carry)], nextCarryBills: [...new Set(carry)],
-    scanResults: [], scanQueryStatus: [], trackResults: [], trackEvents: [], trackQueryStatus: [], finalRows: [], needTrackBills: [],
+    nonPnhBills: [], excludedBills: [], duplicateBills: [],
+    carryBills: [...new Set(carryBills || [])], nextCarryBills: [...new Set(carryBills || [])], podLocks,
+    scanPool: [], scanResults: [], scanQueryStatus: [], trackResults: [], trackEvents: [], trackQueryStatus: [], finalRows: [], finalDiversionRows: [], needTrackBills: [],
+    historySummary: [], logs: [],
     processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
     lastRunSummary: null, lastRun: null, currentRun: null
   });
 }
 
-function initializeShopeeState(reportDate, sourceName, rows, queueRows) {
-  const current = loadBusinessState(SHOPEE);
+function initializeShopeeState(reportDate, sourceName, rows, carryBills) {
   const today = rows.map(row => row.shipmentCode);
-  const carry = queueRows.filter(row => SHOPEE_TYPES.has(String(row.businessType || '').toUpperCase()) && row.sourceType === 'HISTORICAL_CARRY').map(row => row.shipmentCode);
+  const allMembers = [...new Set([...today, ...(carryBills || [])])];
+  const podLocks = podBillsForMembership(allMembers);
   const dailyParseRows = rows.map(row => ({
     ...row,
     运单号: row.shipmentCode,
@@ -252,14 +386,21 @@ function initializeShopeeState(reportDate, sourceName, rows, queueRows) {
     importStatus: 'ACCEPTED'
   }));
   saveBusinessState({
-    ...current,
     businessType: SHOPEE, reportDate, sourceName, dailyReportReady: true,
     pnhBills: today, dailyParseRows,
-    dailyParseSummary: { totalRecognized: today.length, groupCounts: { CN: rows.filter(row => row.businessType === 'SHOPEECN').length, VN: rows.filter(row => row.businessType === 'SHOPEEVN').length }, importedAt: new Date().toISOString() },
-    carryBills: [...new Set(carry)], nextCarryBills: [...new Set(carry)],
-    scanResults: [], scanQueryStatus: [], trackResults: [], trackEvents: [], eventQueryStatus: [], exceptionItems: [], exceptionQueryStatus: [], finalRows: [], needTrackBills: [],
+    dailyParseSummary: {
+      totalRecognized: today.length,
+      groupCounts: { CN: rows.filter(row => row.businessType === 'SHOPEECN').length, VN: rows.filter(row => row.businessType === 'SHOPEEVN').length },
+      importedAt: new Date().toISOString(),
+      source: 'V363_COMMITTED_UNIFIED_MEMBERSHIP'
+    },
+    recipientConflicts: [], recipientReconciliation: null,
+    carryBills: [...new Set(carryBills || [])], nextCarryBills: [...new Set(carryBills || [])], podLocks,
+    scanPool: [], scanRetryBills: [], scanResults: [], scanQueryStatus: [], shipmentTrackResults: [], shipmentQueryStatus: [],
+    trackResults: [], trackEvents: [], eventQueryStatus: [], exceptionItems: [], exceptionQueryStatus: [], finalRows: [], priorCarryRows: [], needTrackBills: [], apiBatchStatus: [],
+    historySummary: [], logs: [],
     processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
-    lastRunSummary: null, lastRun: null, currentRun: null
+    lastRunSummary: null, lastRun: null, currentRun: null, snapshotId: ''
   }, SHOPEE);
 }
 
@@ -271,8 +412,8 @@ function coreProjection(parsed, rows) {
     rows,
     classificationCounts: counts,
     sourceReconciliation: { businessTypes: [...CORE_TYPES], validUniqueWaybills: total, classifiedWaybills: total, difference: 0, balanced: true },
-    summary: { ...(parsed.summary || {}), validUniqueWaybills: total },
-    warnings: [...(parsed.warnings || []), ...(parsed.rows.some(row => row.businessType === WHPP) ? [{ type: 'WHPP_SEPARATE_PERSISTENCE', message: 'WHPP本土由V42独立持久化和业务快照处理，不进入旧六板块统一快照。' }] : [])]
+    summary: { ...(parsed.summary || {}), validUniqueWaybills: total, totalUnique: total },
+    warnings: [...(parsed.warnings || []), ...(parsed.rows.some(row => row.businessType === WHPP) ? [{ type: 'WHPP_SEPARATE_PERSISTENCE', message: 'WHPP本土使用独立第三处理阶段，但与同一日报提交事务共同确认后才切换当前日期。' }] : [])]
   };
 }
 
