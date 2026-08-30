@@ -12,7 +12,7 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-30-v363-seven-business-import-commit-gate-v1';
+const PATCH_ID = '2026-08-30-v364-seven-business-import-commit-gate-v2';
 const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const ALL_TYPES = [...CORE_TYPES, WHPP];
@@ -105,7 +105,7 @@ function fastCarryoverSummary(reportDate) {
     todayOpen += Number(countToday.get(type, reportDate)?.count || 0);
     historicalOpen += Number(countHistorical.get(type, reportDate)?.count || 0);
   }
-  return { todayOpen, historicalOpen, rechecked: 0, currentOpen: todayOpen + historicalOpen, historicalSeparate: true, source: 'V363_INDEXED_COUNTS' };
+  return { todayOpen, historicalOpen, rechecked: 0, currentOpen: todayOpen + historicalOpen, historicalSeparate: true, source: 'V364_INDEXED_COUNTS' };
 }
 
 function historicalCarryBills(types, reportDate) {
@@ -114,6 +114,31 @@ function historicalCarryBills(types, reportDate) {
   const bills = [];
   for (const type of types) for (const row of stmt.all(type, reportDate)) bills.push(String(row.shipmentCode || '').trim().toUpperCase());
   return [...new Set(bills.filter(Boolean))];
+}
+
+function shopeePriorCarryRows(carryBills = []) {
+  const db = getDb();
+  const lookup = db.prepare("SELECT shipmentCode,businessType,sourceReportDate,lastReportDate FROM carryover_open_items WHERE shipmentCode=? AND status='OPEN' LIMIT 1");
+  const rows = [];
+  for (const value of [...new Set(carryBills || [])]) {
+    const bill = String(value || '').trim().toUpperCase();
+    if (!bill) continue;
+    const found = lookup.get(bill);
+    const businessType = String(found?.businessType || '').toUpperCase();
+    if (!SHOPEE_TYPES.has(businessType)) continue;
+    rows.push({
+      shipmentCode: bill,
+      运单号: bill,
+      businessType,
+      recipient_group: businessType === 'SHOPEECN' ? 'CN' : 'VN',
+      recipient_group_reason: 'HISTORICAL_CARRY_BUSINESS_TYPE',
+      sourceDate: found?.sourceReportDate || '',
+      sourceReportDate: found?.sourceReportDate || '',
+      lastReportDate: found?.lastReportDate || '',
+      sourceType: 'HISTORICAL_CARRY'
+    });
+  }
+  return rows;
 }
 
 function podBillsForMembership(bills = []) {
@@ -217,7 +242,7 @@ function failStagedImport(staged, error) {
   try {
     db.prepare('UPDATE unified_import_batches SET status=? WHERE batchId=? AND status=?').run(`FAILED_STAGING:${staged.batchId}`, staged.batchId, staged.stageStatus);
     db.prepare("UPDATE unified_snapshots SET status='INVALID_FAILED_IMPORT' WHERE snapshotId=? AND status='STAGING'").run(staged.snapshotId);
-    console.warn(`[CE-QC][V363_IMPORT_STAGE_FAILED] reportDate=${staged.reportDate} batchId=${staged.batchId} error=${error?.message || error}`);
+    console.warn(`[CE-QC][V364_IMPORT_STAGE_FAILED] reportDate=${staged.reportDate} batchId=${staged.batchId} error=${error?.message || error}`);
   } catch {}
 }
 
@@ -246,13 +271,13 @@ async function handleUnifiedImportV42(req, res) {
     const coreRows = parsed.rows.filter(row => row.businessType !== WHPP);
     const coreParsed = coreProjection(parsed, coreRows);
     staged = stageUnifiedCoreImport(coreParsed, req.file.originalname);
-    console.log(`[CE-QC][V363_IMPORT_STAGE] staged reportDate=${parsed.reportDate} coreRows=${coreRows.length} whppRows=${whppRows.length} elapsedMs=${Date.now() - startedAt}`);
+    console.log(`[CE-QC][V364_IMPORT_STAGE] staged reportDate=${parsed.reportDate} coreRows=${coreRows.length} whppRows=${whppRows.length} elapsedMs=${Date.now() - startedAt}`);
 
     const ccslCarry = historicalCarryBills([...CCSL_TYPES], parsed.reportDate);
     const shopeeCarry = historicalCarryBills([...SHOPEE_TYPES], parsed.reportDate);
     initializeCcslState(parsed.reportDate, req.file.originalname, coreRows.filter(row => CCSL_TYPES.has(row.businessType)), ccslCarry);
     initializeShopeeState(parsed.reportDate, req.file.originalname, coreRows.filter(row => SHOPEE_TYPES.has(row.businessType)), shopeeCarry);
-    console.log(`[CE-QC][V363_IMPORT_STAGE] core_states_ready reportDate=${parsed.reportDate} ccslCarry=${ccslCarry.length} shopeeCarry=${shopeeCarry.length} elapsedMs=${Date.now() - startedAt}`);
+    console.log(`[CE-QC][V364_IMPORT_STAGE] core_states_ready reportDate=${parsed.reportDate} ccslCarry=${ccslCarry.length} shopeeCarry=${shopeeCarry.length} elapsedMs=${Date.now() - startedAt}`);
 
     const whppChanged = whppRows.length > 0 || !preservedWhpp.present;
     let whppState;
@@ -276,7 +301,7 @@ async function handleUnifiedImportV42(req, res) {
       effectiveWhppCount = whppRows.length;
       whppImportSource = whppRows.length ? 'DIRECT_PARSER_WHPP_DAILY_IMPORT' : 'DIRECT_CONFIRMED_ZERO_WHPP_DAILY_IMPORT';
     }
-    console.log(`[CE-QC][V363_IMPORT_STAGE] whpp_ready reportDate=${parsed.reportDate} whpp=${effectiveWhppCount} elapsedMs=${Date.now() - startedAt}`);
+    console.log(`[CE-QC][V364_IMPORT_STAGE] whpp_ready reportDate=${parsed.reportDate} whpp=${effectiveWhppCount} elapsedMs=${Date.now() - startedAt}`);
 
     invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged });
     const releasedSupersededSlots = activateUnifiedCoreImport(staged);
@@ -285,7 +310,7 @@ async function handleUnifiedImportV42(req, res) {
     const effectiveCounts = { ...(parsed.classificationCounts || {}), WHPP: effectiveWhppCount };
     const effectiveTotal = Object.values(effectiveCounts).reduce((sum, value) => sum + Number(value || 0), 0);
     const carryover = fastCarryoverSummary(parsed.reportDate);
-    console.log(`[CE-QC][V363_IMPORT_COMMITTED] reportDate=${parsed.reportDate} total=${effectiveTotal} batchId=${staged.batchId} elapsedMs=${Date.now() - startedAt}`);
+    console.log(`[CE-QC][V364_IMPORT_COMMITTED] reportDate=${parsed.reportDate} total=${effectiveTotal} batchId=${staged.batchId} elapsedMs=${Date.now() - startedAt}`);
     res.json({
       ok: true,
       patchId: PATCH_ID,
@@ -313,7 +338,7 @@ async function handleUnifiedImportV42(req, res) {
         classifiedWaybills: effectiveTotal,
         difference: 0,
         balanced: true,
-        runtimeTruth: 'V363_COMMIT_AFTER_CCSL_SHOPEE_WHPP_READY'
+        runtimeTruth: 'V364_COMMIT_AFTER_CCSL_SHOPEE_WHPP_READY'
       },
       summary: { ...(parsed.summary || {}), validUniqueWaybills: effectiveTotal, totalUnique: effectiveTotal },
       warnings: parsed.warnings,
@@ -360,7 +385,7 @@ function initializeCcslState(reportDate, sourceName, rows, carryBills) {
       duplicateCount: 0,
       businessCounts,
       importedAt: new Date().toISOString(),
-      source: 'V363_COMMITTED_UNIFIED_MEMBERSHIP'
+      source: 'V364_COMMITTED_UNIFIED_MEMBERSHIP'
     },
     nonPnhBills: [], excludedBills: [], duplicateBills: [],
     carryBills: [...new Set(carryBills || [])], nextCarryBills: [...new Set(carryBills || [])], podLocks,
@@ -375,6 +400,7 @@ function initializeShopeeState(reportDate, sourceName, rows, carryBills) {
   const today = rows.map(row => row.shipmentCode);
   const allMembers = [...new Set([...today, ...(carryBills || [])])];
   const podLocks = podBillsForMembership(allMembers);
+  const priorCarryRows = shopeePriorCarryRows(carryBills);
   const dailyParseRows = rows.map(row => ({
     ...row,
     运单号: row.shipmentCode,
@@ -392,12 +418,12 @@ function initializeShopeeState(reportDate, sourceName, rows, carryBills) {
       totalRecognized: today.length,
       groupCounts: { CN: rows.filter(row => row.businessType === 'SHOPEECN').length, VN: rows.filter(row => row.businessType === 'SHOPEEVN').length },
       importedAt: new Date().toISOString(),
-      source: 'V363_COMMITTED_UNIFIED_MEMBERSHIP'
+      source: 'V364_COMMITTED_UNIFIED_MEMBERSHIP'
     },
     recipientConflicts: [], recipientReconciliation: null,
     carryBills: [...new Set(carryBills || [])], nextCarryBills: [...new Set(carryBills || [])], podLocks,
     scanPool: [], scanRetryBills: [], scanResults: [], scanQueryStatus: [], shipmentTrackResults: [], shipmentQueryStatus: [],
-    trackResults: [], trackEvents: [], eventQueryStatus: [], exceptionItems: [], exceptionQueryStatus: [], finalRows: [], priorCarryRows: [], needTrackBills: [], apiBatchStatus: [],
+    trackResults: [], trackEvents: [], eventQueryStatus: [], exceptionItems: [], exceptionQueryStatus: [], finalRows: [], priorCarryRows, needTrackBills: [], apiBatchStatus: [],
     historySummary: [], logs: [],
     processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
     lastRunSummary: null, lastRun: null, currentRun: null, snapshotId: ''
