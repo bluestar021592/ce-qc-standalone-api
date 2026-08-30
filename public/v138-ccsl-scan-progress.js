@@ -1,6 +1,7 @@
 (function installV138CcslScanProgress(global){
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
   const VERSION='2026-08-29-v341-ccsl-progress-owner-guard-v1';
+  const DISPLAY_STABILITY_REVISION='2026-08-30-v376-terminal-unified-owner-lock-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
@@ -15,12 +16,20 @@
   function unifiedOwnsLegacyStatus(node){
     if(!node)return false;
     const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
-    if(stage?.owner==='V67'&&stage.active===true){
-      return String(stage.type||'').toUpperCase()!=='CCSL';
+    const stageDate=normalizeDate(stage?.reportDate||'');
+    const currentDate=selectedReportDate();
+    const sameUnifiedDate=!stageDate||!currentDate||stageDate===currentDate;
+    const stageType=String(stage?.type||'').toUpperCase();
+    if(stage?.owner==='V67'&&sameUnifiedDate){
+      if(stage.active===true)return stageType!=='CCSL';
+      // Once V67 reaches a terminal unified state, keep the final unified message
+      // authoritative even if app refresh rebuilt #ccslRunStatus and erased its
+      // dataset markers. The CCSL 1s/250ms detail pollers must not paint an old
+      // CCSL-only completion card over the final seven-business result.
+      if(stage.active===false&&['DONE','FAILED','ERROR'].includes(stageType))return true;
     }
     if(node.dataset.v67UnifiedOwner!=='1')return false;
     const ownerDate=normalizeDate(node.dataset.v67UnifiedReportDate||'');
-    const currentDate=selectedReportDate();
     if(ownerDate&&currentDate&&ownerDate!==currentDate){
       delete node.dataset.v67UnifiedOwner;
       delete node.dataset.v67UnifiedReportDate;
@@ -150,7 +159,14 @@
     if(typeof original!=='function'||original.__v334TruthfulProgress)return;
     const wrapped=function(state){
       const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
-      if(stage?.owner==='V67'&&stage.active===true&&String(stage.type||'').toUpperCase()!=='CCSL')return original.apply(this,arguments);
+      const stageType=String(stage?.type||'').toUpperCase();
+      const stageDate=normalizeDate(stage?.reportDate||'');
+      const currentDate=selectedReportDate();
+      const sameUnifiedDate=!stageDate||!currentDate||stageDate===currentDate;
+      if(stage?.owner==='V67'&&sameUnifiedDate){
+        if(stage.active===true&&stageType!=='CCSL')return original.apply(this,arguments);
+        if(stage.active===false&&['DONE','FAILED','ERROR'].includes(stageType))return original.apply(this,arguments);
+      }
       const type=String(state?.businessType||'CCSL').toUpperCase()==='SHOPEE'?'SHOPEE':'CCSL';
       const live=progressByType.get(type);
       const sameDate=!live?.reportDate||!state?.reportDate||String(live.reportDate)===String(state.reportDate);
@@ -188,6 +204,6 @@
     [100,450,1200].forEach(ms=>setTimeout(tick,ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus};
-  console.info('[CE-QC][V341_CCSL_DETAIL_OWNER]',VERSION,'CCSL progress keeps 350/50 detail but yields #ccslRunStatus to unified Shopee/WHPP/final status.');
+  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,displayStabilityRevision:DISPLAY_STABILITY_REVISION,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus};
+  console.info('[CE-QC][V341_CCSL_DETAIL_OWNER]',VERSION,DISPLAY_STABILITY_REVISION,'CCSL progress keeps 350/50 detail during the CCSL stage, then permanently yields #ccslRunStatus to the terminal V67 unified result for the same report date.');
 })(window);

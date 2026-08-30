@@ -4,8 +4,10 @@
   const VERSION = '2026-08-27-v333-canonical-seven-business-owner-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-status-only-v1';
   const COMPLETION_SYNC_REVISION = '2026-08-30-v360-verified-whpp-status-sync-v1';
+  const DISPLAY_STABILITY_REVISION = '2026-08-30-v376-v67-active-stage-display-lock-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   const RUN_VERIFIED_GRACE_MS = 10 * 60 * 1000;
+  const STAGE_ORDER = ['CCSL', 'SHOPEE', 'WHPP'];
   let lastTruth = null;
   let refreshBusy = false;
   let timer = null;
@@ -152,6 +154,36 @@
     return 'muted';
   }
 
+  function activeRunnerStage(reportDate) {
+    const stage = global.__CE_QC_UNIFIED_RUN_STAGE__ || {};
+    const target = normalizeDate(reportDate || '');
+    const stageDate = normalizeDate(stage.reportDate || '');
+    if (stage.owner !== 'V67' || stage.active !== true) return null;
+    if (target && stageDate && target !== stageDate) return null;
+    const key = String(stage.type || '').toUpperCase();
+    return STAGE_ORDER.includes(key) ? { ...stage, key, reportDate: stageDate || target } : null;
+  }
+
+  function stableStagesForRunner(stages = [], reportDate = '') {
+    const active = activeRunnerStage(reportDate);
+    if (!active) return { stages, runnerActive: false };
+    const activeIndex = STAGE_ORDER.indexOf(active.key);
+    return {
+      runnerActive: true,
+      activeKey: active.key,
+      stages: stages.map(stage => {
+        const index = STAGE_ORDER.indexOf(stage.key);
+        if (index === activeIndex) {
+          return { ...stage, state: 'running', complete: false, details: `V67当前正在执行${stage.label}，完成确认前不发布最终完成状态。` };
+        }
+        if (index > activeIndex) {
+          return { ...stage, state: 'pending', complete: false, details: `等待V67完成前一阶段后自动进入${stage.label}。` };
+        }
+        return stage;
+      })
+    };
+  }
+
   function ensureSummaryNode() {
     const status = document.getElementById('ccslRunStatus');
     if (!status?.parentElement) return null;
@@ -173,20 +205,29 @@
   function renderTruth(truth) {
     const node = ensureSummaryNode();
     if (!node || !truth) return;
-    const stages = truth.stages || [];
+    const stable = stableStagesForRunner(truth.stages || [], truth.reportDate);
+    const stages = stable.stages || [];
+    const visibleComplete = !stable.runnerActive && stages.every(stage => stage.state === 'done');
     node.dataset.v333Owner = 'canonical';
     node.dataset.executionOwner = 'V67';
     node.dataset.completionSyncRevision = COMPLETION_SYNC_REVISION;
+    node.dataset.displayStabilityRevision = DISPLAY_STABILITY_REVISION;
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
         ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${stage.details || stage.error || ''}">${stageText(stage)}</span>`).join('')}
-        <span class="status-pill ${truth.complete ? 'success' : 'muted'}">${truth.complete ? '七业务已完成' : '尚未全部完成'}</span>
+        <span class="status-pill ${visibleComplete ? 'success' : 'muted'}">${visibleComplete ? '七业务已完成' : '尚未全部完成'}</span>
       </div>`;
+
+    // V67 is the only execution-control owner. While it is actively running a
+    // stage, V168 must remain display-only and must not overwrite the button text
+    // with a backend snapshot that can become complete a few seconds earlier than
+    // the V67 final acknowledgement. This removes the visible CCSL/WHPP/DONE race.
+    if (stable.runnerActive) return;
 
     const start = document.querySelector('[data-testid="global-auto-process"]');
     const resume = document.querySelector('button[onclick="resumeUnified()"]');
-    if (truth.complete) {
+    if (visibleComplete) {
       if (start) {
         start.dataset.v168Locked = '1';
         start.disabled = true;
@@ -292,12 +333,13 @@
       version: VERSION,
       architecture: ARCHITECTURE,
       completionSyncRevision: COMPLETION_SYNC_REVISION,
+      displayStabilityRevision: DISPLAY_STABILITY_REVISION,
       statusOnly: true,
       authoritativeRunner: 'V67',
       refresh: refreshTruth,
       get lastTruth() { return lastTruth; }
     };
-    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, COMPLETION_SYNC_REVISION, 'V168 only renders canonical CCSL/SHOPEE/WHPP status; it never wraps or starts unified processing. A same-page V67 verified completion may bridge the short summary-read lag only while CCSL+SHOPEE remain canonically complete for the same date.');
+    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, COMPLETION_SYNC_REVISION, DISPLAY_STABILITY_REVISION, 'V168 renders canonical CCSL/SHOPEE/WHPP status and yields button control while V67 is active; later-stage stale completion cannot overtake the active V67 stage.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
