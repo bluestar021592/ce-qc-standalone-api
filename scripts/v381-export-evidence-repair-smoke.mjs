@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { buildConsistencyReport, V382_CCSL_PROCESSING_PROOF_ID } from '../src/consistency.js';
 
-for(const file of ['src/v381ExportEvidenceRepair.js','src/v225ExportReturnTruth.js','src/v183SingleBusinessExportJobWorker.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v381ExportEvidenceRepair.js','src/v225ExportReturnTruth.js','src/v183SingleBusinessExportJobWorker.js','src/consistency.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const repair=fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8');
 const exportTruth=fs.readFileSync('src/v225ExportReturnTruth.js','utf8');
 const worker=fs.readFileSync('src/v183SingleBusinessExportJobWorker.js','utf8');
+const snapshotSource=fs.readFileSync('src/snapshots.js','utf8');
 
 assert.match(repair,/V381_EXPORT_TRACK_BATCH=50/,'export evidence track repair must stay at 50 per request');
 assert.match(repair,/V381_EXPORT_TRACK_CONCURRENCY=4/,'export evidence repair must stay at 4 concurrent groups');
@@ -31,4 +33,19 @@ assert.match(worker,/terminalTruth=rootCauseCode==='SHOPEE_EXPORT_TRUTH_INCOMPLE
 assert.match(worker,/terminalTruth\?'FAILED':rootCauseCode/,'terminal truth failure must stop V195 reconnect polling instead of masquerading as a transport retry');
 assert.match(worker,/evidenceRepairVersion:V381_EXPORT_EVIDENCE_REPAIR_ID/,'worker progress must expose the evidence repair owner');
 
-console.log('[V381] Shopee complete-export evidence repair smoke passed · saved-first · missing POD/START/attempt candidates · 50x4 track · strict START->POD preserved · terminal failure stops false reconnect');
+assert.match(V382_CCSL_PROCESSING_PROOF_ID,/v382-ccsl-scan-or-pod-proof-v1/);
+const missing=buildConsistencyReport({reportDate:'2026-08-25',pnhBills:['CC-A','CC-B'],scanResults:[{shipmentCode:'CC-A'}],podLocks:[],finalRows:[],trackEvents:[],carryBills:[],nextCarryBills:[]});
+assert.equal(missing.processingProof.source,2);
+assert.equal(missing.processingProof.covered,1);
+assert.equal(missing.processingProof.missing,1);
+assert.equal(missing.processingProof.complete,false);
+assert.ok(missing.errors.some(x=>String(x).includes('CCSL处理证据不完整')),'a non-POD daily member without scan proof must block snapshot completion');
+const covered=buildConsistencyReport({reportDate:'2026-08-25',pnhBills:['CC-A','CC-B'],scanResults:[{shipmentCode:'CC-A'}],podLocks:['CC-B'],finalRows:[],trackEvents:[],carryBills:[],nextCarryBills:[]});
+assert.equal(covered.processingProof.covered,2);
+assert.equal(covered.processingProof.missing,0);
+assert.equal(covered.processingProof.complete,true);
+assert.ok(!covered.errors.some(x=>String(x).includes('CCSL处理证据不完整')),'scan proof plus terminal POD locks must satisfy exact daily processing coverage');
+assert.match(snapshotSource,/const reconciliationFailed = consistency\?\.status === 'error'/,'snapshot validity must remain driven by consistency errors');
+assert.match(snapshotSource,/payload\.status = reconciliationFailed \? 'INVALID_FAILED_RECONCILIATION' : 'VALID'/,'missing processing proof must make the formal snapshot invalid rather than green');
+
+console.log('[V382/V381] export + CCSL completion-proof smoke passed · V381 saved-first 50x4 strict START->POD · V382 every non-POD CCSL daily member requires scan proof before a VALID completed snapshot can exist');
