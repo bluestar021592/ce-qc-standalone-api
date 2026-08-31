@@ -2,6 +2,7 @@
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
   const VERSION='2026-08-29-v341-ccsl-progress-owner-guard-v1';
   const V385_DETAIL_OWNER_RELEASE='2026-08-31-v385-release-stale-v67-detail-owner-v1';
+  const V393_FAILURE_VISIBILITY='2026-08-31-v393-preserve-unified-failure-detail-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
@@ -23,9 +24,16 @@
     if(!node)return false;
     const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
     if(stage?.owner==='V67'){
+      const type=String(stage.type||'').toUpperCase();
       if(stage.active===true){
-        return String(stage.type||'').toUpperCase()!=='CCSL';
+        return type!=='CCSL';
       }
+      // A completed/failed handoff is not stale CCSL detail. In particular, a
+      // SHOPEE start error used to be overwritten within 250ms by the canonical
+      // CCSL-completed renderer, hiding the real reason the three-stage runner
+      // stopped. Preserve V67 terminal failure/error ownership until the next
+      // explicit run changes the stage; successful DONE may return to CCSL detail.
+      if(type==='FAILED'||type==='ERROR')return true;
       releaseV67Owner(node);
       return false;
     }
@@ -192,6 +200,6 @@
     [100,450,1200].forEach(ms=>setTimeout(tick,ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,detailOwnerRelease:V385_DETAIL_OWNER_RELEASE,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus,releaseV67Owner};
-  console.info('[CE-QC][V341_CCSL_DETAIL_OWNER]',VERSION,V385_DETAIL_OWNER_RELEASE,'CCSL progress keeps 350/50 detail; inactive or absent V67 runner ownership is released immediately so V317/V384 canonical detail cannot remain stale.');
+  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,detailOwnerRelease:V385_DETAIL_OWNER_RELEASE,failureVisibility:V393_FAILURE_VISIBILITY,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus,releaseV67Owner};
+  console.info('[CE-QC][V341_CCSL_DETAIL_OWNER]',VERSION,V385_DETAIL_OWNER_RELEASE,V393_FAILURE_VISIBILITY,'CCSL progress keeps 350/50 detail; active non-CCSL V67 ownership and terminal V67 failures are never overwritten by CCSL detail. Successful/inactive ownership is released so canonical CCSL detail can refresh normally.');
 })(window);
