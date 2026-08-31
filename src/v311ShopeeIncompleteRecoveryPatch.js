@@ -5,9 +5,13 @@ import { SHOPEE, createOrRecoverBusinessRun, getBusinessRunStatus, updateBusines
 export const V311_SHOPEE_INCOMPLETE_RECOVERY_ID='2026-08-31-v380-auto-prepare-current-shopee-lifecycle-v1';
 export const V375_SHOPEE_ZERO_WORK_ID='2026-08-31-v375-exact-zero-shopee-no-work-v1';
 export const V377_SHOPEE_IMPORT_LIFECYCLE_ID='2026-08-31-v377-latest-valid-import-lifecycle-boundary-v2';
+export const V393_SHOPEE_SELECTED_DATE_EXECUTION_ID='2026-08-31-v393-exact-selected-shopee-runtime-pointer-v1';
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
 
+function safeJson(value,fallback={}){
+  try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}
+}
 function latestShopeeDate(db){
   const daily=String(db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType=? ORDER BY reportDate DESC LIMIT 1").get(SHOPEE)?.reportDate||'');
   const unified=String(db.prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate||'');
@@ -55,6 +59,38 @@ function retireStaleShopeeRunPointers(db,reportDate,runId){
     db.exec('COMMIT');
     return checkpoints+locks;
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
+}
+
+// The legacy SHOPEE executor still resolves its date from business_states instead
+// of req.body.reportDate. V67, however, is explicitly selected-date driven. Point
+// only the compact runtime cache at the requested persisted daily membership before
+// entering the legacy executor. All daily/API/final/audit facts remain untouched;
+// loadBusinessState() immediately rehydrates the exact date from normalized tables.
+function alignShopeeRuntimePointer(db,reportDate){
+  const date=String(reportDate||'').trim();
+  if(!date)return{ok:true,changed:false,reportDate:'',reason:'NO_EXPLICIT_DATE'};
+  const daily=db.prepare('SELECT sourceFile,summaryJson,totalCount FROM business_daily_reports WHERE businessType=? AND reportDate=? LIMIT 1').get(SHOPEE,date)||null;
+  if(!daily)return{ok:false,changed:false,reportDate:date,reason:'SHOPEE_DAILY_STATE_MISSING'};
+  const row=db.prepare('SELECT valueJson FROM business_states WHERE businessType=? LIMIT 1').get(SHOPEE)||null;
+  const current=safeJson(row?.valueJson,{});
+  const beforeDate=String(current?.reportDate||'').trim();
+  if(beforeDate===date&&current?.dailyReportReady===true)return{ok:true,changed:false,reportDate:date,beforeDate};
+  const summary=safeJson(daily.summaryJson,{});
+  const sourceName=String(daily.sourceFile||'');
+  const compact={
+    businessType:SHOPEE,
+    reportDate:date,
+    sourceName,
+    dailyReportReady:true,
+    daily:{reportDate:date,sourceName,summary},
+    dailyParseSummary:summary,
+    snapshotId:''
+  };
+  const now=nowIso();
+  db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
+    ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
+    .run(SHOPEE,JSON.stringify(compact),now);
+  return{ok:true,changed:true,reportDate:date,beforeDate,totalCount:Number(daily.totalCount||0),policyId:V393_SHOPEE_SELECTED_DATE_EXECUTION_ID};
 }
 
 export function inspectV311ShopeeRecovery({db=getDb(),reportDate=''}={}){
@@ -109,12 +145,20 @@ function prepareCurrentShopeeLifecycle(req,res,next){
   try{
     const requestedDate=String(req.body?.reportDate||'').trim();
     const status=inspectV311ShopeeRecovery({reportDate:requestedDate});
-    if(status.complete||status.noWork||!status.dailyExists)return next();
+    if(status.complete||status.noWork)return next();
+    if(!status.dailyExists){
+      return res.status(409).json({ok:false,code:'V311_SHOPEE_DAILY_STATE_MISSING',error:`SHOPEE ${status.reportDate||requestedDate||'当前日期'} 有日报分类成员但缺少可执行日报状态，已停止跨日期误跑。`,recovery:status});
+    }
+    const pointer=alignShopeeRuntimePointer(getDb(),status.reportDate);
+    if(!pointer.ok){
+      return res.status(409).json({ok:false,code:'V393_SHOPEE_SELECTED_DATE_BIND_FAILED',error:`SHOPEE无法绑定所选日报日期 ${status.reportDate||requestedDate}，已停止跨日期误跑。`,recovery:status,pointer});
+    }
     const prepared=prepareV311ShopeeRecovery({reportDate:status.reportDate,actor:req.user?.username||req.user?.email||'V380_AUTO_PREPARE'});
     if(prepared.error){
-      return res.status(409).json({ok:false,code:'V311_SHOPEE_PREPARE_FAILED',error:`SHOPEE当前日报运行态准备失败：${prepared.error}`,recovery:prepared});
+      return res.status(409).json({ok:false,code:'V311_SHOPEE_PREPARE_FAILED',error:`SHOPEE当前日报运行态准备失败：${prepared.error}`,recovery:prepared,pointer});
     }
     req.v311ShopeePrepared=prepared;
+    req.v393ShopeeSelectedDatePointer=pointer;
     return next();
   }catch(error){
     return res.status(500).json({ok:false,code:'V311_SHOPEE_PREPARE_FAILED',error:`SHOPEE当前日报运行态准备失败：${error?.message||error}`});
@@ -130,4 +174,4 @@ express.application.post=function v311ShopeeIncompleteRecoveryPost(route,...hand
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,'SHOPEE start/resume now auto-prepare the exact current import lifecycle before execution; stale pre-import run pointers retire only by exact business/date/runId; persisted business facts and audit snapshots remain preserved.');
+console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,V393_SHOPEE_SELECTED_DATE_EXECUTION_ID,'SHOPEE start/resume auto-prepare and bind the exact explicitly selected persisted report date before the legacy executor resolves business state; stale pre-import run pointers retire only by exact business/date/runId; daily/API/final/audit facts remain preserved.');
