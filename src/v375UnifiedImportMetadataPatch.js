@@ -137,28 +137,31 @@ function wrapBootstrapHandler(handler){
   };
 }
 
-function wrapUnifiedImportPostHandler(handler){
-  return async function v387HydratedUnifiedImportPost(req,res,next){
-    const originalJson=res.json.bind(res);
-    let restored=false;
-    res.json=function v387ImportPostJson(payload){
-      if(restored)return originalJson(payload);
-      restored=true;
-      try{
-        const hydrated=hydrateV384UnifiedImportPostPayload(payload);
-        if(hydrated!==payload){
-          payload=hydrated;
-          res.setHeader('X-CE-QC-V384-Import-Post-Truth',V384_UNIFIED_IMPORT_POST_TRUTH_ID);
-          res.setHeader('X-CE-QC-V387-Import-Post-Owner',V387_UNIFIED_IMPORT_POST_OWNER_ID);
-        }
-      }catch(error){
-        console.warn('[CE-QC][V387_IMPORT_POST_METADATA] hydration skipped:',error?.message||error);
+// This must be a pre-handler rather than a wrapper around the route's final
+// handler. V42 deliberately replaces only the LAST unified-import handler with
+// its atomic seven-business owner. A pre-handler survives that replacement and
+// can hydrate whichever final owner eventually emits the committed response.
+function unifiedImportPostHydrationMiddleware(req,res,next){
+  const originalJson=res.json.bind(res);
+  let restored=false;
+  res.json=function v387ImportPostJson(payload){
+    if(restored)return originalJson(payload);
+    restored=true;
+    res.json=originalJson;
+    try{
+      const hydrated=hydrateV384UnifiedImportPostPayload(payload);
+      if(hydrated!==payload){
+        payload=hydrated;
+        res.setHeader('X-CE-QC-V384-Import-Post-Truth',V384_UNIFIED_IMPORT_POST_TRUTH_ID);
+        res.setHeader('X-CE-QC-V387-Import-Post-Owner',V387_UNIFIED_IMPORT_POST_OWNER_ID);
       }
-      return originalJson(payload);
-    };
-    try{return await handler.call(this,req,res,next);}
-    finally{res.json=originalJson;}
+    }catch(error){
+      console.warn('[CE-QC][V387_IMPORT_POST_METADATA] hydration skipped:',error?.message||error);
+    }
+    return originalJson(payload);
   };
+  try{return next();}
+  catch(error){res.json=originalJson;throw error;}
 }
 
 express.application.get=function v377UnifiedImportMetadataGet(route,...handlers){
@@ -180,17 +183,16 @@ export function installV387UnifiedImportPostOwner(){
   const wrappedPost=function v387UnifiedImportMetadataPost(route,...handlers){
     const path=String(route||'');
     if(path==='/api/import/unified-daily-report'&&handlers.length){
-      const nextHandlers=[...handlers];
-      const index=nextHandlers.length-1;
-      if(typeof nextHandlers[index]==='function')nextHandlers[index]=wrapUnifiedImportPostHandler(nextHandlers[index]);
-      return previousPost.call(this,route,...nextHandlers);
+      const finalHandler=handlers[handlers.length-1];
+      if(typeof finalHandler!=='function')return previousPost.call(this,route,...handlers);
+      return previousPost.call(this,route,...handlers.slice(0,-1),unifiedImportPostHydrationMiddleware,finalHandler);
     }
     return previousPost.call(this,route,...handlers);
   };
   Object.defineProperty(wrappedPost,POST_OWNER,{value:true});
   express.application.post=wrappedPost;
-  return{installed:true,active:true,revision:V387_UNIFIED_IMPORT_POST_OWNER_ID,previousOwner:previousPost.name||'anonymous'};
+  return{installed:true,active:true,revision:V387_UNIFIED_IMPORT_POST_OWNER_ID,previousOwner:previousPost.name||'anonymous',placement:'PRE_FINAL_HANDLER_SURVIVES_V42_REPLACEMENT'};
 }
 
 console.info('[CE-QC][V375_IMPORT_METADATA]',V375_UNIFIED_IMPORT_METADATA_ID,V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,'bootstrap + unified-latest read one exact latest VALID snapshot; processing queue is always open-today + open-historical; no database writes or schema changes.');
-console.info('[CE-QC][V384_IMPORT_POST_TRUTH]',V384_UNIFIED_IMPORT_POST_TRUTH_ID,'successful unified-daily-report POST payload hydration is exported as one shared truth function; V387 explicitly installs the final production route owner after earlier import wrappers.');
+console.info('[CE-QC][V384_IMPORT_POST_TRUTH]',V384_UNIFIED_IMPORT_POST_TRUTH_ID,'successful unified-daily-report POST payload hydration uses a pre-final response middleware so V42 final-handler replacement cannot discard it; V387 installs after earlier import wrappers.');
