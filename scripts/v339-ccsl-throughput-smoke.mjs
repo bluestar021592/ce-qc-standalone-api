@@ -6,18 +6,22 @@ import { createCcslThroughputClient,V339_CCSL_CONFIRM_CONCURRENCY,V339_CCSL_THRO
 import { shouldUseCcslLightCheckpoint,V340_CCSL_FAST_CHECKPOINT_ID } from '../src/v340CcslStorageCheckpoint.js';
 import { resolveV314Target } from '../src/v314ModuleRedirectPatch.js';
 
-for(const file of ['src/v339CcslThroughputCore.js','src/v314ShopeeThroughputCore.js','src/v340CcslStorageCheckpoint.js','src/v314PipelineThroughput.js','src/v314ModuleRedirectPatch.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v339CcslThroughputCore.js','src/v314ShopeeThroughputCore.js','src/v340CcslStorageCheckpoint.js','src/v314PipelineThroughput.js','src/v314ModuleRedirectPatch.js','src/v70ConfirmQueryResiliencePatch.js','src/v338CcslBatchPolicyRestore.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 assert.equal(V339_CCSL_CONFIRM_CONCURRENCY,1);
 assert.match(V339_CCSL_THROUGHPUT_CORE_ID,/v345-ccsl-single-lane-bounded-retry/);
 assert.match(V340_CCSL_FAST_CHECKPOINT_ID,/v348-ccsl-final-only-authoritative-mirror/);
 assert.match(resolveV314Target('./src/storage.js','file:///C:/CE/app/server.js'),/v340CcslStorageCheckpoint\.js$/);
-const compat=fs.readFileSync('src/v339CcslThroughputCore.js','utf8'),wrapper=fs.readFileSync('src/v314PipelineThroughput.js','utf8'),checkpoint=fs.readFileSync('src/v340CcslStorageCheckpoint.js','utf8'),core=fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8');
+const compat=fs.readFileSync('src/v339CcslThroughputCore.js','utf8'),wrapper=fs.readFileSync('src/v314PipelineThroughput.js','utf8'),checkpoint=fs.readFileSync('src/v340CcslStorageCheckpoint.js','utf8'),core=fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8'),v70=fs.readFileSync('src/v70ConfirmQueryResiliencePatch.js','utf8'),v338=fs.readFileSync('src/v338CcslBatchPolicyRestore.js','utf8'),v147=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 assert.match(compat,/Compatibility module only/);
 assert.doesNotMatch(compat,/function createCcslThroughputClient/,'legacy V339 file must not own duplicate throughput logic');
 assert.match(wrapper,/createUnifiedThroughputClient/);
 assert.match(wrapper,/trackConcurrency:4/);
 assert.match(wrapper,/scanBatchSize:350/);
 assert.match(wrapper,/trackBatchSize:50/);
+assert.match(v147,/v338CcslBatchPolicyRestore\.js/,'V338 must be preloaded before the canonical pipeline module snapshot');
+assert.match(v338,/process\.env\.ORDER_BATCH_SIZE='350'/,'V338 must keep the logical scan planner at 350');
+assert.doesNotMatch(v70,/process\.env\.ORDER_BATCH_SIZE\s*=/,'V70 transport safety must never shrink the canonical logical 350 planner back to 100');
+assert.match(v70,/Math\.min\(100, Number\(process\.env\.CONFIRM_QUERY_BATCH_SIZE/,'V70 may retain <=100 only as its internal CE transport chunk boundary');
 assert.doesNotMatch(checkpoint,/SCAN_FULL_MIRROR_STRIDE/,'V348 must not restore periodic full SQLite mirrors during an active CCSL run');
 assert.doesNotMatch(checkpoint,/TRACK_FULL_MIRROR_STRIDE/,'V348 must not restore periodic full SQLite mirrors during an active CCSL run');
 assert.match(checkpoint,/FINAL_ONLY_AFTER_RUNNING_FALSE/,'V348 authoritative full mirror must remain final-only after processing.running becomes false');
@@ -38,4 +42,4 @@ const trackBills=Array.from({length:670},(_,i)=>`T${String(i+1).padStart(4,'0')}
 const trackClient=createCcslThroughputClient({businessType:'CCSL',needTrackBills:trackBills,trackQueryStatus:[]},{async trackQuery(codes){calls++;active++;maxActive=Math.max(maxActive,active);assert.ok(codes.length<=50);await new Promise(r=>setTimeout(r,35));active--;return codes.map(shipmentCode=>({shipmentCode}));}},{trackConcurrency:4});
 assert.equal(trackClient.__ceQcThroughputPools.track.planMode,'compact-pending');
 const started=performance.now();for(let i=0;i<trackBills.length;i+=50)await trackClient.trackQuery(trackBills.slice(i,i+50));const elapsed=performance.now()-started;assert.equal(calls,14);assert.equal(maxActive,4,'CCSL track must use 50-ticket x4 bounded prefetch');assert.ok(elapsed<340);
-console.log(`[V345/V348] CCSL compatibility smoke passed · active owner is unified · scan 350 single remote lane · track 50x4 · fallback stays bounded · resume boundary compact-pending · all active batches stay zero-wait light checkpoints · final authoritative mirror only after running=false · ${elapsed.toFixed(1)}ms synthetic`);
+console.log(`[V345/V348/V392] CCSL compatibility smoke passed · logical scan planner locked at 350 · V70 internal transport <=100 only · active owner is unified · scan 350 single remote lane · track 50x4 · fallback stays bounded · resume boundary compact-pending · all active batches stay zero-wait light checkpoints · final authoritative mirror only after running=false · ${elapsed.toFixed(1)}ms synthetic`);
