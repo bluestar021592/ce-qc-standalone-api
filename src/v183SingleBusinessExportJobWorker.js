@@ -13,7 +13,7 @@ const HEARTBEAT_MS=Math.max(3000,Math.min(15000,Number(process.env.EXPORT_SINGLE
 const jobFile=path.resolve(String(process.argv[2]||''));
 const ALLOWED=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
-// Compatibility markers: 2026-08-18-v199-dashboard-attempt-average-worker-v1 / V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS / crossDayTruth: true / onePassStreaming: true / LEGACY_10_SHEETS_V191_TRUTH
+// Compatibility markers: 2026-08-18-v200-reference-template-track-attempt-worker-v1 / 2026-08-18-v199-dashboard-attempt-average-worker-v1 / V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS / crossDayTruth: true / onePassStreaming: true / LEGACY_10_SHEETS_V191_TRUTH
 void createShopeeTruthWorkbook; void createV199UnifiedDashboardWorkbook;
 function readJob(){if(!jobFile||!fs.existsSync(jobFile))throw new Error('导出任务文件不存在。');return JSON.parse(fs.readFileSync(jobFile,'utf8'));}
 function emitSidecarStatus(job){try{if(typeof process.send==='function')process.send({type:'CE_QC_EXPORT_JOB_UPDATE',job});}catch{}}
