@@ -7,6 +7,7 @@ export const V375_SHOPEE_ZERO_WORK_ID='2026-08-31-v375-exact-zero-shopee-no-work
 export const V377_SHOPEE_IMPORT_LIFECYCLE_ID='2026-08-31-v377-latest-valid-import-lifecycle-boundary-v2';
 export const V393_SHOPEE_SELECTED_DATE_EXECUTION_ID='2026-08-31-v393-exact-selected-shopee-runtime-pointer-v1';
 export const V394_SHOPEE_FAILURE_DIAGNOSTIC_ID='2026-08-31-v394-runtime-failure-diagnostic-v1';
+export const V395_SHOPEE_PREFLIGHT_STATUS_ID='2026-08-31-v395-preflight-running-status-v1';
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
 const FAILURE_CAPTURE=Symbol.for('ce-qc.v394-shopee-failure-capture');
@@ -164,13 +165,19 @@ export function prepareV311ShopeeRecovery({db=getDb(),reportDate='',actor='V311'
   }
   if(lock?.status==='finished'){
     updateBusinessRunLock(SHOPEE,date,'failed','V311 reopened a finished SHOPEE run because no VALID COMPLETED snapshot exists for this report date.');
+  }else if(lock&&['failed','paused'].includes(String(lock.status||'').toLowerCase())){
+    // This prepare is part of an actual start/resume request. Do not leave an old
+    // FAILED/PAUSED badge visible while the new CE preflight is already running.
+    // If preflight fails, V394 writes the exact FAILED/PAUSED reason back before
+    // the response is sent; if it succeeds, the legacy executor reuses this run.
+    updateBusinessRunLock(SHOPEE,date,'running','');
   }else if(!lock){
     const outcome=createOrRecoverBusinessRun(SHOPEE,date,{lockedBy:String(actor||'V311')});
     if(!outcome.ok)return{...before,prepared:false,retiredStalePointers,error:outcome.error||outcome.code||'RUN_PREPARE_FAILED'};
   }
   const after=inspectV311ShopeeRecovery({db,reportDate:date});
-  try{db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v311_last_shopee_recovery',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(JSON.stringify({reportDate:date,before:before.lock?.status||'NONE',after:after.lock?.status||'NONE',retiredStalePointers,at:nowIso()}),nowIso());}catch{}
-  return{...after,prepared:true,reopenedFrom:before.lock?.status||'NONE',retiredStalePointers};
+  try{db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v311_last_shopee_recovery',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(JSON.stringify({reportDate:date,before:before.lock?.status||'NONE',after:after.lock?.status||'NONE',retiredStalePointers,at:nowIso(),statusPolicy:V395_SHOPEE_PREFLIGHT_STATUS_ID}),nowIso());}catch{}
+  return{...after,prepared:true,reopenedFrom:before.lock?.status||'NONE',retiredStalePointers,preflightStatusPolicy:V395_SHOPEE_PREFLIGHT_STATUS_ID};
 }
 
 function routeHandler(req,res){
@@ -236,4 +243,4 @@ express.application.post=function v311ShopeeIncompleteRecoveryPost(route,...hand
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,V393_SHOPEE_SELECTED_DATE_EXECUTION_ID,V394_SHOPEE_FAILURE_DIAGNOSTIC_ID,'SHOPEE start/resume auto-prepare and bind the exact selected persisted report date; current runtime failure detail is exposed without secrets and early execution failures synchronize the run lock; stale pre-import run pointers retire only by exact business/date/runId; daily/API/final/audit facts remain preserved.');
+console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,V393_SHOPEE_SELECTED_DATE_EXECUTION_ID,V394_SHOPEE_FAILURE_DIAGNOSTIC_ID,V395_SHOPEE_PREFLIGHT_STATUS_ID,'SHOPEE start/resume binds exact selected persisted date; old failed/paused status flips to running before the real CE preflight; failure detail is exposed without secrets and preflight failures synchronize the run lock; facts/audit remain preserved.');
