@@ -32,14 +32,17 @@ assert.equal(sameLifecycle.locked,true);
 assert.equal(sameLifecycle.reason,'CURRENT_DAILY_ALREADY_FINALIZED');
 assert.equal(sameLifecycle.finalizedSnapshotId,'WHPP-FINAL-0824-A');
 
-// A stale state from another source must not lock a genuinely new same-date import.
-const differentLifecycle=inspectV378WhppCompletionLock(date,{reportDate:date,sourceSnapshotId:'SOURCE-0824-B'},db);
-assert.equal(differentLifecycle.locked,false);
-assert.equal(differentLifecycle.reason,'FINALIZED_OTHER_SOURCE');
+// The persisted daily completion marker is authoritative. A transient in-memory
+// source mismatch must never reopen a finalized daily before the re-import commit
+// actually replaces business_daily_reports.summaryJson.
+const transientDifferentState=inspectV378WhppCompletionLock(date,{reportDate:date,sourceSnapshotId:'SOURCE-0824-B'},db);
+assert.equal(transientDifferentState.sourceMatches,false);
+assert.equal(transientDifferentState.locked,true);
+assert.equal(transientDifferentState.reason,'CURRENT_DAILY_ALREADY_FINALIZED');
 
 // saveWhppDailyImport semantics for a real same-date re-upload overwrite summaryJson
 // with the new source snapshot and remove the old finalized marker. Reproduce that
-// database boundary directly and ensure the lock naturally opens again.
+// database boundary directly and ensure the lock opens only after this durable write.
 const reimportSummary={batchId:'BATCH-0824-B',snapshotId:'SOURCE-0824-B',total:203};
 db.prepare("UPDATE business_daily_reports SET summaryJson=?,updatedAt=? WHERE businessType='WHPP' AND reportDate=?")
   .run(JSON.stringify(reimportSummary),'2026-08-31T05:10:00.000Z',date);
@@ -50,6 +53,8 @@ assert.equal(afterReimport.reason,'CURRENT_DAILY_NOT_FINALIZED');
 
 const source=fs.readFileSync(new URL('../src/v134WhppRunSupervisorPatch.js',import.meta.url),'utf8');
 assert.match(source,/V378_WHPP_COMPLETION_LOCK_REVISION/);
+assert.match(source,/locked: finalized/,
+  'durable normalized-daily finalization must remain authoritative until a re-import replaces the marker');
 assert.match(source,/const completionLock = inspectV378WhppCompletionLock\(state\.reportDate, state\)/,
   'every explicit WHPP launch must check the durable daily finalization marker before CE network work');
 assert.match(source,/if \(persistedCompletion\.locked\) return false;/,
@@ -63,4 +68,4 @@ assert.match(source,/accepted: false,[\s\S]*completed: true/,
 
 closeDb();
 fs.rmSync(root,{recursive:true,force:true});
-console.log('[V378] WHPP completion-lock smoke passed · finalized same-source daily is monotonic · duplicate start/resume cannot re-enter processing · backend 5s supervisor cannot restart it · genuine same-date re-import clears the marker and unlocks the new lifecycle');
+console.log('[V378] WHPP completion-lock smoke passed · persisted finalized daily is monotonic even across transient state-source mismatch · duplicate start/resume cannot re-enter processing · backend 5s supervisor cannot restart it · genuine same-date re-import clears the marker and unlocks the new lifecycle');
