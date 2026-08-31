@@ -54,8 +54,8 @@ function isTransient(error) {
   const code = String(error?.code || error?.cause?.code || '').toUpperCase();
   const message = String(error?.message || error?.cause?.message || '');
   return [408, 425, 429, 500, 502, 503, 504].includes(status)
-    || ['ECONNRESET','ECONNABORTED','ETIMEDOUT','EPIPE','EAI_AGAIN','ENETRESET','ENETUNREACH'].includes(code)
-    || /socket hang up|connection reset|network error|timed?\s*out|timeout|premature close|read ECONNRESET/i.test(message);
+    || ['ECONNRESET','ECONNABORTED','ETIMEDOUT','EPIPE','EAI_AGAIN','ENETRESET','ENETUNREACH','CE_CONFIRM_BATCH_BUDGET_EXHAUSTED'].includes(code)
+    || /socket hang up|connection reset|network error|timed?\s*out|timeout|premature close|read ECONNRESET|transport budget exhausted/i.test(message);
 }
 
 function wait(ms) {
