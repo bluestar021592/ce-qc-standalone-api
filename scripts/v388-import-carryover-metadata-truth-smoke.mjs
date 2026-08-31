@@ -73,7 +73,7 @@ try{
 
   const rawBefore=db.prepare('SELECT dateDetectionSource,dateCandidatesJson,regionCountsJson,summaryJson FROM unified_import_batches WHERE batchId=?').get(saved.batchId);
   const snapshotBefore=db.prepare('SELECT payloadJson,status FROM unified_snapshots WHERE snapshotId=?').get(saved.snapshotId);
-  const changesBefore=Number(db.prepare('SELECT total_changes() n').get()?.n||0);
+  const changesBeforeReads=Number(db.prepare('SELECT total_changes() n').get()?.n||0);
 
   const recoveredDirect=recoverV388ArchivedImportMetadata({fileHash:hash,reportDate:'2026-08-25',sourceName:'historical-source.xlsx',dateWasManuallyCorrected:0});
   assert.equal(recoveredDirect?.recoveryId,V388_ARCHIVED_IMPORT_METADATA_ID);
@@ -103,23 +103,38 @@ try{
   assert.equal(hydrated.carryover.todayOpen,4);
   assert.equal(hydrated.carryover.currentOpen,6,'V375 current queue truth must be today OPEN + historical OPEN');
 
-  const running=normalizeV161UnifiedImport(hydrated);
+  const runningInitial=normalizeV161UnifiedImport(hydrated);
   assert.match(V161_UNIFIED_IMPORT_RUNTIME_TRUTH_PATCH_ID,/v388-current-queue-includes-historical-open-v1/);
-  assert.equal(running.snapshotStatus,'IMPORTED');
-  assert.equal(running.carryover.historicalOpen,2);
-  assert.equal(running.carryover.currentOpen,6,'incomplete runtime queue must include four current members plus two historical OPEN');
-  assert.equal(running.regionCounts.PP,2,'V161 must not overwrite recovered PP with legacy blank region rows');
-  assert.equal(running.regionCounts.PV,2,'V161 must not overwrite recovered PV with legacy blank region rows');
-  assert.ok(Array.isArray(running.dateCandidates)&&running.dateCandidates.length>0,'V161 must not overwrite recovered date candidates with an empty legacy batch array');
-  assert.equal(running.dateCandidates[0]?.date,'2026-08-25');
+  assert.equal(runningInitial.snapshotStatus,'IMPORTED');
+  assert.equal(runningInitial.carryover.todayOpen,4);
+  assert.equal(runningInitial.carryover.historicalOpen,2);
+  assert.equal(runningInitial.carryover.currentOpen,6,'fresh imported queue must expose four current OPEN plus two historical OPEN');
+  assert.equal(runningInitial.carryover.runtimeTruth,'TODAY_OPEN_PLUS_HISTORICAL_OPEN');
+  assert.equal(runningInitial.regionCounts.PP,2,'V161 must not overwrite recovered PP with legacy blank region rows');
+  assert.equal(runningInitial.regionCounts.PV,2,'V161 must not overwrite recovered PV with legacy blank region rows');
+  assert.ok(Array.isArray(runningInitial.dateCandidates)&&runningInitial.dateCandidates.length>0,'V161 must not overwrite recovered date candidates with an empty legacy batch array');
+  assert.equal(runningInitial.dateCandidates[0]?.date,'2026-08-25');
+  assert.equal(Number(db.prepare('SELECT total_changes() n').get()?.n||0),changesBeforeReads,'metadata recovery and runtime normalization must remain read-only');
+
+  // Simulate a real processing/refresh result closing one current-day package while
+  // the unified snapshot is still IMPORTED. Current queue must shrink immediately;
+  // it must never keep showing the entire original daily membership as OPEN.
+  db.prepare("UPDATE carryover_open_items SET status='CLOSED',closeReason='SIGNED',updatedAt=? WHERE shipmentCode='CC-V388-001'").run(new Date().toISOString());
+  const changesAfterFixtureClose=Number(db.prepare('SELECT total_changes() n').get()?.n||0);
+  const runningAfterClose=normalizeV161UnifiedImport(hydrated);
+  assert.equal(runningAfterClose.snapshotStatus,'IMPORTED');
+  assert.equal(runningAfterClose.carryover.todayOpen,3);
+  assert.equal(runningAfterClose.carryover.historicalOpen,2);
+  assert.equal(runningAfterClose.carryover.currentOpen,5,'an IMPORTED/running queue must drop a current package as soon as persisted OPEN truth closes it');
+  assert.equal(runningAfterClose.carryover.runtimeTruth,'TODAY_OPEN_PLUS_HISTORICAL_OPEN');
 
   db.prepare("UPDATE unified_snapshots SET status='COMPLETED' WHERE snapshotId=?").run(saved.snapshotId);
   const completedBase=readV375LatestUnifiedImport(db);
   const completed=normalizeV161UnifiedImport(completedBase);
   assert.equal(completed.snapshotStatus,'COMPLETED');
-  assert.equal(completed.carryover.todayOpen,4);
+  assert.equal(completed.carryover.todayOpen,3);
   assert.equal(completed.carryover.historicalOpen,2);
-  assert.equal(completed.carryover.currentOpen,6,'completed runtime queue must remain today OPEN + historical OPEN');
+  assert.equal(completed.carryover.currentOpen,5,'completed runtime queue must use the same persisted OPEN truth');
   assert.equal(completed.dateCandidates[0]?.date,'2026-08-25','completed runtime truth must keep recovered date candidates too');
 
   const rawAfter=db.prepare('SELECT dateDetectionSource,dateCandidatesJson,regionCountsJson,summaryJson FROM unified_import_batches WHERE batchId=?').get(saved.batchId);
@@ -127,9 +142,9 @@ try{
   assert.deepEqual(rawAfter,rawBefore,'read-only archive hydration must never rewrite historical batch metadata');
   assert.equal(snapshotAfter.payloadJson,snapshotBefore.payloadJson,'read-only archive hydration must never rewrite immutable snapshot payload');
   const changesAfter=Number(db.prepare('SELECT total_changes() n').get()?.n||0);
-  // The only write after changesBefore is the deliberate fixture status flip to
-  // COMPLETED above. Metadata recovery/normalization itself must not add writes.
-  assert.equal(changesAfter,changesBefore+1,'V388 metadata/carryover reads must remain database read-only');
+  // After the deliberate fixture close, the only subsequent write is the deliberate
+  // snapshot status flip. Metadata recovery/normalization itself must add no writes.
+  assert.equal(changesAfter,changesAfterFixtureClose+1,'V388 metadata/carryover reads must remain database read-only');
 
   const auditSource=fs.readFileSync('src/v142SevenBusinessHistoryAudit.js','utf8');
   const auditUi=fs.readFileSync('public/v142-history-integrity-audit.js','utf8');
@@ -140,7 +155,7 @@ try{
   assert.match(auditUi,/它不是当前日报“当前处理队列”/,'UI must explicitly distinguish history export scope from current queue truth');
   assert.match(auditUi,/当日OPEN \+ 当前日前历史OPEN/,'UI must state the current processing queue formula');
 
-  console.log('[V388] import carryover + archived metadata truth smoke passed · V266 exact-SHA workbook restores real date/container/PP-PV/dateCandidates/rawRows read-only · V161 keeps recovered regions/date candidates · currentOpen=today+historical in running/completed states · export-range OPEN scope is explicit');
+  console.log('[V388] import carryover + archived metadata truth smoke passed · V266 exact-SHA workbook restores real date/container/PP-PV/dateCandidates/rawRows read-only · V161 preserves recovered metadata and uses persisted todayOPEN+historicalOPEN in IMPORTED/COMPLETED states · partial current closure shrinks queue before completion · export-range OPEN scope is explicit');
 }finally{
   try{closeDb();}catch{}
   try{fs.rmSync(root,{recursive:true,force:true});}catch{}
