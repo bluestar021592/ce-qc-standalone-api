@@ -4,6 +4,7 @@ import { isShopeePending1203ReturnEvent } from './shopeeReturnTruth.js';
 import { applyV230AttemptSigningTruth, V230_ATTEMPT_SIGNING_TRUTH_ID } from './v230AttemptSigningTruth.js';
 import { collectV320HistoricalExportRows, V320_HISTORICAL_EXPORT_ROWS_ID } from './v320HistoricalExportRows.js';
 import { applyV320DispatchSigningTruth, V320_DISPATCH_SIGNING_TRUTH_ID } from './v320DispatchSigningTruth.js';
+import { applyV381LedgerExportTruth, V381_EXPORT_EVIDENCE_REPAIR_ID } from './v381ExportEvidenceRepair.js';
 
 export const V200_EXPORT_VERSION = BASE_EXPORT_VERSION;
 // Legacy identifier retained because external update gates/source diagnostics reference it.
@@ -38,6 +39,10 @@ export async function collectV200Rows(type,range,onProgress=()=>{}){
   // 1/2/3派与平均签收天数必须共享同一套真实派送证据：70 START优先，整票无70才允许60兜底；
   // 对TBKH/SHOPEE CN/VN，缺真实START或POD时保持未知，禁止再用首次日报日期覆盖真实派送时效。
   applyV230AttemptSigningTruth(businessType,rows);
+  // V381 only hydrates genuine persisted ledger evidence (POD + strict START).
+  // V320 below remains the final START->POD signing owner, so no first-report
+  // fallback can leak into Shopee average signing days.
+  applyV381LedgerExportTruth(businessType,rows,{db:getDb(),range});
   applyV320DispatchSigningTruth(businessType,rows,{db:getDb()});
   applyV329FirstReportSigning(businessType,rows);
   const diag=evidenceDiagnostics(businessType,rows);
@@ -46,7 +51,7 @@ export async function collectV200Rows(type,range,onProgress=()=>{}){
   const keys=rows.map(row=>`${dateKey(row.reportMembershipDate||row.dailyMembershipDates?.[0])}|${normalizeBill(row.shipmentCode)}`),unique=new Set(keys.filter(key=>!key.startsWith('|')));
   if(DAILY_MEMBERSHIP_TYPES.has(businessType)&&unique.size!==rows.length)throw new Error(`V320_EXPORT_DUPLICATE_DAILY_MEMBER:${businessType}:${rows.length-unique.size}`);
   if(!rows.length)throw new Error(`${businessType} 在所选区间没有可导出的已保存日报成员。`);
-  onProgress({phase:'returnAttemptSigningTruth',completed:rows.length,total:rows.length,returned:rows.filter(r=>r.returned&&!r.pod).length,notPodActive:rows.filter(r=>!r.pod&&!r.returned).length,unknownAttemptPod:diag.attemptMissing,unknownSigningPod:diag.signingMissing,dailyMembershipOccurrences:rows.length,evidencePartial:diag.partial,engine:`${V225_EXPORT_RETURN_TRUTH_ID}+${V230_ATTEMPT_SIGNING_TRUTH_ID}+${V320_HISTORICAL_EXPORT_ROWS_ID}+${V320_DISPATCH_SIGNING_TRUTH_ID}`});
+  onProgress({phase:'returnAttemptSigningTruth',completed:rows.length,total:rows.length,returned:rows.filter(r=>r.returned&&!r.pod).length,notPodActive:rows.filter(r=>!r.pod&&!r.returned).length,unknownAttemptPod:diag.attemptMissing,unknownSigningPod:diag.signingMissing,dailyMembershipOccurrences:rows.length,evidencePartial:diag.partial,engine:`${V225_EXPORT_RETURN_TRUTH_ID}+${V230_ATTEMPT_SIGNING_TRUTH_ID}+${V320_HISTORICAL_EXPORT_ROWS_ID}+${V320_DISPATCH_SIGNING_TRUTH_ID}+${V381_EXPORT_EVIDENCE_REPAIR_ID}`});
   return rows;
 }
 
