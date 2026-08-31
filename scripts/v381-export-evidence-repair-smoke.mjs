@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { buildConsistencyReport, V382_CCSL_PROCESSING_PROOF_ID } from '../src/consistency.js';
 import { V384_CCSL_PROCESSING_PROOF_ID } from '../src/v384CcslProcessingProof.js';
 
-for(const file of ['src/v381ExportEvidenceRepair.js','src/v225ExportReturnTruth.js','src/v183SingleBusinessExportJobWorker.js','src/consistency.js','src/v317CcslIncompleteRecoveryPatch.js','src/v384CcslProcessingProof.js','src/v375UnifiedImportMetadataPatch.js','scripts/v384-import-post-processing-proof-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v381ExportEvidenceRepair.js','src/v225ExportReturnTruth.js','src/v183SingleBusinessExportJobWorker.js','src/consistency.js','src/v317CcslIncompleteRecoveryPatch.js','src/v384CcslProcessingProof.js','src/v375UnifiedImportMetadataPatch.js','scripts/v384-import-post-processing-proof-smoke.mjs','public/v138-ccsl-scan-progress.js','scripts/v385-v67-detail-owner-release-smoke.mjs'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const repair=fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8');
 const exportTruth=fs.readFileSync('src/v225ExportReturnTruth.js','utf8');
 const worker=fs.readFileSync('src/v183SingleBusinessExportJobWorker.js','utf8');
@@ -80,4 +80,5 @@ assert.match(importTruth,/path==='\/api\/import\/unified-daily-report'/,'the exa
 assert.match(importTruth,/readV375LatestUnifiedImport\(\)/,'POST hydration must reuse the same exact snapshot reader as bootstrap/latest');
 
 execFileSync(process.execPath,['scripts/v384-import-post-processing-proof-smoke.mjs'],{stdio:'inherit'});
-console.log('[V384/V383/V382/V381] export + import hydration + CCSL processing-proof smoke passed · V381 saved-first 50x4 strict START->POD · import POST renders exact snapshot truth · terminal scan/POD closes directly · nonterminal scan requires non-retry final trajectory proof · API failure never closes · old false-complete snapshot reopens without reupload');
+execFileSync(process.execPath,['scripts/v385-v67-detail-owner-release-smoke.mjs'],{stdio:'inherit'});
+console.log('[V385/V384/V383/V382/V381] export + import hydration + CCSL proof + detail-owner release smoke passed · V381 saved-first 50x4 strict START->POD · V384 strict completion proof · inactive V67 can no longer leave stale CCSL detail DOM');
