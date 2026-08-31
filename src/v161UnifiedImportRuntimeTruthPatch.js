@@ -3,8 +3,9 @@ import express from 'express';
 import { getDb } from './db.js';
 import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
 
-const PATCH_ID = '2026-08-29-v345-unified-seven-business-direct-whpp-truth-v2';
+const PATCH_ID = '2026-08-31-v393-unified-history-metadata-fastpath-v1';
 const TARGETS = new Set(['/api/bootstrap', '/api/import/unified-latest']);
+const FAST_HISTORY_ROUTE = '/api/unified-history';
 const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const WRAPPED = Symbol.for('ce-qc.v161-unified-import-runtime-truth');
 
@@ -44,13 +45,9 @@ function directWhppMembership(reportDate = '') {
     if (expected === actual) {
       return { count: actual, source: actual > 0 ? 'WHPP_STANDARD_DAILY' : 'WHPP_STANDARD_DAILY_ZERO', direct: true, expected, actual };
     }
-    // A partially persisted standard cohort is not safe evidence of daily
-    // membership. Fail closed instead of publishing a fabricated partial total.
     return { count: 0, source: 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED', direct: true, expected, actual };
   }
 
-  // Only old/erased dates reach the V351 fallback. Fresh imports should always
-  // return above from saveWhppDailyImport's normalized daily membership.
   try {
     const fallback = loadV351UnifiedWhppMembership(date, db);
     if (fallback?.present) {
@@ -68,9 +65,6 @@ function classificationTruth(batch) {
   const counts = Object.fromEntries(TYPES.map(type => [type, 0]));
   if (!batch) return { counts, whpp: { count: 0, source: 'NO_VALID_BATCH', direct: false } };
 
-  // V42 deliberately keeps WHPP out of the legacy six-business unified snapshot
-  // because WHPP is finalized by its own third execution stage. Read the six
-  // legacy partitions here, then join the same-day normalized WHPP daily cohort.
   const rows = getDb().prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType').all(batch.batchId);
   for (const row of rows) if (Object.prototype.hasOwnProperty.call(counts, row.businessType) && row.businessType !== 'WHPP') counts[row.businessType] = num(row.count);
   const whpp = directWhppMembership(batch.reportDate);
@@ -82,8 +76,6 @@ function regionCounts(batch) {
   if (!batch) return { PP: 0, PV: 0 };
   const stored = safeJson(batch.regionCountsJson, {});
   const storedPP = num(stored.PP), storedPV = num(stored.PV);
-  // V42 persists the parser's original regionCountsJson before projecting the
-  // six-business legacy snapshot, so these stored totals already include WHPP.
   if (storedPP + storedPV > 0) return { ...stored, PP: storedPP, PV: storedPV };
   const rows = getDb().prepare(`SELECT UPPER(COALESCE(regionCode,'')) regionCode,COUNT(*) count
     FROM unified_import_rows WHERE batchId=? GROUP BY UPPER(COALESCE(regionCode,''))`).all(batch.batchId);
@@ -175,6 +167,48 @@ function normalizeImport(base = {}) {
   };
 }
 
+function fastUnifiedHistory(req, res, next) {
+  try {
+    const requested = Math.max(1, Math.min(500, Number(req.query?.limit) || 120));
+    const rows = getDb().prepare(`SELECT b.batchId,b.snapshotId,b.reportDate,b.sourceName,b.fileHash,b.createdAt,
+      b.dateDetectionSource,b.dateCandidatesJson,b.dateWasManuallyCorrected,b.regionCountsJson,b.summaryJson,b.warningsJson,
+      COALESCE(s.status,'IMPORTED') snapshotStatus,COALESCE(s.createdAt,b.createdAt) snapshotCreatedAt
+      FROM unified_import_batches b
+      LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+      WHERE b.status='VALID'
+      ORDER BY b.reportDate DESC,b.createdAt DESC
+      LIMIT ?`).all(requested);
+    const seen = new Set();
+    const compact = [];
+    for (const row of rows) {
+      if (!row.reportDate || seen.has(row.reportDate)) continue;
+      seen.add(row.reportDate);
+      compact.push({
+        batchId: row.batchId,
+        snapshotId: row.snapshotId,
+        reportDate: row.reportDate,
+        sourceName: row.sourceName || '',
+        fileHash: row.fileHash || '',
+        dateDetectionSource: row.dateDetectionSource || '',
+        dateCandidates: safeJson(row.dateCandidatesJson, []),
+        dateWasManuallyCorrected: Boolean(row.dateWasManuallyCorrected),
+        regionCounts: safeJson(row.regionCountsJson, {}),
+        summary: safeJson(row.summaryJson, {}),
+        warnings: safeJson(row.warningsJson, []),
+        snapshotStatus: row.snapshotStatus || 'IMPORTED',
+        createdAt: row.snapshotCreatedAt || row.createdAt,
+        carryover: null,
+        historyMetadataOnly: true,
+        runtimeTruthPatch: PATCH_ID
+      });
+    }
+    res.setHeader('X-CE-QC-Unified-History-Owner', PATCH_ID);
+    return res.json({ ok: true, rows: compact, metadataOnly: true, carryoverRecomputed: false });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 function wrapRoute(handler) {
   if (typeof handler !== 'function' || handler[WRAPPED]) return handler;
   const wrapped = function v161UnifiedImportRuntimeTruthHandler(req, res, next) {
@@ -198,7 +232,11 @@ function wrapRoute(handler) {
 
 const previousGet = express.application.get;
 express.application.get = function v161UnifiedImportRuntimeTruthGet(...args) {
-  if (args.length >= 2 && TARGETS.has(String(args[0] || ''))) {
+  const route = String(args[0] || '');
+  if (args.length >= 2 && route === FAST_HISTORY_ROUTE) {
+    return previousGet.call(this, args[0], fastUnifiedHistory);
+  }
+  if (args.length >= 2 && TARGETS.has(route)) {
     return previousGet.apply(this, [args[0], ...args.slice(1).map(wrapRoute)]);
   }
   return previousGet.apply(this, args);
