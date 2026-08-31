@@ -1,5 +1,4 @@
 export const V384_CCSL_PROCESSING_PROOF_ID='2026-08-31-v384-scan-success-required-track-final-proof-v1';
-const CCSL_TYPES=new Set(['CE','CEAF','TBKH','ALI1688']);
 const SCAN_TERMINAL_STATUSES=new Set(['85','100']);
 
 function text(value=''){return String(value??'').trim();}
@@ -58,13 +57,52 @@ export function buildV384CcslProcessingProof({sourceBills=[],scanResults=[],fina
   };
 }
 
-export function readV384CcslProcessingProof(db,{reportDate='',snapshotId=''}={}){
-  const date=text(reportDate),sid=text(snapshotId);
-  if(!date||!sid)return{id:V384_CCSL_PROCESSING_PROOF_ID,source:0,covered:0,missing:0,complete:false,scanRows:0,finalRows:0,podLocked:0,reasons:{INVALID_SCOPE:1},missingBills:[],missingReasons:[]};
-  const sourceRows=db.prepare(`SELECT shipmentCode,businessType FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN ('CE','CEAF','TBKH','ALI1688')`).all(sid,date)
-    .filter(row=>CCSL_TYPES.has(text(row.businessType).toUpperCase()));
-  const scanRows=db.prepare('SELECT * FROM scan_results WHERE reportDate=?').all(date);
-  const finalRows=db.prepare('SELECT * FROM final_rows WHERE reportDate=?').all(date);
-  const podLocks=db.prepare('SELECT shipmentCode FROM pod_locks').all();
-  return buildV384CcslProcessingProof({sourceBills:sourceRows,scanResults:scanRows,finalRows,podLocks});
+function persistedProofSql(boundary=''){
+  const scanBoundary=boundary?" AND COALESCE(s.updatedAt,'')>=?":'';
+  const finalBoundary=boundary?" AND COALESCE(f.updatedAt,'')>=?":'';
+  return `(
+    EXISTS (SELECT 1 FROM pod_locks p WHERE p.shipmentCode=u.shipmentCode)
+    OR EXISTS (
+      SELECT 1 FROM scan_results s
+      WHERE s.reportDate=u.reportDate AND s.shipmentCode=u.shipmentCode${scanBoundary}
+        AND UPPER(COALESCE(s.scanCategory,'')) NOT LIKE '%API失败%'
+        AND UPPER(COALESCE(s.scanCategory,'')) NOT LIKE '%待重试%'
+        AND (
+          COALESCE(s.isPod,0)=1 OR COALESCE(s.orderStatus,'') IN ('85','100')
+          OR EXISTS (
+            SELECT 1 FROM final_rows f
+            WHERE f.reportDate=u.reportDate AND f.shipmentCode=u.shipmentCode${finalBoundary}
+              AND UPPER(COALESCE(f.primaryCategory,'')) NOT LIKE '%待重试%'
+              AND UPPER(COALESCE(f.category,'')) NOT LIKE '%待重试%'
+              AND UPPER(COALESCE(f.qcConclusion,'')) NOT LIKE '%API失败%'
+          )
+        )
+    )
+  )`;
+}
+
+export function readV384CcslProcessingProof(db,{reportDate='',snapshotId='',boundary=''}={}){
+  const date=text(reportDate),sid=text(snapshotId),life=text(boundary);
+  if(!date||!sid)return{id:V384_CCSL_PROCESSING_PROOF_ID,source:0,covered:0,missing:0,complete:false,reasons:{INVALID_SCOPE:1},missingBills:[],missingReasons:[],lifecycleBoundary:life};
+  const proofSql=persistedProofSql(life);
+  const params=[sid,date];
+  if(life)params.push(life,life);
+  const row=db.prepare(`SELECT COUNT(*) source,COALESCE(SUM(CASE WHEN ${proofSql} THEN 1 ELSE 0 END),0) covered
+    FROM unified_import_rows u
+    WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')`).get(...params)||{};
+  const source=Number(row.source||0),covered=Number(row.covered||0),missing=Math.max(0,source-covered);
+  let missingBills=[];
+  if(missing>0){
+    const missingParams=[sid,date];
+    if(life)missingParams.push(life,life);
+    missingBills=db.prepare(`SELECT u.shipmentCode FROM unified_import_rows u
+      WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN ('CE','CEAF','TBKH','ALI1688') AND NOT ${proofSql}
+      ORDER BY u.shipmentCode LIMIT 50`).all(...missingParams).map(item=>text(item.shipmentCode).toUpperCase()).filter(Boolean);
+  }
+  return{
+    id:V384_CCSL_PROCESSING_PROOF_ID,source,covered,missing,complete:covered>=source,
+    reasons:missing?{MISSING_VALID_PROCESSING_PROOF:missing}:{},missingBills,
+    missingReasons:missingBills.map(shipmentCode=>({shipmentCode,covered:false,reason:'MISSING_VALID_PROCESSING_PROOF'})),
+    lifecycleBoundary:life,queryMode:'INDEXED_EXISTS_CURRENT_SNAPSHOT_ONLY'
+  };
 }
