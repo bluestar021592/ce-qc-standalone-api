@@ -28,7 +28,7 @@ function executePool(statements, state, cleanName) {
 function executeWhppPool(statements, state) {
   const context = { state: structuredClone(state), cleanCodes: clean, result: null };
   vm.createContext(context);
-  vm.runInContext(`${statements}\nresult = allBills;`, context, { timeout: 1000 });
+  vm.runInContext(`${statements}\nresult = activeScanBills;`, context, { timeout: 1000 });
   return Array.from(context.result || []);
 }
 
@@ -62,9 +62,12 @@ const shopeeStatements = [
 const whppStatements = [
   must(whpp, /const today = cleanCodes\(state\.pnhBills \|\| \[\]\);/, 'WHPP today membership'),
   must(whpp, /const carry = cleanCodes\(state\.carryBills \|\| state\.nextCarryBills \|\| \[\]\);/, 'WHPP carry membership'),
-  must(whpp, /const allBills = cleanCodes\(\[\.\.\.today, \.\.\.carry\]\);/, 'WHPP rebuilt allBills')
+  must(whpp, /const allBills = cleanCodes\(\[\.\.\.today, \.\.\.carry\]\);/, 'WHPP rebuilt allBills'),
+  must(whpp, /const podLocks = new Set\(cleanCodes\(state\.podLocks \|\| \[\]\)\);/, 'WHPP POD locks'),
+  must(whpp, /const lockedPodBills = new Set\(allBills\.filter\(bill => podLocks\.has\(bill\)\)\);/, 'WHPP locked POD members'),
+  must(whpp, /const activeScanBills = allBills\.filter\(bill => !lockedPodBills\.has\(bill\)\);/, 'WHPP open scanPool source')
 ].join('\n');
-assert.match(whpp, /state\.scanPool = allBills;/, 'WHPP must publish rebuilt allBills as scanPool');
+assert.match(whpp, /state\.scanPool = activeScanBills;/, 'WHPP must publish only non-POD-locked members as scanPool');
 
 const today = Array.from({ length: 700 }, (_, i) => `CE260816${String(i + 1).padStart(6, '0')}`);
 const carry = ['CE260815999998', 'CE260815999999'];
@@ -85,11 +88,12 @@ assert.equal(shopeePool.length, 702, 'SHOPEE must ignore the empty saved scanPoo
 assert.deepEqual(batchSizes(shopeePool, 350), [350, 350, 2], 'SHOPEE rebuilt pool must preserve 350-ticket boundaries');
 
 const whppPool = executeWhppPool(whppStatements, staleState);
-assert.equal(whppPool.length, 702, 'WHPP must ignore the empty saved scanPool and rebuild 700 today + 2 carry');
-assert.deepEqual(batchSizes(whppPool, 350), [350, 350, 2], 'WHPP rebuilt pool must preserve 350-ticket boundaries');
+assert.equal(whppPool.length, 702, 'WHPP must ignore the empty saved scanPool and rebuild 700 today + 2 carry when there are no POD locks');
+assert.deepEqual(batchSizes(whppPool, 350), [350, 350, 2], 'WHPP rebuilt open pool must preserve 350-ticket boundaries');
 
 const withPodLock = { ...staleState, podLocks: [today[0]] };
 assert.equal(executePool(ccslStatements, withPodLock, 'cleanBills').length, 701, 'CCSL must remove historical POD locks from the rebuilt scanPool');
 assert.equal(executePool(shopeeStatements, withPodLock, 'cleanAnyBills').length, 701, 'SHOPEE must remove historical POD locks from the rebuilt scanPool');
+assert.equal(executeWhppPool(whppStatements, withPodLock).length, 701, 'WHPP must remove historical POD locks from the rebuilt scanPool and keep them terminal');
 
-console.log('[V371] production-source scanPool runtime smoke passed · actual CCSL/SHOPEE/WHPP source statements rebuild empty saved pools from committed membership · 702 => 350+350+2 · CCSL/SHOPEE POD locks excluded · WHPP independent owner remains 350 scan / track x4');
+console.log('[V371] production-source scanPool runtime smoke passed · actual CCSL/SHOPEE/WHPP source statements rebuild empty saved pools from committed membership · 702 => 350+350+2 without locks · all three owners exclude historical POD locks · WHPP independent owner remains 350 scan / track x4');
