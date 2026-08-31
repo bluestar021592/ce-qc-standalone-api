@@ -8,7 +8,7 @@ const workbook=fs.readFileSync('src/v200ReferenceWorkbook.js','utf8');
 const must=(source,token)=>{if(!source.includes(token))throw new Error(`export owner smoke missing ${token}`);};
 
 must(single,'createV200ReferenceDashboardWorkbook');
-must(single,'2026-08-18-v200-reference-template-track-attempt-worker-v1');
+if(!single.includes('2026-08-18-v200-reference-template-track-attempt-worker-v1')&&!single.includes('2026-08-31-v381-shopee-export-evidence-preflight-v1'))throw new Error('export owner smoke missing compatible V200/V381 worker revision');
 must(single,'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
 must(allChild,'createV200ReferenceDashboardWorkbook');
 must(allChild,'2026-08-18-v200-all-business-reference-child-v1');
@@ -24,4 +24,4 @@ must(workbook,"'派次与平均签收天数'");
 must(workbook,"const DETAIL_SHEETS = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细']");
 // V199 remains only as rollback/reference code; it must no longer own user-facing exports.
 must(v199,'2026-08-18-v199-dashboard-attempt-average-v1');
-console.log('[V200] single + ALL business reference-template export ownership smoke passed');
+console.log('[V381.1/V200] single + ALL business reference-template export ownership smoke passed');
