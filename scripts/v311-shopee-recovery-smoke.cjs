@@ -17,6 +17,7 @@ const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 assert.match(backend,/2026-08-31-v380-auto-prepare-current-shopee-lifecycle-v1/);
 assert.match(backend,/2026-08-31-v393-exact-selected-shopee-runtime-pointer-v1/,'V393 must bind the legacy SHOPEE executor to the explicitly selected persisted date');
 assert.match(backend,/2026-08-31-v394-runtime-failure-diagnostic-v1/,'V394 must expose sanitized persisted Shopee failure diagnostics');
+assert.match(backend,/2026-08-31-v395-preflight-running-status-v1/,'V395 must synchronize the run badge before the real CE preflight begins');
 assert.match(backend,/business_export_snapshots/,'V311+ must verify an exact VALID snapshot before reopening a finished run');
 assert.match(backend,/reconciliationStatus/,'V311+ must require completed snapshot reconciliation');
 assert.match(backend,/lock\?\.status==='finished'/,'V311+ must specifically repair the finished-without-snapshot dead state');
@@ -38,11 +39,14 @@ assert.match(backend,/errorMessage:String\(lock\.errorMessage\|\|''\)/,'canonica
 assert.match(backend,/function installShopeeExecutionFailureCapture\(res,reportDate\)/,'early Shopee execution failures must synchronize into the run lock');
 assert.match(backend,/const status=code==='AUTH_REQUIRED'\?'paused':'failed'/,'expired CE auth must pause while other execution failures become failed');
 assert.match(backend,/installShopeeExecutionFailureCapture\(res,status\.reportDate\)/,'failure capture must be installed only after exact-date prepare succeeds');
+assert.match(backend,/lock&&\['failed','paused'\]\.includes\(String\(lock\.status\|\|''\)\.toLowerCase\(\)\)/,'retrying an old failed/paused lifecycle must enter running before preflight');
+assert.match(backend,/updateBusinessRunLock\(SHOPEE,date,'running',''\)/,'V395 must clear the stale failure badge at the start of the new preflight attempt');
+assert.match(backend,/preflightStatusPolicy:V395_SHOPEE_PREFLIGHT_STATUS_ID/,'prepared status must disclose the V395 preflight-status policy');
 
 // V377 intentionally retires only a stale pre-import run pointer so a fresh
 // same-date VALID import can receive a new runId. This is not business-data loss.
-// V393/V394 may repoint/read the compact business_states cache, but they must never
-// mutate persisted daily/API/final/audit facts while selecting or diagnosing a date.
+// V393/V394/V395 may repoint/read tiny runtime metadata, but they must never mutate
+// persisted daily/API/final/audit facts while selecting or diagnosing a date.
 assert.match(backend,/DELETE FROM business_run_checkpoints WHERE businessType=\? AND reportDate=\? AND runId=\?/,
   'stale checkpoint retirement must be constrained by business + date + exact old runId');
 assert.match(backend,/DELETE FROM business_run_locks WHERE businessType=\? AND reportDate=\? AND runId=\?/,
@@ -93,4 +97,4 @@ assert.ok(inject.includes('X-CE-QC-V333-UI'),'V333 compatibility response header
 assert.ok(inject.includes('X-CE-QC-Unified-Runner'),'single-runner response header must be observable');
 assert.match(activation,/v311ShopeeIncompleteRecoveryPatch\.js/,'backend recovery route must remain production-active');
 
-console.log('[V394/V393/V380/V378/SINGLE-RUNNER] SHOPEE exact selected-date routing + persisted failure diagnostic + lifecycle auto-prepare + WHPP completion-lock smoke passed · early failures synchronize run lock · facts/audit immutable · V67 remains the sole browser execution owner');
+console.log('[V395/V394/V393/V380/V378/SINGLE-RUNNER] SHOPEE exact selected-date routing + preflight running-state sync + persisted failure diagnostic + lifecycle auto-prepare + WHPP completion-lock smoke passed · early failures synchronize run lock · facts/audit immutable · V67 remains sole browser execution owner');
