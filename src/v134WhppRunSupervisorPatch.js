@@ -117,7 +117,7 @@ export function inspectV378WhppCompletionLock(reportDate = '', state = null, db 
   const sourceMatches = !stateSourceSnapshotId || !sourceSnapshotId || stateSourceSnapshotId === sourceSnapshotId;
   const finalized = Boolean(summary.completed === true && COMPLETE_SNAPSHOT.has(status) && finalizedSnapshotId);
   return {
-    locked: Boolean(finalized && sourceMatches),
+    locked: finalized,
     finalized,
     sourceMatches,
     reportDate: date,
@@ -127,7 +127,7 @@ export function inspectV378WhppCompletionLock(reportDate = '', state = null, db 
     finalizedSnapshotId,
     snapshotStatus: status,
     finalizedAt: String(summary.finalizedAt || ''),
-    reason: finalized && sourceMatches ? 'CURRENT_DAILY_ALREADY_FINALIZED' : finalized ? 'FINALIZED_OTHER_SOURCE' : 'CURRENT_DAILY_NOT_FINALIZED',
+    reason: finalized ? 'CURRENT_DAILY_ALREADY_FINALIZED' : 'CURRENT_DAILY_NOT_FINALIZED',
     revision: V378_WHPP_COMPLETION_LOCK_REVISION
   };
 }
