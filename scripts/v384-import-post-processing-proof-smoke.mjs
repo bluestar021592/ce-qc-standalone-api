@@ -17,9 +17,22 @@ process.env.CE_QC_DISABLE_V246_TRACKING='1';
 const {getDb,closeDb}=await import('../src/db.js');
 const {saveUnifiedImport}=await import('../src/unifiedImportStore.js');
 const {buildV384CcslProcessingProof,readV384CcslProcessingProof,V384_CCSL_PROCESSING_PROOF_ID}=await import('../src/v384CcslProcessingProof.js');
-// Load the competing CCSL POST owner first. V387 must be installed AFTER it,
-// matching production where V74 explicitly installs the final import-POST owner
-// after its own same-file-reimport guard and before server.js registers routes.
+
+// Simulate the production V42 contract BEFORE later wrappers load: for the
+// unified-import route the lower owner discards/replaces only the LAST handler.
+// V387 must therefore live before that last handler or it will disappear.
+const postBeforeV42Mock=express.application.post;
+express.application.post=function v42StyleFinalReplacementMock(route,...handlers){
+  if(String(route||'')==='/api/import/unified-daily-report'&&handlers.length){
+    const replacement=(req,res)=>res.json({...globalThis.__V387_MOCK_V42_PAYLOAD__});
+    return postBeforeV42Mock.call(this,route,...handlers.slice(0,-1),replacement);
+  }
+  return postBeforeV42Mock.call(this,route,...handlers);
+};
+
+// Load the competing CCSL POST owner after the V42-style lower owner, then
+// explicitly install V387 last. This reproduces the production registration
+// topology rather than relying on a simple standalone Express route.
 const {inspectV317CcslRecovery}=await import('../src/v317CcslIncompleteRecoveryPatch.js');
 const {
   V384_UNIFIED_IMPORT_POST_TRUTH_ID,
@@ -30,6 +43,7 @@ const {
 const owner=installV387UnifiedImportPostOwner();
 assert.equal(owner.active,true);
 assert.equal(owner.revision,V387_UNIFIED_IMPORT_POST_OWNER_ID);
+assert.equal(owner.placement,'PRE_FINAL_HANDLER_SURVIVES_V42_REPLACEMENT');
 
 function parsed(reportDate,rows,fileHash){
   const counts={CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0};
@@ -65,14 +79,19 @@ assert.equal(directHydrated.summary.rawRows,4);
 assert.equal(directHydrated.carryover.currentOpen,directHydrated.carryover.todayOpen+directHydrated.carryover.historicalOpen);
 assert.ok(directHydrated.carryover.currentOpen>0);
 
+globalThis.__V387_MOCK_V42_PAYLOAD__=stalePayload;
 const app=express();
-app.post('/api/import/unified-daily-report',(req,res)=>res.json({...stalePayload}));
+// This final handler MUST be discarded by the V42-style lower owner. If V387
+// were still wrapping the final handler, this request would lose hydration and
+// reproduce the user's candidate failure. The pre-final middleware must survive.
+app.post('/api/import/unified-daily-report',(req,res)=>res.json({ok:false,shouldHaveBeenDiscarded:true}));
 const server=app.listen(0,'127.0.0.1');
 await once(server,'listening');
 try{
   const response=await fetch(`http://127.0.0.1:${server.address().port}/api/import/unified-daily-report`,{method:'POST'});
   const payload=await response.json();
   assert.equal(response.status,200);
+  assert.equal(payload.shouldHaveBeenDiscarded,undefined,'V42-style owner must actually replace the route final handler in this fixture');
   assert.equal(payload.importCommitted,true);
   assert.equal(payload.postTruthId,V384_UNIFIED_IMPORT_POST_TRUTH_ID);
   assert.equal(payload.postOwnerRevision,V387_UNIFIED_IMPORT_POST_OWNER_ID);
@@ -85,7 +104,10 @@ try{
   assert.ok(payload.carryover.historicalOpen>=1);
   assert.equal(payload.carryover.currentOpen,payload.carryover.todayOpen+payload.carryover.historicalOpen);
   assert.ok(payload.carryover.currentOpen>0);
-}finally{await new Promise(resolve=>server.close(resolve));}
+}finally{
+  delete globalThis.__V387_MOCK_V42_PAYLOAD__;
+  await new Promise(resolve=>server.close(resolve));
+}
 
 // Production activation is explicit: V74 is loaded immediately before V76/server
 // and must install V387 only after taking its own POST registration wrapper.
@@ -95,6 +117,8 @@ const v387OwnerIndex=v74Source.indexOf('installV387UnifiedImportPostOwner()');
 assert.ok(v74OwnerIndex>=0,'V74 same-file reimport owner must remain active');
 assert.ok(v387OwnerIndex>v74OwnerIndex,'V387 must be installed after V74 so it is the final unified-import POST truth owner before server registration');
 assert.match(v74Source,/V387_UNIFIED_IMPORT_POST_OWNER_ID/,'production route owner revision must be observable');
+const v375Source=fs.readFileSync('src/v375UnifiedImportMetadataPatch.js','utf8');
+assert.match(v375Source,/handlers\.slice\(0,-1\),unifiedImportPostHydrationMiddleware,finalHandler/,'V387 hydration must be inserted before the final handler, never wrapped around the replaceable V42 final owner');
 
 const proof1=buildV384CcslProcessingProof({
   sourceBills:['V384-A','V384-B','V384-C','V384-D'],
@@ -153,4 +177,4 @@ assert.equal(status.snapshotId,'V384-OLD-COMPLETED');
 
 closeDb();
 fs.rmSync(root,{recursive:true,force:true});
-console.log('[V387/V384] runtime smoke passed · final unified-import POST owner is explicit after V74/V317-style wrappers · successful import POST hydrates exact snapshot metadata before browser render · CCSL processing proof remains strict');
+console.log('[V387/V384] runtime smoke passed · V42-style final-handler replacement is executed and V387 pre-final hydration survives · successful import POST hydrates exact snapshot metadata · CCSL processing proof remains strict');
