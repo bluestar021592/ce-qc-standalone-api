@@ -4,6 +4,7 @@ import { SHOPEE, createOrRecoverBusinessRun, getBusinessRunStatus, updateBusines
 
 export const V311_SHOPEE_INCOMPLETE_RECOVERY_ID='2026-08-26-v311-reopen-finished-without-snapshot-v1';
 export const V375_SHOPEE_ZERO_WORK_ID='2026-08-31-v375-exact-zero-shopee-no-work-v1';
+export const V377_SHOPEE_IMPORT_LIFECYCLE_ID='2026-08-31-v377-latest-valid-import-lifecycle-boundary-v1';
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
 
@@ -12,20 +13,34 @@ function latestShopeeDate(db){
   const unified=String(db.prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate||'');
   return daily>unified?daily:unified;
 }
-function validSnapshot(db,reportDate,runId=''){
+function timestampAtOrAfter(value,boundary){
+  const limit=Date.parse(String(boundary||''));
+  if(!Number.isFinite(limit))return true;
+  const actual=Date.parse(String(value||''));
+  return Number.isFinite(actual)&&actual>=limit;
+}
+function lockForCurrentImport(rawLock,boundary=''){
+  if(!rawLock)return null;
+  if(!boundary)return rawLock;
+  const started=String(rawLock.lockedAt||rawLock.updatedAt||'');
+  return timestampAtOrAfter(started,boundary)?rawLock:null;
+}
+function validSnapshot(db,reportDate,runId='',boundary=''){
   const currentRunId=String(runId||'').trim();
   if(!currentRunId)return null;
-  return db.prepare("SELECT snapshotId,runId,reconciliationStatus,status,generatedAt FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND runId=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(SHOPEE,reportDate,currentRunId)||null;
+  const row=db.prepare("SELECT snapshotId,runId,reconciliationStatus,status,generatedAt FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND runId=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(SHOPEE,reportDate,currentRunId)||null;
+  if(!row)return null;
+  return timestampAtOrAfter(row.generatedAt,boundary)?row:null;
 }
 function dailyExists(db,reportDate){
   return Boolean(db.prepare('SELECT 1 FROM business_daily_reports WHERE businessType=? AND reportDate=? LIMIT 1').get(SHOPEE,reportDate));
 }
 function exactUnifiedShopeeMembership(db,reportDate){
-  const batch=db.prepare(`SELECT b.batchId,b.snapshotId,s.status snapshotStatus
+  const batch=db.prepare(`SELECT b.batchId,b.snapshotId,b.createdAt,s.status snapshotStatus
     FROM unified_import_batches b
     INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
     WHERE b.reportDate=? AND b.status='VALID' AND s.status IN ('IMPORTED','COMPLETED')
-    ORDER BY b.createdAt DESC LIMIT 1`).get(reportDate);
+    ORDER BY b.createdAt DESC,b.batchId DESC LIMIT 1`).get(reportDate);
   if(!batch)return null;
   const rows=db.prepare("SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE batchId=? AND businessType IN ('SHOPEECN','SHOPEEVN') GROUP BY businessType").all(batch.batchId);
   const membership={SHOPEECN:0,SHOPEEVN:0};
@@ -35,16 +50,25 @@ function exactUnifiedShopeeMembership(db,reportDate){
 
 export function inspectV311ShopeeRecovery({db=getDb(),reportDate=''}={}){
   const date=String(reportDate||'').trim()||latestShopeeDate(db);
-  if(!date)return{ok:true,reportDate:'',dailyExists:false,complete:false,needsResume:false,reason:'NO_SHOPEE_DAILY'};
+  if(!date)return{ok:true,reportDate:'',dailyExists:false,complete:false,needsResume:false,reason:'NO_SHOPEE_DAILY',lifecyclePolicy:V377_SHOPEE_IMPORT_LIFECYCLE_ID};
   const exactMembership=exactUnifiedShopeeMembership(db,date);
   if(exactMembership&&exactMembership.total===0){
-    return{ok:true,reportDate:date,dailyExists:false,complete:true,needsResume:false,noWork:true,zeroTicketDay:true,reason:'EXACT_ZERO_UNIFIED_SHOPEE_MEMBERSHIP',policyId:V375_SHOPEE_ZERO_WORK_ID,snapshotId:exactMembership.snapshotId,lock:null,membership:{SHOPEECN:0,SHOPEEVN:0,total:0,batchId:exactMembership.batchId,snapshotId:exactMembership.snapshotId}};
+    return{ok:true,reportDate:date,dailyExists:false,complete:true,needsResume:false,noWork:true,zeroTicketDay:true,reason:'EXACT_ZERO_UNIFIED_SHOPEE_MEMBERSHIP',policyId:V375_SHOPEE_ZERO_WORK_ID,lifecyclePolicy:V377_SHOPEE_IMPORT_LIFECYCLE_ID,lifecycleBoundary:String(exactMembership.createdAt||''),snapshotId:exactMembership.snapshotId,lock:null,membership:{SHOPEECN:0,SHOPEEVN:0,total:0,batchId:exactMembership.batchId,snapshotId:exactMembership.snapshotId}};
   }
   const hasDaily=dailyExists(db,date);
-  const lock=hasDaily?getBusinessRunStatus(SHOPEE,date).lock:null;
-  const snapshot=hasDaily?validSnapshot(db,date,lock?.runId||''):null;
+  const rawLock=hasDaily?getBusinessRunStatus(SHOPEE,date).lock:null;
+  const boundary=String(exactMembership?.createdAt||'');
+  const lock=lockForCurrentImport(rawLock,boundary);
+  const staleLockIgnored=Boolean(rawLock&&!lock&&boundary);
+  const snapshot=hasDaily?validSnapshot(db,date,lock?.runId||'',boundary):null;
   const complete=Boolean(snapshot&&String(snapshot.reconciliationStatus||'COMPLETED').toUpperCase()==='COMPLETED');
-  return{ok:true,reportDate:date,dailyExists:hasDaily,complete,needsResume:Boolean(hasDaily&&!complete),snapshotId:snapshot?.snapshotId||'',lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),updatedAt:lock.updatedAt||''}:null};
+  const membership=exactMembership?{SHOPEECN:Number(exactMembership.SHOPEECN||0),SHOPEEVN:Number(exactMembership.SHOPEEVN||0),total:Number(exactMembership.total||0),batchId:exactMembership.batchId,snapshotId:exactMembership.snapshotId}:null;
+  return{
+    ok:true,reportDate:date,dailyExists:hasDaily,complete,needsResume:Boolean(hasDaily&&!complete),snapshotId:snapshot?.snapshotId||'',
+    lifecyclePolicy:V377_SHOPEE_IMPORT_LIFECYCLE_ID,lifecycleBoundary:boundary,staleLockIgnored,membership,sourceTotal:Number(exactMembership?.total||0),
+    reason:staleLockIgnored?'STALE_PRE_IMPORT_SHOPEE_RUN_IGNORED':'',
+    lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),lockedAt:lock.lockedAt||'',updatedAt:lock.updatedAt||''}:null
+  };
 }
 
 export function prepareV311ShopeeRecovery({db=getDb(),reportDate='',actor='V311'}={}){
@@ -80,4 +104,4 @@ express.application.post=function v311ShopeeIncompleteRecoveryPost(route,...hand
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,'completion snapshots stay bound to the current SHOPEE runId; exact latest VALID unified CN=0/VN=0 is a formal zero-work completion and never opens a remote run.');
+console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,'completion and run status must belong to the newest VALID unified import lifecycle; exact CN=0/VN=0 remains formal zero-work.');
