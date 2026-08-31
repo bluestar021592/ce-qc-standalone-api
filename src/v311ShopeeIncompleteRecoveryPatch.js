@@ -6,8 +6,10 @@ export const V311_SHOPEE_INCOMPLETE_RECOVERY_ID='2026-08-31-v380-auto-prepare-cu
 export const V375_SHOPEE_ZERO_WORK_ID='2026-08-31-v375-exact-zero-shopee-no-work-v1';
 export const V377_SHOPEE_IMPORT_LIFECYCLE_ID='2026-08-31-v377-latest-valid-import-lifecycle-boundary-v2';
 export const V393_SHOPEE_SELECTED_DATE_EXECUTION_ID='2026-08-31-v393-exact-selected-shopee-runtime-pointer-v1';
+export const V394_SHOPEE_FAILURE_DIAGNOSTIC_ID='2026-08-31-v394-runtime-failure-diagnostic-v1';
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
+const FAILURE_CAPTURE=Symbol.for('ce-qc.v394-shopee-failure-capture');
 
 function safeJson(value,fallback={}){
   try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}
@@ -61,6 +63,43 @@ function retireStaleShopeeRunPointers(db,reportDate,runId){
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
 }
 
+function readShopeeRuntimeDiagnostic(db,reportDate,lock=null){
+  const date=String(reportDate||'').trim();
+  let row={};
+  try{
+    row=db.prepare(`SELECT
+      json_extract(valueJson,'$.reportDate') AS reportDate,
+      json_extract(valueJson,'$.processing.error') AS processingError,
+      json_extract(valueJson,'$.apiDiagnostic') AS apiDiagnosticJson
+      FROM business_states WHERE businessType=? LIMIT 1`).get(SHOPEE)||{};
+  }catch{}
+  const stateDate=String(row.reportDate||'').replace(/^"|"$/g,'').trim();
+  const exactState=!date||!stateDate||stateDate===date;
+  const api=exactState?safeJson(row.apiDiagnosticJson,{}):{};
+  const processingError=exactState?String(row.processingError||'').replace(/^"|"$/g,'').trim():'';
+  const errorMessage=String(lock?.errorMessage||processingError||api.ceMsg||api.message||'').trim();
+  const httpStatus=Number(api.httpStatus||api.ceStatus||0)||0;
+  const ceCode=String(api.ceCode||api.code||'').trim();
+  const code=(httpStatus===401||httpStatus===403)?'AUTH_REQUIRED':String(api.code||'').trim();
+  return{
+    policyId:V394_SHOPEE_FAILURE_DIAGNOSTIC_ID,
+    reportDate:date||stateDate,
+    stateDate,
+    exactState,
+    errorMessage,
+    code,
+    apiName:String(api.apiName||''),
+    method:String(api.method||''),
+    endpoint:String(api.endpoint||''),
+    shipmentCount:Number(api.shipmentCount||0),
+    httpStatus,
+    ceCode,
+    ceMsg:String(api.ceMsg||''),
+    preflight:String(api.preflight||''),
+    checkedAt:String(api.checkedAt||'')
+  };
+}
+
 // The legacy SHOPEE executor still resolves its date from business_states instead
 // of req.body.reportDate. V67, however, is explicitly selected-date driven. Point
 // only the compact runtime cache at the requested persisted daily membership before
@@ -95,21 +134,22 @@ function alignShopeeRuntimePointer(db,reportDate){
 
 export function inspectV311ShopeeRecovery({db=getDb(),reportDate=''}={}){
   const date=String(reportDate||'').trim()||latestShopeeDate(db);
-  if(!date)return{ok:true,reportDate:'',dailyExists:false,complete:false,needsResume:false,reason:'NO_SHOPEE_DAILY',lifecyclePolicy:V377_SHOPEE_IMPORT_LIFECYCLE_ID};
+  if(!date)return{ok:true,reportDate:'',dailyExists:false,complete:false,needsResume:false,reason:'NO_SHOPEE_DAILY',lifecyclePolicy:V377_SHOPEE_IMPORT_LIFECYCLE_ID,diagnostic:readShopeeRuntimeDiagnostic(db,'')};
   const exactMembership=exactUnifiedShopeeMembership(db,date);
   if(exactMembership&&exactMembership.total===0){
-    return{ok:true,reportDate:date,dailyExists:false,complete:true,needsResume:false,noWork:true,zeroTicketDay:true,reason:'EXACT_ZERO_UNIFIED_SHOPEE_MEMBERSHIP',policyId:V375_SHOPEE_ZERO_WORK_ID,lifecyclePolicy:V377_SHOPEE_IMPORT_LIFECYCLE_ID,lifecycleBoundary:String(exactMembership.createdAt||''),snapshotId:exactMembership.snapshotId,lock:null,membership:{SHOPEECN:0,SHOPEEVN:0,total:0,batchId:exactMembership.batchId,snapshotId:exactMembership.snapshotId}};
+    return{ok:true,reportDate:date,dailyExists:false,complete:true,needsResume:false,noWork:true,zeroTicketDay:true,reason:'EXACT_ZERO_UNIFIED_SHOPEE_MEMBERSHIP',policyId:V375_SHOPEE_ZERO_WORK_ID,lifecyclePolicy:V377_SHOPEE_IMPORT_LIFECYCLE_ID,lifecycleBoundary:String(exactMembership.createdAt||''),snapshotId:exactMembership.snapshotId,lock:null,membership:{SHOPEECN:0,SHOPEEVN:0,total:0,batchId:exactMembership.batchId,snapshotId:exactMembership.snapshotId},diagnostic:readShopeeRuntimeDiagnostic(db,date)};
   }
   const hasDaily=dailyExists(db,date),rawLock=hasDaily?getBusinessRunStatus(SHOPEE,date).lock:null,boundary=String(exactMembership?.createdAt||'');
   const lock=lockForCurrentImport(rawLock,boundary),staleLockIgnored=Boolean(rawLock&&!lock&&boundary);
   const snapshot=hasDaily?validSnapshot(db,date,lock?.runId||'',boundary):null;
   const complete=Boolean(snapshot&&String(snapshot.reconciliationStatus||'COMPLETED').toUpperCase()==='COMPLETED');
   const membership=exactMembership?{SHOPEECN:Number(exactMembership.SHOPEECN||0),SHOPEEVN:Number(exactMembership.SHOPEEVN||0),total:Number(exactMembership.total||0),batchId:exactMembership.batchId,snapshotId:exactMembership.snapshotId}:null;
+  const diagnostic=readShopeeRuntimeDiagnostic(db,date,lock);
   return{
     ok:true,reportDate:date,dailyExists:hasDaily,complete,needsResume:Boolean(hasDaily&&!complete),snapshotId:snapshot?.snapshotId||'',
     lifecyclePolicy:V377_SHOPEE_IMPORT_LIFECYCLE_ID,lifecycleBoundary:boundary,staleLockIgnored,staleRunId:staleLockIgnored?String(rawLock?.runId||''):'',membership,sourceTotal:Number(exactMembership?.total||0),
-    reason:staleLockIgnored?'STALE_PRE_IMPORT_SHOPEE_RUN_IGNORED':'',
-    lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),lockedAt:lock.lockedAt||'',updatedAt:lock.updatedAt||''}:null
+    reason:staleLockIgnored?'STALE_PRE_IMPORT_SHOPEE_RUN_IGNORED':'',diagnostic,
+    lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),errorMessage:String(lock.errorMessage||''),lockedAt:lock.lockedAt||'',updatedAt:lock.updatedAt||''}:null
   };
 }
 
@@ -141,6 +181,27 @@ function routeHandler(req,res){
   }catch(error){return res.status(500).json({ok:false,error:`V311 SHOPEE恢复检查失败：${error?.message||error}`});}
 }
 
+function installShopeeExecutionFailureCapture(res,reportDate){
+  if(!res||res[FAILURE_CAPTURE])return;
+  res[FAILURE_CAPTURE]=true;
+  const previousJson=res.json;
+  res.json=function v394ShopeeExecutionJson(payload){
+    try{
+      if(payload?.ok===false){
+        const code=String(payload?.code||'').toUpperCase();
+        if(!['RUN_ALREADY_ACTIVE','RUN_ALREADY_COMPLETED'].includes(code)){
+          const message=String(payload?.error||payload?.message||code||'SHOPEE处理失败').trim();
+          const status=code==='AUTH_REQUIRED'?'paused':'failed';
+          const lock=getBusinessRunStatus(SHOPEE,reportDate).lock;
+          if(lock&&lock.status!=='finished')updateBusinessRunLock(SHOPEE,reportDate,status,message);
+        }
+      }
+    }catch(error){console.warn('[CE-QC][V394_SHOPEE_FAILURE_DIAGNOSTIC] capture failed:',error?.message||error);}
+    res.json=previousJson;
+    return previousJson.call(this,payload);
+  };
+}
+
 function prepareCurrentShopeeLifecycle(req,res,next){
   try{
     const requestedDate=String(req.body?.reportDate||'').trim();
@@ -159,6 +220,7 @@ function prepareCurrentShopeeLifecycle(req,res,next){
     }
     req.v311ShopeePrepared=prepared;
     req.v393ShopeeSelectedDatePointer=pointer;
+    installShopeeExecutionFailureCapture(res,status.reportDate);
     return next();
   }catch(error){
     return res.status(500).json({ok:false,code:'V311_SHOPEE_PREPARE_FAILED',error:`SHOPEE当前日报运行态准备失败：${error?.message||error}`});
@@ -174,4 +236,4 @@ express.application.post=function v311ShopeeIncompleteRecoveryPost(route,...hand
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,V393_SHOPEE_SELECTED_DATE_EXECUTION_ID,'SHOPEE start/resume auto-prepare and bind the exact explicitly selected persisted report date before the legacy executor resolves business state; stale pre-import run pointers retire only by exact business/date/runId; daily/API/final/audit facts remain preserved.');
+console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,V393_SHOPEE_SELECTED_DATE_EXECUTION_ID,V394_SHOPEE_FAILURE_DIAGNOSTIC_ID,'SHOPEE start/resume auto-prepare and bind the exact selected persisted report date; current runtime failure detail is exposed without secrets and early execution failures synchronize the run lock; stale pre-import run pointers retire only by exact business/date/runId; daily/API/final/audit facts remain preserved.');
