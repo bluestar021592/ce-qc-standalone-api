@@ -16,6 +16,7 @@ const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 
 assert.match(backend,/2026-08-31-v380-auto-prepare-current-shopee-lifecycle-v1/);
 assert.match(backend,/2026-08-31-v393-exact-selected-shopee-runtime-pointer-v1/,'V393 must bind the legacy SHOPEE executor to the explicitly selected persisted date');
+assert.match(backend,/2026-08-31-v394-runtime-failure-diagnostic-v1/,'V394 must expose sanitized persisted Shopee failure diagnostics');
 assert.match(backend,/business_export_snapshots/,'V311+ must verify an exact VALID snapshot before reopening a finished run');
 assert.match(backend,/reconciliationStatus/,'V311+ must require completed snapshot reconciliation');
 assert.match(backend,/lock\?\.status==='finished'/,'V311+ must specifically repair the finished-without-snapshot dead state');
@@ -30,11 +31,18 @@ assert.match(backend,/routePath==='\/api\/shopee\/run\/start'/,'SHOPEE start mus
 assert.match(backend,/routePath==='\/api\/shopee\/run\/resume'/,'SHOPEE resume must pass through the lifecycle prepare gate');
 assert.match(backend,/prepareV311ShopeeRecovery\(\{reportDate:status\.reportDate,actor:/,'the execution gate must invoke canonical V311 prepare rather than inventing a second recovery path');
 assert.match(backend,/originalPost\.call\(this,route,prepareCurrentShopeeLifecycle,\.\.\.handlers\)/,'prepare must run before the registered start\/resume handler');
+assert.match(backend,/function readShopeeRuntimeDiagnostic\(db,reportDate,lock=null\)/,'V394 must read failure detail from tiny persisted state/run metadata only');
+assert.match(backend,/json_extract\(valueJson,'\$\.processing\.error'\)/,'V394 must expose the persisted processing error without reading heavy fact tables');
+assert.match(backend,/json_extract\(valueJson,'\$\.apiDiagnostic'\)/,'V394 must expose the existing sanitized CE preflight diagnostic');
+assert.match(backend,/errorMessage:String\(lock\.errorMessage\|\|''\)/,'canonical status must expose the exact persisted run-lock failure message');
+assert.match(backend,/function installShopeeExecutionFailureCapture\(res,reportDate\)/,'early Shopee execution failures must synchronize into the run lock');
+assert.match(backend,/const status=code==='AUTH_REQUIRED'\?'paused':'failed'/,'expired CE auth must pause while other execution failures become failed');
+assert.match(backend,/installShopeeExecutionFailureCapture\(res,status\.reportDate\)/,'failure capture must be installed only after exact-date prepare succeeds');
 
 // V377 intentionally retires only a stale pre-import run pointer so a fresh
 // same-date VALID import can receive a new runId. This is not business-data loss.
-// V393 may repoint the compact business_states cache, but it must never mutate
-// persisted daily/API/final/audit facts while selecting the requested date.
+// V393/V394 may repoint/read the compact business_states cache, but they must never
+// mutate persisted daily/API/final/audit facts while selecting or diagnosing a date.
 assert.match(backend,/DELETE FROM business_run_checkpoints WHERE businessType=\? AND reportDate=\? AND runId=\?/,
   'stale checkpoint retirement must be constrained by business + date + exact old runId');
 assert.match(backend,/DELETE FROM business_run_locks WHERE businessType=\? AND reportDate=\? AND runId=\?/,
@@ -42,7 +50,7 @@ assert.match(backend,/DELETE FROM business_run_locks WHERE businessType=\? AND r
 assert.doesNotMatch(backend,/DELETE FROM business_(?:daily_reports|daily_parse_rows|scan_results|shipment_tracks|track_events|final_rows|pod_locks|carry_bills|exception_items|api_batches|export_snapshots)/,
   'recovery must never delete persisted daily membership, API evidence, final facts, carry/POD locks, or audit snapshots');
 assert.doesNotMatch(backend,/UPDATE\s+business_(?:daily_reports|daily_parse_rows|scan_results|shipment_tracks|track_events|final_rows|pod_locks|carry_bills|exception_items|api_batches|export_snapshots)/i,
-  'selected-date routing must never rewrite persisted SHOPEE facts');
+  'selected-date routing/diagnosis must never rewrite persisted SHOPEE facts');
 assert.doesNotMatch(backend,/DELETE FROM business_run_checkpoints\s+WHERE\s+(?!businessType=\? AND reportDate=\? AND runId=\?)/,
   'checkpoint retirement must never broaden beyond the exact stale lifecycle');
 
@@ -63,8 +71,12 @@ assert.doesNotMatch(ui,/getElementById\('ccslRunStatus'\)/,'historical V311 sour
 assert.doesNotMatch(ui,/getElementById\('sevenBusinessStageSummary'\)/,'historical V311 source must never acquire the canonical seven-business summary DOM');
 
 assert.match(seven,/2026-08-29-single-unified-runner-status-only-v1/,'V168 must be status-only');
+assert.match(seven,/2026-08-31-v394-visible-shopee-failure-detail-v1/,'V168 must visibly own exact Shopee failure detail');
 assert.match(seven,/postJson\('\/api\/v311\/shopee-recovery',[\s\S]*action: 'status'/,'V168 must read canonical SHOPEE backend recovery truth');
 assert.match(seven,/stageFromShopeeRecovery/,'V168 must derive SHOPEE stage from canonical recovery payload');
+assert.match(seven,/diagnostic\.errorMessage[\s\S]*diagnostic\.ceMsg[\s\S]*payload\?\.lock\?\.errorMessage/,'V168 must prefer persisted diagnostic/run-lock error text over generic reason');
+assert.match(seven,/data-testid="seven-business-failure-detail"/,'failed or paused stage reason must be visible inline instead of tooltip-only');
+assert.match(seven,/diagnostic\.httpStatus/,'visible diagnostic must include sanitized HTTP status when available');
 assert.doesNotMatch(seven,/\/api\/shopee\/run\/resume|global\.resumeUnified\s*=/,'V168 must not execute Shopee recovery');
 
 assert.match(runner,/2026-08-29-single-unified-runner-v1/,'V67 must own the single foreground execution architecture');
@@ -81,4 +93,4 @@ assert.ok(inject.includes('X-CE-QC-V333-UI'),'V333 compatibility response header
 assert.ok(inject.includes('X-CE-QC-Unified-Runner'),'single-runner response header must be observable');
 assert.match(activation,/v311ShopeeIncompleteRecoveryPatch\.js/,'backend recovery route must remain production-active');
 
-console.log('[V393/V380/V378/SINGLE-RUNNER] SHOPEE exact selected-date routing + lifecycle auto-prepare + failure visibility + WHPP completion-lock smoke passed · compact runtime pointer only · facts/audit immutable · V67 remains the sole browser execution owner');
+console.log('[V394/V393/V380/V378/SINGLE-RUNNER] SHOPEE exact selected-date routing + persisted failure diagnostic + lifecycle auto-prepare + WHPP completion-lock smoke passed · early failures synchronize run lock · facts/audit immutable · V67 remains the sole browser execution owner');
