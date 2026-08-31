@@ -1,14 +1,19 @@
 import express from 'express';
-import { getDb } from './db.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { getDb, getRuntimeConfig } from './db.js';
+import { parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 
 export const V375_UNIFIED_IMPORT_METADATA_ID='2026-08-31-v376-bootstrap-latest-snapshot-metadata-v2';
 export const V377_UNIFIED_IMPORT_STATUS_TRUTH_ID='2026-08-31-v377-import-metadata-carryover-status-truth-v1';
 export const V384_UNIFIED_IMPORT_POST_TRUTH_ID='2026-08-31-v384-import-post-hydrated-snapshot-truth-v1';
 export const V387_UNIFIED_IMPORT_POST_OWNER_ID='2026-08-31-v387-final-unified-import-post-owner-v1';
+export const V388_ARCHIVED_IMPORT_METADATA_ID='2026-08-31-v388-immutable-source-metadata-recovery-v1';
 
 const BUSINESS_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const POST_OWNER=Symbol.for('ce-qc.v387-unified-import-post-owner');
 const originalGet=express.application.get;
+const archivedMetadataCache=new Map();
 
 function json(value,fallback){
   try{return value?JSON.parse(value):fallback;}catch{return fallback;}
@@ -38,6 +43,59 @@ function carryoverSummary(db,reportDate){
     historicalSeparate:true,
     source:'V377_OPEN_TODAY_PLUS_HISTORICAL'
   };
+}
+function canonicalFileHash(value=''){
+  const match=String(value||'').trim().match(/^([a-f0-9]{64})/i);
+  return match?match[1].toLowerCase():'';
+}
+function findArchivedSourceByHash(hash=''){
+  if(!hash)return'';
+  const cfg=getRuntimeConfig();
+  const root=path.join(cfg.dataDir,'evidence_archive','source_uploads');
+  if(!fs.existsSync(root))return'';
+  let folders=[];
+  try{folders=fs.readdirSync(root,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>item.name).sort().reverse();}catch{return'';}
+  for(const folder of folders){
+    const dir=path.join(root,folder);
+    for(const ext of ['.xlsx','.xls']){
+      const candidate=path.join(dir,`${hash}${ext}`);
+      try{if(fs.statSync(candidate).isFile())return candidate;}catch{}
+    }
+  }
+  return'';
+}
+export function recoverV388ArchivedImportMetadata(batch={}){
+  const hash=canonicalFileHash(batch?.fileHash);
+  if(!hash)return null;
+  const key=`${hash}|${String(batch?.reportDate||'')}|${String(batch?.sourceName||'')}`;
+  if(archivedMetadataCache.has(key))return archivedMetadataCache.get(key);
+  const file=findArchivedSourceByHash(hash);
+  if(!file){archivedMetadataCache.set(key,null);return null;}
+  try{
+    const originalName=String(batch?.sourceName||'').trim()||`${String(batch?.reportDate||'daily')}${path.extname(file)}`;
+    let parsed;
+    try{parsed=parseUnifiedDailyExcel(file,{originalName});}
+    catch{parsed=parseUnifiedDailyExcel(file,{originalName,reportDate:String(batch?.reportDate||'')});}
+    const result={
+      recovered:true,
+      recoveryId:V388_ARCHIVED_IMPORT_METADATA_ID,
+      evidence:'V266_EXACT_SHA_SOURCE_UPLOAD',
+      fileHash:hash,
+      reportDate:String(parsed?.reportDate||batch?.reportDate||''),
+      dateDetectionSource:String(parsed?.dateDetectionSource||'归档原始日报').trim()||'归档原始日报',
+      dateCandidates:Array.isArray(parsed?.dateCandidates)?parsed.dateCandidates:[],
+      containerFormat:String(parsed?.containerFormat||'').trim(),
+      regionCounts:{PP:Number(parsed?.regionCounts?.PP||0),PV:Number(parsed?.regionCounts?.PV||0),UNKNOWN:Number(parsed?.regionCounts?.UNKNOWN||0)},
+      summary:parsed?.summary&&typeof parsed.summary==='object'?parsed.summary:{},
+      sheetDiagnostics:Array.isArray(parsed?.sheetDiagnostics)?parsed.sheetDiagnostics:[]
+    };
+    archivedMetadataCache.set(key,result);
+    return result;
+  }catch(error){
+    console.warn('[CE-QC][V388_ARCHIVED_IMPORT_METADATA] recovery skipped:',error?.message||error);
+    archivedMetadataCache.set(key,null);
+    return null;
+  }
 }
 
 export function readV375LatestUnifiedImport(db=getDb()){
@@ -72,21 +130,29 @@ export function readV375LatestUnifiedImport(db=getDb()){
     PV:Number(storedRegions.PV??payloadRegions.PV??0),
     UNKNOWN:Number(storedRegions.UNKNOWN??payloadRegions.UNKNOWN??0)
   };
+  const existingDateSource=String(row.dateDetectionSource||payload.dateDetectionSource||'').trim();
+  const existingContainer=String(payload.containerFormat||'').trim();
+  const existingRegionEvidence=(candidateRegions.PP+candidateRegions.PV)+(derivedRegions.PP+derivedRegions.PV);
+  const archiveMeta=(!existingDateSource||!existingContainer||existingRegionEvidence===0)?recoverV388ArchivedImportMetadata(row):null;
+  const recoveredRegions=archiveMeta?.regionCounts||{PP:0,PV:0,UNKNOWN:0};
   const candidateRegionTotal=candidateRegions.PP+candidateRegions.PV+candidateRegions.UNKNOWN;
   const derivedRegionTotal=derivedRegions.PP+derivedRegions.PV+derivedRegions.UNKNOWN;
-  const regionCounts=(candidateRegionTotal===classifiedTotal||derivedRegionTotal===0)?candidateRegions:derivedRegions;
+  let regionCounts=(candidateRegionTotal===classifiedTotal||derivedRegionTotal===0)?candidateRegions:derivedRegions;
+  if(Number(regionCounts.PP||0)+Number(regionCounts.PV||0)===0&&Number(recoveredRegions.PP||0)+Number(recoveredRegions.PV||0)>0)regionCounts=recoveredRegions;
 
   const batchCandidates=json(row.dateCandidatesJson,[]);
-  const dateCandidates=batchCandidates.length?batchCandidates:(Array.isArray(payload.dateCandidates)?payload.dateCandidates:[]);
-  const dateDetectionSource=String(row.dateDetectionSource||payload.dateDetectionSource||'').trim();
-  const containerFormat=String(payload.containerFormat||'').trim();
+  const archiveCandidates=Array.isArray(archiveMeta?.dateCandidates)?archiveMeta.dateCandidates:[];
+  const dateCandidates=batchCandidates.length?batchCandidates:(Array.isArray(payload.dateCandidates)&&payload.dateCandidates.length?payload.dateCandidates:archiveCandidates);
+  const dateDetectionSource=existingDateSource||String(archiveMeta?.dateDetectionSource||'数据库批次').trim()||'数据库批次';
+  const containerFormat=existingContainer||String(archiveMeta?.containerFormat||'').trim();
   const sourceRecon=sourceReconciliation(classificationCounts,summary.validUniqueWaybills);
   return{
     batchId:row.batchId,snapshotId:row.snapshotId,reportDate:row.reportDate,sourceName:row.sourceName||'',fileHash:row.fileHash||'',createdAt:row.createdAt||'',
     classificationCounts,sourceReconciliation:sourceRecon,
     dateDetectionSource,dateCandidates,dateConflict:Boolean(payload.dateConflict??(dateCandidates.length>1)),dateWasManuallyCorrected:Boolean(row.dateWasManuallyCorrected||payload.dateWasManuallyCorrected),
-    containerFormat,regionCounts,summary,sheetDiagnostics:Array.isArray(payload.sheetDiagnostics)?payload.sheetDiagnostics:[],warnings:json(row.warningsJson,[]),
-    carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID,statusTruthId:V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,postTruthId:V384_UNIFIED_IMPORT_POST_TRUTH_ID,postOwnerRevision:V387_UNIFIED_IMPORT_POST_OWNER_ID
+    containerFormat,regionCounts,summary,sheetDiagnostics:Array.isArray(payload.sheetDiagnostics)&&payload.sheetDiagnostics.length?payload.sheetDiagnostics:(archiveMeta?.sheetDiagnostics||[]),warnings:json(row.warningsJson,[]),
+    carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID,statusTruthId:V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,postTruthId:V384_UNIFIED_IMPORT_POST_TRUTH_ID,postOwnerRevision:V387_UNIFIED_IMPORT_POST_OWNER_ID,
+    metadataRecovery:archiveMeta?{recovered:true,id:V388_ARCHIVED_IMPORT_METADATA_ID,evidence:archiveMeta.evidence}:null
   };
 }
 
@@ -109,6 +175,7 @@ function latestHandler(req,res){
     res.setHeader('X-CE-QC-V375-Metadata',V375_UNIFIED_IMPORT_METADATA_ID);
     res.setHeader('X-CE-QC-V377-Import-Truth',V377_UNIFIED_IMPORT_STATUS_TRUTH_ID);
     res.setHeader('X-CE-QC-V384-Import-Post-Truth',V384_UNIFIED_IMPORT_POST_TRUTH_ID);
+    res.setHeader('X-CE-QC-V388-Archived-Metadata',V388_ARCHIVED_IMPORT_METADATA_ID);
     return res.json({ok:true,import:readV375LatestUnifiedImport()});
   }catch(error){return res.status(500).json({ok:false,error:`V375 日报状态回读失败：${error?.message||error}`});}
 }
@@ -126,6 +193,7 @@ function wrapBootstrapHandler(handler){
           payload={...payload,unifiedImport:hydrated};
           res.setHeader('X-CE-QC-V375-Metadata',V375_UNIFIED_IMPORT_METADATA_ID);
           res.setHeader('X-CE-QC-V377-Import-Truth',V377_UNIFIED_IMPORT_STATUS_TRUTH_ID);
+          res.setHeader('X-CE-QC-V388-Archived-Metadata',V388_ARCHIVED_IMPORT_METADATA_ID);
         }
       }catch(error){
         console.warn('[CE-QC][V377_BOOTSTRAP_METADATA] hydration skipped:',error?.message||error);
@@ -137,10 +205,6 @@ function wrapBootstrapHandler(handler){
   };
 }
 
-// This must be a pre-handler rather than a wrapper around the route's final
-// handler. V42 deliberately replaces only the LAST unified-import handler with
-// its atomic seven-business owner. A pre-handler survives that replacement and
-// can hydrate whichever final owner eventually emits the committed response.
 function unifiedImportPostHydrationMiddleware(req,res,next){
   const originalJson=res.json.bind(res);
   let restored=false;
@@ -165,9 +229,9 @@ function unifiedImportPostHydrationMiddleware(req,res,next){
 }
 
 express.application.get=function v377UnifiedImportMetadataGet(route,...handlers){
-  const path=String(route||'');
-  if(path==='/api/import/unified-latest')return originalGet.call(this,route,latestHandler);
-  if(path==='/api/bootstrap'&&handlers.length){
+  const routePath=String(route||'');
+  if(routePath==='/api/import/unified-latest')return originalGet.call(this,route,latestHandler);
+  if(routePath==='/api/bootstrap'&&handlers.length){
     const nextHandlers=[...handlers];
     const index=nextHandlers.length-1;
     if(typeof nextHandlers[index]==='function')nextHandlers[index]=wrapBootstrapHandler(nextHandlers[index]);
@@ -181,8 +245,8 @@ export function installV387UnifiedImportPostOwner(){
   if(typeof previousPost!=='function')return{installed:false,active:false,revision:V387_UNIFIED_IMPORT_POST_OWNER_ID,reason:'EXPRESS_POST_MISSING'};
   if(previousPost[POST_OWNER])return{installed:false,active:true,revision:V387_UNIFIED_IMPORT_POST_OWNER_ID,reason:'ALREADY_FINAL_OWNER'};
   const wrappedPost=function v387UnifiedImportMetadataPost(route,...handlers){
-    const path=String(route||'');
-    if(path==='/api/import/unified-daily-report'&&handlers.length){
+    const routePath=String(route||'');
+    if(routePath==='/api/import/unified-daily-report'&&handlers.length){
       const finalHandler=handlers[handlers.length-1];
       if(typeof finalHandler!=='function')return previousPost.call(this,route,...handlers);
       return previousPost.call(this,route,...handlers.slice(0,-1),unifiedImportPostHydrationMiddleware,finalHandler);
@@ -195,4 +259,5 @@ export function installV387UnifiedImportPostOwner(){
 }
 
 console.info('[CE-QC][V375_IMPORT_METADATA]',V375_UNIFIED_IMPORT_METADATA_ID,V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,'bootstrap + unified-latest read one exact latest VALID snapshot; processing queue is always open-today + open-historical; no database writes or schema changes.');
+console.info('[CE-QC][V388_ARCHIVED_IMPORT_METADATA]',V388_ARCHIVED_IMPORT_METADATA_ID,'missing legacy date/container/PP-PV metadata is recovered read-only from the exact V266 SHA-archived source workbook; no database writes.');
 console.info('[CE-QC][V384_IMPORT_POST_TRUTH]',V384_UNIFIED_IMPORT_POST_TRUTH_ID,'successful unified-daily-report POST payload hydration uses a pre-final response middleware so V42 final-handler replacement cannot discard it; V387 installs after earlier import wrappers.');
