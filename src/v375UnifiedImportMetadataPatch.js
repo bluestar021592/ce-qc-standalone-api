@@ -2,6 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 
 export const V375_UNIFIED_IMPORT_METADATA_ID='2026-08-31-v376-bootstrap-latest-snapshot-metadata-v2';
+export const V377_UNIFIED_IMPORT_STATUS_TRUTH_ID='2026-08-31-v377-import-metadata-carryover-status-truth-v1';
 
 const BUSINESS_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const originalGet=express.application.get;
@@ -22,14 +23,22 @@ function carryoverSummary(db,reportDate){
   const row=db.prepare(`SELECT
     COALESCE(SUM(CASE WHEN status='OPEN' AND sourceReportDate=? THEN 1 ELSE 0 END),0) todayOpen,
     COALESCE(SUM(CASE WHEN status='OPEN' AND sourceReportDate<? THEN 1 ELSE 0 END),0) historicalOpen,
-    COALESCE(SUM(CASE WHEN lastReportDate=? AND sourceReportDate<? THEN 1 ELSE 0 END),0) rechecked,
-    COALESCE(SUM(CASE WHEN status='OPEN' AND lastReportDate<=? THEN 1 ELSE 0 END),0) currentOpen
-    FROM carryover_open_items`).get(reportDate,reportDate,reportDate,reportDate,reportDate)||{};
-  return{todayOpen:Number(row.todayOpen||0),historicalOpen:Number(row.historicalOpen||0),rechecked:Number(row.rechecked||0),currentOpen:Number(row.currentOpen||0)};
+    COALESCE(SUM(CASE WHEN lastReportDate=? AND sourceReportDate<? THEN 1 ELSE 0 END),0) rechecked
+    FROM carryover_open_items`).get(reportDate,reportDate,reportDate,reportDate)||{};
+  const todayOpen=Number(row.todayOpen||0);
+  const historicalOpen=Number(row.historicalOpen||0);
+  return{
+    todayOpen,
+    historicalOpen,
+    rechecked:Number(row.rechecked||0),
+    currentOpen:todayOpen+historicalOpen,
+    historicalSeparate:true,
+    source:'V377_OPEN_TODAY_PLUS_HISTORICAL'
+  };
 }
 
 export function readV375LatestUnifiedImport(db=getDb()){
-  const row=db.prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC LIMIT 1").get();
+  const row=db.prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get();
   if(!row)return null;
   const snapshot=db.prepare('SELECT status,payloadJson,createdAt FROM unified_snapshots WHERE snapshotId=? LIMIT 1').get(row.snapshotId)||{};
   const payload=json(snapshot.payloadJson,{});
@@ -70,26 +79,27 @@ export function readV375LatestUnifiedImport(db=getDb()){
   const containerFormat=String(payload.containerFormat||'').trim();
   const sourceRecon=sourceReconciliation(classificationCounts,summary.validUniqueWaybills);
   return{
-    batchId:row.batchId,snapshotId:row.snapshotId,reportDate:row.reportDate,sourceName:row.sourceName||'',fileHash:row.fileHash||'',
+    batchId:row.batchId,snapshotId:row.snapshotId,reportDate:row.reportDate,sourceName:row.sourceName||'',fileHash:row.fileHash||'',createdAt:row.createdAt||'',
     classificationCounts,sourceReconciliation:sourceRecon,
     dateDetectionSource,dateCandidates,dateConflict:Boolean(payload.dateConflict??(dateCandidates.length>1)),dateWasManuallyCorrected:Boolean(row.dateWasManuallyCorrected||payload.dateWasManuallyCorrected),
     containerFormat,regionCounts,summary,sheetDiagnostics:Array.isArray(payload.sheetDiagnostics)?payload.sheetDiagnostics:[],warnings:json(row.warningsJson,[]),
-    carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID
+    carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID,statusTruthId:V377_UNIFIED_IMPORT_STATUS_TRUTH_ID
   };
 }
 
 function latestHandler(req,res){
   try{
     res.setHeader('X-CE-QC-V375-Metadata',V375_UNIFIED_IMPORT_METADATA_ID);
+    res.setHeader('X-CE-QC-V377-Import-Truth',V377_UNIFIED_IMPORT_STATUS_TRUTH_ID);
     return res.json({ok:true,import:readV375LatestUnifiedImport()});
   }catch(error){return res.status(500).json({ok:false,error:`V375 日报状态回读失败：${error?.message||error}`});}
 }
 
 function wrapBootstrapHandler(handler){
-  return async function v376HydratedBootstrap(req,res,next){
+  return async function v377HydratedBootstrap(req,res,next){
     const originalJson=res.json.bind(res);
     let restored=false;
-    res.json=function v376BootstrapJson(payload){
+    res.json=function v377BootstrapJson(payload){
       if(restored)return originalJson(payload);
       restored=true;
       try{
@@ -97,9 +107,10 @@ function wrapBootstrapHandler(handler){
           const hydrated=readV375LatestUnifiedImport();
           payload={...payload,unifiedImport:hydrated};
           res.setHeader('X-CE-QC-V375-Metadata',V375_UNIFIED_IMPORT_METADATA_ID);
+          res.setHeader('X-CE-QC-V377-Import-Truth',V377_UNIFIED_IMPORT_STATUS_TRUTH_ID);
         }
       }catch(error){
-        console.warn('[CE-QC][V376_BOOTSTRAP_METADATA] hydration skipped:',error?.message||error);
+        console.warn('[CE-QC][V377_BOOTSTRAP_METADATA] hydration skipped:',error?.message||error);
       }
       return originalJson(payload);
     };
@@ -108,7 +119,7 @@ function wrapBootstrapHandler(handler){
   };
 }
 
-express.application.get=function v375UnifiedImportMetadataGet(route,...handlers){
+express.application.get=function v377UnifiedImportMetadataGet(route,...handlers){
   const path=String(route||'');
   if(path==='/api/import/unified-latest')return originalGet.call(this,route,latestHandler);
   if(path==='/api/bootstrap'&&handlers.length){
@@ -120,4 +131,4 @@ express.application.get=function v375UnifiedImportMetadataGet(route,...handlers)
   return originalGet.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V375_IMPORT_METADATA]',V375_UNIFIED_IMPORT_METADATA_ID,'bootstrap + unified-latest read one exact latest VALID snapshot metadata truth; date/container/PP-PV/summary survive reload and processing polls; no database writes or schema changes.');
+console.info('[CE-QC][V375_IMPORT_METADATA]',V375_UNIFIED_IMPORT_METADATA_ID,V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,'bootstrap + unified-latest read one exact latest VALID snapshot; processing queue is always open-today + open-historical; no database writes or schema changes.');
