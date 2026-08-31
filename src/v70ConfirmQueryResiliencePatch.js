@@ -4,7 +4,7 @@ import './v140ShopeeCheckpointRecoveryPatch.js';
 import './v139DailyCarryIsolationPatch.js';
 
 const PATCH_ID = '2026-08-16-v140-confirm-track-final-retry-v2';
-export const V392_CONFIRM_TRANSPORT_BOUNDARY_ID = '2026-08-31-v392-confirm-transport-boundary-single-completeness-owner-v1';
+export const V392_CONFIRM_TRANSPORT_BOUNDARY_ID = '2026-08-31-v392-confirm-transport-boundary-single-completeness-owner-v2';
 const ORIGINAL_CONFIRM = CEClient.prototype.confirmQuery;
 const ORIGINAL_TRACK = CEClient.prototype.trackQuery;
 const ORIGINAL_EXCEPTION = CEClient.prototype.exceptionQuery;
@@ -15,12 +15,11 @@ const CONFIRM_TIMEOUT_MS = Math.max(8000, Math.min(45000, Number(process.env.CON
 const CONFIRM_BATCH_BUDGET_MS = Math.max(20_000, Math.min(120_000, Number(process.env.CONFIRM_QUERY_BATCH_BUDGET_MS || 45_000)));
 const FINAL_RETRY_ROUNDS = Math.max(3, Math.min(5, Number(process.env.CE_FINAL_RETRY_ROUNDS || 3)));
 
-// V392 keeps V70 as the CE transport-safety boundary only. The canonical V314/V345
-// owner plans logical 350-ticket confirm work, while V349 alone owns successful-but-
-// incomplete response recovery. V70 may split a logical request into <=100-ticket
-// transport chunks, but it must not run a second missing-row retry loop.
-const configuredPipelineBatch = Number(process.env.ORDER_BATCH_SIZE || MAX_BATCH);
-process.env.ORDER_BATCH_SIZE = String(Math.max(1, Math.min(MAX_BATCH, Number.isFinite(configuredPipelineBatch) ? configuredPipelineBatch : MAX_BATCH)));
+// V392 keeps V70 as the CE transport-safety boundary only. The canonical V338 +
+// V314/V345 owners plan logical 350-ticket confirm work. V70 may split that request
+// into <=100-ticket CE transport chunks, but it must never rewrite ORDER_BATCH_SIZE
+// and it must never run a second successful-response missing-row retry loop. V349
+// alone owns completeness recovery.
 
 function cleanCodes(values = []) {
   return [...new Set((values || [])
@@ -191,9 +190,10 @@ export const V139_FINAL_RETRY_ROUNDS = FINAL_RETRY_ROUNDS;
 
 console.info('[CE-QC][V392_CONFIRM_TRANSPORT_BOUNDARY]', JSON.stringify({
   id: V392_CONFIRM_TRANSPORT_BOUNDARY_ID,
+  logicalScanBatch: Number(process.env.ORDER_BATCH_SIZE || 350),
   safeTransportBatch: MAX_BATCH,
   completenessOwner: 'V349',
-  logicalBatchOwner: 'V314/V345',
+  logicalBatchOwner: 'V338+V314/V345',
   transportFailurePolicy: 'PRESERVE_SUCCESSFUL_SAFE_CHUNKS_THEN_RETRY_ONLY_MISSING',
   duplicateMissingRetry: false
 }));
