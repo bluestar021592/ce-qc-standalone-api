@@ -5,6 +5,7 @@ import { chooseCcslReportDate, ccslRecoveryDecision, V317_CCSL_RECOVERY_POLICY_I
 
 export const V317_CCSL_INCOMPLETE_RECOVERY_ID='2026-08-27-v333-selected-date-ccsl-recovery-v1';
 export const V377_CCSL_IMPORT_LIFECYCLE_ID='2026-08-31-v377-latest-valid-import-lifecycle-boundary-v2';
+export const V383_CCSL_RETROACTIVE_PROOF_ID='2026-08-31-v383-retroactive-ccsl-processing-proof-v1';
 const V317_EXPLICIT_REPORT_DATE_HINT_REVISION='2026-08-29-v359-selected-report-date-runtime-hint-v1';
 const EXPLICIT_REPORT_DATE_HINT_TTL_MS=60_000;
 const originalPost=express.application.post;
@@ -50,6 +51,19 @@ function ccslMemberCount(db,reportDate,batch=null){
   if(snapshotId)return Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN ('CE','CEAF','TBKH','ALI1688')`).get(snapshotId,reportDate)?.count||0);
   return Number(db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount||0);
 }
+export function ccslProcessingProof(db,reportDate,batch=null,sourceTotal=0){
+  const resolved=batch||latestValidUnifiedBatch(db,reportDate),snapshotId=String(resolved?.snapshotId||''),total=Math.max(0,Number(sourceTotal||0));
+  if(total===0)return{version:V383_CCSL_RETROACTIVE_PROOF_ID,sourceTotal:0,covered:0,missing:0,complete:true,snapshotId};
+  if(!snapshotId)return{version:V383_CCSL_RETROACTIVE_PROOF_ID,sourceTotal:total,covered:0,missing:total,complete:false,snapshotId:''};
+  const covered=Number(db.prepare(`SELECT COUNT(DISTINCT u.shipmentCode) covered
+    FROM unified_import_rows u
+    WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')
+      AND (
+        EXISTS (SELECT 1 FROM scan_results s WHERE s.reportDate=? AND s.shipmentCode=u.shipmentCode)
+        OR EXISTS (SELECT 1 FROM pod_locks p WHERE p.shipmentCode=u.shipmentCode)
+      )`).get(snapshotId,reportDate,reportDate)?.covered||0);
+  return{version:V383_CCSL_RETROACTIVE_PROOF_ID,sourceTotal:total,covered,missing:Math.max(0,total-covered),complete:covered>=total,snapshotId};
+}
 function retireStaleCcslRunPointers(db,reportDate,runId){
   const date=String(reportDate||'').trim(),id=String(runId||'').trim();
   if(!date||!id)return 0;
@@ -71,17 +85,21 @@ export function inspectV317ExplicitReportDateHint({maxAgeMs=EXPLICIT_REPORT_DATE
 
 export function inspectV317CcslRecovery({db=getDb(),reportDate=''}={}){
   const canonical=resolveDate(db),requested=String(reportDate||'').trim(),date=requested||canonical;
-  if(!date)return{ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,reportDate:'',dailyExists:false,sourceTotal:0,complete:false,paused:false,needsResume:false,action:'NO_DAILY',reason:'NO_CCSL_DAILY'};
+  if(!date)return{ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,proofPolicy:V383_CCSL_RETROACTIVE_PROOF_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,reportDate:'',dailyExists:false,sourceTotal:0,complete:false,paused:false,needsResume:false,action:'NO_DAILY',reason:'NO_CCSL_DAILY'};
   const validBatch=latestValidUnifiedBatch(db,date),sourceTotal=ccslMemberCount(db,date,validBatch);
   const hasDaily=Boolean(validBatch)||sourceTotal>0||Boolean(db.prepare('SELECT 1 FROM daily_reports WHERE reportDate=? LIMIT 1').get(date));
   const rawLock=sourceTotal>0&&hasDaily?getRunStatus(date).lock:null;
   const lock=lockForCurrentImport(rawLock,validBatch),staleLockIgnored=Boolean(rawLock&&!lock&&validBatch?.createdAt);
-  const snapshot=sourceTotal>0&&hasDaily?latestValidSnapshot(db,date,lock?.runId||'',validBatch?.createdAt||''):null;
+  const rawSnapshot=sourceTotal>0&&hasDaily?latestValidSnapshot(db,date,lock?.runId||'',validBatch?.createdAt||''):null;
+  const processingProof=ccslProcessingProof(db,date,validBatch,sourceTotal);
+  const rejectedLegacySnapshot=Boolean(rawSnapshot&&!processingProof.complete);
+  const snapshot=rejectedLegacySnapshot?null:rawSnapshot;
   const decision=ccslRecoveryDecision({hasDaily,complete:Boolean(snapshot),lockStatus:lock?.status||'',validUnified:Boolean(validBatch),sourceTotal});
   return{
-    ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,
+    ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,proofPolicy:V383_CCSL_RETROACTIVE_PROOF_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,
     reportDate:date,dailyExists:hasDaily,validUnified:Boolean(validBatch),sourceTotal,complete:decision.complete,paused:decision.paused,needsResume:decision.needsResume,action:decision.action,zeroTicketDay:Boolean(decision.zeroTicketDay),
-    reason:decision.zeroTicketDay?'VALID_UNIFIED_ZERO_CCSL_TICKETS':(staleLockIgnored?'STALE_PRE_IMPORT_CCSL_RUN_IGNORED':''),snapshotId:snapshot?.snapshotId||'',
+    reason:decision.zeroTicketDay?'VALID_UNIFIED_ZERO_CCSL_TICKETS':(rejectedLegacySnapshot?'COMPLETED_SNAPSHOT_REJECTED_MISSING_PROCESSING_PROOF':(staleLockIgnored?'STALE_PRE_IMPORT_CCSL_RUN_IGNORED':'')),snapshotId:snapshot?.snapshotId||'',
+    rejectedSnapshotId:rejectedLegacySnapshot?String(rawSnapshot?.snapshotId||''):'',processingProof,
     lifecycleBoundary:String(validBatch?.createdAt||''),staleLockIgnored,staleRunId:staleLockIgnored?String(rawLock?.runId||''):'',
     lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),lockedAt:lock.lockedAt||'',updatedAt:lock.updatedAt||''}:null
   };
@@ -94,13 +112,15 @@ export function prepareV317CcslRecovery({db=getDb(),reportDate='',actor='V317'}=
   let retiredStalePointers=0;
   if(before.staleLockIgnored&&before.staleRunId)retiredStalePointers=retireStaleCcslRunPointers(db,date,before.staleRunId);
   if(before.action==='REOPEN_FINISHED'&&!before.staleLockIgnored){
-    updateRunLock(date,'failed','V317 reopened a finished CCSL run because no VALID COMPLETED snapshot exists for this report date.');
+    updateRunLock(date,'failed',before.reason==='COMPLETED_SNAPSHOT_REJECTED_MISSING_PROCESSING_PROOF'
+      ?`V383 reopened finished CCSL run: ${before.processingProof?.missing||0} current daily members lack scan/POD proof.`
+      :'V317 reopened a finished CCSL run because no VALID COMPLETED snapshot exists for this report date.');
   }else if(before.action==='CREATE_AND_RESUME'||before.staleLockIgnored){
     const outcome=createOrRecoverRun(date,{lockedBy:String(actor||'V317')});
     if(!outcome.ok)return{...before,prepared:false,retiredStalePointers,error:outcome.error||outcome.code||'RUN_PREPARE_FAILED'};
   }
   const after=inspectV317CcslRecovery({db,reportDate:date});
-  try{db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v317_last_ccsl_recovery',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(JSON.stringify({reportDate:date,before:before.lock?.status||'NONE',after:after.lock?.status||'NONE',sourceTotal:after.sourceTotal,retiredStalePointers,at:nowIso()}),nowIso());}catch{}
+  try{db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v317_last_ccsl_recovery',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(JSON.stringify({reportDate:date,before:before.lock?.status||'NONE',after:after.lock?.status||'NONE',sourceTotal:after.sourceTotal,processingProof:after.processingProof,retiredStalePointers,at:nowIso()}),nowIso());}catch{}
   return{...after,prepared:true,reopenedFrom:before.lock?.status||'NONE',retiredStalePointers};
 }
 
@@ -119,4 +139,5 @@ express.application.post=function v317CcslIncompleteRecoveryPost(route,...handle
 };
 
 console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,V377_CCSL_IMPORT_LIFECYCLE_ID,'pre-import run pointers are ignored for status and retired only when preparing the new run; old audit snapshots remain preserved.');
+console.info('[CE-QC][V383_CCSL_RETROACTIVE_PROOF]',V383_CCSL_RETROACTIVE_PROOF_ID,'existing COMPLETED snapshots are accepted only when every current CCSL daily member has scan or POD-lock proof; rejected legacy snapshots are preserved read-only and their finished run is recoverable.');
 console.info('[CE-QC][V359_SELECTED_REPORT_DATE_HINT]',V317_EXPLICIT_REPORT_DATE_HINT_REVISION,'explicit browser status reads keep a short-lived in-memory selected-date hint so backend WHPP continuity can resume the exact visible date without scanning or guessing historical dates.');

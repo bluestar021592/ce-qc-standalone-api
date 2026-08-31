@@ -3,11 +3,12 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { buildConsistencyReport, V382_CCSL_PROCESSING_PROOF_ID } from '../src/consistency.js';
 
-for(const file of ['src/v381ExportEvidenceRepair.js','src/v225ExportReturnTruth.js','src/v183SingleBusinessExportJobWorker.js','src/consistency.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v381ExportEvidenceRepair.js','src/v225ExportReturnTruth.js','src/v183SingleBusinessExportJobWorker.js','src/consistency.js','src/v317CcslIncompleteRecoveryPatch.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const repair=fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8');
 const exportTruth=fs.readFileSync('src/v225ExportReturnTruth.js','utf8');
 const worker=fs.readFileSync('src/v183SingleBusinessExportJobWorker.js','utf8');
 const snapshotSource=fs.readFileSync('src/snapshots.js','utf8');
+const ccslRecovery=fs.readFileSync('src/v317CcslIncompleteRecoveryPatch.js','utf8');
 
 assert.match(repair,/V381_EXPORT_TRACK_BATCH=50/,'export evidence track repair must stay at 50 per request');
 assert.match(repair,/V381_EXPORT_TRACK_CONCURRENCY=4/,'export evidence repair must stay at 4 concurrent groups');
@@ -48,4 +49,13 @@ assert.ok(!covered.errors.some(x=>String(x).includes('CCSL处理证据不完整'
 assert.match(snapshotSource,/const reconciliationFailed = consistency\?\.status === 'error'/,'snapshot validity must remain driven by consistency errors');
 assert.match(snapshotSource,/payload\.status = reconciliationFailed \? 'INVALID_FAILED_RECONCILIATION' : 'VALID'/,'missing processing proof must make the formal snapshot invalid rather than green');
 
-console.log('[V382/V381] export + CCSL completion-proof smoke passed · V381 saved-first 50x4 strict START->POD · V382 every non-POD CCSL daily member requires scan proof before a VALID completed snapshot can exist');
+assert.match(ccslRecovery,/2026-08-31-v383-retroactive-ccsl-processing-proof-v1/,'V383 retroactive proof owner must be active');
+assert.match(ccslRecovery,/EXISTS \(SELECT 1 FROM scan_results s WHERE s\.reportDate=\? AND s\.shipmentCode=u\.shipmentCode\)/,'old completed snapshots must require current-date scan proof');
+assert.match(ccslRecovery,/EXISTS \(SELECT 1 FROM pod_locks p WHERE p\.shipmentCode=u\.shipmentCode\)/,'terminal POD locks remain valid processing proof');
+assert.match(ccslRecovery,/rejectedLegacySnapshot=Boolean\(rawSnapshot&&!processingProof\.complete\)/,'a legacy completed snapshot without exact proof must be rejected at status read');
+assert.match(ccslRecovery,/snapshot=rejectedLegacySnapshot\?null:rawSnapshot/,'rejected legacy snapshot must not drive canonical completion');
+assert.match(ccslRecovery,/COMPLETED_SNAPSHOT_REJECTED_MISSING_PROCESSING_PROOF/,'recovery reason must remain observable');
+assert.match(ccslRecovery,/V383 reopened finished CCSL run/,'finished false-complete runs must be recoverable without reupload');
+assert.doesNotMatch(ccslRecovery,/DELETE FROM (?:scan_results|track_events|final_rows|daily_reports|daily_parse_rows|unified_import_rows|export_snapshots|pod_locks|carry_bills)/,'retroactive validation must preserve all saved facts and old snapshots');
+
+console.log('[V383/V382/V381] export + CCSL completion-proof smoke passed · V381 saved-first 50x4 strict START->POD · V382 blocks new false-complete snapshots · V383 rejects old completed snapshots lacking scan/POD proof and reopens the existing run without reupload');
