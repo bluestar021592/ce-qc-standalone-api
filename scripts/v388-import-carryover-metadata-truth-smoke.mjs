@@ -86,6 +86,8 @@ try{
   assert.equal(recoveredDirect?.regionCounts?.PP,2);
   assert.equal(recoveredDirect?.regionCounts?.PV,2);
   assert.equal(recoveredDirect?.summary?.rawRows,4);
+  assert.ok(Array.isArray(recoveredDirect?.dateCandidates)&&recoveredDirect.dateCandidates.length>0,'archive recovery must preserve real date candidates');
+  assert.equal(recoveredDirect.dateCandidates[0]?.date,'2026-08-25');
 
   const hydrated=readV375LatestUnifiedImport(db);
   assert.equal(hydrated.reportDate,'2026-08-25');
@@ -95,18 +97,21 @@ try{
   assert.equal(hydrated.regionCounts.PV,2);
   assert.equal(hydrated.summary.rawRows,4);
   assert.equal(hydrated.metadataRecovery?.recovered,true);
+  assert.ok(Array.isArray(hydrated.dateCandidates)&&hydrated.dateCandidates.length>0,'hydrated import must expose recovered date candidates');
+  assert.equal(hydrated.dateCandidates[0]?.date,'2026-08-25');
   assert.equal(hydrated.carryover.historicalOpen,2);
   assert.equal(hydrated.carryover.todayOpen,4);
   assert.equal(hydrated.carryover.currentOpen,6,'V375 current queue truth must be today OPEN + historical OPEN');
 
   const running=normalizeV161UnifiedImport(hydrated);
-  assert.match(V161_UNIFIED_IMPORT_RUNTIME_TRUTH_PATCH_ID,/v388-unified-import-carryover-region-owner-v1/);
+  assert.match(V161_UNIFIED_IMPORT_RUNTIME_TRUTH_PATCH_ID,/v388-current-queue-includes-historical-open-v1/);
   assert.equal(running.snapshotStatus,'IMPORTED');
   assert.equal(running.carryover.historicalOpen,2);
   assert.equal(running.carryover.currentOpen,6,'incomplete runtime queue must include four current members plus two historical OPEN');
   assert.equal(running.regionCounts.PP,2,'V161 must not overwrite recovered PP with legacy blank region rows');
   assert.equal(running.regionCounts.PV,2,'V161 must not overwrite recovered PV with legacy blank region rows');
-  assert.equal(running.regionCounts.runtimeRegionTruth,'PRESERVED_HYDRATED_METADATA');
+  assert.ok(Array.isArray(running.dateCandidates)&&running.dateCandidates.length>0,'V161 must not overwrite recovered date candidates with an empty legacy batch array');
+  assert.equal(running.dateCandidates[0]?.date,'2026-08-25');
 
   db.prepare("UPDATE unified_snapshots SET status='COMPLETED' WHERE snapshotId=?").run(saved.snapshotId);
   const completedBase=readV375LatestUnifiedImport(db);
@@ -115,6 +120,7 @@ try{
   assert.equal(completed.carryover.todayOpen,4);
   assert.equal(completed.carryover.historicalOpen,2);
   assert.equal(completed.carryover.currentOpen,6,'completed runtime queue must remain today OPEN + historical OPEN');
+  assert.equal(completed.dateCandidates[0]?.date,'2026-08-25','completed runtime truth must keep recovered date candidates too');
 
   const rawAfter=db.prepare('SELECT dateDetectionSource,dateCandidatesJson,regionCountsJson,summaryJson FROM unified_import_batches WHERE batchId=?').get(saved.batchId);
   const snapshotAfter=db.prepare('SELECT payloadJson FROM unified_snapshots WHERE snapshotId=?').get(saved.snapshotId);
@@ -134,7 +140,7 @@ try{
   assert.match(auditUi,/它不是当前日报“当前处理队列”/,'UI must explicitly distinguish history export scope from current queue truth');
   assert.match(auditUi,/当日OPEN \+ 当前日前历史OPEN/,'UI must state the current processing queue formula');
 
-  console.log('[V388] import carryover + archived metadata truth smoke passed · V266 exact-SHA workbook restores real date/container/PP-PV/rawRows read-only · V161 keeps recovered regions · currentOpen=today+historical in running/completed states · export-range OPEN scope is explicit');
+  console.log('[V388] import carryover + archived metadata truth smoke passed · V266 exact-SHA workbook restores real date/container/PP-PV/dateCandidates/rawRows read-only · V161 keeps recovered regions/date candidates · currentOpen=today+historical in running/completed states · export-range OPEN scope is explicit');
 }finally{
   try{closeDb();}catch{}
   try{fs.rmSync(root,{recursive:true,force:true});}catch{}
