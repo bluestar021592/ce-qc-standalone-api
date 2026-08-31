@@ -100,29 +100,18 @@ function snapshotMeta(batch) {
   return { status: String(row.status || 'IMPORTED'), payload: safeJson(row.payloadJson, {}) };
 }
 
-function runtimeCarry(batch, counts, snapshotStatus, baseCarry = {}) {
+function runtimeCarry(batch, _counts = {}, _snapshotStatus = '', baseCarry = {}) {
   const reportDate = String(batch?.reportDate || '');
-  const historicalOpen = one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate<?", reportDate);
-  if (snapshotStatus !== 'COMPLETED') {
-    const mainQueue = TYPES.reduce((sum, type) => sum + num(counts[type]), 0);
-    return {
-      ...baseCarry,
-      todayOpen: mainQueue,
-      historicalOpen,
-      rechecked: num(baseCarry?.rechecked),
-      currentOpen: mainQueue + historicalOpen,
-      historicalSeparate: true,
-      runtimeTruth: 'CURRENT_SEVEN_BUSINESS_IMPORT_MEMBERS_PLUS_HISTORICAL_OPEN'
-    };
-  }
   const todayOpen = one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate=?", reportDate);
+  const historicalOpen = one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate<?", reportDate);
   return {
     ...baseCarry,
     todayOpen,
     historicalOpen,
+    rechecked: num(baseCarry?.rechecked),
     currentOpen: todayOpen + historicalOpen,
     historicalSeparate: true,
-    runtimeTruth: 'COMPLETED_TODAY_OPEN_PLUS_HISTORICAL_OPEN'
+    runtimeTruth: 'TODAY_OPEN_PLUS_HISTORICAL_OPEN'
   };
 }
 
