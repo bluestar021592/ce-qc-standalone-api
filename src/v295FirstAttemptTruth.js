@@ -8,7 +8,7 @@ import {
 } from './v295FirstAttemptMetric.js';
 
 export const V295_FIRST_ATTEMPT_TRUTH_ID = '2026-08-25-v295-first-attempt-range-truth-v1';
-export const V295_FIRST_ATTEMPT_QUERY_POLICY_ID = '2026-08-28-v344-index-friendly-shipment-lookups-v1';
+export const V295_FIRST_ATTEMPT_QUERY_POLICY_ID = '2026-08-31-v374-index-friendly-membership-v2';
 export const V295_FIRST_ATTEMPT_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const CCSL_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688']);
 const SHOPEE_TYPES = Object.freeze(['SHOPEECN','SHOPEEVN']);
@@ -34,6 +34,8 @@ function validRange(fromDate, toDate) {
   return { from, to };
 }
 
+// businessType/shipmentCode are normalized before persistence. Keep indexed columns bare:
+// wrapping them in UPPER/TRIM makes SQLite ignore the existing composite membership indexes.
 function latestUnifiedMembership(from, to, db) {
   return db.prepare(`
     WITH ranked AS (
@@ -42,12 +44,12 @@ function latestUnifiedMembership(from, to, db) {
       FROM unified_import_batches b
       WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
     )
-    SELECT DISTINCT r.reportDate,UPPER(TRIM(u.businessType)) businessType,UPPER(TRIM(u.shipmentCode)) shipmentCode
+    SELECT DISTINCT r.reportDate,u.businessType businessType,u.shipmentCode shipmentCode
     FROM ranked r
     JOIN unified_import_rows u ON u.snapshotId=r.snapshotId AND u.reportDate=r.reportDate
     WHERE r.rn=1
-      AND UPPER(TRIM(COALESCE(u.businessType,''))) IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
-      AND TRIM(COALESCE(u.shipmentCode,''))<>''
+      AND u.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
+      AND u.shipmentCode<>''
     ORDER BY r.reportDate,businessType,shipmentCode
   `).all(from, to);
 }
@@ -61,17 +63,17 @@ function whppMembership(from, to, db) {
         FROM unified_import_batches b
         WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
       ), latest AS (SELECT reportDate,snapshotId FROM ranked WHERE rn=1)
-      SELECT DISTINCT p.reportDate,'WHPP' businessType,UPPER(TRIM(p.shipmentCode)) shipmentCode
+      SELECT DISTINCT p.reportDate,'WHPP' businessType,p.shipmentCode shipmentCode
       FROM business_daily_parse_rows p
       LEFT JOIN latest l ON l.reportDate=p.reportDate
-      WHERE UPPER(COALESCE(p.businessType,''))='WHPP'
+      WHERE p.businessType='WHPP'
         AND p.reportDate BETWEEN ? AND ?
-        AND TRIM(COALESCE(p.shipmentCode,''))<>''
+        AND p.shipmentCode<>''
         AND NOT EXISTS (
           SELECT 1 FROM unified_import_rows u
           WHERE u.snapshotId=l.snapshotId AND u.reportDate=p.reportDate
-            AND UPPER(COALESCE(u.businessType,''))='CEAF'
-            AND UPPER(TRIM(u.shipmentCode))=UPPER(TRIM(p.shipmentCode))
+            AND u.businessType='CEAF'
+            AND u.shipmentCode=p.shipmentCode
         )
       ORDER BY p.reportDate,shipmentCode
     `).all(from, to, from, to);
@@ -214,11 +216,19 @@ export function summarizeV295FirstAttemptRange(fromDate, toDate, db = getDb()) {
   const key = `${from}|${to}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+  const startedAt = Date.now();
+  let phaseAt = startedAt;
+  const timings = {};
   const members = membershipRows(from, to, db);
+  timings.membershipMs = Date.now() - phaseAt; phaseAt = Date.now();
   const ledger = ledgerByKey(members, db);
+  timings.ledgerMs = Date.now() - phaseAt; phaseAt = Date.now();
   const fallbackPod = fallbackPodByMembership(members, from, to, db);
+  timings.fallbackPodMs = Date.now() - phaseAt; phaseAt = Date.now();
   const events = eventsByKey(members, db);
+  timings.eventsMs = Date.now() - phaseAt; phaseAt = Date.now();
   const daily = dailyFacts(members, ledger, fallbackPod, events);
+  timings.dailyFactsMs = Date.now() - phaseAt;
   const byType = {};
   for (const type of V295_FIRST_ATTEMPT_TYPES) byType[type] = mergeV295FirstAttemptFacts(type, daily.filter(row => row.businessType === type), { reportDate: to });
   const ccsl = mergeV295FirstAttemptFacts('CCSL', CCSL_TYPES.map(type => byType[type]), { reportDate: to });
@@ -226,6 +236,8 @@ export function summarizeV295FirstAttemptRange(fromDate, toDate, db = getDb()) {
   const home = mergeV295FirstAttemptFacts('HOME', [...CCSL_TYPES.map(type => byType[type]), byType.WHPP], { reportDate: to });
   const all = mergeV295FirstAttemptFacts('ALL', V295_FIRST_ATTEMPT_TYPES.map(type => byType[type]), { reportDate: to });
   const dates = [...new Set(members.map(row => row.reportDate))].sort();
+  const elapsedMs = Date.now() - startedAt;
+  if (elapsedMs >= 500) console.info('[CE-QC][V374_FIRST_ATTEMPT_PHASES]', JSON.stringify({ from, to, members: members.length, elapsedMs, ...timings }));
   const value = { ok: true, id: V295_FIRST_ATTEMPT_TRUTH_ID, queryPolicyId: V295_FIRST_ATTEMPT_QUERY_POLICY_ID, metricId: V295_FIRST_ATTEMPT_METRIC_ID, fromDate: from, toDate: to, dates, daily, byType, ccsl, shopee, home, all, source: 'LATEST_VALID_DAILY_MEMBERSHIP + SAVED_REAL_TRACK_START/FAILURE_CYCLE + TERMINAL_POD_TRUTH' };
   cache.set(key, { at: Date.now(), value });
   return value;
@@ -265,4 +277,4 @@ export function readV295FirstAttemptTrends(businessType = 'ALL', fromDate = '', 
 export function invalidateV295FirstAttemptTruth() { cache.clear(); }
 globalThis.__CE_QC_INVALIDATE_V295_FIRST_ATTEMPT__ = invalidateV295FirstAttemptTruth;
 console.info('[CE-QC][V295_FIRST_ATTEMPT_TRUTH]', V295_FIRST_ATTEMPT_TRUTH_ID, '首次妥投率=第一次派送成功/第一次派送尝试；首日POD保持独立；真实START缺失时不发布伪0%。');
-console.info('[CE-QC][V344_FIRST_ATTEMPT_INDEXED_QUERY]', V295_FIRST_ATTEMPT_QUERY_POLICY_ID, 'large final/event fact lookups keep shipmentCode bare so SQLite shipment indexes remain usable; metric semantics unchanged.');
+console.info('[CE-QC][V374_FIRST_ATTEMPT_INDEXED_QUERY]', V295_FIRST_ATTEMPT_QUERY_POLICY_ID, 'membership/fact/event lookups keep normalized indexed columns bare; metric semantics unchanged; slow phases are logged.');

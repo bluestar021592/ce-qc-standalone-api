@@ -175,12 +175,12 @@ function Wait-BackendReady($Backend, [int]$Seconds = 240) {
         try {
             $Response = Invoke-WebRequest $LocalUrl -UseBasicParsing -TimeoutSec 2
             $status = [int]$Response.StatusCode
-            if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
+            if ($status -eq 200 -or $status -eq 401) { return @{ Ready = $true; Status = $status } }
         } catch {
             try {
                 if ($_.Exception.Response) {
                     $status = [int]$_.Exception.Response.StatusCode
-                    if ($status -ge 200 -and $status -lt 500) { return @{ Ready = $true; Status = $status } }
+                    if ($status -eq 200 -or $status -eq 401) { return @{ Ready = $true; Status = $status } }
                 }
             } catch {}
         }
@@ -268,7 +268,8 @@ Write-Host '===============================================' -ForegroundColor Gr
 Write-Host 'BACKEND READY - local web response verified' -ForegroundColor Green
 Write-Host "Local URL: $LocalUrl" -ForegroundColor Green
 if ($LanUrl) { Write-Host "LAN URL: $LanUrl" -ForegroundColor Green }
-Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green
+if ($Probe.Status -eq 401) { Write-Host 'Local login gate: READY - authentication is required by design.' -ForegroundColor Green }
+else { Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green }
 Write-Host "Startup log: $LogFile"
 Write-Host "Crash archive: $CrashDir"
 Write-Host 'Automatic backend restart: ENABLED (max 5 crashes / 10 minutes).' -ForegroundColor Green
@@ -313,7 +314,8 @@ while ($true) {
         if ($Probe.Ready) {
             Write-Host ''
             Write-Host 'BACKEND RECOVERED - browser can reconnect automatically.' -ForegroundColor Green
-            Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green
+            if ($Probe.Status -eq 401) { Write-Host 'Local login gate: READY - authentication is required by design.' -ForegroundColor Green }
+            else { Write-Host "Local HTTP status: $($Probe.Status)" -ForegroundColor Green }
             continue
         }
 
