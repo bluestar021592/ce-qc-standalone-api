@@ -86,7 +86,8 @@ assert.match(importTruth,/readV375LatestUnifiedImport\(\)/,'POST hydration must 
 assert.match(importTruth,/V266_EXACT_SHA_SOURCE_UPLOAD/,'legacy metadata recovery must be bound to the exact immutable source hash');
 assert.match(runtimeTruth,/currentOpen: mainQueue \+ historicalOpen/,'running current queue must include historical OPEN');
 assert.match(runtimeTruth,/currentOpen: todayOpen \+ historicalOpen/,'completed current queue must include historical OPEN');
-assert.match(runtimeTruth,/PRESERVED_HYDRATED_METADATA/,'V161 must preserve stronger recovered PP/PV metadata instead of overwriting it with blank legacy row evidence');
+assert.match(runtimeTruth,/out\.PP \+ out\.PV === 0 && base\.PP \+ base\.PV > 0/,'V161 must preserve stronger recovered PP/PV metadata instead of overwriting it with blank legacy row evidence');
+assert.match(runtimeTruth,/batchDateCandidates\.length[\s\S]*base\.dateCandidates/,'V161 must preserve recovered date candidates when legacy batch dateCandidatesJson is empty');
 assert.match(historyTruth,/carryOpenScope:'SOURCE_REPORT_DATE_BETWEEN_EXPORT_RANGE'/,'history backend must publish selected export-range OPEN scope');
 assert.match(historyUi,/选定导出区间仍OPEN/,'history UI must label export-range OPEN separately from the current processing queue');
 
