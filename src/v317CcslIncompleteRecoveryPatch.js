@@ -53,10 +53,10 @@ function ccslMemberCount(db,reportDate,batch=null){
   return Number(db.prepare('SELECT pnhCount FROM daily_reports WHERE reportDate=?').get(reportDate)?.pnhCount||0);
 }
 export function ccslProcessingProof(db,reportDate,batch=null,sourceTotal=0){
-  const resolved=batch||latestValidUnifiedBatch(db,reportDate),snapshotId=String(resolved?.snapshotId||''),total=Math.max(0,Number(sourceTotal||0));
-  if(total===0)return{version:V383_CCSL_RETROACTIVE_PROOF_ID,revision:V384_CCSL_PROCESSING_PROOF_ID,sourceTotal:0,source:0,covered:0,missing:0,complete:true,snapshotId};
-  if(!snapshotId)return{version:V383_CCSL_RETROACTIVE_PROOF_ID,revision:V384_CCSL_PROCESSING_PROOF_ID,sourceTotal:total,source:total,covered:0,missing:total,complete:false,snapshotId:''};
-  const proof=readV384CcslProcessingProof(db,{reportDate,snapshotId});
+  const resolved=batch||latestValidUnifiedBatch(db,reportDate),snapshotId=String(resolved?.snapshotId||''),total=Math.max(0,Number(sourceTotal||0)),boundary=String(resolved?.createdAt||'');
+  if(total===0)return{version:V383_CCSL_RETROACTIVE_PROOF_ID,revision:V384_CCSL_PROCESSING_PROOF_ID,sourceTotal:0,source:0,covered:0,missing:0,complete:true,snapshotId,lifecycleBoundary:boundary};
+  if(!snapshotId)return{version:V383_CCSL_RETROACTIVE_PROOF_ID,revision:V384_CCSL_PROCESSING_PROOF_ID,sourceTotal:total,source:total,covered:0,missing:total,complete:false,snapshotId:'',lifecycleBoundary:boundary};
+  const proof=readV384CcslProcessingProof(db,{reportDate,snapshotId,boundary});
   return{...proof,version:V383_CCSL_RETROACTIVE_PROOF_ID,revision:V384_CCSL_PROCESSING_PROOF_ID,sourceTotal:total,snapshotId};
 }
 function retireStaleCcslRunPointers(db,reportDate,runId){
@@ -135,5 +135,5 @@ express.application.post=function v317CcslIncompleteRecoveryPost(route,...handle
 
 console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,V377_CCSL_IMPORT_LIFECYCLE_ID,'pre-import run pointers are ignored for status and retired only when preparing the new run; old audit snapshots remain preserved.');
 console.info('[CE-QC][V383_CCSL_RETROACTIVE_PROOF]',V383_CCSL_RETROACTIVE_PROOF_ID,'existing COMPLETED snapshots are revalidated against current daily processing proof; rejected legacy snapshots are preserved read-only and their finished run is recoverable.');
-console.info('[CE-QC][V384_CCSL_PROCESSING_PROOF]',V384_CCSL_PROCESSING_PROOF_ID,'completion requires terminal scan/POD lock, or a successful nonterminal scan followed by a non-retry final trajectory result; scan-only placeholders and API failures cannot close CCSL.');
+console.info('[CE-QC][V384_CCSL_PROCESSING_PROOF]',V384_CCSL_PROCESSING_PROOF_ID,'completion requires terminal scan/POD lock, or a successful same-lifecycle nonterminal scan followed by a non-retry same-lifecycle final trajectory result; scan-only placeholders, stale same-date evidence and API failures cannot close CCSL.');
 console.info('[CE-QC][V359_SELECTED_REPORT_DATE_HINT]',V317_EXPLICIT_REPORT_DATE_HINT_REVISION,'explicit browser status reads keep a short-lived in-memory selected-date hint so backend WHPP continuity can resume the exact visible date without scanning or guessing historical dates.');
