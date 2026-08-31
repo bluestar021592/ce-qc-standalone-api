@@ -3,9 +3,11 @@ import { getDb } from './db.js';
 
 export const V375_UNIFIED_IMPORT_METADATA_ID='2026-08-31-v376-bootstrap-latest-snapshot-metadata-v2';
 export const V377_UNIFIED_IMPORT_STATUS_TRUTH_ID='2026-08-31-v377-import-metadata-carryover-status-truth-v1';
+export const V384_UNIFIED_IMPORT_POST_TRUTH_ID='2026-08-31-v384-import-post-hydrated-snapshot-truth-v1';
 
 const BUSINESS_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const originalGet=express.application.get;
+const originalPost=express.application.post;
 
 function json(value,fallback){
   try{return value?JSON.parse(value):fallback;}catch{return fallback;}
@@ -83,7 +85,7 @@ export function readV375LatestUnifiedImport(db=getDb()){
     classificationCounts,sourceReconciliation:sourceRecon,
     dateDetectionSource,dateCandidates,dateConflict:Boolean(payload.dateConflict??(dateCandidates.length>1)),dateWasManuallyCorrected:Boolean(row.dateWasManuallyCorrected||payload.dateWasManuallyCorrected),
     containerFormat,regionCounts,summary,sheetDiagnostics:Array.isArray(payload.sheetDiagnostics)?payload.sheetDiagnostics:[],warnings:json(row.warningsJson,[]),
-    carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID,statusTruthId:V377_UNIFIED_IMPORT_STATUS_TRUTH_ID
+    carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID,statusTruthId:V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,postTruthId:V384_UNIFIED_IMPORT_POST_TRUTH_ID
   };
 }
 
@@ -91,6 +93,7 @@ function latestHandler(req,res){
   try{
     res.setHeader('X-CE-QC-V375-Metadata',V375_UNIFIED_IMPORT_METADATA_ID);
     res.setHeader('X-CE-QC-V377-Import-Truth',V377_UNIFIED_IMPORT_STATUS_TRUTH_ID);
+    res.setHeader('X-CE-QC-V384-Import-Post-Truth',V384_UNIFIED_IMPORT_POST_TRUTH_ID);
     return res.json({ok:true,import:readV375LatestUnifiedImport()});
   }catch(error){return res.status(500).json({ok:false,error:`V375 日报状态回读失败：${error?.message||error}`});}
 }
@@ -119,6 +122,37 @@ function wrapBootstrapHandler(handler){
   };
 }
 
+function wrapUnifiedImportPostHandler(handler){
+  return async function v384HydratedUnifiedImportPost(req,res,next){
+    const originalJson=res.json.bind(res);
+    let restored=false;
+    res.json=function v384ImportPostJson(payload){
+      if(restored)return originalJson(payload);
+      restored=true;
+      try{
+        if(payload&&typeof payload==='object'&&payload.ok===true&&payload.importCommitted===true){
+          const hydrated=readV375LatestUnifiedImport();
+          const responseDate=String(payload.reportDate||'').trim();
+          if(hydrated&&(!responseDate||String(hydrated.reportDate||'')===responseDate)){
+            const state=payload.state,shopeeState=payload.shopeeState,whppState=payload.whppState,processingQueue=payload.processingQueue;
+            payload={...payload,...hydrated,ok:true,importCommitted:true};
+            if(state!==undefined)payload.state=state;
+            if(shopeeState!==undefined)payload.shopeeState=shopeeState;
+            if(whppState!==undefined)payload.whppState=whppState;
+            if(processingQueue!==undefined)payload.processingQueue=processingQueue;
+            res.setHeader('X-CE-QC-V384-Import-Post-Truth',V384_UNIFIED_IMPORT_POST_TRUTH_ID);
+          }
+        }
+      }catch(error){
+        console.warn('[CE-QC][V384_IMPORT_POST_METADATA] hydration skipped:',error?.message||error);
+      }
+      return originalJson(payload);
+    };
+    try{return await handler.call(this,req,res,next);}
+    finally{res.json=originalJson;}
+  };
+}
+
 express.application.get=function v377UnifiedImportMetadataGet(route,...handlers){
   const path=String(route||'');
   if(path==='/api/import/unified-latest')return originalGet.call(this,route,latestHandler);
@@ -131,4 +165,16 @@ express.application.get=function v377UnifiedImportMetadataGet(route,...handlers)
   return originalGet.call(this,route,...handlers);
 };
 
+express.application.post=function v384UnifiedImportMetadataPost(route,...handlers){
+  const path=String(route||'');
+  if(path==='/api/import/unified-daily-report'&&handlers.length){
+    const nextHandlers=[...handlers];
+    const index=nextHandlers.length-1;
+    if(typeof nextHandlers[index]==='function')nextHandlers[index]=wrapUnifiedImportPostHandler(nextHandlers[index]);
+    return originalPost.call(this,route,...nextHandlers);
+  }
+  return originalPost.call(this,route,...handlers);
+};
+
 console.info('[CE-QC][V375_IMPORT_METADATA]',V375_UNIFIED_IMPORT_METADATA_ID,V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,'bootstrap + unified-latest read one exact latest VALID snapshot; processing queue is always open-today + open-historical; no database writes or schema changes.');
+console.info('[CE-QC][V384_IMPORT_POST_TRUTH]',V384_UNIFIED_IMPORT_POST_TRUTH_ID,'successful unified-daily-report POST responses are hydrated from the same exact VALID snapshot before the browser can render stale zero metadata.');
