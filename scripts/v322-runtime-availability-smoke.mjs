@@ -5,7 +5,8 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { execFileSync } from 'node:child_process';
 
-for(const file of ['src/rangeDashboardStoreV320.js','src/v322WebAvailabilityPatch.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptTruth.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+execFileSync(process.execPath,['scripts/v375-import-metadata-zero-shopee-smoke.mjs'],{stdio:'inherit'});
+for(const file of ['src/rangeDashboardStoreV320.js','src/v322WebAvailabilityPatch.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptTruth.js','src/v375UnifiedImportMetadataPatch.js','src/v311ShopeeIncompleteRecoveryPatch.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const rangeSource=fs.readFileSync('src/rangeDashboardStoreV320.js','utf8');
 const progressSource=fs.readFileSync('src/v322WebAvailabilityPatch.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
@@ -18,6 +19,7 @@ assert.match(progressSource,/V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN/);
 assert.doesNotMatch(progressSource,/FROM\s+(?:scan_results|business_scan_results|final_rows|business_final_rows)/i,'run-progress must not count large fact tables');
 assert.match(progressSource,/\/api\/v33\/run-progress/,'V322 must replace the legacy progress handler');
 assert.match(activation,/v322WebAvailabilityPatch\.js/,'V322 web availability guard must activate before server route registration');
+assert.match(activation,/v375UnifiedImportMetadataPatch\.js/,'V375 import metadata owner must activate before server route registration');
 // V374 supersedes the earlier V344 lookup policy. Large first-attempt fact/event AND
 // membership lookups must keep normalized businessType/shipmentCode columns bare so
 // the existing SQLite indexes remain usable. Function-wrapped indexed columns cause
@@ -79,4 +81,4 @@ assert.equal(range.queryMode,'V322_SINGLE_DAY_DASHBOARD_CACHE_ONLY');assert.equa
 started=performance.now();const progress=readV322RunProgress('CCSL',db),progressMs=performance.now()-started;
 assert.equal(progress.progressRule,'V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN');assert.equal(progress.dailyTotal,4);assert.ok(progressMs<200,`tiny run progress must stay sub-200ms in fixture, got ${progressMs.toFixed(1)}ms`);
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V374/V322/V335] runtime availability smoke passed · V295 membership + shipment lookups remain index-friendly · exact 1/1 WHPP standard membership + six unified businesses = 7 · single-day period=${rangeMs.toFixed(1)}ms · tiny progress=${progressMs.toFixed(1)}ms · no large fact-table scans`);
+console.log(`[V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact 1/1 WHPP standard membership + six unified businesses = 7 · single-day period=${rangeMs.toFixed(1)}ms · tiny progress=${progressMs.toFixed(1)}ms · no large fact-table scans`);
