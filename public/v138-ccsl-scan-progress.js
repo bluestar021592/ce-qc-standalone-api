@@ -1,6 +1,7 @@
 (function installV138CcslScanProgress(global){
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
   const VERSION='2026-08-29-v341-ccsl-progress-owner-guard-v1';
+  const V385_DETAIL_OWNER_RELEASE='2026-08-31-v385-release-stale-v67-detail-owner-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
@@ -12,21 +13,24 @@
   const normalizeDate=value=>{const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
   const selectedReportDate=()=>normalizeDate(document.getElementById('reportDate')?.value||document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value||'');
 
+  function releaseV67Owner(node){
+    if(!node)return;
+    delete node.dataset.v67UnifiedOwner;
+    delete node.dataset.v67UnifiedReportDate;
+  }
+
   function unifiedOwnsLegacyStatus(node){
     if(!node)return false;
     const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
-    if(stage?.owner==='V67'&&stage.active===true){
-      return String(stage.type||'').toUpperCase()!=='CCSL';
-    }
-    if(node.dataset.v67UnifiedOwner!=='1')return false;
-    const ownerDate=normalizeDate(node.dataset.v67UnifiedReportDate||'');
-    const currentDate=selectedReportDate();
-    if(ownerDate&&currentDate&&ownerDate!==currentDate){
-      delete node.dataset.v67UnifiedOwner;
-      delete node.dataset.v67UnifiedReportDate;
+    if(stage?.owner==='V67'){
+      if(stage.active===true){
+        return String(stage.type||'').toUpperCase()!=='CCSL';
+      }
+      releaseV67Owner(node);
       return false;
     }
-    return true;
+    if(node.dataset.v67UnifiedOwner==='1')releaseV67Owner(node);
+    return false;
   }
 
   const statusText=progress=>{
@@ -188,6 +192,6 @@
     [100,450,1200].forEach(ms=>setTimeout(tick,ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus};
-  console.info('[CE-QC][V341_CCSL_DETAIL_OWNER]',VERSION,'CCSL progress keeps 350/50 detail but yields #ccslRunStatus to unified Shopee/WHPP/final status.');
+  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,detailOwnerRelease:V385_DETAIL_OWNER_RELEASE,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus,releaseV67Owner};
+  console.info('[CE-QC][V341_CCSL_DETAIL_OWNER]',VERSION,V385_DETAIL_OWNER_RELEASE,'CCSL progress keeps 350/50 detail; inactive or absent V67 runner ownership is released immediately so V317/V384 canonical detail cannot remain stale.');
 })(window);
