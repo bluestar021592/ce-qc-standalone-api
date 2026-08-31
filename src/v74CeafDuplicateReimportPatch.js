@@ -3,6 +3,7 @@ import fs from 'fs';
 import express from 'express';
 import XLSX from 'xlsx';
 import { getDb } from './db.js';
+import { installV387UnifiedImportPostOwner, V387_UNIFIED_IMPORT_POST_OWNER_ID } from './v375UnifiedImportMetadataPatch.js';
 
 const PATCH_ID = '2026-08-16-v154-safe-same-date-reimport-v3';
 const WRAPPED = Symbol.for('ce-qc.v74-ceaf-duplicate-reimport');
@@ -160,6 +161,13 @@ if (typeof previousPost === 'function' && !previousPost[WRAPPED]) {
   Object.defineProperty(wrappedPost, WRAPPED, { value: true });
   express.application.post = wrappedPost;
 }
+
+// V387 deliberately installs after V74 has taken its own registration slot.
+// V76, loaded next by bootstrap, does not mutate Express routing; therefore this
+// becomes the final unified-import POST truth owner before server.js registers
+// /api/import/unified-daily-report. Re-import safety remains inside the chain.
+const v387PostOwner = installV387UnifiedImportPostOwner();
+console.info('[CE-QC][V387_IMPORT_POST_OWNER]', V387_UNIFIED_IMPORT_POST_OWNER_ID, JSON.stringify(v387PostOwner));
 
 export const V74_CEAF_DUPLICATE_REIMPORT_PATCH_ID = PATCH_ID;
 export const __test = { countAirMarkerRows, isAirMarker, fileHashOf, prepareSameFileReplacement, restorePriorBatchIfReplacementFailed };
