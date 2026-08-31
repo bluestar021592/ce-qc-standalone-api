@@ -34,11 +34,23 @@ assert.match(purgeWorkerSource, /BUSINESS_DATA_TABLES\.filter/);
 
 // Same-date reupload keeps immutable audit snapshots. Completion must therefore
 // be tied to the newly-created current run for CCSL/SHOPEE, never to any older
-// same-date snapshot. The legacy WHPP business-state route follows the same rule.
+// same-date snapshot. V377 additionally binds both run and snapshot freshness to
+// the newest VALID unified import createdAt boundary. The legacy WHPP business-
+// state route continues to keep its own current-run binding rule.
 assert.match(ccslRecoverySource, /WHERE reportDate=\? AND runId=\? AND snapshotType='dashboard'/);
-assert.match(ccslRecoverySource, /latestValidSnapshot\(db,date,lock\?\.runId\|\|''\)/);
+assert.ok(ccslRecoverySource.includes('V377_CCSL_IMPORT_LIFECYCLE_ID'), 'CCSL recovery must expose the V377 import lifecycle policy');
+assert.ok(
+  ccslRecoverySource.includes("latestValidSnapshot(db,date,lock?.runId||'',validBatch?.createdAt||'')"),
+  'CCSL completion lookup must include the newest VALID import createdAt boundary'
+);
+assert.ok(ccslRecoverySource.includes('retireStaleCcslRunPointers'), 'CCSL prepare must retire stale pre-import run pointers without deleting audit snapshots');
 assert.match(shopeeRecoverySource, /businessType=\? AND reportDate=\? AND runId=\?/);
-assert.match(shopeeRecoverySource, /validSnapshot\(db,date,lock\?\.runId\|\|''\)/);
+assert.ok(shopeeRecoverySource.includes('V377_SHOPEE_IMPORT_LIFECYCLE_ID'), 'SHOPEE recovery must expose the V377 import lifecycle policy');
+assert.ok(
+  shopeeRecoverySource.includes("validSnapshot(db,date,lock?.runId||'',boundary)"),
+  'SHOPEE completion lookup must include the newest VALID import createdAt boundary'
+);
+assert.ok(shopeeRecoverySource.includes('retireStaleShopeeRunPointers'), 'SHOPEE prepare must retire stale pre-import run pointers without deleting audit snapshots');
 assert.match(whppStateSource, /businessType='WHPP' AND reportDate=\? AND runId=\?/);
 assert.match(whppStateSource, /const completed=Boolean\(snapshot\)/);
 assert.doesNotMatch(whppStateSource, /const completed=Boolean\(snapshot\|\|history\)/);
@@ -95,4 +107,4 @@ assert.ok(serverLoaderStart >= 0, 'interactive-first server loader function must
 assert.ok(serverLoaderEnd > serverLoaderStart, 'interactive-first server loader must end before deferred maintenance function');
 assert.ok(serverImportIndex > serverLoaderStart && serverImportIndex < serverLoaderEnd, 'interactive-first server loader must actually import server.js');
 
-console.log('[V295.8/V294] clean reupload integrity smoke passed · current-run snapshot binding + fresh-import date synchronization + canonical lifecycle-aware zero-work WHPP completion verified · retained same-date audit snapshots cannot falsely close the new lifecycle');
+console.log('[V377.1/V295.8/V294] clean reupload integrity smoke passed · current-run + newest VALID import lifecycle binding verified for CCSL/SHOPEE · stale run pointers retire without deleting audit snapshots · canonical lifecycle-aware WHPP completion retained');
