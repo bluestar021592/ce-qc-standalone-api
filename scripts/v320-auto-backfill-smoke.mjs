@@ -21,4 +21,5 @@ assert.match(overlay,/RECONCILED_COMPLETED_DASHBOARD_CACHE_MATCHED_DENOMINATOR/,
 assert.doesNotMatch(ui,/setInterval\(\(\)=>\{if\(activeShopeeType\(\)\)loadTable\(true\);\},10000\)/,'visible page must not poll every 10s');
 assert.doesNotMatch(ui,/\/api\/v315\/evidence-recheck/,'user-facing table must not force manual recheck just to render');
 
-console.log('[V321] evidence repair isolation smoke passed · repair capability retained · startup auto-load retired · no 10s UI polling · malformed legacy JSON safe');
+execFileSync(process.execPath,['scripts/v381-export-evidence-repair-smoke.mjs'],{stdio:'inherit'});
+console.log('[V321] evidence repair isolation smoke passed · repair capability retained · startup auto-load retired · no 10s UI polling · malformed legacy JSON safe · V381 export repair gate chained');
