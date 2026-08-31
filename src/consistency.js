@@ -1,6 +1,8 @@
 import { getXlsxSheetRows, safeFinalRows } from './reporting.js';
 import { cleanMainBills, isExcludedBill } from './storage.js';
 
+export const V382_CCSL_PROCESSING_PROOF_ID='2026-08-31-v382-ccsl-scan-or-pod-proof-v1';
+
 export function buildConsistencyReport(state = {}) {
   const warnings = [];
   const errors = [];
@@ -8,6 +10,13 @@ export function buildConsistencyReport(state = {}) {
   const sheets = getXlsxSheetRows(state);
   const finalRows = safeFinalRows(state);
   const podSet = new Set(cleanMainBills(state.podLocks || []));
+
+  const sourceBills = new Set(cleanMainBills(state.pnhBills || []));
+  const scanBills = new Set((state.scanResults || []).map(row => billOf(row)).filter(Boolean));
+  const unprocessedBills = [...sourceBills].filter(wb => !scanBills.has(wb) && !podSet.has(wb));
+  if (sourceBills.size > 0 && unprocessedBills.length > 0) {
+    errors.push(`CCSL处理证据不完整：${unprocessedBills.length}/${sourceBills.size}票既无扫描结果也无POD锁，禁止标记完成`);
+  }
 
   const abnormalCount = sheets.abnormalOpen.length;
   const pageAbnormalCount = (state.detailTabs?.abnormalOpen?.total ?? abnormalCount);
@@ -53,12 +62,23 @@ export function buildConsistencyReport(state = {}) {
   info.push(`最终结果过滤后：${finalRows.length}`);
   info.push(`XLSX异常未闭环：${abnormalCount}`);
   info.push(`明日继续跨日：${sheets.nextCarry.length}`);
+  info.push(`V382处理证据：${sourceBills.size-unprocessedBills.length}/${sourceBills.size}`);
 
   return {
     status: errors.length ? 'error' : (warnings.length ? 'warning' : 'ok'),
     errors,
     warnings,
     info,
+    processingProof: {
+      id: V382_CCSL_PROCESSING_PROOF_ID,
+      source: sourceBills.size,
+      scan: scanBills.size,
+      podLocked: podSet.size,
+      covered: sourceBills.size-unprocessedBills.length,
+      missing: unprocessedBills.length,
+      complete: unprocessedBills.length===0,
+      missingBills: unprocessedBills.slice(0,50)
+    },
     counts: {
       pnh: (state.pnhBills || []).length,
       scanResults: (state.scanResults || []).length,
@@ -102,8 +122,6 @@ function hasRecognizedAction(row = {}) {
   const latestAction = String(row?.lastEventActionType || row?.最后节点动作类型 || '').toUpperCase();
   const category = String(row?.primaryCategory || row?.异常分类 || '');
   const special = String(row?.specialState || '');
-  // Any recognized action after the first CCSL inbound invalidates inbound-no-scan,
-  // even if a later duplicate inbound becomes the latest raw event.
   return latestAction === 'OUTBOUND'
     || Boolean(special)
     || isShopRow(row)
