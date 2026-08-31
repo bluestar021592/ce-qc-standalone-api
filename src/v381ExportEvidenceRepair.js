@@ -2,7 +2,7 @@ import { getDb } from './db.js';
 import { CEClient } from './ceClient.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { ensureV246TrackingSchema, applyV246StrictAttemptEvidence } from './v246TrackingLedgerCore.js';
-import { applyV294ExportAttemptSigningTruth, backfillV294StrictAttemptsFromSavedEvidence } from './v294AttemptSigningTruth.js';
+import { backfillV294StrictAttemptsFromSavedEvidence } from './v294AttemptSigningTruth.js';
 
 export const V381_EXPORT_EVIDENCE_REPAIR_ID='2026-08-31-v381-shopee-export-scoped-evidence-repair-v1';
 const SHOPEE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
@@ -13,6 +13,7 @@ const billOf=v=>text(v).toUpperCase();
 const dateKey=v=>{const m=text(v).match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';};
 const chunks=(values,size=V381_EXPORT_TRACK_BATCH)=>{const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;};
 const safeJson=(value,fallback={})=>{try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}};
+const strictAttemptSource=value=>/^V246_STRICT_TRACK:/i.test(text(value))||/严格.*START|START.*失败.*START/i.test(text(value));
 
 function eventBill(row={}){return billOf(row.shipmentCode||row.运单号||row.waybill||row.waybillNo||row.billCode||row.trackingNo);}
 async function mapLimit(values,limit,worker){let next=0;const result=new Array(values.length);async function run(){while(true){const index=next++;if(index>=values.length)return;result[index]=await worker(values[index],index);}}await Promise.all(Array.from({length:Math.min(limit,Math.max(1,values.length))},()=>run()));return result;}
@@ -48,20 +49,20 @@ export function hydrateV381LedgerStartEvidence(type,rows=[],{db=getDb()}={}){
     const ledger=db.prepare(`SELECT shipmentCode,podDate,attemptNo,attemptSource,evidenceJson FROM qc_tracking_ledger WHERE businessType=? AND shipmentCode IN (${marks})`).all(businessType,...part);
     for(const locked of ledger){
       const bill=billOf(locked.shipmentCode),row=byBill.get(bill);if(!row)continue;
-      const evidence=safeJson(locked.evidenceJson,{}),firstStart=text(evidence?.starts?.[0]?.time);
+      const evidence=safeJson(locked.evidenceJson,{}),firstStart=text(evidence?.starts?.[0]?.time),attempt=Math.max(0,Math.min(3,Number(locked.attemptNo||0))),attemptSource=text(locked.attemptSource);
       if(dateKey(locked.podDate))row.podDate=dateKey(locked.podDate);
       if(!text(row.firstAttemptAt)&&firstStart)row.firstAttemptAt=firstStart;
       if(!text(row.dispatchStartAt)&&firstStart)row.dispatchStartAt=firstStart;
+      if(attempt>0&&strictAttemptSource(attemptSource)){
+        row.attemptNo=attempt;row.trackAttemptNo=attempt;row.podAttemptNo=attempt;row.currentAttemptNo=attempt;row.attemptSource=attemptSource;row.attemptEvidenceComplete=true;
+      }
     }
   }
   return rows;
 }
 
-export function applyV381LedgerExportTruth(type,rows=[],{db=getDb(),range={}}={}){
-  const businessType=text(type).toUpperCase();if(!SHOPEE_TYPES.has(businessType)||!rows.length)return rows;
-  applyV294ExportAttemptSigningTruth(businessType,rows,{db,range});
-  hydrateV381LedgerStartEvidence(businessType,rows,{db});
-  return rows;
+export function applyV381LedgerExportTruth(type,rows=[],{db=getDb()}={}){
+  return hydrateV381LedgerStartEvidence(type,rows,{db});
 }
 
 export async function prepareV381ShopeeExportEvidence({type,range,db=getDb(),client=null,onProgress=()=>{}}={}){
@@ -98,4 +99,4 @@ export async function prepareV381ShopeeExportEvidence({type,range,db=getDb(),cli
   return result;
 }
 
-console.info('[CE-QC][V381_EXPORT_EVIDENCE_REPAIR]',V381_EXPORT_EVIDENCE_REPAIR_ID,'Shopee export preflight reuses saved evidence first, then queries only incomplete terminal POD tickets at 50x4; no synthetic START/POD dates.');
+console.info('[CE-QC][V381_EXPORT_EVIDENCE_REPAIR]',V381_EXPORT_EVIDENCE_REPAIR_ID,'Shopee export preflight reuses saved evidence first, then queries only incomplete terminal POD tickets at 50x4; export hydration is direct ledger POD/strict START/attempt only.');
