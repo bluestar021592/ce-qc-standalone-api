@@ -8,7 +8,7 @@ export const V375_UNIFIED_IMPORT_METADATA_ID='2026-08-31-v376-bootstrap-latest-s
 export const V377_UNIFIED_IMPORT_STATUS_TRUTH_ID='2026-08-31-v377-import-metadata-carryover-status-truth-v1';
 export const V384_UNIFIED_IMPORT_POST_TRUTH_ID='2026-08-31-v384-import-post-hydrated-snapshot-truth-v1';
 export const V387_UNIFIED_IMPORT_POST_OWNER_ID='2026-08-31-v387-final-unified-import-post-owner-v1';
-export const V388_ARCHIVED_IMPORT_METADATA_ID='2026-08-31-v388-immutable-source-metadata-recovery-v1';
+export const V388_ARCHIVED_IMPORT_METADATA_ID='2026-08-31-v388-immutable-source-metadata-recovery-v2';
 
 const BUSINESS_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const POST_OWNER=Symbol.for('ce-qc.v387-unified-import-post-owner');
@@ -57,12 +57,28 @@ function findArchivedSourceByHash(hash=''){
   try{folders=fs.readdirSync(root,{withFileTypes:true}).filter(item=>item.isDirectory()).map(item=>item.name).sort().reverse();}catch{return'';}
   for(const folder of folders){
     const dir=path.join(root,folder);
-    for(const ext of ['.xlsx','.xls']){
+    for(const ext of ['.xlsx','.xls','.bin']){
       const candidate=path.join(dir,`${hash}${ext}`);
       try{if(fs.statSync(candidate).isFile())return candidate;}catch{}
     }
   }
   return'';
+}
+function sniffArchivedContainer(file=''){
+  try{
+    const fd=fs.openSync(file,'r');
+    try{
+      const buffer=Buffer.alloc(8);const bytes=fs.readSync(fd,buffer,0,8,0);const b=buffer.subarray(0,bytes);
+      if(b.length>=4&&b[0]===0x50&&b[1]===0x4b&&b[2]===0x03&&b[3]===0x04)return'OOXML_ZIP';
+      if(b.length>=8&&b[0]===0xd0&&b[1]===0xcf&&b[2]===0x11&&b[3]===0xe0)return'OLE_XLS';
+      return'UNKNOWN';
+    }finally{fs.closeSync(fd);}
+  }catch{return'';}
+}
+function cacheArchivedMetadata(key,value){
+  if(!value)return;
+  archivedMetadataCache.set(key,value);
+  while(archivedMetadataCache.size>32){const first=archivedMetadataCache.keys().next().value;archivedMetadataCache.delete(first);}
 }
 export function recoverV388ArchivedImportMetadata(batch={}){
   const hash=canonicalFileHash(batch?.fileHash);
@@ -70,32 +86,49 @@ export function recoverV388ArchivedImportMetadata(batch={}){
   const key=`${hash}|${String(batch?.reportDate||'')}|${String(batch?.sourceName||'')}`;
   if(archivedMetadataCache.has(key))return archivedMetadataCache.get(key);
   const file=findArchivedSourceByHash(hash);
-  if(!file){archivedMetadataCache.set(key,null);return null;}
+  if(!file)return null;
+  const originalName=String(batch?.sourceName||'').trim()||`${String(batch?.reportDate||'daily')}${path.extname(file)}`;
+  const containerFormat=sniffArchivedContainer(file);
+  let parsed=null;
+  let dateEvidenceRecovered=false;
+  let sourceParseError='';
   try{
-    const originalName=String(batch?.sourceName||'').trim()||`${String(batch?.reportDate||'daily')}${path.extname(file)}`;
-    let parsed;
-    try{parsed=parseUnifiedDailyExcel(file,{originalName});}
-    catch{parsed=parseUnifiedDailyExcel(file,{originalName,reportDate:String(batch?.reportDate||'')});}
-    const result={
-      recovered:true,
-      recoveryId:V388_ARCHIVED_IMPORT_METADATA_ID,
-      evidence:'V266_EXACT_SHA_SOURCE_UPLOAD',
-      fileHash:hash,
-      reportDate:String(parsed?.reportDate||batch?.reportDate||''),
-      dateDetectionSource:String(parsed?.dateDetectionSource||'归档原始日报').trim()||'归档原始日报',
-      dateCandidates:Array.isArray(parsed?.dateCandidates)?parsed.dateCandidates:[],
-      containerFormat:String(parsed?.containerFormat||'').trim(),
-      regionCounts:{PP:Number(parsed?.regionCounts?.PP||0),PV:Number(parsed?.regionCounts?.PV||0),UNKNOWN:Number(parsed?.regionCounts?.UNKNOWN||0)},
-      summary:parsed?.summary&&typeof parsed.summary==='object'?parsed.summary:{},
-      sheetDiagnostics:Array.isArray(parsed?.sheetDiagnostics)?parsed.sheetDiagnostics:[]
-    };
-    archivedMetadataCache.set(key,result);
-    return result;
+    parsed=parseUnifiedDailyExcel(file,{originalName,referenceDate:String(batch?.reportDate||'')});
+    dateEvidenceRecovered=true;
   }catch(error){
-    console.warn('[CE-QC][V388_ARCHIVED_IMPORT_METADATA] recovery skipped:',error?.message||error);
-    archivedMetadataCache.set(key,null);
-    return null;
+    sourceParseError=String(error?.message||error||'');
+    try{
+      // Fallback is allowed only to recover non-date workbook facts such as PP/PV
+      // and sheet diagnostics. Supplying reportDate here must NEVER be surfaced as
+      // historical date-detection evidence, otherwise old files become falsely
+      // labelled as manually dated.
+      parsed=parseUnifiedDailyExcel(file,{originalName,reportDate:String(batch?.reportDate||'')});
+    }catch(fallbackError){
+      console.warn('[CE-QC][V388_ARCHIVED_IMPORT_METADATA] recovery skipped:',fallbackError?.message||fallbackError);
+      return null;
+    }
   }
+  const parsedRegions=parsed?.regionCounts||{};
+  const dateDetectionSource=dateEvidenceRecovered?String(parsed?.dateDetectionSource||'').trim():(batch?.dateWasManuallyCorrected?'手动日期（历史批次）':'');
+  const dateCandidates=dateEvidenceRecovered&&Array.isArray(parsed?.dateCandidates)?parsed.dateCandidates:[];
+  const result={
+    recovered:true,
+    recoveryId:V388_ARCHIVED_IMPORT_METADATA_ID,
+    evidence:'V266_EXACT_SHA_SOURCE_UPLOAD',
+    fileHash:hash,
+    reportDate:String(batch?.reportDate||parsed?.reportDate||''),
+    dateDetectionSource,
+    dateCandidates,
+    dateEvidenceRecovered,
+    nonDateFallbackUsed:!dateEvidenceRecovered,
+    sourceParseError:dateEvidenceRecovered?'':sourceParseError,
+    containerFormat:containerFormat||String(parsed?.containerFormat||'').trim(),
+    regionCounts:{PP:Number(parsedRegions.PP||0),PV:Number(parsedRegions.PV||0),UNKNOWN:Number(parsedRegions.UNKNOWN||0)},
+    summary:parsed?.summary&&typeof parsed.summary==='object'?parsed.summary:{},
+    sheetDiagnostics:Array.isArray(parsed?.sheetDiagnostics)?parsed.sheetDiagnostics:[]
+  };
+  cacheArchivedMetadata(key,result);
+  return result;
 }
 
 export function readV375LatestUnifiedImport(db=getDb()){
@@ -110,7 +143,7 @@ export function readV375LatestUnifiedImport(db=getDb()){
   const batchSummary=json(row.summaryJson,{});
   const payloadSummary=payload?.summary&&typeof payload.summary==='object'?payload.summary:{};
   const batchValid=Number(batchSummary?.validUniqueWaybills||0);
-  const summary=(batchValid>0||classifiedTotal===0)
+  let summary=(batchValid>0||classifiedTotal===0)
     ?{...payloadSummary,...batchSummary}
     :{...batchSummary,...payloadSummary};
   if(!Number(summary.validUniqueWaybills||0)&&classifiedTotal>0)summary.validUniqueWaybills=classifiedTotal;
@@ -133,12 +166,14 @@ export function readV375LatestUnifiedImport(db=getDb()){
   const existingDateSource=String(row.dateDetectionSource||payload.dateDetectionSource||'').trim();
   const existingContainer=String(payload.containerFormat||'').trim();
   const existingRegionEvidence=(candidateRegions.PP+candidateRegions.PV)+(derivedRegions.PP+derivedRegions.PV);
-  const archiveMeta=(!existingDateSource||!existingContainer||existingRegionEvidence===0)?recoverV388ArchivedImportMetadata(row):null;
+  const archiveMeta=(!existingDateSource||!existingContainer||existingRegionEvidence===0||Number(summary.rawRows||0)===0)?recoverV388ArchivedImportMetadata(row):null;
   const recoveredRegions=archiveMeta?.regionCounts||{PP:0,PV:0,UNKNOWN:0};
   const candidateRegionTotal=candidateRegions.PP+candidateRegions.PV+candidateRegions.UNKNOWN;
   const derivedRegionTotal=derivedRegions.PP+derivedRegions.PV+derivedRegions.UNKNOWN;
   let regionCounts=(candidateRegionTotal===classifiedTotal||derivedRegionTotal===0)?candidateRegions:derivedRegions;
   if(Number(regionCounts.PP||0)+Number(regionCounts.PV||0)===0&&Number(recoveredRegions.PP||0)+Number(recoveredRegions.PV||0)>0)regionCounts=recoveredRegions;
+  const archiveSummary=archiveMeta?.summary&&typeof archiveMeta.summary==='object'?archiveMeta.summary:{};
+  if(Number(summary.rawRows||0)<=0&&Number(archiveSummary.rawRows||0)>0)summary={...summary,rawRows:Number(archiveSummary.rawRows||0)};
 
   const batchCandidates=json(row.dateCandidatesJson,[]);
   const archiveCandidates=Array.isArray(archiveMeta?.dateCandidates)?archiveMeta.dateCandidates:[];
@@ -152,7 +187,7 @@ export function readV375LatestUnifiedImport(db=getDb()){
     dateDetectionSource,dateCandidates,dateConflict:Boolean(payload.dateConflict??(dateCandidates.length>1)),dateWasManuallyCorrected:Boolean(row.dateWasManuallyCorrected||payload.dateWasManuallyCorrected),
     containerFormat,regionCounts,summary,sheetDiagnostics:Array.isArray(payload.sheetDiagnostics)&&payload.sheetDiagnostics.length?payload.sheetDiagnostics:(archiveMeta?.sheetDiagnostics||[]),warnings:json(row.warningsJson,[]),
     carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID,statusTruthId:V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,postTruthId:V384_UNIFIED_IMPORT_POST_TRUTH_ID,postOwnerRevision:V387_UNIFIED_IMPORT_POST_OWNER_ID,
-    metadataRecovery:archiveMeta?{recovered:true,id:V388_ARCHIVED_IMPORT_METADATA_ID,evidence:archiveMeta.evidence}:null
+    metadataRecovery:archiveMeta?{recovered:true,id:V388_ARCHIVED_IMPORT_METADATA_ID,evidence:archiveMeta.evidence,dateEvidenceRecovered:Boolean(archiveMeta.dateEvidenceRecovered),nonDateFallbackUsed:Boolean(archiveMeta.nonDateFallbackUsed)}:null
   };
 }
 
@@ -259,5 +294,5 @@ export function installV387UnifiedImportPostOwner(){
 }
 
 console.info('[CE-QC][V375_IMPORT_METADATA]',V375_UNIFIED_IMPORT_METADATA_ID,V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,'bootstrap + unified-latest read one exact latest VALID snapshot; processing queue is always open-today + open-historical; no database writes or schema changes.');
-console.info('[CE-QC][V388_ARCHIVED_IMPORT_METADATA]',V388_ARCHIVED_IMPORT_METADATA_ID,'missing legacy date/container/PP-PV metadata is recovered read-only from the exact V266 SHA-archived source workbook; no database writes.');
+console.info('[CE-QC][V388_ARCHIVED_IMPORT_METADATA]',V388_ARCHIVED_IMPORT_METADATA_ID,'missing legacy date/container/PP-PV/raw-row metadata is recovered read-only from the exact V266 SHA-archived source workbook; fallback reportDate parsing is never surfaced as historical date evidence; no database writes.');
 console.info('[CE-QC][V384_IMPORT_POST_TRUTH]',V384_UNIFIED_IMPORT_POST_TRUTH_ID,'successful unified-daily-report POST payload hydration uses a pre-final response middleware so V42 final-handler replacement cannot discard it; V387 installs after earlier import wrappers.');
