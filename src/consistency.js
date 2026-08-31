@@ -1,5 +1,6 @@
 import { getXlsxSheetRows, safeFinalRows } from './reporting.js';
 import { cleanMainBills, isExcludedBill } from './storage.js';
+import { buildV384CcslProcessingProof, V384_CCSL_PROCESSING_PROOF_ID } from './v384CcslProcessingProof.js';
 
 export const V382_CCSL_PROCESSING_PROOF_ID='2026-08-31-v382-ccsl-scan-or-pod-proof-v1';
 
@@ -12,10 +13,14 @@ export function buildConsistencyReport(state = {}) {
   const podSet = new Set(cleanMainBills(state.podLocks || []));
 
   const sourceBills = new Set(cleanMainBills(state.pnhBills || []));
-  const scanBills = new Set((state.scanResults || []).map(row => billOf(row)).filter(Boolean));
-  const unprocessedBills = [...sourceBills].filter(wb => !scanBills.has(wb) && !podSet.has(wb));
-  if (sourceBills.size > 0 && unprocessedBills.length > 0) {
-    errors.push(`CCSL处理证据不完整：${unprocessedBills.length}/${sourceBills.size}票既无扫描结果也无POD锁，禁止标记完成`);
+  const processingProof=buildV384CcslProcessingProof({
+    sourceBills:[...sourceBills],
+    scanResults:state.scanResults||[],
+    finalRows:state.finalRows||[],
+    podLocks:[...podSet]
+  });
+  if (sourceBills.size > 0 && !processingProof.complete) {
+    errors.push(`CCSL处理证据不完整：${processingProof.missing}/${processingProof.source}票未完成有效扫描/必要轨迹，禁止标记完成`);
   }
 
   const abnormalCount = sheets.abnormalOpen.length;
@@ -62,7 +67,7 @@ export function buildConsistencyReport(state = {}) {
   info.push(`最终结果过滤后：${finalRows.length}`);
   info.push(`XLSX异常未闭环：${abnormalCount}`);
   info.push(`明日继续跨日：${sheets.nextCarry.length}`);
-  info.push(`V382处理证据：${sourceBills.size-unprocessedBills.length}/${sourceBills.size}`);
+  info.push(`V384处理证据：${processingProof.covered}/${processingProof.source}`);
 
   return {
     status: errors.length ? 'error' : (warnings.length ? 'warning' : 'ok'),
@@ -70,14 +75,9 @@ export function buildConsistencyReport(state = {}) {
     warnings,
     info,
     processingProof: {
-      id: V382_CCSL_PROCESSING_PROOF_ID,
-      source: sourceBills.size,
-      scan: scanBills.size,
-      podLocked: podSet.size,
-      covered: sourceBills.size-unprocessedBills.length,
-      missing: unprocessedBills.length,
-      complete: unprocessedBills.length===0,
-      missingBills: unprocessedBills.slice(0,50)
+      ...processingProof,
+      compatibilityId:V382_CCSL_PROCESSING_PROOF_ID,
+      revisionId:V384_CCSL_PROCESSING_PROOF_ID
     },
     counts: {
       pnh: (state.pnhBills || []).length,
