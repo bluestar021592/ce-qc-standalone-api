@@ -13,11 +13,16 @@ const runner=fs.readFileSync('public/v67-resilient-run-guard.js','utf8');
 const inject=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 
-assert.match(backend,/2026-08-26-v311-reopen-finished-without-snapshot-v1/);
+assert.match(backend,/2026-08-31-v380-auto-prepare-current-shopee-lifecycle-v1/);
 assert.match(backend,/business_export_snapshots/,'V311+ must verify an exact VALID snapshot before reopening a finished run');
 assert.match(backend,/reconciliationStatus/,'V311+ must require completed snapshot reconciliation');
 assert.match(backend,/lock\?\.status==='finished'/,'V311+ must specifically repair the finished-without-snapshot dead state');
 assert.match(backend,/updateBusinessRunLock\(SHOPEE,date,'failed'/,'V311+ must retain normal same-lifecycle checkpoint recovery');
+assert.match(backend,/function prepareCurrentShopeeLifecycle\(req,res,next\)/,'V380 must prepare the exact current SHOPEE import lifecycle before execution');
+assert.match(backend,/routePath==='\/api\/shopee\/run\/start'/,'SHOPEE start must pass through the lifecycle prepare gate');
+assert.match(backend,/routePath==='\/api\/shopee\/run\/resume'/,'SHOPEE resume must pass through the lifecycle prepare gate');
+assert.match(backend,/prepareV311ShopeeRecovery\(\{reportDate:status\.reportDate,actor:/,'the execution gate must invoke canonical V311 prepare rather than inventing a second recovery path');
+assert.match(backend,/originalPost\.call\(this,route,prepareCurrentShopeeLifecycle,\.\.\.handlers\)/,'prepare must run before the registered start\/resume handler');
 
 // V377 intentionally retires only a stale pre-import run pointer so a fresh
 // same-date VALID import can receive a new runId. This is not business-data loss.
@@ -67,4 +72,4 @@ assert.ok(inject.includes('X-CE-QC-V333-UI'),'V333 compatibility response header
 assert.ok(inject.includes('X-CE-QC-Unified-Runner'),'single-runner response header must be observable');
 assert.match(activation,/v311ShopeeIncompleteRecoveryPatch\.js/,'backend recovery route must remain production-active');
 
-console.log('[V378/SINGLE-RUNNER/V345/V333] SHOPEE recovery + WHPP completion-lock smoke passed · exact stale run pointers may retire · business facts/audit remain immutable · duplicate finalized WHPP cannot re-enter processing');
+console.log('[V380/V378/SINGLE-RUNNER] SHOPEE lifecycle auto-prepare + WHPP completion-lock smoke passed · exact stale run pointers may retire · business facts/audit remain immutable · V67 remains the sole browser execution owner');
