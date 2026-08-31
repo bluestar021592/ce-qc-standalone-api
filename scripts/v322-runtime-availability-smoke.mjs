@@ -18,9 +18,18 @@ assert.match(progressSource,/V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN/);
 assert.doesNotMatch(progressSource,/FROM\s+(?:scan_results|business_scan_results|final_rows|business_final_rows)/i,'run-progress must not count large fact tables');
 assert.match(progressSource,/\/api\/v33\/run-progress/,'V322 must replace the legacy progress handler');
 assert.match(activation,/v322WebAvailabilityPatch\.js/,'V322 web availability guard must activate before server route registration');
-// V344: large first-attempt fact/event lookups must keep shipmentCode bare so the
-// existing SQLite shipment indexes remain usable. Function-wrapped columns cause full scans.
-assert.match(firstAttemptSource,/V295_FIRST_ATTEMPT_QUERY_POLICY_ID\s*=\s*'2026-08-28-v344-index-friendly-shipment-lookups-v1'/);
+// V374 supersedes the earlier V344 lookup policy. Large first-attempt fact/event AND
+// membership lookups must keep normalized businessType/shipmentCode columns bare so
+// the existing SQLite indexes remain usable. Function-wrapped indexed columns cause
+// full scans on the production database.
+assert.match(firstAttemptSource,/V295_FIRST_ATTEMPT_QUERY_POLICY_ID\s*=\s*'2026-08-31-v374-index-friendly-membership-v2'/);
+assert.match(firstAttemptSource,/SELECT DISTINCT r\.reportDate,u\.businessType businessType,u\.shipmentCode shipmentCode/);
+assert.match(firstAttemptSource,/u\.businessType IN \('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'\)/);
+assert.match(firstAttemptSource,/u\.shipmentCode<>''/);
+assert.match(firstAttemptSource,/WHERE p\.businessType='WHPP'/);
+assert.match(firstAttemptSource,/AND p\.shipmentCode<>''/);
+assert.match(firstAttemptSource,/AND u\.businessType='CEAF'/);
+assert.match(firstAttemptSource,/AND u\.shipmentCode=p\.shipmentCode/);
 assert.match(firstAttemptSource,/FROM track_events WHERE shipmentCode IN/);
 assert.match(firstAttemptSource,/businessType='SHOPEE' AND shipmentCode IN/);
 assert.match(firstAttemptSource,/businessType='WHPP' AND shipmentCode IN/);
@@ -28,6 +37,8 @@ assert.match(firstAttemptSource,/FROM final_rows WHERE reportDate BETWEEN \? AND
 assert.doesNotMatch(firstAttemptSource,/FROM track_events WHERE UPPER\(TRIM\(shipmentCode\)\) IN/,'V295 track-event reads must not disable shipment indexes');
 assert.doesNotMatch(firstAttemptSource,/FROM business_track_events[\s\S]{0,120}UPPER\(TRIM\(shipmentCode\)\) IN/,'V295 business event reads must not disable shipment indexes');
 assert.doesNotMatch(firstAttemptSource,/FROM (?:business_)?final_rows[\s\S]{0,160}UPPER\(TRIM\(shipmentCode\)\) IN/,'V295 final-row reads must not disable shipment indexes');
+assert.doesNotMatch(firstAttemptSource,/unified_import_rows[\s\S]{0,420}UPPER\(TRIM\((?:u\.)?(?:businessType|shipmentCode)\)\)/,'V374 unified membership reads must not disable normalized membership indexes');
+assert.doesNotMatch(firstAttemptSource,/business_daily_parse_rows[\s\S]{0,700}UPPER\((?:TRIM\()?\s*(?:p\.)?(?:businessType|shipmentCode)/,'V374 WHPP membership reads must not disable normalized membership indexes');
 
 const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v322-'));
 process.env.DATA_DIR=tempRoot;process.env.DB_FILE=path.join(tempRoot,'v322.db');process.env.ACCESS_MODE='LOCAL';process.env.SQLITE_MMAP_BYTES='0';process.env.SQLITE_CACHE_KIB='8192';process.env.NODE_ENV='test';process.env.CE_QC_DISABLE_V246_TRACKING='1';
@@ -68,4 +79,4 @@ assert.equal(range.queryMode,'V322_SINGLE_DAY_DASHBOARD_CACHE_ONLY');assert.equa
 started=performance.now();const progress=readV322RunProgress('CCSL',db),progressMs=performance.now()-started;
 assert.equal(progress.progressRule,'V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN');assert.equal(progress.dailyTotal,4);assert.ok(progressMs<200,`tiny run progress must stay sub-200ms in fixture, got ${progressMs.toFixed(1)}ms`);
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V344/V322/V335] runtime availability smoke passed · V295 shipment lookups remain index-friendly · exact 1/1 WHPP standard membership + six unified businesses = 7 · single-day period=${rangeMs.toFixed(1)}ms · tiny progress=${progressMs.toFixed(1)}ms · no large fact-table scans`);
+console.log(`[V374/V322/V335] runtime availability smoke passed · V295 membership + shipment lookups remain index-friendly · exact 1/1 WHPP standard membership + six unified businesses = 7 · single-day period=${rangeMs.toFixed(1)}ms · tiny progress=${progressMs.toFixed(1)}ms · no large fact-table scans`);
