@@ -84,8 +84,10 @@ assert.match(importTruth,/2026-08-31-v388-immutable-source-metadata-recovery-v2/
 assert.match(importTruth,/routePath==='\/api\/import\/unified-daily-report'/,'the exact V387 import POST route must be intercepted');
 assert.match(importTruth,/readV375LatestUnifiedImport\(\)/,'POST hydration must reuse the same exact snapshot reader as bootstrap/latest');
 assert.match(importTruth,/V266_EXACT_SHA_SOURCE_UPLOAD/,'legacy metadata recovery must be bound to the exact immutable source hash');
-assert.match(runtimeTruth,/currentOpen: mainQueue \+ historicalOpen/,'running current queue must include historical OPEN');
-assert.match(runtimeTruth,/currentOpen: todayOpen \+ historicalOpen/,'completed current queue must include historical OPEN');
+assert.match(runtimeTruth,/const todayOpen = one\("SELECT COUNT\(\*\) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate=\?"/,'V161 current-day queue must read persisted OPEN truth instead of the original import total');
+assert.match(runtimeTruth,/currentOpen: todayOpen \+ historicalOpen/,'V161 current queue must always equal current-day OPEN plus historical OPEN');
+assert.doesNotMatch(runtimeTruth,/currentOpen: mainQueue \+ historicalOpen/,'V161 must never present the full daily membership as current OPEN after rows have closed');
+assert.match(runtimeTruth,/runtimeTruth: 'TODAY_OPEN_PLUS_HISTORICAL_OPEN'/,'V161 must expose one queue contract for IMPORTED and COMPLETED states');
 assert.match(runtimeTruth,/out\.PP \+ out\.PV === 0 && base\.PP \+ base\.PV > 0/,'V161 must preserve stronger recovered PP/PV metadata instead of overwriting it with blank legacy row evidence');
 assert.match(runtimeTruth,/batchDateCandidates\.length[\s\S]*base\.dateCandidates/,'V161 must preserve recovered date candidates when legacy batch dateCandidatesJson is empty');
 assert.match(historyTruth,/carryOpenScope:'SOURCE_REPORT_DATE_BETWEEN_EXPORT_RANGE'/,'history backend must publish selected export-range OPEN scope');
@@ -94,4 +96,4 @@ assert.match(historyUi,/选定导出区间仍OPEN/,'history UI must label export
 execFileSync(process.execPath,['scripts/v384-import-post-processing-proof-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v385-v67-detail-owner-release-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v388-import-carryover-metadata-truth-smoke.mjs'],{stdio:'inherit'});
-console.log('[V388/V385/V384/V383/V382/V381] export + import hydration + archived metadata + carryover queue + CCSL proof + detail-owner release smoke passed · V381 saved-first 50x4 strict START->POD · V388 currentOpen=today+historical and export-range OPEN scope is explicit');
+console.log('[V388/V385/V384/V383/V382/V381] export + import hydration + archived metadata + carryover queue + CCSL proof + detail-owner release smoke passed · V381 saved-first 50x4 strict START->POD · V388 currentOpen=todayOPEN+historicalOPEN from persisted queue facts and export-range OPEN scope is explicit');
