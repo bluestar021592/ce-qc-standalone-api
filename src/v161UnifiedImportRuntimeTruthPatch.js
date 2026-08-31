@@ -135,6 +135,10 @@ function normalizeImport(base = {}) {
   const meta = snapshotMeta(batch);
   const currentImportTotal = TYPES.reduce((sum, type) => sum + num(counts[type]), 0);
   const whppIncomplete = truth.whpp.source === 'WHPP_STANDARD_DAILY_INCOMPLETE_FAIL_CLOSED';
+  const batchDateCandidates = safeJson(batch.dateCandidatesJson, []);
+  const dateCandidates = Array.isArray(batchDateCandidates) && batchDateCandidates.length
+    ? batchDateCandidates
+    : (Array.isArray(base.dateCandidates) ? base.dateCandidates : []);
   const summary = {
     ...safeJson(batch.summaryJson, {}),
     ...(base.summary || {}),
@@ -157,7 +161,7 @@ function normalizeImport(base = {}) {
     reportDate: batch.reportDate,
     sourceName: batch.sourceName || base.sourceName || '',
     dateDetectionSource: batch.dateDetectionSource || base.dateDetectionSource || '数据库批次',
-    dateCandidates: safeJson(batch.dateCandidatesJson, base.dateCandidates || []),
+    dateCandidates,
     dateWasManuallyCorrected: Boolean(batch.dateWasManuallyCorrected),
     classificationCounts: counts,
     regionCounts: regions,
