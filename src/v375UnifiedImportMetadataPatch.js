@@ -4,10 +4,11 @@ import { getDb } from './db.js';
 export const V375_UNIFIED_IMPORT_METADATA_ID='2026-08-31-v376-bootstrap-latest-snapshot-metadata-v2';
 export const V377_UNIFIED_IMPORT_STATUS_TRUTH_ID='2026-08-31-v377-import-metadata-carryover-status-truth-v1';
 export const V384_UNIFIED_IMPORT_POST_TRUTH_ID='2026-08-31-v384-import-post-hydrated-snapshot-truth-v1';
+export const V387_UNIFIED_IMPORT_POST_OWNER_ID='2026-08-31-v387-final-unified-import-post-owner-v1';
 
 const BUSINESS_TYPES=Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
+const POST_OWNER=Symbol.for('ce-qc.v387-unified-import-post-owner');
 const originalGet=express.application.get;
-const originalPost=express.application.post;
 
 function json(value,fallback){
   try{return value?JSON.parse(value):fallback;}catch{return fallback;}
@@ -85,8 +86,22 @@ export function readV375LatestUnifiedImport(db=getDb()){
     classificationCounts,sourceReconciliation:sourceRecon,
     dateDetectionSource,dateCandidates,dateConflict:Boolean(payload.dateConflict??(dateCandidates.length>1)),dateWasManuallyCorrected:Boolean(row.dateWasManuallyCorrected||payload.dateWasManuallyCorrected),
     containerFormat,regionCounts,summary,sheetDiagnostics:Array.isArray(payload.sheetDiagnostics)?payload.sheetDiagnostics:[],warnings:json(row.warningsJson,[]),
-    carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID,statusTruthId:V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,postTruthId:V384_UNIFIED_IMPORT_POST_TRUTH_ID
+    carryover:carryoverSummary(db,row.reportDate),duplicateFile:false,snapshotStatus:String(snapshot.status||'IMPORTED'),metadataHydrationId:V375_UNIFIED_IMPORT_METADATA_ID,statusTruthId:V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,postTruthId:V384_UNIFIED_IMPORT_POST_TRUTH_ID,postOwnerRevision:V387_UNIFIED_IMPORT_POST_OWNER_ID
   };
+}
+
+export function hydrateV384UnifiedImportPostPayload(payload,db=getDb()){
+  if(!payload||typeof payload!=='object'||payload.ok!==true||payload.importCommitted!==true)return payload;
+  const hydrated=readV375LatestUnifiedImport(db);
+  const responseDate=String(payload.reportDate||'').trim();
+  if(!hydrated||(responseDate&&String(hydrated.reportDate||'')!==responseDate))return payload;
+  const state=payload.state,shopeeState=payload.shopeeState,whppState=payload.whppState,processingQueue=payload.processingQueue;
+  const next={...payload,...hydrated,ok:true,importCommitted:true,postOwnerRevision:V387_UNIFIED_IMPORT_POST_OWNER_ID};
+  if(state!==undefined)next.state=state;
+  if(shopeeState!==undefined)next.shopeeState=shopeeState;
+  if(whppState!==undefined)next.whppState=whppState;
+  if(processingQueue!==undefined)next.processingQueue=processingQueue;
+  return next;
 }
 
 function latestHandler(req,res){
@@ -123,28 +138,21 @@ function wrapBootstrapHandler(handler){
 }
 
 function wrapUnifiedImportPostHandler(handler){
-  return async function v384HydratedUnifiedImportPost(req,res,next){
+  return async function v387HydratedUnifiedImportPost(req,res,next){
     const originalJson=res.json.bind(res);
     let restored=false;
-    res.json=function v384ImportPostJson(payload){
+    res.json=function v387ImportPostJson(payload){
       if(restored)return originalJson(payload);
       restored=true;
       try{
-        if(payload&&typeof payload==='object'&&payload.ok===true&&payload.importCommitted===true){
-          const hydrated=readV375LatestUnifiedImport();
-          const responseDate=String(payload.reportDate||'').trim();
-          if(hydrated&&(!responseDate||String(hydrated.reportDate||'')===responseDate)){
-            const state=payload.state,shopeeState=payload.shopeeState,whppState=payload.whppState,processingQueue=payload.processingQueue;
-            payload={...payload,...hydrated,ok:true,importCommitted:true};
-            if(state!==undefined)payload.state=state;
-            if(shopeeState!==undefined)payload.shopeeState=shopeeState;
-            if(whppState!==undefined)payload.whppState=whppState;
-            if(processingQueue!==undefined)payload.processingQueue=processingQueue;
-            res.setHeader('X-CE-QC-V384-Import-Post-Truth',V384_UNIFIED_IMPORT_POST_TRUTH_ID);
-          }
+        const hydrated=hydrateV384UnifiedImportPostPayload(payload);
+        if(hydrated!==payload){
+          payload=hydrated;
+          res.setHeader('X-CE-QC-V384-Import-Post-Truth',V384_UNIFIED_IMPORT_POST_TRUTH_ID);
+          res.setHeader('X-CE-QC-V387-Import-Post-Owner',V387_UNIFIED_IMPORT_POST_OWNER_ID);
         }
       }catch(error){
-        console.warn('[CE-QC][V384_IMPORT_POST_METADATA] hydration skipped:',error?.message||error);
+        console.warn('[CE-QC][V387_IMPORT_POST_METADATA] hydration skipped:',error?.message||error);
       }
       return originalJson(payload);
     };
@@ -165,16 +173,24 @@ express.application.get=function v377UnifiedImportMetadataGet(route,...handlers)
   return originalGet.call(this,route,...handlers);
 };
 
-express.application.post=function v384UnifiedImportMetadataPost(route,...handlers){
-  const path=String(route||'');
-  if(path==='/api/import/unified-daily-report'&&handlers.length){
-    const nextHandlers=[...handlers];
-    const index=nextHandlers.length-1;
-    if(typeof nextHandlers[index]==='function')nextHandlers[index]=wrapUnifiedImportPostHandler(nextHandlers[index]);
-    return originalPost.call(this,route,...nextHandlers);
-  }
-  return originalPost.call(this,route,...handlers);
-};
+export function installV387UnifiedImportPostOwner(){
+  const previousPost=express.application.post;
+  if(typeof previousPost!=='function')return{installed:false,active:false,revision:V387_UNIFIED_IMPORT_POST_OWNER_ID,reason:'EXPRESS_POST_MISSING'};
+  if(previousPost[POST_OWNER])return{installed:false,active:true,revision:V387_UNIFIED_IMPORT_POST_OWNER_ID,reason:'ALREADY_FINAL_OWNER'};
+  const wrappedPost=function v387UnifiedImportMetadataPost(route,...handlers){
+    const path=String(route||'');
+    if(path==='/api/import/unified-daily-report'&&handlers.length){
+      const nextHandlers=[...handlers];
+      const index=nextHandlers.length-1;
+      if(typeof nextHandlers[index]==='function')nextHandlers[index]=wrapUnifiedImportPostHandler(nextHandlers[index]);
+      return previousPost.call(this,route,...nextHandlers);
+    }
+    return previousPost.call(this,route,...handlers);
+  };
+  Object.defineProperty(wrappedPost,POST_OWNER,{value:true});
+  express.application.post=wrappedPost;
+  return{installed:true,active:true,revision:V387_UNIFIED_IMPORT_POST_OWNER_ID,previousOwner:previousPost.name||'anonymous'};
+}
 
 console.info('[CE-QC][V375_IMPORT_METADATA]',V375_UNIFIED_IMPORT_METADATA_ID,V377_UNIFIED_IMPORT_STATUS_TRUTH_ID,'bootstrap + unified-latest read one exact latest VALID snapshot; processing queue is always open-today + open-historical; no database writes or schema changes.');
-console.info('[CE-QC][V384_IMPORT_POST_TRUTH]',V384_UNIFIED_IMPORT_POST_TRUTH_ID,'successful unified-daily-report POST responses are hydrated from the same exact VALID snapshot before the browser can render stale zero metadata.');
+console.info('[CE-QC][V384_IMPORT_POST_TRUTH]',V384_UNIFIED_IMPORT_POST_TRUTH_ID,'successful unified-daily-report POST payload hydration is exported as one shared truth function; V387 explicitly installs the final production route owner after earlier import wrappers.');
