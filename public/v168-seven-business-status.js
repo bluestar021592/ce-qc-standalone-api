@@ -4,6 +4,7 @@
   const VERSION = '2026-08-27-v333-canonical-seven-business-owner-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-status-only-v1';
   const COMPLETION_SYNC_REVISION = '2026-08-30-v360-verified-whpp-status-sync-v1';
+  const FAILURE_DETAIL_REVISION = '2026-08-31-v394-visible-shopee-failure-detail-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   const RUN_VERIFIED_GRACE_MS = 10 * 60 * 1000;
   let lastTruth = null;
@@ -13,6 +14,9 @@
   function normalizeDate(value) {
     const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
     return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+  }
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
   }
 
   function targetDate() {
@@ -74,17 +78,28 @@
   function stageFromShopeeRecovery(payload, target) {
     const date = normalizeDate(payload?.reportDate || target);
     const lockStatus = String(payload?.lock?.status || '').toLowerCase();
+    const diagnostic = payload?.diagnostic || {};
     let state = 'pending';
     if (date === target && payload?.complete === true) state = 'done';
     else if (date === target && lockStatus === 'running') state = 'running';
     else if (date === target && lockStatus === 'paused') state = 'paused';
     else if (date === target && lockStatus === 'failed') state = 'failed';
+    const detail = payload?.complete === true
+      ? 'VALID + COMPLETED 正式快照'
+      : String(
+          diagnostic.errorMessage
+          || diagnostic.ceMsg
+          || payload?.lock?.errorMessage
+          || payload?.reason
+          || ''
+        );
     return {
       key: 'SHOPEE', label: 'SHOPEE CN/VN', state, date,
       complete: payload?.complete === true,
       runStatus: lockStatus,
       snapshotId: String(payload?.snapshotId || ''),
-      details: payload?.complete === true ? 'VALID + COMPLETED 正式快照' : String(payload?.reason || '')
+      details: detail,
+      diagnostic
     };
   }
 
@@ -152,6 +167,17 @@
     return 'muted';
   }
 
+  function formatFailureDetail(stage) {
+    const detail = String(stage?.details || stage?.error || '').trim();
+    const diagnostic = stage?.diagnostic || {};
+    const meta = [];
+    if (Number(diagnostic.httpStatus || 0)) meta.push(`HTTP ${Number(diagnostic.httpStatus)}`);
+    if (String(diagnostic.ceCode || '').trim()) meta.push(`CE code ${String(diagnostic.ceCode).trim()}`);
+    if (String(diagnostic.apiName || '').trim()) meta.push(String(diagnostic.apiName).trim());
+    if (Number(diagnostic.shipmentCount || 0)) meta.push(`预检${Number(diagnostic.shipmentCount)}票`);
+    return [detail, meta.join(' · ')].filter(Boolean).join('｜');
+  }
+
   function ensureSummaryNode() {
     const status = document.getElementById('ccslRunStatus');
     if (!status?.parentElement) return null;
@@ -174,15 +200,21 @@
     const node = ensureSummaryNode();
     if (!node || !truth) return;
     const stages = truth.stages || [];
+    const blockers = stages
+      .filter(stage => ['failed','paused','error'].includes(stage.state))
+      .map(stage => ({ stage, detail: formatFailureDetail(stage) }))
+      .filter(item => item.detail);
     node.dataset.v333Owner = 'canonical';
     node.dataset.executionOwner = 'V67';
     node.dataset.completionSyncRevision = COMPLETION_SYNC_REVISION;
+    node.dataset.failureDetailRevision = FAILURE_DETAIL_REVISION;
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
-        ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${stage.details || stage.error || ''}">${stageText(stage)}</span>`).join('')}
+        ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${esc(formatFailureDetail(stage) || stage.details || stage.error || '')}">${esc(stageText(stage))}</span>`).join('')}
         <span class="status-pill ${truth.complete ? 'success' : 'muted'}">${truth.complete ? '七业务已完成' : '尚未全部完成'}</span>
-      </div>`;
+      </div>
+      ${blockers.length ? `<div data-testid="seven-business-failure-detail" style="margin-top:9px;padding:9px 11px;border-radius:7px;background:#fff3f3;border:1px solid #ffd0d0;color:#9f1c1c;font-size:13px;line-height:1.55">${blockers.map(item => `<div><strong>${esc(item.stage.label)}：</strong>${esc(item.detail)}</div>`).join('')}</div>` : ''}`;
 
     const start = document.querySelector('[data-testid="global-auto-process"]');
     const resume = document.querySelector('button[onclick="resumeUnified()"]');
@@ -292,12 +324,13 @@
       version: VERSION,
       architecture: ARCHITECTURE,
       completionSyncRevision: COMPLETION_SYNC_REVISION,
+      failureDetailRevision: FAILURE_DETAIL_REVISION,
       statusOnly: true,
       authoritativeRunner: 'V67',
       refresh: refreshTruth,
       get lastTruth() { return lastTruth; }
     };
-    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, COMPLETION_SYNC_REVISION, 'V168 only renders canonical CCSL/SHOPEE/WHPP status; it never wraps or starts unified processing. A same-page V67 verified completion may bridge the short summary-read lag only while CCSL+SHOPEE remain canonically complete for the same date.');
+    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, COMPLETION_SYNC_REVISION, FAILURE_DETAIL_REVISION, 'V168 only renders canonical CCSL/SHOPEE/WHPP status; failed/paused stages expose the persisted sanitized backend reason inline; it never wraps or starts unified processing.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
