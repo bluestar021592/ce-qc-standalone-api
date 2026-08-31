@@ -35,7 +35,8 @@ const htmlOwner=fs.readFileSync(new URL('../src/v44WhppUiPatch.js',import.meta.u
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 
 assert.match(backend,/2026-08-27-v333-selected-date-ccsl-recovery-v1/,'V317 backend must expose selected-date V333 truth');
-assert.match(backend,/const requested=String\(reportDate\|\|''\)\.trim\(\);[\s\S]*const date=requested\|\|canonical/,'explicit selected reportDate must win over latest/current fallback');
+assert.match(backend,/requested=String\(reportDate\|\|''\)\.trim\(\)/,'V317 must parse the explicit selected reportDate');
+assert.match(backend,/date=requested\|\|canonical/,'explicit selected reportDate must win over latest/current fallback regardless of declaration formatting');
 assert.match(backend,/unified_import_batches WHERE reportDate=\? AND status='VALID'/,'selected date must still require a real VALID unified import');
 assert.match(backend,/businessType IN \('CE','CEAF','TBKH','ALI1688'\)/,'CCSL membership must cover exactly the four CCSL-routed boards');
 assert.match(backend,/sourceTotal>0&&hasDaily\?latestValidSnapshot/,'zero-ticket days must not require an empty export snapshot');
@@ -153,4 +154,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · exact stale CCSL run pointers may retire while facts/audit remain immutable · V67 foreground + V134 guarded backend continuity cannot reopen finalized WHPP · scan=350 · trajectory=50');
+console.log('[V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · explicit date precedence gate is formatting-independent · exact stale CCSL run pointers may retire while facts/audit remain immutable · V67 foreground + V134 guarded backend continuity cannot reopen finalized WHPP · scan=350 · trajectory=50');
