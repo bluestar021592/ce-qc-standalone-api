@@ -4,6 +4,7 @@ import { createOrRecoverRun, getRunStatus, updateRunLock } from './store.js';
 import { chooseCcslReportDate, ccslRecoveryDecision, V317_CCSL_RECOVERY_POLICY_ID } from './v317CcslRecoveryPolicy.js';
 
 export const V317_CCSL_INCOMPLETE_RECOVERY_ID='2026-08-27-v333-selected-date-ccsl-recovery-v1';
+export const V377_CCSL_IMPORT_LIFECYCLE_ID='2026-08-31-v377-latest-valid-import-lifecycle-boundary-v1';
 const V317_EXPLICIT_REPORT_DATE_HINT_REVISION='2026-08-29-v359-selected-report-date-runtime-hint-v1';
 const EXPLICIT_REPORT_DATE_HINT_TTL_MS=60_000;
 const originalPost=express.application.post;
@@ -24,17 +25,32 @@ function resolveDate(db){
   return chooseCcslReportDate({latestValidUnified:latestValidUnifiedDate(db),currentState:currentStateDate(db),lastProcessed:lastProcessedDate(db),latestDaily:latestDailyDate(db)});
 }
 function latestValidUnifiedBatch(db,reportDate){
-  return db.prepare("SELECT batchId,snapshotId,reportDate FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(reportDate)||null;
+  return db.prepare("SELECT batchId,snapshotId,reportDate,createdAt FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(reportDate)||null;
 }
-function latestValidSnapshot(db,reportDate,runId=''){
+function timestampAtOrAfter(value,boundary){
+  const limit=Date.parse(String(boundary||''));
+  if(!Number.isFinite(limit))return true;
+  const actual=Date.parse(String(value||''));
+  return Number.isFinite(actual)&&actual>=limit;
+}
+function lockForCurrentImport(rawLock,batch){
+  if(!rawLock)return null;
+  const boundary=String(batch?.createdAt||'');
+  if(!boundary)return rawLock;
+  const started=String(rawLock.lockedAt||rawLock.updatedAt||'');
+  return timestampAtOrAfter(started,boundary)?rawLock:null;
+}
+function latestValidSnapshot(db,reportDate,runId='',boundary=''){
   const currentRunId=String(runId||'').trim();
   if(!currentRunId)return null;
-  return db.prepare(`SELECT snapshotId,runId,status,reconciliationStatus,generatedAt
+  const row=db.prepare(`SELECT snapshotId,runId,status,reconciliationStatus,generatedAt
     FROM export_snapshots
     WHERE reportDate=? AND runId=? AND snapshotType='dashboard'
       AND COALESCE(status,'VALID')='VALID'
       AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
     ORDER BY id DESC LIMIT 1`).get(reportDate,currentRunId)||null;
+  if(!row)return null;
+  return timestampAtOrAfter(row.generatedAt,boundary)?row:null;
 }
 function ccslMemberCount(db,reportDate,batch=null){
   const resolved=batch||latestValidUnifiedBatch(db,reportDate);
@@ -69,19 +85,22 @@ export function inspectV317CcslRecovery({db=getDb(),reportDate=''}={}){
   const canonical=resolveDate(db);
   const requested=String(reportDate||'').trim();
   const date=requested||canonical;
-  if(!date)return{ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,reportDate:'',dailyExists:false,sourceTotal:0,complete:false,paused:false,needsResume:false,action:'NO_DAILY',reason:'NO_CCSL_DAILY'};
+  if(!date)return{ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,reportDate:'',dailyExists:false,sourceTotal:0,complete:false,paused:false,needsResume:false,action:'NO_DAILY',reason:'NO_CCSL_DAILY'};
   const validBatch=latestValidUnifiedBatch(db,date);
   const sourceTotal=ccslMemberCount(db,date,validBatch);
   const hasDaily=Boolean(validBatch)||sourceTotal>0||Boolean(db.prepare('SELECT 1 FROM daily_reports WHERE reportDate=? LIMIT 1').get(date));
-  const lock=sourceTotal>0&&hasDaily?getRunStatus(date).lock:null;
-  const snapshot=sourceTotal>0&&hasDaily?latestValidSnapshot(db,date,lock?.runId||''):null;
+  const rawLock=sourceTotal>0&&hasDaily?getRunStatus(date).lock:null;
+  const lock=lockForCurrentImport(rawLock,validBatch);
+  const staleLockIgnored=Boolean(rawLock&&!lock&&validBatch?.createdAt);
+  const snapshot=sourceTotal>0&&hasDaily?latestValidSnapshot(db,date,lock?.runId||'',validBatch?.createdAt||''):null;
   const decision=ccslRecoveryDecision({hasDaily,complete:Boolean(snapshot),lockStatus:lock?.status||'',validUnified:Boolean(validBatch),sourceTotal});
   return{
-    ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,
+    ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,
     reportDate:date,dailyExists:hasDaily,validUnified:Boolean(validBatch),sourceTotal,complete:decision.complete,paused:decision.paused,
     needsResume:decision.needsResume,action:decision.action,zeroTicketDay:Boolean(decision.zeroTicketDay),
-    reason:decision.zeroTicketDay?'VALID_UNIFIED_ZERO_CCSL_TICKETS':'',snapshotId:snapshot?.snapshotId||'',
-    lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),updatedAt:lock.updatedAt||''}:null
+    reason:decision.zeroTicketDay?'VALID_UNIFIED_ZERO_CCSL_TICKETS':(staleLockIgnored?'STALE_PRE_IMPORT_CCSL_RUN_IGNORED':''),snapshotId:snapshot?.snapshotId||'',
+    lifecycleBoundary:String(validBatch?.createdAt||''),staleLockIgnored,
+    lock:lock?{runId:lock.runId,status:lock.status,currentStage:lock.currentStage,batchIndex:Number(lock.batchIndex||0),totalBatches:Number(lock.totalBatches||0),lockedAt:lock.lockedAt||'',updatedAt:lock.updatedAt||''}:null
   };
 }
 
@@ -120,5 +139,5 @@ express.application.post=function v317CcslIncompleteRecoveryPost(route,...handle
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,'explicit selected reportDate wins for UI truth; completion snapshots are bound to the current runId so retained same-date audit snapshots cannot close a fresh reupload lifecycle.');
+console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,V377_CCSL_IMPORT_LIFECYCLE_ID,'selected-date status ignores runs and completion snapshots that began before the newest VALID unified import lifecycle.');
 console.info('[CE-QC][V359_SELECTED_REPORT_DATE_HINT]',V317_EXPLICIT_REPORT_DATE_HINT_REVISION,'explicit browser status reads keep a short-lived in-memory selected-date hint so backend WHPP continuity can resume the exact visible date without scanning or guessing historical dates.');
