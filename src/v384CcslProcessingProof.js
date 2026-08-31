@@ -85,11 +85,10 @@ export function readV384CcslProcessingProof(db,{reportDate='',snapshotId='',boun
   const date=text(reportDate),sid=text(snapshotId),life=text(boundary);
   if(!date||!sid)return{id:V384_CCSL_PROCESSING_PROOF_ID,source:0,covered:0,missing:0,complete:false,reasons:{INVALID_SCOPE:1},missingBills:[],missingReasons:[],lifecycleBoundary:life};
   const proofSql=persistedProofSql(life);
-  const params=[sid,date];
-  if(life)params.push(life,life);
+  const countParams=life?[life,life,sid,date]:[sid,date];
   const row=db.prepare(`SELECT COUNT(*) source,COALESCE(SUM(CASE WHEN ${proofSql} THEN 1 ELSE 0 END),0) covered
     FROM unified_import_rows u
-    WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')`).get(...params)||{};
+    WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')`).get(...countParams)||{};
   const source=Number(row.source||0),covered=Number(row.covered||0),missing=Math.max(0,source-covered);
   let missingBills=[];
   if(missing>0){
