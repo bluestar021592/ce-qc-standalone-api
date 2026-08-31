@@ -1,12 +1,13 @@
 import express from 'express';
 import { CEClient } from './ceClient.js';
+import { getDb } from './db.js';
 import { runWhppPipeline } from './whppPipeline.js';
 import { WHPP, loadWhppState, saveWhppState, finalizeWhppState } from './whppStore.js';
 
 const PATCH_ID = '2026-08-14-v134-whpp-run-supervisor-v1';
 const BACKEND_CONTINUITY_REVISION = '2026-08-29-v357-whpp-backend-final-stage-continuity-v1';
 const SELECTED_DATE_CONTINUITY_REVISION = '2026-08-29-v359-selected-date-whpp-backend-continuity-v1';
-const START_PATHS = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
+export const V378_WHPP_COMPLETION_LOCK_REVISION = '2026-08-31-v378-whpp-finalized-lifecycle-monotonic-v1';
 const PROGRESS_PATH = '/api/whpp/progress';
 const WHPP_REQUEST_TIMEOUT_MS = Math.max(8_000, Math.min(45_000, Number(process.env.WHPP_REQUEST_TIMEOUT_MS || 20_000)));
 const AUTO_RESUME_POLL_MS = 5_000;
@@ -26,6 +27,10 @@ function nowIso() { return new Date().toISOString(); }
 function dateOnly(value = '') {
   const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+function safeJson(value, fallback = {}) {
+  try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
+  catch { return fallback; }
 }
 function idleRuntime() {
   return {
@@ -71,23 +76,11 @@ function parseProgress(message = '') {
   const text = String(message || '');
   const scan = text.match(/WHPP订单扫描\s+(\d+)-(\d+)\s*\/\s*(\d+)/i);
   if (scan) {
-    const end = Number(scan[2] || 0);
-    const total = Number(scan[3] || 0);
-    return {
-      phase: text,
-      batchIndex: end,
-      totalBatches: total,
-      progressKind: 'SCAN_WAYBILLS'
-    };
+    return { phase: text, batchIndex: Number(scan[2] || 0), totalBatches: Number(scan[3] || 0), progressKind: 'SCAN_WAYBILLS' };
   }
   const batch = text.match(/(WHPP[^：]*查询)\s+(\d+)\/(\d+)/i);
   if (batch) {
-    return {
-      phase: text,
-      batchIndex: Number(batch[2] || 0),
-      totalBatches: Number(batch[3] || 0),
-      progressKind: 'API_BATCHES'
-    };
+    return { phase: text, batchIndex: Number(batch[2] || 0), totalBatches: Number(batch[3] || 0), progressKind: 'API_BATCHES' };
   }
   return { phase: text };
 }
@@ -110,6 +103,35 @@ function publicRuntime(value = runtime) {
 function isAuthFailure(error) {
   return /401|403|未授权|unauthorized|登录.*失效|token/i.test(`${error?.ceStatus || ''} ${error?.ceCode || ''} ${error?.message || ''}`);
 }
+
+export function inspectV378WhppCompletionLock(reportDate = '', state = null, db = getDb()) {
+  const date = dateOnly(reportDate || state?.reportDate || '');
+  if (!date) return { locked: false, reportDate: '', reason: 'REPORT_DATE_MISSING', revision: V378_WHPP_COMPLETION_LOCK_REVISION };
+  const daily = db.prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);
+  if (!daily) return { locked: false, reportDate: date, reason: 'NO_NORMALIZED_DAILY', revision: V378_WHPP_COMPLETION_LOCK_REVISION };
+  const summary = safeJson(daily.summaryJson, {});
+  const status = String(summary.snapshotStatus || summary.reconciliationStatus || '').toUpperCase();
+  const finalizedSnapshotId = String(summary.finalizedSnapshotId || '').trim();
+  const sourceSnapshotId = String(summary.snapshotId || summary.batchId || '').trim();
+  const stateSourceSnapshotId = String(state?.sourceSnapshotId || state?.batchId || '').trim();
+  const sourceMatches = !stateSourceSnapshotId || !sourceSnapshotId || stateSourceSnapshotId === sourceSnapshotId;
+  const finalized = Boolean(summary.completed === true && COMPLETE_SNAPSHOT.has(status) && finalizedSnapshotId);
+  return {
+    locked: finalized,
+    finalized,
+    sourceMatches,
+    reportDate: date,
+    total: Number(daily.totalCount || 0),
+    sourceSnapshotId,
+    stateSourceSnapshotId,
+    finalizedSnapshotId,
+    snapshotStatus: status,
+    finalizedAt: String(summary.finalizedAt || ''),
+    reason: finalized ? 'CURRENT_DAILY_ALREADY_FINALIZED' : 'CURRENT_DAILY_NOT_FINALIZED',
+    revision: V378_WHPP_COMPLETION_LOCK_REVISION
+  };
+}
+
 function persistFailure(error, log) {
   try {
     const current = loadWhppState();
@@ -136,6 +158,14 @@ function launchWhpp(mode = 'start') {
     error.code = 'WHPP_REPORT_MISSING';
     throw error;
   }
+  const completionLock = inspectV378WhppCompletionLock(state.reportDate, state);
+  if (completionLock.locked) {
+    const error = new Error('WHPP本土当前日报已正式完成；同一日报生命周期禁止重复启动。');
+    error.code = 'WHPP_ALREADY_FINALIZED';
+    error.completionLock = completionLock;
+    throw error;
+  }
+
   const client = new CEClient();
   if (client?.http?.defaults) client.http.defaults.timeout = WHPP_REQUEST_TIMEOUT_MS;
   const log = [];
@@ -159,14 +189,7 @@ function launchWhpp(mode = 'start') {
         const text = String(message || '');
         log.push({ at: nowIso(), message: text });
         if (log.length > LOG_LIMIT) log.shift();
-        const parsed = parseProgress(text);
-        runtime = {
-          ...runtime,
-          ...parsed,
-          active: true,
-          lastMessage: text,
-          heartbeatAt: nowIso()
-        };
+        runtime = { ...runtime, ...parseProgress(text), active: true, lastMessage: text, heartbeatAt: nowIso() };
       },
       onCheckpoint: async current => {
         const processing = current.processing || {};
@@ -235,6 +258,9 @@ async function maybeAutoResumeWhpp(reason = 'backend-watch') {
     const shopee = shopeeModule.inspectV311ShopeeRecovery({ reportDate });
     if (shopee?.complete !== true) return false;
 
+    const persistedCompletion = inspectV378WhppCompletionLock(reportDate, loadWhppState());
+    if (persistedCompletion.locked) return false;
+
     const before = summaryModule.inspectV132WhppFastSummary(reportDate);
     const beforeStatus = String(before?.snapshotStatus || before?.state?.snapshotStatus || '').toUpperCase();
     if (before?.completed === true || COMPLETE_SNAPSHOT.has(beforeStatus)) return false;
@@ -249,6 +275,8 @@ async function maybeAutoResumeWhpp(reason = 'backend-watch') {
     const afterRecovery = summaryModule.inspectV132WhppFastSummary(reportDate);
     const afterStatus = String(afterRecovery?.snapshotStatus || afterRecovery?.state?.snapshotStatus || '').toUpperCase();
     if (afterRecovery?.completed === true || COMPLETE_SNAPSHOT.has(afterStatus)) return false;
+    const afterPersistedCompletion = inspectV378WhppCompletionLock(reportDate, loadWhppState());
+    if (afterPersistedCompletion.locked) return false;
 
     lastAutoResumeKey = key;
     lastAutoResumeAt = now;
@@ -256,6 +284,7 @@ async function maybeAutoResumeWhpp(reason = 'backend-watch') {
     console.log('[CE-QC][V357_WHPP_BACKEND_CONTINUITY]', JSON.stringify({
       revision: BACKEND_CONTINUITY_REVISION,
       selectedDateRevision: SELECTED_DATE_CONTINUITY_REVISION,
+      completionLockRevision: V378_WHPP_COMPLETION_LOCK_REVISION,
       reportDate,
       reportDateSource: hintedDate ? 'VISIBLE_BROWSER_STATUS_HINT' : 'CANONICAL_FALLBACK',
       hintAgeMs: Number(selectedHint?.ageMs || 0),
@@ -268,7 +297,7 @@ async function maybeAutoResumeWhpp(reason = 'backend-watch') {
     }));
     return true;
   } catch (error) {
-    console.warn('[CE-QC][V357_WHPP_BACKEND_CONTINUITY] skipped:', error?.message || error);
+    if (error?.code !== 'WHPP_ALREADY_FINALIZED') console.warn('[CE-QC][V357_WHPP_BACKEND_CONTINUITY] skipped:', error?.message || error);
     return false;
   } finally {
     autoResumeBusy = false;
@@ -307,12 +336,27 @@ function startHandler(mode) {
         patchId: PATCH_ID,
         backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
         selectedDateContinuityRevision: SELECTED_DATE_CONTINUITY_REVISION,
+        completionLockRevision: V378_WHPP_COMPLETION_LOCK_REVISION,
         reportDate: started.reportDate,
         processing: { running: true, phase: started.phase },
         runtime: started,
         message: 'WHPP任务已进入后台执行；页面可继续响应，进度由 /api/whpp/progress 查询。'
       });
     } catch (error) {
+      if (error?.code === 'WHPP_ALREADY_FINALIZED') {
+        return res.status(200).json({
+          ok: true,
+          accepted: false,
+          completed: true,
+          code: 'WHPP_ALREADY_FINALIZED',
+          patchId: PATCH_ID,
+          completionLockRevision: V378_WHPP_COMPLETION_LOCK_REVISION,
+          reportDate: error.completionLock?.reportDate || '',
+          snapshotStatus: error.completionLock?.snapshotStatus || 'COMPLETED',
+          finalizedSnapshotId: error.completionLock?.finalizedSnapshotId || '',
+          message: 'WHPP本土当前日报已经正式完成，本次重复启动已安全忽略。'
+        });
+      }
       const status = error?.code === 'WHPP_REPORT_MISSING' ? 400 : 500;
       return res.status(status).json({ ok: false, code: error?.code || 'WHPP_RUN_START_FAILED', error: error?.message || String(error) });
     }
@@ -351,6 +395,7 @@ function progressHandler(req, res) {
     patchId: PATCH_ID,
     backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
     selectedDateContinuityRevision: SELECTED_DATE_CONTINUITY_REVISION,
+    completionLockRevision: V378_WHPP_COMPLETION_LOCK_REVISION,
     reportDate: state.reportDate,
     processing,
     runtimeActive,
@@ -365,6 +410,7 @@ function progressHandler(req, res) {
       lastAttemptAt: lastAutoResumeAt,
       lastKey: lastAutoResumeKey
     },
+    completionLock: inspectV378WhppCompletionLock(state.reportDate, state),
     summary: state.lastRunSummary,
     log: (state.progressLog || []).slice(-50)
   });
@@ -385,13 +431,16 @@ express.application.listen = function v134WhppRunSupervisorListen(...args) {
 };
 
 export function inspectV134WhppRuntime() {
+  const state = loadWhppState();
   return {
     patchId: PATCH_ID,
     backendContinuityRevision: BACKEND_CONTINUITY_REVISION,
     selectedDateContinuityRevision: SELECTED_DATE_CONTINUITY_REVISION,
+    completionLockRevision: V378_WHPP_COMPLETION_LOCK_REVISION,
     requestTimeoutMs: WHPP_REQUEST_TIMEOUT_MS,
     runtimeActive: Boolean(runtimePromise && runtime.active),
     runtime: publicRuntime(runtimePromise && runtime.active ? runtime : lastRuntime),
+    completionLock: inspectV378WhppCompletionLock(state.reportDate, state),
     backendContinuity: {
       enabled: true,
       pollMs: AUTO_RESUME_POLL_MS,

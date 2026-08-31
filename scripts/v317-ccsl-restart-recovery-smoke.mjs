@@ -42,7 +42,18 @@ assert.match(backend,/sourceTotal>0&&hasDaily\?latestValidSnapshot/,'zero-ticket
 assert.match(backend,/ZERO_CCSL_TICKETS/,'zero-ticket closure must remain observable');
 assert.match(backend,/createOrRecoverRun\(date/,'missing run locks remain checkpoint-recoverable');
 assert.match(backend,/updateRunLock\(date,'failed'/,'finished-without-snapshot remains recoverable');
-assert.doesNotMatch(backend,/DELETE FROM (?:scan_results|track_events|run_checkpoints|unified_import_rows)/,'recovery must never delete saved progress or membership');
+
+// V377 may retire only the exact pre-import lifecycle pointer so a new same-date
+// VALID import gets a new runId. Persisted facts, membership and audit snapshots
+// remain immutable. The old gate incorrectly classified run_checkpoints as facts.
+assert.match(backend,/DELETE FROM run_checkpoints WHERE reportDate=\? AND runId=\?/,
+  'stale CCSL checkpoint retirement must be constrained by date + exact old runId');
+assert.match(backend,/DELETE FROM run_locks WHERE reportDate=\? AND runId=\?/,
+  'stale CCSL lock retirement must be constrained by date + exact old runId');
+assert.doesNotMatch(backend,/DELETE FROM (?:scan_results|track_events|final_rows|daily_reports|daily_parse_rows|unified_import_rows|export_snapshots|pod_locks|carry_bills)/,
+  'CCSL recovery must never delete saved facts, daily membership, POD/carry truth or audit snapshots');
+assert.doesNotMatch(backend,/DELETE FROM run_checkpoints\s+WHERE\s+(?!reportDate=\? AND runId=\?)/,
+  'CCSL checkpoint retirement must never broaden beyond the exact stale lifecycle');
 
 assert.match(progress,/2026-08-27-v331-ccsl-progress-selected-date-zero-ticket-v1/,'V33 selected-date zero-ticket truth must remain active');
 assert.match(progress,/const reportDate = requested[\s\S]*\|\| latestValidReportDate\(db\)/,'V33 explicit page date must win');
@@ -142,4 +153,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · V67 alone executes CCSL→SHOPEE→WHPP · V134 current-run finalize acknowledgement closes only the run that finished after this wait began · V168 is status-only and may bridge only the same verified completion · scan=350 · trajectory=50');
+console.log('[V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · exact stale CCSL run pointers may retire while facts/audit remain immutable · V67 foreground + V134 guarded backend continuity cannot reopen finalized WHPP · scan=350 · trajectory=50');
