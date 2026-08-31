@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb, nowIso } from './db.js';
 import { SHOPEE, createOrRecoverBusinessRun, getBusinessRunStatus, updateBusinessRunLock } from './businessStore.js';
 
-export const V311_SHOPEE_INCOMPLETE_RECOVERY_ID='2026-08-26-v311-reopen-finished-without-snapshot-v1';
+export const V311_SHOPEE_INCOMPLETE_RECOVERY_ID='2026-08-31-v380-auto-prepare-current-shopee-lifecycle-v1';
 export const V375_SHOPEE_ZERO_WORK_ID='2026-08-31-v375-exact-zero-shopee-no-work-v1';
 export const V377_SHOPEE_IMPORT_LIFECYCLE_ID='2026-08-31-v377-latest-valid-import-lifecycle-boundary-v2';
 const originalPost=express.application.post;
@@ -105,9 +105,29 @@ function routeHandler(req,res){
   }catch(error){return res.status(500).json({ok:false,error:`V311 SHOPEE恢复检查失败：${error?.message||error}`});}
 }
 
+function prepareCurrentShopeeLifecycle(req,res,next){
+  try{
+    const requestedDate=String(req.body?.reportDate||'').trim();
+    const status=inspectV311ShopeeRecovery({reportDate:requestedDate});
+    if(status.complete||status.noWork||!status.dailyExists)return next();
+    const prepared=prepareV311ShopeeRecovery({reportDate:status.reportDate,actor:req.user?.username||req.user?.email||'V380_AUTO_PREPARE'});
+    if(prepared.error){
+      return res.status(409).json({ok:false,code:'V311_SHOPEE_PREPARE_FAILED',error:`SHOPEE当前日报运行态准备失败：${prepared.error}`,recovery:prepared});
+    }
+    req.v311ShopeePrepared=prepared;
+    return next();
+  }catch(error){
+    return res.status(500).json({ok:false,code:'V311_SHOPEE_PREPARE_FAILED',error:`SHOPEE当前日报运行态准备失败：${error?.message||error}`});
+  }
+}
+
 express.application.post=function v311ShopeeIncompleteRecoveryPost(route,...handlers){
   if(!installedApps.has(this)){installedApps.add(this);originalPost.call(this,'/api/v311/shopee-recovery',routeHandler);}
+  const routePath=String(route||'');
+  if(routePath==='/api/shopee/run/start'||routePath==='/api/shopee/run/resume'){
+    return originalPost.call(this,route,prepareCurrentShopeeLifecycle,...handlers);
+  }
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,'pre-import run pointers are ignored for status and retired only when preparing the new run; old audit snapshots remain preserved; exact zero-work remains unchanged.');
+console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,V377_SHOPEE_IMPORT_LIFECYCLE_ID,'SHOPEE start/resume now auto-prepare the exact current import lifecycle before execution; stale pre-import run pointers retire only by exact business/date/runId; persisted business facts and audit snapshots remain preserved.');
