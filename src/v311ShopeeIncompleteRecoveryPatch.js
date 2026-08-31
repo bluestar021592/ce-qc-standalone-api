@@ -3,11 +3,14 @@ import { getDb, nowIso } from './db.js';
 import { SHOPEE, createOrRecoverBusinessRun, getBusinessRunStatus, updateBusinessRunLock } from './businessStore.js';
 
 export const V311_SHOPEE_INCOMPLETE_RECOVERY_ID='2026-08-26-v311-reopen-finished-without-snapshot-v1';
+export const V375_SHOPEE_ZERO_WORK_ID='2026-08-31-v375-exact-zero-shopee-no-work-v1';
 const originalPost=express.application.post;
 const installedApps=new WeakSet();
 
 function latestShopeeDate(db){
-  return String(db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType=? ORDER BY reportDate DESC LIMIT 1").get(SHOPEE)?.reportDate||'');
+  const daily=String(db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType=? ORDER BY reportDate DESC LIMIT 1").get(SHOPEE)?.reportDate||'');
+  const unified=String(db.prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate||'');
+  return daily>unified?daily:unified;
 }
 function validSnapshot(db,reportDate,runId=''){
   const currentRunId=String(runId||'').trim();
@@ -17,10 +20,26 @@ function validSnapshot(db,reportDate,runId=''){
 function dailyExists(db,reportDate){
   return Boolean(db.prepare('SELECT 1 FROM business_daily_reports WHERE businessType=? AND reportDate=? LIMIT 1').get(SHOPEE,reportDate));
 }
+function exactUnifiedShopeeMembership(db,reportDate){
+  const batch=db.prepare(`SELECT b.batchId,b.snapshotId,s.status snapshotStatus
+    FROM unified_import_batches b
+    INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.reportDate=? AND b.status='VALID' AND s.status IN ('IMPORTED','COMPLETED')
+    ORDER BY b.createdAt DESC LIMIT 1`).get(reportDate);
+  if(!batch)return null;
+  const rows=db.prepare("SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE batchId=? AND businessType IN ('SHOPEECN','SHOPEEVN') GROUP BY businessType").all(batch.batchId);
+  const membership={SHOPEECN:0,SHOPEEVN:0};
+  for(const row of rows)if(Object.hasOwn(membership,row.businessType))membership[row.businessType]=Number(row.count||0);
+  return{...batch,...membership,total:membership.SHOPEECN+membership.SHOPEEVN};
+}
 
 export function inspectV311ShopeeRecovery({db=getDb(),reportDate=''}={}){
   const date=String(reportDate||'').trim()||latestShopeeDate(db);
   if(!date)return{ok:true,reportDate:'',dailyExists:false,complete:false,needsResume:false,reason:'NO_SHOPEE_DAILY'};
+  const exactMembership=exactUnifiedShopeeMembership(db,date);
+  if(exactMembership&&exactMembership.total===0){
+    return{ok:true,reportDate:date,dailyExists:false,complete:true,needsResume:false,noWork:true,zeroTicketDay:true,reason:'EXACT_ZERO_UNIFIED_SHOPEE_MEMBERSHIP',policyId:V375_SHOPEE_ZERO_WORK_ID,snapshotId:exactMembership.snapshotId,lock:null,membership:{SHOPEECN:0,SHOPEEVN:0,total:0,batchId:exactMembership.batchId,snapshotId:exactMembership.snapshotId}};
+  }
   const hasDaily=dailyExists(db,date);
   const lock=hasDaily?getBusinessRunStatus(SHOPEE,date).lock:null;
   const snapshot=hasDaily?validSnapshot(db,date,lock?.runId||''):null;
@@ -61,4 +80,4 @@ express.application.post=function v311ShopeeIncompleteRecoveryPost(route,...hand
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,'completion snapshots are bound to the current SHOPEE runId; retained same-date audit snapshots remain historical evidence and cannot close a fresh reupload lifecycle.');
+console.info('[CE-QC][V311_SHOPEE_RECOVERY]',V311_SHOPEE_INCOMPLETE_RECOVERY_ID,V375_SHOPEE_ZERO_WORK_ID,'completion snapshots stay bound to the current SHOPEE runId; exact latest VALID unified CN=0/VN=0 is a formal zero-work completion and never opens a remote run.');
