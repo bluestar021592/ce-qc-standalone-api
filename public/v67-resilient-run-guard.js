@@ -5,6 +5,8 @@
   const ARCHITECTURE = '2026-08-29-single-unified-runner-v1';
   const RECOVERY_TRIGGER_REVISION = '2026-08-29-v355-visible-import-watch-v2';
   const FINALIZATION_ACK_REVISION = '2026-08-30-v360-whpp-current-run-finalization-ack-v1';
+  const COMPLETION_STABILITY_REVISION = '2026-08-31-v396-sticky-three-stage-completion-v1';
+  const IMPORT_CARRY_REFRESH_REVISION = '2026-08-31-v396-live-import-carry-refresh-v1';
   // Source-only compatibility token for the stable gate: void execute('resume')
   // Runtime uses the awaited retryable handoff below so a failed WHPP continuation can retry.
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
@@ -139,6 +141,63 @@
     }
   }
 
+  function completionLatchMatches(target) {
+    const latch = global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ || null;
+    return Boolean(latch && normalizeDate(latch.reportDate) === normalizeDate(target) && latch.owner === 'V67');
+  }
+
+  function clearCompletionLatch() {
+    global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = null;
+  }
+
+  async function readWhppCompletionLock(target) {
+    try {
+      const progress = await jsonFetch('/api/whpp/progress');
+      const lock = progress?.completionLock || {};
+      const date = normalizeDate(lock.reportDate || progress?.reportDate || '');
+      if (lock.locked === true && (!target || date === normalizeDate(target))) {
+        return {
+          label: 'WHPP本土',
+          ok: true,
+          verified: true,
+          completed: true,
+          snapshotStatus: String(lock.snapshotStatus || 'COMPLETED').toUpperCase() || 'COMPLETED',
+          reportDate: date || normalizeDate(target),
+          total: Number(lock.total || 0),
+          source: 'V378_PERSISTED_COMPLETION_LOCK',
+          finalizedSnapshotId: String(lock.finalizedSnapshotId || ''),
+          finalizedAt: String(lock.finalizedAt || '')
+        };
+      }
+    } catch {}
+    return null;
+  }
+
+  async function refreshUnifiedImportRuntimeTruth(target) {
+    try {
+      const payload = await jsonFetch('/api/import/unified-latest?compact=1');
+      const next = payload?.import || null;
+      if (!next) return false;
+      const date = normalizeDate(next.reportDate || '');
+      if (target && date && date !== normalizeDate(target)) return false;
+      try { if (typeof unifiedImportState !== 'undefined') unifiedImportState = next; } catch {}
+      try {
+        if (typeof global.renderUnifiedImportResult === 'function') global.renderUnifiedImportResult();
+        else if (typeof renderUnifiedImportResult === 'function') renderUnifiedImportResult();
+      } catch {}
+      return true;
+    } catch (error) {
+      console.warn('[CE-QC][V396_IMPORT_CARRY_REFRESH] skipped:', error?.message || error);
+      return false;
+    }
+  }
+
+  function scheduleUnifiedImportRuntimeTruthRefresh(target) {
+    [120, 500, 1500].forEach(ms => setTimeout(() => {
+      if (!target || targetDate() === normalizeDate(target)) void refreshUnifiedImportRuntimeTruth(target);
+    }, ms));
+  }
+
   async function readWhppSummary(target) {
     const query = target ? `?reportDate=${encodeURIComponent(target)}` : '';
     return jsonFetch(`/api/v132/whpp-fast-summary${query}`);
@@ -177,6 +236,8 @@
   }
 
   async function verifyWhpp(target) {
+    const persistedLock = await readWhppCompletionLock(target);
+    if (persistedLock) return persistedLock;
     const payload = await readWhppSummary(target);
     const truth = whppCompletion(payload, target);
     if (target && truth.date && truth.date !== target) {
@@ -305,7 +366,7 @@
   async function recoverPendingWhpp(reason = 'startup') {
     if (busy || !importPageVisible()) return false;
     const target = targetDate();
-    if (!target || autoRecoveryDates.has(target)) return false;
+    if (!target || completionLatchMatches(target) || autoRecoveryDates.has(target)) return false;
     autoRecoveryDates.add(target);
     try {
       const ccslStage = { key: 'CCSL' };
@@ -316,7 +377,18 @@
       const shopee = await canonicalStageTruth(shopeeStage, target);
       if (!shopee.done) return false;
       const whpp = await canonicalStageTruth(whppStage, target);
-      if (whpp.done) return false;
+      if (whpp.done) {
+        global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = {
+          reportDate: target,
+          verifiedAt: Date.now(),
+          owner: 'V67',
+          finalizationRevision: FINALIZATION_ACK_REVISION,
+          completionStabilityRevision: COMPLETION_STABILITY_REVISION,
+          source: whpp.payload?.source || 'CANONICAL_WHPP_COMPLETION'
+        };
+        scheduleUnifiedImportRuntimeTruthRefresh(target);
+        return false;
+      }
       if (whpp.error && !whppStillPending(whpp.error) && !isTransient(whpp.error)) return false;
 
       setStatus(`检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土…`);
@@ -340,6 +412,7 @@
       if (document.visibilityState === 'visible') setTimeout(() => { void recoverPendingWhpp('visibility'); }, 250);
     });
     document.addEventListener('click', event => {
+      if (event.target?.closest?.('[data-testid="combined-daily-import"]')) clearCompletionLatch();
       if (event.target?.closest?.('[data-page="import"]')) setTimeout(() => { void recoverPendingWhpp('import-navigation'); }, 500);
     }, true);
     if (autoRecoveryTimer) clearInterval(autoRecoveryTimer);
@@ -351,8 +424,8 @@
   async function execute(mode = 'start') {
     if (busy) return { ok: false, busy: true };
     const target = targetDate();
-    setUnifiedStage('CCSL', true, target);
-    setBusy(true, `正在启动 ${target || '当日'} 七业务处理…`);
+    setUnifiedStage('VERIFYING', false, target);
+    setBusy(true, `正在核对 ${target || '当日'} 七业务断点…`);
     setStatus(`正在核对 ${target || '当日'} 七业务断点：CCSL → SHOPEE → WHPP`);
     const results = [];
     try {
@@ -364,14 +437,15 @@
 
       for (let index = 0; index < stages.length; index += 1) {
         const stage = stages[index];
-        setUnifiedStage(stage.key, true, target);
-        setBusy(true, `${stage.label}处理中…`);
+        setBusy(true, `正在核对${stage.label}…`);
         const truth = await canonicalStageTruth(stage, target);
         if (truth.done) {
           setStatus(`第 ${index + 1}/3 步：${stage.label}已有正式结果，跳过重复处理，继续下一阶段`);
           results.push({ label: stage.label, ok: true, skipped: true, canonicalComplete: true });
           continue;
         }
+        setUnifiedStage(stage.key, true, target);
+        setBusy(true, `${stage.label}处理中…`);
         setStatus(`第 ${index + 1}/3 步：${stage.label}正在处理，完成后自动进入下一步`);
         const result = await runStage(stage, mode === 'resume', target);
         results.push(result);
@@ -393,9 +467,11 @@
           verifiedAt: Date.now(),
           owner: 'V67',
           finalizationRevision: FINALIZATION_ACK_REVISION,
+          completionStabilityRevision: COMPLETION_STABILITY_REVISION,
           results
         };
         setStatus('七业务当日日报处理完成：CCSL → SHOPEE → WHPP均已验证正式结果。', 'success');
+        scheduleUnifiedImportRuntimeTruthRefresh(target);
       }
       document.dispatchEvent(new CustomEvent('ce-qc-run-complete', { detail: { results, reportDate: target, complete: allThreeResolved } }));
       try { if (typeof global.refresh === 'function') await global.refresh(); } catch {}
@@ -420,16 +496,20 @@
       architecture: ARCHITECTURE,
       recoveryTriggerRevision: RECOVERY_TRIGGER_REVISION,
       finalizationAckRevision: FINALIZATION_ACK_REVISION,
+      completionStabilityRevision: COMPLETION_STABILITY_REVISION,
+      importCarryRefreshRevision: IMPORT_CARRY_REFRESH_REVISION,
       singleOwner: true,
       run: execute,
       targetDate,
       verifyWhpp,
       readWhppSummary,
+      readWhppCompletionLock,
+      refreshUnifiedImportRuntimeTruth,
       canonicalStageTruth,
       recoverPendingWhpp
     };
     scheduleAutoRecovery();
-    console.info('[CE-QC][V355_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, RECOVERY_TRIGGER_REVISION, FINALIZATION_ACK_REVISION, 'V67 is the single run/resume owner; completed CCSL/SHOPEE stages are skipped and a pending WHPP stage auto-resumes whenever the import page is actually visible. Current WHPP completion may close from V134 runtime only when that runtime finished after this wait began and finalizeWhppState already succeeded.');
+    console.info('[CE-QC][V396_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, RECOVERY_TRIGGER_REVISION, FINALIZATION_ACK_REVISION, COMPLETION_STABILITY_REVISION, IMPORT_CARRY_REFRESH_REVISION, 'V67 verifies a stage before showing it as active; persisted WHPP completion and same-page verified completion suppress duplicate auto-reentry; a new explicit daily import clears the local latch; completed runs refresh live today/historical OPEN counts from SQLite.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
