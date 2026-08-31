@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-export const V142_HISTORY_AUDIT_ID = '2026-08-27-v142-seven-business-history-audit-v3-v330-zero-ticket';
+export const V142_HISTORY_AUDIT_ID = '2026-08-31-v388-seven-business-history-audit-export-range-scope-v1';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = ['CE','CEAF','TBKH','ALI1688'];
 const ALL_TYPES = [...CORE_TYPES,'WHPP'];
@@ -99,6 +99,7 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
   const oldestOpen=String(db.prepare("SELECT MIN(sourceReportDate) value FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate BETWEEN ? AND ?").get(from,to)?.value||'');
   const currentEvidence={
     carryOpen:openCarry,carryClosed:closedCarry,oldestOpenDate:oldestOpen,
+    carryOpenScope:'SOURCE_REPORT_DATE_BETWEEN_EXPORT_RANGE',carryOpenFromDate:from,carryOpenToDate:to,
     ccslFinalRows:count(db,'SELECT COUNT(*) count FROM final_rows WHERE reportDate BETWEEN ? AND ?',from,to),
     shopeeFinalRows:count(db,"SELECT COUNT(*) count FROM business_final_rows WHERE businessType='SHOPEE' AND reportDate BETWEEN ? AND ?",from,to),
     whppFinalRows:count(db,"SELECT COUNT(*) count FROM business_final_rows WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ?",from,to),
