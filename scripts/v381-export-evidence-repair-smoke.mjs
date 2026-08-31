@@ -68,6 +68,7 @@ assert.match(snapshotSource,/payload\.status = reconciliationFailed \? 'INVALID_
 
 assert.match(ccslRecovery,/2026-08-31-v383-retroactive-ccsl-processing-proof-v1/,'V383 retroactive proof owner must remain active');
 assert.match(ccslRecovery,/readV384CcslProcessingProof/,'old completed snapshots must use the same strict V384 proof as new snapshots');
+assert.match(ccslRecovery,/readV384CcslProcessingProof\(db,\{reportDate,snapshotId,boundary\}\)/,'V384 persisted proof must be bound to the latest VALID import lifecycle timestamp');
 assert.match(ccslRecovery,/rejectedLegacySnapshot=Boolean\(rawSnapshot&&!processingProof\.complete\)/,'a legacy completed snapshot without exact proof must be rejected at status read');
 assert.match(ccslRecovery,/snapshot=rejectedLegacySnapshot\?null:rawSnapshot/,'rejected legacy snapshot must not drive canonical completion');
 assert.match(ccslRecovery,/COMPLETED_SNAPSHOT_REJECTED_MISSING_PROCESSING_PROOF/,'recovery reason must remain observable');
