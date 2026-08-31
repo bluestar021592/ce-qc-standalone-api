@@ -14,4 +14,5 @@ assert.doesNotMatch(source,/if\(node\.dataset\.v67UnifiedOwner!=='1'\)return fal
 assert.match(source,/setInterval\(enforceLastTruth,250\)/,'canonical CCSL detail repaint enforcement must remain active');
 assert.match(source,/postJson\('\/api\/v317\/ccsl-recovery'/,'detail must continue reading canonical V317\/V384 truth');
 
-console.log('[V385] stale V67 CCSL detail-owner release smoke passed · inactive runner releases #ccslRunStatus · V317/V384 canonical truth can repaint within 250ms enforcement window');
+execFileSync(process.execPath,['scripts/v386-dirty-dashboard-cache-truth-smoke.mjs'],{stdio:'inherit'});
+console.log('[V386/V385] status + dashboard truth smoke passed · inactive V67 releases stale CCSL detail DOM · dirty current dates cannot keep serving stale derived POD/open metrics');
