@@ -23,6 +23,7 @@ import './v183HistoricalStatusRefreshPatch.js';
 import './v206InteractiveFirstRuntimePatch.js';
 
 const PATCH_ID='2026-09-01-v413-idempotent-lifecycle-seven-business-loader-v1';
+const V411_STATUS_ENTRY_LOCK_LOADER_COMPAT='2026-09-01-v411-serialized-status-entry-lock-loader-v1';
 const V375_CONTROL_REVISION='2026-08-30-v375-canonical-run-control-cache-bust-v1';
 const V226_COMPAT_UI_BUILD='2026-08-22-v226-shared-client-ui-cache-bust-v1';
 const GOLIVE_COMPAT_PATCH_ID='2026-08-18-v195-ipc-export-owner-shell-v1';
@@ -65,5 +66,5 @@ express.application.use=function v206InteractiveFirstOwnerUse(...args){
   return previousUse.apply(this,args);
 };
 
-export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,controlRevision:V375_CONTROL_REVISION,compatPatchId:GOLIVE_COMPAT_PATCH_ID,legacyUiBuild:V226_COMPAT_UI_BUILD,singleRunner:SINGLE_RUNNER_UI_BUILD,whppPageOwner:WHPP_PAGE_OWNER};}
+export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,controlRevision:V375_CONTROL_REVISION,compatPatchId:GOLIVE_COMPAT_PATCH_ID,legacyUiBuild:V226_COMPAT_UI_BUILD,singleRunner:SINGLE_RUNNER_UI_BUILD,whppPageOwner:WHPP_PAGE_OWNER,statusEntryLockCompat:V411_STATUS_ENTRY_LOCK_LOADER_COMPAT};}
 export const V44_WHPP_UI_PATCH_ID=PATCH_ID;
