@@ -112,14 +112,17 @@ test('V413 same-date new import cannot inherit stale prior lifecycle completion 
   assert.equal(rt.originalCalls,1);
 });
 
-test('V413 remains idempotent and never owns processing APIs',()=>{
-  assert.match(convergenceSource,/2026-09-01-v413-lifecycle-bound-seven-business-convergence-v3/);
+test('V413 remains idempotent, reconciles import success text, and never owns processing APIs',()=>{
+  assert.match(convergenceSource,/2026-09-01-v413-lifecycle-bound-seven-business-convergence-v4/);
   assert.doesNotMatch(convergenceSource,/\/api\/whpp\/run\/(?:start|resume)|\/api\/(?:run|resume)|\/api\/shopee\/run\/(?:start|resume)/);
   assert.doesNotMatch(convergenceSource,/async function execute|function execute\(/);
   assert.match(convergenceSource,/\['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'\]/);
   assert.match(convergenceSource,/SEVEN_BUSINESS_ALREADY_COMPLETE_V413/);
   assert.match(convergenceSource,/lifecycleKey/);
   assert.match(convergenceSource,/truthCurrentEnough/);
+  assert.match(convergenceSource,/日报导入完成，[\\s\\S]*个唯一运单/,'legacy green import-success total must be rewritten to seven-business truth');
+  assert.match(convergenceSource,/patchText\(document\.getElementById\('importPage'\),total\)/,'all import-page success text owners must converge to the same total');
+  assert.match(convergenceSource,/setTimeout\(runObservedSync,60\)/,'observer reconciliation must be throttled instead of running on every mutation');
   assert.match(convergenceSource,/String\(valid\.textContent\|\|''\)\.trim\(\)!==totalText/,'unchanged visible total must not rewrite DOM and retrigger its observer');
   assert.match(convergenceSource,/dataset\.v412SevenBusinessTotal!==String\(total\)/,'unchanged dataset truth must remain idempotent');
 });
@@ -128,6 +131,6 @@ test('runtime loader order is V67 -> V168 -> V169 -> V413 convergence',()=>{
   const v67=shellSource.indexOf('v67-resilient-run-guard.js?v=20260830-v360-1');
   const v168=shellSource.indexOf('v168-seven-business-status.js?v=20260901-v411-1');
   const v169=shellSource.indexOf('v169-seven-business-legacy-status-sync.js?v=20260901-v411-1');
-  const v413=shellSource.indexOf('v412-seven-business-convergence.js?v=20260901-v413-2');
+  const v413=shellSource.indexOf('v412-seven-business-convergence.js?v=20260901-v413-3');
   assert.ok(v67>=0&&v168>v67&&v169>v168&&v413>v169);
 });
