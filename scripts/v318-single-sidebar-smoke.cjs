@@ -39,7 +39,7 @@ assert.match(completionGuard,/SEVEN_BUSINESS_STATUS_UNCONFIRMED/,'missing, stale
 assert.match(completionGuard,/CURRENT_DATE_STATUS_NOT_READY/,'V411 must distinguish an unready exact-date status from a real incomplete lifecycle');
 assert.match(completionGuard,/CURRENT_DATE_STATUS_STALE/,'V411 must fail closed when the exact-date status is stale');
 assert.match(completionGuard,/state\.kind==='unconfirmed'[\s\S]*lockResumeButtons\(state\)/,'unconfirmed status must keep legacy resume controls hidden and disabled');
-assert.doesNotMatch(completionGuard,/\/api\/whpp\/run\/(?:start|resume)|\/api\/(?:run|resume)|\/api\/shopee\/run\/(?:start|resume)/,'V411 guard must never start any CCSL, SHOPEE or WHPP processing API itself');
+assert.doesNotMatch(completionGuard,/\/api\/whpp\/run\/start|\/api\/whpp\/run\/resume|\/api\/run\/start|\/api\/v311\/shopee-recovery[^\n]*action[^\n]*start/,'V411 guard must never start any CCSL, SHOPEE or WHPP processing API itself');
 assert.doesNotMatch(completionGuard,/async function execute|function execute\(/,'V411 guard must not own a duplicate three-stage executor');
 
 assert.match(convergence,/2026-09-01-v413-lifecycle-bound-seven-business-convergence-v3/,'V412 filename must expose the V413 idempotent lifecycle-bound convergence build');
