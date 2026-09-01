@@ -117,18 +117,20 @@ test('580 aliases are special only when they are the latest effective destinatio
   assert.equal(historicalOnly.special, null, 'historical 580 must not suppress a later current state');
 });
 
-test('CECN, CEZT and warehouse self-pickup are latest-node special facts', () => {
+test('CECN, CEZT and warehouse self-pickup are latest-node normal diversion facts', () => {
   const cecn = buildTrajectoryFacts({
     shipmentCode: 'CCFACT001', scanRow: { orderStatus: '70' },
     events: [event({ code: '26', time: '2026-08-09 10:00:00', text: '货物到达网点【CEL:CECN】' })]
   });
-  assert.equal(cecn.special?.specialState, 'CECN_RETENTION');
+  assert.equal(cecn.special?.specialState, 'CCSLCN_DIVERSION');
+  assert.equal(cecn.special?.label, 'CCSLCN分流');
 
   const cezt = buildTrajectoryFacts({
     shipmentCode: 'CCFACT002', scanRow: { orderStatus: '70' },
     events: [event({ code: '26', time: '2026-08-09 10:00:00', text: '货物到达网点【CE:CEZT】' })]
   });
-  assert.equal(cezt.special?.specialState, 'CEZT_RETENTION');
+  assert.equal(cezt.special?.specialState, 'CCSLZT_DIVERSION');
+  assert.equal(cezt.special?.label, 'CCSLZT分流');
 
   const pickup = buildTrajectoryFacts({
     shipmentCode: 'CCFACT003', scanRow: { orderStatus: '70' },
