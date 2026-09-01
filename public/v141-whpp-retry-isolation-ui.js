@@ -1,7 +1,8 @@
 (function installV145SevenBusinessRetryCenter(global){
   if(global.__CE_QC_V145_SEVEN_BUSINESS_RETRY_CENTER__)return;
   global.__CE_QC_V145_SEVEN_BUSINESS_RETRY_CENTER__=true;
-  const VERSION='2026-08-16-v145-seven-business-retry-center-v1';
+  const BASE_VERSION='2026-08-16-v145-seven-business-retry-center-v1';
+  const VERSION='2026-09-01-v398-whpp-first-retry-auto-kick-v1';
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const LABELS={ALL:'全部业务',CE:'CE',CEAF:'CEAF',TBKH:'TBKH',ALI1688:'ALI1688',SHOPEECN:'SHOPEE CN',SHOPEEVN:'SHOPEE VN',WHPP:'WHPP本土'};
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
@@ -10,10 +11,23 @@
   let lastPayload=null;
   let pollTimer=null;
   let lastRetryTarget='';
+  let autoWhppKickSignature='';
+  let autoWhppKickInFlight=false;
 
   function visible(){return location.pathname==='/import'||document.getElementById('importPage')?.classList?.contains('active')||document.getElementById('importPage')?.hidden===false;}
   function importPanel(){return document.getElementById('unifiedImport');}
   function authLike(message=''){return /未授权|unauthorized|重新登录CE|需要重新登录CE|token|登录.*过期|授权.*失效/i.test(String(message||''));}
+  function normalizeDate(value=''){const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';}
+  function whppRetryCountForDate(whpp={},reportDate=''){
+    const date=normalizeDate(reportDate);if(!date)return 0;
+    return Number((whpp?.summary?.byDate||[]).find(item=>normalizeDate(item?.reportDate)===date)?.count||0);
+  }
+  function whppNeedsAutomaticKick(progress={}){
+    const processing=progress?.processing||{};const runtime=progress?.runtime||{};
+    const outcome=String(runtime.outcome||'').toUpperCase();
+    const text=`${processing.phase||''} ${processing.error||''} ${runtime.phase||''} ${runtime.error||''}`;
+    return outcome==='RETRY_REQUIRED'||/WHPP待重试|接口.*失败.*重试|RETRY_REQUIRED/i.test(text);
+  }
 
   function installLayout(){
     document.getElementById('v143ImportWorkspaceStyle')?.remove();
@@ -78,7 +92,7 @@
         <div id="v145Auth" class="v145-auth" hidden></div>`;
       node.querySelector('#v145Business')?.addEventListener('change',event=>{selectedBusiness=String(event.target.value||'ALL');queue();});
       node.querySelector('#v145Refresh')?.addEventListener('click',()=>queue());
-      node.querySelector('#v145Retry')?.addEventListener('click',runRetry);
+      node.querySelector('#v145Retry')?.addEventListener('click',()=>runRetry());
       host.appendChild(node);
     }else if(node.parentElement!==host)host.appendChild(node);
     return node;
@@ -100,19 +114,34 @@
   async function loginAndRetry(){
     const auth=document.getElementById('v145Auth');if(!auth)return;const button=auth.querySelector('#v145Login');const msg=auth.querySelector('#v145LoginMsg');const tenantId=auth.querySelector('#v145Tenant')?.value?.trim()||'000000';const username=auth.querySelector('#v145User')?.value?.trim()||'';const password=auth.querySelector('#v145Password')?.value||'';
     if(!username||!password){msg.textContent='请输入CE账号和密码。';return;}button.disabled=true;button.textContent='正在登录CE…';
-    try{const r=await fetch('/api/ce-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenantId,username,password}),credentials:'same-origin'});const p=await r.json();if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);hideAuth();await runRetry();}
+    try{const r=await fetch('/api/ce-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenantId,username,password}),credentials:'same-origin'});const p=await r.json();if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);hideAuth();autoWhppKickSignature='';await runRetry();}
     catch(error){msg.textContent=`CE重新登录失败：${error.message}`;button.disabled=false;button.textContent='重新登录CE并继续重试';}
   }
 
   function schedulePoll(){clearTimeout(pollTimer);pollTimer=setTimeout(()=>queue({poll:true}),1200);}
+  async function maybeAutoKickWhpp({whpp={},progress={},centerJob={},whppJob={}}={}){
+    if(autoWhppKickInFlight||whppJob.running||centerJob.running||!whppNeedsAutomaticKick(progress))return false;
+    const reportDate=normalizeDate(progress?.reportDate||progress?.runtime?.reportDate||'');
+    const retryCount=whppRetryCountForDate(whpp,reportDate);
+    if(!reportDate||retryCount<=0)return false;
+    const marker=String(progress?.runtime?.finishedAt||progress?.processing?.lastCheckpointAt||progress?.processing?.error||'');
+    const signature=`${reportDate}:${retryCount}:${marker}`;
+    if(signature===autoWhppKickSignature)return false;
+    autoWhppKickSignature=signature;autoWhppKickInFlight=true;
+    console.info('[CE-QC][V398_WHPP_FIRST_RETRY_AUTO_KICK]',{reportDate,retryCount,signature});
+    try{return await runRetry({automatic:true,targetOverride:'WHPP'});}
+    finally{autoWhppKickInFlight=false;}
+  }
+
   async function queue({poll=false}={}){
     if(!visible())return null;const node=center();if(!node)return null;const meta=node.querySelector('#v145Meta');const button=node.querySelector('#v145Retry');const totalBadge=node.querySelector('#v145Total');
     try{
-      const [centerRes,whppRes]=await Promise.all([
+      const [centerRes,whppRes,progressRes]=await Promise.all([
         fetch(`/api/v145/retry-center?businessType=${encodeURIComponent(selectedBusiness)}&limit=200`,{cache:'no-store',credentials:'same-origin'}),
-        fetch('/api/v143/whpp-retry-queue?limit=200',{cache:'no-store',credentials:'same-origin'})
+        fetch('/api/v143/whpp-retry-queue?limit=200',{cache:'no-store',credentials:'same-origin'}),
+        fetch('/api/whpp/progress',{cache:'no-store',credentials:'same-origin'})
       ]);
-      const payload=await centerRes.json();const whpp=await whppRes.json();if(!centerRes.ok||payload.ok===false)throw new Error(payload.error||`HTTP ${centerRes.status}`);lastPayload=payload;
+      const payload=await centerRes.json();const whpp=await whppRes.json();const progress=progressRes.ok?await progressRes.json():{};if(!centerRes.ok||payload.ok===false)throw new Error(payload.error||`HTTP ${centerRes.status}`);lastPayload=payload;
       const summary=payload.summary||{};const total=Number(summary.total||0);const selectedTotal=Number(summary.selectedTotal||0);const target=selectedBusiness==='ALL'?String(summary.nextBusiness||''):selectedBusiness;lastRetryTarget=target;
       renderKpis(summary);renderPreview(payload.rows||[]);if(totalBadge)totalBadge.textContent=`失败待重试 ${fmt(total)}`;
       const centerJob=payload.job||{};const whppJob=whpp?.job||{};const active=whppJob.running?{...whppJob,engine:'WHPP'}:(centerJob.running?{...centerJob,engine:'SEVEN'}:null);
@@ -121,24 +150,26 @@
       if(lastError){meta.innerHTML=`<b style="color:#c23a3a">上一次重试失败：</b>${esc(lastError)}<br>失败票仍保留在SQLite，不会被删除。`;if(authLike(lastError)){showAuth(lastError);button.disabled=true;button.textContent='请先重新登录CE';}else{hideAuth();button.disabled=selectedTotal===0;button.textContent='重新尝试下一批';}return payload;}
       hideAuth();
       const dates=(summary.byDate||[]).slice(0,12).map(item=>`${esc(item.reportDate)} ${fmt(item.count)}票`).join(' · ');
-      if(total===0){meta.innerHTML='<b style="color:#15965a">七业务接口失败池已清零。</b><br>以后任一业务出现扫描/轨迹/异常接口失败，会自动在这里汇总。';button.disabled=true;button.textContent='当前无失败票';}
+      if(total===0){autoWhppKickSignature='';meta.innerHTML='<b style="color:#15965a">七业务接口失败池已清零。</b><br>以后任一业务出现扫描/轨迹/异常接口失败，会自动在这里汇总。';button.disabled=true;button.textContent='当前无失败票';}
       else if(selectedTotal===0){meta.innerHTML=`全部七业务仍有 <b>${fmt(total)}</b> 票失败，但当前筛选“${esc(LABELS[selectedBusiness]||selectedBusiness)}”为0票。`;button.disabled=true;button.textContent='当前业务无失败票';}
       else{meta.innerHTML=`当前筛选 <b>${esc(LABELS[selectedBusiness]||selectedBusiness)}</b>：<b>${fmt(selectedTotal)}</b> 票待重试${dates?`<br>${dates}`:''}<br><span style="color:#7a899c">只处理明确失败票；成功票、普通未POD和普通跨日遗留不会进入这里。</span>`;button.disabled=false;const targetCount=Number(summary.byBusiness?.[target]||selectedTotal);button.textContent=`重试下一批${Math.min(200,targetCount||selectedTotal)}票${target?` · ${LABELS[target]||target}`:''}`;}
+      setTimeout(()=>{void maybeAutoKickWhpp({whpp,progress,centerJob,whppJob});},0);
       return payload;
     }catch(error){meta.innerHTML=`<span style="color:#c23a3a">七业务接口失败池读取失败：${esc(error.message)}</span>`;button.disabled=true;if(poll)schedulePoll();return null;}
   }
 
-  async function runRetry(){
-    const node=center();if(!node)return;const meta=node.querySelector('#v145Meta');const button=node.querySelector('#v145Retry');const payload=lastPayload||await queue();if(!payload)return;const summary=payload.summary||{};const target=selectedBusiness==='ALL'?String(summary.nextBusiness||''):selectedBusiness;if(!target)return;lastRetryTarget=target;button.disabled=true;button.textContent='正在启动后台重试…';meta.innerHTML=`<span style="color:#a66a00">正在启动 ${esc(LABELS[target]||target)} 失败票补偿重试…</span>`;
+  async function runRetry(options={}){
+    const automatic=options?.automatic===true;const targetOverride=String(options?.targetOverride||'');
+    const node=center();if(!node)return false;const meta=node.querySelector('#v145Meta');const button=node.querySelector('#v145Retry');const payload=lastPayload||await queue();if(!payload)return false;const summary=payload.summary||{};const target=targetOverride||(selectedBusiness==='ALL'?String(summary.nextBusiness||''):selectedBusiness);if(!target)return false;lastRetryTarget=target;button.disabled=true;button.textContent=automatic?'WHPP自动重试启动中…':'正在启动后台重试…';meta.innerHTML=automatic?'<span style="color:#a66a00">检测到WHPP接口失败，已自动启动失败票补偿重试，无需手动点击。</span>':`<span style="color:#a66a00">正在启动 ${esc(LABELS[target]||target)} 失败票补偿重试…</span>`;
     try{
-      const url=target==='WHPP'?'/api/v143/whpp-retry-queue/recheck':'/api/v145/retry-center/recheck';const body=target==='WHPP'?{limit:200}:{businessType:target,limit:200};const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin'});const p=await r.json();if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);hideAuth();meta.innerHTML='<span style="color:#a66a00">后台任务已启动，正在读取实时进度…</span>';schedulePoll();
-    }catch(error){meta.innerHTML=`<span style="color:#c23a3a">无法启动接口恢复：${esc(error.message)}</span><br>失败票没有被删除。`;if(authLike(error.message)){showAuth(error.message);button.disabled=true;button.textContent='请先重新登录CE';}else{button.disabled=false;button.textContent='重新尝试启动';}}
+      const url=target==='WHPP'?'/api/v143/whpp-retry-queue/recheck':'/api/v145/retry-center/recheck';const body=target==='WHPP'?{limit:200}:{businessType:target,limit:200};const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'same-origin'});const p=await r.json();if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);hideAuth();meta.innerHTML=automatic?'<span style="color:#a66a00">WHPP失败票后台自动重试已启动，正在读取实时进度…</span>':'<span style="color:#a66a00">后台任务已启动，正在读取实时进度…</span>';schedulePoll();return true;
+    }catch(error){meta.innerHTML=`<span style="color:#c23a3a">无法启动接口恢复：${esc(error.message)}</span><br>失败票没有被删除。`;if(authLike(error.message)){showAuth(error.message);button.disabled=true;button.textContent='请先重新登录CE';}else{button.disabled=false;button.textContent='重新尝试启动';}return false;}
   }
 
   async function reconcile(){if(!visible())return;installLayout();center();await queue();}
   document.addEventListener('ce-qc-run-complete',()=>setTimeout(reconcile,180));
   document.addEventListener('click',event=>{if(event.target?.closest?.('[data-page="import"],.side-link[data-path="/import"]'))setTimeout(reconcile,150);},true);
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(reconcile,180),{once:true});else setTimeout(reconcile,180);
-  global.__CE_QC_V145_SEVEN_BUSINESS_RETRY_CENTER__={version:VERSION,refresh:reconcile,retry:runRetry};
-  console.info('[CE-QC][V145_SEVEN_BUSINESS_RETRY_CENTER]',VERSION);
+  global.__CE_QC_V145_SEVEN_BUSINESS_RETRY_CENTER__={version:VERSION,baseVersion:BASE_VERSION,refresh:reconcile,retry:runRetry,autoWhppKickRevision:VERSION};
+  console.info('[CE-QC][V145_SEVEN_BUSINESS_RETRY_CENTER]',VERSION,BASE_VERSION);
 })(window);
