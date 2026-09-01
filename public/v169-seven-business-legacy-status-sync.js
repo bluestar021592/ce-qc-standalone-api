@@ -1,6 +1,6 @@
 (function installSevenBusinessLegacyStatusSyncV169(global){
   if(global.__CE_QC_V169_LEGACY_STATUS_SYNC__)return;
-  const VERSION='2026-09-01-v400-canonical-completion-ui-and-entry-lock-v1';
+  const VERSION='2026-09-01-v411-unconfirmed-status-entry-lock-v1';
   let observerTimer=null;
   const norm=value=>String(value||'').replace(/\s+/g,' ').trim();
   const normalizeDate=value=>{
@@ -12,25 +12,53 @@
     return global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
   }
 
+  function pendingImportDate(){
+    const explicit=global.__CE_QC_PENDING_IMPORT_DATE__||{};
+    const active=explicit.active===true?normalizeDate(explicit.reportDate):'';
+    if(active)return active;
+    try{
+      const fromV146=normalizeDate(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__?.getPendingDate?.());
+      if(fromV146)return fromV146;
+    }catch{}
+    return '';
+  }
+
   function currentTargetDate(){
+    const pending=pendingImportDate();
+    if(pending)return pending;
     const input=normalizeDate(document.getElementById('reportDate')?.value);
     if(input)return input;
+    const top=normalizeDate(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value);
+    if(top)return top;
     try{
       const imported=normalizeDate(typeof unifiedImportState!=='undefined'?unifiedImportState?.reportDate:'');
       if(imported)return imported;
     }catch{}
-    const top=normalizeDate(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value);
-    if(top)return top;
     return '';
   }
 
-  function currentCompleteTruth(){
-    const truth=canonicalTruth();
-    if(!truth?.complete)return null;
-    const truthDate=normalizeDate(truth.reportDate);
+  function statusState(){
     const target=currentTargetDate();
-    if(target&&truthDate&&target!==truthDate)return null;
-    return truth;
+    const truth=canonicalTruth();
+    const truthDate=normalizeDate(truth?.reportDate);
+    if(!target){
+      return{kind:'unconfirmed',reportDate:'',truth:null,reason:'TARGET_DATE_UNRESOLVED'};
+    }
+    if(!truth||!truthDate||truthDate!==target){
+      return{kind:'unconfirmed',reportDate:target,truth:null,reason:'CURRENT_DATE_STATUS_NOT_READY'};
+    }
+    const stages=Array.isArray(truth.stages)?truth.stages:[];
+    const fresh=truth.statusFresh===true||(stages.length===3&&stages.every(stage=>stage?.statusFresh!==false));
+    if(!fresh){
+      return{kind:'unconfirmed',reportDate:target,truth,reason:'CURRENT_DATE_STATUS_STALE'};
+    }
+    if(truth.complete===true)return{kind:'complete',reportDate:target,truth,reason:'CANONICAL_COMPLETE'};
+    return{kind:'incomplete',reportDate:target,truth,reason:'CANONICAL_FRESH_INCOMPLETE'};
+  }
+
+  function currentCompleteTruth(){
+    const state=statusState();
+    return state.kind==='complete'?state.truth:null;
   }
 
   function resumeButtons(){
@@ -41,32 +69,43 @@
     });
   }
 
-  function lockResumeButtons(truth){
+  function rememberEntryButton(btn){
+    if(btn.dataset.v169EntryLock==='1')return;
+    btn.dataset.v169EntryLock='1';
+    btn.dataset.v169PreviousDisplay=btn.style.display||'';
+    btn.dataset.v169PreviousTitle=btn.getAttribute('title')||'';
+    btn.dataset.v169PreviousDisabled=btn.disabled?'1':'0';
+    btn.dataset.v169PreviousHidden=btn.hidden?'1':'0';
+  }
+
+  function lockResumeButtons(state){
+    const complete=state?.kind==='complete';
+    const reportDate=state?.reportDate||'';
     resumeButtons().forEach(btn=>{
-      if(btn.dataset.v169CanonicalComplete!=='1'){
-        btn.dataset.v169CanonicalComplete='1';
-        btn.dataset.v169PreviousDisplay=btn.style.display||'';
-        btn.dataset.v169PreviousTitle=btn.getAttribute('title')||'';
-        btn.dataset.v169PreviousDisabled=btn.disabled?'1':'0';
-      }
+      rememberEntryButton(btn);
+      btn.dataset.v169LockReason=complete?'complete':'unconfirmed';
       btn.disabled=true;
       btn.hidden=true;
       btn.style.display='none';
-      btn.title=`${truth.reportDate||''} 七业务均已完成，无需继续处理`;
+      btn.title=complete
+        ?`${reportDate} 七业务均已完成，无需继续处理`
+        :`${reportDate} 当前日报状态尚未确认，禁止重复启动或继续处理`;
     });
   }
 
   function unlockResumeButtons(){
-    document.querySelectorAll('button[data-v169-canonical-complete="1"]').forEach(btn=>{
+    document.querySelectorAll('button[data-v169-entry-lock="1"]').forEach(btn=>{
       btn.disabled=btn.dataset.v169PreviousDisabled==='1';
-      btn.hidden=false;
+      btn.hidden=btn.dataset.v169PreviousHidden==='1';
       btn.style.display=btn.dataset.v169PreviousDisplay||'';
       const previousTitle=btn.dataset.v169PreviousTitle;
       if(previousTitle)btn.title=previousTitle;else btn.removeAttribute('title');
-      delete btn.dataset.v169CanonicalComplete;
+      delete btn.dataset.v169EntryLock;
+      delete btn.dataset.v169LockReason;
       delete btn.dataset.v169PreviousDisplay;
       delete btn.dataset.v169PreviousTitle;
       delete btn.dataset.v169PreviousDisabled;
+      delete btn.dataset.v169PreviousHidden;
     });
   }
 
@@ -93,11 +132,11 @@
     });
   }
 
-  function syncVerifiedRunLatch(truth){
-    const reportDate=normalizeDate(truth?.reportDate);
-    if(!reportDate)return;
+  function syncVerifiedRunLatch(state){
+    const reportDate=normalizeDate(state?.reportDate);
+    if(!reportDate||state?.kind==='unconfirmed')return;
     const existing=global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__||null;
-    if(truth.complete){
+    if(state.kind==='complete'){
       if(normalizeDate(existing?.reportDate)!==reportDate||existing?.owner!=='V67'){
         global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__={
           reportDate,
@@ -118,18 +157,31 @@
     const original=global[name];
     if(typeof original!=='function'||original.__v169CanonicalCompletionGuard)return;
     const guarded=function(){
-      const truth=currentCompleteTruth();
-      if(truth){
-        syncVerifiedRunLatch(truth);
-        lockResumeButtons(truth);
-        syncLegacyStatus(truth);
-        console.info('[CE-QC][V169]',name,'skipped because seven-business canonical truth is complete for',truth.reportDate||'current report');
+      const state=statusState();
+      if(state.kind==='complete'){
+        syncVerifiedRunLatch(state);
+        lockResumeButtons(state);
+        syncLegacyStatus(state.truth);
+        console.info('[CE-QC][V169]',name,'skipped because seven-business canonical truth is complete for',state.reportDate||'current report');
         return Promise.resolve({
           ok:true,
           skipped:true,
           code:'SEVEN_BUSINESS_ALREADY_COMPLETE',
-          reportDate:normalizeDate(truth.reportDate),
-          complete:true
+          reportDate:state.reportDate,
+          complete:true,
+          statusFresh:true
+        });
+      }
+      if(state.kind==='unconfirmed'){
+        lockResumeButtons(state);
+        console.info('[CE-QC][V169]',name,'blocked until current exact-date status is fresh for',state.reportDate||'current report');
+        return Promise.resolve({
+          ok:false,
+          skipped:true,
+          code:'SEVEN_BUSINESS_STATUS_UNCONFIRMED',
+          reportDate:state.reportDate,
+          complete:false,
+          statusFresh:false
         });
       }
       return original.apply(this,arguments);
@@ -146,19 +198,20 @@
 
   function apply(){
     installEntryGuards();
-    const truth=canonicalTruth();
-    if(!truth)return false;
-    syncVerifiedRunLatch(truth);
-    const completeTruth=currentCompleteTruth();
-    if(completeTruth){
-      lockResumeButtons(completeTruth);
-      syncLegacyStatus(completeTruth);
+    const state=statusState();
+    syncVerifiedRunLatch(state);
+    if(state.kind==='complete'){
+      lockResumeButtons(state);
+      syncLegacyStatus(state.truth);
+    }else if(state.kind==='unconfirmed'){
+      lockResumeButtons(state);
+      restoreLegacyStatus();
     }else{
       unlockResumeButtons();
       restoreLegacyStatus();
     }
     global.__CE_QC_V138_CCSL_SCAN_PROGRESS__?.enforceLastTruth?.();
-    return Boolean(completeTruth);
+    return state.kind==='complete';
   }
 
   function refreshAndApply(){
@@ -174,6 +227,7 @@
 
   function settle(){
     installEntryGuards();
+    apply();
     refreshAndApply();
     let tries=0;
     const timer=setInterval(()=>{
@@ -192,6 +246,6 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   installEntryGuards();
-  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,apply,refresh:refreshAndApply};
-  console.info('[CE-QC][V169]',VERSION,'legacy status, continue CTA and both unified execution entries follow V168 canonical completion truth; completed WHPP cannot re-enter the same report lifecycle.');
+  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth};
+  console.info('[CE-QC][V169]',VERSION,'same-date complete stays hard-locked; stale, missing or mismatched canonical status is read-only and cannot enter V67; only fresh incomplete truth releases run/resume.');
 })(window);
