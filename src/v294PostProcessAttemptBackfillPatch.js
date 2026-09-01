@@ -5,12 +5,11 @@ import { refreshV235CurrentDashboardCacheDate } from './v235DashboardCurrentCach
 import { requestV328EvidenceRepair } from './v328EvidenceRepairCoordinator.js';
 import { requestV334GenericHistoryBuild } from './v334GenericHistoryCoordinator.js';
 
-export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID = '2026-09-01-v294-finalize-persisted-dashboard-history-v1';
+export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID = '2026-09-01-v294-finalize-persisted-dashboard-history-v2';
 const previousPost = express.application.post;
 const ROUTES = new Set([
   '/api/run','/api/run/start','/api/resume','/api/run/resume',
-  '/api/shopee/run/start','/api/shopee/run/resume',
-  '/api/whpp/run/start','/api/whpp/run/resume'
+  '/api/shopee/run/start','/api/shopee/run/resume'
 ]);
 const ATTEMPT_HISTORY_TYPES=['TBKH','SHOPEECN','SHOPEEVN'];
 const GENERIC_HISTORY_TYPES=['CE','CEAF','ALI1688','WHPP','ALL'];
@@ -20,9 +19,8 @@ let historyTimer = null;
 
 function typesForPath(path='') {
   const value=String(path||'');
-  if(value.startsWith('/api/shopee/'))return {family:'SHOPEE',carryTypes:['SHOPEECN','SHOPEEVN'],attemptTypes:['SHOPEECN','SHOPEEVN'],unifiedComplete:false};
-  if(value.startsWith('/api/whpp/'))return {family:'WHPP',carryTypes:[],attemptTypes:[],unifiedComplete:true};
-  return {family:'CCSL',carryTypes:['CE','CEAF','TBKH','ALI1688'],attemptTypes:['TBKH'],unifiedComplete:false};
+  if(value.startsWith('/api/shopee/'))return {family:'SHOPEE',carryTypes:['SHOPEECN','SHOPEEVN'],attemptTypes:['SHOPEECN','SHOPEEVN']};
+  return {family:'CCSL',carryTypes:['CE','CEAF','TBKH','ALI1688'],attemptTypes:['TBKH']};
 }
 function responseReportDate(req, payload={}) {
   return String(payload?.run?.reportDate||payload?.summary?.reportDate||payload?.state?.reportDate||payload?.import?.reportDate||payload?.reportDate||req?.body?.reportDate||req?.body?.date||'').slice(0,10);
@@ -36,16 +34,24 @@ function invalidateDashboardReadCaches(){
 function schedulePersistedHistoryBuild(reportDate){
   const date=String(reportDate||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return;
   clearTimeout(historyTimer);
-  // Completed-run invalidation hooks finish synchronously with the response.
-  // Delay the isolated history workers so they never compete with foreground
-  // CCSL/SHOPEE/WHPP processing and cannot be deleted by the same response hook.
   historyTimer=setTimeout(()=>{
     for(const type of ATTEMPT_HISTORY_TYPES){try{requestV328EvidenceRepair(type,date);}catch(error){console.warn('[CE-QC][FINAL_HISTORY_THREE_QUEUE_FAILED]',type,date,error?.message||error);}}
     for(const type of GENERIC_HISTORY_TYPES){try{requestV334GenericHistoryBuild(type,date);}catch(error){console.warn('[CE-QC][FINAL_HISTORY_GENERIC_QUEUE_FAILED]',type,date,error?.message||error);}}
-    console.info('[CE-QC][FINAL_HISTORY_MATERIALIZATION_QUEUED]',JSON.stringify({reportDate:date,attemptTypes:ATTEMPT_HISTORY_TYPES,genericTypes:GENERIC_HISTORY_TYPES,policy:'AFTER_UNIFIED_WHPP_COMPLETION_ONLY'}));
+    console.info('[CE-QC][FINAL_HISTORY_MATERIALIZATION_QUEUED]',JSON.stringify({reportDate:date,attemptTypes:ATTEMPT_HISTORY_TYPES,genericTypes:GENERIC_HISTORY_TYPES,policy:'AFTER_ACTUAL_WHPP_FINALIZATION_ONLY'}));
   },1500);
   historyTimer.unref?.();
 }
+
+export function materializeV294CompletedUnifiedHistory(reportDate=''){
+  const date=String(reportDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return{ok:false,skipped:true,reason:'REPORT_DATE_MISSING'};
+  let dashboardCache={ok:true,skipped:true,reason:'CACHE_NOT_READY'};
+  try{dashboardCache=refreshV235CurrentDashboardCacheDate(date,{force:true});}catch(error){dashboardCache={ok:false,error:error?.message||String(error)};}
+  invalidateDashboardReadCaches();
+  schedulePersistedHistoryBuild(date);
+  return{ok:true,reportDate:date,dashboardCache,historyQueued:true,policy:'PERSIST_ONCE_THEN_READ_CACHE'};
+}
+globalThis.__CE_QC_FINALIZE_PERSISTED_DASHBOARD_HISTORY__=materializeV294CompletedUnifiedHistory;
 
 function runBackfill(reportDate, scopes={}) {
   const date = String(reportDate || '').slice(0, 10);
@@ -68,8 +74,7 @@ function runBackfill(reportDate, scopes={}) {
       let dashboardCache={ok:true,skipped:true,reason:'SIX_BUSINESS_NOT_YET_COMPLETE'};
       try{dashboardCache=refreshV235CurrentDashboardCacheDate(date,{force:true});}catch(error){dashboardCache={ok:false,error:error?.message||String(error)};}
       invalidateDashboardReadCaches();
-      if(scopes.unifiedComplete===true)schedulePersistedHistoryBuild(date);
-      console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_DONE]', JSON.stringify({ family:scopes.family||'',reportDate:date,carryLifecycle,attemptBackfill:result,dashboardCache,historyQueued:scopes.unifiedComplete===true }));
+      console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_DONE]', JSON.stringify({ family:scopes.family||'',reportDate:date,carryLifecycle,attemptBackfill:result,dashboardCache,historyQueued:false }));
     } catch (error) {
       console.error('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_FAILED]', JSON.stringify({ reportDate: date, family:scopes.family||'',carryTypes, attemptTypes, error: error?.message || String(error) }));
     } finally {
@@ -104,4 +109,4 @@ express.application.post = function v294PostProcessAttemptRegistration(pathValue
 };
 
 console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL]', V294_POST_PROCESS_ATTEMPT_BACKFILL_ID,
-  'completed CCSL/SHOPEE stages backfill strict saved evidence and refresh current materialized dashboard truth; only final WHPP/unified completion queues isolated saved-history caches for TBKH/CN/VN + CE/CEAF/ALI1688/WHPP/ALL, so no history worker competes with foreground processing.');
+  'CCSL/SHOPEE completion backfills strict saved attempt/signing evidence and refreshes current persisted dashboard truth; actual WHPP finalization calls the single unified history materializer, which then queues isolated cache builders after foreground processing is over.');
