@@ -185,7 +185,7 @@ const bootstrapV146=bootstrap.indexOf("importPhase('v146UnifiedImportDateBridgeP
 const bootstrapV42=bootstrap.indexOf("importPhase('v42WhppPatch'");
 assert.ok(bootstrapV102>=0&&bootstrapV146>bootstrapV102&&bootstrapV42>bootstrapV146,'production bootstrap route ownership must remain V102 safety/atomic → V146 date bridge → V42 final importer');
 
-assert.match(v146,/2026-08-30-v366-atomic-seven-business-import-ui-v1/,'browser import owner must isolate pending dates and wait for atomic commit');
+assert.match(v146,/2026-09-01-v410-atomic-seven-business-visible-truth-v1/,'browser import owner must isolate pending dates, normalize seven-business totals, and wait for atomic commit');
 assert.match(v146,/2026-08-30-v379-file-date-conflict-guard-v2/,'browser import owner must include current-file fail-closed plus server conflict-source ownership');
 assert.match(v146,/let candidateTarget=''/,'filename-recognized date must live outside the committed report-date input');
 assert.match(v146,/#detectFilenameDateButton/,'filename detection itself must be intercepted');
@@ -200,11 +200,13 @@ assert.match(v146,/resetStaleDateOverride\(\);[\s\S]*candidateTarget=filenameDat
 assert.match(v146,/文件名未含可确认日期/,'unknown filenames must visibly explain workbook-content detection instead of pretending the previous day is current');
 assert.match(v146,/payload\?\.ok===true&&payload\?\.importCommitted===true/,'browser may switch only after explicit successful atomic commit acknowledgement');
 assert.doesNotMatch(v146,/importCommitted!==false/,'undefined commit acknowledgement must never be treated as success');
+assert.match(v146,/UNIFIED_IMPORT_NOT_COMMITTED/,'HTTP 200 without atomic commit acknowledgement must be converted into a fail-closed browser response');
+assert.match(v146,/BUSINESS_TYPES=\['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'\]/,'visible effective total must sum all seven business classifications including WHPP');
 assert.match(v146,/classification-whpp/,'import result must visibly include WHPP as business seven');
 assert.match(v146,/正在导入并确认七业务/,'long import must expose a single non-repeatable in-flight action');
 assert.match(v146,/__CE_QC_PENDING_IMPORT_DATE__/,'pending date must be observable without becoming canonical processing truth');
-assert.match(v44,/v146-unified-import-date-status\.js\?v=20260830-v366-1/,'HTML owner must force the browser to load the V366 import UI instead of a cached older script');
-assert.match(v44,/datefix=20260830-v379-1/,'HTML owner must cache-bust the V379 new-file date conflict guard');
+assert.match(v44,/v146-unified-import-date-status\.js\?v=20260901-v410-1/,'HTML owner must force the browser to load the V410 atomic import UI instead of a cached older script');
+assert.match(v44,/v168-seven-business-status\.js\?v=20260901-v409-1/,'HTML owner must pair the V410 import date owner with the V409 lightweight status owner');
 
 const parserStart=v146.indexOf('  function validDate');
 const parserEnd=v146.indexOf('  function status');
@@ -220,11 +222,11 @@ assert.equal(detectFilenameDate('08-17.xls'),'2026-08-17','zero-padded 08-17.xls
 assert.equal(detectFilenameDate('8月17日.xls'),'2026-08-17','Chinese 8月17日.xls must resolve to 08-17');
 
 for (const source of [v67,v168,v132]) {
-  assert.match(source,/reportDate/,'all processing\/status owners must remain date-bound');
+  assert.match(source,/reportDate/,'all processing/status owners must remain date-bound');
 }
 assert.match(v67,/\{ key: 'CCSL'[\s\S]*\{ key: 'SHOPEE'[\s\S]*\{ key: 'WHPP'/,'execution order must remain CCSL → SHOPEE → WHPP');
 assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require canonical finalization before seven-business completion');
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V365/V366/V379] exact daily transition + frontend fail-closed + backend request/file conflict guard + executable atomic persistence gate passed · 8-17.xls/08-17.xls/8月17日.xls resolve to 2026-08-17 · stale 08-16 request cannot override 08-17 filename · explicit manual correction remains available · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
+console.log('[V410/V409/V365/V366/V379] exact daily transition + frontend fail-closed + backend request/file conflict guard + executable atomic persistence gate passed · 8-17.xls/08-17.xls/8月17日.xls resolve to 2026-08-17 · stale prior-day request cannot override the selected file · explicit manual correction remains available · visible totals include WHPP · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
