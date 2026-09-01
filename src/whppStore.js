@@ -31,18 +31,10 @@ function isFinalizedWhppDaily(summary = {}) {
   );
 }
 
-function isPreservedWhppMembershipReplay(rows = []) {
-  return rows.length > 0 && rows.every(row =>
-    String(row?.classificationSource || '').toUpperCase() === 'PRESERVED_WHPP_STANDARD_DAILY'
-  );
-}
-
-function restoreFinalizedWhppState(reportDate, summary, prior) {
+function restoreFinalizedWhppState(reportDate, summary) {
   const finalizedSnapshotId = String(summary.finalizedSnapshotId || '').trim();
   const payload = loadWhppSnapshot(finalizedSnapshotId);
-  const persisted = payload?.state && typeof payload.state === 'object'
-    ? payload.state
-    : (String(prior?.reportDate || '').slice(0, 10) === String(reportDate || '').slice(0, 10) ? prior : null);
+  const persisted = payload?.state && typeof payload.state === 'object' ? payload.state : null;
   if (!persisted) {
     const error = new Error(`WHPP ${reportDate} 已完成，但完成快照 ${finalizedSnapshotId} 无法恢复；已阻止把完成态覆盖为待处理。`);
     error.code = 'WHPP_FINALIZED_REHYDRATE_SNAPSHOT_MISSING';
@@ -67,23 +59,23 @@ function restoreFinalizedWhppState(reportDate, summary, prior) {
   return restored;
 }
 
-export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], batchId = '', snapshotId = '' }) {
+export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], batchId = '', snapshotId = '', preserveFinalizedLifecycle = false }) {
   const db = getDb();
   const now = nowIso();
   const unique = uniqueRows(rows).map(row => ({ ...row, businessType: WHPP, reportDate }));
   const todayBills = new Set(unique.map(billOf));
   const prior = loadWhppState();
 
-  // V397: V366 may replay the already-normalized WHPP membership while a new
-  // six-business unified snapshot is being staged. That replay is not a new
-  // WHPP import and must never erase a durable completed marker or regress
-  // shipment/carry facts back to PENDING_SCAN. A genuine direct parser import
-  // does not carry PRESERVED_WHPP_STANDARD_DAILY and therefore keeps the
-  // authoritative same-date re-import semantics below.
-  if (isPreservedWhppMembershipReplay(unique)) {
+  // V397: the unified importer can explicitly rehydrate an already-normalized
+  // WHPP membership when the new combined workbook contains no WHPP rows. That
+  // is not a new WHPP import. If the same daily is already finalized, restore
+  // its immutable completed snapshot and make this call a no-op for daily rows,
+  // current shipment facts and carry facts. A genuine direct re-import omits
+  // preserveFinalizedLifecycle and remains authoritative for the same date.
+  if (preserveFinalizedLifecycle === true) {
     const existing = db.prepare("SELECT summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
     const summary = safeJson(existing?.summaryJson, {});
-    if (isFinalizedWhppDaily(summary)) return restoreFinalizedWhppState(reportDate, summary, prior);
+    if (isFinalizedWhppDaily(summary)) return restoreFinalizedWhppState(reportDate, summary);
   }
 
   const carryBills = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' ORDER BY shipmentCode").all().map(row => row.shipmentCode);
