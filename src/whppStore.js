@@ -22,12 +22,70 @@ export function saveWhppState(state = {}) {
   return normalized;
 }
 
+function isFinalizedWhppDaily(summary = {}) {
+  const status = String(summary.snapshotStatus || summary.reconciliationStatus || '').toUpperCase();
+  return Boolean(
+    summary.completed === true
+    && ['COMPLETED', 'COMPLETED_WITH_RETRY'].includes(status)
+    && String(summary.finalizedSnapshotId || '').trim()
+  );
+}
+
+function isPreservedWhppMembershipReplay(rows = []) {
+  return rows.length > 0 && rows.every(row =>
+    String(row?.classificationSource || '').toUpperCase() === 'PRESERVED_WHPP_STANDARD_DAILY'
+  );
+}
+
+function restoreFinalizedWhppState(reportDate, summary, prior) {
+  const finalizedSnapshotId = String(summary.finalizedSnapshotId || '').trim();
+  const payload = loadWhppSnapshot(finalizedSnapshotId);
+  const persisted = payload?.state && typeof payload.state === 'object'
+    ? payload.state
+    : (String(prior?.reportDate || '').slice(0, 10) === String(reportDate || '').slice(0, 10) ? prior : null);
+  if (!persisted) {
+    const error = new Error(`WHPP ${reportDate} 已完成，但完成快照 ${finalizedSnapshotId} 无法恢复；已阻止把完成态覆盖为待处理。`);
+    error.code = 'WHPP_FINALIZED_REHYDRATE_SNAPSHOT_MISSING';
+    error.reportDate = reportDate;
+    error.finalizedSnapshotId = finalizedSnapshotId;
+    throw error;
+  }
+  const restored = saveWhppState({
+    ...persisted,
+    reportDate,
+    dailyReportReady: true,
+    snapshotId: finalizedSnapshotId || persisted.snapshotId || '',
+    snapshotStatus: 'COMPLETED',
+    processing: {
+      ...(persisted.processing || {}),
+      running: false,
+      paused: false,
+      phase: '完成'
+    }
+  });
+  console.log(`[CE-QC][WHPP_FINALIZED_REHYDRATE_NOOP] reportDate=${reportDate} snapshot=${finalizedSnapshotId}`);
+  return restored;
+}
+
 export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], batchId = '', snapshotId = '' }) {
   const db = getDb();
   const now = nowIso();
   const unique = uniqueRows(rows).map(row => ({ ...row, businessType: WHPP, reportDate }));
   const todayBills = new Set(unique.map(billOf));
   const prior = loadWhppState();
+
+  // V397: V366 may replay the already-normalized WHPP membership while a new
+  // six-business unified snapshot is being staged. That replay is not a new
+  // WHPP import and must never erase a durable completed marker or regress
+  // shipment/carry facts back to PENDING_SCAN. A genuine direct parser import
+  // does not carry PRESERVED_WHPP_STANDARD_DAILY and therefore keeps the
+  // authoritative same-date re-import semantics below.
+  if (isPreservedWhppMembershipReplay(unique)) {
+    const existing = db.prepare("SELECT summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
+    const summary = safeJson(existing?.summaryJson, {});
+    if (isFinalizedWhppDaily(summary)) return restoreFinalizedWhppState(reportDate, summary, prior);
+  }
+
   const carryBills = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' ORDER BY shipmentCode").all().map(row => row.shipmentCode);
 
   db.exec('BEGIN IMMEDIATE');
