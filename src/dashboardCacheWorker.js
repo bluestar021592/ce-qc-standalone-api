@@ -28,7 +28,7 @@ const WORKER_ACTIVE_KEY = 'dashboard_cache_worker_active';
 const WORKER_ACTIVE_UNTIL_KEY = 'dashboard_cache_worker_active_until';
 const PURGE_BLOCK_KEY = 'data_purge_block_until';
 const WORKER_LEASE_MS = 5 * 60_000;
-const TREND_AUDIT_ID = '2026-08-23-v243-post-rebuild-flat-series-audit-v1';
+const TREND_AUDIT_ID = '2026-09-01-persisted-dashboard-cache-no-startup-rebuild-v1';
 const TREND_AUDIT_META_KEY = 'v243_trend_audit_latest';
 const AUDIT_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP','CCSL','SHOPEE','ALL'];
 const workerId = `${process.pid}-${Date.now()}`;
@@ -43,9 +43,6 @@ function writeSkip(skipReason) {
 }
 
 function activeForegroundRun(db = getDb()) {
-  // A normal "paused" run has stopped scan/track writes and may safely coexist
-  // with a read-only trend-cache build. Only actively running or paused_write
-  // states still own the SQLite write path and should delay the cache child.
   if (db.prepare("SELECT 1 FROM run_locks WHERE status IN ('running','paused_write') LIMIT 1").get()) return true;
   return Boolean(db.prepare("SELECT 1 FROM business_run_locks WHERE status IN ('running','paused_write') LIMIT 1").get());
 }
@@ -185,26 +182,16 @@ try {
     markDashboardCacheDirty(reportDate, reason);
     result = refreshV235CurrentDashboardCacheDate(reportDate, { force: true });
   } else if (reason === 'V235_INTERACTIVE_STARTUP' || reason === 'STARTUP_WARM') {
-    const dates = recentCompletedDashboardDates(7);
-    const results = [];
-    for (const date of dates) {
-      const startedAt=Date.now();
-      // V242 intentionally rebuilds startup history even when an older V240
-      // marker says CURRENT_CACHE_READY. V240's formula fixes shared one cache
-      // contract id, so an already-built historical row can otherwise survive
-      // a code update and keep stale percentages indefinitely.
-      const item=refreshV235CurrentDashboardCacheDate(date, { force: true });
-      results.push({...item,elapsedMs:Date.now()-startedAt});
+    const status = getDashboardCacheStatus();
+    // Completed dates are immutable read models. Startup must not rescan the
+    // latest seven dates on every launch. Only build an initial cache when none
+    // exists, otherwise consume dirty markers created by real import/finalization.
+    if (Number(status.cachedDates || 0) === 0) {
+      result = { mode:'INITIAL_CACHE_WARM_ONCE', ...warmDashboardCacheRange({ days: warmDays }) };
+    } else {
+      const refreshed = refreshDashboardCacheDirty({ limit: 24, recentDays: 30 });
+      result = { mode:'PERSISTED_CACHE_STARTUP_READ_ONLY', cachedDates:Number(status.cachedDates||0), ...refreshed };
     }
-    const audit = auditRecentTrendSeries(dates);
-    result = {
-      mode: 'V243_FORCED_RECENT_7_REBUILD_WITH_AUDIT',
-      latestDate: dates[0] || latestCompletedDashboardDate(),
-      checked: dates.length,
-      refreshed: results.filter(item => item.refreshed).length,
-      results,
-      audit
-    };
   } else {
     const status = getDashboardCacheStatus();
     if (Number(status.cachedDates || 0) === 0) result = warmDashboardCacheRange({ days: warmDays });
