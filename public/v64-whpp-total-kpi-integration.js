@@ -1,5 +1,5 @@
 (function installWhppTotalKpiIntegrationV64(global) {
-  const VERSION = '2026-08-12-v64-whpp-total-kpi-integration-v2';
+  const VERSION = '2026-09-01-v407-normal-diversion-labels-v1';
   const summaryCache = new Map();
   let decorating = false;
   let timer = null;
@@ -137,6 +137,17 @@
     return [...document.querySelectorAll('#homePage .v18-core-grid .v18-metric-card')].find(card => String(card.querySelector('span')?.textContent || '').trim() === label);
   }
 
+  function normalizeDiversionLabels() {
+    const aliases = [
+      ['CECN滞留包裹', 'CCSLCN分流'],
+      ['CEZT滞留包裹', 'CCSLZT分流']
+    ];
+    for (const [legacy, canonical] of aliases) {
+      const card = metricCardByLabel(legacy);
+      if (card) setText(card.querySelector('span'), canonical);
+    }
+  }
+
   function baseValue(card, signature) {
     if (!card) return 0;
     if (card.dataset.v64BaseSignature !== signature) {
@@ -166,6 +177,7 @@
     if (!selectedSingleDay(data.reportDate)) return;
     const core = document.querySelector('#homePage .v18-core');
     if (!core) return;
+    normalizeDiversionLabels();
     const ccslTotal = homeCardValue('CE') + homeCardValue('CEAF空运') + homeCardValue('TBKH') + homeCardValue('ALI1688');
     const denominator = ccslTotal + Number(data.total || 0);
     const m = data.metrics || {};
@@ -185,8 +197,8 @@
     patchCountMetric('OC 2天+', m.oc2, denominator, signature);
     patchCountMetric('外省未完结POD件', data.regionPvUnresolved, denominator, signature);
     patchCountMetric('仓库自提件', data.selfPickup, denominator, signature);
-    patchCountMetric('CECN滞留包裹', m.ccslCnDiversion, denominator, signature);
-    patchCountMetric('CEZT滞留包裹', m.ccslZtDiversion, denominator, signature);
+    patchCountMetric('CCSLCN分流', m.ccslCnDiversion, denominator, signature);
+    patchCountMetric('CCSLZT分流', m.ccslZtDiversion, denominator, signature);
     patchCountMetric('580滞留包裹', m.ccsl580Retention, denominator, signature);
 
     const podCard = metricCardByLabel('今日POD');
