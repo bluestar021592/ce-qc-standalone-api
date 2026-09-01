@@ -5,16 +5,20 @@ import vm from 'node:vm';
 
 const read = relative => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
 
-test('V406 UI loader serves V169 after V168, keeps seven-business total sync, and retires redundant WHPP browser layers', () => {
+test('V410 UI loader serves atomic import truth then V409/V169 status chain and keeps retired WHPP layers out', () => {
   const loader = read('../src/v44WhppUiPatch.js');
+  const v146At = loader.indexOf('/v146-unified-import-date-status.js');
   const v168At = loader.indexOf('/v168-seven-business-status.js');
   const v169At = loader.indexOf('/v169-seven-business-legacy-status-sync.js');
 
-  assert.match(loader, /v406-retire-redundant-whpp-browser-layers-v1/);
+  assert.match(loader, /v410-atomic-import-light-status-loader-v1/);
   assert.match(loader, /WHPP_PAGE_OWNER='V132'/);
   assert.match(loader, /X-CE-QC-WHPP-Page-Owner/);
-  assert.ok(v168At >= 0, 'V168 canonical status script must be loaded');
+  assert.ok(v146At >= 0, 'V146 atomic import owner must be loaded');
+  assert.ok(v168At > v146At, 'V409 status owner must load after V146 pending-date truth');
   assert.ok(v169At > v168At, 'V169 completion guard must load after V168 canonical truth');
+  assert.match(loader, /v146-unified-import-date-status\.js\?v=20260901-v410-1/);
+  assert.match(loader, /v168-seven-business-status\.js\?v=20260901-v409-1/);
 
   for (const retired of [
     '/whpp-v44.js',
@@ -39,6 +43,40 @@ test('V406 UI loader serves V169 after V168, keeps seven-business total sync, an
   assert.match(totalSync, /fullUnique:\s*core\s*\+\s*whppTotal/);
   assert.match(totalSync, /日报导入完成，\\s\*共/);
   assert.match(totalSync, /state\.summary\s*=\s*\{[\s\S]*validUniqueWaybills:\s*core\s*\+\s*total/);
+});
+
+test('V409/V410 reproduce and prevent the 6668-vs-6748, stale-date, and Failed-to-fetch regressions', () => {
+  const importUi = read('../public/v146-unified-import-date-status.js');
+  const statusUi = read('../public/v168-seven-business-status.js');
+
+  const screenshotCounts = { CE:2339, CEAF:11, TBKH:2178, ALI1688:81, SHOPEECN:637, SHOPEEVN:1422, WHPP:80 };
+  assert.equal(Object.values(screenshotCounts).reduce((sum, value) => sum + value, 0), 6748);
+  assert.equal(screenshotCounts.CE + screenshotCounts.CEAF + screenshotCounts.TBKH + screenshotCounts.ALI1688 + screenshotCounts.SHOPEECN + screenshotCounts.SHOPEEVN, 6668);
+  assert.equal(6748 - 6668, screenshotCounts.WHPP);
+
+  assert.match(importUi, /v410-atomic-seven-business-visible-truth-v1/);
+  assert.match(importUi, /BUSINESS_TYPES=\['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'\]/);
+  assert.match(importUi, /function sevenBusinessTotal\(counts=\{\}\)\{return BUSINESS_TYPES\.reduce/);
+  assert.match(importUi, /validUniqueWaybills:total,sevenBusinessValidUniqueWaybills:total/);
+  assert.match(importUi, /UNIFIED_IMPORT_NOT_COMMITTED/);
+  assert.match(importUi, /status:409,statusText:'Unified import not committed'/);
+  assert.match(importUi, /committed=Boolean\(response\.ok&&payload\?\.ok===true&&payload\?\.importCommitted===true/);
+  assert.match(importUi, /callerResponse=response\.ok&&payload\?\.ok===true\?uncommittedResponse/);
+  assert.match(importUi, /callerResponse=responseWithPayload\(response,payload\)/);
+  assert.match(importUi, /七业务有效唯一单号/);
+
+  assert.match(statusUi, /v409-pending-date-light-status-v1/);
+  const pendingPos = statusUi.indexOf('const pending = pendingImportDate()');
+  const reportInputPos = statusUi.indexOf("document.getElementById('reportDate')?.value");
+  assert.ok(pendingPos >= 0 && reportInputPos > pendingPos, 'selected/pending report date must beat the previous committed reportDate input');
+  assert.match(statusUi, /__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__\?\.getPendingDate/);
+  assert.match(statusUi, /\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}&compact=1/);
+  assert.match(statusUi, /STATUS_ATTEMPTS = 2/);
+  assert.match(statusUi, /function transientStage/);
+  assert.match(statusUi, /statusFresh: false/);
+  assert.match(statusUi, /保留上一次真实进度并自动重试/);
+  assert.match(statusUi, /complete: stages\.every\(stage => stage\.state === 'done' && stage\.statusFresh !== false\)/);
+  assert.doesNotMatch(statusUi, /\/api\/whpp\/run\/start|\/api\/shopee\/run\/start/);
 });
 
 test('V408 home WHPP KPI reads canonical V132 summary and preserves normal-flow semantics', () => {
