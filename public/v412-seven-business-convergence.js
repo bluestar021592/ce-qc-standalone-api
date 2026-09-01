@@ -1,6 +1,6 @@
 (function installSevenBusinessConvergenceV412(global){
   if(global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__)return;
-  const VERSION='2026-09-01-v413-lifecycle-bound-seven-business-convergence-v1';
+  const VERSION='2026-09-01-v413-lifecycle-bound-seven-business-convergence-v2';
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const SELECTORS={CE:'ce',CEAF:'ceaf',TBKH:'tbkh',ALI1688:'ali1688',SHOPEECN:'shopeecn',SHOPEEVN:'shopeevn',WHPP:'whpp'};
   const WHPP_DONE_KEY='ce_qc_v412_whpp_done';
@@ -68,11 +68,14 @@
     const marker=readMarker();const key=lifecycleKey();
     return Boolean(marker?.completed===true&&key&&marker.lifecycleKey===key&&normalizeDate(marker.reportDate)===normalizeDate(target));
   }
+  function truthCurrentEnough(truth){
+    const checkedAt=Number(truth?.checkedAt||0);
+    return !minimumTruthCheckedAt||checkedAt>=minimumTruthCheckedAt;
+  }
   function learnWhppCompletion(){
     const truth=global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
     const date=normalizeDate(truth?.reportDate);
-    const checkedAt=Number(truth?.checkedAt||0);
-    if(minimumTruthCheckedAt&&checkedAt<minimumTruthCheckedAt)return false;
+    if(!truthCurrentEnough(truth))return false;
     if(date!==currentDate())return false;
     const whpp=(truth?.stages||[]).find(stage=>stage?.key==='WHPP');
     if(date&&whpp?.state==='done'&&whpp?.statusFresh!==false)return writeMarker(date,'V168_CANONICAL_DONE');
@@ -80,7 +83,7 @@
   }
   function exactFreshStagesDone(target){
     const truth=global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
-    if(normalizeDate(truth?.reportDate)!==target)return false;
+    if(normalizeDate(truth?.reportDate)!==target||!truthCurrentEnough(truth))return false;
     const stages=truth?.stages||[];
     const byKey=key=>stages.find(stage=>stage?.key===key);
     const ccsl=byKey('CCSL'),shopee=byKey('SHOPEE'),whpp=byKey('WHPP');
@@ -130,7 +133,7 @@
     document.addEventListener('change',event=>{if(event.target?.id==='excelFile')invalidateForNewLifecycle();},true);
     document.addEventListener('click',event=>{if(event.target?.closest?.('[data-testid="combined-daily-import"]'))invalidateForNewLifecycle();},true);
     global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__={version:VERSION,syncTotal,learnWhppCompletion,clearMarker,readMarker,markerMatches,lifecycleKey,sevenTotal};
-    console.info('[CE-QC][V413_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'seven-business total always includes WHPP; persisted WHPP completion is bound to the exact unified-import lifecycle key, stale pre-import V168 truth cannot recreate a completion lock, and new same-date imports must be freshly verified.');
+    console.info('[CE-QC][V413_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'seven-business total always includes WHPP; persisted WHPP completion is bound to the exact unified-import lifecycle key, stale pre-import V168 truth cannot recreate or satisfy a completion lock, and new same-date imports must be freshly verified.');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,40),{once:true});else setTimeout(install,40);
 })(window);
