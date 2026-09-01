@@ -46,14 +46,14 @@ function runtime(){
     Math,
     Promise,
     unifiedImportState:{
-      reportDate:'2026-08-16',
+      reportDate:'2026-08-30',
       snapshotId:'IMPORT-A',
-      classificationCounts:{CE:2069,CEAF:50,TBKH:1889,ALI1688:283,SHOPEECN:769,SHOPEEVN:0,WHPP:228},
-      summary:{validUniqueWaybills:5060,totalUnique:5060}
+      classificationCounts:{CE:4566,CEAF:42,TBKH:1,ALI1688:519,SHOPEECN:1366,SHOPEEVN:0,WHPP:121},
+      summary:{validUniqueWaybills:6494,totalUnique:6494}
     },
     __CE_QC_V168_SEVEN_BUSINESS_STATUS__:{
       lastTruth:{
-        reportDate:'2026-08-16',
+        reportDate:'2026-08-30',
         complete:true,
         statusFresh:true,
         checkedAt,
@@ -73,12 +73,12 @@ function runtime(){
   return {sandbox,listeners,get originalCalls(){return originalCalls;}};
 }
 
-test('V413 seven-business total includes WHPP instead of legacy six-business 5060',()=>{
+test('V413 exact 08-30 total includes WHPP 121: 6494 becomes 6615',()=>{
   const rt=runtime();
-  assert.equal(rt.sandbox.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__.sevenTotal(),5288);
-  assert.equal(rt.sandbox.unifiedImportState.summary.validUniqueWaybills,5288);
-  assert.equal(rt.sandbox.unifiedImportState.summary.totalUnique,5288);
-  assert.equal(rt.sandbox.unifiedImportState.sevenBusinessValidUniqueWaybills,5288);
+  assert.equal(rt.sandbox.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__.sevenTotal(),6615);
+  assert.equal(rt.sandbox.unifiedImportState.summary.validUniqueWaybills,6615);
+  assert.equal(rt.sandbox.unifiedImportState.summary.totalUnique,6615);
+  assert.equal(rt.sandbox.unifiedImportState.sevenBusinessValidUniqueWaybills,6615);
 });
 
 test('V413 blocks duplicate unified execution when exact lifecycle CCSL/SHOPEE/WHPP are already complete',async()=>{
@@ -103,7 +103,7 @@ test('V413 same-date new import cannot inherit stale prior lifecycle completion 
   const rt=runtime();
   assert.equal(rt.sandbox.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__.readMarker()?.lifecycleKey,'IMPORT-A');
   rt.sandbox.unifiedImportState.snapshotId='IMPORT-B';
-  for(const handler of rt.listeners.get('ce-qc-unified-import-committed')||[])handler({detail:{reportDate:'2026-08-16'}});
+  for(const handler of rt.listeners.get('ce-qc-unified-import-committed')||[])handler({detail:{reportDate:'2026-08-30'}});
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(rt.sandbox.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__.readMarker(),null,'stale V168 checkedAt must not recreate a marker for IMPORT-B');
@@ -120,7 +120,7 @@ test('V413 remains idempotent, reconciles import success text, and never owns pr
   assert.match(convergenceSource,/SEVEN_BUSINESS_ALREADY_COMPLETE_V413/);
   assert.match(convergenceSource,/lifecycleKey/);
   assert.match(convergenceSource,/truthCurrentEnough/);
-  assert.match(convergenceSource,/日报导入完成，[\\s\\S]*个唯一运单/,'legacy green import-success total must be rewritten to seven-business truth');
+  assert.match(convergenceSource,/日报导入完成，[\s\S]*个唯一运单/,'legacy green import-success total must be rewritten to seven-business truth');
   assert.match(convergenceSource,/patchText\(document\.getElementById\('importPage'\),total\)/,'all import-page success text owners must converge to the same total');
   assert.match(convergenceSource,/setTimeout\(runObservedSync,60\)/,'observer reconciliation must be throttled instead of running on every mutation');
   assert.match(convergenceSource,/String\(valid\.textContent\|\|''\)\.trim\(\)!==totalText/,'unchanged visible total must not rewrite DOM and retrigger its observer');
