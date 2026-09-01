@@ -7,10 +7,12 @@
   const FINALIZATION_ACK_REVISION = '2026-08-30-v360-whpp-current-run-finalization-ack-v1';
   const COMPLETION_STABILITY_REVISION = '2026-08-31-v396-sticky-three-stage-completion-v1';
   const IMPORT_CARRY_REFRESH_REVISION = '2026-08-31-v396-live-import-carry-refresh-v1';
+  const SHOPEE_RESTART_RECOVERY_REVISION = '2026-09-01-v67-shopee-process-restart-auto-resume-v1';
   // Source-only compatibility token for the stable gate: void execute('resume')
   // Runtime uses the awaited retryable handoff below so a failed WHPP continuation can retry.
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   const autoRecoveryDates = new Set();
+  const shopeeRestartRecoveryKeys = new Set();
   let busy = false;
   let autoRecoveryTimer = null;
 
@@ -107,6 +109,30 @@
   function noReport(error) {
     return ['WHPP_REPORT_MISSING','REPORT_MISSING','NO_DAILY_REPORT','REPORT_DATE_MISSING'].includes(String(error?.code || ''))
       || /未导入.*日报|没有.*日报/i.test(String(error?.message || ''));
+  }
+
+  function shopeeRestartInterruption(payload = {}, target = '') {
+    const diagnostic = payload?.diagnostic || {};
+    const lock = payload?.lock || {};
+    const values = [
+      diagnostic.errorMessage,
+      diagnostic.code,
+      diagnostic.ceMsg,
+      lock.errorMessage,
+      payload?.reason,
+      payload?.error,
+      payload?.message
+    ].map(value => String(value || '').trim()).filter(Boolean);
+    const marker = values.find(value => value.toUpperCase().includes('PROCESS_RESTART_INTERRUPTED')) || '';
+    const reportDate = normalizeDate(payload?.reportDate || target);
+    const key = [
+      reportDate,
+      String(lock.runId || ''),
+      String(lock.updatedAt || lock.lockedAt || ''),
+      String(payload?.lifecycleBoundary || ''),
+      'PROCESS_RESTART_INTERRUPTED'
+    ].join('|');
+    return { interrupted: Boolean(marker), marker, key, reportDate };
   }
 
   function statusNode() { return document.getElementById('ccslRunStatus'); }
@@ -375,7 +401,21 @@
       const ccsl = await canonicalStageTruth(ccslStage, target);
       if (!ccsl.done) return false;
       const shopee = await canonicalStageTruth(shopeeStage, target);
-      if (!shopee.done) return false;
+      if (!shopee.done) {
+        const restart = shopeeRestartInterruption(shopee.payload || {}, target);
+        if (!restart.interrupted || restart.reportDate !== target || shopeeRestartRecoveryKeys.has(restart.key)) return false;
+        shopeeRestartRecoveryKeys.add(restart.key);
+        setStatus(`检测到${target}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN/VN → WHPP本土…`);
+        console.info('[CE-QC][V67_SHOPEE_RESTART_RECOVERY]', {
+          revision: SHOPEE_RESTART_RECOVERY_REVISION,
+          reportDate: target,
+          runId: String(shopee.payload?.lock?.runId || ''),
+          lifecycleBoundary: String(shopee.payload?.lifecycleBoundary || ''),
+          reason
+        });
+        const result = await execute('resume');
+        return Boolean(result?.ok);
+      }
       const whpp = await canonicalStageTruth(whppStage, target);
       if (whpp.done) {
         global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = {
@@ -412,7 +452,10 @@
       if (document.visibilityState === 'visible') setTimeout(() => { void recoverPendingWhpp('visibility'); }, 250);
     });
     document.addEventListener('click', event => {
-      if (event.target?.closest?.('[data-testid="combined-daily-import"]')) clearCompletionLatch();
+      if (event.target?.closest?.('[data-testid="combined-daily-import"]')) {
+        clearCompletionLatch();
+        shopeeRestartRecoveryKeys.clear();
+      }
       if (event.target?.closest?.('[data-page="import"]')) setTimeout(() => { void recoverPendingWhpp('import-navigation'); }, 500);
     }, true);
     if (autoRecoveryTimer) clearInterval(autoRecoveryTimer);
@@ -498,6 +541,7 @@
       finalizationAckRevision: FINALIZATION_ACK_REVISION,
       completionStabilityRevision: COMPLETION_STABILITY_REVISION,
       importCarryRefreshRevision: IMPORT_CARRY_REFRESH_REVISION,
+      shopeeRestartRecoveryRevision: SHOPEE_RESTART_RECOVERY_REVISION,
       singleOwner: true,
       run: execute,
       targetDate,
@@ -506,10 +550,11 @@
       readWhppCompletionLock,
       refreshUnifiedImportRuntimeTruth,
       canonicalStageTruth,
+      shopeeRestartInterruption,
       recoverPendingWhpp
     };
     scheduleAutoRecovery();
-    console.info('[CE-QC][V396_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, RECOVERY_TRIGGER_REVISION, FINALIZATION_ACK_REVISION, COMPLETION_STABILITY_REVISION, IMPORT_CARRY_REFRESH_REVISION, 'V67 verifies a stage before showing it as active; persisted WHPP completion and same-page verified completion suppress duplicate auto-reentry; a new explicit daily import clears the local latch; completed runs refresh live today/historical OPEN counts from SQLite.');
+    console.info('[CE-QC][V396_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, RECOVERY_TRIGGER_REVISION, FINALIZATION_ACK_REVISION, COMPLETION_STABILITY_REVISION, IMPORT_CARRY_REFRESH_REVISION, SHOPEE_RESTART_RECOVERY_REVISION, 'V67 verifies a stage before showing it as active; exact PROCESS_RESTART_INTERRUPTED Shopee locks auto-resume once per lock revision through the same V67 executor, then continue to WHPP; generic failures remain fail-closed; persisted WHPP completion and same-page verified completion suppress duplicate auto-reentry; a new explicit daily import clears the local latch; completed runs refresh live today/historical OPEN counts from SQLite.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
