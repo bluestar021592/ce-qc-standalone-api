@@ -114,7 +114,7 @@ const v168=fs.readFileSync(new URL('../public/v168-seven-business-status.js',imp
 const v132=fs.readFileSync(new URL('../public/v132-whpp-seven-business-fast.js',import.meta.url),'utf8');
 const bootstrap=fs.readFileSync(new URL('../bootstrap.js',import.meta.url),'utf8');
 
-assert.match(v42,/2026-08-30-v366-seven-business-atomic-whpp-rehydrate-v2/,'real unified import owner must include atomic WHPP rehydration v2');
+assert.match(v42,/IDENTICAL_FINALIZED_WHPP_MEMBERSHIP_REUPLOAD_NOOP/,'real unified import owner must preserve an already completed WHPP lifecycle when the same membership is reuploaded');
 assert.match(v42,/const stageStatus = `STAGING:\$\{batchId\}`/,'new daily batch must start invisible as STAGING');
 assert.match(v42,/UPDATE unified_import_batches SET status='VALID' WHERE batchId=\? AND status=\?/,'STAGING batch must have one explicit VALID commit point');
 assert.match(v42,/FAILED_STAGING:/,'failed new-day writes must never become current VALID truth');
