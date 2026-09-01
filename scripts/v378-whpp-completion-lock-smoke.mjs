@@ -66,6 +66,24 @@ assert.match(source,/error\?\.code === 'WHPP_ALREADY_FINALIZED'/,
 assert.match(source,/accepted: false,[\s\S]*completed: true/,
   'duplicate finalized start must answer success without entering processing');
 
+const runner=fs.readFileSync(new URL('../public/v67-resilient-run-guard.js',import.meta.url),'utf8');
+assert.match(runner,/2026-08-31-v396-sticky-three-stage-completion-v1/,
+  'V396 must keep a verified same-page completion latch so the 2.5s watch cannot re-enter a finished lifecycle');
+assert.match(runner,/2026-08-31-v396-live-import-carry-refresh-v1/,
+  'V396 must refresh the import summary from live SQLite carry truth after all three stages finish');
+assert.match(runner,/async function readWhppCompletionLock\(target\)/,
+  'V67 must read the persisted V378 WHPP completion lock before trusting a transient summary');
+assert.match(runner,/if \(persistedLock\) return persistedLock;/,
+  'persisted WHPP completion must short-circuit transient summary lag');
+assert.match(runner,/completionLatchMatches\(target\)/,
+  'visible-import auto recovery must suppress same-page duplicate completion re-entry');
+assert.match(runner,/\[data-testid="combined-daily-import"\][\s\S]*clearCompletionLatch\(\)/,
+  'an explicit new daily import must clear only the browser completion latch so same-date reimports can run again');
+assert.match(runner,/\/api\/import\/unified-latest\?compact=1/,
+  'completed runs must reread current today/historical OPEN counts instead of leaving the import-time carry summary stale');
+assert.match(runner,/const truth = await canonicalStageTruth\(stage, target\);[\s\S]*if \(truth\.done\)[\s\S]*continue;[\s\S]*setUnifiedStage\(stage\.key, true, target\);/,
+  'a canonical-complete CCSL/SHOPEE/WHPP stage must never be painted as processing before its completion check');
+
 closeDb();
 fs.rmSync(root,{recursive:true,force:true});
-console.log('[V378] WHPP completion-lock smoke passed · persisted finalized daily is monotonic even across transient state-source mismatch · duplicate start/resume cannot re-enter processing · backend 5s supervisor cannot restart it · genuine same-date re-import clears the marker and unlocks the new lifecycle');
+console.log('[V396/V378] WHPP completion-lock + stable three-stage UI smoke passed · persisted finalized daily is monotonic · completed stages never flash as processing · same-page completion cannot auto-reenter · explicit reimport unlocks · live carry summary refresh is wired');
