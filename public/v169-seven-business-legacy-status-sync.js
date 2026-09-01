@@ -1,6 +1,6 @@
 (function installSevenBusinessLegacyStatusSyncV169(global){
   if(global.__CE_QC_V169_LEGACY_STATUS_SYNC__)return;
-  const VERSION='2026-09-01-v398-canonical-completion-ui-and-run-lock-v1';
+  const VERSION='2026-09-01-v400-canonical-completion-ui-and-entry-lock-v1';
   let observerTimer=null;
   const norm=value=>String(value||'').replace(/\s+/g,' ').trim();
   const normalizeDate=value=>{
@@ -10,6 +10,27 @@
 
   function canonicalTruth(){
     return global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
+  }
+
+  function currentTargetDate(){
+    const input=normalizeDate(document.getElementById('reportDate')?.value);
+    if(input)return input;
+    try{
+      const imported=normalizeDate(typeof unifiedImportState!=='undefined'?unifiedImportState?.reportDate:'');
+      if(imported)return imported;
+    }catch{}
+    const top=normalizeDate(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value);
+    if(top)return top;
+    return '';
+  }
+
+  function currentCompleteTruth(){
+    const truth=canonicalTruth();
+    if(!truth?.complete)return null;
+    const truthDate=normalizeDate(truth.reportDate);
+    const target=currentTargetDate();
+    if(target&&truthDate&&target!==truthDate)return null;
+    return truth;
   }
 
   function resumeButtons(){
@@ -93,19 +114,51 @@
     }
   }
 
+  function wrapUnifiedEntry(name){
+    const original=global[name];
+    if(typeof original!=='function'||original.__v169CanonicalCompletionGuard)return;
+    const guarded=function(){
+      const truth=currentCompleteTruth();
+      if(truth){
+        syncVerifiedRunLatch(truth);
+        lockResumeButtons(truth);
+        syncLegacyStatus(truth);
+        console.info('[CE-QC][V169]',name,'skipped because seven-business canonical truth is complete for',truth.reportDate||'current report');
+        return Promise.resolve({
+          ok:true,
+          skipped:true,
+          code:'SEVEN_BUSINESS_ALREADY_COMPLETE',
+          reportDate:normalizeDate(truth.reportDate),
+          complete:true
+        });
+      }
+      return original.apply(this,arguments);
+    };
+    guarded.__v169CanonicalCompletionGuard=true;
+    guarded.__v169Original=original;
+    global[name]=guarded;
+  }
+
+  function installEntryGuards(){
+    wrapUnifiedEntry('runUnified');
+    wrapUnifiedEntry('resumeUnified');
+  }
+
   function apply(){
+    installEntryGuards();
     const truth=canonicalTruth();
     if(!truth)return false;
     syncVerifiedRunLatch(truth);
-    if(truth.complete){
-      lockResumeButtons(truth);
-      syncLegacyStatus(truth);
+    const completeTruth=currentCompleteTruth();
+    if(completeTruth){
+      lockResumeButtons(completeTruth);
+      syncLegacyStatus(completeTruth);
     }else{
       unlockResumeButtons();
       restoreLegacyStatus();
     }
     global.__CE_QC_V138_CCSL_SCAN_PROGRESS__?.enforceLastTruth?.();
-    return Boolean(truth.complete);
+    return Boolean(completeTruth);
   }
 
   function refreshAndApply(){
@@ -120,6 +173,7 @@
   }
 
   function settle(){
+    installEntryGuards();
     refreshAndApply();
     let tries=0;
     const timer=setInterval(()=>{
@@ -137,6 +191,7 @@
   window.addEventListener('ce-qc:route-changed',settle);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
+  installEntryGuards();
   global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,apply,refresh:refreshAndApply};
-  console.info('[CE-QC][V169]',VERSION,'legacy WHPP route and V67 run latch follow V168 canonical completion truth; completed WHPP cannot re-enter from the continue CTA.');
+  console.info('[CE-QC][V169]',VERSION,'legacy status, continue CTA and both unified execution entries follow V168 canonical completion truth; completed WHPP cannot re-enter the same report lifecycle.');
 })(window);
