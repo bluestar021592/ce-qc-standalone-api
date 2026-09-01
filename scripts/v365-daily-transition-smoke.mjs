@@ -206,7 +206,8 @@ assert.match(v146,/classification-whpp/,'import result must visibly include WHPP
 assert.match(v146,/正在导入并确认七业务/,'long import must expose a single non-repeatable in-flight action');
 assert.match(v146,/__CE_QC_PENDING_IMPORT_DATE__/,'pending date must be observable without becoming canonical processing truth');
 assert.match(v44,/v146-unified-import-date-status\.js\?v=20260901-v410-1/,'HTML owner must force the browser to load the V410 atomic import UI instead of a cached older script');
-assert.match(v44,/v168-seven-business-status\.js\?v=20260901-v409-1/,'HTML owner must pair the V410 import date owner with the V409 lightweight status owner');
+assert.match(v44,/v168-seven-business-status\.js\?v=20260901-v411-1/,'HTML owner must pair the V410 import date owner with the V411 serialized status owner');
+assert.match(v44,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'HTML owner must load the V411 fail-closed unified entry guard after V168 status truth');
 
 const parserStart=v146.indexOf('  function validDate');
 const parserEnd=v146.indexOf('  function status');
@@ -229,4 +230,4 @@ assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require cano
 assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V410/V409/V365/V366/V379] exact daily transition + frontend fail-closed + backend request/file conflict guard + executable atomic persistence gate passed · 8-17.xls/08-17.xls/8月17日.xls resolve to 2026-08-17 · stale prior-day request cannot override the selected file · explicit manual correction remains available · visible totals include WHPP · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · WHPP remains final canonical stage');
+console.log('[V410/V411/V365/V366/V379] exact daily transition + frontend fail-closed + backend request/file conflict guard + executable atomic persistence gate passed · 8-17.xls/08-17.xls/8月17日.xls resolve to 2026-08-17 · stale prior-day request cannot override the selected file · explicit manual correction remains available · visible totals include WHPP · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · V411 serialized status and fail-closed entry lock remain active · WHPP remains final canonical stage');
