@@ -1,8 +1,12 @@
 (function installSevenBusinessLegacyStatusSyncV169(global){
   if(global.__CE_QC_V169_LEGACY_STATUS_SYNC__)return;
-  const VERSION='2026-09-01-v397-canonical-completion-ui-sync-v1';
+  const VERSION='2026-09-01-v398-canonical-completion-ui-and-run-lock-v1';
   let observerTimer=null;
   const norm=value=>String(value||'').replace(/\s+/g,' ').trim();
+  const normalizeDate=value=>{
+    const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';
+  };
 
   function canonicalTruth(){
     return global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
@@ -46,7 +50,7 @@
   }
 
   function syncLegacyStatus(truth){
-    const expected=String(truth.reportDate||'');
+    const expected=normalizeDate(truth.reportDate);
     const re=/^日报\s*(\d{4}-\d{2}-\d{2})\s*·\s*当前业务.*处理中$/;
     document.querySelectorAll('div,span,p').forEach(node=>{
       if(node.children?.length)return;
@@ -68,9 +72,31 @@
     });
   }
 
+  function syncVerifiedRunLatch(truth){
+    const reportDate=normalizeDate(truth?.reportDate);
+    if(!reportDate)return;
+    const existing=global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__||null;
+    if(truth.complete){
+      if(normalizeDate(existing?.reportDate)!==reportDate||existing?.owner!=='V67'){
+        global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__={
+          reportDate,
+          verifiedAt:Date.now(),
+          owner:'V67',
+          source:'V169_CANONICAL_SEVEN_BUSINESS_TRUTH',
+          canonicalUiLock:true
+        };
+      }
+      return;
+    }
+    if(normalizeDate(existing?.reportDate)===reportDate&&existing?.source==='V169_CANONICAL_SEVEN_BUSINESS_TRUTH'){
+      global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__=null;
+    }
+  }
+
   function apply(){
     const truth=canonicalTruth();
     if(!truth)return false;
+    syncVerifiedRunLatch(truth);
     if(truth.complete){
       lockResumeButtons(truth);
       syncLegacyStatus(truth);
@@ -112,5 +138,5 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,apply,refresh:refreshAndApply};
-  console.info('[CE-QC][V169]',VERSION,'legacy WHPP route status and continue CTA follow V168 canonical completion truth.');
+  console.info('[CE-QC][V169]',VERSION,'legacy WHPP route and V67 run latch follow V168 canonical completion truth; completed WHPP cannot re-enter from the continue CTA.');
 })(window);
