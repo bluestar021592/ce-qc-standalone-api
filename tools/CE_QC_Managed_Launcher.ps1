@@ -41,6 +41,24 @@ function Invoke-RemoteGit([string[]]$GitArguments, [switch]$AllowFailure) {
   Invoke-Exe $script:GitExe $args | Out-Null
 }
 
+function Test-PublicIPv4([string]$Address) {
+  $parsed = $null
+  if (-not [Net.IPAddress]::TryParse([string]$Address, [ref]$parsed)) { return $false }
+  if ($parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $false }
+  $b = $parsed.GetAddressBytes()
+  if ($b[0] -eq 0 -or $b[0] -eq 10 -or $b[0] -eq 127) { return $false }
+  if ($b[0] -eq 100 -and $b[1] -ge 64 -and $b[1] -le 127) { return $false }
+  if ($b[0] -eq 169 -and $b[1] -eq 254) { return $false }
+  if ($b[0] -eq 172 -and $b[1] -ge 16 -and $b[1] -le 31) { return $false }
+  if ($b[0] -eq 192 -and $b[1] -eq 168) { return $false }
+  if ($b[0] -eq 192 -and $b[1] -eq 0 -and $b[2] -eq 2) { return $false }
+  if ($b[0] -eq 198 -and ($b[1] -eq 18 -or $b[1] -eq 19)) { return $false }
+  if ($b[0] -eq 198 -and $b[1] -eq 51 -and $b[2] -eq 100) { return $false }
+  if ($b[0] -eq 203 -and $b[1] -eq 0 -and $b[2] -eq 113) { return $false }
+  if ($b[0] -ge 224) { return $false }
+  return $true
+}
+
 function Get-GitHubFallbackAddresses {
   $addresses = @()
   $resolve = Get-Command Resolve-DnsName -ErrorAction SilentlyContinue
@@ -50,13 +68,65 @@ function Get-GitHubFallbackAddresses {
       $rows = @(Resolve-DnsName github.com -Server $server -Type A -DnsOnly -QuickTimeout -ErrorAction Stop)
       foreach ($row in $rows) {
         $ip = [string]$row.IPAddress
-        if ($ip -match '^\d{1,3}(\.\d{1,3}){3}$') { $addresses += $ip }
+        if (Test-PublicIPv4 $ip) { $addresses += $ip }
       }
     } catch {
       Write-ManagedLog "[UPDATE] Explicit DNS query via $server failed; continuing fallback chain." DarkYellow
     }
   }
   return @($addresses | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+# V401: some office/ISP networks block direct UDP/TCP DNS (port 53) while HTTPS is
+# healthy. Query trusted DoH resolvers over 443 using literal resolver IPs and curl's
+# process-local --resolve, so this path itself does not depend on Windows DNS. TLS
+# still validates the resolver hostname. Returned GitHub addresses are validated and
+# used only through Git's process-local curloptResolve; system DNS/hosts stay untouched.
+function Get-GitHubDohFallbackAddresses {
+  $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+  if (-not $curl) {
+    Write-ManagedLog '[UPDATE] HTTPS DNS fallback unavailable because curl.exe was not found.' DarkYellow
+    return @()
+  }
+  $addresses = @()
+  $endpoints = @(
+    @{ Host='cloudflare-dns.com'; Ip='1.1.1.1'; Url='https://cloudflare-dns.com/dns-query?name=github.com&type=A' },
+    @{ Host='dns.google'; Ip='8.8.8.8'; Url='https://dns.google/resolve?name=github.com&type=A' }
+  )
+  foreach ($endpoint in $endpoints) {
+    try {
+      $resolveArg = "$($endpoint.Host):443:$($endpoint.Ip)"
+      $raw = (& $curl.Source '--silent' '--show-error' '--fail' '--connect-timeout' '4' '--max-time' '8' '--resolve' $resolveArg '-H' 'accept: application/dns-json' $endpoint.Url 2>$null | Out-String).Trim()
+      if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { throw 'DoH request failed.' }
+      $payload = $raw | ConvertFrom-Json -ErrorAction Stop
+      if ([int]$payload.Status -ne 0) { throw "DoH status $($payload.Status)" }
+      foreach ($answer in @($payload.Answer)) {
+        if ([int]$answer.type -ne 1) { continue }
+        $ip = ([string]$answer.data).Trim()
+        if (Test-PublicIPv4 $ip) { $addresses += $ip }
+      }
+      if ($addresses.Count -gt 0) {
+        Write-ManagedLog "[UPDATE] HTTPS DNS resolved github.com through $($endpoint.Host) without changing Windows DNS." DarkCyan
+      }
+    } catch {
+      Write-ManagedLog "[UPDATE] HTTPS DNS query via $($endpoint.Host) failed; continuing fallback chain." DarkYellow
+    }
+  }
+  return @($addresses | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+function Try-GitHubResolvedAddresses([string[]]$Addresses, [string]$SourceLabel) {
+  foreach ($ip in @($Addresses)) {
+    if (-not (Test-PublicIPv4 $ip)) { continue }
+    $script:GitHubCurlResolve = "github.com:443:$ip"
+    Write-ManagedLog "[UPDATE] Retrying GitHub through temporary $SourceLabel result $ip." DarkCyan
+    $code = Invoke-RemoteGit @('fetch','--quiet','origin','main') -AllowFailure
+    if ($code -eq 0) {
+      Write-ManagedLog "[UPDATE] GitHub fetch recovered through temporary $SourceLabel fallback." Green
+      return $true
+    }
+  }
+  return $false
 }
 
 function Invoke-ResilientGitHubFetch {
@@ -74,15 +144,12 @@ function Invoke-ResilientGitHubFetch {
   }
 
   $fallbackAddresses = @(Get-GitHubFallbackAddresses)
-  foreach ($ip in $fallbackAddresses) {
-    $script:GitHubCurlResolve = "github.com:443:$ip"
-    Write-ManagedLog "[UPDATE] Windows DNS still cannot reach GitHub; retrying through explicit DNS result $ip." DarkCyan
-    $code = Invoke-RemoteGit @('fetch','--quiet','origin','main') -AllowFailure
-    if ($code -eq 0) {
-      Write-ManagedLog '[UPDATE] GitHub fetch recovered through temporary explicit DNS fallback.' Green
-      return $true
-    }
-  }
+  if (Try-GitHubResolvedAddresses $fallbackAddresses 'explicit DNS') { return $true }
+
+  Write-ManagedLog '[UPDATE] Classic DNS fallback could not reach GitHub; trying HTTPS DNS (DoH) over port 443.' DarkCyan
+  $dohAddresses = @(Get-GitHubDohFallbackAddresses)
+  if (Try-GitHubResolvedAddresses $dohAddresses 'HTTPS DNS') { return $true }
+
   $script:GitHubCurlResolve = $null
   return $false
 }
@@ -208,7 +275,7 @@ function Invoke-SafeAutoUpdate {
   $current = Get-GitText @('rev-parse','HEAD')
   try {
     if (-not (Invoke-ResilientGitHubFetch)) {
-      Write-ManagedLog '[UPDATE] GitHub remains unreachable after retries and explicit DNS fallback; starting current installed version.' Yellow
+      Write-ManagedLog '[UPDATE] GitHub remains unreachable after retries, explicit DNS, and HTTPS DNS fallback; starting current installed version.' Yellow
       return
     }
   } catch {
