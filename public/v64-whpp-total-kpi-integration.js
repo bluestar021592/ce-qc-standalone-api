@@ -1,5 +1,5 @@
 (function installWhppTotalKpiIntegrationV64(global) {
-  const VERSION = '2026-09-01-v407-normal-diversion-labels-v1';
+  const VERSION = '2026-09-01-v408-canonical-v132-home-kpi-v1';
   const summaryCache = new Map();
   let decorating = false;
   let timer = null;
@@ -71,14 +71,21 @@
 
   async function readWhppSummary(reportDate) {
     const date = String(reportDate || '').slice(0, 10);
-    if (!date) return { reportDate: '', total: 0, metrics: {}, regionPvUnresolved: 0, activeStoreRetention: 0, selfPickup: 0 };
+    if (!date) return { reportDate: '', total: 0, metrics: {}, regions: {}, regionPvUnresolved: 0, activeStoreRetention: 0, selfPickup: 0 };
     const cached = summaryCache.get(date);
     if (cached && Date.now() - cached.at < 30000) return cached.value;
-    const response = await fetch(`/api/v71/whpp-summary?reportDate=${encodeURIComponent(date)}`, { cache: 'no-store', credentials: 'same-origin' });
+    const response = await fetch(`/api/v132/whpp-fast-summary?reportDate=${encodeURIComponent(date)}`, { cache: 'no-store', credentials: 'same-origin' });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
-    summaryCache.set(date, { at: Date.now(), value: payload });
-    return payload;
+    const metrics = payload.metrics || {};
+    const normalized = {
+      ...payload,
+      activeStoreRetention: Number(metrics.activeStoreRetention || 0),
+      selfPickup: Number(metrics.selfPickup || 0),
+      regionPvUnresolved: Number(payload.regions?.PV?.unresolved || 0)
+    };
+    summaryCache.set(date, { at: Date.now(), value: normalized });
+    return normalized;
   }
 
   function selectedReportDate() {
