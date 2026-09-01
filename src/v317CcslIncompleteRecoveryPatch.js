@@ -7,6 +7,7 @@ import { readV384CcslProcessingProof, V384_CCSL_PROCESSING_PROOF_ID } from './v3
 export const V317_CCSL_INCOMPLETE_RECOVERY_ID='2026-08-27-v333-selected-date-ccsl-recovery-v1';
 export const V377_CCSL_IMPORT_LIFECYCLE_ID='2026-08-31-v377-latest-valid-import-lifecycle-boundary-v2';
 export const V383_CCSL_RETROACTIVE_PROOF_ID='2026-08-31-v383-retroactive-ccsl-processing-proof-v1';
+export const V317_STATUS_PROOF_LAZY_ID='2026-09-01-v317-status-proof-lazy-until-completion-snapshot-v1';
 const V317_EXPLICIT_REPORT_DATE_HINT_REVISION='2026-08-29-v359-selected-report-date-runtime-hint-v1';
 const EXPLICIT_REPORT_DATE_HINT_TTL_MS=60_000;
 const originalPost=express.application.post;
@@ -59,6 +60,22 @@ export function ccslProcessingProof(db,reportDate,batch=null,sourceTotal=0){
   const proof=readV384CcslProcessingProof(db,{reportDate,snapshotId,boundary});
   return{...proof,version:V383_CCSL_RETROACTIVE_PROOF_ID,revision:V384_CCSL_PROCESSING_PROOF_ID,sourceTotal:total,snapshotId};
 }
+function pendingProcessingProof(batch,sourceTotal=0){
+  const total=Math.max(0,Number(sourceTotal||0));
+  return{
+    version:V383_CCSL_RETROACTIVE_PROOF_ID,
+    revision:V384_CCSL_PROCESSING_PROOF_ID,
+    statusFastPath:V317_STATUS_PROOF_LAZY_ID,
+    sourceTotal:total,
+    source:total,
+    covered:0,
+    missing:total,
+    complete:total===0,
+    snapshotId:String(batch?.snapshotId||''),
+    lifecycleBoundary:String(batch?.createdAt||''),
+    queryMode:total===0?'ZERO_TICKET_NO_PROOF_REQUIRED':'SKIPPED_UNTIL_COMPLETION_SNAPSHOT'
+  };
+}
 function retireStaleCcslRunPointers(db,reportDate,runId){
   const date=String(reportDate||'').trim(),id=String(runId||'').trim();
   if(!date||!id)return 0;
@@ -80,18 +97,24 @@ export function inspectV317ExplicitReportDateHint({maxAgeMs=EXPLICIT_REPORT_DATE
 
 export function inspectV317CcslRecovery({db=getDb(),reportDate=''}={}){
   const canonical=resolveDate(db),requested=String(reportDate||'').trim(),date=requested||canonical;
-  if(!date)return{ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,proofPolicy:V383_CCSL_RETROACTIVE_PROOF_ID,proofRevision:V384_CCSL_PROCESSING_PROOF_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,reportDate:'',dailyExists:false,sourceTotal:0,complete:false,paused:false,needsResume:false,action:'NO_DAILY',reason:'NO_CCSL_DAILY'};
+  if(!date)return{ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,statusFastPath:V317_STATUS_PROOF_LAZY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,proofPolicy:V383_CCSL_RETROACTIVE_PROOF_ID,proofRevision:V384_CCSL_PROCESSING_PROOF_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,reportDate:'',dailyExists:false,sourceTotal:0,complete:false,paused:false,needsResume:false,action:'NO_DAILY',reason:'NO_CCSL_DAILY'};
   const validBatch=latestValidUnifiedBatch(db,date),sourceTotal=ccslMemberCount(db,date,validBatch);
   const hasDaily=Boolean(validBatch)||sourceTotal>0||Boolean(db.prepare('SELECT 1 FROM daily_reports WHERE reportDate=? LIMIT 1').get(date));
   const rawLock=sourceTotal>0&&hasDaily?getRunStatus(date).lock:null;
   const lock=lockForCurrentImport(rawLock,validBatch),staleLockIgnored=Boolean(rawLock&&!lock&&validBatch?.createdAt);
   const rawSnapshot=sourceTotal>0&&hasDaily?latestValidSnapshot(db,date,lock?.runId||'',validBatch?.createdAt||''):null;
-  const processingProof=ccslProcessingProof(db,date,validBatch,sourceTotal);
+  // Status/start checks do not need to scan thousands of scan/final rows before a
+  // completion snapshot even exists. A current VALID completion snapshot is the
+  // only situation where V384 proof can possibly turn the stage into complete.
+  // Until then, return an explicit incomplete lightweight proof and let V67 run.
+  const processingProof=rawSnapshot
+    ?ccslProcessingProof(db,date,validBatch,sourceTotal)
+    :pendingProcessingProof(validBatch,sourceTotal);
   const rejectedLegacySnapshot=Boolean(rawSnapshot&&!processingProof.complete);
   const snapshot=rejectedLegacySnapshot?null:rawSnapshot;
   const decision=ccslRecoveryDecision({hasDaily,complete:Boolean(snapshot),lockStatus:lock?.status||'',validUnified:Boolean(validBatch),sourceTotal});
   return{
-    ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,proofPolicy:V383_CCSL_RETROACTIVE_PROOF_ID,proofRevision:V384_CCSL_PROCESSING_PROOF_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,
+    ok:true,version:V317_CCSL_INCOMPLETE_RECOVERY_ID,statusFastPath:V317_STATUS_PROOF_LAZY_ID,lifecyclePolicy:V377_CCSL_IMPORT_LIFECYCLE_ID,proofPolicy:V383_CCSL_RETROACTIVE_PROOF_ID,proofRevision:V384_CCSL_PROCESSING_PROOF_ID,policy:V317_CCSL_RECOVERY_POLICY_ID,
     reportDate:date,dailyExists:hasDaily,validUnified:Boolean(validBatch),sourceTotal,complete:decision.complete,paused:decision.paused,needsResume:decision.needsResume,action:decision.action,zeroTicketDay:Boolean(decision.zeroTicketDay),
     reason:decision.zeroTicketDay?'VALID_UNIFIED_ZERO_CCSL_TICKETS':(rejectedLegacySnapshot?'COMPLETED_SNAPSHOT_REJECTED_MISSING_PROCESSING_PROOF':(staleLockIgnored?'STALE_PRE_IMPORT_CCSL_RUN_IGNORED':'')),snapshotId:snapshot?.snapshotId||'',
     rejectedSnapshotId:rejectedLegacySnapshot?String(rawSnapshot?.snapshotId||''):'',processingProof,
@@ -133,7 +156,7 @@ express.application.post=function v317CcslIncompleteRecoveryPost(route,...handle
   return originalPost.call(this,route,...handlers);
 };
 
-console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,V377_CCSL_IMPORT_LIFECYCLE_ID,'pre-import run pointers are ignored for status and retired only when preparing the new run; old audit snapshots remain preserved.');
+console.info('[CE-QC][V317_CCSL_RECOVERY]',V317_CCSL_INCOMPLETE_RECOVERY_ID,V377_CCSL_IMPORT_LIFECYCLE_ID,V317_STATUS_PROOF_LAZY_ID,'status/start checks skip the expensive V384 member proof until a current completion snapshot exists; pre-import run pointers remain isolated and audit snapshots stay preserved.');
 console.info('[CE-QC][V383_CCSL_RETROACTIVE_PROOF]',V383_CCSL_RETROACTIVE_PROOF_ID,'existing COMPLETED snapshots are revalidated against current daily processing proof; rejected legacy snapshots are preserved read-only and their finished run is recoverable.');
 console.info('[CE-QC][V384_CCSL_PROCESSING_PROOF]',V384_CCSL_PROCESSING_PROOF_ID,'completion requires terminal scan/POD lock, or a successful same-lifecycle nonterminal scan followed by a non-retry same-lifecycle final trajectory result; scan-only placeholders, stale same-date evidence and API failures cannot close CCSL.');
 console.info('[CE-QC][V359_SELECTED_REPORT_DATE_HINT]',V317_EXPLICIT_REPORT_DATE_HINT_REVISION,'explicit browser status reads keep a short-lived in-memory selected-date hint so backend WHPP continuity can resume the exact visible date without scanning or guessing historical dates.');
