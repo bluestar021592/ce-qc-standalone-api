@@ -3,7 +3,7 @@ import { loadRangeDashboard as loadRangeDashboardV320 } from './rangeDashboardSt
 
 const CCSL_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688']);
 const SHOPEE_TYPES = Object.freeze(['SHOPEECN', 'SHOPEEVN']);
-const FINAL_RULE_VERSION = '2026-09-01-v401-v320-final-normal-flow-v1';
+const FINAL_RULE_VERSION = '2026-09-01-v402-v320-final-normal-flow-v2';
 
 /**
  * Final range-normalization layer.
@@ -65,8 +65,13 @@ function applyCcslState(state, adjustment) {
     shopOc: adjustment.shopOc
   };
 
+  // V320's single-day cache path intentionally returns a compact state and may
+  // omit legacy detail-tab shells. Preserve the public detail contract here
+  // without changing the V320 source truth or fabricating detail rows.
+  state.detailTabs = state.detailTabs || {};
   for (const key of ['coreAbnormal', 'abnormal']) {
-    if (state.detailTabs?.[key]) state.detailTabs[key].total = adjustment.dedicatedAbnormal;
+    state.detailTabs[key] = state.detailTabs[key] || { total: 0, rows: [] };
+    state.detailTabs[key].total = adjustment.dedicatedAbnormal;
   }
   normalizeCcslDashboardRows(state.detailTabs?.dashboard?.rows, adjustment);
 }
@@ -83,26 +88,39 @@ function applyShopeeState(state, rows, label) {
   const all = sumAdjustments(rows);
   const groups = state.dashboard.recipientGroups || {};
   const allMetrics = groups.ALL?.metrics || state.dashboard.metrics;
+  const appliedObjects = new Set();
+  const applyOnce = (target, adjustment) => {
+    if (!target || appliedObjects.has(target)) return;
+    appliedObjects.add(target);
+    applyShopeeMetrics(target, adjustment);
+  };
 
-  applyShopeeMetrics(allMetrics, all);
-  if (state.dashboard.metrics && state.dashboard.metrics !== allMetrics) applyShopeeMetrics(state.dashboard.metrics, all);
-
-  if (groups.CN?.metrics) applyShopeeMetrics(groups.CN.metrics, sumAdjustments(rows.filter(row => row.businessType === 'SHOPEECN')));
-  if (groups.VN?.metrics) applyShopeeMetrics(groups.VN.metrics, sumAdjustments(rows.filter(row => row.businessType === 'SHOPEEVN')));
+  // V236/V320 intentionally reuses object identity for dashboard.metrics,
+  // recipientGroups.ALL and (on a single CN/VN board) the matching CN/VN
+  // group. Apply the normal-flow subtraction by object identity, not by path,
+  // so one parcel can never be subtracted twice merely because aliases exist.
+  applyOnce(allMetrics, all);
+  applyOnce(state.dashboard.metrics, all);
+  applyOnce(groups.CN?.metrics, sumAdjustments(rows.filter(row => row.businessType === 'SHOPEECN')));
+  applyOnce(groups.VN?.metrics, sumAdjustments(rows.filter(row => row.businessType === 'SHOPEEVN')));
 
   for (const regionCode of ['PP', 'PV', 'UNKNOWN']) {
     const regionAdj = sumAdjustments(rows.filter(row => row.regionCode === regionCode));
     const allRegion = groups.ALL?.regions?.[regionCode] || state.dashboard.regions?.[regionCode];
-    if (allRegion) applyShopeeMetrics(allRegion, regionAdj);
-    if (state.dashboard.regions?.[regionCode] && state.dashboard.regions[regionCode] !== allRegion) {
-      applyShopeeMetrics(state.dashboard.regions[regionCode], regionAdj);
-    }
-    if (groups.CN?.regions?.[regionCode]) applyShopeeMetrics(groups.CN.regions[regionCode], sumAdjustments(rows.filter(row => row.businessType === 'SHOPEECN' && row.regionCode === regionCode)));
-    if (groups.VN?.regions?.[regionCode]) applyShopeeMetrics(groups.VN.regions[regionCode], sumAdjustments(rows.filter(row => row.businessType === 'SHOPEEVN' && row.regionCode === regionCode)));
+    applyOnce(allRegion, regionAdj);
+    applyOnce(state.dashboard.regions?.[regionCode], regionAdj);
+    applyOnce(groups.CN?.regions?.[regionCode], sumAdjustments(rows.filter(row => row.businessType === 'SHOPEECN' && row.regionCode === regionCode)));
+    applyOnce(groups.VN?.regions?.[regionCode], sumAdjustments(rows.filter(row => row.businessType === 'SHOPEEVN' && row.regionCode === regionCode)));
   }
 
-  if (state.detailTabs?.abnormal) state.detailTabs.abnormal.total = Number(allMetrics?.unresolved || 0);
-  if (state.dashboard.detailTabs?.abnormal) state.dashboard.detailTabs.abnormal.total = Number(allMetrics?.unresolved || 0);
+  const unresolved = Number(allMetrics?.unresolved || 0);
+  state.detailTabs = state.detailTabs || {};
+  state.detailTabs.abnormal = state.detailTabs.abnormal || { total: 0, rows: [] };
+  state.detailTabs.abnormal.total = unresolved;
+  if (state.dashboard.detailTabs) {
+    state.dashboard.detailTabs.abnormal = state.dashboard.detailTabs.abnormal || { total: 0, rows: [] };
+    state.dashboard.detailTabs.abnormal.total = unresolved;
+  }
   state.dashboard.finalAdjustment = { label, ...all };
 }
 
