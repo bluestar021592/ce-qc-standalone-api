@@ -19,15 +19,26 @@ const db=getDb();
 const date='2026-08-24';
 const now='2026-08-31T05:00:00.000Z';
 
+// Seed a coherent normalized WHPP daily exactly the same way a genuine import
+// does. Its original classificationSource deliberately is NOT a replay marker;
+// V397 must rely only on V366's explicit preserveFinalizedLifecycle intent.
+const seedState=saveWhppDailyImport({
+  reportDate:date,
+  sourceName:'8-24.xls',
+  rows:[{shipmentCode:'CE0001',classificationSource:'SHIPMENT_PREFIX',classificationMatchedValue:'CE'}],
+  batchId:'BATCH-0824-A',
+  snapshotId:'SOURCE-0824-A'
+});
+assert.equal(seedState.processing.phase,'待处理');
+assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count||0),1);
+
 const finalizedSummary={
-  batchId:'BATCH-0824-A',snapshotId:'SOURCE-0824-A',total:203,
+  batchId:'BATCH-0824-A',snapshotId:'SOURCE-0824-A',total:1,
   completed:true,snapshotStatus:'COMPLETED',reconciliationStatus:'COMPLETED',
   finalizedSnapshotId:'WHPP-FINAL-0824-A',finalizedAt:now
 };
-db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt)
-  VALUES(?,?,?,?,?,?,?)`).run('WHPP',date,'8-24.xls',203,JSON.stringify(finalizedSummary),now,now);
-
 const finalizedState={
+  ...seedState,
   businessType:'WHPP',
   reportDate:date,
   sourceName:'8-24.xls',
@@ -36,29 +47,23 @@ const finalizedState={
   snapshotId:'WHPP-FINAL-0824-A',
   snapshotStatus:'COMPLETED',
   dailyReportReady:true,
-  pnhBills:['CE0001'],
-  dailyParseRows:[{shipmentCode:'CE0001',classificationSource:'PRESERVED_WHPP_STANDARD_DAILY'}],
-  carryBills:[],
-  nextCarryBills:[],
-  podLocks:[],
-  scanResults:[],
-  scanQueryStatus:[],
-  trackEvents:[],
-  eventQueryStatus:[],
-  exceptionItems:[],
-  exceptionQueryStatus:[],
-  finalRows:[],
-  trackResults:[],
   processing:{running:false,paused:false,phase:'完成'},
   lastRunSummary:null,
   lastRun:null
 };
 db.prepare(`INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,payloadJson,generatedAt,createdAt)
   VALUES(?,?,?,?,?,?,?)`).run('WHPP-FINAL-0824-A','WHPP',date,'',JSON.stringify({state:finalizedState,status:'VALID',reconciliationStatus:'COMPLETED'}),now,now);
+db.prepare("UPDATE business_daily_reports SET summaryJson=?,updatedAt=? WHERE businessType='WHPP' AND reportDate=?")
+  .run(JSON.stringify(finalizedSummary),now,date);
+
+// Give the current shipment a nonterminal live fact. A rehydrate-only replay must
+// not regress it to PENDING_SCAN. A genuine direct re-import below is allowed to.
+db.prepare("UPDATE shipment_current_state SET state='IN_TRANSIT',apiStatus='SUCCESS',stateJson=?,updatedAt=? WHERE shipmentCode='CE0001'")
+  .run(JSON.stringify({marker:'KEEP_FINALIZED_FACT'}),now);
 
 // Simulate a cold process whose mutable WHPP state points somewhere else. The
 // persisted finalized daily + immutable snapshot must still be enough to restore
-// the exact completed lifecycle without touching membership/current/carry facts.
+// the exact completed lifecycle.
 saveWhppState({reportDate:'2026-08-25',dailyReportReady:true,processing:{running:false,paused:false,phase:'待处理'}});
 
 const sameLifecycle=inspectV378WhppCompletionLock(date,{reportDate:date,sourceSnapshotId:'SOURCE-0824-A'},db);
@@ -76,15 +81,15 @@ assert.equal(transientDifferentState.locked,true);
 assert.equal(transientDifferentState.reason,'CURRENT_DAILY_ALREADY_FINALIZED');
 
 // V366 can replay the already-normalized WHPP membership while staging a new
-// six-business unified snapshot. This is not a new WHPP import. It must restore
-// the immutable completed snapshot and leave the durable finalization marker
-// untouched even though V366 supplies a fresh batch/snapshot id.
+// six-business unified snapshot. The original row still says SHIPMENT_PREFIX;
+// only the explicit preserveFinalizedLifecycle flag identifies this as rehydrate.
 const replayState=saveWhppDailyImport({
   reportDate:date,
   sourceName:'8-24-replayed.xls',
-  rows:[{shipmentCode:'CE0001',classificationSource:'PRESERVED_WHPP_STANDARD_DAILY'}],
+  rows:[{shipmentCode:'CE0001',classificationSource:'SHIPMENT_PREFIX',classificationMatchedValue:'CE'}],
   batchId:'BATCH-0824-REPLAY',
-  snapshotId:'SOURCE-0824-REPLAY'
+  snapshotId:'SOURCE-0824-REPLAY',
+  preserveFinalizedLifecycle:true
 });
 assert.equal(replayState.reportDate,date);
 assert.equal(replayState.dailyReportReady,true);
@@ -100,13 +105,18 @@ assert.equal(replaySummary.completed,true);
 assert.equal(replaySummary.snapshotStatus,'COMPLETED');
 assert.equal(replaySummary.finalizedSnapshotId,'WHPP-FINAL-0824-A');
 assert.equal(replaySummary.snapshotId,'SOURCE-0824-A');
+const replayCurrent=db.prepare("SELECT state,apiStatus,stateJson FROM shipment_current_state WHERE shipmentCode='CE0001'").get();
+assert.equal(replayCurrent.state,'IN_TRANSIT','rehydrate-only replay must not regress live state to PENDING_SCAN');
+assert.equal(replayCurrent.apiStatus,'SUCCESS');
+assert.equal(JSON.parse(replayCurrent.stateJson).marker,'KEEP_FINALIZED_FACT');
+assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count||0),1,'rehydrate-only replay must not rewrite normalized membership');
 
-// A genuine direct parser same-date re-import is authoritative and is still
-// allowed to open a new lifecycle by durably replacing the old completion marker.
+// A genuine direct parser same-date re-import is authoritative. It omits the
+// preserve flag, durably replaces the old completion marker and opens a new run.
 const directState=saveWhppDailyImport({
   reportDate:date,
   sourceName:'8-24-direct.xls',
-  rows:[{shipmentCode:'CE0001',classificationSource:'DIRECT_PARSER_WHPP_DAILY_IMPORT'}],
+  rows:[{shipmentCode:'CE0001',classificationSource:'SHIPMENT_PREFIX',classificationMatchedValue:'CE'}],
   batchId:'BATCH-0824-B',
   snapshotId:'SOURCE-0824-B'
 });
@@ -121,6 +131,7 @@ const directSummary=JSON.parse(db.prepare("SELECT summaryJson FROM business_dail
 assert.equal(directSummary.snapshotId,'SOURCE-0824-B');
 assert.equal(directSummary.completed,undefined);
 assert.equal(directSummary.finalizedSnapshotId,undefined);
+assert.equal(db.prepare("SELECT state FROM shipment_current_state WHERE shipmentCode='CE0001'").get()?.state,'PENDING_SCAN','genuine direct re-import may open a fresh nonterminal lifecycle');
 
 const source=fs.readFileSync(new URL('../src/v134WhppRunSupervisorPatch.js',import.meta.url),'utf8');
 assert.match(source,/V378_WHPP_COMPLETION_LOCK_REVISION/);
@@ -138,12 +149,22 @@ assert.match(source,/accepted: false,[\s\S]*completed: true/,
   'duplicate finalized start must answer success without entering processing');
 
 const store=fs.readFileSync(new URL('../src/whppStore.js',import.meta.url),'utf8');
-assert.match(store,/PRESERVED_WHPP_STANDARD_DAILY/,
-  'V366 preserved-membership replay must be distinguishable from a genuine direct WHPP import');
+assert.match(store,/preserveFinalizedLifecycle = false/,
+  'WHPP storage must require explicit rehydrate intent instead of inferring it from mutable row fields');
+assert.match(store,/if \(preserveFinalizedLifecycle === true\)/,
+  'only an explicit V366 rehydrate may preserve a finalized lifecycle');
 assert.match(store,/WHPP_FINALIZED_REHYDRATE_SNAPSHOT_MISSING/,
   'missing immutable completion evidence must fail closed instead of reopening WHPP');
 assert.match(store,/WHPP_FINALIZED_REHYDRATE_NOOP/,
   'completed preserved membership must restore immutable state without rewriting the daily lifecycle');
+
+const importer=fs.readFileSync(new URL('../src/v42WhppPatch.js',import.meta.url),'utf8');
+assert.match(importer,/preserveFinalizedLifecycle:\s*true/,
+  'V366 preserved-membership branch must explicitly request finalized lifecycle preservation');
+assert.match(importer,/const whppLifecycleChanged = !\(preservedWhpp\.present && String\(whppState\.snapshotStatus \|\| ''\)\.toUpperCase\(\) === 'COMPLETED'\)/,
+  'V366 must distinguish a finalized no-op replay from an incomplete/new WHPP lifecycle');
+assert.match(importer,/invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged: whppLifecycleChanged \}\)/,
+  'V366 must not delete WHPP run/history pointers when the finalized lifecycle was preserved');
 
 const runner=fs.readFileSync(new URL('../public/v67-resilient-run-guard.js',import.meta.url),'utf8');
 assert.match(runner,/2026-08-31-v396-sticky-three-stage-completion-v1/,
@@ -165,4 +186,4 @@ assert.match(runner,/const truth = await canonicalStageTruth\(stage, target\);[\
 
 closeDb();
 fs.rmSync(root,{recursive:true,force:true});
-console.log('[V397/V396/V378] WHPP finalized replay lock passed · V366 membership replay is a no-op · immutable completed state restores on cold start · genuine direct re-import alone unlocks · completed stages cannot auto-reenter');
+console.log('[V397/V396/V378] WHPP finalized replay lock passed · V366 explicit rehydrate is a no-op · completed live facts stay immutable · cold start restores final snapshot · genuine direct re-import alone unlocks · completed stages cannot auto-reenter');
