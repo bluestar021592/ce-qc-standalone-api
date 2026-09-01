@@ -143,7 +143,10 @@ assert.doesNotMatch(injection,/if\(!body\.includes\(V317_CCSL_RECOVERY_MARKER\)\
 assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must still load V334 history hard owner');
 assert.match(injection,/X-CE-QC-Unified-Runner/,'single-runner response header must be observable');
 
-assert.match(htmlOwner,/2026-09-01-v400-seven-business-completion-loader-v1/,'HTML owner must expose the current V400 completion-loader build identity');
+assert.match(htmlOwner,/2026-09-01-v406-retire-redundant-whpp-browser-layers-v1/,'HTML owner must expose the current V406 runtime-cleanup build identity');
+assert.match(htmlOwner,/WHPP_PAGE_OWNER='V132'/,'V132 must remain the sole WHPP page owner');
+assert.match(htmlOwner,/X-CE-QC-WHPP-Page-Owner/,'WHPP page ownership must be observable in the HTML response');
+assert.doesNotMatch(htmlOwner,/\/whpp-v44\.js|\/whpp-v45-cleanup\.js|\/whpp-v47-auto-run\.js|\/v52-whpp-source-truth-route\.js|\/v72-whpp-light-state-bridge\.js|\/v103-home-whpp-card-guard\.js/,'retired WHPP browser layers must not re-enter the live loader');
 assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'browser must load the V338 CCSL 350/50 detail owner');
 assert.match(htmlOwner,/v67-resilient-run-guard\.js\?v=20260830-v360-1/,'browser must load the current V360 V67 runner without stale static cache');
 assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260830-v360-1/,'browser must load the current V360 status-only V168 owner without stale static cache');
@@ -154,4 +157,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V400/V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · explicit date precedence gate is formatting-independent · exact stale CCSL run pointers may retire while facts/audit remain immutable · V67 remains sole execution owner while V169 synchronizes verified completion UI · scan=350 · trajectory=50');
+console.log('[V406/V400/V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · explicit date precedence gate is formatting-independent · exact stale CCSL run pointers may retire while facts/audit remain immutable · V67 remains sole execution owner while V169 synchronizes verified completion UI · V132 solely owns WHPP page · retired WHPP browser layers stay out · scan=350 · trajectory=50');
