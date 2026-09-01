@@ -6,6 +6,7 @@ import { buildSnapshotHashes } from './snapshotHash.js';
 import { persistPendingDailyMembers } from './pendingDays.js';
 
 export const SHOPEE = 'SHOPEE';
+export const BUSINESS_RUNTIME_CHECKPOINT_REVISION = '2026-09-01-shopee-lightweight-runtime-checkpoint-v1';
 
 export function loadBusinessState(businessType = SHOPEE) {
   const type = normalizeType(businessType);
@@ -39,6 +40,7 @@ export function saveBusinessState(state = {}, businessType = state.businessType 
   const startedAt = Date.now();
   const type = normalizeType(businessType);
   const normalized = restrictShopeeState(normalizeBusinessState(state, type), type);
+  const runtimeCheckpoint = isRuntimeCheckpointActive(normalized);
   const persisted = compactBusinessStatePayload(normalized);
   const serializeStartedAt = Date.now();
   const persistedJson = JSON.stringify(persisted);
@@ -50,14 +52,15 @@ export function saveBusinessState(state = {}, businessType = state.businessType 
     db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
       ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
       .run(type, persistedJson, now);
-    mirrorBusinessTables(db, normalized, type, now);
+    if (runtimeCheckpoint) mirrorBusinessRuntimeCheckpoint(db, normalized, type, now);
+    else mirrorBusinessTables(db, normalized, type, now);
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
-    console.warn(`[CE-QC][BUSINESS_STATE_STAGE] save_failed type=${type} elapsedMs=${Date.now() - startedAt} serializeMs=${serializeMs} priorCarry=${normalized.priorCarryRows.length} error=${error?.message || error}`);
+    console.warn(`[CE-QC][BUSINESS_STATE_STAGE] save_failed type=${type} elapsedMs=${Date.now() - startedAt} serializeMs=${serializeMs} runtimeCheckpoint=${runtimeCheckpoint ? 1 : 0} priorCarry=${normalized.priorCarryRows.length} error=${error?.message || error}`);
     throw error;
   }
-  console.info(`[CE-QC][BUSINESS_STATE_STAGE] save_done type=${type} elapsedMs=${Date.now() - startedAt} serializeMs=${serializeMs} bytes=${Buffer.byteLength(persistedJson,'utf8')} priorCarry=${normalized.priorCarryRows.length} activeCarry=${normalized.nextCarryBills.length || normalized.carryBills.length}`);
+  console.info(`[CE-QC][BUSINESS_STATE_STAGE] ${runtimeCheckpoint ? 'checkpoint_done' : 'save_done'} type=${type} revision=${BUSINESS_RUNTIME_CHECKPOINT_REVISION} elapsedMs=${Date.now() - startedAt} serializeMs=${serializeMs} bytes=${Buffer.byteLength(persistedJson,'utf8')} priorCarry=${normalized.priorCarryRows.length} activeCarry=${normalized.nextCarryBills.length || normalized.carryBills.length}`);
   return normalized;
 }
 
@@ -135,7 +138,7 @@ export function saveBusinessSnapshot(businessType, state, view) {
   const snapshotId = `${type}_${reportDate}_${runId}_${randomUUID().slice(0, 8)}`;
   const generatedAt = nowIso();
   const snapshotState = {
-    ...compactBusinessStatePayload(normalizeBusinessState(state, type)),
+    ...compactBusinessStatePayload(normalizeBusinessState(state, type), false),
     businessType: type,
     snapshotId,
     // Keep final rows in the immutable snapshot for count/reconciliation checks,
@@ -227,7 +230,6 @@ export function loadBusinessDetail(businessType, reportDate, shipmentCode) {
   };
 }
 
-
 function parseJsonSafe(value, fallback = null) {
   if (value == null || value === '') return fallback;
   try { return typeof value === 'string' ? JSON.parse(value) : value; } catch { return fallback; }
@@ -236,8 +238,9 @@ function parseJsonSafe(value, fallback = null) {
 function stripHeavyBusinessRow(row = {}) {
   if (!row || typeof row !== 'object') return row;
   const copy = { ...row };
-  // Raw API bodies remain available in the normalized scan/event tables. Do not
-  // duplicate them inside state/snapshot JSON where they multiply memory usage.
+  // Raw API bodies remain available in the normalized scan/event tables after
+  // finalization. Runtime checkpoints keep only the normalized evidence needed
+  // for exact resume, so they cannot grow back into the legacy giant JSON state.
   delete copy.rawJson;
   delete copy.raw;
   delete copy.events;
@@ -247,7 +250,11 @@ function stripHeavyBusinessRow(row = {}) {
   return copy;
 }
 
-function compactBusinessStatePayload(state = {}) {
+function isRuntimeCheckpointActive(state = {}) {
+  return Boolean(state?.processing?.running === true || state?.processing?.paused === true);
+}
+
+function compactBusinessStatePayload(state = {}, preserveRuntimeEvidence = isRuntimeCheckpointActive(state)) {
   const summary = state.dailyParseSummary || state.daily?.summary || null;
   const compactDaily = state.daily ? {
     reportDate: state.reportDate || state.daily.reportDate || '',
@@ -255,24 +262,25 @@ function compactBusinessStatePayload(state = {}) {
     importedAt: state.daily.importedAt || summary?.importedAt || '',
     summary
   } : null;
+  const rows = key => preserveRuntimeEvidence ? (state[key] || []).map(stripHeavyBusinessRow) : [];
+  const statuses = key => preserveRuntimeEvidence ? (state[key] || []).map(stripHeavyBusinessRow) : [];
   return {
     ...state,
     daily: compactDaily,
     dailyParseRows: [],
     recipientConflicts: [],
-    scanResults: [],
-    scanQueryStatus: [],
-    shipmentTrackResults: [],
-    shipmentQueryStatus: [],
-    trackEvents: [],
-    eventQueryStatus: [],
-    exceptionItems: [],
-    exceptionQueryStatus: [],
-    apiBatchStatus: [],
-    // Track results are the only large-ish array retained because they are the
-    // resume checkpoint after an event batch. Strip embedded raw scan bodies.
+    scanResults: rows('scanResults'),
+    scanQueryStatus: statuses('scanQueryStatus'),
+    shipmentTrackResults: rows('shipmentTrackResults'),
+    shipmentQueryStatus: statuses('shipmentQueryStatus'),
+    trackEvents: rows('trackEvents'),
+    eventQueryStatus: statuses('eventQueryStatus'),
+    exceptionItems: rows('exceptionItems'),
+    exceptionQueryStatus: statuses('exceptionQueryStatus'),
+    apiBatchStatus: statuses('apiBatchStatus'),
+    // Track results are the analysis/resume checkpoint after event batches.
     trackResults: (state.trackResults || []).map(stripHeavyBusinessRow),
-    finalRows: [],
+    finalRows: preserveRuntimeEvidence ? (state.finalRows || []).map(stripHeavyBusinessRow) : [],
     priorCarryRows: (state.priorCarryRows || []).map(stripHeavyBusinessRow)
   };
 }
@@ -288,6 +296,12 @@ function rowsFromJson(db, sql, params = [], field = 'rawJson') {
   }
 }
 
+function preferRuntimeRows(state, key, tableRows, runtimeActive) {
+  const checkpointRows = Array.isArray(state?.[key]) ? state[key] : [];
+  if (runtimeActive && checkpointRows.length) return checkpointRows.map(stripHeavyBusinessRow);
+  return tableRows;
+}
+
 function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
   let date = String(state.reportDate || '').trim();
   if (!date) {
@@ -299,35 +313,42 @@ function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
 
   const report = db.prepare('SELECT sourceFile,totalCount,summaryJson FROM business_daily_reports WHERE businessType=? AND reportDate=?').get(type, date);
   const dailySummary = parseJsonSafe(report?.summaryJson, state.dailyParseSummary || null);
+  const run = db.prepare('SELECT * FROM business_run_locks WHERE businessType=? AND reportDate=?').get(type, date) || null;
+  const runtimeActive = Boolean(run && ['running', 'paused'].includes(String(run.status || '').toLowerCase()));
   const dailyRows = rowsFromJson(db,
     'SELECT rowJson FROM business_daily_parse_rows WHERE businessType=? AND reportDate=? ORDER BY id',
     [type, date], 'rowJson');
-  const scanResults = rowsFromJson(db,
+  const scanTableRows = (!runtimeActive || !(state.scanResults || []).length) ? rowsFromJson(db,
     'SELECT rawJson FROM business_scan_results WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
-    [type, date]);
-  const shipmentTrackResults = rowsFromJson(db,
+    [type, date]) : [];
+  const shipmentTableRows = (!runtimeActive || !(state.shipmentTrackResults || []).length) ? rowsFromJson(db,
     'SELECT rawJson FROM business_shipment_tracks WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
-    [type, date]);
-  const trackEvents = rowsFromJson(db,
+    [type, date]) : [];
+  const eventTableRows = (!runtimeActive || !(state.trackEvents || []).length) ? rowsFromJson(db,
     'SELECT rawJson FROM business_track_events WHERE businessType=? AND reportDate=? ORDER BY eventTime,id',
-    [type, date]);
-  const exceptionItems = rowsFromJson(db,
+    [type, date]) : [];
+  const exceptionTableRows = (!runtimeActive || !(state.exceptionItems || []).length) ? rowsFromJson(db,
     'SELECT rawJson FROM business_exception_items WHERE businessType=? AND reportDate=? ORDER BY reportTime,id',
-    [type, date]);
-  const finalRows = rowsFromJson(db,
+    [type, date]) : [];
+  const finalTableRows = (!runtimeActive || !(state.finalRows || []).length) ? rowsFromJson(db,
     'SELECT rawJson FROM business_final_rows WHERE businessType=? AND reportDate=? ORDER BY shipmentCode',
-    [type, date]);
+    [type, date]) : [];
+  const scanResults = preferRuntimeRows(state, 'scanResults', scanTableRows, runtimeActive);
+  const shipmentTrackResults = preferRuntimeRows(state, 'shipmentTrackResults', shipmentTableRows, runtimeActive);
+  const trackEvents = preferRuntimeRows(state, 'trackEvents', eventTableRows, runtimeActive);
+  const exceptionItems = preferRuntimeRows(state, 'exceptionItems', exceptionTableRows, runtimeActive);
+  const finalRows = preferRuntimeRows(state, 'finalRows', finalTableRows, runtimeActive);
 
   const conflictRows = db.prepare('SELECT shipmentCode,groupsJson,rowsJson,status FROM business_recipient_conflicts WHERE businessType=? AND reportDate=? ORDER BY id').all(type, date)
     .map(row => ({ shipmentCode: row.shipmentCode, groups: parseJsonSafe(row.groupsJson, []), rows: parseJsonSafe(row.rowsJson, []), status: row.status || '' }));
-  const apiBatchStatus = db.prepare('SELECT runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt FROM business_api_batches WHERE businessType=? AND reportDate=? ORDER BY updatedAt').all(type, date)
-    .map(row => ({ ...row, shipmentCodes: parseJsonSafe(row.shipmentCodesJson, []) }));
-  const podLocks = db.prepare('SELECT shipmentCode FROM business_pod_locks WHERE businessType=? ORDER BY shipmentCode').all(type).map(row => row.shipmentCode);
+  const tableApiBatchStatus = (!runtimeActive || !(state.apiBatchStatus || []).length) ? db.prepare('SELECT runId,apiName,batchKey,shipmentCodesJson,status,attemptCount,resultCount,errorMessage,createdAt,updatedAt FROM business_api_batches WHERE businessType=? AND reportDate=? ORDER BY updatedAt').all(type, date)
+    .map(row => ({ ...row, shipmentCodes: parseJsonSafe(row.shipmentCodesJson, []) })) : [];
+  const apiBatchStatus = runtimeActive && (state.apiBatchStatus || []).length ? state.apiBatchStatus : tableApiBatchStatus;
+  const podLocksFromDb = db.prepare('SELECT shipmentCode FROM business_pod_locks WHERE businessType=? ORDER BY shipmentCode').all(type).map(row => row.shipmentCode);
+  const podLocks = [...new Set([...(state.podLocks || []), ...podLocksFromDb])];
   // Only unresolved carry belongs in the mutable current state. Loading every
   // historical carry row forced large installations to read/JSON-parse months of
-  // closed history whenever a new Shopee day was imported or started. The schema
-  // already has idx_business_carry_active(businessType,status,shipmentCode), so
-  // keep this hydration strictly on the indexed active subset.
+  // closed history whenever a new Shopee day was imported or started.
   const carryRowsRaw = rowsFromJson(db,
     "SELECT rawJson FROM business_carry_bills WHERE businessType=? AND status='active' ORDER BY updatedAt DESC",
     [type]);
@@ -338,7 +359,6 @@ function hydrateBusinessStateFromTables(db, state = {}, type = SHOPEE) {
   }
   const carryRows = [...carryByBill.values()];
   const carryBills = carryRows.map(billOf).filter(Boolean);
-  const run = db.prepare('SELECT * FROM business_run_locks WHERE businessType=? AND reportDate=?').get(type, date) || null;
   const historyRows = db.prepare('SELECT summaryJson FROM business_history_summary WHERE businessType=? ORDER BY reportDate DESC LIMIT 30').all(type)
     .map(row => parseJsonSafe(row.summaryJson, null)).filter(Boolean).reverse();
   const latestSnapshot = db.prepare("SELECT snapshotId FROM business_export_snapshots WHERE businessType=? AND reportDate=? AND COALESCE(status,'VALID')='VALID' ORDER BY id DESC LIMIT 1").get(type, date);
@@ -435,6 +455,19 @@ function restrictShopeeState(state, type) {
   };
 }
 
+function mirrorBusinessRuntimeCheckpoint(db, state, type, now) {
+  const date = String(state.reportDate || '').trim();
+  const run = state.currentRun || state.lastRunSummary || null;
+  const podStmt = db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt) VALUES(?,?,?,'runtime_checkpoint',?,?)
+    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET updatedAt=excluded.updatedAt`);
+  for (const bill of state.podLocks || []) podStmt.run(type, bill, '', now, now);
+  if (!date || !run?.runId) return;
+  db.prepare(`UPDATE business_run_locks SET currentStage=?,batchIndex=?,totalBatches=?,errorMessage=?,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=?`)
+    .run(state.processing.phase || '', Number(state.processing.batchIndex || 0), Number(state.processing.totalBatches || 0), state.processing.error || '', now, type, date, run.runId);
+  db.prepare('INSERT INTO business_run_checkpoints(businessType,runId,reportDate,stage,batchIndex,totalBatches,status,payloadJson,errorMessage,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run(type, run.runId, date, state.processing.phase || '', Number(state.processing.batchIndex || 0), Number(state.processing.totalBatches || 0), state.processing.running ? 'running' : (state.processing.paused ? 'paused' : 'saved'), JSON.stringify({ scanDone: state.scanResults.length, trackDone: state.trackResults.length, eventsDone: state.trackEvents.length, exceptionsDone: state.exceptionItems.length, revision: BUSINESS_RUNTIME_CHECKPOINT_REVISION }), state.processing.error || '', now, now);
+}
+
 function mirrorBusinessTables(db, state, type, now) {
   const date = state.reportDate;
   if (date && state.dailyReportReady) {
@@ -521,10 +554,10 @@ function mirrorBusinessTables(db, state, type, now) {
       throw error;
     }
     batchStmt.run(
-    type, date, row.runId, row.apiName || '', row.batchKey || '', JSON.stringify(row.shipmentCodes || []), row.status || '',
-    Number(row.attemptCount || 0), Number(row.resultCount || 0), row.errorMessage || '', row.createdAt || now, now,
-    row.payloadHash || '', Number(row.shipmentCount || (row.shipmentCodes || []).length), row.firstShipmentCode || '', row.lastShipmentCode || '',
-    row.updatedAt || now, row.createdAt || now, ['success', 'failed'].includes(row.status) ? (row.updatedAt || now) : ''
+      type, date, row.runId, row.apiName || '', row.batchKey || '', JSON.stringify(row.shipmentCodes || []), row.status || '',
+      Number(row.attemptCount || 0), Number(row.resultCount || 0), row.errorMessage || '', row.createdAt || now, now,
+      row.payloadHash || '', Number(row.shipmentCount || (row.shipmentCodes || []).length), row.firstShipmentCode || '', row.lastShipmentCode || '',
+      row.updatedAt || now, row.createdAt || now, ['success', 'failed'].includes(row.status) ? (row.updatedAt || now) : ''
     );
   }
   db.prepare('DELETE FROM business_final_rows WHERE businessType=? AND reportDate=?').run(type, date);
