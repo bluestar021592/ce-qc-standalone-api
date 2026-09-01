@@ -12,7 +12,7 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb, nowIso } from './db.js';
 
-const PATCH_ID = '2026-08-30-v366-seven-business-atomic-whpp-rehydrate-v2';
+const PATCH_ID = '2026-09-01-v399-identical-finalized-whpp-reupload-v1';
 const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const ALL_TYPES = [...CORE_TYPES, WHPP];
@@ -403,10 +403,11 @@ async function handleUnifiedImportV42(req, res) {
       });
       effectiveWhppCount = whppRows.length;
       whppImportSource = whppRows.length ? 'DIRECT_PARSER_WHPP_DAILY_IMPORT' : 'DIRECT_CONFIRMED_ZERO_WHPP_DAILY_IMPORT';
+      if (whppState.finalizedLifecyclePreserved === true) whppImportSource = 'IDENTICAL_FINALIZED_WHPP_MEMBERSHIP_REUPLOAD_NOOP';
     }
     console.log(`[CE-QC][V366_IMPORT_STAGE] whpp_ready reportDate=${parsed.reportDate} whpp=${effectiveWhppCount} source=${whppImportSource} elapsedMs=${Date.now() - startedAt}`);
 
-    const whppLifecycleChanged = !(preservedWhpp.present && String(whppState.snapshotStatus || '').toUpperCase() === 'COMPLETED');
+    const whppLifecycleChanged = String(whppState.snapshotStatus || '').toUpperCase() !== 'COMPLETED';
     invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged: whppLifecycleChanged });
     const releasedSupersededSlots = activateUnifiedCoreImport(staged);
 
@@ -455,6 +456,7 @@ async function handleUnifiedImportV42(req, res) {
         count: effectiveWhppCount,
         parsedCount: whppRows.length,
         preservedExistingMembership: preservedWhpp.present,
+        finalizedLifecyclePreserved: whppState.finalizedLifecyclePreserved === true,
         source: whppImportSource,
         reportDate: parsed.reportDate,
         dailyReportReady: whppState.dailyReportReady
