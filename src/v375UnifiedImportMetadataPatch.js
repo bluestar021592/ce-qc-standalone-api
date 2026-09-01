@@ -132,13 +132,17 @@ export function recoverV388ArchivedImportMetadata(batch={}){
 }
 
 export function readV375LatestUnifiedImport(db=getDb()){
-  const row=db.prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get();
+  // createdAt has millisecond precision. Two synchronous imports can legitimately
+  // land in the same millisecond (especially in the Windows candidate gate).
+  // UUID batchId is random and must never decide which committed import is latest.
+  // rowid is the deterministic insertion-order tiebreaker for this ordinary table.
+  const row=db.prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1").get();
   if(!row)return null;
   const snapshot=db.prepare('SELECT status,payloadJson,createdAt FROM unified_snapshots WHERE snapshotId=? LIMIT 1').get(row.snapshotId)||{};
   const payload=json(snapshot.payloadJson,{});
   const grouped=db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType').all(row.batchId);
   const classificationCounts=numericCounts(Object.fromEntries(grouped.map(item=>[String(item.businessType||'').toUpperCase(),Number(item.count||0)])));
-  const classifiedTotal=Object.values(classificationCounts).reduce((sum,value)=>sum+value,0);
+  const classifiedTotal=Object.values(classificationCounts).reduce((sum,value)=>sum+Number(value||0),0);
 
   const batchSummary=json(row.summaryJson,{});
   const payloadSummary=payload?.summary&&typeof payload.summary==='object'?payload.summary:{};
