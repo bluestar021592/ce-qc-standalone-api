@@ -1,12 +1,15 @@
 (function installSevenBusinessStatusV168(global) {
   if (global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__) return;
 
-  const VERSION = '2026-08-27-v333-canonical-seven-business-owner-v1';
+  const VERSION = '2026-09-01-v409-pending-date-light-status-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-status-only-v1';
   const COMPLETION_SYNC_REVISION = '2026-08-30-v360-verified-whpp-status-sync-v1';
   const FAILURE_DETAIL_REVISION = '2026-08-31-v394-visible-shopee-failure-detail-v1';
+  const STATUS_RESILIENCE_REVISION = '2026-09-01-v409-compact-whpp-last-good-status-v1';
   const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
   const RUN_VERIFIED_GRACE_MS = 10 * 60 * 1000;
+  const STATUS_TIMEOUT_MS = 3000;
+  const STATUS_ATTEMPTS = 2;
   let lastTruth = null;
   let refreshBusy = false;
   let timer = null;
@@ -18,8 +21,22 @@
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
   }
+  function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+  function pendingImportDate() {
+    const explicit = global.__CE_QC_PENDING_IMPORT_DATE__ || {};
+    const active = explicit.active === true ? normalizeDate(explicit.reportDate) : '';
+    if (active) return active;
+    try {
+      const fromV146 = normalizeDate(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__?.getPendingDate?.());
+      if (fromV146) return fromV146;
+    } catch {}
+    return '';
+  }
 
   function targetDate() {
+    const pending = pendingImportDate();
+    if (pending) return pending;
     const input = normalizeDate(document.getElementById('reportDate')?.value);
     if (input) return input;
     const top = normalizeDate(document.getElementById('topRangeTo')?.value || document.getElementById('dashboardRangeTo')?.value);
@@ -33,28 +50,43 @@
     } catch { return ''; }
   }
 
-  async function readJson(url) {
-    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
-    const text = await response.text();
-    let payload = {};
-    try { payload = text ? JSON.parse(text) : {}; } catch {}
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
-    return payload;
+  async function requestJson(url, init = {}, attempts = STATUS_ATTEMPTS) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= Math.max(1, Number(attempts || 1)); attempt += 1) {
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const timeout = controller ? setTimeout(() => controller.abort(), STATUS_TIMEOUT_MS) : null;
+      try {
+        const response = await fetch(url, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          ...init,
+          ...(controller ? { signal: controller.signal } : {})
+        });
+        const text = await response.text();
+        let payload = {};
+        try { payload = text ? JSON.parse(text) : {}; } catch {}
+        if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
+        return payload;
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts) await wait(220 * attempt);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    }
+    throw lastError || new Error('状态读取失败');
   }
 
-  async function postJson(url, body) {
-    const response = await fetch(url, {
+  function readJson(url) {
+    return requestJson(url, { method: 'GET' });
+  }
+
+  function postJson(url, body) {
+    return requestJson(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      cache: 'no-store',
       body: JSON.stringify(body || {})
     });
-    const text = await response.text();
-    let payload = {};
-    try { payload = text ? JSON.parse(text) : {}; } catch {}
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
-    return payload;
   }
 
   function stageFromCcslRecovery(payload, target) {
@@ -71,7 +103,8 @@
       complete: payload?.complete === true,
       zeroTicketDay: Boolean(payload?.zeroTicketDay),
       runStatus: lockStatus,
-      details: payload?.zeroTicketDay ? 'VALID日报CCSL=0票，已闭环' : String(payload?.action || '')
+      details: payload?.zeroTicketDay ? 'VALID日报CCSL=0票，已闭环' : String(payload?.action || ''),
+      statusFresh: true
     };
   }
 
@@ -99,7 +132,8 @@
       runStatus: lockStatus,
       snapshotId: String(payload?.snapshotId || ''),
       details: detail,
-      diagnostic
+      diagnostic,
+      statusFresh: true
     };
   }
 
@@ -113,6 +147,8 @@
       target
       && ccsl?.state === 'done'
       && shopee?.state === 'done'
+      && ccsl?.statusFresh !== false
+      && shopee?.statusFresh !== false
       && marker.owner === 'V67'
       && markerDate === target
       && age >= 0 && age <= RUN_VERIFIED_GRACE_MS
@@ -131,7 +167,7 @@
     const processing = view.processing || {};
     const total = Number(view.total ?? payload?.total ?? view.dailyParseSummary?.totalRecognized ?? 0);
     let state = 'pending';
-    let details = String(payload?.summarySource || payload?.truthSource || '');
+    let details = String(payload?.completionSource || payload?.summarySource || payload?.truthSource || '');
     if (date === target && (COMPLETE_SNAPSHOT.has(snapshotStatus) || view.completed === true || payload?.completed === true)) state = 'done';
     else if (verifiedByRunner) {
       state = 'done';
@@ -143,27 +179,54 @@
     return {
       key: 'WHPP', label: 'WHPP本土', state, date: date || (verifiedByRunner ? target : ''), snapshotStatus, runStatus, total,
       verifiedByRunner,
-      details
+      details,
+      statusFresh: true
     };
   }
 
-  function failedStage(key, label, error) {
-    return { key, label, state: 'error', date: '', total: 0, error: String(error?.message || error || '状态读取失败') };
+  function failedStage(key, label, error, target = '') {
+    return { key, label, state: 'error', date: target, total: 0, error: String(error?.message || error || '状态读取失败'), statusFresh: false };
+  }
+
+  function priorStage(key, target) {
+    if (!lastTruth || normalizeDate(lastTruth.reportDate) !== target) return null;
+    return (lastTruth.stages || []).find(stage => stage.key === key && normalizeDate(stage.date || target) === target) || null;
+  }
+
+  function transientStage(key, label, error, target) {
+    const previous = priorStage(key, target);
+    const message = String(error?.message || error || '状态读取暂时中断');
+    if (previous) {
+      return {
+        ...previous,
+        key,
+        label,
+        date: target,
+        statusFresh: false,
+        statusReadError: message,
+        details: String(previous.details || ''),
+        error: message
+      };
+    }
+    return { key, label, state: 'unknown', date: target, total: 0, statusFresh: false, statusReadError: message, error: message };
   }
 
   function stageText(stage) {
-    if (stage.state === 'done') return `${stage.label} 已完成`;
-    if (stage.state === 'running') return `${stage.label} 处理中`;
-    if (stage.state === 'paused') return `${stage.label} 已暂停`;
-    if (stage.state === 'failed') return `${stage.label} 失败`;
+    const suffix = stage.statusFresh === false ? '（状态重试中）' : '';
+    if (stage.state === 'done') return `${stage.label} 已完成${suffix}`;
+    if (stage.state === 'running') return `${stage.label} 处理中${suffix}`;
+    if (stage.state === 'paused') return `${stage.label} 已暂停${suffix}`;
+    if (stage.state === 'failed') return `${stage.label} 失败${suffix}`;
     if (stage.state === 'error') return `${stage.label} 状态读取失败`;
-    return `${stage.label} 待处理`;
+    if (stage.state === 'unknown') return `${stage.label} 状态重试中`;
+    return `${stage.label} 待处理${suffix}`;
   }
 
   function pillClass(stage) {
+    if (stage.statusFresh === false) return 'warning';
     if (stage.state === 'done') return 'success';
     if (stage.state === 'failed' || stage.state === 'error') return 'danger';
-    if (stage.state === 'running' || stage.state === 'paused') return 'warning';
+    if (stage.state === 'running' || stage.state === 'paused' || stage.state === 'unknown') return 'warning';
     return 'muted';
   }
 
@@ -201,19 +264,24 @@
     if (!node || !truth) return;
     const stages = truth.stages || [];
     const blockers = stages
-      .filter(stage => ['failed','paused','error'].includes(stage.state))
+      .filter(stage => ['failed','paused','error'].includes(stage.state) && stage.statusFresh !== false)
       .map(stage => ({ stage, detail: formatFailureDetail(stage) }))
       .filter(item => item.detail);
+    const transient = stages
+      .filter(stage => stage.statusFresh === false)
+      .map(stage => `${stage.label}：${String(stage.statusReadError || '状态读取暂时中断')}`);
     node.dataset.v333Owner = 'canonical';
     node.dataset.executionOwner = 'V67';
     node.dataset.completionSyncRevision = COMPLETION_SYNC_REVISION;
     node.dataset.failureDetailRevision = FAILURE_DETAIL_REVISION;
+    node.dataset.statusResilienceRevision = STATUS_RESILIENCE_REVISION;
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
-        ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${esc(formatFailureDetail(stage) || stage.details || stage.error || '')}">${esc(stageText(stage))}</span>`).join('')}
+        ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${esc(formatFailureDetail(stage) || stage.statusReadError || stage.details || stage.error || '')}">${esc(stageText(stage))}</span>`).join('')}
         <span class="status-pill ${truth.complete ? 'success' : 'muted'}">${truth.complete ? '七业务已完成' : '尚未全部完成'}</span>
       </div>
+      ${transient.length ? `<div data-testid="seven-business-status-retry" style="margin-top:8px;color:#916000;font-size:12px;line-height:1.5">状态接口暂时繁忙，已保留上一次真实进度并自动重试：${transient.map(esc).join('；')}</div>` : ''}
       ${blockers.length ? `<div data-testid="seven-business-failure-detail" style="margin-top:9px;padding:9px 11px;border-radius:7px;background:#fff3f3;border:1px solid #ffd0d0;color:#9f1c1c;font-size:13px;line-height:1.55">${blockers.map(item => `<div><strong>${esc(item.stage.label)}：</strong>${esc(item.detail)}</div>`).join('')}</div>` : ''}`;
 
     const start = document.querySelector('[data-testid="global-auto-process"]');
@@ -269,33 +337,39 @@
       const requests = await Promise.allSettled([
         postJson('/api/v317/ccsl-recovery', { action: 'status', reportDate: target }),
         postJson('/api/v311/shopee-recovery', { action: 'status', reportDate: target }),
-        readJson(`/api/v132/whpp-fast-summary?reportDate=${encoded}`)
+        readJson(`/api/v132/whpp-fast-summary?reportDate=${encoded}&compact=1`)
       ]);
       const ccsl = requests[0].status === 'fulfilled'
         ? stageFromCcslRecovery(requests[0].value, target)
-        : failedStage('CCSL', 'CCSL', requests[0].reason);
+        : transientStage('CCSL', 'CCSL', requests[0].reason, target);
       const shopee = requests[1].status === 'fulfilled'
         ? stageFromShopeeRecovery(requests[1].value, target)
-        : failedStage('SHOPEE', 'SHOPEE CN/VN', requests[1].reason);
+        : transientStage('SHOPEE', 'SHOPEE CN/VN', requests[1].reason, target);
       const verifiedByRunner = runnerVerifiedCompletion(target, ccsl, shopee);
       const whpp = requests[2].status === 'fulfilled'
         ? stageFromWhpp(requests[2].value, target, verifiedByRunner)
         : (verifiedByRunner
           ? stageFromWhpp({}, target, true)
-          : failedStage('WHPP', 'WHPP本土', requests[2].reason));
+          : transientStage('WHPP', 'WHPP本土', requests[2].reason, target));
       const stages = [ccsl, shopee, whpp];
-      lastTruth = { reportDate: target, stages, complete: stages.every(stage => stage.state === 'done'), checkedAt: Date.now() };
-      renderTruth(lastTruth);
-      return lastTruth;
-    } catch (error) {
       lastTruth = {
-        reportDate: targetDate() || normalizeDate(lastTruth?.reportDate),
-        stages: [failedStage('CCSL', 'CCSL', error), failedStage('SHOPEE', 'SHOPEE CN/VN', error), failedStage('WHPP', 'WHPP本土', error)],
-        complete: false,
+        reportDate: target,
+        stages,
+        complete: stages.every(stage => stage.state === 'done' && stage.statusFresh !== false),
         checkedAt: Date.now()
       };
       renderTruth(lastTruth);
-      console.warn('[CE-QC][V168_STATUS_ONLY] seven-business truth refresh failed:', error?.message || error);
+      return lastTruth;
+    } catch (error) {
+      const target = targetDate() || normalizeDate(lastTruth?.reportDate);
+      const stages = [
+        transientStage('CCSL', 'CCSL', error, target),
+        transientStage('SHOPEE', 'SHOPEE CN/VN', error, target),
+        transientStage('WHPP', 'WHPP本土', error, target)
+      ];
+      lastTruth = { reportDate: target, stages, complete: false, checkedAt: Date.now() };
+      renderTruth(lastTruth);
+      console.warn('[CE-QC][V168_STATUS_ONLY] seven-business truth refresh temporarily unavailable:', error?.message || error);
       return lastTruth;
     } finally {
       refreshBusy = false;
@@ -313,11 +387,15 @@
   function install() {
     [150, 600, 1600].forEach(ms => setTimeout(() => { void refreshTruth(); }, ms));
     document.addEventListener('ce-qc-run-complete', () => setTimeout(() => { void refreshTruth(); }, 100));
+    document.addEventListener('ce-qc-unified-import-committed', () => setTimeout(() => { void refreshTruth(); }, 80));
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') setTimeout(() => { void refreshTruth(); }, 80);
     });
+    document.addEventListener('change', event => {
+      if (event.target?.id === 'excelFile') setTimeout(() => { void refreshTruth(); }, 80);
+    }, true);
     document.addEventListener('click', event => {
-      if (event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query')) setTimeout(() => { void refreshTruth(); }, 120);
+      if (event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,[data-testid="combined-daily-import"]')) setTimeout(() => { void refreshTruth(); }, 120);
     }, true);
     schedule();
     global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__ = {
@@ -325,12 +403,13 @@
       architecture: ARCHITECTURE,
       completionSyncRevision: COMPLETION_SYNC_REVISION,
       failureDetailRevision: FAILURE_DETAIL_REVISION,
+      statusResilienceRevision: STATUS_RESILIENCE_REVISION,
       statusOnly: true,
       authoritativeRunner: 'V67',
       refresh: refreshTruth,
       get lastTruth() { return lastTruth; }
     };
-    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, COMPLETION_SYNC_REVISION, FAILURE_DETAIL_REVISION, 'V168 only renders canonical CCSL/SHOPEE/WHPP status; failed/paused stages expose the persisted sanitized backend reason inline; it never wraps or starts unified processing.');
+    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, COMPLETION_SYNC_REVISION, FAILURE_DETAIL_REVISION, STATUS_RESILIENCE_REVISION, 'V168 reads the pending/current exact date, polls WHPP compact status only, preserves exact-date last-good progress across transient read failures, and never wraps or starts unified processing.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
