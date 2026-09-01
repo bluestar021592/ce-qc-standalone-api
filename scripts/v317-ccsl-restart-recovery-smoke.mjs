@@ -44,9 +44,6 @@ assert.match(backend,/ZERO_CCSL_TICKETS/,'zero-ticket closure must remain observ
 assert.match(backend,/createOrRecoverRun\(date/,'missing run locks remain checkpoint-recoverable');
 assert.match(backend,/updateRunLock\(date,'failed'/,'finished-without-snapshot remains recoverable');
 
-// V377 may retire only the exact pre-import lifecycle pointer so a new same-date
-// VALID import gets a new runId. Persisted facts, membership and audit snapshots
-// remain immutable. The old gate incorrectly classified run_checkpoints as facts.
 assert.match(backend,/DELETE FROM run_checkpoints WHERE reportDate=\? AND runId=\?/,
   'stale CCSL checkpoint retirement must be constrained by date + exact old runId');
 assert.match(backend,/DELETE FROM run_locks WHERE reportDate=\? AND runId=\?/,
@@ -97,23 +94,25 @@ assert.match(progressUi,/batchMax:50/,'V138 trajectory phase must expose 50-tick
 assert.match(progressUi,/单批最大350/,'V138 visible scan detail must say 350 tickets per batch');
 assert.match(progressUi,/单批最大50/,'V138 visible trajectory detail must say 50 tickets per batch');
 
-assert.match(sevenStatus,/2026-08-27-v333-canonical-seven-business-owner-v1/,'V168 remains the canonical summary owner');
+assert.match(sevenStatus,/2026-09-01-v409-pending-date-light-status-v1/,'V168 must expose pending-date + lightweight status truth');
 assert.match(sevenStatus,/2026-08-29-single-unified-runner-status-only-v1/,'V168 must advertise status-only architecture');
 assert.match(sevenStatus,/2026-08-30-v360-verified-whpp-status-sync-v1/,'V168 must expose the current-run WHPP completion sync contract');
 assert.match(sevenStatus,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical CCSL recovery truth for the selected date');
 assert.match(sevenStatus,/postJson\('\/api\/v311\/shopee-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical SHOPEE recovery truth for the same selected date');
-assert.match(sevenStatus,/readJson\(`\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}`\)/,'V168 must align WHPP to the same selected date through canonical WHPP summary');
+assert.match(sevenStatus,/readJson\(`\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}&compact=1`\)/,'V168 must use compact WHPP status for the same selected date');
 assert.match(sevenStatus,/payload\?\.completed === true/,'V168 must honor canonical zero-work WHPP completion');
 assert.match(sevenStatus,/runnerVerifiedCompletion\(target, ccsl, shopee\)/,'V168 may bridge only a current V67-verified completion for the same date');
 assert.match(sevenStatus,/marker\.owner === 'V67'/,'runner completion bridge must be owned by V67');
 assert.match(sevenStatus,/stage\.active === false[\s\S]*String\(stage\.type \|\| ''\)\.toUpperCase\(\) === 'DONE'/,'V168 must require V67 DONE before bridging a short summary lag');
 assert.match(sevenStatus,/ccsl\?\.state === 'done'[\s\S]*shopee\?\.state === 'done'/,'V168 must never let an old WHPP completion bridge a fresh same-date reimport whose earlier stages are pending');
-assert.match(sevenStatus,/stages\.every\(stage => stage\.state === 'done'\)/,'overall completion must be computed from the same canonical stage objects shown in the pills');
-assert.match(sevenStatus,/if \(stage\.state === 'done'\) return 'success'/,'every completed stage must be green');
+assert.match(sevenStatus,/stages\.every\(stage => stage\.state === 'done' && stage\.statusFresh !== false\)/,'overall completion requires fresh exact-date canonical stages');
+assert.match(sevenStatus,/if \(stage\.state === 'done'\) return 'success'/,'every fresh completed stage must be green');
 assert.match(sevenStatus,/truth\.complete \? 'success' : 'muted'/,'overall completed state must also be green');
 assert.match(sevenStatus,/node\.dataset\.v333Owner = 'canonical'/,'summary DOM must mark canonical ownership');
 assert.match(sevenStatus,/statusOnly: true/,'V168 must be read/render only');
 assert.match(sevenStatus,/authoritativeRunner: 'V67'/,'V168 must point execution ownership to V67');
+assert.match(sevenStatus,/pendingImportDate\(\)/,'V168 must prefer the current pending import date over the previous committed input');
+assert.match(sevenStatus,/function transientStage/,'V168 must preserve exact-date last-good progress during temporary status read failure');
 assert.doesNotMatch(sevenStatus,/function wrapRunner/,'summary owner must never wrap runUnified/resumeUnified');
 assert.doesNotMatch(sevenStatus,/handoffPendingWhpp/,'summary owner must never start WHPP');
 assert.doesNotMatch(sevenStatus,/\/api\/whpp\/run\/start/,'summary owner must never call WHPP execution routes');
@@ -143,13 +142,14 @@ assert.doesNotMatch(injection,/if\(!body\.includes\(V317_CCSL_RECOVERY_MARKER\)\
 assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must still load V334 history hard owner');
 assert.match(injection,/X-CE-QC-Unified-Runner/,'single-runner response header must be observable');
 
-assert.match(htmlOwner,/2026-09-01-v406-retire-redundant-whpp-browser-layers-v1/,'HTML owner must expose the current V406 runtime-cleanup build identity');
+assert.match(htmlOwner,/2026-09-01-v410-atomic-import-light-status-loader-v1/,'HTML owner must expose the current V410 import/status build identity');
 assert.match(htmlOwner,/WHPP_PAGE_OWNER='V132'/,'V132 must remain the sole WHPP page owner');
 assert.match(htmlOwner,/X-CE-QC-WHPP-Page-Owner/,'WHPP page ownership must be observable in the HTML response');
 assert.doesNotMatch(htmlOwner,/\/whpp-v44\.js|\/whpp-v45-cleanup\.js|\/whpp-v47-auto-run\.js|\/v52-whpp-source-truth-route\.js|\/v72-whpp-light-state-bridge\.js|\/v103-home-whpp-card-guard\.js/,'retired WHPP browser layers must not re-enter the live loader');
 assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'browser must load the V338 CCSL 350/50 detail owner');
 assert.match(htmlOwner,/v67-resilient-run-guard\.js\?v=20260830-v360-1/,'browser must load the current V360 V67 runner without stale static cache');
-assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260830-v360-1/,'browser must load the current V360 status-only V168 owner without stale static cache');
+assert.match(htmlOwner,/v146-unified-import-date-status\.js\?v=20260901-v410-1/,'browser must load the current atomic import UI owner');
+assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260901-v409-1/,'browser must load the current lightweight status-only V168 owner without stale cache');
 assert.match(htmlOwner,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v400-1/,'V400 completion/status sync must load after V168 while V67 remains the sole execution owner');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
@@ -157,4 +157,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V406/V400/V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · explicit date precedence gate is formatting-independent · exact stale CCSL run pointers may retire while facts/audit remain immutable · V67 remains sole execution owner while V169 synchronizes verified completion UI · V132 solely owns WHPP page · retired WHPP browser layers stay out · scan=350 · trajectory=50');
+console.log('[V410/V409/V400/V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · pending selected date beats stale committed input · WHPP status is compact · exact-date last-good progress survives transient fetch failures · V67 remains sole execution owner · scan=350 · trajectory=50');
