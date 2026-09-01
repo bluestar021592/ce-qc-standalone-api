@@ -39,10 +39,10 @@ assert.match(completionGuard,/SEVEN_BUSINESS_ALREADY_COMPLETE/,'completed lifecy
 assert.doesNotMatch(completionGuard,/\/api\/whpp\/run\/start|\/api\/whpp\/run\/resume|\/api\/run\/start|\/api\/v311\/shopee-recovery[^\n]*action[^\n]*start/,'V400 guard must never start any CCSL, SHOPEE or WHPP processing API itself');
 assert.doesNotMatch(completionGuard,/async function execute|function execute\(/,'V400 guard must not own a duplicate three-stage executor');
 assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v400-1/,'V400 completion guard must load after the canonical status owner with an explicit cache bust');
-assert.match(shell,/v168-seven-business-status\.js\?v=20260830-v360-1/,'canonical V168 status-only owner must be cache-busted to the current verified-completion sync build');
+assert.match(shell,/v168-seven-business-status\.js\?v=20260901-v409-1/,'canonical V168 status-only owner must be cache-busted to the current V409 pending-date/light-status build');
 assert.match(shell,/v67-resilient-run-guard\.js\?v=20260830-v360-1/,'single V67 runner must be cache-busted with the matching current-run finalization acknowledgement build');
 const v67At=shell.indexOf('v67-resilient-run-guard.js?v=20260830-v360-1');
-const v168At=shell.indexOf('v168-seven-business-status.js?v=20260830-v360-1');
+const v168At=shell.indexOf('v168-seven-business-status.js?v=20260901-v409-1');
 const v169At=shell.indexOf('v169-seven-business-legacy-status-sync.js?v=20260901-v400-1');
 assert.ok(v67At>=0&&v168At>v67At&&v169At>v168At,'runtime order must remain V67 executor → V168 canonical status → V400/V169 completion guard');
 
@@ -59,4 +59,4 @@ assert.match(whppStore,/\.\.\.emptyWhppState\(\),[\s\S]*reportDate,[\s\S]*dailyR
 assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must remain delivered');
 assert.match(inject,/X-CE-QC-V318-UI/,'V318 response header must be observable');
 
-console.log('[V400/SINGLE-RUNNER/V361/V360/V318] single-sidebar + status ownership smoke passed · V67 remains sole executor · V169 is completion UI/entry guard only · finalized identical WHPP survives reload/reupload · changed membership unlocks · exact 15-item nav');
+console.log('[V409/V400/SINGLE-RUNNER/V361/V360/V318] single-sidebar + status ownership smoke passed · V67 remains sole executor · V168 current status owner is V409 · V169 is completion UI/entry guard only · finalized identical WHPP survives reload/reupload · changed membership unlocks · exact 15-item nav');
