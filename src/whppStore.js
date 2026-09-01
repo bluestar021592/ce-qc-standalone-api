@@ -295,3 +295,15 @@ function uniqueRows(rows = []) {
   for (const row of rows || []) { const bill = billOf(row); if (bill) map.set(bill, row); }
   return [...map.values()];
 }
+function safeJson(value, fallback = {}) {
+  try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
+  catch { return fallback; }
+}
+function emptyWhppState() {
+  return {
+    businessType: WHPP, reportDate: '', sourceName: '', batchId: '', sourceSnapshotId: '', snapshotId: '', snapshotStatus: 'EMPTY',
+    dailyReportReady: false, pnhBills: [], dailyParseRows: [], carryBills: [], nextCarryBills: [], podLocks: [],
+    scanResults: [], scanQueryStatus: [], trackEvents: [], eventQueryStatus: [], exceptionItems: [], exceptionQueryStatus: [],
+    finalRows: [], trackResults: [], processing: { running: false, paused: false, phase: '' }, lastRunSummary: null, lastRun: null
+  };
+}
