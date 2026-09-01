@@ -1,7 +1,7 @@
 (function installWhppRetryAwareCompatV135(global){
   if(global.__CE_QC_V135_WHPP_RETRY_RUN__)return;
 
-  const VERSION='2026-08-29-v340-whpp-retry-ui-compat-v1';
+  const VERSION='2026-09-01-v403-whpp-retry-center-guidance-v1';
   const normalizeDate=value=>{const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
 
   function selectedDate(){
@@ -41,7 +41,7 @@
     if(!heading)return;
     const banner=document.createElement('div');
     banner.className='processing-notice warning v135-whpp-retry-banner';
-    banner.innerHTML=`<b>WHPP快照已生成</b><span>${retry.toLocaleString('zh-CN')}票接口暂时失败，断点已保留；使用统一“继续处理”即可只补偿未完成票。</span>`;
+    banner.innerHTML=`<b>WHPP正式快照已完成</b><span>${retry.toLocaleString('zh-CN')}票接口暂时失败，失败票由“七业务接口失败 / 失效重试中心”独立自动补偿；无需、也不应重新启动七业务处理。若CE授权失效，请仅在重试中心重新登录后继续补偿。</span>`;
     heading.insertAdjacentElement('afterend',banner);
   }
 
@@ -49,8 +49,10 @@
     try{retryBanner(await summary());}catch{}
   }
 
-  // V340 intentionally does NOT wrap runUnified/resumeUnified and does NOT
-  // start WHPP itself. V67 is the only owner of CCSL -> SHOPEE -> WHPP.
+  // V403: completed/retry-pending is still a completed WHPP lifecycle. V169 is
+  // therefore correct to lock runUnified/resumeUnified. Failed API tickets are
+  // recovered separately by V145; V135 remains display-only and never starts a
+  // business run or retry job itself.
   document.addEventListener('ce-qc-run-complete',()=>setTimeout(refreshBanner,120));
   document.addEventListener('click',event=>{
     if(event.target?.closest?.('.side-link[data-page="whpp"]'))setTimeout(refreshBanner,120);
@@ -60,11 +62,13 @@
   global.__CE_QC_V135_WHPP_RETRY_RUN__={
     version:VERSION,
     compatibilityOnly:true,
+    displayOnly:true,
     authoritativeRunner:'V67',
+    retryOwner:'V145',
     canonicalSummary:'/api/v132/whpp-fast-summary',
     fetchSummary:summary,
     selectedDate,
     refreshBanner
   };
-  console.info('[CE-QC][V340_WHPP_RETRY_COMPAT]',VERSION,'No duplicate runner; V67 owns WHPP execution.');
+  console.info('[CE-QC][V403_WHPP_RETRY_GUIDANCE]',VERSION,'Completed WHPP stays locked; V145 independently owns failed-ticket compensation.');
 })(window);
