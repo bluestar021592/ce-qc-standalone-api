@@ -1,10 +1,11 @@
 (function installSevenBusinessConvergenceV412(global){
   if(global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__)return;
-  const VERSION='2026-09-01-v413-lifecycle-bound-seven-business-convergence-v3';
+  const VERSION='2026-09-01-v413-lifecycle-bound-seven-business-convergence-v4';
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const SELECTORS={CE:'ce',CEAF:'ceaf',TBKH:'tbkh',ALI1688:'ali1688',SHOPEECN:'shopeecn',SHOPEEVN:'shopeevn',WHPP:'whpp'};
   const WHPP_DONE_KEY='ce_qc_v412_whpp_done';
   let observer=null;
+  let observerTimer=null;
   let wrapping=false;
   let minimumTruthCheckedAt=0;
 
@@ -37,6 +38,7 @@
         .replace(/有效唯一单号\s*[\d,]+/g,`有效唯一单号 ${text}`)
         .replace(/日报导入完成，\s*共\s*[\d,]+\s*个唯一运单/g,`日报导入完成，共 ${text} 个唯一运单`)
         .replace(/导入成功：\s*有效\s*[\d,]+\s*票/g,`导入成功：有效 ${text} 票`)
+        .replace(/导入成功：[^·\n]*·\s*有效唯一单号\s*[\d,]+/g,value=>value.replace(/有效唯一单号\s*[\d,]+/,`有效唯一单号 ${text}`))
         .replace(/七业务有效唯一单号\s*[\d,]+/g,`七业务有效唯一单号 ${text}`);
       if(next!==before){node.nodeValue=next;changed=true;}
     }
@@ -57,8 +59,10 @@
       if(num(state.sevenBusinessValidUniqueWaybills)!==total)state.sevenBusinessValidUniqueWaybills=total;
       state.visibleTotalRevision=VERSION;
     }
-    patchText(document.getElementById('fileStatus'),total);
-    patchText(document.getElementById('unifiedClassificationSummary'),total);
+    // Legacy import owners can render the green success banner outside fileStatus.
+    // Reconcile the whole import page, but only text matching an import-total phrase
+    // can change. The throttled observer below prevents repeated DOM scans/churn.
+    patchText(document.getElementById('importPage'),total);
     if(document.documentElement.dataset.v412SevenBusinessTotal!==String(total))document.documentElement.dataset.v412SevenBusinessTotal=String(total);
     return total;
   }
@@ -100,7 +104,9 @@
     if(wrapping)return;wrapping=true;
     try{for(const name of ['runUnified','resumeUnified']){const original=global[name];if(typeof original!=='function'||original.__v412Wrapped)continue;const wrapped=function(){return guardCall(original,this,arguments);};wrapped.__v412Wrapped=true;wrapped.__v412Original=original;global[name]=wrapped;}}finally{wrapping=false;}
   }
-  function installObserver(){if(observer)return;observer=new MutationObserver(()=>{syncTotal();learnWhppCompletion();wrapEntries();});observer.observe(document.body,{childList:true,subtree:true,characterData:true});}
+  function runObservedSync(){observerTimer=null;syncTotal();learnWhppCompletion();wrapEntries();}
+  function scheduleObservedSync(){if(observerTimer)return;observerTimer=setTimeout(runObservedSync,60);}
+  function installObserver(){if(observer)return;observer=new MutationObserver(scheduleObservedSync);observer.observe(document.body,{childList:true,subtree:true,characterData:true});}
   function invalidateForNewLifecycle(){minimumTruthCheckedAt=Date.now();clearMarker();}
   function install(){
     syncTotal();learnWhppCompletion();wrapEntries();installObserver();
@@ -110,7 +116,7 @@
     document.addEventListener('change',event=>{if(event.target?.id==='excelFile')invalidateForNewLifecycle();},true);
     document.addEventListener('click',event=>{if(event.target?.closest?.('[data-testid="combined-daily-import"]'))invalidateForNewLifecycle();},true);
     global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__={version:VERSION,syncTotal,learnWhppCompletion,clearMarker,readMarker,markerMatches,lifecycleKey,sevenTotal};
-    console.info('[CE-QC][V413_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'seven-business total always includes WHPP; DOM reconciliation is idempotent; persisted WHPP completion is exact-lifecycle only; stale pre-import truth cannot satisfy a new lifecycle.');
+    console.info('[CE-QC][V413_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'seven-business total always includes WHPP across classification cards and import-success text; observer work is throttled and idempotent; persisted WHPP completion is exact-lifecycle only; stale pre-import truth cannot satisfy a new lifecycle.');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,40),{once:true});else setTimeout(install,40);
 })(window);
