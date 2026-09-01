@@ -1,8 +1,8 @@
 // Final public facade.
 // Cache-maintenance APIs stay on the preserved implementation. Dashboard reads
-// keep the historical V295 -> V294 parity chain, while V320 adds one narrow
-// single-day protection: a denominator-matched COMPLETED dashboard cache may
-// override an unproven ledger admission so a completed day's POD cannot collapse.
+// keep V320 as the source/cache truth owner, then apply the final normal-flow
+// business normalization layer (store Pending/OC, CECN/CEZT/580/self-pickup,
+// dedicated abnormal thresholds) without falling back to the old V31 selector.
 // Compatibility contract markers: rangeDashboardStoreV295 / rangeDashboardStoreV294.
 import { getDb } from './db.js';
 import {
@@ -67,7 +67,7 @@ export {
   RANGE_DASHBOARD_BUSINESS_TYPES
 };
 
-export { loadRangeDashboard } from './rangeDashboardStoreV320.js';
+export { loadRangeDashboard } from './rangeDashboardStoreFinal.js';
 
 console.info('[CE-QC][V386_DIRTY_DASHBOARD_CACHE_TRUTH]', V386_DIRTY_DASHBOARD_CACHE_TRUTH_ID,
   'dirty dates immediately drop derived dashboard rows/date markers; business facts and dirty markers remain untouched until the normal worker rebuild succeeds.');
