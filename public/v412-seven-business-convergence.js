@@ -1,6 +1,6 @@
 (function installSevenBusinessConvergenceV412(global){
   if(global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__)return;
-  const VERSION='2026-09-01-v413-lifecycle-bound-seven-business-convergence-v2';
+  const VERSION='2026-09-01-v413-lifecycle-bound-seven-business-convergence-v3';
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const SELECTORS={CE:'ce',CEAF:'ceaf',TBKH:'tbkh',ALI1688:'ali1688',SHOPEECN:'shopeecn',SHOPEEVN:'shopeevn',WHPP:'whpp'};
   const WHPP_DONE_KEY='ce_qc_v412_whpp_done';
@@ -14,18 +14,12 @@
 
   function importState(){try{if(typeof unifiedImportState!=='undefined')return unifiedImportState;}catch{}return global.unifiedImportState||null;}
   function currentDate(){
-    try{
-      const pending=normalizeDate(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__?.getPendingDate?.());
-      if(pending)return pending;
-    }catch{}
+    try{const pending=normalizeDate(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__?.getPendingDate?.());if(pending)return pending;}catch{}
     const input=normalizeDate(document.getElementById('reportDate')?.value);if(input)return input;
     const state=importState();const stateDate=normalizeDate(state?.reportDate);if(stateDate)return stateDate;
     return normalizeDate(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value);
   }
-  function lifecycleKey(){
-    const state=importState()||{};
-    return String(state.snapshotId||state.batchId||state.sourceSnapshotId||state.importSnapshotId||'').trim();
-  }
+  function lifecycleKey(){const state=importState()||{};return String(state.snapshotId||state.batchId||state.sourceSnapshotId||state.importSnapshotId||'').trim();}
   function stateCounts(){const counts=importState()?.classificationCounts||{};const explicit=TYPES.every(type=>Object.prototype.hasOwnProperty.call(counts,type));return explicit?Object.fromEntries(TYPES.map(type=>[type,num(counts[type])])):null;}
   function domCounts(){return Object.fromEntries(TYPES.map(type=>[type,num(document.querySelector(`[data-testid="classification-${SELECTORS[type]}"]`)?.textContent)]));}
   function counts(){return stateCounts()||domCounts();}
@@ -33,8 +27,8 @@
   function whppTotal(){return num(counts().WHPP);}
 
   function patchText(root,total){
-    if(!root||!total)return;
-    const text=fmt(total);
+    if(!root||!total)return false;
+    const text=fmt(total);let changed=false;
     const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
     const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
     for(const node of nodes){
@@ -44,39 +38,40 @@
         .replace(/日报导入完成，\s*共\s*[\d,]+\s*个唯一运单/g,`日报导入完成，共 ${text} 个唯一运单`)
         .replace(/导入成功：\s*有效\s*[\d,]+\s*票/g,`导入成功：有效 ${text} 票`)
         .replace(/七业务有效唯一单号\s*[\d,]+/g,`七业务有效唯一单号 ${text}`);
-      if(next!==before)node.nodeValue=next;
+      if(next!==before){node.nodeValue=next;changed=true;}
     }
+    return changed;
   }
   function syncTotal(){
     const total=sevenTotal();if(total<=0)return 0;
+    const totalText=fmt(total);
     const grid=document.querySelector('#unifiedClassificationSummary .unified-count-grid');
-    const valid=grid?.querySelector('[data-testid="classification-valid-unique"]');if(valid)valid.textContent=fmt(total);
-    const state=importState();if(state){state.summary={...(state.summary||{}),validUniqueWaybills:total,sevenBusinessValidUniqueWaybills:total,totalUnique:total};state.sevenBusinessValidUniqueWaybills=total;state.visibleTotalRevision=VERSION;}
+    const valid=grid?.querySelector('[data-testid="classification-valid-unique"]');
+    if(valid&&String(valid.textContent||'').trim()!==totalText)valid.textContent=totalText;
+    const state=importState();
+    if(state){
+      const summary=state.summary||{};
+      if(num(summary.validUniqueWaybills)!==total||num(summary.sevenBusinessValidUniqueWaybills)!==total||num(summary.totalUnique)!==total){
+        state.summary={...summary,validUniqueWaybills:total,sevenBusinessValidUniqueWaybills:total,totalUnique:total};
+      }
+      if(num(state.sevenBusinessValidUniqueWaybills)!==total)state.sevenBusinessValidUniqueWaybills=total;
+      state.visibleTotalRevision=VERSION;
+    }
     patchText(document.getElementById('fileStatus'),total);
     patchText(document.getElementById('unifiedClassificationSummary'),total);
-    document.documentElement.dataset.v412SevenBusinessTotal=String(total);
+    if(document.documentElement.dataset.v412SevenBusinessTotal!==String(total))document.documentElement.dataset.v412SevenBusinessTotal=String(total);
     return total;
   }
 
   function readMarker(){try{return JSON.parse(localStorage.getItem(WHPP_DONE_KEY)||'null');}catch{return null;}}
-  function writeMarker(reportDate,source='V168'){
-    const date=normalizeDate(reportDate);const key=lifecycleKey();if(!date||!key)return false;
-    try{localStorage.setItem(WHPP_DONE_KEY,JSON.stringify({reportDate:date,lifecycleKey:key,whppTotal:whppTotal(),completed:true,source,savedAt:Date.now()}));return true;}catch{return false;}
-  }
+  function writeMarker(reportDate,source='V168'){const date=normalizeDate(reportDate);const key=lifecycleKey();if(!date||!key)return false;try{localStorage.setItem(WHPP_DONE_KEY,JSON.stringify({reportDate:date,lifecycleKey:key,whppTotal:whppTotal(),completed:true,source,savedAt:Date.now()}));return true;}catch{return false;}}
   function clearMarker(){try{localStorage.removeItem(WHPP_DONE_KEY);}catch{}}
-  function markerMatches(target){
-    const marker=readMarker();const key=lifecycleKey();
-    return Boolean(marker?.completed===true&&key&&marker.lifecycleKey===key&&normalizeDate(marker.reportDate)===normalizeDate(target));
-  }
-  function truthCurrentEnough(truth){
-    const checkedAt=Number(truth?.checkedAt||0);
-    return !minimumTruthCheckedAt||checkedAt>=minimumTruthCheckedAt;
-  }
+  function markerMatches(target){const marker=readMarker();const key=lifecycleKey();return Boolean(marker?.completed===true&&key&&marker.lifecycleKey===key&&normalizeDate(marker.reportDate)===normalizeDate(target));}
+  function truthCurrentEnough(truth){const checkedAt=Number(truth?.checkedAt||0);return !minimumTruthCheckedAt||checkedAt>=minimumTruthCheckedAt;}
   function learnWhppCompletion(){
     const truth=global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
     const date=normalizeDate(truth?.reportDate);
-    if(!truthCurrentEnough(truth))return false;
-    if(date!==currentDate())return false;
+    if(!truthCurrentEnough(truth)||date!==currentDate())return false;
     const whpp=(truth?.stages||[]).find(stage=>stage?.key==='WHPP');
     if(date&&whpp?.state==='done'&&whpp?.statusFresh!==false)return writeMarker(date,'V168_CANONICAL_DONE');
     return false;
@@ -99,31 +94,13 @@
     const button=document.querySelector('[data-testid="global-auto-process"]');if(button){button.disabled=true;button.textContent='七业务已完成';button.title=`${target} 七业务均已有正式结果，无需重复处理`;}
     try{document.dispatchEvent(new CustomEvent('ce-qc-run-complete',{detail:{reportDate:target,complete:true,source:'V413'}}));}catch{}
   }
-  async function refreshThenLearn(){
-    try{await global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.();}catch{}
-    return learnWhppCompletion();
-  }
-  async function guardCall(original,thisArg,args){
-    const target=currentDate();
-    await refreshThenLearn();
-    if(target&&exactFreshStagesDone(target)){
-      renderCompleted(target);
-      return {ok:true,reportDate:target,skipped:true,reason:'SEVEN_BUSINESS_ALREADY_COMPLETE_V413'};
-    }
-    return original.apply(thisArg,args);
-  }
+  async function refreshThenLearn(){try{await global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.();}catch{}return learnWhppCompletion();}
+  async function guardCall(original,thisArg,args){const target=currentDate();await refreshThenLearn();if(target&&exactFreshStagesDone(target)){renderCompleted(target);return {ok:true,reportDate:target,skipped:true,reason:'SEVEN_BUSINESS_ALREADY_COMPLETE_V413'};}return original.apply(thisArg,args);}
   function wrapEntries(){
     if(wrapping)return;wrapping=true;
-    try{
-      for(const name of ['runUnified','resumeUnified']){
-        const original=global[name];if(typeof original!=='function'||original.__v412Wrapped)continue;
-        const wrapped=function(){return guardCall(original,this,arguments);};wrapped.__v412Wrapped=true;wrapped.__v412Original=original;global[name]=wrapped;
-      }
-    }finally{wrapping=false;}
+    try{for(const name of ['runUnified','resumeUnified']){const original=global[name];if(typeof original!=='function'||original.__v412Wrapped)continue;const wrapped=function(){return guardCall(original,this,arguments);};wrapped.__v412Wrapped=true;wrapped.__v412Original=original;global[name]=wrapped;}}finally{wrapping=false;}
   }
-  function installObserver(){
-    if(observer)return;observer=new MutationObserver(()=>{syncTotal();learnWhppCompletion();wrapEntries();});observer.observe(document.body,{childList:true,subtree:true,characterData:true});
-  }
+  function installObserver(){if(observer)return;observer=new MutationObserver(()=>{syncTotal();learnWhppCompletion();wrapEntries();});observer.observe(document.body,{childList:true,subtree:true,characterData:true});}
   function invalidateForNewLifecycle(){minimumTruthCheckedAt=Date.now();clearMarker();}
   function install(){
     syncTotal();learnWhppCompletion();wrapEntries();installObserver();
@@ -133,7 +110,7 @@
     document.addEventListener('change',event=>{if(event.target?.id==='excelFile')invalidateForNewLifecycle();},true);
     document.addEventListener('click',event=>{if(event.target?.closest?.('[data-testid="combined-daily-import"]'))invalidateForNewLifecycle();},true);
     global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__={version:VERSION,syncTotal,learnWhppCompletion,clearMarker,readMarker,markerMatches,lifecycleKey,sevenTotal};
-    console.info('[CE-QC][V413_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'seven-business total always includes WHPP; persisted WHPP completion is bound to the exact unified-import lifecycle key, stale pre-import V168 truth cannot recreate or satisfy a completion lock, and new same-date imports must be freshly verified.');
+    console.info('[CE-QC][V413_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'seven-business total always includes WHPP; DOM reconciliation is idempotent; persisted WHPP completion is exact-lifecycle only; stale pre-import truth cannot satisfy a new lifecycle.');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,40),{once:true});else setTimeout(install,40);
 })(window);
