@@ -1,0 +1,116 @@
+(function installSevenBusinessConvergenceV412(global){
+  if(global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__)return;
+  const VERSION='2026-09-01-v412-seven-business-convergence-v1';
+  const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
+  const SELECTORS={CE:'ce',CEAF:'ceaf',TBKH:'tbkh',ALI1688:'ali1688',SHOPEECN:'shopeecn',SHOPEEVN:'shopeevn',WHPP:'whpp'};
+  const WHPP_DONE_KEY='ce_qc_v412_whpp_done';
+  let observer=null;
+  let wrapping=false;
+
+  const normalizeDate=value=>{const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
+  const num=value=>{const parsed=Number(String(value??'').replace(/[^0-9.-]/g,''));return Number.isFinite(parsed)?parsed:0;};
+  const fmt=value=>Number(value||0).toLocaleString('zh-CN');
+
+  function importState(){try{if(typeof unifiedImportState!=='undefined')return unifiedImportState;}catch{}return global.unifiedImportState||null;}
+  function currentDate(){
+    try{
+      const pending=normalizeDate(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__?.getPendingDate?.());
+      if(pending)return pending;
+    }catch{}
+    const input=normalizeDate(document.getElementById('reportDate')?.value);if(input)return input;
+    const state=importState();const stateDate=normalizeDate(state?.reportDate);if(stateDate)return stateDate;
+    return normalizeDate(document.getElementById('topRangeTo')?.value||document.getElementById('dashboardRangeTo')?.value);
+  }
+  function stateCounts(){const counts=importState()?.classificationCounts||{};const explicit=TYPES.every(type=>Object.prototype.hasOwnProperty.call(counts,type));return explicit?Object.fromEntries(TYPES.map(type=>[type,num(counts[type])])):null;}
+  function domCounts(){return Object.fromEntries(TYPES.map(type=>[type,num(document.querySelector(`[data-testid="classification-${SELECTORS[type]}"]`)?.textContent)]));}
+  function counts(){return stateCounts()||domCounts();}
+  function sevenTotal(){const values=counts();return TYPES.reduce((sum,type)=>sum+num(values[type]),0);}
+
+  function patchText(root,total){
+    if(!root||!total)return;
+    const text=fmt(total);
+    const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+    const nodes=[];while(walker.nextNode())nodes.push(walker.currentNode);
+    for(const node of nodes){
+      const before=String(node.nodeValue||'');
+      const next=before
+        .replace(/有效唯一单号\s*[\d,]+/g,`有效唯一单号 ${text}`)
+        .replace(/日报导入完成，\s*共\s*[\d,]+\s*个唯一运单/g,`日报导入完成，共 ${text} 个唯一运单`)
+        .replace(/导入成功：\s*有效\s*[\d,]+\s*票/g,`导入成功：有效 ${text} 票`)
+        .replace(/七业务有效唯一单号\s*[\d,]+/g,`七业务有效唯一单号 ${text}`);
+      if(next!==before)node.nodeValue=next;
+    }
+  }
+  function syncTotal(){
+    const total=sevenTotal();if(total<=0)return 0;
+    const grid=document.querySelector('#unifiedClassificationSummary .unified-count-grid');
+    const valid=grid?.querySelector('[data-testid="classification-valid-unique"]');if(valid)valid.textContent=fmt(total);
+    const state=importState();if(state){state.summary={...(state.summary||{}),validUniqueWaybills:total,sevenBusinessValidUniqueWaybills:total,totalUnique:total};state.sevenBusinessValidUniqueWaybills=total;state.visibleTotalRevision=VERSION;}
+    patchText(document.getElementById('fileStatus'),total);
+    patchText(document.getElementById('unifiedClassificationSummary'),total);
+    document.documentElement.dataset.v412SevenBusinessTotal=String(total);
+    return total;
+  }
+
+  function readMarker(){try{return JSON.parse(localStorage.getItem(WHPP_DONE_KEY)||'null');}catch{return null;}}
+  function writeMarker(reportDate,source='V168'){const date=normalizeDate(reportDate);if(!date)return;try{localStorage.setItem(WHPP_DONE_KEY,JSON.stringify({reportDate:date,completed:true,source,savedAt:Date.now()}));}catch{}}
+  function clearMarker(){try{localStorage.removeItem(WHPP_DONE_KEY);}catch{}}
+  function learnWhppCompletion(){
+    const truth=global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
+    const date=normalizeDate(truth?.reportDate);
+    const whpp=(truth?.stages||[]).find(stage=>stage?.key==='WHPP');
+    if(date&&whpp?.state==='done'&&whpp?.statusFresh!==false)writeMarker(date,'V168_CANONICAL_DONE');
+  }
+  function exactFreshStagesDone(target){
+    const truth=global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
+    if(normalizeDate(truth?.reportDate)!==target)return false;
+    const stages=truth?.stages||[];
+    const byKey=key=>stages.find(stage=>stage?.key===key);
+    const ccsl=byKey('CCSL'),shopee=byKey('SHOPEE'),whpp=byKey('WHPP');
+    const freshDone=stage=>stage?.state==='done'&&stage?.statusFresh!==false;
+    if(freshDone(whpp))writeMarker(target,'V168_CANONICAL_DONE');
+    const marker=readMarker();
+    const whppDone=freshDone(whpp)||Boolean(marker?.completed===true&&normalizeDate(marker?.reportDate)===target);
+    return freshDone(ccsl)&&freshDone(shopee)&&whppDone;
+  }
+  function renderCompleted(target){
+    global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__={reportDate:target,verifiedAt:Date.now(),owner:'V67',source:'V412_PERSISTED_WHPP_COMPLETION'};
+    global.__CE_QC_UNIFIED_RUN_STAGE__={owner:'V67',type:'DONE',active:false,reportDate:target,updatedAt:Date.now()};
+    const node=document.getElementById('ccslRunStatus');if(node)node.innerHTML='<span class="status-pill success">七业务当日日报处理完成：CCSL → SHOPEE → WHPP均已验证正式结果。</span>';
+    const button=document.querySelector('[data-testid="global-auto-process"]');if(button){button.disabled=true;button.textContent='七业务已完成';button.title=`${target} 七业务均已有正式结果，无需重复处理`;}
+    try{document.dispatchEvent(new CustomEvent('ce-qc-run-complete',{detail:{reportDate:target,complete:true,source:'V412'}}));}catch{}
+  }
+  async function guardCall(original,thisArg,args){
+    const target=currentDate();
+    try{await global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.();}catch{}
+    learnWhppCompletion();
+    if(target&&exactFreshStagesDone(target)){
+      renderCompleted(target);
+      return {ok:true,reportDate:target,skipped:true,reason:'SEVEN_BUSINESS_ALREADY_COMPLETE_V412'};
+    }
+    return original.apply(thisArg,args);
+  }
+  function wrapEntries(){
+    if(wrapping)return;wrapping=true;
+    try{
+      for(const name of ['runUnified','resumeUnified']){
+        const original=global[name];if(typeof original!=='function'||original.__v412Wrapped)continue;
+        const wrapped=function(){return guardCall(original,this,arguments);};wrapped.__v412Wrapped=true;wrapped.__v412Original=original;global[name]=wrapped;
+      }
+    }finally{wrapping=false;}
+  }
+  function installObserver(){
+    if(observer)return;observer=new MutationObserver(()=>{syncTotal();learnWhppCompletion();wrapEntries();});observer.observe(document.body,{childList:true,subtree:true,characterData:true});
+  }
+  function install(){
+    syncTotal();learnWhppCompletion();wrapEntries();installObserver();
+    [0,80,250,700,1500,3000].forEach(ms=>setTimeout(()=>{syncTotal();learnWhppCompletion();wrapEntries();},ms));
+    document.addEventListener('ce-qc-unified-import-committed',event=>{clearMarker();setTimeout(()=>{syncTotal();learnWhppCompletion();},80);});
+    document.addEventListener('ce-qc-run-complete',()=>setTimeout(()=>{syncTotal();learnWhppCompletion();wrapEntries();},60));
+    document.addEventListener('change',event=>{if(event.target?.id==='excelFile')clearMarker();},true);
+    document.addEventListener('click',event=>{if(event.target?.closest?.('[data-testid="combined-daily-import"]'))clearMarker();},true);
+    global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__={version:VERSION,syncTotal,learnWhppCompletion,clearMarker,readMarker,sevenTotal};
+    console.info('[CE-QC][V412_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'seven-business visible total is always the sum of CE/CEAF/TBKH/ALI1688/SHOPEECN/SHOPEEVN/WHPP; exact-date WHPP completion is persisted only after fresh canonical confirmation and is cleared on every new import selection/commit.');
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,40),{once:true});else setTimeout(install,40);
+})(window);
