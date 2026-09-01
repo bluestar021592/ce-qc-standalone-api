@@ -309,6 +309,8 @@
     if (!node || !truth) return;
     const stages = truth.stages || [];
     const allFresh = stages.length === 3 && stages.every(stage => stage.statusFresh !== false);
+    const completionClass = truth.complete ? 'success' : 'muted';
+    const overallClass = allFresh ? completionClass : 'warning';
     const blockers = stages
       .filter(stage => ['failed','paused','error'].includes(stage.state) && stage.statusFresh !== false)
       .map(stage => ({ stage, detail: formatFailureDetail(stage) }))
@@ -325,7 +327,7 @@
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
         ${stages.map(stage => `<span class="status-pill ${pillClass(stage)}" title="${esc(formatFailureDetail(stage) || stage.statusReadError || stage.details || stage.error || '')}">${esc(stageText(stage))}</span>`).join('')}
-        <span class="status-pill ${truth.complete ? 'success' : (allFresh ? 'muted' : 'warning')}">${truth.complete ? '七业务已完成' : (allFresh ? '尚未全部完成' : '状态确认中')}</span>
+        <span class="status-pill ${overallClass}">${truth.complete ? '七业务已完成' : (allFresh ? '尚未全部完成' : '状态确认中')}</span>
       </div>
       ${transient.length ? `<div data-testid="seven-business-status-retry" style="margin-top:8px;color:#916000;font-size:12px;line-height:1.5">状态读取暂未确认，已保留上一次真实进度并自动重试：${transient.map(esc).join('；')}</div>` : ''}
       ${blockers.length ? `<div data-testid="seven-business-failure-detail" style="margin-top:9px;padding:9px 11px;border-radius:7px;background:#fff3f3;border:1px solid #ffd0d0;color:#9f1c1c;font-size:13px;line-height:1.55">${blockers.map(item => `<div><strong>${esc(item.stage.label)}：</strong>${esc(item.detail)}</div>`).join('')}</div>` : ''}`;
