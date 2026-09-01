@@ -5,20 +5,21 @@ import vm from 'node:vm';
 
 const read = relative => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
 
-test('V410 UI loader serves atomic import truth then V409/V169 status chain and keeps retired WHPP layers out', () => {
+test('V411 UI loader serves atomic import truth then V411/V169 status chain and keeps retired WHPP layers out', () => {
   const loader = read('../src/v44WhppUiPatch.js');
   const v146At = loader.indexOf('/v146-unified-import-date-status.js');
   const v168At = loader.indexOf('/v168-seven-business-status.js');
   const v169At = loader.indexOf('/v169-seven-business-legacy-status-sync.js');
 
-  assert.match(loader, /v410-atomic-import-light-status-loader-v1/);
+  assert.match(loader, /v411-serialized-status-entry-lock-loader-v1/);
   assert.match(loader, /WHPP_PAGE_OWNER='V132'/);
   assert.match(loader, /X-CE-QC-WHPP-Page-Owner/);
   assert.ok(v146At >= 0, 'V146 atomic import owner must be loaded');
-  assert.ok(v168At > v146At, 'V409 status owner must load after V146 pending-date truth');
-  assert.ok(v169At > v168At, 'V169 completion guard must load after V168 canonical truth');
+  assert.ok(v168At > v146At, 'V411 status owner must load after V146 pending-date truth');
+  assert.ok(v169At > v168At, 'V169 entry guard must load after V168 canonical truth');
   assert.match(loader, /v146-unified-import-date-status\.js\?v=20260901-v410-1/);
-  assert.match(loader, /v168-seven-business-status\.js\?v=20260901-v409-1/);
+  assert.match(loader, /v168-seven-business-status\.js\?v=20260901-v411-1/);
+  assert.match(loader, /v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/);
 
   for (const retired of [
     '/whpp-v44.js',
@@ -45,7 +46,7 @@ test('V410 UI loader serves atomic import truth then V409/V169 status chain and 
   assert.match(totalSync, /state\.summary\s*=\s*\{[\s\S]*validUniqueWaybills:\s*core\s*\+\s*total/);
 });
 
-test('V409/V410 reproduce and prevent the 6668-vs-6748, stale-date, and Failed-to-fetch regressions', () => {
+test('V411 serializes local SQLite status reads, removes raw abort text, and keeps stale truth read-only', () => {
   const importUi = read('../public/v146-unified-import-date-status.js');
   const statusUi = read('../public/v168-seven-business-status.js');
 
@@ -59,22 +60,25 @@ test('V409/V410 reproduce and prevent the 6668-vs-6748, stale-date, and Failed-t
   assert.match(importUi, /function sevenBusinessTotal\(counts=\{\}\)\{return BUSINESS_TYPES\.reduce/);
   assert.match(importUi, /validUniqueWaybills:total,sevenBusinessValidUniqueWaybills:total/);
   assert.match(importUi, /UNIFIED_IMPORT_NOT_COMMITTED/);
-  assert.match(importUi, /status:409,statusText:'Unified import not committed'/);
-  assert.match(importUi, /committed=Boolean\(response\.ok&&payload\?\.ok===true&&payload\?\.importCommitted===true/);
-  assert.match(importUi, /callerResponse=response\.ok&&payload\?\.ok===true\?uncommittedResponse/);
-  assert.match(importUi, /callerResponse=responseWithPayload\(response,payload\)/);
-  assert.match(importUi, /七业务有效唯一单号/);
 
-  assert.match(statusUi, /v409-pending-date-light-status-v1/);
+  assert.match(statusUi, /v411-serialized-status-read-v1/);
   const pendingPos = statusUi.indexOf('const pending = pendingImportDate()');
   const reportInputPos = statusUi.indexOf("document.getElementById('reportDate')?.value");
-  assert.ok(pendingPos >= 0 && reportInputPos > pendingPos, 'selected/pending report date must beat the previous committed reportDate input');
+  assert.ok(pendingPos >= 0 && reportInputPos > pendingPos, 'pending report date must beat the previous committed reportDate input');
   assert.match(statusUi, /__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__\?\.getPendingDate/);
+  assert.match(statusUi, /STATUS_TIMEOUT_MS = 15000/);
+  assert.match(statusUi, /STATUS_ATTEMPTS = 1/);
+  assert.match(statusUi, /STATUS_POLL_MS = 10000/);
+  assert.match(statusUi, /signal is aborted\|aborted without reason/);
+  assert.match(statusUi, /状态读取超过\$\{Math\.round\(STATUS_TIMEOUT_MS \/ 1000\)\}秒，正在自动重试/);
+  assert.match(statusUi, /const shopeeRequest = await settle/);
+  assert.match(statusUi, /const whppRequest = await settle/);
+  assert.match(statusUi, /const ccslRequest = await settle/);
+  assert.doesNotMatch(statusUi, /Promise\.allSettled\(\[/);
   assert.match(statusUi, /\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}&compact=1/);
-  assert.match(statusUi, /STATUS_ATTEMPTS = 2/);
-  assert.match(statusUi, /function transientStage/);
   assert.match(statusUi, /statusFresh: false/);
-  assert.match(statusUi, /保留上一次真实进度并自动重试/);
+  assert.match(statusUi, /状态确认中/);
+  assert.match(statusUi, /确认完成前禁止重复启动/);
   assert.match(statusUi, /complete: stages\.every\(stage => stage\.state === 'done' && stage\.statusFresh !== false\)/);
   assert.doesNotMatch(statusUi, /\/api\/whpp\/run\/start|\/api\/shopee\/run\/start/);
 });
@@ -99,7 +103,7 @@ test('V408 home WHPP KPI reads canonical V132 summary and preserves normal-flow 
   assert.match(reporting, /selfPickup:\s*selfPickupRows\.length/);
 });
 
-test('V169 blocks completed run/resume entries, hides stale continue CTA, and releases the lock for a new lifecycle', async () => {
+test('V411 blocks complete and unconfirmed run/resume entries, and releases only fresh incomplete truth', async () => {
   const source = read('../public/v169-seven-business-legacy-status-sync.js');
   const attrs = { onclick: 'resumeUnified()' };
   const button = {
@@ -115,7 +119,7 @@ test('V169 blocks completed run/resume entries, hides stale continue CTA, and re
     removeAttribute(name) { delete attrs[name]; if (name === 'title') this.title = ''; }
   };
 
-  const reportDate = { value: '2026-08-26' };
+  const reportDate = { value: '2026-08-29' };
   const document = {
     readyState: 'loading',
     visibilityState: 'visible',
@@ -123,9 +127,7 @@ test('V169 blocks completed run/resume entries, hides stale continue CTA, and re
     getElementById(id) { return id === 'reportDate' ? reportDate : null; },
     querySelectorAll(selector) {
       if (selector === 'button') return [button];
-      if (selector === 'button[data-v169-canonical-complete="1"]') {
-        return button.dataset.v169CanonicalComplete === '1' ? [button] : [];
-      }
+      if (selector === 'button[data-v169-entry-lock="1"]') return button.dataset.v169EntryLock === '1' ? [button] : [];
       return [];
     },
     addEventListener() {}
@@ -133,8 +135,13 @@ test('V169 blocks completed run/resume entries, hides stale continue CTA, and re
 
   let runCalls = 0;
   let resumeCalls = 0;
+  const staleStages = [
+    { key:'CCSL', state:'done', statusFresh:false },
+    { key:'SHOPEE', state:'done', statusFresh:false },
+    { key:'WHPP', state:'pending', statusFresh:false }
+  ];
   const canonical = {
-    lastTruth: { reportDate: '2026-08-26', complete: true },
+    lastTruth: { reportDate: '2026-08-29', complete: false, statusFresh: false, stages: staleStages },
     refresh: async function () { return this.lastTruth; }
   };
   const window = {
@@ -166,30 +173,69 @@ test('V169 blocks completed run/resume entries, hides stale continue CTA, and re
   vm.runInNewContext(source, context, { filename: 'v169-seven-business-legacy-status-sync.js' });
   const api = window.__CE_QC_V169_LEGACY_STATUS_SYNC__;
   assert.ok(api, 'V169 API must install');
-  assert.equal(api.apply(), true);
-  assert.equal(button.hidden, true);
+  assert.equal(api.apply(), false);
+  assert.equal(button.hidden, true, '08-29 stale status must hide the WHPP continue CTA');
   assert.equal(button.disabled, true);
 
-  const resumed = await window.resumeUnified();
-  const started = await window.runUnified();
-  assert.equal(resumed.code, 'SEVEN_BUSINESS_ALREADY_COMPLETE');
-  assert.equal(started.code, 'SEVEN_BUSINESS_ALREADY_COMPLETE');
+  const staleResume = await window.resumeUnified();
+  const staleStart = await window.runUnified();
+  assert.equal(staleResume.code, 'SEVEN_BUSINESS_STATUS_UNCONFIRMED');
+  assert.equal(staleStart.code, 'SEVEN_BUSINESS_STATUS_UNCONFIRMED');
   assert.equal(resumeCalls, 0);
   assert.equal(runCalls, 0);
 
-  canonical.lastTruth = { reportDate: '2026-08-27', complete: false };
-  reportDate.value = '2026-08-27';
+  canonical.lastTruth = {
+    reportDate: '2026-08-29', complete: true, statusFresh: true,
+    stages: [
+      { key:'CCSL', state:'done', statusFresh:true },
+      { key:'SHOPEE', state:'done', statusFresh:true },
+      { key:'WHPP', state:'done', statusFresh:true }
+    ]
+  };
+  assert.equal(api.apply(), true);
+  const completed = await window.resumeUnified();
+  assert.equal(completed.code, 'SEVEN_BUSINESS_ALREADY_COMPLETE');
+  assert.equal(resumeCalls, 0);
+
+  canonical.lastTruth = {
+    reportDate: '2026-08-30', complete: false, statusFresh: true,
+    stages: [
+      { key:'CCSL', state:'done', statusFresh:true },
+      { key:'SHOPEE', state:'done', statusFresh:true },
+      { key:'WHPP', state:'pending', statusFresh:true }
+    ]
+  };
+  reportDate.value = '2026-08-30';
   assert.equal(api.apply(), false);
   assert.equal(button.hidden, false);
   assert.equal(button.disabled, false);
-
   const nextResume = await window.resumeUnified();
   assert.equal(nextResume.original, true);
   assert.equal(resumeCalls, 1);
 
-  canonical.lastTruth = { reportDate: '2026-08-26', complete: true };
-  reportDate.value = '2026-08-27';
-  assert.equal(api.apply(), false, 'a stale completed truth from the previous report must not lock a new report date');
+  canonical.lastTruth = {
+    reportDate: '2026-08-29', complete: true, statusFresh: true,
+    stages: [
+      { key:'CCSL', state:'done', statusFresh:true },
+      { key:'SHOPEE', state:'done', statusFresh:true },
+      { key:'WHPP', state:'done', statusFresh:true }
+    ]
+  };
+  reportDate.value = '2026-08-30';
+  assert.equal(api.apply(), false, 'a previous-date completed truth is unconfirmed for the new target and must stay locked');
+  const mismatched = await window.runUnified();
+  assert.equal(mismatched.code, 'SEVEN_BUSINESS_STATUS_UNCONFIRMED');
+  assert.equal(runCalls, 0);
+
+  canonical.lastTruth = {
+    reportDate: '2026-08-30', complete: false, statusFresh: true,
+    stages: [
+      { key:'CCSL', state:'done', statusFresh:true },
+      { key:'SHOPEE', state:'done', statusFresh:true },
+      { key:'WHPP', state:'pending', statusFresh:true }
+    ]
+  };
+  api.apply();
   await window.runUnified();
-  assert.equal(runCalls, 1);
+  assert.equal(runCalls, 1, 'fresh current-date incomplete truth is the only state that may enter V67');
 });
