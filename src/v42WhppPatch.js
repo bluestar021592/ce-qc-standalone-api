@@ -388,7 +388,8 @@ async function handleUnifiedImportV42(req, res) {
         sourceName: req.file.originalname,
         rows: preservedRows,
         batchId: staged.batchId,
-        snapshotId: staged.snapshotId
+        snapshotId: staged.snapshotId,
+        preserveFinalizedLifecycle: true
       });
       effectiveWhppCount = preservedRows.length;
       whppImportSource = 'REHYDRATED_EXISTING_COMPLETE_DAILY_MEMBERSHIP';
@@ -405,7 +406,8 @@ async function handleUnifiedImportV42(req, res) {
     }
     console.log(`[CE-QC][V366_IMPORT_STAGE] whpp_ready reportDate=${parsed.reportDate} whpp=${effectiveWhppCount} source=${whppImportSource} elapsedMs=${Date.now() - startedAt}`);
 
-    invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged: true });
+    const whppLifecycleChanged = !(preservedWhpp.present && String(whppState.snapshotStatus || '').toUpperCase() === 'COMPLETED');
+    invalidateMutableSameDatePointers(parsed.reportDate, { whppChanged: whppLifecycleChanged });
     const releasedSupersededSlots = activateUnifiedCoreImport(staged);
 
     const effectiveCounts = { ...(parsed.classificationCounts || {}), WHPP: effectiveWhppCount };
