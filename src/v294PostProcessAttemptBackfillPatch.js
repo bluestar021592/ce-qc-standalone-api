@@ -8,7 +8,7 @@ import { requestV334GenericHistoryBuild } from './v334GenericHistoryCoordinator.
 import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.js';
 import { readV334GenericHistoryCache } from './v334GenericHistoryCache.js';
 
-export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID = '2026-09-01-v294-finalize-persisted-dashboard-history-v3';
+export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID = '2026-09-01-v294-seven-business-final-materialization-v4';
 const previousPost = express.application.post;
 const ROUTES = new Set([
   '/api/run','/api/run/start','/api/resume','/api/run/resume',
@@ -94,11 +94,12 @@ function runBackfill(reportDate, scopes={}) {
       const result = attemptTypes.length
         ? backfillV294StrictAttemptsFromSavedEvidence({ reportDate: date, fromDate: date, businessTypes: attemptTypes, reason: 'V294_POST_PROCESS_ROUTE' })
         : {ok:true,skipped:true,reason:'NO_ATTEMPT_TYPES'};
-      let dashboardCache={ok:true,skipped:true,reason:'SIX_BUSINESS_NOT_YET_COMPLETE'};
-      try{dashboardCache=refreshV235CurrentDashboardCacheDate(date,{force:true});}catch(error){dashboardCache={ok:false,error:error?.message||String(error)};}
+      // Do not rebuild dashboard/trend caches between CCSL and SHOPEE. Those are
+      // intermediate internal stages of one seven-business lifecycle. The final
+      // persisted read models are materialized once WHPP is finalized.
       invalidateDashboardReadCaches();
       if(scopes.family==='SHOPEE')watchForWhppFinalization(date);
-      console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_DONE]', JSON.stringify({ family:scopes.family||'',reportDate:date,carryLifecycle,attemptBackfill:result,dashboardCache,whppFinalizationWatch:scopes.family==='SHOPEE' }));
+      console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_DONE]', JSON.stringify({ family:scopes.family||'',reportDate:date,carryLifecycle,attemptBackfill:result,dashboardCache:'DEFERRED_UNTIL_SEVEN_BUSINESS_COMPLETE',whppFinalizationWatch:scopes.family==='SHOPEE' }));
     } catch (error) {
       console.error('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_FAILED]', JSON.stringify({ reportDate: date, family:scopes.family||'',carryTypes, attemptTypes, error: error?.message || String(error) }));
     } finally {
@@ -132,10 +133,11 @@ express.application.post = function v294PostProcessAttemptRegistration(pathValue
   return previousPost.call(this, pathValue, ...handlers);
 };
 
-// One bounded startup check only: if the latest imported date was already fully
-// finalized before this code upgrade, build any missing lightweight caches from
-// SQLite. It never calls CE APIs and never starts work for a newer unfinished day.
-if(process.env.NODE_ENV!=='test'&&!process.env.CI){const timer=setTimeout(()=>{const date=latestUnifiedReportDate();if(date&&whppFinalized(date))materializeV294CompletedUnifiedHistory(date);},5000);timer.unref?.();}
+// On startup, only watch the latest imported date's tiny persisted WHPP marker.
+// If it is already finalized, fill any missing local caches; if it is interrupted,
+// wait for the existing V67/V134 recovery path to finish and then materialize.
+// This watcher never starts business processing and never calls CE APIs.
+if(process.env.NODE_ENV!=='test'&&!process.env.CI){const timer=setTimeout(()=>{const date=latestUnifiedReportDate();if(!date)return;if(whppFinalized(date))materializeV294CompletedUnifiedHistory(date);else watchForWhppFinalization(date);},5000);timer.unref?.();}
 
 console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL]', V294_POST_PROCESS_ATTEMPT_BACKFILL_ID,
-  'CCSL/SHOPEE completion backfills strict saved attempt/signing evidence and refreshes current materialized dashboard truth; a tiny SQLite-only WHPP finalization watch queues missing saved-history caches only after the full unified pipeline is actually complete.');
+  'CCSL/SHOPEE completion only persists strict saved attempt/signing evidence; dashboard + trend read models materialize once after the same seven-business lifecycle reaches finalized WHPP, then completed dates are cache/SQLite reads.');
