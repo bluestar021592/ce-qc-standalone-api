@@ -1,9 +1,11 @@
 (function installV146UnifiedImportDateStatus(global){
   if(global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__)return;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__={};
-  const VERSION='2026-08-30-v366-atomic-seven-business-import-ui-v1';
+  const VERSION='2026-09-01-v410-atomic-seven-business-visible-truth-v1';
   const FILE_DATE_REVISION='2026-08-30-v379-file-date-conflict-guard-v2';
+  const DISPLAY_TOTAL_REVISION='2026-09-01-v410-seven-business-effective-total-v1';
   const ROUTE='/api/import/unified-daily-report';
+  const BUSINESS_TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const originalFetch=global.fetch.bind(global);
   let candidateTarget='';
   let pendingTarget='';
@@ -74,9 +76,49 @@
     if(file)return pendingTarget||manualOverrideDate()||candidateTarget||filenameDate(file.name);
     return pendingTarget||manualOverrideDate()||candidateTarget||committedDate();
   }
+  function numeric(value){return Number(String(value??'').replace(/[^0-9.-]/g,''))||0;}
+  function sevenBusinessTotal(counts={}){return BUSINESS_TYPES.reduce((sum,type)=>sum+Number(counts?.[type]||0),0);}
+  function domClassificationCounts(){
+    const selectors={CE:'ce',CEAF:'ceaf',TBKH:'tbkh',ALI1688:'ali1688',SHOPEECN:'shopeecn',SHOPEEVN:'shopeevn',WHPP:'whpp'};
+    return Object.fromEntries(BUSINESS_TYPES.map(type=>[type,numeric(document.querySelector(`[data-testid="classification-${selectors[type]}"]`)?.textContent)]));
+  }
+  function normalizeVisibleSummary(payload){
+    if(!payload||typeof payload!=='object')return payload;
+    const total=sevenBusinessTotal(payload.classificationCounts||{});
+    if(total>0){
+      payload.summary={...(payload.summary||{}),validUniqueWaybills:total,sevenBusinessValidUniqueWaybills:total};
+      payload.sevenBusinessValidUniqueWaybills=total;
+      payload.visibleTotalRevision=DISPLAY_TOTAL_REVISION;
+    }
+    return payload;
+  }
+  function responseWithPayload(response,payload){
+    if(typeof Response!=='function'||!payload||typeof payload!=='object')return response;
+    const headers=new Headers(response.headers||{});
+    headers.delete('content-length');
+    headers.delete('content-encoding');
+    headers.set('content-type','application/json; charset=utf-8');
+    headers.set('X-CE-QC-Seven-Business-Visible-Total',DISPLAY_TOTAL_REVISION);
+    return new Response(JSON.stringify(payload),{status:response.status,statusText:response.statusText,headers});
+  }
+  function uncommittedResponse(response,payload,target){
+    if(typeof Response!=='function')return response;
+    const body={
+      ok:false,
+      code:'UNIFIED_IMPORT_NOT_COMMITTED',
+      error:`${target||payload?.reportDate||'本次'} 日报尚未完成七业务原子提交，页面不会切换成功状态。`,
+      reportDate:String(payload?.reportDate||target||''),
+      importCommitted:false,
+      classificationCounts:payload?.classificationCounts||{},
+      summary:payload?.summary||{},
+      visibleTotalRevision:DISPLAY_TOTAL_REVISION
+    };
+    return new Response(JSON.stringify(body),{status:409,statusText:'Unified import not committed',headers:{'content-type':'application/json; charset=utf-8','X-CE-QC-Seven-Business-Visible-Total':DISPLAY_TOTAL_REVISION}});
+  }
   function syncCommittedTruth(payload=null){
     const payloadDate=normalizeDate(payload?.reportDate||'');
     if(payload&&payloadDate&&payload?.importCommitted===true){
+      normalizeVisibleSummary(payload);
       try{if(typeof unifiedImportState!=='undefined')unifiedImportState=payload;}catch{}
       try{if(typeof appState!=='undefined'&&payload?.state)appState=payload.state;}catch{}
       try{if(typeof shopeeState!=='undefined'&&payload?.shopeeState)shopeeState=payload.shopeeState;}catch{}
@@ -120,25 +162,43 @@
   function show(kind,title,detail=''){
     const node=status();if(!node)return;
     const palette=kind==='error'?['#fff1f1','#c43737','#f0c2c2']:kind==='success'?['#edf9f1','#16864d','#bfe7cf']:['#eef5ff','#245f9d','#c9dcf6'];
-    node.innerHTML=`<div data-v146-import-status="${kind}" style="margin-top:8px;padding:10px 12px;border:1px solid ${palette[2]};border-radius:7px;background:${palette[0]};color:${palette[1]};line-height:1.55"><b>${title}</b>${detail?`<div style="margin-top:3px;font-size:12px">${detail}</div>`:''}</div>`;
+    node.innerHTML=`<div data-v146-import-status="${kind}" data-v146-report-date="${targetDate()}" style="margin-top:8px;padding:10px 12px;border:1px solid ${palette[2]};border-radius:7px;background:${palette[0]};color:${palette[1]};line-height:1.55"><b>${title}</b>${detail?`<div style="margin-top:3px;font-size:12px">${detail}</div>`:''}</div>`;
   }
-  function syncSevenBusinessClassification(payload=committedImport()){
-    const counts=payload?.classificationCounts||{};
+  function syncSevenBusinessClassification(payload){
+    const explicit=payload&&typeof payload==='object'?normalizeVisibleSummary(payload):null;
+    const supplied=explicit?.classificationCounts&&typeof explicit.classificationCounts==='object';
+    const counts=supplied?explicit.classificationCounts:domClassificationCounts();
     const grid=document.querySelector('#unifiedClassificationSummary .unified-count-grid');
-    if(grid&&!grid.querySelector('[data-testid="classification-whpp"]')){
+    if(grid&&supplied&&!grid.querySelector('[data-testid="classification-whpp"]')){
       const cell=document.createElement('div');
       cell.innerHTML=`<span>WHPP本土</span><b data-testid="classification-whpp">${Number(counts.WHPP||0).toLocaleString('zh-CN')}</b>`;
       grid.appendChild(cell);
-    }else if(grid){
+    }else if(grid&&supplied){
       const target=grid.querySelector('[data-testid="classification-whpp"]');
       if(target)target.textContent=Number(counts.WHPP||0).toLocaleString('zh-CN');
     }
+    const total=sevenBusinessTotal(supplied?counts:domClassificationCounts());
+    const totalNode=grid?.querySelector('[data-testid="classification-valid-unique"]');
+    if(totalNode&&total>0)totalNode.textContent=total.toLocaleString('zh-CN');
+    if(explicit?.summary&&total>0){explicit.summary.validUniqueWaybills=total;explicit.summary.sevenBusinessValidUniqueWaybills=total;}
     const heading=document.querySelector('#importPage .page-heading p');
     if(heading&&/五个独立业务队列|五业务/.test(heading.textContent||''))heading.textContent='一次上传综合日报，系统一次确认七业务分类并建立独立处理队列';
     const empty=document.querySelector('#unifiedClassificationSummary .unified-empty-state span');
     if(empty&&/六业务|五业务/.test(empty.textContent||''))empty.textContent='选择综合日报后，这里会显示七业务分类、PP/PV和数据质量统计。';
+    return total;
   }
-  function scheduleSevenBusinessClassification(payload){[50,250,900].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(payload),ms));}
+  function scheduleSevenBusinessClassification(payload){[0,50,250,900,1800].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(payload),ms));}
+  function showSelectedPendingState(){
+    const file=selectedFile();if(!file||importBusy)return;
+    const selected=manualOverrideDate()||candidateTarget||filenameDate(file.name);
+    if(selected){
+      show('info',`已选择 ${selected} 日报，尚未写入数据库`,`文件：${file.name}。当前正式日报仍保持 ${committedDate()||'上一成功日期'}；只有七业务分类和三个处理队列全部保存成功后才切换。`);
+    }else{
+      show('info','已选择日报，导入时从Excel内容确认日期',`文件：${file.name}。文件名未给出可确认日期，系统不会沿用 ${committedDate()||'上一成功日期'}；导入时由Excel内容确定新日期。`);
+    }
+    syncSevenBusinessClassification();
+  }
+  function scheduleSelectedPendingState(){[0,80,250,700,1500,2600].forEach(ms=>setTimeout(showSelectedPendingState,ms));}
   function markSelected(){
     const file=selectedFile();if(!file)return;
     resetStaleDateOverride();
@@ -146,7 +206,8 @@
     candidateTarget=filenameDate(file.name)||'';
     restoreCommittedDate();
     showCandidateSource();
-    setTimeout(()=>show('info',candidateTarget?`已选择 ${candidateTarget} 日报，尚未写入数据库`:'已选择日报，导入时从Excel内容确认日期',candidateTarget?`文件：${file.name}。当前正式日报仍保持 ${committedDate()||'上一成功日期'}；只有七业务分类和三个处理队列全部保存成功后才切换。`:`文件：${file.name}。文件名未给出可确认日期，系统不会沿用 ${committedDate()||'上一成功日期'}；导入时由Excel内容确定新日期。`),0);
+    scheduleSelectedPendingState();
+    try{global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.();}catch{}
   }
 
   document.addEventListener('change',event=>{if(event.target?.id==='excelFile')markSelected();},true);
@@ -174,6 +235,7 @@
     showCandidateSource();
     setImportButtonBusy(true);
     show('info',pendingTarget?`正在导入 ${pendingTarget} 日报…`:'正在从Excel内容识别日报日期…','正在执行日期校验、七业务分类、CCSL/SHOPEE/WHPP队列保存和最终原子提交。完成前不会替换上一份日报，也不会沿用上一天日期。');
+    try{global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.();}catch{}
   },true);
 
   global.fetch=async function v146UnifiedImportFetch(input,init){
@@ -184,6 +246,7 @@
     let target=pendingTarget||selectedManual||candidateTarget||filenameDate(selectedFile()?.name||'');
     let committed=false;
     let payload=null;
+    let callerResponse=null;
     try{
       const body=init?.body;
       if(body instanceof FormData){
@@ -202,6 +265,7 @@
       show('info',target?`正在导入 ${target} 日报…`:'正在从Excel内容识别日报日期…','新日期仍处于待确认状态；后台七业务和三个处理队列全部原子提交前，页面继续使用上一份正式日报。');
       const response=await originalFetch(input,init);
       try{payload=await response.clone().json();}catch{}
+      normalizeVisibleSummary(payload);
       const responseDate=normalizeDate(payload?.reportDate||'');
       const requestedDate=normalizeDate(target||'');
       committed=Boolean(response.ok&&payload?.ok===true&&payload?.importCommitted===true&&responseDate&&(!requestedDate||responseDate===requestedDate));
@@ -212,16 +276,22 @@
         show('error',`${target||'本次'} 日报导入未完成`,`${message}。上一份成功日报继续生效；不会进入半分类、半扫描状态。`);
         restoreCommittedDate();
         showCandidateSource();
+        callerResponse=response.ok&&payload?.ok===true?uncommittedResponse(response,payload,target):response;
+        [0,80,250,700].forEach(ms=>setTimeout(()=>{
+          show('error',`${target||'本次'} 日报导入未完成`,`${message}。上一份成功日报继续生效；不会进入半分类、半扫描状态。`);
+          syncSevenBusinessClassification(payload);
+        },ms));
       }else{
         syncCommittedTruth(payload);
         candidateTarget='';
         resetStaleDateOverride();
-        show('success',`${responseDate} 日报已完整提交`,`七业务分类和 CCSL → SHOPEE → WHPP 三阶段处理入口均已原子切换到新日期。`);
+        show('success',`${responseDate} 日报已完整提交`,`七业务有效唯一单号 ${sevenBusinessTotal(payload?.classificationCounts||{}).toLocaleString('zh-CN')}；CCSL → SHOPEE → WHPP 三阶段处理入口均已原子切换到新日期。`);
         scheduleSevenBusinessClassification(payload);
         scheduleCommittedTruth(payload);
+        callerResponse=responseWithPayload(response,payload);
         try{document.dispatchEvent(new CustomEvent('ce-qc-unified-import-committed',{detail:{reportDate:responseDate,snapshotId:String(payload?.snapshotId||'')}}));}catch{}
       }
-      return response;
+      return callerResponse||response;
     }catch(error){
       show('error',`${target||'本次'} 日报导入请求失败`,`${error?.message||error}。上一份正式日报继续生效。`);
       restoreCommittedDate();
@@ -236,13 +306,14 @@
     }
   };
 
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleCommittedTruth();});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){scheduleCommittedTruth();if(selectedFile())scheduleSelectedPendingState();}});
   global.addEventListener('popstate',()=>scheduleCommittedTruth());
-  document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page]'))setTimeout(()=>scheduleCommittedTruth(),80);},true);
+  document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link[data-page]'))setTimeout(()=>{scheduleCommittedTruth();if(selectedFile())showSelectedPendingState();},80);},true);
   [100,400,1200,3000].forEach(ms=>setTimeout(()=>syncCommittedTruth(),ms));
-  [200,900,1800].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(),ms));
+  [200,900,1800].forEach(ms=>setTimeout(()=>syncSevenBusinessClassification(selectedFile()?undefined:committedImport()),ms));
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.version=VERSION;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.fileDateRevision=FILE_DATE_REVISION;
+  global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.displayTotalRevision=DISPLAY_TOTAL_REVISION;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.getPendingDate=()=>pendingTarget||candidateTarget;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.detectFilenameDate=filenameDate;
   global.__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__.syncClassification=syncSevenBusinessClassification;
