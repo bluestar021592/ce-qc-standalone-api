@@ -31,7 +31,7 @@ function isFinalizedWhppDaily(summary = {}) {
   );
 }
 
-function restoreFinalizedWhppState(reportDate, summary) {
+function restoreFinalizedWhppState(reportDate, summary, reason = 'EXPLICIT_REHYDRATE') {
   const finalizedSnapshotId = String(summary.finalizedSnapshotId || '').trim();
   const payload = loadWhppSnapshot(finalizedSnapshotId);
   const persisted = payload?.state && typeof payload.state === 'object' ? payload.state : null;
@@ -55,8 +55,24 @@ function restoreFinalizedWhppState(reportDate, summary) {
       phase: '完成'
     }
   });
-  console.log(`[CE-QC][WHPP_FINALIZED_REHYDRATE_NOOP] reportDate=${reportDate} snapshot=${finalizedSnapshotId}`);
+  restored.finalizedLifecyclePreserved = true;
+  restored.finalizedLifecyclePreserveReason = reason;
+  console.log(`[CE-QC][WHPP_FINALIZED_REHYDRATE_NOOP] reportDate=${reportDate} snapshot=${finalizedSnapshotId} reason=${reason}`);
   return restored;
+}
+
+function inspectExistingWhppDaily(db, reportDate, incomingRows = []) {
+  const daily = db.prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
+  const summary = safeJson(daily?.summaryJson, {});
+  if (!daily) return { exists: false, finalized: false, identicalMembership: false, summary };
+  const incoming = uniqueRows(incomingRows).map(billOf).filter(Boolean).sort();
+  const stored = db.prepare("SELECT DISTINCT shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>'' ORDER BY shipmentCode").all(reportDate)
+    .map(row => String(row.shipmentCode || '').trim().toUpperCase()).filter(Boolean);
+  const headerCount = Number(daily.totalCount || 0);
+  const identicalMembership = headerCount === incoming.length
+    && stored.length === incoming.length
+    && stored.every((bill, index) => bill === incoming[index]);
+  return { exists: true, finalized: isFinalizedWhppDaily(summary), identicalMembership, summary };
 }
 
 export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], batchId = '', snapshotId = '', preserveFinalizedLifecycle = false }) {
@@ -66,16 +82,17 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
   const todayBills = new Set(unique.map(billOf));
   const prior = loadWhppState();
 
-  // V397: the unified importer can explicitly rehydrate an already-normalized
-  // WHPP membership when the new combined workbook contains no WHPP rows. That
-  // is not a new WHPP import. If the same daily is already finalized, restore
-  // its immutable completed snapshot and make this call a no-op for daily rows,
-  // current shipment facts and carry facts. A genuine direct re-import omits
-  // preserveFinalizedLifecycle and remains authoritative for the same date.
-  if (preserveFinalizedLifecycle === true) {
-    const existing = db.prepare("SELECT summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
-    const summary = safeJson(existing?.summaryJson, {});
-    if (isFinalizedWhppDaily(summary)) return restoreFinalizedWhppState(reportDate, summary);
+  // V399: a finalized WHPP daily is immutable when the exact same shipment
+  // membership is uploaded again. This covers both the explicit V366 rehydrate
+  // path and a normal same-date workbook reupload that still contains WHPP rows.
+  // Only a real membership change is allowed to clear the completion lifecycle.
+  const existingDaily = inspectExistingWhppDaily(db, reportDate, unique);
+  if (existingDaily.finalized && (preserveFinalizedLifecycle === true || existingDaily.identicalMembership)) {
+    return restoreFinalizedWhppState(
+      reportDate,
+      existingDaily.summary,
+      preserveFinalizedLifecycle === true ? 'EXPLICIT_REHYDRATE' : 'IDENTICAL_MEMBERSHIP_REUPLOAD'
+    );
   }
 
   const carryBills = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' ORDER BY shipmentCode").all().map(row => row.shipmentCode);
@@ -277,16 +294,4 @@ function uniqueRows(rows = []) {
   const map = new Map();
   for (const row of rows || []) { const bill = billOf(row); if (bill) map.set(bill, row); }
   return [...map.values()];
-}
-function safeJson(value, fallback = {}) {
-  try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
-  catch { return fallback; }
-}
-function emptyWhppState() {
-  return {
-    businessType: WHPP, reportDate: '', sourceName: '', batchId: '', sourceSnapshotId: '', snapshotId: '', snapshotStatus: 'EMPTY',
-    dailyReportReady: false, pnhBills: [], dailyParseRows: [], carryBills: [], nextCarryBills: [], podLocks: [],
-    scanResults: [], scanQueryStatus: [], trackEvents: [], eventQueryStatus: [], exceptionItems: [], exceptionQueryStatus: [],
-    finalRows: [], trackResults: [], processing: { running: false, paused: false, phase: '' }, lastRunSummary: null, lastRun: null
-  };
 }
