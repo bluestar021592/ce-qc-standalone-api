@@ -94,9 +94,13 @@ assert.match(progressUi,/batchMax:50/,'V138 trajectory phase must expose 50-tick
 assert.match(progressUi,/单批最大350/,'V138 visible scan detail must say 350 tickets per batch');
 assert.match(progressUi,/单批最大50/,'V138 visible trajectory detail must say 50 tickets per batch');
 
-assert.match(sevenStatus,/2026-09-01-v409-pending-date-light-status-v1/,'V168 must expose pending-date + lightweight status truth');
+assert.match(sevenStatus,/2026-09-01-v411-serialized-status-read-v1/,'V168 must expose the V411 pending-date serialized status truth');
 assert.match(sevenStatus,/2026-08-29-single-unified-runner-status-only-v1/,'V168 must advertise status-only architecture');
 assert.match(sevenStatus,/2026-08-30-v360-verified-whpp-status-sync-v1/,'V168 must expose the current-run WHPP completion sync contract');
+assert.match(sevenStatus,/const STATUS_TIMEOUT_MS = 15000/,'V168 must not self-abort local status reads after the old 3-second window');
+assert.match(sevenStatus,/const STATUS_POLL_MS = 10000/,'V168 must avoid 2-second status-poll pressure on the local SQLite backend');
+assert.match(sevenStatus,/const shopeeRequest = await settle[\s\S]*const whppRequest = await settle[\s\S]*const ccslRequest = await settle/,'V168 status reads must be serialized so one synchronous proof cannot expire queued siblings');
+assert.doesNotMatch(sevenStatus,/Promise\.allSettled\(/,'V168 must not issue the three local status reads concurrently');
 assert.match(sevenStatus,/postJson\('\/api\/v317\/ccsl-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical CCSL recovery truth for the selected date');
 assert.match(sevenStatus,/postJson\('\/api\/v311\/shopee-recovery',[\s\S]*action: 'status',[\s\S]*reportDate: target/,'V168 must read canonical SHOPEE recovery truth for the same selected date');
 assert.match(sevenStatus,/readJson\(`\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}&compact=1`\)/,'V168 must use compact WHPP status for the same selected date');
@@ -108,6 +112,9 @@ assert.match(sevenStatus,/ccsl\?\.state === 'done'[\s\S]*shopee\?\.state === 'do
 assert.match(sevenStatus,/stages\.every\(stage => stage\.state === 'done' && stage\.statusFresh !== false\)/,'overall completion requires fresh exact-date canonical stages');
 assert.match(sevenStatus,/if \(stage\.state === 'done'\) return 'success'/,'every fresh completed stage must be green');
 assert.match(sevenStatus,/truth\.complete \? 'success' : 'muted'/,'overall completed state must also be green');
+assert.match(sevenStatus,/if \(!allFresh\)[\s\S]*lockControl\(start, '状态确认中'/,'unconfirmed exact-date truth must fail closed instead of exposing a repeat start');
+assert.match(sevenStatus,/lockControl\(resume,[\s\S]*确认完成前禁止重复继续/,'unconfirmed exact-date truth must disable the legacy continue control');
+
 assert.match(sevenStatus,/node\.dataset\.v333Owner = 'canonical'/,'summary DOM must mark canonical ownership');
 assert.match(sevenStatus,/statusOnly: true/,'V168 must be read/render only');
 assert.match(sevenStatus,/authoritativeRunner: 'V67'/,'V168 must point execution ownership to V67');
@@ -142,19 +149,19 @@ assert.doesNotMatch(injection,/if\(!body\.includes\(V317_CCSL_RECOVERY_MARKER\)\
 assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must still load V334 history hard owner');
 assert.match(injection,/X-CE-QC-Unified-Runner/,'single-runner response header must be observable');
 
-assert.match(htmlOwner,/2026-09-01-v410-atomic-import-light-status-loader-v1/,'HTML owner must expose the current V410 import/status build identity');
+assert.match(htmlOwner,/2026-09-01-v411-serialized-status-entry-lock-loader-v1/,'HTML owner must expose the current V411 status/entry-lock build identity');
 assert.match(htmlOwner,/WHPP_PAGE_OWNER='V132'/,'V132 must remain the sole WHPP page owner');
 assert.match(htmlOwner,/X-CE-QC-WHPP-Page-Owner/,'WHPP page ownership must be observable in the HTML response');
 assert.doesNotMatch(htmlOwner,/\/whpp-v44\.js|\/whpp-v45-cleanup\.js|\/whpp-v47-auto-run\.js|\/v52-whpp-source-truth-route\.js|\/v72-whpp-light-state-bridge\.js|\/v103-home-whpp-card-guard\.js/,'retired WHPP browser layers must not re-enter the live loader');
 assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'browser must load the V338 CCSL 350/50 detail owner');
 assert.match(htmlOwner,/v67-resilient-run-guard\.js\?v=20260830-v360-1/,'browser must load the current V360 V67 runner without stale static cache');
 assert.match(htmlOwner,/v146-unified-import-date-status\.js\?v=20260901-v410-1/,'browser must load the current atomic import UI owner');
-assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260901-v409-1/,'browser must load the current lightweight status-only V168 owner without stale cache');
-assert.match(htmlOwner,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v400-1/,'V400 completion/status sync must load after V168 while V67 remains the sole execution owner');
+assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260901-v411-1/,'browser must load the current serialized status-only V168 owner without stale cache');
+assert.match(htmlOwner,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'V411 fail-closed completion/status sync must load after V168 while V67 remains the sole execution owner');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
 
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V410/V409/V400/V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · pending selected date beats stale committed input · WHPP status is compact · exact-date last-good progress survives transient fetch failures · V67 remains sole execution owner · scan=350 · trajectory=50');
+console.log('[V411/V410/V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · pending selected date beats stale committed input · WHPP status is compact · status reads serialize at 15s bounded windows · exact-date last-good progress survives transient fetch failures · unconfirmed truth blocks duplicate start/resume · V67 remains sole execution owner · scan=350 · trajectory=50');
