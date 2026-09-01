@@ -14,16 +14,19 @@ export function buildWhppDashboard(state = {}) {
   const returnedRows = dailyRows.filter(row => !isPod(row) && isReturned(row));
   const cancelledRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && isWhppCancelledRow(row));
   const activeShopRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && isActiveShop(row));
+  const activeStoreRetentionRows = activeShopRows.filter(row => Number(row.shopRetentionNaturalDays || row.storeRetentionNaturalDays || 0) >= 2);
   const phnomPenhShopRows = activeShopRows.filter(row => regionOf(row) === 'PP');
   const provinceShopRows = activeShopRows.filter(row => regionOf(row) === 'PV');
   const unknownShopRows = activeShopRows.filter(row => regionOf(row) === 'UNKNOWN');
   const unresolvedRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row) && !isActiveShop(row));
   const normalDiversionRows = dailyRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && isNormalDiversion(row));
+  const selfPickupRows = normalDiversionRows.filter(row => specialOf(row) === 'SELF_PICKUP');
   const ccsl580Rows = normalDiversionRows.filter(row => ['CCSL580_RETENTION','CCSL580_DIVERSION'].includes(specialOf(row)));
 
   // Current shop location is a normal destination bucket, not an ordinary
-  // Pending/OC/盘点 anomaly bucket. This prevents the same parcel from appearing
-  // both in 门店 and in ordinary operational anomalies.
+  // Pending/OC/盘点 anomaly bucket. Only a shop that has actually remained for
+  // >=2 natural days is published as store retention; ordinary shop presence is
+  // not itself an abnormal-retention count.
   const actionable = monitorRows.filter(row => !isPod(row) && !isReturned(row) && !isWhppCancelledRow(row) && !isNormalDiversion(row) && !isActiveShop(row));
   const metrics = {
     total: dailyRows.length,
@@ -35,7 +38,9 @@ export function buildWhppDashboard(state = {}) {
     cancelRate: rate(cancelledRows.length, dailyRows.length),
     unresolved: unresolvedRows.length,
     normalDiversion: normalDiversionRows.length,
+    selfPickup: selfPickupRows.length,
     shopTotal: activeShopRows.length,
+    activeStoreRetention: activeStoreRetentionRows.length,
     accounted: podRows.length + returnedRows.length + cancelledRows.length + unresolvedRows.length + normalDiversionRows.length + activeShopRows.length,
     accountingDifference: dailyRows.length - podRows.length - returnedRows.length - cancelledRows.length - unresolvedRows.length - normalDiversionRows.length - activeShopRows.length,
     pending1: actionable.filter(row => pendingDays(row) >= 1).length,
@@ -84,6 +89,7 @@ export function buildWhppDashboard(state = {}) {
     cancelled: tab('订单取消', cancelledRows),
     unresolved: tab('当前未闭环', unresolvedRows),
     normalDiversion: tab('正常分流', normalDiversionRows),
+    selfPickup: tab('仓库自提', selfPickupRows),
     pending1: tab('Pending1+', actionable.filter(row => pendingDays(row) >= 1)),
     pending2: tab('Pending2+', actionable.filter(row => pendingDays(row) >= 2)),
     pending3: tab('Pending3+', actionable.filter(row => pendingDays(row) >= 3)),
@@ -99,6 +105,7 @@ export function buildWhppDashboard(state = {}) {
     ccslZtDiversion: tab('CCSLZT分流', normalDiversionRows.filter(row => specialOf(row) === 'CCSLZT_DIVERSION')),
     ccsl580Retention: tab('580滞留包裹', ccsl580Rows),
     ccsl580Diversion: tab('580滞留包裹', ccsl580Rows),
+    activeStoreRetention: tab('门店滞留2天+', activeStoreRetentionRows),
     phnomPenhShop: tab('金边门店', phnomPenhShopRows),
     provinceShop: tab('外省门店', provinceShopRows),
     unknownShop: tab('门店区域待确认', unknownShopRows),
