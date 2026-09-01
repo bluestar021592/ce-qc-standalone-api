@@ -21,14 +21,22 @@ import './v334GenericTrendRoutePatch.js';
 import './v319TrendCacheFastPatch.js';
 import './v295FirstAttemptUiInjectionPatch.js';
 
+// Historical archive replay and the old V284 priority repair were useful while
+// migrating legacy databases, but they must not run during ordinary startup.
+// In particular V284PriorityUnprovenRefresh can call the CE APIs for old dates;
+// that made a completed installation keep "reading" history after every restart.
+// Maintenance remains available only through an explicit opt-in environment flag.
+export const V147_LEGACY_MAINTENANCE_POLICY_ID='2026-09-01-completed-dates-no-startup-api-refresh-v1';
 const RECOVERY_SAFE_MODE=String(process.env.CE_QC_RECOVERY_SAFE_MODE||'')==='1';
-if(!RECOVERY_SAFE_MODE){
+const LEGACY_HISTORY_MAINTENANCE=String(process.env.CE_QC_LEGACY_HISTORY_MAINTENANCE||'')==='1';
+if(!RECOVERY_SAFE_MODE&&LEGACY_HISTORY_MAINTENANCE){
   await import('./v283LegacyDecoratedHashReplay.js');
   await import('./v283LegacyDecoratedHashReplayRetry.js');
   await import('./v284DailyMembershipAudit.js');
   await import('./v284PriorityUnprovenRefresh.js');
+  console.log('[CE-QC][LEGACY_HISTORY_MAINTENANCE] explicit maintenance enabled; legacy replay/audit/priority repair may access saved historical evidence and CE APIs.');
 }else{
-  console.log('[CE-QC][RECOVERY_SAFE_MODE] V283 archive replay + V284 startup audit/priority refresh skipped on automatic startup; persisted database state is unchanged.');
+  console.log('[CE-QC][COMPLETED_HISTORY_READ_ONLY_STARTUP]',V147_LEGACY_MAINTENANCE_POLICY_ID,'legacy V283 replay + V284 audit/API priority refresh disabled on normal startup; completed dates stay SQLite/cache read-only.');
 }
 
 // Historical export kept for compatibility with existing activation/smoke gates.
