@@ -143,15 +143,15 @@ assert.doesNotMatch(injection,/if\(!body\.includes\(V317_CCSL_RECOVERY_MARKER\)\
 assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must still load V334 history hard owner');
 assert.match(injection,/X-CE-QC-Unified-Runner/,'single-runner response header must be observable');
 
-assert.match(htmlOwner,/2026-08-27-v334-canonical-detail-history-owner-cache-bust-v1/,'HTML owner must retain V334 compatibility build identity');
+assert.match(htmlOwner,/2026-09-01-v400-seven-business-completion-loader-v1/,'HTML owner must expose the current V400 completion-loader build identity');
 assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'browser must load the V338 CCSL 350/50 detail owner');
 assert.match(htmlOwner,/v67-resilient-run-guard\.js\?v=20260830-v360-1/,'browser must load the current V360 V67 runner without stale static cache');
 assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260830-v360-1/,'browser must load the current V360 status-only V168 owner without stale static cache');
-assert.doesNotMatch(htmlOwner,/v169-seven-business-legacy-status-sync\.js/,'legacy V169 summary refresh bridge must be retired from runtime');
+assert.match(htmlOwner,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v400-1/,'V400 completion/status sync must load after V168 while V67 remains the sole execution owner');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
 
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · explicit date precedence gate is formatting-independent · exact stale CCSL run pointers may retire while facts/audit remain immutable · V67 foreground + V134 guarded backend continuity cannot reopen finalized WHPP · scan=350 · trajectory=50');
+console.log('[V400/V378.1/V378/V377/SINGLE-RUNNER/V360/V341/V334/V317] smoke passed · explicit date precedence gate is formatting-independent · exact stale CCSL run pointers may retire while facts/audit remain immutable · V67 remains sole execution owner while V169 synchronizes verified completion UI · scan=350 · trajectory=50');
