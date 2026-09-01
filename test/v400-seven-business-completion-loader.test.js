@@ -41,6 +41,26 @@ test('V406 UI loader serves V169 after V168, keeps seven-business total sync, an
   assert.match(totalSync, /state\.summary\s*=\s*\{[\s\S]*validUniqueWaybills:\s*core\s*\+\s*total/);
 });
 
+test('V408 home WHPP KPI reads canonical V132 summary and preserves normal-flow semantics', () => {
+  const v64 = read('../public/v64-whpp-total-kpi-integration.js');
+  assert.match(v64, /v408-canonical-v132-home-kpi-v1/);
+  assert.match(v64, /\/api\/v132\/whpp-fast-summary/);
+  assert.doesNotMatch(v64, /\/api\/v71\/whpp-summary/);
+  assert.match(v64, /metrics\.activeStoreRetention/);
+  assert.match(v64, /metrics\.selfPickup/);
+  assert.match(v64, /regions\?\.PV\?\.unresolved/);
+  assert.match(v64, /patchCountMetric\('CCSLCN分流'/);
+  assert.match(v64, /patchCountMetric\('CCSLZT分流'/);
+  assert.doesNotMatch(v64, /patchCountMetric\('CECN滞留包裹'/);
+  assert.doesNotMatch(v64, /patchCountMetric\('CEZT滞留包裹'/);
+
+  const reporting = read('../src/whppReporting.js');
+  assert.match(reporting, /activeStoreRetentionRows\s*=\s*activeShopRows\.filter[\s\S]*>=\s*2/);
+  assert.match(reporting, /selfPickupRows\s*=\s*normalDiversionRows\.filter[\s\S]*SELF_PICKUP/);
+  assert.match(reporting, /activeStoreRetention:\s*activeStoreRetentionRows\.length/);
+  assert.match(reporting, /selfPickup:\s*selfPickupRows\.length/);
+});
+
 test('V169 blocks completed run/resume entries, hides stale continue CTA, and releases the lock for a new lifecycle', async () => {
   const source = read('../public/v169-seven-business-legacy-status-sync.js');
   const attrs = { onclick: 'resumeUnified()' };
