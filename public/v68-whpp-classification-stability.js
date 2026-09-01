@@ -1,7 +1,7 @@
 (function installWhppClassificationStabilityV68(global) {
   if (global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__) return;
 
-  const VERSION = '2026-08-22-v217-whpp-classification-display-truth-v1';
+  const VERSION = '2026-09-01-v399-seven-business-import-total-v1';
   let scheduled = false;
   let fastSyncing = false;
   let lastFastSyncAt = 0;
@@ -122,11 +122,18 @@
   function patchStatus(truth) {
     const status = document.getElementById('fileStatus');
     if (!status) return;
-    status.querySelectorAll('p').forEach(p => {
-      if (!/有效唯一单号/.test(p.textContent || '')) return;
-      const next = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${fmt(truth.fullUnique)}`);
-      if (next !== p.innerHTML) p.innerHTML = next;
-    });
+    const total = fmt(truth.fullUnique);
+    const walker = document.createTreeWalker(status, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const before = String(node.nodeValue || '');
+      let next = before
+        .replace(/有效唯一单号\s*[\d,]+/g, `有效唯一单号 ${total}`)
+        .replace(/日报导入完成，\s*共\s*[\d,]+\s*个唯一运单/g, `日报导入完成，共 ${total} 个唯一运单`)
+        .replace(/导入成功：\s*有效\s*[\d,]+\s*票/g, `导入成功：有效 ${total} 票`);
+      if (next !== before) node.nodeValue = next;
+    }
   }
 
   function normalize() {
@@ -165,10 +172,10 @@
       const core = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']
         .reduce((sum, type) => sum + num(state.classificationCounts?.[type]), 0);
       state.summary = { ...(state.summary || {}), validUniqueWaybills: core + total, totalUnique: core + total };
-      state.whppClassificationDisplaySource = 'V217_WHPP_FAST_SUMMARY';
+      state.whppClassificationDisplaySource = 'V399_WHPP_FAST_SUMMARY';
       normalize();
     } catch (error) {
-      console.warn('[CE-QC][V217_WHPP_CLASSIFICATION] fast WHPP sync skipped', error?.message || error);
+      console.warn('[CE-QC][V399_WHPP_CLASSIFICATION] fast WHPP sync skipped', error?.message || error);
     } finally {
       fastSyncing = false;
     }
