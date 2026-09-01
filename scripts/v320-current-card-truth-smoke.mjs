@@ -4,13 +4,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-for(const file of ['src/v320DispatchMetricOverlay.js','src/rangeDashboardStoreV320.js','src/rangeDashboardStore.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v320DispatchMetricOverlay.js','src/rangeDashboardStoreV320.js','src/rangeDashboardStoreFinal.js','src/rangeDashboardStore.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const facade=fs.readFileSync('src/rangeDashboardStore.js','utf8');
+const finalOwner=fs.readFileSync('src/rangeDashboardStoreFinal.js','utf8');
 const rangeOwner=fs.readFileSync('src/rangeDashboardStoreV320.js','utf8');
-assert.match(facade,/rangeDashboardStoreV320\.js/,'public period-dashboard facade must activate V320 single-day current truth');
+assert.match(facade,/rangeDashboardStoreFinal\.js/,'public period-dashboard facade must pass through final business normalization');
+assert.match(finalOwner,/rangeDashboardStoreV320\.js/,'final business normalization must consume V320 as its authoritative source/cache truth');
+assert.doesNotMatch(finalOwner,/rangeDashboardStoreV31\.js/,'final normalization must never fall back to the obsolete V31 snapshot selector');
 assert.match(facade,/rangeDashboardStoreV295[\s\S]*rangeDashboardStoreV294/,'historical V295/V294 compatibility markers must remain');
 assert.match(rangeOwner,/currentCacheOverlayApplied/,'single-day range owner must only apply reconciled completed-cache rows');
 assert.match(rangeOwner,/from!==to/,'V320 current-card override must stay single-day only');
+assert.match(finalOwner,/finalNormalizationApplied:\s*true/,'public result must make the post-V320 normal-flow normalization observable');
+assert.match(finalOwner,/PARTITION BY u\.reportDate,UPPER\(TRIM\(u\.businessType\)\)/,'final normal-flow adjustments must preserve V320-era per-date + per-business latest VALID isolation');
 
 const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v320-current-'));
 process.env.DATA_DIR=tempRoot;process.env.DB_FILE=path.join(tempRoot,'current.db');process.env.ACCESS_MODE='LOCAL';process.env.SQLITE_MMAP_BYTES='0';process.env.SQLITE_CACHE_KIB='8192';process.env.NODE_ENV='test';
@@ -40,4 +45,4 @@ assert.equal(good.total,2);assert.equal(good.pod,2,'denominator-matched complete
 const bad=readV320HistoricalDailyWithDispatch('CE','2026-08-07','2026-08-07',{db,expandSingle:false}).daily[0];
 assert.equal(bad.total,2);assert.equal(bad.currentCacheOverlayApplied,false,'cache with a mismatched denominator must never override persisted daily membership');assert.equal(bad.pod,0,'mismatched cache must be rejected rather than fabricated into the current card');
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V320] current-card truth smoke passed · exact completed cache wins only at identical daily denominator · unproven ledger cannot collapse completed POD');
+console.log('[V402/V320] current-card truth smoke passed · public facade=Final→V320 · exact completed cache wins only at identical daily denominator · final normal-flow rules preserve per-business latest VALID truth');
