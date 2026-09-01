@@ -11,9 +11,11 @@ const v85 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v85ShopeeWhppMetr
 const v132 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v132WhppFastIntegrationPatch.js'), 'utf8').replace(/\r\n/g, '\n');
 const v161 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v161UnifiedImportRuntimeTruthPatch.js'), 'utf8').replace(/\r\n/g, '\n');
 const v42 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v42WhppPatch.js'), 'utf8').replace(/\r\n/g, '\n');
+const whppStore = fs.readFileSync(path.join(__dirname, '..', 'src', 'whppStore.js'), 'utf8').replace(/\r\n/g, '\n');
 const v94 = fs.readFileSync(path.join(__dirname, '..', 'src', 'v94UnifiedImportDisplayTruthPatch.js'), 'utf8').replace(/\r\n/g, '\n');
 for (const relative of [
   '../src/v42WhppPatch.js',
+  '../src/whppStore.js',
   '../src/v94UnifiedImportDisplayTruthPatch.js',
   '../src/v132WhppFastIntegrationPatch.js',
   '../src/v161UnifiedImportRuntimeTruthPatch.js',
@@ -58,8 +60,12 @@ assert.ok(v42ActivateIndex > v42WhppRehydrateIndex, 'unified batch must not beco
 assert.ok(v42VerifyIndex > v42ActivateIndex, 'seven-business persisted truth must be re-read only after VALID activation');
 assert.match(v42, /if \(preservedWhpp\.present\)[\s\S]*loadPreservedWhppDailyRows\(parsed\.reportDate\)[\s\S]*saveWhppDailyImport\(\{[\s\S]*rows: preservedRows[\s\S]*preserveFinalizedLifecycle:\s*true[\s\S]*REHYDRATED_EXISTING_COMPLETE_DAILY_MEMBERSHIP/, 'a complete preserved WHPP cohort must explicitly request finalized-lifecycle preservation before it is rehydrated into the target-date current state');
 assert.match(v42, /else \{[\s\S]*saveWhppDailyImport\(\{[\s\S]*rows: whppRows[\s\S]*DIRECT_CONFIRMED_ZERO_WHPP_DAILY_IMPORT/, 'direct WHPP or confirmed-zero days must still initialize the WHPP target-date state');
-assert.match(v42, /const whppLifecycleChanged = !\(preservedWhpp\.present && String\(whppState\.snapshotStatus \|\| ''\)\.toUpperCase\(\) === 'COMPLETED'\)/, 'finalized WHPP rehydrate must be distinguished from a new or incomplete WHPP lifecycle');
-assert.match(v42, /invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged: whppLifecycleChanged \}\)/, 'new or incomplete WHPP lifecycles must clear mutable same-date pointers, while finalized rehydrate must preserve them');
+assert.match(whppStore, /inspectExistingWhppDaily/, 'WHPP storage must compare same-date normalized membership before deciding whether a completed lifecycle can be reused');
+assert.match(whppStore, /existingDaily\.finalized && \(preserveFinalizedLifecycle === true \|\| existingDaily\.identicalMembership\)/, 'only explicit rehydrate or an exactly identical finalized membership may preserve completion');
+assert.match(whppStore, /IDENTICAL_MEMBERSHIP_REUPLOAD/, 'an identical direct WHPP reupload must be observable as a finalized no-op');
+assert.match(v42, /IDENTICAL_FINALIZED_WHPP_MEMBERSHIP_REUPLOAD_NOOP/, 'V42 must expose the identical finalized membership no-op instead of silently reopening WHPP');
+assert.match(v42, /const whppLifecycleChanged = String\(whppState\.snapshotStatus \|\| ''\)\.toUpperCase\(\) !== 'COMPLETED'/, 'WHPP lifecycle invalidation must follow the storage result so both explicit rehydrate and identical finalized direct reupload stay completed');
+assert.match(v42, /invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged: whppLifecycleChanged \}\)/, 'new or incomplete WHPP lifecycles must clear mutable same-date pointers, while every finalized no-op must preserve them');
 assert.match(v42, /if \(whppChanged\) \{[\s\S]*businessType='WHPP'/, 'WHPP run/history invalidation must remain scoped behind the explicit WHPP-changed flag');
 assert.match(v42, /classificationCounts: effectiveCounts/, 'immediate import response must publish effective seven-business WHPP truth, not parser zero after preservation');
 assert.match(v42, /importCommitted: true/, 'browser commit acknowledgement must exist only after the persisted seven-business verification path');
@@ -207,7 +213,7 @@ const noBatchPartialFacts = loadV351UnifiedWhppMembership('2026-08-14', fakeDb({
 assert.equal(noBatchPartialFacts.present, false, 'missing batch must not weaken exact-count safety');
 assert.equal(noBatchPartialFacts.membershipSource, 'NO_VALID_UNIFIED_BATCH');
 
-console.log('[V351/V397] WHPP source-truth smoke passed · V42 blocks damaged same-date WHPP before STAGING · finalized preserved WHPP rehydrate keeps completion/run truth · new or incomplete WHPP clears mutable pointers · persisted seven-business truth is verified after activation · V94 no V216 repair · V161 direct standard daily first · V351 disaster/history fallback only when standard header is missing · exact 236/236 facts recover · partial facts fail closed');
+console.log('[V351/V400] WHPP source-truth smoke passed · damaged same-date membership blocks before STAGING · explicit rehydrate and identical finalized direct reupload keep completion/run truth · only changed/new WHPP membership clears mutable pointers · persisted seven-business truth is verified after activation · V94 no V216 repair · V161 direct standard daily first · V351 disaster/history fallback only when standard header is missing · exact 236/236 facts recover · partial facts fail closed');
 await import('./v352-whpp-visible-single-truth-smoke.mjs');
 await import('./whpp-visible-truth-smoke.mjs');
 await import('./shopee-history-region-signing-smoke.mjs');
