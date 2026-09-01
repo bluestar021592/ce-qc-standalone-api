@@ -2,12 +2,13 @@ const fs=require('fs');
 const assert=require('assert/strict');
 const {execFileSync}=require('child_process');
 
-for(const file of ['public/v318-single-sidebar-owner.js','public/v169-seven-business-legacy-status-sync.js','public/v412-seven-business-convergence.js','src/v295FirstAttemptUiInjectionPatch.js','src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/whppStore.js']){
+for(const file of ['public/v318-single-sidebar-owner.js','public/v169-seven-business-legacy-status-sync.js','public/v412-seven-business-convergence.js','src/v102UnifiedImportSafetyGatePatch.js','src/v295FirstAttemptUiInjectionPatch.js','src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/whppStore.js']){
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 const ui=fs.readFileSync('public/v318-single-sidebar-owner.js','utf8');
 const completionGuard=fs.readFileSync('public/v169-seven-business-legacy-status-sync.js','utf8');
 const convergence=fs.readFileSync('public/v412-seven-business-convergence.js','utf8');
+const importSafety=fs.readFileSync('src/v102UnifiedImportSafetyGatePatch.js','utf8');
 const inject=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const whppSummary=fs.readFileSync('src/v132WhppFastIntegrationPatch.js','utf8');
@@ -38,7 +39,7 @@ assert.match(completionGuard,/SEVEN_BUSINESS_STATUS_UNCONFIRMED/,'missing, stale
 assert.match(completionGuard,/CURRENT_DATE_STATUS_NOT_READY/,'V411 must distinguish an unready exact-date status from a real incomplete lifecycle');
 assert.match(completionGuard,/CURRENT_DATE_STATUS_STALE/,'V411 must fail closed when the exact-date status is stale');
 assert.match(completionGuard,/state\.kind==='unconfirmed'[\s\S]*lockResumeButtons\(state\)/,'unconfirmed status must keep legacy resume controls hidden and disabled');
-assert.doesNotMatch(completionGuard,/\/api\/whpp\/run\/start|\/api\/whpp\/run\/resume|\/api\/run\/start|\/api\/v311\/shopee-recovery[^\n]*action[^\n]*start/,'V411 guard must never start any CCSL, SHOPEE or WHPP processing API itself');
+assert.doesNotMatch(completionGuard,/\/api\/whpp\/run\/(?:start|resume)|\/api\/(?:run|resume)|\/api\/shopee\/run\/(?:start|resume)/,'V411 guard must never start any CCSL, SHOPEE or WHPP processing API itself');
 assert.doesNotMatch(completionGuard,/async function execute|function execute\(/,'V411 guard must not own a duplicate three-stage executor');
 
 assert.match(convergence,/2026-09-01-v413-lifecycle-bound-seven-business-convergence-v3/,'V412 filename must expose the V413 idempotent lifecycle-bound convergence build');
@@ -51,6 +52,12 @@ assert.match(convergence,/invalidateForNewLifecycle\(\)/,'new import selection/c
 assert.match(convergence,/String\(valid\.textContent\|\|''\)\.trim\(\)!==totalText/,'unchanged seven-business total must not retrigger the body observer');
 assert.doesNotMatch(convergence,/\/api\/whpp\/run\/(?:start|resume)|\/api\/(?:run|resume)|\/api\/shopee\/run\/(?:start|resume)/,'V413 convergence guard must never own processing APIs');
 assert.doesNotMatch(convergence,/async function execute|function execute\(/,'V413 convergence guard must not become a second executor');
+
+assert.match(importSafety,/2026-09-01-v102-effective-range-duplicate-review-v1/,'duplicate ownership review must expose the bounded-range revision');
+assert.match(importSafety,/getUnifiedEffectiveSheetRange/,'duplicate ownership review must reuse the canonical parser effective-range clamp');
+assert.match(importSafety,/sheet_to_json\(sheet, \{ header: 1, defval: '', raw: false, range: effectiveRangeObject \}\)/,'duplicate ownership review must never expand the raw legacy Excel UsedRange');
+assert.match(importSafety,/V102_DUPLICATE_REVIEW/,'duplicate review duration/result must be observable in backend logs');
+assert.doesNotMatch(importSafety,/sheet_to_json\(sheet, \{ header: 1, defval: '', raw: false \}\)/,'unbounded duplicate-review matrix expansion must stay retired');
 
 assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'V411 entry guard must load after the canonical status owner with an explicit cache bust');
 assert.match(shell,/v168-seven-business-status\.js\?v=20260901-v411-1/,'canonical V168 status-only owner must be cache-busted to the current V411 serialized-status build');
@@ -75,4 +82,4 @@ assert.match(whppStore,/\.\.\.emptyWhppState\(\),[\s\S]*reportDate,[\s\S]*dailyR
 assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must remain delivered');
 assert.match(inject,/X-CE-QC-V318-UI/,'V318 response header must be observable');
 
-console.log('[V413/V411/SINGLE-RUNNER/V361/V360/V318] smoke passed · total includes WHPP · observer is idempotent · completion memory is exact-lifecycle only · stale same-date truth cannot skip new work · V67 remains sole executor · finalized identical WHPP survives reload/reupload · changed membership unlocks · exact 15-item nav');
+console.log('[V413/V411/V102/SINGLE-RUNNER/V361/V360/V318] smoke passed · total includes WHPP · import duplicate review uses bounded effective Excel range · observer is idempotent · completion memory is exact-lifecycle only · stale same-date truth cannot skip new work · V67 remains sole executor · finalized identical WHPP survives reload/reupload · changed membership unlocks · exact 15-item nav');
