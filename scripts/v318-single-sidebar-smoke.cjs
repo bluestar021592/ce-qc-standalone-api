@@ -2,10 +2,11 @@ const fs=require('fs');
 const assert=require('assert/strict');
 const {execFileSync}=require('child_process');
 
-for(const file of ['public/v318-single-sidebar-owner.js','public/v169-seven-business-legacy-status-sync.js','public/v412-seven-business-convergence.js','src/v102UnifiedImportSafetyGatePatch.js','src/v317CcslIncompleteRecoveryPatch.js','src/v295FirstAttemptUiInjectionPatch.js','src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/whppStore.js']){
+for(const file of ['public/v318-single-sidebar-owner.js','public/v67-resilient-run-guard.js','public/v169-seven-business-legacy-status-sync.js','public/v412-seven-business-convergence.js','src/v102UnifiedImportSafetyGatePatch.js','src/v317CcslIncompleteRecoveryPatch.js','src/v295FirstAttemptUiInjectionPatch.js','src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/whppStore.js']){
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 const ui=fs.readFileSync('public/v318-single-sidebar-owner.js','utf8');
+const runner=fs.readFileSync('public/v67-resilient-run-guard.js','utf8');
 const completionGuard=fs.readFileSync('public/v169-seven-business-legacy-status-sync.js','utf8');
 const convergence=fs.readFileSync('public/v412-seven-business-convergence.js','utf8');
 const importSafety=fs.readFileSync('src/v102UnifiedImportSafetyGatePatch.js','utf8');
@@ -26,6 +27,16 @@ assert.match(ui,/setInterval\(enforce,1200\)/,'V318 must continuously enforce af
 assert.doesNotMatch(ui,/new MutationObserver/,'sidebar repair must remain polling/idempotent and never create a recursive observer');
 assert.match(ui,/七业务处理完成/,'all-complete banner must not remain SHOPEE-only after all owners report complete');
 assert.match(ui,/CCSL、SHOPEE CN\/VN、WHPP本土均已完成/);
+
+assert.match(runner,/2026-09-01-v67-shopee-process-restart-auto-resume-v1/,'V67 sole executor must expose exact Shopee restart recovery revision');
+assert.match(runner,/function shopeeRestartInterruption\(payload = \{\}, target = ''\)/,'restart recovery must classify canonical Shopee status without a second executor');
+assert.match(runner,/PROCESS_RESTART_INTERRUPTED/,'only the persisted process-restart interruption marker is eligible for automatic Shopee recovery');
+assert.match(runner,/const shopeeRestartRecoveryKeys = new Set\(\)/,'one exact interrupted lock revision must not be hammered by the 2.5s watcher');
+assert.match(runner,/if \(!shopee\.done\) \{[\s\S]*shopeeRestartInterruption\(shopee\.payload \|\| \{\}, target\)[\s\S]*if \(!restart\.interrupted \|\| restart\.reportDate !== target \|\| shopeeRestartRecoveryKeys\.has\(restart\.key\)\) return false;[\s\S]*const result = await execute\('resume'\)/,'after exact-date CCSL completion, only PROCESS_RESTART_INTERRUPTED may auto-enter the same V67 resume path');
+assert.match(runner,/检测到\$\{target\}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN\/VN → WHPP本土/,'visible recovery state must explain automatic Shopee-to-WHPP continuation');
+assert.match(runner,/shopeeRestartRecoveryRevision: SHOPEE_RESTART_RECOVERY_REVISION/,'runtime diagnostics must expose the restart-recovery revision');
+assert.match(runner,/global\.runUnified = \(\) => execute\('start'\)/,'V67 remains the public start owner');
+assert.match(runner,/global\.resumeUnified = \(\) => execute\('resume'\)/,'V67 remains the public resume owner');
 
 assert.match(completionGuard,/2026-09-01-v411-unconfirmed-status-entry-lock-v1/,'V169 filename must expose the V411 fail-closed entry guard build');
 assert.doesNotMatch(completionGuard,/getElementById\('ccslRunStatus'\)/,'V411 entry guard must never acquire the CCSL detail panel');
@@ -70,8 +81,8 @@ assert.match(ccslRecovery,/const rejectedLegacySnapshot=Boolean\(rawSnapshot&&!p
 assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'V411 entry guard must load after the canonical status owner with an explicit cache bust');
 assert.match(shell,/v168-seven-business-status\.js\?v=20260901-v411-1/,'canonical V168 status-only owner must retain the current serialized bounded-read build');
 assert.match(shell,/v412-seven-business-convergence\.js\?v=20260901-v413-3/,'V413 import-total-text convergence must be cache-busted after V169');
-assert.match(shell,/v67-resilient-run-guard\.js\?v=20260830-v360-1/,'single V67 runner must be cache-busted with the matching current-run finalization acknowledgement build');
-const v67At=shell.indexOf('v67-resilient-run-guard.js?v=20260830-v360-1');
+assert.match(shell,/v67-resilient-run-guard\.js\?v=20260830-v360-1&restart=20260901-1/,'single V67 runner must force-load the exact Shopee restart recovery while retaining the stable V360 compatibility token');
+const v67At=shell.indexOf('v67-resilient-run-guard.js?v=20260830-v360-1&restart=20260901-1');
 const v168At=shell.indexOf('v168-seven-business-status.js?v=20260901-v411-1');
 const v169At=shell.indexOf('v169-seven-business-legacy-status-sync.js?v=20260901-v411-1');
 const v413At=shell.indexOf('v412-seven-business-convergence.js?v=20260901-v413-3');
@@ -90,4 +101,4 @@ assert.match(whppStore,/\.\.\.emptyWhppState\(\),[\s\S]*reportDate,[\s\S]*dailyR
 assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must remain delivered');
 assert.match(inject,/X-CE-QC-V318-UI/,'V318 response header must be observable');
 
-console.log('[V413/V411/V317/V102/SINGLE-RUNNER/V361/V360/V318] smoke passed · total includes WHPP in cards + green success text · CCSL status proof is lazy until a completion snapshot exists · import duplicate review uses bounded effective Excel range · observer is throttled/idempotent · completion memory is exact-lifecycle only · V67 remains sole executor · finalized identical WHPP survives reload/reupload · exact 15-item nav');
+console.log('[V67-RESTART/V413/V411/V317/V102/SINGLE-RUNNER/V361/V360/V318] smoke passed · exact PROCESS_RESTART_INTERRUPTED Shopee lock auto-resumes once through sole V67 then continues WHPP · generic Shopee failures remain fail-closed · total includes WHPP in cards + green success text · CCSL status proof is lazy until a completion snapshot exists · import duplicate review uses bounded effective Excel range · observer is throttled/idempotent · completion memory is exact-lifecycle only · finalized identical WHPP survives reload/reupload · exact 15-item nav');
