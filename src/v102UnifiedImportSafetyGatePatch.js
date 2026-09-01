@@ -2,10 +2,11 @@ import fs from 'fs';
 import express from 'express';
 import XLSX from 'xlsx';
 import { closeDb } from './db.js';
-import { classifyUnifiedBusiness, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
+import { classifyUnifiedBusiness, getUnifiedEffectiveSheetRange, parseUnifiedDailyExcel } from './unifiedExcelParser.js';
 import { runAtomicUnifiedImportV366, V366_ATOMIC_UNIFIED_IMPORT_ID } from './v366AtomicUnifiedImport.js';
 
 export const V102_UNIFIED_IMPORT_SAFETY_GATE_ID = '2026-08-30-v366-pre-persistence-atomic-import-safety-v4';
+export const V102_DUPLICATE_REVIEW_RANGE_REVISION = '2026-09-01-v102-effective-range-duplicate-review-v1';
 const ROUTE = '/api/import/unified-daily-report';
 const WRAPPED = Symbol.for('ce-qc.v102-unified-import-safety');
 
@@ -29,10 +30,12 @@ function findDuplicateOwnershipConflict(filePath, parsed) {
     throw safetyError('IMPORT_SAFETY_SOURCE_MISSING', '导入安全复核无法读取临时日报文件，已停止写入数据库。');
   }
 
+  const reviewStartedAt = Date.now();
   const workbook = XLSX.readFile(filePath, { cellDates: true });
   const firstByBill = new Map((parsed.rows || []).map(row => [String(row.shipmentCode || '').trim().toUpperCase(), row]));
   const diagnostics = new Map((parsed.sheetDiagnostics || []).filter(item => item?.status === 'VALID').map(item => [item.sheetName, item]));
   const matrices = new Map();
+  let reviewedSheets = 0;
 
   for (const warning of duplicateWarnings) {
     const bill = String(warning.shipmentCode || '').trim().toUpperCase();
@@ -44,8 +47,18 @@ function findDuplicateOwnershipConflict(filePath, parsed) {
     }
     let matrix = matrices.get(warning.sheetName);
     if (!matrix) {
-      matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+      // The canonical parser already clamps legacy XLS/OOXML inflated UsedRange
+      // to actual non-empty cells. The safety re-check must use the exact same
+      // bounded range; calling sheet_to_json without range here can expand a
+      // stale A1:AZ500000-style !ref and make an otherwise small daily report
+      // look frozen before any database write begins.
+      const effectiveRangeObject = getUnifiedEffectiveSheetRange(sheet);
+      if (!effectiveRangeObject) {
+        throw safetyError('DUPLICATE_WAYBILL_REVIEW_REQUIRED', `重复运单 ${bill} 所在Sheet没有可复核的有效单元格，已停止导入。`, { shipmentCode: bill, sheetName: warning.sheetName });
+      }
+      matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, range: effectiveRangeObject });
       matrices.set(warning.sheetName, matrix);
+      reviewedSheets += 1;
     }
     const row = matrix[Math.max(0, Number(warning.rowNumber || 1) - 1)] || [];
     const columns = diagnostic.detectedColumns || {};
@@ -53,13 +66,10 @@ function findDuplicateOwnershipConflict(filePath, parsed) {
     const customerName = Number.isInteger(columns.customerName) && columns.customerName >= 0 ? row[columns.customerName] : '';
     const duplicateClassification = classifyUnifiedBusiness(bill, recipient, customerName);
     if (!duplicateClassification) {
-      throw safetyError(
-        'DUPLICATE_WAYBILL_REVIEW_REQUIRED',
-        `重复运单 ${bill} 的后续行无法确认业务归属，已停止导入，避免“第一行覆盖后续行”。`,
-        { shipmentCode: bill, firstBusinessType: first.businessType, sheetName: warning.sheetName, rowNumber: warning.rowNumber }
-      );
+      throw safetyError('DUPLICATE_WAYBILL_REVIEW_REQUIRED', `重复运单 ${bill} 的后续行无法确认业务归属，已停止导入，避免“第一行覆盖后续行”。`, { shipmentCode: bill, firstBusinessType: first.businessType, sheetName: warning.sheetName, rowNumber: warning.rowNumber });
     }
     if (String(duplicateClassification.businessType || '').toUpperCase() !== String(first.businessType || '').toUpperCase()) {
+      console.log(`[CE-QC][V102_DUPLICATE_REVIEW] revision=${V102_DUPLICATE_REVIEW_RANGE_REVISION} duplicates=${duplicateWarnings.length} sheets=${reviewedSheets} elapsedMs=${Date.now() - reviewStartedAt} result=CONFLICT`);
       return {
         shipmentCode: bill,
         firstBusinessType: String(first.businessType || '').toUpperCase(),
@@ -69,6 +79,7 @@ function findDuplicateOwnershipConflict(filePath, parsed) {
       };
     }
   }
+  console.log(`[CE-QC][V102_DUPLICATE_REVIEW] revision=${V102_DUPLICATE_REVIEW_RANGE_REVISION} duplicates=${duplicateWarnings.length} sheets=${reviewedSheets} elapsedMs=${Date.now() - reviewStartedAt} result=PASSED`);
   return null;
 }
 
@@ -81,36 +92,20 @@ export function assertUnifiedImportSafety({ filePath = '', parsed, manualReportD
   const conflicts = (parsed.warnings || []).filter(item => item?.type === 'CLASSIFICATION_CONFLICT');
   if (conflicts.length || Number(parsed.summary?.classificationConflicts || 0) > 0) {
     const first = conflicts[0] || {};
-    throw safetyError(
-      'CLASSIFICATION_CONFLICT_BLOCKED',
-      `运单 ${first.shipmentCode || '未知'} 同时命中多个强业务规则（${(first.matches || []).join(' / ') || '冲突'}），已停止导入；系统不再自动按优先级猜分流。`,
-      { shipmentCode: first.shipmentCode || '', matches: first.matches || [], conflictCount: Math.max(conflicts.length, Number(parsed.summary?.classificationConflicts || 0)) }
-    );
+    throw safetyError('CLASSIFICATION_CONFLICT_BLOCKED', `运单 ${first.shipmentCode || '未知'} 同时命中多个强业务规则（${(first.matches || []).join(' / ') || '冲突'}），已停止导入；系统不再自动按优先级猜分流。`, { shipmentCode: first.shipmentCode || '', matches: first.matches || [], conflictCount: Math.max(conflicts.length, Number(parsed.summary?.classificationConflicts || 0)) });
   }
 
   const manual = normalizeManualDate(manualReportDate);
   if (!manual && Array.isArray(parsed.explicitDateCandidates) && parsed.explicitDateCandidates.length > 1) {
-    throw safetyError(
-      'REPORT_DATE_CONFLICT_BLOCKED',
-      `日报日期列存在多个日期（${parsed.explicitDateCandidates.map(item => item.date).join(' / ')}），已停止导入；请使用明确日报日期。`,
-      { dateCandidates: parsed.explicitDateCandidates }
-    );
+    throw safetyError('REPORT_DATE_CONFLICT_BLOCKED', `日报日期列存在多个日期（${parsed.explicitDateCandidates.map(item => item.date).join(' / ')}），已停止导入；请使用明确日报日期。`, { dateCandidates: parsed.explicitDateCandidates });
   }
   if (!manual && parsed.dateDetectionSource === '业务日期列' && Array.isArray(parsed.transactionDateCandidates) && parsed.transactionDateCandidates.length > 1) {
-    throw safetyError(
-      'REPORT_DATE_AMBIGUOUS_BLOCKED',
-      `文件没有明确日报日期，且业务日期存在多个值（${parsed.transactionDateCandidates.map(item => item.date).join(' / ')}），已停止按多数值猜日期。`,
-      { dateCandidates: parsed.transactionDateCandidates }
-    );
+    throw safetyError('REPORT_DATE_AMBIGUOUS_BLOCKED', `文件没有明确日报日期，且业务日期存在多个值（${parsed.transactionDateCandidates.map(item => item.date).join(' / ')}），已停止按多数值猜日期。`, { dateCandidates: parsed.transactionDateCandidates });
   }
 
   const duplicateConflict = findDuplicateOwnershipConflict(filePath, parsed);
   if (duplicateConflict) {
-    throw safetyError(
-      'DUPLICATE_WAYBILL_BUSINESS_CONFLICT',
-      `重复运单 ${duplicateConflict.shipmentCode} 在同一日报中分别属于 ${duplicateConflict.firstBusinessType} / ${duplicateConflict.duplicateBusinessType}，已停止导入。`,
-      duplicateConflict
-    );
+    throw safetyError('DUPLICATE_WAYBILL_BUSINESS_CONFLICT', `重复运单 ${duplicateConflict.shipmentCode} 在同一日报中分别属于 ${duplicateConflict.firstBusinessType} / ${duplicateConflict.duplicateBusinessType}，已停止导入。`, duplicateConflict);
   }
 
   const validUnique = Number(parsed.summary?.validUniqueWaybills || 0);
@@ -122,6 +117,7 @@ export function assertUnifiedImportSafety({ filePath = '', parsed, manualReportD
   return {
     ok: true,
     gateId: V102_UNIFIED_IMPORT_SAFETY_GATE_ID,
+    duplicateReviewRangeRevision: V102_DUPLICATE_REVIEW_RANGE_REVISION,
     atomicImportId: V366_ATOMIC_UNIFIED_IMPORT_ID,
     reportDate: parsed.reportDate,
     validUniqueWaybills: validUnique,
