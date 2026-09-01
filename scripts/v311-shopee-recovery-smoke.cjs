@@ -62,7 +62,9 @@ assert.match(businessStore,/const finalByBill = new Map/,'Shopee state save must
 assert.match(businessStore,/const priorCarryByBill = new Map/,'Shopee state save must index historical carry rows once');
 assert.match(businessStore,/const final = finalByBill\.get\(bill\) \|\| priorCarryByBill\.get\(bill\) \|\| \{\}/,'active carry persistence must use O(1) indexed lookup');
 assert.doesNotMatch(businessStore,/state\.finalRows\.find\(row => billOf\(row\) === bill\) \|\| state\.priorCarryRows\.find/,'O(N²) per-ticket carry lookup must never return');
-assert.match(businessStore,/\[CE-QC\]\[BUSINESS_STATE_STAGE\] save_done/,'production must expose Shopee state-save timing');
+assert.match(businessStore,/2026-09-01-shopee-lightweight-runtime-checkpoint-v1/,'production must expose the lightweight Shopee runtime-checkpoint revision');
+assert.match(businessStore,/if \(runtimeCheckpoint\) mirrorBusinessRuntimeCheckpoint\(db, normalized, type, now\);\s*else mirrorBusinessTables\(db, normalized, type, now\);/,'active Shopee saves must use the lightweight checkpoint while final saves retain the authoritative full mirror');
+assert.ok(businessStore.includes("runtimeCheckpoint ? 'checkpoint_done' : 'save_done'"),'production must expose separate checkpoint and final-save timing markers');
 assert.match(businessStore,/serializeMs=/,'state JSON serialization must be separately timed');
 
 assert.match(v309,/2026-08-29-ui-only-no-unified-trigger-v1/,'V309 must be UI-only');
