@@ -77,4 +77,4 @@ jobs:
       - name: V237 single dashboard owner source smoke
         run: node scripts/v237-dashboard-owner-source-smoke.cjs
       - name: Final state-machine regression
-        run: node --test test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js
+        run: node --test test/v400-seven-business-completion-loader.test.js test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js
