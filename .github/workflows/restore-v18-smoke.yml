@@ -43,8 +43,15 @@ jobs:
           node --check src/shopeeAnalyzer.js
           node --check src/shopeeTemplateExporter.js
           node --check src/reporting.js
-          $null = [scriptblock]::Create((Get-Content -Raw Start_CE_QC.ps1))
-          if (-not (Select-String -Path Start_CE_QC.cmd -SimpleMatch 'Start_CE_QC.ps1')) { throw 'CMD wrapper does not call Start_CE_QC.ps1' }
+          foreach ($file in @('Start_CE_QC.ps1','tools/CE_QC_Managed_Launcher.ps1','tools/CE_QC_Start.ps1')) {
+            $null = [scriptblock]::Create((Get-Content -Raw $file))
+          }
+          $managedCmd = Get-Content -Raw Start_CE_QC.cmd
+          if (-not $managedCmd.Contains('tools\CE_QC_Managed_Launcher.ps1')) { throw 'Managed CMD wrapper lost CE_QC_Managed_Launcher.ps1 ownership' }
+          $updateBat = Get-Content -Raw CE_QC_Start.bat
+          if (-not $updateBat.Contains('tools\CE_QC_Start.ps1')) { throw 'Verified update BAT lost CE_QC_Start.ps1 ownership' }
+          $updateLauncher = Get-Content -Raw tools/CE_QC_Start.ps1
+          if (-not $updateLauncher.Contains('Start_CE_QC.ps1')) { throw 'Verified updater no longer hands off to protected Start_CE_QC.ps1 runtime' }
 
       - name: Verify locked UI signature
         shell: pwsh
