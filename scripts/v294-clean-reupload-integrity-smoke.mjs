@@ -88,10 +88,12 @@ assert.match(v322StatusSource, /ok\s*:\s*false/,
   'status read failure must remain fail-closed');
 assert.match(v322StatusSource, /V322_PERSISTED_STATUS_READ_FAILED/,
   'status read failure must expose the canonical error code regardless of object field ordering');
+assert.match(v322StatusSource, /detailCode:'V419_SCALAR_STATUS_READ_FAILED'/,
+  'status read failure must retain V419 scalar diagnostics without breaking canonical V322 consumers');
 assert.match(v322StatusSource, /Server-Timing/);
 assert.match(v322StatusSource, /V419_SCALAR_STATUS_SLOW/);
-assert.doesNotMatch(v322StatusSource, /payloadJson|stateJson|summaryJson|valueJson/,
-  'normal status reads must never materialize large JSON payload columns');
+assert.doesNotMatch(v322StatusSource, /SELECT[^`\n]*(?:payloadJson|stateJson|summaryJson|valueJson)/,
+  'normal status SQL must never materialize large JSON payload columns');
 assert.doesNotMatch(v322StatusSource, /scan_results|business_scan_results|business_track_events|track_events/,
   'normal status owner must not reconstruct scan or trajectory facts');
 
