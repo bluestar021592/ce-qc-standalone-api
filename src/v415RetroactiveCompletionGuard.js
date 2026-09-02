@@ -5,12 +5,16 @@ import { loadWhppState, saveWhppState } from './whppStore.js';
 
 export const V415_RETROACTIVE_COMPLETION_GUARD_ID='2026-09-02-v415-current-member-processing-proof-v1';
 export const V415_STALE_COMPLETION_REOPEN_ID='2026-09-02-v415-stale-completion-reopen-v1';
+export const V416_FAST_FAILCLOSED_PROOF_ID='2026-09-02-v416-large-db-fast-failclosed-proof-v1';
 const STATUS_ROUTE='/api/v33/run-progress';
 const GUARDED_POST_ROUTES=new Set(['/api/shopee/run/start','/api/shopee/run/resume','/api/whpp/run/start','/api/whpp/run/resume']);
 const previousGet=express.application.get;
 const previousPost=express.application.post;
 const GET_WRAPPED=Symbol.for('ce-qc.v415-status-proof-get');
 const POST_WRAPPED=Symbol.for('ce-qc.v415-stale-completion-post');
+const proofCache=new Map();
+const INCOMPLETE_CACHE_MS=2500;
+const COMPLETE_CACHE_MS=60000;
 
 const text=value=>String(value??'').trim();
 const n=value=>Number.isFinite(Number(value))?Number(value):0;
@@ -27,12 +31,26 @@ function latestValidBatch(db,reportDate=''){
 function exactMembership(db,batch){
   const result={CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0,CCSL:0,SHOPEE:0,TOTAL:0};
   if(!batch?.snapshotId||!batch?.reportDate)return result;
+  try{
+    const snapshot=db.prepare('SELECT payloadJson FROM unified_snapshots WHERE snapshotId=? AND reportDate=? LIMIT 1').get(batch.snapshotId,batch.reportDate)||{};
+    const payload=safeJson(snapshot.payloadJson,{}),stored=payload.classificationCounts||payload.reconciliation?.expectedCounts||{};
+    const keys=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
+    if(keys.some(key=>Object.prototype.hasOwnProperty.call(stored,key))){
+      for(const key of keys)result[key]=n(stored[key]);
+      result.CCSL=result.CE+result.CEAF+result.TBKH+result.ALI1688;
+      result.SHOPEE=result.SHOPEECN+result.SHOPEEVN;
+      result.TOTAL=result.CCSL+result.SHOPEE+result.WHPP;
+      result._source='UNIFIED_SNAPSHOT_IMMUTABLE_CLASSIFICATION_COUNTS';
+      return result;
+    }
+  }catch{}
   for(const row of db.prepare('SELECT businessType,COUNT(DISTINCT shipmentCode) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? GROUP BY businessType').all(batch.snapshotId,batch.reportDate)){
     if(Object.hasOwn(result,row.businessType))result[row.businessType]=n(row.count);
   }
   result.CCSL=result.CE+result.CEAF+result.TBKH+result.ALI1688;
   result.SHOPEE=result.SHOPEECN+result.SHOPEEVN;
   result.TOTAL=result.CCSL+result.SHOPEE+result.WHPP;
+  result._source='UNIFIED_IMPORT_ROWS_FALLBACK';
   return result;
 }
 
@@ -58,13 +76,31 @@ function currentCompletionSnapshot(db,type,date,runId,boundary=''){
   }catch{return null;}
 }
 
-function businessSuccessCoverage(db,{businessType,date,snapshotId,boundary='',memberTypes=[]}={}){
-  if(!snapshotId||!date||!memberTypes.length)return 0;
-  const placeholders=memberTypes.map(()=>'?').join(',');
-  const boundarySql=boundary?" AND COALESCE(f.updatedAt,'')>=?":'';
-  const params=[snapshotId,date,...memberTypes,businessType,date];
-  if(boundary)params.push(boundary);
+function unifiedCompletionClaim(db,batch){
+  try{return text(db.prepare('SELECT status FROM unified_snapshots WHERE snapshotId=? AND reportDate=? LIMIT 1').get(batch?.snapshotId,batch?.reportDate)?.status).toUpperCase()==='COMPLETED';}catch{return false;}
+}
+
+function whppStateCompletionClaim(db,date,boundary=''){
   try{
+    const row=db.prepare("SELECT valueJson,updatedAt FROM business_states WHERE businessType='WHPP' LIMIT 1").get()||{};
+    if(boundary&&!atOrAfter(row.updatedAt,boundary))return false;
+    const state=safeJson(row.valueJson,{}),status=text(state.snapshotStatus).toUpperCase();
+    return dateOnly(state.reportDate)===date&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(text(state.snapshotId));
+  }catch{return false;}
+}
+
+function businessSuccessCoverage(db,{businessType,date,snapshotId,boundary='',memberTypes=[],expected=0}={}){
+  if(!snapshotId||!date||!memberTypes.length)return 0;
+  const boundarySql=boundary?" AND COALESCE(f.updatedAt,'')>=?":'';
+  try{
+    const upperParams=[businessType,date];
+    if(boundary)upperParams.push(boundary);
+    const upper=n(db.prepare(`SELECT COUNT(*) count FROM business_final_rows f
+      WHERE f.businessType=? AND f.reportDate=? AND UPPER(COALESCE(f.apiStatus,''))='SUCCESS'${boundarySql}`).get(...upperParams)?.count);
+    if(n(expected)>0&&upper<n(expected))return upper;
+    const placeholders=memberTypes.map(()=>'?').join(',');
+    const params=[snapshotId,date,...memberTypes,businessType,date];
+    if(boundary)params.push(boundary);
     return n(db.prepare(`SELECT COUNT(DISTINCT u.shipmentCode) count
       FROM unified_import_rows u
       WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN (${placeholders})
@@ -76,41 +112,71 @@ function businessSuccessCoverage(db,{businessType,date,snapshotId,boundary='',me
   }catch{return 0;}
 }
 
-export function readV415CurrentProcessingProof({db=getDb(),reportDate=''}={}){
-  const date=dateOnly(reportDate);
+function emptyMemberProof(total,reason){return{id:V384_CCSL_PROCESSING_PROOF_ID,source:n(total),covered:0,missing:n(total),complete:false,reasons:{[reason]:n(total)},missingBills:[],missingReasons:[],queryMode:'V416_FAST_NEGATIVE_PROOF'};}
+
+function cacheResult(key,value){
+  const complete=['CCSL','SHOPEE','WHPP'].every(stage=>value?.stages?.[stage]?.complete===true);
+  proofCache.set(key,{value,at:Date.now(),ttl:complete?COMPLETE_CACHE_MS:INCOMPLETE_CACHE_MS});
+  if(proofCache.size>24){for(const [cacheKey,item] of proofCache){if(Date.now()-item.at>Math.max(COMPLETE_CACHE_MS,item.ttl))proofCache.delete(cacheKey);}}
+  return value;
+}
+
+export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=false}={}){
+  const started=Date.now(),date=dateOnly(reportDate);
   const batch=latestValidBatch(db,date);
-  if(!date||!batch)return{ok:false,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,reportDate:date,batch:null,counts:{CCSL:0,SHOPEE:0,WHPP:0,TOTAL:0},stages:{CCSL:{complete:false},SHOPEE:{complete:false},WHPP:{complete:false}},reason:'CURRENT_VALID_BATCH_MISSING'};
+  if(!date||!batch)return{ok:false,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,reportDate:date,batch:null,counts:{CCSL:0,SHOPEE:0,WHPP:0,TOTAL:0},stages:{CCSL:{complete:false},SHOPEE:{complete:false},WHPP:{complete:false}},reason:'CURRENT_VALID_BATCH_MISSING'};
+  const cacheKey=`${date}:${text(batch.snapshotId)}`,cached=proofCache.get(cacheKey);
+  if(!force&&cached&&Date.now()-cached.at<cached.ttl)return{...cached.value,cacheHit:true,elapsedMs:Date.now()-started};
   const counts=exactMembership(db,batch),boundary=text(batch.createdAt),snapshotId=text(batch.snapshotId);
 
   const ccslLock=currentLock(db,'CCSL',date,boundary);
   const ccslSnapshot=currentCompletionSnapshot(db,'CCSL',date,ccslLock?.runId,boundary);
   const ccslMemberProof=counts.CCSL===0
     ?{id:V384_CCSL_PROCESSING_PROOF_ID,source:0,covered:0,missing:0,complete:true,queryMode:'ZERO_TICKET'}
-    :readV384CcslProcessingProof(db,{reportDate:date,snapshotId,boundary});
+    :ccslSnapshot
+      ?readV384CcslProcessingProof(db,{reportDate:date,snapshotId,boundary,includeMissingBills:false})
+      :emptyMemberProof(counts.CCSL,'NO_CURRENT_COMPLETION_SNAPSHOT');
   const ccslComplete=counts.CCSL===0||Boolean(ccslSnapshot&&ccslMemberProof.complete&&n(ccslMemberProof.source)===counts.CCSL);
 
   const shopeeLock=currentLock(db,'SHOPEE',date,boundary);
   const shopeeSnapshot=currentCompletionSnapshot(db,'SHOPEE',date,shopeeLock?.runId,boundary);
-  const shopeeCovered=businessSuccessCoverage(db,{businessType:'SHOPEE',date,snapshotId,boundary,memberTypes:['SHOPEECN','SHOPEEVN']});
+  const shopeeCovered=shopeeSnapshot?businessSuccessCoverage(db,{businessType:'SHOPEE',date,snapshotId,boundary,memberTypes:['SHOPEECN','SHOPEEVN'],expected:counts.SHOPEE}):0;
   const shopeeComplete=counts.SHOPEE===0||Boolean(shopeeSnapshot&&shopeeCovered>=counts.SHOPEE);
 
   const whppLock=currentLock(db,'WHPP',date,boundary);
-  const whppCovered=businessSuccessCoverage(db,{businessType:'WHPP',date,snapshotId,boundary,memberTypes:['WHPP']});
-  const whppComplete=counts.WHPP===0||whppCovered>=counts.WHPP;
+  const whppClaim=counts.WHPP===0||unifiedCompletionClaim(db,batch)||['finished','completed'].includes(text(whppLock?.status).toLowerCase())||whppStateCompletionClaim(db,date,boundary);
+  const whppCovered=counts.WHPP>0&&whppClaim?businessSuccessCoverage(db,{businessType:'WHPP',date,snapshotId,boundary,memberTypes:['WHPP'],expected:counts.WHPP}):0;
+  const whppComplete=counts.WHPP===0||Boolean(whppClaim&&whppCovered>=counts.WHPP);
 
-  return{
-    ok:true,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,reportDate:date,
+  const result={
+    ok:true,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,reportDate:date,
     batch:{batchId:text(batch.batchId),snapshotId,boundary},counts,
     stages:{
       CCSL:{complete:ccslComplete,total:counts.CCSL,covered:n(ccslMemberProof.covered),missing:Math.max(0,counts.CCSL-n(ccslMemberProof.covered)),memberProof:ccslMemberProof,completionSnapshotId:text(ccslSnapshot?.snapshotId),lock:ccslLock},
       SHOPEE:{complete:shopeeComplete,total:counts.SHOPEE,covered:shopeeCovered,missing:Math.max(0,counts.SHOPEE-shopeeCovered),completionSnapshotId:text(shopeeSnapshot?.snapshotId),lock:shopeeLock},
-      WHPP:{complete:whppComplete,total:counts.WHPP,covered:whppCovered,missing:Math.max(0,counts.WHPP-whppCovered),completionSnapshotId:'',lock:whppLock}
-    }
+      WHPP:{complete:whppComplete,total:counts.WHPP,covered:whppCovered,missing:Math.max(0,counts.WHPP-whppCovered),completionSnapshotId:'',completionClaim:whppClaim,lock:whppLock}
+    },
+    membershipSource:text(counts._source),elapsedMs:Date.now()-started,cacheHit:false
   };
+  return cacheResult(cacheKey,result);
+}
+
+function failClosedStage(stage={},proof={},reason='STATUS_PROOF_UNCONFIRMED'){
+  const lock=proof?.lock||null,status=text(lock?.status).toLowerCase();
+  return{...stage,sourceTotal:n(proof?.total||stage?.sourceTotal),complete:false,zeroTicketDay:false,snapshotId:'',snapshotStatus:'PENDING',runId:text(lock?.runId||stage?.runId),runStatus:status||'status_unconfirmed',running:status==='running',paused:status==='paused',failed:status==='failed',phase:text(lock?.currentStage)||'状态确认中',completionSource:reason,statusSource:'V416_FAIL_CLOSED_STATUS_PROOF',completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,...proof}};
+}
+
+function failClosedPayload(payload={},proof={},reason='STATUS_PROOF_UNCONFIRMED'){
+  if(payload?.stages&&typeof payload.stages==='object'){
+    const stages={...payload.stages};
+    for(const key of ['CCSL','SHOPEE','WHPP'])stages[key]=failClosedStage(stages[key]||{key},proof?.stages?.[key]||{},reason);
+    return{...payload,complete:false,stages,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,ok:false,reason}};
+  }
+  return{...failClosedStage(payload,proof?.stages?.[text(payload.businessType||payload.key).toUpperCase()]||{},reason),complete:false,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,ok:false,reason}};
 }
 
 function downgradedStage(stage={},proof={}){
-  if(stage?.complete!==true||proof.complete===true)return{...stage,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,...proof}};
+  if(stage?.complete!==true||proof.complete===true)return{...stage,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,...proof}};
   const lock=proof.lock||null,status=text(lock?.status).toLowerCase();
   return{
     ...stage,
@@ -124,22 +190,22 @@ function downgradedStage(stage={},proof={}){
     snapshotId:'',snapshotStatus:'PENDING',
     completionSource:'V415_CURRENT_MEMBER_PROCESSING_PROOF_REQUIRED',
     statusSource:'V415_RETROACTIVE_CURRENT_MEMBER_PROOF',
-    completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,...proof}
+    completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,...proof}
   };
 }
 
 export function applyV415StatusGuard(payload={},proof=null){
   if(!payload||typeof payload!=='object')return payload;
   const resolved=proof||readV415CurrentProcessingProof({reportDate:payload.reportDate});
-  if(!resolved?.ok)return{...payload,complete:false,completionGuard:resolved};
+  if(!resolved?.ok)return failClosedPayload(payload,resolved,'CURRENT_PROCESSING_PROOF_UNAVAILABLE');
   if(payload.stages&&typeof payload.stages==='object'){
     const stages={...payload.stages};
     for(const key of ['CCSL','SHOPEE','WHPP'])stages[key]=downgradedStage(stages[key]||{key},resolved.stages[key]||{complete:false});
-    return{...payload,complete:['CCSL','SHOPEE','WHPP'].every(key=>stages[key]?.complete===true),stages,completedFastPath:payload.completedFastPath?`${payload.completedFastPath}+V415_PROOF_GUARD`:payload.completedFastPath,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,batch:resolved.batch,counts:resolved.counts}};
+    return{...payload,complete:['CCSL','SHOPEE','WHPP'].every(key=>stages[key]?.complete===true),stages,completedFastPath:payload.completedFastPath?`${payload.completedFastPath}+V415_PROOF_GUARD`:payload.completedFastPath,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,batch:resolved.batch,counts:resolved.counts,elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
   }
   const key=text(payload.businessType||payload.key).toUpperCase()==='SHOPEE'?'SHOPEE':text(payload.businessType||payload.key).toUpperCase()==='WHPP'?'WHPP':'CCSL';
   const guarded=downgradedStage(payload,resolved.stages[key]||{complete:false});
-  return{...guarded,businessType:payload.businessType||key,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,batch:resolved.batch,counts:resolved.counts,stage:resolved.stages[key]}};
+  return{...guarded,businessType:payload.businessType||key,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,batch:resolved.batch,counts:resolved.counts,stage:resolved.stages[key],elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
 }
 
 function statusResponseGuard(req,res,next){
@@ -148,12 +214,13 @@ function statusResponseGuard(req,res,next){
     try{
       const requested=dateOnly(req.query?.reportDate||payload?.reportDate);
       const guarded=applyV415StatusGuard(payload,readV415CurrentProcessingProof({reportDate:requested}));
+      res.setHeader('X-CE-QC-V416-Proof',V416_FAST_FAILCLOSED_PROOF_ID);
       res.json=previousJson;
       return previousJson.call(this,guarded);
     }catch(error){
-      console.warn('[CE-QC][V415_STATUS_GUARD] proof failed closed:',error?.message||error);
+      console.warn('[CE-QC][V416_STATUS_GUARD] proof failed closed:',error?.message||error);
       res.json=previousJson;
-      return previousJson.call(this,{...payload,complete:false,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,ok:false,error:text(error?.message||error)}});
+      return previousJson.call(this,failClosedPayload(payload,{},`PROOF_ERROR:${text(error?.message||error)}`));
     }
   };
   return next();
@@ -199,6 +266,7 @@ function reopenWhppStaleCompletion(db,date,proof,batch){
       .run('V415_REOPEN_STALE_COMPLETION_MISSING_CURRENT_PROCESSING_PROOF',nowIso(),date,proof.lock.runId);
     lockReset=n(result?.changes)>0;
   }
+  proofCache.clear();
   return{changed:stateReset||lockReset,stateReset,lockReset,reason:stateReset||lockReset?'STALE_WHPP_COMPLETION_REOPENED':'NO_MUTABLE_STALE_POINTER',runId:text(proof.lock?.runId)};
 }
 
@@ -208,13 +276,13 @@ function staleCompletionRunGuard(req,res,next){
     const batch=latestValidBatch(getDb(),requested);
     const date=requested||dateOnly(batch?.reportDate);
     if(!date||!batch)return next();
-    const full=readV415CurrentProcessingProof({reportDate:date});
+    const full=readV415CurrentProcessingProof({reportDate:date,force:true});
     const route=text(req.path||req.originalUrl).split('?')[0];
     const action=route.includes('/shopee/')
       ?reopenShopeeStaleCompletion(getDb(),date,full.stages.SHOPEE)
       :reopenWhppStaleCompletion(getDb(),date,full.stages.WHPP,full.batch);
     req.ceQcV415StaleCompletion=action;
-    if(action.changed)console.warn('[CE-QC][V415_STALE_COMPLETION_REOPEN]',JSON.stringify({id:V415_STALE_COMPLETION_REOPEN_ID,route,date,...action}));
+    if(action.changed){proofCache.clear();console.warn('[CE-QC][V415_STALE_COMPLETION_REOPEN]',JSON.stringify({id:V415_STALE_COMPLETION_REOPEN_ID,route,date,...action}));}
     return next();
   }catch(error){
     console.error('[CE-QC][V415_STALE_COMPLETION_REOPEN] fail closed:',error?.stack||error);
@@ -240,4 +308,4 @@ if(typeof previousPost==='function'&&!previousPost[POST_WRAPPED]){
   express.application.post=wrappedPost;
 }
 
-console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,'legacy COMPLETED markers are display/run-authoritative only when the exact current unified membership has current-lifecycle processing proof; old audit snapshots remain preserved.');
+console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,V416_FAST_FAILCLOSED_PROOF_ID,'legacy COMPLETED markers are display/run-authoritative only when exact current membership has current-lifecycle proof; large-database status reads use immutable classification counts, count-only CCSL proof and short-lived proof cache; any proof failure is fail-closed.');
