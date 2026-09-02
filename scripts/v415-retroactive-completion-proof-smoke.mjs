@@ -48,7 +48,7 @@ assert.match(V418_STATUS_PROOF_FAST_PATH_ID,/v418-large-db-set-join-status-proof
 assert.match(activation,/import '\.\/v415RetroactiveCompletionGuard\.js';/,'V415/V418 must load before V317/V322 status registration');
 assert.match(activation,/import '\.\/v415ImportCarryoverGuard\.js';/,'V415 import OPEN guard must load before web route registration');
 
-// V418 large-db contract: current membership and SUCCESS coverage are read from
+// V419 large-db contract: current membership and SUCCESS coverage are read from
 // current-member indexed/set-join tables. Old giant snapshot/state JSON cannot be
 // materialized on the normal status path.
 assert.match(source,/readV418CurrentMembershipCounts/,'V415 status proof must delegate membership to V418 fast current-member reader');
@@ -63,8 +63,9 @@ assert.doesNotMatch(source,/SELECT payloadJson FROM unified_snapshots/,'V418 sta
 assert.doesNotMatch(v322Source,/SELECT status,payloadJson FROM unified_snapshots/,'V322 legacy completed check must not materialize old snapshot payload JSON');
 assert.match(v322Source,/SELECT status FROM unified_snapshots/,'V322 may read only the lightweight snapshot status claim');
 assert.match(v322Source,/V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID/,'V322 legacy completed claim must be guarded by V418 current-member proof');
-assert.match(v322Source,/length\(CAST\(valueJson AS BLOB\)\)/,'oversized legacy WHPP state must be size-checked before materialization');
-assert.match(source,/length\(CAST\(valueJson AS BLOB\)\)/,'V415 WHPP completion claim must size-check legacy state before reading it');
+assert.doesNotMatch(v322Source,/\bSELECT\b[^;\n]*\bvalueJson\b/i,'V419 status owner must never select legacy business_states.valueJson');
+assert.doesNotMatch(v322Source,/JSON\.parse\([^\n]*valueJson/i,'V419 status owner must never parse legacy business_states.valueJson');
+assert.doesNotMatch(source,/\bSELECT\b[^;\n]*\bvalueJson\b/i,'V415 completion proof hot path must not select legacy business state JSON');
 assert.match(source,/includeMissingBills:false/,'small-fixture compatibility fallback may use count-only V384 mode, never missing-bill diagnostics');
 assert.match(source,/NO_CURRENT_COMPLETION_SNAPSHOT/,'missing current completion snapshot must fail closed before CCSL proof');
 assert.match(source,/V416_FAIL_CLOSED_STATUS_PROOF/,'proof errors/unavailability must never preserve stale completed stages');
@@ -199,4 +200,4 @@ const completedImport=applyV415ImportOpenGuard({reportDate:date,snapshotId:'S1',
 assert.equal(completedImport.carryover.currentOpen,3,'processing completion must never fabricate business closure; nonterminal current members remain OPEN');
 assert.equal(completedImport.carryover.processingCompleteDoesNotCloseOpen,true);
 
-console.log(`[V418/V417/V416/V415] large-db status + OPEN split smoke passed · giant legacy snapshot ignored in ${staleElapsedMs.toFixed(1)}ms · current-member set joins preserve SUCCESS/V384 semantics · reconciled current+historical OPEN add to one total · stale completion stays fail-closed`);
+console.log(`[V419/V418/V417/V416/V415] large-db status + OPEN split smoke passed · giant legacy snapshot ignored in ${staleElapsedMs.toFixed(1)}ms · current-member set joins preserve SUCCESS/V384 semantics · reconciled current+historical OPEN add to one total · legacy state JSON remains off the status hot path · stale completion stays fail-closed`);
