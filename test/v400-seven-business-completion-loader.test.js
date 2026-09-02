@@ -12,7 +12,7 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
   const v169At = loader.indexOf('/v169-seven-business-legacy-status-sync.js');
 
   assert.match(loader, /consolidated-persisted-status-loader-v1/);
-  assert.match(loader, /PERSISTED_STATUS_BUILD='2026-09-02-v322-one-read-seven-business-status-v1'/);
+  assert.match(loader, /PERSISTED_STATUS_BUILD='2026-09-02-v414-one-read-seven-business-status-v1'/);
   assert.match(loader, /X-CE-QC-Persisted-Status/);
   assert.match(loader, /WHPP_PAGE_OWNER='V132'/);
   assert.match(loader, /X-CE-QC-WHPP-Page-Owner/);
@@ -20,8 +20,9 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
   assert.ok(v168At > v146At, 'persisted status owner must load after V146 pending-date truth');
   assert.ok(v169At > v168At, 'V169 entry guard must load after V168 canonical truth');
   assert.match(loader, /v146-unified-import-date-status\.js\?v=20260901-v410-1/);
-  assert.match(loader, /v168-seven-business-status\.js\?v=20260902-persisted-status-1/);
-  assert.match(loader, /v67-resilient-run-guard\.js\?v=20260902-persisted-status-2/);
+  assert.match(loader, /v168-seven-business-status\.js\?v=20260902-v414-status-1/);
+  assert.match(loader, /v67-resilient-run-guard\.js\?v=20260902-v414-explicit-1/);
+  assert.match(loader, /v159-current-import-stability\.js\?v=20260902-v414-explicit-1/);
   assert.match(loader, /v132-whpp-seven-business-fast\.js\?v=20260902-display-only-2/);
   assert.match(loader, /v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/);
 
@@ -50,7 +51,7 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
   assert.match(totalSync, /state\.summary\s*=\s*\{[\s\S]*validUniqueWaybills:\s*core\s*\+\s*total/);
 });
 
-test('V168 performs one exact-date persisted status read; V322 preserves V132 WHPP current-cohort completion semantics', () => {
+test('V168 performs one exact-date persisted status read; V322 preserves V414 WHPP current-cohort completion and restart-proof semantics', () => {
   const importUi = read('../public/v146-unified-import-date-status.js');
   const statusUi = read('../public/v168-seven-business-status.js');
   const fastStatus = read('../src/v322WebAvailabilityPatch.js');
@@ -67,7 +68,7 @@ test('V168 performs one exact-date persisted status read; V322 preserves V132 WH
   assert.match(importUi, /UNIFIED_IMPORT_NOT_COMMITTED/);
 
   assert.match(statusUi, /v168-one-persisted-status-read-v1/);
-  assert.match(statusUi, /STATUS_SOURCE_REVISION = '2026-09-02-v322-one-read-seven-business-status-v1'/);
+  assert.match(statusUi, /STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1'/);
   const pendingPos = statusUi.indexOf('const pending = pendingImportDate()');
   const reportInputPos = statusUi.indexOf("document.getElementById('reportDate')?.value");
   assert.ok(pendingPos >= 0 && reportInputPos > pendingPos, 'pending report date must beat the previous committed reportDate input');
@@ -82,8 +83,8 @@ test('V168 performs one exact-date persisted status read; V322 preserves V132 WH
   assert.doesNotMatch(statusUi, /\/api\/v311\/shopee-recovery|\/api\/v317\/ccsl-recovery|\/api\/v132\/whpp-fast-summary/);
   assert.doesNotMatch(statusUi, /Promise\.allSettled|\/api\/whpp\/run\/start|\/api\/shopee\/run\/start/);
 
-  assert.match(fastStatus, /V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1'/);
-  assert.match(fastStatus, /V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v322-whpp-v132-current-cohort-parity-v1'/);
+  assert.match(fastStatus, /V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v414-one-read-seven-business-status-v1'/);
+  assert.match(fastStatus, /V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v414-whpp-success-evidence-parity-v1'/);
   assert.match(fastStatus, /readV322SevenBusinessStatus/);
   assert.match(fastStatus, /stages:\{CCSL,SHOPEE,WHPP\}/);
   assert.match(fastStatus, /PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/);
@@ -92,9 +93,13 @@ test('V168 performs one exact-date persisted status read; V322 preserves V132 WH
   assert.match(fastStatus, /standard\?\.finalized/);
   assert.match(fastStatus, /lifecycle\?\.complete/);
   assert.match(fastStatus, /EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP/);
-  assert.match(fastStatus, /FULL_MEMBER_FINAL_EVIDENCE/);
+  assert.match(fastStatus, /FULL_MEMBER_SUCCESS_EVIDENCE/);
+  assert.match(fastStatus, /UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,
+    'full-member completion must count only successfully processed current-member rows');
+  assert.match(fastStatus, /restartInterrupted/);
+  assert.match(fastStatus, /PROCESS_RESTART_INTERRUPTED/);
   assert.match(fastStatus, /EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode/,
-    'legacy full-member completion may use only indexed per-member final existence checks');
+    'member completion checks must remain indexed by the current cohort');
   assert.match(fastStatus, /ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,
     'status read failure must fail closed rather than masquerade as fresh pending truth');
   assert.doesNotMatch(fastStatus, /scan_results|business_scan_results|business_track_events|track_events/,
