@@ -32,17 +32,18 @@ test('V419 OPEN display uses backend values only', () => {
   assert.doesNotMatch(source,/Math\.max\(num\(carry\.historicalOpen\),num\(carry\.historicalReconciledOpen\)\)/);
 });
 
-test('V419 history audit is low priority and cannot overwrite primary OPEN', () => {
+test('V419 heavy history audit is manual-only and cannot overwrite primary OPEN', () => {
   const audit=read('../public/v142-history-integrity-audit.js');
   const loader=read('../src/v44WhppUiPatch.js');
-  assert.match(audit,/v419-low-priority-history-audit-no-open-mutation-v3/);
-  assert.match(audit,/function statusPriorityBusy\(/);
-  assert.match(audit,/if\(!owner\|\|!owner\.lastTruth\)return true/);
-  assert.match(audit,/requestIdleCallback/);
-  assert.match(audit,/auditRunning/);
+  assert.match(audit,/v419-manual-only-history-audit-no-open-mutation-v4/);
+  assert.match(audit,/automatic:false/);
+  assert.match(audit,/automatic history audit disabled/);
   assert.match(audit,/历史审计不会回写或覆盖主页面OPEN数字/);
+  assert.match(audit,/立即重新检查/);
   assert.doesNotMatch(audit,/combined-processing-queue-count/);
   assert.doesNotMatch(audit,/function syncOpenSummary\(/);
+  assert.doesNotMatch(audit,/requestIdleCallback/);
+  assert.doesNotMatch(audit,/ce-qc-run-complete[^\n]*load/);
   assert.match(loader,/v142-history-integrity-audit\.js\?v=20260902-v419-priority-1/);
 });
 
