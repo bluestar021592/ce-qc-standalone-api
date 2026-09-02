@@ -122,7 +122,7 @@ const v169At=shell.indexOf('v169-seven-business-legacy-status-sync.js?v=20260901
 const v413At=shell.indexOf('v412-seven-business-convergence.js?v=20260901-v413-3');
 assert.ok(v67At>=0&&v168At>v67At&&v169At>v168At&&v413At>v169At,'runtime order must remain V67 executor → V168 V414 persisted status → V169 fail-closed entry guard → V413 lifecycle convergence');
 
-assert.match(whppSummary,/2026-08-30-v361-whpp-finalized-lifecycle-status-v1/,'WHPP canonical summary must expose persistent lifecycle completion truth');
+assert.match(whppSummary,/STATUS_REVISION='2026-09-02-v414-whpp-success-evidence-status-v1'/,'WHPP canonical summary must expose the V414 SUCCESS-evidence lifecycle status revision');
 assert.match(whppSummary,/function loadCurrentLifecycleCompletion/,'WHPP summary must recover an already-finalized current lifecycle after browser reload');
 assert.match(whppSummary,/stateMemberCount===num\(memberCount\)/,'current lifecycle completion must match the exact daily membership count');
 assert.match(whppSummary,/sourceMatches=!sourceSnapshotId\|\|stateSourceSnapshotId===sourceSnapshotId/,'current lifecycle completion must remain bound to the same imported source snapshot');
