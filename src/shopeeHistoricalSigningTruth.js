@@ -16,12 +16,12 @@ export function resolveShopeeHistoricalRegions(db,businessType='',fromDate='',to
   if(!SHOPEE_TYPES.has(type)||!from||!to)return out;
   if(hasTable(db,'unified_import_batches')&&hasTable(db,'unified_import_rows'))try{
     const rows=db.prepare(`WITH candidates AS (
-      SELECT b.rowid AS batchRowId,b.reportDate,b.snapshotId,b.createdAt
+      SELECT b.rowid AS batchId,b.reportDate,b.snapshotId,b.createdAt
       FROM unified_import_batches b JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate
       WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ? AND UPPER(TRIM(u.businessType))=? AND TRIM(COALESCE(u.shipmentCode,''))<>''
       GROUP BY b.rowid,b.reportDate,b.snapshotId,b.createdAt
     ), ranked AS (
-      SELECT reportDate,snapshotId,ROW_NUMBER() OVER(PARTITION BY reportDate ORDER BY createdAt DESC,batchRowId DESC) rn FROM candidates
+      SELECT reportDate,snapshotId,ROW_NUMBER() OVER(PARTITION BY reportDate ORDER BY createdAt DESC,batchId DESC) rn FROM candidates
     )
     SELECT r.reportDate,u.shipmentCode,u.regionCode,u.rowJson
     FROM ranked r JOIN unified_import_rows u ON u.snapshotId=r.snapshotId AND u.reportDate=r.reportDate
