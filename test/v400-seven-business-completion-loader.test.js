@@ -22,7 +22,7 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
   assert.match(loader, /v146-unified-import-date-status\.js\?v=20260901-v410-1/);
   assert.match(loader, /v168-seven-business-status\.js\?v=20260902-v414-status-1/);
   assert.match(loader, /v67-resilient-run-guard\.js\?v=20260902-v414-explicit-1/);
-  assert.match(loader, /v159-current-import-stability\.js\?v=20260902-v414-explicit-1/);
+  assert.match(loader, /v159-current-import-stability\.js\?v=20260902-v419-open-single-source-1/);
   assert.match(loader, /v132-whpp-seven-business-fast\.js\?v=20260902-display-only-2/);
   assert.match(loader, /v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/);
 
