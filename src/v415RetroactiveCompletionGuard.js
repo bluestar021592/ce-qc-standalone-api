@@ -66,17 +66,6 @@ function unifiedCompletionClaim(db,batch){
   try{return text(db.prepare('SELECT status FROM unified_snapshots WHERE snapshotId=? AND reportDate=? LIMIT 1').get(batch?.snapshotId,batch?.reportDate)?.status).toUpperCase()==='COMPLETED';}catch{return false;}
 }
 
-function whppStateCompletionClaim(db,date,boundary=''){
-  try{
-    const meta=db.prepare("SELECT length(CAST(valueJson AS BLOB)) bytes,updatedAt FROM business_states WHERE businessType='WHPP' LIMIT 1").get()||{};
-    if(n(meta.bytes)>2*1024*1024)return false;
-    if(boundary&&!atOrAfter(meta.updatedAt,boundary))return false;
-    const row=db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP' LIMIT 1").get()||{};
-    const state=safeJson(row.valueJson,{}),status=text(state.snapshotStatus).toUpperCase();
-    return dateOnly(state.reportDate)===date&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(text(state.snapshotId));
-  }catch{return false;}
-}
-
 function businessSuccessCoverage(db,{businessType,date,snapshotId,boundary='',memberTypes=[]}={}){
   const result=readV418BusinessSuccessCoverage(db,{businessType,date,snapshotId,boundary,memberTypes});
   return result?.ok?n(result.count):0;
@@ -120,7 +109,14 @@ export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=f
 
   const whppLock=currentLock(db,'WHPP',date,boundary);
   const whppMembershipOk=counts._whppMembershipOk!==false;
-  const whppClaim=whppMembershipOk&&(counts.WHPP===0||unifiedCompletionClaim(db,batch)||['finished','completed'].includes(text(whppLock?.status).toLowerCase())||whppStateCompletionClaim(db,date,boundary));
+  // V419: completion claims on the status/proof path are scalar-only. The old
+  // business_states.valueJson fallback was redundant with the persisted current
+  // run lock/unified completion claim and could rematerialize a large WHPP state
+  // blob on a status read. Exact current-member SUCCESS coverage remains mandatory.
+  const whppUnifiedClaim=unifiedCompletionClaim(db,batch);
+  const whppLockClaim=['finished','completed'].includes(text(whppLock?.status).toLowerCase());
+  const whppClaim=whppMembershipOk&&(counts.WHPP===0||whppUnifiedClaim||whppLockClaim);
+  const whppClaimSource=counts.WHPP===0?'ZERO_TICKET':whppUnifiedClaim?'UNIFIED_COMPLETED_SCALAR':whppLockClaim?'CURRENT_FINISHED_RUN_LOCK':'NONE';
   const whppCovered=counts.WHPP>0&&whppClaim?businessSuccessCoverage(db,{businessType:'WHPP',date,snapshotId,boundary,memberTypes:['WHPP']}):0;
   const whppComplete=Boolean(whppMembershipOk&&(counts.WHPP===0||whppClaim&&whppCovered>=counts.WHPP));
 
@@ -130,7 +126,7 @@ export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=f
     stages:{
       CCSL:{complete:ccslComplete,total:counts.CCSL,covered:n(ccslMemberProof.covered),missing:Math.max(0,counts.CCSL-n(ccslMemberProof.covered)),memberProof:ccslMemberProof,completionSnapshotId:text(ccslSnapshot?.snapshotId),lock:ccslLock},
       SHOPEE:{complete:shopeeComplete,total:counts.SHOPEE,covered:shopeeCovered,missing:Math.max(0,counts.SHOPEE-shopeeCovered),completionSnapshotId:text(shopeeSnapshot?.snapshotId),lock:shopeeLock},
-      WHPP:{complete:whppComplete,total:counts.WHPP,covered:whppCovered,missing:Math.max(0,counts.WHPP-whppCovered),completionSnapshotId:'',completionClaim:whppClaim,membershipOk:whppMembershipOk,membershipReason:text(counts._whppMembershipReason),lock:whppLock}
+      WHPP:{complete:whppComplete,total:counts.WHPP,covered:whppCovered,missing:Math.max(0,counts.WHPP-whppCovered),completionSnapshotId:'',completionClaim:whppClaim,completionClaimSource:whppClaimSource,membershipOk:whppMembershipOk,membershipReason:text(counts._whppMembershipReason),lock:whppLock}
     },
     membershipSource:text(counts._source),membershipFastSource:text(counts._fastSource),elapsedMs:Date.now()-started,cacheHit:false
   };
@@ -287,4 +283,4 @@ if(typeof previousPost==='function'&&!previousPost[POST_WRAPPED]){
   express.application.post=wrappedPost;
 }
 
-console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,V416_FAST_FAILCLOSED_PROOF_ID,V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,V418_STATUS_PROOF_FAST_PATH_ID,'legacy COMPLETED markers are display/run-authoritative only when exact current membership has current-lifecycle proof; V418 avoids large snapshot/state JSON materialization and uses current-member set joins; any proof failure is fail-closed.');
+console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,V416_FAST_FAILCLOSED_PROOF_ID,V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,V418_STATUS_PROOF_FAST_PATH_ID,'legacy COMPLETED markers are display/run-authoritative only when exact current membership has current-lifecycle proof; V419/V418 status proof avoids large snapshot/state JSON materialization and uses scalar claims plus current-member set joins; any proof failure is fail-closed.');
