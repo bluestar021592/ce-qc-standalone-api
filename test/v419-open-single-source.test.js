@@ -35,8 +35,9 @@ test('V419 OPEN display uses backend values only', () => {
 test('V419 history audit is low priority and cannot overwrite primary OPEN', () => {
   const audit=read('../public/v142-history-integrity-audit.js');
   const loader=read('../src/v44WhppUiPatch.js');
-  assert.match(audit,/v419-low-priority-history-audit-no-open-mutation-v1/);
+  assert.match(audit,/v419-low-priority-history-audit-no-open-mutation-v3/);
   assert.match(audit,/function statusPriorityBusy\(/);
+  assert.match(audit,/if\(!owner\|\|!owner\.lastTruth\)return true/);
   assert.match(audit,/requestIdleCallback/);
   assert.match(audit,/auditRunning/);
   assert.match(audit,/历史审计不会回写或覆盖主页面OPEN数字/);
