@@ -213,7 +213,7 @@
     const start = document.querySelector('[data-testid="global-auto-process"]');
     const resume = document.querySelector('button[onclick="resumeUnified()"]');
     if (truth.complete) {
-      lockControl(start, '本轮处理已完成', `${truth.reportDate} 七业务均已有当前成员处理证明，无需重复处理`);
+      lockControl(start, '七业务已完成', `${truth.reportDate} 七业务均已有当前成员处理证明，无需重复处理`);
       lockControl(resume, '', '本轮七业务处理均已完成，无需继续处理');
     } else if (!allFresh) {
       lockControl(start, '状态确认中', '正在读取当前日报的持久化状态，确认前禁止重复启动');
