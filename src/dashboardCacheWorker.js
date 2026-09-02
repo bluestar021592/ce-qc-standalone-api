@@ -55,9 +55,9 @@ try{
   }else if(reason==='V235_INTERACTIVE_STARTUP'||reason==='STARTUP_WARM'){
     const status=getDashboardCacheStatus();
     if(Number(status.cachedDates||0)===0)result={mode:'INITIAL_CACHE_WARM_ONCE',...warmDashboardCacheRange({days:warmDays})};
-    else{const refreshed=refreshDashboardCacheDirty({limit:24,recentDays:30});result={mode:'PERSISTED_CACHE_STARTUP_READ_ONLY',cachedDates:Number(status.cachedDates||0),...refreshed};}
+    else{const refreshed=refreshDashboardCacheDirty({ limit: 24, recentDays: 30 });result={mode:'PERSISTED_CACHE_STARTUP_READ_ONLY',cachedDates:Number(status.cachedDates||0),...refreshed};}
   }else{
-    const status=getDashboardCacheStatus();if(Number(status.cachedDates||0)===0)result=warmDashboardCacheRange({days:warmDays});else result=refreshDashboardCacheDirty({limit:24,recentDays:30});
+    const status=getDashboardCacheStatus();if(Number(status.cachedDates||0)===0)result=warmDashboardCacheRange({days:warmDays});else result=refreshDashboardCacheDirty({ limit: 24, recentDays: 30 });
   }
   writeResult(result);releaseWorkerLease();closeDb();process.exit(0);
 }catch(error){process.stderr.write(`${JSON.stringify({ok:false,reason,cacheId:V235_DASHBOARD_CURRENT_CACHE_ID,elapsedMs:Date.now()-workerStartedAt,error:error?.stack||error?.message||String(error)})}\n`);try{releaseWorkerLease();}catch{}try{closeDb();}catch{}process.exit(1);}
