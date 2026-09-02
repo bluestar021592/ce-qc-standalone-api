@@ -143,8 +143,10 @@ function whppFinalEvidenceCount(db,date,{standardPresent=false,snapshotId=''}={}
     if(standardPresent){
       return n(db.prepare(`SELECT COUNT(DISTINCT d.shipmentCode) count
         FROM business_daily_parse_rows d
-        JOIN business_final_rows f ON f.businessType='WHPP' AND f.shipmentCode=d.shipmentCode AND f.reportDate=?
-        WHERE d.businessType='WHPP' AND d.reportDate=? AND UPPER(COALESCE(f.apiStatus,''))='SUCCESS'`).get(date,date)?.count);
+        WHERE d.businessType='WHPP' AND d.reportDate=?
+          AND EXISTS(SELECT 1 FROM business_final_rows f
+            WHERE f.businessType='WHPP' AND f.shipmentCode=d.shipmentCode AND f.reportDate=?
+              AND UPPER(COALESCE(f.apiStatus,''))='SUCCESS')`).get(date,date)?.count);
     }
     if(snapshotId){
       return n(db.prepare(`SELECT COUNT(*) count
