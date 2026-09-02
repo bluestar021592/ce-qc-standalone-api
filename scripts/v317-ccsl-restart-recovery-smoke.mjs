@@ -111,7 +111,7 @@ assert.match(sevenStatus,/if \(stage\.state === 'done'\) return 'success'/,'ever
 assert.match(sevenStatus,/truth\.complete \? 'success' : 'muted'/,'overall completed state must also be green');
 assert.match(sevenStatus,/if \(truth\.complete\)[\s\S]*lockControl\(start, '七业务已完成'/,'persisted completion must lock duplicate start');
 assert.match(sevenStatus,/else if \(!allFresh\)[\s\S]*lockControl\(start, '状态确认中'/,'unconfirmed exact-date truth must fail closed instead of exposing a repeat start');
-assert.match(sevenStatus,/lockControl\(resume,[\s\S]*确认完成前禁止重复继续/,'unconfirmed exact-date truth must disable the legacy continue control');
+assert.match(sevenStatus,/lockControl\(resume, '', '正在读取当前日报的轻量持久化状态，确认前禁止重复继续'\)/,'unconfirmed exact-date truth must disable the legacy continue control');
 assert.match(sevenStatus,/node\.dataset\.v333Owner = 'canonical'/,'summary DOM must mark canonical ownership');
 assert.match(sevenStatus,/statusOnly: true/,'V168 must be read/render only');
 assert.match(sevenStatus,/authoritativeRunner: 'V67'/,'V168 must point execution ownership to V67');
