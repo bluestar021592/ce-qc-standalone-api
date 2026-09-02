@@ -3,7 +3,7 @@
 
   const VERSION = '2026-09-02-v168-one-persisted-status-read-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-status-only-v1';
-  const STATUS_SOURCE_REVISION = '2026-09-02-v322-one-read-seven-business-status-v1';
+  const STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1';
   const TERMINAL_READ_POLICY = '2026-09-02-v168-stop-polling-completed-date-v1';
   const STATUS_TIMEOUT_MS = 8000;
   const STATUS_POLL_MS = 10000;
