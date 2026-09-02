@@ -42,7 +42,7 @@ assert.match(v132Source, /import \{ buildWhppDashboard \} from '\.\/whppReportin
 assert.match(v132Source, /loadUnifiedMembership/, 'V132 must retain V351 only as the safe fallback path');
 assert.match(v132Source, /const present=expected===rows\.length/, 'V132 must require exact standard header/member equality');
 assert.match(v132Source, /WHPP_STANDARD_DAILY_ZERO/, 'V132 must keep exact persisted zero authoritative');
-assert.match(v132Source, /const standard=loadStandardMembership\(db,reportDate\);[\s\S]*const unified=standard\.present\?\{present:false,rows:\[\],source:'STANDARD_PRIMARY_NO_FALLBACK'\}:loadUnifiedMembership\(db,reportDate\)/, 'V132 must use the normalized WHPP daily cohort before invoking V351 fallback');
+assert.match(v132Source, /const standard=loadStandardMembership\(db,reportDate\);[\s\S]*const unified=standard\.present\?\{present:false,rows:\[\],source:'STANDARD_PRIMARY_NO_FALLBACK'[^}]*\}:loadUnifiedMembership\(db,reportDate\)/, 'V132 must use the normalized WHPP daily cohort before invoking V351 fallback');
 assert.match(v132Source, /const membershipRows=standard\.present\?standard\.rows:unified\.rows/, 'V132 selected membership must prefer direct standard daily rows');
 assert.match(v132Source, /loadFinalFacts/, 'V132 must read current WHPP final facts');
 assert.match(v132Source, /memberSet\.has\(billOf\(row\)\)/, 'V132 final facts must be bounded to selected membership');
