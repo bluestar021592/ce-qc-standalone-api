@@ -4,17 +4,25 @@ import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
 import { V334_GENERIC_HISTORY_TYPES } from './v334GenericHistoryCache.js';
 
-export const V334_GENERIC_HISTORY_COORDINATOR_ID='2026-08-27-v335-generic-history-observable-v1';
+export const V334_GENERIC_HISTORY_COORDINATOR_ID='2026-09-02-v334-date-scoped-history-invalidation-v1';
 const TYPES=new Set(V334_GENERIC_HISTORY_TYPES);
 const WORKER_TIMEOUT_MS=120_000;
 const states=new Map(V334_GENERIC_HISTORY_TYPES.map(type=>[type,{businessType:type,status:'IDLE',phase:'WAITING',toDate:'',cacheReady:false,cacheBlocked:false,rowCount:0,message:'',updatedAt:'',completedAt:'',startedAt:'',durationMs:0}]));
 const queue=new Map();let child=null,currentType='',generation=0,childGeneration=0,workerTimer=null,workerStartedAt=0;
+const staleCleanupByGeneration=new Map();
 const workerPath=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../scripts/v334-generic-history-cache-worker.mjs');
 const now=()=>new Date().toISOString();
+const date=v=>{const s=String(v||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:'';};
 function patch(type,value={}){const old=states.get(type)||{businessType:type};const next={...old,...value,businessType:type,updatedAt:now()};states.set(type,next);return next;}
-function clearSmallCache(type=''){
-  try{const db=getDb(),exists=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='v334_generic_history_cache' LIMIT 1").get();if(!exists)return;const target=String(type||'').toUpperCase();if(TYPES.has(target))db.prepare('DELETE FROM v334_generic_history_cache WHERE businessType=?').run(target);else db.exec('DELETE FROM v334_generic_history_cache');}
-  catch(error){console.warn('[CE-QC][V335_GENERIC_HISTORY_INVALIDATE]',type,error?.message||error);}
+function clearSmallCache(type='',reportDate=''){
+  try{
+    const db=getDb(),exists=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='v334_generic_history_cache' LIMIT 1").get();if(!exists)return;
+    const target=String(type||'').toUpperCase(),d=date(reportDate),all=!TYPES.has(target);
+    if(d&&all)db.prepare('DELETE FROM v334_generic_history_cache WHERE reportDate=?').run(d);
+    else if(d)db.prepare('DELETE FROM v334_generic_history_cache WHERE businessType=? AND reportDate=?').run(target,d);
+    else if(all)db.exec('DELETE FROM v334_generic_history_cache');
+    else db.prepare('DELETE FROM v334_generic_history_cache WHERE businessType=?').run(target);
+  }catch(error){console.warn('[CE-QC][V335_GENERIC_HISTORY_INVALIDATE]',type,reportDate,error?.message||error);}
 }
 function clearTimer(){if(workerTimer){clearTimeout(workerTimer);workerTimer=null;}}
 function spawnNext(){
@@ -28,17 +36,17 @@ function spawnNext(){
   running.on('error',error=>{if(childGeneration===generation){const durationMs=Date.now()-workerStartedAt;patch(type,{status:'FAILED',phase:'FAILED',message:error?.message||String(error),durationMs});console.warn('[CE-QC][V335_GENERIC_HISTORY_WORKER_FAILED]',JSON.stringify({type,toDate,durationMs,error:error?.message||String(error)}));}});
   running.on('exit',code=>{
     clearTimer();const durationMs=Date.now()-workerStartedAt,stale=childGeneration!==generation,state=states.get(type)||{},queuedAgain=queue.has(type);
-    if(stale){clearSmallCache(type);patch(type,{status:queuedAgain?'QUEUED':'IDLE',phase:queuedAgain?'QUEUED':'STALE_AFTER_MUTATION',cacheReady:false,cacheBlocked:true,rowCount:0,completedAt:'',message:queuedAgain?'历史成员已变化，等待新一轮独立缓存':'历史成员已变化，旧worker结果已丢弃；下次读取将重新建立缓存',durationMs});}
+    if(stale){const cleanupDate=staleCleanupByGeneration.get(childGeneration)||'';clearSmallCache(type,cleanupDate);staleCleanupByGeneration.delete(childGeneration);patch(type,{status:queuedAgain?'QUEUED':'IDLE',phase:queuedAgain?'QUEUED':'STALE_AFTER_MUTATION',cacheReady:false,cacheBlocked:!cleanupDate,rowCount:0,completedAt:'',message:queuedAgain?'历史成员已变化，等待新一轮独立缓存':cleanupDate?`${cleanupDate}缓存已失效；其他已完成日期继续直接读取`:'历史成员已变化，旧worker结果已丢弃；下次读取将重新建立缓存',durationMs});}
     else if(['STARTING','RUNNING','QUEUED'].includes(String(state.status||'').toUpperCase()))patch(type,{status:code===0?'COMPLETED':'FAILED',phase:code===0?'DONE':'FAILED',cacheReady:code===0||Boolean(state.cacheReady),cacheBlocked:code===0?false:Boolean(state.cacheBlocked),message:code===0?(state.message||'通用历史缓存完成'):`通用历史缓存子进程退出 code=${code}`,durationMs});
     if(code!==0&&String(states.get(type)?.phase||'')!=='TIMEOUT')console.warn('[CE-QC][V335_GENERIC_HISTORY_WORKER_EXIT]',JSON.stringify({type,toDate,code,durationMs,status:states.get(type)?.status}));
     child=null;currentType='';workerStartedAt=0;setTimeout(spawnNext,250).unref?.();
   });
 }
-export function invalidateV334GenericHistory(reason='HISTORY_MEMBERSHIP_MUTATION'){
-  generation+=1;queue.clear();clearSmallCache();
-  for(const type of TYPES)patch(type,{status:'IDLE',phase:'INVALIDATED',toDate:'',cacheReady:false,cacheBlocked:true,rowCount:0,completedAt:'',message:`历史缓存已失效：${reason}`});
-  if(child){try{child.kill();}catch{}}clearTimer();
-  return{ok:true,id:V334_GENERIC_HISTORY_COORDINATOR_ID,generation,reason};
+export function invalidateV334GenericHistory(reason='HISTORY_MEMBERSHIP_MUTATION',reportDate=''){
+  const d=date(reportDate),oldGeneration=generation;staleCleanupByGeneration.set(oldGeneration,d);generation+=1;queue.clear();clearSmallCache('',d);
+  for(const type of TYPES)patch(type,{status:'IDLE',phase:d?'DATE_INVALIDATED':'INVALIDATED',toDate:'',cacheReady:false,cacheBlocked:!d,rowCount:0,completedAt:'',message:d?`${d}历史缓存已失效；其他完成日期保留：${reason}`:`历史缓存已失效：${reason}`});
+  if(child){try{child.kill();}catch{}}else staleCleanupByGeneration.delete(oldGeneration);clearTimer();
+  return{ok:true,id:V334_GENERIC_HISTORY_COORDINATOR_ID,generation,reason,reportDate:d,scope:d?'REPORT_DATE_ONLY':'ALL_HISTORY'};
 }
 export function requestV334GenericHistoryBuild(businessType='',toDate=''){
   const type=String(businessType||'').toUpperCase(),to=String(toDate||'').slice(0,10);if(!TYPES.has(type)||!/^\d{4}-\d{2}-\d{2}$/.test(to))return inspectV334GenericHistoryBuild(type);
@@ -49,4 +57,4 @@ export function requestV334GenericHistoryBuild(businessType='',toDate=''){
 }
 export function inspectV334GenericHistoryBuild(businessType=''){const type=String(businessType||'').toUpperCase();if(TYPES.has(type))return{id:V334_GENERIC_HISTORY_COORDINATOR_ID,generation,...states.get(type)};return{id:V334_GENERIC_HISTORY_COORDINATOR_ID,generation,runningType:currentType,queue:[...queue.keys()],types:Object.fromEntries([...states.entries()])};}
 globalThis.__CE_QC_INVALIDATE_V334_GENERIC_HISTORY__=invalidateV334GenericHistory;
-console.info('[CE-QC][V335_GENERIC_HISTORY_COORDINATOR]',V334_GENERIC_HISTORY_COORDINATOR_ID,'CE/CEAF/ALI1688/WHPP/ALL history workers are observable and bounded to 120s; stale children cannot republish old history and failed workers can be retried.');
+console.info('[CE-QC][V334_GENERIC_HISTORY_COORDINATOR]',V334_GENERIC_HISTORY_COORDINATOR_ID,'daily imports invalidate only the affected reportDate in CE/CEAF/ALI1688/WHPP/ALL compact caches; completed historical dates stay persisted; full purge/reset still clears all history; workers remain isolated and bounded to 120s.');
