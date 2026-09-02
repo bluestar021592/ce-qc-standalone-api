@@ -190,7 +190,7 @@ must(bootstrap, 'v165WhppRunStateRecoveryPatch');
 must(bootstrap, 'v167CcslPodLockFactRepair');
 must(bootstrap, 'v193ExportSidecar.js');
 must(bootstrap, 'CE_QC_EXPORT_SIDECAR_PORT');
-must(whppRecovery, '2026-08-17-v165-whpp-run-state-recovery-v2');
+must(whppRecovery, '2026-09-02-v414-whpp-run-state-restart-proof-v1');
 must(whppRecovery, '2026-09-02-v414-whpp-process-restart-proof-v1');
 must(whppRecovery, 'PROCESS_RESTART_INTERRUPTED');
 must(whppRecovery, 'inspectV165WhppRestartInterruption');
