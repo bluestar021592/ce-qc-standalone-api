@@ -49,7 +49,7 @@ export function applyV415ImportOpenGuard(imported={},proof=null,{db=getDb(),hard
       historicalOpen:historical,
       historicalSeparate:true,
       source:'V415_CURRENT_MEMBERSHIP_OPEN_FALLBACK',
-      persistedTodayOpen,
+      persistedTodayOpen:persistedToday,
       hardTerminalClosed:Math.min(total,closed),
       completionProofId:V415_RETROACTIVE_COMPLETION_GUARD_ID,
       openGuardId:V415_IMPORT_OPEN_GUARD_ID
