@@ -1,7 +1,7 @@
 (function installSevenBusinessStatusV168(global) {
   if (global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__) return;
 
-  const VERSION = '2026-09-02-v416-failclosed-persisted-status-read-v1';
+  const VERSION = '2026-09-02-v168-one-persisted-status-read-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-status-only-v1';
   const STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1';
   const TERMINAL_READ_POLICY = '2026-09-02-v168-stop-polling-completed-date-v1';
@@ -128,7 +128,8 @@
   }
   function stageText(stage) {
     if (stage.statusFresh === false || stage.state === 'unknown') return `${stage.label} 状态确认中`;
-    if (stage.state === 'done') return `${stage.label} 本轮处理已完成`;
+    const suffix = '';
+    if (stage.state === 'done') return `${stage.label} 已完成${suffix}`;
     if (stage.state === 'running') return `${stage.label} 处理中`;
     if (stage.state === 'paused') return `${stage.label} 已暂停`;
     if (stage.state === 'failed') return `${stage.label} 失败`;
@@ -289,7 +290,7 @@
       get lastTruth() { return lastTruth; },
       get terminalDate() { return terminalDate; }
     };
-    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, TERMINAL_READ_POLICY, TRANSIENT_POLICY, 'one exact-date persisted status read supplies all three stage badges; unconfirmed reads never reuse stale completed badges; processing completion is explicitly labeled as one processing cycle and is independent from business OPEN/closure truth.');
+    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, TERMINAL_READ_POLICY, TRANSIENT_POLICY, 'one exact-date persisted status read supplies all three stage badges; unconfirmed reads never reuse stale completed badges; processing completion is represented by the overall cycle label and is independent from business OPEN/closure truth.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
