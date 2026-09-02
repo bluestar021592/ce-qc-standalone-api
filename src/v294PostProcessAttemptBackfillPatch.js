@@ -1,193 +1,66 @@
 import express from 'express';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
+import { markDashboardCacheDirty } from './rangeDashboardStore.js';
 import { backfillV294StrictAttemptsFromSavedEvidence } from './v294AttemptSigningTruth.js';
 import { repairV294CarryoverLifecycle } from './v294CarryoverLifecycleTruth.js';
-import { refreshV235CurrentDashboardCacheDate } from './v235DashboardCurrentCache.js';
-import { requestV328EvidenceRepair } from './v328EvidenceRepairCoordinator.js';
+import { requestV328EvidenceRepair,hasFinalizedDeliveryEvidenceAttempt } from './v328EvidenceRepairCoordinator.js';
 import { requestV334GenericHistoryBuild } from './v334GenericHistoryCoordinator.js';
 import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.js';
 import { readV334GenericHistoryCache } from './v334GenericHistoryCache.js';
 import { completeUnifiedSnapshot } from './unifiedImportStore.js';
+import { FINALIZED_HISTORY_BACKFILL_META_KEY,FINALIZED_HISTORY_BACKFILL_REVISION } from './dashboardCacheWorker.js';
 
-export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID = '2026-09-02-v294-seven-business-final-materialization-v6';
-const previousPost = express.application.post;
-const ROUTES = new Set([
-  '/api/import/unified-daily-report',
-  '/api/run','/api/run/start','/api/resume','/api/run/resume',
-  '/api/shopee/run/start','/api/shopee/run/resume'
-]);
+export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID='2026-09-02-v294-seven-business-final-materialization-v6';
+export const V294_EVENT_DRIVEN_FINALIZATION_REVISION='2026-09-02-v294-event-driven-final-materialization-v1';
+const previousPost=express.application.post;
+const ROUTES=new Set(['/api/import/unified-daily-report','/api/run','/api/run/start','/api/resume','/api/run/resume','/api/shopee/run/start','/api/shopee/run/resume']);
 const ATTEMPT_HISTORY_TYPES=['TBKH','SHOPEECN','SHOPEEVN'];
 const GENERIC_HISTORY_TYPES=['CE','CEAF','ALI1688','WHPP','ALL'];
-let inFlight = false;
-let queued = null;
-let historyTimer = null;
-let whppWatchTimer = null;
-let whppWatchDate = '';
+const rootDir=path.dirname(fileURLToPath(import.meta.url));
+let inFlight=false,queued=null,historyTimer=null,dashboardWorker=null,dashboardActiveKey='';
+const dashboardTasks=new Map();
 
-function typesForPath(path='') {
-  const value=String(path||'');
-  if(value==='/api/import/unified-daily-report')return {family:'IMPORT',carryTypes:[],attemptTypes:[]};
-  if(value.startsWith('/api/shopee/'))return {family:'SHOPEE',carryTypes:['SHOPEECN','SHOPEEVN'],attemptTypes:['SHOPEECN','SHOPEEVN']};
-  return {family:'CCSL',carryTypes:['CE','CEAF','TBKH','ALI1688'],attemptTypes:['TBKH']};
-}
-function responseReportDate(req, payload={}) {
-  return String(payload?.run?.reportDate||payload?.summary?.reportDate||payload?.state?.reportDate||payload?.import?.reportDate||payload?.reportDate||req?.body?.reportDate||req?.body?.date||'').slice(0,10);
-}
+function typesForPath(pathValue=''){const value=String(pathValue||'');if(value==='/api/import/unified-daily-report')return{family:'IMPORT',carryTypes:[],attemptTypes:[]};if(value.startsWith('/api/shopee/'))return{family:'SHOPEE',carryTypes:['SHOPEECN','SHOPEEVN'],attemptTypes:['SHOPEECN','SHOPEEVN']};return{family:'CCSL',carryTypes:['CE','CEAF','TBKH','ALI1688'],attemptTypes:['TBKH']};}
+function responseReportDate(req,payload={}){return String(payload?.run?.reportDate||payload?.summary?.reportDate||payload?.state?.reportDate||payload?.import?.reportDate||payload?.reportDate||req?.body?.reportDate||req?.body?.date||'').slice(0,10);}
 function safeJson(value,fallback={}){try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}}
 function latestUnifiedReportDate(){try{return String(getDb().prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1").get()?.reportDate||'').slice(0,10);}catch{return'';}}
-function latestUnifiedBatch(reportDate=''){
-  const date=String(reportDate||'').slice(0,10);if(!date)return null;
-  try{return getDb().prepare("SELECT batchId,snapshotId,reportDate,createdAt FROM unified_import_batches WHERE status='VALID' AND reportDate=? ORDER BY createdAt DESC,rowid DESC LIMIT 1").get(date)||null;}catch{return null;}
-}
-function unifiedExpectedCounts(reportDate=''){
-  const batch=latestUnifiedBatch(reportDate);if(!batch)return{batch:null,CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0,ccsl:0,shopee:0,total:0};
-  const counts={CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0};
-  try{for(const row of getDb().prepare('SELECT businessType,COUNT(*) AS c FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(batch.snapshotId))if(Object.hasOwn(counts,row.businessType))counts[row.businessType]=Number(row.c||0);}catch{}
-  return{batch,...counts,ccsl:counts.CE+counts.CEAF+counts.TBKH+counts.ALI1688,shopee:counts.SHOPEECN+counts.SHOPEEVN,total:Object.values(counts).reduce((a,b)=>a+Number(b||0),0)};
-}
+function latestUnifiedBatch(reportDate=''){const date=String(reportDate||'').slice(0,10);if(!date)return null;try{return getDb().prepare("SELECT batchId,snapshotId,reportDate,createdAt FROM unified_import_batches WHERE status='VALID' AND reportDate=? ORDER BY createdAt DESC,rowid DESC LIMIT 1").get(date)||null;}catch{return null;}}
+function unifiedExpectedCounts(reportDate=''){const batch=latestUnifiedBatch(reportDate);if(!batch)return{batch:null,CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0,ccsl:0,shopee:0,total:0};const counts={CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0};try{for(const row of getDb().prepare('SELECT businessType,COUNT(*) AS c FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(batch.snapshotId))if(Object.hasOwn(counts,row.businessType))counts[row.businessType]=Number(row.c||0);}catch{}return{batch,...counts,ccsl:counts.CE+counts.CEAF+counts.TBKH+counts.ALI1688,shopee:counts.SHOPEECN+counts.SHOPEEVN,total:Object.values(counts).reduce((a,b)=>a+Number(b||0),0)};}
 function unifiedWhppExpected(reportDate=''){return unifiedExpectedCounts(reportDate).WHPP;}
-function whppCompletion(reportDate=''){
-  const date=String(reportDate||'').slice(0,10);if(!date)return{finalized:false,reportDate:'',snapshotId:''};
-  try{
-    const row=getDb().prepare("SELECT summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date),summary=safeJson(row?.summaryJson,{}),status=String(summary.snapshotStatus||summary.reconciliationStatus||'').toUpperCase(),snapshotId=String(summary.finalizedSnapshotId||'').trim();
-    return{finalized:summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(snapshotId),reportDate:date,snapshotId,status,summary};
-  }catch{return{finalized:false,reportDate:date,snapshotId:''};}
-}
+function whppCompletion(reportDate=''){const date=String(reportDate||'').slice(0,10);if(!date)return{finalized:false,reportDate:'',snapshotId:''};try{const row=getDb().prepare("SELECT summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date),summary=safeJson(row?.summaryJson,{}),status=String(summary.snapshotStatus||summary.reconciliationStatus||'').toUpperCase(),snapshotId=String(summary.finalizedSnapshotId||'').trim();return{finalized:summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(snapshotId),reportDate:date,snapshotId,status,summary};}catch{return{finalized:false,reportDate:date,snapshotId:''};}}
 function sevenBusinessTerminal(reportDate=''){return unifiedWhppExpected(reportDate)===0||whppCompletion(reportDate).finalized;}
+function unifiedAlreadyCompleted(reportDate=''){const batch=latestUnifiedBatch(reportDate);if(!batch)return null;try{const row=getDb().prepare('SELECT status,payloadJson FROM unified_snapshots WHERE snapshotId=? AND reportDate=? LIMIT 1').get(batch.snapshotId,batch.reportDate),payload=safeJson(row?.payloadJson,{});if(String(row?.status||'').toUpperCase()==='COMPLETED'&&payload?.reconciliation?.passed===true)return{ok:true,alreadyCompleted:true,reportDate:batch.reportDate,batch,result:{status:'COMPLETED',reconciliation:payload.reconciliation}};}catch{}return null;}
 function loadSnapshotPayload(sql,...args){try{const row=getDb().prepare(sql).get(...args);return row?.payloadJson?safeJson(row.payloadJson,null):null;}catch{return null;}}
-function loadExactFamilySnapshots(reportDate=''){
-  const date=String(reportDate||'').slice(0,10),completion=whppCompletion(date);
-  const ccsl=loadSnapshotPayload("SELECT payloadJson FROM export_snapshots WHERE reportDate=? AND status='VALID' AND reconciliationStatus='COMPLETED' ORDER BY id DESC LIMIT 1",date);
-  const shopee=loadSnapshotPayload("SELECT payloadJson FROM business_export_snapshots WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY id DESC LIMIT 1",date);
-  let whpp=null;
-  if(completion.finalized&&completion.snapshotId){
-    const payload=loadSnapshotPayload("SELECT payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND snapshotId=? ORDER BY id DESC LIMIT 1",date,completion.snapshotId);
-    if(payload)whpp={...payload,snapshotId:completion.snapshotId,status:payload.status||'VALID',reconciliationStatus:payload.reconciliationStatus||'COMPLETED'};
-  }
-  return{ccsl,shopee,whpp};
-}
-function finalizeUnifiedSevenBusiness(reportDate=''){
-  const date=String(reportDate||'').slice(0,10),expected=unifiedExpectedCounts(date);if(!expected.batch)return{ok:false,skipped:true,reason:'UNIFIED_BATCH_MISSING',reportDate:date};
-  const families=loadExactFamilySnapshots(date);
-  if(expected.ccsl>0&&!families.ccsl)return{ok:true,skipped:true,reason:'CCSL_NOT_FINALIZED',reportDate:date,expected};
-  if(expected.shopee>0&&!families.shopee)return{ok:true,skipped:true,reason:'SHOPEE_NOT_FINALIZED',reportDate:date,expected};
-  if(expected.WHPP>0&&!families.whpp)return{ok:true,skipped:true,reason:'WHPP_NOT_FINALIZED',reportDate:date,expected};
-  try{
-    const result=completeUnifiedSnapshot({reportDate:date,ccslSnapshot:families.ccsl,shopeeSnapshot:families.shopee,whppSnapshot:families.whpp});
-    return{ok:true,reportDate:date,expected,result};
-  }catch(error){return{ok:false,reportDate:date,expected,code:error?.code||'UNIFIED_FINALIZATION_FAILED',error:error?.message||String(error),reconciliation:error?.reconciliation||null};}
-}
-function invalidateDashboardReadCaches(){
-  for(const name of ['__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__','__CE_QC_INVALIDATE_V253_DASHBOARD_FAST_PATH__','__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__']){
-    try{globalThis[name]?.();}catch{}
-  }
-  try { globalThis.__CE_QC_REFRESH_V274_TRENDS__?.(); } catch {}
-}
-function attemptCacheReady(type,date){try{const data=readV329ThreeBusinessDailyCache(type,date,getDb(),date);return data?.dates?.includes(date)&&data.daily?.some(row=>row.reportDate===date&&row.ready!==false);}catch{return false;}}
+function loadExactFamilySnapshots(reportDate=''){const date=String(reportDate||'').slice(0,10),completion=whppCompletion(date),ccsl=loadSnapshotPayload("SELECT payloadJson FROM export_snapshots WHERE reportDate=? AND status='VALID' AND reconciliationStatus='COMPLETED' ORDER BY id DESC LIMIT 1",date),shopee=loadSnapshotPayload("SELECT payloadJson FROM business_export_snapshots WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY id DESC LIMIT 1",date);let whpp=null;if(completion.finalized&&completion.snapshotId){const payload=loadSnapshotPayload("SELECT payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND snapshotId=? ORDER BY id DESC LIMIT 1",date,completion.snapshotId);if(payload)whpp={...payload,snapshotId:completion.snapshotId,status:payload.status||'VALID',reconciliationStatus:payload.reconciliationStatus||'COMPLETED'};}return{ccsl,shopee,whpp};}
+function finalizeUnifiedSevenBusiness(reportDate=''){const existing=unifiedAlreadyCompleted(reportDate);if(existing)return existing;const date=String(reportDate||'').slice(0,10),expected=unifiedExpectedCounts(date);if(!expected.batch)return{ok:false,skipped:true,reason:'UNIFIED_BATCH_MISSING',reportDate:date};const families=loadExactFamilySnapshots(date);if(expected.ccsl>0&&!families.ccsl)return{ok:true,skipped:true,reason:'CCSL_NOT_FINALIZED',reportDate:date,expected};if(expected.shopee>0&&!families.shopee)return{ok:true,skipped:true,reason:'SHOPEE_NOT_FINALIZED',reportDate:date,expected};if(expected.WHPP>0&&!families.whpp)return{ok:true,skipped:true,reason:'WHPP_NOT_FINALIZED',reportDate:date,expected};try{const result=completeUnifiedSnapshot({reportDate:date,ccslSnapshot:families.ccsl,shopeeSnapshot:families.shopee,whppSnapshot:families.whpp});return{ok:true,reportDate:date,expected,result};}catch(error){return{ok:false,reportDate:date,expected,code:error?.code||'UNIFIED_FINALIZATION_FAILED',error:error?.message||String(error),reconciliation:error?.reconciliation||null};}}
+function invalidateDashboardReadCaches(){for(const name of ['__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__','__CE_QC_INVALIDATE_V253_DASHBOARD_FAST_PATH__','__CE_QC_INVALIDATE_V284_DAILY_MEMBERSHIP__']){try{globalThis[name]?.();}catch{}}try{globalThis.__CE_QC_REFRESH_V274_TRENDS__?.();}catch{}}
+function attemptCacheState(type,date){try{const data=readV329ThreeBusinessDailyCache(type,date,getDb(),date),row=data.daily?.find(item=>item.reportDate===date);return{ready:Boolean(data?.dates?.includes(date)&&row&&row.ready!==false),evidenceIncomplete:Boolean(row?.evidenceIncomplete),row};}catch{return{ready:false,evidenceIncomplete:true,row:null};}}
 function genericCacheReady(type,date){try{const data=readV334GenericHistoryCache(type,date,getDb(),date);return data?.dates?.includes(date)&&data.daily?.some(row=>row.reportDate===date&&row.ready!==false);}catch{return false;}}
-function schedulePersistedHistoryBuild(reportDate){
-  const date=String(reportDate||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!sevenBusinessTerminal(date))return;
-  clearTimeout(historyTimer);
-  historyTimer=setTimeout(()=>{
-    const queuedAttempt=[],queuedGeneric=[];
-    for(const type of ATTEMPT_HISTORY_TYPES){if(attemptCacheReady(type,date))continue;try{requestV328EvidenceRepair(type,date);queuedAttempt.push(type);}catch(error){console.warn('[CE-QC][FINAL_HISTORY_THREE_QUEUE_FAILED]',type,date,error?.message||error);}}
-    for(const type of GENERIC_HISTORY_TYPES){if(genericCacheReady(type,date))continue;try{requestV334GenericHistoryBuild(type,date);queuedGeneric.push(type);}catch(error){console.warn('[CE-QC][FINAL_HISTORY_GENERIC_QUEUE_FAILED]',type,date,error?.message||error);}}
-    console.info('[CE-QC][FINAL_HISTORY_MATERIALIZATION_QUEUED]',JSON.stringify({reportDate:date,attemptTypes:queuedAttempt,genericTypes:queuedGeneric,policy:'AFTER_ACTUAL_SEVEN_BUSINESS_FINALIZATION_ONLY_MISSING_CACHE_ONLY'}));
-  },1500);
-  historyTimer.unref?.();
-}
+function dashboardHistoryBackfillDone(){try{const raw=getDb().prepare('SELECT value FROM app_meta WHERE key=? LIMIT 1').get(FINALIZED_HISTORY_BACKFILL_META_KEY)?.value,payload=safeJson(raw,{});return payload.revision===FINALIZED_HISTORY_BACKFILL_REVISION;}catch{return false;}}
+function spawnNextDashboardTask(){if(dashboardWorker||!dashboardTasks.size)return;const [key,task]=dashboardTasks.entries().next().value;dashboardTasks.delete(key);const workerFile=path.join(rootDir,'dashboardCacheWorker.js'),args=[workerFile,'--reason',task.reason];if(task.reportDate)args.push('--date',task.reportDate);const child=spawn(process.execPath,args,{cwd:path.resolve(rootDir,'..'),env:process.env,windowsHide:true,stdio:['ignore','ignore','ignore']});dashboardWorker=child;dashboardActiveKey=key;child.once('exit',code=>{console.info('[CE-QC][FINAL_DASHBOARD_WORKER_EXIT]',JSON.stringify({key,reason:task.reason,reportDate:task.reportDate||'',code}));dashboardWorker=null;dashboardActiveKey='';setTimeout(spawnNextDashboardTask,150).unref?.();});child.once('error',error=>{console.warn('[CE-QC][FINAL_DASHBOARD_WORKER_ERROR]',task.reason,error?.message||error);dashboardWorker=null;dashboardActiveKey='';setTimeout(spawnNextDashboardTask,250).unref?.();});}
+function enqueueDashboardTask({reportDate='',reason='SEVEN_BUSINESS_FINALIZED'}={}){const date=String(reportDate||'').slice(0,10),key=date?`DATE:${date}`:`REASON:${reason}`;if(date)try{markDashboardCacheDirty(date,reason);}catch{}if(key===dashboardActiveKey||dashboardTasks.has(key))return{started:false,queued:true,key};dashboardTasks.set(key,{reportDate:date,reason});setImmediate(spawnNextDashboardTask);return{started:!dashboardWorker,queued:Boolean(dashboardWorker),key};}
+function schedulePersistedHistoryBuild(reportDate){const date=String(reportDate||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!sevenBusinessTerminal(date))return;clearTimeout(historyTimer);historyTimer=setTimeout(()=>{const queuedAttempt=[],queuedGeneric=[];for(const type of ATTEMPT_HISTORY_TYPES){const cache=attemptCacheState(type,date),evidenceAttempted=hasFinalizedDeliveryEvidenceAttempt(type,date);if(cache.ready&&!cache.evidenceIncomplete)continue;if(cache.ready&&cache.evidenceIncomplete&&evidenceAttempted)continue;try{const networkRepairDate=evidenceAttempted?'':date;requestV328EvidenceRepair(type,date,{networkRepairDate});queuedAttempt.push({type,networkRepairDate:networkRepairDate||'SAVED_ONLY'});}catch(error){console.warn('[CE-QC][FINAL_HISTORY_THREE_QUEUE_FAILED]',type,date,error?.message||error);}}for(const type of GENERIC_HISTORY_TYPES){if(genericCacheReady(type,date))continue;try{requestV334GenericHistoryBuild(type,date);queuedGeneric.push(type);}catch(error){console.warn('[CE-QC][FINAL_HISTORY_GENERIC_QUEUE_FAILED]',type,date,error?.message||error);}}console.info('[CE-QC][FINAL_HISTORY_MATERIALIZATION_QUEUED]',JSON.stringify({reportDate:date,attemptTypes:queuedAttempt,genericTypes:queuedGeneric,policy:'FINALIZED_DATE_NETWORK_EVIDENCE_ONCE_THEN_PERSISTED_CACHE'}));},1000);historyTimer.unref?.();}
+
 export function materializeV294CompletedUnifiedHistory(reportDate=''){
-  const date=String(reportDate||'').slice(0,10);
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return{ok:false,skipped:true,reason:'REPORT_DATE_MISSING'};
-  if(!sevenBusinessTerminal(date))return{ok:true,skipped:true,reason:'WHPP_NOT_FINALIZED',reportDate:date,expectedWhpp:unifiedWhppExpected(date)};
-  const unifiedFinalization=finalizeUnifiedSevenBusiness(date);
-  if(unifiedFinalization.skipped)return{ok:true,skipped:true,reportDate:date,reason:unifiedFinalization.reason,unifiedFinalization};
-  if(!unifiedFinalization.ok||unifiedFinalization.result?.deferred===true)return{ok:false,reportDate:date,reason:'UNIFIED_SEVEN_BUSINESS_NOT_FINAL',unifiedFinalization};
-  let dashboardCache={ok:true,skipped:true,reason:'CACHE_NOT_READY'};
-  try{dashboardCache=refreshV235CurrentDashboardCacheDate(date,{force:true});}catch(error){dashboardCache={ok:false,error:error?.message||String(error)};}
-  invalidateDashboardReadCaches();
-  schedulePersistedHistoryBuild(date);
-  return{ok:true,reportDate:date,unifiedFinalization,dashboardCache,historyQueued:true,policy:'FINALIZE_SEVEN_ONCE_THEN_READ_PERSISTED_CACHE'};
+  const date=String(reportDate||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return{ok:false,skipped:true,reason:'REPORT_DATE_MISSING'};if(!sevenBusinessTerminal(date))return{ok:true,skipped:true,reason:'WHPP_NOT_FINALIZED',reportDate:date,expectedWhpp:unifiedWhppExpected(date)};
+  const unifiedFinalization=finalizeUnifiedSevenBusiness(date);if(unifiedFinalization.skipped)return{ok:true,skipped:true,reportDate:date,reason:unifiedFinalization.reason,unifiedFinalization};if(!unifiedFinalization.ok||unifiedFinalization.result?.deferred===true)return{ok:false,reportDate:date,reason:'UNIFIED_SEVEN_BUSINESS_NOT_FINAL',unifiedFinalization};
+  invalidateDashboardReadCaches();const dashboardCache=enqueueDashboardTask({reportDate:date,reason:'SEVEN_BUSINESS_FINALIZED'});const historyBackfill=dashboardHistoryBackfillDone()?{skipped:true,reason:'ALREADY_MATERIALIZED'}:enqueueDashboardTask({reason:'FINALIZED_HISTORY_BACKFILL'});schedulePersistedHistoryBuild(date);
+  return{ok:true,reportDate:date,unifiedFinalization,dashboardCache,historyBackfill,historyQueued:true,policy:'EVENT_DRIVEN_FINALIZE_ONCE_THEN_BACKGROUND_PERSISTED_READ_MODELS',revision:V294_EVENT_DRIVEN_FINALIZATION_REVISION};
 }
 globalThis.__CE_QC_FINALIZE_PERSISTED_DASHBOARD_HISTORY__=materializeV294CompletedUnifiedHistory;
 
-function stopWhppWatch(){if(whppWatchTimer){clearInterval(whppWatchTimer);whppWatchTimer=null;}whppWatchDate='';}
-function watchForWhppFinalization(reportDate=''){
-  const date=String(reportDate||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return;
-  if(whppWatchTimer&&whppWatchDate===date)return;stopWhppWatch();whppWatchDate=date;
-  const started=Date.now();
-  const check=()=>{
-    if(sevenBusinessTerminal(date)){
-      const result=materializeV294CompletedUnifiedHistory(date);
-      console.info('[CE-QC][FINAL_HISTORY_SEVEN_BUSINESS_CHECK]',JSON.stringify(result));
-      if(result.ok&&!result.skipped)stopWhppWatch();
-    }
-    if(Date.now()-started>6*60*60*1000)stopWhppWatch();
-  };
-  setTimeout(check,1000).unref?.();whppWatchTimer=setInterval(check,5000);whppWatchTimer.unref?.();
+function runBackfill(reportDate,scopes={}){
+  const date=String(reportDate||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return;const carryTypes=[...new Set((scopes.carryTypes||[]).map(value=>String(value||'').toUpperCase()).filter(Boolean))],attemptTypes=[...new Set((scopes.attemptTypes||[]).map(value=>String(value||'').toUpperCase()).filter(Boolean))];
+  if(scopes.family==='IMPORT'){invalidateDashboardReadCaches();console.info('[CE-QC][V294_IMPORTED_LIFECYCLE]',JSON.stringify({reportDate:date,policy:'NO_FINALIZATION_POLLING_WAIT_FOR_AUTHORITATIVE_WHPP_EVENT'}));return;}
+  if(inFlight){if(!queued||date>=queued.reportDate)queued={reportDate:date,scopes:{...scopes,carryTypes,attemptTypes}};return;}inFlight=true;
+  setTimeout(()=>{try{const carryLifecycle=carryTypes.length?repairV294CarryoverLifecycle({reportDate:date,businessTypes:carryTypes,reason:'V294_POST_PROCESS_ROUTE'}):{ok:true,skipped:true,reason:'NO_CARRY_TYPES'},result=attemptTypes.length?backfillV294StrictAttemptsFromSavedEvidence({reportDate:date,fromDate:date,businessTypes:attemptTypes,reason:'V294_POST_PROCESS_ROUTE'}):{ok:true,skipped:true,reason:'NO_ATTEMPT_TYPES'};invalidateDashboardReadCaches();let finalization={skipped:true,reason:'WAIT_FOR_WHPP'};if(scopes.family==='SHOPEE'&&sevenBusinessTerminal(date))finalization=materializeV294CompletedUnifiedHistory(date);console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_DONE]',JSON.stringify({family:scopes.family||'',reportDate:date,carryLifecycle,attemptBackfill:result,dashboardCache:'DEFERRED_UNTIL_SEVEN_BUSINESS_COMPLETE',finalization}));}catch(error){console.error('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_FAILED]',JSON.stringify({reportDate:date,family:scopes.family||'',carryTypes,attemptTypes,error:error?.message||String(error)}));}finally{inFlight=false;const next=queued;queued=null;if(next)runBackfill(next.reportDate,next.scopes);}},250).unref?.();
 }
+function responseHook(req,res,next){const originalJson=res.json.bind(res);let handled=false;res.json=function v294PostProcessJson(payload){const success=res.statusCode<400&&payload?.ok!==false,reportDate=responseReportDate(req,payload),out=originalJson(payload);if(success&&reportDate&&!handled){handled=true;runBackfill(reportDate,typesForPath(req.path));}return out;};next();}
+express.application.post=function v294PostProcessAttemptRegistration(pathValue,...handlers){const route=String(pathValue||'');if(ROUTES.has(route)&&handlers.length)return previousPost.call(this,pathValue,responseHook,...handlers);return previousPost.call(this,pathValue,...handlers);};
 
-function runBackfill(reportDate, scopes={}) {
-  const date = String(reportDate || '').slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-  const carryTypes=[...new Set((scopes.carryTypes||[]).map(value=>String(value||'').toUpperCase()).filter(Boolean))];
-  const attemptTypes=[...new Set((scopes.attemptTypes||[]).map(value=>String(value||'').toUpperCase()).filter(Boolean))];
-  if(scopes.family==='IMPORT'){
-    invalidateDashboardReadCaches();
-    watchForWhppFinalization(date);
-    console.info('[CE-QC][V294_IMPORTED_LIFECYCLE_WATCH]',JSON.stringify({reportDate:date,policy:'WATCH_PERSISTED_FAMILY_FINALIZATION_NO_API'}));
-    return;
-  }
-  if (inFlight) {
-    if (!queued || date >= queued.reportDate) queued = { reportDate: date, scopes:{...scopes,carryTypes,attemptTypes} };
-    return;
-  }
-  inFlight = true;
-  setTimeout(() => {
-    try {
-      const carryLifecycle = carryTypes.length
-        ? repairV294CarryoverLifecycle({ reportDate: date, businessTypes: carryTypes, reason: 'V294_POST_PROCESS_ROUTE' })
-        : {ok:true,skipped:true,reason:'NO_CARRY_TYPES'};
-      const result = attemptTypes.length
-        ? backfillV294StrictAttemptsFromSavedEvidence({ reportDate: date, fromDate: date, businessTypes: attemptTypes, reason: 'V294_POST_PROCESS_ROUTE' })
-        : {ok:true,skipped:true,reason:'NO_ATTEMPT_TYPES'};
-      invalidateDashboardReadCaches();
-      if(scopes.family==='SHOPEE')watchForWhppFinalization(date);
-      console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_DONE]', JSON.stringify({ family:scopes.family||'',reportDate:date,carryLifecycle,attemptBackfill:result,dashboardCache:'DEFERRED_UNTIL_SEVEN_BUSINESS_COMPLETE',sevenBusinessFinalizationWatch:scopes.family==='SHOPEE' }));
-    } catch (error) {
-      console.error('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL_FAILED]', JSON.stringify({ reportDate: date, family:scopes.family||'',carryTypes, attemptTypes, error: error?.message || String(error) }));
-    } finally {
-      inFlight = false;
-      const next = queued;
-      queued = null;
-      if (next) runBackfill(next.reportDate, next.scopes);
-    }
-  }, 250).unref?.();
-}
+if(process.env.NODE_ENV!=='test'&&!process.env.CI){const timer=setTimeout(()=>{const date=latestUnifiedReportDate();if(!date||!sevenBusinessTerminal(date))return;const result=materializeV294CompletedUnifiedHistory(date);console.info('[CE-QC][FINAL_HISTORY_STARTUP_ONE_SHOT]',JSON.stringify(result));},5000);timer.unref?.();}
 
-function responseHook(req, res, next) {
-  const originalJson = res.json.bind(res);
-  let handled = false;
-  res.json = function v294PostProcessJson(payload) {
-    const success = res.statusCode < 400 && payload?.ok !== false;
-    const reportDate = responseReportDate(req,payload);
-    const out = originalJson(payload);
-    if (success && reportDate && !handled) {
-      handled = true;
-      runBackfill(reportDate, typesForPath(req.path));
-    }
-    return out;
-  };
-  next();
-}
-
-express.application.post = function v294PostProcessAttemptRegistration(pathValue, ...handlers) {
-  const path = String(pathValue || '');
-  if (ROUTES.has(path) && handlers.length) return previousPost.call(this, pathValue, responseHook, ...handlers);
-  return previousPost.call(this, pathValue, ...handlers);
-};
-
-if(process.env.NODE_ENV!=='test'&&!process.env.CI){const timer=setTimeout(()=>{const date=latestUnifiedReportDate();if(!date)return;watchForWhppFinalization(date);},5000);timer.unref?.();}
-
-console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL]', V294_POST_PROCESS_ATTEMPT_BACKFILL_ID,
-  'one import lifecycle starts one tiny persisted-state finalization watch; CCSL/SHOPEE only persist strict saved evidence; after exact seven-business completion, unified snapshot + dashboard/trend caches materialize once and completed dates stay SQLite/cache reads.');
+console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL]',V294_POST_PROCESS_ATTEMPT_BACKFILL_ID,V294_EVENT_DRIVEN_FINALIZATION_REVISION,'no 5s/6h WHPP polling: import/CCSL/SHOPEE persist saved truth, V134 emits the authoritative WHPP-finalized event, and dashboard/history read models materialize in background workers once then remain SQLite/cache reads.');
