@@ -4,14 +4,11 @@ import { loadRangeDashboard as loadRangeDashboardV31 } from './rangeDashboardSto
 const SHOPEE_TYPES = Object.freeze(['SHOPEECN', 'SHOPEEVN']);
 
 /**
- * V33 is a narrow dispatch-attempt correctness layer over the preceding V31
- * historical SQL owner.
+ * V33 is a narrow correctness layer over the preceding V31 historical range owner.
  *
- * Do not import rangeDashboardStoreFinal here. The public Final owner already
- * reaches V33 through V320 -> V295 -> V294 -> V284 -> V191 -> V55Compact ->
- * V58 -> V55 -> V36. Importing Final from this layer creates a recursive
- * multi-day owner loop. Single-day V322 cache reads returned before that loop,
- * which is why the defect was visible only on explicit historical ranges.
+ * It must not import rangeDashboardStoreFinal: the public Final owner reaches V33
+ * through the historical decorator chain, so importing Final here creates a
+ * multi-day recursive loop. Single-day V322 cache reads return before this layer.
  *
  * Dispatch attempt classification uses the strongest persisted evidence in this
  * order: podAttemptNo -> currentAttemptNo -> POD timestamp relative to report day.
@@ -93,72 +90,165 @@ function queryDispatchAttemptFacts(fromDate, toDate) {
         ON f.businessType='SHOPEE'
        AND f.shipmentCode=v.shipmentCode
        AND f.reportDate=v.reportDate
+    ), classified AS (
+      SELECT
+        reportDate,
+        businessType,
+        regionCode,
+        shipmentCode,
+        isPod,
+        CASE
+          WHEN isPod<>1 THEN 0
+          WHEN explicitAttempt>0 THEN MIN(3,explicitAttempt)
+          WHEN length(podTimestamp)>=10
+               AND julianday(date(replace(substr(podTimestamp,1,10),'/','-'))) IS NOT NULL
+          THEN MIN(3,MAX(1,
+            CAST(julianday(date(replace(substr(podTimestamp,1,10),'/','-'))) - julianday(reportDate) AS INTEGER) + 1
+          ))
+          ELSE 0
+        END AS attemptDay
+      FROM prepared
     )
     SELECT
-      reportDate,businessType,regionCode,shipmentCode,isPod,
-      CASE
-        WHEN isPod<>1 THEN 0
-        WHEN explicitAttempt>0 THEN MIN(3, explicitAttempt)
-        WHEN length(podTimestamp)>=10
-             AND julianday(date(replace(substr(podTimestamp,1,10),'/','-'))) IS NOT NULL
-        THEN MIN(3, MAX(1,
-          CAST(julianday(date(replace(substr(podTimestamp,1,10),'/','-'))) - julianday(reportDate) AS INTEGER) + 1
-        ))
-        ELSE 0
-      END AS attemptNo
-    FROM prepared
-  `).all(fromDate, toDate);
+      reportDate,
+      businessType,
+      regionCode,
+      COUNT(*) AS total,
+      SUM(CASE WHEN isPod=1 THEN 1 ELSE 0 END) AS pod,
+      SUM(CASE WHEN isPod=1 AND attemptDay=1 THEN 1 ELSE 0 END) AS attempt1,
+      SUM(CASE WHEN isPod=1 AND attemptDay=2 THEN 1 ELSE 0 END) AS attempt2,
+      SUM(CASE WHEN isPod=1 AND attemptDay>=3 THEN 1 ELSE 0 END) AS attempt3,
+      SUM(CASE WHEN isPod=1 AND attemptDay=0 THEN 1 ELSE 0 END) AS podAttemptUnknown
+    FROM classified
+    GROUP BY reportDate,businessType,regionCode
+    ORDER BY reportDate,businessType,regionCode
+  `).all(fromDate, toDate).map(normalizeFact);
 }
 
-function patchShopeeState(state, facts, type) {
+function patchShopeeState(state, rows, label) {
   if (!state?.dashboard) return;
-  const scoped = type === 'SHOPEE' ? facts : facts.filter(row => row.businessType === type);
-  const all = summarize(scoped);
-  patchMetrics(state.dashboard.metrics, all);
-  patchMetrics(state.v55Summary, all);
-  patchMetrics(state.dashboard.v55Summary, all);
+  const dashboard = state.dashboard;
+  const all = summarize(rows);
+  patchMetrics(dashboard.metrics, all);
 
-  const groups = state.dashboard.recipientGroups || {};
-  patchMetrics(groups.ALL?.metrics, all);
-  if (type === 'SHOPEE') {
-    patchMetrics(groups.CN?.metrics, summarize(scoped.filter(row => row.businessType === 'SHOPEECN')));
-    patchMetrics(groups.VN?.metrics, summarize(scoped.filter(row => row.businessType === 'SHOPEEVN')));
-  } else {
-    const group = type === 'SHOPEECN' ? 'CN' : 'VN';
-    patchMetrics(groups[group]?.metrics, all);
+  const groups = dashboard.recipientGroups || {};
+  patchGroup(groups.ALL, rows);
+  patchGroup(groups.CN, rows.filter(row => row.businessType === 'SHOPEECN'));
+  patchGroup(groups.VN, rows.filter(row => row.businessType === 'SHOPEEVN'));
+
+  for (const regionCode of ['PP','PV','UNKNOWN']) {
+    patchMetrics(dashboard.regions?.[regionCode], summarize(rows.filter(row => row.regionCode === regionCode)));
   }
 
-  for (const region of ['PP','PV','UNKNOWN']) {
-    patchMetrics(state.dashboard.regions?.[region], summarize(scoped.filter(row => row.regionCode === region)));
-    patchMetrics(groups.ALL?.regions?.[region], summarize(scoped.filter(row => row.regionCode === region)));
-    if (type === 'SHOPEE') {
-      patchMetrics(groups.CN?.regions?.[region], summarize(scoped.filter(row => row.businessType === 'SHOPEECN' && row.regionCode === region)));
-      patchMetrics(groups.VN?.regions?.[region], summarize(scoped.filter(row => row.businessType === 'SHOPEEVN' && row.regionCode === region)));
-    }
+  patchHistory(state, rows);
+  patchRecipientTrends(dashboard, state.historySummary || []);
+  patchDashboardRows(dashboard.dashboardRows, groups);
+  patchDashboardRows(state.detailTabs?.dashboard?.rows, groups);
+  patchDashboardRows(dashboard.detailTabs?.dashboard?.rows, groups);
+
+  dashboard.dispatchAttemptAudit = {
+    label,
+    denominator: all.total,
+    pod: all.pod,
+    classifiedPod: all.attempt1 + all.attempt2 + all.attempt3,
+    unclassifiedPod: all.podAttemptUnknown,
+    rule: 'POD_ATTEMPT_THEN_CURRENT_ATTEMPT_THEN_POD_TIMESTAMP'
+  };
+}
+
+function patchGroup(group, rows) {
+  if (!group) return;
+  const all = summarize(rows);
+  patchMetrics(group.metrics, all);
+  for (const regionCode of ['PP','PV','UNKNOWN']) {
+    patchMetrics(group.regions?.[regionCode], summarize(rows.filter(row => row.regionCode === regionCode)));
+  }
+}
+
+function patchMetrics(metrics, summary) {
+  if (!metrics) return;
+  metrics.dispatchAttempt1 = summary.attempt1;
+  metrics.dispatchAttempt2 = summary.attempt2;
+  metrics.dispatchAttempt3 = summary.attempt3;
+  metrics.dispatchAttemptDenominator = summary.total;
+  metrics.dispatchAttempt1Rate = rate(summary.attempt1, summary.total);
+  metrics.dispatchAttempt2Rate = rate(summary.attempt2, summary.total);
+  metrics.dispatchAttempt3Rate = rate(summary.attempt3, summary.total);
+  metrics.firstAttemptCount = summary.attempt1;
+  metrics.firstAttemptEligible = summary.total;
+  metrics.firstAttemptRate = rate(summary.attempt1, summary.total);
+  metrics.dispatchAttemptUnclassifiedPod = summary.podAttemptUnknown;
+}
+
+function patchHistory(state, rows) {
+  if (!Array.isArray(state.historySummary)) return;
+  for (const item of state.historySummary) {
+    const reportDate = String(item?.reportDate || item?.summary?.reportDate || '');
+    const summary = item?.summary;
+    if (!reportDate || !summary) continue;
+    const dayRows = rows.filter(row => row.reportDate === reportDate);
+    const all = summarize(dayRows);
+    const cn = summarize(dayRows.filter(row => row.businessType === 'SHOPEECN'));
+    const vn = summarize(dayRows.filter(row => row.businessType === 'SHOPEEVN'));
+    summary.metrics ||= {};
+    summary.metrics['ALL_首派成功率'] = rate(all.attempt1, all.total);
+    summary.metrics['CN_首派成功率'] = rate(cn.attempt1, cn.total);
+    summary.metrics['VN_首派成功率'] = rate(vn.attempt1, vn.total);
+    summary.firstPodRate = rate(all.attempt1, all.total);
+  }
+}
+
+function patchRecipientTrends(dashboard, history) {
+  if (!dashboard?.recipientTrends) return;
+  for (const group of ['CN','VN']) {
+    if (!dashboard.recipientTrends[group]) continue;
+    dashboard.recipientTrends[group].firstAttemptRate = history.slice(-7).map(item => {
+      const value = Number(item?.summary?.metrics?.[`${group}_首派成功率`] || 0);
+      return { date: item.reportDate, value, hasData: true, status: value >= 90 ? 'normal' : 'warning' };
+    });
+  }
+}
+
+function patchDashboardRows(rows, groups) {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    const key = String(row?.metricKey || '');
+    const match = key.match(/^(ALL|CN|VN)_首派成功率$/);
+    if (!match) continue;
+    const value = Number(groups?.[match[1]]?.metrics?.firstAttemptRate || 0);
+    row.数值 = `${value.toFixed(2)}%`;
+    row.数值原值 = value;
   }
 }
 
 function summarize(rows) {
-  const pod = rows.filter(row => Number(row.isPod || 0) === 1);
-  const a1 = pod.filter(row => Number(row.attemptNo || 0) === 1).length;
-  const a2 = pod.filter(row => Number(row.attemptNo || 0) === 2).length;
-  const a3 = pod.filter(row => Number(row.attemptNo || 0) >= 3).length;
-  const unknown = Math.max(0, pod.length - a1 - a2 - a3);
-  return { pod: pod.length, a1, a2, a3, unknown };
+  return {
+    total: sum(rows,'total'),
+    pod: sum(rows,'pod'),
+    attempt1: sum(rows,'attempt1'),
+    attempt2: sum(rows,'attempt2'),
+    attempt3: sum(rows,'attempt3'),
+    podAttemptUnknown: sum(rows,'podAttemptUnknown')
+  };
 }
 
-function patchMetrics(metrics, s) {
-  if (!metrics || !s) return;
-  metrics.dispatchAttempt1 = s.a1;
-  metrics.dispatchAttempt2 = s.a2;
-  metrics.dispatchAttempt3 = s.a3;
-  metrics.dispatchAttemptUnclassifiedPod = s.unknown;
-  metrics.dispatchAttemptDenominator = s.pod;
-  metrics.dispatchAttempt1Rate = pct(s.a1, s.pod);
-  metrics.dispatchAttempt2Rate = pct(s.a2, s.pod);
-  metrics.dispatchAttempt3Rate = pct(s.a3, s.pod);
+function normalizeFact(row) {
+  return {
+    ...row,
+    total: Number(row.total || 0),
+    pod: Number(row.pod || 0),
+    attempt1: Number(row.attempt1 || 0),
+    attempt2: Number(row.attempt2 || 0),
+    attempt3: Number(row.attempt3 || 0),
+    podAttemptUnknown: Number(row.podAttemptUnknown || 0)
+  };
 }
 
-function pct(value, total) {
-  return total ? Number((Number(value || 0) * 100 / Number(total)).toFixed(2)) : 0;
+function sum(rows, key) {
+  return (rows || []).reduce((total, row) => total + Number(row?.[key] || 0), 0);
+}
+
+function rate(value, total) {
+  const denominator = Number(total || 0);
+  return denominator ? Number((Number(value || 0) * 100 / denominator).toFixed(2)) : 0;
 }
