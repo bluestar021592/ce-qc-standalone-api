@@ -11,10 +11,11 @@ import { requestV334GenericHistoryBuild } from './v334GenericHistoryCoordinator.
 import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.js';
 import { readV334GenericHistoryCache } from './v334GenericHistoryCache.js';
 import { completeUnifiedSnapshot } from './unifiedImportStore.js';
-import { FINALIZED_HISTORY_BACKFILL_META_KEY,FINALIZED_HISTORY_BACKFILL_REVISION } from './dashboardCacheWorker.js';
 
 export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID='2026-09-02-v294-seven-business-final-materialization-v6';
 export const V294_EVENT_DRIVEN_FINALIZATION_REVISION='2026-09-02-v294-event-driven-final-materialization-v1';
+const FINALIZED_HISTORY_BACKFILL_REVISION='2026-09-02-finalized-dashboard-history-backfill-once-v1';
+const FINALIZED_HISTORY_BACKFILL_META_KEY='finalized_dashboard_history_backfill_revision';
 const previousPost=express.application.post;
 const ROUTES=new Set(['/api/import/unified-daily-report','/api/run','/api/run/start','/api/resume','/api/run/resume','/api/shopee/run/start','/api/shopee/run/resume']);
 const ATTEMPT_HISTORY_TYPES=['TBKH','SHOPEECN','SHOPEEVN'];
@@ -47,7 +48,7 @@ function schedulePersistedHistoryBuild(reportDate){const date=String(reportDate|
 export function materializeV294CompletedUnifiedHistory(reportDate=''){
   const date=String(reportDate||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return{ok:false,skipped:true,reason:'REPORT_DATE_MISSING'};if(!sevenBusinessTerminal(date))return{ok:true,skipped:true,reason:'WHPP_NOT_FINALIZED',reportDate:date,expectedWhpp:unifiedWhppExpected(date)};
   const unifiedFinalization=finalizeUnifiedSevenBusiness(date);if(unifiedFinalization.skipped)return{ok:true,skipped:true,reportDate:date,reason:unifiedFinalization.reason,unifiedFinalization};if(!unifiedFinalization.ok||unifiedFinalization.result?.deferred===true)return{ok:false,reportDate:date,reason:'UNIFIED_SEVEN_BUSINESS_NOT_FINAL',unifiedFinalization};
-  invalidateDashboardReadCaches();const dashboardCache=enqueueDashboardTask({reportDate:date,reason:'SEVEN_BUSINESS_FINALIZED'});const historyBackfill=dashboardHistoryBackfillDone()?{skipped:true,reason:'ALREADY_MATERIALIZED'}:enqueueDashboardTask({reason:'FINALIZED_HISTORY_BACKFILL'});schedulePersistedHistoryBuild(date);
+  invalidateDashboardReadCaches();const dashboardCache=enqueueDashboardTask({reportDate:date,reason:'SEVEN_BUSINESS_FINALIZED'}),historyBackfill=dashboardHistoryBackfillDone()?{skipped:true,reason:'ALREADY_MATERIALIZED'}:enqueueDashboardTask({reason:'FINALIZED_HISTORY_BACKFILL'});schedulePersistedHistoryBuild(date);
   return{ok:true,reportDate:date,unifiedFinalization,dashboardCache,historyBackfill,historyQueued:true,policy:'EVENT_DRIVEN_FINALIZE_ONCE_THEN_BACKGROUND_PERSISTED_READ_MODELS',revision:V294_EVENT_DRIVEN_FINALIZATION_REVISION};
 }
 globalThis.__CE_QC_FINALIZE_PERSISTED_DASHBOARD_HISTORY__=materializeV294CompletedUnifiedHistory;
