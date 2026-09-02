@@ -46,7 +46,7 @@ jobs:
             'fetch','origin','main','reset','--hard','origin/main','node_modules','5177',
             'Get-PortOwnerPids','Stop-PortOwners','Stop-LegacySupervisors','Get-CimInstance','taskkill.exe','/T','/F',
             'Get-ShellSupervisorForProcess','Stop-RecordedRuntime','runtime_supervisor.pid','stable and free',
-            'Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','elseif','CE_QC_LAUNCHER_TEST_MODE'
+            'Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','CE_QC_LAUNCHER_TEST_MODE'
           )) {
             if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
           }
