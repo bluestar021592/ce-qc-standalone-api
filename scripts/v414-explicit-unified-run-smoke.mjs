@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import './v415-retroactive-completion-proof-smoke.mjs';
 
 const read = file => fs.readFileSync(file, 'utf8');
 const mustMatch = (source, pattern, label = String(pattern)) => {
