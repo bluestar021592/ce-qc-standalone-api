@@ -10,9 +10,9 @@ const {getDb,closeDb}=await import('../src/db.js');
 const {saveUnifiedImport}=await import('../src/unifiedImportStore.js');
 const {ensureWhppStore,saveWhppDailyMembers,getWhppDailyMembers}=await import('../src/whppStore.js');
 const {ensureBusinessTables}=await import('../src/businessStore.js');
-const {BUSINESS_TYPES}=await import('../src/businessConfig.js');
 const {completeUnifiedSnapshot}=await import('../src/unifiedFinalizer.js');
 const {refreshV235CurrentDashboardCacheDate}=await import('../src/v235DashboardCurrentCache.js');
+const BUSINESS_TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 
 const parsed=(date,counts)=>{const rows=[];let i=0;for(const [businessType,count] of Object.entries(counts))for(let j=0;j<count;j++){const shipmentCode=`${businessType}-${date}-${++i}`;rows.push({reportDate:date,businessType,shipmentCode,recipientRaw:businessType,recipientNormalized:businessType,recipientGroup:businessType,regionCode:j%2?'PV':'PP',sheetName:'日报',rowNumber:i+1,classificationReason:'FINALIZATION_SMOKE',rowJson:{shipmentCode,businessType,regionCode:j%2?'PV':'PP'}});}return{reportDate:date,rows,rawRows:rows.length,summary:{validUniqueWaybills:rows.length,businessCounts:counts},sourceMeta:{fixture:true}};};
 const familyRows=(saved,types)=>saved.rows.filter(r=>types.includes(r.businessType));
