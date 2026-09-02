@@ -50,7 +50,7 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
   assert.match(totalSync, /state\.summary\s*=\s*\{[\s\S]*validUniqueWaybills:\s*core\s*\+\s*total/);
 });
 
-test('V168 performs one exact-date persisted status read and never invokes heavy recovery/WHPP summary endpoints', () => {
+test('V168 performs one exact-date persisted status read; V322 preserves V132 WHPP current-cohort completion semantics', () => {
   const importUi = read('../public/v146-unified-import-date-status.js');
   const statusUi = read('../public/v168-seven-business-status.js');
   const fastStatus = read('../src/v322WebAvailabilityPatch.js');
@@ -83,12 +83,22 @@ test('V168 performs one exact-date persisted status read and never invokes heavy
   assert.doesNotMatch(statusUi, /Promise\.allSettled|\/api\/whpp\/run\/start|\/api\/shopee\/run\/start/);
 
   assert.match(fastStatus, /V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1'/);
+  assert.match(fastStatus, /V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v322-whpp-v132-current-cohort-parity-v1'/);
   assert.match(fastStatus, /readV322SevenBusinessStatus/);
   assert.match(fastStatus, /stages:\{CCSL,SHOPEE,WHPP\}/);
   assert.match(fastStatus, /PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/);
-  assert.match(fastStatus, /PERSISTED_WHPP_DAILY_FINALIZATION_HEADER/);
-  assert.doesNotMatch(fastStatus, /scan_results|business_scan_results|business_final_rows|business_track_events|track_events/,
-    'normal web status owner must never touch large fact tables');
+  assert.match(fastStatus, /PERSISTED_WHPP_V132_COMPLETION_PARITY/);
+  assert.match(fastStatus, /function whppCompletionDecision\(/);
+  assert.match(fastStatus, /standard\?\.finalized/);
+  assert.match(fastStatus, /lifecycle\?\.complete/);
+  assert.match(fastStatus, /EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP/);
+  assert.match(fastStatus, /FULL_MEMBER_FINAL_EVIDENCE/);
+  assert.match(fastStatus, /EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode/,
+    'legacy full-member completion may use only indexed per-member final existence checks');
+  assert.match(fastStatus, /ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,
+    'status read failure must fail closed rather than masquerade as fresh pending truth');
+  assert.doesNotMatch(fastStatus, /scan_results|business_scan_results|business_track_events|track_events/,
+    'normal web status owner must never reconstruct scan or trajectory facts');
 });
 
 test('V408 home WHPP KPI reads canonical V132 summary and preserves normal-flow semantics', () => {
