@@ -1,8 +1,8 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V322_WEB_AVAILABILITY_ID='2026-09-02-v322-persisted-three-stage-status-v3';
-export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1';
+export const V322_WEB_AVAILABILITY_ID='2026-09-02-v322-persisted-three-stage-status-v4';
+export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v2';
 const previousGet=express.application.get;
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
 const first=(...values)=>{for(const v of values)if(v!==undefined&&v!==null&&v!==''&&Number.isFinite(Number(v)))return Number(v);return 0;};
@@ -33,18 +33,23 @@ function sourceHeader(db,type,date){
   }catch{return{exists:false,total:0,summary:{},source:''};}
 }
 function fallbackUnifiedCount(db,type,date,snapshotId){
-  if(!snapshotId||!date)return 0;
+  if(!snapshotId||!date)return{ok:false,count:0};
   try{
-    if(type==='CCSL')return n(db.prepare("SELECT COUNT(*) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN ('CE','CEAF','TBKH','ALI1688')").get(snapshotId,date)?.count);
-    if(type==='SHOPEE')return n(db.prepare("SELECT COUNT(*) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN ('SHOPEECN','SHOPEEVN')").get(snapshotId,date)?.count);
-    if(type==='WHPP')return n(db.prepare("SELECT COUNT(*) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType='WHPP'").get(snapshotId,date)?.count);
+    if(type==='CCSL')return{ok:true,count:n(db.prepare("SELECT COUNT(*) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN ('CE','CEAF','TBKH','ALI1688')").get(snapshotId,date)?.count)};
+    if(type==='SHOPEE')return{ok:true,count:n(db.prepare("SELECT COUNT(*) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN ('SHOPEECN','SHOPEEVN')").get(snapshotId,date)?.count)};
+    if(type==='WHPP')return{ok:true,count:n(db.prepare("SELECT COUNT(*) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType='WHPP'").get(snapshotId,date)?.count)};
   }catch{}
-  return 0;
+  return{ok:false,count:0};
 }
 function stageSource(db,type,date,batch){
-  const header=sourceHeader(db,type,date);
-  if(header.exists)return header;
-  return{...header,total:fallbackUnifiedCount(db,type,date,text(batch?.snapshotId)),source:'unified_import_rows_fallback'};
+  const header=sourceHeader(db,type,date),snapshotId=text(batch?.snapshotId);
+  if(header.exists&&header.total>0)return{...header,zeroProven:false,membershipVerified:false};
+  const fallback=fallbackUnifiedCount(db,type,date,snapshotId);
+  if(header.exists){
+    if(fallback.ok&&fallback.count>0)return{...header,total:fallback.count,source:`${header.source}+unified_import_rows_zero_mismatch_recovery`,zeroProven:false,membershipVerified:true,headerTotal:header.total};
+    return{...header,zeroProven:Boolean(snapshotId&&fallback.ok&&fallback.count===0),membershipVerified:Boolean(fallback.ok),headerTotal:header.total};
+  }
+  return{...header,total:fallback.count,source:fallback.ok?'unified_import_rows_fallback':'missing_source_header',zeroProven:Boolean(snapshotId&&fallback.ok&&fallback.count===0),membershipVerified:Boolean(fallback.ok)};
 }
 function runLock(db,type,date){
   try{
@@ -85,23 +90,23 @@ function baseStage(type,date,source,lock,checkpoint={}){
   const scan=bounded(scanTotal,first(payload.scanDone,payload.scanResults),first(payload.scanRetry,last.scanRetry),first(payload.scanObserved));
   const track=bounded(trackTotal,first(payload.trackDone,payload.trackResults),first(payload.trackRetry,last.trackRetry),first(payload.trackObserved));
   const phase=text(lock?.currentStage||checkpoint.stage)||'待处理',isTrack=/轨迹|track|shipment-event|exception-item/i.test(phase),status=text(lock?.status).toLowerCase();
-  return{key:type,label:type==='SHOPEE'?'SHOPEE CN/VN':(type==='WHPP'?'WHPP本土':'CCSL'),reportDate:date,sourceTotal:source.total,sourceHeader:source.source,runId:text(lock?.runId),runStatus:status,phase,batchIndex:first(lock?.batchIndex,checkpoint.batchIndex),totalBatches:first(lock?.totalBatches,checkpoint.totalBatches),lastMessage:text(lock?.errorMessage||checkpoint.errorMessage),running:status==='running',paused:status==='paused',failed:status==='failed',scanDone:scan.done,scanRetry:scan.retry,scanTotal:scan.total,trackDone:track.done,trackRetry:track.retry,trackTotal:track.total,done:isTrack?track.done:scan.done,retry:isTrack?track.retry:scan.retry,total:isTrack?track.total:scan.total};
+  return{key:type,label:type==='SHOPEE'?'SHOPEE CN/VN':(type==='WHPP'?'WHPP本土':'CCSL'),reportDate:date,sourceTotal:source.total,sourceHeader:source.source,sourceMembershipVerified:source.membershipVerified===true,runId:text(lock?.runId),runStatus:status,phase,batchIndex:first(lock?.batchIndex,checkpoint.batchIndex),totalBatches:first(lock?.totalBatches,checkpoint.totalBatches),lastMessage:text(lock?.errorMessage||checkpoint.errorMessage),running:status==='running',paused:status==='paused',failed:status==='failed',scanDone:scan.done,scanRetry:scan.retry,scanTotal:scan.total,trackDone:track.done,trackRetry:track.retry,trackTotal:track.total,done:isTrack?track.done:scan.done,retry:isTrack?track.retry:scan.retry,total:isTrack?track.total:scan.total};
 }
 function readCcslStage(db,date,batch){
   const source=stageSource(db,'CCSL',date,batch),raw=runLock(db,'CCSL',date),lock=lockForLifecycle(raw,text(batch?.createdAt)),checkpoint=latestCheckpoint(db,'CCSL',date,text(lock?.runId)),stage=baseStage('CCSL',date,source,lock,checkpoint);
-  const zero=Boolean(batch?.snapshotId&&source.total===0),snapshot=zero?null:exactCompletionSnapshot(db,'CCSL',date,text(lock?.runId),text(batch?.createdAt));
+  const zero=source.zeroProven===true,snapshot=zero?null:exactCompletionSnapshot(db,'CCSL',date,text(lock?.runId),text(batch?.createdAt));
   return{...stage,complete:zero||Boolean(snapshot),zeroTicketDay:zero,snapshotId:text(snapshot?.snapshotId),lifecycleBoundary:text(batch?.createdAt),staleRunIgnored:Boolean(raw&&!lock&&batch?.createdAt),statusSource:'PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT'};
 }
 function readShopeeStage(db,date,batch){
   const source=stageSource(db,'SHOPEE',date,batch),raw=runLock(db,'SHOPEE',date),lock=lockForLifecycle(raw,text(batch?.createdAt)),checkpoint=latestCheckpoint(db,'SHOPEE',date,text(lock?.runId)),stage=baseStage('SHOPEE',date,source,lock,checkpoint);
-  const zero=Boolean(batch?.snapshotId&&source.total===0),snapshot=zero?null:exactCompletionSnapshot(db,'SHOPEE',date,text(lock?.runId),text(batch?.createdAt));
+  const zero=source.zeroProven===true,snapshot=zero?null:exactCompletionSnapshot(db,'SHOPEE',date,text(lock?.runId),text(batch?.createdAt));
   return{...stage,complete:zero||Boolean(snapshot),zeroTicketDay:zero,snapshotId:text(snapshot?.snapshotId),lifecycleBoundary:text(batch?.createdAt),staleRunIgnored:Boolean(raw&&!lock&&batch?.createdAt),statusSource:'PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT'};
 }
 function readWhppStage(db,date,batch){
   const source=stageSource(db,'WHPP',date,batch),raw=runLock(db,'WHPP',date),lock=lockForLifecycle(raw,text(batch?.createdAt)),checkpoint=latestCheckpoint(db,'WHPP',date,text(lock?.runId)),stage=baseStage('WHPP',date,source,lock,checkpoint),summary=source.summary||{};
   const status=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase();
   const finalizedSnapshotId=text(summary.finalizedSnapshotId),explicitComplete=summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(finalizedSnapshotId);
-  const zero=Boolean(batch?.snapshotId&&source.total===0);
+  const zero=source.zeroProven===true;
   return{...stage,complete:zero||explicitComplete,zeroTicketDay:zero,snapshotId:finalizedSnapshotId,snapshotStatus:status,finalizedAt:text(summary.finalizedAt),lifecycleBoundary:text(batch?.createdAt),staleRunIgnored:Boolean(raw&&!lock&&batch?.createdAt),statusSource:'PERSISTED_WHPP_DAILY_FINALIZATION_HEADER'};
 }
 export function readV322SevenBusinessStatus({reportDate='',db=getDb()}={}){
@@ -120,4 +125,4 @@ export function readV322RunProgress(businessType='CCSL',db=getDb(),reportDate=''
 }
 function progressHandler(req,res){const started=Date.now();try{res.setHeader('Cache-Control','private,max-age=1');res.setHeader('X-CE-QC-V322',V322_WEB_AVAILABILITY_ID);res.setHeader('X-CE-QC-V322-Seven-Status',V322_SEVEN_BUSINESS_STATUS_ID);const data=readV322RunProgress(req.query.businessType||'CCSL',getDb(),req.query.reportDate||'');res.setHeader('Server-Timing',`v322progress;dur=${Date.now()-started}`);return res.json(data);}catch(error){return res.status(200).json({ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),running:false,paused:false,phase:'状态读取暂缓',done:0,retry:0,total:0,error:text(error?.message||error),generatedAt:new Date().toISOString()});}}
 express.application.get=function v322AvailabilityGet(pathValue,...handlers){if(String(pathValue||'')==='/api/v33/run-progress')return previousGet.call(this,pathValue,progressHandler);return previousGet.call(this,pathValue,...handlers);};
-console.info('[CE-QC][V322_WEB_AVAILABILITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,'one exact-date persisted read returns CCSL + SHOPEE + WHPP lifecycle truth from daily headers, run locks/checkpoints and finalized snapshot markers; normal status polling never scans scan/final/event fact tables.');
+console.info('[CE-QC][V322_WEB_AVAILABILITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,'one exact-date persisted read returns CCSL + SHOPEE + WHPP lifecycle truth from daily headers, run locks/checkpoints and finalized snapshot markers; normal positive status never scans scan/final/event fact tables; zero-ticket completion is accepted only after exact unified-import membership proves zero.');
