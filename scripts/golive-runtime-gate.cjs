@@ -41,12 +41,14 @@ const exportPreflight = read('src/v142AsyncExportPreflightPatch.js');
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
 
-// V67 is the sole browser three-stage executor. Validate the current persisted
-// status architecture and recovery semantics rather than obsolete V355 labels.
-must(runner, '2026-09-02-v67-persisted-three-stage-runner-v2');
+// V414: V67 is the sole normal browser three-stage executor. A fresh import is
+// inert until the user explicitly starts/continues. Automatic browser recovery is
+// allowed only for an exact persisted process-restart interruption lifecycle.
+must(runner, '2026-09-02-v414-explicit-unified-restart-only-v1');
 must(runner, '2026-08-29-single-unified-runner-v1');
-must(runner, '2026-09-02-v322-one-read-seven-business-status-v1');
+must(runner, '2026-09-02-v414-one-read-seven-business-status-v1');
 must(runner, '2026-09-02-v67-retryable-process-restart-recovery-v2');
+must(runner, '2026-09-02-v414-whpp-restart-only-browser-v1');
 must(runner, '2026-09-02-v67-persisted-completion-latch-v2');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
@@ -65,42 +67,54 @@ must(runner, '七业务未全部完成');
 must(runner, 'recoverPendingWhpp');
 must(runner, 'PROCESS_RESTART_INTERRUPTED');
 must(runner, 'SHOPEE_RESTART_RETRY_COOLDOWN_MS = 15000');
+must(runner, 'WHPP_RESTART_RETRY_COOLDOWN_MS = 15000');
 must(runner, 'shopeeRestartRecoveryCooldown.set(restart.key, Date.now() + SHOPEE_RESTART_RETRY_COOLDOWN_MS)');
+must(runner, 'whppRestartRecoveryCooldown.set(restart.key, Date.now() + WHPP_RESTART_RETRY_COOLDOWN_MS)');
+must(runner, 'whppRestartInterruption');
+must(runner, 'payload?.restartInterrupted === true');
 must(runner, "const result = await execute('resume')");
 must(runner, '[CE-QC][V67_SHOPEE_RESTART_RECOVERY]');
 must(runner, '检测到${target}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN/VN → WHPP本土');
+must(runner, '[CE-QC][V67_WHPP_RESTART_RECOVERY]');
+must(runner, '检测到${target}的WHPP因程序重启中断，正在从已保存断点恢复WHPP本土');
 must(runner, '__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__');
 must(runner, "source: 'V322_PERSISTED_THREE_STAGE_STATUS'");
-must(runner, '检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土');
-must(runner, '[CE-QC][V67_WHPP_AUTO_RESUME]');
 must(runner, '[data-page="import"]');
 must(runner, "recoverPendingWhpp('visible-import-watch')");
 must(runner, "global.runUnified = () => execute('start')");
 must(runner, "global.resumeUnified = () => execute('resume')");
+forbid(runner, '检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土');
+forbid(runner, '[CE-QC][V67_WHPP_AUTO_RESUME]');
 forbid(runner, '/api/v311/shopee-recovery');
 forbid(runner, '/api/v317/ccsl-recovery');
 forbid(runner, '/api/v132/whpp-fast-summary');
 
-// Browser V67 remains the sole UI run/resume owner, but the backend must also
-// close the final WHPP stage after launcher/browser restarts. This is not a
-// second three-stage runner: it can only start WHPP after canonical CCSL and
-// SHOPEE completion truth is already proven for the exact selected report date.
+// V414 backend continuity is restart-only as well. It may resume WHPP only after
+// V165 proves that the previous process died during the exact current WHPP run,
+// and after same-date CCSL + SHOPEE completion is proven. New-import rearm calls
+// are converted into an explicit-run-only idle latch and cannot launch WHPP.
 must(whppSupervisor, '2026-08-14-v134-whpp-run-supervisor-v1');
-must(whppSupervisor, '2026-08-29-v357-whpp-backend-final-stage-continuity-v1');
-must(whppSupervisor, '2026-08-29-v359-selected-date-whpp-backend-continuity-v1');
+must(whppSupervisor, '2026-09-02-v414-explicit-unified-whpp-restart-only-v1');
 must(whppSupervisor, 'maybeAutoResumeWhpp');
-must(whppSupervisor, 'inspectV317ExplicitReportDateHint');
-must(whppSupervisor, 'selectedHint?.fresh');
-must(whppSupervisor, 'VISIBLE_BROWSER_STATUS_HINT');
-must(whppSupervisor, 'inspectV317CcslRecovery({ reportDate: hintedDate })');
-must(whppSupervisor, 'inspectV311ShopeeRecovery({ reportDate })');
+must(whppSupervisor, 'inspectV165WhppRestartInterruption');
+must(whppSupervisor, 'restart?.interrupted!==true');
+must(whppSupervisor, 'V165_PROCESS_RESTART_INTERRUPTED_MARKER');
+must(whppSupervisor, 'inspectV317CcslRecovery({reportDate})');
+must(whppSupervisor, 'inspectV311ShopeeRecovery({reportDate})');
 must(whppSupervisor, 'inspectV132WhppFastSummary(reportDate)');
 must(whppSupervisor, 'recoverV165WhppRunState(reportDate)');
 must(whppSupervisor, "launchWhpp('resume')");
+must(whppSupervisor, '[CE-QC][V414_WHPP_RESTART_ONLY_RECOVERY]');
+must(whppSupervisor, "reportDateSource:'V165_PROCESS_RESTART_INTERRUPTED_MARKER'");
+must(whppSupervisor, 'autoStartOnImport:false');
+must(whppSupervisor, 'pollingActive:false');
 must(whppSupervisor, "this.post('/api/whpp/run/start'");
 must(whppSupervisor, "this.post('/api/whpp/run/resume'");
-must(whppSupervisor, "setInterval(() => { void maybeAutoResumeWhpp('backend-watch'); }, AUTO_RESUME_POLL_MS)");
-must(whppSupervisor, 'runtimePromise && runtime.active');
+must(whppSupervisor, "maybeAutoResumeWhpp('backend-watch')");
+must(whppSupervisor, 'runtimePromise&&runtime.active');
+forbid(whppSupervisor, 'inspectV317ExplicitReportDateHint');
+forbid(whppSupervisor, 'VISIBLE_BROWSER_STATUS_HINT');
+forbid(whppSupervisor, 'new-import-event');
 forbid(whppSupervisor, '/api/run');
 forbid(whppSupervisor, '/api/shopee/run/start');
 forbid(whppSupervisor, 'global.runUnified');
@@ -177,6 +191,9 @@ must(bootstrap, 'v167CcslPodLockFactRepair');
 must(bootstrap, 'v193ExportSidecar.js');
 must(bootstrap, 'CE_QC_EXPORT_SIDECAR_PORT');
 must(whppRecovery, '2026-08-17-v165-whpp-run-state-recovery-v2');
+must(whppRecovery, '2026-09-02-v414-whpp-process-restart-proof-v1');
+must(whppRecovery, 'PROCESS_RESTART_INTERRUPTED');
+must(whppRecovery, 'inspectV165WhppRestartInterruption');
 must(whppRecovery, "businessType='WHPP'");
 must(whppRecovery, 'sameSet');
 must(podRepair, '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1');
@@ -254,4 +271,4 @@ must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V67 owns browser three-stage run/resume from one exact-date persisted V322 status source, exact PROCESS_RESTART_INTERRUPTED recovery is bounded/retryable, completion is latched, V134 provides backend-only WHPP final-stage continuity for the exact visible report date after canonical CCSL+SHOPEE completion, and V132 remains display-only');
+console.log('[GOLIVE] runtime-source gate passed; V414 keeps fresh imports explicit-run-only, V67 owns normal CCSL → SHOPEE → WHPP execution, browser/backend WHPP auto-resume both require exact PROCESS_RESTART_INTERRUPTED proof for the same report date and runId, completion remains latched, and V132 remains display-only');
