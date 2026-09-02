@@ -52,11 +52,19 @@ assert.doesNotMatch(statusUi,/\/api\/v311\/shopee-recovery|\/api\/v317\/ccsl-rec
 assert.doesNotMatch(statusUi,/\/api\/shopee\/run\/start|\/api\/whpp\/run\/start|async function execute|function execute\(/,'V168 remains status-only');
 
 assert.match(persistedStatus,/2026-09-02-v322-one-read-seven-business-status-v1/);
+assert.match(persistedStatus,/2026-09-02-v322-whpp-v132-current-cohort-parity-v1/);
 assert.match(persistedStatus,/readV322SevenBusinessStatus/);
 assert.match(persistedStatus,/stages:\{CCSL,SHOPEE,WHPP\}/);
 assert.match(persistedStatus,/PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/);
-assert.match(persistedStatus,/PERSISTED_WHPP_DAILY_FINALIZATION_HEADER/);
-assert.doesNotMatch(persistedStatus,/scan_results|business_scan_results|business_final_rows|business_track_events|track_events/,'normal status owner must never scan large fact tables');
+assert.match(persistedStatus,/PERSISTED_WHPP_V132_COMPLETION_PARITY/);
+assert.match(persistedStatus,/function whppCompletionDecision\(/);
+assert.match(persistedStatus,/CURRENT_DAILY_FINALIZATION_MARKER/);
+assert.match(persistedStatus,/CURRENT_FINALIZED_WHPP_STATE/);
+assert.match(persistedStatus,/EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP/);
+assert.match(persistedStatus,/FULL_MEMBER_FINAL_EVIDENCE/);
+assert.match(persistedStatus,/EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode/,'positive legacy completion proof must be an indexed per-current-member existence check');
+assert.match(persistedStatus,/ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,'unknown persisted status must fail closed');
+assert.doesNotMatch(persistedStatus,/scan_results|business_scan_results|business_track_events|track_events/,'normal status owner must never reconstruct scan or trajectory facts');
 
 assert.match(completionGuard,/2026-09-01-v411-unconfirmed-status-entry-lock-v1/,'V169 filename must expose the V411 fail-closed entry guard build');
 assert.doesNotMatch(completionGuard,/getElementById\('ccslRunStatus'\)/,'V411 entry guard must never acquire the CCSL detail panel');
