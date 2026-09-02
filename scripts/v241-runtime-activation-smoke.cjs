@@ -37,10 +37,14 @@ assert.match(runtime, /import '\.\/v246QcTrackingRuntimePatch\.js';/, 'V206 must
 assert.match(runtime, /dashboard cache prime child exit code=/, 'cache-prime child completion must remain observable');
 assert.match(runtime, /MAX_PRIME_ATTEMPTS = 4/, 'transient startup skips must retry with a bounded attempt count');
 assert.match(runtime, /FOREGROUND_PROCESSING_ACTIVE\|CACHE_OR_PURGE_WORKER_ALREADY_ACTIVE/, 'runtime must recognize retryable cache-prime skips');
-assert.match(worker, /recentCompletedDashboardDates\(7\)/, 'startup worker must target recent seven ready report dates');
-assert.match(worker, /refreshV235CurrentDashboardCacheDate\(date, \{ force: true \}\)/, 'startup must force rebuild old dashboard cache rows');
-assert.match(worker, /readV237DashboardTrends/, 'worker must audit the same trend reader used by UI');
-assert.match(worker, /SUSPICIOUS_FLAT_SERIES/, 'worker must flag suspicious flat percentage series');
+assert.match(worker, /getDashboardCacheStatus\(\)/, 'startup worker must inspect persisted dashboard cache state');
+assert.match(worker, /INITIAL_CACHE_WARM_ONCE/, 'a brand-new database may warm persisted dashboard cache exactly once');
+assert.match(worker, /PERSISTED_CACHE_STARTUP_READ_ONLY/, 'normal startup must reuse persisted dashboard cache instead of rebuilding history');
+assert.match(worker, /refreshDashboardCacheDirty\(\{ limit: 24, recentDays: 30 \}\)/, 'normal startup may rebuild only dates explicitly marked dirty by real fact changes');
+assert.doesNotMatch(worker, /V243_FORCED_RECENT_7_REBUILD_WITH_AUDIT/, 'forced recent-seven rebuild mode must stay retired');
+assert.doesNotMatch(worker, /recentCompletedDashboardDates\(7\)/, 'normal startup must not scan/rebuild the recent seven completed dates');
+assert.match(worker, /readV237DashboardTrends/, 'worker must retain the same trend audit reader for explicit diagnostics');
+assert.match(worker, /SUSPICIOUS_FLAT_SERIES/, 'worker must retain suspicious-flat-series diagnostics without forcing them on every startup');
 assert.match(route, /path==='\/api\/v234\/trends'/, 'V236 must own the V234 trend endpoint');
 
 assert.match(attemptCycle,/first real delivery START/,'V246 attempt helper must document the locked START rule');
@@ -124,4 +128,4 @@ assert.match(inject,/X-CE-QC-V246-UI/,'V246 UI response header must be observabl
 assert.match(inject,/X-CE-QC-V248-UI/,'V248 UI response header must be observable');
 assert.match(inject,/X-CE-QC-V249-UI/,'V249 UI response header must be observable');
 
-console.log('[V284/V249] daily-membership Shopee truth + continuous QC tracking + V248 SPA owner + WHPP exact drilldown/canonical handoff gate passed');
+console.log('[V284/V249] daily-membership Shopee truth + continuous QC tracking + persisted-cache startup + V248 SPA owner + WHPP exact drilldown/canonical handoff gate passed');
