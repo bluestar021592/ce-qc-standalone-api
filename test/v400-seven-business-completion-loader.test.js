@@ -105,8 +105,10 @@ test('V168 performs one exact-date persisted status read; V419 keeps V414 semant
     'V419 status route must bypass the legacy V415 response wrapper and avoid a second proof read');
   assert.doesNotMatch(fastStatus, /readV415CurrentProcessingProof/,
     'V419 V322 must not invoke the legacy second proof chain');
-  assert.match(fastStatus, /code:'V419_SCALAR_STATUS_READ_FAILED'/,
-    'scalar status read failure must fail closed rather than masquerade as fresh pending truth');
+  assert.match(fastStatus, /code:'V322_PERSISTED_STATUS_READ_FAILED'/,
+    'status read failure must preserve the canonical V322 code for existing browser consumers');
+  assert.match(fastStatus, /detailCode:'V419_SCALAR_STATUS_READ_FAILED'/,
+    'V419 scalar failure detail must remain visible for diagnostics while the canonical code stays compatible');
   assert.doesNotMatch(fastStatus, /SELECT[^`\n]*(?:payloadJson|summaryJson|valueJson)/,
     'V419 status SQL must not select heavy JSON state/checkpoint columns');
   assert.doesNotMatch(fastStatus, /scan_results|business_scan_results|business_track_events|track_events/,
