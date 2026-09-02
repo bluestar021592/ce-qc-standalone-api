@@ -224,7 +224,7 @@
     document.addEventListener('ce-qc-run-complete',()=>{seedCurrentImport();queueRouteGuard();void refreshAllResultTruth();});
     setTimeout(()=>{if(seedCurrentImport())global.renderAll?.();normalizeImportStatus();queueRouteGuard();alignInitialCurrentImport();},80);
     setTimeout(()=>alignInitialCurrentImport(),700);
-    global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,refreshResults:refreshAllResultTruth,routeGuard:restoreRouteOwnership,syncSelectedDate:syncSelectedDate,reconciledCarryDisplay};
+    global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,refreshResults:refreshAllResultTruth,routeGuard:restoreRouteOwnership,syncSelectedDate:syncSelectedDateToCurrentImport,reconciledCarryDisplay};
     console.info('[CE-QC][V159_CURRENT_IMPORT_STABILITY]',VERSION,'fresh import owns the active selected date once; V418 OPEN split display reads backend closure reconciliation fields without mutating browser business truth.');
   }
 
