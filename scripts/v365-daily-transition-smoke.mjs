@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runAtomicUnifiedImportWithDbV366 } from '../src/v366AtomicUnifiedImport.js';
 import { resolveUnifiedImportDate } from '../src/v146UnifiedImportDateBridgePatch.js';
 
-for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v146UnifiedImportDateBridgePatch.js','src/v366AtomicUnifiedImport.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
+for (const file of ['src/v42WhppPatch.js','src/v44WhppUiPatch.js','src/v102UnifiedImportSafetyGatePatch.js','src/v146UnifiedImportDateBridgePatch.js','src/v366AtomicUnifiedImport.js','src/v322WebAvailabilityPatch.js','public/v146-unified-import-date-status.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v132-whpp-seven-business-fast.js']) {
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
@@ -108,6 +108,7 @@ const v44=fs.readFileSync(new URL('../src/v44WhppUiPatch.js',import.meta.url),'u
 const v102=fs.readFileSync(new URL('../src/v102UnifiedImportSafetyGatePatch.js',import.meta.url),'utf8');
 const v146Bridge=fs.readFileSync(new URL('../src/v146UnifiedImportDateBridgePatch.js',import.meta.url),'utf8');
 const v366=fs.readFileSync(new URL('../src/v366AtomicUnifiedImport.js',import.meta.url),'utf8');
+const v322=fs.readFileSync(new URL('../src/v322WebAvailabilityPatch.js',import.meta.url),'utf8');
 const v146=fs.readFileSync(new URL('../public/v146-unified-import-date-status.js',import.meta.url),'utf8');
 const v67=fs.readFileSync(new URL('../public/v67-resilient-run-guard.js',import.meta.url),'utf8');
 const v168=fs.readFileSync(new URL('../public/v168-seven-business-status.js',import.meta.url),'utf8');
@@ -206,8 +207,9 @@ assert.match(v146,/classification-whpp/,'import result must visibly include WHPP
 assert.match(v146,/正在导入并确认七业务/,'long import must expose a single non-repeatable in-flight action');
 assert.match(v146,/__CE_QC_PENDING_IMPORT_DATE__/,'pending date must be observable without becoming canonical processing truth');
 assert.match(v44,/v146-unified-import-date-status\.js\?v=20260901-v410-1/,'HTML owner must force the browser to load the V410 atomic import UI instead of a cached older script');
-assert.match(v44,/v168-seven-business-status\.js\?v=20260901-v411-1/,'HTML owner must pair the V410 import date owner with the V411 serialized status owner');
-assert.match(v44,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'HTML owner must load the V411 fail-closed unified entry guard after V168 status truth');
+assert.match(v44,/v168-seven-business-status\.js\?v=20260902-persisted-status-1/,'HTML owner must pair the V410 import date owner with the V322-backed single persisted status owner');
+assert.match(v44,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'HTML owner must keep the V411 fail-closed unified entry guard after V168 status truth');
+assert.match(v44,/PERSISTED_STATUS_BUILD='2026-09-02-v322-one-read-seven-business-status-v1'/,'HTML owner must expose the persisted status protocol build');
 
 const parserStart=v146.indexOf('  function validDate');
 const parserEnd=v146.indexOf('  function status');
@@ -227,7 +229,11 @@ for (const source of [v67,v168,v132]) {
 }
 assert.match(v67,/\{ key: 'CCSL'[\s\S]*\{ key: 'SHOPEE'[\s\S]*\{ key: 'WHPP'/,'execution order must remain CCSL → SHOPEE → WHPP');
 assert.match(v67,/waitForWhppFinalized/,'WHPP completion must still require canonical finalization before seven-business completion');
-assert.match(v168,/payload\?\.completed === true|payload\?\.completed===true/,'seven-business status must consume backend WHPP completion truth');
+assert.match(v168,/businessType: 'ALL', reportDate: target/,'seven-business status must use one exact-date persisted three-stage request');
+assert.match(v168,/raw\.complete === true/,'V168 must consume persisted completion truth from V322 rather than inventing completion in the browser');
+assert.doesNotMatch(v168,/\/api\/v132\/whpp-fast-summary|\/api\/v311\/shopee-recovery|\/api\/v317\/ccsl-recovery/,'V168 must not re-enter heavy per-stage status owners');
+assert.match(v322,/V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v322-whpp-v132-current-cohort-parity-v1'/,'V322 persisted status must retain V132-equivalent WHPP current-cohort completion truth');
+assert.match(v322,/ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,'unreadable persisted status must remain fail-closed');
 assert.match(v132,/canonicalCompleted/,'WHPP board must consume canonical completion rather than offering a stale continue button');
 
-console.log('[V410/V411/V365/V366/V379] exact daily transition + frontend fail-closed + backend request/file conflict guard + executable atomic persistence gate passed · 8-17.xls/08-17.xls/8月17日.xls resolve to 2026-08-17 · stale prior-day request cannot override the selected file · explicit manual correction remains available · visible totals include WHPP · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · V411 serialized status and fail-closed entry lock remain active · WHPP remains final canonical stage');
+console.log('[V410/V322/V411/V365/V366/V379] exact daily transition + frontend fail-closed + backend request/file conflict guard + executable atomic persistence gate passed · 8-17.xls/08-17.xls/8月17日.xls resolve to 2026-08-17 · stale prior-day request cannot override the selected file · explicit manual correction remains available · visible totals include WHPP · real DatabaseSync commit/rollback behavior proven · production route order V102→V146→V42 locked · explicit commit acknowledgement required · preserved WHPP is rehydrated to target date · seven memberships and all three current states are reread and verified before commit · any inner failure rolls back · browser cache is busted · V322 single persisted status + V411 fail-closed entry lock remain active · WHPP remains final canonical stage');
