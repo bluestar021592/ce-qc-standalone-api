@@ -105,7 +105,8 @@ forbid(whppSupervisor, '/api/run');
 forbid(whppSupervisor, '/api/shopee/run/start');
 forbid(whppSupervisor, 'global.runUnified');
 
-must(whppUi, '2026-08-29-v353-whpp-display-only-v1');
+must(whppUi, '2026-09-02-v132-whpp-display-only-v2');
+must(whppUi, '2026-09-02-v132-no-separate-processing-entry-v1');
 must(whppUi, 'displayOnly:true');
 must(whppUi, "authoritativeRunner:'V67'");
 must(whppUi, "document.getElementById('reportDate')");
@@ -137,7 +138,7 @@ must(bstore, 'finalByBill');
 must(bstore, 'priorCarryByBill');
 // Cache-bust suffixes may advance without changing the single-runner contract.
 must(shell, 'v67-resilient-run-guard.js?v=');
-must(shell, 'v132-whpp-seven-business-fast.js?v=20260829-v353-1');
+must(shell, 'v132-whpp-seven-business-fast.js?v=20260902-display-only-2');
 must(shell, 'v183HistoricalStatusRefreshPatch.js');
 must(shell, '/v183-history-refresh.js?v=20260822-v226-1');
 must(shell, '2026-08-22-v226-shared-client-ui-cache-bust-v1');
