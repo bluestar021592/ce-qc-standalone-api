@@ -47,6 +47,17 @@ test('V419 heavy history audit is manual-only and cannot overwrite primary OPEN'
   assert.match(loader,/v142-history-integrity-audit\.js\?v=20260902-v419-priority-1/);
 });
 
+test('V419 recovery-safe startup skips synchronous POD-lock repair but explicit maintenance remains available', () => {
+  const bootstrap=read('../bootstrap.js');
+  const repair=read('../src/v167CcslPodLockFactRepair.js');
+  assert.match(bootstrap,/process\.env\.CE_QC_RECOVERY_SAFE_MODE = '1'/);
+  assert.match(repair,/v419-ccsl-pod-lock-safe-mode-startup-guard-v3/);
+  assert.match(repair,/!database && \(/);
+  assert.match(repair,/CE_QC_RECOVERY_SAFE_MODE/);
+  assert.match(repair,/INTERACTIVE_FIRST_STARTUP_SKIP/);
+  assert.match(repair,/const db = database \|\| getDb\(\)/);
+});
+
 test('V419 loader cache-busts replaced V159 and total remains core + WHPP', () => {
   const loader=read('../src/v44WhppUiPatch.js');
   const totalSync=read('../public/v68-whpp-classification-stability.js');
