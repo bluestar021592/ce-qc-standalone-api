@@ -90,6 +90,7 @@ process.env.DATA_DIR=tempRoot;process.env.DB_FILE=path.join(tempRoot,'v322.db');
 const {getDb,closeDb}=await import('../src/db.js');
 const {loadRangeDashboard}=await import('../src/rangeDashboardStoreV320.js');
 const {readV322RunProgress,readV322SevenBusinessStatus}=await import('../src/v322WebAvailabilityPatch.js');
+const {readV415CurrentProcessingProof}=await import('../src/v415RetroactiveCompletionGuard.js');
 const db=getDb(),date='2026-08-06',snapshotId='V322-S',batchId='V322-B',now=`${date}T23:00:00.000Z`,after=`${date}T23:30:00.000Z`;
 // dashboard_daily_cache is a runtime-maintained table rather than a base migration
 // table in some isolated test databases. Create only the minimal production-compatible
@@ -143,13 +144,18 @@ assert.equal(all.stages.WHPP.complete,false,'a current WHPP member with no SUCCE
 // released only after all exact current members carry real current-lifecycle proof.
 db.prepare("UPDATE unified_snapshots SET status='COMPLETED',payloadJson=? WHERE snapshotId=?").run('x'.repeat(8*1024*1024),snapshotId);
 db.prepare('INSERT INTO run_locks(reportDate,runId,status,currentStage,batchIndex,totalBatches,lockedAt,completedAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)').run(date,'V322-CCSL-RUN','finished','完成',1,1,after,after,after);
-db.prepare('INSERT INTO export_snapshots(snapshotId,reportDate,runId,snapshotType,generatedAt,createdAt) VALUES(?,?,?,?,?,?)').run('V322-CCSL-FINAL',date,'V322-CCSL-RUN','dashboard',after,after);
+db.prepare("INSERT INTO export_snapshots(snapshotId,reportDate,runId,snapshotType,status,reconciliationStatus,generatedAt,createdAt) VALUES(?,?,?,?,?,?,?,?)").run('V322-CCSL-FINAL',date,'V322-CCSL-RUN','dashboard','VALID','COMPLETED',after,after);
 for(const type of ['CE','CEAF','TBKH','ALI1688'])db.prepare('INSERT INTO pod_locks(shipmentCode,source,podTime,lastSeenReportDate,createdAt,updatedAt) VALUES(?,?,?,?,?,?)').run(`V322-${type}`,'V322',after,date,after,after);
 db.prepare('INSERT INTO business_run_locks(businessType,reportDate,runId,status,currentStage,batchIndex,totalBatches,lockedAt,completedAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?)').run('SHOPEE',date,'V322-SHOPEE-RUN','finished','完成',1,1,after,after,after);
-db.prepare('INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,generatedAt,createdAt) VALUES(?,?,?,?,?,?)').run('V322-SHOPEE-FINAL','SHOPEE',date,'V322-SHOPEE-RUN',after,after);
+db.prepare("INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,status,reconciliationStatus,generatedAt,createdAt) VALUES(?,?,?,?,?,?,?,?)").run('V322-SHOPEE-FINAL','SHOPEE',date,'V322-SHOPEE-RUN','VALID','COMPLETED',after,after);
 for(const type of ['SHOPEECN','SHOPEEVN'])db.prepare('INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)').run('SHOPEE',`V322-${type}`,date,0,'派送中','SUCCESS',after,after);
 db.prepare('INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?)').run('WHPP','V322-WHPP',date,0,'派送中','SUCCESS',after,after);
 
+const proof=readV415CurrentProcessingProof({db,reportDate:date,force:true});
+assert.equal(proof.ok,true,'V418 current-member proof fixture must resolve');
+for(const key of ['CCSL','SHOPEE','WHPP']){
+  assert.equal(proof.stages[key].complete,true,`${key} exact current-member proof must be complete: ${JSON.stringify(proof.stages[key])}`);
+}
 started=performance.now();const terminal=readV322SevenBusinessStatus({reportDate:date,db}),terminalMs=performance.now()-started;
 assert.equal(terminal.complete,true,'legacy COMPLETED marker may publish only after exact current-member proof succeeds');
 assert.equal(terminal.completedFastPath,'2026-09-02-v322-unified-completed-snapshot-fast-path-v1+2026-09-02-v418-v322-no-payload-completed-claim-v1');
