@@ -5,20 +5,24 @@ import vm from 'node:vm';
 
 const read = relative => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
 
-test('V411 UI loader serves atomic import truth then V411/V169 status chain and keeps retired WHPP layers out', () => {
+test('UI loader serves atomic import truth then one persisted V322/V168 status chain and keeps WHPP display-only', () => {
   const loader = read('../src/v44WhppUiPatch.js');
   const v146At = loader.indexOf('/v146-unified-import-date-status.js');
   const v168At = loader.indexOf('/v168-seven-business-status.js');
   const v169At = loader.indexOf('/v169-seven-business-legacy-status-sync.js');
 
-  assert.match(loader, /v411-serialized-status-entry-lock-loader-v1/);
+  assert.match(loader, /consolidated-persisted-status-loader-v1/);
+  assert.match(loader, /PERSISTED_STATUS_BUILD='2026-09-02-v322-one-read-seven-business-status-v1'/);
+  assert.match(loader, /X-CE-QC-Persisted-Status/);
   assert.match(loader, /WHPP_PAGE_OWNER='V132'/);
   assert.match(loader, /X-CE-QC-WHPP-Page-Owner/);
   assert.ok(v146At >= 0, 'V146 atomic import owner must be loaded');
-  assert.ok(v168At > v146At, 'V411 status owner must load after V146 pending-date truth');
+  assert.ok(v168At > v146At, 'persisted status owner must load after V146 pending-date truth');
   assert.ok(v169At > v168At, 'V169 entry guard must load after V168 canonical truth');
   assert.match(loader, /v146-unified-import-date-status\.js\?v=20260901-v410-1/);
-  assert.match(loader, /v168-seven-business-status\.js\?v=20260901-v411-1/);
+  assert.match(loader, /v168-seven-business-status\.js\?v=20260902-persisted-status-1/);
+  assert.match(loader, /v67-resilient-run-guard\.js\?v=20260902-persisted-status-2/);
+  assert.match(loader, /v132-whpp-seven-business-fast\.js\?v=20260902-display-only-2/);
   assert.match(loader, /v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/);
 
   for (const retired of [
@@ -28,12 +32,12 @@ test('V411 UI loader serves atomic import truth then V411/V169 status chain and 
     '/v52-whpp-source-truth-route.js',
     '/v72-whpp-light-state-bridge.js',
     '/v103-home-whpp-card-guard.js'
-  ]) {
-    assert.equal(loader.includes(retired), false, `${retired} must stay retired from the live browser chain`);
-  }
+  ]) assert.equal(loader.includes(retired), false, `${retired} must stay retired from the live browser chain`);
 
-  assert.match(loader, /\/v132-whpp-seven-business-fast\.js/);
-  assert.match(loader, /\/v170-route-isolation-whpp-priority\.js\?v=20260901-v404-1/);
+  const whpp = read('../public/v132-whpp-seven-business-fast.js');
+  assert.match(whpp, /displayOnly:true,authoritativeRunner:'V67'/);
+  assert.match(whpp, /no-separate-processing-entry-v1/);
+  assert.doesNotMatch(whpp, /继续七业务处理|onclick="window\.runUnified\(\)"|\/api\/whpp\/run\/start/);
 
   const v170 = read('../public/v170-route-isolation-whpp-priority.js');
   assert.match(v170, /routeIsolationOnly:\s*true/);
@@ -46,9 +50,10 @@ test('V411 UI loader serves atomic import truth then V411/V169 status chain and 
   assert.match(totalSync, /state\.summary\s*=\s*\{[\s\S]*validUniqueWaybills:\s*core\s*\+\s*total/);
 });
 
-test('V411 serializes local SQLite status reads, removes raw abort text, and keeps stale truth read-only', () => {
+test('V168 performs one exact-date persisted status read and never invokes heavy recovery/WHPP summary endpoints', () => {
   const importUi = read('../public/v146-unified-import-date-status.js');
   const statusUi = read('../public/v168-seven-business-status.js');
+  const fastStatus = read('../src/v322WebAvailabilityPatch.js');
 
   const screenshotCounts = { CE:2339, CEAF:11, TBKH:2178, ALI1688:81, SHOPEECN:637, SHOPEEVN:1422, WHPP:80 };
   assert.equal(Object.values(screenshotCounts).reduce((sum, value) => sum + value, 0), 6748);
@@ -61,26 +66,29 @@ test('V411 serializes local SQLite status reads, removes raw abort text, and kee
   assert.match(importUi, /validUniqueWaybills:total,sevenBusinessValidUniqueWaybills:total/);
   assert.match(importUi, /UNIFIED_IMPORT_NOT_COMMITTED/);
 
-  assert.match(statusUi, /v411-serialized-status-read-v1/);
+  assert.match(statusUi, /v168-one-persisted-status-read-v1/);
+  assert.match(statusUi, /STATUS_SOURCE_REVISION = '2026-09-02-v322-one-read-seven-business-status-v1'/);
   const pendingPos = statusUi.indexOf('const pending = pendingImportDate()');
   const reportInputPos = statusUi.indexOf("document.getElementById('reportDate')?.value");
   assert.ok(pendingPos >= 0 && reportInputPos > pendingPos, 'pending report date must beat the previous committed reportDate input');
   assert.match(statusUi, /__CE_QC_V146_UNIFIED_IMPORT_DATE_STATUS__\?\.getPendingDate/);
-  assert.match(statusUi, /STATUS_TIMEOUT_MS = 15000/);
-  assert.match(statusUi, /STATUS_ATTEMPTS = 1/);
+  assert.match(statusUi, /STATUS_TIMEOUT_MS = 8000/);
   assert.match(statusUi, /STATUS_POLL_MS = 10000/);
-  assert.match(statusUi, /signal is aborted\|aborted without reason/);
-  assert.match(statusUi, /状态读取超过\$\{Math\.round\(STATUS_TIMEOUT_MS \/ 1000\)\}秒，正在自动重试/);
-  assert.match(statusUi, /const shopeeRequest = await settle/);
-  assert.match(statusUi, /const whppRequest = await settle/);
-  assert.match(statusUi, /const ccslRequest = await settle/);
-  assert.doesNotMatch(statusUi, /Promise\.allSettled\(\[/);
-  assert.match(statusUi, /\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}&compact=1/);
+  assert.match(statusUi, /businessType: 'ALL', reportDate: target/);
+  assert.match(statusUi, /\/api\/v33\/run-progress\?\$\{query\.toString\(\)\}/);
   assert.match(statusUi, /statusFresh: false/);
   assert.match(statusUi, /状态确认中/);
-  assert.match(statusUi, /确认完成前禁止重复启动/);
-  assert.match(statusUi, /complete: stages\.every\(stage => stage\.state === 'done' && stage\.statusFresh !== false\)/);
-  assert.doesNotMatch(statusUi, /\/api\/whpp\/run\/start|\/api\/shopee\/run\/start/);
+  assert.match(statusUi, /确认前禁止重复启动/);
+  assert.doesNotMatch(statusUi, /\/api\/v311\/shopee-recovery|\/api\/v317\/ccsl-recovery|\/api\/v132\/whpp-fast-summary/);
+  assert.doesNotMatch(statusUi, /Promise\.allSettled|\/api\/whpp\/run\/start|\/api\/shopee\/run\/start/);
+
+  assert.match(fastStatus, /V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1'/);
+  assert.match(fastStatus, /readV322SevenBusinessStatus/);
+  assert.match(fastStatus, /stages:\{CCSL,SHOPEE,WHPP\}/);
+  assert.match(fastStatus, /PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/);
+  assert.match(fastStatus, /PERSISTED_WHPP_DAILY_FINALIZATION_HEADER/);
+  assert.doesNotMatch(fastStatus, /scan_results|business_scan_results|business_final_rows|business_track_events|track_events/,
+    'normal web status owner must never touch large fact tables');
 });
 
 test('V408 home WHPP KPI reads canonical V132 summary and preserves normal-flow semantics', () => {
@@ -103,7 +111,7 @@ test('V408 home WHPP KPI reads canonical V132 summary and preserves normal-flow 
   assert.match(reporting, /selfPickup:\s*selfPickupRows\.length/);
 });
 
-test('V411 blocks complete and unconfirmed run/resume entries, and releases only fresh incomplete truth', async () => {
+test('V411 entry guard blocks complete and unconfirmed run/resume entries, and releases only fresh incomplete truth', async () => {
   const source = read('../public/v169-seven-business-legacy-status-sync.js');
   const attrs = { onclick: 'resumeUnified()' };
   const button = {
@@ -174,7 +182,7 @@ test('V411 blocks complete and unconfirmed run/resume entries, and releases only
   const api = window.__CE_QC_V169_LEGACY_STATUS_SYNC__;
   assert.ok(api, 'V169 API must install');
   assert.equal(api.apply(), false);
-  assert.equal(button.hidden, true, '08-29 stale status must hide the WHPP continue CTA');
+  assert.equal(button.hidden, true, '08-29 stale status must hide the legacy WHPP continue CTA');
   assert.equal(button.disabled, true);
 
   const staleResume = await window.resumeUnified();
