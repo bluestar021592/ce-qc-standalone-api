@@ -185,7 +185,7 @@ function progressHandler(req,res){
   }catch(error){
     const totalMs=Number(elapsed(started).toFixed(3));
     res.setHeader('Server-Timing',`v419total;dur=${totalMs}`);
-    return res.status(200).json({ok:false,code:'V419_SCALAR_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs},generatedAt:new Date().toISOString()});
+    return res.status(200).json({ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED',detailCode:'V419_SCALAR_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs},generatedAt:new Date().toISOString()});
   }
 }
 
