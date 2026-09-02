@@ -1,9 +1,10 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-export const V322_WEB_AVAILABILITY_ID='2026-09-02-v322-persisted-three-stage-status-v4';
-export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1';
+export const V322_WEB_AVAILABILITY_ID='2026-09-02-v322-persisted-three-stage-status-v5';
+export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v2';
 const previousGet=express.application.get;
+const COMPLETE_SNAPSHOT=new Set(['COMPLETED','COMPLETED_WITH_RETRY']);
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
 const first=(...values)=>{for(const v of values)if(v!==undefined&&v!==null&&v!==''&&Number.isFinite(Number(v)))return Number(v);return 0;};
 const text=v=>String(v??'').trim();
@@ -57,11 +58,7 @@ function runLock(db,type,date){
     return db.prepare('SELECT runId,status,currentStage,batchIndex,totalBatches,errorMessage,lockedAt,updatedAt,completedAt FROM business_run_locks WHERE businessType=? AND reportDate=? LIMIT 1').get(type,date)||null;
   }catch{return null;}
 }
-function lockForLifecycle(lock,boundary){
-  if(!lock)return null;
-  if(!boundary)return lock;
-  return atOrAfter(lock.lockedAt||lock.updatedAt,boundary)?lock:null;
-}
+function lockForLifecycle(lock,boundary){if(!lock)return null;if(!boundary)return lock;return atOrAfter(lock.lockedAt||lock.updatedAt,boundary)?lock:null;}
 function exactCompletionSnapshot(db,type,date,runId,boundary){
   const id=text(runId);if(!id)return null;
   try{
@@ -102,12 +99,72 @@ function readShopeeStage(db,date,batch){
   const zero=source.zeroProven===true,snapshot=zero?null:exactCompletionSnapshot(db,'SHOPEE',date,text(lock?.runId),text(batch?.createdAt));
   return{...stage,complete:zero||Boolean(snapshot),zeroTicketDay:zero,snapshotId:text(snapshot?.snapshotId),lifecycleBoundary:text(batch?.createdAt),staleRunIgnored:Boolean(raw&&!lock&&batch?.createdAt),statusSource:'PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT'};
 }
+function whppStandardMembership(db,date){
+  try{
+    const daily=db.prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);
+    if(!daily)return{present:false,expected:0,actual:0,memberCount:0,summary:{},finalized:false,finalizedSnapshotId:'',finalizedStatus:'',sourceSnapshotId:''};
+    const expected=Math.max(0,n(daily.totalCount));
+    const actual=n(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count);
+    const summary=safeJson(daily.summaryJson,{}),finalizedStatus=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase(),finalizedSnapshotId=text(summary.finalizedSnapshotId),sourceSnapshotId=text(summary.snapshotId||summary.batchId||summary.sourceSnapshotId);
+    const finalized=expected===actual&&summary.completed===true&&COMPLETE_SNAPSHOT.has(finalizedStatus)&&Boolean(finalizedSnapshotId);
+    return{present:expected===actual,expected,actual,memberCount:actual,summary,finalized,finalizedSnapshotId,finalizedStatus,sourceSnapshotId};
+  }catch{return{present:false,expected:0,actual:0,memberCount:0,summary:{},finalized:false,finalizedSnapshotId:'',finalizedStatus:'',sourceSnapshotId:''};}
+}
+function whppLifecycleCompletion(db,date,memberCount,sourceSnapshotId=''){
+  try{
+    const row=db.prepare(`SELECT
+      json_extract(valueJson,'$.reportDate') reportDate,
+      json_extract(valueJson,'$.snapshotStatus') snapshotStatus,
+      json_extract(valueJson,'$.snapshotId') snapshotId,
+      json_extract(valueJson,'$.sourceSnapshotId') sourceSnapshotId,
+      json_array_length(valueJson,'$.pnhBills') memberCount
+      FROM business_states WHERE businessType='WHPP' LIMIT 1`).get()||{};
+    const stateDate=normalizeDate(row.reportDate),snapshotStatus=text(row.snapshotStatus).toUpperCase(),snapshotId=text(row.snapshotId),stateSourceSnapshotId=text(row.sourceSnapshotId),stateMemberCount=n(row.memberCount),sourceMatches=!sourceSnapshotId||stateSourceSnapshotId===sourceSnapshotId;
+    return{complete:Boolean(stateDate===date&&stateMemberCount===n(memberCount)&&sourceMatches&&COMPLETE_SNAPSHOT.has(snapshotStatus)&&snapshotId),stateDate,snapshotStatus,snapshotId,stateSourceSnapshotId,stateMemberCount,sourceMatches};
+  }catch{return{complete:false,stateDate:'',snapshotStatus:'',snapshotId:'',stateSourceSnapshotId:'',stateMemberCount:0,sourceMatches:false};}
+}
+function whppFinalEvidenceCount(db,date,{standardPresent=false,snapshotId=''}={}){
+  try{
+    if(standardPresent){
+      return n(db.prepare(`SELECT COUNT(DISTINCT d.shipmentCode) count
+        FROM business_daily_parse_rows d
+        WHERE d.businessType='WHPP' AND d.reportDate=?
+          AND EXISTS(SELECT 1 FROM business_final_rows f
+            WHERE f.businessType='WHPP' AND f.shipmentCode=d.shipmentCode AND f.reportDate=?)`).get(date,date)?.count);
+    }
+    if(snapshotId){
+      return n(db.prepare(`SELECT COUNT(DISTINCT u.shipmentCode) count
+        FROM unified_import_rows u
+        WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType='WHPP'
+          AND EXISTS(SELECT 1 FROM business_final_rows f
+            WHERE f.businessType='WHPP' AND f.shipmentCode=u.shipmentCode AND f.reportDate=?)`).get(snapshotId,date,date)?.count);
+    }
+  }catch{}
+  return 0;
+}
+function whppCompletionDecision({standard,lifecycle,exactZero=false,memberCount=0,finalEvidenceRows=0,membershipVerified=false,batchSnapshotId=''}={}){
+  if(standard?.finalized)return{completed:true,snapshotStatus:standard.finalizedStatus||'COMPLETED',completionSource:'CURRENT_DAILY_FINALIZATION_MARKER',snapshotId:standard.finalizedSnapshotId};
+  if(lifecycle?.complete)return{completed:true,snapshotStatus:lifecycle.snapshotStatus||'COMPLETED',completionSource:'CURRENT_FINALIZED_WHPP_STATE',snapshotId:lifecycle.snapshotId};
+  if(exactZero)return{completed:true,snapshotStatus:'COMPLETED',completionSource:'EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP',snapshotId:batchSnapshotId};
+  if(membershipVerified&&n(memberCount)>0&&n(finalEvidenceRows)>=n(memberCount))return{completed:true,snapshotStatus:'COMPLETED',completionSource:'FULL_MEMBER_FINAL_EVIDENCE',snapshotId:batchSnapshotId};
+  return{completed:false,snapshotStatus:n(memberCount)>0?'PENDING':'EMPTY',completionSource:'PENDING',snapshotId:''};
+}
 function readWhppStage(db,date,batch){
-  const source=stageSource(db,'WHPP',date,batch),raw=runLock(db,'WHPP',date),lock=lockForLifecycle(raw,text(batch?.createdAt)),checkpoint=latestCheckpoint(db,'WHPP',date,text(lock?.runId)),stage=baseStage('WHPP',date,source,lock,checkpoint),summary=source.summary||{};
-  const status=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase();
-  const finalizedSnapshotId=text(summary.finalizedSnapshotId),explicitComplete=summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(finalizedSnapshotId);
-  const zero=source.zeroProven===true;
-  return{...stage,complete:zero||explicitComplete,zeroTicketDay:zero,snapshotId:finalizedSnapshotId,snapshotStatus:status,finalizedAt:text(summary.finalizedAt),lifecycleBoundary:text(batch?.createdAt),staleRunIgnored:Boolean(raw&&!lock&&batch?.createdAt),statusSource:'PERSISTED_WHPP_DAILY_FINALIZATION_HEADER'};
+  const rawSource=stageSource(db,'WHPP',date,batch),standard=whppStandardMembership(db,date),batchSnapshotId=text(batch?.snapshotId),exactUnified=fallbackUnifiedCount(db,'WHPP',date,batchSnapshotId);
+  const standardCurrent=Boolean(standard.present&&(!batchSnapshotId||!exactUnified.ok||standard.memberCount===exactUnified.count));
+  const memberCount=standardCurrent?standard.memberCount:(exactUnified.ok?exactUnified.count:rawSource.total);
+  const membershipVerified=Boolean(standardCurrent||(batchSnapshotId&&exactUnified.ok));
+  const source={...rawSource,total:memberCount,membershipVerified,source:standardCurrent?'WHPP_STANDARD_DAILY_CURRENT':(exactUnified.ok?'WHPP_CURRENT_UNIFIED_MEMBERSHIP':rawSource.source)};
+  const raw=runLock(db,'WHPP',date),lock=lockForLifecycle(raw,text(batch?.createdAt)),checkpoint=latestCheckpoint(db,'WHPP',date,text(lock?.runId)),stage=baseStage('WHPP',date,source,lock,checkpoint);
+  const currentStandard=standardCurrent?standard:{...standard,present:false,finalized:false};
+  const lifecycle=standardCurrent?whppLifecycleCompletion(db,date,memberCount,currentStandard.sourceSnapshotId):{complete:false};
+  const exactZero=Boolean(batchSnapshotId&&exactUnified.ok&&exactUnified.count===0);
+  let finalEvidenceRows=0;
+  if(!currentStandard.finalized&&!lifecycle.complete&&!exactZero&&membershipVerified&&memberCount>0){
+    finalEvidenceRows=whppFinalEvidenceCount(db,date,{standardPresent:standardCurrent,snapshotId:standardCurrent?'':batchSnapshotId});
+  }
+  const decision=whppCompletionDecision({standard:currentStandard,lifecycle,exactZero,memberCount,finalEvidenceRows,membershipVerified,batchSnapshotId});
+  return{...stage,complete:decision.completed,zeroTicketDay:exactZero,snapshotId:text(decision.snapshotId),snapshotStatus:decision.snapshotStatus,completionSource:decision.completionSource,finalEvidenceRows,lifecycleBoundary:text(batch?.createdAt),staleRunIgnored:Boolean(raw&&!lock&&batch?.createdAt),standardMembershipPresent:standard.present,standardMembershipCurrent:standardCurrent,standardExpected:standard.expected,standardActual:standard.actual,currentMembershipConsistent:membershipVerified,statusSource:'PERSISTED_WHPP_V132_COMPLETION_PARITY'};
 }
 export function readV322SevenBusinessStatus({reportDate='',db=getDb()}={}){
   const requested=normalizeDate(reportDate),batch=latestValid(db,requested),date=requested||normalizeDate(batch.reportDate)||latestShopeeDate(db)||latestWhppDate(db);
@@ -123,6 +180,19 @@ export function readV322RunProgress(businessType='CCSL',db=getDb(),reportDate=''
   const key=type==='SHOPEE'?'SHOPEE':type==='WHPP'?'WHPP':'CCSL',stage=all.stages?.[key]||{};
   return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:Math.max(0,n(stage.sourceTotal)-n(stage.scanTotal)),generatedAt:new Date().toISOString()};
 }
-function progressHandler(req,res){const started=Date.now();try{res.setHeader('Cache-Control','private,max-age=1');res.setHeader('X-CE-QC-V322',V322_WEB_AVAILABILITY_ID);res.setHeader('X-CE-QC-V322-Seven-Status',V322_SEVEN_BUSINESS_STATUS_ID);const data=readV322RunProgress(req.query.businessType||'CCSL',getDb(),req.query.reportDate||'');res.setHeader('Server-Timing',`v322progress;dur=${Date.now()-started}`);return res.json(data);}catch(error){return res.status(200).json({ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),running:false,paused:false,phase:'状态读取暂缓',done:0,retry:0,total:0,error:text(error?.message||error),generatedAt:new Date().toISOString()});}}
+function progressHandler(req,res){
+  const started=Date.now();
+  try{
+    res.setHeader('Cache-Control','private,max-age=1');
+    res.setHeader('X-CE-QC-V322',V322_WEB_AVAILABILITY_ID);
+    res.setHeader('X-CE-QC-V322-Seven-Status',V322_SEVEN_BUSINESS_STATUS_ID);
+    const data=readV322RunProgress(req.query.businessType||'CCSL',getDb(),req.query.reportDate||'');
+    res.setHeader('Server-Timing',`v322progress;dur=${Date.now()-started}`);
+    return res.json(data);
+  }catch(error){
+    res.setHeader('Server-Timing',`v322progress;dur=${Date.now()-started}`);
+    return res.status(200).json({ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),generatedAt:new Date().toISOString()});
+  }
+}
 express.application.get=function v322AvailabilityGet(pathValue,...handlers){if(String(pathValue||'')==='/api/v33/run-progress')return previousGet.call(this,pathValue,progressHandler);return previousGet.call(this,pathValue,...handlers);};
-console.info('[CE-QC][V322_WEB_AVAILABILITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,'one exact-date persisted read returns CCSL + SHOPEE + WHPP lifecycle truth from daily headers, run locks/checkpoints and finalized snapshot markers; normal positive status never scans scan/final/event fact tables; zero-ticket completion is accepted only after exact unified-import membership proves zero.');
+console.info('[CE-QC][V322_WEB_AVAILABILITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,'one exact-date persisted read returns CCSL + SHOPEE + WHPP lifecycle truth. WHPP completion matches V132 current-cohort semantics via daily finalization, exact lifecycle, exact-zero and indexed current-member final evidence. Status read errors fail closed; no scan/track/event reconstruction is performed.');
