@@ -48,6 +48,7 @@ function schedulePersistedHistoryBuild(reportDate){const date=String(reportDate|
 export function materializeV294CompletedUnifiedHistory(reportDate=''){
   const date=String(reportDate||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return{ok:false,skipped:true,reason:'REPORT_DATE_MISSING'};if(!sevenBusinessTerminal(date))return{ok:true,skipped:true,reason:'WHPP_NOT_FINALIZED',reportDate:date,expectedWhpp:unifiedWhppExpected(date)};
   const unifiedFinalization=finalizeUnifiedSevenBusiness(date);if(unifiedFinalization.skipped)return{ok:true,skipped:true,reportDate:date,reason:unifiedFinalization.reason,unifiedFinalization};if(!unifiedFinalization.ok||unifiedFinalization.result?.deferred===true)return{ok:false,reportDate:date,reason:'UNIFIED_SEVEN_BUSINESS_NOT_FINAL',unifiedFinalization};
+  try{globalThis.__CE_QC_IDLE_WHPP_BACKEND_CONTINUITY__?.(date);}catch{}
   invalidateDashboardReadCaches();const dashboardCache=enqueueDashboardTask({reportDate:date,reason:'SEVEN_BUSINESS_FINALIZED'}),historyBackfill=dashboardHistoryBackfillDone()?{skipped:true,reason:'ALREADY_MATERIALIZED'}:enqueueDashboardTask({reason:'FINALIZED_HISTORY_BACKFILL'});schedulePersistedHistoryBuild(date);
   return{ok:true,reportDate:date,unifiedFinalization,dashboardCache,historyBackfill,historyQueued:true,policy:'EVENT_DRIVEN_FINALIZE_ONCE_THEN_BACKGROUND_PERSISTED_READ_MODELS',revision:V294_EVENT_DRIVEN_FINALIZATION_REVISION};
 }
@@ -64,4 +65,4 @@ express.application.post=function v294PostProcessAttemptRegistration(pathValue,.
 
 if(process.env.NODE_ENV!=='test'&&!process.env.CI){const timer=setTimeout(()=>{const date=latestUnifiedReportDate();if(!date||!sevenBusinessTerminal(date))return;const result=materializeV294CompletedUnifiedHistory(date);console.info('[CE-QC][FINAL_HISTORY_STARTUP_ONE_SHOT]',JSON.stringify(result));},5000);timer.unref?.();}
 
-console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL]',V294_POST_PROCESS_ATTEMPT_BACKFILL_ID,V294_EVENT_DRIVEN_FINALIZATION_REVISION,'no 5s/6h WHPP polling: new imports rearm backend continuity once; CCSL/SHOPEE persist saved truth, V134 emits the authoritative WHPP-finalized event, and dashboard/history read models materialize in background workers once then remain SQLite/cache reads.');
+console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL]',V294_POST_PROCESS_ATTEMPT_BACKFILL_ID,V294_EVENT_DRIVEN_FINALIZATION_REVISION,'no 5s/6h WHPP polling: new imports rearm backend continuity; exact seven-business finalization idles that loop; CCSL/SHOPEE persist saved truth, V134 emits the authoritative WHPP-finalized event, and dashboard/history read models materialize in background workers once then remain SQLite/cache reads.');
