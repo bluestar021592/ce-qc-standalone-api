@@ -6,9 +6,10 @@ import { performance } from 'node:perf_hooks';
 import { execFileSync } from 'node:child_process';
 
 execFileSync(process.execPath,['scripts/v375-import-metadata-zero-shopee-smoke.mjs'],{stdio:'inherit'});
-for(const file of ['src/rangeDashboardStoreV320.js','src/v322WebAvailabilityPatch.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptTruth.js','src/v375UnifiedImportMetadataPatch.js','src/v311ShopeeIncompleteRecoveryPatch.js','public/v168-seven-business-status.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/rangeDashboardStoreV320.js','src/v322WebAvailabilityPatch.js','src/v418StatusProofFastPath.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptTruth.js','src/v375UnifiedImportMetadataPatch.js','src/v311ShopeeIncompleteRecoveryPatch.js','public/v168-seven-business-status.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const rangeSource=fs.readFileSync('src/rangeDashboardStoreV320.js','utf8');
 const progressSource=fs.readFileSync('src/v322WebAvailabilityPatch.js','utf8');
+const fastProofSource=fs.readFileSync('src/v418StatusProofFastPath.js','utf8');
 const statusUiSource=fs.readFileSync('public/v168-seven-business-status.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const firstAttemptSource=fs.readFileSync('src/v295FirstAttemptTruth.js','utf8');
@@ -17,39 +18,44 @@ assert.match(rangeSource,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'si
 assert.match(rangeSource,/requestedFrom===requestedTo\)return fastSingleDay\(requestedTo\)/,'single-day must return before historical V295/V294 work');
 assert.ok(rangeSource.indexOf('return fastSingleDay(requestedTo)')<rangeSource.indexOf('const range=loadRangeDashboardV295'),'heavy historical range owner must be unreachable for a one-day request');
 
-// V418 keeps V322 as the one persisted exact-date status endpoint for CCSL + SHOPEE + WHPP,
-// but a legacy unified COMPLETED marker is only a lightweight claim. It may never
-// materialize payloadJson and may publish terminal truth only after the exact current
-// members have current-lifecycle processing proof.
+// V419 keeps V322 as the one persisted exact-date status endpoint for CCSL + SHOPEE + WHPP.
+// The normal web path is scalar-only: current membership, compact run/snapshot markers and
+// exact current-member SUCCESS set joins. Legacy large snapshot/state JSON stays unread.
 assert.match(progressSource,/V322_WEB_AVAILABILITY_ID='2026-09-02-v414-persisted-three-stage-status-v1'/);
 assert.match(progressSource,/V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v414-one-read-seven-business-status-v1'/);
 assert.match(progressSource,/V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v414-whpp-success-evidence-parity-v1'/);
 assert.match(progressSource,/V322_COMPLETED_FAST_PATH_ID='2026-09-02-v322-unified-completed-snapshot-fast-path-v1'/);
 assert.match(progressSource,/V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID='2026-09-02-v418-v322-no-payload-completed-claim-v1'/);
-assert.match(progressSource,/function unifiedCompletedFastPath\(/,'completed seven-business lifecycle must have one canonical terminal claim path');
+assert.match(progressSource,/V419_SCALAR_STATUS_PRIORITY_ID='2026-09-02-v419-scalar-status-priority-no-json-v1'/);
+assert.match(progressSource,/V419_STATUS_TIMING_ID='2026-09-02-v419-status-substage-timing-v1'/);
+assert.match(progressSource,/function unifiedCompletionClaim\(db,batch\)/,'current unified completion claim must stay a compact exact snapshot-status read');
 assert.match(progressSource,/SELECT status FROM unified_snapshots WHERE snapshotId=\? AND reportDate=\? LIMIT 1/,'terminal claim must read only the exact current unified snapshot status');
-assert.doesNotMatch(progressSource,/SELECT status,payloadJson FROM unified_snapshots WHERE snapshotId=\? AND reportDate=\? LIMIT 1/,'V418 terminal status must never materialize legacy snapshot payloadJson');
-assert.match(progressSource,/readV415CurrentProcessingProof\(\{db,reportDate:date\}\)/,'legacy COMPLETED claim must be revalidated by exact current-member processing proof');
+assert.doesNotMatch(progressSource,/SELECT[^`\n]*(?:payloadJson|stateJson|summaryJson|valueJson)/,'V419 status SQL must never materialize large JSON payload columns');
+assert.match(progressSource,/readV418CurrentMembershipCounts\(db,batch\|\|\{\}\)/,'V419 must anchor status to the exact current seven-business cohort');
+assert.match(progressSource,/readV418CcslProcessingProof/,'CCSL completion must use the V418 current-member scalar proof');
+assert.match(progressSource,/readV418BusinessSuccessCoverage/,'SHOPEE and WHPP completion must use V418 current-member SUCCESS coverage');
+assert.doesNotMatch(progressSource,/readV415CurrentProcessingProof\(/,'V419 normal status must not invoke the legacy second proof chain');
 assert.match(progressSource,/V418_CURRENT_MEMBER_PROCESSING_PROOF/,'terminal publication must identify current-member proof ownership');
 assert.match(progressSource,/V418_NO_PAYLOAD_COMPLETED_CLAIM/,'terminal publication must expose the no-payload V418 claim source');
-assert.doesNotMatch(progressSource,/reconciliation\.passed!==true/,'V418 must not reopen the old payloadJson reconciliation path');
-assert.match(progressSource,/const completed=unifiedCompletedFastPath\(db,date,exactBatch\);[\s\S]*if\(completed\)return completed;[\s\S]*readCcslStage/,'a handled COMPLETED claim must return before duplicate legacy stage reads');
 assert.match(progressSource,/function readV322SevenBusinessStatus/);
 assert.match(progressSource,/stages:\{CCSL,SHOPEE,WHPP\}/,'one V322 read must return all three persisted execution stages');
-assert.match(progressSource,/PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/,'CCSL and SHOPEE completion must remain persisted-header/run-lock/snapshot based while incomplete');
+assert.match(progressSource,/PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/,'CCSL and SHOPEE completion must remain compact persisted lock/snapshot based while incomplete');
 assert.match(progressSource,/PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF/,'WHPP status must expose V414 current-member SUCCESS and restart-proof truth while incomplete');
-assert.match(progressSource,/CURRENT_DAILY_FINALIZATION_MARKER/,'WHPP current daily finalization marker must close an already finalized cohort');
-assert.match(progressSource,/CURRENT_FINALIZED_WHPP_STATE/,'WHPP exact current lifecycle completion must survive browser/backend restart');
-assert.match(progressSource,/EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP/,'exact current zero membership must remain a safe no-work completion path');
-assert.match(progressSource,/FULL_MEMBER_SUCCESS_EVIDENCE/,'full exact current-member SUCCESS evidence must remain a safe completion path');
-assert.match(progressSource,/UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,'WHPP completion must reject retry/placeholders and count only successful current-member processing evidence');
-assert.match(progressSource,/COUNT\(DISTINCT d\.shipmentCode\)[\s\S]*EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode AND f\.reportDate=\?/,'standard WHPP final-evidence check must stay membership-bound and date-bound');
-assert.match(progressSource,/FROM unified_import_rows u[\s\S]*JOIN business_final_rows f ON f\.businessType='WHPP' AND f\.shipmentCode=u\.shipmentCode AND f\.reportDate=\?[\s\S]*u\.snapshotId=\?/,'unified WHPP fallback evidence check must stay exact-snapshot/member/date bound');
+assert.match(progressSource,/const whppMembershipOk=counts\._whppMembershipOk!==false/,'WHPP completion must fail closed when standard and unified current membership disagree');
+assert.match(progressSource,/const lockClaim=COMPLETE_LOCK\.has\(text\(whppLock\?\.status\)\.toLowerCase\(\)\),unifiedClaim=unifiedCompletionClaim\(db,batch\)/,'WHPP positive proof requires a current compact completion claim before SUCCESS coverage');
+assert.match(progressSource,/readV418BusinessSuccessCoverage\(db,\{businessType:'WHPP',date,snapshotId,boundary,memberTypes:\['WHPP'\]\}\)/,'WHPP completion must use the exact current WHPP cohort');
+assert.match(progressSource,/coverage\?\.ok&&n\(coverage\.count\)>=n\(counts\.WHPP\)/,'WHPP completion requires full current-member SUCCESS coverage');
+assert.match(fastProofSource,/V418_STATUS_PROOF_FAST_PATH_ID='2026-09-02-v418-large-db-set-join-status-proof-v1'/);
+assert.match(fastProofSource,/UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,'positive completion proof must count only successful current-member processing evidence');
+assert.match(fastProofSource,/FROM business_daily_parse_rows d[\s\S]*JOIN business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode/,'WHPP current-member proof must remain a set join');
+assert.match(fastProofSource,/FROM unified_import_rows u[\s\S]*JOIN business_final_rows f[\s\S]*f\.shipmentCode=u\.shipmentCode/,'SHOPEE current-member proof must remain an exact-snapshot set join');
 assert.match(progressSource,/restartInterrupted/,'persisted WHPP status must expose restart interruption truth');
 assert.match(progressSource,/PROCESS_RESTART_INTERRUPTED/,'generic incomplete WHPP must not become automatic-run eligible without exact restart proof');
 assert.doesNotMatch(progressSource,/FROM\s+(?:scan_results|business_scan_results|track_events|business_track_events|business_shipment_tracks|business_exception_items)\b/i,'web run-progress must never reconstruct scan/track/event facts');
-assert.match(progressSource,/code:'V322_PERSISTED_STATUS_READ_FAILED'/,'status read errors must fail closed rather than fabricating pending/complete truth');
+assert.match(progressSource,/code:'V322_PERSISTED_STATUS_READ_FAILED'/,'status read errors must preserve the canonical fail-closed compatibility code');
+assert.match(progressSource,/detailCode:'V419_SCALAR_STATUS_READ_FAILED'/,'V419 scalar diagnostics must remain visible alongside the canonical code');
 assert.match(progressSource,/ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,'failed status reads must be visibly non-ok');
+assert.match(progressSource,/this\.route\(pathValue\)\.get\(progressHandler\)/,'V419 must own the run-progress route directly and avoid a duplicate proof wrapper');
 assert.match(progressSource,/\/api\/v33\/run-progress/,'V322 must replace the legacy progress handler');
 assert.match(activation,/v322WebAvailabilityPatch\.js/,'V322 web availability guard must activate before server route registration');
 assert.match(activation,/v375UnifiedImportMetadataPatch\.js/,'V375 import metadata owner must activate before server route registration');
@@ -140,7 +146,7 @@ assert.equal(all.stages.WHPP.completionPolicy,'2026-09-02-v414-whpp-success-evid
 assert.match(String(all.stages.WHPP.statusSource||''),/PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF/);
 assert.equal(all.stages.WHPP.complete,false,'a current WHPP member with no SUCCESS row must remain incomplete rather than inheriting cache/final placeholders');
 
-// A legacy COMPLETED marker alone must still be rejected. V418 terminal truth is
+// A legacy COMPLETED marker alone must still be rejected. V419 terminal truth is
 // released only after all exact current members carry real current-lifecycle proof.
 db.prepare("UPDATE unified_snapshots SET status='COMPLETED',payloadJson=? WHERE snapshotId=?").run('x'.repeat(8*1024*1024),snapshotId);
 db.prepare('INSERT INTO run_locks(reportDate,runId,status,currentStage,batchIndex,totalBatches,lockedAt,completedAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)').run(date,'V322-CCSL-RUN','finished','完成',1,1,after,after,after);
@@ -156,7 +162,7 @@ assert.equal(proof.ok,true,'V418 current-member proof fixture must resolve');
 for(const key of ['CCSL','SHOPEE','WHPP']){
   assert.equal(proof.stages[key].complete,true,`${key} exact current-member proof must be complete: ${JSON.stringify(proof.stages[key])}`);
 }
-started=performance.now();const terminal=readV322SevenBusinessStatus({reportDate:date,db}),terminalMs=performance.now()-started;
+started=performance.now();const terminal=readV322SevenBusinessStatus({reportDate:date,db,force:true}),terminalMs=performance.now()-started;
 assert.equal(terminal.complete,true,'legacy COMPLETED marker may publish only after exact current-member proof succeeds');
 assert.equal(terminal.completedFastPath,'2026-09-02-v322-unified-completed-snapshot-fast-path-v1+2026-09-02-v418-v322-no-payload-completed-claim-v1');
 assert.equal(terminal.v418FastPathId,'2026-09-02-v418-large-db-set-join-status-proof-v1');
@@ -166,7 +172,7 @@ for(const key of ['CCSL','SHOPEE','WHPP']){
   assert.equal(terminal.stages[key].statusSource,'V418_NO_PAYLOAD_COMPLETED_CLAIM');
   assert.equal(terminal.stages[key].completionSource,'V418_CURRENT_MEMBER_PROCESSING_PROOF');
 }
-assert.ok(terminalMs<100,`V418 completed unified status must stay sub-100ms without reading the 8MB payload, got ${terminalMs.toFixed(1)}ms`);
+assert.ok(terminalMs<100,`V419 completed unified status must stay sub-100ms without reading the 8MB payload, got ${terminalMs.toFixed(1)}ms`);
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V418/V414/V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact seven-business unified cohort includes WHPP=1 · incomplete WHPP requires current-member SUCCESS/restart proof · legacy COMPLETED + 8MB payload stays unread until exact current-member proof releases terminal truth · V168 completed date stops polling · single-day period=${rangeMs.toFixed(1)}ms · persisted progress=${progressMs.toFixed(1)}ms · completed-status=${terminalMs.toFixed(1)}ms · no scan/track/event reconstruction`);
+console.log(`[V419/V418/V414/V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact seven-business unified cohort includes WHPP=1 · incomplete WHPP requires current-member SUCCESS/restart proof · legacy COMPLETED + 8MB payload stays unread until exact current-member scalar proof releases terminal truth · V168 completed date stops polling · single-day period=${rangeMs.toFixed(1)}ms · persisted progress=${progressMs.toFixed(1)}ms · completed-status=${terminalMs.toFixed(1)}ms · no scan/track/event reconstruction`);
