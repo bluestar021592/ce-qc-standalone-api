@@ -65,7 +65,12 @@ test('source totals include imported unfinished dates while outcome metrics stay
   seed();
   const result = loadRangeDashboard('2026-08-01','2026-08-02');
 
-  assert.equal(result.queryMode, 'SQL_SOURCE_VALID_PLUS_ANALYSIS_COMPLETED_V32');
+  assert.match(result.queryMode, /^SQL_SOURCE_VALID_PLUS_ANALYSIS_COMPLETED_V32\+/,
+    'explicit multi-day range must enter the historical SQL owner chain instead of V322 single-day cache');
+  assert.match(result.queryMode, /DAILY_MEMBERSHIP_PROVEN_LEDGER_V284/,
+    'multi-day result must include current proven-membership coverage semantics');
+  assert.match(result.queryMode, /V293_WHPP_HISTORY_RANGE/,
+    'multi-day result must retain the preserved WHPP historical owner');
   assert.deepEqual(result.sourceDates, ['2026-08-01','2026-08-02']);
   assert.deepEqual(result.analyzedDates, ['2026-08-01']);
   assert.deepEqual(result.missingAnalysisDates, ['2026-08-02']);
@@ -100,15 +105,16 @@ test('source totals include imported unfinished dates while outcome metrics stay
   assert.equal(result.aggregates.SHOPEE.analyzedTotal, 2);
 });
 
-test('a fully completed date reports no analysis gap', () => {
+test('single-day range stays cache-only and fails closed when derived cache is absent', () => {
   const result = loadRangeDashboard('2026-08-01','2026-08-01');
-  assert.equal(result.sourceTotal, 4);
-  assert.equal(result.analyzedTotal, 4);
-  assert.equal(result.analysisPending, 0);
-  assert.equal(result.analysisComplete, true);
-  assert.deepEqual(result.missingAnalysisDates, []);
-  assert.equal(result.states.CE.snapshotStatus, 'COMPLETED');
-  assert.equal(result.states.SHOPEECN.snapshotStatus, 'COMPLETED');
+  assert.equal(result.queryMode, 'V322_SINGLE_DAY_DASHBOARD_CACHE_ONLY');
+  assert.equal(result.singleDayCacheOnly, true);
+  assert.equal(result.availabilityFirst, true);
+  assert.equal(result.sourceTotal, 4, 'latest VALID membership remains visible without rebuilding heavy history');
+  assert.equal(result.analyzedTotal, 0, 'missing derived cache must not trigger synchronous historical reconstruction');
+  assert.equal(result.analysisPending, 4);
+  assert.equal(result.analysisComplete, false);
+  assert.deepEqual(result.missingAnalysisDates, ['2026-08-01']);
 });
 
 test.after(() => {
