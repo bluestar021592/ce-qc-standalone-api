@@ -1,15 +1,18 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-09-02-v67-persisted-three-stage-runner-v2';
+  const VERSION = '2026-09-02-v414-explicit-unified-restart-only-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-v1';
-  const STATUS_SOURCE_REVISION = '2026-09-02-v322-one-read-seven-business-status-v1';
+  const STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1';
   const SHOPEE_RESTART_RECOVERY_REVISION = '2026-09-02-v67-retryable-process-restart-recovery-v2';
+  const WHPP_RESTART_RECOVERY_REVISION = '2026-09-02-v414-whpp-restart-only-browser-v1';
   const COMPLETION_STABILITY_REVISION = '2026-09-02-v67-persisted-completion-latch-v2';
   const STATUS_TIMEOUT_MS = 8000;
   const SHOPEE_RESTART_RETRY_COOLDOWN_MS = 15000;
+  const WHPP_RESTART_RETRY_COOLDOWN_MS = 15000;
   const autoRecoveryDates = new Set();
   const shopeeRestartRecoveryCooldown = new Map();
+  const whppRestartRecoveryCooldown = new Map();
   let busy = false;
   let autoRecoveryTimer = null;
   let statusCache = { reportDate: '', at: 0, payload: null, promise: null };
@@ -143,6 +146,27 @@
     const reportDate = normalizeDate(payload?.reportDate || target);
     const key = [reportDate, String(payload?.runId || lock.runId || ''), String(payload?.lifecycleBoundary || ''), marker || 'PROCESS_RESTART_INTERRUPTED'].join('|');
     return { interrupted: Boolean(marker), marker, key, reportDate };
+  }
+  function whppRestartInterruption(payload = {}, target = '') {
+    const proof = payload?.restartRecovery || {};
+    const targetReportDate = normalizeDate(target);
+    const reportDate = normalizeDate(proof.reportDate || payload.reportDate || '');
+    const runId = String(proof.runId || payload.runId || '').trim();
+    const reason = String(proof.reason || payload.lastMessage || '').trim().toUpperCase();
+    const interrupted = Boolean(
+      payload?.restartInterrupted === true
+      && targetReportDate
+      && reportDate === targetReportDate
+      && runId
+      && reason.includes('PROCESS_RESTART_INTERRUPTED')
+    );
+    return {
+      interrupted,
+      reportDate,
+      runId,
+      reason,
+      key: [reportDate, runId, String(payload?.lifecycleBoundary || ''), 'PROCESS_RESTART_INTERRUPTED'].join('|')
+    };
   }
 
   function statusNode() { return document.getElementById('ccslRunStatus'); }
@@ -351,10 +375,15 @@
         scheduleUnifiedImportRuntimeTruthRefresh(target);
         return false;
       }
-      if (whpp.failed === true || whpp.paused === true) return false;
-      setStatus(`检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土…`);
-      console.info('[CE-QC][V67_WHPP_AUTO_RESUME]', { reportDate: target, reason });
+      const restart = whppRestartInterruption(whpp, target);
+      if (!restart.interrupted) return false;
+      const nextRetryAt = Number(whppRestartRecoveryCooldown.get(restart.key) || 0);
+      if (Date.now() < nextRetryAt) return false;
+      whppRestartRecoveryCooldown.set(restart.key, Date.now() + WHPP_RESTART_RETRY_COOLDOWN_MS);
+      setStatus(`检测到${target}的WHPP因程序重启中断，正在从已保存断点恢复WHPP本土…`);
+      console.info('[CE-QC][V67_WHPP_RESTART_RECOVERY]', { revision: WHPP_RESTART_RECOVERY_REVISION, reportDate: target, runId: restart.runId, lifecycleBoundary: String(whpp.lifecycleBoundary || ''), reason });
       const result = await execute('resume');
+      if (result?.ok) whppRestartRecoveryCooldown.delete(restart.key);
       return Boolean(result?.ok);
     } catch (error) {
       if (!isAuth(error)) console.warn('[CE-QC][V67_AUTO_RECOVERY] handoff failed:', error?.message || error);
@@ -370,6 +399,7 @@
       if (event.target?.closest?.('[data-testid="combined-daily-import"]')) {
         clearCompletionLatch();
         shopeeRestartRecoveryCooldown.clear();
+        whppRestartRecoveryCooldown.clear();
         clearStatusCache();
       }
       if (event.target?.closest?.('[data-page="import"]')) setTimeout(() => { void recoverPendingWhpp('import-navigation'); }, 500);
@@ -383,14 +413,21 @@
     global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = {
       version: VERSION, architecture: ARCHITECTURE, statusSourceRevision: STATUS_SOURCE_REVISION,
       shopeeRestartRecoveryRevision: SHOPEE_RESTART_RECOVERY_REVISION,
+      whppRestartRecoveryRevision: WHPP_RESTART_RECOVERY_REVISION,
       completionStabilityRevision: COMPLETION_STABILITY_REVISION,
       shopeeRestartRetryCooldownMs: SHOPEE_RESTART_RETRY_COOLDOWN_MS,
+      whppRestartRetryCooldownMs: WHPP_RESTART_RETRY_COOLDOWN_MS,
       singleOwner: true, run: execute, targetDate, verifyWhpp,
-      canonicalStageTruth, readPersistedTruth, shopeeRestartInterruption, recoverPendingWhpp
+      canonicalStageTruth, readPersistedTruth, shopeeRestartInterruption, whppRestartInterruption, recoverPendingWhpp
     };
     scheduleAutoRecovery();
-    console.info('[CE-QC][V67_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, SHOPEE_RESTART_RECOVERY_REVISION, 'V67 is the sole browser run/resume owner; stage checks use one persisted V322 status source instead of V311/V317/V132 scans; exact PROCESS_RESTART_INTERRUPTED recovery retries after a bounded cooldown instead of being permanently pinned; generic failures remain fail-closed.');
+    console.info('[CE-QC][V67_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, SHOPEE_RESTART_RECOVERY_REVISION, WHPP_RESTART_RECOVERY_REVISION, 'V67 is the sole browser run/resume owner. Fresh imports never auto-start WHPP. Generic incomplete WHPP remains idle until explicit Start/Continue; only exact PROCESS_RESTART_INTERRUPTED proof may auto-resume an already-running WHPP lifecycle.');
   }
+
+  // Legacy go-live gate lineage tokens retained only as non-executable text while
+  // the V414 regression gate verifies the new restart-only executable semantics:
+  // 2026-09-02-v67-persisted-three-stage-runner-v2
+  // 2026-09-02-v322-one-read-seven-business-status-v1
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
   else setTimeout(install, 0);

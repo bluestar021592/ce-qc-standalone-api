@@ -17,12 +17,13 @@ assert.match(rangeSource,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'si
 assert.match(rangeSource,/requestedFrom===requestedTo\)return fastSingleDay\(requestedTo\)/,'single-day must return before historical V295/V294 work');
 assert.ok(rangeSource.indexOf('return fastSingleDay(requestedTo)')<rangeSource.indexOf('const range=loadRangeDashboardV295'),'heavy historical range owner must be unreachable for a one-day request');
 
-// V322 now owns one persisted exact-date status read for CCSL + SHOPEE + WHPP.
+// V414 keeps V322 as the one persisted exact-date status endpoint for CCSL + SHOPEE + WHPP.
 // A fully reconciled unified COMPLETED snapshot is terminal truth and must bypass
-// every per-stage/member evidence lookup. Incomplete dates retain WHPP/V132 parity.
-assert.match(progressSource,/V322_WEB_AVAILABILITY_ID='2026-09-02-v322-persisted-three-stage-status-v5'/);
-assert.match(progressSource,/V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1'/);
-assert.match(progressSource,/V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v322-whpp-v132-current-cohort-parity-v1'/);
+// every per-stage/member evidence lookup. Incomplete WHPP dates require current-member
+// SUCCESS evidence or exact persisted PROCESS_RESTART_INTERRUPTED proof.
+assert.match(progressSource,/V322_WEB_AVAILABILITY_ID='2026-09-02-v414-persisted-three-stage-status-v1'/);
+assert.match(progressSource,/V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v414-one-read-seven-business-status-v1'/);
+assert.match(progressSource,/V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v414-whpp-success-evidence-parity-v1'/);
 assert.match(progressSource,/V322_COMPLETED_FAST_PATH_ID='2026-09-02-v322-unified-completed-snapshot-fast-path-v1'/);
 assert.match(progressSource,/function unifiedCompletedFastPath\(/,'completed seven-business lifecycle must have one canonical terminal fast path');
 assert.match(progressSource,/SELECT status,payloadJson FROM unified_snapshots WHERE snapshotId=\? AND reportDate=\? LIMIT 1/,'terminal fast path must read the exact current unified snapshot only');
@@ -32,13 +33,16 @@ assert.match(progressSource,/const completed=unifiedCompletedFastPath\(db,date,e
 assert.match(progressSource,/function readV322SevenBusinessStatus/);
 assert.match(progressSource,/stages:\{CCSL,SHOPEE,WHPP\}/,'one V322 read must return all three persisted execution stages');
 assert.match(progressSource,/PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/,'CCSL and SHOPEE completion must remain persisted-header/run-lock/snapshot based while incomplete');
-assert.match(progressSource,/PERSISTED_WHPP_V132_COMPLETION_PARITY/,'WHPP status must explicitly expose V132 current-cohort completion parity while incomplete');
+assert.match(progressSource,/PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF/,'WHPP status must expose V414 current-member SUCCESS and restart-proof truth while incomplete');
 assert.match(progressSource,/CURRENT_DAILY_FINALIZATION_MARKER/,'WHPP current daily finalization marker must close an already finalized cohort');
 assert.match(progressSource,/CURRENT_FINALIZED_WHPP_STATE/,'WHPP exact current lifecycle completion must survive browser/backend restart');
 assert.match(progressSource,/EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP/,'exact current zero membership must remain a safe no-work completion path');
-assert.match(progressSource,/FULL_MEMBER_FINAL_EVIDENCE/,'full exact current-member final evidence must remain a safe zero-work completion path');
+assert.match(progressSource,/FULL_MEMBER_SUCCESS_EVIDENCE/,'full exact current-member SUCCESS evidence must remain a safe completion path');
+assert.match(progressSource,/UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,'WHPP completion must reject retry/placeholders and count only successful current-member processing evidence');
 assert.match(progressSource,/COUNT\(DISTINCT d\.shipmentCode\)[\s\S]*EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode AND f\.reportDate=\?/,'standard WHPP final-evidence check must stay membership-bound and date-bound');
 assert.match(progressSource,/COUNT\(DISTINCT u\.shipmentCode\)[\s\S]*u\.snapshotId=\?[\s\S]*EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.shipmentCode=u\.shipmentCode AND f\.reportDate=\?/,'unified WHPP fallback evidence check must stay exact-snapshot/member/date bound');
+assert.match(progressSource,/restartInterrupted/,'persisted WHPP status must expose restart interruption truth');
+assert.match(progressSource,/PROCESS_RESTART_INTERRUPTED/,'generic incomplete WHPP must not become automatic-run eligible without exact restart proof');
 assert.doesNotMatch(progressSource,/FROM\s+(?:scan_results|business_scan_results|track_events|business_track_events|business_shipment_tracks|business_exception_items)\b/i,'web run-progress must never reconstruct scan/track/event facts');
 assert.match(progressSource,/code:'V322_PERSISTED_STATUS_READ_FAILED'/,'status read errors must fail closed rather than fabricating pending/complete truth');
 assert.match(progressSource,/ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,'failed status reads must be visibly non-ok');
@@ -101,22 +105,22 @@ db.exec(`CREATE TABLE IF NOT EXISTS dashboard_daily_cache(
 db.prepare('INSERT INTO unified_snapshots(snapshotId,batchId,reportDate,status,payloadJson,createdAt) VALUES(?,?,?,?,?,?)').run(snapshotId,batchId,date,'COMPLETED','{}',now);
 db.prepare('INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?)').run(batchId,snapshotId,date,'v322.xlsx','v322-hash','VALID','{}','[]',now);
 const insRow=db.prepare('INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,regionCode,recipientRaw,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)');
-const types=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+const types=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 for(let i=0;i<types.length;i++)insRow.run(batchId,snapshotId,date,types[i],`V322-${types[i]}`,'PP',types[i],types[i],'日报',i+1,'V322','{}',now);
 const cache=db.prepare('INSERT INTO dashboard_daily_cache(reportDate,businessType,regionCode,metricsJson,snapshotId,snapshotStatus,sourceFingerprint,refreshedAt) VALUES(?,?,?,?,?,?,?,?)');
-for(const type of [...types,'WHPP'])cache.run(date,type,'',JSON.stringify({total:1,pod:1,returned:0,cancelled:0,sameDayPod:1,ocCurrent:0,pending1:0,pending2:0,pending3:0,pendingNonContinuous:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,delivery1:0,deliveryStay:0,provinceOpen:0,attempt1:type.startsWith('SHOPEE')?1:0,attempt2:0,attempt3:0}),snapshotId,'COMPLETED','V322',now);
-// V335+ requires WHPP standard daily membership to be internally complete: the daily
-// header total and the distinct parse-row members must agree exactly. A header-only
-// fixture is intentionally rejected as incomplete, just like production 236/235 data.
+for(const type of types)cache.run(date,type,'',JSON.stringify({total:1,pod:1,returned:0,cancelled:0,sameDayPod:1,ocCurrent:0,pending1:0,pending2:0,pending3:0,pendingNonContinuous:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,delivery1:0,deliveryStay:0,provinceOpen:0,attempt1:type.startsWith('SHOPEE')?1:0,attempt2:0,attempt3:0}),snapshotId,'COMPLETED','V322',now);
+// V414 requires the WHPP standard daily membership and the current unified WHPP cohort
+// to agree. The header, parse-row membership and unified row therefore all carry the
+// same one WHPP shipment. Without SUCCESS evidence it must remain incomplete.
 db.prepare('INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?)').run('WHPP',date,'v322-whpp.xlsx',1,JSON.stringify({total:1,pod:1,sameDayPod:1,ocCurrent:0}),now,now);
 db.prepare('INSERT INTO business_daily_parse_rows(businessType,reportDate,shipmentCode,rowJson,createdAt) VALUES(?,?,?,?,?)').run('WHPP',date,'V322-WHPP',JSON.stringify({shipmentCode:'V322-WHPP',businessType:'WHPP',reportDate:date,regionCode:'PP'}),now);
 
 let started=performance.now();const range=loadRangeDashboard(date,date),rangeMs=performance.now()-started;
 assert.equal(range.queryMode,'V322_SINGLE_DAY_DASHBOARD_CACHE_ONLY');assert.equal(range.dates.length,1);assert.equal(range.dates[0],date);assert.equal(range.sourceTotal,7);assert.ok(rangeMs<500,`single-day period dashboard must stay sub-500ms in fixture, got ${rangeMs.toFixed(1)}ms`);
 started=performance.now();const progress=readV322RunProgress('CCSL',db,date),progressMs=performance.now()-started;
-assert.equal(progress.version,'2026-09-02-v322-persisted-three-stage-status-v5');
-assert.equal(progress.statusVersion,'2026-09-02-v322-one-read-seven-business-status-v1');
-assert.equal(progress.whppCompletionPolicy,'2026-09-02-v322-whpp-v132-current-cohort-parity-v1');
+assert.equal(progress.version,'2026-09-02-v414-persisted-three-stage-status-v1');
+assert.equal(progress.statusVersion,'2026-09-02-v414-one-read-seven-business-status-v1');
+assert.equal(progress.whppCompletionPolicy,'2026-09-02-v414-whpp-success-evidence-parity-v1');
 assert.equal(progress.businessType,'CCSL');
 assert.equal(progress.reportDate,date);
 assert.equal(progress.dailyTotal,4);
@@ -125,10 +129,11 @@ assert.ok(progressMs<200,`persisted run progress must stay sub-200ms in fixture,
 const all=readV322SevenBusinessStatus({reportDate:date,db});
 assert.equal(all.ok,true);
 assert.equal(all.reportDate,date);
-assert.equal(all.statusVersion,'2026-09-02-v322-one-read-seven-business-status-v1');
+assert.equal(all.statusVersion,'2026-09-02-v414-one-read-seven-business-status-v1');
 assert.deepEqual(Object.keys(all.stages),['CCSL','SHOPEE','WHPP']);
-assert.equal(all.stages.WHPP.completionPolicy,'2026-09-02-v322-whpp-v132-current-cohort-parity-v1');
-assert.match(String(all.stages.WHPP.statusSource||''),/PERSISTED_WHPP_V132_COMPLETION_PARITY/);
+assert.equal(all.stages.WHPP.completionPolicy,'2026-09-02-v414-whpp-success-evidence-parity-v1');
+assert.match(String(all.stages.WHPP.statusSource||''),/PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF/);
+assert.equal(all.stages.WHPP.complete,false,'a current WHPP member with no SUCCESS row must remain incomplete rather than inheriting cache/final placeholders');
 
 // Flip only the exact current unified snapshot to the shape produced by
 // completeUnifiedSnapshot. The next status read must return before stage/member reads.
@@ -145,4 +150,4 @@ assert.equal(terminal.stages.WHPP.statusSource,'UNIFIED_COMPLETED_SNAPSHOT_FAST_
 assert.ok(terminalMs<100,`completed unified status must stay sub-100ms in fixture, got ${terminalMs.toFixed(1)}ms`);
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact 1/1 WHPP standard membership + six unified businesses = 7 · incomplete V322 retains V132 parity · fully reconciled COMPLETED snapshot short-circuits all stage/member reads · V168 completed date stops polling · single-day period=${rangeMs.toFixed(1)}ms · persisted progress=${progressMs.toFixed(1)}ms · completed-status=${terminalMs.toFixed(1)}ms · no scan/track/event reconstruction`);
+console.log(`[V414/V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact seven-business unified cohort includes WHPP=1 · incomplete WHPP requires current-member SUCCESS/restart proof · fully reconciled COMPLETED snapshot short-circuits all stage/member reads · V168 completed date stops polling · single-day period=${rangeMs.toFixed(1)}ms · persisted progress=${progressMs.toFixed(1)}ms · completed-status=${terminalMs.toFixed(1)}ms · no scan/track/event reconstruction`);

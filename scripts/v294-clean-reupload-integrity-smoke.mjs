@@ -62,10 +62,11 @@ assert.match(whppStateSource, /businessType='WHPP' AND reportDate=\? AND runId=\
 assert.match(whppStateSource, /const completed=Boolean\(snapshot\)/);
 assert.doesNotMatch(whppStateSource, /const completed=Boolean\(snapshot\|\|history\)/);
 
-// Visible WHPP completion is different: after an identical same-day reupload,
-// the current normalized membership may already have final evidence for every
-// member. A finalized current lifecycle/daily marker is authoritative, while
-// full member evidence and exact zero remain safe zero-work completion paths.
+// V414 visible WHPP completion is stricter than legacy final-row existence:
+// only successfully processed rows from the current exact membership may satisfy
+// the zero-work full-member path. API_PENDING_RETRY/placeholder rows stay visible
+// but cannot close the lifecycle. Finalized current markers and exact zero remain
+// authoritative and use the same centralized completion decision.
 assert.match(whppCanonicalSource, /const memberCount=uniqueRows\(membershipRows\)\.length/);
 assert.match(whppCanonicalSource, /function completionDecision\(/,
   'V132 must centralize WHPP completion semantics instead of duplicating stale inline predicates');
@@ -76,15 +77,23 @@ assert.match(whppCanonicalSource, /lifecycle\?\.complete/,
 assert.match(whppCanonicalSource, /num\(memberCount\)===0&&Boolean\(standard\?\.present\|\|historyPresent\)/,
   'V132 must retain explicit exact-zero completion semantics');
 assert.match(whppCanonicalSource, /num\(memberCount\)>0&&num\(finalEvidenceRows\)>=num\(memberCount\)/,
-  'V132 must still accept full current-member final evidence as zero-work completion');
-assert.match(whppCanonicalSource, /completionDecision\(\{standard,memberCount,finalEvidenceRows:facts\.length,historyPresent:Boolean\(history\),lifecycle,retryPending\}\)/,
-  'visible WHPP summary must use the same centralized lifecycle-aware completion decision');
+  'V132 may accept the exact current cohort only after every member has successful processing evidence');
+assert.match(whppCanonicalSource, /UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,
+  'V132 current-member completion evidence must exclude retry/placeholder final rows');
+assert.match(whppCanonicalSource, /const finalEvidenceRows=countFinalEvidence\(db,reportDate,\{standard,unified\}\);/,
+  'visible WHPP summary must count the same SUCCESS-only evidence as compact status');
+assert.match(whppCanonicalSource, /completionDecision\(\{standard,memberCount,finalEvidenceRows,historyPresent:Boolean\(history\),lifecycle,retryPending\}\)/,
+  'visible WHPP summary must use the same centralized V414 lifecycle-aware completion decision');
+assert.doesNotMatch(whppCanonicalSource, /finalEvidenceRows:facts\.length/,
+  'visible facts may include retry placeholders and must never be reused as completion evidence');
 assert.match(whppCanonicalSource, /Cache-Control','no-store/);
 
 // V168 must no longer run three separate recovery/summary reads. The one V322
 // persisted status read is allowed only because V322 itself carries the exact
-// current-cohort WHPP completion contract above, rejects stale same-date cohorts,
-// and fails closed when persisted status cannot be read.
+// current-cohort V414 success-evidence contract, restart proof, stale-cohort guard,
+// and fail-closed behavior.
+assert.match(sevenBusinessSource, /STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1'/,
+  'V168 must consume the exact V414 persisted status protocol');
 assert.match(sevenBusinessSource, /businessType: 'ALL', reportDate: target/,
   'V168 must request all persisted three-stage truth in one exact-date read');
 assert.match(sevenBusinessSource, /\/api\/v33\/run-progress\?\$\{query\.toString\(\)\}/,
@@ -93,15 +102,23 @@ assert.doesNotMatch(sevenBusinessSource, /\/api\/v132\/whpp-fast-summary|\/api\/
   'V168 must not trigger separate heavy recovery/WHPP summary reads');
 assert.doesNotMatch(sevenBusinessSource, /\/api\/business-state\/WHPP/,
   'V168 must not use the legacy snapshot-only WHPP status route');
-assert.match(v322StatusSource, /V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v322-whpp-v132-current-cohort-parity-v1'/,
-  'V322 must explicitly own V132-equivalent WHPP current-cohort completion semantics');
+assert.match(v322StatusSource, /V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v414-one-read-seven-business-status-v1'/,
+  'V322 must expose the same persisted status protocol consumed by V168/V67');
+assert.match(v322StatusSource, /V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v414-whpp-success-evidence-parity-v1'/,
+  'V322 must explicitly own V414 SUCCESS-only WHPP current-cohort completion semantics');
 assert.match(v322StatusSource, /function whppCompletionDecision\(/);
-for (const source of ['CURRENT_DAILY_FINALIZATION_MARKER','CURRENT_FINALIZED_WHPP_STATE','EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP','FULL_MEMBER_FINAL_EVIDENCE']) {
+for (const source of ['CURRENT_DAILY_FINALIZATION_MARKER','CURRENT_FINALIZED_WHPP_STATE','EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP','FULL_MEMBER_SUCCESS_EVIDENCE']) {
   assert.ok(v322StatusSource.includes(source), `V322 WHPP completion parity missing ${source}`);
 }
+assert.match(v322StatusSource, /UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,
+  'V322 full-member completion must exclude retry/placeholder current rows');
+assert.match(v322StatusSource, /restartInterrupted/,
+  'V322 must expose persisted restart interruption proof to the restart-only browser owner');
+assert.match(v322StatusSource, /PROCESS_RESTART_INTERRUPTED/,
+  'V322 restart proof must use the exact durable interruption marker');
 assert.match(v322StatusSource, /const standardCurrent=Boolean\(standard\.present&&\(!batchSnapshotId\|\|!exactUnified\.ok\|\|standard\.memberCount===exactUnified\.count\)\)/,
   'V322 must reject a stale same-date standard cohort when current unified WHPP membership changed');
-assert.match(v322StatusSource, /EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.businessType='WHPP' AND f\.shipmentCode=d\.shipmentCode AND f\.reportDate=\?\)/,
+assert.match(v322StatusSource, /EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.businessType='WHPP' AND f\.shipmentCode=d\.shipmentCode AND f\.reportDate=\?/,
   'V322 full-evidence completion must stay bound to the exact current WHPP members');
 assert.match(v322StatusSource, /ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,
   'V322 unknown status must fail closed so run controls cannot unlock on a read failure');
@@ -135,4 +152,4 @@ assert.ok(serverLoaderStart >= 0, 'interactive-first server loader function must
 assert.ok(serverLoaderEnd > serverLoaderStart, 'interactive-first server loader must end before deferred maintenance function');
 assert.ok(serverImportIndex > serverLoaderStart && serverImportIndex < serverLoaderEnd, 'interactive-first server loader must actually import server.js');
 
-console.log('[V377.1/V295.8/V294] clean reupload integrity smoke passed · isolated V377 lifecycle fixture + current-run/newest VALID import binding verified for CCSL/SHOPEE · V168 one-read V322 status retains V132 WHPP current-cohort completion parity · unknown status fails closed');
+console.log('[V414/V377.1/V295.8/V294] clean reupload integrity smoke passed · isolated same-date lifecycle fixture + current-run/newest VALID import binding verified for CCSL/SHOPEE · V168 one-read V322 status shares V414 SUCCESS-only WHPP completion/restart-proof semantics · retry placeholders cannot close · unknown status fails closed');

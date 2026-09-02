@@ -152,7 +152,7 @@ try {
   assert.match(startupSource,/v294PostProcessAttemptBackfillPatch\.js/,'real bootstrap chain must activate V294 post-process parity before server startup');
   assert.match(startupSource,/v294CarryoverSchedulerActivation\.js/,'real bootstrap chain must activate V294 carry scheduler before server startup');
   assert.match(carryActivationSource,/server\.once\('listening', activate\)/,'carry scheduler must wait for a real bound/listening server before background activation');
-  assert.match(postProcessSource,/fromDate: date/,'automatic post-run attempt repair must be limited to the completed report date, not full-history synchronous scanning');
+  assert.match(postProcessSource,/fromDate\s*:\s*date/,'automatic post-run attempt repair must be limited to the completed report date, not full-history synchronous scanning');
   assert.match(postProcessSource,/typesForPath/,'automatic post-run repair must limit CCSL to TBKH and SHOPEE runs to CN/VN');
   assert.match(specialUiSource,/attemptComplete\?fmt\(last\.attempt1\):'—'/,'special business board must render —, not a partial 1-pai count, until all POD attempts are proven');
   assert.match(specialUiSource,/signingComplete&&last\.avgSigningDays!=null/,'special business board must gate average signing days on complete POD signing evidence');

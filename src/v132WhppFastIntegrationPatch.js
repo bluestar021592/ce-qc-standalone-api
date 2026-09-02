@@ -4,7 +4,7 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
 
 const PATCH_ID='2026-08-22-v216-whpp-import-parity-v1';
-const STATUS_REVISION='2026-08-30-v361-whpp-finalized-lifecycle-status-v1';
+const STATUS_REVISION='2026-09-02-v414-whpp-success-evidence-status-v1';
 const ROUTE='/api/v132/whpp-fast-summary';
 const COMPLETE_SNAPSHOT=new Set(['COMPLETED','COMPLETED_WITH_RETRY']);
 
@@ -130,7 +130,7 @@ function completionDecision({standard,memberCount,finalEvidenceRows,historyPrese
     return {completed:true,snapshotStatus:retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED',completionSource:standard?.present?'EXACT_ZERO_DAILY':'ZERO_HISTORY'};
   }
   if(num(memberCount)>0&&num(finalEvidenceRows)>=num(memberCount)){
-    return {completed:true,snapshotStatus:retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED',completionSource:'FULL_MEMBER_FINAL_EVIDENCE'};
+    return {completed:true,snapshotStatus:retryPending>0?'COMPLETED_WITH_RETRY':'COMPLETED',completionSource:'FULL_MEMBER_SUCCESS_EVIDENCE'};
   }
   return {completed:false,snapshotStatus:num(memberCount)>0?'PENDING':'EMPTY',completionSource:'PENDING'};
 }
@@ -189,14 +189,16 @@ function countFinalEvidence(db,reportDate,{standard,unified}={}){
         FROM business_final_rows f
         INNER JOIN business_daily_parse_rows d
           ON d.businessType='WHPP' AND d.reportDate=? AND d.shipmentCode=f.shipmentCode
-        WHERE f.businessType='WHPP' AND f.reportDate=?`).get(reportDate,reportDate)?.count);
+        WHERE f.businessType='WHPP' AND f.reportDate=?
+          AND UPPER(COALESCE(f.apiStatus,''))='SUCCESS'`).get(reportDate,reportDate)?.count);
     }
     if(unified?.present&&unified.batchId){
       return num(db.prepare(`SELECT COUNT(DISTINCT f.shipmentCode) count
         FROM business_final_rows f
         INNER JOIN unified_import_rows u
           ON u.batchId=? AND u.businessType='WHPP' AND u.shipmentCode=f.shipmentCode
-        WHERE f.businessType='WHPP' AND f.reportDate=?`).get(unified.batchId,reportDate)?.count);
+        WHERE f.businessType='WHPP' AND f.reportDate=?
+          AND UPPER(COALESCE(f.apiStatus,''))='SUCCESS'`).get(unified.batchId,reportDate)?.count);
     }
   }catch{}
   return 0;
@@ -223,8 +225,7 @@ function buildFastStatus(requested=''){
     ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate,total:memberCount,completed:decision.completed,snapshotStatus:decision.snapshotStatus,retryPending,
     finalEvidenceRows,completionSource:decision.completionSource,
     lifecycleSnapshotStatus:lifecycle.snapshotStatus||'',lifecycleSnapshotId:lifecycle.snapshotId||'',dailyFinalizedSnapshotId:standard.finalizedSnapshotId||'',
-    summarySource:standard.present?standard.source:(unified.present?unified.source:'EMPTY'),
-    normalizedDailyPresent:Boolean(standard.present),unifiedFallbackPresent:Boolean(unified.present),serverBuildMs:Date.now()-started,
+    summarySource:standard.present?standard.source:(unified.present?unified.source:'EMPTY'),normalizedDailyPresent:Boolean(standard.present),unifiedFallbackPresent:Boolean(unified.present),serverBuildMs:Date.now()-started,
     state:{reportDate,dailyReportReady:Boolean(standard.present||unified.present),snapshotStatus:decision.snapshotStatus,completed:decision.completed,total:memberCount}
   };
 }
@@ -237,12 +238,8 @@ function buildFastSummary(requested=''){
     return {ok:true,patchId:PATCH_ID,statusRevision:STATUS_REVISION,reportDate:'',total:0,completed:false,snapshotStatus:'EMPTY',metrics:{...dashboard.metrics,retryPending:0},regions:dashboard.regions,accounting:dashboard.accounting,dashboard:{businessType:'WHPP',reportDate:'',metrics:{...dashboard.metrics,retryPending:0},regions:dashboard.regions,accounting:dashboard.accounting},summarySource:'EMPTY',completionSource:'EMPTY',generatedAt:new Date().toISOString(),serverBuildMs:Date.now()-started};
   }
 
-  // Fresh imports write WHPP directly into business_daily_reports +
-  // business_daily_parse_rows. That normalized daily membership is the primary
-  // authority, including an exact persisted zero. V351 is retained only as a
-  // disaster/history fallback when the standard cohort is missing/incomplete.
   const standard=loadStandardMembership(db,reportDate);
-  const unified=standard.present?{present:false,rows:[],source:'STANDARD_PRIMARY_NO_FALLBACK'}:loadUnifiedMembership(db,reportDate);
+  const unified=standard.present?{present:false,rows:[],source:'STANDARD_PRIMARY_NO_FALLBACK',batchId:''}:loadUnifiedMembership(db,reportDate);
   const membershipRows=standard.present?standard.rows:unified.rows;
   const facts=loadFinalFacts(db,reportDate,membershipRows);
   const dashboard=buildWhppDashboard({
@@ -259,8 +256,9 @@ function buildFastSummary(requested=''){
   const historySource=safeJson(history?.summaryJson,{});
   const retryPending=num(historySource.retryPending);
   const memberCount=uniqueRows(membershipRows).length;
+  const finalEvidenceRows=countFinalEvidence(db,reportDate,{standard,unified});
   const lifecycle=standard.present?loadCurrentLifecycleCompletion(db,reportDate,memberCount,standard.sourceSnapshotId):{complete:false};
-  const decision=completionDecision({standard,memberCount,finalEvidenceRows:facts.length,historyPresent:Boolean(history),lifecycle,retryPending});
+  const decision=completionDecision({standard,memberCount,finalEvidenceRows,historyPresent:Boolean(history),lifecycle,retryPending});
   const metrics={...dashboard.metrics,retryPending};
   const slimDashboard={businessType:'WHPP',reportDate,metrics,regions:dashboard.regions,accounting:dashboard.accounting};
   return {
@@ -281,7 +279,7 @@ function buildFastSummary(requested=''){
     state:{reportDate,dailyReportReady:true,snapshotStatus:decision.snapshotStatus,completed:decision.completed,total:num(metrics.total)},
     dashboard:slimDashboard,
     summarySource:standard.present?standard.source:(unified.present?unified.source:'EMPTY'),
-    finalEvidenceRows:facts.length,
+    finalEvidenceRows,
     generatedAt:new Date().toISOString(),
     serverBuildMs:Date.now()-started
   };
@@ -299,7 +297,7 @@ express.application.listen=function v216WhppInstantSummaryListen(...args){
         const payload=compact?buildFastStatus(req.query.reportDate||req.query.date||''):buildFastSummary(req.query.reportDate||req.query.date||'');
         const duration=Date.now()-started;
         res.setHeader('Cache-Control','no-store');
-        res.setHeader('X-CE-QC-WHPP-Summary',compact?'V361-STATUS':'V361');
+        res.setHeader('X-CE-QC-WHPP-Summary',compact?'V414-STATUS':'V414');
         res.setHeader('Server-Timing',`whppSummary;dur=${duration}`);
         if(duration>=250)console.log(`[CE-QC][PERF][WHPP_VISIBLE_TRUTH] ${ROUTE} ${duration}ms reportDate=${payload.reportDate||''} compact=${compact?1:0}`);
         res.json(payload);

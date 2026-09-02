@@ -1,6 +1,6 @@
 (function installCurrentImportStabilityV159(global){
   if(global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__)return;
-  const VERSION='2026-08-17-v159-current-import-stability-v2-result-refresh';
+  const VERSION='2026-09-02-v414-current-import-stability-v3-carryover-read-only';
   const PAGE_TYPE=Object.freeze({ce:'CE',ceaf:'CEAF',tbkh:'TBKH',ali1688:'ALI1688',shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'});
   const PATH_PAGE=Object.freeze({'/':'home','/home':'home','/ce':'ce','/ceaf':'ceaf','/tbkh':'tbkh','/ali1688':'ali1688','/shopeecn':'shopeecn','/shopeevn':'shopeevn','/import':'import','/tracking':'tracking','/track':'tracking','/exceptions':'exceptions','/reports':'reports','/settings':'settings','/logs':'logs','/data-management':'data-management'});
   const TYPES=Object.values(PAGE_TYPE);
@@ -72,10 +72,6 @@
       states[type]=provisionalState(imported,type);
       changed=true;
     }
-    if(imported?.dailyIsolation?.enabled&&imported?.carryover){
-      imported.carryover.currentOpen=num(imported.carryover.todayOpen);
-      imported.carryover.rechecked=0;
-    }
     return changed;
   }
 
@@ -116,8 +112,8 @@
     if(!node||!node.textContent.includes('综合日报已导入'))return;
     let note=document.getElementById('v159DailyIsolationNote');
     if(!note){note=document.createElement('div');note.id='v159DailyIsolationNote';note.style.cssText='margin-top:7px;color:#39705a;font-size:12px;line-height:1.5';node.appendChild(note);}
-    const today=num(imported.carryover.todayOpen),historical=num(imported.carryover.historicalOpen);
-    note.innerHTML=`<b>${String(imported.reportDate)} 当日自动处理队列：${fmt(today)}票</b> · 历史跨日 ${fmt(historical)}票独立复查，不会混入当日全自动。`;
+    const today=num(imported.carryover.todayOpen),historical=num(imported.carryover.historicalOpen),current=today+historical;
+    note.innerHTML=`<b>${String(imported.reportDate)} 当日剩余未闭环：${fmt(today)}票</b> · 历史跨日剩余未闭环 ${fmt(historical)}票 · 当前OPEN总量 ${fmt(current)}票。七业务是否已处理完成以持久化处理状态为准。`;
   }
 
   async function exactBusinessState(type,options={}){
@@ -217,7 +213,7 @@
     setTimeout(()=>{if(seedCurrentImport())global.renderAll?.();normalizeImportStatus();queueRouteGuard();alignInitialCurrentImport();},80);
     setTimeout(()=>alignInitialCurrentImport(),700);
     global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,refreshResults:refreshAllResultTruth,routeGuard:restoreRouteOwnership,syncSelectedDate:syncSelectedDateToCurrentImport};
-    console.info('[CE-QC][V159_CURRENT_IMPORT_STABILITY]',VERSION,'fresh import owns the active selected date once; historical manual date queries remain user-controlled afterwards.');
+    console.info('[CE-QC][V159_CURRENT_IMPORT_STABILITY]',VERSION,'fresh import owns the active selected date once; carryover truth is read-only in the browser and remains owned by persisted backend state.');
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();

@@ -142,12 +142,12 @@ assert.equal(db.prepare("SELECT state FROM shipment_current_state WHERE shipment
 
 const source=fs.readFileSync(new URL('../src/v134WhppRunSupervisorPatch.js',import.meta.url),'utf8');
 assert.match(source,/V378_WHPP_COMPLETION_LOCK_REVISION/);
-assert.match(source,/locked: finalized/,'durable normalized-daily finalization must remain authoritative until a real membership change replaces the marker');
-assert.match(source,/const completionLock = inspectV378WhppCompletionLock\(state\.reportDate, state\)/,'every explicit WHPP launch must check the durable daily finalization marker before CE network work');
-assert.match(source,/if \(persistedCompletion\.locked\) return false;/,'backend 5s continuity owner must not restart a finalized WHPP lifecycle');
-assert.match(source,/if \(afterPersistedCompletion\.locked\) return false;/,'backend continuity must recheck the lock after recovery before launching');
-assert.match(source,/error\?\.code === 'WHPP_ALREADY_FINALIZED'/,'duplicate start/resume must be a completed no-op instead of a new run');
-assert.match(source,/accepted: false,[\s\S]*completed: true/,'duplicate finalized start must answer success without entering processing');
+assert.match(source,/locked\s*:\s*finalized/,'durable normalized-daily finalization must remain authoritative until a real membership change replaces the marker');
+assert.match(source,/const\s+completionLock\s*=\s*inspectV378WhppCompletionLock\(state\.reportDate\s*,\s*state\)/,'every explicit WHPP launch must check the durable daily finalization marker before CE network work');
+assert.match(source,/if\s*\(persistedCompletion\.locked\)\s*\{[\s\S]*?return false;\}/,'backend 5s continuity owner must not restart a finalized WHPP lifecycle');
+assert.match(source,/if\s*\(afterPersistedCompletion\.locked\)\s*\{[\s\S]*?return false;\}/,'backend continuity must recheck the lock after recovery before launching');
+assert.match(source,/error\?\.code\s*===\s*'WHPP_ALREADY_FINALIZED'/,'duplicate start/resume must be a completed no-op instead of a new run');
+assert.match(source,/accepted\s*:\s*false,[\s\S]*completed\s*:\s*true/,'duplicate finalized start must answer success without entering processing');
 
 const store=fs.readFileSync(new URL('../src/whppStore.js',import.meta.url),'utf8');
 assert.match(store,/preserveFinalizedLifecycle = false/,'WHPP storage keeps explicit rehydrate compatibility');

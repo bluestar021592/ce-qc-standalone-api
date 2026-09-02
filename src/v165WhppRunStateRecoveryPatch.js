@@ -4,11 +4,38 @@ import { loadWhppState, saveWhppState } from './whppStore.js';
 import { ensureV351WhppNormalizedDaily } from './v351WhppUnifiedDashboardBridgePatch.js';
 import './v134WhppRunSupervisorPatch.js';
 
-const PATCH_ID = '2026-08-17-v165-whpp-run-state-recovery-v2';
+const PATCH_ID = '2026-09-02-v414-whpp-run-state-restart-proof-v1';
 const NORMALIZED_BRIDGE_REVISION = '2026-08-29-v358-whpp-requested-date-normalized-bridge-v1';
+export const V414_WHPP_RESTART_PROOF_REVISION = '2026-09-02-v414-whpp-process-restart-proof-v1';
 const RUN_ROUTES = new Set(['/api/whpp/run/start', '/api/whpp/run/resume']);
 const WRAPPED = Symbol.for('ce-qc.v165-whpp-run-state-recovery');
 const INTERRUPTED_RUN_REASON = 'PROCESS_RESTART_INTERRUPTED';
+
+function dateOnly(value = '') {
+  const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+function safeJson(value, fallback = {}) {
+  try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
+  catch { return fallback; }
+}
+function codeOf(value = {}) {
+  return String(typeof value === 'string' ? value : (value.shipmentCode || value.运单号 || value.waybill || '')).trim().toUpperCase();
+}
+function unique(values = []) { return [...new Set((values || []).map(codeOf).filter(Boolean))]; }
+function sameSet(left = [], right = []) {
+  const a = unique(left), b = unique(right);
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every(code => set.has(code));
+}
+function runIdOf(state = {}) {
+  return String(state?.processing?.runId || state?.lastRunSummary?.runId || state?.lastRun?.runId || '').trim();
+}
+function finalizedState(state = {}) {
+  const status = String(state?.snapshotStatus || '').toUpperCase();
+  return ['COMPLETED', 'COMPLETED_WITH_RETRY'].includes(status) && Boolean(String(state?.snapshotId || '').trim());
+}
 
 function recoverInterruptedRunLocks() {
   const db = getDb();
@@ -47,31 +74,92 @@ function recoverInterruptedRunLocks() {
   return { ccsl, business, recoveredAt: now };
 }
 
+function recoverInterruptedWhppState() {
+  try {
+    const state = loadWhppState();
+    const reportDate = dateOnly(state?.reportDate);
+    const processing = state?.processing || {};
+    const runId = runIdOf(state);
+    if (!reportDate || processing.running !== true || !runId || finalizedState(state)) {
+      return {
+        recovered: false,
+        reportDate,
+        runId,
+        reason: !reportDate ? 'REPORT_DATE_MISSING' : finalizedState(state) ? 'WHPP_ALREADY_FINALIZED' : processing.running !== true ? 'NO_PERSISTED_RUNNING_WHPP' : 'RUN_ID_MISSING',
+        revision: V414_WHPP_RESTART_PROOF_REVISION
+      };
+    }
+    const detectedAt = new Date().toISOString();
+    const restartRecovery = {
+      reason: INTERRUPTED_RUN_REASON,
+      reportDate,
+      runId,
+      detectedAt,
+      source: 'V165_STARTUP_PERSISTED_RUNNING_STATE',
+      revision: V414_WHPP_RESTART_PROOF_REVISION
+    };
+    saveWhppState({
+      ...state,
+      processing: {
+        ...processing,
+        running: false,
+        paused: false,
+        phase: 'WHPP等待断点恢复',
+        error: INTERRUPTED_RUN_REASON,
+        runId,
+        lastCheckpointAt: processing.lastCheckpointAt || detectedAt
+      },
+      restartRecovery
+    });
+    console.log('[CE-QC][V414_WHPP_RESTART_PROOF]', JSON.stringify(restartRecovery));
+    return { recovered: true, ...restartRecovery };
+  } catch (error) {
+    console.warn('[CE-QC][V414_WHPP_RESTART_PROOF] startup recovery skipped:', error?.message || error);
+    return { recovered: false, reason: 'WHPP_RESTART_PROOF_FAILED', error: error?.message || String(error), revision: V414_WHPP_RESTART_PROOF_REVISION };
+  }
+}
+
+export function inspectV165WhppRestartInterruption(reportDate = '') {
+  try {
+    const state = loadWhppState();
+    const requested = dateOnly(reportDate || state?.reportDate);
+    const marker = state?.restartRecovery && typeof state.restartRecovery === 'object' ? state.restartRecovery : {};
+    const markerDate = dateOnly(marker.reportDate);
+    const markerRunId = String(marker.runId || '').trim();
+    const stateRunId = runIdOf(state);
+    const interrupted = Boolean(
+      requested
+      && dateOnly(state?.reportDate) === requested
+      && markerDate === requested
+      && String(marker.reason || '').toUpperCase() === INTERRUPTED_RUN_REASON
+      && markerRunId
+      && stateRunId === markerRunId
+      && state?.processing?.running !== true
+      && !finalizedState(state)
+    );
+    return {
+      interrupted,
+      reportDate: requested,
+      runId: markerRunId,
+      reason: interrupted ? INTERRUPTED_RUN_REASON : 'NO_EXACT_WHPP_RESTART_INTERRUPTION',
+      detectedAt: String(marker.detectedAt || ''),
+      source: String(marker.source || ''),
+      marker: interrupted ? marker : null,
+      revision: V414_WHPP_RESTART_PROOF_REVISION
+    };
+  } catch (error) {
+    return { interrupted: false, reportDate: dateOnly(reportDate), runId: '', reason: 'WHPP_RESTART_PROOF_READ_FAILED', error: error?.message || String(error), revision: V414_WHPP_RESTART_PROOF_REVISION };
+  }
+}
+
 // This module is loaded before server.js. At this moment no new foreground run can
 // exist in the current process yet. Therefore any persisted status='running' row
-// belongs to a previous process and must not block V183 history refresh forever.
-// Paused / paused_write locks are deliberately preserved because the user may
-// intentionally resume them later.
+// belongs to a previous process. Paused / paused_write locks are deliberately
+// preserved. WHPP is different from CCSL/SHOPEE run-lock tables, so V414 also
+// converts only a persisted WHPP processing.running=true + runId into a durable,
+// exact PROCESS_RESTART_INTERRUPTED marker. A fresh pending import never qualifies.
 export const V165_STARTUP_RUN_LOCK_RECOVERY = recoverInterruptedRunLocks();
-
-function dateOnly(value = '') {
-  const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
-}
-function safeJson(value, fallback = {}) {
-  try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
-  catch { return fallback; }
-}
-function codeOf(value = {}) {
-  return String(typeof value === 'string' ? value : (value.shipmentCode || value.运单号 || value.waybill || '')).trim().toUpperCase();
-}
-function unique(values = []) { return [...new Set((values || []).map(codeOf).filter(Boolean))]; }
-function sameSet(left = [], right = []) {
-  const a = unique(left), b = unique(right);
-  if (a.length !== b.length) return false;
-  const set = new Set(a);
-  return b.every(code => set.has(code));
-}
+export const V165_STARTUP_WHPP_RUN_STATE_RECOVERY = recoverInterruptedWhppState();
 
 function normalizedDaily(reportDate = '') {
   const db = getDb();
@@ -174,6 +262,7 @@ function recoverWhppState(reportDate = '') {
     currentRun: null,
     lastRunSummary: null,
     lastRun: null,
+    restartRecovery: null,
     v165RecoveredFromNormalizedDaily: { patchId: PATCH_ID, revision: NORMALIZED_BRIDGE_REVISION, reportDate: normalized.daily.reportDate, expected, recoveredAt: now }
   });
   return { recovered: true, reason: 'NORMALIZED_SQLITE_REHYDRATE', state, expected, bridge };

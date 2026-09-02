@@ -69,10 +69,10 @@ assert.doesNotMatch(ui,/getElementById\('sevenBusinessStageSummary'\)/,'historic
 
 assert.match(seven,/2026-09-02-v168-one-persisted-status-read-v1/,'V168 must be the current status-only persisted reader');
 assert.match(seven,/2026-08-29-single-unified-runner-status-only-v1/,'V168 must remain status-only');
-assert.match(seven,/STATUS_SOURCE_REVISION = '2026-09-02-v322-one-read-seven-business-status-v1'/,'V168 must bind to the exact V322 persisted status contract');
+assert.match(seven,/STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1'/,'V168 must bind to the exact V414 persisted status contract');
 assert.match(seven,/new URLSearchParams\(\{ businessType: 'ALL', reportDate: target \}\)/,'V168 must request all three stages in one exact-date read');
 assert.match(seven,/\/api\/v33\/run-progress\?\$\{query\.toString\(\)\}/,'V168 must read the consolidated persisted status endpoint');
-assert.match(seven,/function stageFromPersisted\(raw = \{\}, key, label, target\)/,'V168 must derive every stage from the persisted V322 payload');
+assert.match(seven,/function stageFromPersisted\(raw = \{\}, key, label, target\)/,'V168 must derive every stage from the persisted V414 payload');
 assert.match(seven,/details: String\(raw\.lastMessage \|\| ''\)/,'persisted Shopee run-lock failure text must flow into the visible stage detail');
 assert.match(seven,/function formatFailureDetail\(stage\)[\s\S]*stage\?\.details \|\| stage\?\.error/,'V168 must preserve exact persisted failure text for display');
 assert.match(seven,/\['failed','paused'\]\.includes\(stage\.state\)[\s\S]*formatFailureDetail\(stage\)/,'only fresh failed/paused stages may become visible blockers');
@@ -81,7 +81,7 @@ assert.doesNotMatch(seven,/\/api\/v311\/shopee-recovery|\/api\/v317\/ccsl-recove
 assert.doesNotMatch(seven,/\/api\/shopee\/run\/resume|global\.resumeUnified\s*=|async function execute|function execute\(/,'V168 must never execute Shopee or unified recovery');
 
 assert.match(runner,/2026-08-29-single-unified-runner-v1/,'V67 must own the single foreground execution architecture');
-assert.match(runner,/STATUS_SOURCE_REVISION = '2026-09-02-v322-one-read-seven-business-status-v1'/,'V67 stage decisions must share the same persisted V322 status truth as V168');
+assert.match(runner,/STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1'/,'V67 stage decisions must share the same persisted V414 status truth as V168');
 assert.match(runner,/\/api\/v33\/run-progress\?\$\{query\.toString\(\)\}/,'V67 must read one exact-date persisted status before deciding whether to execute');
 assert.match(runner,/function shopeeRestartInterruption\(payload = \{\}, target = ''\)/,'V67 must classify the exact persisted Shopee restart interruption without a second status owner');
 assert.match(runner,/PROCESS_RESTART_INTERRUPTED/,'only the exact persisted restart interruption marker is eligible for automatic Shopee recovery');
@@ -98,4 +98,4 @@ assert.ok(inject.includes('X-CE-QC-V333-UI'),'V333 compatibility response header
 assert.ok(inject.includes('X-CE-QC-Unified-Runner'),'single-runner response header must be observable');
 assert.match(activation,/v311ShopeeIncompleteRecoveryPatch\.js/,'backend recovery route must remain production-active');
 
-console.log('[V395/V394/V393/V380/V378/V322/SINGLE-RUNNER] SHOPEE exact selected-date routing + preflight running-state sync + persisted failure diagnostic + lifecycle auto-prepare + WHPP completion-lock smoke passed · V168/V67 share one exact-date persisted V322 status source · early failures synchronize run lock · facts/audit immutable · V67 remains sole browser execution owner');
+console.log('[V395/V394/V393/V380/V378/V414/SINGLE-RUNNER] SHOPEE exact selected-date routing + preflight running-state sync + persisted failure diagnostic + lifecycle auto-prepare + WHPP completion-lock smoke passed · V168/V67 share one exact-date persisted V414 status source · early failures synchronize run lock · facts/audit immutable · V67 remains sole browser execution owner');
