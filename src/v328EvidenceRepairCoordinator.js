@@ -1,1 +1,1 @@
-export { V328_EVIDENCE_COORDINATOR_ID, invalidateV328EvidenceRepair, requestV328EvidenceRepair, inspectV328EvidenceRepair } from './historyCacheCoordinators.js';
+export { V328_EVIDENCE_COORDINATOR_ID, FINALIZED_DELIVERY_EVIDENCE_REVISION, hasFinalizedDeliveryEvidenceAttempt, invalidateV328EvidenceRepair, requestV328EvidenceRepair, inspectV328EvidenceRepair } from './historyCacheCoordinators.js';
