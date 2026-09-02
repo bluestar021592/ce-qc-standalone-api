@@ -22,7 +22,7 @@ test('old source date alone never makes a parcel severe when latest node is fres
   assert.equal(row.入库无扫描节点, '否');
   assert.equal(row.中转节点停留, '是');
   assert.equal(row.严重超时, '否');
-  assert.equal(row.primaryCategory, '中转节点停留');
+  assert.equal(row.primaryCategory, 'WHPP滞留包裹', 'latest WHPP destination keeps its dedicated business category');
   assert.equal(row.latestEventTime, '2026-08-03 10:00:00');
 });
 
@@ -41,7 +41,7 @@ test('a later inbound node closes the previous Pending episode', () => {
   assert.equal(/Pending/.test(row.primaryCategory), false);
 });
 
-test('only code 150 Pending after the latest progress node remains active', () => {
+test('all real code-150 dates remain factual when latest state is Pending', () => {
   const row = analyzeShopeeShipment({
     ...base,
     events: [
@@ -50,9 +50,11 @@ test('only code 150 Pending after the latest progress node remains active', () =
       { eventCode: '150', eventTime: '2026-08-04 09:00:00', trackingEventDescZh: 'Pending 客户改约' }
     ]
   });
-  assert.equal(row.Pending当前次数, 1);
+  assert.equal(row.Pending当前次数, 2, 'distinct real Pending dates must not be erased by an intermediate progress node');
+  assert.equal(row.pendingDistinctDayCount, 2);
   assert.equal(row.Pending状态, '是');
-  assert.equal(row.primaryCategory, 'Pending1次');
+  assert.equal(row.Pending不连续, '是');
+  assert.equal(row.primaryCategory, 'Pending2次');
 });
 
 test('OC closes when a newer effective track node appears', () => {
@@ -128,7 +130,7 @@ test('tracking code 80 POD and code 86 completed return are normal closed states
   assert.equal(returned.carry状态, 'closed_return');
 });
 
-test('delivery attempts are counted once per Cambodia natural day', () => {
+test('free-text delivery descriptions never fabricate dispatch attempts', () => {
   const row = analyzeShopeeShipment({
     ...base,
     events: [
@@ -137,7 +139,23 @@ test('delivery attempts are counted once per Cambodia natural day', () => {
       { eventTime: '2026-08-03 09:00:00', trackingEventDescZh: 'Delivery Assign' }
     ]
   });
+  assert.equal(row.currentAttemptNo, 0);
+  assert.deepEqual(row.attemptHistory, []);
+  assert.equal(row.attemptStatus, 'UNKNOWN_NO_STRICT_START_EVIDENCE');
+});
+
+test('strict 70 START then failure then new 70 START is exactly second attempt', () => {
+  const row = analyzeShopeeShipment({
+    ...base,
+    events: [
+      { eventCode: '70', eventTime: '2026-08-02 08:00:00', trackingEventDescZh: 'Delivery START' },
+      { eventCode: '70', eventTime: '2026-08-02 10:00:00', trackingEventDescZh: '重复 START 不增加派次' },
+      { eventCode: '150', eventTime: '2026-08-02 18:00:00', trackingEventDescZh: 'Pending 无法联系客户' },
+      { eventCode: '70', eventTime: '2026-08-03 09:00:00', trackingEventDescZh: 'Delivery START' }
+    ]
+  });
   assert.equal(row.currentAttemptNo, 2);
-  assert.deepEqual(row.attemptHistory, ['2026-08-02', '2026-08-03']);
-  assert.equal(row.attemptStatus, 'CALCULATED_FROM_TRACK');
+  assert.deepEqual(row.attemptHistory, ['2026-08-02 08:00:00', '2026-08-03 09:00:00']);
+  assert.equal(row.attemptStatus, 'V246_STRICT_START_FAILURE_CYCLE');
+  assert.equal(row.attemptConfidence, 'HIGH');
 });
