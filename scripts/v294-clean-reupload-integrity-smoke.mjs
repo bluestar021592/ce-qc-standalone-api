@@ -12,6 +12,7 @@ for (const file of [
   'src/v311ShopeeIncompleteRecoveryPatch.js',
   'src/v137WhppUnifiedBusinessStatePatch.js',
   'src/v132WhppFastIntegrationPatch.js',
+  'src/v322WebAvailabilityPatch.js',
   'public/v159-current-import-stability.js',
   'public/v168-seven-business-status.js'
 ]) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
@@ -25,6 +26,7 @@ const ccslRecoverySource = fs.readFileSync(new URL('../src/v317CcslIncompleteRec
 const shopeeRecoverySource = fs.readFileSync(new URL('../src/v311ShopeeIncompleteRecoveryPatch.js', import.meta.url), 'utf8');
 const whppStateSource = fs.readFileSync(new URL('../src/v137WhppUnifiedBusinessStatePatch.js', import.meta.url), 'utf8');
 const whppCanonicalSource = fs.readFileSync(new URL('../src/v132WhppFastIntegrationPatch.js', import.meta.url), 'utf8');
+const v322StatusSource = fs.readFileSync(new URL('../src/v322WebAvailabilityPatch.js', import.meta.url), 'utf8');
 const currentImportUiSource = fs.readFileSync(new URL('../public/v159-current-import-stability.js', import.meta.url), 'utf8');
 const sevenBusinessSource = fs.readFileSync(new URL('../public/v168-seven-business-status.js', import.meta.url), 'utf8');
 
@@ -78,12 +80,33 @@ assert.match(whppCanonicalSource, /num\(memberCount\)>0&&num\(finalEvidenceRows\
 assert.match(whppCanonicalSource, /completionDecision\(\{standard,memberCount,finalEvidenceRows:facts\.length,historyPresent:Boolean\(history\),lifecycle,retryPending\}\)/,
   'visible WHPP summary must use the same centralized lifecycle-aware completion decision');
 assert.match(whppCanonicalSource, /Cache-Control','no-store/);
-assert.match(sevenBusinessSource, /\/api\/v132\/whpp-fast-summary\?reportDate=\$\{encoded\}/,
-  'V168 must read the same canonical WHPP summary as the visible board');
-assert.doesNotMatch(sevenBusinessSource, /readJson\(`\/api\/business-state\/WHPP\?reportDate=\$\{encoded\}`\)/,
+
+// V168 must no longer run three separate recovery/summary reads. The one V322
+// persisted status read is allowed only because V322 itself carries the exact
+// current-cohort WHPP completion contract above, rejects stale same-date cohorts,
+// and fails closed when persisted status cannot be read.
+assert.match(sevenBusinessSource, /businessType: 'ALL', reportDate: target/,
+  'V168 must request all persisted three-stage truth in one exact-date read');
+assert.match(sevenBusinessSource, /\/api\/v33\/run-progress\?\$\{query\.toString\(\)\}/,
+  'V168 must use the single persisted status route');
+assert.doesNotMatch(sevenBusinessSource, /\/api\/v132\/whpp-fast-summary|\/api\/v311\/shopee-recovery|\/api\/v317\/ccsl-recovery/,
+  'V168 must not trigger separate heavy recovery/WHPP summary reads');
+assert.doesNotMatch(sevenBusinessSource, /\/api\/business-state\/WHPP/,
   'V168 must not use the legacy snapshot-only WHPP status route');
-assert.match(sevenBusinessSource, /payload\?\.completed === true/,
-  'V168 must accept canonical current-membership completion without requiring a duplicate run snapshot');
+assert.match(v322StatusSource, /V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v322-whpp-v132-current-cohort-parity-v1'/,
+  'V322 must explicitly own V132-equivalent WHPP current-cohort completion semantics');
+assert.match(v322StatusSource, /function whppCompletionDecision\(/);
+for (const source of ['CURRENT_DAILY_FINALIZATION_MARKER','CURRENT_FINALIZED_WHPP_STATE','EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP','FULL_MEMBER_FINAL_EVIDENCE']) {
+  assert.ok(v322StatusSource.includes(source), `V322 WHPP completion parity missing ${source}`);
+}
+assert.match(v322StatusSource, /const standardCurrent=Boolean\(standard\.present&&\(!batchSnapshotId\|\|!exactUnified\.ok\|\|standard\.memberCount===exactUnified\.count\)\)/,
+  'V322 must reject a stale same-date standard cohort when current unified WHPP membership changed');
+assert.match(v322StatusSource, /EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.businessType='WHPP' AND f\.shipmentCode=d\.shipmentCode AND f\.reportDate=\?\)/,
+  'V322 full-evidence completion must stay bound to the exact current WHPP members');
+assert.match(v322StatusSource, /ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,
+  'V322 unknown status must fail closed so run controls cannot unlock on a read failure');
+assert.doesNotMatch(v322StatusSource, /scan_results|business_scan_results|business_track_events|track_events/,
+  'V322 status must not reconstruct scan or trajectory facts');
 
 // A successful fresh import owns the active selected date. This prevents the
 // homepage range owner from immediately repainting the new 8/15 import with old
@@ -112,4 +135,4 @@ assert.ok(serverLoaderStart >= 0, 'interactive-first server loader function must
 assert.ok(serverLoaderEnd > serverLoaderStart, 'interactive-first server loader must end before deferred maintenance function');
 assert.ok(serverImportIndex > serverLoaderStart && serverImportIndex < serverLoaderEnd, 'interactive-first server loader must actually import server.js');
 
-console.log('[V377.1/V295.8/V294] clean reupload integrity smoke passed · isolated V377 lifecycle fixture + current-run/newest VALID import binding verified for CCSL/SHOPEE · stale run pointers retire without deleting audit snapshots · canonical lifecycle-aware WHPP completion retained');
+console.log('[V377.1/V295.8/V294] clean reupload integrity smoke passed · isolated V377 lifecycle fixture + current-run/newest VALID import binding verified for CCSL/SHOPEE · V168 one-read V322 status retains V132 WHPP current-cohort completion parity · unknown status fails closed');
