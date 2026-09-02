@@ -29,7 +29,7 @@ test('current status prefers latest structured state over historical QC category
 
 test('locked trajectory codes determine user-facing current status', () => {
   const cases = [
-    ['26', '入库无扫描'],
+    ['26', '揽收成功'],
     ['30', '盘点'],
     ['32', '盘点'],
     ['99', '工单'],
