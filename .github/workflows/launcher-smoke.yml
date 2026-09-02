@@ -46,15 +46,19 @@ jobs:
             'fetch','origin','main','reset','--hard','origin/main','node_modules','5177',
             'Get-PortOwnerPids','Stop-PortOwners','Stop-LegacySupervisors','Get-CimInstance','taskkill.exe','/T','/F',
             'Get-ShellSupervisorForProcess','Stop-RecordedRuntime','runtime_supervisor.pid','stable and free',
-            'Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','CE_QC_LAUNCHER_TEST_MODE'
+            'Verify-InstalledCandidate','Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','CE_QC_LAUNCHER_TEST_MODE'
           )) {
             if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
           }
           if ($text -match '(?m)^\s*elif\s*\(') {
             throw 'launcher contains bash/python-style elif; PowerShell requires elseif'
           }
-          if ($text.Contains("Start-CeQcBackend") -or $text.Contains("ArgumentList @('bootstrap.js')")) {
-            throw 'desktop launcher must hand off to protected Start_CE_QC.ps1 instead of launching Node directly'
+          if ($text.Contains("Start-CeQcBackend")) {
+            throw 'desktop update launcher must never own a second production backend supervisor'
+          }
+          $handoff = "& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$ProjectRoot 'Start_CE_QC.ps1')"
+          if (-not $text.Contains($handoff)) {
+            throw 'verified update must hand off final production runtime ownership to Start_CE_QC.ps1'
           }
           if ($text -match "stash','push','-u") {
             throw 'launcher must not stash/remove untracked local runtime or backup files'
