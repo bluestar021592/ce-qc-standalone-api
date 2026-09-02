@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getRuntimeConfig } from './db.js';
 
-const PATCH_ID='2026-09-03-v419-export-result-truth-invalidation-v1';
+const PATCH_ID='2026-08-17-v179-async-export-stale-recovery-v2';
 const PREPARE_PATH='/api/export-period/prepare';
 const STATUS_PATH='/api/v84/export-job/:jobId';
 const LEGACY_RUNNING_STALE_MS=Math.max(60_000,Number(process.env.EXPORT_LEGACY_RUNNING_STALE_MS||120_000));
@@ -32,15 +32,6 @@ function touchedAt(job={}){
   const ms=Date.parse(raw);
   return Number.isFinite(ms)?ms:0;
 }
-function persistedTruthWatermarkMs(){
-  const dbFile=String(getRuntimeConfig().dbFile||'').trim();
-  if(!dbFile)return 0;
-  let watermark=0;
-  for(const file of [dbFile,`${dbFile}-wal`]){
-    try{watermark=Math.max(watermark,Number(fs.statSync(file).mtimeMs||0));}catch{}
-  }
-  return watermark;
-}
 function staleInfo(job={}){
   const status=String(job.status||'').toUpperCase();
   if(!['QUEUED','RUNNING'].includes(status))return {stale:false,ageMs:0,limitMs:0};
@@ -48,16 +39,6 @@ function staleInfo(job={}){
   const ageMs=touched?Math.max(0,Date.now()-touched):Number.MAX_SAFE_INTEGER;
   const limitMs=status==='QUEUED'?QUEUED_STALE_MS:(job.heartbeatAt?HEARTBEAT_RUNNING_STALE_MS:LEGACY_RUNNING_STALE_MS);
   return {stale:ageMs>limitMs,ageMs,limitMs};
-}
-function completedTruthStaleInfo(job={}){
-  if(String(job.status||'').toUpperCase()!=='COMPLETED')return {stale:false,completedAtMs:0,truthWatermarkMs:0};
-  const completedAtMs=Date.parse(job.completedAt||job.updatedAt||'');
-  const truthWatermarkMs=persistedTruthWatermarkMs();
-  return {
-    stale:Boolean(Number.isFinite(completedAtMs)&&completedAtMs>0&&truthWatermarkMs>completedAtMs),
-    completedAtMs:Number.isFinite(completedAtMs)?completedAtMs:0,
-    truthWatermarkMs
-  };
 }
 function markStale(file,job,info){
   if(!file||!job||!info?.stale)return job;
@@ -75,52 +56,25 @@ function markStale(file,job,info){
     updatedAt:now,
     recoveryPatchId:PATCH_ID
   };
-  try{writeAtomic(file,next);console.warn(`[CE-QC][V419_EXPORT_RECOVERY] stale job released ${job.jobId||path.basename(file)} age=${Math.round(info.ageMs/1000)}s`);return next;}
-  catch(error){console.error('[CE-QC][V419_EXPORT_RECOVERY] failed to mark stale job:',error?.stack||error);return job;}
-}
-function markTruthStale(file,job,info){
-  if(!file||!job||!info?.stale)return job;
-  const now=new Date().toISOString();
-  const next={
-    ...job,
-    status:'FAILED',
-    progress:100,
-    cancelRequested:false,
-    errorCode:'EXPORT_RESULT_STALE_DATA_CHANGED',
-    message:'所选范围的数据在上次导出后已经更新，旧文件已停止复用；本次将重新生成最新数据。',
-    error:'EXPORT_RESULT_STALE_DATA_CHANGED',
-    failedAt:now,
-    staleDetectedAt:now,
-    updatedAt:now,
-    exportTruthCompletedAtMs:info.completedAtMs,
-    exportTruthWatermarkMs:info.truthWatermarkMs,
-    recoveryPatchId:PATCH_ID
-  };
-  try{writeAtomic(file,next);console.info(`[CE-QC][V419_EXPORT_TRUTH_INVALIDATED] ${job.jobId||path.basename(file)} completed=${info.completedAtMs} truth=${info.truthWatermarkMs}`);return next;}
-  catch(error){console.error('[CE-QC][V419_EXPORT_RECOVERY] failed to invalidate stale completed export:',error?.stack||error);return job;}
+  try{writeAtomic(file,next);console.warn(`[CE-QC][V179_EXPORT_RECOVERY] stale job released ${job.jobId||path.basename(file)} age=${Math.round(info.ageMs/1000)}s`);return next;}
+  catch(error){console.error('[CE-QC][V179_EXPORT_RECOVERY] failed to mark stale job:',error?.stack||error);return job;}
 }
 function reapFile(file){
   const job=readJob(file);if(!job)return null;
-  const truth=completedTruthStaleInfo(job);if(truth.stale)return markTruthStale(file,job,truth);
   const info=staleInfo(job);return info.stale?markStale(file,job,info):job;
 }
 function reapRecent(){
   let names=[];try{names=fs.readdirSync(jobsDir()).filter(name=>name.endsWith('.json')).slice(-SCAN_LIMIT);}catch{return 0;}
   let reaped=0;
-  for(const name of names){
-    const file=path.join(jobsDir(),name);const before=readJob(file);if(!before)continue;
-    const truth=completedTruthStaleInfo(before);
-    if(truth.stale){markTruthStale(file,before,truth);reaped+=1;continue;}
-    const info=staleInfo(before);if(!info.stale)continue;markStale(file,before,info);reaped+=1;
-  }
+  for(const name of names){const file=path.join(jobsDir(),name);const before=readJob(file);if(!before)continue;const info=staleInfo(before);if(!info.stale)continue;markStale(file,before,info);reaped+=1;}
   return reaped;
 }
 function prepareRecovery(req,res,next){
-  try{const reaped=reapRecent();if(reaped)req.ceQcV176ReapedJobs=reaped;}catch(error){console.warn('[CE-QC][V419_EXPORT_RECOVERY] prepare stale scan failed:',error?.message||error);}
+  try{const reaped=reapRecent();if(reaped)req.ceQcV176ReapedJobs=reaped;}catch(error){console.warn('[CE-QC][V179_EXPORT_RECOVERY] prepare stale scan failed:',error?.message||error);}
   next();
 }
 function statusRecovery(req,res,next){
-  try{const file=fileFor(req.params?.jobId);if(file&&fs.existsSync(file))reapFile(file);}catch(error){console.warn('[CE-QC][V419_EXPORT_RECOVERY] status stale check failed:',error?.message||error);}
+  try{const file=fileFor(req.params?.jobId);if(file&&fs.existsSync(file))reapFile(file);}catch(error){console.warn('[CE-QC][V179_EXPORT_RECOVERY] status stale check failed:',error?.message||error);}
   next();
 }
 
@@ -141,5 +95,5 @@ if(typeof previousGet==='function'&&!previousGet[WRAPPED]){
   Object.defineProperty(wrappedGet,WRAPPED,{value:true});express.application.get=wrappedGet;
 }
 
-export function inspectV176AsyncExportRecovery(){return {patchId:PATCH_ID,prepareInstalled,statusInstalled,legacyRunningStaleMs:LEGACY_RUNNING_STALE_MS,heartbeatRunningStaleMs:HEARTBEAT_RUNNING_STALE_MS,queuedStaleMs:QUEUED_STALE_MS,truthWatermarkMs:persistedTruthWatermarkMs()};}
+export function inspectV176AsyncExportRecovery(){return {patchId:PATCH_ID,prepareInstalled,statusInstalled,legacyRunningStaleMs:LEGACY_RUNNING_STALE_MS,heartbeatRunningStaleMs:HEARTBEAT_RUNNING_STALE_MS,queuedStaleMs:QUEUED_STALE_MS};}
 export const V176_ASYNC_EXPORT_RECOVERY_ID=PATCH_ID;
