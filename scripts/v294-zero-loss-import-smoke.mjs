@@ -138,11 +138,16 @@ try {
   assert.match(runnerSource, /async function waitForWhppFinalized\(target,[\s\S]*return await verifyWhpp\(target\)/, 'WHPP finalized wait must verify its own canonical snapshot before being accepted');
   assert.match(runnerSource, /if \(stage\.key === 'WHPP'\) return await waitForWhppFinalized\(target\)/, 'WHPP stage must wait for its finalized snapshot after start/resume');
   assert.match(runnerSource, /for \(let index = 0; index < stages\.length; index \+= 1\)[\s\S]*const stage = stages\[index\][\s\S]*await runStage\(stage, mode === 'resume', target\)/, 'all stages must execute through the same bounded ordered runner');
-  const ccslStage = runnerSource.indexOf("{ key: 'CCSL'");
-  const shopeeStage = runnerSource.indexOf("{ key: 'SHOPEE'");
-  const whppStage = runnerSource.indexOf("{ key: 'WHPP'");
+  const stagesStart = runnerSource.indexOf('const stages = [');
+  const stagesEnd = runnerSource.indexOf('];', stagesStart);
+  assert.ok(stagesStart >= 0 && stagesEnd > stagesStart, 'canonical ordered stages array must exist');
+  const orderedStages = runnerSource.slice(stagesStart, stagesEnd + 2);
+  const ccslStage = orderedStages.indexOf("{ key: 'CCSL'");
+  const shopeeStage = orderedStages.indexOf("{ key: 'SHOPEE'");
+  const whppStage = orderedStages.indexOf("{ key: 'WHPP'");
   assert.ok(ccslStage >= 0 && shopeeStage > ccslStage && whppStage > shopeeStage, 'all-business auto run order must stay CCSL -> SHOPEE -> WHPP so WHPP is never double-run');
-  assert.equal((runnerSource.match(/\/api\/whpp\/run\/start/g) || []).length, 1, 'WHPP start endpoint must appear exactly once in the browser orchestration');
+  assert.equal((orderedStages.match(/\/api\/whpp\/run\/start/g) || []).length, 1, 'WHPP start endpoint must appear exactly once in the canonical browser stage array');
+  assert.match(runnerSource, /if \(result\.ok === false\) break;/, 'a failed earlier stage must stop the ordered runner before later stages can start');
 
   console.log(`[V346/V294] zero-loss import smoke passed · same-date/same-file reupload overwrites by default · old same-date completed snapshots retire · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
 } finally {
