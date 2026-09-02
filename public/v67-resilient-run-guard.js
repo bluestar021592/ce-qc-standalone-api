@@ -428,8 +428,6 @@
   // the V414 regression gate verifies the new restart-only executable semantics:
   // 2026-09-02-v67-persisted-three-stage-runner-v2
   // 2026-09-02-v322-one-read-seven-business-status-v1
-  // 检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土
-  // [CE-QC][V67_WHPP_AUTO_RESUME]
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
   else setTimeout(install, 0);
