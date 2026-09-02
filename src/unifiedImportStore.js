@@ -11,7 +11,7 @@ export function saveUnifiedImport(parsed, sourceName, options = {}) {
   const stageStartedAt = Date.now();
   assertSourceReconciliation(parsed);
   const db = getDb();
-  const previousValid = db.prepare("SELECT * FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC LIMIT 1").get(parsed.reportDate);
+  const previousValid = db.prepare("SELECT * FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1").get(parsed.reportDate);
   const exactSameFile = Boolean(previousValid && String(previousValid.fileHash || '') === String(parsed.fileHash || ''));
   if (options?.reuseExactDuplicate === true && exactSameFile) {
     const hydrated = hydrateBatch(previousValid, true);
@@ -55,19 +55,16 @@ export function saveUnifiedImport(parsed, sourceName, options = {}) {
 }
 
 export function getLatestUnifiedImport() {
-  const row = getDb().prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC LIMIT 1").get();
+  const row = getDb().prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC,rowid DESC LIMIT 1").get();
   return row ? hydrateBatch(row, false) : null;
 }
 
 export function listUnifiedImportHistory(limit = 120) {
-  // One report date must resolve to the newest currently VALID import batch.
-  // A superseded COMPLETED snapshot belongs to an older upload of the same date
-  // and must never replace the latest imported classification on business pages.
   const rows = getDb().prepare(`SELECT b.*, s.status snapshotStatus, s.createdAt snapshotCreatedAt
     FROM unified_import_batches b
     LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
     WHERE b.status='VALID'
-    ORDER BY b.reportDate DESC, b.createdAt DESC
+    ORDER BY b.reportDate DESC, b.createdAt DESC, b.rowid DESC
     LIMIT ?`).all(Math.max(1, Math.min(500, Number(limit) || 120)));
   const seen = new Set();
   return rows.filter(row => {
@@ -153,26 +150,89 @@ export function carryoverSummary(reportDate) {
   return summary;
 }
 
-export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shopeeSnapshot = null }) {
+function snapshotValid(snapshot, expectedCount, reportDate, sourceSnapshotId = '', batchId = '') {
+  if (Number(expectedCount || 0) === 0) return true;
+  if (!snapshot?.snapshotId) return false;
+  if (String(snapshot.status || 'VALID').toUpperCase() !== 'VALID') return false;
+  if (String(snapshot.reconciliationStatus || 'COMPLETED').toUpperCase() !== 'COMPLETED') return false;
+  const state = snapshot.state || {};
+  const stateDate = String(state.reportDate || reportDate || '').slice(0, 10);
+  if (stateDate && stateDate !== reportDate) return false;
+  const source = String(state.sourceSnapshotId || state.batchId || '').trim();
+  return !source || source === sourceSnapshotId || source === batchId;
+}
+
+export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shopeeSnapshot = null, whppSnapshot = null }) {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM unified_snapshots WHERE reportDate=? AND status IN ('IMPORTED','COMPLETED','INVALID_FAILED_RECONCILIATION') ORDER BY createdAt DESC LIMIT 1").get(reportDate);
+  const row = db.prepare("SELECT * FROM unified_snapshots WHERE reportDate=? AND status IN ('IMPORTED','COMPLETED','INVALID_FAILED_RECONCILIATION') ORDER BY createdAt DESC,rowid DESC LIMIT 1").get(reportDate);
   if (!row) return null;
   const payload = JSON.parse(row.payloadJson || '{}');
   const typeByBill = new Map(db.prepare('SELECT shipmentCode,businessType FROM unified_import_rows WHERE snapshotId=?').all(row.snapshotId).map(item => [item.shipmentCode, item.businessType]));
-  const partitionedRows = partitionUnifiedRows(
-    [...(ccslSnapshot?.state?.finalRows || []), ...(shopeeSnapshot?.state?.finalRows || [])],
-    typeByBill
-  );
-  const completedAt = nowIso();
-  payload.completedAt = completedAt;
-  payload.sourceSnapshots = { CCSL: ccslSnapshot?.snapshotId || '', SHOPEE: shopeeSnapshot?.snapshotId || '' };
-  payload.finalRows = partitionedRows.dailyRows;
-  payload.historicalCarryRows = partitionedRows.historicalCarryRows;
-  payload.dashboard = { CCSL: ccslSnapshot?.view || null, SHOPEE: shopeeSnapshot?.view || null };
   const expectedCounts = Object.fromEntries(BUSINESS_TYPES.map(type => [type, 0]));
   for (const item of db.prepare('SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE snapshotId=? GROUP BY businessType').all(row.snapshotId)) {
     expectedCounts[item.businessType] = Number(item.count);
   }
+  const expectedCcsl = ['CE','CEAF','TBKH','ALI1688'].reduce((sum,type)=>sum+Number(expectedCounts[type]||0),0);
+  const expectedShopee = Number(expectedCounts.SHOPEECN||0)+Number(expectedCounts.SHOPEEVN||0);
+  const expectedWhpp = Number(expectedCounts.WHPP||0);
+  const ccslValid = snapshotValid(ccslSnapshot, expectedCcsl, reportDate, row.snapshotId, row.batchId);
+  const shopeeValid = snapshotValid(shopeeSnapshot, expectedShopee, reportDate, row.snapshotId, row.batchId);
+  const whppValid = snapshotValid(whppSnapshot, expectedWhpp, reportDate, row.snapshotId, row.batchId);
+
+  const corePartition = partitionUnifiedRows(
+    [...(ccslSnapshot?.state?.finalRows || []), ...(shopeeSnapshot?.state?.finalRows || [])],
+    typeByBill
+  );
+  const coreActualCounts = Object.fromEntries(BUSINESS_TYPES.map(type => [type, corePartition.dailyRows.filter(item => item.businessType === type).length]));
+  const coreExpected = expectedCcsl + expectedShopee;
+  const coreCountChecks = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].every(type => coreActualCounts[type] === Number(expectedCounts[type] || 0));
+  const coreUnique = new Set(corePartition.dailyRows.map(codeOf).filter(Boolean));
+  const sourceReconciliation = buildSourceReconciliation(expectedCounts, typeByBill.size);
+  const coreReady = ccslValid && shopeeValid && sourceReconciliation.balanced && coreCountChecks
+    && corePartition.dailyRows.length === coreExpected && coreUnique.size === corePartition.dailyRows.length;
+
+  if (expectedWhpp > 0 && !whppValid && coreReady) {
+    const deferredAt = nowIso();
+    payload.sourceSnapshots = { CCSL: ccslSnapshot?.snapshotId || '', SHOPEE: shopeeSnapshot?.snapshotId || '', WHPP: '' };
+    payload.pendingFinalization = { status: 'WAITING_WHPP', expectedWhpp, at: deferredAt, sourceSnapshotId: row.snapshotId, batchId: row.batchId };
+    payload.validationStatus = 'PENDING_WHPP';
+    payload.reconciliationStatus = 'PENDING';
+    payload.sourceReconciliation = sourceReconciliation;
+    payload.reconciliation = {
+      expectedCounts,
+      actualCounts: coreActualCounts,
+      uniqueFinalRows: coreUnique.size,
+      sourceReconciliation,
+      sourceSnapshotsValid: false,
+      passed: false,
+      pendingStage: 'WHPP'
+    };
+    payload.parentRun = {
+      runId: payload.parentRun?.runId || `UNIFIED-${row.batchId}`,
+      reportDate,
+      status: 'PROCESSING',
+      children: Object.fromEntries(BUSINESS_TYPES.map(type => [type, {
+        businessType: type,
+        expected: Number(expectedCounts[type] || 0),
+        completed: Number(coreActualCounts[type] || 0),
+        status: type === 'WHPP' ? 'PENDING' : (Number(coreActualCounts[type] || 0) === Number(expectedCounts[type] || 0) ? 'COMPLETED' : 'FAILED_RECONCILIATION')
+      }]))
+    };
+    db.prepare("UPDATE unified_snapshots SET status='IMPORTED',payloadJson=? WHERE snapshotId=?").run(JSON.stringify(payload), row.snapshotId);
+    return { snapshotId: row.snapshotId, reportDate, deferred: true, status: 'WAITING_WHPP', expectedWhpp, finalRowCount: corePartition.dailyRows.length, parentRun: payload.parentRun, reconciliation: payload.reconciliation };
+  }
+
+  const partitionedRows = partitionUnifiedRows(
+    [...corePartition.dailyRows, ...(whppSnapshot?.state?.finalRows || [])],
+    typeByBill
+  );
+  const completedAt = nowIso();
+  payload.completedAt = completedAt;
+  payload.sourceSnapshots = { CCSL: ccslSnapshot?.snapshotId || '', SHOPEE: shopeeSnapshot?.snapshotId || '', WHPP: whppSnapshot?.snapshotId || '' };
+  payload.finalRows = partitionedRows.dailyRows;
+  payload.historicalCarryRows = partitionedRows.historicalCarryRows;
+  payload.dashboard = { CCSL: ccslSnapshot?.view || null, SHOPEE: shopeeSnapshot?.view || null, WHPP: whppSnapshot?.view || null };
+  delete payload.pendingFinalization;
   const actualCounts = Object.fromEntries(BUSINESS_TYPES.map(type => [type, payload.finalRows.filter(item => item.businessType === type).length]));
   const uniqueBills = new Set(payload.finalRows.map(codeOf).filter(Boolean));
   const podRows = payload.finalRows.filter(isPodRow);
@@ -181,16 +241,9 @@ export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shope
   const inboundSet = new Set(inboundNoScanRows.map(codeOf));
   const podInboundIntersection = podRows.filter(item => inboundSet.has(codeOf(item))).map(codeOf);
   const returnInboundIntersection = returnedRows.filter(item => inboundSet.has(codeOf(item))).map(codeOf);
-  const sourceSnapshotsValid = Boolean(
-    ccslSnapshot?.snapshotId && shopeeSnapshot?.snapshotId
-    && String(ccslSnapshot.status || 'VALID') === 'VALID'
-    && String(ccslSnapshot.reconciliationStatus || 'COMPLETED') === 'COMPLETED'
-    && String(shopeeSnapshot.status || 'VALID') === 'VALID'
-    && String(shopeeSnapshot.reconciliationStatus || 'COMPLETED') === 'COMPLETED'
-  );
+  const sourceSnapshotsValid = ccslValid && shopeeValid && whppValid;
   const countChecks = Object.fromEntries(BUSINESS_TYPES.map(type => [type, actualCounts[type] === Number(expectedCounts[type] || 0)]));
   const retryCount = payload.finalRows.filter(isRetryRow).length;
-  const sourceReconciliation = buildSourceReconciliation(expectedCounts, typeByBill.size);
   const validationPassed = sourceSnapshotsValid
     && sourceReconciliation.balanced
     && uniqueBills.size === payload.finalRows.length
@@ -237,7 +290,7 @@ export function completeUnifiedSnapshot({ reportDate, ccslSnapshot = null, shope
     throw error;
   }
   db.prepare("UPDATE unified_snapshots SET status='COMPLETED',payloadJson=? WHERE snapshotId=?").run(JSON.stringify(payload), row.snapshotId);
-  return { snapshotId: row.snapshotId, reportDate, finalRowCount: payload.finalRows.length, parentRun: payload.parentRun, reconciliation: payload.reconciliation };
+  return { snapshotId: row.snapshotId, reportDate, deferred: false, status: 'COMPLETED', finalRowCount: payload.finalRows.length, parentRun: payload.parentRun, reconciliation: payload.reconciliation };
 }
 
 export function partitionUnifiedRows(rows = [], typeByBill = new Map()) {
@@ -303,17 +356,15 @@ export function loadUnifiedBusinessState(businessType, snapshotId = '') {
   const db = getDb();
   const batch = snapshotId
     ? db.prepare('SELECT * FROM unified_import_batches WHERE snapshotId=?').get(snapshotId)
-    : db.prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC LIMIT 1").get();
+    : db.prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC,rowid DESC LIMIT 1").get();
   if (!batch) return emptyBusinessState(type);
-  const latestBatch = db.prepare("SELECT snapshotId FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC LIMIT 1").get();
+  const latestBatch = db.prepare("SELECT snapshotId FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC,rowid DESC LIMIT 1").get();
   const isCurrentSnapshot = latestBatch?.snapshotId === batch.snapshotId;
   const dailyRows = db.prepare('SELECT rowJson FROM unified_import_rows WHERE snapshotId=? AND businessType=? ORDER BY shipmentCode').all(batch.snapshotId, type).map(row => JSON.parse(row.rowJson || '{}'));
   const bills = dailyRows.map(row => row.shipmentCode).filter(Boolean);
   const memberSet = new Set(bills);
   const unified = db.prepare('SELECT status,payloadJson FROM unified_snapshots WHERE snapshotId=?').get(batch.snapshotId);
   const payload = JSON.parse(unified?.payloadJson || '{}');
-  // Historical views stay immutable. The exact currently active snapshot may
-  // use live progress so a freshly imported report does not display stale data.
   const mayUseLiveState = !exactSnapshotRequested || isCurrentSnapshot;
   const liveShopeeState = mayUseLiveState && type.startsWith('SHOPEE') ? loadBusinessState(SHOPEE) : null;
   const liveState = liveShopeeState?.reportDate === batch.reportDate ? liveShopeeState : null;
@@ -396,7 +447,7 @@ export function loadUnifiedPeriodBusinessState(businessType, fromDate, toDate) {
     INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
     WHERE b.reportDate BETWEEN ? AND ?
       AND s.status='COMPLETED'
-    ORDER BY b.reportDate ASC,b.createdAt DESC`).all(fromDate, toDate);
+    ORDER BY b.reportDate ASC,b.createdAt DESC,b.rowid DESC`).all(fromDate, toDate);
   const byDate = new Map();
   for (const row of rows) if (!byDate.has(row.reportDate)) byDate.set(row.reportDate, row);
   const states = [...byDate.values()].map(row => loadUnifiedBusinessState(type, row.snapshotId));
