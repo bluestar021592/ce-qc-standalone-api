@@ -84,7 +84,7 @@ assert.match(v322StatusSource, /currentCompletionSnapshot/);
 assert.match(v322StatusSource, /unifiedCompletionClaim/);
 assert.match(v322StatusSource, /restartInterrupted/);
 assert.match(v322StatusSource, /PROCESS_RESTART_INTERRUPTED/);
-assert.match(v322StatusSource, /ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/);
+assert.match(v322StatusSource, /ok\s*:\s*false\s*,\s*code\s*:\s*'V322_PERSISTED_STATUS_READ_FAILED'/);
 assert.match(v322StatusSource, /Server-Timing/);
 assert.match(v322StatusSource, /V419_SCALAR_STATUS_SLOW/);
 assert.doesNotMatch(v322StatusSource, /payloadJson|stateJson|summaryJson|valueJson/,
