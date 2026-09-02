@@ -6,9 +6,10 @@ import { performance } from 'node:perf_hooks';
 import { execFileSync } from 'node:child_process';
 
 execFileSync(process.execPath,['scripts/v375-import-metadata-zero-shopee-smoke.mjs'],{stdio:'inherit'});
-for(const file of ['src/rangeDashboardStoreV320.js','src/v322WebAvailabilityPatch.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptTruth.js','src/v375UnifiedImportMetadataPatch.js','src/v311ShopeeIncompleteRecoveryPatch.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/rangeDashboardStoreV320.js','src/v322WebAvailabilityPatch.js','src/v147TrackTimeoutConfig.js','src/v295FirstAttemptTruth.js','src/v375UnifiedImportMetadataPatch.js','src/v311ShopeeIncompleteRecoveryPatch.js','public/v168-seven-business-status.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const rangeSource=fs.readFileSync('src/rangeDashboardStoreV320.js','utf8');
 const progressSource=fs.readFileSync('src/v322WebAvailabilityPatch.js','utf8');
+const statusUiSource=fs.readFileSync('public/v168-seven-business-status.js','utf8');
 const activation=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const firstAttemptSource=fs.readFileSync('src/v295FirstAttemptTruth.js','utf8');
 assert.match(rangeSource,/V322_SINGLE_DAY_DASHBOARD_CACHE_ONLY/);
@@ -17,17 +18,21 @@ assert.match(rangeSource,/requestedFrom===requestedTo\)return fastSingleDay\(req
 assert.ok(rangeSource.indexOf('return fastSingleDay(requestedTo)')<rangeSource.indexOf('const range=loadRangeDashboardV295'),'heavy historical range owner must be unreachable for a one-day request');
 
 // V322 now owns one persisted exact-date status read for CCSL + SHOPEE + WHPP.
-// The old V322_TINY_LOCK_CHECKPOINT_NO_FACT_TABLE_SCAN marker predated WHPP/V132
-// completion parity. Current WHPP parity may perform only an indexed EXISTS check
-// against final evidence for the exact current member set; it must never rebuild
-// scan/track/event truth in the web status path.
+// A fully reconciled unified COMPLETED snapshot is terminal truth and must bypass
+// every per-stage/member evidence lookup. Incomplete dates retain WHPP/V132 parity.
 assert.match(progressSource,/V322_WEB_AVAILABILITY_ID='2026-09-02-v322-persisted-three-stage-status-v5'/);
 assert.match(progressSource,/V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1'/);
 assert.match(progressSource,/V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v322-whpp-v132-current-cohort-parity-v1'/);
+assert.match(progressSource,/V322_COMPLETED_FAST_PATH_ID='2026-09-02-v322-unified-completed-snapshot-fast-path-v1'/);
+assert.match(progressSource,/function unifiedCompletedFastPath\(/,'completed seven-business lifecycle must have one canonical terminal fast path');
+assert.match(progressSource,/SELECT status,payloadJson FROM unified_snapshots WHERE snapshotId=\? AND reportDate=\? LIMIT 1/,'terminal fast path must read the exact current unified snapshot only');
+assert.match(progressSource,/reconciliation\.passed!==true/,'only a fully reconciled unified snapshot may short-circuit stage reads');
+assert.match(progressSource,/UNIFIED_COMPLETED_SNAPSHOT_FAST_PATH/,'terminal stage truth must expose its completed-snapshot source');
+assert.match(progressSource,/const completed=unifiedCompletedFastPath\(db,date,exactBatch\);[\s\S]*if\(completed\)return completed;[\s\S]*readCcslStage/,'completed snapshot must return before any stage/member evidence read');
 assert.match(progressSource,/function readV322SevenBusinessStatus/);
 assert.match(progressSource,/stages:\{CCSL,SHOPEE,WHPP\}/,'one V322 read must return all three persisted execution stages');
-assert.match(progressSource,/PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/,'CCSL and SHOPEE completion must remain persisted-header/run-lock/snapshot based');
-assert.match(progressSource,/PERSISTED_WHPP_V132_COMPLETION_PARITY/,'WHPP status must explicitly expose V132 current-cohort completion parity');
+assert.match(progressSource,/PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/,'CCSL and SHOPEE completion must remain persisted-header/run-lock/snapshot based while incomplete');
+assert.match(progressSource,/PERSISTED_WHPP_V132_COMPLETION_PARITY/,'WHPP status must explicitly expose V132 current-cohort completion parity while incomplete');
 assert.match(progressSource,/CURRENT_DAILY_FINALIZATION_MARKER/,'WHPP current daily finalization marker must close an already finalized cohort');
 assert.match(progressSource,/CURRENT_FINALIZED_WHPP_STATE/,'WHPP exact current lifecycle completion must survive browser/backend restart');
 assert.match(progressSource,/EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP/,'exact current zero membership must remain a safe no-work completion path');
@@ -40,6 +45,15 @@ assert.match(progressSource,/ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,
 assert.match(progressSource,/\/api\/v33\/run-progress/,'V322 must replace the legacy progress handler');
 assert.match(activation,/v322WebAvailabilityPatch\.js/,'V322 web availability guard must activate before server route registration');
 assert.match(activation,/v375UnifiedImportMetadataPatch\.js/,'V375 import metadata owner must activate before server route registration');
+
+// Once one exact-date read proves all seven businesses complete, the browser must
+// stop its 10s status polling until a new import/date lifecycle requires recheck.
+assert.match(statusUiSource,/TERMINAL_READ_POLICY = '2026-09-02-v168-stop-polling-completed-date-v1'/);
+assert.match(statusUiSource,/function terminalTruthFor\(target\)/);
+assert.match(statusUiSource,/if \(!options\.force && terminalTruthFor\(target\)\)/,'completed exact-date truth must short-circuit explicit refreshes');
+assert.match(statusUiSource,/terminalDate = lastTruth\.complete \? target : ''/,'fresh complete truth must latch the exact report date');
+assert.match(statusUiSource,/!terminalTruthFor\(target\)\) void refreshTruth\(\)/,'10s poll must skip an exact completed report date');
+assert.match(statusUiSource,/ce-qc-unified-import-committed[\s\S]*clearTerminal\(\)/,'new committed import must invalidate the previous terminal latch');
 
 // V374 supersedes the earlier V344 lookup policy. Large first-attempt fact/event AND
 // membership lookups must keep normalized businessType/shipmentCode columns bare so
@@ -115,5 +129,20 @@ assert.equal(all.statusVersion,'2026-09-02-v322-one-read-seven-business-status-v
 assert.deepEqual(Object.keys(all.stages),['CCSL','SHOPEE','WHPP']);
 assert.equal(all.stages.WHPP.completionPolicy,'2026-09-02-v322-whpp-v132-current-cohort-parity-v1');
 assert.match(String(all.stages.WHPP.statusSource||''),/PERSISTED_WHPP_V132_COMPLETION_PARITY/);
+
+// Flip only the exact current unified snapshot to the shape produced by
+// completeUnifiedSnapshot. The next status read must return before stage/member reads.
+const expectedCounts={CE:1,CEAF:1,TBKH:1,ALI1688:1,SHOPEECN:1,SHOPEEVN:1,WHPP:1};
+db.prepare('UPDATE unified_snapshots SET payloadJson=? WHERE snapshotId=?').run(JSON.stringify({reconciliation:{passed:true,expectedCounts}}),snapshotId);
+started=performance.now();const terminal=readV322SevenBusinessStatus({reportDate:date,db}),terminalMs=performance.now()-started;
+assert.equal(terminal.complete,true);
+assert.equal(terminal.completedFastPath,'2026-09-02-v322-unified-completed-snapshot-fast-path-v1');
+assert.equal(terminal.stages.CCSL.complete,true);assert.equal(terminal.stages.SHOPEE.complete,true);assert.equal(terminal.stages.WHPP.complete,true);
+assert.equal(terminal.stages.CCSL.sourceTotal,4);assert.equal(terminal.stages.SHOPEE.sourceTotal,2);assert.equal(terminal.stages.WHPP.sourceTotal,1);
+assert.equal(terminal.stages.CCSL.statusSource,'UNIFIED_COMPLETED_SNAPSHOT_FAST_PATH');
+assert.equal(terminal.stages.SHOPEE.statusSource,'UNIFIED_COMPLETED_SNAPSHOT_FAST_PATH');
+assert.equal(terminal.stages.WHPP.statusSource,'UNIFIED_COMPLETED_SNAPSHOT_FAST_PATH');
+assert.ok(terminalMs<100,`completed unified status must stay sub-100ms in fixture, got ${terminalMs.toFixed(1)}ms`);
+
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact 1/1 WHPP standard membership + six unified businesses = 7 · V322 one-read persisted three-stage status + V132 WHPP completion parity · single-day period=${rangeMs.toFixed(1)}ms · persisted progress=${progressMs.toFixed(1)}ms · no scan/track/event reconstruction`);
+console.log(`[V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact 1/1 WHPP standard membership + six unified businesses = 7 · incomplete V322 retains V132 parity · fully reconciled COMPLETED snapshot short-circuits all stage/member reads · V168 completed date stops polling · single-day period=${rangeMs.toFixed(1)}ms · persisted progress=${progressMs.toFixed(1)}ms · completed-status=${terminalMs.toFixed(1)}ms · no scan/track/event reconstruction`);
