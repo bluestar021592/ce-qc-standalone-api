@@ -6,6 +6,7 @@ const files = [
   'src/v319TrendCacheFastPatch.js',
   'src/v308DeliveryDailyFastPath.js',
   'src/v329ThreeBusinessDailyCache.js',
+  'src/historyCacheCoordinators.js',
   'src/v328EvidenceRepairCoordinator.js',
   'scripts/v329-three-business-cache-worker.mjs',
   'src/shopeeHistoricalSigningTruth.js',
@@ -22,7 +23,8 @@ for (const file of files) execFileSync(process.execPath, ['--check', file], { st
 const trend = fs.readFileSync('src/v319TrendCacheFastPatch.js', 'utf8');
 const daily = fs.readFileSync('src/v308DeliveryDailyFastPath.js', 'utf8');
 const cache = fs.readFileSync('src/v329ThreeBusinessDailyCache.js', 'utf8');
-const coordinator = fs.readFileSync('src/v328EvidenceRepairCoordinator.js', 'utf8');
+const canonicalCoordinator = fs.readFileSync('src/historyCacheCoordinators.js', 'utf8');
+const coordinatorCompat = fs.readFileSync('src/v328EvidenceRepairCoordinator.js', 'utf8');
 const worker = fs.readFileSync('scripts/v329-three-business-cache-worker.mjs', 'utf8');
 const signingTruth = fs.readFileSync('src/shopeeHistoricalSigningTruth.js', 'utf8');
 const genericRoute = fs.readFileSync('src/v334GenericTrendRoutePatch.js', 'utf8');
@@ -60,7 +62,14 @@ assert.match(cache,/真实POD时间/);
 assert.doesNotMatch(cache,/首次日报锁定日期/);
 assert.doesNotMatch(cache, /fetch\(|axios|trackQuery|confirmQuery/);
 
-assert.match(coordinator, /v329-three-business-cache-worker\.mjs/);
+assert.match(coordinatorCompat, /from '\.\/historyCacheCoordinators\.js'/, 'V328 compatibility entry must point to the single canonical coordinator owner');
+assert.doesNotMatch(coordinatorCompat, /node:child_process|fork\(|DELETE FROM|setTimeout\(/, 'V328 compatibility entry must not retain a duplicate coordinator implementation');
+assert.match(canonicalCoordinator, /HISTORY_CACHE_COORDINATORS_ID='2026-09-02-unified-history-cache-coordinators-v1'/);
+assert.match(canonicalCoordinator, /function createCoordinator\(config\)/);
+assert.match(canonicalCoordinator, /v329-three-business-cache-worker\.mjs/);
+assert.match(canonicalCoordinator, /const WORKER_TIMEOUT_MS=120_000/);
+assert.match(canonicalCoordinator, /REPORT_DATE_ONLY/);
+assert.match(canonicalCoordinator, /ALL_HISTORY/);
 assert.match(worker, /v328-three-business-evidence-worker-v2\.mjs/);
 assert.doesNotMatch(worker, /readV295FirstAttemptTrends|v295FirstAttemptTruth/, 'history worker must not depend on current VALID V295 truth');
 for (const token of [
@@ -107,4 +116,4 @@ for (const script of ['v320-history-trend-owner.js', 'v328-three-business-attemp
 assert.ok(headInject.includes('v308-dashboard-read-bridge.js'), 'head injection must deliver V308 dashboard bridge');
 assert.match(headInject, /X-CE-QC-V308-UI/);
 
-console.log('[V321] web availability behavior gate passed · per-business current truth · strict START/POD signing · PP/PV signing · shared cache-only history · SPA title ownership · no release-name coupling');
+console.log('[V321] web availability behavior gate passed · canonical history coordinator · per-business current truth · strict START/POD signing · PP/PV signing · shared cache-only history · SPA title ownership · no duplicate coordinator implementation');
