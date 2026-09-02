@@ -4,11 +4,13 @@
   const VERSION = '2026-09-02-v168-one-persisted-status-read-v1';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-status-only-v1';
   const STATUS_SOURCE_REVISION = '2026-09-02-v322-one-read-seven-business-status-v1';
+  const TERMINAL_READ_POLICY = '2026-09-02-v168-stop-polling-completed-date-v1';
   const STATUS_TIMEOUT_MS = 8000;
   const STATUS_POLL_MS = 10000;
   let lastTruth = null;
   let refreshBusy = false;
   let timer = null;
+  let terminalDate = '';
 
   function normalizeDate(value) {
     const text = String(value || '').trim().replace(/\//g, '-').slice(0, 10);
@@ -42,6 +44,10 @@
       );
     } catch { return ''; }
   }
+  function terminalTruthFor(target) {
+    return Boolean(target && terminalDate === target && lastTruth?.reportDate === target && lastTruth?.complete === true && lastTruth?.statusFresh === true);
+  }
+  function clearTerminal() { terminalDate = ''; }
   function normalizedStatusError(error) {
     const name = String(error?.name || '');
     const message = String(error?.message || error || '').trim();
@@ -175,6 +181,7 @@
     node.dataset.v333Owner = 'canonical';
     node.dataset.executionOwner = 'V67';
     node.dataset.statusSourceRevision = STATUS_SOURCE_REVISION;
+    node.dataset.terminalReadPolicy = TERMINAL_READ_POLICY;
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
@@ -196,10 +203,14 @@
       unlockControl(resume);
     }
   }
-  async function refreshTruth() {
+  async function refreshTruth(options = {}) {
     if (refreshBusy) return lastTruth;
-    refreshBusy = true;
     const target = targetDate();
+    if (!options.force && terminalTruthFor(target)) {
+      renderTruth(lastTruth);
+      return lastTruth;
+    }
+    refreshBusy = true;
     try {
       if (!target) throw new Error('无法确定日报日期');
       const payload = await readPersistedStatus(target);
@@ -210,6 +221,7 @@
         stageFromPersisted(raw.WHPP, 'WHPP', 'WHPP本土', target)
       ];
       lastTruth = { reportDate: target, stages, complete: payload.complete === true && stages.every(stage => stage.state === 'done'), statusFresh: true, checkedAt: Date.now() };
+      terminalDate = lastTruth.complete ? target : '';
       renderTruth(lastTruth);
       return lastTruth;
     } catch (error) {
@@ -231,24 +243,37 @@
     if (timer) clearInterval(timer);
     timer = setInterval(() => {
       const page = document.getElementById('importPage');
-      if (page && !page.hidden && document.visibilityState === 'visible') void refreshTruth();
+      const target = targetDate();
+      if (page && !page.hidden && document.visibilityState === 'visible' && !terminalTruthFor(target)) void refreshTruth();
     }, STATUS_POLL_MS);
   }
   function install() {
     setTimeout(() => { void refreshTruth(); }, 150);
-    document.addEventListener('ce-qc-run-complete', () => setTimeout(() => { void refreshTruth(); }, 100));
-    document.addEventListener('ce-qc-unified-import-committed', () => setTimeout(() => { void refreshTruth(); }, 80));
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => { void refreshTruth(); }, 80); });
-    document.addEventListener('change', event => { if (event.target?.id === 'excelFile') setTimeout(() => { void refreshTruth(); }, 80); }, true);
-    document.addEventListener('click', event => { if (event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,[data-testid="combined-daily-import"]')) setTimeout(() => { void refreshTruth(); }, 120); }, true);
+    document.addEventListener('ce-qc-run-complete', () => { clearTerminal(); setTimeout(() => { void refreshTruth({ force: true }); }, 100); });
+    document.addEventListener('ce-qc-unified-import-committed', () => { clearTerminal(); setTimeout(() => { void refreshTruth({ force: true }); }, 80); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      const target = targetDate();
+      if (terminalTruthFor(target)) renderTruth(lastTruth);
+      else setTimeout(() => { void refreshTruth(); }, 80);
+    });
+    document.addEventListener('change', event => { if (event.target?.id === 'excelFile') { clearTerminal(); setTimeout(() => { void refreshTruth({ force: true }); }, 80); } }, true);
+    document.addEventListener('click', event => {
+      const hit = event.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,[data-testid="combined-daily-import"]');
+      if (!hit) return;
+      if (hit.matches?.('[data-testid="combined-daily-import"]')) clearTerminal();
+      setTimeout(() => { void refreshTruth(); }, 120);
+    }, true);
     schedule();
     global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__ = {
       version: VERSION, architecture: ARCHITECTURE, statusSourceRevision: STATUS_SOURCE_REVISION,
+      terminalReadPolicy: TERMINAL_READ_POLICY,
       statusTimeoutMs: STATUS_TIMEOUT_MS, statusPollMs: STATUS_POLL_MS,
       statusOnly: true, authoritativeRunner: 'V67', refresh: refreshTruth,
-      get lastTruth() { return lastTruth; }
+      get lastTruth() { return lastTruth; },
+      get terminalDate() { return terminalDate; }
     };
-    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, 'one exact-date V322 persisted read supplies all three stage badges; V168 never calls V311/V317/V132 and never starts processing.');
+    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, TERMINAL_READ_POLICY, 'one exact-date V322 persisted read supplies all three stage badges; completed dates become terminal in-page and stop the 10s status poll until a new import/date transition. V168 never calls V311/V317/V132 and never starts processing.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
