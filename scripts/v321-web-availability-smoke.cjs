@@ -70,7 +70,10 @@ assert.match(canonicalCoordinator, /v329-three-business-cache-worker\.mjs/);
 assert.match(canonicalCoordinator, /const WORKER_TIMEOUT_MS=120_000/);
 assert.match(canonicalCoordinator, /REPORT_DATE_ONLY/);
 assert.match(canonicalCoordinator, /ALL_HISTORY/);
-assert.match(worker, /v328-three-business-evidence-worker-v2\.mjs/);
+assert.match(worker, /THREE_BUSINESS_HISTORY_WORKER_ID='2026-09-02-single-process-three-business-history-worker-v1'/);
+assert.match(worker, /repairHistoricalEvidence/);
+assert.match(worker, /analyzeV246ShopeeAttemptCycle/);
+assert.doesNotMatch(worker, /node:child_process|fork\(|v328-three-business-evidence-worker/, 'history cache owner must perform saved evidence repair in the same isolated worker instead of spawning another patch worker');
 assert.doesNotMatch(worker, /readV295FirstAttemptTrends|v295FirstAttemptTruth/, 'history worker must not depend on current VALID V295 truth');
 for (const token of [
   'listV328HistoricalMembers','strict(l.attemptSource)','firstAttemptEligible','firstAttemptSuccess','firstAttemptUnknownPod',
@@ -116,4 +119,4 @@ for (const script of ['v320-history-trend-owner.js', 'v328-three-business-attemp
 assert.ok(headInject.includes('v308-dashboard-read-bridge.js'), 'head injection must deliver V308 dashboard bridge');
 assert.match(headInject, /X-CE-QC-V308-UI/);
 
-console.log('[V321] web availability behavior gate passed · canonical history coordinator · per-business current truth · strict START/POD signing · PP/PV signing · shared cache-only history · SPA title ownership · no duplicate coordinator implementation');
+console.log('[V321] web availability behavior gate passed · canonical history coordinator · one three-business history worker process · strict START/POD signing · PP/PV signing · shared cache-only history · SPA title ownership · no duplicate patch worker');
