@@ -2,7 +2,8 @@ import express from 'express';
 import { getDb } from './db.js';
 
 export const V322_WEB_AVAILABILITY_ID='2026-09-02-v322-persisted-three-stage-status-v5';
-export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v2';
+export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1';
+export const V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v322-whpp-v132-current-cohort-parity-v1';
 const previousGet=express.application.get;
 const COMPLETE_SNAPSHOT=new Set(['COMPLETED','COMPLETED_WITH_RETRY']);
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
@@ -164,21 +165,21 @@ function readWhppStage(db,date,batch){
     finalEvidenceRows=whppFinalEvidenceCount(db,date,{standardPresent:standardCurrent,snapshotId:standardCurrent?'':batchSnapshotId});
   }
   const decision=whppCompletionDecision({standard:currentStandard,lifecycle,exactZero,memberCount,finalEvidenceRows,membershipVerified,batchSnapshotId});
-  return{...stage,complete:decision.completed,zeroTicketDay:exactZero,snapshotId:text(decision.snapshotId),snapshotStatus:decision.snapshotStatus,completionSource:decision.completionSource,finalEvidenceRows,lifecycleBoundary:text(batch?.createdAt),staleRunIgnored:Boolean(raw&&!lock&&batch?.createdAt),standardMembershipPresent:standard.present,standardMembershipCurrent:standardCurrent,standardExpected:standard.expected,standardActual:standard.actual,currentMembershipConsistent:membershipVerified,statusSource:'PERSISTED_WHPP_V132_COMPLETION_PARITY'};
+  return{...stage,complete:decision.completed,zeroTicketDay:exactZero,snapshotId:text(decision.snapshotId),snapshotStatus:decision.snapshotStatus,completionSource:decision.completionSource,completionPolicy:V322_WHPP_COMPLETION_PARITY_ID,finalEvidenceRows,lifecycleBoundary:text(batch?.createdAt),staleRunIgnored:Boolean(raw&&!lock&&batch?.createdAt),standardMembershipPresent:standard.present,standardMembershipCurrent:standardCurrent,standardExpected:standard.expected,standardActual:standard.actual,currentMembershipConsistent:membershipVerified,statusSource:'PERSISTED_WHPP_V132_COMPLETION_PARITY'};
 }
 export function readV322SevenBusinessStatus({reportDate='',db=getDb()}={}){
   const requested=normalizeDate(reportDate),batch=latestValid(db,requested),date=requested||normalizeDate(batch.reportDate)||latestShopeeDate(db)||latestWhppDate(db);
-  if(!date)return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,reportDate:'',complete:false,stages:{CCSL:{key:'CCSL',complete:false},SHOPEE:{key:'SHOPEE',complete:false},WHPP:{key:'WHPP',complete:false}},generatedAt:new Date().toISOString()};
+  if(!date)return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,reportDate:'',complete:false,stages:{CCSL:{key:'CCSL',complete:false},SHOPEE:{key:'SHOPEE',complete:false},WHPP:{key:'WHPP',complete:false}},generatedAt:new Date().toISOString()};
   const exactBatch=normalizeDate(batch.reportDate)===date?batch:latestValid(db,date);
   const CCSL=readCcslStage(db,date,exactBatch),SHOPEE=readShopeeStage(db,date,exactBatch),WHPP=readWhppStage(db,date,exactBatch);
-  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,reportDate:date,batchId:text(exactBatch.batchId),sourceSnapshotId:text(exactBatch.snapshotId),lifecycleBoundary:text(exactBatch.createdAt),complete:[CCSL,SHOPEE,WHPP].every(stage=>stage.complete===true),stages:{CCSL,SHOPEE,WHPP},generatedAt:new Date().toISOString()};
+  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,reportDate:date,batchId:text(exactBatch.batchId),sourceSnapshotId:text(exactBatch.snapshotId),lifecycleBoundary:text(exactBatch.createdAt),complete:[CCSL,SHOPEE,WHPP].every(stage=>stage.complete===true),stages:{CCSL,SHOPEE,WHPP},generatedAt:new Date().toISOString()};
 }
 export function readV322RunProgress(businessType='CCSL',db=getDb(),reportDate=''){
   const type=text(businessType).toUpperCase();
   if(type==='ALL')return readV322SevenBusinessStatus({reportDate,db});
   const all=readV322SevenBusinessStatus({reportDate,db});
   const key=type==='SHOPEE'?'SHOPEE':type==='WHPP'?'WHPP':'CCSL',stage=all.stages?.[key]||{};
-  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:Math.max(0,n(stage.sourceTotal)-n(stage.scanTotal)),generatedAt:new Date().toISOString()};
+  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:Math.max(0,n(stage.sourceTotal)-n(stage.scanTotal)),generatedAt:new Date().toISOString()};
 }
 function progressHandler(req,res){
   const started=Date.now();
@@ -186,13 +187,14 @@ function progressHandler(req,res){
     res.setHeader('Cache-Control','private,max-age=1');
     res.setHeader('X-CE-QC-V322',V322_WEB_AVAILABILITY_ID);
     res.setHeader('X-CE-QC-V322-Seven-Status',V322_SEVEN_BUSINESS_STATUS_ID);
+    res.setHeader('X-CE-QC-V322-WHPP-Completion',V322_WHPP_COMPLETION_PARITY_ID);
     const data=readV322RunProgress(req.query.businessType||'CCSL',getDb(),req.query.reportDate||'');
     res.setHeader('Server-Timing',`v322progress;dur=${Date.now()-started}`);
     return res.json(data);
   }catch(error){
     res.setHeader('Server-Timing',`v322progress;dur=${Date.now()-started}`);
-    return res.status(200).json({ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),generatedAt:new Date().toISOString()});
+    return res.status(200).json({ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),generatedAt:new Date().toISOString()});
   }
 }
 express.application.get=function v322AvailabilityGet(pathValue,...handlers){if(String(pathValue||'')==='/api/v33/run-progress')return previousGet.call(this,pathValue,progressHandler);return previousGet.call(this,pathValue,...handlers);};
-console.info('[CE-QC][V322_WEB_AVAILABILITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,'one exact-date persisted read returns CCSL + SHOPEE + WHPP lifecycle truth. WHPP completion matches V132 current-cohort semantics via daily finalization, exact lifecycle, exact-zero and indexed current-member final evidence. Status read errors fail closed; no scan/track/event reconstruction is performed.');
+console.info('[CE-QC][V322_WEB_AVAILABILITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,V322_WHPP_COMPLETION_PARITY_ID,'one exact-date persisted read returns CCSL + SHOPEE + WHPP lifecycle truth. WHPP completion matches V132 current-cohort semantics via daily finalization, exact lifecycle, exact-zero and indexed current-member final evidence. Status read errors fail closed; no scan/track/event reconstruction is performed.');
