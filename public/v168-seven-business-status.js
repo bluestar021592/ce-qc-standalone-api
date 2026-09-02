@@ -6,7 +6,7 @@
   const STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1';
   const TERMINAL_READ_POLICY = '2026-09-02-v168-stop-polling-completed-date-v1';
   const TRANSIENT_POLICY = '2026-09-02-v416-never-display-stale-completed-while-unconfirmed-v1';
-  const STATUS_TIMEOUT_MS = 12000;
+  const STATUS_TIMEOUT_MS = 8000;
   const STATUS_POLL_MS = 10000;
   let lastTruth = null;
   let refreshBusy = false;
