@@ -1,9 +1,9 @@
 import { getDb } from './db.js';
 
-export const V235_DASHBOARD_CURRENT_CACHE_ID = '2026-08-23-v240-daily-rate-contract-v1';
+export const V235_DASHBOARD_CURRENT_CACHE_ID = '2026-09-02-v235-exact-seven-business-persisted-cache-v1';
 const CCSL_TYPES = ['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE_TYPES = ['SHOPEECN','SHOPEEVN'];
-const REQUIRED_TYPES = [...CCSL_TYPES,...SHOPEE_TYPES];
+const REQUIRED_TYPES = [...CCSL_TYPES,...SHOPEE_TYPES,'WHPP'];
 
 const nowIso = () => new Date().toISOString();
 const n = value => Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -41,17 +41,16 @@ function latestValidBatch(reportDate = '') {
   const db = getDb();
   const date = String(reportDate || '').trim();
   return date
-    ? db.prepare(`SELECT b.batchId,b.snapshotId,b.reportDate,b.createdAt,COALESCE(s.status,'') AS snapshotStatus
+    ? db.prepare(`SELECT b.rowid AS batchRowId,b.batchId,b.snapshotId,b.reportDate,b.createdAt,COALESCE(s.status,'') AS snapshotStatus
                   FROM unified_import_batches b LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-                  WHERE b.status='VALID' AND b.reportDate=? ORDER BY b.createdAt DESC,b.batchId DESC LIMIT 1`).get(date) || null
-    : db.prepare(`SELECT b.batchId,b.snapshotId,b.reportDate,b.createdAt,COALESCE(s.status,'') AS snapshotStatus
+                  WHERE b.status='VALID' AND b.reportDate=? ORDER BY b.createdAt DESC,b.rowid DESC LIMIT 1`).get(date) || null
+    : db.prepare(`SELECT b.rowid AS batchRowId,b.batchId,b.snapshotId,b.reportDate,b.createdAt,COALESCE(s.status,'') AS snapshotStatus
                   FROM unified_import_batches b LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-                  WHERE b.status='VALID' ORDER BY b.reportDate DESC,b.createdAt DESC,b.batchId DESC LIMIT 1`).get() || null;
+                  WHERE b.status='VALID' ORDER BY b.reportDate DESC,b.createdAt DESC,b.rowid DESC LIMIT 1`).get() || null;
 }
 
 export function normalizedDashboardCoverageReady(batch) {
   if (!batch?.snapshotId || !batch?.reportDate) return false;
-  if (String(batch.snapshotStatus || '').toUpperCase() === 'COMPLETED') return true;
   const db = getDb();
   const ccsl = db.prepare(`
     SELECT COUNT(DISTINCT u.shipmentCode) AS total,
@@ -67,7 +66,16 @@ export function normalizedDashboardCoverageReady(batch) {
     LEFT JOIN business_final_rows f ON f.businessType='SHOPEE' AND f.shipmentCode=u.shipmentCode AND f.reportDate=u.reportDate
     WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN ('SHOPEECN','SHOPEEVN')
   `).get(batch.snapshotId,batch.reportDate) || {};
-  return n(ccsl.total) === n(ccsl.matched) && n(shopee.total) === n(shopee.matched);
+  const whpp = db.prepare(`
+    SELECT COUNT(DISTINCT u.shipmentCode) AS total,
+           COUNT(DISTINCT CASE WHEN f.shipmentCode IS NOT NULL THEN u.shipmentCode END) AS matched
+    FROM unified_import_rows u
+    LEFT JOIN business_final_rows f ON f.businessType='WHPP' AND f.shipmentCode=u.shipmentCode AND f.reportDate=u.reportDate
+    WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType='WHPP'
+  `).get(batch.snapshotId,batch.reportDate) || {};
+  return n(ccsl.total) === n(ccsl.matched)
+    && n(shopee.total) === n(shopee.matched)
+    && n(whpp.total) === n(whpp.matched);
 }
 
 export function latestCompletedDashboardBatch(reportDate = '') {
@@ -80,11 +88,11 @@ export function recentCompletedDashboardDates(limit = 7) {
   const max = Math.max(1,Math.min(30,Number(limit)||7));
   const candidates = getDb().prepare(`
     WITH ranked AS (
-      SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,COALESCE(s.status,'') AS snapshotStatus,
-             ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.batchId DESC) AS rn
+      SELECT b.rowid AS batchRowId,b.reportDate,b.snapshotId,b.createdAt,b.batchId,COALESCE(s.status,'') AS snapshotStatus,
+             ROW_NUMBER() OVER(PARTITION BY b.reportDate ORDER BY b.createdAt DESC,b.rowid DESC) AS rn
       FROM unified_import_batches b LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId WHERE b.status='VALID'
     )
-    SELECT reportDate,snapshotId,snapshotStatus,createdAt,batchId FROM ranked WHERE rn=1 ORDER BY reportDate DESC LIMIT ?
+    SELECT reportDate,snapshotId,snapshotStatus,createdAt,batchId,batchRowId FROM ranked WHERE rn=1 ORDER BY reportDate DESC LIMIT ?
   `).all(Math.max(max*2, max));
   return candidates.filter(row => normalizedDashboardCoverageReady(row)).slice(0,max).map(row=>String(row.reportDate||'')).filter(Boolean);
 }
@@ -203,7 +211,10 @@ function shopeeRows(db,batch){
 
 function whppRows(db,batch){
   return db.prepare(`
-    WITH facts AS (
+    WITH valid AS (
+      SELECT u.shipmentCode FROM unified_import_rows u
+      WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType='WHPP'
+    ), facts AS (
       SELECT COALESCE(f.isPod,0) AS isPod,
         CASE WHEN COALESCE(f.isPod,0)=0 AND (COALESCE(json_extract(f.rawJson,'$."退回状态"'),'')='已退回' OR COALESCE(f.primaryCategory,'') LIKE '%退回%' OR COALESCE(f.rawJson,'') LIKE '%1203--派送异常%') THEN 1 ELSE 0 END AS isReturned,
         CASE WHEN COALESCE(f.isPod,0)=0 AND (COALESCE(json_extract(f.rawJson,'$."订单取消"'),'')='是' OR COALESCE(f.primaryCategory,'') LIKE '%取消%') THEN 1 ELSE 0 END AS isCancelled,
@@ -213,7 +224,8 @@ function whppRows(db,batch){
         COALESCE(CAST(json_extract(f.rawJson,'$."派送中停留天数"') AS INTEGER),0) AS deliveryDays,
         COALESCE(f.primaryCategory,'') AS category,COALESCE(f.rawJson,'{}') AS rawJson,
         REPLACE(SUBSTR(COALESCE(NULLIF(json_extract(f.rawJson,'$."POD时间"'),''),NULLIF(json_extract(f.rawJson,'$.podTime'),''),NULLIF(json_extract(f.rawJson,'$."签收时间"'),''),NULLIF(f.latestEventTime,''),''),1,10),'/','-') AS podDate
-      FROM business_final_rows f WHERE f.businessType='WHPP' AND f.reportDate=?
+      FROM valid v LEFT JOIN business_final_rows f
+        ON f.businessType='WHPP' AND f.shipmentCode=v.shipmentCode AND f.reportDate=?
     )
     SELECT 'WHPP' AS businessType,'' AS regionCode,COUNT(*) AS total,
       SUM(isPod) AS pod,SUM(isReturned) AS returned,SUM(CASE WHEN isPod=0 AND isReturned=0 AND isCancelled=1 THEN 1 ELSE 0 END) AS cancelled,
@@ -234,18 +246,18 @@ function whppRows(db,batch){
       SUM(CASE WHEN isPod=0 AND isReturned=0 AND isCancelled=0 AND (deliveryDays>0 OR category='派送中停留') THEN 1 ELSE 0 END) AS deliveryStay,
       0 AS provinceOpen,0 AS attempt1,0 AS attempt2,0 AS attempt3
     FROM facts
-  `).all(batch.reportDate,batch.reportDate);
+  `).all(batch.snapshotId,batch.reportDate,batch.reportDate,batch.reportDate);
 }
 
 function normalizeMetric(row={}){const out={};for(const [key,value] of Object.entries(row)){if(key==='businessType'||key==='regionCode')continue;out[key]=Number.isFinite(Number(value))?Number(value):value;}return out;}
 
 export function refreshV235CurrentDashboardCacheDate(reportDate='',options={}){
   const db=getDb();ensureCacheSchema(db);const batch=latestCompletedDashboardBatch(reportDate);
-  if(!batch)return{ok:true,skipped:true,reason:'LATEST_VALID_SNAPSHOT_NOT_READY',reportDate:String(reportDate||'')};
+  if(!batch)return{ok:true,skipped:true,reason:'LATEST_VALID_SEVEN_BUSINESS_FACTS_NOT_READY',reportDate:String(reportDate||'')};
   const fingerprint=sourceFingerprint(db,batch);const marker=db.prepare('SELECT snapshotId,sourceFingerprint FROM dashboard_cache_dates WHERE reportDate=?').get(batch.reportDate);
   if(!options.force&&marker?.snapshotId===batch.snapshotId&&marker?.sourceFingerprint===fingerprint){
-    const readyTypes=n(db.prepare("SELECT COUNT(DISTINCT businessType) AS c FROM dashboard_daily_cache WHERE reportDate=? AND snapshotId=? AND snapshotStatus='COMPLETED' AND businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')").get(batch.reportDate,batch.snapshotId)?.c);
-    if(readyTypes===REQUIRED_TYPES.length){const count=n(db.prepare("SELECT COUNT(*) AS c FROM dashboard_daily_cache WHERE reportDate=? AND snapshotId=? AND snapshotStatus='COMPLETED'").get(batch.reportDate,batch.snapshotId)?.c);return{ok:true,skipped:true,reason:'CURRENT_CACHE_READY',reportDate:batch.reportDate,snapshotId:batch.snapshotId,rowCount:count,readyTypes};}
+    const readyTypes=n(db.prepare("SELECT COUNT(DISTINCT businessType) AS c FROM dashboard_daily_cache WHERE reportDate=? AND snapshotId=? AND snapshotStatus='COMPLETED' AND businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP')").get(batch.reportDate,batch.snapshotId)?.c);
+    if(readyTypes===REQUIRED_TYPES.length){const count=n(db.prepare("SELECT COUNT(*) AS c FROM dashboard_daily_cache WHERE reportDate=? AND snapshotId=? AND snapshotStatus='COMPLETED'").get(batch.reportDate,batch.snapshotId)?.c);return{ok:true,skipped:true,reason:'CURRENT_SEVEN_BUSINESS_CACHE_READY',reportDate:batch.reportDate,snapshotId:batch.snapshotId,rowCount:count,readyTypes};}
   }
   const rows=[...ccslRows(db,batch),...shopeeRows(db,batch),...whppRows(db,batch)];const present=new Set(rows.map(row=>String(row.businessType||'').toUpperCase()));
   for(const type of REQUIRED_TYPES)if(!present.has(type))rows.push({businessType:type,regionCode:'',total:0,pod:0,returned:0,cancelled:0,sameDayPod:0,ocCurrent:0,pending1:0,pending2:0,pending3:0,pendingNonContinuous:0,oc1:0,oc2:0,oc3:0,cycle2:0,inboundNoScan:0,delivery1:0,deliveryStay:0,provinceOpen:0,attempt1:0,attempt2:0,attempt3:0});
