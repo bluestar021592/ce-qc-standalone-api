@@ -86,11 +86,11 @@ test('historical range uses latest same-day source snapshot without double count
   assert.equal(ce.analyzedTotal, 2);
   assert.equal(ce.dashboard.pnh, 2, 'old CE snapshot rows must not be double-counted');
   assert.equal(ce.dashboard.returned, 1);
-  assert.equal(ce.dashboard.abnormalCount, 1, 'normal returned parcel is excluded from abnormal count');
+  assert.equal(ce.dashboard.abnormalCount, 0, 'Pending2 is below the dedicated Pending3+ abnormal threshold and returned is a normal closure');
   assert.equal(ce.dashboardRows?.length ?? ce.detailTabs.dashboard.rows.length > 0, true);
   const cePending2 = ce.detailTabs.dashboard.rows.find(row => row.项目 === 'Pending2+');
   const ceProvinceOpen = ce.detailTabs.dashboard.rows.find(row => row.项目 === '外省未完结POD件');
-  assert.equal(cePending2?.数值原值, 1);
+  assert.equal(cePending2?.数值原值, 1, 'Pending2 may remain visible as a monitoring detail without being promoted to dedicated abnormal');
   assert.equal(ceProvinceOpen?.数值原值, 1, 'PV returned parcel must not remain province-open');
 
   const ceaf = result.states.CEAF;
@@ -98,8 +98,9 @@ test('historical range uses latest same-day source snapshot without double count
   assert.equal(ceaf.sourceTotal, 1);
   assert.equal(ceaf.analyzedTotal, 1);
   assert.equal(ceaf.dashboard.pnh, 1);
+  assert.equal(ceaf.dashboard.abnormalCount, 0, 'CEAF Pending2 follows the same Pending3+ abnormal threshold');
   const ceafPending2 = ceaf.detailTabs.dashboard.rows.find(row => row.项目 === 'Pending2+');
-  assert.equal(ceafPending2?.数值原值, 1, 'CEAF uses the same CCSL/CE metric logic');
+  assert.equal(ceafPending2?.数值原值, 1, 'CEAF uses the same CCSL/CE monitoring detail logic');
 
   const vnState = result.states.SHOPEEVN;
   const vn = vnState.dashboard.metrics;
@@ -111,7 +112,7 @@ test('historical range uses latest same-day source snapshot without double count
   assert.equal(vn.unresolved, 1, 'returned parcel is normal closure, not unresolved anomaly');
 
   assert.equal(result.aggregates.CCSL.sourceTotal, 3, 'CCSL source aggregate includes CE + CEAF');
-  assert.equal(result.aggregates.CCSL.dashboard.pnh, 3, 'CCSL analyzed aggregate includes CE + CEAF');
+  assert.equal(result.aggregates.CCSL.dashboard.pnh, 3, 'CCSL visible denominator includes CE + CEAF without historical duplicates');
   assert.equal(result.aggregates.SHOPEE.sourceTotal, 2);
   assert.equal(result.aggregates.SHOPEE.dashboard.metrics.total, 2);
 });
