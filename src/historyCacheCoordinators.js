@@ -8,11 +8,13 @@ import { V334_GENERIC_HISTORY_TYPES } from './v334GenericHistoryCache.js';
 export const HISTORY_CACHE_COORDINATORS_ID='2026-09-02-unified-history-cache-coordinators-v1';
 export const V328_EVIDENCE_COORDINATOR_ID='2026-09-02-v328-date-scoped-history-invalidation-v1';
 export const V334_GENERIC_HISTORY_COORDINATOR_ID='2026-09-02-v334-date-scoped-history-invalidation-v1';
+export const FINALIZED_DELIVERY_EVIDENCE_REVISION='2026-09-02-finalized-date-delivery-evidence-once-v1';
 const WORKER_TIMEOUT_MS=120_000;
 const rootDir=path.dirname(fileURLToPath(import.meta.url));
 const dateKey=v=>{const s=String(v||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:'';};
 const now=()=>new Date().toISOString();
 const activeStatus=value=>['QUEUED','STARTING','RUNNING'].includes(String(value||'').toUpperCase());
+const evidenceMetaKey=(type,date)=>`finalized_delivery_evidence:${FINALIZED_DELIVERY_EVIDENCE_REVISION}:${String(type||'').toUpperCase()}:${dateKey(date)}`;
 function tableExists(db,name){try{return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name));}catch{return false;}}
 function clearScopedTable(db,table,typeSet,type='',reportDate=''){
   if(!tableExists(db,table))return;
@@ -34,20 +36,32 @@ function clearGenericCaches(type='',reportDate=''){
   try{clearScopedTable(getDb(),'v334_generic_history_cache',new Set(V334_GENERIC_HISTORY_TYPES),type,reportDate);}
   catch(error){console.warn('[CE-QC][V335_GENERIC_HISTORY_INVALIDATE]',type,reportDate,error?.message||error);}
 }
+export function hasFinalizedDeliveryEvidenceAttempt(businessType='',reportDate='',db=getDb()){
+  const type=String(businessType||'').toUpperCase(),date=dateKey(reportDate);if(!V328_ATTEMPT_TYPES.includes(type)||!date)return false;
+  try{return Boolean(db.prepare('SELECT 1 FROM app_meta WHERE key=? LIMIT 1').get(evidenceMetaKey(type,date)));}catch{return false;}
+}
+function persistFinalizedDeliveryEvidenceAttempt(type,date,message={}){
+  const d=dateKey(date);if(!d||Number(message.failed||0)>0)return false;
+  try{
+    const db=getDb(),payload={revision:FINALIZED_DELIVERY_EVIDENCE_REVISION,businessType:type,reportDate:d,known:Number(message.known||0),unresolved:Number(message.unresolved||0),signingKnown:Number(message.signingKnown||0),signingUnresolved:Number(message.signingUnresolved||0),completedAt:now()};
+    db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(evidenceMetaKey(type,d),JSON.stringify(payload),payload.completedAt);return true;
+  }catch{return false;}
+}
 
 function createCoordinator(config){
   const types=[...new Set(config.types.map(v=>String(v||'').toUpperCase()).filter(Boolean))],typeSet=new Set(types);
-  const states=new Map(types.map(type=>[type,{businessType:type,status:'IDLE',phase:'WAITING',toDate:'',cacheReady:false,cacheBlocked:false,message:'',updatedAt:'',completedAt:'',startedAt:'',durationMs:0,...config.initialState}]));
+  const states=new Map(types.map(type=>[type,{businessType:type,status:'IDLE',phase:'WAITING',toDate:'',networkRepairDate:'',cacheReady:false,cacheBlocked:false,message:'',updatedAt:'',completedAt:'',startedAt:'',durationMs:0,...config.initialState}]));
   const queue=new Map(),staleCleanupByGeneration=new Map();
   let child=null,currentType='',generation=0,childGeneration=0,workerTimer=null,workerStartedAt=0;
   const patch=(type,value={})=>{const old=states.get(type)||{businessType:type};const next={...old,...value,businessType:type,updatedAt:now()};states.set(type,next);return next;};
   const clearTimer=()=>{if(workerTimer){clearTimeout(workerTimer);workerTimer=null;}};
   function spawnNext(){
     if(child||!queue.size)return;
-    const [type,toDate]=queue.entries().next().value;queue.delete(type);currentType=type;childGeneration=generation;workerStartedAt=Date.now();
-    patch(type,{status:'STARTING',phase:'STARTING',toDate,message:config.startMessage(type),startedAt:now(),durationMs:0,...config.startState});
-    console.info(config.logs.start,JSON.stringify({type,toDate,generation}));
-    const running=fork(config.workerPath,[`--type=${type}`,`--to=${toDate}`],{env:{...process.env,...config.workerEnv},stdio:['ignore','ignore','ignore','ipc']});child=running;
+    const [type,entry]=queue.entries().next().value;queue.delete(type);const toDate=entry.toDate,options=entry.options||{},networkRepairDate=dateKey(options.networkRepairDate);currentType=type;childGeneration=generation;workerStartedAt=Date.now();
+    patch(type,{status:'STARTING',phase:'STARTING',toDate,networkRepairDate,message:config.startMessage(type),startedAt:now(),durationMs:0,...config.startState});
+    console.info(config.logs.start,JSON.stringify({type,toDate,networkRepairDate,generation}));
+    const dynamicEnv=typeof config.workerEnvFor==='function'?config.workerEnvFor(type,toDate,options):{};
+    const running=fork(config.workerPath,[`--type=${type}`,`--to=${toDate}`],{env:{...process.env,...config.workerEnv,...dynamicEnv},stdio:['ignore','ignore','ignore','ipc']});child=running;
     workerTimer=setTimeout(()=>{
       if(child!==running)return;
       const durationMs=Date.now()-workerStartedAt;
@@ -58,9 +72,12 @@ function createCoordinator(config){
     running.on('message',message=>{
       if(message?.kind!==config.progressKind||childGeneration!==generation)return;
       const status=String(message.status||'RUNNING').toUpperCase(),durationMs=Date.now()-workerStartedAt,state=states.get(type)||{};
-      patch(type,{...message,status,cacheBlocked:message.cacheReady?false:state.cacheBlocked,completedAt:status==='COMPLETED'?now():state.completedAt||'',durationMs});
+      patch(type,{...message,status,networkRepairDate,cacheBlocked:message.cacheReady?false:state.cacheBlocked,completedAt:status==='COMPLETED'?now():state.completedAt||'',durationMs});
       if(message.cacheReady)try{config.onCacheReady?.(type,message);}catch{}
-      if(status==='COMPLETED')console.info(config.logs.done,JSON.stringify({type,toDate,durationMs,...config.doneMeta(message)}));
+      if(status==='COMPLETED'){
+        try{config.onComplete?.(type,toDate,options,message);}catch{}
+        console.info(config.logs.done,JSON.stringify({type,toDate,networkRepairDate,durationMs,...config.doneMeta(message)}));
+      }
     });
     running.on('error',error=>{
       if(childGeneration!==generation)return;
@@ -84,7 +101,7 @@ function createCoordinator(config){
   }
   function invalidate(reason='HISTORY_MEMBERSHIP_MUTATION',reportDate=''){
     const d=dateKey(reportDate),oldGeneration=generation;staleCleanupByGeneration.set(oldGeneration,d);generation+=1;queue.clear();config.clearCache('',d);
-    for(const type of typeSet)patch(type,{status:'IDLE',phase:d?'DATE_INVALIDATED':'INVALIDATED',toDate:'',cacheReady:false,cacheBlocked:!d,completedAt:'',message:d?config.invalidateDateMessage(d,reason):config.invalidateAllMessage(reason),...config.resetState});
+    for(const type of typeSet)patch(type,{status:'IDLE',phase:d?'DATE_INVALIDATED':'INVALIDATED',toDate:'',networkRepairDate:'',cacheReady:false,cacheBlocked:!d,completedAt:'',message:d?config.invalidateDateMessage(d,reason):config.invalidateAllMessage(reason),...config.resetState});
     if(child){try{child.kill();}catch{}}else staleCleanupByGeneration.delete(oldGeneration);clearTimer();
     return{ok:true,id:config.id,generation,reason,reportDate:d,scope:d?'REPORT_DATE_ONLY':'ALL_HISTORY'};
   }
@@ -93,13 +110,12 @@ function createCoordinator(config){
     if(typeSet.has(type))return{id:config.id,generation,...states.get(type)};
     return{id:config.id,generation,runningType:currentType,queue:[...queue.keys()],types:Object.fromEntries([...states.entries()])};
   }
-  function request(businessType='',toDate=''){
-    const type=String(businessType||'').toUpperCase(),to=dateKey(toDate);
-    if(!typeSet.has(type)||!to)return inspect(type);
-    const state=states.get(type)||{},status=String(state.status||'').toUpperCase();
-    if(activeStatus(status)&&state.toDate===to)return state;
-    if(status==='COMPLETED'&&state.toDate===to){const age=Date.now()-Date.parse(state.completedAt||state.updatedAt||0),ttl=config.completedTtlMs(state);if(Number.isFinite(age)&&ttl>0&&age<ttl)return state;}
-    queue.set(type,to);patch(type,{status:'QUEUED',phase:'QUEUED',toDate:to,cacheReady:Boolean(state.cacheReady&&state.toDate===to),cacheBlocked:Boolean(state.cacheBlocked),message:child?config.queueWaitMessage(currentType):config.queueIdleMessage});setImmediate(spawnNext);return states.get(type);
+  function request(businessType='',toDate='',options={}){
+    const type=String(businessType||'').toUpperCase(),to=dateKey(toDate),networkRepairDate=dateKey(options?.networkRepairDate);if(!typeSet.has(type)||!to)return inspect(type);
+    const state=states.get(type)||{},status=String(state.status||'').toUpperCase(),sameMode=String(state.networkRepairDate||'')===networkRepairDate;
+    if(activeStatus(status)&&state.toDate===to&&sameMode)return state;
+    if(status==='COMPLETED'&&state.toDate===to&&sameMode){const age=Date.now()-Date.parse(state.completedAt||state.updatedAt||0),ttl=config.completedTtlMs(state);if(Number.isFinite(age)&&ttl>0&&age<ttl)return state;}
+    queue.set(type,{toDate:to,options:{...options,networkRepairDate}});patch(type,{status:'QUEUED',phase:'QUEUED',toDate:to,networkRepairDate,cacheReady:Boolean(state.cacheReady&&state.toDate===to),cacheBlocked:Boolean(state.cacheBlocked),message:child?config.queueWaitMessage(currentType):config.queueIdleMessage});setImmediate(spawnNext);return states.get(type);
   }
   return{invalidate,inspect,request};
 }
@@ -108,8 +124,8 @@ const threeCoordinator=createCoordinator({
   id:V328_EVIDENCE_COORDINATOR_ID,
   types:V328_ATTEMPT_TYPES,
   initialState:{total:0,completed:0,queried:0,failed:0,known:0,unresolved:0,signingKnown:0,signingUnresolved:0,cacheVersion:0},
-  workerPath:path.resolve(rootDir,'../scripts/v329-three-business-cache-worker.mjs'),workerEnv:{CE_QC_V329_CHILD:'1'},progressKind:'V328_EVIDENCE_PROGRESS',queueDelayMs:500,
-  clearCache:clearThreeBusinessCaches,onCacheReady:()=>clearV328ThreeBusinessHistoryCache(),startState:{cacheReady:false,cacheVersion:0},resetState:{cacheVersion:0},
+  workerPath:path.resolve(rootDir,'../scripts/v329-three-business-cache-worker.mjs'),workerEnv:{CE_QC_V329_CHILD:'1'},workerEnvFor:(type,toDate,options)=>dateKey(options?.networkRepairDate)?{CE_QC_HISTORY_NETWORK_REPAIR:'1',CE_QC_HISTORY_NETWORK_REPAIR_DATE:dateKey(options.networkRepairDate)}:{CE_QC_HISTORY_NETWORK_REPAIR:'0',CE_QC_HISTORY_NETWORK_REPAIR_DATE:''},progressKind:'V328_EVIDENCE_PROGRESS',queueDelayMs:500,
+  clearCache:clearThreeBusinessCaches,onCacheReady:()=>clearV328ThreeBusinessHistoryCache(),onComplete:(type,toDate,options,message)=>{const d=dateKey(options?.networkRepairDate);if(d)persistFinalizedDeliveryEvidenceAttempt(type,d,message);},startState:{cacheReady:false,cacheVersion:0},resetState:{cacheVersion:0},
   startMessage:()=> '启动独立历史缓存/派次签收校准',timeoutMessage:ms=>`历史缓存worker超过${ms/1000}秒，已终止并允许重试`,successMessage:'后台校准完成',failureMessage:code=>`后台校准子进程退出 code=${code}`,
   queueWaitMessage:type=>`等待 ${type} 后台校准完成`,queueIdleMessage:'等待独立历史缓存启动',staleQueuedMessage:'历史成员已变化，等待新一轮独立缓存',staleDateMessage:d=>`${d}缓存已失效；其他已完成日期继续直接读取`,staleAllMessage:'历史成员已变化，旧worker结果已丢弃；下次读取将重新建立缓存',invalidateDateMessage:(d,reason)=>`${d}历史缓存已失效；其他完成日期保留：${reason}`,invalidateAllMessage:reason=>`历史缓存已失效：${reason}`,
   completedTtlMs:state=>Number(state.unresolved||0)===0&&Number(state.signingUnresolved||0)===0&&Number(state.failed||0)===0?4*60*60*1000:15*60*1000,
@@ -128,12 +144,12 @@ const genericCoordinator=createCoordinator({
 });
 
 export const invalidateV328EvidenceRepair=(reason='HISTORY_MEMBERSHIP_MUTATION',reportDate='')=>threeCoordinator.invalidate(reason,reportDate);
-export const requestV328EvidenceRepair=(businessType='',toDate='')=>threeCoordinator.request(businessType,toDate);
+export const requestV328EvidenceRepair=(businessType='',toDate='',options={})=>threeCoordinator.request(businessType,toDate,options);
 export const inspectV328EvidenceRepair=(businessType='')=>threeCoordinator.inspect(businessType);
 export const invalidateV334GenericHistory=(reason='HISTORY_MEMBERSHIP_MUTATION',reportDate='')=>genericCoordinator.invalidate(reason,reportDate);
-export const requestV334GenericHistoryBuild=(businessType='',toDate='')=>genericCoordinator.request(businessType,toDate);
+export const requestV334GenericHistoryBuild=(businessType='',toDate='',options={})=>genericCoordinator.request(businessType,toDate,options);
 export const inspectV334GenericHistoryBuild=(businessType='')=>genericCoordinator.inspect(businessType);
 
 globalThis.__CE_QC_INVALIDATE_V329_THREE_BUSINESS_HISTORY__=invalidateV328EvidenceRepair;
 globalThis.__CE_QC_INVALIDATE_V334_GENERIC_HISTORY__=invalidateV334GenericHistory;
-console.info('[CE-QC][HISTORY_CACHE_COORDINATORS]',HISTORY_CACHE_COORDINATORS_ID,'V328 + V334 now share one canonical bounded-worker coordinator implementation; persisted history invalidation remains reportDate-scoped for normal daily mutations and full only for purge/reset.');
+console.info('[CE-QC][HISTORY_CACHE_COORDINATORS]',HISTORY_CACHE_COORDINATORS_ID,FINALIZED_DELIVERY_EVIDENCE_REVISION,'V328 + V334 share one canonical bounded-worker coordinator; finalized TBKH/CN/VN missing START/POD evidence may be repaired once for the exact completed report date, while normal page reads stay persisted-cache only.');
