@@ -61,7 +61,7 @@ function seed() {
   insertShopee.run('CN-D1-RETURN',d1,0,'退回',JSON.stringify({ currentState:'RETURN_COMPLETED', 退回状态:'已退回' }),t1,t1);
 }
 
-test('source totals include imported unfinished dates while outcome metrics stay analyzed-only', () => {
+test('source totals include imported unfinished dates while analysis coverage stays explicit', () => {
   seed();
   const result = loadRangeDashboard('2026-08-01','2026-08-02');
 
@@ -88,16 +88,19 @@ test('source totals include imported unfinished dates while outcome metrics stay
   assert.equal(ce.snapshotStatus, 'PARTIAL');
   assert.deepEqual(ce.missingAnalysisDates, ['2026-08-02']);
   assert.equal(ce.dailyParseSummary.totalRecognized, 5, 'source denominator remains complete');
-  assert.equal(ce.dashboard.pnh, 2, 'POD/Pending outcome denominator remains analyzed-only');
-  assert.equal(ce.dashboard.abnormalCount, 1, 'unfinished source rows are not invented as anomalies');
+  assert.equal(ce.dashboard.pnh, 5, 'visible ticket volume follows imported source membership, never only analyzed evidence');
+  assert.equal(ce.dashboard.todayPod, 1, 'outcome facts still come only from persisted evidence');
+  assert.equal(ce.dashboard.abnormalCount, 0, 'Pending2 alone is below the dedicated Pending3+ abnormal threshold and unfinished rows are not fabricated as abnormalities');
 
   const cn = result.states.SHOPEECN;
   assert.equal(cn.sourceTotal, 5);
   assert.equal(cn.analyzedTotal, 2);
   assert.equal(cn.analysisPending, 3);
   assert.equal(cn.dailyParseSummary.totalRecognized, 5);
-  assert.equal(cn.dashboard.metrics.total, 2, 'Shopee outcome metrics remain analyzed-only');
-  assert.equal(cn.dashboard.metrics.unresolved, 0, 'three unfinished source rows are not counted unresolved');
+  assert.equal(cn.dashboard.metrics.total, 5, 'Shopee visible denominator follows the complete imported membership');
+  assert.equal(cn.dashboard.metrics.pod, 1, 'Shopee POD remains evidence-backed');
+  assert.equal(cn.dashboard.metrics.returned, 1, 'Shopee returned remains evidence-backed');
+  assert.equal(cn.dashboard.metrics.unresolved, 3, 'unprocessed imported members remain visibly open while analysisPending separately exposes missing evidence');
 
   assert.equal(result.aggregates.CCSL.sourceTotal, 5);
   assert.equal(result.aggregates.CCSL.analyzedTotal, 2);
