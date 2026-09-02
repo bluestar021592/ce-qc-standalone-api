@@ -32,6 +32,19 @@ test('V419 OPEN display uses backend values only', () => {
   assert.doesNotMatch(source,/Math\.max\(num\(carry\.historicalOpen\),num\(carry\.historicalReconciledOpen\)\)/);
 });
 
+test('V419 history audit is low priority and cannot overwrite primary OPEN', () => {
+  const audit=read('../public/v142-history-integrity-audit.js');
+  const loader=read('../src/v44WhppUiPatch.js');
+  assert.match(audit,/v419-low-priority-history-audit-no-open-mutation-v1/);
+  assert.match(audit,/function statusPriorityBusy\(/);
+  assert.match(audit,/requestIdleCallback/);
+  assert.match(audit,/auditRunning/);
+  assert.match(audit,/历史审计不会回写或覆盖主页面OPEN数字/);
+  assert.doesNotMatch(audit,/combined-processing-queue-count/);
+  assert.doesNotMatch(audit,/function syncOpenSummary\(/);
+  assert.match(loader,/v142-history-integrity-audit\.js\?v=20260902-v419-priority-1/);
+});
+
 test('V419 loader cache-busts replaced V159 and total remains core + WHPP', () => {
   const loader=read('../src/v44WhppUiPatch.js');
   const totalSync=read('../public/v68-whpp-classification-stability.js');
