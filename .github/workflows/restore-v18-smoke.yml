@@ -66,7 +66,7 @@ jobs:
           $detail = Get-Content -Raw public/detail.html
           if (-not $detail.Contains("params.get('businessType')")) { throw 'Detail page lost business-scope query support' }
 
-      - name: Run self-contained regression tests
+      - name: Run isolated self-contained regression tests
         shell: pwsh
         run: |
           $tests = @(
@@ -92,7 +92,33 @@ jobs:
             'test/v9-period-range.test.js',
             'test/v9-special-nodes.test.js'
           )
-          node --test --test-force-exit $tests
+          foreach ($test in $tests) {
+            Write-Host "=== V18 regression: $test ==="
+            $safeName = ($test -replace '[^A-Za-z0-9_.-]', '_')
+            $stdout = Join-Path $env:RUNNER_TEMP ($safeName + '.stdout.log')
+            $stderr = Join-Path $env:RUNNER_TEMP ($safeName + '.stderr.log')
+            Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
+            $proc = Start-Process -FilePath 'node.exe' -ArgumentList @('--test','--test-force-exit',$test) -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $deadline = (Get-Date).AddSeconds(90)
+            while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
+              Start-Sleep -Milliseconds 250
+              $proc.Refresh()
+            }
+            if (-not $proc.HasExited) {
+              cmd /c "taskkill /PID $($proc.Id) /T /F" | Out-Null
+              Write-Host "--- stdout: $test ---"
+              Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
+              Write-Host "--- stderr: $test ---"
+              Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue
+              throw "V18 regression timed out after 90 seconds: $test"
+            }
+            $proc.Refresh()
+            Write-Host "--- stdout: $test ---"
+            Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
+            Write-Host "--- stderr: $test ---"
+            Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue
+            if ($proc.ExitCode -ne 0) { throw "V18 regression failed with exit code $($proc.ExitCode): $test" }
+          }
 
       - name: Note external-fixture tests
         shell: pwsh
