@@ -17,8 +17,6 @@ function whppDailyCount(db,reportDate=''){
     if(expected!==actual)return{ok:false,count:0,expected,actual,reason:'WHPP_DAILY_MEMBERSHIP_INCOMPLETE'};
     return{ok:true,count:actual,expected,actual,reason:'WHPP_STANDARD_DAILY_VERIFIED'};
   }catch(error){
-    // Older isolated smoke fixtures may not declare business_daily_reports. In
-    // that case the parse-row table is still the exact WHPP current membership.
     try{
       const actual=n(db.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(date)?.count);
       return{ok:true,count:actual,reason:'WHPP_DAILY_PARSE_ROWS_COMPAT'};
@@ -47,9 +45,6 @@ export function readV418CurrentMembershipCounts(db,batch={}){
   result.CCSL=result.CE+result.CEAF+result.TBKH+result.ALI1688;
   result.SHOPEE=result.SHOPEECN+result.SHOPEEVN;
   result.TOTAL=result.CCSL+result.SHOPEE+result.WHPP;
-  // Compatibility name retained because this is still the immutable exact
-  // current snapshot membership; V418 changes only how it is read (indexed rows
-  // instead of materializing the old unified_snapshots.payloadJson blob).
   result._source='UNIFIED_SNAPSHOT_IMMUTABLE_CLASSIFICATION_COUNTS';
   result._fastSource='V418_INDEXED_CURRENT_MEMBERSHIP_COUNTS';
   result._fastPathId=V418_STATUS_PROOF_FAST_PATH_ID;
@@ -108,8 +103,9 @@ export function readV418BusinessSuccessCoverage(db,{businessType='',date='',snap
   const boundarySql=life?" AND COALESCE(f.updatedAt,'')>=?":'';
   try{
     if(type==='WHPP'){
-      const params=['WHPP',reportDate,reportDate];
+      const params=['WHPP',reportDate];
       if(life)params.push(life);
+      params.push(reportDate);
       const count=n(db.prepare(`SELECT COUNT(DISTINCT d.shipmentCode) count
         FROM business_daily_parse_rows d
         JOIN business_final_rows f
