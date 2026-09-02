@@ -88,7 +88,7 @@ test('V168 performs one exact-date persisted status read; V322 preserves V414 WH
   assert.match(fastStatus, /readV322SevenBusinessStatus/);
   assert.match(fastStatus, /stages:\{CCSL,SHOPEE,WHPP\}/);
   assert.match(fastStatus, /PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/);
-  assert.match(fastStatus, /PERSISTED_WHPP_V132_COMPLETION_PARITY/);
+  assert.match(fastStatus, /PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF/);
   assert.match(fastStatus, /function whppCompletionDecision\(/);
   assert.match(fastStatus, /standard\?\.finalized/);
   assert.match(fastStatus, /lifecycle\?\.complete/);
