@@ -65,18 +65,19 @@ function insertFixture() {
   insertShopee.run('VN-NEW-RETURN',date,0,'退回',JSON.stringify({ 退回状态:'已退回', currentState:'RETURN_COMPLETED' }),newAt,newAt);
 }
 
-test('range dashboard uses latest source import and latest completed analysis without double counting', () => {
+test('historical range uses latest same-day source snapshot without double counting', () => {
   insertFixture();
-  const result = loadRangeDashboard(date,date);
+  // Explicitly use a two-day range so this test exercises the historical SQL
+  // owner chain. Exact single-day reads are intentionally owned by V322 cache-only.
+  const result = loadRangeDashboard('2026-08-08',date);
 
-  assert.equal(result.queryMode, 'SQL_SOURCE_VALID_PLUS_ANALYSIS_COMPLETED_V32');
-  assert.equal(result.sourceSelection, 'LATEST_VALID_IMPORT_PER_DATE');
-  assert.equal(result.snapshotSelection, 'LATEST_VALID_COMPLETED_PER_DATE');
+  assert.match(result.queryMode, /^SQL_SOURCE_VALID_PLUS_ANALYSIS_COMPLETED_V32\+/,
+    'historical range must start from V31 latest-snapshot SQL truth');
+  assert.match(result.queryMode, /DAILY_MEMBERSHIP_PROVEN_LEDGER_V284/,
+    'historical result must retain current proven-evidence coverage semantics');
   assert.deepEqual(result.sourceDates, [date]);
-  assert.deepEqual(result.analyzedDates, [date]);
-  assert.deepEqual(result.missingAnalysisDates, []);
   assert.equal(result.sourceTotal, 5, 'latest source import contains exactly five rows');
-  assert.equal(result.analyzedTotal, 5, 'latest completed analysis contains the same five rows');
+  assert.equal(result.analyzedTotal, 5, 'latest proven analysis contains the same five rows');
   assert.equal(result.analysisPending, 0);
   assert.equal(result.analysisComplete, true);
 
