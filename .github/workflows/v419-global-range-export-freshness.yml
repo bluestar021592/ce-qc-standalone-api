@@ -1,0 +1,27 @@
+name: CE QC V419 global range export freshness
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  range-export-freshness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Syntax checks
+        run: |
+          node --check public/v237-dashboard-owner-guard.js
+          node --check src/v84AsyncExportPatch.js
+          node --check src/v176AsyncExportRecoveryPatch.js
+          node --check src/v320HistoricalExportRows.js
+          node --check scripts/v419-global-range-export-freshness-smoke.mjs
+      - name: Global date range + next-day export truth
+        run: node scripts/v419-global-range-export-freshness-smoke.mjs
