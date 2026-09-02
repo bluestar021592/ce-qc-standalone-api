@@ -1,0 +1,243 @@
+import express from 'express';
+import { getDb, nowIso } from './db.js';
+import { readV384CcslProcessingProof, V384_CCSL_PROCESSING_PROOF_ID } from './v384CcslProcessingProof.js';
+import { loadWhppState, saveWhppState } from './whppStore.js';
+
+export const V415_RETROACTIVE_COMPLETION_GUARD_ID='2026-09-02-v415-current-member-processing-proof-v1';
+export const V415_STALE_COMPLETION_REOPEN_ID='2026-09-02-v415-stale-completion-reopen-v1';
+const STATUS_ROUTE='/api/v33/run-progress';
+const GUARDED_POST_ROUTES=new Set(['/api/shopee/run/start','/api/shopee/run/resume','/api/whpp/run/start','/api/whpp/run/resume']);
+const previousGet=express.application.get;
+const previousPost=express.application.post;
+const GET_WRAPPED=Symbol.for('ce-qc.v415-status-proof-get');
+const POST_WRAPPED=Symbol.for('ce-qc.v415-stale-completion-post');
+
+const text=value=>String(value??'').trim();
+const n=value=>Number.isFinite(Number(value))?Number(value):0;
+const dateOnly=value=>{const s=text(value).replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:'';};
+const safeJson=(value,fallback={})=>{try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}};
+const atOrAfter=(value,boundary)=>{const limit=Date.parse(text(boundary));if(!Number.isFinite(limit))return true;const actual=Date.parse(text(value));return Number.isFinite(actual)&&actual>=limit;};
+
+function latestValidBatch(db,reportDate=''){
+  const date=dateOnly(reportDate);
+  if(!date)return null;
+  return db.prepare("SELECT batchId,snapshotId,reportDate,createdAt FROM unified_import_batches WHERE status='VALID' AND reportDate=? ORDER BY createdAt DESC,rowid DESC LIMIT 1").get(date)||null;
+}
+
+function exactMembership(db,batch){
+  const result={CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0,CCSL:0,SHOPEE:0,TOTAL:0};
+  if(!batch?.snapshotId||!batch?.reportDate)return result;
+  for(const row of db.prepare('SELECT businessType,COUNT(DISTINCT shipmentCode) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? GROUP BY businessType').all(batch.snapshotId,batch.reportDate)){
+    if(Object.hasOwn(result,row.businessType))result[row.businessType]=n(row.count);
+  }
+  result.CCSL=result.CE+result.CEAF+result.TBKH+result.ALI1688;
+  result.SHOPEE=result.SHOPEECN+result.SHOPEEVN;
+  result.TOTAL=result.CCSL+result.SHOPEE+result.WHPP;
+  return result;
+}
+
+function currentLock(db,type,date,boundary=''){
+  let row=null;
+  try{
+    row=type==='CCSL'
+      ?db.prepare('SELECT runId,status,currentStage,batchIndex,totalBatches,errorMessage,lockedAt,updatedAt,completedAt FROM run_locks WHERE reportDate=? LIMIT 1').get(date)||null
+      :db.prepare('SELECT runId,status,currentStage,batchIndex,totalBatches,errorMessage,lockedAt,updatedAt,completedAt FROM business_run_locks WHERE businessType=? AND reportDate=? LIMIT 1').get(type,date)||null;
+  }catch{return null;}
+  if(!row)return null;
+  return atOrAfter(row.lockedAt||row.updatedAt,boundary)?row:null;
+}
+
+function currentCompletionSnapshot(db,type,date,runId,boundary=''){
+  const id=text(runId);
+  if(!id)return null;
+  try{
+    const row=type==='CCSL'
+      ?db.prepare("SELECT snapshotId,runId,generatedAt,status,reconciliationStatus FROM export_snapshots WHERE reportDate=? AND runId=? AND snapshotType='dashboard' AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY id DESC LIMIT 1").get(date,id)||null
+      :db.prepare("SELECT snapshotId,runId,generatedAt,status,reconciliationStatus FROM business_export_snapshots WHERE businessType='SHOPEE' AND reportDate=? AND runId=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY id DESC LIMIT 1").get(date,id)||null;
+    return row&&atOrAfter(row.generatedAt,boundary)?row:null;
+  }catch{return null;}
+}
+
+function businessSuccessCoverage(db,{businessType,date,snapshotId,boundary='',memberTypes=[]}={}){
+  if(!snapshotId||!date||!memberTypes.length)return 0;
+  const placeholders=memberTypes.map(()=>'?').join(',');
+  const boundarySql=boundary?" AND COALESCE(f.updatedAt,'')>=?":'';
+  const params=[snapshotId,date,...memberTypes,businessType,date];
+  if(boundary)params.push(boundary);
+  try{
+    return n(db.prepare(`SELECT COUNT(DISTINCT u.shipmentCode) count
+      FROM unified_import_rows u
+      WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN (${placeholders})
+        AND EXISTS(
+          SELECT 1 FROM business_final_rows f
+          WHERE f.businessType=? AND f.reportDate=? AND f.shipmentCode=u.shipmentCode
+            AND UPPER(COALESCE(f.apiStatus,''))='SUCCESS'${boundarySql}
+        )`).get(...params)?.count);
+  }catch{return 0;}
+}
+
+export function readV415CurrentProcessingProof({db=getDb(),reportDate=''}={}){
+  const date=dateOnly(reportDate);
+  const batch=latestValidBatch(db,date);
+  if(!date||!batch)return{ok:false,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,reportDate:date,batch:null,counts:{CCSL:0,SHOPEE:0,WHPP:0,TOTAL:0},stages:{CCSL:{complete:false},SHOPEE:{complete:false},WHPP:{complete:false}},reason:'CURRENT_VALID_BATCH_MISSING'};
+  const counts=exactMembership(db,batch),boundary=text(batch.createdAt),snapshotId=text(batch.snapshotId);
+
+  const ccslLock=currentLock(db,'CCSL',date,boundary);
+  const ccslSnapshot=currentCompletionSnapshot(db,'CCSL',date,ccslLock?.runId,boundary);
+  const ccslMemberProof=counts.CCSL===0
+    ?{id:V384_CCSL_PROCESSING_PROOF_ID,source:0,covered:0,missing:0,complete:true,queryMode:'ZERO_TICKET'}
+    :readV384CcslProcessingProof(db,{reportDate:date,snapshotId,boundary});
+  const ccslComplete=counts.CCSL===0||Boolean(ccslSnapshot&&ccslMemberProof.complete&&n(ccslMemberProof.source)===counts.CCSL);
+
+  const shopeeLock=currentLock(db,'SHOPEE',date,boundary);
+  const shopeeSnapshot=currentCompletionSnapshot(db,'SHOPEE',date,shopeeLock?.runId,boundary);
+  const shopeeCovered=businessSuccessCoverage(db,{businessType:'SHOPEE',date,snapshotId,boundary,memberTypes:['SHOPEECN','SHOPEEVN']});
+  const shopeeComplete=counts.SHOPEE===0||Boolean(shopeeSnapshot&&shopeeCovered>=counts.SHOPEE);
+
+  const whppLock=currentLock(db,'WHPP',date,boundary);
+  const whppCovered=businessSuccessCoverage(db,{businessType:'WHPP',date,snapshotId,boundary,memberTypes:['WHPP']});
+  const whppComplete=counts.WHPP===0||whppCovered>=counts.WHPP;
+
+  return{
+    ok:true,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,reportDate:date,
+    batch:{batchId:text(batch.batchId),snapshotId,boundary},counts,
+    stages:{
+      CCSL:{complete:ccslComplete,total:counts.CCSL,covered:n(ccslMemberProof.covered),missing:Math.max(0,counts.CCSL-n(ccslMemberProof.covered)),memberProof:ccslMemberProof,completionSnapshotId:text(ccslSnapshot?.snapshotId),lock:ccslLock},
+      SHOPEE:{complete:shopeeComplete,total:counts.SHOPEE,covered:shopeeCovered,missing:Math.max(0,counts.SHOPEE-shopeeCovered),completionSnapshotId:text(shopeeSnapshot?.snapshotId),lock:shopeeLock},
+      WHPP:{complete:whppComplete,total:counts.WHPP,covered:whppCovered,missing:Math.max(0,counts.WHPP-whppCovered),completionSnapshotId:'',lock:whppLock}
+    }
+  };
+}
+
+function downgradedStage(stage={},proof={}){
+  if(stage?.complete!==true||proof.complete===true)return{...stage,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,...proof}};
+  const lock=proof.lock||null,status=text(lock?.status).toLowerCase();
+  return{
+    ...stage,
+    sourceTotal:n(proof.total||stage.sourceTotal),
+    complete:false,
+    zeroTicketDay:false,
+    runId:text(lock?.runId||stage.runId),
+    runStatus:status==='finished'?'stale_finished_rejected':status,
+    running:status==='running',paused:status==='paused',failed:status==='failed',
+    phase:text(lock?.currentStage)||(status==='running'?'处理中':'待处理'),
+    snapshotId:'',snapshotStatus:'PENDING',
+    completionSource:'V415_CURRENT_MEMBER_PROCESSING_PROOF_REQUIRED',
+    statusSource:'V415_RETROACTIVE_CURRENT_MEMBER_PROOF',
+    completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,...proof}
+  };
+}
+
+export function applyV415StatusGuard(payload={},proof=null){
+  if(!payload||typeof payload!=='object')return payload;
+  const resolved=proof||readV415CurrentProcessingProof({reportDate:payload.reportDate});
+  if(!resolved?.ok)return{...payload,complete:false,completionGuard:resolved};
+  if(payload.stages&&typeof payload.stages==='object'){
+    const stages={...payload.stages};
+    for(const key of ['CCSL','SHOPEE','WHPP'])stages[key]=downgradedStage(stages[key]||{key},resolved.stages[key]||{complete:false});
+    return{...payload,complete:['CCSL','SHOPEE','WHPP'].every(key=>stages[key]?.complete===true),stages,completedFastPath:payload.completedFastPath?`${payload.completedFastPath}+V415_PROOF_GUARD`:payload.completedFastPath,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,batch:resolved.batch,counts:resolved.counts}};
+  }
+  const key=text(payload.businessType||payload.key).toUpperCase()==='SHOPEE'?'SHOPEE':text(payload.businessType||payload.key).toUpperCase()==='WHPP'?'WHPP':'CCSL';
+  const guarded=downgradedStage(payload,resolved.stages[key]||{complete:false});
+  return{...guarded,businessType:payload.businessType||key,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,batch:resolved.batch,counts:resolved.counts,stage:resolved.stages[key]}};
+}
+
+function statusResponseGuard(req,res,next){
+  const previousJson=res.json;
+  res.json=function v415StatusJson(payload){
+    try{
+      const requested=dateOnly(req.query?.reportDate||payload?.reportDate);
+      const guarded=applyV415StatusGuard(payload,readV415CurrentProcessingProof({reportDate:requested}));
+      res.json=previousJson;
+      return previousJson.call(this,guarded);
+    }catch(error){
+      console.warn('[CE-QC][V415_STATUS_GUARD] proof failed closed:',error?.message||error);
+      res.json=previousJson;
+      return previousJson.call(this,{...payload,complete:false,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,ok:false,error:text(error?.message||error)}});
+    }
+  };
+  return next();
+}
+
+function currentWhppDailyRows(db,date){
+  try{return db.prepare("SELECT shipmentCode,rowJson FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY id").all(date).map(row=>{const parsed=safeJson(row.rowJson,{}),bill=text(row.shipmentCode).toUpperCase();return{...parsed,shipmentCode:bill,运单号:bill,businessType:'WHPP',reportDate:date};}).filter(row=>row.shipmentCode);}catch{return[];}
+}
+
+function reopenShopeeStaleCompletion(db,date,proof){
+  if(!proof||proof.complete||n(proof.total)===0)return{changed:false,reason:'PROOF_ALREADY_COMPLETE_OR_ZERO'};
+  const lock=proof.lock;
+  if(!lock||text(lock.status).toLowerCase()!=='finished')return{changed:false,reason:'NO_STALE_FINISHED_LOCK'};
+  const now=nowIso();
+  const result=db.prepare("UPDATE business_run_locks SET status='failed',errorMessage=?,completedAt='',updatedAt=? WHERE businessType='SHOPEE' AND reportDate=? AND runId=? AND status='finished'")
+    .run('V415_REOPEN_STALE_COMPLETION_MISSING_CURRENT_PROCESSING_PROOF',now,date,lock.runId);
+  return{changed:n(result?.changes)>0,reason:'STALE_SHOPEE_FINISHED_REOPENED',runId:text(lock.runId)};
+}
+
+function reopenWhppStaleCompletion(db,date,proof,batch){
+  if(!proof||proof.complete||n(proof.total)===0)return{changed:false,reason:'PROOF_ALREADY_COMPLETE_OR_ZERO'};
+  const current=loadWhppState(),stateDate=dateOnly(current.reportDate),rows=currentWhppDailyRows(db,date),bills=[...new Set(rows.map(row=>row.shipmentCode).filter(Boolean))];
+  const finalized=['COMPLETED','COMPLETED_WITH_RETRY'].includes(text(current.snapshotStatus).toUpperCase())||Boolean(text(current.snapshotId));
+  const sameMembers=bills.length===n(proof.total);
+  let stateReset=false;
+  if(stateDate===date&&sameMembers&&finalized){
+    saveWhppState({
+      ...current,
+      reportDate:date,
+      sourceSnapshotId:text(batch?.snapshotId||current.sourceSnapshotId),
+      dailyReportReady:true,pnhBills:bills,dailyParseRows:rows,
+      scanPool:[],scanResults:[],scanQueryStatus:[],needTrackBills:[],needExceptionBills:[],
+      trackEvents:[],eventQueryStatus:[],exceptionItems:[],exceptionQueryStatus:[],trackResults:[],finalRows:[],
+      processing:{running:false,paused:false,phase:'待处理',batchIndex:0,totalBatches:0},
+      currentRun:null,lastRunSummary:null,lastRun:null,restartRecovery:null,snapshotId:'',snapshotStatus:'IMPORTED',
+      v415StaleCompletionReopened:{id:V415_STALE_COMPLETION_REOPEN_ID,reportDate:date,previousSnapshotId:text(current.snapshotId),missing:n(proof.missing),at:nowIso()}
+    });
+    stateReset=true;
+  }
+  let lockReset=false;
+  if(proof.lock&&text(proof.lock.status).toLowerCase()==='finished'){
+    const result=db.prepare("UPDATE business_run_locks SET status='failed',errorMessage=?,completedAt='',updatedAt=? WHERE businessType='WHPP' AND reportDate=? AND runId=? AND status='finished'")
+      .run('V415_REOPEN_STALE_COMPLETION_MISSING_CURRENT_PROCESSING_PROOF',nowIso(),date,proof.lock.runId);
+    lockReset=n(result?.changes)>0;
+  }
+  return{changed:stateReset||lockReset,stateReset,lockReset,reason:stateReset||lockReset?'STALE_WHPP_COMPLETION_REOPENED':'NO_MUTABLE_STALE_POINTER',runId:text(proof.lock?.runId)};
+}
+
+function staleCompletionRunGuard(req,res,next){
+  try{
+    const requested=dateOnly(req.body?.reportDate||req.query?.reportDate);
+    const batch=latestValidBatch(getDb(),requested);
+    const date=requested||dateOnly(batch?.reportDate);
+    if(!date||!batch)return next();
+    const full=readV415CurrentProcessingProof({reportDate:date});
+    const route=text(req.path||req.originalUrl).split('?')[0];
+    const action=route.includes('/shopee/')
+      ?reopenShopeeStaleCompletion(getDb(),date,full.stages.SHOPEE)
+      :reopenWhppStaleCompletion(getDb(),date,full.stages.WHPP,full.batch);
+    req.ceQcV415StaleCompletion=action;
+    if(action.changed)console.warn('[CE-QC][V415_STALE_COMPLETION_REOPEN]',JSON.stringify({id:V415_STALE_COMPLETION_REOPEN_ID,route,date,...action}));
+    return next();
+  }catch(error){
+    console.error('[CE-QC][V415_STALE_COMPLETION_REOPEN] fail closed:',error?.stack||error);
+    return res.status(409).json({ok:false,code:'V415_STALE_COMPLETION_PROOF_FAILED',error:`当前日报旧完成状态复核失败，已阻止重复/跳过处理：${error?.message||error}`,revision:V415_RETROACTIVE_COMPLETION_GUARD_ID});
+  }
+}
+
+if(typeof previousGet==='function'&&!previousGet[GET_WRAPPED]){
+  const wrappedGet=function v415RetroactiveCompletionGet(pathValue,...handlers){
+    if(String(pathValue||'')===STATUS_ROUTE)return previousGet.call(this,pathValue,statusResponseGuard,...handlers);
+    return previousGet.call(this,pathValue,...handlers);
+  };
+  Object.defineProperty(wrappedGet,GET_WRAPPED,{value:true});
+  express.application.get=wrappedGet;
+}
+
+if(typeof previousPost==='function'&&!previousPost[POST_WRAPPED]){
+  const wrappedPost=function v415RetroactiveCompletionPost(pathValue,...handlers){
+    if(GUARDED_POST_ROUTES.has(String(pathValue||'')))return previousPost.call(this,pathValue,staleCompletionRunGuard,...handlers);
+    return previousPost.call(this,pathValue,...handlers);
+  };
+  Object.defineProperty(wrappedPost,POST_WRAPPED,{value:true});
+  express.application.post=wrappedPost;
+}
+
+console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,'legacy COMPLETED markers are display/run-authoritative only when the exact current unified membership has current-lifecycle processing proof; old audit snapshots remain preserved.');
