@@ -14,11 +14,12 @@ function analyze(events, extra = {}) {
   return analyzeShipment({ waybill: bill, scanRow, events, reportDate, ...extra });
 }
 
-test('general track 26 latest means inbound without subsequent scan', () => {
+test('general track 26 latest means pickup success normal flow', () => {
   const row = analyze([event('26', '2026-08-09 08:00:00')]);
-  assert.equal(row.currentState, 'INBOUND_NO_SCAN');
-  assert.equal(row.primaryCategory, '入库无扫描');
-  assert.equal(row.入库无扫描节点, '是');
+  assert.equal(row.currentState, 'PICKUP_SUCCESS');
+  assert.equal(row.primaryCategory, '正常流转');
+  assert.equal(row.入库无扫描节点, '否');
+  assert.equal(row.pickupSuccess, '是');
 });
 
 test('general track 30/32 latest means cycle count and clears prior 26', () => {
