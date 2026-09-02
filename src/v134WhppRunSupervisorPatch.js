@@ -101,14 +101,3 @@ export{maybeAutoResumeWhpp as recoverV357PendingWhppFinalStage,rearmBackendConti
 export const V134_WHPP_RUN_SUPERVISOR_PATCH_ID=PATCH_ID;
 export const V357_WHPP_BACKEND_CONTINUITY_REVISION=BACKEND_CONTINUITY_REVISION;
 export const V359_WHPP_SELECTED_DATE_CONTINUITY_REVISION=SELECTED_DATE_CONTINUITY_REVISION;
-
-/* Existing go-live gate compatibility tokens retained as documentation only; V414
-   forbids these from being executable fresh-import auto-start logic:
-   inspectV317ExplicitReportDateHint
-   selectedHint?.fresh
-   VISIBLE_BROWSER_STATUS_HINT
-   inspectV317CcslRecovery({ reportDate: hintedDate })
-   recoverV165WhppRunState(reportDate)
-   launchWhpp('resume')
-   setInterval(() => { void maybeAutoResumeWhpp('backend-watch'); }, AUTO_RESUME_POLL_MS)
-*/
