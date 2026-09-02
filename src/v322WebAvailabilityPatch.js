@@ -7,11 +7,11 @@ import {
   readV418BusinessSuccessCoverage
 } from './v418StatusProofFastPath.js';
 
-export const V322_WEB_AVAILABILITY_ID='2026-09-02-v419-persisted-three-stage-scalar-status-v1';
-export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v419-one-read-seven-business-scalar-status-v1';
-export const V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v419-whpp-scalar-success-evidence-parity-v1';
-export const V322_COMPLETED_FAST_PATH_ID='2026-09-02-v419-unified-scalar-status-path-v1';
-export const V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID='2026-09-02-v419-no-json-completed-claim-v1';
+export const V322_WEB_AVAILABILITY_ID='2026-09-02-v414-persisted-three-stage-status-v1';
+export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v414-one-read-seven-business-status-v1';
+export const V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v414-whpp-success-evidence-parity-v1';
+export const V322_COMPLETED_FAST_PATH_ID='2026-09-02-v322-unified-completed-snapshot-fast-path-v1';
+export const V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID='2026-09-02-v418-v322-no-payload-completed-claim-v1';
 export const V419_SCALAR_STATUS_PRIORITY_ID='2026-09-02-v419-scalar-status-priority-no-json-v1';
 export const V419_STATUS_TIMING_ID='2026-09-02-v419-status-substage-timing-v1';
 
@@ -72,14 +72,17 @@ function emptyStage(type,date,total,boundary,lock=null){
     batchIndex:n(lock?.batchIndex),totalBatches:n(lock?.totalBatches),lastMessage:interrupted?'PROCESS_RESTART_INTERRUPTED':text(lock?.errorMessage),
     running:status==='running',paused:status==='paused',failed:interrupted?false:status==='failed',
     scanDone:0,scanRetry:0,scanTotal:0,trackDone:0,trackRetry:0,trackTotal:0,done:0,retry:0,total:0,
-    complete:false,zeroTicketDay:false,snapshotId:'',snapshotStatus:'PENDING',completionSource:'V419_SCALAR_CURRENT_MEMBER_PROOF_REQUIRED',
+    complete:false,zeroTicketDay:false,snapshotId:'',snapshotStatus:'PENDING',completionSource:'V415_CURRENT_MEMBER_PROCESSING_PROOF_REQUIRED',
     restartInterrupted:interrupted,restartRecovery:interrupted?{interrupted:true,reportDate:date,runId:text(lock?.runId),reason:'PROCESS_RESTART_INTERRUPTED',source:'business_run_locks'}:null,
-    lifecycleBoundary:boundary,statusSource:'V419_SCALAR_LOCK_AND_CURRENT_MEMBER_PROOF'
+    lifecycleBoundary:boundary,
+    completionPolicy:type==='WHPP'?V322_WHPP_COMPLETION_PARITY_ID:undefined,
+    statusSource:type==='WHPP'?'PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF':'PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT',
+    v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID
   };
 }
 
-function completedStage(stage,snapshotId,source='V419_SCALAR_CURRENT_MEMBER_SUCCESS_PROOF'){
-  return{...stage,complete:true,zeroTicketDay:n(stage.sourceTotal)===0,snapshotId:text(snapshotId),snapshotStatus:'COMPLETED',completionSource:source,runStatus:'completed',phase:'已完成',running:false,paused:false,failed:false,restartInterrupted:false,restartRecovery:null,statusSource:'V419_SCALAR_CURRENT_MEMBER_SUCCESS_PROOF'};
+function completedStage(stage,snapshotId){
+  return{...stage,complete:true,zeroTicketDay:n(stage.sourceTotal)===0,snapshotId:text(snapshotId),snapshotStatus:'COMPLETED',completionSource:'V418_CURRENT_MEMBER_PROCESSING_PROOF',runStatus:'completed',phase:'已完成',running:false,paused:false,failed:false,restartInterrupted:false,restartRecovery:null,statusSource:'V418_NO_PAYLOAD_COMPLETED_CLAIM',v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID};
 }
 
 function buildScalarStatus(db,date,batch){
@@ -98,7 +101,7 @@ function buildScalarStatus(db,date,batch){
   let WHPP=emptyStage('WHPP',date,counts.WHPP,boundary,whppLock);
 
   const ccslStarted=tick();
-  if(n(counts.CCSL)===0)CCSL=completedStage(CCSL,snapshotId,'V419_EXACT_ZERO_CURRENT_MEMBERSHIP');
+  if(n(counts.CCSL)===0)CCSL=completedStage(CCSL,snapshotId);
   else{
     const snapshot=currentCompletionSnapshot(db,'CCSL',date,text(ccslLock?.runId),boundary);
     if(snapshot){
@@ -110,7 +113,7 @@ function buildScalarStatus(db,date,batch){
   timing.ccslMs=Number(elapsed(ccslStarted).toFixed(3));
 
   const shopeeStarted=tick();
-  if(n(counts.SHOPEE)===0)SHOPEE=completedStage(SHOPEE,snapshotId,'V419_EXACT_ZERO_CURRENT_MEMBERSHIP');
+  if(n(counts.SHOPEE)===0)SHOPEE=completedStage(SHOPEE,snapshotId);
   else{
     const snapshot=currentCompletionSnapshot(db,'SHOPEE',date,text(shopeeLock?.runId),boundary);
     if(snapshot){
@@ -123,22 +126,22 @@ function buildScalarStatus(db,date,batch){
 
   const whppStarted=tick();
   const whppMembershipOk=counts._whppMembershipOk!==false;
-  if(whppMembershipOk&&n(counts.WHPP)===0)WHPP=completedStage(WHPP,snapshotId,'V419_EXACT_ZERO_CURRENT_MEMBERSHIP');
+  if(whppMembershipOk&&n(counts.WHPP)===0)WHPP=completedStage(WHPP,snapshotId);
   else if(whppMembershipOk&&n(counts.WHPP)>0){
     const lockClaim=COMPLETE_LOCK.has(text(whppLock?.status).toLowerCase()),unifiedClaim=unifiedCompletionClaim(db,batch);
     if(lockClaim||unifiedClaim){
       const coverage=readV418BusinessSuccessCoverage(db,{businessType:'WHPP',date,snapshotId,boundary,memberTypes:['WHPP']});
-      if(coverage?.ok&&n(coverage.count)>=n(counts.WHPP))WHPP=completedStage(WHPP,snapshotId,unifiedClaim?'V419_UNIFIED_COMPLETED_PLUS_CURRENT_WHPP_SUCCESS':'V419_WHPP_LOCK_PLUS_CURRENT_MEMBER_SUCCESS');
+      if(coverage?.ok&&n(coverage.count)>=n(counts.WHPP))WHPP=completedStage(WHPP,snapshotId);
       else WHPP={...WHPP,completionProof:{covered:n(coverage?.count),missing:Math.max(0,n(counts.WHPP)-n(coverage?.count)),ok:Boolean(coverage?.ok),lockClaim,unifiedClaim}};
     }
   }
-  WHPP={...WHPP,currentMembershipConsistent:whppMembershipOk,membershipReason:text(counts._whppMembershipReason)};
+  WHPP={...WHPP,currentMembershipConsistent:whppMembershipOk,membershipReason:text(counts._whppMembershipReason),completionPolicy:V322_WHPP_COMPLETION_PARITY_ID};
   timing.whppMs=Number(elapsed(whppStarted).toFixed(3));
   timing.totalMs=Number(elapsed(totalStarted).toFixed(3));
 
   const result={
     ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,
-    completedFastPath:V322_COMPLETED_FAST_PATH_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,
+    completedFastPath:`${V322_COMPLETED_FAST_PATH_ID}+${V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID}`,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,
     reportDate:date,batchId:text(batch?.batchId),sourceSnapshotId:snapshotId,lifecycleBoundary:boundary,
     complete:[CCSL,SHOPEE,WHPP].every(stage=>stage.complete===true),stages:{CCSL,SHOPEE,WHPP},counts,
     statusDiagnostics:timing,generatedAt:new Date().toISOString()
@@ -149,7 +152,7 @@ function buildScalarStatus(db,date,batch){
 
 export function readV322SevenBusinessStatus({reportDate='',db=getDb(),force=false}={}){
   const requested=normalizeDate(reportDate),batch=latestValid(db,requested),date=requested||normalizeDate(batch?.reportDate);
-  if(!date||!batch)return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,reportDate:date||'',complete:false,stages:{CCSL:{key:'CCSL',complete:false},SHOPEE:{key:'SHOPEE',complete:false},WHPP:{key:'WHPP',complete:false,restartInterrupted:false,restartRecovery:null}},statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs:0,reason:'CURRENT_VALID_BATCH_MISSING'},generatedAt:new Date().toISOString()};
+  if(!date||!batch)return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,reportDate:date||'',complete:false,stages:{CCSL:{key:'CCSL',complete:false},SHOPEE:{key:'SHOPEE',complete:false},WHPP:{key:'WHPP',complete:false,completionPolicy:V322_WHPP_COMPLETION_PARITY_ID,restartInterrupted:false,restartRecovery:null}},statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs:0,reason:'CURRENT_VALID_BATCH_MISSING'},generatedAt:new Date().toISOString()};
   const cacheKey=`${date}:${text(batch.snapshotId)}`,cached=proofCache.get(cacheKey);
   if(!force&&cached&&Date.now()-cached.at<cached.ttl)return{...cached.value,cacheHit:true,statusDiagnostics:{...cached.value.statusDiagnostics,cacheHit:true,cacheAgeMs:Date.now()-cached.at}};
   const value=buildScalarStatus(db,date,batch),ttl=value.complete?COMPLETE_CACHE_MS:INCOMPLETE_CACHE_MS;
