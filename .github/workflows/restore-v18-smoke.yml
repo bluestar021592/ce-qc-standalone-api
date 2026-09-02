@@ -92,7 +92,7 @@ jobs:
             'test/v9-period-range.test.js',
             'test/v9-special-nodes.test.js'
           )
-          node --test $tests
+          node --test --test-force-exit $tests
 
       - name: Note external-fixture tests
         shell: pwsh
