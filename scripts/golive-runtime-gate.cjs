@@ -41,27 +41,45 @@ const exportPreflight = read('src/v142AsyncExportPreflightPatch.js');
 const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
 const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
 
-must(runner, '2026-08-29-v355-authoritative-whpp-auto-resume-v1');
-must(runner, '2026-08-29-v355-visible-import-watch-v2');
+// V67 is the sole browser three-stage executor. Validate the current persisted
+// status architecture and recovery semantics rather than obsolete V355 labels.
+must(runner, '2026-09-02-v67-persisted-three-stage-runner-v2');
+must(runner, '2026-08-29-single-unified-runner-v1');
+must(runner, '2026-09-02-v322-one-read-seven-business-status-v1');
+must(runner, '2026-09-02-v67-retryable-process-restart-recovery-v2');
+must(runner, '2026-09-02-v67-persisted-completion-latch-v2');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
 must(runner, "{ key: 'WHPP'");
 must(runner, '/api/run');
 must(runner, '/api/shopee/run/start');
 must(runner, '/api/whpp/run/start');
+must(runner, "new URLSearchParams({ businessType: 'ALL', reportDate: date })");
+must(runner, '/api/v33/run-progress?${query.toString()}');
 must(runner, 'canonicalStageTruth');
-must(runner, "payload?.complete === true");
-must(runner, '0票也不能在没有正式完成语义时自动跳过');
+must(runner, 'row.complete === true');
 must(runner, 'verifyWhpp');
 must(runner, 'waitForWhppFinalized');
 must(runner, 'WHPP_STAGE_NOT_FINALIZED');
 must(runner, '七业务未全部完成');
 must(runner, 'recoverPendingWhpp');
-must(runner, "void execute('resume')");
-must(runner, 'V355_WHPP_AUTO_RESUME');
-must(runner, 'CCSL与SHOPEE均已完成，正在自动续跑WHPP本土');
+must(runner, 'PROCESS_RESTART_INTERRUPTED');
+must(runner, 'SHOPEE_RESTART_RETRY_COOLDOWN_MS = 15000');
+must(runner, 'shopeeRestartRecoveryCooldown.set(restart.key, Date.now() + SHOPEE_RESTART_RETRY_COOLDOWN_MS)');
+must(runner, "const result = await execute('resume')");
+must(runner, '[CE-QC][V67_SHOPEE_RESTART_RECOVERY]');
+must(runner, '检测到${target}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN/VN → WHPP本土');
+must(runner, '__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__');
+must(runner, "source: 'V322_PERSISTED_THREE_STAGE_STATUS'");
+must(runner, '检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土');
+must(runner, '[CE-QC][V67_WHPP_AUTO_RESUME]');
 must(runner, '[data-page="import"]');
 must(runner, "recoverPendingWhpp('visible-import-watch')");
+must(runner, "global.runUnified = () => execute('start')");
+must(runner, "global.resumeUnified = () => execute('resume')");
+forbid(runner, '/api/v311/shopee-recovery');
+forbid(runner, '/api/v317/ccsl-recovery');
+forbid(runner, '/api/v132/whpp-fast-summary');
 
 // Browser V67 remains the sole UI run/resume owner, but the backend must also
 // close the final WHPP stage after launcher/browser restarts. This is not a
@@ -235,4 +253,4 @@ must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
 for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
 
-console.log('[GOLIVE] runtime-source gate passed; V67 owns browser three-stage run/resume, V134 provides backend-only WHPP final-stage continuity for the exact visible report date after canonical CCSL+SHOPEE completion, WHPP requires explicit canonical completion, and V132 is display-only');
+console.log('[GOLIVE] runtime-source gate passed; V67 owns browser three-stage run/resume from one exact-date persisted V322 status source, exact PROCESS_RESTART_INTERRUPTED recovery is bounded/retryable, completion is latched, V134 provides backend-only WHPP final-stage continuity for the exact visible report date after canonical CCSL+SHOPEE completion, and V132 remains display-only');
