@@ -1,20 +1,18 @@
 (function installResilientRunGuardV67(global) {
   if (global.__CE_QC_V67_RESILIENT_RUN_GUARD__) return;
 
-  const VERSION = '2026-08-29-v355-authoritative-whpp-auto-resume-v1';
+  const VERSION = '2026-09-02-v67-persisted-three-stage-runner-v2';
   const ARCHITECTURE = '2026-08-29-single-unified-runner-v1';
-  const RECOVERY_TRIGGER_REVISION = '2026-08-29-v355-visible-import-watch-v2';
-  const FINALIZATION_ACK_REVISION = '2026-08-30-v360-whpp-current-run-finalization-ack-v1';
-  const COMPLETION_STABILITY_REVISION = '2026-08-31-v396-sticky-three-stage-completion-v1';
-  const IMPORT_CARRY_REFRESH_REVISION = '2026-08-31-v396-live-import-carry-refresh-v1';
-  const SHOPEE_RESTART_RECOVERY_REVISION = '2026-09-01-v67-shopee-process-restart-auto-resume-v1';
-  // Source-only compatibility token for the stable gate: void execute('resume')
-  // Runtime uses the awaited retryable handoff below so a failed WHPP continuation can retry.
-  const COMPLETE_SNAPSHOT = new Set(['COMPLETED', 'COMPLETED_WITH_RETRY']);
+  const STATUS_SOURCE_REVISION = '2026-09-02-v322-one-read-seven-business-status-v1';
+  const SHOPEE_RESTART_RECOVERY_REVISION = '2026-09-02-v67-retryable-process-restart-recovery-v2';
+  const COMPLETION_STABILITY_REVISION = '2026-09-02-v67-persisted-completion-latch-v2';
+  const STATUS_TIMEOUT_MS = 8000;
+  const SHOPEE_RESTART_RETRY_COOLDOWN_MS = 15000;
   const autoRecoveryDates = new Set();
-  const shopeeRestartRecoveryKeys = new Set();
+  const shopeeRestartRecoveryCooldown = new Map();
   let busy = false;
   let autoRecoveryTimer = null;
+  let statusCache = { reportDate: '', at: 0, payload: null, promise: null };
 
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
   function normalizeDate(value) {
@@ -42,21 +40,25 @@
       );
     } catch { return ''; }
   }
-
   function importPageVisible() {
     const page = document.getElementById('importPage');
     return Boolean(page && !page.hidden && document.visibilityState !== 'hidden');
   }
 
-  async function jsonFetch(url, options = {}) {
+  async function jsonFetch(url, options = {}, timeoutMs = STATUS_TIMEOUT_MS) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs || STATUS_TIMEOUT_MS))) : null;
     let response;
     try {
-      response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', ...options });
+      response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', ...options, ...(controller ? { signal: controller.signal } : {}) });
     } catch (cause) {
-      const error = new Error('与后台连接中断');
-      error.code = 'NETWORK_CONNECTION_INTERRUPTED';
+      const aborted = String(cause?.name || '') === 'AbortError';
+      const error = new Error(aborted ? '轻量持久化状态读取超时' : '与后台连接中断');
+      error.code = aborted ? 'PERSISTED_STATUS_TIMEOUT' : 'NETWORK_CONNECTION_INTERRUPTED';
       error.cause = cause;
       throw error;
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
     const text = await response.text();
     let payload = {};
@@ -70,15 +72,9 @@
     }
     return payload;
   }
-
   async function postJson(url, body) {
-    return jsonFetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    });
+    return jsonFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }, 60 * 60 * 1000);
   }
-
   function isAuth(error) {
     const status = Number(error?.status || error?.payload?.status || 0);
     const code = String(error?.code || '').toUpperCase();
@@ -86,119 +82,94 @@
     return [401, 403].includes(status) || ['401','403','AUTH_REQUIRED'].includes(code)
       || /未授权|unauthorized|登录.*失效|token.*(?:过期|expired|invalid)/i.test(message);
   }
-
   function isTransient(error) {
     const status = Number(error?.status || 0);
     const code = String(error?.code || '').toUpperCase();
     const message = String(error?.message || '');
-    return ['NETWORK_CONNECTION_INTERRUPTED','ECONNRESET','ECONNABORTED','ETIMEDOUT'].includes(code)
+    return ['NETWORK_CONNECTION_INTERRUPTED','PERSISTED_STATUS_TIMEOUT','ECONNRESET','ECONNABORTED','ETIMEDOUT'].includes(code)
       || [408,425,429,500,502,503,504].includes(status)
       || /socket hang up|connection reset|timeout|timed out|failed to fetch|fetch failed|连接中断|网络中断/i.test(message);
   }
-
   function alreadyDone(error) {
-    return ['RUN_ALREADY_COMPLETED'].includes(String(error?.code || ''))
+    return String(error?.code || '') === 'RUN_ALREADY_COMPLETED'
       || /已经完成|当前任务已经完成|already\s*(?:completed|finished)/i.test(String(error?.message || ''));
   }
-
   function activeRun(error) {
     return ['WHPP_RUN_ALREADY_ACTIVE','RUN_ALREADY_ACTIVE'].includes(String(error?.code || ''))
       || /任务正在运行|already\s*(?:active|running)/i.test(String(error?.message || ''));
   }
-
   function noReport(error) {
     return ['WHPP_REPORT_MISSING','REPORT_MISSING','NO_DAILY_REPORT','REPORT_DATE_MISSING'].includes(String(error?.code || ''))
       || /未导入.*日报|没有.*日报/i.test(String(error?.message || ''));
   }
 
+  function clearStatusCache() { statusCache = { reportDate: '', at: 0, payload: null, promise: null }; }
+  async function readPersistedTruth(target, { force = false } = {}) {
+    const date = normalizeDate(target);
+    if (!date) throw new Error('无法确定日报日期');
+    const fresh = statusCache.reportDate === date && statusCache.payload && Date.now() - statusCache.at < 600;
+    if (!force && fresh) return statusCache.payload;
+    if (!force && statusCache.reportDate === date && statusCache.promise) return statusCache.promise;
+    const query = new URLSearchParams({ businessType: 'ALL', reportDate: date });
+    const promise = jsonFetch(`/api/v33/run-progress?${query.toString()}`, {}, STATUS_TIMEOUT_MS).then(payload => {
+      if (String(payload.statusVersion || '') !== STATUS_SOURCE_REVISION) throw new Error('后台轻量状态接口版本尚未同步');
+      if (normalizeDate(payload.reportDate) !== date) throw new Error(`后台状态日期未同步到${date}`);
+      statusCache = { reportDate: date, at: Date.now(), payload, promise: null };
+      return payload;
+    }).catch(error => {
+      if (statusCache.promise === promise) statusCache.promise = null;
+      throw error;
+    });
+    statusCache = { reportDate: date, at: statusCache.at, payload: force ? null : statusCache.payload, promise };
+    return promise;
+  }
+  function persistedStage(payload, key) { return payload?.stages?.[key] || null; }
+  async function canonicalStageTruth(stage, target, { force = false } = {}) {
+    try {
+      const payload = await readPersistedTruth(target, { force });
+      const row = persistedStage(payload, stage.key);
+      if (!row) return { done: false, date: target, payload: null, all: payload };
+      return { done: row.complete === true, date: normalizeDate(row.reportDate || target), payload: row, all: payload };
+    } catch (error) {
+      if (isAuth(error)) throw error;
+      return { done: false, date: target, error };
+    }
+  }
   function shopeeRestartInterruption(payload = {}, target = '') {
-    const diagnostic = payload?.diagnostic || {};
     const lock = payload?.lock || {};
-    const values = [
-      diagnostic.errorMessage,
-      diagnostic.code,
-      diagnostic.ceMsg,
-      lock.errorMessage,
-      payload?.reason,
-      payload?.error,
-      payload?.message
-    ].map(value => String(value || '').trim()).filter(Boolean);
+    const values = [payload?.lastMessage, payload?.errorMessage, payload?.details, lock.errorMessage, payload?.reason, payload?.error, payload?.message]
+      .map(value => String(value || '').trim()).filter(Boolean);
     const marker = values.find(value => value.toUpperCase().includes('PROCESS_RESTART_INTERRUPTED')) || '';
     const reportDate = normalizeDate(payload?.reportDate || target);
-    const key = [
-      reportDate,
-      String(lock.runId || ''),
-      String(lock.updatedAt || lock.lockedAt || ''),
-      String(payload?.lifecycleBoundary || ''),
-      'PROCESS_RESTART_INTERRUPTED'
-    ].join('|');
+    const key = [reportDate, String(payload?.runId || lock.runId || ''), String(payload?.lifecycleBoundary || ''), marker || 'PROCESS_RESTART_INTERRUPTED'].join('|');
     return { interrupted: Boolean(marker), marker, key, reportDate };
   }
 
   function statusNode() { return document.getElementById('ccslRunStatus'); }
   function runButton() { return document.querySelector('[data-testid="global-auto-process"]'); }
-
   function setUnifiedStage(type, active, reportDate) {
-    global.__CE_QC_UNIFIED_RUN_STAGE__ = {
-      owner: 'V67',
-      type: String(type || ''),
-      active: Boolean(active),
-      reportDate: normalizeDate(reportDate),
-      updatedAt: Date.now()
-    };
+    global.__CE_QC_UNIFIED_RUN_STAGE__ = { owner: 'V67', type: String(type || ''), active: Boolean(active), reportDate: normalizeDate(reportDate), updatedAt: Date.now() };
   }
-
   function setStatus(text, level = 'warning') {
     const node = statusNode();
-    if (node) {
-      node.dataset.v67UnifiedOwner = '1';
-      const reportDate = normalizeDate(global.__CE_QC_UNIFIED_RUN_STAGE__?.reportDate);
-      if (reportDate) node.dataset.v67UnifiedReportDate = reportDate;
-      node.innerHTML = `<span class="status-pill ${level}">${String(text || '')}</span>`;
-    }
+    if (!node) return;
+    node.dataset.v67UnifiedOwner = '1';
+    const reportDate = normalizeDate(global.__CE_QC_UNIFIED_RUN_STAGE__?.reportDate);
+    if (reportDate) node.dataset.v67UnifiedReportDate = reportDate;
+    node.innerHTML = `<span class="status-pill ${level}">${String(text || '')}</span>`;
   }
-
   function setBusy(value, text = '') {
     busy = Boolean(value);
     const button = runButton();
-    if (button) {
-      button.disabled = busy;
-      button.textContent = busy ? (text || '七业务处理中…') : '开始全自动处理';
-    }
+    if (!button) return;
+    button.disabled = busy;
+    button.textContent = busy ? (text || '七业务处理中…') : '开始全自动处理';
   }
-
   function completionLatchMatches(target) {
     const latch = global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ || null;
     return Boolean(latch && normalizeDate(latch.reportDate) === normalizeDate(target) && latch.owner === 'V67');
   }
-
-  function clearCompletionLatch() {
-    global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = null;
-  }
-
-  async function readWhppCompletionLock(target) {
-    try {
-      const progress = await jsonFetch('/api/whpp/progress');
-      const lock = progress?.completionLock || {};
-      const date = normalizeDate(lock.reportDate || progress?.reportDate || '');
-      if (lock.locked === true && (!target || date === normalizeDate(target))) {
-        return {
-          label: 'WHPP本土',
-          ok: true,
-          verified: true,
-          completed: true,
-          snapshotStatus: String(lock.snapshotStatus || 'COMPLETED').toUpperCase() || 'COMPLETED',
-          reportDate: date || normalizeDate(target),
-          total: Number(lock.total || 0),
-          source: 'V378_PERSISTED_COMPLETION_LOCK',
-          finalizedSnapshotId: String(lock.finalizedSnapshotId || ''),
-          finalizedAt: String(lock.finalizedAt || '')
-        };
-      }
-    } catch {}
-    return null;
-  }
-
+  function clearCompletionLatch() { global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = null; }
   async function refreshUnifiedImportRuntimeTruth(target) {
     try {
       const payload = await jsonFetch('/api/import/unified-latest?compact=1');
@@ -212,150 +183,52 @@
         else if (typeof renderUnifiedImportResult === 'function') renderUnifiedImportResult();
       } catch {}
       return true;
-    } catch (error) {
-      console.warn('[CE-QC][V396_IMPORT_CARRY_REFRESH] skipped:', error?.message || error);
-      return false;
-    }
+    } catch { return false; }
   }
-
   function scheduleUnifiedImportRuntimeTruthRefresh(target) {
     [120, 500, 1500].forEach(ms => setTimeout(() => {
       if (!target || targetDate() === normalizeDate(target)) void refreshUnifiedImportRuntimeTruth(target);
     }, ms));
   }
 
-  async function readWhppSummary(target) {
-    const query = target ? `?reportDate=${encodeURIComponent(target)}` : '';
-    return jsonFetch(`/api/v132/whpp-fast-summary${query}`);
-  }
-
-  function whppCompletion(payload, target) {
-    const state = payload?.state || {};
-    const date = normalizeDate(state.reportDate || payload?.reportDate || payload?.reportDateLocal || '');
-    const total = Number(state.total ?? payload?.total ?? state.dailyParseSummary?.totalRecognized ?? 0);
-    const snapshotStatus = String(state.snapshotStatus || payload?.snapshotStatus || '').toUpperCase();
-    const completed = Boolean(state.completed === true || payload?.completed === true || COMPLETE_SNAPSHOT.has(snapshotStatus));
-    const retryPending = Number(payload?.metrics?.retryPending ?? state?.metrics?.retryPending ?? 0);
-    return { date, total, snapshotStatus, completed, retryPending, reportDate: date || target };
-  }
-
-  function currentRunFinalization(progress, target, waitStartedAt = 0) {
-    const runtime = progress?.runtime || {};
-    const processing = progress?.processing || {};
-    const date = normalizeDate(runtime.reportDate || progress?.reportDate || '');
-    const outcome = String(runtime.outcome || '').toUpperCase();
-    const finishedAt = Date.parse(String(runtime.finishedAt || ''));
-    const finishedAfterWaitStarted = Number.isFinite(finishedAt) && finishedAt >= Math.max(0, Number(waitStartedAt || 0));
-    const sameDate = !target || date === target;
-    const cleanStop = progress?.runtimeActive !== true && processing.running !== true && processing.paused !== true && !String(processing.error || runtime.error || '').trim();
-    if (outcome !== 'COMPLETED' || !sameDate || !finishedAfterWaitStarted || !cleanStop) return null;
-    return {
-      label: 'WHPP本土',
-      ok: true,
-      verified: true,
-      completed: true,
-      snapshotStatus: 'COMPLETED',
-      reportDate: date || target,
-      source: 'V134_CURRENT_RUN_FINALIZED',
-      finishedAt: runtime.finishedAt || ''
-    };
-  }
-
   async function verifyWhpp(target) {
-    const persistedLock = await readWhppCompletionLock(target);
-    if (persistedLock) return persistedLock;
-    const payload = await readWhppSummary(target);
-    const truth = whppCompletion(payload, target);
-    if (target && truth.date && truth.date !== target) {
-      const error = new Error(`WHPP当前正式结果日期为${truth.date}，等待${target}完成。`);
-      error.code = 'WHPP_SUMMARY_DATE_MISMATCH';
-      throw error;
-    }
-    if (!truth.completed) {
-      const error = new Error(truth.total > 0
-        ? `WHPP本土${truth.total}票仍在生成正式快照，七业务不能提前标记完成。`
-        : 'WHPP本土当前尚未返回明确完成标记；0票也不能在没有正式完成语义时自动跳过。');
-      error.code = 'WHPP_STAGE_NOT_FINALIZED';
-      throw error;
-    }
-    return { label: 'WHPP本土', ok: true, verified: true, ...truth };
+    const truth = await canonicalStageTruth({ key: 'WHPP' }, target, { force: true });
+    if (truth.done) return { label: 'WHPP本土', ok: true, verified: true, completed: true, reportDate: target, ...(truth.payload || {}) };
+    const stage = truth.payload || {};
+    const error = new Error(stage.lastMessage || (Number(stage.sourceTotal || 0) > 0 ? `WHPP本土${Number(stage.sourceTotal || 0)}票仍在生成正式结果。` : 'WHPP本土尚未返回正式完成标记。'));
+    error.code = stage.failed ? 'WHPP_STAGE_FAILED' : 'WHPP_STAGE_NOT_FINALIZED';
+    error.stage = stage;
+    throw error;
   }
-
-  async function canonicalStageTruth(stage, target) {
-    try {
-      if (stage.key === 'CCSL') {
-        const payload = await postJson('/api/v317/ccsl-recovery', { action: 'status', reportDate: target || '' });
-        const date = normalizeDate(payload?.reportDate || target);
-        return { done: Boolean((!target || date === target) && payload?.complete === true), date, payload };
-      }
-      if (stage.key === 'SHOPEE') {
-        const payload = await postJson('/api/v311/shopee-recovery', { action: 'status', reportDate: target || '' });
-        const date = normalizeDate(payload?.reportDate || target);
-        return { done: Boolean((!target || date === target) && payload?.complete === true), date, payload };
-      }
-      if (stage.key === 'WHPP') {
-        const verified = await verifyWhpp(target);
-        return { done: true, date: normalizeDate(verified.reportDate || target), payload: verified };
-      }
-    } catch (error) {
-      if (isAuth(error)) throw error;
-      return { done: false, error };
-    }
-    return { done: false };
-  }
-
-  function whppStillPending(error) {
-    return ['WHPP_STAGE_NOT_FINALIZED','WHPP_SUMMARY_DATE_MISMATCH'].includes(String(error?.code || ''));
-  }
-
+  function whppStillPending(error) { return String(error?.code || '') === 'WHPP_STAGE_NOT_FINALIZED'; }
   async function waitForWhppFinalized(target, timeoutMs = 10 * 60 * 1000) {
-    const waitStartedAt = Date.now();
-    const deadline = waitStartedAt + timeoutMs;
+    const deadline = Date.now() + timeoutMs;
     let lastError = null;
     while (Date.now() < deadline) {
-      try {
-        return await verifyWhpp(target);
-      } catch (error) {
+      try { return await verifyWhpp(target); }
+      catch (error) {
         if (isAuth(error)) throw error;
         if (!whppStillPending(error) && !isTransient(error)) throw error;
         lastError = error;
+        const stage = error?.stage || {};
+        setStatus(`WHPP本土处理中：${String(stage.phase || '扫描/轨迹')}${stage.batchIndex && stage.totalBatches ? ` · ${stage.batchIndex}/${stage.totalBatches}` : ''}`);
       }
-
-      const progress = await jsonFetch('/api/whpp/progress').catch(() => null);
-      const processing = progress?.processing || {};
-      const runtime = progress?.runtime || {};
-      const runtimeFinalized = currentRunFinalization(progress, target, waitStartedAt);
-      if (runtimeFinalized) {
-        setStatus('WHPP本土正式结果已保存，正在完成七业务状态同步…');
-        console.info('[CE-QC][V360_WHPP_FINALIZATION_ACK]', FINALIZATION_ACK_REVISION, runtimeFinalized);
-        return runtimeFinalized;
-      }
-      const phase = String(processing.phase || runtime.lastMessage || '扫描/轨迹');
-      const batchIndex = Number(processing.batchIndex || runtime.batchIndex || 0);
-      const totalBatches = Number(processing.totalBatches || runtime.totalBatches || 0);
-      if (processing.error && !processing.running && !processing.paused) {
-        throw new Error(String(processing.error));
-      }
-      setStatus(`WHPP本土处理中：${phase}${batchIndex && totalBatches ? ` · ${batchIndex}/${totalBatches}` : ''}`);
       await wait(1200);
     }
-    const error = new Error(lastError?.message || 'WHPP后台任务超过10分钟仍未生成正式快照，断点已保留，可继续处理。');
+    const error = new Error(lastError?.message || 'WHPP后台任务超过10分钟仍未生成正式结果，断点已保留。');
     error.code = lastError?.code || 'WHPP_FINALIZE_TIMEOUT';
     throw error;
   }
-
   async function waitForWhppActiveRun(target, timeoutMs = 10 * 60 * 1000) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const progress = await jsonFetch('/api/whpp/progress').catch(() => null);
-      const processing = progress?.processing || {};
-      if (!processing.running && !processing.paused) return waitForWhppFinalized(target, Math.max(1000, deadline - Date.now()));
-      setStatus(`WHPP本土已有任务，正在等待当前任务完成… ${Number(processing.batchIndex || 0)}/${Number(processing.totalBatches || 0)}`);
-      await wait(1000);
-    }
-    throw new Error('WHPP本土已有任务超过10分钟未完成，已停止把它当作成功。');
+    return waitForWhppFinalized(target, timeoutMs);
   }
-
+  async function verifyStageAfterRequest(stage, target) {
+    clearStatusCache();
+    const truth = await canonicalStageTruth(stage, target, { force: true });
+    if (truth.done) return { label: stage.label, ok: true, verified: true, canonicalComplete: true };
+    const row = truth.payload || {};
+    return { label: stage.label, ok: false, error: row.lastMessage || `${stage.label}请求结束但未生成正式完成快照` };
+  }
   async function runStage(stage, preferResume, target) {
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -365,12 +238,14 @@
       setStatus(`${stage.label}${attempt ? `自动续跑 ${attempt + 1}/3` : '处理中'}…`);
       try {
         await postJson(url, { reportDate: target || '' });
+        clearStatusCache();
         if (stage.key === 'WHPP') return await waitForWhppFinalized(target);
-        return { label: stage.label, ok: true };
+        return await verifyStageAfterRequest(stage, target);
       } catch (error) {
         if (alreadyDone(error)) {
+          clearStatusCache();
           if (stage.key === 'WHPP') return await waitForWhppFinalized(target);
-          return { label: stage.label, ok: true, skipped: true };
+          return await verifyStageAfterRequest(stage, target);
         }
         if (stage.key === 'WHPP' && activeRun(error)) {
           try { return await waitForWhppActiveRun(target); }
@@ -389,81 +264,6 @@
     return { label: stage.label, ok: false, error: lastError?.message || String(lastError || '处理失败') };
   }
 
-  async function recoverPendingWhpp(reason = 'startup') {
-    if (busy || !importPageVisible()) return false;
-    const target = targetDate();
-    if (!target || completionLatchMatches(target) || autoRecoveryDates.has(target)) return false;
-    autoRecoveryDates.add(target);
-    try {
-      const ccslStage = { key: 'CCSL' };
-      const shopeeStage = { key: 'SHOPEE' };
-      const whppStage = { key: 'WHPP' };
-      const ccsl = await canonicalStageTruth(ccslStage, target);
-      if (!ccsl.done) return false;
-      const shopee = await canonicalStageTruth(shopeeStage, target);
-      if (!shopee.done) {
-        const restart = shopeeRestartInterruption(shopee.payload || {}, target);
-        if (!restart.interrupted || restart.reportDate !== target || shopeeRestartRecoveryKeys.has(restart.key)) return false;
-        shopeeRestartRecoveryKeys.add(restart.key);
-        setStatus(`检测到${target}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN/VN → WHPP本土…`);
-        console.info('[CE-QC][V67_SHOPEE_RESTART_RECOVERY]', {
-          revision: SHOPEE_RESTART_RECOVERY_REVISION,
-          reportDate: target,
-          runId: String(shopee.payload?.lock?.runId || ''),
-          lifecycleBoundary: String(shopee.payload?.lifecycleBoundary || ''),
-          reason
-        });
-        const result = await execute('resume');
-        return Boolean(result?.ok);
-      }
-      const whpp = await canonicalStageTruth(whppStage, target);
-      if (whpp.done) {
-        global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = {
-          reportDate: target,
-          verifiedAt: Date.now(),
-          owner: 'V67',
-          finalizationRevision: FINALIZATION_ACK_REVISION,
-          completionStabilityRevision: COMPLETION_STABILITY_REVISION,
-          source: whpp.payload?.source || 'CANONICAL_WHPP_COMPLETION'
-        };
-        scheduleUnifiedImportRuntimeTruthRefresh(target);
-        return false;
-      }
-      if (whpp.error && !whppStillPending(whpp.error) && !isTransient(whpp.error)) return false;
-
-      setStatus(`检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土…`);
-      console.info('[CE-QC][V355_WHPP_AUTO_RESUME]', { reportDate: target, reason });
-      const result = await execute('resume');
-      return Boolean(result?.ok);
-    } catch (error) {
-      if (!isAuth(error)) console.warn('[CE-QC][V355_WHPP_AUTO_RESUME] retryable handoff failed:', error?.message || error);
-      return false;
-    } finally {
-      // The guard is only for one in-flight preflight/execute cycle. Never pin a
-      // report date permanently: a same-date re-import creates a new lifecycle and
-      // must be allowed to auto-run WHPP again if its canonical truth becomes pending.
-      autoRecoveryDates.delete(target);
-    }
-  }
-
-  function scheduleAutoRecovery() {
-    [900, 2500, 6000, 12000].forEach(ms => setTimeout(() => { void recoverPendingWhpp(`startup-${ms}`); }, ms));
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') setTimeout(() => { void recoverPendingWhpp('visibility'); }, 250);
-    });
-    document.addEventListener('click', event => {
-      if (event.target?.closest?.('[data-testid="combined-daily-import"]')) {
-        clearCompletionLatch();
-        shopeeRestartRecoveryKeys.clear();
-      }
-      if (event.target?.closest?.('[data-page="import"]')) setTimeout(() => { void recoverPendingWhpp('import-navigation'); }, 500);
-    }, true);
-    if (autoRecoveryTimer) clearInterval(autoRecoveryTimer);
-    autoRecoveryTimer = setInterval(() => {
-      if (importPageVisible() && !busy) void recoverPendingWhpp('visible-import-watch');
-    }, 2500);
-  }
-
   async function execute(mode = 'start') {
     if (busy) return { ok: false, busy: true };
     const target = targetDate();
@@ -477,13 +277,13 @@
         { key: 'SHOPEE', label: 'SHOPEE CN/VN', start: '/api/shopee/run/start', resume: '/api/shopee/run/resume' },
         { key: 'WHPP', label: 'WHPP本土', start: '/api/whpp/run/start', resume: '/api/whpp/run/resume' }
       ];
-
       for (let index = 0; index < stages.length; index += 1) {
         const stage = stages[index];
+        clearStatusCache();
         setBusy(true, `正在核对${stage.label}…`);
-        const truth = await canonicalStageTruth(stage, target);
+        const truth = await canonicalStageTruth(stage, target, { force: true });
         if (truth.done) {
-          setStatus(`第 ${index + 1}/3 步：${stage.label}已有正式结果，跳过重复处理，继续下一阶段`);
+          setStatus(`第 ${index + 1}/3 步：${stage.label}已有正式持久化结果，直接进入下一阶段`);
           results.push({ label: stage.label, ok: true, skipped: true, canonicalComplete: true });
           continue;
         }
@@ -494,26 +294,16 @@
         results.push(result);
         if (result.ok === false) break;
       }
-
       const failed = results.filter(item => item.ok === false);
       const allThreeResolved = results.length === 3 && failed.length === 0;
       if (!allThreeResolved) {
         setUnifiedStage('FAILED', false, target);
-        const message = failed.length
-          ? failed.map(item => `${item.label}：${item.error || '失败'}`).join('；')
-          : '尚有阶段未完成';
+        const message = failed.length ? failed.map(item => `${item.label}：${item.error || '失败'}`).join('；') : '尚有阶段未完成';
         setStatus(`七业务未全部完成：${message}。已完成断点保留。`, 'danger');
       } else {
         setUnifiedStage('DONE', false, target);
-        global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = {
-          reportDate: target,
-          verifiedAt: Date.now(),
-          owner: 'V67',
-          finalizationRevision: FINALIZATION_ACK_REVISION,
-          completionStabilityRevision: COMPLETION_STABILITY_REVISION,
-          results
-        };
-        setStatus('七业务当日日报处理完成：CCSL → SHOPEE → WHPP均已验证正式结果。', 'success');
+        global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = { reportDate: target, verifiedAt: Date.now(), owner: 'V67', completionStabilityRevision: COMPLETION_STABILITY_REVISION, results };
+        setStatus('七业务当日日报处理完成：CCSL → SHOPEE → WHPP均已验证正式持久化结果。', 'success');
         scheduleUnifiedImportRuntimeTruthRefresh(target);
       }
       document.dispatchEvent(new CustomEvent('ce-qc-run-complete', { detail: { results, reportDate: target, complete: allThreeResolved } }));
@@ -522,39 +312,84 @@
     } catch (error) {
       setUnifiedStage('ERROR', false, target);
       const text = isAuth(error)
-        ? 'CE登录已失效，请重新登录后点击继续处理；已完成断点不会丢失。'
+        ? 'CE登录已失效，请重新登录后再继续；已完成断点不会丢失。'
         : `处理连接异常：${String(error.message || error)}；已完成断点不会丢失。`;
       setStatus(text, 'danger');
       return { ok: false, error: error.message || String(error), results };
     } finally {
       setBusy(false);
+      clearStatusCache();
     }
   }
 
+  async function recoverPendingWhpp(reason = 'startup') {
+    if (busy || !importPageVisible()) return false;
+    const target = targetDate();
+    if (!target || completionLatchMatches(target) || autoRecoveryDates.has(target)) return false;
+    autoRecoveryDates.add(target);
+    try {
+      clearStatusCache();
+      const all = await readPersistedTruth(target, { force: true });
+      const ccsl = persistedStage(all, 'CCSL') || {};
+      const shopee = persistedStage(all, 'SHOPEE') || {};
+      const whpp = persistedStage(all, 'WHPP') || {};
+      if (ccsl.complete !== true) return false;
+      if (shopee.complete !== true) {
+        const restart = shopeeRestartInterruption(shopee, target);
+        if (!restart.interrupted || restart.reportDate !== target) return false;
+        const nextRetryAt = Number(shopeeRestartRecoveryCooldown.get(restart.key) || 0);
+        if (Date.now() < nextRetryAt) return false;
+        shopeeRestartRecoveryCooldown.set(restart.key, Date.now() + SHOPEE_RESTART_RETRY_COOLDOWN_MS);
+        setStatus(`检测到${target}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN/VN → WHPP本土…`);
+        console.info('[CE-QC][V67_SHOPEE_RESTART_RECOVERY]', { revision: SHOPEE_RESTART_RECOVERY_REVISION, reportDate: target, runId: String(shopee.runId || ''), lifecycleBoundary: String(shopee.lifecycleBoundary || ''), reason });
+        const result = await execute('resume');
+        if (result?.ok) shopeeRestartRecoveryCooldown.delete(restart.key);
+        return Boolean(result?.ok);
+      }
+      if (whpp.complete === true) {
+        global.__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__ = { reportDate: target, verifiedAt: Date.now(), owner: 'V67', completionStabilityRevision: COMPLETION_STABILITY_REVISION, source: 'V322_PERSISTED_THREE_STAGE_STATUS' };
+        scheduleUnifiedImportRuntimeTruthRefresh(target);
+        return false;
+      }
+      if (whpp.failed === true || whpp.paused === true) return false;
+      setStatus(`检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土…`);
+      console.info('[CE-QC][V67_WHPP_AUTO_RESUME]', { reportDate: target, reason });
+      const result = await execute('resume');
+      return Boolean(result?.ok);
+    } catch (error) {
+      if (!isAuth(error)) console.warn('[CE-QC][V67_AUTO_RECOVERY] handoff failed:', error?.message || error);
+      return false;
+    } finally {
+      autoRecoveryDates.delete(target);
+    }
+  }
+  function scheduleAutoRecovery() {
+    [900, 2500, 6000, 12000].forEach(ms => setTimeout(() => { void recoverPendingWhpp(`startup-${ms}`); }, ms));
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => { void recoverPendingWhpp('visibility'); }, 250); });
+    document.addEventListener('click', event => {
+      if (event.target?.closest?.('[data-testid="combined-daily-import"]')) {
+        clearCompletionLatch();
+        shopeeRestartRecoveryCooldown.clear();
+        clearStatusCache();
+      }
+      if (event.target?.closest?.('[data-page="import"]')) setTimeout(() => { void recoverPendingWhpp('import-navigation'); }, 500);
+    }, true);
+    if (autoRecoveryTimer) clearInterval(autoRecoveryTimer);
+    autoRecoveryTimer = setInterval(() => { if (importPageVisible() && !busy) void recoverPendingWhpp('visible-import-watch'); }, 2500);
+  }
   function install() {
     global.runUnified = () => execute('start');
     global.resumeUnified = () => execute('resume');
     global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = {
-      version: VERSION,
-      architecture: ARCHITECTURE,
-      recoveryTriggerRevision: RECOVERY_TRIGGER_REVISION,
-      finalizationAckRevision: FINALIZATION_ACK_REVISION,
-      completionStabilityRevision: COMPLETION_STABILITY_REVISION,
-      importCarryRefreshRevision: IMPORT_CARRY_REFRESH_REVISION,
+      version: VERSION, architecture: ARCHITECTURE, statusSourceRevision: STATUS_SOURCE_REVISION,
       shopeeRestartRecoveryRevision: SHOPEE_RESTART_RECOVERY_REVISION,
-      singleOwner: true,
-      run: execute,
-      targetDate,
-      verifyWhpp,
-      readWhppSummary,
-      readWhppCompletionLock,
-      refreshUnifiedImportRuntimeTruth,
-      canonicalStageTruth,
-      shopeeRestartInterruption,
-      recoverPendingWhpp
+      completionStabilityRevision: COMPLETION_STABILITY_REVISION,
+      shopeeRestartRetryCooldownMs: SHOPEE_RESTART_RETRY_COOLDOWN_MS,
+      singleOwner: true, run: execute, targetDate, verifyWhpp,
+      canonicalStageTruth, readPersistedTruth, shopeeRestartInterruption, recoverPendingWhpp
     };
     scheduleAutoRecovery();
-    console.info('[CE-QC][V396_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, RECOVERY_TRIGGER_REVISION, FINALIZATION_ACK_REVISION, COMPLETION_STABILITY_REVISION, IMPORT_CARRY_REFRESH_REVISION, SHOPEE_RESTART_RECOVERY_REVISION, 'V67 verifies a stage before showing it as active; exact PROCESS_RESTART_INTERRUPTED Shopee locks auto-resume once per lock revision through the same V67 executor, then continue to WHPP; generic failures remain fail-closed; persisted WHPP completion and same-page verified completion suppress duplicate auto-reentry; a new explicit daily import clears the local latch; completed runs refresh live today/historical OPEN counts from SQLite.');
+    console.info('[CE-QC][V67_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, SHOPEE_RESTART_RECOVERY_REVISION, 'V67 is the sole browser run/resume owner; stage checks use one persisted V322 status source instead of V311/V317/V132 scans; exact PROCESS_RESTART_INTERRUPTED recovery retries after a bounded cooldown instead of being permanently pinned; generic failures remain fail-closed.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(install, 0), { once: true });
