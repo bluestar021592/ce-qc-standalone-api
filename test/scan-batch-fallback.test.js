@@ -45,7 +45,7 @@ test('confirm-query socket hang up retries same 350 batch before fallback', asyn
   assert.equal(result.failures.length, 0);
   assert.equal(result.successes.flatMap(item => item.batch).length, 350);
   assert.deepEqual(attempts, [350, 350]);
-  assert.ok(logs.some(message => message.includes('otwms-order-confirm-query网络瞬断')));
+  assert.ok(logs.some(message => message.includes('otwms-order-confirm-query网络/TLS瞬断')));
 });
 
 test('persistent confirm-query transport failure falls back 350 to 100 without losing successful children', async () => {
@@ -130,7 +130,7 @@ test('track socket hang up retries the same batch automatically before fallback'
   assert.equal(result.failures.length, 0);
   assert.equal(result.successes.flatMap(item => item.batch).length, 10);
   assert.deepEqual(attempts, [10, 10]);
-  assert.ok(logs.some(message => message.includes('网络瞬断')));
+  assert.ok(logs.some(message => message.includes('网络/TLS瞬断')));
 });
 
 test('persistent track failure isolates 10-waybill batch down to one bill', async () => {
