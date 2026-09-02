@@ -45,7 +45,7 @@ test('V28 SHOPEE resume deletes persisted batch audit hashes but preserves per-w
   assert.doesNotMatch(resumePatch,/podLocks\s*=\s*\[\]/);
 });
 
-test('V28 trends use up to seven latest VALID report dates for a single-day dashboard', () => {
+test('V28 trends use up to seven latest VALID report dates on the lightweight history path', () => {
   const trendPatch=fs.readFileSync('src/v27TrendPatch.js','utf8');
   assert.match(trendPatch,/function resolveTrendWindow/);
   assert.match(trendPatch,/FROM unified_import_batches/);
@@ -53,7 +53,10 @@ test('V28 trends use up to seven latest VALID report dates for a single-day dash
   assert.doesNotMatch(trendPatch,/s\.status='COMPLETED'/,'trend existence must not depend on processing completion');
   assert.match(trendPatch,/LIMIT 7/);
   assert.match(trendPatch,/reportDate<=\?/);
-  assert.match(trendPatch,/loadRangeDashboard\(trendWindow\.from,trendWindow\.to\)/);
+  assert.match(trendPatch,/listLightweightBusinessHistory/,'trend cards must read lightweight persisted history instead of rebuilding the range dashboard');
+  assert.match(trendPatch,/historyFor\(type,requestedTo\)/);
+  assert.doesNotMatch(trendPatch,/loadRangeDashboard\(trendWindow\.from,trendWindow\.to\)/,
+    'trend endpoint must not synchronously invoke the heavy range-dashboard chain on the production database');
   assert.match(trendPatch,/attemptRows\(trendWindow\.from,trendWindow\.to\)/);
   assert.match(trendPatch,/trendWindowDates/);
   assert.match(trendPatch,/historySource:'VALID_UNIFIED_IMPORT_SQLITE'/);
