@@ -2,6 +2,7 @@ import './v206InteractiveFirstRuntimePatch.js';
 import express from 'express';
 import { getDb } from './db.js';
 import { loadV351UnifiedWhppMembership } from './v351WhppUnifiedDashboardBridgePatch.js';
+import { reconcileV417Carryover, V417_OPEN_RUNTIME_TRUTH_ID } from './v417OpenTruth.js';
 
 const PATCH_ID = '2026-08-31-v388-current-queue-includes-historical-open-v1';
 const TARGETS = new Set(['/api/bootstrap', '/api/import/unified-latest']);
@@ -100,19 +101,18 @@ function snapshotMeta(batch) {
   return { status: String(row.status || 'IMPORTED'), payload: safeJson(row.payloadJson, {}) };
 }
 
-function runtimeCarry(batch, _counts = {}, _snapshotStatus = '', baseCarry = {}) {
+function runtimeCarry(batch, counts = {}, _snapshotStatus = '', baseCarry = {}) {
   const reportDate = String(batch?.reportDate || '');
-  const todayOpen = one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate=?", reportDate);
-  const historicalOpen = one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate<?", reportDate);
-  return {
+  const persisted = {
     ...baseCarry,
-    todayOpen,
-    historicalOpen,
+    todayOpen: one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate=?", reportDate),
+    historicalOpen: one("SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate<?", reportDate),
     rechecked: num(baseCarry?.rechecked),
-    currentOpen: todayOpen + historicalOpen,
     historicalSeparate: true,
     runtimeTruth: 'TODAY_OPEN_PLUS_HISTORICAL_OPEN'
   };
+  persisted.currentOpen = num(persisted.todayOpen) + num(persisted.historicalOpen);
+  return reconcileV417Carryover(getDb(), { batch, counts, baseCarry: persisted });
 }
 
 function normalizeImport(base = {}) {
@@ -163,7 +163,8 @@ function normalizeImport(base = {}) {
     whppClassificationCount: num(truth.whpp.count),
     whppDirectDailyPrimary: Boolean(truth.whpp.direct),
     whppMembershipIncomplete: whppIncomplete,
-    runtimeTruthPatch: PATCH_ID
+    runtimeTruthPatch: PATCH_ID,
+    openTruthPatch: V417_OPEN_RUNTIME_TRUTH_ID
   };
 }
 

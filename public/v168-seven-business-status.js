@@ -6,6 +6,7 @@
   const STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1';
   const TERMINAL_READ_POLICY = '2026-09-02-v168-stop-polling-completed-date-v1';
   const TRANSIENT_POLICY = '2026-09-02-v416-never-display-stale-completed-while-unconfirmed-v1';
+  const LEGACY_DETAIL_POLICY = '2026-09-02-v417-hide-stale-legacy-detail-while-status-unconfirmed-v1';
   const STATUS_TIMEOUT_MS = 8000;
   const STATUS_POLL_MS = 10000;
   let lastTruth = null;
@@ -188,6 +189,30 @@
     delete button.dataset.v168PreviousText;
     delete button.dataset.v168PreviousTitle;
   }
+  function reconcileLegacyRunDetail(truth, allFresh) {
+    const legacy = document.getElementById('ccslRunStatus');
+    if (!legacy) return;
+    const stages = truth?.stages || [];
+    if (!allFresh) {
+      legacy.dataset.v417StatusGuard = '1';
+      legacy.dataset.v417Policy = LEGACY_DETAIL_POLICY;
+      legacy.innerHTML = `<div data-testid="v417-legacy-run-status-guard" style="padding:8px 10px;border-radius:7px;background:#fff8e8;border:1px solid #f4d79a;color:#916000;line-height:1.5"><span class="status-pill warning">状态确认中</span><div style="margin-top:6px">当前阶段：状态确认中</div><small>当前日报状态尚未确认，旧“已完成/处理完成”明细已隐藏，确认前不会沿用。</small></div>`;
+      return;
+    }
+    const staleCompleted = /已完成|处理完成/.test(String(legacy.textContent || ''));
+    if (legacy.dataset.v417StatusGuard !== '1' && !staleCompleted) return;
+    delete legacy.dataset.v417StatusGuard;
+    legacy.dataset.v417Policy = LEGACY_DETAIL_POLICY;
+    const active = stages.find(stage => ['running','paused','failed'].includes(stage.state));
+    if (active) {
+      const progress = active.totalBatches > 0 ? ` · ${Math.max(0, active.batchIndex)}/${Math.max(0, active.totalBatches)}` : '';
+      legacy.innerHTML = `<span class="status-pill ${pillClass(active)}">${esc(stageText(active))}</span><div style="margin-top:6px">当前阶段：${esc(active.phase || stageText(active))}${esc(progress)}</div>`;
+    } else if (truth.complete) {
+      legacy.innerHTML = `<span class="status-pill success">已完成</span><div style="margin-top:6px">当前阶段：本轮处理已完成</div>`;
+    } else {
+      legacy.innerHTML = `<span class="status-pill muted">待处理</span><div style="margin-top:6px">当前阶段：待处理</div>`;
+    }
+  }
   function renderTruth(truth) {
     const node = ensureSummaryNode();
     if (!node || !truth) return;
@@ -202,6 +227,7 @@
     node.dataset.statusSourceRevision = STATUS_SOURCE_REVISION;
     node.dataset.terminalReadPolicy = TERMINAL_READ_POLICY;
     node.dataset.transientPolicy = TRANSIENT_POLICY;
+    node.dataset.legacyDetailPolicy = LEGACY_DETAIL_POLICY;
     node.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <strong style="color:#0b3158">七业务处理状态</strong>
@@ -210,6 +236,7 @@
       </div>
       ${transient.length ? `<div data-testid="seven-business-status-retry" style="margin-top:8px;color:#916000;font-size:12px;line-height:1.5">当前状态尚未确认；为避免把旧结果误显示为完成，暂不沿用旧完成状态并自动重试：${transient.map(esc).join('；')}</div>` : ''}
       ${blockers.length ? `<div data-testid="seven-business-failure-detail" style="margin-top:9px;padding:9px 11px;border-radius:7px;background:#fff3f3;border:1px solid #ffd0d0;color:#9f1c1c;font-size:13px;line-height:1.55">${blockers.map(item => `<div><strong>${esc(item.stage.label)}：</strong>${esc(item.detail)}</div>`).join('')}</div>` : ''}`;
+    reconcileLegacyRunDetail(truth, allFresh);
     const start = document.querySelector('[data-testid="global-auto-process"]');
     const resume = document.querySelector('button[onclick="resumeUnified()"]');
     if (truth.complete) {
@@ -284,13 +311,13 @@
     schedule();
     global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__ = {
       version: VERSION, architecture: ARCHITECTURE, statusSourceRevision: STATUS_SOURCE_REVISION,
-      terminalReadPolicy: TERMINAL_READ_POLICY, transientPolicy: TRANSIENT_POLICY,
+      terminalReadPolicy: TERMINAL_READ_POLICY, transientPolicy: TRANSIENT_POLICY, legacyDetailPolicy: LEGACY_DETAIL_POLICY,
       statusTimeoutMs: STATUS_TIMEOUT_MS, statusPollMs: STATUS_POLL_MS,
       statusOnly: true, authoritativeRunner: 'V67', refresh: refreshTruth,
       get lastTruth() { return lastTruth; },
       get terminalDate() { return terminalDate; }
     };
-    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, TERMINAL_READ_POLICY, TRANSIENT_POLICY, 'one exact-date persisted status read supplies all three stage badges; unconfirmed reads never reuse stale completed badges; processing completion is represented by the overall cycle label and is independent from business OPEN/closure truth.');
+    console.info('[CE-QC][V168_STATUS_ONLY]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, TERMINAL_READ_POLICY, TRANSIENT_POLICY, LEGACY_DETAIL_POLICY, 'one exact-date persisted status read supplies all three stage badges; unconfirmed reads never reuse stale completed badges or legacy run detail; processing completion is represented by the overall cycle label and is independent from business OPEN/closure truth.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
