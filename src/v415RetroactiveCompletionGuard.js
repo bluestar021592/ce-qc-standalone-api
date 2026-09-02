@@ -2,11 +2,18 @@ import express from 'express';
 import { getDb, nowIso } from './db.js';
 import { readV384CcslProcessingProof, V384_CCSL_PROCESSING_PROOF_ID } from './v384CcslProcessingProof.js';
 import { loadWhppState, saveWhppState } from './whppStore.js';
+import {
+  V418_STATUS_PROOF_FAST_PATH_ID,
+  readV418CurrentMembershipCounts,
+  readV418CcslProcessingProof,
+  readV418BusinessSuccessCoverage
+} from './v418StatusProofFastPath.js';
 
 export const V415_RETROACTIVE_COMPLETION_GUARD_ID='2026-09-02-v415-current-member-processing-proof-v1';
 export const V415_STALE_COMPLETION_REOPEN_ID='2026-09-02-v415-stale-completion-reopen-v1';
 export const V416_FAST_FAILCLOSED_PROOF_ID='2026-09-02-v416-large-db-fast-failclosed-proof-v1';
 export const V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID='2026-09-02-v417-membership-anchored-success-proof-v1';
+export { V418_STATUS_PROOF_FAST_PATH_ID };
 const STATUS_ROUTE='/api/v33/run-progress';
 const GUARDED_POST_ROUTES=new Set(['/api/shopee/run/start','/api/shopee/run/resume','/api/whpp/run/start','/api/whpp/run/resume']);
 const previousGet=express.application.get;
@@ -30,29 +37,7 @@ function latestValidBatch(db,reportDate=''){
 }
 
 function exactMembership(db,batch){
-  const result={CE:0,CEAF:0,TBKH:0,ALI1688:0,SHOPEECN:0,SHOPEEVN:0,WHPP:0,CCSL:0,SHOPEE:0,TOTAL:0};
-  if(!batch?.snapshotId||!batch?.reportDate)return result;
-  try{
-    const snapshot=db.prepare('SELECT payloadJson FROM unified_snapshots WHERE snapshotId=? AND reportDate=? LIMIT 1').get(batch.snapshotId,batch.reportDate)||{};
-    const payload=safeJson(snapshot.payloadJson,{}),stored=payload.classificationCounts||payload.reconciliation?.expectedCounts||{};
-    const keys=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
-    if(keys.some(key=>Object.prototype.hasOwnProperty.call(stored,key))){
-      for(const key of keys)result[key]=n(stored[key]);
-      result.CCSL=result.CE+result.CEAF+result.TBKH+result.ALI1688;
-      result.SHOPEE=result.SHOPEECN+result.SHOPEEVN;
-      result.TOTAL=result.CCSL+result.SHOPEE+result.WHPP;
-      result._source='UNIFIED_SNAPSHOT_IMMUTABLE_CLASSIFICATION_COUNTS';
-      return result;
-    }
-  }catch{}
-  for(const row of db.prepare('SELECT businessType,COUNT(DISTINCT shipmentCode) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? GROUP BY businessType').all(batch.snapshotId,batch.reportDate)){
-    if(Object.hasOwn(result,row.businessType))result[row.businessType]=n(row.count);
-  }
-  result.CCSL=result.CE+result.CEAF+result.TBKH+result.ALI1688;
-  result.SHOPEE=result.SHOPEECN+result.SHOPEEVN;
-  result.TOTAL=result.CCSL+result.SHOPEE+result.WHPP;
-  result._source='UNIFIED_IMPORT_ROWS_FALLBACK';
-  return result;
+  return readV418CurrentMembershipCounts(db,batch);
 }
 
 function currentLock(db,type,date,boundary=''){
@@ -83,42 +68,18 @@ function unifiedCompletionClaim(db,batch){
 
 function whppStateCompletionClaim(db,date,boundary=''){
   try{
-    const row=db.prepare("SELECT valueJson,updatedAt FROM business_states WHERE businessType='WHPP' LIMIT 1").get()||{};
-    if(boundary&&!atOrAfter(row.updatedAt,boundary))return false;
+    const meta=db.prepare("SELECT length(CAST(valueJson AS BLOB)) bytes,updatedAt FROM business_states WHERE businessType='WHPP' LIMIT 1").get()||{};
+    if(n(meta.bytes)>2*1024*1024)return false;
+    if(boundary&&!atOrAfter(meta.updatedAt,boundary))return false;
+    const row=db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP' LIMIT 1").get()||{};
     const state=safeJson(row.valueJson,{}),status=text(state.snapshotStatus).toUpperCase();
     return dateOnly(state.reportDate)===date&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(text(state.snapshotId));
   }catch{return false;}
 }
 
 function businessSuccessCoverage(db,{businessType,date,snapshotId,boundary='',memberTypes=[]}={}){
-  if(!date||!memberTypes.length)return 0;
-  const boundarySql=boundary?" AND COALESCE(f.updatedAt,'')>=?":'';
-  try{
-    if(text(businessType).toUpperCase()==='WHPP'){
-      const params=[date,'WHPP',date];
-      if(boundary)params.push(boundary);
-      return n(db.prepare(`SELECT COUNT(DISTINCT d.shipmentCode) count
-        FROM business_daily_parse_rows d
-        WHERE d.businessType='WHPP' AND d.reportDate=? AND TRIM(COALESCE(d.shipmentCode,''))<>''
-          AND EXISTS(
-            SELECT 1 FROM business_final_rows f
-            WHERE f.businessType=? AND f.shipmentCode=d.shipmentCode AND f.reportDate=?
-              AND UPPER(COALESCE(f.apiStatus,''))='SUCCESS'${boundarySql}
-          )`).get(...params)?.count);
-    }
-    if(!snapshotId)return 0;
-    const placeholders=memberTypes.map(()=>'?').join(',');
-    const params=[snapshotId,date,...memberTypes,businessType,date];
-    if(boundary)params.push(boundary);
-    return n(db.prepare(`SELECT COUNT(DISTINCT u.shipmentCode) count
-      FROM unified_import_rows u
-      WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN (${placeholders})
-        AND EXISTS(
-          SELECT 1 FROM business_final_rows f
-          WHERE f.businessType=? AND f.shipmentCode=u.shipmentCode AND f.reportDate=?
-            AND UPPER(COALESCE(f.apiStatus,''))='SUCCESS'${boundarySql}
-        )`).get(...params)?.count);
-  }catch{return 0;}
+  const result=readV418BusinessSuccessCoverage(db,{businessType,date,snapshotId,boundary,memberTypes});
+  return result?.ok?n(result.count):0;
 }
 
 function emptyMemberProof(total,reason){return{id:V384_CCSL_PROCESSING_PROOF_ID,source:n(total),covered:0,missing:n(total),complete:false,reasons:{[reason]:n(total)},missingBills:[],missingReasons:[],queryMode:'V416_FAST_NEGATIVE_PROOF'};}
@@ -133,17 +94,22 @@ function cacheResult(key,value){
 export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=false}={}){
   const started=Date.now(),date=dateOnly(reportDate);
   const batch=latestValidBatch(db,date);
-  if(!date||!batch)return{ok:false,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,reportDate:date,batch:null,counts:{CCSL:0,SHOPEE:0,WHPP:0,TOTAL:0},stages:{CCSL:{complete:false},SHOPEE:{complete:false},WHPP:{complete:false}},reason:'CURRENT_VALID_BATCH_MISSING'};
+  if(!date||!batch)return{ok:false,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,reportDate:date,batch:null,counts:{CCSL:0,SHOPEE:0,WHPP:0,TOTAL:0},stages:{CCSL:{complete:false},SHOPEE:{complete:false},WHPP:{complete:false}},reason:'CURRENT_VALID_BATCH_MISSING'};
   const cacheKey=`${date}:${text(batch.snapshotId)}`,cached=proofCache.get(cacheKey);
   if(!force&&cached&&Date.now()-cached.at<cached.ttl)return{...cached.value,cacheHit:true,elapsedMs:Date.now()-started};
   const counts=exactMembership(db,batch),boundary=text(batch.createdAt),snapshotId=text(batch.snapshotId);
 
   const ccslLock=currentLock(db,'CCSL',date,boundary);
   const ccslSnapshot=currentCompletionSnapshot(db,'CCSL',date,ccslLock?.runId,boundary);
+  const fastCcslProof=ccslSnapshot?readV418CcslProcessingProof(db,{reportDate:date,snapshotId,boundary}):null;
   const ccslMemberProof=counts.CCSL===0
     ?{id:V384_CCSL_PROCESSING_PROOF_ID,source:0,covered:0,missing:0,complete:true,queryMode:'ZERO_TICKET'}
     :ccslSnapshot
-      ?readV384CcslProcessingProof(db,{reportDate:date,snapshotId,boundary,includeMissingBills:false})
+      ?(fastCcslProof?.ok
+        ?fastCcslProof
+        :(counts.CCSL<=500
+          ?readV384CcslProcessingProof(db,{reportDate:date,snapshotId,boundary,includeMissingBills:false})
+          :emptyMemberProof(counts.CCSL,'V418_FAST_CCSL_PROOF_FAILED')))
       :emptyMemberProof(counts.CCSL,'NO_CURRENT_COMPLETION_SNAPSHOT');
   const ccslComplete=counts.CCSL===0||Boolean(ccslSnapshot&&ccslMemberProof.complete&&n(ccslMemberProof.source)===counts.CCSL);
 
@@ -153,40 +119,41 @@ export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=f
   const shopeeComplete=counts.SHOPEE===0||Boolean(shopeeSnapshot&&shopeeCovered>=counts.SHOPEE);
 
   const whppLock=currentLock(db,'WHPP',date,boundary);
-  const whppClaim=counts.WHPP===0||unifiedCompletionClaim(db,batch)||['finished','completed'].includes(text(whppLock?.status).toLowerCase())||whppStateCompletionClaim(db,date,boundary);
+  const whppMembershipOk=counts._whppMembershipOk!==false;
+  const whppClaim=whppMembershipOk&&(counts.WHPP===0||unifiedCompletionClaim(db,batch)||['finished','completed'].includes(text(whppLock?.status).toLowerCase())||whppStateCompletionClaim(db,date,boundary));
   const whppCovered=counts.WHPP>0&&whppClaim?businessSuccessCoverage(db,{businessType:'WHPP',date,snapshotId,boundary,memberTypes:['WHPP']}):0;
-  const whppComplete=counts.WHPP===0||Boolean(whppClaim&&whppCovered>=counts.WHPP);
+  const whppComplete=Boolean(whppMembershipOk&&(counts.WHPP===0||whppClaim&&whppCovered>=counts.WHPP));
 
   const result={
-    ok:true,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,reportDate:date,
+    ok:true,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,reportDate:date,
     batch:{batchId:text(batch.batchId),snapshotId,boundary},counts,
     stages:{
       CCSL:{complete:ccslComplete,total:counts.CCSL,covered:n(ccslMemberProof.covered),missing:Math.max(0,counts.CCSL-n(ccslMemberProof.covered)),memberProof:ccslMemberProof,completionSnapshotId:text(ccslSnapshot?.snapshotId),lock:ccslLock},
       SHOPEE:{complete:shopeeComplete,total:counts.SHOPEE,covered:shopeeCovered,missing:Math.max(0,counts.SHOPEE-shopeeCovered),completionSnapshotId:text(shopeeSnapshot?.snapshotId),lock:shopeeLock},
-      WHPP:{complete:whppComplete,total:counts.WHPP,covered:whppCovered,missing:Math.max(0,counts.WHPP-whppCovered),completionSnapshotId:'',completionClaim:whppClaim,lock:whppLock}
+      WHPP:{complete:whppComplete,total:counts.WHPP,covered:whppCovered,missing:Math.max(0,counts.WHPP-whppCovered),completionSnapshotId:'',completionClaim:whppClaim,membershipOk:whppMembershipOk,membershipReason:text(counts._whppMembershipReason),lock:whppLock}
     },
-    membershipSource:text(counts._source),elapsedMs:Date.now()-started,cacheHit:false
+    membershipSource:text(counts._source),membershipFastSource:text(counts._fastSource),elapsedMs:Date.now()-started,cacheHit:false
   };
-  if(result.elapsedMs>1000)console.warn('[CE-QC][V417_STATUS_PROOF_SLOW]',JSON.stringify({reportDate:date,elapsedMs:result.elapsedMs,ccsl:counts.CCSL,shopee:counts.SHOPEE,whpp:counts.WHPP,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID}));
+  if(result.elapsedMs>1000)console.warn('[CE-QC][V418_STATUS_PROOF_SLOW]',JSON.stringify({reportDate:date,elapsedMs:result.elapsedMs,ccsl:counts.CCSL,shopee:counts.SHOPEE,whpp:counts.WHPP,fastPathId:V418_STATUS_PROOF_FAST_PATH_ID}));
   return cacheResult(cacheKey,result);
 }
 
 function failClosedStage(stage={},proof={},reason='STATUS_PROOF_UNCONFIRMED'){
   const lock=proof?.lock||null,status=text(lock?.status).toLowerCase();
-  return{...stage,sourceTotal:n(proof?.total||stage?.sourceTotal),complete:false,zeroTicketDay:false,snapshotId:'',snapshotStatus:'PENDING',runId:text(lock?.runId||stage?.runId),runStatus:status||'status_unconfirmed',running:status==='running',paused:status==='paused',failed:status==='failed',phase:text(lock?.currentStage)||'状态确认中',completionSource:reason,statusSource:'V416_FAIL_CLOSED_STATUS_PROOF',completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,...proof}};
+  return{...stage,sourceTotal:n(proof?.total||stage?.sourceTotal),complete:false,zeroTicketDay:false,snapshotId:'',snapshotStatus:'PENDING',runId:text(lock?.runId||stage?.runId),runStatus:status||'status_unconfirmed',running:status==='running',paused:status==='paused',failed:status==='failed',phase:text(lock?.currentStage)||'状态确认中',completionSource:reason,statusSource:'V416_FAIL_CLOSED_STATUS_PROOF',completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,...proof}};
 }
 
 function failClosedPayload(payload={},proof={},reason='STATUS_PROOF_UNCONFIRMED'){
   if(payload?.stages&&typeof payload.stages==='object'){
     const stages={...payload.stages};
     for(const key of ['CCSL','SHOPEE','WHPP'])stages[key]=failClosedStage(stages[key]||{key},proof?.stages?.[key]||{},reason);
-    return{...payload,complete:false,stages,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,ok:false,reason}};
+    return{...payload,complete:false,stages,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,ok:false,reason}};
   }
-  return{...failClosedStage(payload,proof?.stages?.[text(payload.businessType||payload.key).toUpperCase()]||{},reason),complete:false,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,ok:false,reason}};
+  return{...failClosedStage(payload,proof?.stages?.[text(payload.businessType||payload.key).toUpperCase()]||{},reason),complete:false,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,ok:false,reason}};
 }
 
 function downgradedStage(stage={},proof={}){
-  if(stage?.complete!==true||proof.complete===true)return{...stage,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,...proof}};
+  if(stage?.complete!==true||proof.complete===true)return{...stage,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,...proof}};
   const lock=proof.lock||null,status=text(lock?.status).toLowerCase();
   return{
     ...stage,
@@ -200,7 +167,7 @@ function downgradedStage(stage={},proof={}){
     snapshotId:'',snapshotStatus:'PENDING',
     completionSource:'V415_CURRENT_MEMBER_PROCESSING_PROOF_REQUIRED',
     statusSource:'V415_RETROACTIVE_CURRENT_MEMBER_PROOF',
-    completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,...proof}
+    completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,...proof}
   };
 }
 
@@ -211,11 +178,11 @@ export function applyV415StatusGuard(payload={},proof=null){
   if(payload.stages&&typeof payload.stages==='object'){
     const stages={...payload.stages};
     for(const key of ['CCSL','SHOPEE','WHPP'])stages[key]=downgradedStage(stages[key]||{key},resolved.stages[key]||{complete:false});
-    return{...payload,complete:['CCSL','SHOPEE','WHPP'].every(key=>stages[key]?.complete===true),stages,completedFastPath:payload.completedFastPath?`${payload.completedFastPath}+V415_PROOF_GUARD`:payload.completedFastPath,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,batch:resolved.batch,counts:resolved.counts,elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
+    return{...payload,complete:['CCSL','SHOPEE','WHPP'].every(key=>stages[key]?.complete===true),stages,completedFastPath:payload.completedFastPath?`${payload.completedFastPath}+V415_PROOF_GUARD`:payload.completedFastPath,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,batch:resolved.batch,counts:resolved.counts,elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
   }
   const key=text(payload.businessType||payload.key).toUpperCase()==='SHOPEE'?'SHOPEE':text(payload.businessType||payload.key).toUpperCase()==='WHPP'?'WHPP':'CCSL';
   const guarded=downgradedStage(payload,resolved.stages[key]||{complete:false});
-  return{...guarded,businessType:payload.businessType||key,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,batch:resolved.batch,counts:resolved.counts,stage:resolved.stages[key],elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
+  return{...guarded,businessType:payload.businessType||key,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,batch:resolved.batch,counts:resolved.counts,stage:resolved.stages[key],elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
 }
 
 function statusResponseGuard(req,res,next){
@@ -226,10 +193,11 @@ function statusResponseGuard(req,res,next){
       const guarded=applyV415StatusGuard(payload,readV415CurrentProcessingProof({reportDate:requested}));
       res.setHeader('X-CE-QC-V416-Proof',V416_FAST_FAILCLOSED_PROOF_ID);
       res.setHeader('X-CE-QC-V417-Member-Proof',V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID);
+      res.setHeader('X-CE-QC-V418-Fast-Proof',V418_STATUS_PROOF_FAST_PATH_ID);
       res.json=previousJson;
       return previousJson.call(this,guarded);
     }catch(error){
-      console.warn('[CE-QC][V416_STATUS_GUARD] proof failed closed:',error?.message||error);
+      console.warn('[CE-QC][V418_STATUS_GUARD] proof failed closed:',error?.message||error);
       res.json=previousJson;
       return previousJson.call(this,failClosedPayload(payload,{},`PROOF_ERROR:${text(error?.message||error)}`));
     }
@@ -319,4 +287,4 @@ if(typeof previousPost==='function'&&!previousPost[POST_WRAPPED]){
   express.application.post=wrappedPost;
 }
 
-console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,V416_FAST_FAILCLOSED_PROOF_ID,V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,'legacy COMPLETED markers are display/run-authoritative only when exact current membership has current-lifecycle proof; large-database status reads anchor SUCCESS checks on the exact current membership instead of scanning all historical final rows; any proof failure is fail-closed.');
+console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,V416_FAST_FAILCLOSED_PROOF_ID,V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,V418_STATUS_PROOF_FAST_PATH_ID,'legacy COMPLETED markers are display/run-authoritative only when exact current membership has current-lifecycle proof; V418 avoids large snapshot/state JSON materialization and uses current-member set joins; any proof failure is fail-closed.');

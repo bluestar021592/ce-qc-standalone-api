@@ -1,6 +1,6 @@
 (function installCurrentImportStabilityV159(global){
   if(global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__)return;
-  const VERSION='2026-09-02-v414-current-import-stability-v3-carryover-read-only';
+  const VERSION='2026-09-02-v418-current-import-stability-v4-open-split-display';
   const PAGE_TYPE=Object.freeze({ce:'CE',ceaf:'CEAF',tbkh:'TBKH',ali1688:'ALI1688',shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'});
   const PATH_PAGE=Object.freeze({'/':'home','/home':'home','/ce':'ce','/ceaf':'ceaf','/tbkh':'tbkh','/ali1688':'ali1688','/shopeecn':'shopeecn','/shopeevn':'shopeevn','/import':'import','/tracking':'tracking','/track':'tracking','/exceptions':'exceptions','/reports':'reports','/settings':'settings','/logs':'logs','/data-management':'data-management'});
   const TYPES=Object.values(PAGE_TYPE);
@@ -105,15 +105,27 @@
     return changed;
   }
 
+  function reconciledCarryDisplay(carry={}){
+    const today=Math.max(num(carry.todayOpen),num(carry.conservativeCurrentOpen));
+    const historical=Math.max(num(carry.historicalOpen),num(carry.historicalReconciledOpen));
+    const current=today+historical;
+    return{today,historical,current,source:'V418_READONLY_CLOSURE_RECONCILED_DISPLAY'};
+  }
   function normalizeImportStatus(){
     const imported=currentImport();
     if(!imported?.reportDate||!imported?.carryover)return;
     const node=document.getElementById('fileStatus');
     if(!node||!node.textContent.includes('综合日报已导入'))return;
+    const display=reconciledCarryDisplay(imported.carryover);
+    const carryLine=[...node.querySelectorAll('p')].find(item=>item.textContent.includes('当日未完结')||item.textContent.includes('当前处理队列')||item.textContent.includes('当前OPEN总量'));
+    if(carryLine){
+      carryLine.innerHTML=`当日未完结 <b>${fmt(display.today)}</b> · 历史跨日未完结 <b data-testid="historical-carryover-count">${fmt(display.historical)}</b> · 本次复核 <b>${fmt(imported.carryover.rechecked||0)}</b> · 当前OPEN总量 <b data-testid="combined-processing-queue-count">${fmt(display.current)}</b>`;
+      carryLine.dataset.v418OpenDisplay=display.source;
+    }
     let note=document.getElementById('v159DailyIsolationNote');
     if(!note){note=document.createElement('div');note.id='v159DailyIsolationNote';note.style.cssText='margin-top:7px;color:#39705a;font-size:12px;line-height:1.5';node.appendChild(note);}
-    const today=num(imported.carryover.todayOpen),historical=num(imported.carryover.historicalOpen),current=today+historical;
-    note.innerHTML=`<b>${String(imported.reportDate)} 当日剩余未闭环：${fmt(today)}票</b> · 历史跨日剩余未闭环 ${fmt(historical)}票 · 当前OPEN总量 ${fmt(current)}票。七业务是否已处理完成以持久化处理状态为准。`;
+    note.innerHTML=`<b>${String(imported.reportDate)} 当日剩余未闭环：${fmt(display.today)}票</b> · 历史跨日剩余未闭环 ${fmt(display.historical)}票 · 当前OPEN总量 ${fmt(display.current)}票。七业务是否已处理完成以持久化处理状态为准。`;
+    note.dataset.v418OpenDisplay=display.source;
   }
 
   async function exactBusinessState(type,options={}){
@@ -212,8 +224,8 @@
     document.addEventListener('ce-qc-run-complete',()=>{seedCurrentImport();queueRouteGuard();void refreshAllResultTruth();});
     setTimeout(()=>{if(seedCurrentImport())global.renderAll?.();normalizeImportStatus();queueRouteGuard();alignInitialCurrentImport();},80);
     setTimeout(()=>alignInitialCurrentImport(),700);
-    global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,refreshResults:refreshAllResultTruth,routeGuard:restoreRouteOwnership,syncSelectedDate:syncSelectedDateToCurrentImport};
-    console.info('[CE-QC][V159_CURRENT_IMPORT_STABILITY]',VERSION,'fresh import owns the active selected date once; carryover truth is read-only in the browser and remains owned by persisted backend state.');
+    global.__CE_QC_V159_CURRENT_IMPORT_STABILITY__={version:VERSION,seed:seedCurrentImport,exact:exactBusinessState,refreshResults:refreshAllResultTruth,routeGuard:restoreRouteOwnership,syncSelectedDate:syncSelectedDateToCurrentImport,reconciledCarryDisplay};
+    console.info('[CE-QC][V159_CURRENT_IMPORT_STABILITY]',VERSION,'fresh import owns the active selected date once; V418 OPEN split display reads backend closure reconciliation fields without mutating browser business truth.');
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
