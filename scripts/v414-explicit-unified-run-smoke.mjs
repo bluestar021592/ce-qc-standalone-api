@@ -13,6 +13,7 @@ const v165 = read('src/v165WhppRunStateRecoveryPatch.js');
 const v134 = read('src/v134WhppRunSupervisorPatch.js');
 const v294 = read('src/v294PostProcessAttemptBackfillPatch.js');
 const v322 = read('src/v322WebAvailabilityPatch.js');
+const v418 = read('src/v418StatusProofFastPath.js');
 const v132 = read('src/v132WhppFastIntegrationPatch.js');
 const v329 = read('src/v329ThreeBusinessDailyCache.js');
 const v67 = read('public/v67-resilient-run-guard.js');
@@ -59,16 +60,22 @@ mustMatch(v67, /global\.resumeUnified\s*=\s*\(\)\s*=>\s*execute\(\s*['"]resume['
 forbidMatch(v67, /console\.info\(\s*['"]\[CE-QC\]\[V67_WHPP_AUTO_RESUME\]/, 'generic browser WHPP auto resume executable path');
 
 // 5) WHPP completion evidence must be a successfully processed current-member
-// row. Placeholder/API_PENDING_RETRY rows may remain visible but cannot complete.
+// row. V419 keeps V322 as the scalar orchestration owner while V418 owns the
+// exact current-member set join and SUCCESS-only SQL. Placeholder/API_PENDING_RETRY
+// rows may remain visible but can never complete the stage.
 mustMatch(v322, /V322_WHPP_COMPLETION_PARITY_ID\s*=\s*'2026-09-02-v414-whpp-success-evidence-parity-v1'/, 'V322 WHPP SUCCESS-evidence parity');
-mustMatch(v322, /UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/, 'V322 SUCCESS-only final evidence');
-mustMatch(v322, /restartInterrupted/, 'V322 restart interruption exposure');
-mustMatch(v322, /lastMessage\s*:\s*restartInterrupted\s*\?\s*'PROCESS_RESTART_INTERRUPTED'\s*:\s*stage\.lastMessage/, 'V322 restart interruption message');
-mustMatch(v322, /completionSource\s*:\s*'FULL_MEMBER_SUCCESS_EVIDENCE'/, 'V322 full-member SUCCESS completion source');
+mustMatch(v322, /readV418BusinessSuccessCoverage/, 'V322 delegates SUCCESS coverage to V418 current-member proof owner');
+mustMatch(v322, /readV418BusinessSuccessCoverage\(db,\{businessType:'WHPP',date,snapshotId,boundary,memberTypes:\['WHPP'\]\}\)/, 'V322 WHPP stage invokes exact V418 SUCCESS coverage');
+mustMatch(v418, /FROM business_daily_parse_rows d[\s\S]*JOIN business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode[\s\S]*d\.businessType='WHPP'[\s\S]*d\.reportDate=\?[\s\S]*UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/, 'V418 WHPP exact current-member SUCCESS-only evidence');
+mustMatch(v418, /V418_WHPP_CURRENT_MEMBER_SET_JOIN/, 'V418 WHPP current-member proof source');
+mustMatch(v322, /restartInterrupted\s*:\s*interrupted/, 'V322 restart interruption exposure');
+mustMatch(v322, /lastMessage\s*:\s*interrupted\s*\?\s*'PROCESS_RESTART_INTERRUPTED'/, 'V322 exact restart interruption message');
+mustMatch(v322, /completionSource:'V418_CURRENT_MEMBER_PROCESSING_PROOF'/, 'V322 completed stage identifies V418 current-member proof');
+forbidMatch(v322, /UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/, 'duplicated SUCCESS SQL in V322 scalar orchestrator');
 mustMatch(v132, /STATUS_REVISION\s*=\s*'2026-09-02-v414-whpp-success-evidence-status-v1'/, 'V132 V414 SUCCESS-evidence status revision');
 mustMatch(v132, /UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/, 'V132 SUCCESS-only final evidence');
 mustMatch(v132, /const\s+finalEvidenceRows\s*=\s*countFinalEvidence\(db,reportDate,\{standard,unified\}\)/, 'V132 current-cohort final evidence count');
-mustMatch(v132, /completionSource\s*:\s*'FULL_MEMBER_SUCCESS_EVIDENCE'/, 'V132 full-member SUCCESS completion source');
+mustMatch(v132, /completionSource:'FULL_MEMBER_SUCCESS_EVIDENCE'/, 'V132 full-member SUCCESS completion source');
 forbidMatch(v132, /finalEvidenceRows\s*:\s*facts\.length/, 'full-summary placeholder completion');
 
 // 6) SHOPEE historical 1/2/3 attempts and START->POD days rebuild from saved
@@ -81,4 +88,4 @@ mustMatch(historyWorker, /const\s+ALLOW_NETWORK_REPAIR\s*=\s*String\(process\.en
 mustMatch(historyWorker, /savedEvents\(db/, 'history rebuild reads saved SQLite events');
 mustMatch(historyWorker, /analyzeV246ShopeeAttemptCycle\(eventMap\.get\(row\.shipmentCode\)\|\|\[\]/, 'history rebuild uses strict V246 attempt cycles');
 
-console.log('V414 explicit unified run smoke passed: fresh import cannot auto-start WHPP; restart recovery requires exact PROCESS_RESTART_INTERRUPTED proof from a previously persisted running lifecycle; WHPP completion ignores non-SUCCESS placeholder rows; Shopee historical attempt/signing cache is rebuilt from saved evidence first.');
+console.log('V419/V414 explicit unified run smoke passed: fresh import cannot auto-start WHPP; restart recovery requires exact PROCESS_RESTART_INTERRUPTED proof from a previously persisted running lifecycle; V322 delegates current-member SUCCESS proof to V418 set joins; non-SUCCESS placeholder rows cannot complete WHPP; Shopee historical attempt/signing cache is rebuilt from saved evidence first.');
