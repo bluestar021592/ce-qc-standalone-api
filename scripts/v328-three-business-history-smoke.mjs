@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 const syntax = [
   'src/v328ThreeBusinessHistoryFast.js',
   'src/v329ThreeBusinessDailyCache.js',
+  'src/historyCacheCoordinators.js',
   'src/v328EvidenceRepairCoordinator.js',
   'scripts/v329-three-business-cache-worker.mjs',
   'src/shopeeHistoricalSigningTruth.js',
@@ -22,7 +23,8 @@ const read = file => fs.readFileSync(file, 'utf8');
 const heavy = read('src/v328ThreeBusinessHistoryFast.js');
 const cacheSource = read('src/v329ThreeBusinessDailyCache.js');
 const backend = read('src/v308DeliveryDailyFastPath.js');
-const coordinator = read('src/v328EvidenceRepairCoordinator.js');
+const canonicalCoordinator = read('src/historyCacheCoordinators.js');
+const coordinatorCompat = read('src/v328EvidenceRepairCoordinator.js');
 const worker = read('scripts/v329-three-business-cache-worker.mjs');
 const signingTruth = read('src/shopeeHistoricalSigningTruth.js');
 const ui = read('public/v308-dashboard-read-bridge.js');
@@ -67,8 +69,15 @@ assert.match(backend, /ppAvgSigningDays/);
 assert.match(backend, /pvAvgSigningDays/);
 assert.doesNotMatch(backend, /readV328ThreeBusinessHistory|readV320HistoricalDailyWithDispatch/);
 
-// Isolated worker must derive old dates from saved members + strict evidence, not current V295 truth.
-assert.match(coordinator, /v329-three-business-cache-worker\.mjs/);
+// The single canonical coordinator owns worker launch/bounds; legacy entry is only a compatibility export.
+assert.match(coordinatorCompat, /from '\.\/historyCacheCoordinators\.js'/);
+assert.doesNotMatch(coordinatorCompat, /fork\(|setTimeout\(|DELETE FROM/);
+assert.match(canonicalCoordinator, /HISTORY_CACHE_COORDINATORS_ID='2026-09-02-unified-history-cache-coordinators-v1'/);
+assert.match(canonicalCoordinator, /function createCoordinator\(config\)/);
+assert.match(canonicalCoordinator, /v329-three-business-cache-worker\.mjs/);
+assert.match(canonicalCoordinator, /const WORKER_TIMEOUT_MS=120_000/);
+assert.match(canonicalCoordinator, /REPORT_DATE_ONLY/);
+assert.match(canonicalCoordinator, /ALL_HISTORY/);
 assert.doesNotMatch(worker, /readV295FirstAttemptTrends|v295FirstAttemptTruth/);
 for (const token of [
   'listV328HistoricalMembers',
@@ -166,4 +175,4 @@ for (const type of ['TBKH','SHOPEECN','SHOPEEVN']) {
 
 closeDb();
 fs.rmSync(root, { recursive:true, force:true });
-console.log('[THREE_BUSINESS_HISTORY] behavior smoke passed · saved membership · strict attempts · partial real START-to-POD samples · PP/PV averages · shared cache-only UI · no release-name coupling');
+console.log('[THREE_BUSINESS_HISTORY] behavior smoke passed · canonical shared coordinator · saved membership · strict attempts · partial real START-to-POD samples · PP/PV averages · shared cache-only UI · no duplicate coordinator implementation');
