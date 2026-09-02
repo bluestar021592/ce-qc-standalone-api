@@ -2,7 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 
 export const V322_WEB_AVAILABILITY_ID='2026-09-02-v322-persisted-three-stage-status-v4';
-export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v2';
+export const V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v322-one-read-seven-business-status-v1';
 const previousGet=express.application.get;
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
 const first=(...values)=>{for(const v of values)if(v!==undefined&&v!==null&&v!==''&&Number.isFinite(Number(v)))return Number(v);return 0;};
