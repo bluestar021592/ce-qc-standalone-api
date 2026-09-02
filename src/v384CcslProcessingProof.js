@@ -81,7 +81,7 @@ function persistedProofSql(boundary=''){
   )`;
 }
 
-export function readV384CcslProcessingProof(db,{reportDate='',snapshotId='',boundary=''}={}){
+export function readV384CcslProcessingProof(db,{reportDate='',snapshotId='',boundary='',includeMissingBills=true}={}){
   const date=text(reportDate),sid=text(snapshotId),life=text(boundary);
   if(!date||!sid)return{id:V384_CCSL_PROCESSING_PROOF_ID,source:0,covered:0,missing:0,complete:false,reasons:{INVALID_SCOPE:1},missingBills:[],missingReasons:[],lifecycleBoundary:life};
   const proofSql=persistedProofSql(life);
@@ -91,7 +91,7 @@ export function readV384CcslProcessingProof(db,{reportDate='',snapshotId='',boun
     WHERE u.snapshotId=? AND u.reportDate=? AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')`).get(...countParams)||{};
   const source=Number(row.source||0),covered=Number(row.covered||0),missing=Math.max(0,source-covered);
   let missingBills=[];
-  if(missing>0){
+  if(includeMissingBills!==false&&missing>0){
     const missingParams=[sid,date];
     if(life)missingParams.push(life,life);
     missingBills=db.prepare(`SELECT u.shipmentCode FROM unified_import_rows u
@@ -102,6 +102,6 @@ export function readV384CcslProcessingProof(db,{reportDate='',snapshotId='',boun
     id:V384_CCSL_PROCESSING_PROOF_ID,source,covered,missing,complete:covered>=source,
     reasons:missing?{MISSING_VALID_PROCESSING_PROOF:missing}:{},missingBills,
     missingReasons:missingBills.map(shipmentCode=>({shipmentCode,covered:false,reason:'MISSING_VALID_PROCESSING_PROOF'})),
-    lifecycleBoundary:life,queryMode:'INDEXED_EXISTS_CURRENT_SNAPSHOT_ONLY'
+    lifecycleBoundary:life,queryMode:includeMissingBills===false?'INDEXED_EXISTS_COUNT_ONLY':'INDEXED_EXISTS_CURRENT_SNAPSHOT_ONLY'
   };
 }
