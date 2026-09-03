@@ -89,14 +89,14 @@ mustMatch(historyWorker, /const\s+ALLOW_NETWORK_REPAIR\s*=\s*String\(process\.en
 mustMatch(historyWorker, /savedEvents\(db/, 'history rebuild reads saved SQLite events');
 mustMatch(historyWorker, /analyzeV246ShopeeAttemptCycle\(eventMap\.get\(row\.shipmentCode\)\|\|\[\]/, 'history rebuild uses strict V246 attempt cycles');
 
-// 7) V419 local installer must prove the new global-range/export freshness and
-// carry/current/ledger convergence in isolated child processes. These smoke tests
-// use only temporary/in-memory SQLite and never production data or CE network APIs.
+// 7) V419/V420 local installer proves global range/export freshness, carry/current/ledger convergence,
+// and the explicit-entry status convergence in isolated/source-only child checks.
 for (const smoke of [
   'scripts/v419-carry-ledger-sync-smoke.mjs',
-  'scripts/v419-global-range-export-freshness-smoke.mjs'
+  'scripts/v419-global-range-export-freshness-smoke.mjs',
+  'scripts/v420-status-entry-coalescing-smoke.mjs'
 ]) {
   execFileSync(process.execPath,[smoke],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 }
 
-console.log('V419/V414 explicit unified run smoke passed: fresh import cannot auto-start WHPP; restart recovery requires exact PROCESS_RESTART_INTERRUPTED proof from a previously persisted running lifecycle; V322 delegates current-member SUCCESS proof to V418 set joins; non-SUCCESS placeholder rows cannot complete WHPP; Shopee historical attempt/signing cache is rebuilt from saved evidence first; V419 range/export/carry smokes passed in isolated child processes.');
+console.log('V420/V419/V414 explicit unified run smoke passed: fresh import cannot auto-start WHPP; restart recovery requires exact PROCESS_RESTART_INTERRUPTED proof; V169 waits/retries canonical V168 status before explicit entry while V412 does not duplicate the preflight; V67 remains the sole runner; V322/V418 current-member SUCCESS proof and V419 range/export/carry truth remain locked.');
