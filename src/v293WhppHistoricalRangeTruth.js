@@ -2,6 +2,7 @@ import { getDb } from './db.js';
 
 export const V293_WHPP_HISTORICAL_RANGE_TRUTH_ID='2026-08-25-v293-whpp-history-range-fallback-v1';
 export const V293_WHPP_HISTORY_MEMBERSHIP_INTEGRITY_ID='2026-08-29-v293-whpp-history-membership-integrity-v2';
+export const V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID='2026-09-03-v419-whpp-history-summary-metric-failclosed-v1';
 const n=value=>Number.isFinite(Number(value))?Number(value):0;
 const pct=(value,total)=>total?Number((n(value)*100/n(total)).toFixed(2)):0;
 const date=value=>{const text=String(value||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
@@ -22,15 +23,21 @@ function fromHistory(row={}){
   const summaryTotal=pickOptional(summary,['total','today','todayTotal']);
   const hasCompletedSummary=Boolean(String(row.summaryJson||'').trim());
   const historySummaryVerified=hasCompletedSummary&&summaryTotal!==null&&n(summaryTotal)===expectedTotal;
+  // V419: history metrics are evidence only when their own denominator exactly
+  // matches the preserved WHPP daily-report denominator. A stale/corrupt summary
+  // may keep the trusted daily total visible, but none of its POD/Pending/OC/
+  // return/attempt/signing facts are publishable. This is deliberately fail-closed.
+  const metric=(keys=[],fallback=0)=>historySummaryVerified?pick(summary,keys,fallback):0;
   return finish({
     reportDate:String(row.reportDate||''),businessType:'WHPP',regionCode:'UNKNOWN',total:expectedTotal,matched:historySummaryVerified?expectedTotal:0,
-    pod:pick(summary,['pod','todayPod','podCount','签收件数']),sameDayPod:pick(summary,['sameDayPod','firstDayPod','firstPod','首日POD']),
-    ocCurrent:pick(summary,['ocCurrent','todayOc','currentOc','当日OC']),pendingNonContinuous:pick(summary,['pendingNonContinuous','pendingDiscontinuous','Pending不连续']),
-    pending3:pick(summary,['pending3','pending3plus','pending3Plus']),oc1:pick(summary,['oc1']),oc2:pick(summary,['oc2']),cycle2:pick(summary,['cycle2','cycle2plus']),
-    shopRetention2:pick(summary,['shopRetention2','activeStoreRetention','storeRetention2']),workOrder:pick(summary,['workOrder','ticketOpen']),inboundNoScan:pick(summary,['inboundNoScan']),
-    provinceOpen:pick(summary,['provinceOpen','regionPvUnresolved']),returned:pick(summary,['returned']),attempt1:pick(summary,['attempt1','dispatchAttempt1']),attempt2:pick(summary,['attempt2','dispatchAttempt2']),attempt3:pick(summary,['attempt3','dispatchAttempt3']),attemptUnknown:pick(summary,['attemptUnknown','dispatchAttemptUnclassifiedPod']),
-    signingDaysSum:pick(summary,['signingDaysSum']),signingDaysCount:pick(summary,['signingDaysCount']),historyFallback:historySummaryVerified,
-    historySource:historySummaryVerified?'WHPP_BUSINESS_HISTORY_SUMMARY':'WHPP_HISTORY_SUMMARY_UNVERIFIED',historySummaryVerified,historySummaryTotal:summaryTotal,expectedTotal
+    pod:metric(['pod','todayPod','podCount','签收件数']),sameDayPod:metric(['sameDayPod','firstDayPod','firstPod','首日POD']),
+    ocCurrent:metric(['ocCurrent','todayOc','currentOc','当日OC']),pendingNonContinuous:metric(['pendingNonContinuous','pendingDiscontinuous','Pending不连续']),
+    pending3:metric(['pending3','pending3plus','pending3Plus']),oc1:metric(['oc1']),oc2:metric(['oc2']),cycle2:metric(['cycle2','cycle2plus']),
+    shopRetention2:metric(['shopRetention2','activeStoreRetention','storeRetention2']),workOrder:metric(['workOrder','ticketOpen']),inboundNoScan:metric(['inboundNoScan']),
+    provinceOpen:metric(['provinceOpen','regionPvUnresolved']),returned:metric(['returned']),attempt1:metric(['attempt1','dispatchAttempt1']),attempt2:metric(['attempt2','dispatchAttempt2']),attempt3:metric(['attempt3','dispatchAttempt3']),attemptUnknown:metric(['attemptUnknown','dispatchAttemptUnclassifiedPod']),
+    signingDaysSum:metric(['signingDaysSum']),signingDaysCount:metric(['signingDaysCount']),historyFallback:historySummaryVerified,
+    historySource:historySummaryVerified?'WHPP_BUSINESS_HISTORY_SUMMARY':hasCompletedSummary?'WHPP_HISTORY_SUMMARY_REJECTED_DENOMINATOR':'WHPP_HISTORY_SUMMARY_MISSING',historySummaryVerified,historySummaryTotal:summaryTotal,expectedTotal,
+    historyFailClosedId:V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID
   });
 }
 function incompleteError(reportDate,expected,actual){
@@ -99,7 +106,9 @@ export function mergeV293WhppHistoricalRange(canonicalDaily=[],fromDate='',toDat
     }
 
     // actual===0 with expected>0 means the historical parse membership was fully
-    // rotated away. Only an exact completed history summary may restore facts.
+    // rotated away. Only an exact completed history summary may restore metrics.
+    // An unverified/mismatched summary is denominator-only fail-closed truth: it
+    // keeps total visible but all analysis facts are zero and the day stays unready.
     // A partially-present membership never reaches this branch and is rejected above.
     if(history?.historySummaryVerified){byDate.set(reportDate,history);continue;}
     if(history){byDate.set(reportDate,history);continue;}
@@ -108,4 +117,4 @@ export function mergeV293WhppHistoricalRange(canonicalDaily=[],fromDate='',toDat
   return [...byDate.values()].sort((a,b)=>String(a.reportDate||'').localeCompare(String(b.reportDate||'')));
 }
 
-console.info('[CE-QC][V293_WHPP_HISTORY_RANGE]',V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,V293_WHPP_HISTORY_MEMBERSHIP_INTEGRITY_ID,'WHPP history recovery distinguishes complete current membership from fully rotated membership; partial membership fails closed and can never be hidden by history fallback; read-only, no SQLite mutation.');
+console.info('[CE-QC][V293_WHPP_HISTORY_RANGE]',V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,V293_WHPP_HISTORY_MEMBERSHIP_INTEGRITY_ID,V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID,'WHPP history recovery distinguishes complete current membership from fully rotated membership; partial membership fails closed; mismatched history keeps only the trusted daily denominator and cannot publish stale analysis metrics; read-only, no SQLite mutation.');
