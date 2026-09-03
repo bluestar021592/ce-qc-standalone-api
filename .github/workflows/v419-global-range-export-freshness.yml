@@ -19,9 +19,14 @@ jobs:
       - name: Syntax checks
         run: |
           node --check public/v237-dashboard-owner-guard.js
+          node --check public/v132-whpp-seven-business-fast.js
+          node --check public/v249-whpp-detail-owner.js
+          node --check src/v236DashboardCurrentRoutePatch.js
+          node --check src/v172WhppDetailParityPatch.js
           node --check src/v84AsyncExportPatch.js
           node --check src/v176AsyncExportRecoveryPatch.js
           node --check src/v320HistoricalExportRows.js
+          node --check scripts/v237-dashboard-owner-source-smoke.cjs
           node --check scripts/v419-global-range-export-freshness-smoke.mjs
-      - name: Global date range + next-day export truth
+      - name: Global date range + next-day export truth + WHPP range parity
         run: node scripts/v419-global-range-export-freshness-smoke.mjs
