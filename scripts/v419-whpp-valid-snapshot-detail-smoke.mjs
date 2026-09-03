@@ -58,9 +58,16 @@ try{
   assert.deepEqual(exportSnapshots[0].payload.finalRows.map(row=>row.shipmentCode),[good],'residual final rows from invalid/non-member facts must not create WHPP export members');
   assert.equal(countCompletedWhppRows('2026-08-01','2026-08-02'),1,'WHPP completed export row count must be membership-locked');
   assert.deepEqual(whppDailyCounts('2026-08-01','2026-08-02'),[{reportDate:'2026-08-01',businessType:'WHPP',count:1}]);
-  assert.equal(exportSnapshots[0].payload.finalRows[0].v419WhppExportMembershipId,'2026-09-03-v419-whpp-valid-completed-membership-export-v1');
+  assert.equal(exportSnapshots[0].payload.finalRows[0].v419WhppExportMembershipId,'2026-09-03-v419-whpp-valid-completed-membership-export-v2');
 
-  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT] PASS invalid/failed snapshots and INVALID unified batches cannot override completed history or create phantom dates; residual final rows cannot create WHPP export members; latest current POD still overlays valid daily membership');
+  const partialA='WH-V419-PARTIAL-A',partialB='WH-V419-PARTIAL-B';
+  const partialState={businessType:'WHPP',reportDate:'2026-08-03',pnhBills:[partialA,partialB],dailyParseRows:[],finalRows:[{shipmentCode:partialA,运单号:partialA},{shipmentCode:partialB,运单号:partialB}]};
+  insertMinimal('business_export_snapshots',{snapshotId:'WH-VALID-0803',businessType:'WHPP',reportDate:'2026-08-03',runId:'RUN-PARTIAL',payloadJson:JSON.stringify({state:partialState}),generatedAt:'2026-08-03T10:00:00.000Z',createdAt:'2026-08-03T10:00:00.000Z',status:'VALID',reconciliationStatus:'COMPLETED'});
+  insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:'2026-08-03',sourceFile:'8-3.xls',totalCount:2,summaryJson:'{}',createdAt:'2026-08-03T09:00:00.000Z',updatedAt:'2026-08-03T09:00:00.000Z'});
+  insertMinimal('business_daily_parse_rows',{businessType:'WHPP',reportDate:'2026-08-03',shipmentCode:partialA,sheetName:'日报',rowNumber:2,source_row_number:2,recipient_raw:'WHPP',recipient_normalized:'WHPP',recipient_group:'WHPP',recipient_group_reason:'TEST',rawText:'',rowJson:JSON.stringify({运单号:partialA}),createdAt:'2026-08-03T09:00:00.000Z'});
+  assert.throws(()=>whppDailyCounts('2026-08-03','2026-08-03'),error=>error?.code==='WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE'&&error.expected===2&&error.actual===1,'partial standard WHPP membership must fail closed instead of being hidden by snapshot fallback');
+
+  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT] PASS invalid/failed snapshots and INVALID unified batches cannot override completed history or create phantom dates; residual final rows cannot create WHPP export members; partial standard membership fails closed; latest current POD still overlays valid daily membership');
 }finally{
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
