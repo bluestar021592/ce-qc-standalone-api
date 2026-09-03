@@ -16,6 +16,7 @@ import {
   invalidateV284DailyMembershipTruth,
   V419_WHPP_RANGE_METRIC_PARITY_ID
 } from '../src/v284DailyMembershipTruth.js';
+import { readV237DashboardTrends, V419_WHPP_TREND_TRUTH_ID } from '../src/v237DashboardTrendRead.js';
 
 for(const file of [
   'src/v284DailyMembershipTruth.js',
@@ -23,6 +24,7 @@ for(const file of [
   'src/v293WhppHistoricalRangeTruth.js',
   'src/rangeDashboardStoreV284.js',
   'src/v236DashboardCurrentRoutePatch.js',
+  'src/v237DashboardTrendRead.js',
   'public/v132-whpp-seven-business-fast.js'
 ])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 
@@ -31,6 +33,7 @@ const dailyTruthSource=fs.readFileSync('src/v284DailyMembershipTruth.js','utf8')
 const coverageSource=fs.readFileSync('src/v284MembershipEvidenceCoverage.js','utf8');
 const rangeSource=fs.readFileSync('src/rangeDashboardStoreV284.js','utf8');
 const routeSource=fs.readFileSync('src/v236DashboardCurrentRoutePatch.js','utf8');
+const trendSource=fs.readFileSync('src/v237DashboardTrendRead.js','utf8');
 const publicWhppSource=fs.readFileSync('public/v132-whpp-seven-business-fast.js','utf8');
 assert.match(source,/2026-08-25-v293-whpp-history-range-fallback-v1/);
 assert.match(source,/2026-08-29-v293-whpp-history-membership-integrity-v2/);
@@ -58,9 +61,15 @@ assert.match(rangeSource,/visibleSourceTotal=n\(truth\.ccsl\?\.total\)\+n\(truth
 assert.match(rangeSource,/aggregateFlatWhppRegions/,'WHPP period state must expose PP\/PV region facts from the same daily membership truth');
 assert.match(rangeSource,/regionCoverageComplete/,'WHPP range must explicitly disclose whether PP\/PV region evidence covers the whole denominator');
 assert.match(rangeSource,/V419_WHPP_RANGE_VISIBLE_METRIC_ID/);
-assert.match(routeSource,/exactUnresolved=optionalNumber\(raw,\['unresolved'\]\)/,'range API must prefer exact WHPP unresolved truth over total-minus-terminal subtraction');
+assert.match(routeSource,/const exactUnresolved=isWhpp\?optionalNumber/,'exact unresolved override must be scoped to WHPP only');
+assert.match(routeSource,/if\(isWhpp&&!coverageComplete\)/,'PP\/PV fail-closed null behavior must be scoped to WHPP only');
 assert.match(routeSource,/regionCoverageComplete/,'range API must propagate WHPP PP\/PV coverage truth');
 assert.match(routeSource,/normalized\[key\]=null/,'incomplete WHPP region coverage must fail closed to null, not fake zero');
+assert.match(trendSource,/V419_WHPP_TREND_TRUTH_ID/,'WHPP trend truth must have an explicit owner id');
+assert.match(trendSource,/FROM business_daily_reports WHERE businessType='WHPP'/,'WHPP trend dates must come from the WHPP daily report ledger, not unified-import dates');
+assert.match(trendSource,/mergeV293WhppHistoricalRange/,'WHPP trend must restore verified rotated history through V293');
+assert.match(trendSource,/type==='WHPP'\?readWhppTrendDaily/,'only WHPP trends may switch to the new ledger/history path');
+assert.match(trendSource,/V240_EXACT_DAILY_RATE_CACHE_ONLY/,'all non-WHPP trend ownership must remain on the existing V240 cache-only path');
 assert.match(publicWhppSource,/incomplete\?'—'/,'WHPP range UI must render incomplete PP\/PV evidence as dash');
 assert.match(publicWhppSource,/历史PP\/PV区域证据不完整/,'WHPP UI must explain why incomplete historical region values are not shown as zero');
 assert.match(publicWhppSource,/ce_qc_v132_whpp_fast_summary_v419_2/,'WHPP V419 range truth must not reuse the stale pre-parity browser cache');
@@ -84,7 +93,7 @@ const fixtures=[
 for(const [reportDate,total,pod] of fixtures){
   report.run('WHPP',reportDate,total,'{}');
   const fullMetricFixture=reportDate==='2026-08-17'?{
-    pending1:3,pending2:2,pending3:1,oc3:1,cancelled:1,unresolved:5,delivery:2,
+    pending1:3,pending2:2,pending3:1,oc3:1,returned:2,cancelled:1,unresolved:5,delivery:2,
     ccslCnDiversion:1,ccslZtDiversion:1,ccsl580Retention:1,phnomPenhShop:2,provinceShop:1,shopTotal:3
   }:{};
   history.run('WHPP',reportDate,JSON.stringify({reportDate,total,pod,podRate:Number((pod*100/total).toFixed(2)),pending1:reportDate==='2026-08-21'?1:0,ocCurrent:0,oc1:0,returned:0,...fullMetricFixture}));
@@ -120,10 +129,10 @@ assert.deepEqual(historical.map(row=>row.pod),[10,14,113,15,59,0]);
 assert.ok(historical.every(row=>row.ready),'exact completed WHPP history summaries plus 0/0 must be publishable facts');
 const fullHistory=historical.find(row=>row.reportDate==='2026-08-17');
 assert.deepEqual({
-  pending1:fullHistory.pending1,pending2:fullHistory.pending2,pending3:fullHistory.pending3,oc3:fullHistory.oc3,cancelled:fullHistory.cancelled,
+  pending1:fullHistory.pending1,pending2:fullHistory.pending2,pending3:fullHistory.pending3,oc3:fullHistory.oc3,returned:fullHistory.returned,cancelled:fullHistory.cancelled,
   unresolved:fullHistory.unresolved,delivery:fullHistory.delivery,ccslCnDiversion:fullHistory.ccslCnDiversion,ccslZtDiversion:fullHistory.ccslZtDiversion,
   ccsl580Retention:fullHistory.ccsl580Retention,phnomPenhShop:fullHistory.phnomPenhShop,provinceShop:fullHistory.provinceShop,shopTotal:fullHistory.shopTotal
-},{pending1:3,pending2:2,pending3:1,oc3:1,cancelled:1,unresolved:5,delivery:2,ccslCnDiversion:1,ccslZtDiversion:1,ccsl580Retention:1,phnomPenhShop:2,provinceShop:1,shopTotal:3},'verified rotated WHPP history must restore the complete visible range metric set');
+},{pending1:3,pending2:2,pending3:1,oc3:1,returned:2,cancelled:1,unresolved:5,delivery:2,ccslCnDiversion:1,ccslZtDiversion:1,ccsl580Retention:1,phnomPenhShop:2,provinceShop:1,shopTotal:3},'verified rotated WHPP history must restore the complete visible range metric set');
 assert.equal(fullHistory.historyFullMetricId,V419_WHPP_HISTORY_FULL_METRIC_ID);
 
 const canonical=[{reportDate:'2026-08-21',businessType:'WHPP',regionCode:'UNKNOWN',total:140,matched:140,pod:59,ready:true,historyFallback:false}];
@@ -162,6 +171,24 @@ const phantom=readV293WhppHistoricalRangeFacts('2026-08-25','2026-08-25',db);
 assert.equal(phantom.length,0,'history without a WHPP daily report must stay invisible');
 const changesAfter=db.prepare('SELECT total_changes() changes').get().changes;
 assert.equal(changesAfter,changesBefore,'V293 reads must not mutate SQLite');
+
+// Execute the real V419 WHPP trend path against rotated history. There are no
+// unified-import dates in this fixture, so any returned points prove the trend
+// dates come from business_daily_reports and V293 restores the archived metrics.
+const whppTrend=readV237DashboardTrends('WHPP','2026-08-17','2026-08-20',db);
+assert.deepEqual(whppTrend.dates,['2026-08-17','2026-08-18','2026-08-19','2026-08-20']);
+assert.equal(whppTrend.source,'V419_WHPP_DAILY_LEDGER_MEMBERSHIP_PLUS_VERIFIED_HISTORY');
+assert.equal(whppTrend.whppTrendTruthId,V419_WHPP_TREND_TRUTH_ID);
+assert.deepEqual(whppTrend.ticket,[22,36,156,25]);
+assert.deepEqual(whppTrend.pod,[10,14,113,15]);
+assert.deepEqual(whppTrend.podRate,[45.45,38.89,72.44,60]);
+assert.deepEqual(whppTrend.returned,[2,0,0,0]);
+assert.deepEqual(whppTrend.returnRate,[9.09,0,0,0]);
+assert.deepEqual(whppTrend.pending1,[3,0,0,0]);
+assert.deepEqual(whppTrend.pendingRate,[13.64,0,0,0]);
+assert.deepEqual(whppTrend.missingDates,[],'verified rotated WHPP history must remain publishable in trend charts');
+const whppRecentTrend=readV237DashboardTrends('WHPP','2026-08-20','2026-08-20',db);
+assert.deepEqual(whppRecentTrend.dates,['2026-08-17','2026-08-18','2026-08-19','2026-08-20'],'single-day WHPP board must use the latest seven WHPP report-ledger dates, not unified-import dates');
 
 // Execute the real V284 WHPP SQL. This catches SQL errors that would otherwise be
 // hidden by queryWhppRegionFacts' defensive fallback and proves single-day parity.
@@ -202,6 +229,7 @@ assert.equal(V293_WHPP_HISTORY_MEMBERSHIP_INTEGRITY_ID,'2026-08-29-v293-whpp-his
 assert.equal(V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID,'2026-09-03-v419-whpp-history-summary-metric-failclosed-v1');
 assert.equal(V419_WHPP_HISTORY_FULL_METRIC_ID,'2026-09-03-v419-whpp-history-full-range-metrics-v1');
 assert.equal(V419_WHPP_RANGE_METRIC_PARITY_ID,'2026-09-03-v419-whpp-range-daily-metric-parity-v1');
+assert.equal(V419_WHPP_TREND_TRUTH_ID,'2026-09-03-v419-whpp-ledger-history-trend-truth-v1');
 
 db.close();
-console.log('[V419/V293] WHPP range smoke passed · real V284 SQL executed · full Pending1/2/3 + OC1/2/3 + terminal/shop/diversion metrics preserved · verified history restores full metrics · mismatched history publishes denominator only · incomplete PP/PV evidence renders dash · SQLite unchanged by history reads');
+console.log('[V419/V293] WHPP range smoke passed · real V284 SQL + V237 trend truth executed · full Pending1/2/3 + OC1/2/3 + terminal/shop/diversion metrics preserved · verified history restores full cards and trends · mismatched history publishes denominator only · incomplete PP/PV evidence renders dash');
