@@ -8,6 +8,7 @@ Object.assign(process.env,{DATA_DIR:root,DB_FILE:path.join(root,'whpp-valid-deta
 
 const {getDb,closeDb}=await import('../src/db.js');
 const {inspectV172WhppDetail}=await import('../src/v172WhppDetailParityPatch.js');
+const {listCompletedWhppSnapshots,countCompletedWhppRows,whppDailyCounts}=await import('../src/v87WhppExportStore.js');
 const db=getDb();
 const now='2026-08-01T10:00:00.000Z';
 function insertMinimal(table,values){
@@ -33,6 +34,9 @@ try{
   insertMinimal('business_export_snapshots',{snapshotId:'WH-INVALID-ONLY-0802',businessType:'WHPP',reportDate:'2026-08-02',runId:'RUN-INVALID-ONLY',payloadJson:JSON.stringify({state:{...state(invalidOnly),reportDate:'2026-08-02',dailyParseRows:[{shipmentCode:invalidOnly,运单号:invalidOnly,regionCode:'PV',日报日期:'2026-08-02'}]}}),generatedAt:'2026-08-02T12:00:00.000Z',createdAt:'2026-08-02T12:00:00.000Z',status:'INVALID',reconciliationStatus:'FAILED'});
   insertMinimal('unified_import_batches',{batchId:'B-INVALID-0802',snapshotId:'S-INVALID-0802',reportDate:'2026-08-02',sourceName:'8-2-invalid.xls',fileHash:'invalid-fixture',status:'INVALID',summaryJson:'{}',warningsJson:'[]',createdAt:'2026-08-02T13:00:00.000Z'});
   insertMinimal('unified_import_rows',{batchId:'B-INVALID-0802',snapshotId:'S-INVALID-0802',reportDate:'2026-08-02',businessType:'WHPP',shipmentCode:invalidUnified,regionCode:'PV',recipientRaw:'WHPP',recipientNormalized:'WHPP',sheetName:'日报',rowNumber:2,classificationReason:'INVALID_FIXTURE',rowJson:JSON.stringify({运单号:invalidUnified,regionCode:'PV'}),createdAt:'2026-08-02T13:00:00.000Z'});
+  for(const [bill,reportDate,category] of [[good,'2026-08-01','Pending'],[bad,'2026-08-01','错误残留'],[invalidOnly,'2026-08-02','错误残留'],[invalidUnified,'2026-08-02','错误残留']]){
+    insertMinimal('business_final_rows',{businessType:'WHPP',shipmentCode:bill,reportDate,isPod:0,primaryCategory:category,apiStatus:'SUCCESS',carryStatus:'OPEN',rawJson:JSON.stringify({shipmentCode:bill,运单号:bill,currentState:'OPEN',primaryCategory:category}),createdAt:now,updatedAt:now});
+  }
   insertMinimal('shipment_current_state',{shipmentCode:good,businessType:'WHPP',reportDate:'2026-08-02',snapshotId:'CURRENT-1',state:'POD',apiStatus:'SUCCESS',lastEventTime:'2026-08-02T18:00:00+07:00',stateJson:JSON.stringify({shipmentCode:good,运单号:good,regionCode:'PP',currentState:'POD',是否POD:'是',POD状态:'POD',POD时间:'2026-08-02T18:00:00+07:00'}),updatedAt:'2026-08-02T18:01:00+07:00'});
 
   const one=inspectV172WhppDetail({reportDate:'2026-08-01',tab:'pod',page:'1',pageSize:'500'});
@@ -47,7 +51,16 @@ try{
   assert.equal(range.total,1);
   assert.equal(range.rows[0]?.shipmentCode,good);
   assert.ok(!range.rows.some(row=>[bad,invalidOnly,invalidUnified].includes(row.shipmentCode)),'invalid snapshot/unified members must never leak into WHPP range detail');
-  console.log('[V419 WHPP VALID SNAPSHOT DETAIL] PASS invalid/failed snapshots and INVALID unified batches cannot override completed history or create phantom range dates; latest current POD still overlays valid daily membership');
+
+  const exportSnapshots=listCompletedWhppSnapshots('2026-08-01','2026-08-02');
+  assert.equal(exportSnapshots.length,1,'WHPP export must include only dates with VALID+COMPLETED snapshots');
+  assert.equal(exportSnapshots[0].reportDate,'2026-08-01');
+  assert.deepEqual(exportSnapshots[0].payload.finalRows.map(row=>row.shipmentCode),[good],'residual final rows from invalid/non-member facts must not create WHPP export members');
+  assert.equal(countCompletedWhppRows('2026-08-01','2026-08-02'),1,'WHPP completed export row count must be membership-locked');
+  assert.deepEqual(whppDailyCounts('2026-08-01','2026-08-02'),[{reportDate:'2026-08-01',businessType:'WHPP',count:1}]);
+  assert.equal(exportSnapshots[0].payload.finalRows[0].v419WhppExportMembershipId,'2026-09-03-v419-whpp-valid-completed-membership-export-v1');
+
+  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT] PASS invalid/failed snapshots and INVALID unified batches cannot override completed history or create phantom dates; residual final rows cannot create WHPP export members; latest current POD still overlays valid daily membership');
 }finally{
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
