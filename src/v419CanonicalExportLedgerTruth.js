@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 import { ensureV246TrackingSchema, v246InclusiveDays } from './v246TrackingLedgerCore.js';
 
-export const V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID='2026-09-03-v419-canonical-export-ledger-truth-v1';
+export const V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID='2026-09-03-v419-canonical-export-ledger-truth-v2';
 const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const STRICT_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const text=v=>String(v??'').trim();
@@ -17,21 +17,26 @@ function strictSigningDays(ledger={}){
   const first=starts.map(item=>text(item?.time||item?.eventTime||item)).map(dateKey).filter(Boolean).sort()[0]||'';
   return first?(v246InclusiveDays(first,pod)||0):0;
 }
+function clearPodDerivedTruth(row){
+  row.podDate='';row.podTime='';row.podSource='';row.podPriority=99;
+  row.attemptNo=0;row.trackAttemptNo=0;row.podAttemptNo=0;row.currentAttemptNo=0;row.attemptSource='';row.attemptEvidenceComplete=false;
+  row.signingDays=0;row.deliveryDays=0;row.signingDaysSource='';row.deliveryDaysSource='';row.dispatchSigningEvidenceComplete=false;row.signingEvidenceComplete=false;
+}
 function applyOpenTruth(row,ledger){
   const raw=safeJson(ledger.currentStateJson,{}),state=text(ledger.currentState),category=text(ledger.currentCategory),evidence=`${state} ${category} ${raw.primaryCategory||''} ${raw.主分类||''} ${raw.异常分类||''}`;
-  row.pod=false;row.returned=false;
+  clearPodDerivedTruth(row);row.pod=false;row.returned=false;row.cancelled=false;
   row.pending=/PENDING/i.test(evidence)||Number(raw.pendingDistinctDayCount||raw.Pending次数||raw.Pending当前次数||raw.Pending天数||raw.pendingDays||0)>0;
   row.delivering=!row.pending&&/DELIVER|派送|派件|ASSIGN/i.test(evidence);
   if(row.pending){row.statusCode='P';row.statusDesc='Pending';}
   else if(row.delivering){row.statusCode='W';row.statusDesc='分配派送中';}
   else{row.statusCode=text(raw.状态标识||row.statusCode);row.statusDesc=category||state||row.statusDesc||'OPEN';}
-  row.attemptNo=0;row.trackAttemptNo=0;
 }
 function applyTerminalTruth(type,row,ledger){
-  const reason=text(ledger.terminalReason).toUpperCase();
+  const reason=text(ledger.terminalReason).toUpperCase(),legacyPodTime=text(row.podTime);
+  clearPodDerivedTruth(row);
   if(reason==='POD'){
-    row.pod=true;row.returned=false;row.pending=false;row.delivering=false;row.statusCode='Y';row.statusDesc='POD';
-    const podDate=dateKey(ledger.podDate);if(podDate){row.podDate=podDate;if(!text(row.podTime))row.podTime=podDate;}
+    row.pod=true;row.returned=false;row.cancelled=false;row.pending=false;row.delivering=false;row.statusCode='Y';row.statusDesc='POD';
+    const podDate=dateKey(ledger.podDate);row.podDate=podDate;if(podDate)row.podTime=dateKey(legacyPodTime)===podDate?legacyPodTime:podDate;
     const attempt=positiveAttempt(ledger.attemptNo);
     if(attempt){row.attemptNo=attempt;row.trackAttemptNo=attempt;row.podAttemptNo=attempt;row.currentAttemptNo=attempt;row.attemptSource=text(ledger.attemptSource)||'V246_LEDGER';row.attemptEvidenceComplete=true;}
     if(STRICT_TYPES.has(type)){
@@ -42,13 +47,13 @@ function applyTerminalTruth(type,row,ledger){
     }
     return;
   }
-  row.pod=false;row.pending=false;row.delivering=false;row.attemptNo=0;row.trackAttemptNo=0;row.podAttemptNo=0;
+  row.pod=false;row.pending=false;row.delivering=false;
   if(reason==='RETURNED'){
-    row.returned=true;row.statusCode='R';row.statusDesc='RETURNED';
+    row.returned=true;row.cancelled=false;row.statusCode='R';row.statusDesc='RETURNED';
   }else if(reason==='ORDER_CANCELLED'){
-    row.returned=false;row.statusCode='N';row.statusDesc='ORDER_CANCELLED';row.cancelled=true;
+    row.returned=false;row.cancelled=true;row.statusCode='N';row.statusDesc='ORDER_CANCELLED';
   }else{
-    row.returned=false;row.statusDesc=text(ledger.currentCategory||ledger.currentState||reason||row.statusDesc);
+    row.returned=false;row.cancelled=false;row.statusDesc=text(ledger.currentCategory||ledger.currentState||reason||row.statusDesc);
   }
 }
 
@@ -84,4 +89,4 @@ export function applyV419CanonicalExportLedgerTruth(businessType,rows=[],{db=get
   return rows;
 }
 
-console.info('[CE-QC][V419_EXPORT_LEDGER_TRUTH]',V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,'daily membership stays historical; V246 ledger is the final POD/RETURN/cancel/attempt authority after every legacy export calculator.');
+console.info('[CE-QC][V419_EXPORT_LEDGER_TRUTH]',V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,'daily membership stays historical; V246 ledger is the final POD/RETURN/cancel/attempt/signing authority after every legacy export calculator, and non-POD outcomes clear stale POD-derived fields.');
