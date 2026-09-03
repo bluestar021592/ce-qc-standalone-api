@@ -26,10 +26,15 @@ jobs:
           node --check public/v249-whpp-detail-owner.js
           node --check src/v236DashboardCurrentRoutePatch.js
           node --check src/v172WhppDetailParityPatch.js
+          node --check src/carryLedgerSync.js
+          node --check src/unifiedImportStore.js
           node --check src/v84AsyncExportPatch.js
           node --check src/v176AsyncExportRecoveryPatch.js
           node --check src/v320HistoricalExportRows.js
           node --check scripts/v237-dashboard-owner-source-smoke.cjs
+          node --check scripts/v419-carry-ledger-sync-smoke.mjs
           node --check scripts/v419-global-range-export-freshness-smoke.mjs
+      - name: Immediate carry ledger truth + atomic rollback
+        run: node scripts/v419-carry-ledger-sync-smoke.mjs
       - name: Global date range + next-day export truth + WHPP range parity
         run: node scripts/v419-global-range-export-freshness-smoke.mjs
