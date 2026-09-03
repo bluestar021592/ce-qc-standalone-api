@@ -20,19 +20,29 @@ test('V87 WHPP export reader and workers are syntax valid', () => {
   }
 });
 
-test('WHPP export membership is daily-truth locked, partial membership fails closed, and count planning stays lightweight', () => {
-  assert.match(store, /V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v2'/);
+test('WHPP export membership is immutable daily truth, carry final rows cannot become members, and count planning stays lightweight', () => {
+  assert.match(store, /V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v3'/);
   assert.match(store, /COALESCE\(status,'VALID'\)='VALID'/);
   assert.match(store, /COALESCE\(reconciliationStatus,'COMPLETED'\)='COMPLETED'/);
+  assert.match(store, /SELECT snapshotId,reportDate,createdAt,id/,'eligible-date query must stay metadata-only');
+  assert.doesNotMatch(store, /SELECT snapshotId,reportDate,payloadJson,createdAt,id/,'count planning must not materialize every snapshot payload');
+  assert.match(store, /function loadSnapshotPayload/,'snapshot JSON may be loaded lazily for one rotated historical date');
   assert.match(store, /function standardMembershipMeta/);
   assert.match(store, /WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE/);
-  assert.match(store, /expected>0&&actual===0/,'fully rotated history may use immutable snapshot fallback');
-  assert.match(store, /function standardMembershipRows/);
-  assert.match(store, /business_daily_parse_rows/);
+  assert.match(store, /expected>0&&actual===0/,'fully rotated history may use an immutable fallback');
+  assert.match(store, /function latestValidUnifiedMembershipRows/);
+  assert.match(store, /b\.status='VALID'/,'rotated history should recover exact VALID unified membership before snapshot JSON');
+  assert.match(store, /membershipSource:'WHPP_VALID_UNIFIED_DAILY'/);
   assert.match(store, /function snapshotMembershipRows/);
-  assert.match(store, /payload\.state/);
-  assert.match(store, /if\(meta\.complete\)return meta\.expected===0\?\[\]:standardMembershipRows/,'complete standard membership must outrank snapshot fallback');
-  assert.match(store, /function finalRowsByBill/);
+  assert.match(store, /state\.pnhBills/);
+  assert.match(store, /state\.dailyParseRows/);
+  const snapshotMembershipBody=store.match(/function snapshotMembershipRows[\s\S]*?function validateRecoveredCount/)?.[0]||'';
+  assert.ok(snapshotMembershipBody,'snapshot membership function must be inspectable');
+  assert.doesNotMatch(snapshotMembershipBody,/state\.finalRows/,'WHPP finalRows contains today + carry and must never restore daily membership');
+  assert.match(store, /WHPP_EXPORT_MEMBERSHIP_UNRECOVERABLE/,'unknown old snapshot membership must fail closed rather than use carry-contaminated final rows');
+  assert.match(store, /if\(meta\.complete\)return meta\.expected===0\?\[\]:standardMembershipRows/,'complete standard membership must outrank historical fallbacks');
+  assert.match(store, /function finalRowsByBill\(reportDate,bills=\[\]/,'final rows must be requested only for already-admitted member bills');
+  assert.match(store, /UPPER\(TRIM\(shipmentCode\)\) IN/);
   assert.match(store, /normalizeWhppRow\(finals\.get\(bill\)\|\|\{\},member,snapshot\.reportDate\)/,'final rows may enrich only an admitted member');
   assert.match(store, /function membershipCount/);
   assert.match(store, /latestValidCompletedSnapshots\(fromDate,toDate,db\)\.reduce\(\(sum,snapshot\)=>sum\+membershipCount\(snapshot,db\),0\)/,'large-range split count must read membership only, not hydrate final rows');
