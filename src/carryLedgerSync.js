@@ -6,7 +6,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v1';
+export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v2-atomic';
 
 const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const EXACT_TERMINAL_REASONS = new Set(['POD','RETURNED','ORDER_CANCELLED']);
@@ -57,7 +57,7 @@ function compact(row = {}) {
     currentCategory:text(row.currentCategory),podDate:text(row.podDate),attemptNo:Number(row.attemptNo || 0),attemptSource:text(row.attemptSource)
   };
 }
-function invalidateReadCaches() {
+export function invalidateCarryLedgerReadCaches() {
   for (const name of [
     '__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__',
     '__CE_QC_INVALIDATE_V253_DASHBOARD_FAST_PATH__',
@@ -68,7 +68,12 @@ function invalidateReadCaches() {
   }
 }
 
-export function syncCarryRowsToV246Ledger(rows = [], { db = getDb(), reason = 'CARRY_RESULT_COMMIT' } = {}) {
+export function syncCarryRowsToV246Ledger(rows = [], {
+  db = getDb(),
+  reason = 'CARRY_RESULT_COMMIT',
+  manageTransaction = true,
+  invalidateCaches = true
+} = {}) {
   ensureV246TrackingSchema(db);
   const inputByBill = new Map();
   for (const row of rows || []) {
@@ -103,7 +108,7 @@ export function syncCarryRowsToV246Ledger(rows = [], { db = getDb(), reason = 'C
 
   const now = nowIso();
   let processed=0, terminal=0, open=0, reopened=0, changed=0;
-  db.exec('BEGIN IMMEDIATE');
+  if (manageTransaction) db.exec('BEGIN IMMEDIATE');
   try {
     for (const [bill,input] of inputByBill) {
       const carry = carryGet.get(bill) || null;
@@ -159,11 +164,13 @@ export function syncCarryRowsToV246Ledger(rows = [], { db = getDb(), reason = 'C
       if (isTerminal) terminal += 1; else open += 1;
       processed += 1;
     }
-    db.exec('COMMIT');
+    if (manageTransaction) db.exec('COMMIT');
   } catch (error) {
-    try { db.exec('ROLLBACK'); } catch {}
+    if (manageTransaction) {
+      try { db.exec('ROLLBACK'); } catch {}
+    }
     throw error;
   }
-  invalidateReadCaches();
+  if (invalidateCaches) invalidateCarryLedgerReadCaches();
   return { ok:true, version:CARRY_LEDGER_SYNC_ID, processed, terminal, open, reopened, changed, syncedAt:now };
 }
