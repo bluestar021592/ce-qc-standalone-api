@@ -6,6 +6,7 @@ import { isSpecialCategory } from './specialNode.js';
 
 export const WHPP = 'WHPP';
 export const V419_WHPP_REIMPORT_LIFECYCLE_ID = '2026-09-03-v419-whpp-reimport-invalidates-old-completion-v1';
+export const V419_WHPP_REIMPORT_CARRY_RETIRE_ID = '2026-09-03-v419-whpp-reimport-retires-removed-same-day-carry-v1';
 export const V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID = '2026-09-03-v419-whpp-final-snapshot-valid-completed-v1';
 
 export function loadWhppState() {
@@ -130,6 +131,21 @@ function invalidatePriorWhppLifecycle(db, reportDate, context = {}, now = nowIso
   return { invalidatedSnapshots, reason };
 }
 
+function retireRemovedWhppDailyCarry(db, reportDate, incomingBills = [], now = nowIso()) {
+  const keep = new Set((incomingBills || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean));
+  const rows = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE status='OPEN' AND businessType='WHPP' AND sourceReportDate=? ORDER BY shipmentCode").all(reportDate);
+  const retiredBills = rows
+    .map(row => String(row.shipmentCode || '').trim().toUpperCase())
+    .filter(bill => bill && !keep.has(bill));
+  if (!retiredBills.length) return { retired: 0, bills: [] };
+  const retire = db.prepare(`UPDATE carryover_open_items
+    SET status='CLOSED',apiStatus='REMOVED_BY_REIMPORT',closeReason='WHPP_REIMPORT_REMOVED_MEMBER',lastReportDate=?,updatedAt=?
+    WHERE shipmentCode=? AND businessType='WHPP' AND status='OPEN' AND sourceReportDate=?`);
+  let retired = 0;
+  for (const bill of retiredBills) retired += Number(retire.run(reportDate, now, bill, reportDate)?.changes || 0);
+  return { retired, bills: retiredBills };
+}
+
 export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], batchId = '', snapshotId = '', preserveFinalizedLifecycle = false }) {
   const db = getDb();
   const now = nowIso();
@@ -154,12 +170,17 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
 
   db.exec('BEGIN IMMEDIATE');
   let lifecycleReset = { invalidatedSnapshots: 0, reason: '' };
+  let carryRetirement = { retired: 0, bills: [] };
   try {
     // This call is reached only for a real new lifecycle. Old completed snapshots
     // and derived history must become ineligible before the new membership is
     // published, otherwise an export between re-upload and re-processing could
     // incorrectly reuse stale completion evidence.
     lifecycleReset = invalidatePriorWhppLifecycle(db, reportDate, existingDaily, now);
+    // A corrected same-day reupload must also retire OPEN carry rows that were
+    // created by the superseded membership itself. Real cross-day carry has an
+    // earlier sourceReportDate and is deliberately preserved.
+    if (existingDaily.exists) carryRetirement = retireRemovedWhppDailyCarry(db, reportDate, unique.map(billOf), now);
     db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt)
       VALUES(?,?,?,?,?,?,?) ON CONFLICT(businessType,reportDate) DO UPDATE SET sourceFile=excluded.sourceFile,totalCount=excluded.totalCount,summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
       .run(WHPP, reportDate, sourceName, unique.length, JSON.stringify({ batchId, snapshotId, total: unique.length, lifecycleRevision: V419_WHPP_REIMPORT_LIFECYCLE_ID }), now, now);
@@ -199,6 +220,12 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
   if (lifecycleReset.invalidatedSnapshots > 0) {
     console.log('[CE-QC][WHPP_REIMPORT_LIFECYCLE_INVALIDATED]', JSON.stringify({ revision: V419_WHPP_REIMPORT_LIFECYCLE_ID, reportDate, invalidatedSnapshots: lifecycleReset.invalidatedSnapshots, incoming: unique.length }));
   }
+  if (carryRetirement.retired > 0) {
+    console.log('[CE-QC][WHPP_REIMPORT_REMOVED_CARRY_RETIRED]', JSON.stringify({ revision: V419_WHPP_REIMPORT_CARRY_RETIRE_ID, reportDate, retired: carryRetirement.retired }));
+  }
+
+  const retiredCarrySet = new Set(carryRetirement.bills.map(value => String(value || '').trim().toUpperCase()));
+  const activeCarryBills = carryBills.filter(bill => !retiredCarrySet.has(String(bill || '').trim().toUpperCase()));
 
   // POD locks are needed only for today's WHPP members (plus any defensive OPEN
   // carry inconsistency), never for every WHPP shipment ever seen. The old global
@@ -227,8 +254,8 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
     dailyReportReady: true,
     pnhBills: unique.map(billOf),
     dailyParseRows: unique,
-    carryBills: [...new Set(carryBills.filter(bill => !todayBills.has(bill)))],
-    nextCarryBills: [...new Set(carryBills)],
+    carryBills: [...new Set(activeCarryBills.filter(bill => !todayBills.has(bill)))],
+    nextCarryBills: [...new Set(activeCarryBills)],
     podLocks,
     previousReportDate: prior.reportDate || '',
     processing: { running: false, paused: false, phase: '待处理', batchIndex: 0, totalBatches: 0 },
