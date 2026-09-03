@@ -17,6 +17,8 @@ const bootstrap = read('bootstrap.js');
 const podRepair = read('src/v167CcslPodLockFactRepair.js');
 const v246 = read('src/v246TrackingLedgerCore.js');
 const v172 = read('src/v172WhppDetailParityPatch.js');
+const v87 = read('src/v87WhppExportStore.js');
+const v419Export = read('src/v419CanonicalExportLedgerTruth.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
 const allBusinessChild = read('src/v84ExportBusinessWorker.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
@@ -70,6 +72,20 @@ must(v172, "COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'");
 must(v172, "INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId AND b.reportDate=u.reportDate AND b.status='VALID'");
 must(v172, 'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED');
 
+// WHPP export uses the same membership truth: valid completed dates, exact daily
+// membership when complete, immutable snapshot fallback only after full rotation,
+// and no residual final-row admission. Split/count planning remains membership-only.
+must(v87, "V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v2'");
+must(v87, 'WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE');
+must(v87, 'function membershipCount');
+must(v87, 'finals.get(bill)||{}');
+
+// Canonical export ledger is last authority and clears every stale POD-derived
+// field before writing current POD/return/cancel/attempt/signing truth.
+must(v419Export, "V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID='2026-09-03-v419-canonical-export-ledger-truth-v2'");
+must(v419Export, 'function clearPodDerivedTruth');
+must(v419Export, "row.podDate='';row.podTime=''");
+
 // The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
 // HTML/JS caching. Exact cache-bust suffixes may advance independently.
 must(shell, 'v67-resilient-run-guard.js?v=');
@@ -115,6 +131,9 @@ for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storag
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
+for (const args of [
+  ['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],
+  ['--test','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js']
+]) execFileSync(process.execPath,args,{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · V419 WHPP global-range display owner · valid/completed WHPP history detail + VALID unified membership dates · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · V419 WHPP global-range display owner · valid/completed membership-locked WHPP history+export · canonical ledger clears stale POD-derived fields · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
