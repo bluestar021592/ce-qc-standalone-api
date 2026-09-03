@@ -6,7 +6,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v6-exact-mirror-dates';
+export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v7-strict-evidence-signing-lock';
 
 const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -272,8 +272,9 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       podDate=CASE WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
       attemptNo=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptNo ELSE excluded.attemptNo END,
       attemptSource=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptSource ELSE excluded.attemptSource END,
-      signingDays=CASE WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
-      evidenceJson=excluded.evidenceJson,currentStateJson=excluded.currentStateJson,lastCheckedAt=excluded.lastCheckedAt,
+      signingDays=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
+      evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
+      currentStateJson=excluded.currentStateJson,lastCheckedAt=excluded.lastCheckedAt,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
   const audit = db.prepare(`INSERT INTO qc_tracking_audit(shipmentCode,businessType,action,reason,beforeJson,afterJson,createdAt) VALUES(?,?,?,?,?,?,?)`);
   const finalMirror = buildFinalMirrorUpdater(db);
@@ -322,18 +323,19 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       const strictAttempt = /^V246_STRICT_TRACK/i.test(text(old?.attemptSource));
       const attemptNo = strictAttempt ? Number(old?.attemptNo || 0) : observedAttempt(payload);
       const attemptSource = strictAttempt ? text(old?.attemptSource) : (attemptNo ? text(payload.attemptSource || payload.attemptStatus || 'CARRY_RESULT') : '');
-      const signingDays = podDate ? v246InclusiveDays(firstReportDate,podDate) : (old?.signingDays ?? null);
+      const signingDays = strictAttempt ? (old?.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : (old?.signingDays ?? null));
       const terminalAt = isTerminal ? (text(old?.terminalAt) || lastEventTime || now) : '';
       const before = compact(old || {});
       const canonicalPayload = normalizeCanonicalPayload({ ...payload, businessType },terminalReason,currentState,currentCategory,podDate,attemptNo);
       const canonicalJson = JSON.stringify(canonicalPayload);
+      const refreshEvidenceJson = JSON.stringify({source:CARRY_LEDGER_SYNC_ID,reason,snapshotId:lastSnapshotId,checkedAt:now});
 
       carryUpdate.run(isTerminal ? 'CLOSED' : 'OPEN', apiStatus, terminalReason, canonicalJson, now, bill);
       if (current) currentUpdate.run(currentState, apiStatus, lastEventTime, canonicalJson, now, bill);
       ledgerUpsert.run(
         bill,businessType,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,terminalReason,terminalAt,
         currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,
-        JSON.stringify({source:CARRY_LEDGER_SYNC_ID,reason,snapshotId:lastSnapshotId,checkedAt:now}),canonicalJson,now,reason,old?.createdAt || carry?.createdAt || now,now
+        strictAttempt ? text(old?.evidenceJson || '{}') : refreshEvidenceJson,canonicalJson,now,reason,old?.createdAt || carry?.createdAt || now,now
       );
       const ledger = ledgerGet.get(bill) || {};
       const after = compact(ledger);
