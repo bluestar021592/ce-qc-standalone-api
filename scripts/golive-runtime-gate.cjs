@@ -69,7 +69,7 @@ must(v172, '2026-09-03-v419-whpp-membership-integrity-detail-v5');
 must(v172, "COALESCE(status,'VALID')='VALID'");
 must(v172, "COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'");
 must(v172, "INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId AND b.reportDate=u.reportDate AND b.status='VALID'");
-must(v172, 'WHPP_DETAIL_DAILY_MEMBERSHIP_INCOMPLETE');
+must(v172, 'WHPP_STANDARD_DAILY_INCOMPLETE');
 must(v172, 'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED');
 
 // The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
