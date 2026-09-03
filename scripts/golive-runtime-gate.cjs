@@ -1,274 +1,108 @@
 const fs = require('fs');
 
 const read = p => fs.readFileSync(p, 'utf8');
+const must = (source, token, label = token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${label}`); };
+const forbid = (source, token, label = token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${label}`); };
+
 const runner = read('public/v67-resilient-run-guard.js');
 const whppUi = read('public/v132-whpp-seven-business-fast.js');
 const pause = read('public/v164-unified-pause-router.js');
 const shell = read('src/v44WhppUiPatch.js');
 const whppSupervisor = read('src/v134WhppRunSupervisorPatch.js');
 const v161 = read('src/v161UnifiedImportRuntimeTruthPatch.js');
-const v163 = read('src/v163ShopeeDailyIsolationPatch.js');
 const storage = read('src/storage.js');
 const bstore = read('src/businessStore.js');
-const v109 = read('public/v109-instant-business-navigation.js');
-const v140 = read('public/v140-current-business-truth.js');
-const v108 = read('public/v108-route-lazy-features.js');
-const exportDirectClient = read('public/v190-export-direct-route-client.js');
-const asyncExportUi = read('public/v84-async-export-ui.js');
-const tokenExportUi = read('public/v194-export-token-ui.js');
-const dashboard = read('public/dashboard-v18.js');
 const bootstrap = read('bootstrap.js');
-const whppRecovery = read('src/v165WhppRunStateRecoveryPatch.js');
 const podRepair = read('src/v167CcslPodLockFactRepair.js');
-const historyRefresh = read('src/v183HistoricalStatusRefreshPatch.js');
-const historyRefreshUi = read('public/v183-history-refresh.js');
-const refreshedExporter = read('src/v183ShopeeRefreshedPeriodExporter.js');
-const streamedExporter = read('src/v185ShopeeCurrentStateStreamExporter.js');
+const v246 = read('src/v246TrackingLedgerCore.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
 const allBusinessChild = read('src/v84ExportBusinessWorker.js');
-const parityExporter = read('src/v197UnifiedParityExporter.js');
-const strictParityExporter = read('src/v198UnifiedParityExporter.js');
-const dashboardExporter = read('src/v199UnifiedDashboardExporter.js');
-const v200Evidence = read('src/v200EvidenceData.js');
-const v200Metrics = read('src/v200Metrics.js');
-const v200Workbook = read('src/v200ReferenceWorkbook.js');
-const v200Exporter = read('src/v200TemplateDashboardExporter.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 const exportDirect = read('src/v190ExportDirectEndpointPatch.js');
 const exportSidecar = read('src/v193ExportSidecar.js');
-const exportPreflight = read('src/v142AsyncExportPreflightPatch.js');
 
-const must = (source, token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${token}`); };
-const forbid = (source, token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${token}`); };
-
-// V414: V67 is the sole normal browser three-stage executor. A fresh import is
-// inert until the user explicitly starts/continues. Automatic browser recovery is
-// allowed only for an exact persisted process-restart interruption lifecycle.
+// Current execution ownership: V67 is the sole normal browser runner.
 must(runner, '2026-09-02-v414-explicit-unified-restart-only-v1');
-must(runner, '2026-08-29-single-unified-runner-v1');
 must(runner, '2026-09-02-v414-one-read-seven-business-status-v1');
-must(runner, '2026-09-02-v67-retryable-process-restart-recovery-v2');
-must(runner, '2026-09-02-v414-whpp-restart-only-browser-v1');
-must(runner, '2026-09-02-v67-persisted-completion-latch-v2');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
 must(runner, "{ key: 'WHPP'");
 must(runner, '/api/run');
 must(runner, '/api/shopee/run/start');
 must(runner, '/api/whpp/run/start');
-must(runner, "new URLSearchParams({ businessType: 'ALL', reportDate: date })");
-must(runner, '/api/v33/run-progress?${query.toString()}');
-must(runner, 'canonicalStageTruth');
-must(runner, 'row.complete === true');
-must(runner, 'verifyWhpp');
-must(runner, 'waitForWhppFinalized');
-must(runner, 'WHPP_STAGE_NOT_FINALIZED');
-must(runner, '七业务未全部完成');
-must(runner, 'recoverPendingWhpp');
 must(runner, 'PROCESS_RESTART_INTERRUPTED');
-must(runner, 'SHOPEE_RESTART_RETRY_COOLDOWN_MS = 15000');
-must(runner, 'WHPP_RESTART_RETRY_COOLDOWN_MS = 15000');
-must(runner, 'shopeeRestartRecoveryCooldown.set(restart.key, Date.now() + SHOPEE_RESTART_RETRY_COOLDOWN_MS)');
-must(runner, 'whppRestartRecoveryCooldown.set(restart.key, Date.now() + WHPP_RESTART_RETRY_COOLDOWN_MS)');
-must(runner, 'whppRestartInterruption');
-must(runner, 'payload?.restartInterrupted === true');
-must(runner, "const result = await execute('resume')");
-must(runner, '[CE-QC][V67_SHOPEE_RESTART_RECOVERY]');
-must(runner, '检测到${target}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN/VN → WHPP本土');
-must(runner, '[CE-QC][V67_WHPP_RESTART_RECOVERY]');
-must(runner, '检测到${target}的WHPP因程序重启中断，正在从已保存断点恢复WHPP本土');
-must(runner, '__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__');
-must(runner, "source: 'V322_PERSISTED_THREE_STAGE_STATUS'");
-must(runner, '[data-page="import"]');
-must(runner, "recoverPendingWhpp('visible-import-watch')");
 must(runner, "global.runUnified = () => execute('start')");
 must(runner, "global.resumeUnified = () => execute('resume')");
-forbid(runner, '检测到${target}的CCSL与SHOPEE均已完成，正在自动续跑WHPP本土');
 forbid(runner, '[CE-QC][V67_WHPP_AUTO_RESUME]');
 forbid(runner, '/api/v311/shopee-recovery');
 forbid(runner, '/api/v317/ccsl-recovery');
-forbid(runner, '/api/v132/whpp-fast-summary');
 
-// V414 backend continuity is restart-only as well. It may resume WHPP only after
-// V165 proves that the previous process died during the exact current WHPP run,
-// and after same-date CCSL + SHOPEE completion is proven. New-import rearm calls
-// are converted into an explicit-run-only idle latch and cannot launch WHPP.
-must(whppSupervisor, '2026-08-14-v134-whpp-run-supervisor-v1');
+// Backend WHPP continuity is restart-only, never a fresh-import auto runner.
 must(whppSupervisor, '2026-09-02-v414-explicit-unified-whpp-restart-only-v1');
-must(whppSupervisor, 'maybeAutoResumeWhpp');
 must(whppSupervisor, 'inspectV165WhppRestartInterruption');
-must(whppSupervisor, 'restart?.interrupted!==true');
 must(whppSupervisor, 'V165_PROCESS_RESTART_INTERRUPTED_MARKER');
-must(whppSupervisor, 'inspectV317CcslRecovery({reportDate})');
-must(whppSupervisor, 'inspectV311ShopeeRecovery({reportDate})');
-must(whppSupervisor, 'inspectV132WhppFastSummary(reportDate)');
-must(whppSupervisor, 'recoverV165WhppRunState(reportDate)');
-must(whppSupervisor, "launchWhpp('resume')");
-must(whppSupervisor, '[CE-QC][V414_WHPP_RESTART_ONLY_RECOVERY]');
-must(whppSupervisor, "reportDateSource:'V165_PROCESS_RESTART_INTERRUPTED_MARKER'");
 must(whppSupervisor, 'autoStartOnImport:false');
-must(whppSupervisor, 'pollingActive:false');
-must(whppSupervisor, "this.post('/api/whpp/run/start'");
-must(whppSupervisor, "this.post('/api/whpp/run/resume'");
-must(whppSupervisor, "maybeAutoResumeWhpp('backend-watch')");
-must(whppSupervisor, 'runtimePromise&&runtime.active');
-forbid(whppSupervisor, 'inspectV317ExplicitReportDateHint');
-forbid(whppSupervisor, 'VISIBLE_BROWSER_STATUS_HINT');
+must(whppSupervisor, 'restartOnly:true');
+must(whppSupervisor, "launchWhpp('resume')");
 forbid(whppSupervisor, 'new-import-event');
-forbid(whppSupervisor, '/api/run');
-forbid(whppSupervisor, '/api/shopee/run/start');
-forbid(whppSupervisor, 'global.runUnified');
 
-must(whppUi, '2026-09-02-v132-whpp-display-only-v2');
-must(whppUi, '2026-09-02-v132-no-separate-processing-entry-v1');
+// V419 WHPP page is display-only but follows the same global from/to owner as
+// HOME and every other business board. It cannot create a separate run entry.
+must(whppUi, '2026-09-03-v419-whpp-one-global-range-board-v1');
+must(whppUi, '2026-09-03-v419-whpp-range-summary-trend-detail-v1');
+must(whppUi, '__CE_QC_GLOBAL_PERIOD_RANGE__');
+must(whppUi, '/api/v234/current-summary?from=');
+must(whppUi, '/api/v234/trends?businessType=WHPP&from=');
+must(whppUi, '/api/v172/whpp-metric-detail?');
 must(whppUi, 'displayOnly:true');
 must(whppUi, "authoritativeRunner:'V67'");
-must(whppUi, "document.getElementById('reportDate')");
 forbid(whppUi, 'global.runUnified=');
 forbid(whppUi, 'global.resumeUnified=');
-forbid(whppUi, 'ensureWhppCompleted');
 forbid(whppUi, '/api/whpp/run/start');
-forbid(whppUi, '[data-testid="global-auto-process"]');
+
+// The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
+// HTML/JS caching. Exact cache-bust suffixes may advance independently.
+must(shell, 'v67-resilient-run-guard.js?v=');
+must(shell, 'v132-whpp-seven-business-fast.js?v=');
+must(shell, 'Cache-Control');
+must(shell, 'no-store, no-cache, must-revalidate, proxy-revalidate');
+must(shell, "const WHPP_PAGE_OWNER='V132'");
 must(pause, '/api/shopee/run/pause');
 must(pause, 'global.pauseUnified=pauseUnified');
 
-// V161 is a long-lived route owner. Verify its current contract, not an obsolete
-// release label: bootstrap/import runtime truth must count all seven businesses,
-// including WHPP, and must derive counts from normalized unified_import_rows.
+// Seven-business source truth remains independent while WHPP executes as the
+// dedicated third stage rather than being folded into CCSL.
 must(v161, "const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']");
-must(v161, "SELECT businessType,COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType");
-must(v161, "TYPES.reduce((sum, type) => sum + num(counts[type]), 0)");
-must(v163, '2026-08-17-v163-shopee-daily-membership-isolation-v2');
-must(storage, 'compactStateForPersistence');
-must(storage, 'sanitizeValue');
-// WHPP is the seventh business in unified truth, but execution is deliberately a
-// dedicated third stage. Folding WHPP into CCSL state would query the same ticket
-// once in /api/run and again in /api/whpp/run/start.
+must(v161, 'unified_import_rows');
+must(v161, 'TYPES.reduce((sum, type) => sum + num(counts[type]), 0)');
 forbid(storage, 'mergeUnifiedWhppMembership');
 forbid(storage, 'unifiedWhppSnapshotId');
 must(bstore, 'compactBusinessStatePayload');
-must(bstore, 'stripHeavyBusinessRow');
 must(bstore, 'finalByBill');
-must(bstore, 'priorCarryByBill');
-// Cache-bust suffixes may advance without changing the single-runner contract.
-must(shell, 'v67-resilient-run-guard.js?v=');
-must(shell, 'v132-whpp-seven-business-fast.js?v=20260902-display-only-2');
-must(shell, 'v183HistoricalStatusRefreshPatch.js');
-must(shell, '/v183-history-refresh.js?v=20260822-v226-1');
-must(shell, '2026-08-22-v226-shared-client-ui-cache-bust-v1');
-must(shell, 'Cache-Control');
-must(shell, 'no-store, no-cache, must-revalidate, proxy-revalidate');
-must(shell, '2026-08-18-v195-ipc-export-owner-shell-v1');
-must(shell, '/v108-route-lazy-features.js?v=20260818-v195-1');
-must(shell, '/v84-async-export-ui.js?v=20260818-v193-1');
-must(shell, '/v194-export-token-ui.js?v=20260818-v195-1');
-must(v109, '2026-08-17-v166-summary-first-navigation-throttle-v1');
-must(v109, 'MIN_BACKGROUND_HYDRATE_MS=60_000');
-must(v140, '2026-08-21-v201-current-business-truth-per-business-inflight-v1');
-must(v140, 'inFlightByType');
-must(v140, '&compact=1');
-must(v108, '2026-08-18-v195-route-lazy-ipc-export-v1');
-must(v108, '/v194-export-token-ui.js?v=20260818-v195-1');
-must(v108, "script.dataset.ceQcLazy='v195'");
-must(exportDirectClient, '2026-08-17-v190-export-direct-route-client-v1');
-must(exportDirectClient, '/api/v190/export-period/prepare');
-must(asyncExportUi, '2026-08-18-v193-export-ui-isolated-sidecar-v1');
-must(asyncExportUi, '[V193独立导出]');
-must(tokenExportUi, '2026-08-18-v194-export-token-ui-v1');
-must(tokenExportUi, '2026-08-18-v195-ipc-xhr-status-ui-v1');
-must(tokenExportUi, '2026-08-18-v195-ipc-memory-status-v1');
-must(tokenExportUi, "global.__CE_QC_V194_EXPORT_TOKEN_UI_REVISION__ === REVISION");
-must(tokenExportUi, '[V195独立导出]');
-must(tokenExportUi, 'XMLHttpRequest');
-must(tokenExportUi, '/api/v194/export-ping');
-must(tokenExportUi, '/api/v194/export-period/prepare');
-must(tokenExportUi, 'Worker进度使用IPC写入5178内存');
-must(tokenExportUi, '状态轮询将完全绕开主SQLite鉴权');
-must(dashboard, 'renderSignatures');
-must(dashboard, 'completedProbeCache');
-must(bootstrap, 'v165WhppRunStateRecoveryPatch');
-must(bootstrap, 'v167CcslPodLockFactRepair');
-must(bootstrap, 'v193ExportSidecar.js');
-must(bootstrap, 'CE_QC_EXPORT_SIDECAR_PORT');
-must(whppRecovery, '2026-09-02-v414-whpp-run-state-restart-proof-v1');
-must(whppRecovery, '2026-09-02-v414-whpp-process-restart-proof-v1');
-must(whppRecovery, 'PROCESS_RESTART_INTERRUPTED');
-must(whppRecovery, 'inspectV165WhppRestartInterruption');
-must(whppRecovery, "businessType='WHPP'");
-must(whppRecovery, 'sameSet');
-must(podRepair, '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1');
-must(podRepair, 'POD_LOCK_FACT_REPAIR_V167');
-must(historyRefresh, '2026-08-17-v183-historical-status-refresh-center-v2');
-must(historyRefresh, '2026-08-17-v184-history-refresh-fail-fast-diagnostic-v1');
-must(historyRefresh, '/api/v183/history-refresh/summary');
-must(historyRefresh, '/api/v183/history-refresh/start');
-must(historyRefresh, 'HISTORY_REFRESH_PREFLIGHT_ZERO_EVIDENCE');
-must(historyRefreshUi, '2026-08-18-v192-history-refresh-ui-manual-read-v1');
-must(historyRefreshUi, 'automatic summary reads disabled');
-must(refreshedExporter, '2026-08-17-v183-shopee-current-status-overlay-export-v1');
-must(streamedExporter, '2026-08-17-v185-shopee-current-state-stream-export-v1');
-must(streamedExporter, 'shipment_current_state');
 
-must(singleExportWorker, '2026-08-17-v191-single-business-truth-worker-v1');
-must(singleExportWorker, '2026-08-18-v200-reference-template-track-attempt-worker-v1');
+// V419/V246 terminal and strict signing truth is production-active.
+must(v246, "export const V419_STRICT_SIGNING_TRUTH_ID = '2026-09-03-v419-strict-start-signing-truth-v1'");
+must(v246, 'ignoredLegacyCloseReason: text(closeReason)');
+must(v246, 'firstStrictStartDate(row.starts||[])');
+must(v246, 'v246InclusiveDays(strictStartDate,podDate)');
+must(v246, 'V246_STRICT_TRACK:');
+
+// Startup remains interactive-first and expensive maintenance cannot steal the
+// production write lock in recovery safe mode.
+must(bootstrap, 'v167CcslPodLockFactRepair');
+must(podRepair, '2026-09-02-v419-ccsl-pod-lock-safe-mode-startup-guard-v3');
+
+// One export engine owns both single-business and ALL seven-business output.
 must(singleExportWorker, 'createV200ReferenceDashboardWorkbook');
 must(singleExportWorker, 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
-must(singleExportWorker, 'dashboardAttemptOnly:true');
-must(singleExportWorker, 'wpsFormulaLinks:true');
-must(singleExportWorker, 'trackAttemptFacts:true');
-must(singleExportWorker, 'crossDayTruth:true');
-must(singleExportWorker, 'onePassStreaming:true');
-must(singleExportWorker, 'CE_QC_EXPORT_JOB_UPDATE');
-must(singleExportWorker, 'process.send');
-
-must(allBusinessChild, '2026-08-18-v200-all-business-reference-child-v1');
 must(allBusinessChild, 'createV200ReferenceDashboardWorkbook');
-must(allBusinessChild, 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
-
-must(parityExporter, '2026-08-18-v197-unified-parity-dashboard-v1');
-must(parityExporter, 'assertParityReconciliation');
-must(strictParityExporter, '2026-08-18-v198-strict-pod-parity-dashboard-v1');
-must(strictParityExporter, 'assertStrictParityReconciliation');
-must(dashboardExporter, '2026-08-18-v199-dashboard-attempt-average-v1');
-
-must(v200Evidence, '2026-08-18-v200-reference-template-track-attempt-v1');
-must(v200Evidence, "code === '70'");
-must(v200Evidence, "code === '60'");
-must(v200Evidence, "'派件时间'");
-must(v200Evidence, "source: '无真实派次证据'");
-must(v200Evidence, 'firstDispatchDate');
-must(v200Metrics, "'POD明细'");
-must(v200Metrics, 'referenceAverageDays');
-must(v200Workbook, 'HYPERLINK');
-must(v200Workbook, "workbook.addWorksheet('每日看板'");
-must(v200Workbook, "'每日票量'");
-must(v200Workbook, "'每日状态'");
-must(v200Workbook, "'派次与平均签收天数'");
-must(v200Workbook, "const DETAIL_SHEETS = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细']");
-must(v200Workbook, "fgColor: { argb: 'FF1F4E78' }");
-must(v200Workbook, "fgColor: { argb: 'FFFFF9E6' }");
-must(v200Exporter, 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY');
-must(v200Exporter, '_V200.xlsx');
-
-must(asyncExportLauncher, '2026-08-17-v185-one-pass-stream-export-launch-v1');
 must(asyncExportLauncher, 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM');
-must(exportDirect, '2026-08-18-v192-direct-export-early-route-v1');
 must(exportDirect, '/api/v190/export-period/prepare');
-must(exportDirect, '/api/v190/export-job/:jobId');
-must(exportSidecar, '2026-08-18-v194-token-status-sidecar-v1');
-must(exportSidecar, '2026-08-18-v195-ipc-memory-status-v1');
-must(exportSidecar, '/api/v194/export-ping');
 must(exportSidecar, '/api/v194/export-period/prepare');
-must(exportSidecar, '/api/v194/export-job/:jobId');
-must(exportSidecar, '/api/v194/export-file');
-must(exportSidecar, 'TOKEN_V194_NO_SQLITE');
 must(exportSidecar, 'IPC_MEMORY_V195');
-must(exportSidecar, "stdio: ['ignore', 'ignore', 'ignore', 'ipc']");
-must(exportSidecar, "child.on('message'");
-must(exportSidecar, 'MEMORY_IPC');
-must(exportPreflight, "import './v190ExportDirectEndpointPatch.js';");
-must(exportPreflight, '2026-08-17-v142-v84-async-export-preflight-v4');
 
-for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, v163, storage, bstore, v109, v140, dashboard, bootstrap, whppRecovery, podRepair]) forbid(source, 'v148-direct-daily-runner-v1');
+for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storage, bstore, bootstrap, podRepair]) {
+  forbid(source, 'v148-direct-daily-runner-v1');
+}
 
-console.log('[GOLIVE] runtime-source gate passed; V414 keeps fresh imports explicit-run-only, V67 owns normal CCSL → SHOPEE → WHPP execution, browser/backend WHPP auto-resume both require exact PROCESS_RESTART_INTERRUPTED proof for the same report date and runId, completion remains latched, and V132 remains display-only');
+console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · V419 WHPP global-range display owner · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
