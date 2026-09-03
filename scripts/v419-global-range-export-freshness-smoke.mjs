@@ -59,6 +59,8 @@ assert.match(whppBoardSource,/\/api\/v234\/trends\?businessType=WHPP&from=/,'WHP
 assert.match(whppBoardSource,/new URLSearchParams\(\{from:range\.from,to:range\.to/,'WHPP V132 direct detail path must send same from/to');
 assert.match(whppExactUiSource,/new URLSearchParams\(\{from:range\.from,to:range\.to/,'V249 exact click owner must send same from/to');
 assert.match(whppExactUiSource,/`\$\{membership\}\|\$\{code\}`/,'WHPP closed detail must preserve daily membership occurrence rather than cross-day bill dedupe');
+assert.match(whppDetailSource,/2026-09-03-v419-whpp-immutable-membership-detail-v6/,'WHPP detail must use immutable daily membership owner');
+assert.match(whppDetailSource,/function restrictStateToImmutableMembership/,'WHPP detail must restrict final rows to admitted daily members');
 assert.match(whppDetailSource,/function memberDates\(from,to\)/,'WHPP detail backend must enumerate daily memberships inside selected range');
 assert.match(whppDetailSource,/SHIPMENT_CURRENT_STATE/,'WHPP historical daily memberships must overlay latest persisted current truth');
 assert.match(whppDetailSource,/reportMembershipDate:reportDate/,'WHPP detail must disclose immutable daily membership date');
@@ -105,7 +107,7 @@ const whpp=inspectV172WhppDetail({from:'2026-08-01',to:'2026-08-02',tab:'pod',pa
 assert.equal(whpp.total,2,'WHPP range detail must preserve one occurrence for each daily membership');
 assert.deepEqual(whpp.rows.map(row=>row.reportMembershipDate),['2026-08-01','2026-08-02'],'WHPP daily membership dates must remain immutable and ordered');
 assert.ok(whpp.rows.every(row=>row.是否POD==='是'||row.POD状态==='POD'||String(row.currentState||'').toUpperCase()==='POD'),'latest next-day POD truth must overlay both historical daily memberships');
-assert.equal(whpp.truthSource,'DAILY_MEMBERSHIP_PLUS_LATEST_SHIPMENT_CURRENT_STATE');
+assert.equal(whpp.truthSource,'IMMUTABLE_DAILY_MEMBERSHIP_PLUS_LATEST_SHIPMENT_CURRENT_STATE');
 closeDb();fs.rmSync(temp,{recursive:true,force:true});
 
-console.log('[V419 RANGE+EXPORT+WHPP] PASS one global range across HOME/7 business boards/export · WHPP cards+trends+details share from/to · daily WHPP membership preserved with latest carryover POD · DB/WAL truth-aware export reuse');
+console.log('[V419 RANGE+EXPORT+WHPP] PASS one global range across HOME/7 business boards/export · WHPP cards+trends+details share from/to · immutable daily WHPP membership preserved with latest carryover POD · DB/WAL truth-aware export reuse');
