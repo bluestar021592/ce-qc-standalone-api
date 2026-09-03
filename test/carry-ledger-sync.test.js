@@ -69,7 +69,9 @@ test('explicit return-in-progress reopens stale legacy RETURNED closure', () => 
     assert.equal(db.prepare('SELECT status FROM carryover_open_items WHERE shipmentCode=?').get(row.shipmentCode).status,'OPEN');
     assert.equal(db.prepare('SELECT state FROM shipment_current_state WHERE shipmentCode=?').get(row.shipmentCode).state,'RETURN_IN_PROGRESS');
     const ledger=db.prepare('SELECT trackingStatus,terminalReason,currentState FROM qc_tracking_ledger WHERE shipmentCode=?').get(row.shipmentCode);
-    assert.deepEqual(ledger,{trackingStatus:'OPEN',terminalReason:'',currentState:'RETURN_IN_PROGRESS'});
+    assert.equal(ledger.trackingStatus,'OPEN');
+    assert.equal(ledger.terminalReason,'');
+    assert.equal(ledger.currentState,'RETURN_IN_PROGRESS');
   } finally { db.close(); }
 });
 
@@ -92,7 +94,9 @@ test('strict Shopee attempt evidence and POD locks remain immutable across later
     insertLedger(db,{bill:locked.shipmentCode,type:'CE',terminalReason:'POD',state:'POD',podDate:'2026-08-02'});
     syncCarryRowsToV246Ledger([locked],{db,reason:'TEST_POD_LOCK_RETURN_NOISE'});
     const podLockLedger=db.prepare('SELECT terminalReason,currentState,currentCategory FROM qc_tracking_ledger WHERE shipmentCode=?').get(locked.shipmentCode);
-    assert.deepEqual(podLockLedger,{terminalReason:'POD',currentState:'POD',currentCategory:'POD'});
+    assert.equal(podLockLedger.terminalReason,'POD');
+    assert.equal(podLockLedger.currentState,'POD');
+    assert.equal(podLockLedger.currentCategory,'POD');
     assert.equal(db.prepare('SELECT state FROM shipment_current_state WHERE shipmentCode=?').get(locked.shipmentCode).state,'POD');
     assert.equal(db.prepare('SELECT status FROM carryover_open_items WHERE shipmentCode=?').get(locked.shipmentCode).status,'CLOSED');
   } finally { db.close(); }
