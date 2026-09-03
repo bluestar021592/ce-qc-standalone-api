@@ -6,7 +6,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v3-return-progress-reopen';
+export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v4-terminal-authority';
 
 const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const EXACT_TERMINAL_REASONS = new Set(['POD','RETURNED','ORDER_CANCELLED']);
@@ -42,7 +42,7 @@ function observedAttempt(payload = {}) {
 }
 function podDateOf(payload = {}, classification = {}, old = {}) {
   if (text(old.podDate)) return v246DateKey(old.podDate) || text(old.podDate);
-  if (!classification.pod) return '';
+  if (!classification.pod && text(old.terminalReason).toUpperCase() !== 'POD') return '';
   for (const key of ['POD时间','podTime','podClosedAt','podAt','deliveredAt','deliveryCompletedAt','签收时间']) {
     const value = v246DateKey(payload?.[key]);
     if (value) return value;
@@ -128,7 +128,7 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       const oldExactTerminal = old?.trackingStatus === 'TERMINAL'
         && EXACT_TERMINAL_REASONS.has(oldReason)
         && !(oldReason === 'RETURNED' && explicitlyReturnInProgress);
-      const terminalReason = classification.terminal ? classification.reason : (oldExactTerminal ? oldReason : '');
+      const terminalReason = oldExactTerminal ? oldReason : (classification.terminal ? classification.reason : '');
       const isTerminal = Boolean(terminalReason);
       const trackingStatus = isTerminal ? 'TERMINAL' : 'OPEN';
       const firstReportDate = minDate(old?.firstReportDate, carry?.sourceReportDate, payload.sourceReportDate, current?.reportDate) || v246DateKey(current?.reportDate) || v246DateKey(carry?.lastReportDate);
@@ -141,7 +141,9 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       const currentState = isTerminal
         ? (terminalReason === 'POD' ? 'POD' : terminalReason === 'RETURNED' ? 'RETURNED' : 'ORDER_CANCELLED')
         : classifyState;
-      const currentCategory = text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || currentState);
+      const currentCategory = isTerminal
+        ? (terminalReason === 'POD' ? 'POD' : terminalReason === 'RETURNED' ? '退回' : '订单取消')
+        : text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || currentState);
       const podDate = terminalReason === 'POD' ? podDateOf(payload, classification, old || {}) : text(old?.podDate || '');
       const strictAttempt = /^V246_STRICT_TRACK/i.test(text(old?.attemptSource));
       const attemptNo = strictAttempt ? Number(old?.attemptNo || 0) : observedAttempt(payload);
@@ -150,6 +152,8 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       const terminalAt = isTerminal ? (text(old?.terminalAt) || lastEventTime || now) : '';
       const before = compact(old || {});
       const normalizedPayload = { ...payload, businessType, currentState, primaryCategory:currentCategory };
+      if (terminalReason === 'POD') normalizedPayload.是否POD = '是';
+      if (terminalReason === 'RETURNED') normalizedPayload.退回状态 = '已退回';
       const normalizedJson = JSON.stringify(normalizedPayload);
 
       carryUpdate.run(isTerminal ? 'CLOSED' : 'OPEN', apiStatus, terminalReason, normalizedJson, now, bill);
