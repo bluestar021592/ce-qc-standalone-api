@@ -1,0 +1,49 @@
+name: CE QC V419 global range export freshness
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - fix/v419-scalar-status-priority-open-truth
+
+jobs:
+  range-export-freshness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Syntax checks
+        run: |
+          node --check public/v237-dashboard-owner-guard.js
+          node --check public/v132-whpp-seven-business-fast.js
+          node --check public/v249-whpp-detail-owner.js
+          node --check src/v236DashboardCurrentRoutePatch.js
+          node --check src/v172WhppDetailParityPatch.js
+          node --check src/v246TrackingLedgerCore.js
+          node --check src/carryLedgerSync.js
+          node --check src/rangeDashboardStore.js
+          node --check src/unifiedImportStore.js
+          node --check src/v419CanonicalExportLedgerTruth.js
+          node --check src/v225ExportReturnTruth.js
+          node --check src/v84AsyncExportPatch.js
+          node --check src/v176AsyncExportRecoveryPatch.js
+          node --check src/v320HistoricalExportRows.js
+          node --check test/carry-ledger-sync.test.js
+          node --check test/carry-ledger-derived-refresh.test.js
+          node --check test/v419-export-ledger-truth.test.js
+          node --check scripts/v237-dashboard-owner-source-smoke.cjs
+          node --check scripts/v419-carry-ledger-sync-smoke.mjs
+          node --check scripts/v419-global-range-export-freshness-smoke.mjs
+      - name: Standard V419 ledger regressions
+        run: node --test test/carry-ledger-sync.test.js test/carry-ledger-derived-refresh.test.js test/v419-export-ledger-truth.test.js
+      - name: Immediate carry ledger truth + atomic rollback
+        run: node scripts/v419-carry-ledger-sync-smoke.mjs
+      - name: Global date range + next-day export truth + WHPP range parity
+        run: node scripts/v419-global-range-export-freshness-smoke.mjs

@@ -5,6 +5,7 @@ import { applyV230AttemptSigningTruth, V230_ATTEMPT_SIGNING_TRUTH_ID } from './v
 import { collectV320HistoricalExportRows, V320_HISTORICAL_EXPORT_ROWS_ID } from './v320HistoricalExportRows.js';
 import { applyV320DispatchSigningTruth, V320_DISPATCH_SIGNING_TRUTH_ID } from './v320DispatchSigningTruth.js';
 import { applyV381LedgerExportTruth, V381_EXPORT_EVIDENCE_REPAIR_ID } from './v381ExportEvidenceRepair.js';
+import { applyV419CanonicalExportLedgerTruth, V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID } from './v419CanonicalExportLedgerTruth.js';
 
 export const V200_EXPORT_VERSION = BASE_EXPORT_VERSION;
 // Legacy identifier retained because external update gates/source diagnostics reference it.
@@ -45,14 +46,19 @@ export async function collectV200Rows(type,range,onProgress=()=>{}){
   applyV381LedgerExportTruth(businessType,rows,{db:getDb(),range});
   applyV320DispatchSigningTruth(businessType,rows,{db:getDb()});
   applyV329FirstReportSigning(businessType,rows);
+  // V419 is intentionally last: old snapshots/final rows/track counters may enrich
+  // addresses and evidence, but they can never overwrite canonical terminal truth
+  // or a persisted V246 attempt after this point.
+  applyV419CanonicalExportLedgerTruth(businessType,rows,{db:getDb()});
+  normalizeTerminalExclusion(rows);
   const diag=evidenceDiagnostics(businessType,rows);
-  for(const row of rows){row.exportEvidencePartial=diag.partial;row.exportAttemptMissing=diag.attemptMissing;row.exportSigningMissing=diag.signingMissing;row.v320ExportTruthId=V225_EXPORT_RETURN_TRUTH_ID;}
+  for(const row of rows){row.exportEvidencePartial=diag.partial;row.exportAttemptMissing=diag.attemptMissing;row.exportSigningMissing=diag.signingMissing;row.v320ExportTruthId=V225_EXPORT_RETURN_TRUTH_ID;row.v419CanonicalExportTruthId=row.v419CanonicalExportTruthId||V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID;}
   rows=DAILY_MEMBERSHIP_TYPES.has(businessType)?expandDailyMembership(rows,range):rows;
   const keys=rows.map(row=>`${dateKey(row.reportMembershipDate||row.dailyMembershipDates?.[0])}|${normalizeBill(row.shipmentCode)}`),unique=new Set(keys.filter(key=>!key.startsWith('|')));
   if(DAILY_MEMBERSHIP_TYPES.has(businessType)&&unique.size!==rows.length)throw new Error(`V320_EXPORT_DUPLICATE_DAILY_MEMBER:${businessType}:${rows.length-unique.size}`);
   if(!rows.length)throw new Error(`${businessType} 在所选区间没有可导出的已保存日报成员。`);
-  onProgress({phase:'returnAttemptSigningTruth',completed:rows.length,total:rows.length,returned:rows.filter(r=>r.returned&&!r.pod).length,notPodActive:rows.filter(r=>!r.pod&&!r.returned).length,unknownAttemptPod:diag.attemptMissing,unknownSigningPod:diag.signingMissing,dailyMembershipOccurrences:rows.length,evidencePartial:diag.partial,engine:`${V225_EXPORT_RETURN_TRUTH_ID}+${V230_ATTEMPT_SIGNING_TRUTH_ID}+${V320_HISTORICAL_EXPORT_ROWS_ID}+${V320_DISPATCH_SIGNING_TRUTH_ID}+${V381_EXPORT_EVIDENCE_REPAIR_ID}`});
+  onProgress({phase:'returnAttemptSigningTruth',completed:rows.length,total:rows.length,returned:rows.filter(r=>r.returned&&!r.pod).length,notPodActive:rows.filter(r=>!r.pod&&!r.returned).length,unknownAttemptPod:diag.attemptMissing,unknownSigningPod:diag.signingMissing,dailyMembershipOccurrences:rows.length,evidencePartial:diag.partial,engine:`${V225_EXPORT_RETURN_TRUTH_ID}+${V230_ATTEMPT_SIGNING_TRUTH_ID}+${V320_HISTORICAL_EXPORT_ROWS_ID}+${V320_DISPATCH_SIGNING_TRUTH_ID}+${V381_EXPORT_EVIDENCE_REPAIR_ID}+${V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID}`});
   return rows;
 }
 
-console.info('[CE-QC][V329_EXPORT_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,'TBKH/SHOPEE attempts and signing days share real START/failure-cycle/POD evidence; missing START or POD remains unknown instead of falling back to first-report dates.');
+console.info('[CE-QC][V419_EXPORT_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,'membership remains date-locked; V246 canonical ledger is the final POD/return/cancel/attempt authority after legacy export evidence enrichment.');

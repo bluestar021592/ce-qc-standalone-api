@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
       - name: Parse launcher scripts with Windows PowerShell 5.1
         shell: powershell
         run: |
@@ -35,26 +36,32 @@ jobs:
             $runtimeErrors | Format-List | Out-String | Write-Error
             exit 1
           }
-      - name: Verify stable launcher files and supervisor handoff
+
+      - name: Verify managed update launcher and protected runtime handoff
         shell: powershell
         run: |
           if (-not (Test-Path 'CE_QC_Start.bat')) { throw 'CE_QC_Start.bat missing' }
           if (-not (Test-Path 'Install_CE_QC_Desktop_Shortcut.bat')) { throw 'desktop installer missing' }
           if (-not (Test-Path 'Start_CE_QC.ps1')) { throw 'protected runtime Start_CE_QC.ps1 missing' }
+
           $text = Get-Content 'tools/CE_QC_Start.ps1' -Raw
           foreach ($required in @(
             'fetch','origin','main','reset','--hard','origin/main','node_modules','5177',
             'Get-PortOwnerPids','Stop-PortOwners','Stop-LegacySupervisors','Get-CimInstance','taskkill.exe','/T','/F',
             'Get-ShellSupervisorForProcess','Stop-RecordedRuntime','runtime_supervisor.pid','stable and free',
-            'Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','elseif','CE_QC_LAUNCHER_TEST_MODE'
+            'Verify-InstalledCandidate','Start_CE_QC.ps1','Get-FileHash','powershell.exe','--untracked-files=no','CE_QC_LAUNCHER_TEST_MODE'
           )) {
             if (-not $text.Contains($required)) { throw "launcher missing required token: $required" }
           }
           if ($text -match '(?m)^\s*elif\s*\(') {
             throw 'launcher contains bash/python-style elif; PowerShell requires elseif'
           }
-          if ($text.Contains("Start-CeQcBackend") -or $text.Contains("ArgumentList @('bootstrap.js')")) {
-            throw 'desktop launcher must hand off to protected Start_CE_QC.ps1 instead of launching Node directly'
+          if ($text.Contains('Start-CeQcBackend')) {
+            throw 'desktop update launcher must never own a second production backend supervisor'
+          }
+          $handoff = "& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$ProjectRoot 'Start_CE_QC.ps1')"
+          if (-not $text.Contains($handoff)) {
+            throw 'verified update must hand off final production runtime ownership to Start_CE_QC.ps1'
           }
           if ($text -match "stash','push','-u") {
             throw 'launcher must not stash/remove untracked local runtime or backup files'
@@ -76,38 +83,67 @@ jobs:
             throw 'protected runtime must not rely on the fragile Process.HasExited monitor loop'
           }
 
-          $bat = Get-Content 'CE_QC_Start.bat' -Raw
-          if ($bat.Contains('启动未完成')) {
-            throw 'outer BAT must not print a misleading startup-failed message after the protected runtime has already been ready'
-          }
-
-          $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
-          foreach ($required in @('0x8D28','0x63A7','0x542F','0x52A8','CE_QC_Start.ps1','EncodedCommand','.cmd','WriteAllLines','-NoExit','test_mode')) {
-            if (-not $installer.Contains($required)) { throw "installer missing desktop CMD token: $required" }
-          }
-          if ($installer.Contains('CreateShortcut(')) {
-            throw 'installer must not rely on WScript.Shell .lnk creation anymore'
-          }
-      - name: Create and actually execute Windows desktop launcher
+      - name: Verify V5 desktop shortcut installer contract
         shell: powershell
         run: |
-          $tempDesktop = Join-Path $env:RUNNER_TEMP 'ce-qc-desktop-launcher-test'
-          New-Item -ItemType Directory -Path $tempDesktop -Force | Out-Null
-          $env:CE_QC_SHORTCUT_DESKTOP = $tempDesktop
+          $installer = Get-Content 'tools/Install_CE_QC_Desktop_Shortcut.ps1' -Raw
+          foreach ($required in @(
+            'CE_QC_LAUNCHER','Launch_CE_QC.ps1','CE_EXPRESS_APP_V5.ico','CE QC APP.lnk',
+            'New-Item -ItemType Junction','WScript.Shell','CreateShortcut','WindowStyle Hidden',
+            'Start_CE_QC.ps1','127.0.0.1:5177','NO CMD window. NO VBS. NO Windows Script Host.'
+          )) {
+            if (-not $installer.Contains($required)) { throw "V5 installer missing required contract token: $required" }
+          }
+          foreach ($retired in @('EncodedCommand',':test_mode','Launch_CE_QC.cmd','Launch_CE_QC.vbs')) {
+            if ($installer.Contains($retired) -and $retired -notin @('Launch_CE_QC.cmd','Launch_CE_QC.vbs')) {
+              throw "V5 installer still depends on retired launcher contract: $retired"
+            }
+          }
+          if (-not $installer.Contains("Remove-Item -LiteralPath (Join-Path `$LauncherRoot 'Launch_CE_QC.cmd')")) {
+            throw 'V5 installer must remove stale CMD launcher'
+          }
+          if (-not $installer.Contains("Remove-Item -LiteralPath (Join-Path `$LauncherRoot 'Launch_CE_QC.vbs')")) {
+            throw 'V5 installer must remove stale VBS launcher'
+          }
+
+      - name: Create and inspect Windows V5 desktop launcher
+        shell: powershell
+        run: |
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File 'tools/Install_CE_QC_Desktop_Shortcut.ps1'
           if ($LASTEXITCODE -ne 0) { throw "desktop installer exited with $LASTEXITCODE" }
 
-          $launchers = @(Get-ChildItem -LiteralPath $tempDesktop -Filter '*.cmd')
-          if ($launchers.Count -ne 1) { throw "expected exactly one desktop .cmd launcher, found $($launchers.Count)" }
-          if ($launchers[0].Length -le 0) { throw 'desktop CMD launcher is empty' }
-          if (@(Get-ChildItem -LiteralPath $tempDesktop -Filter '*.lnk').Count -ne 0) { throw 'legacy .lnk should not remain' }
-          $cmdText = Get-Content -LiteralPath $launchers[0].FullName -Raw
-          if (-not $cmdText.Contains('-NoExit')) { throw 'normal desktop launcher must keep PowerShell visible with -NoExit' }
-          if (-not $cmdText.Contains(':test_mode')) { throw 'desktop launcher must contain CI test mode path' }
-
-          $env:CE_QC_LAUNCHER_TEST_MODE = '1'
-          $output = & cmd.exe /d /c ('"' + $launchers[0].FullName + '"') 2>&1 | Out-String
-          if ($LASTEXITCODE -ne 0) { throw "desktop launcher exited with $LASTEXITCODE`n$output" }
-          if (-not $output.Contains('CE_QC_LAUNCHER_TEST_OK')) {
-            throw "desktop launcher did not reach CE_QC_Start.ps1`n$output"
+          $launcherRoot = Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER'
+          $hiddenLauncher = Join-Path $launcherRoot 'Launch_CE_QC.ps1'
+          $appLink = Join-Path $launcherRoot 'app'
+          $icon = Join-Path $launcherRoot 'CE_EXPRESS_APP_V5.ico'
+          foreach ($requiredPath in @($hiddenLauncher,$appLink,$icon)) {
+            if (-not (Test-Path -LiteralPath $requiredPath)) { throw "V5 launcher artifact missing: $requiredPath" }
           }
+          $appItem = Get-Item -LiteralPath $appLink -Force
+          if (($appItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+            throw 'V5 app bridge must be a junction/reparse point'
+          }
+
+          $shell = New-Object -ComObject WScript.Shell
+          $desktopCandidates = @()
+          try { $desktopCandidates += [string]$shell.SpecialFolders.Item('Desktop') } catch {}
+          try { $desktopCandidates += [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory) } catch {}
+          if ($env:USERPROFILE) { $desktopCandidates += (Join-Path $env:USERPROFILE 'Desktop') }
+          $shortcut = $null
+          foreach ($desktop in ($desktopCandidates | Where-Object { $_ } | Select-Object -Unique)) {
+            $candidate = Join-Path $desktop 'CE QC APP.lnk'
+            if (Test-Path -LiteralPath $candidate) { $shortcut = $candidate; break }
+          }
+          if (-not $shortcut) { throw 'CE QC APP.lnk was not created on the resolved desktop' }
+
+          $saved = $shell.CreateShortcut($shortcut)
+          if ([string]$saved.TargetPath -notmatch 'powershell\.exe$') { throw "shortcut target is not PowerShell: $($saved.TargetPath)" }
+          if ([string]$saved.Arguments -notlike '*-WindowStyle Hidden*Launch_CE_QC.ps1*') { throw "shortcut is not hidden V5 launcher: $($saved.Arguments)" }
+          if ([string]$saved.Arguments -like '*Start_CE_QC.ps1*') { throw 'desktop shortcut must go through the ASCII hidden launcher instead of Unicode project path directly' }
+          if ([string]$saved.IconLocation -notlike '*CE_EXPRESS_APP_V5.ico*') { throw "shortcut icon mismatch: $($saved.IconLocation)" }
+
+          $hidden = Get-Content -LiteralPath $hiddenLauncher -Raw
+          foreach ($required in @('Start_CE_QC.ps1','WindowStyle Hidden','127.0.0.1:5177','Test-CeQcReady')) {
+            if (-not $hidden.Contains($required)) { throw "hidden launcher missing required token: $required" }
+          }
+          Write-Host 'V5 desktop launcher contract passed: .lnk -> hidden PowerShell -> ASCII junction -> protected Start_CE_QC.ps1'

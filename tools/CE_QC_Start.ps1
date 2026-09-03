@@ -99,9 +99,20 @@ function Stop-LegacySupervisors([string]$ProjectRoot) {
 }
 
 function Stop-PortOwners([int]$Port) {
-  for ($attempt = 1; $attempt -le 12; $attempt++) {
+  $freePasses = 0
+  for ($attempt = 1; $attempt -le 18; $attempt++) {
     $owners = @(Get-PortOwnerPids $Port)
-    if ($owners.Count -eq 0) { return }
+    if ($owners.Count -eq 0) {
+      $freePasses += 1
+      if ($freePasses -ge 3) {
+        Write-Host "Port $Port is stable and free." -ForegroundColor Green
+        return
+      }
+      Start-Sleep -Milliseconds 700
+      continue
+    }
+
+    $freePasses = 0
     foreach ($ownerPid in $owners) {
       $supervisor = Get-ShellSupervisorForProcess $ownerPid
       if ($supervisor) { Stop-ProcessTree ([int]$supervisor.ProcessId) "supervisor of port $Port owner" }
@@ -111,6 +122,7 @@ function Stop-PortOwners([int]$Port) {
   }
   $remaining = @(Get-PortOwnerPids $Port)
   if ($remaining.Count -gt 0) { throw "Port $Port is still occupied after cleanup: $($remaining -join ',')" }
+  throw "Port $Port did not remain stable and free for three consecutive checks."
 }
 
 function Ensure-LiveDependencies([string]$ProjectRoot) {

@@ -3,6 +3,7 @@ import { getDb, nowIso } from './db.js';
 import { SHOPEE, getMatchingBusinessSnapshot, loadBusinessState } from './businessStore.js';
 import { analyzeStoreFlow } from './storeFlow.js';
 import { loadAppState } from './store.js';
+import { syncCarryRowsToV246Ledger, invalidateCarryLedgerReadCaches } from './carryLedgerSync.js';
 
 const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN', 'WHPP']);
 let ccslSnapshotCache = { snapshotId: '', state: null };
@@ -108,6 +109,7 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [] }) {
   const update = db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=? WHERE shipmentCode=?`);
   const current = db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=? WHERE shipmentCode=?`);
   const now = nowIso();
+  let ledgerSync = null;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const row of rows) {
@@ -127,9 +129,18 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [] }) {
       update.run(status, apiStatus, reason, reportDate, snapshotId, json, now, bill);
       current.run(closed ? reason : String(row.primaryCategory || row.主分类 || 'OPEN'), apiStatus, reportDate, snapshotId, row.latestEventTime || row.最后节点时间 || '', json, now, bill);
     }
+    ledgerSync = syncCarryRowsToV246Ledger(rows, {
+      db,
+      reason: `UPDATE_CARRYOVER_RESULTS:${snapshotId || reportDate || 'UNKNOWN'}`,
+      manageTransaction: false,
+      invalidateCaches: false
+    });
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
-  return carryoverSummary(reportDate);
+  invalidateCarryLedgerReadCaches();
+  const summary = carryoverSummary(reportDate);
+  console.log(`[CE-QC][CARRY_LEDGER_SYNC] reportDate=${reportDate} processed=${Number(ledgerSync?.processed || 0)} terminal=${Number(ledgerSync?.terminal || 0)} open=${Number(ledgerSync?.open || 0)} reopened=${Number(ledgerSync?.reopened || 0)} changed=${Number(ledgerSync?.changed || 0)}`);
+  return { ...summary, ledgerSync };
 }
 
 export function carryoverSummary(reportDate) {

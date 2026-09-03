@@ -1,7 +1,7 @@
 import { getDb, nowIso } from './db.js';
 
 const PATCH_ID = '2026-08-17-v167-ccsl-pod-lock-fact-repair-v1';
-const STARTUP_GUARD_ID = '2026-08-22-v235-ccsl-pod-lock-fact-repair-interactive-guard-v2';
+const STARTUP_GUARD_ID = '2026-09-02-v419-ccsl-pod-lock-safe-mode-startup-guard-v3';
 const CCSL_TYPES = ['CE', 'CEAF', 'TBKH', 'ALI1688'];
 
 function latestCompletedBatch(db) {
@@ -78,7 +78,11 @@ function upsertPodFact(db, batch, row, now) {
 }
 
 export function repairLatestCcslPodLockFacts(database = null) {
-  if (!database && String(process.env.CE_QC_SKIP_STARTUP_POD_REPAIR || '') === '1') {
+  const startupSkip = !database && (
+    String(process.env.CE_QC_SKIP_STARTUP_POD_REPAIR || '') === '1'
+    || String(process.env.CE_QC_RECOVERY_SAFE_MODE || '') === '1'
+  );
+  if (startupSkip) {
     return { ok: true, skipped: true, repaired: 0, updated: 0, reason: 'INTERACTIVE_FIRST_STARTUP_SKIP', startupGuardId: STARTUP_GUARD_ID };
   }
 

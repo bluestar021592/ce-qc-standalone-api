@@ -48,11 +48,12 @@ test('confirm-query scan gate uses orderStatus only', () => {
   assert.equal(returned.trackRequired, false);
 });
 
-test('tracking 26 latest is inbound without scan', () => {
+test('tracking 26 latest is pickup success normal flow', () => {
   const result = analyze({ events: [event('26', '2026-08-09T08:00:00+07:00')] });
-  assert.equal(result.currentState, 'INBOUND_NO_SCAN');
-  assert.equal(result.primaryCategory, '入库无扫描节点');
-  assert.equal(result.入库无扫描节点, '是');
+  assert.equal(result.currentState, 'PICKUP_SUCCESS');
+  assert.equal(result.primaryCategory, '正常流转');
+  assert.equal(result.入库无扫描节点, '否');
+  assert.equal(result.pickupSuccess, '是');
 });
 
 test('tracking 30 or 32 is cycle count and closes prior 26 state', () => {

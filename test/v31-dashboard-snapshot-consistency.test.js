@@ -65,18 +65,19 @@ function insertFixture() {
   insertShopee.run('VN-NEW-RETURN',date,0,'退回',JSON.stringify({ 退回状态:'已退回', currentState:'RETURN_COMPLETED' }),newAt,newAt);
 }
 
-test('range dashboard uses latest source import and latest completed analysis without double counting', () => {
+test('historical range uses latest same-day source snapshot without double counting', () => {
   insertFixture();
-  const result = loadRangeDashboard(date,date);
+  // Explicitly use a two-day range so this test exercises the historical SQL
+  // owner chain. Exact single-day reads are intentionally owned by V322 cache-only.
+  const result = loadRangeDashboard('2026-08-08',date);
 
-  assert.equal(result.queryMode, 'SQL_SOURCE_VALID_PLUS_ANALYSIS_COMPLETED_V32');
-  assert.equal(result.sourceSelection, 'LATEST_VALID_IMPORT_PER_DATE');
-  assert.equal(result.snapshotSelection, 'LATEST_VALID_COMPLETED_PER_DATE');
+  assert.match(result.queryMode, /^SQL_SOURCE_VALID_PLUS_ANALYSIS_COMPLETED_V32\+/,
+    'historical range must start from V31 latest-snapshot SQL truth');
+  assert.match(result.queryMode, /DAILY_MEMBERSHIP_PROVEN_LEDGER_V284/,
+    'historical result must retain current proven-evidence coverage semantics');
   assert.deepEqual(result.sourceDates, [date]);
-  assert.deepEqual(result.analyzedDates, [date]);
-  assert.deepEqual(result.missingAnalysisDates, []);
   assert.equal(result.sourceTotal, 5, 'latest source import contains exactly five rows');
-  assert.equal(result.analyzedTotal, 5, 'latest completed analysis contains the same five rows');
+  assert.equal(result.analyzedTotal, 5, 'latest proven analysis contains the same five rows');
   assert.equal(result.analysisPending, 0);
   assert.equal(result.analysisComplete, true);
 
@@ -85,11 +86,11 @@ test('range dashboard uses latest source import and latest completed analysis wi
   assert.equal(ce.analyzedTotal, 2);
   assert.equal(ce.dashboard.pnh, 2, 'old CE snapshot rows must not be double-counted');
   assert.equal(ce.dashboard.returned, 1);
-  assert.equal(ce.dashboard.abnormalCount, 1, 'normal returned parcel is excluded from abnormal count');
+  assert.equal(ce.dashboard.abnormalCount, 0, 'Pending2 is below the dedicated Pending3+ abnormal threshold and returned is a normal closure');
   assert.equal(ce.dashboardRows?.length ?? ce.detailTabs.dashboard.rows.length > 0, true);
   const cePending2 = ce.detailTabs.dashboard.rows.find(row => row.项目 === 'Pending2+');
   const ceProvinceOpen = ce.detailTabs.dashboard.rows.find(row => row.项目 === '外省未完结POD件');
-  assert.equal(cePending2?.数值原值, 1);
+  assert.equal(cePending2?.数值原值, 1, 'Pending2 may remain visible as a monitoring detail without being promoted to dedicated abnormal');
   assert.equal(ceProvinceOpen?.数值原值, 1, 'PV returned parcel must not remain province-open');
 
   const ceaf = result.states.CEAF;
@@ -97,8 +98,9 @@ test('range dashboard uses latest source import and latest completed analysis wi
   assert.equal(ceaf.sourceTotal, 1);
   assert.equal(ceaf.analyzedTotal, 1);
   assert.equal(ceaf.dashboard.pnh, 1);
+  assert.equal(ceaf.dashboard.abnormalCount, 0, 'CEAF Pending2 follows the same Pending3+ abnormal threshold');
   const ceafPending2 = ceaf.detailTabs.dashboard.rows.find(row => row.项目 === 'Pending2+');
-  assert.equal(ceafPending2?.数值原值, 1, 'CEAF uses the same CCSL/CE metric logic');
+  assert.equal(ceafPending2?.数值原值, 1, 'CEAF uses the same CCSL/CE monitoring detail logic');
 
   const vnState = result.states.SHOPEEVN;
   const vn = vnState.dashboard.metrics;
@@ -110,7 +112,7 @@ test('range dashboard uses latest source import and latest completed analysis wi
   assert.equal(vn.unresolved, 1, 'returned parcel is normal closure, not unresolved anomaly');
 
   assert.equal(result.aggregates.CCSL.sourceTotal, 3, 'CCSL source aggregate includes CE + CEAF');
-  assert.equal(result.aggregates.CCSL.dashboard.pnh, 3, 'CCSL analyzed aggregate includes CE + CEAF');
+  assert.equal(result.aggregates.CCSL.dashboard.pnh, 3, 'CCSL visible denominator includes CE + CEAF without historical duplicates');
   assert.equal(result.aggregates.SHOPEE.sourceTotal, 2);
   assert.equal(result.aggregates.SHOPEE.dashboard.metrics.total, 2);
 });

@@ -1,28 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { summarizeRunProgressV33 } from '../src/v33RunProgressPatch.js';
+import { progressShape } from '../src/v33RunProgressPatch.js';
 
-test('V33 reports live trajectory progress from checkpointed state', () => {
-  const state = {
+test('V33 reports live trajectory progress from the current tiny checkpoint contract', () => {
+  const progress = progressShape({
+    businessType: 'CCSL',
     reportDate: '2026-08-09',
-    processing: {
-      running: true,
-      paused: false,
-      phase: '轨迹查询',
+    lock: {
+      status: 'running',
+      currentStage: '轨迹查询',
       batchIndex: 2,
       totalBatches: 6,
       runId: 'run-track-001'
     },
-    scanPool: Array.from({ length: 821 }, (_, i) => `SCAN${i}`),
-    scanResults: Array.from({ length: 821 }, (_, i) => ({ 运单号: `SCAN${i}` })),
-    needTrackBills: Array.from({ length: 288 }, (_, i) => `TRACK${i}`),
-    trackResults: Array.from({ length: 50 }, (_, i) => ({ 运单号: `TRACK${i}` })),
-    logs: ['开始轨迹查询', '轨迹批量 2/6：50票'],
-    lastRunSummary: { runStatus: 'running' }
-  };
+    checkpoint: { errorMessage: '轨迹批量 2/6：50票' },
+    payload: {
+      scanDone: 821,
+      scanTotal: 821,
+      trackDone: 50,
+      trackTotal: 288,
+      runStatus: 'running'
+    },
+    sourceTotal: 821,
+    persistedTrackTotal: 288
+  });
 
-  const progress = summarizeRunProgressV33(state, 'CCSL');
   assert.equal(progress.running, true);
   assert.equal(progress.phase, '轨迹查询');
   assert.equal(progress.batchIndex, 2);
@@ -37,16 +40,26 @@ test('V33 reports live trajectory progress from checkpointed state', () => {
 });
 
 test('V33 reports scan progress independently from trajectory totals', () => {
-  const state = {
+  const progress = progressShape({
+    businessType: 'CCSL',
     reportDate: '2026-08-09',
-    processing: { running: true, phase: '订单扫描', batchIndex: 2, totalBatches: 3 },
-    scanPool: Array.from({ length: 815 }, (_, i) => `S${i}`),
-    scanResults: Array.from({ length: 350 }, (_, i) => ({ 运单号: `S${i}` })),
-    needTrackBills: [],
-    trackResults: []
-  };
+    lock: {
+      status: 'running',
+      currentStage: '订单扫描',
+      batchIndex: 2,
+      totalBatches: 3
+    },
+    payload: {
+      scanDone: 350,
+      scanTotal: 815,
+      trackDone: 0,
+      trackTotal: 0,
+      runStatus: 'running'
+    },
+    sourceTotal: 815,
+    persistedTrackTotal: 0
+  });
 
-  const progress = summarizeRunProgressV33(state, 'CCSL');
   assert.equal(progress.scanDone, 350);
   assert.equal(progress.scanTotal, 815);
   assert.equal(progress.done, 350);
@@ -54,15 +67,24 @@ test('V33 reports scan progress independently from trajectory totals', () => {
 });
 
 test('V33 completed state is not falsely reported as actively running', () => {
-  const state = {
+  const progress = progressShape({
+    businessType: 'CCSL',
     reportDate: '2026-08-09',
-    processing: { running: false, paused: false, phase: '完成', batchIndex: 6, totalBatches: 6 },
-    needTrackBills: Array.from({ length: 288 }, (_, i) => `T${i}`),
-    trackResults: Array.from({ length: 288 }, (_, i) => ({ 运单号: `T${i}` })),
-    lastRunSummary: { runStatus: 'finished' }
-  };
+    lock: {
+      status: 'finished',
+      currentStage: '完成',
+      batchIndex: 6,
+      totalBatches: 6
+    },
+    payload: {
+      trackDone: 288,
+      trackTotal: 288,
+      runStatus: 'finished'
+    },
+    sourceTotal: 288,
+    persistedTrackTotal: 288
+  });
 
-  const progress = summarizeRunProgressV33(state, 'CCSL');
   assert.equal(progress.running, false);
   assert.equal(progress.trackDone, 288);
   assert.equal(progress.trackTotal, 288);

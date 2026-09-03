@@ -48,7 +48,7 @@ assert.match(V418_STATUS_PROOF_FAST_PATH_ID,/v418-large-db-set-join-status-proof
 assert.match(activation,/import '\.\/v415RetroactiveCompletionGuard\.js';/,'V415/V418 must load before V317/V322 status registration');
 assert.match(activation,/import '\.\/v415ImportCarryoverGuard\.js';/,'V415 import OPEN guard must load before web route registration');
 
-// V418 large-db contract: current membership and SUCCESS coverage are read from
+// V419 large-db contract: current membership and SUCCESS coverage are read from
 // current-member indexed/set-join tables. Old giant snapshot/state JSON cannot be
 // materialized on the normal status path.
 assert.match(source,/readV418CurrentMembershipCounts/,'V415 status proof must delegate membership to V418 fast current-member reader');
@@ -63,8 +63,9 @@ assert.doesNotMatch(source,/SELECT payloadJson FROM unified_snapshots/,'V418 sta
 assert.doesNotMatch(v322Source,/SELECT status,payloadJson FROM unified_snapshots/,'V322 legacy completed check must not materialize old snapshot payload JSON');
 assert.match(v322Source,/SELECT status FROM unified_snapshots/,'V322 may read only the lightweight snapshot status claim');
 assert.match(v322Source,/V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID/,'V322 legacy completed claim must be guarded by V418 current-member proof');
-assert.match(v322Source,/length\(CAST\(valueJson AS BLOB\)\)/,'oversized legacy WHPP state must be size-checked before materialization');
-assert.match(source,/length\(CAST\(valueJson AS BLOB\)\)/,'V415 WHPP completion claim must size-check legacy state before reading it');
+assert.doesNotMatch(v322Source,/\bSELECT\b[^;\n]*\bvalueJson\b/i,'V419 status owner must never select legacy business_states.valueJson');
+assert.doesNotMatch(v322Source,/JSON\.parse\([^\n]*valueJson/i,'V419 status owner must never parse legacy business_states.valueJson');
+assert.doesNotMatch(source,/\bSELECT\b[^;\n]*\bvalueJson\b/i,'V415 completion proof hot path must not select legacy business state JSON');
 assert.match(source,/includeMissingBills:false/,'small-fixture compatibility fallback may use count-only V384 mode, never missing-bill diagnostics');
 assert.match(source,/NO_CURRENT_COMPLETION_SNAPSHOT/,'missing current completion snapshot must fail closed before CCSL proof');
 assert.match(source,/V416_FAIL_CLOSED_STATUS_PROOF/,'proof errors/unavailability must never preserve stale completed stages');
@@ -79,10 +80,12 @@ assert.match(runtimeImportSource,/reconcileV417Carryover/,'V161 current import o
 assert.match(runtimeImportSource,/openTruthPatch: V417_OPEN_RUNTIME_TRUTH_ID/,'current import payload must expose V417 OPEN truth revision');
 assert.match(v417OpenSource,/HISTORICAL_NONTERMINAL_RECONCILIATION/,'historical rows closed without hard terminal truth must remain visible as OPEN read-only truth');
 assert.match(v417OpenSource,/processingCompleteDoesNotCloseOpen:true/,'V417 OPEN reconciliation must remain independent from processing completion');
-assert.match(importUi,/v418-current-import-stability-v4-open-split-display/,'import UI must own V418 read-only split display');
-assert.match(importUi,/conservativeCurrentOpen/,'today OPEN display must consume backend closure-reconciled current OPEN');
-assert.match(importUi,/historicalReconciledOpen/,'historical OPEN display must consume backend closure-reconciled historical OPEN');
-assert.match(importUi,/V418_READONLY_CLOSURE_RECONCILED_DISPLAY/,'OPEN split UI must identify read-only reconciled display truth');
+assert.match(importUi,/v419-current-import-stability-v5-backend-open-single-source/,'import UI must own the V419 backend OPEN single-source display');
+assert.match(importUi,/const today=Math\.max\(0,num\(carry\.todayOpen\)\)/,'today OPEN display must read backend todayOpen directly');
+assert.match(importUi,/const historical=Math\.max\(0,num\(carry\.historicalOpen\)\)/,'historical OPEN display must read backend historicalOpen directly');
+assert.match(importUi,/const current=hasCurrent\?Math\.max\(0,num\(carry\.currentOpen\)\):today\+historical/,'current OPEN total must prefer backend currentOpen and only sum as a missing-field fallback');
+assert.match(importUi,/V419_BACKEND_OPEN_SINGLE_SOURCE/,'OPEN UI must identify the backend currentOpen single-source truth');
+assert.doesNotMatch(importUi,/conservativeCurrentOpen|historicalReconciledOpen|V418_READONLY_CLOSURE_RECONCILED_DISPLAY/,'retired V418 browser split reconstruction must not return');
 assert.doesNotMatch(importUi,/carryover\.(?:todayOpen|historicalOpen|currentOpen)\s*=/,'browser must never mutate backend OPEN truth');
 assert.match(statusUi,/v416-never-display-stale-completed-while-unconfirmed-v1/,'browser status must fail closed while persistence proof is unconfirmed');
 assert.match(statusUi,/v417-hide-stale-legacy-detail-while-status-unconfirmed-v1/,'legacy detail panel must have a V417 fail-closed owner');
@@ -199,4 +202,4 @@ const completedImport=applyV415ImportOpenGuard({reportDate:date,snapshotId:'S1',
 assert.equal(completedImport.carryover.currentOpen,3,'processing completion must never fabricate business closure; nonterminal current members remain OPEN');
 assert.equal(completedImport.carryover.processingCompleteDoesNotCloseOpen,true);
 
-console.log(`[V418/V417/V416/V415] large-db status + OPEN split smoke passed · giant legacy snapshot ignored in ${staleElapsedMs.toFixed(1)}ms · current-member set joins preserve SUCCESS/V384 semantics · reconciled current+historical OPEN add to one total · stale completion stays fail-closed`);
+console.log(`[V419/V418/V417/V416/V415] large-db status + OPEN single-source smoke passed · giant legacy snapshot ignored in ${staleElapsedMs.toFixed(1)}ms · current-member set joins preserve SUCCESS/V384 semantics · backend current/historical OPEN remain authoritative · legacy state JSON remains off the status hot path · stale completion stays fail-closed`);

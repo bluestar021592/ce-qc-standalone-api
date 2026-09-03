@@ -1,10 +1,14 @@
 import { getDb } from './db.js';
-import { loadRangeDashboard as loadFinalRangeDashboard } from './rangeDashboardStoreFinal.js';
+import { loadRangeDashboard as loadRangeDashboardV31 } from './rangeDashboardStoreV31.js';
 
 const SHOPEE_TYPES = Object.freeze(['SHOPEECN', 'SHOPEEVN']);
 
 /**
- * V33 is a narrow correctness layer over the final range dashboard.
+ * V33 is a narrow correctness layer over the preceding V31 historical range owner.
+ *
+ * It must not import rangeDashboardStoreFinal: the public Final owner reaches V33
+ * through the historical decorator chain, so importing Final here creates a
+ * multi-day recursive loop. Single-day V322 cache reads return before this layer.
  *
  * Dispatch attempt classification uses the strongest persisted evidence in this
  * order: podAttemptNo -> currentAttemptNo -> POD timestamp relative to report day.
@@ -12,7 +16,7 @@ const SHOPEE_TYPES = Object.freeze(['SHOPEECN', 'SHOPEEVN']);
  * rows that retained currentAttemptNo to participate instead of rendering 0%.
  */
 export function loadRangeDashboard(fromDate, toDate) {
-  const range = loadFinalRangeDashboard(fromDate, toDate);
+  const range = loadRangeDashboardV31(fromDate, toDate);
   const facts = queryDispatchAttemptFacts(range.fromDate, range.toDate);
 
   for (const type of SHOPEE_TYPES) {

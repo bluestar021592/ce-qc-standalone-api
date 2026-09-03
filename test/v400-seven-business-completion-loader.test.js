@@ -22,7 +22,7 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
   assert.match(loader, /v146-unified-import-date-status\.js\?v=20260901-v410-1/);
   assert.match(loader, /v168-seven-business-status\.js\?v=20260902-v414-status-1/);
   assert.match(loader, /v67-resilient-run-guard\.js\?v=20260902-v414-explicit-1/);
-  assert.match(loader, /v159-current-import-stability\.js\?v=20260902-v414-explicit-1/);
+  assert.match(loader, /v159-current-import-stability\.js\?v=20260902-v419-open-single-source-1/);
   assert.match(loader, /v132-whpp-seven-business-fast\.js\?v=20260902-display-only-2/);
   assert.match(loader, /v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/);
 
@@ -51,10 +51,11 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
   assert.match(totalSync, /state\.summary\s*=\s*\{[\s\S]*validUniqueWaybills:\s*core\s*\+\s*total/);
 });
 
-test('V168 performs one exact-date persisted status read; V322 preserves V414 WHPP current-cohort completion and restart-proof semantics', () => {
+test('V168 performs one exact-date persisted status read; V419 keeps V414 semantics on a scalar current-cohort proof chain', () => {
   const importUi = read('../public/v146-unified-import-date-status.js');
   const statusUi = read('../public/v168-seven-business-status.js');
   const fastStatus = read('../src/v322WebAvailabilityPatch.js');
+  const fastProof = read('../src/v418StatusProofFastPath.js');
 
   const screenshotCounts = { CE:2339, CEAF:11, TBKH:2178, ALI1688:81, SHOPEECN:637, SHOPEEVN:1422, WHPP:80 };
   assert.equal(Object.values(screenshotCounts).reduce((sum, value) => sum + value, 0), 6748);
@@ -85,25 +86,39 @@ test('V168 performs one exact-date persisted status read; V322 preserves V414 WH
 
   assert.match(fastStatus, /V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v414-one-read-seven-business-status-v1'/);
   assert.match(fastStatus, /V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v414-whpp-success-evidence-parity-v1'/);
+  assert.match(fastStatus, /V419_SCALAR_STATUS_PRIORITY_ID='2026-09-02-v419-scalar-status-priority-no-json-v1'/);
+  assert.match(fastStatus, /V419_STATUS_TIMING_ID='2026-09-02-v419-status-substage-timing-v1'/);
   assert.match(fastStatus, /readV322SevenBusinessStatus/);
   assert.match(fastStatus, /stages:\{CCSL,SHOPEE,WHPP\}/);
   assert.match(fastStatus, /PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/);
   assert.match(fastStatus, /PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF/);
-  assert.match(fastStatus, /function whppCompletionDecision\(/);
-  assert.match(fastStatus, /standard\?\.finalized/);
-  assert.match(fastStatus, /lifecycle\?\.complete/);
-  assert.match(fastStatus, /EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP/);
-  assert.match(fastStatus, /FULL_MEMBER_SUCCESS_EVIDENCE/);
-  assert.match(fastStatus, /UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,
-    'full-member completion must count only successfully processed current-member rows');
+  assert.match(fastStatus, /readV418CurrentMembershipCounts/);
+  assert.match(fastStatus, /readV418CcslProcessingProof/);
+  assert.match(fastStatus, /readV418BusinessSuccessCoverage/);
+  assert.match(fastStatus, /COMPLETE_LOCK\.has/);
+  assert.match(fastStatus, /unifiedCompletionClaim\(db,batch\)/);
+  assert.match(fastStatus, /coverage\?\.ok&&n\(coverage\.count\)>=n\(counts\.WHPP\)/,
+    'WHPP may complete only when current-member SUCCESS coverage reaches the current WHPP cohort');
   assert.match(fastStatus, /restartInterrupted/);
   assert.match(fastStatus, /PROCESS_RESTART_INTERRUPTED/);
-  assert.match(fastStatus, /EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode/,
-    'member completion checks must remain indexed by the current cohort');
-  assert.match(fastStatus, /ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,
-    'status read failure must fail closed rather than masquerade as fresh pending truth');
+  assert.match(fastStatus, /this\.route\(pathValue\)\.get\(progressHandler\)/,
+    'V419 status route must bypass the legacy V415 response wrapper and avoid a second proof read');
+  assert.doesNotMatch(fastStatus, /readV415CurrentProcessingProof/,
+    'V419 V322 must not invoke the legacy second proof chain');
+  assert.match(fastStatus, /code:'V322_PERSISTED_STATUS_READ_FAILED'/,
+    'status read failure must preserve the canonical V322 code for existing browser consumers');
+  assert.match(fastStatus, /detailCode:'V419_SCALAR_STATUS_READ_FAILED'/,
+    'V419 scalar failure detail must remain visible for diagnostics while the canonical code stays compatible');
+  assert.doesNotMatch(fastStatus, /SELECT[^`\n]*(?:payloadJson|summaryJson|valueJson)/,
+    'V419 status SQL must not select heavy JSON state/checkpoint columns');
   assert.doesNotMatch(fastStatus, /scan_results|business_scan_results|business_track_events|track_events/,
     'normal web status owner must never reconstruct scan or trajectory facts');
+
+  assert.match(fastProof, /readV418BusinessSuccessCoverage/);
+  assert.match(fastProof, /JOIN business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode[\s\S]*UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,
+    'WHPP completion proof must be an indexed current-member set join over SUCCESS rows');
+  assert.match(fastProof, /JOIN business_final_rows f[\s\S]*f\.shipmentCode=u\.shipmentCode[\s\S]*UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,
+    'SHOPEE completion proof must be an indexed current-snapshot set join over SUCCESS rows');
 });
 
 test('V408 home WHPP KPI reads canonical V132 summary and preserves normal-flow semantics', () => {

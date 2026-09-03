@@ -2,7 +2,7 @@ const fs=require('fs');
 const assert=require('assert/strict');
 const {execFileSync}=require('child_process');
 
-for(const file of ['public/v318-single-sidebar-owner.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v169-seven-business-legacy-status-sync.js','public/v412-seven-business-convergence.js','src/v102UnifiedImportSafetyGatePatch.js','src/v317CcslIncompleteRecoveryPatch.js','src/v322WebAvailabilityPatch.js','src/v295FirstAttemptUiInjectionPatch.js','src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/whppStore.js']){
+for(const file of ['public/v318-single-sidebar-owner.js','public/v67-resilient-run-guard.js','public/v168-seven-business-status.js','public/v169-seven-business-legacy-status-sync.js','public/v412-seven-business-convergence.js','src/v102UnifiedImportSafetyGatePatch.js','src/v317CcslIncompleteRecoveryPatch.js','src/v322WebAvailabilityPatch.js','src/v418StatusProofFastPath.js','src/v295FirstAttemptUiInjectionPatch.js','src/v44WhppUiPatch.js','src/v132WhppFastIntegrationPatch.js','src/whppStore.js']){
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 const ui=fs.readFileSync('public/v318-single-sidebar-owner.js','utf8');
@@ -13,6 +13,7 @@ const convergence=fs.readFileSync('public/v412-seven-business-convergence.js','u
 const importSafety=fs.readFileSync('src/v102UnifiedImportSafetyGatePatch.js','utf8');
 const ccslRecovery=fs.readFileSync('src/v317CcslIncompleteRecoveryPatch.js','utf8');
 const persistedStatus=fs.readFileSync('src/v322WebAvailabilityPatch.js','utf8');
+const fastProof=fs.readFileSync('src/v418StatusProofFastPath.js','utf8');
 const inject=fs.readFileSync('src/v295FirstAttemptUiInjectionPatch.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const whppSummary=fs.readFileSync('src/v132WhppFastIntegrationPatch.js','utf8');
@@ -57,21 +58,26 @@ assert.doesNotMatch(statusUi,/\/api\/shopee\/run\/start|\/api\/whpp\/run\/start|
 
 assert.match(persistedStatus,/2026-09-02-v414-one-read-seven-business-status-v1/);
 assert.match(persistedStatus,/2026-09-02-v414-whpp-success-evidence-parity-v1/);
+assert.match(persistedStatus,/2026-09-02-v419-scalar-status-priority-no-json-v1/);
 assert.match(persistedStatus,/readV322SevenBusinessStatus/);
 assert.match(persistedStatus,/stages:\{CCSL,SHOPEE,WHPP\}/);
 assert.match(persistedStatus,/PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/);
 assert.match(persistedStatus,/PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF/);
-assert.match(persistedStatus,/function whppCompletionDecision\(/);
-assert.match(persistedStatus,/CURRENT_DAILY_FINALIZATION_MARKER/);
-assert.match(persistedStatus,/CURRENT_FINALIZED_WHPP_STATE/);
-assert.match(persistedStatus,/EXACT_ZERO_CURRENT_UNIFIED_MEMBERSHIP/);
-assert.match(persistedStatus,/FULL_MEMBER_SUCCESS_EVIDENCE/);
-assert.match(persistedStatus,/UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,'positive current-member completion proof must count only successful processing evidence');
-assert.match(persistedStatus,/EXISTS\(SELECT 1 FROM business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode/,'positive completion proof must remain an indexed per-current-member existence check');
+assert.match(persistedStatus,/readV418CurrentMembershipCounts\(db,batch\|\|\{\}\)/,'V419 status must read the exact current seven-business membership through the scalar helper');
+assert.match(persistedStatus,/const whppMembershipOk=counts\._whppMembershipOk!==false/,'WHPP completion must fail closed when the current membership is inconsistent');
+assert.match(persistedStatus,/COMPLETE_LOCK\.has\(text\(whppLock\?\.status\)\.toLowerCase\(\)\),unifiedClaim=unifiedCompletionClaim\(db,batch\)/,'WHPP positive proof requires a current completion claim before SUCCESS coverage is consulted');
+assert.match(persistedStatus,/readV418BusinessSuccessCoverage\(db,\{businessType:'WHPP',date,snapshotId,boundary,memberTypes:\['WHPP'\]\}\)/,'WHPP completion must use the exact current WHPP cohort');
+assert.match(persistedStatus,/coverage\?\.ok&&n\(coverage\.count\)>=n\(counts\.WHPP\)/,'WHPP completion must require full successful processing coverage of the current cohort');
 assert.match(persistedStatus,/restartInterrupted/,'V414 persisted status must expose restart interruption truth');
 assert.match(persistedStatus,/PROCESS_RESTART_INTERRUPTED/,'V414 persisted status must expose exact restart proof rather than generic auto-run eligibility');
-assert.match(persistedStatus,/ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,'unknown persisted status must fail closed');
+assert.match(persistedStatus,/ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED'/,'unknown persisted status must fail closed with the canonical compatibility code');
+assert.match(persistedStatus,/detailCode:'V419_SCALAR_STATUS_READ_FAILED'/,'V419 scalar failure diagnostics must remain visible without breaking V322 consumers');
+assert.doesNotMatch(persistedStatus,/SELECT[^`\n]*(?:payloadJson|stateJson|summaryJson|valueJson)/,'normal status SQL must never materialize heavy JSON payloads');
 assert.doesNotMatch(persistedStatus,/scan_results|business_scan_results|business_track_events|track_events/,'normal status owner must never reconstruct scan or trajectory facts');
+assert.match(fastProof,/V418_STATUS_PROOF_FAST_PATH_ID='2026-09-02-v418-large-db-set-join-status-proof-v1'/);
+assert.match(fastProof,/UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/,'positive current-member completion proof must count only successful processing evidence');
+assert.match(fastProof,/FROM business_daily_parse_rows d[\s\S]*JOIN business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode/,'WHPP positive proof must remain an indexed current-member set join');
+assert.match(fastProof,/FROM unified_import_rows u[\s\S]*JOIN business_final_rows f[\s\S]*f\.shipmentCode=u\.shipmentCode/,'SHOPEE positive proof must remain an indexed current-snapshot set join');
 
 assert.match(completionGuard,/2026-09-01-v411-unconfirmed-status-entry-lock-v1/,'V169 filename must expose the V411 fail-closed entry guard build');
 assert.doesNotMatch(completionGuard,/getElementById\('ccslRunStatus'\)/,'V411 entry guard must never acquire the CCSL detail panel');
@@ -136,4 +142,4 @@ assert.match(whppStore,/\.\.\.emptyWhppState\(\),[\s\S]*reportDate,[\s\S]*dailyR
 assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must remain delivered');
 assert.match(inject,/X-CE-QC-V318-UI/,'V318 response header must be observable');
 
-console.log('[V414/V168/V322/SINGLE-RUNNER] smoke passed · one V414 persisted exact-date status read replaces repeated V311/V317/V132 UI polling · exact PROCESS_RESTART_INTERRUPTED recovery retries after bounded cooldown through sole V67 · generic incomplete WHPP remains idle · generic failures remain fail-closed · WHPP dashboard is display-only · seven-business total and completion lifecycle remain exact');
+console.log('[V419/V414/V168/V322/SINGLE-RUNNER] smoke passed · one scalar persisted exact-date status read replaces repeated V311/V317/V132 UI polling · exact PROCESS_RESTART_INTERRUPTED recovery retries after bounded cooldown through sole V67 · current-member WHPP completion requires full SUCCESS coverage · generic incomplete WHPP remains idle · generic failures remain fail-closed · WHPP dashboard is display-only · seven-business total and completion lifecycle remain exact');

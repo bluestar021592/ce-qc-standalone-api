@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { getRuntimeConfig } from './db.js';
 
 const PATCH_ID = '2026-08-17-v185-one-pass-stream-export-launch-v1';
+const TRUTH_REUSE_ID = '2026-09-03-v419-export-reuse-persisted-truth-watermark-v1';
 const EXPORT_CONTRACT_VERSION = 'ONE_WORKBOOK_PER_BUSINESS_V185_ONE_PASS_STREAM';
 const PREPARE_PATH = '/api/export-period/prepare';
 const STATUS_PATH = '/api/v84/export-job/:jobId';
@@ -61,7 +62,18 @@ function normalizePayload(body = {}) {
   const businessType = String(body.businessType || 'ALL').trim().toUpperCase() || 'ALL';
   return { periodType, date: String(body.date || '').slice(0, 10), fromDate: String(body.fromDate || '').slice(0, 10), toDate: String(body.toDate || '').slice(0, 10), businessType };
 }
-function payloadKey(payload) { return crypto.createHash('sha256').update(JSON.stringify({ ...payload, exportContractVersion: EXPORT_CONTRACT_VERSION })).digest('hex'); }
+function persistedTruthWatermarkMs() {
+  const dbFile = String(getRuntimeConfig().dbFile || '').trim();
+  if (!dbFile) return 0;
+  let watermark = 0;
+  for (const file of [dbFile, `${dbFile}-wal`]) {
+    try { watermark = Math.max(watermark, Number(fs.statSync(file).mtimeMs || 0)); } catch {}
+  }
+  return Math.floor(watermark);
+}
+function payloadKey(payload, truthWatermarkMs = persistedTruthWatermarkMs()) {
+  return crypto.createHash('sha256').update(JSON.stringify({ ...payload, exportContractVersion: EXPORT_CONTRACT_VERSION, truthReuseId: TRUTH_REUSE_ID, truthWatermarkMs })).digest('hex');
+}
 function activeSlot(key, requester = '') { return `${String(key || '')}|${String(requester || '')}`; }
 function rememberActive(job = {}) { if (job?.jobId && job?.payloadKey) activeJobs.set(activeSlot(job.payloadKey, job.requestedBy || ''), job.jobId); }
 function forgetActive(job = {}) {
@@ -98,7 +110,7 @@ function activeReusableJob(key, requester = '') {
   const id = activeJobs.get(activeSlot(key, requester));
   if (!id) return null;
   const job = readJob(id);
-  if (!job || String(job.payloadKey || '') !== key || String(job.requestedBy || '') !== String(requester || '') || String(job.exportContractVersion || '') !== EXPORT_CONTRACT_VERSION) { activeJobs.delete(activeSlot(key, requester)); return null; }
+  if (!job || String(job.payloadKey || '') !== key || String(job.requestedBy || '') !== String(requester || '') || String(job.exportContractVersion || '') !== EXPORT_CONTRACT_VERSION || String(job.truthReuseId || '') !== TRUTH_REUSE_ID) { activeJobs.delete(activeSlot(key, requester)); return null; }
   if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) return { job, reused: 'ACTIVE' };
   forgetActive(job);
   return null;
@@ -111,6 +123,7 @@ function reusableJob(key, requester = '') {
     if (String(job.payloadKey || '') !== key) continue;
     if (requester && job.requestedBy && String(job.requestedBy) !== requester) continue;
     if (String(job.exportContractVersion || '') !== EXPORT_CONTRACT_VERSION) continue;
+    if (String(job.truthReuseId || '') !== TRUTH_REUSE_ID) continue;
     if (['QUEUED', 'RUNNING'].includes(String(job.status || ''))) { rememberActive(job); return { job, reused: 'ACTIVE' }; }
     if (String(job.status || '') === 'COMPLETED') {
       const completedAt = Date.parse(job.completedAt || job.updatedAt || '');
@@ -176,7 +189,8 @@ function launchExportWorker(file, job) {
 function enqueueExport(req, res) {
   const payload = normalizePayload(req.body || {});
   if (!validatePayload(payload, res)) return;
-  const key = payloadKey(payload);
+  const truthWatermarkMs = persistedTruthWatermarkMs();
+  const key = payloadKey(payload, truthWatermarkMs);
   const requester = req.user?.username || req.user?.email || '';
   const reusable = reusableJob(key, requester);
   if (reusable) {
@@ -184,8 +198,8 @@ function enqueueExport(req, res) {
     const completed = reusable.reused === 'COMPLETED';
     return res.status(completed ? 200 : 202).json({
       ok: true, async: !completed, reused: reusable.reused, jobId: job.jobId, status: job.status,
-      progress: Number(job.progress || 0),
-      message: completed ? '相同条件V185完整报表已生成，直接复用现有文件' : '相同条件V185完整报表正在后台执行，已复用当前任务',
+      progress: Number(job.progress || 0), truthReuseId: TRUTH_REUSE_ID, truthWatermarkMs,
+      message: completed ? '相同条件且数据未变化的完整报表已生成，直接复用现有文件' : '相同条件且数据未变化的完整报表正在后台执行，已复用当前任务',
       files: completed ? (job.files || []) : undefined,
       pollUrl: `/api/v84/export-job/${encodeURIComponent(job.jobId)}`
     });
@@ -196,6 +210,8 @@ function enqueueExport(req, res) {
   const singleBusiness = payload.businessType !== 'ALL';
   const job = {
     version: PATCH_ID,
+    truthReuseId: TRUTH_REUSE_ID,
+    truthWatermarkMs,
     exportContractVersion: EXPORT_CONTRACT_VERSION,
     jobId,
     payloadKey: key,
@@ -214,7 +230,7 @@ function enqueueExport(req, res) {
   rememberActive(job);
   jobFileIndexCache = { at: 0, files: [] };
   launchExportWorker(file, job);
-  res.status(202).json({ ok: true, async: true, reused: false, jobId, status: job.status, progress: job.progress, message: job.message, pollUrl: `/api/v84/export-job/${encodeURIComponent(jobId)}`, workerMode: job.workerMode, exportContractVersion: EXPORT_CONTRACT_VERSION });
+  res.status(202).json({ ok: true, async: true, reused: false, jobId, status: job.status, progress: job.progress, message: job.message, pollUrl: `/api/v84/export-job/${encodeURIComponent(jobId)}`, workerMode: job.workerMode, exportContractVersion: EXPORT_CONTRACT_VERSION, truthReuseId: TRUTH_REUSE_ID, truthWatermarkMs });
 }
 function exportStatus(req, res) {
   const job = readJob(req.params.jobId);
@@ -241,9 +257,12 @@ export function inspectV180ExportCaches() {
     jobReadCache: jobReadCache.size,
     jobReadCacheMax: JOB_READ_CACHE_MAX,
     exportContractVersion: EXPORT_CONTRACT_VERSION,
+    truthReuseId: TRUTH_REUSE_ID,
+    truthWatermarkMs: persistedTruthWatermarkMs(),
     allJobHeapMB: ALL_JOB_HEAP_MB,
     singleJobHeapMB: SINGLE_JOB_HEAP_MB,
     patchId: PATCH_ID
   };
 }
 export const V84_ASYNC_EXPORT_PATCH_ID = PATCH_ID;
+export const V419_EXPORT_TRUTH_REUSE_ID = TRUTH_REUSE_ID;

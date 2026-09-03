@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 function serverBootIndex(bootstrap) {
-  const direct = bootstrap.indexOf("import('./server.js')");
-  const phased = bootstrap.indexOf("importPhase('server', './server.js')");
+  const interactiveCall = bootstrap.indexOf('await importServerInteractiveFirst();');
+  if (interactiveCall >= 0) return interactiveCall;
+  const direct = bootstrap.lastIndexOf("import('./server.js')");
+  const phased = bootstrap.lastIndexOf("importPhase('server', './server.js')");
   return direct >= 0 ? direct : phased;
 }
 
@@ -17,6 +19,7 @@ test('V27 server routes and fast bootstrap are installed before server start', (
   assert.match(bootstrap,/v27ServerPatch\.js/);
   assert.match(bootstrap,/v27TrendPatch\.js/);
   assert.ok(bootstrap.indexOf('v27ServerPatch.js') < serverIndex);
+  assert.ok(bootstrap.indexOf('v27TrendPatch.js') < serverIndex);
   assert.match(serverPatch,/\/api\/v27\/metric-detail/);
   assert.match(serverPatch,/\/api\/v27\/carry-monitor/);
   assert.match(serverPatch,/v27BootstrapHandler/);
@@ -42,16 +45,21 @@ test('V28 SHOPEE resume deletes persisted batch audit hashes but preserves per-w
   assert.doesNotMatch(resumePatch,/podLocks\s*=\s*\[\]/);
 });
 
-test('V28 trends use up to seven completed valid report dates for a single-day dashboard', () => {
+test('V28 trends use up to seven latest VALID report dates on the lightweight history path', () => {
   const trendPatch=fs.readFileSync('src/v27TrendPatch.js','utf8');
   assert.match(trendPatch,/function resolveTrendWindow/);
-  assert.match(trendPatch,/s\.status='COMPLETED'/);
-  assert.match(trendPatch,/b\.status='VALID'/);
+  assert.match(trendPatch,/FROM unified_import_batches/);
+  assert.match(trendPatch,/WHERE status='VALID' AND reportDate<=\?/);
+  assert.doesNotMatch(trendPatch,/s\.status='COMPLETED'/,'trend existence must not depend on processing completion');
   assert.match(trendPatch,/LIMIT 7/);
-  assert.match(trendPatch,/b\.reportDate<=\?/);
-  assert.match(trendPatch,/loadRangeDashboard\(trendWindow\.from,trendWindow\.to\)/);
+  assert.match(trendPatch,/reportDate<=\?/);
+  assert.match(trendPatch,/listLightweightBusinessHistory/,'trend cards must read lightweight persisted history instead of rebuilding the range dashboard');
+  assert.match(trendPatch,/historyFor\(type,requestedTo\)/);
+  assert.doesNotMatch(trendPatch,/loadRangeDashboard\(trendWindow\.from,trendWindow\.to\)/,
+    'trend endpoint must not synchronously invoke the heavy range-dashboard chain on the production database');
   assert.match(trendPatch,/attemptRows\(trendWindow\.from,trendWindow\.to\)/);
   assert.match(trendPatch,/trendWindowDates/);
+  assert.match(trendPatch,/historySource:'VALID_UNIFIED_IMPORT_SQLITE'/);
 });
 
 test('V29 metric detail follows latest VALID import even before snapshot completion', () => {
