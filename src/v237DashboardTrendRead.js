@@ -2,6 +2,7 @@ import { getDb } from './db.js';
 import { readV236CurrentSummary } from './v236DashboardCurrentRead.js';
 import { readV284ProvenDailyFacts } from './v284MembershipEvidenceCoverage.js';
 import { mergeV293WhppHistoricalRange } from './v293WhppHistoricalRangeTruth.js';
+import { ensureV246TrackingSchema } from './v246TrackingLedgerCore.js';
 
 export const V237_DASHBOARD_TREND_READ_ID='2026-08-23-v240-daily-rate-contract-v1';
 export const V419_WHPP_TREND_TRUTH_ID='2026-09-03-v419-whpp-ledger-history-trend-truth-v1';
@@ -36,6 +37,7 @@ function normalizeWhppTrendFact(row,date){
 }
 function readWhppTrendDaily(dates=[],db=getDb()){
   if(!dates.length)return[];
+  ensureV246TrackingSchema(db);
   const from=dates[0],to=dates.at(-1);
   const canonical=readV284ProvenDailyFacts(from,to,db).filter(row=>String(row?.businessType||'').toUpperCase()==='WHPP'&&dates.includes(String(row.reportDate||'')));
   const merged=mergeV293WhppHistoricalRange(canonical,from,to,db);
