@@ -8,9 +8,12 @@ import {
 } from './v284DailyMembershipTruth.js';
 
 export const V284_EVIDENCE_COVERAGE_ID='2026-08-24-v286-seven-business-proven-coverage-v1';
+export const V419_WHPP_PROVEN_RANGE_METRIC_PARITY_ID='2026-09-03-v419-whpp-proven-range-full-metrics-v1';
 const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
 const CCSL=['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE=['SHOPEECN','SHOPEEVN'];
+const BASE_COUNT_KEYS=['total','matched','pod','sameDayPod','ocCurrent','pendingNonContinuous','pending3','oc1','oc2','cycle2','shopRetention2','workOrder','inboundNoScan','provinceOpen','returned','attempt1','attempt2','attempt3','attemptUnknown','signingDaysSum','signingDaysCount'];
+const WHPP_EXTRA_KEYS=['pending1','pending2','oc3','cancelled','unresolved','delivery','ccslCnDiversion','ccslZtDiversion','ccsl580Retention','phnomPenhShop','provinceShop','shopTotal'];
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
 const pct=(v,t)=>t?Number((n(v)*100/n(t)).toFixed(2)):0;
 const key=(d,t,r='ALL')=>`${d}|${t}|${r}`;
@@ -84,10 +87,11 @@ function patchFact(row,proven){
   return out;
 }
 function aggregateFact(source,type){
-  const rows=(source||[]).filter(Boolean),out={businessType:type,reportDate:rows.at(-1)?.reportDate||'',total:0,matched:0,pod:0,sameDayPod:0,ocCurrent:0,pendingNonContinuous:0,pending3:0,oc1:0,oc2:0,cycle2:0,shopRetention2:0,workOrder:0,inboundNoScan:0,provinceOpen:0,returned:0,attempt1:0,attempt2:0,attempt3:0,attemptUnknown:0,signingDaysSum:0,signingDaysCount:0};
-  for(const row of rows)for(const k of ['total','matched','pod','sameDayPod','ocCurrent','pendingNonContinuous','pending3','oc1','oc2','cycle2','shopRetention2','workOrder','inboundNoScan','provinceOpen','returned','attempt1','attempt2','attempt3','attemptUnknown','signingDaysSum','signingDaysCount'])out[k]+=n(row[k]);
+  const rows=(source||[]).filter(Boolean),keys=type==='WHPP'?[...BASE_COUNT_KEYS,...WHPP_EXTRA_KEYS]:BASE_COUNT_KEYS;
+  const out={businessType:type,reportDate:rows.at(-1)?.reportDate||''};for(const key of keys)out[key]=0;
+  for(const row of rows)for(const k of keys)out[k]+=n(row[k]);
   out.coverageRate=pct(out.matched,out.total);out.podRate=pct(out.pod,out.total);out.sameDayPodRate=pct(out.sameDayPod,out.total);out.ocRate=pct(out.ocCurrent,out.total);out.ready=out.total===0||out.matched>=out.total;
-  const known=out.attempt1+out.attempt2+out.attempt3;out.attemptUnknown=Math.max(out.attemptUnknown,Math.max(0,out.pod-known));out.attemptCoverageRate=out.pod?pct(Math.min(out.pod,known),out.pod):null;const hasAttempt=out.pod>0&&known>0;out.attempt1Rate=hasAttempt?pct(out.attempt1,out.pod):null;out.attempt2Rate=hasAttempt?pct(out.attempt2,out.pod):null;out.attempt3Rate=hasAttempt?pct(out.attempt3,out.pod):null;out.avgPodDays=out.signingDaysCount?Number((out.signingDaysSum/out.signingDaysCount).toFixed(2)):null;return out;
+  const known=out.attempt1+out.attempt2+out.attempt3;out.attemptUnknown=Math.max(out.attemptUnknown,Math.max(0,out.pod-known));out.attemptCoverageRate=out.pod?pct(Math.min(out.pod,known),out.pod):null;const hasAttempt=out.pod>0&&known>0;out.attempt1Rate=hasAttempt?pct(out.attempt1,out.pod):null;out.attempt2Rate=hasAttempt?pct(out.attempt2,out.pod):null;out.attempt3Rate=hasAttempt?pct(out.attempt3,out.pod):null;out.avgPodDays=out.signingDaysCount?Number((out.signingDaysSum/out.signingDaysCount).toFixed(2)):null;if(type==='WHPP')out.whppRangeMetricParityId=V419_WHPP_PROVEN_RANGE_METRIC_PARITY_ID;return out;
 }
 
 export function readV284ProvenDailyFacts(fromDate,toDate,db=getDb()){
@@ -127,7 +131,7 @@ export function summarizeV284ProvenRange(fromDate,toDate,db=getDb()){
   const ccsl=aggregateFact(CCSL.map(t=>byType[t]),'CCSL'),shopee=aggregateFact(SHOPEE.map(t=>byType[t]),'SHOPEE'),whpp=byType.WHPP||aggregateFact([],'WHPP');
   const dates=[...new Set(daily.map(r=>r.reportDate))].sort();const missingDates=dates.filter(date=>daily.some(r=>r.reportDate===date&&r.total>0&&!r.ready));
   const sourceTotal=ccsl.total+shopee.total+whpp.total,analyzedTotal=ccsl.matched+shopee.matched+whpp.matched;
-  return {...base,dates,daily,byType,ccsl,shopee,whpp,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,sourceTotal,analyzedTotal,analysisPending:Math.max(0,sourceTotal-analyzedTotal),missingDates,analysisComplete:missingDates.length===0&&analyzedTotal>=sourceTotal};
+  return {...base,dates,daily,byType,ccsl,shopee,whpp,evidenceCoverageId:V284_EVIDENCE_COVERAGE_ID,whppRangeMetricParityId:V419_WHPP_PROVEN_RANGE_METRIC_PARITY_ID,sourceTotal,analyzedTotal,analysisPending:Math.max(0,sourceTotal-analyzedTotal),missingDates,analysisComplete:missingDates.length===0&&analyzedTotal>=sourceTotal};
 }
 
-console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,'all seven businesses use per-date+per-business latest VALID membership; WHPP keeps its full dedicated daily membership without CEAF subtraction and uses WHPP ledger/final evidence; ledger admission alone is not analysis proof.');
+console.info('[CE-QC][V284_EVIDENCE_COVERAGE]',V284_EVIDENCE_COVERAGE_ID,V419_WHPP_PROVEN_RANGE_METRIC_PARITY_ID,'all seven businesses use per-date+per-business latest VALID membership; WHPP keeps its full dedicated daily membership without CEAF subtraction, carries its complete range metric set through proven aggregation, and uses WHPP ledger/final evidence; ledger admission alone is not analysis proof.');
