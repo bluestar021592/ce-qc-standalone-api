@@ -63,11 +63,15 @@ test('OPEN/RETURNED ledger clears every stale POD-derived field, not only the vi
 
 test('V225 export pipeline applies V419 canonical ledger after all legacy evidence calculators',()=>{
   const source=fs.readFileSync(new URL('../src/v225ExportReturnTruth.js',import.meta.url),'utf8');
-  const v230=source.indexOf('applyV230AttemptSigningTruth(businessType,rows)');
-  const v381=source.indexOf('applyV381LedgerExportTruth(businessType,rows');
-  const v320=source.indexOf('applyV320DispatchSigningTruth(businessType,rows');
-  const v329=source.indexOf('applyV329FirstReportSigning(businessType,rows');
-  const v419=source.indexOf('applyV419CanonicalExportLedgerTruth(businessType,rows');
-  assert.ok(v230>=0&&v381>v230&&v320>v381&&v329>v320&&v419>v329,'V419 ledger truth must be the final export authority');
+  const pipelineStart=source.indexOf('export async function collectV200Rows');
+  assert.ok(pipelineStart>=0,'collectV200Rows pipeline must exist');
+  const pipeline=source.slice(pipelineStart);
+  const v230=pipeline.indexOf('applyV230AttemptSigningTruth(businessType,rows)');
+  const v381=pipeline.indexOf('applyV381LedgerExportTruth(businessType,rows');
+  const v320=pipeline.indexOf('applyV320DispatchSigningTruth(businessType,rows');
+  const v329=pipeline.indexOf('applyV329FirstReportSigning(businessType,rows');
+  const v419=pipeline.indexOf('applyV419CanonicalExportLedgerTruth(businessType,rows');
+  assert.ok(v230>=0&&v381>v230&&v320>v381&&v329>v320&&v419>v329,'V419 ledger truth must be the final export authority inside collectV200Rows');
+  assert.match(pipeline,/V419 is intentionally last/);
   assert.match(source,/V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID/);
 });
