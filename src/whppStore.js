@@ -6,6 +6,7 @@ import { isSpecialCategory } from './specialNode.js';
 
 export const WHPP = 'WHPP';
 export const V419_WHPP_REIMPORT_LIFECYCLE_ID = '2026-09-03-v419-whpp-reimport-invalidates-old-completion-v1';
+export const V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID = '2026-09-03-v419-whpp-final-snapshot-valid-completed-v1';
 
 export function loadWhppState() {
   const row = getDb().prepare('SELECT valueJson FROM business_states WHERE businessType=?').get(WHPP);
@@ -32,9 +33,37 @@ function isFinalizedWhppDaily(summary = {}) {
   );
 }
 
+function immutableMemberBills(state = {}) {
+  const pnh = [...new Set((state.pnhBills || []).map(value => String(value || '').trim().toUpperCase()).filter(Boolean))].sort();
+  if (pnh.length) return pnh;
+  return [...new Set((state.dailyParseRows || []).map(billOf).filter(Boolean))].sort();
+}
+
+function loadLegacyFinalizedWhppSnapshot(reportDate, summary = {}) {
+  const db = getDb();
+  const snapshotId = String(summary.finalizedSnapshotId || '').trim();
+  if (!snapshotId || !isFinalizedWhppDaily(summary)) return null;
+  const row = db.prepare(`SELECT reportDate,status,reconciliationStatus,payloadJson FROM business_export_snapshots
+    WHERE businessType='WHPP' AND snapshotId=? LIMIT 1`).get(snapshotId);
+  if (!row || String(row.reportDate || '') !== String(reportDate || '')) return null;
+  const status = String(row.status || '').toUpperCase();
+  const reconciliationStatus = String(row.reconciliationStatus || '').toUpperCase();
+  if (status === 'INVALID' || reconciliationStatus === 'FAILED') return null;
+  const payload = safeJson(row.payloadJson, null);
+  const state = payload?.state && typeof payload.state === 'object' ? payload.state : null;
+  if (!state || String(state.reportDate || '') !== String(reportDate || '')) return null;
+  const stored = db.prepare("SELECT DISTINCT UPPER(TRIM(shipmentCode)) shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>'' ORDER BY shipmentCode")
+    .all(reportDate).map(item => String(item.shipmentCode || '').trim().toUpperCase()).filter(Boolean);
+  const header = db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate);
+  const snapshotMembers = immutableMemberBills(state);
+  if (!header || Number(header.totalCount || 0) !== stored.length || snapshotMembers.length !== stored.length) return null;
+  if (!stored.every((bill, index) => bill === snapshotMembers[index])) return null;
+  return { ...payload, legacyFinalizedSnapshotAttested: true, finalSnapshotAuthority: V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID };
+}
+
 function restoreFinalizedWhppState(reportDate, summary, reason = 'EXPLICIT_REHYDRATE') {
   const finalizedSnapshotId = String(summary.finalizedSnapshotId || '').trim();
-  const payload = loadWhppSnapshot(finalizedSnapshotId);
+  const payload = loadWhppSnapshot(finalizedSnapshotId) || loadLegacyFinalizedWhppSnapshot(reportDate, summary);
   const persisted = payload?.state && typeof payload.state === 'object' ? payload.state : null;
   if (!persisted) {
     const error = new Error(`WHPP ${reportDate} 已完成，但完成快照 ${finalizedSnapshotId} 无法恢复；已阻止把完成态覆盖为待处理。`);
@@ -58,7 +87,8 @@ function restoreFinalizedWhppState(reportDate, summary, reason = 'EXPLICIT_REHYD
   });
   restored.finalizedLifecyclePreserved = true;
   restored.finalizedLifecyclePreserveReason = reason;
-  console.log(`[CE-QC][WHPP_FINALIZED_REHYDRATE_NOOP] reportDate=${reportDate} snapshot=${finalizedSnapshotId} reason=${reason}`);
+  restored.legacyFinalizedSnapshotAttested = Boolean(payload?.legacyFinalizedSnapshotAttested);
+  console.log(`[CE-QC][WHPP_FINALIZED_REHYDRATE_NOOP] reportDate=${reportDate} snapshot=${finalizedSnapshotId} reason=${reason} legacyAttested=${restored.legacyFinalizedSnapshotAttested ? 1 : 0}`);
   return restored;
 }
 
@@ -257,8 +287,15 @@ export function finalizeWhppState(state = {}) {
       updateCarry.run(billOf(row), WHPP, row.sourceReportDate || reportDate, reportDate, normalized.sourceSnapshotId || snapshotId, snapshotId, status, apiStatus, terminal, rawJson, now, now);
     }
 
-    const payload = { state: { ...normalized, snapshotId }, dashboard, status: 'VALID', reconciliationStatus: 'COMPLETED' };
-    db.prepare(`INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,payloadJson,generatedAt,createdAt) VALUES(?,?,?,?,?,?,?)`)
+    const payload = {
+      state: { ...normalized, snapshotId },
+      dashboard,
+      status: 'VALID',
+      reconciliationStatus: 'COMPLETED',
+      finalSnapshotAuthority: V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID
+    };
+    db.prepare(`INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,payloadJson,generatedAt,createdAt,status,reconciliationStatus,invalidReason)
+      VALUES(?,?,?,?,?,?,?,'VALID','COMPLETED','')`)
       .run(snapshotId, WHPP, reportDate, normalized.lastRunSummary?.runId || '', JSON.stringify(payload), now, now);
     db.prepare(`INSERT INTO business_history_summary(businessType,reportDate,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?)
       ON CONFLICT(businessType,reportDate) DO UPDATE SET summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
@@ -272,12 +309,15 @@ export function finalizeWhppState(state = {}) {
         total: Number(dashboard.metrics?.total || 0),
         completed: true,
         snapshotStatus: 'COMPLETED',
+        reconciliationStatus: 'COMPLETED',
         finalizedSnapshotId: snapshotId,
-        finalizedAt: now
+        finalizedAt: now,
+        finalSnapshotAuthority: V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID
       }), now, WHPP, reportDate);
 
     normalized.snapshotId = snapshotId;
     normalized.snapshotStatus = 'COMPLETED';
+    normalized.finalSnapshotAuthority = V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID;
     db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?) ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
       .run(WHPP, JSON.stringify(normalized), now);
     db.exec('COMMIT');
