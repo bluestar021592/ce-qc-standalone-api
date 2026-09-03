@@ -2,11 +2,13 @@ name: V329 Windows go-live gate
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ce-qc-windows-golive-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows-golive:
