@@ -7,14 +7,26 @@ import { fileURLToPath } from 'node:url';
 const storeUrl = new URL('../src/v87WhppExportStore.js', import.meta.url);
 const workerUrl = new URL('../src/v84ExportJobWorker.js', import.meta.url);
 const businessUrl = new URL('../src/v84ExportBusinessWorker.js', import.meta.url);
+const historicalUrl = new URL('../src/v320HistoricalExportRows.js', import.meta.url);
+const evidenceUrl = new URL('../src/v200EvidenceData.js', import.meta.url);
 const uiUrl = new URL('../public/v84-async-export-ui.js', import.meta.url);
 const store = fs.readFileSync(storeUrl, 'utf8');
 const worker = fs.readFileSync(workerUrl, 'utf8');
 const business = fs.readFileSync(businessUrl, 'utf8');
+const historical = fs.readFileSync(historicalUrl, 'utf8');
+const evidence = fs.readFileSync(evidenceUrl, 'utf8');
 const ui = fs.readFileSync(uiUrl, 'utf8');
 
+function quotedArrayAfter(source, marker) {
+  const start = source.indexOf(marker);
+  if (start < 0) return [];
+  const tail = source.slice(start, start + 400);
+  const body = tail.match(/\[([^\]]+)\]/)?.[1] || '';
+  return [...body.matchAll(/'([^']+)'/g)].map(match => match[1]);
+}
+
 test('V87 WHPP export reader and workers are syntax valid', () => {
-  for (const url of [storeUrl, workerUrl, businessUrl, uiUrl]) {
+  for (const url of [storeUrl, workerUrl, businessUrl, historicalUrl, evidenceUrl, uiUrl]) {
     const check = spawnSync(process.execPath, ['--check', fileURLToPath(url)], { encoding: 'utf8' });
     assert.equal(check.status, 0, check.stderr || check.stdout);
   }
@@ -53,32 +65,35 @@ test('WHPP export completion is daily-authority certified, membership is immutab
   assert.match(store, /UPPER\(TRIM\(shipmentCode\)\) IN/);
   assert.match(store, /normalizeWhppRow\(finals\.get\(bill\)\|\|\{\},member,snapshot\.reportDate\)/,'final rows may enrich only an admitted member');
   assert.match(store, /function membershipCount/);
-  assert.match(store, /latestEligibleCompletedSnapshots\(fromDate,toDate,db\)\.reduce\(\(sum,snapshot\)=>sum\+membershipCount\(snapshot,db\),0\)/,'large-range split count must read certified completion + membership only, not hydrate final rows');
+  assert.match(store, /latestEligibleCompletedSnapshots\(fromDate,toDate,db\)\.reduce\(\(sum,snapshot\)=>sum\+membershipCount\(snapshot,db\),0\)/,'large-range count planning must read certified completion + membership only, not hydrate final rows');
   assert.match(store, /whppExportMembershipSource/);
   assert.match(store, /listCompletedWhppSnapshots/);
   assert.match(store, /whppDailyCounts/);
   assert.doesNotMatch(store, /DELETE FROM|UPDATE |INSERT INTO|DROP TABLE/i,'V87 export reader stays read-only');
 });
 
-test('ALL background export includes WHPP as the seventh business and splits it under the same memory cap', () => {
-  assert.match(worker, /'SHOPEEVN', 'WHPP'/);
-  assert.match(worker, /if \(type === 'WHPP'\) return countCompletedWhppRows/);
-  assert.match(worker, /const parts = count > LARGE_BUSINESS_THRESHOLD \? splitRange\(range\) : \[range\]/);
-  assert.match(worker, /whppDailyCounts\(range\.from, range\.to\)/);
-  assert.match(worker, /正在准备 .*7业务后台导出/);
-  assert.match(worker, /7业务轻量管理汇总/);
+test('ALL background export includes WHPP as the seventh business and keeps one complete workbook per business', () => {
+  assert.deepEqual(quotedArrayAfter(worker, 'const ALL_TYPES=Object.freeze'), ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
+  assert.match(worker, /requested\.has\('WHPP'\).*countCompletedWhppRows\(range\.from,range\.to\)/s,'WHPP count planning must use the completion-certified reader');
+  assert.match(worker, /rows\.push\(\.\.\.whppDailyCounts\(range\.from,range\.to\)\)/,'management summary must include WHPP daily counts');
+  assert.match(worker, /outputContract:'ONE_WORKBOOK_PER_BUSINESS'/,'modern export must keep one complete workbook per business');
+  assert.match(worker, /不再输出日期分片/,'modern export must not reintroduce date-split workbooks');
+  assert.match(worker, /正在准备 .*7业务.*完整表格/,'ALL export must advertise seven-business output');
 });
 
-test('isolated business worker selects the WHPP membership-locked range reader only for WHPP', () => {
-  assert.match(business, /type === 'WHPP'/);
-  assert.match(business, /listCompletedWhppSnapshots\(from, to\)/);
-  assert.match(business, /listLightweightCompletedUnifiedSnapshots\(from, to, \[type\]\)/);
-  assert.match(business, /'WHPP'/);
+test('V200 isolated business worker accepts all seven businesses and WHPP still uses the membership-locked reader internally', () => {
+  assert.deepEqual(quotedArrayAfter(business, 'const allowed=new Set'), ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
+  assert.match(business, /createV200ReferenceDashboardWorkbook\(\{type,periodType,range,outputDir:/,'all businesses must use the one V200 workbook owner');
+  assert.match(business, /partCount>1\|\|partIndex!==1/,'business worker must reject date splitting');
+  assert.match(historical, /if\(businessType==='WHPP'\)return collectLegacyV200Rows\(businessType,range,onProgress\)/,'V320 must hand WHPP to its dedicated reader');
+  assert.match(evidence, /businessType === 'WHPP' \? seedWhpp\(range, onProgress\) : seedUnified/,'V200 data owner must keep WHPP separate from unified membership');
+  assert.match(evidence, /listCompletedWhppSnapshots\(range\.from, range\.to\)/,'WHPP workbook membership must originate from completion-certified snapshots');
 });
 
-test('report selector exposes CEAF and WHPP explicitly and defaults ALL to seven businesses', () => {
-  assert.match(ui, /\['ALL', '管理汇总 \+ 7业务'\]/);
-  assert.match(ui, /\['CEAF', '仅CEAF空运'\]/);
-  assert.match(ui, /\['WHPP', '仅WHPP本土'\]/);
+test('report selector exposes all seven businesses including CEAF and WHPP', () => {
+  for (const value of ['ALL','CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']) assert.match(ui, new RegExp(`\\['${value}',`));
+  assert.match(ui, /管理汇总 \+ 7业务/);
+  assert.match(ui, /仅CEAF空运完整表/);
+  assert.match(ui, /仅WHPP本土完整表/);
   assert.match(ui, /ensureBusinessOptions\(\)/);
 });
