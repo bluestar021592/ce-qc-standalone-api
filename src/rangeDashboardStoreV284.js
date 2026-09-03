@@ -1,11 +1,13 @@
 import { loadRangeDashboard as loadRangeDashboardV191 } from './rangeDashboardStoreV191.js';
-import { V284_DAILY_MEMBERSHIP_TRUTH_ID } from './v284DailyMembershipTruth.js';
+import { V284_DAILY_MEMBERSHIP_TRUTH_ID, readV284RegionFacts } from './v284DailyMembershipTruth.js';
 import { summarizeV284ProvenRange as summarizeV284Range, readV284ProvenShopeeTrends } from './v284MembershipEvidenceCoverage.js';
 import { mergeV293WhppHistoricalRange, V293_WHPP_HISTORICAL_RANGE_TRUTH_ID } from './v293WhppHistoricalRangeTruth.js';
 
+export const V419_WHPP_RANGE_VISIBLE_METRIC_ID='2026-09-03-v419-whpp-range-visible-full-metrics-v1';
 const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
 const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
 const COUNT_KEYS=['total','matched','pod','sameDayPod','ocCurrent','pendingNonContinuous','pending3','oc1','oc2','cycle2','shopRetention2','workOrder','inboundNoScan','provinceOpen','returned','attempt1','attempt2','attempt3','attemptUnknown','signingDaysSum','signingDaysCount'];
+const WHPP_EXTRA_KEYS=['pending1','pending2','oc3','cancelled','unresolved','delivery','ccslCnDiversion','ccslZtDiversion','ccsl580Retention','phnomPenhShop','provinceShop','shopTotal'];
 const n=v=>Number.isFinite(Number(v))?Number(v):0;
 const pct=(v,t)=>t?Number((n(v)*100/n(t)).toFixed(2)):0;
 
@@ -44,10 +46,24 @@ export function loadRangeDashboard(fromDate,toDate){
     .sort((a,b)=>String(a.reportDate||'').localeCompare(String(b.reportDate||''))||String(a.businessType||'').localeCompare(String(b.businessType||'')));
   const visibleDates=[...new Set([...truth.dates,...whppDaily.map(row=>row.reportDate)].filter(Boolean))].sort();
 
+  // V419: WHPP period cards use the same full daily metric set as the single-day
+  // board. Region facts remain exact only while every range member still has a
+  // classified PP/PV membership row. If historical membership has been rotated or
+  // region is UNKNOWN, publish a coverage=false marker instead of pretending PP/PV=0.
+  const whppRegionRows=readV284RegionFacts(resolvedFrom,resolvedTo).rows.filter(row=>String(row.businessType||'').toUpperCase()==='WHPP');
+  const whppRegions=aggregateFlatWhppRegions(whppRegionRows);
+  const whppClassifiedRegionTotal=n(whppRegions.PP?.total)+n(whppRegions.PV?.total);
+  const whppRegionCoverageComplete=whppClassifiedRegionTotal===n(visibleWhpp.total);
+
   // V291: WHPP and the homepage operational aggregate are first-class read-only
   // range states. This does not alter SQLite or redefine CCSL. HOME is explicitly
   // CE+CEAF+TBKH+ALI1688+WHPP, matching the visible homepage core-card definition.
   range.states.WHPP=buildTruthState('WHPP',visibleWhpp,whppDaily);
+  range.states.WHPP.regionCoverageComplete=whppRegionCoverageComplete;
+  range.states.WHPP.whppRangeVisibleMetricId=V419_WHPP_RANGE_VISIBLE_METRIC_ID;
+  range.states.WHPP.dashboard.regions=whppRegions;
+  range.states.WHPP.dashboard.regionCoverageComplete=whppRegionCoverageComplete;
+  range.states.WHPP.dashboard.whppRangeVisibleMetricId=V419_WHPP_RANGE_VISIBLE_METRIC_ID;
   const homeFact=mergeFacts('HOME',[truth.ccsl,visibleWhpp]);
   range.aggregates.HOME=buildTruthState('HOME',homeFact,visibleDaily.filter(row=>CCSL_TYPES.includes(row.businessType)||row.businessType==='WHPP'));
 
@@ -61,8 +77,10 @@ export function loadRangeDashboard(fromDate,toDate){
   range.analysisComplete=visibleMissingDates.length===0&&visibleAnalyzedTotal>=visibleSourceTotal;
   range.sourceDates=visibleDates;
   range.dates=visibleDates;
+  range.whppRegionCoverageComplete=whppRegionCoverageComplete;
+  range.whppRangeVisibleMetricId=V419_WHPP_RANGE_VISIBLE_METRIC_ID;
   range.v284Coverage=visibleDaily.map(row=>({reportDate:row.reportDate,businessType:row.businessType,total:row.total,matched:row.matched,coverageRate:row.coverageRate,ready:row.ready,historyFallback:Boolean(row.historyFallback)}));
-  return {...range,queryMode:`${range.queryMode||'SQL'}+DAILY_MEMBERSHIP_PROVEN_LEDGER_V284+V291_SEVEN_BUSINESS_VISIBLE_TRUTH+V293_WHPP_HISTORY_RANGE`,dailyTruthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,evidenceCoverageId:truth.evidenceCoverageId,whppHistoricalTruthId:V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP_WITH_PRESERVED_WHPP_HISTORY_FALLBACK',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK',visibleTruthId:'2026-08-25-v293-seven-business-visible-truth-v2'};
+  return {...range,queryMode:`${range.queryMode||'SQL'}+DAILY_MEMBERSHIP_PROVEN_LEDGER_V284+V291_SEVEN_BUSINESS_VISIBLE_TRUTH+V293_WHPP_HISTORY_RANGE+V419_WHPP_FULL_METRICS`,dailyTruthId:V284_DAILY_MEMBERSHIP_TRUTH_ID,evidenceCoverageId:truth.evidenceCoverageId,whppHistoricalTruthId:V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,sourceSelection:'LATEST_VALID_DAILY_MEMBERSHIP_WITH_PRESERVED_WHPP_HISTORY_FALLBACK',analysisSelection:'PROVEN_V246_LEDGER_OR_FINAL_FALLBACK',visibleTruthId:'2026-09-03-v419-seven-business-visible-truth-v3'};
 }
 
 function buildTruthState(type,fact,dailyRows=[]){
@@ -73,7 +91,8 @@ function buildTruthState(type,fact,dailyRows=[]){
 
 function mergeFacts(type,facts=[]){
   const out={businessType:type,reportDate:facts.map(f=>f?.reportDate).filter(Boolean).sort().at(-1)||''};
-  for(const key of COUNT_KEYS)out[key]=facts.reduce((sum,f)=>sum+n(f?.[key]),0);
+  const keys=type==='WHPP'?[...COUNT_KEYS,...WHPP_EXTRA_KEYS]:COUNT_KEYS;
+  for(const key of keys)out[key]=facts.reduce((sum,f)=>sum+n(f?.[key]),0);
   out.coverageRate=pct(out.matched,out.total);
   out.podRate=pct(out.pod,out.total);
   out.sameDayPodRate=pct(out.sameDayPod,out.total);
@@ -86,12 +105,18 @@ function mergeFacts(type,facts=[]){
   out.attempt3Rate=out.pod?pct(out.attempt3,out.pod):null;
   out.avgPodDays=out.signingDaysCount?Number((out.signingDaysSum/out.signingDaysCount).toFixed(2)):null;
   out.ready=out.total===0||out.matched>=out.total;
+  if(type==='WHPP')out.whppRangeVisibleMetricId=V419_WHPP_RANGE_VISIBLE_METRIC_ID;
   return out;
 }
 
 function aggregateRegions(daily=[]){
   const out={};
   for(const region of ['PP','PV','UNKNOWN'])out[region]=mergeFacts(region,daily.map(row=>row?.regions?.[region]).filter(Boolean));
+  return out;
+}
+function aggregateFlatWhppRegions(rows=[]){
+  const out={};
+  for(const region of ['PP','PV','UNKNOWN'])out[region]=mergeFacts('WHPP',rows.filter(row=>String(row.regionCode||'').toUpperCase()===region));
   return out;
 }
 
@@ -168,18 +193,25 @@ function patchRegions(target,regions={}){
 
 function patchMetrics(target,f){
   if(!target||!f)return;
-  const cancelled=n(target.cancelled);
+  const isWhpp=String(f.businessType||'').toUpperCase()==='WHPP';
+  const cancelled=isWhpp?n(f.cancelled):n(target.cancelled);
   Object.assign(target,{
     total:f.total,pod:f.pod,podRate:f.podRate,sameDayPod:f.sameDayPod,sameDayPodRate:f.sameDayPodRate,
     pendingNonContinuous:f.pendingNonContinuous,pending3:f.pending3,pending3plus:f.pending3,
     ocCurrent:f.ocCurrent,oc1:f.oc1,oc2:f.oc2,cycle2:f.cycle2,cycle2plus:f.cycle2,
     shopRetention2:f.shopRetention2,workOrder:f.workOrder,inboundNoScan:f.inboundNoScan,provinceOpen:f.provinceOpen,returned:f.returned,
-    returnRate:pct(f.returned,f.total),unresolved:Math.max(0,n(f.total)-n(f.pod)-n(f.returned)-cancelled),
+    returnRate:pct(f.returned,f.total),unresolved:isWhpp?n(f.unresolved):Math.max(0,n(f.total)-n(f.pod)-n(f.returned)-cancelled),
     dispatchAttempt1:f.attempt1,dispatchAttempt2:f.attempt2,dispatchAttempt3:f.attempt3,dispatchAttemptUnclassifiedPod:f.attemptUnknown,
     dispatchAttemptDenominator:f.pod,dispatchAttempt1Rate:f.attempt1Rate,dispatchAttempt2Rate:f.attempt2Rate,dispatchAttempt3Rate:f.attempt3Rate,
     firstAttemptCount:f.attempt1,firstAttemptEligible:f.total,firstAttemptRate:pct(f.attempt1,f.total),
     attemptEvidenceCoverage:f.attemptCoverageRate,
     analysisCoverageRate:f.coverageRate
+  });
+  if(isWhpp)Object.assign(target,{
+    pending1:n(f.pending1),pending2:n(f.pending2),oc3:n(f.oc3),cancelled:n(f.cancelled),unresolved:n(f.unresolved),delivery:n(f.delivery),deliveryStay:n(f.delivery),
+    ccslCnDiversion:n(f.ccslCnDiversion),ccslZtDiversion:n(f.ccslZtDiversion),ccsl580Retention:n(f.ccsl580Retention),ccsl580Diversion:n(f.ccsl580Retention),
+    phnomPenhShop:n(f.phnomPenhShop),provinceShop:n(f.provinceShop),shopTotal:n(f.shopTotal),activeStoreRetention:n(f.shopRetention2),
+    whppRangeVisibleMetricId:V419_WHPP_RANGE_VISIBLE_METRIC_ID
   });
 }
 
@@ -192,7 +224,10 @@ function patchDashboardRows(rows,f){
     ['入库无扫描节点',f.inboundNoScan],['入库无扫描',f.inboundNoScan],['盘点2天+',f.cycle2],['盘点 2天+',f.cycle2],
     ['今日POD',f.pod],['POD率',f.podRate],['首次妥投率',f.sameDayPodRate],['首日POD妥投率',f.sameDayPodRate],['外省未完结POD件',f.provinceOpen],['已退回件',f.returned],['退回件',f.returned]
   ]);
+  if(String(f?.businessType||'').toUpperCase()==='WHPP'){
+    values.set('Pending1+',f.pending1);values.set('Pending2+',f.pending2);values.set('OC3+',f.oc3);
+  }
   for(const row of rows){const label=String(row?.项目||row?.metricKey||row?.label||'').trim();if(!values.has(label))continue;const value=Number(values.get(label)||0);row.数值=value;row.数值原值=value;row.value=value;}
 }
 
-console.info('[CE-QC][V293_VISIBLE_TRUTH]',V284_DAILY_MEMBERSHIP_TRUTH_ID,V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,'range exposes full WHPP historical period + HOME(CE/CEAF/TBKH/ALI1688/WHPP) and writes proven Shopee truth into visible recipient/region metrics; read-only, no database mutation.');
+console.info('[CE-QC][V293_VISIBLE_TRUTH]',V284_DAILY_MEMBERSHIP_TRUTH_ID,V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,V419_WHPP_RANGE_VISIBLE_METRIC_ID,'range exposes full WHPP historical period + HOME(CE/CEAF/TBKH/ALI1688+WHPP); WHPP visible range cards keep the complete single-day metric set and publish PP/PV region coverage explicitly instead of fake zero; read-only, no database mutation.');
