@@ -10,6 +10,12 @@ import {
   V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID,
   V419_WHPP_HISTORY_FULL_METRIC_ID
 } from '../src/v293WhppHistoricalRangeTruth.js';
+import {
+  readV284RegionFacts,
+  readV284DailyFacts,
+  invalidateV284DailyMembershipTruth,
+  V419_WHPP_RANGE_METRIC_PARITY_ID
+} from '../src/v284DailyMembershipTruth.js';
 
 for(const file of [
   'src/v284DailyMembershipTruth.js',
@@ -63,7 +69,11 @@ const db=new DatabaseSync(':memory:');
 db.exec(`
   CREATE TABLE business_daily_reports(businessType TEXT,reportDate TEXT,totalCount INTEGER,summaryJson TEXT);
   CREATE TABLE business_history_summary(businessType TEXT,reportDate TEXT,summaryJson TEXT);
-  CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT);
+  CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,rowJson TEXT);
+  CREATE TABLE unified_import_batches(reportDate TEXT,snapshotId TEXT,createdAt TEXT,batchId TEXT,status TEXT);
+  CREATE TABLE unified_import_rows(snapshotId TEXT,reportDate TEXT,businessType TEXT,shipmentCode TEXT,regionCode TEXT);
+  CREATE TABLE final_rows(shipmentCode TEXT,reportDate TEXT,isPod INTEGER,rawJson TEXT,primaryCategory TEXT,category TEXT,lastEventTime TEXT,pendingDays INTEGER,ocDays INTEGER,cycleCountDays INTEGER,shopState TEXT,shopRetentionNaturalDays INTEGER);
+  CREATE TABLE business_final_rows(businessType TEXT,shipmentCode TEXT,reportDate TEXT,isPod INTEGER,rawJson TEXT,currentMainCategory TEXT,primaryCategory TEXT,podAttemptNo INTEGER,currentAttemptNo INTEGER,latestEventTime TEXT,shopState TEXT,shopRetentionNaturalDays INTEGER);
 `);
 const report=db.prepare('INSERT INTO business_daily_reports(businessType,reportDate,totalCount,summaryJson) VALUES(?,?,?,?)');
 const history=db.prepare('INSERT INTO business_history_summary(businessType,reportDate,summaryJson) VALUES(?,?,?)');
@@ -150,13 +160,49 @@ assert.equal(unverified[0].avgPodDays,null);
 
 const phantom=readV293WhppHistoricalRangeFacts('2026-08-25','2026-08-25',db);
 assert.equal(phantom.length,0,'history without a WHPP daily report must stay invisible');
-
 const changesAfter=db.prepare('SELECT total_changes() changes').get().changes;
 assert.equal(changesAfter,changesBefore,'V293 reads must not mutate SQLite');
+
+// Execute the real V284 WHPP SQL. This catches SQL errors that would otherwise be
+// hidden by queryWhppRegionFacts' defensive fallback and proves single-day parity.
+const v284Date='2026-08-26';
+const insertV284Member=db.prepare('INSERT INTO business_daily_parse_rows(businessType,reportDate,shipmentCode,rowJson) VALUES(?,?,?,?)');
+const insertV284Final=db.prepare('INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,rawJson,currentMainCategory,primaryCategory,podAttemptNo,currentAttemptNo,latestEventTime,shopState,shopRetentionNaturalDays) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)');
+const v284Rows=[
+  ['WH-RANGE-PENDING2','PP','Pending2次',0,{currentState:'PENDING',Pending当前次数:2,Pending不连续:'是'}],
+  ['WH-RANGE-OC3','PV','OC3天及以上',0,{currentState:'OC',OC天数:3}],
+  ['WH-RANGE-SHOP','PP','门店滞留',0,{currentState:'SHOP_RETENTION',shopState:'SHOP_ARRIVED_CURRENT',shopRetentionNaturalDays:2,Pending当前次数:3,OC天数:3}],
+  ['WH-RANGE-580','PV','CCSL580_RETENTION',0,{currentState:'CCSL580_RETENTION',specialState:'CCSL580_RETENTION',Pending当前次数:3,OC天数:3}],
+  ['WH-RANGE-CANCEL','PP','订单取消',0,{currentState:'ORDER_CANCELLED',订单取消:'是'}],
+  ['WH-RANGE-POD','PP','POD',1,{currentState:'POD',是否POD:'是',POD时间:v284Date}],
+  ['WH-RANGE-DELIVERY','PP','派送中',0,{currentState:'DELIVERY',派送中停留天数:1}],
+  ['WH-RANGE-CN','PV','CCSLCN_DIVERSION',0,{currentState:'CCSLCN_DIVERSION',specialState:'CCSLCN_DIVERSION'}],
+  ['WH-RANGE-ZT','PP','CCSLZT_DIVERSION',0,{currentState:'CCSLZT_DIVERSION',specialState:'CCSLZT_DIVERSION'}]
+];
+for(const [bill,region,category,isPod,raw] of v284Rows){
+  insertV284Member.run('WHPP',v284Date,bill,JSON.stringify({shipmentCode:bill,regionCode:region}));
+  insertV284Final.run('WHPP',bill,v284Date,isPod,JSON.stringify({shipmentCode:bill,regionCode:region,...raw}),'',category,0,0,isPod?v284Date:'',String(raw.shopState||''),Number(raw.shopRetentionNaturalDays||0));
+}
+invalidateV284DailyMembershipTruth();
+const regionFacts=readV284RegionFacts(v284Date,v284Date,db).rows.filter(row=>row.businessType==='WHPP');
+const regionTotals=Object.fromEntries(regionFacts.map(row=>[row.regionCode,row.total]));
+assert.deepEqual(regionTotals,{PP:6,PV:3},'WHPP V284 PP/PV region totals must come directly from the same nine daily members');
+const v284Fact=readV284DailyFacts(v284Date,v284Date,db).find(row=>row.businessType==='WHPP');
+assert.ok(v284Fact,'V284 WHPP SQL must return a daily fact instead of silently falling back to an empty array');
+assert.equal(v284Fact.rangeMetricParityId,V419_WHPP_RANGE_METRIC_PARITY_ID);
+assert.deepEqual({
+  total:v284Fact.total,matched:v284Fact.matched,pod:v284Fact.pod,pendingNonContinuous:v284Fact.pendingNonContinuous,
+  pending1:v284Fact.pending1,pending2:v284Fact.pending2,pending3:v284Fact.pending3,ocCurrent:v284Fact.ocCurrent,oc1:v284Fact.oc1,oc2:v284Fact.oc2,oc3:v284Fact.oc3,
+  cancelled:v284Fact.cancelled,unresolved:v284Fact.unresolved,delivery:v284Fact.delivery,shopRetention2:v284Fact.shopRetention2,
+  ccslCnDiversion:v284Fact.ccslCnDiversion,ccslZtDiversion:v284Fact.ccslZtDiversion,ccsl580Retention:v284Fact.ccsl580Retention,
+  phnomPenhShop:v284Fact.phnomPenhShop,provinceShop:v284Fact.provinceShop,shopTotal:v284Fact.shopTotal
+},{total:9,matched:9,pod:1,pendingNonContinuous:1,pending1:1,pending2:1,pending3:0,ocCurrent:1,oc1:1,oc2:1,oc3:1,cancelled:1,unresolved:3,delivery:1,shopRetention2:1,ccslCnDiversion:1,ccslZtDiversion:1,ccsl580Retention:1,phnomPenhShop:1,provinceShop:0,shopTotal:1},'WHPP V284 must match single-day actionable rules: shop/special rows excluded from ordinary anomalies while their own buckets stay visible');
+
 assert.equal(V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,'2026-08-25-v293-whpp-history-range-fallback-v1');
 assert.equal(V293_WHPP_HISTORY_MEMBERSHIP_INTEGRITY_ID,'2026-08-29-v293-whpp-history-membership-integrity-v2');
 assert.equal(V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID,'2026-09-03-v419-whpp-history-summary-metric-failclosed-v1');
 assert.equal(V419_WHPP_HISTORY_FULL_METRIC_ID,'2026-09-03-v419-whpp-history-full-range-metrics-v1');
+assert.equal(V419_WHPP_RANGE_METRIC_PARITY_ID,'2026-09-03-v419-whpp-range-daily-metric-parity-v1');
 
 db.close();
-console.log('[V419/V293] WHPP range smoke passed · full Pending1/2/3 + OC1/2/3 + terminal/shop/diversion metrics preserved · verified history restores full metrics · mismatched history publishes denominator only · incomplete PP/PV evidence renders dash · SQLite unchanged');
+console.log('[V419/V293] WHPP range smoke passed · real V284 SQL executed · full Pending1/2/3 + OC1/2/3 + terminal/shop/diversion metrics preserved · verified history restores full metrics · mismatched history publishes denominator only · incomplete PP/PV evidence renders dash · SQLite unchanged by history reads');
