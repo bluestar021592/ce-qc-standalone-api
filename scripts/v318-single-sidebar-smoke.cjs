@@ -136,7 +136,9 @@ assert.match(whppSummary,/CURRENT_FINALIZED_WHPP_STATE/,'an already finalized WH
 assert.match(whppSummary,/CURRENT_DAILY_FINALIZATION_MARKER/,'future WHPP runs must persist a lightweight exact daily completion marker');
 assert.match(whppSummary,/FULL_MEMBER_SUCCESS_EVIDENCE/,'V132 completion must use successful current-member processing evidence');
 assert.match(whppStore,/completed: true,[\s\S]*snapshotStatus: 'COMPLETED',[\s\S]*finalizedSnapshotId: snapshotId/,'WHPP finalization must write the lightweight completion marker into the exact daily cohort row');
-assert.match(whppStore,/existingDaily\.finalized && \(preserveFinalizedLifecycle === true \|\| existingDaily\.identicalMembership\)/,'identical finalized same-date WHPP membership must remain immutable');
+assert.match(whppStore,/const explicitEmptyRehydrate = preserveFinalizedLifecycle === true && unique\.length === 0/,'explicit finalized rehydrate must be limited to an empty incoming WHPP cohort');
+assert.match(whppStore,/existingDaily\.finalized && \(existingDaily\.identicalMembership \|\| explicitEmptyRehydrate\)/,'identical finalized same-date WHPP membership must remain immutable, while explicit preserve applies only to an empty rehydrate');
+assert.doesNotMatch(whppStore,/existingDaily\.finalized && \(preserveFinalizedLifecycle === true \|\| existingDaily\.identicalMembership\)/,'a non-empty changed membership must never preserve completion merely because preserveFinalizedLifecycle=true');
 assert.match(whppStore,/\.\.\.emptyWhppState\(\),[\s\S]*reportDate,[\s\S]*dailyReportReady: true/,'a changed/new WHPP membership must still start from a fresh runtime state instead of inheriting old completion');
 
 assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must remain delivered');
