@@ -6,7 +6,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v7-strict-evidence-signing-lock';
+export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v8-strict-alias-evidence-lock';
 
 const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -37,6 +37,10 @@ function optionalNumber(row = {}, keys = []) {
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+function strictAttemptSource(value = '') {
+  const source = text(value);
+  return /^V246_STRICT_TRACK/i.test(source) || /严格START|严格派送/i.test(source);
 }
 function preferredState(payload = {}, currentState = '') {
   const evidence = [
@@ -270,10 +274,10 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       trackingStatus=excluded.trackingStatus,terminalReason=excluded.terminalReason,terminalAt=excluded.terminalAt,
       currentState=excluded.currentState,currentCategory=excluded.currentCategory,lastEventTime=excluded.lastEventTime,
       podDate=CASE WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
-      attemptNo=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptNo ELSE excluded.attemptNo END,
-      attemptSource=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptSource ELSE excluded.attemptSource END,
-      signingDays=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
-      evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
+      attemptNo=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.attemptNo ELSE excluded.attemptNo END,
+      attemptSource=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.attemptSource ELSE excluded.attemptSource END,
+      signingDays=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
+      evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
       currentStateJson=excluded.currentStateJson,lastCheckedAt=excluded.lastCheckedAt,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
   const audit = db.prepare(`INSERT INTO qc_tracking_audit(shipmentCode,businessType,action,reason,beforeJson,afterJson,createdAt) VALUES(?,?,?,?,?,?,?)`);
@@ -320,7 +324,7 @@ export function syncCarryRowsToV246Ledger(rows = [], {
         ? (terminalReason === 'POD' ? 'POD' : terminalReason === 'RETURNED' ? '退回' : '订单取消')
         : text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || currentState);
       const podDate = terminalReason === 'POD' ? podDateOf(payload, classification, old || {}) : text(old?.podDate || '');
-      const strictAttempt = /^V246_STRICT_TRACK/i.test(text(old?.attemptSource));
+      const strictAttempt = strictAttemptSource(old?.attemptSource);
       const attemptNo = strictAttempt ? Number(old?.attemptNo || 0) : observedAttempt(payload);
       const attemptSource = strictAttempt ? text(old?.attemptSource) : (attemptNo ? text(payload.attemptSource || payload.attemptStatus || 'CARRY_RESULT') : '');
       const signingDays = strictAttempt ? (old?.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : (old?.signingDays ?? null));
