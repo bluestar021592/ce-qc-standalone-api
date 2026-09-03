@@ -70,8 +70,8 @@ try{
   assert.throws(()=>whppDailyCounts('2026-08-03','2026-08-03'),error=>error?.code==='WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE'&&error.expected===2&&error.actual===1,'partial standard WHPP membership must block export instead of being hidden by snapshot fallback');
 
   // WHPP pipeline finalRows contains today + carry. When persisted daily rows are
-  // fully rotated, export recovery must use immutable pnhBills (or dailyParseRows),
-  // never the carry-contaminated finalRows array saved in the completed snapshot.
+  // fully rotated, both detail and export recovery must use immutable pnhBills
+  // (or dailyParseRows), never carry-contaminated finalRows.
   const rotatedDaily='WH-V419-ROTATED-DAILY',rotatedCarry='WH-V419-ROTATED-CARRY';
   const rotatedState={businessType:'WHPP',reportDate:'2026-08-04',pnhBills:[rotatedDaily],dailyParseRows:[],carryBills:[rotatedCarry],nextCarryBills:[rotatedCarry],finalRows:[
     {shipmentCode:rotatedDaily,运单号:rotatedDaily,regionCode:'PP',currentState:'POD',是否POD:'是'},
@@ -83,11 +83,16 @@ try{
   const rotated=listCompletedWhppSnapshots('2026-08-04','2026-08-04');
   assert.equal(rotated.length,1);
   assert.equal(countCompletedWhppRows('2026-08-04','2026-08-04'),1);
-  assert.deepEqual(rotated[0].payload.finalRows.map(row=>row.shipmentCode),[rotatedDaily],'carry saved inside snapshot finalRows must never become recovered daily membership');
+  assert.deepEqual(rotated[0].payload.finalRows.map(row=>row.shipmentCode),[rotatedDaily],'carry saved inside snapshot finalRows must never become recovered export membership');
   assert.equal(rotated[0].payload.finalRows[0].whppExportMembershipSource,'WHPP_VALID_COMPLETED_SNAPSHOT_PNH');
-  assert.ok(!rotated[0].payload.finalRows.some(row=>row.shipmentCode===rotatedCarry),'carry member must stay excluded even when residual final row exists for the same report date');
+  assert.ok(!rotated[0].payload.finalRows.some(row=>row.shipmentCode===rotatedCarry),'carry member must stay excluded from export even when residual final row exists for the same report date');
+  const rotatedDetail=inspectV172WhppDetail({reportDate:'2026-08-04',tab:'all',page:'1',pageSize:'500'});
+  assert.equal(rotatedDetail.total,1,'WHPP historical detail must use the same immutable daily membership as export');
+  assert.deepEqual(rotatedDetail.rows.map(row=>row.shipmentCode),[rotatedDaily]);
+  assert.ok(!rotatedDetail.rows.some(row=>row.shipmentCode===rotatedCarry),'carry saved inside snapshot finalRows must never become WHPP detail membership');
+  assert.equal(rotatedDetail.truthSource,'IMMUTABLE_DAILY_MEMBERSHIP_PLUS_LATEST_SHIPMENT_CURRENT_STATE');
 
-  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT] PASS invalid/failed snapshots and INVALID unified batches cannot create history; partial membership fails closed; rotated history recovers immutable pnhBills only and excludes carry-contaminated finalRows; latest current POD still overlays valid daily membership');
+  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT] PASS invalid/failed snapshots and INVALID unified batches cannot create history; partial membership fails closed; rotated history recovers immutable pnhBills only and excludes carry-contaminated finalRows in both detail and export; latest current POD still overlays valid daily membership');
 }finally{
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
