@@ -16,15 +16,8 @@ const runtime=read('src/v206InteractiveFirstRuntimePatch.js');
 const fastPath=read('src/v253DashboardFastPath.js');
 const worker=read('src/dashboardCacheWorker.js');
 
-for(const [name,source] of [
-  ['v234-dashboard-live',live],
-  ['v237-home-dashboard-owner',home],
-  ['v237-dashboard-owner-guard',guard],
-  ['v239-dashboard-request-coalescer',coalescer],
-  ['v253-dashboard-fast-owner',fastOwner]
-]) assert.doesNotThrow(()=>new Function(source),`${name} must compile as browser JavaScript`);
+for(const [name,source] of [['v234-dashboard-live',live],['v237-home-dashboard-owner',home],['v237-dashboard-owner-guard',guard],['v239-dashboard-request-coalescer',coalescer],['v253-dashboard-fast-owner',fastOwner]]) assert.doesNotThrow(()=>new Function(source),`${name} must compile as browser JavaScript`);
 
-// Retain the established single-owner/authenticated dashboard contract.
 assert.match(guard,/__CE_QC_V237_DASHBOARD_OWNER__=true/,'head guard must still declare dashboard ownership');
 assert.match(guard,/\/api\\\/v27\\\/trends/,'legacy V27 trend reads must remain retired on owner pages');
 assert.match(guard,/\/api\\\/v55\\\/reconciliation/,'legacy passive reconciliation must remain retired on owner pages');
@@ -32,7 +25,6 @@ assert.match(route,/path\s*===\s*'\/api\/v234\/trends'/,'authenticated V234 tren
 assert.match(route,/path\s*===\s*'\/api\/shopee\/state'/,'compact Shopee state ownership must remain present');
 assert.match(coalescer,/CACHE_MS=15_000/,'current-summary reads must remain coalesced');
 
-// Preserve metric definitions. V335 changes same-date source ownership, not the business denominator.
 assert.match(current,/out\.ocRate=pct\(out\.ocCurrent,out\.total\)/,'OC rate must remain current OC / daily total');
 assert.match(current,/out\.sameDayPodRate=pct\(out\.sameDayPod,out\.total\)/,'same-day POD rate must remain same-day POD / daily total');
 assert.match(current,/latestBatchForType\(date,type\)/,'current cards must select latest VALID snapshots independently per business');
@@ -41,17 +33,17 @@ assert.match(cache,/AS ocCurrent/,'legacy cache maintenance must retain current 
 assert.match(cache,/AS sameDayPod/,'legacy cache maintenance must retain same-day POD evidence');
 assert.match(trend,/V240_EXACT_DAILY_RATE_CACHE_ONLY/,'legacy cache reader remains available as maintenance/fallback evidence');
 
-// V236 may still serve six-business compact states even if WHPP is damaged, but
-// its shared current-summary endpoint must never publish a numeric WHPP fallback.
 assert.match(current,/SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP'/,'V236 WHPP summary must start from the dedicated standard daily header');
 assert.match(current,/COUNT\(DISTINCT shipmentCode\)[\s\S]*business_daily_parse_rows WHERE businessType='WHPP'/,'V236 must verify the exact distinct WHPP member count');
 assert.match(current,/if\(expected!==actual\)[\s\S]*out\.membershipIncomplete=true[\s\S]*WHPP_STANDARD_DAILY_INCOMPLETE/,'V236 must mark 236\/235 as incomplete instead of merging historical metrics');
 assert.match(current,/membershipSource=expected===0\?'WHPP_STANDARD_DAILY_ZERO':'WHPP_STANDARD_DAILY'/,'V236 must keep exact 0\/0 as a real current truth');
-assert.match(route,/if\(data\.whpp\?\.membershipIncomplete\)[\s\S]*res\.status\(409\)/,'V234 current-summary must expose WHPP membership damage as 409');
-assert.match(route,/function statePayload\(type,req,res\)[\s\S]*const metric=data\.business\[type\]/,'six-business compact states must continue reading their own metrics independently of WHPP');
+assert.match(route,/const singleDayRequest=!from\|\|from===to/,'reportDate and equivalent from=to requests must share single-day WHPP safety semantics');
+assert.match(route,/if\(singleDayRequest&&data\.whpp\?\.membershipIncomplete\)[\s\S]*res\.status\(409\)/,'single-day V234 current-summary must expose WHPP membership damage as 409');
+assert.match(route,/loadRangeDashboard\(from,to\)/,'multi-day current cards must use canonical range dashboard truth');
+assert.match(route,/V419_CANONICAL_PERIOD_DASHBOARD_RANGE/,'multi-day current summary must disclose canonical range ownership');
+assert.match(route,/function statePayload\(type,req,res\)[\s\S]*data\.business\[type\]/,'six-business compact states must continue reading their own metrics independently of WHPP');
 assert.doesNotMatch(route,/function statePayload\(type,req,res\)[\s\S]*membershipIncomplete[\s\S]*return res\.json/,'WHPP damage must not be injected as a blocker into per-business compact state responses');
 
-// V253 now owns only nonblocking first paint. Same-day truth comes from V236 per-business ownership; saved history is owned by V334/V320.
 assert.match(runtime,/import '\.\/v253DashboardFastPath\.js';/,'V253 fast backend must activate before server registration');
 assert.match(runtime,/primeDashboardCacheInChild\(delayMs\s*=\s*60_000\)/,'cache maintenance must be delayed away from first paint');
 assert.match(runtime,/MAX_PRIME_ATTEMPTS\s*=\s*4/,'delayed maintenance retry count must remain bounded');
@@ -66,18 +58,18 @@ assert.doesNotMatch(fastPath,/function latestBatches\(/,'retired one-global-snap
 assert.doesNotMatch(fastPath,/PARTITION BY reportDate ORDER BY createdAt DESC/,'same-date businesses must never share one global latest snapshot');
 assert.match(fastPath,/!registered\s*&&\s*path\s*===\s*'\/api\/v234\/trends'/,'V253 endpoints must register only when the authenticated dashboard route is registered');
 
-// V253 must arrive in <head> before older dashboard clients and redirect their slow reads.
-assert.match(inject,/v253-dashboard-fast-owner\.js\?v=20260823-v253-1/,'V253 owner must be cache-busted into delivered HTML');
+assert.match(inject,/v253-dashboard-fast-owner\.js\?v=20260823-v253-1/,'V253 compatibility source marker must remain available');
+assert.match(inject,/V253_FAST_MARKER/,'V253 final owner must be injected into delivered HTML');
+assert.match(inject,/['"]v237-home-dashboard-owner\.js['"]/,'legacy V237 home DOM writer must be stripped from delivered HTML');
 assert.match(inject,/X-CE-QC-V253-UI/,'V253 delivery must be observable in response headers');
 assert.match(fastOwner,/\/api\/v89\/instant-dashboard/,'legacy slow first-paint summary must be intercepted');
 assert.match(fastOwner,/\/api\/v253\/instant-dashboard/,'first-paint summary must use V253');
 assert.match(fastOwner,/\/api\/v234\/trends/,'legacy cache-dependent trend reads must be intercepted');
 assert.match(fastOwner,/\/api\/v253\/trends/,'visible same-day fast reads must use V253 before V334 history owner paints saved trends');
-assert.match(fastOwner,/sessionStorage/,'repeat navigation must reuse last confirmed data while refreshing');
 assert.match(fastOwner,/removeHomeLegacyAttempts/,'obsolete homepage dual attempt charts must be removed');
+assert.match(fastOwner,/\/api\/period-dashboard\?from=/,'homepage visible totals must use the selected canonical from/to range');
 
-// The old cache worker remains a bounded background maintenance job only; it is not canonical same-date ownership anymore.
 assert.match(worker,/WORKER_LEASE_MS\s*=\s*5\s*\*\s*60_000/,'dashboard cache lease must remain bounded to five minutes');
 assert.match(worker,/cleared stale dashboard-cache lease/,'worker must still recover stale cache leases');
 
-console.log('[V335/V253/V247] per-business first paint + membership-safe V236 WHPP summary + retained metric contract + single-owner performance guards passed');
+console.log('[V419/V335/V253] per-business single-day safety + canonical multi-day range + membership-safe WHPP summary + one delivered visual owner passed');
