@@ -1,0 +1,85 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v419-whpp-final-authority-'));
+Object.assign(process.env,{DATA_DIR:root,DB_FILE:path.join(root,'whpp-final-authority.db'),ACCESS_MODE:'LOCAL',NODE_ENV:'test',CI:'1',SQLITE_MMAP_BYTES:'0',SQLITE_CACHE_KIB:'8192'});
+
+const {getDb,closeDb}=await import('../src/db.js');
+const {saveWhppDailyImport,finalizeWhppState}=await import('../src/whppStore.js');
+const {listCompletedWhppSnapshots,countCompletedWhppRows}=await import('../src/v87WhppExportStore.js');
+const db=getDb();
+const now='2026-08-07T09:00:00.000Z';
+
+function insertMinimal(table,values){
+  const info=db.prepare(`PRAGMA table_info(${table})`).all(),known=new Map(info.map(c=>[c.name,c])),data={};
+  for(const [key,value] of Object.entries(values))if(known.has(key))data[key]=value;
+  for(const col of info){
+    if(Object.hasOwn(data,col.name)||col.dflt_value!==null)continue;
+    if(col.pk&&String(col.type||'').toUpperCase().includes('INT'))continue;
+    if(!col.notnull&&!col.pk)continue;
+    const t=String(col.type||'').toUpperCase();
+    data[col.name]=/INT|REAL|NUM|DEC|BOOL/.test(t)?0:(/AT$|TIME|DATE/i.test(col.name)?now:'');
+  }
+  const cols=Object.keys(data),marks=cols.map(()=>'?').join(',');
+  db.prepare(`INSERT INTO ${table}(${cols.map(c=>`"${c}"`).join(',')}) VALUES(${marks})`).run(...cols.map(c=>data[c]));
+}
+
+try{
+  // New V419 completion must certify the snapshot at the write owner itself.
+  const date='2026-08-07',bill='WH-V419-FINAL-AUTH',dailyRow={shipmentCode:bill,运单号:bill,regionCode:'PP',rowNumber:2};
+  const imported=saveWhppDailyImport({reportDate:date,sourceName:'8-7.xls',rows:[dailyRow],batchId:'B-FINAL-0807',snapshotId:'S-FINAL-0807'});
+  const finalized=finalizeWhppState({
+    ...imported,
+    scanResults:[{shipmentCode:bill,运单号:bill,orderStatus:'85',是否POD:'是',POD状态:'POD',regionCode:'PP'}],
+    trackEvents:[],exceptionItems:[],
+    finalRows:[{...dailyRow,currentState:'POD',primaryCategory:'POD',主分类:'POD',异常分类:'POD',是否POD:'是',POD状态:'POD',退回状态:'未退回',API状态:'成功',carry状态:'closed_pod'}],
+    lastRunSummary:{runId:'RUN-FINAL-0807'},lastRun:{runId:'RUN-FINAL-0807'},
+    processing:{running:false,paused:false,phase:'完成',runId:'RUN-FINAL-0807'}
+  });
+  const persisted=db.prepare('SELECT status,reconciliationStatus,invalidReason,payloadJson FROM business_export_snapshots WHERE snapshotId=?').get(finalized.snapshotId);
+  assert.equal(persisted.status,'VALID','new WHPP final snapshot must be VALID at insert time');
+  assert.equal(persisted.reconciliationStatus,'COMPLETED','new WHPP final snapshot must be COMPLETED at insert time');
+  assert.equal(String(persisted.invalidReason||''),'');
+  const payload=JSON.parse(persisted.payloadJson||'{}');
+  assert.equal(payload.status,'VALID');assert.equal(payload.reconciliationStatus,'COMPLETED');
+  assert.equal(payload.finalSnapshotAuthority,'2026-09-03-v419-whpp-final-snapshot-valid-completed-v1');
+  const dailySummary=JSON.parse(db.prepare("SELECT summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=?").get(date).summaryJson||'{}');
+  assert.equal(dailySummary.completed,true);assert.equal(dailySummary.finalizedSnapshotId,finalized.snapshotId);assert.equal(dailySummary.reconciliationStatus,'COMPLETED');
+  assert.equal(dailySummary.finalSnapshotAuthority,'2026-09-03-v419-whpp-final-snapshot-valid-completed-v1');
+  const currentExport=listCompletedWhppSnapshots(date,date);
+  assert.equal(currentExport.length,1);assert.equal(currentExport[0].snapshotId,finalized.snapshotId);assert.equal(countCompletedWhppRows(date,date),1);
+
+  // Compatibility with snapshots created by the installed 4f53-era WHPP owner:
+  // the row can still carry schema defaults LEGACY_UNVERIFIED / UNVERIFIED. It is
+  // accepted only because the surviving completed daily summary points exactly
+  // to this snapshot and the immutable snapshot membership equals the stored day.
+  const legacyDate='2026-08-08',legacyBill='WH-V419-LEGACY-AUTH',legacySnapshot='WH-LEGACY-0808';
+  const legacyRow={shipmentCode:legacyBill,运单号:legacyBill,regionCode:'PV',rowNumber:2};
+  const legacyState={businessType:'WHPP',reportDate:legacyDate,pnhBills:[legacyBill],dailyParseRows:[legacyRow],finalRows:[{...legacyRow,currentState:'POD',是否POD:'是'}],processing:{running:false,paused:false,phase:'完成'}};
+  insertMinimal('business_export_snapshots',{snapshotId:legacySnapshot,businessType:'WHPP',reportDate:legacyDate,runId:'RUN-LEGACY-0808',payloadJson:JSON.stringify({state:legacyState,dashboard:{},status:'VALID',reconciliationStatus:'COMPLETED'}),generatedAt:'2026-08-08T10:00:00.000Z',createdAt:'2026-08-08T10:00:00.000Z'});
+  insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:legacyDate,sourceFile:'8-8.xls',totalCount:1,summaryJson:JSON.stringify({total:1,completed:true,snapshotStatus:'COMPLETED',finalizedSnapshotId:legacySnapshot,finalizedAt:'2026-08-08T10:00:00.000Z'}),createdAt:'2026-08-08T09:00:00.000Z',updatedAt:'2026-08-08T10:00:00.000Z'});
+  insertMinimal('business_daily_parse_rows',{businessType:'WHPP',reportDate:legacyDate,shipmentCode:legacyBill,sheetName:'日报',rowNumber:2,source_row_number:2,recipient_raw:'WHPP',recipient_normalized:'WHPP',recipient_group:'WHPP',recipient_group_reason:'TEST',rawText:'',rowJson:JSON.stringify(legacyRow),createdAt:'2026-08-08T09:00:00.000Z'});
+  const legacyDbRow=db.prepare('SELECT status,reconciliationStatus FROM business_export_snapshots WHERE snapshotId=?').get(legacySnapshot);
+  assert.equal(legacyDbRow.status,'LEGACY_UNVERIFIED');assert.equal(legacyDbRow.reconciliationStatus,'UNVERIFIED');
+  const legacyExport=listCompletedWhppSnapshots(legacyDate,legacyDate);
+  assert.equal(legacyExport.length,1,'completed daily authority must preserve old finalized WHPP history without globally trusting legacy snapshots');
+  assert.equal(legacyExport[0].snapshotId,legacySnapshot);assert.equal(legacyExport[0].legacyFinalized,true);assert.equal(countCompletedWhppRows(legacyDate,legacyDate),1);
+  const replay=saveWhppDailyImport({reportDate:legacyDate,sourceName:'8-8-replay.xls',rows:[legacyRow],batchId:'B-LEGACY-REPLAY',snapshotId:'S-LEGACY-REPLAY'});
+  assert.equal(replay.finalizedLifecyclePreserved,true);assert.equal(replay.finalizedLifecyclePreserveReason,'IDENTICAL_MEMBERSHIP_REUPLOAD');assert.equal(replay.legacyFinalizedSnapshotAttested,true);
+
+  // A legacy snapshot is not self-authorizing. A daily header that is pending or
+  // points elsewhere must keep it out of completed export history.
+  const orphanDate='2026-08-09',orphanBill='WH-V419-LEGACY-ORPHAN',orphanSnapshot='WH-LEGACY-ORPHAN-0809';
+  insertMinimal('business_export_snapshots',{snapshotId:orphanSnapshot,businessType:'WHPP',reportDate:orphanDate,runId:'RUN-ORPHAN',payloadJson:JSON.stringify({state:{businessType:'WHPP',reportDate:orphanDate,pnhBills:[orphanBill],dailyParseRows:[{shipmentCode:orphanBill,运单号:orphanBill}]}}),generatedAt:'2026-08-09T10:00:00.000Z',createdAt:'2026-08-09T10:00:00.000Z'});
+  insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:orphanDate,sourceFile:'8-9.xls',totalCount:1,summaryJson:JSON.stringify({total:1,completed:false,snapshotStatus:'PENDING'}),createdAt:'2026-08-09T09:00:00.000Z',updatedAt:'2026-08-09T10:00:00.000Z'});
+  insertMinimal('business_daily_parse_rows',{businessType:'WHPP',reportDate:orphanDate,shipmentCode:orphanBill,sheetName:'日报',rowNumber:2,source_row_number:2,recipient_raw:'WHPP',recipient_normalized:'WHPP',recipient_group:'WHPP',recipient_group_reason:'TEST',rawText:'',rowJson:JSON.stringify({shipmentCode:orphanBill,运单号:orphanBill}),createdAt:'2026-08-09T09:00:00.000Z'});
+  assert.deepEqual(listCompletedWhppSnapshots(orphanDate,orphanDate),[],'unreferenced legacy snapshot must not self-authorize completed history');
+  assert.equal(countCompletedWhppRows(orphanDate,orphanDate),0);
+
+  console.log('[V419 WHPP FINAL SNAPSHOT AUTHORITY] PASS new finalize writes VALID+COMPLETED at source · 4f53 legacy finalized snapshot preserved only by exact completed daily authority + immutable membership · orphan legacy snapshot rejected');
+}finally{
+  try{closeDb();}catch{}
+  fs.rmSync(root,{recursive:true,force:true});
+}
