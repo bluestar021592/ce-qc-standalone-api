@@ -6,7 +6,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v2-atomic';
+export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v3-return-progress-reopen';
 
 const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const EXACT_TERMINAL_REASONS = new Set(['POD','RETURNED','ORDER_CANCELLED']);
@@ -123,8 +123,12 @@ export function syncCarryRowsToV246Ledger(rows = [], {
 
       const classifyState = preferredState(payload, current?.state);
       const classification = classifyV246Terminal({ closeReason:carry?.closeReason || '', state:classifyState, stateJson:payload });
-      const oldExactTerminal = old?.trackingStatus === 'TERMINAL' && EXACT_TERMINAL_REASONS.has(text(old?.terminalReason).toUpperCase());
-      const terminalReason = classification.terminal ? classification.reason : (oldExactTerminal ? text(old.terminalReason).toUpperCase() : '');
+      const oldReason = text(old?.terminalReason).toUpperCase();
+      const explicitlyReturnInProgress = classifyState === 'RETURN_IN_PROGRESS';
+      const oldExactTerminal = old?.trackingStatus === 'TERMINAL'
+        && EXACT_TERMINAL_REASONS.has(oldReason)
+        && !(oldReason === 'RETURNED' && explicitlyReturnInProgress);
+      const terminalReason = classification.terminal ? classification.reason : (oldExactTerminal ? oldReason : '');
       const isTerminal = Boolean(terminalReason);
       const trackingStatus = isTerminal ? 'TERMINAL' : 'OPEN';
       const firstReportDate = minDate(old?.firstReportDate, carry?.sourceReportDate, payload.sourceReportDate, current?.reportDate) || v246DateKey(current?.reportDate) || v246DateKey(carry?.lastReportDate);
