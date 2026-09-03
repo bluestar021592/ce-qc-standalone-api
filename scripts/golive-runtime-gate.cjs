@@ -52,8 +52,8 @@ forbid(whppSupervisor, 'new-import-event');
 
 // V419 WHPP page is display-only but follows the same global from/to owner as
 // HOME and every other business board. It cannot create a separate run entry.
-must(whppUi, '2026-09-03-v419-whpp-one-global-range-board-v1');
-must(whppUi, '2026-09-03-v419-whpp-range-summary-trend-detail-v1');
+must(whppUi, '2026-09-03-v419-whpp-one-global-range-board-v2');
+must(whppUi, '2026-09-03-v419-whpp-range-summary-trend-detail-v2');
 must(whppUi, '__CE_QC_GLOBAL_PERIOD_RANGE__');
 must(whppUi, '/api/v234/current-summary?from=');
 must(whppUi, '/api/v234/trends?businessType=WHPP&from=');
