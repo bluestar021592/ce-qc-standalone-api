@@ -20,17 +20,22 @@ test('V87 WHPP export reader and workers are syntax valid', () => {
   }
 });
 
-test('WHPP export membership is daily-truth locked and invalid snapshots/final-row residue cannot create members', () => {
-  assert.match(store, /V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v1'/);
+test('WHPP export membership is daily-truth locked, partial membership fails closed, and count planning stays lightweight', () => {
+  assert.match(store, /V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v2'/);
   assert.match(store, /COALESCE\(status,'VALID'\)='VALID'/);
   assert.match(store, /COALESCE\(reconciliationStatus,'COMPLETED'\)='COMPLETED'/);
+  assert.match(store, /function standardMembershipMeta/);
+  assert.match(store, /WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE/);
+  assert.match(store, /expected>0&&actual===0/,'fully rotated history may use immutable snapshot fallback');
   assert.match(store, /function standardMembershipRows/);
   assert.match(store, /business_daily_parse_rows/);
   assert.match(store, /function snapshotMembershipRows/);
   assert.match(store, /payload\.state/);
-  assert.match(store, /if\(standard\.length\)return standard/,'standard persisted WHPP daily membership must outrank snapshot fallback');
+  assert.match(store, /if\(meta\.complete\)return meta\.expected===0\?\[\]:standardMembershipRows/,'complete standard membership must outrank snapshot fallback');
   assert.match(store, /function finalRowsByBill/);
   assert.match(store, /normalizeWhppRow\(finals\.get\(bill\)\|\|\{\},member,snapshot\.reportDate\)/,'final rows may enrich only an admitted member');
+  assert.match(store, /function membershipCount/);
+  assert.match(store, /latestValidCompletedSnapshots\(fromDate,toDate,db\)\.reduce\(\(sum,snapshot\)=>sum\+membershipCount\(snapshot,db\),0\)/,'large-range split count must read membership only, not hydrate final rows');
   assert.match(store, /whppExportMembershipSource/);
   assert.match(store, /listCompletedWhppSnapshots/);
   assert.match(store, /whppDailyCounts/);
