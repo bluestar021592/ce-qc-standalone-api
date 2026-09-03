@@ -84,7 +84,7 @@ assert.equal(replayState.snapshotStatus,'COMPLETED');
 assert.equal(replayState.processing.running,false);
 assert.equal(replayState.processing.phase,'完成');
 assert.equal(replayState.finalizedLifecyclePreserved,true);
-assert.equal(replayState.finalizedLifecyclePreserveReason,'EXPLICIT_REHYDRATE');
+assert.equal(replayState.finalizedLifecyclePreserveReason,'IDENTICAL_MEMBERSHIP_REUPLOAD');
 assert.equal(inspectV378WhppCompletionLock(date,replayState,db).locked,true);
 const replaySummary=JSON.parse(db.prepare("SELECT summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=?").get(date).summaryJson);
 assert.equal(replaySummary.completed,true);
@@ -92,10 +92,28 @@ assert.equal(replaySummary.snapshotStatus,'COMPLETED');
 assert.equal(replaySummary.finalizedSnapshotId,'WHPP-FINAL-0824-A');
 assert.equal(replaySummary.snapshotId,'SOURCE-0824-A');
 const replayCurrent=db.prepare("SELECT state,apiStatus,stateJson FROM shipment_current_state WHERE shipmentCode='CE0001'").get();
-assert.equal(replayCurrent.state,'IN_TRANSIT','rehydrate-only replay must not regress live state to PENDING_SCAN');
+assert.equal(replayCurrent.state,'IN_TRANSIT','identical preserved replay must not regress live state to PENDING_SCAN');
 assert.equal(replayCurrent.apiStatus,'SUCCESS');
 assert.equal(JSON.parse(replayCurrent.stateJson).marker,'KEEP_FINALIZED_FACT');
-assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count||0),1,'rehydrate-only replay must not rewrite normalized membership');
+assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count||0),1,'identical preserved replay must not rewrite normalized membership');
+
+const explicitRehydrateState=saveWhppDailyImport({
+  reportDate:date,
+  sourceName:'8-24-explicit-empty-rehydrate.xls',
+  rows:[],
+  batchId:'BATCH-0824-EMPTY-REHYDRATE',
+  snapshotId:'SOURCE-0824-EMPTY-REHYDRATE',
+  preserveFinalizedLifecycle:true
+});
+assert.equal(explicitRehydrateState.reportDate,date);
+assert.equal(explicitRehydrateState.snapshotId,'WHPP-FINAL-0824-A');
+assert.equal(explicitRehydrateState.snapshotStatus,'COMPLETED');
+assert.equal(explicitRehydrateState.processing.phase,'完成');
+assert.equal(explicitRehydrateState.finalizedLifecyclePreserved,true);
+assert.equal(explicitRehydrateState.finalizedLifecyclePreserveReason,'EXPLICIT_REHYDRATE');
+assert.equal(inspectV378WhppCompletionLock(date,explicitRehydrateState,db).locked,true,'explicit empty rehydrate must keep the durable completion lock');
+assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count||0),1,'explicit empty rehydrate must not rewrite normalized membership');
+assert.equal(db.prepare("SELECT state FROM shipment_current_state WHERE shipmentCode='CE0001'").get()?.state,'IN_TRANSIT','explicit empty rehydrate must keep current WHPP facts immutable');
 
 const identicalDirectState=saveWhppDailyImport({
   reportDate:date,
@@ -152,7 +170,9 @@ assert.match(source,/accepted\s*:\s*false,[\s\S]*completed\s*:\s*true/,'duplicat
 const store=fs.readFileSync(new URL('../src/whppStore.js',import.meta.url),'utf8');
 assert.match(store,/preserveFinalizedLifecycle = false/,'WHPP storage keeps explicit rehydrate compatibility');
 assert.match(store,/inspectExistingWhppDaily/,'WHPP storage must compare same-date shipment membership before reopening a finalized lifecycle');
-assert.match(store,/existingDaily\.finalized && \(preserveFinalizedLifecycle === true \|\| existingDaily\.identicalMembership\)/,'finalized WHPP must stay completed for explicit rehydrate or exact identical membership reupload');
+assert.match(store,/const explicitEmptyRehydrate = preserveFinalizedLifecycle === true && unique\.length === 0/,'explicit finalized rehydrate must be limited to an empty incoming WHPP cohort');
+assert.match(store,/existingDaily\.finalized && \(existingDaily\.identicalMembership \|\| explicitEmptyRehydrate\)/,'finalized WHPP may stay completed only for exact identical membership or explicit empty rehydrate');
+assert.doesNotMatch(store,/existingDaily\.finalized && \(preserveFinalizedLifecycle === true \|\| existingDaily\.identicalMembership\)/,'non-empty changed membership must never preserve completion merely because preserveFinalizedLifecycle=true');
 assert.match(store,/IDENTICAL_MEMBERSHIP_REUPLOAD/,'identical direct reupload must be observable as a finalized no-op');
 assert.match(store,/WHPP_FINALIZED_REHYDRATE_SNAPSHOT_MISSING/,'missing immutable completion evidence must fail closed instead of reopening WHPP');
 assert.match(store,/WHPP_FINALIZED_REHYDRATE_NOOP/,'completed membership must restore immutable state without rewriting the daily lifecycle');
@@ -184,4 +204,4 @@ assert.doesNotMatch(runner,/async function readWhppCompletionLock|\/api\/v132\/w
 
 closeDb();
 fs.rmSync(root,{recursive:true,force:true});
-console.log('[V399/V397/V322/V378] WHPP finalized reupload lock passed · explicit rehydrate no-op · identical direct membership reupload no-op · only membership change unlocks · seven-business import total display gated · V67 exact-date persisted completion latch blocks 2.5s re-entry and V322 is the sole status truth');
+console.log('[V399/V397/V322/V378] WHPP finalized reupload lock passed · explicit empty rehydrate no-op · identical preserved/direct membership reupload no-op · only membership change unlocks · seven-business import total display gated · V67 exact-date persisted completion latch blocks 2.5s re-entry and V322 is the sole status truth');
