@@ -63,11 +63,13 @@ assert.match(trackingCore,/sourceReportDate/,'V246 reconciliation must retain th
 assert.match(trackingCore,/firstReportDate/,'V246 must lock the first report date per shipment');
 assert.match(trackingCore,/trackingStatus='OPEN'/,'V246 open-candidate reader must only refresh non-terminal ledger rows');
 assert.doesNotMatch(trackingCore,/normal\s*\?\s*'NORMAL_FINAL'/,'V246 must never close a shipment merely because it is a normal final hub');
-assert.match(trackingCore,/Legacy closeReason is deliberately not authoritative/,'V246 must ignore contaminated legacy closeReason when deciding terminal truth');
+assert.match(trackingCore,/ignoredLegacyCloseReason:\s*text\(closeReason\)/,'V246 must retain contaminated legacy closeReason only as diagnostics, never as terminal evidence');
 assert.match(trackingCore,/RETURN_OPEN_RE/,'V246 must keep return-in-progress open');
 assert.match(trackingCore,/v246PositivePodText/,'V246 terminal truth must reject negative POD wording');
 assert.match(trackingCore,/\['POD','RETURNED','ORDER_CANCELLED'\]/,'V246 terminal lock must be restricted to real terminal outcomes');
-assert.match(trackingCore,/v246InclusiveDays\(firstReportDate,podDate\)/,'average signing days must use immutable firstReportDate to actual POD date');
+assert.match(trackingCore,/v246InclusiveDays\(firstReportDate,podDate\)/,'non-strict compatibility signing may use immutable firstReportDate to actual POD date');
+assert.match(trackingCore,/const strictStartDate=firstStrictStartDate\(row\.starts\|\|\[\]\);[\s\S]*const signingDays=podDate&&strictStartDate\?v246InclusiveDays\(strictStartDate,podDate\):null;/,'strict signing must use the first real START to actual POD date');
+assert.match(trackingCore,/V419_STRICT_SIGNING_TRUTH_ID/,'V246 strict START-to-POD signing truth must expose the V419 revision marker');
 assert.match(trackingCore,/listV246ShopeePodForStrictCheck/,'V246 must enumerate POD rows requiring strict track evidence');
 assert.match(trackingCore,/applyV246StrictAttemptEvidence/,'V246 must support authoritative strict-attempt corrections, including downward correction');
 assert.match(trackingCore,/V246_STRICT_TRACK:/,'V246 strict track evidence must be persisted with explicit ownership');
