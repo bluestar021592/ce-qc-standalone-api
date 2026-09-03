@@ -26,6 +26,7 @@ jobs:
           node --check public/v249-whpp-detail-owner.js
           node --check src/v236DashboardCurrentRoutePatch.js
           node --check src/v172WhppDetailParityPatch.js
+          node --check src/v246TrackingLedgerCore.js
           node --check src/carryLedgerSync.js
           node --check src/rangeDashboardStore.js
           node --check src/unifiedImportStore.js
