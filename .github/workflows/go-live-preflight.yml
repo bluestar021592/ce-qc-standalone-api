@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ce-qc-golive-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   go-live-preflight:
     runs-on: ubuntu-latest
@@ -34,3 +38,5 @@ jobs:
           node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
       - name: Go-live regression suite
         run: npm run test:golive
+      - name: Final state-machine regression
+        run: node --test test/v400-seven-business-completion-loader.test.js test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js
