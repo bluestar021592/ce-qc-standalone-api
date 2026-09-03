@@ -243,7 +243,7 @@ function normalizeWhppRow(finalRow = {}, memberRow = {}, reportDate = '') {
     recipient_group: 'WHPP',
     source_row_number: Number(finalRow.source_row_number || memberRow.rowNumber || merged.source_row_number || merged.rowNumber || 0),
     sheetName: memberRow.sheetName || merged.sheetName || '',
-    whppExportMembershipSource:memberRow.membershipSource||(snapshot.legacyFinalized?'WHPP_LEGACY_FINALIZED_SNAPSHOT_PNH':'WHPP_VALID_COMPLETED_SNAPSHOT_PNH'),
+    whppExportMembershipSource:memberRow.membershipSource||'WHPP_VALID_COMPLETED_SNAPSHOT_PNH',
     v419WhppExportMembershipId:V419_WHPP_EXPORT_MEMBERSHIP_ID
   };
 }
