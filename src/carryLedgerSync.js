@@ -6,7 +6,7 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v5-derived-cache-mirror';
+export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v6-exact-mirror-dates';
 
 const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
@@ -152,11 +152,12 @@ function buildFinalMirrorUpdater(db) {
   set('shopStateReason',"CASE WHEN TRIM(COALESCE(?,''))='' THEN shopStateReason ELSE ? END",'shopStateReason','shopStateReason');
   set('updatedAt','?','updatedAt');
   if (!assignments.length) return null;
-  const stmt = db.prepare(`UPDATE final_rows SET ${assignments.join(',')} WHERE shipmentCode=?`);
+  const stmt = db.prepare(`UPDATE final_rows SET ${assignments.join(',')} WHERE shipmentCode=? RETURNING reportDate`);
   return (bill, values) => {
     const params = keys.map(key => values[key]);
     params.push(bill);
-    return Number(stmt.run(...params)?.changes || 0);
+    const rows = stmt.all(...params);
+    return { changes: rows.length, dates: rows.map(row => v246DateKey(row.reportDate)).filter(Boolean) };
   };
 }
 function buildBusinessMirrorUpdater(db) {
@@ -185,11 +186,12 @@ function buildBusinessMirrorUpdater(db) {
   set('attemptStatus',"CASE WHEN ?>0 AND TRIM(COALESCE(?,''))<>'' THEN ? ELSE attemptStatus END",'attemptNo','attemptSource','attemptSource');
   set('updatedAt','?','updatedAt');
   if (!assignments.length) return null;
-  const stmt = db.prepare(`UPDATE business_final_rows SET ${assignments.join(',')} WHERE businessType=? AND shipmentCode=?`);
+  const stmt = db.prepare(`UPDATE business_final_rows SET ${assignments.join(',')} WHERE businessType=? AND shipmentCode=? RETURNING reportDate`);
   return (storageType, bill, values) => {
     const params = keys.map(key => values[key]);
     params.push(storageType,bill);
-    return Number(stmt.run(...params)?.changes || 0);
+    const rows = stmt.all(...params);
+    return { changes: rows.length, dates: rows.map(row => v246DateKey(row.reportDate)).filter(Boolean) };
   };
 }
 function fallbackInvalidateDerivedDates(db, dates = [], reason = 'V246_LEDGER_CHANGED') {
@@ -343,14 +345,14 @@ export function syncCarryRowsToV246Ledger(rows = [], {
 
       const mirrorPayload = normalizeCanonicalPayload(canonicalPayload,text(ledger.terminalReason),text(ledger.currentState),text(ledger.currentCategory),text(ledger.podDate),Number(ledger.attemptNo || 0));
       const values = { ...mirrorValues(mirrorPayload,ledger,apiStatus,lastEventTime), updatedAt: now };
-      let mirrored = 0;
-      if (SHOPEE_TYPES.has(businessType)) mirrored += businessMirror?.('SHOPEE',bill,values) || 0;
-      else if (businessType === 'WHPP') mirrored += businessMirror?.('WHPP',bill,values) || 0;
-      else mirrored += finalMirror?.(bill,values) || 0;
-      mirrorChanged += mirrored;
+      let mirrorResult = { changes: 0, dates: [] };
+      if (SHOPEE_TYPES.has(businessType)) mirrorResult = businessMirror?.('SHOPEE',bill,values) || mirrorResult;
+      else if (businessType === 'WHPP') mirrorResult = businessMirror?.('WHPP',bill,values) || mirrorResult;
+      else mirrorResult = finalMirror?.(bill,values) || mirrorResult;
+      mirrorChanged += Number(mirrorResult.changes || 0);
 
-      if (ledgerChanged || mirrored > 0) {
-        for (const value of [carry?.sourceReportDate,carry?.lastReportDate,current?.reportDate,payload.reportDate,firstReportDate,lastImportedDate]) {
+      if (ledgerChanged || Number(mirrorResult.changes || 0) > 0) {
+        for (const value of [...(mirrorResult.dates || []),carry?.sourceReportDate,carry?.lastReportDate,current?.reportDate,payload.reportDate,firstReportDate,lastImportedDate]) {
           const date = v246DateKey(value);
           if (date) affectedDates.add(date);
         }
