@@ -1,6 +1,7 @@
 (function installSevenBusinessConvergenceV412(global){
   if(global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__)return;
-  const VERSION='2026-09-03-v420-no-duplicate-entry-preflight-v1';
+  const VERSION='2026-09-01-v413-lifecycle-bound-seven-business-convergence-v4';
+  const V420_ENTRY_CONVERGENCE_REVISION='2026-09-03-v420-no-duplicate-entry-preflight-v1';
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const SELECTORS={CE:'ce',CEAF:'ceaf',TBKH:'tbkh',ALI1688:'ali1688',SHOPEECN:'shopeecn',SHOPEEVN:'shopeevn',WHPP:'whpp'};
   const WHPP_DONE_KEY='ce_qc_v412_whpp_done';
@@ -120,8 +121,8 @@
     document.addEventListener('ce-qc-run-complete',()=>{minimumTruthCheckedAt=Date.now();setTimeout(()=>{void refreshThenLearn().finally(()=>{syncTotal();wrapEntries();});},40);});
     document.addEventListener('change',event=>{if(event.target?.id==='excelFile')invalidateForNewLifecycle();},true);
     document.addEventListener('click',event=>{if(event.target?.closest?.('[data-testid="combined-daily-import"]'))invalidateForNewLifecycle();},true);
-    global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__={version:VERSION,syncTotal,learnWhppCompletion,clearMarker,readMarker,markerMatches,lifecycleKey,sevenTotal};
-    console.info('[CE-QC][V420_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'classification total still includes WHPP; explicit run/resume no longer performs a duplicate status preflight here; only already-known exact fresh completion may short-circuit before V169/V67.');
+    global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__={version:VERSION,v420Revision:V420_ENTRY_CONVERGENCE_REVISION,syncTotal,learnWhppCompletion,clearMarker,readMarker,markerMatches,lifecycleKey,sevenTotal};
+    console.info('[CE-QC][V420_SEVEN_BUSINESS_CONVERGENCE]',VERSION,V420_ENTRY_CONVERGENCE_REVISION,'classification total still includes WHPP; explicit run/resume no longer performs a duplicate status preflight here; only already-known exact fresh completion may short-circuit before V169/V67.');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,40),{once:true});else setTimeout(install,40);
 })(window);
