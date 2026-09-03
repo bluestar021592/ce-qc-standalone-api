@@ -27,16 +27,18 @@ jobs:
           node --check src/v236DashboardCurrentRoutePatch.js
           node --check src/v172WhppDetailParityPatch.js
           node --check src/carryLedgerSync.js
+          node --check src/rangeDashboardStore.js
           node --check src/unifiedImportStore.js
           node --check src/v84AsyncExportPatch.js
           node --check src/v176AsyncExportRecoveryPatch.js
           node --check src/v320HistoricalExportRows.js
           node --check test/carry-ledger-sync.test.js
+          node --check test/carry-ledger-derived-refresh.test.js
           node --check scripts/v237-dashboard-owner-source-smoke.cjs
           node --check scripts/v419-carry-ledger-sync-smoke.mjs
           node --check scripts/v419-global-range-export-freshness-smoke.mjs
-      - name: Standard carry ledger regression
-        run: node --test test/carry-ledger-sync.test.js
+      - name: Standard carry ledger regressions
+        run: node --test test/carry-ledger-sync.test.js test/carry-ledger-derived-refresh.test.js
       - name: Immediate carry ledger truth + atomic rollback
         run: node scripts/v419-carry-ledger-sync-smoke.mjs
       - name: Global date range + next-day export truth + WHPP range parity
