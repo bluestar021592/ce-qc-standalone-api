@@ -3,7 +3,7 @@ import { getDb } from './db.js';
 import { loadWhppState } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
 
-const PATCH_ID='2026-09-03-v419-whpp-valid-history-membership-detail-v4';
+const PATCH_ID='2026-09-03-v419-whpp-membership-integrity-detail-v5';
 const ROUTE='/api/v172/whpp-metric-detail';
 const MAX_RANGE_DAYS=180;
 
@@ -13,6 +13,16 @@ function billOf(row={}){return String(row.shipmentCode||row.运单号||row.waybi
 function regionOf(row={}){const code=String(row.regionCode||row.区域||'').trim().toUpperCase();return code==='PP'?'PP':code==='PV'?'PV':'UNKNOWN';}
 function normalizeTab(value='all'){const raw=String(value||'all').trim(),aliases={podRate:'pod',returnRate:'returned','签收率':'pod','签收件数':'pod','今日POD':'pod','区间POD':'pod','POD率':'pod','已退回件':'returned','当前未闭环':'unresolved','订单取消':'cancelled','Pending不连续':'pendingNonContinuous','Pending1+':'pending1','Pending2+':'pending2','Pending3+':'pending3','OC1+':'oc1','OC2+':'oc2','OC3+':'oc3','盘点2天+':'cycle2','入库无扫描':'inboundNoScan','派送中':'delivery','CCSLCN':'ccslCnDiversion','CEZT':'ccslZtDiversion','CCSL580':'ccsl580Retention','金边门店':'phnomPenhShop','外省门店':'provinceShop'};return aliases[raw]||raw||'all';}
 function rangeDays(from,to){const a=Date.parse(`${from}T00:00:00Z`),b=Date.parse(`${to}T00:00:00Z`);return!Number.isFinite(a)||!Number.isFinite(b)||b<a?0:Math.floor((b-a)/86400000)+1;}
+function standardMembershipMeta(reportDate){
+  const db=getDb();let header=null,actual=0;
+  try{header=db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||null;}catch{header=null;}
+  if(!header)return{header:false,expected:null,actual:0,complete:false,rotated:true};
+  const expected=Math.max(0,Number(header.totalCount||0));
+  try{actual=Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(reportDate)?.count||0);}catch{actual=0;}
+  if(actual===expected)return{header:true,expected,actual,complete:true,rotated:false};
+  if(expected>0&&actual===0)return{header:true,expected,actual,complete:false,rotated:true};
+  const error=new Error(`WHPP_STANDARD_DAILY_INCOMPLETE:${reportDate}:${expected}/${actual}`);error.code='WHPP_STANDARD_DAILY_INCOMPLETE';error.reportDate=reportDate;error.expected=expected;error.actual=actual;throw error;
+}
 function memberDates(from,to){
   const db=getDb(),dates=new Set();
   try{for(const row of db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
@@ -39,12 +49,23 @@ function directStateForDate(reportDate){
   }
   const bills=[...new Set(source.map(billOf).filter(Boolean))];if(!bills.length)return{businessType:'WHPP',reportDate,pnhBills:[],dailyParseRows:[],finalRows:[],detailMembershipSource:'NO_SAVED_DAILY_MEMBERS'};
   let finals=[];try{finals=db.prepare("SELECT shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,rawJson FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? ORDER BY shipmentCode").all(reportDate).map(row=>({...safeJson(row.rawJson,{}),shipmentCode:String(row.shipmentCode||'').trim().toUpperCase(),运单号:String(row.shipmentCode||'').trim().toUpperCase(),是否POD:Number(row.isPod||0)===1?'是':safeJson(row.rawJson,{}).是否POD||'否',primaryCategory:row.primaryCategory||safeJson(row.rawJson,{}).primaryCategory||'',apiStatus:row.apiStatus||'',carryStatus:row.carryStatus||'',latestEventTime:row.latestEventTime||'',latestEventDesc:row.latestEventDesc||'',latestNode:row.latestNode||''}));}catch{finals=[];}
-  return{businessType:'WHPP',reportDate,pnhBills:bills,dailyParseRows:source,finalRows:finals,detailMembershipSource:source[0]?.classificationReason?'UNIFIED_IMPORT_ROWS':'PERSISTED_DAILY_MEMBER_ROWS'};
+  const allowed=new Set(bills),memberFinals=finals.filter(row=>allowed.has(billOf(row)));
+  return{businessType:'WHPP',reportDate,pnhBills:bills,dailyParseRows:source,finalRows:memberFinals,detailMembershipSource:source[0]?.classificationReason?'UNIFIED_IMPORT_ROWS':'PERSISTED_DAILY_MEMBER_ROWS'};
+}
+function validCompletedSnapshotState(reportDate){
+  const row=getDb().prepare("SELECT payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY createdAt DESC,id DESC LIMIT 1").get(reportDate);
+  if(!row)return null;const payload=safeJson(row.payloadJson,{}),saved=payload.state||{};return((saved.pnhBills||[]).length||(saved.dailyParseRows||[]).length)?saved:null;
 }
 function stateForDate(reportDate=''){
-  const requested=dateOnly(reportDate),current=loadWhppState();if(!requested||requested===dateOnly(current.reportDate))return overlayCurrentTruth(current);
-  const row=getDb().prepare("SELECT payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY createdAt DESC,id DESC LIMIT 1").get(requested);
-  if(row){const payload=safeJson(row.payloadJson,{}),saved=payload.state||{};if((saved.pnhBills||[]).length||(saved.dailyParseRows||[]).length)return overlayCurrentTruth({...saved,businessType:'WHPP',reportDate:requested,detailMembershipSource:'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED'});}
+  const requested=dateOnly(reportDate),current=loadWhppState();if(!requested)return overlayCurrentTruth(current);
+  const integrity=standardMembershipMeta(requested);
+  if(requested===dateOnly(current.reportDate))return overlayCurrentTruth(current);
+  if(integrity.complete){
+    if(integrity.expected===0)return{businessType:'WHPP',reportDate:requested,pnhBills:[],dailyParseRows:[],finalRows:[],detailMembershipSource:'WHPP_STANDARD_DAILY_ZERO'};
+    return overlayCurrentTruth(directStateForDate(requested));
+  }
+  const saved=validCompletedSnapshotState(requested);
+  if(saved)return overlayCurrentTruth({...saved,businessType:'WHPP',reportDate:requested,detailMembershipSource:'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED'});
   return overlayCurrentTruth(directStateForDate(requested));
 }
 function rowsForState(reportDate,tab,region=''){const state=stateForDate(reportDate),dashboard=buildWhppDashboard(state),detail=dashboard.detailTabs?.[tab]||dashboard.detailTabs?.all||{label:tab,rows:[]};let rows=Array.isArray(detail.rows)?detail.rows:[];if(region==='PP'||region==='PV')rows=rows.filter(row=>regionOf(row)===region);return{label:detail.label||tab,rows:rows.map(row=>({...row,reportMembershipDate:reportDate,日报日期:reportDate,detailMembershipSource:row.detailMembershipSource||state.detailMembershipSource||''}))};}
