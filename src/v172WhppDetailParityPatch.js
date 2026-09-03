@@ -3,7 +3,7 @@ import { getDb } from './db.js';
 import { loadWhppState } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
 
-const PATCH_ID='2026-09-03-v419-whpp-valid-completed-history-detail-v3';
+const PATCH_ID='2026-09-03-v419-whpp-valid-history-membership-detail-v4';
 const ROUTE='/api/v172/whpp-metric-detail';
 const MAX_RANGE_DAYS=180;
 
@@ -17,7 +17,7 @@ function memberDates(from,to){
   const db=getDb(),dates=new Set();
   try{for(const row of db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
   try{for(const row of db.prepare("SELECT DISTINCT reportDate FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
-  try{for(const row of db.prepare("SELECT DISTINCT reportDate FROM unified_import_rows WHERE UPPER(TRIM(businessType))='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
+  try{for(const row of db.prepare("SELECT DISTINCT u.reportDate FROM unified_import_rows u INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId AND b.reportDate=u.reportDate AND b.status='VALID' WHERE UPPER(TRIM(u.businessType))='WHPP' AND u.reportDate BETWEEN ? AND ? ORDER BY u.reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
   return[...dates].sort();
 }
 function currentWhppRows(bills=[]){
