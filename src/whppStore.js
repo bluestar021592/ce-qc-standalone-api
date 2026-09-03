@@ -6,7 +6,7 @@ import { isSpecialCategory } from './specialNode.js';
 
 export const WHPP = 'WHPP';
 export const V419_WHPP_REIMPORT_LIFECYCLE_ID = '2026-09-03-v419-whpp-reimport-invalidates-old-completion-v1';
-export const V419_WHPP_REIMPORT_CARRY_RETIRE_ID = '2026-09-03-v419-whpp-reimport-retires-removed-same-day-carry-v1';
+export const V419_WHPP_REIMPORT_CARRY_RETIRE_ID = '2026-09-03-v419-whpp-reimport-retires-removed-same-day-carry-and-ledger-v2';
 export const V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID = '2026-09-03-v419-whpp-final-snapshot-valid-completed-v1';
 
 export function loadWhppState() {
@@ -137,13 +137,32 @@ function retireRemovedWhppDailyCarry(db, reportDate, incomingBills = [], now = n
   const retiredBills = rows
     .map(row => String(row.shipmentCode || '').trim().toUpperCase())
     .filter(bill => bill && !keep.has(bill));
-  if (!retiredBills.length) return { retired: 0, bills: [] };
-  const retire = db.prepare(`UPDATE carryover_open_items
-    SET status='CLOSED',apiStatus='REMOVED_BY_REIMPORT',closeReason='WHPP_REIMPORT_REMOVED_MEMBER',lastReportDate=?,updatedAt=?
-    WHERE shipmentCode=? AND businessType='WHPP' AND status='OPEN' AND sourceReportDate=?`);
-  let retired = 0;
-  for (const bill of retiredBills) retired += Number(retire.run(reportDate, now, bill, reportDate)?.changes || 0);
-  return { retired, bills: retiredBills };
+  if (!retiredBills.length) return { retired: 0, retiredLedger: 0, bills: [] };
+
+  const removeCarry = db.prepare("DELETE FROM carryover_open_items WHERE shipmentCode=? AND businessType='WHPP' AND status='OPEN' AND sourceReportDate=?");
+  let ledgerGet = null, removeLedger = null, ledgerAudit = null;
+  try {
+    const hasLedger = Boolean(db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name='qc_tracking_ledger' LIMIT 1").get()?.ok);
+    if (hasLedger) {
+      ledgerGet = db.prepare("SELECT * FROM qc_tracking_ledger WHERE shipmentCode=? AND businessType='WHPP' LIMIT 1");
+      removeLedger = db.prepare("DELETE FROM qc_tracking_ledger WHERE shipmentCode=? AND businessType='WHPP' AND firstReportDate=?");
+      const hasAudit = Boolean(db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name='qc_tracking_audit' LIMIT 1").get()?.ok);
+      if (hasAudit) ledgerAudit = db.prepare("INSERT INTO qc_tracking_audit(shipmentCode,businessType,action,reason,beforeJson,afterJson,createdAt) VALUES(?,?,?,?,?,?,?)");
+    }
+  } catch {}
+
+  let retired = 0, retiredLedger = 0;
+  for (const bill of retiredBills) {
+    const ledger = ledgerGet?.get(bill) || null;
+    if (ledger && String(ledger.firstReportDate || '') === String(reportDate || '')) {
+      try {
+        ledgerAudit?.run(bill, WHPP, 'WHPP_REIMPORT_RETIRE_REMOVED_MEMBER', V419_WHPP_REIMPORT_CARRY_RETIRE_ID, JSON.stringify(ledger), JSON.stringify({ removedFromActiveTruth: true, reportDate }), now);
+      } catch {}
+      retiredLedger += Number(removeLedger?.run(bill, reportDate)?.changes || 0);
+    }
+    retired += Number(removeCarry.run(bill, reportDate)?.changes || 0);
+  }
+  return { retired, retiredLedger, bills: retiredBills };
 }
 
 export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], batchId = '', snapshotId = '', preserveFinalizedLifecycle = false }) {
@@ -170,16 +189,16 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
 
   db.exec('BEGIN IMMEDIATE');
   let lifecycleReset = { invalidatedSnapshots: 0, reason: '' };
-  let carryRetirement = { retired: 0, bills: [] };
+  let carryRetirement = { retired: 0, retiredLedger: 0, bills: [] };
   try {
     // This call is reached only for a real new lifecycle. Old completed snapshots
     // and derived history must become ineligible before the new membership is
     // published, otherwise an export between re-upload and re-processing could
     // incorrectly reuse stale completion evidence.
     lifecycleReset = invalidatePriorWhppLifecycle(db, reportDate, existingDaily, now);
-    // A corrected same-day reupload must also retire OPEN carry rows that were
-    // created by the superseded membership itself. Real cross-day carry has an
-    // earlier sourceReportDate and is deliberately preserved.
+    // A corrected same-day reupload removes the superseded day's own OPEN carry
+    // from active truth. It also retires a V246 ledger row only when that ledger
+    // originated on the superseded date. Real earlier-day carry/ledger survives.
     if (existingDaily.exists) carryRetirement = retireRemovedWhppDailyCarry(db, reportDate, unique.map(billOf), now);
     db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt)
       VALUES(?,?,?,?,?,?,?) ON CONFLICT(businessType,reportDate) DO UPDATE SET sourceFile=excluded.sourceFile,totalCount=excluded.totalCount,summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
@@ -220,8 +239,8 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
   if (lifecycleReset.invalidatedSnapshots > 0) {
     console.log('[CE-QC][WHPP_REIMPORT_LIFECYCLE_INVALIDATED]', JSON.stringify({ revision: V419_WHPP_REIMPORT_LIFECYCLE_ID, reportDate, invalidatedSnapshots: lifecycleReset.invalidatedSnapshots, incoming: unique.length }));
   }
-  if (carryRetirement.retired > 0) {
-    console.log('[CE-QC][WHPP_REIMPORT_REMOVED_CARRY_RETIRED]', JSON.stringify({ revision: V419_WHPP_REIMPORT_CARRY_RETIRE_ID, reportDate, retired: carryRetirement.retired }));
+  if (carryRetirement.retired > 0 || carryRetirement.retiredLedger > 0) {
+    console.log('[CE-QC][WHPP_REIMPORT_REMOVED_CARRY_RETIRED]', JSON.stringify({ revision: V419_WHPP_REIMPORT_CARRY_RETIRE_ID, reportDate, retiredCarry: carryRetirement.retired, retiredLedger: carryRetirement.retiredLedger }));
   }
 
   const retiredCarrySet = new Set(carryRetirement.bills.map(value => String(value || '').trim().toUpperCase()));
