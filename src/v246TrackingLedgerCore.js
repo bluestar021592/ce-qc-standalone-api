@@ -2,6 +2,7 @@ import { getDb, nowIso } from './db.js';
 import { v246PositivePodText } from './shopeeAttemptCycleV246.js';
 
 export const V246_TRACKING_LEDGER_ID = '2026-08-23-v246-qc-tracking-ledger-v2';
+export const V419_STRICT_SIGNING_TRUTH_ID = '2026-09-03-v419-strict-start-signing-truth-v1';
 export const V246_TRACKING_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const TYPE_SET = new Set(V246_TRACKING_TYPES);
 const RETURN_DONE_RE = /\bRETURNED\b|\bRETURN_COMPLETED\b|已退回|退回完成|退件完成|退货完成|返仓完成|R退回/i;
@@ -75,10 +76,12 @@ function extractPodDate(state = {}, terminal = {}) {
   const latestDesc = text(firstValue(state, ['latestEventDesc','最后节点','lastEventDesc','QC判断']));
   const latestTime = firstValue(state, ['latestEventTime','最后节点时间','lastEventTime']);
   if (latestCodeOf(state) === '80' || v246PositivePodText(latestDesc)) return v246DateKey(latestTime);
-  // orderStatus=85 proves terminal POD, but without an explicit POD timestamp or
-  // a code-80/positive POD node it does NOT prove the POD date. Keep it unknown
-  // until strict trajectory backfill instead of fabricating a signing-day value.
   return '';
+}
+function strictAttemptSource(value=''){ return /^V246_STRICT_TRACK/i.test(text(value)) || /严格START|严格派送/i.test(text(value)); }
+function firstStrictStartDate(value = []) {
+  const starts = Array.isArray(value) ? value : [];
+  return starts.map(item => v246DateKey(item?.time || item?.eventTime || item)).filter(Boolean).sort()[0] || '';
 }
 
 export function classifyV246Terminal({ closeReason = '', state = '', stateJson = {} } = {}) {
@@ -88,9 +91,6 @@ export function classifyV246Terminal({ closeReason = '', state = '', stateJson =
   const latestCode = latestCodeOf(payload);
   const evidence = [stateName,payload.退回状态,payload.primaryCategory,payload.currentMainCategory,payload.主分类,payload.异常分类,payload.latestEventDesc,payload.最后节点,payload.QC判断]
     .map(text).join(' ');
-  // Legacy closeReason is deliberately not authoritative: older logic could
-  // close NORMAL_FINAL_HUB / 580 / self-pickup / return-in-progress. V246 only
-  // trusts exact current-state/scan/trajectory evidence and reopens everything else.
   const pod = stateName === 'POD' || orderStatus === '85' || latestCode === '80' || payload.是否POD === '是' || v246PositivePodText(evidence);
   const returned = !pod && (
     ['RETURNED','RETURN_COMPLETED'].includes(stateName)
@@ -203,9 +203,6 @@ function carryoverSources(db, { businessType, fromDate, toDate }) {
 }
 export function listV246UploadedSources(selection, db = getDb()) {
   ensureV246TrackingSchema(db);
-  // The source ledger is intentionally a UNION of current valid daily snapshots
-  // and every shipment already admitted into carryover. A later re-upload must
-  // never make a previously valid shipment silently disappear from QC tracking.
   const merged = new Map();
   for (const row of [...unifiedSources(db, selection), ...whppSources(db, selection), ...carryoverSources(db, selection)]) {
     const bill = billOf(row.shipmentCode);
@@ -230,7 +227,6 @@ function compactLedger(row = {}) {
     attemptNo: Number(row.attemptNo || 0), attemptSource: row.attemptSource || '', signingDays: row.signingDays ?? null, currentState: row.currentState || ''
   };
 }
-function strictAttemptSource(value=''){ return /^V246_STRICT_TRACK/i.test(text(value)) || /严格START|严格派送/i.test(text(value)); }
 
 export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 'RECONCILE' } = {}) {
   ensureV246TrackingSchema(db);
@@ -265,8 +261,9 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       podDate=CASE WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
       attemptNo=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptNo ELSE excluded.attemptNo END,
       attemptSource=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptSource ELSE excluded.attemptSource END,
-      signingDays=CASE WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
-      evidenceJson=excluded.evidenceJson,currentStateJson=excluded.currentStateJson,lastCheckedAt=CASE WHEN excluded.lastCheckedAt<>'' THEN excluded.lastCheckedAt ELSE qc_tracking_ledger.lastCheckedAt END,
+      signingDays=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
+      evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
+      currentStateJson=excluded.currentStateJson,lastCheckedAt=CASE WHEN excluded.lastCheckedAt<>'' THEN excluded.lastCheckedAt ELSE qc_tracking_ledger.lastCheckedAt END,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
   const auditInsert = db.prepare('INSERT INTO qc_tracking_audit(shipmentCode,businessType,action,reason,beforeJson,afterJson,createdAt) VALUES(?,?,?,?,?,?,?)');
   const now = nowIso();
@@ -295,7 +292,7 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       const observedAttempt = directAttempt(payload);
       const attemptNo = oldStrict ? Number(oldLedger?.attemptNo || 0) : observedAttempt;
       const attemptSource = oldStrict ? text(oldLedger?.attemptSource) : (attemptNo ? text(payload.attemptSource || payload.attemptStatus || '现有派次证据') : '');
-      const signingDays = podDate ? v246InclusiveDays(firstReportDate,podDate) : null;
+      const signingDays = oldStrict ? (oldLedger?.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : null);
       const stateName = text(current?.state || payload.currentState || payload.scanNormalizedState || payload.primaryCategory || payload.主分类 || 'OPEN');
       const category = text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || stateName);
       const lastEventTime = text(current?.lastEventTime || payload.latestEventTime || payload.最后节点时间 || '');
@@ -311,7 +308,7 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       ledgerUpsert.run(
         bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,closeReason,
         cls.terminal ? (text(oldLedger?.terminalAt) || lastEventTime || now) : '',stateName,category,lastEventTime,podDate,attemptNo,attemptSource,signingDays,
-        JSON.stringify({ source:'V246_RECONCILE', reason, sourceFirstReportDate:source.firstReportDate, sourceLastImportedDate:source.lastImportedDate }),
+        oldStrict ? text(oldLedger?.evidenceJson || '{}') : JSON.stringify({ source:'V246_RECONCILE', reason, sourceFirstReportDate:source.firstReportDate, sourceLastImportedDate:source.lastImportedDate }),
         JSON.stringify(payload),text(oldLedger?.lastCheckedAt || current?.updatedAt || carry?.updatedAt || ''),reason,oldLedger?.createdAt || carry?.createdAt || now,now
       );
       if (!oldLedger || !carry || (!cls.terminal && carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason)))) {
@@ -367,14 +364,13 @@ export function applyV246EvidenceRows(rows = [], { db = getDb(), reason = 'EVIDE
       const terminalReason = oldTerminal ? text(old.terminalReason) : isPod ? 'POD' : exactReturned ? 'RETURNED' : '';
       const terminal = Boolean(terminalReason);
       const podDate = terminalReason === 'POD' ? (v246DateKey(row.podDate) || text(old.podDate)) : text(old.podDate);
-      // V200 is used only to enrich POD date/signing-day evidence here. Attempt
-      // number is authoritative only after V246 strict START/failure backfill.
       const attemptNo = Number(old.attemptNo || 0);
       const attemptSource = text(old.attemptSource);
-      const signingDays = podDate ? v246InclusiveDays(firstReportDate,podDate) : (old.signingDays ?? null);
+      const oldStrict = strictAttemptSource(attemptSource);
+      const signingDays = oldStrict ? (old.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : (old.signingDays ?? null));
       const stateName = terminalReason === 'POD' ? 'POD' : terminalReason === 'RETURNED' ? 'RETURNED' : text(row.statusDesc || old.currentState || 'OPEN');
       const category = text(row.statusDesc || row.exceptionDesc || old.currentCategory || stateName);
-      const evidence = JSON.stringify({ source:'V200_EVIDENCE_SAFE', reason, podSource:row.podSource || '', firstReportDate, podDate });
+      const evidence = oldStrict ? text(old.evidenceJson || '{}') : JSON.stringify({ source:'V200_EVIDENCE_SAFE', reason, podSource:row.podSource || '', firstReportDate, podDate });
       update.run(row.businessType || old.businessType,firstReportDate,lastImportedDate,terminal?'TERMINAL':'OPEN',terminalReason,
         terminal ? (text(old.terminalAt) || text(row.podTime) || now) : '',stateName,category,podDate,attemptNo,attemptSource,signingDays,evidence,now,reason,now,bill);
       const statePayload = JSON.stringify({ shipmentCode:bill,businessType:row.businessType||old.businessType,currentState:stateName,primaryCategory:category,是否POD:terminalReason==='POD'?'是':'否',POD时间:row.podTime||'',podTime:row.podTime||'',podAttemptNo:attemptNo,attemptSource });
@@ -408,7 +404,7 @@ export function applyV246StrictAttemptEvidence(rows = [], { db = getDb(), reason
   const update = db.prepare(`UPDATE qc_tracking_ledger SET podDate=?,attemptNo=?,attemptSource=?,signingDays=?,evidenceJson=?,lastCheckedAt=?,lastRepairReason=?,updatedAt=? WHERE shipmentCode=?`);
   const audit = db.prepare('INSERT INTO qc_tracking_audit(shipmentCode,businessType,action,reason,beforeJson,afterJson,createdAt) VALUES(?,?,?,?,?,?,?)');
   const now = nowIso();
-  let updated=0,known=0,unknown=0,podDateFilled=0,corrected=0;
+  let updated=0,known=0,unknown=0,podDateFilled=0,corrected=0,signingKnown=0;
   db.exec('BEGIN IMMEDIATE');
   try {
     for(const row of rows){
@@ -417,18 +413,19 @@ export function applyV246StrictAttemptEvidence(rows = [], { db = getDb(), reason
       const podDate=v246DateKey(row.podDate)||text(old.podDate);
       const attemptNo=Math.max(0,Math.min(3,Number(row.attemptNo||0)));
       const source=`V246_STRICT_TRACK:${text(row.source||'START_FAILURE_CYCLE')}`;
-      const signingDays=podDate?v246InclusiveDays(old.firstReportDate,podDate):(old.signingDays??null);
-      const evidence=JSON.stringify({source,reason,podDate,attemptNo,startMode:row.startMode||'',starts:row.starts||[],failures:row.failures||[],checkedAt:now});
+      const strictStartDate=firstStrictStartDate(row.starts||[]);
+      const signingDays=podDate&&strictStartDate?v246InclusiveDays(strictStartDate,podDate):null;
+      const evidence=JSON.stringify({source,reason,podDate,attemptNo,startMode:row.startMode||'',starts:row.starts||[],failures:row.failures||[],strictStartDate,signingTruth:V419_STRICT_SIGNING_TRUTH_ID,checkedAt:now});
       if(!old.podDate&&podDate)podDateFilled+=1;
       if(Number(old.attemptNo||0)!==attemptNo&&text(old.attemptSource))corrected+=1;
       update.run(podDate,attemptNo,source,signingDays,evidence,now,reason,now,bill);
       const after=compactLedger(get.get(bill)||{});
       if(JSON.stringify(before)!==JSON.stringify(after))audit.run(bill,old.businessType,'STRICT_ATTEMPT_EVIDENCE',reason,JSON.stringify(before),JSON.stringify(after),now);
-      updated+=1;if(attemptNo>0)known+=1;else unknown+=1;
+      updated+=1;if(attemptNo>0)known+=1;else unknown+=1;if(Number(signingDays||0)>0)signingKnown+=1;
     }
     db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
-  return{updated,known,unknown,podDateFilled,corrected};
+  return{updated,known,unknown,podDateFilled,corrected,signingKnown,signingTruthId:V419_STRICT_SIGNING_TRUTH_ID};
 }
 
 export function readV246ShopeeDailyTruth(businessType, dates = [], db = getDb()) {
