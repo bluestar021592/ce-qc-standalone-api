@@ -17,6 +17,7 @@ const bootstrap = read('bootstrap.js');
 const podRepair = read('src/v167CcslPodLockFactRepair.js');
 const v246 = read('src/v246TrackingLedgerCore.js');
 const v172 = read('src/v172WhppDetailParityPatch.js');
+const v87 = read('src/v87WhppExportStore.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
 const allBusinessChild = read('src/v84ExportBusinessWorker.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
@@ -62,15 +63,22 @@ forbid(whppUi, 'global.runUnified=');
 forbid(whppUi, 'global.resumeUnified=');
 forbid(whppUi, '/api/whpp/run/start');
 
-// WHPP historical detail must use the same membership-integrity rule as the
-// range board and export path: valid dates only, full standard membership when
-// present, fully-rotated historical fallback allowed, partial membership fails closed.
-must(v172, '2026-09-03-v419-whpp-membership-integrity-detail-v5');
+// WHPP detail and export must share one immutable daily membership owner.
+// finalRows contains today + carry in WHPP pipeline, so it is enrichment only.
+must(v172, '2026-09-03-v419-whpp-immutable-membership-detail-v6');
+must(v172, 'function restrictStateToImmutableMembership');
+must(v172, 'IMMUTABLE_DAILY_MEMBERSHIP_PLUS_LATEST_SHIPMENT_CURRENT_STATE');
 must(v172, "COALESCE(status,'VALID')='VALID'");
 must(v172, "COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'");
 must(v172, "INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId AND b.reportDate=u.reportDate AND b.status='VALID'");
 must(v172, 'WHPP_STANDARD_DAILY_INCOMPLETE');
 must(v172, 'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED');
+must(v87, '2026-09-03-v419-whpp-valid-completed-membership-export-v3');
+must(v87, 'WHPP_VALID_UNIFIED_DAILY');
+must(v87, 'WHPP_VALID_COMPLETED_SNAPSHOT_PNH');
+must(v87, 'WHPP_EXPORT_MEMBERSHIP_UNRECOVERABLE');
+must(v87, 'function loadSnapshotPayload');
+forbid(v87, 'SELECT snapshotId,reportDate,payloadJson,createdAt,id','WHPP export split/count metadata query must not hydrate every snapshot payload');
 
 // The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
 // HTML/JS caching. Exact cache-bust suffixes may advance independently.
@@ -117,10 +125,10 @@ for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storag
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-// The real updater executes test:golive. Keep the two newest truth-boundary
-// regressions inside this gate so a candidate cannot install with either
-// WHPP membership leakage or stale POD/attempt/signing residue in export rows.
+// The real updater executes test:golive. Keep the newest truth-boundary
+// regressions inside this gate so a candidate cannot install with WHPP carry
+// membership leakage or stale POD/attempt/signing residue in export rows.
 execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['--test','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · V419 WHPP one-range detail with partial-membership fail-closed · membership-locked WHPP export · canonical ledger clears stale POD/attempt/signing residue · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · carry-contaminated finalRows are enrichment only · lazy snapshot JSON recovery · partial-membership fail-closed · canonical ledger clears stale POD/attempt/signing residue · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
