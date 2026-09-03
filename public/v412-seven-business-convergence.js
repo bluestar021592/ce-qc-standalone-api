@@ -1,6 +1,6 @@
 (function installSevenBusinessConvergenceV412(global){
   if(global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__)return;
-  const VERSION='2026-09-01-v413-lifecycle-bound-seven-business-convergence-v4';
+  const VERSION='2026-09-03-v420-no-duplicate-entry-preflight-v1';
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const SELECTORS={CE:'ce',CEAF:'ceaf',TBKH:'tbkh',ALI1688:'ali1688',SHOPEECN:'shopeecn',SHOPEEVN:'shopeevn',WHPP:'whpp'};
   const WHPP_DONE_KEY='ce_qc_v412_whpp_done';
@@ -59,9 +59,6 @@
       if(num(state.sevenBusinessValidUniqueWaybills)!==total)state.sevenBusinessValidUniqueWaybills=total;
       state.visibleTotalRevision=VERSION;
     }
-    // Legacy import owners can render the green success banner outside fileStatus.
-    // Reconcile the whole import page, but only text matching an import-total phrase
-    // can change. The throttled observer below prevents repeated DOM scans/churn.
     patchText(document.getElementById('importPage'),total);
     if(document.documentElement.dataset.v412SevenBusinessTotal!==String(total))document.documentElement.dataset.v412SevenBusinessTotal=String(total);
     return total;
@@ -99,7 +96,15 @@
     try{document.dispatchEvent(new CustomEvent('ce-qc-run-complete',{detail:{reportDate:target,complete:true,source:'V413'}}));}catch{}
   }
   async function refreshThenLearn(){try{await global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.();}catch{}return learnWhppCompletion();}
-  async function guardCall(original,thisArg,args){const target=currentDate();await refreshThenLearn();if(target&&exactFreshStagesDone(target)){renderCompleted(target);return {ok:true,reportDate:target,skipped:true,reason:'SEVEN_BUSINESS_ALREADY_COMPLETE_V413'};}return original.apply(thisArg,args);}
+  async function guardCall(original,thisArg,args){
+    const target=currentDate();
+    learnWhppCompletion();
+    if(target&&exactFreshStagesDone(target)){
+      renderCompleted(target);
+      return {ok:true,reportDate:target,skipped:true,reason:'SEVEN_BUSINESS_ALREADY_COMPLETE_V413'};
+    }
+    return original.apply(thisArg,args);
+  }
   function wrapEntries(){
     if(wrapping)return;wrapping=true;
     try{for(const name of ['runUnified','resumeUnified']){const original=global[name];if(typeof original!=='function'||original.__v412Wrapped)continue;const wrapped=function(){return guardCall(original,this,arguments);};wrapped.__v412Wrapped=true;wrapped.__v412Original=original;global[name]=wrapped;}}finally{wrapping=false;}
@@ -116,7 +121,7 @@
     document.addEventListener('change',event=>{if(event.target?.id==='excelFile')invalidateForNewLifecycle();},true);
     document.addEventListener('click',event=>{if(event.target?.closest?.('[data-testid="combined-daily-import"]'))invalidateForNewLifecycle();},true);
     global.__CE_QC_V412_SEVEN_BUSINESS_CONVERGENCE__={version:VERSION,syncTotal,learnWhppCompletion,clearMarker,readMarker,markerMatches,lifecycleKey,sevenTotal};
-    console.info('[CE-QC][V413_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'seven-business total always includes WHPP across classification cards and import-success text; observer work is throttled and idempotent; persisted WHPP completion is exact-lifecycle only; stale pre-import truth cannot satisfy a new lifecycle.');
+    console.info('[CE-QC][V420_SEVEN_BUSINESS_CONVERGENCE]',VERSION,'classification total still includes WHPP; explicit run/resume no longer performs a duplicate status preflight here; only already-known exact fresh completion may short-circuit before V169/V67.');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,40),{once:true});else setTimeout(install,40);
 })(window);
