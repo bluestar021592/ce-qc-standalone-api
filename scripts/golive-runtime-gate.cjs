@@ -63,10 +63,11 @@ forbid(whppUi, 'global.resumeUnified=');
 forbid(whppUi, '/api/whpp/run/start');
 
 // WHPP historical detail may read immutable snapshots only when they remain
-// VALID + COMPLETED. Invalidated/failed snapshots must never replace history.
-must(v172, '2026-09-03-v419-whpp-valid-completed-history-detail-v3');
+// VALID + COMPLETED, and unified membership dates only from VALID batches.
+must(v172, '2026-09-03-v419-whpp-valid-history-membership-detail-v4');
 must(v172, "COALESCE(status,'VALID')='VALID'");
 must(v172, "COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'");
+must(v172, "INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId AND b.reportDate=u.reportDate AND b.status='VALID'");
 must(v172, 'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED');
 
 // The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
@@ -116,4 +117,4 @@ for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storag
 
 execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · V419 WHPP global-range display owner · valid/completed WHPP history detail · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · V419 WHPP global-range display owner · valid/completed WHPP history detail + VALID unified membership dates · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
