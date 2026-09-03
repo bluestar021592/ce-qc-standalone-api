@@ -94,21 +94,30 @@ try{
   assert.equal(rotatedDetail.truthSource,'IMMUTABLE_DAILY_MEMBERSHIP_PLUS_LATEST_SHIPMENT_CURRENT_STATE');
 
   // Same-day membership change is a new lifecycle. The previously completed
-  // snapshot/history/finals must become invalid before the new cohort is visible,
-  // so export cannot reuse stale completion between re-upload and re-processing.
-  const oldBill='WH-V419-REIMPORT-OLD',newBill='WH-V419-REIMPORT-NEW',oldSnapshot='WH-VALID-0805';
+  // snapshot/history/finals and removed same-day OPEN carry must become invalid
+  // before the new cohort is visible. True earlier-day carry must survive.
+  const oldBill='WH-V419-REIMPORT-OLD',newBill='WH-V419-REIMPORT-NEW',historicCarry='WH-V419-HIST-CARRY',oldSnapshot='WH-VALID-0805';
   const oldState={businessType:'WHPP',reportDate:'2026-08-05',pnhBills:[oldBill],dailyParseRows:[{shipmentCode:oldBill,运单号:oldBill,regionCode:'PP',rowNumber:2}],finalRows:[{shipmentCode:oldBill,运单号:oldBill,currentState:'POD',是否POD:'是'}]};
   insertMinimal('business_export_snapshots',{snapshotId:oldSnapshot,businessType:'WHPP',reportDate:'2026-08-05',runId:'RUN-OLD-0805',payloadJson:JSON.stringify({state:oldState}),generatedAt:'2026-08-05T10:00:00.000Z',createdAt:'2026-08-05T10:00:00.000Z',status:'VALID',reconciliationStatus:'COMPLETED'});
   insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:'2026-08-05',sourceFile:'8-5-old.xls',totalCount:1,summaryJson:JSON.stringify({total:1,completed:true,snapshotStatus:'COMPLETED',finalizedSnapshotId:oldSnapshot,finalizedAt:'2026-08-05T10:00:00.000Z'}),createdAt:'2026-08-05T09:00:00.000Z',updatedAt:'2026-08-05T10:00:00.000Z'});
   insertMinimal('business_daily_parse_rows',{businessType:'WHPP',reportDate:'2026-08-05',shipmentCode:oldBill,sheetName:'日报',rowNumber:2,source_row_number:2,recipient_raw:'WHPP',recipient_normalized:'WHPP',recipient_group:'WHPP',recipient_group_reason:'TEST',rawText:'',rowJson:JSON.stringify({运单号:oldBill,regionCode:'PP'}),createdAt:'2026-08-05T09:00:00.000Z'});
   insertMinimal('business_history_summary',{businessType:'WHPP',reportDate:'2026-08-05',summaryJson:JSON.stringify({total:1,pod:1}),createdAt:'2026-08-05T10:00:00.000Z',updatedAt:'2026-08-05T10:00:00.000Z'});
   insertMinimal('business_final_rows',{businessType:'WHPP',shipmentCode:oldBill,reportDate:'2026-08-05',isPod:1,primaryCategory:'POD',apiStatus:'SUCCESS',carryStatus:'CLOSED',rawJson:JSON.stringify({shipmentCode:oldBill,运单号:oldBill,currentState:'POD',是否POD:'是'}),createdAt:'2026-08-05T10:00:00.000Z',updatedAt:'2026-08-05T10:00:00.000Z'});
+  insertMinimal('carryover_open_items',{shipmentCode:oldBill,businessType:'WHPP',sourceReportDate:'2026-08-05',lastReportDate:'2026-08-05',sourceSnapshotId:'S-OLD-0805',lastSnapshotId:'S-OLD-0805',status:'OPEN',apiStatus:'SUCCESS',closeReason:'',stateJson:JSON.stringify({shipmentCode:oldBill,currentState:'Pending'}),createdAt:'2026-08-05T09:00:00.000Z',updatedAt:'2026-08-05T10:00:00.000Z'});
+  insertMinimal('carryover_open_items',{shipmentCode:historicCarry,businessType:'WHPP',sourceReportDate:'2026-08-04',lastReportDate:'2026-08-05',sourceSnapshotId:'S-HIST-0804',lastSnapshotId:'S-HIST-0805',status:'OPEN',apiStatus:'SUCCESS',closeReason:'',stateJson:JSON.stringify({shipmentCode:historicCarry,currentState:'Pending'}),createdAt:'2026-08-04T09:00:00.000Z',updatedAt:'2026-08-05T10:00:00.000Z'});
   const reimported=saveWhppDailyImport({reportDate:'2026-08-05',sourceName:'8-5-new.xls',rows:[{shipmentCode:newBill,运单号:newBill,regionCode:'PP',rowNumber:2}],batchId:'B-NEW-0805',snapshotId:'S-NEW-0805'});
   assert.deepEqual(reimported.pnhBills,[newBill],'changed same-day reupload must publish only the new WHPP membership');
   const invalidated=db.prepare('SELECT status,reconciliationStatus,invalidReason FROM business_export_snapshots WHERE snapshotId=?').get(oldSnapshot);
   assert.equal(invalidated.status,'INVALID');assert.equal(invalidated.reconciliationStatus,'FAILED');assert.match(String(invalidated.invalidReason||''),/WHPP_DAILY_REIMPORT_NEW_LIFECYCLE/);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM business_history_summary WHERE businessType='WHPP' AND reportDate='2026-08-05'").get().count,0,'old completed history summary must be cleared on changed reupload');
   assert.equal(db.prepare("SELECT COUNT(*) count FROM business_final_rows WHERE businessType='WHPP' AND reportDate='2026-08-05'").get().count,0,'old same-day derived final rows must be cleared before the new lifecycle runs');
+  const retiredCarry=db.prepare("SELECT status,apiStatus,closeReason FROM carryover_open_items WHERE shipmentCode=?").get(oldBill);
+  assert.equal(retiredCarry.status,'CLOSED','removed same-day WHPP member must not remain in the OPEN carry pool');
+  assert.equal(retiredCarry.apiStatus,'REMOVED_BY_REIMPORT');assert.equal(retiredCarry.closeReason,'WHPP_REIMPORT_REMOVED_MEMBER');
+  const preservedCarry=db.prepare("SELECT status,sourceReportDate FROM carryover_open_items WHERE shipmentCode=?").get(historicCarry);
+  assert.equal(preservedCarry.status,'OPEN','real earlier-day WHPP carry must survive a same-day correction');assert.equal(preservedCarry.sourceReportDate,'2026-08-04');
+  assert.ok(!reimported.carryBills.includes(oldBill)&&!reimported.nextCarryBills.includes(oldBill),'retired same-day member must be removed from in-memory carry queues immediately');
+  assert.ok(reimported.carryBills.includes(historicCarry)&&reimported.nextCarryBills.includes(historicCarry),'earlier-day carry must remain in both persisted and in-memory continuation truth');
   const reimportDaily=db.prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate='2026-08-05'").get(),reimportSummary=JSON.parse(reimportDaily.summaryJson||'{}');
   assert.equal(Number(reimportDaily.totalCount),1);assert.notEqual(reimportSummary.completed,true);assert.equal(reimportSummary.lifecycleRevision,'2026-09-03-v419-whpp-reimport-invalidates-old-completion-v1');
   assert.deepEqual(db.prepare("SELECT shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate='2026-08-05' ORDER BY shipmentCode").all().map(row=>row.shipmentCode),[newBill]);
@@ -131,7 +140,7 @@ try{
   assert.equal(replaySummary.completed,true);assert.equal(replaySummary.finalizedSnapshotId,sameSnapshot);
   assert.equal(listCompletedWhppSnapshots('2026-08-06','2026-08-06').length,1,'identical completed reupload must remain export-eligible and must not restart WHPP');
 
-  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT+REIMPORT] PASS invalid/failed history rejected · certified partial membership fail-closed · snapshot carry excluded · changed same-day reupload invalidates old completion before new processing · identical finalized reupload remains a no-op');
+  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT+REIMPORT] PASS invalid/failed history rejected · certified partial membership fail-closed · snapshot carry excluded · changed same-day reupload invalidates old completion and retires removed same-day carry · real historical carry preserved · identical finalized reupload remains a no-op');
 }finally{
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
