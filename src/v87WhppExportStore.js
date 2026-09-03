@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-export const V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v3';
+export const V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-completion-certified-membership-export-v4';
 
 const text=value=>String(value??'').trim();
 const billOf=value=>text(value).toUpperCase();
@@ -12,31 +12,68 @@ function parseJson(value) {
   catch { return {}; }
 }
 
-// Metadata only. Export split/count planning must never materialize every
-// historical WHPP payloadJson just to discover eligible dates.
-function latestValidCompletedSnapshots(fromDate,toDate,db=getDb()) {
+function completedDailyAuthority(fromDate,toDate,db=getDb()) {
   const rows=db.prepare(`
-    SELECT snapshotId,reportDate,createdAt,id
+    SELECT reportDate,summaryJson
+    FROM business_daily_reports
+    WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ?
+    ORDER BY reportDate
+  `).all(fromDate,toDate);
+  const byDate=new Map();
+  for(const row of rows){
+    const date=text(row.reportDate),summary=parseJson(row.summaryJson),status=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase(),snapshotId=text(summary.finalizedSnapshotId);
+    const completed=summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(snapshotId);
+    byDate.set(date,{dailyPresent:true,completed,snapshotId:completed?snapshotId:'',status});
+  }
+  return byDate;
+}
+
+// Metadata only. Export split/count planning must never materialize every
+// historical WHPP payloadJson just to discover eligible dates. A surviving daily
+// header is the completion authority: only its exact finalizedSnapshotId is
+// eligible. When the header has been fully rotated away, an explicitly
+// VALID+COMPLETED snapshot may stand alone. Legacy unverified snapshots are never
+// self-authorizing; they require the completed daily summary to point to them.
+function latestEligibleCompletedSnapshots(fromDate,toDate,db=getDb()) {
+  const dailyAuthority=completedDailyAuthority(fromDate,toDate,db);
+  const rows=db.prepare(`
+    SELECT snapshotId,reportDate,status,reconciliationStatus,createdAt,id
     FROM business_export_snapshots
     WHERE businessType='WHPP'
       AND reportDate BETWEEN ? AND ?
-      AND COALESCE(status,'VALID')='VALID'
-      AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
+      AND UPPER(COALESCE(status,''))<>'INVALID'
+      AND UPPER(COALESCE(reconciliationStatus,''))<>'FAILED'
     ORDER BY reportDate,createdAt DESC,id DESC
   `).all(fromDate,toDate);
-  const byDate=new Map();
-  for(const row of rows){const date=text(row.reportDate);if(date&&!byDate.has(date))byDate.set(date,row);}
-  return [...byDate.values()].sort((a,b)=>text(a.reportDate).localeCompare(text(b.reportDate)));
+  const grouped=new Map();
+  for(const row of rows){const date=text(row.reportDate);if(!date)continue;if(!grouped.has(date))grouped.set(date,[]);grouped.get(date).push(row);}
+  const out=[];
+  for(const [date,candidates] of grouped){
+    const authority=dailyAuthority.get(date);
+    let chosen=null,legacyFinalized=false;
+    if(authority?.dailyPresent){
+      if(!authority.completed)continue;
+      chosen=candidates.find(row=>text(row.snapshotId)===authority.snapshotId)||null;
+      if(!chosen)continue;
+      const explicit=text(chosen.status).toUpperCase()==='VALID'&&text(chosen.reconciliationStatus).toUpperCase()==='COMPLETED';
+      legacyFinalized=!explicit;
+    }else{
+      chosen=candidates.find(row=>text(row.status).toUpperCase()==='VALID'&&text(row.reconciliationStatus).toUpperCase()==='COMPLETED')||null;
+      if(!chosen)continue;
+    }
+    out.push({...chosen,legacyFinalized,dailyCompletionAuthority:Boolean(authority?.dailyPresent)});
+  }
+  return out.sort((a,b)=>text(a.reportDate).localeCompare(text(b.reportDate)));
 }
 
 function loadSnapshotPayload(snapshot={},db=getDb()) {
   if(!snapshot?.snapshotId)return {};
   const row=db.prepare(`
-    SELECT payloadJson
+    SELECT status,reconciliationStatus,payloadJson
     FROM business_export_snapshots
     WHERE snapshotId=? AND businessType='WHPP'
-      AND COALESCE(status,'VALID')='VALID'
-      AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
+      AND UPPER(COALESCE(status,''))<>'INVALID'
+      AND UPPER(COALESCE(reconciliationStatus,''))<>'FAILED'
     LIMIT 1
   `).get(snapshot.snapshotId);
   return parseJson(row?.payloadJson);
@@ -114,12 +151,13 @@ function latestValidUnifiedMembershipRows(reportDate,db=getDb()) {
 
 function snapshotMembershipRows(snapshot={},db=getDb()) {
   const payload=loadSnapshotPayload(snapshot,db),state=payload.state||{};
+  const legacyPrefix=snapshot.legacyFinalized?'WHPP_LEGACY_FINALIZED_SNAPSHOT':'WHPP_VALID_COMPLETED_SNAPSHOT';
   const pnhBills=uniqueBills(state.pnhBills||[]);
   const dailyRows=Array.isArray(state.dailyParseRows)?state.dailyParseRows:[];
   const dailyByBill=new Map();
   for(const row of dailyRows){
     const bill=billOf(row?.shipmentCode||row?.运单号||row?.waybill);if(!bill)continue;
-    dailyByBill.set(bill,{...row,shipmentCode:bill,运单号:bill,membershipSource:'WHPP_VALID_COMPLETED_SNAPSHOT_DAILY'});
+    dailyByBill.set(bill,{...row,shipmentCode:bill,运单号:bill,membershipSource:`${legacyPrefix}_DAILY`});
   }
   if(pnhBills.length){
     if(dailyByBill.size){
@@ -130,7 +168,7 @@ function snapshotMembershipRows(snapshot={},db=getDb()) {
         error.code='WHPP_EXPORT_SNAPSHOT_MEMBERSHIP_MISMATCH';error.reportDate=snapshot.reportDate;error.pnhCount=pnhBills.length;error.dailyCount=dailyByBill.size;throw error;
       }
     }
-    return pnhBills.map(bill=>({...(dailyByBill.get(bill)||{}),shipmentCode:bill,运单号:bill,membershipSource:'WHPP_VALID_COMPLETED_SNAPSHOT_PNH'}));
+    return pnhBills.map(bill=>({...(dailyByBill.get(bill)||{}),shipmentCode:bill,运单号:bill,membershipSource:`${legacyPrefix}_PNH`}));
   }
   if(dailyByBill.size)return [...dailyByBill.values()];
   // finalRows is deliberately NOT a membership fallback. WHPP pipeline builds
@@ -154,7 +192,7 @@ function membershipRows(snapshot,db=getDb()) {
   if(meta.complete)return meta.expected===0?[]:standardMembershipRows(snapshot.reportDate,db);
   const unified=latestValidUnifiedMembershipRows(snapshot.reportDate,db);
   if(unified.length)return validateRecoveredCount(unified,meta,snapshot.reportDate,'WHPP_VALID_UNIFIED_DAILY');
-  return validateRecoveredCount(snapshotMembershipRows(snapshot,db),meta,snapshot.reportDate,'WHPP_VALID_COMPLETED_SNAPSHOT');
+  return validateRecoveredCount(snapshotMembershipRows(snapshot,db),meta,snapshot.reportDate,snapshot.legacyFinalized?'WHPP_LEGACY_FINALIZED_SNAPSHOT':'WHPP_VALID_COMPLETED_SNAPSHOT');
 }
 
 function membershipCount(snapshot,db=getDb()) {
@@ -162,7 +200,7 @@ function membershipCount(snapshot,db=getDb()) {
   if(meta.complete)return meta.expected;
   const unified=latestValidUnifiedMembershipRows(snapshot.reportDate,db);
   if(unified.length)return validateRecoveredCount(unified,meta,snapshot.reportDate,'WHPP_VALID_UNIFIED_DAILY').length;
-  return validateRecoveredCount(snapshotMembershipRows(snapshot,db),meta,snapshot.reportDate,'WHPP_VALID_COMPLETED_SNAPSHOT').length;
+  return validateRecoveredCount(snapshotMembershipRows(snapshot,db),meta,snapshot.reportDate,snapshot.legacyFinalized?'WHPP_LEGACY_FINALIZED_SNAPSHOT':'WHPP_VALID_COMPLETED_SNAPSHOT').length;
 }
 
 function finalRowsByBill(reportDate,bills=[],db=getDb()) {
@@ -205,32 +243,32 @@ function normalizeWhppRow(finalRow = {}, memberRow = {}, reportDate = '') {
     recipient_group: 'WHPP',
     source_row_number: Number(finalRow.source_row_number || memberRow.rowNumber || merged.source_row_number || merged.rowNumber || 0),
     sheetName: memberRow.sheetName || merged.sheetName || '',
-    whppExportMembershipSource:memberRow.membershipSource||'WHPP_VALID_COMPLETED_SNAPSHOT_PNH',
+    whppExportMembershipSource:memberRow.membershipSource||(snapshot.legacyFinalized?'WHPP_LEGACY_FINALIZED_SNAPSHOT_PNH':'WHPP_VALID_COMPLETED_SNAPSHOT_PNH'),
     v419WhppExportMembershipId:V419_WHPP_EXPORT_MEMBERSHIP_ID
   };
 }
 
 export function listCompletedWhppSnapshots(fromDate, toDate) {
-  const db=getDb(),snapshots=latestValidCompletedSnapshots(fromDate,toDate,db),out=[];
+  const db=getDb(),snapshots=latestEligibleCompletedSnapshots(fromDate,toDate,db),out=[];
   for(const snapshot of snapshots){
     const members=membershipRows(snapshot,db),memberBills=members.map(row=>row.shipmentCode||row.运单号),finals=finalRowsByBill(snapshot.reportDate,memberBills,db),rows=[];
     for(const member of members){
       const bill=billOf(member.shipmentCode||member.运单号);if(!bill)continue;
       rows.push(normalizeWhppRow(finals.get(bill)||{},member,snapshot.reportDate));
     }
-    out.push({snapshotId:snapshot.snapshotId||`WHPP-RANGE-${snapshot.reportDate}`,reportDate:snapshot.reportDate,payload:{finalRows:rows},membershipSource:members[0]?.membershipSource||(rows.length?'WHPP_RECOVERED_DAILY':'WHPP_STANDARD_DAILY_ZERO')});
+    out.push({snapshotId:snapshot.snapshotId||`WHPP-RANGE-${snapshot.reportDate}`,reportDate:snapshot.reportDate,payload:{finalRows:rows},membershipSource:members[0]?.membershipSource||(rows.length?'WHPP_RECOVERED_DAILY':'WHPP_STANDARD_DAILY_ZERO'),legacyFinalized:Boolean(snapshot.legacyFinalized)});
   }
   return out;
 }
 
 export function countCompletedWhppRows(fromDate, toDate) {
   const db=getDb();
-  return latestValidCompletedSnapshots(fromDate,toDate,db).reduce((sum,snapshot)=>sum+membershipCount(snapshot,db),0);
+  return latestEligibleCompletedSnapshots(fromDate,toDate,db).reduce((sum,snapshot)=>sum+membershipCount(snapshot,db),0);
 }
 
 export function whppDailyCounts(fromDate, toDate) {
   const db=getDb();
-  return latestValidCompletedSnapshots(fromDate,toDate,db).map(snapshot=>({reportDate:snapshot.reportDate,businessType:'WHPP',count:membershipCount(snapshot,db)}));
+  return latestEligibleCompletedSnapshots(fromDate,toDate,db).map(snapshot=>({reportDate:snapshot.reportDate,businessType:'WHPP',count:membershipCount(snapshot,db)}));
 }
 
-console.info('[CE-QC][V419_WHPP_EXPORT_MEMBERSHIP]',V419_WHPP_EXPORT_MEMBERSHIP_ID,'WHPP export membership is immutable daily truth only: complete standard daily first, then latest VALID unified daily, then VALID+COMPLETED snapshot pnhBills/dailyParseRows. finalRows is status enrichment only because WHPP pipeline finalRows includes today+carry. Snapshot payloadJson is loaded lazily only when persisted daily/unified membership is unavailable.');
+console.info('[CE-QC][V419_WHPP_EXPORT_MEMBERSHIP]',V419_WHPP_EXPORT_MEMBERSHIP_ID,'WHPP export completion is daily-authority certified: while a daily header exists, only its exact completed finalizedSnapshotId is eligible (including legacy unverified snapshots from old finalize versions); if the header is fully rotated away, only explicit VALID+COMPLETED snapshots stand alone. Membership remains immutable daily truth: standard daily, VALID unified, then snapshot pnhBills/dailyParseRows; finalRows is enrichment only.');
