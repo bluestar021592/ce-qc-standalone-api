@@ -17,8 +17,10 @@ const {
   reconcileV246TrackingLedger,
   v246TrackingSummary,
   applyV246StrictAttemptEvidence,
+  applyV246EvidenceRows,
   ensureV246TrackingSchema
 }=await import('../src/v246TrackingLedgerCore.js');
+const {syncCarryRowsToV246Ledger}=await import('../src/carryLedgerSync.js');
 const db=getDb();ensureV246TrackingSchema(db);
 const now='2026-08-23T00:00:00.000Z';
 const reportDate='2026-08-01';const snapshotId='V246-S1',batchId='V246-B1';
@@ -60,15 +62,33 @@ assert.equal(summary.total,4);assert.equal(summary.open,3);assert.equal(summary.
 db.prepare("UPDATE qc_tracking_ledger SET attemptNo=3,attemptSource='LEGACY_DISTINCT_DELIVERY_DATES' WHERE shipmentCode='TBKH-TRUE-POD'").run();
 const corrected=applyV246StrictAttemptEvidence([{shipmentCode:'TBKH-TRUE-POD',attemptNo:1,source:'轨迹70严格START/失败循环',podDate:'2026-08-03',starts:[{time:'2026-08-02 09:00:00',code:'70'}],failures:[]}],{db,reason:'V246_STRICT_CORRECTION_SMOKE'});
 assert.equal(corrected.corrected,1);
-const correctedRow=db.prepare("SELECT attemptNo,attemptSource,signingDays,evidenceJson FROM qc_tracking_ledger WHERE shipmentCode='TBKH-TRUE-POD'").get();
+let correctedRow=db.prepare("SELECT attemptNo,attemptSource,signingDays,evidenceJson FROM qc_tracking_ledger WHERE shipmentCode='TBKH-TRUE-POD'").get();
 assert.equal(Number(correctedRow.attemptNo),1,'strict cycle must overwrite—not max—with the authoritative attempt');
 assert.match(correctedRow.attemptSource,/^V246_STRICT_TRACK:/);
 assert.equal(Number(correctedRow.signingDays),2,'strict signing days must be first real START through actual POD, inclusive');
-const strictEvidence=JSON.parse(correctedRow.evidenceJson||'{}');
+let strictEvidence=JSON.parse(correctedRow.evidenceJson||'{}');
 assert.equal(strictEvidence.starts?.[0]?.time,'2026-08-02 09:00:00');
 
+// Prove that every later compatibility writer preserves the strict tuple rather
+// than silently reverting to first-report-to-POD days or guessed attempts.
+applyV246EvidenceRows([{
+  shipmentCode:'TBKH-TRUE-POD',businessType:'TBKH',pod:true,podDate:'2026-08-03',podTime:'2026-08-03 12:00:00',
+  podSource:'POD锁',statusCode:'Y',statusDesc:'POD'
+}],{db,reason:'V246_STRICT_V200_PRESERVE_SMOKE'});
+syncCarryRowsToV246Ledger([{
+  shipmentCode:'TBKH-TRUE-POD',businessType:'TBKH',currentState:'POD',是否POD:'是',POD时间:'2026-08-03 12:00:00',
+  podAttemptNo:3,currentAttemptNo:3,attemptSource:'CARRY_GUESS_SHOULD_NOT_WIN'
+}],{db,reason:'V246_STRICT_CARRY_PRESERVE_SMOKE',invalidateCaches:false});
+reconcileV246TrackingLedger({businessType:'TBKH',fromDate:'2026-08-01',toDate:'2026-08-03',days:3},{db,reason:'V246_STRICT_RECONCILE_PRESERVE_SMOKE'});
+correctedRow=db.prepare("SELECT attemptNo,attemptSource,signingDays,evidenceJson FROM qc_tracking_ledger WHERE shipmentCode='TBKH-TRUE-POD'").get();
+assert.equal(Number(correctedRow.attemptNo),1,'V200/carry/reconcile must not downgrade strict attempt evidence');
+assert.match(correctedRow.attemptSource,/^V246_STRICT_TRACK:/);
+assert.equal(Number(correctedRow.signingDays),2,'V200/carry/reconcile must preserve strict START-to-POD signing days');
+strictEvidence=JSON.parse(correctedRow.evidenceJson||'{}');
+assert.equal(strictEvidence.starts?.[0]?.time,'2026-08-02 09:00:00','strict START evidence must survive later compatibility refreshes');
+
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V246] ledger reconcile smoke passed: historical-source union + false-close reopen + true terminal lock + strict START-to-POD signing days + strict attempt correction');
+console.log('[V246] ledger reconcile smoke passed: historical-source union + false-close reopen + true terminal lock + strict START-to-POD signing days + strict evidence survives V200/carry/reconcile');
 
 // Keep package.json/dependencies unchanged. The existing V246 gate explicitly
 // chains the V247 dashboard truth smoke as a fresh process so its DB/env are isolated.
