@@ -59,7 +59,9 @@ assert.match(whppBoardSource,/\/api\/v234\/trends\?businessType=WHPP&from=/,'WHP
 assert.match(whppBoardSource,/new URLSearchParams\(\{from:range\.from,to:range\.to/,'WHPP V132 direct detail path must send same from/to');
 assert.match(whppExactUiSource,/new URLSearchParams\(\{from:range\.from,to:range\.to/,'V249 exact click owner must send same from/to');
 assert.match(whppExactUiSource,/`\$\{membership\}\|\$\{code\}`/,'WHPP closed detail must preserve daily membership occurrence rather than cross-day bill dedupe');
-assert.match(whppDetailSource,/2026-09-03-v419-whpp-immutable-membership-detail-v6/,'WHPP detail must use immutable daily membership owner');
+assert.match(whppDetailSource,/2026-09-03-v419-whpp-completion-certified-detail-v7/,'WHPP detail must use completion-certified immutable daily membership owner');
+assert.match(whppDetailSource,/function certifiedCompletedSnapshotState\(reportDate\)/,'WHPP rotated history must use certified completion authority');
+assert.match(whppDetailSource,/BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED/,'WHPP standalone rotated snapshot must be explicit VALID+COMPLETED');
 assert.match(whppDetailSource,/function restrictStateToImmutableMembership/,'WHPP detail must restrict final rows to admitted daily members');
 assert.match(whppDetailSource,/function memberDates\(from,to\)/,'WHPP detail backend must enumerate daily memberships inside selected range');
 assert.match(whppDetailSource,/SHIPMENT_CURRENT_STATE/,'WHPP historical daily memberships must overlay latest persisted current truth');
@@ -100,7 +102,7 @@ assert.ok(rows[0].evidence instanceof Set&&rows[0].evidence.has('当前持久化
 const whppBill='WH-V419-1';
 for(const reportDate of ['2026-08-01','2026-08-02']){
   const state={businessType:'WHPP',reportDate,pnhBills:[whppBill],dailyParseRows:[{shipmentCode:whppBill,运单号:whppBill,regionCode:'PP',日报日期:reportDate}],finalRows:[{shipmentCode:whppBill,运单号:whppBill,regionCode:'PP',是否POD:'否',currentState:'OPEN',primaryCategory:'Pending'}]};
-  insert('business_export_snapshots',{snapshotId:`WS-${reportDate}`,businessType:'WHPP',reportDate,runId:`WR-${reportDate}`,payloadJson:JSON.stringify({state}),generatedAt:`${reportDate}T12:00:00.000Z`,createdAt:`${reportDate}T12:00:00.000Z`});
+  insert('business_export_snapshots',{snapshotId:`WS-${reportDate}`,businessType:'WHPP',reportDate,runId:`WR-${reportDate}`,payloadJson:JSON.stringify({state}),generatedAt:`${reportDate}T12:00:00.000Z`,createdAt:`${reportDate}T12:00:00.000Z`,status:'VALID',reconciliationStatus:'COMPLETED',invalidReason:''});
 }
 insert('shipment_current_state',{shipmentCode:whppBill,businessType:'WHPP',reportDate:'2026-08-02',snapshotId:'WS-2026-08-02',state:'POD',apiStatus:'SUCCESS',lastEventTime:'2026-08-02T18:00:00+07:00',stateJson:JSON.stringify({shipmentCode:whppBill,运单号:whppBill,regionCode:'PP',currentState:'POD',是否POD:'是',POD状态:'POD',POD时间:'2026-08-02T18:00:00+07:00'}),updatedAt:'2026-08-02T18:01:00+07:00'});
 const whpp=inspectV172WhppDetail({from:'2026-08-01',to:'2026-08-02',tab:'pod',page:'1',pageSize:'500'});
@@ -110,4 +112,4 @@ assert.ok(whpp.rows.every(row=>row.是否POD==='是'||row.POD状态==='POD'||Str
 assert.equal(whpp.truthSource,'IMMUTABLE_DAILY_MEMBERSHIP_PLUS_LATEST_SHIPMENT_CURRENT_STATE');
 closeDb();fs.rmSync(temp,{recursive:true,force:true});
 
-console.log('[V419 RANGE+EXPORT+WHPP] PASS one global range across HOME/7 business boards/export · WHPP cards+trends+details share from/to · immutable daily WHPP membership preserved with latest carryover POD · DB/WAL truth-aware export reuse');
+console.log('[V419 RANGE+EXPORT+WHPP] PASS one global range across HOME/7 business boards/export · WHPP cards+trends+details share from/to · completion-certified immutable daily WHPP membership preserved with latest carryover POD · DB/WAL truth-aware export reuse');
