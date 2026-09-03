@@ -10,7 +10,7 @@ const TYPE_SET=new Set([...STANDARD_TYPES,'CCSL','SHOPEE','ALL','WHPP']);
 const n=value=>Number.isFinite(Number(value))?Number(value):0;
 const pct=(value,total)=>total?Number((n(value)*100/n(total)).toFixed(2)):0;
 function dateKey(value=''){const text=String(value||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';}
-function datesForRange(from,to){const db=getDb();if(from===to)return db.prepare("SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate<=? ORDER BY reportDate DESC LIMIT 7").all(to).map(row=>String(row.reportDate||'')).filter(Boolean).sort();return db.prepare("SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate BETWEEN ? AND ? ORDER BY reportDate ASC LIMIT 180").all(from,to).map(row=>String(row.reportDate||'')).filter(Boolean);}
+function datesForRange(from,to,db=getDb()){if(from===to)return db.prepare("SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate<=? ORDER BY reportDate DESC LIMIT 7").all(to).map(row=>String(row.reportDate||'')).filter(Boolean).sort();return db.prepare("SELECT DISTINCT reportDate FROM unified_import_batches WHERE status='VALID' AND reportDate BETWEEN ? AND ? ORDER BY reportDate ASC LIMIT 180").all(from,to).map(row=>String(row.reportDate||'')).filter(Boolean);}
 function whppDatesForRange(from,to,db=getDb()){
   if(from===to)return db.prepare("SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate<=? ORDER BY reportDate DESC LIMIT 7").all(to).map(row=>String(row.reportDate||'')).filter(Boolean).sort();
   return db.prepare("SELECT DISTINCT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate ASC LIMIT 180").all(from,to).map(row=>String(row.reportDate||'')).filter(Boolean);
@@ -42,10 +42,10 @@ function readWhppTrendDaily(dates=[],db=getDb()){
   const byDate=new Map(merged.map(row=>[String(row.reportDate||''),row]));
   return dates.map(date=>normalizeWhppTrendFact(byDate.get(date),date));
 }
-export function readV237DashboardTrends(businessType='ALL',fromDate='',toDate=''){
+export function readV237DashboardTrends(businessType='ALL',fromDate='',toDate='',db=getDb()){
   const type=String(businessType||'ALL').toUpperCase(),to=dateKey(toDate),from=dateKey(fromDate)||to;if(!TYPE_SET.has(type))throw new Error('业务板块无效');if(!from||!to||from>to)throw new Error('日期范围无效');
-  const dates=type==='WHPP'?whppDatesForRange(from,to):datesForRange(from,to);
-  const daily=type==='WHPP'?readWhppTrendDaily(dates):[];
+  const dates=type==='WHPP'?whppDatesForRange(from,to,db):datesForRange(from,to,db);
+  const daily=type==='WHPP'?readWhppTrendDaily(dates,db):[];
   if(type!=='WHPP')for(const date of dates){const summary=readV236CurrentSummary(date,{cacheOnly:true});daily.push(pick(summary,type,date));}
   const value=(row,key)=>row?.ready?(row[key]===null||row[key]===undefined?null:n(row[key])):null;
   return{ok:true,readId:V237_DASHBOARD_TREND_READ_ID,whppTrendTruthId:type==='WHPP'?V419_WHPP_TREND_TRUTH_ID:'',businessType:type,requestedFromDate:from,requestedToDate:to,fromDate:dates[0]||from,toDate:dates.at(-1)||to,dates,daily,
