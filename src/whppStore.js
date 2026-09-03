@@ -5,6 +5,7 @@ import { isWhppCancelledRow } from './whppAnalyzer.js';
 import { isSpecialCategory } from './specialNode.js';
 
 export const WHPP = 'WHPP';
+export const V419_WHPP_REIMPORT_LIFECYCLE_ID = '2026-09-03-v419-whpp-reimport-invalidates-old-completion-v1';
 
 export function loadWhppState() {
   const row = getDb().prepare('SELECT valueJson FROM business_states WHERE businessType=?').get(WHPP);
@@ -72,7 +73,31 @@ function inspectExistingWhppDaily(db, reportDate, incomingRows = []) {
   const identicalMembership = headerCount === incoming.length
     && stored.length === incoming.length
     && stored.every((bill, index) => bill === incoming[index]);
-  return { exists: true, finalized: isFinalizedWhppDaily(summary), identicalMembership, summary };
+  return { exists: true, finalized: isFinalizedWhppDaily(summary), identicalMembership, summary, storedCount: stored.length, incomingCount: incoming.length };
+}
+
+function invalidatePriorWhppLifecycle(db, reportDate, context = {}, now = nowIso()) {
+  const reason = JSON.stringify({
+    code: 'WHPP_DAILY_REIMPORT_NEW_LIFECYCLE',
+    revision: V419_WHPP_REIMPORT_LIFECYCLE_ID,
+    reportDate,
+    priorFinalized: Boolean(context.finalized),
+    priorIdenticalMembership: Boolean(context.identicalMembership),
+    priorStoredCount: Number(context.storedCount || 0),
+    incomingCount: Number(context.incomingCount || 0),
+    invalidatedAt: now
+  });
+  let invalidatedSnapshots = 0;
+  try {
+    invalidatedSnapshots = Number(db.prepare(`UPDATE business_export_snapshots
+      SET status='INVALID',reconciliationStatus='FAILED',invalidReason=?
+      WHERE businessType='WHPP' AND reportDate=? AND COALESCE(status,'VALID')='VALID'`).run(reason, reportDate)?.changes || 0);
+  } catch {}
+  try { db.prepare("DELETE FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?").run(reportDate); } catch {}
+  for (const table of ['business_scan_results','business_track_events','business_exception_items','business_final_rows']) {
+    try { db.prepare(`DELETE FROM ${table} WHERE businessType='WHPP' AND reportDate=?`).run(reportDate); } catch {}
+  }
+  return { invalidatedSnapshots, reason };
 }
 
 export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], batchId = '', snapshotId = '', preserveFinalizedLifecycle = false }) {
@@ -82,26 +107,32 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
   const todayBills = new Set(unique.map(billOf));
   const prior = loadWhppState();
 
-  // V399: a finalized WHPP daily is immutable when the exact same shipment
-  // membership is uploaded again. This covers both the explicit V366 rehydrate
-  // path and a normal same-date workbook reupload that still contains WHPP rows.
-  // Only a real membership change is allowed to clear the completion lifecycle.
+  // V419/V399: a finalized WHPP daily is immutable only when the exact same
+  // membership is uploaded again, or an explicit rehydrate contains no new WHPP
+  // members at all. A non-empty changed membership always starts a new lifecycle.
   const existingDaily = inspectExistingWhppDaily(db, reportDate, unique);
-  if (existingDaily.finalized && (preserveFinalizedLifecycle === true || existingDaily.identicalMembership)) {
+  const explicitEmptyRehydrate = preserveFinalizedLifecycle === true && unique.length === 0;
+  if (existingDaily.finalized && (existingDaily.identicalMembership || explicitEmptyRehydrate)) {
     return restoreFinalizedWhppState(
       reportDate,
       existingDaily.summary,
-      preserveFinalizedLifecycle === true ? 'EXPLICIT_REHYDRATE' : 'IDENTICAL_MEMBERSHIP_REUPLOAD'
+      explicitEmptyRehydrate ? 'EXPLICIT_REHYDRATE' : 'IDENTICAL_MEMBERSHIP_REUPLOAD'
     );
   }
 
   const carryBills = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' ORDER BY shipmentCode").all().map(row => row.shipmentCode);
 
   db.exec('BEGIN IMMEDIATE');
+  let lifecycleReset = { invalidatedSnapshots: 0, reason: '' };
   try {
+    // This call is reached only for a real new lifecycle. Old completed snapshots
+    // and derived history must become ineligible before the new membership is
+    // published, otherwise an export between re-upload and re-processing could
+    // incorrectly reuse stale completion evidence.
+    lifecycleReset = invalidatePriorWhppLifecycle(db, reportDate, existingDaily, now);
     db.prepare(`INSERT INTO business_daily_reports(businessType,reportDate,sourceFile,totalCount,summaryJson,createdAt,updatedAt)
       VALUES(?,?,?,?,?,?,?) ON CONFLICT(businessType,reportDate) DO UPDATE SET sourceFile=excluded.sourceFile,totalCount=excluded.totalCount,summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`)
-      .run(WHPP, reportDate, sourceName, unique.length, JSON.stringify({ batchId, snapshotId, total: unique.length }), now, now);
+      .run(WHPP, reportDate, sourceName, unique.length, JSON.stringify({ batchId, snapshotId, total: unique.length, lifecycleRevision: V419_WHPP_REIMPORT_LIFECYCLE_ID }), now, now);
     db.prepare('DELETE FROM business_daily_parse_rows WHERE businessType=? AND reportDate=?').run(WHPP, reportDate);
     const insertParse = db.prepare(`INSERT INTO business_daily_parse_rows(
       businessType,reportDate,shipmentCode,sheetName,rowNumber,source_row_number,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,rawText,rowJson,createdAt
@@ -134,6 +165,9 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
+  }
+  if (lifecycleReset.invalidatedSnapshots > 0) {
+    console.log('[CE-QC][WHPP_REIMPORT_LIFECYCLE_INVALIDATED]', JSON.stringify({ revision: V419_WHPP_REIMPORT_LIFECYCLE_ID, reportDate, invalidatedSnapshots: lifecycleReset.invalidatedSnapshots, incoming: unique.length }));
   }
 
   // POD locks are needed only for today's WHPP members (plus any defensive OPEN
@@ -255,12 +289,15 @@ export function finalizeWhppState(state = {}) {
 }
 
 export function listWhppHistory(limit = 120) {
-  return getDb().prepare(`SELECT snapshotId,reportDate,runId,generatedAt,createdAt FROM business_export_snapshots WHERE businessType=? ORDER BY reportDate DESC,createdAt DESC LIMIT ?`)
+  return getDb().prepare(`SELECT snapshotId,reportDate,runId,generatedAt,createdAt FROM business_export_snapshots
+    WHERE businessType=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
+    ORDER BY reportDate DESC,createdAt DESC LIMIT ?`)
     .all(WHPP, Math.max(1, Math.min(500, Number(limit) || 120)));
 }
 
 export function loadWhppSnapshot(snapshotId) {
-  const row = getDb().prepare('SELECT payloadJson FROM business_export_snapshots WHERE businessType=? AND snapshotId=?').get(WHPP, snapshotId);
+  const row = getDb().prepare(`SELECT payloadJson FROM business_export_snapshots
+    WHERE businessType=? AND snapshotId=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'`).get(WHPP, snapshotId);
   if (!row) return null;
   try { return JSON.parse(row.payloadJson || '{}'); } catch { return null; }
 }
