@@ -69,6 +69,9 @@ try{
   assert.equal(legacyExport[0].snapshotId,legacySnapshot);assert.equal(legacyExport[0].legacyFinalized,true);assert.equal(countCompletedWhppRows(legacyDate,legacyDate),1);
   const replay=saveWhppDailyImport({reportDate:legacyDate,sourceName:'8-8-replay.xls',rows:[legacyRow],batchId:'B-LEGACY-REPLAY',snapshotId:'S-LEGACY-REPLAY'});
   assert.equal(replay.finalizedLifecyclePreserved,true);assert.equal(replay.finalizedLifecyclePreserveReason,'IDENTICAL_MEMBERSHIP_REUPLOAD');assert.equal(replay.legacyFinalizedSnapshotAttested,true);
+  const historicalAnchorDate='2026-08-10',historicalAnchorBill='WH-V419-CURRENT-ANCHOR';
+  const historicalAnchor=saveWhppDailyImport({reportDate:historicalAnchorDate,sourceName:'8-10-anchor.xls',rows:[{shipmentCode:historicalAnchorBill,运单号:historicalAnchorBill,regionCode:'PP',rowNumber:2}],batchId:'B-HISTORICAL-ANCHOR',snapshotId:'S-HISTORICAL-ANCHOR'});
+  assert.equal(historicalAnchor.reportDate,historicalAnchorDate,'fixture must advance current WHPP state so 8/8 exercises historical snapshot recovery');
 
   // Simulate old normalized member rows being rotated away. V172 detail and V87
   // export must both recover the exact same legacy finalized snapshot membership,
