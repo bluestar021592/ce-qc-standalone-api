@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { ensureV246TrackingSchema } from '../src/v246TrackingLedgerCore.js';
+import {
+  ensureV246TrackingSchema,
+  applyV246StrictAttemptEvidence,
+  V419_STRICT_SIGNING_TRUTH_ID
+} from '../src/v246TrackingLedgerCore.js';
 import { syncCarryRowsToV246Ledger } from '../src/carryLedgerSync.js';
 
 const NOW='2026-09-03T00:00:00Z';
@@ -42,13 +46,13 @@ function insertCurrent(db,bill,type,date,state,payload){
   db.prepare('INSERT INTO shipment_current_state VALUES(?,?,?,?,?,?,?,?,?)')
     .run(bill,type,date,'S2',state,'SUCCESS',payload.latestEventTime||'',JSON.stringify(payload),NOW);
 }
-function insertLedger(db,{bill,type,terminalReason='POD',attemptNo=0,attemptSource='',podDate='2026-08-02'}){
+function insertLedger(db,{bill,type,terminalReason='POD',attemptNo=0,attemptSource='',podDate='2026-08-02',signingDays=2,evidenceJson='{}'}){
   db.prepare(`INSERT INTO qc_tracking_ledger(
     shipmentCode,businessType,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,terminalReason,terminalAt,
     currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastCheckedAt,lastRepairReason,createdAt,updatedAt
   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    bill,type,'2026-08-01','2026-08-02','S1','S2','TERMINAL',terminalReason,NOW,
-    terminalReason==='POD'?'POD':'RETURNED',terminalReason==='POD'?'POD':'退回','',podDate,attemptNo,attemptSource,2,'{}','{}',NOW,'fixture',NOW,NOW
+    bill,type,'2026-08-01','2026-08-04','S1','S2','TERMINAL',terminalReason,NOW,
+    terminalReason==='POD'?'POD':'RETURNED',terminalReason==='POD'?'POD':'退回','',podDate,attemptNo,attemptSource,signingDays,evidenceJson,'{}',NOW,'fixture',NOW,NOW
   );
 }
 
@@ -93,19 +97,54 @@ test('multi-day carry POD rewrites every legacy CCSL mirror date before synchron
   }
 });
 
-test('strict Shopee attempt evidence is mirrored into all business_final_rows without downgrade',()=>{
+test('strict START evidence calculates signing days from real dispatch START instead of first report date',()=>{
+  const db=fixture();
+  try{
+    const bill='SPE-STRICT-SIGNING';
+    insertLedger(db,{bill,type:'SHOPEECN',attemptNo:1,attemptSource:'OLD',podDate:'2026-08-04',signingDays:4,evidenceJson:'{}'});
+    const result=applyV246StrictAttemptEvidence([{
+      shipmentCode:bill,businessType:'SHOPEECN',podDate:'2026-08-04',attemptNo:2,source:'START_FAILURE_CYCLE',startMode:'TRACK_70',
+      starts:[{time:'2026-08-03T07:10:00Z'},{time:'2026-08-04T07:20:00Z'}],
+      failures:[{time:'2026-08-03T18:00:00Z',code:'1203'}]
+    }],{db,reason:'TEST_STRICT_START_SIGNING'});
+    assert.equal(result.updated,1);
+    assert.equal(result.signingKnown,1);
+    assert.equal(result.signingTruthId,V419_STRICT_SIGNING_TRUTH_ID);
+    const locked=db.prepare('SELECT attemptNo,attemptSource,signingDays,evidenceJson FROM qc_tracking_ledger WHERE shipmentCode=?').get(bill);
+    assert.equal(locked.attemptNo,2);
+    assert.equal(locked.attemptSource,'V246_STRICT_TRACK:START_FAILURE_CYCLE');
+    assert.equal(locked.signingDays,2,'2026-08-03 START through 2026-08-04 POD must be 2 inclusive days, not 4 days from first report');
+    const evidence=JSON.parse(locked.evidenceJson);
+    assert.equal(evidence.strictStartDate,'2026-08-03');
+    assert.equal(evidence.signingTruth,V419_STRICT_SIGNING_TRUTH_ID);
+    assert.equal(evidence.starts.length,2);
+    assert.equal(evidence.failures.length,1);
+  }finally{db.close();}
+});
+
+test('ordinary carry refresh cannot downgrade strict Shopee attempt, START evidence, or signing days',()=>{
   const db=fixture();
   const oldHook=globalThis.__CE_QC_REFRESH_LEDGER_DERIVED_DASHBOARDS__;
   try{
     const bill='SPE-STRICT-MIRROR';
-    const row={shipmentCode:bill,businessType:'SHOPEEVN',currentState:'POD',是否POD:'是',POD时间:'2026-08-02T09:00:00Z',podAttemptNo:1,currentAttemptNo:1,primaryCategory:'POD'};
-    insertCarry(db,bill,'SHOPEEVN','2026-08-01','2026-08-02',row);
-    insertCurrent(db,bill,'SHOPEEVN','2026-08-02','POD',row);
-    insertLedger(db,{bill,type:'SHOPEEVN',attemptNo:2,attemptSource:'V246_STRICT_TRACK:START_FAILURE_CYCLE'});
+    const row={shipmentCode:bill,businessType:'SHOPEEVN',currentState:'POD',是否POD:'是',POD时间:'2026-08-04T09:00:00Z',podAttemptNo:1,currentAttemptNo:1,primaryCategory:'POD'};
+    insertCarry(db,bill,'SHOPEEVN','2026-08-01','2026-08-04',row);
+    insertCurrent(db,bill,'SHOPEEVN','2026-08-04','POD',row);
+    const strictEvidence={
+      source:'V246_STRICT_TRACK:START_FAILURE_CYCLE',reason:'fixture',podDate:'2026-08-04',attemptNo:2,startMode:'TRACK_70',
+      starts:[{time:'2026-08-03T07:00:00Z'},{time:'2026-08-04T07:00:00Z'}],failures:[{time:'2026-08-03T18:00:00Z',code:'1203'}],
+      strictStartDate:'2026-08-03',signingTruth:V419_STRICT_SIGNING_TRUTH_ID,checkedAt:NOW
+    };
+    insertLedger(db,{bill,type:'SHOPEEVN',attemptNo:2,attemptSource:'V246_STRICT_TRACK:START_FAILURE_CYCLE',podDate:'2026-08-04',signingDays:2,evidenceJson:JSON.stringify(strictEvidence)});
     const insert=db.prepare('INSERT INTO business_final_rows VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-    for(const date of ['2026-08-01','2026-08-02']) insert.run('SHOPEE',bill,date,0,'退回','退回','SUCCESS','OPEN','','','{}',2,'SHOP_ARRIVED_CURRENT','OLD',1,1,'OLD',NOW);
+    for(const date of ['2026-08-01','2026-08-02','2026-08-03','2026-08-04']) insert.run('SHOPEE',bill,date,0,'退回','退回','SUCCESS','OPEN','','','{}',2,'SHOP_ARRIVED_CURRENT','OLD',1,1,'OLD',NOW);
     globalThis.__CE_QC_REFRESH_LEDGER_DERIVED_DASHBOARDS__=()=>({ok:true});
     syncCarryRowsToV246Ledger([row],{db,reason:'TEST_STRICT_MIRROR'});
+    const locked=db.prepare('SELECT attemptNo,attemptSource,signingDays,evidenceJson FROM qc_tracking_ledger WHERE shipmentCode=?').get(bill);
+    assert.equal(locked.attemptNo,2);
+    assert.equal(locked.attemptSource,'V246_STRICT_TRACK:START_FAILURE_CYCLE');
+    assert.equal(locked.signingDays,2);
+    assert.deepEqual(JSON.parse(locked.evidenceJson),strictEvidence,'ordinary carry commit must not erase strict START/failure evidence');
     for(const item of db.prepare("SELECT reportDate,isPod,primaryCategory,currentMainCategory,carryStatus,currentAttemptNo,podAttemptNo,attemptStatus,rawJson FROM business_final_rows WHERE businessType='SHOPEE' AND shipmentCode=? ORDER BY reportDate").all(bill)){
       assert.equal(item.isPod,1);
       assert.equal(item.primaryCategory,'POD');
