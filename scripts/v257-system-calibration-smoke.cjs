@@ -52,7 +52,9 @@ assert.ok(v284.includes('row.attempt2Rate=hasAttempt?pct(row.attempt2,row.pod):n
 assert.ok(v284.includes('row.attempt3Rate=hasAttempt?pct(row.attempt3,row.pod):null'), 'missing attempt-3 evidence must stay unavailable');
 assert.ok(v284.includes('daily denominator=latest VALID report membership PER BUSINESS per date;'), 'V284 authority must explicitly retain per-business latest-VALID daily membership');
 assert.ok(v284.includes('unrelated same-day imports cannot zero another business'), 'V284 authority must lock same-date sibling-business isolation');
-assert.ok(v284.includes('status truth=V246 ledger first'), 'V284 authority must explicitly keep V246 lifecycle truth ahead of legacy final rows');
+assert.ok(v284.includes("CASE WHEN l.shipmentCode IS NOT NULL THEN CASE WHEN l.terminalReason='POD' THEN 1 ELSE 0 END"), 'V284 POD truth must execute V246 ledger first before any legacy final-row fallback');
+assert.ok(v284.includes("CASE WHEN l.shipmentCode IS NOT NULL THEN CASE WHEN l.trackingStatus='TERMINAL' THEN 1 ELSE 0 END"), 'V284 terminal truth must execute V246 ledger first before any legacy final-row fallback');
+assert.ok(v284.includes("CASE WHEN l.shipmentCode IS NOT NULL THEN COALESCE(l.currentCategory,l.currentState,'')"), 'V284 current-category truth must execute V246 ledger first before any legacy final-row fallback');
 
 // 4) Tracking admission and terminal truth must cover all seven boards and close only real terminal evidence.
 assert.ok(tracking.includes("export const V246_TRACKING_TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);"), 'tracking ledger must cover all seven physical boards');
