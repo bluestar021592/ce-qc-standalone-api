@@ -3,7 +3,7 @@ import { getDb } from './db.js';
 import { loadWhppState } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
 
-const PATCH_ID='2026-09-03-v419-whpp-global-range-detail-current-truth-v2';
+const PATCH_ID='2026-09-03-v419-whpp-valid-completed-history-detail-v3';
 const ROUTE='/api/v172/whpp-metric-detail';
 const MAX_RANGE_DAYS=180;
 
@@ -16,7 +16,7 @@ function rangeDays(from,to){const a=Date.parse(`${from}T00:00:00Z`),b=Date.parse
 function memberDates(from,to){
   const db=getDb(),dates=new Set();
   try{for(const row of db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
-  try{for(const row of db.prepare("SELECT DISTINCT reportDate FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
+  try{for(const row of db.prepare("SELECT DISTINCT reportDate FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
   try{for(const row of db.prepare("SELECT DISTINCT reportDate FROM unified_import_rows WHERE UPPER(TRIM(businessType))='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate").all(from,to))if(dateOnly(row.reportDate))dates.add(dateOnly(row.reportDate));}catch{}
   return[...dates].sort();
 }
@@ -43,8 +43,8 @@ function directStateForDate(reportDate){
 }
 function stateForDate(reportDate=''){
   const requested=dateOnly(reportDate),current=loadWhppState();if(!requested||requested===dateOnly(current.reportDate))return overlayCurrentTruth(current);
-  const row=getDb().prepare("SELECT payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC,id DESC LIMIT 1").get(requested);
-  if(row){const payload=safeJson(row.payloadJson,{}),saved=payload.state||{};if((saved.pnhBills||[]).length||(saved.dailyParseRows||[]).length)return overlayCurrentTruth({...saved,businessType:'WHPP',reportDate:requested,detailMembershipSource:'BUSINESS_EXPORT_SNAPSHOT'});}
+  const row=getDb().prepare("SELECT payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY createdAt DESC,id DESC LIMIT 1").get(requested);
+  if(row){const payload=safeJson(row.payloadJson,{}),saved=payload.state||{};if((saved.pnhBills||[]).length||(saved.dailyParseRows||[]).length)return overlayCurrentTruth({...saved,businessType:'WHPP',reportDate:requested,detailMembershipSource:'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED'});}
   return overlayCurrentTruth(directStateForDate(requested));
 }
 function rowsForState(reportDate,tab,region=''){const state=stateForDate(reportDate),dashboard=buildWhppDashboard(state),detail=dashboard.detailTabs?.[tab]||dashboard.detailTabs?.all||{label:tab,rows:[]};let rows=Array.isArray(detail.rows)?detail.rows:[];if(region==='PP'||region==='PV')rows=rows.filter(row=>regionOf(row)===region);return{label:detail.label||tab,rows:rows.map(row=>({...row,reportMembershipDate:reportDate,日报日期:reportDate,detailMembershipSource:row.detailMembershipSource||state.detailMembershipSource||''}))};}
