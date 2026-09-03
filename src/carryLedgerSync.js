@@ -6,12 +6,16 @@ import {
   v246InclusiveDays
 } from './v246TrackingLedgerCore.js';
 
-export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v4-terminal-authority';
+export const CARRY_LEDGER_SYNC_ID = '2026-09-03-carry-ledger-sync-v5-derived-cache-mirror';
 
 const TYPES = new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
+const SHOPEE_TYPES = new Set(['SHOPEECN','SHOPEEVN']);
 const EXACT_TERMINAL_REASONS = new Set(['POD','RETURNED','ORDER_CANCELLED']);
 const text = value => String(value ?? '').trim();
 const billOf = value => text(value).toUpperCase();
+let pendingDerivedDates = new Set();
+let pendingDerivedDb = null;
+
 function safeJson(value, fallback = {}) {
   try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
   catch { return fallback; }
@@ -24,6 +28,15 @@ function firstValue(row = {}, keys = []) {
     if (value !== undefined && value !== null && text(value)) return value;
   }
   return '';
+}
+function optionalNumber(row = {}, keys = []) {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value === undefined || value === null || text(value) === '') continue;
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 function preferredState(payload = {}, currentState = '') {
   const evidence = [
@@ -57,6 +70,150 @@ function compact(row = {}) {
     currentCategory:text(row.currentCategory),podDate:text(row.podDate),attemptNo:Number(row.attemptNo || 0),attemptSource:text(row.attemptSource)
   };
 }
+function tableExists(db, table) {
+  try { return Boolean(db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(table)?.ok); }
+  catch { return false; }
+}
+function tableColumns(db, table) {
+  if (!tableExists(db, table)) return new Set();
+  try { return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row => String(row.name || ''))); }
+  catch { return new Set(); }
+}
+function normalizeCanonicalPayload(payload, terminalReason, currentState, currentCategory, podDate, attemptNo) {
+  const out = { ...payload, currentState, primaryCategory: currentCategory };
+  if (attemptNo > 0) {
+    out.currentAttemptNo = attemptNo;
+    out.podAttemptNo = attemptNo;
+  }
+  if (terminalReason === 'POD') {
+    out.是否POD = '是';
+    out.退回状态 = '';
+    out.订单取消 = '';
+    if (podDate && !v246DateKey(out.POD时间 || out.podTime || out.签收时间)) out.POD时间 = podDate;
+  } else if (terminalReason === 'RETURNED') {
+    out.是否POD = '否';
+    out.退回状态 = '已退回';
+    out.订单取消 = '';
+  } else if (terminalReason === 'ORDER_CANCELLED') {
+    out.是否POD = '否';
+    out.退回状态 = '';
+    out.订单取消 = '是';
+  } else {
+    out.是否POD = '否';
+    if (currentState === 'RETURN_IN_PROGRESS') out.退回状态 = '退回处理中';
+  }
+  return out;
+}
+function mirrorValues(payload, ledger, apiStatus, lastEventTime) {
+  const terminal = ledger.trackingStatus === 'TERMINAL';
+  return {
+    isPod: ledger.terminalReason === 'POD' ? 1 : 0,
+    category: text(ledger.currentCategory || ledger.currentState || 'OPEN'),
+    apiStatus: text(apiStatus || 'SUCCESS'),
+    carryStatus: terminal ? 'CLOSED' : 'OPEN',
+    lastEventTime: text(lastEventTime || ledger.lastEventTime || ''),
+    latestEventDesc: text(payload.latestEventDesc || payload.最后节点 || payload.lastEventDesc || ''),
+    rawJson: JSON.stringify(payload),
+    pendingDays: terminal ? 0 : optionalNumber(payload,['pendingDays','Pending天数','Pending当前天数','Pending当前次数']),
+    ocDays: terminal ? 0 : optionalNumber(payload,['ocDays','OC天数']),
+    cycleDays: terminal ? 0 : optionalNumber(payload,['cycleCountDays','盘点天数']),
+    assignDays: terminal ? 0 : optionalNumber(payload,['assignDays','分配天数']),
+    deliveringDays: terminal ? 0 : optionalNumber(payload,['deliveringDays','派送中停留天数']),
+    shopRetentionDays: terminal ? 0 : optionalNumber(payload,['shopRetentionNaturalDays','门店滞留天数']),
+    shopState: terminal ? 'CLOSED' : text(payload.shopState || payload.门店状态 || ''),
+    shopStateReason: terminal ? `V246_${ledger.terminalReason}` : text(payload.shopStateReason || ''),
+    attemptNo: Number(ledger.attemptNo || 0),
+    attemptSource: text(ledger.attemptSource || payload.attemptSource || payload.attemptStatus || '')
+  };
+}
+function buildFinalMirrorUpdater(db) {
+  const cols = tableColumns(db, 'final_rows');
+  if (!cols.size) return null;
+  const assignments = [];
+  const keys = [];
+  const set = (column, expression, ...valueKeys) => {
+    if (!cols.has(column)) return;
+    assignments.push(`${column}=${expression}`);
+    keys.push(...valueKeys);
+  };
+  set('isPod','?','isPod');
+  set('category','?','category');
+  set('qcConclusion','?','category');
+  set('lastEventTime',"COALESCE(NULLIF(?,''),lastEventTime)",'lastEventTime');
+  set('primaryCategory','?','category');
+  set('rawJson','?','rawJson');
+  set('pendingDays','CASE WHEN ? IS NULL THEN pendingDays ELSE ? END','pendingDays','pendingDays');
+  set('ocDays','CASE WHEN ? IS NULL THEN ocDays ELSE ? END','ocDays','ocDays');
+  set('cycleCountDays','CASE WHEN ? IS NULL THEN cycleCountDays ELSE ? END','cycleDays','cycleDays');
+  set('assignDays','CASE WHEN ? IS NULL THEN assignDays ELSE ? END','assignDays','assignDays');
+  set('deliveringDays','CASE WHEN ? IS NULL THEN deliveringDays ELSE ? END','deliveringDays','deliveringDays');
+  set('shopRetentionNaturalDays','CASE WHEN ? IS NULL THEN shopRetentionNaturalDays ELSE ? END','shopRetentionDays','shopRetentionDays');
+  set('shopState',"CASE WHEN TRIM(COALESCE(?,''))='' THEN shopState ELSE ? END",'shopState','shopState');
+  set('shopStateReason',"CASE WHEN TRIM(COALESCE(?,''))='' THEN shopStateReason ELSE ? END",'shopStateReason','shopStateReason');
+  set('updatedAt','?','updatedAt');
+  if (!assignments.length) return null;
+  const stmt = db.prepare(`UPDATE final_rows SET ${assignments.join(',')} WHERE shipmentCode=?`);
+  return (bill, values) => {
+    const params = keys.map(key => values[key]);
+    params.push(bill);
+    return Number(stmt.run(...params)?.changes || 0);
+  };
+}
+function buildBusinessMirrorUpdater(db) {
+  const cols = tableColumns(db, 'business_final_rows');
+  if (!cols.size) return null;
+  const assignments = [];
+  const keys = [];
+  const set = (column, expression, ...valueKeys) => {
+    if (!cols.has(column)) return;
+    assignments.push(`${column}=${expression}`);
+    keys.push(...valueKeys);
+  };
+  set('isPod','?','isPod');
+  set('primaryCategory','?','category');
+  set('currentMainCategory','?','category');
+  set('apiStatus','?','apiStatus');
+  set('carryStatus','?','carryStatus');
+  set('latestEventTime',"COALESCE(NULLIF(?,''),latestEventTime)",'lastEventTime');
+  set('latestEventDesc',"CASE WHEN TRIM(COALESCE(?,''))='' THEN latestEventDesc ELSE ? END",'latestEventDesc','latestEventDesc');
+  set('rawJson','?','rawJson');
+  set('shopRetentionNaturalDays','CASE WHEN ? IS NULL THEN shopRetentionNaturalDays ELSE ? END','shopRetentionDays','shopRetentionDays');
+  set('shopState',"CASE WHEN TRIM(COALESCE(?,''))='' THEN shopState ELSE ? END",'shopState','shopState');
+  set('shopStateReason',"CASE WHEN TRIM(COALESCE(?,''))='' THEN shopStateReason ELSE ? END",'shopStateReason','shopStateReason');
+  set('currentAttemptNo','CASE WHEN ?>0 THEN ? ELSE currentAttemptNo END','attemptNo','attemptNo');
+  set('podAttemptNo','CASE WHEN ?>0 THEN ? ELSE podAttemptNo END','attemptNo','attemptNo');
+  set('attemptStatus',"CASE WHEN ?>0 AND TRIM(COALESCE(?,''))<>'' THEN ? ELSE attemptStatus END",'attemptNo','attemptSource','attemptSource');
+  set('updatedAt','?','updatedAt');
+  if (!assignments.length) return null;
+  const stmt = db.prepare(`UPDATE business_final_rows SET ${assignments.join(',')} WHERE businessType=? AND shipmentCode=?`);
+  return (storageType, bill, values) => {
+    const params = keys.map(key => values[key]);
+    params.push(storageType,bill);
+    return Number(stmt.run(...params)?.changes || 0);
+  };
+}
+function fallbackInvalidateDerivedDates(db, dates = [], reason = 'V246_LEDGER_CHANGED') {
+  const normalized = [...new Set((dates || []).map(v246DateKey).filter(Boolean))];
+  if (!normalized.length) return { invalidated: 0, dates: [] };
+  const hasRows = tableExists(db,'dashboard_daily_cache');
+  const hasDates = tableExists(db,'dashboard_cache_dates');
+  const hasDirty = tableExists(db,'dashboard_cache_dirty');
+  const dropRows = hasRows ? db.prepare('DELETE FROM dashboard_daily_cache WHERE reportDate=?') : null;
+  const dropDates = hasDates ? db.prepare('DELETE FROM dashboard_cache_dates WHERE reportDate=?') : null;
+  const dirty = hasDirty ? db.prepare(`INSERT INTO dashboard_cache_dirty(reportDate,reason,dirtyAt) VALUES(?,?,?)
+    ON CONFLICT(reportDate) DO UPDATE SET reason=excluded.reason,dirtyAt=excluded.dirtyAt`) : null;
+  const now = nowIso();
+  for (const date of normalized) {
+    try { dropDates?.run(date); } catch {}
+    try { dropRows?.run(date); } catch {}
+    try { dirty?.run(date,String(reason || 'V246_LEDGER_CHANGED').slice(0,120),now); } catch {}
+  }
+  return { invalidated: normalized.length, dates: normalized };
+}
+function stageDerivedDates(db, dates = []) {
+  for (const date of dates.map(v246DateKey).filter(Boolean)) pendingDerivedDates.add(date);
+  if (dates.length) pendingDerivedDb = db;
+}
 export function invalidateCarryLedgerReadCaches() {
   for (const name of [
     '__CE_QC_INVALIDATE_V236_CURRENT_SUMMARY__',
@@ -66,6 +223,18 @@ export function invalidateCarryLedgerReadCaches() {
   ]) {
     try { globalThis[name]?.(); } catch {}
   }
+  const dates = [...pendingDerivedDates].sort();
+  const db = pendingDerivedDb;
+  pendingDerivedDates = new Set();
+  pendingDerivedDb = null;
+  if (!dates.length) return { dates: [], refreshed: false };
+  try {
+    const refresh = globalThis.__CE_QC_REFRESH_LEDGER_DERIVED_DASHBOARDS__;
+    if (typeof refresh === 'function') return { dates, refreshed: true, result: refresh(dates,'V246_LEDGER_COMMIT') };
+  } catch (error) {
+    console.warn('[CE-QC][CARRY_LEDGER_DERIVED_REFRESH_FAILED]', error?.message || error);
+  }
+  return { dates, refreshed: false, fallback: db ? fallbackInvalidateDerivedDates(db,dates,'V246_LEDGER_COMMIT_FALLBACK') : null };
 }
 
 export function syncCarryRowsToV246Ledger(rows = [], {
@@ -80,7 +249,7 @@ export function syncCarryRowsToV246Ledger(rows = [], {
     const bill = billOf(row?.shipmentCode || row?.运单号 || row?.waybill);
     if (bill) inputByBill.set(bill, row || {});
   }
-  if (!inputByBill.size) return { ok:true, version:CARRY_LEDGER_SYNC_ID, processed:0, terminal:0, open:0, reopened:0, changed:0 };
+  if (!inputByBill.size) return { ok:true, version:CARRY_LEDGER_SYNC_ID, processed:0, terminal:0, open:0, reopened:0, changed:0, mirrorChanged:0, affectedDates:[] };
 
   const carryGet = db.prepare('SELECT * FROM carryover_open_items WHERE shipmentCode=?');
   const currentGet = db.prepare('SELECT * FROM shipment_current_state WHERE shipmentCode=?');
@@ -105,9 +274,12 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       evidenceJson=excluded.evidenceJson,currentStateJson=excluded.currentStateJson,lastCheckedAt=excluded.lastCheckedAt,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
   const audit = db.prepare(`INSERT INTO qc_tracking_audit(shipmentCode,businessType,action,reason,beforeJson,afterJson,createdAt) VALUES(?,?,?,?,?,?,?)`);
+  const finalMirror = buildFinalMirrorUpdater(db);
+  const businessMirror = buildBusinessMirrorUpdater(db);
 
   const now = nowIso();
-  let processed=0, terminal=0, open=0, reopened=0, changed=0;
+  let processed=0, terminal=0, open=0, reopened=0, changed=0, mirrorChanged=0;
+  const affectedDates = new Set();
   if (manageTransaction) db.exec('BEGIN IMMEDIATE');
   try {
     for (const [bill,input] of inputByBill) {
@@ -151,22 +323,37 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       const signingDays = podDate ? v246InclusiveDays(firstReportDate,podDate) : (old?.signingDays ?? null);
       const terminalAt = isTerminal ? (text(old?.terminalAt) || lastEventTime || now) : '';
       const before = compact(old || {});
-      const normalizedPayload = { ...payload, businessType, currentState, primaryCategory:currentCategory };
-      if (terminalReason === 'POD') normalizedPayload.是否POD = '是';
-      if (terminalReason === 'RETURNED') normalizedPayload.退回状态 = '已退回';
-      const normalizedJson = JSON.stringify(normalizedPayload);
+      const canonicalPayload = normalizeCanonicalPayload({ ...payload, businessType },terminalReason,currentState,currentCategory,podDate,attemptNo);
+      const canonicalJson = JSON.stringify(canonicalPayload);
 
-      carryUpdate.run(isTerminal ? 'CLOSED' : 'OPEN', apiStatus, terminalReason, normalizedJson, now, bill);
-      if (current) currentUpdate.run(currentState, apiStatus, lastEventTime, normalizedJson, now, bill);
+      carryUpdate.run(isTerminal ? 'CLOSED' : 'OPEN', apiStatus, terminalReason, canonicalJson, now, bill);
+      if (current) currentUpdate.run(currentState, apiStatus, lastEventTime, canonicalJson, now, bill);
       ledgerUpsert.run(
         bill,businessType,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,terminalReason,terminalAt,
         currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,
-        JSON.stringify({source:CARRY_LEDGER_SYNC_ID,reason,snapshotId:lastSnapshotId,checkedAt:now}),normalizedJson,now,reason,old?.createdAt || carry?.createdAt || now,now
+        JSON.stringify({source:CARRY_LEDGER_SYNC_ID,reason,snapshotId:lastSnapshotId,checkedAt:now}),canonicalJson,now,reason,old?.createdAt || carry?.createdAt || now,now
       );
-      const after = compact(ledgerGet.get(bill) || {});
-      if (JSON.stringify(before) !== JSON.stringify(after)) {
+      const ledger = ledgerGet.get(bill) || {};
+      const after = compact(ledger);
+      const ledgerChanged = JSON.stringify(before) !== JSON.stringify(after);
+      if (ledgerChanged) {
         changed += 1;
         audit.run(bill,businessType,'CARRY_RESULT_SYNC',reason,JSON.stringify(before),JSON.stringify(after),now);
+      }
+
+      const mirrorPayload = normalizeCanonicalPayload(canonicalPayload,text(ledger.terminalReason),text(ledger.currentState),text(ledger.currentCategory),text(ledger.podDate),Number(ledger.attemptNo || 0));
+      const values = { ...mirrorValues(mirrorPayload,ledger,apiStatus,lastEventTime), updatedAt: now };
+      let mirrored = 0;
+      if (SHOPEE_TYPES.has(businessType)) mirrored += businessMirror?.('SHOPEE',bill,values) || 0;
+      else if (businessType === 'WHPP') mirrored += businessMirror?.('WHPP',bill,values) || 0;
+      else mirrored += finalMirror?.(bill,values) || 0;
+      mirrorChanged += mirrored;
+
+      if (ledgerChanged || mirrored > 0) {
+        for (const value of [carry?.sourceReportDate,carry?.lastReportDate,current?.reportDate,payload.reportDate,firstReportDate,lastImportedDate]) {
+          const date = v246DateKey(value);
+          if (date) affectedDates.add(date);
+        }
       }
       if (old?.trackingStatus === 'TERMINAL' && trackingStatus === 'OPEN') reopened += 1;
       if (isTerminal) terminal += 1; else open += 1;
@@ -179,6 +366,9 @@ export function syncCarryRowsToV246Ledger(rows = [], {
     }
     throw error;
   }
-  if (invalidateCaches) invalidateCarryLedgerReadCaches();
-  return { ok:true, version:CARRY_LEDGER_SYNC_ID, processed, terminal, open, reopened, changed, syncedAt:now };
+  const affected = [...affectedDates].sort();
+  stageDerivedDates(db, affected);
+  let cacheRefresh = null;
+  if (invalidateCaches) cacheRefresh = invalidateCarryLedgerReadCaches();
+  return { ok:true, version:CARRY_LEDGER_SYNC_ID, processed, terminal, open, reopened, changed, mirrorChanged, affectedDates:affected, cacheRefresh, syncedAt:now };
 }
