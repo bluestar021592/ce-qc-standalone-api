@@ -10,6 +10,7 @@ const whppUi = read('public/v132-whpp-seven-business-fast.js');
 const pause = read('public/v164-unified-pause-router.js');
 const shell = read('src/v44WhppUiPatch.js');
 const whppSupervisor = read('src/v134WhppRunSupervisorPatch.js');
+const whppStore = read('src/whppStore.js');
 const v161 = read('src/v161UnifiedImportRuntimeTruthPatch.js');
 const storage = read('src/storage.js');
 const bstore = read('src/businessStore.js');
@@ -80,6 +81,21 @@ must(v87, 'WHPP_EXPORT_MEMBERSHIP_UNRECOVERABLE');
 must(v87, 'function loadSnapshotPayload');
 forbid(v87, 'SELECT snapshotId,reportDate,payloadJson,createdAt,id','WHPP export split/count metadata query must not hydrate every snapshot payload');
 
+// Same-day WHPP reupload has one lifecycle owner. Exact same membership keeps a
+// finalized day immutable/no-op. A non-empty changed membership starts a new
+// lifecycle transaction and makes every old completed artifact ineligible before
+// publishing the replacement daily membership.
+must(whppStore, "V419_WHPP_REIMPORT_LIFECYCLE_ID = '2026-09-03-v419-whpp-reimport-invalidates-old-completion-v1'");
+must(whppStore, 'const explicitEmptyRehydrate = preserveFinalizedLifecycle === true && unique.length === 0');
+must(whppStore, 'existingDaily.identicalMembership || explicitEmptyRehydrate');
+must(whppStore, "'IDENTICAL_MEMBERSHIP_REUPLOAD'");
+must(whppStore, 'function invalidatePriorWhppLifecycle');
+must(whppStore, "SET status='INVALID',reconciliationStatus='FAILED',invalidReason=?");
+must(whppStore, "DELETE FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?");
+for (const table of ['business_scan_results','business_track_events','business_exception_items','business_final_rows']) must(whppStore, `'${table}'`);
+must(whppStore, 'WHPP_DAILY_REIMPORT_NEW_LIFECYCLE');
+must(whppStore, '[CE-QC][WHPP_REIMPORT_LIFECYCLE_INVALIDATED]');
+
 // The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
 // HTML/JS caching. Exact cache-bust suffixes may advance independently.
 must(shell, 'v67-resilient-run-guard.js?v=');
@@ -127,8 +143,9 @@ for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storag
 
 // The real updater executes test:golive. Keep the newest truth-boundary
 // regressions inside this gate so a candidate cannot install with WHPP carry
-// membership leakage or stale POD/attempt/signing residue in export rows.
+// membership leakage, stale same-day completion reuse, or stale POD/attempt/
+// signing residue in export rows.
 execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['--test','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · carry-contaminated finalRows are enrichment only · lazy snapshot JSON recovery · partial-membership fail-closed · canonical ledger clears stale POD/attempt/signing residue · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · carry-contaminated finalRows are enrichment only · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · lazy snapshot JSON recovery · partial-membership fail-closed · canonical ledger clears stale POD/attempt/signing residue · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
