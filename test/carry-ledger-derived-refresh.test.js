@@ -52,28 +52,28 @@ function insertLedger(db,{bill,type,terminalReason='POD',attemptNo=0,attemptSour
   );
 }
 
-test('next-day POD rewrites every legacy CCSL mirror row before synchronous derived refresh',()=>{
+test('multi-day carry POD rewrites every legacy CCSL mirror date before synchronous derived refresh',()=>{
   const db=fixture();
   const oldHook=globalThis.__CE_QC_REFRESH_LEDGER_DERIVED_DASHBOARDS__;
   try{
-    const bill='CE-NEXTDAY-POD';
+    const bill='CE-MULTIDAY-POD';
     const stale={shipmentCode:bill,businessType:'CE',currentState:'OPEN',primaryCategory:'OC',OC天数:3,Pending天数:3,退回状态:'已退回'};
-    insertCarry(db,bill,'CE','2026-08-01','2026-08-02',stale);
-    insertCurrent(db,bill,'CE','2026-08-02','POD',{...stale,currentState:'POD',是否POD:'是',latestTrackStatusCode:'80',latestEventTime:'2026-08-02T08:30:00Z'});
+    insertCarry(db,bill,'CE','2026-08-01','2026-08-04',stale);
+    insertCurrent(db,bill,'CE','2026-08-04','POD',{...stale,currentState:'POD',是否POD:'是',latestTrackStatusCode:'80',latestEventTime:'2026-08-04T08:30:00Z'});
     const insert=db.prepare('INSERT INTO final_rows VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-    for(const date of ['2026-08-01','2026-08-02']) insert.run(bill,date,0,'OC','OC','', 'OC',JSON.stringify(stale),3,3,2,1,2,3,'SHOP_ARRIVED_CURRENT','OLD',NOW);
+    for(const date of ['2026-08-01','2026-08-02','2026-08-03']) insert.run(bill,date,0,'OC','OC','', 'OC',JSON.stringify(stale),3,3,2,1,2,3,'SHOP_ARRIVED_CURRENT','OLD',NOW);
     let hookCall=null;
     globalThis.__CE_QC_REFRESH_LEDGER_DERIVED_DASHBOARDS__=(dates,reason)=>{
       const ledger=db.prepare('SELECT terminalReason,currentState,currentCategory FROM qc_tracking_ledger WHERE shipmentCode=?').get(bill);
-      const mirror=db.prepare('SELECT isPod,primaryCategory,pendingDays,ocDays,shopState,rawJson FROM final_rows WHERE shipmentCode=? AND reportDate=?').get(bill,'2026-08-01');
+      const mirror=db.prepare('SELECT isPod,primaryCategory,pendingDays,ocDays,shopState,rawJson FROM final_rows WHERE shipmentCode=? AND reportDate=?').get(bill,'2026-08-02');
       hookCall={dates:[...dates],reason,ledger:{...ledger},mirror:{...mirror}};
       return {ok:true,dates};
     };
-    const result=syncCarryRowsToV246Ledger([{...stale,currentState:'POD',是否POD:'是',latestTrackStatusCode:'80',latestEventTime:'2026-08-02T08:30:00Z'}],{db,reason:'TEST_DERIVED_REFRESH'});
+    const result=syncCarryRowsToV246Ledger([{...stale,currentState:'POD',是否POD:'是',latestTrackStatusCode:'80',latestEventTime:'2026-08-04T08:30:00Z'}],{db,reason:'TEST_DERIVED_REFRESH'});
     assert.equal(result.changed,1);
-    assert.ok(result.mirrorChanged>=2);
-    assert.deepEqual(result.affectedDates,['2026-08-01','2026-08-02']);
-    assert.deepEqual(hookCall.dates,['2026-08-01','2026-08-02']);
+    assert.ok(result.mirrorChanged>=3);
+    assert.deepEqual(result.affectedDates,['2026-08-01','2026-08-02','2026-08-03','2026-08-04']);
+    assert.deepEqual(hookCall.dates,['2026-08-01','2026-08-02','2026-08-03','2026-08-04']);
     assert.equal(hookCall.ledger.terminalReason,'POD');
     assert.equal(hookCall.ledger.currentState,'POD');
     assert.equal(hookCall.mirror.isPod,1);
