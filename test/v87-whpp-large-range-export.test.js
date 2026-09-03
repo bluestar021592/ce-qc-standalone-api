@@ -20,15 +20,20 @@ test('V87 WHPP export reader and workers are syntax valid', () => {
   }
 });
 
-test('WHPP export reads current normalized final rows instead of historical payload blobs', () => {
-  assert.match(store, /business_final_rows f/);
-  assert.match(store, /business_daily_parse_rows p/);
-  assert.match(store, /business_export_snapshots s/);
-  assert.match(store, /s\.businessType='WHPP'/);
-  assert.match(store, /f\.businessType='WHPP'/);
+test('WHPP export membership is daily-truth locked and invalid snapshots/final-row residue cannot create members', () => {
+  assert.match(store, /V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v1'/);
+  assert.match(store, /COALESCE\(status,'VALID'\)='VALID'/);
+  assert.match(store, /COALESCE\(reconciliationStatus,'COMPLETED'\)='COMPLETED'/);
+  assert.match(store, /function standardMembershipRows/);
+  assert.match(store, /business_daily_parse_rows/);
+  assert.match(store, /function snapshotMembershipRows/);
+  assert.match(store, /payload\.state/);
+  assert.match(store, /if\(standard\.length\)return standard/,'standard persisted WHPP daily membership must outrank snapshot fallback');
+  assert.match(store, /function finalRowsByBill/);
+  assert.match(store, /normalizeWhppRow\(finals\.get\(bill\)\|\|\{\},member,snapshot\.reportDate\)/,'final rows may enrich only an admitted member');
+  assert.match(store, /whppExportMembershipSource/);
   assert.match(store, /listCompletedWhppSnapshots/);
   assert.match(store, /whppDailyCounts/);
-  assert.doesNotMatch(store, /business_export_snapshots[^\n]*payloadJson/i);
   assert.doesNotMatch(store, /DELETE FROM|UPDATE |INSERT INTO|DROP TABLE/i);
 });
 
@@ -41,7 +46,7 @@ test('ALL background export includes WHPP as the seventh business and splits it 
   assert.match(worker, /7业务轻量管理汇总/);
 });
 
-test('isolated business worker selects the WHPP normalized range reader only for WHPP', () => {
+test('isolated business worker selects the WHPP membership-locked range reader only for WHPP', () => {
   assert.match(business, /type === 'WHPP'/);
   assert.match(business, /listCompletedWhppSnapshots\(from, to\)/);
   assert.match(business, /listLightweightCompletedUnifiedSnapshots\(from, to, \[type\]\)/);
