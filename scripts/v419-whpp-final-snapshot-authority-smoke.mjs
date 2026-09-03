@@ -82,6 +82,18 @@ try{
   assert.equal(legacyDetail.rows[0]?.shipmentCode,legacyBill);
   assert.equal(legacyDetail.rows[0]?.detailMembershipSource,'BUSINESS_EXPORT_SNAPSHOT_LEGACY_DAILY_ATTESTED');
 
+  // A changed reupload of that same legacy date starts a new lifecycle. Even the
+  // old LEGACY_UNVERIFIED row must become explicitly INVALID/FAILED, not merely
+  // lose eligibility because the daily summary was rewritten.
+  const legacyReplacement='WH-V419-LEGACY-REPLACEMENT';
+  const legacyChanged=saveWhppDailyImport({reportDate:legacyDate,sourceName:'8-8-changed.xls',rows:[{shipmentCode:legacyReplacement,运单号:legacyReplacement,regionCode:'PV',rowNumber:2}],batchId:'B-LEGACY-CHANGED',snapshotId:'S-LEGACY-CHANGED'});
+  assert.deepEqual(legacyChanged.pnhBills,[legacyReplacement]);
+  const invalidLegacy=db.prepare('SELECT status,reconciliationStatus,invalidReason FROM business_export_snapshots WHERE snapshotId=?').get(legacySnapshot);
+  assert.equal(invalidLegacy.status,'INVALID');assert.equal(invalidLegacy.reconciliationStatus,'FAILED');assert.match(String(invalidLegacy.invalidReason||''),/WHPP_DAILY_REIMPORT_NEW_LIFECYCLE/);
+  assert.deepEqual(listCompletedWhppSnapshots(legacyDate,legacyDate),[],'changed legacy reupload must revoke completed export eligibility immediately');
+  const changedLegacyDetail=inspectV172WhppDetail({reportDate:legacyDate,tab:'all',page:'1',pageSize:'500'});
+  assert.deepEqual(changedLegacyDetail.rows.map(row=>row.shipmentCode),[legacyReplacement],'detail must switch from invalidated legacy completion to new daily membership immediately');
+
   // A legacy snapshot is not self-authorizing. A daily header that is pending or
   // points elsewhere must keep it out of completed export and rotated detail.
   const orphanDate='2026-08-09',orphanBill='WH-V419-LEGACY-ORPHAN',orphanSnapshot='WH-LEGACY-ORPHAN-0809';
@@ -94,7 +106,7 @@ try{
   const orphanDetail=inspectV172WhppDetail({reportDate:orphanDate,tab:'all',page:'1',pageSize:'500'});
   assert.equal(orphanDetail.total,0,'pending daily authority must not allow a legacy snapshot to self-authorize rotated historical detail');
 
-  console.log('[V419 WHPP FINAL SNAPSHOT AUTHORITY] PASS new finalize writes VALID+COMPLETED at source · 4f53 legacy finalized snapshot preserved in export+detail only by exact completed daily authority + immutable membership · orphan legacy snapshot rejected');
+  console.log('[V419 WHPP FINAL SNAPSHOT AUTHORITY] PASS new finalize writes VALID+COMPLETED at source · 4f53 legacy finalized snapshot preserved in export+detail only by exact completed daily authority + immutable membership · changed legacy reupload explicitly INVALID/FAILED · orphan legacy snapshot rejected');
 }finally{
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
