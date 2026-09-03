@@ -54,32 +54,32 @@ try{
   assert.ok(!range.rows.some(row=>[bad,invalidOnly,invalidUnified].includes(row.shipmentCode)),'invalid snapshot/unified members must never leak into WHPP range detail');
 
   const exportSnapshots=listCompletedWhppSnapshots('2026-08-01','2026-08-02');
-  assert.equal(exportSnapshots.length,1,'WHPP export must include only dates with VALID+COMPLETED snapshots');
+  assert.equal(exportSnapshots.length,1,'WHPP export must include only certified completed dates');
   assert.equal(exportSnapshots[0].reportDate,'2026-08-01');
   assert.deepEqual(exportSnapshots[0].payload.finalRows.map(row=>row.shipmentCode),[good],'residual final rows from invalid/non-member facts must not create WHPP export members');
   assert.equal(countCompletedWhppRows('2026-08-01','2026-08-02'),1,'WHPP completed export row count must be membership-locked');
   assert.deepEqual(whppDailyCounts('2026-08-01','2026-08-02'),[{reportDate:'2026-08-01',businessType:'WHPP',count:1}]);
-  assert.equal(exportSnapshots[0].payload.finalRows[0].v419WhppExportMembershipId,'2026-09-03-v419-whpp-valid-completed-membership-export-v3');
+  assert.equal(exportSnapshots[0].payload.finalRows[0].v419WhppExportMembershipId,'2026-09-03-v419-whpp-completion-certified-membership-export-v4');
 
-  const partialA='WH-V419-PARTIAL-A',partialB='WH-V419-PARTIAL-B';
+  const partialA='WH-V419-PARTIAL-A',partialB='WH-V419-PARTIAL-B',partialSnapshot='WH-VALID-0803';
   const partialState={businessType:'WHPP',reportDate:'2026-08-03',pnhBills:[partialA,partialB],dailyParseRows:[],finalRows:[{shipmentCode:partialA,运单号:partialA},{shipmentCode:partialB,运单号:partialB}]};
-  insertMinimal('business_export_snapshots',{snapshotId:'WH-VALID-0803',businessType:'WHPP',reportDate:'2026-08-03',runId:'RUN-PARTIAL',payloadJson:JSON.stringify({state:partialState}),generatedAt:'2026-08-03T10:00:00.000Z',createdAt:'2026-08-03T10:00:00.000Z',status:'VALID',reconciliationStatus:'COMPLETED'});
-  insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:'2026-08-03',sourceFile:'8-3.xls',totalCount:2,summaryJson:'{}',createdAt:'2026-08-03T09:00:00.000Z',updatedAt:'2026-08-03T09:00:00.000Z'});
+  insertMinimal('business_export_snapshots',{snapshotId:partialSnapshot,businessType:'WHPP',reportDate:'2026-08-03',runId:'RUN-PARTIAL',payloadJson:JSON.stringify({state:partialState}),generatedAt:'2026-08-03T10:00:00.000Z',createdAt:'2026-08-03T10:00:00.000Z',status:'VALID',reconciliationStatus:'COMPLETED'});
+  insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:'2026-08-03',sourceFile:'8-3.xls',totalCount:2,summaryJson:JSON.stringify({total:2,completed:true,snapshotStatus:'COMPLETED',reconciliationStatus:'COMPLETED',finalizedSnapshotId:partialSnapshot}),createdAt:'2026-08-03T09:00:00.000Z',updatedAt:'2026-08-03T10:00:00.000Z'});
   insertMinimal('business_daily_parse_rows',{businessType:'WHPP',reportDate:'2026-08-03',shipmentCode:partialA,sheetName:'日报',rowNumber:2,source_row_number:2,recipient_raw:'WHPP',recipient_normalized:'WHPP',recipient_group:'WHPP',recipient_group_reason:'TEST',rawText:'',rowJson:JSON.stringify({运单号:partialA}),createdAt:'2026-08-03T09:00:00.000Z'});
   const partialGuard=error=>error?.code==='WHPP_STANDARD_DAILY_INCOMPLETE'&&error.expected===2&&error.actual===1;
   assert.throws(()=>inspectV172WhppDetail({reportDate:'2026-08-03',tab:'all'}),partialGuard,'partial standard WHPP membership must block detail instead of being hidden by completed snapshot fallback');
-  assert.throws(()=>whppDailyCounts('2026-08-03','2026-08-03'),error=>error?.code==='WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE'&&error.expected===2&&error.actual===1,'partial standard WHPP membership must block export instead of being hidden by snapshot fallback');
+  assert.throws(()=>whppDailyCounts('2026-08-03','2026-08-03'),error=>error?.code==='WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE'&&error.expected===2&&error.actual===1,'certified completed date with partial standard WHPP membership must fail closed in export');
 
   // WHPP pipeline finalRows contains today + carry. When persisted daily rows are
   // fully rotated, both detail and export recovery must use immutable pnhBills
   // (or dailyParseRows), never carry-contaminated finalRows.
-  const rotatedDaily='WH-V419-ROTATED-DAILY',rotatedCarry='WH-V419-ROTATED-CARRY';
+  const rotatedDaily='WH-V419-ROTATED-DAILY',rotatedCarry='WH-V419-ROTATED-CARRY',rotatedSnapshot='WH-VALID-0804';
   const rotatedState={businessType:'WHPP',reportDate:'2026-08-04',pnhBills:[rotatedDaily],dailyParseRows:[],carryBills:[rotatedCarry],nextCarryBills:[rotatedCarry],finalRows:[
     {shipmentCode:rotatedDaily,运单号:rotatedDaily,regionCode:'PP',currentState:'POD',是否POD:'是'},
     {shipmentCode:rotatedCarry,运单号:rotatedCarry,regionCode:'PV',currentState:'Pending',是否POD:'否'}
   ]};
-  insertMinimal('business_export_snapshots',{snapshotId:'WH-VALID-0804',businessType:'WHPP',reportDate:'2026-08-04',runId:'RUN-ROTATED',payloadJson:JSON.stringify({state:rotatedState}),generatedAt:'2026-08-04T10:00:00.000Z',createdAt:'2026-08-04T10:00:00.000Z',status:'VALID',reconciliationStatus:'COMPLETED'});
-  insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:'2026-08-04',sourceFile:'8-4.xls',totalCount:1,summaryJson:'{}',createdAt:'2026-08-04T09:00:00.000Z',updatedAt:'2026-08-04T09:00:00.000Z'});
+  insertMinimal('business_export_snapshots',{snapshotId:rotatedSnapshot,businessType:'WHPP',reportDate:'2026-08-04',runId:'RUN-ROTATED',payloadJson:JSON.stringify({state:rotatedState}),generatedAt:'2026-08-04T10:00:00.000Z',createdAt:'2026-08-04T10:00:00.000Z',status:'VALID',reconciliationStatus:'COMPLETED'});
+  insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:'2026-08-04',sourceFile:'8-4.xls',totalCount:1,summaryJson:JSON.stringify({total:1,completed:true,snapshotStatus:'COMPLETED',reconciliationStatus:'COMPLETED',finalizedSnapshotId:rotatedSnapshot}),createdAt:'2026-08-04T09:00:00.000Z',updatedAt:'2026-08-04T10:00:00.000Z'});
   for(const [bill,category,isPod] of [[rotatedDaily,'POD',1],[rotatedCarry,'Pending',0]])insertMinimal('business_final_rows',{businessType:'WHPP',shipmentCode:bill,reportDate:'2026-08-04',isPod,primaryCategory:category,apiStatus:'SUCCESS',carryStatus:isPod?'CLOSED':'OPEN',rawJson:JSON.stringify({shipmentCode:bill,运单号:bill,currentState:category,是否POD:isPod?'是':'否'}),createdAt:'2026-08-04T10:00:00.000Z',updatedAt:'2026-08-04T10:00:00.000Z'});
   const rotated=listCompletedWhppSnapshots('2026-08-04','2026-08-04');
   assert.equal(rotated.length,1);
@@ -131,7 +131,7 @@ try{
   assert.equal(replaySummary.completed,true);assert.equal(replaySummary.finalizedSnapshotId,sameSnapshot);
   assert.equal(listCompletedWhppSnapshots('2026-08-06','2026-08-06').length,1,'identical completed reupload must remain export-eligible and must not restart WHPP');
 
-  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT+REIMPORT] PASS invalid/failed history rejected · partial membership fail-closed · snapshot carry excluded · changed same-day reupload invalidates old completion before new processing · identical finalized reupload remains a no-op');
+  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT+REIMPORT] PASS invalid/failed history rejected · certified partial membership fail-closed · snapshot carry excluded · changed same-day reupload invalidates old completion before new processing · identical finalized reupload remains a no-op');
 }finally{
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
