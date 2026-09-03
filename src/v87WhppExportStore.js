@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-export const V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v1';
+export const V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-valid-completed-membership-export-v2';
 
 const text=value=>String(value??'').trim();
 const billOf=value=>text(value).toUpperCase();
@@ -26,23 +26,35 @@ function latestValidCompletedSnapshots(fromDate,toDate,db=getDb()) {
   return [...byDate.values()].sort((a,b)=>text(a.reportDate).localeCompare(text(b.reportDate)));
 }
 
+function standardMembershipMeta(reportDate,db=getDb()) {
+  let header=null,actual=0;
+  try { header=db.prepare("SELECT totalCount FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(reportDate)||null; }
+  catch { header=null; }
+  if(!header)return {header:false,expected:null,actual:0,complete:false,rotated:true};
+  const expected=Math.max(0,Number(header.totalCount||0));
+  try { actual=Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(reportDate)?.count||0); }
+  catch { actual=0; }
+  if(actual===expected)return {header:true,expected,actual,complete:true,rotated:false};
+  if(expected>0&&actual===0)return {header:true,expected,actual,complete:false,rotated:true};
+  const error=new Error(`WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE:${reportDate}:${expected}/${actual}`);
+  error.code='WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE';error.reportDate=reportDate;error.expected=expected;error.actual=actual;throw error;
+}
+
 function standardMembershipRows(reportDate,db=getDb()) {
-  try {
-    return db.prepare(`
-      SELECT shipmentCode,rowJson,sheetName,rowNumber
-      FROM business_daily_parse_rows
-      WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''
-      ORDER BY rowNumber,id
-    `).all(reportDate).map(row=>({
-      ...parseJson(row.rowJson),
-      shipmentCode:billOf(row.shipmentCode),
-      运单号:billOf(row.shipmentCode),
-      rowJson:row.rowJson,
-      sheetName:row.sheetName||'',
-      rowNumber:Number(row.rowNumber||0),
-      membershipSource:'WHPP_STANDARD_DAILY'
-    })).filter(row=>row.shipmentCode);
-  } catch { return []; }
+  return db.prepare(`
+    SELECT shipmentCode,rowJson,sheetName,rowNumber
+    FROM business_daily_parse_rows
+    WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''
+    ORDER BY rowNumber,id
+  `).all(reportDate).map(row=>({
+    ...parseJson(row.rowJson),
+    shipmentCode:billOf(row.shipmentCode),
+    运单号:billOf(row.shipmentCode),
+    rowJson:row.rowJson,
+    sheetName:row.sheetName||'',
+    rowNumber:Number(row.rowNumber||0),
+    membershipSource:'WHPP_STANDARD_DAILY'
+  })).filter(row=>row.shipmentCode);
 }
 
 function snapshotMembershipRows(snapshot={}) {
@@ -61,9 +73,14 @@ function snapshotMembershipRows(snapshot={}) {
 }
 
 function membershipRows(snapshot,db=getDb()) {
-  const standard=standardMembershipRows(snapshot.reportDate,db);
-  if(standard.length)return standard;
+  const meta=standardMembershipMeta(snapshot.reportDate,db);
+  if(meta.complete)return meta.expected===0?[]:standardMembershipRows(snapshot.reportDate,db);
   return snapshotMembershipRows(snapshot);
+}
+
+function membershipCount(snapshot,db=getDb()) {
+  const meta=standardMembershipMeta(snapshot.reportDate,db);
+  return meta.complete?meta.expected:snapshotMembershipRows(snapshot).length;
 }
 
 function finalRowsByBill(reportDate,db=getDb()) {
@@ -116,17 +133,19 @@ export function listCompletedWhppSnapshots(fromDate, toDate) {
       const bill=billOf(member.shipmentCode||member.运单号);if(!bill)continue;
       rows.push(normalizeWhppRow(finals.get(bill)||{},member,snapshot.reportDate));
     }
-    out.push({snapshotId:snapshot.snapshotId||`WHPP-RANGE-${snapshot.reportDate}`,reportDate:snapshot.reportDate,payload:{finalRows:rows},membershipSource:members[0]?.membershipSource||'WHPP_VALID_COMPLETED_SNAPSHOT'});
+    out.push({snapshotId:snapshot.snapshotId||`WHPP-RANGE-${snapshot.reportDate}`,reportDate:snapshot.reportDate,payload:{finalRows:rows},membershipSource:members[0]?.membershipSource||(rows.length?'WHPP_VALID_COMPLETED_SNAPSHOT':'WHPP_STANDARD_DAILY_ZERO')});
   }
   return out;
 }
 
 export function countCompletedWhppRows(fromDate, toDate) {
-  return listCompletedWhppSnapshots(fromDate,toDate).reduce((sum,snapshot)=>sum+Number(snapshot.payload?.finalRows?.length||0),0);
+  const db=getDb();
+  return latestValidCompletedSnapshots(fromDate,toDate,db).reduce((sum,snapshot)=>sum+membershipCount(snapshot,db),0);
 }
 
 export function whppDailyCounts(fromDate, toDate) {
-  return listCompletedWhppSnapshots(fromDate,toDate).map(snapshot=>({reportDate:snapshot.reportDate,businessType:'WHPP',count:Number(snapshot.payload?.finalRows?.length||0)}));
+  const db=getDb();
+  return latestValidCompletedSnapshots(fromDate,toDate,db).map(snapshot=>({reportDate:snapshot.reportDate,businessType:'WHPP',count:membershipCount(snapshot,db)}));
 }
 
-console.info('[CE-QC][V419_WHPP_EXPORT_MEMBERSHIP]',V419_WHPP_EXPORT_MEMBERSHIP_ID,'WHPP export dates require VALID+COMPLETED snapshots; membership comes from standard daily rows first, immutable valid snapshot membership only as historical fallback; residual final rows can enrich status but never create export members.');
+console.info('[CE-QC][V419_WHPP_EXPORT_MEMBERSHIP]',V419_WHPP_EXPORT_MEMBERSHIP_ID,'WHPP export dates require VALID+COMPLETED snapshots; standard daily membership wins when complete, fully rotated history may fall back to immutable valid snapshot membership, partial membership fails closed; count/split planning reads membership only and never scans final rows.');
