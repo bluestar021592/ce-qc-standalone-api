@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 
 const read = p => fs.readFileSync(p, 'utf8');
 const must = (source, token, label = token) => { if (!source.includes(token)) throw new Error(`GOLIVE missing ${label}`); };
@@ -15,6 +16,7 @@ const bstore = read('src/businessStore.js');
 const bootstrap = read('bootstrap.js');
 const podRepair = read('src/v167CcslPodLockFactRepair.js');
 const v246 = read('src/v246TrackingLedgerCore.js');
+const v172 = read('src/v172WhppDetailParityPatch.js');
 const singleExportWorker = read('src/v183SingleBusinessExportJobWorker.js');
 const allBusinessChild = read('src/v84ExportBusinessWorker.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
@@ -59,6 +61,13 @@ must(whppUi, "authoritativeRunner:'V67'");
 forbid(whppUi, 'global.runUnified=');
 forbid(whppUi, 'global.resumeUnified=');
 forbid(whppUi, '/api/whpp/run/start');
+
+// WHPP historical detail may read immutable snapshots only when they remain
+// VALID + COMPLETED. Invalidated/failed snapshots must never replace history.
+must(v172, '2026-09-03-v419-whpp-valid-completed-history-detail-v3');
+must(v172, "COALESCE(status,'VALID')='VALID'");
+must(v172, "COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'");
+must(v172, 'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED');
 
 // The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
 // HTML/JS caching. Exact cache-bust suffixes may advance independently.
@@ -105,4 +114,6 @@ for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storag
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
-console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · V419 WHPP global-range display owner · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
+
+console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · V419 WHPP global-range display owner · valid/completed WHPP history detail · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
