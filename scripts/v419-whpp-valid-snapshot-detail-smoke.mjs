@@ -58,7 +58,7 @@ try{
   assert.deepEqual(exportSnapshots[0].payload.finalRows.map(row=>row.shipmentCode),[good],'residual final rows from invalid/non-member facts must not create WHPP export members');
   assert.equal(countCompletedWhppRows('2026-08-01','2026-08-02'),1,'WHPP completed export row count must be membership-locked');
   assert.deepEqual(whppDailyCounts('2026-08-01','2026-08-02'),[{reportDate:'2026-08-01',businessType:'WHPP',count:1}]);
-  assert.equal(exportSnapshots[0].payload.finalRows[0].v419WhppExportMembershipId,'2026-09-03-v419-whpp-valid-completed-membership-export-v2');
+  assert.equal(exportSnapshots[0].payload.finalRows[0].v419WhppExportMembershipId,'2026-09-03-v419-whpp-valid-completed-membership-export-v3');
 
   const partialA='WH-V419-PARTIAL-A',partialB='WH-V419-PARTIAL-B';
   const partialState={businessType:'WHPP',reportDate:'2026-08-03',pnhBills:[partialA,partialB],dailyParseRows:[],finalRows:[{shipmentCode:partialA,运单号:partialA},{shipmentCode:partialB,运单号:partialB}]};
@@ -69,7 +69,25 @@ try{
   assert.throws(()=>inspectV172WhppDetail({reportDate:'2026-08-03',tab:'all'}),partialGuard,'partial standard WHPP membership must block detail instead of being hidden by completed snapshot fallback');
   assert.throws(()=>whppDailyCounts('2026-08-03','2026-08-03'),error=>error?.code==='WHPP_EXPORT_DAILY_MEMBERSHIP_INCOMPLETE'&&error.expected===2&&error.actual===1,'partial standard WHPP membership must block export instead of being hidden by snapshot fallback');
 
-  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT] PASS invalid/failed snapshots and INVALID unified batches cannot override completed history or create phantom dates; residual final rows cannot create WHPP export members; partial standard membership fails closed in both detail and export; latest current POD still overlays valid daily membership');
+  // WHPP pipeline finalRows contains today + carry. When persisted daily rows are
+  // fully rotated, export recovery must use immutable pnhBills (or dailyParseRows),
+  // never the carry-contaminated finalRows array saved in the completed snapshot.
+  const rotatedDaily='WH-V419-ROTATED-DAILY',rotatedCarry='WH-V419-ROTATED-CARRY';
+  const rotatedState={businessType:'WHPP',reportDate:'2026-08-04',pnhBills:[rotatedDaily],dailyParseRows:[],carryBills:[rotatedCarry],nextCarryBills:[rotatedCarry],finalRows:[
+    {shipmentCode:rotatedDaily,运单号:rotatedDaily,regionCode:'PP',currentState:'POD',是否POD:'是'},
+    {shipmentCode:rotatedCarry,运单号:rotatedCarry,regionCode:'PV',currentState:'Pending',是否POD:'否'}
+  ]};
+  insertMinimal('business_export_snapshots',{snapshotId:'WH-VALID-0804',businessType:'WHPP',reportDate:'2026-08-04',runId:'RUN-ROTATED',payloadJson:JSON.stringify({state:rotatedState}),generatedAt:'2026-08-04T10:00:00.000Z',createdAt:'2026-08-04T10:00:00.000Z',status:'VALID',reconciliationStatus:'COMPLETED'});
+  insertMinimal('business_daily_reports',{businessType:'WHPP',reportDate:'2026-08-04',sourceFile:'8-4.xls',totalCount:1,summaryJson:'{}',createdAt:'2026-08-04T09:00:00.000Z',updatedAt:'2026-08-04T09:00:00.000Z'});
+  for(const [bill,category,isPod] of [[rotatedDaily,'POD',1],[rotatedCarry,'Pending',0]])insertMinimal('business_final_rows',{businessType:'WHPP',shipmentCode:bill,reportDate:'2026-08-04',isPod,primaryCategory:category,apiStatus:'SUCCESS',carryStatus:isPod?'CLOSED':'OPEN',rawJson:JSON.stringify({shipmentCode:bill,运单号:bill,currentState:category,是否POD:isPod?'是':'否'}),createdAt:'2026-08-04T10:00:00.000Z',updatedAt:'2026-08-04T10:00:00.000Z'});
+  const rotated=listCompletedWhppSnapshots('2026-08-04','2026-08-04');
+  assert.equal(rotated.length,1);
+  assert.equal(countCompletedWhppRows('2026-08-04','2026-08-04'),1);
+  assert.deepEqual(rotated[0].payload.finalRows.map(row=>row.shipmentCode),[rotatedDaily],'carry saved inside snapshot finalRows must never become recovered daily membership');
+  assert.equal(rotated[0].payload.finalRows[0].whppExportMembershipSource,'WHPP_VALID_COMPLETED_SNAPSHOT_PNH');
+  assert.ok(!rotated[0].payload.finalRows.some(row=>row.shipmentCode===rotatedCarry),'carry member must stay excluded even when residual final row exists for the same report date');
+
+  console.log('[V419 WHPP VALID SNAPSHOT DETAIL+EXPORT] PASS invalid/failed snapshots and INVALID unified batches cannot create history; partial membership fails closed; rotated history recovers immutable pnhBills only and excludes carry-contaminated finalRows; latest current POD still overlays valid daily membership');
 }finally{
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
