@@ -1,12 +1,14 @@
 (function installSevenBusinessLegacyStatusSyncV169(global){
   if(global.__CE_QC_V169_LEGACY_STATUS_SYNC__)return;
-  const VERSION='2026-09-01-v411-unconfirmed-status-entry-lock-v1';
+  const VERSION='2026-09-03-v420-bounded-entry-status-confirm-v1';
+  const ENTRY_CONFIRM_WAIT_MS=8500;
   let observerTimer=null;
   const norm=value=>String(value||'').replace(/\s+/g,' ').trim();
   const normalizeDate=value=>{
     const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);
     return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';
   };
+  const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
   function canonicalTruth(){
     return global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth||null;
@@ -54,6 +56,34 @@
     }
     if(truth.complete===true)return{kind:'complete',reportDate:target,truth,reason:'CANONICAL_COMPLETE'};
     return{kind:'incomplete',reportDate:target,truth,reason:'CANONICAL_FRESH_INCOMPLETE'};
+  }
+
+  async function waitForStatusAdvance(beforeCheckedAt){
+    const deadline=Date.now()+ENTRY_CONFIRM_WAIT_MS;
+    let state=statusState();
+    while(state.kind==='unconfirmed'&&Date.now()<deadline){
+      const checkedAt=Number(canonicalTruth()?.checkedAt||0);
+      if(checkedAt>Number(beforeCheckedAt||0))break;
+      await sleep(120);
+      state=statusState();
+    }
+    return statusState();
+  }
+
+  async function ensureFreshEntryState(){
+    let state=statusState();
+    for(let attempt=0;attempt<2&&state.kind==='unconfirmed';attempt+=1){
+      const beforeCheckedAt=Number(canonicalTruth()?.checkedAt||0);
+      try{await Promise.resolve(global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.refresh?.({force:true}));}catch{}
+      state=statusState();
+      if(state.kind!=='unconfirmed')return state;
+      if(Number(canonicalTruth()?.checkedAt||0)<=beforeCheckedAt){
+        state=await waitForStatusAdvance(beforeCheckedAt);
+        if(state.kind!=='unconfirmed')return state;
+      }
+      if(attempt===0)await sleep(220);
+    }
+    return state;
   }
 
   function currentCompleteTruth(){
@@ -156,34 +186,35 @@
   function wrapUnifiedEntry(name){
     const original=global[name];
     if(typeof original!=='function'||original.__v169CanonicalCompletionGuard)return;
-    const guarded=function(){
-      const state=statusState();
+    const guarded=async function(){
+      const state=await ensureFreshEntryState();
       if(state.kind==='complete'){
         syncVerifiedRunLatch(state);
         lockResumeButtons(state);
         syncLegacyStatus(state.truth);
         console.info('[CE-QC][V169]',name,'skipped because seven-business canonical truth is complete for',state.reportDate||'current report');
-        return Promise.resolve({
+        return{
           ok:true,
           skipped:true,
           code:'SEVEN_BUSINESS_ALREADY_COMPLETE',
           reportDate:state.reportDate,
           complete:true,
           statusFresh:true
-        });
+        };
       }
       if(state.kind==='unconfirmed'){
         lockResumeButtons(state);
-        console.info('[CE-QC][V169]',name,'blocked until current exact-date status is fresh for',state.reportDate||'current report');
-        return Promise.resolve({
+        console.info('[CE-QC][V169]',name,'blocked after bounded canonical status confirmation for',state.reportDate||'current report');
+        return{
           ok:false,
           skipped:true,
           code:'SEVEN_BUSINESS_STATUS_UNCONFIRMED',
           reportDate:state.reportDate,
           complete:false,
           statusFresh:false
-        });
+        };
       }
+      unlockResumeButtons();
       return original.apply(this,arguments);
     };
     guarded.__v169CanonicalCompletionGuard=true;
@@ -246,6 +277,6 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   installEntryGuards();
-  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth};
-  console.info('[CE-QC][V169]',VERSION,'same-date complete stays hard-locked; stale, missing or mismatched canonical status is read-only and cannot enter V67; only fresh incomplete truth releases run/resume.');
+  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState};
+  console.info('[CE-QC][V169]',VERSION,'same-date complete stays hard-locked; explicit start/resume waits for an already-running canonical V168 read and retries once before fail-closed; only fresh incomplete truth releases V67.');
 })(window);
