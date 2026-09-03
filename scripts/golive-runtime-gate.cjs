@@ -74,7 +74,12 @@ must(v172, "COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'");
 must(v172, "INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId AND b.reportDate=u.reportDate AND b.status='VALID'");
 must(v172, 'WHPP_STANDARD_DAILY_INCOMPLETE');
 must(v172, 'BUSINESS_EXPORT_SNAPSHOT_VALID_COMPLETED');
-must(v87, '2026-09-03-v419-whpp-valid-completed-membership-export-v3');
+must(v87, '2026-09-03-v419-whpp-completion-certified-membership-export-v4');
+must(v87, 'function completedDailyAuthority');
+must(v87, 'function latestEligibleCompletedSnapshots');
+must(v87, 'authority?.dailyPresent');
+must(v87, 'text(row.snapshotId)===authority.snapshotId');
+must(v87, 'WHPP_LEGACY_FINALIZED_SNAPSHOT');
 must(v87, 'WHPP_VALID_UNIFIED_DAILY');
 must(v87, 'WHPP_VALID_COMPLETED_SNAPSHOT_PNH');
 must(v87, 'WHPP_EXPORT_MEMBERSHIP_UNRECOVERABLE');
@@ -95,6 +100,19 @@ must(whppStore, "DELETE FROM business_history_summary WHERE businessType='WHPP' 
 for (const table of ['business_scan_results','business_track_events','business_exception_items','business_final_rows']) must(whppStore, `'${table}'`);
 must(whppStore, 'WHPP_DAILY_REIMPORT_NEW_LIFECYCLE');
 must(whppStore, '[CE-QC][WHPP_REIMPORT_LIFECYCLE_INVALIDATED]');
+
+// WHPP final snapshot certification belongs to the finalize writer. New snapshots
+// cannot inherit LEGACY_UNVERIFIED/UNVERIFIED schema defaults. Old 4f53-era
+// snapshots may be restored only through exact completed-daily + immutable-member
+// attestation; INVALID/FAILED legacy rows remain rejected.
+must(whppStore, "V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID = '2026-09-03-v419-whpp-final-snapshot-valid-completed-v1'");
+must(whppStore, 'function loadLegacyFinalizedWhppSnapshot');
+must(whppStore, "if (status === 'INVALID' || reconciliationStatus === 'FAILED') return null");
+must(whppStore, 'snapshotMembers.length !== stored.length');
+must(whppStore, "INSERT INTO business_export_snapshots(snapshotId,businessType,reportDate,runId,payloadJson,generatedAt,createdAt,status,reconciliationStatus,invalidReason)");
+must(whppStore, "VALUES(?,?,?,?,?,?,?,'VALID','COMPLETED','')");
+must(whppStore, "reconciliationStatus: 'COMPLETED'");
+must(whppStore, 'finalSnapshotAuthority: V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID');
 
 // The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
 // HTML/JS caching. Exact cache-bust suffixes may advance independently.
@@ -143,9 +161,10 @@ for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storag
 
 // The real updater executes test:golive. Keep the newest truth-boundary
 // regressions inside this gate so a candidate cannot install with WHPP carry
-// membership leakage, stale same-day completion reuse, or stale POD/attempt/
-// signing residue in export rows.
+// membership leakage, stale same-day completion reuse, uncertified WHPP final
+// snapshots, or stale POD/attempt/signing residue in export rows.
 execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
+execFileSync(process.execPath,['scripts/v419-whpp-final-snapshot-authority-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['--test','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · carry-contaminated finalRows are enrichment only · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · lazy snapshot JSON recovery · partial-membership fail-closed · canonical ledger clears stale POD/attempt/signing residue · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · carry-contaminated finalRows are enrichment only · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · 4f53 legacy completion requires exact daily authority + immutable-member attestation · lazy snapshot JSON recovery · partial-membership fail-closed · canonical ledger clears stale POD/attempt/signing residue · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
