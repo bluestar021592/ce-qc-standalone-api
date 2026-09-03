@@ -3,6 +3,8 @@ import { getDb } from './db.js';
 export const V293_WHPP_HISTORICAL_RANGE_TRUTH_ID='2026-08-25-v293-whpp-history-range-fallback-v1';
 export const V293_WHPP_HISTORY_MEMBERSHIP_INTEGRITY_ID='2026-08-29-v293-whpp-history-membership-integrity-v2';
 export const V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID='2026-09-03-v419-whpp-history-summary-metric-failclosed-v1';
+export const V419_WHPP_HISTORY_FULL_METRIC_ID='2026-09-03-v419-whpp-history-full-range-metrics-v1';
+const EXTRA_KEYS=['pending1','pending2','oc3','cancelled','unresolved','delivery','ccslCnDiversion','ccslZtDiversion','ccsl580Retention','phnomPenhShop','provinceShop','shopTotal'];
 const n=value=>Number.isFinite(Number(value))?Number(value):0;
 const pct=(value,total)=>total?Number((n(value)*100/n(total)).toFixed(2)):0;
 const date=value=>{const text=String(value||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';};
@@ -11,7 +13,7 @@ function pick(summary,keys=[],fallback=0){for(const key of keys){const value=sum
 function pickOptional(summary,keys=[]){for(const key of keys){const value=summary?.[key];if(value!==undefined&&value!==null&&value!==''&&Number.isFinite(Number(value)))return Number(value);}return null;}
 function finish(row){
   row.total=n(row.total);row.matched=n(row.matched);row.pod=n(row.pod);row.sameDayPod=n(row.sameDayPod);row.ocCurrent=n(row.ocCurrent);
-  for(const key of ['pendingNonContinuous','pending3','oc1','oc2','cycle2','shopRetention2','workOrder','inboundNoScan','provinceOpen','returned','attempt1','attempt2','attempt3','attemptUnknown','signingDaysSum','signingDaysCount'])row[key]=n(row[key]);
+  for(const key of ['pendingNonContinuous','pending3','oc1','oc2','cycle2','shopRetention2','workOrder','inboundNoScan','provinceOpen','returned',...EXTRA_KEYS,'attempt1','attempt2','attempt3','attemptUnknown','signingDaysSum','signingDaysCount'])row[key]=n(row[key]);
   row.coverageRate=pct(row.matched,row.total);row.podRate=pct(row.pod,row.total);row.sameDayPodRate=pct(row.sameDayPod,row.total);row.ocRate=pct(row.ocCurrent,row.total);
   const known=row.attempt1+row.attempt2+row.attempt3;row.attemptUnknown=Math.max(row.attemptUnknown,Math.max(0,row.pod-known));row.attemptCoverageRate=row.pod?pct(Math.min(row.pod,known),row.pod):null;
   row.attempt1Rate=row.pod&&known?pct(row.attempt1,row.pod):null;row.attempt2Rate=row.pod&&known?pct(row.attempt2,row.pod):null;row.attempt3Rate=row.pod&&known?pct(row.attempt3,row.pod):null;
@@ -32,12 +34,15 @@ function fromHistory(row={}){
     reportDate:String(row.reportDate||''),businessType:'WHPP',regionCode:'UNKNOWN',total:expectedTotal,matched:historySummaryVerified?expectedTotal:0,
     pod:metric(['pod','todayPod','podCount','签收件数']),sameDayPod:metric(['sameDayPod','firstDayPod','firstPod','首日POD']),
     ocCurrent:metric(['ocCurrent','todayOc','currentOc','当日OC']),pendingNonContinuous:metric(['pendingNonContinuous','pendingDiscontinuous','Pending不连续']),
-    pending3:metric(['pending3','pending3plus','pending3Plus']),oc1:metric(['oc1']),oc2:metric(['oc2']),cycle2:metric(['cycle2','cycle2plus']),
+    pending1:metric(['pending1']),pending2:metric(['pending2']),pending3:metric(['pending3','pending3plus','pending3Plus']),oc1:metric(['oc1']),oc2:metric(['oc2']),oc3:metric(['oc3']),cycle2:metric(['cycle2','cycle2plus']),
     shopRetention2:metric(['shopRetention2','activeStoreRetention','storeRetention2']),workOrder:metric(['workOrder','ticketOpen']),inboundNoScan:metric(['inboundNoScan']),
-    provinceOpen:metric(['provinceOpen','regionPvUnresolved']),returned:metric(['returned']),attempt1:metric(['attempt1','dispatchAttempt1']),attempt2:metric(['attempt2','dispatchAttempt2']),attempt3:metric(['attempt3','dispatchAttempt3']),attemptUnknown:metric(['attemptUnknown','dispatchAttemptUnclassifiedPod']),
+    provinceOpen:metric(['provinceOpen','regionPvUnresolved']),returned:metric(['returned']),cancelled:metric(['cancelled','cancelCount']),unresolved:metric(['unresolved']),delivery:metric(['delivery','deliveryStay','delivering']),
+    ccslCnDiversion:metric(['ccslCnDiversion']),ccslZtDiversion:metric(['ccslZtDiversion']),ccsl580Retention:metric(['ccsl580Retention','ccsl580Diversion']),
+    phnomPenhShop:metric(['phnomPenhShop']),provinceShop:metric(['provinceShop']),shopTotal:metric(['shopTotal']),
+    attempt1:metric(['attempt1','dispatchAttempt1']),attempt2:metric(['attempt2','dispatchAttempt2']),attempt3:metric(['attempt3','dispatchAttempt3']),attemptUnknown:metric(['attemptUnknown','dispatchAttemptUnclassifiedPod']),
     signingDaysSum:metric(['signingDaysSum']),signingDaysCount:metric(['signingDaysCount']),historyFallback:historySummaryVerified,
     historySource:historySummaryVerified?'WHPP_BUSINESS_HISTORY_SUMMARY':hasCompletedSummary?'WHPP_HISTORY_SUMMARY_REJECTED_DENOMINATOR':'WHPP_HISTORY_SUMMARY_MISSING',historySummaryVerified,historySummaryTotal:summaryTotal,expectedTotal,
-    historyFailClosedId:V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID
+    historyFailClosedId:V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID,historyFullMetricId:V419_WHPP_HISTORY_FULL_METRIC_ID
   });
 }
 function incompleteError(reportDate,expected,actual){
@@ -117,4 +122,4 @@ export function mergeV293WhppHistoricalRange(canonicalDaily=[],fromDate='',toDat
   return [...byDate.values()].sort((a,b)=>String(a.reportDate||'').localeCompare(String(b.reportDate||'')));
 }
 
-console.info('[CE-QC][V293_WHPP_HISTORY_RANGE]',V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,V293_WHPP_HISTORY_MEMBERSHIP_INTEGRITY_ID,V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID,'WHPP history recovery distinguishes complete current membership from fully rotated membership; partial membership fails closed; mismatched history keeps only the trusted daily denominator and cannot publish stale analysis metrics; read-only, no SQLite mutation.');
+console.info('[CE-QC][V293_WHPP_HISTORY_RANGE]',V293_WHPP_HISTORICAL_RANGE_TRUTH_ID,V293_WHPP_HISTORY_MEMBERSHIP_INTEGRITY_ID,V419_WHPP_HISTORY_SUMMARY_FAILCLOSED_ID,V419_WHPP_HISTORY_FULL_METRIC_ID,'WHPP history recovery distinguishes complete current membership from fully rotated membership; verified history restores the complete visible WHPP metric set; partial membership fails closed; mismatched history keeps only the trusted daily denominator and cannot publish stale analysis metrics; read-only, no SQLite mutation.');
