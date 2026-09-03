@@ -4,6 +4,9 @@ on:
   pull_request:
     branches:
       - main
+  push:
+    branches:
+      - fix/v419-scalar-status-priority-open-truth
 
 jobs:
   range-export-freshness:
