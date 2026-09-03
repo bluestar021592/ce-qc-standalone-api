@@ -2,6 +2,7 @@
   if(global.__CE_QC_V169_LEGACY_STATUS_SYNC__)return;
   const VERSION='2026-09-01-v411-unconfirmed-status-entry-lock-v1';
   const V420_ENTRY_CONFIRM_REVISION='2026-09-03-v420-bounded-entry-status-confirm-v1';
+  const V421_CLICKABLE_UNCONFIRMED_REVISION='2026-09-03-v421-clickable-unconfirmed-start-v1';
   const ENTRY_CONFIRM_WAIT_MS=8500;
   let observerTimer=null;
   const norm=value=>String(value||'').replace(/\s+/g,' ').trim();
@@ -140,6 +141,26 @@
     });
   }
 
+  function releaseStartButtonForConfirmation(state){
+    if(state?.kind!=='unconfirmed')return false;
+    const btn=document.querySelector('[data-testid="global-auto-process"]');
+    if(!btn)return false;
+    const v67Stage=global.__CE_QC_UNIFIED_RUN_STAGE__||{};
+    const label=norm(btn.textContent);
+    const lockedByV168=btn.dataset.v168Locked==='1';
+    if(v67Stage.active===true||(!lockedByV168&&label!=='状态确认中'))return false;
+    btn.disabled=false;
+    btn.hidden=false;
+    btn.textContent='开始全自动处理';
+    btn.title=`${state.reportDate||'当前日报'} 状态仍在确认；点击后系统会等待当前读取并自动重试一次，只有确认未完成后才进入处理。`;
+    delete btn.dataset.v168Locked;
+    delete btn.dataset.v168PreviousDisabled;
+    delete btn.dataset.v168PreviousText;
+    delete btn.dataset.v168PreviousTitle;
+    btn.dataset.v421UnconfirmedEntry='1';
+    return true;
+  }
+
   function syncLegacyStatus(truth){
     const expected=normalizeDate(truth.reportDate);
     const re=/^日报\s*(\d{4}-\d{2}-\d{2})\s*·\s*当前业务.*处理中$/;
@@ -205,6 +226,7 @@
       }
       if(state.kind==='unconfirmed'){
         lockResumeButtons(state);
+        releaseStartButtonForConfirmation(state);
         console.info('[CE-QC][V169]',name,'blocked after bounded canonical status confirmation for',state.reportDate||'current report');
         return{
           ok:false,
@@ -216,6 +238,8 @@
         };
       }
       unlockResumeButtons();
+      const start=document.querySelector('[data-testid="global-auto-process"]');
+      if(start)delete start.dataset.v421UnconfirmedEntry;
       return original.apply(this,arguments);
     };
     guarded.__v169CanonicalCompletionGuard=true;
@@ -237,9 +261,12 @@
       syncLegacyStatus(state.truth);
     }else if(state.kind==='unconfirmed'){
       lockResumeButtons(state);
+      releaseStartButtonForConfirmation(state);
       restoreLegacyStatus();
     }else{
       unlockResumeButtons();
+      const start=document.querySelector('[data-testid="global-auto-process"]');
+      if(start)delete start.dataset.v421UnconfirmedEntry;
       restoreLegacyStatus();
     }
     global.__CE_QC_V138_CCSL_SCAN_PROGRESS__?.enforceLastTruth?.();
@@ -278,6 +305,6 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   installEntryGuards();
-  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState};
-  console.info('[CE-QC][V169]',VERSION,V420_ENTRY_CONFIRM_REVISION,'same-date complete stays hard-locked; explicit start/resume waits for an already-running canonical V168 read and retries once before fail-closed; only fresh incomplete truth releases V67.');
+  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,releaseStartButtonForConfirmation};
+  console.info('[CE-QC][V169]',VERSION,V420_ENTRY_CONFIRM_REVISION,V421_CLICKABLE_UNCONFIRMED_REVISION,'same-date complete stays hard-locked; unconfirmed display remains fail-closed but explicit Start stays clickable and waits/retries canonical V168 status before V67; only fresh incomplete truth releases V67.');
 })(window);
