@@ -1,6 +1,7 @@
 (function installSevenBusinessLegacyStatusSyncV169(global){
   if(global.__CE_QC_V169_LEGACY_STATUS_SYNC__)return;
-  const VERSION='2026-09-03-v420-bounded-entry-status-confirm-v1';
+  const VERSION='2026-09-01-v411-unconfirmed-status-entry-lock-v1';
+  const V420_ENTRY_CONFIRM_REVISION='2026-09-03-v420-bounded-entry-status-confirm-v1';
   const ENTRY_CONFIRM_WAIT_MS=8500;
   let observerTimer=null;
   const norm=value=>String(value||'').replace(/\s+/g,' ').trim();
@@ -277,6 +278,6 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   installEntryGuards();
-  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState};
-  console.info('[CE-QC][V169]',VERSION,'same-date complete stays hard-locked; explicit start/resume waits for an already-running canonical V168 read and retries once before fail-closed; only fresh incomplete truth releases V67.');
+  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState};
+  console.info('[CE-QC][V169]',VERSION,V420_ENTRY_CONFIRM_REVISION,'same-date complete stays hard-locked; explicit start/resume waits for an already-running canonical V168 read and retries once before fail-closed; only fresh incomplete truth releases V67.');
 })(window);
