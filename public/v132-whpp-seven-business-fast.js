@@ -1,8 +1,8 @@
 (function installWhppSevenBusinessFastV132(global){
   if(global.__CE_QC_V132_WHPP_FAST__)return;
-  const VERSION='2026-09-03-v419-whpp-one-global-range-board-v1';
-  const REVISION='2026-09-03-v419-whpp-range-summary-trend-detail-v1';
-  const CACHE_KEY='ce_qc_v132_whpp_fast_summary';
+  const VERSION='2026-09-03-v419-whpp-one-global-range-board-v2';
+  const REVISION='2026-09-03-v419-whpp-range-summary-trend-detail-v2';
+  const CACHE_KEY='ce_qc_v132_whpp_fast_summary_v419_2';
   let currentSummary=readCache();
   let trendRequest=0,detailRequest=0,rangeTimer=null;
 
@@ -48,7 +48,7 @@
   function share(value,total){return `占本业务 ${total?(Number(value||0)*100/Number(total)).toFixed(2):'0.00'}%`;}
   function topCard(label,value,unit,total,key,tone='blue',rangeMode=false){const display=unit==='%'?pct(value):fmt(value),timeLabel=rangeMode?'区间票数':'今日票数';return `<button class="v18-business-card ${tone}" data-whpp-tab="${esc(key)}" onclick="window.openWhppV132Detail('${esc(key)}','')"><span>${esc(label)}</span><small>${unit==='%'?'当前比率':timeLabel}</small><b>${display}</b><em>${label==='WHPP本土'?'占本业务 100.00%':unit==='%'?`当前比率 ${display}`:share(value,total)}</em></button>`;}
   function metric(label,value,total,key,unit='件'){return `<button class="v18-metric-card" data-whpp-tab="${esc(key)}" onclick="window.openWhppV132Detail('${esc(key)}','')"><i aria-hidden="true">●</i><span>${esc(label)}</span><b>${unit==='%'?pct(value):fmt(value)}</b><small>${unit==='%'?`当前比率 ${pct(value)}`:share(value,total)}</small></button>`;}
-  function regionBlock(label,code,row={},rangeMode=false){const first=rangeMode?'区间件数':'今日件数',items=[[first,row.total,'all'],['签收率',pct(row.podRate),'pod'],['签收件数',row.pod,'pod'],['Pending1+',row.pending1,'pending1'],['Pending2+',row.pending2,'pending2'],['Pending3+',row.pending3,'pending3'],['OC1+',row.oc1,'oc1'],['OC2+',row.oc2,'oc2'],['OC3+',row.oc3,'oc3'],['已退回件',row.returned,'returned'],['当前未闭环',row.unresolved,'unresolved']];return `<section class="region-block" data-region="${code}"><h4>${esc(label)}</h4><div>${items.map(([name,value,key])=>`<button type="button" data-whpp-tab="${key}" data-whpp-region="${code}" onclick="window.openWhppV132Detail('${key}','${code}')"><span>${esc(name)}</span><b>${typeof value==='string'?esc(value):fmt(value)}</b></button>`).join('')}</div></section>`;}
+  function regionBlock(label,code,row={},rangeMode=false){const incomplete=rangeMode&&row?.ready===false,first=rangeMode?'区间件数':'今日件数',items=[[first,row.total,'all'],['签收率',pct(row.podRate),'pod'],['签收件数',row.pod,'pod'],['Pending1+',row.pending1,'pending1'],['Pending2+',row.pending2,'pending2'],['Pending3+',row.pending3,'pending3'],['OC1+',row.oc1,'oc1'],['OC2+',row.oc2,'oc2'],['OC3+',row.oc3,'oc3'],['已退回件',row.returned,'returned'],['当前未闭环',row.unresolved,'unresolved']];return `<section class="region-block" data-region="${code}"><h4>${esc(label)}</h4><div>${items.map(([name,value,key])=>`<button type="button" data-whpp-tab="${key}" data-whpp-region="${code}" onclick="window.openWhppV132Detail('${key}','${code}')"><span>${esc(name)}</span><b>${incomplete?'—':typeof value==='string'?esc(value):fmt(value)}</b></button>`).join('')}</div>${incomplete?'<small>历史PP/PV区域证据不完整，暂不显示可能失真的0值</small>':''}</section>`;}
   function chartModel(title,type,dates,values,oc=false){return {title,type,oc,dates:Array.isArray(dates)?dates:[],series:[{name:'WHPP',values:(Array.isArray(values)?values:[]).map(value=>value===null||value===undefined?null:Number(value))}]};}
   async function mountTrends(retry=0){
     const host=document.getElementById('v152WhppTrend');if(!host||location.pathname!=='/whpp')return;const request=++trendRequest,range=selectedRange();if(!range.from||!range.to)return;
@@ -57,7 +57,8 @@
   function render(payload=currentSummary,note=''){
     const page=activatePage(false);if(!page)return;const data=payload||{},range=selectedRange(),rangeMode=Boolean(data.range||range.multi),m=data.metrics||{},regions=data.regions||{},total=Number(m.total||data.total||0),completed=canonicalCompleted(data);
     const span=rangeMode?`${esc(data.fromDate||range.from||'—')} ~ ${esc(data.toDate||range.to||'—')}`:`${esc(data.reportDate||range.to||'—')}`;
-    const statusText=rangeMode?`区间 ${span} · WHPP与全局日期范围一致 · ${completed?'当前已保存结果':'部分日期仍待完成'}`:completed?`日报 ${span} · 当前业务正式结果已保存`:total>0?`日报 ${span} · WHPP已从同一份日报分类 ${fmt(total)} 票，等待统一七业务流程自动进入本土阶段。`:`日报 ${span} · 当前无WHPP本土数据`;
+    const regionCoverageNote=rangeMode&&m.regionCoverageComplete===false?' · 历史PP/PV区域证据不完整，区域暂以—显示':'';
+    const statusText=(rangeMode?`区间 ${span} · WHPP与全局日期范围一致 · ${completed?'当前已保存结果':'部分日期仍待完成'}`:completed?`日报 ${span} · 当前业务正式结果已保存`:total>0?`日报 ${span} · WHPP已从同一份日报分类 ${fmt(total)} 票，等待统一七业务流程自动进入本土阶段。`:`日报 ${span} · 当前无WHPP本土数据`)+regionCoverageNote;
     const podLabel=rangeMode?'区间POD':'今日POD';
     const top=[['WHPP本土',total,'件','all','purple'],[podLabel,m.pod,'件','pod','blue'],['POD率',m.podRate,'%','pod','blue'],['已退回件',m.returned,'件','returned','blue'],['订单取消',m.cancelled,'件','cancelled','blue'],['当前未闭环',m.unresolved,'件','unresolved','blue']];
     const core=[['Pending不连续',m.pendingNonContinuous,'pendingNonContinuous'],['Pending1+',m.pending1,'pending1'],['Pending2+',m.pending2,'pending2'],['Pending3+',m.pending3,'pending3'],['OC1+',m.oc1,'oc1'],['OC2+',m.oc2,'oc2'],['OC3+',m.oc3,'oc3'],['盘点2天+',m.cycle2,'cycle2'],['入库无扫描',m.inboundNoScan,'inboundNoScan'],['已退回件',m.returned,'returned'],['当前未闭环',m.unresolved,'unresolved'],['派送中',m.delivery??m.deliveryStay,'delivery'],['CCSLCN',m.ccslCnDiversion,'ccslCnDiversion'],['CEZT',m.ccslZtDiversion,'ccslZtDiversion'],['CCSL580',m.ccsl580Retention,'ccsl580Retention'],['金边门店',m.phnomPenhShop,'phnomPenhShop'],['外省门店',m.provinceShop,'provinceShop']];
@@ -79,7 +80,7 @@
     document.addEventListener('ce-qc-run-complete',()=>{void fetchFast().then(value=>{if(location.pathname==='/whpp'){render(value);scheduleCompletionSync();}}).catch(()=>{});});
     if(location.pathname==='/whpp')void navigate(false);
     global.__CE_QC_V132_WHPP_FAST__={version:VERSION,revision:REVISION,displayOnly:true,authoritativeRunner:'V67',navigate,fetchSummary:fetchFast,selectedDate,selectedRange,openDetail,mountTrends,canonicalCompleted};
-    console.info('[CE-QC][V132_WHPP_GLOBAL_RANGE]',REVISION,'WHPP cards, regions, trends and drilldowns follow the same global from/to range as HOME and all other business boards; single-day fast path remains available.');
+    console.info('[CE-QC][V132_WHPP_GLOBAL_RANGE]',REVISION,'WHPP cards, regions, trends and drilldowns follow the same global from/to range as HOME and all other business boards; incomplete historical PP/PV region evidence renders dash instead of fake zero; single-day fast path remains available.');
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(install,20),{once:true});else setTimeout(install,20);
 })(window);
