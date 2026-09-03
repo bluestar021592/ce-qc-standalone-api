@@ -2,13 +2,13 @@ name: CE QC final system regression
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ce-qc-final-regression-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   final-regression:
