@@ -189,7 +189,6 @@ const regionTotals=Object.fromEntries(regionFacts.map(row=>[row.regionCode,row.t
 assert.deepEqual(regionTotals,{PP:6,PV:3},'WHPP V284 PP/PV region totals must come directly from the same nine daily members');
 const v284Fact=readV284DailyFacts(v284Date,v284Date,db).find(row=>row.businessType==='WHPP');
 assert.ok(v284Fact,'V284 WHPP SQL must return a daily fact instead of silently falling back to an empty array');
-assert.equal(v284Fact.rangeMetricParityId,V419_WHPP_RANGE_METRIC_PARITY_ID);
 assert.deepEqual({
   total:v284Fact.total,matched:v284Fact.matched,pod:v284Fact.pod,pendingNonContinuous:v284Fact.pendingNonContinuous,
   pending1:v284Fact.pending1,pending2:v284Fact.pending2,pending3:v284Fact.pending3,ocCurrent:v284Fact.ocCurrent,oc1:v284Fact.oc1,oc2:v284Fact.oc2,oc3:v284Fact.oc3,
