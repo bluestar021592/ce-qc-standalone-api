@@ -33,13 +33,17 @@ assert.match(ui,/CCSL、SHOPEE CN\/VN、WHPP本土均已完成/);
 
 assert.match(runner,/2026-09-02-v414-explicit-unified-restart-only-v1/,'V67 must expose the current explicit-run/restart-only runner revision');
 assert.match(runner,/2026-09-02-v67-retryable-process-restart-recovery-v2/,'V67 sole executor must expose retryable exact Shopee restart recovery');
+assert.match(runner,/V424_RESUME_FLOOR_REVISION = '2026-09-04-v424-restart-proof-resume-floor-v1'/,'V67 must expose the V424 same-proof resume-floor revision');
 assert.match(runner,/function shopeeRestartInterruption\(payload = \{\}, target = ''\)/,'restart recovery must classify persisted Shopee status without a second executor');
 assert.match(runner,/PROCESS_RESTART_INTERRUPTED/,'only the persisted process-restart interruption marker is eligible for automatic recovery');
 assert.match(runner,/const shopeeRestartRecoveryCooldown = new Map\(\)/,'restart recovery must use a cooldown map, never a permanent suppression set');
 assert.match(runner,/SHOPEE_RESTART_RETRY_COOLDOWN_MS = 15000/,'failed exact restart recovery must have bounded retry cooldown');
 assert.match(runner,/if \(Date\.now\(\) < nextRetryAt\) return false/,'same interrupted lock must not be hammered while its cooldown is active');
+assert.match(runner,/handoff\.token !== resumeHandoffNonce/,'resume-floor privilege must require an opaque V67 process-local token');
+assert.match(runner,/const handoff = createPersistedRestartHandoff\(all, target, 'SHOPEE'\)/,'automatic Shopee restart recovery must mint its resume floor from the same persisted proof');
 assert.match(runner,/shopeeRestartRecoveryCooldown\.set\(restart\.key, Date\.now\(\) \+ SHOPEE_RESTART_RETRY_COOLDOWN_MS\)/,'cooldown must be armed before the single V67 resume attempt');
-assert.match(runner,/const result = await execute\('resume'\);[\s\S]*if \(result\?\.ok\) shopeeRestartRecoveryCooldown\.delete\(restart\.key\)/,'successful recovery clears its cooldown; failed recovery becomes eligible again after cooldown');
+assert.match(runner,/const handoff = createPersistedRestartHandoff\(all, target, 'SHOPEE'\);[\s\S]*const result = await execute\('resume', handoff\);[\s\S]*if \(result\?\.ok\) shopeeRestartRecoveryCooldown\.delete\(restart\.key\)/,'successful exact restart recovery must carry the same proof into V67 and clear its cooldown only after success');
+assert.match(runner,/if \(resumeFloor && index < resumeFloor\.index\)[\s\S]*resumeFloor: V424_RESUME_FLOOR_REVISION/,'only an accepted resume floor may skip an already-proven prior stage');
 assert.match(runner,/检测到\$\{target\}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN\/VN → WHPP本土/,'visible recovery state must explain exact process-restart Shopee-to-WHPP continuation');
 assert.match(runner,/WHPP_RESTART_RECOVERY_REVISION = '2026-09-02-v414-whpp-restart-only-browser-v1'/,'generic incomplete WHPP must remain idle; automatic WHPP recovery is restart-only');
 assert.match(runner,/function whppRestartInterruption\(payload = \{\}, target = ''\)/,'WHPP automatic recovery must require persisted restart proof');
@@ -47,7 +51,7 @@ assert.match(runner,/if \(!restart\.interrupted\) return false/,'V67 must not au
 assert.match(runner,/\/api\/v33\/run-progress\?\$\{query\.toString\(\)\}/,'V67 stage decisions must use the tiny persisted status endpoint');
 assert.doesNotMatch(runner,/\/api\/v311\/shopee-recovery|\/api\/v317\/ccsl-recovery|\/api\/v132\/whpp-fast-summary/,'V67 must not re-enter heavy status/recovery/summary reads while deciding completed stages');
 assert.match(runner,/global\.runUnified = \(\) => execute\('start'\)/,'V67 remains the public start owner');
-assert.match(runner,/global\.resumeUnified = \(\) => execute\('resume'\)/,'V67 remains the public resume owner');
+assert.match(runner,/global\.resumeUnified = handoff => execute\('resume', handoff\)/,'V67 remains the public resume owner; ordinary callers get no resume-floor privilege without an opaque handoff');
 
 assert.match(statusUi,/2026-09-02-v168-one-persisted-status-read-v1/);
 assert.match(statusUi,/STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1'/,'V168 must bind to the exact V414 persisted status contract');
@@ -59,6 +63,9 @@ assert.doesNotMatch(statusUi,/\/api\/shopee\/run\/start|\/api\/whpp\/run\/start|
 assert.match(persistedStatus,/2026-09-02-v414-one-read-seven-business-status-v1/);
 assert.match(persistedStatus,/2026-09-02-v414-whpp-success-evidence-parity-v1/);
 assert.match(persistedStatus,/2026-09-02-v419-scalar-status-priority-no-json-v1/);
+assert.match(persistedStatus,/2026-09-04-v424-same-lifecycle-completion-snapshot-v1/,'V322 must expose bounded same-lifecycle completion recovery');
+assert.match(persistedStatus,/claimSource:'SAME_VALID_IMPORT_LIFECYCLE'/,'a later accidental runId may not hide a boundary-valid completion snapshot');
+assert.match(persistedStatus,/lifecycle&&atOrAfter\(lifecycle\.generatedAt,boundary\)/,'same-lifecycle completion recovery must never cross the current VALID import boundary');
 assert.match(persistedStatus,/readV322SevenBusinessStatus/);
 assert.match(persistedStatus,/stages:\{CCSL,SHOPEE,WHPP\}/);
 assert.match(persistedStatus,/PERSISTED_DAILY_HEADER_RUN_LOCK_SNAPSHOT/);
@@ -80,20 +87,23 @@ assert.match(fastProof,/FROM business_daily_parse_rows d[\s\S]*JOIN business_fin
 assert.match(fastProof,/FROM unified_import_rows u[\s\S]*JOIN business_final_rows f[\s\S]*f\.shipmentCode=u\.shipmentCode/,'SHOPEE positive proof must remain an indexed current-snapshot set join');
 
 assert.match(completionGuard,/2026-09-01-v411-unconfirmed-status-entry-lock-v1/,'V169 filename must expose the V411 fail-closed entry guard build');
+assert.match(completionGuard,/2026-09-04-v424-v169-v67-proof-handoff-v1/,'V169 must expose the V424 same-proof handoff bridge');
 assert.doesNotMatch(completionGuard,/getElementById\('ccslRunStatus'\)/,'V411 entry guard must never acquire the CCSL detail panel');
 assert.doesNotMatch(completionGuard,/getElementById\('sevenBusinessStageSummary'\)/,'V411 entry guard must never acquire the canonical summary');
 assert.match(completionGuard,/__CE_QC_V168_SEVEN_BUSINESS_STATUS__\?\.refresh/,'V411 guard may ask V168 to refresh canonical truth');
 assert.match(completionGuard,/__CE_QC_V138_CCSL_SCAN_PROGRESS__\?\.enforceLastTruth/,'V411 guard may ask V138 to re-enforce CCSL detail truth');
 assert.match(completionGuard,/wrapUnifiedEntry\('runUnified'\)/,'V411 must guard the public start entry after V67 installs it');
 assert.match(completionGuard,/wrapUnifiedEntry\('resumeUnified'\)/,'V411 must guard the public resume entry after V67 installs it');
-assert.match(completionGuard,/return original\.apply\(this,arguments\)/,'only fresh incomplete truth may delegate to the original V67 entry');
+assert.match(completionGuard,/createShopeeRestartHandoff/,'V169 exact restart routing must request a V67-owned opaque handoff instead of calling a bare resume');
+assert.match(completionGuard,/originalEntries\.resumeUnified\.call\(this,handoff\)/,'V169 must pass the same restart proof into V67 exactly once');
+assert.match(completionGuard,/return original\.apply\(this,arguments\)/,'only ordinary fresh incomplete truth may delegate to the original V67 entry');
 assert.match(completionGuard,/SEVEN_BUSINESS_ALREADY_COMPLETE/,'completed lifecycle must be rejected before it can re-enter V67');
 assert.match(completionGuard,/SEVEN_BUSINESS_STATUS_UNCONFIRMED/,'missing, stale or wrong-date canonical status must be rejected before it can re-enter V67');
 assert.match(completionGuard,/CURRENT_DATE_STATUS_NOT_READY/,'V411 must distinguish an unready exact-date status from a real incomplete lifecycle');
 assert.match(completionGuard,/CURRENT_DATE_STATUS_STALE/,'V411 must fail closed when the exact-date status is stale');
 assert.match(completionGuard,/state\.kind==='unconfirmed'[\s\S]*lockResumeButtons\(state\)/,'unconfirmed status must keep legacy resume controls hidden and disabled');
-assert.doesNotMatch(completionGuard,/\/api\/whpp\/run\/start|\/api\/whpp\/run\/resume|\/api\/run\/start|\/api\/v311\/shopee-recovery[^\n]*action[^\n]*start/,'V411 guard must never start any CCSL, SHOPEE or WHPP processing API itself');
-assert.doesNotMatch(completionGuard,/async function execute|function execute\(/,'V411 guard must not own a duplicate three-stage executor');
+assert.doesNotMatch(completionGuard,/\/api\/whpp\/run\/start|\/api\/whpp\/run\/resume|\/api\/run\/start|\/api\/v311\/shopee-recovery[^\n]*action[^\n]*start/,'V411/V424 guard must never start any CCSL, SHOPEE or WHPP processing API itself');
+assert.doesNotMatch(completionGuard,/async function execute|function execute\(/,'V411/V424 guard must not own a duplicate three-stage executor');
 
 assert.match(convergence,/2026-09-01-v413-lifecycle-bound-seven-business-convergence-v4/,'V412 filename must expose the V413 import-total-text convergence build');
 assert.match(convergence,/\['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'\]/,'visible total must always sum all seven businesses');
@@ -118,15 +128,15 @@ assert.match(ccslRecovery,/2026-09-01-v317-status-proof-lazy-until-completion-sn
 assert.match(ccslRecovery,/rawSnapshot\s*\?ccslProcessingProof\(db,date,validBatch,sourceTotal\)\s*:pendingProcessingProof\(validBatch,sourceTotal\)/,'V384 member proof remains strict when V317 is explicitly invoked');
 assert.match(ccslRecovery,/SKIPPED_UNTIL_COMPLETION_SNAPSHOT/);
 
-assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'entry guard must load after canonical status owner');
+assert.match(shell,/v67-resilient-run-guard\.js\?v=20260904-v424-1/,'single V67 runner must force-load the V424 resume-floor build');
 assert.match(shell,/v168-seven-business-status\.js\?v=20260902-v414-status-1/,'canonical V168 status-only owner must force-load the V414 single-read build');
-assert.match(shell,/v412-seven-business-convergence\.js\?v=20260901-v413-3/,'V413 import-total-text convergence must remain after V169');
-assert.match(shell,/v67-resilient-run-guard\.js\?v=20260902-v414-explicit-1/,'single V67 runner must force-load the V414 explicit/restart-only build');
-const v67At=shell.indexOf('v67-resilient-run-guard.js?v=20260902-v414-explicit-1');
+assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260904-v424-1/,'entry guard must force-load the V424 same-proof handoff build');
+assert.match(shell,/v412-seven-business-convergence\.js\?v=20260904-v420-1/,'V420/V413 import-total-text convergence must remain after V169');
+const v67At=shell.indexOf('v67-resilient-run-guard.js?v=20260904-v424-1');
 const v168At=shell.indexOf('v168-seven-business-status.js?v=20260902-v414-status-1');
-const v169At=shell.indexOf('v169-seven-business-legacy-status-sync.js?v=20260901-v411-1');
-const v413At=shell.indexOf('v412-seven-business-convergence.js?v=20260901-v413-3');
-assert.ok(v67At>=0&&v168At>v67At&&v169At>v168At&&v413At>v169At,'runtime order must remain V67 executor → V168 V414 persisted status → V169 fail-closed entry guard → V413 lifecycle convergence');
+const v169At=shell.indexOf('v169-seven-business-legacy-status-sync.js?v=20260904-v424-1');
+const v413At=shell.indexOf('v412-seven-business-convergence.js?v=20260904-v420-1');
+assert.ok(v67At>=0&&v168At>v67At&&v169At>v168At&&v413At>v169At,'runtime order must remain V67 V424 executor → V168 V414 persisted status → V169 V424 fail-closed handoff guard → V420/V413 lifecycle convergence');
 
 assert.match(whppSummary,/STATUS_REVISION='2026-09-02-v414-whpp-success-evidence-status-v1'/,'WHPP canonical summary must expose the V414 SUCCESS-evidence lifecycle status revision');
 assert.match(whppSummary,/function loadCurrentLifecycleCompletion/,'WHPP summary must recover an already-finalized current lifecycle after browser reload');
@@ -144,4 +154,4 @@ assert.match(whppStore,/\.\.\.emptyWhppState\(\),[\s\S]*reportDate,[\s\S]*dailyR
 assert.match(inject,/v318-single-sidebar-owner\.js\?v=20260826-v318-1/,'V318 UI owner must remain delivered');
 assert.match(inject,/X-CE-QC-V318-UI/,'V318 response header must be observable');
 
-console.log('[V419/V414/V168/V322/SINGLE-RUNNER] smoke passed · one scalar persisted exact-date status read replaces repeated V311/V317/V132 UI polling · exact PROCESS_RESTART_INTERRUPTED recovery retries after bounded cooldown through sole V67 · current-member WHPP completion requires full SUCCESS coverage · generic incomplete WHPP remains idle · generic failures remain fail-closed · WHPP dashboard is display-only · seven-business total and completion lifecycle remain exact');
+console.log('[V424/V419/V414/V168/V322/SINGLE-RUNNER] smoke passed · one scalar persisted exact-date status read replaces repeated V311/V317/V132 UI polling · exact PROCESS_RESTART_INTERRUPTED recovery carries one opaque same-proof V67 resume floor so completed CCSL cannot be reopened · current-member completion remains boundary-locked and fail-closed · generic incomplete WHPP remains idle · generic failures remain fail-closed · WHPP dashboard is display-only · seven-business total and completion lifecycle remain exact');
