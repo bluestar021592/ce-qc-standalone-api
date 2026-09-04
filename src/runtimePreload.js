@@ -1,28 +1,19 @@
 import { applyStoragePolicy, STORAGE_POLICY_ID } from './storagePolicy.js';
 
-export const RUNTIME_PRELOAD_ID='system-runtime-preload-v1';
+export const RUNTIME_PRELOAD_ID='system-runtime-preload-v2';
 export const V147_LEGACY_MAINTENANCE_POLICY_ID='2026-09-01-completed-dates-no-startup-api-refresh-v1';
 export const V147_TRACK_TIMEOUT_CONFIG_ID='2026-08-16-v147-track-time-budget-v2';
 export const V305_SHOPEE_FAST_BATCH_POLICY_ID='2026-08-25-v305-shopee-fast-bounded-batch-v1';
 
-// Core storage ownership must be established before any legacy runtime module is
-// evaluated. This replaces V303 as a path owner; V303 may remain only as a temporary
-// compatibility shim until the repository-wide audit proves no external test/import
-// still references it.
 const storageLayout=applyStoragePolicy();
 console.log('[CE-QC][CORE_STORAGE_POLICY_READY]',JSON.stringify({
-  runtimePreload:RUNTIME_PRELOAD_ID,
-  storagePolicy:STORAGE_POLICY_ID,
-  dataRoot:storageLayout.dataRoot,
-  runtimeRoot:storageLayout.runtimeRoot,
-  database:storageLayout.dbFile
+  runtimePreload:RUNTIME_PRELOAD_ID,storagePolicy:STORAGE_POLICY_ID,
+  dataRoot:storageLayout.dataRoot,runtimeRoot:storageLayout.runtimeRoot,database:storageLayout.dbFile
 }));
 
-// Keep evaluation order explicit. The previous v147 file used a long static import
-// stack, which made ownership hard to audit and allowed path/runtime side effects to
-// be hidden inside dependency evaluation. The compatibility modules are still loaded
-// for now, but this unversioned coordinator is the single startup owner while they are
-// being folded into core modules one by one.
+// Explicit startup ownership. Compatibility modules remain only while their public
+// endpoints/old test contracts are being retired; no module should rely on another
+// module's incidental import side effects to become active.
 await import('./v316BatchPolicyPreload.js');
 await import('./v314ModuleRedirectPatch.js');
 await import('./v315OperationalDataRefreshPatch.js');
@@ -38,6 +29,7 @@ await import('./v294PostProcessAttemptBackfillPatch.js');
 await import('./v294CarryoverSchedulerActivation.js');
 await import('./v295FirstAttemptRoutePatch.js');
 await import('./v295FirstAttemptInvalidationPatch.js');
+await import('./v415RetroactiveCompletionGuard.js');
 await import('./v322WebAvailabilityPatch.js');
 await import('./v308DeliveryDailyFastPath.js');
 await import('./v308DashboardReadBridgeInjection.js');
@@ -57,24 +49,16 @@ if(!RECOVERY_SAFE_MODE&&LEGACY_HISTORY_MAINTENANCE){
   console.log('[CE-QC][COMPLETED_HISTORY_READ_ONLY_STARTUP]',V147_LEGACY_MAINTENANCE_POLICY_ID,'legacy V283 replay + V284 audit/API priority refresh disabled on normal startup; completed dates stay SQLite/cache read-only.');
 }
 
-// Canonical read-only CE pipeline budgets. Track/exception retries now have one
-// owner in trackBatching.js; these variables tune that owner rather than creating
-// another nested retry loop in CEClient.
 if(!process.env.REQUEST_TIMEOUT_MS)process.env.REQUEST_TIMEOUT_MS='12000';
 if(!process.env.CE_TRACK_BATCH_BUDGET_MS)process.env.CE_TRACK_BATCH_BUDGET_MS='25000';
 if(!process.env.CE_TRANSIENT_RETRIES)process.env.CE_TRANSIENT_RETRIES='1';
 if(!process.env.CE_TRANSIENT_RETRY_DELAY_MS)process.env.CE_TRANSIENT_RETRY_DELAY_MS='400';
 
 console.log('[CE-QC][CORE_RUNTIME_PRELOAD]',JSON.stringify({
-  id:RUNTIME_PRELOAD_ID,
-  legacyTrackPolicy:V147_TRACK_TIMEOUT_CONFIG_ID,
-  legacyShopeePolicy:V305_SHOPEE_FAST_BATCH_POLICY_ID,
-  requestTimeoutMs:Number(process.env.REQUEST_TIMEOUT_MS),
-  trackBatchBudgetMs:Number(process.env.CE_TRACK_BATCH_BUDGET_MS),
-  transientRetries:Number(process.env.CE_TRANSIENT_RETRIES),
-  retryDelayMs:Number(process.env.CE_TRANSIENT_RETRY_DELAY_MS),
-  trackBatchSize:50,
-  trackConcurrency:4,
-  retryOwner:'trackBatching',
-  policy:'UNVERSIONED_STARTUP_COORDINATOR_SINGLE_STORAGE_OWNER_SINGLE_TRACK_RETRY_OWNER'
+  id:RUNTIME_PRELOAD_ID,legacyTrackPolicy:V147_TRACK_TIMEOUT_CONFIG_ID,legacyShopeePolicy:V305_SHOPEE_FAST_BATCH_POLICY_ID,
+  requestTimeoutMs:Number(process.env.REQUEST_TIMEOUT_MS),trackBatchBudgetMs:Number(process.env.CE_TRACK_BATCH_BUDGET_MS),
+  transientRetries:Number(process.env.CE_TRANSIENT_RETRIES),retryDelayMs:Number(process.env.CE_TRANSIENT_RETRY_DELAY_MS),
+  trackBatchSize:50,trackConcurrency:4,retryOwner:'trackBatching',statusOwner:'processingStatusCore',
+  staleCompletionGuard:'explicit-post-only',
+  policy:'UNVERSIONED_STARTUP_COORDINATOR_SINGLE_STORAGE_OWNER_SINGLE_TRACK_RETRY_OWNER_SINGLE_STATUS_OWNER'
 }));
