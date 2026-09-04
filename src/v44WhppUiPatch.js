@@ -22,6 +22,7 @@ import './v183HistoricalStatusRefreshPatch.js';
 import './v206InteractiveFirstRuntimePatch.js';
 
 export const CORE_UI_LOADER_ID='system-route-aware-ui-loader-v1';
+export const CORE_UI_LOADER_REVISION='system-route-aware-ui-loader-v2';
 const PATCH_ID='2026-09-02-consolidated-persisted-status-loader-v1';
 const V411_STATUS_ENTRY_LOCK_LOADER_COMPAT='2026-09-01-v411-serialized-status-entry-lock-loader-v1';
 const V375_CONTROL_REVISION='2026-08-30-v375-canonical-run-control-cache-bust-v1';
@@ -47,9 +48,9 @@ function buildInjectedHtml(){
     '</head>'
   ].join('\n'));
   // Consolidation: one browser loader owns all route-specific compatibility scripts.
-  // The previous build synchronously appended ~50 scripts to every page, forcing
-  // unrelated WHPP/export/status observers to execute before first paint.
-  injectedHtml=withStyle.replace('</body>','  <script src="/runtime-loader.js?v=system-runtime-loader-v1"></script>\n</body>');
+  // Critical status/first-paint scripts load immediately; trend/drilldown/history helpers
+  // are deferred until the browser is idle and never block the first dashboard render.
+  injectedHtml=withStyle.replace('</body>','  <script src="/runtime-loader.js?v=system-runtime-loader-v2"></script>\n</body>');
   return injectedHtml;
 }
 
@@ -58,6 +59,7 @@ function html(req,res,next){
   try{
     res.setHeader('X-CE-QC-UI-Build',PATCH_ID);
     res.setHeader('X-CE-QC-Core-UI-Loader',CORE_UI_LOADER_ID);
+    res.setHeader('X-CE-QC-Core-UI-Loader-Revision',CORE_UI_LOADER_REVISION);
     res.setHeader('X-CE-QC-UI-Control',V375_CONTROL_REVISION);
     res.setHeader('X-CE-QC-UI-Compat',GOLIVE_COMPAT_PATCH_ID);
     res.setHeader('X-CE-QC-Unified-Runner',SINGLE_RUNNER_UI_BUILD);
@@ -78,5 +80,5 @@ express.application.use=function coreInteractiveFirstOwnerUse(...args){
   return previousUse.apply(this,args);
 };
 
-export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,coreUiLoader:CORE_UI_LOADER_ID,controlRevision:V375_CONTROL_REVISION,compatPatchId:GOLIVE_COMPAT_PATCH_ID,legacyUiBuild:V226_COMPAT_UI_BUILD,singleRunner:SINGLE_RUNNER_UI_BUILD,persistedStatus:PERSISTED_STATUS_BUILD,whppPageOwner:WHPP_PAGE_OWNER,statusEntryLockCompat:V411_STATUS_ENTRY_LOCK_LOADER_COMPAT};}
+export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,coreUiLoader:CORE_UI_LOADER_ID,coreUiLoaderRevision:CORE_UI_LOADER_REVISION,controlRevision:V375_CONTROL_REVISION,compatPatchId:GOLIVE_COMPAT_PATCH_ID,legacyUiBuild:V226_COMPAT_UI_BUILD,singleRunner:SINGLE_RUNNER_UI_BUILD,persistedStatus:PERSISTED_STATUS_BUILD,whppPageOwner:WHPP_PAGE_OWNER,statusEntryLockCompat:V411_STATUS_ENTRY_LOCK_LOADER_COMPAT};}
 export const V44_WHPP_UI_PATCH_ID=PATCH_ID;
