@@ -95,12 +95,20 @@ export function getUnifiedProcessingQueue(batchId) {
   const batch = db.prepare('SELECT * FROM unified_import_batches WHERE batchId=?').get(batchId);
   if (!batch) throw new Error('导入批次不存在');
   const queryStartedAt = Date.now();
+  // Import hydration only consumes historical CCSL/Shopee carry rows. Today rows
+  // were just parsed in-memory and WHPP has an independent daily/carry lifecycle;
+  // reading those stateJson blobs again made every new import scale with the entire
+  // OPEN table even though the caller discarded them immediately.
   const rows = db.prepare(`SELECT c.shipmentCode,c.businessType,c.sourceReportDate,c.lastReportDate,c.status,c.apiStatus,c.stateJson,
-    CASE WHEN c.sourceReportDate=? THEN 'TODAY' ELSE 'HISTORICAL_CARRY' END sourceType
-    FROM carryover_open_items c WHERE c.status='OPEN' ORDER BY c.sourceReportDate,c.shipmentCode`).all(batch.reportDate);
+    'HISTORICAL_CARRY' sourceType
+    FROM carryover_open_items c
+    WHERE c.status='OPEN'
+      AND c.sourceReportDate<?
+      AND c.businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
+    ORDER BY c.businessType,c.sourceReportDate,c.shipmentCode`).all(batch.reportDate);
   const queryElapsedMs = Date.now() - queryStartedAt;
   const summary = carryoverSummary(batch.reportDate);
-  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] carryover_queue elapsedMs=${Date.now() - stageStartedAt} queryMs=${queryElapsedMs} reportDate=${batch.reportDate} rows=${rows.length} historical=${summary.historicalOpen} today=${summary.todayOpen}`);
+  console.log(`[CE-QC][UNIFIED_IMPORT_STAGE] carryover_queue elapsedMs=${Date.now() - stageStartedAt} queryMs=${queryElapsedMs} reportDate=${batch.reportDate} hydratedHistoricalCore=${rows.length} historicalAll=${summary.historicalOpen} today=${summary.todayOpen} policy=HISTORICAL_CCSL_SHOPEE_ONLY`);
   return { batchId, snapshotId: batch.snapshotId, reportDate: batch.reportDate, rows, summary };
 }
 
