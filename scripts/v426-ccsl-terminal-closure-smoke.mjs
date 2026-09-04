@@ -5,6 +5,8 @@ import path from 'node:path';
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v426-terminal-'));
 const dbFile=path.join(root,'v426.db');
+const ENV_KEYS=['NODE_ENV','ACCESS_MODE','DATA_DIR','DB_FILE','SQLITE_MMAP_BYTES','SQLITE_CACHE_KIB','CE_QC_DISABLE_V246_TRACKING'];
+const oldEnv=Object.fromEntries(ENV_KEYS.map(key=>[key,process.env[key]]));
 Object.assign(process.env,{
   NODE_ENV:'test',
   ACCESS_MODE:'LOCAL',
@@ -137,5 +139,9 @@ try{
   console.log('[V426] CCSL terminal-closure smoke passed · no completion snapshot + exact current VALID membership fully POD-locked closes CCSL without reopening run · V317/V322/V415 agree · interrupted run pointer remains audit-only · UI 0/0 is never proof · one new uncovered member keeps the newer lifecycle incomplete');
 } finally {
   try{closeDb();}catch{}
+  for(const key of ENV_KEYS){
+    if(oldEnv[key]===undefined)delete process.env[key];
+    else process.env[key]=oldEnv[key];
+  }
   fs.rmSync(root,{recursive:true,force:true});
 }
