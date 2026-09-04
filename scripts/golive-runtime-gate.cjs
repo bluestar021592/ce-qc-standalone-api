@@ -25,9 +25,11 @@ const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 const exportDirect = read('src/v190ExportDirectEndpointPatch.js');
 const exportSidecar = read('src/v193ExportSidecar.js');
 
-// Current execution ownership: V67 is the sole normal browser runner.
+// Current execution ownership: V67 is the sole normal browser runner. V424 adds
+// only an opaque same-proof resume floor for an exact restart interruption.
 must(runner, '2026-09-02-v414-explicit-unified-restart-only-v1');
 must(runner, '2026-09-02-v414-one-read-seven-business-status-v1');
+must(runner, '2026-09-04-v424-restart-proof-resume-floor-v1');
 must(runner, "{ key: 'CCSL'");
 must(runner, "{ key: 'SHOPEE'");
 must(runner, "{ key: 'WHPP'");
@@ -35,8 +37,11 @@ must(runner, '/api/run');
 must(runner, '/api/shopee/run/start');
 must(runner, '/api/whpp/run/start');
 must(runner, 'PROCESS_RESTART_INTERRUPTED');
+must(runner, 'resumeHandoffNonce');
+must(runner, "createPersistedRestartHandoff(all, target, 'SHOPEE')");
+must(runner, 'if (resumeFloor && index < resumeFloor.index)');
 must(runner, "global.runUnified = () => execute('start')");
-must(runner, "global.resumeUnified = () => execute('resume')");
+must(runner, "global.resumeUnified = handoff => execute('resume', handoff)");
 forbid(runner, '[CE-QC][V67_WHPP_AUTO_RESUME]');
 forbid(runner, '/api/v311/shopee-recovery');
 forbid(runner, '/api/v317/ccsl-recovery');
@@ -123,7 +128,8 @@ must(whppStore, 'finalSnapshotAuthority: V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID')
 
 // The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
 // HTML/JS caching. Exact cache-bust suffixes may advance independently.
-must(shell, 'v67-resilient-run-guard.js?v=');
+must(shell, 'v67-resilient-run-guard.js?v=20260904-v424-1');
+must(shell, 'v169-seven-business-legacy-status-sync.js?v=20260904-v424-1');
 must(shell, 'v132-whpp-seven-business-fast.js?v=');
 must(shell, 'Cache-Control');
 must(shell, 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -169,10 +175,12 @@ for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storag
 // The real updater executes test:golive. Keep the newest truth-boundary
 // regressions inside this gate so a candidate cannot install with WHPP carry
 // membership leakage, stale same-day completion reuse, uncertified WHPP final
-// snapshots, legacy detail/export divergence, or stale POD/attempt/signing
-// residue in export rows.
+// snapshots, legacy detail/export divergence, stale POD/attempt/signing residue,
+// or a restart handoff that reopens an already-proven CCSL stage.
+execFileSync(process.execPath,['scripts/v424-resume-floor-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
+execFileSync(process.execPath,['scripts/v424-same-lifecycle-completion-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['scripts/v419-whpp-final-snapshot-authority-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['--test','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V419] runtime-source gate passed · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · carry-contaminated finalRows are enrichment only · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · 4f53 legacy completion requires exact daily authority + immutable-member attestation in both export and detail · lazy snapshot JSON recovery · partial-membership fail-closed · canonical ledger clears stale POD/attempt/signing residue · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V419] runtime-source gate passed · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · carry-contaminated finalRows are enrichment only · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · 4f53 legacy completion requires exact daily authority + immutable-member attestation in both export and detail · lazy snapshot JSON recovery · partial-membership fail-closed · canonical ledger clears stale POD/attempt/signing residue · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
