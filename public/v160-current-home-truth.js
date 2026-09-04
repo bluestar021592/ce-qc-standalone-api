@@ -1,6 +1,7 @@
 (function installCurrentHomeTruthV160(global){
   if(global.__CE_QC_V160_CURRENT_HOME_TRUTH__)return;
   const VERSION='2026-08-16-v160-current-home-truth-v1';
+  const V426_HOME_RENDER_HANDOFF='2026-09-04-v426-v160-post-render-v64-handoff-v1';
   const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
   const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
   const num=value=>{const parsed=Number(value||0);return Number.isFinite(parsed)?parsed:0;};
@@ -85,10 +86,17 @@
     if(needsReset(sh,source,shTotal,'SHOPEE')){changed=setShopee(shopeePlaceholder(sh,source,shTotal))||changed;}
     return changed;
   }
+  function handoffHomeClassification(){
+    if(String(global.__CE_QC_HOME_CLASSIFICATION_OWNER__||'')!=='V64')return;
+    const refresh=global.__CE_QC_V64_WHPP_TOTAL_KPI__?.refresh;
+    if(typeof refresh!=='function')return;
+    const run=()=>{try{void refresh();}catch(error){console.warn('[CE-QC][V160_HOME_HANDOFF]',error);}};
+    if(typeof queueMicrotask==='function')queueMicrotask(run);else setTimeout(run,0);
+  }
   function install(){
     const oldRender=global.renderAll;
     if(typeof oldRender==='function'&&!oldRender.__v160Wrapped){
-      const wrapped=function(){sync();return oldRender.apply(this,arguments);};
+      const wrapped=function(){sync();const result=oldRender.apply(this,arguments);handoffHomeClassification();return result;};
       wrapped.__v160Wrapped=true;global.renderAll=wrapped;
     }
     const oldRefresh=global.refresh;
@@ -98,8 +106,8 @@
     }
     if(sync())global.renderAll?.();
     document.addEventListener('ce-qc-run-complete',()=>{setTimeout(()=>{try{global.refresh?.();}catch{}},50);});
-    global.__CE_QC_V160_CURRENT_HOME_TRUTH__={version:VERSION,sync};
-    console.info('[CE-QC][V160_CURRENT_HOME_TRUTH]',VERSION);
+    global.__CE_QC_V160_CURRENT_HOME_TRUTH__={version:VERSION,homeRenderHandoff:V426_HOME_RENDER_HANDOFF,sync,handoffHomeClassification};
+    console.info('[CE-QC][V160_CURRENT_HOME_TRUTH]',VERSION,V426_HOME_RENDER_HANDOFF);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })(window);
