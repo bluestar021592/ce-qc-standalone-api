@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const read = relative => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
+const V426_DATE='2026-09-04';
 
 function loadV159() {
   const source = read('../public/v159-current-import-stability.js');
@@ -16,6 +17,71 @@ function loadV159() {
     console:{info(){},warn(){},error(){}}, Number, String, Math, Date, Promise, Object, Array, Boolean, Map
   }, { filename:'v159-current-import-stability.js' });
   return { api: window.__CE_QC_V159_CURRENT_IMPORT_STABILITY__, source };
+}
+
+function executeV51WithV64Owner() {
+  const source=read('../public/v51-runtime-fix.js');
+  const fetchCalls=[];
+  const documentListeners=new Map();
+  const windowListeners=new Map();
+  const homePage={hidden:false,classList:{contains(){return true;}}};
+  const document={
+    readyState:'complete',hidden:false,
+    getElementById(id){return id==='homePage'?homePage:null;},
+    querySelector(){return null;},querySelectorAll(){return [];},
+    addEventListener(type,handler){documentListeners.set(type,handler);}
+  };
+  const context={
+    document,location:{pathname:'/',origin:'http://127.0.0.1'},
+    __CE_QC_HOME_CLASSIFICATION_OWNER__:'V64',
+    fetch:async input=>{fetchCalls.push(String(input||''));return {ok:true,async json(){return {ok:true,total:0};},clone(){return this;}};},
+    setTimeout(handler){if(typeof handler==='function')handler();return 1;},clearTimeout(){},
+    addEventListener(type,handler){windowListeners.set(type,handler);},
+    console:{info(){},warn(){},error(){}},String,Number,Boolean,Math,Date,Promise,Object,Array,Map,Set,URL
+  };
+  context.window=context;context.globalThis=context;
+  vm.createContext(context);
+  vm.runInContext(source,context,{filename:'v51-runtime-fix.js'});
+  documentListeners.get('ce-qc-run-complete')?.();
+  document.hidden=false;
+  documentListeners.get('visibilitychange')?.();
+  windowListeners.get('popstate')?.();
+  return {context,fetchCalls};
+}
+
+function executeV160PostRenderHandoff() {
+  const source=read('../public/v160-current-home-truth.js');
+  let baseRenderCount=0;
+  let v64RefreshCount=0;
+  const unifiedImportState={
+    reportDate:V426_DATE,snapshotId:'SNAP-V426-HANDOFF',
+    classificationCounts:{CE:2500,CEAF:300,TBKH:700,ALI1688:560,SHOPEECN:500,SHOPEEVN:500,WHPP:228}
+  };
+  const appState={
+    reportDate:V426_DATE,snapshotId:'SNAP-V426-HANDOFF',sourceTotal:4060,pnhBills:[],
+    dailyParseSummary:{totalRecognized:4060},v55Summary:{pod:0},dashboard:{pnh:4060,totalMonitored:4060,todayPod:0}
+  };
+  const shopeeState={
+    reportDate:V426_DATE,snapshotId:'SNAP-V426-HANDOFF',sourceTotal:1000,pnhBills:[],
+    dailyParseSummary:{totalRecognized:1000},v55Summary:{pod:0},dashboard:{metrics:{total:1000}}
+  };
+  const document={readyState:'complete',addEventListener(){}};
+  const context={
+    document,unifiedImportState,appState,shopeeState,
+    __CE_QC_HOME_CLASSIFICATION_OWNER__:'V64',
+    __CE_QC_V64_WHPP_TOTAL_KPI__:{refresh(){v64RefreshCount+=1;}},
+    renderAll(){baseRenderCount+=1;return 'BASE_RENDER_RESULT';},
+    async refresh(){return {ok:true};},
+    queueMicrotask(handler){if(typeof handler==='function')handler();},
+    setTimeout(handler){if(typeof handler==='function')handler();return 1;},
+    console:{info(){},warn(){},error(){}},String,Number,Boolean,Math,Date,Promise,Object,Array,Map,Set
+  };
+  context.window=context;context.globalThis=context;
+  vm.createContext(context);
+  vm.runInContext(source,context,{filename:'v160-current-home-truth.js'});
+  const first=context.renderAll();
+  const second=context.renderAll();
+  return {context,baseRenderCount,v64RefreshCount,first,second};
 }
 
 test('V419 OPEN display uses backend values only', () => {
@@ -70,6 +136,21 @@ test('V426 parser/store conserve all seven businesses including WHPP', () => {
   assert.match(store,/balanced:\s*classifiedWaybills\s*===\s*validUnique/);
   assert.match(store,/assertSourceReconciliation\(parsed\)/);
   assert.match(store,/SELECT businessType, COUNT\(\*\) count FROM unified_import_rows WHERE batchId=\? GROUP BY businessType/);
+});
+
+test('V426 V51 HOME legacy writer is runtime-disabled by the shell V64 owner contract', () => {
+  const {context,fetchCalls}=executeV51WithV64Owner();
+  assert.equal(context.__CE_QC_HOME_CLASSIFICATION_OWNER__,'V64');
+  assert.equal(fetchCalls.filter(url=>url.includes('/api/v71/whpp-summary')).length,0,'V51 startup/run-complete/visibility/popstate hooks must not fetch legacy HOME WHPP truth when V64 owns classification');
+});
+
+test('V426 V160 post-render handoff invokes V64 once per base render without recursion', () => {
+  const result=executeV160PostRenderHandoff();
+  assert.equal(result.context.__CE_QC_V160_CURRENT_HOME_TRUTH__?.homeRenderHandoff,'2026-09-04-v426-v160-post-render-v64-handoff-v1');
+  assert.equal(result.first,'BASE_RENDER_RESULT');
+  assert.equal(result.second,'BASE_RENDER_RESULT');
+  assert.equal(result.baseRenderCount,2,'V160 must preserve exactly one V105/base render per renderAll call');
+  assert.equal(result.v64RefreshCount,2,'V160 must hand each completed base render to V64 exactly once');
 });
 
 test('V426 loader delivers import-truth owners, retires V51 HOME writes, and restores authority after final renderAll', () => {
