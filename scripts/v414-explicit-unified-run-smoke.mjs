@@ -47,24 +47,31 @@ mustMatch(v294, /globalThis\.__CE_QC_IDLE_WHPP_BACKEND_CONTINUITY__\?\.\(date\)/
 mustMatch(v294, /EXPLICIT_UNIFIED_RUN_ONLY_NEW_IMPORT_NEVER_AUTO_STARTS_WHPP/, 'import policy marker');
 forbidMatch(v294, /globalThis\.__CE_QC_REARM_WHPP_BACKEND_CONTINUITY__\?\.\(date\)/, 'import-time WHPP rearm');
 
-// 4) Browser V67 is still the sole normal three-stage owner. Generic "CCSL +
-// SHOPEE done, WHPP incomplete" is not an auto-start condition anymore.
-mustMatch(v67, /VERSION\s*=\s*'2026-09-02-v414-explicit-unified-restart-only-v1'/, 'V67 V414 runner revision');
+// 4) Browser V67 is still the sole normal three-stage owner. V424 adds only an
+// opaque same-proof resume floor; it never creates a second executor.
+mustMatch(v67, /VERSION\s*=\s*'2026-09-02-v414-explicit-unified-restart-only-v1'/, 'V67 V414 runner compatibility revision');
 mustMatch(v67, /STATUS_SOURCE_REVISION\s*=\s*'2026-09-02-v414-one-read-seven-business-status-v1'/, 'V67 V414 persisted status contract');
 mustMatch(v67, /WHPP_RESTART_RECOVERY_REVISION\s*=\s*'2026-09-02-v414-whpp-restart-only-browser-v1'/, 'V67 WHPP restart-only browser revision');
+mustMatch(v67, /V424_RESUME_FLOOR_REVISION\s*=\s*'2026-09-04-v424-restart-proof-resume-floor-v1'/, 'V67 V424 same-proof resume-floor revision');
 mustMatch(v67, /function\s+whppRestartInterruption\s*\(/, 'V67 WHPP restart interruption classifier');
 mustMatch(v67, /payload\?\.restartInterrupted\s*===\s*true/, 'V67 requires persisted restartInterrupted=true');
 mustMatch(v67, /reason\.includes\(\s*['"]PROCESS_RESTART_INTERRUPTED['"]\s*\)/, 'V67 requires exact restart reason');
-mustMatch(v67, /\[CE-QC\]\[V67_WHPP_RESTART_RECOVERY\]/, 'V67 restart recovery log');
+mustMatch(v67, /resumeHandoffNonce/, 'V67 resume-floor token must be opaque and process-local');
+mustMatch(v67, /if \(resumeFloor && index < resumeFloor\.index\)[\s\S]*resumeFloor: V424_RESUME_FLOOR_REVISION/, 'accepted restart handoff must skip already-proven prior stages');
+mustMatch(v67, /\[CE-QC\]\[V424_RESUME_FLOOR\]/, 'V67 resume-floor execution must be observable');
 mustMatch(v67, /global\.runUnified\s*=\s*\(\)\s*=>\s*execute\(\s*['"]start['"]\s*\)/, 'V67 sole unified start owner');
-mustMatch(v67, /global\.resumeUnified\s*=\s*\(\)\s*=>\s*execute\(\s*['"]resume['"]\s*\)/, 'V67 sole unified resume owner');
+mustMatch(v67, /global\.resumeUnified\s*=\s*handoff\s*=>\s*execute\(\s*['"]resume['"]\s*,\s*handoff\s*\)/, 'V67 sole unified resume owner with optional internal handoff');
 forbidMatch(v67, /console\.info\(\s*['"]\[CE-QC\]\[V67_WHPP_AUTO_RESUME\]/, 'generic browser WHPP auto resume executable path');
 
 // 5) WHPP completion evidence must be a successfully processed current-member
 // row. V419 keeps V322 as the scalar orchestration owner while V418 owns the
-// exact current-member set join and SUCCESS-only SQL. Placeholder/API_PENDING_RETRY
-// rows may remain visible but can never complete the stage.
+// exact current-member set join and SUCCESS-only SQL. V424 may recover an older
+// runId completion only inside the same VALID import boundary and still requires
+// the exact current-member proof.
 mustMatch(v322, /V322_WHPP_COMPLETION_PARITY_ID\s*=\s*'2026-09-02-v414-whpp-success-evidence-parity-v1'/, 'V322 WHPP SUCCESS-evidence parity');
+mustMatch(v322, /V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID='2026-09-04-v424-same-lifecycle-completion-snapshot-v1'/, 'V322 V424 same-lifecycle completion revision');
+mustMatch(v322, /claimSource:'SAME_VALID_IMPORT_LIFECYCLE'/, 'V322 later runId cannot hide boundary-valid completion');
+mustMatch(v322, /lifecycle&&atOrAfter\(lifecycle\.generatedAt,boundary\)/, 'V322 completion fallback must remain inside current VALID lifecycle boundary');
 mustMatch(v322, /readV418BusinessSuccessCoverage/, 'V322 delegates SUCCESS coverage to V418 current-member proof owner');
 mustMatch(v322, /readV418BusinessSuccessCoverage\(db,\{businessType:'WHPP',date,snapshotId,boundary,memberTypes:\['WHPP'\]\}\)/, 'V322 WHPP stage invokes exact V418 SUCCESS coverage');
 mustMatch(v418, /FROM business_daily_parse_rows d[\s\S]*JOIN business_final_rows f[\s\S]*f\.shipmentCode=d\.shipmentCode[\s\S]*d\.businessType='WHPP'[\s\S]*d\.reportDate=\?[\s\S]*UPPER\(COALESCE\(f\.apiStatus,''\)\)='SUCCESS'/, 'V418 WHPP exact current-member SUCCESS-only evidence');
@@ -89,16 +96,16 @@ mustMatch(historyWorker, /const\s+ALLOW_NETWORK_REPAIR\s*=\s*String\(process\.en
 mustMatch(historyWorker, /savedEvents\(db/, 'history rebuild reads saved SQLite events');
 mustMatch(historyWorker, /analyzeV246ShopeeAttemptCycle\(eventMap\.get\(row\.shipmentCode\)\|\|\[\]/, 'history rebuild uses strict V246 attempt cycles');
 
-// 7) V419/V420/V423 local installer proves global range/export freshness,
-// carry/current/ledger convergence, status-entry convergence, and executable
-// current-date SHOPEE restart routing through the sole V67 resume entry.
+// 7) V419/V420/V423/V424 installer gates prove global truth + browser delivery +
+// executable same-proof restart floor in isolated/source-only child checks.
 for (const smoke of [
   'scripts/v419-carry-ledger-sync-smoke.mjs',
   'scripts/v419-global-range-export-freshness-smoke.mjs',
   'scripts/v420-status-entry-coalescing-smoke.mjs',
-  'scripts/v423-explicit-shopee-restart-resume-smoke.mjs'
+  'scripts/v423-explicit-shopee-restart-resume-smoke.mjs',
+  'scripts/v424-resume-floor-smoke.mjs'
 ]) {
   execFileSync(process.execPath,[smoke],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 }
 
-console.log('V423/V420/V419/V414 explicit unified run smoke passed: fresh import cannot auto-start WHPP; exact current-date SHOPEE PROCESS_RESTART_INTERRUPTED after CCSL completion is consumed by explicit Start through the sole V67 resume entry; generic failures remain normal-start/fail-closed; V169 waits/retries canonical V168 status while V412 does not duplicate preflight; V322/V418 current-member SUCCESS proof and V419 range/export/carry truth remain locked.');
+console.log('V424/V423/V420/V419/V414 explicit unified run smoke passed: exact current-date SHOPEE PROCESS_RESTART_INTERRUPTED after CCSL completion carries one same-proof V67 resume floor; CCSL cannot be reopened by a second fail-closed read; same-lifecycle completion survives a later runId only with current-member proof and never crosses a newer VALID import boundary; fresh import cannot auto-start WHPP; generic failures remain normal-start/fail-closed; V67 remains the sole runner.');
