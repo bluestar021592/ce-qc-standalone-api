@@ -209,7 +209,7 @@ const v64 = loadImportTruthScript(
   }
 );
 assert.ok(v64.api, 'V64 API must install');
-assert.match(v64.api.version, /v426-unified-import-truth-kpi/);
+assert.match(v64.api.version, /v426-unified-import-truth-kpi-v2/);
 const v64Stats = v64.api.importStats();
 assert.equal(v64Stats.authoritativeImport, true);
 assert.equal(v64Stats.whppTotal, 228);
@@ -220,7 +220,8 @@ assert.equal(v64Summary.total, 228, 'stale WHPP fast-summary total=0 must be rep
 assert.equal(v64Summary.classificationTotal, 5288, 'HOME total must retain the seven-business imported 5288');
 assert.equal(v64Summary.classificationSource, 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH');
 assert.equal(v64Summary.metrics.pending3, 12, 'WHPP processing metrics may still come from the fast summary');
-assert.match(shellSource, /v64-whpp-total-kpi-integration\.js\?v=20260904-v426-1/, 'shell must cache-bust V64 to the protected V426 build');
+assert.match(shellSource, /v64-whpp-total-kpi-integration\.js\?v=20260904-v426-2/, 'shell must cache-bust V64 to the protected V426 v2 build');
+assert.doesNotMatch(shellSource, /v64-whpp-total-kpi-integration\.js\?v=20260904-v426-1/, 'retired V64 v1 cache-bust must not survive');
 
 // V94 used to merge /api/v89/instant-dashboard back into classificationCounts.
 // It must now obey the same import boundary, even if a stale dashboard says WHPP=0
