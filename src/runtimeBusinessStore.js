@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import * as originalStore from './businessStore.js';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
-import { V314_SHOPEE_THROUGHPUT_CORE_ID } from './v314ShopeeThroughputCore.js';
+import { V314_SHOPEE_THROUGHPUT_CORE_ID } from './throughputCore.js';
 export * from './businessStore.js';
 
 export const RUNTIME_BUSINESS_STORE_ID='system-runtime-business-store-v2';
@@ -47,17 +47,11 @@ function pendingUnifiedImportSeed(type){
     if(Number.isFinite(batchAt)&&Number.isFinite(mirrorAt)&&mirrorAt>=batchAt)return null;
     if(!Number.isFinite(batchAt)&&mirrored?.updatedAt&&String(mirrored.updatedAt)>=String(batch.createdAt||''))return null;
     const seed=originalStore.normalizeBusinessState({
-      businessType:type,
-      reportDate:String(batch.reportDate),
-      dailyReportReady:false,
-      processing:{running:false,paused:false,phase:''},
-      currentRun:null,lastRunSummary:null,lastRun:null,
+      businessType:type,reportDate:String(batch.reportDate),dailyReportReady:false,
+      processing:{running:false,paused:false,phase:''},currentRun:null,lastRunSummary:null,lastRun:null,
       dailyParseRows:[],pnhBills:[],carryBills:[],podLocks:[],scanPool:[],scanResults:[],scanQueryStatus:[],shipmentTrackResults:[],shipmentQueryStatus:[],needTrackBills:[],trackEvents:[],eventQueryStatus:[],exceptionItems:[],exceptionQueryStatus:[],apiBatchStatus:[],trackResults:[],finalRows:[],priorCarryRows:[],nextCarryBills:[],historySummary:[],logs:[]
     },type);
-    console.info('[CE-QC][CORE_UNIFIED_IMPORT_FAST_SEED]',JSON.stringify({
-      owner:RUNTIME_BUSINESS_STORE_ID,businessType:type,reportDate:batch.reportDate,snapshotId:String(batch.snapshotId||''),
-      policy:'SKIP_OLD_BUSINESS_STATE_PARSE_BEFORE_FRESH_UNIFIED_IMPORT_HYDRATION'
-    }));
+    console.info('[CE-QC][CORE_UNIFIED_IMPORT_FAST_SEED]',JSON.stringify({owner:RUNTIME_BUSINESS_STORE_ID,businessType:type,reportDate:batch.reportDate,snapshotId:String(batch.snapshotId||''),policy:'SKIP_OLD_BUSINESS_STATE_PARSE_BEFORE_FRESH_UNIFIED_IMPORT_HYDRATION'}));
     return seed;
   }catch{return null;}
 }
@@ -88,8 +82,7 @@ function lightCheckpoint(state={},businessType=''){
 export function loadBusinessState(businessType=originalStore.SHOPEE){
   const type=normalizeType(businessType);
   if(type===originalStore.SHOPEE&&liveState?.processing?.running&&!liveState?.processing?.error)return liveState;
-  const importSeed=pendingUnifiedImportSeed(type);
-  if(importSeed)return importSeed;
+  const importSeed=pendingUnifiedImportSeed(type);if(importSeed)return importSeed;
   const loaded=originalStore.loadBusinessState(type);
   if(type===originalStore.SHOPEE&&loaded?.processing?.running&&!loaded?.processing?.error)liveState=loaded;
   return loaded;
@@ -99,27 +92,12 @@ export function saveBusinessState(state={},businessType=state.businessType||orig
   if(type!==originalStore.SHOPEE)return originalStore.saveBusinessState(state,type);
   if(state&&typeof state==='object'&&state.processing?.running&&!state.processing?.error)liveState=state;
   if(shouldUseLightCheckpoint(state,type))return lightCheckpoint(state,type);
-  const startedAt=Date.now();
-  const result=originalStore.saveBusinessState(state,type);
-  const elapsedMs=Date.now()-startedAt;
-  if(elapsedMs>=FULL_MIRROR_WARN_MS){
-    console.warn('[CE-QC][CORE_SHOPEE_FINAL_MIRROR_TIMING]',JSON.stringify({businessType:type,reportDate:String(state.reportDate||''),runId:currentRunId(state),phase:String(state.processing?.phase||''),running:Boolean(state.processing?.running),paused:Boolean(state.processing?.paused),elapsedMs,...progressCounts(state)}));
-  }
+  const startedAt=Date.now(),result=originalStore.saveBusinessState(state,type),elapsedMs=Date.now()-startedAt;
+  if(elapsedMs>=FULL_MIRROR_WARN_MS)console.warn('[CE-QC][CORE_SHOPEE_FINAL_MIRROR_TIMING]',JSON.stringify({businessType:type,reportDate:String(state.reportDate||''),runId:currentRunId(state),phase:String(state.processing?.phase||''),running:Boolean(state.processing?.running),paused:Boolean(state.processing?.paused),elapsedMs,...progressCounts(state)}));
   if(!state?.processing?.running)liveState=null;
   return result;
 }
-export function resetRuntimeBusinessStoreForTest(){
-  try{progressDb?.close();}catch{}
-  progressDb=null;progressDbPath='';liveState=null;lastCheckpointWarnAt=0;
-}
+export function resetRuntimeBusinessStoreForTest(){try{progressDb?.close();}catch{}progressDb=null;progressDbPath='';liveState=null;lastCheckpointWarnAt=0;}
 export const resetV314CheckpointRuntimeForTest=resetRuntimeBusinessStoreForTest;
 
-console.info('[CE-QC][CORE_RUNTIME_BUSINESS_STORE]',JSON.stringify({
-  id:RUNTIME_BUSINESS_STORE_ID,compatibilityId:V314_FAST_CHECKPOINT_ID,core:V314_SHOPEE_THROUGHPUT_CORE_ID,
-  inRunFullMirror:false,authoritativeFullMirrorPolicy:'PAUSE_ERROR_OR_FINAL_ONLY',lightCheckpointBusyTimeoutMs:0,
-  importHydrationPolicy:'FAST_SEED_WHEN_UNIFIED_BATCH_NEWER_THAN_SHOPEE_DAILY_MIRROR',
-  pauseReadPolicy:'IN_MEMORY_WHILE_ACTIVE',lightCheckpointWrites:'business_run_locks+business_run_checkpoints only',
-  lightCheckpointFailurePolicy:'ZERO_WAIT_FAIL_OPEN_NEVER_ABORT_SHOPEE',finalMirrorFailurePolicy:'FAIL_CLOSED',
-  scanBatchSize:350,trackBatchSize:50,trackConcurrency:4,
-  policy:'UNVERSIONED_LARGE_DB_SHOPEE_RUNTIME_STORAGE_FINAL_ONLY_AUTHORITATIVE_MIRROR'
-}));
+console.info('[CE-QC][CORE_RUNTIME_BUSINESS_STORE]',JSON.stringify({id:RUNTIME_BUSINESS_STORE_ID,compatibilityId:V314_FAST_CHECKPOINT_ID,core:V314_SHOPEE_THROUGHPUT_CORE_ID,inRunFullMirror:false,authoritativeFullMirrorPolicy:'PAUSE_ERROR_OR_FINAL_ONLY',lightCheckpointBusyTimeoutMs:0,importHydrationPolicy:'FAST_SEED_WHEN_UNIFIED_BATCH_NEWER_THAN_SHOPEE_DAILY_MIRROR',pauseReadPolicy:'IN_MEMORY_WHILE_ACTIVE',lightCheckpointWrites:'business_run_locks+business_run_checkpoints only',lightCheckpointFailurePolicy:'ZERO_WAIT_FAIL_OPEN_NEVER_ABORT_SHOPEE',finalMirrorFailurePolicy:'FAIL_CLOSED',scanBatchSize:350,trackBatchSize:50,trackConcurrency:4,policy:'UNVERSIONED_LARGE_DB_SHOPEE_RUNTIME_STORAGE_FINAL_ONLY_AUTHORITATIVE_MIRROR'}));
