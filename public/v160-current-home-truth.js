@@ -1,7 +1,7 @@
 (function installCurrentHomeTruthV160(global){
   if(global.__CE_QC_V160_CURRENT_HOME_TRUTH__)return;
   const VERSION='2026-08-16-v160-current-home-truth-v1';
-  const V426_HOME_RENDER_HANDOFF='2026-09-04-v426-v160-post-render-v64-handoff-v1';
+  const V426_HOME_RENDER_HANDOFF='2026-09-04-v426-v160-post-render-v64-classification-handoff-v2';
   const CCSL_TYPES=['CE','CEAF','TBKH','ALI1688'];
   const SHOPEE_TYPES=['SHOPEECN','SHOPEEVN'];
   const num=value=>{const parsed=Number(value||0);return Number.isFinite(parsed)?parsed:0;};
@@ -88,9 +88,9 @@
   }
   function handoffHomeClassification(){
     if(String(global.__CE_QC_HOME_CLASSIFICATION_OWNER__||'')!=='V64')return;
-    const refresh=global.__CE_QC_V64_WHPP_TOTAL_KPI__?.refresh;
-    if(typeof refresh!=='function')return;
-    const run=()=>{try{void refresh();}catch(error){console.warn('[CE-QC][V160_HOME_HANDOFF]',error);}};
+    const refreshClassification=global.__CE_QC_V64_WHPP_TOTAL_KPI__?.refreshClassification;
+    if(typeof refreshClassification!=='function')return;
+    const run=()=>{try{refreshClassification();}catch(error){console.warn('[CE-QC][V160_HOME_HANDOFF]',error);}};
     if(typeof queueMicrotask==='function')queueMicrotask(run);else setTimeout(run,0);
   }
   function install(){
