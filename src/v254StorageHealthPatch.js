@@ -1,70 +1,30 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { getRuntimeConfig } from './db.js';
+import { readStorageHealth, STORAGE_MAINTENANCE_ID } from './storageMaintenance.js';
 
 export const V254_STORAGE_HEALTH_ID='2026-08-23-v254-storage-health-readonly-v1';
 
-const MAX_ENTRIES=200000;
-const TOP_N=12;
-
-function fileSize(file){try{return Number(fs.statSync(file).size||0);}catch{return 0;}}
-function scanDir(root){
-  const result={path:root||'',bytes:0,files:0,dirs:0,entries:0,truncated:false,largest:[]};
-  if(!root||!fs.existsSync(root))return result;
-  const stack=[root];
-  while(stack.length&&result.entries<MAX_ENTRIES){
-    const dir=stack.pop();let entries=[];try{entries=fs.readdirSync(dir,{withFileTypes:true});}catch{continue;}
-    for(const entry of entries){
-      result.entries+=1;if(result.entries>=MAX_ENTRIES){result.truncated=true;break;}
-      const full=path.join(dir,entry.name);if(entry.isSymbolicLink())continue;
-      if(entry.isDirectory()){result.dirs+=1;stack.push(full);continue;}
-      if(!entry.isFile())continue;
-      const bytes=fileSize(full);result.bytes+=bytes;result.files+=1;
-      if(bytes>0){result.largest.push({path:full,bytes});result.largest.sort((a,b)=>b.bytes-a.bytes);if(result.largest.length>TOP_N)result.largest.length=TOP_N;}
-    }
-  }
-  return result;
-}
-function mib(bytes){return Number((Number(bytes||0)/1024/1024).toFixed(1));}
-function gib(bytes){return Number((Number(bytes||0)/1024/1024/1024).toFixed(2));}
-function compactDir(scan){return{path:scan.path,bytes:scan.bytes,GiB:gib(scan.bytes),files:scan.files,dirs:scan.dirs,truncated:scan.truncated,largest:scan.largest.map(item=>({name:path.basename(item.path),GiB:gib(item.bytes),path:item.path}))};}
-function compactDisk(disk={}){return{ok:Boolean(disk.ok),root:disk.root||'',totalGiB:gib(disk.totalBytes),usedGiB:gib(disk.usedBytes),freeGiB:gib(disk.freeBytes)};}
-
+// Compatibility shim only. Detailed C/D sizing, largest-file detection and safe
+// cleanup preview are owned by the unversioned storageMaintenance core.
 function buildReport(){
-  const cfg=getRuntimeConfig();
-  const dbBytes=fileSize(cfg.dbFile),walBytes=fileSize(`${cfg.dbFile}-wal`),shmBytes=fileSize(`${cfg.dbFile}-shm`);
-  const dirs={
-    runtimeBackups:scanDir(cfg.backupsDir),
-    runtimeImports:scanDir(cfg.importsDir),
-    runtimeEvidenceArchive:scanDir(cfg.evidenceArchiveDir),
-    runtimeExports:scanDir(cfg.exportsDir),
-    runtimeLogs:scanDir(cfg.logsDir)
-  };
-  if(cfg.legacyEvidenceArchiveDir&&path.normalize(cfg.legacyEvidenceArchiveDir)!==path.normalize(cfg.evidenceArchiveDir)){
-    dirs.legacyDataDriveEvidenceArchive=scanDir(cfg.legacyEvidenceArchiveDir);
-  }
-  const legacyPreUpdate=path.join(cfg.dataDir,'backups','pre_update');
-  if(path.normalize(legacyPreUpdate)!==path.normalize(path.join(cfg.backupsDir,'pre_update')))dirs.legacyDataDrivePreUpdateBackups=scanDir(legacyPreUpdate);
-  const directoryBytes=Object.values(dirs).reduce((sum,item)=>sum+Number(item.bytes||0),0);
-  return{
-    ok:true,id:V254_STORAGE_HEALTH_ID,createdAt:new Date().toISOString(),storagePolicyId:cfg.storagePolicyId||'',
-    placement:{dataRoot:cfg.dataDir,runtimeRoot:cfg.runtimeDir,database:cfg.dbFile,evidenceArchive:cfg.evidenceArchiveDir,backups:cfg.backupsDir,exports:cfg.exportsDir,imports:cfg.importsDir,logs:cfg.logsDir,temp:cfg.tempDir},
-    disks:{data:compactDisk(cfg.dataDisk),runtime:compactDisk(cfg.runtimeDisk)},
-    database:{path:cfg.dbFile,bytes:dbBytes,GiB:gib(dbBytes),walBytes,walGiB:gib(walBytes),shmBytes,shmMiB:mib(shmBytes)},
-    directories:Object.fromEntries(Object.entries(dirs).map(([key,value])=>[key,compactDir(value)])),
-    observedTotalBytes:dbBytes+walBytes+shmBytes+directoryBytes,
-    observedTotalGiB:gib(dbBytes+walBytes+shmBytes+directoryBytes),
-    note:'READ_ONLY_SIZE_SCAN; separates current C/D runtime ownership from legacy D evidence/pre-update backups; no delete, vacuum or checkpoint is performed by this report'
-  };
+  const report=readStorageHealth(getRuntimeConfig());
+  return{...report,legacyId:V254_STORAGE_HEALTH_ID,coreStorageMaintenanceId:STORAGE_MAINTENANCE_ID};
 }
 
 if(String(process.env.CE_QC_DISABLE_STARTUP_STORAGE_SCAN||'')!=='1'){
   const timer=setTimeout(()=>{
     try{
-      const report=buildReport();console.log('[CE-QC][V254_STORAGE]',JSON.stringify(report));
-      try{fs.mkdirSync(getRuntimeConfig().logsDir,{recursive:true});fs.writeFileSync(path.join(getRuntimeConfig().logsDir,'storage_health_latest.json'),JSON.stringify(report,null,2));}catch{}
-    }catch(error){console.warn('[CE-QC][V254_STORAGE] scan failed:',error?.message||error);}
-  },15000);timer.unref?.();
-}else console.log('[CE-QC][RECOVERY_SAFE_MODE] V254 automatic full-directory size scan skipped; readV254StorageHealth remains available on demand.');
+      const report=buildReport();
+      console.log('[CE-QC][STORAGE_HEALTH]',JSON.stringify(report));
+      try{
+        const cfg=getRuntimeConfig();
+        fs.mkdirSync(cfg.logsDir,{recursive:true});
+        fs.writeFileSync(path.join(cfg.logsDir,'storage_health_latest.json'),JSON.stringify(report,null,2));
+      }catch{}
+    }catch(error){console.warn('[CE-QC][STORAGE_HEALTH] scan failed:',error?.message||error);}
+  },15000);
+  timer.unref?.();
+}else console.log('[CE-QC][RECOVERY_SAFE_MODE] automatic full-directory size scan skipped; readV254StorageHealth remains available on demand.');
 
 export function readV254StorageHealth(){return buildReport();}
