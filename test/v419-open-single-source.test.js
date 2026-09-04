@@ -58,6 +58,20 @@ test('V419 recovery-safe startup skips synchronous POD-lock repair but explicit 
   assert.match(repair,/const db = database \|\| getDb\(\)/);
 });
 
+test('V426 parser/store conserve all seven businesses including WHPP', () => {
+  const parser=read('../src/unifiedExcelParser.js');
+  const store=read('../src/unifiedImportStore.js');
+  const seven=/\['CE',\s*'CEAF',\s*'TBKH',\s*'ALI1688',\s*'SHOPEECN',\s*'SHOPEEVN',\s*'WHPP'\]/;
+  assert.match(parser,seven);
+  assert.match(store,seven);
+  assert.match(parser,/validUniqueWaybills:\s*details\.length/);
+  assert.match(parser,/classifiedWaybills\s*===\s*details\.length/);
+  assert.match(store,/function buildSourceReconciliation\(/);
+  assert.match(store,/balanced:\s*classifiedWaybills\s*===\s*validUnique/);
+  assert.match(store,/assertSourceReconciliation\(parsed\)/);
+  assert.match(store,/SELECT businessType, COUNT\(\*\) count FROM unified_import_rows WHERE batchId=\? GROUP BY businessType/);
+});
+
 test('V426 loader delivers import-truth owners and total remains core + WHPP', () => {
   const loader=read('../src/v44WhppUiPatch.js');
   const totalSync=read('../public/v68-whpp-classification-stability.js');
