@@ -225,7 +225,7 @@
       const response=await nativeFetch(`/api/v51/carry-monitor?${params}`,{cache:'no-store',credentials:'same-origin'});
       const data=await response.json().catch(()=>({}));
       if(response.ok&&data?.ok){carrySummary=data.businessSummary||{};patchCarryBusinessCards();}
-    }catch(error){console.warn('[CE-QC][V51][CARRY_SUMMARY]',error);}
+    }catch(error){console.warn('[V51][CARRY_SUMMARY]',error);}
   }
 
   function scheduleDecorate(){
