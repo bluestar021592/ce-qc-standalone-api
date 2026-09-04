@@ -44,7 +44,11 @@ function refsFrom(file,source){
     /(?:import\s+(?:[^'\"]*?\s+from\s+)?|export\s+[^'\"]*?\s+from\s+|import\s*\()\s*['\"]([^'\"]+)['\"]/g,
     /<script[^>]+src=['\"]([^'\"]+)['\"]/gi,
     /<link[^>]+href=['\"]([^'\"]+)['\"]/gi,
-    /(?:readFileSync|readFile|createReadStream)\s*\(\s*['\"]([^'\"]+)['\"]/g
+    /(?:readFileSync|readFile|createReadStream)\s*\(\s*['\"]([^'\"]+)['\"]/g,
+    // Browser runtime manifests keep cache-busted public assets as quoted absolute
+    // paths instead of static <script> tags. Treat them as real references so the
+    // deletion audit cannot mark a lazily loaded feature as orphaned.
+    /['\"](\/(?:[^'\"]+\.(?:js|css))(?:\?[^'\"]*)?)['\"]/g
   ];
   for(const re of patterns){
     let m;while((m=re.exec(source))){const resolved=resolveRef(file,m[1]);if(resolved)refs.add(resolved);}
