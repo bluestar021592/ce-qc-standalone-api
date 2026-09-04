@@ -10,12 +10,12 @@ import {
   V314_ALL_BUSINESS_THROUGHPUT_CORE_ID,
   V314_CONFIRM_CONCURRENCY,
   V339_CCSL_CONFIRM_CONCURRENCY
-} from '../src/v314ShopeeThroughputCore.js';
+} from '../src/throughputCore.js';
 import { queryBatchWithFallback, queryTrackBatchWithFallback } from '../src/trackBatching.js';
 import { resolveV314Target } from '../src/v314ModuleRedirectPatch.js';
 
 for(const file of [
-  'src/runtimePipeline.js','src/runtimeBusinessStore.js','src/runtimeStorage.js',
+  'src/throughputCore.js','src/runtimePipeline.js','src/runtimeBusinessStore.js','src/runtimeStorage.js',
   'src/v314PipelineThroughput.js','src/v314BusinessStoreCheckpoint.js','src/v340CcslStorageCheckpoint.js',
   'src/v314ShopeeThroughputCore.js','src/v339CcslThroughputCore.js','src/v314ModuleRedirectPatch.js','src/trackBatching.js'
 ])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
@@ -32,8 +32,9 @@ const runtimeStorage=fs.readFileSync('src/runtimeStorage.js','utf8');
 const pipelineShim=fs.readFileSync('src/v314PipelineThroughput.js','utf8');
 const storeShim=fs.readFileSync('src/v314BusinessStoreCheckpoint.js','utf8');
 const storageShim=fs.readFileSync('src/v340CcslStorageCheckpoint.js','utf8');
+const throughputShim=fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8');
 const compat=fs.readFileSync('src/v339CcslThroughputCore.js','utf8');
-const core=fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8');
+const core=fs.readFileSync('src/throughputCore.js','utf8');
 const batching=fs.readFileSync('src/trackBatching.js','utf8');
 
 assert.match(runtimePipeline,/createUnifiedThroughputClient/,'unversioned runtime pipeline must own throughput');
@@ -42,7 +43,9 @@ assert.match(runtimePipeline,/scanBatchSize:350/);assert.match(runtimePipeline,/
 assert.match(pipelineShim,/runtimePipeline\.js/,'V314 pipeline file must be compatibility-only');
 assert.match(storeShim,/runtimeBusinessStore\.js/,'V314 business store file must be compatibility-only');
 assert.match(storageShim,/runtimeStorage\.js/,'V340 storage file must be compatibility-only');
-assert.match(compat,/Compatibility module only/);assert.doesNotMatch(compat,/function createCcslThroughputClient/,'old CCSL file must not own duplicate throughput logic');
+assert.match(throughputShim,/throughputCore\.js/,'V314 throughput core path must be compatibility-only');
+assert.match(compat,/throughputCore\.js/,'V339 path must be compatibility-only');
+assert.doesNotMatch(compat,/function createCcslThroughputClient/,'old CCSL file must not own duplicate throughput logic');
 assert.doesNotMatch(core,/if\(!plannedKeys\.has\(key\)\)return query\(batch\)/,'fallback/on-demand requests must never bypass bounded scheduler');
 assert.match(core,/enqueue\(batch,!plannedKeys\.has\(key\)\)/,'fallback/on-demand requests must enter the same scheduler with priority');
 assert.match(core,/planMode:isShopee\?'stable-filter':'compact-pending'/,'CCSL track resume must compact pending tickets exactly like pipeline.js');
@@ -82,7 +85,6 @@ async function confirmCase(businessType,expectedConcurrency){
 }
 await confirmCase('SHOPEE',2);await confirmCase('CCSL',1);
 
-// Confirm transport fallback remains bounded and inside the single remote lane.
 {
   const bills=Array.from({length:700},(_,i)=>`CCSL-F-${String(i+1).padStart(4,'0')}`);
   let active=0,maxActive=0,failedParent=false;const calls=[];
@@ -98,9 +100,6 @@ await confirmCase('SHOPEE',2);await confirmCase('CCSL',1);
   assert.ok(calls.some(c=>c.length===100),'synthetic failed 350 batch must exercise confirm fallback children');
 }
 
-// Trajectory no longer recursively degrades 50 -> 25 -> 10 -> 5 -> 1. One failed
-// 50-ticket unit is checkpointed once and handed to the retry center while other
-// prefetched 50-ticket units continue under the same x4 limiter.
 {
   const bills=Array.from({length:300},(_,i)=>`CCSL-TF-${String(i+1).padStart(4,'0')}`);
   let active=0,maxActive=0,failedParent=false;const callSizes=[];
@@ -132,4 +131,4 @@ await confirmCase('SHOPEE',2);await confirmCase('CCSL',1);
 const aliasRaw={async trackQuery(codes){return codes.map(shipmentCode=>({shipmentCode}));}};
 assert.ok(createShopeeThroughputClient({businessType:'SHOPEE',needTrackBills:['A']},aliasRaw).__ceQcThroughputPools.track);
 assert.ok(createCcslThroughputClient({businessType:'CCSL',needTrackBills:['B']},aliasRaw).__ceQcThroughputPools.track);
-console.log(`[CORE THROUGHPUT] unversioned runtime owners passed · scan=350 · SHOPEE confirm x2 · CCSL confirm x1 · track=50x4 · failed trajectory stays one 50-ticket retry unit · active SQLite checkpoints zero-wait/final-only · synthetic track ${shopeeTrack.toFixed(1)}/${ccslTrack.toFixed(1)}ms`);
+console.log(`[CORE THROUGHPUT] unversioned throughput/runtime owners passed · scan=350 · SHOPEE confirm x2 · CCSL confirm x1 · track=50x4 · failed trajectory stays one 50-ticket retry unit · active SQLite checkpoints zero-wait/final-only · synthetic track ${shopeeTrack.toFixed(1)}/${ccslTrack.toFixed(1)}ms`);
