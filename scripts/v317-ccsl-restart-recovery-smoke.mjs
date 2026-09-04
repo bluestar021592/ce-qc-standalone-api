@@ -125,9 +125,15 @@ assert.match(runner,/2026-08-29-single-unified-runner-v1/,'V67 is the sole three
 assert.match(runner,/STATUS_SOURCE_REVISION = '2026-09-02-v414-one-read-seven-business-status-v1'/,'V67 execution decisions must share the same exact V414 persisted status truth as V168');
 assert.match(runner,/\/api\/v33\/run-progress\?\$\{query\.toString\(\)\}/,'V67 must use the lightweight persisted status endpoint before execution decisions');
 assert.match(runner,/global\.runUnified = \(\) => execute\('start'\)/);
-assert.match(runner,/global\.resumeUnified = \(\) => execute\('resume'\)/);
+assert.match(runner,/V424_RESUME_FLOOR_REVISION = '2026-09-04-v424-restart-proof-resume-floor-v1'/,'V67 must expose the V424 exact restart resume-floor contract');
+assert.match(runner,/const resumeHandoffNonce = \{\}/,'resume-floor authority must be an in-process opaque token');
+assert.match(runner,/function resolveResumeFloor\(mode, handoff, target\)[\s\S]*handoff\.token !== resumeHandoffNonce/,'ordinary resume calls without the exact V67-owned handoff must not gain a resume floor');
+assert.match(runner,/global\.resumeUnified = handoff => execute\('resume', handoff\)/,'V67 remains the public resume owner while only an opaque handoff can authorize a restart floor');
+assert.doesNotMatch(runner,/global\.resumeUnified = \(\) => execute\('resume'\)/,'the retired bare resume entry must not be required or reintroduced');
+assert.match(runner,/const handoff = createPersistedRestartHandoff\(all, target, 'SHOPEE'\);[\s\S]*const result = await execute\('resume', handoff\)/,'automatic SHOPEE restart recovery must carry the exact persisted proof into V67');
 assert.match(runner,/\{ key: 'CCSL'[\s\S]*\{ key: 'SHOPEE'[\s\S]*\{ key: 'WHPP'/,'execution order must remain CCSL → SHOPEE → WHPP');
 assert.match(runner,/const truth = await canonicalStageTruth\(stage, target, \{ force: true \}\);[\s\S]*if \(truth\.done\)[\s\S]*continue/,'already completed persisted stages must be skipped before execution');
+assert.match(runner,/if \(resumeFloor && index < resumeFloor\.index\)[\s\S]*resumeFloor: V424_RESUME_FLOOR_REVISION/,'only an accepted V424 restart floor may skip a prior already-proven stage');
 assert.match(runner,/waitForWhppFinalized/,'WHPP completion must still be canonically verified');
 assert.match(runner,/COMPLETION_STABILITY_REVISION = '2026-09-02-v67-persisted-completion-latch-v2'/,'same-page completed lifecycle must remain latched');
 assert.match(runner,/__CE_QC_LAST_VERIFIED_UNIFIED_COMPLETION__/,'V67 must publish the verified completion marker');
@@ -156,14 +162,14 @@ assert.match(htmlOwner,/WHPP_PAGE_OWNER='V132'/,'V132 must remain the sole WHPP 
 assert.match(htmlOwner,/X-CE-QC-WHPP-Page-Owner/,'WHPP page ownership must be observable in the HTML response');
 assert.doesNotMatch(htmlOwner,/\/whpp-v44\.js|\/whpp-v45-cleanup\.js|\/whpp-v47-auto-run\.js|\/v52-whpp-source-truth-route\.js|\/v72-whpp-light-state-bridge\.js|\/v103-home-whpp-card-guard\.js/,'retired WHPP browser layers must not re-enter the live loader');
 assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'browser must load the V338 CCSL 350/50 detail owner');
-assert.match(htmlOwner,/v67-resilient-run-guard\.js\?v=20260902-v414-explicit-1/,'browser must force-load the V414 explicit/restart-only V67 runner');
+assert.match(htmlOwner,/v67-resilient-run-guard\.js\?v=20260904-v424-1/,'browser must force-load the V424 exact restart resume-floor V67 runner');
 assert.match(htmlOwner,/v146-unified-import-date-status\.js\?v=20260901-v410-1/,'browser must load the current atomic import UI owner');
 assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260902-v414-status-1/,'browser must force-load the V414 one-read persisted V168 status owner');
-assert.match(htmlOwner,/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'V411 fail-closed completion/status sync must load after V168 while V67 remains the sole execution owner');
+assert.match(htmlOwner,/v169-seven-business-legacy-status-sync\.js\?v=20260904-v424-1/,'V424 fail-closed proof handoff must load after V168 while V67 remains the sole execution owner');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
 
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V414/V411/V410/V378.1/V378/V377/SINGLE-RUNNER/V341/V334/V317] smoke passed · pending selected date beats stale committed input · one exact-date V414 persisted status read supplies CCSL/SHOPEE/WHPP · exact-date last-good progress survives transient fetch failures · unconfirmed truth blocks duplicate start/resume · V67 remains sole explicit execution owner · only exact PROCESS_RESTART_INTERRUPTED proof may auto-recover WHPP · scan=350 · trajectory=50');
+console.log('[V424/V414/V411/V410/V378.1/V378/V377/SINGLE-RUNNER/V341/V334/V317] smoke passed · pending selected date beats stale committed input · one exact-date V414 persisted status read supplies CCSL/SHOPEE/WHPP · V424 exact PROCESS_RESTART_INTERRUPTED recovery requires one opaque V67 handoff and cannot reopen a proven prior stage · unconfirmed truth blocks duplicate start/resume · V67 remains sole explicit execution owner · scan=350 · trajectory=50');
