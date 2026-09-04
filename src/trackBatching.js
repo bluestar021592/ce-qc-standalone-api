@@ -1,12 +1,16 @@
 export const TRACK_QUERY_BATCH_SIZE = 50;
-const DEFAULT_TRANSIENT_RETRIES = Math.max(1, Math.min(5, Number(process.env.CE_TRANSIENT_RETRIES || 3)));
-const DEFAULT_TRANSIENT_DELAY_MS = Math.max(200, Math.min(5000, Number(process.env.CE_TRANSIENT_RETRY_DELAY_MS || 800)));
+export const TRACK_QUERY_CONCURRENCY = Math.max(1, Math.min(4, Number(process.env.TRACK_CONCURRENCY || 4)));
+// pipeline.js still reads TRACK_CONCURRENCY from the environment. Keep the one
+// canonical batching policy here so every business defaults to the same 50 x 4
+// trajectory contract without relying on an old launcher environment value.
+if (!process.env.TRACK_CONCURRENCY) process.env.TRACK_CONCURRENCY = String(TRACK_QUERY_CONCURRENCY);
+const DEFAULT_TRANSIENT_RETRIES = Math.max(0, Math.min(2, Number(process.env.CE_TRANSIENT_RETRIES || 1)));
+const DEFAULT_TRANSIENT_DELAY_MS = Math.max(200, Math.min(5000, Number(process.env.CE_TRANSIENT_RETRY_DELAY_MS || 400)));
 const MIN_BATCH_TIME_BUDGET_MS = Math.max(250, Math.min(30000, Number(process.env.CE_MIN_BATCH_BUDGET_MS || 5000)));
-const DEFAULT_BATCH_TIME_BUDGET_MS = Math.max(MIN_BATCH_TIME_BUDGET_MS, Math.min(180000, Number(process.env.CE_TRACK_BATCH_BUDGET_MS || 90000)));
+const DEFAULT_BATCH_TIME_BUDGET_MS = Math.max(MIN_BATCH_TIME_BUDGET_MS, Math.min(180000, Number(process.env.CE_TRACK_BATCH_BUDGET_MS || 25000)));
 const MAX_REQUEST_WINDOW_MS = 15000;
 const CONFIRM_HARD_BUDGET_MS = Math.max(100, Math.min(30000, Number(process.env.CE_CONFIRM_HARD_BUDGET_MS || 18000)));
 const CONFIRM_MAX_TRANSIENT_RETRIES = 1;
-const TRACK_FALLBACK_SIZES = Object.freeze([25, 10, 5, 1]);
 
 export function splitTrackBatches(shipmentCodes = [], batchSize = TRACK_QUERY_BATCH_SIZE) {
   const size = Math.max(1, Math.min(TRACK_QUERY_BATCH_SIZE, Number(batchSize || TRACK_QUERY_BATCH_SIZE)));
@@ -19,9 +23,7 @@ export function splitTrackBatches(shipmentCodes = [], batchSize = TRACK_QUERY_BA
 function splitBatchesAtSize(shipmentCodes = [], batchSize = 1) {
   const size = Math.max(1, Number(batchSize || 1));
   const batches = [];
-  for (let index = 0; index < shipmentCodes.length; index += size) {
-    batches.push(shipmentCodes.slice(index, index + size));
-  }
+  for (let index = 0; index < shipmentCodes.length; index += size) batches.push(shipmentCodes.slice(index, index + size));
   return batches;
 }
 
@@ -29,10 +31,6 @@ async function safeAttempt(onAttempt, payload, onLog) {
   try {
     await onAttempt(payload);
   } catch (error) {
-    // Per-waybill scan/event/exception status is the authoritative resume checkpoint.
-    // apiBatchStatus is only audit metadata. After a partial success or adaptive
-    // fallback, the remaining waybills can legitimately be regrouped under the same
-    // numeric batch key. That must never block a safe resume.
     if (error?.code === 'BATCH_KEY_PAYLOAD_MISMATCH') {
       await onLog(`批次审计键已变化，按逐票成功/失败状态继续处理：${error.message || ''}`);
       return;
@@ -43,9 +41,7 @@ async function safeAttempt(onAttempt, payload, onLog) {
 
 export function isTransientTransportError(error) {
   const code = String(error?.code || error?.cause?.code || error?.transportCode || '').toUpperCase();
-  const message = [error?.message, error?.cause?.message, error?.ceMsg]
-    .filter(Boolean)
-    .join(' ');
+  const message = [error?.message, error?.cause?.message, error?.ceMsg].filter(Boolean).join(' ');
   return ['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN', 'ENETRESET', 'ENETUNREACH', 'ECONNREFUSED'].includes(code)
     || /socket hang up|connection reset|network error|timed?\s*out|timeout|premature close|read ECONNRESET|socket disconnected before secure TLS connection|before secure TLS connection was established|client network socket disconnected/i.test(message);
 }
@@ -53,25 +49,22 @@ export function isTransientTransportError(error) {
 function isAuthenticationFailure(error) {
   const status = Number(error?.ceStatus || error?.status || error?.response?.status || 0);
   const code = String(error?.ceCode || error?.code || '').trim().toUpperCase();
-  const message = [error?.ceMsg, error?.message, error?.response?.data?.msg, error?.response?.data?.message]
-    .filter(Boolean)
-    .join(' ');
+  const message = [error?.ceMsg, error?.message, error?.response?.data?.msg, error?.response?.data?.message].filter(Boolean).join(' ');
   return [401, 403].includes(status)
     || ['401', '403', 'AUTH_REQUIRED'].includes(code)
     || /请求未授权|未授权|unauthorized|登录已失效|登录过期|token\s*(?:expired|invalid)|expired\s*token|invalid\s*token/i.test(message);
 }
 
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
-}
+function wait(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
 
 function effectiveFallbackSizes(apiName = '', fallbackSizes = null) {
-  // An explicitly supplied [] means "fixed-size batch, never shrink". The SHOPEE
-  // event/exception pipeline uses this mode so a 50-ticket batch is retried as the
-  // same batch and then checkpointed for later retry instead of degrading to
-  // 25/10/5/1 and slowing thousands of daily shipments.
   if (Array.isArray(fallbackSizes)) return fallbackSizes;
-  return /track|shipment-event|exception-item/i.test(String(apiName || '')) ? [...TRACK_FALLBACK_SIZES] : [];
+  // System consolidation: 350 confirm and 50 trajectory are logical units.
+  // Successful-but-partial confirm responses are completed by the dedicated
+  // completeness owner; true transport failures go to the retry center. A failed
+  // 50-ticket trajectory request likewise remains one retry unit instead of being
+  // recursively degraded to 25/10/5/1, which was one of the major latency multipliers.
+  return [];
 }
 
 function budgetError(apiName, batch, budgetMs) {
@@ -93,13 +86,9 @@ async function queryWithinHardDeadline(query, batch, apiName, deadlineAt, budget
   try {
     return await Promise.race([
       Promise.resolve().then(() => query(batch)),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(budgetError(apiName, batch, budgetMs)), remaining);
-      })
+      new Promise((_, reject) => { timer = setTimeout(() => reject(budgetError(apiName, batch, budgetMs)), remaining); })
     ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+  } finally { if (timer) clearTimeout(timer); }
 }
 
 async function withTransientRetry(query, batch, onLog, retries = DEFAULT_TRANSIENT_RETRIES, delayMs = DEFAULT_TRANSIENT_DELAY_MS, apiName = 'CE接口', deadlineAt = 0, budgetMs = DEFAULT_BATCH_TIME_BUDGET_MS) {
@@ -109,17 +98,13 @@ async function withTransientRetry(query, batch, onLog, retries = DEFAULT_TRANSIE
     const remaining = deadlineAt ? deadlineAt - Date.now() : Number.POSITIVE_INFINITY;
     if (deadlineAt && remaining < minWindow) throw budgetError(apiName, batch, budgetMs);
     try {
-      // Do not rely on the HTTP client's socket timeout alone. A DNS/TLS/socket
-      // promise can occasionally remain pending without resolving or rejecting.
-      // The batch wall-clock deadline is authoritative so one bad CE request can
-      // never freeze thousands of later shipments or leave the UI on one batch.
       return await queryWithinHardDeadline(query, batch, apiName, deadlineAt, budgetMs);
     } catch (error) {
       if (isAuthenticationFailure(error) || error?.runStatus) throw error;
       if (error?.code === 'BATCH_TIME_BUDGET_EXCEEDED') throw error;
       if (!isTransientTransportError(error) || attempt >= retries) throw error;
       attempt += 1;
-      const backoff = Math.min(8000, delayMs * attempt);
+      const backoff = Math.min(3000, delayMs * attempt);
       if (deadlineAt && Date.now() + backoff + minWindow > deadlineAt) {
         await onLog(`${apiName}已完成网络补偿尝试 ${attempt}/${retries}，当前${batch.length}票批次达到时间预算，将保存失败票并继续后续批次。`);
         throw budgetError(apiName, batch, budgetMs);
@@ -146,10 +131,6 @@ export async function queryBatchWithFallback({
   const fallback = effectiveFallbackSizes(apiName, fallbackSizes);
   const isConfirmQuery = /confirm-query/i.test(String(apiName || ''));
   const requestedBudgetMs = Math.max(MIN_BATCH_TIME_BUDGET_MS, Math.min(180000, Number(batchTimeBudgetMs || DEFAULT_BATCH_TIME_BUDGET_MS)));
-  // V337: confirm-query is the first-stage gate for thousands of CCSL tickets. It
-  // must never inherit a stale 90s module default just because preload order changed.
-  // Cap it here, inside the batching core, so one dead DNS/TLS/socket promise cannot
-  // leave the whole daily run apparently frozen on a single batch.
   const effectiveBudgetMs = isConfirmQuery ? Math.min(requestedBudgetMs, CONFIRM_HARD_BUDGET_MS) : requestedBudgetMs;
   const effectiveTransientRetries = isConfirmQuery
     ? Math.min(CONFIRM_MAX_TRANSIENT_RETRIES, Math.max(0, Number(transientRetries || 0)))
@@ -158,19 +139,11 @@ export async function queryBatchWithFallback({
   const minWindow = requestWindowMs(effectiveBudgetMs);
   try {
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'running' }, onLog);
-    // CE's read-only query endpoints can occasionally reset the TLS socket before
-    // the secure connection is established. Retry the exact same idempotent request
-    // several times before treating the waybills as failed. A wall-clock budget is
-    // shared by the original request and every fallback child so one bad batch can
-    // never freeze thousands of later waybills.
     const events = await withTransientRetry(query, original, onLog, effectiveTransientRetries, transientDelayMs, apiName, effectiveDeadlineAt, effectiveBudgetMs);
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'success', resultCount: (events || []).length }, onLog);
     return { successes: [{ batch: original, events: events || [] }], failures: [] };
   } catch (error) {
     await safeAttempt(onAttempt, { apiName, batch: original, status: 'failed', error }, onLog);
-    // CE sometimes reports an expired/unauthorized session with HTTP 200 and a
-    // business message such as “请求未授权”. Treat that exactly like HTTP 401/403:
-    // stop immediately, preserve checkpoints, and let the run pause for login.
     if (error?.runStatus || isAuthenticationFailure(error)) throw error;
     await onLog(`${apiName}批次失败：原批次${original.length}票，原因：${error?.message || error}`);
     if (error?.code === 'BATCH_TIME_BUDGET_EXCEEDED' || Date.now() + minWindow >= effectiveDeadlineAt) {
@@ -183,21 +156,15 @@ export async function queryBatchWithFallback({
       return { successes: [], failures: [{ batch: original, error }] };
     }
 
-    await onLog(`仅对失败批次自适应降级：${original.length}→${fallbackSize}`);
     const successes = [];
     const failures = [];
     for (const child of splitBatchesAtSize(original, fallbackSize)) {
       if (Date.now() + minWindow >= effectiveDeadlineAt) {
-        const timeout = budgetError(apiName, child, effectiveBudgetMs);
-        failures.push({ batch: child, error: timeout });
+        failures.push({ batch: child, error: budgetError(apiName, child, effectiveBudgetMs) });
         continue;
       }
       const result = await queryBatchWithFallback({
-        batch: child,
-        query,
-        onLog,
-        onAttempt,
-        apiName,
+        batch: child, query, onLog, onAttempt, apiName,
         fallbackSizes: fallback.filter(size => size < fallbackSize),
         transientRetries: effectiveTransientRetries,
         transientDelayMs,
@@ -215,10 +182,6 @@ export async function queryTrackBatchWithFallback(options = {}) {
   const onLog = options.onLog || (async () => {});
   const rawQuery = options.query;
   if (typeof rawQuery !== 'function') throw new Error('track query function is required');
-
-  // Generic CCSL track queries may still opt into adaptive fallback. SHOPEE calls
-  // queryBatchWithFallback directly with fallbackSizes: [] and therefore remain at
-  // the stable 50-ticket batch size.
   return queryBatchWithFallback({
     ...options,
     query: rawQuery,
@@ -227,8 +190,6 @@ export async function queryTrackBatchWithFallback(options = {}) {
     transientRetries: Number.isFinite(Number(options.transientRetries)) ? Number(options.transientRetries) : DEFAULT_TRANSIENT_RETRIES,
     transientDelayMs: Number.isFinite(Number(options.transientDelayMs)) ? Number(options.transientDelayMs) : DEFAULT_TRANSIENT_DELAY_MS,
     batchTimeBudgetMs: Number.isFinite(Number(options.batchTimeBudgetMs)) ? Number(options.batchTimeBudgetMs) : DEFAULT_BATCH_TIME_BUDGET_MS,
-    fallbackSizes: Array.isArray(options.fallbackSizes)
-      ? options.fallbackSizes
-      : [...TRACK_FALLBACK_SIZES]
+    fallbackSizes: Array.isArray(options.fallbackSizes) ? options.fallbackSizes : []
   });
 }
