@@ -5,11 +5,11 @@ import { fileURLToPath } from 'url';
 import { DatabaseSync } from 'node:sqlite';
 
 import { migrateDatabase } from './migrations.js';
+import { applyStoragePolicy, ensureStorageLayout, resolveStorageLayout } from './storagePolicy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
-const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
 const EXPORT_WORKER_MODE = String(process.env.CE_QC_EXPORT_WORKER_MODE || '').toUpperCase();
 const IS_EXPORT_WORKER = EXPORT_WORKER_MODE === 'SINGLE_BUSINESS_DIRECT' || EXPORT_WORKER_MODE === 'ALL_BUSINESS_ORCHESTRATOR';
 const SQLITE_CACHE_KIB = Math.max(8 * 1024, Math.min(256 * 1024, Number(process.env.SQLITE_CACHE_KIB || (IS_EXPORT_WORKER ? 8 * 1024 : 64 * 1024))));
@@ -23,20 +23,8 @@ let initialized = false;
 let expectedSchemaVersion = null;
 
 export function getRuntimeConfig() {
-  const preferredDataDir = resolveProjectPath(process.env.DATA_DIR || DEFAULT_DATA_DIR);
-  const fallbackDataDir = resolveProjectPath('./data');
-  const dataRootAvailable = isPathRootAvailable(preferredDataDir);
-  const dataDir = dataRootAvailable ? preferredDataDir : fallbackDataDir;
-  const fallbackWarning = dataRootAvailable
-    ? ''
-    : '未检测到D盘，当前数据临时保存到项目data目录。建议检查数据保存路径。';
-  const preferredDbFile = resolveProjectPath(process.env.DB_FILE || path.join(dataDir, 'ce_qc_monitor.db'));
-  const dbFile = isPathRootAvailable(preferredDbFile) ? preferredDbFile : path.join(fallbackDataDir, 'ce_qc_monitor.db');
-  const exportsDir = process.env.EXPORTS_DIR ? resolveProjectPath(process.env.EXPORTS_DIR) : path.join(dataDir, 'exports');
-  const backupsDir = process.env.BACKUPS_DIR ? resolveProjectPath(process.env.BACKUPS_DIR) : path.join(dataDir, 'backups');
-  const importsDir = process.env.IMPORTS_DIR ? resolveProjectPath(process.env.IMPORTS_DIR) : path.join(dataDir, 'imports');
-  const logsDir = process.env.LOGS_DIR ? resolveProjectPath(process.env.LOGS_DIR) : path.join(dataDir, 'logs');
-  const evidenceArchiveDir = process.env.EVIDENCE_ARCHIVE_DIR ? resolveProjectPath(process.env.EVIDENCE_ARCHIVE_DIR) : path.join(dataDir, 'evidence_archive');
+  applyStoragePolicy({ baseDir: projectRoot });
+  const layout = resolveStorageLayout({ baseDir: projectRoot });
   const accessMode = String(process.env.ACCESS_MODE || 'DUAL').toUpperCase();
   const host = accessMode === 'DUAL' ? (process.env.HOST || '0.0.0.0') : '127.0.0.1';
   const port = Number(process.env.PORT || 5177);
@@ -44,18 +32,26 @@ export function getRuntimeConfig() {
     projectRoot,
     host,
     port,
-    dataDir,
-    dbFile,
-    backupsDir,
-    exportsDir,
-    longJsonExportsDir: path.join(exportsDir, 'long_json'),
-    importsDir,
-    logsDir,
-    evidenceArchiveDir,
-    tokenDir: path.join(dataDir, 'token'),
-    tokenFile: path.join(dataDir, 'token', 'token.json'),
-    usingFallbackDataDir: !dataRootAvailable,
-    dataPathWarning: fallbackWarning
+    dataDir: layout.dataRoot,
+    runtimeDir: layout.runtimeRoot,
+    dbFile: layout.dbFile,
+    backupsDir: layout.backupsDir,
+    exportsDir: layout.exportsDir,
+    longJsonExportsDir: path.join(layout.exportsDir, 'long_json'),
+    importsDir: layout.importsDir,
+    logsDir: layout.logsDir,
+    evidenceArchiveDir: layout.evidenceArchiveDir,
+    legacyEvidenceArchiveDir: layout.legacyEvidenceArchiveDir,
+    tempDir: layout.tempDir,
+    tokenDir: layout.tokenDir,
+    tokenFile: path.join(layout.tokenDir, 'token.json'),
+    storagePolicyId: layout.id,
+    dataDisk: layout.dataDisk,
+    runtimeDisk: layout.runtimeDisk,
+    usingFallbackDataDir: layout.usingDataFallback,
+    dataPathWarning: layout.usingDataFallback
+      ? `首选数据盘不可用，数据库已安全回退到 ${layout.dataRoot}。`
+      : ''
   };
 }
 
@@ -66,10 +62,6 @@ export function getDb() {
     maybeCopyLegacyDatabase(cfg);
     db = new DatabaseSync(cfg.dbFile);
 
-    // Configure lock handling before any pragma that might need a write lock.
-    // Re-applying journal_mode=WAL on every process open can block for tens of
-    // seconds when a stale reader/supervisor still exists. Read first and only
-    // switch modes when the database is genuinely not already WAL.
     db.exec('PRAGMA busy_timeout = 3000');
     let journalMode = '';
     try { journalMode = String(db.prepare('PRAGMA journal_mode').get()?.journal_mode || '').toLowerCase(); } catch {}
@@ -108,15 +100,23 @@ export function nowIso() {
 }
 
 export function ensureRuntimeDirs(cfg = getRuntimeConfig()) {
-  for (const dir of [cfg.dataDir, cfg.backupsDir, cfg.exportsDir, cfg.longJsonExportsDir, cfg.importsDir, cfg.logsDir, cfg.evidenceArchiveDir, cfg.tokenDir]) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureStorageLayout({
+    id: cfg.storagePolicyId,
+    dataRoot: cfg.dataDir,
+    runtimeRoot: cfg.runtimeDir,
+    dbFile: cfg.dbFile,
+    backupsDir: cfg.backupsDir,
+    exportsDir: cfg.exportsDir,
+    importsDir: cfg.importsDir,
+    logsDir: cfg.logsDir,
+    evidenceArchiveDir: cfg.evidenceArchiveDir,
+    tempDir: cfg.tempDir,
+    tokenDir: cfg.tokenDir
+  });
+  fs.mkdirSync(cfg.longJsonExportsDir, { recursive: true });
 }
 
 function configurePerformancePragmas(database) {
-  // Export workers deliberately use a much smaller SQLite footprint so a large
-  // historical Excel export cannot starve the web/API process. The main process
-  // keeps the original performance settings when CE_QC_EXPORT_WORKER_MODE is unset.
   const statements = [
     `PRAGMA cache_size = -${Math.round(SQLITE_CACHE_KIB)}`,
     `PRAGMA temp_store = ${SQLITE_TEMP_STORE}`,
@@ -165,10 +165,4 @@ function maybeCopyLegacyDatabase(cfg) {
     const src = `${legacyDb}${suffix}`;
     if (fs.existsSync(src)) fs.copyFileSync(src, `${cfg.dbFile}${suffix}`);
   }
-}
-
-function isPathRootAvailable(targetPath) {
-  const parsed = path.parse(path.resolve(targetPath));
-  if (!parsed.root) return true;
-  return fs.existsSync(parsed.root);
 }
