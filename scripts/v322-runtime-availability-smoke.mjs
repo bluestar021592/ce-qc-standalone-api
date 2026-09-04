@@ -18,9 +18,11 @@ assert.match(rangeSource,/readV236CurrentSummary\(date,\{cacheOnly:true\}\)/,'si
 assert.match(rangeSource,/requestedFrom===requestedTo\)return fastSingleDay\(requestedTo\)/,'single-day must return before historical V295/V294 work');
 assert.ok(rangeSource.indexOf('return fastSingleDay(requestedTo)')<rangeSource.indexOf('const range=loadRangeDashboardV295'),'heavy historical range owner must be unreachable for a one-day request');
 
-// V419 keeps V322 as the one persisted exact-date status endpoint for CCSL + SHOPEE + WHPP.
+// V419/V424 keeps V322 as the one persisted exact-date status endpoint for CCSL + SHOPEE + WHPP.
 // The normal web path is scalar-only: current membership, compact run/snapshot markers and
-// exact current-member SUCCESS set joins. Legacy large snapshot/state JSON stays unread.
+// exact current-member SUCCESS set joins. A later accidental runId may recover only a
+// completion snapshot generated inside the same current VALID import lifecycle; current-member
+// proof remains mandatory and a newer VALID import boundary invalidates the fallback.
 assert.match(progressSource,/V322_WEB_AVAILABILITY_ID='2026-09-02-v414-persisted-three-stage-status-v1'/);
 assert.match(progressSource,/V322_SEVEN_BUSINESS_STATUS_ID='2026-09-02-v414-one-read-seven-business-status-v1'/);
 assert.match(progressSource,/V322_WHPP_COMPLETION_PARITY_ID='2026-09-02-v414-whpp-success-evidence-parity-v1'/);
@@ -28,6 +30,9 @@ assert.match(progressSource,/V322_COMPLETED_FAST_PATH_ID='2026-09-02-v322-unifie
 assert.match(progressSource,/V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID='2026-09-02-v418-v322-no-payload-completed-claim-v1'/);
 assert.match(progressSource,/V419_SCALAR_STATUS_PRIORITY_ID='2026-09-02-v419-scalar-status-priority-no-json-v1'/);
 assert.match(progressSource,/V419_STATUS_TIMING_ID='2026-09-02-v419-status-substage-timing-v1'/);
+assert.match(progressSource,/V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID='2026-09-04-v424-same-lifecycle-completion-snapshot-v1'/);
+assert.match(progressSource,/claimSource:'SAME_VALID_IMPORT_LIFECYCLE'/,'V424 must expose when a later run pointer is bypassed by same-lifecycle completion proof');
+assert.match(progressSource,/lifecycle&&atOrAfter\(lifecycle\.generatedAt,boundary\)/,'V424 fallback must never cross the current VALID import lifecycle boundary');
 assert.match(progressSource,/function unifiedCompletionClaim\(db,batch\)/,'current unified completion claim must stay a compact exact snapshot-status read');
 assert.match(progressSource,/SELECT status FROM unified_snapshots WHERE snapshotId=\? AND reportDate=\? LIMIT 1/,'terminal claim must read only the exact current unified snapshot status');
 assert.doesNotMatch(progressSource,/SELECT[^`\n]*(?:payloadJson|stateJson|summaryJson|valueJson)/,'V419 status SQL must never materialize large JSON payload columns');
@@ -141,12 +146,13 @@ const all=readV322SevenBusinessStatus({reportDate:date,db});
 assert.equal(all.ok,true);
 assert.equal(all.reportDate,date);
 assert.equal(all.statusVersion,'2026-09-02-v414-one-read-seven-business-status-v1');
+assert.equal(all.v424SameLifecycleCompletionId,'2026-09-04-v424-same-lifecycle-completion-snapshot-v1');
 assert.deepEqual(Object.keys(all.stages),['CCSL','SHOPEE','WHPP']);
 assert.equal(all.stages.WHPP.completionPolicy,'2026-09-02-v414-whpp-success-evidence-parity-v1');
 assert.match(String(all.stages.WHPP.statusSource||''),/PERSISTED_WHPP_V414_SUCCESS_AND_RESTART_PROOF/);
 assert.equal(all.stages.WHPP.complete,false,'a current WHPP member with no SUCCESS row must remain incomplete rather than inheriting cache/final placeholders');
 
-// A legacy COMPLETED marker alone must still be rejected. V419 terminal truth is
+// A legacy COMPLETED marker alone must still be rejected. V419/V424 terminal truth is
 // released only after all exact current members carry real current-lifecycle proof.
 db.prepare("UPDATE unified_snapshots SET status='COMPLETED',payloadJson=? WHERE snapshotId=?").run('x'.repeat(8*1024*1024),snapshotId);
 db.prepare('INSERT INTO run_locks(reportDate,runId,status,currentStage,batchIndex,totalBatches,lockedAt,completedAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)').run(date,'V322-CCSL-RUN','finished','完成',1,1,after,after,after);
@@ -164,15 +170,16 @@ for(const key of ['CCSL','SHOPEE','WHPP']){
 }
 started=performance.now();const terminal=readV322SevenBusinessStatus({reportDate:date,db,force:true}),terminalMs=performance.now()-started;
 assert.equal(terminal.complete,true,'legacy COMPLETED marker may publish only after exact current-member proof succeeds');
-assert.equal(terminal.completedFastPath,'2026-09-02-v322-unified-completed-snapshot-fast-path-v1+2026-09-02-v418-v322-no-payload-completed-claim-v1');
+assert.equal(terminal.completedFastPath,'2026-09-02-v322-unified-completed-snapshot-fast-path-v1+2026-09-02-v418-v322-no-payload-completed-claim-v1+2026-09-04-v424-same-lifecycle-completion-snapshot-v1');
 assert.equal(terminal.v418FastPathId,'2026-09-02-v418-large-db-set-join-status-proof-v1');
+assert.equal(terminal.v424SameLifecycleCompletionId,'2026-09-04-v424-same-lifecycle-completion-snapshot-v1');
 assert.equal(terminal.stages.CCSL.complete,true);assert.equal(terminal.stages.SHOPEE.complete,true);assert.equal(terminal.stages.WHPP.complete,true);
 assert.equal(terminal.stages.CCSL.sourceTotal,4);assert.equal(terminal.stages.SHOPEE.sourceTotal,2);assert.equal(terminal.stages.WHPP.sourceTotal,1);
 for(const key of ['CCSL','SHOPEE','WHPP']){
   assert.equal(terminal.stages[key].statusSource,'V418_NO_PAYLOAD_COMPLETED_CLAIM');
   assert.equal(terminal.stages[key].completionSource,'V418_CURRENT_MEMBER_PROCESSING_PROOF');
 }
-assert.ok(terminalMs<100,`V419 completed unified status must stay sub-100ms without reading the 8MB payload, got ${terminalMs.toFixed(1)}ms`);
+assert.ok(terminalMs<100,`V419/V424 completed unified status must stay sub-100ms without reading the 8MB payload, got ${terminalMs.toFixed(1)}ms`);
 
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log(`[V419/V418/V414/V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact seven-business unified cohort includes WHPP=1 · incomplete WHPP requires current-member SUCCESS/restart proof · legacy COMPLETED + 8MB payload stays unread until exact current-member scalar proof releases terminal truth · V168 completed date stops polling · single-day period=${rangeMs.toFixed(1)}ms · persisted progress=${progressMs.toFixed(1)}ms · completed-status=${terminalMs.toFixed(1)}ms · no scan/track/event reconstruction`);
+console.log(`[V424/V419/V418/V414/V374/V375/V322/V335] runtime availability smoke passed · V375 import reload + zero-Shopee gate chained · V295 membership + shipment lookups remain index-friendly · exact seven-business unified cohort includes WHPP=1 · incomplete WHPP requires current-member SUCCESS/restart proof · same-lifecycle completion fallback is boundary-locked and proof-guarded · legacy COMPLETED + 8MB payload stays unread until exact current-member scalar proof releases terminal truth · V168 completed date stops polling · single-day period=${rangeMs.toFixed(1)}ms · persisted progress=${progressMs.toFixed(1)}ms · completed-status=${terminalMs.toFixed(1)}ms · no scan/track/event reconstruction`);
