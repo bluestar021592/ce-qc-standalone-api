@@ -4,7 +4,9 @@ import { V418_STATUS_PROOF_FAST_PATH_ID } from './v415RetroactiveCompletionGuard
 import {
   readV418CurrentMembershipCounts,
   readV418CcslProcessingProof,
-  readV418BusinessSuccessCoverage
+  readV418CcslTerminalClosureProof,
+  readV418BusinessSuccessCoverage,
+  V426_CCSL_TERMINAL_CLOSURE_PROOF_ID
 } from './v418StatusProofFastPath.js';
 
 export const V322_WEB_AVAILABILITY_ID='2026-09-02-v414-persisted-three-stage-status-v1';
@@ -15,6 +17,7 @@ export const V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID='2026-09-02-v418-v322-no-p
 export const V419_SCALAR_STATUS_PRIORITY_ID='2026-09-02-v419-scalar-status-priority-no-json-v1';
 export const V419_STATUS_TIMING_ID='2026-09-02-v419-status-substage-timing-v1';
 export const V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID='2026-09-04-v424-same-lifecycle-completion-snapshot-v1';
+export const V426_CCSL_TERMINAL_STATUS_ID='2026-09-04-v426-ccsl-pod-lock-terminal-status-v1';
 
 const previousGet=express.application.get;
 const STATUS_ROUTE='/api/v33/run-progress';
@@ -116,6 +119,14 @@ function buildScalarStatus(db,date,batch){
       const proof=readV418CcslProcessingProof(db,{reportDate:date,snapshotId,boundary});
       if(proof?.ok&&proof.complete===true&&n(proof.source)===n(counts.CCSL)&&n(proof.covered)>=n(counts.CCSL))CCSL=completedStage(CCSL,text(snapshot.snapshotId),snapshot.claimSource);
       else CCSL={...CCSL,completionProof:{source:n(proof?.source),covered:n(proof?.covered),missing:n(proof?.missing),ok:Boolean(proof?.ok)}};
+    }else{
+      const terminal=readV418CcslTerminalClosureProof(db,{reportDate:date,snapshotId});
+      const terminalComplete=Boolean(terminal?.ok&&terminal.complete===true&&n(terminal.source)===n(counts.CCSL)&&n(terminal.covered)>=n(counts.CCSL));
+      if(terminalComplete){
+        CCSL={...completedStage(CCSL,snapshotId,'V426_EXACT_CURRENT_MEMBERS_ALL_POD_LOCKED'),terminalClosureProof:{id:V426_CCSL_TERMINAL_CLOSURE_PROOF_ID,source:n(terminal.source),covered:n(terminal.covered),missing:n(terminal.missing),ok:true}};
+      }else{
+        CCSL={...CCSL,terminalClosureProof:{id:V426_CCSL_TERMINAL_CLOSURE_PROOF_ID,source:n(terminal?.source),covered:n(terminal?.covered),missing:n(terminal?.missing),ok:Boolean(terminal?.ok),complete:false}};
+      }
     }
   }
   timing.ccslMs=Number(elapsed(ccslStarted).toFixed(3));
@@ -149,7 +160,7 @@ function buildScalarStatus(db,date,batch){
 
   const result={
     ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,
-    completedFastPath:`${V322_COMPLETED_FAST_PATH_ID}+${V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID}+${V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID}`,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,
+    completedFastPath:`${V322_COMPLETED_FAST_PATH_ID}+${V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID}+${V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID}+${V426_CCSL_TERMINAL_STATUS_ID}`,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,v426CcslTerminalStatusId:V426_CCSL_TERMINAL_STATUS_ID,
     reportDate:date,batchId:text(batch?.batchId),sourceSnapshotId:snapshotId,lifecycleBoundary:boundary,
     complete:[CCSL,SHOPEE,WHPP].every(stage=>stage.complete===true),stages:{CCSL,SHOPEE,WHPP},counts,
     statusDiagnostics:timing,generatedAt:new Date().toISOString()
@@ -160,7 +171,7 @@ function buildScalarStatus(db,date,batch){
 
 export function readV322SevenBusinessStatus({reportDate='',db=getDb(),force=false}={}){
   const requested=normalizeDate(reportDate),batch=latestValid(db,requested),date=requested||normalizeDate(batch?.reportDate);
-  if(!date||!batch)return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,reportDate:date||'',complete:false,stages:{CCSL:{key:'CCSL',complete:false},SHOPEE:{key:'SHOPEE',complete:false},WHPP:{key:'WHPP',complete:false,completionPolicy:V322_WHPP_COMPLETION_PARITY_ID,restartInterrupted:false,restartRecovery:null}},statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs:0,reason:'CURRENT_VALID_BATCH_MISSING'},generatedAt:new Date().toISOString()};
+  if(!date||!batch)return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,v426CcslTerminalStatusId:V426_CCSL_TERMINAL_STATUS_ID,reportDate:date||'',complete:false,stages:{CCSL:{key:'CCSL',complete:false},SHOPEE:{key:'SHOPEE',complete:false},WHPP:{key:'WHPP',complete:false,completionPolicy:V322_WHPP_COMPLETION_PARITY_ID,restartInterrupted:false,restartRecovery:null}},statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs:0,reason:'CURRENT_VALID_BATCH_MISSING'},generatedAt:new Date().toISOString()};
   const cacheKey=`${date}:${text(batch.snapshotId)}`,cached=proofCache.get(cacheKey);
   if(!force&&cached&&Date.now()-cached.at<cached.ttl)return{...cached.value,cacheHit:true,statusDiagnostics:{...cached.value.statusDiagnostics,cacheHit:true,cacheAgeMs:Date.now()-cached.at}};
   const value=buildScalarStatus(db,date,batch),ttl=value.complete?COMPLETE_CACHE_MS:INCOMPLETE_CACHE_MS;
@@ -173,7 +184,7 @@ export function readV322RunProgress(businessType='CCSL',db=getDb(),reportDate=''
   const type=text(businessType).toUpperCase(),all=readV322SevenBusinessStatus({reportDate,db});
   if(type==='ALL')return all;
   const key=type==='SHOPEE'?'SHOPEE':type==='WHPP'?'WHPP':'CCSL',stage=all.stages?.[key]||{};
-  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:Math.max(0,n(stage.sourceTotal)-n(stage.scanTotal)),statusDiagnostics:all.statusDiagnostics,generatedAt:new Date().toISOString()};
+  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,v426CcslTerminalStatusId:V426_CCSL_TERMINAL_STATUS_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:Math.max(0,n(stage.sourceTotal)-n(stage.scanTotal)),statusDiagnostics:all.statusDiagnostics,generatedAt:new Date().toISOString()};
 }
 
 function progressHandler(req,res){
@@ -186,6 +197,7 @@ function progressHandler(req,res){
     res.setHeader('X-CE-QC-V418-Status-Fast-Path',V418_STATUS_PROOF_FAST_PATH_ID);
     res.setHeader('X-CE-QC-V419-Scalar-Status',V419_SCALAR_STATUS_PRIORITY_ID);
     res.setHeader('X-CE-QC-V424-Same-Lifecycle-Completion',V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID);
+    res.setHeader('X-CE-QC-V426-CCSL-Terminal-Closure',V426_CCSL_TERMINAL_STATUS_ID);
     const data=readV322RunProgress(req.query.businessType||'CCSL',getDb(),req.query.reportDate||'');
     const totalMs=Number(elapsed(started).toFixed(3));
     const d=data?.statusDiagnostics||{};
@@ -194,7 +206,7 @@ function progressHandler(req,res){
   }catch(error){
     const totalMs=Number(elapsed(started).toFixed(3));
     res.setHeader('Server-Timing',`v419total;dur=${totalMs}`);
-    return res.status(200).json({ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED',detailCode:'V419_SCALAR_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs},generatedAt:new Date().toISOString()});
+    return res.status(200).json({ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED',detailCode:'V419_SCALAR_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,v426CcslTerminalStatusId:V426_CCSL_TERMINAL_STATUS_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs},generatedAt:new Date().toISOString()});
   }
 }
 
@@ -205,4 +217,4 @@ express.application.get=function v419AvailabilityGet(pathValue,...handlers){
   return previousGet.call(this,pathValue,...handlers);
 };
 
-console.info('[CE-QC][V419_SCALAR_STATUS_PRIORITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,V322_WHPP_COMPLETION_PARITY_ID,V419_SCALAR_STATUS_PRIORITY_ID,V419_STATUS_TIMING_ID,V418_STATUS_PROOF_FAST_PATH_ID,V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,'status reads are scalar-only: no run_checkpoints.payloadJson, business_run_checkpoints.payloadJson, business_states.valueJson, or business_daily_reports.summaryJson is selected or parsed; current-member completion remains fail-closed; a later same-lifecycle runId cannot hide a boundary-valid completion snapshot that still passes exact current-member proof.');
+console.info('[CE-QC][V419_SCALAR_STATUS_PRIORITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,V322_WHPP_COMPLETION_PARITY_ID,V419_SCALAR_STATUS_PRIORITY_ID,V419_STATUS_TIMING_ID,V418_STATUS_PROOF_FAST_PATH_ID,V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,V426_CCSL_TERMINAL_STATUS_ID,'status reads remain scalar-only; CCSL may close without a dashboard completion snapshot only when the exact current VALID CCSL membership is 100% covered by immutable POD locks; UI 0/0 and stale run/checkpoint state are never completion proof.');
