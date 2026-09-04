@@ -87,7 +87,7 @@ test('V426 loader delivers import-truth owners, retires V51 HOME writes, and res
   const v105Load=loader.indexOf('v105-fast-render.js?v=20260814-2');
   const v160Load=loader.indexOf('v160-current-home-truth.js?v=20260904-v426-1');
   assert.ok(ownerMarker>=0&&v51Load>ownerMarker,'shell must declare V64 HOME owner before legacy V51 loads');
-  assert.ok(v105Load>=0&&v160Load>v105Load,'V160 must remain the final renderAll wrapper after V105 replaces the base renderer');
+  assert.ok(v105Load>=0&&v160Load>v105Load,'V105 must install the base renderAll before V160 becomes the final wrapper');
   assert.match(loader,/v51-runtime-fix\.js\?v=20260904-v426-2/);
   assert.doesNotMatch(loader,/v51-runtime-fix\.js\?v=20260904-v426-1/);
   assert.doesNotMatch(loader,/v51-runtime-fix\.js\?v=20260812-3/);
