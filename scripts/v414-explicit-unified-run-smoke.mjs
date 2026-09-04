@@ -97,13 +97,14 @@ mustMatch(historyWorker, /savedEvents\(db/, 'history rebuild reads saved SQLite 
 mustMatch(historyWorker, /analyzeV246ShopeeAttemptCycle\(eventMap\.get\(row\.shipmentCode\)\|\|\[\]/, 'history rebuild uses strict V246 attempt cycles');
 
 // 7) V419/V420/V423/V424 installer gates prove global truth + browser delivery +
-// executable same-proof restart floor in isolated/source-only child checks.
+// executable same-proof restart floor and real SQLite lifecycle-bound completion.
 for (const smoke of [
   'scripts/v419-carry-ledger-sync-smoke.mjs',
   'scripts/v419-global-range-export-freshness-smoke.mjs',
   'scripts/v420-status-entry-coalescing-smoke.mjs',
   'scripts/v423-explicit-shopee-restart-resume-smoke.mjs',
-  'scripts/v424-resume-floor-smoke.mjs'
+  'scripts/v424-resume-floor-smoke.mjs',
+  'scripts/v424-same-lifecycle-completion-smoke.mjs'
 ]) {
   execFileSync(process.execPath,[smoke],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 }
