@@ -12,8 +12,7 @@ const saved={...process.env};
 Object.assign(process.env,{
   DATA_DIR:dataRoot,
   DB_FILE:path.join(dataRoot,'ce_qc_monitor.db'),
-  CE_QC_RUNTIME_DIR:runtimeRoot,
-  EXPORTS_DIR:'',IMPORTS_DIR:'',BACKUPS_DIR:'',LOGS_DIR:'',EVIDENCE_ARCHIVE_DIR:'',CE_QC_TEMP_DIR:'',TEMP:'',TMP:''
+  CE_QC_RUNTIME_DIR:runtimeRoot
 });
 for(const key of ['EXPORTS_DIR','IMPORTS_DIR','BACKUPS_DIR','LOGS_DIR','EVIDENCE_ARCHIVE_DIR','CE_QC_TEMP_DIR','TEMP','TMP'])delete process.env[key];
 
@@ -31,26 +30,22 @@ try{
     assert.equal(fs.existsSync(layout[key]),true,`${key} must be created by core policy`);
   }
 
-  // Primary data must never be deleted by runtime maintenance.
   fs.writeFileSync(layout.dbFile,Buffer.alloc(1024,'D'));
   const preRoot=path.join(dataRoot,'backups','pre_update');fs.mkdirSync(preRoot,{recursive:true});
-  const oldTime=new Date(Date.now()-3*24*60*60*1000);
-  for(const name of ['20260901-010000','20260902-010000','20260903-010000']){
+  const times=[4,3,2].map(days=>new Date(Date.now()-days*24*60*60*1000));
+  for(const [index,name] of ['20260901-010000','20260902-010000','20260903-010000'].entries()){
     const dir=path.join(preRoot,name);fs.mkdirSync(dir,{recursive:true});
     const dbCopy=path.join(dir,'ce_qc_monitor.db');fs.writeFileSync(dbCopy,Buffer.alloc(2048,name));
     fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({ok:true,name}));
-    fs.utimesSync(dbCopy,oldTime,oldTime);fs.utimesSync(dir,oldTime,oldTime);
+    fs.utimesSync(dbCopy,times[index],times[index]);fs.utimesSync(dir,times[index],times[index]);
   }
-  // Make the newest backup actually newest while still older than the safety age.
-  const newestDb=path.join(preRoot,'20260903-010000','ce_qc_monitor.db');
-  const newestTime=new Date(Date.now()-2*24*60*60*1000);fs.utimesSync(newestDb,newestTime,newestTime);
   let inventory=inspectPreUpdateBackups(dataRoot);
   assert.equal(inventory.entries.filter(row=>row.complete).length,3);
-  const pruned=prunePreUpdateBackups({dataRoot,keep:1,minAgeMs:24*60*60*1000});
+  const pruned=prunePreUpdateBackups({dataRoot,keep:2,minAgeMs:24*60*60*1000});
   assert.equal(pruned.id,STORAGE_MAINTENANCE_ID);
-  assert.equal(pruned.removed,2,'only the newest completed pre-update backup should remain');
+  assert.equal(pruned.removed,1,'two verified rollback generations must remain');
   inventory=inspectPreUpdateBackups(dataRoot);
-  assert.equal(inventory.entries.filter(row=>row.complete).length,1);
+  assert.equal(inventory.entries.filter(row=>row.complete).length,2);
   assert.equal(fs.existsSync(layout.dbFile),true,'live database must never be touched by pre-update retention');
   assert.equal(fs.statSync(layout.dbFile).size,1024);
 
@@ -64,6 +59,13 @@ try{
   assert.equal(fs.existsSync(currentEvidence),true,'evidence inside retention window must remain');
   assert.equal(fs.existsSync(expiredEvidence),false,'evidence beyond >=366-day retention may be pruned');
 
+  const protectedEvidence=path.join(layout.evidenceArchiveDir,'protected-365.json.gz');
+  fs.writeFileSync(protectedEvidence,'protected');
+  const protectedTime=new Date(Date.now()-365*24*60*60*1000);fs.utimesSync(protectedEvidence,protectedTime,protectedTime);
+  const forcedShort=pruneExpiredEvidence({roots:[layout.evidenceArchiveDir],retentionDays:30});
+  assert.equal(forcedShort.retentionDays,366,'configuration cannot reduce evidence retention below 366 days');
+  assert.equal(fs.existsSync(protectedEvidence),true,'365-day evidence must remain even if an unsafe shorter retention is requested');
+
   const oldTemp=path.join(layout.tempDir,'old.tmp'),newTemp=path.join(layout.tempDir,'new.tmp');
   fs.writeFileSync(oldTemp,'old');fs.writeFileSync(newTemp,'new');
   fs.utimesSync(oldTemp,new Date(Date.now()-20*24*60*60*1000),new Date(Date.now()-20*24*60*60*1000));
@@ -73,7 +75,7 @@ try{
 
   const finalLayout=resolveStorageLayout({baseDir:root});
   assert.equal(path.normalize(finalLayout.evidenceArchiveDir),path.normalize(path.join(runtimeRoot,'evidence_archive')),'evidence cannot silently fall back to dataRoot/D after policy application');
-  console.log('[SYSTEM STORAGE] passed · one core C/D layout · DB remains persistent-data · runtime/evidence/backups/exports/imports/logs/temp use runtime root · pre-update full backups retain newest one · evidence retention never drops below 366d · live DB untouched');
+  console.log('[SYSTEM STORAGE] passed · one core C/D layout · DB remains persistent-data · runtime/evidence/backups/exports/imports/logs/temp use runtime root · two verified rollback generations retained · evidence retention never drops below 366d · live DB untouched');
 } finally {
   for(const key of Object.keys(process.env))if(!(key in saved))delete process.env[key];
   Object.assign(process.env,saved);
