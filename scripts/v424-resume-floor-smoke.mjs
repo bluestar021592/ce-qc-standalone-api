@@ -7,6 +7,7 @@ const v169Source=fs.readFileSync('public/v169-seven-business-legacy-status-sync.
 const v322Source=fs.readFileSync('src/v322WebAvailabilityPatch.js','utf8');
 const v415Source=fs.readFileSync('src/v415RetroactiveCompletionGuard.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
+const backupSource=fs.readFileSync('scripts/CE_QC_PreUpdate_Backup.mjs','utf8');
 
 assert.match(v67Source,/V424_RESUME_FLOOR_REVISION\s*=\s*'2026-09-04-v424-restart-proof-resume-floor-v1'/);
 assert.match(v169Source,/V424_RESUME_FLOOR_HANDOFF_REVISION='2026-09-04-v424-v169-v67-proof-handoff-v1'/);
@@ -43,6 +44,21 @@ for(const [name,source] of [['V322',v322Source],['V415',v415Source]])assertCurre
 
 assert.match(shell,/<script src="\/v67-resilient-run-guard\.js\?v=20260904-v424-1"/);
 assert.match(shell,/<script src="\/v169-seven-business-legacy-status-sync\.js\?v=20260904-v424-1"/);
+
+// V425 storage hygiene is updater-only. The live database stays where DATA_DIR/DB_FILE
+// points, while verified pre-update copies may use C or D according to real free space.
+// Cleanup is constrained to updater-owned backup paths and must retain at least two
+// verified physical rollback copies before older copies can be retired.
+assert.match(backupSource,/V425_BACKUP_STORAGE_POLICY_ID='2026-09-04-v425-c-d-auto-backup-retention-v1'/,'pre-update backup must expose the C/D auto-storage policy');
+assert.match(backupSource,/managedBackupRoot=path\.join\(managedLauncherHome,'backups','pre_update'\)/,'C-side managed launcher backup root must be available');
+assert.match(backupSource,/legacyBackupRoot=path\.join\(dataDir,'backups','pre_update'\)/,'existing D-side pre_update backups must remain discoverable');
+assert.match(backupSource,/fs\.statfsSync\(existing\)/,'backup placement must use actual filesystem free-space data');
+assert.match(backupSource,/sort\(\(a,b\)=>b\.freeBytes-a\.freeBytes\)/,'C/D candidates must prefer the root with more real free space');
+assert.match(backupSource,/PHYSICAL_BACKUP_KEEP_COUNT=Math\.max\(2/,'automatic cleanup must never reduce verified physical rollback copies below two');
+assert.match(backupSource,/function safeRemoveBackupDir[\s\S]*if\(!isDirectChildOfBackupRoot\(dir\)\)/,'recursive cleanup must be constrained to direct children of known pre_update roots');
+assert.match(backupSource,/function pruneLegacyLooseBackups[\s\S]*physicalVerifiedBackups\(\)\.length<PHYSICAL_BACKUP_KEEP_COUNT/,'legacy loose updater copies may be pruned only after the verified retention floor exists');
+assert.match(backupSource,/INSUFFICIENT_BACKUP_SPACE:[\s\S]*C\/D auto-selection refused an unsafe copy/,'full backup must fail closed when neither C nor D has safe headroom');
+assert.doesNotMatch(backupSource,/fs\.(?:rmSync|unlinkSync)\(dbFile/,'storage cleanup must never delete the live SQLite database');
 
 const REPORT_DATE='2026-09-01';
 function v168Truth(){
@@ -141,4 +157,4 @@ async function installV67({bareResume=false}={}){
   assert.equal(posts.filter(url=>url==='/api/resume').length,1,'a forged/bare resume has no resume-floor privilege and retains normal CCSL verification/resume semantics');
 }
 
-console.log('[V424] restart resume-floor smoke passed · same fresh V168 proof skips already-complete CCSL · CCSL /api/resume=0 on exact SHOPEE restart · SHOPEE resume=1 · stale/wrong/forged handoffs rejected · V322+V415 same-lifecycle completion fallback remains boundary-locked and current-member-proven');
+console.log('[V425/V424] restart resume-floor + backup storage smoke passed · same fresh V168 proof skips already-complete CCSL · CCSL /api/resume=0 on exact SHOPEE restart · SHOPEE resume=1 · stale/wrong/forged handoffs rejected · V322+V415 completion remains current-member-proven · C/D backup selection is free-space aware · updater cleanup retains >=2 verified physical backups and cannot delete live SQLite');
