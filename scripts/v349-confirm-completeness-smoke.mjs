@@ -12,9 +12,9 @@ import {
 assert.match(V349_CONFIRM_COMPLETENESS_ID,/v349-confirm-partial-response-recovery-v3/);
 assert.equal(CEClient.prototype.confirmQuery.name,'v349CompleteConfirmQuery','V349 must install once at the CEClient boundary so WHPP/retry-center cannot miss the owner');
 
-// V392 contract: V70 is transport safety only. It may split the logical 350 into
-// <=100-ticket CE requests, but it must not own a second successful-response
-// completeness retry loop. V349 is the one and only missing-row owner.
+// Consolidated contract: V70 is confirm transport safety only. It may split the
+// logical 350 into <=100-ticket CE requests, but track/exception retry ownership
+// belongs to trackBatching.js and must not be nested again inside CEClient.
 execFileSync(process.execPath,['--check','src/v70ConfirmQueryResiliencePatch.js'],{stdio:'pipe'});
 const v70=fs.readFileSync(new URL('../src/v70ConfirmQueryResiliencePatch.js',import.meta.url),'utf8');
 assert.match(v70,/V392_CONFIRM_TRANSPORT_BOUNDARY_ID/,'V70 must expose the consolidated transport boundary revision');
@@ -23,6 +23,9 @@ assert.match(v70,/successfulTransportBatches === 0 && lastTransportError/,'all s
 assert.match(v70,/return queryConfirmBatches\(this, codes\)/,'V70 confirm entry must only execute the transport-safe batch collector');
 assert.doesNotMatch(v70,/confirm-query final retry/,'V70 must never reintroduce a second confirm missing-row retry loop');
 assert.doesNotMatch(v70,/retriedRows = await queryConfirmBatches\(this, missing\)/,'missing-row recovery belongs exclusively to V349');
+assert.doesNotMatch(v70,/CEClient\.prototype\.trackQuery\s*=/,'V70 must not wrap trackQuery; trackBatching is the single trajectory retry owner');
+assert.doesNotMatch(v70,/CEClient\.prototype\.exceptionQuery\s*=/,'V70 must not wrap exceptionQuery; trackBatching is the single exception retry owner');
+assert.match(v70,/export const V139_FINAL_RETRY_ROUNDS = 0/,'legacy nested track final retries must remain disabled');
 
 // Exact production symptom: 362 requested, HTTP succeeds, but only 23 waybills are
 // present in the response. V349 must never mark the other 339 as transport failures
@@ -106,7 +109,7 @@ assert.match(whpp,/createUnifiedThroughputClient/,'WHPP must remain its independ
 assert.match(whpp,/CONFIRM_BATCH_SIZE = 350/,'WHPP scan batch remains 350');
 assert.match(whpp,/trackConcurrency: 4/,'WHPP trajectory remains 50x4 via V346');
 
-console.log(`[V349] partial confirm completeness smoke passed · V70 transport-only <=100 chunks · V349 sole missing-row owner · exact CCSL 362→23 recovery · already-returned 23 never re-requested · WHPP 144 successful omissions become no-scan trajectory evidence · failed compensation stays real retry · true parent failure still bubbles to V345/V346 · CEClient boundary owner active`);
+console.log(`[V349] partial confirm completeness smoke passed · V70 confirm transport-only <=100 chunks · track/exception retry single-owner in trackBatching · V349 sole missing-row owner · exact CCSL 362→23 recovery · already-returned 23 never re-requested · WHPP 144 successful omissions become no-scan trajectory evidence · failed compensation stays real retry · true parent failure still bubbles to V345/V346 · CEClient boundary owner active`);
 
 await import('./v314-shopee-throughput-smoke.mjs');
 await import('./v339-ccsl-throughput-smoke.mjs');
