@@ -14,6 +14,7 @@ export const V322_COMPLETED_FAST_PATH_ID='2026-09-02-v322-unified-completed-snap
 export const V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID='2026-09-02-v418-v322-no-payload-completed-claim-v1';
 export const V419_SCALAR_STATUS_PRIORITY_ID='2026-09-02-v419-scalar-status-priority-no-json-v1';
 export const V419_STATUS_TIMING_ID='2026-09-02-v419-status-substage-timing-v1';
+export const V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID='2026-09-04-v424-same-lifecycle-completion-snapshot-v1';
 
 const previousGet=express.application.get;
 const STATUS_ROUTE='/api/v33/run-progress';
@@ -49,12 +50,19 @@ function currentLock(db,type,date,boundary=''){
 
 function currentCompletionSnapshot(db,type,date,runId,boundary=''){
   const id=text(runId);
-  if(!id)return null;
   try{
-    const row=type==='CCSL'
-      ?db.prepare("SELECT snapshotId,runId,generatedAt,status,reconciliationStatus FROM export_snapshots WHERE reportDate=? AND runId=? AND snapshotType='dashboard' AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY id DESC LIMIT 1").get(date,id)||null
-      :db.prepare("SELECT snapshotId,runId,generatedAt,status,reconciliationStatus FROM business_export_snapshots WHERE businessType='SHOPEE' AND reportDate=? AND runId=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY id DESC LIMIT 1").get(date,id)||null;
-    return row&&atOrAfter(row.generatedAt,boundary)?row:null;
+    const exact=id
+      ?(type==='CCSL'
+        ?db.prepare("SELECT snapshotId,runId,generatedAt,status,reconciliationStatus FROM export_snapshots WHERE reportDate=? AND runId=? AND snapshotType='dashboard' AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY id DESC LIMIT 1").get(date,id)||null
+        :db.prepare("SELECT snapshotId,runId,generatedAt,status,reconciliationStatus FROM business_export_snapshots WHERE businessType='SHOPEE' AND reportDate=? AND runId=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY id DESC LIMIT 1").get(date,id)||null)
+      :null;
+    if(exact&&atOrAfter(exact.generatedAt,boundary))return{...exact,claimSource:'CURRENT_RUN_ID'};
+    const lifecycle=type==='CCSL'
+      ?db.prepare("SELECT snapshotId,runId,generatedAt,status,reconciliationStatus FROM export_snapshots WHERE reportDate=? AND snapshotType='dashboard' AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY generatedAt DESC,id DESC LIMIT 1").get(date)||null
+      :db.prepare("SELECT snapshotId,runId,generatedAt,status,reconciliationStatus FROM business_export_snapshots WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(status,'VALID')='VALID' AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED' ORDER BY generatedAt DESC,id DESC LIMIT 1").get(date)||null;
+    return lifecycle&&atOrAfter(lifecycle.generatedAt,boundary)
+      ?{...lifecycle,claimSource:'SAME_VALID_IMPORT_LIFECYCLE'}
+      :null;
   }catch{return null;}
 }
 
@@ -81,8 +89,8 @@ function emptyStage(type,date,total,boundary,lock=null){
   };
 }
 
-function completedStage(stage,snapshotId){
-  return{...stage,complete:true,zeroTicketDay:n(stage.sourceTotal)===0,snapshotId:text(snapshotId),snapshotStatus:'COMPLETED',completionSource:'V418_CURRENT_MEMBER_PROCESSING_PROOF',runStatus:'completed',phase:'已完成',running:false,paused:false,failed:false,restartInterrupted:false,restartRecovery:null,statusSource:'V418_NO_PAYLOAD_COMPLETED_CLAIM',v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID};
+function completedStage(stage,snapshotId,completionClaimSource=''){
+  return{...stage,complete:true,zeroTicketDay:n(stage.sourceTotal)===0,snapshotId:text(snapshotId),snapshotStatus:'COMPLETED',completionSource:'V418_CURRENT_MEMBER_PROCESSING_PROOF',completionClaimSource:text(completionClaimSource),runStatus:'completed',phase:'已完成',running:false,paused:false,failed:false,restartInterrupted:false,restartRecovery:null,statusSource:'V418_NO_PAYLOAD_COMPLETED_CLAIM',v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID};
 }
 
 function buildScalarStatus(db,date,batch){
@@ -101,24 +109,24 @@ function buildScalarStatus(db,date,batch){
   let WHPP=emptyStage('WHPP',date,counts.WHPP,boundary,whppLock);
 
   const ccslStarted=tick();
-  if(n(counts.CCSL)===0)CCSL=completedStage(CCSL,snapshotId);
+  if(n(counts.CCSL)===0)CCSL=completedStage(CCSL,snapshotId,'ZERO_TICKET');
   else{
     const snapshot=currentCompletionSnapshot(db,'CCSL',date,text(ccslLock?.runId),boundary);
     if(snapshot){
       const proof=readV418CcslProcessingProof(db,{reportDate:date,snapshotId,boundary});
-      if(proof?.ok&&proof.complete===true&&n(proof.source)===n(counts.CCSL)&&n(proof.covered)>=n(counts.CCSL))CCSL=completedStage(CCSL,text(snapshot.snapshotId));
+      if(proof?.ok&&proof.complete===true&&n(proof.source)===n(counts.CCSL)&&n(proof.covered)>=n(counts.CCSL))CCSL=completedStage(CCSL,text(snapshot.snapshotId),snapshot.claimSource);
       else CCSL={...CCSL,completionProof:{source:n(proof?.source),covered:n(proof?.covered),missing:n(proof?.missing),ok:Boolean(proof?.ok)}};
     }
   }
   timing.ccslMs=Number(elapsed(ccslStarted).toFixed(3));
 
   const shopeeStarted=tick();
-  if(n(counts.SHOPEE)===0)SHOPEE=completedStage(SHOPEE,snapshotId);
+  if(n(counts.SHOPEE)===0)SHOPEE=completedStage(SHOPEE,snapshotId,'ZERO_TICKET');
   else{
     const snapshot=currentCompletionSnapshot(db,'SHOPEE',date,text(shopeeLock?.runId),boundary);
     if(snapshot){
       const coverage=readV418BusinessSuccessCoverage(db,{businessType:'SHOPEE',date,snapshotId,boundary,memberTypes:['SHOPEECN','SHOPEEVN']});
-      if(coverage?.ok&&n(coverage.count)>=n(counts.SHOPEE))SHOPEE=completedStage(SHOPEE,text(snapshot.snapshotId));
+      if(coverage?.ok&&n(coverage.count)>=n(counts.SHOPEE))SHOPEE=completedStage(SHOPEE,text(snapshot.snapshotId),snapshot.claimSource);
       else SHOPEE={...SHOPEE,completionProof:{covered:n(coverage?.count),missing:Math.max(0,n(counts.SHOPEE)-n(coverage?.count)),ok:Boolean(coverage?.ok)}};
     }
   }
@@ -126,12 +134,12 @@ function buildScalarStatus(db,date,batch){
 
   const whppStarted=tick();
   const whppMembershipOk=counts._whppMembershipOk!==false;
-  if(whppMembershipOk&&n(counts.WHPP)===0)WHPP=completedStage(WHPP,snapshotId);
+  if(whppMembershipOk&&n(counts.WHPP)===0)WHPP=completedStage(WHPP,snapshotId,'ZERO_TICKET');
   else if(whppMembershipOk&&n(counts.WHPP)>0){
     const lockClaim=COMPLETE_LOCK.has(text(whppLock?.status).toLowerCase()),unifiedClaim=unifiedCompletionClaim(db,batch);
     if(lockClaim||unifiedClaim){
       const coverage=readV418BusinessSuccessCoverage(db,{businessType:'WHPP',date,snapshotId,boundary,memberTypes:['WHPP']});
-      if(coverage?.ok&&n(coverage.count)>=n(counts.WHPP))WHPP=completedStage(WHPP,snapshotId);
+      if(coverage?.ok&&n(coverage.count)>=n(counts.WHPP))WHPP=completedStage(WHPP,snapshotId,lockClaim?'CURRENT_FINISHED_RUN_LOCK':'UNIFIED_COMPLETED_SCALAR');
       else WHPP={...WHPP,completionProof:{covered:n(coverage?.count),missing:Math.max(0,n(counts.WHPP)-n(coverage?.count)),ok:Boolean(coverage?.ok),lockClaim,unifiedClaim}};
     }
   }
@@ -141,7 +149,7 @@ function buildScalarStatus(db,date,batch){
 
   const result={
     ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,
-    completedFastPath:`${V322_COMPLETED_FAST_PATH_ID}+${V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID}`,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,
+    completedFastPath:`${V322_COMPLETED_FAST_PATH_ID}+${V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID}+${V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID}`,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,
     reportDate:date,batchId:text(batch?.batchId),sourceSnapshotId:snapshotId,lifecycleBoundary:boundary,
     complete:[CCSL,SHOPEE,WHPP].every(stage=>stage.complete===true),stages:{CCSL,SHOPEE,WHPP},counts,
     statusDiagnostics:timing,generatedAt:new Date().toISOString()
@@ -152,7 +160,7 @@ function buildScalarStatus(db,date,batch){
 
 export function readV322SevenBusinessStatus({reportDate='',db=getDb(),force=false}={}){
   const requested=normalizeDate(reportDate),batch=latestValid(db,requested),date=requested||normalizeDate(batch?.reportDate);
-  if(!date||!batch)return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,reportDate:date||'',complete:false,stages:{CCSL:{key:'CCSL',complete:false},SHOPEE:{key:'SHOPEE',complete:false},WHPP:{key:'WHPP',complete:false,completionPolicy:V322_WHPP_COMPLETION_PARITY_ID,restartInterrupted:false,restartRecovery:null}},statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs:0,reason:'CURRENT_VALID_BATCH_MISSING'},generatedAt:new Date().toISOString()};
+  if(!date||!batch)return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,reportDate:date||'',complete:false,stages:{CCSL:{key:'CCSL',complete:false},SHOPEE:{key:'SHOPEE',complete:false},WHPP:{key:'WHPP',complete:false,completionPolicy:V322_WHPP_COMPLETION_PARITY_ID,restartInterrupted:false,restartRecovery:null}},statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs:0,reason:'CURRENT_VALID_BATCH_MISSING'},generatedAt:new Date().toISOString()};
   const cacheKey=`${date}:${text(batch.snapshotId)}`,cached=proofCache.get(cacheKey);
   if(!force&&cached&&Date.now()-cached.at<cached.ttl)return{...cached.value,cacheHit:true,statusDiagnostics:{...cached.value.statusDiagnostics,cacheHit:true,cacheAgeMs:Date.now()-cached.at}};
   const value=buildScalarStatus(db,date,batch),ttl=value.complete?COMPLETE_CACHE_MS:INCOMPLETE_CACHE_MS;
@@ -165,7 +173,7 @@ export function readV322RunProgress(businessType='CCSL',db=getDb(),reportDate=''
   const type=text(businessType).toUpperCase(),all=readV322SevenBusinessStatus({reportDate,db});
   if(type==='ALL')return all;
   const key=type==='SHOPEE'?'SHOPEE':type==='WHPP'?'WHPP':'CCSL',stage=all.stages?.[key]||{};
-  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:Math.max(0,n(stage.sourceTotal)-n(stage.scanTotal)),statusDiagnostics:all.statusDiagnostics,generatedAt:new Date().toISOString()};
+  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:Math.max(0,n(stage.sourceTotal)-n(stage.scanTotal)),statusDiagnostics:all.statusDiagnostics,generatedAt:new Date().toISOString()};
 }
 
 function progressHandler(req,res){
@@ -177,6 +185,7 @@ function progressHandler(req,res){
     res.setHeader('X-CE-QC-V322-WHPP-Completion',V322_WHPP_COMPLETION_PARITY_ID);
     res.setHeader('X-CE-QC-V418-Status-Fast-Path',V418_STATUS_PROOF_FAST_PATH_ID);
     res.setHeader('X-CE-QC-V419-Scalar-Status',V419_SCALAR_STATUS_PRIORITY_ID);
+    res.setHeader('X-CE-QC-V424-Same-Lifecycle-Completion',V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID);
     const data=readV322RunProgress(req.query.businessType||'CCSL',getDb(),req.query.reportDate||'');
     const totalMs=Number(elapsed(started).toFixed(3));
     const d=data?.statusDiagnostics||{};
@@ -185,7 +194,7 @@ function progressHandler(req,res){
   }catch(error){
     const totalMs=Number(elapsed(started).toFixed(3));
     res.setHeader('Server-Timing',`v419total;dur=${totalMs}`);
-    return res.status(200).json({ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED',detailCode:'V419_SCALAR_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs},generatedAt:new Date().toISOString()});
+    return res.status(200).json({ok:false,code:'V322_PERSISTED_STATUS_READ_FAILED',detailCode:'V419_SCALAR_STATUS_READ_FAILED',version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,businessType:text(req.query.businessType).toUpperCase()||'CCSL',reportDate:normalizeDate(req.query.reportDate),error:text(error?.message||error),statusDiagnostics:{id:V419_STATUS_TIMING_ID,totalMs},generatedAt:new Date().toISOString()});
   }
 }
 
@@ -196,4 +205,4 @@ express.application.get=function v419AvailabilityGet(pathValue,...handlers){
   return previousGet.call(this,pathValue,...handlers);
 };
 
-console.info('[CE-QC][V419_SCALAR_STATUS_PRIORITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,V322_WHPP_COMPLETION_PARITY_ID,V419_SCALAR_STATUS_PRIORITY_ID,V419_STATUS_TIMING_ID,V418_STATUS_PROOF_FAST_PATH_ID,'status reads are scalar-only: no run_checkpoints.payloadJson, business_run_checkpoints.payloadJson, business_states.valueJson, or business_daily_reports.summaryJson is selected or parsed; current-member completion remains fail-closed and V414 explicit-run/restart semantics are unchanged.');
+console.info('[CE-QC][V419_SCALAR_STATUS_PRIORITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,V322_WHPP_COMPLETION_PARITY_ID,V419_SCALAR_STATUS_PRIORITY_ID,V419_STATUS_TIMING_ID,V418_STATUS_PROOF_FAST_PATH_ID,V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,'status reads are scalar-only: no run_checkpoints.payloadJson, business_run_checkpoints.payloadJson, business_states.valueJson, or business_daily_reports.summaryJson is selected or parsed; current-member completion remains fail-closed; a later same-lifecycle runId cannot hide a boundary-valid completion snapshot that still passes exact current-member proof.');
