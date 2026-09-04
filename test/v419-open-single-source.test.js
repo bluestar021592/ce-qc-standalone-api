@@ -58,12 +58,21 @@ test('V419 recovery-safe startup skips synchronous POD-lock repair but explicit 
   assert.match(repair,/const db = database \|\| getDb\(\)/);
 });
 
-test('V419 loader cache-busts replaced V159 and total remains core + WHPP', () => {
+test('V426 loader delivers import-truth owners and total remains core + WHPP', () => {
   const loader=read('../src/v44WhppUiPatch.js');
   const totalSync=read('../public/v68-whpp-classification-stability.js');
+  const canonicalSync=read('../public/v94-business-source-truth-ui-v2.js');
   assert.match(loader,/v159-current-import-stability\.js\?v=20260902-v419-open-single-source-1/);
   assert.doesNotMatch(loader,/v159-current-import-stability\.js\?v=20260902-v414-explicit-1/);
+  assert.match(loader,/v68-whpp-classification-stability\.js\?v=20260904-v426-1/);
+  assert.match(loader,/v94-business-source-truth-ui-v2\.js\?v=20260904-v426-1/);
   assert.equal(5060+228,5288);
+  assert.match(totalSync,/v426-unified-import-seven-business-truth-priority-v1/);
+  assert.match(totalSync,/AUTHORITATIVE_UNIFIED_IMPORT_TRUTH/);
+  assert.match(totalSync,/V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH/);
   assert.match(totalSync,/fullUnique:\s*core\s*\+\s*whppTotal/);
   assert.match(totalSync,/validUniqueWaybills:\s*core\s*\+\s*total/);
+  assert.match(canonicalSync,/v426-unified-import-truth-priority-v1/);
+  assert.match(canonicalSync,/AUTHORITATIVE_UNIFIED_IMPORT_TRUTH/);
+  assert.match(canonicalSync,/V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH/);
 });
