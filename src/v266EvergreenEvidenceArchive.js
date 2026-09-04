@@ -9,10 +9,13 @@ import { CEClient } from './ceClient.js';
 
 export const V266_EVERGREEN_EVIDENCE_ARCHIVE_ID='2026-08-23-v266-evergreen-evidence-archive-v1';
 export const V266_MIN_RETENTION_DAYS=366;
-export const V266_RETENTION_POLICY='NO_AUTOMATIC_ARCHIVE_DELETE_BEFORE_OR_AFTER_RETENTION; annual cleanup requires an explicit future guarded action';
+export const V266_RETENTION_POLICY='SOURCE_AND_CE_API_EVIDENCE_RETENTION_366D_MINIMUM; archive location is owned by core storagePolicy';
 const gzipAsync=promisify(gzip),gunzipAsync=promisify(gunzip);
 const cfg=getRuntimeConfig();
-const archiveRoot=path.join(cfg.dataDir,'evidence_archive');
+// Consolidation: V266 no longer reconstructs a D:-based archive path. db.js/core
+// storagePolicy owns the location, so a C: runtime placement cannot be silently
+// overridden by this compatibility module.
+const archiveRoot=path.resolve(cfg.evidenceArchiveDir);
 const sourceRoot=path.join(archiveRoot,'source_uploads');
 const apiRoot=path.join(archiveRoot,'ce_api');
 const importsRoot=path.resolve(cfg.importsDir);
@@ -38,10 +41,10 @@ async function archiveSourceFile(filePath,{reason='IMPORT_UNLINK_GUARD'}={}){
   await ensureDirs();const stat=await fsPromises.stat(filePath);if(!stat.isFile())return{archived:false,skipped:true,reason:'NOT_FILE'};
   const hash=await sha256File(filePath),ext=await sniffExtension(filePath),createdAt=iso(),month=createdAt.slice(0,7);const dir=path.join(sourceRoot,month);await fsPromises.mkdir(dir,{recursive:true});
   const target=path.join(dir,`${hash}${ext}`),metaPath=path.join(dir,`${hash}.meta.json`);
-  try{await fsPromises.access(target);}catch{await fsPromises.copyFile(filePath,target);}
+  let existed=true;try{await fsPromises.access(target);}catch{existed=false;await fsPromises.copyFile(filePath,target);}
   const meta={id:V266_EVERGREEN_EVIDENCE_ARCHIVE_ID,kind:'SOURCE_UPLOAD',sha256:hash,bytes:stat.size,extension:ext,capturedAt:createdAt,retainUntil:retainUntil(createdAt),reason,sourceTempName:path.basename(filePath),archivePath:target,policy:V266_RETENTION_POLICY};
   try{await fsPromises.writeFile(metaPath,JSON.stringify(meta,null,2),{flag:'wx'});}catch(error){if(error?.code!=='EEXIST')throw error;}
-  return{archived:true,deduped:fs.existsSync(target),...meta};
+  return{archived:true,deduped:existed,...meta};
 }
 async function archiveCeApiEvidence({endpoint='',requestBody=null,responseData=null,label=''}){
   await ensureDirs();const capturedAt=iso(),day=capturedAt.slice(0,10),folder=safePart(endpoint.replace(/^\/api\//,''));const dir=path.join(apiRoot,day,folder);await fsPromises.mkdir(dir,{recursive:true});
@@ -50,7 +53,7 @@ async function archiveCeApiEvidence({endpoint='',requestBody=null,responseData=n
   const payload={id:V266_EVERGREEN_EVIDENCE_ARCHIVE_ID,kind:'CE_API_EVIDENCE',capturedAt,retainUntil:retainUntil(capturedAt),policy:V266_RETENTION_POLICY,...core};const compressed=await gzipAsync(Buffer.from(JSON.stringify(payload),'utf8'),{level:6});await fsPromises.writeFile(target,compressed,{flag:'wx'}).catch(error=>{if(error?.code!=='EEXIST')throw error;});return{archived:true,deduped:false,sha256:hash,path:target,bytes:compressed.length};
 }
 export async function readV266ApiEvidence(filePath){const raw=await fsPromises.readFile(filePath);return JSON.parse((await gunzipAsync(raw)).toString('utf8'));}
-export function getV266EvidenceArchivePaths(){return{archiveRoot,sourceRoot,apiRoot,importsRoot,retentionDays:V266_MIN_RETENTION_DAYS,policy:V266_RETENTION_POLICY};}
+export function getV266EvidenceArchivePaths(){return{archiveRoot,sourceRoot,apiRoot,importsRoot,retentionDays:V266_MIN_RETENTION_DAYS,policy:V266_RETENTION_POLICY,legacyArchiveRoot:cfg.legacyEvidenceArchiveDir||''};}
 
 function patchImportDeletion(){
   if(unlinkPatched||globalThis.__CE_QC_V266_IMPORT_DELETE_GUARD__)return;unlinkPatched=true;globalThis.__CE_QC_V266_IMPORT_DELETE_GUARD__=true;
@@ -69,9 +72,9 @@ function patchCeClient(){
   };
 }
 async function seedExistingImportTemps(){
-  try{await ensureDirs();const names=await fsPromises.readdir(importsRoot);let archived=0,failed=0;for(const name of names.slice(0,5000)){const filePath=path.join(importsRoot,name);try{const stat=await fsPromises.stat(filePath);if(!stat.isFile())continue;await archiveSourceFile(filePath,{reason:'STARTUP_EXISTING_IMPORT_SEED'});archived+=1;}catch{failed+=1;}}console.log('[CE-QC][V266_EVIDENCE]',JSON.stringify({id:V266_EVERGREEN_EVIDENCE_ARCHIVE_ID,seedExistingImports:true,archived,failed,archiveRoot,retentionDays:V266_MIN_RETENTION_DAYS,automaticDelete:false}));}catch(error){console.warn('[CE-QC][V266_EVIDENCE] existing import seed skipped:',error?.message||error);}
+  try{await ensureDirs();const names=await fsPromises.readdir(importsRoot);let archived=0,failed=0;for(const name of names.slice(0,5000)){const filePath=path.join(importsRoot,name);try{const stat=await fsPromises.stat(filePath);if(!stat.isFile())continue;await archiveSourceFile(filePath,{reason:'STARTUP_EXISTING_IMPORT_SEED'});archived+=1;}catch{failed+=1;}}console.log('[CE-QC][V266_EVIDENCE]',JSON.stringify({id:V266_EVERGREEN_EVIDENCE_ARCHIVE_ID,seedExistingImports:true,archived,failed,archiveRoot,retentionDays:V266_MIN_RETENTION_DAYS,coreStoragePolicy:cfg.storagePolicyId||'',automaticDelete:false}));}catch(error){console.warn('[CE-QC][V266_EVIDENCE] existing import seed skipped:',error?.message||error);}
 }
 
 patchImportDeletion();patchCeClient();
 if(!process.env.CI&&process.env.NODE_ENV!=='test'){const timer=setTimeout(()=>void seedExistingImportTemps(),30_000);timer.unref?.();}
-console.log(`[CE-QC][V266_EVIDENCE] ${V266_EVERGREEN_EVIDENCE_ARCHIVE_ID} enabled: source uploads are archived before temp deletion; successful CE API bodies are gzip archived and deduplicated; retention >=${V266_MIN_RETENTION_DAYS} days; no automatic archive deletion.`);
+console.log(`[CE-QC][V266_EVIDENCE] ${V266_EVERGREEN_EVIDENCE_ARCHIVE_ID} enabled: source uploads and successful CE API bodies are archived under core runtime storage (${archiveRoot}); D: dataRoot is no longer hard-coded here; retention >=${V266_MIN_RETENTION_DAYS} days.`);
