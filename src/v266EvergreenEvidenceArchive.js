@@ -10,18 +10,22 @@ import { CEClient } from './ceClient.js';
 export const V266_EVERGREEN_EVIDENCE_ARCHIVE_ID='2026-08-23-v266-evergreen-evidence-archive-v1';
 export const V266_MIN_RETENTION_DAYS=366;
 export const V266_RETENTION_POLICY='SOURCE_AND_CE_API_EVIDENCE_RETENTION_366D_MINIMUM; archive location is owned by core storagePolicy';
+export const EVIDENCE_ARCHIVE_QUEUE_ID='system-evidence-archive-nonblocking-v1';
 const gzipAsync=promisify(gzip),gunzipAsync=promisify(gunzip);
 const cfg=getRuntimeConfig();
-// Consolidation: V266 no longer reconstructs a D:-based archive path. db.js/core
-// storagePolicy owns the location, so a C: runtime placement cannot be silently
-// overridden by this compatibility module.
 const archiveRoot=path.resolve(cfg.evidenceArchiveDir);
 const sourceRoot=path.join(archiveRoot,'source_uploads');
 const apiRoot=path.join(archiveRoot,'ce_api');
 const importsRoot=path.resolve(cfg.importsDir);
 const originalUnlink=fsPromises.unlink.bind(fsPromises);
 const originalPostJson=CEClient.prototype.postJson;
+const API_ARCHIVE_CONCURRENCY=Math.max(1,Math.min(4,Number(process.env.CE_QC_EVIDENCE_ARCHIVE_CONCURRENCY||2)));
 let unlinkPatched=false,clientPatched=false;
+let archiveActive=0;
+let archiveQueued=0;
+let archiveCompleted=0;
+let archiveFailed=0;
+const apiArchiveQueue=[];
 
 const iso=()=>new Date().toISOString();
 const retainUntil=(createdAt=iso())=>{const d=new Date(createdAt);d.setUTCDate(d.getUTCDate()+V266_MIN_RETENTION_DAYS);return d.toISOString();};
@@ -52,6 +56,30 @@ async function archiveCeApiEvidence({endpoint='',requestBody=null,responseData=n
   try{await fsPromises.access(target);return{archived:true,deduped:true,sha256:hash,path:target};}catch{}
   const payload={id:V266_EVERGREEN_EVIDENCE_ARCHIVE_ID,kind:'CE_API_EVIDENCE',capturedAt,retainUntil:retainUntil(capturedAt),policy:V266_RETENTION_POLICY,...core};const compressed=await gzipAsync(Buffer.from(JSON.stringify(payload),'utf8'),{level:6});await fsPromises.writeFile(target,compressed,{flag:'wx'}).catch(error=>{if(error?.code!=='EEXIST')throw error;});return{archived:true,deduped:false,sha256:hash,path:target,bytes:compressed.length};
 }
+
+function pumpApiArchiveQueue(){
+  while(archiveActive<API_ARCHIVE_CONCURRENCY&&apiArchiveQueue.length){
+    const job=apiArchiveQueue.shift();archiveActive+=1;
+    Promise.resolve().then(()=>archiveCeApiEvidence(job.payload)).then(
+      result=>{archiveCompleted+=1;job.resolve(result);},
+      error=>{archiveFailed+=1;console.error('[CE-QC][EVIDENCE_ARCHIVE] async CE evidence archive failed; normalized runtime data remains authoritative:',error?.message||error);job.reject(error);}
+    ).finally(()=>{archiveActive-=1;pumpApiArchiveQueue();});
+  }
+}
+function enqueueCeApiEvidence(payload){
+  archiveQueued+=1;
+  const promise=new Promise((resolve,reject)=>{apiArchiveQueue.push({payload,resolve,reject});pumpApiArchiveQueue();});
+  // The API hot path must not await gzip/hash/disk I-O. Attach a rejection handler
+  // immediately so a storage problem cannot become an unhandled rejection or turn
+  // a successful CE API call into a processing failure.
+  promise.catch(()=>{});
+  return promise;
+}
+export async function flushV266EvidenceArchiveQueue(){
+  while(apiArchiveQueue.length||archiveActive)await new Promise(resolve=>setTimeout(resolve,25));
+  return getV266EvidenceArchiveQueueStatus();
+}
+export function getV266EvidenceArchiveQueueStatus(){return{id:EVIDENCE_ARCHIVE_QUEUE_ID,concurrency:API_ARCHIVE_CONCURRENCY,active:archiveActive,pending:apiArchiveQueue.length,queued:archiveQueued,completed:archiveCompleted,failed:archiveFailed};}
 export async function readV266ApiEvidence(filePath){const raw=await fsPromises.readFile(filePath);return JSON.parse((await gunzipAsync(raw)).toString('utf8'));}
 export function getV266EvidenceArchivePaths(){return{archiveRoot,sourceRoot,apiRoot,importsRoot,retentionDays:V266_MIN_RETENTION_DAYS,policy:V266_RETENTION_POLICY,legacyArchiveRoot:cfg.legacyEvidenceArchiveDir||''};}
 
@@ -67,7 +95,7 @@ function patchCeClient(){
   if(clientPatched||globalThis.__CE_QC_V266_CE_ARCHIVE_PATCH__)return;clientPatched=true;globalThis.__CE_QC_V266_CE_ARCHIVE_PATCH__=true;
   CEClient.prototype.postJson=async function v266EvidencePostJson(endpoint,body,label,canRetryAuth=true){
     const data=await originalPostJson.call(this,endpoint,body,label,canRetryAuth);
-    try{await archiveCeApiEvidence({endpoint,requestBody:body,responseData:data,label});}catch(error){console.error('[CE-QC][V266_EVIDENCE] CE evidence archive failed; normalized runtime data remains available:',error?.message||error);}
+    enqueueCeApiEvidence({endpoint,requestBody:body,responseData:data,label});
     return data;
   };
 }
@@ -77,4 +105,4 @@ async function seedExistingImportTemps(){
 
 patchImportDeletion();patchCeClient();
 if(!process.env.CI&&process.env.NODE_ENV!=='test'){const timer=setTimeout(()=>void seedExistingImportTemps(),30_000);timer.unref?.();}
-console.log(`[CE-QC][V266_EVIDENCE] ${V266_EVERGREEN_EVIDENCE_ARCHIVE_ID} enabled: source uploads and successful CE API bodies are archived under core runtime storage (${archiveRoot}); D: dataRoot is no longer hard-coded here; retention >=${V266_MIN_RETENTION_DAYS} days.`);
+console.log(`[CE-QC][V266_EVIDENCE] ${V266_EVERGREEN_EVIDENCE_ARCHIVE_ID} enabled: source uploads are archived synchronously before temp deletion; successful CE API evidence is queued non-blocking under ${archiveRoot}; gzip/hash/disk I-O no longer sits on the scan/trajectory critical path; retention >=${V266_MIN_RETENTION_DAYS} days.`);
