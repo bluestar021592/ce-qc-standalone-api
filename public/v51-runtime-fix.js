@@ -1,5 +1,5 @@
 (function installRuntimeFixV51(global){
-  const VERSION='2026-08-12-v51-runtime-fix-v3';
+  const VERSION='2026-09-04-v426-v51-defers-home-truth-v1';
   const nativeFetch=global.fetch.bind(global);
   const SPECIAL_TAB_BY_LABEL={
     'CCSLCN分流':'ccslCnDiversion','CECN滞留包裹':'ccslCnDiversion',
@@ -124,7 +124,12 @@
 
   function homeVisible(){const node=document.getElementById('homePage');return Boolean((node&&!node.hidden&&node.classList.contains('active'))||location.pathname==='/'||location.pathname==='/home');}
   function businessCardValue(card){return parseNumber(card.querySelector('b')?.textContent);}
+  function v64OwnsHomeClassification(){
+    const owner=global.__CE_QC_V64_WHPP_TOTAL_KPI__;
+    return Boolean(owner&&/v426-unified-import-truth-kpi-v2/.test(String(owner.version||'')));
+  }
   function patchHomeWhppCard(){
+    if(v64OwnsHomeClassification())return;
     if(homeWhppTotal===null||!homeVisible())return;
     const grid=document.querySelector('#homePage .v18-business-grid');if(!grid)return;
     let cards=[...grid.querySelectorAll('.v18-business-card')];if(!cards.length)return;
@@ -152,6 +157,7 @@
     });
   }
   async function refreshHomeWhpp(force=false){
+    if(v64OwnsHomeClassification())return;
     if(!homeVisible())return;
     const date=selectedDate();
     if(homeRequest)return homeRequest;
