@@ -1,6 +1,5 @@
-// Compatibility module only. Active production throughput is consolidated in
-// v314ShopeeThroughputCore.js for every business. Keeping this filename avoids
-// breaking old imports without maintaining a second implementation.
+// Legacy CCSL throughput import path. The implementation is consolidated in the
+// unversioned throughputCore.js module used by every business.
 export {
   createCcslThroughputClient,
   createUnifiedThroughputClient,
@@ -8,4 +7,4 @@ export {
   V339_CCSL_CONFIRM_CONCURRENCY,
   V339_CCSL_CONFIRM_HARD_BUDGET_MS,
   V314_EVENT_CONCURRENCY
-} from './v314ShopeeThroughputCore.js';
+} from './throughputCore.js';
