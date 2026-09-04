@@ -6,6 +6,8 @@ const must = (source, token, label = token) => { if (!source.includes(token)) th
 const forbid = (source, token, label = token) => { if (source.includes(token)) throw new Error(`GOLIVE retired token ${label}`); };
 
 const runner = read('public/v67-resilient-run-guard.js');
+const v68 = read('public/v68-whpp-classification-stability.js');
+const v94 = read('public/v94-business-source-truth-ui-v2.js');
 const whppUi = read('public/v132-whpp-seven-business-fast.js');
 const pause = read('public/v164-unified-pause-router.js');
 const shell = read('src/v44WhppUiPatch.js');
@@ -47,6 +49,22 @@ must(runner, "global.resumeUnified = handoff => execute('resume', handoff)");
 forbid(runner, '[CE-QC][V67_WHPP_AUTO_RESUME]');
 forbid(runner, '/api/v311/shopee-recovery');
 forbid(runner, '/api/v317/ccsl-recovery');
+
+// V426 import-source authority: the parser/store seven-business reconciliation is
+// the owner immediately after upload. Later WHPP/dashboard summaries are legacy
+// fallback only and may never rewrite a balanced 5060+228=5288 import back to
+// the six-business 5060 view.
+must(v68, '2026-09-04-v426-unified-import-seven-business-truth-priority-v1');
+must(v68, 'function authoritativeImportTruth');
+must(v68, "reconciliation.balanced !== true");
+must(v68, "reason: 'AUTHORITATIVE_UNIFIED_IMPORT_TRUTH'");
+must(v68, 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH');
+must(v68, 'V426_LEGACY_WHPP_FAST_SUMMARY_COMPAT');
+must(v94, '2026-09-04-v426-unified-import-truth-priority-v1');
+must(v94, 'function authoritativeUnifiedImport');
+must(v94, "reason: 'AUTHORITATIVE_UNIFIED_IMPORT_TRUTH'");
+must(v94, 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH');
+must(v94, 'V94_CANONICAL_POST_CLASSIFICATION_LEGACY_COMPAT');
 
 // Backend WHPP continuity is restart-only, never a fresh-import auto runner.
 must(whppSupervisor, '2026-09-02-v414-explicit-unified-whpp-restart-only-v1');
@@ -128,9 +146,12 @@ must(whppStore, "VALUES(?,?,?,?,?,?,?,'VALID','COMPLETED','')");
 must(whppStore, "reconciliationStatus: 'COMPLETED'");
 must(whppStore, 'finalSnapshotAuthority: V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID');
 
-// The shell must deliver one V67 runner + one V132 WHPP page and prevent stale
-// HTML/JS caching. Exact cache-bust suffixes may advance independently.
+// The shell must deliver one V67 runner + the V426 import-truth owners + one V132
+// WHPP page and prevent stale HTML/JS caching.
+must(shell, "const PATCH_ID='2026-09-04-v426-seven-business-import-truth-loader-v1'");
 must(shell, 'v67-resilient-run-guard.js?v=20260904-v424-1');
+must(shell, 'v68-whpp-classification-stability.js?v=20260904-v426-1');
+must(shell, 'v94-business-source-truth-ui-v2.js?v=20260904-v426-1');
 must(shell, 'v169-seven-business-legacy-status-sync.js?v=20260904-v424-1');
 must(shell, 'v132-whpp-seven-business-fast.js?v=');
 must(shell, 'Cache-Control');
@@ -170,7 +191,7 @@ must(exportDirect, '/api/v190/export-period/prepare');
 must(exportSidecar, '/api/v194/export-period/prepare');
 must(exportSidecar, 'IPC_MEMORY_V195');
 
-for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storage, bstore, bootstrap, podRepair]) {
+for (const source of [runner, v68, v94, whppUi, pause, shell, whppSupervisor, v161, storage, bstore, bootstrap, podRepair]) {
   forbid(source, 'v148-direct-daily-runner-v1');
 }
 
@@ -188,4 +209,4 @@ execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mj
 execFileSync(process.execPath,['scripts/v419-whpp-final-snapshot-authority-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['--test','test/v419-open-single-source.test.js','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V426] runtime-source gate passed · persisted-complete unified stages are read-only and already-complete WHPP can never be re-POSTed by an explicit unified click · only an actually incomplete WHPP gets one authorized start · visible seven-business total stays core + WHPP (5060+228=5288 parity) · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V426] runtime-source gate passed · persisted-complete unified stages are read-only and already-complete WHPP can never be re-POSTed by an explicit unified click · only an actually incomplete WHPP gets one authorized start · balanced seven-business import truth outranks stale WHPP/dashboard summaries, preserving 5060+228=5288 · V426 cache-busted import truth owners are delivered by the shell · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
