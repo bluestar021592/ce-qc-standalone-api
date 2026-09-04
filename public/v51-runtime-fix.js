@@ -1,5 +1,6 @@
 (function installRuntimeFixV51(global){
-  const VERSION='2026-09-04-v426-v51-defers-home-truth-v1';
+  const VERSION='2026-08-12-v51-runtime-fix-v3';
+  const V426_HOME_OWNER_HANDOFF='2026-09-04-v426-v51-defers-home-truth-v1';
   const nativeFetch=global.fetch.bind(global);
   const SPECIAL_TAB_BY_LABEL={
     'CCSLCN分流':'ccslCnDiversion','CECN滞留包裹':'ccslCnDiversion',
@@ -237,5 +238,5 @@
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){void refreshHomeWhpp(false);}});
   document.addEventListener('ce-qc-run-complete',()=>{homeWhppDate='';void refreshHomeWhpp(true);void refreshCarrySummary();});
   setTimeout(()=>{void refreshHomeWhpp(false);void refreshCarrySummary();},40);
-  console.info('[CE-QC][RUNTIME_V51]',VERSION);
+  console.info('[CE-QC][RUNTIME_V51]',VERSION,V426_HOME_OWNER_HANDOFF);
 })(window);
