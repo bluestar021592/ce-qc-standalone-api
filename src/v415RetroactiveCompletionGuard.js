@@ -4,8 +4,10 @@ import { readV384CcslProcessingProof, V384_CCSL_PROCESSING_PROOF_ID } from './v3
 import { loadWhppState, saveWhppState } from './whppStore.js';
 import {
   V418_STATUS_PROOF_FAST_PATH_ID,
+  V426_CCSL_TERMINAL_CLOSURE_PROOF_ID,
   readV418CurrentMembershipCounts,
   readV418CcslProcessingProof,
+  readV418CcslTerminalClosureProof,
   readV418BusinessSuccessCoverage
 } from './v418StatusProofFastPath.js';
 
@@ -14,6 +16,7 @@ export const V415_STALE_COMPLETION_REOPEN_ID='2026-09-02-v415-stale-completion-r
 export const V416_FAST_FAILCLOSED_PROOF_ID='2026-09-02-v416-large-db-fast-failclosed-proof-v1';
 export const V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID='2026-09-02-v417-membership-anchored-success-proof-v1';
 export const V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID='2026-09-04-v424-same-lifecycle-completion-proof-v1';
+export const V426_TERMINAL_COMPLETION_GUARD_ID='2026-09-04-v426-current-member-pod-terminal-guard-v1';
 export { V418_STATUS_PROOF_FAST_PATH_ID };
 const STATUS_ROUTE='/api/v33/run-progress';
 const GUARDED_POST_ROUTES=new Set(['/api/shopee/run/start','/api/shopee/run/resume','/api/whpp/run/start','/api/whpp/run/resume']);
@@ -91,7 +94,7 @@ function cacheResult(key,value){
 export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=false}={}){
   const started=Date.now(),date=dateOnly(reportDate);
   const batch=latestValidBatch(db,date);
-  if(!date||!batch)return{ok:false,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,reportDate:date,batch:null,counts:{CCSL:0,SHOPEE:0,WHPP:0,TOTAL:0},stages:{CCSL:{complete:false},SHOPEE:{complete:false},WHPP:{complete:false}},reason:'CURRENT_VALID_BATCH_MISSING'};
+  if(!date||!batch)return{ok:false,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,reportDate:date,batch:null,counts:{CCSL:0,SHOPEE:0,WHPP:0,TOTAL:0},stages:{CCSL:{complete:false},SHOPEE:{complete:false},WHPP:{complete:false}},reason:'CURRENT_VALID_BATCH_MISSING'};
   const cacheKey=`${date}:${text(batch.snapshotId)}`,cached=proofCache.get(cacheKey);
   if(!force&&cached&&Date.now()-cached.at<cached.ttl)return{...cached.value,cacheHit:true,elapsedMs:Date.now()-started};
   const counts=exactMembership(db,batch),boundary=text(batch.createdAt),snapshotId=text(batch.snapshotId);
@@ -99,6 +102,8 @@ export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=f
   const ccslLock=currentLock(db,'CCSL',date,boundary);
   const ccslSnapshot=currentCompletionSnapshot(db,'CCSL',date,ccslLock?.runId,boundary);
   const fastCcslProof=ccslSnapshot?readV418CcslProcessingProof(db,{reportDate:date,snapshotId,boundary}):null;
+  const terminalCcslProof=!ccslSnapshot&&counts.CCSL>0?readV418CcslTerminalClosureProof(db,{reportDate:date,snapshotId,force}):null;
+  const terminalCcslComplete=Boolean(terminalCcslProof?.ok&&terminalCcslProof.complete===true&&n(terminalCcslProof.source)===counts.CCSL&&n(terminalCcslProof.covered)>=counts.CCSL);
   const ccslMemberProof=counts.CCSL===0
     ?{id:V384_CCSL_PROCESSING_PROOF_ID,source:0,covered:0,missing:0,complete:true,queryMode:'ZERO_TICKET'}
     :ccslSnapshot
@@ -107,8 +112,13 @@ export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=f
         :(counts.CCSL<=500
           ?readV384CcslProcessingProof(db,{reportDate:date,snapshotId,boundary,includeMissingBills:false})
           :emptyMemberProof(counts.CCSL,'V418_FAST_CCSL_PROOF_FAILED')))
-      :emptyMemberProof(counts.CCSL,'NO_CURRENT_COMPLETION_SNAPSHOT');
-  const ccslComplete=counts.CCSL===0||Boolean(ccslSnapshot&&ccslMemberProof.complete&&n(ccslMemberProof.source)===counts.CCSL);
+      :terminalCcslComplete
+        ?{...terminalCcslProof,id:V426_CCSL_TERMINAL_CLOSURE_PROOF_ID,queryMode:'V426_CURRENT_MEMBER_POD_LOCK_TERMINAL_CLOSURE'}
+        :emptyMemberProof(counts.CCSL,'NO_CURRENT_COMPLETION_SNAPSHOT');
+  const ccslComplete=counts.CCSL===0||Boolean(
+    ccslSnapshot&&ccslMemberProof.complete&&n(ccslMemberProof.source)===counts.CCSL
+    ||terminalCcslComplete
+  );
 
   const shopeeLock=currentLock(db,'SHOPEE',date,boundary);
   const shopeeSnapshot=currentCompletionSnapshot(db,'SHOPEE',date,shopeeLock?.runId,boundary);
@@ -129,10 +139,10 @@ export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=f
   const whppComplete=Boolean(whppMembershipOk&&(counts.WHPP===0||whppClaim&&whppCovered>=counts.WHPP));
 
   const result={
-    ok:true,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,reportDate:date,
+    ok:true,id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,reportDate:date,
     batch:{batchId:text(batch.batchId),snapshotId,boundary},counts,
     stages:{
-      CCSL:{complete:ccslComplete,total:counts.CCSL,covered:n(ccslMemberProof.covered),missing:Math.max(0,counts.CCSL-n(ccslMemberProof.covered)),memberProof:ccslMemberProof,completionSnapshotId:text(ccslSnapshot?.snapshotId),completionClaimSource:text(ccslSnapshot?.claimSource),lock:ccslLock},
+      CCSL:{complete:ccslComplete,total:counts.CCSL,covered:n(ccslMemberProof.covered),missing:Math.max(0,counts.CCSL-n(ccslMemberProof.covered)),memberProof:ccslMemberProof,terminalClosureProof:terminalCcslProof,completionSnapshotId:text(ccslSnapshot?.snapshotId),completionClaimSource:text(ccslSnapshot?.claimSource)||(terminalCcslComplete?'V426_EXACT_CURRENT_MEMBERS_ALL_POD_LOCKED':''),lock:ccslLock},
       SHOPEE:{complete:shopeeComplete,total:counts.SHOPEE,covered:shopeeCovered,missing:Math.max(0,counts.SHOPEE-shopeeCovered),completionSnapshotId:text(shopeeSnapshot?.snapshotId),completionClaimSource:text(shopeeSnapshot?.claimSource),lock:shopeeLock},
       WHPP:{complete:whppComplete,total:counts.WHPP,covered:whppCovered,missing:Math.max(0,counts.WHPP-whppCovered),completionSnapshotId:'',completionClaim:whppClaim,completionClaimSource:whppClaimSource,membershipOk:whppMembershipOk,membershipReason:text(counts._whppMembershipReason),lock:whppLock}
     },
@@ -144,20 +154,20 @@ export function readV415CurrentProcessingProof({db=getDb(),reportDate='',force=f
 
 function failClosedStage(stage={},proof={},reason='STATUS_PROOF_UNCONFIRMED'){
   const lock=proof?.lock||null,status=text(lock?.status).toLowerCase();
-  return{...stage,sourceTotal:n(proof?.total||stage?.sourceTotal),complete:false,zeroTicketDay:false,snapshotId:'',snapshotStatus:'PENDING',runId:text(lock?.runId||stage?.runId),runStatus:status||'status_unconfirmed',running:status==='running',paused:status==='paused',failed:status==='failed',phase:text(lock?.currentStage)||'状态确认中',completionSource:reason,statusSource:'V416_FAIL_CLOSED_STATUS_PROOF',completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,...proof}};
+  return{...stage,sourceTotal:n(proof?.total||stage?.sourceTotal),complete:false,zeroTicketDay:false,snapshotId:'',snapshotStatus:'PENDING',runId:text(lock?.runId||stage?.runId),runStatus:status||'status_unconfirmed',running:status==='running',paused:status==='paused',failed:status==='failed',phase:text(lock?.currentStage)||'状态确认中',completionSource:reason,statusSource:'V416_FAIL_CLOSED_STATUS_PROOF',completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,...proof}};
 }
 
 function failClosedPayload(payload={},proof={},reason='STATUS_PROOF_UNCONFIRMED'){
   if(payload?.stages&&typeof payload.stages==='object'){
     const stages={...payload.stages};
     for(const key of ['CCSL','SHOPEE','WHPP'])stages[key]=failClosedStage(stages[key]||{key},proof?.stages?.[key]||{},reason);
-    return{...payload,complete:false,stages,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,ok:false,reason}};
+    return{...payload,complete:false,stages,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,ok:false,reason}};
   }
-  return{...failClosedStage(payload,proof?.stages?.[text(payload.businessType||payload.key).toUpperCase()]||{},reason),complete:false,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,ok:false,reason}};
+  return{...failClosedStage(payload,proof?.stages?.[text(payload.businessType||payload.key).toUpperCase()]||{},reason),complete:false,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,ok:false,reason}};
 }
 
 function downgradedStage(stage={},proof={}){
-  if(stage?.complete!==true||proof.complete===true)return{...stage,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,...proof}};
+  if(stage?.complete!==true||proof.complete===true)return{...stage,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,...proof}};
   const lock=proof.lock||null,status=text(lock?.status).toLowerCase();
   return{
     ...stage,
@@ -171,7 +181,7 @@ function downgradedStage(stage={},proof={}){
     snapshotId:'',snapshotStatus:'PENDING',
     completionSource:'V415_CURRENT_MEMBER_PROCESSING_PROOF_REQUIRED',
     statusSource:'V415_RETROACTIVE_CURRENT_MEMBER_PROOF',
-    completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,...proof}
+    completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,...proof}
   };
 }
 
@@ -182,11 +192,11 @@ export function applyV415StatusGuard(payload={},proof=null){
   if(payload.stages&&typeof payload.stages==='object'){
     const stages={...payload.stages};
     for(const key of ['CCSL','SHOPEE','WHPP'])stages[key]=downgradedStage(stages[key]||{key},resolved.stages[key]||{complete:false});
-    return{...payload,complete:['CCSL','SHOPEE','WHPP'].every(key=>stages[key]?.complete===true),stages,completedFastPath:payload.completedFastPath?`${payload.completedFastPath}+V415_PROOF_GUARD`:payload.completedFastPath,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,batch:resolved.batch,counts:resolved.counts,elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
+    return{...payload,complete:['CCSL','SHOPEE','WHPP'].every(key=>stages[key]?.complete===true),stages,completedFastPath:payload.completedFastPath?`${payload.completedFastPath}+V415_PROOF_GUARD`:payload.completedFastPath,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,batch:resolved.batch,counts:resolved.counts,elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
   }
   const key=text(payload.businessType||payload.key).toUpperCase()==='SHOPEE'?'SHOPEE':text(payload.businessType||payload.key).toUpperCase()==='WHPP'?'WHPP':'CCSL';
   const guarded=downgradedStage(payload,resolved.stages[key]||{complete:false});
-  return{...guarded,businessType:payload.businessType||key,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,batch:resolved.batch,counts:resolved.counts,stage:resolved.stages[key],elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
+  return{...guarded,businessType:payload.businessType||key,completionGuard:{id:V415_RETROACTIVE_COMPLETION_GUARD_ID,fastProofId:V416_FAST_FAILCLOSED_PROOF_ID,memberProofId:V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,v426TerminalCompletionId:V426_TERMINAL_COMPLETION_GUARD_ID,batch:resolved.batch,counts:resolved.counts,stage:resolved.stages[key],elapsedMs:resolved.elapsedMs,cacheHit:resolved.cacheHit}};
 }
 
 function statusResponseGuard(req,res,next){
@@ -199,6 +209,7 @@ function statusResponseGuard(req,res,next){
       res.setHeader('X-CE-QC-V417-Member-Proof',V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID);
       res.setHeader('X-CE-QC-V418-Fast-Proof',V418_STATUS_PROOF_FAST_PATH_ID);
       res.setHeader('X-CE-QC-V424-Same-Lifecycle-Completion',V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID);
+      res.setHeader('X-CE-QC-V426-Terminal-Completion',V426_TERMINAL_COMPLETION_GUARD_ID);
       res.json=previousJson;
       return previousJson.call(this,guarded);
     }catch(error){
@@ -292,4 +303,4 @@ if(typeof previousPost==='function'&&!previousPost[POST_WRAPPED]){
   express.application.post=wrappedPost;
 }
 
-console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,V416_FAST_FAILCLOSED_PROOF_ID,V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,V418_STATUS_PROOF_FAST_PATH_ID,V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,'legacy COMPLETED markers are display/run-authoritative only when exact current membership has current-lifecycle proof; a later same-lifecycle runId cannot hide a boundary-valid completion snapshot; new imports remain isolated by the VALID batch boundary and every fallback still requires exact current-member proof.');
+console.info('[CE-QC][V415_RETROACTIVE_COMPLETION_GUARD]',V415_RETROACTIVE_COMPLETION_GUARD_ID,V415_STALE_COMPLETION_REOPEN_ID,V416_FAST_FAILCLOSED_PROOF_ID,V417_MEMBER_ANCHORED_SUCCESS_PROOF_ID,V418_STATUS_PROOF_FAST_PATH_ID,V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID,V426_TERMINAL_COMPLETION_GUARD_ID,'legacy COMPLETED markers remain current-member guarded; a missing CCSL completion snapshot may close only when every member of the exact current VALID CCSL cohort has immutable POD-lock proof; UI progress, run locks and checkpoints are not terminal proof.');
