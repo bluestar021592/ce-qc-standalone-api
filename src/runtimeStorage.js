@@ -1,9 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
 import * as originalStorage from './storage.js';
-import { getRuntimeConfig, nowIso } from './db.js';
+import { getDb, getRuntimeConfig, nowIso } from './db.js';
 export * from './storage.js';
 
-export const RUNTIME_STORAGE_ID='system-runtime-storage-v1';
+export const RUNTIME_STORAGE_ID='system-runtime-storage-v2';
 export const V340_CCSL_FAST_CHECKPOINT_ID='2026-08-28-v348-ccsl-final-only-authoritative-mirror-v1';
 const FULL_MIRROR_WARN_MS=1000;
 
@@ -12,6 +12,7 @@ let progressDbPath='';
 let liveState=null;
 let lastPersistedFactSignature='';
 
+function safeJson(value,fallback={}){try{return JSON.parse(String(value||''));}catch{return fallback;}}
 function isTrackPhase(phase=''){return /轨迹|track|shipment-event|exception-item/i.test(String(phase||''));}
 function isScanPhase(phase=''){return /扫描|scan|order/i.test(String(phase||''));}
 function countStatus(rows=[],status='success'){
@@ -71,6 +72,36 @@ function getProgressDb(){
   progressDbPath=cfg.dbFile;
   return progressDb;
 }
+
+function pendingUnifiedImportSeed(){
+  try{
+    const db=getDb();
+    const batch=db.prepare("SELECT reportDate,createdAt FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1").get();
+    if(!batch?.reportDate)return null;
+    const daily=db.prepare('SELECT updatedAt FROM daily_reports WHERE reportDate=?').get(batch.reportDate);
+    // saveUnifiedImport happens before server hydrates CCSL state. If the latest
+    // unified batch is newer than the mirrored daily report, parsing the previous
+    // giant app_state is wasted work because the route immediately overwrites it.
+    if(daily?.updatedAt&&String(daily.updatedAt)>=String(batch.createdAt||''))return null;
+    const podLocks=db.prepare('SELECT shipmentCode FROM pod_locks ORDER BY shipmentCode').all().map(row=>row.shipmentCode);
+    const historySummary=db.prepare(`SELECT reportDate,summaryJson FROM (
+      SELECT reportDate,summaryJson FROM history_summary ORDER BY reportDate DESC LIMIT 30
+    ) ORDER BY reportDate ASC`).all().map(row=>({reportDate:row.reportDate,summary:safeJson(row.summaryJson,{})}));
+    const seed=originalStorage.normalizeState({
+      reportDate:batch.reportDate,
+      podLocks,
+      historySummary,
+      processing:{running:false,paused:false,phase:''},
+      logs:[]
+    });
+    console.info('[CE-QC][CORE_UNIFIED_IMPORT_FAST_SEED]',JSON.stringify({
+      owner:RUNTIME_STORAGE_ID,businessType:'CCSL',reportDate:batch.reportDate,podLocks:podLocks.length,historyDays:historySummary.length,
+      policy:'SKIP_OLD_APP_STATE_PARSE_BEFORE_FRESH_UNIFIED_IMPORT_HYDRATION'
+    }));
+    return seed;
+  }catch{return null;}
+}
+
 export function shouldUseCcslLightCheckpoint(state={}){
   const processing=state.processing||{};
   return Boolean(processing.running&&!processing.paused&&!processing.error);
@@ -106,6 +137,8 @@ function lightCheckpoint(state={}){
 }
 export async function loadState(){
   if(liveState?.processing?.running&&!liveState?.processing?.error)return liveState;
+  const importSeed=pendingUnifiedImportSeed();
+  if(importSeed)return importSeed;
   const loaded=await originalStorage.loadState();
   if(loaded?.processing?.running&&!loaded?.processing?.error)liveState=loaded;
   return loaded;
@@ -139,6 +172,7 @@ export const resetV347CheckpointRuntimeForTest=resetRuntimeStorageForTest;
 console.info('[CE-QC][CORE_RUNTIME_STORAGE]',JSON.stringify({
   id:RUNTIME_STORAGE_ID,compatibilityId:V340_CCSL_FAST_CHECKPOINT_ID,
   inRunFullMirror:false,authoritativeFullMirrorPolicy:'FINAL_ONLY_AFTER_RUNNING_FALSE',
+  importHydrationPolicy:'FAST_SEED_WHEN_UNIFIED_BATCH_NEWER_THAN_MIRRORED_DAILY',
   lightCheckpointBusyTimeoutMs:0,pauseReadPolicy:'IN_MEMORY_WHILE_ACTIVE',
   lightCheckpointWrites:'run_locks+run_checkpoints only',
   lightCheckpointFailurePolicy:'ZERO_WAIT_FAIL_OPEN_NEVER_ABORT_CCSL',
