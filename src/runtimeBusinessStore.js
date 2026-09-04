@@ -1,10 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import * as originalStore from './businessStore.js';
-import { getRuntimeConfig, nowIso } from './db.js';
+import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { V314_SHOPEE_THROUGHPUT_CORE_ID } from './v314ShopeeThroughputCore.js';
 export * from './businessStore.js';
 
-export const RUNTIME_BUSINESS_STORE_ID='system-runtime-business-store-v1';
+export const RUNTIME_BUSINESS_STORE_ID='system-runtime-business-store-v2';
 export const V314_FAST_CHECKPOINT_ID='2026-08-30-v314-shopee-final-only-authoritative-mirror-v2';
 const FULL_MIRROR_WARN_MS=1000;
 const CHECKPOINT_WARN_INTERVAL_MS=30_000;
@@ -36,6 +36,31 @@ function getProgressDb(){
   progressDbPath=cfg.dbFile;
   return progressDb;
 }
+function pendingUnifiedImportSeed(type){
+  if(type!==originalStore.SHOPEE)return null;
+  try{
+    const db=getDb();
+    const batch=db.prepare("SELECT reportDate,createdAt,snapshotId FROM unified_import_batches WHERE status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1").get();
+    if(!batch?.reportDate)return null;
+    const mirrored=db.prepare('SELECT updatedAt FROM business_daily_reports WHERE businessType=? AND reportDate=?').get(type,batch.reportDate);
+    const batchAt=Date.parse(String(batch.createdAt||'')),mirrorAt=Date.parse(String(mirrored?.updatedAt||''));
+    if(Number.isFinite(batchAt)&&Number.isFinite(mirrorAt)&&mirrorAt>=batchAt)return null;
+    if(!Number.isFinite(batchAt)&&mirrored?.updatedAt&&String(mirrored.updatedAt)>=String(batch.createdAt||''))return null;
+    const seed=originalStore.normalizeBusinessState({
+      businessType:type,
+      reportDate:String(batch.reportDate),
+      dailyReportReady:false,
+      processing:{running:false,paused:false,phase:''},
+      currentRun:null,lastRunSummary:null,lastRun:null,
+      dailyParseRows:[],pnhBills:[],carryBills:[],podLocks:[],scanPool:[],scanResults:[],scanQueryStatus:[],shipmentTrackResults:[],shipmentQueryStatus:[],needTrackBills:[],trackEvents:[],eventQueryStatus:[],exceptionItems:[],exceptionQueryStatus:[],apiBatchStatus:[],trackResults:[],finalRows:[],priorCarryRows:[],nextCarryBills:[],historySummary:[],logs:[]
+    },type);
+    console.info('[CE-QC][CORE_UNIFIED_IMPORT_FAST_SEED]',JSON.stringify({
+      owner:RUNTIME_BUSINESS_STORE_ID,businessType:type,reportDate:batch.reportDate,snapshotId:String(batch.snapshotId||''),
+      policy:'SKIP_OLD_BUSINESS_STATE_PARSE_BEFORE_FRESH_UNIFIED_IMPORT_HYDRATION'
+    }));
+    return seed;
+  }catch{return null;}
+}
 function shouldUseLightCheckpoint(state={},businessType=''){
   const type=normalizeType(businessType,state),processing=state.processing||{};
   return type===originalStore.SHOPEE&&processing.running===true&&processing.paused!==true&&!processing.error;
@@ -63,6 +88,8 @@ function lightCheckpoint(state={},businessType=''){
 export function loadBusinessState(businessType=originalStore.SHOPEE){
   const type=normalizeType(businessType);
   if(type===originalStore.SHOPEE&&liveState?.processing?.running&&!liveState?.processing?.error)return liveState;
+  const importSeed=pendingUnifiedImportSeed(type);
+  if(importSeed)return importSeed;
   const loaded=originalStore.loadBusinessState(type);
   if(type===originalStore.SHOPEE&&loaded?.processing?.running&&!loaded?.processing?.error)liveState=loaded;
   return loaded;
@@ -90,6 +117,7 @@ export const resetV314CheckpointRuntimeForTest=resetRuntimeBusinessStoreForTest;
 console.info('[CE-QC][CORE_RUNTIME_BUSINESS_STORE]',JSON.stringify({
   id:RUNTIME_BUSINESS_STORE_ID,compatibilityId:V314_FAST_CHECKPOINT_ID,core:V314_SHOPEE_THROUGHPUT_CORE_ID,
   inRunFullMirror:false,authoritativeFullMirrorPolicy:'PAUSE_ERROR_OR_FINAL_ONLY',lightCheckpointBusyTimeoutMs:0,
+  importHydrationPolicy:'FAST_SEED_WHEN_UNIFIED_BATCH_NEWER_THAN_SHOPEE_DAILY_MIRROR',
   pauseReadPolicy:'IN_MEMORY_WHILE_ACTIVE',lightCheckpointWrites:'business_run_locks+business_run_checkpoints only',
   lightCheckpointFailurePolicy:'ZERO_WAIT_FAIL_OPEN_NEVER_ABORT_SHOPEE',finalMirrorFailurePolicy:'FAIL_CLOSED',
   scanBatchSize:350,trackBatchSize:50,trackConcurrency:4,
