@@ -72,10 +72,11 @@ test('V426 parser/store conserve all seven businesses including WHPP', () => {
   assert.match(store,/SELECT businessType, COUNT\(\*\) count FROM unified_import_rows WHERE batchId=\? GROUP BY businessType/);
 });
 
-test('V426 loader delivers import-truth owners, retires V51 HOME writes, and paints authority before WHPP metrics fetch', () => {
+test('V426 loader delivers import-truth owners, retires V51 HOME writes, and restores authority after final renderAll', () => {
   const loader=read('../src/v44WhppUiPatch.js');
   const legacyRuntime=read('../public/v51-runtime-fix.js');
   const homeSync=read('../public/v64-whpp-total-kpi-integration.js');
+  const finalHomeRender=read('../public/v160-current-home-truth.js');
   const totalSync=read('../public/v68-whpp-classification-stability.js');
   const canonicalSync=read('../public/v94-business-source-truth-ui-v2.js');
   assert.match(loader,/v159-current-import-stability\.js\?v=20260902-v419-open-single-source-1/);
@@ -83,12 +84,17 @@ test('V426 loader delivers import-truth owners, retires V51 HOME writes, and pai
   assert.match(loader,/window\.__CE_QC_HOME_CLASSIFICATION_OWNER__=\\'V64\\'/);
   const ownerMarker=loader.indexOf("window.__CE_QC_HOME_CLASSIFICATION_OWNER__=\\'V64\\'");
   const v51Load=loader.indexOf('v51-runtime-fix.js?v=20260904-v426-2');
+  const v105Load=loader.indexOf('v105-fast-render.js?v=20260814-2');
+  const v160Load=loader.indexOf('v160-current-home-truth.js?v=20260904-v426-1');
   assert.ok(ownerMarker>=0&&v51Load>ownerMarker,'shell must declare V64 HOME owner before legacy V51 loads');
+  assert.ok(v105Load>=0&&v160Load>v105Load,'V160 must remain the final renderAll wrapper after V105 replaces the base renderer');
   assert.match(loader,/v51-runtime-fix\.js\?v=20260904-v426-2/);
   assert.doesNotMatch(loader,/v51-runtime-fix\.js\?v=20260904-v426-1/);
   assert.doesNotMatch(loader,/v51-runtime-fix\.js\?v=20260812-3/);
   assert.match(loader,/v64-whpp-total-kpi-integration\.js\?v=20260904-v426-2/);
   assert.doesNotMatch(loader,/v64-whpp-total-kpi-integration\.js\?v=20260904-v426-1/);
+  assert.match(loader,/v160-current-home-truth\.js\?v=20260904-v426-1/);
+  assert.doesNotMatch(loader,/v160-current-home-truth\.js\?v=20260816-1/);
   assert.match(loader,/v68-whpp-classification-stability\.js\?v=20260904-v426-1/);
   assert.match(loader,/v94-business-source-truth-ui-v2\.js\?v=20260904-v426-1/);
   assert.equal(5060+228,5288);
@@ -103,6 +109,11 @@ test('V426 loader delivers import-truth owners, retires V51 HOME writes, and pai
   const metricsFetch=homeSync.indexOf('const summary = await readWhppSummary(reportDate);');
   assert.ok(immediateHome>=0&&metricsFetch>immediateHome,'authoritative HOME classification must paint before WHPP metrics fetch');
   assert.match(homeSync,/if \(immediateHome\) patchHomeTop\(immediateHome\);/);
+  assert.match(finalHomeRender,/2026-08-16-v160-current-home-truth-v1/);
+  assert.match(finalHomeRender,/v426-v160-post-render-v64-handoff-v1/);
+  assert.match(finalHomeRender,/function handoffHomeClassification\(/);
+  assert.match(finalHomeRender,/__CE_QC_HOME_CLASSIFICATION_OWNER__/);
+  assert.match(finalHomeRender,/const wrapped=function\(\)\{sync\(\);const result=oldRender\.apply\(this,arguments\);handoffHomeClassification\(\);return result;\};/);
   assert.match(totalSync,/v426-unified-import-seven-business-truth-priority-v1/);
   assert.match(totalSync,/AUTHORITATIVE_UNIFIED_IMPORT_TRUTH/);
   assert.match(totalSync,/V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH/);
