@@ -12,15 +12,35 @@ assert.match(v67Source,/V424_RESUME_FLOOR_REVISION\s*=\s*'2026-09-04-v424-restar
 assert.match(v169Source,/V424_RESUME_FLOOR_HANDOFF_REVISION='2026-09-04-v424-v169-v67-proof-handoff-v1'/);
 assert.match(v322Source,/V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID='2026-09-04-v424-same-lifecycle-completion-snapshot-v1'/);
 assert.match(v415Source,/V424_SAME_LIFECYCLE_COMPLETION_GUARD_ID='2026-09-04-v424-same-lifecycle-completion-proof-v1'/);
-for(const [name,source] of [['V322',v322Source],['V415',v415Source]]){
-  assert.doesNotMatch(source,/function currentCompletionSnapshot[\s\S]*?if\(!id\)return null/ ,`${name} must not let a later runId hide same-lifecycle completion`);
+
+function assertCurrentMemberCompletionSemantics(name,source){
+  assert.doesNotMatch(source,/function currentCompletionSnapshot[\s\S]*?if\(!id\)return null/,`${name} must not let a later runId hide same-lifecycle completion`);
   assert.match(source,/claimSource:'SAME_VALID_IMPORT_LIFECYCLE'/,`${name} must expose the bounded same-lifecycle fallback`);
   assert.match(source,/lifecycle&&atOrAfter\(lifecycle\.generatedAt,boundary\)/,`${name} lifecycle fallback must stay behind the current VALID import boundary`);
-  assert.match(source,/WHERE reportDate=\?[^\n]*COALESCE\(status,'VALID'\)='VALID'[^\n]*COALESCE\(reconciliationStatus,'COMPLETED'\)='COMPLETED'/,`${name} CCSL fallback must stay same-date and completion-certified`);
-  assert.match(source,/businessType='SHOPEE' AND reportDate=\?[^\n]*COALESCE\(status,'VALID'\)='VALID'[^\n]*COALESCE\(reconciliationStatus,'COMPLETED'\)='COMPLETED'/,`${name} SHOPEE fallback must stay same-date and completion-certified`);
-  assert.match(source,/readV418CcslProcessingProof\(db,\{reportDate:date,snapshotId,boundary\}\)/,`${name} CCSL fallback still requires exact current-member proof`);
-  assert.match(source,/readV418BusinessSuccessCoverage\(db,\{businessType:'SHOPEE',date,snapshotId,boundary,memberTypes:\['SHOPEECN','SHOPEEVN'\]\}\)/,`${name} SHOPEE fallback still requires exact current-member SUCCESS proof`);
+  assert.match(source,/function currentCompletionSnapshot[\s\S]*?reportDate=\?/,`${name} completion fallback must remain exact-date scoped`);
+  assert.match(source,/function currentCompletionSnapshot[\s\S]*?COALESCE\(status,'VALID'\)='VALID'/,`${name} fallback must require VALID snapshots`);
+  assert.match(source,/function currentCompletionSnapshot[\s\S]*?COALESCE\(reconciliationStatus,'COMPLETED'\)='COMPLETED'/,`${name} fallback must require completion-certified snapshots`);
+  assert.match(source,/function currentCompletionSnapshot[\s\S]*?businessType='SHOPEE'/,`${name} SHOPEE fallback must remain isolated to SHOPEE snapshots`);
+
+  assert.match(source,/readV418CurrentMembershipCounts/,`${name} status proof must remain anchored to V418 current membership`);
+  assert.match(source,/readV418CcslProcessingProof\(db,\{reportDate:date,snapshotId,boundary\}\)/,`${name} CCSL fallback still requires exact current-member processing proof`);
+
+  const directShopeeProof=/readV418BusinessSuccessCoverage\(db,\{businessType:'SHOPEE',date,snapshotId,boundary,memberTypes:\['SHOPEECN','SHOPEEVN'\]\}\)/.test(source);
+  const helperDelegatesToV418=/function\s+businessSuccessCoverage\([^)]*\)[\s\S]{0,500}?readV418BusinessSuccessCoverage\(db,\{businessType,date,snapshotId,boundary,memberTypes\}\)[\s\S]{0,220}?result\?\.ok\?n\(result\.count\):0/.test(source);
+  const helperUsesExactShopeeCohort=/businessSuccessCoverage\(db,\{businessType:'SHOPEE',date,snapshotId,boundary,memberTypes:\['SHOPEECN','SHOPEEVN'\]\}\)/.test(source);
+  assert.ok(directShopeeProof||(helperDelegatesToV418&&helperUsesExactShopeeCohort),`${name} SHOPEE completion must reach V418 SUCCESS coverage for the exact SHOPEECN+SHOPEEVN current cohort, directly or through the fail-closed helper`);
+
+  const directFullCoverage=/coverage\?\.ok&&n\(coverage\.count\)>=n\(counts\.SHOPEE\)/.test(source);
+  const helperFullCoverage=/shopeeSnapshot&&shopeeCovered>=counts\.SHOPEE/.test(source);
+  assert.ok(directFullCoverage||helperFullCoverage,`${name} SHOPEE completion must require full current-member SUCCESS coverage, never partial evidence`);
+
+  assert.match(source,/memberTypes:\['WHPP'\]/,`${name} WHPP proof must remain isolated to the exact WHPP current cohort`);
+  const directWhppCoverage=/coverage\?\.ok&&n\(coverage\.count\)>=n\(counts\.WHPP\)/.test(source);
+  const helperWhppCoverage=/whppCovered>=counts\.WHPP/.test(source);
+  assert.ok(directWhppCoverage||helperWhppCoverage,`${name} WHPP completion must also require full current-member SUCCESS coverage`);
 }
+for(const [name,source] of [['V322',v322Source],['V415',v415Source]])assertCurrentMemberCompletionSemantics(name,source);
+
 assert.match(shell,/<script src="\/v67-resilient-run-guard\.js\?v=20260904-v424-1"/);
 assert.match(shell,/<script src="\/v169-seven-business-legacy-status-sync\.js\?v=20260904-v424-1"/);
 
