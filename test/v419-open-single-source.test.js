@@ -72,18 +72,24 @@ test('V426 parser/store conserve all seven businesses including WHPP', () => {
   assert.match(store,/SELECT businessType, COUNT\(\*\) count FROM unified_import_rows WHERE batchId=\? GROUP BY businessType/);
 });
 
-test('V426 loader delivers import-truth owners and HOME paints authority before WHPP metrics fetch', () => {
+test('V426 loader delivers import-truth owners, retires V51 HOME writes, and paints authority before WHPP metrics fetch', () => {
   const loader=read('../src/v44WhppUiPatch.js');
+  const legacyRuntime=read('../public/v51-runtime-fix.js');
   const homeSync=read('../public/v64-whpp-total-kpi-integration.js');
   const totalSync=read('../public/v68-whpp-classification-stability.js');
   const canonicalSync=read('../public/v94-business-source-truth-ui-v2.js');
   assert.match(loader,/v159-current-import-stability\.js\?v=20260902-v419-open-single-source-1/);
   assert.doesNotMatch(loader,/v159-current-import-stability\.js\?v=20260902-v414-explicit-1/);
+  assert.match(loader,/v51-runtime-fix\.js\?v=20260904-v426-1/);
+  assert.doesNotMatch(loader,/v51-runtime-fix\.js\?v=20260812-3/);
   assert.match(loader,/v64-whpp-total-kpi-integration\.js\?v=20260904-v426-2/);
   assert.doesNotMatch(loader,/v64-whpp-total-kpi-integration\.js\?v=20260904-v426-1/);
   assert.match(loader,/v68-whpp-classification-stability\.js\?v=20260904-v426-1/);
   assert.match(loader,/v94-business-source-truth-ui-v2\.js\?v=20260904-v426-1/);
   assert.equal(5060+228,5288);
+  assert.match(legacyRuntime,/v426-v51-defers-home-truth-v1/);
+  assert.match(legacyRuntime,/function v64OwnsHomeClassification\(/);
+  assert.equal((legacyRuntime.match(/if\(v64OwnsHomeClassification\(\)\)return;/g)||[]).length,2,'V51 must guard both HOME patching and HOME WHPP refresh when V64 owns truth');
   assert.match(homeSync,/v426-unified-import-truth-kpi-v2/);
   assert.match(homeSync,/function authoritativeHomeSummary\(/);
   const immediateHome=homeSync.indexOf('const immediateHome = authoritativeHomeSummary(reportDate);');
