@@ -79,7 +79,8 @@ test('V426 loader delivers import-truth owners and HOME paints authority before 
   const canonicalSync=read('../public/v94-business-source-truth-ui-v2.js');
   assert.match(loader,/v159-current-import-stability\.js\?v=20260902-v419-open-single-source-1/);
   assert.doesNotMatch(loader,/v159-current-import-stability\.js\?v=20260902-v414-explicit-1/);
-  assert.match(loader,/v64-whpp-total-kpi-integration\.js\?v=20260904-v426-1/);
+  assert.match(loader,/v64-whpp-total-kpi-integration\.js\?v=20260904-v426-2/);
+  assert.doesNotMatch(loader,/v64-whpp-total-kpi-integration\.js\?v=20260904-v426-1/);
   assert.match(loader,/v68-whpp-classification-stability\.js\?v=20260904-v426-1/);
   assert.match(loader,/v94-business-source-truth-ui-v2\.js\?v=20260904-v426-1/);
   assert.equal(5060+228,5288);
