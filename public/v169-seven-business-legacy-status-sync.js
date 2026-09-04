@@ -4,6 +4,7 @@
   const V420_ENTRY_CONFIRM_REVISION='2026-09-03-v420-bounded-entry-status-confirm-v1';
   const V421_CLICKABLE_UNCONFIRMED_REVISION='2026-09-03-v421-clickable-unconfirmed-start-v1';
   const V423_EXPLICIT_SHOPEE_RESTART_REVISION='2026-09-04-v423-explicit-shopee-restart-resume-v1';
+  const V424_RESUME_FLOOR_HANDOFF_REVISION='2026-09-04-v424-v169-v67-proof-handoff-v1';
   const ENTRY_CONFIRM_WAIT_MS=8500;
   let observerTimer=null;
   const originalEntries={};
@@ -256,8 +257,17 @@
       const start=document.querySelector('[data-testid="global-auto-process"]');
       if(start)delete start.dataset.v421UnconfirmedEntry;
       if(name==='runUnified'&&exactShopeeRestartInterruption(state)&&typeof originalEntries.resumeUnified==='function'){
-        console.info('[CE-QC][V423]',state.reportDate,'explicit Start consumed exact SHOPEE PROCESS_RESTART_INTERRUPTED proof and delegated to V67 resume');
-        return originalEntries.resumeUnified.apply(this,arguments);
+        const handoff=global.__CE_QC_V67_RESILIENT_RUN_GUARD__?.createShopeeRestartHandoff?.({
+          reportDate:state.reportDate,
+          checkedAt:Number(state.truth?.checkedAt||0),
+          recoveryRevision:V423_EXPLICIT_SHOPEE_RESTART_REVISION
+        });
+        if(!handoff){
+          console.warn('[CE-QC][V424]',state.reportDate,'exact SHOPEE restart was visible but V67 rejected the same-proof resume-floor handoff; refusing to reopen CCSL.');
+          return{ok:false,skipped:true,code:'SHOPEE_RESTART_HANDOFF_REJECTED',reportDate:state.reportDate,complete:false,statusFresh:true};
+        }
+        console.info('[CE-QC][V424]',state.reportDate,'explicit Start consumed exact SHOPEE PROCESS_RESTART_INTERRUPTED proof and delegated the same proof to the V67 SHOPEE resume floor');
+        return originalEntries.resumeUnified.call(this,handoff);
       }
       return original.apply(this,arguments);
     };
@@ -324,6 +334,6 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   installEntryGuards();
-  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,v423Revision:V423_EXPLICIT_SHOPEE_RESTART_REVISION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,releaseStartButtonForConfirmation,exactShopeeRestartInterruption};
-  console.info('[CE-QC][V169]',VERSION,V420_ENTRY_CONFIRM_REVISION,V421_CLICKABLE_UNCONFIRMED_REVISION,V423_EXPLICIT_SHOPEE_RESTART_REVISION,'same-date complete stays hard-locked; unconfirmed display remains fail-closed; explicit Start consumes only exact current-date SHOPEE PROCESS_RESTART_INTERRUPTED after CCSL completion and delegates to V67 resume; generic failures still use normal V67 start.');
+  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,v423Revision:V423_EXPLICIT_SHOPEE_RESTART_REVISION,v424Revision:V424_RESUME_FLOOR_HANDOFF_REVISION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,releaseStartButtonForConfirmation,exactShopeeRestartInterruption};
+  console.info('[CE-QC][V169]',VERSION,V420_ENTRY_CONFIRM_REVISION,V421_CLICKABLE_UNCONFIRMED_REVISION,V423_EXPLICIT_SHOPEE_RESTART_REVISION,V424_RESUME_FLOOR_HANDOFF_REVISION,'same-date complete stays hard-locked; unconfirmed display remains fail-closed; exact SHOPEE restart passes the same fresh V168 proof into V67 resume floor so CCSL cannot be reopened by a second status read; generic failures still use normal V67 start.');
 })(window);
