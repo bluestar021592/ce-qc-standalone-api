@@ -3,8 +3,10 @@
   const VERSION='2026-09-01-v411-unconfirmed-status-entry-lock-v1';
   const V420_ENTRY_CONFIRM_REVISION='2026-09-03-v420-bounded-entry-status-confirm-v1';
   const V421_CLICKABLE_UNCONFIRMED_REVISION='2026-09-03-v421-clickable-unconfirmed-start-v1';
+  const V423_EXPLICIT_SHOPEE_RESTART_REVISION='2026-09-04-v423-explicit-shopee-restart-resume-v1';
   const ENTRY_CONFIRM_WAIT_MS=8500;
   let observerTimer=null;
+  const originalEntries={};
   const norm=value=>String(value||'').replace(/\s+/g,' ').trim();
   const normalizeDate=value=>{
     const text=String(value||'').trim().replace(/\//g,'-').slice(0,10);
@@ -91,6 +93,18 @@
   function currentCompleteTruth(){
     const state=statusState();
     return state.kind==='complete'?state.truth:null;
+  }
+
+  function exactShopeeRestartInterruption(state){
+    if(state?.kind!=='incomplete')return false;
+    const target=normalizeDate(state.reportDate);
+    const stages=Array.isArray(state.truth?.stages)?state.truth.stages:[];
+    const ccsl=stages.find(stage=>stage?.key==='CCSL');
+    const shopee=stages.find(stage=>stage?.key==='SHOPEE');
+    if(!target||ccsl?.complete!==true||ccsl?.statusFresh===false)return false;
+    if(!shopee||shopee.complete===true||shopee.statusFresh===false||shopee.state!=='failed')return false;
+    if(normalizeDate(shopee.date)!==target)return false;
+    return String(shopee.details||'').toUpperCase().includes('PROCESS_RESTART_INTERRUPTED');
   }
 
   function resumeButtons(){
@@ -208,6 +222,7 @@
   function wrapUnifiedEntry(name){
     const original=global[name];
     if(typeof original!=='function'||original.__v169CanonicalCompletionGuard)return;
+    originalEntries[name]=original;
     const guarded=async function(){
       const state=await ensureFreshEntryState();
       if(state.kind==='complete'){
@@ -240,6 +255,10 @@
       unlockResumeButtons();
       const start=document.querySelector('[data-testid="global-auto-process"]');
       if(start)delete start.dataset.v421UnconfirmedEntry;
+      if(name==='runUnified'&&exactShopeeRestartInterruption(state)&&typeof originalEntries.resumeUnified==='function'){
+        console.info('[CE-QC][V423]',state.reportDate,'explicit Start consumed exact SHOPEE PROCESS_RESTART_INTERRUPTED proof and delegated to V67 resume');
+        return originalEntries.resumeUnified.apply(this,arguments);
+      }
       return original.apply(this,arguments);
     };
     guarded.__v169CanonicalCompletionGuard=true;
@@ -305,6 +324,6 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   installEntryGuards();
-  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,releaseStartButtonForConfirmation};
-  console.info('[CE-QC][V169]',VERSION,V420_ENTRY_CONFIRM_REVISION,V421_CLICKABLE_UNCONFIRMED_REVISION,'same-date complete stays hard-locked; unconfirmed display remains fail-closed but explicit Start stays clickable and waits/retries canonical V168 status before V67; only fresh incomplete truth releases V67.');
+  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,v423Revision:V423_EXPLICIT_SHOPEE_RESTART_REVISION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,releaseStartButtonForConfirmation,exactShopeeRestartInterruption};
+  console.info('[CE-QC][V169]',VERSION,V420_ENTRY_CONFIRM_REVISION,V421_CLICKABLE_UNCONFIRMED_REVISION,V423_EXPLICIT_SHOPEE_RESTART_REVISION,'same-date complete stays hard-locked; unconfirmed display remains fail-closed; explicit Start consumes only exact current-date SHOPEE PROCESS_RESTART_INTERRUPTED after CCSL completion and delegates to V67 resume; generic failures still use normal V67 start.');
 })(window);
