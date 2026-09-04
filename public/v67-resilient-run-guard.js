@@ -7,9 +7,12 @@
   const SHOPEE_RESTART_RECOVERY_REVISION = '2026-09-02-v67-retryable-process-restart-recovery-v2';
   const WHPP_RESTART_RECOVERY_REVISION = '2026-09-02-v414-whpp-restart-only-browser-v1';
   const COMPLETION_STABILITY_REVISION = '2026-09-02-v67-persisted-completion-latch-v2';
+  const V424_RESUME_FLOOR_REVISION = '2026-09-04-v424-restart-proof-resume-floor-v1';
   const STATUS_TIMEOUT_MS = 8000;
   const SHOPEE_RESTART_RETRY_COOLDOWN_MS = 15000;
   const WHPP_RESTART_RETRY_COOLDOWN_MS = 15000;
+  const RESUME_HANDOFF_MAX_AGE_MS = 30000;
+  const resumeHandoffNonce = {};
   const autoRecoveryDates = new Set();
   const shopeeRestartRecoveryCooldown = new Map();
   const whppRestartRecoveryCooldown = new Map();
@@ -168,6 +171,67 @@
       key: [reportDate, runId, String(payload?.lifecycleBoundary || ''), 'PROCESS_RESTART_INTERRUPTED'].join('|')
     };
   }
+  function makeResumeHandoff(resumeStage, reportDate, source, proofKey = '') {
+    return {
+      token: resumeHandoffNonce,
+      revision: V424_RESUME_FLOOR_REVISION,
+      resumeStage: String(resumeStage || '').toUpperCase(),
+      reportDate: normalizeDate(reportDate),
+      source: String(source || ''),
+      proofKey: String(proofKey || ''),
+      issuedAt: Date.now()
+    };
+  }
+  function liveV168ShopeeRestartProof(input = {}) {
+    const target = normalizeDate(input.reportDate);
+    const expectedCheckedAt = Number(input.checkedAt || 0);
+    const truth = global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__?.lastTruth || null;
+    if (!target || normalizeDate(truth?.reportDate) !== target) return null;
+    const checkedAt = Number(truth?.checkedAt || 0);
+    if (!checkedAt || (expectedCheckedAt && checkedAt !== expectedCheckedAt) || Date.now() - checkedAt > RESUME_HANDOFF_MAX_AGE_MS) return null;
+    const stages = Array.isArray(truth?.stages) ? truth.stages : [];
+    const fresh = truth?.statusFresh === true || (stages.length === 3 && stages.every(stage => stage?.statusFresh !== false));
+    const ccsl = stages.find(stage => stage?.key === 'CCSL');
+    const shopee = stages.find(stage => stage?.key === 'SHOPEE');
+    if (!fresh || ccsl?.complete !== true || ccsl?.statusFresh === false) return null;
+    if (!shopee || shopee.complete === true || shopee.statusFresh === false || shopee.state !== 'failed') return null;
+    const shopeeDate = normalizeDate(shopee.date || shopee.reportDate || target);
+    if (shopeeDate !== target) return null;
+    const restart = shopeeRestartInterruption({ ...shopee, reportDate: shopeeDate }, target);
+    if (!restart.interrupted || restart.reportDate !== target) return null;
+    return { target, checkedAt, restart };
+  }
+  function createShopeeRestartHandoff(input = {}) {
+    const proof = liveV168ShopeeRestartProof(input);
+    if (!proof) return null;
+    return makeResumeHandoff('SHOPEE', proof.target, 'V169_V423_FRESH_V168_PROOF', proof.restart.key);
+  }
+  function createPersistedRestartHandoff(all, target, resumeStage) {
+    const date = normalizeDate(target);
+    const ccsl = persistedStage(all, 'CCSL') || {};
+    const shopee = persistedStage(all, 'SHOPEE') || {};
+    const whpp = persistedStage(all, 'WHPP') || {};
+    if (!date || normalizeDate(all?.reportDate) !== date || ccsl.complete !== true) return null;
+    if (resumeStage === 'SHOPEE') {
+      const restart = shopeeRestartInterruption(shopee, date);
+      if (shopee.complete === true || !restart.interrupted || restart.reportDate !== date) return null;
+      return makeResumeHandoff('SHOPEE', date, 'V67_PERSISTED_RESTART_PROOF', restart.key);
+    }
+    if (resumeStage === 'WHPP') {
+      if (shopee.complete !== true) return null;
+      const restart = whppRestartInterruption(whpp, date);
+      if (whpp.complete === true || !restart.interrupted || restart.reportDate !== date) return null;
+      return makeResumeHandoff('WHPP', date, 'V67_PERSISTED_RESTART_PROOF', restart.key);
+    }
+    return null;
+  }
+  function resolveResumeFloor(mode, handoff, target) {
+    if (mode !== 'resume' || !handoff || handoff.token !== resumeHandoffNonce) return null;
+    if (handoff.revision !== V424_RESUME_FLOOR_REVISION || normalizeDate(handoff.reportDate) !== normalizeDate(target)) return null;
+    if (!Number(handoff.issuedAt) || Date.now() - Number(handoff.issuedAt) > RESUME_HANDOFF_MAX_AGE_MS) return null;
+    const index = handoff.resumeStage === 'SHOPEE' ? 1 : handoff.resumeStage === 'WHPP' ? 2 : -1;
+    return index >= 0 ? { index, resumeStage: handoff.resumeStage, source: handoff.source, proofKey: handoff.proofKey } : null;
+  }
 
   function statusNode() { return document.getElementById('ccslRunStatus'); }
   function runButton() { return document.querySelector('[data-testid="global-auto-process"]'); }
@@ -288,9 +352,10 @@
     return { label: stage.label, ok: false, error: lastError?.message || String(lastError || '处理失败') };
   }
 
-  async function execute(mode = 'start') {
+  async function execute(mode = 'start', handoff = null) {
     if (busy) return { ok: false, busy: true };
     const target = targetDate();
+    const resumeFloor = resolveResumeFloor(mode, handoff, target);
     setUnifiedStage('VERIFYING', false, target);
     setBusy(true, `正在核对 ${target || '当日'} 七业务断点…`);
     setStatus(`正在核对 ${target || '当日'} 七业务断点：CCSL → SHOPEE → WHPP`);
@@ -303,6 +368,21 @@
       ];
       for (let index = 0; index < stages.length; index += 1) {
         const stage = stages[index];
+        if (resumeFloor && index < resumeFloor.index) {
+          setStatus(`第 ${index + 1}/3 步：${stage.label}沿用同次持久化完成证明，不重新开启该阶段`);
+          results.push({ label: stage.label, ok: true, skipped: true, canonicalComplete: true, resumeFloor: V424_RESUME_FLOOR_REVISION });
+          continue;
+        }
+        if (resumeFloor && index === resumeFloor.index) {
+          setUnifiedStage(stage.key, true, target);
+          setBusy(true, `${stage.label}断点恢复中…`);
+          setStatus(`第 ${index + 1}/3 步：${stage.label}从已验证的程序重启断点继续处理`);
+          console.info('[CE-QC][V424_RESUME_FLOOR]', { revision: V424_RESUME_FLOOR_REVISION, reportDate: target, resumeStage: stage.key, source: resumeFloor.source });
+          const result = await runStage(stage, true, target);
+          results.push(result);
+          if (result.ok === false) break;
+          continue;
+        }
         clearStatusCache();
         setBusy(true, `正在核对${stage.label}…`);
         const truth = await canonicalStageTruth(stage, target, { force: true });
@@ -363,10 +443,12 @@
         if (!restart.interrupted || restart.reportDate !== target) return false;
         const nextRetryAt = Number(shopeeRestartRecoveryCooldown.get(restart.key) || 0);
         if (Date.now() < nextRetryAt) return false;
+        const handoff = createPersistedRestartHandoff(all, target, 'SHOPEE');
+        if (!handoff) return false;
         shopeeRestartRecoveryCooldown.set(restart.key, Date.now() + SHOPEE_RESTART_RETRY_COOLDOWN_MS);
         setStatus(`检测到${target}的SHOPEE因程序重启中断，正在自动恢复SHOPEE CN/VN → WHPP本土…`);
-        console.info('[CE-QC][V67_SHOPEE_RESTART_RECOVERY]', { revision: SHOPEE_RESTART_RECOVERY_REVISION, reportDate: target, runId: String(shopee.runId || ''), lifecycleBoundary: String(shopee.lifecycleBoundary || ''), reason });
-        const result = await execute('resume');
+        console.info('[CE-QC][V67_SHOPEE_RESTART_RECOVERY]', { revision: SHOPEE_RESTART_RECOVERY_REVISION, resumeFloorRevision: V424_RESUME_FLOOR_REVISION, reportDate: target, runId: String(shopee.runId || ''), lifecycleBoundary: String(shopee.lifecycleBoundary || ''), reason });
+        const result = await execute('resume', handoff);
         if (result?.ok) shopeeRestartRecoveryCooldown.delete(restart.key);
         return Boolean(result?.ok);
       }
@@ -379,10 +461,12 @@
       if (!restart.interrupted) return false;
       const nextRetryAt = Number(whppRestartRecoveryCooldown.get(restart.key) || 0);
       if (Date.now() < nextRetryAt) return false;
+      const handoff = createPersistedRestartHandoff(all, target, 'WHPP');
+      if (!handoff) return false;
       whppRestartRecoveryCooldown.set(restart.key, Date.now() + WHPP_RESTART_RETRY_COOLDOWN_MS);
       setStatus(`检测到${target}的WHPP因程序重启中断，正在从已保存断点恢复WHPP本土…`);
-      console.info('[CE-QC][V67_WHPP_RESTART_RECOVERY]', { revision: WHPP_RESTART_RECOVERY_REVISION, reportDate: target, runId: restart.runId, lifecycleBoundary: String(whpp.lifecycleBoundary || ''), reason });
-      const result = await execute('resume');
+      console.info('[CE-QC][V67_WHPP_RESTART_RECOVERY]', { revision: WHPP_RESTART_RECOVERY_REVISION, resumeFloorRevision: V424_RESUME_FLOOR_REVISION, reportDate: target, runId: restart.runId, lifecycleBoundary: String(whpp.lifecycleBoundary || ''), reason });
+      const result = await execute('resume', handoff);
       if (result?.ok) whppRestartRecoveryCooldown.delete(restart.key);
       return Boolean(result?.ok);
     } catch (error) {
@@ -409,19 +493,21 @@
   }
   function install() {
     global.runUnified = () => execute('start');
-    global.resumeUnified = () => execute('resume');
+    global.resumeUnified = handoff => execute('resume', handoff);
     global.__CE_QC_V67_RESILIENT_RUN_GUARD__ = {
       version: VERSION, architecture: ARCHITECTURE, statusSourceRevision: STATUS_SOURCE_REVISION,
       shopeeRestartRecoveryRevision: SHOPEE_RESTART_RECOVERY_REVISION,
       whppRestartRecoveryRevision: WHPP_RESTART_RECOVERY_REVISION,
       completionStabilityRevision: COMPLETION_STABILITY_REVISION,
+      resumeFloorRevision: V424_RESUME_FLOOR_REVISION,
       shopeeRestartRetryCooldownMs: SHOPEE_RESTART_RETRY_COOLDOWN_MS,
       whppRestartRetryCooldownMs: WHPP_RESTART_RETRY_COOLDOWN_MS,
       singleOwner: true, run: execute, targetDate, verifyWhpp,
-      canonicalStageTruth, readPersistedTruth, shopeeRestartInterruption, whppRestartInterruption, recoverPendingWhpp
+      canonicalStageTruth, readPersistedTruth, shopeeRestartInterruption, whppRestartInterruption,
+      createShopeeRestartHandoff, recoverPendingWhpp
     };
     scheduleAutoRecovery();
-    console.info('[CE-QC][V67_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, SHOPEE_RESTART_RECOVERY_REVISION, WHPP_RESTART_RECOVERY_REVISION, 'V67 is the sole browser run/resume owner. Fresh imports never auto-start WHPP. Generic incomplete WHPP remains idle until explicit Start/Continue; only exact PROCESS_RESTART_INTERRUPTED proof may auto-resume an already-running WHPP lifecycle.');
+    console.info('[CE-QC][V67_THREE_STAGE_RUNNER]', VERSION, ARCHITECTURE, STATUS_SOURCE_REVISION, SHOPEE_RESTART_RECOVERY_REVISION, WHPP_RESTART_RECOVERY_REVISION, V424_RESUME_FLOOR_REVISION, 'V67 is the sole browser run/resume owner. Exact restart handoffs carry a same-proof resume floor so already-completed prior stages cannot be reopened by a second fail-closed read. Fresh imports never auto-start WHPP; generic incomplete stages remain explicit/fail-closed.');
   }
 
   // Legacy go-live gate lineage tokens retained only as non-executable text while
