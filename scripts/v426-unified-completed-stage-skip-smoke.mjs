@@ -171,9 +171,6 @@ assert.deepEqual(
   'only incomplete WHPP may receive exactly one start request'
 );
 
-// Exact historical 5060 + 228 = 5288 regression. The unified import parser/store
-// already produced a balanced seven-business reconciliation. A stale WHPP fast
-// summary returning 0 must not be allowed to erase the imported 228.
 const v68State = authoritativeImportFixture();
 const v68 = loadImportTruthScript(
   v68Source,
@@ -192,9 +189,6 @@ assert.equal(v68.calls.length, 0, 'V68 must not even fetch the secondary WHPP su
 assert.equal(v68State.classificationCounts.WHPP, 228);
 assert.equal(v68State.summary.validUniqueWaybills, 5288);
 
-// V64 also decorates HOME independently. It may still fetch WHPP metrics, but a
-// stale fast-summary total=0 is metrics-only once the same-date unified import has
-// balanced seven-business truth. HOME classification must remain 5060+228=5288.
 const v64State = authoritativeImportFixture();
 const v64 = loadImportTruthScript(
   v64Source,
@@ -209,7 +203,8 @@ const v64 = loadImportTruthScript(
   }
 );
 assert.ok(v64.api, 'V64 API must install');
-assert.match(v64.api.version, /v426-unified-import-truth-kpi-v2/);
+assert.match(v64.api.version, /v426-unified-import-truth-kpi-v3/);
+assert.equal(typeof v64.api.refreshClassification, 'function', 'V64 must expose a synchronous classification-only refresh independent of metrics');
 const v64Stats = v64.api.importStats();
 assert.equal(v64Stats.authoritativeImport, true);
 assert.equal(v64Stats.whppTotal, 228);
@@ -220,12 +215,9 @@ assert.equal(v64Summary.total, 228, 'stale WHPP fast-summary total=0 must be rep
 assert.equal(v64Summary.classificationTotal, 5288, 'HOME total must retain the seven-business imported 5288');
 assert.equal(v64Summary.classificationSource, 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH');
 assert.equal(v64Summary.metrics.pending3, 12, 'WHPP processing metrics may still come from the fast summary');
-assert.match(shellSource, /v64-whpp-total-kpi-integration\.js\?v=20260904-v426-2/, 'shell must cache-bust V64 to the protected V426 v2 build');
-assert.doesNotMatch(shellSource, /v64-whpp-total-kpi-integration\.js\?v=20260904-v426-1/, 'retired V64 v1 cache-bust must not survive');
+assert.match(shellSource, /v64-whpp-total-kpi-integration\.js\?v=20260904-v426-3/, 'shell must cache-bust V64 to the protected synchronous V426 v3 build');
+assert.doesNotMatch(shellSource, /v64-whpp-total-kpi-integration\.js\?v=20260904-v426-[12]/, 'retired V64 v1/v2 cache-busts must not survive');
 
-// V94 used to merge /api/v89/instant-dashboard back into classificationCounts.
-// It must now obey the same import boundary, even if a stale dashboard says WHPP=0
-// and total=5060 immediately after upload.
 const v94State = authoritativeImportFixture();
 const v94 = loadImportTruthScript(
   v94Source,
@@ -247,4 +239,4 @@ assert.equal(v94State.classificationCounts.WHPP, 228);
 assert.equal(v94State.summary.validUniqueWaybills, 5288);
 assert.equal(v94State.sevenBusinessValidUniqueWaybills, 5288);
 
-console.log('[V426] regression smoke passed · completed WHPP is never re-posted · incomplete WHPP gets one authorized start · balanced unified import 5060+228=5288 outranks stale V64 HOME WHPP totals and stale V68/V94 summaries, so import and HOME cannot be overwritten back to 5060');
+console.log('[V426] regression smoke passed · completed WHPP is never re-posted · incomplete WHPP gets one authorized start · balanced unified import 5060+228=5288 outranks stale V64 HOME WHPP totals and stale V68/V94 summaries · V64 synchronous classification refresh is independent from asynchronous WHPP metrics');
