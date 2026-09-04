@@ -26,6 +26,7 @@ async function runScenario({ whppCompleteAtStart }) {
     ['ccslRunStatus', statusNode]
   ]);
   const document = {
+    readyState: 'complete',
     visibilityState: 'visible',
     getElementById(id) { return elements.get(id) || null; },
     querySelector(selector) { return selector === '[data-testid="global-auto-process"]' ? runButton : null; },
@@ -48,7 +49,10 @@ async function runScenario({ whppCompleteAtStart }) {
     document,
     URLSearchParams,
     CustomEvent: class CustomEvent { constructor(type, init = {}) { this.type = type; this.detail = init.detail; } },
-    setTimeout() { return 1; },
+    setTimeout(callback, delay = 0) {
+      if (Number(delay || 0) === 0 && typeof callback === 'function') callback();
+      return 1;
+    },
     clearTimeout() {},
     setInterval() { return 1; },
     clearInterval() {},
