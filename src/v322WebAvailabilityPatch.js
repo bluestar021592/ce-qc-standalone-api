@@ -160,7 +160,7 @@ function buildScalarStatus(db,date,batch){
 
   const result={
     ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,
-    completedFastPath:`${V322_COMPLETED_FAST_PATH_ID}+${V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID}+${V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID}+${V426_CCSL_TERMINAL_STATUS_ID}`,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,v426CcslTerminalStatusId:V426_CCSL_TERMINAL_STATUS_ID,
+    completedFastPath:`${V322_COMPLETED_FAST_PATH_ID}+${V418_V322_LIGHTWEIGHT_COMPLETED_CLAIM_ID}+${V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID}`,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,v426CcslTerminalStatusId:V426_CCSL_TERMINAL_STATUS_ID,
     reportDate:date,batchId:text(batch?.batchId),sourceSnapshotId:snapshotId,lifecycleBoundary:boundary,
     complete:[CCSL,SHOPEE,WHPP].every(stage=>stage.complete===true),stages:{CCSL,SHOPEE,WHPP},counts,
     statusDiagnostics:timing,generatedAt:new Date().toISOString()
@@ -184,7 +184,8 @@ export function readV322RunProgress(businessType='CCSL',db=getDb(),reportDate=''
   const type=text(businessType).toUpperCase(),all=readV322SevenBusinessStatus({reportDate,db});
   if(type==='ALL')return all;
   const key=type==='SHOPEE'?'SHOPEE':type==='WHPP'?'WHPP':'CCSL',stage=all.stages?.[key]||{};
-  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,v426CcslTerminalStatusId:V426_CCSL_TERMINAL_STATUS_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:Math.max(0,n(stage.sourceTotal)-n(stage.scanTotal)),statusDiagnostics:all.statusDiagnostics,generatedAt:new Date().toISOString()};
+  const provenPodLocks=key==='CCSL'?n(stage.terminalClosureProof?.covered):0;
+  return{ok:true,version:V322_WEB_AVAILABILITY_ID,statusVersion:V322_SEVEN_BUSINESS_STATUS_ID,whppCompletionPolicy:V322_WHPP_COMPLETION_PARITY_ID,v418FastPathId:V418_STATUS_PROOF_FAST_PATH_ID,v419ScalarStatusId:V419_SCALAR_STATUS_PRIORITY_ID,v424SameLifecycleCompletionId:V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,v426CcslTerminalStatusId:V426_CCSL_TERMINAL_STATUS_ID,businessType:key,...stage,dailyTotal:n(stage.sourceTotal),podLockSkipped:provenPodLocks,statusDiagnostics:all.statusDiagnostics,generatedAt:new Date().toISOString()};
 }
 
 function progressHandler(req,res){
@@ -217,4 +218,4 @@ express.application.get=function v419AvailabilityGet(pathValue,...handlers){
   return previousGet.call(this,pathValue,...handlers);
 };
 
-console.info('[CE-QC][V419_SCALAR_STATUS_PRIORITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,V322_WHPP_COMPLETION_PARITY_ID,V419_SCALAR_STATUS_PRIORITY_ID,V419_STATUS_TIMING_ID,V418_STATUS_PROOF_FAST_PATH_ID,V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,V426_CCSL_TERMINAL_STATUS_ID,'status reads remain scalar-only; CCSL may close without a dashboard completion snapshot only when the exact current VALID CCSL membership is 100% covered by immutable POD locks; UI 0/0 and stale run/checkpoint state are never completion proof.');
+console.info('[CE-QC][V419_SCALAR_STATUS_PRIORITY]',V322_WEB_AVAILABILITY_ID,V322_SEVEN_BUSINESS_STATUS_ID,V322_WHPP_COMPLETION_PARITY_ID,V419_SCALAR_STATUS_PRIORITY_ID,V419_STATUS_TIMING_ID,V418_STATUS_PROOF_FAST_PATH_ID,V424_SAME_LIFECYCLE_COMPLETION_FALLBACK_ID,V426_CCSL_TERMINAL_STATUS_ID,'status reads remain scalar-only; CCSL may close without a dashboard completion snapshot only when the exact current VALID CCSL membership is 100% covered by immutable POD locks; podLockSkipped reports only proven POD-lock coverage, never sourceTotal-scanTotal; UI 0/0 and stale run/checkpoint state are never completion proof.');
