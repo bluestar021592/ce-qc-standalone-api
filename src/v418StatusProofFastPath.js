@@ -1,10 +1,14 @@
 import { V384_CCSL_PROCESSING_PROOF_ID } from './v384CcslProcessingProof.js';
 
 export const V418_STATUS_PROOF_FAST_PATH_ID='2026-09-02-v418-large-db-set-join-status-proof-v1';
+export const V426_CCSL_TERMINAL_CLOSURE_PROOF_ID='2026-09-04-v426-current-member-pod-lock-closure-v1';
 
 const text=value=>String(value??'').trim();
 const n=value=>Number.isFinite(Number(value))?Number(value):0;
 const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
+const terminalClosureCache=new Map();
+const TERMINAL_COMPLETE_CACHE_MS=60_000;
+const TERMINAL_INCOMPLETE_CACHE_MS=1_500;
 
 function whppDailyCount(db,reportDate=''){
   const date=text(reportDate);
@@ -51,6 +55,41 @@ export function readV418CurrentMembershipCounts(db,batch={}){
   result._whppMembershipOk=Boolean(whpp.ok);
   result._whppMembershipReason=whpp.reason;
   return result;
+}
+
+// V426: A missing dashboard completion snapshot must not force a restart when every
+// member of the exact current VALID CCSL cohort already has an immutable POD lock.
+// This is deliberately narrower than the normal V384/V418 processing proof: it does
+// not infer from scanTotal=0, progress checkpoints, a run status, or stale same-day
+// facts. It joins only the exact current import membership to immutable pod_locks.
+// One missing current member keeps the stage incomplete and on the normal recovery path.
+export function readV418CcslTerminalClosureProof(db,{reportDate='',snapshotId='',force=false}={}){
+  const date=text(reportDate),sid=text(snapshotId),key=`${sid}:${date}`;
+  if(!db||!date||!sid)return{ok:false,id:V426_CCSL_TERMINAL_CLOSURE_PROOF_ID,fastPathId:V418_STATUS_PROOF_FAST_PATH_ID,source:0,covered:0,missing:0,complete:false,reason:'INVALID_SCOPE',queryMode:'V426_SCOPE_MISSING'};
+  const cached=terminalClosureCache.get(key);
+  if(!force&&cached&&Date.now()-cached.at<cached.ttl)return{...cached.value,cacheHit:true};
+  let value;
+  try{
+    const row=db.prepare(`SELECT COUNT(*) source,
+      COALESCE(SUM(CASE WHEN EXISTS(
+        SELECT 1 FROM pod_locks p WHERE p.shipmentCode=u.shipmentCode
+      ) THEN 1 ELSE 0 END),0) covered
+      FROM unified_import_rows u
+      WHERE u.snapshotId=? AND u.reportDate=?
+        AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')`).get(sid,date)||{};
+    const source=n(row.source),covered=n(row.covered),missing=Math.max(0,source-covered);
+    value={
+      ok:true,id:V426_CCSL_TERMINAL_CLOSURE_PROOF_ID,fastPathId:V418_STATUS_PROOF_FAST_PATH_ID,
+      source,covered,missing,complete:source>0&&covered>=source,
+      reason:source>0&&covered>=source?'EXACT_CURRENT_MEMBERS_ALL_POD_LOCKED':'CURRENT_MEMBER_POD_LOCK_COVERAGE_INCOMPLETE',
+      queryMode:'V426_INDEXED_CURRENT_MEMBERSHIP_POD_LOCK_EXISTS',cacheHit:false
+    };
+  }catch(error){
+    value={ok:false,id:V426_CCSL_TERMINAL_CLOSURE_PROOF_ID,fastPathId:V418_STATUS_PROOF_FAST_PATH_ID,source:0,covered:0,missing:0,complete:false,reason:'V426_TERMINAL_CLOSURE_QUERY_FAILED',queryMode:'V426_SET_JOIN_FAILED',error:text(error?.message||error),cacheHit:false};
+  }
+  terminalClosureCache.set(key,{value,at:Date.now(),ttl:value.complete?TERMINAL_COMPLETE_CACHE_MS:TERMINAL_INCOMPLETE_CACHE_MS});
+  if(terminalClosureCache.size>24){for(const [cacheKey,item] of terminalClosureCache){if(Date.now()-item.at>TERMINAL_COMPLETE_CACHE_MS*2)terminalClosureCache.delete(cacheKey);}}
+  return value;
 }
 
 export function readV418CcslProcessingProof(db,{reportDate='',snapshotId='',boundary=''}={}){
