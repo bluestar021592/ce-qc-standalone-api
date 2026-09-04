@@ -1,5 +1,5 @@
 (function installWhppTotalKpiIntegrationV64(global) {
-  const VERSION = '2026-09-04-v426-unified-import-truth-kpi-v2';
+  const VERSION = '2026-09-04-v426-unified-import-truth-kpi-v3';
   const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const CORE_TYPES = TYPES.filter(type => type !== 'WHPP');
   const HOME_TYPE_BY_LABEL = {
@@ -322,22 +322,31 @@
     patchRateMetric('首次妥投率', combinedPodRate, signature);
   }
 
+  function refreshClassification() {
+    patchImportPage();
+    const home = document.getElementById('homePage');
+    if (!home || home.hidden) return 0;
+    const reportDate = selectedReportDate();
+    if (!reportDate) return 0;
+    const immediateHome = authoritativeHomeSummary(reportDate);
+    return immediateHome ? patchHomeTop(immediateHome) : 0;
+  }
+
   async function decorate() {
     if (decorating) return;
     decorating = true;
     try {
-      patchImportPage();
+      refreshClassification();
       const home = document.getElementById('homePage');
       if (!home || home.hidden) return;
       const reportDate = selectedReportDate();
       if (!reportDate) return;
-      const immediateHome = authoritativeHomeSummary(reportDate);
-      if (immediateHome) patchHomeTop(immediateHome);
       const summary = await readWhppSummary(reportDate);
       patchHomeTop(summary);
       patchHomeCore(summary);
     } catch (error) {
-      console.warn('[CE-QC][V64_WHPP_TOTAL_KPI] WHPP metrics refresh skipped; authoritative HOME classification remains protected when available', error);
+      refreshClassification();
+      console.warn('[CE-QC][V64_WHPP_TOTAL_KPI] WHPP metrics refresh skipped; synchronous authoritative HOME classification remains protected', error);
     } finally {
       decorating = false;
     }
@@ -366,12 +375,13 @@
     }, true);
     document.addEventListener('ce-qc-run-complete', () => schedule(0, true));
     schedule(0, false);
-    console.info('[CE-QC][V64_WHPP_TOTAL_KPI]', VERSION, 'balanced seven-business import truth paints HOME immediately; WHPP fast-summary is metrics-only for the same imported date.');
+    console.info('[CE-QC][V64_WHPP_TOTAL_KPI]', VERSION, 'balanced seven-business classification refresh is synchronous; WHPP fast-summary is metrics-only for the same imported date.');
   }
 
   global.__CE_QC_V64_WHPP_TOTAL_KPI__ = {
     version: VERSION,
     refresh: decorate,
+    refreshClassification,
     importStats,
     readWhppSummary,
     protectWhppSummary,
