@@ -2,17 +2,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import { createUnifiedThroughputClient, splitFixedBatches } from '../src/v314ShopeeThroughputCore.js';
+import { createUnifiedThroughputClient, splitFixedBatches } from '../src/throughputCore.js';
 import { queryTrackBatchWithFallback } from '../src/trackBatching.js';
 import { WHPP_THROUGHPUT_POLICY_ID } from '../src/whppPipeline.js';
 
-for (const file of ['src/whppPipeline.js','src/v314ShopeeThroughputCore.js','src/trackBatching.js']) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+for (const file of ['src/whppPipeline.js','src/throughputCore.js','src/v314ShopeeThroughputCore.js','src/trackBatching.js']) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
 assert.match(WHPP_THROUGHPUT_POLICY_ID, /whpp-independent-350-scan-50x4-evidence/);
 const source = fs.readFileSync('src/whppPipeline.js', 'utf8');
+const legacyCore = fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8');
+assert.match(legacyCore,/throughputCore\.js/,'legacy V314 throughput path must be compatibility-only');
 assert.match(source, /const CONFIRM_BATCH_SIZE = 350/);
 assert.match(source, /const lockedPodBills = new Set\(allBills\.filter\(bill => podLocks\.has\(bill\)\)\)/,'persisted WHPP POD locks must be explicit terminal evidence');
 assert.match(source, /const activeScanBills = allBills\.filter\(bill => !lockedPodBills\.has\(bill\)\)/,'POD locks must be removed before the confirm scan pool is built');
-assert.match(source, /state\.scanPool = activeScanBills/,'V314 confirm prefetch must see only still-open WHPP tickets');
+assert.match(source, /state\.scanPool = activeScanBills/,'throughput confirm prefetch must see only still-open WHPP tickets');
 assert.match(source, /createUnifiedThroughputClient\(state, client, \{/);
 assert.match(source, /businessType: 'WHPP'/);
 assert.match(source, /confirmConcurrency: 1/);
@@ -29,7 +31,6 @@ assert.match(source, /const needException = cleanCodes\(\[\.\.\.needTrack, \.\.\
 assert.match(source, /if \(lockedPodBills\.has\(bill\)\) \{\s*result = lockedPodResult/,'POD lock must win before failed/retry classification');
 assert.match(source, /terminalEvidenceSource: 'POD_LOCK'/,'final rows must preserve explicit POD-lock evidence');
 
-// WHPP confirm-query: exact 350-ticket planning and a single remote lane.
 {
   const bills = Array.from({ length: 700 }, (_, i) => `WHPP-C-${String(i + 1).padStart(4, '0')}`);
   let active = 0, maxActive = 0; const calls = [];
@@ -42,8 +43,6 @@ assert.match(source, /terminalEvidenceSource: 'POD_LOCK'/,'final rows must prese
   assert.equal(maxActive, 1, 'WHPP confirm-query must stay on one remote lane');
 }
 
-// WHPP restart compacts successful scan tickets before it cuts the next 350 batch.
-// Prefetch must use that exact same boundary or it can overlap and duplicate tickets.
 {
   const bills = Array.from({ length: 730 }, (_, i) => `WHPP-CR-${String(i + 1).padStart(4, '0')}`);
   const done = bills.slice(0, 30), pending = bills.slice(30), calls = [];
@@ -57,7 +56,6 @@ assert.match(source, /terminalEvidenceSource: 'POD_LOCK'/,'final rows must prese
   assert.ok(done.every(code => !calls.flat().includes(code)), 'WHPP completed scan tickets must remain skipped');
 }
 
-// WHPP track-query: remove already-successful waybills first, then prefetch exact compact-pending 50-ticket boundaries at x4.
 {
   const bills = Array.from({ length: 270 }, (_, i) => `WHPP-T-${String(i + 1).padStart(4, '0')}`), done = bills.slice(0, 20), pending = bills.slice(20);
   let active = 0, maxActive = 0; const calls = [];
@@ -74,7 +72,6 @@ assert.match(source, /terminalEvidenceSource: 'POD_LOCK'/,'final rows must prese
   assert.ok(elapsed < 120, `WHPP 5x25ms track batches should prefetch x4, got ${elapsed.toFixed(1)}ms`);
 }
 
-// Cancellation is terminal for tracking but still belongs to exception enrichment, which must use needExceptionBills at x4.
 {
   const track = Array.from({ length: 180 }, (_, i) => `WHPP-E-T-${String(i + 1).padStart(4, '0')}`), cancelled = Array.from({ length: 80 }, (_, i) => `WHPP-E-C-${String(i + 1).padStart(4, '0')}`), needException = [...track, ...cancelled];
   let active = 0, maxActive = 0; const calls = [];
@@ -88,7 +85,7 @@ assert.match(source, /terminalEvidenceSource: 'POD_LOCK'/,'final rows must prese
   const queried = new Set(calls.flat()); assert.ok(cancelled.every(code => queried.has(code)), 'cancelled WHPP tickets must receive exception enrichment');
 }
 
-// Failed 50-ticket tracking may degrade to 25/10/5/1, but every child remains under the same x4 scheduler.
+// Fixed trajectory retry unit: a failed 50-ticket request is not recursively split.
 {
   const bills = Array.from({ length: 250 }, (_, i) => `WHPP-F-${String(i + 1).padStart(4, '0')}`);
   let active = 0, maxActive = 0, failedParent = false; const sizes = [];
@@ -96,9 +93,9 @@ assert.match(source, /terminalEvidenceSource: 'POD_LOCK'/,'final rows must prese
   const state = { businessType: 'WHPP', needTrackBills: bills, eventQueryStatus: [] };
   const client = createUnifiedThroughputClient(state, raw, { businessType: 'WHPP', trackConcurrency: 4 });
   const outcome = await queryTrackBatchWithFallback({ batch: bills.slice(0, 50), query: codes => client.trackQuery(codes), transientRetries: 0, batchTimeBudgetMs: 1500, apiName: 'whpp-track-query' });
-  assert.equal(outcome.failures.length, 0); assert.equal(outcome.successes.flatMap(item => item.batch).length, 50);
-  assert.ok(sizes.includes(25), 'failed WHPP 50-ticket track batch must exercise fallback');
-  assert.ok(maxActive <= 4, `WHPP fallback must never exceed x4, observed ${maxActive}`);
+  assert.equal(outcome.failures.length, 1); assert.equal(outcome.failures[0].batch.length, 50);
+  assert.equal(sizes.includes(25), false, 'failed WHPP 50-ticket track batch must not recursively split to 25');
+  assert.ok(maxActive <= 4, `WHPP requests must never exceed x4, observed ${maxActive}`);
 }
 
-console.log('[V346] WHPP throughput smoke passed · POD locks terminal before scan · independent third stage · scan=350x1 · compact resume exact · track=50x4 · exception=50x4 · fallback bounded');
+console.log('[CORE WHPP] throughput smoke passed · POD locks terminal before scan · independent third stage · scan=350x1 · compact resume exact · track=50x4 · exception=50x4 · failed track stays one 50-ticket retry unit');
