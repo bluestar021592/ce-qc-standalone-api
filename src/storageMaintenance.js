@@ -39,10 +39,12 @@ export function inspectPreUpdateBackups(dataRoot){
   return{root,entries,totalBytes:entries.reduce((sum,item)=>sum+item.bytes,0)};
 }
 
-export function prunePreUpdateBackups({dataRoot,keep=1,minAgeMs=24*HOUR,dryRun=false}={}){
+export function prunePreUpdateBackups({dataRoot,keep=2,minAgeMs=24*HOUR,dryRun=false}={}){
   const inventory=inspectPreUpdateBackups(dataRoot);
   const complete=inventory.entries.filter(item=>item.complete);
-  const keepCount=Math.max(1,Math.floor(Number(keep)||1));
+  // Keep two full generations by default. This mirrors the updater safety policy:
+  // one rollback point for the current candidate and one prior known-good generation.
+  const keepCount=Math.max(2,Math.floor(Number(keep)||2));
   const protectedDirs=new Set(complete.slice(0,keepCount).map(item=>item.dir));
   const removed=[];let freedBytes=0;
   for(const item of complete.slice(keepCount)){
@@ -93,7 +95,7 @@ export function pruneRuntimeTemps({roots=[],maxAgeDays=14,dryRun=false,maxEntrie
 }
 
 export function runStorageMaintenance(cfg,{dryRun=false}={}){
-  const preUpdate=prunePreUpdateBackups({dataRoot:cfg.dataDir,keep:Number(process.env.CE_QC_PREUPDATE_BACKUPS_KEEP||1),minAgeMs:Number(process.env.CE_QC_PREUPDATE_MIN_AGE_MS||DAY),dryRun});
+  const preUpdate=prunePreUpdateBackups({dataRoot:cfg.dataDir,keep:Number(process.env.CE_QC_PREUPDATE_BACKUPS_KEEP||2),minAgeMs:Number(process.env.CE_QC_PREUPDATE_MIN_AGE_MS||DAY),dryRun});
   const evidence=pruneExpiredEvidence({roots:[cfg.evidenceArchiveDir,cfg.legacyEvidenceArchiveDir],retentionDays:Number(process.env.CE_QC_EVIDENCE_RETENTION_DAYS||400),dryRun});
   const temp=pruneRuntimeTemps({roots:[cfg.importsDir,cfg.tempDir],maxAgeDays:Number(process.env.CE_QC_RUNTIME_TEMP_MAX_AGE_DAYS||14),dryRun});
   return{ok:true,id:STORAGE_MAINTENANCE_ID,dryRun,preUpdate,evidence,temp,at:new Date().toISOString()};
