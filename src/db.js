@@ -20,6 +20,7 @@ const SQLITE_TEMP_STORE = String(process.env.SQLITE_TEMP_STORE || (IS_EXPORT_WOR
 
 let db = null;
 let initialized = false;
+let hotPathIndexesReady = false;
 let expectedSchemaVersion = null;
 
 export function getRuntimeConfig() {
@@ -79,6 +80,10 @@ export function getDb() {
     if (!expected || current !== expected) migrateDatabase(db, getRuntimeConfig());
     initialized = true;
   }
+  if (!hotPathIndexesReady) {
+    ensureHotPathIndexes(db);
+    hotPathIndexesReady = true;
+  }
   return db;
 }
 
@@ -87,6 +92,7 @@ export function closeDb() {
     db.close();
     db = null;
     initialized = false;
+    hotPathIndexesReady = false;
   }
 }
 
@@ -128,6 +134,31 @@ function configurePerformancePragmas(database) {
     try { database.exec(statement); }
     catch (error) { console.warn('[CE-QC][DB] optional performance pragma skipped:', statement, error?.message || error); }
   }
+}
+
+function ensureHotPathIndexes(database) {
+  const statements = [
+    // Unified import and seven-business processing should never scan the full
+    // historical carry table merely to prepare the current queue.
+    'CREATE INDEX IF NOT EXISTS idx_carryover_open_queue ON carryover_open_items(status,sourceReportDate,shipmentCode)',
+    'CREATE INDEX IF NOT EXISTS idx_carryover_business_open_bill ON carryover_open_items(businessType,status,shipmentCode)',
+    // Current-state lookups are used repeatedly by dashboard/status/POD-lock reads.
+    'CREATE INDEX IF NOT EXISTS idx_shipment_current_business_state_bill ON shipment_current_state(businessType,state,shipmentCode)',
+    // Latest VALID daily membership is read by import/status/dashboard paths.
+    'CREATE INDEX IF NOT EXISTS idx_unified_batches_valid_date_created ON unified_import_batches(status,reportDate,createdAt)'
+  ];
+  const startedAt = Date.now();
+  for (const statement of statements) {
+    try { database.exec(statement); }
+    catch (error) {
+      // Older/brand-new schemas can briefly reach here before every optional table
+      // exists. The migration remains authoritative; a missing optional index must
+      // never make the application unavailable.
+      console.warn('[CE-QC][DB] hot-path index skipped:', statement, error?.message || error);
+    }
+  }
+  const elapsedMs = Date.now() - startedAt;
+  if (elapsedMs >= 500) console.log(`[CE-QC][DB] hot-path indexes ready in ${elapsedMs}ms`);
 }
 
 function getExpectedSchemaVersion() {
