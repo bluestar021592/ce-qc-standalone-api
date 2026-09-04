@@ -178,13 +178,14 @@ for (const source of [runner, whppUi, pause, shell, whppSupervisor, v161, storag
 // regressions inside this gate so a candidate cannot install with WHPP carry
 // membership leakage, stale same-day completion reuse, uncertified WHPP final
 // snapshots, legacy detail/export divergence, stale POD/attempt/signing residue,
-// a restart handoff that reopens an already-proven CCSL stage, or an explicit
-// unified click that re-POSTs an already completed WHPP stage.
+// a restart handoff that reopens an already-proven CCSL stage, an explicit
+// unified click that re-POSTs an already completed WHPP stage, or a seven-business
+// visible total that drops WHPP from core + WHPP (the historical 5060+228=5288 case).
 execFileSync(process.execPath,['scripts/v426-unified-completed-stage-skip-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['scripts/v424-resume-floor-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['scripts/v424-same-lifecycle-completion-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['scripts/v419-whpp-final-snapshot-authority-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
-execFileSync(process.execPath,['--test','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
+execFileSync(process.execPath,['--test','test/v419-open-single-source.test.js','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V426] runtime-source gate passed · persisted-complete unified stages are read-only and already-complete WHPP can never be re-POSTed by an explicit unified click · only an actually incomplete WHPP gets one authorized start · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V426] runtime-source gate passed · persisted-complete unified stages are read-only and already-complete WHPP can never be re-POSTed by an explicit unified click · only an actually incomplete WHPP gets one authorized start · visible seven-business total stays core + WHPP (5060+228=5288 parity) · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
