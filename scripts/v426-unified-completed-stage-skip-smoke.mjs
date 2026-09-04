@@ -4,8 +4,10 @@ import vm from 'node:vm';
 import { URLSearchParams } from 'node:url';
 
 const runnerSource = fs.readFileSync('public/v67-resilient-run-guard.js', 'utf8');
+const v64Source = fs.readFileSync('public/v64-whpp-total-kpi-integration.js', 'utf8');
 const v68Source = fs.readFileSync('public/v68-whpp-classification-stability.js', 'utf8');
 const v94Source = fs.readFileSync('public/v94-business-source-truth-ui-v2.js', 'utf8');
+const shellSource = fs.readFileSync('src/v44WhppUiPatch.js', 'utf8');
 const date = '2026-09-04';
 const STATUS_VERSION = '2026-09-02-v414-one-read-seven-business-status-v1';
 const SEVEN_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
@@ -111,7 +113,7 @@ function authoritativeImportFixture() {
       difference: 0,
       balanced: true
     },
-    summary: { validUniqueWaybills: total, totalUnique: total }
+    summary: { rawRows: total, duplicateRows: 0, missingWaybillRows: 0, validUniqueWaybills: total, totalUnique: total }
   };
 }
 
@@ -123,6 +125,7 @@ function loadImportTruthScript(source, apiKey, state, fetchPayload) {
     body: {},
     getElementById() { return null; },
     querySelector() { return null; },
+    querySelectorAll() { return []; },
     addEventListener() {},
     createTreeWalker() { return { nextNode() { return false; } }; },
     createElement() { return { dataset: {}, querySelector() { return null; }, appendChild() {}, remove() {} }; }
@@ -189,6 +192,36 @@ assert.equal(v68.calls.length, 0, 'V68 must not even fetch the secondary WHPP su
 assert.equal(v68State.classificationCounts.WHPP, 228);
 assert.equal(v68State.summary.validUniqueWaybills, 5288);
 
+// V64 also decorates HOME independently. It may still fetch WHPP metrics, but a
+// stale fast-summary total=0 is metrics-only once the same-date unified import has
+// balanced seven-business truth. HOME classification must remain 5060+228=5288.
+const v64State = authoritativeImportFixture();
+const v64 = loadImportTruthScript(
+  v64Source,
+  '__CE_QC_V64_WHPP_TOTAL_KPI__',
+  v64State,
+  {
+    ok: true,
+    reportDate: date,
+    total: 0,
+    metrics: { total: 0, pending3: 12, pod: 80 },
+    regions: { PV: { unresolved: 9 } }
+  }
+);
+assert.ok(v64.api, 'V64 API must install');
+assert.match(v64.api.version, /v426-unified-import-truth-kpi/);
+const v64Stats = v64.api.importStats();
+assert.equal(v64Stats.authoritativeImport, true);
+assert.equal(v64Stats.whppTotal, 228);
+assert.equal(v64Stats.fullUnique, 5288);
+const v64Summary = await v64.api.readWhppSummary(date);
+assert.equal(v64.calls.length, 1, 'V64 may fetch WHPP metrics once, but not classification truth');
+assert.equal(v64Summary.total, 228, 'stale WHPP fast-summary total=0 must be replaced by imported WHPP=228');
+assert.equal(v64Summary.classificationTotal, 5288, 'HOME total must retain the seven-business imported 5288');
+assert.equal(v64Summary.classificationSource, 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH');
+assert.equal(v64Summary.metrics.pending3, 12, 'WHPP processing metrics may still come from the fast summary');
+assert.match(shellSource, /v64-whpp-total-kpi-integration\.js\?v=20260904-v426-1/, 'shell must cache-bust V64 to the protected V426 build');
+
 // V94 used to merge /api/v89/instant-dashboard back into classificationCounts.
 // It must now obey the same import boundary, even if a stale dashboard says WHPP=0
 // and total=5060 immediately after upload.
@@ -213,4 +246,4 @@ assert.equal(v94State.classificationCounts.WHPP, 228);
 assert.equal(v94State.summary.validUniqueWaybills, 5288);
 assert.equal(v94State.sevenBusinessValidUniqueWaybills, 5288);
 
-console.log('[V426] regression smoke passed · completed WHPP is never re-posted · incomplete WHPP gets one authorized start · balanced unified import 5060+228=5288 outranks stale WHPP/dashboard summaries and cannot be overwritten back to 5060');
+console.log('[V426] regression smoke passed · completed WHPP is never re-posted · incomplete WHPP gets one authorized start · balanced unified import 5060+228=5288 outranks stale V64 HOME WHPP totals and stale V68/V94 summaries, so import and HOME cannot be overwritten back to 5060');
