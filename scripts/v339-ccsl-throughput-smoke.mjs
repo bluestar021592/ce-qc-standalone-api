@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { execFileSync } from 'node:child_process';
-import { createCcslThroughputClient,V339_CCSL_CONFIRM_CONCURRENCY,V339_CCSL_THROUGHPUT_CORE_ID } from '../src/v339CcslThroughputCore.js';
+import { createCcslThroughputClient,V339_CCSL_CONFIRM_CONCURRENCY,V339_CCSL_THROUGHPUT_CORE_ID } from '../src/throughputCore.js';
 import { shouldUseCcslLightCheckpoint,V340_CCSL_FAST_CHECKPOINT_ID } from '../src/runtimeStorage.js';
 import { resolveV314Target } from '../src/v314ModuleRedirectPatch.js';
 
 for(const file of [
-  'src/runtimePreload.js','src/runtimePipeline.js','src/runtimeStorage.js','src/runtimeBusinessStore.js',
+  'src/runtimePreload.js','src/throughputCore.js','src/runtimePipeline.js','src/runtimeStorage.js','src/runtimeBusinessStore.js',
   'src/v339CcslThroughputCore.js','src/v314ShopeeThroughputCore.js','src/v340CcslStorageCheckpoint.js',
   'src/v314PipelineThroughput.js','src/v314ModuleRedirectPatch.js','src/v70ConfirmQueryResiliencePatch.js','src/v338CcslBatchPolicyRestore.js'
 ])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
@@ -17,17 +17,19 @@ assert.match(V340_CCSL_FAST_CHECKPOINT_ID,/v348-ccsl-final-only-authoritative-mi
 assert.match(resolveV314Target('./src/storage.js','file:///C:/CE/app/server.js'),/runtimeStorage\.js$/);
 
 const compat=fs.readFileSync('src/v339CcslThroughputCore.js','utf8');
+const throughputShim=fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8');
 const runtimePipeline=fs.readFileSync('src/runtimePipeline.js','utf8');
 const checkpoint=fs.readFileSync('src/runtimeStorage.js','utf8');
 const storageShim=fs.readFileSync('src/v340CcslStorageCheckpoint.js','utf8');
-const core=fs.readFileSync('src/v314ShopeeThroughputCore.js','utf8');
+const core=fs.readFileSync('src/throughputCore.js','utf8');
 const v70=fs.readFileSync('src/v70ConfirmQueryResiliencePatch.js','utf8');
 const v338=fs.readFileSync('src/v338CcslBatchPolicyRestore.js','utf8');
 const v147=fs.readFileSync('src/v147TrackTimeoutConfig.js','utf8');
 const preload=fs.readFileSync('src/runtimePreload.js','utf8');
 const batching=fs.readFileSync('src/trackBatching.js','utf8');
 
-assert.match(compat,/Compatibility module only/);
+assert.match(compat,/throughputCore\.js/,'V339 must be compatibility-only');
+assert.match(throughputShim,/throughputCore\.js/,'V314 throughput path must be compatibility-only');
 assert.doesNotMatch(compat,/function createCcslThroughputClient/,'legacy V339 file must not own duplicate throughput logic');
 assert.match(runtimePipeline,/createUnifiedThroughputClient/);
 assert.match(runtimePipeline,/trackConcurrency:4/);
@@ -68,4 +70,4 @@ for(let i=0;i<trackBills.length;i+=50)await trackClient.trackQuery(trackBills.sl
 const elapsed=performance.now()-started;
 assert.equal(calls,14);assert.equal(maxActive,4,'CCSL track must use 50-ticket x4 bounded prefetch');assert.ok(elapsed<340);
 
-console.log(`[CORE CCSL] compatibility smoke passed · unversioned preload/pipeline/storage owners · logical scan 350 · V70 confirm transport-only <=100 · track 50x4 fixed retry units · active zero-wait light checkpoints · final mirror only after running=false · ${elapsed.toFixed(1)}ms synthetic`);
+console.log(`[CORE CCSL] compatibility smoke passed · unversioned preload/throughput/pipeline/storage owners · logical scan 350 · V70 confirm transport-only <=100 · track 50x4 fixed retry units · active zero-wait light checkpoints · final mirror only after running=false · ${elapsed.toFixed(1)}ms synthetic`);
