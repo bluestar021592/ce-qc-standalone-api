@@ -6,20 +6,18 @@ import './v139DailyCarryIsolationPatch.js';
 const PATCH_ID = '2026-08-16-v140-confirm-track-final-retry-v2';
 export const V392_CONFIRM_TRANSPORT_BOUNDARY_ID = '2026-08-31-v392-confirm-transport-boundary-single-completeness-owner-v2';
 const ORIGINAL_CONFIRM = CEClient.prototype.confirmQuery;
-const ORIGINAL_TRACK = CEClient.prototype.trackQuery;
-const ORIGINAL_EXCEPTION = CEClient.prototype.exceptionQuery;
 const MAX_BATCH = Math.max(10, Math.min(100, Number(process.env.CONFIRM_QUERY_BATCH_SIZE || 100)));
-const TRACK_MAX_BATCH = Math.max(10, Math.min(50, Number(process.env.TRACK_QUERY_BATCH_SIZE || 50)));
 const MIN_SPLIT = Math.max(1, Math.min(10, Number(process.env.CONFIRM_QUERY_MIN_SPLIT || 5)));
 const CONFIRM_TIMEOUT_MS = Math.max(8000, Math.min(45000, Number(process.env.CONFIRM_QUERY_TIMEOUT_MS || 25000)));
 const CONFIRM_BATCH_BUDGET_MS = Math.max(20_000, Math.min(120_000, Number(process.env.CONFIRM_QUERY_BATCH_BUDGET_MS || 45_000)));
-const FINAL_RETRY_ROUNDS = Math.max(3, Math.min(5, Number(process.env.CE_FINAL_RETRY_ROUNDS || 3)));
 
-// V392 keeps V70 as the CE transport-safety boundary only. The canonical V338 +
-// V314/V345 owners plan logical 350-ticket confirm work. V70 may split that request
-// into <=100-ticket CE transport chunks, but it must never rewrite ORDER_BATCH_SIZE
-// and it must never run a second successful-response missing-row retry loop. V349
-// alone owns completeness recovery.
+// Consolidation rule:
+// - V70 is transport safety for confirm-query only.
+// - V349 owns successful-response completeness recovery.
+// - trackBatching.js owns trajectory/exception retry budgets and fixed 50-ticket batches.
+// V70 must never wrap trackQuery/exceptionQuery again; doing so multiplied retry loops
+// and made one slow 50-ticket batch occupy the pipeline several times before the
+// canonical retry center could take over.
 
 function cleanCodes(values = []) {
   return [...new Set((values || [])
@@ -138,9 +136,6 @@ async function queryConfirmBatches(client, codes) {
       console.warn(`[CE-QC][V392] confirm-query safe transport chunk deferred to V349/V345 owner: ${batch.length} waybills; ${error?.message || error}`);
     }
   }
-  // If every safe transport chunk failed, this was a true parent transport failure:
-  // bubble it to V349/V345. If at least one chunk completed, preserve those rows and
-  // let V349 retry only the absent waybills instead of replaying the whole 350.
   if (successfulTransportBatches === 0 && lastTransportError) throw lastTransportError;
   return rows;
 }
@@ -151,42 +146,10 @@ CEClient.prototype.confirmQuery = async function v140ConfirmQuery(shipmentCodes)
   return queryConfirmBatches(this, codes);
 };
 
-async function queryReadOnlyWithFinalRetries(client, original, shipmentCodes, apiName) {
-  const codes = cleanCodes(shipmentCodes);
-  if (!codes.length) return [];
-  const rows = [];
-  for (const batch of split(codes, TRACK_MAX_BATCH)) {
-    let completed = false;
-    let lastError = null;
-    for (let attempt = 0; attempt <= FINAL_RETRY_ROUNDS; attempt += 1) {
-      try {
-        rows.push(...await original.call(client, batch));
-        completed = true;
-        break;
-      } catch (error) {
-        lastError = error;
-        if (isAuthError(error) || isPermanentRequestError(error)) throw error;
-        if (attempt >= FINAL_RETRY_ROUNDS) break;
-        const delay = 400 * (attempt + 1);
-        console.warn(`[CE-QC][V140] ${apiName} final retry ${attempt + 1}/${FINAL_RETRY_ROUNDS}: ${batch.length} waybills; ${error?.message || error}`);
-        await wait(delay);
-      }
-    }
-    if (!completed && lastError) throw lastError;
-  }
-  return rows;
-}
-
-CEClient.prototype.trackQuery = async function v140TrackQuery(shipmentCodes) {
-  return queryReadOnlyWithFinalRetries(this, ORIGINAL_TRACK, shipmentCodes, 'track-query');
-};
-
-CEClient.prototype.exceptionQuery = async function v140ExceptionQuery(shipmentCodes) {
-  return queryReadOnlyWithFinalRetries(this, ORIGINAL_EXCEPTION, shipmentCodes, 'exception-query');
-};
-
 export const V70_CONFIRM_QUERY_RESILIENCE_PATCH_ID = PATCH_ID;
-export const V139_FINAL_RETRY_ROUNDS = FINAL_RETRY_ROUNDS;
+// Compatibility export only. Track/exception retry ownership was consolidated into
+// trackBatching.js, so the legacy V139/V140 nested final-retry count is now zero.
+export const V139_FINAL_RETRY_ROUNDS = 0;
 
 console.info('[CE-QC][V392_CONFIRM_TRANSPORT_BOUNDARY]', JSON.stringify({
   id: V392_CONFIRM_TRANSPORT_BOUNDARY_ID,
@@ -194,6 +157,11 @@ console.info('[CE-QC][V392_CONFIRM_TRANSPORT_BOUNDARY]', JSON.stringify({
   safeTransportBatch: MAX_BATCH,
   completenessOwner: 'V349',
   logicalBatchOwner: 'V338+V314/V345',
+  trackRetryOwner: 'trackBatching',
+  exceptionRetryOwner: 'trackBatching',
+  trackQueryWrappedHere: false,
+  exceptionQueryWrappedHere: false,
   transportFailurePolicy: 'PRESERVE_SUCCESSFUL_SAFE_CHUNKS_THEN_RETRY_ONLY_MISSING',
-  duplicateMissingRetry: false
+  duplicateMissingRetry: false,
+  duplicateTrackRetry: false
 }));
