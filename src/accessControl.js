@@ -8,6 +8,7 @@ const ROLE_LEVEL = Object.freeze({ VIEWER: 1, OPERATOR: 2, ADMIN: 3 });
 const LOGIN_LIMIT = 5;
 const SESSION_HOURS = 8;
 const SESSION_REFRESH_THRESHOLD_MS = 2 * 60 * 60_000;
+export const V430_INTERNAL_LOGIN_FALLBACK_ID = '2026-09-05-v430-native-form-login-fallback-v1';
 let jwks = null;
 
 export function validateAccessConfiguration() {
@@ -22,7 +23,7 @@ export async function accessIdentity(req, res, next) {
   const remote = normalizeIp(req.socket?.remoteAddress);
   const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'ce-qc.cambodian.com');
   try {
-    if (isInternalAuthPath(req.path)) return handleInternalAuth(req, res, host, remote);
+    if (isInternalAuthPath(req.path)) return await handleInternalAuth(req, res, host, remote);
     let channel = '';
     let cloudflareEmail = '';
     if (publicHost && host === publicHost) {
@@ -64,18 +65,20 @@ async function handleInternalAuth(req, res, host, remote) {
     else return res.status(403).json({ ok: false, error: 'Access channel is not allowed.' });
   } catch (error) { return res.status(401).json({ ok: false, error: error.message || 'Cloudflare Access authentication failed.' }); }
 
+  await ensureInternalAuthBody(req);
+
   if (req.path.endsWith('/logout')) {
     revokeCookieSession(req);
     clearSessionCookie(res, channel);
     return res.json({ ok: true });
   }
   if (req.path.endsWith('/bootstrap')) {
-    if (channel !== 'LOCAL' || userCount() !== 0) return res.status(403).json({ ok: false, error: 'Bootstrap is unavailable.' });
+    if (channel !== 'LOCAL' || userCount() !== 0) return authError(req, res, 403, 'Bootstrap is unavailable.', channel, true);
     return createFirstAdmin(req, res, channel);
   }
   if (req.path.endsWith('/change-password')) {
     const user = readSession(req, channel, cloudflareEmail);
-    if (!user) return res.status(401).json({ ok: false, error: 'Please sign in first.' });
+    if (!user) return authError(req, res, 401, 'Please sign in first.', channel, false);
     return changePassword(req, res, user);
   }
   return loginInternalUser(req, res, channel, cloudflareEmail);
@@ -86,7 +89,7 @@ function createFirstAdmin(req, res, channel) {
   const password = String(req.body?.password || '');
   const displayName = String(req.body?.displayName || username).trim().slice(0, 80);
   const email = cleanEmail(req.body?.email);
-  if (!username || !validPassword(password)) return res.status(400).json({ ok: false, error: 'Username and a password of at least 10 characters are required.' });
+  if (!username || !validPassword(password)) return authError(req, res, 400, 'Username and a password of at least 10 characters are required.', channel, true);
   const now = nowIso();
   try {
     const hash = bcrypt.hashSync(password, 12);
@@ -94,7 +97,7 @@ function createFirstAdmin(req, res, channel) {
       .get(username, displayName, String(req.body?.departmentCompany || '').trim().slice(0, 120), email || null, hash, now, now);
     auditAction(req, 'USER_BOOTSTRAP_ADMIN_CREATED', { username });
     return issueSession(res, row, req, channel, '', false);
-  } catch (error) { return res.status(409).json({ ok: false, error: 'Username or email is already in use.' }); }
+  } catch (error) { return authError(req, res, 409, 'Username or email is already in use.', channel, true); }
 }
 
 function loginInternalUser(req, res, channel, cloudflareEmail) {
@@ -102,25 +105,26 @@ function loginInternalUser(req, res, channel, cloudflareEmail) {
   const password = String(req.body?.password || '');
   const row = getDb().prepare("SELECT * FROM users WHERE username=? AND status='ACTIVE'").get(username);
   const now = new Date();
-  if (!row || !bcrypt.compareSync(password, row.passwordHash || '')) return loginFailure(req, res, row, 'Invalid username or password.');
-  if (!Number(row.enabled)) return res.status(403).json({ ok: false, error: 'This account is disabled.' });
-  if (row.expiresAt && new Date(row.expiresAt) <= now) return res.status(403).json({ ok: false, error: 'This account has expired.' });
-  if (row.lockedUntil && new Date(row.lockedUntil) > now) return res.status(423).json({ ok: false, error: 'This account is temporarily locked. Please try again later.' });
-  if (channel === 'PUBLIC' && cloudflareEmail && (!row.email || row.email.toLowerCase() !== cloudflareEmail.toLowerCase())) return res.status(403).json({ ok: false, error: 'Internal account email does not match Cloudflare Access identity.' });
+  if (!row || !bcrypt.compareSync(password, row.passwordHash || '')) return loginFailure(req, res, row, '用户名或密码错误。', channel);
+  if (!Number(row.enabled)) return authError(req, res, 403, '此账号已被停用。', channel, false);
+  if (row.expiresAt && new Date(row.expiresAt) <= now) return authError(req, res, 403, '此账号已过期。', channel, false);
+  if (row.lockedUntil && new Date(row.lockedUntil) > now) return authError(req, res, 423, '账号暂时锁定，请稍后再试。', channel, false);
+  if (channel === 'PUBLIC' && cloudflareEmail && (!row.email || row.email.toLowerCase() !== cloudflareEmail.toLowerCase())) return authError(req, res, 403, '内部账号邮箱与 Cloudflare Access 身份不一致。', channel, false);
   getDb().prepare('UPDATE users SET failedLoginCount=0,lockedUntil=NULL,lastLoginAt=?,updatedAt=? WHERE id=?').run(nowIso(), nowIso(), row.id);
   const user = getDb().prepare("SELECT * FROM users WHERE id=? AND status='ACTIVE'").get(row.id);
   auditAction(req, 'LOGIN_SUCCESS', { username, accessChannel: channel });
   return issueSession(res, user, req, channel, cloudflareEmail, Boolean(user.mustChangePassword));
 }
 
-function loginFailure(req, res, row, message) {
+function loginFailure(req, res, row, message, channel) {
+  let lockedUntil = null;
   if (row) {
     const attempts = Number(row.failedLoginCount || 0) + 1;
-    const lockedUntil = attempts >= LOGIN_LIMIT ? new Date(Date.now() + 15 * 60_000).toISOString() : null;
+    lockedUntil = attempts >= LOGIN_LIMIT ? new Date(Date.now() + 15 * 60_000).toISOString() : null;
     getDb().prepare('UPDATE users SET failedLoginCount=?,lockedUntil=?,updatedAt=? WHERE id=?').run(attempts, lockedUntil, nowIso(), row.id);
     auditAction(req, lockedUntil ? 'ACCOUNT_LOCKED' : 'LOGIN_FAILED', { username: row.username });
   } else auditAction(req, 'LOGIN_FAILED', { username: cleanUsername(req.body?.username) });
-  return res.status(row?.lockedUntil ? 423 : 401).json({ ok: false, error: message });
+  return authError(req, res, lockedUntil ? 423 : 401, lockedUntil ? '账号已暂时锁定，请15分钟后再试。' : message, channel, false);
 }
 
 function changePassword(req, res, user) {
@@ -141,7 +145,40 @@ function issueSession(res, row, req, channel, cloudflareEmail, mustChangePasswor
   getDb().prepare('INSERT INTO user_sessions(userId,sessionHash,accessChannel,cloudflareEmail,ipAddress,userAgent,expiresAt,createdAt) VALUES(?,?,?,?,?,?,?,?)')
     .run(row.id, sha256(raw), channel, cloudflareEmail || null, normalizeIp(req.socket?.remoteAddress), String(req.get('user-agent') || '').slice(0, 300), expiresAt, nowIso());
   res.setHeader('Set-Cookie', `ce_internal_session=${raw}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}${channel === 'PUBLIC' ? '; Secure' : ''}`);
+  if (isNativeAuthForm(req)) return res.redirect(303, '/');
   return res.json({ ok: true, user: publicUser(row), mustChangePassword, expiresAt });
+}
+
+async function ensureInternalAuthBody(req) {
+  const type = String(req.get?.('content-type') || '');
+  if (/application\/x-www-form-urlencoded/i.test(type) && ['POST', 'PUT', 'PATCH'].includes(String(req.method || '').toUpperCase())) {
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of req) {
+      bytes += chunk.length;
+      if (bytes > 64 * 1024) throw new Error('Internal authentication form is too large.');
+      chunks.push(chunk);
+    }
+    const params = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+    const body = {};
+    for (const [key, value] of params.entries()) body[key] = value;
+    req.body = body;
+    return body;
+  }
+  if (req.body && typeof req.body === 'object') return req.body;
+  req.body = {};
+  return req.body;
+}
+
+function isNativeAuthForm(req) {
+  const type = String(req.get?.('content-type') || '');
+  const accept = String(req.get?.('accept') || '');
+  return /application\/x-www-form-urlencoded/i.test(type) && /text\/html/i.test(accept);
+}
+
+function authError(req, res, status, message, channel, bootstrap) {
+  if (isNativeAuthForm(req)) return loginPage(req, res, { channel, bootstrap, error: message, forceHtml: true, status });
+  return res.status(status).json({ ok: false, error: message });
 }
 
 function readSession(req, channel, cloudflareEmail) {
@@ -214,8 +251,8 @@ async function verifyCloudflareIdentity(req) {
   return email;
 }
 
-function loginPage(req, res, { channel, bootstrap }) {
-  if (req.path.startsWith('/api/')) return res.status(401).json({
+function loginPage(req, res, { channel, bootstrap, error = '', forceHtml = false, status = 401 }) {
+  if (req.path.startsWith('/api/') && !forceHtml) return res.status(401).json({
     ok: false,
     code: bootstrap ? 'INTERNAL_BOOTSTRAP_REQUIRED' : 'INTERNAL_AUTH_REQUIRED',
     reloginRequired: !bootstrap,
@@ -223,7 +260,8 @@ function loginPage(req, res, { channel, bootstrap }) {
   });
   const endpoint = bootstrap ? '/api/internal-auth/bootstrap' : '/api/internal-auth/login';
   const title = bootstrap ? 'Initialize administrator' : 'CE QC internal sign-in';
-  return res.status(401).type('html').send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(400px,calc(100% - 40px));background:#fff;border:1px solid #dce5ef;border-radius:8px;padding:28px;box-shadow:0 12px 36px #16395b18}h1{font-size:22px;margin:0 0 18px}label{display:block;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd8e5;border-radius:5px}button{width:100%;margin-top:18px;border:0;border-radius:5px;background:#126ee8;color:#fff;padding:11px;font-weight:700}#error{color:#b42318;margin-top:10px}</style><main class="box"><h1>${bootstrap ? '创建首个管理员' : 'CE质控系统内部登录'}</h1><form id="login">${bootstrap ? '<label>姓名</label><input name="displayName" required><label>邮箱</label><input name="email" type="email">' : ''}<label>用户名</label><input name="username" autocomplete="username" required><label>密码</label><input name="password" type="password" autocomplete="current-password" required><button>${bootstrap ? '创建管理员' : '登录'}</button><div id="error"></div></form></main><script>document.getElementById('login').addEventListener('submit',async e=>{e.preventDefault();const body=Object.fromEntries(new FormData(e.target));const r=await fetch('${endpoint}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(r.ok)location.href='/';else document.getElementById('error').textContent=j.error||'登录失败';});</script>`);
+  const safeError = escapeHtml(error);
+  return res.status(status).type('html').send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(400px,calc(100% - 40px));background:#fff;border:1px solid #dce5ef;border-radius:8px;padding:28px;box-shadow:0 12px 36px #16395b18}h1{font-size:22px;margin:0 0 18px}label{display:block;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd8e5;border-radius:5px}button{width:100%;margin-top:18px;border:0;border-radius:5px;background:#126ee8;color:#fff;padding:11px;font-weight:700;cursor:pointer}button:disabled{opacity:.65;cursor:wait}#error{color:#b42318;margin-top:10px;min-height:24px}</style><main class="box"><h1>${bootstrap ? '创建首个管理员' : 'CE质控系统内部登录'}</h1><form id="login" method="post" action="${endpoint}">${bootstrap ? '<label>姓名</label><input name="displayName" required><label>邮箱</label><input name="email" type="email">' : ''}<label>用户名</label><input name="username" autocomplete="username" required><label>密码</label><input name="password" type="password" autocomplete="current-password" required><button type="submit">${bootstrap ? '创建管理员' : '登录'}</button><div id="error" role="alert">${safeError}</div><noscript><div style="margin-top:10px;color:#667085">浏览器脚本不可用时，登录按钮会自动使用标准表单提交。</div></noscript></form></main><script>(function(){var form=document.getElementById('login');if(!form||!window.fetch||!window.FormData)return;form.addEventListener('submit',function(e){e.preventDefault();var btn=form.querySelector('button[type="submit"]');var err=document.getElementById('error');if(btn)btn.disabled=true;if(err)err.textContent='正在登录...';var fd=new FormData(form);var body={};fd.forEach(function(v,k){body[k]=v;});fetch('${endpoint}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return {r:r,j:j};});}).then(function(x){if(x.r.ok){location.href='/';return;}if(err)err.textContent=x.j.error||'登录失败';}).catch(function(){if(err)err.textContent='登录请求没有完成，请再点一次；标准表单备用通道已保留。';}).then(function(){if(btn)btn.disabled=false;});});})();</script>`);
 }
 
 function cleanUsername(value) { return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 60); }
@@ -231,6 +269,7 @@ function cleanEmail(value) { const email = String(value || '').trim().toLowerCas
 function validPassword(value) { return String(value || '').length >= 10; }
 function cookieValue(req, name) { return String(req.get('cookie') || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${name}=`))?.slice(name.length + 1) || ''; }
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
+function escapeHtml(value) { return String(value || '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
 function envEnabled(name, fallback) { const value = process.env[name]; return value == null || value === '' ? fallback : /^(1|true|yes|on)$/i.test(value); }
 function normalizeTeamDomain(value) { const domain = String(value || '').trim().replace(/\/$/, ''); return !domain ? '' : (/^https:\/\//i.test(domain) ? domain : `https://${domain}`); }
 function normalizeHost(value) { return String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split(':')[0]; }
