@@ -45,8 +45,8 @@ assert.match(shell,/v67-resilient-run-guard\.js\?v=20260904-v424-1/,'browser she
 assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260905-v433-1/,'browser shell must execute the V433 V169 policy build');
 assert.match(shell,/data-previous-src=.*v169-seven-business-legacy-status-sync\.js\?v=20260904-v424-1/,'V424 V169 URL may remain only as compatibility metadata');
 assert.match(shell,/v412-seven-business-convergence\.js\?v=20260904-v420-1/,'browser shell must actually request the V420 convergence build with a current cache-bust URL');
-assert.doesNotMatch(shell,/<script src=\\"\/v169-seven-business-legacy-status-sync\.js\?v=20260904-v424-1/,'retired V424 V169 URL must not be the live script src');
-assert.doesNotMatch(shell,/<script src=\\"\/v169-seven-business-legacy-status-sync\.js\?v=20260901-v411-1/,'old V411 URL may remain only as non-executable compatibility metadata, never as the live script src');
-assert.doesNotMatch(shell,/<script src=\\"\/v412-seven-business-convergence\.js\?v=20260901-v413-3/,'old V413 URL may remain only as non-executable compatibility metadata, never as the live script src');
+assert.ok(!shell.includes('<script src="/v169-seven-business-legacy-status-sync.js?v=20260904-v424-1"'),'retired V424 V169 URL must not be the live script src');
+assert.ok(!shell.includes('<script src="/v169-seven-business-legacy-status-sync.js?v=20260901-v411-1"'),'old V411 URL may remain only as non-executable compatibility metadata, never as the live script src');
+assert.ok(!shell.includes('<script src="/v412-seven-business-convergence.js?v=20260901-v413-3"'),'old V413 URL may remain only as non-executable compatibility metadata, never as the live script src');
 
 console.log('[V433/V424/V423/V420] unified-entry delivery smoke passed · V168 is sole fail-closed idle Start owner · V169 no longer re-enables unconfirmed Start · exact current-date Shopee restart still requires same-proof V67 handoff · V412 no duplicate preflight · V67 sole runner');
