@@ -1,9 +1,9 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-08-27-v334-canonical-detail-history-ownership-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-09-05-v433-status-first-heavy-query-gate-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
-const MARKER='/v295-first-attempt-ui.js?v=20260827-v334-1';
+const MARKER='/v295-first-attempt-ui.js?v=20260905-v433-1';
 const V299_FIRST_ATTEMPT_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v299-1';
 const STABILITY_MARKER='/v301-runtime-stability.js?v=20260825-v301-1';
 const V307_HOME_MARKER='/v307-exact-daily-home-owner.js?v=20260826-v325-1';
@@ -54,8 +54,9 @@ express.response.send=function v334FirstAttemptUiSend(body){
     this.setHeader?.('X-CE-QC-V332-UI','2026-08-27-v332-completion-style-ownership-v1');
     this.setHeader?.('X-CE-QC-V333-UI','2026-08-27-v333-canonical-status-ownership-v1');
     this.setHeader?.('X-CE-QC-V334-UI',V295_FIRST_ATTEMPT_UI_INJECTION_ID);
+    this.setHeader?.('X-CE-QC-V433-Status-First',V295_FIRST_ATTEMPT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-Unified-Runner',SINGLE_RUNNER_MARKER);
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V334_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,SINGLE_RUNNER_MARKER,'V67 is the sole unified execution owner; legacy recovery watchdogs and the completed one-time clean-start client are not injected.');
+console.info('[CE-QC][V433_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,SINGLE_RUNNER_MARKER,'V67 remains the sole unified execution owner; V295 HOME first-attempt data is delivered only after V168 current-date status confirmation.');
