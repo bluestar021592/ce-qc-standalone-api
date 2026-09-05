@@ -193,10 +193,18 @@ function Test-Candidate([string]$CandidateSha, [string]$ProjectRoot) {
 }
 
 function Get-LiveRuntimeConfig {
-  $code = "import('./src/db.js').then(m=>process.stdout.write(JSON.stringify(m.getRuntimeConfig()))).catch(e=>{console.error(e);process.exit(1)})"
-  $json = (& node --input-type=module -e $code | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0 -or -not $json) { throw 'Unable to resolve the installed database path safely.' }
-  try { return ($json | ConvertFrom-Json) } catch { throw 'Installed database configuration is invalid.' }
+  # Windows PowerShell 5.1 can mis-decode UTF-8 emitted by native processes when
+  # the live data directory contains non-ASCII characters. Emit ASCII Base64 from
+  # Node, then decode the JSON explicitly as UTF-8 inside PowerShell.
+  $code = "import('./src/db.js').then(m=>process.stdout.write(Buffer.from(JSON.stringify(m.getRuntimeConfig()),'utf8').toString('base64'))).catch(e=>{console.error(e);process.exit(1)})"
+  $encoded = (& node --input-type=module -e $code | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $encoded) { throw 'Unable to resolve the installed database path safely.' }
+  try {
+    $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
+    return ($json | ConvertFrom-Json)
+  } catch {
+    throw 'Installed database configuration is invalid.'
+  }
 }
 
 function Invoke-SqliteCheck([string]$DbFile, [switch]$Checkpoint) {
