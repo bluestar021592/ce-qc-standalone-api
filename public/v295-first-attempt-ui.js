@@ -9,9 +9,8 @@
   const HISTORY_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
   const NAV_ITEMS=[
     ['home','首页总看板','home','/'],['ce','CE看板','package','/ce'],['ceaf','CEAF空运看板','package','/ceaf'],['tbkh','TBKH看板','package','/tbkh'],['ali1688','ALI1688看板','package','/ali1688'],['whpp','WHPP本土看板','package','/whpp'],
-    ['shopeecn','SHOPEE CN看板','bag','/shopeecn'],['shopeevn','SHOPEE VN看板','bag','/shopeevn'],['import','数据导入','database','/import'],['tracking','轨迹查询','route','/tracking'],['exceptions','异常明细','alert','/exceptions'],['reports','报表导出','clipboard','/reports'],['data-management','数据管理','database','/data-management'],['settings','系统设置','settings'],['logs','操作日志','clipboard','/logs']
+    ['shopeecn','SHOPEE CN看板','bag','/shopeecn'],['shopeevn','SHOPEE VN看板','bag','/shopeevn'],['import','数据导入','database','/import'],['tracking','轨迹查询','route','/tracking'],['exceptions','异常明细','alert','/exceptions'],['reports','报表导出','clipboard','/reports'],['data-management','数据管理','database','/data-management'],['settings','系统设置','settings','/settings'],['logs','操作日志','clipboard','/logs']
   ];
-  NAV_ITEMS.find(item=>item[0]==='settings')[3]='/settings';
   const cache=new Map(),inflight=new Map();
   const installedAt=Date.now();
   let timer=null,lastKey='',lastPayload=null,applying=false,applyReleaseTimer=null,navFixing=false,navPending=false,retryTimer=null,statusGateTimer=null;
