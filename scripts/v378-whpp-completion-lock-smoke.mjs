@@ -184,7 +184,10 @@ assert.match(importer,/const whppLifecycleChanged = String\(whppState\.snapshotS
 assert.match(importer,/invalidateMutableSameDatePointers\(parsed\.reportDate, \{ whppChanged: whppLifecycleChanged \}\)/,'V366 must not delete WHPP run/history pointers when the finalized lifecycle was preserved');
 
 const ui=fs.readFileSync(new URL('../public/v68-whpp-classification-stability.js',import.meta.url),'utf8');
-assert.match(ui,/v399-seven-business-import-total-v1/,'V399 must own the seven-business import total display');
+assert.match(ui,/2026-09-04-v426-unified-import-seven-business-truth-priority-v1/,'V426 must own the seven-business import total display');
+assert.match(ui,/function authoritativeImportTruth\(/,'V426 import display must derive authority from the committed seven-business reconciliation');
+assert.match(ui,/reconciliation\.balanced !== true/,'unbalanced import reconciliation must fail closed instead of becoming display truth');
+assert.match(ui,/V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH/,'authoritative seven-business import truth must bypass stale WHPP summary writes');
 assert.match(ui,/日报导入完成，\\s\*共\\s\*\[\\d,\]\+\\s\*个唯一运单/,'upload success text must be rewritten from six-business total to seven-business total');
 assert.match(ui,/NodeFilter\.SHOW_TEXT/,'status repair must cover the green status text even when it is not wrapped in a paragraph');
 
@@ -204,4 +207,4 @@ assert.doesNotMatch(runner,/async function readWhppCompletionLock|\/api\/v132\/w
 
 closeDb();
 fs.rmSync(root,{recursive:true,force:true});
-console.log('[V399/V397/V322/V378] WHPP finalized reupload lock passed · explicit empty rehydrate no-op · identical preserved/direct membership reupload no-op · only membership change unlocks · seven-business import total display gated · V67 exact-date persisted completion latch blocks 2.5s re-entry and V322 is the sole status truth');
+console.log('[V426/V397/V322/V378] WHPP finalized reupload lock passed · explicit empty rehydrate no-op · identical preserved/direct membership reupload no-op · only membership change unlocks · seven-business import total display gated by authoritative reconciliation · V67 exact-date persisted completion latch blocks 2.5s re-entry and V322 is the sole status truth');
