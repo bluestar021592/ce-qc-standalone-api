@@ -238,7 +238,6 @@ function armStandby() {
       tryListen();
     } finally { takeoverBusy = false; }
   }, 1500);
-  standbyTimer.unref?.();
 }
 
 function tryListen() {
