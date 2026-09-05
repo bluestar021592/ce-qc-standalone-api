@@ -1,6 +1,7 @@
 (function installSevenBusinessLegacyStatusSyncV169(global){
   if(global.__CE_QC_V169_LEGACY_STATUS_SYNC__)return;
   const VERSION='2026-09-05-v433-v168-single-start-control-owner-v1';
+  const V411_FAIL_CLOSED_ENTRY_COMPAT='2026-09-01-v411-unconfirmed-status-entry-lock-v1';
   const V420_ENTRY_CONFIRM_REVISION='2026-09-03-v420-bounded-entry-status-confirm-v1';
   const V421_CLICKABLE_UNCONFIRMED_REVISION='2026-09-03-v421-clickable-unconfirmed-start-v1';
   const V423_EXPLICIT_SHOPEE_RESTART_REVISION='2026-09-04-v423-explicit-shopee-restart-resume-v1';
@@ -313,6 +314,6 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   installEntryGuards();
-  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,v423Revision:V423_EXPLICIT_SHOPEE_RESTART_REVISION,v424Revision:V424_RESUME_FLOOR_HANDOFF_REVISION,v433StartOwner:V433_V168_SINGLE_START_OWNER,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,exactShopeeRestartInterruption};
+  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v411Compat:V411_FAIL_CLOSED_ENTRY_COMPAT,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,v423Revision:V423_EXPLICIT_SHOPEE_RESTART_REVISION,v424Revision:V424_RESUME_FLOOR_HANDOFF_REVISION,v433StartOwner:V433_V168_SINGLE_START_OWNER,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,exactShopeeRestartInterruption};
   console.info('[CE-QC][V433_V169]',VERSION,V433_V168_SINGLE_START_OWNER,'V168 is the sole idle start-button authority: unconfirmed status stays fail-closed; V169 only guards entry/resume and completion proof. V423/V424 exact SHOPEE restart handoff remains unchanged.');
 })(window);
