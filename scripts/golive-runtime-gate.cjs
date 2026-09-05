@@ -11,6 +11,7 @@ const v94 = read('public/v94-business-source-truth-ui-v2.js');
 const whppUi = read('public/v132-whpp-seven-business-fast.js');
 const pause = read('public/v164-unified-pause-router.js');
 const shell = read('src/v44WhppUiPatch.js');
+const v428 = read('public/v428-base-ccsl-status-owner.js');
 const whppSupervisor = read('src/v134WhppRunSupervisorPatch.js');
 const whppStore = read('src/whppStore.js');
 const v161 = read('src/v161UnifiedImportRuntimeTruthPatch.js');
@@ -146,17 +147,22 @@ must(whppStore, "VALUES(?,?,?,?,?,?,?,'VALID','COMPLETED','')");
 must(whppStore, "reconciliationStatus: 'COMPLETED'");
 must(whppStore, 'finalSnapshotAuthority: V419_WHPP_FINAL_SNAPSHOT_AUTHORITY_ID');
 
-// The shell must deliver one V67 runner + the V426 import-truth owners + one V132
-// WHPP page and prevent stale HTML/JS caching.
-must(shell, "const PATCH_ID='2026-09-04-v426-seven-business-import-truth-loader-v1'");
+// The shell must deliver one V67 runner + the V428 base-status retirement owner +
+// the V426 import-truth owners + one V132 WHPP page and prevent stale HTML/JS caching.
+must(shell, "const PATCH_ID='2026-09-05-v428-base-ccsl-status-owner-loader-v1'");
 must(shell, 'v67-resilient-run-guard.js?v=20260904-v424-1');
 must(shell, 'v68-whpp-classification-stability.js?v=20260904-v426-1');
 must(shell, 'v94-business-source-truth-ui-v2.js?v=20260904-v426-1');
+must(shell, 'v428-base-ccsl-status-owner.js?v=20260905-v428-1');
 must(shell, 'v169-seven-business-legacy-status-sync.js?v=20260904-v424-1');
 must(shell, 'v132-whpp-seven-business-fast.js?v=');
 must(shell, 'Cache-Control');
 must(shell, 'no-store, no-cache, must-revalidate, proxy-revalidate');
 must(shell, "const WHPP_PAGE_OWNER='V132'");
+must(v428, '2026-09-05-v428-retire-base-ccsl-status-writer-v1');
+must(v428, 'const original=global.runStatusMarkup');
+must(v428, 'function v168OwnsIdleStatus()');
+must(v428, 'return original.apply(this,arguments)');
 must(pause, '/api/shopee/run/pause');
 must(pause, 'global.pauseUnified=pauseUnified');
 
@@ -209,4 +215,4 @@ execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mj
 execFileSync(process.execPath,['scripts/v419-whpp-final-snapshot-authority-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['--test','test/v419-open-single-source.test.js','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V426] runtime-source gate passed · persisted-complete unified stages are read-only and already-complete WHPP can never be re-POSTed by an explicit unified click · only an actually incomplete WHPP gets one authorized start · balanced seven-business import truth outranks stale WHPP/dashboard summaries, preserving 5060+228=5288 · V426 cache-busted import truth owners are delivered by the shell · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V428] runtime-source gate passed · V428 base app.js stale completion writer is retired while V168 owns idle status and active V67 CCSL still delegates live 350/50 detail · persisted-complete unified stages are read-only and already-complete WHPP can never be re-POSTed by an explicit unified click · only an actually incomplete WHPP gets one authorized start · balanced seven-business import truth outranks stale WHPP/dashboard summaries, preserving 5060+228=5288 · V428 cache-busted status owner plus V426 import-truth owners are delivered by the shell · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
