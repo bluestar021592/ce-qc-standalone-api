@@ -1,10 +1,11 @@
 (function installSevenBusinessLegacyStatusSyncV169(global){
   if(global.__CE_QC_V169_LEGACY_STATUS_SYNC__)return;
-  const VERSION='2026-09-01-v411-unconfirmed-status-entry-lock-v1';
+  const VERSION='2026-09-05-v433-v168-single-start-control-owner-v1';
   const V420_ENTRY_CONFIRM_REVISION='2026-09-03-v420-bounded-entry-status-confirm-v1';
   const V421_CLICKABLE_UNCONFIRMED_REVISION='2026-09-03-v421-clickable-unconfirmed-start-v1';
   const V423_EXPLICIT_SHOPEE_RESTART_REVISION='2026-09-04-v423-explicit-shopee-restart-resume-v1';
   const V424_RESUME_FLOOR_HANDOFF_REVISION='2026-09-04-v424-v169-v67-proof-handoff-v1';
+  const V433_V168_SINGLE_START_OWNER='2026-09-05-v433-v168-single-start-control-owner-v1';
   const ENTRY_CONFIRM_WAIT_MS=8500;
   let observerTimer=null;
   const originalEntries={};
@@ -156,26 +157,6 @@
     });
   }
 
-  function releaseStartButtonForConfirmation(state){
-    if(state?.kind!=='unconfirmed')return false;
-    const btn=document.querySelector('[data-testid="global-auto-process"]');
-    if(!btn)return false;
-    const v67Stage=global.__CE_QC_UNIFIED_RUN_STAGE__||{};
-    const label=norm(btn.textContent);
-    const lockedByV168=btn.dataset.v168Locked==='1';
-    if(v67Stage.active===true||(!lockedByV168&&label!=='状态确认中'))return false;
-    btn.disabled=false;
-    btn.hidden=false;
-    btn.textContent='开始全自动处理';
-    btn.title=`${state.reportDate||'当前日报'} 状态仍在确认；点击后系统会等待当前读取并自动重试一次，只有确认未完成后才进入处理。`;
-    delete btn.dataset.v168Locked;
-    delete btn.dataset.v168PreviousDisabled;
-    delete btn.dataset.v168PreviousText;
-    delete btn.dataset.v168PreviousTitle;
-    btn.dataset.v421UnconfirmedEntry='1';
-    return true;
-  }
-
   function syncLegacyStatus(truth){
     const expected=normalizeDate(truth.reportDate);
     const re=/^日报\s*(\d{4}-\d{2}-\d{2})\s*·\s*当前业务.*处理中$/;
@@ -242,8 +223,7 @@
       }
       if(state.kind==='unconfirmed'){
         lockResumeButtons(state);
-        releaseStartButtonForConfirmation(state);
-        console.info('[CE-QC][V169]',name,'blocked after bounded canonical status confirmation for',state.reportDate||'current report');
+        console.info('[CE-QC][V433]',name,'blocked while V168 owns the fail-closed start-button state for',state.reportDate||'current report');
         return{
           ok:false,
           skipped:true,
@@ -290,7 +270,6 @@
       syncLegacyStatus(state.truth);
     }else if(state.kind==='unconfirmed'){
       lockResumeButtons(state);
-      releaseStartButtonForConfirmation(state);
       restoreLegacyStatus();
     }else{
       unlockResumeButtons();
@@ -334,6 +313,6 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')settle();});
 
   installEntryGuards();
-  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,v423Revision:V423_EXPLICIT_SHOPEE_RESTART_REVISION,v424Revision:V424_RESUME_FLOOR_HANDOFF_REVISION,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,releaseStartButtonForConfirmation,exactShopeeRestartInterruption};
-  console.info('[CE-QC][V169]',VERSION,V420_ENTRY_CONFIRM_REVISION,V421_CLICKABLE_UNCONFIRMED_REVISION,V423_EXPLICIT_SHOPEE_RESTART_REVISION,V424_RESUME_FLOOR_HANDOFF_REVISION,'same-date complete stays hard-locked; unconfirmed display remains fail-closed; exact SHOPEE restart passes the same fresh V168 proof into V67 resume floor so CCSL cannot be reopened by a second status read; generic failures still use normal V67 start.');
+  global.__CE_QC_V169_LEGACY_STATUS_SYNC__={version:VERSION,v420Revision:V420_ENTRY_CONFIRM_REVISION,v421Revision:V421_CLICKABLE_UNCONFIRMED_REVISION,v423Revision:V423_EXPLICIT_SHOPEE_RESTART_REVISION,v424Revision:V424_RESUME_FLOOR_HANDOFF_REVISION,v433StartOwner:V433_V168_SINGLE_START_OWNER,apply,refresh:refreshAndApply,statusState,currentCompleteTruth,ensureFreshEntryState,exactShopeeRestartInterruption};
+  console.info('[CE-QC][V433_V169]',VERSION,V433_V168_SINGLE_START_OWNER,'V168 is the sole idle start-button authority: unconfirmed status stays fail-closed; V169 only guards entry/resume and completion proof. V423/V424 exact SHOPEE restart handoff remains unchanged.');
 })(window);
