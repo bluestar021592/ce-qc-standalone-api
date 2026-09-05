@@ -160,7 +160,7 @@ assert.doesNotMatch(injection,/if\(!body\.includes\(V317_CCSL_RECOVERY_MARKER\)\
 assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must still load V334 history hard owner');
 assert.match(injection,/X-CE-QC-Unified-Runner/,'single-runner response header must be observable');
 
-assert.match(htmlOwner,/2026-09-04-v426-seven-business-import-truth-loader-v1/,'HTML owner must expose the V426 shell while retaining the consolidated V414 persisted-status contract');
+assert.match(htmlOwner,/2026-09-05-v428-base-ccsl-status-owner-loader-v1/,'HTML owner must expose the V428 base-status owner retirement while retaining the consolidated V414 persisted-status contract');
 assert.match(htmlOwner,/V411_STATUS_ENTRY_LOCK_LOADER_COMPAT='2026-09-01-v411-serialized-status-entry-lock-loader-v1'/,'V411 fail-closed entry-lock compatibility must remain active');
 assert.match(htmlOwner,/PERSISTED_STATUS_BUILD='2026-09-02-v414-one-read-seven-business-status-v1'/,'HTML response must expose the V414 persisted status contract');
 assert.match(htmlOwner,/WHPP_PAGE_OWNER='V132'/,'V132 must remain the sole WHPP page owner');
@@ -170,6 +170,7 @@ assert.match(htmlOwner,/v138-ccsl-scan-progress\.js\?v=20260905-v427-1/,'browser
 assert.match(htmlOwner,/v67-resilient-run-guard\.js\?v=20260904-v424-1/,'browser must force-load the V424 exact restart resume-floor V67 runner');
 assert.match(htmlOwner,/v146-unified-import-date-status\.js\?v=20260901-v410-1/,'browser must load the current atomic import UI owner');
 assert.match(htmlOwner,/v168-seven-business-status\.js\?v=20260902-v414-status-1/,'browser must force-load the V414 one-read persisted V168 status owner');
+assert.match(htmlOwner,/v428-base-ccsl-status-owner\.js\?v=20260905-v428-1/,'browser must load V428 immediately after V168 to retire the base app.js stale completion writer');
 assert.match(htmlOwner,/v169-seven-business-legacy-status-sync\.js\?v=20260904-v424-1/,'V424 fail-closed proof handoff must load after V168 while V67 remains the sole execution owner');
 assert.match(server,/resetRunForReport\(parsed\.reportDate\)[\s\S]*await saveState\(ccslState\)/);
 assert.match(server,/createOrRecoverRun\(reportDate/);
@@ -177,4 +178,4 @@ assert.match(server,/createOrRecoverRun\(reportDate/);
 const screenshotCcslTotal=2478+58+0+150;
 assert.equal(screenshotCcslTotal,2686);
 
-console.log('[V427/V424/V414/V411/V410/V378.1/V378/V377/SINGLE-RUNNER/V334/V317] smoke passed · V168 solely owns idle exact-date status/detail · V138 performs zero idle V317 recovery reads on the modern shell and keeps 350/50 live detail only during active V67 CCSL · pending selected date beats stale committed input · one exact-date V414 persisted status read supplies CCSL/SHOPEE/WHPP · V424 exact PROCESS_RESTART_INTERRUPTED recovery requires one opaque V67 handoff and cannot reopen a proven prior stage · unconfirmed truth blocks duplicate start/resume · V67 remains sole explicit execution owner');
+console.log('[V428/V427/V424/V414/V411/V410/V378.1/V378/V377/SINGLE-RUNNER/V334/V317] smoke passed · V428 retires the base app.js stale completion writer · V168 solely owns idle exact-date status/detail · V138 performs zero idle V317 recovery reads on the modern shell and keeps 350/50 live detail only during active V67 CCSL · pending selected date beats stale committed input · one exact-date V414 persisted status read supplies CCSL/SHOPEE/WHPP · V424 exact PROCESS_RESTART_INTERRUPTED recovery requires one opaque V67 handoff and cannot reopen a proven prior stage · unconfirmed truth blocks duplicate start/resume · V67 remains sole explicit execution owner');
