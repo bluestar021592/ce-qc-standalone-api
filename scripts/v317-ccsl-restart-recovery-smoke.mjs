@@ -155,7 +155,7 @@ assert.doesNotMatch(injection,/if\(!body\.includes\(V317_CCSL_RECOVERY_MARKER\)\
 assert.match(injection,/v320-history-trend-owner\.js\?v=20260827-v334-1/,'browser must still load V334 history hard owner');
 assert.match(injection,/X-CE-QC-Unified-Runner/,'single-runner response header must be observable');
 
-assert.match(htmlOwner,/2026-09-02-consolidated-persisted-status-loader-v1/,'HTML owner must expose the consolidated V414 persisted-status loader');
+assert.match(htmlOwner,/2026-09-04-v426-seven-business-import-truth-loader-v1/,'HTML owner must expose the V426 shell while retaining the consolidated V414 persisted-status contract');
 assert.match(htmlOwner,/V411_STATUS_ENTRY_LOCK_LOADER_COMPAT='2026-09-01-v411-serialized-status-entry-lock-loader-v1'/,'V411 fail-closed entry-lock compatibility must remain active');
 assert.match(htmlOwner,/PERSISTED_STATUS_BUILD='2026-09-02-v414-one-read-seven-business-status-v1'/,'HTML response must expose the V414 persisted status contract');
 assert.match(htmlOwner,/WHPP_PAGE_OWNER='V132'/,'V132 must remain the sole WHPP page owner');
