@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig } from './db.js';
 
 export const V431_LOCAL_AUTH_SIDECAR_ID = '2026-09-05-v431-readonly-local-auth-sidecar-v1';
+export const V432_LOCAL_AUTH_SINGLE_OWNER_ID = '2026-09-05-v432-single-active-auth-sidecar-v1';
 export const V431_LOCAL_AUTH_COOKIE = 'ce_qc_local_auth_v431';
 const PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 const APP_PORT = Math.max(1024, Math.min(65535, Number(process.env.PORT || 5177)));
@@ -21,6 +22,9 @@ let authDb = null;
 let authStmt = null;
 let authDbFile = '';
 let cachedSecret = '';
+let standbyTimer = null;
+let takeoverBusy = false;
+let shuttingDown = false;
 
 function hostOnly(value = '') { return String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split(':')[0]; }
 function ipOnly(value = '') { return String(value || '').replace(/^::ffff:/, ''); }
@@ -101,6 +105,7 @@ function responseHeaders(req, extra = {}) {
   const headers = {
     'cache-control': 'no-store',
     'x-ce-qc-auth-sidecar': V431_LOCAL_AUTH_SIDECAR_ID,
+    'x-ce-qc-auth-owner': V432_LOCAL_AUTH_SINGLE_OWNER_ID,
     'access-control-allow-headers': 'Content-Type, Accept',
     'access-control-allow-methods': 'GET,POST,OPTIONS',
     ...extra
@@ -156,8 +161,8 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(allowed.ok ? 204 : 403, headers); return res.end();
   }
   if (req.method === 'GET' && url.pathname === '/api/local-auth/health') {
-    try { openAuthDb(); return json(req, res, 200, { ok: true, id: V431_LOCAL_AUTH_SIDECAR_ID, dbReady: true, port: PORT, appPort: APP_PORT }); }
-    catch (error) { return json(req, res, 503, { ok: false, id: V431_LOCAL_AUTH_SIDECAR_ID, dbReady: false, error: String(error?.message || error) }); }
+    try { openAuthDb(); return json(req, res, 200, { ok: true, id: V431_LOCAL_AUTH_SIDECAR_ID, ownerId: V432_LOCAL_AUTH_SINGLE_OWNER_ID, dbReady: true, port: PORT, appPort: APP_PORT }); }
+    catch (error) { return json(req, res, 503, { ok: false, id: V431_LOCAL_AUTH_SIDECAR_ID, ownerId: V432_LOCAL_AUTH_SINGLE_OWNER_ID, dbReady: false, error: String(error?.message || error) }); }
   }
   if (req.method !== 'POST' || url.pathname !== '/api/local-auth/login') return json(req, res, 404, { ok: false, error: 'Not found.' });
   const channel = localChannel(req);
@@ -198,11 +203,76 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 10000;
 server.headersTimeout = 11000;
 server.keepAliveTimeout = 1000;
-server.listen(PORT, HOST, () => console.log(`[CE-QC][V431_AUTH_SIDECAR] READY http://${HOST}:${PORT} · app=${APP_PORT} · readonly-users`));
-server.on('error', error => { console.error('[CE-QC][V431_AUTH_SIDECAR] START FAILED', error?.stack || error); process.exitCode = 1; });
-function shutdown() { try { server.close(); } catch {} closeAuthDb(); }
+
+function probeExistingOwner(timeoutMs = 700) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => { if (settled) return; settled = true; resolve(Boolean(value)); };
+    const req = http.get({ host: '127.0.0.1', port: PORT, path: '/api/local-auth/health', headers: { Host: `127.0.0.1:${PORT}`, Accept: 'application/json' } }, res => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        try {
+          const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+          finish(res.statusCode === 200 && payload?.ok === true && payload?.id === V431_LOCAL_AUTH_SIDECAR_ID);
+        } catch { finish(false); }
+      });
+    });
+    req.setTimeout(timeoutMs, () => { req.destroy(); finish(false); });
+    req.on('error', () => finish(false));
+  });
+}
+
+function armStandby() {
+  if (standbyTimer || shuttingDown) return;
+  console.log(`[CE-QC][V432_AUTH_SINGLE_OWNER] port=${PORT} already has a healthy V431 owner; this duplicate child is standby-only.`);
+  standbyTimer = setInterval(async () => {
+    if (shuttingDown || takeoverBusy) return;
+    takeoverBusy = true;
+    try {
+      const healthy = await probeExistingOwner();
+      if (healthy) return;
+      clearInterval(standbyTimer);
+      standbyTimer = null;
+      console.warn(`[CE-QC][V432_AUTH_SINGLE_OWNER] active owner disappeared; standby attempting takeover on ${PORT}.`);
+      tryListen();
+    } finally { takeoverBusy = false; }
+  }, 1500);
+}
+
+function tryListen() {
+  if (shuttingDown) return;
+  try {
+    server.listen(PORT, HOST, () => {
+      if (standbyTimer) { clearInterval(standbyTimer); standbyTimer = null; }
+      console.log(`[CE-QC][V431_AUTH_SIDECAR] READY http://${HOST}:${PORT} · app=${APP_PORT} · readonly-users · ${V432_LOCAL_AUTH_SINGLE_OWNER_ID}`);
+    });
+  } catch (error) {
+    console.error('[CE-QC][V431_AUTH_SIDECAR] START FAILED', error?.stack || error);
+    process.exitCode = 1;
+  }
+}
+
+server.on('error', error => {
+  void (async () => {
+    if (error?.code === 'EADDRINUSE' && await probeExistingOwner()) {
+      armStandby();
+      return;
+    }
+    console.error('[CE-QC][V431_AUTH_SIDECAR] START FAILED', error?.stack || error);
+    process.exitCode = 1;
+  })();
+});
+tryListen();
+
+function shutdown() {
+  shuttingDown = true;
+  if (standbyTimer) { clearInterval(standbyTimer); standbyTimer = null; }
+  try { server.close(); } catch {}
+  closeAuthDb();
+}
 process.once('SIGINT', () => { shutdown(); process.exit(0); });
 process.once('SIGTERM', () => { shutdown(); process.exit(0); });
 process.once('exit', shutdown);
 
-export const __test = { hostOnly, ipOnly, privateV4, localChannel, cleanUsername, allowedOrigin, failureState };
+export const __test = { hostOnly, ipOnly, privateV4, localChannel, cleanUsername, allowedOrigin, failureState, probeExistingOwner };
