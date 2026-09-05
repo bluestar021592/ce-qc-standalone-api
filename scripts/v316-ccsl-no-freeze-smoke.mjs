@@ -223,7 +223,7 @@ assert.match(batching,/CONFIRM_MAX_TRANSIENT_RETRIES = 1/,'confirm-query may per
 assert.match(ui,/batchMax:350/,'running scan UI must show 350 tickets per scan batch');
 assert.match(ui,/单批最大350/,'completed/detail UI must show scan batch maximum 350');
 assert.match(ui,/单批最大50/,'completed/detail UI must show trajectory batch maximum 50');
-assert.match(shell,/v138-ccsl-scan-progress\.js\?v=20260827-v338-1/,'HTML shell must cache-bust the V338 350/50 progress owner');
+assert.match(shell,/v138-ccsl-scan-progress\.js\?v=20260905-v427-1/,'HTML shell must cache-bust the V427 V168-idle/V138-live 350/50 progress owner');
 
 const sampleTotal = 5453;
 const alreadyCompleted = 2100;

@@ -1,8 +1,9 @@
 (function installV138CcslScanProgress(global){
   if(global.__CE_QC_V138_CCSL_SCAN_PROGRESS__)return;
-  const VERSION='2026-08-29-v341-ccsl-progress-owner-guard-v1';
+  const VERSION='2026-09-05-v427-v168-idle-status-owner-v1';
   const V385_DETAIL_OWNER_RELEASE='2026-08-31-v385-release-stale-v67-detail-owner-v1';
   const V393_FAILURE_VISIBILITY='2026-08-31-v393-preserve-unified-failure-detail-v1';
+  const V427_V168_IDLE_OWNER='2026-09-05-v427-v168-idle-status-single-owner-v1';
   const POLL_MS=1000;
   const progressByType=new Map();
   let polling=false;
@@ -20,6 +21,22 @@
     delete node.dataset.v67UnifiedReportDate;
   }
 
+  function activeV67Ccsl(){
+    const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
+    return Boolean(stage?.owner==='V67'&&stage.active===true&&String(stage.type||'').toUpperCase()==='CCSL');
+  }
+
+  // V168 is the single idle exact-date status owner on the modern shell. V138 is
+  // only a live CCSL progress renderer while V67 is actually executing CCSL. This
+  // prevents a cached legacy "completed" card from repainting over V168's
+  // fail-closed "status confirming" truth, and it also removes the old 1s idle
+  // POST /api/v317/ccsl-recovery loop that can trigger expensive completion proof
+  // work on a large production SQLite database.
+  function v168OwnsIdleLegacyStatus(node){
+    if(!node||activeV67Ccsl())return false;
+    return Boolean(global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__);
+  }
+
   function unifiedOwnsLegacyStatus(node){
     if(!node)return false;
     const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
@@ -32,7 +49,7 @@
       // SHOPEE start error used to be overwritten within 250ms by the canonical
       // CCSL-completed renderer, hiding the real reason the three-stage runner
       // stopped. Preserve V67 terminal failure/error ownership until the next
-      // explicit run changes the stage; successful DONE may return to CCSL detail.
+      // explicit run changes the stage; successful DONE may return to idle V168.
       if(type==='FAILED'||type==='ERROR')return true;
       releaseV67Owner(node);
       return false;
@@ -80,9 +97,16 @@
       const normalizedType=String(type||'CCSL').toUpperCase();
       const reportDate=normalizedType==='CCSL'?selectedReportDate():'';
       if(normalizedType==='CCSL'){
-        const truth=await canonicalCcsl(reportDate);
-        const resolved=canonicalProgress(truth,reportDate);
-        if(resolved){progressByType.set('CCSL',resolved);return resolved;}
+        // Modern V168 owns idle status completely. Do not touch V317 while idle.
+        // During a real V67 CCSL run, read the lightweight live-progress endpoint
+        // directly; V317 remains only as a compatibility fallback for old shells.
+        if(global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__){
+          if(!activeV67Ccsl())return null;
+        }else{
+          const truth=await canonicalCcsl(reportDate);
+          const resolved=canonicalProgress(truth,reportDate);
+          if(resolved){progressByType.set('CCSL',resolved);return resolved;}
+        }
       }
       const suffix=reportDate?`&reportDate=${encodeURIComponent(reportDate)}`:'';
       const response=await fetch(`/api/v33/run-progress?businessType=${encodeURIComponent(normalizedType)}${suffix}`,{cache:'no-store',credentials:'same-origin'});
@@ -149,7 +173,7 @@
     if(!progress)return;
     const status=document.getElementById('ccslRunStatus');
     const button=document.querySelector('[data-testid="global-auto-process"]');
-    if(status&&unifiedOwnsLegacyStatus(status))return;
+    if(status&&(unifiedOwnsLegacyStatus(status)||v168OwnsIdleLegacyStatus(status)))return;
     if(status){status.innerHTML=markup(progress);status.dataset.v334ProgressState=statusText(progress)==='已完成'?'done':(progress.noDaily?'no-daily':'active');}
     if(button&&button.disabled&&progress.running){
       const p=phase(progress);
@@ -163,6 +187,7 @@
     const wrapped=function(state){
       const stage=global.__CE_QC_UNIFIED_RUN_STAGE__;
       if(stage?.owner==='V67'&&stage.active===true&&String(stage.type||'').toUpperCase()!=='CCSL')return original.apply(this,arguments);
+      if(global.__CE_QC_V168_SEVEN_BUSINESS_STATUS__&&!activeV67Ccsl())return original.apply(this,arguments);
       const type=String(state?.businessType||'CCSL').toUpperCase()==='SHOPEE'?'SHOPEE':'CCSL';
       const live=progressByType.get(type);
       const sameDate=!live?.reportDate||!state?.reportDate||String(live.reportDate)===String(state.reportDate);
@@ -178,7 +203,8 @@
   async function tick(){
     installStaticMarkupBridge();
     const page=document.getElementById('importPage');
-    if(polling||!page||page.hidden)return;
+    const status=document.getElementById('ccslRunStatus');
+    if(polling||!page||page.hidden||v168OwnsIdleLegacyStatus(status))return;
     polling=true;
     try{
       const ccsl=await read('CCSL');
@@ -189,6 +215,8 @@
   function enforceLastTruth(){
     installStaticMarkupBridge();
     const page=document.getElementById('importPage');
+    const status=document.getElementById('ccslRunStatus');
+    if(v168OwnsIdleLegacyStatus(status))return;
     const live=progressByType.get('CCSL');
     if(page&&!page.hidden&&renderable(live))render(live);
   }
@@ -200,6 +228,6 @@
     [100,450,1200].forEach(ms=>setTimeout(tick,ms));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,detailOwnerRelease:V385_DETAIL_OWNER_RELEASE,failureVisibility:V393_FAILURE_VISIBILITY,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus,releaseV67Owner};
-  console.info('[CE-QC][V341_CCSL_DETAIL_OWNER]',VERSION,V385_DETAIL_OWNER_RELEASE,V393_FAILURE_VISIBILITY,'CCSL progress keeps 350/50 detail; active non-CCSL V67 ownership and terminal V67 failures are never overwritten by CCSL detail. Successful/inactive ownership is released so canonical CCSL detail can refresh normally.');
+  global.__CE_QC_V138_CCSL_SCAN_PROGRESS__={version:VERSION,detailOwnerRelease:V385_DETAIL_OWNER_RELEASE,failureVisibility:V393_FAILURE_VISIBILITY,v168IdleOwner:V427_V168_IDLE_OWNER,read,canonicalCcsl,phase,progressByType,selectedReportDate,enforceLastTruth,unifiedOwnsLegacyStatus,v168OwnsIdleLegacyStatus,activeV67Ccsl,releaseV67Owner};
+  console.info('[CE-QC][V427_CCSL_DETAIL_OWNER]',VERSION,V385_DETAIL_OWNER_RELEASE,V393_FAILURE_VISIBILITY,V427_V168_IDLE_OWNER,'V168 is the sole idle exact-date status owner; V138 performs no idle V317 recovery polling and renders 350/50 detail only during an active V67 CCSL stage.');
 })(window);
