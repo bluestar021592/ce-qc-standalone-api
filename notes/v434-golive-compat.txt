@@ -1,1 +1,0 @@
-V434 preserves the existing V334 saved-history first-attempt ownership marker after the V433 status-first query gate change. This is a compatibility-only go-live repair: no classification, WHPP/CCSL execution, scan batch, confirm-query, or dashboard metric logic is changed.
