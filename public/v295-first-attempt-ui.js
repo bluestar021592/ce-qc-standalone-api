@@ -3,6 +3,7 @@
   const VERSION='2026-09-05-v433-status-first-heavy-query-gate-v1';
   const V299_COMPAT_VERSION='2026-08-25-v299-exact-first-attempt-after-fast-trends-v3';void V299_COMPAT_VERSION;
   const V298_COMPAT_VERSION='2026-08-25-v298-exact-visible-truth-nav-authority-v2';void V298_COMPAT_VERSION;
+  const V334_COMPAT_VERSION='2026-08-27-v334-saved-history-first-attempt-owner-v1';void V334_COMPAT_VERSION;
   const V433_STATUS_FIRST_GATE='2026-09-05-v433-status-first-dashboard-heavy-query-v1';
   const DASHBOARD_CSS='/dashboard-v18.css?v=20260825-v296-1';
   const FIRST_ATTEMPT_API='/api/v295/first-attempt-trends';
