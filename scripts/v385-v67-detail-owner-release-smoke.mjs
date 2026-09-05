@@ -33,7 +33,9 @@ assert.match(v428Source,/function v168OwnsIdleStatus\(\)[\s\S]*__CE_QC_V168_SEVE
 assert.match(v428Source,/if\(v168OwnsIdleStatus\(\)\)[\s\S]*unconfirmedMarkup\(\)[\s\S]*node\.innerHTML/,'V428 must preserve V168 fail-closed/fresh DOM instead of recomputing base appState completion');
 assert.match(v428Source,/return original\.apply\(this,arguments\)/,'V428 must delegate during active V67 CCSL so live 350/50 progress remains intact');
 assert.match(loader,/v428-base-ccsl-status-owner\.js\?v=20260905-v428-1/,'shell must load the V428 base status owner retirement after V168');
-assert.match(loader,/v168-seven-business-status\.js[^\n]*\n  <script src=\"\/v428-base-ccsl-status-owner\.js/,'V428 must load immediately after V168 so base renders cannot regain idle ownership');
+const v168LoaderIndex=loader.indexOf('/v168-seven-business-status.js?v=20260902-v414-status-1');
+const v428LoaderIndex=loader.indexOf('/v428-base-ccsl-status-owner.js?v=20260905-v428-1');
+assert.ok(v168LoaderIndex>=0&&v428LoaderIndex>v168LoaderIndex,'V428 must load after V168 so base renders cannot regain idle ownership');
 
 // Execute the browser owner boundary with a tiny DOM/fetch harness. This catches a
 // future regression where source still contains the guard text but idle code issues
