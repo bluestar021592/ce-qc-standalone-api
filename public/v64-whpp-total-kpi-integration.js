@@ -1,5 +1,11 @@
 (function installWhppTotalKpiIntegrationV64(global) {
-  const VERSION = '2026-09-01-v408-canonical-v132-home-kpi-v1';
+  const VERSION = '2026-09-04-v426-unified-import-truth-kpi-v3';
+  const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
+  const CORE_TYPES = TYPES.filter(type => type !== 'WHPP');
+  const HOME_TYPE_BY_LABEL = {
+    'CE':'CE', 'CEAF空运':'CEAF', 'TBKH':'TBKH', 'ALI1688':'ALI1688',
+    'SHOPEE CN':'SHOPEECN', 'SHOPEE VN':'SHOPEEVN', 'WHPP本土':'WHPP'
+  };
   const summaryCache = new Map();
   let decorating = false;
   let timer = null;
@@ -10,6 +16,33 @@
   };
   const fmt = value => Number(value || 0).toLocaleString('zh-CN');
   const rate = (value, total) => total ? Number(value || 0) * 100 / Number(total) : 0;
+
+  function importState() {
+    try {
+      if (typeof unifiedImportState !== 'undefined') return unifiedImportState;
+    } catch {}
+    return global.unifiedImportState || null;
+  }
+
+  function authoritativeImportTruth(state = importState()) {
+    const counts = state?.classificationCounts || null;
+    const reconciliation = state?.sourceReconciliation || null;
+    if (!counts || !reconciliation || reconciliation.balanced !== true) return null;
+    if (!TYPES.every(type => Object.prototype.hasOwnProperty.call(counts, type))) return null;
+    const declaredTypes = new Set((Array.isArray(reconciliation.businessTypes) ? reconciliation.businessTypes : []).map(type => String(type || '').toUpperCase()));
+    if (!TYPES.every(type => declaredTypes.has(type))) return null;
+    const normalized = Object.fromEntries(TYPES.map(type => [type, Math.max(0, num(counts[type]))]));
+    const total = TYPES.reduce((sum, type) => sum + normalized[type], 0);
+    if (num(reconciliation.validUniqueWaybills) !== total || num(reconciliation.classifiedWaybills) !== total) return null;
+    return {
+      counts: normalized,
+      total,
+      whppTotal: normalized.WHPP,
+      coreTotal: CORE_TYPES.reduce((sum, type) => sum + normalized[type], 0),
+      reportDate: String(state?.reportDate || '').slice(0, 10),
+      source: 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH'
+    };
+  }
 
   function setText(node, text) {
     if (node && node.textContent !== text) node.textContent = text;
@@ -27,6 +60,22 @@
   }
 
   function importStats() {
+    const protectedTruth = authoritativeImportTruth();
+    if (protectedTruth) {
+      const state = importState();
+      return {
+        rawRows: Math.max(0, num(state?.summary?.rawRows)),
+        duplicateRows: Math.max(0, num(state?.summary?.duplicateRows)),
+        missingWaybillRows: Math.max(0, num(state?.summary?.missingWaybillRows)),
+        coreCount: protectedTruth.coreTotal,
+        rawUnique: protectedTruth.total,
+        whppTotal: protectedTruth.whppTotal,
+        fullUnique: protectedTruth.total,
+        authoritativeImport: true,
+        classificationCounts: protectedTruth.counts
+      };
+    }
+
     const root = document.getElementById('unifiedClassificationSummary');
     const text = String(root?.textContent || '');
     const pick = label => {
@@ -40,7 +89,7 @@
     const coreCount = coreLabels.reduce((sum, label) => sum + importCardCount(label), 0);
     const rawUnique = Math.max(0, rawRows - duplicateRows - missingWaybillRows);
     const whppTotal = rawUnique >= coreCount ? rawUnique - coreCount : 0;
-    return { rawRows, duplicateRows, missingWaybillRows, coreCount, rawUnique, whppTotal, fullUnique: rawUnique || coreCount + whppTotal };
+    return { rawRows, duplicateRows, missingWaybillRows, coreCount, rawUnique, whppTotal, fullUnique: rawUnique || coreCount + whppTotal, authoritativeImport: false };
   }
 
   function ensureImportWhppCard(grid) {
@@ -66,26 +115,63 @@
     status?.querySelectorAll('p').forEach(p => {
       if (/有效唯一单号/.test(p.textContent || '')) p.innerHTML = p.innerHTML.replace(/有效唯一单号\s*[\d,]+/, `有效唯一单号 ${fmt(data.fullUnique)}`);
     });
+    document.documentElement.dataset.v64ImportTruth = data.authoritativeImport ? 'authoritative-seven-business' : 'legacy-compat';
+    document.documentElement.dataset.v64UnifiedTotal = String(data.fullUnique);
     return data;
+  }
+
+  function protectWhppSummary(value, reportDate) {
+    const date = String(reportDate || '').slice(0, 10);
+    const protectedTruth = authoritativeImportTruth();
+    if (!protectedTruth || protectedTruth.reportDate !== date) return value;
+    return {
+      ...(value || {}),
+      reportDate: date,
+      total: protectedTruth.whppTotal,
+      classificationTotal: protectedTruth.total,
+      classificationCounts: protectedTruth.counts,
+      classificationSource: protectedTruth.source
+    };
+  }
+
+  function authoritativeHomeSummary(reportDate) {
+    const date = String(reportDate || '').slice(0, 10);
+    const protectedTruth = authoritativeImportTruth();
+    if (!date || !protectedTruth || protectedTruth.reportDate !== date) return null;
+    return {
+      reportDate: date,
+      total: protectedTruth.whppTotal,
+      classificationTotal: protectedTruth.total,
+      classificationCounts: protectedTruth.counts,
+      classificationSource: protectedTruth.source,
+      metrics: {},
+      regions: {},
+      regionPvUnresolved: 0,
+      activeStoreRetention: 0,
+      selfPickup: 0
+    };
   }
 
   async function readWhppSummary(reportDate) {
     const date = String(reportDate || '').slice(0, 10);
     if (!date) return { reportDate: '', total: 0, metrics: {}, regions: {}, regionPvUnresolved: 0, activeStoreRetention: 0, selfPickup: 0 };
     const cached = summaryCache.get(date);
-    if (cached && Date.now() - cached.at < 30000) return cached.value;
+    if (cached && Date.now() - cached.at < 30000) return protectWhppSummary(cached.value, date);
     const response = await fetch(`/api/v132/whpp-fast-summary?reportDate=${encodeURIComponent(date)}`, { cache: 'no-store', credentials: 'same-origin' });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+    const payloadDate = String(payload.reportDate || date).slice(0, 10);
+    if (payloadDate !== date) throw new Error(`WHPP summary date mismatch: expected ${date}, got ${payloadDate}`);
     const metrics = payload.metrics || {};
     const normalized = {
       ...payload,
+      reportDate: date,
       activeStoreRetention: Number(metrics.activeStoreRetention || 0),
       selfPickup: Number(metrics.selfPickup || 0),
       regionPvUnresolved: Number(payload.regions?.PV?.unresolved || 0)
     };
     summaryCache.set(date, { at: Date.now(), value: normalized });
-    return normalized;
+    return protectWhppSummary(normalized, date);
   }
 
   function selectedReportDate() {
@@ -125,10 +211,24 @@
     const grid = document.querySelector('#homePage .v18-business-grid');
     if (!grid || !selectedSingleDay(data.reportDate)) return 0;
     ensureHomeWhppCard(grid);
-    const whppTotal = Number(data.total || 0);
-    setText(homeCard('WHPP本土')?.querySelector('b'), fmt(whppTotal));
+
+    const protectedCounts = data.classificationSource === 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH' && data.classificationCounts
+      ? data.classificationCounts
+      : null;
+    if (protectedCounts) {
+      for (const [label, type] of Object.entries(HOME_TYPE_BY_LABEL)) {
+        const card = homeCard(label);
+        if (card) setText(card.querySelector('b'), fmt(protectedCounts[type]));
+      }
+    } else {
+      setText(homeCard('WHPP本土')?.querySelector('b'), fmt(Number(data.total || 0)));
+    }
+
+    const whppTotal = protectedCounts ? Number(protectedCounts.WHPP || 0) : Number(data.total || 0);
     const sixLabels = ['CE','CEAF空运','TBKH','SHOPEE CN','SHOPEE VN','ALI1688'];
-    const fullTotal = sixLabels.reduce((sum, label) => sum + homeCardValue(label), 0) + whppTotal;
+    const fullTotal = protectedCounts
+      ? Number(data.classificationTotal || TYPES.reduce((sum, type) => sum + num(protectedCounts[type]), 0))
+      : sixLabels.reduce((sum, label) => sum + homeCardValue(label), 0) + whppTotal;
     for (const card of grid.querySelectorAll('.v18-business-card')) {
       const label = String(card.querySelector('span')?.textContent || '').trim();
       const value = label === '总览' ? fullTotal : (label === 'WHPP本土' ? whppTotal : num(card.querySelector('b')?.textContent));
@@ -137,6 +237,8 @@
         setText(card.querySelector('em'), `占总票数 ${label === '总览' ? '100.00' : rate(value, fullTotal).toFixed(2)}%`);
       }
     }
+    document.documentElement.dataset.v64HomeClassificationSource = protectedCounts ? 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH' : 'LEGACY_WHPP_FAST_SUMMARY';
+    document.documentElement.dataset.v64HomeUnifiedTotal = String(fullTotal);
     return fullTotal;
   }
 
@@ -220,11 +322,21 @@
     patchRateMetric('首次妥投率', combinedPodRate, signature);
   }
 
+  function refreshClassification() {
+    patchImportPage();
+    const home = document.getElementById('homePage');
+    if (!home || home.hidden) return 0;
+    const reportDate = selectedReportDate();
+    if (!reportDate) return 0;
+    const immediateHome = authoritativeHomeSummary(reportDate);
+    return immediateHome ? patchHomeTop(immediateHome) : 0;
+  }
+
   async function decorate() {
     if (decorating) return;
     decorating = true;
     try {
-      patchImportPage();
+      refreshClassification();
       const home = document.getElementById('homePage');
       if (!home || home.hidden) return;
       const reportDate = selectedReportDate();
@@ -233,7 +345,8 @@
       patchHomeTop(summary);
       patchHomeCore(summary);
     } catch (error) {
-      console.warn('[CE-QC][V64_WHPP_TOTAL_KPI] skipped', error);
+      refreshClassification();
+      console.warn('[CE-QC][V64_WHPP_TOTAL_KPI] WHPP metrics refresh skipped; synchronous authoritative HOME classification remains protected', error);
     } finally {
       decorating = false;
     }
@@ -262,8 +375,19 @@
     }, true);
     document.addEventListener('ce-qc-run-complete', () => schedule(0, true));
     schedule(0, false);
-    console.info('[CE-QC][V64_WHPP_TOTAL_KPI]', VERSION);
+    console.info('[CE-QC][V64_WHPP_TOTAL_KPI]', VERSION, 'balanced seven-business classification refresh is synchronous; WHPP fast-summary is metrics-only for the same imported date.');
   }
+
+  global.__CE_QC_V64_WHPP_TOTAL_KPI__ = {
+    version: VERSION,
+    refresh: decorate,
+    refreshClassification,
+    importStats,
+    readWhppSummary,
+    protectWhppSummary,
+    authoritativeHomeSummary,
+    authoritativeImportTruth
+  };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
   else install();

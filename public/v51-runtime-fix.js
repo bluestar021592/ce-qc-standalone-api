@@ -1,5 +1,6 @@
 (function installRuntimeFixV51(global){
   const VERSION='2026-08-12-v51-runtime-fix-v3';
+  const V426_HOME_OWNER_HANDOFF='2026-09-04-v426-v51-shell-owner-contract-v2';
   const nativeFetch=global.fetch.bind(global);
   const SPECIAL_TAB_BY_LABEL={
     'CCSLCN分流':'ccslCnDiversion','CECN滞留包裹':'ccslCnDiversion',
@@ -124,7 +125,11 @@
 
   function homeVisible(){const node=document.getElementById('homePage');return Boolean((node&&!node.hidden&&node.classList.contains('active'))||location.pathname==='/'||location.pathname==='/home');}
   function businessCardValue(card){return parseNumber(card.querySelector('b')?.textContent);}
+  function v64OwnsHomeClassification(){
+    return String(global.__CE_QC_HOME_CLASSIFICATION_OWNER__||'')==='V64';
+  }
   function patchHomeWhppCard(){
+    if(v64OwnsHomeClassification())return;
     if(homeWhppTotal===null||!homeVisible())return;
     const grid=document.querySelector('#homePage .v18-business-grid');if(!grid)return;
     let cards=[...grid.querySelectorAll('.v18-business-card')];if(!cards.length)return;
@@ -152,6 +157,7 @@
     });
   }
   async function refreshHomeWhpp(force=false){
+    if(v64OwnsHomeClassification())return;
     if(!homeVisible())return;
     const date=selectedDate();
     if(homeRequest)return homeRequest;
@@ -231,5 +237,5 @@
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){void refreshHomeWhpp(false);}});
   document.addEventListener('ce-qc-run-complete',()=>{homeWhppDate='';void refreshHomeWhpp(true);void refreshCarrySummary();});
   setTimeout(()=>{void refreshHomeWhpp(false);void refreshCarrySummary();},40);
-  console.info('[CE-QC][RUNTIME_V51]',VERSION);
+  console.info('[CE-QC][RUNTIME_V51]',VERSION,V426_HOME_OWNER_HANDOFF);
 })(window);

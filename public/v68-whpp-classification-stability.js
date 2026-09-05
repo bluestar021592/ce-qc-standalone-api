@@ -1,7 +1,9 @@
 (function installWhppClassificationStabilityV68(global) {
   if (global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__) return;
 
-  const VERSION = '2026-09-01-v399-seven-business-import-total-v1';
+  const VERSION = '2026-09-04-v426-unified-import-seven-business-truth-priority-v1';
+  const TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
+  const CORE_TYPES = TYPES.filter(type => type !== 'WHPP');
   let scheduled = false;
   let fastSyncing = false;
   let lastFastSyncAt = 0;
@@ -62,30 +64,54 @@
   }
 
   function coreCountFromCards() {
-    return ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']
-      .reduce((sum, label) => sum + readCardCount(label), 0);
+    return CORE_TYPES.reduce((sum, label) => sum + readCardCount(label), 0);
+  }
+
+  function authoritativeImportTruth(state = importState()) {
+    const counts = state?.classificationCounts || null;
+    const reconciliation = state?.sourceReconciliation || null;
+    if (!counts || !reconciliation || reconciliation.balanced !== true) return null;
+    if (!TYPES.every(type => Object.prototype.hasOwnProperty.call(counts, type))) return null;
+    const declaredTypes = new Set((Array.isArray(reconciliation.businessTypes) ? reconciliation.businessTypes : []).map(type => String(type || '').toUpperCase()));
+    if (!TYPES.every(type => declaredTypes.has(type))) return null;
+    const normalized = Object.fromEntries(TYPES.map(type => [type, Math.max(0, num(counts[type]))]));
+    const total = TYPES.reduce((sum, type) => sum + normalized[type], 0);
+    if (num(reconciliation.validUniqueWaybills) !== total || num(reconciliation.classifiedWaybills) !== total) return null;
+    return {
+      counts: normalized,
+      core: CORE_TYPES.reduce((sum, type) => sum + normalized[type], 0),
+      whppTotal: normalized.WHPP,
+      fullUnique: total,
+      reportDate: String(state?.reportDate || '').slice(0, 10),
+      source: 'UNIFIED_IMPORT_SEVEN_BUSINESS_RECONCILIATION'
+    };
   }
 
   function deriveTruth() {
+    const stateTruth = authoritativeImportTruth();
+    if (stateTruth) return { ...stateTruth, rawUnique: stateTruth.fullUnique, explicit: true, authoritativeImport: true };
+
     const stats = rawStats();
     const rawUnique = Math.max(0, stats.rawRows - stats.duplicateRows - stats.missingWaybillRows);
-    const core = coreCountFromCards();
     const state = importState();
     const counts = state?.classificationCounts || {};
     const hasExplicitWhpp = Object.prototype.hasOwnProperty.call(counts, 'WHPP');
+    const coreFromState = CORE_TYPES.every(type => Object.prototype.hasOwnProperty.call(counts, type))
+      ? CORE_TYPES.reduce((sum, type) => sum + Math.max(0, num(counts[type])), 0)
+      : 0;
+    const core = coreFromState || coreCountFromCards();
 
-    // V94/V216 already synchronize the canonical WHPP count into the runtime
-    // import state. Prefer that explicit value. The legacy V68 heuristic used
-    // rawRows-core, but fast bootstrap intentionally does not hydrate rawRows,
-    // so it incorrectly overwrote a real WHPP count with zero.
+    // Legacy compatibility only. New unified imports are protected above by the
+    // seven-business source reconciliation and can never be replaced by a later
+    // WHPP summary read.
     if (hasExplicitWhpp) {
       const whppTotal = Math.max(0, num(counts.WHPP));
-      return { rawUnique, core, whppTotal, fullUnique: core + whppTotal, explicit: true };
+      return { rawUnique, core, whppTotal, fullUnique: core + whppTotal, explicit: true, authoritativeImport: false };
     }
 
     const whppTotal = rawUnique >= core ? Math.max(0, rawUnique - core) : 0;
     const fullUnique = rawUnique > 0 ? rawUnique : core + whppTotal;
-    return { rawUnique, core, whppTotal, fullUnique, explicit: false };
+    return { rawUnique, core, whppTotal, fullUnique, explicit: false, authoritativeImport: false };
   }
 
   function isWhppCard(node) {
@@ -128,7 +154,7 @@
     while (walker.nextNode()) nodes.push(walker.currentNode);
     for (const node of nodes) {
       const before = String(node.nodeValue || '');
-      let next = before
+      const next = before
         .replace(/有效唯一单号\s*[\d,]+/g, `有效唯一单号 ${total}`)
         .replace(/日报导入完成，\s*共\s*[\d,]+\s*个唯一运单/g, `日报导入完成，共 ${total} 个唯一运单`)
         .replace(/导入成功：\s*有效\s*[\d,]+\s*票/g, `导入成功：有效 ${total} 票`);
@@ -150,13 +176,23 @@
     patchStatus(truth);
     document.documentElement.dataset.v68WhppTotal = String(truth.whppTotal);
     document.documentElement.dataset.v68UnifiedTotal = String(truth.fullUnique);
+    document.documentElement.dataset.v68ImportTruth = truth.authoritativeImport ? 'authoritative-seven-business' : 'legacy-compat';
     return true;
   }
 
   async function syncFastWhppTruth(force = false) {
     const date = currentDate();
-    if (!date || fastSyncing) return;
-    if (!force && Date.now() - lastFastSyncAt < 5000) return;
+    if (!date || fastSyncing) return null;
+
+    const before = importState();
+    const protectedTruth = authoritativeImportTruth(before);
+    if (protectedTruth && protectedTruth.reportDate === date) {
+      before.whppClassificationDisplaySource = 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH';
+      normalize();
+      return { skipped: true, reason: 'AUTHORITATIVE_UNIFIED_IMPORT_TRUTH', total: protectedTruth.fullUnique, whppTotal: protectedTruth.whppTotal };
+    }
+
+    if (!force && Date.now() - lastFastSyncAt < 5000) return null;
     fastSyncing = true;
     lastFastSyncAt = Date.now();
     try {
@@ -164,18 +200,30 @@
         cache: 'no-store', credentials: 'same-origin'
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.ok === false || String(payload?.reportDate || '') !== date) return;
+      if (!response.ok || payload?.ok === false || String(payload?.reportDate || '') !== date) return null;
       const state = importState();
-      if (!state || String(state.reportDate || '').slice(0, 10) !== date) return;
+      if (!state || String(state.reportDate || '').slice(0, 10) !== date) return null;
+
+      // The import may have completed while this legacy request was in flight.
+      // Re-check before writing so stale WHPP summaries can never overwrite a
+      // newly committed seven-business reconciliation.
+      const nowProtected = authoritativeImportTruth(state);
+      if (nowProtected) {
+        state.whppClassificationDisplaySource = 'V426_UNIFIED_IMPORT_SEVEN_BUSINESS_TRUTH';
+        normalize();
+        return { skipped: true, reason: 'AUTHORITATIVE_IMPORT_BECAME_READY', total: nowProtected.fullUnique, whppTotal: nowProtected.whppTotal };
+      }
+
       const total = Math.max(0, num(payload?.total ?? payload?.metrics?.total));
       state.classificationCounts = { ...(state.classificationCounts || {}), WHPP: total };
-      const core = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']
-        .reduce((sum, type) => sum + num(state.classificationCounts?.[type]), 0);
+      const core = CORE_TYPES.reduce((sum, type) => sum + num(state.classificationCounts?.[type]), 0);
       state.summary = { ...(state.summary || {}), validUniqueWaybills: core + total, totalUnique: core + total };
-      state.whppClassificationDisplaySource = 'V399_WHPP_FAST_SUMMARY';
+      state.whppClassificationDisplaySource = 'V426_LEGACY_WHPP_FAST_SUMMARY_COMPAT';
       normalize();
+      return { skipped: false, source: 'LEGACY_WHPP_FAST_SUMMARY', total: core + total, whppTotal: total };
     } catch (error) {
-      console.warn('[CE-QC][V399_WHPP_CLASSIFICATION] fast WHPP sync skipped', error?.message || error);
+      console.warn('[CE-QC][V426_WHPP_CLASSIFICATION] legacy fast WHPP sync skipped', error?.message || error);
+      return null;
     } finally {
       fastSyncing = false;
     }
@@ -232,7 +280,7 @@
     normalize();
     schedule();
     void syncFastWhppTruth(true);
-    console.info('[CE-QC][V68_WHPP_CLASSIFICATION_STABILITY]', VERSION);
+    console.info('[CE-QC][V68_WHPP_CLASSIFICATION_STABILITY]', VERSION, 'balanced seven-business unified import truth is authoritative; WHPP fast-summary is legacy fallback only.');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
@@ -241,6 +289,8 @@
   global.__CE_QC_V68_WHPP_CLASSIFICATION_STABILITY__ = {
     version: VERSION,
     refresh: normalize,
-    sync: syncFastWhppTruth
+    sync: syncFastWhppTruth,
+    deriveTruth,
+    authoritativeImportTruth
   };
 })(window);
