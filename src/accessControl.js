@@ -1,15 +1,62 @@
 import net from 'net';
 import crypto from 'crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { getDb, nowIso } from './db.js';
+import { getDb, nowIso, getRuntimeConfig } from './db.js';
 
 const ROLE_LEVEL = Object.freeze({ VIEWER: 1, OPERATOR: 2, ADMIN: 3 });
 const LOGIN_LIMIT = 5;
 const SESSION_HOURS = 8;
 const SESSION_REFRESH_THRESHOLD_MS = 2 * 60 * 60_000;
+const LOCAL_AUTH_COOKIE = 'ce_qc_local_auth_v431';
+const AUTH_SIDECAR_PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 export const V430_INTERNAL_LOGIN_FALLBACK_ID = '2026-09-05-v430-native-form-login-fallback-v1';
+export const V431_LOCAL_AUTH_SIDECAR_ID = '2026-09-05-v431-readonly-local-auth-sidecar-v1';
 let jwks = null;
+let authSidecarChild = null;
+let authSidecarStopping = false;
+let authSidecarRestartTimer = null;
+let localAuthSecretCache = '';
+
+function startLocalAuthSidecar() {
+  if (String(process.env.CE_QC_LOCAL_AUTH_CHILD || '') === '1' || String(process.env.NODE_ENV || '').toLowerCase() === 'test' || authSidecarChild) return;
+  const file = fileURLToPath(new URL('./localAuthSidecar.js', import.meta.url));
+  try {
+    authSidecarChild = spawn(process.execPath, [file], {
+      cwd: process.cwd(),
+      env: { ...process.env, CE_QC_LOCAL_AUTH_CHILD: '1', CE_QC_AUTH_SIDECAR_PORT: String(AUTH_SIDECAR_PORT) },
+      windowsHide: true,
+      detached: false,
+      stdio: ['ignore', 'inherit', 'inherit']
+    });
+    console.log(`[CE-QC][V431_AUTH_SIDECAR] starting pid=${authSidecarChild.pid || '-'} port=${AUTH_SIDECAR_PORT}`);
+    authSidecarChild.once('error', error => console.error('[CE-QC][V431_AUTH_SIDECAR] spawn failed:', error?.stack || error));
+    authSidecarChild.once('exit', (code, signal) => {
+      console.log(`[CE-QC][V431_AUTH_SIDECAR] exited code=${code ?? 'null'}${signal ? ` signal=${signal}` : ''}`);
+      authSidecarChild = null;
+      if (!authSidecarStopping) {
+        clearTimeout(authSidecarRestartTimer);
+        authSidecarRestartTimer = setTimeout(startLocalAuthSidecar, 1000);
+        authSidecarRestartTimer.unref?.();
+      }
+    });
+  } catch (error) {
+    authSidecarChild = null;
+    console.error('[CE-QC][V431_AUTH_SIDECAR] start failed:', error?.stack || error);
+  }
+}
+function stopLocalAuthSidecar() {
+  authSidecarStopping = true;
+  clearTimeout(authSidecarRestartTimer);
+  try { authSidecarChild?.kill(); } catch {}
+  authSidecarChild = null;
+}
+process.once('exit', stopLocalAuthSidecar);
+startLocalAuthSidecar();
 
 export function validateAccessConfiguration() {
   const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'ce-qc.cambodian.com');
@@ -36,9 +83,12 @@ export async function accessIdentity(req, res, next) {
     } else {
       return denyPageOrApi(req, res, 403, 'Access denied', publicHost ? `Please use https://${publicHost}` : 'Contact the system administrator.');
     }
-    let user = readSession(req, channel, cloudflareEmail);
+    let user = readLocalAuthSession(req, channel);
+    if (!user) {
+      user = readSession(req, channel, cloudflareEmail);
+      if (user) user = refreshSessionIfNeeded(req, res, user, channel);
+    }
     if (user) {
-      user = refreshSessionIfNeeded(req, res, user, channel);
       req.user = user;
       req.accessMode = channel;
       req.cloudflareEmail = cloudflareEmail;
@@ -77,7 +127,7 @@ async function handleInternalAuth(req, res, host, remote) {
     return createFirstAdmin(req, res, channel);
   }
   if (req.path.endsWith('/change-password')) {
-    const user = readSession(req, channel, cloudflareEmail);
+    const user = readLocalAuthSession(req, channel) || readSession(req, channel, cloudflareEmail);
     if (!user) return authError(req, res, 401, 'Please sign in first.', channel, false);
     return changePassword(req, res, user);
   }
@@ -136,6 +186,7 @@ function changePassword(req, res, user) {
   getDb().prepare('UPDATE users SET passwordHash=?,mustChangePassword=0,updatedAt=? WHERE id=?').run(bcrypt.hashSync(newPassword, 12), nowIso(), row.id);
   getDb().prepare('UPDATE user_sessions SET revokedAt=? WHERE userId=? AND revokedAt IS NULL').run(nowIso(), row.id);
   auditAction(req, 'PASSWORD_CHANGED', { username: row.username });
+  clearLocalAuthCookie(res);
   return res.json({ ok: true, reloginRequired: true });
 }
 
@@ -181,6 +232,37 @@ function authError(req, res, status, message, channel, bootstrap) {
   return res.status(status).json({ ok: false, error: message });
 }
 
+function localAuthSecret() {
+  if (localAuthSecretCache) return localAuthSecretCache;
+  const env = String(process.env.CE_QC_LOCAL_SESSION_SECRET || '').trim();
+  if (env.length >= 32) { localAuthSecretCache = env; return localAuthSecretCache; }
+  try {
+    const file = path.join(getRuntimeConfig().tokenDir, 'v431_local_auth.secret');
+    const secret = fs.readFileSync(file, 'utf8').trim();
+    if (secret.length >= 43) { localAuthSecretCache = secret; return localAuthSecretCache; }
+  } catch {}
+  return '';
+}
+
+function readLocalAuthSession(req, channel) {
+  if (!['LOCAL', 'LAN'].includes(channel)) return null;
+  const token = cookieValue(req, LOCAL_AUTH_COOKIE);
+  const secret = localAuthSecret();
+  if (!token || !secret) return null;
+  try {
+    const [body, sig, extra] = String(token).split('.');
+    if (!body || !sig || extra) return null;
+    const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+    const a = Buffer.from(sig); const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (payload?.v !== 431 || Number(payload?.exp || 0) <= Date.now() || payload?.channel !== channel) return null;
+    const user = payload?.user || {};
+    if (!user.username || !['VIEWER', 'OPERATOR', 'ADMIN'].includes(String(user.role || '').toUpperCase())) return null;
+    return { ...user, role: String(user.role).toUpperCase(), businessScope: String(user.businessScope || 'ALL').toUpperCase(), department: user.department || '', devMode: channel === 'LOCAL', localAuth: true };
+  } catch { return null; }
+}
+
 function readSession(req, channel, cloudflareEmail) {
   const token = cookieValue(req, 'ce_internal_session');
   if (!token) return null;
@@ -203,7 +285,18 @@ function refreshSessionIfNeeded(req, res, user, channel) {
 }
 
 function revokeCookieSession(req) { const token = cookieValue(req, 'ce_internal_session'); if (token) getDb().prepare('UPDATE user_sessions SET revokedAt=? WHERE sessionHash=?').run(nowIso(), sha256(token)); }
-function clearSessionCookie(res, channel) { res.setHeader('Set-Cookie', `ce_internal_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${channel === 'PUBLIC' ? '; Secure' : ''}`); }
+function clearLocalAuthCookie(res) {
+  const existing = res.getHeader?.('Set-Cookie');
+  const rows = Array.isArray(existing) ? existing.slice() : (existing ? [String(existing)] : []);
+  rows.push(`${LOCAL_AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
+  res.setHeader('Set-Cookie', rows);
+}
+function clearSessionCookie(res, channel) {
+  res.setHeader('Set-Cookie', [
+    `ce_internal_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${channel === 'PUBLIC' ? '; Secure' : ''}`,
+    `${LOCAL_AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+  ]);
+}
 function userCount() { return Number(getDb().prepare("SELECT COUNT(*) AS count FROM users WHERE status='ACTIVE'").get()?.count || 0); }
 
 export function requireRole(minimumRole) {
@@ -261,7 +354,12 @@ function loginPage(req, res, { channel, bootstrap, error = '', forceHtml = false
   const endpoint = bootstrap ? '/api/internal-auth/bootstrap' : '/api/internal-auth/login';
   const title = bootstrap ? 'Initialize administrator' : 'CE QC internal sign-in';
   const safeError = escapeHtml(error);
-  return res.status(status).type('html').send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(400px,calc(100% - 40px));background:#fff;border:1px solid #dce5ef;border-radius:8px;padding:28px;box-shadow:0 12px 36px #16395b18}h1{font-size:22px;margin:0 0 18px}label{display:block;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd8e5;border-radius:5px}button{width:100%;margin-top:18px;border:0;border-radius:5px;background:#126ee8;color:#fff;padding:11px;font-weight:700;cursor:pointer}button:disabled{opacity:.65;cursor:wait}#error{color:#b42318;margin-top:10px;min-height:24px}</style><main class="box"><h1>${bootstrap ? '创建首个管理员' : 'CE质控系统内部登录'}</h1><form id="login" method="post" action="${endpoint}">${bootstrap ? '<label>姓名</label><input name="displayName" required><label>邮箱</label><input name="email" type="email">' : ''}<label>用户名</label><input name="username" autocomplete="username" required><label>密码</label><input name="password" type="password" autocomplete="current-password" required><button type="submit">${bootstrap ? '创建管理员' : '登录'}</button><div id="error" role="alert">${safeError}</div><noscript><div style="margin-top:10px;color:#667085">浏览器脚本不可用时，登录按钮会自动使用标准表单提交。</div></noscript></form></main><script>(function(){var form=document.getElementById('login');if(!form||!window.fetch||!window.FormData)return;form.addEventListener('submit',function(e){e.preventDefault();var btn=form.querySelector('button[type="submit"]');var err=document.getElementById('error');if(btn)btn.disabled=true;if(err)err.textContent='正在登录...';var fd=new FormData(form);var body={};fd.forEach(function(v,k){body[k]=v;});fetch('${endpoint}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(j){return {r:r,j:j};});}).then(function(x){if(x.r.ok){location.href='/';return;}if(err)err.textContent=x.j.error||'登录失败';}).catch(function(){if(err)err.textContent='登录请求没有完成，请再点一次；标准表单备用通道已保留。';}).then(function(){if(btn)btn.disabled=false;});});})();</script>`);
+  const useSidecar = !bootstrap && (channel === 'LOCAL' || channel === 'LAN');
+  const requestHost = normalizeHost(req.hostname || req.get('host')) || '127.0.0.1';
+  const formattedHost = requestHost.includes(':') ? `[${requestHost}]` : requestHost;
+  const primaryEndpoint = useSidecar ? `http://${formattedHost}:${AUTH_SIDECAR_PORT}/api/local-auth/login` : endpoint;
+  const statusText = useSidecar ? '独立登录通道 5179，不占用质控主数据库写入锁。' : '';
+  return res.status(status).type('html').send(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#f3f6fa;color:#17324d;font:15px/1.6 system-ui,'Microsoft YaHei',sans-serif;display:grid;place-items:center;min-height:100vh}.box{width:min(400px,calc(100% - 40px));background:#fff;border:1px solid #dce5ef;border-radius:8px;padding:28px;box-shadow:0 12px 36px #16395b18}h1{font-size:22px;margin:0 0 18px}label{display:block;margin:12px 0 4px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #cbd8e5;border-radius:5px}button{width:100%;margin-top:18px;border:0;border-radius:5px;background:#126ee8;color:#fff;padding:11px;font-weight:700;cursor:pointer}button:disabled{opacity:.65;cursor:wait}#error{color:#b42318;margin-top:10px;min-height:24px}#channel{color:#667085;margin-top:8px;font-size:12px}</style><main class="box"><h1>${bootstrap ? '创建首个管理员' : 'CE质控系统内部登录'}</h1><form id="login" method="post" action="${primaryEndpoint}">${bootstrap ? '<label>姓名</label><input name="displayName" required><label>邮箱</label><input name="email" type="email">' : ''}<label>用户名</label><input name="username" autocomplete="username" required><label>密码</label><input name="password" type="password" autocomplete="current-password" required><button type="submit">${bootstrap ? '创建管理员' : '登录'}</button><div id="error" role="alert">${safeError}</div>${statusText ? `<div id="channel">${statusText}</div>` : ''}<noscript><div style="margin-top:10px;color:#667085">浏览器脚本不可用时，登录按钮仍会使用独立表单通道提交。</div></noscript></form></main><script>(function(){var form=document.getElementById('login');if(!form||!window.fetch||!window.FormData)return;form.addEventListener('submit',function(e){e.preventDefault();var btn=form.querySelector('button[type="submit"]');var err=document.getElementById('error');if(btn)btn.disabled=true;if(err)err.textContent='${useSidecar ? '正在通过独立认证通道登录...' : '正在登录...'}';var fd=new FormData(form);var body={};fd.forEach(function(v,k){body[k]=v;});var controller=window.AbortController?new AbortController():null;var timer=setTimeout(function(){if(controller)controller.abort();},8000);fetch('${primaryEndpoint}',{method:'POST',credentials:'include',cache:'no-store',headers:{'content-type':'application/json','accept':'application/json'},body:JSON.stringify(body),signal:controller?controller.signal:undefined}).then(function(r){return r.text().then(function(t){var j={};try{j=t?JSON.parse(t):{};}catch(_){j={error:t||('HTTP '+r.status)};}return {r:r,j:j};});}).then(function(x){clearTimeout(timer);if(x.r.ok){location.replace('/?auth=v431&t='+Date.now());return;}if(err)err.textContent=x.j.error||'登录失败';if(btn)btn.disabled=false;}).catch(function(ex){clearTimeout(timer);if(err)err.textContent=ex&&ex.name==='AbortError'?'登录认证8秒内未完成，独立认证服务没有响应。':'登录认证连接失败，请保持启动器窗口开启后重试。';if(btn)btn.disabled=false;});});})();</script>`);
 }
 
 function cleanUsername(value) { return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 60); }
