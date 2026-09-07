@@ -114,7 +114,7 @@ function currentWhppMembership(database,date){
   // Older/preserved days can have their normalized WHPP daily rows rotated while
   // the immutable unified-import membership remains available. Use the latest
   // VALID WHPP-bearing cohort for this date; sibling-only later imports do not
-  // replace this per-business membership proof.
+  // supersede this per-business membership proof.
   try{
     const batch=database.prepare(`SELECT b.snapshotId
       FROM unified_import_batches b
