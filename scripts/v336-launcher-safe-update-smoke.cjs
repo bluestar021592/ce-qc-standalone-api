@@ -36,7 +36,11 @@ assert.ok(managed.includes('Resolve-DnsName github.com'), 'managed launcher must
 assert.ok(managed.includes("foreach ($server in @('1.1.1.1','8.8.8.8'))"), 'managed launcher must have independent public DNS resolvers');
 assert.ok(managed.includes('http.curloptResolve=$script:GitHubCurlResolve'), 'managed launcher must bypass broken resolver without changing TLS hostname');
 assert.ok(managed.includes("for ($attempt = 1; $attempt -le 3; $attempt++)"), 'managed launcher must retry normal fetch before DNS fallback');
-assert.ok(managed.includes("Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')"), 'resolved Git transport must also be used for install pull');
+assert.ok(managed.includes('V446_LOCAL_EXACT_INSTALL_ID=2026-09-07-v446-local-exact-sha-install-v1'), 'managed launcher must use V446 exact local-SHA install contract');
+assert.ok(managed.includes('function Install-VerifiedCommitLocally'), 'managed launcher must install the already-verified local commit');
+assert.ok(managed.includes("Invoke-Exe $script:GitExe @('merge','--ff-only','--quiet',$VerifiedCommit)"), 'managed launcher must advance only to the exact verified SHA locally');
+assert.ok(managed.includes('if ($installed -ne $VerifiedCommit)'), 'managed launcher must verify exact installed HEAD after local install');
+assert.ok(!managed.includes("Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')"), 'managed launcher must not perform a second post-verification GitHub pull');
 
 // Security gate must detect real mutation commands, not harmless comments/log text such as
 // "hosts file is not modified". Strip PowerShell comments before checking command patterns.
@@ -74,4 +78,4 @@ assert.ok(repair.includes('CE_QC_Managed_Launcher.ps1'), 'emergency recovery mus
 assert.ok(!repair.includes('config --local --add http.curloptResolve'), 'emergency recovery must not persist the resolver in repository config');
 assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b/i.test(repair), 'emergency recovery must not alter adapter DNS');
 
-console.log('[V347/V336] launcher safety smoke passed · exact candidate tested before install · V347 persistence hot-path forces fresh SQLite backup · backup hash+quick_check verified · exact SHA installed · local startup verified · automatic code+DB rollback armed · managed launcher retries GitHub and uses process-local explicit-DNS fallback without system DNS mutation');
+console.log('[V446.1/V347/V336] launcher safety smoke passed · exact candidate tested before install · V347 persistence hot-path forces fresh SQLite backup · backup hash+quick_check verified · V446 exact verified SHA installs locally without a second GitHub pull · local startup verified · automatic code+DB rollback armed · managed launcher retries GitHub and uses process-local explicit-DNS fallback without system DNS mutation');
