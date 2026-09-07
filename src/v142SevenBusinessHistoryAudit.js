@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 
-export const V142_HISTORY_AUDIT_ID = '2026-09-07-v451-snapshot-indexed-readonly-history-audit-v1';
+export const V142_HISTORY_AUDIT_ID = '2026-09-07-v451-snapshot-indexed-readonly-history-audit-v2-fail-closed';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = ['CE','CEAF','TBKH','ALI1688'];
 const ALL_TYPES = [...CORE_TYPES,'WHPP'];
@@ -9,7 +9,7 @@ const SNAPSHOT_CHUNK_SIZE = 300;
 function iso(value='') { const text=String(value||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:''; }
 function dates(from,to){ const out=[]; const d=new Date(`${from}T00:00:00Z`), end=new Date(`${to}T00:00:00Z`); while(d<=end){out.push(d.toISOString().slice(0,10));d.setUTCDate(d.getUTCDate()+1);} return out; }
 function tableExists(db,name){ return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name)); }
-function rows(db,sql,...params){ try{return db.prepare(sql).all(...params);}catch{return [];}}
+function rows(db,sql,...params){ return db.prepare(sql).all(...params); }
 function safeJson(value,fallback={}){try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}}
 function token(value){return String(value??'').normalize('NFKC').trim().toUpperCase().replace(/[\s_-]+/g,'');}
 function hasAirMarker(row={}){const raw=row?.raw&&typeof row.raw==='object'?row.raw:row;return Object.values(raw||{}).some(value=>['CCAF','CEAF'].includes(token(value)));}
