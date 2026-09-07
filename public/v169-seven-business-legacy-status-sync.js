@@ -109,7 +109,7 @@
     const btn=startButton();if(!btn)return;
     rememberStartButton(btn);
     const complete=state?.kind==='complete';
-    btn.disabled=true;
+    if(!btn.disabled)btn.disabled=true;
     btn.setAttribute('aria-disabled','true');
     btn.dataset.v441LockReason=complete?'complete':'unconfirmed';
     btn.textContent=complete?'七业务已完成':'状态确认中';
@@ -383,7 +383,9 @@
 
   installIsolatedStatusFetchBridge();
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',settle,{once:true});else settle();
-  new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','class','style']});
+  new MutationObserver(records=>{
+    if(records.some(record=>record.type==='childList'||(record.type==='attributes'&&record.attributeName==='disabled'&&record.target?.matches?.('[data-testid="global-auto-process"]'))))schedule();
+  }).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled']});
   document.addEventListener('click',event=>{
     const btn=event.target?.closest?.('[data-testid="global-auto-process"]');
     if(!btn)return;
