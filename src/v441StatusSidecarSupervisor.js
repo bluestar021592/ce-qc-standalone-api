@@ -144,7 +144,8 @@ function snapshotMembership(row){
 // exactly equals the current WHPP member set remains authoritative even when a
 // later sibling-business import moved the global batch boundary or an old writer
 // stripped finalizedSnapshotId from the daily summary. Legacy/unverified snapshots
-// still require the surviving daily finalizedSnapshotId attestation.
+// still require finalized daily evidence: either the exact surviving daily pointer
+// or the finalize-generated history row, plus exact immutable member equality.
 export function readV444WhppFinalizedStatusAuthority(database,{reportDate=''}={}){
   const date=normalizeDate(reportDate);
   if(!database||!date)return null;
@@ -152,6 +153,8 @@ export function readV444WhppFinalizedStatusAuthority(database,{reportDate=''}={}
   if(!current.ok||current.expected<=0)return null;
   const summary=safeJson(current.daily?.summaryJson),summaryStatus=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase();
   const attestedId=summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(summaryStatus)?text(summary.finalizedSnapshotId):'';
+  let historyFinalized=false;
+  try{historyFinalized=Boolean(database.prepare("SELECT 1 ok FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date)?.ok);}catch{}
   const candidates=[];
   try{
     if(attestedId){
@@ -162,7 +165,7 @@ export function readV444WhppFinalizedStatusAuthority(database,{reportDate=''}={}
     }
     const rows=database.prepare(`SELECT snapshotId,runId,generatedAt,createdAt,status,reconciliationStatus,payloadJson
       FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=?
-        AND UPPER(COALESCE(status,''))='VALID' AND UPPER(COALESCE(reconciliationStatus,''))='COMPLETED'
+        AND UPPER(COALESCE(status,''))<>'INVALID' AND UPPER(COALESCE(reconciliationStatus,''))<>'FAILED'
       ORDER BY COALESCE(NULLIF(generatedAt,''),createdAt) DESC,id DESC`).all(date);
     const seen=new Set(candidates.map(row=>text(row.snapshotId)));
     for(const row of rows){const id=text(row.snapshotId);if(id&&!seen.has(id)){seen.add(id);candidates.push(row);}}
@@ -171,13 +174,14 @@ export function readV444WhppFinalizedStatusAuthority(database,{reportDate=''}={}
   for(const row of candidates){
     const id=text(row.snapshotId),explicit=text(row.status).toUpperCase()==='VALID'&&text(row.reconciliationStatus).toUpperCase()==='COMPLETED';
     const attested=Boolean(attestedId&&id===attestedId);
-    if(!explicit&&!attested)continue;
+    const legacyHistoryAttested=!explicit&&!attested&&historyFinalized;
+    if(!explicit&&!attested&&!legacyHistoryAttested)continue;
     const snapshotBills=snapshotMembership(row);
     if(snapshotBills.length!==current.expected||!sameBills(snapshotBills,current.bills))continue;
     return{
       snapshotId:id,runId:text(row.runId),generatedAt:text(row.generatedAt),createdAt:text(row.createdAt),
-      claimSource:attested?'WHPP_DAILY_FINALIZED_EXACT_MEMBERSHIP':'WHPP_VALID_COMPLETED_EXACT_MEMBERSHIP_RECOVERY',
-      exactMembership:true,dailySummaryAttested:attested,expected:current.expected,currentCount:current.bills.length,
+      claimSource:attested?'WHPP_DAILY_FINALIZED_EXACT_MEMBERSHIP':(explicit?'WHPP_VALID_COMPLETED_EXACT_MEMBERSHIP_RECOVERY':'WHPP_LEGACY_FINALIZED_EXACT_MEMBERSHIP_HISTORY_RECOVERY'),
+      exactMembership:true,dailySummaryAttested:attested,legacyHistoryAttested,expected:current.expected,currentCount:current.bills.length,
       snapshotCount:snapshotBills.length,currentMembershipSource:current.source,unifiedSnapshotId:text(current.unifiedSnapshotId),
       authorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID
     };
@@ -252,7 +256,7 @@ async function startChildServer(){
         ...(payload.statusDiagnostics||{}),v444WhppClaimSource:claim.claimSource,v444WhppExpected:expected,
         v444WhppCurrentCount:n(claim.currentCount),v444WhppSnapshotCount:n(claim.snapshotCount),
         v444WhppCurrentMembershipSource:claim.currentMembershipSource,v444WhppDailySummaryAttested:Boolean(claim.dailySummaryAttested),
-        v444WhppCoverage:covered
+        v444WhppLegacyHistoryAttested:Boolean(claim.legacyHistoryAttested),v444WhppCoverage:covered
       }
     };
   }
