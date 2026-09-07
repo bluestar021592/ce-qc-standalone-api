@@ -55,8 +55,9 @@ assert.equal(cycle.startMode,'TRACK_60_FALLBACK');
 assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收'),e(80,'2026-08-03 17:00:00','POD')]),'2026-08-03');
 assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收')]),'','negative POD wording must never fabricate POD date');
 
-// V450: observability panels must read existing SQLite truth without silently
-// starting a reconcile, and the 27GB history audit must use bounded bulk scans.
+// V450 owners are part of this already-wired go-live smoke so syntax failures or
+// a regression back to per-day 27GB scanning cannot reach installation.
+for(const file of ['src/v142SevenBusinessHistoryAudit.js','public/v142-history-integrity-audit.js','public/v246-qc-tracking.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const trackingUi=fs.readFileSync('public/v246-qc-tracking.js','utf8');
 assert.match(trackingUi,/2026-09-07-v450-tracking-summary-auto-read-v1/,'V450 tracking read-only summary marker missing');
 assert.match(trackingUi,/function mount\(\)\{const panel=ensurePanel\(\);if\(panel&&!initialReadStarted\)\{initialReadStarted=true;queueMicrotask\(\(\)=>void read\(\)\);\}\}/,'tracking counters must auto-read once after mount');
