@@ -1,0 +1,12 @@
+V448 Windows system proxy/PAC GitHub recovery
+
+Use only when CE QC Managed Launcher can reach the internet generally but git.exe direct HTTPS to github.com:443 cannot connect.
+
+1. Close the CE QC Managed Launcher so port 5177 is free.
+2. Run CE_QC_GitHub_Proxy_Update_V448.cmd.
+3. The tool reads existing Windows system proxy/PAC/static/environment proxy settings, without modifying them.
+4. If GitHub fetch succeeds through that path, it runs the full test:golive gate in an isolated worktree, runs the existing verified SQLite pre-update backup gate, then installs only the exact verified fetched SHA with a local fast-forward merge.
+5. No Windows DNS, hosts, system proxy, Git global proxy, database business facts, uploaded reports, CCSL, SHOPEE, or WHPP execution state is rewritten by the recovery transport itself.
+
+Log:
+%LOCALAPPDATA%\CE_QC_LAUNCHER\proxy_update_latest.log
