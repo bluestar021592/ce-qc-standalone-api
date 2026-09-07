@@ -117,12 +117,13 @@ try{
   assert.match(cacheWorker,/PERSISTED_CACHE_STARTUP_READ_ONLY/,'normal startup must read persisted dashboard cache');
   assert.doesNotMatch(cacheWorker,/recentCompletedDashboardDates\(7\)/,'normal startup must not rebuild recent seven dates');
 
-  for(const file of ['src/localStatusSidecar.js','src/v441StatusSidecarSupervisor.js','public/v169-seven-business-legacy-status-sync.js','src/v44WhppUiPatch.js']){
+  for(const file of ['src/localStatusSidecar.js','src/v441StatusSidecarSupervisor.js','public/v169-seven-business-legacy-status-sync.js','src/v44WhppUiPatch.js','src/v322WebAvailabilityPatch.js']){
     execFileSync(process.execPath,['--check',file],{stdio:'pipe',env:{...process.env,NODE_ENV:'test'}});
   }
   const statusSidecar=fs.readFileSync('src/localStatusSidecar.js','utf8');
   const statusSupervisor=fs.readFileSync('src/v441StatusSidecarSupervisor.js','utf8');
   const statusUi=fs.readFileSync('public/v169-seven-business-legacy-status-sync.js','utf8');
+  const statusOwner=fs.readFileSync('src/v322WebAvailabilityPatch.js','utf8');
   const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
   assert.match(statusSidecar,/2026-09-07-v441-isolated-readonly-status-sidecar-v1/);
   assert.match(statusSidecar,/new DatabaseSync\(file,\{readOnly:true\}\)/,'status sidecar must open production SQLite read-only');
@@ -137,6 +138,9 @@ try{
   assert.match(statusSupervisor,/new DatabaseSync\(file,\{readOnly:true\}\)/,'V442 status process must remain read-only');
   assert.match(statusSupervisor,/PRAGMA query_only=ON/,'V442 status process must enforce query_only');
   assert.doesNotMatch(statusSupervisor,/\b(?:INSERT|UPDATE|DELETE|REPLACE)\s+(?:INTO|FROM|[a-z_])/i,'V442 status parity must not write business state');
+  assert.match(statusOwner,/2026-09-07-v445-whpp-zero-ticket-exact-unified-completion-v1/,'V445 zero-ticket WHPP authority must be present in the canonical V322 status owner');
+  assert.match(statusOwner,/if\(n\(counts\.WHPP\)===0&&\(whppMembershipOk\|\|unifiedClaim\)\)WHPP=completedStage\(WHPP,snapshotId,unifiedClaim\?'UNIFIED_ZERO_TICKET_COMPLETED':'ZERO_TICKET'\)/,'a zero-ticket WHPP day may inherit completion only from the exact selected unified COMPLETED snapshot when legacy daily membership is inconsistent');
+  assert.match(statusOwner,/function unifiedCompletionClaim\(db,batch\)[\s\S]*WHERE snapshotId=\? AND reportDate=\?/,'V445 zero-ticket authority must stay bound to the exact selected snapshot and date');
   assert.match(statusUi,/STATUS_SIDECAR_PORT=5180/);
   assert.match(statusUi,/\/api\/local-status\/run-progress/);
   assert.match(statusUi,/event\.stopImmediatePropagation\(\)/,'unconfirmed Start click must be blocked at capture phase');
@@ -145,7 +149,7 @@ try{
   assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260907-v441-1/);
   assert.match(shell,/X-CE-QC-V441-Status-Sidecar/);
 
-  console.log('[SEVEN-BUSINESS-FINALIZATION] passed · SHOPEE defers non-zero WHPP without INVALID · exact WHPP finalization closes all 7 · zero-WHPP completes directly · dashboard cache requires 7/7 · completed history is persisted-read/no implicit CE re-query · one canonical history worker · V441 local/LAN status is read-only isolated on 5180 and unconfirmed Start is fail-closed at DOM+click entry · V442 restores finalized WHPP completion from current-lifecycle snapshot/daily authority only after exact current-member SUCCESS coverage');
+  console.log('[SEVEN-BUSINESS-FINALIZATION] passed · SHOPEE defers non-zero WHPP without INVALID · exact WHPP finalization closes all 7 · zero-WHPP completes directly · V445 exact selected unified COMPLETED snapshot restores zero-ticket WHPP even when a legacy daily header is inconsistent · dashboard cache requires 7/7 · completed history is persisted-read/no implicit CE re-query · one canonical history worker · V441 local/LAN status is read-only isolated on 5180 and unconfirmed Start is fail-closed at DOM+click entry · V442/V444 preserve finalized non-zero WHPP authority');
 } finally {
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
