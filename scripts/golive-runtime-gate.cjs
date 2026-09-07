@@ -27,6 +27,7 @@ const allBusinessChild = read('src/v84ExportBusinessWorker.js');
 const asyncExportLauncher = read('src/v84AsyncExportPatch.js');
 const exportDirect = read('src/v190ExportDirectEndpointPatch.js');
 const exportSidecar = read('src/v193ExportSidecar.js');
+const managedLauncher = read('tools/CE_QC_Managed_Launcher.ps1');
 
 // Current execution ownership: V67 is the sole normal browser runner. V424 adds
 // only an opaque same-proof resume floor for an exact restart interruption.
@@ -199,6 +200,16 @@ must(exportDirect, '/api/v190/export-period/prepare');
 must(exportSidecar, '/api/v194/export-period/prepare');
 must(exportSidecar, 'IPC_MEMORY_V195');
 
+// V446 updater contract: after the one remote fetch + isolated candidate gate +
+// verified SQLite backup, the installer must advance to that exact already-fetched
+// commit locally. Never introduce a second post-verification GitHub pull.
+must(managedLauncher, 'V446_LOCAL_EXACT_INSTALL_ID=2026-09-07-v446-local-exact-sha-install-v1');
+must(managedLauncher, 'function Install-VerifiedCommitLocally');
+must(managedLauncher, "@('cat-file','-e',\"$VerifiedCommit^{commit}\")");
+must(managedLauncher, "@('merge','--ff-only','--quiet',$VerifiedCommit)");
+must(managedLauncher, 'if ($installed -ne $VerifiedCommit)');
+forbid(managedLauncher, "Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')");
+
 for (const source of [runner, v68, v94, whppUi, pause, shell, whppSupervisor, v161, storage, bstore, bootstrap, podRepair]) {
   forbid(source, 'v148-direct-daily-runner-v1');
 }
@@ -217,4 +228,4 @@ execFileSync(process.execPath,['scripts/v419-whpp-valid-snapshot-detail-smoke.mj
 execFileSync(process.execPath,['scripts/v419-whpp-final-snapshot-authority-smoke.mjs'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 execFileSync(process.execPath,['--test','test/v419-open-single-source.test.js','test/v87-whpp-large-range-export.test.js','test/v419-export-ledger-truth.test.js'],{stdio:'inherit',env:{...process.env,NODE_ENV:'test'}});
 
-console.log('[GOLIVE V433] runtime-source gate passed · V168 is the sole fail-closed idle Start owner and V169 cannot re-enable an unconfirmed Start · V428 base app.js stale completion writer remains retired while active V67 CCSL still delegates live 350/50 detail · persisted-complete unified stages are read-only and already-complete WHPP can never be re-POSTed by an explicit unified click · only an actually incomplete WHPP gets one authorized start · balanced seven-business import truth outranks stale WHPP/dashboard summaries, preserving 5060+228=5288 · V433 cache-busted status policy plus V428/V426 truth owners are delivered by the shell · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');
+console.log('[GOLIVE V446] runtime-source gate passed · V446 exact local-SHA post-verification install is enforced with no second GitHub pull · V168 is the sole fail-closed idle Start owner and V169 cannot re-enable an unconfirmed Start · V428 base app.js stale completion writer remains retired while active V67 CCSL still delegates live 350/50 detail · persisted-complete unified stages are read-only and already-complete WHPP can never be re-POSTed by an explicit unified click · only an actually incomplete WHPP gets one authorized start · balanced seven-business import truth outranks stale WHPP/dashboard summaries, preserving 5060+228=5288 · V433 cache-busted status policy plus V428/V426 truth owners are delivered by the shell · V424 same-proof resume floor prevents completed CCSL from reopening during exact SHOPEE restart recovery · same-lifecycle completion fallback stays current-member-proven and cannot cross a newer VALID import boundary · V67 sole explicit CCSL→SHOPEE→WHPP runner · restart-only continuity · immutable WHPP daily membership across current/history detail+export · changed-member same-day reupload invalidates stale completion before replacement membership is published · identical completed membership remains no-op · new WHPP final snapshots are VALID+COMPLETED at the writer · seven-business truth · V246 strict START→POD · unified export owner · no stale runtime cache');

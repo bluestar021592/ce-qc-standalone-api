@@ -254,6 +254,39 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
   }
 }
 
+# V446_LOCAL_EXACT_INSTALL_ID=2026-09-07-v446-local-exact-sha-install-v1
+# The remote fetch above already materializes the exact candidate commit locally.
+# After candidate tests + verified DB backup pass, install only that immutable SHA
+# from the local Git object store. A second GitHub request is neither needed nor
+# allowed to become a post-verification failure point.
+function Install-VerifiedCommitLocally([string]$ExpectedCurrent, [string]$VerifiedCommit) {
+  if (-not (Test-TrackedTreeClean)) {
+    throw 'Tracked project files changed after candidate validation; exact installation blocked.'
+  }
+
+  $headBefore = Get-GitText @('rev-parse','HEAD')
+  if ($headBefore -ne $ExpectedCurrent) {
+    throw "Installed HEAD changed after candidate validation. expected=$ExpectedCurrent actual=$headBefore"
+  }
+
+  $objectCode = Invoke-Exe $script:GitExe @('cat-file','-e',"$VerifiedCommit^{commit}") -AllowFailure
+  if ($objectCode -ne 0) {
+    throw "Verified candidate commit is no longer present in the local Git object store: $VerifiedCommit"
+  }
+
+  $ancestorCode = Invoke-Exe $script:GitExe @('merge-base','--is-ancestor',$ExpectedCurrent,$VerifiedCommit) -AllowFailure
+  if ($ancestorCode -ne 0) {
+    throw 'Verified candidate is no longer a fast-forward descendant of the installed version.'
+  }
+
+  Invoke-Exe $script:GitExe @('merge','--ff-only','--quiet',$VerifiedCommit) | Out-Null
+  $installed = Get-GitText @('rev-parse','HEAD')
+  if ($installed -ne $VerifiedCommit) {
+    throw "Exact verified candidate installation mismatch. expected=$VerifiedCommit actual=$installed"
+  }
+  return $installed
+}
+
 function Invoke-SafeAutoUpdate {
   $git = Get-Command git.exe -ErrorAction SilentlyContinue
   $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -305,14 +338,13 @@ function Invoke-SafeAutoUpdate {
   }
 
   $dependencyFiles = Get-GitText @('diff','--name-only',$current,$remote,'--','package.json','package-lock.json')
-  Write-ManagedLog '[UPDATE] Installing verified fast-forward update...' Cyan
-  Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')
+  Write-ManagedLog "[UPDATE] Installing verified exact commit $($remote.Substring(0,8)) from local Git object store; no second GitHub request is required." Cyan
+  $installed = Install-VerifiedCommitLocally $current $remote
   if (-not [string]::IsNullOrWhiteSpace($dependencyFiles)) {
     Write-ManagedLog '[UPDATE] Dependencies changed; refreshing node_modules...' Cyan
     Invoke-Exe $script:NpmExe @('ci','--prefer-offline','--no-audit','--no-fund') | Out-Null
   }
-  $installed = Get-GitText @('rev-parse','HEAD')
-  Write-ManagedLog "[UPDATE] Installed verified version $($installed.Substring(0,8)). Database was not rewritten by updater." Green
+  Write-ManagedLog "[UPDATE] Installed verified exact version $($installed.Substring(0,8)). Database was not rewritten by updater." Green
 }
 
 function Add-JobObjectType {
