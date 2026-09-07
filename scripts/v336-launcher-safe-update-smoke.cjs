@@ -42,13 +42,35 @@ assert.ok(managed.includes("Invoke-Exe $script:GitExe @('merge','--ff-only','--q
 assert.ok(managed.includes('if ($installed -ne $VerifiedCommit)'), 'managed launcher must verify exact installed HEAD after local install');
 assert.ok(!managed.includes("Invoke-RemoteGit @('pull','--ff-only','--quiet','origin','main')"), 'managed launcher must not perform a second post-verification GitHub pull');
 
+// V448 one-time connectivity recovery is the bridge for machines whose browsers are
+// online through Windows proxy/PAC while git.exe direct HTTPS to github.com:443 is
+// blocked. It may read existing Windows proxy settings, but must never mutate them.
+const proxyRecovery = fs.readFileSync('tools/CE_QC_GitHub_Proxy_Update_V448.ps1','utf8');
+assert.ok(proxyRecovery.includes("2026-09-07-v448-windows-system-proxy-pac-git-recovery-v1"), 'V448 proxy recovery marker missing');
+assert.ok(proxyRecovery.includes('[System.Net.WebRequest]::GetSystemWebProxy()'), 'V448 must resolve the Windows system proxy/PAC path');
+assert.ok(proxyRecovery.includes('AutoConfigURL'), 'V448 must detect Windows PAC configuration');
+assert.ok(proxyRecovery.includes('ProxyEnable'), 'V448 must detect Windows static proxy configuration');
+assert.ok(proxyRecovery.includes('http.proxy=$proxyUri'), 'V448 must pass the detected proxy to Git only for the current process');
+assert.ok(proxyRecovery.includes('http.proxyAuthMethod=anyauth'), 'V448 must allow enterprise proxy authentication negotiation');
+assert.ok(proxyRecovery.includes("@('run','test:golive')"), 'V448 must run the full go-live gate before install');
+assert.ok(proxyRecovery.includes('CE_QC_PreUpdate_Backup.mjs'), 'V448 must run the existing verified SQLite backup gate');
+assert.ok(proxyRecovery.includes("'merge','--ff-only','--quiet',$RemoteCommit"), 'V448 must install only the exact verified fetched SHA');
+assert.ok(proxyRecovery.includes('if ($installed -ne $RemoteCommit)'), 'V448 must verify exact installed HEAD');
+
 // Security gate must detect real mutation commands, not harmless comments/log text such as
 // "hosts file is not modified". Strip PowerShell comments before checking command patterns.
 const managedCode = managed.replace(/^\s*#.*$/gm, '');
+const proxyCode = proxyRecovery.replace(/^\s*#.*$/gm, '');
 const mutatesSystemDns = /\bSet-DnsClientServerAddress\b|\bnetsh\s+interface\s+[^\r\n]*\bdns\b/i.test(managedCode);
 const writesHosts = /\b(?:Set-Content|Add-Content|Out-File)\b[^\r\n]*(?:\\drivers\\etc\\hosts|\bhosts\b)|\[IO\.File\]::(?:WriteAllText|AppendAllText)\([^\r\n]*(?:\\drivers\\etc\\hosts|\bhosts\b)/i.test(managedCode);
+const proxyMutatesSystemDns = /\bSet-DnsClientServerAddress\b|\bnetsh\s+interface\s+[^\r\n]*\bdns\b/i.test(proxyCode);
+const proxyWritesHosts = /\b(?:Set-Content|Add-Content|Out-File)\b[^\r\n]*(?:\\drivers\\etc\\hosts|\bhosts\b)|\[IO\.File\]::(?:WriteAllText|AppendAllText)\([^\r\n]*(?:\\drivers\\etc\\hosts|\bhosts\b)/i.test(proxyCode);
+const proxyPersistsSettings = /\bSet-ItemProperty\b[^\r\n]*Internet Settings|\bnetsh\s+winhttp\s+set\s+proxy\b|\bgit(?:\.exe)?\b[^\r\n]*\bconfig\b[^\r\n]*\bhttp\.proxy\b/i.test(proxyCode);
 assert.ok(!mutatesSystemDns, 'managed launcher must never modify Windows adapter DNS');
 assert.ok(!writesHosts, 'managed launcher must never write the Windows hosts file');
+assert.ok(!proxyMutatesSystemDns, 'V448 proxy recovery must never modify Windows adapter DNS');
+assert.ok(!proxyWritesHosts, 'V448 proxy recovery must never write the Windows hosts file');
+assert.ok(!proxyPersistsSettings, 'V448 proxy recovery must never persist proxy or Git proxy configuration');
 
 // V347 changes the live SQLite persistence hot path. It must never be treated as a
 // low-risk code-only update merely because a previous verified DB copy has the same
@@ -68,6 +90,9 @@ if (process.platform === 'win32') {
   const parse = "$errors=$null;$tokens=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/CE_QC_Managed_Launcher.ps1'),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 41}";
   const parsed = spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',parse],{encoding:'utf8'});
   assert.strictEqual(parsed.status,0,`managed launcher PowerShell parse failed: ${parsed.stderr || parsed.stdout}`);
+  const proxyParse = "$errors=$null;$tokens=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'tools/CE_QC_GitHub_Proxy_Update_V448.ps1'),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count -gt 0){$errors|ForEach-Object{Write-Error $_.Message};exit 42}";
+  const proxyParsed = spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',proxyParse],{encoding:'utf8'});
+  assert.strictEqual(proxyParsed.status,0,`V448 proxy recovery PowerShell parse failed: ${proxyParsed.stderr || proxyParsed.stdout}`);
 }
 
 const repair = fs.readFileSync('tools/CE_QC_Repair_Managed_Launcher_Git_Fatal.cmd', 'utf8');
@@ -78,4 +103,4 @@ assert.ok(repair.includes('CE_QC_Managed_Launcher.ps1'), 'emergency recovery mus
 assert.ok(!repair.includes('config --local --add http.curloptResolve'), 'emergency recovery must not persist the resolver in repository config');
 assert.ok(!/Set-DnsClientServerAddress|netsh\s+interface\s+.*\bdns\b/i.test(repair), 'emergency recovery must not alter adapter DNS');
 
-console.log('[V446.1/V347/V336] launcher safety smoke passed · exact candidate tested before install · V347 persistence hot-path forces fresh SQLite backup · backup hash+quick_check verified · V446 exact verified SHA installs locally without a second GitHub pull · local startup verified · automatic code+DB rollback armed · managed launcher retries GitHub and uses process-local explicit-DNS fallback without system DNS mutation');
+console.log('[V448/V446.1/V347/V336] launcher safety smoke passed · exact candidate tested before install · V347 persistence hot-path forces fresh SQLite backup · V446 exact verified SHA installs locally without a second GitHub pull · V448 reads Windows system proxy/PAC only as a process-local Git fallback and never mutates DNS/hosts/proxy settings · local startup verified · automatic code+DB rollback armed');
