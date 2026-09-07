@@ -55,23 +55,35 @@ assert.equal(cycle.startMode,'TRACK_60_FALLBACK');
 assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收'),e(80,'2026-08-03 17:00:00','POD')]),'2026-08-03');
 assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收')]),'','negative POD wording must never fabricate POD date');
 
-// V450 owners are part of this already-wired go-live smoke so syntax failures or
-// a regression back to per-day 27GB scanning cannot reach installation.
+// V451 owners are part of the already-wired go-live smoke. This locks the
+// 27GB-safe read path so a later patch cannot silently reintroduce range scans.
 for(const file of ['src/v142SevenBusinessHistoryAudit.js','public/v142-history-integrity-audit.js','public/v246-qc-tracking.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const trackingUi=fs.readFileSync('public/v246-qc-tracking.js','utf8');
 assert.match(trackingUi,/2026-09-07-v450-tracking-summary-auto-read-v1/,'V450 tracking read-only summary marker missing');
 assert.match(trackingUi,/function mount\(\)\{const panel=ensurePanel\(\);if\(panel&&!initialReadStarted\)\{initialReadStarted=true;queueMicrotask\(\(\)=>void read\(\)\);\}\}/,'tracking counters must auto-read once after mount');
 assert.match(trackingUi,/\/api\/v246\/tracking\/summary\?/,'auto read must use the summary GET route');
 assert.doesNotMatch(trackingUi,/function mount\([^)]*\)[\s\S]{0,220}tracking\/reconcile/,'mount must never auto-start reconcile');
+
 const historyAudit=fs.readFileSync('src/v142SevenBusinessHistoryAudit.js','utf8');
-assert.match(historyAudit,/2026-09-07-v450-bulk-readonly-history-audit-v1/,'V450 bulk history audit marker missing');
-assert.match(historyAudit,/scanMode:'V450_BULK_RANGE_READ'/,'history audit must expose bulk-read mode');
-assert.match(historyAudit,/WHERE businessType='WHPP' AND reportDate BETWEEN \? AND \?/,'WHPP history must be scanned by bounded date range');
+assert.match(historyAudit,/2026-09-07-v451-snapshot-indexed-readonly-history-audit-v2-fail-closed/,'V451 indexed history audit marker missing');
+assert.match(historyAudit,/scanMode:'V451_SNAPSHOT_INDEXED_READ'/,'history audit must expose snapshot-indexed read mode');
+assert.match(historyAudit,/snapshotId IN \(\$\{marks\}\)/,'large unified history reads must be anchored by selected snapshotId');
+assert.doesNotMatch(historyAudit,/FROM unified_import_rows\s+WHERE reportDate BETWEEN/,'unified_import_rows must never be range-scanned by reportDate');
+assert.doesNotMatch(historyAudit,/FROM business_track_events\s+WHERE reportDate BETWEEN/,'business_track_events diagnostic must never block history audit');
+assert.doesNotMatch(historyAudit,/FROM scan_results\s+WHERE reportDate BETWEEN/,'scan_results diagnostic must never block history audit');
+assert.match(historyAudit,/heavyDiagnosticCountsSkipped:true/,'V451 must explicitly report skipped heavy diagnostics');
+assert.match(historyAudit,/const exportReady=missing\.length===0&&incomplete\.length===0/,'export readiness must remain fail-closed');
+assert.doesNotMatch(historyAudit,/catch\s*\{\s*return\s*\[\]\s*;?\s*\}/,'SQL read failures must not be swallowed as empty history');
+assert.match(historyAudit,/WHERE businessType='WHPP' AND reportDate BETWEEN \? AND \?/,'WHPP indexed daily history must stay date-bounded');
 assert.doesNotMatch(historyAudit,/function whppDay\(/,'old per-day WHPP query loop must remain retired');
 assert.doesNotMatch(historyAudit,/function airMismatch\(/,'old per-day wildcard air-marker scan must remain retired');
-const historyUi=fs.readFileSync('public/v142-history-integrity-audit.js','utf8');
-assert.match(historyUi,/2026-09-07-v450-bounded-manual-history-audit-ui-v1/,'V450 bounded history UI marker missing');
-assert.match(historyUi,/new AbortController\(\)/,'manual history audit must have a browser-side timeout guard');
 
-console.log('[V450/V246] tracking core smoke passed: true-terminal-only + immutable signing start + strict START/failure attempts + negative POD guards + read-only summary auto-load + bulk history audit contract');
+const historyUi=fs.readFileSync('public/v142-history-integrity-audit.js','utf8');
+assert.match(historyUi,/2026-09-07-v451-snapshot-indexed-history-audit-ui-v1/,'V451 indexed history UI marker missing');
+assert.match(historyUi,/new AbortController\(\)/,'manual history audit must keep a browser-side timeout guard');
+assert.match(historyUi,/heavyDiagnosticCountsSkipped===true/,'UI must distinguish skipped heavy diagnostics from numeric zero');
+assert.match(historyUi,/不是0票/,'UI must explicitly prevent skipped diagnostics being misread as zero');
+assert.match(historyUi,/不需要重新跑业务数据/,'timeout guidance must not ask operators to rerun business data');
+
+console.log('[V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + fail-closed export safety + no blocking mega-table diagnostics');
 execFileSync(process.execPath,['scripts/v252-lifecycle-smoke.mjs'],{stdio:'inherit'});
