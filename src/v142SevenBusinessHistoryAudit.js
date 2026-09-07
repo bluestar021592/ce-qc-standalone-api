@@ -1,15 +1,15 @@
 import { getDb } from './db.js';
 
-export const V142_HISTORY_AUDIT_ID = '2026-09-07-v450-bulk-readonly-history-audit-v1';
+export const V142_HISTORY_AUDIT_ID = '2026-09-07-v451-snapshot-indexed-readonly-history-audit-v1';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = ['CE','CEAF','TBKH','ALI1688'];
 const ALL_TYPES = [...CORE_TYPES,'WHPP'];
+const SNAPSHOT_CHUNK_SIZE = 300;
 
 function iso(value='') { const text=String(value||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:''; }
 function dates(from,to){ const out=[]; const d=new Date(`${from}T00:00:00Z`), end=new Date(`${to}T00:00:00Z`); while(d<=end){out.push(d.toISOString().slice(0,10));d.setUTCDate(d.getUTCDate()+1);} return out; }
 function tableExists(db,name){ return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name)); }
-function count(db,sql,...params){ try{return Number(db.prepare(sql).get(...params)?.count||0);}catch{return 0;} }
-function rows(db,sql,...params){ try{return db.prepare(sql).all(...params);}catch{return [];} }
+function rows(db,sql,...params){ try{return db.prepare(sql).all(...params);}catch{return [];}}
 function safeJson(value,fallback={}){try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}}
 function token(value){return String(value??'').normalize('NFKC').trim().toUpperCase().replace(/[\s_-]+/g,'');}
 function hasAirMarker(row={}){const raw=row?.raw&&typeof row.raw==='object'?row.raw:row;return Object.values(raw||{}).some(value=>['CCAF','CEAF'].includes(token(value)));}
@@ -21,6 +21,8 @@ function mapLatest(list,dateField='reportDate'){
   return out;
 }
 function mapGrouped(list,keyOf){const out=new Map();for(const row of list)out.set(keyOf(row),row);return out;}
+function chunked(list,size=SNAPSHOT_CHUNK_SIZE){const out=[];for(let i=0;i<list.length;i+=size)out.push(list.slice(i,i+size));return out;}
+function placeholders(list){return list.map(()=>'?').join(',');}
 
 export function coreSnapshotCompletionDecision({validBatch=false,snapshotCompleted=false,ccslTotal=0,coveredCcsl=0}={}){
   const total=Number(ccslTotal||0),covered=Number(coveredCcsl||0);
@@ -36,28 +38,40 @@ function loadBulkHistory(db,from,to){
   const exists={};
   for(const name of ['final_rows','business_daily_reports','business_daily_parse_rows','business_final_rows','business_export_snapshots','carryover_open_items','scan_results','business_scan_results','business_track_events'])exists[name]=tableExists(db,name);
 
-  // V450: every large history table is range-scanned at most once here. The old
-  // implementation repeated many synchronous queries for every calendar day;
-  // on a 27GB SQLite file that could occupy the 5177 event loop indefinitely.
+  // V451: unified_import_rows is a very large table whose useful leading index is
+  // snapshotId. Never scan it by reportDate. Resolve the one VALID batch selected
+  // for each day from the small batch table first, then read only those snapshots.
   const batchRows=rows(db,`SELECT b.batchId,b.snapshotId,b.reportDate,b.sourceName,b.createdAt,b.status,s.status AS snapshotStatus
     FROM unified_import_batches b LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId AND s.reportDate=b.reportDate
     WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
     ORDER BY b.reportDate,b.createdAt,b.rowid`,from,to);
   const batches=mapLatest(batchRows);
+  const selectedSnapshotIds=[...new Set([...batches.values()].map(row=>String(row?.snapshotId||'').trim()).filter(Boolean))];
 
-  const coreCountRows=rows(db,`SELECT snapshotId,reportDate,businessType,COUNT(*) count
-    FROM unified_import_rows WHERE reportDate BETWEEN ? AND ? AND businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
-    GROUP BY snapshotId,reportDate,businessType`,from,to);
+  const coreCountRows=[];
+  const coverageRows=[];
+  const ceafRows=[];
+  for(const snapshotIds of chunked(selectedSnapshotIds)){
+    const marks=placeholders(snapshotIds);
+    coreCountRows.push(...rows(db,`SELECT snapshotId,reportDate,businessType,COUNT(*) count
+      FROM unified_import_rows
+      WHERE snapshotId IN (${marks}) AND businessType IN ('CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN')
+      GROUP BY snapshotId,reportDate,businessType`,...snapshotIds));
+    if(exists.final_rows){
+      coverageRows.push(...rows(db,`SELECT u.reportDate,u.snapshotId,COUNT(DISTINCT u.shipmentCode) covered
+        FROM unified_import_rows u JOIN final_rows f ON f.reportDate=u.reportDate AND f.shipmentCode=u.shipmentCode
+        WHERE u.snapshotId IN (${marks}) AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')
+        GROUP BY u.reportDate,u.snapshotId`,...snapshotIds));
+    }
+    ceafRows.push(...rows(db,`SELECT reportDate,snapshotId,shipmentCode FROM unified_import_rows
+      WHERE snapshotId IN (${marks}) AND businessType='CEAF' AND TRIM(COALESCE(shipmentCode,''))<>''`,...snapshotIds));
+  }
+
   const coreCounts=new Map();
   for(const row of coreCountRows){
     const k=key(row.reportDate,row.snapshotId);if(!coreCounts.has(k))coreCounts.set(k,Object.fromEntries(CORE_TYPES.map(type=>[type,0])));
     const target=coreCounts.get(k);if(Object.hasOwn(target,row.businessType))target[row.businessType]=num(row.count);
   }
-
-  const coverageRows=exists.final_rows?rows(db,`SELECT u.reportDate,u.snapshotId,COUNT(DISTINCT u.shipmentCode) covered
-    FROM unified_import_rows u JOIN final_rows f ON f.reportDate=u.reportDate AND f.shipmentCode=u.shipmentCode
-    WHERE u.reportDate BETWEEN ? AND ? AND u.businessType IN ('CE','CEAF','TBKH','ALI1688')
-    GROUP BY u.reportDate,u.snapshotId`,from,to):[];
   const ccslCoverage=mapGrouped(coverageRows,row=>key(row.reportDate,row.snapshotId));
 
   const dailyReports=exists.business_daily_reports?mapLatest(rows(db,`SELECT reportDate,totalCount,sourceFile,summaryJson,rowid
@@ -76,12 +90,11 @@ function loadBulkHistory(db,from,to){
     FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate,createdAt,id`,from,to):[];
   const whppSnapshots=mapLatest(snapshotRows);
 
-  const ceafRows=rows(db,`SELECT reportDate,snapshotId,shipmentCode FROM unified_import_rows
-    WHERE reportDate BETWEEN ? AND ? AND businessType='CEAF' AND TRIM(COALESCE(shipmentCode,''))<>''`,from,to);
   const ceafMembers=new Map();
   for(const row of ceafRows){const k=key(row.reportDate,row.snapshotId);if(!ceafMembers.has(k))ceafMembers.set(k,new Set());ceafMembers.get(k).add(String(row.shipmentCode||'').trim().toUpperCase());}
 
-  // Air-marker fallback is also one bounded range scan, never one wildcard scan per date.
+  // WHPP daily_parse_rows has a businessType/reportDate leading index, so this
+  // bounded lookup remains safe. It is used only for the CEAF source-membership check.
   const markerRows=exists.business_daily_parse_rows?rows(db,`SELECT reportDate,shipmentCode,rowJson FROM business_daily_parse_rows
     WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ?
       AND (COALESCE(rowJson,'') LIKE '%CCAF%' OR COALESCE(rowJson,'') LIKE '%CEAF%')`,from,to):[];
@@ -92,7 +105,7 @@ function loadBulkHistory(db,from,to){
     if(!airMarkers.has(date))airMarkers.set(date,new Set());airMarkers.get(date).add(bill);
   }
 
-  return{exists,batches,coreCounts,ccslCoverage,dailyReports,dailyParse,whppFinal,whppSnapshots,ceafMembers,airMarkers,bulkReadMs:Date.now()-started};
+  return{exists,batches,selectedSnapshotIds,coreCounts,ccslCoverage,dailyReports,dailyParse,whppFinal,whppSnapshots,ceafMembers,airMarkers,bulkReadMs:Date.now()-started};
 }
 
 function whppForDate(bulk,reportDate){
@@ -118,7 +131,7 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
   if(!to||from>to)throw new Error('历史审计日期范围无效。');
   const expected=dates(from,to),bulk=loadBulkHistory(db,from,to);
   const days=[];const missing=[];const incomplete=[];const warnings=[];
-  let totalImported=0,totalWhpp=0,totalRetry=0;
+  let totalImported=0,totalWhpp=0,totalRetry=0,totalCcslCoverage=0,totalWhppFinal=0;
   for(const reportDate of expected){
     const batch=bulk.batches.get(reportDate)||null;
     if(!batch){missing.push(reportDate);days.push({reportDate,status:'MISSING_CORE_IMPORT'});continue;}
@@ -142,33 +155,28 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
     if(issues.length)incomplete.push({reportDate,issues,ceafMissingBills:air.missingBills,ccslTotal,ccslFinalCoverage:covered,coreCompletion:coreCompletion.reason});
     if(whpp.retryPending>0)warnings.push({reportDate,type:'WHPP_RETRY_PENDING',count:whpp.retryPending});
     totalImported+=coreTotal+whpp.reported; totalWhpp+=whpp.reported; totalRetry+=whpp.retryPending;
-    days.push({reportDate,status:issues.length?'CHECK_REQUIRED':'OK',snapshotId:batch.snapshotId,snapshotStatus:batch.snapshotStatus,coreCounts:counts,coreTotal,ccslTotal,ccslFinalCoverage:covered,coreCompletion,whpp,air,issues});
+    totalCcslCoverage+=covered; totalWhppFinal+=whpp.finalRows;
+    days.push({reportDate,status:issues.length?'CHECK_REQUIRED':'OK',snapshotId:batch.snapshotId,snapshotStatus:batch.snapshotStatus,coreCounts:counts,coreTotal,ccslTotal,ccslFinalCoverage:covered,coverage,coreCompletion,whpp,air,issues});
   }
 
-  const openCarry=count(db,"SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate BETWEEN ? AND ?",from,to);
-  const closedCarry=count(db,"SELECT COUNT(*) count FROM carryover_open_items WHERE status='CLOSED' AND sourceReportDate BETWEEN ? AND ?",from,to);
-  const openBeforeRange=count(db,"SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate < ?",from);
-  const openInsideRangeBeforeTo=count(db,"SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate >= ? AND sourceReportDate < ?",from,to);
-  const openOnToDate=count(db,"SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate = ?",to);
-  const openThroughToDate=count(db,"SELECT COUNT(*) count FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate <= ?",to);
-  const rangeOpenReconciled=openCarry===openInsideRangeBeforeTo+openOnToDate;
-  const throughToOpenReconciled=openThroughToDate===openBeforeRange+openCarry;
-  const oldestOpen=String(db.prepare("SELECT MIN(sourceReportDate) value FROM carryover_open_items WHERE status='OPEN' AND sourceReportDate BETWEEN ? AND ?").get(from,to)?.value||'');
+  // V451: historical export readiness does not depend on diagnostic row totals
+  // from scan/track/carryover mega tables. Those synchronous COUNT scans could
+  // block the Node process for minutes on a 27GB DB. Keep the safety decision
+  // fail-closed on actual completeness checks above, and expose only evidence
+  // already obtained during the indexed audit pass.
   const currentEvidence={
-    carryOpen:openCarry,carryClosed:closedCarry,oldestOpenDate:oldestOpen,
-    carryOpenScope:'SOURCE_REPORT_DATE_BETWEEN_EXPORT_RANGE',carryOpenFromDate:from,carryOpenToDate:to,
-    carryOpenBeforeRange:openBeforeRange,carryOpenInsideRangeBeforeTo:openInsideRangeBeforeTo,carryOpenOnToDate:openOnToDate,carryOpenThroughToDate:openThroughToDate,
-    carryOpenRangeReconciled:rangeOpenReconciled,carryOpenThroughToReconciled:throughToOpenReconciled,
-    ccslFinalRows:count(db,'SELECT COUNT(*) count FROM final_rows WHERE reportDate BETWEEN ? AND ?',from,to),
-    shopeeFinalRows:count(db,"SELECT COUNT(*) count FROM business_final_rows WHERE businessType='SHOPEE' AND reportDate BETWEEN ? AND ?",from,to),
-    whppFinalRows:count(db,"SELECT COUNT(*) count FROM business_final_rows WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ?",from,to),
-    ccslScanRows:count(db,'SELECT COUNT(*) count FROM scan_results WHERE reportDate BETWEEN ? AND ?',from,to),
-    businessScanRows:count(db,'SELECT COUNT(*) count FROM business_scan_results WHERE reportDate BETWEEN ? AND ?',from,to),
-    businessTrackEvents:count(db,'SELECT COUNT(*) count FROM business_track_events WHERE reportDate BETWEEN ? AND ?',from,to)
+    evidenceMode:'V451_INDEXED_AUDIT_ONLY',
+    selectedCoreSnapshots:bulk.selectedSnapshotIds.length,
+    checkedDays:expected.length,
+    ccslCoveredRows:totalCcslCoverage,
+    whppFinalRows:totalWhppFinal,
+    heavyDiagnosticCountsSkipped:true,
+    skippedDiagnostics:['carryover_open_items','final_rows_range_count','scan_results','business_scan_results','business_track_events'],
+    skippedReason:'LARGE_TABLE_DIAGNOSTICS_ARE_NOT_REQUIRED_FOR_EXPORT_READINESS'
   };
   const exportReady=missing.length===0&&incomplete.length===0;
   const totalMs=Date.now()-totalStarted;
-  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,readOnly:true,scanMode:'V450_BULK_RANGE_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
+  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
 }
 
 export const V142_BUSINESS_TYPES=ALL_TYPES;
