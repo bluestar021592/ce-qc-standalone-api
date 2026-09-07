@@ -108,6 +108,15 @@ try{
   assert.equal(zeroDone.reconciliation.expectedCounts.WHPP,0);
   assert.equal(zeroDone.reconciliation.actualCounts.WHPP,0);
 
+  const {readV449WhppZeroTicketStatusAuthority}=await import('../src/v441StatusSidecarSupervisor.js');
+  const zeroStatusClaim=readV449WhppZeroTicketStatusAuthority(getDb(),{reportDate:zero.reportDate,snapshotId:zero.snapshotId});
+  assert.equal(zeroStatusClaim?.claimSource,'UNIFIED_ZERO_TICKET_COMPLETED','5180 must honor the exact selected COMPLETED unified snapshot for a true zero-WHPP day');
+  assert.equal(zeroStatusClaim?.expected,0);
+  const nonZeroStatusClaim=readV449WhppZeroTicketStatusAuthority(getDb(),{reportDate:saved.reportDate,snapshotId:saved.snapshotId});
+  assert.equal(nonZeroStatusClaim,null,'5180 zero-ticket authority must never close a non-zero WHPP cohort');
+  const wrongSnapshotClaim=readV449WhppZeroTicketStatusAuthority(getDb(),{reportDate:zero.reportDate,snapshotId:'OLD-OR-WRONG-SNAPSHOT'});
+  assert.equal(wrongSnapshotClaim,null,'5180 zero-ticket authority must never cross the exact selected snapshot boundary');
+
   const historyWorker=fs.readFileSync('scripts/v329-three-business-cache-worker.mjs','utf8');
   assert.match(historyWorker,/THREE_BUSINESS_HISTORY_WORKER_ID='2026-09-02-single-process-three-business-history-worker-v1'/,'three-business history must have one canonical worker');
   assert.match(historyWorker,/CE_QC_HISTORY_NETWORK_REPAIR/,'historical trajectory network repair must be explicit opt-in');
@@ -138,6 +147,10 @@ try{
   assert.match(statusSupervisor,/new DatabaseSync\(file,\{readOnly:true\}\)/,'V442 status process must remain read-only');
   assert.match(statusSupervisor,/PRAGMA query_only=ON/,'V442 status process must enforce query_only');
   assert.doesNotMatch(statusSupervisor,/\b(?:INSERT|UPDATE|DELETE|REPLACE)\s+(?:INTO|FROM|[a-z_])/i,'V442 status parity must not write business state');
+  assert.match(statusSupervisor,/2026-09-07-v449-5180-zero-ticket-exact-unified-completion-v1/,'V449 exact zero-ticket authority must be delivered by the visible 5180 owner');
+  assert.match(statusSupervisor,/SELECT status FROM unified_snapshots WHERE snapshotId=\? AND reportDate=\? LIMIT 1/,'V449 must bind completion to the exact selected unified snapshot and date');
+  assert.match(statusSupervisor,/COUNT\(DISTINCT UPPER\(TRIM\(shipmentCode\)\)\) count FROM unified_import_rows/,'V449 must prove the exact selected unified cohort has zero WHPP members');
+  assert.match(statusSupervisor,/if\(text\(latest\?\.snapshotId\)!==id\)return null/,'V449 must reject a stale/non-selected unified snapshot');
   assert.match(statusOwner,/2026-09-07-v445-whpp-zero-ticket-exact-unified-completion-v1/,'V445 zero-ticket WHPP authority must be present in the canonical V322 status owner');
   assert.match(statusOwner,/if\(n\(counts\.WHPP\)===0&&\(whppMembershipOk\|\|unifiedClaim\)\)WHPP=completedStage\(WHPP,snapshotId,unifiedClaim\?'UNIFIED_ZERO_TICKET_COMPLETED':'ZERO_TICKET'\)/,'a zero-ticket WHPP day may inherit completion only from the exact selected unified COMPLETED snapshot when legacy daily membership is inconsistent');
   assert.match(statusOwner,/function unifiedCompletionClaim\(db,batch\)[\s\S]*WHERE snapshotId=\? AND reportDate=\?/,'V445 zero-ticket authority must stay bound to the exact selected snapshot and date');
@@ -149,7 +162,7 @@ try{
   assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260907-v441-1/);
   assert.match(shell,/X-CE-QC-V441-Status-Sidecar/);
 
-  console.log('[SEVEN-BUSINESS-FINALIZATION] passed · SHOPEE defers non-zero WHPP without INVALID · exact WHPP finalization closes all 7 · zero-WHPP completes directly · V445 exact selected unified COMPLETED snapshot restores zero-ticket WHPP even when a legacy daily header is inconsistent · dashboard cache requires 7/7 · completed history is persisted-read/no implicit CE re-query · one canonical history worker · V441 local/LAN status is read-only isolated on 5180 and unconfirmed Start is fail-closed at DOM+click entry · V442/V444 preserve finalized non-zero WHPP authority');
+  console.log('[SEVEN-BUSINESS-FINALIZATION] passed · SHOPEE defers non-zero WHPP without INVALID · exact WHPP finalization closes all 7 · zero-WHPP completes directly · V445/V449 exact selected unified COMPLETED snapshot restores zero-ticket WHPP in both canonical 5177 and visible 5180 status owners · V449 rejects non-zero and wrong-snapshot claims · dashboard cache requires 7/7 · completed history is persisted-read/no implicit CE re-query · one canonical history worker · V441 local/LAN status is read-only isolated on 5180 and unconfirmed Start is fail-closed at DOM+click entry · V442/V444 preserve finalized non-zero WHPP authority');
 } finally {
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});

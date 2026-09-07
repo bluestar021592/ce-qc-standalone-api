@@ -8,6 +8,7 @@ export const V441_STATUS_SIDECAR_SUPERVISOR_ID='2026-09-07-v441-status-sidecar-s
 export const V442_WHPP_STATUS_PARITY_ID='2026-09-07-v442-whpp-finalized-daily-status-parity-v1';
 export const V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID='2026-09-07-v443-whpp-preserved-finalized-daily-authority-v1';
 export const V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID='2026-09-07-v444-whpp-exact-membership-finalized-status-v1';
+export const V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID='2026-09-07-v449-5180-zero-ticket-exact-unified-completion-v1';
 const V441_COMPAT_ENTRY='./localStatusSidecar.js';
 const PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_STATUS_SIDECAR_PORT||5180)));
 const APP_PORT=Math.max(1024,Math.min(65535,Number(process.env.PORT||5177)));
@@ -44,14 +45,14 @@ function startSupervisor(){
       env:{...process.env,CE_QC_STATUS_SIDECAR_CHILD:'1',CE_QC_STATUS_SIDECAR_PORT:String(PORT)},
       windowsHide:true,detached:false,stdio:['ignore','inherit','inherit']
     });
-    console.log(`[CE-QC][V444_STATUS_SUPERVISOR] starting pid=${child.pid||'-'} port=${PORT} authority=${V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID}`);
-    child.once('error',error=>console.error('[CE-QC][V444_STATUS_SUPERVISOR] spawn failed:',error?.stack||error));
+    console.log(`[CE-QC][V449_STATUS_SUPERVISOR] starting pid=${child.pid||'-'} port=${PORT} zeroTicket=${V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID} nonZero=${V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID}`);
+    child.once('error',error=>console.error('[CE-QC][V449_STATUS_SUPERVISOR] spawn failed:',error?.stack||error));
     child.once('exit',(code,signal)=>{
-      console.log(`[CE-QC][V444_STATUS_SUPERVISOR] exited code=${code??'null'}${signal?` signal=${signal}`:''}`);
+      console.log(`[CE-QC][V449_STATUS_SUPERVISOR] exited code=${code??'null'}${signal?` signal=${signal}`:''}`);
       child=null;
       if(!stopping){clearTimeout(restartTimer);restartTimer=setTimeout(startSupervisor,1000);restartTimer.unref?.();}
     });
-  }catch(error){child=null;console.error('[CE-QC][V444_STATUS_SUPERVISOR] start failed:',error?.stack||error);}
+  }catch(error){child=null;console.error('[CE-QC][V449_STATUS_SUPERVISOR] start failed:',error?.stack||error);}
 }
 
 function stopSupervisor(){
@@ -87,6 +88,7 @@ function responseHeaders(req,extra={}){
     'x-ce-qc-whpp-status-parity':V442_WHPP_STATUS_PARITY_ID,
     'x-ce-qc-whpp-preserved-authority':V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,
     'x-ce-qc-whpp-exact-membership-authority':V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,
+    'x-ce-qc-whpp-zero-ticket-authority':V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID,
     'access-control-allow-headers':'Accept, Content-Type',
     'access-control-allow-methods':'GET,OPTIONS',
     ...extra
@@ -111,10 +113,6 @@ function currentWhppMembership(database,date){
   if(dailyBills.length>0)return{ok:false,expected,actual:dailyBills.length,reason:'WHPP_STANDARD_DAILY_PARTIAL'};
   if(expected===0)return{ok:true,expected:0,bills:[],source:'WHPP_STANDARD_DAILY_ZERO',daily};
 
-  // Older/preserved days can have their normalized WHPP daily rows rotated while
-  // the immutable unified-import membership remains available. Use the latest
-  // VALID WHPP-bearing cohort for this date; sibling-only later imports do not
-  // supersede this per-business membership proof.
   try{
     const batch=database.prepare(`SELECT b.snapshotId
       FROM unified_import_batches b
@@ -138,14 +136,6 @@ function snapshotMembership(row){
   return billsOf(state.dailyParseRows||[]);
 }
 
-// V444 is a read-only status authority, not a new execution path. V419 already
-// invalidates old WHPP snapshots before changed same-day membership is published.
-// Therefore an explicit VALID+COMPLETED WHPP snapshot whose immutable member set
-// exactly equals the current WHPP member set remains authoritative even when a
-// later sibling-business import moved the global batch boundary or an old writer
-// stripped finalizedSnapshotId from the daily summary. Legacy/unverified snapshots
-// still require finalized daily evidence: either the exact surviving daily pointer
-// or the finalize-generated history row, plus exact immutable member equality.
 export function readV444WhppFinalizedStatusAuthority(database,{reportDate=''}={}){
   const date=normalizeDate(reportDate);
   if(!database||!date)return null;
@@ -189,6 +179,25 @@ export function readV444WhppFinalizedStatusAuthority(database,{reportDate=''}={}
   return null;
 }
 
+// V449 closes the exact gap seen in production: 5180 is the visible status owner,
+// and V444 intentionally ignores expected=0 because it is a non-zero finalized
+// membership authority. A zero-ticket WHPP day is allowed to complete here only
+// when the exact selected/latest VALID unified snapshot is itself COMPLETED and
+// contains zero WHPP members. No old date/snapshot can bleed across a new import.
+export function readV449WhppZeroTicketStatusAuthority(database,{reportDate='',snapshotId=''}={}){
+  const date=normalizeDate(reportDate),id=text(snapshotId);
+  if(!database||!date||!id)return null;
+  try{
+    const latest=database.prepare("SELECT snapshotId FROM unified_import_batches WHERE status='VALID' AND reportDate=? ORDER BY createdAt DESC,rowid DESC LIMIT 1").get(date)||null;
+    if(text(latest?.snapshotId)!==id)return null;
+    const status=text(database.prepare('SELECT status FROM unified_snapshots WHERE snapshotId=? AND reportDate=? LIMIT 1').get(id,date)?.status).toUpperCase();
+    if(status!=='COMPLETED')return null;
+    const row=database.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND UPPER(TRIM(businessType))='WHPP' AND TRIM(COALESCE(shipmentCode,''))<>''").get(id,date)||{};
+    if(n(row.count)!==0)return null;
+    return{snapshotId:id,reportDate:date,expected:0,claimSource:'UNIFIED_ZERO_TICKET_COMPLETED',authorityId:V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID};
+  }catch{return null;}
+}
+
 async function startChildServer(){
   const [{getRuntimeConfig},{readV322SevenBusinessStatus},{readV418BusinessSuccessCoverage}]=await Promise.all([
     import('./db.js'),
@@ -214,12 +223,39 @@ async function startChildServer(){
   function applyWhppCompletionParity(database,payload){
     const whpp=payload?.stages?.WHPP;
     if(!whpp||whpp.complete===true)return payload;
+
+    const zeroClaim=readV449WhppZeroTicketStatusAuthority(database,{reportDate:payload?.reportDate,snapshotId:payload?.sourceSnapshotId});
+    if(zeroClaim){
+      const completedWhpp={
+        ...whpp,
+        sourceTotal:0,
+        sourceHeader:'V449_EXACT_SELECTED_UNIFIED_ZERO_TICKET',
+        sourceMembershipVerified:true,
+        exactUnifiedZeroTicketVerified:true,
+        complete:true,
+        zeroTicketDay:true,
+        snapshotId:text(zeroClaim.snapshotId),
+        snapshotStatus:'COMPLETED',
+        completionSource:'V449_EXACT_SELECTED_UNIFIED_ZERO_TICKET_AUTHORITY',
+        completionClaimSource:zeroClaim.claimSource,
+        runStatus:'completed',phase:'已完成',running:false,paused:false,failed:false,
+        restartInterrupted:false,restartRecovery:null,
+        statusSource:'V449_WHPP_ZERO_TICKET_EXACT_UNIFIED_STATUS'
+      };
+      const stages={...payload.stages,WHPP:completedWhpp};
+      const counts={...(payload.counts||{}),WHPP:0};
+      counts.TOTAL=n(counts.CCSL)+n(counts.SHOPEE);
+      return{
+        ...payload,
+        stages,counts,
+        complete:['CCSL','SHOPEE','WHPP'].every(key=>stages?.[key]?.complete===true),
+        v449WhppZeroTicketStatusParityId:V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID,
+        statusDiagnostics:{...(payload.statusDiagnostics||{}),v449WhppZeroTicketClaimSource:zeroClaim.claimSource,v449WhppZeroTicketSnapshotId:zeroClaim.snapshotId}
+      };
+    }
+
     const claim=readV444WhppFinalizedStatusAuthority(database,{reportDate:payload?.reportDate});
     if(!claim)return payload;
-
-    // Finalized exact-membership authority is sufficient to restore the display
-    // completion state. Saved SUCCESS coverage is retained as a diagnostic only;
-    // it cannot demote a certified finalized WHPP cycle after sibling imports.
     const coverage=readV418BusinessSuccessCoverage(database,{
       businessType:'WHPP',date:payload.reportDate,snapshotId:payload.sourceSnapshotId,boundary:'',memberTypes:['WHPP']
     });
@@ -252,6 +288,7 @@ async function startChildServer(){
       v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,
       v443WhppPreservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,
       v444WhppExactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,
+      v449WhppZeroTicketStatusParityId:V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID,
       statusDiagnostics:{
         ...(payload.statusDiagnostics||{}),v444WhppClaimSource:claim.claimSource,v444WhppExpected:expected,
         v444WhppCurrentCount:n(claim.currentCount),v444WhppSnapshotCount:n(claim.snapshotCount),
@@ -267,6 +304,7 @@ async function startChildServer(){
     all.v442WhppStatusParityId=V442_WHPP_STATUS_PARITY_ID;
     all.v443WhppPreservedAuthorityId=V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID;
     all.v444WhppExactMembershipAuthorityId=V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID;
+    all.v449WhppZeroTicketStatusParityId=V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID;
     const type=text(businessType).toUpperCase();
     if(type==='ALL')return all;
     const key=type==='SHOPEE'?'SHOPEE':type==='WHPP'?'WHPP':'CCSL',stage=all.stages?.[key]||{};
@@ -280,8 +318,8 @@ async function startChildServer(){
     }
     if(req.method==='GET'&&url.pathname==='/api/local-status/health'){
       if(!localChannel(req))return sendJson(req,res,403,{ok:false,error:'Status sidecar is limited to local/LAN access.'});
-      try{getReadonlyDb();return sendJson(req,res,200,{ok:true,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,dbReady:true,port:PORT,appPort:APP_PORT});}
-      catch(error){return sendJson(req,res,503,{ok:false,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,dbReady:false,error:text(error?.message||error)});}
+      try{getReadonlyDb();return sendJson(req,res,200,{ok:true,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,zeroTicketAuthorityId:V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID,dbReady:true,port:PORT,appPort:APP_PORT});}
+      catch(error){return sendJson(req,res,503,{ok:false,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,zeroTicketAuthorityId:V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID,dbReady:false,error:text(error?.message||error)});}
     }
     if(req.method!=='GET'||url.pathname!=='/api/local-status/run-progress')return sendJson(req,res,404,{ok:false,error:'Not found.'});
     if(!localChannel(req))return sendJson(req,res,403,{ok:false,error:'Status sidecar is limited to local/LAN access.'});
@@ -290,20 +328,20 @@ async function startChildServer(){
       const database=getReadonlyDb();
       const data=readProgress(database,url.searchParams.get('businessType')||'ALL',url.searchParams.get('reportDate')||'');
       const totalMs=Number(elapsed(started).toFixed(3)),d=data?.statusDiagnostics||{};
-      return sendJson(req,res,200,data,{'server-timing':`v444total;dur=${totalMs},membership;dur=${n(d.membershipMs)},locks;dur=${n(d.locksMs)},ccsl;dur=${n(d.ccslMs)},shopee;dur=${n(d.shopeeMs)},whpp;dur=${n(d.whppMs)}`});
+      return sendJson(req,res,200,data,{'server-timing':`v449total;dur=${totalMs},membership;dur=${n(d.membershipMs)},locks;dur=${n(d.locksMs)},ccsl;dur=${n(d.ccslMs)},shopee;dur=${n(d.shopeeMs)},whpp;dur=${n(d.whppMs)}`});
     }catch(error){
       closeDb();
-      return sendJson(req,res,200,{ok:false,code:'V444_ISOLATED_STATUS_READ_FAILED',statusVersion:'2026-09-02-v414-one-read-seven-business-status-v1',isolatedStatusId:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,v443WhppPreservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,v444WhppExactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,reportDate:normalizeDate(url.searchParams.get('reportDate')||''),error:text(error?.message||error),generatedAt:new Date().toISOString()});
+      return sendJson(req,res,200,{ok:false,code:'V449_ISOLATED_STATUS_READ_FAILED',statusVersion:'2026-09-02-v414-one-read-seven-business-status-v1',isolatedStatusId:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,v443WhppPreservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,v444WhppExactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,v449WhppZeroTicketStatusParityId:V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID,reportDate:normalizeDate(url.searchParams.get('reportDate')||''),error:text(error?.message||error),generatedAt:new Date().toISOString()});
     }
   });
   server.requestTimeout=12000;server.headersTimeout=13000;server.keepAliveTimeout=1000;
-  server.on('error',error=>{console.error('[CE-QC][V444_STATUS_SIDECAR] START FAILED',error?.stack||error);process.exitCode=1;});
+  server.on('error',error=>{console.error('[CE-QC][V449_STATUS_SIDECAR] START FAILED',error?.stack||error);process.exitCode=1;});
   const shutdown=()=>{
     if(shuttingDown)return;shuttingDown=true;closeDb();
     try{server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),500).unref?.();}catch{process.exit(0);}
   };
   process.once('SIGTERM',shutdown);process.once('SIGINT',shutdown);process.once('exit',closeDb);
-  server.listen(PORT,HOST,()=>console.log(`[CE-QC][V444_STATUS_SIDECAR] READY http://${HOST}:${PORT} · app=${APP_PORT} · readonly · ${V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID}`));
+  server.listen(PORT,HOST,()=>console.log(`[CE-QC][V449_STATUS_SIDECAR] READY http://${HOST}:${PORT} · app=${APP_PORT} · readonly · zeroTicket=${V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID} · nonZero=${V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID}`));
 }
 
 if(CHILD){
@@ -313,4 +351,4 @@ if(CHILD){
   startSupervisor();
 }
 
-export function inspectV441StatusSupervisor(){return{eligible:eligible(),running:Boolean(child),pid:child?.pid||0,port:PORT,id:V441_STATUS_SIDECAR_SUPERVISOR_ID,parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,compatEntry:V441_COMPAT_ENTRY};}
+export function inspectV441StatusSupervisor(){return{eligible:eligible(),running:Boolean(child),pid:child?.pid||0,port:PORT,id:V441_STATUS_SIDECAR_SUPERVISOR_ID,parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,zeroTicketAuthorityId:V449_WHPP_ZERO_TICKET_STATUS_PARITY_ID,compatEntry:V441_COMPAT_ENTRY};}
