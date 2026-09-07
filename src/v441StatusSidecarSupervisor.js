@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 export const V441_STATUS_SIDECAR_SUPERVISOR_ID='2026-09-07-v441-status-sidecar-supervisor-v1';
 export const V442_WHPP_STATUS_PARITY_ID='2026-09-07-v442-whpp-finalized-daily-status-parity-v1';
 export const V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID='2026-09-07-v443-whpp-preserved-finalized-daily-authority-v1';
+export const V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID='2026-09-07-v444-whpp-exact-membership-finalized-status-v1';
 const V441_COMPAT_ENTRY='./localStatusSidecar.js';
 const PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_STATUS_SIDECAR_PORT||5180)));
 const APP_PORT=Math.max(1024,Math.min(65535,Number(process.env.PORT||5177)));
@@ -17,6 +18,10 @@ const n=value=>Number.isFinite(Number(value))?Number(value):0;
 const normalizeDate=value=>{const s=text(value).replace(/\//g,'-').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:'';};
 const elapsed=start=>Math.max(0,Number(process.hrtime.bigint()-start)/1e6);
 const tick=()=>process.hrtime.bigint();
+const safeJson=value=>{try{return typeof value==='string'?JSON.parse(value||'{}'):(value||{});}catch{return{};}};
+const bill=value=>text(typeof value==='string'?value:(value?.shipmentCode||value?.运单号||value?.waybill)).toUpperCase();
+const billsOf=values=>[...new Set((values||[]).map(bill).filter(Boolean))].sort();
+const sameBills=(a,b)=>a.length===b.length&&a.every((value,index)=>value===b[index]);
 
 let child=null;
 let stopping=false;
@@ -39,14 +44,14 @@ function startSupervisor(){
       env:{...process.env,CE_QC_STATUS_SIDECAR_CHILD:'1',CE_QC_STATUS_SIDECAR_PORT:String(PORT)},
       windowsHide:true,detached:false,stdio:['ignore','inherit','inherit']
     });
-    console.log(`[CE-QC][V443_STATUS_SUPERVISOR] starting pid=${child.pid||'-'} port=${PORT} parity=${V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID}`);
-    child.once('error',error=>console.error('[CE-QC][V443_STATUS_SUPERVISOR] spawn failed:',error?.stack||error));
+    console.log(`[CE-QC][V444_STATUS_SUPERVISOR] starting pid=${child.pid||'-'} port=${PORT} authority=${V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID}`);
+    child.once('error',error=>console.error('[CE-QC][V444_STATUS_SUPERVISOR] spawn failed:',error?.stack||error));
     child.once('exit',(code,signal)=>{
-      console.log(`[CE-QC][V443_STATUS_SUPERVISOR] exited code=${code??'null'}${signal?` signal=${signal}`:''}`);
+      console.log(`[CE-QC][V444_STATUS_SUPERVISOR] exited code=${code??'null'}${signal?` signal=${signal}`:''}`);
       child=null;
       if(!stopping){clearTimeout(restartTimer);restartTimer=setTimeout(startSupervisor,1000);restartTimer.unref?.();}
     });
-  }catch(error){child=null;console.error('[CE-QC][V443_STATUS_SUPERVISOR] start failed:',error?.stack||error);}
+  }catch(error){child=null;console.error('[CE-QC][V444_STATUS_SUPERVISOR] start failed:',error?.stack||error);}
 }
 
 function stopSupervisor(){
@@ -81,6 +86,7 @@ function responseHeaders(req,extra={}){
     'x-ce-qc-local-status':'2026-09-07-v441-isolated-readonly-status-sidecar-v1',
     'x-ce-qc-whpp-status-parity':V442_WHPP_STATUS_PARITY_ID,
     'x-ce-qc-whpp-preserved-authority':V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,
+    'x-ce-qc-whpp-exact-membership-authority':V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,
     'access-control-allow-headers':'Accept, Content-Type',
     'access-control-allow-methods':'GET,OPTIONS',
     ...extra
@@ -93,8 +99,91 @@ function sendJson(req,res,status,payload,extra={}){
   if(!allowed.ok){res.writeHead(403,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});return res.end(JSON.stringify({ok:false,error:'Origin denied.'}));}
   res.writeHead(status,headers);res.end(JSON.stringify(payload));
 }
-function safeJson(value){try{return typeof value==='string'?JSON.parse(value||'{}'):(value||{});}catch{return{};}}
-function atOrAfter(value,boundary){const limit=Date.parse(text(boundary));if(!Number.isFinite(limit))return true;const actual=Date.parse(text(value));return Number.isFinite(actual)&&actual>=limit;}
+
+function currentWhppMembership(database,date){
+  let daily=null;
+  try{daily=database.prepare("SELECT totalCount,summaryJson,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date)||null;}catch{return{ok:false,reason:'WHPP_DAILY_HEADER_READ_FAILED'};}
+  if(!daily)return{ok:false,reason:'WHPP_DAILY_HEADER_MISSING'};
+  const expected=Math.max(0,n(daily.totalCount));
+  let dailyBills=[];
+  try{dailyBills=billsOf(database.prepare("SELECT shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>'' ORDER BY UPPER(TRIM(shipmentCode))").all(date));}catch{return{ok:false,expected,reason:'WHPP_DAILY_MEMBERSHIP_READ_FAILED'};}
+  if(dailyBills.length===expected)return{ok:true,expected,bills:dailyBills,source:'WHPP_STANDARD_DAILY',daily};
+  if(dailyBills.length>0)return{ok:false,expected,actual:dailyBills.length,reason:'WHPP_STANDARD_DAILY_PARTIAL'};
+  if(expected===0)return{ok:true,expected:0,bills:[],source:'WHPP_STANDARD_DAILY_ZERO',daily};
+
+  // Older/preserved days can have their normalized WHPP daily rows rotated while
+  // the immutable unified-import membership remains available. Use the latest
+  // VALID WHPP-bearing cohort for this date; sibling-only later imports do not
+  // replace this per-business membership proof.
+  try{
+    const batch=database.prepare(`SELECT b.snapshotId
+      FROM unified_import_batches b
+      WHERE b.status='VALID' AND b.reportDate=?
+        AND EXISTS(SELECT 1 FROM unified_import_rows u WHERE u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate
+          AND UPPER(TRIM(u.businessType))='WHPP' AND TRIM(COALESCE(u.shipmentCode,''))<>'')
+      ORDER BY b.createdAt DESC,b.rowid DESC LIMIT 1`).get(date)||null;
+    if(batch?.snapshotId){
+      const unifiedBills=billsOf(database.prepare("SELECT shipmentCode FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND UPPER(TRIM(businessType))='WHPP' AND TRIM(COALESCE(shipmentCode,''))<>'' ORDER BY UPPER(TRIM(shipmentCode))").all(batch.snapshotId,date));
+      if(unifiedBills.length===expected)return{ok:true,expected,bills:unifiedBills,source:'WHPP_LATEST_VALID_UNIFIED_DAILY',daily,unifiedSnapshotId:text(batch.snapshotId)};
+      if(unifiedBills.length>0)return{ok:false,expected,actual:unifiedBills.length,reason:'WHPP_VALID_UNIFIED_MEMBERSHIP_MISMATCH'};
+    }
+  }catch{return{ok:false,expected,actual:0,reason:'WHPP_VALID_UNIFIED_MEMBERSHIP_READ_FAILED'};}
+  return{ok:false,expected,actual:0,reason:'WHPP_CURRENT_MEMBERSHIP_UNRECOVERABLE'};
+}
+
+function snapshotMembership(row){
+  const payload=safeJson(row?.payloadJson),state=payload?.state&&typeof payload.state==='object'?payload.state:{};
+  const pnh=billsOf(state.pnhBills||[]);
+  if(pnh.length)return pnh;
+  return billsOf(state.dailyParseRows||[]);
+}
+
+// V444 is a read-only status authority, not a new execution path. V419 already
+// invalidates old WHPP snapshots before changed same-day membership is published.
+// Therefore an explicit VALID+COMPLETED WHPP snapshot whose immutable member set
+// exactly equals the current WHPP member set remains authoritative even when a
+// later sibling-business import moved the global batch boundary or an old writer
+// stripped finalizedSnapshotId from the daily summary. Legacy/unverified snapshots
+// still require the surviving daily finalizedSnapshotId attestation.
+export function readV444WhppFinalizedStatusAuthority(database,{reportDate=''}={}){
+  const date=normalizeDate(reportDate);
+  if(!database||!date)return null;
+  const current=currentWhppMembership(database,date);
+  if(!current.ok||current.expected<=0)return null;
+  const summary=safeJson(current.daily?.summaryJson),summaryStatus=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase();
+  const attestedId=summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(summaryStatus)?text(summary.finalizedSnapshotId):'';
+  const candidates=[];
+  try{
+    if(attestedId){
+      const row=database.prepare(`SELECT snapshotId,runId,generatedAt,createdAt,status,reconciliationStatus,payloadJson
+        FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? AND snapshotId=?
+          AND UPPER(COALESCE(status,''))<>'INVALID' AND UPPER(COALESCE(reconciliationStatus,''))<>'FAILED' LIMIT 1`).get(date,attestedId)||null;
+      if(row)candidates.push(row);
+    }
+    const rows=database.prepare(`SELECT snapshotId,runId,generatedAt,createdAt,status,reconciliationStatus,payloadJson
+      FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=?
+        AND UPPER(COALESCE(status,''))='VALID' AND UPPER(COALESCE(reconciliationStatus,''))='COMPLETED'
+      ORDER BY COALESCE(NULLIF(generatedAt,''),createdAt) DESC,id DESC`).all(date);
+    const seen=new Set(candidates.map(row=>text(row.snapshotId)));
+    for(const row of rows){const id=text(row.snapshotId);if(id&&!seen.has(id)){seen.add(id);candidates.push(row);}}
+  }catch{return null;}
+
+  for(const row of candidates){
+    const id=text(row.snapshotId),explicit=text(row.status).toUpperCase()==='VALID'&&text(row.reconciliationStatus).toUpperCase()==='COMPLETED';
+    const attested=Boolean(attestedId&&id===attestedId);
+    if(!explicit&&!attested)continue;
+    const snapshotBills=snapshotMembership(row);
+    if(snapshotBills.length!==current.expected||!sameBills(snapshotBills,current.bills))continue;
+    return{
+      snapshotId:id,runId:text(row.runId),generatedAt:text(row.generatedAt),createdAt:text(row.createdAt),
+      claimSource:attested?'WHPP_DAILY_FINALIZED_EXACT_MEMBERSHIP':'WHPP_VALID_COMPLETED_EXACT_MEMBERSHIP_RECOVERY',
+      exactMembership:true,dailySummaryAttested:attested,expected:current.expected,currentCount:current.bills.length,
+      snapshotCount:snapshotBills.length,currentMembershipSource:current.source,unifiedSnapshotId:text(current.unifiedSnapshotId),
+      authorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID
+    };
+  }
+  return null;
+}
 
 async function startChildServer(){
   const [{getRuntimeConfig},{readV322SevenBusinessStatus},{readV418BusinessSuccessCoverage}]=await Promise.all([
@@ -118,101 +207,53 @@ async function startChildServer(){
     return db;
   };
 
-  function currentWhppCompletionClaim(database,payload){
-    const date=normalizeDate(payload?.reportDate),boundary=text(payload?.lifecycleBoundary);
-    if(!date)return null;
-
-    // V443: WHPP has its own immutable same-day lifecycle. A later combined
-    // import of sibling businesses must not invalidate a previously finalized
-    // WHPP cycle when the current WHPP daily header still certifies the exact
-    // same finalizedSnapshotId and its standard daily membership is complete.
-    // Changed WHPP membership is already handled canonically by V419: the old
-    // snapshot is INVALID/FAILED and the completed daily summary is replaced.
-    try{
-      const daily=database.prepare("SELECT totalCount,summaryJson,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date)||null;
-      if(daily){
-        const expected=Math.max(0,n(daily.totalCount));
-        const actual=n(database.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(date)?.count);
-        const summary=safeJson(daily.summaryJson),status=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase(),snapshotId=text(summary.finalizedSnapshotId);
-        if(expected===actual&&summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&snapshotId){
-          const finalized=database.prepare(`SELECT snapshotId,runId,generatedAt,createdAt,status,reconciliationStatus
-            FROM business_export_snapshots
-            WHERE businessType='WHPP' AND reportDate=? AND snapshotId=?
-              AND UPPER(COALESCE(status,''))<>'INVALID'
-              AND UPPER(COALESCE(reconciliationStatus,''))<>'FAILED'
-            LIMIT 1`).get(date,snapshotId)||null;
-          if(finalized)return{
-            ...finalized,
-            claimSource:'WHPP_CURRENT_DAILY_FINALIZED_AUTHORITY',
-            dailyAuthority:true,
-            dailyExpected:expected,
-            dailyActual:actual,
-            dailyUpdatedAt:text(daily.updatedAt)
-          };
-        }
-      }
-    }catch{}
-
-    // Fallback for a new-schema explicit VALID+COMPLETED snapshot that is not
-    // represented by an older daily header. This path remains bound to the
-    // current combined-import lifecycle boundary and keeps V442 semantics.
-    try{
-      const explicit=database.prepare(`SELECT snapshotId,runId,generatedAt,createdAt,status,reconciliationStatus
-        FROM business_export_snapshots
-        WHERE businessType='WHPP' AND reportDate=?
-          AND UPPER(COALESCE(status,''))='VALID'
-          AND UPPER(COALESCE(reconciliationStatus,''))='COMPLETED'
-        ORDER BY COALESCE(NULLIF(generatedAt,''),createdAt) DESC,id DESC LIMIT 1`).get(date)||null;
-      if(explicit&&atOrAfter(explicit.generatedAt||explicit.createdAt,boundary))return{...explicit,claimSource:'WHPP_VALID_COMPLETED_SNAPSHOT',dailyAuthority:false};
-    }catch{}
-    return null;
-  }
-
   function applyWhppCompletionParity(database,payload){
     const whpp=payload?.stages?.WHPP;
-    if(!whpp||whpp.complete===true||n(whpp.sourceTotal)===0||whpp.currentMembershipConsistent===false)return payload;
-    const claim=currentWhppCompletionClaim(database,payload);
+    if(!whpp||whpp.complete===true)return payload;
+    const claim=readV444WhppFinalizedStatusAuthority(database,{reportDate:payload?.reportDate});
     if(!claim)return payload;
 
-    // For V443 daily-authority claims, exact current standard membership plus
-    // the still-certified finalizedSnapshotId is itself the immutable completion
-    // proof. We still read saved SUCCESS coverage as a diagnostic, but we do not
-    // incorrectly reject an old valid WHPP finalization merely because a later
-    // sibling-business import moved the global lifecycle boundary forward.
+    // Finalized exact-membership authority is sufficient to restore the display
+    // completion state. Saved SUCCESS coverage is retained as a diagnostic only;
+    // it cannot demote a certified finalized WHPP cycle after sibling imports.
     const coverage=readV418BusinessSuccessCoverage(database,{
-      businessType:'WHPP',
-      date:payload.reportDate,
-      snapshotId:payload.sourceSnapshotId,
-      boundary:claim.dailyAuthority?'':payload.lifecycleBoundary,
-      memberTypes:['WHPP']
+      businessType:'WHPP',date:payload.reportDate,snapshotId:payload.sourceSnapshotId,boundary:'',memberTypes:['WHPP']
     });
-    const expected=n(whpp.sourceTotal),covered=n(coverage?.count);
-    const dailyAuthorityExact=claim.dailyAuthority===true&&n(claim.dailyExpected)===expected&&n(claim.dailyActual)===expected;
-    if(!dailyAuthorityExact&&(!coverage?.ok||covered<expected))return{
-      ...payload,
-      stages:{...payload.stages,WHPP:{...whpp,completionProof:{covered,missing:Math.max(0,expected-covered),ok:Boolean(coverage?.ok),completionClaimSource:claim.claimSource}}},
-      statusDiagnostics:{...(payload.statusDiagnostics||{}),v442WhppClaimSource:claim.claimSource,v442WhppCoverage:covered,v442WhppExpected:expected,v443DailyAuthorityExact:false}
-    };
+    const expected=n(claim.expected),covered=n(coverage?.count);
     const completedWhpp={
       ...whpp,
+      sourceTotal:expected,
+      sourceHeader:'V444_EXACT_CURRENT_WHPP_MEMBERSHIP',
+      sourceMembershipVerified:true,
+      currentMembershipConsistent:true,
+      membershipReason:claim.currentMembershipSource,
       complete:true,
+      zeroTicketDay:false,
       snapshotId:text(claim.snapshotId),
       snapshotStatus:'COMPLETED',
-      completionSource:dailyAuthorityExact?'V443_CURRENT_DAILY_FINALIZED_AUTHORITY':'V418_CURRENT_MEMBER_PROCESSING_PROOF',
+      completionSource:'V444_EXACT_CURRENT_MEMBER_FINALIZED_AUTHORITY',
       completionClaimSource:claim.claimSource,
       runStatus:'completed',phase:'已完成',running:false,paused:false,failed:false,
       restartInterrupted:false,restartRecovery:null,
-      statusSource:'V443_WHPP_PRESERVED_FINALIZED_DAILY_AUTHORITY',
-      completionProof:{covered,missing:Math.max(0,expected-covered),ok:dailyAuthorityExact||Boolean(coverage?.ok),dailyAuthorityExact,completionClaimSource:claim.claimSource}
+      statusSource:'V444_WHPP_EXACT_MEMBERSHIP_FINALIZED_STATUS',
+      completionProof:{covered,missing:Math.max(0,expected-covered),coverageOk:Boolean(coverage?.ok),authorityOk:true,exactMembership:true,completionClaimSource:claim.claimSource}
     };
     const stages={...payload.stages,WHPP:completedWhpp};
+    const counts={...(payload.counts||{}),WHPP:expected};
+    counts.TOTAL=n(counts.CCSL)+n(counts.SHOPEE)+expected;
     return{
       ...payload,
-      stages,
+      stages,counts,
       complete:['CCSL','SHOPEE','WHPP'].every(key=>stages?.[key]?.complete===true),
       v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,
       v443WhppPreservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,
-      statusDiagnostics:{...(payload.statusDiagnostics||{}),v442WhppClaimSource:claim.claimSource,v442WhppCoverage:covered,v442WhppExpected:expected,v443DailyAuthorityExact:dailyAuthorityExact,v443DailyExpected:n(claim.dailyExpected),v443DailyActual:n(claim.dailyActual)}
+      v444WhppExactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,
+      statusDiagnostics:{
+        ...(payload.statusDiagnostics||{}),v444WhppClaimSource:claim.claimSource,v444WhppExpected:expected,
+        v444WhppCurrentCount:n(claim.currentCount),v444WhppSnapshotCount:n(claim.snapshotCount),
+        v444WhppCurrentMembershipSource:claim.currentMembershipSource,v444WhppDailySummaryAttested:Boolean(claim.dailySummaryAttested),
+        v444WhppCoverage:covered
+      }
     };
   }
 
@@ -221,6 +262,7 @@ async function startChildServer(){
     all.isolatedStatusId='2026-09-07-v441-isolated-readonly-status-sidecar-v1';
     all.v442WhppStatusParityId=V442_WHPP_STATUS_PARITY_ID;
     all.v443WhppPreservedAuthorityId=V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID;
+    all.v444WhppExactMembershipAuthorityId=V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID;
     const type=text(businessType).toUpperCase();
     if(type==='ALL')return all;
     const key=type==='SHOPEE'?'SHOPEE':type==='WHPP'?'WHPP':'CCSL',stage=all.stages?.[key]||{};
@@ -234,8 +276,8 @@ async function startChildServer(){
     }
     if(req.method==='GET'&&url.pathname==='/api/local-status/health'){
       if(!localChannel(req))return sendJson(req,res,403,{ok:false,error:'Status sidecar is limited to local/LAN access.'});
-      try{getReadonlyDb();return sendJson(req,res,200,{ok:true,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,dbReady:true,port:PORT,appPort:APP_PORT});}
-      catch(error){return sendJson(req,res,503,{ok:false,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,dbReady:false,error:text(error?.message||error)});}
+      try{getReadonlyDb();return sendJson(req,res,200,{ok:true,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,dbReady:true,port:PORT,appPort:APP_PORT});}
+      catch(error){return sendJson(req,res,503,{ok:false,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,dbReady:false,error:text(error?.message||error)});}
     }
     if(req.method!=='GET'||url.pathname!=='/api/local-status/run-progress')return sendJson(req,res,404,{ok:false,error:'Not found.'});
     if(!localChannel(req))return sendJson(req,res,403,{ok:false,error:'Status sidecar is limited to local/LAN access.'});
@@ -244,20 +286,20 @@ async function startChildServer(){
       const database=getReadonlyDb();
       const data=readProgress(database,url.searchParams.get('businessType')||'ALL',url.searchParams.get('reportDate')||'');
       const totalMs=Number(elapsed(started).toFixed(3)),d=data?.statusDiagnostics||{};
-      return sendJson(req,res,200,data,{'server-timing':`v443total;dur=${totalMs},membership;dur=${n(d.membershipMs)},locks;dur=${n(d.locksMs)},ccsl;dur=${n(d.ccslMs)},shopee;dur=${n(d.shopeeMs)},whpp;dur=${n(d.whppMs)}`});
+      return sendJson(req,res,200,data,{'server-timing':`v444total;dur=${totalMs},membership;dur=${n(d.membershipMs)},locks;dur=${n(d.locksMs)},ccsl;dur=${n(d.ccslMs)},shopee;dur=${n(d.shopeeMs)},whpp;dur=${n(d.whppMs)}`});
     }catch(error){
       closeDb();
-      return sendJson(req,res,200,{ok:false,code:'V443_ISOLATED_STATUS_READ_FAILED',statusVersion:'2026-09-02-v414-one-read-seven-business-status-v1',isolatedStatusId:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,v443WhppPreservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,reportDate:normalizeDate(url.searchParams.get('reportDate')||''),error:text(error?.message||error),generatedAt:new Date().toISOString()});
+      return sendJson(req,res,200,{ok:false,code:'V444_ISOLATED_STATUS_READ_FAILED',statusVersion:'2026-09-02-v414-one-read-seven-business-status-v1',isolatedStatusId:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,v443WhppPreservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,v444WhppExactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,reportDate:normalizeDate(url.searchParams.get('reportDate')||''),error:text(error?.message||error),generatedAt:new Date().toISOString()});
     }
   });
   server.requestTimeout=12000;server.headersTimeout=13000;server.keepAliveTimeout=1000;
-  server.on('error',error=>{console.error('[CE-QC][V443_STATUS_SIDECAR] START FAILED',error?.stack||error);process.exitCode=1;});
+  server.on('error',error=>{console.error('[CE-QC][V444_STATUS_SIDECAR] START FAILED',error?.stack||error);process.exitCode=1;});
   const shutdown=()=>{
     if(shuttingDown)return;shuttingDown=true;closeDb();
     try{server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),500).unref?.();}catch{process.exit(0);}
   };
   process.once('SIGTERM',shutdown);process.once('SIGINT',shutdown);process.once('exit',closeDb);
-  server.listen(PORT,HOST,()=>console.log(`[CE-QC][V443_STATUS_SIDECAR] READY http://${HOST}:${PORT} · app=${APP_PORT} · readonly · ${V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID}`));
+  server.listen(PORT,HOST,()=>console.log(`[CE-QC][V444_STATUS_SIDECAR] READY http://${HOST}:${PORT} · app=${APP_PORT} · readonly · ${V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID}`));
 }
 
 if(CHILD){
@@ -267,4 +309,4 @@ if(CHILD){
   startSupervisor();
 }
 
-export function inspectV441StatusSupervisor(){return{eligible:eligible(),running:Boolean(child),pid:child?.pid||0,port:PORT,id:V441_STATUS_SIDECAR_SUPERVISOR_ID,parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,compatEntry:V441_COMPAT_ENTRY};}
+export function inspectV441StatusSupervisor(){return{eligible:eligible(),running:Boolean(child),pid:child?.pid||0,port:PORT,id:V441_STATUS_SIDECAR_SUPERVISOR_ID,parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,exactMembershipAuthorityId:V444_WHPP_EXACT_MEMBERSHIP_AUTHORITY_ID,compatEntry:V441_COMPAT_ENTRY};}
