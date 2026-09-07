@@ -6,6 +6,7 @@ const v169=fs.readFileSync('public/v169-seven-business-legacy-status-sync.js','u
 const v412=fs.readFileSync('public/v412-seven-business-convergence.js','utf8');
 const v67=fs.readFileSync('public/v67-resilient-run-guard.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
+const executableShell=shell.replace(/<!--[\s\S]*?-->/g,'');
 
 assert.match(v168,/if \(refreshBusy\) return lastTruth/,'V168 remains the one display/status fetch owner; entry guards must wait for its truth instead of spawning competing readers');
 assert.match(v168,/lockControl\(start, '状态确认中'/,'V168 must keep the unconfirmed Start button fail-closed');
@@ -45,8 +46,8 @@ assert.match(shell,/v67-resilient-run-guard\.js\?v=20260904-v424-1/,'browser she
 assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260905-v433-1/,'browser shell must execute the V433 V169 policy build');
 assert.match(shell,/data-previous-src=.*v169-seven-business-legacy-status-sync\.js\?v=20260904-v424-1/,'V424 V169 URL may remain only as compatibility metadata');
 assert.match(shell,/v412-seven-business-convergence\.js\?v=20260904-v420-1/,'browser shell must actually request the V420 convergence build with a current cache-bust URL');
-assert.ok(!shell.includes('<script src="/v169-seven-business-legacy-status-sync.js?v=20260904-v424-1"'),'retired V424 V169 URL must not be the live script src');
-assert.ok(!shell.includes('<script src="/v169-seven-business-legacy-status-sync.js?v=20260901-v411-1"'),'old V411 URL may remain only as non-executable compatibility metadata, never as the live script src');
-assert.ok(!shell.includes('<script src="/v412-seven-business-convergence.js?v=20260901-v413-3"'),'old V413 URL may remain only as non-executable compatibility metadata, never as the live script src');
+assert.ok(!executableShell.includes('<script src="/v169-seven-business-legacy-status-sync.js?v=20260904-v424-1"'),'retired V424 V169 URL must not be the live script src');
+assert.ok(!executableShell.includes('<script src="/v169-seven-business-legacy-status-sync.js?v=20260901-v411-1"'),'old V411 URL may remain only as non-executable compatibility metadata, never as the live script src');
+assert.ok(!executableShell.includes('<script src="/v412-seven-business-convergence.js?v=20260901-v413-3"'),'old V413 URL may remain only as non-executable compatibility metadata, never as the live script src');
 
 console.log('[V433/V424/V423/V420] unified-entry delivery smoke passed · V168 is sole fail-closed idle Start owner · V169 no longer re-enables unconfirmed Start · exact current-date Shopee restart still requires same-proof V67 handoff · V412 no duplicate preflight · V67 sole runner');
