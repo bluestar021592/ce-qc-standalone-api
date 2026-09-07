@@ -2,7 +2,9 @@
   if(global.__CE_QC_V246_TRACKING_UI__)return;
   global.__CE_QC_V246_TRACKING_UI__=true;
   const VERSION='2026-08-23-v246-qc-tracking-ui-v1';
+  const V450_READONLY_SUMMARY_ID='2026-09-07-v450-tracking-summary-auto-read-v1';
   let pollTimer=null;
+  let initialReadStarted=false;
   const TYPES=['ALL','CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const fmt=v=>Number(v||0).toLocaleString('zh-CN');
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -34,7 +36,7 @@
       <button class="v246-btn primary" id="v246Run" type="button">核查自定义区间</button><button class="v246-btn" id="v246Read" type="button">只读取账本</button>
     </div>
     <div class="v246-grid"><div class="v246-card"><span>追踪账本总票</span><b id="v246Total">—</b></div><div class="v246-card"><span>持续追踪中</span><b id="v246Open">—</b></div><div class="v246-card"><span>已POD</span><b id="v246Pod">—</b></div><div class="v246-card"><span>已退回</span><b id="v246Returned">—</b></div><div class="v246-card"><span>派次证据已识别</span><b id="v246Attempt">—</b></div><div class="v246-card"><span>派次未识别POD</span><b id="v246Unknown">—</b></div></div>
-    <div class="v246-status" id="v246Status">系统会在运行时每小时做一次防漏对账；柬埔寨时间02:00执行最近30天非终态自动刷新。电脑关机时本机无法执行，重新开机后会自动补跑漏掉的02:00任务。</div><div class="v246-progress"><i id="v246Progress"></i></div>
+    <div class="v246-status" id="v246Status">正在读取已保存QC追踪账本；这里只读，不会自动启动扫描或轨迹核查。</div><div class="v246-progress"><i id="v246Progress"></i></div>
     <div class="v246-bill"><label>单号追踪诊断<input id="v246Bill" placeholder="例如 TBKH000803140"></label><button class="v246-btn" id="v246BillBtn" type="button">查看这票为什么漏/是否仍追踪</button></div><div class="v246-bill-result" id="v246BillResult"></div>`;
     h.insertAdjacentElement('afterend',p);
     const today=khDate();p.querySelector('#v246To').value=today;p.querySelector('#v246From').value=addDays(today,-29);
@@ -46,12 +48,13 @@
   function status(msg,tone=''){const n=document.getElementById('v246Status');if(n){n.className=`v246-status ${tone}`.trim();n.textContent=msg;}}
   function progress(v){const n=document.getElementById('v246Progress');if(n)n.style.width=`${Math.max(0,Math.min(100,Number(v||0)))}%`;}
   function show(s={}){const map={v246Total:s.total,v246Open:s.open,v246Pod:s.pod,v246Returned:s.returned,v246Attempt:s.attemptKnown,v246Unknown:s.attemptUnknown};for(const[id,v]of Object.entries(map)){const n=document.getElementById(id);if(n)n.textContent=v===undefined?'—':fmt(v);}}
-  async function read(){ensurePanel();const q=new URLSearchParams(selection());setBusy(true);try{const d=await api(`/api/v246/tracking/summary?${q}`);show(d);status(`账本读取完成：${fmt(d.total)}票；仍需持续追踪${fmt(d.open)}票；POD ${fmt(d.pod)}票；派次仍未识别${fmt(d.attemptUnknown)}票。`,'ok');}catch(e){status(`读取失败：${e.message}`,'danger');}finally{setBusy(false);}}
+  async function read(){ensurePanel();const q=new URLSearchParams(selection());setBusy(true);status('正在只读加载已保存QC追踪账本…');try{const d=await api(`/api/v246/tracking/summary?${q}`);show(d);status(`账本读取完成：${fmt(d.total)}票；仍需持续追踪${fmt(d.open)}票；POD ${fmt(d.pod)}票；派次仍未识别${fmt(d.attemptUnknown)}票。`,'ok');}catch(e){status(`读取失败：${e.message}`,'danger');}finally{setBusy(false);}}
   async function runPreset(days){const p=ensurePanel();const today=khDate();p.querySelector('#v246To').value=today;p.querySelector('#v246From').value=addDays(today,-(days-1));await start();}
   async function start(){ensurePanel();setBusy(true);progress(1);try{const d=await api('/api/v246/tracking/reconcile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(selection())});const id=d.job?.jobId;if(!id)throw new Error('未取得任务编号');status('已开始：先核对日报应有票数，再补回漏票，然后只刷新非终态，最后重建Shopee派次与平均签收天数。','warn');poll(id);}catch(e){setBusy(false);status(`启动失败：${e.message}`,'danger');}}
   async function poll(id){clearTimeout(pollTimer);try{const d=await api(`/api/v246/tracking/job/${encodeURIComponent(id)}`);const j=d.job||{};progress(j.progress);status(j.message||'处理中…',j.status==='FAILED'?'danger':'warn');if(j.status==='COMPLETED'){setBusy(false);show(j.after||j.result?.after||{});const r=j.result||{};status(`核查完成：非终态候选${fmt(r.candidates)}票，成功更新${fmt(r.refreshed)}票，待重试${fmt(r.failed)}票；防漏对账本次补回/重开${fmt(r.finalRepair?.repaired)}票。`,'ok');return;}if(j.status==='FAILED'){setBusy(false);return;}pollTimer=setTimeout(()=>poll(id),1800);}catch(e){setBusy(false);status(`任务读取失败：${e.message}`,'danger');}}
   async function bill(){const code=String(document.getElementById('v246Bill')?.value||'').trim().toUpperCase();if(!code)return;const out=document.getElementById('v246BillResult');out.textContent='正在读取…';try{const d=await api(`/api/v246/tracking/bill/${encodeURIComponent(code)}`);const l=d.ledger;if(!l){out.innerHTML=`<b>${esc(code)}</b>：当前追踪账本没有这票。请用上方7天/30天核查，系统会从原始日报重新枚举并自动补回。`;return;}const audits=(d.audits||[]).slice(0,5).map(a=>`${esc(a.createdAt)} · ${esc(a.action)} · ${esc(a.reason)}`).join('<br>');out.innerHTML=`<b>${esc(code)}</b> · ${esc(l.businessType)}<br>首次日报：<b>${esc(l.firstReportDate)}</b> · 最后出现在日报：${esc(l.lastImportedDate)} · 追踪状态：<b>${esc(l.trackingStatus)}</b> · 终态：${esc(l.terminalReason||'未终态')}<br>POD日期：${esc(l.podDate||'—')} · 派次：${l.attemptNo?`${l.attemptNo}派`:'未识别'} · 平均签收起算结果：${l.signingDays?`${l.signingDays}天`:'—'}<div class="v246-audit">${audits||'暂无修复审计记录'}</div>`;}catch(e){out.textContent=`读取失败：${e.message}`;}}
-  function mount(){ensurePanel();}
+  function mount(){const panel=ensurePanel();if(panel&&!initialReadStarted){initialReadStarted=true;queueMicrotask(()=>void read());}}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
   const observer=new MutationObserver(()=>ensurePanel());observer.observe(document.documentElement,{childList:true,subtree:true});
+  global.__CE_QC_V246_TRACKING_READONLY_SUMMARY_ID__=V450_READONLY_SUMMARY_ID;
 })(window);
