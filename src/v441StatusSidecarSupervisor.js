@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 export const V441_STATUS_SIDECAR_SUPERVISOR_ID='2026-09-07-v441-status-sidecar-supervisor-v1';
 export const V442_WHPP_STATUS_PARITY_ID='2026-09-07-v442-whpp-finalized-daily-status-parity-v1';
+export const V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID='2026-09-07-v443-whpp-preserved-finalized-daily-authority-v1';
 const V441_COMPAT_ENTRY='./localStatusSidecar.js';
 const PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_STATUS_SIDECAR_PORT||5180)));
 const APP_PORT=Math.max(1024,Math.min(65535,Number(process.env.PORT||5177)));
@@ -38,14 +39,14 @@ function startSupervisor(){
       env:{...process.env,CE_QC_STATUS_SIDECAR_CHILD:'1',CE_QC_STATUS_SIDECAR_PORT:String(PORT)},
       windowsHide:true,detached:false,stdio:['ignore','inherit','inherit']
     });
-    console.log(`[CE-QC][V442_STATUS_SUPERVISOR] starting pid=${child.pid||'-'} port=${PORT} parity=${V442_WHPP_STATUS_PARITY_ID}`);
-    child.once('error',error=>console.error('[CE-QC][V442_STATUS_SUPERVISOR] spawn failed:',error?.stack||error));
+    console.log(`[CE-QC][V443_STATUS_SUPERVISOR] starting pid=${child.pid||'-'} port=${PORT} parity=${V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID}`);
+    child.once('error',error=>console.error('[CE-QC][V443_STATUS_SUPERVISOR] spawn failed:',error?.stack||error));
     child.once('exit',(code,signal)=>{
-      console.log(`[CE-QC][V442_STATUS_SUPERVISOR] exited code=${code??'null'}${signal?` signal=${signal}`:''}`);
+      console.log(`[CE-QC][V443_STATUS_SUPERVISOR] exited code=${code??'null'}${signal?` signal=${signal}`:''}`);
       child=null;
       if(!stopping){clearTimeout(restartTimer);restartTimer=setTimeout(startSupervisor,1000);restartTimer.unref?.();}
     });
-  }catch(error){child=null;console.error('[CE-QC][V442_STATUS_SUPERVISOR] start failed:',error?.stack||error);}
+  }catch(error){child=null;console.error('[CE-QC][V443_STATUS_SUPERVISOR] start failed:',error?.stack||error);}
 }
 
 function stopSupervisor(){
@@ -79,6 +80,7 @@ function responseHeaders(req,extra={}){
     'cache-control':'no-store',
     'x-ce-qc-local-status':'2026-09-07-v441-isolated-readonly-status-sidecar-v1',
     'x-ce-qc-whpp-status-parity':V442_WHPP_STATUS_PARITY_ID,
+    'x-ce-qc-whpp-preserved-authority':V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,
     'access-control-allow-headers':'Accept, Content-Type',
     'access-control-allow-methods':'GET,OPTIONS',
     ...extra
@@ -119,6 +121,41 @@ async function startChildServer(){
   function currentWhppCompletionClaim(database,payload){
     const date=normalizeDate(payload?.reportDate),boundary=text(payload?.lifecycleBoundary);
     if(!date)return null;
+
+    // V443: WHPP has its own immutable same-day lifecycle. A later combined
+    // import of sibling businesses must not invalidate a previously finalized
+    // WHPP cycle when the current WHPP daily header still certifies the exact
+    // same finalizedSnapshotId and its standard daily membership is complete.
+    // Changed WHPP membership is already handled canonically by V419: the old
+    // snapshot is INVALID/FAILED and the completed daily summary is replaced.
+    try{
+      const daily=database.prepare("SELECT totalCount,summaryJson,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date)||null;
+      if(daily){
+        const expected=Math.max(0,n(daily.totalCount));
+        const actual=n(database.prepare("SELECT COUNT(DISTINCT shipmentCode) count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''").get(date)?.count);
+        const summary=safeJson(daily.summaryJson),status=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase(),snapshotId=text(summary.finalizedSnapshotId);
+        if(expected===actual&&summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&snapshotId){
+          const finalized=database.prepare(`SELECT snapshotId,runId,generatedAt,createdAt,status,reconciliationStatus
+            FROM business_export_snapshots
+            WHERE businessType='WHPP' AND reportDate=? AND snapshotId=?
+              AND UPPER(COALESCE(status,''))<>'INVALID'
+              AND UPPER(COALESCE(reconciliationStatus,''))<>'FAILED'
+            LIMIT 1`).get(date,snapshotId)||null;
+          if(finalized)return{
+            ...finalized,
+            claimSource:'WHPP_CURRENT_DAILY_FINALIZED_AUTHORITY',
+            dailyAuthority:true,
+            dailyExpected:expected,
+            dailyActual:actual,
+            dailyUpdatedAt:text(daily.updatedAt)
+          };
+        }
+      }
+    }catch{}
+
+    // Fallback for a new-schema explicit VALID+COMPLETED snapshot that is not
+    // represented by an older daily header. This path remains bound to the
+    // current combined-import lifecycle boundary and keeps V442 semantics.
     try{
       const explicit=database.prepare(`SELECT snapshotId,runId,generatedAt,createdAt,status,reconciliationStatus
         FROM business_export_snapshots
@@ -126,24 +163,9 @@ async function startChildServer(){
           AND UPPER(COALESCE(status,''))='VALID'
           AND UPPER(COALESCE(reconciliationStatus,''))='COMPLETED'
         ORDER BY COALESCE(NULLIF(generatedAt,''),createdAt) DESC,id DESC LIMIT 1`).get(date)||null;
-      if(explicit&&atOrAfter(explicit.generatedAt||explicit.createdAt,boundary))return{...explicit,claimSource:'WHPP_VALID_COMPLETED_SNAPSHOT'};
+      if(explicit&&atOrAfter(explicit.generatedAt||explicit.createdAt,boundary))return{...explicit,claimSource:'WHPP_VALID_COMPLETED_SNAPSHOT',dailyAuthority:false};
     }catch{}
-    try{
-      const daily=database.prepare("SELECT totalCount,summaryJson,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date)||null;
-      if(!daily)return null;
-      const summary=safeJson(daily.summaryJson),status=text(summary.snapshotStatus||summary.reconciliationStatus).toUpperCase(),snapshotId=text(summary.finalizedSnapshotId);
-      if(summary.completed!==true||!['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)||!snapshotId)return null;
-      const legacy=database.prepare(`SELECT snapshotId,runId,generatedAt,createdAt,status,reconciliationStatus
-        FROM business_export_snapshots
-        WHERE businessType='WHPP' AND reportDate=? AND snapshotId=?
-          AND UPPER(COALESCE(status,''))<>'INVALID'
-          AND UPPER(COALESCE(reconciliationStatus,''))<>'FAILED'
-        LIMIT 1`).get(date,snapshotId)||null;
-      if(!legacy)return null;
-      const lifecycleTime=legacy.generatedAt||legacy.createdAt||daily.updatedAt;
-      if(!atOrAfter(lifecycleTime,boundary)&&!atOrAfter(daily.updatedAt,boundary))return null;
-      return{...legacy,claimSource:'WHPP_COMPLETED_DAILY_FINALIZED_SNAPSHOT',dailyTotal:n(daily.totalCount)};
-    }catch{return null;}
+    return null;
   }
 
   function applyWhppCompletionParity(database,payload){
@@ -151,30 +173,37 @@ async function startChildServer(){
     if(!whpp||whpp.complete===true||n(whpp.sourceTotal)===0||whpp.currentMembershipConsistent===false)return payload;
     const claim=currentWhppCompletionClaim(database,payload);
     if(!claim)return payload;
+
+    // For V443 daily-authority claims, exact current standard membership plus
+    // the still-certified finalizedSnapshotId is itself the immutable completion
+    // proof. We still read saved SUCCESS coverage as a diagnostic, but we do not
+    // incorrectly reject an old valid WHPP finalization merely because a later
+    // sibling-business import moved the global lifecycle boundary forward.
     const coverage=readV418BusinessSuccessCoverage(database,{
       businessType:'WHPP',
       date:payload.reportDate,
       snapshotId:payload.sourceSnapshotId,
-      boundary:payload.lifecycleBoundary,
+      boundary:claim.dailyAuthority?'':payload.lifecycleBoundary,
       memberTypes:['WHPP']
     });
     const expected=n(whpp.sourceTotal),covered=n(coverage?.count);
-    if(!coverage?.ok||covered<expected)return{
+    const dailyAuthorityExact=claim.dailyAuthority===true&&n(claim.dailyExpected)===expected&&n(claim.dailyActual)===expected;
+    if(!dailyAuthorityExact&&(!coverage?.ok||covered<expected))return{
       ...payload,
       stages:{...payload.stages,WHPP:{...whpp,completionProof:{covered,missing:Math.max(0,expected-covered),ok:Boolean(coverage?.ok),completionClaimSource:claim.claimSource}}},
-      statusDiagnostics:{...(payload.statusDiagnostics||{}),v442WhppClaimSource:claim.claimSource,v442WhppCoverage:covered,v442WhppExpected:expected}
+      statusDiagnostics:{...(payload.statusDiagnostics||{}),v442WhppClaimSource:claim.claimSource,v442WhppCoverage:covered,v442WhppExpected:expected,v443DailyAuthorityExact:false}
     };
     const completedWhpp={
       ...whpp,
       complete:true,
       snapshotId:text(claim.snapshotId),
       snapshotStatus:'COMPLETED',
-      completionSource:'V418_CURRENT_MEMBER_PROCESSING_PROOF',
+      completionSource:dailyAuthorityExact?'V443_CURRENT_DAILY_FINALIZED_AUTHORITY':'V418_CURRENT_MEMBER_PROCESSING_PROOF',
       completionClaimSource:claim.claimSource,
       runStatus:'completed',phase:'已完成',running:false,paused:false,failed:false,
       restartInterrupted:false,restartRecovery:null,
-      statusSource:'V442_WHPP_FINALIZED_DAILY_STATUS_PARITY',
-      completionProof:{covered,missing:0,ok:true,completionClaimSource:claim.claimSource}
+      statusSource:'V443_WHPP_PRESERVED_FINALIZED_DAILY_AUTHORITY',
+      completionProof:{covered,missing:Math.max(0,expected-covered),ok:dailyAuthorityExact||Boolean(coverage?.ok),dailyAuthorityExact,completionClaimSource:claim.claimSource}
     };
     const stages={...payload.stages,WHPP:completedWhpp};
     return{
@@ -182,7 +211,8 @@ async function startChildServer(){
       stages,
       complete:['CCSL','SHOPEE','WHPP'].every(key=>stages?.[key]?.complete===true),
       v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,
-      statusDiagnostics:{...(payload.statusDiagnostics||{}),v442WhppClaimSource:claim.claimSource,v442WhppCoverage:covered,v442WhppExpected:expected}
+      v443WhppPreservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,
+      statusDiagnostics:{...(payload.statusDiagnostics||{}),v442WhppClaimSource:claim.claimSource,v442WhppCoverage:covered,v442WhppExpected:expected,v443DailyAuthorityExact:dailyAuthorityExact,v443DailyExpected:n(claim.dailyExpected),v443DailyActual:n(claim.dailyActual)}
     };
   }
 
@@ -190,6 +220,7 @@ async function startChildServer(){
     const all=applyWhppCompletionParity(database,readV322SevenBusinessStatus({reportDate,db:database,force:true}));
     all.isolatedStatusId='2026-09-07-v441-isolated-readonly-status-sidecar-v1';
     all.v442WhppStatusParityId=V442_WHPP_STATUS_PARITY_ID;
+    all.v443WhppPreservedAuthorityId=V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID;
     const type=text(businessType).toUpperCase();
     if(type==='ALL')return all;
     const key=type==='SHOPEE'?'SHOPEE':type==='WHPP'?'WHPP':'CCSL',stage=all.stages?.[key]||{};
@@ -203,8 +234,8 @@ async function startChildServer(){
     }
     if(req.method==='GET'&&url.pathname==='/api/local-status/health'){
       if(!localChannel(req))return sendJson(req,res,403,{ok:false,error:'Status sidecar is limited to local/LAN access.'});
-      try{getReadonlyDb();return sendJson(req,res,200,{ok:true,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,dbReady:true,port:PORT,appPort:APP_PORT});}
-      catch(error){return sendJson(req,res,503,{ok:false,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,dbReady:false,error:text(error?.message||error)});}
+      try{getReadonlyDb();return sendJson(req,res,200,{ok:true,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,dbReady:true,port:PORT,appPort:APP_PORT});}
+      catch(error){return sendJson(req,res,503,{ok:false,id:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,dbReady:false,error:text(error?.message||error)});}
     }
     if(req.method!=='GET'||url.pathname!=='/api/local-status/run-progress')return sendJson(req,res,404,{ok:false,error:'Not found.'});
     if(!localChannel(req))return sendJson(req,res,403,{ok:false,error:'Status sidecar is limited to local/LAN access.'});
@@ -213,20 +244,20 @@ async function startChildServer(){
       const database=getReadonlyDb();
       const data=readProgress(database,url.searchParams.get('businessType')||'ALL',url.searchParams.get('reportDate')||'');
       const totalMs=Number(elapsed(started).toFixed(3)),d=data?.statusDiagnostics||{};
-      return sendJson(req,res,200,data,{'server-timing':`v442total;dur=${totalMs},membership;dur=${n(d.membershipMs)},locks;dur=${n(d.locksMs)},ccsl;dur=${n(d.ccslMs)},shopee;dur=${n(d.shopeeMs)},whpp;dur=${n(d.whppMs)}`});
+      return sendJson(req,res,200,data,{'server-timing':`v443total;dur=${totalMs},membership;dur=${n(d.membershipMs)},locks;dur=${n(d.locksMs)},ccsl;dur=${n(d.ccslMs)},shopee;dur=${n(d.shopeeMs)},whpp;dur=${n(d.whppMs)}`});
     }catch(error){
       closeDb();
-      return sendJson(req,res,200,{ok:false,code:'V442_ISOLATED_STATUS_READ_FAILED',statusVersion:'2026-09-02-v414-one-read-seven-business-status-v1',isolatedStatusId:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,reportDate:normalizeDate(url.searchParams.get('reportDate')||''),error:text(error?.message||error),generatedAt:new Date().toISOString()});
+      return sendJson(req,res,200,{ok:false,code:'V443_ISOLATED_STATUS_READ_FAILED',statusVersion:'2026-09-02-v414-one-read-seven-business-status-v1',isolatedStatusId:'2026-09-07-v441-isolated-readonly-status-sidecar-v1',v442WhppStatusParityId:V442_WHPP_STATUS_PARITY_ID,v443WhppPreservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,reportDate:normalizeDate(url.searchParams.get('reportDate')||''),error:text(error?.message||error),generatedAt:new Date().toISOString()});
     }
   });
   server.requestTimeout=12000;server.headersTimeout=13000;server.keepAliveTimeout=1000;
-  server.on('error',error=>{console.error('[CE-QC][V442_STATUS_SIDECAR] START FAILED',error?.stack||error);process.exitCode=1;});
+  server.on('error',error=>{console.error('[CE-QC][V443_STATUS_SIDECAR] START FAILED',error?.stack||error);process.exitCode=1;});
   const shutdown=()=>{
     if(shuttingDown)return;shuttingDown=true;closeDb();
     try{server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),500).unref?.();}catch{process.exit(0);}
   };
   process.once('SIGTERM',shutdown);process.once('SIGINT',shutdown);process.once('exit',closeDb);
-  server.listen(PORT,HOST,()=>console.log(`[CE-QC][V442_STATUS_SIDECAR] READY http://${HOST}:${PORT} · app=${APP_PORT} · readonly · ${V442_WHPP_STATUS_PARITY_ID}`));
+  server.listen(PORT,HOST,()=>console.log(`[CE-QC][V443_STATUS_SIDECAR] READY http://${HOST}:${PORT} · app=${APP_PORT} · readonly · ${V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID}`));
 }
 
 if(CHILD){
@@ -236,4 +267,4 @@ if(CHILD){
   startSupervisor();
 }
 
-export function inspectV441StatusSupervisor(){return{eligible:eligible(),running:Boolean(child),pid:child?.pid||0,port:PORT,id:V441_STATUS_SIDECAR_SUPERVISOR_ID,parityId:V442_WHPP_STATUS_PARITY_ID,compatEntry:V441_COMPAT_ENTRY};}
+export function inspectV441StatusSupervisor(){return{eligible:eligible(),running:Boolean(child),pid:child?.pid||0,port:PORT,id:V441_STATUS_SIDECAR_SUPERVISOR_ID,parityId:V442_WHPP_STATUS_PARITY_ID,preservedAuthorityId:V443_WHPP_PRESERVED_FINALIZED_AUTHORITY_ID,compatEntry:V441_COMPAT_ENTRY};}
