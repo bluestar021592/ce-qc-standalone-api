@@ -1,10 +1,10 @@
 (function installV194ExportTokenUi(global) {
-  const REVISION = '2026-08-18-v195-ipc-xhr-status-ui-v1';
+  const REVISION = '2026-09-07-v447-stale-export-job-watchdog-v1';
   if (global.__CE_QC_V194_EXPORT_TOKEN_UI_REVISION__ === REVISION) return;
   global.__CE_QC_V194_EXPORT_TOKEN_UI__ = true;
 
   // Public contract names stay V194 so old launchers remain compatible. The V195
-  // revision changes transport to XHR + 5178 IPC-memory status.
+  // transport remains XHR + 5178 IPC-memory status; V447 only retires stale jobs.
   const VERSION = '2026-08-18-v194-export-token-ui-v1';
   const SIDECAR_VERSION = '2026-08-18-v194-token-status-sidecar-v1';
   const SIDECAR_REVISION = '2026-08-18-v195-ipc-memory-status-v1';
@@ -12,6 +12,7 @@
   const LEGACY_KEYS = ['ce_qc_active_export_job_v180','ce_qc_active_export_job_v186','ce_qc_active_export_job_v187','ce_qc_active_export_job_v191','ce_qc_active_export_job_v192','ce_qc_active_export_job_v193'];
   const LEGACY_LABEL = '[V194独立导出]';
   const LABEL = '[V195独立导出]';
+  const STALE_JOB_MS = 2 * 60 * 1000;
   const previousExport = typeof global.exportPeriodReport === 'function' ? global.exportPeriodReport.bind(global) : null;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let pollEpoch = 0;
@@ -92,7 +93,9 @@
   function load() {
     try {
       const value = JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY) || 'null');
-      return value?.jobId && value.version === VERSION && value.revision === REVISION ? value : null;
+      if (value?.jobId && value.version === VERSION && value.revision === REVISION) return value;
+      if (value?.jobId) localStorage.removeItem(ACTIVE_JOB_KEY);
+      return null;
     } catch { return null; }
   }
   function clear(jobId='') {
@@ -100,6 +103,16 @@
       const current = load();
       if (!jobId || !current || current.jobId === jobId) localStorage.removeItem(ACTIVE_JOB_KEY);
     } catch {}
+  }
+  function jobHeartbeatAgeMs(job={}) {
+    const stamp = Date.parse(String(job.heartbeatAt || job.updatedAt || job.createdAt || ''));
+    return Number.isFinite(stamp) ? Math.max(0, Date.now() - stamp) : 0;
+  }
+  function staleRunningJob(job={}) {
+    const status = String(job.status || '').toUpperCase();
+    if (!['QUEUED','RUNNING'].includes(status)) return false;
+    const age = jobHeartbeatAgeMs(job);
+    return age > STALE_JOB_MS;
   }
   function ownDom() {
     let progress = document.getElementById('exportProgressV194') || document.getElementById('exportProgressV193') || document.getElementById('exportProgressV192') || document.getElementById('exportProgressV191') || document.getElementById('exportProgressV187');
@@ -151,6 +164,12 @@
         const status = String(job.status || '').toUpperCase();
         const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
         const transport = job.statusTransport === 'IPC_MEMORY_V195' ? ' · IPC内存状态' : '';
+        if (staleRunningJob(job)) {
+          const staleMinutes = Math.max(2, Math.round(jobHeartbeatAgeMs(job) / 60000));
+          clear(jobId);
+          progress.textContent = `${LABEL} Job ${jobId} · 后台进程已中断，最后心跳已超过${staleMinutes}分钟；旧任务已自动释放，可直接重新导出`;
+          return;
+        }
         progress.textContent = `${LABEL} Job ${jobId} · ${job.message || '后台生成中'} · ${pct}%${job.currentBusiness ? ` · ${job.currentBusiness}` : ''}${transport}`;
         if (status === 'COMPLETED') {
           const ready = Array.isArray(job.files) ? job.files.filter(item => item?.url && item?.name) : [];
