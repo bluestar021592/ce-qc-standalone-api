@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-seven-final-'));
 Object.assign(process.env,{
@@ -116,7 +117,28 @@ try{
   assert.match(cacheWorker,/PERSISTED_CACHE_STARTUP_READ_ONLY/,'normal startup must read persisted dashboard cache');
   assert.doesNotMatch(cacheWorker,/recentCompletedDashboardDates\(7\)/,'normal startup must not rebuild recent seven dates');
 
-  console.log('[SEVEN-BUSINESS-FINALIZATION] passed · SHOPEE defers non-zero WHPP without INVALID · exact WHPP finalization closes all 7 · zero-WHPP completes directly · dashboard cache requires 7/7 · completed history is persisted-read/no implicit CE re-query · one canonical history worker');
+  for(const file of ['src/localStatusSidecar.js','src/v441StatusSidecarSupervisor.js','public/v169-seven-business-legacy-status-sync.js','src/v44WhppUiPatch.js']){
+    execFileSync(process.execPath,['--check',file],{stdio:'pipe',env:{...process.env,NODE_ENV:'test'}});
+  }
+  const statusSidecar=fs.readFileSync('src/localStatusSidecar.js','utf8');
+  const statusSupervisor=fs.readFileSync('src/v441StatusSidecarSupervisor.js','utf8');
+  const statusUi=fs.readFileSync('public/v169-seven-business-legacy-status-sync.js','utf8');
+  const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
+  assert.match(statusSidecar,/2026-09-07-v441-isolated-readonly-status-sidecar-v1/);
+  assert.match(statusSidecar,/new DatabaseSync\(file,\{readOnly:true\}\)/,'status sidecar must open production SQLite read-only');
+  assert.match(statusSidecar,/PRAGMA query_only=ON/,'status sidecar must enforce query_only');
+  assert.doesNotMatch(statusSidecar,/\b(?:INSERT|UPDATE|DELETE|REPLACE)\s+(?:INTO|FROM|[a-z_])/i,'isolated status sidecar must not write business state');
+  assert.match(statusSupervisor,/CE_QC_STATUS_SIDECAR_CHILD/);
+  assert.match(statusSupervisor,/localStatusSidecar\.js/);
+  assert.match(statusUi,/STATUS_SIDECAR_PORT=5180/);
+  assert.match(statusUi,/\/api\/local-status\/run-progress/);
+  assert.match(statusUi,/event\.stopImmediatePropagation\(\)/,'unconfirmed Start click must be blocked at capture phase');
+  assert.match(statusUi,/btn\.disabled=true/,'unconfirmed Start must stay DOM-disabled');
+  assert.match(shell,/v441StatusSidecarSupervisor\.js/);
+  assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260907-v441-1/);
+  assert.match(shell,/X-CE-QC-V441-Status-Sidecar/);
+
+  console.log('[SEVEN-BUSINESS-FINALIZATION] passed · SHOPEE defers non-zero WHPP without INVALID · exact WHPP finalization closes all 7 · zero-WHPP completes directly · dashboard cache requires 7/7 · completed history is persisted-read/no implicit CE re-query · one canonical history worker · V441 local/LAN status is read-only isolated on 5180 and unconfirmed Start is fail-closed at DOM+click entry');
 } finally {
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
