@@ -100,7 +100,6 @@ function buildScalarStatus(db,date,batch){
   const counts=readV418CurrentMembershipCounts(db,batch||{});
   timing.membershipMs=Number(elapsed(membershipStarted).toFixed(3));
   const boundary=text(batch?.createdAt),snapshotId=text(batch?.snapshotId);
-  const unifiedClaim=unifiedCompletionClaim(db,batch);
 
   const locksStarted=tick();
   const ccslLock=currentLock(db,'CCSL',date,boundary),shopeeLock=currentLock(db,'SHOPEE',date,boundary),whppLock=currentLock(db,'WHPP',date,boundary);
@@ -136,9 +135,10 @@ function buildScalarStatus(db,date,batch){
 
   const whppStarted=tick();
   const whppMembershipOk=counts._whppMembershipOk!==false;
+  const unifiedClaim=n(counts.WHPP)===0?unifiedCompletionClaim(db,batch):false;
   if(n(counts.WHPP)===0&&(whppMembershipOk||unifiedClaim))WHPP=completedStage(WHPP,snapshotId,unifiedClaim?'UNIFIED_ZERO_TICKET_COMPLETED':'ZERO_TICKET');
   else if(whppMembershipOk&&n(counts.WHPP)>0){
-    const lockClaim=COMPLETE_LOCK.has(text(whppLock?.status).toLowerCase());
+    const lockClaim=COMPLETE_LOCK.has(text(whppLock?.status).toLowerCase()),unifiedClaim=unifiedCompletionClaim(db,batch);
     if(lockClaim||unifiedClaim){
       const coverage=readV418BusinessSuccessCoverage(db,{businessType:'WHPP',date,snapshotId,boundary,memberTypes:['WHPP']});
       if(coverage?.ok&&n(coverage.count)>=n(counts.WHPP))WHPP=completedStage(WHPP,snapshotId,lockClaim?'CURRENT_FINISHED_RUN_LOCK':'UNIFIED_COMPLETED_SCALAR');
