@@ -45,7 +45,7 @@ function insertMinimal(table,values){
   }
   const cols=Object.keys(data);assert.ok(cols.length,`no insertable columns for ${table}`);
   const sql=`INSERT INTO ${table}(${cols.map(c=>`"${c}"`).join(',')}) VALUES(${cols.map(()=>'?').join(',')})`;
-  db.prepare(sql).run(...cols.map(c=>data[c]));
+  getDb().prepare(sql).run(...cols.map(c=>data[c]));
 }
 function persistFacts(reportDate,rows){
   for(const row of rows){
@@ -130,6 +130,13 @@ try{
   assert.doesNotMatch(statusSidecar,/\b(?:INSERT|UPDATE|DELETE|REPLACE)\s+(?:INTO|FROM|[a-z_])/i,'isolated status sidecar must not write business state');
   assert.match(statusSupervisor,/CE_QC_STATUS_SIDECAR_CHILD/);
   assert.match(statusSupervisor,/localStatusSidecar\.js/);
+  assert.match(statusSupervisor,/2026-09-07-v442-whpp-finalized-daily-status-parity-v1/,'V442 must be the active 5180 WHPP completion parity owner');
+  assert.match(statusSupervisor,/business_export_snapshots/,'V442 must accept finalized WHPP snapshot authority without requiring a surviving run lock');
+  assert.match(statusSupervisor,/business_daily_reports/,'V442 must preserve attested legacy finalized WHPP daily authority');
+  assert.match(statusSupervisor,/readV418BusinessSuccessCoverage/,'V442 completion still requires exact current-member SUCCESS coverage');
+  assert.match(statusSupervisor,/new DatabaseSync\(file,\{readOnly:true\}\)/,'V442 status process must remain read-only');
+  assert.match(statusSupervisor,/PRAGMA query_only=ON/,'V442 status process must enforce query_only');
+  assert.doesNotMatch(statusSupervisor,/\b(?:INSERT|UPDATE|DELETE|REPLACE)\s+(?:INTO|FROM|[a-z_])/i,'V442 status parity must not write business state');
   assert.match(statusUi,/STATUS_SIDECAR_PORT=5180/);
   assert.match(statusUi,/\/api\/local-status\/run-progress/);
   assert.match(statusUi,/event\.stopImmediatePropagation\(\)/,'unconfirmed Start click must be blocked at capture phase');
@@ -138,7 +145,7 @@ try{
   assert.match(shell,/v169-seven-business-legacy-status-sync\.js\?v=20260907-v441-1/);
   assert.match(shell,/X-CE-QC-V441-Status-Sidecar/);
 
-  console.log('[SEVEN-BUSINESS-FINALIZATION] passed · SHOPEE defers non-zero WHPP without INVALID · exact WHPP finalization closes all 7 · zero-WHPP completes directly · dashboard cache requires 7/7 · completed history is persisted-read/no implicit CE re-query · one canonical history worker · V441 local/LAN status is read-only isolated on 5180 and unconfirmed Start is fail-closed at DOM+click entry');
+  console.log('[SEVEN-BUSINESS-FINALIZATION] passed · SHOPEE defers non-zero WHPP without INVALID · exact WHPP finalization closes all 7 · zero-WHPP completes directly · dashboard cache requires 7/7 · completed history is persisted-read/no implicit CE re-query · one canonical history worker · V441 local/LAN status is read-only isolated on 5180 and unconfirmed Start is fail-closed at DOM+click entry · V442 restores finalized WHPP completion from current-lifecycle snapshot/daily authority only after exact current-member SUCCESS coverage');
 } finally {
   try{closeDb();}catch{}
   fs.rmSync(root,{recursive:true,force:true});
