@@ -25,6 +25,7 @@ import './v206InteractiveFirstRuntimePatch.js';
 const PATCH_ID='2026-09-05-v433-unified-status-stability-loader-v1';
 const V428_BASE_STATUS_LOADER_COMPAT='2026-09-05-v428-base-ccsl-status-owner-loader-v1';
 const V411_STATUS_ENTRY_LOCK_LOADER_COMPAT='2026-09-01-v411-serialized-status-entry-lock-loader-v1';
+const V424_V169_LOADER_SIGNATURE_COMPAT='<script src="/v169-seven-business-legacy-status-sync.js?v=20260904-v424-1"';
 const V375_CONTROL_REVISION='2026-08-30-v375-canonical-run-control-cache-bust-v1';
 const V226_COMPAT_UI_BUILD='2026-08-22-v226-shared-client-ui-cache-bust-v1';
 const GOLIVE_COMPAT_PATCH_ID='2026-08-18-v195-ipc-export-owner-shell-v1';
@@ -70,5 +71,5 @@ express.application.use=function v206InteractiveFirstOwnerUse(...args){
   return previousUse.apply(this,args);
 };
 
-export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,baseStatusLoaderCompat:V428_BASE_STATUS_LOADER_COMPAT,controlRevision:V375_CONTROL_REVISION,compatPatchId:GOLIVE_COMPAT_PATCH_ID,legacyUiBuild:V226_COMPAT_UI_BUILD,singleRunner:SINGLE_RUNNER_UI_BUILD,persistedStatus:PERSISTED_STATUS_BUILD,whppPageOwner:WHPP_PAGE_OWNER,statusEntryLockCompat:V411_STATUS_ENTRY_LOCK_LOADER_COMPAT};}
+export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,baseStatusLoaderCompat:V428_BASE_STATUS_LOADER_COMPAT,controlRevision:V375_CONTROL_REVISION,compatPatchId:GOLIVE_COMPAT_PATCH_ID,legacyUiBuild:V226_COMPAT_UI_BUILD,singleRunner:SINGLE_RUNNER_UI_BUILD,persistedStatus:PERSISTED_STATUS_BUILD,whppPageOwner:WHPP_PAGE_OWNER,statusEntryLockCompat:V411_STATUS_ENTRY_LOCK_LOADER_COMPAT,v424V169LoaderSignatureCompat:V424_V169_LOADER_SIGNATURE_COMPAT};}
 export const V44_WHPP_UI_PATCH_ID=PATCH_ID;
