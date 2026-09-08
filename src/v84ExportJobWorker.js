@@ -15,7 +15,7 @@ const CHILD_HEAP_MB=Math.max(1024,Number(process.env.EXPORT_BUSINESS_HEAP_MB||15
 const CONCURRENCY=Math.max(1,Math.min(2,Number(process.env.EXPORT_WORKER_CONCURRENCY||1)));
 const CHILD_TIMEOUT_MS=Math.max(180_000,Number(process.env.EXPORT_BUSINESS_TIMEOUT_MS||900_000));
 const HEARTBEAT_MS=Math.max(5_000,Math.min(60_000,Number(process.env.EXPORT_HEARTBEAT_MS||15_000)));
-const EXPORT_PLAN_VERSION='2026-09-08-v474-one-business-one-workbook-indexed-progress-v1';
+const EXPORT_PLAN_VERSION='2026-09-08-v477-batch-driven-membership-progress-v1';
 
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
@@ -89,6 +89,8 @@ function childFraction(state={}){
   const completed=Math.max(0,Number(state.completed||0)),total=Math.max(0,Number(state.total||0));
   const ratio=total>0?Math.max(0,Math.min(1,completed/total)):0;
   if(phase==='starting')return 0.02;
+  if(phase==='membershipplan')return 0.06;
+  if(phase==='membershipload')return 0.06+0.04*ratio;
   if(phase==='membershiprows')return 0.10;
   if(phase==='hydratefinalrows')return 0.10+0.28*ratio;
   if(phase==='hydratecurrenttruth')return 0.38+0.18*ratio;
@@ -100,6 +102,8 @@ function childFraction(state={}){
 }
 function childMessage(type,range,state,elapsedSec){
   const phase=String(state?.phase||'').toLowerCase(),completed=Number(state?.completed||0),total=Number(state?.total||0),entries=Number(state?.entries||0);
+  if(phase==='membershipplan')return total>0?`${type} 已用索引选定 ${total} 个日报快照；准备读取成员`:`${type} 正在从日报批次索引选择每一天最新 VALID 快照`;
+  if(phase==='membershipload')return `${type} 正在读取已选日报成员 ${completed}/${Math.max(total,completed)} 天 · 当前唯一运单 ${entries.toLocaleString()}`;
   if(phase==='membershiprows')return `${type} 已锁定 ${entries.toLocaleString()} 个历史运单成员；准备索引读取最终状态`;
   if(phase==='hydratefinalrows')return `${type} 正在索引读取历史最终状态 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()}`;
   if(phase==='hydratecurrenttruth')return `${type} 正在索引叠加当前持久化状态 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()}`;
