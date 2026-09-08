@@ -77,7 +77,7 @@ export function applyV419CanonicalExportLedgerTruth(businessType,rows=[],{db=get
   for(const row of rows){const bill=billOf(row?.shipmentCode||row?.运单号);if(!bill)continue;if(!byBill.has(bill))byBill.set(bill,[]);byBill.get(bill).push(row);}
   const bills=[...byBill.keys()];
   let matched=0,terminal=0,pod=0,returned=0,open=0,attemptLocked=0,processed=0,openJsonRows=0,strictEvidenceRows=0;
-  onProgress({phase:'hydrateCurrentTruth',completed:0,total:bills.length,entries:bills.length,source:V479_CANONICAL_LEDGER_READ_ID,batchSize:LEDGER_CHUNK_SIZE});
+  onProgress({phase:'hydrateLedgerTruth',completed:0,total:bills.length,entries:bills.length,source:V479_CANONICAL_LEDGER_READ_ID,batchSize:LEDGER_CHUNK_SIZE});
   for(const part of chunks(bills)){
     const marks=part.map(()=>'?').join(',');if(!marks)continue;
     let ledger=[];
@@ -108,7 +108,7 @@ export function applyV419CanonicalExportLedgerTruth(businessType,rows=[],{db=get
       }
     }
     processed+=part.length;
-    onProgress({phase:'hydrateCurrentTruth',completed:Math.min(processed,bills.length),total:bills.length,entries:bills.length,matched,terminal,pod,returned,open,attemptLocked,openJsonRows,strictEvidenceRows,source:V479_CANONICAL_LEDGER_READ_ID,batchSize:LEDGER_CHUNK_SIZE});
+    onProgress({phase:'hydrateLedgerTruth',completed:Math.min(processed,bills.length),total:bills.length,entries:bills.length,matched,terminal,pod,returned,open,attemptLocked,openJsonRows,strictEvidenceRows,source:V479_CANONICAL_LEDGER_READ_ID,batchSize:LEDGER_CHUNK_SIZE});
   }
   Object.defineProperty(rows,'v419CanonicalExportDiagnostics',{value:{id:V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,readId:V479_CANONICAL_LEDGER_READ_ID,type,rows:rows.length,matched,terminal,pod,returned,open,attemptLocked,openJsonRows,strictEvidenceRows,ledgerChunkSize:LEDGER_CHUNK_SIZE,primaryKeyOnly:true},enumerable:false,configurable:true});
   return rows;
