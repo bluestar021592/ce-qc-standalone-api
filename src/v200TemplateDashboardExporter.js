@@ -3,7 +3,7 @@ import { collectV200Rows, V200_EXPORT_VERSION } from './v225ExportReturnTruth.js
 import { statsOf, bucketRows, anchorMaps, completeAttemptRatio, completeSigningAverage } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 import { V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
-import { prepareV482StrictExportEvidence, isV482StrictExportEvidenceType, V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID } from './v381ExportEvidenceRepair.js';
+import { prepareV482StrictExportEvidence, repairV483StrictExportRows, isV482StrictExportEvidenceType, V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID, V483_EXPORT_MEMBER_EVIDENCE_ID } from './v381ExportEvidenceRepair.js';
 
 export { V200_EXPORT_VERSION } from './v225ExportReturnTruth.js';
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
@@ -92,6 +92,16 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
   const rows = await collectV200Rows(businessType, range, onProgress);
   if (!rows.length) throw new Error(`${displayType(businessType)} 在所选区间没有数据。`);
   assertV200ExportRange(rows, range);
+  if (isV482StrictExportEvidenceType(businessType)) {
+    await repairV483StrictExportRows({
+      type: businessType,
+      range,
+      rows,
+      onProgress(info = {}) {
+        onProgress({ ...info, strictExportMemberRepair: true, evidenceRepairVersion: V483_EXPORT_MEMBER_EVIDENCE_ID });
+      }
+    });
+  }
   const stats = statsOf(rows, range);
   const dailyTotal = stats.daily.reduce((sum, row) => sum + Number(row.total || 0), 0);
   if (Number(stats.overall.total || 0) !== rows.length || dailyTotal !== rows.length) {
