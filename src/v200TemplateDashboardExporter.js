@@ -3,6 +3,7 @@ import { collectV200Rows, V200_EXPORT_VERSION } from './v225ExportReturnTruth.js
 import { statsOf, bucketRows, anchorMaps, completeAttemptRatio, completeSigningAverage } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 import { V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
+import { prepareV482StrictExportEvidence, isV482StrictExportEvidenceType, V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID } from './v381ExportEvidenceRepair.js';
 
 export { V200_EXPORT_VERSION } from './v225ExportReturnTruth.js';
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
@@ -79,6 +80,15 @@ export function assertShopeeExportTruth(businessType, rows = [], stats = {}) {
 
 export async function createV200ReferenceDashboardWorkbook({ type, periodType = 'custom', range, outputDir, onProgress = () => {} }) {
   const businessType = String(type || '').trim().toUpperCase();
+  if (isV482StrictExportEvidenceType(businessType)) {
+    await prepareV482StrictExportEvidence({
+      type: businessType,
+      range,
+      onProgress(info = {}) {
+        onProgress({ ...info, strictEvidencePreflight: true, evidenceRepairVersion: V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID });
+      }
+    });
+  }
   const rows = await collectV200Rows(businessType, range, onProgress);
   if (!rows.length) throw new Error(`${displayType(businessType)} 在所选区间没有数据。`);
   assertV200ExportRange(rows, range);
