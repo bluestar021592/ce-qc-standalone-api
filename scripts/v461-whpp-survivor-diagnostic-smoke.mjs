@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { inspectV461WhppHistoricalSurvivors } from '../src/v461WhppHistoricalSurvivorDiagnosticPatch.js';
 import { inspectV461WhppArchiveEvidence } from '../src/v461WhppArchiveEvidence.js';
+
+for(const file of ['src/v462WhppSurvivorFastPatch.js','src/v462WhppArchiveEvidenceWorker.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 
 const backend=fs.readFileSync('src/v461WhppHistoricalSurvivorDiagnosticPatch.js','utf8');
 const fastBackend=fs.readFileSync('src/v462WhppSurvivorFastPatch.js','utf8');
