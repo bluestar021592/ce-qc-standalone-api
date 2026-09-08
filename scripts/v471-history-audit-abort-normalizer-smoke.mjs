@@ -26,4 +26,11 @@ const otherController=new sandbox.AbortController();
 otherController.abort('OTHER_REASON');
 assert.equal(otherController.received,'OTHER_REASON','all non-target abort reasons must remain unchanged');
 
-console.log('[V471] history audit timeout abort normalizer smoke passed: exact-reason only, no network/database/business mutation');
+const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
+const prelude='v471-history-audit-abort-normalizer.js?v=20260908-v471-1';
+const audit='v142-history-integrity-audit.js?v=20260908-v470-1';
+assert.ok(shell.includes(prelude),'V471 prelude must be wired into the shell');
+assert.ok(shell.includes(audit),'V470 history audit must remain wired into the shell');
+assert.ok(shell.indexOf(prelude)<shell.indexOf(audit),'V471 timeout normalizer must load before the V142/V470 history audit');
+
+console.log('[V471] history audit timeout abort normalizer smoke passed: exact-reason only, ordered before V142, no network/database/business mutation');
