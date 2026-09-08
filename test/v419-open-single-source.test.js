@@ -106,8 +106,10 @@ test('V419 heavy history audit is manual-only and cannot overwrite primary OPEN'
   const audit=read('../public/v142-history-integrity-audit.js');
   const loader=read('../src/v44WhppUiPatch.js');
   assert.match(audit,/v419-manual-only-history-audit-no-open-mutation-v4/);
+  assert.match(audit,/2026-09-07-v451-snapshot-indexed-history-audit-ui-v1/);
   assert.match(audit,/automatic:false/);
-  assert.match(audit,/automatic history audit disabled/);
+  assert.match(audit,/不会自动触发本检查/);
+  assert.match(audit,/manual audit uses snapshot-indexed readonly reads and never mutates primary business data/);
   assert.match(audit,/历史审计不会回写或覆盖主页面OPEN数字/);
   assert.match(audit,/立即重新检查/);
   assert.doesNotMatch(audit,/combined-processing-queue-count/);
