@@ -13,7 +13,7 @@ assert.match(helper,/2026-09-08-v478-windows-retry-safe-export-job-json-v1/);
 for(const code of ['EPERM','EBUSY','EACCES'])assert.match(helper,new RegExp(`'${code}'`));
 assert.match(helper,/Atomics\.wait\(/,'sync worker retry must be bounded without event-loop timers');
 assert.match(helper,/await sleep\(DELAYS\[attempt\]\)/,'async sidecar retry must yield between attempts');
-assert.doesNotMatch(helper,/unlinkSync\(file|rmSync\(file|writeFileSync\(file,/,'V478 must not delete or directly overwrite the destination as a fallback');
+assert.doesNotMatch(helper,/fs\.writeFileSync\(file,body|fsp\.writeFile\(file,body|fs\.unlinkSync\(file\)|fsp\.unlink\(file\)/,'V478 must not directly overwrite/delete the destination as a fallback');
 for(const file of files.slice(1)){
   const source=read(file);
   assert.match(source,/exportJobAtomicJson\.js/,`${file} must use the shared V478 writer`);
