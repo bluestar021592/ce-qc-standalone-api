@@ -6,12 +6,14 @@ const owner=read('public/v268-lifecycle-export-owner.js');
 const integrity=read('public/v271-canonical-integrity-owner.js');
 const inject=read('src/v231MetricTruthUiInjectionPatch.js');
 const tracking=read('public/v246-qc-tracking.js');
+const trackingRuntime=read('src/v246QcTrackingRuntimePatch.js');
 const history=read('public/v183-history-refresh.js');
 const shops=read('src/shopCodes.js');
 const parser=read('src/unifiedExcelParser.js');
 execFileSync(process.execPath,['--check','public/v268-lifecycle-export-owner.js'],{stdio:'pipe'});
 execFileSync(process.execPath,['--check','public/v271-canonical-integrity-owner.js'],{stdio:'pipe'});
 execFileSync(process.execPath,['--check','src/v231MetricTruthUiInjectionPatch.js'],{stdio:'pipe'});
+execFileSync(process.execPath,['--check','src/v246QcTrackingRuntimePatch.js'],{stdio:'pipe'});
 execFileSync(process.execPath,['--check','src/shopCodes.js'],{stdio:'pipe'});
 execFileSync(process.execPath,['--check','src/unifiedExcelParser.js'],{stdio:'pipe'});
 assert.doesNotThrow(()=>new Function(owner),'V330 navigation-safe lifecycle/export owner must compile');
@@ -73,7 +75,19 @@ assert.match(integrity,/9000/,'historical V271 source should remain identifiable
 assert.match(integrity,/走势图读取失败/,'historical V271 source should remain identifiable by its old timeout UI');
 assert.match(integrity,/scheduleRetry/,'historical V271 source should remain identifiable by its old retry loop');
 assert.match(inject,/X-CE-QC-V269-UI/,'V269 navigation-safe compatibility delivery must remain observable');
-assert.match(tracking,/每小时做一次防漏对账/,'existing V246 background anti-leak tracking must remain active');
-assert.match(tracking,/02:00执行最近30天非终态自动刷新/,'existing V246 nightly OPEN refresh contract must remain active');
+
+// V452: the V450 UI intentionally auto-loads only the persisted tracking ledger.
+// Do not use UI wording as proof that background anti-leak jobs still exist. The
+// scheduler/runtime is the authority: it must preserve the hourly lightweight
+// reconciliation and Cambodia 02:00 rolling 30-day non-terminal refresh.
+assert.match(tracking,/\/api\/v246\/tracking\/summary\?/,'V450 tracking UI must auto-read persisted ledger through the read-only summary route');
+assert.match(tracking,/initialReadStarted/,'V450 tracking UI must auto-read only once after mount');
+assert.doesNotMatch(tracking,/function mount\([^)]*\)[\s\S]{0,220}tracking\/reconcile/,'V450 mount must not auto-start a network reconcile');
+assert.match(trackingRuntime,/Date\.now\(\)-hourlyAuditAt>=60\*60_000/,'existing V246 hourly anti-leak cadence must remain active in runtime');
+assert.match(trackingRuntime,/HOURLY_ANTI_LEAK_RECONCILE/,'existing V246 hourly anti-leak reconciliation must remain active in runtime');
+assert.match(trackingRuntime,/if\(clock\.minuteOfDay<120\)return/,'existing V246 Cambodia 02:00 scheduler gate must remain active');
+assert.match(trackingRuntime,/fromDate:addDays\(clock\.date,-29\),toDate:clock\.date,days:30/,'existing V246 nightly rolling 30-day scope must remain active');
+assert.match(trackingRuntime,/CAMBODIA_0200_30DAY_AUTO/,'existing V246 nightly OPEN refresh contract must remain active in runtime');
+assert.match(trackingRuntime,/v246_daily_0200_success_date/,'nightly V246 scheduler must persist success date for missed-run/catch-up control');
 assert.match(history,/刷新状态后导出/,'legacy V183 refresh/export source remains for compatibility but is visually retired');
-console.log('[V330/V306.1/V269] V271 timeout/retry trend owner retired · cache-only trend ownership + authoritative shop code/alias routing + seven-board isolation + lifecycle freshness gate passed');
+console.log('[V452/V330/V306.1/V269] lifecycle/export smoke passed · V246 background scheduler verified from runtime authority instead of stale UI wording · cache-only trend ownership + authoritative shop code/alias routing + seven-board isolation preserved');
