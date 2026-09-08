@@ -94,6 +94,7 @@ function childFraction(state={}){
   if(phase==='hydratefinalrows')return 0.10+0.28*ratio;
   if(phase==='hydratecurrenttruth')return 0.38+0.18*ratio;
   if(phase==='sourcerows')return 0.58;
+  if(phase==='hydrateledgertruth')return 0.58+0.12*ratio;
   if(phase==='returnattemptsigningtruth')return 0.70;
   if(phase==='writing')return 0.72+0.26*ratio;
   if(phase==='done')return 1;
@@ -107,6 +108,7 @@ function childMessage(type,range,state,elapsedSec){
   if(phase==='hydratefinalrows')return `${type} 正在索引读取历史最终状态 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()}`;
   if(phase==='hydratecurrenttruth')return `${type} 正在索引叠加当前持久化状态 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()}`;
   if(phase==='sourcerows')return `${type} 历史成员/最终状态读取完成，共 ${entries.toLocaleString()} 个唯一运单；正在做证据对账`;
+  if(phase==='hydrateledgertruth')return `${type} 正在按 shipmentCode 主键读取V246账本 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()} · 仅OPEN/严格POD按需读取JSON证据`;
   if(phase==='returnattemptsigningtruth')return `${type} 状态/派次/签收证据对账完成；准备生成Excel`;
   if(phase==='writing')return `${type} 正在写Excel：${state.sheet||'明细'}（${completed}/${Math.max(total,completed)}张明细sheet）`;
   if(phase==='done')return `${type} 完整Excel已生成`;
