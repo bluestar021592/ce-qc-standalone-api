@@ -3,6 +3,7 @@ import { collectV200Rows as collectLegacyV200Rows } from './v200EvidenceData.js'
 
 export const V320_HISTORICAL_EXPORT_ROWS_ID='2026-09-03-v419-membership-locked-current-truth-export-v1';
 export const V474_EXPORT_INDEXED_HYDRATION_ID='2026-09-08-v474-index-native-export-hydration-progress-v1';
+export const V477_EXPORT_MEMBERSHIP_PLAN_ID='2026-09-08-v477-indexed-batch-driven-membership-selection-v1';
 const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const SHOPEE=new Set(['SHOPEECN','SHOPEEVN']);
 const text=v=>String(v??'').trim();
@@ -11,7 +12,7 @@ const dateKey=v=>{const m=text(v).match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);ret
 const safeJson=(v,f={})=>{try{return v&&typeof v==='object'?v:(JSON.parse(String(v||''))||f);}catch{return f;}};
 const normalizeKey=v=>text(v).normalize('NFKC').toLowerCase().replace(/[\s_\-]+/g,'');
 const chunks=(a,size=300)=>{const out=[];for(let i=0;i<a.length;i+=size)out.push(a.slice(i,i+size));return out;};
-const progress=(fn,payload)=>{try{fn?.({...payload,v474:V474_EXPORT_INDEXED_HYDRATION_ID});}catch{}};
+const progress=(fn,payload)=>{try{fn?.({...payload,v474:V474_EXPORT_INDEXED_HYDRATION_ID,v477:V477_EXPORT_MEMBERSHIP_PLAN_ID});}catch{}};
 
 function parseRow(raw={}){
   const root=raw?.raw&&typeof raw.raw==='object'?raw.raw:raw;
@@ -53,30 +54,41 @@ function applySource(entry,row,date){
   entry.evidence.add('历史日报成员');
 }
 
-// V474: every hot-path predicate below keeps indexed columns bare. The stored
-// businessType/shipmentCode values are canonicalized by the import writers, so
-// applying UPPER/TRIM in SQL only disables the primary/composite indexes on the
-// 27GB production database without changing business truth.
-function latestValidRows(db,type,range){
+// V477: keep the exact latest VALID per reportDate+businessType rule, but drive
+// candidate selection from the small batch table. EXISTS probes the covering
+// idx_unified_rows_snapshot(snapshotId,businessType,shipmentCode) index instead
+// of joining/window-sorting the full member table before the first progress event.
+function latestValidRows(db,type,range,onProgress=()=>{}){
   const rows=[];
+  progress(onProgress,{phase:'membershipPlan',completed:0,total:0,entries:0});
   try{
-    const batches=db.prepare(`WITH candidates AS (
-      SELECT DISTINCT b.reportDate,b.snapshotId,b.createdAt,b.batchId
+    const candidates=db.prepare(`SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId
       FROM unified_import_batches b
-      JOIN unified_import_rows u ON u.snapshotId=b.snapshotId AND u.reportDate=b.reportDate
       WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
-        AND u.businessType=? AND u.shipmentCode<>''
-    ), ranked AS (
-      SELECT reportDate,snapshotId,createdAt,batchId,
-             ROW_NUMBER() OVER(PARTITION BY reportDate ORDER BY createdAt DESC,batchId DESC) rn
-      FROM candidates
-    )
-    SELECT reportDate,snapshotId FROM ranked WHERE rn=1 ORDER BY reportDate`).all(range.from,range.to,type);
+        AND EXISTS (
+          SELECT 1 FROM unified_import_rows u
+          WHERE u.snapshotId=b.snapshotId AND u.businessType=?
+            AND u.reportDate=b.reportDate AND u.shipmentCode<>''
+          LIMIT 1
+        )
+      ORDER BY b.reportDate ASC,b.createdAt DESC,b.batchId DESC`).all(range.from,range.to,type);
+    const batches=[],selectedDates=new Set();
+    for(const candidate of candidates){
+      const d=dateKey(candidate.reportDate);if(!d||selectedDates.has(d))continue;
+      selectedDates.add(d);batches.push(candidate);
+    }
+    progress(onProgress,{phase:'membershipPlan',completed:batches.length,total:batches.length,entries:0,candidates:candidates.length});
     const stmt=db.prepare('SELECT shipmentCode,regionCode,recipientRaw,recipientNormalized,rowNumber,rowJson FROM unified_import_rows WHERE snapshotId=? AND businessType=? ORDER BY rowNumber,shipmentCode');
+    const uniqueBills=new Set();let loadedDays=0;
     for(const b of batches){
       const dayRows=stmt.all(b.snapshotId,type);
       if(!dayRows.length)throw new Error(`EXPORT_BUSINESS_MEMBERSHIP_EMPTY:${type}:${b.reportDate}`);
-      for(const r of dayRows)rows.push({...r,reportDate:b.reportDate,source:'UNIFIED_PER_BUSINESS_LATEST_VALID'});
+      for(const r of dayRows){
+        rows.push({...r,reportDate:b.reportDate,source:'UNIFIED_PER_BUSINESS_LATEST_VALID'});
+        const bill=billOf(r.shipmentCode);if(bill)uniqueBills.add(bill);
+      }
+      loadedDays+=1;
+      progress(onProgress,{phase:'membershipLoad',completed:loadedDays,total:batches.length,entries:uniqueBills.size,rows:rows.length});
     }
   }catch(error){if(String(error?.message||'').startsWith('EXPORT_BUSINESS_MEMBERSHIP_EMPTY:'))throw error;}
   return rows;
@@ -166,7 +178,7 @@ export async function collectV320HistoricalExportRows(type,range,onProgress=()=>
   if(!TYPES.has(businessType))throw new Error(`V320不支持业务：${businessType}`);
   if(businessType==='WHPP')return collectLegacyV200Rows(businessType,range,onProgress);
   const db=getDb();
-  const modern=latestValidRows(db,businessType,range),modernDates=new Set(modern.map(r=>dateKey(r.reportDate)));
+  const modern=latestValidRows(db,businessType,range,onProgress),modernDates=new Set(modern.map(r=>dateKey(r.reportDate)));
   const snap=historicalSnapshotRows(db,businessType,range,modernDates),covered=new Set([...modernDates,...snap.map(r=>dateKey(r.reportDate))]);
   const legacy=legacyShopeeRows(db,businessType,range,covered),source=[...modern,...snap,...legacy],map=new Map();
   for(const row of source){
@@ -187,4 +199,4 @@ export async function collectV320HistoricalExportRows(type,range,onProgress=()=>
   progress(onProgress,{phase:'sourceRows',completed:sourceDates.size,total:sourceDates.size,entries:out.length,historySource:'PER_BUSINESS_LATEST_VALID+SHIPMENT_SNAPSHOTS+LEGACY_SHOPEE+CURRENT_STATE_OVERLAY'});
   return out;
 }
-console.info('[CE-QC][V320_HISTORICAL_EXPORT_ROWS]',V320_HISTORICAL_EXPORT_ROWS_ID,V474_EXPORT_INDEXED_HYDRATION_ID,'export membership stays date-locked; V474 keeps shipmentCode/businessType predicates bare so final/current hydration uses existing primary/composite indexes and emits child progress.');
+console.info('[CE-QC][V320_HISTORICAL_EXPORT_ROWS]',V320_HISTORICAL_EXPORT_ROWS_ID,V474_EXPORT_INDEXED_HYDRATION_ID,V477_EXPORT_MEMBERSHIP_PLAN_ID,'export membership stays date-locked; V477 selects per-business latest VALID snapshots from the small batch table with indexed EXISTS probes before member hydration.');
