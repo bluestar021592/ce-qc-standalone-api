@@ -1,10 +1,12 @@
 import { getDb } from './db.js';
 
 export const V142_HISTORY_AUDIT_ID = '2026-09-07-v451-snapshot-indexed-readonly-history-audit-v2-fail-closed';
+export const V456_WHPP_AUTHORITY_DIAGNOSTIC_ID = '2026-09-08-v456-whpp-finalized-snapshot-authority-diagnostic-v1';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = ['CE','CEAF','TBKH','ALI1688'];
 const ALL_TYPES = [...CORE_TYPES,'WHPP'];
 const SNAPSHOT_CHUNK_SIZE = 300;
+const WHPP_COMPLETE_STATUSES = new Set(['COMPLETED','COMPLETED_WITH_RETRY']);
 
 function iso(value='') { const text=String(value||'').slice(0,10); return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:''; }
 function dates(from,to){ const out=[]; const d=new Date(`${from}T00:00:00Z`), end=new Date(`${to}T00:00:00Z`); while(d<=end){out.push(d.toISOString().slice(0,10));d.setUTCDate(d.getUTCDate()+1);} return out; }
@@ -21,6 +23,11 @@ function mapLatest(list,dateField='reportDate'){
   return out;
 }
 function mapGrouped(list,keyOf){const out=new Map();for(const row of list)out.set(keyOf(row),row);return out;}
+function mapListsByDate(list,dateField='reportDate'){
+  const out=new Map();
+  for(const row of list){const date=iso(row?.[dateField]);if(!date)continue;if(!out.has(date))out.set(date,[]);out.get(date).push(row);}
+  return out;
+}
 function chunked(list,size=SNAPSHOT_CHUNK_SIZE){const out=[];for(let i=0;i<list.length;i+=size)out.push(list.slice(i,i+size));return out;}
 function placeholders(list){return list.map(()=>'?').join(',');}
 
@@ -31,6 +38,39 @@ export function coreSnapshotCompletionDecision({validBatch=false,snapshotComplet
   if(total===0)return {complete:true,reason:'VALID_ZERO_CCSL_TICKETS',zeroTicketDay:true,legacyCoverageRecovered:false};
   if(covered>=total)return {complete:true,reason:'LEGACY_FINAL_ROWS_FULL_COVERAGE',zeroTicketDay:false,legacyCoverageRecovered:true};
   return {complete:false,reason:'CORE_SNAPSHOT_NOT_COMPLETED',zeroTicketDay:false,legacyCoverageRecovered:false};
+}
+
+// V456: mirror the same non-zero WHPP completion authority used by the formal
+// export reader. A surviving daily header owns completion: it must be marked
+// completed and point to one exact non-invalid/non-failed snapshot. Legacy
+// snapshots with blank VALID/COMPLETED columns are accepted only when that exact
+// finalizedSnapshotId is attested by the completed daily header. This helper is
+// pure so go-live tests can lock the fail-closed decision without touching SQLite.
+export function whppCompletionAuthorityDecision({reportPresent=false,reported=0,summary={},snapshotRows=[]}={}){
+  const total=Math.max(0,Number(reported||0));
+  const dailyStatus=String(summary?.snapshotStatus||summary?.reconciliationStatus||'').trim().toUpperCase();
+  const finalizedSnapshotId=String(summary?.finalizedSnapshotId||'').trim();
+  const completedFlag=summary?.completed===true;
+  const dailyCompleted=completedFlag&&WHPP_COMPLETE_STATUSES.has(dailyStatus)&&Boolean(finalizedSnapshotId);
+  const candidates=(snapshotRows||[]).filter(row=>row&&typeof row==='object');
+  const exact=finalizedSnapshotId?candidates.find(row=>String(row.snapshotId||'').trim()===finalizedSnapshotId)||null:null;
+  const exactStatus=String(exact?.status||'').trim().toUpperCase();
+  const exactReconciliation=String(exact?.reconciliationStatus||'').trim().toUpperCase();
+  const exactRejected=Boolean(exact&&(exactStatus==='INVALID'||exactReconciliation==='FAILED'));
+  const explicitCompleted=Boolean(exact&&exactStatus==='VALID'&&exactReconciliation==='COMPLETED');
+  let eligible=false,reason='';
+  if(!reportPresent)reason='WHPP_DAILY_REPORT_MISSING';
+  else if(total<=0){eligible=true;reason='WHPP_ZERO_TICKET_DAILY';}
+  else if(!completedFlag||!WHPP_COMPLETE_STATUSES.has(dailyStatus))reason='WHPP_DAILY_NOT_COMPLETED';
+  else if(!finalizedSnapshotId)reason='WHPP_FINALIZED_SNAPSHOT_ID_MISSING';
+  else if(!exact)reason='WHPP_FINALIZED_SNAPSHOT_ROW_MISSING';
+  else if(exactRejected)reason='WHPP_FINALIZED_SNAPSHOT_INVALID_OR_FAILED';
+  else{eligible=true;reason=explicitCompleted?'WHPP_VALID_COMPLETED_SNAPSHOT':'WHPP_LEGACY_FINALIZED_SNAPSHOT_ATTESTED';}
+  return{
+    eligible,reason,reportPresent:Boolean(reportPresent),reported:total,completedFlag,dailyStatus,dailyCompleted,finalizedSnapshotId,
+    snapshotCandidateCount:candidates.length,exactSnapshotFound:Boolean(exact),exactSnapshotStatus:exactStatus,exactReconciliationStatus:exactReconciliation,
+    explicitCompleted,legacyAttested:eligible&&total>0&&!explicitCompleted
+  };
 }
 
 function loadBulkHistory(db,from,to){
@@ -86,9 +126,12 @@ function loadBulkHistory(db,from,to){
     FROM business_final_rows WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? GROUP BY reportDate`,from,to):[];
   const whppFinal=mapGrouped(finalRows,row=>iso(row.reportDate));
 
-  const snapshotRows=exists.business_export_snapshots?rows(db,`SELECT reportDate,snapshotId,createdAt,id
+  // V456 keeps this metadata-only and date-bounded. Do not load payloadJson.
+  // Every same-date candidate is retained so the exact finalizedSnapshotId can be
+  // checked instead of accepting an unrelated/invalid snapshot by mere presence.
+  const snapshotRows=exists.business_export_snapshots?rows(db,`SELECT reportDate,snapshotId,status,reconciliationStatus,createdAt,id
     FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate,createdAt,id`,from,to):[];
-  const whppSnapshots=mapLatest(snapshotRows);
+  const whppSnapshotRows=mapListsByDate(snapshotRows);
 
   const ceafMembers=new Map();
   for(const row of ceafRows){const k=key(row.reportDate,row.snapshotId);if(!ceafMembers.has(k))ceafMembers.set(k,new Set());ceafMembers.get(k).add(String(row.shipmentCode||'').trim().toUpperCase());}
@@ -105,7 +148,7 @@ function loadBulkHistory(db,from,to){
     if(!airMarkers.has(date))airMarkers.set(date,new Set());airMarkers.get(date).add(bill);
   }
 
-  return{exists,batches,selectedSnapshotIds,coreCounts,ccslCoverage,dailyReports,dailyParse,whppFinal,whppSnapshots,ceafMembers,airMarkers,bulkReadMs:Date.now()-started};
+  return{exists,batches,selectedSnapshotIds,coreCounts,ccslCoverage,dailyReports,dailyParse,whppFinal,whppSnapshotRows,ceafMembers,airMarkers,bulkReadMs:Date.now()-started};
 }
 
 function whppForDate(bulk,reportDate){
@@ -113,8 +156,17 @@ function whppForDate(bulk,reportDate){
   const daily=num(bulk.dailyParse.get(reportDate)?.dailyRows);
   const finals=num(bulk.whppFinal.get(reportDate)?.finalRows);
   const retry=num(bulk.whppFinal.get(reportDate)?.retryPending);
-  const snapshot=bulk.whppSnapshots.get(reportDate)||null;
-  return{reportPresent:Boolean(report),reported:Number(report?.totalCount??daily),dailyRows:daily,finalRows:finals,retryPending:retry,snapshotPresent:Boolean(snapshot),snapshotId:String(snapshot?.snapshotId||'')};
+  const reported=Number(report?.totalCount??daily);
+  const summary=safeJson(report?.summaryJson,{});
+  const authority=whppCompletionAuthorityDecision({reportPresent:Boolean(report),reported,summary,snapshotRows:bulk.whppSnapshotRows.get(reportDate)||[]});
+  return{
+    reportPresent:Boolean(report),reported,dailyRows:daily,finalRows:finals,retryPending:retry,
+    snapshotPresent:Boolean(authority.eligible),snapshotId:authority.eligible?authority.finalizedSnapshotId:'',
+    authorityReason:authority.reason,dailyCompleted:authority.dailyCompleted,completedFlag:authority.completedFlag,dailySnapshotStatus:authority.dailyStatus,
+    finalizedSnapshotId:authority.finalizedSnapshotId,snapshotCandidateCount:authority.snapshotCandidateCount,exactSnapshotFound:authority.exactSnapshotFound,
+    exactSnapshotStatus:authority.exactSnapshotStatus,exactReconciliationStatus:authority.exactReconciliationStatus,
+    explicitCompleted:authority.explicitCompleted,legacyAttested:authority.legacyAttested,v456AuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID
+  };
 }
 function airForDate(bulk,reportDate,snapshotId){
   const markerSet=bulk.airMarkers.get(reportDate)||new Set();
@@ -148,11 +200,13 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
     if(coreCompletion.zeroTicketDay)warnings.push({reportDate,type:'CCSL_ZERO_TICKET_DAY_AUTO_CLOSED',count:0});
     else if(coreCompletion.legacyCoverageRecovered)warnings.push({reportDate,type:'CORE_LEGACY_STATUS_RECOVERED_BY_FULL_FINAL_COVERAGE',count:covered});
     if(!whpp.reportPresent)issues.push('WHPP_DAILY_REPORT_MISSING');
+    // Compatibility issue code stays stable for the UI/export preflight, while
+    // whpp.authorityReason now explains the exact fail-closed cause.
     if(whpp.reported>0&&!whpp.snapshotPresent)issues.push('WHPP_SNAPSHOT_MISSING');
     if(whpp.dailyRows!==whpp.reported)issues.push('WHPP_DAILY_COUNT_MISMATCH');
     if(whpp.snapshotPresent&&whpp.finalRows<whpp.dailyRows)issues.push('WHPP_FINAL_ROWS_INCOMPLETE');
     if(air.mismatch>0)issues.push('CEAF_SOURCE_MEMBERSHIP_MISMATCH');
-    if(issues.length)incomplete.push({reportDate,issues,ceafMissingBills:air.missingBills,ccslTotal,ccslFinalCoverage:covered,coreCompletion:coreCompletion.reason});
+    if(issues.length)incomplete.push({reportDate,issues,ceafMissingBills:air.missingBills,ccslTotal,ccslFinalCoverage:covered,coreCompletion:coreCompletion.reason,whpp});
     if(whpp.retryPending>0)warnings.push({reportDate,type:'WHPP_RETRY_PENDING',count:whpp.retryPending});
     totalImported+=coreTotal+whpp.reported; totalWhpp+=whpp.reported; totalRetry+=whpp.retryPending;
     totalCcslCoverage+=covered; totalWhppFinal+=whpp.finalRows;
@@ -166,6 +220,7 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
   // already obtained during the indexed audit pass.
   const currentEvidence={
     evidenceMode:'V451_INDEXED_AUDIT_ONLY',
+    whppAuthorityDiagnostic:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,
     selectedCoreSnapshots:bulk.selectedSnapshotIds.length,
     checkedDays:expected.length,
     ccslCoveredRows:totalCcslCoverage,
@@ -176,7 +231,7 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
   };
   const exportReady=missing.length===0&&incomplete.length===0;
   const totalMs=Date.now()-totalStarted;
-  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
+  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,v456WhppAuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
 }
 
 export const V142_BUSINESS_TYPES=ALL_TYPES;
