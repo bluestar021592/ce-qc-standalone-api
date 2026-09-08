@@ -114,4 +114,4 @@ export function applyV419CanonicalExportLedgerTruth(businessType,rows=[],{db=get
   return rows;
 }
 
-console.info('[CE-QC][V419_EXPORT_LEDGER_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,'daily membership stays historical; V246 canonical ledger is the final POD/return/cancel/attempt authority after every legacy export calculator, and non-POD outcomes clear stale POD-derived fields.');
+console.info('[CE-QC][V419_EXPORT_LEDGER_TRUTH]',V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,V479_CANONICAL_LEDGER_READ_ID,'daily membership stays historical; export hydration uses shipmentCode primary-key scalar reads, with JSON fetched only for OPEN or strict POD evidence.');
