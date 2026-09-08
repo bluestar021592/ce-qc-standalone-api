@@ -3,6 +3,7 @@ import { getDb } from './db.js';
 
 export const V461_WHPP_SURVIVOR_DIAGNOSTIC_ID='2026-09-08-v461-whpp-historical-survivor-evidence-v1';
 export const V461_AUTH_ROUTE_ID='2026-09-08-v461-after-access-identity-authenticated-readonly-route-v1';
+export const V461_INDEXED_JOIN_ID='2026-09-08-v461-bare-indexed-member-join-v1';
 const ROUTE='/api/v461/whpp-history-survivor';
 const WRAPPED=Symbol.for('ce-qc.v461-whpp-history-survivor-diagnostic');
 
@@ -29,6 +30,8 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
 
   const members=n(one(db,`SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count
     FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''`,date).count);
+  // V461: normalize only the tiny selected daily cohort. Every large-table join
+  // keeps shipmentCode/businessType bare so SQLite can use the existing PK/index.
   const baseCte=`WITH members AS (
     SELECT DISTINCT UPPER(TRIM(shipmentCode)) shipmentCode
     FROM business_daily_parse_rows
@@ -43,7 +46,7 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
         SUM(CASE WHEN UPPER(COALESCE(c.state,''))='PENDING_SCAN' OR UPPER(COALESCE(c.apiStatus,''))='PENDING_SCAN' THEN 1 ELSE 0 END) pendingScan,
         SUM(CASE WHEN UPPER(COALESCE(c.state,'')) NOT IN ('','PENDING_SCAN','POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED') AND UPPER(COALESCE(c.apiStatus,'')) NOT IN ('','PENDING_SCAN') THEN 1 ELSE 0 END) checkedNonterminal,
         SUM(CASE WHEN c.shipmentCode IS NULL OR (TRIM(COALESCE(c.state,''))='' AND TRIM(COALESCE(c.apiStatus,''))='') THEN 1 ELSE 0 END) unknown
-      FROM members m LEFT JOIN shipment_current_state c ON UPPER(TRIM(c.shipmentCode))=m.shipmentCode AND UPPER(COALESCE(c.businessType,''))='WHPP'`,date);
+      FROM members m LEFT JOIN shipment_current_state c ON c.shipmentCode=m.shipmentCode AND c.businessType='WHPP'`,date);
     current={rows:n(r.rows),terminal:n(r.terminal),pendingScan:n(r.pendingScan),checkedNonterminal:n(r.checkedNonterminal),unknown:n(r.unknown)};
   }catch(error){readErrors.push(`shipment_current_state:${error?.message||error}`);}}
 
@@ -54,7 +57,7 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
         SUM(CASE WHEN UPPER(COALESCE(c.status,''))='OPEN' THEN 1 ELSE 0 END) open,
         SUM(CASE WHEN UPPER(COALESCE(c.status,''))='CLOSED' AND UPPER(COALESCE(c.closeReason,'')) IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','SELF_PICKUP','NORMAL_FINAL') THEN 1 ELSE 0 END) closedTerminal,
         SUM(CASE WHEN UPPER(COALESCE(c.status,''))='CLOSED' AND UPPER(COALESCE(c.closeReason,'')) NOT IN ('POD','RETURNED','RETURN_COMPLETED','ORDER_CANCELLED','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION','SELF_PICKUP','NORMAL_FINAL') THEN 1 ELSE 0 END) otherClosed
-      FROM members m LEFT JOIN carryover_open_items c ON UPPER(TRIM(c.shipmentCode))=m.shipmentCode AND UPPER(COALESCE(c.businessType,''))='WHPP'`,date);
+      FROM members m LEFT JOIN carryover_open_items c ON c.shipmentCode=m.shipmentCode AND c.businessType='WHPP'`,date);
     carry={rows:n(r.rows),open:n(r.open),closedTerminal:n(r.closedTerminal),otherClosed:n(r.otherClosed)};
   }catch(error){readErrors.push(`carryover_open_items:${error?.message||error}`);}}
 
@@ -68,12 +71,12 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
         SUM(CASE WHEN UPPER(COALESCE(q.trackingStatus,''))='OPEN' AND TRIM(COALESCE(q.lastCheckedAt,''))<>'' AND UPPER(COALESCE(q.currentState,'')) NOT IN ('','PENDING_SCAN') THEN 1 ELSE 0 END) checkedOpen,
         SUM(CASE WHEN q.shipmentCode IS NULL OR TRIM(COALESCE(q.lastCheckedAt,''))='' OR UPPER(COALESCE(q.currentState,'')) IN ('','PENDING_SCAN') THEN 1 ELSE 0 END) placeholderOrUnverified,
         SUM(CASE WHEN TRIM(COALESCE(q.lastCheckedAt,''))<>'' THEN 1 ELSE 0 END) lastChecked
-      FROM members m LEFT JOIN qc_tracking_ledger q ON UPPER(TRIM(q.shipmentCode))=m.shipmentCode AND UPPER(COALESCE(q.businessType,''))='WHPP'`,date,date);
+      FROM members m LEFT JOIN qc_tracking_ledger q ON q.shipmentCode=m.shipmentCode AND q.businessType='WHPP'`,date,date);
     ledger={rows:n(r.rows),firstDateMatch:n(r.firstDateMatch),terminal:n(r.terminal),open:n(r.open),checkedOpen:n(r.checkedOpen),placeholderOrUnverified:n(r.placeholderOrUnverified),lastChecked:n(r.lastChecked)};
   }catch(error){readErrors.push(`qc_tracking_ledger:${error?.message||error}`);}}
 
   let podLocks=0;
-  if(exists.pod){try{podLocks=n(one(db,`${baseCte} SELECT COUNT(p.shipmentCode) count FROM members m LEFT JOIN business_pod_locks p ON UPPER(TRIM(p.shipmentCode))=m.shipmentCode AND UPPER(COALESCE(p.businessType,''))='WHPP' WHERE p.shipmentCode IS NOT NULL`,date).count);}catch(error){readErrors.push(`business_pod_locks:${error?.message||error}`);}}
+  if(exists.pod){try{podLocks=n(one(db,`${baseCte} SELECT COUNT(p.shipmentCode) count FROM members m LEFT JOIN business_pod_locks p ON p.shipmentCode=m.shipmentCode AND p.businessType='WHPP' WHERE p.shipmentCode IS NOT NULL`,date).count);}catch(error){readErrors.push(`business_pod_locks:${error?.message||error}`);}}
 
   let runLocks=[];
   if(exists.runLocks){try{runLocks=rows(db,`SELECT runId,status,currentStage,batchIndex,totalBatches,errorMessage,lockedAt,completedAt,updatedAt
@@ -106,7 +109,7 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
   const ledgerKnown=ledger.terminal+ledger.checkedOpen;
   const survivorCoverageCandidate=members>0&&readErrors.length===0&&ledger.rows===members&&ledgerKnown===members&&ledger.placeholderOrUnverified===0;
   return{
-    ok:true,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,authRouteVersion:V461_AUTH_ROUTE_ID,reportDate:date,members,
+    ok:true,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,authRouteVersion:V461_AUTH_ROUTE_ID,indexedJoinVersion:V461_INDEXED_JOIN_ID,reportDate:date,members,
     current:{...current,known:currentKnown},carry,ledger:{...ledger,known:ledgerKnown},podLocks,runLocks,checkpoints,persistedState,
     survivorCoverageCandidate,requiresArchiveProof:!survivorCoverageCandidate,readErrors,
     conclusion:survivorCoverageCandidate?'SURVIVOR_LEDGER_FULL_CURRENT_EVIDENCE_CANDIDATE':'SURVIVOR_EVIDENCE_INCOMPLETE_NEEDS_ARCHIVE_PROOF',
@@ -137,4 +140,4 @@ if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
   express.application.use=wrapped;
 }
 
-console.info('[CE-QC][V461_WHPP_SURVIVOR_DIAGNOSTIC]',V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,V461_AUTH_ROUTE_ID,'authenticated read-only exact-member survivor evidence census installed after accessIdentity; no scan/track/API call and no database mutation.');
+console.info('[CE-QC][V461_WHPP_SURVIVOR_DIAGNOSTIC]',V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,V461_AUTH_ROUTE_ID,V461_INDEXED_JOIN_ID,'authenticated read-only exact-member survivor evidence census installed after accessIdentity; large-table join columns remain bare/indexable; no scan/track/API call and no database mutation.');
