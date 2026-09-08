@@ -1,9 +1,10 @@
 (function installV461WhppSurvivorDiagnostic(global){
   if(global.__CE_QC_V461_WHPP_SURVIVOR_DIAGNOSTIC__)return;
-  const VERSION='2026-09-08-v462-fast-survivor-isolated-archive-ui-v1';
+  const VERSION='2026-09-08-v468-v462-survivor-lazy-v464-ui-v1';
+  const V464_UI_SRC='/v464-whpp-offline-history-recovery.js?v=20260908-v468-1';
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
-  let lastAuditAt=0,busy=false,timer=null,pollTimer=null,lastPayload=null,lastDate='';
+  let lastAuditAt=0,busy=false,timer=null,pollTimer=null,lastPayload=null,lastDate='',v464UiPromise=null;
 
   function host(){
     const panel=document.getElementById('v142HistoryAudit');if(!panel)return null;
@@ -18,6 +19,18 @@
     return matches[0]?.[1]||'';
   }
   function archiveResult(job={}){return job?.state==='COMPLETED'?(job.result||{}):{};}
+  function ensureV464Ui(){
+    if(global.__CE_QC_V464_WHPP_OFFLINE_RECOVERY__){void global.__CE_QC_V464_WHPP_OFFLINE_RECOVERY__.preflight?.();return Promise.resolve(true);}
+    if(v464UiPromise)return v464UiPromise;
+    v464UiPromise=new Promise((resolve,reject)=>{
+      let script=document.querySelector('script[data-ce-qc-v464-lazy="1"]');
+      const loaded=()=>{void global.__CE_QC_V464_WHPP_OFFLINE_RECOVERY__?.preflight?.();resolve(Boolean(global.__CE_QC_V464_WHPP_OFFLINE_RECOVERY__));};
+      if(script){if(global.__CE_QC_V464_WHPP_OFFLINE_RECOVERY__)loaded();else{script.addEventListener('load',loaded,{once:true});script.addEventListener('error',()=>reject(new Error('V464_UI_LOAD_FAILED')),{once:true});}return;}
+      script=document.createElement('script');script.src=V464_UI_SRC;script.async=true;script.dataset.ceQcV464Lazy='1';
+      script.addEventListener('load',loaded,{once:true});script.addEventListener('error',()=>reject(new Error('V464_UI_LOAD_FAILED')),{once:true});document.head.appendChild(script);
+    }).catch(error=>{v464UiPromise=null;const box=host();if(box)box.insertAdjacentHTML('beforeend',`<p class="danger-text">V464离线恢复预检界面加载失败：${esc(error?.message||error)}。未修改任何业务数据。</p>`);return false;});
+    return v464UiPromise;
+  }
   function render(payload,job){
     const box=host();if(!box||!payload)return;
     const current=payload.current||{},carry=payload.carry||{},ledger=payload.ledger||{},state=payload.persistedState||{},check=payload.checkpoints||{},archive=archiveResult(job);
@@ -49,6 +62,7 @@
       const p=await r.json();if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);
       render(lastPayload,p.archiveJob||{});
       if(p.archiveJob?.state==='RUNNING')pollTimer=setTimeout(()=>void pollArchive(date),2000);
+      else if(p.archiveJob?.state==='COMPLETED')void ensureV464Ui();
     }catch(error){const box=host();if(box)box.insertAdjacentHTML('beforeend',`<p class="danger-text">V266后台证据状态读取失败：${esc(error?.message||error)}。业务数据未修改。</p>`);}
   }
   async function load(date){
@@ -58,7 +72,9 @@
     try{
       const r=await fetch(`/api/v462/whpp-history-survivor?reportDate=${encodeURIComponent(date)}`,{cache:'no-store',credentials:'same-origin',signal:controller.signal});
       const p=await r.json();if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);
-      lastPayload=p;render(p,p.archiveJob||{});if(p.archiveJob?.state==='RUNNING')pollTimer=setTimeout(()=>void pollArchive(date),1000);
+      lastPayload=p;render(p,p.archiveJob||{});
+      if(p.archiveJob?.state==='RUNNING')pollTimer=setTimeout(()=>void pollArchive(date),1000);
+      else if(p.archiveJob?.state==='COMPLETED')void ensureV464Ui();
     }catch(error){const timedOut=error?.name==='AbortError';box.innerHTML=`<p class="danger-text"><b>V462 WHPP幸存证据读取失败：</b>${timedOut?'SQLite快速读取超过15秒，已停止等待':esc(error?.message||error)}。未修改任何数据。</p>`;}
     finally{clearTimeout(timeout);busy=false;}
   }
@@ -69,6 +85,6 @@
   }
   function start(){if(timer)return;timer=setInterval(tick,500);timer.unref?.();tick();}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
-  global.__CE_QC_V461_WHPP_SURVIVOR_DIAGNOSTIC__={version:VERSION,refresh:()=>{const date=incompleteWhppDate();return date?load(date):Promise.resolve();}};
-  console.info('[CE-QC][V462_WHPP_SURVIVOR_DIAGNOSTIC]',VERSION,'SQLite survivor returns fast; V266 gzip evidence is isolated in a child process and polled read-only; never starts business processing.');
+  global.__CE_QC_V461_WHPP_SURVIVOR_DIAGNOSTIC__={version:VERSION,refresh:()=>{const date=incompleteWhppDate();return date?load(date):Promise.resolve();},loadV464Ui:ensureV464Ui};
+  console.info('[CE-QC][V462_WHPP_SURVIVOR_DIAGNOSTIC]',VERSION,'SQLite survivor returns fast; V266 gzip evidence is isolated in a child process; V464 UI is lazy-loaded only after archive completion and never on normal page startup.');
 })(window);
