@@ -35,6 +35,7 @@ test('V87 WHPP export reader and workers are syntax valid', () => {
 test('WHPP export completion is daily-authority certified, membership is immutable, and count planning stays lightweight', () => {
   assert.match(store, /V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-completion-certified-membership-export-v4'/);
   assert.match(store, /V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID='2026-09-08-v457-whpp-legacy-metadata-loss-attestation-v1'/);
+  assert.match(store, /V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID='2026-09-08-v460-whpp-history-snapshot-exact-disambiguation-v1'/);
   assert.match(store, /function completedDailyAuthority/);
   assert.match(store, /summary\.completed===true/);
   assert.match(store, /summary\.finalizedSnapshotId/,'surviving modern daily completion must point to the exact finalized snapshot');
@@ -42,12 +43,14 @@ test('WHPP export completion is daily-authority certified, membership is immutab
   assert.match(store, /business_history_summary/,'legacy metadata-loss recovery must require the persisted history snapshot attestation');
   assert.match(store, /coveredDailyRows/,'legacy metadata-loss recovery must prove exact member final coverage');
   assert.match(store, /authority\.metadataAbsent/,'explicit incomplete\/failed daily metadata must never enter legacy recovery');
-  assert.match(store, /candidates\.length!==1/,'legacy metadata-loss recovery must reject ambiguous surviving snapshots');
-  assert.match(store, /text\(chosen\.snapshotId\)!==text\(legacyProof\.history\.get\(date\)\)/,'history attestation must match the one surviving snapshot exactly');
+  assert.match(store, /const historyId=text\(legacyProof\.history\.get\(date\)\)/,'legacy recovery must read the persisted history snapshot id before choosing a candidate');
+  assert.match(store, /const attested=candidates\.filter\(row=>text\(row\.snapshotId\)===historyId\)/,'V460 must disambiguate same-date snapshots by exact persisted history id');
+  assert.match(store, /if\(attested\.length!==1\)continue/,'history id must uniquely select exactly one viable same-date snapshot');
+  assert.doesNotMatch(store, /candidates\.length!==1/,'unrelated surviving old snapshots must not block an exact persisted history attestation');
   assert.match(store, /function latestEligibleCompletedSnapshots/);
   assert.match(store, /UPPER\(COALESCE\(status,''\)\)<>'INVALID'/);
   assert.match(store, /UPPER\(COALESCE\(reconciliationStatus,''\)\)<>'FAILED'/);
-  assert.match(store, /authority\?\.dailyPresent/,'when a daily header survives it must own modern completion eligibility or the narrow V457 metadata-loss proof');
+  assert.match(store, /authority\?\.dailyPresent/,'when a daily header survives it must own modern completion eligibility or the narrow V457/V460 metadata-loss proof');
   assert.match(store, /text\(row\.snapshotId\)===authority\.snapshotId/,'modern daily finalizedSnapshotId must match exactly');
   assert.match(store, /text\(row\.status\)\.toUpperCase\(\)==='VALID'.*text\(row\.reconciliationStatus\)\.toUpperCase\(\)==='COMPLETED'/s,'fully rotated history may stand alone only with explicit VALID+COMPLETED snapshot evidence');
   assert.match(store, /SELECT snapshotId,reportDate,status,reconciliationStatus,createdAt,id/,'eligible-date query must stay metadata-only');
