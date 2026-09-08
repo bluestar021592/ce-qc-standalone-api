@@ -14,7 +14,8 @@ test('V142 history audit is read-only and covers seven businesses, carry and evi
   assert.match(s,/carryover_open_items/);assert.match(s,/business_track_events/);assert.match(s,/business_scan_results/);assert.match(s,/final_rows/);
   assert.match(s,/exportReady/);assert.match(s,/BLOCKED_UNTIL_REPAIRED/);assert.match(s,/CEAF_SOURCE_MEMBERSHIP_MISMATCH/);assert.match(s,/missingBills/);
   assert.match(s,/2026-09-08-v457-whpp-legacy-metadata-loss-attestation-v1/);
-  assert.match(s,/business_history_summary/);assert.match(s,/coveredDailyRows/);
+  assert.match(s,/2026-09-08-v460-whpp-history-snapshot-exact-disambiguation-v1/);
+  assert.match(s,/business_history_summary/);assert.match(s,/coveredDailyRows/);assert.match(s,/attestedSnapshotCandidateCount/);
   assert.doesNotMatch(s,/\b(?:INSERT|UPDATE|DELETE|REPLACE)\s+(?:INTO|FROM|OR)?/i);
 });
 
@@ -46,7 +47,8 @@ test('V141 and V142 are wired into bootstrap and import-page UI',()=>{
   const boot=read('bootstrap.js');const ui=read('src/v44WhppUiPatch.js');
   assert.match(boot,/v141WhppDailyRetryIsolationPatch/);assert.match(boot,/v142SevenBusinessExportPatch/);assert.match(boot,/v142AsyncExportPreflightPatch/);
   assert.match(ui,/v141-whpp-retry-isolation-ui\.js/);
-  assert.match(ui,/v142-history-integrity-audit\.js\?v=20260908-v457-1/,'V457 history audit UI must be cache-busted by the shell loader');
+  assert.match(ui,/v142-history-integrity-audit\.js\?v=20260908-v460-1/,'V460 history audit UI must be cache-busted by the shell loader');
+  assert.doesNotMatch(ui,/v142-history-integrity-audit\.js\?v=20260908-v457-1/,'retired V457 cache key must never pin the pre-disambiguation history UI');
   assert.doesNotMatch(ui,/v142-history-integrity-audit\.js\?v=20260902-v419-priority-1/,'retired V419 cache key must never keep the V456 history UI pinned in browsers');
 });
 
