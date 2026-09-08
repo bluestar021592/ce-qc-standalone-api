@@ -13,6 +13,8 @@ test('V142 history audit is read-only and covers seven businesses, carry and evi
   assert.match(s,/\['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'\]/);assert.match(s,/WHPP/);
   assert.match(s,/carryover_open_items/);assert.match(s,/business_track_events/);assert.match(s,/business_scan_results/);assert.match(s,/final_rows/);
   assert.match(s,/exportReady/);assert.match(s,/BLOCKED_UNTIL_REPAIRED/);assert.match(s,/CEAF_SOURCE_MEMBERSHIP_MISMATCH/);assert.match(s,/missingBills/);
+  assert.match(s,/2026-09-08-v457-whpp-legacy-metadata-loss-attestation-v1/);
+  assert.match(s,/business_history_summary/);assert.match(s,/coveredDailyRows/);
   assert.doesNotMatch(s,/\b(?:INSERT|UPDATE|DELETE|REPLACE)\s+(?:INTO|FROM|OR)?/i);
 });
 
@@ -20,6 +22,10 @@ test('V142 strict direct exporter includes CEAF and WHPP and cannot silently ski
   syntax('src/v142SevenBusinessPeriodExporter.js');const s=read('src/v142SevenBusinessPeriodExporter.js');
   assert.match(s,/ALL_TYPES=\[\.\.\.CORE_TYPES,'WHPP'\]/);assert.match(s,/CEAF/);assert.match(s,/loadWhppRows/);
   assert.match(s,/auditSevenBusinessHistory/);assert.match(s,/已阻止静默缺日导出/);assert.match(s,/历史完整性校验未通过，已阻止缺数据导出/);
+  assert.match(s,/2026-09-08-v457-direct-export-consumes-audited-whpp-authority-v1/);
+  assert.match(s,/const snapshots=buildSnapshots\(range,audit\)/,'direct export must pass the exact successful audit into snapshot construction');
+  assert.match(s,/dayAudit\.whpp\?\.snapshotId/,'direct export must consume the WHPP snapshot id already certified by the audit');
+  assert.doesNotMatch(s,/SELECT snapshotId FROM business_export_snapshots WHERE businessType='WHPP'/,'direct export must not reselect a different same-date WHPP snapshot after the audit');
   assert.match(s,/数据完整性校验/);assert.match(s,/跨日当前未闭环/);assert.match(s,/七业务/);
 });
 
