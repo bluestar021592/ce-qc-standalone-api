@@ -15,7 +15,7 @@ const CHILD_HEAP_MB=Math.max(1024,Number(process.env.EXPORT_BUSINESS_HEAP_MB||15
 const CONCURRENCY=Math.max(1,Math.min(2,Number(process.env.EXPORT_WORKER_CONCURRENCY||1)));
 const CHILD_TIMEOUT_MS=Math.max(180_000,Number(process.env.EXPORT_BUSINESS_TIMEOUT_MS||900_000));
 const HEARTBEAT_MS=Math.max(5_000,Math.min(60_000,Number(process.env.EXPORT_HEARTBEAT_MS||15_000)));
-const EXPORT_PLAN_VERSION='2026-08-17-v177-one-business-one-workbook-v1';
+const EXPORT_PLAN_VERSION='2026-09-08-v474-one-business-one-workbook-indexed-progress-v1';
 
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
@@ -83,20 +83,62 @@ function terminateChild(child){
     try{const killer=spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});killer.unref?.();}catch{}
   }
 }
+function readChildProgress(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
+function childFraction(state={}){
+  const phase=String(state.phase||'').toLowerCase();
+  const completed=Math.max(0,Number(state.completed||0)),total=Math.max(0,Number(state.total||0));
+  const ratio=total>0?Math.max(0,Math.min(1,completed/total)):0;
+  if(phase==='starting')return 0.02;
+  if(phase==='membershiprows')return 0.10;
+  if(phase==='hydratefinalrows')return 0.10+0.28*ratio;
+  if(phase==='hydratecurrenttruth')return 0.38+0.18*ratio;
+  if(phase==='sourcerows')return 0.58;
+  if(phase==='returnattemptsigningtruth')return 0.70;
+  if(phase==='writing')return 0.72+0.26*ratio;
+  if(phase==='done')return 1;
+  return 0.03;
+}
+function childMessage(type,range,state,elapsedSec){
+  const phase=String(state?.phase||'').toLowerCase(),completed=Number(state?.completed||0),total=Number(state?.total||0),entries=Number(state?.entries||0);
+  if(phase==='membershiprows')return `${type} 已锁定 ${entries.toLocaleString()} 个历史运单成员；准备索引读取最终状态`;
+  if(phase==='hydratefinalrows')return `${type} 正在索引读取历史最终状态 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()}`;
+  if(phase==='hydratecurrenttruth')return `${type} 正在索引叠加当前持久化状态 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()}`;
+  if(phase==='sourcerows')return `${type} 历史成员/最终状态读取完成，共 ${entries.toLocaleString()} 个唯一运单；正在做证据对账`;
+  if(phase==='returnattemptsigningtruth')return `${type} 状态/派次/签收证据对账完成；准备生成Excel`;
+  if(phase==='writing')return `${type} 正在写Excel：${state.sheet||'明细'}（${completed}/${Math.max(total,completed)}张明细sheet）`;
+  if(phase==='done')return `${type} 完整Excel已生成`;
+  return `正在生成 ${type} 完整表格 · ${range.from} 至 ${range.to} · 已运行${elapsedSec}秒`;
+}
+function overallChildProgress(taskIndex,taskCount,state){
+  const segment=90/Math.max(1,taskCount),fraction=childFraction(state);
+  return Math.max(2,Math.min(92,Math.floor(taskIndex*segment+fraction*segment)));
+}
 
-function spawnCompleteBusiness({type,range,periodType}){
+function spawnCompleteBusiness({type,range,periodType,taskIndex=0,taskCount=1}){
   return new Promise((resolve,reject)=>{
     const resultFile=`${jobFile}.${type}.${Date.now()}.complete.result.json`;
-    try{fs.rmSync(resultFile,{force:true});}catch{}
+    const progressFile=`${resultFile}.progress.json`;
+    try{fs.rmSync(resultFile,{force:true});fs.rmSync(progressFile,{force:true});}catch{}
     const startedAt=Date.now();let settled=false;
     const child=spawn(process.execPath,[`--max-old-space-size=${CHILD_HEAP_MB}`,businessWorker,resultFile,type,range.from,range.to,periodType,'1','1'],{
-      cwd:getRuntimeConfig().projectRoot,env:process.env,windowsHide:true,stdio:'ignore'
+      cwd:getRuntimeConfig().projectRoot,
+      env:{...process.env,CE_QC_EXPORT_WORKER_MODE:'SINGLE_BUSINESS_DIRECT'},
+      windowsHide:true,stdio:'ignore'
     });
-    const cleanup=()=>{clearInterval(heartbeat);clearTimeout(timeout);try{fs.rmSync(resultFile,{force:true});}catch{}};
+    const cleanup=()=>{clearInterval(heartbeat);clearTimeout(timeout);try{fs.rmSync(resultFile,{force:true});fs.rmSync(progressFile,{force:true});}catch{}};
     const finish=(error,result)=>{if(settled)return;settled=true;cleanup();if(error)reject(error);else resolve(result||{files:[]});};
     const heartbeat=setInterval(()=>{
-      try{writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),currentBusiness:type,currentPart:1,businessParts:1,message:`正在生成 ${type} 完整表格 · ${range.from} 至 ${range.to} · 已运行${Math.max(1,Math.floor((Date.now()-startedAt)/1000))}秒`});}
-      catch(error){terminateChild(child);finish(error);}
+      try{
+        const childState=readChildProgress(progressFile)||{};
+        const elapsedSec=Math.max(1,Math.floor((Date.now()-startedAt)/1000));
+        writeJob({
+          status:'RUNNING',heartbeatAt:new Date().toISOString(),
+          progress:overallChildProgress(taskIndex,taskCount,childState),
+          currentBusiness:type,currentPart:1,businessParts:1,
+          childPhase:String(childState.phase||'starting'),childCompleted:Number(childState.completed||0),childTotal:Number(childState.total||0),childEntries:Number(childState.entries||0),
+          message:childMessage(type,range,childState,elapsedSec)
+        });
+      }catch(error){terminateChild(child);finish(error);}
     },HEARTBEAT_MS);heartbeat.unref?.();
     const timeout=setTimeout(()=>{
       terminateChild(child);const error=new Error(`${type} 完整表格生成超过${Math.ceil(CHILD_TIMEOUT_MS/60000)}分钟，已停止该业务，避免拖死主系统。`);error.code='EXPORT_BUSINESS_TIMEOUT';finish(error);
@@ -130,11 +172,9 @@ async function createManagementSummary(range,businessSummaries={}){
   for(const type of ALL_TYPES){const s=businessSummaries[type];if(!s)continue;metric.addRow({business:type,total:s.total??'',pod:s.pod??'',podRate:s.podRate===undefined?'':`${s.podRate}%`,averageDeliveryDays:s.averageDeliveryDays??'',validSamples:s.validDeliveryDaySamples??'',pp:s.pp??'',pv:s.pv??''});}
   const file=path.join(getRuntimeConfig().exportsDir,`CE_QC_管理汇总_${range.key}.xlsx`);await workbook.xlsx.writeFile(file);return file;
 }
-
 async function zipFiles(files,zipFile){
   await new Promise((resolve,reject)=>{const output=fs.createWriteStream(zipFile);const archive=archiver('zip',{zlib:{level:1}});output.on('close',resolve);output.on('error',reject);archive.on('error',reject);archive.pipe(output);for(const file of files)archive.file(file,{name:path.basename(file)});archive.finalize();});
 }
-
 async function runTasks(tasks,periodType){
   const results=new Array(tasks.length);let cursor=0,completed=0;
   async function runner(){
@@ -142,9 +182,9 @@ async function runTasks(tasks,periodType){
       const index=cursor++;if(index>=tasks.length)return;
       const task=tasks[index];
       writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),currentBusiness:task.type,currentPart:1,businessParts:1,message:`正在生成 ${task.type} 完整表格（${completed+1}/${tasks.length}）`});
-      results[index]=await spawnCompleteBusiness({...task,periodType});
+      results[index]=await spawnCompleteBusiness({...task,periodType,taskIndex:index,taskCount:tasks.length});
       completed+=1;
-      writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),message:`已完成 ${completed}/${tasks.length} 个业务完整表格；不再输出日期分片`});
+      writeJob({status:'RUNNING',heartbeatAt:new Date().toISOString(),progress:Math.max(2,Math.floor(completed*90/Math.max(1,tasks.length))),message:`已完成 ${completed}/${tasks.length} 个业务完整表格；不再输出日期分片`,childPhase:'done',childCompleted:1,childTotal:1});
     }
   }
   await Promise.all(Array.from({length:Math.min(CONCURRENCY,tasks.length)},()=>runner()));
@@ -159,7 +199,6 @@ async function main(){
   const counts=completedBusinessCounts(range,types);
   const tasks=types.filter(type=>Number(counts[type]||0)>0).map(type=>({type,range}));
   if(!tasks.length)throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的数据。`);
-
   const results=await runTasks(tasks,job.payload?.periodType||'custom');
   const files=[];const summaries={};
   for(let i=0;i<results.length;i+=1){files.push(...(results[i]?.files||[]));if(results[i]?.summary)summaries[tasks[i].type]=results[i].summary;}
