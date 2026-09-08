@@ -72,7 +72,8 @@ assert.match(ui,/不修改数据库/);
 assert.doesNotMatch(ui,/\/api\/v461\/whpp-history-survivor/,'V462 UI must retire the blocking combined V461 route');
 assert.doesNotMatch(ui,/\/api\/whpp\/run\/(?:start|resume)|\/api\/v246\/tracking\/reconcile/,'V462 UI must never start business processing');
 assert.match(shell,/import '\.\/v462WhppSurvivorFastPatch\.js'/);
-assert.match(shell,/v461-whpp-survivor-diagnostic\.js\?v=20260908-v462-1/);
+assert.match(shell,/v461-whpp-survivor-diagnostic\.js\?v=20260908-v468-1/,'V468 survivor UI cache key must be delivered by the shell');
+assert.doesNotMatch(shell,/v461-whpp-survivor-diagnostic\.js\?v=20260908-v462-1/,'old V462 survivor UI cache key must stay retired');
 assert.doesNotMatch(shell,/^\s*import ['"]\.\/v464WhppOfflineHistoryRecoveryPatch\.js['"];?\s*$/m,'V464 must not return to eager startup wiring');
 
 const db=new DatabaseSync(':memory:');
@@ -142,4 +143,4 @@ assert.equal(archive.processedFiles,3);
 assert.ok(progress.some(value=>value.state==='COMPLETED'&&value.processedFiles===3),'streaming archive scanner must publish completion progress');
 fs.rmSync(archiveRoot,{recursive:true,force:true});
 
-console.log('[V468/V463/V462/V461] fast authenticated WHPP survivor + isolated streaming V266 archive diagnostic smoke passed · exact daily cohort only · placeholder evidence fails closed · V464 backend lazy-dispatches through the single existing authenticated V462 hook · V464 UI lazy-loads only after archive completion · no CE call · no DB mutation');
+console.log('[V468/V463/V462/V461] fast authenticated WHPP survivor + isolated streaming V266 archive diagnostic smoke passed · exact daily cohort only · placeholder evidence fails closed · V464 backend lazy-dispatches through the single existing authenticated V462 hook · V464 UI lazy-loads only after archive completion · fresh cache key locked · no CE call · no DB mutation');
