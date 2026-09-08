@@ -1,12 +1,14 @@
-import fs from 'node:fs';
 import path from 'node:path';
 // Legacy imports retained for compatibility; V200 owns all-business child output.
 import { createV199UnifiedDashboardWorkbook } from './v199UnifiedDashboardExporter.js';
 import { createV200ReferenceDashboardWorkbook, V200_EXPORT_VERSION } from './v200TemplateDashboardExporter.js';
 import { closeDb, getRuntimeConfig } from './db.js';
+import { writeJsonAtomicSync } from './exportJobAtomicJson.js';
 
-const VERSION='2026-09-08-v474-indexed-business-export-progress-v1';
-// Compatibility-only historical gate signature: 2026-08-18-v200-all-business-reference-child-v1
+const VERSION='2026-09-08-v478-windows-safe-export-progress-v1';
+// Compatibility-only historical gate signatures:
+// 2026-09-08-v474-indexed-business-export-progress-v1
+// 2026-08-18-v200-all-business-reference-child-v1
 const resultFile=path.resolve(String(process.argv[2]||''));
 const progressFile=resultFile?`${resultFile}.progress.json`:'';
 const type=String(process.argv[3]||'').trim().toUpperCase();
@@ -17,7 +19,7 @@ const partIndex=Number(process.argv[7]||1),partCount=Number(process.argv[8]||1);
 const allowed=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 // Compatibility marker: 2026-08-18-v199-all-business-dashboard-child-v1 / V199_DASHBOARD_ATTEMPTS_NO_ATTEMPT_DETAIL_SHEETS
 void createV199UnifiedDashboardWorkbook;
-function writeAtomic(file,value){if(!file)return;const temp=`${file}.${process.pid}.tmp`;fs.writeFileSync(temp,JSON.stringify(value,null,2),'utf8');fs.renameSync(temp,file);}
+function writeAtomic(file,value){if(!file)return;writeJsonAtomicSync(file,value);}
 function writeResult(v){writeAtomic(resultFile,v);}
 function writeProgress(v={}){try{writeAtomic(progressFile,{version:VERSION,type,from,to,...v,updatedAt:new Date().toISOString()});}catch{}}
 try{
