@@ -63,7 +63,7 @@ for(const row of [
 for(const row of [['W1','CLOSED','POD'],['W2','CLOSED','RETURNED'],['W3','OPEN','']])db.prepare("INSERT INTO carryover_open_items VALUES(?,'WHPP',?,?)").run(...row);
 for(const row of [
   ['W1','TERMINAL','POD','2026-09-01T10:00:00Z'],['W2','TERMINAL','RETURNED','2026-09-01T10:10:00Z'],['W3','OPEN','SHOP_ARRIVED_CURRENT','2026-09-02T08:00:00Z']
-])db.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP',? ,?,?,?)").run(row[0],date,row[1],row[2],row[3]);
+])db.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP',?,?,?,?,?)").run(row[0],date,row[1],row[2],row[3]);
 const finalRows=[
   {shipmentCode:'W1',reportDate:date,currentState:'POD',是否POD:'是',regionCode:'PP'},
   {shipmentCode:'W2',reportDate:date,currentState:'RETURNED',退回状态:'已退回',primaryCategory:'退回',regionCode:'PV'},
@@ -74,6 +74,12 @@ const finalRows=[
 const state={businessType:'WHPP',reportDate:date,pnhBills:['W1','W2','W3'],dailyParseRows:daily,carryBills:['C1','C2'],nextCarryBills:['C1','C2'],finalRows,processing:{runId:'WHPP-0901',phase:'WHPP待重试',running:false,paused:false}};
 db.prepare("INSERT INTO business_states VALUES('WHPP',?,'')").run(JSON.stringify(state));
 const archiveJob={state:'COMPLETED',truncated:false,readErrors:1,result:{endpoints:{confirm:{requestedDaily:3,responseDaily:3},track:{requestedDaily:0},exception:{requestedDaily:0}}}};
+const badArchiveJob={state:'COMPLETED',truncated:false,readErrors:0,result:{endpoints:{confirm:{requestedDaily:3,responseDaily:2},track:{requestedDaily:0},exception:{requestedDaily:0}}}};
+
+const badProof=inspectV464WhppOfflineRecovery(date,db,badArchiveJob);
+assert.equal(badProof.repairable,false,'one missing confirm response must fail closed');
+assert.ok(badProof.failedChecks.includes('archiveConfirmExact'));
+assert.equal(db.prepare("SELECT COUNT(*) count FROM business_final_rows").get().count,0,'failed preflight must not write history');
 
 const beforeCurrent=JSON.stringify(db.prepare("SELECT * FROM shipment_current_state ORDER BY shipmentCode").all());
 const beforeCarry=JSON.stringify(db.prepare("SELECT * FROM carryover_open_items ORDER BY shipmentCode").all());
@@ -115,9 +121,5 @@ assert.equal(stateAfter.finalRows.length,5);
 assert.equal(stateAfter.snapshotStatus,'COMPLETED');
 const afterProof=inspectV464WhppOfflineRecovery(date,db,archiveJob);
 assert.equal(afterProof.recoveredAlready,true);
-
-const dbFail=new DatabaseSync(':memory:');
-db.backup?.();
-dbFail.close();
 db.close();
-console.log('[V464] proof-gated offline WHPP history recovery smoke passed · exact daily+carry state workset · V246 full checked evidence · confirm request+response exact · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
+console.log('[V464] proof-gated offline WHPP history recovery smoke passed · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · confirm request+response exact · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
