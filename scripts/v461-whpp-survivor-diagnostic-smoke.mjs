@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { inspectV461WhppHistoricalSurvivors } from '../src/v461WhppHistoricalSurvivorDiagnosticPatch.js';
+import { inspectV461WhppArchiveEvidence } from '../src/v461WhppArchiveEvidence.js';
 
 const backend=fs.readFileSync('src/v461WhppHistoricalSurvivorDiagnosticPatch.js','utf8');
+const archiveSource=fs.readFileSync('src/v461WhppArchiveEvidence.js','utf8');
 const ui=fs.readFileSync('public/v461-whpp-survivor-diagnostic.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 
@@ -20,10 +25,20 @@ assert.doesNotMatch(backend,/UPPER\(TRIM\((?:c|q|p)\.shipmentCode\)\)/,'large-ta
 assert.doesNotMatch(backend,/\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|REPLACE\s+INTO|DROP\s+TABLE)\b/i,'V461 diagnostic source must stay read-only');
 assert.doesNotMatch(backend,/CEClient|trackQuery\(|confirmQuery\(|exceptionQuery\(|\/tracking\/reconcile/,'V461 must never call CE or trigger tracking');
 
-assert.match(ui,/2026-09-08-v461-whpp-historical-survivor-evidence-ui-v1/);
+assert.match(archiveSource,/2026-09-08-v461-bounded-v266-offline-api-evidence-census-v1/);
+assert.match(archiveSource,/otwms_order_confirm-query/);
+assert.match(archiveSource,/tms-shipment-event_query/);
+assert.match(archiveSource,/exception-item_query/);
+assert.match(archiveSource,/MAX_FILES=12000/,'archive census must remain bounded');
+assert.match(archiveSource,/CONCURRENCY=8/,'archive decompression must remain bounded');
+assert.doesNotMatch(archiveSource,/CEClient|axios|https?:\/\/|fetch\(/,'archive census must stay offline');
+assert.doesNotMatch(archiveSource,/\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|REPLACE\s+INTO|DROP\s+TABLE)\b/i,'archive census must not write database facts');
+
+assert.match(ui,/2026-09-08-v461-whpp-historical-survivor-evidence-ui-v2/);
 assert.match(ui,/\/api\/v461\/whpp-history-survivor/);
 assert.match(ui,/__CE_QC_V142_HISTORY_AUDIT__/);
 assert.match(ui,/lastLoadedAt/,'V461 UI must follow a completed manual V142 audit instead of auto-running history audit');
+assert.match(ui,/V266原始API归档/);
 assert.match(ui,/不调用CE接口/);
 assert.match(ui,/不修改数据库/);
 assert.doesNotMatch(ui,/\/api\/whpp\/run\/(?:start|resume)|\/api\/v246\/tracking\/reconcile/,'V461 UI must never start business processing');
@@ -75,6 +90,23 @@ assert.equal(full.ledger.placeholderOrUnverified,0);
 assert.equal(full.ledger.known,3);
 assert.equal(full.survivorCoverageCandidate,true,'full checked ledger may only advance to offline proof candidate');
 assert.equal(full.conclusion,'SURVIVOR_LEDGER_FULL_CURRENT_EVIDENCE_CANDIDATE');
-
 db.close();
-console.log('[V461] authenticated/index-friendly WHPP survivor diagnostic smoke passed · exact daily cohort only · placeholder evidence fails closed · no CE call · no DB mutation');
+
+const archiveRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v461-archive-'));
+process.env.EVIDENCE_ARCHIVE_DIR=archiveRoot;
+function writeEvidence(folder,name,payload){const dir=path.join(archiveRoot,'ce_api','2026-09-01',folder);fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,name),gzipSync(Buffer.from(JSON.stringify(payload),'utf8')));}
+writeEvidence('otwms_order_confirm-query','confirm.json.gz',{capturedAt:'2026-09-01T02:00:00Z',endpoint:'/api/otwms/order/confirm-query',requestBody:{shipmentCodes:['W1','W2','W3','OLD-CARRY']},responseData:{data:[{shipmentCode:'W1'},{shipmentCode:'W2'},{shipmentCode:'W3'}]}});
+writeEvidence('tms-shipment-event_query','track.json.gz',{capturedAt:'2026-09-01T02:01:00Z',endpoint:'/api/tms-shipment-event/query',requestBody:['W2','W3'],responseData:{data:[]}});
+writeEvidence('exception-item_query','exception.json.gz',{capturedAt:'2026-09-01T02:02:00Z',endpoint:'/api/exception-item/query',requestBody:['W2','W3'],responseData:{data:[]}});
+const archive=await inspectV461WhppArchiveEvidence('2026-09-01',['W1','W2','W3']);
+assert.equal(archive.networkCalls,0);
+assert.equal(archive.databaseWrites,0);
+assert.equal(archive.endpoints.confirm.requestedDaily,3);
+assert.equal(archive.endpoints.confirm.responseDaily,3);
+assert.equal(archive.endpoints.confirm.relatedRequestAll,4,'related request census may reveal carry without exposing bill ids');
+assert.equal(archive.endpoints.track.requestedDaily,2);
+assert.equal(archive.endpoints.exception.requestedDaily,2);
+assert.equal(archive.archiveDailyEvidenceCandidate,true,'full confirm request coverage advances only to offline archive-evidence candidate');
+fs.rmSync(archiveRoot,{recursive:true,force:true});
+
+console.log('[V461] authenticated/index-friendly WHPP survivor + bounded V266 archive diagnostic smoke passed · exact daily cohort only · placeholder evidence fails closed · offline gzip evidence census · no CE call · no DB mutation');
