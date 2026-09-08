@@ -1,0 +1,29 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import { execFileSync } from 'node:child_process';
+
+const file='public/v471-history-audit-abort-normalizer.js';
+execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+const source=fs.readFileSync(file,'utf8');
+assert.match(source,/2026-09-08-v471-history-audit-timeout-abort-normalizer-v1/,'V471 marker missing');
+assert.match(source,/reason===TARGET_REASON/,'V471 must normalize only the exact history-audit timeout reason');
+assert.doesNotMatch(source,/fetch\s*\(/,'V471 must not issue network requests');
+assert.doesNotMatch(source,/business_|sqlite|getDb|INSERT|UPDATE|DELETE/i,'V471 must not touch business/database state');
+
+class FakeAbortController{
+  constructor(){this.received='__UNSET__';}
+  abort(reason){this.received=reason;}
+}
+const sandbox={AbortController:FakeAbortController,console:{info(){}}};
+sandbox.window=sandbox;
+vm.runInNewContext(source,sandbox,{filename:file});
+assert.equal(sandbox.__CE_QC_V471_HISTORY_ABORT_NORMALIZER__?.installed,true,'V471 should install when AbortController exists');
+const timeoutController=new sandbox.AbortController();
+timeoutController.abort('V451_HISTORY_AUDIT_TIMEOUT');
+assert.equal(timeoutController.received,undefined,'V451 timeout must be converted to the native no-reason abort path so fetch rejects with standard AbortError');
+const otherController=new sandbox.AbortController();
+otherController.abort('OTHER_REASON');
+assert.equal(otherController.received,'OTHER_REASON','all non-target abort reasons must remain unchanged');
+
+console.log('[V471] history audit timeout abort normalizer smoke passed: exact-reason only, no network/database/business mutation');
