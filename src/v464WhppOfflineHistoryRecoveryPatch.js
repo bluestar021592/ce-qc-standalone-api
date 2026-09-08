@@ -6,13 +6,15 @@ import { inspectV461WhppHistoricalSurvivors } from './v461WhppHistoricalSurvivor
 import { getV462WhppArchiveEvidence } from './v462WhppSurvivorFastPatch.js';
 import { isWhppCancelledRow } from './whppAnalyzer.js';
 import { isSpecialCategory } from './specialNode.js';
+import { requireRole, sameOriginWriteGuard } from './accessControl.js';
 
 export const V464_WHPP_OFFLINE_RECOVERY_ID='2026-09-08-v464-proof-gated-member-locked-whpp-offline-history-recovery-v1';
-export const V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID='2026-09-08-v464-auth-explicit-one-click-offline-recovery-v1';
+export const V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID='2026-09-08-v464-auth-explicit-one-click-offline-recovery-v2-same-origin-operator';
 const ROUTE='/api/v464/whpp-history-offline-recovery';
 const WRAPPED=Symbol.for('ce-qc.v464-whpp-offline-history-recovery');
 const CONFIRMATION='V464_OFFLINE_RECOVERY';
 const HEADER='x-ce-qc-history-recovery';
+const requireOperator=requireRole('OPERATOR');
 
 const text=value=>String(value??'').trim();
 const bill=value=>text(value).normalize('NFKC').toUpperCase();
@@ -49,10 +51,7 @@ function modernDailyComplete(summary={}){
   const status=String(summary.snapshotStatus||summary.reconciliationStatus||'').toUpperCase();
   return summary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(status)&&Boolean(text(summary.finalizedSnapshotId));
 }
-function publicProof(context={}){
-  const {proof}=context;
-  return proof?{...proof}:{};
-}
+function publicProof(context={}){const {proof}=context;return proof?{...proof}:{};}
 
 function buildRecoveryContext(reportDate='',db=getDb(),archiveJobOverride=null){
   const date=dateOnly(reportDate);if(!date){const error=new Error('V464需要有效YYYY-MM-DD日期。');error.code='V464_REPORT_DATE_INVALID';throw error;}
@@ -151,11 +150,15 @@ export function repairV464WhppOfflineHistory({reportDate='',db=getDb(),archiveJo
 
 function authenticated(req,res){if(req.user)return true;res.status(401).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:'AUTH_REQUIRED',error:'Authentication required.'});return false;}
 function getHandler(req,res){if(!authenticated(req,res))return;try{return res.json(inspectV464WhppOfflineRecovery(req.query?.reportDate||'',getDb()));}catch(error){return res.status(400).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:error?.code||'V464_PREFLIGHT_FAILED',error:error?.message||String(error)});}}
+function executePost(req,res){
+  const confirmation=text(req.body?.confirmation||req.query?.confirmation),reportDate=req.body?.reportDate||req.query?.reportDate||'';
+  if(text(req.get?.(HEADER))!==CONFIRMATION||confirmation!==CONFIRMATION)return res.status(400).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:'V464_EXPLICIT_CONFIRMATION_REQUIRED',error:'需要V464显式离线恢复确认。'});
+  try{return res.json(repairV464WhppOfflineHistory({reportDate,db:getDb()}));}
+  catch(error){return res.status(409).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:error?.code||'V464_RECOVERY_FAILED',error:error?.message||String(error),proof:error?.proof||undefined});}
+}
 function postHandler(req,res){
   if(!authenticated(req,res))return;
-  if(text(req.get?.(HEADER))!==CONFIRMATION||text(req.body?.confirmation)!==CONFIRMATION)return res.status(400).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:'V464_EXPLICIT_CONFIRMATION_REQUIRED',error:'需要V464显式离线恢复确认。'});
-  try{return res.json(repairV464WhppOfflineHistory({reportDate:req.body?.reportDate||'',db:getDb()}));}
-  catch(error){return res.status(409).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:error?.code||'V464_RECOVERY_FAILED',error:error?.message||String(error),proof:error?.proof||undefined});}
+  return sameOriginWriteGuard(req,res,()=>requireOperator(req,res,()=>executePost(req,res)));
 }
 
 const previousUse=express.application.use;let installed=false;
@@ -175,4 +178,4 @@ if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
   Object.defineProperty(wrapped,WRAPPED,{value:true});express.application.use=wrapped;
 }
 
-console.info('[CE-QC][V464_WHPP_OFFLINE_RECOVERY]',V464_WHPP_OFFLINE_RECOVERY_ID,V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID,'explicit authenticated proof-gated offline history repair; exact daily membership + persisted state workset + V246/current/carry + V266 confirm must close; writes historical completion evidence only and never calls CE.');
+console.info('[CE-QC][V464_WHPP_OFFLINE_RECOVERY]',V464_WHPP_OFFLINE_RECOVERY_ID,V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID,'explicit authenticated + same-origin + OPERATOR proof-gated offline history repair; exact daily membership + persisted state workset + V246/current/carry + V266 confirm must close; protected current facts stay unchanged and CE is never called.');
