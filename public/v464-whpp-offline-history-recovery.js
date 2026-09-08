@@ -1,6 +1,6 @@
 (function installV464WhppOfflineRecovery(global){
   if(global.__CE_QC_V464_WHPP_OFFLINE_RECOVERY__)return;
-  const VERSION='2026-09-08-v464-explicit-proof-gated-offline-whpp-recovery-ui-v1';
+  const VERSION='2026-09-08-v464-explicit-proof-gated-offline-whpp-recovery-ui-v2-role-aware';
   const CONFIRMATION='V464_OFFLINE_RECOVERY';
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
@@ -32,6 +32,10 @@
     const archive=p.archive||{},survivor=p.survivor||{};
     const proof=`日报 ${fmt(p.reported)} / 成员 ${fmt(p.members)} · state成员 ${fmt(p.stateMembers)} · state finalRows ${fmt(p.stateFinalRows)}（日报覆盖 ${fmt(p.stateDailyFinalCoverage)} / 工作集 ${fmt(p.expectedWorkset)}） · V246已验证 ${fmt(survivor.ledgerKnown)}/${fmt(p.members)}（终态 ${fmt(survivor.ledgerTerminal)} / OPEN ${fmt(survivor.ledgerCheckedOpen)}） · V266 confirm ${fmt(archive.confirmRequestedDaily)}/${fmt(p.members)}（响应 ${fmt(archive.confirmResponseDaily)}）`;
     if(p.repairable){
+      if(p.canRepair===false){
+        box.innerHTML=`<p class="success"><b>V464 ${esc(p.reportDate)} 离线恢复证明已闭合：</b>${proof}</p><p class="muted">当前账号为只读权限；只有 OPERATOR / ADMIN 可以执行离线恢复。当前135终态+6 OPEN、carry和V246账本仍保持不变。</p>`;
+        return;
+      }
       box.innerHTML=`<p class="success"><b>V464 ${esc(p.reportDate)} 离线恢复证明已闭合：</b>${proof}</p><p class="muted">只恢复该日历史完成凭证和141个日报成员的历史final_rows；保留当前135终态+6 OPEN、carry和V246账本，不调用CE，也不重新扫描/轨迹。</p><div class="button-row"><button id="v464WhppOfflineRepair" class="btn primary compact" type="button">离线恢复 ${esc(p.reportDate)} WHPP历史凭证</button></div>`;
       box.querySelector('#v464WhppOfflineRepair')?.addEventListener('click',()=>void repair(p.reportDate),{once:true});
       return;
@@ -54,11 +58,12 @@
     if(repairing||!date)return;repairing=true;stopPoll();
     const box=host();if(box)box.innerHTML=`<p class="muted"><b>V464 ${esc(date)}：</b>正在事务内重新验证全部证明并重建历史完成凭证；不会调用CE。</p>`;
     try{
-      const r=await fetch('/api/v464/whpp-history-offline-recovery',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','X-CE-QC-History-Recovery':CONFIRMATION},body:JSON.stringify({reportDate:date,confirmation:CONFIRMATION})});
+      const url=`/api/v464/whpp-history-offline-recovery?reportDate=${encodeURIComponent(date)}&confirmation=${encodeURIComponent(CONFIRMATION)}`;
+      const r=await fetch(url,{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','X-CE-QC-History-Recovery':CONFIRMATION},body:JSON.stringify({reportDate:date,confirmation:CONFIRMATION})});
       const p=await r.json();if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);
       if(box)box.innerHTML=`<p class="success"><b>V464离线恢复完成：</b>${esc(date)} · 成员 ${fmt(p.members)} · 已重建历史final_rows ${fmt(p.historicalFinalRowsWritten)} · 新快照 ${esc(p.snapshotId||'')}</p><p class="muted">当前运单状态、carry、V246账本和CE原始证据均未改写。正在重新执行历史导出安全检查。</p>`;
       await global.__CE_QC_V142_HISTORY_AUDIT__?.refresh?.();
-    }catch(error){if(box)box.innerHTML=`<p class="danger-text"><b>V464离线恢复被拒绝：</b>${esc(error?.message||error)}。事务已回滚，未强行标记完成。</p>`;}
+    }catch(error){if(box)box.innerHTML=`<p class="danger-text"><b>V464离线恢复被拒绝：</b>${esc(error?.message||error)}。事务已回滚或未进入写入，未强行标记完成。</p>`;}
     finally{repairing=false;}
   }
   function tick(){
@@ -71,5 +76,5 @@
   function start(){if(timer)return;timer=setInterval(tick,500);timer.unref?.();tick();}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
   global.__CE_QC_V464_WHPP_OFFLINE_RECOVERY__={version:VERSION,preflight:()=>{const date=incompleteWhppDate();return date?preflight(date):Promise.resolve();}};
-  console.info('[CE-QC][V464_WHPP_OFFLINE_RECOVERY_UI]',VERSION,'proof-gated explicit one-click offline recovery only; no automatic POST, no CE call, no scan/track rerun.');
+  console.info('[CE-QC][V464_WHPP_OFFLINE_RECOVERY_UI]',VERSION,'proof-gated explicit one-click offline recovery only; VIEWER is read-only; OPERATOR/ADMIN repair POST only; no automatic POST, no CE call, no scan/track rerun.');
 })(window);
