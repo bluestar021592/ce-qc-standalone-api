@@ -8,8 +8,10 @@ import { V461_ARCHIVE_EVIDENCE_ID } from './v461WhppArchiveEvidence.js';
 
 export const V462_WHPP_SURVIVOR_FAST_ID='2026-09-08-v462-fast-sqlite-survivor-isolated-archive-worker-v1';
 export const V462_WHPP_ARCHIVE_WORKER_ID='2026-09-08-v462-isolated-whpp-archive-evidence-worker-v1';
+export const V468_V464_LAZY_DISPATCH_ID='2026-09-08-v468-v462-single-hook-lazy-v464-dispatch-v1';
 const SURVIVOR_ROUTE='/api/v462/whpp-history-survivor';
 const ARCHIVE_ROUTE='/api/v462/whpp-history-archive-status';
+const V464_ROUTE='/api/v464/whpp-history-offline-recovery';
 const WRAPPED=Symbol.for('ce-qc.v462-whpp-survivor-fast');
 const WORKER_FILE=fileURLToPath(new URL('./v462WhppArchiveEvidenceWorker.js',import.meta.url));
 const JOB_TIMEOUT_MS=10*60_000;
@@ -70,6 +72,18 @@ function archiveStatusHandler(req,res){
   const date=dateOnly(req.query?.reportDate||'');if(!date)return res.status(400).json({ok:false,readOnly:true,version:V462_WHPP_SURVIVOR_FAST_ID,code:'V462_REPORT_DATE_INVALID',error:'V462需要有效YYYY-MM-DD日期。'});
   return res.json({ok:true,readOnly:true,version:V462_WHPP_SURVIVOR_FAST_ID,archiveJob:getV462WhppArchiveEvidence(date)});
 }
+function dispatchV464(req,res,next){
+  import('./v464WhppOfflineHistoryRecoveryPatch.js')
+    .then(module=>{
+      const handled=module.handleV464WhppOfflineRecoveryRequest?.(req,res,next);
+      if(handled===false&&typeof next==='function')next();
+    })
+    .catch(error=>{
+      console.error('[CE-QC][V468_V464_LAZY_DISPATCH_FAILED]',error?.stack||error);
+      if(res.headersSent){if(typeof next==='function')next(error);return;}
+      res.status(500).json({ok:false,version:V468_V464_LAZY_DISPATCH_ID,code:'V468_V464_LAZY_DISPATCH_FAILED',error:'V464离线恢复模块加载失败；未修改任何业务数据。'});
+    });
+}
 
 const previousUse=express.application.use;
 let installed=false;
@@ -82,6 +96,7 @@ if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
       previousUse.call(this,(req,res,next)=>{
         if(req.method==='GET'&&req.path===SURVIVOR_ROUTE)return survivorHandler(req,res);
         if(req.method==='GET'&&req.path===ARCHIVE_ROUTE)return archiveStatusHandler(req,res);
+        if(req.path===V464_ROUTE&&['GET','POST'].includes(req.method))return dispatchV464(req,res,next);
         return next();
       });
     }
@@ -91,4 +106,4 @@ if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
 }
 process.once('exit',()=>{for(const job of jobs.values())try{job.child?.kill();}catch{}});
 
-console.info('[CE-QC][V462_WHPP_SURVIVOR_FAST]',V462_WHPP_SURVIVOR_FAST_ID,V462_WHPP_ARCHIVE_WORKER_ID,'SQLite survivor returns immediately; V266 gzip evidence runs in an isolated child and is polled read-only; completed archive evidence is exposed read-only for V464 proof; no CE network call and no database mutation.');
+console.info('[CE-QC][V462_WHPP_SURVIVOR_FAST]',V462_WHPP_SURVIVOR_FAST_ID,V462_WHPP_ARCHIVE_WORKER_ID,V468_V464_LAZY_DISPATCH_ID,'SQLite survivor returns immediately; V266 gzip evidence runs in an isolated child. The already-authenticated V462 hook lazily dispatches the exact V464 route only; V464 adds no second Express prototype wrapper.');
