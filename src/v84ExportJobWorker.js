@@ -6,6 +6,7 @@ import ExcelJS from 'exceljs';
 import archiver from 'archiver';
 import { getDb, getRuntimeConfig, closeDb } from './db.js';
 import { countCompletedWhppRows, whppDailyCounts } from './v87WhppExportStore.js';
+import { writeJsonAtomicSync } from './exportJobAtomicJson.js';
 
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const businessWorker=path.join(__dirname,'v84ExportBusinessWorker.js');
@@ -27,9 +28,7 @@ function writeJob(patch){
   const nextStatus=String(patch?.status||'').toUpperCase();
   if(current.cancelRequested&&!['FAILED','CANCELLED'].includes(nextStatus))throw cancellationError();
   const next={...current,...patch,updatedAt:new Date().toISOString()};
-  const temp=`${jobFile}.${process.pid}.tmp`;
-  fs.writeFileSync(temp,JSON.stringify(next,null,2),'utf8');
-  fs.renameSync(temp,jobFile);
+  writeJsonAtomicSync(jobFile,next);
   return next;
 }
 function dateKey(value){return /^\d{4}-\d{2}-\d{2}$/.test(String(value||''))?String(value):'';}
