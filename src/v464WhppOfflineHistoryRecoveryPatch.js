@@ -6,10 +6,10 @@ import { inspectV461WhppHistoricalSurvivors } from './v461WhppHistoricalSurvivor
 import { getV462WhppArchiveEvidence } from './v462WhppSurvivorFastPatch.js';
 import { isWhppCancelledRow } from './whppAnalyzer.js';
 import { isSpecialCategory } from './specialNode.js';
-import { requireRole, sameOriginWriteGuard } from './accessControl.js';
+import { auditAction, requireRole, sameOriginWriteGuard } from './accessControl.js';
 
 export const V464_WHPP_OFFLINE_RECOVERY_ID='2026-09-08-v464-proof-gated-member-locked-whpp-offline-history-recovery-v1';
-export const V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID='2026-09-08-v464-auth-explicit-one-click-offline-recovery-v2-same-origin-operator';
+export const V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID='2026-09-08-v464-auth-explicit-one-click-offline-recovery-v3-same-origin-operator-audit';
 const ROUTE='/api/v464/whpp-history-offline-recovery';
 const WRAPPED=Symbol.for('ce-qc.v464-whpp-offline-history-recovery');
 const CONFIRMATION='V464_OFFLINE_RECOVERY';
@@ -109,8 +109,8 @@ function insertRecoveredFinalRows(db,date,rows,now){
   const insert=db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   for(const row of rows){
-    const terminal=terminalReason(row),rawJson=JSON.stringify(row);
-    insert.run('WHPP',billOf(row),date,isPod(row)?1:0,categoryOf(row),'SUCCESS',terminal?'CLOSED':'OPEN',row.latestEventTime||row.最后节点时间||'',row.latestEventDesc||row.最后节点||'',row.latestNode||row.latestNodeCode||'',row.recipient_raw||row.recipientRaw||'',row.recipient_normalized||row.recipientNormalized||'','WHPP','SHIPMENT_PREFIX_CE',Number(row.source_row_number||row.rowNumber||0),rawJson,now,now);
+    const terminal=terminalReason(row),apiStatus=/失败|retry/i.test(String(row.API状态||row.查询状态||''))?'API_PENDING_RETRY':'SUCCESS',rawJson=JSON.stringify(row);
+    insert.run('WHPP',billOf(row),date,isPod(row)?1:0,categoryOf(row),apiStatus,terminal?'CLOSED':'OPEN',row.latestEventTime||row.最后节点时间||'',row.latestEventDesc||row.最后节点||'',row.latestNode||row.latestNodeCode||'',row.recipient_raw||row.recipientRaw||'',row.recipient_normalized||row.recipientNormalized||'','WHPP','SHIPMENT_PREFIX_CE',Number(row.source_row_number||row.rowNumber||0),rawJson,now,now);
   }
 }
 
@@ -149,12 +149,22 @@ export function repairV464WhppOfflineHistory({reportDate='',db=getDb(),archiveJo
 }
 
 function authenticated(req,res){if(req.user)return true;res.status(401).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:'AUTH_REQUIRED',error:'Authentication required.'});return false;}
-function getHandler(req,res){if(!authenticated(req,res))return;try{return res.json(inspectV464WhppOfflineRecovery(req.query?.reportDate||'',getDb()));}catch(error){return res.status(400).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:error?.code||'V464_PREFLIGHT_FAILED',error:error?.message||String(error)});}}
+function getHandler(req,res){
+  if(!authenticated(req,res))return;
+  try{
+    const proof=inspectV464WhppOfflineRecovery(req.query?.reportDate||'',getDb());
+    const role=String(req.user?.role||'').toUpperCase();
+    return res.json({...proof,canRepair:['OPERATOR','ADMIN'].includes(role)});
+  }catch(error){return res.status(400).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:error?.code||'V464_PREFLIGHT_FAILED',error:error?.message||String(error)});}
+}
 function executePost(req,res){
   const confirmation=text(req.body?.confirmation||req.query?.confirmation),reportDate=req.body?.reportDate||req.query?.reportDate||'';
   if(text(req.get?.(HEADER))!==CONFIRMATION||confirmation!==CONFIRMATION)return res.status(400).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:'V464_EXPLICIT_CONFIRMATION_REQUIRED',error:'需要V464显式离线恢复确认。'});
-  try{return res.json(repairV464WhppOfflineHistory({reportDate,db:getDb()}));}
-  catch(error){return res.status(409).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:error?.code||'V464_RECOVERY_FAILED',error:error?.message||String(error),proof:error?.proof||undefined});}
+  try{
+    const result=repairV464WhppOfflineHistory({reportDate,db:getDb()});
+    try{auditAction(req,'WHPP_HISTORY_OFFLINE_RECOVERY',{businessType:'WHPP',reportDate:result.reportDate,snapshotId:result.snapshotId||'',members:Number(result.members||0),version:V464_WHPP_OFFLINE_RECOVERY_ID});}catch(error){console.warn('[CE-QC][V464_AUDIT_LOG_FAILED]',error?.message||error);}
+    return res.json(result);
+  }catch(error){return res.status(409).json({ok:false,version:V464_WHPP_OFFLINE_RECOVERY_ID,code:error?.code||'V464_RECOVERY_FAILED',error:error?.message||String(error),proof:error?.proof||undefined});}
 }
 function postHandler(req,res){
   if(!authenticated(req,res))return;
@@ -178,4 +188,4 @@ if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
   Object.defineProperty(wrapped,WRAPPED,{value:true});express.application.use=wrapped;
 }
 
-console.info('[CE-QC][V464_WHPP_OFFLINE_RECOVERY]',V464_WHPP_OFFLINE_RECOVERY_ID,V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID,'explicit authenticated + same-origin + OPERATOR proof-gated offline history repair; exact daily membership + persisted state workset + V246/current/carry + V266 confirm must close; protected current facts stay unchanged and CE is never called.');
+console.info('[CE-QC][V464_WHPP_OFFLINE_RECOVERY]',V464_WHPP_OFFLINE_RECOVERY_ID,V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID,'explicit authenticated + same-origin + OPERATOR proof-gated offline history repair; exact daily membership + persisted state workset + V246/current/carry + V266 confirm must close; retry truth is preserved, repair is audited, protected current facts stay unchanged and CE is never called.');
