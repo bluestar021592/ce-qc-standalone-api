@@ -16,7 +16,7 @@ assert.match(helper,/await sleep\(DELAYS\[attempt\]\)/,'async sidecar retry must
 assert.doesNotMatch(helper,/unlinkSync\(file|rmSync\(file|writeFileSync\(file,/,'V478 must not delete or directly overwrite the destination as a fallback');
 for(const file of files.slice(1)){
   const source=read(file);
-  assert.match(source,/exportJobAtomicJson\.js/`${file} must use the shared V478 writer`);
+  assert.match(source,/exportJobAtomicJson\.js/,`${file} must use the shared V478 writer`);
 }
 assert.doesNotMatch(read('src/v84ExportJobWorker.js'),/renameSync\(temp,jobFile\)/,'V84 heartbeat must not use one-shot rename');
 assert.doesNotMatch(read('src/v84ExportBusinessWorker.js'),/renameSync\(temp,file\)/,'child progress/result must not use one-shot rename');
