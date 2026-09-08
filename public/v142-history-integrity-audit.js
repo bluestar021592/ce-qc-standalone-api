@@ -4,6 +4,7 @@
   const V451_UI_ID='2026-09-07-v451-snapshot-indexed-history-audit-ui-v1';
   const V456_UI_ID='2026-09-08-v456-whpp-authority-diagnostic-ui-v1';
   const V457_UI_ID='2026-09-08-v457-whpp-legacy-completion-attestation-ui-v1';
+  const V460_UI_ID='2026-09-08-v460-whpp-history-snapshot-disambiguation-ui-v1';
   const AUDIT_TIMEOUT_MS=60000;
   // Compatibility wording gate: when an older backend still returns OPEN evidence,
   // preserve its display. V451 deliberately skips those mega-table diagnostics.
@@ -21,17 +22,17 @@
     WHPP_LEGACY_COMPLETION_METADATA_LOST_ATTESTED:'WHPP旧版完成元数据曾被覆盖，现有历史事实已只读精确证明完成',
     WHPP_LEGACY_DAILY_MEMBERSHIP_INCOMPLETE:'WHPP旧版日报成员不完整，不能恢复完成态',
     WHPP_LEGACY_FINAL_COVERAGE_INCOMPLETE:'WHPP旧版日报成员最终明细覆盖不完整，不能恢复完成态',
-    WHPP_LEGACY_SNAPSHOT_AMBIGUOUS:'WHPP同日存在多个可用历史快照，不能猜测完成快照',
+    WHPP_LEGACY_SNAPSHOT_AMBIGUOUS:'WHPP历史证明snapshotId对应多个可用快照，不能确定唯一实体',
     WHPP_LEGACY_SNAPSHOT_MISSING:'WHPP旧版完成快照不存在',
     WHPP_LEGACY_HISTORY_ATTESTATION_MISSING:'WHPP历史汇总缺少完成快照证明',
-    WHPP_LEGACY_HISTORY_SNAPSHOT_MISMATCH:'WHPP历史汇总与现存快照不一致'
+    WHPP_LEGACY_HISTORY_SNAPSHOT_MISMATCH:'WHPP历史汇总snapshotId未命中同日可用快照'
   }[String(reason||'')]||String(reason||'未知'));
   function whppDiagnostic(item={}){
     const w=item.whpp;if(!w)return '';
     const finalId=w.finalizedSnapshotId?esc(w.finalizedSnapshotId):'无';
     const status=w.dailySnapshotStatus?esc(w.dailySnapshotStatus):'无';
     const historyId=w.historySnapshotId?esc(w.historySnapshotId):'无';
-    return `；WHPP诊断：${esc(whppReasonLabel(w.authorityReason))}；日报 ${fmt(w.reported)} / 成员 ${fmt(w.dailyRows)} / 成员最终覆盖 ${fmt(w.coveredDailyRows)} / 最终明细 ${fmt(w.finalRows)}；日报完成=${w.completedFlag?'是':'否'}，状态=${status}，finalizedSnapshotId=${finalId}，历史证明snapshotId=${historyId}，同日快照候选=${fmt(w.snapshotCandidateCount)}，可用候选=${fmt(w.viableSnapshotCandidateCount)}`;
+    return `；WHPP诊断：${esc(whppReasonLabel(w.authorityReason))}；日报 ${fmt(w.reported)} / 成员 ${fmt(w.dailyRows)} / 成员最终覆盖 ${fmt(w.coveredDailyRows)} / 最终明细 ${fmt(w.finalRows)}；日报完成=${w.completedFlag?'是':'否'}，状态=${status}，finalizedSnapshotId=${finalId}，历史证明snapshotId=${historyId}，同日快照候选=${fmt(w.snapshotCandidateCount)}，可用候选=${fmt(w.viableSnapshotCandidateCount)}，历史精确命中=${fmt(w.attestedSnapshotCandidateCount)}`;
   }
   let auditRunning=false;
   let lastLoadedAt=0;
@@ -53,7 +54,7 @@
     const body=panel.querySelector('#v142AuditBody');
     const button=panel.querySelector('#v142AuditRefresh');
     if(button)button.disabled=true;
-    body.innerHTML='<span class="status-pill warning">正在只读核对历史日报、快照和7业务导出覆盖…</span><p class="muted">V451 按 snapshotId 索引读取核心历史；V456/V457 核对WHPP现代完成权威及旧版完成元数据丢失证明；不会执行会锁住27GB SQLite 的轨迹/扫描/OPEN大表统计。</p>';
+    body.innerHTML='<span class="status-pill warning">正在只读核对历史日报、快照和7业务导出覆盖…</span><p class="muted">V451 按 snapshotId 索引读取核心历史；V456/V457/V460 核对WHPP现代完成权威、旧版完成元数据丢失证明及历史snapshotId精确消歧；不会执行会锁住27GB SQLite 的轨迹/扫描/OPEN大表统计。</p>';
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort('V451_HISTORY_AUDIT_TIMEOUT'),AUDIT_TIMEOUT_MS);
     try{
@@ -70,10 +71,10 @@
       const title=p.exportReady?(p.totalRetryPending>0?'历史覆盖完整，可导出（仍有接口待重试）':'历史覆盖完整，可安全导出'):(latestDayPending?'当前最新日报尚未处理完成，区间导出暂不可用':'历史完整性未通过，已禁止静默缺数据导出');
       const timing=p.timing?.totalMs!==undefined?` · 只读检查耗时 ${fmt(p.timing.totalMs)}ms`:'';
       const snapshots=evidence.selectedCoreSnapshots!==undefined?` · 已核对快照 ${fmt(evidence.selectedCoreSnapshots)} 个`:'';
-      const recoveredHtml=recoveredDays?`<p class="muted"><b>旧版WHPP完成态只读恢复：</b>已有 <b>${fmt(recoveredDays)}</b> 天通过严格历史证明。恢复条件同时要求：完成字段确实缺失、日报成员精确完整、每个成员具有同日最终明细、仅一个可用WHPP快照、历史汇总 snapshotId 与该快照完全一致。仅恢复导出资格，不回写数据库。</p>`:'';
+      const recoveredHtml=recoveredDays?`<p class="muted"><b>旧版WHPP完成态只读恢复：</b>已有 <b>${fmt(recoveredDays)}</b> 天通过严格历史证明。恢复条件同时要求：完成字段确实缺失、日报成员精确完整、每个成员具有同日最终明细、历史汇总 snapshotId 在同日未作废快照中精确且唯一命中。其它同日旧快照只保留为审计历史，不会覆盖该精确证明。仅恢复导出资格，不回写数据库。</p>`:'';
       let evidenceHtml='';
       if(diagnosticsSkipped){
-        evidenceHtml=`<p class="muted"><b>安全读取模式：</b>已跳过 OPEN/扫描/轨迹的大表统计，避免它们阻塞主SQLite；这些项目是“未执行统计”，不是0票，也不会被拿来放宽导出安全判断。</p><p class="muted">当前安全判定仍严格依据：每日有效导入、核心快照/最终明细覆盖、WHPP日报与最终明细、CEAF来源归属。现代WHPP要求日报完成标记与 exact finalizedSnapshotId 实体快照一致；仅旧版“完成元数据被覆盖”日期可由V457五重历史证明只读恢复。任一必要读取失败、歧义或数据不完整都会阻止导出。</p>`;
+        evidenceHtml=`<p class="muted"><b>安全读取模式：</b>已跳过 OPEN/扫描/轨迹的大表统计，避免它们阻塞主SQLite；这些项目是“未执行统计”，不是0票，也不会被拿来放宽导出安全判断。</p><p class="muted">当前安全判定仍严格依据：每日有效导入、核心快照/最终明细覆盖、WHPP日报与最终明细、CEAF来源归属。现代WHPP要求日报完成标记与 exact finalizedSnapshotId 实体快照一致；仅旧版“完成元数据被覆盖”日期可由V457/V460历史证明只读恢复，且历史 snapshotId 必须精确命中一个同日未作废快照。任一必要读取失败、精确命中失败或数据不完整都会阻止导出。</p>`;
       }else{
         const open=evidence.carryOpen||0,cls=evidence.carryClosed||0;
         const scopeFrom=evidence.carryOpenFromDate||p.fromDate,scopeTo=evidence.carryOpenToDate||p.toDate;
@@ -93,6 +94,6 @@
   function ensure(){if(visible())host();}
   document.addEventListener('click',e=>{if(e.target?.closest?.('[data-page="import"],.side-link[data-path="/import"]'))setTimeout(ensure,300);},true);
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(ensure,800),{once:true});else setTimeout(ensure,800);
-  global.__CE_QC_V142_HISTORY_AUDIT__={version:VERSION,v451UiId:V451_UI_ID,v456UiId:V456_UI_ID,v457UiId:V457_UI_ID,refresh:load,get running(){return auditRunning;},get lastLoadedAt(){return lastLoadedAt;},automatic:false};
-  console.info('[CE-QC][V142_HISTORY_AUDIT]',VERSION,V451_UI_ID,V456_UI_ID,V457_UI_ID,'manual audit uses snapshot-indexed readonly reads, provable legacy WHPP completion attestation, and never mutates primary business data.');
+  global.__CE_QC_V142_HISTORY_AUDIT__={version:VERSION,v451UiId:V451_UI_ID,v456UiId:V456_UI_ID,v457UiId:V457_UI_ID,v460UiId:V460_UI_ID,refresh:load,get running(){return auditRunning;},get lastLoadedAt(){return lastLoadedAt;},automatic:false};
+  console.info('[CE-QC][V142_HISTORY_AUDIT]',VERSION,V451_UI_ID,V456_UI_ID,V457_UI_ID,V460_UI_ID,'manual audit uses snapshot-indexed readonly reads, provable legacy WHPP completion attestation with exact history snapshot disambiguation, and never mutates primary business data.');
 })(window);
