@@ -1,11 +1,12 @@
 import { getDb } from './db.js';
 import { CEClient } from './ceClient.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
-import { ensureV246TrackingSchema, applyV246StrictAttemptEvidence } from './v246TrackingLedgerCore.js';
+import { ensureV246TrackingSchema, applyV246StrictAttemptEvidence, v246InclusiveDays } from './v246TrackingLedgerCore.js';
 import { backfillV294StrictAttemptsFromSavedEvidence, V294_ATTEMPT_TYPES } from './v294AttemptSigningTruth.js';
 
 export const V381_EXPORT_EVIDENCE_REPAIR_ID='2026-08-31-v381-shopee-export-scoped-evidence-repair-v1';
 export const V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID='2026-09-08-v482-three-business-export-scoped-evidence-repair-v1';
+export const V483_EXPORT_MEMBER_EVIDENCE_ID='2026-09-08-v483-export-member-driven-strict-evidence-v1';
 const STRICT_TYPES=new Set(V294_ATTEMPT_TYPES);
 const PREPARED_RANGES_BY_DB=new WeakMap();
 export const V381_EXPORT_TRACK_BATCH=50;
@@ -16,6 +17,7 @@ const dateKey=v=>{const m=text(v).match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);ret
 const chunks=(values,size=V381_EXPORT_TRACK_BATCH)=>{const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;};
 const safeJson=(value,fallback={})=>{try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}};
 const strictAttemptSource=value=>/^V246_STRICT_TRACK:/i.test(text(value))||/严格.*START|START.*失败.*START/i.test(text(value));
+const positiveAttempt=value=>{const n=Number(value||0);return Number.isFinite(n)&&n>0?Math.min(3,Math.floor(n)):0;};
 
 function eventBill(row={}){return billOf(row.shipmentCode||row.运单号||row.waybill||row.waybillNo||row.billCode||row.trackingNo);}
 async function mapLimit(values,limit,worker){let next=0;const result=new Array(values.length);async function run(){while(true){const index=next++;if(index>=values.length)return;result[index]=await worker(values[index],index);}}await Promise.all(Array.from({length:Math.min(limit,Math.max(1,values.length))},()=>run()));return result;}
@@ -110,6 +112,67 @@ export async function prepareV482StrictExportEvidence({type,range,db=getDb(),cli
   return result;
 }
 
+export function listV483StrictExportRowGaps(type,rows=[]){
+  const businessType=text(type).toUpperCase();if(!STRICT_TYPES.has(businessType)||!Array.isArray(rows)||!rows.length)return[];
+  const byBill=new Map();
+  for(const row of rows){
+    if(!row?.pod)continue;
+    const bill=billOf(row.shipmentCode||row.运单号);if(!bill)continue;
+    let item=byBill.get(bill);if(!item){item={shipmentCode:bill,businessType,podDate:'',attemptKnown:false,signingKnown:false,rows:[]};byBill.set(bill,item);}
+    item.rows.push(row);
+    item.podDate=item.podDate||dateKey(row.podDate||row.podTime||row.POD时间);
+    if(positiveAttempt(row.attemptNo||row.trackAttemptNo||row.podAttemptNo||row.currentAttemptNo))item.attemptKnown=true;
+    if(Number.isFinite(Number(row.signingDays||row.deliveryDays))&&Number(row.signingDays||row.deliveryDays)>0)item.signingKnown=true;
+  }
+  return[...byBill.values()].filter(item=>!item.podDate||!item.attemptKnown||!item.signingKnown);
+}
+
+export function applyV483StrictTruthToExportRows(record={},strict={}){
+  const rows=Array.isArray(record.rows)?record.rows:[],starts=Array.isArray(strict.starts)?strict.starts:[],failures=Array.isArray(strict.failures)?strict.failures:[];
+  const attemptNo=positiveAttempt(strict.attemptNo),podDate=dateKey(strict.podDate)||dateKey(record.podDate);
+  const firstStart=starts.map(item=>text(item?.time||item?.eventTime||item)).filter(Boolean).sort()[0]||'';
+  const firstStartDate=dateKey(firstStart),signingDays=podDate&&firstStartDate?(v246InclusiveDays(firstStartDate,podDate)||0):0;
+  for(const row of rows){
+    if(podDate){row.podDate=podDate;if(!text(row.podTime))row.podTime=podDate;}
+    if(attemptNo>0){row.attemptNo=attemptNo;row.trackAttemptNo=attemptNo;row.podAttemptNo=attemptNo;row.currentAttemptNo=attemptNo;row.attemptSource=`V246_STRICT_TRACK:${text(strict.source||'V483_EXPORT_MEMBER_TRACK')}`;row.attemptEvidenceComplete=true;}
+    if(firstStart){row.firstAttemptAt=firstStart;row.dispatchStartAt=firstStart;row.dispatchStartDate=firstStartDate;}
+    if(signingDays>0){row.signingDays=signingDays;row.deliveryDays=signingDays;row.signingDaysSource='V483实际导出POD成员真实START→POD';row.deliveryDaysSource=row.signingDaysSource;row.dispatchSigningEvidenceComplete=true;row.signingEvidenceComplete=true;}
+    row.v483StrictExportEvidenceId=V483_EXPORT_MEMBER_EVIDENCE_ID;
+  }
+  return{resolved:Boolean(podDate&&attemptNo>0&&signingDays>0),attemptNo,podDate,firstStart,signingDays,evidenceRow:{shipmentCode:record.shipmentCode,businessType:record.businessType,podDate,attemptNo,source:text(strict.source||'V483_EXPORT_MEMBER_TRACK'),startMode:strict.startMode||'',starts,failures}};
+}
+
+export async function repairV483StrictExportRows({type,range,rows=[],db=getDb(),client=null,onProgress=()=>{}}={}){
+  const selection=selectionOf(type,range);if(!selection)return{ok:true,skipped:true,reason:'NON_STRICT_BUSINESS',total:0,queried:0,unresolved:0};
+  let gaps=listV483StrictExportRowGaps(selection.businessType,rows),total=gaps.length;
+  onProgress({phase:'strictExportEvidence',completed:0,total,queried:0,failed:0,unresolved:total,batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID});
+  if(!total)return{ok:true,version:V483_EXPORT_MEMBER_EVIDENCE_ID,...selection,total:0,queried:0,failed:0,updated:0,unresolved:0};
+
+  const ce=client||new CEClient(),gapByBill=new Map(gaps.map(item=>[item.shipmentCode,item])),groups=chunks([...gapByBill.keys()]),stats={completed:0,queried:0,failed:0,updated:0,resolved:0};
+  await mapLimit(groups,V381_EXPORT_TRACK_CONCURRENCY,async bills=>{
+    let events=[];
+    try{events=await ce.trackQuery(bills);stats.queried+=bills.length;}
+    catch{stats.failed+=bills.length;stats.completed+=bills.length;onProgress({phase:'strictExportEvidence',...stats,total,unresolved:Math.max(0,total-stats.resolved),batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID});return;}
+    const byBill=new Map();for(const event of events||[]){const bill=eventBill(event);if(!bill)continue;if(!byBill.has(bill))byBill.set(bill,[]);byBill.get(bill).push(event);}
+    const evidenceRows=[];
+    for(const bill of bills){
+      const record=gapByBill.get(bill);if(!record)continue;
+      const strict=analyzeV246ShopeeAttemptCycle(byBill.get(bill)||[],{podDate:record.podDate||''}),applied=applyV483StrictTruthToExportRows(record,strict);
+      if(applied.attemptNo>0||applied.signingDays>0||applied.podDate)evidenceRows.push(applied.evidenceRow);
+      if(applied.resolved)stats.resolved+=1;
+    }
+    if(evidenceRows.length){const persisted=applyV246StrictAttemptEvidence(evidenceRows,{db,reason:'V483_EXPORT_MEMBER_TRACK'});stats.updated+=Number(persisted?.updated||0);}
+    stats.completed+=bills.length;onProgress({phase:'strictExportEvidence',...stats,total,unresolved:Math.max(0,total-stats.resolved),batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID});
+  });
+
+  gaps=listV483StrictExportRowGaps(selection.businessType,rows);
+  const missingAttempt=gaps.filter(item=>!item.attemptKnown).length,missingSigning=gaps.filter(item=>!item.signingKnown).length,missingPodDate=gaps.filter(item=>!item.podDate).length;
+  const result={ok:gaps.length===0,version:V483_EXPORT_MEMBER_EVIDENCE_ID,...selection,total,queried:stats.queried,failed:stats.failed,updated:stats.updated,resolved:total-gaps.length,unresolved:gaps.length,missingAttempt,missingSigning,missingPodDate,sample:gaps.slice(0,8).map(item=>item.shipmentCode)};
+  onProgress({phase:'strictExportEvidenceDone',...result,batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID});
+  if(gaps.length){const error=new Error(`V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE:${selection.businessType}:missingAttempt=${missingAttempt}:missingSigning=${missingSigning}:missingPodDate=${missingPodDate}${result.sample.length?`:sample=${result.sample.join(',')}`:''}`);error.code='V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE';error.diagnostics=result;throw error;}
+  return result;
+}
+
 // Compatibility export retained for V381 callers. Its implementation now delegates
 // to the one strict three-business owner, so legacy callers gain TBKH safety without
 // creating a second evidence-repair mechanism.
@@ -117,4 +180,4 @@ export async function prepareV381ShopeeExportEvidence(options={}){
   return prepareV482StrictExportEvidence(options);
 }
 
-console.info('[CE-QC][V482_STRICT_EXPORT_EVIDENCE_REPAIR]',V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,'TBKH + SHOPEECN + SHOPEEVN export preflight: reconcile exact range, reuse saved SQLite evidence, then only unresolved terminal POD trajectory at 50x4; duplicate calls in one export process reuse the same DB-scoped result. V381 compatibility export remains available.');
+console.info('[CE-QC][V483_STRICT_EXPORT_EVIDENCE]',V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,V483_EXPORT_MEMBER_EVIDENCE_ID,'TBKH + SHOPEECN + SHOPEEVN first reconcile ledger/saved evidence, then actual export POD membership drives residual 50x4 strict START→POD repair; unresolved rows fail with exact counts/sample instead of generic metric-missing.');
