@@ -3,6 +3,7 @@ import { getDb } from './db.js';
 export const V142_HISTORY_AUDIT_ID = '2026-09-07-v451-snapshot-indexed-readonly-history-audit-v2-fail-closed';
 export const V456_WHPP_AUTHORITY_DIAGNOSTIC_ID = '2026-09-08-v456-whpp-finalized-snapshot-authority-diagnostic-v1';
 export const V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID = '2026-09-08-v457-whpp-legacy-metadata-loss-attestation-v1';
+export const V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID = '2026-09-08-v460-whpp-history-snapshot-exact-disambiguation-v1';
 const CORE_TYPES = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const CCSL_TYPES = ['CE','CEAF','TBKH','ALI1688'];
 const ALL_TYPES = [...CORE_TYPES,'WHPP'];
@@ -72,22 +73,23 @@ export function whppCompletionAuthorityDecision({reportPresent=false,reported=0,
   };
 }
 
-// V457: old replay/import code could overwrite a previously completed WHPP daily
-// summary back to {batchId,snapshotId,total} while leaving the immutable final
-// snapshot, history-summary attestation and member final facts intact. Recovery is
-// read-only and deliberately stronger than a count-equality shortcut. It is
-// allowed only when completion fields are absent (never when they explicitly say
-// failed/incomplete), every normalized daily member has same-date final coverage,
-// exactly one non-rejected snapshot survives, and business_history_summary points
-// to that exact snapshot. Any ambiguity remains fail-closed.
+// V457/V460: old replay/import code could overwrite a previously completed WHPP
+// daily summary back to {batchId,snapshotId,total} while leaving the immutable
+// final snapshot, history-summary attestation and member final facts intact.
+// Recovery stays read-only and stronger than count equality. Completion fields
+// must be absent, every normalized daily member must have same-date final coverage,
+// and business_history_summary.snapshotId must select exactly one non-rejected
+// same-date snapshot. Other surviving old same-date snapshots are audit history and
+// do not create ambiguity once the persisted history id disambiguates the owner.
 export function whppLegacyCompletionRecoveryDecision({reportPresent=false,reported=0,summary={},dailyRows=0,coveredDailyRows=0,snapshotRows=[],historySnapshotId=''}={}){
   const total=Math.max(0,Number(reported||0));
   const metadataAbsent=!owns(summary,'completed')&&!owns(summary,'snapshotStatus')&&!owns(summary,'reconciliationStatus')&&!owns(summary,'finalizedSnapshotId');
   const allCandidates=(snapshotRows||[]).filter(row=>row&&typeof row==='object');
   const viable=allCandidates.filter(row=>String(row.status||'').trim().toUpperCase()!=='INVALID'&&String(row.reconciliationStatus||'').trim().toUpperCase()!=='FAILED');
   const historyId=String(historySnapshotId||'').trim();
-  const only=viable.length===1?viable[0]:null;
-  const recoveredSnapshotId=String(only?.snapshotId||'').trim();
+  const attested=historyId?viable.filter(row=>String(row.snapshotId||'').trim()===historyId):[];
+  const chosen=attested.length===1?attested[0]:null;
+  const recoveredSnapshotId=String(chosen?.snapshotId||'').trim();
   const dailyCount=Math.max(0,Number(dailyRows||0)),covered=Math.max(0,Number(coveredDailyRows||0));
   let eligible=false,reason='WHPP_LEGACY_RECOVERY_NOT_APPLICABLE';
   if(!reportPresent)reason='WHPP_DAILY_REPORT_MISSING';
@@ -95,11 +97,17 @@ export function whppLegacyCompletionRecoveryDecision({reportPresent=false,report
   else if(!metadataAbsent)reason='WHPP_LEGACY_RECOVERY_NOT_APPLICABLE';
   else if(dailyCount!==total)reason='WHPP_LEGACY_DAILY_MEMBERSHIP_INCOMPLETE';
   else if(covered!==total)reason='WHPP_LEGACY_FINAL_COVERAGE_INCOMPLETE';
-  else if(viable.length!==1)reason=viable.length?'WHPP_LEGACY_SNAPSHOT_AMBIGUOUS':'WHPP_LEGACY_SNAPSHOT_MISSING';
+  else if(viable.length===0)reason='WHPP_LEGACY_SNAPSHOT_MISSING';
   else if(!historyId)reason='WHPP_LEGACY_HISTORY_ATTESTATION_MISSING';
-  else if(historyId!==recoveredSnapshotId)reason='WHPP_LEGACY_HISTORY_SNAPSHOT_MISMATCH';
+  else if(attested.length===0)reason='WHPP_LEGACY_HISTORY_SNAPSHOT_MISMATCH';
+  else if(attested.length!==1)reason='WHPP_LEGACY_SNAPSHOT_AMBIGUOUS';
   else{eligible=true;reason='WHPP_LEGACY_COMPLETION_METADATA_LOST_ATTESTED';}
-  return{eligible,reason,metadataAbsent,dailyRows:dailyCount,coveredDailyRows:covered,historySnapshotId:historyId,viableSnapshotCandidateCount:viable.length,recoveredSnapshotId,allSnapshotCandidateCount:allCandidates.length,v457RecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID};
+  return{
+    eligible,reason,metadataAbsent,dailyRows:dailyCount,coveredDailyRows:covered,historySnapshotId:historyId,
+    viableSnapshotCandidateCount:viable.length,attestedSnapshotCandidateCount:attested.length,recoveredSnapshotId,
+    allSnapshotCandidateCount:allCandidates.length,v457RecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,
+    v460DisambiguationId:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID
+  };
 }
 
 function loadBulkHistory(db,from,to){
@@ -165,8 +173,8 @@ function loadBulkHistory(db,from,to){
     FROM business_final_rows WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? GROUP BY reportDate`,from,to):[];
   const whppFinal=mapGrouped(finalRows,row=>iso(row.reportDate));
 
-  // V456/V457 keep snapshot authority metadata-only and date-bounded. Payload JSON
-  // is never materialized on the history safety path.
+  // V456/V457/V460 keep snapshot authority metadata-only and date-bounded.
+  // Payload JSON is never materialized on the history safety path.
   const snapshotRows=exists.business_export_snapshots?rows(db,`SELECT reportDate,snapshotId,status,reconciliationStatus,createdAt,id
     FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ? ORDER BY reportDate,createdAt,id`,from,to):[];
   const whppSnapshotRows=mapListsByDate(snapshotRows);
@@ -220,8 +228,10 @@ function whppForDate(bulk,reportDate){
     finalizedSnapshotId:authority.finalizedSnapshotId,snapshotCandidateCount:authority.snapshotCandidateCount,exactSnapshotFound:authority.exactSnapshotFound,
     exactSnapshotStatus:authority.exactSnapshotStatus,exactReconciliationStatus:authority.exactReconciliationStatus,
     explicitCompleted:authority.explicitCompleted,legacyAttested:authority.legacyAttested,legacyMetadataRecovered:Boolean(authority.legacyMetadataRecovered),
-    historySnapshotId:recovery.historySnapshotId,viableSnapshotCandidateCount:recovery.viableSnapshotCandidateCount,recoveryReason:recovery.reason,
-    v456AuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,v457LegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID
+    historySnapshotId:recovery.historySnapshotId,viableSnapshotCandidateCount:recovery.viableSnapshotCandidateCount,
+    attestedSnapshotCandidateCount:recovery.attestedSnapshotCandidateCount,recoveryReason:recovery.reason,
+    v456AuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,v457LegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,
+    v460HistorySnapshotDisambiguationId:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID
   };
 }
 function airForDate(bulk,reportDate,snapshotId){
@@ -276,6 +286,7 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
     evidenceMode:'V451_INDEXED_AUDIT_ONLY',
     whppAuthorityDiagnostic:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,
     whppLegacyCompletionRecovery:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,
+    whppHistorySnapshotDisambiguation:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,
     whppLegacyMetadataRecoveredDays:totalWhppLegacyRecovered,
     selectedCoreSnapshots:bulk.selectedSnapshotIds.length,
     checkedDays:expected.length,
@@ -287,7 +298,7 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
   };
   const exportReady=missing.length===0&&incomplete.length===0;
   const totalMs=Date.now()-totalStarted;
-  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,v456WhppAuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,v457WhppLegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
+  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,v456WhppAuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,v457WhppLegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,v460WhppHistorySnapshotDisambiguationId:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
 }
 
 export const V142_BUSINESS_TYPES=ALL_TYPES;
