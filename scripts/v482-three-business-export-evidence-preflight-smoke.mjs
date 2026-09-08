@@ -6,7 +6,7 @@ for(const file of ['src/v381ExportEvidenceRepair.js','src/v200TemplateDashboardE
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
-const repair=fs.readFileFileSync?fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8'):'';
+const repair=fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8');
 const exporter=fs.readFileSync('src/v200TemplateDashboardExporter.js','utf8');
 const allWorker=fs.readFileSync('src/v84ExportBusinessWorker.js','utf8');
 const singleWorker=fs.readFileSync('src/v183SingleBusinessExportJobWorker.js','utf8');
