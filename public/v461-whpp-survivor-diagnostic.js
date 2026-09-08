@@ -1,7 +1,7 @@
 (function installV461WhppSurvivorDiagnostic(global){
   if(global.__CE_QC_V461_WHPP_SURVIVOR_DIAGNOSTIC__)return;
   const VERSION='2026-09-08-v461-whpp-historical-survivor-evidence-ui-v2';
-  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
+  const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const fmt=value=>Number(value||0).toLocaleString('zh-CN');
   let lastAuditAt=0,busy=false,timer=null;
 
