@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { inspectV461WhppHistoricalSurvivors } from '../src/v461WhppHistoricalSurvivorDiagnosticPatch.js';
 import { inspectV461WhppArchiveEvidence } from '../src/v461WhppArchiveEvidence.js';
 
-for(const file of ['src/v462WhppSurvivorFastPatch.js','src/v462WhppArchiveEvidenceWorker.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v462WhppSurvivorFastPatch.js','src/v462WhppArchiveEvidenceWorker.js','public/v461-whpp-survivor-diagnostic.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 
 const backend=fs.readFileSync('src/v461WhppHistoricalSurvivorDiagnosticPatch.js','utf8');
 const fastBackend=fs.readFileSync('src/v462WhppSurvivorFastPatch.js','utf8');
@@ -36,6 +36,9 @@ assert.match(fastBackend,/fork\(WORKER_FILE/,'V462 archive work must execute in 
 assert.match(fastBackend,/archiveRunsInChildProcess:true/,'fast response must disclose isolated archive execution');
 assert.match(fastBackend,/function authenticated\(req,res\)\{if\(req\.user\)return true;res\.status\(401\)\.json\(/,'V462 auth helper must reject unauthenticated requests with HTTP 401');
 assert.equal((fastBackend.match(/if\(!authenticated\(req,res\)\)return;/g)||[]).length,2,'both V462 GET handlers must enforce the authenticated helper');
+assert.match(fastBackend,/2026-09-08-v468-v462-single-hook-lazy-v464-dispatch-v1/,'V462 must own the one lazy V464 dispatch path');
+assert.match(fastBackend,/if\(req\.path===V464_ROUTE&&\['GET','POST'\]\.includes\(req\.method\)\)return dispatchV464/,'V464 must dispatch only on its exact path and method');
+assert.match(fastBackend,/import\('\.\/v464WhppOfflineHistoryRecoveryPatch\.js'\)/,'V464 backend must remain lazy and absent from normal startup');
 assert.doesNotMatch(fastBackend,/from '\.\/v462WhppArchiveEvidenceWorker\.js'/,'main web process must not import worker runtime just to read an id');
 assert.doesNotMatch(fastBackend,/CEClient|trackQuery\(|confirmQuery\(|exceptionQuery\(/,'V462 fast route must not call CE');
 assert.doesNotMatch(fastBackend,/\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|REPLACE\s+INTO|DROP\s+TABLE)\b/i,'V462 fast route must not mutate business database facts');
@@ -57,10 +60,12 @@ assert.match(workerSource,/process\.send/);
 assert.doesNotMatch(workerSource,/CEClient|axios|https?:\/\/|fetch\(/,'worker itself must stay offline');
 assert.doesNotMatch(workerSource,/getDb|DatabaseSync|INSERT INTO|UPDATE /i,'worker must not open or mutate SQLite');
 
-assert.match(ui,/2026-09-08-v462-fast-survivor-isolated-archive-ui-v1/);
+assert.match(ui,/2026-09-08-v468-v462-survivor-lazy-v464-ui-v1/);
 assert.match(ui,/\/api\/v462\/whpp-history-survivor/);
 assert.match(ui,/\/api\/v462\/whpp-history-archive-status/);
 assert.match(ui,/setTimeout\(\(\)=>void pollArchive\(date\),2000\)/,'archive status must be polled without holding the fast SQLite request open');
+assert.match(ui,/v464-whpp-offline-history-recovery\.js\?v=20260908-v468-1/,'V464 UI must use a fresh lazy cache key');
+assert.match(ui,/archiveJob\?\.state==='COMPLETED'\)void ensureV464Ui\(\)/,'V464 UI must load only after isolated archive completion');
 assert.match(ui,/V266 gzip会在隔离子进程核对/);
 assert.match(ui,/不调用CE接口/);
 assert.match(ui,/不修改数据库/);
@@ -68,7 +73,7 @@ assert.doesNotMatch(ui,/\/api\/v461\/whpp-history-survivor/,'V462 UI must retire
 assert.doesNotMatch(ui,/\/api\/whpp\/run\/(?:start|resume)|\/api\/v246\/tracking\/reconcile/,'V462 UI must never start business processing');
 assert.match(shell,/import '\.\/v462WhppSurvivorFastPatch\.js'/);
 assert.match(shell,/v461-whpp-survivor-diagnostic\.js\?v=20260908-v462-1/);
-assert.doesNotMatch(shell,/v461-whpp-survivor-diagnostic\.js\?v=20260908-v461-1/,'old blocking V461 cache key must stay retired');
+assert.doesNotMatch(shell,/^\s*import ['"]\.\/v464WhppOfflineHistoryRecoveryPatch\.js['"];?\s*$/m,'V464 must not return to eager startup wiring');
 
 const db=new DatabaseSync(':memory:');
 db.exec(`
@@ -137,4 +142,4 @@ assert.equal(archive.processedFiles,3);
 assert.ok(progress.some(value=>value.state==='COMPLETED'&&value.processedFiles===3),'streaming archive scanner must publish completion progress');
 fs.rmSync(archiveRoot,{recursive:true,force:true});
 
-console.log('[V463/V462/V461] fast authenticated WHPP survivor + isolated streaming V266 archive diagnostic smoke passed · both GET routes enforce auth helper · exact daily cohort only · placeholder evidence fails closed · UI polls child progress · no CE call · no DB mutation');
+console.log('[V468/V463/V462/V461] fast authenticated WHPP survivor + isolated streaming V266 archive diagnostic smoke passed · exact daily cohort only · placeholder evidence fails closed · V464 backend lazy-dispatches through the single existing authenticated V462 hook · V464 UI lazy-loads only after archive completion · no CE call · no DB mutation');
