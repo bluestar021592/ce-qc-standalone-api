@@ -28,6 +28,10 @@ function publicJob(job){
     result:job.state==='COMPLETED'?job.result:null,readOnly:true,networkCalls:0,databaseWrites:0,workerId:V462_WHPP_ARCHIVE_WORKER_ID,archiveVersion:V461_ARCHIVE_EVIDENCE_ID
   };
 }
+export function getV462WhppArchiveEvidence(reportDate=''){
+  const date=dateOnly(reportDate);
+  return publicJob(date?jobs.get(date):null);
+}
 function stopJob(job,reason='REPLACED'){
   if(!job||job.state!=='RUNNING')return;
   clearTimeout(job.timer);job.state='FAILED';job.error=reason;job.finishedAt=new Date().toISOString();
@@ -64,7 +68,7 @@ function survivorHandler(req,res){
 function archiveStatusHandler(req,res){
   if(!authenticated(req,res))return;
   const date=dateOnly(req.query?.reportDate||'');if(!date)return res.status(400).json({ok:false,readOnly:true,version:V462_WHPP_SURVIVOR_FAST_ID,code:'V462_REPORT_DATE_INVALID',error:'V462需要有效YYYY-MM-DD日期。'});
-  return res.json({ok:true,readOnly:true,version:V462_WHPP_SURVIVOR_FAST_ID,archiveJob:publicJob(jobs.get(date))});
+  return res.json({ok:true,readOnly:true,version:V462_WHPP_SURVIVOR_FAST_ID,archiveJob:getV462WhppArchiveEvidence(date)});
 }
 
 const previousUse=express.application.use;
@@ -87,4 +91,4 @@ if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
 }
 process.once('exit',()=>{for(const job of jobs.values())try{job.child?.kill();}catch{}});
 
-console.info('[CE-QC][V462_WHPP_SURVIVOR_FAST]',V462_WHPP_SURVIVOR_FAST_ID,V462_WHPP_ARCHIVE_WORKER_ID,'SQLite survivor returns immediately; V266 gzip evidence runs in an isolated child and is polled read-only; no CE network call and no database mutation.');
+console.info('[CE-QC][V462_WHPP_SURVIVOR_FAST]',V462_WHPP_SURVIVOR_FAST_ID,V462_WHPP_ARCHIVE_WORKER_ID,'SQLite survivor returns immediately; V266 gzip evidence runs in an isolated child and is polled read-only; completed archive evidence is exposed read-only for V464 proof; no CE network call and no database mutation.');
