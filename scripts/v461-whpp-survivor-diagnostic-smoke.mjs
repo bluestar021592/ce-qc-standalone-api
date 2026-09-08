@@ -34,7 +34,8 @@ assert.match(fastBackend,/\/api\/v462\/whpp-history-survivor/);
 assert.match(fastBackend,/\/api\/v462\/whpp-history-archive-status/);
 assert.match(fastBackend,/fork\(WORKER_FILE/,'V462 archive work must execute in a child process');
 assert.match(fastBackend,/archiveRunsInChildProcess:true/,'fast response must disclose isolated archive execution');
-assert.match(fastBackend,/if\(!req\.user\)/,'V462 routes must require authenticated req.user');
+assert.match(fastBackend,/function authenticated\(req,res\)\{if\(req\.user\)return true;res\.status\(401\)\.json\(/,'V462 auth helper must reject unauthenticated requests with HTTP 401');
+assert.equal((fastBackend.match(/if\(!authenticated\(req,res\)\)return;/g)||[]).length,2,'both V462 GET handlers must enforce the authenticated helper');
 assert.doesNotMatch(fastBackend,/from '\.\/v462WhppArchiveEvidenceWorker\.js'/,'main web process must not import worker runtime just to read an id');
 assert.doesNotMatch(fastBackend,/CEClient|trackQuery\(|confirmQuery\(|exceptionQuery\(/,'V462 fast route must not call CE');
 assert.doesNotMatch(fastBackend,/\b(?:INSERT\s+INTO|UPDATE\s+\w|DELETE\s+FROM|REPLACE\s+INTO|DROP\s+TABLE)\b/i,'V462 fast route must not mutate business database facts');
@@ -136,4 +137,4 @@ assert.equal(archive.processedFiles,3);
 assert.ok(progress.some(value=>value.state==='COMPLETED'&&value.processedFiles===3),'streaming archive scanner must publish completion progress');
 fs.rmSync(archiveRoot,{recursive:true,force:true});
 
-console.log('[V462/V461] fast authenticated WHPP survivor + isolated streaming V266 archive diagnostic smoke passed · exact daily cohort only · placeholder evidence fails closed · UI polls child progress · no CE call · no DB mutation');
+console.log('[V463/V462/V461] fast authenticated WHPP survivor + isolated streaming V266 archive diagnostic smoke passed · both GET routes enforce auth helper · exact daily cohort only · placeholder evidence fails closed · UI polls child progress · no CE call · no DB mutation');
