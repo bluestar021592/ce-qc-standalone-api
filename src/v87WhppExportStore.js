@@ -2,6 +2,7 @@ import { getDb } from './db.js';
 
 export const V419_WHPP_EXPORT_MEMBERSHIP_ID='2026-09-03-v419-whpp-completion-certified-membership-export-v4';
 export const V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID='2026-09-08-v457-whpp-legacy-metadata-loss-attestation-v1';
+export const V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID='2026-09-08-v460-whpp-history-snapshot-exact-disambiguation-v1';
 
 const text=value=>String(value??'').trim();
 const billOf=value=>text(value).toUpperCase();
@@ -31,11 +32,12 @@ function completedDailyAuthority(fromDate,toDate,db=getDb()) {
   return byDate;
 }
 
-// V457 read-only attestation for the pre-V397 replay bug. Old replay code could
-// overwrite the daily completion fields after a successful finalize without
-// deleting the immutable snapshot/final facts. Recovery is intentionally strict:
-// exact daily membership, exact member final coverage, one surviving snapshot,
-// and business_history_summary must all agree on that same snapshot id.
+// V457/V460 read-only attestation for the pre-V397 replay bug. Old replay code
+// could overwrite daily completion fields after a successful finalize without
+// deleting immutable snapshot/final facts. Recovery is intentionally strict:
+// exact daily membership, exact member final coverage, and the persisted
+// business_history_summary snapshotId must select exactly one non-rejected
+// same-date snapshot. Other surviving same-date snapshots remain audit history.
 function legacyCompletionProofs(fromDate,toDate,db=getDb()) {
   const coverageRows=db.prepare(`
     SELECT d.reportDate,
@@ -63,8 +65,8 @@ function legacyCompletionProofs(fromDate,toDate,db=getDb()) {
 
 // Metadata only. Export split/count planning must never materialize every
 // historical WHPP payloadJson just to discover eligible dates. A surviving modern
-// daily header owns completion through exact finalizedSnapshotId. V457 adds one
-// narrow legacy exception only for proven metadata-loss dates; current explicit
+// daily header owns completion through exact finalizedSnapshotId. V457/V460 add
+// one narrow legacy exception only for proven metadata-loss dates; current explicit
 // incomplete/failed metadata can never use that recovery. Fully rotated history
 // still requires an explicit VALID+COMPLETED snapshot.
 function latestEligibleCompletedSnapshots(fromDate,toDate,db=getDb()) {
@@ -93,9 +95,11 @@ function latestEligibleCompletedSnapshots(fromDate,toDate,db=getDb()) {
         if(!authority.metadataAbsent||authority.total<=0)continue;
         const proof=legacyProof.coverage.get(date)||{dailyRows:0,coveredDailyRows:0};
         if(proof.dailyRows!==authority.total||proof.coveredDailyRows!==authority.total)continue;
-        if(candidates.length!==1)continue;
-        chosen=candidates[0];
-        if(!chosen||text(chosen.snapshotId)!==text(legacyProof.history.get(date)))continue;
+        const historyId=text(legacyProof.history.get(date));
+        if(!historyId)continue;
+        const attested=candidates.filter(row=>text(row.snapshotId)===historyId);
+        if(attested.length!==1)continue;
+        chosen=attested[0];
         legacyMetadataRecovered=true;
       }
       const explicit=text(chosen.status).toUpperCase()==='VALID'&&text(chosen.reconciliationStatus).toUpperCase()==='COMPLETED';
@@ -104,7 +108,7 @@ function latestEligibleCompletedSnapshots(fromDate,toDate,db=getDb()) {
       chosen=candidates.find(row=>text(row.status).toUpperCase()==='VALID'&&text(row.reconciliationStatus).toUpperCase()==='COMPLETED')||null;
       if(!chosen)continue;
     }
-    out.push({...chosen,legacyFinalized,legacyMetadataRecovered,dailyCompletionAuthority:Boolean(authority?.dailyPresent),v457LegacyRecoveryId:legacyMetadataRecovered?V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID:''});
+    out.push({...chosen,legacyFinalized,legacyMetadataRecovered,dailyCompletionAuthority:Boolean(authority?.dailyPresent),v457LegacyRecoveryId:legacyMetadataRecovered?V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID:'',v460HistorySnapshotDisambiguationId:legacyMetadataRecovered?V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID:''});
   }
   return out.sort((a,b)=>text(a.reportDate).localeCompare(text(b.reportDate)));
 }
@@ -288,7 +292,8 @@ function normalizeWhppRow(finalRow = {}, memberRow = {}, reportDate = '') {
     sheetName: memberRow.sheetName || merged.sheetName || '',
     whppExportMembershipSource:memberRow.membershipSource||'WHPP_VALID_COMPLETED_SNAPSHOT_PNH',
     v419WhppExportMembershipId:V419_WHPP_EXPORT_MEMBERSHIP_ID,
-    v457WhppLegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID
+    v457WhppLegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,
+    v460WhppHistorySnapshotDisambiguationId:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID
   };
 }
 
@@ -300,7 +305,7 @@ export function listCompletedWhppSnapshots(fromDate, toDate) {
       const bill=billOf(member.shipmentCode||member.运单号);if(!bill)continue;
       rows.push(normalizeWhppRow(finals.get(bill)||{},member,snapshot.reportDate));
     }
-    out.push({snapshotId:snapshot.snapshotId||`WHPP-RANGE-${snapshot.reportDate}`,reportDate:snapshot.reportDate,payload:{finalRows:rows},membershipSource:members[0]?.membershipSource||(rows.length?'WHPP_RECOVERED_DAILY':'WHPP_STANDARD_DAILY_ZERO'),legacyFinalized:Boolean(snapshot.legacyFinalized),legacyMetadataRecovered:Boolean(snapshot.legacyMetadataRecovered),v457WhppLegacyRecoveryId:snapshot.v457LegacyRecoveryId||''});
+    out.push({snapshotId:snapshot.snapshotId||`WHPP-RANGE-${snapshot.reportDate}`,reportDate:snapshot.reportDate,payload:{finalRows:rows},membershipSource:members[0]?.membershipSource||(rows.length?'WHPP_RECOVERED_DAILY':'WHPP_STANDARD_DAILY_ZERO'),legacyFinalized:Boolean(snapshot.legacyFinalized),legacyMetadataRecovered:Boolean(snapshot.legacyMetadataRecovered),v457WhppLegacyRecoveryId:snapshot.v457LegacyRecoveryId||'',v460WhppHistorySnapshotDisambiguationId:snapshot.v460HistorySnapshotDisambiguationId||''});
   }
   return out;
 }
@@ -315,4 +320,4 @@ export function whppDailyCounts(fromDate, toDate) {
   return latestEligibleCompletedSnapshots(fromDate,toDate,db).map(snapshot=>({reportDate:snapshot.reportDate,businessType:'WHPP',count:membershipCount(snapshot,db)}));
 }
 
-console.info('[CE-QC][V419_WHPP_EXPORT_MEMBERSHIP]',V419_WHPP_EXPORT_MEMBERSHIP_ID,V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,'WHPP export completion is daily-authority certified. V457 read-only recovery admits only legacy daily metadata-loss dates proven by exact normalized membership, exact same-date final coverage, one surviving snapshot, and matching business_history_summary snapshotId; explicit incomplete/failed metadata remains fail-closed. Membership remains immutable daily truth; finalRows is enrichment only.');
+console.info('[CE-QC][V419_WHPP_EXPORT_MEMBERSHIP]',V419_WHPP_EXPORT_MEMBERSHIP_ID,V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,'WHPP export completion is daily-authority certified. V457/V460 read-only recovery admits only legacy daily metadata-loss dates proven by exact normalized membership, exact same-date final coverage, and a business_history_summary snapshotId that uniquely selects one non-rejected same-date snapshot; other old same-date snapshots remain audit history. Explicit incomplete/failed metadata remains fail-closed. Membership remains immutable daily truth; finalRows is enrichment only.');
