@@ -2,6 +2,7 @@ import express from 'express';
 import { getDb } from './db.js';
 
 export const V461_WHPP_SURVIVOR_DIAGNOSTIC_ID='2026-09-08-v461-whpp-historical-survivor-evidence-v1';
+export const V461_AUTH_ROUTE_ID='2026-09-08-v461-after-access-identity-authenticated-readonly-route-v1';
 const ROUTE='/api/v461/whpp-history-survivor';
 const WRAPPED=Symbol.for('ce-qc.v461-whpp-history-survivor-diagnostic');
 
@@ -10,7 +11,6 @@ function dateOnly(value=''){const match=text(value).match(/^(\d{4})-(\d{2})-(\d{
 function tableExists(db,name){try{return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name));}catch{return false;}}
 function safeJson(value,fallback={}){try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}}
 function n(value){return Number(value||0);}
-
 function one(db,sql,...params){return db.prepare(sql).get(...params)||{};}
 function rows(db,sql,...params){return db.prepare(sql).all(...params);}
 
@@ -29,7 +29,6 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
 
   const members=n(one(db,`SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count
     FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>''`,date).count);
-
   const baseCte=`WITH members AS (
     SELECT DISTINCT UPPER(TRIM(shipmentCode)) shipmentCode
     FROM business_daily_parse_rows
@@ -106,11 +105,10 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
   const currentKnown=current.terminal+current.checkedNonterminal;
   const ledgerKnown=ledger.terminal+ledger.checkedOpen;
   const survivorCoverageCandidate=members>0&&readErrors.length===0&&ledger.rows===members&&ledgerKnown===members&&ledger.placeholderOrUnverified===0;
-  const requiresArchiveProof=!survivorCoverageCandidate;
   return{
-    ok:true,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,reportDate:date,members,
+    ok:true,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,authRouteVersion:V461_AUTH_ROUTE_ID,reportDate:date,members,
     current:{...current,known:currentKnown},carry,ledger:{...ledger,known:ledgerKnown},podLocks,runLocks,checkpoints,persistedState,
-    survivorCoverageCandidate,requiresArchiveProof,readErrors,
+    survivorCoverageCandidate,requiresArchiveProof:!survivorCoverageCandidate,readErrors,
     conclusion:survivorCoverageCandidate?'SURVIVOR_LEDGER_FULL_CURRENT_EVIDENCE_CANDIDATE':'SURVIVOR_EVIDENCE_INCOMPLETE_NEEDS_ARCHIVE_PROOF',
     note:'本接口只盘点幸存证据，不恢复快照、不生成最终明细、不修改数据库。ledger全覆盖也只代表可进入下一步离线证明，不等于自动判定历史已完成。',
     elapsedMs:Date.now()-started
@@ -118,6 +116,7 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
 }
 
 function handler(req,res){
+  if(!req.user)return res.status(401).json({ok:false,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,code:'AUTH_REQUIRED',error:'Authentication required.'});
   try{return res.json(inspectV461WhppHistoricalSurvivors(req.query?.reportDate||''));}
   catch(error){return res.status(400).json({ok:false,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,code:error?.code||'V461_DIAGNOSTIC_FAILED',error:error?.message||String(error)});}
 }
@@ -126,11 +125,16 @@ const previousUse=express.application.use;
 let installed=false;
 if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
   const wrapped=function v461WhppHistoricalSurvivorUse(...args){
-    if(!installed){installed=true;previousUse.call(this,(req,res,next)=>{if(req.method==='GET'&&req.path===ROUTE)return handler(req,res);return next();});}
-    return previousUse.apply(this,args);
+    const candidates=args.flat().filter(value=>typeof value==='function');
+    const result=previousUse.apply(this,args);
+    if(!installed&&candidates.some(fn=>fn.name==='accessIdentity')){
+      installed=true;
+      previousUse.call(this,(req,res,next)=>{if(req.method==='GET'&&req.path===ROUTE)return handler(req,res);return next();});
+    }
+    return result;
   };
   Object.defineProperty(wrapped,WRAPPED,{value:true});
   express.application.use=wrapped;
 }
 
-console.info('[CE-QC][V461_WHPP_SURVIVOR_DIAGNOSTIC]',V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,'read-only exact-member survivor evidence census installed; no scan/track/API call and no database mutation.');
+console.info('[CE-QC][V461_WHPP_SURVIVOR_DIAGNOSTIC]',V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,V461_AUTH_ROUTE_ID,'authenticated read-only exact-member survivor evidence census installed after accessIdentity; no scan/track/API call and no database mutation.');
