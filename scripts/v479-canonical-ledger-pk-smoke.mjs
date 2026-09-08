@@ -5,12 +5,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { ensureV246TrackingSchema } from '../src/v246TrackingLedgerCore.js';
 import { applyV419CanonicalExportLedgerTruth, V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID, V479_CANONICAL_LEDGER_READ_ID } from '../src/v419CanonicalExportLedgerTruth.js';
 
-for(const file of ['src/v419CanonicalExportLedgerTruth.js','src/v225ExportReturnTruth.js']){
+for(const file of ['src/v419CanonicalExportLedgerTruth.js','src/v225ExportReturnTruth.js','src/v84ExportJobWorker.js']){
   const checked=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
   assert.equal(checked.status,0,`${file} syntax failed: ${checked.stderr||checked.stdout}`);
 }
 const v419=fs.readFileSync('src/v419CanonicalExportLedgerTruth.js','utf8');
 const v225=fs.readFileSync('src/v225ExportReturnTruth.js','utf8');
+const v84=fs.readFileSync('src/v84ExportJobWorker.js','utf8');
 assert.match(v419,/2026-09-08-v479-primary-key-scalar-ledger-hydration-v1/);
 assert.match(v419,/const LEDGER_CHUNK_SIZE=900/);
 assert.match(v419,/FROM qc_tracking_ledger WHERE shipmentCode IN \(\$\{marks\}\)/);
@@ -18,7 +19,10 @@ assert.doesNotMatch(v419,/WHERE businessType=\? AND shipmentCode IN/,'V479 must 
 assert.doesNotMatch(v419,/signingDays,evidenceJson,currentStateJson,lastEventTime/,'V479 scalar hot query must not hydrate both large JSON columns for every ticket');
 assert.match(v419,/jsonColumnByBill\(db,openBills,'currentStateJson'\)/);
 assert.match(v419,/jsonColumnByBill\(db,strictPodBills,'evidenceJson'\)/);
+assert.match(v419,/phase:'hydrateLedgerTruth'/,'V479 must use a dedicated post-sourceRows ledger phase');
 assert.match(v225,/applyV419CanonicalExportLedgerTruth\(businessType,rows,\{db:getDb\(\),onProgress\}\)/,'V225 must forward child progress into V479 ledger hydration');
+assert.match(v84,/if\(phase==='hydrateledgertruth'\)return 0\.58\+0\.12\*ratio/,'V84 must keep ledger hydration progress monotonic after sourceRows');
+assert.match(v84,/正在按 shipmentCode 主键读取V246账本/,'V84 must expose exact V246 ledger progress instead of a generic 7% stall');
 assert.equal(V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,'2026-09-03-v419-canonical-export-ledger-truth-v2','canonical business truth id must remain stable');
 assert.equal(V479_CANONICAL_LEDGER_READ_ID,'2026-09-08-v479-primary-key-scalar-ledger-hydration-v1');
 
@@ -61,8 +65,9 @@ try{
   assert.ok(sqlLog.some(sql=>/SELECT shipmentCode,currentStateJson AS jsonValue/.test(sql)),'OPEN CE rows must hydrate currentStateJson separately');
   assert.ok(!sqlLog.some(sql=>/SELECT shipmentCode,evidenceJson AS jsonValue/.test(sql)),'CE export must not read strict evidenceJson');
   assert.ok(progress.length>=2,'V479 must emit bounded ledger progress');
-  assert.equal(progress.at(-1).phase,'hydrateCurrentTruth');assert.equal(progress.at(-1).completed,2);assert.equal(progress.at(-1).total,2);
+  assert.ok(progress.every(item=>item.phase==='hydrateLedgerTruth'),'V479 ledger progress must stay in its dedicated phase');
+  assert.equal(progress.at(-1).completed,2);assert.equal(progress.at(-1).total,2);
   const diag=rows.v419CanonicalExportDiagnostics;assert.equal(diag.primaryKeyOnly,true);assert.equal(diag.openJsonRows,1);assert.equal(diag.strictEvidenceRows,0);
 }finally{db.close();}
 
-console.log('[V479] canonical V246 export ledger smoke passed · shipmentCode PK SEARCH · scalar terminal reads · OPEN-only currentStateJson · strict-only evidenceJson · progress preserved');
+console.log('[V479] canonical V246 export ledger smoke passed · shipmentCode PK SEARCH · scalar terminal reads · OPEN-only currentStateJson · strict-only evidenceJson · monotonic V246 progress preserved');
