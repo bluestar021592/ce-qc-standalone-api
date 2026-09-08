@@ -45,7 +45,9 @@ test('V142 preflights the existing V84 async prepare route before a background e
 test('V141 and V142 are wired into bootstrap and import-page UI',()=>{
   const boot=read('bootstrap.js');const ui=read('src/v44WhppUiPatch.js');
   assert.match(boot,/v141WhppDailyRetryIsolationPatch/);assert.match(boot,/v142SevenBusinessExportPatch/);assert.match(boot,/v142AsyncExportPreflightPatch/);
-  assert.match(ui,/v141-whpp-retry-isolation-ui\.js/);assert.match(ui,/v142-history-integrity-audit\.js/);
+  assert.match(ui,/v141-whpp-retry-isolation-ui\.js/);
+  assert.match(ui,/v142-history-integrity-audit\.js\?v=20260908-v457-1/,'V457 history audit UI must be cache-busted by the shell loader');
+  assert.doesNotMatch(ui,/v142-history-integrity-audit\.js\?v=20260902-v419-priority-1/,'retired V419 cache key must never keep the V456 history UI pinned in browsers');
 });
 
 test('legacy five-business direct period exporter is no longer the registered GET route authority',()=>{
