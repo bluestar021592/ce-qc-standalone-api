@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import { inspectV464WhppOfflineRecovery, repairV464WhppOfflineHistory } from '../src/v464WhppOfflineHistoryRecoveryPatch.js';
+
+process.env.NODE_ENV='test';
+const { inspectV464WhppOfflineRecovery, repairV464WhppOfflineHistory }=await import('../src/v464WhppOfflineHistoryRecoveryPatch.js');
 
 for(const file of ['src/v464WhppOfflineHistoryRecoveryPatch.js','public/v464-whpp-offline-history-recovery.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const backend=fs.readFileSync('src/v464WhppOfflineHistoryRecoveryPatch.js','utf8');
@@ -11,6 +13,7 @@ const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const v462=fs.readFileSync('src/v462WhppSurvivorFastPatch.js','utf8');
 
 assert.match(backend,/2026-09-08-v464-proof-gated-member-locked-whpp-offline-history-recovery-v1/);
+assert.match(backend,/2026-09-08-v464-auth-explicit-one-click-offline-recovery-v2-same-origin-operator/);
 assert.match(backend,/stateMembershipExact/);
 assert.match(backend,/stateDailyFinalCoverageExact/);
 assert.match(backend,/stateWorksetExact/);
@@ -21,6 +24,9 @@ assert.match(backend,/BEGIN IMMEDIATE/);
 assert.match(backend,/V464_POST_WRITE_VERIFY_FAILED/);
 assert.match(backend,/x-ce-qc-history-recovery/);
 assert.match(backend,/V464_OFFLINE_RECOVERY/);
+assert.match(backend,/requireRole, sameOriginWriteGuard/,'V464 must reuse canonical write safety middleware');
+assert.match(backend,/const requireOperator=requireRole\('OPERATOR'\)/,'V464 repair POST must require OPERATOR or ADMIN');
+assert.match(backend,/sameOriginWriteGuard\(req,res,\(\)=>requireOperator\(req,res,\(\)=>executePost\(req,res\)\)\)/,'V464 POST must enforce same-origin before operator-gated repair execution');
 assert.match(backend,/if\(req\.path!==ROUTE\)return next\(\)/);
 assert.doesNotMatch(backend,/CEClient|axios|https?:\/\/|trackQuery\(|confirmQuery\(|exceptionQuery\(|\/api\/whpp\/run|\/api\/v246\/tracking\/reconcile/,'V464 must remain offline and must never start business processing');
 assert.doesNotMatch(backend,/UPDATE\s+(?:shipment_current_state|carryover_open_items|qc_tracking_ledger|business_pod_locks|business_track_events|business_scan_results|business_exception_items)/i,'V464 must not rewrite protected current evidence tables');
@@ -122,4 +128,4 @@ assert.equal(stateAfter.snapshotStatus,'COMPLETED');
 const afterProof=inspectV464WhppOfflineRecovery(date,db,archiveJob);
 assert.equal(afterProof.recoveredAlready,true);
 db.close();
-console.log('[V464] proof-gated offline WHPP history recovery smoke passed · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · confirm request+response exact · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
+console.log('[V464] proof-gated offline WHPP history recovery smoke passed · auth sidecar suppressed in test · same-origin+OPERATOR write guard locked · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · confirm request+response exact · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
