@@ -2,8 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { auditSevenBusinessHistory } from './v142SevenBusinessHistoryAudit.js';
 import { closeDb } from './db.js';
+import { writeJsonAtomicSync } from './exportJobAtomicJson.js';
 
-const VERSION='2026-09-08-v473-all-export-worker-preflight-v1';
+const VERSION='2026-09-08-v478-all-export-worker-windows-safe-job-json-v1';
+// Compatibility signature: 2026-09-08-v473-all-export-worker-preflight-v1
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
 
@@ -11,9 +13,7 @@ function readJob(){return JSON.parse(fs.readFileSync(jobFile,'utf8'));}
 function writeJob(patch={}){
   const current=readJob();
   const next={...current,...patch,updatedAt:new Date().toISOString(),v473WorkerVersion:VERSION};
-  const temp=`${jobFile}.${process.pid}.v473.tmp`;
-  fs.writeFileSync(temp,JSON.stringify(next,null,2),'utf8');
-  fs.renameSync(temp,jobFile);
+  writeJsonAtomicSync(jobFile,next);
   return next;
 }
 function dateKey(value=''){const text=String(value||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(text)?text:'';}
