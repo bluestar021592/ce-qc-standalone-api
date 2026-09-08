@@ -108,10 +108,12 @@ test('V419 heavy history audit is manual-only and cannot overwrite primary OPEN'
   assert.match(audit,/v419-manual-only-history-audit-no-open-mutation-v4/);
   assert.match(audit,/2026-09-07-v451-snapshot-indexed-history-audit-ui-v1/);
   assert.match(audit,/2026-09-08-v457-whpp-legacy-completion-attestation-ui-v1/);
+  assert.match(audit,/2026-09-08-v460-whpp-history-snapshot-disambiguation-ui-v1/);
   assert.match(audit,/automatic:false/);
   assert.match(audit,/不会自动触发本检查/);
   assert.match(audit,/manual audit uses snapshot-indexed readonly reads/);
   assert.match(audit,/provable legacy WHPP completion attestation/);
+  assert.match(audit,/exact history snapshot disambiguation/);
   assert.match(audit,/never mutates primary business data/);
   assert.match(audit,/历史审计不会回写或覆盖主页面OPEN数字/);
   assert.match(audit,/立即重新检查/);
@@ -119,7 +121,8 @@ test('V419 heavy history audit is manual-only and cannot overwrite primary OPEN'
   assert.doesNotMatch(audit,/function syncOpenSummary\(/);
   assert.doesNotMatch(audit,/requestIdleCallback/);
   assert.doesNotMatch(audit,/ce-qc-run-complete[^\n]*load/);
-  assert.match(loader,/v142-history-integrity-audit\.js\?v=20260908-v457-1/);
+  assert.match(loader,/v142-history-integrity-audit\.js\?v=20260908-v460-1/);
+  assert.doesNotMatch(loader,/v142-history-integrity-audit\.js\?v=20260908-v457-1/);
   assert.doesNotMatch(loader,/v142-history-integrity-audit\.js\?v=20260902-v419-priority-1/);
 });
 
