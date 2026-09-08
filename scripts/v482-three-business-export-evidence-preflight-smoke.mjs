@@ -6,7 +6,7 @@ for(const file of ['src/v381ExportEvidenceRepair.js','src/v200TemplateDashboardE
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
-const repair=fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8');
+const repair=fs.readFileFileSync?fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8'):'';
 const exporter=fs.readFileSync('src/v200TemplateDashboardExporter.js','utf8');
 const allWorker=fs.readFileSync('src/v84ExportBusinessWorker.js','utf8');
 const singleWorker=fs.readFileSync('src/v183SingleBusinessExportJobWorker.js','utf8');
@@ -24,7 +24,7 @@ assert.match(repair,/applyV246StrictAttemptEvidence/,'repaired strict truth must
 assert.match(repair,/export async function prepareV381ShopeeExportEvidence[\s\S]*return prepareV482StrictExportEvidence\(options\)/,'legacy V381 caller must delegate to the V482 owner');
 
 const firstCandidate=repair.indexOf('let todo=listV381ExportEvidenceCandidates');
-const savedBackfill=repair.indexOf('backfillV294StrictAttemptsFromSavedEvidence');
+const savedBackfill=repair.indexOf('backfillV294StrictAttemptsFromSavedEvidence({',firstCandidate);
 assert.ok(firstCandidate>0&&savedBackfill>firstCandidate,'V482 must candidate-check before historical saved-evidence backfill');
 const firstReturn=repair.indexOf("if(!todo.length)return{ok:true,version:V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID",firstCandidate);
 assert.ok(firstReturn>firstCandidate&&firstReturn<savedBackfill,'already-complete strict evidence must short-circuit before a second historical backfill');
