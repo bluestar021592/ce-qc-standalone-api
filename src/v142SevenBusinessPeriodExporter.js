@@ -10,6 +10,7 @@ import { fileHash, recordExport } from './backup.js';
 import { auditSevenBusinessHistory } from './v142SevenBusinessHistoryAudit.js';
 
 export const V142_SEVEN_EXPORT_ID='2026-08-16-v142-seven-business-strict-period-export-v1';
+export const V457_AUDITED_WHPP_EXPORT_ID='2026-09-08-v457-direct-export-consumes-audited-whpp-authority-v1';
 const CORE_TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
 const ALL_TYPES=[...CORE_TYPES,'WHPP'];
 function safeJson(v,f={}){try{return v&&typeof v==='object'?v:(JSON.parse(String(v||''))||f);}catch{return f;}}
@@ -33,14 +34,17 @@ function loadWhppRows(reportDate){
   const finalMap=new Map(finals.map(row=>[String(row.shipmentCode||'').toUpperCase(),row]));
   return sources.map(source=>{const code=String(source.shipmentCode||'').toUpperCase();const s=safeJson(source.rowJson,{});const f=finalMap.get(code)||{};const raw=safeJson(f.rawJson,{});const pod=Number(f.isPod||0)===1||raw.是否POD==='是'||String(raw.currentState||'').toUpperCase()==='POD';return {...s,...raw,shipmentCode:code,运单号:code,businessType:'WHPP',reportDate,isPod:pod?1:0,是否POD:pod?'是':'否',primaryCategory:f.primaryCategory||raw.primaryCategory||raw.主分类||'',API状态:f.apiStatus||raw.API状态||raw.查询状态||'',apiStatus:f.apiStatus||raw.apiStatus||'',carry状态:f.carryStatus||raw.carry状态||'',latestEventTime:f.latestEventTime||raw.latestEventTime||'',latestEventDesc:f.latestEventDesc||raw.latestEventDesc||raw.最后节点||'',latestNode:f.latestNode||raw.latestNode||''};});
 }
-function buildSnapshots(range){
-  const db=getDb();const snapshots=[];
+function buildSnapshots(range,audit){
+  const db=getDb(),snapshots=[],auditByDate=new Map((audit?.days||[]).map(day=>[String(day.reportDate||''),day]));
   for(const reportDate of dateList(range.from,range.to)){
-    const batch=latestBatch(db,reportDate);if(!batch||String(batch.snapshotStatus)!=='COMPLETED')throw new Error(`${reportDate} 当日统一快照未完成，已阻止静默缺日导出。`);
+    const dayAudit=auditByDate.get(reportDate)||null;
+    if(!dayAudit||dayAudit.status!=='OK')throw new Error(`${reportDate} 七业务安全审计未通过，已阻止静默缺日导出。`);
+    const batch=latestBatch(db,reportDate);if(!batch)throw new Error(`${reportDate} 当日有效统一导入不存在，已阻止静默缺日导出。`);
     const rows=[];for(const type of CORE_TYPES){const state=loadLightweightUnifiedBusinessState(type,batch.snapshotId,{includeHistory:false});rows.push(...(state.finalRows||[]).map(row=>({...row,businessType:type,reportDate:row.reportDate||reportDate})));}
     const whppRows=loadWhppRows(reportDate);rows.push(...whppRows);
-    const whppSnapshot= db.prepare("SELECT snapshotId FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY createdAt DESC,id DESC LIMIT 1").get(reportDate);
-    snapshots.push({snapshotId:`${batch.snapshotId}|WHPP:${whppSnapshot?.snapshotId||'NONE'}`,reportDate,createdAt:batch.createdAt,payload:{finalRows:rows}});
+    const whppSnapshotId=String(dayAudit.whpp?.snapshotId||'').trim()||(Number(dayAudit.whpp?.reported||0)===0?'ZERO_TICKET':'NONE');
+    if(Number(dayAudit.whpp?.reported||0)>0&&whppSnapshotId==='NONE')throw new Error(`${reportDate} WHPP已通过前置审计但缺少审计锁定快照，已停止导出。`);
+    snapshots.push({snapshotId:`${batch.snapshotId}|WHPP:${whppSnapshotId}`,reportDate,createdAt:batch.createdAt,payload:{finalRows:rows},v457AuditedWhppSnapshotId:whppSnapshotId,v457AuditAuthority:dayAudit.whpp?.authorityReason||''});
   }
   return snapshots;
 }
@@ -64,7 +68,7 @@ export async function exportSevenBusinessPeriodReports(args={}){
   const periodType=args.periodType||'daily';const range=rangeOf(args);if(range.days>180)throw new Error('单次日期范围最多180天。');const selected=normalizeType(args.businessType||'ALL');
   const audit=auditSevenBusinessHistory({fromDate:range.from,toDate:range.to});
   if(!audit.exportReady){const missing=audit.missingDates.join(',');const incomplete=audit.incompleteDates.slice(0,8).map(x=>`${x.reportDate}:${x.issues.join('+')}`).join('；');throw new Error(`历史完整性校验未通过，已阻止缺数据导出。${missing?` 缺少日期：${missing}。`:''}${incomplete?` 待修复：${incomplete}。`:''}`);}
-  const snapshots=buildSnapshots(range);const outputDir=getRuntimeConfig().exportsDir;await fs.mkdir(outputDir,{recursive:true});
+  const snapshots=buildSnapshots(range,audit);const outputDir=getRuntimeConfig().exportsDir;await fs.mkdir(outputDir,{recursive:true});
   const types=selected==='ALL'?ALL_TYPES:[selected];const files=[];
   if(selected==='ALL'){
     let management=(await createShopeeTemplateWorkbook({type:'ALL',periodType,range,snapshots,outputDir})).file;management=await patchSevenWorkbook(management,audit,range);files.push(management);
@@ -73,5 +77,5 @@ export async function exportSevenBusinessPeriodReports(args={}){
   let file=files[0];
   if(selected==='ALL'){file=path.join(outputDir,`CE_QC_${periodType}_${range.key}_七业务_${stamp()}.zip`);await zipFiles(files,file);}
   const ids=snapshots.map(s=>s.snapshotId);for(const f of [...files,...(file&&!files.includes(file)?[file]:[])]){recordExport({reportDate:range.to,exportType:`${periodType}:seven-business`,fileName:path.basename(f),fileHash:fileHash(f),rowCount:snapshots.reduce((n,s)=>n+(s.payload?.finalRows?.length||0),0),summary:{periodType,range,snapshotIds:ids,audit:{expectedDays:audit.expectedDays,totalImported:audit.totalImported,totalRetryPending:audit.totalRetryPending}},consistency:{status:'PASSED',validationStatus:'VALID',reconciliationStatus:audit.totalRetryPending?'COMPLETED_WITH_RETRY':'COMPLETED'}});}
-  return {file,files,range,snapshots:ids,audit};
+  return {file,files,range,snapshots:ids,audit,v457AuditedWhppExportId:V457_AUDITED_WHPP_EXPORT_ID};
 }
