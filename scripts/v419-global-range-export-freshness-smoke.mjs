@@ -77,8 +77,11 @@ for(const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'])as
 
 // 4) Historical membership remains on source day while current persisted truth overlays later carryover closure.
 assert.match(historicalExportSource,/function enrichCurrentTruth/,'historical export must have current-state overlay');
-assert.match(historicalExportSource,/FROM shipment_current_state WHERE UPPER\(TRIM\(shipmentCode\)\) IN/,'current-state overlay must be keyed by shipment identity');
-assert.match(historicalExportSource,/enrichFinals\(db,businessType,map\);enrichCurrentTruth\(db,businessType,map\)/,'latest current truth must overlay finals before export');
+assert.match(historicalExportSource,/FROM shipment_current_state WHERE shipmentCode IN/,'V474 current-state overlay must use bare indexed shipment identity');
+assert.doesNotMatch(historicalExportSource,/FROM shipment_current_state WHERE UPPER\(TRIM\(shipmentCode\)\) IN/,'current-state overlay must never disable the shipmentCode primary-key index');
+assert.match(historicalExportSource,/enrichFinals\(db,businessType,map,onProgress\);\s*enrichCurrentTruth\(db,businessType,map,onProgress\)/,'latest current truth must overlay finals before export while preserving V474 child progress');
+assert.match(historicalExportSource,/phase:'hydrateFinalRows'/,'V474 final-row hydration progress must remain observable');
+assert.match(historicalExportSource,/phase:'hydrateCurrentTruth'/,'V474 current-state hydration progress must remain observable');
 assert.match(historicalExportSource,/CURRENT_STATE_OVERLAY/,'export diagnostics must disclose current-state ownership');
 
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v419-export-'));
@@ -112,4 +115,4 @@ assert.ok(whpp.rows.every(row=>row.是否POD==='是'||row.POD状态==='POD'||Str
 assert.equal(whpp.truthSource,'IMMUTABLE_DAILY_MEMBERSHIP_PLUS_LATEST_SHIPMENT_CURRENT_STATE');
 closeDb();fs.rmSync(temp,{recursive:true,force:true});
 
-console.log('[V419 RANGE+EXPORT+WHPP] PASS one global range across HOME/7 business boards/export · WHPP cards+trends+details share from/to · completion-certified immutable daily WHPP membership preserved with latest carryover POD · DB/WAL truth-aware export reuse');
+console.log('[V475/V419 RANGE+EXPORT+WHPP] PASS one global range across HOME/7 business boards/export · V474 indexed current-state overlay + child progress preserved · WHPP cards+trends+details share from/to · completion-certified immutable daily WHPP membership preserved with latest carryover POD · DB/WAL truth-aware export reuse');
