@@ -1,5 +1,6 @@
 import express from 'express';
 import { getDb } from './db.js';
+import { inspectV461WhppArchiveEvidence, V461_ARCHIVE_EVIDENCE_ID } from './v461WhppArchiveEvidence.js';
 
 export const V461_WHPP_SURVIVOR_DIAGNOSTIC_ID='2026-09-08-v461-whpp-historical-survivor-evidence-v1';
 export const V461_AUTH_ROUTE_ID='2026-09-08-v461-after-access-identity-authenticated-readonly-route-v1';
@@ -14,6 +15,7 @@ function safeJson(value,fallback={}){try{return value&&typeof value==='object'?v
 function n(value){return Number(value||0);}
 function one(db,sql,...params){return db.prepare(sql).get(...params)||{};}
 function rows(db,sql,...params){return db.prepare(sql).all(...params);}
+function memberBillsForDate(db,date){return rows(db,`SELECT DISTINCT UPPER(TRIM(shipmentCode)) shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>'' ORDER BY shipmentCode`,date).map(row=>text(row.shipmentCode)).filter(Boolean);}
 
 export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
   const date=dateOnly(reportDate);
@@ -109,7 +111,7 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
   const ledgerKnown=ledger.terminal+ledger.checkedOpen;
   const survivorCoverageCandidate=members>0&&readErrors.length===0&&ledger.rows===members&&ledgerKnown===members&&ledger.placeholderOrUnverified===0;
   return{
-    ok:true,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,authRouteVersion:V461_AUTH_ROUTE_ID,indexedJoinVersion:V461_INDEXED_JOIN_ID,reportDate:date,members,
+    ok:true,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,authRouteVersion:V461_AUTH_ROUTE_ID,indexedJoinVersion:V461_INDEXED_JOIN_ID,archiveEvidenceVersion:V461_ARCHIVE_EVIDENCE_ID,reportDate:date,members,
     current:{...current,known:currentKnown},carry,ledger:{...ledger,known:ledgerKnown},podLocks,runLocks,checkpoints,persistedState,
     survivorCoverageCandidate,requiresArchiveProof:!survivorCoverageCandidate,readErrors,
     conclusion:survivorCoverageCandidate?'SURVIVOR_LEDGER_FULL_CURRENT_EVIDENCE_CANDIDATE':'SURVIVOR_EVIDENCE_INCOMPLETE_NEEDS_ARCHIVE_PROOF',
@@ -118,10 +120,13 @@ export function inspectV461WhppHistoricalSurvivors(reportDate='',db=getDb()){
   };
 }
 
-function handler(req,res){
+async function handler(req,res){
   if(!req.user)return res.status(401).json({ok:false,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,code:'AUTH_REQUIRED',error:'Authentication required.'});
-  try{return res.json(inspectV461WhppHistoricalSurvivors(req.query?.reportDate||''));}
-  catch(error){return res.status(400).json({ok:false,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,code:error?.code||'V461_DIAGNOSTIC_FAILED',error:error?.message||String(error)});}
+  try{
+    const date=dateOnly(req.query?.reportDate||'');const db=getDb();const survivor=inspectV461WhppHistoricalSurvivors(date,db);const memberBills=memberBillsForDate(db,date);
+    let archive=null;try{archive=await inspectV461WhppArchiveEvidence(date,memberBills);}catch(error){archive={version:V461_ARCHIVE_EVIDENCE_ID,readOnly:true,networkCalls:0,databaseWrites:0,error:error?.message||String(error),archiveDailyEvidenceCandidate:false};}
+    return res.json({...survivor,archive,totalElapsedMs:survivor.elapsedMs+Number(archive?.elapsedMs||0)});
+  }catch(error){return res.status(400).json({ok:false,readOnly:true,version:V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,code:error?.code||'V461_DIAGNOSTIC_FAILED',error:error?.message||String(error)});}
 }
 
 const previousUse=express.application.use;
@@ -132,7 +137,7 @@ if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
     const result=previousUse.apply(this,args);
     if(!installed&&candidates.some(fn=>fn.name==='accessIdentity')){
       installed=true;
-      previousUse.call(this,(req,res,next)=>{if(req.method==='GET'&&req.path===ROUTE)return handler(req,res);return next();});
+      previousUse.call(this,(req,res,next)=>{if(req.method==='GET'&&req.path===ROUTE)return void handler(req,res);return next();});
     }
     return result;
   };
@@ -140,4 +145,4 @@ if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
   express.application.use=wrapped;
 }
 
-console.info('[CE-QC][V461_WHPP_SURVIVOR_DIAGNOSTIC]',V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,V461_AUTH_ROUTE_ID,V461_INDEXED_JOIN_ID,'authenticated read-only exact-member survivor evidence census installed after accessIdentity; large-table join columns remain bare/indexable; no scan/track/API call and no database mutation.');
+console.info('[CE-QC][V461_WHPP_SURVIVOR_DIAGNOSTIC]',V461_WHPP_SURVIVOR_DIAGNOSTIC_ID,V461_AUTH_ROUTE_ID,V461_INDEXED_JOIN_ID,V461_ARCHIVE_EVIDENCE_ID,'authenticated read-only exact-member survivor + bounded V266 archive census installed after accessIdentity; large-table join columns remain bare/indexable; no CE network call and no database mutation.');
