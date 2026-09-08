@@ -1,6 +1,8 @@
 import ExcelJS from 'exceljs';
 import { ratio, anchor, completeAttemptRatio, completeSigningAverage } from './v200Metrics.js';
 
+export const V481_VERIFIED_METRIC_SCOPE_ID='2026-09-08-v481-business-scoped-verified-export-metrics-v1';
+const STRICT_VERIFIED_METRIC_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const FONT = 'Microsoft YaHei';
 const DETAIL_SHEETS = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
 const DETAIL_HEADERS = ['日期', '运单编号', '下单时间', '状态标识', '状态说明', '收件省份', '区域分类', '当前门店', '当前省份', '收件人', '收件人手机', '收件地址', '派件时间', '派件门店', '派件省份', '派件快递员', '异常编码', '异常描述', '备注'];
@@ -46,6 +48,7 @@ function writeCard(sheet, pairIndex, label, value, percent, target, fill) {
   link.value = internalFormula(target, 1, '点击查看明细');
   applyCardCell(title, fill, { title: true }); applyCardCell(valueCell, fill, { value: true }); applyCardCell(pct, fill, { percent: true }); applyCardCell(link, fill, { link: true });
 }
+function publishVerifiedMetric(value){return value===null||value===undefined||!Number.isFinite(Number(value))?'—':Number(value);}
 function createDashboard(workbook, type, range, stats, anchors) {
   const sheet = workbook.addWorksheet('每日看板', { views: [{ state: 'frozen', ySplit: 10, xSplit: 1 }] });
   const widths = [13, 10, 10, 10, 10, 3, 13, 10, 11, 10, 10, 11, 11, 11, 11, 11];
@@ -88,6 +91,7 @@ function createDashboard(workbook, type, range, stats, anchors) {
   const metricHeaderRow = sectionRow + 1;
   ['日期','1派POD','1派占POD','2派POD','2派占POD','3派+POD','3派+占POD','总平均签收','金边1派','金边2派','金边3派+','金边平均签收','外省1派','外省2派','外省3派+','外省平均签收'].forEach((v, i) => sheet.getCell(metricHeaderRow, i + 1).value = v);
   styleSubHeader(sheet.getRow(metricHeaderRow));
+  const strictVerified=STRICT_VERIFIED_METRIC_TYPES.has(String(type||'').toUpperCase());
   const metricRows = [o, ...stats.daily]; let mr = metricHeaderRow + 1;
   for (let index = 0; index < metricRows.length; index++) {
     const d = metricRows[index];
@@ -95,10 +99,11 @@ function createDashboard(workbook, type, range, stats, anchors) {
     const totalAverage = d.pod ? completeSigningAverage(d.days, d.pod) : 0;
     const ppAverage = d.ppPod ? completeSigningAverage(d.ppDays, d.ppPod) : 0;
     const pvAverage = d.pvPod ? completeSigningAverage(d.pvDays, d.pvPod) : 0;
-    if ([a1Rate,a2Rate,a3Rate,totalAverage,ppAverage,pvAverage].some(value => value === null || value === undefined || !Number.isFinite(Number(value)))) {
+    const verified=[a1Rate,a2Rate,a3Rate,totalAverage,ppAverage,pvAverage];
+    if (strictVerified && verified.some(value => value === null || value === undefined || !Number.isFinite(Number(value)))) {
       throw new Error(`V200_VERIFIED_METRIC_MISSING:${d.date}`);
     }
-    const values = [index===0?'区间汇总':d.date,d.a1,a1Rate,d.a2,a2Rate,d.a3,a3Rate,totalAverage,d.ppA1,d.ppA2,d.ppA3,ppAverage,d.pvA1,d.pvA2,d.pvA3,pvAverage];
+    const values = [index===0?'区间汇总':d.date,d.a1,publishVerifiedMetric(a1Rate),d.a2,publishVerifiedMetric(a2Rate),d.a3,publishVerifiedMetric(a3Rate),publishVerifiedMetric(totalAverage),d.ppA1,d.ppA2,d.ppA3,publishVerifiedMetric(ppAverage),d.pvA1,d.pvA2,d.pvA3,publishVerifiedMetric(pvAverage)];
     values.forEach((value, i) => { const c = sheet.getCell(mr, i + 1); c.value = value; styleDashboardDataCell(c, false, [3,5,7].includes(i+1)); });
     for (const col of [3,5,7]) sheet.getCell(mr,col).numFmt='0.00%';
     for (const col of [8,12,16]) sheet.getCell(mr,col).numFmt='0.00';
@@ -106,7 +111,7 @@ function createDashboard(workbook, type, range, stats, anchors) {
     mr++;
   }
   const noteRow = mr + 1; sheet.mergeCells(noteRow, 1, noteRow, 16);
-  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在整票没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派。平均签收天数：真实首次派送START日期→真实POD日期，包含首尾自然日；SHOPEE CN/VN的总平均与PP/PV平均使用完全相同的真实样本。导出前必须完成POD日期、派次、区域及签收天数对账，缺少真实证据时整份报表拒绝生成，不以空白、横线或默认1替代。`;
+  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在整票没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派。TBKH、SHOPEE CN/VN属于严格派次/签收证据业务：POD派次或真实START→POD签收样本不完整时拒绝生成。CE、CEAF、ALI1688、WHPP保留已证实票数；无法完整验证的派次占比或平均签收显示“—”，绝不伪造0%、默认1派或默认天数。`;
   sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=42;
   sheet.commit();
 }
@@ -129,3 +134,4 @@ export async function writeV200ReferenceWorkbook({file,type,range,rows,stats,buc
   await workbook.commit();
 }
 export function internalHyperlinkFormulaForV200(sheet,row,display){return internalFormula(sheet,row,display).formula;}
+console.info('[CE-QC][V481_VERIFIED_METRIC_SCOPE]',V481_VERIFIED_METRIC_SCOPE_ID,'strict=TBKH+SHOPEECN+SHOPEEVN; CE/CEAF/ALI1688/WHPP publish dash for unverified attempt/signing metrics without fabricating zero or blocking the whole workbook.');
