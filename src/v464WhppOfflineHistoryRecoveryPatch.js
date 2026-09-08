@@ -1,4 +1,3 @@
-import express from 'express';
 import crypto from 'node:crypto';
 import { getDb, nowIso } from './db.js';
 import { buildWhppDashboard } from './whppReporting.js';
@@ -9,9 +8,8 @@ import { isSpecialCategory } from './specialNode.js';
 import { auditAction, requireRole, sameOriginWriteGuard } from './accessControl.js';
 
 export const V464_WHPP_OFFLINE_RECOVERY_ID='2026-09-08-v464-proof-gated-member-locked-whpp-offline-history-recovery-v1';
-export const V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID='2026-09-08-v464-auth-explicit-one-click-offline-recovery-v3-same-origin-operator-audit';
-const ROUTE='/api/v464/whpp-history-offline-recovery';
-const WRAPPED=Symbol.for('ce-qc.v464-whpp-offline-history-recovery');
+export const V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID='2026-09-08-v468-v462-lazy-exact-route-dispatch-v1';
+export const V464_WHPP_OFFLINE_RECOVERY_ROUTE='/api/v464/whpp-history-offline-recovery';
 const CONFIRMATION='V464_OFFLINE_RECOVERY';
 const HEADER='x-ce-qc-history-recovery';
 const requireOperator=requireRole('OPERATOR');
@@ -171,21 +169,12 @@ function postHandler(req,res){
   return sameOriginWriteGuard(req,res,()=>requireOperator(req,res,()=>executePost(req,res)));
 }
 
-const previousUse=express.application.use;let installed=false;
-if(typeof previousUse==='function'&&!previousUse[WRAPPED]){
-  const wrapped=function v464WhppOfflineRecoveryUse(...args){
-    const candidates=args.flat().filter(value=>typeof value==='function'),result=previousUse.apply(this,args);
-    if(!installed&&candidates.some(fn=>fn.name==='accessIdentity')){
-      installed=true;previousUse.call(this,(req,res,next)=>{
-        if(req.path!==ROUTE)return next();
-        if(req.method==='GET')return getHandler(req,res);
-        if(req.method==='POST')return postHandler(req,res);
-        return next();
-      });
-    }
-    return result;
-  };
-  Object.defineProperty(wrapped,WRAPPED,{value:true});express.application.use=wrapped;
+export function handleV464WhppOfflineRecoveryRequest(req,res,next){
+  if(req.path!==V464_WHPP_OFFLINE_RECOVERY_ROUTE)return false;
+  if(req.method==='GET'){getHandler(req,res);return true;}
+  if(req.method==='POST'){postHandler(req,res);return true;}
+  if(typeof next==='function')next();
+  return true;
 }
 
-console.info('[CE-QC][V464_WHPP_OFFLINE_RECOVERY]',V464_WHPP_OFFLINE_RECOVERY_ID,V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID,'explicit authenticated + same-origin + OPERATOR proof-gated offline history repair; exact daily membership + persisted state workset + V246/current/carry + V266 confirm must close; retry truth is preserved, repair is audited, protected current facts stay unchanged and CE is never called.');
+console.info('[CE-QC][V464_WHPP_OFFLINE_RECOVERY]',V464_WHPP_OFFLINE_RECOVERY_ID,V464_WHPP_OFFLINE_RECOVERY_ROUTE_ID,'inert proof/repair module; no Express prototype mutation. Exact V464 route is dispatched lazily by the already-authenticated V462 middleware only. POST remains same-origin + OPERATOR guarded, audited, member-locked, transactional and fully offline.');
