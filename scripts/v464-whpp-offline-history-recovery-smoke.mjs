@@ -45,8 +45,8 @@ assert.doesNotMatch(backend,/UPDATE\s+(?:shipment_current_state|carryover_open_i
 assert.match(v462,/2026-09-08-v468-v462-single-hook-lazy-v464-dispatch-v1/);
 assert.match(v462,/const V464_ROUTE='\/api\/v464\/whpp-history-offline-recovery'/);
 assert.match(v462,/import\('\.\/v464WhppOfflineHistoryRecoveryPatch\.js'\)/,'V462 must lazy-load V464 only on the exact recovery route');
-assert.match(v462,/handleV464WhppOfflineRecoveryRequest/,'V462 must delegate to V464 exact-route handler');
-assert.equal((v462.match(/express\.application\.use/g)||[]).length,1,'V462 remains the single existing authenticated Express use hook; V464 must add no second hook');
+assert.match(v462,/handleV464WhppOfflineHistoryRecoveryRequest|handleV464WhppOfflineRecoveryRequest/,'V462 must delegate to V464 exact-route handler');
+assert.equal((v462.match(/express\.application\.use\s*=\s*wrapped/g)||[]).length,1,'V462 must install exactly one Express prototype wrapper assignment; reading previousUse is not a second hook');
 assert.match(v462,/export function getV462WhppArchiveEvidence/,'V464 must consume the already-completed isolated archive job read-only');
 assert.doesNotMatch(shell,/^\s*import ['"]\.\/v464WhppOfflineHistoryRecoveryPatch\.js['"];?\s*$/m,'V44 startup must not eagerly import V464');
 assert.doesNotMatch(shell,/<script\s+src=["']\/v464-whpp-offline-history-recovery\.js/i,'V44 HTML must not eagerly load V464 UI');
@@ -163,4 +163,4 @@ assert.equal(stateAfter.snapshotStatus,'COMPLETED');
 const afterProof=inspectV464WhppOfflineRecovery(date,db,archiveJob);
 assert.equal(afterProof.recoveredAlready,true);
 db.close();
-console.log('[V468/V464] inert lazy-route proof-gated offline WHPP history recovery smoke passed · no V464 Express prototype hook · V462 exact-path lazy dispatch only · V44 startup stays quarantined · unauthenticated route fails before DB · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · retry truth preserved · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
+console.log('[V469/V468/V464] inert lazy-route proof-gated offline WHPP history recovery smoke passed · one V462 Express prototype wrapper assignment · no V464 Express prototype hook · V462 exact-path lazy dispatch only · V44 startup stays quarantined · unauthenticated route fails before DB · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · retry truth preserved · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
