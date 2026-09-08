@@ -11,7 +11,7 @@
     "start:production": "set NODE_ENV=production&& node bootstrap.js",
     "test": "node --test --test-reporter=tap --test-skip-pattern=\"desktop root start no longer|due-only endpoint cannot refresh|internal refresh bypass is restricted\" test/*.test.js",
     "test:full": "npm test",
-    "test:golive": "node scripts/v471-history-audit-abort-normalizer-smoke.mjs && node scripts/v473-all-export-sidecar-smoke.mjs && node scripts/golive-runner.cjs"
+    "test:golive": "node scripts/v471-history-audit-abort-normalizer-smoke.mjs && node scripts/v473-all-export-sidecar-smoke.mjs && node scripts/v474-export-indexed-hydration-smoke.mjs && node scripts/golive-runner.cjs"
   },
   "dependencies": {
     "axios": "^1.7.9",
