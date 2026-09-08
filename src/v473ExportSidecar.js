@@ -9,8 +9,8 @@ import { accessIdentity, requireRole } from './accessControl.js';
 import { closeDb, getRuntimeConfig } from './db.js';
 import { writeJsonAtomic } from './exportJobAtomicJson.js';
 
-const VERSION='2026-09-08-v478-windows-safe-export-sidecar-v1';
-// Compatibility signature: 2026-09-08-v473-all-business-isolated-export-sidecar-v1
+const VERSION='2026-09-08-v473-all-business-isolated-export-sidecar-v1';
+// V478 Windows I/O safety is delegated to exportJobAtomicJson.js; V473 remains transport owner.
 const PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_EXPORT_SIDECAR_PORT||5178)));
 const HOST=String(process.env.CE_QC_EXPORT_SIDECAR_HOST||'0.0.0.0');
 const SINGLE_JOB_HEAP_MB=Math.max(384,Math.min(1024,Number(process.env.EXPORT_SINGLE_JOB_HEAP_MB||768)));
