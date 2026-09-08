@@ -48,8 +48,9 @@ export async function collectV200Rows(type,range,onProgress=()=>{}){
   applyV329FirstReportSigning(businessType,rows);
   // V419 is intentionally last: old snapshots/final rows/track counters may enrich
   // addresses and evidence, but they can never overwrite canonical terminal truth
-  // or a persisted V246 attempt after this point.
-  applyV419CanonicalExportLedgerTruth(businessType,rows,{db:getDb()});
+  // or a persisted V246 attempt after this point. V479 keeps this final authority
+  // but hydrates it by shipmentCode primary key and reports bounded progress.
+  applyV419CanonicalExportLedgerTruth(businessType,rows,{db:getDb(),onProgress});
   normalizeTerminalExclusion(rows);
   const diag=evidenceDiagnostics(businessType,rows);
   for(const row of rows){row.exportEvidencePartial=diag.partial;row.exportAttemptMissing=diag.attemptMissing;row.exportSigningMissing=diag.signingMissing;row.v320ExportTruthId=V225_EXPORT_RETURN_TRUTH_ID;row.v419CanonicalExportTruthId=row.v419CanonicalExportTruthId||V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID;}
