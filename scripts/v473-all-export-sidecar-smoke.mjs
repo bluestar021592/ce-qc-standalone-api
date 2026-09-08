@@ -32,19 +32,25 @@ const auditAt=worker.indexOf('auditSevenBusinessHistory');
 const legacyWorkerAt=worker.indexOf("await import('./v84ExportJobWorker.js')");
 assert.ok(auditAt>=0&&legacyWorkerAt>auditAt,'V473 ALL worker must pass history audit before workbook generation begins');
 
+assert.match(ui,/2026-09-08-v473-all-export-sidecar-ui-v2/);
 assert.match(ui,/http:\/\/\$\{location\.hostname\}:5178/);
 assert.match(ui,/\/api\/v473\/export-ping/);
 assert.match(ui,/\/api\/v473\/export-period\/prepare/);
 assert.match(ui,/V473导出创建接口/);
 assert.doesNotMatch(ui,/\/api\/export-period\/prepare/,'V473 UI must never create export jobs on 5177');
 assert.match(ui,/dataset\.ceQcExportOwner='v193'/,'V473 button must remain compatible with the earlier V193 DOM guard');
+assert.match(ui,/error\.jobTerminal=true/,'terminal worker failures must surface immediately instead of entering network-retry loop');
+assert.match(ui,/global\.exportPeriodReport=exportCompat/,'legacy exportPeriodReport callers must hand off to V473');
+assert.match(ui,/global\.resumeActiveExportJob=resume/,'legacy resume callers must hand off to V473');
+assert.match(ui,/exportProgressV194/,'V473 must recover an existing V194 progress DOM when present');
 
 assert.match(boot,/\.\/src\/v193ExportSidecar\.js/,'historical bootstrap filename stays stable');
 assert.match(shim,/import '\.\/v473ExportSidecar\.js'/,'legacy sidecar entry must start only V473 authority');
 assert.doesNotMatch(shim,/app\.listen|express from/,'legacy sidecar entry must not start a second server');
-assert.match(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-1/,'existing token UI slot must hand ownership to cache-busted V473 UI');
+assert.match(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-2/,'existing token UI slot must hand ownership to final cache-busted V473 UI');
+assert.doesNotMatch(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-1/,'retired V473 UI cache key must not remain active');
 const v84At=shell.indexOf('v84-async-export-ui.js?v=20260818-v193-1');
 const tokenAt=shell.indexOf('v194-export-token-ui.js?v=20260818-v195-1');
 assert.ok(v84At>=0&&tokenAt>v84At,'V473 loader slot must remain after V84 compatibility UI so its cloned button becomes authoritative');
 
-console.log('[V473] isolated ALL+single export sidecar smoke passed · 5178 owns job creation · ALL history preflight runs fail-closed in isolated worker before Excel · 5177 range reads cannot block export ACK');
+console.log('[V473] isolated ALL+single export sidecar smoke passed · 5178 owns job creation · ALL history preflight runs fail-closed in isolated worker before Excel · terminal failures surface · legacy export globals preserved · 5177 range reads cannot block export ACK');
