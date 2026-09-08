@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { classifyV246Terminal, v246InclusiveDays } from '../src/v246TrackingLedgerCore.js';
 import { analyzeV246ShopeeAttemptCycle, findV246PodDate, v246PositivePodText } from '../src/shopeeAttemptCycleV246.js';
-import { whppCompletionAuthorityDecision } from '../src/v142SevenBusinessHistoryAudit.js';
+import { whppCompletionAuthorityDecision, whppLegacyCompletionRecoveryDecision } from '../src/v142SevenBusinessHistoryAudit.js';
 
 const terminal = stateJson => classifyV246Terminal({ stateJson });
 
@@ -93,6 +93,36 @@ whppAuthority=whppCompletionAuthorityDecision({
 assert.equal(whppAuthority.eligible,true);
 assert.equal(whppAuthority.reason,'WHPP_VALID_COMPLETED_SNAPSHOT');
 
+// V457: legacy completion recovery is not a count shortcut. It requires absent
+// completion metadata + exact member coverage + one surviving snapshot + exact
+// history-summary snapshot attestation. Explicit incomplete metadata never recovers.
+let legacy=whppLegacyCompletionRecoveryDecision({
+  reportPresent:true,reported:190,summary:{batchId:'B',snapshotId:'UNIFIED',total:190},dailyRows:190,coveredDailyRows:190,
+  snapshotRows:[{snapshotId:'WHPP-OLD',status:'',reconciliationStatus:''}],historySnapshotId:'WHPP-OLD'
+});
+assert.equal(legacy.eligible,true);
+assert.equal(legacy.reason,'WHPP_LEGACY_COMPLETION_METADATA_LOST_ATTESTED');
+legacy=whppLegacyCompletionRecoveryDecision({
+  reportPresent:true,reported:190,summary:{completed:false,snapshotStatus:'PROCESSING'},dailyRows:190,coveredDailyRows:190,
+  snapshotRows:[{snapshotId:'WHPP-OLD',status:'VALID',reconciliationStatus:'COMPLETED'}],historySnapshotId:'WHPP-OLD'
+});
+assert.equal(legacy.eligible,false,'explicit incomplete metadata must never use legacy recovery');
+legacy=whppLegacyCompletionRecoveryDecision({
+  reportPresent:true,reported:190,summary:{batchId:'B',total:190},dailyRows:190,coveredDailyRows:189,
+  snapshotRows:[{snapshotId:'WHPP-OLD',status:'VALID',reconciliationStatus:'COMPLETED'}],historySnapshotId:'WHPP-OLD'
+});
+assert.equal(legacy.eligible,false,'one uncovered daily member must keep export blocked');
+legacy=whppLegacyCompletionRecoveryDecision({
+  reportPresent:true,reported:190,summary:{batchId:'B',total:190},dailyRows:190,coveredDailyRows:190,
+  snapshotRows:[{snapshotId:'A',status:'VALID',reconciliationStatus:'COMPLETED'},{snapshotId:'B',status:'VALID',reconciliationStatus:'COMPLETED'}],historySnapshotId:'A'
+});
+assert.equal(legacy.eligible,false,'multiple surviving snapshots are ambiguous');
+legacy=whppLegacyCompletionRecoveryDecision({
+  reportPresent:true,reported:190,summary:{batchId:'B',total:190},dailyRows:190,coveredDailyRows:190,
+  snapshotRows:[{snapshotId:'WHPP-OLD',status:'VALID',reconciliationStatus:'COMPLETED'}],historySnapshotId:'DIFFERENT'
+});
+assert.equal(legacy.eligible,false,'history attestation must point to the exact surviving snapshot');
+
 // V451 owners are part of the already-wired go-live smoke. This locks the
 // 27GB-safe read path so a later patch cannot silently reintroduce range scans.
 for(const file of ['src/v142SevenBusinessHistoryAudit.js','public/v142-history-integrity-audit.js','public/v246-qc-tracking.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
@@ -105,6 +135,7 @@ assert.doesNotMatch(trackingUi,/function mount\([^)]*\)[\s\S]{0,220}tracking\/re
 const historyAudit=fs.readFileSync('src/v142SevenBusinessHistoryAudit.js','utf8');
 assert.match(historyAudit,/2026-09-07-v451-snapshot-indexed-readonly-history-audit-v2-fail-closed/,'V451 indexed history audit marker missing');
 assert.match(historyAudit,/2026-09-08-v456-whpp-finalized-snapshot-authority-diagnostic-v1/,'V456 WHPP authority diagnostic marker missing');
+assert.match(historyAudit,/2026-09-08-v457-whpp-legacy-metadata-loss-attestation-v1/,'V457 legacy completion attestation marker missing');
 assert.match(historyAudit,/scanMode:'V451_SNAPSHOT_INDEXED_READ'/,'history audit must expose snapshot-indexed read mode');
 assert.match(historyAudit,/snapshotId IN \(\$\{marks\}\)/,'large unified history reads must be anchored by selected snapshotId');
 assert.doesNotMatch(historyAudit,/FROM unified_import_rows\s+WHERE reportDate BETWEEN/,'unified_import_rows must never be range-scanned by reportDate');
@@ -114,9 +145,12 @@ assert.match(historyAudit,/heavyDiagnosticCountsSkipped:true/,'V451 must explici
 assert.match(historyAudit,/const exportReady=missing\.length===0&&incomplete\.length===0/,'export readiness must remain fail-closed');
 assert.doesNotMatch(historyAudit,/catch\s*\{\s*return\s*\[\]\s*;?\s*\}/,'SQL read failures must not be swallowed as empty history');
 assert.match(historyAudit,/WHERE businessType='WHPP' AND reportDate BETWEEN \? AND \?/,'WHPP indexed daily history must stay date-bounded');
-assert.match(historyAudit,/SELECT reportDate,snapshotId,status,reconciliationStatus,createdAt,id/,'V456 WHPP authority check must stay metadata-only');
+assert.match(historyAudit,/SELECT reportDate,snapshotId,status,reconciliationStatus,createdAt,id/,'V456/V457 WHPP authority check must stay metadata-only');
 assert.match(historyAudit,/whppCompletionAuthorityDecision/,'V456 must use one explicit fail-closed WHPP authority decision');
-assert.doesNotMatch(historyAudit,/payloadJson\s+FROM business_export_snapshots/,'V456 audit must not hydrate WHPP snapshot payloads');
+assert.match(historyAudit,/whppLegacyCompletionRecoveryDecision/,'V457 must use one explicit fail-closed legacy recovery decision');
+assert.match(historyAudit,/business_history_summary/,'V457 must require persisted history snapshot attestation');
+assert.match(historyAudit,/coveredDailyRows/,'V457 must prove exact daily-member final coverage');
+assert.doesNotMatch(historyAudit,/payloadJson\s+FROM business_export_snapshots/,'history audit must not hydrate WHPP snapshot payloads');
 assert.doesNotMatch(historyAudit,/function whppDay\(/,'old per-day WHPP query loop must remain retired');
 assert.doesNotMatch(historyAudit,/function airMismatch\(/,'old per-day wildcard air-marker scan must remain retired');
 
@@ -130,5 +164,5 @@ assert.match(historyUi,/heavyDiagnosticCountsSkipped===true/,'UI must distinguis
 assert.match(historyUi,/不是0票/,'UI must explicitly prevent skipped diagnostics being misread as zero');
 assert.match(historyUi,/不需要重新跑业务数据/,'timeout guidance must not ask operators to rerun business data');
 
-console.log('[V456/V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + exact WHPP finalized-snapshot authority + fail-closed export safety + no blocking mega-table diagnostics');
+console.log('[V457/V456/V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + exact modern WHPP authority + provable legacy metadata-loss recovery + fail-closed export safety + no blocking mega-table diagnostics');
 execFileSync(process.execPath,['scripts/v252-lifecycle-smoke.mjs'],{stdio:'inherit'});
