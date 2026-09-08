@@ -151,14 +151,22 @@ try{
 
   const auditSource=fs.readFileSync('src/v142SevenBusinessHistoryAudit.js','utf8');
   const auditUi=fs.readFileSync('public/v142-history-integrity-audit.js','utf8');
-  assert.match(auditSource,/sourceReportDate BETWEEN \? AND \?/,'history audit OPEN count must stay bound to selected export source-date range');
-  assert.match(auditSource,/carryOpenScope:'SOURCE_REPORT_DATE_BETWEEN_EXPORT_RANGE'/,'backend must expose the history-card range contract');
-  assert.match(auditSource,/carryOpenFromDate:from,carryOpenToDate:to/,'backend must expose exact selected range boundaries');
-  assert.match(auditUi,/选定导出区间仍OPEN/,'UI must no longer label export-range OPEN as if it were current processing queue');
-  assert.match(auditUi,/它不是当前日报“当前处理队列”/,'UI must explicitly distinguish history export scope from current queue truth');
-  assert.match(auditUi,/当日OPEN \+ 当前日前历史OPEN/,'UI must state the persisted queue baseline formula before V417 closure reconciliation');
+  // V454: V388 still proves the live/current OPEN queue semantics above. Historical
+  // export safety is a separate read-only concern and must not re-scan carryover or
+  // trajectory mega tables on the 27GB production database. The V451 audit instead
+  // proves exact daily/snapshot/final coverage through indexed reads and fails closed.
+  assert.match(auditSource,/V451_INDEXED_AUDIT_ONLY/,'history audit must use the V451 indexed-only evidence mode');
+  assert.match(auditSource,/heavyDiagnosticCountsSkipped:true/,'history audit must explicitly disclose skipped mega-table diagnostics');
+  assert.match(auditSource,/skippedDiagnostics:\['carryover_open_items','final_rows_range_count','scan_results','business_scan_results','business_track_events'\]/,'history audit must enumerate every skipped heavy diagnostic source');
+  assert.match(auditSource,/const exportReady=missing\.length===0&&incomplete\.length===0/,'history export safety must remain fail-closed on required coverage');
+  assert.doesNotMatch(auditSource,/FROM carryover_open_items[\s\S]{0,240}sourceReportDate BETWEEN \? AND \?/i,'history audit must not reintroduce synchronous carryover range scans');
+  assert.doesNotMatch(auditSource,/FROM business_track_events[\s\S]{0,240}reportDate BETWEEN \? AND \?/i,'history audit must not reintroduce synchronous trajectory range scans');
+  assert.match(auditUi,/diagnosticsSkipped=evidence\.heavyDiagnosticCountsSkipped===true/,'history UI must recognize the indexed safety mode');
+  assert.match(auditUi,/未执行统计[^`]*不是0票/,'skipped diagnostics must be shown as unexecuted, never fabricated zero');
+  assert.match(auditUi,/不会被拿来放宽导出安全判断/,'UI must state that skipped diagnostics do not relax export safety');
+  assert.match(auditUi,/不需要重新跑业务数据/,'history audit timeout guidance must not tell operators to rerun business data');
 
-  console.log('[V417/V388] import carryover + archived metadata truth smoke passed · V266 exact-SHA workbook restores real metadata read-only · V161 keeps persisted OPEN as baseline then reconciles only hard terminal closures · processing completion never fabricates business closure · export-range OPEN scope remains explicit');
+  console.log('[V454/V417/V388] import carryover + archived metadata truth smoke passed · V266 exact-SHA workbook restores real metadata read-only · V161 keeps persisted OPEN as baseline then reconciles only hard terminal closures · processing completion never fabricates business closure · V451 history export safety stays indexed/fail-closed without mega-table OPEN scans');
 }finally{
   try{closeDb();}catch{}
   try{fs.rmSync(root,{recursive:true,force:true});}catch{}
