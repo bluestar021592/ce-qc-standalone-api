@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
 import { inspectV461WhppHistoricalSurvivors } from './v461WhppHistoricalSurvivorDiagnosticPatch.js';
 import { V461_ARCHIVE_EVIDENCE_ID } from './v461WhppArchiveEvidence.js';
-import { V462_WHPP_ARCHIVE_WORKER_ID } from './v462WhppArchiveEvidenceWorker.js';
 
 export const V462_WHPP_SURVIVOR_FAST_ID='2026-09-08-v462-fast-sqlite-survivor-isolated-archive-worker-v1';
+export const V462_WHPP_ARCHIVE_WORKER_ID='2026-09-08-v462-isolated-whpp-archive-evidence-worker-v1';
 const SURVIVOR_ROUTE='/api/v462/whpp-history-survivor';
 const ARCHIVE_ROUTE='/api/v462/whpp-history-archive-status';
 const WRAPPED=Symbol.for('ce-qc.v462-whpp-survivor-fast');
