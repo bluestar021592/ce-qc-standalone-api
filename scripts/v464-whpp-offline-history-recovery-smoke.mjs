@@ -13,7 +13,7 @@ const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const v462=fs.readFileSync('src/v462WhppSurvivorFastPatch.js','utf8');
 
 assert.match(backend,/2026-09-08-v464-proof-gated-member-locked-whpp-offline-history-recovery-v1/);
-assert.match(backend,/2026-09-08-v464-auth-explicit-one-click-offline-recovery-v2-same-origin-operator/);
+assert.match(backend,/2026-09-08-v464-auth-explicit-one-click-offline-recovery-v3-same-origin-operator-audit/);
 assert.match(backend,/stateMembershipExact/);
 assert.match(backend,/stateDailyFinalCoverageExact/);
 assert.match(backend,/stateWorksetExact/);
@@ -24,16 +24,21 @@ assert.match(backend,/BEGIN IMMEDIATE/);
 assert.match(backend,/V464_POST_WRITE_VERIFY_FAILED/);
 assert.match(backend,/x-ce-qc-history-recovery/);
 assert.match(backend,/V464_OFFLINE_RECOVERY/);
-assert.match(backend,/requireRole, sameOriginWriteGuard/,'V464 must reuse canonical write safety middleware');
+assert.match(backend,/auditAction, requireRole, sameOriginWriteGuard/,'V464 must reuse canonical audit/write safety middleware');
 assert.match(backend,/const requireOperator=requireRole\('OPERATOR'\)/,'V464 repair POST must require OPERATOR or ADMIN');
 assert.match(backend,/sameOriginWriteGuard\(req,res,\(\)=>requireOperator\(req,res,\(\)=>executePost\(req,res\)\)\)/,'V464 POST must enforce same-origin before operator-gated repair execution');
+assert.match(backend,/WHPP_HISTORY_OFFLINE_RECOVERY/,'successful explicit repair must be audit logged');
+assert.match(backend,/apiStatus=\/失败\|retry\/i\.test/,'V464 historical final rows must preserve saved retry truth instead of forcing SUCCESS');
 assert.match(backend,/if\(req\.path!==ROUTE\)return next\(\)/);
 assert.doesNotMatch(backend,/CEClient|axios|https?:\/\/|trackQuery\(|confirmQuery\(|exceptionQuery\(|\/api\/whpp\/run|\/api\/v246\/tracking\/reconcile/,'V464 must remain offline and must never start business processing');
 assert.doesNotMatch(backend,/UPDATE\s+(?:shipment_current_state|carryover_open_items|qc_tracking_ledger|business_pod_locks|business_track_events|business_scan_results|business_exception_items)/i,'V464 must not rewrite protected current evidence tables');
 assert.match(v462,/export function getV462WhppArchiveEvidence/,'V464 must consume the already-completed isolated archive job read-only');
 assert.match(shell,/import '\.\/v464WhppOfflineHistoryRecoveryPatch\.js'/);
-assert.match(shell,/v464-whpp-offline-history-recovery\.js\?v=20260908-v464-1/);
-assert.match(ui,/2026-09-08-v464-explicit-proof-gated-offline-whpp-recovery-ui-v1/);
+assert.match(shell,/v464-whpp-offline-history-recovery\.js\?v=20260908-v464-2/);
+assert.doesNotMatch(shell,/v464-whpp-offline-history-recovery\.js\?v=20260908-v464-1/,'old V464 UI cache key must stay retired');
+assert.match(ui,/2026-09-08-v464-explicit-proof-gated-offline-whpp-recovery-ui-v2-role-aware/);
+assert.match(ui,/canRepair===false/,'VIEWER must not receive an executable repair button');
+assert.match(ui,/OPERATOR \/ ADMIN/);
 assert.match(ui,/离线恢复/);
 assert.match(ui,/X-CE-QC-History-Recovery/);
 assert.match(ui,/__CE_QC_V142_HISTORY_AUDIT__\?\.refresh/);
@@ -73,7 +78,7 @@ for(const row of [
 const finalRows=[
   {shipmentCode:'W1',reportDate:date,currentState:'POD',是否POD:'是',regionCode:'PP'},
   {shipmentCode:'W2',reportDate:date,currentState:'RETURNED',退回状态:'已退回',primaryCategory:'退回',regionCode:'PV'},
-  {shipmentCode:'W3',reportDate:date,currentState:'SHOP_ARRIVED_CURRENT',shopState:'SHOP_ARRIVED_CURRENT',regionCode:'PP'},
+  {shipmentCode:'W3',reportDate:date,currentState:'SHOP_ARRIVED_CURRENT',shopState:'SHOP_ARRIVED_CURRENT',regionCode:'PP',API状态:'retry'},
   {shipmentCode:'C1',sourceReportDate:'2026-08-31',currentState:'POD',是否POD:'是',regionCode:'PP'},
   {shipmentCode:'C2',sourceReportDate:'2026-08-31',currentState:'OPEN',primaryCategory:'派送中',regionCode:'PV'}
 ];
@@ -108,6 +113,7 @@ assert.equal(result.repaired,true);
 assert.equal(result.members,3);
 assert.equal(result.historicalFinalRowsWritten,3,'recovery writes only exact daily members, not historical carry rows');
 assert.equal(db.prepare("SELECT COUNT(*) count FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(date).count,3);
+assert.equal(db.prepare("SELECT apiStatus FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? AND shipmentCode='W3'").get(date).apiStatus,'API_PENDING_RETRY','saved retry truth must survive offline history recovery');
 const snapshot=db.prepare("SELECT snapshotId,status,reconciliationStatus,payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=?").get(date);
 assert.equal(snapshot.status,'VALID');
 assert.equal(snapshot.reconciliationStatus,'COMPLETED');
@@ -128,4 +134,4 @@ assert.equal(stateAfter.snapshotStatus,'COMPLETED');
 const afterProof=inspectV464WhppOfflineRecovery(date,db,archiveJob);
 assert.equal(afterProof.recoveredAlready,true);
 db.close();
-console.log('[V464] proof-gated offline WHPP history recovery smoke passed · auth sidecar suppressed in test · same-origin+OPERATOR write guard locked · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · confirm request+response exact · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
+console.log('[V464] proof-gated offline WHPP history recovery smoke passed · auth sidecar suppressed in test · same-origin+OPERATOR write guard locked · VIEWER read-only · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · confirm request+response exact · retry truth preserved · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
