@@ -63,7 +63,7 @@ for(const row of [
 for(const row of [['W1','CLOSED','POD'],['W2','CLOSED','RETURNED'],['W3','OPEN','']])db.prepare("INSERT INTO carryover_open_items VALUES(?,'WHPP',?,?)").run(...row);
 for(const row of [
   ['W1','TERMINAL','POD','2026-09-01T10:00:00Z'],['W2','TERMINAL','RETURNED','2026-09-01T10:10:00Z'],['W3','OPEN','SHOP_ARRIVED_CURRENT','2026-09-02T08:00:00Z']
-])db.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP',?,?,?,?,?)").run(row[0],date,row[1],row[2],row[3]);
+])db.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP',?,?,?,?)").run(row[0],date,row[1],row[2],row[3]);
 const finalRows=[
   {shipmentCode:'W1',reportDate:date,currentState:'POD',是否POD:'是',regionCode:'PP'},
   {shipmentCode:'W2',reportDate:date,currentState:'RETURNED',退回状态:'已退回',primaryCategory:'退回',regionCode:'PV'},
