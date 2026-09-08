@@ -7,8 +7,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { accessIdentity, requireRole } from './accessControl.js';
 import { closeDb, getRuntimeConfig } from './db.js';
+import { writeJsonAtomic } from './exportJobAtomicJson.js';
 
-const VERSION='2026-09-08-v473-all-business-isolated-export-sidecar-v1';
+const VERSION='2026-09-08-v478-windows-safe-export-sidecar-v1';
+// Compatibility signature: 2026-09-08-v473-all-business-isolated-export-sidecar-v1
 const PORT=Math.max(1024,Math.min(65535,Number(process.env.CE_QC_EXPORT_SIDECAR_PORT||5178)));
 const HOST=String(process.env.CE_QC_EXPORT_SIDECAR_HOST||'0.0.0.0');
 const SINGLE_JOB_HEAP_MB=Math.max(384,Math.min(1024,Number(process.env.EXPORT_SINGLE_JOB_HEAP_MB||768)));
@@ -41,7 +43,6 @@ function validatePayload(payload,res){
 function payloadKey(payload){return sha256(JSON.stringify({...payload,exportContractVersion:EXPORT_CONTRACT_VERSION}));}
 function jobsDir(){return path.join(getRuntimeConfig().dataDir,'export_jobs');}
 function jobPath(jobId){const safe=safeJobId(jobId);return safe?path.join(jobsDir(),`${safe}.json`):'';}
-async function writeJsonAtomic(file,value){const temp=`${file}.${process.pid}.v473.tmp`;await fsp.writeFile(temp,JSON.stringify(value,null,2),'utf8');await fsp.rename(temp,file);}
 async function readJob(file){try{return JSON.parse(await fsp.readFile(file,'utf8'));}catch{return null;}}
 function tokenMatches(job,token){const expected=String(job?.pollTokenHash||'');const actual=sha256(token);if(!expected||expected.length!==actual.length)return false;try{return crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(actual,'hex'));}catch{return false;}}
 function stripPrivate(job={}){const {pollTokenHash,...safe}=job||{};return {...safe,files:Array.isArray(safe.files)?safe.files:[],sidecarVersion:VERSION};}
