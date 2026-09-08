@@ -4,16 +4,26 @@ import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 
 process.env.NODE_ENV='test';
-const { inspectV464WhppOfflineRecovery, repairV464WhppOfflineHistory }=await import('../src/v464WhppOfflineHistoryRecoveryPatch.js');
+const {
+  inspectV464WhppOfflineRecovery,
+  repairV464WhppOfflineHistory,
+  handleV464WhppOfflineRecoveryRequest,
+  V464_WHPP_OFFLINE_RECOVERY_ROUTE
+}=await import('../src/v464WhppOfflineHistoryRecoveryPatch.js');
 
-for(const file of ['src/v464WhppOfflineHistoryRecoveryPatch.js','public/v464-whpp-offline-history-recovery.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v464WhppOfflineHistoryRecoveryPatch.js','public/v464-whpp-offline-history-recovery.js','src/v462WhppSurvivorFastPatch.js','public/v461-whpp-survivor-diagnostic.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const backend=fs.readFileSync('src/v464WhppOfflineHistoryRecoveryPatch.js','utf8');
 const ui=fs.readFileSync('public/v464-whpp-offline-history-recovery.js','utf8');
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const v462=fs.readFileSync('src/v462WhppSurvivorFastPatch.js','utf8');
+const v461ui=fs.readFileSync('public/v461-whpp-survivor-diagnostic.js','utf8');
 
 assert.match(backend,/2026-09-08-v464-proof-gated-member-locked-whpp-offline-history-recovery-v1/);
-assert.match(backend,/2026-09-08-v464-auth-explicit-one-click-offline-recovery-v3-same-origin-operator-audit/);
+assert.match(backend,/2026-09-08-v468-v462-lazy-exact-route-dispatch-v1/);
+assert.match(backend,/export const V464_WHPP_OFFLINE_RECOVERY_ROUTE='\/api\/v464\/whpp-history-offline-recovery'/);
+assert.match(backend,/export function handleV464WhppOfflineRecoveryRequest/);
+assert.doesNotMatch(backend,/import express from 'express'/,'V464 must be inert and must not import Express at module load');
+assert.doesNotMatch(backend,/express\.application\.(?:use|get|post)|previousUse|WRAPPED=Symbol\.for\('ce-qc\.v464/,'V464 must never mutate global Express prototypes');
 assert.match(backend,/stateMembershipExact/);
 assert.match(backend,/stateDailyFinalCoverageExact/);
 assert.match(backend,/stateWorksetExact/);
@@ -29,13 +39,21 @@ assert.match(backend,/const requireOperator=requireRole\('OPERATOR'\)/,'V464 rep
 assert.match(backend,/sameOriginWriteGuard\(req,res,\(\)=>requireOperator\(req,res,\(\)=>executePost\(req,res\)\)\)/,'V464 POST must enforce same-origin before operator-gated repair execution');
 assert.match(backend,/WHPP_HISTORY_OFFLINE_RECOVERY/,'successful explicit repair must be audit logged');
 assert.match(backend,/apiStatus=\/失败\|retry\/i\.test/,'V464 historical final rows must preserve saved retry truth instead of forcing SUCCESS');
-assert.match(backend,/if\(req\.path!==ROUTE\)return next\(\)/);
 assert.doesNotMatch(backend,/CEClient|axios|https?:\/\/|trackQuery\(|confirmQuery\(|exceptionQuery\(|\/api\/whpp\/run|\/api\/v246\/tracking\/reconcile/,'V464 must remain offline and must never start business processing');
 assert.doesNotMatch(backend,/UPDATE\s+(?:shipment_current_state|carryover_open_items|qc_tracking_ledger|business_pod_locks|business_track_events|business_scan_results|business_exception_items)/i,'V464 must not rewrite protected current evidence tables');
+
+assert.match(v462,/2026-09-08-v468-v462-single-hook-lazy-v464-dispatch-v1/);
+assert.match(v462,/const V464_ROUTE='\/api\/v464\/whpp-history-offline-recovery'/);
+assert.match(v462,/import\('\.\/v464WhppOfflineHistoryRecoveryPatch\.js'\)/,'V462 must lazy-load V464 only on the exact recovery route');
+assert.match(v462,/handleV464WhppOfflineRecoveryRequest/,'V462 must delegate to V464 exact-route handler');
+assert.equal((v462.match(/express\.application\.use/g)||[]).length,1,'V462 remains the single existing authenticated Express use hook; V464 must add no second hook');
 assert.match(v462,/export function getV462WhppArchiveEvidence/,'V464 must consume the already-completed isolated archive job read-only');
-assert.match(shell,/import '\.\/v464WhppOfflineHistoryRecoveryPatch\.js'/);
-assert.match(shell,/v464-whpp-offline-history-recovery\.js\?v=20260908-v464-2/);
-assert.doesNotMatch(shell,/v464-whpp-offline-history-recovery\.js\?v=20260908-v464-1/,'old V464 UI cache key must stay retired');
+assert.doesNotMatch(shell,/^\s*import ['"]\.\/v464WhppOfflineHistoryRecoveryPatch\.js['"];?\s*$/m,'V44 startup must not eagerly import V464');
+assert.doesNotMatch(shell,/<script\s+src=["']\/v464-whpp-offline-history-recovery\.js/i,'V44 HTML must not eagerly load V464 UI');
+assert.match(v461ui,/2026-09-08-v468-v462-survivor-lazy-v464-ui-v1/);
+assert.match(v461ui,/v464-whpp-offline-history-recovery\.js\?v=20260908-v468-1/,'V464 UI must be loaded only from the V462 survivor owner with a fresh V468 cache key');
+assert.match(v461ui,/else if\(p\.archiveJob\?\.state==='COMPLETED'\)void ensureV464Ui\(\)/,'V464 UI must not load until isolated V266 archive work is completed');
+
 assert.match(ui,/2026-09-08-v464-explicit-proof-gated-offline-whpp-recovery-ui-v2-role-aware/);
 assert.match(ui,/canRepair===false/,'VIEWER must not receive an executable repair button');
 assert.match(ui,/OPERATOR \/ ADMIN/);
@@ -44,6 +62,17 @@ assert.match(ui,/X-CE-QC-History-Recovery/);
 assert.match(ui,/__CE_QC_V142_HISTORY_AUDIT__\?\.refresh/);
 assert.doesNotMatch(ui,/\/api\/whpp\/run\/(?:start|resume)|\/api\/v246\/tracking\/reconcile/,'V464 UI must not start scan/track business processing');
 assert.equal((ui.match(/method:'POST'/g)||[]).length,1,'V464 UI has exactly one explicit repair POST site');
+
+{
+  let statusCode=200,payload=null,nextCalled=0;
+  const res={status(code){statusCode=code;return this;},json(value){payload=value;return this;}};
+  const handled=handleV464WhppOfflineRecoveryRequest({path:V464_WHPP_OFFLINE_RECOVERY_ROUTE,method:'GET',user:null,query:{}},res,()=>{nextCalled+=1;});
+  assert.equal(handled,true,'exact V464 route must be handled');
+  assert.equal(statusCode,401,'unauthenticated V464 GET must fail before any database read');
+  assert.equal(payload?.code,'AUTH_REQUIRED');
+  assert.equal(nextCalled,0);
+  assert.equal(handleV464WhppOfflineRecoveryRequest({path:'/api/other',method:'GET'},res,()=>{}),false,'non-V464 paths must remain completely untouched');
+}
 
 const db=new DatabaseSync(':memory:');
 db.exec(`
@@ -134,4 +163,4 @@ assert.equal(stateAfter.snapshotStatus,'COMPLETED');
 const afterProof=inspectV464WhppOfflineRecovery(date,db,archiveJob);
 assert.equal(afterProof.recoveredAlready,true);
 db.close();
-console.log('[V464] proof-gated offline WHPP history recovery smoke passed · auth sidecar suppressed in test · same-origin+OPERATOR write guard locked · VIEWER read-only · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · confirm request+response exact · retry truth preserved · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
+console.log('[V468/V464] inert lazy-route proof-gated offline WHPP history recovery smoke passed · no V464 Express prototype hook · V462 exact-path lazy dispatch only · V44 startup stays quarantined · unauthenticated route fails before DB · missing confirm response fails closed · exact daily+carry state workset · V246 full checked evidence · retry truth preserved · member-locked historical writes · current/carry/ledger unchanged · transaction verified · no CE/network');
