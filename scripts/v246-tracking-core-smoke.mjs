@@ -165,6 +165,13 @@ const historyUi=fs.readFileSync('public/v142-history-integrity-audit.js','utf8')
 assert.match(historyUi,/2026-09-07-v451-snapshot-indexed-history-audit-ui-v1/,'V451 indexed history UI marker missing');
 assert.match(historyUi,/2026-09-08-v456-whpp-authority-diagnostic-ui-v1/,'V456 exact WHPP diagnostic UI marker missing');
 assert.match(historyUi,/2026-09-08-v460-whpp-history-snapshot-disambiguation-ui-v1/,'V460 UI disambiguation marker missing');
+assert.match(historyUi,/2026-09-08-v470-whpp-current-vs-retained-retry-display-v1/,'V470 retry display marker missing');
+assert.match(historyUi,/function retryDisplayTruth\(payload=\{\}\)/,'V470 must derive retry display from the already-returned history payload');
+assert.match(historyUi,/\/-V464-\/i\.test\(snapshotId\)/,'only V464 recovery snapshots may move retry markers into retained-history display');
+assert.match(historyUi,/raw-retained/,'current interface retry display must subtract only V464 retained historical markers');
+assert.match(historyUi,/当前接口待重试/,'V470 UI must label actionable retries explicitly');
+assert.match(historyUi,/历史retry标记保留/,'V470 UI must label retained historical retry markers explicitly');
+assert.match(historyUi,/V464离线恢复审计事实，不需重跑/,'V470 UI must tell operators retained markers do not require business rerun');
 assert.match(historyUi,/WHPP诊断/,'V456 UI must show the exact WHPP authority reason and bounded counts');
 assert.match(historyUi,/历史精确命中/,'V460 UI must show the exact history snapshot match count');
 assert.match(historyUi,/finalizedSnapshotId/,'V456 UI must expose whether the final snapshot id exists');
@@ -174,9 +181,10 @@ assert.match(historyUi,/不是0票/,'UI must explicitly prevent skipped diagnost
 assert.match(historyUi,/不需要重新跑业务数据/,'timeout guidance must not ask operators to rerun business data');
 
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
-assert.match(shell,/v142-history-integrity-audit\.js\?v=20260908-v460-1/,'V460 shell must cache-bust the exact-disambiguation history UI');
+assert.match(shell,/v142-history-integrity-audit\.js\?v=20260908-v470-1/,'V470 shell must cache-bust the corrected retry display UI');
+assert.doesNotMatch(shell,/v142-history-integrity-audit\.js\?v=20260908-v460-1/,'retired V460 cache key must not pin the pre-retry-split UI');
 assert.doesNotMatch(shell,/v142-history-integrity-audit\.js\?v=20260908-v457-1/,'retired V457 cache key must not pin the pre-disambiguation UI');
 assert.doesNotMatch(shell,/v142-history-integrity-audit\.js\?v=20260902-v419-priority-1/,'retired V419 cache key must not pin browsers to the V456 history UI');
 
-console.log('[V460/V458/V457/V456/V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + exact modern WHPP authority + provable legacy metadata-loss recovery + exact history snapshot disambiguation + V460 UI cache-bust + fail-closed export safety');
+console.log('[V470/V460/V458/V457/V456/V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + exact WHPP completion authority + V464 retained retry display split + V470 cache-bust + fail-closed export safety');
 execFileSync(process.execPath,['scripts/v252-lifecycle-smoke.mjs'],{stdio:'inherit'});
