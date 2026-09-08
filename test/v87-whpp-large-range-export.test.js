@@ -93,7 +93,8 @@ test('ALL background export includes WHPP as the seventh business and keeps one 
 
 test('V200 isolated business worker accepts all seven businesses and WHPP still uses the membership-locked reader internally', () => {
   assert.deepEqual(quotedArrayAfter(business, 'const allowed=new Set'), ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
-  assert.match(business, /createV200ReferenceDashboardWorkbook\(\{type,periodType,range,outputDir:/,'all businesses must use the one V200 workbook owner');
+  assert.match(business, /VERSION='2026-09-08-v474-indexed-business-export-progress-v1'/,'isolated business worker must keep the V474 indexed progress owner');
+  assert.match(business, /createV200ReferenceDashboardWorkbook\(\{[\s\S]*?type,periodType,range,outputDir:getRuntimeConfig\(\)\.exportsDir,[\s\S]*?onProgress:payload=>writeProgress\(payload\|\|\{\}\)[\s\S]*?\}\)/,'all businesses must use the one V200 workbook owner and preserve V474 child progress');
   assert.match(business, /partCount>1\|\|partIndex!==1/,'business worker must reject date splitting');
   assert.match(historical, /if\(businessType==='WHPP'\)return collectLegacyV200Rows\(businessType,range,onProgress\)/,'V320 must hand WHPP to its dedicated reader');
   assert.match(evidence, /businessType === 'WHPP' \? seedWhpp\(range, onProgress\) : seedUnified/,'V200 data owner must keep WHPP separate from unified membership');
