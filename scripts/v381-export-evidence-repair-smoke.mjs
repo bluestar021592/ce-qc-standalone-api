@@ -92,10 +92,23 @@ assert.doesNotMatch(runtimeTruth,/currentOpen: mainQueue \+ historicalOpen/,'V16
 assert.match(runtimeTruth,/runtimeTruth: 'TODAY_OPEN_PLUS_HISTORICAL_OPEN'/,'V161 must expose the persisted queue baseline before V417 closure reconciliation');
 assert.match(runtimeTruth,/out\.PP \+ out\.PV === 0 && base\.PP \+ base\.PV > 0/,'V161 must preserve stronger recovered PP/PV metadata instead of overwriting it with blank legacy row evidence');
 assert.match(runtimeTruth,/batchDateCandidates\.length[\s\S]*base\.dateCandidates/,'V161 must preserve recovered date candidates when legacy batch dateCandidatesJson is empty');
-assert.match(historyTruth,/carryOpenScope:'SOURCE_REPORT_DATE_BETWEEN_EXPORT_RANGE'/,'history backend must publish selected export-range OPEN scope');
-assert.match(historyUi,/选定导出区间仍OPEN/,'history UI must label export-range OPEN separately from the current processing queue');
+
+// V453/V451: historical export safety no longer performs synchronous range COUNTs
+// over the 27GB OPEN/scan/track mega tables. Those counts were diagnostic-only and
+// could block the Node process. The authoritative export gate remains fail-closed on
+// required daily membership/final-detail completeness; skipped diagnostics must be
+// explicit and must never be rendered as a false zero.
+assert.match(historyTruth,/V451_INDEXED_AUDIT_ONLY/,'history backend must expose the V451 indexed-audit evidence mode');
+assert.match(historyTruth,/heavyDiagnosticCountsSkipped:true/,'history backend must explicitly disclose skipped mega-table diagnostics');
+assert.match(historyTruth,/skippedDiagnostics:\['carryover_open_items','final_rows_range_count','scan_results','business_scan_results','business_track_events'\]/,'history backend must enumerate every intentionally skipped heavy diagnostic');
+assert.match(historyTruth,/exportReady=missing\.length===0&&incomplete\.length===0/,'skipping diagnostics must not relax fail-closed export readiness');
+assert.doesNotMatch(historyTruth,/FROM\s+carryover_open_items/i,'history audit must not synchronously scan carryover_open_items on the critical export-safety path');
+assert.doesNotMatch(historyTruth,/FROM\s+business_track_events/i,'history audit must not synchronously scan business_track_events on the critical export-safety path');
+assert.match(historyUi,/这些项目是“未执行统计”，不是0票/,'history UI must distinguish skipped diagnostics from a real zero count');
+assert.match(historyUi,/不会被拿来放宽导出安全判断/,'history UI must disclose that skipped diagnostics do not weaken export safety');
+assert.match(historyUi,/选定导出区间仍OPEN/,'older-backend compatibility display must still label export-range OPEN separately when legacy evidence is returned');
 
 execFileSync(process.execPath,['scripts/v384-import-post-processing-proof-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v385-v67-detail-owner-release-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v388-import-carryover-metadata-truth-smoke.mjs'],{stdio:'inherit'});
-console.log('[V417/V388/V385/V384/V383/V382/V381] export + import hydration + archived metadata + closure-reconciled carryover queue + CCSL proof + detail-owner release smoke passed · persisted OPEN is the baseline and V417 prevents processing completion from fabricating business closure');
+console.log('[V453/V451/V417/V388/V385/V384/V383/V382/V381] export + indexed history safety + import hydration + archived metadata + closure-reconciled carryover queue + CCSL proof + detail-owner release smoke passed · V451 skips blocking history diagnostics without weakening fail-closed export readiness');
