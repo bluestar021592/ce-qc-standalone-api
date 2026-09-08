@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { classifyV246Terminal, v246InclusiveDays } from '../src/v246TrackingLedgerCore.js';
 import { analyzeV246ShopeeAttemptCycle, findV246PodDate, v246PositivePodText } from '../src/shopeeAttemptCycleV246.js';
+import { whppCompletionAuthorityDecision } from '../src/v142SevenBusinessHistoryAudit.js';
 
 const terminal = stateJson => classifyV246Terminal({ stateJson });
 
@@ -55,6 +56,43 @@ assert.equal(cycle.startMode,'TRACK_60_FALLBACK');
 assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收'),e(80,'2026-08-03 17:00:00','POD')]),'2026-08-03');
 assert.equal(findV246PodDate([e(70,'2026-08-02 10:00:00','未签收')]),'','negative POD wording must never fabricate POD date');
 
+// V456: non-zero WHPP history must use the exact same completion authority as
+// formal export. Merely having any same-date snapshot can never make history safe.
+let whppAuthority=whppCompletionAuthorityDecision({
+  reportPresent:true,reported:228,summary:{completed:false,snapshotStatus:'',finalizedSnapshotId:''},snapshotRows:[]
+});
+assert.equal(whppAuthority.eligible,false);
+assert.equal(whppAuthority.reason,'WHPP_DAILY_NOT_COMPLETED');
+whppAuthority=whppCompletionAuthorityDecision({
+  reportPresent:true,reported:228,summary:{completed:true,snapshotStatus:'COMPLETED',finalizedSnapshotId:'WHPP-FINAL'},snapshotRows:[]
+});
+assert.equal(whppAuthority.eligible,false);
+assert.equal(whppAuthority.reason,'WHPP_FINALIZED_SNAPSHOT_ROW_MISSING');
+whppAuthority=whppCompletionAuthorityDecision({
+  reportPresent:true,reported:228,summary:{completed:true,snapshotStatus:'COMPLETED',finalizedSnapshotId:'WHPP-FINAL'},
+  snapshotRows:[{snapshotId:'WHPP-OTHER',status:'VALID',reconciliationStatus:'COMPLETED'}]
+});
+assert.equal(whppAuthority.eligible,false,'unrelated same-date snapshot must not authorize export');
+assert.equal(whppAuthority.reason,'WHPP_FINALIZED_SNAPSHOT_ROW_MISSING');
+whppAuthority=whppCompletionAuthorityDecision({
+  reportPresent:true,reported:228,summary:{completed:true,snapshotStatus:'COMPLETED',finalizedSnapshotId:'WHPP-FINAL'},
+  snapshotRows:[{snapshotId:'WHPP-FINAL',status:'INVALID',reconciliationStatus:'FAILED'}]
+});
+assert.equal(whppAuthority.eligible,false,'invalid/failed exact snapshot must fail closed');
+assert.equal(whppAuthority.reason,'WHPP_FINALIZED_SNAPSHOT_INVALID_OR_FAILED');
+whppAuthority=whppCompletionAuthorityDecision({
+  reportPresent:true,reported:228,summary:{completed:true,snapshotStatus:'COMPLETED',finalizedSnapshotId:'WHPP-FINAL'},
+  snapshotRows:[{snapshotId:'WHPP-FINAL',status:'',reconciliationStatus:''}]
+});
+assert.equal(whppAuthority.eligible,true,'legacy exact snapshot may be accepted only when completed daily authority attests it');
+assert.equal(whppAuthority.reason,'WHPP_LEGACY_FINALIZED_SNAPSHOT_ATTESTED');
+whppAuthority=whppCompletionAuthorityDecision({
+  reportPresent:true,reported:228,summary:{completed:true,snapshotStatus:'COMPLETED',finalizedSnapshotId:'WHPP-FINAL'},
+  snapshotRows:[{snapshotId:'WHPP-FINAL',status:'VALID',reconciliationStatus:'COMPLETED'}]
+});
+assert.equal(whppAuthority.eligible,true);
+assert.equal(whppAuthority.reason,'WHPP_VALID_COMPLETED_SNAPSHOT');
+
 // V451 owners are part of the already-wired go-live smoke. This locks the
 // 27GB-safe read path so a later patch cannot silently reintroduce range scans.
 for(const file of ['src/v142SevenBusinessHistoryAudit.js','public/v142-history-integrity-audit.js','public/v246-qc-tracking.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
@@ -66,6 +104,7 @@ assert.doesNotMatch(trackingUi,/function mount\([^)]*\)[\s\S]{0,220}tracking\/re
 
 const historyAudit=fs.readFileSync('src/v142SevenBusinessHistoryAudit.js','utf8');
 assert.match(historyAudit,/2026-09-07-v451-snapshot-indexed-readonly-history-audit-v2-fail-closed/,'V451 indexed history audit marker missing');
+assert.match(historyAudit,/2026-09-08-v456-whpp-finalized-snapshot-authority-diagnostic-v1/,'V456 WHPP authority diagnostic marker missing');
 assert.match(historyAudit,/scanMode:'V451_SNAPSHOT_INDEXED_READ'/,'history audit must expose snapshot-indexed read mode');
 assert.match(historyAudit,/snapshotId IN \(\$\{marks\}\)/,'large unified history reads must be anchored by selected snapshotId');
 assert.doesNotMatch(historyAudit,/FROM unified_import_rows\s+WHERE reportDate BETWEEN/,'unified_import_rows must never be range-scanned by reportDate');
@@ -75,15 +114,21 @@ assert.match(historyAudit,/heavyDiagnosticCountsSkipped:true/,'V451 must explici
 assert.match(historyAudit,/const exportReady=missing\.length===0&&incomplete\.length===0/,'export readiness must remain fail-closed');
 assert.doesNotMatch(historyAudit,/catch\s*\{\s*return\s*\[\]\s*;?\s*\}/,'SQL read failures must not be swallowed as empty history');
 assert.match(historyAudit,/WHERE businessType='WHPP' AND reportDate BETWEEN \? AND \?/,'WHPP indexed daily history must stay date-bounded');
+assert.match(historyAudit,/SELECT reportDate,snapshotId,status,reconciliationStatus,createdAt,id/,'V456 WHPP authority check must stay metadata-only');
+assert.match(historyAudit,/whppCompletionAuthorityDecision/,'V456 must use one explicit fail-closed WHPP authority decision');
+assert.doesNotMatch(historyAudit,/payloadJson\s+FROM business_export_snapshots/,'V456 audit must not hydrate WHPP snapshot payloads');
 assert.doesNotMatch(historyAudit,/function whppDay\(/,'old per-day WHPP query loop must remain retired');
 assert.doesNotMatch(historyAudit,/function airMismatch\(/,'old per-day wildcard air-marker scan must remain retired');
 
 const historyUi=fs.readFileSync('public/v142-history-integrity-audit.js','utf8');
 assert.match(historyUi,/2026-09-07-v451-snapshot-indexed-history-audit-ui-v1/,'V451 indexed history UI marker missing');
+assert.match(historyUi,/2026-09-08-v456-whpp-authority-diagnostic-ui-v1/,'V456 exact WHPP diagnostic UI marker missing');
+assert.match(historyUi,/WHPP诊断/,'V456 UI must show the exact WHPP authority reason and bounded counts');
+assert.match(historyUi,/finalizedSnapshotId/,'V456 UI must expose whether the final snapshot id exists');
 assert.match(historyUi,/new AbortController\(\)/,'manual history audit must keep a browser-side timeout guard');
 assert.match(historyUi,/heavyDiagnosticCountsSkipped===true/,'UI must distinguish skipped heavy diagnostics from numeric zero');
 assert.match(historyUi,/不是0票/,'UI must explicitly prevent skipped diagnostics being misread as zero');
 assert.match(historyUi,/不需要重新跑业务数据/,'timeout guidance must not ask operators to rerun business data');
 
-console.log('[V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + fail-closed export safety + no blocking mega-table diagnostics');
+console.log('[V456/V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + exact WHPP finalized-snapshot authority + fail-closed export safety + no blocking mega-table diagnostics');
 execFileSync(process.execPath,['scripts/v252-lifecycle-smoke.mjs'],{stdio:'inherit'});
