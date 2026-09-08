@@ -4,8 +4,8 @@ import { auditSevenBusinessHistory } from './v142SevenBusinessHistoryAudit.js';
 import { closeDb } from './db.js';
 import { writeJsonAtomicSync } from './exportJobAtomicJson.js';
 
-const VERSION='2026-09-08-v478-all-export-worker-windows-safe-job-json-v1';
-// Compatibility signature: 2026-09-08-v473-all-export-worker-preflight-v1
+const VERSION='2026-09-08-v473-all-export-worker-preflight-v1';
+// V478 Windows I/O safety is delegated to exportJobAtomicJson.js; V473 remains preflight owner.
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
 
