@@ -5,6 +5,7 @@
   const V456_UI_ID='2026-09-08-v456-whpp-authority-diagnostic-ui-v1';
   const V457_UI_ID='2026-09-08-v457-whpp-legacy-completion-attestation-ui-v1';
   const V460_UI_ID='2026-09-08-v460-whpp-history-snapshot-disambiguation-ui-v1';
+  const V470_UI_ID='2026-09-08-v470-whpp-current-vs-retained-retry-display-v1';
   const AUDIT_TIMEOUT_MS=60000;
   // Compatibility wording gate: when an older backend still returns OPEN evidence,
   // preserve its display. V451 deliberately skips those mega-table diagnostics.
@@ -33,6 +34,17 @@
     const status=w.dailySnapshotStatus?esc(w.dailySnapshotStatus):'无';
     const historyId=w.historySnapshotId?esc(w.historySnapshotId):'无';
     return `；WHPP诊断：${esc(whppReasonLabel(w.authorityReason))}；日报 ${fmt(w.reported)} / 成员 ${fmt(w.dailyRows)} / 成员最终覆盖 ${fmt(w.coveredDailyRows)} / 最终明细 ${fmt(w.finalRows)}；日报完成=${w.completedFlag?'是':'否'}，状态=${status}，finalizedSnapshotId=${finalId}，历史证明snapshotId=${historyId}，同日快照候选=${fmt(w.snapshotCandidateCount)}，可用候选=${fmt(w.viableSnapshotCandidateCount)}，历史精确命中=${fmt(w.attestedSnapshotCandidateCount)}`;
+  }
+  function retryDisplayTruth(payload={}){
+    const raw=Math.max(0,Number(payload.totalRetryPending||0));
+    let retained=0;
+    for(const day of payload.days||[]){
+      const w=day?.whpp||{};
+      const snapshotId=String(w.snapshotId||w.finalizedSnapshotId||'');
+      if(/-V464-/i.test(snapshotId))retained+=Math.max(0,Number(w.retryPending||0));
+    }
+    retained=Math.min(raw,retained);
+    return{raw,current:Math.max(0,raw-retained),retained};
   }
   let auditRunning=false;
   let lastLoadedAt=0;
@@ -65,13 +77,15 @@
       const missing=p.missingDates||[],incomplete=p.incompleteDates||[],evidence=p.currentEvidence||{};
       const diagnosticsSkipped=evidence.heavyDiagnosticCountsSkipped===true;
       const recoveredDays=Number(evidence.whppLegacyMetadataRecoveredDays||0);
+      const retryTruth=retryDisplayTruth(p);
       const latestProcessingIssues=new Set(['CORE_SNAPSHOT_NOT_COMPLETED','WHPP_SNAPSHOT_MISSING','WHPP_FINAL_ROWS_INCOMPLETE']);
       const latestDayPending=missing.length===0&&incomplete.length>0&&incomplete.every(x=>String(x.reportDate||'')===String(p.toDate||'')&&(x.issues||[]).length>0&&(x.issues||[]).every(issue=>latestProcessingIssues.has(String(issue||''))));
       const clsName=p.exportReady?'success':(latestDayPending?'warning':'danger');
-      const title=p.exportReady?(p.totalRetryPending>0?'历史覆盖完整，可导出（仍有接口待重试）':'历史覆盖完整，可安全导出'):(latestDayPending?'当前最新日报尚未处理完成，区间导出暂不可用':'历史完整性未通过，已禁止静默缺数据导出');
+      const title=p.exportReady?(retryTruth.current>0?'历史覆盖完整，可导出（仍有当前接口待重试）':'历史覆盖完整，可安全导出'):(latestDayPending?'当前最新日报尚未处理完成，区间导出暂不可用':'历史完整性未通过，已禁止静默缺数据导出');
       const timing=p.timing?.totalMs!==undefined?` · 只读检查耗时 ${fmt(p.timing.totalMs)}ms`:'';
       const snapshots=evidence.selectedCoreSnapshots!==undefined?` · 已核对快照 ${fmt(evidence.selectedCoreSnapshots)} 个`:'';
       const recoveredHtml=recoveredDays?`<p class="muted"><b>旧版WHPP完成态只读恢复：</b>已有 <b>${fmt(recoveredDays)}</b> 天通过严格历史证明。恢复条件同时要求：完成字段确实缺失、日报成员精确完整、每个成员具有同日最终明细、历史汇总 snapshotId 在同日未作废快照中精确且唯一命中。其它同日旧快照只保留为审计历史，不会覆盖该精确证明。仅恢复导出资格，不回写数据库。</p>`:'';
+      const retryHtml=`<p>当前接口待重试 <b>${fmt(retryTruth.current)}</b>${retryTruth.retained>0?` · 历史retry标记保留 <b>${fmt(retryTruth.retained)}</b> <span class="muted">（V464离线恢复审计事实，不需重跑）</span>`:''}</p>`;
       let evidenceHtml='';
       if(diagnosticsSkipped){
         evidenceHtml=`<p class="muted"><b>安全读取模式：</b>已跳过 OPEN/扫描/轨迹的大表统计，避免它们阻塞主SQLite；这些项目是“未执行统计”，不是0票，也不会被拿来放宽导出安全判断。</p><p class="muted">当前安全判定仍严格依据：每日有效导入、核心快照/最终明细覆盖、WHPP日报与最终明细、CEAF来源归属。现代WHPP要求日报完成标记与 exact finalizedSnapshotId 实体快照一致；仅旧版“完成元数据被覆盖”日期可由V457/V460历史证明只读恢复，且历史 snapshotId 必须精确命中一个同日未作废快照。任一必要读取失败、精确命中失败或数据不完整都会阻止导出。</p>`;
@@ -81,9 +95,9 @@
         const openBeforeRange=evidence.carryOpenBeforeRange||0,openInsideRangeBeforeTo=evidence.carryOpenInsideRangeBeforeTo||0,openOnToDate=evidence.carryOpenOnToDate||0,openThroughToDate=evidence.carryOpenThroughToDate||0;
         const historicalBeforeTo=openBeforeRange+openInsideRangeBeforeTo;
         const openReconciled=evidence.carryOpenRangeReconciled!==false&&evidence.carryOpenThroughToReconciled!==false;
-        evidenceHtml=`<p>选定导出区间仍OPEN <b>${fmt(open)}</b> · 区间已闭环 <b>${fmt(cls)}</b> · WHPP待重试 <b>${fmt(p.totalRetryPending)}</b></p><p><b>OPEN精准对账：</b>区间起日前仍OPEN <b>${fmt(openBeforeRange)}</b> · 区间内历史OPEN（不含截止日） <b>${fmt(openInsideRangeBeforeTo)}</b> · 截止日当日OPEN <b>${fmt(openOnToDate)}</b> · 截至截止日全部OPEN <b>${fmt(openThroughToDate)}</b></p><p class="muted">当前日报口径仅用于核对：历史跨日未完结 = 区间起日前OPEN + 区间内历史OPEN = <b>${fmt(historicalBeforeTo)}</b>；当日未完结 = 截止日当日OPEN = <b>${fmt(openOnToDate)}</b>；当前OPEN总量 = 当日OPEN + 当前日前历史OPEN = 截至截止日全部OPEN = <b>${fmt(openThroughToDate)}</b>。历史审计不会回写或覆盖主页面OPEN数字。</p>${openReconciled?'':`<p class="danger-text">OPEN对账未闭合：SQLite分段统计与总数不一致，已保留原始值，请勿用该区间数字做导出判断。</p>`}${open?`<p class="muted">这里统计 sourceReportDate 位于 <b>${esc(scopeFrom)} 至 ${esc(scopeTo)}</b> 的 carryover OPEN；它不是当前日报“当前处理队列”。</p>`:''}`;
+        evidenceHtml=`<p>选定导出区间仍OPEN <b>${fmt(open)}</b> · 区间已闭环 <b>${fmt(cls)}</b></p><p><b>OPEN精准对账：</b>区间起日前仍OPEN <b>${fmt(openBeforeRange)}</b> · 区间内历史OPEN（不含截止日） <b>${fmt(openInsideRangeBeforeTo)}</b> · 截止日当日OPEN <b>${fmt(openOnToDate)}</b> · 截至截止日全部OPEN <b>${fmt(openThroughToDate)}</b></p><p class="muted">当前日报口径仅用于核对：历史跨日未完结 = 区间起日前OPEN + 区间内历史OPEN = <b>${fmt(historicalBeforeTo)}</b>；当日未完结 = 截止日当日OPEN = <b>${fmt(openOnToDate)}</b>；当前OPEN总量 = 当日OPEN + 当前日前历史OPEN = 截至截止日全部OPEN = <b>${fmt(openThroughToDate)}</b>。历史审计不会回写或覆盖主页面OPEN数字。</p>${openReconciled?'':`<p class="danger-text">OPEN对账未闭合：SQLite分段统计与总数不一致，已保留原始值，请勿用该区间数字做导出判断。</p>`}${open?`<p class="muted">这里统计 sourceReportDate 位于 <b>${esc(scopeFrom)} 至 ${esc(scopeTo)}</b> 的 carryover OPEN；它不是当前日报“当前处理队列”。</p>`:''}`;
       }
-      body.innerHTML=`<span class="status-pill ${clsName}">${esc(title)}</span><p><b>${esc(p.fromDate)} 至 ${esc(p.toDate)}</b> · 应有 ${fmt(p.expectedDays)} 天 · 已找到 ${fmt(p.daysPresent)} 天 · 总导入 ${fmt(p.totalImported)} 票${snapshots}${timing}</p><p>WHPP待重试 <b>${fmt(p.totalRetryPending)}</b></p>${evidenceHtml}${recoveredHtml}${missing.length?`<p class="danger-text">缺少日期：${missing.map(esc).join('、')}</p>`:''}${incomplete.length?`<p class="${latestDayPending?'muted':'danger-text'}">待核对日期：${incomplete.slice(0,8).map(x=>`${esc(x.reportDate)}（${esc((x.issues||[]).join('/'))}${whppDiagnostic(x)}）`).join('；')}${incomplete.length>8?'…':''}</p>`:''}<p class="muted">导出执行严格7业务覆盖检查：CE、CEAF、TBKH、ALI1688、SHOPEE CN、SHOPEE VN、WHPP。当前最新日报未处理完成时只暂缓导出，不代表历史数据被删除。</p>`;
+      body.innerHTML=`<span class="status-pill ${clsName}">${esc(title)}</span><p><b>${esc(p.fromDate)} 至 ${esc(p.toDate)}</b> · 应有 ${fmt(p.expectedDays)} 天 · 已找到 ${fmt(p.daysPresent)} 天 · 总导入 ${fmt(p.totalImported)} 票${snapshots}${timing}</p>${retryHtml}${evidenceHtml}${recoveredHtml}${missing.length?`<p class="danger-text">缺少日期：${missing.map(esc).join('、')}</p>`:''}${incomplete.length?`<p class="${latestDayPending?'muted':'danger-text'}">待核对日期：${incomplete.slice(0,8).map(x=>`${esc(x.reportDate)}（${esc((x.issues||[]).join('/'))}${whppDiagnostic(x)}）`).join('；')}${incomplete.length>8?'…':''}</p>`:''}<p class="muted">导出执行严格7业务覆盖检查：CE、CEAF、TBKH、ALI1688、SHOPEE CN、SHOPEE VN、WHPP。当前最新日报未处理完成时只暂缓导出，不代表历史数据被删除。</p>`;
       lastLoadedAt=Date.now();
     }catch(error){
       const timedOut=error?.name==='AbortError';
@@ -94,6 +108,6 @@
   function ensure(){if(visible())host();}
   document.addEventListener('click',e=>{if(e.target?.closest?.('[data-page="import"],.side-link[data-path="/import"]'))setTimeout(ensure,300);},true);
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(ensure,800),{once:true});else setTimeout(ensure,800);
-  global.__CE_QC_V142_HISTORY_AUDIT__={version:VERSION,v451UiId:V451_UI_ID,v456UiId:V456_UI_ID,v457UiId:V457_UI_ID,v460UiId:V460_UI_ID,refresh:load,get running(){return auditRunning;},get lastLoadedAt(){return lastLoadedAt;},automatic:false};
-  console.info('[CE-QC][V142_HISTORY_AUDIT]',VERSION,V451_UI_ID,V456_UI_ID,V457_UI_ID,V460_UI_ID,'manual audit uses snapshot-indexed readonly reads, provable legacy WHPP completion attestation with exact history snapshot disambiguation, and never mutates primary business data.');
+  global.__CE_QC_V142_HISTORY_AUDIT__={version:VERSION,v451UiId:V451_UI_ID,v456UiId:V456_UI_ID,v457UiId:V457_UI_ID,v460UiId:V460_UI_ID,v470UiId:V470_UI_ID,refresh:load,get running(){return auditRunning;},get lastLoadedAt(){return lastLoadedAt;},automatic:false};
+  console.info('[CE-QC][V142_HISTORY_AUDIT]',VERSION,V451_UI_ID,V456_UI_ID,V457_UI_ID,V460_UI_ID,V470_UI_ID,'manual audit uses snapshot-indexed readonly reads; V470 distinguishes current interface retries from V464 retained historical retry markers without mutating facts.');
 })(window);
