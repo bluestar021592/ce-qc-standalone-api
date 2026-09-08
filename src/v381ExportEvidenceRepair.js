@@ -7,7 +7,7 @@ import { backfillV294StrictAttemptsFromSavedEvidence, V294_ATTEMPT_TYPES } from 
 export const V381_EXPORT_EVIDENCE_REPAIR_ID='2026-08-31-v381-shopee-export-scoped-evidence-repair-v1';
 export const V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID='2026-09-08-v482-three-business-export-scoped-evidence-repair-v1';
 const STRICT_TYPES=new Set(V294_ATTEMPT_TYPES);
-const PREPARED_RANGES=new Map();
+const PREPARED_RANGES_BY_DB=new WeakMap();
 export const V381_EXPORT_TRACK_BATCH=50;
 export const V381_EXPORT_TRACK_CONCURRENCY=4;
 const text=v=>String(v??'').trim();
@@ -19,6 +19,7 @@ const strictAttemptSource=value=>/^V246_STRICT_TRACK:/i.test(text(value))||/严�
 
 function eventBill(row={}){return billOf(row.shipmentCode||row.运单号||row.waybill||row.waybillNo||row.billCode||row.trackingNo);}
 async function mapLimit(values,limit,worker){let next=0;const result=new Array(values.length);async function run(){while(true){const index=next++;if(index>=values.length)return;result[index]=await worker(values[index],index);}}await Promise.all(Array.from({length:Math.min(limit,Math.max(1,values.length))},()=>run()));return result;}
+function preparedRangesFor(db){let ranges=PREPARED_RANGES_BY_DB.get(db);if(!ranges){ranges=new Map();PREPARED_RANGES_BY_DB.set(db,ranges);}return ranges;}
 
 export function isV482StrictExportEvidenceType(type){return STRICT_TYPES.has(text(type).toUpperCase());}
 
@@ -71,8 +72,8 @@ export function applyV381LedgerExportTruth(type,rows=[],{db=getDb()}={}){
 
 export async function prepareV482StrictExportEvidence({type,range,db=getDb(),client=null,onProgress=()=>{}}={}){
   const selection=selectionOf(type,range);if(!selection)return{ok:true,skipped:true,reason:'NON_STRICT_BUSINESS',queried:0,total:0,unresolved:0};
-  const cacheKey=`${selection.businessType}|${selection.fromDate}|${selection.toDate}`;
-  if(PREPARED_RANGES.has(cacheKey))return{...PREPARED_RANGES.get(cacheKey),reusedInProcess:true};
+  const preparedRanges=preparedRangesFor(db),cacheKey=`${selection.businessType}|${selection.fromDate}|${selection.toDate}`;
+  if(preparedRanges.has(cacheKey))return{...preparedRanges.get(cacheKey),reusedInProcess:true};
   ensureV246TrackingSchema(db);
 
   // Always reconcile the selected strict-business range first. A historical POD can
@@ -83,7 +84,7 @@ export async function prepareV482StrictExportEvidence({type,range,db=getDb(),cli
   let todo=listV381ExportEvidenceCandidates(selection.businessType,selection,{db});
   const total=todo.length;
   onProgress({phase:'evidenceRepair',completed:0,total,queried:0,failed:0,unresolved:total,batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID});
-  if(!total){const result={ok:true,version:V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,...selection,total:0,queried:0,failed:0,updated:0,unresolved:0,reusedSaved:true};PREPARED_RANGES.set(cacheKey,result);return result;}
+  if(!total){const result={ok:true,version:V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,...selection,total:0,queried:0,failed:0,updated:0,unresolved:0,reusedSaved:true};preparedRanges.set(cacheKey,result);return result;}
 
   const ce=client||new CEClient(),groups=chunks(todo),stats={completed:0,queried:0,failed:0,updated:0};
   await mapLimit(groups,V381_EXPORT_TRACK_CONCURRENCY,async group=>{
@@ -104,7 +105,7 @@ export async function prepareV482StrictExportEvidence({type,range,db=getDb(),cli
   });
   todo=listV381ExportEvidenceCandidates(selection.businessType,selection,{db});
   const result={ok:true,version:V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,...selection,total,queried:stats.queried,failed:stats.failed,updated:stats.updated,unresolved:todo.length};
-  PREPARED_RANGES.set(cacheKey,result);
+  preparedRanges.set(cacheKey,result);
   onProgress({phase:'evidenceRepairDone',...result,batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID});
   return result;
 }
@@ -116,4 +117,4 @@ export async function prepareV381ShopeeExportEvidence(options={}){
   return prepareV482StrictExportEvidence(options);
 }
 
-console.info('[CE-QC][V482_STRICT_EXPORT_EVIDENCE_REPAIR]',V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,'TBKH + SHOPEECN + SHOPEEVN export preflight: reconcile exact range, reuse saved SQLite evidence, then only unresolved terminal POD trajectory at 50x4; duplicate calls in one export process reuse the same result. V381 compatibility export remains available.');
+console.info('[CE-QC][V482_STRICT_EXPORT_EVIDENCE_REPAIR]',V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,'TBKH + SHOPEECN + SHOPEEVN export preflight: reconcile exact range, reuse saved SQLite evidence, then only unresolved terminal POD trajectory at 50x4; duplicate calls in one export process reuse the same DB-scoped result. V381 compatibility export remains available.');
