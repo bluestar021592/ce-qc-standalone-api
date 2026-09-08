@@ -164,5 +164,9 @@ assert.match(historyUi,/heavyDiagnosticCountsSkipped===true/,'UI must distinguis
 assert.match(historyUi,/不是0票/,'UI must explicitly prevent skipped diagnostics being misread as zero');
 assert.match(historyUi,/不需要重新跑业务数据/,'timeout guidance must not ask operators to rerun business data');
 
-console.log('[V457/V456/V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + exact modern WHPP authority + provable legacy metadata-loss recovery + fail-closed export safety + no blocking mega-table diagnostics');
+const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
+assert.match(shell,/v142-history-integrity-audit\.js\?v=20260908-v457-1/,'V458 shell must cache-bust the V457 history integrity UI');
+assert.doesNotMatch(shell,/v142-history-integrity-audit\.js\?v=20260902-v419-priority-1/,'retired V419 cache key must not pin browsers to the V456 history UI');
+
+console.log('[V458/V457/V456/V451/V246] smoke passed: readonly tracking + snapshot-indexed history audit + exact modern WHPP authority + provable legacy metadata-loss recovery + V457 UI cache-bust + fail-closed export safety');
 execFileSync(process.execPath,['scripts/v252-lifecycle-smoke.mjs'],{stdio:'inherit'});
