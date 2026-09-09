@@ -20,16 +20,20 @@ assert.match(canonicalCoordinator,/REPORT_DATE_ONLY/,'normal daily history inval
 assert.doesNotMatch(backend,/readV328ThreeBusinessHistory/,'main web route must not run the heavy legacy builder');
 assert.match(ui,/平均签收天数=真实POD日期−真实首次派送START日期\+1/);
 
-// Guard the actual dispatch-attempt behavior instead of a fixed Chinese UI sentence.
-// Attempt 1 starts on the first real START; only failure/Pending evidence may allow a later START to advance the attempt number.
-assert.match(attempt,/function isDeliveryStart\(event = \{\}\) \{ return eventCode\(event\) === '70'; \}/);
-assert.match(attempt,/function isAssignStart\(event = \{\}\) \{ return eventCode\(event\) === '60'; \}/);
+// V488: guard the actual dispatch-attempt behavior rather than the retired
+// V265 source shape. V486 keeps numeric 70/60 compatibility, adds the same
+// canonical CE delivery/assign text semantics already used elsewhere, and
+// preserves the strict failure-before-next-attempt rule.
+assert.match(attempt,/function isDeliveryStart\(event = \{\}\) \{[\s\S]*eventCode\(event\) === '70'[\s\S]*DELIVERY_START_RE\.test\(value\)[\s\S]*!FAILURE_RE\.test\(value\)/,'delivery START must preserve numeric 70 and accept only non-failure canonical delivery text');
+assert.match(attempt,/function isAssignStart\(event = \{\}\) \{[\s\S]*eventCode\(event\) === '60'[\s\S]*ASSIGN_START_RE\.test\(value\)[\s\S]*!FAILURE_RE\.test\(value\)/,'assign START fallback must preserve numeric 60 and reject failure text');
 assert.match(attempt,/function isFailure\(event = \{\}\) \{ return eventCode\(event\) === '150' \|\| FAILURE_RE\.test\(eventText\(event\)\); \}/);
-assert.match(attempt,/const hasDelivery70 = sorted\.some\(isDeliveryStart\)/);
-assert.match(attempt,/const isStart = hasDelivery70 \? isDeliveryStart : isAssignStart/);
+assert.match(attempt,/const hasDeliveryStart = sorted\.some\(isDeliveryStart\)/,'whole-trajectory real delivery START evidence must be resolved before fallback');
+assert.match(attempt,/const hasDelivery70 = sorted\.some\(event => eventCode\(event\) === '70'\)/,'numeric 70 presence must remain observable for strict source attribution');
+assert.match(attempt,/const hasAssignStart = sorted\.some\(isAssignStart\)/,'assign fallback availability must be computed independently');
+assert.match(attempt,/const isStart = hasDeliveryStart \? isDeliveryStart : isAssignStart/,'assign START may be used only when no real delivery START exists');
 assert.match(attempt,/let failedSinceStart = false/);
 assert.match(attempt,/else if \(failedSinceStart\)/,'a repeated START must not increment unless failure evidence occurred after the prior START');
 assert.match(attempt,/if \(attemptNo > 0 && isFailure\(event\)\) \{[\s\S]*failedSinceStart = true/,'Pending or delivery-failure evidence must arm the next START as the next attempt');
 assert.match(attempt,/attemptNo = Math\.min\(3, attemptNo \+ 1\)/,'attempt number must remain capped at 3 where 3 means 3+');
 
-console.log('[V329] metric guard passed · one canonical shared coordinator · one three-business history worker process · visible average=real dispatch START→actual POD inclusive · strict START/failure attempt behavior locked in source');
+console.log('[V488/V329] metric guard passed · one canonical shared coordinator · one three-business history worker process · visible average=real dispatch START→actual POD inclusive · V486 semantic START/failure attempt behavior locked in source');
