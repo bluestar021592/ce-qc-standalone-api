@@ -3,7 +3,7 @@ import { collectV200Rows, V200_EXPORT_VERSION } from './v225ExportReturnTruth.js
 import { statsOf, bucketRows, anchorMaps, completeAttemptRatio, completeSigningAverage } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 import { V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
-import { prepareV482StrictExportEvidence, repairV483StrictExportRows, isV482StrictExportEvidenceType, V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID, V483_EXPORT_MEMBER_EVIDENCE_ID } from './v381ExportEvidenceRepair.js';
+import { repairV484StrictExportEvidence, isV484StrictExportEvidenceType, V484_STRICT_EXPORT_EVIDENCE_OWNER_ID } from './v484StrictExportEvidenceOwner.js';
 
 export { V200_EXPORT_VERSION } from './v225ExportReturnTruth.js';
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
@@ -80,25 +80,20 @@ export function assertShopeeExportTruth(businessType, rows = [], stats = {}) {
 
 export async function createV200ReferenceDashboardWorkbook({ type, periodType = 'custom', range, outputDir, onProgress = () => {} }) {
   const businessType = String(type || '').trim().toUpperCase();
-  if (isV482StrictExportEvidenceType(businessType)) {
-    await prepareV482StrictExportEvidence({
-      type: businessType,
-      range,
-      onProgress(info = {}) {
-        onProgress({ ...info, strictEvidencePreflight: true, evidenceRepairVersion: V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID });
-      }
-    });
-  }
+  // V484: formal export is actual-member driven. The old V482 full-range
+  // reconcile/backfill is intentionally not executed here; it remains only as a
+  // compatibility/maintenance API. This prevents every historical export from
+  // rescanning the entire selected strict-business history before membership is known.
   const rows = await collectV200Rows(businessType, range, onProgress);
   if (!rows.length) throw new Error(`${displayType(businessType)} 在所选区间没有数据。`);
   assertV200ExportRange(rows, range);
-  if (isV482StrictExportEvidenceType(businessType)) {
-    await repairV483StrictExportRows({
+  if (isV484StrictExportEvidenceType(businessType)) {
+    await repairV484StrictExportEvidence({
       type: businessType,
       range,
       rows,
       onProgress(info = {}) {
-        onProgress({ ...info, strictExportMemberRepair: true, evidenceRepairVersion: V483_EXPORT_MEMBER_EVIDENCE_ID });
+        onProgress({ ...info, strictExportMemberRepair: true, evidenceRepairVersion: V484_STRICT_EXPORT_EVIDENCE_OWNER_ID });
       }
     });
   }
