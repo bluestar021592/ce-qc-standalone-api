@@ -92,7 +92,11 @@ assert.match(strictBackfill,/nodeCode|eventStatusCode|operationCode|scanCode/,'C
 assert.doesNotMatch(strictBackfill,/businessType IN \('CE','CEAF'|businessType IN \('ALI1688'|businessType IN \('WHPP'/,'other boards must not enter attempt/signing evidence retry');
 assert.match(attemptCycle,/CODE_KEY_RE/,'strict attempt analyzer must recursively normalize CE node-code keys');
 assert.match(attemptCycle,/nodeCode|scanCode|operationCode/,'strict attempt analyzer must support alternate real CE code fields');
-assert.match(attemptCycle,/only when the whole trajectory has no code 70 may code 60 be fallback/,'70-first and whole-trajectory 60 fallback rule must remain explicit');
+assert.match(attemptCycle,/const hasDeliveryStart = sorted\.some\(isDeliveryStart\)/,'strict attempt owner must evaluate whole-trajectory delivery START evidence before fallback');
+assert.match(attemptCycle,/const isStart = hasDeliveryStart \? isDeliveryStart : isAssignStart/,'assign START may be used only when no real delivery START exists');
+assert.match(attemptCycle,/eventCode\(event\) === '70'/,'numeric 70 START compatibility must remain');
+assert.match(attemptCycle,/eventCode\(event\) === '60'/,'numeric 60 fallback compatibility must remain');
+assert.match(attemptCycle,/DELIVERY_START_RE\.test\(value\) && !FAILURE_RE\.test\(value\)/,'semantic delivery START must reject Pending/delivery-failure text');
 
 assert.match(trend,/new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'V263 read endpoint scope must be exact');
 assert.match(trend,/signingDaysSum/,'average signing days must come from locked per-shipment signing days');
@@ -117,4 +121,4 @@ assert.match(r2guard,/DEFAULT_SAFE_STORAGE_BYTES=8\*GIB/,'R2 zero-cost guard mus
 assert.match(r2guard,/storageClass:'STANDARD'/,'R2 must remain Standard-only');
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'secrets must never be committed');
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V267/V265] report export clarity + evidence-aware delivery UI + storage safety gate passed');
+console.log('[V487/V267/V265] report export clarity + evidence-aware delivery UI + storage safety gate passed · V486 semantic START behavior verified structurally');
