@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { listV483StrictExportRowGaps, applyV483StrictTruthToExportRows } from '../src/v381ExportEvidenceRepair.js';
 
-for (const file of ['src/v381ExportEvidenceRepair.js','src/v200TemplateDashboardExporter.js']) {
+for (const file of ['src/v381ExportEvidenceRepair.js','src/v484StrictExportEvidenceOwner.js','src/v200TemplateDashboardExporter.js']) {
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
@@ -29,22 +29,23 @@ assert.equal(listV483StrictExportRowGaps('TBKH',rows).length,0,'resolved export 
 assert.equal(listV483StrictExportRowGaps('CE',[{shipmentCode:'CE-1',pod:true}]).length,0,'non-strict CE must never enter V483 strict evidence repair');
 
 const repair=fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8');
+const owner=fs.readFileSync('src/v484StrictExportEvidenceOwner.js','utf8');
 const exporter=fs.readFileSync('src/v200TemplateDashboardExporter.js','utf8');
-assert.match(repair,/V483_EXPORT_MEMBER_EVIDENCE_ID='2026-09-08-v483-export-member-driven-strict-evidence-v1'/,'V483 owner id missing');
-assert.match(repair,/export function listV483StrictExportRowGaps/,'V483 must diagnose actual export POD members, not only ledger candidates');
-assert.match(repair,/export async function repairV483StrictExportRows/,'V483 residual repair owner missing');
+assert.match(repair,/V483_EXPORT_MEMBER_EVIDENCE_ID='2026-09-08-v483-export-member-driven-strict-evidence-v1'/,'V483 residual owner id missing');
+assert.match(repair,/export function listV483StrictExportRowGaps/,'V483 must diagnose actual export POD members');
+assert.match(repair,/export async function repairV483StrictExportRows/,'V483 residual 50x4 repair owner missing');
 assert.match(repair,/ce\.trackQuery\(bills\)/,'V483 must query only residual export-member gaps through the bounded trajectory client');
 assert.match(repair,/V381_EXPORT_TRACK_BATCH=50/,'V483 must retain 50-ticket trajectory batches');
 assert.match(repair,/V381_EXPORT_TRACK_CONCURRENCY=4/,'V483 must retain x4 bounded trajectory concurrency');
-assert.match(repair,/applyV246StrictAttemptEvidence\(evidenceRows/,'V483 must persist strict evidence whenever a canonical ledger row already exists');
-assert.match(repair,/V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE:[^`]*missingAttempt=/,'remaining strict gaps must fail with explicit attempt/signing diagnostics instead of generic metric missing');
+assert.match(repair,/V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE:[^`]*missingAttempt=/,'remaining strict gaps must fail with explicit diagnostics');
 
-assert.match(exporter,/repairV483StrictExportRows/,'common V200 owner must invoke V483 residual repair');
-const preflight=exporter.indexOf('await prepareV482StrictExportEvidence');
+assert.match(owner,/repairV483StrictExportRows/,'V484 must delegate only remaining gaps to V483');
+assert.match(exporter,/repairV484StrictExportEvidence/,'common V200 owner must invoke V484 wrapper instead of calling V483 directly');
+assert.doesNotMatch(exporter,/repairV483StrictExportRows\s*\(/,'V200 must not bypass V484 local-saved-evidence phase');
 const collect=exporter.indexOf('const rows = await collectV200Rows');
-const residual=exporter.indexOf('await repairV483StrictExportRows');
+const v484=exporter.indexOf('await repairV484StrictExportEvidence');
 const stats=exporter.indexOf('const stats = statsOf');
 const write=exporter.indexOf('await writeV200ReferenceWorkbook');
-assert.ok(preflight>0&&collect>preflight&&residual>collect&&stats>residual&&write>stats,'V200 order must be V482 ledger prep → actual export rows → V483 residual repair → metrics → workbook');
+assert.ok(collect>0&&v484>collect&&stats>v484&&write>stats,'V200 order must be actual export rows → V484(saved local→V483 residual) → metrics → workbook');
 
-console.log('[V483] export-member strict evidence smoke passed · actual TBKH POD gaps drive residual 50x4 START→POD repair · proven attempt/signing mutates export rows · non-strict businesses excluded · unresolved gaps fail with exact diagnostics');
+console.log('[V484/V483] export-member strict evidence smoke passed · V483 remains bounded 50x4 residual owner under V484 · proven attempt/signing mutates actual export rows · non-strict businesses excluded · unresolved gaps fail with exact diagnostics');
