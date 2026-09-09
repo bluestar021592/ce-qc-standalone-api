@@ -26,10 +26,11 @@ assert.match(repair,/applyV246StrictAttemptEvidence/,'repaired truth must persis
 assert.doesNotMatch(repair,/firstReportDate.*podDate.*signing/i,'repair must not fabricate dispatch signing days from first-report date');
 
 assert.equal((exportTruth.match(/2026-08-27-v329-first-report-pod-export-signing-v1/g)||[]).length,1,'legacy V225 public truth id must remain compatible');
-assert.match(exportTruth,/applyV381LedgerExportTruth/,'export must hydrate persisted V381 ledger evidence');
-const ledgerIndex=exportTruth.indexOf('applyV381LedgerExportTruth(businessType,rows');
-const strictIndex=exportTruth.indexOf('applyV320DispatchSigningTruth(businessType,rows');
-assert.ok(ledgerIndex>0&&strictIndex>ledgerIndex,'ledger POD/START hydration must happen before final V320 START->POD signing owner');
+assert.match(exportTruth,/V489_FORMAL_EXPORT_EVIDENCE_PATH_ID/,'formal export must expose the V489 canonical-ledger hot-path owner');
+assert.doesNotMatch(exportTruth,/applyV381LedgerExportTruth\s*\(/,'formal workbook hot path must not re-run V381 full-member ledger hydration before V419');
+assert.doesNotMatch(exportTruth,/applyV320DispatchSigningTruth\s*\(/,'formal workbook hot path must not re-run V320 full-member event hydration before V419');
+assert.match(exportTruth,/if\(!STRICT_DELIVERY_TYPES\.has\(businessType\)\)applyV230AttemptSigningTruth\(businessType,rows\)/,'TBKH/CN/VN must skip legacy V230 full-member saved-track hydration');
+assert.match(exportTruth,/applyV419CanonicalExportLedgerTruth\(businessType,rows,\{db:getDb\(\),onProgress\}\)/,'V419 shipmentCode-PK canonical ledger must be the strict formal-export owner before actual-POD gap repair');
 assert.match(exportTruth,/STRICT_START_TO_ACTUAL_POD/,'strict START-to-actual-POD export contract must remain unchanged');
 
 const prepareIndex=worker.indexOf('prepareV381ShopeeExportEvidence');
@@ -111,4 +112,4 @@ assert.match(historyUi,/选定导出区间仍OPEN/,'older-backend compatibility 
 execFileSync(process.execPath,['scripts/v384-import-post-processing-proof-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v385-v67-detail-owner-release-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v388-import-carryover-metadata-truth-smoke.mjs'],{stdio:'inherit'});
-console.log('[V453/V451/V417/V388/V385/V384/V383/V382/V381] export + indexed history safety + import hydration + archived metadata + closure-reconciled carryover queue + CCSL proof + detail-owner release smoke passed · V451 skips blocking history diagnostics without weakening fail-closed export readiness');
+console.log('[V489/V453/V451/V417/V388/V385/V384/V383/V382/V381] export hot-path + indexed history safety + import hydration + archived metadata + closure-reconciled carryover queue + CCSL proof + detail-owner release smoke passed · formal workbook skips duplicate V381/V320 full-member scans and keeps V419→V484 fail-closed truth');
