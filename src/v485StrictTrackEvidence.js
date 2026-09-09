@@ -15,7 +15,7 @@ const BILL_KEYS=['shipmentCode','waybill','waybillNo','billCode','trackingNo','è
 const CODE_KEYS=['eventCode','trackingEventCode','statusCode','eventStatusCode','nodeCode','scanCode','trackCode','trackingCode','shipmentEventCode','operationCode','operateCode','eventTypeCode','statusTypeCode'];
 const TIME_KEYS=['eventTime','creationDate','lastUpdateDate','createdAt','eventDate','occurTime','occurrenceTime','trackingTime','scanTime','operateTime','operationTime'];
 const TEXT_KEYS=['trackingEventDesc','trackingEventDescZh','trackingEventDescKm','statusText','statusName','eventName','remark','memo','message','place','eventShop','locationCode','description'];
-const SKIP_KEYS=new Set(['headers','authorization','cookie','token','requestBody']);
+const SKIP_KEYS=new Set(['headers','authorization','cookie','token','requestbody']);
 const text=value=>String(value??'').trim();
 const bill=value=>text(value).toUpperCase();
 const uniq=values=>[...new Set((values||[]).map(bill).filter(Boolean))];
@@ -70,9 +70,11 @@ function addDays(date,days){const d=new Date(`${date}T12:00:00Z`);if(Number.isNa
 function rangeDays(from,to){const out=[];let day=text(from).slice(0,10),guard=0;while(day&&day<=to&&guard++<190){out.push(day);day=addDays(day,1);}return out;}
 function orderedArchiveDays(range={},mode='recent'){
   const from=text(range.from||range.fromDate).slice(0,10),to=text(range.to||range.toDate).slice(0,10),today=new Date().toISOString().slice(0,10);
-  const recent=[today,addDays(today,-1),to,addDays(to,1),addDays(to,-1)].filter(Boolean);
+  const recent=[today,addDays(today,-1),to,addDays(to,1),addDays(to,-1)].filter(Boolean),recentSet=new Set(recent);
   if(mode==='recent')return[...new Set(recent)];
-  return[...new Set([...recent,...rangeDays(from,to).reverse()])];
+  const historical=rangeDays(from,to).reverse().filter(day=>!recentSet.has(day));
+  if(mode==='history')return historical;
+  return[...new Set([...recent,...historical])];
 }
 async function mapLimit(items,limit,fn){let cursor=0;async function worker(){for(;;){const index=cursor++;if(index>=items.length)return;await fn(items[index],index);}}await Promise.all(Array.from({length:Math.min(limit,Math.max(1,items.length))},()=>worker()));}
 async function readArchive(file){const raw=await fs.readFile(file);return JSON.parse((await gunzipAsync(raw)).toString('utf8'));}
