@@ -10,6 +10,7 @@ const v273 = read('src/v273DashboardTruthReadPatch.js');
 const exporter = read('src/v225ExportReturnTruth.js');
 const historicalExporter = read('src/v320HistoricalExportRows.js');
 const dispatchTruth = read('src/v320DispatchSigningTruth.js');
+const canonicalLedger = read('src/v419CanonicalExportLedgerTruth.js');
 const worker = read('src/v183SingleBusinessExportJobWorker.js');
 const rangeStore = read('src/rangeDashboardStoreV294.js');
 const carryScheduler = read('src/carryoverRefreshScheduler.js');
@@ -30,9 +31,10 @@ assert.match(chart,/plot\.style\.overflowX='auto'/,'long ranges must expand hori
 assert.match(chart,/pointSpacing\(chart\)/,'trend width must scale with selected daily point count');
 assert.doesNotMatch(chart,/chart\.series\.length===1&&chart\.dates\.length<=10/,'old single-series-only label restriction must be retired');
 
-// 2) Legacy V294 publication helpers remain conservative. V320 may additionally
-// publish a sample average in its dedicated history view when some POD timing
-// evidence is missing, but it must never fabricate missing attempt evidence.
+// 2) Legacy V294 publication helpers remain conservative. Non-strict workbook
+// businesses may render unverified attempt/signing metrics as dash, while strict
+// TBKH/CN/VN evidence gaps are repaired by V484/V483 and remain fail-closed if
+// still unresolved. No path may fabricate missing attempt evidence.
 const partial = enforceV294MetricCompleteness({pod:4,attempt1:2,attempt2:1,attempt3:0,attemptUnknown:1,signingDaysCount:3,signingDaysSum:7});
 assert.equal(partial.attemptEvidenceComplete,false);
 assert.equal(partial.attempt1Rate,null);
@@ -42,9 +44,11 @@ assert.equal(completeAttemptRatio({pod:4,a1:2,a2:1,a3:0,attemptUnknown:1},2),nul
 assert.match(metricTruth,/dispatchAttempt1: publishAttempt \? n\(f\.attempt1\) : null/,'legacy dashboard cards must not publish partial known attempt counts');
 assert.match(metricTruth,/dispatchAttempt1Known/,'partial known counts may remain diagnostic only');
 
-// 3) V320 formal export must use every persisted daily membership occurrence,
-// not only current VALID batches and not unique shipment lifecycles. Optional
-// attempt/signing gaps are diagnostics and must not abort an otherwise valid workbook.
+// 3) Formal export must use every persisted daily membership occurrence,
+// not only current VALID batches and not unique shipment lifecycles. V489 retires
+// the old V381/V320 full-member strict scans from the workbook hot path: V419
+// canonical ledger hydrates saved POD/attempt/START truth by shipmentCode PK, then
+// V484/V483 repairs only actual strict POD gaps before metric publication.
 const repeatedShipment = {
   shipmentCode:'QC-REPEAT-1',area:'金边',pod:true,podDate:'2026-08-03',firstReportDate:'2026-08-01',attemptNo:1,
   dailyMembershipDates:['2026-08-01','2026-08-03'],returned:false,pending:false,delivering:false,store:false
@@ -63,18 +67,25 @@ assert.match(historicalExporter,/shipment_daily_snapshots/,'formal export must r
 assert.match(historicalExporter,/business_daily_parse_rows/,'formal export must recover legacy Shopee daily membership rows');
 assert.match(exporter,/expandDailyMembership\(rows,range\)/,'formal export must expand each shipment into exact daily membership occurrences');
 assert.match(exporter,/V320_EXPORT_DUPLICATE_DAILY_MEMBER/,'duplicate date+shipment membership must fail export closed');
-assert.match(exporter,/applyV320DispatchSigningTruth/,'formal export must use real dispatch START to POD timing truth');
-assert.match(dispatchTruth,/v246InclusiveDays\(dispatch,pod\)/,'dispatch-to-POD duration must be inclusive natural days');
-assert.doesNotMatch(dispatchTruth,/firstReportDate/,'dispatch timing must never start from report membership date');
-assert.doesNotMatch(exporter,/V294_EXPORT_EVIDENCE_INCOMPLETE/,'optional attempt/signing gaps must not abort the workbook in V320');
-assert.match(exporter,/evidencePartial/,'optional evidence gaps must remain explicit export diagnostics');
+assert.match(exporter,/V489_FORMAL_EXPORT_EVIDENCE_PATH_ID/,'formal export must expose the V489 canonical-ledger hot-path owner');
+assert.match(exporter,/applyV419CanonicalExportLedgerTruth\(businessType,rows,\{db:getDb\(\),onProgress\}\)/,'formal export must hydrate canonical persisted ledger truth before actual-POD gap repair');
+assert.doesNotMatch(exporter,/applyV320DispatchSigningTruth\s*\(/,'formal export must not re-run the retired V320 full-member event hydration');
+assert.match(canonicalLedger,/function strictSigningDays\(ledger=\{\}\)/,'V419 must own strict persisted START-to-POD signing truth');
+assert.match(canonicalLedger,/v246InclusiveDays\(first,pod\)/,'V419 strict START-to-POD duration must be inclusive natural days');
+assert.doesNotMatch(canonicalLedger,/firstReportDate/,'V419 strict signing timing must never start from report membership date');
+assert.match(dispatchTruth,/v246InclusiveDays\(dispatch,pod\)/,'compatibility V320 dispatch-to-POD duration must remain inclusive natural days');
+assert.doesNotMatch(dispatchTruth,/firstReportDate/,'compatibility V320 dispatch timing must never start from report membership date');
+assert.doesNotMatch(exporter,/V294_EXPORT_EVIDENCE_INCOMPLETE/,'legacy V294 incomplete marker must not replace the scoped V481/V484 strict evidence contract');
+assert.match(exporter,/evidencePartial/,'evidence gaps must remain explicit export diagnostics before scoped workbook gating');
 assert.match(historicalExporter,/businessType==='WHPP'\)return collectLegacyV200Rows/,'WHPP must retain its existing per-ticket export authority rather than aggregate-only history');
 
-// 4) Current production worker must use V200/V225/V320; V199 day-count fallback remains compatibility-only.
+// 4) Current production worker must use V200/V225/V489; V199 day-count fallback
+// and V320 full-member strict event hydration remain compatibility-only.
 assert.match(worker,/createV200ReferenceDashboardWorkbook/,'runtime worker must call V200 reference exporter');
 assert.match(worker,/void createShopeeTruthWorkbook; void createV199UnifiedDashboardWorkbook;/,'V199 must remain compatibility-only and not be the runtime call');
 assert.match(worker,/const result=await createV200ReferenceDashboardWorkbook/,'runtime export call must be V200');
-assert.match(exporter,/applyV320DispatchSigningTruth/,'V200 final row collector must apply V320 strict dispatch/signing truth');
+assert.match(exporter,/V489_FORMAL_EXPORT_EVIDENCE_PATH_ID/,'V200 final row collector must use V489 canonical-ledger formal-export truth');
+assert.doesNotMatch(exporter,/applyV320DispatchSigningTruth\s*\(/,'V200 final row collector must not restore the retired V320 full-member scan');
 
 // 5) Dashboard range cards keep the conservative V294 complete-evidence gate;
 // V320 history/sample views layer corrected sample metrics without weakening cards.
@@ -87,4 +98,4 @@ assert.match(carryScheduler,/KEEP_OPEN_UNTIL_RETURN_86/,'return-in-progress must
 assert.match(carryTruth,/NORMAL_FINAL/,'repair layer must include legacy false NORMAL_FINAL closures');
 assert.match(carryTruth,/hasV294ExactTerminal/,'reopen/close decision must depend on exact terminal evidence');
 
-console.log('[V320 FINAL QC] passed · exact custom dates + full persisted history export + real dispatch→POD timing + optional evidence nonblocking + duplicate membership fail-closed + V199 non-runtime + normal transit carryover stays OPEN');
+console.log('[V490/V489 FINAL QC] passed · exact custom dates + full persisted history membership + V419 canonical START-to-POD truth + actual-POD gap repair + duplicate membership fail-closed + V199/V320 full-member scans non-runtime + normal transit carryover stays OPEN');
