@@ -2,7 +2,6 @@ import { getDb } from './db.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { applyV246StrictAttemptEvidence } from './v246TrackingLedgerCore.js';
 import {
-  isV482StrictExportEvidenceType,
   listV483StrictExportRowGaps,
   applyV483StrictTruthToExportRows,
   repairV483StrictExportRows,
@@ -10,13 +9,17 @@ import {
 } from './v381ExportEvidenceRepair.js';
 import { recoverV485ArchivedTrackEvents, V485_STRICT_TRACK_EVIDENCE_ID } from './v485StrictTrackEvidence.js';
 
-export const V484_STRICT_EXPORT_EVIDENCE_OWNER_ID='2026-09-09-v484-actual-export-member-local-first-evidence-v1';
+export const V484_STRICT_EXPORT_EVIDENCE_OWNER_ID='2026-09-09-v492-shopee-only-strict-export-evidence-v1';
 const LOCAL_BATCH=220;
+const V484_STRICT_EXPORT_EVIDENCE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 const text=value=>String(value??'').trim();
 const billOf=value=>text(value).toUpperCase();
 const chunks=(values,size=LOCAL_BATCH)=>{const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;};
 
-export function isV484StrictExportEvidenceType(type){return isV482StrictExportEvidenceType(type);}
+// The V483/V484 attempt/signing evidence contract is Shopee-specific.
+// TBKH has valid tracking events, but does not share the Shopee attempt/signing semantics,
+// so formal TBKH export must not be blocked by this gate.
+export function isV484StrictExportEvidenceType(type){return V484_STRICT_EXPORT_EVIDENCE_TYPES.has(text(type).toUpperCase());}
 
 function pushEvents(result,rows=[],accept=()=>true){
   for(const row of rows){
@@ -106,4 +109,4 @@ export async function repairV484StrictExportEvidence({type,range,rows=[],db=getD
   return{...remote,ownerVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,total:initialTotal,localResolved,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:Number(remote?.queried||0),updated:updated+Number(remote?.updated||0)};
 }
 
-console.info('[CE-QC][V484_STRICT_EXPORT_EVIDENCE_OWNER]',V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,V485_STRICT_TRACK_EVIDENCE_ID,'formal TBKH/CN/VN export uses actual POD gaps: SQLite saved events → V266 archived track evidence → only residual nested-normalized CE 50x4.');
+console.info('[CE-QC][V492_STRICT_EXPORT_EVIDENCE_OWNER]',V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,V485_STRICT_TRACK_EVIDENCE_ID,'formal CN/VN export keeps Shopee strict evidence repair; TBKH bypasses Shopee-only attempt/signing gate.');
