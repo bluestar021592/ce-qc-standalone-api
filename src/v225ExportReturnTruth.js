@@ -3,13 +3,12 @@ import { V200_EXPORT_VERSION as BASE_EXPORT_VERSION } from './v200EvidenceData.j
 import { isShopeePending1203ReturnEvent } from './shopeeReturnTruth.js';
 import { applyV230AttemptSigningTruth, V230_ATTEMPT_SIGNING_TRUTH_ID } from './v230AttemptSigningTruth.js';
 import { collectV320HistoricalExportRows, V320_HISTORICAL_EXPORT_ROWS_ID } from './v320HistoricalExportRows.js';
-import { applyV320DispatchSigningTruth, V320_DISPATCH_SIGNING_TRUTH_ID } from './v320DispatchSigningTruth.js';
-import { applyV381LedgerExportTruth, V381_EXPORT_EVIDENCE_REPAIR_ID } from './v381ExportEvidenceRepair.js';
 import { applyV419CanonicalExportLedgerTruth, V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID } from './v419CanonicalExportLedgerTruth.js';
 
 export const V200_EXPORT_VERSION = BASE_EXPORT_VERSION;
 // Legacy identifier retained because external update gates/source diagnostics reference it.
 export const V225_EXPORT_RETURN_TRUTH_ID = '2026-08-27-v329-first-report-pod-export-signing-v1';
+export const V489_FORMAL_EXPORT_EVIDENCE_PATH_ID = '2026-09-09-v489-canonical-ledger-then-actual-pod-gap-v1';
 const STRICT_DELIVERY_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const DAILY_MEMBERSHIP_TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 // Compatibility marker for pre-V320 source assertions only: applyV294ExportAttemptSigningTruth.
@@ -37,29 +36,30 @@ export async function collectV200Rows(type,range,onProgress=()=>{}){
   const businessType=String(type||'').trim().toUpperCase();
   let rows=await collectV320HistoricalExportRows(businessType,range,onProgress);
   applyShopee1203SavedTrackTruth(businessType,rows);normalizeTerminalExclusion(rows);
-  // 1/2/3派与平均签收天数必须共享同一套真实派送证据：70 START优先，整票无70才允许60兜底；
-  // 对TBKH/SHOPEE CN/VN，缺真实START或POD时保持未知，禁止再用首次日报日期覆盖真实派送时效。
-  applyV230AttemptSigningTruth(businessType,rows);
-  // V381 only hydrates genuine persisted ledger evidence (POD + strict START).
-  // V320 below remains the final START->POD signing owner, so no first-report
-  // fallback can leak into Shopee average signing days.
-  applyV381LedgerExportTruth(businessType,rows,{db:getDb(),range});
-  applyV320DispatchSigningTruth(businessType,rows,{db:getDb()});
+
+  // V489 formal-export hot path: do not run the retired V381/V320 full-member
+  // strict-evidence hydrators before the canonical ledger. They caused 100k+
+  // TBKH/CN/VN members to re-read qc_tracking_ledger/track event tables in
+  // hundreds of batches before V419, even though V419 + V484 already own the
+  // exact same formal-export truth. Compatibility modules remain available to
+  // history/cache callers; only the formal workbook hot path is retired.
+  // V230 is retained only for non-strict businesses. For TBKH/CN/VN, V419 is the
+  // canonical persisted attempt/signing owner and V484 repairs only actual POD gaps.
+  if(!STRICT_DELIVERY_TYPES.has(businessType))applyV230AttemptSigningTruth(businessType,rows);
   applyV329FirstReportSigning(businessType,rows);
-  // V419 is intentionally last: old snapshots/final rows/track counters may enrich
-  // addresses and evidence, but they can never overwrite canonical terminal truth
-  // or a persisted V246 attempt after this point. V479 keeps this final authority
-  // but hydrates it by shipmentCode primary key and reports bounded progress.
+
+  // V419 is intentionally the first strict-evidence database owner in formal
+  // export: shipmentCode PK scalar hydration + JSON only for OPEN/strict POD.
   applyV419CanonicalExportLedgerTruth(businessType,rows,{db:getDb(),onProgress});
   normalizeTerminalExclusion(rows);
   const diag=evidenceDiagnostics(businessType,rows);
-  for(const row of rows){row.exportEvidencePartial=diag.partial;row.exportAttemptMissing=diag.attemptMissing;row.exportSigningMissing=diag.signingMissing;row.v320ExportTruthId=V225_EXPORT_RETURN_TRUTH_ID;row.v419CanonicalExportTruthId=row.v419CanonicalExportTruthId||V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID;}
+  for(const row of rows){row.exportEvidencePartial=diag.partial;row.exportAttemptMissing=diag.attemptMissing;row.exportSigningMissing=diag.signingMissing;row.v320ExportTruthId=V225_EXPORT_RETURN_TRUTH_ID;row.v419CanonicalExportTruthId=row.v419CanonicalExportTruthId||V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID;row.v489FormalExportEvidencePathId=V489_FORMAL_EXPORT_EVIDENCE_PATH_ID;}
   rows=DAILY_MEMBERSHIP_TYPES.has(businessType)?expandDailyMembership(rows,range):rows;
   const keys=rows.map(row=>`${dateKey(row.reportMembershipDate||row.dailyMembershipDates?.[0])}|${normalizeBill(row.shipmentCode)}`),unique=new Set(keys.filter(key=>!key.startsWith('|')));
   if(DAILY_MEMBERSHIP_TYPES.has(businessType)&&unique.size!==rows.length)throw new Error(`V320_EXPORT_DUPLICATE_DAILY_MEMBER:${businessType}:${rows.length-unique.size}`);
   if(!rows.length)throw new Error(`${businessType} 在所选区间没有可导出的已保存日报成员。`);
-  onProgress({phase:'returnAttemptSigningTruth',completed:rows.length,total:rows.length,returned:rows.filter(r=>r.returned&&!r.pod).length,notPodActive:rows.filter(r=>!r.pod&&!r.returned).length,unknownAttemptPod:diag.attemptMissing,unknownSigningPod:diag.signingMissing,dailyMembershipOccurrences:rows.length,evidencePartial:diag.partial,engine:`${V225_EXPORT_RETURN_TRUTH_ID}+${V230_ATTEMPT_SIGNING_TRUTH_ID}+${V320_HISTORICAL_EXPORT_ROWS_ID}+${V320_DISPATCH_SIGNING_TRUTH_ID}+${V381_EXPORT_EVIDENCE_REPAIR_ID}+${V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID}`});
+  onProgress({phase:'returnAttemptSigningTruth',completed:rows.length,total:rows.length,returned:rows.filter(r=>r.returned&&!r.pod).length,notPodActive:rows.filter(r=>!r.pod&&!r.returned).length,unknownAttemptPod:diag.attemptMissing,unknownSigningPod:diag.signingMissing,dailyMembershipOccurrences:rows.length,evidencePartial:diag.partial,engine:`${V225_EXPORT_RETURN_TRUTH_ID}+${V320_HISTORICAL_EXPORT_ROWS_ID}+${V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID}+${V489_FORMAL_EXPORT_EVIDENCE_PATH_ID}${STRICT_DELIVERY_TYPES.has(businessType)?'':`+${V230_ATTEMPT_SIGNING_TRUTH_ID}`}`});
   return rows;
 }
 
-console.info('[CE-QC][V419_EXPORT_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,'membership remains date-locked; V246 canonical ledger is the final POD/return/cancel/attempt authority after legacy export evidence enrichment.');
+console.info('[CE-QC][V419_EXPORT_TRUTH]',V225_EXPORT_RETURN_TRUTH_ID,V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,V489_FORMAL_EXPORT_EVIDENCE_PATH_ID,'formal export now goes membership → canonical V419 ledger → actual-POD V484 gap repair; retired V381/V320 full-member strict evidence scans stay off the workbook hot path.');
