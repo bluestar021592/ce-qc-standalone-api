@@ -1,16 +1,20 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { promisify } from 'node:util';
-import { gunzip } from 'node:zlib';
+import { gzip, gunzip } from 'node:zlib';
 import { getRuntimeConfig } from './db.js';
 
 export const V485_STRICT_TRACK_EVIDENCE_ID='2026-09-09-v485-nested-track-normalizer-v266-archive-reuse-v1';
-const gunzipAsync=promisify(gunzip);
+const gzipAsync=promisify(gzip),gunzipAsync=promisify(gunzip);
 const MAX_DEPTH=9;
 const MAX_NODES=30000;
 const ARCHIVE_CONCURRENCY=8;
 const ARCHIVE_MAX_FILES=12000;
 const TRACK_FOLDER='tms-shipment-event_query';
+const V266_ARCHIVE_ID='2026-08-23-v266-evergreen-evidence-archive-v1';
+const V266_RETENTION_DAYS=366;
+const V266_POLICY='NO_AUTOMATIC_ARCHIVE_DELETE_BEFORE_OR_AFTER_RETENTION; annual cleanup requires an explicit future guarded action';
 const BILL_KEYS=['shipmentCode','waybill','waybillNo','billCode','trackingNo','运单号'];
 const CODE_KEYS=['eventCode','trackingEventCode','statusCode','eventStatusCode','nodeCode','scanCode','trackCode','trackingCode','shipmentEventCode','operationCode','operateCode','eventTypeCode','statusTypeCode'];
 const TIME_KEYS=['eventTime','creationDate','lastUpdateDate','createdAt','eventDate','occurTime','occurrenceTime','trackingTime','scanTime','operateTime','operationTime'];
@@ -79,6 +83,17 @@ function orderedArchiveDays(range={},mode='recent'){
 async function mapLimit(items,limit,fn){let cursor=0;async function worker(){for(;;){const index=cursor++;if(index>=items.length)return;await fn(items[index],index);}}await Promise.all(Array.from({length:Math.min(limit,Math.max(1,items.length))},()=>worker()));}
 async function readArchive(file){const raw=await fs.readFile(file);return JSON.parse((await gunzipAsync(raw)).toString('utf8'));}
 
+export async function archiveV485TrackQueryResponse(requestBills,responseRows){
+  const requestBody=uniq(requestBills);if(!requestBody.length)return{archived:false,skipped:true,reason:'NO_BILLS'};
+  const cfg=getRuntimeConfig(),capturedAt=new Date().toISOString(),day=capturedAt.slice(0,10),dir=path.join(cfg.evidenceArchiveDir,'ce_api',day,TRACK_FOLDER);await fs.mkdir(dir,{recursive:true});
+  const responseData={success:true,data:Array.isArray(responseRows)?responseRows:[]},endpoint='/api/tms-shipment-event/query',label='V485_EXPORT_RESIDUAL_TRACK';
+  const canonical=JSON.stringify({endpoint,label:responseData.label,requestBody,responseData});const sha256=crypto.createHash('sha256').update(canonical).digest('hex'),file=path.join(dir,`${sha256}.json.gz`);
+  const retain=new Date(capturedAt);retain.setUTCDate(retain.getUTCDate()+V266_RETENTION_DAYS);
+  const payload={id:V266_ARCHIVE_ID,kind:'CE_API_EVIDENCE',capturedAt,retainUntil:retain.toISOString(),policy:V266_POLICY,endpoint,label:responseData.label,requestBody,responseData};
+  const compressed=await gzipAsync(Buffer.from(JSON.stringify(payload),'utf8'),{level:6});
+  try{await fs.writeFile(file,compressed,{flag:'wx'});return{archived:true,deduped:false,sha256,file,bytes:compressed.length};}catch(error){if(error?.code==='EEXIST')return{archived:true,deduped:true,sha256,file};throw error;}
+}
+
 export async function recoverV485ArchivedTrackEvents({range={},targetBills=[],mode='recent',onProgress=()=>{},maxFiles=ARCHIVE_MAX_FILES}={}){
   const targets=new Set(uniq(targetBills));const eventsByBill=new Map([...targets].map(code=>[code,[]]));
   if(!targets.size)return{eventsByBill,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,eventBills:0,readErrors:0,truncated:false};
@@ -101,4 +116,4 @@ export async function recoverV485ArchivedTrackEvents({range={},targetBills=[],mo
   return{eventsByBill,filesConsidered:files.length,processedFiles,matchedFiles,requestBillsMatched:requested.size,eventBills:eventBills.size,readErrors,truncated};
 }
 
-console.info('[CE-QC][V485_STRICT_TRACK_EVIDENCE]',V485_STRICT_TRACK_EVIDENCE_ID,'nested CE track payloads inherit parent shipmentCode; strict export may reuse V266 tms-shipment-event gzip evidence before any residual CE network request.');
+console.info('[CE-QC][V485_STRICT_TRACK_EVIDENCE]',V485_STRICT_TRACK_EVIDENCE_ID,'nested CE track payloads inherit parent shipmentCode; strict export reuses and writes V266-compatible track gzip evidence before repeated residual CE requests.');
