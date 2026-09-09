@@ -1,8 +1,8 @@
 import ExcelJS from 'exceljs';
 import { ratio, anchor, completeAttemptRatio, completeSigningAverage } from './v200Metrics.js';
 
-export const V481_VERIFIED_METRIC_SCOPE_ID='2026-09-08-v481-business-scoped-verified-export-metrics-v1';
-const STRICT_VERIFIED_METRIC_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
+export const V481_VERIFIED_METRIC_SCOPE_ID='2026-09-09-v492-shopee-only-verified-export-metrics-v1';
+const STRICT_VERIFIED_METRIC_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 const FONT = 'Microsoft YaHei';
 const DETAIL_SHEETS = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
 const DETAIL_HEADERS = ['日期', '运单编号', '下单时间', '状态标识', '状态说明', '收件省份', '区域分类', '当前门店', '当前省份', '收件人', '收件人手机', '收件地址', '派件时间', '派件门店', '派件省份', '派件快递员', '异常编码', '异常描述', '备注'];
@@ -111,7 +111,7 @@ function createDashboard(workbook, type, range, stats, anchors) {
     mr++;
   }
   const noteRow = mr + 1; sheet.mergeCells(noteRow, 1, noteRow, 16);
-  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在整票没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派。TBKH、SHOPEE CN/VN属于严格派次/签收证据业务：POD派次或真实START→POD签收样本不完整时拒绝生成。CE、CEAF、ALI1688、WHPP保留已证实票数；无法完整验证的派次占比或平均签收显示“—”，绝不伪造0%、默认1派或默认天数。`;
+  sheet.getCell(noteRow, 1).value = `派次口径：轨迹状态码70真实START优先；仅在整票没有70时使用60作为START兜底。连续/重复START不增加派次，只有上一派出现失败或Pending事实后再次START才进入下一派。SHOPEE CN/VN属于严格派次/签收证据业务：POD派次或真实START→POD签收样本不完整时拒绝生成。TBKH、CE、CEAF、ALI1688、WHPP保留已证实票数；无法完整验证的派次占比或平均签收显示“—”，绝不伪造0%、默认1派或默认天数。`;
   sheet.getCell(noteRow, 1).font={name:FONT,size:9,color:{argb:'FF657B95'}};sheet.getCell(noteRow,1).alignment={wrapText:true,vertical:'middle'};sheet.getRow(noteRow).height=42;
   sheet.commit();
 }
@@ -134,4 +134,4 @@ export async function writeV200ReferenceWorkbook({file,type,range,rows,stats,buc
   await workbook.commit();
 }
 export function internalHyperlinkFormulaForV200(sheet,row,display){return internalFormula(sheet,row,display).formula;}
-console.info('[CE-QC][V481_VERIFIED_METRIC_SCOPE]',V481_VERIFIED_METRIC_SCOPE_ID,'strict=TBKH+SHOPEECN+SHOPEEVN; CE/CEAF/ALI1688/WHPP publish dash for unverified attempt/signing metrics without fabricating zero or blocking the whole workbook.');
+console.info('[CE-QC][V492_VERIFIED_METRIC_SCOPE]',V481_VERIFIED_METRIC_SCOPE_ID,'strict=SHOPEECN+SHOPEEVN; TBKH/CE/CEAF/ALI1688/WHPP publish dash for unverified attempt/signing metrics without fabricating zero or blocking the whole workbook.');
