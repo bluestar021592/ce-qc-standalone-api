@@ -87,9 +87,9 @@ export async function archiveV485TrackQueryResponse(requestBills,responseRows){
   const requestBody=uniq(requestBills);if(!requestBody.length)return{archived:false,skipped:true,reason:'NO_BILLS'};
   const cfg=getRuntimeConfig(),capturedAt=new Date().toISOString(),day=capturedAt.slice(0,10),dir=path.join(cfg.evidenceArchiveDir,'ce_api',day,TRACK_FOLDER);await fs.mkdir(dir,{recursive:true});
   const responseData={success:true,data:Array.isArray(responseRows)?responseRows:[]},endpoint='/api/tms-shipment-event/query',label='V485_EXPORT_RESIDUAL_TRACK';
-  const canonical=JSON.stringify({endpoint,label:responseData.label,requestBody,responseData});const sha256=crypto.createHash('sha256').update(canonical).digest('hex'),file=path.join(dir,`${sha256}.json.gz`);
+  const canonical=JSON.stringify({endpoint,label,requestBody,responseData});const sha256=crypto.createHash('sha256').update(canonical).digest('hex'),file=path.join(dir,`${sha256}.json.gz`);
   const retain=new Date(capturedAt);retain.setUTCDate(retain.getUTCDate()+V266_RETENTION_DAYS);
-  const payload={id:V266_ARCHIVE_ID,kind:'CE_API_EVIDENCE',capturedAt,retainUntil:retain.toISOString(),policy:V266_POLICY,endpoint,label:responseData.label,requestBody,responseData};
+  const payload={id:V266_ARCHIVE_ID,kind:'CE_API_EVIDENCE',capturedAt,retainUntil:retain.toISOString(),policy:V266_POLICY,endpoint,label,requestBody,responseData};
   const compressed=await gzipAsync(Buffer.from(JSON.stringify(payload),'utf8'),{level:6});
   try{await fs.writeFile(file,compressed,{flag:'wx'});return{archived:true,deduped:false,sha256,file,bytes:compressed.length};}catch(error){if(error?.code==='EEXIST')return{archived:true,deduped:true,sha256,file};throw error;}
 }
