@@ -61,7 +61,7 @@ test('OPEN/RETURNED ledger clears every stale POD-derived field, not only the vi
   }finally{db.close();}
 });
 
-test('V225 export pipeline applies V419 canonical ledger after all legacy evidence calculators',()=>{
+test('V489 formal export makes V419 the first strict database owner and retires duplicate V381/V320 full-member scans',()=>{
   const source=fs.readFileSync(new URL('../src/v225ExportReturnTruth.js',import.meta.url),'utf8');
   const pipelineStart=source.indexOf('export async function collectV200Rows');
   assert.ok(pipelineStart>=0,'collectV200Rows pipeline must exist');
@@ -71,7 +71,11 @@ test('V225 export pipeline applies V419 canonical ledger after all legacy eviden
   const v320=pipeline.indexOf('applyV320DispatchSigningTruth(businessType,rows');
   const v329=pipeline.indexOf('applyV329FirstReportSigning(businessType,rows');
   const v419=pipeline.indexOf('applyV419CanonicalExportLedgerTruth(businessType,rows');
-  assert.ok(v230>=0&&v381>v230&&v320>v381&&v329>v320&&v419>v329,'V419 ledger truth must be the final export authority inside collectV200Rows');
-  assert.match(pipeline,/V419 is intentionally last/);
+  assert.ok(v230>=0&&v329>v230&&v419>v329,'V419 ledger truth must follow only the lightweight compatibility gates inside collectV200Rows');
+  assert.equal(v381,-1,'retired V381 full-member strict evidence scan must stay off the formal workbook hot path');
+  assert.equal(v320,-1,'retired V320 full-member dispatch/signing scan must stay off the formal workbook hot path');
+  assert.match(pipeline,/if\(!STRICT_DELIVERY_TYPES\.has\(businessType\)\)applyV230AttemptSigningTruth\(businessType,rows\)/,'V230 compatibility evidence must be non-strict only');
+  assert.match(pipeline,/V419 is intentionally the first strict-evidence database owner/,'V419 must remain the first strict database owner in formal export');
   assert.match(source,/V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID/);
+  assert.match(source,/V489_FORMAL_EXPORT_EVIDENCE_PATH_ID/);
 });
