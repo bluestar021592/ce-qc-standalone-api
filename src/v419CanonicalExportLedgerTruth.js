@@ -3,7 +3,7 @@ import { ensureV246TrackingSchema, v246InclusiveDays } from './v246TrackingLedge
 
 export const V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID='2026-09-03-v419-canonical-export-ledger-truth-v2';
 export const V479_CANONICAL_LEDGER_READ_ID='2026-09-08-v479-primary-key-scalar-ledger-hydration-v1';
-export const V493_SCAN85_POD_DATE_RECOVERY_ID='2026-09-09-v493-scan85-saved-terminal-pod-date-v1';
+export const V493_SCAN85_POD_DATE_RECOVERY_ID='2026-09-09-v493-scan85-saved-terminal-pod-date-v2';
 const TYPES=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
 const STRICT_TYPES=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
 const LEDGER_CHUNK_SIZE=900;
@@ -79,6 +79,15 @@ function jsonColumnByBill(db,bills,column){
   }
   return out;
 }
+function shipmentCurrentStateJsonByBill(db,bills){
+  const out=new Map();if(!bills.length)return out;
+  for(const part of chunks(bills)){
+    const marks=part.map(()=>'?').join(',');if(!marks)continue;
+    let rows=[];try{rows=db.prepare(`SELECT shipmentCode,stateJson FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...part);}catch{rows=[];}
+    for(const row of rows){const code=billOf(row.shipmentCode);if(code&&text(row.stateJson))out.set(code,row.stateJson);}
+  }
+  return out;
+}
 
 export function applyV419CanonicalExportLedgerTruth(businessType,rows=[],{db=getDb(),onProgress=()=>{}}={}){
   const type=text(businessType).toUpperCase();
@@ -87,7 +96,7 @@ export function applyV419CanonicalExportLedgerTruth(businessType,rows=[],{db=get
   const byBill=new Map();
   for(const row of rows){const bill=billOf(row?.shipmentCode||row?.运单号);if(!bill)continue;if(!byBill.has(bill))byBill.set(bill,[]);byBill.get(bill).push(row);}
   const bills=[...byBill.keys()];
-  let matched=0,terminal=0,pod=0,returned=0,open=0,attemptLocked=0,processed=0,openJsonRows=0,strictEvidenceRows=0,scan85PodDateRows=0;
+  let matched=0,terminal=0,pod=0,returned=0,open=0,attemptLocked=0,processed=0,openJsonRows=0,strictEvidenceRows=0,scan85PodDateRows=0,terminalStateFallbackRows=0;
   onProgress({phase:'hydrateLedgerTruth',completed:0,total:bills.length,entries:bills.length,source:V479_CANONICAL_LEDGER_READ_ID,batchSize:LEDGER_CHUNK_SIZE});
   for(const part of chunks(bills)){
     const marks=part.map(()=>'?').join(',');if(!marks)continue;
@@ -101,6 +110,9 @@ export function applyV419CanonicalExportLedgerTruth(businessType,rows=[],{db=get
     const strictMissingPodDateBills=STRICT_TYPES.has(type)?ledger.filter(locked=>text(locked.trackingStatus).toUpperCase()==='TERMINAL'&&text(locked.terminalReason).toUpperCase()==='POD'&&!dateKey(locked.podDate)).map(locked=>billOf(locked.shipmentCode)).filter(Boolean):[];
     const currentStateBills=[...new Set([...openBills,...strictMissingPodDateBills])];
     const currentJson=jsonColumnByBill(db,currentStateBills,'currentStateJson');
+    const stillMissingSavedTerminal=strictMissingPodDateBills.filter(code=>!scan85SavedPodDate({currentStateJson:currentJson.get(code)}));
+    const stateFallback=shipmentCurrentStateJsonByBill(db,stillMissingSavedTerminal);
+    for(const code of stillMissingSavedTerminal){const candidate=stateFallback.get(code);if(candidate&&scan85SavedPodDate({currentStateJson:candidate})){currentJson.set(code,candidate);terminalStateFallbackRows+=1;}}
     const evidenceJson=jsonColumnByBill(db,strictPodBills,'evidenceJson');
     openJsonRows+=currentJson.size;strictEvidenceRows+=evidenceJson.size;
     for(const locked of ledger){
@@ -123,11 +135,11 @@ export function applyV419CanonicalExportLedgerTruth(businessType,rows=[],{db=get
       }
     }
     processed+=part.length;
-    onProgress({phase:'hydrateLedgerTruth',completed:Math.min(processed,bills.length),total:bills.length,entries:bills.length,matched,terminal,pod,returned,open,attemptLocked,openJsonRows,strictEvidenceRows,scan85PodDateRows,source:V479_CANONICAL_LEDGER_READ_ID,batchSize:LEDGER_CHUNK_SIZE,podDateRecovery:V493_SCAN85_POD_DATE_RECOVERY_ID});
+    onProgress({phase:'hydrateLedgerTruth',completed:Math.min(processed,bills.length),total:bills.length,entries:bills.length,matched,terminal,pod,returned,open,attemptLocked,openJsonRows,strictEvidenceRows,scan85PodDateRows,terminalStateFallbackRows,source:V479_CANONICAL_LEDGER_READ_ID,batchSize:LEDGER_CHUNK_SIZE,podDateRecovery:V493_SCAN85_POD_DATE_RECOVERY_ID});
   }
-  Object.defineProperty(rows,'v419CanonicalExportDiagnostics',{value:{id:V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,readId:V479_CANONICAL_LEDGER_READ_ID,podDateRecoveryId:V493_SCAN85_POD_DATE_RECOVERY_ID,type,rows:rows.length,matched,terminal,pod,returned,open,attemptLocked,openJsonRows,strictEvidenceRows,scan85PodDateRows,ledgerChunkSize:LEDGER_CHUNK_SIZE,primaryKeyOnly:true},enumerable:false,configurable:true});
+  Object.defineProperty(rows,'v419CanonicalExportDiagnostics',{value:{id:V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,readId:V479_CANONICAL_LEDGER_READ_ID,podDateRecoveryId:V493_SCAN85_POD_DATE_RECOVERY_ID,type,rows:rows.length,matched,terminal,pod,returned,open,attemptLocked,openJsonRows,strictEvidenceRows,scan85PodDateRows,terminalStateFallbackRows,ledgerChunkSize:LEDGER_CHUNK_SIZE,primaryKeyOnly:true},enumerable:false,configurable:true});
   return rows;
 }
 
-console.info('[CE-QC][V493_EXPORT_POD_DATE_RECOVERY]',V493_SCAN85_POD_DATE_RECOVERY_ID,'formal export reads currentStateJson only for OPEN rows plus strict POD rows whose canonical podDate is blank; orderStatus=85 may recover POD date only from saved terminal timestamps such as updateTime/lastUpdateDate, never from export time or lastCheckedAt.');
+console.info('[CE-QC][V493_EXPORT_POD_DATE_RECOVERY]',V493_SCAN85_POD_DATE_RECOVERY_ID,'formal export reads local saved state only for strict POD rows whose canonical podDate is blank: qc_tracking_ledger.currentStateJson first, shipment_current_state.stateJson fallback second; orderStatus=85 may recover POD date only from saved terminal timestamps such as updateTime/lastUpdateDate, never from export time or lastCheckedAt.');
 console.info('[CE-QC][V419_EXPORT_LEDGER_TRUTH]',V419_CANONICAL_EXPORT_LEDGER_TRUTH_ID,V479_CANONICAL_LEDGER_READ_ID,'daily membership stays historical; export hydration uses shipmentCode primary-key scalar reads, with JSON fetched only for OPEN or strict POD evidence/recovery gaps.');
