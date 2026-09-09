@@ -96,12 +96,18 @@ function childFraction(state={}){
   if(phase==='sourcerows')return 0.58;
   if(phase==='hydrateledgertruth')return 0.58+0.12*ratio;
   if(phase==='returnattemptsigningtruth')return 0.70;
-  if(phase==='writing')return 0.72+0.26*ratio;
+  if(phase==='strictexportevidencesaved')return 0.70+0.03*ratio;
+  if(phase==='strictexportevidencesaveddone')return 0.73;
+  if(phase==='strictexportevidencearchive')return 0.73+0.08*ratio;
+  if(phase==='strictexportevidencearchivedone')return 0.81;
+  if(phase==='strictexportevidence')return 0.81+0.09*ratio;
+  if(phase==='strictexportevidencedone')return 0.90;
+  if(phase==='writing')return 0.91+0.08*ratio;
   if(phase==='done')return 1;
   return 0.03;
 }
 function childMessage(type,range,state,elapsedSec){
-  const phase=String(state?.phase||'').toLowerCase(),completed=Number(state?.completed||0),total=Number(state?.total||0),entries=Number(state?.entries||0);
+  const phase=String(state?.phase||'').toLowerCase(),completed=Number(state?.completed||0),total=Number(state?.total||0),entries=Number(state?.entries||0),unresolved=Number(state?.unresolved||0);
   if(phase==='membershipplan')return total>0?`${type} 已用索引选定 ${total} 个日报快照；准备读取成员`:`${type} 正在从日报批次索引选择每一天最新 VALID 快照`;
   if(phase==='membershipload')return `${type} 正在读取已选日报成员 ${completed}/${Math.max(total,completed)} 天 · 当前唯一运单 ${entries.toLocaleString()}`;
   if(phase==='membershiprows')return `${type} 已锁定 ${entries.toLocaleString()} 个历史运单成员；准备索引读取最终状态`;
@@ -109,7 +115,13 @@ function childMessage(type,range,state,elapsedSec){
   if(phase==='hydratecurrenttruth')return `${type} 正在索引叠加当前持久化状态 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()}`;
   if(phase==='sourcerows')return `${type} 历史成员/最终状态读取完成，共 ${entries.toLocaleString()} 个唯一运单；正在做证据对账`;
   if(phase==='hydrateledgertruth')return `${type} 正在按 shipmentCode 主键读取V246账本 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()} · 仅OPEN/严格POD按需读取JSON证据`;
-  if(phase==='returnattemptsigningtruth')return `${type} 状态/派次/签收证据对账完成；准备生成Excel`;
+  if(phase==='returnattemptsigningtruth')return `${type} 状态/派次/签收基础对账完成；准备补严格轨迹证据`;
+  if(phase==='strictexportevidencesaved')return `${type} 正在用SQLite已保存轨迹补严格证据 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()} · 剩余 ${unresolved.toLocaleString()} 票`;
+  if(phase==='strictexportevidencesaveddone')return `${type} SQLite严格证据读取完成 · 本地恢复 ${Number(state.localResolved||0).toLocaleString()} 票 · 剩余 ${unresolved.toLocaleString()} 票`;
+  if(phase==='strictexportevidencearchive')return `${type} 正在读取V266离线轨迹档案（${state.mode==='recent'?'最近档案':'历史档案'}） ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()} 文件 · 命中事件运单 ${Number(state.eventBills||0).toLocaleString()}`;
+  if(phase==='strictexportevidencearchivedone')return `${type} V266离线轨迹档案读取完成（${state.mode==='recent'?'最近档案':'历史档案'}） · 恢复 ${Number(state.resolved||0).toLocaleString()} 票 · 剩余 ${unresolved.toLocaleString()} 票`;
+  if(phase==='strictexportevidence')return `${type} 正在50×4补核剩余严格轨迹 ${completed.toLocaleString()}/${Math.max(total,completed).toLocaleString()} · 已查询 ${Number(state.queried||0).toLocaleString()} · 失败 ${Number(state.failed||0).toLocaleString()} · 有事件 ${Number(state.eventBills||0).toLocaleString()} 票`;
+  if(phase==='strictexportevidencedone')return `${type} 严格轨迹补核完成 · 剩余 ${unresolved.toLocaleString()} 票 · 准备生成Excel`;
   if(phase==='writing')return `${type} 正在写Excel：${state.sheet||'明细'}（${completed}/${Math.max(total,completed)}张明细sheet）`;
   if(phase==='done')return `${type} 完整Excel已生成`;
   return `正在生成 ${type} 完整表格 · ${range.from} 至 ${range.to} · 已运行${elapsedSec}秒`;
