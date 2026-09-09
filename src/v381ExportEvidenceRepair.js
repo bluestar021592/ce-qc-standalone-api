@@ -3,7 +3,7 @@ import { CEClient } from './ceClient.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { ensureV246TrackingSchema, applyV246StrictAttemptEvidence, v246InclusiveDays } from './v246TrackingLedgerCore.js';
 import { backfillV294StrictAttemptsFromSavedEvidence, V294_ATTEMPT_TYPES } from './v294AttemptSigningTruth.js';
-import { normalizeV485TrackRows, V485_STRICT_TRACK_EVIDENCE_ID } from './v485StrictTrackEvidence.js';
+import { archiveV485TrackQueryResponse, normalizeV485TrackRows, V485_STRICT_TRACK_EVIDENCE_ID } from './v485StrictTrackEvidence.js';
 
 export const V381_EXPORT_EVIDENCE_REPAIR_ID='2026-08-31-v381-shopee-export-scoped-evidence-repair-v1';
 export const V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID='2026-09-08-v482-three-business-export-scoped-evidence-repair-v1';
@@ -147,10 +147,13 @@ export async function repairV483StrictExportRows({type,range,rows=[],db=getDb(),
   onProgress({phase:'strictExportEvidence',completed:0,total,queried:0,failed:0,unresolved:total,eventBills:0,normalizedEvents:0,batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID,trackNormalizerVersion:V485_STRICT_TRACK_EVIDENCE_ID});
   if(!total)return{ok:true,version:V483_EXPORT_MEMBER_EVIDENCE_ID,...selection,total:0,queried:0,failed:0,updated:0,unresolved:0,eventBills:0,normalizedEvents:0};
 
-  const ce=client||new CEClient(),gapByBill=new Map(gaps.map(item=>[item.shipmentCode,item])),groups=chunks([...gapByBill.keys()]),eventBillSet=new Set(),stats={completed:0,queried:0,failed:0,updated:0,resolved:0,rawRows:0,normalizedEvents:0};
+  const ce=client||new CEClient(),gapByBill=new Map(gaps.map(item=>[item.shipmentCode,item])),groups=chunks([...gapByBill.keys()]),eventBillSet=new Set(),stats={completed:0,queried:0,failed:0,updated:0,resolved:0,rawRows:0,normalizedEvents:0,archivedBatches:0};
   await mapLimit(groups,V381_EXPORT_TRACK_CONCURRENCY,async bills=>{
     let rawEvents=[];
-    try{rawEvents=await ce.trackQuery(bills);stats.queried+=bills.length;stats.rawRows+=Array.isArray(rawEvents)?rawEvents.length:0;}
+    try{
+      rawEvents=await ce.trackQuery(bills);stats.queried+=bills.length;stats.rawRows+=Array.isArray(rawEvents)?rawEvents.length:0;
+      try{const archived=await archiveV485TrackQueryResponse(bills,rawEvents);if(archived?.archived)stats.archivedBatches+=1;}catch{}
+    }
     catch{stats.failed+=bills.length;stats.completed+=bills.length;onProgress({phase:'strictExportEvidence',...stats,total,eventBills:eventBillSet.size,unresolved:Math.max(0,total-stats.resolved),batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID,trackNormalizerVersion:V485_STRICT_TRACK_EVIDENCE_ID});return;}
     const events=normalizeV485TrackRows(rawEvents,{fallbackBills:bills});stats.normalizedEvents+=events.length;
     const byBill=new Map();for(const event of events){const bill=eventBill(event);if(!bill)continue;if(!byBill.has(bill))byBill.set(bill,[]);byBill.get(bill).push(event);eventBillSet.add(bill);}
@@ -167,9 +170,9 @@ export async function repairV483StrictExportRows({type,range,rows=[],db=getDb(),
 
   gaps=listV483StrictExportRowGaps(selection.businessType,rows);
   const missingAttempt=gaps.filter(item=>!item.attemptKnown).length,missingSigning=gaps.filter(item=>!item.signingKnown).length,missingPodDate=gaps.filter(item=>!item.podDate).length;
-  const result={ok:gaps.length===0,version:V483_EXPORT_MEMBER_EVIDENCE_ID,...selection,total,queried:stats.queried,failed:stats.failed,rawRows:stats.rawRows,normalizedEvents:stats.normalizedEvents,eventBills:eventBillSet.size,noEventBills:Math.max(0,total-eventBillSet.size),updated:stats.updated,resolved:total-gaps.length,unresolved:gaps.length,missingAttempt,missingSigning,missingPodDate,sample:gaps.slice(0,8).map(item=>item.shipmentCode),trackNormalizerVersion:V485_STRICT_TRACK_EVIDENCE_ID};
+  const result={ok:gaps.length===0,version:V483_EXPORT_MEMBER_EVIDENCE_ID,...selection,total,queried:stats.queried,failed:stats.failed,rawRows:stats.rawRows,normalizedEvents:stats.normalizedEvents,eventBills:eventBillSet.size,noEventBills:Math.max(0,total-eventBillSet.size),archivedBatches:stats.archivedBatches,updated:stats.updated,resolved:total-gaps.length,unresolved:gaps.length,missingAttempt,missingSigning,missingPodDate,sample:gaps.slice(0,8).map(item=>item.shipmentCode),trackNormalizerVersion:V485_STRICT_TRACK_EVIDENCE_ID};
   onProgress({phase:'strictExportEvidenceDone',...result,batchSize:V381_EXPORT_TRACK_BATCH,concurrency:V381_EXPORT_TRACK_CONCURRENCY,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID});
-  if(gaps.length){const error=new Error(`V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE:${selection.businessType}:missingAttempt=${missingAttempt}:missingSigning=${missingSigning}:missingPodDate=${missingPodDate}:queried=${result.queried}:failed=${result.failed}:eventBills=${result.eventBills}:normalizedEvents=${result.normalizedEvents}${result.sample.length?`:sample=${result.sample.join(',')}`:''}`);error.code='V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE';error.diagnostics=result;throw error;}
+  if(gaps.length){const error=new Error(`V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE:${selection.businessType}:missingAttempt=${missingAttempt}:missingSigning=${missingSigning}:missingPodDate=${missingPodDate}:queried=${result.queried}:failed=${result.failed}:eventBills=${result.eventBills}:normalizedEvents=${result.normalizedEvents}:archivedBatches=${result.archivedBatches}${result.sample.length?`:sample=${result.sample.join(',')}`:''}`);error.code='V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE';error.diagnostics=result;throw error;}
   return result;
 }
 
@@ -180,4 +183,4 @@ export async function prepareV381ShopeeExportEvidence(options={}){
   return prepareV482StrictExportEvidence(options);
 }
 
-console.info('[CE-QC][V483_STRICT_EXPORT_EVIDENCE]',V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,V483_EXPORT_MEMBER_EVIDENCE_ID,V485_STRICT_TRACK_EVIDENCE_ID,'TBKH + SHOPEECN + SHOPEEVN actual export POD membership uses normalized nested CE track events; unresolved rows fail with remote queried/failed/event coverage diagnostics.');
+console.info('[CE-QC][V483_STRICT_EXPORT_EVIDENCE]',V482_STRICT_EXPORT_EVIDENCE_REPAIR_ID,V483_EXPORT_MEMBER_EVIDENCE_ID,V485_STRICT_TRACK_EVIDENCE_ID,'TBKH + SHOPEECN + SHOPEEVN actual export POD membership uses nested-normalized CE track events and persists successful residual responses into V266-compatible gzip evidence.');
