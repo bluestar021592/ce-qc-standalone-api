@@ -11,11 +11,16 @@ export const V499_FRESH_START_READY_KEY='v499_fresh_start_tracking_ready';
 // behavior. A separate HARD flag still provides an emergency stop at any time.
 const hardDisable=String(process.env.CE_QC_HARD_DISABLE_V246_TRACKING||'')==='1';
 const inheritedDisable=String(process.env.CE_QC_DISABLE_V246_TRACKING||'')==='1';
+const readyOverride=String(process.env.CE_QC_V499_FRESH_START_READY_OVERRIDE||'').trim();
 let freshStartReady=false;
-try{
-  const db=getDb();
-  freshStartReady=String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(V499_FRESH_START_READY_KEY)?.value||'')==='1';
-}catch{}
+if(readyOverride==='1')freshStartReady=true;
+else if(readyOverride==='0')freshStartReady=false;
+else{
+  try{
+    const db=getDb();
+    freshStartReady=String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(V499_FRESH_START_READY_KEY)?.value||'')==='1';
+  }catch{}
+}
 
 if(inheritedDisable&&!hardDisable&&freshStartReady)delete process.env.CE_QC_DISABLE_V246_TRACKING;
 
