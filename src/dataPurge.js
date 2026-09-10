@@ -23,7 +23,7 @@ const PURGE_EXECUTE_COUNT_MODE='DELETE_CHANGESET_EXACT';
 const PRE_CLEAR_BACKUP_WORKER=fileURLToPath(new URL('../scripts/CE_QC_PreClearBackupWorker.mjs',import.meta.url));
 const PURGE_PREPARE_TASK_WORKER=fileURLToPath(new URL('../scripts/CE_QC_PurgePrepareTaskWorker.mjs',import.meta.url));
 const PRE_CLEAR_BACKUP_TIMEOUT_MS=Math.max(5*60_000,Math.min(60*60_000,Number(process.env.PURGE_PRE_CLEAR_BACKUP_TIMEOUT_MS||30*60_000)));
-const PURGE_PREPARE_STALE_MS=PRE_CLEAR_BACKUP_TIMEOUT_MS+10*60_000;
+const PURGE_PREPARE_STALE_MS=Math.max(30_000,Math.min(5*60_000,Number(process.env.PURGE_PREPARE_STALE_MS||60_000)));
 const PURGE_PREPARE_START_DELAY_MS=Math.max(750,Math.min(10_000,Number(process.env.PURGE_PREPARE_START_DELAY_MS||2000)));
 const PURGE_PREPARE_HEARTBEAT_MS=5000;
 const challenges=new Map();
@@ -62,11 +62,16 @@ export async function createPurgeChallenge(user={},options={}){
 
   if(existing&&['QUEUED','RUNNING'].includes(existing.status)){
     const heartbeatAt=Number(existing.heartbeatAt||existing.startedAt||existing.submittedAt||0);
-    if(heartbeatAt>0&&Date.now()-heartbeatAt<PURGE_PREPARE_STALE_MS){
+    const workerPid=Number(existing.workerPid||0);
+    const workerAlive=workerPid<=0||pidIsAlive(workerPid);
+    if(workerAlive&&heartbeatAt>0&&Date.now()-heartbeatAt<PURGE_PREPARE_STALE_MS){
       return pendingPurgePayload(existing);
     }
-    markPurgeJobFailed(existing,'清空前安全备份后台任务失去心跳，已停止本次清除。请重新开始。');
+    const failed=markPurgeJobFailed({...existing,jobFile},workerAlive
+      ?'清空前安全备份后台任务超过60秒没有心跳，已停止本次清除。请重新开始。'
+      :'清空前安全备份后台进程已经退出，已停止本次清除。请重新开始。');
     clearPurgeBlock(db);
+    return pendingPurgePayload(failed);
   }
 
   if(existing?.status==='FAILED')deletePurgeArtifacts(user,existing,{keepChallenge:true});
@@ -133,7 +138,7 @@ export async function runPurgePreparationWorker(payload={}){
   },PURGE_PREPARE_HEARTBEAT_MS);
   heartbeat.unref?.();
   try{
-    const result=await performPurgePreparation(payload.user||{},{activeRunIds:payload.activeRunIds||[],jobId});
+    const result=await performPurgePreparation(payload.user||{},{activeRunIds:payload.activeRunIds||[],jobId,strictRunLocks:true});
     const completed={...readJsonFile(jobFile),status:'SUCCEEDED',completedAt:Date.now(),heartbeatAt:Date.now(),updatedAt:Date.now(),payload:result,error:''};
     writeJsonAtomic(jobFile,completed);
     writePublicPurgeStatus(completed);
@@ -155,7 +160,7 @@ export async function performPurgePreparation(user={},options={}){
   setPurgeBlock(db,Date.now()+60*60_000);
   try{
     await waitForBackgroundMaintenanceIdle(db);
-    reconcileRunLocks(db,options.activeRunIds);
+    reconcileRunLocks(db,options.activeRunIds,{strict:Boolean(options.strictRunLocks)});
     const verifiedBackup=await createVerifiedPreClearBackup(email,options.jobId||'');
     const createdAt=Date.now();
     const expiresAt=createdAt+10*60_000;
@@ -472,12 +477,16 @@ async function waitForBackgroundMaintenanceIdle(db,timeoutMs=5*60_000){
   }
 }
 function clearBusinessRuntimeMeta(db){db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN (?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY);}
-function reconcileRunLocks(db,activeRunIds){
+function reconcileRunLocks(db,activeRunIds,options={}){
   const active=activeRunIds instanceof Set?activeRunIds:new Set(activeRunIds||[]);
   const main=db.prepare("SELECT reportDate,runId FROM run_locks WHERE status IN ('running','paused','paused_write')").all();
   const business=db.prepare("SELECT businessType,reportDate,runId FROM business_run_locks WHERE status IN ('running','paused','paused_write')").all();
   const genuinelyActive=[...main,...business].find(row=>active.has(row.runId));
   if(genuinelyActive)throw new Error(`当前存在活动任务，不能清除。runId：${genuinelyActive.runId}`);
+  if(options.strict&&(main.length||business.length)){
+    const blocker=main[0]||business[0];
+    throw new Error(`检测到运行中或暂停中的任务锁，安全备份不会强行中断。runId：${blocker?.runId||'unknown'}`);
+  }
   if(!main.length&&!business.length)return;
   const now=nowIso();db.exec('BEGIN IMMEDIATE');
   try{
