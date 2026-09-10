@@ -66,6 +66,13 @@
   };
   try{deleteAllDatabaseBackups=global.deleteAllDatabaseBackups;}catch{}
 
+  if(!global.__CE_QC_V505_DATA_PURGE_RECOVERY__){
+    const script=document.createElement('script');
+    script.src='/v505-data-purge-recovery.js?v=20260910-v505-1';
+    script.async=false;
+    document.head.appendChild(script);
+  }
+
   global.__CE_QC_V502_MULTI_DRIVE_BACKUP_UI__={patchId:PATCH_ID,decorateBackupStorage};
   setTimeout(()=>{void decorateBackupStorage();},300);
   console.info('[CE-QC][V502_MULTI_DRIVE_BACKUP_UI]',PATCH_ID);
