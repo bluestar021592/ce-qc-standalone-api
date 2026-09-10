@@ -114,7 +114,7 @@ export function deleteAllBackups(deletedBy = '') {
     orphanDeletedCount: orphanResult.deleted.length,
     deletedBytes,
     failedCount: failed.length + orphanResult.failed.length,
-    retainedCount: retained.length + (safety ? 1 : 0),
+    retainedCount: safety ? 1 : 0,
     retainedSafetyBackup: safety ? {
       directory: safety.directory,
       filePath: safety.filePath,
@@ -229,6 +229,7 @@ function verifiedManifestCandidate(manifestPath, roots, cfg) {
   const manifestDir = path.dirname(path.resolve(manifestPath));
   const filePath = path.resolve(String(manifest?.backupPath || path.join(manifestDir, 'ce_qc_monitor.db')));
   if (!isInsideAnyRoot(filePath, roots) || samePath(filePath, cfg.dbFile)) return null;
+  if (!isInsideOrSame(filePath, manifestDir)) return null;
   let stat = null;
   try { stat = fs.statSync(filePath); } catch { return null; }
   if (!stat.isFile() || stat.size <= 0) return null;
