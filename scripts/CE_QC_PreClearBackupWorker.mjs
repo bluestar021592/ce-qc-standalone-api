@@ -34,6 +34,9 @@ if(!dbFile||!filePath){
 
 let lockDb=null;let sourceDb=null;let verifyDb=null;let locked=false;
 try{
+  if(!fs.existsSync(dbFile))throw new Error('V504_SOURCE_DATABASE_MISSING');
+  const sourceStat=fs.statSync(dbFile);
+  if(!sourceStat.isFile()||Number(sourceStat.size||0)<=0)throw new Error('V504_SOURCE_DATABASE_INVALID');
   fs.mkdirSync(path.dirname(filePath),{recursive:true});
   try{fs.rmSync(filePath,{force:true});}catch{}
   lockDb=new DatabaseSync(dbFile,{timeout:timeoutMs});
