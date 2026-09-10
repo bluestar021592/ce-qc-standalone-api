@@ -87,7 +87,7 @@ export async function recoverV497ArchivedConfirmPodDates({range={},targetBills=[
   const cfg=getRuntimeConfig(),archiveRoot=cfg.evidenceArchiveDir||path.join(cfg.dataDir,'evidence_archive'),apiRoot=path.join(archiveRoot,'ce_api'),days=orderedArchiveDays(range,mode),files=[];let truncated=false;
   for(const day of days){let names=[];try{names=await fs.readdir(path.join(apiRoot,day,CONFIRM_FOLDER));}catch{continue;}for(const name of names){if(!name.endsWith('.json.gz'))continue;if(files.length>=maxFiles){truncated=true;break;}files.push(path.join(apiRoot,day,CONFIRM_FOLDER,name));}if(truncated)break;}
   let processedFiles=0,matchedFiles=0,readErrors=0;const requested=new Set();
-  const publish=force=>{if(force||processedFiles%100===0||processedFiles===files.length)onProgress({phase:'strictExportEvidenceConfirmArchive',mode,completed:processedFiles,total:files.length,matchedFiles,requestBillsMatched:requested.size,podDateBills:evidenceByBill.size,readErrors,truncated,evidenceRepairVersion:V497_ARCHIVED_CONFIRM_POD_DATE_ID});};
+  const publish=force=>{if(force||processedFiles%100===0||processedFiles===files.length)onProgress({phase:'strictExportEvidenceSavedDone',confirmArchive:true,confirmArchiveMode:mode,completed:processedFiles,total:files.length,matchedFiles,requestBillsMatched:requested.size,podDateBills:evidenceByBill.size,readErrors,truncated,evidenceRepairVersion:V497_ARCHIVED_CONFIRM_POD_DATE_ID});};
   publish(true);
   await mapLimit(files,ARCHIVE_CONCURRENCY,async file=>{
     let payload=null;try{payload=await readArchive(file);}catch{readErrors++;processedFiles++;publish(false);return;}
