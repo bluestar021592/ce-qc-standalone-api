@@ -11,6 +11,8 @@ const syntaxFiles=[
   'src/accessControl.js',
   'src/accessControlCore.js',
   'scripts/CE_QC_PurgePrepareTaskWorker.mjs',
+  'public/v104-fast-purge-ui.js',
+  'public/v106-purge-legacy-controls-hide.js',
   'public/v505-data-purge-recovery.js'
 ];
 for(const relative of syntaxFiles){
@@ -41,6 +43,14 @@ assert.match(ui,/后台任务独立执行/);
 assert.match(ui,/超过20秒没有心跳/);
 assert.equal((ui.match(/\/api\/admin\/data-purge\/prepare/g)||[]).length,2,'UI must POST prepare only for initial submission and final challenge recovery');
 
+const legacyUi=read('public/v104-fast-purge-ui.js');
+assert.match(legacyUi,/后台任务提交响应延迟/,'regression fixture must identify the legacy stuck-screen owner');
+const legacyGuard=read('public/v106-purge-legacy-controls-hide.js');
+assert.match(legacyGuard,/__CE_QC_V505_DATA_PURGE_RECOVERY__/);
+assert.match(legacyGuard,/reassertV505Owner/);
+assert.match(legacyGuard,/window\.openDataPurge=owner/);
+assert.match(legacyGuard,/reassertV505Owner\(\);\s*setTimeout\(reassertV505Owner,100\)/);
+
 const access=read('src/accessControl.js');
 assert.match(access,/PURGE_STATUS_PATH/);
 assert.match(access,/PURGE_PREPARE_AUDITS/);
@@ -53,6 +63,8 @@ assert.match(core,/export function auditAction/);
 
 const loader=read('public/v502-multidrive-backup-ui.js');
 assert.match(loader,/v505-data-purge-recovery\.js/);
+const lazyLoader=read('public/v108-route-lazy-features.js');
+assert.match(lazyLoader,/v104-fast-purge-ui\.js[^\n]*v106-purge-legacy-controls-hide\.js/,'legacy purge scripts must remain ordered so V106 can reassert V505 after V104');
 const gitignore=read('.gitignore');
 assert.match(gitignore,/public\/purge-status\//);
 console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass');
