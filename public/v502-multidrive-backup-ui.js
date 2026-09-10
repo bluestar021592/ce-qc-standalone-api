@@ -68,7 +68,7 @@
 
   if(!global.__CE_QC_V505_DATA_PURGE_RECOVERY__){
     const script=document.createElement('script');
-    script.src='/v505-data-purge-recovery.js?v=20260910-v505-4';
+    script.src='/v505-data-purge-recovery.js?v=20260910-v505-6';
     script.async=false;
     document.head.appendChild(script);
   }
