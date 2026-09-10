@@ -16,6 +16,10 @@ assert.match(source,/await verifyBackupQuickIsolated\(filePath\)/);
 assert.match(source,/spawn\(process\.execPath,\[BACKUP_QUICK_CHECK_WORKER,payload\]/);
 assert.doesNotMatch(source,/new DatabaseSync\(filePath/,'5177 purge preparation must not run backup quick_check inside the web process');
 assert.match(source,/isolated-backup-quick-check/);
+assert.match(source,/setPurgeBlock\(db,Date\.now\(\)\+60\*60_000\)/,'large-db prepare needs a long maintenance block while backup + verification runs');
+const backupPos=source.indexOf("const verifiedBackup=await createVerifiedPreClearBackup(user.email||'');");
+const createdPos=source.indexOf('const createdAt=Date.now();');
+assert.ok(backupPos>=0&&createdPos>backupPos,'10-minute confirmation clock must start only after the verified backup finishes');
 
 const tempDir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-v503-'));
 const dbPath=path.join(tempDir,'probe.db');
@@ -53,4 +57,4 @@ assert.notEqual(bad.code,0);
 assert.equal(bad.result?.ok,false);
 
 fs.rmSync(tempDir,{recursive:true,force:true});
-console.log('[V503] pre-clear backup quick_check smoke passed · verification runs in isolated child process · 5177 event loop stays free · corrupt copy fails closed · no business delete is involved');
+console.log('[V503] pre-clear backup quick_check smoke passed · verification runs in isolated child process · 5177 event loop stays free · confirmation clock starts after verified backup · corrupt copy fails closed · no business delete is involved');
