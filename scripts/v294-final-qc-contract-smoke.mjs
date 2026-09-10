@@ -70,7 +70,10 @@ assert.match(exporter,/V320_EXPORT_DUPLICATE_DAILY_MEMBER/,'duplicate date+shipm
 assert.match(exporter,/V489_FORMAL_EXPORT_EVIDENCE_PATH_ID/,'formal export must expose the V489 canonical-ledger hot-path owner');
 assert.match(exporter,/applyV419CanonicalExportLedgerTruth\(businessType,rows,\{db:getDb\(\),onProgress\}\)/,'formal export must hydrate canonical persisted ledger truth before actual-POD gap repair');
 assert.doesNotMatch(exporter,/applyV320DispatchSigningTruth\s*\(/,'formal export must not re-run the retired V320 full-member event hydration');
-assert.match(canonicalLedger,/function strictSigningDays\(ledger=\{\}\)/,'V419 must own strict persisted START-to-POD signing truth');
+assert.match(canonicalLedger,/V493_SCAN85_POD_DATE_RECOVERY_ID/,'V419 must expose the V493 saved-terminal POD-date recovery owner');
+assert.match(canonicalLedger,/function strictSigningDays\(ledger=\{\},podOverride=''\)/,'V419 must own strict persisted START-to-POD signing truth and accept the locally recovered POD-date override');
+assert.match(canonicalLedger,/scan85SavedPodDate\(ledger\)/,'V419 must recover a missing canonical POD date only from saved terminal state');
+assert.match(canonicalLedger,/strictSigningDays\(ledger,podDate\)/,'V419 must calculate signing truth from the canonical or recovered POD date');
 assert.match(canonicalLedger,/v246InclusiveDays\(first,pod\)/,'V419 strict START-to-POD duration must be inclusive natural days');
 assert.doesNotMatch(canonicalLedger,/firstReportDate/,'V419 strict signing timing must never start from report membership date');
 assert.match(dispatchTruth,/v246InclusiveDays\(dispatch,pod\)/,'compatibility V320 dispatch-to-POD duration must remain inclusive natural days');
@@ -98,4 +101,4 @@ assert.match(carryScheduler,/KEEP_OPEN_UNTIL_RETURN_86/,'return-in-progress must
 assert.match(carryTruth,/NORMAL_FINAL/,'repair layer must include legacy false NORMAL_FINAL closures');
 assert.match(carryTruth,/hasV294ExactTerminal/,'reopen/close decision must depend on exact terminal evidence');
 
-console.log('[V490/V489 FINAL QC] passed · exact custom dates + full persisted history membership + V419 canonical START-to-POD truth + actual-POD gap repair + duplicate membership fail-closed + V199/V320 full-member scans non-runtime + normal transit carryover stays OPEN');
+console.log('[V494/V493/V490 FINAL QC] passed · exact custom dates + full persisted history membership + V419 canonical START-to-POD truth + saved scan85 POD-date recovery + actual-POD gap repair + duplicate membership fail-closed + V199/V320 full-member scans non-runtime + normal transit carryover stays OPEN');
