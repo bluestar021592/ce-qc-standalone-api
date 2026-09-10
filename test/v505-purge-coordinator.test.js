@@ -23,22 +23,25 @@ async function waitForStatus(statusFile, jobId, timeoutMs = 30_000) {
   return status;
 }
 
-test('V505 keeps a stale-heartbeat prepare job locked while its worker PID is still alive', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-v505-live-prepare-'));
+test('V505 keeps stale-heartbeat PREPARE and EXECUTE jobs locked while their worker PID is still alive', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-v505-live-worker-'));
   process.env.DATA_DIR = dir;
   process.env.DB_FILE = path.join(dir, 'test.db');
   process.env.CE_QC_DISABLE_CARRY_REFRESH = '1';
   const { getRuntimeConfig } = await import('../src/db.js');
-  const { inspectLivePrepareJob } = await import('../src/v505PurgeCoordinator.js');
+  const { inspectLivePrepareJob, inspectExecutionRecovery } = await import('../src/v505PurgeCoordinator.js');
   const user = { email: 'stale-alive-admin' };
-  const jobDir = path.join(getRuntimeConfig().backupsDir, '.purge_prepare_jobs');
-  fs.mkdirSync(jobDir, { recursive: true });
-  const jobFile = path.join(jobDir, `${identityKey(user)}.job.json`);
-  const statusToken = crypto.randomBytes(24).toString('hex');
-  const fake = {
+  const cfg = getRuntimeConfig();
+  const key = identityKey(user);
+
+  const prepareDir = path.join(cfg.backupsDir, '.purge_prepare_jobs');
+  fs.mkdirSync(prepareDir, { recursive: true });
+  const prepareFile = path.join(prepareDir, `${key}.job.json`);
+  const prepareToken = crypto.randomBytes(24).toString('hex');
+  const fakePrepare = {
     jobId: crypto.randomUUID(),
-    statusToken,
-    statusFile: path.join(getRuntimeConfig().projectRoot, 'public', 'purge-status', `${statusToken}.json`),
+    statusToken: prepareToken,
+    statusFile: path.join(cfg.projectRoot, 'public', 'purge-status', `${prepareToken}.json`),
     status: 'RUNNING',
     email: user.email,
     submittedAt: Date.now() - 180_000,
@@ -47,18 +50,45 @@ test('V505 keeps a stale-heartbeat prepare job locked while its worker PID is st
     workerPid: process.pid,
     updatedAt: Date.now() - 120_000
   };
-  fs.writeFileSync(jobFile, JSON.stringify(fake), 'utf8');
+  fs.writeFileSync(prepareFile, JSON.stringify(fakePrepare), 'utf8');
 
-  const inspected = inspectLivePrepareJob(user);
-  assert.equal(inspected?.dead, false);
-  assert.equal(inspected?.job?.jobId, fake.jobId);
-  assert.equal(inspected?.payload?.jobId, fake.jobId);
-  assert.equal(inspected?.payload?.workerState, 'ALIVE');
-  assert.equal(inspected?.payload?.heartbeatStale, true);
-  assert.match(inspected?.payload?.message || '', /保持锁定/);
-  assert.match(inspected?.payload?.message || '', /不会启动第二份备份/);
+  const prepared = inspectLivePrepareJob(user);
+  assert.equal(prepared?.dead, false);
+  assert.equal(prepared?.job?.jobId, fakePrepare.jobId);
+  assert.equal(prepared?.payload?.jobId, fakePrepare.jobId);
+  assert.equal(prepared?.payload?.workerState, 'ALIVE');
+  assert.equal(prepared?.payload?.heartbeatStale, true);
+  assert.match(prepared?.payload?.message || '', /保持锁定/);
+  assert.match(prepared?.payload?.message || '', /不会启动第二份备份/);
+  fs.rmSync(prepareFile, { force: true });
 
-  fs.rmSync(jobFile, { force: true });
+  const executeDir = path.join(cfg.backupsDir, '.purge_execute_jobs');
+  fs.mkdirSync(executeDir, { recursive: true });
+  const executeFile = path.join(executeDir, `${key}.job.json`);
+  const executeToken = crypto.randomBytes(24).toString('hex');
+  const fakeExecute = {
+    kind: 'EXECUTE',
+    jobId: crypto.randomUUID(),
+    challengeId: crypto.randomUUID(),
+    statusToken: executeToken,
+    statusFile: path.join(cfg.projectRoot, 'public', 'purge-status', `${executeToken}.json`),
+    status: 'RUNNING',
+    submittedAt: Date.now() - 180_000,
+    startedAt: Date.now() - 170_000,
+    heartbeatAt: Date.now() - 120_000,
+    workerPid: process.pid,
+    updatedAt: Date.now() - 120_000
+  };
+  fs.writeFileSync(executeFile, JSON.stringify(fakeExecute), 'utf8');
+
+  const executing = inspectExecutionRecovery(user);
+  assert.equal(executing?.jobId, fakeExecute.jobId);
+  assert.equal(executing?.status, 'RUNNING');
+  assert.equal(executing?.workerState, 'ALIVE');
+  assert.equal(executing?.heartbeatStale, true);
+  assert.match(executing?.message || '', /保持锁定/);
+  assert.match(executing?.message || '', /不会启动第二个清空任务/);
+  fs.rmSync(executeFile, { force: true });
 });
 
 test('V505 detached execute returns quickly, reuses one live job, and finishes transactional purge out of the HTTP process', async () => {
