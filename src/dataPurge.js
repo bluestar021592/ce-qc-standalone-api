@@ -76,7 +76,7 @@ export async function createPurgeChallenge(user={},options={}){
 
   if(existing?.status==='FAILED')deletePurgeArtifacts(user,existing,{keepChallenge:true});
 
-  quickPurgePreflight(options.activeRunIds);
+  quickPurgePreflight(options.activeRunIds,db);
   const jobId=crypto.randomUUID();
   const statusToken=crypto.randomBytes(24).toString('hex');
   const statusFile=purgeStatusFile(statusToken);
@@ -233,10 +233,12 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
 
 export function getPurgeCounts(){return tableCounts(getDb());}
 
-function quickPurgePreflight(activeRunIds){
+function quickPurgePreflight(activeRunIds,db=getDb()){
   const active=activeRunIds instanceof Set?activeRunIds:new Set(activeRunIds||[]);
   const activeRun=[...active].find(Boolean);
   if(activeRun)throw new Error(`当前存在活动任务，不能清除。runId：${activeRun}`);
+  if(schedulerStateForTests().inFlight)throw new Error('后台遗留刷新正在执行，请等待本轮完成后再清空。');
+  if(cacheWorkerActive(db))throw new Error('看板缓存维护正在执行，请等待本轮完成后再清空。');
   const cfg=getRuntimeConfig();
   if(!fs.existsSync(cfg.dbFile))throw new Error('正式数据库不存在，已停止清除。');
   const stat=fs.statSync(cfg.dbFile);
