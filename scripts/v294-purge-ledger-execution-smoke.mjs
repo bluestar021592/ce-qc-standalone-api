@@ -40,6 +40,9 @@ try {
     CREATE TABLE qc_tracking_ledger(shipmentCode TEXT PRIMARY KEY,businessType TEXT,attemptNo INTEGER,signingDays INTEGER);
     CREATE TABLE qc_tracking_audit(id INTEGER PRIMARY KEY,shipmentCode TEXT,action TEXT);
     INSERT INTO app_meta VALUES('last_processed_report_date','2026-08-21','x');
+    INSERT INTO app_meta VALUES('v246_daily_0200_success_date','2026-09-10','x');
+    INSERT INTO app_meta VALUES('v246_daily_0200_success_at','2026-09-10T02:05:00+07:00','x');
+    INSERT INTO app_meta VALUES('v246_daily_0200_failed_at','2026-09-10T02:10:00+07:00','x');
     INSERT INTO app_state VALUES('current','{"reportDate":"2026-08-21"}','x');
     INSERT INTO users(name) VALUES('keep-user');
     INSERT INTO audit_logs(message) VALUES('keep-audit');
@@ -70,6 +73,7 @@ try {
   const verify = new DatabaseSync(dbFile);
   assert.equal(Number(verify.prepare('SELECT COUNT(*) count FROM qc_tracking_ledger').get().count), 0, 'old lifecycle ledger must be deleted');
   assert.equal(Number(verify.prepare('SELECT COUNT(*) count FROM qc_tracking_audit').get().count), 0, 'old lifecycle audit evidence must be deleted');
+  assert.equal(Number(verify.prepare("SELECT COUNT(*) count FROM app_meta WHERE key LIKE 'v246_daily_0200_%'").get().count), 0, 'old V246 02:00 scheduler success/failure state must be deleted so a fresh re-upload cannot inherit a same-day skip');
   assert.equal(Number(verify.prepare('SELECT COUNT(*) count FROM users').get().count), 1, 'users must be preserved');
   assert.equal(Number(verify.prepare('SELECT COUNT(*) count FROM audit_logs').get().count), 1, 'system audit log must be preserved');
   assert.equal(Number(verify.prepare('SELECT COUNT(*) count FROM backup_records').get().count), 1, 'backup records must be preserved');
@@ -79,7 +83,7 @@ try {
   assert.equal(fs.existsSync(path.join(exportsDir, 'old.xlsx')), false, 'generated exports must be cleared');
   assert.equal(fs.existsSync(path.join(importsDir, 'old.xlsx')), false, 'temporary imports must be cleared');
 
-  console.log('[V294] purge execution smoke passed · temp database removes old qc_tracking ledger/audit while preserving users/system audit/backup records');
+  console.log('[V499/V294] purge execution smoke passed · temp database removes old qc_tracking ledger/audit + V246 daily scheduler state while preserving users/system audit/backup records');
 } finally {
   try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
 }
