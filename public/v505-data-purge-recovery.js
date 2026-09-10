@@ -1,6 +1,6 @@
 (function installV505DataPurgeRecovery(global){
   if(global.__CE_QC_V505_DATA_PURGE_RECOVERY__)return;
-  const PATCH_ID='2026-09-10-v505-async-purge-prepare-ui-v2';
+  const PATCH_ID='2026-09-10-v505-async-purge-prepare-ui-v3';
   let active=false;
   let elapsedTimer=null;
   let startedAt=0;
@@ -52,6 +52,11 @@
       }
       if(String(status.jobId||'')!==String(job.jobId||''))throw new Error('后台任务编号不一致，已安全停止。');
       const state=String(status.status||'').toUpperCase();
+      const now=Date.now();
+      const heartbeatAt=Number(status.heartbeatAt||0);
+      const submittedAt=Number(status.submittedAt||0);
+      if(state==='RUNNING'&&heartbeatAt>0&&now-heartbeatAt>20_000)throw new Error('后台安全备份任务超过20秒没有心跳，已停止前端等待；没有执行删除。');
+      if(state==='QUEUED'&&submittedAt>0&&now-submittedAt>30_000)throw new Error('后台安全备份任务排队超过30秒仍未启动，已停止前端等待；没有执行删除。');
       if(state==='SUCCEEDED')return status;
       if(state==='FAILED')throw new Error(status.error||'清空前安全备份失败。');
       renderWorking(state==='QUEUED'?'后台任务已排队，准备锁定数据库并开始安全备份':'正在后台备份并校验数据库完整性');
