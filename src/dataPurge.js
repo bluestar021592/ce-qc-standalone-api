@@ -3,7 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { backup } from 'node:sqlite';
 
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES } from './store.js';
@@ -12,13 +11,14 @@ import { schedulerStateForTests } from './carryoverRefreshScheduler.js';
 
 export const PURGE_PHRASE='永久清除全部业务数据';
 export const V503_PRE_CLEAR_VERIFY_ID='2026-09-10-v503-isolated-pre-clear-backup-quick-check-v1';
+export const V504_PRE_CLEAR_BACKUP_ID='2026-09-10-v504-isolated-full-pre-clear-backup-v1';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const CACHE_WORKER_ACTIVE_KEY='dashboard_cache_worker_active';
 const CACHE_WORKER_ACTIVE_UNTIL_KEY='dashboard_cache_worker_active_until';
 const PURGE_PREPARE_COUNT_MODE='DEFERRED_TO_TRANSACTIONAL_DELETE';
 const PURGE_EXECUTE_COUNT_MODE='DELETE_CHANGESET_EXACT';
-const BACKUP_QUICK_CHECK_WORKER=fileURLToPath(new URL('../scripts/CE_QC_BackupQuickCheckWorker.mjs',import.meta.url));
-const BACKUP_QUICK_CHECK_TIMEOUT_MS=Math.max(60_000,Math.min(30*60_000,Number(process.env.PURGE_BACKUP_VERIFY_TIMEOUT_MS||20*60_000)));
+const PRE_CLEAR_BACKUP_WORKER=fileURLToPath(new URL('../scripts/CE_QC_PreClearBackupWorker.mjs',import.meta.url));
+const PRE_CLEAR_BACKUP_TIMEOUT_MS=Math.max(5*60_000,Math.min(60*60_000,Number(process.env.PURGE_PRE_CLEAR_BACKUP_TIMEOUT_MS||30*60_000)));
 const challenges=new Map();
 
 const FAST_INDEXES=[
@@ -78,7 +78,6 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
 
   const reset=fastResetBusinessState(db,{logs:[]});
   clearBusinessRuntimeMeta(db);
-
   const fileCleanupWarnings=await clearRegenerableFiles();
   assertPurgeStructure(db);
   if(String(process.env.VACUUM_AFTER_PURGE||'').toLowerCase()==='true')db.exec('VACUUM');
@@ -99,51 +98,53 @@ async function createVerifiedPreClearBackup(adminEmail){
   const sourceSize=fs.statSync(cfg.dbFile).size;
   assertFreeSpace(dir,sourceSize);
 
-  const sourceFingerprintBeforeBackup=databaseFingerprint(cfg.dbFile);
-  await backup(db,filePath,{rate:1024});
-  const sourceFingerprintAfterBackup=databaseFingerprint(cfg.dbFile);
-  if(!sameFingerprint(sourceFingerprintBeforeBackup,sourceFingerprintAfterBackup)){
+  let isolated;
+  try{
+    isolated=await createVerifiedBackupIsolated(cfg.dbFile,filePath);
+  }catch(error){
     try{fs.rmSync(dir,{recursive:true,force:true});}catch{}
-    throw new Error('数据库在安全备份期间发生变化，已停止清除。请稍后重新开始。');
+    throw error;
   }
-  const backupSize=fs.statSync(filePath).size;
-  if(backupSize<=0)throw new Error('备份文件为空，已停止清除。');
-
-  const verified=await verifyBackupQuickIsolated(filePath);
-  const sha256=await hashFileStream(filePath);
-  const sourceFingerprintAfterVerification=databaseFingerprint(cfg.dbFile);
-  if(!sameFingerprint(sourceFingerprintAfterBackup,sourceFingerprintAfterVerification)){
+  const currentSourceFingerprint=databaseFingerprint(cfg.dbFile);
+  if(!sameFingerprint(isolated.sourceFingerprintAfter,currentSourceFingerprint)){
     try{fs.rmSync(dir,{recursive:true,force:true});}catch{}
-    throw new Error('数据库在备份校验期间发生变化，已停止清除。请稍后重新开始。');
+    throw new Error('数据库在独立安全备份结束后发生变化，已停止清除。请稍后重新开始。');
   }
   const stat=fs.statSync(filePath);
+  const backupSize=Number(isolated.size||stat.size||0);
+  if(backupSize<=0)throw new Error('备份文件为空，已停止清除。');
+  const sha256=String(isolated.sha256||'');
+  if(!/^[a-f0-9]{64}$/i.test(sha256))throw new Error('备份SHA-256验证无效，已停止清除。');
+  const integrity=String(isolated.integrity||'');
+  if(!['ok','quick-ok'].includes(integrity))throw new Error('备份完整性验证无效，已停止清除。');
+
   const schemaMeta=Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value||0);
   const pragmaSchema=Number(db.prepare('PRAGMA user_version').get()?.user_version||0);
-  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:verified.integrity,verificationMode:'online-backup+stable-source-fingerprint+isolated-backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:'node-sqlite-online-backup',verificationWorker:V503_PRE_CLEAR_VERIFY_ID,systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,sourceStableDuringBackup:true};
+  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity,verificationMode:'isolated-write-freeze+online-backup+backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:isolated.method||'node-sqlite-online-backup-isolated-write-freeze',verificationWorker:V504_PRE_CLEAR_BACKUP_ID,compatibilityVerification:V503_PRE_CLEAR_VERIFY_ID,systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,sourceStableDuringBackup:true};
   fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
   recordBackup({backupType:'database',fileName:path.basename(filePath),filePath,fileHash:sha256,reason:'before-full-clear'});
-  return {directory:dir,filePath,sha256,size:backupSize,mtimeMs:stat.mtimeMs,integrity:verified.integrity,method:'node-sqlite-online-backup',manifestPath:path.join(dir,'manifest.json')};
+  return {directory:dir,filePath,sha256,size:backupSize,mtimeMs:stat.mtimeMs,integrity,method:manifest.method,manifestPath:path.join(dir,'manifest.json')};
 }
 
-function verifyBackupQuickIsolated(filePath){
+function createVerifiedBackupIsolated(dbFile,filePath){
   return new Promise((resolve,reject)=>{
-    const payload=Buffer.from(JSON.stringify({filePath:String(filePath||'')}),'utf8').toString('base64url');
+    const payload=Buffer.from(JSON.stringify({dbFile:String(dbFile||''),filePath:String(filePath||''),lockTimeoutMs:30_000,ratePages:8192}),'utf8').toString('base64url');
     let stdout='';let stderr='';let settled=false;
-    const child=spawn(process.execPath,[BACKUP_QUICK_CHECK_WORKER,payload],{cwd:getRuntimeConfig().projectRoot,env:process.env,windowsHide:true,stdio:['ignore','pipe','pipe']});
+    const child=spawn(process.execPath,[PRE_CLEAR_BACKUP_WORKER,payload],{cwd:getRuntimeConfig().projectRoot,env:process.env,windowsHide:true,stdio:['ignore','pipe','pipe']});
     const timer=setTimeout(()=>{
       try{child.kill();}catch{}
-      if(!settled){settled=true;reject(new Error('清空前备份完整性校验超过20分钟，已停止清除；没有删除业务数据。'));}
-    },BACKUP_QUICK_CHECK_TIMEOUT_MS);
+      if(!settled){settled=true;reject(new Error('清空前安全备份超过30分钟，已停止清除；没有删除业务数据。'));}
+    },PRE_CLEAR_BACKUP_TIMEOUT_MS);
     timer.unref?.();
-    child.stdout?.on('data',chunk=>{stdout+=chunk.toString();if(stdout.length>1024*1024)stdout=stdout.slice(-1024*1024);});
-    child.stderr?.on('data',chunk=>{stderr+=chunk.toString();if(stderr.length>1024*1024)stderr=stderr.slice(-1024*1024);});
+    child.stdout?.on('data',chunk=>{stdout+=chunk.toString();if(stdout.length>2*1024*1024)stdout=stdout.slice(-2*1024*1024);});
+    child.stderr?.on('data',chunk=>{stderr+=chunk.toString();if(stderr.length>2*1024*1024)stderr=stderr.slice(-2*1024*1024);});
     child.once('error',error=>{clearTimeout(timer);if(!settled){settled=true;reject(error);}});
     child.once('exit',code=>{
       clearTimeout(timer);if(settled)return;settled=true;
       const lines=stdout.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);let result=null;
       for(let i=lines.length-1;i>=0;i-=1){try{result=JSON.parse(lines[i]);break;}catch{}}
-      if(code!==0||!result?.ok){reject(new Error(result?.error||stderr.trim()||`清空前备份完整性子进程退出码 ${code}`));return;}
-      resolve({integrity:String(result.integrity||'quick-ok')});
+      if(code!==0||!result?.ok){reject(new Error(result?.error||stderr.trim()||`清空前备份子进程退出码 ${code}`));return;}
+      resolve(result);
     });
   });
 }
@@ -158,47 +159,29 @@ function verifyPreparedBackupStillPresent(backupInfo){
 }
 
 function statFingerprint(file){
-  try{
-    const stat=fs.statSync(file);
-    return {exists:true,size:Number(stat.size||0),mtimeMs:Number(stat.mtimeMs||0)};
-  }catch{return {exists:false,size:0,mtimeMs:0};}
+  try{const stat=fs.statSync(file);return {exists:true,size:Number(stat.size||0),mtimeMs:Number(stat.mtimeMs||0)};}
+  catch{return {exists:false,size:0,mtimeMs:0};}
 }
-function databaseFingerprint(dbFile){
-  return {db:statFingerprint(dbFile),wal:statFingerprint(`${dbFile}-wal`)};
-}
-function sameStatFingerprint(a={},b={}){
-  return Boolean(a.exists)===Boolean(b.exists)&&Number(a.size||0)===Number(b.size||0)&&Math.abs(Number(a.mtimeMs||0)-Number(b.mtimeMs||0))<=1;
-}
+function databaseFingerprint(dbFile){return {db:statFingerprint(dbFile),wal:statFingerprint(`${dbFile}-wal`)};}
+function sameStatFingerprint(a={},b={}){return Boolean(a.exists)===Boolean(b.exists)&&Number(a.size||0)===Number(b.size||0)&&Math.abs(Number(a.mtimeMs||0)-Number(b.mtimeMs||0))<=1;}
 function sameFingerprint(a={},b={}){return sameStatFingerprint(a.db,b.db)&&sameStatFingerprint(a.wal,b.wal);}
 
 function fastResetBusinessState(db,nextState={}){
   const now=nowIso();
   const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name));
   const clearTargets=BUSINESS_DATA_TABLES.filter(name=>existing.has(name));
-  const before={};
-  const after={};
+  const before={};const after={};
   const foreignKeysBefore=Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys||0);
   if(foreignKeysBefore)db.exec('PRAGMA foreign_keys=OFF');
   db.exec('BEGIN IMMEDIATE');
   try{
-    for(const table of clearTargets){
-      const deleted=db.prepare(`DELETE FROM ${table}`).run();
-      before[table]=Number(deleted?.changes||0);
-    }
+    for(const table of clearTargets){const deleted=db.prepare(`DELETE FROM ${table}`).run();before[table]=Number(deleted?.changes||0);}
     for(const [table,sql] of FAST_INDEXES)if(existing.has(table))db.exec(sql);
-    for(const table of clearTargets){
-      const remaining=Number(db.prepare(`SELECT COUNT(*) count FROM ${table}`).get()?.count||0);
-      after[table]=remaining;
-      if(remaining!==0)throw new Error(`业务表清空校验失败：${table} 仍有 ${remaining} 行。`);
-    }
+    for(const table of clearTargets){const remaining=Number(db.prepare(`SELECT COUNT(*) count FROM ${table}`).get()?.count||0);after[table]=remaining;if(remaining!==0)throw new Error(`业务表清空校验失败：${table} 仍有 ${remaining} 行。`);}
     db.prepare(`INSERT INTO app_state(key,valueJson,updatedAt) VALUES('current',?,?) ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`).run(JSON.stringify(nextState),now);
     const meta=db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`);
-    meta.run('last_processed_report_date','',now);
-    meta.run('last_full_clear_at',now,now);
-    meta.run('current_snapshot_id','',now);
-    meta.run('v108_performance_indexes_ready','1',now);
-    db.exec('COMMIT');
-    return {before,after};
+    meta.run('last_processed_report_date','',now);meta.run('last_full_clear_at',now,now);meta.run('current_snapshot_id','',now);meta.run('v108_performance_indexes_ready','1',now);
+    db.exec('COMMIT');return {before,after};
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
   finally{if(foreignKeysBefore)try{db.exec('PRAGMA foreign_keys=ON');}catch{}}
 }
@@ -225,9 +208,7 @@ async function waitForBackgroundMaintenanceIdle(db,timeoutMs=5*60_000){
     await new Promise(resolve=>setTimeout(resolve,250));
   }
 }
-function clearBusinessRuntimeMeta(db){
-  db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN (?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY);
-}
+function clearBusinessRuntimeMeta(db){db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN (?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY);}
 function reconcileRunLocks(db,activeRunIds){
   const active=activeRunIds instanceof Set?activeRunIds:new Set(activeRunIds||[]);
   const main=db.prepare("SELECT reportDate,runId FROM run_locks WHERE status IN ('running','paused','paused_write')").all();
@@ -235,8 +216,7 @@ function reconcileRunLocks(db,activeRunIds){
   const genuinelyActive=[...main,...business].find(row=>active.has(row.runId));
   if(genuinelyActive)throw new Error(`当前存在活动任务，不能清除。runId：${genuinelyActive.runId}`);
   if(!main.length&&!business.length)return;
-  const now=nowIso();
-  db.exec('BEGIN IMMEDIATE');
+  const now=nowIso();db.exec('BEGIN IMMEDIATE');
   try{
     db.prepare("UPDATE run_locks SET status='interrupted',currentStage='服务重启后由管理员终止',errorMessage='stale process lock cleared before full data purge',updatedAt=? WHERE status IN ('running','paused','paused_write')").run(now);
     db.prepare("UPDATE business_run_locks SET status='interrupted',currentStage='服务重启后由管理员终止',errorMessage='stale process lock cleared before full data purge',updatedAt=? WHERE status IN ('running','paused','paused_write')").run(now);
@@ -246,28 +226,17 @@ function reconcileRunLocks(db,activeRunIds){
   }catch(error){try{db.exec('ROLLBACK');}catch{}throw error;}
 }
 function assertPurgeStructure(db){
-  for(const table of ['app_meta','app_state','users','audit_logs','backup_records']){
-    const exists=db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(table)?.ok;
-    if(!exists)throw new Error(`清空后结构校验失败：缺少 ${table}`);
-  }
+  for(const table of ['app_meta','app_state','users','audit_logs','backup_records']){const exists=db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(table)?.ok;if(!exists)throw new Error(`清空后结构校验失败：缺少 ${table}`);}
   if(Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys||0)!==1)throw new Error('清空后外键保护未恢复。');
 }
 export function hashFileStream(file){return new Promise((resolve,reject)=>{const hash=crypto.createHash('sha256');const input=fs.createReadStream(file,{highWaterMark:8*1024*1024});input.on('error',reject);input.on('data',chunk=>hash.update(chunk));input.on('end',()=>resolve(hash.digest('hex')));});}
 function assertFreeSpace(targetDir,sourceSize){const disk=fs.statfsSync(targetDir);const available=Number(disk.bavail)*Number(disk.bsize);const required=Math.ceil(sourceSize*1.1)+256*1024*1024;if(available<required)throw new Error(`备份磁盘空间不足：至少需要 ${required} 字节，当前可用 ${available} 字节。`);}
 function localStamp(){const d=new Date();const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;}
 async function clearRegenerableFiles(){
-  const cfg=getRuntimeConfig();
-  const warnings=[];
+  const cfg=getRuntimeConfig();const warnings=[];
   for(const dir of [cfg.exportsDir,cfg.importsDir]){
-    if(!fs.existsSync(dir))continue;
-    const entries=fs.readdirSync(dir);
-    for(let index=0;index<entries.length;index+=1){
-      const entry=entries[index];
-      try{await fs.promises.rm(path.join(dir,entry),{recursive:true,force:true});}
-      catch(error){warnings.push(`${entry}: ${error?.message||String(error)}`);}
-      if(index%20===19)await new Promise(resolve=>setImmediate(resolve));
-    }
+    if(!fs.existsSync(dir))continue;const entries=fs.readdirSync(dir);
+    for(let index=0;index<entries.length;index+=1){const entry=entries[index];try{await fs.promises.rm(path.join(dir,entry),{recursive:true,force:true});}catch(error){warnings.push(`${entry}: ${error?.message||String(error)}`);}if(index%20===19)await new Promise(resolve=>setImmediate(resolve));}
   }
-  fs.mkdirSync(cfg.longJsonExportsDir,{recursive:true});
-  return warnings;
+  fs.mkdirSync(cfg.longJsonExportsDir,{recursive:true});return warnings;
 }
