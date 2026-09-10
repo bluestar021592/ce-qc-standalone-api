@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 for (const file of [
   'src/v499FreshStartTrackingPolicy.js',
+  'src/v501FreshStartManualTrackingGate.js',
   'src/v206InteractiveFirstRuntimePatch.js',
   'src/v246QcTrackingRuntimePatch.js',
   'src/dataPurge.js',
@@ -13,6 +14,7 @@ for (const file of [
 
 const read = file => fs.readFileSync(file, 'utf8');
 const policy = read('src/v499FreshStartTrackingPolicy.js');
+const manualGate = read('src/v501FreshStartManualTrackingGate.js');
 const v206 = read('src/v206InteractiveFirstRuntimePatch.js');
 const runtime = read('src/v246QcTrackingRuntimePatch.js');
 const directPurge = read('src/dataPurge.js');
@@ -25,8 +27,16 @@ assert.match(policy, /waitingForFreshStart/);
 assert.match(policy, /CE_QC_HARD_DISABLE_V246_TRACKING/);
 assert.match(policy, /freshStartReady\)delete process\.env\.CE_QC_DISABLE_V246_TRACKING/);
 const policyImport = v206.indexOf("import './v499FreshStartTrackingPolicy.js';");
+const manualGateImport = v206.indexOf("import './v501FreshStartManualTrackingGate.js';");
 const runtimeImport = v206.indexOf("import './v246QcTrackingRuntimePatch.js';");
-assert.ok(policyImport >= 0 && runtimeImport > policyImport, 'V500 policy must evaluate before V246 runtime');
+assert.ok(policyImport >= 0 && manualGateImport > policyImport && runtimeImport > manualGateImport, 'V501 manual gate must install after V500 policy and before V246 route registration');
+
+assert.match(manualGate, /V501_FRESH_START_MANUAL_TRACKING_GATE_ID='2026-09-10-v501-block-legacy-manual-v246-before-purge-v1'/);
+assert.match(manualGate, /TARGET_PATH='\/api\/v246\/tracking\/reconcile'/);
+assert.match(manualGate, /policy\.waitingForFreshStart/);
+assert.match(manualGate, /status\(423\)/);
+assert.match(manualGate, /V501_FRESH_PURGE_REQUIRED/);
+assert.match(manualGate, /150,000\+票补核/);
 
 assert.match(runtime, /STARTUP_90DAY_ANTI_LEAK/);
 assert.match(runtime, /HOURLY_ANTI_LEAK_RECONCILE/);
@@ -78,4 +88,4 @@ const disabled = JSON.parse(disabledProbe);
 assert.equal(disabled.hardDisable, true);
 assert.equal(disabled.v246Enabled, false, 'explicit emergency hard-disable must remain available');
 
-console.log('[V500] managed fresh-start gate passed · legacy managed startup keeps V246 heavy audit disabled · isolated purge arms tracking · next managed restart enables hourly/02:00 tracking · explicit hard stop preserved');
+console.log('[V501/V500] managed fresh-start gate passed · legacy startup keeps V246 auto + manual reconcile disabled before purge · isolated purge arms tracking · next managed restart enables hourly/02:00 + manual tracking · explicit hard stop preserved');
