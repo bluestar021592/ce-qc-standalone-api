@@ -14,7 +14,7 @@ export const V503_PRE_CLEAR_VERIFY_ID='2026-09-10-v503-isolated-pre-clear-backup
 export const V504_PRE_CLEAR_BACKUP_ID='2026-09-10-v504-isolated-full-pre-clear-backup-v1';
 export const V505_PURGE_RECOVERY_ID='2026-09-10-v505-idempotent-purge-prepare-recovery-v1';
 const PURGE_BLOCK_KEY='data_purge_block_until';
-const PURGE_PREPARE_JOB_PREFIX='data_purge_prepare_job:';
+const PURGE_PREPARE_JOB_DIR='.purge_prepare_jobs';
 const CACHE_WORKER_ACTIVE_KEY='dashboard_cache_worker_active';
 const CACHE_WORKER_ACTIVE_UNTIL_KEY='dashboard_cache_worker_active_until';
 const PURGE_PREPARE_COUNT_MODE='DEFERRED_TO_TRANSACTIONAL_DELETE';
@@ -38,8 +38,8 @@ const FAST_INDEXES=[
 export async function createPurgeChallenge(user={},options={}){
   const db=getDb();
   const email=String(user.email||'');
-  const jobKey=purgePrepareJobKey(user);
-  const existing=readPurgePrepareJob(db,jobKey);
+  const jobFile=purgePrepareJobFile(user);
+  const existing=readPurgePrepareJob(jobFile);
   if(existing?.status==='SUCCEEDED'&&existing.email===email&&existing.challenge&&existing.payload){
     const expiresAt=Number(existing.challenge.expiresAt||0);
     const sourceStillMatches=sameFingerprint(existing.challenge.sourceFingerprint,databaseFingerprint(getRuntimeConfig().dbFile));
@@ -47,11 +47,10 @@ export async function createPurgeChallenge(user={},options={}){
       try{
         verifyPreparedBackupStillPresent(existing.challenge.backup);
         challenges.set(String(existing.payload.challengeId||''),existing.challenge);
-        setPurgeBlock(db,expiresAt);
         return {...existing.payload,recovered:true,recoveryPatch:V505_PURGE_RECOVERY_ID};
       }catch{}
     }
-    deletePurgePrepareJob(db,jobKey);
+    deletePurgePrepareJob(jobFile);
   }
   if(existing?.status==='RUNNING'&&existing.email===email){
     const startedAt=Number(existing.startedAt||existing.updatedAt||0);
@@ -60,10 +59,10 @@ export async function createPurgeChallenge(user={},options={}){
       error.code='PURGE_PREPARE_RUNNING';
       throw error;
     }
-    deletePurgePrepareJob(db,jobKey);
+    deletePurgePrepareJob(jobFile);
   }
 
-  writePurgePrepareJob(db,jobKey,{status:'RUNNING',email,ownerPid:process.pid,startedAt:Date.now(),updatedAt:Date.now(),patchId:V505_PURGE_RECOVERY_ID});
+  writePurgePrepareJob(jobFile,{status:'RUNNING',email,ownerPid:process.pid,startedAt:Date.now(),updatedAt:Date.now(),patchId:V505_PURGE_RECOVERY_ID});
   setPurgeBlock(db,Date.now()+60*60_000);
   try{
     await waitForBackgroundMaintenanceIdle(db);
@@ -77,10 +76,11 @@ export async function createPurgeChallenge(user={},options={}){
     const challenge={email,backup:verifiedBackup,createdAt,expiresAt,sourceFingerprint,countMode:PURGE_PREPARE_COUNT_MODE};
     const payload={challengeId,notBefore:new Date(createdAt+5000).toISOString(),expiresAt:new Date(expiresAt).toISOString(),databasePath:getRuntimeConfig().dbFile,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,administrator:email,backup:{path:verifiedBackup.filePath,sha256:verifiedBackup.sha256,size:verifiedBackup.size,integrity:verifiedBackup.integrity,method:verifiedBackup.method},deleteScope:['日报及解析行','运单、扫描和轨迹','run/checkpoint/snapshot','carry和POD锁','趋势、缓存、通知及导出文件','遗留动态刷新运行时间戳'],retainedScope:['数据库结构和迁移','用户、角色与系统设置','最新门店白名单','审计日志','清除前备份'],recoveryPatch:V505_PURGE_RECOVERY_ID};
     challenges.set(challengeId,challenge);
-    writePurgePrepareJob(db,jobKey,{status:'SUCCEEDED',email,ownerPid:process.pid,startedAt:Number(readPurgePrepareJob(db,jobKey)?.startedAt||createdAt),updatedAt:Date.now(),completedAt:Date.now(),expiresAt,challenge,payload,patchId:V505_PURGE_RECOVERY_ID});
+    const startedAt=Number(readPurgePrepareJob(jobFile)?.startedAt||createdAt);
+    writePurgePrepareJob(jobFile,{status:'SUCCEEDED',email,ownerPid:process.pid,startedAt,updatedAt:Date.now(),completedAt:Date.now(),expiresAt,challenge,payload,patchId:V505_PURGE_RECOVERY_ID});
     return payload;
   }catch(error){
-    writePurgePrepareJob(db,jobKey,{status:'FAILED',email,ownerPid:process.pid,startedAt:Number(readPurgePrepareJob(db,jobKey)?.startedAt||Date.now()),updatedAt:Date.now(),failedAt:Date.now(),error:String(error?.message||error),patchId:V505_PURGE_RECOVERY_ID});
+    writePurgePrepareJob(jobFile,{status:'FAILED',email,ownerPid:process.pid,startedAt:Number(readPurgePrepareJob(jobFile)?.startedAt||Date.now()),updatedAt:Date.now(),failedAt:Date.now(),error:String(error?.message||error),patchId:V505_PURGE_RECOVERY_ID});
     clearPurgeBlock(db);
     throw error;
   }
@@ -110,7 +110,7 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
   const currentFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
   if(!sameFingerprint(challenge.sourceFingerprint,currentFingerprint)){
     challenges.delete(String(challengeId||''));
-    deletePurgePrepareJob(db,purgePrepareJobKey(user));
+    deletePurgePrepareJob(purgePrepareJobFile(user));
     clearPurgeBlock(db);
     throw new Error('数据库在安全备份后发生变化，已停止清除。请重新开始，系统会先创建包含最新数据的新备份。');
   }
@@ -122,33 +122,38 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
   if(String(process.env.VACUUM_AFTER_PURGE||'').toLowerCase()==='true')db.exec('VACUUM');
   clearPurgeBlock(db);
   challenges.delete(String(challengeId||''));
-  deletePurgePrepareJob(db,purgePrepareJobKey(user));
+  deletePurgePrepareJob(purgePrepareJobFile(user));
   return {backup:challenge.backup,before:reset.before,after:reset.after,completedAt:nowIso(),event:'DATA_RESET',integrity:'ok',integrityCheck:'TRANSACTION_AND_SCHEMA',walCheckpoint:'AUTO',fileCleanupWarnings,deleteMode:'FAST_TABLE_DELETE_FK_GUARDED',performanceIndexes:'V108',countSource:PURGE_EXECUTE_COUNT_MODE,backupSourceFingerprint:'MATCHED',recoveryPatch:V505_PURGE_RECOVERY_ID};
 }
 
 export function getPurgeCounts(){return tableCounts(getDb());}
 
-function purgePrepareJobKey(user={}){
+function purgePrepareJobFile(user={}){
   const identity=String(user.id||user.email||'').trim().toLowerCase();
   if(!identity)throw new Error('缺少管理员身份，无法创建安全清空任务。');
   const digest=crypto.createHash('sha256').update(identity).digest('hex').slice(0,24);
-  return `${PURGE_PREPARE_JOB_PREFIX}${digest}`;
+  const dir=path.join(getRuntimeConfig().backupsDir,PURGE_PREPARE_JOB_DIR);
+  fs.mkdirSync(dir,{recursive:true});
+  return path.join(dir,`${digest}.json`);
 }
-function readPurgePrepareJob(db,key){
-  const raw=db.prepare('SELECT value FROM app_meta WHERE key=?').get(key)?.value;
-  if(!raw)return null;
-  try{return JSON.parse(raw);}catch{return null;}
+function readPurgePrepareJob(file){
+  try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}
 }
-function writePurgePrepareJob(db,key,value){
-  db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(key,JSON.stringify(value||{}),nowIso());
+function writePurgePrepareJob(file,value){
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  const temp=`${file}.${process.pid}.${crypto.randomUUID().slice(0,8)}.tmp`;
+  fs.writeFileSync(temp,JSON.stringify(value||{},null,2),'utf8');
+  try{fs.renameSync(temp,file);}catch{
+    try{fs.rmSync(file,{force:true});}catch{}
+    fs.renameSync(temp,file);
+  }
 }
-function deletePurgePrepareJob(db,key){db.prepare('DELETE FROM app_meta WHERE key=?').run(key);}
+function deletePurgePrepareJob(file){try{fs.rmSync(file,{force:true});}catch{}}
 function resolvePurgeChallenge(challengeId,user={}){
   const id=String(challengeId||'');
   let challenge=challenges.get(id);
   if(challenge)return challenge;
-  const db=getDb();
-  const job=readPurgePrepareJob(db,purgePrepareJobKey(user));
+  const job=readPurgePrepareJob(purgePrepareJobFile(user));
   if(job?.status!=='SUCCEEDED'||String(job?.payload?.challengeId||'')!==id||!job.challenge)return null;
   if(Number(job.challenge.expiresAt||0)<=Date.now())return null;
   challenge=job.challenge;
@@ -156,11 +161,10 @@ function resolvePurgeChallenge(challengeId,user={}){
   return challenge;
 }
 function persistResolvedChallenge(challengeId,user={},challenge){
-  const db=getDb();
-  const key=purgePrepareJobKey(user);
-  const job=readPurgePrepareJob(db,key);
+  const file=purgePrepareJobFile(user);
+  const job=readPurgePrepareJob(file);
   if(job?.status!=='SUCCEEDED'||String(job?.payload?.challengeId||'')!==String(challengeId||''))return;
-  writePurgePrepareJob(db,key,{...job,challenge,updatedAt:Date.now()});
+  writePurgePrepareJob(file,{...job,challenge,updatedAt:Date.now()});
 }
 
 async function createVerifiedPreClearBackup(adminEmail){
