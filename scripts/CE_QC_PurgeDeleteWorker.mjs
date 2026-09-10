@@ -67,7 +67,7 @@ try{
     meta.run('last_full_clear_at',now,now);
     meta.run('current_snapshot_id','',now);
     meta.run('v108_performance_indexes_ready','1',now);
-    db.prepare("DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key IN ('dashboard_cache_worker_active','dashboard_cache_worker_active_until','data_purge_block_until')").run();
+    db.prepare("DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN ('dashboard_cache_worker_active','dashboard_cache_worker_active_until','data_purge_block_until')").run();
     db.exec('COMMIT');
   }catch(error){
     try{db.exec('ROLLBACK');}catch{}
