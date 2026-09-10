@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { normalizeV485TrackRows, requestBillsFromV485Archive, V485_STRICT_TRACK_EVIDENCE_ID } from '../src/v485StrictTrackEvidence.js';
 import { extractV497ConfirmPodEvidence, V497_ARCHIVED_CONFIRM_POD_DATE_ID } from '../src/v497ArchivedConfirmPodEvidence.js';
+import { extractV498SavedShopeePodEvidence, V498_SAVED_SHOPEE_POD_EVIDENCE_ID } from '../src/v498SavedShopeePodEvidence.js';
 import { analyzeV246ShopeeAttemptCycle } from '../src/shopeeAttemptCycleV246.js';
 
-for(const file of ['src/v485StrictTrackEvidence.js','src/v497ArchivedConfirmPodEvidence.js','src/v484StrictExportEvidenceOwner.js','src/v381ExportEvidenceRepair.js','src/v84ExportJobWorker.js']){
+for(const file of ['src/v485StrictTrackEvidence.js','src/v497ArchivedConfirmPodEvidence.js','src/v498SavedShopeePodEvidence.js','src/v484StrictExportEvidenceOwner.js','src/v381ExportEvidenceRepair.js','src/v84ExportJobWorker.js']){
   execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 }
 
@@ -33,6 +34,17 @@ assert.deepEqual([...new Set(mixed.map(row=>row.shipmentCode))].sort(),['TBKH-A'
 assert.deepEqual(requestBillsFromV485Archive(['TBKH-A','TBKH-B']),['TBKH-A','TBKH-B']);
 assert.equal(V485_STRICT_TRACK_EVIDENCE_ID,'2026-09-09-v485-nested-track-normalizer-v266-archive-reuse-v1');
 
+const localPod=extractV498SavedShopeePodEvidence({
+  shipmentCode:'SPE-V498-1',orderStatus:'85',rawJson:JSON.stringify({shipmentCode:'SPE-V498-1',orderStatus:'85',updateTime:'2026-07-13 16:45:00',updatedAt:'2026-09-10 09:00:00'})
+},'business_scan_results');
+assert.equal(localPod?.podDate,'2026-07-13','V498 must recover the saved scan85 updateTime from exact-member local SQLite evidence');
+assert.equal(localPod?.field,'updateTime');
+assert.equal(localPod?.source,'business_scan_results');
+assert.equal(V498_SAVED_SHOPEE_POD_EVIDENCE_ID,'2026-09-10-v498-saved-shopee-scan-final-pod-time-v1');
+assert.equal(extractV498SavedShopeePodEvidence({shipmentCode:'SPE-V498-2',orderStatus:'70',rawJson:JSON.stringify({orderStatus:'70',updateTime:'2026-07-13 12:00:00'})},'business_scan_results'),null,'nonterminal saved updateTime must never become POD');
+assert.equal(extractV498SavedShopeePodEvidence({shipmentCode:'SPE-V498-3',orderStatus:'85',rawJson:JSON.stringify({orderStatus:'85',updatedAt:'2026-07-13 12:00:00'})},'business_scan_results'),null,'saved table updatedAt alone must never become a POD timestamp');
+assert.equal(extractV498SavedShopeePodEvidence({shipmentCode:'SPE-V498-4',isPod:1,rawJson:JSON.stringify({POD时间:'2026-07-15 18:30:00'})},'business_final_rows')?.podDate,'2026-07-15','explicit saved POD timestamp is acceptable even when no generic status time is used');
+
 const confirmPayload={
   requestBody:{shipmentCodes:['SPE-V497-1','SPE-OTHER']},
   responseData:{success:true,data:[
@@ -52,6 +64,7 @@ assert.equal(extractV497ConfirmPodEvidence(confirmPayload,['SPE-NOT-REQUESTED'])
 
 const helper=fs.readFileSync('src/v485StrictTrackEvidence.js','utf8');
 const confirmHelper=fs.readFileSync('src/v497ArchivedConfirmPodEvidence.js','utf8');
+const localHelper=fs.readFileSync('src/v498SavedShopeePodEvidence.js','utf8');
 const owner=fs.readFileSync('src/v484StrictExportEvidenceOwner.js','utf8');
 const repair=fs.readFileSync('src/v381ExportEvidenceRepair.js','utf8');
 const parent=fs.readFileSync('src/v84ExportJobWorker.js','utf8');
@@ -61,20 +74,28 @@ assert.match(helper,/export async function archiveV485TrackQueryResponse/,'succe
 assert.match(helper,/kind:'CE_API_EVIDENCE'/,'V485 residual archive must stay V266-compatible');
 assert.match(helper,/mode==='recent'/);
 assert.match(helper,/mode==='history'/);
+assert.match(localHelper,/FROM business_scan_results WHERE businessType='SHOPEE'/,'V498 must read exact-member saved Shopee scan evidence');
+assert.match(localHelper,/FROM business_shipment_tracks WHERE businessType='SHOPEE'/,'V498 may reuse exact-member saved shipment-track terminal evidence');
+assert.match(localHelper,/FROM business_final_rows WHERE businessType='SHOPEE'/,'V498 must reuse exact-member saved final-row evidence');
+assert.match(localHelper,/TERMINAL_STATUS_TIME_KEYS=\['updateTime','lastUpdateDate','scanTime','statusTime','modifyTime'\]/,'V498 generic terminal timestamps must exclude updatedAt/export time');
 assert.match(confirmHelper,/CONFIRM_FOLDER='otwms_order_confirm-query'/,'V497 must read only V266 confirm-query archives');
 assert.match(confirmHelper,/text\(row\.orderStatus\)===\'85\'/,'V497 generic response timestamps require saved terminal orderStatus=85 proof');
 assert.match(confirmHelper,/TERMINAL_STATUS_TIME_KEYS=\['updateTime','lastUpdateDate','scanTime','statusTime','modifyTime'\]/,'V497 terminal timestamp allowlist must exclude updatedAt/export time');
 assert.match(confirmHelper,/requestBills\(payload\?\.requestBody\)/,'V497 archive reads must be exact-request-member gated');
+assert.match(owner,/recoverV498SavedShopeePodDates/,'V484 owner must read exact-member local Shopee POD evidence before archives');
 assert.match(owner,/recoverV497ArchivedConfirmPodDates/,'V484 owner must reuse V266 archived confirm terminal evidence');
 assert.match(owner,/recoverV485ArchivedTrackEvents/,'V484 owner must reuse V266 archive track evidence');
+assert.match(owner,/strictStartDateByBill/,'recovered local/confirm POD dates must reuse saved V246 strict START evidence to compute signing without another business rerun');
 const saved=owner.indexOf("phase:'strictExportEvidenceSavedDone'");
-const confirmRecent=owner.indexOf("applyConfirmArchivePass({businessType,range,rows,gaps,onProgress,mode:'recent'})");
-const confirmHistory=owner.indexOf("applyConfirmArchivePass({businessType,range,rows,gaps,onProgress,mode:'history'})");
+const localSaved=owner.indexOf('recoverV498SavedShopeePodDates({db,targetBills:localPodTargets})');
+const confirmRecent=owner.indexOf("applyConfirmArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'recent'})");
+const confirmHistory=owner.indexOf("applyConfirmArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'history'})");
 const trackRecent=owner.indexOf("applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'recent'})");
 const trackHistory=owner.indexOf("applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'history'})");
 const remote=owner.indexOf('await repairV483StrictExportRows');
-assert.ok(saved>0&&confirmRecent>saved&&confirmHistory>confirmRecent&&trackRecent>confirmHistory&&trackHistory>trackRecent&&remote>trackHistory,'formal strict evidence order must be SQLite → V266 confirm recent/history → V266 track recent/history → residual CE 50x4');
-assert.match(owner,/podSource='V497_V266_CONFIRM_TERMINAL_TIME'/,'V497 recovered POD date must be marked on the actual export row');
+assert.ok(saved>0&&localSaved>saved&&confirmRecent>localSaved&&confirmHistory>confirmRecent&&trackRecent>confirmHistory&&trackHistory>trackRecent&&remote>trackHistory,'formal strict evidence order must be SQLite track → saved local scan/final POD → V266 confirm → V266 track → residual CE 50x4');
+assert.match(owner,/podSource:'V498_SAVED_SHOPEE_TERMINAL_TIME'/,'V498 recovered POD date must be marked on the actual export row');
+assert.match(owner,/podSource:'V497_V266_CONFIRM_TERMINAL_TIME'/,'V497 recovered POD date must be marked on the actual export row');
 assert.match(repair,/normalizeV485TrackRows\(rawEvents,\{fallbackBills:bills\}\)/,'V483 remote evidence must normalize nested CE track responses before grouping');
 assert.match(repair,/archiveV485TrackQueryResponse\(bills,rawEvents\)/,'successful residual CE track response must be archived before the batch is discarded');
 assert.match(repair,/queried=\$\{result\.queried\}:failed=\$\{result\.failed\}:eventBills=\$\{result\.eventBills\}:normalizedEvents=\$\{result\.normalizedEvents\}/,'unresolved strict evidence error must expose remote request and event coverage diagnostics');
@@ -84,4 +105,4 @@ for(const phase of ['strictexportevidencesaved','strictexportevidencearchive','s
 assert.match(parent,/V266离线轨迹档案/,'operator must see archive progress instead of a frozen business percentage');
 assert.match(parent,/50×4补核剩余严格轨迹/,'operator must see residual CE query progress and failure/event counts');
 
-console.log('[V497/V485] archived confirm POD + nested CE track evidence smoke passed · exact-member orderStatus85 saved timestamp only · updatedAt/export time rejected · SQLite→confirm archive→track archive→50x4 order locked · successful residual track responses archived');
+console.log('[V498/V497/V485] saved local Shopee POD + archived confirm POD + nested CE track evidence smoke passed · exact-member scan85 saved timestamp only · updatedAt/export time rejected · SQLite track→local scan/final→confirm archive→track archive→50x4 order locked');
