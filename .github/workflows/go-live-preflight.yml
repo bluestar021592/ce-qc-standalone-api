@@ -34,6 +34,11 @@ jobs:
           node --check src/unifiedImportStore.js
           node --check src/rangeDashboardStore.js
           node --check src/dataPurge.js
+          node --check src/v505PurgeCoordinator.js
+          node --check src/v29EndpointAliasPatch.js
+          node --check scripts/CE_QC_PurgePrepareTaskWorker.mjs
+          node --check scripts/CE_QC_PurgeExecuteTaskWorker.mjs
+          node --check public/v505-data-purge-recovery.js
           node --check scripts/CE_QC_Production_Audit.mjs
           node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
       - name: Go-live regression suite
