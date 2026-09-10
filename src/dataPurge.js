@@ -212,7 +212,7 @@ async function waitForBackgroundMaintenanceIdle(db,timeoutMs=5*60_000){
   }
 }
 function clearBusinessRuntimeMeta(db){
-  db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key IN (?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY);
+  db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN (?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY);
 }
 function reconcileRunLocks(db,activeRunIds){
   const active=activeRunIds instanceof Set?activeRunIds:new Set(activeRunIds||[]);
