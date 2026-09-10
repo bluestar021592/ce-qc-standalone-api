@@ -34,14 +34,14 @@ const FAST_INDEXES=[
 
 export async function createPurgeChallenge(user={},options={}){
   const db=getDb();
-  setPurgeBlock(db,Date.now()+20*60_000);
+  setPurgeBlock(db,Date.now()+60*60_000);
   try{
     await waitForBackgroundMaintenanceIdle(db);
+    reconcileRunLocks(db,options.activeRunIds);
+    const verifiedBackup=await createVerifiedPreClearBackup(user.email||'');
     const createdAt=Date.now();
     const expiresAt=createdAt+10*60_000;
     setPurgeBlock(db,expiresAt);
-    reconcileRunLocks(db,options.activeRunIds);
-    const verifiedBackup=await createVerifiedPreClearBackup(user.email||'');
     const sourceFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
     const challengeId=crypto.randomUUID();
     challenges.set(challengeId,{email:user.email||'',backup:verifiedBackup,createdAt,expiresAt,sourceFingerprint,countMode:PURGE_PREPARE_COUNT_MODE});
