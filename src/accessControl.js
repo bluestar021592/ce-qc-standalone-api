@@ -5,6 +5,7 @@ import {
 export * from './accessControlCore.js';
 
 const PURGE_STATUS_PATH=/^\/purge-status\/[a-f0-9]{48}\.json$/i;
+const PURGE_PREPARE_AUDITS=new Set(['DATA_PURGE_REQUESTED','DATA_PURGE_BACKUP_VERIFIED']);
 
 export async function accessIdentity(req,res,next){
   if(String(req.method||'').toUpperCase()==='GET'&&PURGE_STATUS_PATH.test(String(req.path||''))){
@@ -17,9 +18,6 @@ export async function accessIdentity(req,res,next){
 
 export function auditAction(req,action,detail={}){
   const pathname=String(req.path||'');
-  const isPurgePrepare=pathname==='/api/admin/data-purge/prepare';
-  const recoveryRequest=isPurgePrepare&&Boolean(req.body?.recoverJobId);
-  const pendingBackup=isPurgePrepare&&action==='DATA_PURGE_BACKUP_VERIFIED'&&String(detail?.backupPath||'').startsWith('PENDING:');
-  if(recoveryRequest||pendingBackup)return;
+  if(pathname==='/api/admin/data-purge/prepare'&&PURGE_PREPARE_AUDITS.has(String(action||'')))return;
   return coreAuditAction(req,action,detail);
 }
