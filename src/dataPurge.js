@@ -12,16 +12,20 @@ import { schedulerStateForTests } from './carryoverRefreshScheduler.js';
 export const PURGE_PHRASE='永久清除全部业务数据';
 export const V503_PRE_CLEAR_VERIFY_ID='2026-09-10-v503-isolated-pre-clear-backup-quick-check-v1';
 export const V504_PRE_CLEAR_BACKUP_ID='2026-09-10-v504-isolated-full-pre-clear-backup-v1';
-export const V505_PURGE_RECOVERY_ID='2026-09-10-v505-idempotent-purge-prepare-recovery-v1';
+export const V505_PURGE_RECOVERY_ID='2026-09-10-v505-async-purge-prepare-worker-v2';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const PURGE_PREPARE_JOB_DIR='.purge_prepare_jobs';
+const PURGE_STATUS_PUBLIC_DIR='purge-status';
 const CACHE_WORKER_ACTIVE_KEY='dashboard_cache_worker_active';
 const CACHE_WORKER_ACTIVE_UNTIL_KEY='dashboard_cache_worker_active_until';
 const PURGE_PREPARE_COUNT_MODE='DEFERRED_TO_TRANSACTIONAL_DELETE';
 const PURGE_EXECUTE_COUNT_MODE='DELETE_CHANGESET_EXACT';
 const PRE_CLEAR_BACKUP_WORKER=fileURLToPath(new URL('../scripts/CE_QC_PreClearBackupWorker.mjs',import.meta.url));
+const PURGE_PREPARE_TASK_WORKER=fileURLToPath(new URL('../scripts/CE_QC_PurgePrepareTaskWorker.mjs',import.meta.url));
 const PRE_CLEAR_BACKUP_TIMEOUT_MS=Math.max(5*60_000,Math.min(60*60_000,Number(process.env.PURGE_PRE_CLEAR_BACKUP_TIMEOUT_MS||30*60_000)));
 const PURGE_PREPARE_STALE_MS=PRE_CLEAR_BACKUP_TIMEOUT_MS+10*60_000;
+const PURGE_PREPARE_START_DELAY_MS=Math.max(750,Math.min(10_000,Number(process.env.PURGE_PREPARE_START_DELAY_MS||2000)));
+const PURGE_PREPARE_HEARTBEAT_MS=5000;
 const challenges=new Map();
 
 const FAST_INDEXES=[
@@ -37,50 +41,145 @@ const FAST_INDEXES=[
 
 export async function createPurgeChallenge(user={},options={}){
   const db=getDb();
-  const email=String(user.email||'');
+  const email=String(user.email||user.username||'');
   const jobFile=purgePrepareJobFile(user);
-  const existing=readPurgePrepareJob(jobFile);
-  if(existing?.status==='SUCCEEDED'&&existing.email===email&&existing.challenge&&existing.payload){
-    const expiresAt=Number(existing.challenge.expiresAt||0);
-    const sourceStillMatches=sameFingerprint(existing.challenge.sourceFingerprint,databaseFingerprint(getRuntimeConfig().dbFile));
-    if(expiresAt>Date.now()&&sourceStillMatches){
-      try{
-        verifyPreparedBackupStillPresent(existing.challenge.backup);
-        challenges.set(String(existing.payload.challengeId||''),existing.challenge);
-        return {...existing.payload,recovered:true,recoveryPatch:V505_PURGE_RECOVERY_ID};
-      }catch{}
+  const existing=readJsonFile(jobFile);
+
+  if(existing?.status==='SUCCEEDED'&&existing.email===email&&existing.payload?.challengeId){
+    const challenge=resolvePurgeChallenge(existing.payload.challengeId,user);
+    if(challenge&&challenge.expiresAt>Date.now()){
+      verifyPreparedBackupStillPresent(challenge.backup);
+      const currentFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
+      if(!sameFingerprint(challenge.sourceFingerprint,currentFingerprint)){
+        deletePurgeArtifacts(user,existing);
+        clearPurgeBlock(db);
+        throw new Error('数据库在安全备份完成后发生变化，已停止清除。请重新开始，系统会重新创建包含最新数据的安全备份。');
+      }
+      return {...existing.payload,status:'SUCCEEDED',jobId:existing.jobId,recovered:true,recoveryPatch:V505_PURGE_RECOVERY_ID};
     }
-    deletePurgePrepareJob(jobFile);
-  }
-  if(existing?.status==='RUNNING'&&existing.email===email){
-    const startedAt=Number(existing.startedAt||existing.updatedAt||0);
-    if(startedAt>0&&Date.now()-startedAt<PURGE_PREPARE_STALE_MS){
-      const error=new Error('PURGE_PREPARE_RUNNING: 清空前安全备份仍在后台创建，请等待系统自动恢复。');
-      error.code='PURGE_PREPARE_RUNNING';
-      throw error;
-    }
-    deletePurgePrepareJob(jobFile);
+    deletePurgeArtifacts(user,existing);
   }
 
-  writePurgePrepareJob(jobFile,{status:'RUNNING',email,ownerPid:process.pid,startedAt:Date.now(),updatedAt:Date.now(),patchId:V505_PURGE_RECOVERY_ID});
+  if(existing&&['QUEUED','RUNNING'].includes(existing.status)){
+    const heartbeatAt=Number(existing.heartbeatAt||existing.startedAt||existing.submittedAt||0);
+    if(heartbeatAt>0&&Date.now()-heartbeatAt<PURGE_PREPARE_STALE_MS){
+      return pendingPurgePayload(existing);
+    }
+    markPurgeJobFailed(existing,'清空前安全备份后台任务失去心跳，已停止本次清除。请重新开始。');
+    clearPurgeBlock(db);
+  }
+
+  if(existing?.status==='FAILED')deletePurgeArtifacts(user,existing,{keepChallenge:true});
+
+  quickPurgePreflight(options.activeRunIds);
+  const jobId=crypto.randomUUID();
+  const statusToken=crypto.randomBytes(24).toString('hex');
+  const statusFile=purgeStatusFile(statusToken);
+  const submittedAt=Date.now();
+  const job={
+    patchId:V505_PURGE_RECOVERY_ID,
+    jobId,statusToken,statusFile,status:'QUEUED',email,
+    submittedAt,startedAt:0,heartbeatAt:submittedAt,updatedAt:submittedAt,
+    workerPid:0,error:'',payload:null
+  };
+  setPurgeBlock(db,Date.now()+60*60_000);
+  writeJsonAtomic(jobFile,job);
+  writePublicPurgeStatus(job);
+  cleanupOldPurgeStatusFiles(statusFile);
+
+  const workerPayload={
+    jobId,statusToken,jobFile,statusFile,
+    user:{id:user.id||null,email,username:String(user.username||''),role:String(user.role||'ADMIN')},
+    activeRunIds:[...(options.activeRunIds instanceof Set?options.activeRunIds:new Set(options.activeRunIds||[]))],
+    delayMs:PURGE_PREPARE_START_DELAY_MS
+  };
+  const encoded=Buffer.from(JSON.stringify(workerPayload),'utf8').toString('base64url');
+  let child;
+  try{
+    child=spawn(process.execPath,[PURGE_PREPARE_TASK_WORKER,encoded],{
+      cwd:getRuntimeConfig().projectRoot,
+      env:{...process.env,CE_QC_PURGE_PREPARE_CHILD:'1'},
+      windowsHide:true,
+      detached:true,
+      stdio:'ignore'
+    });
+    child.unref();
+  }catch(error){
+    markPurgeJobFailed({...job,jobFile},`无法启动清空前安全备份后台任务：${error?.message||String(error)}`);
+    clearPurgeBlock(db);
+    throw error;
+  }
+  const queued={...job,workerPid:Number(child.pid||0),updatedAt:Date.now()};
+  writeJsonAtomic(jobFile,queued);
+  writePublicPurgeStatus(queued);
+  return pendingPurgePayload(queued);
+}
+
+export async function runPurgePreparationWorker(payload={}){
+  const jobFile=String(payload.jobFile||'');
+  const jobId=String(payload.jobId||'');
+  const current=readJsonFile(jobFile);
+  if(!jobFile||!jobId||current?.jobId!==jobId)throw new Error('V505_PURGE_JOB_NOT_FOUND');
+  const startedAt=Date.now();
+  let job={...current,status:'RUNNING',startedAt,heartbeatAt:startedAt,updatedAt:startedAt,workerPid:process.pid,error:''};
+  writeJsonAtomic(jobFile,job);
+  writePublicPurgeStatus(job);
+  const heartbeat=setInterval(()=>{
+    const latest=readJsonFile(jobFile);
+    if(!latest||latest.jobId!==jobId||!['QUEUED','RUNNING'].includes(latest.status))return;
+    job={...latest,status:'RUNNING',heartbeatAt:Date.now(),updatedAt:Date.now(),workerPid:process.pid};
+    writeJsonAtomic(jobFile,job);
+    writePublicPurgeStatus(job);
+  },PURGE_PREPARE_HEARTBEAT_MS);
+  heartbeat.unref?.();
+  try{
+    const result=await performPurgePreparation(payload.user||{},{activeRunIds:payload.activeRunIds||[],jobId});
+    const completed={...readJsonFile(jobFile),status:'SUCCEEDED',completedAt:Date.now(),heartbeatAt:Date.now(),updatedAt:Date.now(),payload:result,error:''};
+    writeJsonAtomic(jobFile,completed);
+    writePublicPurgeStatus(completed);
+    return result;
+  }catch(error){
+    const failed={...readJsonFile(jobFile),status:'FAILED',failedAt:Date.now(),heartbeatAt:Date.now(),updatedAt:Date.now(),error:String(error?.message||error)};
+    writeJsonAtomic(jobFile,failed);
+    writePublicPurgeStatus(failed);
+    try{clearPurgeBlock(getDb());}catch{}
+    throw error;
+  }finally{
+    clearInterval(heartbeat);
+  }
+}
+
+export async function performPurgePreparation(user={},options={}){
+  const db=getDb();
+  const email=String(user.email||user.username||'');
   setPurgeBlock(db,Date.now()+60*60_000);
   try{
     await waitForBackgroundMaintenanceIdle(db);
     reconcileRunLocks(db,options.activeRunIds);
-    const verifiedBackup=await createVerifiedPreClearBackup(email);
+    const verifiedBackup=await createVerifiedPreClearBackup(email,options.jobId||'');
     const createdAt=Date.now();
     const expiresAt=createdAt+10*60_000;
     setPurgeBlock(db,expiresAt);
     const sourceFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
     const challengeId=crypto.randomUUID();
     const challenge={email,backup:verifiedBackup,createdAt,expiresAt,sourceFingerprint,countMode:PURGE_PREPARE_COUNT_MODE};
-    const payload={challengeId,notBefore:new Date(createdAt+5000).toISOString(),expiresAt:new Date(expiresAt).toISOString(),databasePath:getRuntimeConfig().dbFile,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,administrator:email,backup:{path:verifiedBackup.filePath,sha256:verifiedBackup.sha256,size:verifiedBackup.size,integrity:verifiedBackup.integrity,method:verifiedBackup.method},deleteScope:['日报及解析行','运单、扫描和轨迹','run/checkpoint/snapshot','carry和POD锁','趋势、缓存、通知及导出文件','遗留动态刷新运行时间戳'],retainedScope:['数据库结构和迁移','用户、角色与系统设置','最新门店白名单','审计日志','清除前备份'],recoveryPatch:V505_PURGE_RECOVERY_ID};
+    const payload={
+      challengeId,
+      notBefore:new Date(createdAt+5000).toISOString(),
+      expiresAt:new Date(expiresAt).toISOString(),
+      databasePath:getRuntimeConfig().dbFile,
+      counts:null,
+      countMode:PURGE_PREPARE_COUNT_MODE,
+      administrator:email,
+      backup:{path:verifiedBackup.filePath,sha256:verifiedBackup.sha256,size:verifiedBackup.size,integrity:verifiedBackup.integrity,method:verifiedBackup.method},
+      deleteScope:['日报及解析行','运单、扫描和轨迹','run/checkpoint/snapshot','carry和POD锁','趋势、缓存、通知及导出文件','遗留动态刷新运行时间戳'],
+      retainedScope:['数据库结构和迁移','用户、角色与系统设置','最新门店白名单','审计日志','清除前备份'],
+      recoveryPatch:V505_PURGE_RECOVERY_ID
+    };
     challenges.set(challengeId,challenge);
-    const startedAt=Number(readPurgePrepareJob(jobFile)?.startedAt||createdAt);
-    writePurgePrepareJob(jobFile,{status:'SUCCEEDED',email,ownerPid:process.pid,startedAt,updatedAt:Date.now(),completedAt:Date.now(),expiresAt,challenge,payload,patchId:V505_PURGE_RECOVERY_ID});
+    writeJsonAtomic(purgeChallengeFile(user),{challengeId,challenge,payload,updatedAt:Date.now()});
     return payload;
   }catch(error){
-    writePurgePrepareJob(jobFile,{status:'FAILED',email,ownerPid:process.pid,startedAt:Number(readPurgePrepareJob(jobFile)?.startedAt||Date.now()),updatedAt:Date.now(),failedAt:Date.now(),error:String(error?.message||error),patchId:V505_PURGE_RECOVERY_ID});
     clearPurgeBlock(db);
     throw error;
   }
@@ -88,7 +187,7 @@ export async function createPurgeChallenge(user={},options={}){
 
 export function resealPurgeChallenge(challengeId,user={}){
   const challenge=resolvePurgeChallenge(challengeId,user);
-  if(!challenge||challenge.expiresAt<Date.now()||challenge.email!==(user.email||''))throw new Error('清除验证已失效，无法完成安全封存。');
+  if(!challenge||challenge.expiresAt<Date.now()||challenge.email!==String(user.email||user.username||''))throw new Error('清除验证已失效，无法完成安全封存。');
   challenge.sourceFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
   challenge.resealedAt=Date.now();
   challenge.sourceSeal='POST_PREPARE_AUDIT';
@@ -98,7 +197,8 @@ export function resealPurgeChallenge(challengeId,user={}){
 
 export async function executePurge({challengeId,phrase,backupConfirmed,user={},activeRunIds=null}){
   const challenge=resolvePurgeChallenge(challengeId,user);
-  if(!challenge||challenge.expiresAt<Date.now()||challenge.email!==(user.email||''))throw new Error('清除验证已失效，请重新开始。');
+  const email=String(user.email||user.username||'');
+  if(!challenge||challenge.expiresAt<Date.now()||challenge.email!==email)throw new Error('清除验证已失效，请重新开始。');
   if(Date.now()-challenge.createdAt<5000)throw new Error('请等待5秒倒计时完成。');
   if(!backupConfirmed)throw new Error('请勾选“我已确认自动备份成功”。');
   if(String(phrase||'')!==PURGE_PHRASE)throw new Error(`请输入完整确认短语：${PURGE_PHRASE}`);
@@ -110,7 +210,7 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
   const currentFingerprint=databaseFingerprint(getRuntimeConfig().dbFile);
   if(!sameFingerprint(challenge.sourceFingerprint,currentFingerprint)){
     challenges.delete(String(challengeId||''));
-    deletePurgePrepareJob(purgePrepareJobFile(user));
+    deletePurgeArtifacts(user,readJsonFile(purgePrepareJobFile(user)));
     clearPurgeBlock(db);
     throw new Error('数据库在安全备份后发生变化，已停止清除。请重新开始，系统会先创建包含最新数据的新备份。');
   }
@@ -122,24 +222,67 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
   if(String(process.env.VACUUM_AFTER_PURGE||'').toLowerCase()==='true')db.exec('VACUUM');
   clearPurgeBlock(db);
   challenges.delete(String(challengeId||''));
-  deletePurgePrepareJob(purgePrepareJobFile(user));
+  deletePurgeArtifacts(user,readJsonFile(purgePrepareJobFile(user)));
   return {backup:challenge.backup,before:reset.before,after:reset.after,completedAt:nowIso(),event:'DATA_RESET',integrity:'ok',integrityCheck:'TRANSACTION_AND_SCHEMA',walCheckpoint:'AUTO',fileCleanupWarnings,deleteMode:'FAST_TABLE_DELETE_FK_GUARDED',performanceIndexes:'V108',countSource:PURGE_EXECUTE_COUNT_MODE,backupSourceFingerprint:'MATCHED',recoveryPatch:V505_PURGE_RECOVERY_ID};
 }
 
 export function getPurgeCounts(){return tableCounts(getDb());}
 
-function purgePrepareJobFile(user={}){
-  const identity=String(user.id||user.email||'').trim().toLowerCase();
+function quickPurgePreflight(activeRunIds){
+  const active=activeRunIds instanceof Set?activeRunIds:new Set(activeRunIds||[]);
+  const activeRun=[...active].find(Boolean);
+  if(activeRun)throw new Error(`当前存在活动任务，不能清除。runId：${activeRun}`);
+  const cfg=getRuntimeConfig();
+  if(!fs.existsSync(cfg.dbFile))throw new Error('正式数据库不存在，已停止清除。');
+  const stat=fs.statSync(cfg.dbFile);
+  if(!stat.isFile()||Number(stat.size||0)<=0)throw new Error('正式数据库无效，已停止清除。');
+  fs.mkdirSync(cfg.backupsDir,{recursive:true});
+  assertFreeSpace(cfg.backupsDir,Number(stat.size||0));
+}
+
+function pendingPurgePayload(job={}){
+  return {
+    status:String(job.status||'QUEUED'),
+    jobId:String(job.jobId||''),
+    statusToken:String(job.statusToken||''),
+    statusUrl:job.statusToken?`/${PURGE_STATUS_PUBLIC_DIR}/${job.statusToken}.json`:'',
+    submittedAt:Number(job.submittedAt||Date.now()),
+    startedAt:Number(job.startedAt||0),
+    heartbeatAt:Number(job.heartbeatAt||0),
+    databasePath:getRuntimeConfig().dbFile,
+    counts:null,
+    countMode:PURGE_PREPARE_COUNT_MODE,
+    administrator:String(job.email||''),
+    backup:{path:`PENDING:${String(job.jobId||'')}`,sha256:'',size:0,integrity:'pending',method:'detached-background-worker'},
+    recoveryPatch:V505_PURGE_RECOVERY_ID
+  };
+}
+
+function purgeIdentity(user={}){
+  const identity=String(user.id||user.email||user.username||'').trim().toLowerCase();
   if(!identity)throw new Error('缺少管理员身份，无法创建安全清空任务。');
-  const digest=crypto.createHash('sha256').update(identity).digest('hex').slice(0,24);
+  return crypto.createHash('sha256').update(identity).digest('hex').slice(0,24);
+}
+function purgePrepareJobFile(user={}){
   const dir=path.join(getRuntimeConfig().backupsDir,PURGE_PREPARE_JOB_DIR);
   fs.mkdirSync(dir,{recursive:true});
-  return path.join(dir,`${digest}.json`);
+  return path.join(dir,`${purgeIdentity(user)}.job.json`);
 }
-function readPurgePrepareJob(file){
+function purgeChallengeFile(user={}){
+  const dir=path.join(getRuntimeConfig().backupsDir,PURGE_PREPARE_JOB_DIR);
+  fs.mkdirSync(dir,{recursive:true});
+  return path.join(dir,`${purgeIdentity(user)}.challenge.json`);
+}
+function purgeStatusFile(token=''){
+  if(!/^[a-f0-9]{48}$/i.test(String(token||'')))throw new Error('V505_INVALID_PURGE_STATUS_TOKEN');
+  const dir=path.join(getRuntimeConfig().projectRoot,'public',PURGE_STATUS_PUBLIC_DIR);
+  fs.mkdirSync(dir,{recursive:true});
+  return path.join(dir,`${token}.json`);
+}
+function readJsonFile(file){
   try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}
 }
-function writePurgePrepareJob(file,value){
+function writeJsonAtomic(file,value){
   fs.mkdirSync(path.dirname(file),{recursive:true});
   const temp=`${file}.${process.pid}.${crypto.randomUUID().slice(0,8)}.tmp`;
   fs.writeFileSync(temp,JSON.stringify(value||{},null,2),'utf8');
@@ -148,26 +291,67 @@ function writePurgePrepareJob(file,value){
     fs.renameSync(temp,file);
   }
 }
-function deletePurgePrepareJob(file){try{fs.rmSync(file,{force:true});}catch{}}
+function publicStatusPayload(job={}){
+  return {
+    ok:true,
+    patchId:V505_PURGE_RECOVERY_ID,
+    jobId:String(job.jobId||''),
+    status:String(job.status||''),
+    submittedAt:Number(job.submittedAt||0),
+    startedAt:Number(job.startedAt||0),
+    heartbeatAt:Number(job.heartbeatAt||0),
+    completedAt:Number(job.completedAt||0),
+    failedAt:Number(job.failedAt||0),
+    error:job.status==='FAILED'?String(job.error||'清空前安全备份失败。'):''
+  };
+}
+function writePublicPurgeStatus(job={}){
+  const file=String(job.statusFile||'');
+  if(!file)return;
+  writeJsonAtomic(file,publicStatusPayload(job));
+}
+function markPurgeJobFailed(job={},message=''){
+  const failed={...job,status:'FAILED',failedAt:Date.now(),heartbeatAt:Date.now(),updatedAt:Date.now(),error:String(message||'清空前安全备份失败。')};
+  const file=String(job.jobFile||'')||(() => { try{return purgePrepareJobFile({email:job.email});}catch{return '';} })();
+  if(file)writeJsonAtomic(file,failed);
+  writePublicPurgeStatus(failed);
+  return failed;
+}
+function cleanupOldPurgeStatusFiles(keepFile=''){
+  const dir=path.dirname(keepFile||purgeStatusFile(crypto.randomBytes(24).toString('hex')));
+  let entries=[];try{entries=fs.readdirSync(dir,{withFileTypes:true});}catch{return;}
+  const cutoff=Date.now()-24*60*60_000;
+  for(const entry of entries){
+    if(!entry.isFile()||!entry.name.endsWith('.json'))continue;
+    const target=path.join(dir,entry.name);
+    if(keepFile&&path.resolve(target)===path.resolve(keepFile))continue;
+    try{if(fs.statSync(target).mtimeMs<cutoff)fs.rmSync(target,{force:true});}catch{}
+  }
+}
+function deletePurgeArtifacts(user={},job={},options={}){
+  try{fs.rmSync(purgePrepareJobFile(user),{force:true});}catch{}
+  if(!options.keepChallenge){try{fs.rmSync(purgeChallengeFile(user),{force:true});}catch{}}
+  if(job?.statusFile){try{fs.rmSync(job.statusFile,{force:true});}catch{}}
+}
 function resolvePurgeChallenge(challengeId,user={}){
   const id=String(challengeId||'');
   let challenge=challenges.get(id);
   if(challenge)return challenge;
-  const job=readPurgePrepareJob(purgePrepareJobFile(user));
-  if(job?.status!=='SUCCEEDED'||String(job?.payload?.challengeId||'')!==id||!job.challenge)return null;
-  if(Number(job.challenge.expiresAt||0)<=Date.now())return null;
-  challenge=job.challenge;
+  const record=readJsonFile(purgeChallengeFile(user));
+  if(!record||String(record.challengeId||'')!==id||!record.challenge)return null;
+  if(Number(record.challenge.expiresAt||0)<=Date.now())return null;
+  challenge=record.challenge;
   challenges.set(id,challenge);
   return challenge;
 }
 function persistResolvedChallenge(challengeId,user={},challenge){
-  const file=purgePrepareJobFile(user);
-  const job=readPurgePrepareJob(file);
-  if(job?.status!=='SUCCEEDED'||String(job?.payload?.challengeId||'')!==String(challengeId||''))return;
-  writePurgePrepareJob(file,{...job,challenge,updatedAt:Date.now()});
+  const file=purgeChallengeFile(user);
+  const record=readJsonFile(file);
+  if(!record||String(record.challengeId||'')!==String(challengeId||''))return;
+  writeJsonAtomic(file,{...record,challenge,updatedAt:Date.now()});
 }
 
-async function createVerifiedPreClearBackup(adminEmail){
+async function createVerifiedPreClearBackup(adminEmail,jobId=''){
   const cfg=getRuntimeConfig();
   const db=getDb();
   const stamp=`${localStamp()}-${crypto.randomUUID().slice(0,8)}`;
@@ -199,7 +383,7 @@ async function createVerifiedPreClearBackup(adminEmail){
 
   const schemaMeta=Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value||0);
   const pragmaSchema=Number(db.prepare('PRAGMA user_version').get()?.user_version||0);
-  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity,verificationMode:'isolated-write-freeze+online-backup+backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:isolated.method||'node-sqlite-online-backup-isolated-write-freeze',verificationWorker:V504_PRE_CLEAR_BACKUP_ID,compatibilityVerification:V503_PRE_CLEAR_VERIFY_ID,systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,sourceStableDuringBackup:true,recoveryPatch:V505_PURGE_RECOVERY_ID};
+  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity,verificationMode:'isolated-write-freeze+online-backup+backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:isolated.method||'node-sqlite-online-backup-isolated-write-freeze',verificationWorker:V504_PRE_CLEAR_BACKUP_ID,compatibilityVerification:V503_PRE_CLEAR_VERIFY_ID,systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,sourceStableDuringBackup:true,recoveryPatch:V505_PURGE_RECOVERY_ID,prepareJobId:String(jobId||'')};
   fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
   recordBackup({backupType:'database',fileName:path.basename(filePath),filePath,fileHash:sha256,reason:'before-full-clear'});
   return {directory:dir,filePath,sha256,size:backupSize,mtimeMs:stat.mtimeMs,integrity,method:manifest.method,manifestPath:path.join(dir,'manifest.json')};
@@ -309,7 +493,7 @@ function assertPurgeStructure(db){
   if(Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys||0)!==1)throw new Error('清空后外键保护未恢复。');
 }
 export function hashFileStream(file){return new Promise((resolve,reject)=>{const hash=crypto.createHash('sha256');const input=fs.createReadStream(file,{highWaterMark:8*1024*1024});input.on('error',reject);input.on('data',chunk=>hash.update(chunk));input.on('end',()=>resolve(hash.digest('hex')));});}
-function assertFreeSpace(targetDir,sourceSize){const disk=fs.statfsSync(targetDir);const available=Number(disk.bavail)*Number(disk.bsize);const required=Math.ceil(sourceSize*1.1)+256*1024*1024;if(available<required)throw new Error(`备份磁盘空间不足：至少需要 ${required} 字节，当前可用 ${available} 字节。`);}
+function assertFreeSpace(targetDir,sourceSize){const disk=fs.statfsSync(targetDir);const available=Number(disk.bavail)*Number(disk.bsize);const required=Math.ceil(Number(sourceSize||0)*1.1)+256*1024*1024;if(available<required)throw new Error(`备份磁盘空间不足：至少需要 ${required} 字节，当前可用 ${available} 字节。`);}
 function localStamp(){const d=new Date();const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;}
 async function clearRegenerableFiles(){
   const cfg=getRuntimeConfig();const warnings=[];
