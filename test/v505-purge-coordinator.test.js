@@ -28,9 +28,8 @@ test('V505 keeps a stale-heartbeat prepare job locked while its worker PID is st
   process.env.DATA_DIR = dir;
   process.env.DB_FILE = path.join(dir, 'test.db');
   process.env.CE_QC_DISABLE_CARRY_REFRESH = '1';
-  const { getDb, getRuntimeConfig } = await import('../src/db.js');
+  const { getRuntimeConfig } = await import('../src/db.js');
   const { inspectLivePrepareJob } = await import('../src/v505PurgeCoordinator.js');
-  getDb();
   const user = { email: 'stale-alive-admin' };
   const jobDir = path.join(getRuntimeConfig().backupsDir, '.purge_prepare_jobs');
   fs.mkdirSync(jobDir, { recursive: true });
