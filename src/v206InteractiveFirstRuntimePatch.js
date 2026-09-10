@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import './v499FreshStartTrackingPolicy.js';
+import './v501FreshStartManualTrackingGate.js';
 import './v266EvergreenEvidenceArchive.js';
 import './v234DashboardLiveTruthPatch.js';
 import './v236DashboardCurrentRoutePatch.js';
