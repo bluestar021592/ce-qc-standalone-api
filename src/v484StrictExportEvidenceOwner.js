@@ -8,6 +8,7 @@ import {
   V483_EXPORT_MEMBER_EVIDENCE_ID
 } from './v381ExportEvidenceRepair.js';
 import { recoverV485ArchivedTrackEvents, V485_STRICT_TRACK_EVIDENCE_ID } from './v485StrictTrackEvidence.js';
+import { recoverV497ArchivedConfirmPodDates, V497_ARCHIVED_CONFIRM_POD_DATE_ID } from './v497ArchivedConfirmPodEvidence.js';
 
 export const V484_STRICT_EXPORT_EVIDENCE_OWNER_ID='2026-09-09-v492-shopee-only-strict-export-evidence-v1';
 const LOCAL_BATCH=220;
@@ -58,6 +59,33 @@ function persistAppliedEvidence(evidenceRows,db,reason){
   return Number(persisted?.updated||0);
 }
 
+function applyConfirmPodDates(gaps,evidenceByBill){
+  let recovered=0;
+  for(const record of gaps){
+    if(text(record?.podDate))continue;
+    const evidence=evidenceByBill.get(billOf(record?.shipmentCode));if(!evidence?.podDate)continue;
+    let touched=false;
+    for(const row of Array.isArray(record.rows)?record.rows:[]){
+      if(!text(row.podDate)){row.podDate=evidence.podDate;touched=true;}
+      if(!/\d{4}/.test(text(row.podTime)))row.podTime=evidence.timestamp||evidence.podDate;
+      row.podSource='V497_V266_CONFIRM_TERMINAL_TIME';
+      row.v497ArchivedConfirmPodDateId=V497_ARCHIVED_CONFIRM_POD_DATE_ID;
+      row.v497ArchivedConfirmPodDateField=evidence.field||'';
+    }
+    if(touched){record.podDate=evidence.podDate;recovered+=1;}
+  }
+  return recovered;
+}
+
+async function applyConfirmArchivePass({businessType,range,rows,gaps,onProgress,mode}){
+  const missingPod=gaps.filter(item=>!text(item?.podDate)),bills=missingPod.map(item=>billOf(item.shipmentCode)).filter(Boolean);
+  if(!bills.length)return{podDateRecovered:0,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,podDateBills:0,readErrors:0,truncated:false,unresolved:listV483StrictExportRowGaps(businessType,rows).length};
+  const archive=await recoverV497ArchivedConfirmPodDates({range,targetBills:bills,mode,onProgress});
+  const podDateRecovered=applyConfirmPodDates(missingPod,archive.evidenceByBill),remaining=listV483StrictExportRowGaps(businessType,rows).length;
+  onProgress({phase:'strictExportEvidenceConfirmArchiveDone',mode,completed:archive.processedFiles,total:archive.filesConsidered,matchedFiles:archive.matchedFiles,requestBillsMatched:archive.requestBillsMatched,podDateBills:archive.podDateBills,readErrors:archive.readErrors,truncated:archive.truncated,podDateRecovered,unresolved:remaining,evidenceRepairVersion:V497_ARCHIVED_CONFIRM_POD_DATE_ID});
+  return{...archive,podDateRecovered,unresolved:remaining};
+}
+
 async function applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode}){
   const bills=gaps.map(item=>billOf(item.shipmentCode)).filter(Boolean);
   const archive=await recoverV485ArchivedTrackEvents({range,targetBills:bills,mode,onProgress});
@@ -76,7 +104,7 @@ async function applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode
 
 export async function repairV484StrictExportEvidence({type,range,rows=[],db=getDb(),client=null,onProgress=()=>{}}={}){
   const businessType=text(type).toUpperCase();
-  if(!isV484StrictExportEvidenceType(businessType))return{ok:true,skipped:true,reason:'NON_STRICT_BUSINESS',total:0,localResolved:0,archiveResolved:0,remoteQueried:0,unresolved:0};
+  if(!isV484StrictExportEvidenceType(businessType))return{ok:true,skipped:true,reason:'NON_STRICT_BUSINESS',total:0,localResolved:0,confirmPodRecovered:0,archiveResolved:0,remoteQueried:0,unresolved:0};
 
   let gaps=listV483StrictExportRowGaps(businessType,rows),initialTotal=gaps.length,completed=0,updated=0;
   onProgress({phase:'strictExportEvidenceSaved',completed:0,total:initialTotal,unresolved:initialTotal,localBatch:LOCAL_BATCH,evidenceRepairVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID});
@@ -96,17 +124,24 @@ export async function repairV484StrictExportEvidence({type,range,rows=[],db=getD
   gaps=listV483StrictExportRowGaps(businessType,rows);
   const localResolved=Math.max(0,initialTotal-gaps.length);
   onProgress({phase:'strictExportEvidenceSavedDone',completed:initialTotal,total:initialTotal,updated,localResolved,unresolved:gaps.length,localBatch:LOCAL_BATCH,evidenceRepairVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID});
-  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,archiveResolved:0,remoteQueried:0,updated,unresolved:0};
+  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,confirmPodRecovered:0,archiveResolved:0,remoteQueried:0,updated,unresolved:0};
+
+  const confirmRecent=await applyConfirmArchivePass({businessType,range,rows,gaps,onProgress,mode:'recent'});
+  gaps=listV483StrictExportRowGaps(businessType,rows);
+  let confirmHistory={podDateRecovered:0,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,podDateBills:0,readErrors:0,truncated:false,unresolved:gaps.length};
+  if(gaps.some(item=>!text(item?.podDate))){confirmHistory=await applyConfirmArchivePass({businessType,range,rows,gaps,onProgress,mode:'history'});gaps=listV483StrictExportRowGaps(businessType,rows);}
+  const confirmPodRecovered=Number(confirmRecent.podDateRecovered||0)+Number(confirmHistory.podDateRecovered||0);
+  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved:0,remoteQueried:0,updated,unresolved:0};
 
   const recentArchive=await applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'recent'});updated+=recentArchive.updated;
   gaps=listV483StrictExportRowGaps(businessType,rows);
   let historyArchive={resolved:0,updated:0,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,eventBills:0,readErrors:0,truncated:false,unresolved:gaps.length};
   if(gaps.length){historyArchive=await applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'history'});updated+=historyArchive.updated;gaps=listV483StrictExportRowGaps(businessType,rows);}
   const archiveResolved=Math.max(0,initialTotal-localResolved-gaps.length);
-  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:0,updated,unresolved:0};
+  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:0,updated,unresolved:0};
 
-  const remote=await repairV483StrictExportRows({type:businessType,range,rows,db,client,onProgress(info={}){onProgress({...info,v484Residual:true,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID,archiveResolved});}});
-  return{...remote,ownerVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,total:initialTotal,localResolved,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:Number(remote?.queried||0),updated:updated+Number(remote?.updated||0)};
+  const remote=await repairV483StrictExportRows({type:businessType,range,rows,db,client,onProgress(info={}){onProgress({...info,v484Residual:true,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID,confirmPodRecovered,archiveResolved});}});
+  return{...remote,ownerVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,total:initialTotal,localResolved,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:Number(remote?.queried||0),updated:updated+Number(remote?.updated||0)};
 }
 
-console.info('[CE-QC][V492_STRICT_EXPORT_EVIDENCE_OWNER]',V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,V485_STRICT_TRACK_EVIDENCE_ID,'formal CN/VN export keeps Shopee strict evidence repair; TBKH bypasses Shopee-only attempt/signing gate.');
+console.info('[CE-QC][V492_STRICT_EXPORT_EVIDENCE_OWNER]',V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,V485_STRICT_TRACK_EVIDENCE_ID,V497_ARCHIVED_CONFIRM_POD_DATE_ID,'formal CN/VN export keeps Shopee strict evidence repair; exact-member V266 confirm terminal timestamps may fill only real missing POD dates before track evidence; TBKH bypasses Shopee-only attempt/signing gate.');
