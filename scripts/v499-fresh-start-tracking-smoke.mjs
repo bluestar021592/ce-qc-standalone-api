@@ -6,6 +6,7 @@ for (const file of [
   'src/v499FreshStartTrackingPolicy.js',
   'src/v206InteractiveFirstRuntimePatch.js',
   'src/v246QcTrackingRuntimePatch.js',
+  'src/dataPurge.js',
   'scripts/CE_QC_PurgeDeleteWorker.mjs',
   'src/v105AsyncPurgePatch.js'
 ]) execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
@@ -14,6 +15,7 @@ const read = file => fs.readFileSync(file, 'utf8');
 const policy = read('src/v499FreshStartTrackingPolicy.js');
 const v206 = read('src/v206InteractiveFirstRuntimePatch.js');
 const runtime = read('src/v246QcTrackingRuntimePatch.js');
+const directPurge = read('src/dataPurge.js');
 const worker = read('scripts/CE_QC_PurgeDeleteWorker.mjs');
 const purgePatch = read('src/v105AsyncPurgePatch.js');
 
@@ -30,7 +32,8 @@ assert.match(runtime, /fromDate:addDays\(clock\.date,-29\),toDate:clock\.date,da
 assert.match(runtime, /CAMBODIA_0200_30DAY_AUTO/);
 assert.match(runtime, /v246_daily_0200_success_date/);
 
-assert.match(worker, /key LIKE 'v246_daily_0200_%'/, 'clean purge must reset V246 02:00 success/failure state');
+assert.match(directPurge, /key LIKE 'v246_daily_0200_%'/, 'direct full purge must reset V246 02:00 success/failure state');
+assert.match(worker, /key LIKE 'v246_daily_0200_%'/, 'isolated clean purge must reset V246 02:00 success/failure state');
 assert.match(purgePatch, /CE_QC_PurgeDeleteWorker\.mjs/);
 assert.match(purgePatch, /runIsolatedExecute/);
 
@@ -54,4 +57,4 @@ const disabled = JSON.parse(disabledProbe);
 assert.equal(disabled.hardDisable, true);
 assert.equal(disabled.v246Enabled, false, 'explicit emergency hard-disable must remain available');
 
-console.log('[V499] fresh-start tracking gate passed · managed startup enables V246 hourly/02:00 tracking · explicit hard stop preserved · isolated full purge resets V246 daily scheduler state');
+console.log('[V499] fresh-start tracking gate passed · managed startup enables V246 hourly/02:00 tracking · explicit hard stop preserved · direct + isolated full purge reset V246 daily scheduler state');
