@@ -14,7 +14,7 @@
     import:['/v66-import-success-whpp.js?v=20260812-1','/v96-v67-live-progress-bridge.js?v=20260813-1'],
     reports:['/v190-export-direct-route-client.js?v=20260818-v191-1','/v84-async-export-ui.js?v=20260818-v193-1','/v194-export-token-ui.js?v=20260818-v195-1'],
     settings:['/v62-network-settings-runtime.js?v=20260812-1'],
-    data:['/v104-fast-purge-ui.js?v=20260814-8','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
+    data:['/v505-data-purge-recovery.js?v=20260910-v505-6','/v104-fast-purge-ui.js?v=20260814-8','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
     carry:['/v99-carry-live-ui.js?v=20260814-1']
   };
 
