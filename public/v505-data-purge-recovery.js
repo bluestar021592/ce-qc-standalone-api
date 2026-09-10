@@ -1,6 +1,6 @@
 (function installV505DataPurgeRecovery(global){
   if(global.__CE_QC_V505_DATA_PURGE_RECOVERY__)return;
-  const PATCH_ID='2026-09-10-v505-async-purge-prepare-execute-ui-v5';
+  const PATCH_ID='2026-09-10-v505-async-purge-prepare-execute-ui-v6';
   let active=false;
   let elapsedTimer=null;
   let startedAt=0;
@@ -182,5 +182,6 @@
   function claimPurgeOwner(){global.openDataPurge=v505OpenDataPurge;try{openDataPurge=v505OpenDataPurge;}catch{}}
   claimPurgeOwner();setTimeout(claimPurgeOwner,1200);setTimeout(claimPurgeOwner,3500);
   global.__CE_QC_V505_DATA_PURGE_RECOVERY__={patchId:PATCH_ID,openDataPurge:v505OpenDataPurge,getStatus:()=>({active,lastStatus,startedAt,currentJob})};
+  global.__CE_QC_V105_ASYNC_PURGE_UI__={version:PATCH_ID,isPolling:()=>active,isFlowActive:()=>active,pollDelay:()=>2000,recoverRecentJob:async()=>currentJob,owner:'V505'};
   console.info('[CE-QC][V505_DATA_PURGE_RECOVERY]',PATCH_ID);
 })(window);
