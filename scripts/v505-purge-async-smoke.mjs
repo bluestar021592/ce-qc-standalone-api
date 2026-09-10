@@ -23,6 +23,13 @@ for(const relative of syntaxFiles){
   assert.equal(result.status,0,`${relative} syntax check failed: ${result.stderr||result.stdout}`);
 }
 
+const pkg=JSON.parse(read('package.json'));
+assert.equal(pkg.scripts?.start,'node bootstrap.js','production/local launcher must pass through bootstrap patch ownership');
+const bootstrap=read('bootstrap.js');
+const routeOwnerImport=bootstrap.indexOf("'./src/v29EndpointAliasPatch.js'");
+const serverImport=bootstrap.indexOf("'./server.js'");
+assert.ok(routeOwnerImport>=0&&serverImport>=0&&routeOwnerImport<serverImport,'V505 route owner must be installed before server.js registers purge routes');
+
 const purge=read('src/dataPurge.js');
 assert.match(purge,/detached\s*:\s*true/);
 assert.match(purge,/child\.unref\(\)/);
