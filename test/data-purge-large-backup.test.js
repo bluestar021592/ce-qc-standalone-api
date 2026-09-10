@@ -7,6 +7,7 @@ import test from 'node:test';
 import { hashFileStream } from '../src/dataPurge.js';
 
 const RUN_LARGE_DURABILITY = String(process.env.CE_QC_RUN_LARGE_DURABILITY || '') === '1';
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('backup primitives support a sparse file larger than 2 GiB without whole-file Buffer reads', { skip: !RUN_LARGE_DURABILITY }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-large-backup-'));
@@ -27,11 +28,11 @@ test('backup primitives support a sparse file larger than 2 GiB without whole-fi
   }
 });
 
-test('verified backup gates transactional business purge and preserves system tables', async () => {
+test('purge prepare returns immediately, reuses one detached task, then gates transactional purge with a verified backup', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-purge-lifecycle-'));
   process.env.DATA_DIR = dir;
   process.env.DB_FILE = path.join(dir, 'test.db');
-  const { getDb } = await import('../src/db.js');
+  const { getDb, getRuntimeConfig } = await import('../src/db.js');
   const { createPurgeChallenge, executePurge, resealPurgeChallenge, PURGE_PHRASE, V505_PURGE_RECOVERY_ID } = await import('../src/dataPurge.js');
   const db = getDb();
   db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-08-05');
@@ -46,20 +47,38 @@ test('verified backup gates transactional business purge and preserves system ta
   const schemaBefore = Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0);
   assert.equal(schemaBefore, 18);
 
-  const challengePromise = createPurgeChallenge({ email: 'test-admin' });
-  await assert.rejects(
-    createPurgeChallenge({ email: 'test-admin' }),
-    error => error?.code === 'PURGE_PREPARE_RUNNING' && /PURGE_PREPARE_RUNNING/.test(error.message)
-  );
-  const challenge = await challengePromise;
+  const submittedAt = Date.now();
+  const first = await createPurgeChallenge({ email: 'test-admin' });
+  const submitElapsedMs = Date.now() - submittedAt;
+  assert.ok(submitElapsedMs < 1500, `prepare submission blocked for ${submitElapsedMs}ms`);
+  assert.equal(first.status, 'QUEUED');
+  assert.match(first.jobId, /^[0-9a-f-]{36}$/i);
+  assert.match(first.statusUrl, /^\/purge-status\/[a-f0-9]{48}\.json$/i);
+  assert.equal(first.recoveryPatch, V505_PURGE_RECOVERY_ID);
+  assert.match(first.backup.path, /^PENDING:/);
+
+  const second = await createPurgeChallenge({ email: 'test-admin' });
+  assert.equal(second.jobId, first.jobId);
+  assert.ok(['QUEUED', 'RUNNING'].includes(second.status));
+
+  const statusFile = path.join(getRuntimeConfig().projectRoot, 'public', first.statusUrl.replace(/^\//, ''));
+  let status = null;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try { status = JSON.parse(fs.readFileSync(statusFile, 'utf8')); } catch {}
+    if (status?.status === 'SUCCEEDED' || status?.status === 'FAILED') break;
+    await wait(200);
+  }
+  assert.equal(status?.jobId, first.jobId);
+  assert.equal(status?.status, 'SUCCEEDED', status?.error || 'background purge preparation did not complete');
+
+  const challenge = await createPurgeChallenge({ email: 'test-admin' });
+  assert.equal(challenge.status, 'SUCCEEDED');
+  assert.equal(challenge.jobId, first.jobId);
+  assert.ok(challenge.challengeId);
   assert.equal(challenge.counts, null);
   assert.equal(challenge.countMode, 'DEFERRED_TO_TRANSACTIONAL_DELETE');
   assert.equal(challenge.recoveryPatch, V505_PURGE_RECOVERY_ID);
-
-  const recoveredChallenge = await createPurgeChallenge({ email: 'test-admin' });
-  assert.equal(recoveredChallenge.challengeId, challenge.challengeId);
-  assert.equal(recoveredChallenge.recovered, true);
-  assert.equal(recoveredChallenge.recoveryPatch, V505_PURGE_RECOVERY_ID);
 
   const manifestPath = path.join(path.dirname(challenge.backup.path), 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -68,12 +87,14 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(manifest.countMode, 'DEFERRED_TO_TRANSACTIONAL_DELETE');
   assert.equal(manifest.sourceStableDuringBackup, true);
   assert.equal(manifest.recoveryPatch, V505_PURGE_RECOVERY_ID);
+  assert.equal(manifest.prepareJobId, first.jobId);
 
   db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v124_test_retained_audit','1',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(new Date().toISOString());
   const seal = resealPurgeChallenge(challenge.challengeId, { email: 'test-admin' });
   assert.equal(seal.sourceSeal, 'POST_PREPARE_AUDIT');
 
-  await new Promise(resolve => setTimeout(resolve, 5100));
+  const waitMs = Math.max(0, new Date(challenge.notBefore).getTime() - Date.now());
+  if (waitMs) await wait(waitMs + 100);
   const result = await executePurge({ challengeId: challenge.challengeId, phrase: PURGE_PHRASE, backupConfirmed: true, user: { email: 'test-admin' } });
   assert.ok(result.before.daily_reports >= 1);
   assert.equal(result.before.unified_import_rows, 1);
@@ -96,4 +117,5 @@ test('verified backup gates transactional business purge and preserves system ta
   assert.equal(Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0), 18);
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
   assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
+  assert.equal(fs.existsSync(statusFile), false);
 });
