@@ -1,6 +1,6 @@
 (function installV505DataPurgeRecovery(global){
   if(global.__CE_QC_V505_DATA_PURGE_RECOVERY__)return;
-  const PATCH_ID='2026-09-10-v505-async-purge-prepare-ui-v3';
+  const PATCH_ID='2026-09-10-v505-async-purge-prepare-ui-v4';
   let active=false;
   let elapsedTimer=null;
   let startedAt=0;
@@ -45,7 +45,7 @@
     const deadline=Date.now()+40*60_000;
     while(Date.now()<deadline){
       let status;
-      try{status=await requestJson(`${statusUrl}?t=${Date.now()}`,{credentials:'omit'});}
+      try{status=await requestJson(`${statusUrl}?t=${Date.now()}`,{credentials:'same-origin'});}
       catch(error){
         renderWorking('状态通道短暂不可用，后台备份仍在继续，正在重新连接');
         await wait(2000);continue;
