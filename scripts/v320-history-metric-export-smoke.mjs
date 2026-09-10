@@ -38,7 +38,10 @@ assert.doesNotMatch(exportSource,/applyV320DispatchSigningTruth\s*\(/,'formal co
 assert.match(exportSource,/applyV329FirstReportSigning/,'final export signing policy gate remains active');
 assert.match(exportSource,/strict=STRICT_DELIVERY_TYPES\.has\(type\)/,'TBKH/CN/VN must be separated from legacy non-strict first-report fallback');
 assert.match(exportSource,/STRICT_START_TO_ACTUAL_POD/,'strict delivery exports must retain START-to-POD truth');
-assert.match(ledgerSource,/function strictSigningDays\(ledger=\{\}\)/,'V419 must recover persisted strict START-to-POD truth');
+assert.match(ledgerSource,/V493_SCAN85_POD_DATE_RECOVERY_ID/,'V419 must expose saved scan85 POD-date recovery owner');
+assert.match(ledgerSource,/function strictSigningDays\(ledger=\{\},podOverride=''\)/,'V419 must recover persisted strict START-to-POD truth and accept a recovered POD override');
+assert.match(ledgerSource,/scan85SavedPodDate\(ledger\)/,'V419 must recover a proven saved scan85 terminal POD date when canonical podDate is blank');
+assert.match(ledgerSource,/strictSigningDays\(ledger,podDate\)/,'V419 must feed the canonical or recovered POD date into strict START-to-POD signing truth');
 assert.match(ledgerSource,/v246InclusiveDays\(first,pod\)/,'V419 strict signing days must use inclusive START-to-POD days');
 assert.match(workbookSource,/repairV484StrictExportEvidence/,'formal workbook must repair only actual strict POD gaps after membership and V419 hydration');
 assert.ok(workbookSource.indexOf('const rows = await collectV200Rows') < workbookSource.indexOf('await repairV484StrictExportEvidence'),'V484 actual-POD repair must happen after real export membership is built');
@@ -104,4 +107,4 @@ assert.equal(last?.exportEvidencePartial,true,'strict missing evidence must rema
 
 closeDb();
 fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V490/V489/V334/V329] persisted history membership + V419 canonical ledger + V484 actual-POD repair ownership + strict START-to-POD compatibility helpers + shared history cache ownership smoke passed');
+console.log('[V495/V493/V490/V489/V334/V329] persisted history membership + V419 canonical ledger + saved scan85 POD-date recovery + V484 actual-POD repair ownership + strict START-to-POD compatibility helpers + shared history cache ownership smoke passed');
