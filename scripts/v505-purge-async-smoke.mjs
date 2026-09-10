@@ -25,6 +25,8 @@ assert.match(purge,/PURGE_STATUS_PUBLIC_DIR='purge-status'/);
 assert.match(purge,/runPurgePreparationWorker/);
 assert.match(purge,/PENDING:\$\{String\(job\.jobId/);
 assert.match(purge,/crypto\.randomBytes\(24\)\.toString\('hex'\)/);
+assert.match(purge,/strictRunLocks:true/);
+assert.match(purge,/workerPid<=0\|\|pidIsAlive\(workerPid\)/);
 
 const worker=read('scripts/CE_QC_PurgePrepareTaskWorker.mjs');
 assert.match(worker,/runPurgePreparationWorker/);
@@ -32,15 +34,18 @@ assert.match(worker,/delayMs/);
 
 const ui=read('public/v505-data-purge-recovery.js');
 assert.match(ui,/pollBackgroundJob/);
-assert.match(ui,/credentials:'omit'/);
+assert.match(ui,/credentials:'same-origin'/);
+assert.doesNotMatch(ui,/credentials:'omit'/);
 assert.match(ui,/recoverJobId:job\.jobId/);
 assert.match(ui,/后台任务独立执行/);
+assert.match(ui,/超过20秒没有心跳/);
 assert.equal((ui.match(/\/api\/admin\/data-purge\/prepare/g)||[]).length,2,'UI must POST prepare only for initial submission and final challenge recovery');
 
 const access=read('src/accessControl.js');
 assert.match(access,/PURGE_STATUS_PATH/);
-assert.match(access,/recoverJobId/);
-assert.match(access,/PENDING:/);
+assert.match(access,/PURGE_PREPARE_AUDITS/);
+assert.match(access,/DATA_PURGE_REQUESTED/);
+assert.match(access,/DATA_PURGE_BACKUP_VERIFIED/);
 assert.match(access,/coreAuditAction/);
 const core=read('src/accessControlCore.js');
 assert.match(core,/export async function accessIdentity/);
@@ -48,4 +53,6 @@ assert.match(core,/export function auditAction/);
 
 const loader=read('public/v502-multidrive-backup-ui.js');
 assert.match(loader,/v505-data-purge-recovery\.js/);
+const gitignore=read('.gitignore');
+assert.match(gitignore,/public\/purge-status\//);
 console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass');
