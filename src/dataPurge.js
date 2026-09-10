@@ -1,7 +1,9 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { backup, DatabaseSync } from 'node:sqlite';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { backup } from 'node:sqlite';
 
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES } from './store.js';
@@ -9,11 +11,14 @@ import { recordBackup } from './backup.js';
 import { schedulerStateForTests } from './carryoverRefreshScheduler.js';
 
 export const PURGE_PHRASE='永久清除全部业务数据';
+export const V503_PRE_CLEAR_VERIFY_ID='2026-09-10-v503-isolated-pre-clear-backup-quick-check-v1';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const CACHE_WORKER_ACTIVE_KEY='dashboard_cache_worker_active';
 const CACHE_WORKER_ACTIVE_UNTIL_KEY='dashboard_cache_worker_active_until';
 const PURGE_PREPARE_COUNT_MODE='DEFERRED_TO_TRANSACTIONAL_DELETE';
 const PURGE_EXECUTE_COUNT_MODE='DELETE_CHANGESET_EXACT';
+const BACKUP_QUICK_CHECK_WORKER=fileURLToPath(new URL('../scripts/CE_QC_BackupQuickCheckWorker.mjs',import.meta.url));
+const BACKUP_QUICK_CHECK_TIMEOUT_MS=Math.max(60_000,Math.min(30*60_000,Number(process.env.PURGE_BACKUP_VERIFY_TIMEOUT_MS||20*60_000)));
 const challenges=new Map();
 
 const FAST_INDEXES=[
@@ -71,16 +76,9 @@ export async function executePurge({challengeId,phrase,backupConfirmed,user={},a
     throw new Error('数据库在安全备份后发生变化，已停止清除。请重新开始，系统会先创建包含最新数据的新备份。');
   }
 
-  // The backup has already been verified. For the destructive phase, make the
-  // database transaction itself as short as possible. Disabling FK enforcement
-  // only for the all-business-data transaction allows SQLite's whole-table delete
-  // fast path; every business table is cleared and the setting is restored before
-  // the request can complete.
   const reset=fastResetBusinessState(db,{logs:[]});
   clearBusinessRuntimeMeta(db);
 
-  // File cleanup is regenerable and uses async filesystem calls so the HTTP event
-  // loop can keep serving purge job status while old exports/imports are removed.
   const fileCleanupWarnings=await clearRegenerableFiles();
   assertPurgeStructure(db);
   if(String(process.env.VACUUM_AFTER_PURGE||'').toLowerCase()==='true')db.exec('VACUUM');
@@ -111,7 +109,7 @@ async function createVerifiedPreClearBackup(adminEmail){
   const backupSize=fs.statSync(filePath).size;
   if(backupSize<=0)throw new Error('备份文件为空，已停止清除。');
 
-  const verified=verifyBackupQuick(filePath);
+  const verified=await verifyBackupQuickIsolated(filePath);
   const sha256=await hashFileStream(filePath);
   const sourceFingerprintAfterVerification=databaseFingerprint(cfg.dbFile);
   if(!sameFingerprint(sourceFingerprintAfterBackup,sourceFingerprintAfterVerification)){
@@ -121,17 +119,33 @@ async function createVerifiedPreClearBackup(adminEmail){
   const stat=fs.statSync(filePath);
   const schemaMeta=Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value||0);
   const pragmaSchema=Number(db.prepare('PRAGMA user_version').get()?.user_version||0);
-  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:verified.integrity,verificationMode:'online-backup+stable-source-fingerprint+backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:'node-sqlite-online-backup',systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,sourceStableDuringBackup:true};
+  const manifest={createdAt:nowIso(),reason:'clear-all-business-data',databasePath:cfg.dbFile,backupPath:filePath,sha256,size:backupSize,sourceSize,sourceQuickCheck:'deferred-to-verified-copy',backupQuickCheck:'ok',integrity:verified.integrity,verificationMode:'online-backup+stable-source-fingerprint+isolated-backup-quick-check+sha256',backupMtimeMs:stat.mtimeMs,method:'node-sqlite-online-backup',verificationWorker:V503_PRE_CLEAR_VERIFY_ID,systemVersion:process.env.npm_package_version||'0.1.0',migrationVersion:schemaMeta||pragmaSchema,whitelistVersion:db.prepare("SELECT version FROM shop_whitelist_versions WHERE active=1 ORDER BY createdAt DESC LIMIT 1").get()?.version||'',administrator:adminEmail,counts:null,countMode:PURGE_PREPARE_COUNT_MODE,sourceStableDuringBackup:true};
   fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify(manifest,null,2),'utf8');
   recordBackup({backupType:'database',fileName:path.basename(filePath),filePath,fileHash:sha256,reason:'before-full-clear'});
   return {directory:dir,filePath,sha256,size:backupSize,mtimeMs:stat.mtimeMs,integrity:verified.integrity,method:'node-sqlite-online-backup',manifestPath:path.join(dir,'manifest.json')};
 }
 
-function verifyBackupQuick(filePath){
-  const copy=new DatabaseSync(filePath,{readOnly:true,timeout:10000});
-  let quick='';
-  try{copy.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');quick=copy.prepare('PRAGMA quick_check(1)').get()?.quick_check||'';if(quick!=='ok')throw new Error('备份数据库快速完整性校验失败，已停止清除。');}finally{copy.close();}
-  return {integrity:'quick-ok'};
+function verifyBackupQuickIsolated(filePath){
+  return new Promise((resolve,reject)=>{
+    const payload=Buffer.from(JSON.stringify({filePath:String(filePath||'')}),'utf8').toString('base64url');
+    let stdout='';let stderr='';let settled=false;
+    const child=spawn(process.execPath,[BACKUP_QUICK_CHECK_WORKER,payload],{cwd:getRuntimeConfig().projectRoot,env:process.env,windowsHide:true,stdio:['ignore','pipe','pipe']});
+    const timer=setTimeout(()=>{
+      try{child.kill();}catch{}
+      if(!settled){settled=true;reject(new Error('清空前备份完整性校验超过20分钟，已停止清除；没有删除业务数据。'));}
+    },BACKUP_QUICK_CHECK_TIMEOUT_MS);
+    timer.unref?.();
+    child.stdout?.on('data',chunk=>{stdout+=chunk.toString();if(stdout.length>1024*1024)stdout=stdout.slice(-1024*1024);});
+    child.stderr?.on('data',chunk=>{stderr+=chunk.toString();if(stderr.length>1024*1024)stderr=stderr.slice(-1024*1024);});
+    child.once('error',error=>{clearTimeout(timer);if(!settled){settled=true;reject(error);}});
+    child.once('exit',code=>{
+      clearTimeout(timer);if(settled)return;settled=true;
+      const lines=stdout.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);let result=null;
+      for(let i=lines.length-1;i>=0;i-=1){try{result=JSON.parse(lines[i]);break;}catch{}}
+      if(code!==0||!result?.ok){reject(new Error(result?.error||stderr.trim()||`清空前备份完整性子进程退出码 ${code}`));return;}
+      resolve({integrity:String(result.integrity||'quick-ok')});
+    });
+  });
 }
 
 function verifyPreparedBackupStillPresent(backupInfo){
