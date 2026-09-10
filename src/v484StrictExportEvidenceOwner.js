@@ -1,6 +1,6 @@
 import { getDb } from './db.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
-import { applyV246StrictAttemptEvidence } from './v246TrackingLedgerCore.js';
+import { applyV246StrictAttemptEvidence, v246InclusiveDays } from './v246TrackingLedgerCore.js';
 import {
   listV483StrictExportRowGaps,
   applyV483StrictTruthToExportRows,
@@ -9,12 +9,16 @@ import {
 } from './v381ExportEvidenceRepair.js';
 import { recoverV485ArchivedTrackEvents, V485_STRICT_TRACK_EVIDENCE_ID } from './v485StrictTrackEvidence.js';
 import { recoverV497ArchivedConfirmPodDates, V497_ARCHIVED_CONFIRM_POD_DATE_ID } from './v497ArchivedConfirmPodEvidence.js';
+import { recoverV498SavedShopeePodDates, V498_SAVED_SHOPEE_POD_EVIDENCE_ID } from './v498SavedShopeePodEvidence.js';
 
 export const V484_STRICT_EXPORT_EVIDENCE_OWNER_ID='2026-09-09-v492-shopee-only-strict-export-evidence-v1';
 const LOCAL_BATCH=220;
 const V484_STRICT_EXPORT_EVIDENCE_TYPES=new Set(['SHOPEECN','SHOPEEVN']);
 const text=value=>String(value??'').trim();
 const billOf=value=>text(value).toUpperCase();
+const dateKey=value=>{const m=text(value).match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';};
+const safeJson=(value,fallback={})=>{try{return value&&typeof value==='object'?value:(JSON.parse(String(value||''))||fallback);}catch{return fallback;}};
+const positiveAttempt=value=>{const n=Number(value||0);return Number.isFinite(n)&&n>0?Math.min(3,Math.floor(n)):0;};
 const chunks=(values,size=LOCAL_BATCH)=>{const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;};
 
 // The V483/V484 attempt/signing evidence contract is Shopee-specific.
@@ -59,31 +63,54 @@ function persistAppliedEvidence(evidenceRows,db,reason){
   return Number(persisted?.updated||0);
 }
 
-function applyConfirmPodDates(gaps,evidenceByBill){
-  let recovered=0;
-  for(const record of gaps){
-    if(text(record?.podDate))continue;
-    const evidence=evidenceByBill.get(billOf(record?.shipmentCode));if(!evidence?.podDate)continue;
-    let touched=false;
-    for(const row of Array.isArray(record.rows)?record.rows:[]){
-      if(!text(row.podDate)){row.podDate=evidence.podDate;touched=true;}
-      if(!/\d{4}/.test(text(row.podTime)))row.podTime=evidence.timestamp||evidence.podDate;
-      row.podSource='V497_V266_CONFIRM_TERMINAL_TIME';
-      row.v497ArchivedConfirmPodDateId=V497_ARCHIVED_CONFIRM_POD_DATE_ID;
-      row.v497ArchivedConfirmPodDateField=evidence.field||'';
+function strictStartDateByBill(db,bills=[]){
+  const out=new Map(),targets=[...new Set((bills||[]).map(billOf).filter(Boolean))];
+  for(const part of chunks(targets)){
+    const marks=part.map(()=>'?').join(',');if(!marks)continue;
+    let rows=[];try{rows=db.prepare(`SELECT shipmentCode,evidenceJson FROM qc_tracking_ledger WHERE shipmentCode IN (${marks})`).all(...part);}catch{rows=[];}
+    for(const row of rows){
+      const evidence=safeJson(row.evidenceJson,{}),starts=Array.isArray(evidence?.starts)?evidence.starts:[];
+      const first=starts.map(item=>dateKey(item?.time||item?.eventTime||item)).filter(Boolean).sort()[0]||'';
+      if(first)out.set(billOf(row.shipmentCode),first);
     }
-    if(touched){record.podDate=evidence.podDate;recovered+=1;}
   }
-  return recovered;
+  return out;
 }
 
-async function applyConfirmArchivePass({businessType,range,rows,gaps,onProgress,mode}){
+function applyRecoveredPodDates(gaps,evidenceByBill,db,{podSource,idKey,idValue,fieldKey}={}){
+  const targets=(gaps||[]).filter(item=>!text(item?.podDate)).map(item=>billOf(item.shipmentCode)).filter(Boolean),starts=strictStartDateByBill(db,targets);
+  let podDateRecovered=0,signingRecovered=0;
+  for(const record of gaps||[]){
+    if(text(record?.podDate))continue;
+    const bill=billOf(record?.shipmentCode),evidence=evidenceByBill?.get?.(bill);if(!evidence?.podDate)continue;
+    const rows=Array.isArray(record.rows)?record.rows:[],attemptNo=Math.max(0,...rows.map(row=>positiveAttempt(row.attemptNo||row.trackAttemptNo||row.podAttemptNo||row.currentAttemptNo)));
+    const rowStart=rows.map(row=>dateKey(row.firstAttemptAt||row.dispatchStartAt||row.dispatchStartDate)).filter(Boolean).sort()[0]||'';
+    const firstStart=starts.get(bill)||rowStart,signingDays=attemptNo>0&&firstStart?(v246InclusiveDays(firstStart,evidence.podDate)||0):0;
+    let touched=false;
+    for(const row of rows){
+      if(!text(row.podDate)){row.podDate=evidence.podDate;touched=true;}
+      if(!/\d{4}/.test(text(row.podTime)))row.podTime=evidence.timestamp||evidence.podDate;
+      row.podSource=podSource||row.podSource||'';
+      if(idKey)row[idKey]=idValue||'';
+      if(fieldKey)row[fieldKey]=evidence.field||'';
+      if(signingDays>0){row.signingDays=signingDays;row.deliveryDays=signingDays;row.signingDaysSource=`${podSource||'保存的POD时间'} + V246严格START→POD`;row.deliveryDaysSource=row.signingDaysSource;row.dispatchSigningEvidenceComplete=true;row.signingEvidenceComplete=true;}
+    }
+    if(touched){record.podDate=evidence.podDate;podDateRecovered+=1;if(signingDays>0)signingRecovered+=1;}
+  }
+  return{podDateRecovered,signingRecovered};
+}
+
+function applyConfirmPodDates(gaps,evidenceByBill,db){
+  return applyRecoveredPodDates(gaps,evidenceByBill,db,{podSource:'V497_V266_CONFIRM_TERMINAL_TIME',idKey:'v497ArchivedConfirmPodDateId',idValue:V497_ARCHIVED_CONFIRM_POD_DATE_ID,fieldKey:'v497ArchivedConfirmPodDateField'});
+}
+
+async function applyConfirmArchivePass({businessType,range,rows,gaps,db,onProgress,mode}){
   const missingPod=gaps.filter(item=>!text(item?.podDate)),bills=missingPod.map(item=>billOf(item.shipmentCode)).filter(Boolean);
-  if(!bills.length)return{podDateRecovered:0,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,podDateBills:0,readErrors:0,truncated:false,unresolved:listV483StrictExportRowGaps(businessType,rows).length};
+  if(!bills.length)return{podDateRecovered:0,signingRecovered:0,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,podDateBills:0,readErrors:0,truncated:false,unresolved:listV483StrictExportRowGaps(businessType,rows).length};
   const archive=await recoverV497ArchivedConfirmPodDates({range,targetBills:bills,mode,onProgress});
-  const podDateRecovered=applyConfirmPodDates(missingPod,archive.evidenceByBill),remaining=listV483StrictExportRowGaps(businessType,rows).length;
-  onProgress({phase:'strictExportEvidenceSavedDone',confirmArchive:true,confirmArchiveMode:mode,completed:archive.processedFiles,total:archive.filesConsidered,matchedFiles:archive.matchedFiles,requestBillsMatched:archive.requestBillsMatched,podDateBills:archive.podDateBills,readErrors:archive.readErrors,truncated:archive.truncated,podDateRecovered,unresolved:remaining,evidenceRepairVersion:V497_ARCHIVED_CONFIRM_POD_DATE_ID});
-  return{...archive,podDateRecovered,unresolved:remaining};
+  const applied=applyConfirmPodDates(missingPod,archive.evidenceByBill,db),remaining=listV483StrictExportRowGaps(businessType,rows).length;
+  onProgress({phase:'strictExportEvidenceSavedDone',confirmArchive:true,confirmArchiveMode:mode,completed:archive.processedFiles,total:archive.filesConsidered,matchedFiles:archive.matchedFiles,requestBillsMatched:archive.requestBillsMatched,podDateBills:archive.podDateBills,readErrors:archive.readErrors,truncated:archive.truncated,podDateRecovered:applied.podDateRecovered,signingRecovered:applied.signingRecovered,unresolved:remaining,evidenceRepairVersion:V497_ARCHIVED_CONFIRM_POD_DATE_ID});
+  return{...archive,...applied,unresolved:remaining};
 }
 
 async function applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode}){
@@ -104,7 +131,7 @@ async function applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode
 
 export async function repairV484StrictExportEvidence({type,range,rows=[],db=getDb(),client=null,onProgress=()=>{}}={}){
   const businessType=text(type).toUpperCase();
-  if(!isV484StrictExportEvidenceType(businessType))return{ok:true,skipped:true,reason:'NON_STRICT_BUSINESS',total:0,localResolved:0,confirmPodRecovered:0,archiveResolved:0,remoteQueried:0,unresolved:0};
+  if(!isV484StrictExportEvidenceType(businessType))return{ok:true,skipped:true,reason:'NON_STRICT_BUSINESS',total:0,localResolved:0,localPodRecovered:0,confirmPodRecovered:0,archiveResolved:0,remoteQueried:0,unresolved:0};
 
   let gaps=listV483StrictExportRowGaps(businessType,rows),initialTotal=gaps.length,completed=0,updated=0;
   onProgress({phase:'strictExportEvidenceSaved',completed:0,total:initialTotal,unresolved:initialTotal,localBatch:LOCAL_BATCH,evidenceRepairVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID});
@@ -122,36 +149,40 @@ export async function repairV484StrictExportEvidence({type,range,rows=[],db=getD
   }
 
   gaps=listV483StrictExportRowGaps(businessType,rows);
-  const localResolved=Math.max(0,initialTotal-gaps.length);
-  onProgress({phase:'strictExportEvidenceSavedDone',completed:initialTotal,total:initialTotal,updated,localResolved,unresolved:gaps.length,localBatch:LOCAL_BATCH,evidenceRepairVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID});
-  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,confirmPodRecovered:0,archiveResolved:0,remoteQueried:0,updated,unresolved:0};
-
-  const confirmRecent=await applyConfirmArchivePass({businessType,range,rows,gaps,onProgress,mode:'recent'});
+  const localPodTargets=gaps.filter(item=>!text(item?.podDate)).map(item=>billOf(item.shipmentCode)).filter(Boolean);
+  const localPodEvidence=recoverV498SavedShopeePodDates({db,targetBills:localPodTargets});
+  const localPodApplied=applyRecoveredPodDates(gaps,localPodEvidence.evidenceByBill,db,{podSource:'V498_SAVED_SHOPEE_TERMINAL_TIME',idKey:'v498SavedShopeePodEvidenceId',idValue:V498_SAVED_SHOPEE_POD_EVIDENCE_ID,fieldKey:'v498SavedShopeePodEvidenceField'});
   gaps=listV483StrictExportRowGaps(businessType,rows);
-  let confirmHistory={podDateRecovered:0,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,podDateBills:0,readErrors:0,truncated:false,unresolved:gaps.length};
-  if(gaps.some(item=>!text(item?.podDate))){confirmHistory=await applyConfirmArchivePass({businessType,range,rows,gaps,onProgress,mode:'history'});gaps=listV483StrictExportRowGaps(businessType,rows);}
+  const localResolved=Math.max(0,initialTotal-gaps.length);
+  onProgress({phase:'strictExportEvidenceSavedDone',completed:initialTotal,total:initialTotal,updated,localResolved,localPodRecovery:true,localPodMatched:localPodEvidence.matchedBills,localPodRecovered:localPodApplied.podDateRecovered,localSigningRecovered:localPodApplied.signingRecovered,unresolved:gaps.length,localBatch:LOCAL_BATCH,evidenceRepairVersion:V498_SAVED_SHOPEE_POD_EVIDENCE_ID});
+  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,localPodMatched:localPodEvidence.matchedBills,localPodRecovered:localPodApplied.podDateRecovered,localSigningRecovered:localPodApplied.signingRecovered,confirmPodRecovered:0,archiveResolved:0,remoteQueried:0,updated,unresolved:0};
+
+  const confirmRecent=await applyConfirmArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'recent'});
+  gaps=listV483StrictExportRowGaps(businessType,rows);
+  let confirmHistory={podDateRecovered:0,signingRecovered:0,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,podDateBills:0,readErrors:0,truncated:false,unresolved:gaps.length};
+  if(gaps.some(item=>!text(item?.podDate))){confirmHistory=await applyConfirmArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'history'});gaps=listV483StrictExportRowGaps(businessType,rows);}
   const confirmPodRecovered=Number(confirmRecent.podDateRecovered||0)+Number(confirmHistory.podDateRecovered||0);
-  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved:0,remoteQueried:0,updated,unresolved:0};
+  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,localPodMatched:localPodEvidence.matchedBills,localPodRecovered:localPodApplied.podDateRecovered,localSigningRecovered:localPodApplied.signingRecovered,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved:0,remoteQueried:0,updated,unresolved:0};
 
   const recentArchive=await applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'recent'});updated+=recentArchive.updated;
   gaps=listV483StrictExportRowGaps(businessType,rows);
   let historyArchive={resolved:0,updated:0,filesConsidered:0,processedFiles:0,matchedFiles:0,requestBillsMatched:0,eventBills:0,readErrors:0,truncated:false,unresolved:gaps.length};
   if(gaps.length){historyArchive=await applyArchivePass({businessType,range,rows,gaps,db,onProgress,mode:'history'});updated+=historyArchive.updated;gaps=listV483StrictExportRowGaps(businessType,rows);}
   const archiveResolved=Math.max(0,initialTotal-localResolved-gaps.length);
-  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:0,updated,unresolved:0};
+  if(!gaps.length)return{ok:true,version:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,businessType,total:initialTotal,localResolved,localPodMatched:localPodEvidence.matchedBills,localPodRecovered:localPodApplied.podDateRecovered,localSigningRecovered:localPodApplied.signingRecovered,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:0,updated,unresolved:0};
 
   let remote;
   try{
-    remote=await repairV483StrictExportRows({type:businessType,range,rows,db,client,onProgress(info={}){onProgress({...info,v484Residual:true,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID,confirmPodRecovered,archiveResolved});}});
+    remote=await repairV483StrictExportRows({type:businessType,range,rows,db,client,onProgress(info={}){onProgress({...info,v484Residual:true,evidenceRepairVersion:V483_EXPORT_MEMBER_EVIDENCE_ID,localPodRecovered:localPodApplied.podDateRecovered,confirmPodRecovered,archiveResolved});}});
   }catch(error){
     if(error?.code==='V483_STRICT_EXPORT_EVIDENCE_INCOMPLETE'){
       const confirmRequestBillsMatched=Math.max(Number(confirmRecent.requestBillsMatched||0),Number(confirmHistory.requestBillsMatched||0)),confirmPodDateBills=Math.max(Number(confirmRecent.podDateBills||0),Number(confirmHistory.podDateBills||0));
-      error.diagnostics={...(error.diagnostics||{}),v497ArchivedConfirmPodDateId:V497_ARCHIVED_CONFIRM_POD_DATE_ID,confirmPodRecovered,confirmRequestBillsMatched,confirmPodDateBills,confirmReadErrors:Number(confirmRecent.readErrors||0)+Number(confirmHistory.readErrors||0),confirmTruncated:Boolean(confirmRecent.truncated||confirmHistory.truncated)};
-      error.message=`${error.message}:v497ConfirmRecovered=${confirmPodRecovered}:v497ConfirmMatched=${confirmRequestBillsMatched}:v497ConfirmPodDates=${confirmPodDateBills}`;
+      error.diagnostics={...(error.diagnostics||{}),v498SavedShopeePodEvidenceId:V498_SAVED_SHOPEE_POD_EVIDENCE_ID,localPodMatched:localPodEvidence.matchedBills,localPodRecovered:localPodApplied.podDateRecovered,localSigningRecovered:localPodApplied.signingRecovered,v497ArchivedConfirmPodDateId:V497_ARCHIVED_CONFIRM_POD_DATE_ID,confirmPodRecovered,confirmRequestBillsMatched,confirmPodDateBills,confirmReadErrors:Number(confirmRecent.readErrors||0)+Number(confirmHistory.readErrors||0),confirmTruncated:Boolean(confirmRecent.truncated||confirmHistory.truncated)};
+      error.message=`${error.message}:v498LocalMatched=${localPodEvidence.matchedBills}:v498LocalRecovered=${localPodApplied.podDateRecovered}:v498LocalSigning=${localPodApplied.signingRecovered}:v497ConfirmRecovered=${confirmPodRecovered}:v497ConfirmMatched=${confirmRequestBillsMatched}:v497ConfirmPodDates=${confirmPodDateBills}`;
     }
     throw error;
   }
-  return{...remote,ownerVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,total:initialTotal,localResolved,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:Number(remote?.queried||0),updated:updated+Number(remote?.updated||0)};
+  return{...remote,ownerVersion:V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,total:initialTotal,localResolved,localPodMatched:localPodEvidence.matchedBills,localPodRecovered:localPodApplied.podDateRecovered,localSigningRecovered:localPodApplied.signingRecovered,confirmPodRecovered,confirmRecent,confirmHistory,archiveResolved,archiveRecent:recentArchive,archiveHistory:historyArchive,remoteQueried:Number(remote?.queried||0),updated:updated+Number(remote?.updated||0)};
 }
 
-console.info('[CE-QC][V492_STRICT_EXPORT_EVIDENCE_OWNER]',V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,V485_STRICT_TRACK_EVIDENCE_ID,V497_ARCHIVED_CONFIRM_POD_DATE_ID,'formal CN/VN export keeps Shopee strict evidence repair; exact-member V266 confirm terminal timestamps may fill only real missing POD dates before track evidence; TBKH bypasses Shopee-only attempt/signing gate.');
+console.info('[CE-QC][V492_STRICT_EXPORT_EVIDENCE_OWNER]',V484_STRICT_EXPORT_EVIDENCE_OWNER_ID,V498_SAVED_SHOPEE_POD_EVIDENCE_ID,V497_ARCHIVED_CONFIRM_POD_DATE_ID,V485_STRICT_TRACK_EVIDENCE_ID,'formal CN/VN export keeps Shopee strict evidence repair; exact-member local saved scan/shipment/final POD evidence is checked before V266 confirm/track archives and residual CE; TBKH bypasses Shopee-only attempt/signing gate.');
