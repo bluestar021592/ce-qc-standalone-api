@@ -4,6 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import '../src/v294CleanReuploadIntegrity.js';
 import { BUSINESS_DATA_TABLES } from '../src/store.js';
 
+const FRESH_START_READY_KEY='v499_fresh_start_tracking_ready';
+
 function statFingerprint(file){
   try{
     const stat=fs.statSync(file);
@@ -67,6 +69,7 @@ try{
     meta.run('last_full_clear_at',now,now);
     meta.run('current_snapshot_id','',now);
     meta.run('v108_performance_indexes_ready','1',now);
+    meta.run(FRESH_START_READY_KEY,'1',now);
     db.prepare("DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN ('dashboard_cache_worker_active','dashboard_cache_worker_active_until','data_purge_block_until')").run();
     db.exec('COMMIT');
   }catch(error){
@@ -82,7 +85,7 @@ try{
   }
   db.close();db=null;
   const fileCleanupWarnings=await clearRegenerableFiles(payload);
-  process.stdout.write(`${JSON.stringify({ok:true,before,after,fileCleanupWarnings,deleteMode:'ISOLATED_SQLITE_WORKER'})}\n`);
+  process.stdout.write(`${JSON.stringify({ok:true,before,after,fileCleanupWarnings,deleteMode:'ISOLATED_SQLITE_WORKER',freshStartTrackingReady:true})}\n`);
   process.exit(0);
 }catch(error){
   try{db?.close();}catch{}
