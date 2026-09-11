@@ -4,10 +4,10 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { createPurgeChallenge, executePurge, resealPurgeChallenge, PURGE_PHRASE, V505_PURGE_RECOVERY_ID } from './dataPurge.js';
+import { createPurgeChallenge, executePurge, PURGE_PHRASE, V505_PURGE_RECOVERY_ID } from './dataPurge.js';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 
-export const V505_PURGE_COORDINATOR_ID='2026-09-10-v505-purge-coordinator-v3';
+export const V505_PURGE_COORDINATOR_ID='2026-09-11-v505-purge-coordinator-v4-original-backup-fingerprint';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const PREPARE_JOB_DIR='.purge_prepare_jobs';
 const EXECUTE_JOB_DIR='.purge_execute_jobs';
@@ -50,9 +50,6 @@ function pidAlive(pid){
   const number=Number(pid||0);
   if(!Number.isInteger(number)||number<=0)return null;
   try{process.kill(number,0);return true;}catch(error){return error?.code==='EPERM'?true:false;}
-}
-function setPurgeBlock(until=Date.now()+60*60_000){
-  getDb().prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(PURGE_BLOCK_KEY,String(until),nowIso());
 }
 function clearPurgeBlock(){try{getDb().prepare('DELETE FROM app_meta WHERE key=?').run(PURGE_BLOCK_KEY);}catch{}}
 export function purgeBlockUntil(){
@@ -196,8 +193,7 @@ export async function queuePurgeExecution(user={},request={}){
     removeJobArtifacts(file,readJson(file)||existing);
   }
   assertNoBusinessLock();
-  resealPurgeChallenge(challengeId,user);
-  setPurgeBlock(Date.now()+60*60_000);
+  if(!purgeBlockActive())throw new Error('清空安全锁已失效，请重新开始，系统会重新验证备份与数据库状态。');
   const statusToken=crypto.randomBytes(24).toString('hex');
   const publicFile=statusFile(statusToken);
   const jobId=crypto.randomUUID();
@@ -253,7 +249,6 @@ export async function runPurgeExecutionWorker(payload={}){
   },5000);
   heartbeat.unref?.();
   try{
-    resealPurgeChallenge(payload.request?.challengeId,payload.user||{});
     const result=await executePurge({...payload.request,user:payload.user||{},activeRunIds:new Set()});
     const completedAt=Date.now();
     const completed={...readJson(file),status:'SUCCEEDED',completedAt,heartbeatAt:completedAt,updatedAt:completedAt,result,error:'',message:'业务数据已安全清空，正在刷新页面。'};
