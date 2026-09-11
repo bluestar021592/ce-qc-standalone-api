@@ -19,7 +19,7 @@ function identityFile(dir,label){
   return path.join(dir,`${key}.job.json`);
 }
 
-test('V505 freezes every unknown API path and switches the main DB query-only only after the backup fingerprint is sealed',async()=>{
+test('V505 freezes every unknown API path and never thaws the shared web DB while purge truth is active',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v505-write-freeze-'));
   process.env.DATA_DIR=dir;
   process.env.DB_FILE=path.join(dir,'test.db');
@@ -50,7 +50,7 @@ test('V505 freezes every unknown API path and switches the main DB query-only on
     assert.equal(livePrepare.res.body?.protectedBy,'PREPARE:RUNNING');
     assert.equal(livePrepare.res.body?.fingerprintSealed,false);
     assert.equal(livePrepare.req.v505PurgeReadOnlyAuth,true);
-    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'running PREPARE still needs its own pre-seal control writes');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'running PREPARE must freeze the shared web DB before the backup fingerprint is sealed');
 
     const unknownGet=runGuard(request('GET','/api/dashboard'));
     assert.equal(unknownGet.nextCalled,false,'unknown GET APIs are not assumed read-only during purge');
@@ -60,8 +60,12 @@ test('V505 freezes every unknown API path and switches the main DB query-only on
     assert.equal(health.req.v505PurgeReadOnlyAuth,true);
     const session=runGuard(request('GET','/api/session'));
     assert.equal(session.nextCalled,true,'session identity may be read without refreshing the DB session');
+
     const purgeControl=runGuard(request('POST','/api/admin/data-purge/prepare'));
     assert.equal(purgeControl.nextCalled,true,'purge coordinator endpoints must remain reachable');
+    assert.equal(purgeControl.req.v505PurgeReadOnlyAuth,true,'purge control authentication remains read-only');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'trusted purge control must never create a shared writable window');
+    assert.throws(()=>db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v505_concurrent_write_probe','1',?)`).run(new Date().toISOString()),/readonly|read-only/i,'a concurrent main-process write must remain impossible during purge control recovery');
 
     fs.rmSync(prepareFile,{force:true});
     fs.writeFileSync(executeFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,heartbeatAt:Date.now()-120_000}),'utf8');
@@ -82,10 +86,8 @@ test('V505 freezes every unknown API path and switches the main DB query-only on
 
     const sealedControl=runGuard(request('POST','/api/admin/data-purge/execute'));
     assert.equal(sealedControl.nextCalled,true,'trusted purge control stays reachable after seal');
-    assert.equal(sealedControl.req.v505PurgeReadOnlyAuth,true,'auth/audit remains read-only while the control route is temporarily thawed');
-    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'trusted control may temporarily thaw only its own coordinator transition');
-    sealedControl.res.emit('finish');
-    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'finish hook must immediately re-seal the main connection while verified PREPARE truth still exists');
+    assert.equal(sealedControl.req.v505PurgeReadOnlyAuth,true);
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'sealed control recovery must stay read-only on the shared web connection');
 
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:2147483647,heartbeatAt:Date.now()-120_000}),'utf8');
     const confirmedDead=runGuard(request('POST','/api/unified-import'));
