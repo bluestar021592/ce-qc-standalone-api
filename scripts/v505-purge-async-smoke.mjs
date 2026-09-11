@@ -18,7 +18,9 @@ const syntaxFiles=[
   'public/v104-fast-purge-ui.js',
   'public/v106-purge-legacy-controls-hide.js',
   'public/v505-data-purge-recovery.js',
-  'test/v505-purge-global-guard.test.js'
+  'test/v505-purge-global-guard.test.js',
+  'test/v505-purge-coordinator.test.js',
+  'test/v505-purge-fingerprint-failclosed.test.js'
 ];
 for(const relative of syntaxFiles){
   const result=spawnSync(process.execPath,['--check',path.join(root,relative)],{encoding:'utf8'});
@@ -28,6 +30,8 @@ for(const relative of syntaxFiles){
 const pkg=JSON.parse(read('package.json'));
 assert.equal(pkg.scripts?.start,'node bootstrap.js','production/local launcher must pass through bootstrap patch ownership');
 assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-global-guard\.test\.js/,'cross-admin purge guard regression must be part of go-live');
+assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-coordinator\.test\.js/,'detached execute regression must be part of go-live');
+assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-fingerprint-failclosed\.test\.js/,'post-backup fingerprint fail-closed regression must be part of go-live');
 const bootstrap=read('bootstrap.js');
 const routeOwnerImport=bootstrap.indexOf("'./src/v29EndpointAliasPatch.js'");
 const serverImport=bootstrap.indexOf("'./server.js'");
@@ -127,6 +131,12 @@ assert.match(access,/coreAuditAction/);
 const core=read('src/accessControlCore.js');
 assert.match(core,/export async function accessIdentity/);
 assert.match(core,/export function auditAction/);
+
+const fingerprintTest=read('test/v505-purge-fingerprint-failclosed.test.js');
+assert.match(fingerprintTest,/changed-after-backup/,'fingerprint regression must mutate SQLite after the verified backup');
+assert.match(fingerprintTest,/assert\.equal\(executeStatus\?\.status,'FAILED'/,'fingerprint regression must require detached execute failure');
+assert.match(fingerprintTest,/business rows must remain after fingerprint rejection/,'fingerprint regression must verify destructive tables stay intact');
+assert.match(fingerprintTest,/destructive reset must not have committed/,'fingerprint regression must verify reset metadata never commits');
 
 const loader=read('public/v502-multidrive-backup-ui.js');
 assert.match(loader,/v505-data-purge-recovery\.js\?v=20260910-v505-6/,'fallback loader must bust earlier cached V505 assets');
