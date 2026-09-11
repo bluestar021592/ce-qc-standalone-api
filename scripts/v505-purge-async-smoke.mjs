@@ -66,7 +66,9 @@ assert.match(globalGuard,/processInstanceToken/,'stale mutex cleanup must distin
 assert.match(globalGuard,/DATA_PURGE_OWNED_BY_ANOTHER_ADMIN/);
 assert.match(globalGuard,/DATA_PURGE_SUBMISSION_BUSY/);
 assert.match(globalGuard,/DATA_PURGE_GLOBAL_LOCK_ORPHANED/);
-assert.match(globalGuard,/if\(isPrepare&&ownership\.ownProtected\)return next\(\)/,'own prepare recovery must not compete with a long-running backup for a new submit lock');
+assert.match(globalGuard,/reusableOwnTask=ownership\.own\.some/,'only reusable live own tasks may bypass new submission locking');
+assert.match(globalGuard,/\['ALIVE','UNKNOWN'\]\.includes/,'confirmed-dead own workers must not bypass the atomic submission mutex');
+assert.match(globalGuard,/if\(isPrepare&&reusableOwnTask\)return next\(\)/,'live prepare recovery must not contend with a long-running backup for a new submit lock');
 
 const executeWorker=read('scripts/CE_QC_PurgeExecuteTaskWorker.mjs');
 assert.match(executeWorker,/runPurgeExecutionWorker/);
