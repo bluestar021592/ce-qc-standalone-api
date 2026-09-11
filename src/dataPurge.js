@@ -12,7 +12,7 @@ import { schedulerStateForTests } from './carryoverRefreshScheduler.js';
 export const PURGE_PHRASE='永久清除全部业务数据';
 export const V503_PRE_CLEAR_VERIFY_ID='2026-09-10-v503-isolated-pre-clear-backup-quick-check-v1';
 export const V504_PRE_CLEAR_BACKUP_ID='2026-09-10-v504-isolated-full-pre-clear-backup-v1';
-export const V505_PURGE_RECOVERY_ID='2026-09-10-v505-async-purge-prepare-worker-v2';
+export const V505_PURGE_RECOVERY_ID='2026-09-11-v505-async-purge-prepare-worker-v3';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const PURGE_PREPARE_JOB_DIR='.purge_prepare_jobs';
 const PURGE_STATUS_PUBLIC_DIR='purge-status';
@@ -64,12 +64,11 @@ export async function createPurgeChallenge(user={},options={}){
     const heartbeatAt=Number(existing.heartbeatAt||existing.startedAt||existing.submittedAt||0);
     const workerPid=Number(existing.workerPid||0);
     const workerAlive=workerPid<=0||pidIsAlive(workerPid);
-    if(workerAlive&&heartbeatAt>0&&Date.now()-heartbeatAt<PURGE_PREPARE_STALE_MS){
-      return pendingPurgePayload(existing);
+    if(workerAlive){
+      const heartbeatStale=heartbeatAt>0&&Date.now()-heartbeatAt>=PURGE_PREPARE_STALE_MS;
+      return pendingPurgePayload({...existing,heartbeatStale,workerState:workerPid>0?'ALIVE':'UNKNOWN',message:heartbeatStale?'安全备份进程仍存活，但状态心跳延迟；系统保持锁定，不会启动第二份备份。':'安全备份正在后台执行。'});
     }
-    const failed=markPurgeJobFailed({...existing,jobFile},workerAlive
-      ?'清空前安全备份后台任务超过60秒没有心跳，已停止本次清除。请重新开始。'
-      :'清空前安全备份后台进程已经退出，已停止本次清除。请重新开始。');
+    const failed=markPurgeJobFailed({...existing,jobFile},'清空前安全备份后台进程已经退出，已停止本次清除。请重新开始。');
     clearPurgeBlock(db);
     return pendingPurgePayload(failed);
   }
@@ -256,6 +255,9 @@ function pendingPurgePayload(job={}){
     submittedAt:Number(job.submittedAt||Date.now()),
     startedAt:Number(job.startedAt||0),
     heartbeatAt:Number(job.heartbeatAt||0),
+    heartbeatStale:Boolean(job.heartbeatStale),
+    workerState:String(job.workerState||''),
+    message:String(job.message||''),
     databasePath:getRuntimeConfig().dbFile,
     counts:null,
     countMode:PURGE_PREPARE_COUNT_MODE,
