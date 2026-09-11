@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { getDb, getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_GLOBAL_GUARD_ID='2026-09-11-v505-global-single-owner-v5';
+export const V505_PURGE_GLOBAL_GUARD_ID='2026-09-11-v505-global-single-owner-v6';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
 const EXECUTE_DIR='.purge_execute_jobs';
@@ -163,7 +163,6 @@ export function v505PurgeGlobalOwnerGuard(req,res,next){
     };
     req.v505PurgeSubmissionMutexRelease=release;
     res.once?.('finish',release);
-    res.once?.('close',release);
     try{return next();}
     catch(error){release();throw error;}
   }catch(error){
