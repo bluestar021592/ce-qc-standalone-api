@@ -7,7 +7,7 @@ import { getRuntimeConfig } from './db.js';
 import { V505_EXPORT_SUBMISSION_MUTEX_FILE } from './v505PurgeExternalActivity.js';
 import { inspectPurgeWriteFreezeState, v505PurgeWriteFreezeGuard } from './v505PurgeWriteFreezeGuard.js';
 
-export const V505_EXPORT_ADMISSION_GUARD_ID='2026-09-11-v505-export-admission-handshake-v2';
+export const V505_EXPORT_ADMISSION_GUARD_ID='2026-09-11-v505-export-admission-handshake-v3';
 const V473_PREPARE_PATH='/api/v473/export-period/prepare';
 const PROCESS_INSTANCE_TOKEN=crypto.randomBytes(16).toString('hex');
 const originalPost=express.application.post;
@@ -73,17 +73,28 @@ function watchRegisteredJob(jobId,lock){
   };
   poll();
 }
+function purgeBlocked(res,purge){
+  return res.status(423).json({ok:false,code:'DATA_PURGE_IN_PROGRESS',error:'系统正在执行安全备份或清空业务数据，当前不能启动新的导出任务。',protectedBy:purge?.external?.active?`${purge.external.kind}:${purge.external.status}`:'SQLITE_PURGE_BLOCK',guardPatch:V505_EXPORT_ADMISSION_GUARD_ID});
+}
 
 export function v505ExportAdmissionGuard(req,res,next){
   try{
-    const purge=inspectPurgeWriteFreezeState();
-    if(purge.active){
-      return res.status(423).json({ok:false,code:'DATA_PURGE_IN_PROGRESS',error:'系统正在执行安全备份或清空业务数据，当前不能启动新的导出任务。',guardPatch:V505_EXPORT_ADMISSION_GUARD_ID});
-    }
+    const beforeAcquire=inspectPurgeWriteFreezeState();
+    if(beforeAcquire.active)return purgeBlocked(res,beforeAcquire);
+
     const lock=acquire();
     if(!lock.ok){
       return res.status(423).json({ok:false,code:'EXPORT_SUBMISSION_BUSY',error:'另一项导出正在进入受保护任务队列，请稍后重试。',guardPatch:V505_EXPORT_ADMISSION_GUARD_ID});
     }
+
+    // Cross-process double check: purge can acquire its own global submission
+    // mutex between our first check and this export lock. If that happened,
+    // export yields immediately. Conversely, once this lock survives the second
+    // check, purge's coordinator will see it and refuse to start until the V473
+    // job file has been durably registered.
+    const afterAcquire=inspectPurgeWriteFreezeState();
+    if(afterAcquire.active){release(lock);return purgeBlocked(res,afterAcquire);}
+
     let capturedJobId='';let released=false;
     const releaseOnce=()=>{if(released)return;released=true;release(lock);};
     const originalJson=res.json.bind(res);
