@@ -27,9 +27,14 @@ express.application.use=function v505PurgeGuardUse(...args){
   const candidates=args.flat().filter(value=>typeof value==='function');
   if(!purgeWriteBlockInstalled&&candidates.some(fn=>fn.name==='accessIdentity')){
     purgeWriteBlockInstalled=true;
-    // Register before accessIdentity so blocked writes cannot refresh an auth
-    // session and mutate SQLite after the verified backup fingerprint was sealed.
+    // Check once before authentication so already-active purge work cannot cause
+    // session refresh writes, and again after accessIdentity so a request that was
+    // suspended by Cloudflare/JWT verification cannot reach its route if purge
+    // started while authentication was in flight.
     previousUse.call(this,v505PurgeWriteFreezeGuard);
+    const result=previousUse.apply(this,args);
+    previousUse.call(this,v505PurgeWriteFreezeGuard);
+    return result;
   }
   return previousUse.apply(this,args);
 };
