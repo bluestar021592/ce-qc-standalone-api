@@ -12,6 +12,15 @@ function redirectToV27(pathname){
   };
 }
 
+async function runPurgeRouteAndRelease(handler,req,res,next){
+  try{return await handler(req,res,next);}
+  finally{
+    try{req.v505PurgeSubmissionMutexRelease?.();}catch{}
+  }
+}
+function v505GuardedPrepareHandler(req,res,next){return runPurgeRouteAndRelease(v505PurgePrepareHandler,req,res,next);}
+function v505GuardedExecuteHandler(req,res,next){return runPurgeRouteAndRelease(v505PurgeExecuteHandler,req,res,next);}
+
 const previousUse=express.application.use;
 express.application.use=function v505PurgeGuardUse(...args){
   const result=previousUse.apply(this,args);
@@ -27,10 +36,10 @@ const previousPost=express.application.post;
 express.application.post=function v505PurgeRoutePost(pathValue,...handlers){
   const route=String(pathValue||'');
   if(route==='/api/admin/data-purge/prepare'&&handlers.length){
-    return previousPost.call(this,pathValue,...handlers.slice(0,-1),v505PurgeGlobalOwnerGuard,v505PurgePrepareHandler);
+    return previousPost.call(this,pathValue,...handlers.slice(0,-1),v505PurgeGlobalOwnerGuard,v505GuardedPrepareHandler);
   }
   if(route==='/api/admin/data-purge/execute'&&handlers.length){
-    return previousPost.call(this,pathValue,...handlers.slice(0,-1),v505PurgeGlobalOwnerGuard,v505PurgeExecuteHandler);
+    return previousPost.call(this,pathValue,...handlers.slice(0,-1),v505PurgeGlobalOwnerGuard,v505GuardedExecuteHandler);
   }
   return previousPost.call(this,pathValue,...handlers);
 };
