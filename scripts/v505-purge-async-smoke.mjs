@@ -10,6 +10,7 @@ const syntaxFiles=[
   'src/dataPurge.js',
   'src/v505PurgeCoordinator.js',
   'src/v505PurgeGlobalGuard.js',
+  'src/v505PurgeWriteFreezeGuard.js',
   'src/v29EndpointAliasPatch.js',
   'src/accessControl.js',
   'scripts/CE_QC_PurgePrepareTaskWorker.mjs',
@@ -17,9 +18,11 @@ const syntaxFiles=[
   'public/v104-fast-purge-ui.js',
   'public/v106-purge-legacy-controls-hide.js',
   'public/v505-data-purge-recovery.js',
+  'test/data-purge-large-backup.test.js',
   'test/v505-purge-global-guard.test.js',
   'test/v505-purge-coordinator.test.js',
   'test/v505-purge-core-live-worker.test.js',
+  'test/v505-purge-write-freeze.test.js',
   'test/v505-purge-fingerprint-failclosed.test.js'
 ];
 for(const relative of syntaxFiles){
@@ -29,10 +32,15 @@ for(const relative of syntaxFiles){
 
 const pkg=JSON.parse(read('package.json'));
 assert.equal(pkg.scripts?.start,'node bootstrap.js','production/local launcher must pass through bootstrap patch ownership');
-assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-global-guard\.test\.js/,'cross-admin purge guard regression must be part of go-live');
-assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-coordinator\.test\.js/,'detached execute regression must be part of go-live');
-assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-core-live-worker\.test\.js/,'core live-worker stale-heartbeat regression must be part of go-live');
-assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-fingerprint-failclosed\.test\.js/,'post-backup fingerprint fail-closed regression must be part of go-live');
+for(const required of [
+  'test/v505-purge-global-guard.test.js',
+  'test/v505-purge-coordinator.test.js',
+  'test/v505-purge-core-live-worker.test.js',
+  'test/v505-purge-write-freeze.test.js',
+  'test/v505-purge-fingerprint-failclosed.test.js'
+]){
+  assert.ok(String(pkg.scripts?.['test:golive']||'').includes(required),`${required} must be part of go-live`);
+}
 const bootstrap=read('bootstrap.js');
 const routeOwnerImport=bootstrap.indexOf("'./src/v29EndpointAliasPatch.js'");
 const serverImport=bootstrap.indexOf("'./server.js'");
@@ -66,7 +74,6 @@ assert.doesNotMatch(coordinator,/setPurgeBlock/,'execute queue must not change S
 assert.match(coordinator,/detached:true/);
 assert.match(coordinator,/child\.unref\(\)/);
 assert.match(coordinator,/runPurgeExecutionWorker/);
-assert.match(coordinator,/DATA_PURGE_IN_PROGRESS/);
 assert.match(coordinator,/statusToken=crypto\.randomBytes\(24\)\.toString\('hex'\)/);
 
 const globalGuard=read('src/v505PurgeGlobalGuard.js');
@@ -84,6 +91,16 @@ assert.match(globalGuard,/if\(isPrepare&&reusableOwnTask\)return next\(\)/,'live
 assert.match(globalGuard,/req\.v505PurgeSubmissionMutexRelease=release/,'route owner must receive an explicit submission-lock release callback');
 assert.doesNotMatch(globalGuard,/once\?\.\('close',release\)/,'client disconnect must never unlock a submission while its route may still be creating the durable job');
 
+const writeFreeze=read('src/v505PurgeWriteFreezeGuard.js');
+assert.match(writeFreeze,/V505_PURGE_WRITE_FREEZE_ID/);
+assert.match(writeFreeze,/inspectExternalPurgeWriteFreeze/);
+assert.match(writeFreeze,/if\(alive!==false\)/,'live or unknown detached worker must keep writes frozen even if SQLite timestamp expires');
+assert.match(writeFreeze,/group\.kind==='PREPARE'&&status==='SUCCEEDED'/,'verified backup waiting for execute must preserve the write freeze');
+assert.match(writeFreeze,/DATA_PURGE_IN_PROGRESS/);
+assert.match(writeFreeze,/protectedBy:external\.active/);
+assert.match(writeFreeze,/\['POST','PUT','PATCH','DELETE'\]/);
+assert.match(writeFreeze,/data-purge\\\/\(\?:prepare\|execute\)/,'purge coordinator control endpoints must remain reachable through the write freeze');
+
 const executeWorker=read('scripts/CE_QC_PurgeExecuteTaskWorker.mjs');
 assert.match(executeWorker,/runPurgeExecutionWorker/);
 assert.match(executeWorker,/delayMs/);
@@ -91,7 +108,7 @@ assert.match(executeWorker,/delayMs/);
 const routeOwner=read('src/v29EndpointAliasPatch.js');
 assert.match(routeOwner,/v505PurgePrepareHandler/);
 assert.match(routeOwner,/v505PurgeExecuteHandler/);
-assert.match(routeOwner,/v505PurgeWriteBlockMiddleware/);
+assert.match(routeOwner,/v505PurgeWriteFreezeGuard/);
 assert.match(routeOwner,/v505PurgeGlobalOwnerGuard/);
 assert.match(routeOwner,/runPurgeRouteAndRelease/);
 assert.match(routeOwner,/req\.v505PurgeSubmissionMutexRelease\?\.\(\)/,'route wrapper must release the filesystem submit mutex immediately when queueing/recovery returns');
@@ -100,6 +117,9 @@ assert.match(routeOwner,/\/api\/admin\/data-purge\/execute/);
 assert.match(routeOwner,/v505PurgeGlobalOwnerGuard,v505GuardedPrepareHandler/,'prepare route must pass the global owner guard before the release-owning coordinator wrapper');
 assert.match(routeOwner,/v505PurgeGlobalOwnerGuard,v505GuardedExecuteHandler/,'execute route must pass the global owner guard before the release-owning coordinator wrapper');
 assert.match(routeOwner,/handlers\.slice\(0,-1\)/,'legacy synchronous purge route handler must be replaced, not stacked');
+const freezeRegistration=routeOwner.indexOf('previousUse.call(this,v505PurgeWriteFreezeGuard)');
+const accessRegistration=routeOwner.indexOf('return previousUse.apply(this,args)');
+assert.ok(freezeRegistration>=0&&accessRegistration>freezeRegistration,'write freeze must be registered before accessIdentity so blocked writes cannot refresh a DB-backed session first');
 
 const ui=read('public/v505-data-purge-recovery.js');
 assert.match(ui,/pollBackgroundJob/);
@@ -134,11 +154,28 @@ assert.match(access,/export async function accessIdentity/);
 assert.match(access,/export function auditAction/);
 assert.doesNotMatch(access,/accessControlCore/,'V505 must keep access-control changes minimal instead of introducing a split facade');
 
+const happyPathTest=read('test/data-purge-large-backup.test.js');
+assert.doesNotMatch(happyPathTest,/resealPurgeChallenge/,'happy-path purge regression must never legitimize post-backup mutations by resealing');
+assert.match(happyPathTest,/PUBLIC_STATUS_PRIVATE_KEYS/,'prepare status privacy must be tested');
+assert.match(happyPathTest,/public prepare status must not expose/);
+
+const coordinatorTest=read('test/v505-purge-coordinator.test.js');
+assert.match(coordinatorTest,/PUBLIC_STATUS_PRIVATE_KEYS/,'execute status privacy must be tested');
+assert.match(coordinatorTest,/public execute status must not expose/);
+
 const coreLiveTest=read('test/v505-purge-core-live-worker.test.js');
 assert.match(coreLiveTest,/workerPid:process\.pid/,'core live-worker regression must simulate a real live PID');
 assert.match(coreLiveTest,/heartbeatAt:Date\.now\(\)-120_000/,'core live-worker regression must use a stale heartbeat');
 assert.match(coreLiveTest,/live job must remain authoritative/,'core live-worker regression must verify the original task is retained');
 assert.match(coreLiveTest,/stale heartbeat must not clear the purge safety block/,'core live-worker regression must verify the safety lock is retained');
+
+const writeFreezeTest=read('test/v505-purge-write-freeze.test.js');
+assert.match(writeFreezeTest,/setExpiredSqliteBlock/,'write-freeze regression must prove external worker truth survives an expired SQLite timestamp');
+assert.match(writeFreezeTest,/workerPid:process\.pid/,'write-freeze regression must use a real live PID');
+assert.match(writeFreezeTest,/PREPARE:RUNNING/);
+assert.match(writeFreezeTest,/EXECUTE:RUNNING/);
+assert.match(writeFreezeTest,/PREPARE:SUCCEEDED/);
+assert.match(writeFreezeTest,/confirmed-dead worker must not create an endless external write freeze/);
 
 const fingerprintTest=read('test/v505-purge-fingerprint-failclosed.test.js');
 assert.match(fingerprintTest,/changed-after-backup/,'fingerprint regression must mutate SQLite after the verified backup');
