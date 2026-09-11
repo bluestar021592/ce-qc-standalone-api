@@ -1,6 +1,7 @@
 import express from 'express';
-import { v505PurgePrepareHandler, v505PurgeExecuteHandler, v505PurgeWriteBlockMiddleware, V505_PURGE_COORDINATOR_ID } from './v505PurgeCoordinator.js';
+import { v505PurgePrepareHandler, v505PurgeExecuteHandler, V505_PURGE_COORDINATOR_ID } from './v505PurgeCoordinator.js';
 import { v505PurgeGlobalOwnerGuard, V505_PURGE_GLOBAL_GUARD_ID } from './v505PurgeGlobalGuard.js';
+import { v505PurgeWriteFreezeGuard, V505_PURGE_WRITE_FREEZE_ID } from './v505PurgeWriteFreezeGuard.js';
 
 let installed=false;
 let purgeWriteBlockInstalled=false;
@@ -23,13 +24,14 @@ function v505GuardedExecuteHandler(req,res,next){return runPurgeRouteAndRelease(
 
 const previousUse=express.application.use;
 express.application.use=function v505PurgeGuardUse(...args){
-  const result=previousUse.apply(this,args);
   const candidates=args.flat().filter(value=>typeof value==='function');
   if(!purgeWriteBlockInstalled&&candidates.some(fn=>fn.name==='accessIdentity')){
     purgeWriteBlockInstalled=true;
-    previousUse.call(this,v505PurgeWriteBlockMiddleware);
+    // Register before accessIdentity so blocked writes cannot refresh an auth
+    // session and mutate SQLite after the verified backup fingerprint was sealed.
+    previousUse.call(this,v505PurgeWriteFreezeGuard);
   }
-  return result;
+  return previousUse.apply(this,args);
 };
 
 const previousPost=express.application.post;
@@ -58,4 +60,4 @@ express.application.listen=function v29EndpointAliasListen(...args){
   return previousListen.apply(this,args);
 };
 
-console.info('[CE-QC][V505_PURGE_COORDINATOR_ROUTE_OWNER]',V505_PURGE_COORDINATOR_ID,V505_PURGE_GLOBAL_GUARD_ID);
+console.info('[CE-QC][V505_PURGE_COORDINATOR_ROUTE_OWNER]',V505_PURGE_COORDINATOR_ID,V505_PURGE_GLOBAL_GUARD_ID,V505_PURGE_WRITE_FREEZE_ID);
