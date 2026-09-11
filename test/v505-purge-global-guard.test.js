@@ -97,8 +97,24 @@ test('V505 global purge guard blocks cross-admin ownership, closes submission ra
     let ownerNext=false;
     const ownerRes=responseHarness();
     v505PurgeGlobalOwnerGuard(requestFor(adminA),ownerRes,()=>{ownerNext=true;});
-    assert.equal(ownerNext,true,'the owning admin must be able to recover/read its existing prepare task');
-    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get(),undefined,'prepare recovery must not contend with the long-running backup for a new submission mutex');
+    assert.equal(ownerNext,true,'the owning admin must be able to recover/read its existing live prepare task');
+    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get(),undefined,'live prepare recovery must not contend with the long-running backup for a new submission mutex');
+
+    clearGuardState();
+    const deadOwnJob={...foreignJob,jobId:crypto.randomUUID(),email:adminA.email,workerPid:2147483647,heartbeatAt:Date.now()-120_000,updatedAt:Date.now()-120_000};
+    fs.writeFileSync(path.join(prepareDir,`${identityKey(adminA)}.job.json`),JSON.stringify(deadOwnJob),'utf8');
+    setBlock(Date.now()+10*60_000);
+    let deadRecoveryNext=false;
+    const deadRecoveryRes=responseHarness();
+    v505PurgeGlobalOwnerGuard(requestFor(adminA),deadRecoveryRes,()=>{deadRecoveryNext=true;});
+    assert.equal(deadRecoveryNext,true,'confirmed-dead own worker recovery may proceed under the global mutex');
+    assert.ok(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get()?.value,'dead-worker recovery must hold a submission mutex while it mutates job state');
+    let duplicateDeadRecoveryNext=false;
+    const duplicateDeadRecoveryRes=responseHarness();
+    v505PurgeGlobalOwnerGuard(requestFor(adminA),duplicateDeadRecoveryRes,()=>{duplicateDeadRecoveryNext=true;});
+    assert.equal(duplicateDeadRecoveryNext,false,'a second same-owner dead-worker recovery must not race the first recovery request');
+    assert.equal(duplicateDeadRecoveryRes.body?.code,'DATA_PURGE_SUBMISSION_BUSY');
+    deadRecoveryRes.emit('finish');
   }finally{
     try{clearGuardState();}catch{}
     try{closeDb();}catch{}
