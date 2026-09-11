@@ -19,7 +19,7 @@ function identityFile(dir,label){
   return path.join(dir,`${key}.job.json`);
 }
 
-test('V505 freezes every unknown API path and never thaws the shared web DB while purge truth is active',async()=>{
+test('V505 freezes APIs without ever exposing a shared writable window during a real purge job',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v505-write-freeze-'));
   process.env.DATA_DIR=dir;
   process.env.DB_FILE=path.join(dir,'test.db');
@@ -31,6 +31,7 @@ test('V505 freezes every unknown API path and never thaws the shared web DB whil
   const cfg=getRuntimeConfig();
   const prepareDir=path.join(cfg.backupsDir,'.purge_prepare_jobs');
   const executeDir=path.join(cfg.backupsDir,'.purge_execute_jobs');
+  const submissionFile=path.join(cfg.backupsDir,'.purge_global_submission.lock.json');
   fs.mkdirSync(prepareDir,{recursive:true});fs.mkdirSync(executeDir,{recursive:true});
   const prepareFile=identityFile(prepareDir,'prepare-owner');
   const executeFile=identityFile(executeDir,'execute-owner');
@@ -42,6 +43,15 @@ test('V505 freezes every unknown API path and never thaws the shared web DB whil
   };
   try{
     setExpiredSqliteBlock();
+
+    fs.writeFileSync(submissionFile,JSON.stringify({pid:process.pid,requestToken:'submission-window',acquiredAt:Date.now()}),'utf8');
+    const submissionRace=runGuard(request('POST','/api/unified-import'));
+    assert.equal(submissionRace.nextCalled,false,'a racing request must be rejected while the first PREPARE owns the atomic submission mutex');
+    assert.equal(submissionRace.res.statusCode,423);
+    assert.equal(submissionRace.res.body?.protectedBy,'SUBMISSION:LOCKED');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'bare submission mutex must not switch the process-global DB read-only before the owning PREPARE writes its safety block');
+    fs.rmSync(submissionFile,{force:true});
+
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,heartbeatAt:Date.now()-120_000}),'utf8');
     const livePrepare=runGuard(request('POST','/api/unified-import'));
     assert.equal(livePrepare.nextCalled,false);
