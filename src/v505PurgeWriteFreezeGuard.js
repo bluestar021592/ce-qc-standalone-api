@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { getDb, getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v3';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v4';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
@@ -40,14 +40,13 @@ function submissionMutexState(){
 }
 
 export function inspectExternalPurgeWriteFreeze(){
-  const submission=submissionMutexState();
-  if(submission)return submission;
   const cfg=getRuntimeConfig();
   const now=Date.now();
   const groups=[
     {kind:'EXECUTE',dir:path.join(cfg.backupsDir,EXECUTE_DIR)},
     {kind:'PREPARE',dir:path.join(cfg.backupsDir,PREPARE_DIR)}
   ];
+  let activeUnsealed=null;
   for(const group of groups){
     for(const file of jobFiles(group.dir)){
       const job=readJson(file);if(!job)continue;
@@ -55,7 +54,9 @@ export function inspectExternalPurgeWriteFreeze(){
       if(ACTIVE.has(status)){
         const alive=pidAlive(job.workerPid);
         if(alive!==false){
-          return {active:true,sealed:group.kind==='EXECUTE',kind:group.kind,status,workerState:alive===true?'ALIVE':'UNKNOWN',jobId:String(job.jobId||'')};
+          const state={active:true,sealed:group.kind==='EXECUTE',kind:group.kind,status,workerState:alive===true?'ALIVE':'UNKNOWN',jobId:String(job.jobId||'')};
+          if(state.sealed)return state;
+          activeUnsealed ||= state;
         }
       }
       if(group.kind==='PREPARE'&&status==='SUCCEEDED'){
@@ -66,6 +67,9 @@ export function inspectExternalPurgeWriteFreeze(){
       }
     }
   }
+  if(activeUnsealed)return activeUnsealed;
+  const submission=submissionMutexState();
+  if(submission)return submission;
   return {active:false,sealed:false};
 }
 
