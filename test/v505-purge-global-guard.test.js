@@ -34,12 +34,14 @@ test('V505 global purge guard blocks cross-admin ownership, closes submission ra
   const db=getDb();
   const cfg=getRuntimeConfig();
   const prepareDir=path.join(cfg.backupsDir,'.purge_prepare_jobs');
+  const mutexFile=path.join(cfg.backupsDir,'.purge_global_submission.lock.json');
   fs.mkdirSync(prepareDir,{recursive:true});
   const adminA={email:'admin-a@example.test',username:'admin-a',role:'ADMIN'};
   const adminB={email:'admin-b@example.test',username:'admin-b',role:'ADMIN'};
   const setBlock=until=>db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('data_purge_block_until',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(String(until),new Date().toISOString());
   const clearGuardState=()=>{
-    db.prepare("DELETE FROM app_meta WHERE key IN ('data_purge_block_until','data_purge_submission_mutex')").run();
+    db.prepare("DELETE FROM app_meta WHERE key='data_purge_block_until'").run();
+    fs.rmSync(mutexFile,{force:true});
     for(const name of fs.readdirSync(prepareDir)){if(name.endsWith('.job.json'))fs.rmSync(path.join(prepareDir,name),{force:true});}
   };
 
@@ -61,10 +63,13 @@ test('V505 global purge guard blocks cross-admin ownership, closes submission ra
 
     clearGuardState();
     let firstNext=false;
+    const firstReq=requestFor(adminA);
     const firstRes=responseHarness();
-    v505PurgeGlobalOwnerGuard(requestFor(adminA),firstRes,()=>{firstNext=true;});
+    v505PurgeGlobalOwnerGuard(firstReq,firstRes,()=>{firstNext=true;});
     assert.equal(firstNext,true,'first submission must acquire the atomic global mutex');
-    assert.ok(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get()?.value,'submission mutex must remain held until the response finishes');
+    assert.equal(fs.existsSync(mutexFile),true,'submission mutex must exist outside SQLite while the route is entering its durable task queue');
+    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get(),undefined,'submission mutex must never mutate the database fingerprint');
+    assert.equal(typeof firstReq.v505PurgeSubmissionMutexRelease,'function','route owner must receive an explicit release callback');
 
     let secondNext=false;
     const secondRes=responseHarness();
@@ -73,13 +78,16 @@ test('V505 global purge guard blocks cross-admin ownership, closes submission ra
     assert.equal(secondRes.statusCode,423);
     assert.equal(secondRes.body?.code,'DATA_PURGE_SUBMISSION_BUSY');
 
-    firstRes.emit('finish');
-    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get(),undefined,'response completion must release only its own submission mutex');
+    firstReq.v505PurgeSubmissionMutexRelease();
+    assert.equal(fs.existsSync(mutexFile),false,'explicit route completion must release only its own submission mutex before detached work advances');
     let retryNext=false;
+    const retryReq=requestFor(adminB);
     const retryRes=responseHarness();
-    v505PurgeGlobalOwnerGuard(requestFor(adminB),retryRes,()=>{retryNext=true;});
+    v505PurgeGlobalOwnerGuard(retryReq,retryRes,()=>{retryNext=true;});
     assert.equal(retryNext,true,'retry may proceed after the first submission has finished and no protected job exists');
+    assert.equal(fs.existsSync(mutexFile),true);
     retryRes.emit('finish');
+    assert.equal(fs.existsSync(mutexFile),false,'response finish remains a fallback release path');
 
     clearGuardState();
     setBlock(Date.now()+5*60_000);
@@ -95,26 +103,30 @@ test('V505 global purge guard blocks cross-admin ownership, closes submission ra
     fs.writeFileSync(path.join(prepareDir,`${identityKey(adminA)}.job.json`),JSON.stringify(ownJob),'utf8');
     setBlock(Date.now()+10*60_000);
     let ownerNext=false;
+    const ownerReq=requestFor(adminA);
     const ownerRes=responseHarness();
-    v505PurgeGlobalOwnerGuard(requestFor(adminA),ownerRes,()=>{ownerNext=true;});
+    v505PurgeGlobalOwnerGuard(ownerReq,ownerRes,()=>{ownerNext=true;});
     assert.equal(ownerNext,true,'the owning admin must be able to recover/read its existing live prepare task');
-    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get(),undefined,'live prepare recovery must not contend with the long-running backup for a new submission mutex');
+    assert.equal(fs.existsSync(mutexFile),false,'live prepare recovery must not contend with the long-running backup for a new submission mutex');
+    assert.equal(ownerReq.v505PurgeSubmissionMutexRelease,undefined);
 
     clearGuardState();
     const deadOwnJob={...foreignJob,jobId:crypto.randomUUID(),email:adminA.email,workerPid:2147483647,heartbeatAt:Date.now()-120_000,updatedAt:Date.now()-120_000};
     fs.writeFileSync(path.join(prepareDir,`${identityKey(adminA)}.job.json`),JSON.stringify(deadOwnJob),'utf8');
     setBlock(Date.now()+10*60_000);
     let deadRecoveryNext=false;
+    const deadRecoveryReq=requestFor(adminA);
     const deadRecoveryRes=responseHarness();
-    v505PurgeGlobalOwnerGuard(requestFor(adminA),deadRecoveryRes,()=>{deadRecoveryNext=true;});
+    v505PurgeGlobalOwnerGuard(deadRecoveryReq,deadRecoveryRes,()=>{deadRecoveryNext=true;});
     assert.equal(deadRecoveryNext,true,'confirmed-dead own worker recovery may proceed under the global mutex');
-    assert.ok(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get()?.value,'dead-worker recovery must hold a submission mutex while it mutates job state');
+    assert.equal(fs.existsSync(mutexFile),true,'dead-worker recovery must hold a submission mutex while it mutates job state');
     let duplicateDeadRecoveryNext=false;
     const duplicateDeadRecoveryRes=responseHarness();
     v505PurgeGlobalOwnerGuard(requestFor(adminA),duplicateDeadRecoveryRes,()=>{duplicateDeadRecoveryNext=true;});
     assert.equal(duplicateDeadRecoveryNext,false,'a second same-owner dead-worker recovery must not race the first recovery request');
     assert.equal(duplicateDeadRecoveryRes.body?.code,'DATA_PURGE_SUBMISSION_BUSY');
     deadRecoveryRes.emit('finish');
+    assert.equal(fs.existsSync(mutexFile),false);
   }finally{
     try{clearGuardState();}catch{}
     try{closeDb();}catch{}
