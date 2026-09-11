@@ -9,6 +9,7 @@ const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 const syntaxFiles=[
   'src/dataPurge.js',
   'src/v505PurgeCoordinator.js',
+  'src/v505PurgeGlobalGuard.js',
   'src/v29EndpointAliasPatch.js',
   'src/accessControl.js',
   'src/accessControlCore.js',
@@ -25,6 +26,7 @@ for(const relative of syntaxFiles){
 
 const pkg=JSON.parse(read('package.json'));
 assert.equal(pkg.scripts?.start,'node bootstrap.js','production/local launcher must pass through bootstrap patch ownership');
+assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-global-guard\.test\.js/,'cross-admin purge guard regression must be part of go-live');
 const bootstrap=read('bootstrap.js');
 const routeOwnerImport=bootstrap.indexOf("'./src/v29EndpointAliasPatch.js'");
 const serverImport=bootstrap.indexOf("'./server.js'");
@@ -56,6 +58,16 @@ assert.match(coordinator,/runPurgeExecutionWorker/);
 assert.match(coordinator,/DATA_PURGE_IN_PROGRESS/);
 assert.match(coordinator,/statusToken=crypto\.randomBytes\(24\)\.toString\('hex'\)/);
 
+const globalGuard=read('src/v505PurgeGlobalGuard.js');
+assert.match(globalGuard,/V505_PURGE_GLOBAL_GUARD_ID/);
+assert.match(globalGuard,/SUBMISSION_MUTEX_KEY='data_purge_submission_mutex'/);
+assert.match(globalGuard,/BEGIN IMMEDIATE/,'global submission ownership must be claimed atomically in SQLite');
+assert.match(globalGuard,/processInstanceToken/,'stale mutex cleanup must distinguish process instances from PID reuse');
+assert.match(globalGuard,/DATA_PURGE_OWNED_BY_ANOTHER_ADMIN/);
+assert.match(globalGuard,/DATA_PURGE_SUBMISSION_BUSY/);
+assert.match(globalGuard,/DATA_PURGE_GLOBAL_LOCK_ORPHANED/);
+assert.match(globalGuard,/if\(isPrepare&&ownership\.ownProtected\)return next\(\)/,'own prepare recovery must not compete with a long-running backup for a new submit lock');
+
 const executeWorker=read('scripts/CE_QC_PurgeExecuteTaskWorker.mjs');
 assert.match(executeWorker,/runPurgeExecutionWorker/);
 assert.match(executeWorker,/delayMs/);
@@ -64,8 +76,11 @@ const routeOwner=read('src/v29EndpointAliasPatch.js');
 assert.match(routeOwner,/v505PurgePrepareHandler/);
 assert.match(routeOwner,/v505PurgeExecuteHandler/);
 assert.match(routeOwner,/v505PurgeWriteBlockMiddleware/);
+assert.match(routeOwner,/v505PurgeGlobalOwnerGuard/);
 assert.match(routeOwner,/\/api\/admin\/data-purge\/prepare/);
 assert.match(routeOwner,/\/api\/admin\/data-purge\/execute/);
+assert.match(routeOwner,/v505PurgeGlobalOwnerGuard,v505PurgePrepareHandler/,'prepare route must pass the global owner guard before the coordinator');
+assert.match(routeOwner,/v505PurgeGlobalOwnerGuard,v505PurgeExecuteHandler/,'execute route must pass the global owner guard before the coordinator');
 assert.match(routeOwner,/handlers\.slice\(0,-1\)/,'legacy synchronous purge route handler must be replaced, not stacked');
 
 const ui=read('public/v505-data-purge-recovery.js');
