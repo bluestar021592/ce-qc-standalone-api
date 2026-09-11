@@ -19,7 +19,7 @@ function identityFile(dir,label){
   return path.join(dir,`${key}.job.json`);
 }
 
-test('V505 write freeze remains active from detached job truth even when SQLite block timestamp expired',async()=>{
+test('V505 freezes every unknown API path and switches the main DB query-only only after the backup fingerprint is sealed',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v505-write-freeze-'));
   process.env.DATA_DIR=dir;
   process.env.DB_FILE=path.join(dir,'test.db');
@@ -37,7 +37,7 @@ test('V505 write freeze remains active from detached job truth even when SQLite 
   const runGuard=(req)=>{
     let nextCalled=false;const res=responseHarness();
     v505PurgeWriteFreezeGuard(req,res,()=>{nextCalled=true;});
-    return {nextCalled,res};
+    return {nextCalled,res,req};
   };
   try{
     setExpiredSqliteBlock();
@@ -47,10 +47,18 @@ test('V505 write freeze remains active from detached job truth even when SQLite 
     assert.equal(livePrepare.res.statusCode,423);
     assert.equal(livePrepare.res.body?.code,'DATA_PURGE_IN_PROGRESS');
     assert.equal(livePrepare.res.body?.protectedBy,'PREPARE:RUNNING');
-    assert.equal(livePrepare.res.body?.guardPatch,V505_PURGE_WRITE_FREEZE_ID);
+    assert.equal(livePrepare.res.body?.fingerprintSealed,false);
+    assert.equal(livePrepare.req.v505PurgeReadOnlyAuth,true);
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'running PREPARE still needs its own pre-seal control writes');
 
-    const readOnly=runGuard(request('GET','/api/dashboard'));
-    assert.equal(readOnly.nextCalled,true,'read-only GET requests remain available');
+    const unknownGet=runGuard(request('GET','/api/dashboard'));
+    assert.equal(unknownGet.nextCalled,false,'unknown GET APIs are not assumed read-only during purge');
+    assert.equal(unknownGet.res.statusCode,423);
+    const health=runGuard(request('GET','/api/health'));
+    assert.equal(health.nextCalled,true,'explicit health read stays available');
+    assert.equal(health.req.v505PurgeReadOnlyAuth,true);
+    const session=runGuard(request('GET','/api/session'));
+    assert.equal(session.nextCalled,true,'session identity may be read without refreshing the DB session');
     const purgeControl=runGuard(request('POST','/api/admin/data-purge/prepare'));
     assert.equal(purgeControl.nextCalled,true,'purge coordinator endpoints must remain reachable');
 
@@ -59,16 +67,22 @@ test('V505 write freeze remains active from detached job truth even when SQLite 
     const liveExecute=runGuard(request('DELETE','/api/admin/backups/all'));
     assert.equal(liveExecute.nextCalled,false);
     assert.equal(liveExecute.res.body?.protectedBy,'EXECUTE:RUNNING');
+    assert.equal(liveExecute.res.body?.fingerprintSealed,true);
+    assert.equal(liveExecute.res.body?.mainProcessQueryOnly,true);
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'EXECUTE must keep the main web DB connection query-only');
 
     fs.rmSync(executeFile,{force:true});
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'SUCCEEDED',workerPid:0,payload:{expiresAt:new Date(Date.now()+5*60_000).toISOString()}}),'utf8');
     const waitingExecute=runGuard(request('PATCH','/api/settings'));
     assert.equal(waitingExecute.nextCalled,false,'verified backup waiting for execute must keep writes frozen');
     assert.equal(waitingExecute.res.body?.protectedBy,'PREPARE:SUCCEEDED');
+    assert.equal(waitingExecute.res.body?.fingerprintSealed,true);
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1);
 
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:2147483647,heartbeatAt:Date.now()-120_000}),'utf8');
     const confirmedDead=runGuard(request('POST','/api/unified-import'));
     assert.equal(confirmedDead.nextCalled,true,'confirmed-dead worker must not create an endless external write freeze once SQLite block is expired');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'main DB returns to writable mode only after no sealed/active purge truth remains');
   }finally{
     try{closeDb();}catch{}
     fs.rmSync(dir,{recursive:true,force:true});
