@@ -63,14 +63,17 @@ assert.match(globalGuard,/processInstanceToken/);
 assert.doesNotMatch(globalGuard,/data_purge_submission_mutex/);
 
 const freeze=read('src/v505PurgeWriteFreezeGuard.js');
-assert.match(freeze,/v7-no-shared-thaw/);
+assert.match(freeze,/v8-submission-safe/);
 assert.match(freeze,/SAFE_READ_APIS/);
 assert.match(freeze,/inspectExternalPurgeWriteFreeze/);
 assert.match(freeze,/if\(alive!==false\)/);
 assert.match(freeze,/group\.kind==='PREPARE'&&status==='SUCCEEDED'/);
 assert.match(freeze,/req\.v505PurgeReadOnlyAuth=true/);
-assert.match(freeze,/syncPurgeQueryOnly\(state\.active\)/,'query_only must follow purge truth for every request');
-assert.doesNotMatch(freeze,/syncPurgeQueryOnly\(false\)/,'active purge control must never thaw the shared web DB');
+assert.match(freeze,/queryOnlyRequired/,'query-only policy must distinguish the pre-job atomic submission handoff');
+assert.match(freeze,/if\(state\.sqliteActive\)return true/);
+assert.match(freeze,/String\(state\.external\.kind\|\|''\)!=='SUBMISSION'/,'bare submission mutex must not sabotage the owning PREPARE SQLite safety-block write');
+assert.match(freeze,/syncPurgeQueryOnly\(protectSharedDb\)/,'shared DB query_only must follow durable purge truth');
+assert.doesNotMatch(freeze,/syncPurgeQueryOnly\(false\)/,'active purge control must never explicitly thaw the shared web DB');
 assert.doesNotMatch(freeze,/restorePurgeQueryOnlyAfterControl|restoreSealedQueryOnlyAfterControl/,'shared-connection thaw/restore hooks are forbidden');
 assert.match(freeze,/PURGE_CONTROL\.test\(pathname\)&&method==='POST'/,'control routes remain reachable while query-only');
 
@@ -129,6 +132,7 @@ assert.match(happy,/PUBLIC_STATUS_PRIVATE_KEYS/);
 const coordinatorTest=read('test/v505-purge-coordinator.test.js');
 assert.match(coordinatorTest,/PUBLIC_STATUS_PRIVATE_KEYS/);
 const freezeTest=read('test/v505-purge-write-freeze.test.js');
+assert.match(freezeTest,/bare submission mutex must not switch the process-global DB read-only/);
 assert.match(freezeTest,/must never create a shared writable window/);
 assert.match(freezeTest,/concurrent main-process write must remain impossible/);
 assert.match(freezeTest,/main DB returns to writable mode only after no sealed\/active purge truth remains/);
@@ -142,4 +146,4 @@ const fingerprintTest=read('test/v505-purge-fingerprint-failclosed.test.js');
 assert.match(fingerprintTest,/changed-after-backup/);
 assert.match(fingerprintTest,/destructive reset must not have committed/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · detached prepare/execute · no shared DB thaw · auth/read/export handshakes fail closed');
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · detached prepare/execute · no shared DB thaw · submission race safe · auth/read/export handshakes fail closed');
