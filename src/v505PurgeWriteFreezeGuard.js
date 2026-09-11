@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { getDb, getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v5';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v6';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
@@ -109,11 +109,11 @@ function allowedDuringFreeze(method,pathname){
   if(method==='OPTIONS')return true;
   return false;
 }
-function restoreSealedQueryOnlyAfterControl(res){
+function restorePurgeQueryOnlyAfterControl(res){
   let restored=false;
   const restore=()=>{
     if(restored)return;restored=true;
-    try{syncPurgeQueryOnly(inspectPurgeWriteFreezeState().sealed);}catch{}
+    try{syncPurgeQueryOnly(inspectPurgeWriteFreezeState().active);}catch{}
   };
   res.once?.('finish',restore);
   res.once?.('close',restore);
@@ -128,28 +128,25 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
   req.v505PurgeWriteFreezeState=state;
   if(state.active)req.v505PurgeReadOnlyAuth=true;
 
-  // Only the trusted purge coordinator may temporarily thaw the main connection
-  // after sealing, because it may need to expire/restart a challenge or clear a
-  // mismatched control lock. Authentication/audit stays read-only via the request
-  // flag. On finish/close the connection is immediately re-sealed if purge truth
-  // still says the verified fingerprint is authoritative.
-  if(state.sealed&&purgeControl){
+  // The main HTTP-process SQLite connection stays query-only for the complete
+  // PREPARE -> verified-backup -> EXECUTE lifecycle. Detached workers use their
+  // own connections and are unaffected. Only the trusted purge coordinator may
+  // temporarily thaw this connection to transition control metadata; auth/audit
+  // remains read-only, and finish/close immediately restores the latest truth.
+  if(purgeControl){
     syncPurgeQueryOnly(false);
-    restoreSealedQueryOnlyAfterControl(res);
+    restorePurgeQueryOnlyAfterControl(res);
     return next();
   }
 
-  // PREPARE may still need its own control writes until the verified backup is
-  // sealed. Once PREPARE succeeds, all non-control web access is query-only until
-  // detached EXECUTE finishes or the sealed challenge is invalidated.
-  syncPurgeQueryOnly(state.sealed);
+  syncPurgeQueryOnly(state.active);
   if(!state.active)return next();
   if(allowedDuringFreeze(method,pathname))return next();
 
   return res.status(423).json({
     ok:false,
     code:'DATA_PURGE_IN_PROGRESS',
-    error:'系统正在执行安全备份或清空业务数据。为防止备份后的数据库继续变化，除清空控制和必要只读状态外，其余接口已临时冻结。',
+    error:'系统正在执行安全备份或清空业务数据。为防止清空前备份期间及备份后的数据库继续变化，除清空控制和必要只读状态外，其余接口已临时冻结。',
     until:state.until?new Date(state.until).toISOString():'',
     protectedBy:state.external?.active?`${state.external.kind}:${state.external.status}`:'SQLITE_PURGE_BLOCK',
     fingerprintSealed:state.sealed,
