@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 import { createPurgeChallenge, executePurge, PURGE_PHRASE, V505_PURGE_RECOVERY_ID } from './dataPurge.js';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
+import { assertNoActiveExportJobs, V505_PURGE_EXTERNAL_ACTIVITY_ID } from './v505PurgeExternalActivity.js';
 
-export const V505_PURGE_COORDINATOR_ID='2026-09-11-v505-purge-coordinator-v4-original-backup-fingerprint';
+export const V505_PURGE_COORDINATOR_ID='2026-09-11-v505-purge-coordinator-v5-export-gated-sealed-retry';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const PREPARE_JOB_DIR='.purge_prepare_jobs';
 const EXECUTE_JOB_DIR='.purge_execute_jobs';
@@ -64,6 +65,7 @@ function publicStatus(job={}){
     ok:true,
     patchId:V505_PURGE_COORDINATOR_ID,
     recoveryPatch:V505_PURGE_RECOVERY_ID,
+    externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID,
     kind:String(job.kind||'EXECUTE'),
     jobId:String(job.jobId||''),
     status,
@@ -94,6 +96,7 @@ function pendingPayload(job={}){
     workerState:Number(job.workerPid||0)>0?(pidAlive(job.workerPid)?'ALIVE':'DEAD'):'UNKNOWN',
     recoveryPatch:V505_PURGE_RECOVERY_ID,
     coordinatorPatch:V505_PURGE_COORDINATOR_ID,
+    externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID,
     message:String(job.message||'')
   };
 }
@@ -144,8 +147,7 @@ export function inspectExecutionRecovery(user={}){
   if(ACTIVE_EXECUTE.has(status)){
     const alive=pidAlive(job.workerPid);
     if(alive===false){
-      const failed=failJob(file,job,'后台清空进程已退出。SQLite事务会自动回滚未提交修改；系统已解除清空锁，请重新开始。');
-      clearPurgeBlock();
+      const failed=failJob(file,job,'后台清空进程已退出。未提交的SQLite事务会自动回滚；已验证备份的安全锁保持不变，可在凭证有效期内重新恢复。');
       return pendingPayload(failed);
     }
     return pendingPayload({...job,message:alive===null?'清空进程状态暂时无法确认；系统保持锁定，不会启动第二个清空任务。':(Date.now()-Number(job.heartbeatAt||0)>HEARTBEAT_STALE_MS?'清空进程仍存活，但状态心跳延迟；系统保持锁定，不会启动第二个清空任务。':'正在后台清空业务数据。')});
@@ -163,13 +165,14 @@ export async function v505PurgePrepareHandler(req,res){
     const live=inspectLivePrepareJob(req.user||{});
     if(live&&!live.dead)return res.json({ok:true,...live.payload,administrator:req.user?.email||req.user?.username||''});
     assertNoBusinessLock();
+    assertNoActiveExportJobs();
     let challenge=await createPurgeChallenge(req.user||{}, {activeRunIds:new Set()});
     if(live?.dead&&String(challenge?.status||'').toUpperCase()==='FAILED'){
       challenge=await createPurgeChallenge(req.user||{}, {activeRunIds:new Set()});
     }
-    return res.json({ok:true,...challenge,administrator:req.user?.email||req.user?.username||'',coordinatorPatch:V505_PURGE_COORDINATOR_ID});
+    return res.json({ok:true,...challenge,administrator:req.user?.email||req.user?.username||'',coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID});
   }catch(error){
-    return res.status(409).json({ok:false,code:'V505_PURGE_PREPARE_BLOCKED',error:error?.message||String(error),coordinatorPatch:V505_PURGE_COORDINATOR_ID});
+    return res.status(409).json({ok:false,code:error?.code||'V505_PURGE_PREPARE_BLOCKED',error:error?.message||String(error),coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID});
   }
 }
 
@@ -185,14 +188,14 @@ export async function queuePurgeExecution(user={},request={}){
     if(ACTIVE_EXECUTE.has(status)){
       const alive=pidAlive(existing.workerPid);
       if(alive!==false)return pendingPayload(existing);
-      failJob(file,existing,'上一个后台清空进程已经退出，已允许重新创建安全任务。');
-      clearPurgeBlock();
+      failJob(file,existing,'上一个后台清空进程已经退出；保留已验证备份的安全锁，准备恢复同一凭证。');
     }else if(status==='SUCCEEDED'&&String(existing.challengeId||'')===challengeId&&Date.now()-Number(existing.completedAt||0)<=EXECUTE_RECOVERY_MS){
       return {...pendingPayload(existing),status:'SUCCEEDED',completed:true,result:existing.result||null};
     }
     removeJobArtifacts(file,readJson(file)||existing);
   }
   assertNoBusinessLock();
+  assertNoActiveExportJobs();
   if(!purgeBlockActive())throw new Error('清空安全锁已失效，请重新开始，系统会重新验证备份与数据库状态。');
   const statusToken=crypto.randomBytes(24).toString('hex');
   const publicFile=statusFile(statusToken);
@@ -212,7 +215,8 @@ export async function queuePurgeExecution(user={},request={}){
     child=spawn(process.execPath,[EXECUTE_WORKER,encoded],{cwd:getRuntimeConfig().projectRoot,env:{...process.env,CE_QC_PURGE_EXECUTE_CHILD:'1'},windowsHide:true,detached:true,stdio:'ignore'});
     child.unref();
   }catch(error){
-    failJob(file,job,`无法启动后台清空进程：${error?.message||String(error)}`);clearPurgeBlock();throw error;
+    failJob(file,job,`无法启动后台清空进程：${error?.message||String(error)}`);
+    throw error;
   }
   job={...job,workerPid:Number(child.pid||0),updatedAt:Date.now(),message:'后台清空任务已提交，等待独立进程接管。'};
   writeJson(file,job);writePublic(job);
@@ -222,9 +226,9 @@ export async function queuePurgeExecution(user={},request={}){
 export async function v505PurgeExecuteHandler(req,res){
   try{
     const queued=await queuePurgeExecution(req.user||{},req.body||{});
-    return res.status(queued.status==='SUCCEEDED'?200:202).json({ok:true,...queued,coordinatorPatch:V505_PURGE_COORDINATOR_ID});
+    return res.status(queued.status==='SUCCEEDED'?200:202).json({ok:true,...queued,coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID});
   }catch(error){
-    return res.status(409).json({ok:false,code:'V505_PURGE_EXECUTE_BLOCKED',error:error?.message||String(error),coordinatorPatch:V505_PURGE_COORDINATOR_ID});
+    return res.status(409).json({ok:false,code:error?.code||'V505_PURGE_EXECUTE_BLOCKED',error:error?.message||String(error),coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID});
   }
 }
 
@@ -262,15 +266,4 @@ export async function runPurgeExecutionWorker(payload={}){
     workerAudit(payload.user||{},'DATA_PURGE_FAILED',{stage:'execute-worker',error:String(error?.message||error)});
     throw error;
   }finally{clearInterval(heartbeat);}
-}
-
-export function v505PurgeWriteBlockMiddleware(req,res,next){
-  if(!['POST','PUT','PATCH','DELETE'].includes(String(req.method||'').toUpperCase()))return next();
-  const pathname=String(req.originalUrl||req.url||'').split('?')[0];
-  if(/^\/api\/admin\/data-purge\/(?:prepare|execute)$/.test(pathname))return next();
-  const until=purgeBlockUntil();
-  if(Number.isFinite(until)&&until>Date.now()){
-    return res.status(423).json({ok:false,code:'DATA_PURGE_IN_PROGRESS',error:'系统正在执行安全备份或清空业务数据。为防止数据在备份后继续变化，当前写入已临时锁定。',until:new Date(until).toISOString(),coordinatorPatch:V505_PURGE_COORDINATOR_ID});
-  }
-  return next();
 }
