@@ -12,7 +12,6 @@ const syntaxFiles=[
   'src/v505PurgeGlobalGuard.js',
   'src/v29EndpointAliasPatch.js',
   'src/accessControl.js',
-  'src/accessControlCore.js',
   'scripts/CE_QC_PurgePrepareTaskWorker.mjs',
   'scripts/CE_QC_PurgeExecuteTaskWorker.mjs',
   'public/v104-fast-purge-ui.js',
@@ -131,10 +130,9 @@ assert.match(access,/PURGE_STATUS_PATH/);
 assert.match(access,/PURGE_PREPARE_AUDITS/);
 assert.match(access,/DATA_PURGE_REQUESTED/);
 assert.match(access,/DATA_PURGE_BACKUP_VERIFIED/);
-assert.match(access,/coreAuditAction/);
-const core=read('src/accessControlCore.js');
-assert.match(core,/export async function accessIdentity/);
-assert.match(core,/export function auditAction/);
+assert.match(access,/export async function accessIdentity/);
+assert.match(access,/export function auditAction/);
+assert.doesNotMatch(access,/accessControlCore/,'V505 must keep access-control changes minimal instead of introducing a split facade');
 
 const coreLiveTest=read('test/v505-purge-core-live-worker.test.js');
 assert.match(coreLiveTest,/workerPid:process\.pid/,'core live-worker regression must simulate a real live PID');
