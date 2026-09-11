@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { getRuntimeConfig } from './db.js';
+import { V505_EXPORT_SUBMISSION_MUTEX_FILE } from './v505PurgeExternalActivity.js';
 import { inspectPurgeWriteFreezeState, v505PurgeWriteFreezeGuard } from './v505PurgeWriteFreezeGuard.js';
 
-export const V505_EXPORT_ADMISSION_GUARD_ID='2026-09-11-v505-export-admission-handshake-v1';
-export const V505_EXPORT_SUBMISSION_MUTEX_FILE='.v505_export_submission.lock.json';
+export const V505_EXPORT_ADMISSION_GUARD_ID='2026-09-11-v505-export-admission-handshake-v2';
 const V473_PREPARE_PATH='/api/v473/export-period/prepare';
 const PROCESS_INSTANCE_TOKEN=crypto.randomBytes(16).toString('hex');
 const originalPost=express.application.post;
@@ -72,16 +72,6 @@ function watchRegisteredJob(jobId,lock){
     const timer=setTimeout(poll,25);timer.unref?.();
   };
   poll();
-}
-
-export function inspectExportSubmissionAdmission(){
-  const file=lockFile();
-  if(!fs.existsSync(file))return {active:false,file,guard:V505_EXPORT_ADMISSION_GUARD_ID};
-  const record=readJson(file);
-  if(!record)return {active:true,file,workerState:'UNKNOWN',guard:V505_EXPORT_ADMISSION_GUARD_ID};
-  const alive=pidAlive(record.pid);
-  if(alive===false)return {active:false,stale:true,file,record,workerState:'DEAD',guard:V505_EXPORT_ADMISSION_GUARD_ID};
-  return {active:true,file,record,workerState:alive===true?'ALIVE':'UNKNOWN',guard:V505_EXPORT_ADMISSION_GUARD_ID};
 }
 
 export function v505ExportAdmissionGuard(req,res,next){
