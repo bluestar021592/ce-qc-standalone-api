@@ -2,14 +2,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { getDb, getRuntimeConfig, nowIso } from './db.js';
+import { getDb, getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_GLOBAL_GUARD_ID='2026-09-11-v505-global-single-owner-v4';
+export const V505_PURGE_GLOBAL_GUARD_ID='2026-09-11-v505-global-single-owner-v5';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
 const EXECUTE_DIR='.purge_execute_jobs';
 const PURGE_BLOCK_KEY='data_purge_block_until';
-const SUBMISSION_MUTEX_KEY='data_purge_submission_mutex';
+const SUBMISSION_MUTEX_FILE='.purge_global_submission.lock.json';
 const PROCESS_INSTANCE_TOKEN=crypto.randomBytes(16).toString('hex');
 
 function identityKey(user={}){
@@ -18,7 +18,6 @@ function identityKey(user={}){
   return crypto.createHash('sha256').update(identity).digest('hex').slice(0,24);
 }
 function readJson(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
-function safeJson(value){try{return JSON.parse(String(value||''));}catch{return null;}}
 function pidAlive(pid){
   const value=Number(pid||0);
   if(!Number.isInteger(value)||value<=0)return null;
@@ -74,6 +73,11 @@ export function inspectGlobalPurgeOwnership(user={}){
   return {foreign,own,ownProtected,orphanedLock,lockedUntil};
 }
 
+function submissionMutexFile(){
+  const dir=getRuntimeConfig().backupsDir;
+  fs.mkdirSync(dir,{recursive:true});
+  return path.join(dir,SUBMISSION_MUTEX_FILE);
+}
 function existingMutexBlocks(record={}){
   if(!record||typeof record!=='object')return true;
   const pid=Number(record.pid||0);
@@ -82,46 +86,41 @@ function existingMutexBlocks(record={}){
   if(alive===false)return false;
   return true;
 }
-
-export function acquireGlobalPurgeSubmissionMutex(user={}){
-  const db=getDb();
-  const ownerKey=identityKey(user);
-  if(!ownerKey)throw new Error('缺少管理员身份，无法申请全局清空提交锁。');
-  const requestToken=crypto.randomUUID();
-  const record={
-    ownerKey,
-    pid:process.pid,
-    processInstanceToken:PROCESS_INSTANCE_TOKEN,
-    requestToken,
-    acquiredAt:Date.now()
-  };
-  db.exec('BEGIN IMMEDIATE');
+function tryCreateSubmissionMutex(file,record){
+  let fd=null;
   try{
-    const currentRaw=String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(SUBMISSION_MUTEX_KEY)?.value||'');
-    const current=currentRaw?safeJson(currentRaw):null;
-    if(currentRaw&&existingMutexBlocks(current)){
-      db.exec('ROLLBACK');
-      return {acquired:false,current};
-    }
-    db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?)
-      ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`)
-      .run(SUBMISSION_MUTEX_KEY,JSON.stringify(record),nowIso());
-    db.exec('COMMIT');
-    return {acquired:true,record};
+    fd=fs.openSync(file,'wx',0o600);
+    fs.writeFileSync(fd,JSON.stringify(record),'utf8');
+    try{fs.fsyncSync(fd);}catch{}
+    fs.closeSync(fd);fd=null;
+    return true;
   }catch(error){
-    try{db.exec('ROLLBACK');}catch{}
+    if(fd!==null){try{fs.closeSync(fd);}catch{}try{fs.rmSync(file,{force:true});}catch{}}
+    if(error?.code==='EEXIST')return false;
     throw error;
   }
 }
 
+export function acquireGlobalPurgeSubmissionMutex(user={}){
+  const ownerKey=identityKey(user);
+  if(!ownerKey)throw new Error('缺少管理员身份，无法申请全局清空提交锁。');
+  const file=submissionMutexFile();
+  const record={ownerKey,pid:process.pid,processInstanceToken:PROCESS_INSTANCE_TOKEN,requestToken:crypto.randomUUID(),acquiredAt:Date.now()};
+  if(tryCreateSubmissionMutex(file,record))return {acquired:true,record,file};
+
+  const current=readJson(file);
+  if(existingMutexBlocks(current))return {acquired:false,current,file};
+  try{fs.rmSync(file,{force:true});}catch{}
+  if(tryCreateSubmissionMutex(file,record))return {acquired:true,record,file,recoveredStale:true};
+  return {acquired:false,current:readJson(file),file};
+}
+
 export function releaseGlobalPurgeSubmissionMutex(record={}){
   if(!record?.requestToken)return false;
-  const db=getDb();
-  const currentRaw=String(db.prepare('SELECT value FROM app_meta WHERE key=?').get(SUBMISSION_MUTEX_KEY)?.value||'');
-  const current=safeJson(currentRaw);
+  const file=submissionMutexFile();
+  const current=readJson(file);
   if(!current||String(current.requestToken||'')!==String(record.requestToken)||String(current.processInstanceToken||'')!==PROCESS_INSTANCE_TOKEN)return false;
-  db.prepare('DELETE FROM app_meta WHERE key=?').run(SUBMISSION_MUTEX_KEY);
-  return true;
+  try{fs.rmSync(file,{force:true});return true;}catch{return false;}
 }
 
 function blocked(res,code,error,detail={}){
