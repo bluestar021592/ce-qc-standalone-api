@@ -26,6 +26,7 @@ test('V505 freezes every unknown API path and switches the main DB query-only on
   process.env.CE_QC_DISABLE_CARRY_REFRESH='1';
   const {getDb,getRuntimeConfig,closeDb}=await import('../src/db.js');
   const {v505PurgeWriteFreezeGuard,V505_PURGE_WRITE_FREEZE_ID}=await import('../src/v505PurgeWriteFreezeGuard.js');
+  assert.ok(V505_PURGE_WRITE_FREEZE_ID);
   const db=getDb();
   const cfg=getRuntimeConfig();
   const prepareDir=path.join(cfg.backupsDir,'.purge_prepare_jobs');
@@ -78,6 +79,13 @@ test('V505 freezes every unknown API path and switches the main DB query-only on
     assert.equal(waitingExecute.res.body?.protectedBy,'PREPARE:SUCCEEDED');
     assert.equal(waitingExecute.res.body?.fingerprintSealed,true);
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,1);
+
+    const sealedControl=runGuard(request('POST','/api/admin/data-purge/execute'));
+    assert.equal(sealedControl.nextCalled,true,'trusted purge control stays reachable after seal');
+    assert.equal(sealedControl.req.v505PurgeReadOnlyAuth,true,'auth/audit remains read-only while the control route is temporarily thawed');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'trusted control may temporarily thaw only its own coordinator transition');
+    sealedControl.res.emit('finish');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'finish hook must immediately re-seal the main connection while verified PREPARE truth still exists');
 
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:2147483647,heartbeatAt:Date.now()-120_000}),'utf8');
     const confirmedDead=runGuard(request('POST','/api/unified-import'));
