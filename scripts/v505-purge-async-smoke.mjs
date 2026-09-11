@@ -17,7 +17,8 @@ const syntaxFiles=[
   'scripts/CE_QC_PurgeExecuteTaskWorker.mjs',
   'public/v104-fast-purge-ui.js',
   'public/v106-purge-legacy-controls-hide.js',
-  'public/v505-data-purge-recovery.js'
+  'public/v505-data-purge-recovery.js',
+  'test/v505-purge-global-guard.test.js'
 ];
 for(const relative of syntaxFiles){
   const result=spawnSync(process.execPath,['--check',path.join(root,relative)],{encoding:'utf8'});
@@ -60,8 +61,9 @@ assert.match(coordinator,/statusToken=crypto\.randomBytes\(24\)\.toString\('hex'
 
 const globalGuard=read('src/v505PurgeGlobalGuard.js');
 assert.match(globalGuard,/V505_PURGE_GLOBAL_GUARD_ID/);
-assert.match(globalGuard,/SUBMISSION_MUTEX_KEY='data_purge_submission_mutex'/);
-assert.match(globalGuard,/BEGIN IMMEDIATE/,'global submission ownership must be claimed atomically in SQLite');
+assert.match(globalGuard,/SUBMISSION_MUTEX_FILE='\.purge_global_submission\.lock\.json'/);
+assert.match(globalGuard,/fs\.openSync\(file,'wx',0o600\)/,'global submission ownership must be atomically claimed outside SQLite');
+assert.doesNotMatch(globalGuard,/data_purge_submission_mutex/,'submission mutex must not mutate the SQLite fingerprint');
 assert.match(globalGuard,/processInstanceToken/,'stale mutex cleanup must distinguish process instances from PID reuse');
 assert.match(globalGuard,/DATA_PURGE_OWNED_BY_ANOTHER_ADMIN/);
 assert.match(globalGuard,/DATA_PURGE_SUBMISSION_BUSY/);
@@ -69,6 +71,7 @@ assert.match(globalGuard,/DATA_PURGE_GLOBAL_LOCK_ORPHANED/);
 assert.match(globalGuard,/reusableOwnTask=ownership\.own\.some/,'only reusable live own tasks may bypass new submission locking');
 assert.match(globalGuard,/\['ALIVE','UNKNOWN'\]\.includes/,'confirmed-dead own workers must not bypass the atomic submission mutex');
 assert.match(globalGuard,/if\(isPrepare&&reusableOwnTask\)return next\(\)/,'live prepare recovery must not contend with a long-running backup for a new submit lock');
+assert.match(globalGuard,/req\.v505PurgeSubmissionMutexRelease=release/,'route owner must receive an explicit submission-lock release callback');
 
 const executeWorker=read('scripts/CE_QC_PurgeExecuteTaskWorker.mjs');
 assert.match(executeWorker,/runPurgeExecutionWorker/);
@@ -79,10 +82,12 @@ assert.match(routeOwner,/v505PurgePrepareHandler/);
 assert.match(routeOwner,/v505PurgeExecuteHandler/);
 assert.match(routeOwner,/v505PurgeWriteBlockMiddleware/);
 assert.match(routeOwner,/v505PurgeGlobalOwnerGuard/);
+assert.match(routeOwner,/runPurgeRouteAndRelease/);
+assert.match(routeOwner,/req\.v505PurgeSubmissionMutexRelease\?\.\(\)/,'route wrapper must release the filesystem submit mutex immediately when queueing/recovery returns');
 assert.match(routeOwner,/\/api\/admin\/data-purge\/prepare/);
 assert.match(routeOwner,/\/api\/admin\/data-purge\/execute/);
-assert.match(routeOwner,/v505PurgeGlobalOwnerGuard,v505PurgePrepareHandler/,'prepare route must pass the global owner guard before the coordinator');
-assert.match(routeOwner,/v505PurgeGlobalOwnerGuard,v505PurgeExecuteHandler/,'execute route must pass the global owner guard before the coordinator');
+assert.match(routeOwner,/v505PurgeGlobalOwnerGuard,v505GuardedPrepareHandler/,'prepare route must pass the global owner guard before the release-owning coordinator wrapper');
+assert.match(routeOwner,/v505PurgeGlobalOwnerGuard,v505GuardedExecuteHandler/,'execute route must pass the global owner guard before the release-owning coordinator wrapper');
 assert.match(routeOwner,/handlers\.slice\(0,-1\)/,'legacy synchronous purge route handler must be replaced, not stacked');
 
 const ui=read('public/v505-data-purge-recovery.js');
