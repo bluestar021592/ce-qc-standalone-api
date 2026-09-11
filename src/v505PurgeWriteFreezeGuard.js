@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { getDb, getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v2';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v3';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
@@ -33,10 +33,10 @@ function submissionMutexState(){
   const file=path.join(cfg.backupsDir,SUBMISSION_MUTEX_FILE);
   if(!fs.existsSync(file))return null;
   const record=readJson(file);
-  if(!record)return {active:true,kind:'SUBMISSION',status:'UNKNOWN',workerState:'UNKNOWN',jobId:''};
+  if(!record)return {active:true,sealed:false,kind:'SUBMISSION',status:'UNKNOWN',workerState:'UNKNOWN',jobId:''};
   const alive=pidAlive(record.pid);
   if(alive===false)return null;
-  return {active:true,kind:'SUBMISSION',status:'LOCKED',workerState:alive===true?'ALIVE':'UNKNOWN',jobId:String(record.requestToken||'')};
+  return {active:true,sealed:false,kind:'SUBMISSION',status:'LOCKED',workerState:alive===true?'ALIVE':'UNKNOWN',jobId:String(record.requestToken||'')};
 }
 
 export function inspectExternalPurgeWriteFreeze(){
@@ -55,18 +55,18 @@ export function inspectExternalPurgeWriteFreeze(){
       if(ACTIVE.has(status)){
         const alive=pidAlive(job.workerPid);
         if(alive!==false){
-          return {active:true,kind:group.kind,status,workerState:alive===true?'ALIVE':'UNKNOWN',jobId:String(job.jobId||'')};
+          return {active:true,sealed:group.kind==='EXECUTE',kind:group.kind,status,workerState:alive===true?'ALIVE':'UNKNOWN',jobId:String(job.jobId||'')};
         }
       }
       if(group.kind==='PREPARE'&&status==='SUCCEEDED'){
         const expiresAt=Date.parse(String(job.payload?.expiresAt||''));
         if(Number.isFinite(expiresAt)&&expiresAt>now){
-          return {active:true,kind:group.kind,status,workerState:'COMPLETED_WAITING_EXECUTE',jobId:String(job.jobId||''),expiresAt};
+          return {active:true,sealed:true,kind:group.kind,status,workerState:'COMPLETED_WAITING_EXECUTE',jobId:String(job.jobId||''),expiresAt};
         }
       }
     }
   }
-  return {active:false};
+  return {active:false,sealed:false};
 }
 
 export function inspectPurgeWriteFreezeState(){
@@ -75,6 +75,7 @@ export function inspectPurgeWriteFreezeState(){
   const sqliteActive=Number.isFinite(until)&&until>Date.now();
   return {
     active:Boolean(sqliteActive||external.active),
+    sealed:Boolean(external.sealed),
     sqliteActive,
     until:sqliteActive?until:0,
     external
@@ -109,7 +110,10 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
   const method=String(req.method||'GET').toUpperCase();
   const pathname=String(req.originalUrl||req.url||req.path||'').split('?')[0];
   const state=inspectPurgeWriteFreezeState();
-  syncPurgeQueryOnly(state.active);
+  // PREPARE may still need its own control writes until the verified backup is
+  // sealed. Once PREPARE succeeds, the main web-process connection is forced
+  // query-only until detached EXECUTE finishes or the sealed challenge expires.
+  syncPurgeQueryOnly(state.sealed);
   if(!state.active)return next();
 
   req.v505PurgeReadOnlyAuth=true;
@@ -122,6 +126,7 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
     error:'系统正在执行安全备份或清空业务数据。为防止备份后的数据库继续变化，除清空控制和必要只读状态外，其余接口已临时冻结。',
     until:state.until?new Date(state.until).toISOString():'',
     protectedBy:state.external?.active?`${state.external.kind}:${state.external.status}`:'SQLITE_PURGE_BLOCK',
+    fingerprintSealed:state.sealed,
     mainProcessQueryOnly:queryOnlyState===true,
     guardPatch:V505_PURGE_WRITE_FREEZE_ID
   });
