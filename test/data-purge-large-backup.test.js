@@ -8,6 +8,7 @@ import { hashFileStream } from '../src/dataPurge.js';
 
 const RUN_LARGE_DURABILITY = String(process.env.CE_QC_RUN_LARGE_DURABILITY || '') === '1';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const PUBLIC_STATUS_PRIVATE_KEYS = ['email','user','payload','backup','databasePath','challengeId','statusToken','statusFile'];
 
 test('backup primitives support a sparse file larger than 2 GiB without whole-file Buffer reads', { skip: !RUN_LARGE_DURABILITY }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-large-backup-'));
@@ -71,6 +72,7 @@ test('purge prepare returns immediately, reuses one detached task, then gates tr
   }
   assert.equal(status?.jobId, first.jobId);
   assert.equal(status?.status, 'SUCCEEDED', status?.error || 'background purge preparation did not complete');
+  for (const key of PUBLIC_STATUS_PRIVATE_KEYS) assert.equal(Object.hasOwn(status || {}, key), false, `public prepare status must not expose ${key}`);
 
   const challenge = await createPurgeChallenge({ email: 'test-admin' });
   assert.equal(challenge.status, 'SUCCEEDED');
