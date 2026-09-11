@@ -41,6 +41,7 @@ assert.match(purge,/runPurgePreparationWorker/);
 assert.match(purge,/PENDING:\$\{String\(job\.jobId/);
 assert.match(purge,/crypto\.randomBytes\(24\)\.toString\('hex'\)/);
 assert.match(purge,/strictRunLocks:true/);
+assert.match(purge,/sameFingerprint\(challenge\.sourceFingerprint,currentFingerprint\)/,'final destructive path must compare the original post-backup DB/WAL fingerprint before delete');
 
 const prepareWorker=read('scripts/CE_QC_PurgePrepareTaskWorker.mjs');
 assert.match(prepareWorker,/runPurgePreparationWorker/);
@@ -52,7 +53,9 @@ assert.match(coordinator,/if\(alive===false\)return \{dead:true,job,file\}/,'onl
 assert.match(coordinator,/系统保持锁定，不会启动第二份备份/);
 assert.match(coordinator,/inspectExecutionRecovery/);
 assert.match(coordinator,/queuePurgeExecution/);
-assert.match(coordinator,/resealPurgeChallenge\(challengeId,user\)/);
+assert.doesNotMatch(coordinator,/resealPurgeChallenge/,'production coordinator must never rewrite the original verified-backup fingerprint before delete');
+assert.match(coordinator,/if\(!purgeBlockActive\(\)\)throw new Error/,'execute queue must require the existing post-backup write freeze instead of mutating it');
+assert.doesNotMatch(coordinator,/setPurgeBlock/,'execute queue must not change SQLite control metadata after the backup fingerprint is sealed');
 assert.match(coordinator,/detached:true/);
 assert.match(coordinator,/child\.unref\(\)/);
 assert.match(coordinator,/runPurgeExecutionWorker/);
@@ -72,6 +75,7 @@ assert.match(globalGuard,/reusableOwnTask=ownership\.own\.some/,'only reusable l
 assert.match(globalGuard,/\['ALIVE','UNKNOWN'\]\.includes/,'confirmed-dead own workers must not bypass the atomic submission mutex');
 assert.match(globalGuard,/if\(isPrepare&&reusableOwnTask\)return next\(\)/,'live prepare recovery must not contend with a long-running backup for a new submit lock');
 assert.match(globalGuard,/req\.v505PurgeSubmissionMutexRelease=release/,'route owner must receive an explicit submission-lock release callback');
+assert.doesNotMatch(globalGuard,/once\?\.\('close',release\)/,'client disconnect must never unlock a submission while its route may still be creating the durable job');
 
 const executeWorker=read('scripts/CE_QC_PurgeExecuteTaskWorker.mjs');
 assert.match(executeWorker,/runPurgeExecutionWorker/);
