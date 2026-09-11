@@ -282,6 +282,7 @@ function readSession(req, channel, cloudflareEmail) {
 function refreshSessionIfNeeded(req, res, user, channel) {
   const expiresAtMs = Date.parse(user.sessionExpiresAt || '');
   if (Number.isFinite(expiresAtMs) && expiresAtMs - Date.now() > SESSION_REFRESH_THRESHOLD_MS) return user;
+  if (req.v505PurgeReadOnlyAuth) return user;
   const token = cookieValue(req, 'ce_internal_session');
   if (!token) return user;
   const expiresAt = new Date(Date.now() + SESSION_HOURS * 60 * 60_000).toISOString();
@@ -331,6 +332,7 @@ export function sameOriginWriteGuard(req, res, next) {
 }
 
 export function auditAction(req, action, detail = {}) {
+  if(req.v505PurgeReadOnlyAuth)return;
   if(String(req.path||'')==='/api/admin/data-purge/prepare'&&PURGE_PREPARE_AUDITS.has(String(action||'')))return;
   const body = JSON.stringify(detail, (key, value) => /password|token|cookie|authorization/i.test(key) ? '[REDACTED]' : value);
   getDb().prepare('INSERT INTO audit_logs(userEmail,userRole,action,businessType,reportDate,runId,detailJson,ipAddress,createdAt) VALUES(?,?,?,?,?,?,?,?,?)')
