@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { getDb, getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v7-no-shared-thaw';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v8-submission-safe';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
@@ -101,6 +101,16 @@ export function syncPurgeQueryOnly(active){
   }
 }
 
+function queryOnlyRequired(state={}){
+  // The atomic submission mutex exists slightly before the first PREPARE request
+  // writes data_purge_block_until. A concurrent request must be rejected, but it
+  // must not flip the process-global connection query_only before that first
+  // coordinator write has completed. Once the SQLite block or a real worker/job
+  // exists, the shared web connection is frozen for the rest of the lifecycle.
+  if(state.sqliteActive)return true;
+  if(!state.external?.active)return false;
+  return String(state.external.kind||'')!=='SUBMISSION';
+}
 function allowedDuringFreeze(method,pathname){
   if(PURGE_STATUS.test(pathname)&&['GET','HEAD'].includes(method))return true;
   if(PURGE_CONTROL.test(pathname)&&method==='POST')return true;
@@ -114,16 +124,17 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
   const method=String(req.method||'GET').toUpperCase();
   const pathname=String(req.originalUrl||req.url||req.path||'').split('?')[0];
   const state=inspectPurgeWriteFreezeState();
+  const protectSharedDb=queryOnlyRequired(state);
 
   req.v505PurgeWriteFreezeState=state;
   if(state.active)req.v505PurgeReadOnlyAuth=true;
 
-  // Never thaw the shared web-process SQLite connection while purge truth is
-  // active. PREPARE/EXECUTE workers own independent writable connections. The
-  // control HTTP routes only recover/queue filesystem-backed state once a purge
-  // exists, so allowing them through does not justify a process-wide writable
-  // window that another already-in-flight request could accidentally reuse.
-  syncPurgeQueryOnly(state.active);
+  // Never thaw the shared web-process SQLite connection while a real purge job
+  // or purge SQLite block is active. PREPARE/EXECUTE workers use independent DB
+  // handles. A bare submission mutex is the one pre-job exception: reject other
+  // requests, but leave the connection writable so the owning first PREPARE can
+  // create its SQLite safety block without being sabotaged by a racing request.
+  syncPurgeQueryOnly(protectSharedDb);
   if(!state.active)return next();
   if(allowedDuringFreeze(method,pathname))return next();
 
