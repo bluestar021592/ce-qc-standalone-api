@@ -38,6 +38,9 @@ jobs:
           node --check src/v505PurgeCoordinator.js
           node --check src/v505PurgeGlobalGuard.js
           node --check src/v505PurgeWriteFreezeGuard.js
+          node --check src/v505PurgeExternalActivity.js
+          node --check src/v505ExportAdmissionGuard.js
+          node --check src/v193ExportSidecar.js
           node --check src/v29EndpointAliasPatch.js
           node --check scripts/CE_QC_PurgePrepareTaskWorker.mjs
           node --check scripts/CE_QC_PurgeExecuteTaskWorker.mjs
@@ -47,6 +50,8 @@ jobs:
           node --check test/v505-purge-coordinator.test.js
           node --check test/v505-purge-core-live-worker.test.js
           node --check test/v505-purge-write-freeze.test.js
+          node --check test/v505-purge-auth-readonly.test.js
+          node --check test/v505-purge-external-activity.test.js
           node --check test/v505-purge-fingerprint-failclosed.test.js
           node --check scripts/CE_QC_Production_Audit.mjs
           node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
