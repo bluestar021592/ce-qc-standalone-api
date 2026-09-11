@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { getDb, getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v6';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v7-no-shared-thaw';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
@@ -109,36 +109,20 @@ function allowedDuringFreeze(method,pathname){
   if(method==='OPTIONS')return true;
   return false;
 }
-function restorePurgeQueryOnlyAfterControl(res){
-  let restored=false;
-  const restore=()=>{
-    if(restored)return;restored=true;
-    try{syncPurgeQueryOnly(inspectPurgeWriteFreezeState().active);}catch{}
-  };
-  res.once?.('finish',restore);
-  res.once?.('close',restore);
-}
 
 export function v505PurgeWriteFreezeGuard(req,res,next){
   const method=String(req.method||'GET').toUpperCase();
   const pathname=String(req.originalUrl||req.url||req.path||'').split('?')[0];
   const state=inspectPurgeWriteFreezeState();
-  const purgeControl=method==='POST'&&PURGE_CONTROL.test(pathname);
 
   req.v505PurgeWriteFreezeState=state;
   if(state.active)req.v505PurgeReadOnlyAuth=true;
 
-  // The main HTTP-process SQLite connection stays query-only for the complete
-  // PREPARE -> verified-backup -> EXECUTE lifecycle. Detached workers use their
-  // own connections and are unaffected. Only the trusted purge coordinator may
-  // temporarily thaw this connection to transition control metadata; auth/audit
-  // remains read-only, and finish/close immediately restores the latest truth.
-  if(purgeControl){
-    syncPurgeQueryOnly(false);
-    restorePurgeQueryOnlyAfterControl(res);
-    return next();
-  }
-
+  // Never thaw the shared web-process SQLite connection while purge truth is
+  // active. PREPARE/EXECUTE workers own independent writable connections. The
+  // control HTTP routes only recover/queue filesystem-backed state once a purge
+  // exists, so allowing them through does not justify a process-wide writable
+  // window that another already-in-flight request could accidentally reuse.
   syncPurgeQueryOnly(state.active);
   if(!state.active)return next();
   if(allowedDuringFreeze(method,pathname))return next();
