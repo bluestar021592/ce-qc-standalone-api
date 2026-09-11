@@ -1,7 +1,7 @@
 import express from 'express';
 import { v505PurgePrepareHandler, v505PurgeExecuteHandler, V505_PURGE_COORDINATOR_ID } from './v505PurgeCoordinator.js';
 import { v505PurgeGlobalOwnerGuard, V505_PURGE_GLOBAL_GUARD_ID } from './v505PurgeGlobalGuard.js';
-import { v505PurgeWriteFreezeGuard, V505_PURGE_WRITE_FREEZE_ID } from './v505PurgeWriteFreezeGuard.js';
+import { inspectPurgeWriteFreezeState, syncPurgeQueryOnly, v505PurgeWriteFreezeGuard, V505_PURGE_WRITE_FREEZE_ID } from './v505PurgeWriteFreezeGuard.js';
 
 let installed=false;
 let purgeWriteBlockInstalled=false;
@@ -17,6 +17,11 @@ async function runPurgeRouteAndRelease(handler,req,res,next){
   try{return await handler(req,res,next);}
   finally{
     try{req.v505PurgeSubmissionMutexRelease?.();}catch{}
+    // The first PREPARE request starts from a writable idle DB. As soon as that
+    // request has durably queued purge work, immediately mirror the external
+    // truth onto the shared web connection. Recovery/EXECUTE requests never
+    // need to thaw this connection; detached workers own their own DB handles.
+    try{syncPurgeQueryOnly(inspectPurgeWriteFreezeState().active);}catch{}
   }
 }
 function v505GuardedPrepareHandler(req,res,next){return runPurgeRouteAndRelease(v505PurgePrepareHandler,req,res,next);}
