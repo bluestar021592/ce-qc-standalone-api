@@ -20,6 +20,7 @@ const syntaxFiles=[
   'public/v505-data-purge-recovery.js',
   'test/v505-purge-global-guard.test.js',
   'test/v505-purge-coordinator.test.js',
+  'test/v505-purge-core-live-worker.test.js',
   'test/v505-purge-fingerprint-failclosed.test.js'
 ];
 for(const relative of syntaxFiles){
@@ -31,6 +32,7 @@ const pkg=JSON.parse(read('package.json'));
 assert.equal(pkg.scripts?.start,'node bootstrap.js','production/local launcher must pass through bootstrap patch ownership');
 assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-global-guard\.test\.js/,'cross-admin purge guard regression must be part of go-live');
 assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-coordinator\.test\.js/,'detached execute regression must be part of go-live');
+assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-core-live-worker\.test\.js/,'core live-worker stale-heartbeat regression must be part of go-live');
 assert.match(pkg.scripts?.['test:golive']||'',/test\/v505-purge-fingerprint-failclosed\.test\.js/,'post-backup fingerprint fail-closed regression must be part of go-live');
 const bootstrap=read('bootstrap.js');
 const routeOwnerImport=bootstrap.indexOf("'./src/v29EndpointAliasPatch.js'");
@@ -45,6 +47,8 @@ assert.match(purge,/runPurgePreparationWorker/);
 assert.match(purge,/PENDING:\$\{String\(job\.jobId/);
 assert.match(purge,/crypto\.randomBytes\(24\)\.toString\('hex'\)/);
 assert.match(purge,/strictRunLocks:true/);
+assert.match(purge,/if\(workerAlive\)\{[\s\S]*?return pendingPurgePayload/,'core prepare recovery must preserve any live or unknown worker even when heartbeat is stale');
+assert.doesNotMatch(purge,/超过60秒没有心跳，已停止本次清除/,'core prepare recovery must never retire a live worker solely because heartbeat is stale');
 assert.match(purge,/sameFingerprint\(challenge\.sourceFingerprint,currentFingerprint\)/,'final destructive path must compare the original post-backup DB/WAL fingerprint before delete');
 
 const prepareWorker=read('scripts/CE_QC_PurgePrepareTaskWorker.mjs');
@@ -131,6 +135,12 @@ assert.match(access,/coreAuditAction/);
 const core=read('src/accessControlCore.js');
 assert.match(core,/export async function accessIdentity/);
 assert.match(core,/export function auditAction/);
+
+const coreLiveTest=read('test/v505-purge-core-live-worker.test.js');
+assert.match(coreLiveTest,/workerPid:process\.pid/,'core live-worker regression must simulate a real live PID');
+assert.match(coreLiveTest,/heartbeatAt:Date\.now\(\)-120_000/,'core live-worker regression must use a stale heartbeat');
+assert.match(coreLiveTest,/live job must remain authoritative/,'core live-worker regression must verify the original task is retained');
+assert.match(coreLiveTest,/stale heartbeat must not clear the purge safety block/,'core live-worker regression must verify the safety lock is retained');
 
 const fingerprintTest=read('test/v505-purge-fingerprint-failclosed.test.js');
 assert.match(fingerprintTest,/changed-after-backup/,'fingerprint regression must mutate SQLite after the verified backup');
