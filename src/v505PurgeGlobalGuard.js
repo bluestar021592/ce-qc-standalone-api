@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 
-export const V505_PURGE_GLOBAL_GUARD_ID='2026-09-11-v505-global-single-owner-v2';
+export const V505_PURGE_GLOBAL_GUARD_ID='2026-09-11-v505-global-single-owner-v3';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
 const EXECUTE_DIR='.purge_execute_jobs';
@@ -148,7 +148,8 @@ export function v505PurgeGlobalOwnerGuard(req,res,next){
 
     const pathname=String(req.originalUrl||req.url||req.path||'').split('?')[0];
     const isPrepare=pathname==='/api/admin/data-purge/prepare';
-    if(isPrepare&&ownership.ownProtected)return next();
+    const reusableOwnTask=ownership.own.some(item=>ACTIVE.has(String(item.status||'').toUpperCase())&&['ALIVE','UNKNOWN'].includes(String(item.workerState||'')));
+    if(isPrepare&&reusableOwnTask)return next();
 
     const mutex=acquireGlobalPurgeSubmissionMutex(req.user||{});
     if(!mutex.acquired){
