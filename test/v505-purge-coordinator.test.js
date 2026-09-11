@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const PUBLIC_STATUS_PRIVATE_KEYS = ['email','user','payload','backup','databasePath','challengeId','statusToken','statusFile','request','result'];
 
 function identityKey(user = {}) {
   const identity = String(user.id || user.email || user.username || '').trim().toLowerCase();
@@ -139,6 +140,7 @@ test('V505 detached execute returns quickly, reuses one live job, and finishes t
   const executeStatusFile = path.join(getRuntimeConfig().projectRoot, 'public', first.statusUrl.replace(/^\//, ''));
   const executeStatus = await waitForStatus(executeStatusFile, first.jobId);
   assert.equal(executeStatus?.status, 'SUCCEEDED', executeStatus?.error || 'execute worker did not finish');
+  for (const key of PUBLIC_STATUS_PRIVATE_KEYS) assert.equal(Object.hasOwn(executeStatus || {}, key), false, `public execute status must not expose ${key}`);
 
   const recovered = inspectExecutionRecovery(user);
   assert.equal(recovered?.status, 'SUCCEEDED');
