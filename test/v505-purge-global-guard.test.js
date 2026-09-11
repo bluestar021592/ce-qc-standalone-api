@@ -70,6 +70,8 @@ test('V505 global purge guard blocks cross-admin ownership, closes submission ra
     assert.equal(fs.existsSync(mutexFile),true,'submission mutex must exist outside SQLite while the route is entering its durable task queue');
     assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='data_purge_submission_mutex'").get(),undefined,'submission mutex must never mutate the database fingerprint');
     assert.equal(typeof firstReq.v505PurgeSubmissionMutexRelease,'function','route owner must receive an explicit release callback');
+    firstRes.emit('close');
+    assert.equal(fs.existsSync(mutexFile),true,'client disconnect must not release the mutex while the server route may still be creating the durable job');
 
     let secondNext=false;
     const secondRes=responseHarness();
