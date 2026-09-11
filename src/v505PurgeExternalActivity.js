@@ -3,7 +3,8 @@ import path from 'node:path';
 
 import { getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-11-v505-purge-export-activity-gate-v1';
+export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-11-v505-purge-export-activity-gate-v2';
+export const V505_EXPORT_SUBMISSION_MUTEX_FILE='.v505_export_submission.lock.json';
 const ACTIVE_EXPORT_STATUS=new Set(['QUEUED','RUNNING','PROCESSING']);
 const UNKNOWN_RECENT_MS=Math.max(5*60_000,Math.min(60*60_000,Number(process.env.V505_EXPORT_UNKNOWN_RECENT_MS||30*60_000)));
 
@@ -34,6 +35,17 @@ function candidatePids(job={}){
     ...(Array.isArray(job.workerPids)?job.workerPids:[])
   ];
   return [...new Set(values.map(Number).filter(value=>Number.isInteger(value)&&value>0))];
+}
+
+export function inspectExportSubmissionAdmission(){
+  const cfg=getRuntimeConfig();
+  const file=path.join(cfg.backupsDir,V505_EXPORT_SUBMISSION_MUTEX_FILE);
+  if(!fs.existsSync(file))return {active:false,file,gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
+  const record=readJson(file);
+  if(!record)return {active:true,file,workerState:'UNKNOWN',gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
+  const workerState=pidState(record.pid);
+  if(workerState==='DEAD')return {active:false,stale:true,file,record,workerState,gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
+  return {active:true,file,record,workerState,gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
 }
 
 export function inspectActiveExportJobs({now=Date.now()}={}){
@@ -70,6 +82,13 @@ export function inspectActiveExportJobs({now=Date.now()}={}){
 }
 
 export function assertNoActiveExportJobs(){
+  const admission=inspectExportSubmissionAdmission();
+  if(admission.active){
+    const error=new Error('检测到导出请求正在进入受保护任务队列，不能同时开始安全清空。请等待导出任务登记完成后再试。');
+    error.code='DATA_PURGE_EXPORT_SUBMISSION_BUSY';
+    error.exportAdmission=admission;
+    throw error;
+  }
   const state=inspectActiveExportJobs();
   if(!state.active)return state;
   const first=state.jobs[0];
