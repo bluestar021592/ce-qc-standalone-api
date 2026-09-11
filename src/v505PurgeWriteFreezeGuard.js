@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { getDb, getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v4';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-11-v505-external-worker-write-freeze-v5';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const ACTIVE=new Set(['QUEUED','RUNNING']);
 const PREPARE_DIR='.purge_prepare_jobs';
@@ -109,19 +109,41 @@ function allowedDuringFreeze(method,pathname){
   if(method==='OPTIONS')return true;
   return false;
 }
+function restoreSealedQueryOnlyAfterControl(res){
+  let restored=false;
+  const restore=()=>{
+    if(restored)return;restored=true;
+    try{syncPurgeQueryOnly(inspectPurgeWriteFreezeState().sealed);}catch{}
+  };
+  res.once?.('finish',restore);
+  res.once?.('close',restore);
+}
 
 export function v505PurgeWriteFreezeGuard(req,res,next){
   const method=String(req.method||'GET').toUpperCase();
   const pathname=String(req.originalUrl||req.url||req.path||'').split('?')[0];
   const state=inspectPurgeWriteFreezeState();
+  const purgeControl=method==='POST'&&PURGE_CONTROL.test(pathname);
+
+  req.v505PurgeWriteFreezeState=state;
+  if(state.active)req.v505PurgeReadOnlyAuth=true;
+
+  // Only the trusted purge coordinator may temporarily thaw the main connection
+  // after sealing, because it may need to expire/restart a challenge or clear a
+  // mismatched control lock. Authentication/audit stays read-only via the request
+  // flag. On finish/close the connection is immediately re-sealed if purge truth
+  // still says the verified fingerprint is authoritative.
+  if(state.sealed&&purgeControl){
+    syncPurgeQueryOnly(false);
+    restoreSealedQueryOnlyAfterControl(res);
+    return next();
+  }
+
   // PREPARE may still need its own control writes until the verified backup is
-  // sealed. Once PREPARE succeeds, the main web-process connection is forced
-  // query-only until detached EXECUTE finishes or the sealed challenge expires.
+  // sealed. Once PREPARE succeeds, all non-control web access is query-only until
+  // detached EXECUTE finishes or the sealed challenge is invalidated.
   syncPurgeQueryOnly(state.sealed);
   if(!state.active)return next();
-
-  req.v505PurgeReadOnlyAuth=true;
-  req.v505PurgeWriteFreezeState=state;
   if(allowedDuringFreeze(method,pathname))return next();
 
   return res.status(423).json({
