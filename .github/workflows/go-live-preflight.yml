@@ -42,6 +42,7 @@ jobs:
           node --check public/v505-data-purge-recovery.js
           node --check test/v505-purge-global-guard.test.js
           node --check test/v505-purge-coordinator.test.js
+          node --check test/v505-purge-core-live-worker.test.js
           node --check test/v505-purge-fingerprint-failclosed.test.js
           node --check scripts/CE_QC_Production_Audit.mjs
           node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
