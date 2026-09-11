@@ -11,6 +11,9 @@ const syntaxFiles=[
   'src/v505PurgeCoordinator.js',
   'src/v505PurgeGlobalGuard.js',
   'src/v505PurgeWriteFreezeGuard.js',
+  'src/v505PurgeExternalActivity.js',
+  'src/v505ExportAdmissionGuard.js',
+  'src/v193ExportSidecar.js',
   'src/v29EndpointAliasPatch.js',
   'src/accessControl.js',
   'scripts/CE_QC_PurgePrepareTaskWorker.mjs',
@@ -23,6 +26,8 @@ const syntaxFiles=[
   'test/v505-purge-coordinator.test.js',
   'test/v505-purge-core-live-worker.test.js',
   'test/v505-purge-write-freeze.test.js',
+  'test/v505-purge-auth-readonly.test.js',
+  'test/v505-purge-external-activity.test.js',
   'test/v505-purge-fingerprint-failclosed.test.js'
 ];
 for(const relative of syntaxFiles){
@@ -37,6 +42,8 @@ for(const required of [
   'test/v505-purge-coordinator.test.js',
   'test/v505-purge-core-live-worker.test.js',
   'test/v505-purge-write-freeze.test.js',
+  'test/v505-purge-auth-readonly.test.js',
+  'test/v505-purge-external-activity.test.js',
   'test/v505-purge-fingerprint-failclosed.test.js'
 ]){
   assert.ok(String(pkg.scripts?.['test:golive']||'').includes(required),`${required} must be part of go-live`);
@@ -68,13 +75,17 @@ assert.match(coordinator,/if\(alive===false\)return \{dead:true,job,file\}/,'onl
 assert.match(coordinator,/系统保持锁定，不会启动第二份备份/);
 assert.match(coordinator,/inspectExecutionRecovery/);
 assert.match(coordinator,/queuePurgeExecution/);
+assert.match(coordinator,/assertNoActiveExportJobs\(\)/,'new purge prepare and execute must reject active export workers');
+assert.match(coordinator,/V505_PURGE_EXTERNAL_ACTIVITY_ID/);
 assert.doesNotMatch(coordinator,/resealPurgeChallenge/,'production coordinator must never rewrite the original verified-backup fingerprint before delete');
 assert.match(coordinator,/if\(!purgeBlockActive\(\)\)throw new Error/,'execute queue must require the existing post-backup write freeze instead of mutating it');
 assert.doesNotMatch(coordinator,/setPurgeBlock/,'execute queue must not change SQLite control metadata after the backup fingerprint is sealed');
+assert.doesNotMatch(coordinator,/v505PurgeWriteBlockMiddleware/,'dedicated write-freeze guard must be the only HTTP freeze owner');
 assert.match(coordinator,/detached:true/);
 assert.match(coordinator,/child\.unref\(\)/);
 assert.match(coordinator,/runPurgeExecutionWorker/);
 assert.match(coordinator,/statusToken=crypto\.randomBytes\(24\)\.toString\('hex'\)/);
+assert.match(coordinator,/保留已验证备份的安全锁/,'dead execute handoff must not silently reopen writes before same-challenge recovery');
 
 const globalGuard=read('src/v505PurgeGlobalGuard.js');
 assert.match(globalGuard,/V505_PURGE_GLOBAL_GUARD_ID/);
@@ -96,10 +107,35 @@ assert.match(writeFreeze,/V505_PURGE_WRITE_FREEZE_ID/);
 assert.match(writeFreeze,/inspectExternalPurgeWriteFreeze/);
 assert.match(writeFreeze,/if\(alive!==false\)/,'live or unknown detached worker must keep writes frozen even if SQLite timestamp expires');
 assert.match(writeFreeze,/group\.kind==='PREPARE'&&status==='SUCCEEDED'/,'verified backup waiting for execute must preserve the write freeze');
+assert.match(writeFreeze,/SAFE_READ_APIS/,'only explicit read APIs may remain available while purge is active');
+assert.match(writeFreeze,/syncPurgeQueryOnly/);
+assert.match(writeFreeze,/PRAGMA query_only/,'sealed purge must enforce query-only on the main web DB connection');
+assert.match(writeFreeze,/state\.sealed&&purgeControl/,'trusted purge coordinator must have a controlled transition path after seal');
+assert.match(writeFreeze,/restoreSealedQueryOnlyAfterControl/,'controlled purge transition must re-seal the main connection after response');
+assert.match(writeFreeze,/req\.v505PurgeReadOnlyAuth=true/,'auth and audit layers must receive the read-only freeze signal');
 assert.match(writeFreeze,/DATA_PURGE_IN_PROGRESS/);
-assert.match(writeFreeze,/protectedBy:external\.active/);
-assert.match(writeFreeze,/\['POST','PUT','PATCH','DELETE'\]/);
-assert.match(writeFreeze,/data-purge\\\/\(\?:prepare\|execute\)/,'purge coordinator control endpoints must remain reachable through the write freeze');
+assert.match(writeFreeze,/fingerprintSealed:state\.sealed/);
+
+const externalActivity=read('src/v505PurgeExternalActivity.js');
+assert.match(externalActivity,/V505_EXPORT_SUBMISSION_MUTEX_FILE='\.v505_export_submission\.lock\.json'/);
+assert.match(externalActivity,/inspectExportSubmissionAdmission/);
+assert.match(externalActivity,/inspectActiveExportJobs/);
+assert.match(externalActivity,/DATA_PURGE_EXPORT_SUBMISSION_BUSY/);
+assert.match(externalActivity,/DATA_PURGE_EXPORT_ACTIVE/);
+assert.match(externalActivity,/\['QUEUED','RUNNING','PROCESSING'\]/,'active/recent export states must block purge');
+
+const exportAdmission=read('src/v505ExportAdmissionGuard.js');
+assert.match(exportAdmission,/V505_EXPORT_ADMISSION_GUARD_ID/);
+assert.match(exportAdmission,/v505PurgeWriteFreezeGuard,v505ExportAdmissionGuard,\.\.\.handlers/,'port 5178 must check purge freeze and acquire export admission before V473 auth/handler');
+assert.match(exportAdmission,/const beforeAcquire=inspectPurgeWriteFreezeState\(\)/);
+assert.match(exportAdmission,/const afterAcquire=inspectPurgeWriteFreezeState\(\)/,'export must double-check purge after atomically acquiring its own admission lock');
+assert.match(exportAdmission,/watchRegisteredJob/);
+assert.match(exportAdmission,/fs\.existsSync\(file\)\)\{release\(lock\)/,'export admission lock must remain until the durable export job file exists');
+
+const exportSidecarEntry=read('src/v193ExportSidecar.js');
+const admissionImport=exportSidecarEntry.indexOf("'./v505ExportAdmissionGuard.js'");
+const v473Import=exportSidecarEntry.indexOf("'./v473ExportSidecar.js'");
+assert.ok(admissionImport>=0&&v473Import>admissionImport,'V505 export admission patch must install before V473 registers port-5178 routes');
 
 const executeWorker=read('scripts/CE_QC_PurgeExecuteTaskWorker.mjs');
 assert.match(executeWorker,/runPurgeExecutionWorker/);
@@ -150,6 +186,8 @@ assert.match(access,/PURGE_STATUS_PATH/);
 assert.match(access,/PURGE_PREPARE_AUDITS/);
 assert.match(access,/DATA_PURGE_REQUESTED/);
 assert.match(access,/DATA_PURGE_BACKUP_VERIFIED/);
+assert.match(access,/if \(req\.v505PurgeReadOnlyAuth\) return user/,'session expiry must not refresh while purge is frozen');
+assert.match(access,/if\(req\.v505PurgeReadOnlyAuth\)return/,'audit writes must be suppressed while purge is frozen');
 assert.match(access,/export async function accessIdentity/);
 assert.match(access,/export function auditAction/);
 assert.doesNotMatch(access,/accessControlCore/,'V505 must keep access-control changes minimal instead of introducing a split facade');
@@ -170,12 +208,19 @@ assert.match(coreLiveTest,/live job must remain authoritative/,'core live-worker
 assert.match(coreLiveTest,/stale heartbeat must not clear the purge safety block/,'core live-worker regression must verify the safety lock is retained');
 
 const writeFreezeTest=read('test/v505-purge-write-freeze.test.js');
-assert.match(writeFreezeTest,/setExpiredSqliteBlock/,'write-freeze regression must prove external worker truth survives an expired SQLite timestamp');
-assert.match(writeFreezeTest,/workerPid:process\.pid/,'write-freeze regression must use a real live PID');
-assert.match(writeFreezeTest,/PREPARE:RUNNING/);
-assert.match(writeFreezeTest,/EXECUTE:RUNNING/);
-assert.match(writeFreezeTest,/PREPARE:SUCCEEDED/);
-assert.match(writeFreezeTest,/confirmed-dead worker must not create an endless external write freeze/);
+assert.match(writeFreezeTest,/unknown GET APIs are not assumed read-only during purge/);
+assert.match(writeFreezeTest,/main DB returns to writable mode only after no sealed\/active purge truth remains/);
+assert.match(writeFreezeTest,/trusted control may temporarily thaw only its own coordinator transition/);
+assert.match(writeFreezeTest,/finish hook must immediately re-seal/);
+
+const authReadonlyTest=read('test/v505-purge-auth-readonly.test.js');
+assert.match(authReadonlyTest,/near-expiry session must not be refreshed while fingerprint is sealed/);
+assert.match(authReadonlyTest,/access-control audit must remain write-free while purge fingerprint is sealed/);
+
+const externalActivityTest=read('test/v505-purge-external-activity.test.js');
+assert.match(externalActivityTest,/live worker PID stays authoritative/);
+assert.match(externalActivityTest,/recent queued export with no PID fails closed/);
+assert.match(externalActivityTest,/DATA_PURGE_EXPORT_SUBMISSION_BUSY/);
 
 const fingerprintTest=read('test/v505-purge-fingerprint-failclosed.test.js');
 assert.match(fingerprintTest,/changed-after-backup/,'fingerprint regression must mutate SQLite after the verified backup');
