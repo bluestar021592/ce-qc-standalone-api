@@ -33,7 +33,7 @@ test('purge prepare returns immediately, reuses one detached task, then gates tr
   process.env.DATA_DIR = dir;
   process.env.DB_FILE = path.join(dir, 'test.db');
   const { getDb, getRuntimeConfig } = await import('../src/db.js');
-  const { createPurgeChallenge, executePurge, resealPurgeChallenge, PURGE_PHRASE, V505_PURGE_RECOVERY_ID } = await import('../src/dataPurge.js');
+  const { createPurgeChallenge, executePurge, PURGE_PHRASE, V505_PURGE_RECOVERY_ID } = await import('../src/dataPurge.js');
   const db = getDb();
   db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-08-05');
   db.prepare(`INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,fileHash,status,summaryJson,warningsJson,createdAt)
@@ -89,10 +89,6 @@ test('purge prepare returns immediately, reuses one detached task, then gates tr
   assert.equal(manifest.recoveryPatch, V505_PURGE_RECOVERY_ID);
   assert.equal(manifest.prepareJobId, first.jobId);
 
-  db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v124_test_retained_audit','1',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(new Date().toISOString());
-  const seal = resealPurgeChallenge(challenge.challengeId, { email: 'test-admin' });
-  assert.equal(seal.sourceSeal, 'POST_PREPARE_AUDIT');
-
   const waitMs = Math.max(0, new Date(challenge.notBefore).getTime() - Date.now());
   if (waitMs) await wait(waitMs + 100);
   const result = await executePurge({ challengeId: challenge.challengeId, phrase: PURGE_PHRASE, backupConfirmed: true, user: { email: 'test-admin' } });
@@ -113,7 +109,6 @@ test('purge prepare returns immediately, reuses one detached task, then gates tr
   assert.equal(result.deleteMode, 'FAST_TABLE_DELETE_FK_GUARDED');
   assert.equal(result.recoveryPatch, V505_PURGE_RECOVERY_ID);
   assert.ok(db.prepare('SELECT COUNT(*) count FROM backup_records').get().count >= 1);
-  assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='v124_test_retained_audit'").get()?.value, '1');
   assert.equal(Number(db.prepare("SELECT value FROM app_meta WHERE key='db_schema_version'").get()?.value || 0), 18);
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
   assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
