@@ -33,10 +33,58 @@ jobs:
           node --check src/shopeeAnalyzer.js
           node --check src/unifiedImportStore.js
           node --check src/rangeDashboardStore.js
+          node --check src/accessControl.js
+          node --check src/db.js
           node --check src/dataPurge.js
+          node --check src/v505PurgeCoordinator.js
+          node --check src/v505PurgeGlobalGuard.js
+          node --check src/v505PurgeWriteFreezeGuard.js
+          node --check src/v505PurgeHttpActivity.js
+          node --check src/v505PurgePublicStatusGuard.js
+          node --check src/v505PurgeExternalActivity.js
+          node --check src/v505PurgeExecuteReadOnlyPreflight.js
+          node --check src/v505PurgeExecuteAdmissionGuard.js
+          node --check src/v505PurgeStartupOrphanGuard.js
+          node --check src/v505PurgeWorkerClaim.js
+          node --check src/v505ExportAdmissionGuard.js
+          node --check src/v193ExportSidecar.js
+          node --check src/v29EndpointAliasPatch.js
+          node --check scripts/CE_QC_PurgePrepareTaskWorker.mjs
+          node --check scripts/CE_QC_PurgeExecuteTaskWorker.mjs
+          node --check scripts/v505-purge-async-smoke.mjs
+          node --check public/v505-data-purge-recovery.js
+          node --check public/v505-purge-startup-probe.js
+          node --check test/v505-purge-global-guard.test.js
+          node --check test/v505-purge-coordinator.test.js
+          node --check test/v505-purge-startup-orphan-recovery.test.js
+          node --check test/v505-purge-worker-claim-lock.test.js
+          node --check test/v505-purge-core-live-worker.test.js
+          node --check test/v505-purge-write-freeze.test.js
+          node --check test/v505-purge-auth-readonly.test.js
+          node --check test/v505-purge-external-activity.test.js
+          node --check test/v505-purge-http-drain.test.js
+          node --check test/v505-purge-control-db-fallback.test.js
+          node --check test/v505-purge-postcommit-recovery.test.js
+          node --check test/v505-purge-postcommit-precleanup-gate.test.js
+          node --check test/v505-purge-finalized-receipt-recovery.test.js
+          node --check test/v505-purge-finalized-core-idempotency.test.js
+          node --check test/v505-purge-finalized-cross-generation-release.test.js
+          node --check test/v505-purge-finalizer-generation-cleanup.test.js
+          node --check test/v505-purge-ui-delivery.test.js
+          node --check test/v505-purge-execute-env-failsafe.test.js
+          node --check test/v505-purge-worker-db-init-failsafe.test.js
+          node --check test/v505-purge-execute-readonly-preflight.test.js
+          node --check test/v505-purge-execute-admission.test.js
+          node --check test/v505-purge-unreadable-sidecar-failclosed.test.js
+          node --check test/v505-purge-public-status-privacy.test.js
+          node --check test/v505-purge-worker-entrypoint-invariant.test.js
+          node --check test/v505-purge-no-reseal-caller.test.js
+          node --check test/v505-purge-fingerprint-failclosed.test.js
+          node --check test/v505-purge-locked-fingerprint-gate.test.js
+          node --check test/v505-purge-backup-invalid-recovery.test.js
           node --check scripts/CE_QC_Production_Audit.mjs
           node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
       - name: Go-live regression suite
-        run: npm run test:golive
+        run: npm run test:ci
       - name: Final state-machine regression
         run: node --test test/v400-seven-business-completion-loader.test.js test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js

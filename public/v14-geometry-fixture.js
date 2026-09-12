@@ -150,7 +150,10 @@ if (!new URLSearchParams(location.search).has('visualTest')) {
     if (done) script.onload = done;
     document.head.appendChild(script);
   }
-  loadRuntimeScript('/v502-multidrive-backup-ui.js?v=20260910-v502-1');
+  // This loader runs after app.js. Claim the destructive purge UI owner here,
+  // before any legacy/stale feature can install an older long-request flow.
+  loadRuntimeScript('/v505-data-purge-recovery.js?v=20260911-v505-8');
+  loadRuntimeScript('/v502-multidrive-backup-ui.js?v=20260912-v502-3');
   loadRuntimeScript('/v303-authorized-clean-start.js?v=20260825-v303-direct-1', () => {
     loadRuntimeScript('/v304-unified-upload-owner.js?v=20260825-v304-1', () => {
       loadRuntimeScript('/v27-dashboard-fix.js?v=20260808-v27-2', () => {
