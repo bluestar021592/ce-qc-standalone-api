@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const read=relative=>fs.readFileSync(new URL(relative,import.meta.url),'utf8');
-for(const file of ['../src/v473ExportSidecar.js','../src/v473AllBusinessExportWorker.js','../public/v473-all-export-sidecar-ui.js','../public/v194-export-token-ui.js','../src/v193ExportSidecar.js']){
+for(const file of ['../src/v473ExportSidecar.js','../src/v473AllBusinessExportWorker.js','../public/v473-all-export-sidecar-ui.js','../public/v194-export-token-ui.js','../src/v193ExportSidecar.js','../src/v505ExportAdmissionGuard.js']){
   const result=spawnSync(process.execPath,['--check',fileURLToPath(new URL(file,import.meta.url))],{encoding:'utf8'});
   assert.equal(result.status,0,`${file} syntax check failed: ${result.stderr||result.stdout}`);
 }
@@ -12,6 +12,7 @@ const sidecar=read('../src/v473ExportSidecar.js');
 const worker=read('../src/v473AllBusinessExportWorker.js');
 const ui=read('../public/v473-all-export-sidecar-ui.js');
 const shim=read('../src/v193ExportSidecar.js');
+const admission=read('../src/v505ExportAdmissionGuard.js');
 const tokenUi=read('../public/v194-export-token-ui.js');
 const boot=read('../bootstrap.js');
 const shell=read('../src/v44WhppUiPatch.js');
@@ -24,10 +25,13 @@ assert.match(sidecar,/V473_ISOLATED_ALL_BUSINESS/);
 assert.match(sidecar,/ASYNC_JOB_FILE_V473/);
 assert.doesNotMatch(sidecar,/\/api\/export-period\/prepare/,'V473 sidecar must not proxy creation back through blocked 5177');
 
+assert.match(worker,/2026-09-11-v505-v473-all-export-worker-pid-v2/);
 assert.match(worker,/auditSevenBusinessHistory/);
 assert.match(worker,/if\(!audit\?\.exportReady\)/);
 assert.match(worker,/SEVEN_BUSINESS_HISTORY_INCOMPLETE/);
 assert.match(worker,/historyPreflight:'PASSED'/);
+assert.match(worker,/workerPid:process\.pid/,'ALL export must publish a live worker PID before the potentially long history audit');
+assert.match(worker,/heartbeatAt:new Date\(\)\.toISOString\(\)/);
 const auditAt=worker.indexOf('auditSevenBusinessHistory');
 const legacyWorkerAt=worker.indexOf("await import('./v84ExportJobWorker.js')");
 assert.ok(auditAt>=0&&legacyWorkerAt>auditAt,'V473 ALL worker must pass history audit before workbook generation begins');
@@ -45,12 +49,16 @@ assert.match(ui,/global\.resumeActiveExportJob=resume/,'legacy resume callers mu
 assert.match(ui,/exportProgressV194/,'V473 must recover an existing V194 progress DOM when present');
 
 assert.match(boot,/\.\/src\/v193ExportSidecar\.js/,'historical bootstrap filename stays stable');
-assert.match(shim,/import '\.\/v473ExportSidecar\.js'/,'legacy sidecar entry must start only V473 authority');
+const admissionAt=shim.indexOf("import './v505ExportAdmissionGuard.js'");
+const v473At=shim.indexOf("import './v473ExportSidecar.js'");
+assert.ok(admissionAt>=0&&v473At>admissionAt,'legacy sidecar entry must install V505 export/purge admission before starting the single V473 authority');
 assert.doesNotMatch(shim,/app\.listen|express from/,'legacy sidecar entry must not start a second server');
+assert.match(admission,/v505PurgeWriteFreezeGuard,v505ExportAdmissionGuard,\.\.\.handlers/,'5178 export creation must pass purge freeze and admission handshake before V473 handlers');
+assert.match(admission,/const afterAcquire=inspectPurgeWriteFreezeState\(\)/,'cross-process race must be double-checked after export admission lock acquisition');
 assert.match(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-2/,'existing token UI slot must hand ownership to final cache-busted V473 UI');
 assert.doesNotMatch(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-1/,'retired V473 UI cache key must not remain active');
 const v84At=shell.indexOf('v84-async-export-ui.js?v=20260818-v193-1');
 const tokenAt=shell.indexOf('v194-export-token-ui.js?v=20260818-v195-1');
 assert.ok(v84At>=0&&tokenAt>v84At,'V473 loader slot must remain after V84 compatibility UI so its cloned button becomes authoritative');
 
-console.log('[V473] isolated ALL+single export sidecar smoke passed · 5178 owns job creation · ALL history preflight runs fail-closed in isolated worker before Excel · terminal failures surface · legacy export globals preserved · 5177 range reads cannot block export ACK');
+console.log('[V473] isolated ALL+single export sidecar smoke passed · V505 export/purge admission is serialized · ALL worker PID is published before long preflight · terminal failures surface · legacy export globals preserved');

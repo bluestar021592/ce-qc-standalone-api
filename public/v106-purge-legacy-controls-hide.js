@@ -5,8 +5,16 @@
     if(stepTwo)stepTwo.hidden=true;
   };
   const restore=()=>document.querySelectorAll('#purgeStepOne .modal-actions').forEach(node=>{node.hidden=false;});
+  const reassertV505Owner=()=>{
+    const owner=window.__CE_QC_V505_DATA_PURGE_RECOVERY__?.openDataPurge;
+    if(typeof owner!=='function')return false;
+    window.openDataPurge=owner;
+    try{openDataPurge=owner;}catch{}
+    return true;
+  };
   document.addEventListener('click',event=>{
     if(event.target?.closest?.('[data-testid="one-click-purge-home"],#adminDataNav,.danger-outline[onclick*="openDataPurge"]')){
+      reassertV505Owner();
       setTimeout(hide,0);
     }
   },true);
@@ -19,5 +27,7 @@
     });
     observer.observe(preview,{childList:true,subtree:true,characterData:true});
   }
-  window.__CE_QC_V106_PURGE_CONTROL_GUARD__={hide,restore};
+  reassertV505Owner();
+  setTimeout(reassertV505Owner,100);
+  window.__CE_QC_V106_PURGE_CONTROL_GUARD__={hide,restore,reassertV505Owner};
 })();

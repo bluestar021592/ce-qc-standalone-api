@@ -4,8 +4,10 @@ import { auditSevenBusinessHistory } from './v142SevenBusinessHistoryAudit.js';
 import { closeDb } from './db.js';
 import { writeJsonAtomicSync } from './exportJobAtomicJson.js';
 
-const VERSION='2026-09-08-v473-all-export-worker-preflight-v1';
+const VERSION='2026-09-11-v505-v473-all-export-worker-pid-v2';
 // V478 Windows I/O safety is delegated to exportJobAtomicJson.js; V473 remains preflight owner.
+// V505 persists workerPid before the history audit so purge/export coordination
+// can prove this detached process is still alive even if the audit is long.
 const jobFile=path.resolve(String(process.argv[2]||''));
 if(!jobFile||!fs.existsSync(jobFile))process.exit(2);
 
@@ -39,19 +41,19 @@ try{
   if(business!=='ALL')throw Object.assign(new Error('V473 ALL worker只接受七业务汇总任务。'),{code:'V473_ALL_WORKER_ONLY'});
   const range=rangeOf(job.payload||{});
   if(!range.from||!range.to||range.from>range.to)throw Object.assign(new Error('导出日期范围无效。'),{code:'V473_INVALID_RANGE'});
-  writeJob({status:'RUNNING',progress:1,range,historyPreflight:'RUNNING',message:`V473独立导出进程正在只读核对 ${range.from} 至 ${range.to} 七业务历史安全性；不会调用CE API`});
+  writeJob({status:'RUNNING',progress:1,range,historyPreflight:'RUNNING',workerPid:process.pid,heartbeatAt:new Date().toISOString(),message:`V473独立导出进程正在只读核对 ${range.from} 至 ${range.to} 七业务历史安全性；不会调用CE API`});
   let audit;
   try{audit=auditSevenBusinessHistory({fromDate:range.from,toDate:range.to});}
   catch(error){throw Object.assign(new Error(`七业务导出前完整性检查失败：${error?.message||String(error)}`),{code:'SEVEN_BUSINESS_PREFLIGHT_FAILED'});}
   if(!audit?.exportReady){throw Object.assign(new Error(`已阻止缺数据导出。${incompleteText(audit)}`),{code:'SEVEN_BUSINESS_HISTORY_INCOMPLETE'});}
   writeJob({
-    status:'RUNNING',progress:2,historyPreflight:'PASSED',
+    status:'RUNNING',progress:2,historyPreflight:'PASSED',workerPid:process.pid,heartbeatAt:new Date().toISOString(),
     historyAudit:{fromDate:audit.fromDate,toDate:audit.toDate,expectedDays:audit.expectedDays,daysPresent:audit.daysPresent,totalImported:audit.totalImported,totalRetryPending:audit.totalRetryPending,exportReady:true},
     message:`V473七业务历史安全检查通过（${audit.daysPresent}/${audit.expectedDays}天）；开始生成每业务1个完整Excel`
   });
   await import('./v84ExportJobWorker.js');
 }catch(error){
-  try{writeJob({status:'FAILED',historyPreflight:'FAILED',message:error?.message||String(error),error:error?.stack||String(error),errorCode:error?.code||'V473_ALL_EXPORT_PREFLIGHT_FAILED',failedAt:new Date().toISOString()});}catch{}
+  try{writeJob({status:'FAILED',historyPreflight:'FAILED',workerPid:process.pid,heartbeatAt:new Date().toISOString(),message:error?.message||String(error),error:error?.stack||String(error),errorCode:error?.code||'V473_ALL_EXPORT_PREFLIGHT_FAILED',failedAt:new Date().toISOString()});}catch{}
   process.exitCode=1;
   try{closeDb();}catch{}
 }
