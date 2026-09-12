@@ -33,9 +33,15 @@ jobs:
           node --check src/shopeeAnalyzer.js
           node --check src/unifiedImportStore.js
           node --check src/rangeDashboardStore.js
+          node --check src/carryoverRefreshScheduler.js
+          node --check src/manualRefreshPublication.js
+          node --check src/v29EndpointAliasPatch.js
+          node --check src/v200TemplateDashboardExporter.js
           node --check src/dataPurge.js
           node --check scripts/CE_QC_Production_Audit.mjs
           node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
+      - name: Manual refresh and export integrity regression
+        run: node --test test/manual-refresh-export-integrity.test.js
       - name: Go-live regression suite
         run: npm run test:golive
       - name: Final state-machine regression

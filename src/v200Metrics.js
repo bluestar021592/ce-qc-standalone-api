@@ -56,7 +56,7 @@ function emptyStat(date = '') {
 function applyStat(stat, row) {
   stat.total++;
   if (row.area === '金边') stat.pp++; else if (row.area === '外省') stat.pv++; else stat.unknown++;
-  if (row.store) stat.store++;
+  if (!row.pod && !row.returned && row.store) stat.store++;
   if (row.pod) {
     stat.pod++;
     if (row.attemptNo === 1) stat.a1++; else if (row.attemptNo === 2) stat.a2++; else if (row.attemptNo >= 3) stat.a3++; else stat.attemptUnknown++;
@@ -72,9 +72,9 @@ function applyStat(stat, row) {
       if (signingDays > 0) stat.pvDays.push(signingDays);
     }
   } else if (!row.returned) stat.notPod++;
-  if (!row.returned && row.delivering) stat.delivery++;
-  if (!row.returned && row.pending) stat.pending++;
-  if (row.returned) stat.returned++;
+  if (!row.pod && !row.returned && row.delivering) stat.delivery++;
+  if (!row.pod && !row.returned && row.pending) stat.pending++;
+  if (row.returned && !row.pod) stat.returned++;
 }
 function membershipDatesForRow(row, range) {
   const from = dateKey(range?.from), to = dateKey(range?.to);
@@ -103,12 +103,44 @@ export function bucketRows(rows) {
     '全部明细': rows,
     '金边明细': filter(row => row.area === '金边'),
     '外省明细': filter(row => row.area === '外省'),
-    '门店明细': filter(row => row.store),
+    '门店明细': filter(row => !row.pod && !row.returned && row.store),
     'POD明细': filter(row => row.pod),
     '未POD明细': filter(row => !row.pod && !row.returned),
-    '分配派送中明细': filter(row => !row.returned && row.delivering),
-    'Pending明细': filter(row => !row.returned && row.pending),
+    '分配派送中明细': filter(row => !row.pod && !row.returned && row.delivering),
+    'Pending明细': filter(row => !row.pod && !row.returned && row.pending),
     '退回明细': filter(row => row.returned && !row.pod)
+  };
+}
+function memberKey(row = {}) {
+  const date = dateKey(row.reportMembershipDate || row.dailyMembershipDates?.[0] || row.firstReportDate);
+  const bill = String(row.shipmentCode || row.运单号 || '').trim().toUpperCase();
+  return date && bill ? `${date}|${bill}` : '';
+}
+function keySet(rows = []) { return new Set(rows.map(memberKey).filter(Boolean)); }
+function subset(left, right) { for (const value of left) if (!right.has(value)) return false; return true; }
+function disjoint(left, right) { for (const value of left) if (right.has(value)) return false; return true; }
+export function assertV200BucketConservation(bucket = {}, { businessType = '' } = {}) {
+  const allRows = bucket['全部明细'] || [];
+  const all = keySet(allRows), pod = keySet(bucket['POD明细'] || []), returned = keySet(bucket['退回明细'] || []), notPod = keySet(bucket['未POD明细'] || []);
+  const store = keySet(bucket['门店明细'] || []), delivery = keySet(bucket['分配派送中明细'] || []), pending = keySet(bucket['Pending明细'] || []);
+  const pp = keySet(bucket['金边明细'] || []), pv = keySet(bucket['外省明细'] || []);
+  if (all.size !== allRows.length) throw new Error(`V200_BUCKET_DUPLICATE_MEMBER:${businessType}:${allRows.length-all.size}`);
+  for (const [name,set] of [['POD',pod],['RETURNED',returned],['NOT_POD',notPod],['STORE',store],['DELIVERY',delivery],['PENDING',pending],['PP',pp],['PV',pv]]) {
+    if (!subset(set, all)) throw new Error(`V200_BUCKET_OUTSIDE_ALL:${businessType}:${name}`);
+  }
+  if (!disjoint(pod,returned) || !disjoint(pod,notPod) || !disjoint(returned,notPod) || pod.size + returned.size + notPod.size !== all.size) {
+    throw new Error(`V200_STATUS_BUCKET_RECONCILIATION_FAILED:${businessType}:all=${all.size}:pod=${pod.size}:returned=${returned.size}:notPod=${notPod.size}`);
+  }
+  for (const [name,set] of [['STORE',store],['DELIVERY',delivery],['PENDING',pending]]) {
+    if (!subset(set, notPod)) throw new Error(`V200_LIVE_BUCKET_CONTAINS_TERMINAL:${businessType}:${name}`);
+  }
+  if (!disjoint(pp,pv)) throw new Error(`V200_REGION_BUCKET_OVERLAP:${businessType}`);
+  const strictRegion = ['SHOPEECN','SHOPEEVN'].includes(String(businessType || '').toUpperCase());
+  if (strictRegion && pp.size + pv.size !== all.size) throw new Error(`V200_REGION_BUCKET_RECONCILIATION_FAILED:${businessType}:all=${all.size}:pp=${pp.size}:pv=${pv.size}`);
+  return {
+    status: 'PASSED', businessType: String(businessType || '').toUpperCase(), all: all.size,
+    pod: pod.size, returned: returned.size, notPod: notPod.size,
+    pp: pp.size, pv: pv.size, store: store.size, delivery: delivery.size, pending: pending.size
   };
 }
 export function anchorMaps(bucket) {
