@@ -34,8 +34,12 @@ jobs:
           node --check src/unifiedImportStore.js
           node --check src/rangeDashboardStore.js
           node --check src/dataPurge.js
+          node --check src/v506LocalAuthBridgePatch.js
+          node --check test/v506-local-auth-bridge.test.js
           node --check scripts/CE_QC_Production_Audit.mjs
           node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
+      - name: V506 local authentication bridge regression
+        run: node --test test/v506-local-auth-bridge.test.js
       - name: Go-live regression suite
         run: npm run test:golive
       - name: Final state-machine regression
