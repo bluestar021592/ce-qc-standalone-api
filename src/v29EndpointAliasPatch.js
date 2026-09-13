@@ -1,3 +1,4 @@
+import './v506LocalAuthBridgePatch.js';
 import express from 'express';
 
 let installed=false;
