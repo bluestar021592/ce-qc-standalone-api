@@ -36,7 +36,7 @@ async function startWriterThatCommitsWhilePurgeWaitsForWriteLock(dbFile){
     db.exec('BEGIN IMMEDIATE');
     process.stdout.write('LOCKED\\n');
     await new Promise(resolve=>setTimeout(resolve,900));
-    db.prepare(\"INSERT INTO app_meta(key,value,updatedAt) VALUES('v505_locked_gate_race','committed-between-precheck-and-lock',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt\").run(new Date().toISOString());
+    db.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES('v505_locked_gate_race','committed-between-precheck-and-lock',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt").run(new Date().toISOString());
     db.exec('COMMIT');
     process.stdout.write('COMMITTED\\n');
     db.close();
@@ -170,13 +170,12 @@ test('V505 concurrent writer committing after the quick fingerprint check is rej
     const exitCode=await waitForExit(writer.child);
     const output=writer.getOutput();
     assert.equal(exitCode,0,output.stderr||output.stdout);
-    assert.ok(output.stdout.includes('COMMITTED'),'race writer must commit its mutation before purge obtains the write lock');
+    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='v505_locked_gate_race'").get()?.value,'committed-between-precheck-and-lock','SQLite truth, not trailing child stdout, proves the race writer committed before purge obtained the write lock');
     assert.ok(caught,'purge must reject the source that changed while it was waiting for BEGIN IMMEDIATE');
     assert.equal(caught.code,'V505_PURGE_SOURCE_FINGERPRINT_CHANGED');
     assert.equal(caught.stage,'BEGIN_IMMEDIATE_LOCKED_BEFORE_DELETE');
     assert.match(String(caught.message||''),/执行任何DELETE之前停止清除/);
     assert.equal(db.prepare('SELECT COUNT(*) count FROM daily_reports').get().count,1,'business data must remain untouched after locked fingerprint rejection');
-    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='v505_locked_gate_race'").get()?.value,'committed-between-precheck-and-lock');
     assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get(),undefined,'destructive reset must not commit');
     assert.equal(Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys||0),1,'FK enforcement must remain enabled after locked fingerprint rejection');
   }finally{
@@ -220,7 +219,7 @@ test('V505 BEGIN IMMEDIATE busy failure restores foreign_keys on the same connec
     const exitCode=await waitForExit(writer.child);
     const output=writer.getOutput();
     assert.equal(exitCode,0,output.stderr||output.stdout);
-    assert.ok(output.stdout.includes('RELEASED'),'lock holder must release its transaction after parent has failed closed');
+    assert.doesNotThrow(()=>{db.exec('BEGIN IMMEDIATE');db.exec('ROLLBACK');},'SQLite lock acquisition after child exit proves the lock holder released its transaction; trailing stdout is not used as the oracle');
   }finally{
     if(writer?.child&&writer.child.exitCode===null){try{writer.child.kill();}catch{}}
     try{closeDb();}catch{}
