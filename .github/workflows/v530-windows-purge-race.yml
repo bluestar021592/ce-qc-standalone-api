@@ -1,0 +1,25 @@
+name: CE QC V530 Windows purge race gate
+
+on:
+  pull_request:
+    paths:
+      - 'test/v505-purge-locked-fingerprint-gate.test.js'
+      - '.github/workflows/v530-windows-purge-race.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-v505-race:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Run V505 locked fingerprint concurrency gate on Windows
+        run: node --test test/v505-purge-locked-fingerprint-gate.test.js
