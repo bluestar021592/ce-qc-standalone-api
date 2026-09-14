@@ -28,17 +28,21 @@ assert.match(atomic,/timer\.unref\?\.\(\)/,'parent watchdog must not keep a comp
 assert.doesNotMatch(atomic,/taskkill|Stop-Process/i,'V480 parent watch must never kill unrelated processes by name or broad process scan');
 
 assert.match(startup,/2026-09-14-v533-first-paint-bounded-startup-read-v1/,'V533 startup guard must be shipped by the earliest dashboard script');
-assert.match(startup,/const STARTUP_TIMEOUT_MS = 3000;/,'V533 startup reads must have a short finite budget');
-assert.match(startup,/pathname === '\/api\/bootstrap'/,'V533 must bound the primary bootstrap read');
-assert.match(startup,/pathname\.startsWith\('\/api\/business-state\/'\)/,'V533 must bound exact-business startup reads');
-assert.match(startup,/method !== 'GET'/,'V533 must never intercept writes');
-assert.match(startup,/init\?\.signal/,'V533 must preserve explicitly-owned request cancellation');
-assert.match(startup,/controller\.abort\(\)/,'V533 must actively release a timed-out browser request');
-assert.match(startup,/V533_STARTUP_READ_TIMEOUT/,'V533 timeout must fail one read without hanging the page');
-assert.match(startup,/forceFirstPaint\(\)/,'V533 must make the static shell visible before app bootstrap completes');
-assert.match(startup,/typeof global\.refresh === 'function'/,'V533 may attempt only one bounded status reread after first paint');
-assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'V533 first-paint guard must not own destructive or import endpoints');
-assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'V533 first-paint guard must not create write requests');
+assert.match(startup,/2026-09-14-v535-interactive-first-paint-body-bounded-v1/,'V535 interactive-first-paint guard must ship in the same earliest script');
+assert.match(startup,/const STARTUP_TIMEOUT_MS = 3000;/,'startup reads must have a short finite budget');
+assert.match(startup,/pathname === '\/api\/bootstrap'/,'startup guard must bound the primary bootstrap read');
+assert.match(startup,/pathname\.startsWith\('\/api\/business-state\/'\)/,'startup guard must bound exact-business startup reads');
+assert.match(startup,/method !== 'GET'/,'startup guard must never intercept writes');
+assert.match(startup,/init\?\.signal/,'startup guard must preserve explicitly-owned request cancellation');
+assert.match(startup,/controller\.abort\(\)/,'startup guard must actively release a timed-out browser request');
+assert.match(startup,/V533_STARTUP_READ_TIMEOUT/,'header timeout must fail one read without hanging the page');
+assert.match(startup,/forceFirstPaint\(\)/,'startup guard must make the static shell visible before app bootstrap completes');
+assert.match(startup,/function forceInteractivePaint\(\)/,'V535 must make the shell interactive independently of refresh');
+assert.match(startup,/typeof global\.renderAll === 'function'/,'V535 must render the safe shell once app.js is available');
+assert.match(startup,/does NOT clear the startup timer here/,'V535 must keep the timeout armed after response headers arrive');
+assert.match(startup,/typeof global\.refresh === 'function'/,'startup guard may attempt only one bounded status reread after first paint');
+assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
+assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
 
 assert.match(purgeConsole,/CE QC 安全清空业务数据/,'V533 must provide a lightweight authenticated recovery page when the dashboard shell is unavailable');
 assert.match(purgeConsole,/onclick="window\.openDataPurge\?\.\(\)"/,'recovery page must delegate the action to the canonical V505 UI owner');
@@ -47,21 +51,29 @@ assert.match(purgeConsole,/id="purgePreview"/,'V505 status must remain visible o
 assert.doesNotMatch(purgeConsole,/fetch\(['"`]\/api\/admin\/data-purge|XMLHttpRequest/i,'recovery page must not implement a second purge transport');
 assert.doesNotMatch(purgeConsole,/\/api\/admin\/data-purge\/(?:prepare|execute)/i,'recovery HTML must never bypass the canonical V505 transport owner');
 
-// Execute the browser guard with a deliberately never-resolving startup GET. The
-// fake clock fires its 3-second budget immediately, proving first paint can
-// continue while non-GET traffic still goes directly to the native fetch owner.
+// Execute the browser guard with two startup failure shapes:
+// 1) headers never arrive; V533 must synthesize a finite 504;
+// 2) headers arrive but the body never completes; V535 must keep the AbortController
+//    armed so response.text()/json() cannot hang the interactive page forever.
 const timers=[];
 const nativeCalls=[];
 const stage={style:{}};
 const shell={style:{}};
 const body={style:{},appendChild(){}};
+const notices=new Map();
 const document={
   documentElement:{style:{}},body,
   querySelector(selector){return selector==='.app-stage'?stage:selector==='.app-shell'?shell:null;},
-  getElementById(){return null;},
-  createElement(){return {style:{},setAttribute(){},textContent:''};}
+  getElementById(id){return notices.get(id)||null;},
+  createElement(){
+    const node={style:{},setAttribute(){},textContent:'',remove(){if(node.id)notices.delete(node.id);}};
+    Object.defineProperty(node,'id',{get(){return node._id||'';},set(value){node._id=value;if(value)notices.set(value,node);}});
+    return node;
+  }
 };
+body.appendChild=node=>{if(node?.id)notices.set(node.id,node);};
 class FakeMutationObserver{constructor(fn){this.fn=fn;}observe(){}disconnect(){}}
+function abortError(){const error=new Error('aborted');error.name='AbortError';return error;}
 const context={
   document,
   location:{href:'http://127.0.0.1:5177/'},
@@ -72,24 +84,56 @@ const context={
   fetch(input,init={}){
     nativeCalls.push({input,init});
     const method=String(init?.method||'GET').toUpperCase();
-    if(method==='GET')return new Promise(()=>{});
-    return Promise.resolve({native:true,method});
+    if(method!=='GET')return Promise.resolve({native:true,method});
+    const raw=String(input||'');
+    if(raw.includes('/api/bootstrap')){
+      return Promise.resolve({
+        ok:true,status:200,
+        text(){
+          return new Promise((resolve,reject)=>{
+            if(init.signal?.aborted)return reject(abortError());
+            init.signal?.addEventListener('abort',()=>reject(abortError()),{once:true});
+          });
+        }
+      });
+    }
+    return new Promise(()=>{});
   }
 };
 context.window=context;
 vm.runInNewContext(startup,context,{filename:'public/dashboard-fixture-v18.js'});
-assert.equal(stage.style.visibility,'visible','V533 must reveal the stage synchronously');
-assert.equal(shell.style.visibility,'visible','V533 must reveal the shell synchronously');
-const pending=context.fetch('/api/bootstrap');
-const timeout=timers.find(item=>item.ms===3000);
-assert.ok(timeout,'V533 bootstrap fetch must arm the 3-second budget');
+assert.equal(stage.style.visibility,'visible','startup guard must reveal the stage synchronously');
+assert.equal(shell.style.visibility,'visible','startup guard must reveal the shell synchronously');
+assert.equal(stage.style.pointerEvents,'auto','V535 must keep the stage interactive');
+assert.equal(shell.style.pointerEvents,'auto','V535 must keep the shell interactive');
+
+let renderCount=0;
+context.renderAll=()=>{renderCount+=1;};
+const interactiveTimer=timers.find(item=>item.ms===0);
+assert.ok(interactiveTimer,'V535 must schedule an immediate post-script interactive render');
+interactiveTimer.fn();
+assert.equal(renderCount,1,'V535 must call renderAll after app.js becomes available');
+
+const headerTimerStart=timers.length;
+const headerResponse=await context.fetch('/api/bootstrap');
+const headerTimer=timers.slice(headerTimerStart).find(item=>item.ms===3000);
+assert.ok(headerTimer,'V535 body-bounded bootstrap must arm the 3-second wall-clock budget');
+const hangingBody=headerResponse.text();
+headerTimer.fn();
+await assert.rejects(hangingBody,error=>error?.name==='AbortError','V535 must abort a body that stalls after headers arrive');
+
+const noHeaderTimerStart=timers.length;
+const pending=context.fetch('/api/state');
+const timeout=timers.slice(noHeaderTimerStart).find(item=>item.ms===3000);
+assert.ok(timeout,'V533 no-header startup fetch must arm the 3-second budget');
 timeout.fn();
 const timed=await pending;
 assert.equal(timed.status,504,'timed-out startup GET must resolve as a bounded compatibility failure');
 const timedPayload=await timed.json();
 assert.equal(timedPayload.code,'V533_STARTUP_READ_TIMEOUT');
+
 const nativePost=await context.fetch('/api/admin/data-purge/prepare',{method:'POST'});
-assert.equal(nativePost.native,true,'write requests must bypass V533 unchanged');
+assert.equal(nativePost.native,true,'write requests must bypass startup guard unchanged');
 assert.equal(nativeCalls.at(-1)?.init?.method,'POST');
 
-console.log('[V480/V533] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup GET reads are bounded · first paint is synchronous · lightweight recovery delegates only to V505 · writes stay untouched · export descendants self-release when direct parent disappears');
+console.log('[V480/V533/V535] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · shell becomes interactive before hydration · lightweight recovery delegates only to V505 · writes stay untouched · export descendants self-release when direct parent disappears');
