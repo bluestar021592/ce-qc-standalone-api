@@ -49,8 +49,12 @@ test('Shopee dashboard reconciliation uses CN plus VN only', () => {
   assert.equal(dashboard.recipientReconciliation.status, 'PASSED');
 });
 
-test('Shopee scans 4457 CN/VN bills in 13 batches before 50-sized track batches', async () => {
-  const bills = Array.from({ length: 4457 }, (_, index) => `SHP${String(index).padStart(9, '0')}`);
+test('Shopee scans exact 350-sized batches with a tail before bounded 50-sized track batches', async () => {
+  // This is a batching-contract regression, not a throughput benchmark. 701
+  // members prove two full 350-ticket confirm batches plus a non-empty tail;
+  // dedicated throughput smokes cover larger cohorts separately.
+  const bills = Array.from({ length: 701 }, (_, index) => `SHP${String(index).padStart(9, '0')}`);
+  const openBills = new Set(bills.slice(-51));
   const calls = { scan: [], track: [], exception: [] };
   const state = {
     businessType: 'SHOPEE',
@@ -64,7 +68,7 @@ test('Shopee scans 4457 CN/VN bills in 13 batches before 50-sized track batches'
   const client = {
     confirmQuery: async codes => {
       calls.scan.push(codes);
-      return codes.map(shipmentCode => ({ shipmentCode, orderStatus: 50 }));
+      return codes.map(shipmentCode => ({ shipmentCode, orderStatus: openBills.has(shipmentCode) ? 50 : 85 }));
     },
     trackQuery: async codes => {
       calls.track.push(codes);
@@ -76,12 +80,12 @@ test('Shopee scans 4457 CN/VN bills in 13 batches before 50-sized track batches'
     }
   };
   await runQcPipeline({ state, client });
-  assert.deepEqual(calls.scan.map(batch => batch.length), [...Array(12).fill(350), 257]);
-  assert.ok(calls.track.every(batch => batch.length <= 50));
-  assert.ok(calls.exception.every(batch => batch.length <= 50));
-  assert.ok(calls.track.length > 0);
+  assert.deepEqual(calls.scan.map(batch => batch.length), [350, 350, 1]);
+  assert.deepEqual(calls.track.map(batch => batch.length), [50, 1], '51 non-terminal parcels must prove stable 50-ticket track batching');
+  assert.deepEqual(calls.exception.map(batch => batch.length), [50, 1], 'exception batching must use the same bounded 50-ticket contract');
+  assert.deepEqual(state.needTrackBills, bills.slice(-51));
   const scanBatches = state.apiBatchStatus.filter(row => row.apiName === 'otwms-order-confirm-query');
-  assert.deepEqual(scanBatches.map(row => row.batchKey), Array.from({ length: 13 }, (_, index) => `scan-status:${String(index + 1).padStart(6, '0')}`));
+  assert.deepEqual(scanBatches.map(row => row.batchKey), Array.from({ length: 3 }, (_, index) => `scan-status:${String(index + 1).padStart(6, '0')}`));
   assert.ok(scanBatches.every(row => row.payloadHash && row.shipmentCount > 0));
 });
 

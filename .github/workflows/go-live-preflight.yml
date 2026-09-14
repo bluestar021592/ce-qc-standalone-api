@@ -31,12 +31,123 @@ jobs:
           node --check src/analyzerFinal.js
           node --check src/analyzer.js
           node --check src/shopeeAnalyzer.js
+          node --check src/unifiedExcelParser.js
           node --check src/unifiedImportStore.js
           node --check src/rangeDashboardStore.js
+          node --check src/accessControl.js
+          node --check src/db.js
           node --check src/dataPurge.js
+          node --check src/carryoverRefreshScheduler.js
+          node --check src/manualRefreshPublication.js
+          node --check src/v44WhppUiPatch.js
+          node --check src/v142SevenBusinessPeriodExporter.js
+          node --check src/v183SingleBusinessExportJobWorker.js
+          node --check src/v200Metrics.js
+          node --check src/v200TemplateDashboardExporter.js
+          node --check src/v225ExportReturnTruth.js
+          node --check src/v506LocalAuthBridgePatch.js
+          node --check src/v507ManualDashboardCacheMode.js
+          node --check src/v512WhppSourceMembershipGuard.js
+          node --check src/v514CanonicalExportMembershipGuard.js
+          node --check src/v505PurgeCoordinator.js
+          node --check src/v505PurgeGlobalGuard.js
+          node --check src/v505PurgeWriteFreezeGuard.js
+          node --check src/v505PurgeHttpActivity.js
+          node --check src/v505PurgePublicStatusGuard.js
+          node --check src/v505PurgeExternalActivity.js
+          node --check src/v505PurgeExecuteReadOnlyPreflight.js
+          node --check src/v505PurgeExecuteAdmissionGuard.js
+          node --check src/v505PurgeStartupOrphanGuard.js
+          node --check src/v505PurgeWorkerClaim.js
+          node --check src/v505ExportAdmissionGuard.js
+          node --check src/v193ExportSidecar.js
+          node --check src/v29EndpointAliasPatch.js
+          node --check scripts/CE_QC_PurgePrepareTaskWorker.mjs
+          node --check scripts/CE_QC_PurgeExecuteTaskWorker.mjs
+          node --check scripts/v505-purge-async-smoke.mjs
           node --check scripts/CE_QC_Production_Audit.mjs
           node --check scripts/CE_QC_Production_Diagnostic_ReadOnly.mjs
+          node --check public/v505-data-purge-recovery.js
+          node --check public/v505-purge-startup-probe.js
+          node --check public/v14-geometry-fixture.js
+          node --check public/dashboard-v18.js
+          node --check public/v29-data-consistency-fix.js
+          node --check public/v27-trend-mount-fix.js
+          node --check public/v508-canonical-business-export-route.js
+          node --check public/v509-whpp-detail-only.js
+          node --check test/unified-import-v7.test.js
+          node --check test/unified-import-ceaf.test.js
+          node --check test/unified-import-no-silent-skip.test.js
+          node --check test/unified-import-duplicate-classification.test.js
+          node --check test/unified-import-hidden-region-integrity.test.js
+          node --check test/unified-partition-carry-business.test.js
+          node --check test/seven-business-export-classification-reconciliation.test.js
+          node --check test/v512-whpp-source-membership-guard.test.js
+          node --check test/v514-canonical-export-membership-guard.test.js
+          node --check test/source-six-business-persistence.test.js
+          node --check test/manual-refresh-export-integrity.test.js
+          node --check test/v506-local-auth-bridge.test.js
+          node --check test/v507-integrated-release.test.js
+          node --check test/v505-purge-global-guard.test.js
+          node --check test/v505-purge-coordinator.test.js
+          node --check test/v505-purge-startup-orphan-recovery.test.js
+          node --check test/v505-purge-worker-claim-lock.test.js
+          node --check test/v505-purge-core-live-worker.test.js
+          node --check test/v505-purge-write-freeze.test.js
+          node --check test/v505-purge-auth-readonly.test.js
+          node --check test/v505-purge-external-activity.test.js
+          node --check test/v505-purge-http-drain.test.js
+          node --check test/v505-purge-control-db-fallback.test.js
+          node --check test/v505-purge-postcommit-recovery.test.js
+          node --check test/v505-purge-postcommit-precleanup-gate.test.js
+          node --check test/v505-purge-finalized-receipt-recovery.test.js
+          node --check test/v505-purge-finalized-core-idempotency.test.js
+          node --check test/v505-purge-finalized-cross-generation-release.test.js
+          node --check test/v505-purge-finalizer-generation-cleanup.test.js
+          node --check test/v505-purge-ui-delivery.test.js
+          node --check test/v505-purge-execute-env-failsafe.test.js
+          node --check test/v505-purge-worker-db-init-failsafe.test.js
+          node --check test/v505-purge-execute-readonly-preflight.test.js
+          node --check test/v505-purge-execute-admission.test.js
+          node --check test/v505-purge-unreadable-sidecar-failclosed.test.js
+          node --check test/v505-purge-public-status-privacy.test.js
+          node --check test/v505-purge-worker-entrypoint-invariant.test.js
+          node --check test/v505-purge-no-reseal-caller.test.js
+          node --check test/v505-purge-fingerprint-failclosed.test.js
+          node --check test/v505-purge-locked-fingerprint-gate.test.js
+          node --check test/v505-purge-backup-invalid-recovery.test.js
+      - name: Seven-business source no-loss and classification regression
+        run: node --test test/unified-import-v7.test.js test/unified-import-ceaf.test.js test/unified-import-no-silent-skip.test.js test/unified-import-duplicate-classification.test.js test/unified-import-hidden-region-integrity.test.js test/unified-partition-carry-business.test.js test/source-six-business-persistence.test.js
+      - name: V511 seven-business export classification reconciliation
+        run: node --test test/seven-business-export-classification-reconciliation.test.js
+      - name: V512 WHPP source membership conservation
+        run: node --test test/v512-whpp-source-membership-guard.test.js
+      - name: V514 canonical V200 source membership conservation
+        run: node --test test/v514-canonical-export-membership-guard.test.js
+      - name: Integrated release composition regression
+        run: node --test test/v507-integrated-release.test.js
+      - name: Manual refresh and export integrity regression
+        run: node --test test/manual-refresh-export-integrity.test.js
+      - name: V506 local authentication bridge regression
+        run: node --test test/v506-local-auth-bridge.test.js
       - name: Go-live regression suite
-        run: npm run test:golive
+        run: npm run test:ci
       - name: Final state-machine regression
-        run: node --test test/v400-seven-business-completion-loader.test.js test/final-system-state-machine.test.js test/final-analyzer-facade.test.js test/final-store-direct-inbound.test.js test/final-range-shopee.test.js test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/pending-fact-continuity-analyzer.test.js test/normal-flow-abnormal-exclusion.test.js
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests=(
+            test/v400-seven-business-completion-loader.test.js
+            test/final-system-state-machine.test.js
+            test/final-analyzer-facade.test.js
+            test/final-store-direct-inbound.test.js
+            test/final-range-shopee.test.js
+            test/trajectory-facts.test.js
+            test/trajectory-facts-analyzer-integration.test.js
+            test/pending-fact-continuity-analyzer.test.js
+            test/normal-flow-abnormal-exclusion.test.js
+          )
+          for test_file in "${tests[@]}"; do
+            echo "=== FINAL STATE: ${test_file} ==="
+            timeout --signal=TERM --kill-after=5s 90s node --test --test-force-exit "${test_file}"
+          done

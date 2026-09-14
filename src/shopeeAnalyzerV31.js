@@ -130,12 +130,25 @@ export function analyzeShopeeShipment(args = {}) {
     });
   }
 
+  // Only a currently proven non-POD/non-return special closure may inherit a
+  // legacy closed_* carry flag. A historical POD/return followed by a newer
+  // Pending/other open node must be reopened; otherwise old V29 evidence can
+  // leak closed_pod/closed_return back into the final facade.
+  const legacyCarry = String(result.carry状态 || '');
+  const inheritedSpecialClosure = !atShopeeWhpp
+    && !exactPod
+    && !exactReturn
+    && !returnInProgress
+    && legacyCarry.startsWith('closed_')
+    && !['closed_pod', 'closed_return'].includes(legacyCarry.toLowerCase())
+    && result.跨日状态 === '已闭环';
+
   Object.assign(result, {
     analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION,
     trackRequired: !(exactPod || exactReturn),
     trackSkippedReason: exactPod ? 'POD_COMPLETED' : exactReturn ? 'RETURN_COMPLETED' : '',
-    carry状态: exactPod ? 'closed_pod' : exactReturn ? 'closed_return' : returnInProgress ? 'active_return' : 'active',
-    跨日状态: exactPod || exactReturn ? '已闭环' : '未闭环'
+    carry状态: exactPod ? 'closed_pod' : exactReturn ? 'closed_return' : inheritedSpecialClosure ? result.carry状态 : returnInProgress ? 'active_return' : 'active',
+    跨日状态: exactPod || exactReturn || inheritedSpecialClosure ? '已闭环' : '未闭环'
   });
 
   return result;

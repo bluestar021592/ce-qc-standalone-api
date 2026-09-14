@@ -29,6 +29,8 @@ const TRANSACTION_DATE_HEADERS = [
   '入库日期', '下单日期', '下单时间', '订单日期', '日期', 'ordertime', 'orderdate', 'date', 'inbounddate'
 ];
 const UNIFIED_PARSE_REUSE_TTL_MS = 30_000;
+const HEADER_SCAN_LIMIT = 120;
+const NON_WAYBILL_TOKENS = new Set(['SHOPEECN','SHOPEEVN','ALI1688','CCAF','CCSL','CCSL580','CEZT','CECN','PP','PV','PNH']);
 let recentUnifiedParse = null;
 
 export function getUnifiedEffectiveSheetRange(sheet = {}) {
@@ -43,8 +45,6 @@ export function getUnifiedEffectiveSheetRange(sheet = {}) {
     if (point.c > maxColumn) maxColumn = point.c;
   }
   if (maxRow < 0 || maxColumn < 0) return null;
-  // Keep A1 as the origin so existing rowNumber/header row semantics stay absolute,
-  // while clamping only the inflated tail of a legacy XLS/OOXML UsedRange.
   return { s: { r: 0, c: 0 }, e: { r: maxRow, c: maxColumn } };
 }
 
@@ -82,9 +82,10 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
   const details = [];
   const warnings = [];
   const sheetDiagnostics = [];
-  const seen = new Set();
+  const seen = new Map();
   let rawRows = 0;
   let duplicateRows = 0;
+  let duplicateRegionEnrichments = 0;
   let missingWaybillRows = 0;
   let missingRecipientWarnings = 0;
   let classificationConflicts = 0;
@@ -98,7 +99,32 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     const hidden = Number(workbook.Workbook?.Sheets?.find(item => item.name === sheetName)?.Hidden || 0) > 0;
     const originalRange = String(sheet?.['!ref'] || '');
     if (hidden) {
-      sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: '隐藏Sheet', headerRow: null, detectedColumns: {}, missingFields: [], originalRange, effectiveRange: '', rangeClamped: false });
+      const hiddenRangeObject = getUnifiedEffectiveSheetRange(sheet);
+      if (!hiddenRangeObject) {
+        sheetDiagnostics.push({ sheetName, status: 'SKIPPED', reason: '隐藏Sheet（空）', headerRow: null, detectedColumns: {}, missingFields: [], originalRange, effectiveRange: '', rangeClamped: Boolean(originalRange) });
+        continue;
+      }
+      const hiddenEffectiveRange = XLSX.utils.encode_range(hiddenRangeObject);
+      const hiddenRangeClamped = Boolean(originalRange && originalRange !== hiddenEffectiveRange);
+      const hiddenMatrixStartedAt = Date.now();
+      const hiddenMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, range: hiddenRangeObject });
+      const hiddenMatrixElapsedMs = Date.now() - hiddenMatrixStartedAt;
+      if (hiddenMatrix.some(row => row.some(value => String(value ?? '').trim()))) {
+        propagateMergedHeaderCells(sheet, hiddenMatrix);
+        assertNoHiddenWaybillData(hiddenMatrix, {
+          sheetName,
+          sheetDiagnostics,
+          originalRange,
+          effectiveRange: hiddenEffectiveRange,
+          rangeClamped: hiddenRangeClamped,
+          matrixElapsedMs: hiddenMatrixElapsedMs
+        });
+      }
+      sheetDiagnostics.push({
+        sheetName, status: 'SKIPPED', reason: '隐藏Sheet（未检测到运单数据）', headerRow: null,
+        detectedColumns: {}, missingFields: [], originalRange, effectiveRange: hiddenEffectiveRange,
+        rangeClamped: hiddenRangeClamped, matrixElapsedMs: hiddenMatrixElapsedMs
+      });
       continue;
     }
     const effectiveRangeObject = getUnifiedEffectiveSheetRange(sheet);
@@ -120,10 +146,19 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     propagateMergedHeaderCells(sheet, matrix);
     const headerIndex = findHeaderRow(matrix);
     if (headerIndex < 0) {
+      assertNoSuspiciousSkippedWaybills(matrix, {
+        sheetName,
+        reason: `前${HEADER_SCAN_LIMIT}行未找到可识别的运单号表头或其下没有有效运单`,
+        sheetDiagnostics,
+        originalRange,
+        effectiveRange,
+        rangeClamped,
+        matrixElapsedMs
+      });
       sheetDiagnostics.push({
-        sheetName, status: 'SKIPPED', reason: '前30行未找到可识别的运单号表头或其下没有有效运单', headerRow: null,
+        sheetName, status: 'SKIPPED', reason: `前${HEADER_SCAN_LIMIT}行未找到可识别的运单号表头或其下没有有效运单`, headerRow: null,
         detectedColumns: {}, missingFields: ['waybill'],
-        sampleHeaders: matrix.slice(0, 30).map(row => row.filter(Boolean).slice(0, 12)).filter(row => row.length).slice(0, 8),
+        sampleHeaders: matrix.slice(0, HEADER_SCAN_LIMIT).map(row => row.filter(Boolean).slice(0, 12)).filter(row => row.length).slice(0, 8),
         originalRange, effectiveRange, rangeClamped, matrixElapsedMs
       });
       continue;
@@ -140,6 +175,15 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     }
     const customerNameIndex = findColumn(headers, CUSTOMER_NAME_HEADERS);
     if (shipmentIndex < 0) {
+      assertNoSuspiciousSkippedWaybills(matrix.slice(headerIndex + 1), {
+        sheetName,
+        reason: '未识别运单号列',
+        sheetDiagnostics,
+        originalRange,
+        effectiveRange,
+        rangeClamped,
+        matrixElapsedMs
+      });
       sheetDiagnostics.push({
         sheetName, status: 'SKIPPED', reason: '未识别运单号列', headerRow: headerIndex + 1,
         detectedColumns: { waybill: shipmentIndex, recipient: recipientIndex, customerName: customerNameIndex },
@@ -199,24 +243,72 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
         warnings.push({ type: 'MISSING_WAYBILL', sheetName, rowNumber: index + 1, message: '运单号缺失，未计入分类' });
         continue;
       }
-      if (seen.has(shipmentCode)) {
+
+      const matches = classifyMatches(shipmentCode, recipientNormalized, customerNameNormalized);
+      const classification = classifyBusiness(shipmentCode, recipientNormalized, customerNameNormalized);
+      const first = seen.get(shipmentCode);
+      if (first) {
         duplicateRows += 1;
-        warnings.push({ type: 'DUPLICATE', shipmentCode, sheetName, rowNumber: index + 1, message: '重复运单号，已保留首次出现' });
+        const duplicateBusinessType = classification?.businessType || '';
+        if (duplicateBusinessType && duplicateBusinessType !== first.businessType) {
+          const error = new Error(`重复运单 ${shipmentCode} 出现业务归属冲突：首次为${first.businessType}（${first.sheetName}第${first.rowNumber}行），重复行为${duplicateBusinessType}（${sheetName}第${index + 1}行）。为防止自动分类错票，已阻止整份日报入库。`);
+          error.code = 'DUPLICATE_BUSINESS_CLASSIFICATION_CONFLICT';
+          error.shipmentCode = shipmentCode;
+          error.first = first;
+          error.duplicate = {
+            businessType: duplicateBusinessType,
+            classificationSource: classification?.source || '',
+            classificationMatchedValue: classification?.matchedValue || '',
+            recipientRaw,
+            customerNameRaw,
+            regionCode,
+            regionRaw,
+            sheetName,
+            rowNumber: index + 1
+          };
+          throw error;
+        }
+        const firstRegion = String(first.regionCode || '');
+        if (firstRegion && regionCode && firstRegion !== regionCode) {
+          const error = new Error(`重复运单 ${shipmentCode} 的金边/外省归属冲突：首次为${firstRegion}（${first.sheetName}第${first.rowNumber}行），重复行为${regionCode}（${sheetName}第${index + 1}行）。为防止PP/PV统计错位，已阻止整份日报入库。`);
+          error.code = 'DUPLICATE_REGION_CONFLICT';
+          error.shipmentCode = shipmentCode;
+          error.first = first;
+          error.duplicate = { businessType: duplicateBusinessType || first.businessType, regionCode, regionRaw, sheetName, rowNumber: index + 1 };
+          throw error;
+        }
+        if (!firstRegion && regionCode && Number.isInteger(first.detailIndex) && details[first.detailIndex]) {
+          details[first.detailIndex].regionCode = regionCode;
+          details[first.detailIndex].regionRaw = regionRaw;
+          first.regionCode = regionCode;
+          first.regionRaw = regionRaw;
+          duplicateRegionEnrichments += 1;
+          warnings.push({
+            type: 'DUPLICATE_REGION_ENRICHED', shipmentCode, sheetName, rowNumber: index + 1,
+            firstSheetName: first.sheetName, firstRowNumber: first.rowNumber, regionCode,
+            message: `重复运单业务归属一致，首次区域为空；已用重复行的${regionCode}区域补齐首次记录，不增加票数。`
+          });
+        }
+        warnings.push({
+          type: 'DUPLICATE', shipmentCode, sheetName, rowNumber: index + 1,
+          firstSheetName: first.sheetName, firstRowNumber: first.rowNumber,
+          firstBusinessType: first.businessType, duplicateBusinessType: duplicateBusinessType || 'UNRESOLVED',
+          message: duplicateBusinessType
+            ? `重复运单号，业务归属与首次一致（${first.businessType}），已保留首次出现`
+            : `重复运单号，本行缺少足够业务证据，已保留首次已确认归属（${first.businessType}）`
+        });
         continue;
       }
-      seen.add(shipmentCode);
 
       if (!recipientRaw) {
         missingRecipientWarnings += 1;
         warnings.push({ type: 'MISSING_RECIPIENT', shipmentCode, sheetName, rowNumber: index + 1, message: '收件人为空或未识别，但仍按客户名称与运单号前缀继续精确分类；无法精确分类时整份日报会被拒绝。' });
       }
 
-      const matches = classifyMatches(shipmentCode, recipientNormalized, customerNameNormalized);
       if (matches.length > 1) {
         classificationConflicts += 1;
         warnings.push({ type: 'CLASSIFICATION_CONFLICT', shipmentCode, sheetName, rowNumber: index + 1, matches, message: `命中多个强业务规则，按优先级归类${matches[0]}` });
       }
-      const classification = classifyBusiness(shipmentCode, recipientNormalized, customerNameNormalized);
       if (!classification) {
         const error = new Error(`运单 ${shipmentCode} 未命中任何业务板块。收件人列缺失时也不会丢票：系统已读取该运单，但因无法精确归类而阻止整份日报入库。`);
         error.code = 'UNCLASSIFIED_WAYBILL_PREFIX';
@@ -225,6 +317,18 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
         error.rowNumber = index + 1;
         throw error;
       }
+      seen.set(shipmentCode, {
+        businessType: classification.businessType,
+        classificationSource: classification.source,
+        classificationMatchedValue: classification.matchedValue,
+        recipientRaw,
+        customerNameRaw,
+        regionCode,
+        regionRaw,
+        sheetName,
+        rowNumber: index + 1,
+        detailIndex: details.length
+      });
       const raw = Object.fromEntries(originalHeaders.map((header, column) => [header || `column_${column + 1}`, row[column] ?? '']));
       details.push({
         shipmentCode,
@@ -315,7 +419,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
     classificationCounts,
     sourceReconciliation,
     regionCounts,
-    summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, missingWaybillRows, missingRecipientWarnings, classificationConflicts, parseElapsedMs },
+    summary: { rawRows, validUniqueWaybills: details.length, duplicateRows, duplicateRegionEnrichments, missingWaybillRows, missingRecipientWarnings, classificationConflicts, parseElapsedMs },
     rows: details,
     warnings,
     sheetDiagnostics
@@ -330,7 +434,7 @@ export function parseUnifiedDailyExcel(filePath, options = {}) {
 }
 
 function findHeaderRow(matrix) {
-  for (let i = 0; i < Math.min(matrix.length, 30); i += 1) {
+  for (let i = 0; i < Math.min(matrix.length, HEADER_SCAN_LIMIT); i += 1) {
     const headers = (matrix[i] || []).map(normalizeHeader);
     const shipmentIndex = findColumn(headers, SHIPMENT_HEADERS);
     if (shipmentIndex < 0) continue;
@@ -344,6 +448,107 @@ function hasShipmentValues(matrix, headerIndex, shipmentIndex) {
     if (normalizeShipmentCode(matrix[rowIndex]?.[shipmentIndex])) return true;
   }
   return false;
+}
+
+function findSuspiciousSkippedWaybills(matrix = []) {
+  const found = new Map();
+  for (let rowIndex = 0; rowIndex < matrix.length; rowIndex += 1) {
+    const row = matrix[rowIndex] || [];
+    const normalizedBusinessCells = row.map(value => normalizeBusinessToken(value));
+    const hasBusinessMarker = normalizedBusinessCells.some(value => /SHOPEECN|SHOPEEVN|ALI1688|CCAF/.test(value));
+    for (let column = 0; column < row.length; column += 1) {
+      const code = normalizeShipmentCode(row[column]);
+      if (!code || NON_WAYBILL_TOKENS.has(code)) continue;
+      const strong = looksLikeKnownPrefixWaybill(code);
+      const markerAssociated = hasBusinessMarker && looksLikeGenericWaybill(code);
+      if (!strong && !markerAssociated) continue;
+      if (!found.has(code)) found.set(code, { shipmentCode: code, rowNumber: rowIndex + 1, column: column + 1, evidence: strong ? 'KNOWN_PREFIX' : 'BUSINESS_MARKER_ROW' });
+    }
+  }
+  const rows = [...found.values()];
+  return { suspectedCount: rows.length, suspectedWaybills: rows.map(item => item.shipmentCode).slice(0, 20), evidenceRows: rows.slice(0, 20) };
+}
+
+function findExplicitWaybillEvidence(matrix = []) {
+  const headerIndex = findHeaderRow(matrix);
+  if (headerIndex < 0) return { suspectedCount: 0, suspectedWaybills: [], evidenceRows: [] };
+  const headers = (matrix[headerIndex] || []).map(normalizeHeader);
+  const shipmentIndex = findColumn(headers, SHIPMENT_HEADERS);
+  if (shipmentIndex < 0) return { suspectedCount: 0, suspectedWaybills: [], evidenceRows: [] };
+  const found = new Map();
+  for (let rowIndex = headerIndex + 1; rowIndex < matrix.length; rowIndex += 1) {
+    const code = normalizeShipmentCode(matrix[rowIndex]?.[shipmentIndex]);
+    if (!code || NON_WAYBILL_TOKENS.has(code)) continue;
+    if (!found.has(code)) found.set(code, { shipmentCode: code, rowNumber: rowIndex + 1, column: shipmentIndex + 1, evidence: 'EXPLICIT_WAYBILL_HEADER' });
+  }
+  const rows = [...found.values()];
+  return { suspectedCount: rows.length, suspectedWaybills: rows.map(item => item.shipmentCode).slice(0, 20), evidenceRows: rows.slice(0, 20) };
+}
+
+function mergeWaybillEvidence(...groups) {
+  const found = new Map();
+  for (const group of groups) {
+    for (const item of group?.evidenceRows || []) if (item?.shipmentCode && !found.has(item.shipmentCode)) found.set(item.shipmentCode, item);
+  }
+  const rows = [...found.values()];
+  return { suspectedCount: rows.length, suspectedWaybills: rows.map(item => item.shipmentCode).slice(0, 20), evidenceRows: rows.slice(0, 20) };
+}
+
+function looksLikeKnownPrefixWaybill(code) {
+  if (!/\d/.test(code)) return false;
+  return /^(?:TBKH[A-Z0-9-]{2,}|CC[A-Z0-9-]{4,}|CE[A-Z0-9-]{4,})$/.test(code);
+}
+
+function looksLikeGenericWaybill(code) {
+  if (code.length < 6 || code.length > 40 || NON_WAYBILL_TOKENS.has(code)) return false;
+  if (!/^[A-Z0-9-]+$/.test(code)) return false;
+  if (!/[A-Z]/.test(code) || !/\d/.test(code)) return false;
+  if (/^20\d{2}-?\d{1,2}-?\d{1,2}$/.test(code)) return false;
+  return true;
+}
+
+function assertNoHiddenWaybillData(matrix, context = {}) {
+  const evidence = mergeWaybillEvidence(findExplicitWaybillEvidence(matrix), findSuspiciousSkippedWaybills(matrix));
+  if (!evidence.suspectedCount) return;
+  const diagnostic = {
+    sheetName: context.sheetName || '', status: 'BLOCKED',
+    reason: '隐藏Sheet检测到疑似运单，禁止静默跳过', headerRow: null,
+    detectedColumns: {}, missingFields: [], suspectedCount: evidence.suspectedCount,
+    suspectedWaybills: evidence.suspectedWaybills, evidenceRows: evidence.evidenceRows,
+    originalRange: context.originalRange || '', effectiveRange: context.effectiveRange || '',
+    rangeClamped: Boolean(context.rangeClamped), matrixElapsedMs: Number(context.matrixElapsedMs || 0)
+  };
+  context.sheetDiagnostics?.push?.(diagnostic);
+  const error = new Error(`隐藏工作表“${context.sheetName || '未知'}”检测到${evidence.suspectedCount}个疑似运单。隐藏Sheet不能被静默排除，否则会造成源日报漏票；请取消隐藏并确认是否属于正式日报数据，或删除其中的运单数据。示例：${evidence.suspectedWaybills.slice(0, 5).join('、')}`);
+  error.code = 'HIDDEN_WAYBILL_SHEET';
+  error.sheetName = context.sheetName || '';
+  error.suspectedCount = evidence.suspectedCount;
+  error.suspectedWaybills = evidence.suspectedWaybills;
+  error.evidenceRows = evidence.evidenceRows;
+  error.sheetDiagnostics = context.sheetDiagnostics || [];
+  throw error;
+}
+
+function assertNoSuspiciousSkippedWaybills(matrix, context = {}) {
+  const evidence = findSuspiciousSkippedWaybills(matrix);
+  if (!evidence.suspectedCount) return;
+  const diagnostic = {
+    sheetName: context.sheetName || '', status: 'BLOCKED',
+    reason: `${context.reason || '未识别数据结构'}；检测到疑似运单，禁止静默跳过`, headerRow: null,
+    detectedColumns: {}, missingFields: ['waybill'], suspectedCount: evidence.suspectedCount,
+    suspectedWaybills: evidence.suspectedWaybills, evidenceRows: evidence.evidenceRows,
+    originalRange: context.originalRange || '', effectiveRange: context.effectiveRange || '',
+    rangeClamped: Boolean(context.rangeClamped), matrixElapsedMs: Number(context.matrixElapsedMs || 0)
+  };
+  context.sheetDiagnostics?.push?.(diagnostic);
+  const error = new Error(`工作表“${context.sheetName || '未知'}”未识别到标准运单号表头，但检测到${evidence.suspectedCount}个疑似运单。为防止漏票，已阻止整份日报入库；请检查该Sheet表头。示例：${evidence.suspectedWaybills.slice(0, 5).join('、')}`);
+  error.code = 'UNRECOGNIZED_WAYBILL_SHEET';
+  error.sheetName = context.sheetName || '';
+  error.suspectedCount = evidence.suspectedCount;
+  error.suspectedWaybills = evidence.suspectedWaybills;
+  error.evidenceRows = evidence.evidenceRows;
+  error.sheetDiagnostics = context.sheetDiagnostics || [];
+  throw error;
 }
 
 function findColumn(headers, aliases) {
@@ -480,7 +685,7 @@ function mergeDateCandidates(...groups) {
 
 function propagateMergedHeaderCells(sheet, matrix) {
   for (const range of sheet['!merges'] || []) {
-    if (range.s.r >= 30) continue;
+    if (range.s.r >= HEADER_SCAN_LIMIT) continue;
     const value = matrix[range.s.r]?.[range.s.c];
     if (!String(value ?? '').trim()) continue;
     for (let row = range.s.r; row <= range.e.r; row += 1) {

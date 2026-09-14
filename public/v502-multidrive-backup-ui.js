@@ -66,6 +66,25 @@
   };
   try{deleteAllDatabaseBackups=global.deleteAllDatabaseBackups;}catch{}
 
+  function loadStartupProbe(){
+    if(global.__CE_QC_V505_PURGE_STARTUP_PROBE__)return;
+    const probe=document.createElement('script');
+    probe.src='/v505-purge-startup-probe.js?v=20260912-v505-startup-probe-2';
+    probe.async=false;
+    document.head.appendChild(probe);
+  }
+
+  const installedPurgePatch=String(global.__CE_QC_V505_DATA_PURGE_RECOVERY__?.patchId||'');
+  if(!installedPurgePatch.includes('v8-version-aware-owner')){
+    const script=document.createElement('script');
+    script.src='/v505-data-purge-recovery.js?v=20260911-v505-8';
+    script.async=false;
+    script.onload=loadStartupProbe;
+    document.head.appendChild(script);
+  }else{
+    loadStartupProbe();
+  }
+
   global.__CE_QC_V502_MULTI_DRIVE_BACKUP_UI__={patchId:PATCH_ID,decorateBackupStorage};
   setTimeout(()=>{void decorateBackupStorage();},300);
   console.info('[CE-QC][V502_MULTI_DRIVE_BACKUP_UI]',PATCH_ID);

@@ -142,6 +142,63 @@ if (new URLSearchParams(location.search).has('visualTest')) {
   window.__CE_QC_START_BACKEND_RECOVERY__ = startBackendRecovery;
 })();
 
+(function installManualRefreshAndNoTrendMode(){
+  if (new URLSearchParams(location.search).has('visualTest')) return;
+
+  window.__CE_QC_LIVE_TRENDS_DISABLED__ = true;
+  const trendSelectors = ['#homeTrendGrid','#ccslTrendGrid','#shopeeRecipientTrends','#shopeeTrendGrid','.v18-trend-section','#v27ForcedAttemptTrend','#v27ForcedHomeAttemptTrends','.v27-force-trend','.v27-force-attempt'];
+  function suppressLegacyTrends(){
+    trendSelectors.forEach(selector => document.querySelectorAll(selector).forEach(node => {
+      node.hidden = true;
+      node.setAttribute('aria-hidden','true');
+      node.innerHTML = '';
+    }));
+  }
+
+  suppressLegacyTrends();
+  new MutationObserver(suppressLegacyTrends).observe(document.body,{childList:true,subtree:true});
+
+  if (typeof renderHomeTrends === 'function') renderHomeTrends = function(){ return ''; };
+  if (typeof renderShopeeRecipientTrends === 'function') renderShopeeRecipientTrends = function(){ return ''; };
+
+  function ensureManualRefreshButton(){
+    const actions=document.querySelector('.top-actions');
+    if(!actions||document.getElementById('manualLatestDataRefresh'))return;
+    const button=document.createElement('button');
+    button.id='manualLatestDataRefresh';
+    button.type='button';
+    button.className='btn ghost compact';
+    button.title='仅重新扫描和查询当前未完成POD包裹；已POD/已退回终态不会重复查询';
+    button.textContent='更新最新数据';
+    const notification=actions.querySelector('.notification-button');
+    actions.insertBefore(button,notification||actions.firstChild);
+    button.addEventListener('click', async ()=>{
+      if(button.disabled)return;
+      button.disabled=true;
+      const original=button.textContent;
+      button.textContent='更新中…';
+      try{
+        const call = typeof api === 'function'
+          ? api('/api/manual-open-refresh',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})
+          : fetch('/api/manual-open-refresh',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:'{}'}).then(async response=>{const data=await response.json();if(!response.ok||data?.ok===false)throw new Error(data?.error||`HTTP ${response.status}`);return data;});
+        const payload=await call;
+        if(typeof refresh==='function')await refresh();
+        if(typeof currentPage!=='undefined'&&currentPage==='tracking'&&typeof loadTrackingWorkspace==='function')await loadTrackingWorkspace();
+        const result=payload?.result||{};
+        alert(`最新数据更新完成：更新前未完成 ${Number(result.openBefore||0).toLocaleString('zh-CN')} 票，已重新处理 ${Number(result.refreshed||0).toLocaleString('zh-CN')} 票，本次闭环 ${Number(result.closed||0).toLocaleString('zh-CN')} 票，仍未完成 ${Number(result.openAfter||0).toLocaleString('zh-CN')} 票${result.failed?`，失败 ${Number(result.failed).toLocaleString('zh-CN')} 票`:''}。`);
+      }catch(error){
+        alert(`更新最新数据失败：${error?.message||error}`);
+      }finally{
+        button.disabled=false;
+        button.textContent=original;
+      }
+    });
+  }
+
+  ensureManualRefreshButton();
+  new MutationObserver(ensureManualRefreshButton).observe(document.querySelector('.topbar')||document.body,{childList:true,subtree:true});
+})();
+
 if (!new URLSearchParams(location.search).has('visualTest')) {
   function loadRuntimeScript(src, done) {
     const script = document.createElement('script');
@@ -150,14 +207,17 @@ if (!new URLSearchParams(location.search).has('visualTest')) {
     if (done) script.onload = done;
     document.head.appendChild(script);
   }
-  loadRuntimeScript('/v502-multidrive-backup-ui.js?v=20260910-v502-1');
+  // This loader runs after app.js. Claim the destructive purge UI owner here,
+  // before any legacy/stale feature can install an older long-request flow.
+  loadRuntimeScript('/v505-data-purge-recovery.js?v=20260911-v505-8');
+  loadRuntimeScript('/v502-multidrive-backup-ui.js?v=20260912-v502-3');
   loadRuntimeScript('/v303-authorized-clean-start.js?v=20260825-v303-direct-1', () => {
     loadRuntimeScript('/v304-unified-upload-owner.js?v=20260825-v304-1', () => {
       loadRuntimeScript('/v27-dashboard-fix.js?v=20260808-v27-2', () => {
-        loadRuntimeScript('/v27-trend-mount-fix.js?v=20260808-v27-trend-1', () => {
-          loadRuntimeScript('/v27-carry-business-filter.js?v=20260809-v29-carry-1', () => {
-            loadRuntimeScript('/v29-data-consistency-fix.js?v=20260809-v29-1');
-          });
+        // Live dashboard trends are intentionally not mounted. Trend/history
+        // calculations remain available only through export/report workflows.
+        loadRuntimeScript('/v27-carry-business-filter.js?v=20260809-v29-carry-1', () => {
+          loadRuntimeScript('/v29-data-consistency-fix.js?v=20260809-v29-1');
         });
       });
     });

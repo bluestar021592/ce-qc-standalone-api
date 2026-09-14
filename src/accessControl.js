@@ -14,6 +14,8 @@ const SESSION_HOURS = 8;
 const SESSION_REFRESH_THRESHOLD_MS = 2 * 60 * 60_000;
 const LOCAL_AUTH_COOKIE = 'ce_qc_local_auth_v431';
 const AUTH_SIDECAR_PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
+const PURGE_STATUS_PATH=/^\/purge-status\/[a-f0-9]{48}\.json$/i;
+const PURGE_PREPARE_AUDITS=new Set(['DATA_PURGE_REQUESTED','DATA_PURGE_BACKUP_VERIFIED']);
 export const V430_INTERNAL_LOGIN_FALLBACK_ID = '2026-09-05-v430-native-form-login-fallback-v1';
 export const V431_LOCAL_AUTH_SIDECAR_ID = '2026-09-05-v431-readonly-local-auth-sidecar-v1';
 let jwks = null;
@@ -66,6 +68,11 @@ export function validateAccessConfiguration() {
 }
 
 export async function accessIdentity(req, res, next) {
+  if(String(req.method||'').toUpperCase()==='GET'&&PURGE_STATUS_PATH.test(String(req.path||''))){
+    res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma','no-cache');
+    return next();
+  }
   const host = normalizeHost(req.hostname || req.get('host'));
   const remote = normalizeIp(req.socket?.remoteAddress);
   const publicHost = normalizeHost(process.env.PUBLIC_HOSTNAME || 'ce-qc.cambodian.com');
@@ -275,6 +282,7 @@ function readSession(req, channel, cloudflareEmail) {
 function refreshSessionIfNeeded(req, res, user, channel) {
   const expiresAtMs = Date.parse(user.sessionExpiresAt || '');
   if (Number.isFinite(expiresAtMs) && expiresAtMs - Date.now() > SESSION_REFRESH_THRESHOLD_MS) return user;
+  if (req.v505PurgeReadOnlyAuth) return user;
   const token = cookieValue(req, 'ce_internal_session');
   if (!token) return user;
   const expiresAt = new Date(Date.now() + SESSION_HOURS * 60 * 60_000).toISOString();
@@ -324,6 +332,8 @@ export function sameOriginWriteGuard(req, res, next) {
 }
 
 export function auditAction(req, action, detail = {}) {
+  if(req.v505PurgeReadOnlyAuth)return;
+  if(String(req.path||'')==='/api/admin/data-purge/prepare'&&PURGE_PREPARE_AUDITS.has(String(action||'')))return;
   const body = JSON.stringify(detail, (key, value) => /password|token|cookie|authorization/i.test(key) ? '[REDACTED]' : value);
   getDb().prepare('INSERT INTO audit_logs(userEmail,userRole,action,businessType,reportDate,runId,detailJson,ipAddress,createdAt) VALUES(?,?,?,?,?,?,?,?,?)')
     .run(req.user?.email || req.user?.username || '', req.user?.role || '', action, String(detail.businessType || ''), String(detail.reportDate || ''), String(detail.runId || ''), body, normalizeIp(req.socket?.remoteAddress), nowIso());

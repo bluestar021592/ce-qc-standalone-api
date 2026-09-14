@@ -15,11 +15,14 @@ assert.match(source,/V504_PRE_CLEAR_BACKUP_ID='2026-09-10-v504-isolated-full-pre
 assert.match(source,/CE_QC_PreClearBackupWorker\.mjs/);
 assert.match(source,/await createVerifiedBackupIsolated\(cfg\.dbFile,filePath\)/);
 assert.match(source,/spawn\(process\.execPath,\[PRE_CLEAR_BACKUP_WORKER,payload\]/);
-assert.doesNotMatch(source,/from 'node:sqlite'/,'5177 purge preparation must not import node:sqlite backup work');
+assert.doesNotMatch(source,/import\s*\{[^}]*\bbackup\b[^}]*\}\s*from 'node:sqlite'/,'5177 purge preparation must not import node:sqlite backup work');
+assert.match(source,/function withWritablePurgeControlDb\(operation\)/,'direct DatabaseSync use must be isolated to the small purge-control fallback owner');
+assert.equal((source.match(/new DatabaseSync\(/g)||[]).length,1,'dataPurge may open exactly one direct SQLite connection, reserved for purge-control state fallback');
+assert.match(source,/control=new DatabaseSync\(cfg\.dbFile\)/,'the only direct SQLite connection must be the named purge-control connection');
 assert.doesNotMatch(source,/await backup\(/,'5177 purge preparation must never execute the 25GB SQLite backup itself');
 assert.match(source,/isolated-write-freeze\+online-backup\+backup-quick-check\+sha256/);
 assert.match(source,/setPurgeBlock\(db,Date\.now\(\)\+60\*60_000\)/,'large-db prepare needs a long maintenance block while backup + verification runs');
-const backupPos=source.indexOf("const verifiedBackup=await createVerifiedPreClearBackup(user.email||'');");
+const backupPos=source.indexOf("const verifiedBackup=await createVerifiedPreClearBackup(email,options.jobId||'');");
 const createdPos=source.indexOf('const createdAt=Date.now();');
 assert.ok(backupPos>=0&&createdPos>backupPos,'10-minute confirmation clock must start only after the verified backup finishes');
 
@@ -73,4 +76,4 @@ assert.notEqual(bad.code,0);
 assert.equal(bad.result?.ok,false);
 
 fs.rmSync(tempDir,{recursive:true,force:true});
-console.log('[V504/V503] pre-clear full backup smoke passed · online backup + quick_check + SHA all run in isolated worker · 5177 owns only orchestration/status · write-freeze source stays unchanged · corrupt/missing source fails closed · confirmation clock starts after verified copy');
+console.log('[V504/V503] pre-clear full backup smoke passed · 25GB backup + quick_check + SHA remain isolated in worker · 5177 direct SQLite use is restricted to purge-control fallback state · write-freeze source stays unchanged · corrupt/missing source fails closed · confirmation clock starts after verified copy');
