@@ -39,6 +39,7 @@ export/
 downloads/
 uploads/
 screenshots/
+public/purge-status/
 
 # Archives
 *.zip

@@ -1,15 +1,19 @@
 import path from 'node:path';
+import ExcelJS from 'exceljs';
 import { collectV200Rows, V200_EXPORT_VERSION } from './v225ExportReturnTruth.js';
-import { statsOf, bucketRows, anchorMaps, completeAttemptRatio, completeSigningAverage } from './v200Metrics.js';
+import { statsOf, bucketRows, anchorMaps, completeAttemptRatio, completeSigningAverage, assertV200BucketConservation } from './v200Metrics.js';
 import { writeV200ReferenceWorkbook } from './v200ReferenceWorkbook.js';
 import { V294_METRIC_COMPLETENESS_ID } from './v294MetricCompletenessTruth.js';
 import { repairV484StrictExportEvidence, isV484StrictExportEvidenceType, V484_STRICT_EXPORT_EVIDENCE_OWNER_ID } from './v484StrictExportEvidenceOwner.js';
+import { assertV514CanonicalExportMembership, V514_CANONICAL_EXPORT_MEMBERSHIP_GUARD_ID } from './v514CanonicalExportMembershipGuard.js';
 
 export { V200_EXPORT_VERSION } from './v225ExportReturnTruth.js';
 export { resolveV200Attempt, resolveV200AverageDays } from './v200EvidenceData.js';
 export { internalHyperlinkFormulaForV200 } from './v200ReferenceWorkbook.js';
 
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
+const V200_REQUIRED_DETAIL_SHEETS=['全部明细','金边明细','外省明细','门店明细','POD明细','未POD明细','分配派送中明细','Pending明细','退回明细'];
+const V200_REQUIRED_DETAIL_HEADERS=['日期','运单编号','下单时间','状态标识','状态说明','收件省份','区域分类','当前门店','当前省份','收件人','收件人手机','收件地址','派件时间','派件门店','派件省份','派件快递员','异常编码','异常描述','备注'];
 function safeFileName(value = '') { return String(value || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim(); }
 function displayType(type) { return ({ SHOPEECN: 'SHOPEE CN', SHOPEEVN: 'SHOPEE VN' })[type] || type; }
 function periodLabel(periodType = 'custom') { return ({ daily: '日报', weekly: '周报', monthly: '月报', custom: '自定义日期' })[periodType] || '区间报表'; }
@@ -78,13 +82,49 @@ export function assertShopeeExportTruth(businessType, rows = [], stats = {}) {
   return true;
 }
 
+async function validateWrittenV200Workbook(file,bucket){
+  const expectedNames=['每日看板',...V200_REQUIRED_DETAIL_SHEETS];
+  const expectedSet=new Set(expectedNames);
+  const expectedRows=new Map(V200_REQUIRED_DETAIL_SHEETS.map(name=>[name,Number(bucket[name]?.length||0)+1]));
+  const actualRows=new Map();
+  const actualHeaders=new Map();
+  const seen=[];
+  const reader=new ExcelJS.stream.xlsx.WorkbookReader(file,{worksheets:'emit',sharedStrings:'cache',styles:'ignore',hyperlinks:'ignore'});
+  for await(const sheet of reader){
+    seen.push(sheet.name);
+    if(!expectedSet.has(sheet.name))continue;
+    let rows=0,header=null;
+    for await(const row of sheet){
+      rows+=1;
+      if(rows===1&&V200_REQUIRED_DETAIL_SHEETS.includes(sheet.name)){
+        header=(Array.isArray(row.values)?row.values.slice(1):[]).map(value=>String(value??''));
+      }
+    }
+    actualRows.set(sheet.name,rows);
+    if(header)actualHeaders.set(sheet.name,header);
+  }
+  const unexpected=seen.filter(name=>!expectedSet.has(name));
+  if(unexpected.length)throw new Error(`V200_WRITTEN_WORKBOOK_UNEXPECTED_SHEET:${unexpected.join(',')}`);
+  const missing=expectedNames.filter(name=>!actualRows.has(name));
+  if(missing.length)throw new Error(`V200_WRITTEN_WORKBOOK_SHEET_MISSING:${missing.join(',')}`);
+  if(seen.length!==expectedNames.length)throw new Error(`V200_WRITTEN_WORKBOOK_SHEET_COUNT_MISMATCH:${seen.length}/${expectedNames.length}`);
+  const rowMismatches=[];
+  const headerMismatches=[];
+  for(const name of V200_REQUIRED_DETAIL_SHEETS){
+    const wanted=expectedRows.get(name),found=actualRows.get(name);
+    if(found!==wanted)rowMismatches.push(`${name}:${found}/${wanted}`);
+    const header=actualHeaders.get(name)||[];
+    if(JSON.stringify(header)!==JSON.stringify(V200_REQUIRED_DETAIL_HEADERS))headerMismatches.push(name);
+  }
+  if(rowMismatches.length)throw new Error(`V200_WRITTEN_WORKBOOK_ROW_MISMATCH:${rowMismatches.join('|')}`);
+  if(headerMismatches.length)throw new Error(`V200_WRITTEN_WORKBOOK_HEADER_MISMATCH:${headerMismatches.join(',')}`);
+  return{status:'PASSED',sheets:Object.fromEntries([...actualRows.entries()]),detailSheets:V200_REQUIRED_DETAIL_SHEETS.length,headerContract:'PASSED',sheetCount:seen.length};
+}
+
 export async function createV200ReferenceDashboardWorkbook({ type, periodType = 'custom', range, outputDir, onProgress = () => {} }) {
   const businessType = String(type || '').trim().toUpperCase();
-  // V484: formal export is actual-member driven. The old V482 full-range
-  // reconcile/backfill is intentionally not executed here; it remains only as a
-  // compatibility/maintenance API. This prevents every historical export from
-  // rescanning the entire selected strict-business history before membership is known.
   const rows = await collectV200Rows(businessType, range, onProgress);
+  const canonicalMembership = assertV514CanonicalExportMembership({ businessType, range, rows });
   if (!rows.length) throw new Error(`${displayType(businessType)} 在所选区间没有数据。`);
   assertV200ExportRange(rows, range);
   if (isV484StrictExportEvidenceType(businessType)) {
@@ -104,9 +144,14 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
   }
   assertShopeeExportTruth(businessType, rows, stats);
   const bucket = bucketRows(rows);
+  const workbookReconciliation = assertV200BucketConservation(bucket, { businessType });
+  if (Number(workbookReconciliation.all || 0) !== rows.length) {
+    throw new Error(`V200_WORKBOOK_SOURCE_RECONCILIATION_FAILED:${businessType}:source=${rows.length}:all=${workbookReconciliation.all}`);
+  }
   const anchors = anchorMaps(bucket);
   const file = path.join(outputDir, safeFileName(`${displayType(businessType)}_${periodLabel(periodType)}_每日数据看板_${range.from}_至_${range.to}_V200.xlsx`));
   await writeV200ReferenceWorkbook({ file, type: businessType, range, rows, stats, bucket, anchors, onProgress });
+  const writtenWorkbookCheck=await validateWrittenV200Workbook(file,bucket);
   const overall = stats.overall;
   const attempt1Rate = overall.pod ? completeAttemptRatio(overall, overall.a1) : 0;
   const attempt2Rate = overall.pod ? completeAttemptRatio(overall, overall.a2) : 0;
@@ -140,6 +185,9 @@ export async function createV200ReferenceDashboardWorkbook({ type, periodType = 
       ppAverageDays,
       pvAverageDays,
       signingEvidenceComplete: overall.pod === 0 || overall.days.length === overall.pod,
+      canonicalMembership: { ...canonicalMembership, id: canonicalMembership.id || V514_CANONICAL_EXPORT_MEMBERSHIP_GUARD_ID },
+      workbookReconciliation,
+      writtenWorkbookCheck,
       metricCompletenessId: V294_METRIC_COMPLETENESS_ID,
       engine: V200_EXPORT_VERSION,
       outputContract: 'V200_REFERENCE_TEMPLATE_10_SHEETS_DASHBOARD_ATTEMPT_ONLY'

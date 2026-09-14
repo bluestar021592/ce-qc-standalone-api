@@ -7,8 +7,8 @@ test('V9 special node aliases classify from the latest effective tracking event 
   for (const place of ['CE:580', 'CEL:580', 'CE:CCSL580', 'CEL:CCSL580']) {
     assert.equal(classifyLatestSpecialNode([{ eventTime: '2026-08-04 10:00:00', place }])?.specialState, 'CCSL580_RETENTION');
   }
-  assert.equal(classifyLatestSpecialNode([{ eventTime: '2026-08-04 10:00:00', place: 'CE:CECN' }])?.specialState, 'CECN_RETENTION');
-  assert.equal(classifyLatestSpecialNode([{ eventTime: '2026-08-04 10:00:00', place: 'CEL:CEZT' }])?.specialState, 'CEZT_RETENTION');
+  assert.equal(classifyLatestSpecialNode([{ eventTime: '2026-08-04 10:00:00', place: 'CE:CECN' }])?.specialState, 'CCSLCN_DIVERSION');
+  assert.equal(classifyLatestSpecialNode([{ eventTime: '2026-08-04 10:00:00', place: 'CEL:CEZT' }])?.specialState, 'CCSLZT_DIVERSION');
 });
 
 test('V9 later POD or normal action removes prior 580 retention', () => {

@@ -6,9 +6,10 @@ import { createShopeeTruthWorkbook } from './v191ShopeeTruthExporter.js';
 import { createV199UnifiedDashboardWorkbook } from './v199UnifiedDashboardExporter.js';
 import { createV200ReferenceDashboardWorkbook, V200_EXPORT_VERSION } from './v200TemplateDashboardExporter.js';
 import { prepareV381ShopeeExportEvidence, V381_EXPORT_EVIDENCE_REPAIR_ID } from './v381ExportEvidenceRepair.js';
+import { assertWhppSourceMembershipRange, V512_WHPP_SOURCE_MEMBERSHIP_GUARD_ID } from './v512WhppSourceMembershipGuard.js';
 
-const VERSION='2026-08-17-v191-single-business-truth-worker-v1';
-const REVISION='2026-08-31-v381-shopee-export-evidence-preflight-v1';
+const VERSION='2026-09-13-v512-single-business-whpp-source-gate-v1';
+const REVISION='2026-09-13-v512-whpp-source-membership-preflight-v1';
 const HEARTBEAT_MS=Math.max(3000,Math.min(15000,Number(process.env.EXPORT_SINGLE_HEARTBEAT_MS||5000)));
 const jobFile=path.resolve(String(process.argv[2]||''));
 const ALLOWED=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP']);
@@ -46,6 +47,11 @@ try{
   const range=rangeOf(payload);startedAt=Date.now();stage=`正在生成 ${type} 参考母版每日看板`;progress=5;
   writeJob({status:'RUNNING',progress,range,currentBusiness:type,currentPart:1,businessParts:1,heartbeatAt:new Date().toISOString(),workerPid:process.pid,workerMode:'SINGLE_BUSINESS_DIRECT',workerVersion:VERSION,workerRevision:REVISION,message:`${stage} · ${range.from} 至 ${range.to} · ${memoryText()}`});
   heartbeat=setInterval(()=>{try{writeJob({status:'RUNNING',progress,heartbeatAt:new Date().toISOString(),currentBusiness:type,currentPart:1,businessParts:1,workerPid:process.pid,workerMode:'SINGLE_BUSINESS_DIRECT',workerVersion:VERSION,workerRevision:REVISION,message:`${stage} · 已运行${Math.max(1,Math.floor((Date.now()-startedAt)/1000))}秒 · ${memoryText()}`});}catch(e){if(e?.code==='EXPORT_JOB_CANCELLED')process.exitCode=2;}},HEARTBEAT_MS);heartbeat.unref?.();
+  if(type==='WHPP'){
+    stage='核对 WHPP 源日报成员与处理成员守恒';progress=6;
+    const membership=assertWhppSourceMembershipRange({fromDate:range.from,toDate:range.to});
+    writeJob({status:'RUNNING',progress,heartbeatAt:new Date().toISOString(),currentBusiness:type,currentPart:1,businessParts:1,workerPid:process.pid,workerMode:'SINGLE_BUSINESS_DIRECT',workerVersion:VERSION,workerRevision:REVISION,whppSourceMembership:{id:membership.id||V512_WHPP_SOURCE_MEMBERSHIP_GUARD_ID,daysChecked:membership.daysChecked,sourceWhppTotal:membership.sourceWhppTotal,processedWhppTotal:membership.processedWhppTotal,status:'PASSED'},message:`WHPP源成员守恒通过：源${Number(membership.sourceWhppTotal||0).toLocaleString()}票 / 已处理${Number(membership.processedWhppTotal||0).toLocaleString()}票 · ${memoryText()}`});
+  }
   if(SHOPEE_TYPES.has(type)){
     stage=`补核 ${type} 完整表真实POD/派件START证据`;progress=6;
     const repair=await prepareV381ShopeeExportEvidence({type,range,onProgress(info={}){const completed=Math.max(0,Number(info.completed||0)),total=Math.max(0,Number(info.total||0)),queried=Math.max(0,Number(info.queried||0)),failed=Math.max(0,Number(info.failed||0));progress=total?Math.max(6,Math.min(38,6+Math.floor((completed/total)*32))):38;stage=total?`补核 ${type} 真实轨迹 ${completed}/${total} · 已查询${queried.toLocaleString()}票${failed?` · 失败${failed.toLocaleString()}票`:''}`:`${type} 已保存真实证据完整，无需补查`;writeJob({status:'RUNNING',progress,heartbeatAt:new Date().toISOString(),currentBusiness:type,currentPart:1,businessParts:1,workerPid:process.pid,workerMode:'SINGLE_BUSINESS_DIRECT',workerVersion:VERSION,workerRevision:REVISION,evidenceRepairVersion:V381_EXPORT_EVIDENCE_REPAIR_ID,message:`${stage} · ${memoryText()}`});}});

@@ -130,7 +130,7 @@ test('tracking code 80 POD and code 86 completed return are normal closed states
   assert.equal(returned.carry状态, 'closed_return');
 });
 
-test('free-text delivery descriptions never fabricate dispatch attempts', () => {
+test('canonical CE delivery text without numeric code is one strict dispatch attempt until a real failure occurs', () => {
   const row = analyzeShopeeShipment({
     ...base,
     events: [
@@ -139,9 +139,10 @@ test('free-text delivery descriptions never fabricate dispatch attempts', () => 
       { eventTime: '2026-08-03 09:00:00', trackingEventDescZh: 'Delivery Assign' }
     ]
   });
-  assert.equal(row.currentAttemptNo, 0);
-  assert.deepEqual(row.attemptHistory, []);
-  assert.equal(row.attemptStatus, 'UNKNOWN_NO_STRICT_START_EVIDENCE');
+  assert.equal(row.currentAttemptNo, 1);
+  assert.deepEqual(row.attemptHistory, ['2026-08-02 10:00:00']);
+  assert.equal(row.attemptStatus, 'V246_STRICT_START_FAILURE_CYCLE');
+  assert.equal(row.attemptConfidence, 'HIGH');
 });
 
 test('strict 70 START then failure then new 70 START is exactly second attempt', () => {

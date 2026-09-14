@@ -26,6 +26,6 @@ assert.doesNotMatch(backupSource,/readdirSync\(['"]C:\\\\['"]|readdirSync\(['"]D
 assert.match(uiSource,/一键清理C\/D盘CE备份/,'data-management action should explicitly say C/D CE backup cleanup');
 assert.match(uiSource,/driveBreakdown[\s\S]*deletedBytes/,'cleanup completion UI must render per-drive reclaimed bytes');
 assert.match(uiSource,/retainedSafetyBackup/,'cleanup UI must surface the retained verified safety backup');
-assert.match(fixtureSource,/v502-multidrive-backup-ui\.js\?v=20260910-v502-1/,'V502 UI must load after the main app script');
+assert.match(fixtureSource,/v502-multidrive-backup-ui\.js\?v=20260912-v502-3/,'V502 UI must load after the main app script with the current cache-busted key');
 
 console.log('[V502] multi-drive CE backup cleanup smoke passed · D data backups + C launcher pre_update · latest physical verified rollback retained · formal DB/WAL/SHM protected · per-drive usage/reclaimed bytes visible');

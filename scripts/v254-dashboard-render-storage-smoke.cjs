@@ -29,17 +29,18 @@ assert.doesNotThrow(()=>new Function(reportOwner),'V267 report export owner must
 
 assert.match(dashboard,/DELIVERY_KPI_TYPES=new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'canonical UI scope must be exactly TBKH + SHOPEECN + SHOPEEVN');
 assert.match(dashboard,/\/api\/v263\/delivery-trends/,'canonical DashboardV18 must read V263 delivery KPI truth directly');
-assert.match(dashboard,/平均签收天数趋势/,'target boards must replace duplicate first-day trend with average signing days');
-assert.match(dashboard,/1\/2\/3派与平均签收天数/,'target boards must expose one authoritative attempt/signing panel');
+assert.doesNotMatch(dashboard,/平均签收天数趋势/,'live boards must not restore the retired average-signing-days trend chart');
+assert.match(dashboard,/1\/2\/3派与平均签收天数/,'target boards must expose one authoritative attempt/signing summary panel');
+assert.match(dashboard,/趋势图仅保留在导出报表，实时看板不再渲染/,'target boards must disclose that trend charts are export-only after V509');
 assert.match(dashboard,/70 START优先/,'UI must disclose strict START evidence rule');
 assert.match(dashboard,/function renderHome\(/,'home must remain canonical DashboardV18');
 assert.doesNotMatch(dashboard,/派送概率分布（按派次）/,'home must not duplicate the three-business attempt mechanism');
-assert.match(chart,/type === 'days'/,'shared chart renderer must support signing-day values');
+assert.match(chart,/type === 'days'/,'shared chart renderer must support signing-day values for retained report/export surfaces');
 assert.match(chart,/adaptiveAttemptMax/,'low-coverage attempt chart must use readable adaptive scale instead of pinning sub-1% evidence to a 0-100 axis');
 assert.match(chart,/v265-attempt-evidence-status/,'attempt chart must disclose evidence completion status');
 assert.match(chart,/待补抓/,'zero values under incomplete evidence must not be presented as final 0%');
 assert.match(chart,/当前曲线只表示已获得的真实轨迹证据，不作为最终派次率/,'incomplete attempt curves must be explicitly provisional');
-assert.match(css,/#v263DeliveryKpiPanel \.v18-chart-grid\{grid-template-columns:minmax\(0,1fr\)!important/,'attempt chart must occupy the full panel width');
+assert.match(css,/#v263DeliveryKpiPanel \.v18-chart-grid\{grid-template-columns:minmax\(0,1fr\)!important/,'legacy chart layout CSS may remain source-compatible even though live trend mount is retired');
 assert.match(css,/v265-attempt-evidence-status\.incomplete/,'incomplete evidence must have a visible status treatment');
 assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)!important/,'delivery KPI summary must use a balanced four-column layout');
 
@@ -105,7 +106,7 @@ assert.match(trend,/attempt2Known:knownAttempt2[\s\S]*attempt2:attemptEvidenceCo
 assert.match(trend,/attempt3Known:knownAttempt3[\s\S]*attempt3:attemptEvidenceComplete\?knownAttempt3:null/,'reader must retain third-plus attempt evidence and publish it only when complete');
 assert.match(trend,/evidenceIncomplete/,'read model must disclose incomplete evidence instead of presenting partial numbers as final');
 assert.match(trend,/DASHBOARD_LOW_COVERAGE/,'low-coverage dashboard reads must trigger scoped background repair');
-assert.match(runtime,/import '\.\/v263DeliveryKpiTrendPatch\.js';/,'V263 trend route must activate in normal runtime');
+assert.match(runtime,/import '\.\/v263DeliveryKpiTrendPatch\.js';/,'V263 trend route must activate in normal runtime as data source even though live chart rendering is retired');
 
 execFileSync(process.execPath,['scripts/v262-shopee-strict-evidence-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v263-delivery-kpi-trend-smoke.mjs'],{stdio:'inherit'});
@@ -121,4 +122,4 @@ assert.match(r2guard,/DEFAULT_SAFE_STORAGE_BYTES=8\*GIB/,'R2 zero-cost guard mus
 assert.match(r2guard,/storageClass:'STANDARD'/,'R2 must remain Standard-only');
 assert.doesNotMatch(r2guard,/postgresql:\/\/|npg_[A-Za-z0-9]+|BEGIN PRIVATE KEY|AKIA[0-9A-Z]{16}/,'secrets must never be committed');
 execFileSync(process.execPath,['scripts/v257-system-calibration-smoke.cjs'],{stdio:'inherit'});
-console.log('[V487/V267/V265] report export clarity + evidence-aware delivery UI + storage safety gate passed · V486 semantic START behavior verified structurally');
+console.log('[V509/V487/V267/V265] report export clarity + evidence-aware delivery summary + no-live-trend contract + storage safety gate passed · V486 semantic START behavior verified structurally');

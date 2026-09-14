@@ -7,7 +7,7 @@ import XLSX from 'xlsx';
 
 import { parseUnifiedDailyExcel } from '../src/unifiedExcelParser.js';
 
-test('customer name CCAF is classified as CEAF and six businesses reconcile exactly', () => {
+test('customer name CCAF is classified as CEAF and seven businesses reconcile exactly', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-ceaf-'));
   const file = path.join(dir, '日报表_2026-08-09.xlsx');
   try {
@@ -18,8 +18,9 @@ test('customer name CCAF is classified as CEAF and six businesses reconcile exac
       ['CC0002', 'ShopeeVN', 'C C A F', 'PV'],
       ['TBKH0001', 'CECN', 'CCSL', 'PV'],
       ['CC0004', 'ALI1688', 'CCSL', 'PP'],
-      ['SPE0001', 'ShopeeCN', 'Shopee', 'PP'],
-      ['SPE0002', 'ShopeeVN', 'Shopee', 'PV']
+      ['CC0005', 'ShopeeCN', 'Shopee', 'PP'],
+      ['CC0006', 'ShopeeVN', 'Shopee', 'PV'],
+      ['CE0007', '', 'CCSL', 'PV']
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), 'sheet');
@@ -32,10 +33,11 @@ test('customer name CCAF is classified as CEAF and six businesses reconcile exac
       TBKH: 1,
       ALI1688: 1,
       SHOPEECN: 1,
-      SHOPEEVN: 1
+      SHOPEEVN: 1,
+      WHPP: 1
     });
-    assert.equal(parsed.sourceReconciliation.validUniqueWaybills, 6);
-    assert.equal(parsed.sourceReconciliation.classifiedWaybills, 6);
+    assert.equal(parsed.sourceReconciliation.validUniqueWaybills, 7);
+    assert.equal(parsed.sourceReconciliation.classifiedWaybills, 7);
     assert.equal(parsed.sourceReconciliation.difference, 0);
     assert.equal(parsed.sourceReconciliation.balanced, true);
 
@@ -48,6 +50,7 @@ test('customer name CCAF is classified as CEAF and six businesses reconcile exac
     assert.match(ceaf?.classificationReason || '', /CCAF/);
     assert.match(ceaf?.classificationWarning || '', /CEAF,SHOPEEVN/);
     assert.equal(parsed.summary.classificationConflicts, 1);
+    assert.equal(parsed.rows.find(row => row.shipmentCode === 'CE0007')?.businessType, 'WHPP');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

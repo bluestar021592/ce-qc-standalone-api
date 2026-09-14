@@ -310,12 +310,18 @@ export function partitionUnifiedRows(rows = [], typeByBill = new Map()) {
   for (const item of rows || []) {
     const shipmentCode = codeOf(item);
     if (!shipmentCode) continue;
-    const importedType = typeByBill.get(shipmentCode);
+    const importedType = normalizeKnownBusinessType(typeByBill.get(shipmentCode));
+    const historicalType = normalizeKnownBusinessType(item.businessType);
+    const resolvedType = importedType || historicalType || 'UNCLASSIFIED';
+    const missingHistoricalType = !importedType && !historicalType;
     const normalized = {
       ...item,
       shipmentCode,
       运单号: shipmentCode,
-      businessType: importedType || item.businessType || 'CE'
+      businessType: resolvedType,
+      classificationWarning: missingHistoricalType
+        ? [String(item.classificationWarning || '').trim(), '历史跨日件缺少可靠业务归属，未兜底到CE'].filter(Boolean).join('；')
+        : item.classificationWarning
     };
     if (importedType) dailyByBill.set(shipmentCode, normalized);
     else carryByBill.set(shipmentCode, normalized);
@@ -484,9 +490,14 @@ export function loadUnifiedPeriodBusinessState(businessType, fromDate, toDate) {
   };
 }
 
+function normalizeKnownBusinessType(value) {
+  const type = String(value || '').trim().toUpperCase();
+  return BUSINESS_TYPES.includes(type) ? type : '';
+}
+
 function normalizeBusinessType(value) {
-  const type = String(value || '').toUpperCase();
-  if (!BUSINESS_TYPES.includes(type)) throw new Error('不支持的业务类型');
+  const type = normalizeKnownBusinessType(value);
+  if (!type) throw new Error('不支持的业务类型');
   return type;
 }
 

@@ -11,7 +11,7 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
   const v168At = loader.indexOf('/v168-seven-business-status.js');
   const v169At = loader.indexOf('/v169-seven-business-legacy-status-sync.js');
 
-  assert.match(loader, /consolidated-persisted-status-loader-v1/);
+  assert.match(loader, /2026-09-13-v509-no-live-trend-shell-v1/);
   assert.match(loader, /PERSISTED_STATUS_BUILD='2026-09-02-v414-one-read-seven-business-status-v1'/);
   assert.match(loader, /X-CE-QC-Persisted-Status/);
   assert.match(loader, /WHPP_PAGE_OWNER='V132'/);
@@ -37,7 +37,8 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
 
   const whpp = read('../public/v132-whpp-seven-business-fast.js');
   assert.match(whpp, /displayOnly:true,authoritativeRunner:'V67'/);
-  assert.match(whpp, /no-separate-processing-entry-v1/);
+  assert.match(whpp, /VERSION='2026-09-03-v419-whpp-one-global-range-board-v2'/);
+  assert.match(whpp, /REVISION='2026-09-03-v419-whpp-range-summary-trend-detail-v2'/);
   assert.doesNotMatch(whpp, /继续七业务处理|onclick="window\.runUnified\(\)"|\/api\/whpp\/run\/start/);
 
   const v170 = read('../public/v170-route-isolation-whpp-priority.js');
@@ -47,7 +48,7 @@ test('UI loader serves atomic import truth then one persisted V322/V168 status c
 
   const totalSync = read('../public/v68-whpp-classification-stability.js');
   assert.match(totalSync, /fullUnique:\s*core\s*\+\s*whppTotal/);
-  assert.match(totalSync, /日报导入完成，\\s\*共/);
+  assert.match(totalSync, /日报导入完成，\s*共/);
   assert.match(totalSync, /state\.summary\s*=\s*\{[\s\S]*validUniqueWaybills:\s*core\s*\+\s*total/);
 });
 
@@ -123,7 +124,7 @@ test('V168 performs one exact-date persisted status read; V419 keeps V414 semant
 
 test('V408 home WHPP KPI reads canonical V132 summary and preserves normal-flow semantics', () => {
   const v64 = read('../public/v64-whpp-total-kpi-integration.js');
-  assert.match(v64, /v408-canonical-v132-home-kpi-v1/);
+  assert.match(v64, /2026-09-04-v426-unified-import-truth-kpi-v3/);
   assert.match(v64, /\/api\/v132\/whpp-fast-summary/);
   assert.doesNotMatch(v64, /\/api\/v71\/whpp-summary/);
   assert.match(v64, /metrics\.activeStoreRetention/);
@@ -163,6 +164,7 @@ test('V411 entry guard blocks complete and unconfirmed run/resume entries, and r
     visibilityState: 'visible',
     body: {},
     getElementById(id) { return id === 'reportDate' ? reportDate : null; },
+    querySelector() { return null; },
     querySelectorAll(selector) {
       if (selector === 'button') return [button];
       if (selector === 'button[data-v169-entry-lock="1"]') return button.dataset.v169EntryLock === '1' ? [button] : [];
@@ -179,8 +181,11 @@ test('V411 entry guard blocks complete and unconfirmed run/resume entries, and r
     { key:'WHPP', state:'pending', statusFresh:false }
   ];
   const canonical = {
-    lastTruth: { reportDate: '2026-08-29', complete: false, statusFresh: false, stages: staleStages },
-    refresh: async function () { return this.lastTruth; }
+    lastTruth: { reportDate: '2026-08-29', complete: false, statusFresh: false, stages: staleStages, checkedAt: 0 },
+    refresh: async function () {
+      this.lastTruth = { ...this.lastTruth, checkedAt: Number(this.lastTruth?.checkedAt || 0) + 1 };
+      return this.lastTruth;
+    }
   };
   const window = {
     __CE_QC_V168_SEVEN_BUSINESS_STATUS__: canonical,
@@ -202,7 +207,7 @@ test('V411 entry guard blocks complete and unconfirmed run/resume entries, and r
     console: { info() {}, warn() {}, error() {} },
     Promise,
     Date,
-    setTimeout: () => 1,
+    setTimeout: callback => { if (typeof callback === 'function') callback(); return 1; },
     clearTimeout() {},
     setInterval: () => 1,
     clearInterval() {}
@@ -223,7 +228,7 @@ test('V411 entry guard blocks complete and unconfirmed run/resume entries, and r
   assert.equal(runCalls, 0);
 
   canonical.lastTruth = {
-    reportDate: '2026-08-29', complete: true, statusFresh: true,
+    reportDate: '2026-08-29', complete: true, statusFresh: true, checkedAt: 10,
     stages: [
       { key:'CCSL', state:'done', statusFresh:true },
       { key:'SHOPEE', state:'done', statusFresh:true },
@@ -236,7 +241,7 @@ test('V411 entry guard blocks complete and unconfirmed run/resume entries, and r
   assert.equal(resumeCalls, 0);
 
   canonical.lastTruth = {
-    reportDate: '2026-08-30', complete: false, statusFresh: true,
+    reportDate: '2026-08-30', complete: false, statusFresh: true, checkedAt: 20,
     stages: [
       { key:'CCSL', state:'done', statusFresh:true },
       { key:'SHOPEE', state:'done', statusFresh:true },
@@ -252,7 +257,7 @@ test('V411 entry guard blocks complete and unconfirmed run/resume entries, and r
   assert.equal(resumeCalls, 1);
 
   canonical.lastTruth = {
-    reportDate: '2026-08-29', complete: true, statusFresh: true,
+    reportDate: '2026-08-29', complete: true, statusFresh: true, checkedAt: 30,
     stages: [
       { key:'CCSL', state:'done', statusFresh:true },
       { key:'SHOPEE', state:'done', statusFresh:true },
@@ -266,7 +271,7 @@ test('V411 entry guard blocks complete and unconfirmed run/resume entries, and r
   assert.equal(runCalls, 0);
 
   canonical.lastTruth = {
-    reportDate: '2026-08-30', complete: false, statusFresh: true,
+    reportDate: '2026-08-30', complete: false, statusFresh: true, checkedAt: 40,
     stages: [
       { key:'CCSL', state:'done', statusFresh:true },
       { key:'SHOPEE', state:'done', statusFresh:true },

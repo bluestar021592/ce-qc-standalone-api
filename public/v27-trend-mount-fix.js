@@ -1,5 +1,6 @@
 (function installV27TrendMountFix(global){
   if (new URLSearchParams(location.search).has('visualTest')) return;
+  if (global.__CE_QC_LIVE_TRENDS_DISABLED__ === true) return;
 
   const TYPE_BY_PAGE={ce:'CE',ceaf:'CEAF',tbkh:'TBKH',ali1688:'ALI1688',shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'};
   const pending=new Map();
