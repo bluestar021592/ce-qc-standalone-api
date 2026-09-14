@@ -52,7 +52,7 @@ test('V505 keeps stale-heartbeat PREPARE and EXECUTE jobs locked while their wor
     fs.rmSync(executeFile,{force:true});
   }finally{
     try{closeDb();}catch{}
-    fs.rmSync(dir,{recursive:true,force:true});
+    fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
   }
 });
 
@@ -101,7 +101,7 @@ test('V505 detached execute returns quickly, durably binds the sealed DB path, r
   }finally{
     try{closeDb();}catch{}
     for(const file of [prepareStatusFile,executeStatusFile])if(file){try{fs.rmSync(file,{force:true});}catch{}}
-    fs.rmSync(dir,{recursive:true,force:true});
+    fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
   }
 });
 
@@ -156,6 +156,6 @@ test('V505 coordinator restarts only post-commit finalization for an exact recei
     if(spawnedPid>0){try{process.kill(spawnedPid);}catch{}}
     try{closeDb();}catch{}
     try{fs.rmSync(statusFile,{force:true});}catch{}
-    fs.rmSync(dir,{recursive:true,force:true});
+    fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
   }
 });
