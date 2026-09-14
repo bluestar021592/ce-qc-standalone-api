@@ -1,5 +1,5 @@
 (function installV505DataPurgeRecovery(global){
-  const PATCH_ID='2026-09-11-v505-async-purge-prepare-execute-ui-v8-version-aware-owner';
+  const PATCH_ID='2026-09-14-v505-async-purge-prepare-execute-ui-v8-version-aware-owner-v531-server-admin-authority';
   const previous=global.__CE_QC_V505_DATA_PURGE_RECOVERY__;
   if(previous?.patchId===PATCH_ID)return;
   if(previous?.getStatus?.().active){
@@ -219,9 +219,13 @@
 
   async function v505OpenDataPurge(){
     if(active)return;
-    let session;
-    try{session=await requestJson('/api/session',{},8000);}catch(error){return alert(`无法读取管理员状态：${error.message}`);}
-    if(String(session?.user?.role||'').toUpperCase()!=='ADMIN')return;
+    // Do not block the destructive flow on a duplicate /api/session round-trip.
+    // The normal app bootstrap already exposes the best-effort cached role for
+    // UI gating, while both PREPARE and EXECUTE are independently protected by
+    // requireRole('ADMIN') on the server. If the cache is absent/stale, the
+    // server remains the sole authority and fails closed before any purge work.
+    const knownRole=typeof accessSession!=='undefined'?String(accessSession?.user?.role||'').toUpperCase():'';
+    if(knownRole&&knownRole!=='ADMIN')return alert('当前账户不是管理员，无法清空业务数据。');
     if(!global.confirm('确定要清空全部业务数据吗？系统会先创建并校验完整备份，用户、权限、配置、白名单、备份和审计不会删除。'))return;
 
     const dialog=document.getElementById('dataPurgeDialog');

@@ -102,11 +102,17 @@ assert.match(db,/V505_PURGE_EXECUTE_SCHEMA_MISMATCH/);
 
 const ui=read('public/v505-data-purge-recovery.js');
 assert.match(ui,/v8-version-aware-owner/);
+assert.match(ui,/v531-server-admin-authority/,'V531 owner must be the browser purge authority');
+assert.doesNotMatch(ui,/requestJson\('\/api\/session'/,'purge open must never depend on a duplicate /api/session round-trip');
+assert.match(ui,/knownRole=typeof accessSession!=='undefined'/,'UI may use already-loaded session state only as a best-effort early role hint');
 assert.match(ui,/submitPrepareRecovering/);
 assert.match(ui,/submitExecuteRecovering/);
 assert.match(ui,/不会解除任务锁，也不会启动第二个任务/);
+const server=read('server.js');
+assert.match(server,/app\.post\('\/api\/admin\/data-purge\/prepare', requireRole\('ADMIN'\)/,'PREPARE must remain server-authoritative ADMIN-only');
+assert.match(server,/app\.post\('\/api\/admin\/data-purge\/execute', requireRole\('ADMIN'\)/,'EXECUTE must remain server-authoritative ADMIN-only');
 const lazy=read('public/v108-route-lazy-features.js');
 assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260911-v505-8/);
 assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · current fail-closed V505 purge ownership, sealed DB/receipt authority, startup-orphan guard, write freeze and UI owner are aligned');
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · current fail-closed V505 purge ownership, server-authoritative ADMIN gate, sealed DB/receipt authority, startup-orphan guard, write freeze and UI owner are aligned');
