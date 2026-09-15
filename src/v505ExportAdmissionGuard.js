@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { getRuntimeConfig } from './db.js';
-import { V505_EXPORT_SUBMISSION_MUTEX_FILE } from './v505PurgeExternalActivity.js';
+import { inspectExportSubmissionRecord, V505_EXPORT_SUBMISSION_MUTEX_FILE } from './v505PurgeExternalActivity.js';
 import { inspectPurgeWriteFreezeState, v505PurgeWriteFreezeGuard } from './v505PurgeWriteFreezeGuard.js';
 
-export const V505_EXPORT_ADMISSION_GUARD_ID='2026-09-11-v505-export-admission-handshake-v3';
+export const V505_EXPORT_ADMISSION_GUARD_ID='2026-09-15-v539-export-admission-pid-start-v1';
 const V473_PREPARE_PATH='/api/v473/export-period/prepare';
 const PROCESS_INSTANCE_TOKEN=crypto.randomBytes(16).toString('hex');
 const originalPost=express.application.post;
@@ -19,11 +19,6 @@ function lockFile(){
   return path.join(dir,V505_EXPORT_SUBMISSION_MUTEX_FILE);
 }
 function readJson(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
-function pidAlive(pid){
-  const value=Number(pid||0);
-  if(!Number.isInteger(value)||value<=0)return null;
-  try{process.kill(value,0);return true;}catch(error){return error?.code==='EPERM'?true:false;}
-}
 function safeJobId(value){const id=String(value||'').trim();return /^EXP-[A-Z0-9-]{10,80}$/i.test(id)?id:'';}
 function exportJobFile(jobId){const id=safeJobId(jobId);return id?path.join(getRuntimeConfig().dataDir,'export_jobs',`${id}.json`):'';}
 function lockRecord(){return {pid:process.pid,processInstanceToken:PROCESS_INSTANCE_TOKEN,requestToken:crypto.randomUUID(),acquiredAt:Date.now(),owner:'V473_EXPORT_ADMISSION',guard:V505_EXPORT_ADMISSION_GUARD_ID};}
@@ -41,20 +36,36 @@ function createLock(file,record){
     throw error;
   }
 }
+function sameLockIdentity(left={},right={}){
+  const leftRequest=String(left.requestToken||'');
+  const rightRequest=String(right.requestToken||'');
+  if(!leftRequest||!rightRequest||leftRequest!==rightRequest)return false;
+  return Number(left.pid||0)===Number(right.pid||0)
+    && String(left.processInstanceToken||'')===String(right.processInstanceToken||'')
+    && Number(left.acquiredAt||0)===Number(right.acquiredAt||0);
+}
+function removeStaleLockIfUnchanged(file,expected){
+  const current=readJson(file);
+  if(!current||!sameLockIdentity(current,expected))return false;
+  try{fs.rmSync(file,{force:true});return true;}catch{return false;}
+}
 function staleForThisProcess(record={}){
   const pid=Number(record.pid||0);
-  if(pid===process.pid&&String(record.processInstanceToken||'')!==PROCESS_INSTANCE_TOKEN)return true;
-  return pidAlive(pid)===false;
+  if(pid===process.pid&&String(record.processInstanceToken||'')!==PROCESS_INSTANCE_TOKEN){
+    return {stale:true,reason:'PROCESS_INSTANCE_REPLACED'};
+  }
+  const inspection=inspectExportSubmissionRecord(record);
+  return {stale:inspection.active===false&&inspection.stale===true,reason:inspection.identityState||inspection.workerState||'UNKNOWN',inspection};
 }
 function acquire(){
   const file=lockFile();const record=lockRecord();
   if(createLock(file,record))return {ok:true,file,record};
   const current=readJson(file);
-  if(current&&staleForThisProcess(current)){
-    try{fs.rmSync(file,{force:true});}catch{}
-    if(createLock(file,record))return {ok:true,file,record,recoveredStale:true};
+  const stale=current?staleForThisProcess(current):{stale:false};
+  if(current&&stale.stale&&removeStaleLockIfUnchanged(file,current)){
+    if(createLock(file,record))return {ok:true,file,record,recoveredStale:true,recoveryReason:stale.reason};
   }
-  return {ok:false,file,current};
+  return {ok:false,file,current:readJson(file)||current,staleInspection:stale.inspection||null};
 }
 function release(lock){
   if(!lock?.record?.requestToken)return false;

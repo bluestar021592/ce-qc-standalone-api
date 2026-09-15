@@ -7,7 +7,7 @@ import test from 'node:test';
 
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
-test('V538 keeps real/recent export work protected but expires ancient unverified stale locks',async()=>{
+test('V539 keeps real/recent export work protected while recovering stale PID-reused locks',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v505-export-activity-'));
   process.env.DATA_DIR=dir;
   process.env.DB_FILE=path.join(dir,'test.db');
@@ -15,7 +15,8 @@ test('V538 keeps real/recent export work protected but expires ancient unverifie
   const {
     inspectActiveExportJobs,inspectExportSubmissionAdmission,assertNoActiveExportJobs,
     V505_EXPORT_SUBMISSION_MUTEX_FILE,V538_UNVERIFIED_OLD_EXPORT_HARD_EXPIRY_MS,
-    classifyV538OldLiveExportIdentity
+    V539_ADMISSION_PID_REUSE_TOLERANCE_MS,
+    classifyV538OldLiveExportIdentity,classifyV539ExportAdmissionPid
   }=await import('../src/v505PurgeExternalActivity.js');
   const cfg=getRuntimeConfig();
   const jobsDir=path.join(cfg.dataDir,'export_jobs');fs.mkdirSync(jobsDir,{recursive:true});
@@ -36,6 +37,22 @@ test('V538 keeps real/recent export work protected but expires ancient unverifie
     assert.equal(ancientUnknown.workerState,'ALIVE_UNVERIFIED_EXPIRED');
     assert.equal(classifyV538OldLiveExportIdentity({identityState:'MATCH',ageMs:30*24*60*60_000}).block,true,'a proven exact export worker must remain protected regardless of age');
     assert.equal(classifyV538OldLiveExportIdentity({identityState:'MISMATCH',ageMs:2*60*60_000}).block,false,'a proven PID reuse mismatch must not block purge');
+
+    // V539 admission-lock ownership is decided from process creation time only
+    // when it proves PID reuse. Missing/ambiguous process start data stays locked.
+    const lockAt=Date.now()-60_000;
+    const originalOwner=classifyV539ExportAdmissionPid({workerState:'ALIVE',acquiredAt:lockAt,processStartedAt:lockAt-10_000});
+    assert.equal(originalOwner.active,true,'the process that predates its lock must stay protected');
+    assert.equal(originalOwner.identityState,'START_MATCH');
+    const recycledOwner=classifyV539ExportAdmissionPid({workerState:'ALIVE',acquiredAt:lockAt,processStartedAt:lockAt+V539_ADMISSION_PID_REUSE_TOLERANCE_MS+1});
+    assert.equal(recycledOwner.active,false,'a process created after the old lock proves PID reuse');
+    assert.equal(recycledOwner.stale,true);
+    assert.equal(recycledOwner.workerState,'ALIVE_PID_REUSED');
+    const unverifiedOwner=classifyV539ExportAdmissionPid({workerState:'ALIVE',acquiredAt:lockAt,processStartedAt:0});
+    assert.equal(unverifiedOwner.active,true,'process-start lookup failure must fail closed');
+    assert.equal(unverifiedOwner.identityState,'START_UNVERIFIED');
+    assert.equal(classifyV539ExportAdmissionPid({workerState:'ALIVE',acquiredAt:0,processStartedAt:lockAt}).active,true,'missing lock timestamp must fail closed');
+    assert.equal(classifyV539ExportAdmissionPid({workerState:'DEAD',acquiredAt:lockAt}).active,false,'a confirmed-dead PID remains recoverable');
 
     // A stale job can point at a numeric PID that Windows has since reused for an
     // unrelated process. The current test process is deliberately not an export
@@ -100,10 +117,18 @@ test('V538 keeps real/recent export work protected but expires ancient unverifie
     fs.rmSync(file,{force:true});
     const admissionFile=path.join(cfg.backupsDir,V505_EXPORT_SUBMISSION_MUTEX_FILE);fs.mkdirSync(path.dirname(admissionFile),{recursive:true});
     fs.writeFileSync(admissionFile,JSON.stringify({pid:process.pid,requestToken:'export-admission-test',acquiredAt:Date.now()}),'utf8');
-    const admission=inspectExportSubmissionAdmission();
+    let admission=inspectExportSubmissionAdmission();
     assert.equal(admission.active,true);
     assert.equal(admission.workerState,'ALIVE');
     assert.throws(()=>assertNoActiveExportJobs(),error=>error?.code==='DATA_PURGE_EXPORT_SUBMISSION_BUSY','purge must yield while port 5178 is between request acceptance and durable job registration');
+
+    if(process.platform==='win32'){
+      fs.writeFileSync(admissionFile,JSON.stringify({pid:process.pid,requestToken:'old-export-admission-test',acquiredAt:Date.now()-60*60_000}),'utf8');
+      admission=inspectExportSubmissionAdmission();
+      assert.equal(admission.active,false,'Windows process creation time proves an ancient lock cannot belong to this newer PID owner');
+      assert.equal(admission.workerState,'ALIVE_PID_REUSED');
+      assert.equal(admission.identityState,'PID_REUSED');
+    }
   }finally{
     try{confirmedWorker?.kill();}catch{}
     fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
