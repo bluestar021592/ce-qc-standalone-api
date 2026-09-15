@@ -1,14 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import { getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-12-v505-purge-export-activity-gate-v4-structural-failclosed';
+export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-15-v537-purge-export-pid-identity-v2';
 export const V505_EXPORT_SUBMISSION_MUTEX_FILE='.v505_export_submission.lock.json';
 const ACTIVE_EXPORT_STATUS=new Set(['QUEUED','RUNNING','PROCESSING']);
 const TERMINAL_EXPORT_STATUS=new Set(['COMPLETED','SUCCEEDED','FAILED','CANCELLED']);
 const KNOWN_EXPORT_STATUS=new Set([...ACTIVE_EXPORT_STATUS,...TERMINAL_EXPORT_STATUS]);
 const UNKNOWN_RECENT_MS=Math.max(5*60_000,Math.min(60*60_000,Number(process.env.V505_EXPORT_UNKNOWN_RECENT_MS||30*60_000)));
+const PID_IDENTITY_TIMEOUT_MS=Math.max(1000,Math.min(12_000,Number(process.env.V537_EXPORT_PID_IDENTITY_TIMEOUT_MS||8000)));
 
 function readJson(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
 function validExportJob(job){
@@ -57,6 +59,41 @@ function recentUnknownJob(file,name,now,reason='SIDECAR_UNREADABLE_RECENT'){
     touchedAt:touchedAt?new Date(touchedAt).toISOString():'',file
   };
 }
+function processCommandLine(pid){
+  const value=Number(pid||0);
+  if(!Number.isInteger(value)||value<=0)return {state:'UNKNOWN',commandLine:''};
+  try{
+    if(process.platform==='linux'){
+      const raw=fs.readFileSync(`/proc/${value}/cmdline`);
+      const commandLine=raw.toString('utf8').replace(/\0/g,' ').trim();
+      return commandLine?{state:'KNOWN',commandLine}:{state:'UNKNOWN',commandLine:''};
+    }
+    if(process.platform==='win32'){
+      // Get-CimInstance can take a few seconds to initialize on a cold Windows
+      // host. Keep this bounded, but allow enough time to distinguish a stale
+      // recycled PID from the exact export worker instead of failing closed only
+      // because PowerShell/WMI startup exceeded the previous 2.5s budget.
+      const script=`$p=Get-CimInstance Win32_Process -Filter \"ProcessId = ${value}\" -ErrorAction SilentlyContinue; if($p){[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $p.CommandLine}`;
+      const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:PID_IDENTITY_TIMEOUT_MS});
+      if(result.error)return {state:'UNKNOWN',commandLine:''};
+      const commandLine=String(result.stdout||'').trim();
+      return commandLine?{state:'KNOWN',commandLine}:{state:'UNKNOWN',commandLine:''};
+    }
+    const result=spawnSync('ps',['-p',String(value),'-o','command='],{encoding:'utf8',timeout:PID_IDENTITY_TIMEOUT_MS});
+    if(result.error)return {state:'UNKNOWN',commandLine:''};
+    const commandLine=String(result.stdout||'').trim();
+    return commandLine?{state:'KNOWN',commandLine}:{state:'UNKNOWN',commandLine:''};
+  }catch{return {state:'UNKNOWN',commandLine:''};}
+}
+function exportWorkerIdentity(pid,file=''){
+  const info=processCommandLine(pid);
+  if(info.state!=='KNOWN')return {state:'UNKNOWN',commandLine:''};
+  const commandLine=String(info.commandLine||'').toLowerCase();
+  const jobName=path.basename(String(file||'')).toLowerCase();
+  const workerLike=/(?:export[^\s"']*worker|worker[^\s"']*export)/i.test(commandLine)||commandLine.includes('v473allbusinessexportworker')||commandLine.includes('v183singlebusinessexportjobworker');
+  const exactJob=Boolean(jobName&&commandLine.includes(jobName));
+  return {state:workerLike&&exactJob?'MATCH':'MISMATCH',commandLine};
+}
 
 export function inspectExportSubmissionAdmission(){
   const cfg=getRuntimeConfig();
@@ -92,18 +129,45 @@ export function inspectActiveExportJobs({now=Date.now()}={}){
     if(!ACTIVE_EXPORT_STATUS.has(status))continue;
     const pids=candidatePids(job);
     const pidStates=pids.map(pid=>({pid,state:pidState(pid)}));
-    const live=pidStates.find(item=>item.state==='ALIVE');
+    const liveCandidates=pidStates.filter(item=>item.state==='ALIVE');
     const touchedAt=activityTime(job,file);
     const ageMs=touchedAt>0?Math.max(0,now-touchedAt):Number.POSITIVE_INFINITY;
     const recent=ageMs<=UNKNOWN_RECENT_MS;
-    const protectedState=Boolean(live||recent);
-    if(!protectedState)continue;
+    let live=null;
+    let workerState='';
+    let identityState='';
+    if(recent){
+      live=liveCandidates[0]||null;
+      workerState=live?'ALIVE_RECENT':(pidStates.length?'DEAD_RECENT':'UNKNOWN_RECENT');
+    }else if(liveCandidates.length){
+      const identities=liveCandidates.map(item=>({...item,identity:exportWorkerIdentity(item.pid,file)}));
+      const confirmed=identities.find(item=>item.identity.state==='MATCH');
+      const unresolved=identities.find(item=>item.identity.state==='UNKNOWN');
+      if(confirmed){
+        live=confirmed;
+        workerState='ALIVE_CONFIRMED_OLD';
+        identityState='MATCH';
+      }else if(unresolved){
+        live=unresolved;
+        workerState='ALIVE_UNVERIFIED_OLD';
+        identityState='UNKNOWN';
+      }else{
+        // PID reuse is common on long-running Windows hosts. An ancient RUNNING
+        // sidecar must not become a permanent destructive-purge lock merely
+        // because Windows later assigned the same numeric PID to an unrelated
+        // process. We ignore the stale job only after command-line identity
+        // proves every currently-live PID is not this exact export worker/job.
+        continue;
+      }
+    }else if(!recent){
+      continue;
+    }
     jobs.push({
       jobId:String(job.jobId||job.exportJobId||path.basename(name,'.json')),
       status,
       businessType:String(job.payload?.businessType||job.businessType||''),
-      workerState:live?'ALIVE':(pidStates.length?'DEAD_RECENT':'UNKNOWN_RECENT'),
-      workerPid:live?.pid||0,
+      workerState:workerState||'UNKNOWN_RECENT',workerPid:live?.pid||0,
+      identityState,
       ageMs:Number.isFinite(ageMs)?ageMs:null,
       touchedAt:touchedAt?new Date(touchedAt).toISOString():'',
       file

@@ -3,7 +3,7 @@ import { getDb } from './db.js';
 
 const PATCH_ID = '2026-08-21-v208-fast-dashboard-index-only-first-paint-v1';
 const PERF_PATCH_ID = '2026-08-21-v209-dashboard-request-timing-v1';
-const BOOTSTRAP_AUTHORITY_ID = '2026-08-21-v211-force-v210-bootstrap-route-v1';
+const BOOTSTRAP_AUTHORITY_ID = '2026-08-21-v211-force-v210-bootstrap-route-v2-safe-router-stack';
 const SUMMARY_ROUTE = '/api/v89/instant-dashboard';
 const BOOTSTRAP_ROUTE = '/api/bootstrap';
 const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
@@ -14,13 +14,15 @@ const cache = new Map();
 // Extract that exact private handler through a disposable Express app, then force
 // the real /api/bootstrap route to that handler immediately before listen(). This
 // avoids any later route-registration patch accidentally restoring the old heavy
-// server bootstrap handler.
+// server bootstrap handler. Express 4 exposes a deprecated `router` getter that
+// throws when read as a setting; route inspection must use the internal _router
+// stack directly so a supervised backend restart cannot die during listen().
 function extractV43FastBootstrapHandler() {
   try {
     const probe = express();
     const fallback = function v211BootstrapProbeFallback(req, res) { res.status(599).end(); };
     probe.get(BOOTSTRAP_ROUTE, fallback);
-    const stack = probe.router?.stack || probe._router?.stack || [];
+    const stack = probe._router?.stack || [];
     for (const layer of stack) {
       if (layer?.route?.path !== BOOTSTRAP_ROUTE) continue;
       for (const routeLayer of layer.route.stack || []) {
@@ -38,7 +40,7 @@ const V43_FAST_BOOTSTRAP_HANDLER = extractV43FastBootstrapHandler();
 const previousListenForBootstrapAuthority = express.application.listen;
 express.application.listen = function v211ForceFastBootstrapListen(...args) {
   try {
-    const stack = this.router?.stack || this._router?.stack || [];
+    const stack = this._router?.stack || [];
     let matched = 0;
     let replaced = 0;
     for (const layer of stack) {
