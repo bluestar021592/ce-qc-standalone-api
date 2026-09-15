@@ -4,13 +4,14 @@ import { spawnSync } from 'node:child_process';
 
 import { getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-15-v537-purge-export-pid-identity-v2';
+export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-15-v538-purge-unverified-old-export-expiry-v1';
 export const V505_EXPORT_SUBMISSION_MUTEX_FILE='.v505_export_submission.lock.json';
 const ACTIVE_EXPORT_STATUS=new Set(['QUEUED','RUNNING','PROCESSING']);
 const TERMINAL_EXPORT_STATUS=new Set(['COMPLETED','SUCCEEDED','FAILED','CANCELLED']);
 const KNOWN_EXPORT_STATUS=new Set([...ACTIVE_EXPORT_STATUS,...TERMINAL_EXPORT_STATUS]);
 const UNKNOWN_RECENT_MS=Math.max(5*60_000,Math.min(60*60_000,Number(process.env.V505_EXPORT_UNKNOWN_RECENT_MS||30*60_000)));
 const PID_IDENTITY_TIMEOUT_MS=Math.max(1000,Math.min(12_000,Number(process.env.V537_EXPORT_PID_IDENTITY_TIMEOUT_MS||8000)));
+export const V538_UNVERIFIED_OLD_EXPORT_HARD_EXPIRY_MS=Math.max(60*60_000,Math.min(7*24*60*60_000,Number(process.env.V538_EXPORT_UNVERIFIED_HARD_EXPIRY_MS||24*60*60_000)));
 
 function readJson(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
 function validExportJob(job){
@@ -94,6 +95,15 @@ function exportWorkerIdentity(pid,file=''){
   const exactJob=Boolean(jobName&&commandLine.includes(jobName));
   return {state:workerLike&&exactJob?'MATCH':'MISMATCH',commandLine};
 }
+export function classifyV538OldLiveExportIdentity({identityState='',ageMs=Number.POSITIVE_INFINITY}={}){
+  const state=String(identityState||'UNKNOWN').toUpperCase();
+  if(state==='MATCH')return {block:true,workerState:'ALIVE_CONFIRMED_OLD',identityState:'MATCH'};
+  if(state==='MISMATCH')return {block:false,workerState:'ALIVE_PID_REUSED_OLD',identityState:'MISMATCH'};
+  const finiteAge=Number.isFinite(Number(ageMs));
+  const expired=finiteAge&&Number(ageMs)>V538_UNVERIFIED_OLD_EXPORT_HARD_EXPIRY_MS;
+  if(expired)return {block:false,workerState:'ALIVE_UNVERIFIED_EXPIRED',identityState:'UNKNOWN'};
+  return {block:true,workerState:'ALIVE_UNVERIFIED_OLD',identityState:'UNKNOWN'};
+}
 
 export function inspectExportSubmissionAdmission(){
   const cfg=getRuntimeConfig();
@@ -148,15 +158,15 @@ export function inspectActiveExportJobs({now=Date.now()}={}){
         workerState='ALIVE_CONFIRMED_OLD';
         identityState='MATCH';
       }else if(unresolved){
+        const decision=classifyV538OldLiveExportIdentity({identityState:'UNKNOWN',ageMs});
+        if(!decision.block)continue;
         live=unresolved;
-        workerState='ALIVE_UNVERIFIED_OLD';
-        identityState='UNKNOWN';
+        workerState=decision.workerState;
+        identityState=decision.identityState;
       }else{
-        // PID reuse is common on long-running Windows hosts. An ancient RUNNING
-        // sidecar must not become a permanent destructive-purge lock merely
-        // because Windows later assigned the same numeric PID to an unrelated
-        // process. We ignore the stale job only after command-line identity
-        // proves every currently-live PID is not this exact export worker/job.
+        // PID reuse is common on long-running Windows hosts. An old RUNNING
+        // sidecar must not become a permanent purge lock merely because Windows
+        // later assigned the same numeric PID to an unrelated process.
         continue;
       }
     }else if(!recent){
