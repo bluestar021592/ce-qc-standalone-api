@@ -1,6 +1,6 @@
 (function installRouteLazyFeaturesV108(global){
-  if(global.__CE_QC_V108_ROUTE_LAZY__?.version==='2026-09-15-v544-purge-owner-race-v1')return;
-  const VERSION='2026-09-15-v544-purge-owner-race-v1';
+  if(global.__CE_QC_V108_ROUTE_LAZY__?.version==='2026-09-15-v545-explicit-purge-owner-v1')return;
+  const VERSION='2026-09-15-v545-explicit-purge-owner-v1';
   const loaded=new Map();
   const groups={
     shopee:[
@@ -17,7 +17,7 @@
     // V104 is intentionally retired from the active data-management path.
     // V505 is the single purge owner; V106 remains only as a compatibility UI guard
     // for already-open/stale pages and does not install a competing purge workflow.
-    data:['/v505-data-purge-recovery.js?v=20260915-v544-1','/v106-purge-legacy-controls-hide.js?v=20260915-v544-1'],
+    data:['/v505-data-purge-recovery.js?v=20260915-v545-1','/v106-purge-legacy-controls-hide.js?v=20260915-v545-1'],
     carry:['/v99-carry-live-ui.js?v=20260814-1']
   };
 
@@ -33,7 +33,7 @@
       try{existing.remove();}catch{}
     }
     const promise=new Promise((resolve,reject)=>{
-      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v544';
+      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v545';
       script.onload=()=>resolve(script);script.onerror=()=>reject(new Error(`加载页面功能失败：${src}`));document.head.appendChild(script);
     }).catch(error=>{loaded.delete(src);console.warn('[CE-QC][V108_LAZY]',error);throw error;});
     loaded.set(src,promise);return promise;
@@ -63,18 +63,19 @@
   document.addEventListener('click',event=>{
     const purgeTrigger=event.target?.closest?.('[data-testid="one-click-purge-home"],.danger-outline[onclick*="openDataPurge"]');
     if(purgeTrigger){
-      if(reassertPurgeOwner())return;
-      // Capture-phase gate: the legacy inline openDataPurge handler must never run
-      // before V505 has finished loading. Otherwise a fast first click can enter
-      // the obsolete synchronous backup UI and appear permanently stuck on a
-      // 25+ GiB database. Load the single V505 owner first, then invoke it once.
+      const patch=String(global.__CE_QC_V505_DATA_PURGE_RECOVERY__?.patchId||'');
+      if(patch.includes('v545-explicit-two-step')&&reassertPurgeOwner())return;
+      // Capture-phase gate: no legacy owner may receive the destructive click.
+      // Load the cache-busted V545 owner first. V545 itself opens an inert wizard;
+      // backup starts only after an explicit second click on “备份并继续”.
       event.preventDefault();
       event.stopImmediatePropagation();
       void loadGroup('data').then(()=>{
-        if(!reassertPurgeOwner())throw new Error('V505 清空任务控制器尚未就绪。');
+        const installed=String(global.__CE_QC_V505_DATA_PURGE_RECOVERY__?.patchId||'');
+        if(!installed.includes('v545-explicit-two-step')||!reassertPurgeOwner())throw new Error('V545 清空任务控制器尚未就绪。');
         purgeOwner()();
       }).catch(error=>{
-        console.warn('[CE-QC][V544_PURGE_OWNER_GATE]',error);
+        console.warn('[CE-QC][V545_PURGE_OWNER_GATE]',error);
         global.alert?.('清空任务控制器加载失败，未启动任何清空或备份任务。请刷新页面后重试。');
       });
       return;
