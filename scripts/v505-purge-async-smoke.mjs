@@ -70,7 +70,10 @@ assert.match(pidOwnership,/classifyV539ExportAdmissionPid/,'V541 purge ownership
 assert.match(pidOwnership,/workerClaimedAt\|\|job\.startedAt\|\|job\.submittedAt/,'V541 worker ownership must bind to a durable task-generation timestamp');
 
 const freeze=read('src/v505PurgeWriteFreezeGuard.js');
-assert.match(freeze,/v20-historical-startup-reconcile/);
+assert.match(freeze,/v542-write-freeze-pid-reuse-v1/);
+assert.match(freeze,/inspectV541PurgeJobWorker/,'V542 write-freeze job ownership must use the shared process-start PID proof');
+assert.match(freeze,/inspectV541PurgePidOwnership/,'V542 write-freeze submission mutex ownership must use the shared process-start PID proof');
+assert.doesNotMatch(freeze,/function pidAlive\(/,'V542 must not regress to numeric PID liveness in write-freeze');
 assert.match(freeze,/COMMIT_RECEIPT_UNREADABLE/);
 assert.match(freeze,/COMMIT_RECEIPT_ORPHANED/);
 assert.match(freeze,/syncPurgeQueryOnly\(protectSharedDb\)/);
@@ -125,4 +128,4 @@ const lazy=read('public/v108-route-lazy-features.js');
 assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260911-v505-8/);
 assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V541 PID-reuse recovery preserves sealed DB/receipt authority, startup-orphan retirement, write freeze and server-authoritative purge ownership');
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V542 write-freeze now shares fail-closed PID-generation ownership with V541 global/coordinator guards while preserving sealed DB/receipt authority');
