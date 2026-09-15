@@ -125,7 +125,12 @@ const server=read('server.js');
 assert.match(server,/app\.post\('\/api\/admin\/data-purge\/prepare', requireRole\('ADMIN'\)/,'PREPARE must remain server-authoritative ADMIN-only');
 assert.match(server,/app\.post\('\/api\/admin\/data-purge\/execute', requireRole\('ADMIN'\)/,'EXECUTE must remain server-authoritative ADMIN-only');
 const lazy=read('public/v108-route-lazy-features.js');
-assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260911-v505-8/);
+assert.match(lazy,/2026-09-15-v544-purge-entry-owner-race-v1/);
+assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v544-1/);
+assert.match(lazy,/\[onclick\*="openDataPurge"\]/);
+assert.match(lazy,/stopImmediatePropagation\(\)/);
+assert.match(lazy,/await loadGroup\('data'\)/);
+assert.match(lazy,/__CE_QC_V505_DATA_PURGE_RECOVERY__\?\.openDataPurge/);
 assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V542 write-freeze now shares fail-closed PID-generation ownership with V541 global/coordinator guards while preserving sealed DB/receipt authority');
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V544 capture-phase purge entry waits for the single V505 owner; V542/V541 fail-closed PID-generation and sealed DB/receipt authority remain intact');
