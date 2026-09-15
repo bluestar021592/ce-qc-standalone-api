@@ -1,6 +1,7 @@
 (function installV142HistoryAudit(global){
   if(global.__CE_QC_V142_HISTORY_AUDIT__)return;global.__CE_QC_V142_HISTORY_AUDIT__=true;
   const VERSION='2026-09-15-v543-isolated-history-audit-ui-v1';
+  const V419_MANUAL_ONLY_COMPAT='2026-09-02-v419-manual-only-history-audit-no-open-mutation-v4';
   const V451_UI_ID='2026-09-07-v451-snapshot-indexed-history-audit-ui-v1';
   const V456_UI_ID='2026-09-08-v456-whpp-authority-diagnostic-ui-v1';
   const V457_UI_ID='2026-09-08-v457-whpp-legacy-completion-attestation-ui-v1';
@@ -101,6 +102,6 @@
   function ensure(){if(visible())host();}
   document.addEventListener('click',e=>{if(e.target?.closest?.('[data-page="import"],.side-link[data-path="/import"]'))setTimeout(ensure,300);},true);
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(ensure,800),{once:true});else setTimeout(ensure,800);
-  global.__CE_QC_V142_HISTORY_AUDIT__={version:VERSION,v451UiId:V451_UI_ID,v456UiId:V456_UI_ID,v457UiId:V457_UI_ID,v460UiId:V460_UI_ID,v470UiId:V470_UI_ID,v543UiId:V543_UI_ID,refresh:load,get running(){return auditRunning;},get lastLoadedAt(){return lastLoadedAt;},automatic:false};
-  console.info('[CE-QC][V142_HISTORY_AUDIT]',VERSION,V543_UI_ID,'manual audit runs in an isolated read-only child and polls durable in-process job state; no business-data mutation or CE network call.');
+  global.__CE_QC_V142_HISTORY_AUDIT__={version:VERSION,v419ManualOnlyCompat:V419_MANUAL_ONLY_COMPAT,v451UiId:V451_UI_ID,v456UiId:V456_UI_ID,v457UiId:V457_UI_ID,v460UiId:V460_UI_ID,v470UiId:V470_UI_ID,v543UiId:V543_UI_ID,refresh:load,get running(){return auditRunning;},get lastLoadedAt(){return lastLoadedAt;},automatic:false};
+  console.info('[CE-QC][V142_HISTORY_AUDIT]',VERSION,V419_MANUAL_ONLY_COMPAT,V543_UI_ID,'manual audit runs in an isolated read-only child and polls durable in-process job state; no business-data mutation or CE network call.');
 })(window);
