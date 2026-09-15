@@ -1,6 +1,7 @@
 import { getDb } from './db.js';
 
 export const V142_HISTORY_AUDIT_ID = '2026-09-07-v451-snapshot-indexed-readonly-history-audit-v2-fail-closed';
+export const V543_HISTORY_AUDIT_ISOLATION_ID = '2026-09-15-v543-isolated-readonly-history-audit-v1';
 export const V456_WHPP_AUTHORITY_DIAGNOSTIC_ID = '2026-09-08-v456-whpp-finalized-snapshot-authority-diagnostic-v1';
 export const V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID = '2026-09-08-v457-whpp-legacy-metadata-loss-attestation-v1';
 export const V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID = '2026-09-08-v460-whpp-history-snapshot-exact-disambiguation-v1';
@@ -191,9 +192,11 @@ function loadBulkHistory(db,from,to){
   const ceafMembers=new Map();
   for(const row of ceafRows){const k=key(row.reportDate,row.snapshotId);if(!ceafMembers.has(k))ceafMembers.set(k,new Set());ceafMembers.get(k).add(String(row.shipmentCode||'').trim().toUpperCase());}
 
-  // WHPP daily_parse_rows has a businessType/reportDate leading index, so this
-  // bounded lookup remains safe. It is used only for the CEAF source-membership check.
-  const markerRows=exists.business_daily_parse_rows?rows(db,`SELECT reportDate,shipmentCode,rowJson FROM business_daily_parse_rows
+  // V543 keeps the exact CEAF/CCAF source-membership proof but forces the known
+  // business/date/shipment leading index before inspecting rowJson. The text
+  // predicate remains exact evidence; it now runs only inside the indexed WHPP
+  // date slice and, in the UI path, inside an isolated read-only child process.
+  const markerRows=exists.business_daily_parse_rows?rows(db,`SELECT reportDate,shipmentCode,rowJson FROM business_daily_parse_rows INDEXED BY idx_business_daily_rows
     WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ?
       AND (COALESCE(rowJson,'') LIKE '%CCAF%' OR COALESCE(rowJson,'') LIKE '%CEAF%')`,from,to):[];
   const airMarkers=new Map();
@@ -241,8 +244,9 @@ function airForDate(bulk,reportDate,snapshotId){
   return{markers:markerSet.size,ceafMembers:ceafSet.size,mismatch:missingBills.length,missingBills:missingBills.slice(0,50)};
 }
 
-export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={}){
-  const totalStarted=Date.now(),db=getDb();
+export function auditSevenBusinessHistoryWithDb(db,{fromDate='2026-07-01',toDate='' }={}){
+  if(!db||typeof db.prepare!=='function')throw new Error('历史审计缺少只读SQLite连接。');
+  const totalStarted=Date.now();
   const latest=iso(db.prepare("SELECT reportDate FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC LIMIT 1").get()?.reportDate||'');
   const from=iso(fromDate)||'2026-07-01';
   const to=iso(toDate)||latest;
@@ -284,6 +288,7 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
   // fail-closed on actual completeness checks above.
   const currentEvidence={
     evidenceMode:'V451_INDEXED_AUDIT_ONLY',
+    auditIsolation:V543_HISTORY_AUDIT_ISOLATION_ID,
     whppAuthorityDiagnostic:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,
     whppLegacyCompletionRecovery:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,
     whppHistorySnapshotDisambiguation:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,
@@ -298,7 +303,11 @@ export function auditSevenBusinessHistory({fromDate='2026-07-01',toDate='' }={})
   };
   const exportReady=missing.length===0&&incomplete.length===0;
   const totalMs=Date.now()-totalStarted;
-  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,v456WhppAuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,v457WhppLegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,v460WhppHistorySnapshotDisambiguationId:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
+  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,isolationPatchId:V543_HISTORY_AUDIT_ISOLATION_ID,v456WhppAuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,v457WhppLegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,v460WhppHistorySnapshotDisambiguationId:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
+}
+
+export function auditSevenBusinessHistory(options={}){
+  return auditSevenBusinessHistoryWithDb(getDb(),options);
 }
 
 export const V142_BUSINESS_TYPES=ALL_TYPES;
