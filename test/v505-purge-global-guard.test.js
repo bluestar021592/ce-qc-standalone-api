@@ -46,7 +46,8 @@ test('V505 global purge guard blocks cross-admin ownership, serializes recovery,
   };
 
   try{
-    const foreignJob={jobId:crypto.randomUUID(),status:'RUNNING',email:adminA.email,submittedAt:Date.now()-180_000,startedAt:Date.now()-170_000,heartbeatAt:Date.now()-120_000,workerPid:process.pid,updatedAt:Date.now()-120_000};
+    const foreignClaimedAt=Date.now();
+    const foreignJob={jobId:crypto.randomUUID(),status:'RUNNING',email:adminA.email,submittedAt:Date.now()-180_000,startedAt:Date.now()-170_000,workerClaimedAt:foreignClaimedAt,heartbeatAt:Date.now()-120_000,workerPid:process.pid,updatedAt:Date.now()-120_000};
     fs.writeFileSync(path.join(prepareDir,`${identityKey(adminA)}.job.json`),JSON.stringify(foreignJob),'utf8');
     setBlock(Date.now()+10*60_000);
     let foreignNext=false;const foreignRes=responseHarness();
