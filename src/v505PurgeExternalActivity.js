@@ -32,6 +32,13 @@ function instant(value){
   const parsed=Date.parse(String(value));
   return Number.isFinite(parsed)?parsed:0;
 }
+function admissionInstant(value){
+  if(value==null||value==='')return 0;
+  const numeric=Number(value);
+  if(Number.isFinite(numeric))return numeric>1_000_000_000_000?numeric:0;
+  const parsed=Date.parse(String(value));
+  return Number.isFinite(parsed)&&parsed>1_000_000_000_000?parsed:0;
+}
 function fileTime(file=''){
   try{return Number(fs.statSync(file).mtimeMs||0);}catch{return 0;}
 }
@@ -121,8 +128,8 @@ export function classifyV539ExportAdmissionPid({workerState='',acquiredAt=0,proc
   const state=String(workerState||'UNKNOWN').toUpperCase();
   if(state==='DEAD')return {active:false,stale:true,workerState:'DEAD',identityState:'DEAD'};
   if(state!=='ALIVE')return {active:true,stale:false,workerState:state||'UNKNOWN',identityState:'START_UNVERIFIED'};
-  const lockAt=instant(acquiredAt);
-  const startedAt=instant(processStartedAt);
+  const lockAt=admissionInstant(acquiredAt);
+  const startedAt=admissionInstant(processStartedAt);
   const tolerance=Math.max(1000,Math.min(60_000,Number(toleranceMs)||V539_ADMISSION_PID_REUSE_TOLERANCE_MS));
   if(!lockAt||!startedAt)return {active:true,stale:false,workerState:'ALIVE',identityState:'START_UNVERIFIED'};
   if(startedAt>lockAt+tolerance){
