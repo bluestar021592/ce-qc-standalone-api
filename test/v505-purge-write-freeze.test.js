@@ -10,7 +10,7 @@ function responseHarness(){
   const res=new EventEmitter();
   res.statusCode=200;res.body=null;
   res.status=function(code){this.statusCode=code;return this;};
-  res.json=function(body){this.body=body;return this;};
+  res.json=function json(body){this.body=body;return this;};
   return res;
 }
 function request(method,pathValue){return {method,path:pathValue,originalUrl:pathValue,url:pathValue};}
@@ -27,7 +27,7 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
   process.env.V505_PURGE_STARTUP_ORPHAN_STALE_MS='60000';
   const {getDb,getRuntimeConfig,closeDb}=await import('../src/db.js');
   const {v505PurgeWriteFreezeGuard,reconcilePurgeQueryOnlyNow,reconcileHistoricalPurgeStartupDebrisNow,V505_PURGE_WRITE_FREEZE_ID}=await import('../src/v505PurgeWriteFreezeGuard.js');
-  assert.ok(V505_PURGE_WRITE_FREEZE_ID);
+  assert.match(V505_PURGE_WRITE_FREEZE_ID,/v542-write-freeze-pid-reuse/);
   const db=getDb();
   const cfg=getRuntimeConfig();
   const prepareDir=path.join(cfg.backupsDir,'.purge_prepare_jobs');
@@ -53,7 +53,7 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'bare submission mutex must not switch the process-global DB read-only before the owning PREPARE writes its safety block');
     fs.rmSync(submissionFile,{force:true});
 
-    fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,heartbeatAt:Date.now()-120_000}),'utf8');
+    fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,workerClaimedAt:Date.now(),heartbeatAt:Date.now()-120_000}),'utf8');
     const livePrepare=runGuard(request('POST','/api/unified-import'));
     assert.equal(livePrepare.nextCalled,false);
     assert.equal(livePrepare.res.statusCode,423);
@@ -79,7 +79,7 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
     assert.throws(()=>db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v505_concurrent_write_probe','1',?)`).run(new Date().toISOString()),/readonly|read-only/i,'a concurrent main-process write must remain impossible during purge control recovery');
 
     fs.rmSync(prepareFile,{force:true});
-    fs.writeFileSync(executeFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,heartbeatAt:Date.now()-120_000}),'utf8');
+    fs.writeFileSync(executeFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,workerClaimedAt:Date.now(),heartbeatAt:Date.now()-120_000}),'utf8');
     const liveExecute=runGuard(request('DELETE','/api/admin/backups/all'));
     assert.equal(liveExecute.nextCalled,false);
     assert.equal(liveExecute.res.body?.protectedBy,'EXECUTE:RUNNING');
@@ -164,6 +164,34 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
     const confirmedDead=runGuard(request('POST','/api/unified-import'));
     assert.equal(confirmedDead.nextCalled,true,'confirmed-dead worker must not create an endless external write freeze once SQLite block is expired');
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'main DB returns to writable mode only after no sealed/active purge truth remains');
+    fs.rmSync(prepareFile,{force:true});
+
+    if(process.platform==='win32'){
+      const recycledAt=Date.now()-120_000;
+      fs.writeFileSync(prepareFile,JSON.stringify({
+        jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,
+        submittedAt:recycledAt,startedAt:recycledAt,workerClaimedAt:recycledAt,heartbeatAt:recycledAt,updatedAt:recycledAt
+      }),'utf8');
+      const recycledPrepare=runGuard(request('POST','/api/unified-import'));
+      assert.equal(recycledPrepare.nextCalled,true,'Windows PID reuse must not leave an old PREPARE sidecar freezing APIs forever');
+      assert.equal(db.prepare('PRAGMA query_only').get().query_only,0);
+      fs.rmSync(prepareFile,{force:true});
+
+      fs.writeFileSync(executeFile,JSON.stringify({
+        jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,
+        submittedAt:recycledAt,startedAt:recycledAt,workerClaimedAt:recycledAt,heartbeatAt:recycledAt,updatedAt:recycledAt
+      }),'utf8');
+      const recycledExecute=runGuard(request('POST','/api/unified-import'));
+      assert.equal(recycledExecute.nextCalled,true,'Windows PID reuse must not leave an old EXECUTE sidecar freezing APIs forever after its SQLite safety block expires');
+      assert.equal(db.prepare('PRAGMA query_only').get().query_only,0);
+      fs.rmSync(executeFile,{force:true});
+
+      fs.writeFileSync(submissionFile,JSON.stringify({pid:process.pid,requestToken:'recycled-submission-window',acquiredAt:recycledAt}),'utf8');
+      const recycledSubmission=runGuard(request('POST','/api/unified-import'));
+      assert.equal(recycledSubmission.nextCalled,true,'Windows PID reuse must not leave an old global submission mutex freezing admissions forever');
+      assert.equal(db.prepare('PRAGMA query_only').get().query_only,0);
+      fs.rmSync(submissionFile,{force:true});
+    }
   }finally{
     try{db.exec('PRAGMA query_only=OFF');}catch{}
     try{closeDb();}catch{}
