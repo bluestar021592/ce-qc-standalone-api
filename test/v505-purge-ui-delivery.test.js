@@ -8,11 +8,11 @@ import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 const RUNTIME_V505_URL='/v505-data-purge-recovery.js?v=20260911-v505-8';
-const V544_V505_URL='/v505-data-purge-recovery.js?v=20260915-v544-1';
+const V545_V505_URL='/v505-data-purge-recovery.js?v=20260915-v545-1';
 const STARTUP_PROBE_URL='/v505-purge-startup-probe.js?v=20260912-v505-startup-probe-2';
 const V502_URL='/v502-multidrive-backup-ui.js?v=20260912-v502-3';
 
-test('V505 version-aware purge UI owner is delivered after app.js and transport loss recovers persisted server truth before any retry',()=>{
+test('V545 cache-busted purge owner is delivered after app.js and requires explicit backup plus explicit delete confirmation',()=>{
   const index=read('public/index.html');
   const runtimeLoader=read('public/v14-geometry-fixture.js');
   const backupLoader=read('public/v502-multidrive-backup-ui.js');
@@ -22,52 +22,64 @@ test('V505 version-aware purge UI owner is delivered after app.js and transport 
 
   const appAt=index.indexOf('/app.js?v=account-menu-20260806-1');
   const runtimeAt=index.indexOf('/v14-geometry-fixture.js?v=20260805-1');
-  assert.ok(appAt>=0&&runtimeAt>appAt,'runtime loader must execute after app.js so V505 can replace the legacy inline purge owner');
+  assert.ok(appAt>=0&&runtimeAt>appAt,'runtime loader must execute after app.js so the modern purge owner can replace the legacy inline functions');
 
-  assert.match(runtimeLoader,/loadRuntimeScript\('\/v505-data-purge-recovery\.js\?v=20260911-v505-8'\)/,'the always-loaded compatibility bootstrap still claims a V505 owner before route lazy features');
-  assert.match(runtimeLoader,/v502-multidrive-backup-ui\.js\?v=20260912-v502-3/,'the V502 loader carrying startup recovery must be cache-busted');
-  assert.ok(runtimeLoader.indexOf(RUNTIME_V505_URL)<runtimeLoader.indexOf(V502_URL),'V505 must claim ownership before the V502 loader can schedule any fallback');
+  // The always-loaded compatibility chain may still bootstrap the older owner,
+  // but V502 and the data-route lazy group must cache-bust and supersede it with V545.
+  assert.match(runtimeLoader,/loadRuntimeScript\('\/v505-data-purge-recovery\.js\?v=20260911-v505-8'\)/);
+  assert.match(runtimeLoader,/v502-multidrive-backup-ui\.js\?v=20260912-v502-3/);
+  assert.ok(runtimeLoader.indexOf(RUNTIME_V505_URL)<runtimeLoader.indexOf(V502_URL));
 
-  assert.match(backupLoader,/v505-data-purge-recovery\.js\?v=20260915-v544-1/,'V544 data-management backup UI must request a fresh V505 owner when recovery ownership is absent');
-  assert.match(backupLoader,/v8-version-aware-owner/,'V502 must request the current owner when an older V505 patch is already present');
-  assert.match(backupLoader,/v505-purge-startup-probe\.js\?v=20260912-v505-startup-probe-2/,'V502 must install the exact-job-bound startup-orphan probe on every normal data-management runtime');
+  assert.match(backupLoader,/2026-09-15-v545-explicit-purge-owner-cache-bust-v1/);
+  assert.match(backupLoader,/v505-data-purge-recovery\.js\?v=20260915-v545-1/,'V502 must request the V545 owner, not leave the older one authoritative');
+  assert.match(backupLoader,/v545-explicit-two-step/,'V502 must recognize only the explicit two-step V545 owner as current');
+  assert.match(backupLoader,/v505-purge-startup-probe\.js\?v=20260912-v505-startup-probe-2/);
   assert.ok(backupLoader.indexOf(STARTUP_PROBE_URL)>=0);
-  assert.match(backupLoader,/script\.onload=loadStartupProbe/,'if V505 owner must be reloaded, the startup probe may load only after that owner has executed');
-  assert.match(lazy,/2026-09-15-v544-purge-owner-race-v1/,'V544 route-lazy loader itself must have a fresh version identity');
-  assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v544-1/,'data-management navigation must cache-bust the V505 owner');
-  assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v544-1/,'V106 compatibility guard must be refreshed with the same owner generation');
-  assert.match(lazy,/event\.stopImmediatePropagation\(\)/,'first destructive click must be capture-blocked while V505 is still loading');
-  assert.match(lazy,/loadGroup\('data'\)\.then/,'blocked first click must load the V505 data group before any purge entry is invoked');
-  assert.match(lazy,/reassertPurgeOwner/,'V544 must reassert the V505 owner before allowing the inline entry point');
-  assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/,'clean data-management navigation must never install the retired V104 purge workflow');
+  assert.match(backupLoader,/script\.onload=loadStartupProbe/);
 
-  assert.match(owner,/v8-version-aware-owner/);
-  assert.match(owner,/previous\?\.patchId===PATCH_ID/,'same-version duplicate delivery must be a no-op');
-  assert.match(owner,/previous\?\.getStatus\?\.\(\)\.active/,'an older owner already running a protected purge flow must not be replaced mid-flight');
-  assert.match(owner,/setTimeout\(claimPurgeOwner,4200\)/,'new owner must reclaim after older delayed owner callbacks could still fire');
-  assert.match(owner,/setTimeout\(claimPurgeOwner,8000\)/,'new owner must win even on a heavily delayed stale-loader callback');
+  assert.match(lazy,/2026-09-15-v545-explicit-purge-owner-v1/);
+  assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v545-1/);
+  assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v545-1/);
+  assert.match(lazy,/event\.stopImmediatePropagation\(\)/,'first destructive click must be capture-blocked until V545 is installed');
+  assert.match(lazy,/installed\.includes\('v545-explicit-two-step'\)/,'lazy gate must refuse to invoke a stale V505 owner');
+  assert.match(lazy,/loadGroup\('data'\)\.then/);
+  assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-  assert.match(owner,/error\.code=String\(data\.code\|\|'PURGE_HTTP_REJECTED'\)/,'structured server safety codes must survive the fetch wrapper instead of becoming fake transport errors');
+  assert.match(owner,/2026-09-15-v545-explicit-two-step-purge-ui-v1/);
+  assert.match(owner,/previous\?\.patchId===PATCH_ID/);
+  assert.match(owner,/previous\?\.getStatus\?\.\(\)\.active/);
+  assert.match(owner,/global\.continueDataPurge=v505ContinueDataPurge/,'legacy step-one button must be rebound to V545 explicit PREPARE');
+  assert.match(owner,/global\.executeDataPurge=v505ExecuteDataPurge/,'legacy step-two button must be rebound to V545 explicit EXECUTE');
+  assert.match(owner,/尚未开始任何备份或清空任务/,'opening the wizard must be inert');
+  assert.match(owner,/只有点击“备份并继续”后才会创建并校验清空前安全备份/);
+  assert.match(owner,/String\(phrase\?\.value\|\|''\)==='永久清除全部业务数据'/,'DELETE button must require the exact destructive phrase');
+  assert.match(owner,/Boolean\(checkbox\?\.checked\)/,'DELETE button must require explicit backup acknowledgement');
+  assert.match(owner,/最终确认：现在将永久清除全部业务数据/,'DELETE submission must require a final user confirmation');
+  assert.match(owner,/v505ContinueDataPurge[\s\S]*?submitPrepareRecovering/,'PREPARE may start only from the explicit continue action');
+  assert.match(owner,/v505ExecuteDataPurge[\s\S]*?executeChallenge\(preparedChallenge\)/,'EXECUTE may start only from the explicit final action');
+  assert.match(owner,/setTimeout\(claimPurgeOwner,4200\)/);
+  assert.match(owner,/setTimeout\(claimPurgeOwner,8000\)/);
+
+  assert.match(owner,/error\.code=String\(data\.code\|\|'PURGE_HTTP_REJECTED'\)/);
   assert.match(owner,/TRANSIENT_CONTROL_CODES/);
-  assert.match(owner,/submitPrepareRecovering/,'lost PREPARE responses must recover/reuse the persisted PREPARE instead of inviting another task');
-  assert.match(owner,/submitExecuteRecovering/,'lost EXECUTE responses must recover server truth before considering a resubmission');
-  assert.match(owner,/const recovered=await submitPrepareRecovering\(4\)/,'EXECUTE response loss must probe the server through the idempotent PREPARE recovery route first');
-  assert.match(owner,/sameChallenge[\s\S]*?return postExecute\(challenge\)/,'DELETE may be resubmitted only when recovery proves no EXECUTE exists and the same verified challenge is still authoritative');
+  assert.match(owner,/submitPrepareRecovering/);
+  assert.match(owner,/submitExecuteRecovering/);
+  assert.match(owner,/const recovered=await submitPrepareRecovering\(4\)/);
+  assert.match(owner,/sameChallenge[\s\S]*?return postExecute\(challenge\)/);
   assert.match(owner,/PURGE_TRANSPORT_INTERRUPTED/);
-  assert.match(owner,/\^DATA_PURGE_\|\^V505_PURGE_/,'server safety blocks must render as protected/locked state, not “清空未执行” retry guidance');
+  assert.match(owner,/\^DATA_PURGE_\|\^V505_PURGE_/);
   assert.match(owner,/不要重复点击；系统会继续按持久化任务和安全锁保护/);
 
-  assert.match(startupProbe,/PROBE_AFTER_MS=75_000/,'browser waits before recovery probing; the server remains authoritative on the longer startup-orphan threshold');
-  assert.match(startupProbe,/\/api\/admin\/data-purge\/prepare/,'startup probe must go through the serialized PREPARE control route');
-  assert.doesNotMatch(startupProbe,/\/api\/admin\/data-purge\/execute/,'startup probe must never POST the destructive EXECUTE route');
-  assert.match(startupProbe,/\['QUEUED','RUNNING'\]/,'only pre-commit startup states may trigger the probe');
-  assert.match(startupProbe,/__CE_QC_V505_DATA_PURGE_RECOVERY__/,'probe must derive the exact currently protected browser job from the V505 owner');
-  assert.match(startupProbe,/String\(status\?\.jobId\|\|''\)!==jobId/,'stale status evidence must match the exact current job before recovery is requested');
+  assert.match(startupProbe,/PROBE_AFTER_MS=75_000/);
+  assert.match(startupProbe,/\/api\/admin\/data-purge\/prepare/);
+  assert.doesNotMatch(startupProbe,/\/api\/admin\/data-purge\/execute/);
+  assert.match(startupProbe,/\['QUEUED','RUNNING'\]/);
+  assert.match(startupProbe,/__CE_QC_V505_DATA_PURGE_RECOVERY__/);
+  assert.match(startupProbe,/String\(status\?\.jobId\|\|''\)!==jobId/);
 
-  assert.ok(lazy.indexOf(V544_V505_URL)>=0);
-  assert.doesNotMatch(runtimeLoader,/20260911-v505-7/);
-  assert.doesNotMatch(backupLoader,/20260911-v505-7/);
-  assert.doesNotMatch(lazy,/20260911-v505-7/);
+  assert.ok(lazy.indexOf(V545_V505_URL)>=0);
+  assert.doesNotMatch(backupLoader,/20260915-v544-1/);
+  assert.doesNotMatch(lazy,/20260915-v544-1/);
 });
 
 function responseJson(value,status=200){
@@ -108,25 +120,26 @@ test('V505 stale PREPARE browser probe asks only the serialized PREPARE route to
   vm.runInNewContext(source,context,{filename:'v505-purge-startup-probe.js'});
   await context.__CE_QC_V505_PURGE_STARTUP_PROBE__.tick();
   assert.equal(statusReads,1);
-  assert.equal(preparePosts,1,'stale PREPARE startup state must request serialized server recovery through PREPARE');
-  assert.equal(executePosts,0,'browser probe must never create or retry a destructive EXECUTE request');
+  assert.equal(preparePosts,1);
+  assert.equal(executePosts,0);
 });
 
 async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
   const source=read('public/v505-data-purge-recovery.js');
   const challenge={
-    ok:true,status:'SUCCEEDED',challengeId:'challenge-v505-ui-test',notBefore:new Date(Date.now()-1000).toISOString(),
-    databasePath:'D:/safe/test.db',backup:{path:'D:/safe/pre-clear.db',size:1024,integrity:'quick-ok'}
+    ok:true,status:'SUCCEEDED',challengeId:'challenge-v545-ui-test',notBefore:new Date(Date.now()-1000).toISOString(),
+    databasePath:'D:/safe/test.db',backup:{path:'D:/safe/pre-clear.db',size:1024,integrity:'quick-ok'},administrator:'admin'
   };
-  const executeJob={ok:true,async:true,kind:'EXECUTE',status:'QUEUED',jobId:'execute-v505-ui-test',statusUrl:`/purge-status/${'a'.repeat(48)}.json`};
+  const executeJob={ok:true,async:true,kind:'EXECUTE',status:'QUEUED',jobId:'execute-v545-ui-test',statusUrl:`/purge-status/${'a'.repeat(48)}.json`};
   let preparePosts=0;
   let executePosts=0;
   let persistedExecute=null;
   let reloads=0;
   const alerts=[];
+  const confirms=[];
   const nodes=new Map();
   const node=id=>{
-    if(!nodes.has(id))nodes.set(id,{id,hidden:false,innerHTML:'',textContent:'',insertAdjacentHTML(_where,html){this.innerHTML+=html;}});
+    if(!nodes.has(id))nodes.set(id,{id,hidden:false,disabled:false,checked:false,value:'',innerHTML:'',textContent:'',insertAdjacentHTML(_where,html){this.innerHTML+=html;}});
     return nodes.get(id);
   };
   const context={
@@ -134,15 +147,15 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
     console:{info(){},warn(){},error(){}},
     document:{getElementById:id=>node(id)},
     location:{reload(){reloads+=1;}},
-    confirm:()=>true,
+    confirm:value=>{confirms.push(String(value));return true;},
     alert:value=>alerts.push(String(value)),
-    setTimeout(fn){queueMicrotask(fn);return 1;},
+    setTimeout(){return 1;},
     clearTimeout(){},
     setInterval(){return 1;},
     clearInterval(){},
+    accessSession:{user:{role:'ADMIN'}},
     fetch:async(url,options={})=>{
       const method=String(options.method||'GET').toUpperCase();
-      if(url==='/api/session')return responseJson({ok:true,user:{role:'ADMIN'}});
       if(url==='/api/admin/data-purge/prepare'&&method==='POST'){
         preparePosts+=1;
         return responseJson(persistedExecute||challenge);
@@ -162,22 +175,36 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
   };
   context.window=context;
   vm.runInNewContext(source,context,{filename:'v505-data-purge-recovery.js'});
+
   await context.openDataPurge();
-  return {preparePosts,executePosts,reloads,alerts,preview:node('purgePreview').innerHTML};
+  const afterOpen={preparePosts,executePosts};
+  await context.continueDataPurge();
+  const afterPrepare={preparePosts,executePosts};
+  node('purgeBackupConfirmed').checked=true;
+  node('purgePhrase').value='永久清除全部业务数据';
+  context.updatePurgeButton();
+  await context.executeDataPurge();
+  return {afterOpen,afterPrepare,preparePosts,executePosts,reloads,alerts,confirms,preview:node('purgePreview').innerHTML};
 }
 
-test('V505 lost EXECUTE response recovers an already-persisted job without sending a second DELETE request',async()=>{
+test('V545 opening the purge wizard is inert and lost EXECUTE response recovers an already-persisted job without a second DELETE',async()=>{
   const result=await runExecuteTransportScenario({acceptedBeforeDisconnect:true});
-  assert.equal(result.executePosts,1,'when the first EXECUTE reached the server, browser recovery must discover that exact job rather than POST EXECUTE again');
-  assert.equal(result.preparePosts,2,'one initial PREPARE plus one idempotent recovery probe is sufficient');
+  assert.deepEqual(result.afterOpen,{preparePosts:0,executePosts:0},'opening the purge wizard must not copy the DB or submit DELETE');
+  assert.deepEqual(result.afterPrepare,{preparePosts:1,executePosts:0},'explicit 备份并继续 may create PREPARE but must not auto-submit DELETE');
+  assert.equal(result.executePosts,1,'when first EXECUTE reached server, recovery must discover that job rather than POST DELETE again');
+  assert.equal(result.preparePosts,2,'one explicit PREPARE plus one idempotent recovery probe is sufficient');
   assert.equal(result.reloads,1);
   assert.deepEqual(result.alerts,[]);
+  assert.equal(result.confirms.length,2,'wizard open and final destructive submission must be two separate confirmations');
 });
 
-test('V505 retries EXECUTE once only after recovery proves no execute job exists and the same challenge is still valid',async()=>{
+test('V545 retries EXECUTE once only after explicit final confirmation and recovery proves no execute job exists',async()=>{
   const result=await runExecuteTransportScenario({acceptedBeforeDisconnect:false});
-  assert.equal(result.executePosts,2,'a second EXECUTE is allowed only after PREPARE recovery proves the first request was not persisted');
+  assert.deepEqual(result.afterOpen,{preparePosts:0,executePosts:0});
+  assert.deepEqual(result.afterPrepare,{preparePosts:1,executePosts:0});
+  assert.equal(result.executePosts,2,'second EXECUTE is allowed only after server recovery proves first request was not persisted');
   assert.equal(result.preparePosts,2);
   assert.equal(result.reloads,1);
   assert.deepEqual(result.alerts,[]);
+  assert.equal(result.confirms.length,2);
 });
