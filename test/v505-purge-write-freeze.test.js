@@ -19,15 +19,16 @@ function identityFile(dir,label){
   return path.join(dir,`${key}.job.json`);
 }
 
-test('V546 keeps destructive writes frozen while PREPARE read-only UI stays reachable and completed backup no longer whitescreens normal startup',async()=>{
+test('V547 keeps purge safety while idle reconciliation stays low-power',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v505-write-freeze-'));
   process.env.DATA_DIR=dir;
   process.env.DB_FILE=path.join(dir,'test.db');
   process.env.CE_QC_DISABLE_CARRY_REFRESH='1';
   process.env.V505_PURGE_STARTUP_ORPHAN_STALE_MS='60000';
   const {getDb,getRuntimeConfig,closeDb}=await import('../src/db.js');
-  const {v505PurgeWriteFreezeGuard,reconcilePurgeQueryOnlyNow,reconcileHistoricalPurgeStartupDebrisNow,V505_PURGE_WRITE_FREEZE_ID}=await import('../src/v505PurgeWriteFreezeGuard.js');
-  assert.match(V505_PURGE_WRITE_FREEZE_ID,/v546-purge-freeze-readonly-ui-recovery/);
+  const {v505PurgeWriteFreezeGuard,reconcilePurgeQueryOnlyNow,reconcileHistoricalPurgeStartupDebrisNow,V505_PURGE_WRITE_FREEZE_ID,V547_RECONCILE_ACTIVE_MS,V547_RECONCILE_IDLE_MS}=await import('../src/v505PurgeWriteFreezeGuard.js');
+  assert.match(V505_PURGE_WRITE_FREEZE_ID,/v547-low-power-write-freeze-reconcile/);
+  assert.ok(V547_RECONCILE_IDLE_MS>V547_RECONCILE_ACTIVE_MS,'idle reconciliation must run less often than active purge recovery');
   const db=getDb();
   const cfg=getRuntimeConfig();
   const prepareDir=path.join(cfg.backupsDir,'.purge_prepare_jobs');
@@ -96,7 +97,7 @@ test('V546 keeps destructive writes frozen while PREPARE read-only UI stays reac
 
     fs.rmSync(executeFile,{force:true});
     db.exec('PRAGMA query_only=OFF');
-    fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'SUCCEEDED',workerPid:0,payload:{expiresAt:new Date(Date.now()+5*60_000).toISOString()}}),'utf8');
+    fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'SUCCEEDED',workerPid:process.pid,workerClaimedAt:Date.now()-60_000,payload:{expiresAt:new Date(Date.now()+5*60_000).toISOString()}}),'utf8');
     setLiveSqliteBlock();
     const waitingExecuteWrite=runGuard(request('PATCH','/api/settings'));
     assert.equal(waitingExecuteWrite.nextCalled,true,'a completed PREPARE waiting for explicit V545 step two must no longer keep the whole application frozen');
@@ -106,6 +107,7 @@ test('V546 keeps destructive writes frozen while PREPARE read-only UI stays reac
     assert.equal(reconciledCompleted.state.active,false);
     assert.equal(reconciledCompleted.state.prepareBlockSuppressed,true);
     assert.equal(reconciledCompleted.state.external?.workerState,'COMPLETED_WAITING_EXPLICIT_EXECUTE');
+    assert.equal(reconciledCompleted.state.external?.identityState,'TERMINAL_NO_PID_LOOKUP','completed PREPARE must not inspect a historical PID via Windows CIM');
 
     const sealedControl=runGuard(request('POST','/api/admin/data-purge/execute'));
     assert.equal(sealedControl.nextCalled,true,'explicit execute control stays reachable after completed PREPARE');

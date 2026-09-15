@@ -9,7 +9,7 @@ const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 const syntaxFiles=[
   'src/dataPurge.js','src/v505PurgeCoordinator.js','src/v505PurgeGlobalGuard.js','src/v505PurgeWriteFreezeGuard.js',
   'src/v505PurgeExecuteAdmissionGuard.js','src/v505PurgeStartupOrphanGuard.js','src/v505ExportAdmissionGuard.js',
-  'src/v505PurgePublicStatusGuard.js','src/v541PurgePidOwnership.js','src/v29EndpointAliasPatch.js','src/accessControl.js',
+  'src/v505PurgePublicStatusGuard.js','src/v505PurgeExternalActivity.js','src/v541PurgePidOwnership.js','src/v29EndpointAliasPatch.js','src/accessControl.js',
   'scripts/CE_QC_PreClearBackupWorker.mjs','scripts/CE_QC_PurgePrepareTaskWorker.mjs','scripts/CE_QC_PurgeExecuteTaskWorker.mjs',
   'public/v505-data-purge-recovery.js','public/v108-route-lazy-features.js','public/v502-multidrive-backup-ui.js'
 ];
@@ -69,17 +69,28 @@ const pidOwnership=read('src/v541PurgePidOwnership.js');
 assert.match(pidOwnership,/classifyV539ExportAdmissionPid/,'V541 purge ownership must inherit the fail-closed V539 process-start classifier');
 assert.match(pidOwnership,/workerClaimedAt\|\|job\.startedAt\|\|job\.submittedAt/,'V541 worker ownership must bind to a durable task-generation timestamp');
 
+const external=read('src/v505PurgeExternalActivity.js');
+assert.match(external,/v547-low-power-pid-lookup-cache-v1/);
+assert.match(external,/V547_PID_START_CACHE_MS/,'Windows creation-time lookup must be cached');
+assert.match(external,/pidStartCache=new Map\(\)/);
+assert.match(external,/cached&&Date\.now\(\)-Number\(cached\.at\|\|0\)<=V547_PID_START_CACHE_MS/,'repeated ownership checks must reuse the bounded cache instead of respawning PowerShell');
+assert.match(external,/classifyV539ExportAdmissionPid/,'V547 must preserve the V539 fail-closed PID classifier');
+
 const freeze=read('src/v505PurgeWriteFreezeGuard.js');
-assert.match(freeze,/v546-purge-freeze-readonly-ui-recovery-v1/);
-assert.match(freeze,/inspectV541PurgeJobWorker/,'V546 write-freeze job ownership must keep the shared process-start PID proof');
-assert.match(freeze,/inspectV541PurgePidOwnership/,'V546 write-freeze submission mutex ownership must keep the shared process-start PID proof');
-assert.doesNotMatch(freeze,/function pidAlive\(/,'V546 must not regress to numeric PID liveness in write-freeze');
+assert.match(freeze,/v547-low-power-write-freeze-reconcile-v1/);
+assert.match(freeze,/inspectV541PurgeJobWorker/,'V547 write-freeze active jobs must keep the shared process-start PID proof');
+assert.match(freeze,/inspectV541PurgePidOwnership/,'V547 submission mutex ownership must keep the shared process-start PID proof');
+assert.doesNotMatch(freeze,/function pidAlive\(/,'V547 must not regress to numeric PID liveness in write-freeze');
 assert.match(freeze,/COMMIT_RECEIPT_UNREADABLE/);
 assert.match(freeze,/COMMIT_RECEIPT_ORPHANED/);
 assert.match(freeze,/COMPLETED_WAITING_EXPLICIT_EXECUTE/,'completed PREPARE must be distinguishable from active backup work');
+assert.match(freeze,/TERMINAL_NO_PID_LOOKUP/,'completed PREPARE must never trigger a Windows PID-start subprocess');
 assert.match(freeze,/prepareBlockSuppressed:completedPrepareIdle/,'the old one-hour PREPARE safety block must not keep the normal app frozen after backup completion');
 assert.match(freeze,/readonlyUiAllowedDuringFreeze/,'active PREPARE must allow read-only UI APIs while writes remain frozen');
 assert.match(freeze,/pathname\.startsWith\('\/api\/'\).*\['GET','HEAD'\]/,'read-only API access must be explicit in the freeze gate');
+assert.match(freeze,/V547_RECONCILE_IDLE_MS/);
+assert.match(freeze,/scheduleReconcile\(state\?\.active\?V547_RECONCILE_ACTIVE_MS:V547_RECONCILE_IDLE_MS\)/,'idle reconciliation must back off while active recovery remains responsive');
+assert.doesNotMatch(freeze,/setInterval\(/,'V547 must not keep a fixed 10-second purge polling loop alive forever');
 assert.match(freeze,/syncPurgeQueryOnly\(protectSharedDb\)/);
 assert.doesNotMatch(freeze,/syncPurgeQueryOnly\(false\)/);
 assert.match(freeze,/req\.v505PurgeReadOnlyAuth=true/);
@@ -118,11 +129,12 @@ assert.match(db,/V505_PURGE_EXECUTE_DB_MODE_UNSAFE/);
 assert.match(db,/V505_PURGE_EXECUTE_SCHEMA_MISMATCH/);
 
 const preClear=read('scripts/CE_QC_PreClearBackupWorker.mjs');
-assert.match(preClear,/Math\.max\(128,Math\.min\(512,Number\(payload\.ratePages\|\|512\)\)\)/,'V545 must cap SQLite backup work batches so the 25+ GiB copy cannot monopolize disk IO');
-assert.match(preClear,/highWaterMark:1024\*1024/,'V545 SHA verification must use bounded 1 MiB reads');
-assert.match(preClear,/PRAGMA quick_check\(1\)/,'throttling must not remove backup integrity verification');
-assert.match(preClear,/sha256=await hashFile\(filePath\)/,'throttling must not remove full SHA verification');
+assert.match(preClear,/Math\.max\(256,Math\.min\(2048,Number\(payload\.ratePages\|\|2048\)\)\)/,'V547 must keep backup work bounded while removing V545 512-page per-step overhead');
+assert.match(preClear,/highWaterMark:1024\*1024/,'SHA verification must keep bounded 1 MiB reads');
+assert.match(preClear,/PRAGMA quick_check\(1\)/,'throughput tuning must not remove backup integrity verification');
+assert.match(preClear,/sha256=await hashFile\(filePath\)/,'throughput tuning must not remove full SHA verification');
 assert.match(preClear,/BEGIN IMMEDIATE/,'pre-clear backup must still seal writes while its exact source fingerprint is captured');
+assert.match(preClear,/v547-bounded-throughput/);
 
 const ui=read('public/v505-data-purge-recovery.js');
 assert.match(ui,/v545-explicit-two-step-purge-ui-v1/);
@@ -159,4 +171,4 @@ assert.match(backupUi,/2026-09-15-v545-explicit-purge-owner-cache-bust-v1/);
 assert.match(backupUi,/v545-explicit-two-step/);
 assert.match(backupUi,/v505-data-purge-recovery\.js\?v=20260915-v545-1/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V546 keeps PREPARE writes fail-closed while the read-only SPA remains reachable, completed V545 PREPARE no longer leaves a one-hour white-screen freeze, and V541/V542 ownership protections remain intact');
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V547 backs off idle purge reconciliation, caches Windows PID creation-time lookups, skips terminal PID probes, and raises pre-clear backup chunks to bounded 2048 pages while preserving full quick_check + SHA + source-fingerprint safety');

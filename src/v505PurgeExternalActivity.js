@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 
 import { getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-15-v539-export-admission-pid-start-v1';
+export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-15-v547-low-power-pid-lookup-cache-v1';
 export const V505_EXPORT_SUBMISSION_MUTEX_FILE='.v505_export_submission.lock.json';
 const ACTIVE_EXPORT_STATUS=new Set(['QUEUED','RUNNING','PROCESSING']);
 const TERMINAL_EXPORT_STATUS=new Set(['COMPLETED','SUCCEEDED','FAILED','CANCELLED']);
@@ -13,6 +13,9 @@ const UNKNOWN_RECENT_MS=Math.max(5*60_000,Math.min(60*60_000,Number(process.env.
 const PID_IDENTITY_TIMEOUT_MS=Math.max(1000,Math.min(12_000,Number(process.env.V537_EXPORT_PID_IDENTITY_TIMEOUT_MS||8000)));
 export const V538_UNVERIFIED_OLD_EXPORT_HARD_EXPIRY_MS=Math.max(60*60_000,Math.min(7*24*60*60_000,Number(process.env.V538_EXPORT_UNVERIFIED_HARD_EXPIRY_MS||24*60*60_000)));
 export const V539_ADMISSION_PID_REUSE_TOLERANCE_MS=Math.max(1000,Math.min(60_000,Number(process.env.V539_ADMISSION_PID_REUSE_TOLERANCE_MS||5000)));
+export const V547_PID_START_CACHE_MS=Math.max(15_000,Math.min(5*60_000,Number(process.env.V547_PID_START_CACHE_MS||60_000)));
+const PID_START_CACHE_MAX=Math.max(16,Math.min(256,Number(process.env.V547_PID_START_CACHE_MAX||64)));
+const pidStartCache=new Map();
 
 function readJson(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
 function validExportJob(job){
@@ -24,7 +27,7 @@ function validExportJob(job){
 function pidState(pid){
   const value=Number(pid||0);
   if(!Number.isInteger(value)||value<=0)return 'UNKNOWN';
-  try{process.kill(value,0);return 'ALIVE';}catch(error){return error?.code==='EPERM'?'ALIVE':'DEAD';}
+  try{process.kill(value,0);return 'ALIVE';}catch(error){pidStartCache.delete(value);return error?.code==='EPERM'?'ALIVE':'DEAD';}
 }
 function instant(value){
   if(value==null||value==='')return 0;
@@ -78,10 +81,6 @@ function processCommandLine(pid){
       return commandLine?{state:'KNOWN',commandLine}:{state:'UNKNOWN',commandLine:''};
     }
     if(process.platform==='win32'){
-      // Get-CimInstance can take a few seconds to initialize on a cold Windows
-      // host. Keep this bounded, but allow enough time to distinguish a stale
-      // recycled PID from the exact export worker instead of failing closed only
-      // because PowerShell/WMI startup exceeded the previous 2.5s budget.
       const script=`$p=Get-CimInstance Win32_Process -Filter \"ProcessId = ${value}\" -ErrorAction SilentlyContinue; if($p){[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $p.CommandLine}`;
       const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:PID_IDENTITY_TIMEOUT_MS});
       if(result.error)return {state:'UNKNOWN',commandLine:''};
@@ -94,17 +93,28 @@ function processCommandLine(pid){
     return commandLine?{state:'KNOWN',commandLine}:{state:'UNKNOWN',commandLine:''};
   }catch{return {state:'UNKNOWN',commandLine:''};}
 }
+function cachePidStart(pid,startedAt){
+  const value=Number(pid||0);if(!Number.isInteger(value)||value<=0)return startedAt;
+  pidStartCache.delete(value);pidStartCache.set(value,{at:Date.now(),startedAt:Number(startedAt||0)});
+  while(pidStartCache.size>PID_START_CACHE_MAX){const oldest=pidStartCache.keys().next().value;if(oldest===undefined)break;pidStartCache.delete(oldest);}
+  return Number(startedAt||0);
+}
 function processStartedAtMs(pid){
   const value=Number(pid||0);
   if(!Number.isInteger(value)||value<=0)return 0;
   if(process.platform!=='win32')return 0;
+  const cached=pidStartCache.get(value);
+  if(cached&&Date.now()-Number(cached.at||0)<=V547_PID_START_CACHE_MS){
+    pidStartCache.delete(value);pidStartCache.set(value,cached);
+    return Number(cached.startedAt||0);
+  }
   try{
     const script=`$p=Get-CimInstance Win32_Process -Filter \"ProcessId = ${value}\" -ErrorAction SilentlyContinue; if($p -and $p.CreationDate){$d=[DateTimeOffset]$p.CreationDate; [Console]::Write($d.ToUnixTimeMilliseconds())}`;
     const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:PID_IDENTITY_TIMEOUT_MS});
-    if(result.error)return 0;
+    if(result.error)return cachePidStart(value,0);
     const startedAt=Number(String(result.stdout||'').trim());
-    return Number.isFinite(startedAt)&&startedAt>1_000_000_000_000?startedAt:0;
-  }catch{return 0;}
+    return cachePidStart(value,Number.isFinite(startedAt)&&startedAt>1_000_000_000_000?startedAt:0);
+  }catch{return cachePidStart(value,0);}
 }
 function exportWorkerIdentity(pid,file=''){
   const info=processCommandLine(pid);
@@ -143,6 +153,7 @@ export function inspectExportSubmissionRecord(record={}){
   const processStartedAt=workerState==='ALIVE'?processStartedAtMs(record.pid):0;
   return {...classifyV539ExportAdmissionPid({workerState,acquiredAt:record.acquiredAt,processStartedAt}),processStartedAt};
 }
+export function inspectV547PidLookupCache(){return {entries:pidStartCache.size,ttlMs:V547_PID_START_CACHE_MS,maxEntries:PID_START_CACHE_MAX};}
 
 export function inspectExportSubmissionAdmission(){
   const cfg=getRuntimeConfig();
@@ -201,9 +212,6 @@ export function inspectActiveExportJobs({now=Date.now()}={}){
         workerState=decision.workerState;
         identityState=decision.identityState;
       }else{
-        // PID reuse is common on long-running Windows hosts. An old RUNNING
-        // sidecar must not become a permanent purge lock merely because Windows
-        // later assigned the same numeric PID to an unrelated process.
         continue;
       }
     }else if(!recent){
