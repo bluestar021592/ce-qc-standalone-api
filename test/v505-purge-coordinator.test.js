@@ -35,7 +35,8 @@ test('V505 keeps stale-heartbeat PREPARE and EXECUTE jobs locked while their wor
     const prepareDir=path.join(cfg.backupsDir,'.purge_prepare_jobs');fs.mkdirSync(prepareDir,{recursive:true});
     const prepareFile=path.join(prepareDir,`${key}.job.json`);
     const prepareToken=crypto.randomBytes(24).toString('hex');
-    const fakePrepare={jobId:crypto.randomUUID(),statusToken:prepareToken,statusFile:path.join(cfg.projectRoot,'public','purge-status',`${prepareToken}.json`),status:'RUNNING',email:user.email,submittedAt:Date.now()-180_000,startedAt:Date.now()-170_000,heartbeatAt:Date.now()-120_000,workerPid:process.pid,updatedAt:Date.now()-120_000};
+    const prepareClaimedAt=Date.now();
+    const fakePrepare={jobId:crypto.randomUUID(),statusToken:prepareToken,statusFile:path.join(cfg.projectRoot,'public','purge-status',`${prepareToken}.json`),status:'RUNNING',email:user.email,submittedAt:Date.now()-180_000,startedAt:Date.now()-170_000,workerClaimedAt:prepareClaimedAt,heartbeatAt:Date.now()-120_000,workerPid:process.pid,updatedAt:Date.now()-120_000};
     fs.writeFileSync(prepareFile,JSON.stringify(fakePrepare),'utf8');
     const prepared=inspectLivePrepareJob(user);
     assert.equal(prepared?.dead,false);assert.equal(prepared?.job?.jobId,fakePrepare.jobId);assert.equal(prepared?.payload?.jobId,fakePrepare.jobId);assert.equal(prepared?.payload?.workerState,'ALIVE');assert.equal(prepared?.payload?.heartbeatStale,true);assert.match(prepared?.payload?.message||'',/保持锁定/);assert.match(prepared?.payload?.message||'',/不会启动第二份备份/);
@@ -45,7 +46,8 @@ test('V505 keeps stale-heartbeat PREPARE and EXECUTE jobs locked while their wor
     const executeFile=path.join(executeDir,`${key}.job.json`);
     const executeToken=crypto.randomBytes(24).toString('hex');
     const challengeId=crypto.randomUUID();
-    const fakeExecute={kind:'EXECUTE',jobId:crypto.randomUUID(),challengeId,request:{challengeId},statusToken:executeToken,statusFile:path.join(cfg.projectRoot,'public','purge-status',`${executeToken}.json`),status:'RUNNING',submittedAt:Date.now()-180_000,startedAt:Date.now()-170_000,heartbeatAt:Date.now()-120_000,workerPid:process.pid,updatedAt:Date.now()-120_000};
+    const executeClaimedAt=Date.now();
+    const fakeExecute={kind:'EXECUTE',jobId:crypto.randomUUID(),challengeId,request:{challengeId},statusToken:executeToken,statusFile:path.join(cfg.projectRoot,'public','purge-status',`${executeToken}.json`),status:'RUNNING',submittedAt:Date.now()-180_000,startedAt:Date.now()-170_000,workerClaimedAt:executeClaimedAt,heartbeatAt:Date.now()-120_000,workerPid:process.pid,updatedAt:Date.now()-120_000};
     fs.writeFileSync(executeFile,JSON.stringify(fakeExecute),'utf8');
     const executing=inspectExecutionRecovery(user);
     assert.equal(executing?.jobId,fakeExecute.jobId);assert.equal(executing?.status,'RUNNING');assert.equal(executing?.workerState,'ALIVE');assert.equal(executing?.heartbeatStale,true);assert.match(executing?.message||'',/保持锁定/);assert.match(executing?.message||'',/不会启动第二个清空任务/);

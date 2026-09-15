@@ -9,7 +9,7 @@ const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 const syntaxFiles=[
   'src/dataPurge.js','src/v505PurgeCoordinator.js','src/v505PurgeGlobalGuard.js','src/v505PurgeWriteFreezeGuard.js',
   'src/v505PurgeExecuteAdmissionGuard.js','src/v505PurgeStartupOrphanGuard.js','src/v505ExportAdmissionGuard.js',
-  'src/v505PurgePublicStatusGuard.js','src/v29EndpointAliasPatch.js','src/accessControl.js',
+  'src/v505PurgePublicStatusGuard.js','src/v541PurgePidOwnership.js','src/v29EndpointAliasPatch.js','src/accessControl.js',
   'scripts/CE_QC_PurgePrepareTaskWorker.mjs','scripts/CE_QC_PurgeExecuteTaskWorker.mjs',
   'public/v505-data-purge-recovery.js','public/v108-route-lazy-features.js'
 ];
@@ -45,7 +45,10 @@ assert.match(purge,/detached\s*:\s*true/);
 assert.match(purge,/child\.unref\(\)/);
 
 const coordinator=read('src/v505PurgeCoordinator.js');
-assert.match(coordinator,/v12-sealed-db-path/);
+assert.match(coordinator,/v541-purge-coordinator-pid-reuse-v1/);
+assert.match(coordinator,/function sealedDatabasePathForChallenge/,'V541 must retain the V12 sealed DB-path gate');
+assert.match(coordinator,/V505_PURGE_EXECUTE_SEALED_DB_PATH_CHANGED/,'V541 must fail closed if the sealed runtime DB path changes');
+assert.match(coordinator,/inspectV541PurgeJobWorker/,'V541 coordinator must use process-start PID ownership proof');
 assert.match(coordinator,/finalizeCommittedPurge/);
 assert.match(coordinator,/readPurgeCommitReceipt/);
 assert.match(coordinator,/ACTIVE_EXECUTE=new Set\(\['QUEUED','RUNNING','COMMITTED'\]\)/);
@@ -53,11 +56,18 @@ assert.match(coordinator,/executePurge\(\{\.\.\.payload\.request[\s\S]*?executeJ
 assert.doesNotMatch(coordinator,/resealPurgeChallenge/);
 
 const globalGuard=read('src/v505PurgeGlobalGuard.js');
-assert.match(globalGuard,/v18-retire-historical-startup/);
+assert.match(globalGuard,/v541-global-purge-pid-reuse-v1/);
+assert.match(globalGuard,/retireGlobalHistoricalPurgeStartupDebris/,'V541 must preserve V18 historical-startup retirement');
+assert.match(globalGuard,/inspectV541PurgePidOwnership/,'V541 global mutex must use process-start PID ownership proof');
+assert.match(globalGuard,/removeStaleSubmissionMutexIfUnchanged/,'V541 stale mutex recovery must recheck exact lock identity before deletion');
 assert.match(globalGuard,/DATA_PURGE_COMMIT_RECEIPT_UNREADABLE/);
 assert.match(globalGuard,/DATA_PURGE_COMMIT_RECEIPT_PENDING_RECOVERY/);
 assert.match(globalGuard,/SUBMISSION_MUTEX_FILE='\.purge_global_submission\.lock\.json'/);
 assert.match(globalGuard,/waitForMainApiDrain\(\{timeoutMs:3000,pollMs:25\}\)/);
+
+const pidOwnership=read('src/v541PurgePidOwnership.js');
+assert.match(pidOwnership,/classifyV539ExportAdmissionPid/,'V541 purge ownership must inherit the fail-closed V539 process-start classifier');
+assert.match(pidOwnership,/workerClaimedAt\|\|job\.startedAt\|\|job\.submittedAt/,'V541 worker ownership must bind to a durable task-generation timestamp');
 
 const freeze=read('src/v505PurgeWriteFreezeGuard.js');
 assert.match(freeze,/v20-historical-startup-reconcile/);
@@ -115,4 +125,4 @@ const lazy=read('public/v108-route-lazy-features.js');
 assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260911-v505-8/);
 assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · current fail-closed V505 purge ownership, server-authoritative ADMIN gate, sealed DB/receipt authority, startup-orphan guard, write freeze and UI owner are aligned');
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V541 PID-reuse recovery preserves sealed DB/receipt authority, startup-orphan retirement, write freeze and server-authoritative purge ownership');

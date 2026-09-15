@@ -80,9 +80,10 @@ test('V505 finalized receipt is terminal across admins and purge generations wit
     // still be alive for a very short filesystem cleanup tail. That live worker
     // remains the owner until it exits so a new PREPARE cannot replace files the
     // old worker is still challenge-bound to inspect/remove.
+    const liveTailClaimedAt=Date.now();
     fs.writeFileSync(oldExecuteFile,JSON.stringify({
       patchId:'live-finalized-execute-tail',kind:'EXECUTE',jobId:oldExecute,challengeId:oldChallenge,status:'COMMITTED',
-      submittedAt:Date.now()-180_000,startedAt:Date.now()-170_000,heartbeatAt:Date.now(),updatedAt:Date.now(),
+      submittedAt:Date.now()-180_000,startedAt:Date.now()-170_000,workerClaimedAt:liveTailClaimedAt,heartbeatAt:Date.now(),updatedAt:Date.now(),
       workerPid:process.pid,user:adminA,request:{challengeId:oldChallenge,phrase:'永久清除全部业务数据',backupConfirmed:true}
     },null,2),'utf8');
     const liveTailFreeze=inspectExternalPurgeWriteFreeze();

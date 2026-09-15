@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { createPurgeChallenge, executePurge, finalizeCommittedPurge, readPurgeCommitReceipt, PURGE_PHRASE, V505_PURGE_RECOVERY_ID } from './dataPurge.js';
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 import { assertNoActiveExportJobs, V505_PURGE_EXTERNAL_ACTIVITY_ID } from './v505PurgeExternalActivity.js';
+import { inspectV541PurgeJobWorker, V541_PURGE_PID_OWNERSHIP_ID } from './v541PurgePidOwnership.js';
 
-export const V505_PURGE_COORDINATOR_ID='2026-09-12-v505-purge-coordinator-v12-sealed-db-path';
+export const V505_PURGE_COORDINATOR_ID='2026-09-15-v541-purge-coordinator-pid-reuse-v1';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const PREPARE_JOB_DIR='.purge_prepare_jobs';
 const EXECUTE_JOB_DIR='.purge_execute_jobs';
@@ -93,6 +94,11 @@ function pidAlive(pid){
   if(!Number.isInteger(number)||number<=0)return null;
   try{process.kill(number,0);return true;}catch(error){return error?.code==='EPERM'?true:false;}
 }
+function workerOwnership(job={}){return inspectV541PurgeJobWorker(job);}
+function workerLive(job={}){
+  const ownership=workerOwnership(job);
+  return {ownership,live:ownership.active===true&&String(ownership.workerState||'')==='ALIVE'};
+}
 function clearPurgeBlock(){try{getDb().prepare('DELETE FROM app_meta WHERE key=?').run(PURGE_BLOCK_KEY);}catch{}}
 export function purgeBlockUntil(){
   try{return Number(getDb().prepare('SELECT value FROM app_meta WHERE key=?').get(PURGE_BLOCK_KEY)?.value||0);}catch{return 0;}
@@ -107,6 +113,7 @@ function publicStatus(job={}){
     patchId:V505_PURGE_COORDINATOR_ID,
     recoveryPatch:V505_PURGE_RECOVERY_ID,
     externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID,
+    pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID,
     kind:String(job.kind||'EXECUTE'),
     jobId:String(job.jobId||''),
     status,
@@ -141,6 +148,7 @@ function pendingPayload(job={}){
     recoveryPatch:V505_PURGE_RECOVERY_ID,
     coordinatorPatch:V505_PURGE_COORDINATOR_ID,
     externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID,
+    pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID,
     message:String(job.message||'')
   };
 }
@@ -283,9 +291,10 @@ function spawnExecutionWorker(file,job={},options={}){
 export function inspectLivePrepareJob(user={}){
   const file=prepareJobFile(user);const job=readJson(file);
   if(!job||!ACTIVE_PREPARE.has(String(job.status||'').toUpperCase()))return null;
-  const alive=pidAlive(job.workerPid);
-  if(alive===false)return {dead:true,job,file};
-  return {dead:false,job,file,payload:pendingPreparePayload({...job,message:alive===null?'安全备份任务进程状态暂时无法确认；系统保持锁定，不会启动第二份备份。':(Date.now()-Number(job.heartbeatAt||0)>HEARTBEAT_STALE_MS?'安全备份进程仍存活，但状态心跳延迟；系统保持锁定，不会启动第二份备份。':'安全备份正在后台执行。')})};
+  const ownership=workerOwnership(job);
+  if(ownership.active===false)return {dead:true,job,file,ownership};
+  const unknown=String(ownership.workerState||'')!=='ALIVE';
+  return {dead:false,job,file,ownership,payload:pendingPreparePayload({...job,message:unknown?'安全备份任务进程状态暂时无法确认；系统保持锁定，不会启动第二份备份。':(Date.now()-Number(job.heartbeatAt||0)>HEARTBEAT_STALE_MS?'安全备份进程仍存活，但状态心跳延迟；系统保持锁定，不会启动第二份备份。':'安全备份正在后台执行。')})};
 }
 
 export function inspectExecutionRecovery(user={}){
@@ -294,7 +303,7 @@ export function inspectExecutionRecovery(user={}){
   let status=String(job.status||'').toUpperCase();
   const receipt=committedReceipt(job);
   if(receipt&&receiptIsFinalized(receipt)&&status!=='SUCCEEDED'){
-    if(pidAlive(job.workerPid)===true)return finalizedTailPayload(job);
+    if(workerLive(job).live)return finalizedTailPayload(job);
     const finalizedChallenge=String(receipt.challengeId||'').trim();
     const prepareBefore=currentPrepareChallenge(user);
     const newerPrepare=Boolean(prepareBefore&&prepareBefore!==finalizedChallenge);
@@ -307,8 +316,7 @@ export function inspectExecutionRecovery(user={}){
       job={...job,status:'COMMITTED',heartbeatAt:Date.now(),updatedAt:Date.now(),error:'',message:'检测到与本任务完全匹配的SQLite事务提交凭证；不会再次执行删除，只恢复后置清理。'};
       writeJson(file,job);writePublic(job);status='COMMITTED';
     }
-    const alive=pidAlive(job.workerPid);
-    if(alive===true)return pendingPayload(job);
+    if(workerLive(job).live)return pendingPayload(job);
     return spawnExecutionWorker(file,job,{committed:true,delayMs:250});
   }
   if(receipt&&receiptIsFinalized(receipt)&&status==='SUCCEEDED'){
@@ -321,16 +329,18 @@ export function inspectExecutionRecovery(user={}){
     return recoverFinalizedReceipt(file,job,receipt,user).payload;
   }
   if(ACTIVE_EXECUTE.has(status)){
-    const alive=pidAlive(job.workerPid);
-    if(alive===false){
+    const ownership=workerOwnership(job);
+    if(ownership.active===false){
       if(status==='COMMITTED'){
         const held={...job,status:'COMMITTED',workerPid:0,heartbeatAt:Date.now(),updatedAt:Date.now(),error:'缺少与当前任务匹配的事务提交凭证。',message:'任务曾进入已提交状态，但当前无法验证精确提交凭证。系统保持停止，不会重试删除。'};
         writeJson(file,held);writePublic(held);return pendingPayload(held);
       }
-      const failed=failJob(file,job,'后台清空进程已退出。未提交的SQLite事务会自动回滚；已验证备份的安全锁保持不变，可在凭证有效期内重新恢复。');
+      const reason=String(ownership.identityState||'')==='PID_REUSED'?'检测到后台清空PID已被Windows复用；原清空进程已不存在。':'后台清空进程已退出。';
+      const failed=failJob(file,job,`${reason} 未提交的SQLite事务会自动回滚；已验证备份的安全锁保持不变，可在凭证有效期内重新恢复。`);
       return pendingPayload(failed);
     }
-    return pendingPayload({...job,message:status==='COMMITTED'?'业务数据事务已提交，正在完成提交后清理。':alive===null?'清空进程状态暂时无法确认；系统保持锁定，不会启动第二个清空任务。':(Date.now()-Number(job.heartbeatAt||0)>HEARTBEAT_STALE_MS?'清空进程仍存活，但状态心跳延迟；系统保持锁定，不会启动第二个清空任务。':'正在后台清空业务数据。')});
+    const unknown=String(ownership.workerState||'')!=='ALIVE';
+    return pendingPayload({...job,message:status==='COMMITTED'?'业务数据事务已提交，正在完成提交后清理。':unknown?'清空进程状态暂时无法确认；系统保持锁定，不会启动第二个清空任务。':(Date.now()-Number(job.heartbeatAt||0)>HEARTBEAT_STALE_MS?'清空进程仍存活，但状态心跳延迟；系统保持锁定，不会启动第二个清空任务。':'正在后台清空业务数据。')});
   }
   if(status==='SUCCEEDED'&&Date.now()-Number(job.completedAt||job.updatedAt||0)<=EXECUTE_RECOVERY_MS)return {...pendingPayload(job),status:'SUCCEEDED',completed:true,result:job.result||null};
   if(status==='FAILED'){
@@ -347,15 +357,20 @@ export async function v505PurgePrepareHandler(req,res){
     if(executing)return res.json({ok:true,...executing,administrator:req.user?.email||req.user?.username||''});
     const live=inspectLivePrepareJob(req.user||{});
     if(live&&!live.dead)return res.json({ok:true,...live.payload,administrator:req.user?.email||req.user?.username||''});
+    if(live?.dead){
+      const reason=String(live.ownership?.identityState||'')==='PID_REUSED'?'检测到安全备份PID已被Windows复用；原备份进程已不存在。':'清空前安全备份后台进程已经退出。';
+      failJob(live.file,live.job,`${reason} 系统将重新建立同一安全入口，不会复用旧进程状态。`);
+      clearPurgeBlock();
+    }
     assertNoBusinessLock();
     assertNoActiveExportJobs();
     let challenge=await createPurgeChallenge(req.user||{}, {activeRunIds:new Set()});
     if(live?.dead&&String(challenge?.status||'').toUpperCase()==='FAILED'){
       challenge=await createPurgeChallenge(req.user||{}, {activeRunIds:new Set()});
     }
-    return res.json({ok:true,...challenge,administrator:req.user?.email||req.user?.username||'',coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID});
+    return res.json({ok:true,...challenge,administrator:req.user?.email||req.user?.username||'',coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID});
   }catch(error){
-    return res.status(409).json({ok:false,code:error?.code||'V505_PURGE_PREPARE_BLOCKED',error:error?.message||String(error),coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID});
+    return res.status(409).json({ok:false,code:error?.code||'V505_PURGE_PREPARE_BLOCKED',error:error?.message||String(error),coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID});
   }
 }
 
@@ -370,7 +385,7 @@ export async function queuePurgeExecution(user={},request={}){
     let status=String(existing.status||'').toUpperCase();
     const receipt=committedReceipt(existing);
     if(receipt&&receiptIsFinalized(receipt)){
-      if(pidAlive(existing.workerPid)===true)return finalizedTailPayload(existing);
+      if(workerLive(existing).live)return finalizedTailPayload(existing);
       const existingChallenge=String(existing.challengeId||existing.request?.challengeId||'');
       const recovered=recoverFinalizedReceipt(file,existing,receipt,user);
       if(existingChallenge===challengeId)return recovered.payload;
@@ -382,15 +397,15 @@ export async function queuePurgeExecution(user={},request={}){
         existing={...existing,status:'COMMITTED',heartbeatAt:Date.now(),updatedAt:Date.now(),error:'',message:'检测到精确事务提交凭证，恢复后置清理。'};
         writeJson(file,existing);writePublic(existing);status='COMMITTED';
       }
-      const alive=pidAlive(existing.workerPid);
-      if(alive===true)return pendingPayload(existing);
+      if(workerLive(existing).live)return pendingPayload(existing);
       return spawnExecutionWorker(file,existing,{committed:true,delayMs:250});
     }
     if(existing&&ACTIVE_EXECUTE.has(status)){
-      const alive=pidAlive(existing.workerPid);
-      if(alive!==false)return pendingPayload(existing);
+      const ownership=workerOwnership(existing);
+      if(ownership.active===true)return pendingPayload(existing);
       if(status==='COMMITTED')return pendingPayload({...existing,workerPid:0,message:'无法验证已提交状态对应的精确提交凭证；系统不会重复删除。'});
-      failJob(file,existing,'上一个后台清空进程已经退出；保留已验证备份的安全锁，准备恢复同一凭证。');
+      const reason=String(ownership.identityState||'')==='PID_REUSED'?'检测到上一后台清空PID已被Windows复用；原进程已不存在。':'上一个后台清空进程已经退出。';
+      failJob(file,existing,`${reason} 保留已验证备份的安全锁，准备恢复同一凭证。`);
     }else if(existing&&status==='SUCCEEDED'&&String(existing.challengeId||'')===challengeId&&Date.now()-Number(existing.completedAt||0)<=EXECUTE_RECOVERY_MS){
       return {...pendingPayload(existing),status:'SUCCEEDED',completed:true,result:existing.result||null};
     }
@@ -417,9 +432,9 @@ export async function queuePurgeExecution(user={},request={}){
 export async function v505PurgeExecuteHandler(req,res){
   try{
     const queued=await queuePurgeExecution(req.user||{},req.body||{});
-    return res.status(queued.status==='SUCCEEDED'?200:202).json({ok:true,...queued,coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID});
+    return res.status(queued.status==='SUCCEEDED'?200:202).json({ok:true,...queued,coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID});
   }catch(error){
-    return res.status(409).json({ok:false,code:error?.code||'V505_PURGE_EXECUTE_BLOCKED',error:error?.message||String(error),coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID});
+    return res.status(409).json({ok:false,code:error?.code||'V505_PURGE_EXECUTE_BLOCKED',error:error?.message||String(error),coordinatorPatch:V505_PURGE_COORDINATOR_ID,externalActivityGate:V505_PURGE_EXTERNAL_ACTIVITY_ID,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID});
   }
 }
 
