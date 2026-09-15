@@ -5,8 +5,9 @@ import path from 'node:path';
 import { getDb, getRuntimeConfig } from './db.js';
 import { waitForMainApiDrain, V505_PURGE_HTTP_ACTIVITY_ID } from './v505PurgeHttpActivity.js';
 import { inspectGlobalHistoricalPurgeStartupDebris, retireGlobalHistoricalPurgeStartupDebris } from './v505PurgeStartupOrphanGuard.js';
+import { inspectV541PurgeJobWorker, inspectV541PurgePidOwnership, V541_PURGE_PID_OWNERSHIP_ID } from './v541PurgePidOwnership.js';
 
-export const V505_PURGE_GLOBAL_GUARD_ID='2026-09-12-v505-global-single-owner-v18-retire-historical-startup';
+export const V505_PURGE_GLOBAL_GUARD_ID='2026-09-15-v541-global-purge-pid-reuse-v1';
 const ACTIVE=new Set(['QUEUED','RUNNING','COMMITTED']);
 const KNOWN_JOB_STATUS=new Set(['QUEUED','RUNNING','COMMITTED','SUCCEEDED','FAILED']);
 const PREPARE_DIR='.purge_prepare_jobs';
@@ -33,11 +34,6 @@ function readJobRow(directory,name){
     if(!validJobSidecar(job))return {name,file,job:null,unreadable:true,error:'JSON结构缺少有效 jobId / status'};
     return {name,file,job,unreadable:false,error:''};
   }catch(error){return {name,file,job:null,unreadable:true,error:String(error?.message||error)};}
-}
-function pidAlive(pid){
-  const value=Number(pid||0);
-  if(!Number.isInteger(value)||value<=0)return null;
-  try{process.kill(value,0);return true;}catch(error){return error?.code==='EPERM'?true:false;}
 }
 function blockUntil(db=getDb()){
   return Number(db.prepare('SELECT value FROM app_meta WHERE key=?').get(PURGE_BLOCK_KEY)?.value||0);
@@ -89,29 +85,36 @@ function prepareMatchesFinalizedReceipt(receipt,job={}){
   const challengeId=String(job?.payload?.challengeId||'').trim();
   return Boolean(challengeId&&challengeId===String(receipt?.challengeId||'').trim());
 }
+function activeWorkerState(ownership={}){
+  if(ownership.active!==true)return ownership.workerState||'DEAD';
+  return String(ownership.workerState||'UNKNOWN');
+}
 function protectedJob(group,row,lockedUntil,now,receipt){
   if(row?.unreadable){
     return {kind:group.kind,status:'UNKNOWN',workerState:'SIDECAR_UNREADABLE',jobId:'',lockedUntil,durableReceipt:false,stateError:String(row.error||'UNKNOWN')};
   }
   const status=String(row.job.status||'').toUpperCase();
+  const ownership=inspectV541PurgeJobWorker(row.job);
+  const live=ownership.active===true&&String(ownership.workerState||'')==='ALIVE';
   if(group.kind==='EXECUTE'&&receiptMatchesExecute(receipt,row)){
-    const alive=pidAlive(row.job.workerPid);
     if(receiptIsFinalized(receipt)){
-      if(alive===true){
-        return {kind:group.kind,status:'FINALIZED',workerState:'FINALIZER_TAIL_ACTIVE',jobId:String(row.job.jobId||''),lockedUntil,durableReceipt:true,receiptFinalized:true};
+      if(live){
+        return {kind:group.kind,status:'FINALIZED',workerState:'FINALIZER_TAIL_ACTIVE',identityState:ownership.identityState||'',jobId:String(row.job.jobId||''),lockedUntil,durableReceipt:true,receiptFinalized:true};
       }
       return null;
     }
-    return {kind:group.kind,status:'COMMITTED',workerState:alive===true?'ALIVE':'COMMITTED_RECOVERY',jobId:String(row.job.jobId||''),lockedUntil,durableReceipt:true,receiptFinalized:false};
+    return {kind:group.kind,status:'COMMITTED',workerState:live?'ALIVE':'COMMITTED_RECOVERY',identityState:ownership.identityState||'',jobId:String(row.job.jobId||''),lockedUntil,durableReceipt:true,receiptFinalized:false};
   }
   if(group.kind==='EXECUTE'&&status==='COMMITTED'){
-    const alive=pidAlive(row.job.workerPid);
-    return {kind:group.kind,status,workerState:alive===true?'ALIVE':'COMMITTED_RECOVERY',jobId:String(row.job.jobId||''),lockedUntil};
+    return {kind:group.kind,status,workerState:live?'ALIVE':'COMMITTED_RECOVERY',identityState:ownership.identityState||'',jobId:String(row.job.jobId||''),lockedUntil};
   }
   if(ACTIVE.has(status)){
-    const alive=pidAlive(row.job.workerPid);
-    if(alive!==false||lockedUntil>now){
-      return {kind:group.kind,status,workerState:alive===true?'ALIVE':alive===false?'DEAD_LOCKED':'UNKNOWN',jobId:String(row.job.jobId||''),lockedUntil};
+    if(ownership.active===true||lockedUntil>now){
+      let workerState=activeWorkerState(ownership);
+      if(ownership.active!==true&&lockedUntil>now){
+        workerState=String(ownership.identityState||'')==='PID_REUSED'?'PID_REUSED_LOCKED':'DEAD_LOCKED';
+      }
+      return {kind:group.kind,status,workerState,identityState:ownership.identityState||'',jobId:String(row.job.jobId||''),lockedUntil};
     }
     return null;
   }
@@ -163,7 +166,8 @@ export function inspectGlobalPurgeOwnership(user={}){
     commitReceiptPending,
     commitReceiptOrphaned,
     receiptExecuteJobId:String(receipt?.executeJobId||''),
-    receiptFinalizedAt:String(receipt?.finalizedAt||'')
+    receiptFinalizedAt:String(receipt?.finalizedAt||''),
+    pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID
   };
 }
 
@@ -172,13 +176,27 @@ function submissionMutexFile(){
   fs.mkdirSync(dir,{recursive:true});
   return path.join(dir,SUBMISSION_MUTEX_FILE);
 }
-function existingMutexBlocks(record={}){
-  if(!record||typeof record!=='object')return true;
+function sameSubmissionMutexIdentity(left={},right={}){
+  const leftRequest=String(left.requestToken||'');
+  const rightRequest=String(right.requestToken||'');
+  if(!leftRequest||!rightRequest||leftRequest!==rightRequest)return false;
+  return Number(left.pid||0)===Number(right.pid||0)
+    && String(left.processInstanceToken||'')===String(right.processInstanceToken||'')
+    && Number(left.acquiredAt||0)===Number(right.acquiredAt||0)
+    && String(left.ownerKey||'')===String(right.ownerKey||'');
+}
+function removeStaleSubmissionMutexIfUnchanged(file,expected){
+  const current=readJson(file);
+  if(!current||!sameSubmissionMutexIdentity(current,expected))return false;
+  try{fs.rmSync(file,{force:true});return true;}catch{return false;}
+}
+function inspectSubmissionMutex(record={}){
+  if(!record||typeof record!=='object'||Array.isArray(record))return {active:true,stale:false,workerState:'UNKNOWN',identityState:'START_UNVERIFIED'};
   const pid=Number(record.pid||0);
-  if(pid===process.pid&&String(record.processInstanceToken||'')!==PROCESS_INSTANCE_TOKEN)return false;
-  const alive=pidAlive(pid);
-  if(alive===false)return false;
-  return true;
+  if(pid===process.pid&&String(record.processInstanceToken||'')!==PROCESS_INSTANCE_TOKEN){
+    return {active:false,stale:true,workerState:'PROCESS_INSTANCE_REPLACED',identityState:'PROCESS_INSTANCE_REPLACED'};
+  }
+  return inspectV541PurgePidOwnership({pid,ownerAcquiredAt:record.acquiredAt});
 }
 function tryCreateSubmissionMutex(file,record){
   let fd=null;
@@ -199,13 +217,14 @@ export function acquireGlobalPurgeSubmissionMutex(user={}){
   const ownerKey=identityKey(user);
   if(!ownerKey)throw new Error('缺少管理员身份，无法申请全局清空提交锁。');
   const file=submissionMutexFile();
-  const record={ownerKey,pid:process.pid,processInstanceToken:PROCESS_INSTANCE_TOKEN,requestToken:crypto.randomUUID(),acquiredAt:Date.now()};
+  const record={ownerKey,pid:process.pid,processInstanceToken:PROCESS_INSTANCE_TOKEN,requestToken:crypto.randomUUID(),acquiredAt:Date.now(),guard:V505_PURGE_GLOBAL_GUARD_ID};
   if(tryCreateSubmissionMutex(file,record))return {acquired:true,record,file};
   const current=readJson(file);
-  if(existingMutexBlocks(current))return {acquired:false,current,file};
-  try{fs.rmSync(file,{force:true});}catch{}
-  if(tryCreateSubmissionMutex(file,record))return {acquired:true,record,file,recoveredStale:true};
-  return {acquired:false,current:readJson(file),file};
+  const ownership=inspectSubmissionMutex(current);
+  if(!current||ownership.active===true||ownership.stale!==true)return {acquired:false,current,file,ownership};
+  if(!removeStaleSubmissionMutexIfUnchanged(file,current))return {acquired:false,current:readJson(file)||current,file,ownership};
+  if(tryCreateSubmissionMutex(file,record))return {acquired:true,record,file,recoveredStale:true,recoveryReason:ownership.identityState||ownership.workerState||'STALE'};
+  return {acquired:false,current:readJson(file),file,ownership};
 }
 
 export function releaseGlobalPurgeSubmissionMutex(record={}){
@@ -217,7 +236,7 @@ export function releaseGlobalPurgeSubmissionMutex(record={}){
 }
 
 function blocked(res,code,error,detail={}){
-  return res.status(423).json({ok:false,code,error,...detail,guardPatch:V505_PURGE_GLOBAL_GUARD_ID});
+  return res.status(423).json({ok:false,code,error,...detail,guardPatch:V505_PURGE_GLOBAL_GUARD_ID,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID});
 }
 function receiptBlockedResponse(ownership,res){
   if(ownership.commitReceiptUnreadable){
@@ -251,12 +270,6 @@ export async function v505PurgeGlobalOwnerGuard(req,res,next){
     const initialReceiptBlock=receiptBlockedResponse(ownership,res);
     if(initialReceiptBlock)return initialReceiptBlock;
 
-    // Terminal receipts can coexist with abandoned pid=0 startup sidecars from
-    // an older generation (including another administrator). Retire only those
-    // pre-finalization sidecars under the same global submission mutex and the
-    // per-job worker-claim lock before deciding current ownership. This prevents
-    // old debris from freezing every administrator forever without ever ignoring
-    // a live/claiming worker or an unfinalized commit receipt.
     const retired=retireHistoricalStartupGlobally(req.user||{});
     if(retired.busy){
       return blocked(res,'DATA_PURGE_SUBMISSION_BUSY','历史清空启动状态正在被另一项原子操作核对。系统不会并发覆盖任务，请稍后重试。');
@@ -271,6 +284,7 @@ export async function v505PurgeGlobalOwnerGuard(req,res,next){
       const phase=ownership.foreign.kind==='EXECUTE'?'清空':'安全备份';
       return blocked(res,'DATA_PURGE_OWNED_BY_ANOTHER_ADMIN',`另一名管理员已有${phase}任务处于受保护或无法确认状态。系统不会启动第二个任务。`,{
         phase:ownership.foreign.kind,status:ownership.foreign.status,workerState:ownership.foreign.workerState,
+        identityState:ownership.foreign.identityState||'',
         lockedUntil:ownership.foreign.lockedUntil>0?new Date(ownership.foreign.lockedUntil).toISOString():''
       });
     }
@@ -293,7 +307,9 @@ export async function v505PurgeGlobalOwnerGuard(req,res,next){
 
     const mutex=acquireGlobalPurgeSubmissionMutex(req.user||{});
     if(!mutex.acquired){
-      return blocked(res,'DATA_PURGE_SUBMISSION_BUSY','另一项清空提交正在进入受保护任务队列。系统不会并发创建第二个备份或删除任务，请稍后重试。');
+      return blocked(res,'DATA_PURGE_SUBMISSION_BUSY','另一项清空提交正在进入受保护任务队列。系统不会并发创建第二个备份或删除任务，请稍后重试。',{
+        workerState:mutex.ownership?.workerState||'',identityState:mutex.ownership?.identityState||''
+      });
     }
     let released=false;
     const release=()=>{
