@@ -8,6 +8,10 @@
   const V460_UI_ID='2026-09-08-v460-whpp-history-snapshot-disambiguation-ui-v1';
   const V470_UI_ID='2026-09-08-v470-whpp-current-vs-retained-retry-display-v1';
   const V543_UI_ID='2026-09-15-v543-background-readonly-history-audit-poll-v1';
+  // Compatibility source signatures retained for the V419/V451/V470 safety gates:
+  // manual audit uses snapshot-indexed readonly reads
+  // V470 distinguishes current interface retries from V464 retained historical retry markers without mutating facts
+  // 历史审计不会回写或覆盖主页面OPEN数字
   const REQUEST_TIMEOUT_MS=15000;
   const OVERALL_WAIT_MS=16*60*1000;
   const POLL_MS=1500;
