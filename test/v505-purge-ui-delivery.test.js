@@ -149,7 +149,7 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
     location:{reload(){reloads+=1;}},
     confirm:value=>{confirms.push(String(value));return true;},
     alert:value=>alerts.push(String(value)),
-    setTimeout(){return 1;},
+    setTimeout(fn){queueMicrotask(fn);return 1;},
     clearTimeout(){},
     setInterval(){return 1;},
     clearInterval(){},
