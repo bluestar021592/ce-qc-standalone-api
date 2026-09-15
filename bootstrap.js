@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
+const V548_BOOTSTRAP_ID = '2026-09-15-v548-main-service-first-v1';
 
 // RECOVERY SAFE MODE (temporary): production data is preserved, but automatic
 // large-database maintenance is not allowed to compete with the local web UI.
@@ -75,6 +76,14 @@ if (!process.env.DASHBOARD_CACHE_REFRESH_MS) process.env.DASHBOARD_CACHE_REFRESH
 if (!process.env.DASHBOARD_CACHE_WARM_DAYS) process.env.DASHBOARD_CACHE_WARM_DAYS = '7';
 if (!process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS) process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = '120000';
 if (!process.env.CE_QC_EXPORT_SIDECAR_PORT) process.env.CE_QC_EXPORT_SIDECAR_PORT = '5178';
+if (!process.env.CE_QC_EXPORT_SIDECAR_START_DELAY_MS) process.env.CE_QC_EXPORT_SIDECAR_START_DELAY_MS = '3000';
+if (!process.env.CE_QC_POST_SERVER_REPAIR_DELAY_MS) process.env.CE_QC_POST_SERVER_REPAIR_DELAY_MS = '15000';
+
+function boundedDelayMs(rawValue, fallback, minValue, maxValue) {
+  const parsed = Number(rawValue);
+  const value = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.max(minValue, Math.min(maxValue, Math.trunc(value)));
+}
 
 let exportSidecarChild = null;
 function startExportSidecar() {
@@ -98,8 +107,16 @@ function startExportSidecar() {
     console.error('[CE-QC][BOOT] V193 export sidecar start failed:', error?.stack || error);
   }
 }
+
+function scheduleExportSidecar() {
+  if (String(process.env.CE_QC_EXPORT_SIDECAR_CHILD || '') === '1') return;
+  const delayMs = boundedDelayMs(process.env.CE_QC_EXPORT_SIDECAR_START_DELAY_MS, 3000, 1000, 30000);
+  const timer = setTimeout(() => startExportSidecar(), delayMs);
+  timer.unref?.();
+  console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} export sidecar deferred ${delayMs}ms until after main server listen.`);
+}
+
 process.once('exit', () => { try { exportSidecarChild?.kill(); } catch {} });
-startExportSidecar();
 
 function wrapHandler(handler) {
   if (typeof handler !== 'function') return handler;
@@ -166,6 +183,21 @@ async function importServerInteractiveFirst() {
   }
 }
 
+function schedulePostServerRepair(v167Repair) {
+  const delayMs = boundedDelayMs(process.env.CE_QC_POST_SERVER_REPAIR_DELAY_MS, 15000, 5000, 120000);
+  const timer = setTimeout(() => {
+    try {
+      const startedAt = Date.now();
+      const result = v167Repair.repairLatestCcslPodLockFacts();
+      console.log(`[CE-QC][BACKGROUND] V167 CCSL POD-lock fact repair ${Date.now()-startedAt}ms ${JSON.stringify(result)}`);
+    } catch (error) {
+      console.error('[CE-QC][BACKGROUND] V167 CCSL POD-lock fact repair failed:', error?.stack || error);
+    }
+  }, delayMs);
+  timer.unref?.();
+  console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} V167 repair deferred ${delayMs}ms so first browser requests stay responsive.`);
+}
+
 function scheduleDeferredMaintenance({ v92, v76Repair }) {
   if (String(process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED || '').trim() !== '1') {
     console.log('[CE-QC][BOOT] background maintenance disabled on normal startup; first paint is not blocked.');
@@ -194,6 +226,7 @@ function scheduleDeferredMaintenance({ v92, v76Repair }) {
 
 try {
   console.log(`[CE-QC][BOOT] bootstrap pid=${process.pid} node=${process.version}`);
+  console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} main service has startup priority; non-interactive work starts only after listen.`);
   console.log('[CE-QC][RECOVERY_SAFE_MODE] automatic tracking/evidence/history/storage startup maintenance disabled; UI/API availability has priority.');
   await importPhase('v157CeNetworkDnsPatch', './src/v157CeNetworkDnsPatch.js');
   await importPhase('v147TrackTimeoutConfig', './src/v147TrackTimeoutConfig.js');
@@ -249,13 +282,8 @@ try {
   const v76Repair = await importPhase('v76CurrentCeafSplitRepair', './src/v76CurrentCeafSplitRepair.js');
 
   await importServerInteractiveFirst();
-  try {
-    const startedAt = Date.now();
-    const result = v167Repair.repairLatestCcslPodLockFacts();
-    console.log(`[CE-QC][BOOT] V167 CCSL POD-lock fact repair ${Date.now()-startedAt}ms ${JSON.stringify(result)}`);
-  } catch (error) {
-    console.error('[CE-QC][BOOT] V167 CCSL POD-lock fact repair failed:', error?.stack || error);
-  }
+  scheduleExportSidecar();
+  schedulePostServerRepair(v167Repair);
   scheduleDeferredMaintenance({ v92, v76Repair });
 } catch (error) {
   console.error('[CE-QC][STARTUP_FATAL]', error?.stack || error);
