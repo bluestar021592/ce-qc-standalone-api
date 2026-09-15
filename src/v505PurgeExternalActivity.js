@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 
 import { getRuntimeConfig } from './db.js';
 
-export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-15-v538-purge-unverified-old-export-expiry-v1';
+export const V505_PURGE_EXTERNAL_ACTIVITY_ID='2026-09-15-v539-export-admission-pid-start-v1';
 export const V505_EXPORT_SUBMISSION_MUTEX_FILE='.v505_export_submission.lock.json';
 const ACTIVE_EXPORT_STATUS=new Set(['QUEUED','RUNNING','PROCESSING']);
 const TERMINAL_EXPORT_STATUS=new Set(['COMPLETED','SUCCEEDED','FAILED','CANCELLED']);
@@ -12,6 +12,7 @@ const KNOWN_EXPORT_STATUS=new Set([...ACTIVE_EXPORT_STATUS,...TERMINAL_EXPORT_ST
 const UNKNOWN_RECENT_MS=Math.max(5*60_000,Math.min(60*60_000,Number(process.env.V505_EXPORT_UNKNOWN_RECENT_MS||30*60_000)));
 const PID_IDENTITY_TIMEOUT_MS=Math.max(1000,Math.min(12_000,Number(process.env.V537_EXPORT_PID_IDENTITY_TIMEOUT_MS||8000)));
 export const V538_UNVERIFIED_OLD_EXPORT_HARD_EXPIRY_MS=Math.max(60*60_000,Math.min(7*24*60*60_000,Number(process.env.V538_EXPORT_UNVERIFIED_HARD_EXPIRY_MS||24*60*60_000)));
+export const V539_ADMISSION_PID_REUSE_TOLERANCE_MS=Math.max(1000,Math.min(60_000,Number(process.env.V539_ADMISSION_PID_REUSE_TOLERANCE_MS||5000)));
 
 function readJson(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
 function validExportJob(job){
@@ -86,6 +87,18 @@ function processCommandLine(pid){
     return commandLine?{state:'KNOWN',commandLine}:{state:'UNKNOWN',commandLine:''};
   }catch{return {state:'UNKNOWN',commandLine:''};}
 }
+function processStartedAtMs(pid){
+  const value=Number(pid||0);
+  if(!Number.isInteger(value)||value<=0)return 0;
+  if(process.platform!=='win32')return 0;
+  try{
+    const script=`$p=Get-CimInstance Win32_Process -Filter \"ProcessId = ${value}\" -ErrorAction SilentlyContinue; if($p -and $p.CreationDate){$d=[DateTimeOffset]$p.CreationDate; [Console]::Write($d.ToUnixTimeMilliseconds())}`;
+    const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:PID_IDENTITY_TIMEOUT_MS});
+    if(result.error)return 0;
+    const startedAt=Number(String(result.stdout||'').trim());
+    return Number.isFinite(startedAt)&&startedAt>1_000_000_000_000?startedAt:0;
+  }catch{return 0;}
+}
 function exportWorkerIdentity(pid,file=''){
   const info=processCommandLine(pid);
   if(info.state!=='KNOWN')return {state:'UNKNOWN',commandLine:''};
@@ -104,16 +117,33 @@ export function classifyV538OldLiveExportIdentity({identityState='',ageMs=Number
   if(expired)return {block:false,workerState:'ALIVE_UNVERIFIED_EXPIRED',identityState:'UNKNOWN'};
   return {block:true,workerState:'ALIVE_UNVERIFIED_OLD',identityState:'UNKNOWN'};
 }
+export function classifyV539ExportAdmissionPid({workerState='',acquiredAt=0,processStartedAt=0,toleranceMs=V539_ADMISSION_PID_REUSE_TOLERANCE_MS}={}){
+  const state=String(workerState||'UNKNOWN').toUpperCase();
+  if(state==='DEAD')return {active:false,stale:true,workerState:'DEAD',identityState:'DEAD'};
+  if(state!=='ALIVE')return {active:true,stale:false,workerState:state||'UNKNOWN',identityState:'START_UNVERIFIED'};
+  const lockAt=instant(acquiredAt);
+  const startedAt=instant(processStartedAt);
+  const tolerance=Math.max(1000,Math.min(60_000,Number(toleranceMs)||V539_ADMISSION_PID_REUSE_TOLERANCE_MS));
+  if(!lockAt||!startedAt)return {active:true,stale:false,workerState:'ALIVE',identityState:'START_UNVERIFIED'};
+  if(startedAt>lockAt+tolerance){
+    return {active:false,stale:true,workerState:'ALIVE_PID_REUSED',identityState:'PID_REUSED',acquiredAt:lockAt,processStartedAt:startedAt};
+  }
+  return {active:true,stale:false,workerState:'ALIVE',identityState:'START_MATCH',acquiredAt:lockAt,processStartedAt:startedAt};
+}
+export function inspectExportSubmissionRecord(record={}){
+  if(!record||typeof record!=='object'||Array.isArray(record))return {active:true,stale:false,workerState:'UNKNOWN',identityState:'START_UNVERIFIED'};
+  const workerState=pidState(record.pid);
+  const processStartedAt=workerState==='ALIVE'?processStartedAtMs(record.pid):0;
+  return {...classifyV539ExportAdmissionPid({workerState,acquiredAt:record.acquiredAt,processStartedAt}),processStartedAt};
+}
 
 export function inspectExportSubmissionAdmission(){
   const cfg=getRuntimeConfig();
   const file=path.join(cfg.backupsDir,V505_EXPORT_SUBMISSION_MUTEX_FILE);
   if(!fs.existsSync(file))return {active:false,file,gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
   const record=readJson(file);
-  if(!record)return {active:true,file,workerState:'UNKNOWN',gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
-  const workerState=pidState(record.pid);
-  if(workerState==='DEAD')return {active:false,stale:true,file,record,workerState,gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
-  return {active:true,file,record,workerState,gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
+  if(!record)return {active:true,file,workerState:'UNKNOWN',identityState:'START_UNVERIFIED',gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
+  return {...inspectExportSubmissionRecord(record),file,record,gate:V505_PURGE_EXTERNAL_ACTIVITY_ID};
 }
 
 export function inspectActiveExportJobs({now=Date.now()}={}){
