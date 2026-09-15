@@ -6,7 +6,7 @@ import { acquireGlobalPurgeSubmissionMutex, releaseGlobalPurgeSubmissionMutex } 
 import { inspectGlobalHistoricalPurgeStartupDebris, retireGlobalHistoricalPurgeStartupDebris } from './v505PurgeStartupOrphanGuard.js';
 import { inspectV541PurgeJobWorker, inspectV541PurgePidOwnership, V541_PURGE_PID_OWNERSHIP_ID } from './v541PurgePidOwnership.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-15-v546-purge-freeze-readonly-ui-recovery-v1';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-15-v547-low-power-write-freeze-reconcile-v1';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const PURGE_COMMIT_RECEIPT_KEY='data_purge_last_commit_receipt';
 const ACTIVE=new Set(['QUEUED','RUNNING','COMMITTED']);
@@ -18,9 +18,11 @@ const PURGE_CONTROL=/^\/api\/admin\/data-purge\/(?:prepare|execute)$/;
 const PURGE_STATUS=/^\/purge-status\/[a-f0-9]{48}\.json$/i;
 const SAFE_READ_APIS=new Set(['/api/health','/api/session','/api/bootstrap','/api/backups']);
 const LONG_LIVED_AFTER_AUTH=new Set(['/api/events']);
-const QUERY_ONLY_RECONCILE_MS=10_000;
+export const V547_RECONCILE_ACTIVE_MS=Math.max(5_000,Math.min(30_000,Number(process.env.V547_PURGE_ACTIVE_RECONCILE_MS||10_000)));
+export const V547_RECONCILE_IDLE_MS=Math.max(30_000,Math.min(5*60_000,Number(process.env.V547_PURGE_IDLE_RECONCILE_MS||60_000)));
 const SYSTEM_RECONCILE_USER={id:'V505_SYSTEM_HISTORICAL_STARTUP_RECONCILE'};
 let queryOnlyState=null;
+let reconcileTimer=null;
 
 function readJson(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
 function validJobSidecar(job){
@@ -128,6 +130,19 @@ export function inspectExternalPurgeWriteFreeze(){
       }
       const job=state.job;
       const status=String(job.status||'').toUpperCase();
+
+      // Terminal jobs do not own a live worker anymore. Do not launch Windows
+      // PowerShell/CIM just to inspect a historical PID on every web request.
+      if(group.kind==='PREPARE'&&status==='SUCCEEDED'){
+        if(prepareMatchesFinalizedReceipt(receipt,job))continue;
+        const expiresAt=Date.parse(String(job.payload?.expiresAt||''));
+        if(Number.isFinite(expiresAt)&&expiresAt>now){
+          completedPrepare ||= {active:false,sealed:true,kind:group.kind,status,workerState:'COMPLETED_WAITING_EXPLICIT_EXECUTE',identityState:'TERMINAL_NO_PID_LOOKUP',jobId:String(job.jobId||''),expiresAt,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
+        }
+        continue;
+      }
+      if(status==='FAILED'||status==='SUCCEEDED')continue;
+
       const ownership=workerOwnership(job);
       const live=workerLive(ownership);
       if(group.kind==='EXECUTE'&&receiptMatchesExecute(receipt,job)){
@@ -146,13 +161,6 @@ export function inspectExternalPurgeWriteFreeze(){
         const activeState={active:true,sealed:group.kind==='EXECUTE',kind:group.kind,status,workerState:String(ownership.workerState||'UNKNOWN'),identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
         if(activeState.sealed)return activeState;
         activeUnsealed ||= activeState;
-      }
-      if(group.kind==='PREPARE'&&status==='SUCCEEDED'){
-        if(prepareMatchesFinalizedReceipt(receipt,job))continue;
-        const expiresAt=Date.parse(String(job.payload?.expiresAt||''));
-        if(Number.isFinite(expiresAt)&&expiresAt>now){
-          completedPrepare ||= {active:false,sealed:true,kind:group.kind,status,workerState:'COMPLETED_WAITING_EXPLICIT_EXECUTE',identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),expiresAt,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
-        }
       }
     }
   }
@@ -237,11 +245,6 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
   const protectSharedDb=queryOnlyRequired(state);
 
   req.v505PurgeWriteFreezeState=state;
-  // A completed V545 PREPARE no longer freezes normal application traffic, but
-  // authentication itself remains write-free so merely reopening the browser
-  // cannot refresh session expiry/audit metadata and invalidate the sealed copy.
-  // Real business writes are allowed; if they change SQLite, the later explicit
-  // EXECUTE fingerprint gate rejects the old prepared challenge before DELETE.
   if(state.active||state.prepareBlockSuppressed)req.v505PurgeReadOnlyAuth=true;
 
   if(LONG_LIVED_AFTER_AUTH.has(pathname)&&typeof req.v505PurgeHttpActivityRelease==='function'){
@@ -267,13 +270,20 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
   });
 }
 
+function scheduleReconcile(delayMs){
+  if(reconcileTimer)clearTimeout(reconcileTimer);
+  reconcileTimer=setTimeout(()=>{
+    let state=null;
+    try{reconcileHistoricalPurgeStartupDebrisNow();}catch{}
+    try{state=reconcilePurgeQueryOnlyNow().state;}catch{}
+    scheduleReconcile(state?.active?V547_RECONCILE_ACTIVE_MS:V547_RECONCILE_IDLE_MS);
+  },delayMs);
+  reconcileTimer.unref?.();
+}
 const initialReconcile=setImmediate(()=>{
+  let state=null;
   try{reconcileHistoricalPurgeStartupDebrisNow();}catch{}
-  try{reconcilePurgeQueryOnlyNow();}catch{}
+  try{state=reconcilePurgeQueryOnlyNow().state;}catch{}
+  scheduleReconcile(state?.active?V547_RECONCILE_ACTIVE_MS:V547_RECONCILE_IDLE_MS);
 });
 initialReconcile.unref?.();
-const queryOnlyReconciler=setInterval(()=>{
-  try{reconcileHistoricalPurgeStartupDebrisNow();}catch{}
-  try{reconcilePurgeQueryOnlyNow();}catch{}
-},QUERY_ONLY_RECONCILE_MS);
-queryOnlyReconciler.unref?.();
