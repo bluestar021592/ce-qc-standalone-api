@@ -1,6 +1,7 @@
 import { getDb } from './db.js';
 
-export const V142_HISTORY_AUDIT_ID = '2026-09-15-v543-isolated-readonly-history-audit-v1';
+export const V142_HISTORY_AUDIT_ID = '2026-09-07-v451-snapshot-indexed-readonly-history-audit-v2-fail-closed';
+export const V543_HISTORY_AUDIT_ISOLATION_ID = '2026-09-15-v543-isolated-readonly-history-audit-v1';
 export const V456_WHPP_AUTHORITY_DIAGNOSTIC_ID = '2026-09-08-v456-whpp-finalized-snapshot-authority-diagnostic-v1';
 export const V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID = '2026-09-08-v457-whpp-legacy-metadata-loss-attestation-v1';
 export const V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID = '2026-09-08-v460-whpp-history-snapshot-exact-disambiguation-v1';
@@ -287,7 +288,7 @@ export function auditSevenBusinessHistoryWithDb(db,{fromDate='2026-07-01',toDate
   // fail-closed on actual completeness checks above.
   const currentEvidence={
     evidenceMode:'V451_INDEXED_AUDIT_ONLY',
-    auditIsolation:'V543_READONLY_CHILD_CAPABLE',
+    auditIsolation:V543_HISTORY_AUDIT_ISOLATION_ID,
     whppAuthorityDiagnostic:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,
     whppLegacyCompletionRecovery:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,
     whppHistorySnapshotDisambiguation:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,
@@ -302,7 +303,7 @@ export function auditSevenBusinessHistoryWithDb(db,{fromDate='2026-07-01',toDate
   };
   const exportReady=missing.length===0&&incomplete.length===0;
   const totalMs=Date.now()-totalStarted;
-  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,v456WhppAuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,v457WhppLegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,v460WhppHistorySnapshotDisambiguationId:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
+  return {ok:true,patchId:V142_HISTORY_AUDIT_ID,isolationPatchId:V543_HISTORY_AUDIT_ISOLATION_ID,v456WhppAuthorityDiagnosticId:V456_WHPP_AUTHORITY_DIAGNOSTIC_ID,v457WhppLegacyRecoveryId:V457_WHPP_LEGACY_COMPLETION_RECOVERY_ID,v460WhppHistorySnapshotDisambiguationId:V460_WHPP_HISTORY_SNAPSHOT_DISAMBIGUATION_ID,readOnly:true,scanMode:'V451_SNAPSHOT_INDEXED_READ',fromDate:from,toDate:to,expectedDays:expected.length,daysPresent:expected.length-missing.length,missingDates:missing,incompleteDates:incomplete,warnings,totalImported,totalWhpp,totalRetryPending:totalRetry,currentEvidence,exportReady,exportStatus:exportReady?(totalRetry?'READY_WITH_RETRY':'READY'):'BLOCKED_UNTIL_REPAIRED',timing:{bulkReadMs:bulk.bulkReadMs,totalMs},days};
 }
 
 export function auditSevenBusinessHistory(options={}){
