@@ -4,8 +4,9 @@ import path from 'node:path';
 import { getDb, getRuntimeConfig } from './db.js';
 import { acquireGlobalPurgeSubmissionMutex, releaseGlobalPurgeSubmissionMutex } from './v505PurgeGlobalGuard.js';
 import { inspectGlobalHistoricalPurgeStartupDebris, retireGlobalHistoricalPurgeStartupDebris } from './v505PurgeStartupOrphanGuard.js';
+import { inspectV541PurgeJobWorker, inspectV541PurgePidOwnership, V541_PURGE_PID_OWNERSHIP_ID } from './v541PurgePidOwnership.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-12-v505-external-worker-write-freeze-v20-historical-startup-reconcile';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-15-v542-write-freeze-pid-reuse-v1';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const PURGE_COMMIT_RECEIPT_KEY='data_purge_last_commit_receipt';
 const ACTIVE=new Set(['QUEUED','RUNNING','COMMITTED']);
@@ -32,11 +33,6 @@ function readJobState(file){
     if(!validJobSidecar(job))return {job:null,unreadable:true,error:'JSON结构缺少有效 jobId / status'};
     return {job,unreadable:false,error:''};
   }catch(error){return {job:null,unreadable:true,error:String(error?.message||error)};}
-}
-function pidAlive(pid){
-  const value=Number(pid||0);
-  if(!Number.isInteger(value)||value<=0)return null;
-  try{process.kill(value,0);return true;}catch(error){return error?.code==='EPERM'?true:false;}
 }
 function sqliteBlockUntil(){
   try{return Number(getDb().prepare('SELECT value FROM app_meta WHERE key=?').get(PURGE_BLOCK_KEY)?.value||0);}catch{return 0;}
@@ -88,15 +84,23 @@ function prepareMatchesFinalizedReceipt(receipt,job={}){
   const challengeId=String(job?.payload?.challengeId||'').trim();
   return Boolean(challengeId&&challengeId===String(receipt?.challengeId||'').trim());
 }
+function workerOwnership(job={}){return inspectV541PurgeJobWorker(job);}
+function workerLive(ownership={}){
+  return ownership.active===true&&String(ownership.workerState||'')==='ALIVE';
+}
 function submissionMutexState(){
   const cfg=getRuntimeConfig();
   const file=path.join(cfg.backupsDir,SUBMISSION_MUTEX_FILE);
   if(!fs.existsSync(file))return null;
   const record=readJson(file);
-  if(!record)return {active:true,sealed:false,kind:'SUBMISSION',status:'UNKNOWN',workerState:'UNKNOWN',jobId:''};
-  const alive=pidAlive(record.pid);
-  if(alive===false)return null;
-  return {active:true,sealed:false,kind:'SUBMISSION',status:'LOCKED',workerState:alive===true?'ALIVE':'UNKNOWN',jobId:String(record.requestToken||'')};
+  if(!record)return {active:true,sealed:false,kind:'SUBMISSION',status:'UNKNOWN',workerState:'UNKNOWN',identityState:'START_UNVERIFIED',jobId:'',pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
+  const ownership=inspectV541PurgePidOwnership({pid:record.pid,ownerAcquiredAt:record.acquiredAt});
+  if(ownership.active!==true)return null;
+  return {
+    active:true,sealed:false,kind:'SUBMISSION',status:'LOCKED',
+    workerState:String(ownership.workerState||'UNKNOWN'),identityState:String(ownership.identityState||''),
+    jobId:String(record.requestToken||''),pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID
+  };
 }
 
 export function inspectExternalPurgeWriteFreeze(){
@@ -104,7 +108,7 @@ export function inspectExternalPurgeWriteFreeze(){
   const now=Date.now();
   const receiptState=lastCommitReceiptState();
   if(receiptState.unreadable){
-    return {active:true,sealed:true,kind:'EXECUTE',status:'UNKNOWN',workerState:'COMMIT_RECEIPT_UNREADABLE',jobId:'',stateError:receiptState.error};
+    return {active:true,sealed:true,kind:'EXECUTE',status:'UNKNOWN',workerState:'COMMIT_RECEIPT_UNREADABLE',jobId:'',stateError:receiptState.error,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
   }
   const receipt=receiptState.receipt;
   const groups=[
@@ -116,51 +120,48 @@ export function inspectExternalPurgeWriteFreeze(){
     for(const file of jobFiles(group.dir)){
       const state=readJobState(file);
       if(state.unreadable){
-        const unknown={active:true,sealed:group.kind==='EXECUTE',kind:group.kind,status:'UNKNOWN',workerState:'SIDECAR_UNREADABLE',jobId:'',stateError:state.error};
+        const unknown={active:true,sealed:group.kind==='EXECUTE',kind:group.kind,status:'UNKNOWN',workerState:'SIDECAR_UNREADABLE',identityState:'START_UNVERIFIED',jobId:'',stateError:state.error,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
         if(unknown.sealed)return unknown;
         activeUnsealed ||= unknown;
         continue;
       }
       const job=state.job;
       const status=String(job.status||'').toUpperCase();
+      const ownership=workerOwnership(job);
+      const live=workerLive(ownership);
       if(group.kind==='EXECUTE'&&receiptMatchesExecute(receipt,job)){
-        const alive=pidAlive(job.workerPid);
         if(receiptIsFinalized(receipt)){
-          if(alive===true){
-            return {active:true,sealed:true,kind:group.kind,status:'FINALIZED',workerState:'FINALIZER_TAIL_ACTIVE',jobId:String(job.jobId||''),durableReceipt:true,receiptFinalized:true};
+          if(live){
+            return {active:true,sealed:true,kind:group.kind,status:'FINALIZED',workerState:'FINALIZER_TAIL_ACTIVE',identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),durableReceipt:true,receiptFinalized:true,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
           }
           continue;
         }
-        return {active:true,sealed:true,kind:group.kind,status:'COMMITTED',workerState:alive===true?'ALIVE':'COMMITTED_RECOVERY',jobId:String(job.jobId||''),durableReceipt:true,receiptFinalized:false};
+        return {active:true,sealed:true,kind:group.kind,status:'COMMITTED',workerState:live?'ALIVE':'COMMITTED_RECOVERY',identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),durableReceipt:true,receiptFinalized:false,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
       }
       if(group.kind==='EXECUTE'&&status==='COMMITTED'){
-        const alive=pidAlive(job.workerPid);
-        return {active:true,sealed:true,kind:group.kind,status,workerState:alive===true?'ALIVE':'COMMITTED_RECOVERY',jobId:String(job.jobId||'')};
+        return {active:true,sealed:true,kind:group.kind,status,workerState:live?'ALIVE':'COMMITTED_RECOVERY',identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
       }
-      if(ACTIVE.has(status)){
-        const alive=pidAlive(job.workerPid);
-        if(alive!==false){
-          const activeState={active:true,sealed:group.kind==='EXECUTE',kind:group.kind,status,workerState:alive===true?'ALIVE':'UNKNOWN',jobId:String(job.jobId||'')};
-          if(activeState.sealed)return activeState;
-          activeUnsealed ||= activeState;
-        }
+      if(ACTIVE.has(status)&&ownership.active===true){
+        const activeState={active:true,sealed:group.kind==='EXECUTE',kind:group.kind,status,workerState:String(ownership.workerState||'UNKNOWN'),identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
+        if(activeState.sealed)return activeState;
+        activeUnsealed ||= activeState;
       }
       if(group.kind==='PREPARE'&&status==='SUCCEEDED'){
         if(prepareMatchesFinalizedReceipt(receipt,job))continue;
         const expiresAt=Date.parse(String(job.payload?.expiresAt||''));
         if(Number.isFinite(expiresAt)&&expiresAt>now){
-          return {active:true,sealed:true,kind:group.kind,status,workerState:'COMPLETED_WAITING_EXECUTE',jobId:String(job.jobId||''),expiresAt};
+          return {active:true,sealed:true,kind:group.kind,status,workerState:'COMPLETED_WAITING_EXECUTE',identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),expiresAt,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
         }
       }
     }
   }
   if(activeUnsealed)return activeUnsealed;
   if(receipt&&!String(receipt.finalizedAt||'').trim()){
-    return {active:true,sealed:true,kind:'EXECUTE',status:'COMMITTED',workerState:'COMMIT_RECEIPT_ORPHANED',jobId:String(receipt.executeJobId||''),durableReceipt:true,receiptFinalized:false};
+    return {active:true,sealed:true,kind:'EXECUTE',status:'COMMITTED',workerState:'COMMIT_RECEIPT_ORPHANED',jobId:String(receipt.executeJobId||''),durableReceipt:true,receiptFinalized:false,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
   }
   const submission=submissionMutexState();
   if(submission)return submission;
-  return {active:false,sealed:false};
+  return {active:false,sealed:false,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
 }
 
 export function inspectPurgeWriteFreezeState(){
@@ -244,9 +245,11 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
     until:state.until?new Date(state.until).toISOString():'',
     protectedBy:state.external?.active?`${state.external.kind}:${state.external.status}`:'SQLITE_PURGE_BLOCK',
     workerState:String(state.external?.workerState||''),
+    identityState:String(state.external?.identityState||''),
     fingerprintSealed:state.sealed,
     mainProcessQueryOnly:queryOnlyState===true,
-    guardPatch:V505_PURGE_WRITE_FREEZE_ID
+    guardPatch:V505_PURGE_WRITE_FREEZE_ID,
+    pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID
   });
 }
 
