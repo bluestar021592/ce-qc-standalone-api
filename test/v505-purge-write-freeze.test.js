@@ -95,11 +95,12 @@ test('V546 keeps destructive writes frozen while PREPARE read-only UI stays reac
     assert.equal(executeDashboardRead.res.statusCode,423);
 
     fs.rmSync(executeFile,{force:true});
+    db.exec('PRAGMA query_only=OFF');
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'SUCCEEDED',workerPid:0,payload:{expiresAt:new Date(Date.now()+5*60_000).toISOString()}}),'utf8');
     setLiveSqliteBlock();
     const waitingExecuteWrite=runGuard(request('PATCH','/api/settings'));
     assert.equal(waitingExecuteWrite.nextCalled,true,'a completed PREPARE waiting for explicit V545 step two must no longer keep the whole application frozen');
-    assert.equal(waitingExecuteWrite.req.v505PurgeReadOnlyAuth,undefined);
+    assert.equal(waitingExecuteWrite.req.v505PurgeReadOnlyAuth,true,'auth bookkeeping stays write-free while the prepared challenge exists, even though ordinary app traffic is thawed');
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'the old one-hour PREPARE block is suppressed once the backup worker is complete');
     const reconciledCompleted=reconcilePurgeQueryOnlyNow();
     assert.equal(reconciledCompleted.state.active,false);
@@ -108,6 +109,7 @@ test('V546 keeps destructive writes frozen while PREPARE read-only UI stays reac
 
     const sealedControl=runGuard(request('POST','/api/admin/data-purge/execute'));
     assert.equal(sealedControl.nextCalled,true,'explicit execute control stays reachable after completed PREPARE');
+    assert.equal(sealedControl.req.v505PurgeReadOnlyAuth,true);
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'completed PREPARE itself does not silently refreeze the shared DB');
 
     fs.rmSync(prepareFile,{force:true});
