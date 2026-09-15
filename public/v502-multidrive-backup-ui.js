@@ -2,7 +2,7 @@
   if(global.__CE_QC_V502_MULTI_DRIVE_BACKUP_UI__)return;
   const PATCH_ID='2026-09-15-v544-purge-owner-cache-bust-v1';
 
-  const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
+  const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const sizeText=bytes=>typeof global.formatFileSize==='function'?global.formatFileSize(Number(bytes||0)):`${(Number(bytes||0)/1024/1024/1024).toFixed(2)} GB`;
   const driveText=(rows=[],field='totalBytes')=>rows.length?rows.map(row=>`${escapeText(row.drive||'磁盘')} ${sizeText(row[field]||0)}`).join(' ｜ '):'未发现CE受控备份占用';
 
