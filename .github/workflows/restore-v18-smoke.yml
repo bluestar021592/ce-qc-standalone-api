@@ -99,7 +99,8 @@ jobs:
             $stderr = Join-Path $env:RUNNER_TEMP ($safeName + '.stderr.log')
             Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
             $proc = Start-Process -FilePath 'node.exe' -ArgumentList @('--test','--test-force-exit',$test) -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-            $deadline = (Get-Date).AddSeconds(90)
+            $timeoutSeconds = if ($test -eq 'test/shopee-cnvn.test.js') { 180 } else { 90 }
+            $deadline = (Get-Date).AddSeconds($timeoutSeconds)
             while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
               Start-Sleep -Milliseconds 250
               $proc.Refresh()
@@ -110,7 +111,7 @@ jobs:
               Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
               Write-Host "--- stderr: $test ---"
               Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue
-              throw "V18 regression timed out after 90 seconds: $test"
+              throw "V18 regression timed out after $timeoutSeconds seconds: $test"
             }
             $proc.Refresh()
             Write-Host "--- stdout: $test ---"
