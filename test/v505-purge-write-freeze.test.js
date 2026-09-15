@@ -19,7 +19,7 @@ function identityFile(dir,label){
   return path.join(dir,`${key}.job.json`);
 }
 
-test('V505 freezes APIs without ever exposing a shared writable window during a real or receipt-backed committed purge',async()=>{
+test('V546 keeps destructive writes frozen while PREPARE read-only UI stays reachable and completed backup no longer whitescreens normal startup',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v505-write-freeze-'));
   process.env.DATA_DIR=dir;
   process.env.DB_FILE=path.join(dir,'test.db');
@@ -27,7 +27,7 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
   process.env.V505_PURGE_STARTUP_ORPHAN_STALE_MS='60000';
   const {getDb,getRuntimeConfig,closeDb}=await import('../src/db.js');
   const {v505PurgeWriteFreezeGuard,reconcilePurgeQueryOnlyNow,reconcileHistoricalPurgeStartupDebrisNow,V505_PURGE_WRITE_FREEZE_ID}=await import('../src/v505PurgeWriteFreezeGuard.js');
-  assert.match(V505_PURGE_WRITE_FREEZE_ID,/v542-write-freeze-pid-reuse/);
+  assert.match(V505_PURGE_WRITE_FREEZE_ID,/v546-purge-freeze-readonly-ui-recovery/);
   const db=getDb();
   const cfg=getRuntimeConfig();
   const prepareDir=path.join(cfg.backupsDir,'.purge_prepare_jobs');
@@ -36,7 +36,9 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
   fs.mkdirSync(prepareDir,{recursive:true});fs.mkdirSync(executeDir,{recursive:true});
   const prepareFile=identityFile(prepareDir,'prepare-owner');
   const executeFile=identityFile(executeDir,'execute-owner');
-  const setExpiredSqliteBlock=()=>db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('data_purge_block_until',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(String(Date.now()-60_000),new Date().toISOString());
+  const setSqliteBlock=(when)=>db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('data_purge_block_until',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(String(when),new Date().toISOString());
+  const setExpiredSqliteBlock=()=>setSqliteBlock(Date.now()-60_000);
+  const setLiveSqliteBlock=()=>setSqliteBlock(Date.now()+60*60_000);
   const runGuard=(req)=>{
     let nextCalled=false;const res=responseHarness();
     v505PurgeWriteFreezeGuard(req,res,()=>{nextCalled=true;});
@@ -54,21 +56,23 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
     fs.rmSync(submissionFile,{force:true});
 
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,workerClaimedAt:Date.now(),heartbeatAt:Date.now()-120_000}),'utf8');
-    const livePrepare=runGuard(request('POST','/api/unified-import'));
-    assert.equal(livePrepare.nextCalled,false);
-    assert.equal(livePrepare.res.statusCode,423);
-    assert.equal(livePrepare.res.body?.code,'DATA_PURGE_IN_PROGRESS');
-    assert.equal(livePrepare.res.body?.protectedBy,'PREPARE:RUNNING');
-    assert.equal(livePrepare.res.body?.fingerprintSealed,false);
-    assert.equal(livePrepare.req.v505PurgeReadOnlyAuth,true);
+    const livePrepareWrite=runGuard(request('POST','/api/unified-import'));
+    assert.equal(livePrepareWrite.nextCalled,false);
+    assert.equal(livePrepareWrite.res.statusCode,423);
+    assert.equal(livePrepareWrite.res.body?.code,'DATA_PURGE_IN_PROGRESS');
+    assert.equal(livePrepareWrite.res.body?.protectedBy,'PREPARE:RUNNING');
+    assert.equal(livePrepareWrite.res.body?.fingerprintSealed,false);
+    assert.equal(livePrepareWrite.req.v505PurgeReadOnlyAuth,true);
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'running PREPARE must freeze the shared web DB before the backup fingerprint is sealed');
 
-    const unknownGet=runGuard(request('GET','/api/dashboard'));
-    assert.equal(unknownGet.nextCalled,false,'unknown GET APIs are not assumed read-only during purge');
-    assert.equal(unknownGet.res.statusCode,423);
+    const dashboardRead=runGuard(request('GET','/api/state?compact=1'));
+    assert.equal(dashboardRead.nextCalled,true,'read-only dashboard APIs must remain reachable during PREPARE so the SPA cannot white-screen');
+    assert.equal(dashboardRead.req.v505PurgeReadOnlyAuth,true);
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'read-only UI access must not reopen a writable DB window');
+    const historyRead=runGuard(request('GET','/api/unified-history'));
+    assert.equal(historyRead.nextCalled,true,'history reads required by first paint remain available during PREPARE');
     const health=runGuard(request('GET','/api/health'));
     assert.equal(health.nextCalled,true,'explicit health read stays available');
-    assert.equal(health.req.v505PurgeReadOnlyAuth,true);
     const session=runGuard(request('GET','/api/session'));
     assert.equal(session.nextCalled,true,'session identity may be read without refreshing the DB session');
 
@@ -76,7 +80,7 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
     assert.equal(purgeControl.nextCalled,true,'purge coordinator endpoints must remain reachable');
     assert.equal(purgeControl.req.v505PurgeReadOnlyAuth,true,'purge control authentication remains read-only');
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'trusted purge control must never create a shared writable window');
-    assert.throws(()=>db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v505_concurrent_write_probe','1',?)`).run(new Date().toISOString()),/readonly|read-only/i,'a concurrent main-process write must remain impossible during purge control recovery');
+    assert.throws(()=>db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('v505_concurrent_write_probe','1',?)`).run(new Date().toISOString()),/readonly|read-only/i,'a concurrent main-process write must remain impossible during active PREPARE');
 
     fs.rmSync(prepareFile,{force:true});
     fs.writeFileSync(executeFile,JSON.stringify({jobId:crypto.randomUUID(),status:'RUNNING',workerPid:process.pid,workerClaimedAt:Date.now(),heartbeatAt:Date.now()-120_000}),'utf8');
@@ -86,21 +90,28 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
     assert.equal(liveExecute.res.body?.fingerprintSealed,true);
     assert.equal(liveExecute.res.body?.mainProcessQueryOnly,true);
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'EXECUTE must keep the main web DB connection query-only');
+    const executeDashboardRead=runGuard(request('GET','/api/state?compact=1'));
+    assert.equal(executeDashboardRead.nextCalled,false,'destructive EXECUTE keeps nonessential dashboard reads blocked');
+    assert.equal(executeDashboardRead.res.statusCode,423);
 
     fs.rmSync(executeFile,{force:true});
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'SUCCEEDED',workerPid:0,payload:{expiresAt:new Date(Date.now()+5*60_000).toISOString()}}),'utf8');
-    const waitingExecute=runGuard(request('PATCH','/api/settings'));
-    assert.equal(waitingExecute.nextCalled,false,'verified backup waiting for execute must keep writes frozen');
-    assert.equal(waitingExecute.res.body?.protectedBy,'PREPARE:SUCCEEDED');
-    assert.equal(waitingExecute.res.body?.fingerprintSealed,true);
-    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1);
+    setLiveSqliteBlock();
+    const waitingExecuteWrite=runGuard(request('PATCH','/api/settings'));
+    assert.equal(waitingExecuteWrite.nextCalled,true,'a completed PREPARE waiting for explicit V545 step two must no longer keep the whole application frozen');
+    assert.equal(waitingExecuteWrite.req.v505PurgeReadOnlyAuth,undefined);
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'the old one-hour PREPARE block is suppressed once the backup worker is complete');
+    const reconciledCompleted=reconcilePurgeQueryOnlyNow();
+    assert.equal(reconciledCompleted.state.active,false);
+    assert.equal(reconciledCompleted.state.prepareBlockSuppressed,true);
+    assert.equal(reconciledCompleted.state.external?.workerState,'COMPLETED_WAITING_EXPLICIT_EXECUTE');
 
     const sealedControl=runGuard(request('POST','/api/admin/data-purge/execute'));
-    assert.equal(sealedControl.nextCalled,true,'trusted purge control stays reachable after seal');
-    assert.equal(sealedControl.req.v505PurgeReadOnlyAuth,true);
-    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'sealed control recovery must stay read-only on the shared web connection');
+    assert.equal(sealedControl.nextCalled,true,'explicit execute control stays reachable after completed PREPARE');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'completed PREPARE itself does not silently refreeze the shared DB');
 
     fs.rmSync(prepareFile,{force:true});
+    setExpiredSqliteBlock();
     const reconciled=reconcilePurgeQueryOnlyNow();
     assert.equal(reconciled.state.active,false,'no persisted purge truth remains after detached task cleanup');
     assert.equal(reconciled.queryOnly.active,false,'periodic reconciler must restore the shared web DB writable even when no browser request arrives');
@@ -135,11 +146,6 @@ test('V505 freezes APIs without ever exposing a shared writable window during a 
     assert.equal(finalizedReceipt.nextCalled,true,'a valid finalized receipt with no active sidecar is historical and must not block ordinary writes');
     assert.equal(db.prepare('PRAGMA query_only').get().query_only,0);
 
-    // A pre-finalization pid=0 startup sidecar can otherwise survive a completed
-    // purge and make write-freeze inspection return UNKNOWN forever. The periodic
-    // server reconciler retires that debris under the global submission mutex and
-    // per-job claim lock, then restores writable mode without requiring a browser
-    // to click the purge control again.
     const oldHistoricalAt=Date.parse(finalizedAt)-120_000;
     fs.writeFileSync(prepareFile,JSON.stringify({
       jobId:crypto.randomUUID(),status:'RUNNING',workerPid:0,
