@@ -21,16 +21,16 @@ vm.runInNewContext(source,sandbox,{filename:file});
 assert.equal(sandbox.__CE_QC_V471_HISTORY_ABORT_NORMALIZER__?.installed,true,'V471 should install when AbortController exists');
 const timeoutController=new sandbox.AbortController();
 timeoutController.abort('V451_HISTORY_AUDIT_TIMEOUT');
-assert.equal(timeoutController.received,undefined,'V451 timeout must be converted to the native no-reason abort path so fetch rejects with standard AbortError');
+assert.equal(timeoutController.received,undefined,'V451 legacy timeout must remain normalized for cached/older clients');
 const otherController=new sandbox.AbortController();
 otherController.abort('OTHER_REASON');
 assert.equal(otherController.received,'OTHER_REASON','all non-target abort reasons must remain unchanged');
 
 const shell=fs.readFileSync('src/v44WhppUiPatch.js','utf8');
 const prelude='v471-history-audit-abort-normalizer.js?v=20260908-v471-1';
-const audit='v142-history-integrity-audit.js?v=20260908-v470-1';
+const audit='v142-history-integrity-audit.js?v=20260915-v543-1';
 assert.ok(shell.includes(prelude),'V471 prelude must be wired into the shell');
-assert.ok(shell.includes(audit),'V470 history audit must remain wired into the shell');
-assert.ok(shell.indexOf(prelude)<shell.indexOf(audit),'V471 timeout normalizer must load before the V142/V470 history audit');
+assert.ok(shell.includes(audit),'V543 isolated history audit UI must be wired into the shell');
+assert.ok(shell.indexOf(prelude)<shell.indexOf(audit),'V471 legacy timeout normalizer must load before the V543/V142 history audit');
 
-console.log('[V471] history audit timeout abort normalizer smoke passed: exact-reason only, ordered before V142, no network/database/business mutation');
+console.log('[V471/V543] legacy history timeout normalizer remains compatibility-only and ordered before the V543 isolated audit UI; no network/database/business mutation');
