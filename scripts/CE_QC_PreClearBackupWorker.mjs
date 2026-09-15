@@ -17,7 +17,7 @@ function sameFingerprint(a={},b={}){return sameStat(a.db,b.db)&&sameStat(a.wal,b
 function hashFile(file){
   return new Promise((resolve,reject)=>{
     const hash=crypto.createHash('sha256');
-    const input=fs.createReadStream(file,{highWaterMark:8*1024*1024});
+    const input=fs.createReadStream(file,{highWaterMark:1024*1024});
     input.on('error',reject);input.on('data',chunk=>hash.update(chunk));input.on('end',()=>resolve(hash.digest('hex')));
   });
 }
@@ -26,7 +26,10 @@ const payload=decodePayload(process.argv[2]||'');
 const dbFile=String(payload.dbFile||'').trim();
 const filePath=String(payload.filePath||'').trim();
 const timeoutMs=Math.max(10_000,Math.min(120_000,Number(payload.lockTimeoutMs||30_000)));
-const ratePages=Math.max(256,Math.min(16_384,Number(payload.ratePages||8192)));
+// V545 deliberately caps the SQLite backup step to 512 pages (~2 MiB at 4 KiB/page).
+// The backup remains full + quick_check + SHA verified, but Windows can interleave
+// normal browser/auth/database reads instead of letting one 25+ GiB copy monopolize IO.
+const ratePages=Math.max(128,Math.min(512,Number(payload.ratePages||512)));
 if(!dbFile||!filePath){
   process.stdout.write(`${JSON.stringify({ok:false,error:'V504_DB_OR_BACKUP_PATH_REQUIRED',worker:'V504'})}\n`);
   process.exit(2);
@@ -64,7 +67,7 @@ try{
   const sourceFingerprintAfterVerification=databaseFingerprint(dbFile);
   if(!sameFingerprint(sourceFingerprintAfterBackup,sourceFingerprintAfterVerification))throw new Error('V504_SOURCE_CHANGED_DURING_VERIFICATION');
   const finalStat=fs.statSync(filePath);
-  process.stdout.write(`${JSON.stringify({ok:true,worker:'V504',integrity:'quick-ok',quickCheck:'ok',sha256,size:Number(finalStat.size||0),mtimeMs:Number(finalStat.mtimeMs||0),method:'node-sqlite-online-backup-isolated-write-freeze',ratePages,sourceFingerprintBefore,sourceFingerprintAfter:sourceFingerprintAfterVerification})}\n`);
+  process.stdout.write(`${JSON.stringify({ok:true,worker:'V504',integrity:'quick-ok',quickCheck:'ok',sha256,size:Number(finalStat.size||0),mtimeMs:Number(finalStat.mtimeMs||0),method:'node-sqlite-online-backup-isolated-write-freeze-v545-io-throttled',ratePages,sourceFingerprintBefore,sourceFingerprintAfter:sourceFingerprintAfterVerification})}\n`);
 }catch(error){
   try{fs.rmSync(filePath,{force:true});}catch{}
   process.stdout.write(`${JSON.stringify({ok:false,error:error?.message||String(error),worker:'V504'})}\n`);
