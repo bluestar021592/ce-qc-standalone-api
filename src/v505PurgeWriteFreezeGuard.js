@@ -237,7 +237,12 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
   const protectSharedDb=queryOnlyRequired(state);
 
   req.v505PurgeWriteFreezeState=state;
-  if(state.active)req.v505PurgeReadOnlyAuth=true;
+  // A completed V545 PREPARE no longer freezes normal application traffic, but
+  // authentication itself remains write-free so merely reopening the browser
+  // cannot refresh session expiry/audit metadata and invalidate the sealed copy.
+  // Real business writes are allowed; if they change SQLite, the later explicit
+  // EXECUTE fingerprint gate rejects the old prepared challenge before DELETE.
+  if(state.active||state.prepareBlockSuppressed)req.v505PurgeReadOnlyAuth=true;
 
   if(LONG_LIVED_AFTER_AUTH.has(pathname)&&typeof req.v505PurgeHttpActivityRelease==='function'){
     try{req.v505PurgeHttpActivityRelease();}catch{}
