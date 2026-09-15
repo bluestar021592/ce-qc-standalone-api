@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
-const V505_URL='/v505-data-purge-recovery.js?v=20260911-v505-8';
+const RUNTIME_V505_URL='/v505-data-purge-recovery.js?v=20260911-v505-8';
+const V544_V505_URL='/v505-data-purge-recovery.js?v=20260915-v544-1';
 const STARTUP_PROBE_URL='/v505-purge-startup-probe.js?v=20260912-v505-startup-probe-2';
 const V502_URL='/v502-multidrive-backup-ui.js?v=20260912-v502-3';
 
@@ -23,18 +24,22 @@ test('V505 version-aware purge UI owner is delivered after app.js and transport 
   const runtimeAt=index.indexOf('/v14-geometry-fixture.js?v=20260805-1');
   assert.ok(appAt>=0&&runtimeAt>appAt,'runtime loader must execute after app.js so V505 can replace the legacy inline purge owner');
 
-  assert.match(runtimeLoader,/loadRuntimeScript\('\/v505-data-purge-recovery\.js\?v=20260911-v505-8'\)/,'the always-loaded runtime chain must claim the latest V505 owner before route lazy features');
+  assert.match(runtimeLoader,/loadRuntimeScript\('\/v505-data-purge-recovery\.js\?v=20260911-v505-8'\)/,'the always-loaded compatibility bootstrap still claims a V505 owner before route lazy features');
   assert.match(runtimeLoader,/v502-multidrive-backup-ui\.js\?v=20260912-v502-3/,'the V502 loader carrying startup recovery must be cache-busted');
-  assert.ok(runtimeLoader.indexOf(V505_URL)<runtimeLoader.indexOf(V502_URL),'V505 must claim ownership before the V502 loader can schedule any fallback');
+  assert.ok(runtimeLoader.indexOf(RUNTIME_V505_URL)<runtimeLoader.indexOf(V502_URL),'V505 must claim ownership before the V502 loader can schedule any fallback');
 
-  assert.match(backupLoader,/v505-data-purge-recovery\.js\?v=20260911-v505-8/);
+  assert.match(backupLoader,/v505-data-purge-recovery\.js\?v=20260915-v544-1/,'V544 data-management backup UI must request a fresh V505 owner when recovery ownership is absent');
   assert.match(backupLoader,/v8-version-aware-owner/,'V502 must request the current owner when an older V505 patch is already present');
   assert.match(backupLoader,/v505-purge-startup-probe\.js\?v=20260912-v505-startup-probe-2/,'V502 must install the exact-job-bound startup-orphan probe on every normal data-management runtime');
   assert.ok(backupLoader.indexOf(STARTUP_PROBE_URL)>=0);
   assert.match(backupLoader,/script\.onload=loadStartupProbe/,'if V505 owner must be reloaded, the startup probe may load only after that owner has executed');
-  assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260911-v505-8/);
+  assert.match(lazy,/2026-09-15-v544-purge-owner-race-v1/,'V544 route-lazy loader itself must have a fresh version identity');
+  assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v544-1/,'data-management navigation must cache-bust the V505 owner');
+  assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v544-1/,'V106 compatibility guard must be refreshed with the same owner generation');
+  assert.match(lazy,/event\.stopImmediatePropagation\(\)/,'first destructive click must be capture-blocked while V505 is still loading');
+  assert.match(lazy,/loadGroup\('data'\)\.then/,'blocked first click must load the V505 data group before any purge entry is invoked');
+  assert.match(lazy,/reassertPurgeOwner/,'V544 must reassert the V505 owner before allowing the inline entry point');
   assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/,'clean data-management navigation must never install the retired V104 purge workflow');
-  assert.match(lazy,/v106-purge-legacy-controls-hide\.js/,'V106 stays only as a compatibility guard for stale/already-open pages');
 
   assert.match(owner,/v8-version-aware-owner/);
   assert.match(owner,/previous\?\.patchId===PATCH_ID/,'same-version duplicate delivery must be a no-op');
@@ -59,6 +64,7 @@ test('V505 version-aware purge UI owner is delivered after app.js and transport 
   assert.match(startupProbe,/__CE_QC_V505_DATA_PURGE_RECOVERY__/,'probe must derive the exact currently protected browser job from the V505 owner');
   assert.match(startupProbe,/String\(status\?\.jobId\|\|''\)!==jobId/,'stale status evidence must match the exact current job before recovery is requested');
 
+  assert.ok(lazy.indexOf(V544_V505_URL)>=0);
   assert.doesNotMatch(runtimeLoader,/20260911-v505-7/);
   assert.doesNotMatch(backupLoader,/20260911-v505-7/);
   assert.doesNotMatch(lazy,/20260911-v505-7/);

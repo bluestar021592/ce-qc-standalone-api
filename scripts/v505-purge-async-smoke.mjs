@@ -125,7 +125,12 @@ const server=read('server.js');
 assert.match(server,/app\.post\('\/api\/admin\/data-purge\/prepare', requireRole\('ADMIN'\)/,'PREPARE must remain server-authoritative ADMIN-only');
 assert.match(server,/app\.post\('\/api\/admin\/data-purge\/execute', requireRole\('ADMIN'\)/,'EXECUTE must remain server-authoritative ADMIN-only');
 const lazy=read('public/v108-route-lazy-features.js');
-assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260911-v505-8/);
+assert.match(lazy,/2026-09-15-v544-purge-owner-race-v1/,'V544 route-lazy owner version must force a fresh loader');
+assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v544-1/,'V544 must cache-bust the V505 purge owner');
+assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v544-1/,'V544 must cache-bust the legacy-control guard with the owner');
+assert.match(lazy,/event\.stopImmediatePropagation\(\)/,'V544 must stop the obsolete inline purge handler before V505 is ready');
+assert.match(lazy,/loadGroup\('data'\)\.then/,'V544 first purge click must load the V505 owner before invoking anything destructive');
+assert.match(lazy,/reassertPurgeOwner/,'V544 must restore the V505 owner before allowing inline entry');
 assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V542 write-freeze now shares fail-closed PID-generation ownership with V541 global/coordinator guards while preserving sealed DB/receipt authority');
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V544 first-click purge entry is capture-gated until the cache-busted V505 owner is loaded; V542/V541 fail-closed server ownership remains intact');
