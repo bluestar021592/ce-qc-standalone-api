@@ -6,7 +6,7 @@ import { acquireGlobalPurgeSubmissionMutex, releaseGlobalPurgeSubmissionMutex } 
 import { inspectGlobalHistoricalPurgeStartupDebris, retireGlobalHistoricalPurgeStartupDebris } from './v505PurgeStartupOrphanGuard.js';
 import { inspectV541PurgeJobWorker, inspectV541PurgePidOwnership, V541_PURGE_PID_OWNERSHIP_ID } from './v541PurgePidOwnership.js';
 
-export const V505_PURGE_WRITE_FREEZE_ID='2026-09-15-v542-write-freeze-pid-reuse-v1';
+export const V505_PURGE_WRITE_FREEZE_ID='2026-09-15-v546-purge-freeze-readonly-ui-recovery-v1';
 const PURGE_BLOCK_KEY='data_purge_block_until';
 const PURGE_COMMIT_RECEIPT_KEY='data_purge_last_commit_receipt';
 const ACTIVE=new Set(['QUEUED','RUNNING','COMMITTED']);
@@ -116,6 +116,7 @@ export function inspectExternalPurgeWriteFreeze(){
     {kind:'PREPARE',dir:path.join(cfg.backupsDir,PREPARE_DIR)}
   ];
   let activeUnsealed=null;
+  let completedPrepare=null;
   for(const group of groups){
     for(const file of jobFiles(group.dir)){
       const state=readJobState(file);
@@ -150,7 +151,7 @@ export function inspectExternalPurgeWriteFreeze(){
         if(prepareMatchesFinalizedReceipt(receipt,job))continue;
         const expiresAt=Date.parse(String(job.payload?.expiresAt||''));
         if(Number.isFinite(expiresAt)&&expiresAt>now){
-          return {active:true,sealed:true,kind:group.kind,status,workerState:'COMPLETED_WAITING_EXECUTE',identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),expiresAt,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
+          completedPrepare ||= {active:false,sealed:true,kind:group.kind,status,workerState:'COMPLETED_WAITING_EXPLICIT_EXECUTE',identityState:String(ownership.identityState||''),jobId:String(job.jobId||''),expiresAt,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
         }
       }
     }
@@ -161,14 +162,17 @@ export function inspectExternalPurgeWriteFreeze(){
   }
   const submission=submissionMutexState();
   if(submission)return submission;
+  if(completedPrepare)return completedPrepare;
   return {active:false,sealed:false,pidOwnershipPatch:V541_PURGE_PID_OWNERSHIP_ID};
 }
 
 export function inspectPurgeWriteFreezeState(){
   const until=sqliteBlockUntil();
   const external=inspectExternalPurgeWriteFreeze();
-  const sqliteActive=Number.isFinite(until)&&until>Date.now();
-  return {active:Boolean(sqliteActive||external.active),sealed:Boolean(external.sealed),sqliteActive,until:sqliteActive?until:0,external};
+  const rawSqliteActive=Number.isFinite(until)&&until>Date.now();
+  const completedPrepareIdle=rawSqliteActive&&external.active!==true&&String(external.kind||'')==='PREPARE'&&String(external.status||'')==='SUCCEEDED'&&String(external.workerState||'')==='COMPLETED_WAITING_EXPLICIT_EXECUTE';
+  const sqliteActive=rawSqliteActive&&!completedPrepareIdle;
+  return {active:Boolean(sqliteActive||external.active),sealed:Boolean(external.sealed),sqliteActive,rawSqliteActive,prepareBlockSuppressed:completedPrepareIdle,until:sqliteActive?until:0,external};
 }
 
 export function syncPurgeQueryOnly(active){
@@ -212,10 +216,15 @@ export function reconcilePurgeQueryOnlyNow(){
   const protectSharedDb=queryOnlyRequired(state);
   return {state,queryOnly:syncPurgeQueryOnly(protectSharedDb)};
 }
-function allowedDuringFreeze(method,pathname){
+function readonlyUiAllowedDuringFreeze(state={}){
+  if(String(state.external?.kind||'')==='PREPARE')return true;
+  return Boolean(state.sqliteActive&&!state.external?.active);
+}
+function allowedDuringFreeze(method,pathname,state={}){
   if(PURGE_STATUS.test(pathname)&&['GET','HEAD'].includes(method))return true;
   if(PURGE_CONTROL.test(pathname)&&method==='POST')return true;
   if(SAFE_READ_APIS.has(pathname)&&['GET','HEAD'].includes(method))return true;
+  if(pathname.startsWith('/api/')&&['GET','HEAD'].includes(method)&&readonlyUiAllowedDuringFreeze(state))return true;
   if(!pathname.startsWith('/api/')&&['GET','HEAD','OPTIONS'].includes(method))return true;
   if(method==='OPTIONS')return true;
   return false;
@@ -228,7 +237,12 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
   const protectSharedDb=queryOnlyRequired(state);
 
   req.v505PurgeWriteFreezeState=state;
-  if(state.active)req.v505PurgeReadOnlyAuth=true;
+  // A completed V545 PREPARE no longer freezes normal application traffic, but
+  // authentication itself remains write-free so merely reopening the browser
+  // cannot refresh session expiry/audit metadata and invalidate the sealed copy.
+  // Real business writes are allowed; if they change SQLite, the later explicit
+  // EXECUTE fingerprint gate rejects the old prepared challenge before DELETE.
+  if(state.active||state.prepareBlockSuppressed)req.v505PurgeReadOnlyAuth=true;
 
   if(LONG_LIVED_AFTER_AUTH.has(pathname)&&typeof req.v505PurgeHttpActivityRelease==='function'){
     try{req.v505PurgeHttpActivityRelease();}catch{}
@@ -236,12 +250,12 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
 
   syncPurgeQueryOnly(protectSharedDb);
   if(!state.active)return next();
-  if(allowedDuringFreeze(method,pathname))return next();
+  if(allowedDuringFreeze(method,pathname,state))return next();
 
   return res.status(423).json({
     ok:false,
     code:'DATA_PURGE_IN_PROGRESS',
-    error:'系统正在执行安全备份或清空业务数据。为防止清空前备份期间及备份后的数据库继续变化，除清空控制和必要只读状态外，其余接口已临时冻结。',
+    error:'系统正在执行安全备份或清空业务数据。写入接口保持冻结；安全备份阶段的只读页面仍可正常打开。',
     until:state.until?new Date(state.until).toISOString():'',
     protectedBy:state.external?.active?`${state.external.kind}:${state.external.status}`:'SQLITE_PURGE_BLOCK',
     workerState:String(state.external?.workerState||''),

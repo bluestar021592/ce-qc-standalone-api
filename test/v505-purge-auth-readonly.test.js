@@ -26,7 +26,7 @@ function request(cookie=''){
   };
 }
 
-test('V505 sealed purge lets an existing DB session authenticate without refreshing expiry or writing audit rows',async()=>{
+test('V546 completed PREPARE keeps auth metadata write-free without leaving the whole application query-only',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v505-auth-readonly-'));
   process.env.NODE_ENV='test';
   process.env.DATA_DIR=dir;
@@ -50,30 +50,33 @@ test('V505 sealed purge lets an existing DB session authenticate without refresh
     fs.mkdirSync(prepareDir,{recursive:true});
     const prepareFile=path.join(prepareDir,'sealed-auth-test.job.json');
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'SUCCEEDED',workerPid:0,payload:{expiresAt:new Date(Date.now()+5*60_000).toISOString()}}),'utf8');
+    db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES('data_purge_block_until',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`).run(String(Date.now()+60*60_000),now);
 
     const req=request(`ce_internal_session=${sessionToken}`);const res=responseHarness();let freezeNext=false;
     v505PurgeWriteFreezeGuard(req,res,()=>{freezeNext=true;});
     assert.equal(freezeNext,true,'explicit /api/session read must remain reachable');
-    assert.equal(req.v505PurgeReadOnlyAuth,true);
-    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'sealed purge must force main auth connection query-only');
+    assert.equal(req.v505PurgeReadOnlyAuth,true,'completed PREPARE still suppresses session-expiry/audit writes so reopening the page cannot invalidate its sealed fingerprint by itself');
+    assert.equal(req.v505PurgeWriteFreezeState?.prepareBlockSuppressed,true);
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'completed PREPARE must not keep the whole application connection query-only while it waits for a separate explicit EXECUTE');
 
     let authNext=false;
     await accessIdentity(req,res,()=>{authNext=true;});
-    assert.equal(authNext,true,'existing session should authenticate during purge freeze');
+    assert.equal(authNext,true,'existing session should authenticate after PREPARE completion');
     assert.equal(req.user?.username,'v505-admin');
     assert.equal(req.user?.role,'ADMIN');
-    assert.equal(db.prepare('SELECT expiresAt FROM user_sessions WHERE sessionHash=?').get(sessionHash)?.expiresAt,originalExpiry,'near-expiry session must not be refreshed while fingerprint is sealed');
+    assert.equal(db.prepare('SELECT expiresAt FROM user_sessions WHERE sessionHash=?').get(sessionHash)?.expiresAt,originalExpiry,'near-expiry session must not be refreshed merely because the browser reopened a prepared challenge');
     assert.equal(res.getHeader('set-cookie'),undefined,'read-only auth must not rewrite the session cookie');
 
     const beforeAudit=Number(db.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0);
     auditAction(req,'V505_SHOULD_NOT_WRITE_AUDIT',{phase:'sealed'});
     const afterAudit=Number(db.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0);
-    assert.equal(afterAudit,beforeAudit,'access-control audit must remain write-free while purge fingerprint is sealed');
+    assert.equal(afterAudit,beforeAudit,'access-control audit must remain write-free for the prepared-challenge auth request');
 
     fs.rmSync(prepareFile,{force:true});
+    db.prepare("DELETE FROM app_meta WHERE key='data_purge_block_until'").run();
     const thawReq=request(`ce_internal_session=${sessionToken}`);thawReq.path='/api/health';thawReq.originalUrl='/api/health';thawReq.url='/api/health';
     v505PurgeWriteFreezeGuard(thawReq,responseHarness(),()=>{});
-    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'main connection must thaw after sealed purge truth disappears');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'main connection remains writable after prepared challenge truth disappears');
   }finally{
     try{closeDb();}catch{}
     fs.rmSync(dir,{recursive:true,force:true});

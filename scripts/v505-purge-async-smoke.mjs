@@ -70,12 +70,16 @@ assert.match(pidOwnership,/classifyV539ExportAdmissionPid/,'V541 purge ownership
 assert.match(pidOwnership,/workerClaimedAt\|\|job\.startedAt\|\|job\.submittedAt/,'V541 worker ownership must bind to a durable task-generation timestamp');
 
 const freeze=read('src/v505PurgeWriteFreezeGuard.js');
-assert.match(freeze,/v542-write-freeze-pid-reuse-v1/);
-assert.match(freeze,/inspectV541PurgeJobWorker/,'V542 write-freeze job ownership must use the shared process-start PID proof');
-assert.match(freeze,/inspectV541PurgePidOwnership/,'V542 write-freeze submission mutex ownership must use the shared process-start PID proof');
-assert.doesNotMatch(freeze,/function pidAlive\(/,'V542 must not regress to numeric PID liveness in write-freeze');
+assert.match(freeze,/v546-purge-freeze-readonly-ui-recovery-v1/);
+assert.match(freeze,/inspectV541PurgeJobWorker/,'V546 write-freeze job ownership must keep the shared process-start PID proof');
+assert.match(freeze,/inspectV541PurgePidOwnership/,'V546 write-freeze submission mutex ownership must keep the shared process-start PID proof');
+assert.doesNotMatch(freeze,/function pidAlive\(/,'V546 must not regress to numeric PID liveness in write-freeze');
 assert.match(freeze,/COMMIT_RECEIPT_UNREADABLE/);
 assert.match(freeze,/COMMIT_RECEIPT_ORPHANED/);
+assert.match(freeze,/COMPLETED_WAITING_EXPLICIT_EXECUTE/,'completed PREPARE must be distinguishable from active backup work');
+assert.match(freeze,/prepareBlockSuppressed:completedPrepareIdle/,'the old one-hour PREPARE safety block must not keep the normal app frozen after backup completion');
+assert.match(freeze,/readonlyUiAllowedDuringFreeze/,'active PREPARE must allow read-only UI APIs while writes remain frozen');
+assert.match(freeze,/pathname\.startsWith\('\/api\/'\).*\['GET','HEAD'\]/,'read-only API access must be explicit in the freeze gate');
 assert.match(freeze,/syncPurgeQueryOnly\(protectSharedDb\)/);
 assert.doesNotMatch(freeze,/syncPurgeQueryOnly\(false\)/);
 assert.match(freeze,/req\.v505PurgeReadOnlyAuth=true/);
@@ -155,4 +159,4 @@ assert.match(backupUi,/2026-09-15-v545-explicit-purge-owner-cache-bust-v1/);
 assert.match(backupUi,/v545-explicit-two-step/);
 assert.match(backupUi,/v505-data-purge-recovery\.js\?v=20260915-v545-1/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V545 purge opening is inert, PREPARE and EXECUTE require separate explicit user actions, backup IO is capped at 512 pages + 1MiB SHA reads, and V542/V541 fail-closed ownership remains intact');
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V546 keeps PREPARE writes fail-closed while the read-only SPA remains reachable, completed V545 PREPARE no longer leaves a one-hour white-screen freeze, and V541/V542 ownership protections remain intact');
