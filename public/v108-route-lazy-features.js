@@ -1,6 +1,6 @@
 (function installRouteLazyFeaturesV108(global){
-  if(global.__CE_QC_V108_ROUTE_LAZY__?.version==='2026-08-18-v195-route-lazy-ipc-export-v1')return;
-  const VERSION='2026-08-18-v195-route-lazy-ipc-export-v1';
+  if(global.__CE_QC_V108_ROUTE_LAZY__?.version==='2026-09-15-v544-purge-entry-owner-race-v1')return;
+  const VERSION='2026-09-15-v544-purge-entry-owner-race-v1';
   const loaded=new Map();
   const groups={
     shopee:[
@@ -17,7 +17,9 @@
     // V104 is intentionally retired from the active data-management path.
     // V505 is the single purge owner; V106 remains only as a compatibility UI guard
     // for already-open/stale pages and does not install a competing purge workflow.
-    data:['/v505-data-purge-recovery.js?v=20260911-v505-8','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
+    // V544 cache-busts V505 and intercepts every purge-entry click in capture phase,
+    // so the legacy synchronous app.js handler can never run before V505 is loaded.
+    data:['/v505-data-purge-recovery.js?v=20260915-v544-1','/v106-purge-legacy-controls-hide.js?v=20260814-1'],
     carry:['/v99-carry-live-ui.js?v=20260814-1']
   };
 
@@ -33,7 +35,7 @@
       try{existing.remove();}catch{}
     }
     const promise=new Promise((resolve,reject)=>{
-      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v195';
+      const script=document.createElement('script');script.src=src;script.async=false;script.dataset.ceQcLazy='v544';
       script.onload=()=>resolve(script);script.onerror=()=>reject(new Error(`加载页面功能失败：${src}`));document.head.appendChild(script);
     }).catch(error=>{loaded.delete(src);console.warn('[CE-QC][V108_LAZY]',error);throw error;});
     loaded.set(src,promise);return promise;
@@ -52,9 +54,27 @@
     await Promise.all(jobs);
     if(typeof global.renderAll==='function')setTimeout(()=>global.renderAll(),0);
   }
-  document.addEventListener('click',event=>{if(event.target?.closest?.('.side-link,[data-page]'))setTimeout(()=>void ensurePage(pageNow()),0);},true);
+  async function invokePurgeOwner(){
+    await loadGroup('data');
+    const owner=global.__CE_QC_V505_DATA_PURGE_RECOVERY__?.openDataPurge;
+    if(typeof owner!=='function')throw new Error('清空安全模块尚未完成加载，请稍后重试。');
+    return owner();
+  }
+  document.addEventListener('click',event=>{
+    const purgeTrigger=event.target?.closest?.('[onclick*="openDataPurge"]');
+    if(purgeTrigger){
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      purgeTrigger.disabled=true;
+      void invokePurgeOwner()
+        .catch(error=>{console.error('[CE-QC][V544_PURGE_ENTRY]',error);global.alert?.(String(error?.message||error||'清空安全模块加载失败'));})
+        .finally(()=>{purgeTrigger.disabled=false;});
+      return;
+    }
+    if(event.target?.closest?.('.side-link,[data-page]'))setTimeout(()=>void ensurePage(pageNow()),0);
+  },true);
   global.addEventListener('popstate',()=>setTimeout(()=>void ensurePage(pageNow()),0));
   setTimeout(()=>void ensurePage(pageNow()),0);
-  global.__CE_QC_V108_ROUTE_LAZY__={version:VERSION,ensurePage,loadGroup,loadedCount:()=>loaded.size};
+  global.__CE_QC_V108_ROUTE_LAZY__={version:VERSION,ensurePage,loadGroup,invokePurgeOwner,loadedCount:()=>loaded.size};
   console.info('[CE-QC][V108_ROUTE_LAZY]',VERSION);
 })(window);
