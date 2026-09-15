@@ -1,9 +1,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
-export const V505_PURGE_WORKER_CLAIM_ID='2026-09-12-v505-worker-claim-v3-shared-serialization';
+export const V505_PURGE_WORKER_CLAIM_ID='2026-09-15-v540-worker-claim-pid-reuse-v1';
 const CLAIM_LOCK_SUFFIX='.worker-claim.lock';
+const PID_IDENTITY_TIMEOUT_MS=Math.max(1000,Math.min(12_000,Number(process.env.V540_PURGE_WORKER_PID_IDENTITY_TIMEOUT_MS||8000)));
+export const V540_WORKER_CLAIM_PID_REUSE_TOLERANCE_MS=Math.max(1000,Math.min(60_000,Number(process.env.V540_WORKER_CLAIM_PID_REUSE_TOLERANCE_MS||5000)));
 
 function readJson(file){
   try{return JSON.parse(fs.readFileSync(file,'utf8'));}
@@ -24,6 +27,43 @@ function pidAlive(pid){
   if(!Number.isInteger(number)||number<=0)return null;
   try{process.kill(number,0);return true;}catch(error){return error?.code==='EPERM'?true:false;}
 }
+function ownershipInstant(value){
+  if(value==null||value==='')return 0;
+  const numeric=Number(value);
+  if(Number.isFinite(numeric))return numeric>1_000_000_000_000?numeric:0;
+  const parsed=Date.parse(String(value));
+  return Number.isFinite(parsed)&&parsed>1_000_000_000_000?parsed:0;
+}
+function processStartedAtMs(pid){
+  const value=Number(pid||0);
+  if(!Number.isInteger(value)||value<=0||process.platform!=='win32')return 0;
+  try{
+    const script=`$p=Get-CimInstance Win32_Process -Filter \"ProcessId = ${value}\" -ErrorAction SilentlyContinue; if($p -and $p.CreationDate){$d=[DateTimeOffset]$p.CreationDate; [Console]::Write($d.ToUnixTimeMilliseconds())}`;
+    const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:PID_IDENTITY_TIMEOUT_MS});
+    if(result.error)return 0;
+    const startedAt=Number(String(result.stdout||'').trim());
+    return Number.isFinite(startedAt)&&startedAt>1_000_000_000_000?startedAt:0;
+  }catch{return 0;}
+}
+export function classifyV540WorkerPidOwnership({workerState='',ownerAcquiredAt=0,processStartedAt=0,toleranceMs=V540_WORKER_CLAIM_PID_REUSE_TOLERANCE_MS}={}){
+  const state=String(workerState||'UNKNOWN').toUpperCase();
+  if(state==='DEAD')return {active:false,stale:true,workerState:'DEAD',identityState:'DEAD'};
+  if(state!=='ALIVE')return {active:true,stale:false,workerState:state||'UNKNOWN',identityState:'START_UNVERIFIED'};
+  const ownerAt=ownershipInstant(ownerAcquiredAt);
+  const startedAt=ownershipInstant(processStartedAt);
+  const tolerance=Math.max(1000,Math.min(60_000,Number(toleranceMs)||V540_WORKER_CLAIM_PID_REUSE_TOLERANCE_MS));
+  if(!ownerAt||!startedAt)return {active:true,stale:false,workerState:'ALIVE',identityState:'START_UNVERIFIED'};
+  if(startedAt>ownerAt+tolerance){
+    return {active:false,stale:true,workerState:'ALIVE_PID_REUSED',identityState:'PID_REUSED',ownerAcquiredAt:ownerAt,processStartedAt:startedAt};
+  }
+  return {active:true,stale:false,workerState:'ALIVE',identityState:'START_MATCH',ownerAcquiredAt:ownerAt,processStartedAt:startedAt};
+}
+function inspectPidOwnership(pid,ownerAcquiredAt){
+  const alive=pidAlive(pid);
+  const workerState=alive===true?'ALIVE':alive===false?'DEAD':'UNKNOWN';
+  const processStartedAt=workerState==='ALIVE'?processStartedAtMs(pid):0;
+  return {...classifyV540WorkerPidOwnership({workerState,ownerAcquiredAt,processStartedAt}),processStartedAt};
+}
 function coded(code,message=code){const error=new Error(message);error.code=code;return error;}
 function claimLockFile(jobFile=''){return `${String(jobFile||'')}${CLAIM_LOCK_SUFFIX}`;}
 function tryCreateClaimLock(file,record){
@@ -40,6 +80,19 @@ function tryCreateClaimLock(file,record){
     throw error;
   }
 }
+function sameClaimLockIdentity(left={},right={}){
+  const leftToken=String(left.token||'');
+  const rightToken=String(right.token||'');
+  if(!leftToken||!rightToken||leftToken!==rightToken)return false;
+  return String(left.jobId||'')===String(right.jobId||'')
+    && Number(left.pid||0)===Number(right.pid||0)
+    && Number(left.acquiredAt||0)===Number(right.acquiredAt||0);
+}
+function removeClaimLockIfUnchanged(file,expected){
+  const current=readJsonNullable(file);
+  if(!current||!sameClaimLockIdentity(current,expected))return false;
+  try{fs.rmSync(file,{force:true});return true;}catch{return false;}
+}
 function acquireClaimLock(jobFile,jobId){
   const file=claimLockFile(jobFile);
   const record={jobId:String(jobId||''),pid:process.pid,token:crypto.randomUUID(),acquiredAt:Date.now()};
@@ -49,9 +102,8 @@ function acquireClaimLock(jobFile,jobId){
     if(!current||typeof current!=='object'||Array.isArray(current)){
       throw coded('V505_PURGE_WORKER_CLAIM_LOCK_UNREADABLE','V505_PURGE_WORKER_CLAIM_LOCK_UNREADABLE');
     }
-    const live=pidAlive(current.pid);
-    if(live===false){
-      try{fs.rmSync(file,{force:true});}catch{}
+    const ownership=inspectPidOwnership(current.pid,current.acquiredAt);
+    if(ownership.active===false&&ownership.stale===true&&removeClaimLockIfUnchanged(file,current)){
       continue;
     }
     throw coded('V505_PURGE_WORKER_CLAIM_BUSY','V505_PURGE_WORKER_CLAIM_BUSY');
@@ -88,15 +140,19 @@ export function claimPurgeWorkerSidecar({jobFile='',jobId='',allowedStatuses=[]}
     if(allowed.size&&!allowed.has(status))throw coded('V505_PURGE_WORKER_CLAIM_STATUS_INVALID',`V505_PURGE_WORKER_CLAIM_STATUS_INVALID:${status||'EMPTY'}`);
 
     const currentPid=Number(job.workerPid||0);
-    if(Number.isInteger(currentPid)&&currentPid>0&&currentPid!==process.pid&&pidAlive(currentPid)===true){
-      throw coded('V505_PURGE_WORKER_ALREADY_CLAIMED');
+    if(Number.isInteger(currentPid)&&currentPid>0&&currentPid!==process.pid){
+      const ownershipAnchor=job.workerClaimedAt||job.startedAt||job.submittedAt||0;
+      const ownership=inspectPidOwnership(currentPid,ownershipAnchor);
+      if(ownership.active===true){
+        throw coded('V505_PURGE_WORKER_ALREADY_CLAIMED');
+      }
     }
 
     const now=Date.now();
     const claimed={
       ...job,
       workerPid:process.pid,
-      workerClaimedAt:Number(job.workerClaimedAt||0)||now,
+      workerClaimedAt:now,
       heartbeatAt:now,
       updatedAt:now,
       workerClaimPatch:V505_PURGE_WORKER_CLAIM_ID
