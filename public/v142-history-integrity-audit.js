@@ -10,7 +10,7 @@
   const REQUEST_TIMEOUT_MS=15000;
   const OVERALL_WAIT_MS=16*60*1000;
   const POLL_MS=1500;
-  const esc=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const esc=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
   const fmt=v=>Number(v||0).toLocaleString('zh-CN');
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const whppReasonLabel=reason=>({
@@ -89,13 +89,13 @@
         const open=evidence.carryOpen||0,cls=evidence.carryClosed||0,scopeFrom=evidence.carryOpenFromDate||p.fromDate,scopeTo=evidence.carryOpenToDate||p.toDate;
         const openBeforeRange=evidence.carryOpenBeforeRange||0,openInsideRangeBeforeTo=evidence.carryOpenInsideRangeBeforeTo||0,openOnToDate=evidence.carryOpenOnToDate||0,openThroughToDate=evidence.carryOpenThroughToDate||0;
         const historicalBeforeTo=openBeforeRange+openInsideRangeBeforeTo,openReconciled=evidence.carryOpenRangeReconciled!==false&&evidence.carryOpenThroughToReconciled!==false;
-        evidenceHtml=`<p>选定导出区间仍OPEN <b>${fmt(open)}</b> · 区间已闭环 <b>${fmt(cls)}</b></p><p><b>OPEN精准对账：</b>区间起日前仍OPEN <b>${fmt(openBeforeRange)}</b> · 区间内历史OPEN（不含截止日） <b>${fmt(openInsideRangeBeforeTo)}</b> · 截止日当日OPEN <b>${fmt(openOnToDate)}</b> · 截至截止日全部OPEN <b>${fmt(openThroughToDate)}</b></p><p class="muted">历史跨日未完结 = <b>${fmt(historicalBeforeTo)}</b>；当日未完结 = <b>${fmt(openOnToDate)}</b>；截至截止日全部OPEN = <b>${fmt(openThroughToDate)}</b>。历史审计不会回写主页面数字。</p>${openReconciled?'':`<p class="danger-text">OPEN对账未闭合，已保留原始值，请勿用该区间数字做导出判断。</p>`}${open?`<p class="muted">这里统计 sourceReportDate 位于 <b>${esc(scopeFrom)} 至 ${esc(scopeTo)}</b> 的 carryover OPEN。</p>`:''}`;
+        evidenceHtml=`<p>选定导出区间仍OPEN <b>${fmt(open)}</b> · 区间已闭环 <b>${fmt(cls)}</b></p><p><b>OPEN精准对账：</b>区间起日前仍OPEN <b>${fmt(openBeforeRange)}</b> · 区间内历史OPEN（不含截止日） <b>${fmt(openInsideRangeBeforeTo)}</b> · 截止日当日OPEN <b>${fmt(openOnToDate)}</b> · 截至截止日全部OPEN <b>${fmt(openThroughToDate)}</b></p><p class="muted">历史跨日未完结 = <b>${fmt(historicalBeforeTo)}</b>；当日未完结 = <b>${fmt(openOnToDate)}</b>；截至截止日全部OPEN = <b>${fmt(openThroughToDate)}</b>。历史审计不会回写主页面数字。</p>${openReconciled?'':`<p class="danger-text">OPEN对账未闭合，已保留原始值，请勿用该区间数字做导出判断。</p>`}${open?`<p class="muted">这里统计 sourceReportDate 位于 <b>${esc(scopeFrom)} 至 <b>${esc(scopeTo)}</b> 的 carryover OPEN。</p>`:''}`;
       }
       body.innerHTML=`<span class="status-pill ${clsName}">${esc(title)}</span><p><b>${esc(p.fromDate)} 至 ${esc(p.toDate)}</b> · 应有 ${fmt(p.expectedDays)} 天 · 已找到 ${fmt(p.daysPresent)} 天 · 总导入 ${fmt(p.totalImported)} 票${snapshots}${timing}</p>${retryHtml}${evidenceHtml}${recoveredHtml}${missing.length?`<p class="danger-text">缺少日期：${missing.map(esc).join('、')}</p>`:''}${incomplete.length?`<p class="${latestDayPending?'muted':'danger-text'}">待核对日期：${incomplete.slice(0,8).map(x=>`${esc(x.reportDate)}（${esc((x.issues||[]).join('/'))}${whppDiagnostic(x)}）`).join('；')}${incomplete.length>8?'…':''}</p>`:''}<p class="muted">导出执行严格7业务覆盖检查：CE、CEAF、TBKH、ALI1688、SHOPEE CN、SHOPEE VN、WHPP。当前最新日报未处理完成时只暂缓导出，不代表历史数据被删除。</p>`;
       lastLoadedAt=Date.now();
     }catch(error){
       const message=error?.name==='AbortError'?'历史检查状态请求超时，请稍后重新点击；后台只读任务不会修改数据。':String(error?.message||error);
-      body.innerHTML=`<span class="status-pill danger">历史完整性检查失败：${esc(message)}</span><p class="muted">不需要重新跑日报、扫描、轨迹或历史业务数据。</p>`;
+      body.innerHTML=`<span class="status-pill danger">历史完整性检查失败：${esc(message)}</span><p class="muted">不需要重新跑业务数据，也不需要重新跑日报、扫描或轨迹。</p>`;
     }finally{auditRunning=false;if(button)button.disabled=false;}
   }
   function ensure(){if(visible())host();}
