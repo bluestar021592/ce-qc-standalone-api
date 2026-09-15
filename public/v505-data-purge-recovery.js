@@ -1,5 +1,5 @@
 (function installV505DataPurgeRecovery(global){
-  const PATCH_ID='2026-09-14-v505-async-purge-prepare-execute-ui-v8-version-aware-owner-v531-server-admin-authority';
+  const PATCH_ID='2026-09-15-v545-explicit-two-step-purge-ui-v1';
   const previous=global.__CE_QC_V505_DATA_PURGE_RECOVERY__;
   if(previous?.patchId===PATCH_ID)return;
   if(previous?.getStatus?.().active){
@@ -8,9 +8,14 @@
   }
   let active=false;
   let elapsedTimer=null;
+  let confirmTimer=null;
   let startedAt=0;
   let lastStatus='';
   let currentJob=null;
+  let preparedChallenge=null;
+  let prepareInFlight=false;
+  let executeInFlight=false;
+  let dialogOpen=false;
 
   const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -55,8 +60,14 @@
     lastStatus=message;
     node.innerHTML=`<div class="purge-warning"><b>${escapeText(message)}</b><br><span>后台任务独立执行 · 已等待 <b id="v505PurgeElapsed">${escapeText(elapsedText())}</b></span><br><small>${escapeText(detail)}</small></div>`;
   }
+  function renderIdle(){
+    const node=previewNode();if(!node)return;
+    lastStatus='等待管理员明确开始安全备份';
+    node.innerHTML='<div class="purge-warning"><b>尚未开始任何备份或清空任务。</b><br><small>只有点击“备份并继续”后才会创建并校验清空前安全备份；仅打开此窗口不会启动25GB+数据库复制。</small></div>';
+  }
   function startElapsedClock(){clearInterval(elapsedTimer);elapsedTimer=setInterval(()=>{const node=document.getElementById('v505PurgeElapsed');if(node)node.textContent=elapsedText();},1000);}
   function stopElapsedClock(){clearInterval(elapsedTimer);elapsedTimer=null;}
+  function stopConfirmClock(){clearInterval(confirmTimer);confirmTimer=null;}
 
   async function submitPrepare(){
     return requestJson('/api/admin/data-purge/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'},12000);
@@ -116,11 +127,6 @@
       const stale=Boolean(status.heartbeatStale)||(heartbeatAt>0&&heartbeatAge>60_000);
       const committedRecoveryDue=mode==='EXECUTE'&&state==='COMMITTED'&&heartbeatAt>0&&heartbeatAge>15_000;
 
-      // The recovery probe is intentionally a normal V505 PREPARE-control call.
-      // Server ownership + exact SQLite commit receipt decide whether the old
-      // worker is still authoritative, should be marked failed pre-commit, or
-      // should restart post-commit cleanup. The browser never starts a second
-      // destructive DELETE based on heartbeat age alone.
       if(mode==='EXECUTE'&&(stale||committedRecoveryDue)&&Date.now()-lastRecoveryProbeAt>=10_000){
         lastRecoveryProbeAt=Date.now();
         try{
@@ -171,7 +177,7 @@
   async function finishExistingExecution(job){
     const status=String(job.status||'').toUpperCase();
     if(status!=='SUCCEEDED')await pollBackgroundJob(job,'EXECUTE');
-    stopElapsedClock();
+    stopElapsedClock();stopConfirmClock();
     const node=previewNode();
     if(node)node.innerHTML='<div class="purge-success"><b>业务数据已安全清空。</b><br>正在刷新系统状态…</div>';
     await wait(500);
@@ -201,13 +207,7 @@
   }
 
   async function executeChallenge(challenge){
-    const node=previewNode();
-    const waitMs=Math.max(0,new Date(challenge.notBefore).getTime()-Date.now());
-    if(waitMs>0){
-      node?.insertAdjacentHTML('beforeend',`<div class="purge-warning">安全倒计时 ${Math.ceil(waitMs/1000)} 秒后自动提交后台清空。</div>`);
-      await wait(waitMs+100);
-    }
-    renderWorking('正在提交后台事务化清空任务','提交接口只负责创建独立任务，不再等待大数据库DELETE完成。');
+    renderWorking('正在提交后台事务化清空任务','只有管理员完成第二步勾选、精确短语和最终确认后才会进入这里。');
     const execution=await submitExecuteRecovering(challenge);
     currentJob=execution;
     if(execution?.async||String(execution.kind||'').toUpperCase()==='EXECUTE'){
@@ -217,47 +217,93 @@
     return execution;
   }
 
-  async function v505OpenDataPurge(){
-    if(active)return;
-    // Do not block the destructive flow on a duplicate /api/session round-trip.
-    // The normal app bootstrap already exposes the best-effort cached role for
-    // UI gating, while both PREPARE and EXECUTE are independently protected by
-    // requireRole('ADMIN') on the server. If the cache is absent/stale, the
-    // server remains the sole authority and fails closed before any purge work.
-    const knownRole=typeof accessSession!=='undefined'?String(accessSession?.user?.role||'').toUpperCase():'';
-    if(knownRole&&knownRole!=='ADMIN')return alert('当前账户不是管理员，无法清空业务数据。');
-    if(!global.confirm('确定要清空全部业务数据吗？系统会先创建并校验完整备份，用户、权限、配置、白名单、备份和审计不会删除。'))return;
+  function refreshExplicitExecuteButton(){
+    const button=document.getElementById('purgeExecuteButton');
+    const countdown=document.getElementById('purgeCountdown');
+    const checkbox=document.getElementById('purgeBackupConfirmed');
+    const phrase=document.getElementById('purgePhrase');
+    const challenge=preparedChallenge;
+    const waitMs=challenge?Math.max(0,new Date(challenge.notBefore).getTime()-Date.now()):Infinity;
+    const exact=String(phrase?.value||'')==='永久清除全部业务数据';
+    const confirmed=Boolean(checkbox?.checked);
+    const ready=Boolean(challenge&&Number.isFinite(waitMs)&&waitMs<=0&&exact&&confirmed&&!executeInFlight);
+    if(button)button.disabled=!ready;
+    if(countdown){
+      if(!challenge)countdown.textContent='请先完成安全备份';
+      else if(waitMs>0)countdown.textContent=`请等待 ${Math.ceil(waitMs/1000)} 秒`;
+      else if(!confirmed||!exact)countdown.textContent='请勾选备份确认并准确输入确认短语';
+      else countdown.textContent='已完成安全倒计时，可最终确认清空';
+    }
+    return ready;
+  }
 
-    const dialog=document.getElementById('dataPurgeDialog');
+  function showPreparedChallenge(challenge){
+    preparedChallenge=challenge;
+    currentJob=challenge;
+    stopElapsedClock();
+    const node=previewNode();
+    if(node)node.innerHTML=`<div class="purge-success"><b>安全备份与完整性校验已完成。</b><br><small>尚未提交任何删除任务。请在第二步再次明确确认。</small></div><dl><dt>数据库</dt><dd>${escapeText(challenge.databasePath||'')}</dd><dt>安全备份</dt><dd>${escapeText(challenge.backup?.path||'')}</dd><dt>备份大小</dt><dd>${Number(challenge.backup?.size||0).toLocaleString()} 字节</dd><dt>完整性</dt><dd>${escapeText(challenge.backup?.integrity||'')}</dd></dl>`;
+    if(!dialogOpen){
+      lastStatus='安全备份已完成；没有提交删除任务';
+      active=false;
+      return;
+    }
     const stepOne=document.getElementById('purgeStepOne');
     const stepTwo=document.getElementById('purgeStepTwo');
-    if(stepOne)stepOne.hidden=false;if(stepTwo)stepTwo.hidden=true;if(dialog)dialog.hidden=false;
-    active=true;startedAt=Date.now();currentJob=null;renderWorking();startElapsedClock();
+    if(stepOne)stepOne.hidden=true;
+    if(stepTwo)stepTwo.hidden=false;
+    const admin=document.getElementById('purgeAdmin');if(admin)admin.textContent=String(challenge.administrator||'当前管理员');
+    const phrase=document.getElementById('purgePhrase');if(phrase)phrase.value='';
+    const checkbox=document.getElementById('purgeBackupConfirmed');if(checkbox)checkbox.checked=false;
+    stopConfirmClock();
+    refreshExplicitExecuteButton();
+    confirmTimer=setInterval(refreshExplicitExecuteButton,250);
+  }
 
+  async function v505ContinueDataPurge(){
+    if(prepareInFlight||executeInFlight)return;
+    if(preparedChallenge){showPreparedChallenge(preparedChallenge);return;}
+    active=true;prepareInFlight=true;startedAt=Date.now();renderWorking('正在创建并校验清空前安全备份','这是管理员点击“备份并继续”后才启动的独立后台任务；不会自动提交删除。');startElapsedClock();
     try{
       let submitted=await submitPrepareRecovering(4);
       currentJob=submitted;
       if(String(submitted.kind||'').toUpperCase()==='EXECUTE'){
+        executeInFlight=true;
         await finishExistingExecution(submitted);
         return;
       }
       if(String(submitted.status||'').toUpperCase()!=='SUCCEEDED'||!submitted.challengeId){
         await pollBackgroundJob(submitted,'PREPARE');
-        renderWorking('安全备份已完成，正在读取最终校验凭证');
+        renderWorking('安全备份已完成，正在读取最终校验凭证','仍未提交任何删除任务。');
         submitted=await recoverVerifiedChallenge(submitted);
         currentJob=submitted;
         if(String(submitted.kind||'').toUpperCase()==='EXECUTE'){
+          executeInFlight=true;
           await finishExistingExecution(submitted);
           return;
         }
       }
-
-      const challenge=submitted;
+      if(String(submitted.status||'').toUpperCase()!=='SUCCEEDED'||!submitted.challengeId)throw new Error('安全备份未返回可用的清空凭证。');
+      showPreparedChallenge(submitted);
+    }catch(error){
+      stopElapsedClock();
       const node=previewNode();
-      if(node){
-        node.innerHTML=`<div class="purge-success"><b>安全备份与完整性校验已完成。</b></div><dl><dt>数据库</dt><dd>${escapeText(challenge.databasePath||'')}</dd><dt>安全备份</dt><dd>${escapeText(challenge.backup?.path||'')}</dd><dt>备份大小</dt><dd>${Number(challenge.backup?.size||0).toLocaleString()} 字节</dd><dt>完整性</dt><dd>${escapeText(challenge.backup?.integrity||'')}</dd></dl>`;
-      }
-      const result=await executeChallenge(challenge);
+      const code=String(error?.code||'');
+      const keepLocked=['PURGE_STATUS_UNAVAILABLE','PURGE_BACKGROUND_WAIT_LIMIT','PURGE_TRANSPORT_TIMEOUT','PURGE_TRANSPORT_INTERRUPTED'].includes(code)||/^DATA_PURGE_|^V505_PURGE_/.test(code)||Number(error?.status||0)===423;
+      if(node)node.innerHTML=`<div class="purge-error"><b>${keepLocked?'后台任务或安全锁状态需要继续核对。':'备份未完成，未执行清空。'}</b><br>${escapeText(error.message||error)}<br><small>${keepLocked?'不要重复点击；系统会继续按持久化任务和安全锁保护。':'没有提交删除任务，可关闭窗口。'}</small></div>`;
+    }finally{
+      prepareInFlight=false;
+      if(!executeInFlight&&(!dialogOpen||!preparedChallenge))active=false;
+    }
+  }
+
+  async function v505ExecuteDataPurge(){
+    if(executeInFlight||prepareInFlight)return;
+    if(!refreshExplicitExecuteButton()||!preparedChallenge)return alert('请先完成备份确认、准确输入“永久清除全部业务数据”，并等待安全倒计时结束。');
+    if(!global.confirm('最终确认：现在将永久清除全部业务数据。安全备份、用户、权限、配置、白名单和审计不会删除。是否继续？'))return;
+    active=true;executeInFlight=true;startedAt=Date.now();startElapsedClock();stopConfirmClock();
+    try{
+      const result=await executeChallenge(preparedChallenge);
       if(result){
         stopElapsedClock();
         if(typeof global.applyCompletedPurge==='function')await global.applyCompletedPurge(result);
@@ -270,12 +316,45 @@
       const code=String(error?.code||'');
       const keepLocked=['PURGE_STATUS_UNAVAILABLE','PURGE_BACKGROUND_WAIT_LIMIT','PURGE_TRANSPORT_TIMEOUT','PURGE_TRANSPORT_INTERRUPTED'].includes(code)||/^DATA_PURGE_|^V505_PURGE_/.test(code)||Number(error?.status||0)===423;
       if(node)node.innerHTML=`<div class="purge-error"><b>${keepLocked?'后台任务或安全锁状态需要继续核对。':'清空未执行。'}</b><br>${escapeText(error.message||error)}<br><small>${keepLocked?'不要重复点击；系统会继续按持久化任务和安全锁保护，稍后重新进入数据管理查看。':'安全机制已经停止本次动作；确认后台进程已结束后再重新开始。'}</small></div>`;
-    }finally{active=false;}
+    }finally{executeInFlight=false;active=false;}
   }
 
-  function claimPurgeOwner(){global.openDataPurge=v505OpenDataPurge;try{openDataPurge=v505OpenDataPurge;}catch{}}
+  function v505CloseDataPurge(){
+    if(executeInFlight)return alert('清空事务已经提交，当前不能把它当作已取消。请等待后台真实状态返回。');
+    dialogOpen=false;
+    const dialog=document.getElementById('dataPurgeDialog');if(dialog)dialog.hidden=true;
+    stopConfirmClock();
+    if(!prepareInFlight){stopElapsedClock();active=false;}
+    if(prepareInFlight)lastStatus='安全备份仍在后台执行；关闭窗口不会提交删除任务';
+  }
+
+  async function v505OpenDataPurge(){
+    if(executeInFlight)return;
+    const knownRole=typeof accessSession!=='undefined'?String(accessSession?.user?.role||'').toUpperCase():'';
+    if(knownRole&&knownRole!=='ADMIN')return alert('当前账户不是管理员，无法清空业务数据。');
+    if(!global.confirm('打开清空向导？仅打开窗口不会启动备份，也不会删除数据。只有下一步明确点击“备份并继续”后才会开始创建安全备份。'))return;
+
+    const dialog=document.getElementById('dataPurgeDialog');
+    const stepOne=document.getElementById('purgeStepOne');
+    const stepTwo=document.getElementById('purgeStepTwo');
+    if(stepOne)stepOne.hidden=false;if(stepTwo)stepTwo.hidden=true;if(dialog)dialog.hidden=false;
+    dialogOpen=true;active=true;preparedChallenge=null;currentJob=null;stopElapsedClock();stopConfirmClock();renderIdle();
+  }
+
+  function claimPurgeOwner(){
+    global.openDataPurge=v505OpenDataPurge;
+    global.continueDataPurge=v505ContinueDataPurge;
+    global.executeDataPurge=v505ExecuteDataPurge;
+    global.updatePurgeButton=refreshExplicitExecuteButton;
+    global.closeDataPurge=v505CloseDataPurge;
+    try{openDataPurge=v505OpenDataPurge;}catch{}
+    try{continueDataPurge=v505ContinueDataPurge;}catch{}
+    try{executeDataPurge=v505ExecuteDataPurge;}catch{}
+    try{updatePurgeButton=refreshExplicitExecuteButton;}catch{}
+    try{closeDataPurge=v505CloseDataPurge;}catch{}
+  }
   claimPurgeOwner();setTimeout(claimPurgeOwner,1600);setTimeout(claimPurgeOwner,4200);setTimeout(claimPurgeOwner,8000);
-  global.__CE_QC_V505_DATA_PURGE_RECOVERY__={patchId:PATCH_ID,openDataPurge:v505OpenDataPurge,getStatus:()=>({active,lastStatus,startedAt,currentJob})};
-  global.__CE_QC_V105_ASYNC_PURGE_UI__={version:PATCH_ID,isPolling:()=>active,isFlowActive:()=>active,pollDelay:()=>2000,recoverRecentJob:async()=>currentJob,owner:'V505'};
+  global.__CE_QC_V505_DATA_PURGE_RECOVERY__={patchId:PATCH_ID,openDataPurge:v505OpenDataPurge,continueDataPurge:v505ContinueDataPurge,executeDataPurge:v505ExecuteDataPurge,getStatus:()=>({active,lastStatus,startedAt,currentJob,preparedChallenge:Boolean(preparedChallenge),prepareInFlight,executeInFlight,dialogOpen})};
+  global.__CE_QC_V105_ASYNC_PURGE_UI__={version:PATCH_ID,isPolling:()=>prepareInFlight||executeInFlight,isFlowActive:()=>active,pollDelay:()=>2000,recoverRecentJob:async()=>currentJob,owner:'V505'};
   console.info('[CE-QC][V505_DATA_PURGE_RECOVERY]',PATCH_ID);
 })(window);

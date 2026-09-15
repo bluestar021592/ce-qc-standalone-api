@@ -1,6 +1,6 @@
 (function installV502MultiDriveBackupUi(global){
   if(global.__CE_QC_V502_MULTI_DRIVE_BACKUP_UI__)return;
-  const PATCH_ID='2026-09-15-v544-purge-owner-cache-bust-v1';
+  const PATCH_ID='2026-09-15-v545-explicit-purge-owner-cache-bust-v1';
 
   const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const sizeText=bytes=>typeof global.formatFileSize==='function'?global.formatFileSize(Number(bytes||0)):`${(Number(bytes||0)/1024/1024/1024).toFixed(2)} GB`;
@@ -75,9 +75,9 @@
   }
 
   const installedPurgePatch=String(global.__CE_QC_V505_DATA_PURGE_RECOVERY__?.patchId||'');
-  if(!installedPurgePatch.includes('v8-version-aware-owner')){
+  if(!installedPurgePatch.includes('v545-explicit-two-step')){
     const script=document.createElement('script');
-    script.src='/v505-data-purge-recovery.js?v=20260915-v544-1';
+    script.src='/v505-data-purge-recovery.js?v=20260915-v545-1';
     script.async=false;
     script.onload=loadStartupProbe;
     document.head.appendChild(script);

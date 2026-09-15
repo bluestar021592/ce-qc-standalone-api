@@ -10,8 +10,8 @@ const syntaxFiles=[
   'src/dataPurge.js','src/v505PurgeCoordinator.js','src/v505PurgeGlobalGuard.js','src/v505PurgeWriteFreezeGuard.js',
   'src/v505PurgeExecuteAdmissionGuard.js','src/v505PurgeStartupOrphanGuard.js','src/v505ExportAdmissionGuard.js',
   'src/v505PurgePublicStatusGuard.js','src/v541PurgePidOwnership.js','src/v29EndpointAliasPatch.js','src/accessControl.js',
-  'scripts/CE_QC_PurgePrepareTaskWorker.mjs','scripts/CE_QC_PurgeExecuteTaskWorker.mjs',
-  'public/v505-data-purge-recovery.js','public/v108-route-lazy-features.js'
+  'scripts/CE_QC_PreClearBackupWorker.mjs','scripts/CE_QC_PurgePrepareTaskWorker.mjs','scripts/CE_QC_PurgeExecuteTaskWorker.mjs',
+  'public/v505-data-purge-recovery.js','public/v108-route-lazy-features.js','public/v502-multidrive-backup-ui.js'
 ];
 for(const relative of syntaxFiles){
   const result=spawnSync(process.execPath,['--check',path.join(root,relative)],{encoding:'utf8'});
@@ -113,24 +113,46 @@ assert.match(db,/V505_PURGE_EXECUTE_SOURCE_MISSING/);
 assert.match(db,/V505_PURGE_EXECUTE_DB_MODE_UNSAFE/);
 assert.match(db,/V505_PURGE_EXECUTE_SCHEMA_MISMATCH/);
 
+const preClear=read('scripts/CE_QC_PreClearBackupWorker.mjs');
+assert.match(preClear,/Math\.max\(128,Math\.min\(512,Number\(payload\.ratePages\|\|512\)\)\)/,'V545 must cap SQLite backup work batches so the 25+ GiB copy cannot monopolize disk IO');
+assert.match(preClear,/highWaterMark:1024\*1024/,'V545 SHA verification must use bounded 1 MiB reads');
+assert.match(preClear,/PRAGMA quick_check\(1\)/,'throttling must not remove backup integrity verification');
+assert.match(preClear,/sha256=await hashFile\(filePath\)/,'throttling must not remove full SHA verification');
+assert.match(preClear,/BEGIN IMMEDIATE/,'pre-clear backup must still seal writes while its exact source fingerprint is captured');
+
 const ui=read('public/v505-data-purge-recovery.js');
-assert.match(ui,/v8-version-aware-owner/);
-assert.match(ui,/v531-server-admin-authority/,'V531 owner must be the browser purge authority');
+assert.match(ui,/v545-explicit-two-step-purge-ui-v1/);
 assert.doesNotMatch(ui,/requestJson\('\/api\/session'/,'purge open must never depend on a duplicate /api/session round-trip');
 assert.match(ui,/knownRole=typeof accessSession!=='undefined'/,'UI may use already-loaded session state only as a best-effort early role hint');
+assert.match(ui,/尚未开始任何备份或清空任务/,'opening the wizard must be inert');
+assert.match(ui,/global\.continueDataPurge=v505ContinueDataPurge/,'step one must explicitly own PREPARE');
+assert.match(ui,/global\.executeDataPurge=v505ExecuteDataPurge/,'step two must explicitly own EXECUTE');
+assert.match(ui,/String\(phrase\?\.value\|\|''\)==='永久清除全部业务数据'/,'exact phrase is mandatory');
+assert.match(ui,/Boolean\(checkbox\?\.checked\)/,'backup checkbox is mandatory');
+assert.match(ui,/最终确认：现在将永久清除全部业务数据/,'final browser confirmation is mandatory');
+assert.match(ui,/v505ContinueDataPurge[\s\S]*?submitPrepareRecovering/,'only the explicit continue action may initiate PREPARE');
+assert.match(ui,/v505ExecuteDataPurge[\s\S]*?executeChallenge\(preparedChallenge\)/,'only the explicit final action may initiate EXECUTE');
 assert.match(ui,/submitPrepareRecovering/);
 assert.match(ui,/submitExecuteRecovering/);
 assert.match(ui,/不会解除任务锁，也不会启动第二个任务/);
+
 const server=read('server.js');
 assert.match(server,/app\.post\('\/api\/admin\/data-purge\/prepare', requireRole\('ADMIN'\)/,'PREPARE must remain server-authoritative ADMIN-only');
 assert.match(server,/app\.post\('\/api\/admin\/data-purge\/execute', requireRole\('ADMIN'\)/,'EXECUTE must remain server-authoritative ADMIN-only');
+
 const lazy=read('public/v108-route-lazy-features.js');
-assert.match(lazy,/2026-09-15-v544-purge-owner-race-v1/,'V544 route-lazy owner version must force a fresh loader');
-assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v544-1/,'V544 must cache-bust the V505 purge owner');
-assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v544-1/,'V544 must cache-bust the legacy-control guard with the owner');
-assert.match(lazy,/event\.stopImmediatePropagation\(\)/,'V544 must stop the obsolete inline purge handler before V505 is ready');
-assert.match(lazy,/loadGroup\('data'\)\.then/,'V544 first purge click must load the V505 owner before invoking anything destructive');
-assert.match(lazy,/reassertPurgeOwner/,'V544 must restore the V505 owner before allowing inline entry');
+assert.match(lazy,/2026-09-15-v545-explicit-purge-owner-v1/,'V545 route-lazy owner version must force a fresh loader');
+assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v545-1/,'V545 must cache-bust the purge owner');
+assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v545-1/,'V545 must cache-bust the legacy-control guard with the owner');
+assert.match(lazy,/installed\.includes\('v545-explicit-two-step'\)/,'V545 must reject stale purge owners at the capture gate');
+assert.match(lazy,/event\.stopImmediatePropagation\(\)/);
+assert.match(lazy,/loadGroup\('data'\)\.then/);
+assert.match(lazy,/reassertPurgeOwner/);
 assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V544 first-click purge entry is capture-gated until the cache-busted V505 owner is loaded; V542/V541 fail-closed server ownership remains intact');
+const backupUi=read('public/v502-multidrive-backup-ui.js');
+assert.match(backupUi,/2026-09-15-v545-explicit-purge-owner-cache-bust-v1/);
+assert.match(backupUi,/v545-explicit-two-step/);
+assert.match(backupUi,/v505-data-purge-recovery\.js\?v=20260915-v545-1/);
+
+console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V545 purge opening is inert, PREPARE and EXECUTE require separate explicit user actions, backup IO is capped at 512 pages + 1MiB SHA reads, and V542/V541 fail-closed ownership remains intact');
