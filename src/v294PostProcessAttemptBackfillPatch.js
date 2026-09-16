@@ -15,6 +15,7 @@ import { completeUnifiedSnapshot } from './unifiedImportStore.js';
 export const V294_POST_PROCESS_ATTEMPT_BACKFILL_ID='2026-09-02-v294-seven-business-final-materialization-v6';
 export const V294_EVENT_DRIVEN_FINALIZATION_REVISION='2026-09-02-v294-event-driven-final-materialization-v1';
 export const V414_IMPORT_EXPLICIT_RUN_REVISION='2026-09-02-v414-import-never-auto-starts-whpp-v1';
+export const V550_STARTUP_HISTORY_GUARD_REVISION='2026-09-16-v550-no-startup-history-one-shot-v1';
 const FINALIZED_HISTORY_BACKFILL_REVISION='2026-09-02-finalized-dashboard-history-backfill-once-v1';
 const FINALIZED_HISTORY_BACKFILL_META_KEY='finalized_dashboard_history_backfill_revision';
 const previousPost=express.application.post;
@@ -69,6 +70,5 @@ function runBackfill(reportDate,scopes={}){
 function responseHook(req,res,next){const originalJson=res.json.bind(res);let handled=false;res.json=function v294PostProcessJson(payload){const success=res.statusCode<400&&payload?.ok!==false,reportDate=responseReportDate(req,payload),out=originalJson(payload);if(success&&reportDate&&!handled){handled=true;runBackfill(reportDate,typesForPath(req.path));}return out;};next();}
 express.application.post=function v294PostProcessAttemptRegistration(pathValue,...handlers){const route=String(pathValue||'');if(ROUTES.has(route)&&handlers.length)return previousPost.call(this,pathValue,responseHook,...handlers);return previousPost.call(this,pathValue,...handlers);};
 
-if(process.env.NODE_ENV!=='test'&&!process.env.CI){const timer=setTimeout(()=>{const date=latestUnifiedReportDate();if(!date||!sevenBusinessTerminal(date))return;const result=materializeV294CompletedUnifiedHistory(date);console.info('[CE-QC][FINAL_HISTORY_STARTUP_ONE_SHOT]',JSON.stringify(result));},5000);timer.unref?.();}
-
+console.info('[CE-QC][V550_STARTUP_HISTORY_GUARD]',V550_STARTUP_HISTORY_GUARD_REVISION,'startup history one-shot disabled; history materialization is event-driven after business processing/finalization only.');
 console.info('[CE-QC][V294_POST_PROCESS_ATTEMPT_BACKFILL]',V294_POST_PROCESS_ATTEMPT_BACKFILL_ID,V294_EVENT_DRIVEN_FINALIZATION_REVISION,V414_IMPORT_EXPLICIT_RUN_REVISION,'new imports never arm WHPP execution. Only explicit V67 unified start/continue may start normal WHPP; an already-running WHPP may recover only from exact PROCESS_RESTART_INTERRUPTED proof. Seven-business finalization still materializes dashboard/history caches in background once final truth exists.');
