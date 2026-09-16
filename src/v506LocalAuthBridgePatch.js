@@ -6,7 +6,8 @@ import path from 'node:path';
 import net from 'node:net';
 import { getRuntimeConfig } from './db.js';
 
-export const V506_LOCAL_AUTH_BRIDGE_ID = '2026-09-16-v549-local-auth-timeout-v1';
+export const V506_LOCAL_AUTH_BRIDGE_ID = '2026-09-13-v506-same-origin-auth-bridge-v2';
+export const V549_LOCAL_AUTH_TIMEOUT_ID = '2026-09-16-v549-local-auth-timeout-v2';
 const AUTH_PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 const APP_PORT = Math.max(1024, Math.min(65535, Number(process.env.PORT || 5177)));
 const AUTH_COOKIE = 'ce_qc_local_auth_v431';
@@ -172,19 +173,21 @@ export function classifyV549AuthBridgeError(error) {
   const detail = String(error?.message || error || '');
   const code = String(error?.code || '');
   if (detail.includes('AUTH_SIDECAR_TIMEOUT') || code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT') {
-    return { status: 504, code: 'LOCAL_AUTH_BRIDGE_TIMEOUT', error: '本地认证服务处理登录超时，请稍后重试。' };
+    return { status: 504, code: 'LOCAL_AUTH_BRIDGE_TIMEOUT', legacyCode: 'AUTH_SIDECAR_TIMEOUT', error: '本地认证服务处理登录超时，请稍后重试。' };
   }
   if (detail.includes('AUTH_SIDECAR_RESPONSE_TOO_LARGE')) {
-    return { status: 502, code: 'LOCAL_AUTH_BRIDGE_BAD_RESPONSE', error: '本地认证服务返回内容异常，请重启启动器后重试。' };
+    return { status: 502, code: 'LOCAL_AUTH_BRIDGE_BAD_RESPONSE', legacyCode: 'AUTH_SIDECAR_RESPONSE_TOO_LARGE', error: '本地认证服务返回内容异常，请重启启动器后重试。' };
   }
-  return { status: 503, code: 'LOCAL_AUTH_BRIDGE_UNAVAILABLE', error: '本地认证服务当前不可用，请保持启动器窗口开启后重试。' };
+  return { status: 503, code: 'LOCAL_AUTH_BRIDGE_UNAVAILABLE', legacyCode: 'AUTH_SIDECAR_UNAVAILABLE', error: '本地认证服务当前不可用，请保持启动器窗口开启后重试。' };
 }
 function bridgeFailure(res, error, timeoutMs = REQUEST_TIMEOUT_MS) {
   const failure = classifyV549AuthBridgeError(error);
   return json(res, failure.status, {
     ok: false,
     code: failure.code,
+    legacyCode: failure.legacyCode,
     bridgeId: V506_LOCAL_AUTH_BRIDGE_ID,
+    patchId: V549_LOCAL_AUTH_TIMEOUT_ID,
     timeoutMs,
     error: failure.error,
     detail: String(error?.message || error || '')
@@ -215,7 +218,7 @@ async function proxyHealth(req, res) {
   try {
     const reply = await sidecarRequest({ pathName: '/api/local-auth/health', timeoutMs: healthTimeoutMs });
     let payload = {}; try { payload = JSON.parse(reply.body || '{}'); } catch {}
-    return json(res, reply.status, { ...payload, bridgeOk: reply.status === 200 && payload?.ok === true, bridgeId: V506_LOCAL_AUTH_BRIDGE_ID, browserChannel: channel });
+    return json(res, reply.status, { ...payload, bridgeOk: reply.status === 200 && payload?.ok === true, bridgeId: V506_LOCAL_AUTH_BRIDGE_ID, patchId: V549_LOCAL_AUTH_TIMEOUT_ID, browserChannel: channel });
   } catch (error) {
     return bridgeFailure(res, error, healthTimeoutMs);
   }
@@ -243,6 +246,7 @@ async function proxyLogin(req, res) {
       if (parsed.user && typeof parsed.user === 'object') parsed.user.devMode = channel === 'LOCAL';
       parsed.authMode = 'V506_SAME_ORIGIN_BRIDGE';
       parsed.bridgeId = V506_LOCAL_AUTH_BRIDGE_ID;
+      parsed.patchId = V549_LOCAL_AUTH_TIMEOUT_ID;
       responseBody = JSON.stringify(parsed);
       res.status(reply.status).set('cache-control', 'no-store').set('content-type', 'application/json; charset=utf-8').set('x-ce-qc-auth-bridge', V506_LOCAL_AUTH_BRIDGE_ID).send(responseBody);
       return;
@@ -288,6 +292,7 @@ export function v506AuthBridgeStateForTests() {
     appPort: APP_PORT,
     timeoutMs: REQUEST_TIMEOUT_MS,
     frontendTimeoutMs: FRONTEND_TIMEOUT_MS,
-    id: V506_LOCAL_AUTH_BRIDGE_ID
+    id: V506_LOCAL_AUTH_BRIDGE_ID,
+    patchId: V549_LOCAL_AUTH_TIMEOUT_ID
   };
 }
