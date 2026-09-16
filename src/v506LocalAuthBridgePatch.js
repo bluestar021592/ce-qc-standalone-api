@@ -7,10 +7,12 @@ import net from 'node:net';
 import { getRuntimeConfig } from './db.js';
 
 export const V506_LOCAL_AUTH_BRIDGE_ID = '2026-09-13-v506-same-origin-auth-bridge-v2';
+export const V549_LOCAL_AUTH_TIMEOUT_ID = '2026-09-16-v549-local-auth-timeout-v2';
 const AUTH_PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 const APP_PORT = Math.max(1024, Math.min(65535, Number(process.env.PORT || 5177)));
 const AUTH_COOKIE = 'ce_qc_local_auth_v431';
-const REQUEST_TIMEOUT_MS = Math.max(1500, Math.min(8000, Number(process.env.CE_QC_AUTH_BRIDGE_TIMEOUT_MS || 5000)));
+const REQUEST_TIMEOUT_MS = Math.max(5000, Math.min(45000, Number(process.env.CE_QC_AUTH_BRIDGE_TIMEOUT_MS || 25000)));
+const FRONTEND_TIMEOUT_MS = Math.min(60000, REQUEST_TIMEOUT_MS + 10000);
 const MAX_RESPONSE_BYTES = 128 * 1024;
 const MAX_FORM_BYTES = 64 * 1024;
 let installed = false;
@@ -167,6 +169,30 @@ function sidecarRequest({ method = 'GET', pathName, body = '', timeoutMs = REQUE
 function json(res, status, payload) {
   res.status(status).set('cache-control', 'no-store').set('x-ce-qc-auth-bridge', V506_LOCAL_AUTH_BRIDGE_ID).json(payload);
 }
+export function classifyV549AuthBridgeError(error) {
+  const detail = String(error?.message || error || '');
+  const code = String(error?.code || '');
+  if (detail.includes('AUTH_SIDECAR_TIMEOUT') || code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT') {
+    return { status: 504, code: 'LOCAL_AUTH_BRIDGE_TIMEOUT', legacyCode: 'AUTH_SIDECAR_TIMEOUT', error: '本地认证服务处理登录超时，请稍后重试。' };
+  }
+  if (detail.includes('AUTH_SIDECAR_RESPONSE_TOO_LARGE')) {
+    return { status: 502, code: 'LOCAL_AUTH_BRIDGE_BAD_RESPONSE', legacyCode: 'AUTH_SIDECAR_RESPONSE_TOO_LARGE', error: '本地认证服务返回内容异常，请重启启动器后重试。' };
+  }
+  return { status: 503, code: 'LOCAL_AUTH_BRIDGE_UNAVAILABLE', legacyCode: 'AUTH_SIDECAR_UNAVAILABLE', error: '本地认证服务当前不可用，请保持启动器窗口开启后重试。' };
+}
+function bridgeFailure(res, error, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const failure = classifyV549AuthBridgeError(error);
+  return json(res, failure.status, {
+    ok: false,
+    code: failure.code,
+    legacyCode: failure.legacyCode,
+    bridgeId: V506_LOCAL_AUTH_BRIDGE_ID,
+    patchId: V549_LOCAL_AUTH_TIMEOUT_ID,
+    timeoutMs,
+    error: failure.error,
+    detail: String(error?.message || error || '')
+  });
+}
 function nativeFormRequest(req) {
   const type = String(req.get?.('content-type') || req.headers?.['content-type'] || '');
   const accept = String(req.get?.('accept') || req.headers?.accept || '');
@@ -188,12 +214,13 @@ async function proxyHealth(req, res) {
   const channel = resolveV506BrowserChannel(req);
   if (!channel) return json(res, 403, { ok: false, code: 'AUTH_BRIDGE_CHANNEL_DENIED', error: '当前访问来源不允许本机/LAN认证。' });
   if (!isV506SameOriginRequest(req)) return json(res, 403, { ok: false, code: 'AUTH_BRIDGE_ORIGIN_DENIED', error: '登录来源校验失败。' });
+  const healthTimeoutMs = 2500;
   try {
-    const reply = await sidecarRequest({ pathName: '/api/local-auth/health', timeoutMs: 2500 });
+    const reply = await sidecarRequest({ pathName: '/api/local-auth/health', timeoutMs: healthTimeoutMs });
     let payload = {}; try { payload = JSON.parse(reply.body || '{}'); } catch {}
-    return json(res, reply.status, { ...payload, bridgeOk: reply.status === 200 && payload?.ok === true, bridgeId: V506_LOCAL_AUTH_BRIDGE_ID, browserChannel: channel });
+    return json(res, reply.status, { ...payload, bridgeOk: reply.status === 200 && payload?.ok === true, bridgeId: V506_LOCAL_AUTH_BRIDGE_ID, patchId: V549_LOCAL_AUTH_TIMEOUT_ID, browserChannel: channel });
   } catch (error) {
-    return json(res, 503, { ok: false, code: 'AUTH_SIDECAR_UNAVAILABLE', bridgeId: V506_LOCAL_AUTH_BRIDGE_ID, error: '独立认证服务暂不可用，请保持启动器窗口开启后稍后重试。', detail: String(error?.message || error) });
+    return bridgeFailure(res, error, healthTimeoutMs);
   }
 }
 async function proxyLogin(req, res) {
@@ -218,13 +245,15 @@ async function proxyLogin(req, res) {
       if (nativeFormRequest(req)) return res.redirect(303, '/');
       if (parsed.user && typeof parsed.user === 'object') parsed.user.devMode = channel === 'LOCAL';
       parsed.authMode = 'V506_SAME_ORIGIN_BRIDGE';
+      parsed.bridgeId = V506_LOCAL_AUTH_BRIDGE_ID;
+      parsed.patchId = V549_LOCAL_AUTH_TIMEOUT_ID;
       responseBody = JSON.stringify(parsed);
       res.status(reply.status).set('cache-control', 'no-store').set('content-type', 'application/json; charset=utf-8').set('x-ce-qc-auth-bridge', V506_LOCAL_AUTH_BRIDGE_ID).send(responseBody);
       return;
     }
     res.status(reply.status).set('cache-control', 'no-store').set('content-type', 'application/json; charset=utf-8').set('x-ce-qc-auth-bridge', V506_LOCAL_AUTH_BRIDGE_ID).send(responseBody);
   } catch (error) {
-    return json(res, 503, { ok: false, code: 'AUTH_SIDECAR_UNAVAILABLE', error: '独立认证服务没有响应，请保持启动器窗口开启后重试。', detail: String(error?.message || error) });
+    return bridgeFailure(res, error, REQUEST_TIMEOUT_MS);
   }
 }
 
@@ -234,7 +263,9 @@ export function rewriteV506LoginHtml(body) {
   const directEndpoint = new RegExp(`http:\\/\\/(?:\\[[^\\]]+\\]|[^\\"'\\s/]+):${escapedPort}\\/api\\/local-auth\\/login`, 'g');
   return body
     .replace(directEndpoint, '/api/local-auth-proxy/login')
-    .replace(/独立登录通道\s+\d+，不占用质控主数据库写入锁。/g, '独立认证服务通过当前5177页面安全转发，不要求浏览器直连认证端口。');
+    .replace('},8000);fetch(', `},${FRONTEND_TIMEOUT_MS});fetch(`)
+    .replace(/登录认证8秒内未完成，独立认证服务没有响应。/g, `登录请求等待${Math.round(FRONTEND_TIMEOUT_MS / 1000)}秒仍未完成，请重试；若持续发生请检查5177→5179本地认证链路。`)
+    .replace(/独立登录通道\s+\d+，不占用质控主数据库写入锁。/g, '独立认证服务通过当前5177页面安全转发；后端负责认证超时判定。');
 }
 export function v506LocalAuthBridgeMiddleware(req, res, next) {
   if (req.method === 'POST' && req.path === '/api/local-auth-proxy/login') return void proxyLogin(req, res);
@@ -249,9 +280,19 @@ express.application.use = function v506AuthBridgeUse(...args) {
   if (!installed && args.length === 1 && typeof args[0] === 'function' && args[0].name === 'accessIdentity') {
     installed = true;
     previousUse.call(this, v506LocalAuthBridgeMiddleware);
-    console.log(`[CE-QC][V506_AUTH_BRIDGE] installed before accessIdentity; browser login stays on 5177 and sidecar remains isolated on ${AUTH_PORT}.`);
+    console.log(`[CE-QC][V549_AUTH_BRIDGE] installed before accessIdentity; browser login stays on 5177, sidecar ${AUTH_PORT}, backend timeout ${REQUEST_TIMEOUT_MS}ms, frontend failsafe ${FRONTEND_TIMEOUT_MS}ms.`);
   }
   return previousUse.apply(this, args);
 };
 
-export function v506AuthBridgeStateForTests() { return { installed, authPort: AUTH_PORT, appPort: APP_PORT, timeoutMs: REQUEST_TIMEOUT_MS, id: V506_LOCAL_AUTH_BRIDGE_ID }; }
+export function v506AuthBridgeStateForTests() {
+  return {
+    installed,
+    authPort: AUTH_PORT,
+    appPort: APP_PORT,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    frontendTimeoutMs: FRONTEND_TIMEOUT_MS,
+    id: V506_LOCAL_AUTH_BRIDGE_ID,
+    patchId: V549_LOCAL_AUTH_TIMEOUT_ID
+  };
+}
