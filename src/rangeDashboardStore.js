@@ -17,7 +17,6 @@ import { readV284DailyFacts } from './v284DailyMembershipTruth.js';
 
 export const V386_DIRTY_DASHBOARD_CACHE_TRUTH_ID = '2026-08-31-v386-dirty-date-never-serves-stale-cache-v1';
 export const V419_LEDGER_DERIVED_DASHBOARD_REFRESH_ID = '2026-09-03-v419-ledger-derived-dashboard-refresh-v1';
-export const INTERACTIVE_CACHE_STATUS_READONLY_ID = '2026-09-17-stability-health-cache-readonly-v1';
 
 function safeJson(value, fallback = {}) {
   try { return value && typeof value === 'object' ? value : (JSON.parse(String(value || '')) || fallback); }
@@ -135,10 +134,12 @@ export function refreshLedgerDerivedDashboardDates(reportDates = [], reason = 'V
 globalThis.__CE_QC_REFRESH_LEDGER_DERIVED_DASHBOARDS__ = refreshLedgerDerivedDashboardDates;
 
 export function getDashboardCacheStatus() {
-  // Health/status endpoints are read-only by contract. Previous code deleted
-  // dirty cache rows while answering /api/health; when the UI was already under
-  // load, the health probe could erase the fast path and amplify the slowdown.
-  // Dirty-cache invalidation remains on explicit write/maintenance paths above.
+  // Preserve the established V386 safety contract: an already-dirty date must
+  // not keep serving stale derived rows after a restart. This operation only
+  // deletes derived cache rows/date markers; it never touches business facts.
+  // The interactive read fix below ensures a missing single-day cache no longer
+  // triggers the multi-GB shipment-level final-normalization scan.
+  invalidateV386DirtyDashboardCaches();
   return getDashboardCacheStatusLegacy();
 }
 
@@ -155,5 +156,3 @@ console.info('[CE-QC][V386_DIRTY_DASHBOARD_CACHE_TRUTH]', V386_DIRTY_DASHBOARD_C
   'dirty dates immediately drop derived dashboard rows/date markers; business facts and dirty markers remain untouched until the normal worker rebuild succeeds.');
 console.info('[CE-QC][V419_LEDGER_DERIVED_DASHBOARD_REFRESH]', V419_LEDGER_DERIVED_DASHBOARD_REFRESH_ID,
   'post-ledger commit synchronously rebuilds affected derived dashboard dates and rewrites WHPP summary from V284/V246 truth; no CE API call.');
-console.info('[CE-QC][INTERACTIVE_CACHE_STATUS_READONLY]', INTERACTIVE_CACHE_STATUS_READONLY_ID,
-  'health/cache status reads never delete or rebuild dashboard cache rows; maintenance is write/background only.');
