@@ -72,10 +72,10 @@ export function listUnifiedImportHistory(limit = 120) {
     if (!row.reportDate || seen.has(row.reportDate)) return false;
     seen.add(row.reportDate);
     return true;
-  }).map(row => ({ ...hydrateBatch(row, false), snapshotStatus: row.snapshotStatus || 'IMPORTED', createdAt: row.snapshotCreatedAt || row.createdAt }));
+  }).map(row => ({ ...hydrateBatch(row, false, { includeCarryover: false }), snapshotStatus: row.snapshotStatus || 'IMPORTED', createdAt: row.snapshotCreatedAt || row.createdAt }));
 }
 
-function hydrateBatch(row, duplicateFile) {
+function hydrateBatch(row, duplicateFile, { includeCarryover = true } = {}) {
   const counts = getDb().prepare('SELECT businessType, COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType').all(row.batchId);
   const classificationCounts = Object.assign(Object.fromEntries(BUSINESS_TYPES.map(type => [type, 0])), Object.fromEntries(counts.map(item => [item.businessType, Number(item.count)])));
   const summary = JSON.parse(row.summaryJson || '{}');
@@ -85,7 +85,7 @@ function hydrateBatch(row, duplicateFile) {
     classificationCounts,
     sourceReconciliation,
     dateDetectionSource: row.dateDetectionSource || '', dateCandidates: JSON.parse(row.dateCandidatesJson || '[]'), dateConflict: JSON.parse(row.dateCandidatesJson || '[]').length > 1, dateWasManuallyCorrected: Boolean(row.dateWasManuallyCorrected),
-    regionCounts: JSON.parse(row.regionCountsJson || '{}'), summary, warnings: JSON.parse(row.warningsJson || '[]'), carryover: carryoverSummary(row.reportDate), duplicateFile
+    regionCounts: JSON.parse(row.regionCountsJson || '{}'), summary, warnings: JSON.parse(row.warningsJson || '[]'), carryover: includeCarryover ? carryoverSummary(row.reportDate) : null, duplicateFile
   };
 }
 
