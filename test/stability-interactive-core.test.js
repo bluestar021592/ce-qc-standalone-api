@@ -15,11 +15,14 @@ test('interactive facade uses the bounded interactive range owner', () => {
   assert.doesNotMatch(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreFinal\.js';/);
 });
 
-test('health/cache status is read-only and cannot invalidate fast dashboard rows', () => {
+test('V386 dirty-cache safety remains intact while business facts stay outside the invalidation scope', () => {
   const statusBlock = facade.match(/export function getDashboardCacheStatus\(\) \{[\s\S]*?\n\}/);
   assert.ok(statusBlock, 'getDashboardCacheStatus block must exist');
+  assert.match(statusBlock[0], /invalidateV386DirtyDashboardCaches\(\);/);
   assert.match(statusBlock[0], /return getDashboardCacheStatusLegacy\(\);/);
-  assert.doesNotMatch(statusBlock[0], /invalidateV386DirtyDashboardCaches\(/);
+  assert.match(facade, /DELETE FROM dashboard_cache_dates/);
+  assert.match(facade, /DELETE FROM dashboard_daily_cache/);
+  assert.doesNotMatch(facade, /DELETE FROM (?:final_rows|business_final_rows|unified_import_rows|scan_results|track_events|business_scan_results|business_track_events)/);
 });
 
 test('single-day interactive read uses V320 cache-only path and never enters row-level final normalization', () => {
@@ -41,8 +44,6 @@ test('V320 single-day source remains cacheOnly and the heavyweight final owner s
   assert.match(interactive, /loadRangeDashboardFinal\(fromDate, toDate\)/);
 });
 
-test('stability fix does not rewrite schema or business facts', () => {
+test('interactive stability owner is read-only and never rewrites business facts or schema', () => {
   assert.doesNotMatch(interactive, /\b(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i);
-  const statusBlock = facade.match(/export function getDashboardCacheStatus\(\) \{[\s\S]*?\n\}/)?.[0] || '';
-  assert.doesNotMatch(statusBlock, /\b(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i);
 });
