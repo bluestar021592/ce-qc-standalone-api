@@ -1,0 +1,33 @@
+name: V553 Aug22 performance baseline
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [v553-aug22-stability-recovery, main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v553-aug22-performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sqlite-performance-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Syntax checks
+        run: |
+          node --check bootstrap.js
+          node --check src/db.js
+          node --check test/v553-aug22-sqlite-performance-baseline.test.js
+      - name: V553 regression
+        run: node --test test/v553-aug22-sqlite-performance-baseline.test.js

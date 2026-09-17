@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const WRAPPED = Symbol.for('ce-qc.async-route-wrapped');
 const V548_BOOTSTRAP_ID = '2026-09-15-v548-main-service-first-v1';
+const V553_PERFORMANCE_BASELINE_ID = '2026-09-17-v553-aug22-main-sqlite-profile-v1';
 
 // RECOVERY SAFE MODE (temporary): production data is preserved, but automatic
 // large-database maintenance is not allowed to compete with the local web UI.
@@ -16,13 +17,13 @@ process.env.CE_QC_DISABLE_V246_TRACKING = '1';
 process.env.CE_QC_DISABLE_V262_STRICT_BACKFILL = '1';
 process.env.CE_QC_DISABLE_STARTUP_STORAGE_SCAN = '1';
 
-// Recovery resource policy: keep the large authoritative SQLite database on D:,
-// but reduce resident RAM and use disk-backed SQLite temp work. New export files
-// go to a persistent C: runtime directory so D: is reserved for source data,
-// evidence and the primary database.
-if (!process.env.SQLITE_CACHE_KIB) process.env.SQLITE_CACHE_KIB = '32768';
-if (!process.env.SQLITE_MMAP_BYTES) process.env.SQLITE_MMAP_BYTES = '0';
-if (!process.env.SQLITE_TEMP_STORE) process.env.SQLITE_TEMP_STORE = 'FILE';
+// V553 performance recovery: bootstrap must not globally downgrade SQLite.
+// src/db.js already owns the process-specific policy that matched the healthy
+// Aug-22 baseline: main web/API process defaults to 64 MiB cache + 256 MiB mmap
+// + MEMORY temp storage, while dedicated export workers default to a smaller
+// 8 MiB cache + mmap=0 + FILE temp storage. Leaving SQLITE_* untouched here
+// preserves explicit operator overrides and prevents main-process recovery
+// settings from leaking into export workers.
 const runtimeRoot = process.env.LOCALAPPDATA
   ? path.join(process.env.LOCALAPPDATA, 'CE_QC_RUNTIME')
   : path.resolve(process.cwd(), 'runtime');
@@ -60,10 +61,15 @@ function cleanupOrphanPreUpdateBackups() {
 }
 
 const storageRecovery = cleanupOrphanPreUpdateBackups();
+const sqliteMainPolicy = {
+  sqliteCacheKiB: Number(process.env.SQLITE_CACHE_KIB || 64 * 1024),
+  sqliteMmapBytes: Number(process.env.SQLITE_MMAP_BYTES ?? 256 * 1024 * 1024),
+  sqliteTempStore: String(process.env.SQLITE_TEMP_STORE || 'MEMORY').toUpperCase(),
+  sqlitePolicySource: process.env.SQLITE_CACHE_KIB || process.env.SQLITE_MMAP_BYTES || process.env.SQLITE_TEMP_STORE ? 'environment' : 'db.js-main-default'
+};
 console.log('[CE-QC][RESOURCE_POLICY]', JSON.stringify({
-  sqliteCacheKiB: Number(process.env.SQLITE_CACHE_KIB),
-  sqliteMmapBytes: Number(process.env.SQLITE_MMAP_BYTES),
-  sqliteTempStore: process.env.SQLITE_TEMP_STORE,
+  revision: V553_PERFORMANCE_BASELINE_ID,
+  ...sqliteMainPolicy,
   exportsDir: process.env.EXPORTS_DIR,
   orphanBackupDirsRemoved: storageRecovery.removed,
   orphanBackupGiBFreed: Number((storageRecovery.freedBytes / 1024 / 1024 / 1024).toFixed(2))
