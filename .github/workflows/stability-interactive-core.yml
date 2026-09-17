@@ -1,0 +1,33 @@
+name: CE QC interactive stability core
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [stability-interactive-core, main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ce-qc-interactive-stability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  interactive-stability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Syntax checks
+        run: |
+          node --check src/rangeDashboardStore.js
+          node --check src/rangeDashboardStoreInteractive.js
+          node --check test/stability-interactive-core.test.js
+      - name: Interactive read architecture regression
+        run: node --test test/stability-interactive-core.test.js
