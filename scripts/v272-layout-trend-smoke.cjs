@@ -21,12 +21,13 @@ assert.match(ui,/snapshotFallback\(section\)/,'selected-range loading state must
 assert.match(ui,/正在按所选日期读取走势图/,'loading state must describe the exact selected range in Chinese');
 assert.match(ui,/removeTrendBodies/,'one trend owner must remove old and loading grids before redrawing');
 assert.match(ui,/V299_SUPERSEDED_/,'older asynchronous visible trend result must be invalidated synchronously');
-assert.match(ui,/\/api\/v253\/trends/,'all boards must have a bounded fast latest-VALID first-paint route');
+assert.match(ui,/\/api\/v319\/trends/,'all visible boards must use the read-only saved-cache V319 route');
 assert.match(ui,/function exactSlice\(data=\{\},from='',to=''\)/,'V253 compatibility recent-day payload must be sliced back to the exact selected range');
 assert.match(ui,/d>=from&&d<=to/,'fast trend must never leak dates outside the selected range');
 assert.match(ui,/STRICT_DELAY_MS=16000/,'strict ledger refinement must wait until fast chart and first-attempt read have had priority');
-assert.match(ui,/\/api\/v273\/trends/,'generic and home trends must still refine from ledger-backed truth');
-assert.match(ui,/\/api\/v263\/delivery-trends/,'TBKH and Shopee trends must still refine from strict delivery truth');
+assert.doesNotMatch(ui,/\/api\/v273\/trends\?businessType=/,'browser refinement must not auto-enter V273 ledger calculation');
+assert.doesNotMatch(ui,/\/api\/v263\/delivery-trends/,'TBKH and Shopee browser refinement must not auto-enter V263 evidence calculation');
+assert.match(ui,/function strictUrl\(type,rg\)\{return`\/api\/v319\/trends/,'delayed refinement may only re-read the same saved V319 cache');
 assert.match(ui,/基础走势图已按所选日期显示/,'strict timeout must keep the exact fast chart visible instead of blanking the board');
 assert.match(ui,/暂无可绘制趋势/,'true no-data must remain explicit instead of a permanent blank chart');
 assert.match(ui,/SPECIAL=new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'attempt/signing scope must remain exact');
@@ -39,8 +40,8 @@ assert.doesNotMatch(ui,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePr
 assert.match(firstAttemptRoute,/2026-08-25-v299-first-attempt-direct-only-v3/,'first-attempt truth must be direct-only so it cannot block primary trend routes');
 assert.doesNotMatch(firstAttemptRoute,/TARGETS\s*=|responseHook\(|overlayPayload\(/,'V253/V263 must not synchronously execute first-attempt truth during primary chart paint');
 
-// V284 remains the strict evidence authority. V299 changes only the visible read
-// order: latest-VALID exact chart first, then the same strict V284 ledger truth.
+// V284 remains available as the explicit/background strict evidence authority. V299 browser
+// navigation no longer invokes it; visible reads stay on already-saved V319 cache truth.
 assert.match(backend,/V284_DAILY_MEMBERSHIP_TRUTH_ID/,'V284 backend authority must remain active through the historical V273 route');
 assert.match(backend,/readV284ProvenDashboardTrends/,'V273 strict refinement must delegate to V284 proven daily-membership truth');
 assert.match(membership,/2026-08-24-v284-daily-membership-ledger-truth-v1/,'V284 daily-membership truth module must be the active implementation');
@@ -145,4 +146,4 @@ assert.match(archiveReplay,/process\.env\.NODE_ENV === 'test' \|\| process\.env\
 execFileSync(process.execPath,['scripts/v273-trend-import-integrity-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-replay-smoke.mjs'],{stdio:'inherit'});
 execFileSync(process.execPath,['scripts/v281-archive-failure-recovery-smoke.mjs'],{stdio:'inherit'});
-console.log('[V299/V284/V282/V280/V273] all-board fast exact trend first paint + strict daily-membership refinement + shipment-column source census + atomic historical replay + current-state preservation + failed-replay recovery passed');
+console.log('[V299/V284/V282/V280/V273] all-board read-only V319 trend paint + explicit/background strict authority preserved + shipment-column source census + atomic historical replay + current-state preservation + failed-replay recovery passed');
