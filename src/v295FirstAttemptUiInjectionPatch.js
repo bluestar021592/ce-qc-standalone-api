@@ -19,7 +19,7 @@ const V317_CCSL_RECOVERY_V332_COMPAT_MARKER='/v317-ccsl-recovery-owner.js?v=2026
 const V317_CCSL_RECOVERY_V330_COMPAT_MARKER='/v317-ccsl-recovery-owner.js?v=20260827-v330-1';
 const V317_CCSL_RECOVERY_COMPAT_MARKER='/v317-ccsl-recovery-owner.js?v=20260826-v317-2';
 const V318_SINGLE_SIDEBAR_MARKER='/v318-single-sidebar-owner.js?v=20260826-v318-1';
-const V319_TREND_CACHE_MARKER='/v319-trend-cache-first.js?v=20260826-v319-1';
+const V319_TREND_CACHE_MARKER='/v319-trend-cache-first.js?v=20260918-stability-failclosed-2';
 const V320_HISTORY_TREND_MARKER='/v320-history-trend-owner.js?v=20260827-v334-1';
 const V320_HISTORY_TREND_V329_COMPAT_MARKER='/v320-history-trend-owner.js?v=20260827-v329-1';
 const V328_ATTEMPT_MARKER='/v328-three-business-attempt-owner.js?v=20260827-v334-1';
