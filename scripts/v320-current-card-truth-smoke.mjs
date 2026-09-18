@@ -4,11 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-for(const file of ['src/v320DispatchMetricOverlay.js','src/rangeDashboardStoreV320.js','src/rangeDashboardStoreFinal.js','src/rangeDashboardStore.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
+for(const file of ['src/v320DispatchMetricOverlay.js','src/rangeDashboardStoreV320.js','src/rangeDashboardStoreFinal.js','src/rangeDashboardStoreInteractive.js','src/rangeDashboardStore.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const facade=fs.readFileSync('src/rangeDashboardStore.js','utf8');
-const finalOwner=fs.readFileSync('src/rangeDashboardStoreFinal.js','utf8');
+const interactiveOwner=fs.readFileSync('src/rangeDashboardStoreInteractive.js','utf8');\nconst finalOwner=fs.readFileSync('src/rangeDashboardStoreFinal.js','utf8');
 const rangeOwner=fs.readFileSync('src/rangeDashboardStoreV320.js','utf8');
-assert.match(facade,/rangeDashboardStoreFinal\.js/,'public period-dashboard facade must pass through final business normalization');
+assert.match(facade,/rangeDashboardStoreInteractive\.js/,'public period-dashboard facade must pass through the interactive stability owner');\nassert.doesNotMatch(facade,/export \{ loadRangeDashboard \} from '.\/rangeDashboardStoreFinal\.js'/,'public interactive facade must not directly enter final row-level normalization');\nassert.match(interactiveOwner,/loadRangeDashboardV320\(from, to\)/,'single-day interactive range must use V320 cache truth');\nassert.match(interactiveOwner,/loadRangeDashboardFinal\(fromDate, toDate\)/,'explicit multi-day range must retain final normalization');\nassert.match(interactiveOwner,/requestTimeShipmentScan:\s*false/,'single-day interactive range must declare no request-time shipment scan');
 assert.match(finalOwner,/rangeDashboardStoreV320\.js/,'final business normalization must consume V320 as its authoritative source/cache truth');
 assert.doesNotMatch(finalOwner,/rangeDashboardStoreV31\.js/,'final normalization must never fall back to the obsolete V31 snapshot selector');
 assert.match(facade,/rangeDashboardStoreV295[\s\S]*rangeDashboardStoreV294/,'historical V295/V294 compatibility markers must remain');
@@ -45,4 +45,4 @@ assert.equal(good.total,2);assert.equal(good.pod,2,'denominator-matched complete
 const bad=readV320HistoricalDailyWithDispatch('CE','2026-08-07','2026-08-07',{db,expandSingle:false}).daily[0];
 assert.equal(bad.total,2);assert.equal(bad.currentCacheOverlayApplied,false,'cache with a mismatched denominator must never override persisted daily membership');assert.equal(bad.pod,0,'mismatched cache must be rejected rather than fabricated into the current card');
 closeDb();fs.rmSync(tempRoot,{recursive:true,force:true});
-console.log('[V402/V320] current-card truth smoke passed · public facade=Final→V320 · exact completed cache wins only at identical daily denominator · final normal-flow rules preserve per-business latest VALID truth');
+console.log('[V402/V320] current-card truth smoke passed · public facade=Interactive→single-day V320 cache / explicit multi-day Final · exact completed cache wins only at identical daily denominator · final normal-flow rules preserve per-business latest VALID truth');
