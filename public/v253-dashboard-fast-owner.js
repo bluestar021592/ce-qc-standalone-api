@@ -1,6 +1,6 @@
 (function installV253DashboardFastOwner(global){
   if(global.__CE_QC_V253_DASHBOARD_FAST_OWNER__)return;
-  const VERSION='2026-08-25-v293-density-home-attempt-dedupe-v1';
+  const VERSION='2026-09-18-stability-home-readonly-trends-v1';
   // Compatibility marker: generic/business V253 rendering remains "fetch acceleration only";
   // V291+ only adds one read-only homepage truth hydrator and does not revive retired board renderers.
   const LEGACY_FETCH_ACCELERATION_ONLY_MARKER='fetch acceleration only';void LEGACY_FETCH_ACCELERATION_ONLY_MARKER;
@@ -121,8 +121,8 @@
     homeBusy=true;try{
       const [period,cn,vn]=await Promise.all([
         json(`/api/period-dashboard?from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`),
-        json(`/api/v263/delivery-trends?businessType=SHOPEECN&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`),
-        json(`/api/v263/delivery-trends?businessType=SHOPEEVN&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`)
+        json(`/api/v319/trends?businessType=SHOPEECN&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`),
+        json(`/api/v319/trends?businessType=SHOPEEVN&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`)
       ]);
       if(!root.isConnected||!visibleHome())return;suppressMutationsUntil=Date.now()+700;patchBusinessCards(root,period);patchHomeCore(root,period);patchHomeAttempts(root,cn,vn);root.dataset.v291VisibleTruth=key;lastHomeKey=key;
     }catch(error){console.warn('[CE-QC][V293_VISIBLE_HOME]',error?.message||error);}finally{homeBusy=false;}
@@ -143,5 +143,5 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
 
   global.__CE_QC_V253_DASHBOARD_FAST_OWNER__={version:VERSION,refresh,renderGeneric,renderShopee,nativeFetch,fetchBridgeOnly:true,visibleTruthV291:true,visibleTruthV293:true,refreshHomeTruth};
-  console.info('[CE-QC][V293_VISIBLE_TRUTH_OWNER]',VERSION,'generic/business V253 rendering remains fetch-only; homepage removes duplicate empty attempt shells and hydrates one read-only CN/VN V246 attempt panel + seven-business range truth; no startup/database-write changes.');
+  console.info('[CE-QC][STABILITY_HOME_TRENDS]',VERSION,'homepage CN/VN attempt charts read only /api/v319/trends saved caches; opening the homepage never invokes V263 evidence repair or CE API.');
 })(window);
