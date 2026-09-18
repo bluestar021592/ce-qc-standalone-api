@@ -13,6 +13,7 @@ const CHUNK=Math.max(10,Math.min(100,Number(process.env.V262_STRICT_CHUNK||50)))
 const START_DELAY_MS=Math.max(10_000,Math.min(120_000,Number(process.env.V262_STRICT_START_DELAY_MS||20_000)));
 const RETRY_BLOCKED_MS=Math.max(5*60_000,Number(process.env.V262_STRICT_BLOCKED_RETRY_MS||15*60_000));
 const PERIODIC_MS=Math.max(2*60*60_000,Number(process.env.V262_STRICT_PERIODIC_MS||2*60*60_000));
+const BACKGROUND_AUTO_ENABLED=String(process.env.CE_QC_ENABLE_V262_BACKGROUND_BACKFILL||'')==='1';
 const UNKNOWN_RETRY_MS=Math.max(15*60_000,Number(process.env.V263_UNKNOWN_ATTEMPT_RETRY_MS||30*60_000));
 let running=false,startTimer=null,periodicTimer=null,blockedTimer=null,requestedTimer=null;
 let lastRunResult={ok:true,id:V262_SHOPEE_STRICT_EVIDENCE_ID,running:false,completedAt:'',reason:'NOT_RUN'};
@@ -111,8 +112,12 @@ export async function runV262ShopeeStrictEvidenceBackfill({client=new CEClient()
 function retryIfBlocked(){clearTimeout(blockedTimer);blockedTimer=setTimeout(async()=>{const r=await runV262ShopeeStrictEvidenceBackfill({reason:'BLOCKED_RETRY'});if(r?.skipped&&r.reason==='FOREGROUND_PROCESSING_ACTIVE')retryIfBlocked();},RETRY_BLOCKED_MS);blockedTimer.unref?.();}
 function start(){
   if(process.env.CI||process.env.NODE_ENV==='test'||String(process.env.CE_QC_DISABLE_V262_STRICT_BACKFILL||'')==='1')return;
+  if(!BACKGROUND_AUTO_ENABLED){
+    console.log('[CE-QC][V263_DELIVERY_EVIDENCE_AUTO_DISABLED]',V262_SHOPEE_STRICT_EVIDENCE_ID,'startup/periodic CE evidence backfill is disabled by default; completed data is materialized event-by-event and explicit/manual requests remain available.');
+    return;
+  }
   startTimer=setTimeout(async()=>{const r=await runV262ShopeeStrictEvidenceBackfill({reason:'STARTUP_RECENT_FIRST'});if(r?.skipped&&r.reason==='FOREGROUND_PROCESSING_ACTIVE')retryIfBlocked();},START_DELAY_MS);startTimer.unref?.();
   periodicTimer=setInterval(async()=>{const r=await runV262ShopeeStrictEvidenceBackfill({reason:'TWO_HOUR_AUTO'});if(r?.skipped&&r.reason==='FOREGROUND_PROCESSING_ACTIVE')retryIfBlocked();},PERIODIC_MS);periodicTimer.unref?.();
-  console.log(`[CE-QC][V263_DELIVERY_EVIDENCE] ${V262_SHOPEE_STRICT_EVIDENCE_ID} enabled for TBKH + SHOPEECN + SHOPEEVN only: legacy unknowns rechecked once under V265, recent dates first, stored-track first + CE retry, startup ${Math.round(START_DELAY_MS/1000)}s, ${LOOKBACK_DAYS}d lookback, every ${Math.round(PERIODIC_MS/3600000)}h.`);
+  console.log(`[CE-QC][V263_DELIVERY_EVIDENCE_AUTO_ENABLED] ${V262_SHOPEE_STRICT_EVIDENCE_ID} explicit opt-in enabled: startup ${Math.round(START_DELAY_MS/1000)}s, ${LOOKBACK_DAYS}d lookback, every ${Math.round(PERIODIC_MS/3600000)}h.`);
 }
 start();
