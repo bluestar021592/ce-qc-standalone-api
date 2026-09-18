@@ -17,6 +17,8 @@ const v263GenericOwner = fs.readFileSync(path.join(root, 'public', 'v263-generic
 const v272VisibleOwner = fs.readFileSync(path.join(root, 'public', 'v272-layout-trend-finalizer.js'), 'utf8');
 const firstAttemptUi = fs.readFileSync(path.join(root, 'public', 'v295-first-attempt-ui.js'), 'utf8');
 const firstAttemptInjection = fs.readFileSync(path.join(root, 'src', 'v295FirstAttemptUiInjectionPatch.js'), 'utf8');
+const exactHomeOwner = fs.readFileSync(path.join(root, 'public', 'v307-exact-daily-home-owner.js'), 'utf8');
+const uiIntegrityOwner = fs.readFileSync(path.join(root, 'public', 'v309-ui-integrity.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -100,4 +102,13 @@ test('automatic first-attempt UI never enters V295 row-level truth SQL', () => {
   assert.match(firstAttemptInjection, /v295-first-attempt-ui\.js\?v=20260918-stability-cache-1/);
   assert.match(v319, /firstAttemptEligible/);
   assert.match(v319, /firstAttemptEvidenceComplete/);
+});
+
+
+test('secondary UI repair owners also stay off V253 and V308 request-time computation', () => {
+  assert.match(exactHomeOwner, /\/api\/v319\/trends\?businessType=/);
+  assert.doesNotMatch(exactHomeOwner, /\/api\/v253\/trends\?businessType=/);
+  assert.match(uiIntegrityOwner, /\/api\/v319\/trends\?businessType=/);
+  assert.doesNotMatch(uiIntegrityOwner, /\/api\/v308\/delivery-daily/);
+  assert.doesNotMatch(uiIntegrityOwner, /__CE_QC_V308_DASHBOARD_READ_BRIDGE__\?\.loadTable/);
 });
