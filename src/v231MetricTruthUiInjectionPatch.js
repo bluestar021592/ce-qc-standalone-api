@@ -91,7 +91,7 @@ express.response.send = function v330MetricTruthUiSend(body) {
     if(headTags.length) body = body.replace('</head>', `${headTags.join('\n')}\n</head>`);
     const tags = [];
     if (!body.includes(CHART_MARKER)) tags.push(`  <script src="${CHART_MARKER}"></script>`);
-    if (!body.includes(V263_GENERIC_MARKER)) tags.push(`  <script src="${V263_GENERIC_MARKER}"></script>`);
+    // Stability: V272 owns all visible board trends. V263 generic stays source-compatible but is not injected live.
     if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
     if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
     if (!body.includes(V267_REPORT_MARKER)) tags.push(`  <script src="${V267_REPORT_MARKER}"></script>`);
@@ -126,4 +126,4 @@ express.response.send = function v330MetricTruthUiSend(body) {
 
 // Historical gate marker kept intentionally: these owners are still stripped from delivered HTML.
 const V263_RETIRED_VISUAL_OWNERS_MARKER = 'V234/V248/V251/V252/V254/V261 visual owners retired';
-console.info('[CE-QC][V299_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'V330 retires V271 network trend owner; fast exact selected-range/cache-only owners are authoritative; duplicate loading/retry loops remain retired.');
+console.info('[CE-QC][V299_CANONICAL_DASHBOARD]', V272_LAYOUT_TREND_UI_INJECTION_ID, V263_RETIRED_VISUAL_OWNERS_MARKER, 'V272 is the sole live visible trend owner; V263 generic and V271 network owners are compatibility-only; duplicate loading/retry loops remain retired.');
