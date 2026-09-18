@@ -178,12 +178,12 @@
         status(section,'快速日报事实暂未返回，正在直接读取严格轨迹证据…','warn');
         await refineStrict(root,type,rg,key,section,false);return;
       }
-      draw(section,specs);status(section,`已显示 ${(fast.dates||[]).length} 个有效日报，走势图已更新。严格轨迹证据将在后台继续校准。`,'ok');
-      setTimeout(()=>refineStrict(root,type,rg,key,section,true),STRICT_DELAY_MS);
+      draw(section,specs);status(section,`已显示 ${(fast.dates||[]).length} 个已保存日报，走势图已更新。页面仅读取V319轻量缓存，不再延迟重复查询。`,'ok');
+      if(SPECIAL.has(type))renderAttempt(root,type,fast);
     }catch(error){
       if(root.dataset.v272Key!==key)return;
-      status(section,`快速走势图${error?.name==='AbortError'?'读取较慢':'暂未完成'}，正在切换严格证据通道…`,'warn');
-      await refineStrict(root,type,rg,key,section,false);
+      status(section,`走势图读取失败：${error?.name==='AbortError'?'读取超时':error?.message||error}。当前页面不会在后台反复重试；重新查询或切换日期时再读取。`,'error');
+      noData(section,'当前没有可用的已保存轻量缓存。');
     }
   }
 
