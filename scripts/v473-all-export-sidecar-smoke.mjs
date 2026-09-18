@@ -63,7 +63,7 @@ assert.ok(admissionAt>=0&&v473At>admissionAt,'legacy sidecar entry must install 
 assert.doesNotMatch(shim,/app\.listen|express from/,'legacy sidecar entry must not start a second server');
 assert.match(admission,/v505PurgeWriteFreezeGuard,v505ExportAdmissionGuard,\.\.\.handlers/,'5178 export creation must pass purge freeze and admission handshake before V473 handlers');
 assert.match(admission,/const afterAcquire=inspectPurgeWriteFreezeState\(\)/,'cross-process race must be double-checked after export admission lock acquisition');
-assert.match(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-2/,'existing token UI slot must hand ownership to final cache-busted V473 UI');
+assert.match(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260918-lazy-sidecar-1/,'existing token UI slot must hand ownership to the lazy cache-busted V473 UI');
 assert.doesNotMatch(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-1/,'retired V473 UI cache key must not remain active');
 const v84At=shell.indexOf('v84-async-export-ui.js?v=20260818-v193-1');
 const tokenAt=shell.indexOf('v194-export-token-ui.js?v=20260818-v195-1');
