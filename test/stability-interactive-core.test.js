@@ -191,8 +191,9 @@ test('V554 body compatibility scripts cannot block initial document load or base
   assert.match(uiShellLoader, /V554_INTERACTION_READY_ID='2026-09-18-v554-nonblocking-legacy-body-loader-v1'/);
   assert.match(uiShellLoader, /application\/x-ce-qc-deferred/);
   assert.match(uiShellLoader, /data-src=/);
-  assert.match(uiShellLoader, /window\.addEventListener\(\\"load\\"/);
+  assert.match(uiShellLoader, /window\.addEventListener\("load"/);
   assert.match(uiShellLoader, /TIMEOUT=8000/);
+  assert.match(uiShellLoader, /\(\);<\/script>\\\\n'/, 'inline loader must close with a real HTML script terminator');
   assert.match(uiShellLoader, /X-CE-QC-V554-Interaction-Ready/);
   assert.match(uiShellLoader, /injectedHtml=withStyle\.replace\('<\/body>',nonBlockingBodyInjection\);/);
 
