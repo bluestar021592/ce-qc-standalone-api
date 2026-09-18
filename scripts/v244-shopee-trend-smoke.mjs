@@ -104,7 +104,8 @@ assert.doesNotMatch(owner,/function bind\(\)\{\s*if\(!type\(\)\)return/,'Shopee 
 assert.match(owner,/__v248ShopeeOwner/,'navigatePage must be wrapped so SPA navigation activates the Shopee owner');
 assert.match(owner,/addEventListener\('popstate'/,'browser back\/forward navigation must reactivate the Shopee owner');
 assert.match(owner,/attributeFilter:\['hidden'\]/,'Shopee page visibility changes must reactivate the owner after SPA render');
-assert.match(owner,/\/api\/v319\/trends\?businessType=/,'independent Shopee page must read the read-only V319 saved-cache endpoint');\nassert.doesNotMatch(owner,/\/api\/v246\/shopee-trends\?businessType=/,'page navigation must never auto-launch the V246 evidence path');
+assert.match(owner,/\/api\/v319\/trends\?businessType=/,'independent Shopee page must read the read-only V319 saved-cache endpoint');
+assert.doesNotMatch(owner,/\/api\/v246\/shopee-trends\?businessType=/,'page navigation must never auto-launch the V246 evidence path');
 
 assert.doesNotThrow(()=>new Function(finalOwner),'V251 final Shopee owner must compile as browser JavaScript');
 assert.match(finalOwner,/v251-shopee-final-render-owner-v1/,'final Shopee owner must identify V251');
