@@ -17,4 +17,4 @@ express.response.send=function v343DashboardReadBridgeSend(body){
   return originalSend.call(this,body);
 };
 
-console.info('[CE-QC][V343_UI_INJECTION]',V308_DASHBOARD_READ_BRIDGE_UI_ID,'one active TBKH/CN/VN history table owner; browser cache is busted for PP/PV signing averages and automatic stale-cache rebuild.');
+console.info('[CE-QC][V343_UI_INJECTION]',V308_DASHBOARD_READ_BRIDGE_UI_ID,'one active TBKH/CN/VN history table owner; browser cache is busted for PP/PV signing averages; stale cache rebuild is event-driven or explicit, not page-driven.');
