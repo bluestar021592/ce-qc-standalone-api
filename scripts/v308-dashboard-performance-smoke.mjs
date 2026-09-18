@@ -10,7 +10,7 @@ const ui=fs.readFileSync('public/v308-dashboard-read-bridge.js','utf8'),inject=f
 // Validate UI behavior, not a retired Vxxx release-name string. The visible SPA title
 // must remain authoritative before pathname fallback, and the active bridge must expose
 // the current strict START-to-POD + PP/PV signing-average contract.
-assert.match(ui,/const VERSION='[^']*history-signing-region-ui[^']*'/,'current history/signing-region UI owner marker missing');
+assert.match(ui,/const VERSION='2026-09-18-stability-history-table-v319-cache-v1'/,'current V319 cache-only history/signing-region UI owner marker missing');
 assert.match(ui,/document\.getElementById\('pageTitle'\)/,'visible SPA page title must be inspected');
 for(const label of ['SHOPEE CN','SHOPEE VN','TBKH'])assert.ok(ui.includes(`title.includes('${label}')`),`SPA title routing missing ${label}`);
 assert.match(ui,/location\.pathname/,'pathname fallback must remain available after title routing');
