@@ -78,7 +78,8 @@ assert.match(v295Injection,/V300 recursive observer is no longer delivered/,'V30
 assert.doesNotMatch(v295Injection,/X-CE-QC-V300-UI/,'delivered HTML must not advertise the retired V300 runtime rescue');
 assert.match(v295Injection,/X-CE-QC-V329-UI/,'delivered HTML must expose the current three-business cache UI owner');
 assert.match(v295Ui,/2026-08-25-v298-exact-visible-truth-nav-authority-v2/,'V298.1 authoritative visible owner must remain active under V299 trend architecture');
-assert.match(v295Ui,/FIRST_ATTEMPT_API='\/api\/v295\/first-attempt-trends'/,'visible first-attempt card and chart must use the dedicated exact API');
+assert.match(v295Ui,/FIRST_ATTEMPT_API='\/api\/v319\/trends'/,'automatic visible first-attempt reads must use the saved V319 cache');
+assert.doesNotMatch(v295Ui,/\/api\/v295\/first-attempt-trends/,'ordinary page navigation must not auto-run V295 row-level truth SQL');
 assert.match(v295Ui,/const NAV_ITEMS=\[/,'sidebar must be rebuilt from one explicit canonical navigation authority');
 assert.match(v295Ui,/WHPP本土看板/,'canonical sidebar must keep WHPP as a first-class board');
 assert.match(v295Ui,/nav\.innerHTML=NAV_ITEMS\.map/,'duplicate/retired sidebar nodes must be replaced, not merely opportunistically removed');
