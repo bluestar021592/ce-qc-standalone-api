@@ -22,6 +22,8 @@ const uiIntegrityOwner = fs.readFileSync(path.join(root, 'public', 'v309-ui-inte
 const genericHistoryRoute = fs.readFileSync(path.join(root, 'src', 'v334GenericTrendRoutePatch.js'), 'utf8');
 const genericHistoryCache = fs.readFileSync(path.join(root, 'src', 'v334GenericHistoryCache.js'), 'utf8');
 const dashboardReadBridge = fs.readFileSync(path.join(root, 'public', 'v308-dashboard-read-bridge.js'), 'utf8');
+const trackingRuntime = fs.readFileSync(path.join(root, 'src', 'v246QcTrackingRuntimePatch.js'), 'utf8');
+const strictEvidenceRuntime = fs.readFileSync(path.join(root, 'src', 'v262ShopeeStrictEvidenceBackfill.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -132,4 +134,12 @@ test('active TBKH/CN/VN table bridge never auto-enters V308 or evidence computat
   assert.doesNotMatch(dashboardReadBridge, /global\.fetch\(`\/api\/v308\/delivery-daily\?businessType=/);
   assert.match(dashboardReadBridge, /u\.pathname='\/api\/v319\/trends'/);
   assert.match(dashboardReadBridge, /page opening never invokes V308\/V263\/V273 computation/);
+});
+
+
+test('normal backend startup does not schedule CE evidence or all-open tracking work', () => {
+  assert.match(trackingRuntime, /BACKGROUND_SCHEDULER_ENABLED = String\(process\.env\.CE_QC_ENABLE_V246_BACKGROUND_TRACKING/);
+  assert.match(trackingRuntime, /if\(!BACKGROUND_SCHEDULER_ENABLED\)[\s\S]*V246_BACKGROUND_TRACKING_DISABLED[\s\S]*return;/);
+  assert.match(strictEvidenceRuntime, /BACKGROUND_AUTO_ENABLED=String\(process\.env\.CE_QC_ENABLE_V262_BACKGROUND_BACKFILL/);
+  assert.match(strictEvidenceRuntime, /if\(!BACKGROUND_AUTO_ENABLED\)[\s\S]*V263_DELIVERY_EVIDENCE_AUTO_DISABLED[\s\S]*return;/);
 });
