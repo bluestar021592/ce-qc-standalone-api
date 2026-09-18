@@ -13,7 +13,8 @@ assert.doesNotMatch(ui,/new MutationObserver/,'V309 duplicate-nav repair must re
 assert.doesNotMatch(ui,/global\.resumeUnified\(\)|global\.resumeShopee\(\)|\/api\/shopee\/run\/resume/,'V309 must never trigger unified or Shopee execution');
 assert.doesNotMatch(ui,/autoResumeUnified|needsUnifiedResume|lastResumeAt/,'legacy DOM-driven resume trigger must be retired');
 assert.match(ui,/authoritativeRunner:'V67'/,'V309 must explicitly yield execution ownership to V67');
-assert.match(ui,/\/api\/v308\/delivery-daily\?businessType=/,'V309 must patch Shopee CN/VN totals from exact V308 membership');
+assert.match(ui,/\/api\/v319\/trends\?businessType=/,'V309 must patch Shopee CN/VN totals from exact read-only V319 membership');
+assert.doesNotMatch(ui,/\/api\/v308\/delivery-daily\?businessType=/,'V309 page-open repair must never auto-enter V308 computation');
 assert.match(ui,/trend\.parentNode\.insertBefore\(table,trend\)/,'V309 must keep the requested daily attempt\/signing table before charts');
 assert.match(inject,/v309-ui-integrity\.js\?v=20260918-stability-v319-1/,'UI-only V309 must be cache-busted onto the read-only V319 path');
 assert.match(inject,/X-CE-QC-V309-UI/,'V309 response header must be observable');
