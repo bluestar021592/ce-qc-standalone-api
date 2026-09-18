@@ -99,12 +99,12 @@ const finalOwner=fs.readFileSync('public/v250-shopee-metric-visibility.js','utf8
 const lifecycleUi=fs.readFileSync('public/v252-qc-lifecycle-ui.js','utf8');
 const injection=fs.readFileSync('src/v231MetricTruthUiInjectionPatch.js','utf8');
 assert.doesNotThrow(()=>new Function(owner),'V248 Shopee browser owner must compile');
-assert.match(owner,/v248-shopee-spa-operational-trend-owner-v1/,'Shopee page owner must identify the SPA-aware V248 build');
+assert.match(owner,/stability-shopee-readonly-trend-v1/,'Shopee page owner must identify the stability read-only build');
 assert.doesNotMatch(owner,/function bind\(\)\{\s*if\(!type\(\)\)return/,'Shopee owner must not permanently exit when the application initially opens on home');
 assert.match(owner,/__v248ShopeeOwner/,'navigatePage must be wrapped so SPA navigation activates the Shopee owner');
 assert.match(owner,/addEventListener\('popstate'/,'browser back\/forward navigation must reactivate the Shopee owner');
 assert.match(owner,/attributeFilter:\['hidden'\]/,'Shopee page visibility changes must reactivate the owner after SPA render');
-assert.match(owner,/\/api\/v246\/shopee-trends\?businessType=/,'independent Shopee page must read the V246\/V252 locked-ledger endpoint');
+assert.match(owner,/\/api\/v319\/trends\?businessType=/,'independent Shopee page must read the read-only V319 saved-cache endpoint');\nassert.doesNotMatch(owner,/\/api\/v246\/shopee-trends\?businessType=/,'page navigation must never auto-launch the V246 evidence path');
 
 assert.doesNotThrow(()=>new Function(finalOwner),'V251 final Shopee owner must compile as browser JavaScript');
 assert.match(finalOwner,/v251-shopee-final-render-owner-v1/,'final Shopee owner must identify V251');
