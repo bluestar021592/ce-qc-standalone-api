@@ -60,7 +60,7 @@ assert.doesNotMatch(speed,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediat
 
 assert.match(inject,/import '\.\/v273DashboardTruthReadPatch\.js';/);
 assert.match(inject,/import '\.\/v273ImportCompletenessGuard\.js';/);
-assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260825-v299-1/,'V299 owner cache key must force browsers off the old V273 asset');
+assert.match(inject,/v272-layout-trend-finalizer\.js\?v=20260918-stability-v319-1/,'V299 owner cache key must force browsers onto the read-only V319 asset');
 assert.match(inject,/V273_LAYOUT_TREND_COMPAT_MARKER/,'historical V273 source marker must remain for compatibility gates only');
 assert.match(inject,/X-CE-QC-V274-UI/,'V274/V284 compatibility guard must remain observable in response headers');
 
