@@ -28,7 +28,7 @@ assert.doesNotThrow(()=>new Function(generic),'V263 generic trend hydrator must 
 assert.doesNotThrow(()=>new Function(reportOwner),'V267 report export owner must compile');
 
 assert.match(dashboard,/DELIVERY_KPI_TYPES=new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'canonical UI scope must be exactly TBKH + SHOPEECN + SHOPEEVN');
-assert.match(dashboard,/\/api\/v263\/delivery-trends/,'canonical DashboardV18 must read V263 delivery KPI truth directly');
+assert.match(dashboard,/\/api\/v319\/trends/,'canonical DashboardV18 must read saved delivery KPI truth through V319');\nassert.doesNotMatch(dashboard,/\/api\/v263\/delivery-trends\?businessType=/,'canonical page rendering must not auto-enter V263 evidence calculation');
 assert.doesNotMatch(dashboard,/平均签收天数趋势/,'live boards must not restore the retired average-signing-days trend chart');
 assert.match(dashboard,/1\/2\/3派与平均签收天数/,'target boards must expose one authoritative attempt/signing summary panel');
 assert.match(dashboard,/趋势图仅保留在导出报表，实时看板不再渲染/,'target boards must disclose that trend charts are export-only after V509');
