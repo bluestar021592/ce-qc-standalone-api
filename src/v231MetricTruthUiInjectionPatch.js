@@ -31,7 +31,7 @@ export const V272_LAYOUT_TREND_UI_INJECTION_ID = '2026-08-25-v299-fast-exact-all
 export const V273_DASHBOARD_TRUTH_UI_INJECTION_ID = '2026-08-24-v273-ledger-backed-seven-business-trends-v1';
 export const V274_TREND_SPEED_UI_INJECTION_ID = '2026-08-24-v274-single-row-fast-trend-guard-v1';
 
-const DASHBOARD_MARKER = '/dashboard-v18.js?v=20260823-v263-2';
+const DASHBOARD_MARKER = '/dashboard-v18.js?v=20260918-stability-v319-1';
 const CHART_MARKER = '/dashboard-chart-v18.js?v=20260823-v263-2';
 const GUARD_MARKER = '/v237-dashboard-owner-guard.js?v=20260822-v238-1';
 const COALESCER_MARKER = '/v239-dashboard-request-coalescer.js?v=20260823-v239-1';
