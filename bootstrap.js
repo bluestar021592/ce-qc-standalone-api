@@ -93,7 +93,8 @@ function boundedDelayMs(rawValue, fallback, minValue, maxValue) {
 
 let exportSidecarChild = null;
 function startExportSidecar() {
-  if (String(process.env.CE_QC_EXPORT_SIDECAR_CHILD || '') === '1') return;
+  if (String(process.env.CE_QC_EXPORT_SIDECAR_CHILD || '') === '1') return { started:false, reason:'SIDECAR_CHILD' };
+  if (exportSidecarChild && exportSidecarChild.exitCode == null && !exportSidecarChild.killed) return { started:false, reason:'ALREADY_RUNNING', pid:exportSidecarChild.pid || 0 };
   const file = fileURLToPath(new URL('./src/v193ExportSidecar.js', import.meta.url));
   try {
     exportSidecarChild = spawn(process.execPath, [file], {
@@ -103,25 +104,33 @@ function startExportSidecar() {
       detached: false,
       stdio: ['ignore', 'inherit', 'inherit']
     });
-    console.log(`[CE-QC][BOOT] V193 isolated export sidecar starting pid=${exportSidecarChild.pid || '-'} port=${process.env.CE_QC_EXPORT_SIDECAR_PORT}`);
+    console.log(`[CE-QC][BOOT] V193 isolated export sidecar starting on demand pid=${exportSidecarChild.pid || '-'} port=${process.env.CE_QC_EXPORT_SIDECAR_PORT}`);
     exportSidecarChild.once('error', error => console.error('[CE-QC][BOOT] V193 export sidecar spawn failed:', error?.stack || error));
     exportSidecarChild.once('exit', (code, signal) => {
       console.log(`[CE-QC][BOOT] V193 export sidecar exited code=${code ?? 'null'}${signal ? ` signal=${signal}` : ''}`);
       exportSidecarChild = null;
     });
+    return { started:true, reason:'EXPLICIT_DEMAND', pid:exportSidecarChild.pid || 0 };
   } catch (error) {
     console.error('[CE-QC][BOOT] V193 export sidecar start failed:', error?.stack || error);
+    return { started:false, reason:'SPAWN_FAILED', error:error?.message || String(error) };
   }
 }
 
 function scheduleExportSidecar() {
-  if (String(process.env.CE_QC_EXPORT_SIDECAR_CHILD || '') === '1') return;
+  if (String(process.env.CE_QC_EXPORT_SIDECAR_CHILD || '') === '1') return { scheduled:false, reason:'SIDECAR_CHILD' };
+  if (String(process.env.CE_QC_ENABLE_EXPORT_SIDECAR_AT_STARTUP || '') !== '1') {
+    console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} export sidecar startup disabled; 5178 starts only when the user explicitly launches an export.`);
+    return { scheduled:false, reason:'ON_DEMAND_ONLY' };
+  }
   const delayMs = boundedDelayMs(process.env.CE_QC_EXPORT_SIDECAR_START_DELAY_MS, 3000, 1000, 30000);
   const timer = setTimeout(() => startExportSidecar(), delayMs);
   timer.unref?.();
-  console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} export sidecar deferred ${delayMs}ms until after main server listen.`);
+  console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} export sidecar explicit startup opt-in deferred ${delayMs}ms until after main server listen.`);
+  return { scheduled:true, delayMs };
 }
 
+globalThis.__CE_QC_START_EXPORT_SIDECAR__ = () => startExportSidecar();
 process.once('exit', () => { try { exportSidecarChild?.kill(); } catch {} });
 
 function wrapHandler(handler) {
@@ -190,6 +199,10 @@ async function importServerInteractiveFirst() {
 }
 
 function schedulePostServerRepair(v167Repair) {
+  if (String(process.env.CE_QC_SKIP_STARTUP_POD_REPAIR || '') === '1' || String(process.env.CE_QC_RECOVERY_SAFE_MODE || '') === '1') {
+    console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} V167 startup POD-lock repair not scheduled; current write paths own POD-lock facts and explicit maintenance remains available.`);
+    return { scheduled:false, reason:'STARTUP_REPAIR_DISABLED' };
+  }
   const delayMs = boundedDelayMs(process.env.CE_QC_POST_SERVER_REPAIR_DELAY_MS, 15000, 5000, 120000);
   const timer = setTimeout(() => {
     try {
@@ -201,7 +214,8 @@ function schedulePostServerRepair(v167Repair) {
     }
   }, delayMs);
   timer.unref?.();
-  console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} V167 repair deferred ${delayMs}ms so first browser requests stay responsive.`);
+  console.log(`[CE-QC][BOOT] ${V548_BOOTSTRAP_ID} V167 repair explicit opt-in/deferred ${delayMs}ms.`);
+  return { scheduled:true, delayMs };
 }
 
 function scheduleDeferredMaintenance({ v92, v76Repair }) {
