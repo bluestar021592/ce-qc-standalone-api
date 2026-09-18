@@ -102,7 +102,8 @@ test('bootstrap first paint never falls back to shipment-level unified_import_ro
   const merged = bootstrapFastPath.match(/function mergedRows\(latest\) \{[\s\S]*?\n\}/);
   assert.ok(merged, 'bootstrap mergedRows must exist');
   assert.match(merged[0], /return cachedDailyRows\(latest\);/);
-  assert.doesNotMatch(merged[0], /importCountRows|unified_import_rows/);
+  assert.doesNotMatch(merged[0], /\bimportCountRows\s*\(/);
+  assert.doesNotMatch(merged[0], /\.prepare\s*\(/);
   const build = bootstrapFastPath.match(/async function buildPayload\(req\) \{[\s\S]*?\n\}/);
   assert.ok(build, 'bootstrap payload builder must exist');
   assert.doesNotMatch(build[0], /unified_import_rows/);
