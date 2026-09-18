@@ -24,6 +24,10 @@ const genericHistoryCache = fs.readFileSync(path.join(root, 'src', 'v334GenericH
 const dashboardReadBridge = fs.readFileSync(path.join(root, 'public', 'v308-dashboard-read-bridge.js'), 'utf8');
 const trackingRuntime = fs.readFileSync(path.join(root, 'src', 'v246QcTrackingRuntimePatch.js'), 'utf8');
 const strictEvidenceRuntime = fs.readFileSync(path.join(root, 'src', 'v262ShopeeStrictEvidenceBackfill.js'), 'utf8');
+const lifecycleCoordinator = fs.readFileSync(path.join(root, 'src', 'v252LifecycleCoordinator.js'), 'utf8');
+const storageHealth = fs.readFileSync(path.join(root, 'src', 'v254StorageHealthPatch.js'), 'utf8');
+const evidenceArchive = fs.readFileSync(path.join(root, 'src', 'v266EvergreenEvidenceArchive.js'), 'utf8');
+const interactiveRuntime = fs.readFileSync(path.join(root, 'src', 'v206InteractiveFirstRuntimePatch.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -142,4 +146,17 @@ test('normal backend startup does not schedule CE evidence or all-open tracking 
   assert.match(trackingRuntime, /if\(!BACKGROUND_SCHEDULER_ENABLED\)[\s\S]*V246_BACKGROUND_TRACKING_DISABLED[\s\S]*return;/);
   assert.match(strictEvidenceRuntime, /BACKGROUND_AUTO_ENABLED=String\(process\.env\.CE_QC_ENABLE_V262_BACKGROUND_BACKFILL/);
   assert.match(strictEvidenceRuntime, /if\(!BACKGROUND_AUTO_ENABLED\)[\s\S]*V263_DELIVERY_EVIDENCE_AUTO_DISABLED[\s\S]*return;/);
+});
+
+
+test('startup maintenance sweeps are opt-in while event-driven write hooks remain', () => {
+  assert.match(lifecycleCoordinator, /BACKGROUND_LIFECYCLE_ENABLED=String\(process\.env\.CE_QC_ENABLE_V252_BACKGROUND_LIFECYCLE/);
+  assert.match(lifecycleCoordinator, /if\(!BACKGROUND_LIFECYCLE_ENABLED\)[\s\S]*V252_BACKGROUND_LIFECYCLE_DISABLED[\s\S]*return;/);
+  assert.match(lifecycleCoordinator, /importAdmissionMiddleware/, 'import-time ledger admission must remain event-driven');
+  assert.match(storageHealth, /CE_QC_ENABLE_STARTUP_STORAGE_SCAN/, 'recursive storage scan must require explicit startup opt-in');
+  assert.match(storageHealth, /V254_STARTUP_STORAGE_SCAN_DISABLED/, 'normal startup must skip recursive storage sweep');
+  assert.match(evidenceArchive, /CE_QC_ENABLE_V266_STARTUP_SEED/, 'legacy import archive sweep must require explicit opt-in');
+  assert.match(evidenceArchive, /PRESERVE_BEFORE_TEMP_DELETE/, 'new uploads must still archive before temp deletion');
+  assert.match(interactiveRuntime, /DASHBOARD_CACHE_MAINTENANCE_DISABLED/, 'normal startup must not spawn delayed dashboard cache child');
+  assert.match(interactiveRuntime, /CE_QC_BACKGROUND_MAINTENANCE_ENABLED[\s\S]*!== '1'/);
 });
