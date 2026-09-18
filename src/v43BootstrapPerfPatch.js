@@ -137,11 +137,13 @@ function cachedDailyRows(latest) {
 }
 
 function mergedRows(latest) {
-  const imported = importCountRows(latest?.snapshotId || '');
-  const cached = cachedDailyRows(latest);
-  const cacheTypes = new Set(cached.map(row => row.businessType));
-  const fallback = imported.filter(row => !cacheTypes.has(row.businessType));
-  return [...cached, ...fallback];
+  // Interactive bootstrap must stay strictly on the small derived cache.
+  // Falling back to unified_import_rows here can block the single Node/SQLite
+  // service for minutes on a very large production database, which leaves the
+  // browser shell visible but makes the whole UI appear frozen. Missing/dirty
+  // cache rows are intentionally left absent; the V307/V319 page owners hydrate
+  // them from saved per-day caches after first paint without scanning shipment rows.
+  return cachedDailyRows(latest);
 }
 
 function dashboardMetricRow(date, label, value, tab = '') {

@@ -31,6 +31,7 @@ const evidenceArchive = fs.readFileSync(path.join(root, 'src', 'v266EvergreenEvi
 const interactiveRuntime = fs.readFileSync(path.join(root, 'src', 'v206InteractiveFirstRuntimePatch.js'), 'utf8');
 const serverSource = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const uiShellLoader = fs.readFileSync(path.join(root, 'src', 'v44WhppUiPatch.js'), 'utf8');
+const bootstrapFastPath = fs.readFileSync(path.join(root, 'src', 'v43BootstrapPerfPatch.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -95,6 +96,17 @@ test('ordinary navigation never requests non-compact aggregate state', () => {
   assert.ok(hydration, 'hydratePageData must exist');
   assert.doesNotMatch(hydration[0], /api\('\/api\/state'\)/);
   assert.doesNotMatch(hydration[0], /api\('\/api\/shopee\/state'\)/);
+});
+
+test('bootstrap first paint never falls back to shipment-level unified_import_rows scans', () => {
+  const merged = bootstrapFastPath.match(/function mergedRows\(latest\) \{[\s\S]*?\n\}/);
+  assert.ok(merged, 'bootstrap mergedRows must exist');
+  assert.match(merged[0], /return cachedDailyRows\(latest\);/);
+  assert.doesNotMatch(merged[0], /\bimportCountRows\s*\(/);
+  assert.doesNotMatch(merged[0], /\.prepare\s*\(/);
+  const build = bootstrapFastPath.match(/async function buildPayload\(req\) \{[\s\S]*?\n\}/);
+  assert.ok(build, 'bootstrap payload builder must exist');
+  assert.doesNotMatch(build[0], /unified_import_rows/);
 });
 
 
