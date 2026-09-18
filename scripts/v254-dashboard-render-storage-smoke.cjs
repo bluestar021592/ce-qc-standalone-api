@@ -45,7 +45,7 @@ assert.match(css,/v265-attempt-evidence-status\.incomplete/,'incomplete evidence
 assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)!important/,'delivery KPI summary must use a balanced four-column layout');
 
 assert.match(generic,/PAGE_TYPE=\{ce:'CE',ceaf:'CEAF',ali1688:'ALI1688'\}/,'generic hydrator must be scoped to CE + CEAF + ALI1688 only');
-assert.match(generic,/\/api\/v253\/trends/,'generic non-target boards must use V253 cache-independent truth');
+assert.match(generic,/\/api\/v319\/trends/,'generic non-target boards must use the read-only V319 saved-cache truth');\nassert.doesNotMatch(generic,/\/api\/v253\/trends\?businessType=/,'generic browser navigation must not auto-enter V253 computation');
 assert.doesNotMatch(generic,/TBKH|SHOPEECN|SHOPEEVN|WHPP/,'generic hydrator must not compete with the three specialized boards or WHPP dedicated owner');
 assert.doesNotMatch(generic,/读取已落库日报数据/,'generic hydrator must not create indefinite loading placeholders');
 assert.match(inject,/v263-generic-trend-hydrator\.js\?v=20260823-v263-1/,'legacy resource-version gate marker must remain source-compatible while live delivery uses the newer marker');
