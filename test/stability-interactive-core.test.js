@@ -19,6 +19,8 @@ const firstAttemptUi = fs.readFileSync(path.join(root, 'public', 'v295-first-att
 const firstAttemptInjection = fs.readFileSync(path.join(root, 'src', 'v295FirstAttemptUiInjectionPatch.js'), 'utf8');
 const exactHomeOwner = fs.readFileSync(path.join(root, 'public', 'v307-exact-daily-home-owner.js'), 'utf8');
 const uiIntegrityOwner = fs.readFileSync(path.join(root, 'public', 'v309-ui-integrity.js'), 'utf8');
+const genericHistoryRoute = fs.readFileSync(path.join(root, 'src', 'v334GenericTrendRoutePatch.js'), 'utf8');
+const genericHistoryCache = fs.readFileSync(path.join(root, 'src', 'v334GenericHistoryCache.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -111,4 +113,13 @@ test('secondary UI repair owners also stay off V253 and V308 request-time comput
   assert.match(uiIntegrityOwner, /\/api\/v319\/trends\?businessType=/);
   assert.doesNotMatch(uiIntegrityOwner, /\/api\/v308\/delivery-daily/);
   assert.doesNotMatch(uiIntegrityOwner, /__CE_QC_V308_DASHBOARD_READ_BRIDGE__\?\.loadTable/);
+});
+
+
+test('automatic generic saved-history reads do not start workers or mutate cache schema', () => {
+  assert.match(genericHistoryRoute, /historyAll\?inspectV334GenericHistoryBuild\(type\):requestV334GenericHistoryBuild\(type,to\)/);
+  assert.match(genericHistoryCache, /if\(!hasTable\(db,'v334_generic_history_cache'\)\)return/);
+  const readFn=(genericHistoryCache.match(/export function readV334GenericHistoryCache[\s\S]*?\n\}/)||[''])[0];
+  assert.ok(readFn, 'generic saved-history reader must exist');
+  assert.doesNotMatch(readFn, /ensureV334GenericHistoryCache\(db\)/, 'GET-side history reads must not CREATE or ALTER cache schema');
 });
