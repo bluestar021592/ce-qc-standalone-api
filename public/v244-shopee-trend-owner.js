@@ -3,7 +3,7 @@
   global.__CE_QC_V245_SHOPEE_TREND_OWNER__=true;
   global.__CE_QC_V244_SHOPEE_TREND_OWNER__=true;
   global.__CE_QC_V248_SHOPEE_TREND_OWNER__=true;
-  const VERSION='2026-08-23-v248-shopee-spa-operational-trend-owner-v1';
+  const VERSION='2026-09-18-stability-shopee-readonly-trend-v1';
   const PATH_TYPE={shopeecn:'SHOPEECN',shopeevn:'SHOPEEVN'};
   const cache=new Map();
   let timer=null;
@@ -121,7 +121,7 @@
     const key=`${t}|${rg.from}|${rg.to}`;
     if(!force&&cache.has(key)){render(cache.get(key));return;}
     try{
-      const response=await fetch(`/api/v246/shopee-trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});
+      const response=await fetch(`/api/v319/trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});
       const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.error||`HTTP ${response.status}`);
       cache.set(key,data);render(data);
     }catch(error){console.warn('[V248 Shopee trend]',error);}
@@ -161,5 +161,5 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   const previousFetch=global.fetch?.bind(global);
   if(previousFetch){global.fetch=function v248ShopeeTrendFetchBridge(input,init){const text=typeof input==='string'?input:String(input?.url||'');const promise=previousFetch(input,init);if(type()&&text.includes('/api/v234/trends?'))promise.then(()=>schedule(120)).catch(()=>{});return promise;};}
-  console.info('[CE-QC][V248_SHOPEE_TREND_OWNER]',VERSION,'SPA navigation aware; SHOPEECN/VN operational charts and strict attempts read V246 locked ledger truth');
+  console.info('[CE-QC][STABILITY_SHOPEE_TREND_OWNER]',VERSION,'SHOPEECN/VN visible trends read /api/v319/trends only; browser navigation never launches V246/V263 evidence work.');
 })(window);
