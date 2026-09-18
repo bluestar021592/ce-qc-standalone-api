@@ -1,6 +1,6 @@
 (function installV309UiIntegrity(global){
   if(global.__CE_QC_V309_UI_INTEGRITY__)return;
-  const VERSION='2026-08-26-v309-single-nav-auto-resume-shopee-total-v1';
+  const VERSION='2026-09-18-stability-ui-readonly-shopee-total-v1';
   const ARCHITECTURE='2026-08-29-ui-only-no-unified-trigger-v1';
   const NAV_ITEMS=[
     ['home','首页总看板','home','/'],['ce','CE看板','package','/ce'],['ceaf','CEAF空运看板','package','/ceaf'],['tbkh','TBKH看板','package','/tbkh'],['ali1688','ALI1688看板','package','/ali1688'],['whpp','WHPP本土看板','package','/whpp'],
@@ -45,7 +45,7 @@
     const type=activeShopeeType(),root=activeRoot(),rg=selectedRange();if(!type||!root||!rg.to||rg.from!==rg.to)return;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4500);
     try{
-      const response=await fetch(`/api/v308/delivery-daily?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.to)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin',signal:controller.signal});
+      const response=await fetch(`/api/v319/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.to)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin',signal:controller.signal});
       const raw=await response.text();let data={};try{data=raw?JSON.parse(raw):{};}catch{}if(!response.ok||data?.ok===false)return;
       const row=(data.daily||[]).find(item=>date(item?.reportDate)===rg.to);if(!row)return;
       root.querySelectorAll('.v18-business-card').forEach(card=>{
@@ -53,8 +53,7 @@
         if(label!==type)return;const b=card.querySelector('b'),em=card.querySelector('em');if(b)b.textContent=fmt(row.total);if(em)em.textContent='占本业务 100.00%';card.dataset.v309MembershipDate=rg.to;
       });
       const table=root.querySelector('#v308DeliveryDailyTable'),trend=root.querySelector('.v18-trend-section');
-      if(!table)global.__CE_QC_V308_DASHBOARD_READ_BRIDGE__?.loadTable?.(true);
-      else if(trend?.parentNode&&table.nextElementSibling!==trend)trend.parentNode.insertBefore(table,trend);
+      if(table&&trend?.parentNode&&table.nextElementSibling!==trend)trend.parentNode.insertBefore(table,trend);
     }catch(error){console.warn('[CE-QC][V309_SHOPEE_BOARD]',error?.name==='AbortError'?'timeout':error?.message||error);}finally{clearTimeout(timer);}
   }
   function scheduleBoard(ms=200){clearTimeout(boardTimer);boardTimer=setTimeout(()=>{canonicalSidebar();patchShopeeBoard();},ms);}
@@ -68,5 +67,5 @@
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V309_UI_INTEGRITY__={version:VERSION,architecture:ARCHITECTURE,uiOnly:true,authoritativeRunner:'V67',canonicalSidebar,patchShopeeBoard};
-  console.info('[CE-QC][V309_UI_INTEGRITY]',VERSION,ARCHITECTURE,'one canonical sidebar and exact SHOPEE daily totals only; V309 never triggers unified processing. V67 exclusively owns run/resume and automatic continuation.');
+  console.info('[CE-QC][V309_UI_INTEGRITY]',VERSION,ARCHITECTURE,'one canonical sidebar and exact SHOPEE daily totals from read-only V319 cache; V309 never auto-loads V308 strict ledger tables or triggers unified processing.');
 })(window);
