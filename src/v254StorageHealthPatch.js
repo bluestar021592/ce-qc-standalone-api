@@ -59,7 +59,7 @@ function buildReport(){
   };
 }
 
-if(String(process.env.CE_QC_DISABLE_STARTUP_STORAGE_SCAN||'')!=='1'){
+if(String(process.env.CE_QC_ENABLE_STARTUP_STORAGE_SCAN||'')==='1'&&String(process.env.CE_QC_DISABLE_STARTUP_STORAGE_SCAN||'')!=='1'){
   const timer=setTimeout(()=>{
     try{
       const report=buildReport();
@@ -69,7 +69,7 @@ if(String(process.env.CE_QC_DISABLE_STARTUP_STORAGE_SCAN||'')!=='1'){
   },15000);
   timer.unref?.();
 }else{
-  console.log('[CE-QC][RECOVERY_SAFE_MODE] V254 automatic full-directory size scan skipped; readV254StorageHealth remains available on demand.');
+  console.log('[CE-QC][V254_STARTUP_STORAGE_SCAN_DISABLED] recursive storage scan is on-demand by default; set CE_QC_ENABLE_STARTUP_STORAGE_SCAN=1 only for explicit maintenance.');
 }
 
 export function readV254StorageHealth(){return buildReport();}
