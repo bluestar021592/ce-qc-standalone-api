@@ -120,8 +120,9 @@ test('secondary UI repair owners also stay off V253 and V308 request-time comput
 test('automatic generic saved-history reads do not start workers or mutate cache schema', () => {
   assert.match(genericHistoryRoute, /historyAll\?inspectV334GenericHistoryBuild\(type\):requestV334GenericHistoryBuild\(type,to\)/);
   assert.match(genericHistoryCache, /if\(!hasTable\(db,'v334_generic_history_cache'\)\)return/);
-  const readFn=(genericHistoryCache.match(/export function readV334GenericHistoryCache[\s\S]*?\n\}/)||[''])[0];
-  assert.ok(readFn, 'generic saved-history reader must exist');
+  const readStart=genericHistoryCache.indexOf('export function readV334GenericHistoryCache');
+  assert.ok(readStart>=0, 'generic saved-history reader must exist');
+  const readFn=genericHistoryCache.slice(readStart, genericHistoryCache.indexOf("console.info('[CE-QC][V334_GENERIC_HISTORY_CACHE]"));
   assert.doesNotMatch(readFn, /ensureV334GenericHistoryCache\(db\)/, 'GET-side history reads must not CREATE or ALTER cache schema');
 });
 
