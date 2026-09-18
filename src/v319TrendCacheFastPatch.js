@@ -54,23 +54,29 @@ function readAttemptCacheRows(db,type,from,to,{historyAll=false}={}){
 function attemptRow(type,row={}){
   const total=n(row.total),pod=n(row.pod),a1=n(row.attempt1),a2=n(row.attempt2),a3=n(row.attempt3),known=a1+a2+a3;
   const signingCount=n(row.signingDaysCount),signingSum=n(row.signingDaysSum);
+  const firstAttemptEligible=n(row.firstAttemptEligible),firstAttemptSuccess=Math.min(firstAttemptEligible,n(row.firstAttemptSuccess));
+  const firstAttemptUnknownPod=row.firstAttemptUnknownPod===undefined||row.firstAttemptUnknownPod===null?Math.max(0,pod-known):Math.max(0,Math.min(pod,n(row.firstAttemptUnknownPod)));
+  const firstAttemptEvidenceComplete=pod===0||firstAttemptUnknownPod===0;
+  const firstAttemptRate=firstAttemptEvidenceComplete&&firstAttemptEligible>0?pct(firstAttemptSuccess,firstAttemptEligible):null;
   return{
     businessType:type,reportDate:dateKey(row.reportDate),total,pod,ocCurrent:n(row.ocCurrent),oc:n(row.ocCurrent),sameDayPod:n(row.sameDayPod),
     podRate:pct(pod,total)??0,ocRate:pct(row.ocCurrent,total)??0,sameDayPodRate:pct(row.sameDayPod,total)??0,
     attempt1:a1,attempt2:a2,attempt3:a3,attemptUnknown:Math.max(0,pod-known),attemptEvidenceCount:known,
     attempt1Rate:pod?pct(a1,pod):null,attempt2Rate:pod?pct(a2,pod):null,attempt3Rate:pod?pct(a3,pod):null,
     attemptCoverageRate:pod?pct(known,pod):null,attemptEvidenceComplete:pod===0||known>=pod,
+    firstAttemptEligible,firstAttemptSuccess,firstAttemptUnknownPod,firstAttemptRate,firstAttemptEvidenceComplete,
     signingDaysSum:signingSum,signingDaysCount:signingCount,signingCoverageRate:pod?pct(signingCount,pod):null,signingEvidenceComplete:pod===0||signingCount>=pod,
     avgSigningDays:avg(signingSum,signingCount),avgPodDays:avg(signingSum,signingCount),
     ppAvgSigningDays:avg(row.ppSigningDaysSum,row.ppSigningDaysCount),pvAvgSigningDays:avg(row.pvSigningDaysSum,row.pvSigningDaysCount),
     ppSigningDaysSum:n(row.ppSigningDaysSum),ppSigningDaysCount:n(row.ppSigningDaysCount),pvSigningDaysSum:n(row.pvSigningDaysSum),pvSigningDaysCount:n(row.pvSigningDaysCount),
-    ready:Boolean(Number(row.ready)),ledgerReady:Boolean(Number(row.ready)),evidenceIncomplete:!Boolean(Number(row.ready))||(pod>0&&(known<pod||signingCount<pod)),
+    ready:Boolean(Number(row.ready)),ledgerReady:Boolean(Number(row.ready)),evidenceIncomplete:!Boolean(Number(row.ready))||(pod>0&&(known<pod||signingCount<pod||firstAttemptUnknownPod>0)),
     source:String(row.source||'V329_DAILY_CACHE')
   };
 }
 function overlayAttemptCache(base,cached){
   if(!cached||n(cached.total)!==n(base.total)||!Number(cached.ready))return{
     ...base,oc:n(base.ocCurrent),attempt1:null,attempt2:null,attempt3:null,attemptUnknown:n(base.pod),attempt1Rate:null,attempt2Rate:null,attempt3Rate:null,attemptCoverageRate:null,
+    firstAttemptEligible:null,firstAttemptSuccess:null,firstAttemptUnknownPod:n(base.pod),firstAttemptRate:null,firstAttemptEvidenceComplete:n(base.pod)===0,
     avgSigningDays:null,avgPodDays:null,ppAvgSigningDays:null,pvAvgSigningDays:null,evidenceIncomplete:n(base.pod)>0
   };
   const evidence=attemptRow(base.businessType,cached);
@@ -98,6 +104,9 @@ function trendShape(data,type,from,to){
     attempt1:daily.map(r=>r.ready===false?null:(r.attempt1??null)),attempt2:daily.map(r=>r.ready===false?null:(r.attempt2??null)),attempt3:daily.map(r=>r.ready===false?null:(r.attempt3??null)),
     attempt1Rate:daily.map(r=>r.ready===false?null:(r.attempt1Rate??null)),attempt2Rate:daily.map(r=>r.ready===false?null:(r.attempt2Rate??null)),attempt3Rate:daily.map(r=>r.ready===false?null:(r.attempt3Rate??null)),
     attemptUnknown:daily.map(r=>r.ready===false?null:(r.attemptUnknown??null)),attemptCoverageRate:daily.map(r=>r.ready===false?null:(r.attemptCoverageRate??null)),
+    firstAttemptEligible:daily.map(r=>r.ready===false?null:(r.firstAttemptEligible??null)),firstAttemptSuccess:daily.map(r=>r.ready===false?null:(r.firstAttemptSuccess??null)),
+    firstAttemptUnknownPod:daily.map(r=>r.ready===false?null:(r.firstAttemptUnknownPod??null)),firstAttemptRate:daily.map(r=>r.ready===false?null:(r.firstAttemptRate??null)),
+    firstAttemptEvidenceComplete:daily.map(r=>r.ready===false?false:(r.firstAttemptEvidenceComplete===true)),
     avgSigningDays:daily.map(r=>r.ready===false?null:(r.avgSigningDays??null)),avgPodDays:daily.map(r=>r.ready===false?null:(r.avgPodDays??r.avgSigningDays??null)),
     ppAvgSigningDays:daily.map(r=>r.ready===false?null:(r.ppAvgSigningDays??null)),pvAvgSigningDays:daily.map(r=>r.ready===false?null:(r.pvAvgSigningDays??null)),
     signingCoverageRate:daily.map(r=>r.ready===false?null:(r.signingCoverageRate??null)),
