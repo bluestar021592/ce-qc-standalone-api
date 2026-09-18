@@ -38,7 +38,7 @@
   async function refresh(force=false){
     if(global.__CE_QC_V271_CANONICAL_INTEGRITY__)return;
     if(busy)return;const t=type(),rg=range(),r=root();if(!t||!rg.to||!r||r.hidden)return;const key=`${t}|${rg.from}|${rg.to}`;if(!force&&lastKey===key&&r.querySelector('.v18-trend-section')?.dataset?.v263Generic===t)return;
-    busy=true;try{const response=await fetch(`/api/v253/trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});const data=await response.json();if(!response.ok||data?.ok===false)throw new Error(data?.error||`HTTP ${response.status}`);if(render(data,t))lastKey=key;}catch(error){console.warn('[CE-QC][V263_GENERIC_TREND]',t,error?.message||error);}finally{busy=false;}
+    busy=true;try{const response=await fetch(`/api/v319/trends?businessType=${encodeURIComponent(t)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});const data=await response.json();if(!response.ok||data?.ok===false)throw new Error(data?.error||`HTTP ${response.status}`);if(render(data,t))lastKey=key;}catch(error){console.warn('[CE-QC][V263_GENERIC_TREND]',t,error?.message||error);}finally{busy=false;}
   }
   function schedule(ms=80,force=false){clearTimeout(timer);timer=setTimeout(()=>refresh(force),ms);}
   function bind(){
