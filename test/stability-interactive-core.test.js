@@ -22,6 +22,7 @@ const uiIntegrityOwner = fs.readFileSync(path.join(root, 'public', 'v309-ui-inte
 const genericHistoryRoute = fs.readFileSync(path.join(root, 'src', 'v334GenericTrendRoutePatch.js'), 'utf8');
 const genericHistoryCache = fs.readFileSync(path.join(root, 'src', 'v334GenericHistoryCache.js'), 'utf8');
 const dashboardReadBridge = fs.readFileSync(path.join(root, 'public', 'v308-dashboard-read-bridge.js'), 'utf8');
+const postWriteInvalidation = fs.readFileSync(path.join(root, 'src', 'v295FirstAttemptInvalidationPatch.js'), 'utf8');
 const trackingRuntime = fs.readFileSync(path.join(root, 'src', 'v246QcTrackingRuntimePatch.js'), 'utf8');
 const strictEvidenceRuntime = fs.readFileSync(path.join(root, 'src', 'v262ShopeeStrictEvidenceBackfill.js'), 'utf8');
 const lifecycleCoordinator = fs.readFileSync(path.join(root, 'src', 'v252LifecycleCoordinator.js'), 'utf8');
@@ -124,8 +125,9 @@ test('secondary UI repair owners also stay off V253 and V308 request-time comput
 });
 
 
-test('automatic generic saved-history reads do not start workers or mutate cache schema', () => {
-  assert.match(genericHistoryRoute, /historyAll\?inspectV334GenericHistoryBuild\(type\):requestV334GenericHistoryBuild\(type,to\)/);
+test('all generic browser history reads do not start workers or mutate cache schema', () => {
+  assert.match(genericHistoryRoute, /const repair=inspectV334GenericHistoryBuild\(type\)/);
+  assert.doesNotMatch(genericHistoryRoute, /requestV334GenericHistoryBuild/);
   assert.match(genericHistoryCache, /if\(!hasTable\(db,'v334_generic_history_cache'\)\)return/);
   const readStart=genericHistoryCache.indexOf('export function readV334GenericHistoryCache');
   assert.ok(readStart>=0, 'generic saved-history reader must exist');
@@ -171,4 +173,14 @@ test('server startup dashboard cache scheduler is off unless explicitly enabled'
   assert.match(startBlock, /if \(String\(process\.env\.CE_QC_ENABLE_DASHBOARD_CACHE_SCHEDULER/);
   assert.match(startBlock, /return \{ started: false, reason: 'EVENT_DRIVEN_ONLY' \}/);
   assert.match(serverSource, /launchDashboardCacheWorker\(\{ reportDate: parsed\.reportDate, reason: 'UNIFIED_IMPORT' \}\)/, 'write-time cache materialization must remain event-driven');
+});
+
+
+test('history rebuild ownership is post-write and debounced, never browser GET driven', () => {
+  assert.match(postWriteInvalidation, /schedulePostWriteHistoryRebuild\(reportDate\)/);
+  assert.match(postWriteInvalidation, /const rebuildTimers=new Map\(\)/);
+  assert.match(postWriteInvalidation, /setTimeout\(\(\)=>\{/);
+  assert.match(postWriteInvalidation, /requestV328EvidenceRepair\(type,d,\{reason:'POST_WRITE_BACKGROUND_REBUILD'\}\)/);
+  assert.match(postWriteInvalidation, /requestV334GenericHistoryBuild\(type,d,\{reason:'POST_WRITE_BACKGROUND_REBUILD'\}\)/);
+  assert.match(postWriteInvalidation, /if\(reportDate\)schedulePostWriteHistoryRebuild\(reportDate\)/);
 });
