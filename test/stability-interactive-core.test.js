@@ -30,6 +30,7 @@ const storageHealth = fs.readFileSync(path.join(root, 'src', 'v254StorageHealthP
 const evidenceArchive = fs.readFileSync(path.join(root, 'src', 'v266EvergreenEvidenceArchive.js'), 'utf8');
 const interactiveRuntime = fs.readFileSync(path.join(root, 'src', 'v206InteractiveFirstRuntimePatch.js'), 'utf8');
 const serverSource = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+const uiShellLoader = fs.readFileSync(path.join(root, 'src', 'v44WhppUiPatch.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -183,4 +184,18 @@ test('history rebuild ownership is post-write and debounced, never browser GET d
   assert.match(postWriteInvalidation, /requestV328EvidenceRepair\(type,d,\{reason:'POST_WRITE_BACKGROUND_REBUILD'\}\)/);
   assert.match(postWriteInvalidation, /requestV334GenericHistoryBuild\(type,d,\{reason:'POST_WRITE_BACKGROUND_REBUILD'\}\)/);
   assert.match(postWriteInvalidation, /if\(reportDate\)schedulePostWriteHistoryRebuild\(reportDate\)/);
+});
+
+
+test('V554 body compatibility scripts cannot parser-block the already-rendered interactive shell', () => {
+  assert.match(uiShellLoader, /V554_INTERACTION_READY_ID='2026-09-18-v554-nonblocking-legacy-body-loader-v1'/);
+  assert.match(uiShellLoader, /const nonBlockingBodyInjection=bodyInjection\.replace\(\/<script src=\/g,'<script defer src='\);/);
+  assert.match(uiShellLoader, /injectedHtml=withStyle\.replace\('<\/body>',nonBlockingBodyInjection\);/);
+  assert.match(uiShellLoader, /X-CE-QC-V554-Interaction-Ready/);
+
+  const headInjection=(uiShellLoader.match(/const withStyle=source\.replace\('<\/head>'[\s\S]*?\);/)||[''])[0];
+  assert.ok(headInjection, 'critical pre-app head injection must remain present');
+  assert.match(headInjection, /<script src="\/v65-request-coalescing\.js/);
+  assert.match(headInjection, /<script src="\/v125-local-api-resilience\.js/);
+  assert.doesNotMatch(headInjection, /<script defer src=/, 'pre-app fetch guards must keep their original execution timing');
 });
