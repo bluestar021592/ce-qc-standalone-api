@@ -1,9 +1,9 @@
 import express from 'express';
-export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-09-05-v433-status-first-heavy-query-gate-v1';
+export const V295_FIRST_ATTEMPT_UI_INJECTION_ID='2026-09-18-stability-first-attempt-readonly-cache-v1';
 const originalSend=express.response.send;
 const CLEAN_START_MARKER='/v303-authorized-clean-start.js?v=20260825-v303-1';
 const EXACT_DAILY_MARKER='/v302-one-shot-owner.js?v=20260825-v302-1';
-const MARKER='/v295-first-attempt-ui.js?v=20260905-v433-1';
+const MARKER='/v295-first-attempt-ui.js?v=20260918-stability-cache-1';
 const V334_FIRST_ATTEMPT_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260827-v334-1';
 const V334_DETAIL_HISTORY_OWNERSHIP_COMPAT='2026-08-27-v334-canonical-detail-history-ownership-v1';
 const V299_FIRST_ATTEMPT_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v299-1';
@@ -61,4 +61,4 @@ express.response.send=function v334FirstAttemptUiSend(body){
   }
   return originalSend.call(this,body);
 };
-console.info('[CE-QC][V433_UI_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,SINGLE_RUNNER_MARKER,'V67 remains the sole unified execution owner; V295 HOME first-attempt data is delivered only after V168 current-date status confirmation.');
+console.info('[CE-QC][STABILITY_FIRST_ATTEMPT_INJECTION]',V295_FIRST_ATTEMPT_UI_INJECTION_ID,SINGLE_RUNNER_MARKER,'V67 remains the sole unified execution owner; browser first-attempt UI reads saved V319 cache only and never auto-runs V295 heavy truth SQL.');
