@@ -9,6 +9,10 @@ const facade = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStore.js'),
 const interactive = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreInteractive.js'), 'utf8');
 const finalStore = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreFinal.js'), 'utf8');
 const v320 = fs.readFileSync(path.join(root, 'src', 'rangeDashboardStoreV320.js'), 'utf8');
+const v319 = fs.readFileSync(path.join(root, 'src', 'v319TrendCacheFastPatch.js'), 'utf8');
+const homeTrendOwner = fs.readFileSync(path.join(root, 'public', 'v253-dashboard-fast-owner.js'), 'utf8');
+const shopeeTrendOwner = fs.readFileSync(path.join(root, 'public', 'v244-shopee-trend-owner.js'), 'utf8');
+const appJs = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -46,4 +50,31 @@ test('V320 single-day source remains cacheOnly and the heavyweight final owner s
 
 test('interactive stability owner is read-only and never rewrites business facts or schema', () => {
   assert.doesNotMatch(interactive, /\b(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i);
+});
+
+
+test('browser auto-trends never enter V263/V246 evidence paths', () => {
+  assert.match(homeTrendOwner, /\/api\/v319\/trends\?businessType=SHOPEECN/);
+  assert.match(homeTrendOwner, /\/api\/v319\/trends\?businessType=SHOPEEVN/);
+  assert.doesNotMatch(homeTrendOwner, /\/api\/v263\/delivery-trends/);
+  assert.match(shopeeTrendOwner, /\/api\/v319\/trends\?businessType=/);
+  assert.doesNotMatch(shopeeTrendOwner, /\/api\/v246\/shopee-trends\?/);
+});
+
+test('V319 three-business browser route is a saved-cache SELECT path with no repair scheduling', () => {
+  assert.match(v319, /readV236CurrentSummary\(date,\{cacheOnly:true\}\)/);
+  assert.match(v319, /v329_three_business_daily_cache/);
+  assert.doesNotMatch(v319, /readV308DeliveryDaily/);
+  assert.doesNotMatch(v319, /requestV328EvidenceRepair|requestV263DeliveryEvidenceBackfill/);
+  assert.match(v319, /GET不建表、不修复证据、不扫描历史大表、不跑轨迹/);
+});
+
+test('ordinary navigation never requests non-compact aggregate state', () => {
+  assert.match(appJs, /const needsFullAggregate = false/);
+  assert.match(appJs, /api\('\/api\/state\?compact=1'\)/);
+  assert.match(appJs, /api\('\/api\/shopee\/state\?compact=1'\)/);
+  const hydration = appJs.match(/async function hydratePageData\(page\) \{[\s\S]*?\n\}/);
+  assert.ok(hydration, 'hydratePageData must exist');
+  assert.doesNotMatch(hydration[0], /api\('\/api\/state'\)/);
+  assert.doesNotMatch(hydration[0], /api\('\/api\/shopee\/state'\)/);
 });
