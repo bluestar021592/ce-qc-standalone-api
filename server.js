@@ -127,10 +127,16 @@ function launchDashboardCacheWorker({ reportDate = '', reason = 'SCHEDULED_REFRE
 }
 
 function startDashboardCacheScheduler() {
-  if (dashboardCacheTimer) return;
-  setTimeout(() => launchDashboardCacheWorker({ reason: 'STARTUP_WARM' }), 1500).unref?.();
-  dashboardCacheTimer = setInterval(() => launchDashboardCacheWorker({ reason: 'TEN_MINUTE_REFRESH' }), DASHBOARD_CACHE_REFRESH_MS);
+  if (dashboardCacheTimer) return { started: true, alreadyRunning: true };
+  if (String(process.env.CE_QC_ENABLE_DASHBOARD_CACHE_SCHEDULER || '') !== '1') {
+    console.log('[CE-QC][DASHBOARD_CACHE_SCHEDULER_DISABLED] normal startup does not launch STARTUP_WARM or periodic dashboard-cache workers; imports and completed business runs still materialize cache event-by-event.');
+    return { started: false, reason: 'EVENT_DRIVEN_ONLY' };
+  }
+  const startupTimer = setTimeout(() => launchDashboardCacheWorker({ reason: 'STARTUP_WARM' }), 1500);
+  startupTimer.unref?.();
+  dashboardCacheTimer = setInterval(() => launchDashboardCacheWorker({ reason: 'PERIODIC_REFRESH' }), DASHBOARD_CACHE_REFRESH_MS);
   dashboardCacheTimer.unref?.();
+  return { started: true, reason: 'EXPLICIT_OPT_IN' };
 }
 
 app.get('/detail', (req, res) => {
@@ -1919,8 +1925,8 @@ app.listen(port, host, () => {
   console.log(`局域网访问: ${network.lanUrl || '未检测到局域网IPv4，请查看电脑IP地址'}`);
   console.log(`SQLite DB: ${runtimeConfig.dbFile}`);
   console.log(`Public URL: ${network.publicUrl}`);
-  console.log(`Dashboard cache: background refresh every ${Math.round(DASHBOARD_CACHE_REFRESH_MS / 60000)} minutes`);
-  startDashboardCacheScheduler();
+  const dashboardScheduler = startDashboardCacheScheduler();
+  console.log(`Dashboard cache: ${dashboardScheduler.started ? `background refresh every ${Math.round(DASHBOARD_CACHE_REFRESH_MS / 60000)} minutes (explicit opt-in)` : 'event-driven only; no startup/periodic worker'}`);
 });
 
 function buildNetworkInfo(runtime = getRuntimeConfig()) {
