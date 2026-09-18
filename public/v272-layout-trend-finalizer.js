@@ -137,8 +137,8 @@
   function snapshotFallback(section){
     if(!section)return;status(section,'正在按所选日期读取走势图…','');skeleton(section);
   }
-  function fastUrl(type,rg){return`/api/v253/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`;}
-  function strictUrl(type,rg){return SPECIAL.has(type)?`/api/v263/delivery-trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`:`/api/v273/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`;}
+  function fastUrl(type,rg){return`/api/v319/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`;}
+  function strictUrl(type,rg){return`/api/v319/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`;}
   function usefulData(data,specs){return(data.dates||[]).length&&specs.some(spec=>spec.series.some(s=>hasUseful(s.values)));}
   function exactCountText(data){return`${(data.dates||[]).length} 个有效日报`;}
 
@@ -178,12 +178,12 @@
         status(section,'快速日报事实暂未返回，正在直接读取严格轨迹证据…','warn');
         await refineStrict(root,type,rg,key,section,false);return;
       }
-      draw(section,specs);status(section,`已显示 ${(fast.dates||[]).length} 个有效日报，走势图已更新。严格轨迹证据将在后台继续校准。`,'ok');
-      setTimeout(()=>refineStrict(root,type,rg,key,section,true),STRICT_DELAY_MS);
+      draw(section,specs);status(section,`已显示 ${(fast.dates||[]).length} 个已保存日报，走势图已更新。页面仅读取V319轻量缓存，不再延迟重复查询。`,'ok');
+      if(SPECIAL.has(type))renderAttempt(root,type,fast);
     }catch(error){
       if(root.dataset.v272Key!==key)return;
-      status(section,`快速走势图${error?.name==='AbortError'?'读取较慢':'暂未完成'}，正在切换严格证据通道…`,'warn');
-      await refineStrict(root,type,rg,key,section,false);
+      status(section,`走势图读取失败：${error?.name==='AbortError'?'读取超时':error?.message||error}。当前页面不会在后台反复重试；重新查询或切换日期时再读取。`,'error');
+      noData(section,'当前没有可用的已保存轻量缓存。');
     }
   }
 
@@ -214,5 +214,5 @@
   document.addEventListener('change',e=>{if(e.target?.matches?.('#topRangeFrom,#topRangeTo'))setTimeout(rehydrateVisible,180);},false);
   const observer=new MutationObserver(records=>{if(records.some(r=>[...r.addedNodes].some(n=>n.nodeType===1))){polishSettings();retireLegacyEverywhere();}});observer.observe(document.documentElement,{subtree:true,childList:true});
   global.__CE_QC_V272_LAYOUT_TREND_FINALIZER__={id:ID,compatId:V273_COMPAT_ID,hydrateWhppStandalone,rehydrateVisible,exactSlice};
-  console.info('[CE-QC][V299_LAYOUT_TREND]',ID,'all eight visible board scopes use fast V253 latest-VALID exact-sliced first paint; V273/V263 strict truth refines later without blanking an already correct selected-range chart.');
+  console.info('[CE-QC][V299_LAYOUT_TREND]',ID,'all visible board trend reads use read-only V319 saved caches; delayed refinement may re-read the same cache only and never enters V263/V273 evidence calculation.');
 })(window);

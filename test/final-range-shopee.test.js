@@ -9,7 +9,7 @@ process.env.DATA_DIR = tempRoot;
 process.env.DB_FILE = path.join(tempRoot, 'range.db');
 
 const { getDb, closeDb } = await import('../src/db.js');
-const { loadRangeDashboard } = await import('../src/rangeDashboardStore.js');
+const { loadRangeDashboard } = await import('../src/rangeDashboardStoreFinal.js');
 
 function insertFlexible(db, table, values) {
   const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(item => item.name));
@@ -18,7 +18,7 @@ function insertFlexible(db, table, values) {
   db.prepare(sql).run(...entries.map(([, value]) => value));
 }
 
-test('Shopee final range subtracts normal pickup-success exactly once and store Pending is not retention', () => {
+test('Shopee explicit final normalization subtracts normal pickup-success exactly once and store Pending is not retention', () => {
   const db = getDb();
   const date = '2026-08-10';
   const snapshotId = 'shopee-final-range';

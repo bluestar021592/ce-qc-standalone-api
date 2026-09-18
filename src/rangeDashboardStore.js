@@ -134,8 +134,11 @@ export function refreshLedgerDerivedDashboardDates(reportDates = [], reason = 'V
 globalThis.__CE_QC_REFRESH_LEDGER_DERIVED_DASHBOARDS__ = refreshLedgerDerivedDashboardDates;
 
 export function getDashboardCacheStatus() {
-  // Launcher/backend health reads this on startup. This also repairs dates that
-  // were already dirty before V386 was installed, without re-upload or rerun.
+  // Preserve the established V386 safety contract: an already-dirty date must
+  // not keep serving stale derived rows after a restart. This operation only
+  // deletes derived cache rows/date markers; it never touches business facts.
+  // The interactive read fix below ensures a missing single-day cache no longer
+  // triggers the multi-GB shipment-level final-normalization scan.
   invalidateV386DirtyDashboardCaches();
   return getDashboardCacheStatusLegacy();
 }
@@ -147,7 +150,7 @@ export {
   RANGE_DASHBOARD_BUSINESS_TYPES
 };
 
-export { loadRangeDashboard } from './rangeDashboardStoreFinal.js';
+export { loadRangeDashboard } from './rangeDashboardStoreInteractive.js';
 
 console.info('[CE-QC][V386_DIRTY_DASHBOARD_CACHE_TRUTH]', V386_DIRTY_DASHBOARD_CACHE_TRUTH_ID,
   'dirty dates immediately drop derived dashboard rows/date markers; business facts and dirty markers remain untouched until the normal worker rebuild succeeds.');

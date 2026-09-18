@@ -18,16 +18,18 @@ test('V548 bootstrap remains syntax-valid', () => {
   assert.equal(check.status, 0, check.stderr || check.stdout);
 });
 
-test('V548 gives the main 5177 service startup priority over the 5178 export sidecar', () => {
+test('V548 keeps the 5178 export sidecar off normal startup and exposes on-demand start', () => {
   const text = source();
   assert.match(text, /2026-09-15-v548-main-service-first-v1/);
-  assert.match(text, /CE_QC_EXPORT_SIDECAR_START_DELAY_MS/);
+  assert.match(text, /CE_QC_ENABLE_EXPORT_SIDECAR_AT_STARTUP/);
   assert.match(text, /function scheduleExportSidecar\(\)/);
+  assert.match(text, /ON_DEMAND_ONLY/);
+  assert.match(text, /globalThis\.__CE_QC_START_EXPORT_SIDECAR__/);
 
   const serverReady = text.lastIndexOf('await importServerInteractiveFirst();');
-  const sidecarSchedule = text.lastIndexOf('scheduleExportSidecar();');
+  const sidecarPolicy = text.lastIndexOf('scheduleExportSidecar();');
   assert.ok(serverReady >= 0, 'main server startup must remain present');
-  assert.ok(sidecarSchedule > serverReady, 'export sidecar must be scheduled only after the main server is ready');
+  assert.ok(sidecarPolicy > serverReady, 'sidecar policy must be applied only after the main server is ready');
 
   assert.doesNotMatch(
     text,
@@ -36,10 +38,12 @@ test('V548 gives the main 5177 service startup priority over the 5178 export sid
   );
 });
 
-test('V548 defers the synchronous V167 repair until after first browser requests can be served', () => {
+test('V548 skips the V167 startup repair in recovery/interactive-first mode', () => {
   const text = source();
   assert.match(text, /CE_QC_POST_SERVER_REPAIR_DELAY_MS/);
   assert.match(text, /function schedulePostServerRepair\(v167Repair\)/);
+  assert.match(text, /CE_QC_SKIP_STARTUP_POD_REPAIR/);
+  assert.match(text, /STARTUP_REPAIR_DISABLED/);
   assert.match(text, /setTimeout\(\(\) => \{[\s\S]*repairLatestCcslPodLockFacts\(\)/);
 
   const serverReady = text.lastIndexOf('await importServerInteractiveFirst();');

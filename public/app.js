@@ -152,7 +152,7 @@ async function refreshInternal() {
     return;
   }
   const businessType = ['ce','ceaf','tbkh','ali1688','shopeecn','shopeevn'].includes(currentPage) ? currentBusinessType() : '';
-  const needsFullAggregate = ['exceptions', 'reports'].includes(currentPage);
+  // Stability rule: opening any page must first paint from bootstrap/compact cache only.\n  // Exception/report rows may be loaded by their dedicated workflows, but navigation itself\n  // must never hydrate the full aggregate state on the web request thread.\n  const needsFullAggregate = false;
   let bootstrapLoaded = false;
   if (!needsFullAggregate) {
     try {
@@ -504,7 +504,7 @@ async function hydratePageData(page) {
         renderAll();
       }
     } else if (['exceptions', 'reports'].includes(page) && (appState._compact || shopeeState._compact)) {
-      const [ccsl, shopee] = await Promise.all([api('/api/state'), api('/api/shopee/state')]);
+      const [ccsl, shopee] = await Promise.all([api('/api/state?compact=1'), api('/api/shopee/state?compact=1')]);
       appState = ccsl.state || {};
       shopeeState = shopee.state || {};
       renderAll();

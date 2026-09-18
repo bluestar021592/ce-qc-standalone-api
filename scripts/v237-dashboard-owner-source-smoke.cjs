@@ -45,8 +45,9 @@ assert.match(route,/function statePayload\(type,req,res\)[\s\S]*data\.business\[
 assert.doesNotMatch(route,/function statePayload\(type,req,res\)[\s\S]*membershipIncomplete[\s\S]*return res\.json/,'WHPP damage must not be injected as a blocker into per-business compact state responses');
 
 assert.match(runtime,/import '\.\/v253DashboardFastPath\.js';/,'V253 fast backend must activate before server registration');
-assert.match(runtime,/primeDashboardCacheInChild\(delayMs\s*=\s*60_000\)/,'cache maintenance must be delayed away from first paint');
-assert.match(runtime,/MAX_PRIME_ATTEMPTS\s*=\s*4/,'delayed maintenance retry count must remain bounded');
+assert.match(runtime,/CE_QC_BACKGROUND_MAINTENANCE_ENABLED[\s\S]*!== '1'/,'dashboard cache maintenance must be opt-in and disabled on normal startup');
+assert.match(runtime,/DASHBOARD_CACHE_MAINTENANCE_DISABLED/,'normal startup must explicitly skip the delayed dashboard cache child');
+assert.match(runtime,/MAX_PRIME_ATTEMPTS\s*=\s*4/,'opt-in maintenance retry count must remain bounded');
 assert.match(runtime,/dashboard cache prime child exit code=/,'delayed cache maintenance must remain observable');
 assert.match(runtime,/CE_QC_SKIP_STARTUP_POD_REPAIR/,'startup POD repair must remain outside interactive first paint');
 assert.doesNotMatch(fastPath,/dashboard_daily_cache/,'V253 visible first-paint path must not trust legacy global dashboard cache');

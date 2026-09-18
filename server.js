@@ -127,10 +127,16 @@ function launchDashboardCacheWorker({ reportDate = '', reason = 'SCHEDULED_REFRE
 }
 
 function startDashboardCacheScheduler() {
-  if (dashboardCacheTimer) return;
-  setTimeout(() => launchDashboardCacheWorker({ reason: 'STARTUP_WARM' }), 1500).unref?.();
-  dashboardCacheTimer = setInterval(() => launchDashboardCacheWorker({ reason: 'TEN_MINUTE_REFRESH' }), DASHBOARD_CACHE_REFRESH_MS);
+  if (dashboardCacheTimer) return { started: true, alreadyRunning: true };
+  if (String(process.env.CE_QC_ENABLE_DASHBOARD_CACHE_SCHEDULER || '') !== '1') {
+    console.log('[CE-QC][DASHBOARD_CACHE_SCHEDULER_DISABLED] normal startup does not launch STARTUP_WARM or periodic dashboard-cache workers; imports and completed business runs still materialize cache event-by-event.');
+    return { started: false, reason: 'EVENT_DRIVEN_ONLY' };
+  }
+  const startupTimer = setTimeout(() => launchDashboardCacheWorker({ reason: 'STARTUP_WARM' }), 1500);
+  startupTimer.unref?.();
+  dashboardCacheTimer = setInterval(() => launchDashboardCacheWorker({ reason: 'PERIODIC_REFRESH' }), DASHBOARD_CACHE_REFRESH_MS);
   dashboardCacheTimer.unref?.();
+  return { started: true, reason: 'EXPLICIT_OPT_IN' };
 }
 
 app.get('/detail', (req, res) => {
@@ -160,6 +166,17 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/session', (req, res) => {
   res.json({ ok: true, user: publicUser(req.user), unreadNotifications: 0 });
+});
+
+app.post('/api/export-sidecar/start', (req, res) => {
+  try {
+    const starter = globalThis.__CE_QC_START_EXPORT_SIDECAR__;
+    if (typeof starter !== 'function') return res.status(503).json({ ok:false, code:'EXPORT_SIDECAR_STARTER_UNAVAILABLE', error:'独立导出服务启动器尚未就绪。' });
+    const result = starter() || {};
+    return res.json({ ok:result.reason!=='SPAWN_FAILED', ...result, port:Number(process.env.CE_QC_EXPORT_SIDECAR_PORT || 5178), onDemand:true });
+  } catch (error) {
+    return res.status(500).json({ ok:false, code:'EXPORT_SIDECAR_START_FAILED', error:error?.message || String(error) });
+  }
 });
 
 app.get('/api/admin/users', requireRole('ADMIN'), (req, res) => {
@@ -1919,8 +1936,8 @@ app.listen(port, host, () => {
   console.log(`局域网访问: ${network.lanUrl || '未检测到局域网IPv4，请查看电脑IP地址'}`);
   console.log(`SQLite DB: ${runtimeConfig.dbFile}`);
   console.log(`Public URL: ${network.publicUrl}`);
-  console.log(`Dashboard cache: background refresh every ${Math.round(DASHBOARD_CACHE_REFRESH_MS / 60000)} minutes`);
-  startDashboardCacheScheduler();
+  const dashboardScheduler = startDashboardCacheScheduler();
+  console.log(`Dashboard cache: ${dashboardScheduler.started ? `background refresh every ${Math.round(DASHBOARD_CACHE_REFRESH_MS / 60000)} minutes (explicit opt-in)` : 'event-driven only; no startup/periodic worker'}`);
 });
 
 function buildNetworkInfo(runtime = getRuntimeConfig()) {

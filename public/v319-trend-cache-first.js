@@ -1,6 +1,6 @@
 (function installV319TrendCacheFirst(global){
   if(global.__CE_QC_V319_TREND_CACHE_FIRST__)return;
-  const VERSION='2026-08-26-v319-cache-only-exact-trend-client-v1';
+  const VERSION='2026-09-18-stability-v319-fail-closed-client-v2';
   const originalFetch=global.fetch.bind(global);
   const TARGET='/api/v253/trends';
   const REPLACEMENT='/api/v319/trends';
@@ -30,15 +30,13 @@
     if(!isTarget(input))return originalFetch(input,init);
     const rewritten=rewrite(input);
     try{
-      const response=await originalFetch(rewritten,init);
-      if(response.status!==404)return response;
+      return await originalFetch(rewritten,init);
     }catch(error){
-      if(error?.name==='AbortError')throw error;
-      console.warn('[CE-QC][V319_TREND_CACHE_FIRST] cache-only route failed before response; falling back to legacy bounded V253 read.',error?.message||error);
+      console.warn('[CE-QC][V319_TREND_CACHE_FIRST] read-only V319 route failed; fail closed without calling legacy V253.',error?.message||error);
+      throw error;
     }
-    return originalFetch(input,init);
   };
 
   global.__CE_QC_V319_TREND_CACHE_FIRST__={version:VERSION,target:TARGET,replacement:REPLACEMENT,rewrite};
-  console.info('[CE-QC][V319_TREND_CACHE_FIRST]',VERSION,'existing V299/V307 /api/v253/trends requests are transparently routed to cache-only exact /api/v319/trends; 404 alone falls back to legacy V253.');
+  console.info('[CE-QC][V319_TREND_CACHE_FIRST]',VERSION,'legacy /api/v253/trends browser reads are forced onto read-only /api/v319/trends; failures are fail-closed and never fall back to request-time V253 computation.');
 })(window);

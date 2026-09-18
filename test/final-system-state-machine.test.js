@@ -18,6 +18,7 @@ const { analyzeShopeeShipment } = await import('../src/shopeeAnalyzerV31.js');
 const { latestEffectiveStatusLabel } = await import('../src/currentStatus.js');
 const { getDb, closeDb } = await import('../src/db.js');
 const { loadRangeDashboard } = await import('../src/rangeDashboardStore.js');
+const { loadRangeDashboard: loadFinalRangeDashboard } = await import('../src/rangeDashboardStoreFinal.js');
 
 function ev(code, time, text = '', extra = {}) {
   return {
@@ -208,7 +209,10 @@ test('final range layer excludes pickup-success normal flow and keeps store-tran
     });
   }
 
-  const range = loadRangeDashboard(date, date);
+  // Business-rule unit test: exercise the final normalization owner directly.
+  // The public single-day facade is intentionally cache-only for interactive speed,
+  // so newly inserted synthetic final_rows are not rescanned by a page read.
+  const range = loadFinalRangeDashboard(date, date);
   assert.equal(range.states.CE.dashboard.normalOperationalOpen, 1);
   assert.equal(range.states.CE.dashboard.shopTransit2, 1);
   assert.equal(range.states.CE.dashboard.shopRetention2, 0, 'store Pending must not double-count as store retention');

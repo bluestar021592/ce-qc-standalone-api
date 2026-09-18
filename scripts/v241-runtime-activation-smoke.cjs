@@ -108,7 +108,7 @@ for(const label of ['票数趋势','POD数量趋势','平均签收天数趋势',
 assert.match(v245Ui,/<th>平均签收天数<\/th>/,'Shopee daily detail must keep average signing days');
 assert.doesNotMatch(v245Ui,/<th>首日POD<\/th>/,'Shopee daily detail must not restore duplicate first-day POD column');
 assert.doesNotMatch(v245Ui,/<th>首日妥投率<\/th>/,'Shopee daily detail must not restore duplicate first-day POD-rate column');
-assert.match(v245Ui,/v248-shopee-spa-operational-trend-owner-v1/,'Shopee owner must be the V248 SPA-aware owner');
+assert.match(v245Ui,/stability-shopee-readonly-trend-v1/,'Shopee compatibility owner must use the read-only V319 trend path');
 assert.match(v245Ui,/activateIfShopee/,'V248 Shopee owner must reactivate after SPA navigation');
 
 assert.doesNotThrow(()=>new Function(trackingUi),'V246 QC tracking UI must compile as browser JavaScript');

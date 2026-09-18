@@ -1,6 +1,6 @@
 (function installV307ExactDailyHomeOwner(global){
   if(global.__CE_QC_V307_EXACT_DAILY_HOME_OWNER__)return;
-  const VERSION='2026-08-26-v325-single-owner-stable-home-cards-v1';
+  const VERSION='2026-09-18-stability-home-cards-v319-cache-v1';
   const TYPES=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
   const LABELS={'总览':'ALL','CE':'CE','CEAF空运':'CEAF','TBKH':'TBKH','ALI1688':'ALI1688','SHOPEE CN':'SHOPEECN','SHOPEE VN':'SHOPEEVN','WHPP本土':'WHPP'};
   const cache=new Map();
@@ -14,7 +14,7 @@
   function visibleHome(){const root=document.getElementById('homePage');return root&&!root.hidden&&getComputedStyle(root).display!=='none'?root:null;}
   async function json(url){const r=await fetch(url,{cache:'no-store',credentials:'same-origin'}),raw=await r.text();let j={};try{j=raw?JSON.parse(raw):{};}catch{}if(!r.ok||j?.ok===false)throw new Error(j?.error||j?.message||`HTTP ${r.status}`);return j;}
   function exactRow(data,d){return (Array.isArray(data?.daily)?data.daily:[]).find(row=>date(row?.reportDate)===d)||null;}
-  async function loadExact(d){const hit=cache.get(d);if(hit&&Date.now()-hit.at<CACHE_MS)return hit.value;const rows=await Promise.all(TYPES.map(async type=>{const data=await json(`/api/v253/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(d)}&to=${encodeURIComponent(d)}`),row=exactRow(data,d);return[type,{total:num(row?.total),pod:num(row?.pod),oc:num(row?.ocCurrent??row?.oc),sameDayPod:num(row?.sameDayPod),ready:row?.ready!==false}];}));const states=Object.fromEntries(rows),total=TYPES.reduce((sum,type)=>sum+num(states[type]?.total),0),value={date:d,total,states};cache.set(d,{at:Date.now(),value});return value;}
+  async function loadExact(d){const hit=cache.get(d);if(hit&&Date.now()-hit.at<CACHE_MS)return hit.value;const rows=await Promise.all(TYPES.map(async type=>{const data=await json(`/api/v319/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(d)}&to=${encodeURIComponent(d)}`),row=exactRow(data,d);return[type,{total:num(row?.total),pod:num(row?.pod),oc:num(row?.ocCurrent??row?.oc),sameDayPod:num(row?.sameDayPod),ready:row?.ready!==false}];}));const states=Object.fromEntries(rows),total=TYPES.reduce((sum,type)=>sum+num(states[type]?.total),0),value={date:d,total,states};cache.set(d,{at:Date.now(),value});return value;}
   function patchDateCaption(root,d){root.querySelectorAll('h1,h2,h3,p,small,span').forEach(node=>{if(node.children.length)return;const t=String(node.textContent||'');if(/当前日报\s+\d{4}-\d{2}-\d{2}/.test(t)){const next=t.replace(/当前日报\s+\d{4}-\d{2}-\d{2}/,`当前日报 ${d}`);if(node.textContent!==next)node.textContent=next;}});}
   function ensureWhppCard(grid){let card=[...grid.querySelectorAll('.v18-business-card')].find(node=>String(node.querySelector('span')?.textContent||'').trim()==='WHPP本土');if(card)return card;card=document.createElement('button');card.className='v18-business-card cyan';card.dataset.v325Whpp='1';card.innerHTML='<span>WHPP本土</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em>';card.addEventListener('click',()=>{if(typeof global.navigatePage==='function')global.navigatePage('whpp');else document.querySelector('.side-link[data-page="whpp"]')?.click();});grid.appendChild(card);return card;}
   function setText(node,value){if(node&&node.textContent!==value)node.textContent=value;}
@@ -25,5 +25,5 @@
   function bind(){schedule(250);document.addEventListener('click',e=>{if(e.target?.closest?.('#topRangeQuery,.top-range-query,#dashboardRangeQuery,.side-link[data-page]'))schedule(120);},true);document.addEventListener('change',e=>{if(e.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(120);},true);global.addEventListener('ce:exact-date-loaded',()=>{cache.clear();lastData=null;schedule(20);});global.addEventListener('popstate',()=>schedule(120));const observer=new MutationObserver(()=>repairFromCanonical());if(document.body)observer.observe(document.body,{subtree:true,childList:true,characterData:true});}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V307_EXACT_DAILY_HOME_OWNER__={version:VERSION,apply,loadExact,repairFromCanonical,types:[...TYPES]};
-  console.info('[CE-QC][V325_EXACT_DAILY_HOME]',VERSION,'single-day homepage business cards have one canonical owner: seven exact V253 daily memberships. Late period-dashboard/WHPP mutations are repaired in the same DOM turn; no 3-second polling and no visible 6098↔5873 flicker.');
+  console.info('[CE-QC][V325_EXACT_DAILY_HOME]',VERSION,'single-day homepage business cards read seven exact V319 saved-cache memberships only; no request-time historical or ledger recalculation.');
 })(window);

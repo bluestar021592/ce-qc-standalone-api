@@ -64,8 +64,9 @@ assert.match(runtime,/2026-08-23-v266-evergreen-evidence-runtime-v1/,'runtime mu
 assert.match(retiredV286Source,/global Express route hook retired/,'V286 file must remain a no-op historical marker if inspected directly');
 assert.doesNotMatch(retiredV286Source,/express\.application\.get\s*=/,'retired V286 must never restore the global Express route hook');
 assert.match(retiredV288Source,/SAFE_ASSET_RE/,'retired V288 implementation remains inspectable but is not startup-active');
-assert.match(fastOwnerSource,/\/api\/v253\/trends/,'recovered V253 browser owner must match the last confirmed 88439846 shell');
-assert.match(genericTrendSource,/\/api\/v253\/trends/,'recovered generic trend hydrator must match the last confirmed 88439846 shell');
+assert.match(fastOwnerSource,/\/api\/v319\/trends/,'recovered browser owner must preserve the stable shell while reading the V319 saved-cache path');
+assert.match(genericTrendSource,/\/api\/v319\/trends/,'generic trend hydrator must preserve the stable shell while reading the V319 saved-cache path');
+assert.doesNotMatch(genericTrendSource,/\/api\/v253\/trends\?businessType=/,'generic page opening must not auto-enter V253 computation');
 assert.match(v283Retry.V283_LEGACY_HASH_RETRY_ID,/v283-post-evidence-seed-retry-v1/,'V283 retry module must remain available for later controlled use');
 await import(`./v283-legacy-hash-replay-smoke.mjs?nested=${Date.now()}`);
 

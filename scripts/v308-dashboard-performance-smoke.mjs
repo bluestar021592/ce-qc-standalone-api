@@ -10,18 +10,18 @@ const ui=fs.readFileSync('public/v308-dashboard-read-bridge.js','utf8'),inject=f
 // Validate UI behavior, not a retired Vxxx release-name string. The visible SPA title
 // must remain authoritative before pathname fallback, and the active bridge must expose
 // the current strict START-to-POD + PP/PV signing-average contract.
-assert.match(ui,/const VERSION='[^']*history-signing-region-ui[^']*'/,'current history/signing-region UI owner marker missing');
+assert.match(ui,/const VERSION='2026-09-18-stability-history-table-v319-cache-v1'/,'current V319 cache-only history/signing-region UI owner marker missing');
 assert.match(ui,/document\.getElementById\('pageTitle'\)/,'visible SPA page title must be inspected');
 for(const label of ['SHOPEE CN','SHOPEE VN','TBKH'])assert.ok(ui.includes(`title.includes('${label}')`),`SPA title routing missing ${label}`);
 assert.match(ui,/location\.pathname/,'pathname fallback must remain available after title routing');
-assert.match(ui,/\/api\/v308\/delivery-daily/);assert.match(ui,/history=all/);assert.match(ui,/inFlight=new Map\(\)/);assert.match(ui,/5000/);assert.match(ui,/__CE_QC_V328_HISTORY_PAYLOADS__/);assert.match(ui,/\/api\/v328\/evidence-status/);
+assert.match(ui,/\/api\/v319\/trends/);assert.match(ui,/history=all/);assert.match(ui,/inFlight=new Map\(\)/);assert.match(ui,/5000/);assert.match(ui,/__CE_QC_V328_HISTORY_PAYLOADS__/);assert.match(ui,/\/api\/v328\/evidence-status/);assert.doesNotMatch(ui,/global\.fetch\(`\/api\/v308\/delivery-daily/,'page-open history table must never auto-enter V308 computation');assert.match(ui,/u\.pathname='\/api\/v319\/trends'/,'legacy V253\/V263\/V308 reads must be rewritten to V319 cache');
 for(const label of ['平均签收天数','金边PP平均签收天数','外省PV平均签收天数','1派','2派','3派+','未识别POD','派次样本','签收天数样本'])assert.ok(ui.includes(label),`V308 UI missing ${label}`);
 assert.ok(!ui.includes('首次日报锁定日期'),'retired first-report-date label must not return after strict real START-to-POD migration');
 assert.ok(ui.includes('平均签收天数=真实POD日期−真实首次派送START日期+1'),'visible definition must state strict real START-to-POD timing');
 assert.match(ui,/ppAvgSigningDays/);assert.match(ui,/pvAvgSigningDays/);assert.doesNotMatch(ui,/setInterval\(/);
 
 assert.match(inject,/V308_DASHBOARD_READ_BRIDGE_UI_ID='[^']*history-signing-region-ui[^']*'/,'injection must identify the active signing-region UI owner');
-assert.match(inject,/v308-dashboard-read-bridge\.js\?v=20260827-v343-1/,'active browser bridge must use the V343 cache-bust marker');
+assert.match(inject,/v308-dashboard-read-bridge\.js\?v=20260918-stability-v319-1/,'active browser bridge must cache-bust onto the read-only V319 path');
 assert.match(inject,/v308-dashboard-read-bridge\.js\?v=20260827-v334-1/,'V334 browser marker remains compatibility-only');
 assert.match(inject,/v308-dashboard-read-bridge\.js\?v=20260827-v329-1/,'V329 browser marker remains compatibility-only');
 assert.match(runtime,/import '\.\/v308DeliveryDailyFastPath\.js';/);assert.match(backend,/readV329ThreeBusinessDailyCache/);assert.doesNotMatch(backend,/readV328ThreeBusinessHistory|readV320HistoricalDailyWithDispatch/);assert.match(backend,/json_extract\(evidenceJson,'\$\.starts\[0\]\.time'\)/);assert.match(backend,/podDate/);assert.doesNotMatch(backend,/firstReportDate/,'V308 signing average must never fall back to first-report date');assert.match(backend,/ppAvgSigningDays/);assert.match(backend,/pvAvgSigningDays/);assert.match(cacheSource,/平均签收天数/);assert.match(cacheSource,/ppSigningDaysSum/);assert.match(cacheSource,/pvSigningDaysSum/);assert.match(cacheSource,/firstAttemptEligible/);assert.match(cacheSource,/firstAttemptSuccess/);assert.match(cacheSource,/firstAttemptUnknownPod/);assert.doesNotMatch(worker,/readV295FirstAttemptTrends|v295FirstAttemptTruth/,'history worker must use saved historical members + strict V246 ledger rather than current VALID V295 membership');assert.match(worker,/listV328HistoricalMembers/);assert.match(worker,/strictPodKnown/);

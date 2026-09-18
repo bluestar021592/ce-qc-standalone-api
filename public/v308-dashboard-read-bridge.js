@@ -1,7 +1,7 @@
 (function installV308DashboardReadBridge(global){
   'use strict';
   if(global.__CE_QC_V308_DASHBOARD_READ_BRIDGE__)return;
-  const VERSION='2026-08-27-v343-history-signing-region-ui-v1';
+  const VERSION='2026-09-18-stability-history-table-v319-cache-v1';
   const SPECIAL=new Set(['TBKH','SHOPEECN','SHOPEEVN']);
   const nativeFetch=global.fetch.bind(global),inFlight=new Map();
   let tableTimer=null,lastTableKey='',evidenceTimer=null,evidenceWatchKey='',evidencePolls=0,evidenceCacheVersion=0;
@@ -38,8 +38,8 @@
   function selectedTypeFromUrl(u){return String(u?.searchParams?.get('businessType')||'').toUpperCase();}
   function rewrite(raw){
     const u=parseUrl(raw);if(!u||u.origin!==location.origin)return raw;const type=selectedTypeFromUrl(u);
-    if((u.pathname==='/api/v263/delivery-trends'||u.pathname==='/api/v253/trends')&&SPECIAL.has(type)){u.pathname='/api/v308/delivery-daily';return u.pathname+u.search;}
-    if(u.pathname==='/api/v273/trends'){u.pathname='/api/v253/trends';return u.pathname+u.search;}
+    if((u.pathname==='/api/v263/delivery-trends'||u.pathname==='/api/v253/trends'||u.pathname==='/api/v308/delivery-daily')&&SPECIAL.has(type)){u.pathname='/api/v319/trends';return u.pathname+u.search;}
+    if(u.pathname==='/api/v273/trends'){u.pathname='/api/v319/trends';return u.pathname+u.search;}
     return raw;
   }
   function methodOf(input,init){return String(init?.method||input?.method||'GET').toUpperCase();}
@@ -86,11 +86,11 @@
     installStyle();const type=activeAttemptType(),root=visibleRoot(),rg=selectedRange();if(!type||!root||!rg.from||!rg.to||rg.from>rg.to)return;
     const autoHistory=rg.from===rg.to,key=`${type}|${rg.from}|${rg.to}|${autoHistory?'H':'E'}`;if(!force&&lastTableKey===key&&root.querySelector('#v308DeliveryDailyTable'))return;
     let panel=root.querySelector('#v308DeliveryDailyTable');if(!panel){panel=document.createElement('section');panel.id='v308DeliveryDailyTable';panel.className='v18-panel';panel.innerHTML='<div class="v308-state">正在读取派次与签收时效缓存…</div>';const trend=root.querySelector('.v18-trend-section');if(trend)trend.insertAdjacentElement('afterend',panel);else root.appendChild(panel);}else{const state=panel.querySelector('.v308-state');if(state)state.textContent='后台更新中，当前表格保持显示…';}
-    try{const historyParam=autoHistory?'&history=all':'',r=await global.fetch(`/api/v308/delivery-daily?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}${historyParam}`,{cache:'no-store',credentials:'same-origin'}),raw=await r.text();let data={};try{data=raw?JSON.parse(raw):{};}catch{}if(!r.ok||data?.ok===false)throw new Error(data?.error||data?.message||`HTTP ${r.status}`);if(activeAttemptType()!==type)return;renderTable(root,type,data,rg);lastTableKey=key;if(autoHistory){publishHistory(type,data,rg);watchEvidence(type,rg,data.evidenceRepair||{});}}catch(error){const current=root.querySelector('#v308DeliveryDailyTable');if(current&&!current.querySelector('table'))current.innerHTML=`<div class="v308-state error">派次与签收时效读取失败：${esc(error?.name==='AbortError'?'读取超时':error?.message||error)}。</div>`;}
+    try{const historyParam=autoHistory?'&history=all':'',r=await global.fetch(`/api/v319/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}${historyParam}`,{cache:'no-store',credentials:'same-origin'}),raw=await r.text();let data={};try{data=raw?JSON.parse(raw):{};}catch{}if(!r.ok||data?.ok===false)throw new Error(data?.error||data?.message||`HTTP ${r.status}`);if(activeAttemptType()!==type)return;renderTable(root,type,data,rg);lastTableKey=key;if(autoHistory){publishHistory(type,data,rg);watchEvidence(type,rg,data.evidenceRepair||{});}}catch(error){const current=root.querySelector('#v308DeliveryDailyTable');if(current&&!current.querySelector('table'))current.innerHTML=`<div class="v308-state error">派次与签收时效读取失败：${esc(error?.name==='AbortError'?'读取超时':error?.message||error)}。</div>`;}
   }
   function schedule(ms=250,force=false){clearTimeout(tableTimer);tableTimer=setTimeout(()=>loadTable(force),ms);}
   function bind(){installStyle();schedule(500,true);document.addEventListener('click',e=>{if(e.target?.closest?.('.side-link[data-page],#topRangeQuery,.top-range-query,#dashboardRangeQuery'))schedule(250,true);},true);document.addEventListener('change',e=>{if(e.target?.matches?.('#topRangeFrom,#topRangeTo,#dashboardRangeFrom,#dashboardRangeTo'))schedule(250,true);},true);global.addEventListener('ce:exact-date-loaded',()=>schedule(120,false));global.addEventListener('popstate',()=>schedule(250,true));global.addEventListener('focus',()=>loadTable(false));}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
   global.__CE_QC_V308_DASHBOARD_READ_BRIDGE__={version:VERSION,nativeFetch,rewrite,loadTable,activeAttemptType};
-  console.info('[CE-QC][V343_DASHBOARD_READ_BRIDGE]',VERSION,'one active CN/VN/TBKH history table owner; Shopee overall + PP/PV signing averages; stale derived cache revisions rebuild in background.');
+  console.info('[CE-QC][STABILITY_DASHBOARD_READ_BRIDGE]',VERSION,'CN/VN/TBKH table and legacy trend fetches read saved V319 cache only; page opening never invokes V308/V263/V273 computation or starts evidence repair.');
 })(window);

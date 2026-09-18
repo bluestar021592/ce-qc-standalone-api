@@ -28,7 +28,8 @@ assert.doesNotThrow(()=>new Function(generic),'V263 generic trend hydrator must 
 assert.doesNotThrow(()=>new Function(reportOwner),'V267 report export owner must compile');
 
 assert.match(dashboard,/DELIVERY_KPI_TYPES=new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/,'canonical UI scope must be exactly TBKH + SHOPEECN + SHOPEEVN');
-assert.match(dashboard,/\/api\/v263\/delivery-trends/,'canonical DashboardV18 must read V263 delivery KPI truth directly');
+assert.match(dashboard,/\/api\/v319\/trends/,'canonical DashboardV18 must read saved delivery KPI truth through V319');
+assert.doesNotMatch(dashboard,/\/api\/v263\/delivery-trends\?businessType=/,'canonical page rendering must not auto-enter V263 evidence calculation');
 assert.doesNotMatch(dashboard,/平均签收天数趋势/,'live boards must not restore the retired average-signing-days trend chart');
 assert.match(dashboard,/1\/2\/3派与平均签收天数/,'target boards must expose one authoritative attempt/signing summary panel');
 assert.match(dashboard,/趋势图仅保留在导出报表，实时看板不再渲染/,'target boards must disclose that trend charts are export-only after V509');
@@ -45,7 +46,8 @@ assert.match(css,/v265-attempt-evidence-status\.incomplete/,'incomplete evidence
 assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)!important/,'delivery KPI summary must use a balanced four-column layout');
 
 assert.match(generic,/PAGE_TYPE=\{ce:'CE',ceaf:'CEAF',ali1688:'ALI1688'\}/,'generic hydrator must be scoped to CE + CEAF + ALI1688 only');
-assert.match(generic,/\/api\/v253\/trends/,'generic non-target boards must use V253 cache-independent truth');
+assert.match(generic,/\/api\/v319\/trends/,'generic non-target boards must use the read-only V319 saved-cache truth');
+assert.doesNotMatch(generic,/\/api\/v253\/trends\?businessType=/,'generic browser navigation must not auto-enter V253 computation');
 assert.doesNotMatch(generic,/TBKH|SHOPEECN|SHOPEEVN|WHPP/,'generic hydrator must not compete with the three specialized boards or WHPP dedicated owner');
 assert.doesNotMatch(generic,/读取已落库日报数据/,'generic hydrator must not create indefinite loading placeholders');
 assert.match(inject,/v263-generic-trend-hydrator\.js\?v=20260823-v263-1/,'legacy resource-version gate marker must remain source-compatible while live delivery uses the newer marker');
@@ -85,8 +87,9 @@ assert.match(strictBackfill,/attemptNo=0 OR podDate='' OR podDate IS NULL OR sig
 assert.match(strictBackfill,/保留已锁定派次并补POD日期\/签收天数/,'known attempt must be preserved while missing signing evidence is backfilled');
 assert.match(strictBackfill,/business_track_events/,'stored trajectory must be used before CE retry');
 assert.match(strictBackfill,/CE_TRACK_RETRY_UNKNOWN/,'remaining missing evidence must retry CE trajectory');
-assert.match(strictBackfill,/TWO_HOUR_AUTO/,'attempt/signing evidence retry must remain continuous');
-assert.match(strictBackfill,/START_DELAY_MS[\s\S]*20_000/,'first automatic evidence pass must start quickly instead of waiting four minutes');
+assert.match(strictBackfill,/BACKGROUND_AUTO_ENABLED=String\(process\.env\.CE_QC_ENABLE_V262_BACKGROUND_BACKFILL/,'automatic CE evidence backfill must be explicit opt-in only');
+assert.match(strictBackfill,/V263_DELIVERY_EVIDENCE_AUTO_DISABLED/,'normal startup must declare that periodic/startup CE evidence backfill is disabled');
+assert.match(strictBackfill,/if\(!BACKGROUND_AUTO_ENABLED\)[\s\S]*return;/,'normal startup must return before arming V262 timers');
 assert.match(strictBackfill,/ORDER BY firstReportDate DESC/,'recent report dates must be repaired before old history');
 assert.match(strictBackfill,/requestV263DeliveryEvidenceBackfill/,'dashboard must be able to request a low-coverage repair without blocking first paint');
 assert.match(strictBackfill,/nodeCode|eventStatusCode|operationCode|scanCode/,'CE event wrappers must normalize alternate real node-code fields');

@@ -122,7 +122,7 @@
     const rg=deliveryRange(model);if(!rg.to)return;
     const token=`${type}|${rg.from}|${rg.to}|${Date.now()}`;root.dataset.v263Request=token;
     try{
-      const response=await fetch(`/api/v263/delivery-trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});
+      const response=await fetch(`/api/v319/trends?businessType=${encodeURIComponent(type)}&from=${encodeURIComponent(rg.from)}&to=${encodeURIComponent(rg.to)}`,{cache:'no-store',credentials:'same-origin'});
       const data=await response.json();if(!response.ok||data?.ok===false)throw new Error(data?.error||`HTTP ${response.status}`);
       if(!root.isConnected||root.dataset.v263Request!==token||String(root.querySelector('.v18-page-heading h2')?.textContent||'').toUpperCase().indexOf(type==='SHOPEECN'?'SHOPEE CN':type==='SHOPEEVN'?'SHOPEE VN':'TBKH')<0)return;
       let panel=root.querySelector('#v263DeliveryKpiPanel');

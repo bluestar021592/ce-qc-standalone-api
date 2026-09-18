@@ -42,6 +42,8 @@ assert.ok(auditAt>=0&&membershipAt>auditAt&&legacyWorkerAt>membershipAt,'V473 AL
 
 assert.match(ui,/2026-09-08-v473-all-export-sidecar-ui-v2/);
 assert.match(ui,/http:\/\/\$\{location\.hostname\}:5178/);
+assert.match(ui,/\/api\/export-sidecar\/start/,'V473 UI must ask 5177 to start the sidecar only when export is used');
+assert.match(ui,/async function ensureSidecar/,'V473 UI must wait for on-demand 5178 readiness');
 assert.match(ui,/\/api\/v473\/export-ping/);
 assert.match(ui,/\/api\/v473\/export-period\/prepare/);
 assert.match(ui,/V473导出创建接口/);
@@ -53,13 +55,15 @@ assert.match(ui,/global\.resumeActiveExportJob=resume/,'legacy resume callers mu
 assert.match(ui,/exportProgressV194/,'V473 must recover an existing V194 progress DOM when present');
 
 assert.match(boot,/\.\/src\/v193ExportSidecar\.js/,'historical bootstrap filename stays stable');
+assert.match(boot,/CE_QC_ENABLE_EXPORT_SIDECAR_AT_STARTUP/,'normal bootstrap must keep the export sidecar opt-in');
+assert.match(boot,/__CE_QC_START_EXPORT_SIDECAR__/,'bootstrap must expose one on-demand sidecar starter to the main service');
 const admissionAt=shim.indexOf("import './v505ExportAdmissionGuard.js'");
 const v473At=shim.indexOf("import './v473ExportSidecar.js'");
 assert.ok(admissionAt>=0&&v473At>admissionAt,'legacy sidecar entry must install V505 export/purge admission before starting the single V473 authority');
 assert.doesNotMatch(shim,/app\.listen|express from/,'legacy sidecar entry must not start a second server');
 assert.match(admission,/v505PurgeWriteFreezeGuard,v505ExportAdmissionGuard,\.\.\.handlers/,'5178 export creation must pass purge freeze and admission handshake before V473 handlers');
 assert.match(admission,/const afterAcquire=inspectPurgeWriteFreezeState\(\)/,'cross-process race must be double-checked after export admission lock acquisition');
-assert.match(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-2/,'existing token UI slot must hand ownership to final cache-busted V473 UI');
+assert.match(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260918-lazy-sidecar-1/,'existing token UI slot must hand ownership to the lazy cache-busted V473 UI');
 assert.doesNotMatch(tokenUi,/v473-all-export-sidecar-ui\.js\?v=20260908-v473-1/,'retired V473 UI cache key must not remain active');
 const v84At=shell.indexOf('v84-async-export-ui.js?v=20260818-v193-1');
 const tokenAt=shell.indexOf('v194-export-token-ui.js?v=20260818-v195-1');

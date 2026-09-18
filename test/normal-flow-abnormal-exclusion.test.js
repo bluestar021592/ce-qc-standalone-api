@@ -11,6 +11,7 @@ process.env.DB_FILE = path.join(tempRoot, 'normal-flow.db');
 const { buildDashboardData } = await import('../src/reporting.js');
 const { getDb, closeDb } = await import('../src/db.js');
 const { loadRangeDashboard } = await import('../src/rangeDashboardStore.js');
+const { loadRangeDashboard: loadRangeDashboardFinal } = await import('../src/rangeDashboardStoreFinal.js');
 
 function row(code, extra = {}) {
   return {
@@ -91,7 +92,10 @@ test('range abnormal total applies V58 dedicated thresholds after normal-flow ex
     });
   }
 
-  const range = loadRangeDashboard(date, date);
+  // Business-rule regression intentionally exercises the explicit final-normalization owner.
+  // The public interactive facade is cache-only for single-day page reads and therefore
+  // must not rescan row-level facts merely to satisfy this test.
+  const range = loadRangeDashboardFinal(date, date);
   assert.equal(range.states.CE.dashboard.returned, 1);
   assert.equal(range.states.CE.dashboard.returnInProgress, 1);
   assert.equal(range.states.CE.dashboard.normalShopOpen, 2, '1-day store + store Pending are normal store flows');
