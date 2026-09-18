@@ -26,7 +26,7 @@ const LEGACY_OBSERVABLE_PATCH_ID = '2026-08-23-v239-interactive-first-cache-prim
 // direct bulk reads remain authoritative for visible dashboards.
 process.env.DASHBOARD_CACHE_STARTUP_DELAY_MS = String(24 * 60 * 60 * 1000);
 process.env.DASHBOARD_CACHE_REFRESH_MS = String(4 * 60 * 60 * 1000);
-process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED = '0';
+if (process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED === undefined) process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED = '0';
 process.env.CE_QC_SKIP_STARTUP_POD_REPAIR = '1';
 
 let primeAttempts = 0;
@@ -35,8 +35,12 @@ const RETRYABLE_RESULT = /FOREGROUND_PROCESSING_ACTIVE|CACHE_OR_PURGE_WORKER_ALR
 
 function primeDashboardCacheInChild(delayMs = 60_000) {
   if (String(process.env.CE_QC_DASHBOARD_CACHE_CHILD || '') === '1') return;
+  if (String(process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED || '') !== '1') {
+    console.log('[CE-QC][DASHBOARD_CACHE_MAINTENANCE_DISABLED] normal startup does not spawn the historical/dashboard cache child; event-driven finalization owns cache materialization.');
+    return;
+  }
   if (String(process.env.CE_QC_RECOVERY_SAFE_MODE || '') === '1' || String(process.env.CE_QC_DISABLE_DASHBOARD_CACHE_PRIME || '') === '1') {
-    console.log('[CE-QC][RECOVERY_SAFE_MODE] dashboard cache maintenance child skipped; V253 direct reads remain active.');
+    console.log('[CE-QC][RECOVERY_SAFE_MODE] dashboard cache maintenance child skipped; V319/V320 saved-cache reads remain active.');
     return;
   }
   if (primeAttempts >= MAX_PRIME_ATTEMPTS) return;
@@ -73,7 +77,7 @@ function primeDashboardCacheInChild(delayMs = 60_000) {
           primeDashboardCacheInChild(60_000);
         }
       });
-      console.log(`[CE-QC][V253] delayed dashboard cache maintenance child started pid=${child.pid || '-'} after ${Math.round(delayMs/1000)}s; first paint uses V253 direct bulk reads.`);
+      console.log(`[CE-QC][V253] opt-in dashboard cache maintenance child started pid=${child.pid || '-'} after ${Math.round(delayMs/1000)}s; visible pages remain on saved-cache reads.`);
     } catch (error) {
       console.warn('[CE-QC][V253] delayed cache maintenance spawn failed:', error?.message || error);
       if (primeAttempts < MAX_PRIME_ATTEMPTS) primeDashboardCacheInChild(60_000);
