@@ -32,6 +32,7 @@ const MAX_RANGE_DAYS = 180;
 const STARTUP_AUDIT_DELAY_MS = Math.max(30_000,Math.min(10*60_000,Number(process.env.V246_TRACKING_STARTUP_AUDIT_DELAY_MS || 180_000)));
 const SCHEDULER_POLL_MS = 60_000;
 const SCHEDULE_RETRY_MS = Math.max(10*60_000,Number(process.env.V246_0200_RETRY_MS || 30*60_000));
+const BACKGROUND_SCHEDULER_ENABLED = String(process.env.CE_QC_ENABLE_V246_BACKGROUND_TRACKING || '') === '1';
 const jobs = new Map();
 let activeJobId = '';
 let schedulerTimer = null;
@@ -220,9 +221,13 @@ async function scheduledTick(){
 }
 function startScheduler(){
   if(schedulerTimer||process.env.CI||process.env.NODE_ENV==='test'||String(process.env.CE_QC_DISABLE_V246_TRACKING||'')==='1')return;
+  if(!BACKGROUND_SCHEDULER_ENABLED){
+    console.log('[CE-QC][V246_BACKGROUND_TRACKING_DISABLED]',V246_QC_TRACKING_RUNTIME_ID,'normal startup does not run 90-day audit, hourly audit, 02:00 catch-up, or CE ALL-OPEN refresh; manual reconcile and event-driven finalization remain available.');
+    return;
+  }
   startupTimer=setTimeout(()=>{lightweightAudit('STARTUP_90DAY_ANTI_LEAK').catch(error=>console.warn('[CE-QC][V246_STARTUP_AUDIT_FAILED]',error?.message||error));scheduledTick().catch(error=>console.warn('[CE-QC][V246_STARTUP_TICK_FAILED]',error?.message||error));},STARTUP_AUDIT_DELAY_MS);startupTimer.unref?.();
   schedulerTimer=setInterval(()=>scheduledTick().catch(error=>console.error('[CE-QC][V246_SCHEDULER_FAILED]',error?.message||error)),SCHEDULER_POLL_MS);schedulerTimer.unref?.();
-  console.log(`[CE-QC][V246_TRACKING] ${V246_QC_TRACKING_RUNTIME_ID} enabled: startup 90-day anti-leak seed + hourly 30-day anti-leak audit + Cambodia 02:00 rolling 30-day reconciliation followed by ALL-OPEN refresh + missed-run catch-up + ${Math.round(SCHEDULE_RETRY_MS/60000)}m failure backoff.`);
+  console.log(`[CE-QC][V246_BACKGROUND_TRACKING_ENABLED] ${V246_QC_TRACKING_RUNTIME_ID} explicit opt-in: startup audit + hourly audit + Cambodia 02:00 ALL-OPEN refresh; retry backoff ${Math.round(SCHEDULE_RETRY_MS/60000)}m.`);
 }
 
 const previousGet=express.application.get;const previousPost=express.application.post;
