@@ -6,9 +6,14 @@ import { execFileSync } from 'node:child_process';
 
 for(const file of ['src/v320DispatchMetricOverlay.js','src/rangeDashboardStoreV320.js','src/rangeDashboardStoreFinal.js','src/rangeDashboardStoreInteractive.js','src/rangeDashboardStore.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const facade=fs.readFileSync('src/rangeDashboardStore.js','utf8');
-const interactiveOwner=fs.readFileSync('src/rangeDashboardStoreInteractive.js','utf8');\nconst finalOwner=fs.readFileSync('src/rangeDashboardStoreFinal.js','utf8');
+const interactiveOwner=fs.readFileSync('src/rangeDashboardStoreInteractive.js','utf8');
+const finalOwner=fs.readFileSync('src/rangeDashboardStoreFinal.js','utf8');
 const rangeOwner=fs.readFileSync('src/rangeDashboardStoreV320.js','utf8');
-assert.match(facade,/rangeDashboardStoreInteractive\.js/,'public period-dashboard facade must pass through the interactive stability owner');\nassert.doesNotMatch(facade,/export \{ loadRangeDashboard \} from '.\/rangeDashboardStoreFinal\.js'/,'public interactive facade must not directly enter final row-level normalization');\nassert.match(interactiveOwner,/loadRangeDashboardV320\(from, to\)/,'single-day interactive range must use V320 cache truth');\nassert.match(interactiveOwner,/loadRangeDashboardFinal\(fromDate, toDate\)/,'explicit multi-day range must retain final normalization');\nassert.match(interactiveOwner,/requestTimeShipmentScan:\s*false/,'single-day interactive range must declare no request-time shipment scan');
+assert.match(facade,/rangeDashboardStoreInteractive\.js/,'public period-dashboard facade must pass through the interactive stability owner');
+assert.doesNotMatch(facade,/export \{ loadRangeDashboard \} from '.\/rangeDashboardStoreFinal\.js'/,'public interactive facade must not directly enter final row-level normalization');
+assert.match(interactiveOwner,/loadRangeDashboardV320\(from, to\)/,'single-day interactive range must use V320 cache truth');
+assert.match(interactiveOwner,/loadRangeDashboardFinal\(fromDate, toDate\)/,'explicit multi-day range must retain final normalization');
+assert.match(interactiveOwner,/requestTimeShipmentScan:\s*false/,'single-day interactive range must declare no request-time shipment scan');
 assert.match(finalOwner,/rangeDashboardStoreV320\.js/,'final business normalization must consume V320 as its authoritative source/cache truth');
 assert.doesNotMatch(finalOwner,/rangeDashboardStoreV31\.js/,'final normalization must never fall back to the obsolete V31 snapshot selector');
 assert.match(facade,/rangeDashboardStoreV295[\s\S]*rangeDashboardStoreV294/,'historical V295/V294 compatibility markers must remain');
