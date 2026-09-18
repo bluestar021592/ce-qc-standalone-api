@@ -168,6 +168,17 @@ app.get('/api/session', (req, res) => {
   res.json({ ok: true, user: publicUser(req.user), unreadNotifications: 0 });
 });
 
+app.post('/api/export-sidecar/start', (req, res) => {
+  try {
+    const starter = globalThis.__CE_QC_START_EXPORT_SIDECAR__;
+    if (typeof starter !== 'function') return res.status(503).json({ ok:false, code:'EXPORT_SIDECAR_STARTER_UNAVAILABLE', error:'独立导出服务启动器尚未就绪。' });
+    const result = starter() || {};
+    return res.json({ ok:result.reason!=='SPAWN_FAILED', ...result, port:Number(process.env.CE_QC_EXPORT_SIDECAR_PORT || 5178), onDemand:true });
+  } catch (error) {
+    return res.status(500).json({ ok:false, code:'EXPORT_SIDECAR_START_FAILED', error:error?.message || String(error) });
+  }
+});
+
 app.get('/api/admin/users', requireRole('ADMIN'), (req, res) => {
   const includeDeleted = String(req.query?.includeDeleted || '') === '1';
   const rows = getDb().prepare(`SELECT id,username,displayName,departmentCompany,email,role,businessScope,enabled,status,expiresAt,mustChangePassword,failedLoginCount,lockedUntil,lastLoginAt,createdAt,updatedAt,deletedAt,deletedBy FROM users ${includeDeleted ? '' : "WHERE status='ACTIVE'"} ORDER BY CASE WHEN status='ACTIVE' THEN 0 ELSE 1 END, enabled DESC, username`).all();
