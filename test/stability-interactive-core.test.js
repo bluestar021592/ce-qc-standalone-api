@@ -21,6 +21,7 @@ const exactHomeOwner = fs.readFileSync(path.join(root, 'public', 'v307-exact-dai
 const uiIntegrityOwner = fs.readFileSync(path.join(root, 'public', 'v309-ui-integrity.js'), 'utf8');
 const genericHistoryRoute = fs.readFileSync(path.join(root, 'src', 'v334GenericTrendRoutePatch.js'), 'utf8');
 const genericHistoryCache = fs.readFileSync(path.join(root, 'src', 'v334GenericHistoryCache.js'), 'utf8');
+const dashboardReadBridge = fs.readFileSync(path.join(root, 'public', 'v308-dashboard-read-bridge.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -122,4 +123,12 @@ test('automatic generic saved-history reads do not start workers or mutate cache
   const readFn=(genericHistoryCache.match(/export function readV334GenericHistoryCache[\s\S]*?\n\}/)||[''])[0];
   assert.ok(readFn, 'generic saved-history reader must exist');
   assert.doesNotMatch(readFn, /ensureV334GenericHistoryCache\(db\)/, 'GET-side history reads must not CREATE or ALTER cache schema');
+});
+
+
+test('active TBKH/CN/VN table bridge never auto-enters V308 or evidence computation routes', () => {
+  assert.match(dashboardReadBridge, /global\.fetch\(`\/api\/v319\/trends\?businessType=/);
+  assert.doesNotMatch(dashboardReadBridge, /global\.fetch\(`\/api\/v308\/delivery-daily\?businessType=/);
+  assert.match(dashboardReadBridge, /u\.pathname='\/api\/v319\/trends'/);
+  assert.match(dashboardReadBridge, /page opening never invokes V308\/V263\/V273 computation/);
 });
