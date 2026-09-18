@@ -8,8 +8,8 @@ const V334_FIRST_ATTEMPT_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260827-v33
 const V334_DETAIL_HISTORY_OWNERSHIP_COMPAT='2026-08-27-v334-canonical-detail-history-ownership-v1';
 const V299_FIRST_ATTEMPT_COMPAT_MARKER='/v295-first-attempt-ui.js?v=20260825-v299-1';
 const STABILITY_MARKER='/v301-runtime-stability.js?v=20260825-v301-1';
-const V307_HOME_MARKER='/v307-exact-daily-home-owner.js?v=20260826-v325-1';
-const V309_UI_MARKER='/v309-ui-integrity.js?v=20260829-ui-only-1';
+const V307_HOME_MARKER='/v307-exact-daily-home-owner.js?v=20260918-stability-v319-1';
+const V309_UI_MARKER='/v309-ui-integrity.js?v=20260918-stability-v319-1';
 const V310_RESUME_MARKER='/v310-unified-resume-owner.js?v=20260826-v310-1';
 const V311_RECOVERY_MARKER='/v311-shopee-recovery-owner.js?v=20260827-v333-1';
 const V311_RECOVERY_V332_COMPAT_MARKER='/v311-shopee-recovery-owner.js?v=20260827-v332-1';
@@ -49,9 +49,9 @@ express.response.send=function v334FirstAttemptUiSend(body){
     if(tags.length)body=body.replace('</body>',`${tags.join('\n')}\n</body>`);
     this.setHeader?.('X-CE-QC-V295-UI',V295_FIRST_ATTEMPT_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V301-UI','2026-08-25-v301-nonrecursive-runtime-stability-v1');
-    this.setHeader?.('X-CE-QC-V309-UI','2026-08-29-ui-only-no-unified-trigger-v1');
+    this.setHeader?.('X-CE-QC-V309-UI','2026-09-18-stability-ui-readonly-shopee-total-v1');
     this.setHeader?.('X-CE-QC-V318-UI','2026-08-26-v318-single-sidebar-hard-owner-v1');
-    this.setHeader?.('X-CE-QC-V325-UI','2026-08-26-v325-single-owner-stable-home-cards-v1');
+    this.setHeader?.('X-CE-QC-V325-UI','2026-09-18-stability-home-cards-v319-cache-v1');
     this.setHeader?.('X-CE-QC-V329-UI','2026-08-27-v329-three-business-cache-ui-v1');
     this.setHeader?.('X-CE-QC-V332-UI','2026-08-27-v332-completion-style-ownership-v1');
     this.setHeader?.('X-CE-QC-V333-UI','2026-08-27-v333-canonical-status-ownership-v1');
