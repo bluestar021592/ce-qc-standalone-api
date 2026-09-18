@@ -13,6 +13,10 @@ const v319 = fs.readFileSync(path.join(root, 'src', 'v319TrendCacheFastPatch.js'
 const homeTrendOwner = fs.readFileSync(path.join(root, 'public', 'v253-dashboard-fast-owner.js'), 'utf8');
 const shopeeTrendOwner = fs.readFileSync(path.join(root, 'public', 'v244-shopee-trend-owner.js'), 'utf8');
 const appJs = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
+const v263GenericOwner = fs.readFileSync(path.join(root, 'public', 'v263-generic-trend-hydrator.js'), 'utf8');
+const v272VisibleOwner = fs.readFileSync(path.join(root, 'public', 'v272-layout-trend-finalizer.js'), 'utf8');
+const firstAttemptUi = fs.readFileSync(path.join(root, 'public', 'v295-first-attempt-ui.js'), 'utf8');
+const firstAttemptInjection = fs.readFileSync(path.join(root, 'src', 'v295FirstAttemptUiInjectionPatch.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -77,4 +81,23 @@ test('ordinary navigation never requests non-compact aggregate state', () => {
   assert.ok(hydration, 'hydratePageData must exist');
   assert.doesNotMatch(hydration[0], /api\('\/api\/state'\)/);
   assert.doesNotMatch(hydration[0], /api\('\/api\/shopee\/state'\)/);
+});
+
+
+test('all active visible trend owners read V319 saved caches instead of delayed heavy truth routes', () => {
+  assert.match(v263GenericOwner, /\/api\/v319\/trends\?businessType=/);
+  assert.doesNotMatch(v263GenericOwner, /\/api\/v253\/trends\?businessType=/);
+  assert.match(v272VisibleOwner, /function fastUrl\(type,rg\)\{return`\/api\/v319\/trends/);
+  assert.match(v272VisibleOwner, /function strictUrl\(type,rg\)\{return`\/api\/v319\/trends/);
+  assert.doesNotMatch(v272VisibleOwner, /\/api\/v263\/delivery-trends/);
+  assert.doesNotMatch(v272VisibleOwner, /\/api\/v273\/trends\?businessType=/);
+});
+
+test('automatic first-attempt UI never enters V295 row-level truth SQL', () => {
+  assert.match(firstAttemptUi, /const FIRST_ATTEMPT_API='\/api\/v319\/trends'/);
+  assert.match(firstAttemptUi, /if\(!HISTORY_TYPES\.has\(type\)\).*lastPayload=null;return;/);
+  assert.doesNotMatch(firstAttemptUi, /\/api\/v295\/first-attempt-trends/);
+  assert.match(firstAttemptInjection, /v295-first-attempt-ui\.js\?v=20260918-stability-cache-1/);
+  assert.match(v319, /firstAttemptEligible/);
+  assert.match(v319, /firstAttemptEvidenceComplete/);
 });
