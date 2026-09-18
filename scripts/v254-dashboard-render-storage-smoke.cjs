@@ -87,8 +87,9 @@ assert.match(strictBackfill,/attemptNo=0 OR podDate='' OR podDate IS NULL OR sig
 assert.match(strictBackfill,/保留已锁定派次并补POD日期\/签收天数/,'known attempt must be preserved while missing signing evidence is backfilled');
 assert.match(strictBackfill,/business_track_events/,'stored trajectory must be used before CE retry');
 assert.match(strictBackfill,/CE_TRACK_RETRY_UNKNOWN/,'remaining missing evidence must retry CE trajectory');
-assert.match(strictBackfill,/TWO_HOUR_AUTO/,'attempt/signing evidence retry must remain continuous');
-assert.match(strictBackfill,/START_DELAY_MS[\s\S]*20_000/,'first automatic evidence pass must start quickly instead of waiting four minutes');
+assert.match(strictBackfill,/BACKGROUND_AUTO_ENABLED=String\(process\.env\.CE_QC_ENABLE_V262_BACKGROUND_BACKFILL/,'automatic CE evidence backfill must be explicit opt-in only');
+assert.match(strictBackfill,/V263_DELIVERY_EVIDENCE_AUTO_DISABLED/,'normal startup must declare that periodic/startup CE evidence backfill is disabled');
+assert.match(strictBackfill,/if\(!BACKGROUND_AUTO_ENABLED\)[\s\S]*return;/,'normal startup must return before arming V262 timers');
 assert.match(strictBackfill,/ORDER BY firstReportDate DESC/,'recent report dates must be repaired before old history');
 assert.match(strictBackfill,/requestV263DeliveryEvidenceBackfill/,'dashboard must be able to request a low-coverage repair without blocking first paint');
 assert.match(strictBackfill,/nodeCode|eventStatusCode|operationCode|scanCode/,'CE event wrappers must normalize alternate real node-code fields');
