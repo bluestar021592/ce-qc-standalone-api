@@ -37,9 +37,11 @@ const headInject = fs.readFileSync('src/v308DashboardReadBridgeInjection.js', 'u
 
 assert.match(trend, /readV236CurrentSummary\(date,\{cacheOnly:true\}\)/);
 assert.match(trend, /ATTEMPT_SET=new Set\(\['TBKH','SHOPEECN','SHOPEEVN'\]\)/);
-assert.match(trend, /options\.historyAll&&ATTEMPT_SET\.has\(type\)/);
-assert.match(trend, /readV308DeliveryDaily\(type,from,to,db,\{historyAll:true\}\)/);
-assert.match(trend, /source:'V329_SINGLE_DAY_DASHBOARD_CACHE_ONLY'/);
+assert.match(trend, /if\(ATTEMPT_SET\.has\(type\)\)/);
+assert.match(trend, /return attemptHistory\(type,from,to,db,Boolean\(options\.historyAll\)\)/,'three-business history must remain a direct saved V329-cache read');
+assert.doesNotMatch(trend, /readV308DeliveryDaily|readV328ThreeBusinessHistory|requestV328EvidenceRepair/,'V319 browser trend GET must not enter V308 or evidence repair paths');
+assert.match(trend, /V329_SINGLE_DAY_DASHBOARD_PLUS_SAVED_ATTEMPT_CACHE/);
+assert.match(trend, /V329_SAVED_DERIVED_CACHE_READ_ONLY|READ_ONLY_SAVED_CACHE/);
 
 assert.match(daily, /readV236CurrentSummary\(date\)/, 'V308 must fall back to the selected business own current facts');
 assert.doesNotMatch(daily, /readV236CurrentSummary\(date,\{cacheOnly:true\}\)/, 'foreign same-date cache ownership must not create fake zero current metrics');
