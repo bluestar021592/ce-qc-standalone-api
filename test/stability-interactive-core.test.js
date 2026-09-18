@@ -187,15 +187,18 @@ test('history rebuild ownership is post-write and debounced, never browser GET d
 });
 
 
-test('V554 body compatibility scripts cannot parser-block the already-rendered interactive shell', () => {
+test('V554 body compatibility scripts cannot block initial document load or base navigation', () => {
   assert.match(uiShellLoader, /V554_INTERACTION_READY_ID='2026-09-18-v554-nonblocking-legacy-body-loader-v1'/);
-  assert.match(uiShellLoader, /const nonBlockingBodyInjection=bodyInjection\.replace\(\/<script src=\/g,'<script defer src='\);/);
-  assert.match(uiShellLoader, /injectedHtml=withStyle\.replace\('<\/body>',nonBlockingBodyInjection\);/);
+  assert.match(uiShellLoader, /application\/x-ce-qc-deferred/);
+  assert.match(uiShellLoader, /data-src=/);
+  assert.match(uiShellLoader, /window\.addEventListener\(\\"load\\"/);
+  assert.match(uiShellLoader, /TIMEOUT=8000/);
   assert.match(uiShellLoader, /X-CE-QC-V554-Interaction-Ready/);
+  assert.match(uiShellLoader, /injectedHtml=withStyle\.replace\('<\/body>',nonBlockingBodyInjection\);/);
 
   const headInjection=(uiShellLoader.match(/const withStyle=source\.replace\('<\/head>'[\s\S]*?\);/)||[''])[0];
   assert.ok(headInjection, 'critical pre-app head injection must remain present');
   assert.match(headInjection, /<script src="\/v65-request-coalescing\.js/);
   assert.match(headInjection, /<script src="\/v125-local-api-resilience\.js/);
-  assert.doesNotMatch(headInjection, /<script defer src=/, 'pre-app fetch guards must keep their original execution timing');
+  assert.doesNotMatch(headInjection, /application\/x-ce-qc-deferred/, 'pre-app fetch guards must keep original timing');
 });
