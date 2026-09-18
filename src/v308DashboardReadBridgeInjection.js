@@ -1,7 +1,7 @@
 import express from 'express';
 
 export const V308_DASHBOARD_READ_BRIDGE_UI_ID='2026-08-27-v343-history-signing-region-ui-v1';
-const MARKER='/v308-dashboard-read-bridge.js?v=20260827-v343-1';
+const MARKER='/v308-dashboard-read-bridge.js?v=20260918-stability-v319-1';
 const V334_COMPAT_MARKER='/v308-dashboard-read-bridge.js?v=20260827-v334-1';
 const V329_COMPAT_MARKER='/v308-dashboard-read-bridge.js?v=20260827-v329-1';
 void V334_COMPAT_MARKER;void V329_COMPAT_MARKER;
