@@ -119,7 +119,7 @@ function attemptHistory(type,from,to,db,historyAll=false){
     return trendShape({ok:true,fromDate:daily[0]?.reportDate||from,toDate:daily.at(-1)?.reportDate||to,daily,historyExpanded:true,historyCachePending:false,source:'V329_SAVED_DERIVED_CACHE_READ_ONLY',definitions:{readPolicy:'浏览器历史趋势只SELECT已保存V329轻量缓存；缺失时不在请求线程补算、不触发CE API。'}},type,from,to);
   }
   const fallback=singleDayCache(type,to,db);
-  return{...fallback,requestedFromDate:from,requestedToDate:to,historyExpanded:true,historyCachePending:true,source:'V329_SAVED_CACHE_MISSING_CURRENT_DAY_ONLY'};
+  return{...fallback,requestedFromDate:from,requestedToDate:to,historyExpanded:true,historyCachePending:false,historyCacheMissing:true,source:'V329_SAVED_CACHE_MISSING_CURRENT_DAY_ONLY'};
 }
 
 export function readV319TrendCacheFast(businessType='ALL',fromDate='',toDate='',db=getDb(),options={}){
