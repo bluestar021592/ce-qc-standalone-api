@@ -28,6 +28,7 @@ const lifecycleCoordinator = fs.readFileSync(path.join(root, 'src', 'v252Lifecyc
 const storageHealth = fs.readFileSync(path.join(root, 'src', 'v254StorageHealthPatch.js'), 'utf8');
 const evidenceArchive = fs.readFileSync(path.join(root, 'src', 'v266EvergreenEvidenceArchive.js'), 'utf8');
 const interactiveRuntime = fs.readFileSync(path.join(root, 'src', 'v206InteractiveFirstRuntimePatch.js'), 'utf8');
+const serverSource = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -159,4 +160,15 @@ test('startup maintenance sweeps are opt-in while event-driven write hooks remai
   assert.match(evidenceArchive, /PRESERVE_BEFORE_TEMP_DELETE/, 'new uploads must still archive before temp deletion');
   assert.match(interactiveRuntime, /DASHBOARD_CACHE_MAINTENANCE_DISABLED/, 'normal startup must not spawn delayed dashboard cache child');
   assert.match(interactiveRuntime, /CE_QC_BACKGROUND_MAINTENANCE_ENABLED[\s\S]*!== '1'/);
+});
+
+
+test('server startup dashboard cache scheduler is off unless explicitly enabled', () => {
+  assert.match(serverSource, /CE_QC_ENABLE_DASHBOARD_CACHE_SCHEDULER/);
+  assert.match(serverSource, /DASHBOARD_CACHE_SCHEDULER_DISABLED/);
+  const startBlock=(serverSource.match(/function startDashboardCacheScheduler\(\) \{[\s\S]*?\n\}/)||[''])[0];
+  assert.ok(startBlock, 'dashboard cache scheduler start block must exist');
+  assert.match(startBlock, /if \(String\(process\.env\.CE_QC_ENABLE_DASHBOARD_CACHE_SCHEDULER/);
+  assert.match(startBlock, /return \{ started: false, reason: 'EVENT_DRIVEN_ONLY' \}/);
+  assert.match(serverSource, /launchDashboardCacheWorker\(\{ reportDate: parsed\.reportDate, reason: 'UNIFIED_IMPORT' \}\)/, 'write-time cache materialization must remain event-driven');
 });
