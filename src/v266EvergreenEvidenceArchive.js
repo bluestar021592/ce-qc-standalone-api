@@ -73,5 +73,5 @@ async function seedExistingImportTemps(){
 }
 
 patchImportDeletion();patchCeClient();
-if(!process.env.CI&&process.env.NODE_ENV!=='test'){const timer=setTimeout(()=>void seedExistingImportTemps(),30_000);timer.unref?.();}
+if(!process.env.CI&&process.env.NODE_ENV!=='test'&&String(process.env.CE_QC_ENABLE_V266_STARTUP_SEED||'')==='1'){const timer=setTimeout(()=>void seedExistingImportTemps(),30_000);timer.unref?.();}else if(!process.env.CI&&process.env.NODE_ENV!=='test'){console.log('[CE-QC][V266_STARTUP_SEED_DISABLED] existing import archive seeding is maintenance-only; new uploads are still archived before temp deletion and CE responses are still archived.');}
 console.log(`[CE-QC][V266_EVIDENCE] ${V266_EVERGREEN_EVIDENCE_ARCHIVE_ID} enabled: source uploads are archived before temp deletion; successful CE API bodies are gzip archived and deduplicated; retention >=${V266_MIN_RETENTION_DAYS} days; no automatic archive deletion.`);
