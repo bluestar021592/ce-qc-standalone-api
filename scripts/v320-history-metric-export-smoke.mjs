@@ -55,7 +55,8 @@ assert.doesNotMatch(trendUi,/fetch\(`\/api\/v308\/delivery-daily[^`]*history=all
 assert.match(trendUi,/readGenericHistory[\s\S]*history=all/,'generic boards may request only the V334 cache-only V319 history wrapper');
 assert.match(genericRoute,/V334_GENERIC_CACHE_ONLY/);
 assert.doesNotMatch(genericRoute,/readV320HistoricalDaily|readV320HistoricalDailyWithDispatch/,'generic web history wrapper must never scan heavy history');
-assert.match(trendRoute,/V329_EXPLICIT_THREE_BUSINESS_CACHE/);
+assert.match(trendRoute,/V329_SAVED_DERIVED_CACHE_READ_ONLY|READ_ONLY_SAVED_CACHE/,'TBKH/CN/VN browser trend route must read the saved V329 cache without request-time rebuild');
+assert.doesNotMatch(trendRoute,/V329_EXPLICIT_THREE_BUSINESS_CACHE/,'retired request-time three-business cache owner must stay retired');
 
 const tempRoot=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v329-history-'));
 process.env.DATA_DIR=tempRoot;
