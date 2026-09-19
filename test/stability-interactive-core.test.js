@@ -214,4 +214,10 @@ test('V554 body compatibility scripts cannot block initial document load or base
   assert.match(headInjection, /<script src="\/v65-request-coalescing\.js/);
   assert.match(headInjection, /<script src="\/v125-local-api-resilience\.js/);
   assert.doesNotMatch(headInjection, /application\/x-ce-qc-deferred/, 'pre-app fetch guards must keep original timing');
+  assert.match(uiShellLoader, /V555_CRITICAL_SHELL_INLINE_ID='2026-09-19-v555-critical-shell-inline-v1'/);
+  assert.match(uiShellLoader, /function inlineCriticalShellAssets\(html=''/);
+  assert.match(uiShellLoader, /data-ce-qc-inline-src/);
+  assert.match(uiShellLoader, /const inlineShell=inlineCriticalShellAssets\(withStyle\);/);
+  assert.match(uiShellLoader, /injectedHtml=inlineShell\.replace\('<\/body>',nonBlockingBodyInjection\);/);
+  assert.match(uiShellLoader, /X-CE-QC-V555-Critical-Shell-Inline/);
 });
