@@ -133,6 +133,17 @@ export async function accessIdentity(req, res, next) {
     // The read-only auth sidecar owns credential/bootstrap discovery with a bounded
     // health probe. Legacy main-DB sessions remain available for PUBLIC access only.
     if (channel === 'LOCAL' || channel === 'LAN') {
+      // V505 sealed PREPARE explicitly marks this one auth read as write-free.
+      // Preserve that recovery contract; ordinary local first paint never enters it.
+      if (req.v505PurgeReadOnlyAuth && cookieValue(req, 'ce_internal_session')) {
+        user = readSession(req, channel, cloudflareEmail);
+        if (user) {
+          req.user = user;
+          req.accessMode = channel;
+          req.cloudflareEmail = cloudflareEmail;
+          return next();
+        }
+      }
       const health = await probeLocalAuthHealth();
       const bootstrap = channel === 'LOCAL' && health.ok && health.dbReady && health.activeUserCount === 0;
       return loginPage(req, res, { channel, cloudflareEmail, bootstrap });
