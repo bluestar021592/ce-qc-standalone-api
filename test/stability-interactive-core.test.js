@@ -207,7 +207,8 @@ test('V554 body compatibility scripts cannot block initial document load or base
   assert.match(uiShellLoader, /TIMEOUT=8000/);
   assert.ok(uiShellLoader.includes("})();</script>\\\\n';"), 'inline loader must close with a real HTML script terminator');
   assert.match(uiShellLoader, /X-CE-QC-V554-Interaction-Ready/);
-  assert.match(uiShellLoader, /injectedHtml=withStyle\.replace\('<\/body>',nonBlockingBodyInjection\);/);
+  assert.match(uiShellLoader, /const inlineShell=inlineCriticalShellAssets\(withStyle\);/);
+  assert.match(uiShellLoader, /injectedHtml=inlineShell\.replace\('<\/body>',nonBlockingBodyInjection\);/);
 
   const headInjection=(uiShellLoader.match(/const withStyle=source\.replace\('<\/head>'[\s\S]*?\);/)||[''])[0];
   assert.ok(headInjection, 'critical pre-app head injection must remain present');
@@ -217,7 +218,5 @@ test('V554 body compatibility scripts cannot block initial document load or base
   assert.match(uiShellLoader, /V555_CRITICAL_SHELL_INLINE_ID='2026-09-19-v555-critical-shell-inline-v1'/);
   assert.match(uiShellLoader, /function inlineCriticalShellAssets\(html=''/);
   assert.match(uiShellLoader, /data-ce-qc-inline-src/);
-  assert.match(uiShellLoader, /const inlineShell=inlineCriticalShellAssets\(withStyle\);/);
-  assert.match(uiShellLoader, /injectedHtml=inlineShell\.replace\('<\/body>',nonBlockingBodyInjection\);/);
   assert.match(uiShellLoader, /X-CE-QC-V555-Critical-Shell-Inline/);
 });
