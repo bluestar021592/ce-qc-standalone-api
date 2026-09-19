@@ -161,7 +161,11 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(allowed.ok ? 204 : 403, headers); return res.end();
   }
   if (req.method === 'GET' && url.pathname === '/api/local-auth/health') {
-    try { openAuthDb(); return json(req, res, 200, { ok: true, id: V431_LOCAL_AUTH_SIDECAR_ID, ownerId: V432_LOCAL_AUTH_SINGLE_OWNER_ID, dbReady: true, port: PORT, appPort: APP_PORT }); }
+    try {
+      const db = openAuthDb();
+      const activeUserCount = Number(db.prepare("SELECT COUNT(*) AS count FROM users WHERE status='ACTIVE'").get()?.count || 0);
+      return json(req, res, 200, { ok: true, id: V431_LOCAL_AUTH_SIDECAR_ID, ownerId: V432_LOCAL_AUTH_SINGLE_OWNER_ID, dbReady: true, activeUserCount, port: PORT, appPort: APP_PORT });
+    }
     catch (error) { return json(req, res, 503, { ok: false, id: V431_LOCAL_AUTH_SIDECAR_ID, ownerId: V432_LOCAL_AUTH_SINGLE_OWNER_ID, dbReady: false, error: String(error?.message || error) }); }
   }
   if (req.method !== 'POST' || url.pathname !== '/api/local-auth/login') return json(req, res, 404, { ok: false, error: 'Not found.' });
