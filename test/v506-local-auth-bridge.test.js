@@ -113,3 +113,18 @@ test('V506 exposes deterministic health and timeout behavior without exposing pa
   assert.match(bridge,/MAX_RESPONSE_BYTES/);
   assert.doesNotMatch(bridge,/console\.(?:log|warn|error)\([^\n]*password/);
 });
+
+
+test('LOCAL/LAN unauthenticated first paint is sidecar-bounded and never opens the main DB',()=>{
+  const access=read('src/accessControl.js');
+  const sidecar=read('src/localAuthSidecar.js');
+  assert.match(access,/function probeLocalAuthHealth\(timeoutMs = 2500\)/);
+  assert.match(access,/channel === 'LOCAL' \|\| channel === 'LAN'/);
+  assert.match(access,/const health = await probeLocalAuthHealth\(\)/);
+  assert.match(access,/health\.activeUserCount === 0/);
+  const localBlock=access.slice(access.indexOf("if (channel === 'LOCAL' || channel === 'LAN')"),access.indexOf("user = readSession(req, channel, cloudflareEmail);"));
+  assert.doesNotMatch(localBlock,/getDb\s*\(|readSession\s*\(|userCount\s*\(/);
+  assert.match(sidecar,/activeUserCount/);
+  assert.match(sidecar,/SELECT COUNT\(\*\) AS count FROM users WHERE status='ACTIVE'/);
+  assert.match(sidecar,/PRAGMA busy_timeout=800/);
+});

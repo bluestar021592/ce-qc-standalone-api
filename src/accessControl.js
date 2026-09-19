@@ -1,4 +1,5 @@
 import net from 'net';
+import http from 'node:http';
 import crypto from 'crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -67,6 +68,36 @@ export function validateAccessConfiguration() {
   if (missing.length) throw new Error(`Missing Cloudflare Access configuration: ${missing.join(', ')}`);
 }
 
+function probeLocalAuthHealth(timeoutMs = 2500) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => { if (settled) return; settled = true; resolve(value); };
+    const request = http.get({
+      host: '127.0.0.1',
+      port: AUTH_SIDECAR_PORT,
+      path: '/api/local-auth/health',
+      headers: { host: `127.0.0.1:${AUTH_SIDECAR_PORT}`, accept: 'application/json' }
+    }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => {
+        try {
+          const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+          finish({
+            ok: response.statusCode === 200 && payload?.ok === true,
+            activeUserCount: Number(payload?.activeUserCount),
+            dbReady: payload?.dbReady === true
+          });
+        } catch {
+          finish({ ok: false, activeUserCount: NaN, dbReady: false });
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, () => { request.destroy(); finish({ ok: false, activeUserCount: NaN, dbReady: false }); });
+    request.on('error', () => finish({ ok: false, activeUserCount: NaN, dbReady: false }));
+  });
+}
+
 export async function accessIdentity(req, res, next) {
   if(String(req.method||'').toUpperCase()==='GET'&&PURGE_STATUS_PATH.test(String(req.path||''))){
     res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
@@ -91,17 +122,42 @@ export async function accessIdentity(req, res, next) {
       return denyPageOrApi(req, res, 403, 'Access denied', publicHost ? `Please use https://${publicHost}` : 'Contact the system administrator.');
     }
     let user = readLocalAuthSession(req, channel);
-    if (!user) {
-      user = readSession(req, channel, cloudflareEmail);
-      if (user) user = refreshSessionIfNeeded(req, res, user, channel);
-    }
     if (user) {
       req.user = user;
       req.accessMode = channel;
       req.cloudflareEmail = cloudflareEmail;
       return next();
     }
-    return loginPage(req, res, { channel, cloudflareEmail, bootstrap: channel === 'LOCAL' && userCount() === 0 });
+
+    // Local/LAN first paint must never synchronously open the multi-GB main SQLite DB.
+    // The read-only auth sidecar owns credential/bootstrap discovery with a bounded
+    // health probe. Legacy main-DB sessions remain available for PUBLIC access only.
+    if (channel === 'LOCAL' || channel === 'LAN') {
+      // V505 sealed PREPARE explicitly marks this one auth read as write-free.
+      // Preserve that recovery contract; ordinary local first paint never enters it.
+      if (req.v505PurgeReadOnlyAuth && cookieValue(req, 'ce_internal_session')) {
+        user = readSession(req, channel, cloudflareEmail);
+        if (user) {
+          req.user = user;
+          req.accessMode = channel;
+          req.cloudflareEmail = cloudflareEmail;
+          return next();
+        }
+      }
+      const health = await probeLocalAuthHealth();
+      const bootstrap = channel === 'LOCAL' && health.ok && health.dbReady && health.activeUserCount === 0;
+      return loginPage(req, res, { channel, cloudflareEmail, bootstrap });
+    }
+
+    user = readSession(req, channel, cloudflareEmail);
+    if (user) user = refreshSessionIfNeeded(req, res, user, channel);
+    if (user) {
+      req.user = user;
+      req.accessMode = channel;
+      req.cloudflareEmail = cloudflareEmail;
+      return next();
+    }
+    return loginPage(req, res, { channel, cloudflareEmail, bootstrap: false });
   } catch (error) {
     return denyPageOrApi(req, res, 401, 'Authentication required', error?.message || 'Please sign in again.');
   }
