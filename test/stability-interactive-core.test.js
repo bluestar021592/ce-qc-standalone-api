@@ -32,6 +32,8 @@ const interactiveRuntime = fs.readFileSync(path.join(root, 'src', 'v206Interacti
 const serverSource = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const uiShellLoader = fs.readFileSync(path.join(root, 'src', 'v44WhppUiPatch.js'), 'utf8');
 const bootstrapFastPath = fs.readFileSync(path.join(root, 'src', 'v43BootstrapPerfPatch.js'), 'utf8');
+const bootstrapSource = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
+const staticPreAuthSource = fs.readFileSync(path.join(root, 'src', 'v288StaticAssetPreAuthPatch.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -107,6 +109,19 @@ test('bootstrap first paint never falls back to shipment-level unified_import_ro
   const build = bootstrapFastPath.match(/async function buildPayload\(req\) \{[\s\S]*?\n\}/);
   assert.ok(build, 'bootstrap payload builder must exist');
   assert.doesNotMatch(build[0], /unified_import_rows/);
+});
+
+test('render-blocking static assets are runtime-armed before accessIdentity', () => {
+  const ownerImport = "await importPhase('v288StaticAssetPreAuthPatch', './src/v288StaticAssetPreAuthPatch.js');";
+  assert.match(bootstrapSource, /v288StaticAssetPreAuthPatch/);
+  assert.ok(bootstrapSource.indexOf(ownerImport) >= 0, 'bootstrap must import V288 runtime owner');
+  assert.ok(
+    bootstrapSource.indexOf(ownerImport) < bootstrapSource.indexOf('await importServerInteractiveFirst();'),
+    'V288 must arm before server.js registers accessIdentity'
+  );
+  assert.match(staticPreAuthSource, /SAFE_ASSET_RE/);
+  assert.match(staticPreAuthSource, /previousUse\.call\(this,v288StaticAssetBeforeAuth\)/);
+  assert.match(staticPreAuthSource, /isAuthRegistration/);
 });
 
 
