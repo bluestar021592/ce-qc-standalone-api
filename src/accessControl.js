@@ -18,6 +18,7 @@ const PURGE_STATUS_PATH=/^\/purge-status\/[a-f0-9]{48}\.json$/i;
 const PURGE_PREPARE_AUDITS=new Set(['DATA_PURGE_REQUESTED','DATA_PURGE_BACKUP_VERIFIED']);
 export const V430_INTERNAL_LOGIN_FALLBACK_ID = '2026-09-05-v430-native-form-login-fallback-v1';
 export const V431_LOCAL_AUTH_SIDECAR_ID = '2026-09-05-v431-readonly-local-auth-sidecar-v1';
+export const V556_LOCAL_AUTH_FAST_PATH_ID = '2026-09-19-v556-local-auth-no-core-session-read-v1';
 let jwks = null;
 let authSidecarChild = null;
 let authSidecarStopping = false;
@@ -91,7 +92,13 @@ export async function accessIdentity(req, res, next) {
       return denyPageOrApi(req, res, 403, 'Access denied', publicHost ? `Please use https://${publicHost}` : 'Contact the system administrator.');
     }
     let user = readLocalAuthSession(req, channel);
-    if (!user) {
+    // V556: LOCAL/LAN page navigation is owned by the V431/V506 local-auth path.
+    // Never fall back to the SQLite-backed ce_internal_session reader here: an
+    // expired/stale browser cookie must not turn a simple GET / into a synchronous
+    // large-database read that can leave the browser navigation blank and pending.
+    // PUBLIC keeps the existing database-backed internal session behavior.
+    const localAuthFastPath = channel === 'LOCAL' || channel === 'LAN';
+    if (!user && !localAuthFastPath) {
       user = readSession(req, channel, cloudflareEmail);
       if (user) user = refreshSessionIfNeeded(req, res, user, channel);
     }
@@ -202,7 +209,19 @@ function issueSession(res, row, req, channel, cloudflareEmail, mustChangePasswor
   const expiresAt = new Date(Date.now() + SESSION_HOURS * 60 * 60_000).toISOString();
   getDb().prepare('INSERT INTO user_sessions(userId,sessionHash,accessChannel,cloudflareEmail,ipAddress,userAgent,expiresAt,createdAt) VALUES(?,?,?,?,?,?,?,?)')
     .run(row.id, sha256(raw), channel, cloudflareEmail || null, normalizeIp(req.socket?.remoteAddress), String(req.get('user-agent') || '').slice(0, 300), expiresAt, nowIso());
-  res.setHeader('Set-Cookie', `ce_internal_session=${raw}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}${channel === 'PUBLIC' ? '; Secure' : ''}`);
+  const cookies = [`ce_internal_session=${raw}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}${channel === 'PUBLIC' ? '; Secure' : ''}`];
+  if (channel === 'LOCAL' || channel === 'LAN') {
+    const secret = localAuthSecret();
+    if (secret) {
+      const exp = Date.now() + SESSION_HOURS * 60 * 60_000;
+      const payload = { v: 431, iat: Date.now(), exp, channel, user: publicUser(row) };
+      if (payload.user && typeof payload.user === 'object') payload.user.devMode = channel === 'LOCAL';
+      const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+      const sig = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+      cookies.push(`${LOCAL_AUTH_COOKIE}=${body}.${sig}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}`);
+    }
+  }
+  res.setHeader('Set-Cookie', cookies);
   if (isNativeAuthForm(req)) return res.redirect(303, '/');
   return res.json({ ok: true, user: publicUser(row), mustChangePassword, expiresAt });
 }
