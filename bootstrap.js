@@ -270,6 +270,12 @@ try {
   await importPhase('v146UnifiedImportDateBridgePatch', './src/v146UnifiedImportDateBridgePatch.js');
   await importPhase('v42WhppPatch', './src/v42WhppPatch.js');
   await importPhase('v44WhppUiPatch', './src/v44WhppUiPatch.js');
+  // Static CSS/JS/images must bypass SQLite-backed authentication. This owner
+  // arms before server.js registers accessIdentity, then restores express.use.
+  // Without it a valid DB session can make every render-blocking asset wait on
+  // the multi-GB SQLite file, leaving the browser stuck after <title> with a
+  // completely blank body.
+  await importPhase('v288StaticAssetPreAuthPatch', './src/v288StaticAssetPreAuthPatch.js');
   await importPhase('v89StaticAssetCachePatch', './src/v89StaticAssetCachePatch.js');
   await importPhase('v43BootstrapPerfPatch', './src/v43BootstrapPerfPatch.js');
   await importPhase('v46ColdStartIndexPatch', './src/v46ColdStartIndexPatch.js');
