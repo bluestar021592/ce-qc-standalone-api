@@ -118,7 +118,7 @@ test('V556 LOCAL/LAN navigation never falls back to the SQLite-backed core sessi
   const access=read('src/accessControl.js');
   assert.match(access,/V556_LOCAL_AUTH_FAST_PATH_ID = '2026-09-19-v556-local-auth-no-core-session-read-v1'/);
   const identity=access.match(/export async function accessIdentity\(req, res, next\) \{[\s\S]*?\n\}/)?.[0]||'';
-  assert.match(identity,/const localAuthFastPath = channel === 'LOCAL' \|\| channel === 'LAN';/);
+  assert.match(identity,/const localAuthFastPath = \(channel === 'LOCAL' \|\| channel === 'LAN'\) && !req\.v505PurgeReadOnlyAuth;/);
   assert.match(identity,/if \(!user && !localAuthFastPath\) \{/);
   assert.match(identity,/user = readSession\(req, channel, cloudflareEmail\);/);
   const issuer=access.match(/function issueSession\(res, row, req, channel, cloudflareEmail, mustChangePassword\) \{[\s\S]*?\n\}/)?.[0]||'';
