@@ -97,7 +97,7 @@ export async function accessIdentity(req, res, next) {
     // expired/stale browser cookie must not turn a simple GET / into a synchronous
     // large-database read that can leave the browser navigation blank and pending.
     // PUBLIC keeps the existing database-backed internal session behavior.
-    const localAuthFastPath = channel === 'LOCAL' || channel === 'LAN';
+    const localAuthFastPath = (channel === 'LOCAL' || channel === 'LAN') && !req.v505PurgeReadOnlyAuth;
     if (!user && !localAuthFastPath) {
       user = readSession(req, channel, cloudflareEmail);
       if (user) user = refreshSessionIfNeeded(req, res, user, channel);
