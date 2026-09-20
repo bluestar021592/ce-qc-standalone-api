@@ -297,7 +297,7 @@ export function inspectLivePrepareJob(user={}){
   return {dead:false,job,file,ownership,payload:pendingPreparePayload({...job,message:unknown?'安全备份任务进程状态暂时无法确认；系统保持锁定，不会启动第二份备份。':(Date.now()-Number(job.heartbeatAt||0)>HEARTBEAT_STALE_MS?'安全备份进程仍存活，但状态心跳延迟；系统保持锁定，不会启动第二份备份。':'安全备份正在后台执行。')})};
 }
 
-export function inspectExecutionRecovery(user={}){
+export function inspectExecutionRecovery(user={},options={}){
   const file=executeJobFile(user);let job=readJson(file);
   if(!job)return null;
   let status=String(job.status||'').toUpperCase();
@@ -345,6 +345,10 @@ export function inspectExecutionRecovery(user={}){
   if(status==='SUCCEEDED'&&Date.now()-Number(job.completedAt||job.updatedAt||0)<=EXECUTE_RECOVERY_MS)return {...pendingPayload(job),status:'SUCCEEDED',completed:true,result:job.result||null};
   if(status==='FAILED'){
     if(receipt)return spawnExecutionWorker(file,{...job,status:'COMMITTED'},{committed:true,delayMs:250});
+    const recoverJobId=String(options?.recoverJobId||'').trim();
+    if(recoverJobId&&recoverJobId===String(job.jobId||'')){
+      return {...pendingPayload(job),status:'FAILED',failed:true,error:String(job.error||'后台清空任务失败。'),failedAt:Number(job.failedAt||job.updatedAt||0),diagnostic:true};
+    }
     removeJobArtifacts(file,job);return null;
   }
   if(status==='SUCCEEDED'){removeJobArtifacts(file,job);return null;}
@@ -353,7 +357,7 @@ export function inspectExecutionRecovery(user={}){
 
 export async function v505PurgePrepareHandler(req,res){
   try{
-    const executing=inspectExecutionRecovery(req.user||{});
+    const executing=inspectExecutionRecovery(req.user||{},{recoverJobId:String(req.body?.recoverJobId||'')});
     if(executing)return res.json({ok:true,...executing,administrator:req.user?.email||req.user?.username||''});
     const live=inspectLivePrepareJob(req.user||{});
     if(live&&!live.dead)return res.json({ok:true,...live.payload,administrator:req.user?.email||req.user?.username||''});
