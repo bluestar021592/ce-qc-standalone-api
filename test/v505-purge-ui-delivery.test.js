@@ -145,6 +145,7 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
   };
   const executeJob={ok:true,async:true,kind:'EXECUTE',status:'QUEUED',jobId:'execute-v545-ui-test',statusUrl:`/purge-status/${'a'.repeat(48)}.json`};
   let preparePosts=0;
+  let diagnosticPosts=0;
   let executePosts=0;
   let persistedExecute=null;
   let executeUiAtSubmit=null;
