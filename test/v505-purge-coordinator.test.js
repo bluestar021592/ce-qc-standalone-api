@@ -161,3 +161,28 @@ test('V505 coordinator restarts only post-commit finalization for an exact recei
     fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
   }
 });
+
+
+test('V505 failed EXECUTE exposes exact detail only to the bound admin recovery probe, then retires on a fresh prepare path',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v505-failed-detail-'));
+  process.env.DATA_DIR=dir;
+  process.env.DB_FILE=path.join(dir,'test.db');
+  process.env.CE_QC_DISABLE_CARRY_REFRESH='1';
+  const {getRuntimeConfig,closeDb}=await import('../src/db.js');
+  const {inspectExecutionRecovery}=await import('../src/v505PurgeCoordinator.js');
+  const user={email:'failed-detail-admin@example.test',role:'ADMIN'};const key=identityKey(user);
+  const cfg=getRuntimeConfig();const executeDir=path.join(cfg.backupsDir,'.purge_execute_jobs');fs.mkdirSync(executeDir,{recursive:true});
+  const executeFile=path.join(executeDir,`${key}.job.json`);const jobId=crypto.randomUUID();const exact='V505 test exact worker failure detail';
+  try{
+    fs.writeFileSync(executeFile,JSON.stringify({kind:'EXECUTE',jobId,status:'FAILED',failedAt:Date.now(),updatedAt:Date.now(),workerPid:0,error:exact}),'utf8');
+    const diagnostic=inspectExecutionRecovery(user,{recoverJobId:jobId});
+    assert.equal(diagnostic?.status,'FAILED');assert.equal(diagnostic?.jobId,jobId);assert.equal(diagnostic?.error,exact);assert.equal(diagnostic?.diagnostic,true);
+    assert.equal(fs.existsSync(executeFile),true,'diagnostic read must not destroy failure evidence');
+    const fresh=inspectExecutionRecovery(user);
+    assert.equal(fresh,null,'ordinary fresh-prepare path may retire an uncommitted failed execute');
+    assert.equal(fs.existsSync(executeFile),false,'fresh path retires old failed execute sidecar after the detail probe window');
+  }finally{
+    try{closeDb();}catch{}
+    fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
+  }
+});
