@@ -137,7 +137,7 @@ assert.match(preClear,/BEGIN IMMEDIATE/,'pre-clear backup must still seal writes
 assert.match(preClear,/v547-bounded-throughput/);
 
 const ui=read('public/v505-data-purge-recovery.js');
-assert.match(ui,/v545-explicit-two-step-purge-ui-v1/);
+assert.match(ui,/v555-visible-execute-progress-v1/);
 assert.doesNotMatch(ui,/requestJson\('\/api\/session'/,'purge open must never depend on a duplicate /api/session round-trip');
 assert.match(ui,/knownRole=typeof accessSession!=='undefined'/,'UI may use already-loaded session state only as a best-effort early role hint');
 assert.match(ui,/尚未开始任何备份或清空任务/,'opening the wizard must be inert');
@@ -158,9 +158,9 @@ assert.match(server,/app\.post\('\/api\/admin\/data-purge\/execute', requireRole
 
 const lazy=read('public/v108-route-lazy-features.js');
 assert.match(lazy,/2026-09-15-v545-explicit-purge-owner-v1/,'V545 route-lazy owner version must force a fresh loader');
-assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v545-1/,'V545 must cache-bust the purge owner');
+assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260920-v555-1/,'V555 must cache-bust the purge owner');
 assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v545-1/,'V545 must cache-bust the legacy-control guard with the owner');
-assert.match(lazy,/installed\.includes\('v545-explicit-two-step'\)/,'V545 must reject stale purge owners at the capture gate');
+assert.match(lazy,/installed\.includes\('v555-visible-execute-progress'\)/,'V555 must reject stale purge owners at the capture gate');
 assert.match(lazy,/event\.stopImmediatePropagation\(\)/);
 assert.match(lazy,/loadGroup\('data'\)\.then/);
 assert.match(lazy,/reassertPurgeOwner/);
@@ -168,7 +168,7 @@ assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
 const backupUi=read('public/v502-multidrive-backup-ui.js');
 assert.match(backupUi,/2026-09-15-v545-explicit-purge-owner-cache-bust-v1/);
-assert.match(backupUi,/v545-explicit-two-step/);
-assert.match(backupUi,/v505-data-purge-recovery\.js\?v=20260915-v545-1/);
+assert.match(backupUi,/v555-visible-execute-progress/);
+assert.match(backupUi,/v505-data-purge-recovery\.js\?v=20260920-v555-1/);
 
 console.log('[CE-QC][V505_PURGE_ASYNC_SMOKE] pass · V547 backs off idle purge reconciliation, caches Windows PID creation-time lookups, skips terminal PID probes, and raises pre-clear backup chunks to bounded 2048 pages while preserving full quick_check + SHA + source-fingerprint safety');

@@ -75,9 +75,9 @@
   }
 
   const installedPurgePatch=String(global.__CE_QC_V505_DATA_PURGE_RECOVERY__?.patchId||'');
-  if(!installedPurgePatch.includes('v545-explicit-two-step')){
+  if(!installedPurgePatch.includes('v555-visible-execute-progress')){
     const script=document.createElement('script');
-    script.src='/v505-data-purge-recovery.js?v=20260915-v545-1';
+    script.src='/v505-data-purge-recovery.js?v=20260920-v555-1';
     script.async=false;
     script.onload=loadStartupProbe;
     document.head.appendChild(script);
