@@ -1,13 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 
 import { getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES } from './store.js';
 import { inspectV541PurgeJobWorker } from './v541PurgePidOwnership.js';
 
-export const DIRECT_PURGE_ID='2026-09-20-v560-direct-no-backup-purge-v1';
+export const DIRECT_PURGE_ID='2026-09-20-v561-direct-no-backup-detached-worker-v1';
 export const DIRECT_PURGE_PHRASE='永久清除全部业务数据';
 
 const ACTIVE_JOB_STATUS=new Set(['QUEUED','RUNNING']);
@@ -99,7 +101,7 @@ async function clearRegenerableFiles(){
   }
   return warnings;
 }
-function directResetTransaction(db){
+function directResetTransaction(db,onProgress=()=>{}){
   const now=nowIso();
   const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>String(row.name||'')));
   const clearTargets=BUSINESS_DATA_TABLES.filter(name=>existing.has(name));
@@ -108,12 +110,17 @@ function directResetTransaction(db){
   let transactionStarted=false;
   try{
     if(foreignKeysBefore)db.exec('PRAGMA foreign_keys=OFF');
+    onProgress({status:'RUNNING',stage:'WAITING_DB_LOCK',message:'正在取得数据库写锁。'});
     db.exec('BEGIN IMMEDIATE');
     transactionStarted=true;
-    for(const table of clearTargets){
+    onProgress({status:'RUNNING',stage:'DELETE_TABLES',message:'已取得数据库写锁，开始清空业务表。',completedTables:0,totalTables:clearTargets.length});
+    for(let index=0;index<clearTargets.length;index+=1){
+      const table=clearTargets[index];
       const deleted=db.prepare(`DELETE FROM ${table}`).run();
       before[table]=Number(deleted?.changes||0);
+      onProgress({status:'RUNNING',stage:'DELETE_TABLES',message:`正在清空业务表 ${index+1}/${clearTargets.length}`,table,completedTables:index+1,totalTables:clearTargets.length,deletedRows:Object.values(before).reduce((sum,value)=>sum+Number(value||0),0)});
     }
+    onProgress({status:'RUNNING',stage:'VERIFYING',message:'业务表删除完成，正在校验清空结果。',completedTables:clearTargets.length,totalTables:clearTargets.length,deletedRows:Object.values(before).reduce((sum,value)=>sum+Number(value||0),0)});
     for(const [table,sql] of FAST_INDEXES)if(existing.has(table))db.exec(sql);
     for(const table of clearTargets){
       const remaining=Number(db.prepare(`SELECT COUNT(*) count FROM ${table}`).get()?.count||0);
@@ -127,8 +134,10 @@ function directResetTransaction(db){
     meta.run('current_snapshot_id','',now);
     meta.run('v108_performance_indexes_ready','1',now);
     db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN (?,?,?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY,PURGE_BLOCK_KEY,PURGE_COMMIT_RECEIPT_KEY);
+    onProgress({status:'RUNNING',stage:'COMMITTING',message:'校验完成，正在提交清空事务。',deletedRows:Object.values(before).reduce((sum,value)=>sum+Number(value||0),0)});
     db.exec('COMMIT');
     transactionStarted=false;
+    onProgress({status:'RUNNING',stage:'COMMITTED',message:'清空事务已提交，正在清理可再生成文件。',deletedRows:Object.values(before).reduce((sum,value)=>sum+Number(value||0),0)});
     return {before,after,completedAt:now};
   }catch(error){
     if(transactionStarted){try{db.exec('ROLLBACK');}catch{}}
@@ -138,9 +147,10 @@ function directResetTransaction(db){
   }
 }
 
-export async function executeDirectDataPurge({phrase,user={}}={}){
+export async function executeDirectDataPurge({phrase,user={},onProgress=()=>{}}={}){
   if(String(phrase||'')!==DIRECT_PURGE_PHRASE)throw new Error(`请输入完整确认短语：${DIRECT_PURGE_PHRASE}`);
   const administrator=String(user.email||user.username||'');
+  onProgress({status:'RUNNING',stage:'RETIRING_LEGACY',message:'正在结束旧的备份/清空任务状态。'});
   const retiredLegacyJobs=retireLegacyPurgeArtifacts();
   await new Promise(resolve=>setTimeout(resolve,350));
 
@@ -150,10 +160,11 @@ export async function executeDirectDataPurge({phrase,user={}}={}){
   try{
     db.exec('PRAGMA busy_timeout=60000');
     db.exec('PRAGMA foreign_keys=ON');
-    reset=directResetTransaction(db);
+    reset=directResetTransaction(db,onProgress);
   }finally{
     try{db.close();}catch{}
   }
+  onProgress({status:'RUNNING',stage:'FILE_CLEANUP',message:'数据库已清空，正在清理导入/导出临时文件。',deletedRows:Object.values(reset.before||{}).reduce((sum,value)=>sum+Number(value||0),0)});
   const fileCleanupWarnings=await clearRegenerableFiles();
   return {
     ok:true,
@@ -170,4 +181,134 @@ export async function executeDirectDataPurge({phrase,user={}}={}){
     retiredLegacyJobs,
     patchId:DIRECT_PURGE_ID
   };
+}
+
+
+const directJobs=new Map();
+let activeDirectJobId='';
+
+function publicDirectJob(job={}){
+  return {
+    ok:true,
+    direct:true,
+    async:true,
+    jobId:String(job.jobId||''),
+    status:String(job.status||'QUEUED'),
+    stage:String(job.stage||'QUEUED'),
+    message:String(job.message||''),
+    startedAt:Number(job.startedAt||0),
+    updatedAt:Number(job.updatedAt||0),
+    completedTables:Number(job.completedTables||0),
+    totalTables:Number(job.totalTables||0),
+    deletedRows:Number(job.deletedRows||0),
+    error:String(job.error||''),
+    code:String(job.code||''),
+    completedAt:String(job.completedAt||''),
+    patchId:DIRECT_PURGE_ID
+  };
+}
+
+export function queueDirectDataPurge({phrase,user={}}={}){
+  if(!isMainThread)throw new Error('只能由5177主进程提交直接清空任务。');
+  if(String(phrase||'')!==DIRECT_PURGE_PHRASE){
+    const error=new Error(`请输入完整确认短语：${DIRECT_PURGE_PHRASE}`);
+    error.code='DIRECT_PURGE_CONFIRMATION_REQUIRED';
+    throw error;
+  }
+  const administrator=String(user.email||user.username||'').trim();
+  if(!administrator){
+    const error=new Error('管理员身份无效，请重新登录。');
+    error.code='DIRECT_PURGE_ADMIN_REQUIRED';
+    throw error;
+  }
+  if(activeDirectJobId){
+    const existing=directJobs.get(activeDirectJobId);
+    if(existing&&['QUEUED','RUNNING'].includes(String(existing.status||'').toUpperCase())){
+      return {...publicDirectJob(existing),reused:true};
+    }
+  }
+
+  const jobId=crypto.randomUUID();
+  const startedAt=Date.now();
+  const job={
+    jobId,administrator,status:'QUEUED',stage:'QUEUED',
+    message:'直接清空任务已提交，正在启动独立后台线程。',
+    startedAt,updatedAt:startedAt,deletedRows:0,completedTables:0,totalTables:0
+  };
+  directJobs.set(jobId,job);
+  activeDirectJobId=jobId;
+
+  const worker=new Worker(new URL(import.meta.url),{
+    workerData:{
+      ceQcDirectPurgeWorker:true,
+      phrase:DIRECT_PURGE_PHRASE,
+      administrator
+    }
+  });
+  job.worker=worker;
+  job.status='RUNNING';
+  job.stage='STARTING_WORKER';
+  job.message='独立后台清空线程已启动。';
+  job.updatedAt=Date.now();
+
+  worker.on('message',message=>{
+    const current=directJobs.get(jobId);
+    if(!current)return;
+    Object.assign(current,message||{},{jobId,administrator,updatedAt:Date.now()});
+    if(['SUCCEEDED','FAILED'].includes(String(current.status||'').toUpperCase())){
+      current.worker=null;
+      if(activeDirectJobId===jobId)activeDirectJobId='';
+    }
+  });
+  worker.on('error',error=>{
+    const current=directJobs.get(jobId);
+    if(!current)return;
+    Object.assign(current,{status:'FAILED',stage:'FAILED',error:String(error?.message||error),message:String(error?.message||error),code:'DIRECT_PURGE_WORKER_ERROR',updatedAt:Date.now(),worker:null});
+    if(activeDirectJobId===jobId)activeDirectJobId='';
+  });
+  worker.on('exit',code=>{
+    const current=directJobs.get(jobId);
+    if(!current)return;
+    if(!['SUCCEEDED','FAILED'].includes(String(current.status||'').toUpperCase())){
+      Object.assign(current,{status:'FAILED',stage:'FAILED',error:`后台清空线程异常结束（exit=${code}）。`,message:`后台清空线程异常结束（exit=${code}）。`,code:'DIRECT_PURGE_WORKER_EXIT',updatedAt:Date.now(),worker:null});
+    }
+    if(activeDirectJobId===jobId)activeDirectJobId='';
+  });
+
+  return {...publicDirectJob(job),reused:false};
+}
+
+export function getDirectDataPurgeStatus({jobId,user={}}={}){
+  const id=String(jobId||'').trim();
+  const administrator=String(user.email||user.username||'').trim();
+  const job=directJobs.get(id);
+  if(!job){
+    const error=new Error('没有找到该直接清空任务。');
+    error.code='DIRECT_PURGE_JOB_NOT_FOUND';
+    throw error;
+  }
+  if(administrator&&job.administrator&&administrator!==job.administrator){
+    const error=new Error('该清空任务属于其他管理员。');
+    error.code='DIRECT_PURGE_JOB_OWNER_MISMATCH';
+    throw error;
+  }
+  return publicDirectJob(job);
+}
+
+if(!isMainThread&&workerData?.ceQcDirectPurgeWorker===true){
+  const send=payload=>{try{parentPort?.postMessage(payload);}catch{}};
+  try{
+    const result=await executeDirectDataPurge({
+      phrase:String(workerData.phrase||''),
+      user:{email:String(workerData.administrator||''),role:'ADMIN'},
+      onProgress:progress=>send({...progress,status:'RUNNING',updatedAt:Date.now()})
+    });
+    send({
+      status:'SUCCEEDED',stage:'SUCCEEDED',message:'全部业务数据已直接清空。',
+      completedAt:result.completedAt,deletedRows:Object.values(result.before||{}).reduce((sum,value)=>sum+Number(value||0),0),
+      before:result.before,after:result.after,fileCleanupWarnings:result.fileCleanupWarnings||[],updatedAt:Date.now()
+    });
+  }catch(error){
+    send({status:'FAILED',stage:'FAILED',message:String(error?.message||error),error:String(error?.message||error),code:String(error?.code||'DIRECT_PURGE_WORKER_FAILED'),updatedAt:Date.now()});
+  }
 }

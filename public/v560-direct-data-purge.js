@@ -1,5 +1,5 @@
 (function installV560DirectDataPurge(global){
-  const PATCH_ID='2026-09-20-v560-direct-no-backup-ui-v1';
+  const PATCH_ID='2026-09-20-v561-direct-no-backup-async-ui-v1';
   const PHRASE='永久清除全部业务数据';
   let openedAt=0;
   let active=false;
@@ -7,7 +7,7 @@
   const node=id=>document.getElementById(id);
   const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
-  async function requestJson(url,options={},timeoutMs=60*60_000){
+  async function requestJson(url,options={},timeoutMs=15_000){
     const controller=new AbortController();
     const timeout=setTimeout(()=>controller.abort(),timeoutMs);
     try{
@@ -53,6 +53,58 @@
     stopClock();
     const dialog=node('directPurgeDialog');if(dialog)dialog.hidden=true;
   }
+  const STAGE_LABELS={
+    QUEUED:'任务已提交',
+    STARTING_WORKER:'独立后台线程已启动',
+    RETIRING_LEGACY:'正在结束旧的备份/清空状态',
+    WAITING_DB_LOCK:'正在取得数据库写锁',
+    DELETE_TABLES:'正在清空业务表',
+    VERIFYING:'正在校验清空结果',
+    COMMITTING:'正在提交清空事务',
+    COMMITTED:'清空事务已提交',
+    FILE_CLEANUP:'正在清理临时文件',
+    SUCCEEDED:'清空完成',
+    FAILED:'清空失败'
+  };
+
+  function renderJobStatus(job,started){
+    const preview=node('directPurgePreview');
+    if(!preview)return;
+    const stage=String(job?.stage||job?.status||'RUNNING').toUpperCase();
+    const label=STAGE_LABELS[stage]||String(job?.message||'正在后台清空业务数据');
+    const completed=Number(job?.completedTables||0);
+    const total=Number(job?.totalTables||0);
+    const deleted=Number(job?.deletedRows||0);
+    const elapsed=Math.max(0,Math.floor((Date.now()-started)/1000));
+    const progress=total>0?`<br><span>业务表进度：<b>${completed}/${total}</b></span>`:'';
+    const deletedLine=deleted>0?`<br><span>已删除记录：<b>${deleted.toLocaleString()}</b> 行</span>`:'';
+    preview.innerHTML=`<div class="purge-warning"><b>${escapeText(label)}</b>${progress}${deletedLine}<br><small>已等待 ${elapsed} 秒。清空在独立后台线程执行，页面和5177不会再被SQLite同步删除卡死。</small></div>`;
+  }
+
+  async function waitForDirectPurge(job,started){
+    const jobId=String(job?.jobId||'');
+    if(!jobId)throw new Error('后台没有返回清空任务编号。');
+    let failures=0;
+    for(;;){
+      try{
+        const status=await requestJson(`/api/admin/data-purge/direct/status?jobId=${encodeURIComponent(jobId)}`,{},12_000);
+        failures=0;
+        renderJobStatus(status,started);
+        const state=String(status.status||'').toUpperCase();
+        if(state==='SUCCEEDED')return status;
+        if(state==='FAILED'){
+          const error=new Error(status.error||status.message||'直接清空失败。');
+          error.code=String(status.code||'DIRECT_PURGE_FAILED');
+          throw error;
+        }
+      }catch(error){
+        if(String(error?.code||'')==='DIRECT_PURGE_FAILED'||String(error?.code||'').startsWith('DIRECT_PURGE_WORKER'))throw error;
+        failures+=1;
+        if(failures>=20)throw error;
+      }
+      await new Promise(resolve=>setTimeout(resolve,750));
+    }
+  }
   async function executeDirectDataPurge(){
     if(active)return;
     updateDirectPurgeButton();
@@ -64,20 +116,19 @@
     const phrase=node('directPurgePhrase');if(phrase)phrase.disabled=true;
     const preview=node('directPurgePreview');
     const started=Date.now();
-    if(preview)preview.innerHTML='<div class="purge-warning"><b>正在直接事务化清空全部业务数据…</b><br><span>不会创建备份，也不会等待安全封锁。</span><br><small id="directPurgeElapsed">已等待 0 秒</small></div>';
-    const elapsed=setInterval(()=>{const e=node('directPurgeElapsed');if(e)e.textContent=`已等待 ${Math.floor((Date.now()-started)/1000)} 秒`;},1000);
+    if(preview)preview.innerHTML='<div class="purge-warning"><b>正在提交独立后台清空任务…</b><br><span>不会创建备份，也不会等待安全封锁。</span><br><small>5177主线程将保持响应。</small></div>';
     try{
-      const result=await requestJson('/api/admin/data-purge/direct',{
+      const queued=await requestJson('/api/admin/data-purge/direct',{
         method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phrase:PHRASE})
-      });
-      clearInterval(elapsed);
-      const deleted=Object.values(result.before||{}).reduce((sum,value)=>sum+Number(value||0),0);
+      },15_000);
+      renderJobStatus(queued,started);
+      const result=await waitForDirectPurge(queued,started);
+      const deleted=Number(result.deletedRows||0);
       if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>未创建新备份；用户、权限、配置、白名单、已有备份和审计已保留。现在可以重新上传新的日报数据。</small></div>`;
     }catch(error){
-      clearInterval(elapsed);
       active=false;
       if(phrase)phrase.disabled=false;
-      if(preview)preview.innerHTML=`<div class="purge-error"><b>直接清空未完成。</b><br>${escapeText(error.message||error)}<br><small>未显示成功前不要重复点击；可把此错误直接发给开发处理。</small></div>`;
+      if(preview)preview.innerHTML=`<div class="purge-error"><b>直接清空未完成。</b><br>${escapeText(error.message||error)}<br><small>未显示成功前不要重复点击；把此错误直接发给开发处理即可。</small></div>`;
       openedAt=Date.now()-5000;
       startClock();
       return;
