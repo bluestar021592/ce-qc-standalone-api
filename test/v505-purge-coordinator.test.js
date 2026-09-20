@@ -169,12 +169,14 @@ test('V505 failed EXECUTE exposes exact detail only to the bound admin recovery 
   process.env.DB_FILE=path.join(dir,'test.db');
   process.env.CE_QC_DISABLE_CARRY_REFRESH='1';
   const {getRuntimeConfig,closeDb}=await import('../src/db.js');
-  const {inspectExecutionRecovery}=await import('../src/v505PurgeCoordinator.js');
+  const {inspectExecutionRecovery,inspectFailedExecutionDetail}=await import('../src/v505PurgeCoordinator.js');
   const user={email:'failed-detail-admin@example.test',role:'ADMIN'};const key=identityKey(user);
   const cfg=getRuntimeConfig();const executeDir=path.join(cfg.backupsDir,'.purge_execute_jobs');fs.mkdirSync(executeDir,{recursive:true});
   const executeFile=path.join(executeDir,`${key}.job.json`);const jobId=crypto.randomUUID();const exact='V505 test exact worker failure detail';
   try{
     fs.writeFileSync(executeFile,JSON.stringify({kind:'EXECUTE',jobId,status:'FAILED',failedAt:Date.now(),updatedAt:Date.now(),workerPid:0,error:exact}),'utf8');
+    const reopened=inspectFailedExecutionDetail(user);
+    assert.equal(reopened?.status,'FAILED');assert.equal(reopened?.jobId,jobId);assert.equal(reopened?.error,exact);assert.equal(fs.existsSync(executeFile),true,'reopen diagnostic must be inert');
     const diagnostic=inspectExecutionRecovery(user,{recoverJobId:jobId});
     assert.equal(diagnostic?.status,'FAILED');assert.equal(diagnostic?.jobId,jobId);assert.equal(diagnostic?.error,exact);assert.equal(diagnostic?.diagnostic,true);
     assert.equal(fs.existsSync(executeFile),true,'diagnostic read must not destroy failure evidence');
