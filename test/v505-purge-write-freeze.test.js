@@ -100,9 +100,10 @@ test('V547 keeps purge safety while idle reconciliation stays low-power',async()
     fs.writeFileSync(prepareFile,JSON.stringify({jobId:crypto.randomUUID(),status:'SUCCEEDED',workerPid:process.pid,workerClaimedAt:Date.now()-60_000,payload:{expiresAt:new Date(Date.now()+5*60_000).toISOString()}}),'utf8');
     setLiveSqliteBlock();
     const waitingExecuteWrite=runGuard(request('PATCH','/api/settings'));
-    assert.equal(waitingExecuteWrite.nextCalled,true,'a completed PREPARE waiting for explicit V545 step two must no longer keep the whole application frozen');
-    assert.equal(waitingExecuteWrite.req.v505PurgeReadOnlyAuth,true,'auth bookkeeping stays write-free while the prepared challenge exists, even though ordinary app traffic is thawed');
-    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'the old one-hour PREPARE block is suppressed once the backup worker is complete');
+    assert.equal(waitingExecuteWrite.nextCalled,false,'a completed PREPARE waiting for explicit step two must keep unrelated HTTP writes frozen so the verified source fingerprint cannot drift');
+    assert.equal(waitingExecuteWrite.res.statusCode,423);
+    assert.equal(waitingExecuteWrite.req.v505PurgeReadOnlyAuth,true,'auth bookkeeping stays write-free while the prepared challenge exists');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'sealed PREPARE blocks HTTP writes without leaving the shared DB connection query-only');
     const reconciledCompleted=reconcilePurgeQueryOnlyNow();
     assert.equal(reconciledCompleted.state.active,false);
     assert.equal(reconciledCompleted.state.prepareBlockSuppressed,true);
