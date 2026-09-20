@@ -1,11 +1,9 @@
 (function installStartupSourceTruthV81(global) {
   if (global.__CE_QC_V81_STARTUP_SOURCE_TRUTH__) return;
 
-  const VERSION = '2026-08-13-v89-startup-single-flight-v3';
+  const VERSION = '2026-09-20-v555-startup-shell-nonblocking-v1';
   const PRIMARY_GRACE_MS = 1800;
-  const RETRY_DELAYS = [250, 750, 1500, 3000, 5000, 8000];
-  let attempt = 0;
-  let timer = null;
+  const FALLBACK_TIMEOUT_MS = 2500;
   let fallbackRunning = false;
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -14,32 +12,38 @@
     const status = document.getElementById('topRangeStatus');
     if (!status) return;
     const current = String(status.textContent || '').trim();
-    if (force || !current || /正在读取最新日报|正在加载看板指标|最新日报读取失败|后台恢复/.test(current)) status.textContent = text || '';
+    if (force || !current || /正在读取最新日报|正在加载看板指标|最新日报读取失败|后台恢复|主启动数据仍未就绪/.test(current)) {
+      status.textContent = text || '';
+    }
   }
 
-  function primaryReady() {
+  function dataReady() {
     try {
       return Boolean(unifiedImportState?.snapshotId && unifiedImportState?.reportDate && appState?.reportDate && shopeeState?.reportDate);
     } catch { return false; }
   }
 
-  function dispatchReady(source = 'PRIMARY') {
-    if (!primaryReady()) return false;
+  function shellReady() {
+    try { return Boolean(accessSession?.user); } catch { return false; }
+  }
+
+  function dispatchReady(source = 'PRIMARY', allowShell = false) {
+    if (!dataReady() && !(allowShell && shellReady())) return false;
     setStartupStatus('', true);
     let reportDate = '';
     let snapshotId = '';
     try {
-      reportDate = unifiedImportState?.reportDate || appState?.reportDate || '';
+      reportDate = unifiedImportState?.reportDate || appState?.reportDate || shopeeState?.reportDate || '';
       snapshotId = unifiedImportState?.snapshotId || '';
     } catch {}
     global.dispatchEvent(new CustomEvent('ce-qc-startup-truth-ready', {
-      detail: { version: VERSION, source, reportDate, snapshotId }
+      detail: { version: VERSION, source, reportDate, snapshotId, shellReady: true, dataReady: dataReady() }
     }));
-    console.info('[CE-QC][V89_STARTUP_SINGLE_FLIGHT]', VERSION, source, reportDate);
+    console.info('[CE-QC][V555_STARTUP_SHELL_READY]', VERSION, source, reportDate || 'EMPTY');
     return true;
   }
 
-  async function fetchJson(url, timeoutMs = 5000) {
+  async function fetchJson(url, timeoutMs = FALLBACK_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -56,7 +60,7 @@
     }
   }
 
-  function applyFallback(latest, session, ccsl, shopee) {
+  function applyFallback(latest, session) {
     let changed = false;
     try {
       if (session?.user) { accessSession = session; changed = true; }
@@ -69,11 +73,9 @@
         if (!historyModeDate && !dashboardPeriodMode && !dashboardPeriodRange?.fromDate) historyModeDate = imported.reportDate;
         changed = true;
       }
-      if (ccsl?.state) { appState = ccsl.state; changed = true; }
-      if (shopee?.state) { shopeeState = shopee.state; changed = true; }
       if (changed && typeof global.renderAll === 'function') global.renderAll();
     } catch (error) {
-      console.warn('[CE-QC][V89_STARTUP] fallback binding skipped', error);
+      console.warn('[CE-QC][V555_STARTUP] lightweight fallback binding skipped', error);
     }
   }
 
@@ -83,41 +85,30 @@
   }
 
   async function fallbackRecover() {
-    if (fallbackRunning || dispatchReady('PRIMARY_LATE')) return;
+    if (fallbackRunning || dispatchReady('PRIMARY_LATE', true)) return;
     fallbackRunning = true;
-    setStartupStatus('主启动数据仍未就绪，正在进行轻量后台恢复…', true);
+    setStartupStatus('启动资料稍后补齐，界面可继续操作…', true);
     try {
+      // Never request aggregate CCSL/SHOPEE state from startup recovery.
+      // On a multi-GB production DB those compatibility reads can monopolize the
+      // single local SQLite service and make every click appear frozen.
       const results = await Promise.allSettled([
         fetchJson('/api/import/unified-latest?compact=1'),
-        fetchJson('/api/session'),
-        fetchJson('/api/state?compact=1'),
-        fetchJson('/api/shopee/state?compact=1')
+        fetchJson('/api/session')
       ]);
       const authFailure = results.find(result => result.status === 'rejected' && Number(result.reason?.status || 0) === 401);
       if (authFailure) return requestRelogin();
       const value = index => results[index].status === 'fulfilled' ? results[index].value : null;
-      applyFallback(value(0), value(1), value(2), value(3));
-      if (dispatchReady('FALLBACK')) return;
+      applyFallback(value(0), value(1));
+      if (dispatchReady('LIGHTWEIGHT_FALLBACK', true)) return;
+      setStartupStatus('', true);
+      console.info('[CE-QC][V555_STARTUP_SHELL_READY]', VERSION, 'NO_DATA_YET', 'EMPTY');
     } finally {
       fallbackRunning = false;
-    }
-
-    if (attempt < RETRY_DELAYS.length) {
-      const delay = RETRY_DELAYS[attempt++];
-      clearTimeout(timer);
-      timer = setTimeout(() => void fallbackRecover(), delay);
-    } else {
-      attempt = 0;
-      setStartupStatus('最新日报或看板指标仍在后台恢复…', true);
-      timer = setTimeout(() => void fallbackRecover(), 10000);
     }
   }
 
   async function coordinateStartup() {
-    // app.js already starts refresh() immediately. Older V81 simultaneously made
-    // four more API calls and then started a second refresh, tripling cold-start
-    // work. Wait for that primary single-flight first; only recover if it truly
-    // failed or exceeded the grace window.
     try {
       let active = null;
       try { active = typeof refreshPromise !== 'undefined' ? refreshPromise : null; } catch {}
@@ -127,10 +118,10 @@
         await sleep(PRIMARY_GRACE_MS);
       }
     } catch {}
-    if (dispatchReady('PRIMARY')) return;
+    if (dispatchReady('PRIMARY', true)) return;
     void fallbackRecover();
   }
 
-  global.__CE_QC_V81_STARTUP_SOURCE_TRUTH__ = { version: VERSION };
+  global.__CE_QC_V81_STARTUP_SOURCE_TRUTH__ = { version: VERSION, policy: 'SHELL_FIRST_NO_AGGREGATE_STATE_RECOVERY' };
   void coordinateStartup();
 })(window);
