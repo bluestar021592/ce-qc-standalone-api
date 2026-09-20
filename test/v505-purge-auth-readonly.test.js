@@ -67,6 +67,14 @@ test('V546 completed PREPARE keeps auth metadata write-free without leaving the 
     assert.equal(db.prepare('SELECT expiresAt FROM user_sessions WHERE sessionHash=?').get(sessionHash)?.expiresAt,originalExpiry,'near-expiry session must not be refreshed merely because the browser reopened a prepared challenge');
     assert.equal(res.getHeader('set-cookie'),undefined,'read-only auth must not rewrite the session cookie');
 
+    const writeReq=request(`ce_internal_session=${sessionToken}`);
+    writeReq.method='POST';writeReq.path='/api/business-write-test';writeReq.originalUrl='/api/business-write-test';writeReq.url='/api/business-write-test';
+    const writeRes=responseHarness();let writeNext=false;
+    v505PurgeWriteFreezeGuard(writeReq,writeRes,()=>{writeNext=true;});
+    assert.equal(writeNext,false,'completed PREPARE must keep ordinary HTTP writes frozen while explicit EXECUTE confirmation is pending');
+    assert.equal(writeRes.statusCode,423,'sealed PREPARE must reject unrelated POST writes without enabling whole-process query_only');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'HTTP write freeze must not require main connection query_only after PREPARE completion');
+
     const beforeAudit=Number(db.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0);
     auditAction(req,'V505_SHOULD_NOT_WRITE_AUDIT',{phase:'sealed'});
     const afterAudit=Number(db.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0);
