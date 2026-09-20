@@ -45,27 +45,24 @@ assert.match(startup,/typeof global\.refresh === 'function'/,'startup guard may 
 assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
 assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
 
-assert.match(purgeConsole,/CE QC 安全清空业务数据/,'V533 must provide a lightweight authenticated recovery page when the dashboard shell is unavailable');
-assert.match(purgeConsole,/onclick="window\.openDataPurge\?\.\(\)"/,'recovery page must delegate the action to the canonical V505 UI owner');
-assert.match(purgeConsole,/\/v505-data-purge-recovery\.js\?v=20260920-v555-1/,'recovery page must load the same V505 recovery owner');
-assert.match(purgeConsole,/id="purgePreview"/,'V505 status must remain visible on the lightweight recovery page');
-assert.doesNotMatch(purgeConsole,/fetch\(['"`]\/api\/admin\/data-purge|XMLHttpRequest/i,'recovery page must not implement a second purge transport');
-assert.doesNotMatch(purgeConsole,/\/api\/admin\/data-purge\/(?:prepare|execute)/i,'recovery HTML must never bypass the canonical V505 transport owner');
-assert.doesNotMatch(purgeConsole,/#purgeStepTwo\{display:none!important\}/,'recovery console must not permanently hide explicit confirmation step');
-assert.match(purgeConsole,/\[hidden\]\{display:none!important\}#purgeStepTwo:not\(\[hidden\]\)\{display:block!important\}/,'recovery console must reveal the canonical second confirmation step after verified backup');
-assert.match(purgeConsole,/onclick="continueDataPurge\(\)">备份并继续<\/button>/,'recovery console must expose the explicit backup-and-continue control');
-assert.match(purgeConsole,/id="purgeBackupConfirmed"[^>]*onchange="updatePurgeButton\(\)"/,'recovery console must expose the backup confirmation checkbox');
-assert.match(purgeConsole,/id="purgePhrase"[^>]*oninput="updatePurgeButton\(\)"/,'recovery console must expose the exact confirmation phrase field');
-assert.match(purgeConsole,/id="purgeExecuteButton"[^>]*onclick="executeDataPurge\(\)"[^>]*disabled>确认清空所有数据<\/button>/,'recovery console must expose the gated final purge button');
+assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
+assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');
+assert.match(purgeConsole,/\/v560-direct-data-purge\.js\?v=20260920-v560-1/,'recovery page must load the direct purge owner');
+assert.match(purgeConsole,/id="directPurgePreview"/,'direct purge progress must remain visible on the lightweight recovery page');
+assert.match(purgeConsole,/不创建新备份、不启用安全封锁/,'recovery page must state the requested no-backup/no-seal behavior');
+assert.match(purgeConsole,/id="directPurgePhrase"[^>]*oninput="updateDirectPurgeButton\(\)"/,'recovery console must expose the exact confirmation phrase field');
+assert.match(purgeConsole,/id="directPurgeExecuteButton"[^>]*onclick="executeDirectDataPurge\(\)"[^>]*disabled>确认直接清空所有数据<\/button>/,'recovery console must expose the gated direct purge button');
+assert.doesNotMatch(purgeConsole,/备份并继续|purgeBackupConfirmed|v505-data-purge-recovery\.js/,'direct recovery page must not start the legacy backup workflow');
 const recoveryHtmlRoute = server.indexOf("app.get(['/purge-console.html', '/purge-console']");
-const recoveryJsRoute = server.indexOf("app.get('/v505-data-purge-recovery.js'");
+const recoveryJsRoute = server.indexOf("app.get('/v560-direct-data-purge.js'");
 const authMiddleware = server.indexOf('app.use(accessIdentity);');
 assert.ok(recoveryHtmlRoute >= 0 && recoveryHtmlRoute < authMiddleware,'loopback purge HTML must be served before accessIdentity');
-assert.ok(recoveryJsRoute >= 0 && recoveryJsRoute < authMiddleware,'loopback purge JS must be served before accessIdentity');
+assert.ok(recoveryJsRoute >= 0 && recoveryJsRoute < authMiddleware,'loopback direct purge JS must be served before accessIdentity');
 assert.match(server,/function isLoopbackRecoveryRequest\(req\)/,'recovery pre-auth route must have an explicit loopback guard');
 assert.match(server,/\['127\.0\.0\.1', 'localhost', '::1'\]\.includes\(host\)/,'recovery pre-auth route must require loopback host');
 assert.match(server,/\['127\.0\.0\.1', '::1'\]\.includes\(remote\)/,'recovery pre-auth route must require loopback remote');
-assert.doesNotMatch(server.slice(recoveryHtmlRoute,authMiddleware),/\/api\/admin\/data-purge\/(?:prepare|execute)/,'pre-auth recovery shell must never expose purge APIs');
+assert.doesNotMatch(server.slice(recoveryHtmlRoute,authMiddleware),/app\.post\(['"]\/api\/admin\/data-purge\/direct/,'pre-auth recovery shell must never expose direct purge API before auth');
+assert.match(server,/app\.post\('\/api\/admin\/data-purge\/direct', requireRole\('ADMIN'\)/,'direct purge API must remain ADMIN-only after auth');
 
 
 // Execute the browser guard with two startup failure shapes:

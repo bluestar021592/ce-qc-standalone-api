@@ -3,45 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>CE QC 安全清空业务数据</title>
+  <title>CE QC 直接清空业务数据</title>
   <style>
     *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#f4f7fb;color:#18324f;font-family:"Microsoft YaHei","微软雅黑",Arial,sans-serif}body{min-height:100vh;display:grid;place-items:center;padding:24px}.card{width:min(760px,100%);background:#fff;border:1px solid #d9e4f2;border-radius:10px;box-shadow:0 8px 28px rgba(31,78,121,.10);padding:26px}.brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}.mark{width:44px;height:44px;border-radius:9px;background:#052b52;color:#fff;display:grid;place-items:center;font-weight:900}.brand b{display:block;font-size:20px}.brand small{display:block;margin-top:2px;color:#72859d}.danger-note,.purge-warning,.purge-error,.purge-success{padding:12px 14px;border-radius:7px;line-height:1.6}.danger-note,.purge-warning{border:1px solid #f3c3bf;background:#fff5f4;color:#8b2f27}.purge-error{border:1px solid #efaaa4;background:#fff3f2;color:#a12920}.purge-success{border:1px solid #a9ddc5;background:#effaf4;color:#176b49}.actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}button,a{min-height:40px;border-radius:6px;padding:9px 16px;font:inherit;font-weight:700;text-decoration:none;cursor:pointer}.primary{border:1px solid #c4473c;background:#d94f44;color:#fff}.ghost{border:1px solid #cfdbea;background:#fff;color:#31587f}.modal{margin-top:18px}.modal-card{width:100%}.modal .panel-title{display:none}[hidden]{display:none!important}#purgeStepTwo:not([hidden]){display:block!important}.modal-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}.danger-outline{border:1px solid #d94f44;background:#fff;color:#b3342b}.danger{border:1px solid #b3342b;background:#c93f35;color:#fff}.danger:disabled{opacity:.45;cursor:not-allowed}.confirm-check{display:flex;align-items:center;gap:8px;margin:14px 0;color:#29435f}.field-label{display:block;margin:14px 0;font-weight:700;color:#29435f}.field-label input{display:block;width:100%;box-sizing:border-box;margin-top:8px;border:1px solid #cfdbea;border-radius:6px;padding:10px 12px;font:inherit;font-weight:400}.purge-countdown{margin:10px 0;color:#a12920;font-weight:700}#purgePreview dl{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;margin:14px 0}#purgePreview dt{font-weight:700;color:#60758b}#purgePreview dd{margin:0;overflow-wrap:anywhere}.muted{margin-top:14px;color:#72859d;font-size:12px;line-height:1.6}
   </style>
 </head>
 <body>
   <main class="card">
-    <div class="brand"><div class="mark">CE</div><div><b>CE EXPRESS · 安全清空业务数据</b><small>轻量独立入口，不加载首页看板、历史数据或趋势</small></div></div>
-    <div class="danger-note"><b>用途：</b>清空日报、轨迹、异常、跨日、POD锁、业务快照及派送业务数据，保留用户、权限、配置、白名单、备份和审计。系统会先创建并校验安全备份，再执行事务化清空。</div>
+    <div class="brand"><div class="mark">CE</div><div><b>CE EXPRESS · 直接清空业务数据</b><small>轻量独立入口，不加载首页看板、历史数据或趋势</small></div></div>
+    <div class="danger-note"><b>用途：</b>直接清空日报、轨迹、异常、跨日、POD锁、业务快照及派送业务数据；不创建新备份、不启用安全封锁。保留用户、权限、配置、白名单、已有备份和审计。</div>
     <div class="actions">
-      <button class="primary" type="button" onclick="window.openDataPurge?.()">开始安全清空全部业务数据</button>
+      <button class="primary" type="button" onclick="window.openDirectDataPurge?.()">直接清空全部业务数据</button>
       <a class="ghost" href="/">返回系统首页</a>
     </div>
-    <p class="muted">只点击一次。任务开始后不要关闭启动器窗口，也不要重复提交。真正的备份、ADMIN权限校验、全局锁和删除事务仍由 V505 服务端安全流程负责。</p>
-    <div id="dataPurgeDialog" class="modal" hidden>
+    <p class="muted">只点击一次。直接清空不会创建新备份，也不会启用V505安全封锁；仍保留ADMIN权限校验、5秒倒计时、最终确认和单次SQLite事务。</p>
+    <div id="directPurgeDialog" class="modal" hidden>
       <div class="modal-card">
-        <div class="panel-title"><h3>一键清空所有数据</h3></div>
-        <div id="purgeStepOne">
-          <div id="purgePreview" class="purge-preview"></div>
-          <div class="modal-actions">
-            <button class="ghost" type="button" onclick="closeDataPurge()">取消</button>
-            <button class="danger-outline" type="button" onclick="continueDataPurge()">备份并继续</button>
-          </div>
-        </div>
-        <div id="purgeStepTwo" hidden>
-          <p class="danger-note">此操作不可撤销。备份可由管理员用于独立恢复。</p>
-          <p>当前管理员：<b id="purgeAdmin"></b></p>
-          <label class="confirm-check"><input id="purgeBackupConfirmed" type="checkbox" onchange="updatePurgeButton()"> 我已确认自动备份成功</label>
-          <label class="field-label">请输入：永久清除全部业务数据<input id="purgePhrase" autocomplete="off" oninput="updatePurgeButton()"></label>
-          <p id="purgeCountdown" class="purge-countdown">请等待 5 秒</p>
-          <div class="modal-actions">
-            <button class="ghost" type="button" onclick="closeDataPurge()">取消</button>
-            <button id="purgeExecuteButton" class="danger" type="button" onclick="executeDataPurge()" disabled>确认清空所有数据</button>
-          </div>
+        <div id="directPurgePreview" class="purge-preview"></div>
+        <p class="danger-note">此操作不可撤销，并且不会新建恢复备份。现有用户、权限、配置、白名单、已有备份和审计不会删除。</p>
+        <label class="field-label">请输入：永久清除全部业务数据<input id="directPurgePhrase" autocomplete="off" oninput="updateDirectPurgeButton()"></label>
+        <p id="directPurgeCountdown" class="purge-countdown">请等待 5 秒</p>
+        <div class="modal-actions">
+          <button class="ghost" type="button" onclick="closeDirectDataPurge()">取消</button>
+          <button id="directPurgeExecuteButton" class="danger" type="button" onclick="executeDirectDataPurge()" disabled>确认直接清空所有数据</button>
         </div>
       </div>
     </div>
   </main>
-  <script>window.applyCompletedPurge=async function(){var node=document.getElementById('purgePreview');if(node)node.innerHTML='<div class="purge-success"><b>业务数据已安全清空。</b><br>现在可以重新上传新的日报数据。</div>';};</script>
-  <script src="/v505-data-purge-recovery.js?v=20260920-v555-1"></script>
+  <script src="/v560-direct-data-purge.js?v=20260920-v560-1"></script>
 </body>
 </html>
