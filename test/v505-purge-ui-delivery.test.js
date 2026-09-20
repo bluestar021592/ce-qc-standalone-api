@@ -33,7 +33,7 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
 
   assert.match(backupLoader,/2026-09-15-v545-explicit-purge-owner-cache-bust-v1/);
   assert.match(backupLoader,/v505-data-purge-recovery\.js\?v=20260920-v555-1/,'V502 must request the visible-progress owner, not leave the older one authoritative');
-  assert.match(backupLoader,/v545-explicit-two-step/,'V502 must recognize only the explicit two-step V545 owner as current');
+  assert.match(backupLoader,/v555-visible-execute-progress/,'V502 must require the corrected visible-progress owner rather than accept stale V545');
   assert.match(backupLoader,/v505-purge-startup-probe\.js\?v=20260912-v505-startup-probe-2/);
   assert.ok(backupLoader.indexOf(STARTUP_PROBE_URL)>=0);
   assert.match(backupLoader,/script\.onload=loadStartupProbe/);
@@ -42,11 +42,11 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260920-v555-1/);
   assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v545-1/);
   assert.match(lazy,/event\.stopImmediatePropagation\(\)/,'first destructive click must be capture-blocked until V545 is installed');
-  assert.match(lazy,/installed\.includes\('v545-explicit-two-step'\)/,'lazy gate must refuse to invoke a stale V505 owner');
+  assert.match(lazy,/installed\.includes\('v555-visible-execute-progress'\)/,'lazy gate must refuse to invoke a stale V505 owner');
   assert.match(lazy,/loadGroup\('data'\)\.then/);
   assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-  assert.match(owner,/2026-09-20-v545-explicit-two-step-purge-ui-visible-execute-v2/);
+  assert.match(owner,/2026-09-20-v555-visible-execute-progress-v1/);
   assert.match(owner,/previous\?\.patchId===PATCH_ID/);
   assert.match(owner,/previous\?\.getStatus\?\.\(\)\.active/);
   assert.match(owner,/global\.continueDataPurge=v505ContinueDataPurge/,'legacy step-one button must be rebound to V545 explicit PREPARE');
