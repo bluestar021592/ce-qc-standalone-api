@@ -114,7 +114,6 @@ test('V505 stale PREPARE browser probe asks only the serialized PREPARE route to
       }
       if(url==='/api/admin/data-purge/execute'&&method==='POST'){
         executePosts+=1;
-        if(!executeUiAtSubmit)executeUiAtSubmit={stepOneHidden:node('purgeStepOne').hidden,stepTwoHidden:node('purgeStepTwo').hidden,buttonDisabled:node('purgeExecuteButton').disabled,preview:node('purgePreview').innerHTML};
         return responseJson({ok:true});
       }
       throw new Error(`unexpected fetch ${method} ${url}`);
@@ -170,6 +169,7 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
       }
       if(url==='/api/admin/data-purge/execute'&&method==='POST'){
         executePosts+=1;
+        if(!executeUiAtSubmit)executeUiAtSubmit={stepOneHidden:node('purgeStepOne').hidden,stepTwoHidden:node('purgeStepTwo').hidden,buttonDisabled:node('purgeExecuteButton').disabled,preview:node('purgePreview').innerHTML};
         if(executePosts===1){
           if(acceptedBeforeDisconnect)persistedExecute=executeJob;
           throw new TypeError('socket reset after request transmission');
