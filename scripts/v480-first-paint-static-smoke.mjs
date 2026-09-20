@@ -11,6 +11,7 @@ const source=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const atomic=fs.readFileSync('src/exportJobAtomicJson.js','utf8');
 const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
 const purgeConsole=fs.readFileSync('public/purge-console.html','utf8');
+const server=fs.readFileSync('server.js','utf8');
 assert.match(source,/2026-09-08-v480-preauth-static-first-paint-v1/);
 assert.match(source,/const V480_PUBLIC_ASSET_RE=\/\\\.\(\?:css\|js\|svg\|png\|jpe\?g\|webp\|gif\|ico\|woff2\?\)\$\/i/,'V480 whitelist must be explicit non-HTML browser assets only');
 assert.match(source,/express\.static\('public',\{index:false,fallthrough:true,redirect:false,maxAge:0\}\)/,'V480 must never expose index.html through the pre-auth static server');
