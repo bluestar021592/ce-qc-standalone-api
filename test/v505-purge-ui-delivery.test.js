@@ -60,7 +60,8 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   assert.match(owner,/if\(stepTwo\)stepTwo\.hidden=true/,'confirmation form must be hidden once EXECUTE is accepted client-side');
   assert.match(owner,/if\(stepOne\)stepOne\.hidden=false/,'the live status panel must be visible while EXECUTE runs');
   assert.match(owner,/if\(button\)button\.disabled=true/,'the destructive button must disable immediately after final confirmation');
-  assert.match(purgeConsole,/v505-data-purge-recovery\.js\?v=20260920-v555-1/,'lightweight purge console must cache-bust the corrected owner');
+  assert.match(purgeConsole,/v560-direct-data-purge\.js\?v=20260920-v560-1/,'lightweight purge console now intentionally uses the direct no-backup owner');
+  assert.doesNotMatch(purgeConsole,/v505-data-purge-recovery\.js/,'direct recovery console must not start the legacy backup owner');
   assert.match(owner,/v505ContinueDataPurge[\s\S]*?submitPrepareRecovering/,'PREPARE may start only from the explicit continue action');
   assert.match(owner,/v505ExecuteDataPurge[\s\S]*?executeChallenge\(preparedChallenge\)/,'EXECUTE may start only from the explicit final action');
   assert.match(owner,/setTimeout\(claimPurgeOwner,4200\)/);
