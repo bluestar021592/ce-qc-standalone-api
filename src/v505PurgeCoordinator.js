@@ -297,6 +297,12 @@ export function inspectLivePrepareJob(user={}){
   return {dead:false,job,file,ownership,payload:pendingPreparePayload({...job,message:unknown?'安全备份任务进程状态暂时无法确认；系统保持锁定，不会启动第二份备份。':(Date.now()-Number(job.heartbeatAt||0)>HEARTBEAT_STALE_MS?'安全备份进程仍存活，但状态心跳延迟；系统保持锁定，不会启动第二份备份。':'安全备份正在后台执行。')})};
 }
 
+export function inspectFailedExecutionDetail(user={}){
+  const file=executeJobFile(user);const job=readJson(file);
+  if(!job||String(job.status||'').toUpperCase()!=='FAILED'||committedReceipt(job))return null;
+  return {...pendingPayload(job),status:'FAILED',failed:true,error:String(job.error||'后台清空任务失败。'),failedAt:Number(job.failedAt||job.updatedAt||0),diagnostic:true};
+}
+
 export function inspectExecutionRecovery(user={},options={}){
   const file=executeJobFile(user);let job=readJson(file);
   if(!job)return null;
@@ -357,6 +363,10 @@ export function inspectExecutionRecovery(user={},options={}){
 
 export async function v505PurgePrepareHandler(req,res){
   try{
+    if(req.body?.inspectFailed===true){
+      const failed=inspectFailedExecutionDetail(req.user||{});
+      return res.json({ok:true,...(failed||{kind:'NONE',status:'NONE',diagnostic:true}),administrator:req.user?.email||req.user?.username||''});
+    }
     const executing=inspectExecutionRecovery(req.user||{},{recoverJobId:String(req.body?.recoverJobId||'')});
     if(executing)return res.json({ok:true,...executing,administrator:req.user?.email||req.user?.username||''});
     const live=inspectLivePrepareJob(req.user||{});
