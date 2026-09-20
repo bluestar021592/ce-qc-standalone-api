@@ -44,7 +44,7 @@ import {
   resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
-import { executeDirectDataPurge, DIRECT_PURGE_ID } from './src/directDataPurge.js';
+import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -691,17 +691,36 @@ app.get('/api/state/last-report', async (req, res) => {
   });
 });
 
+const directPurgeTerminalAudits = new Set();
+
 app.post('/api/admin/data-purge/direct', requireRole('ADMIN'), async (req, res) => {
   try {
-    const result = await executeDirectDataPurge({ phrase: req.body?.phrase, user: req.user });
-    try { getDb().exec('PRAGMA query_only=OFF'); } catch {}
-    auditAction(req, 'DATA_PURGE_DIRECT_COMPLETED', { direct: true, backupCreated: false, before: result.before, after: result.after, patchId: DIRECT_PURGE_ID });
-    broadcastEvent('DATA_RESET', { at: result.completedAt, direct: true });
-    return res.json(result);
+    const queued = queueDirectDataPurge({ phrase: req.body?.phrase, user: req.user });
+    try { auditAction(req, 'DATA_PURGE_DIRECT_QUEUED', { direct: true, jobId: queued.jobId, reused: queued.reused === true, patchId: DIRECT_PURGE_ID }); } catch {}
+    return res.status(202).json(queued);
   } catch (e) {
     try { getDb().exec('PRAGMA query_only=OFF'); } catch {}
-    try { auditAction(req, 'DATA_PURGE_DIRECT_FAILED', { direct: true, error: e.message, patchId: DIRECT_PURGE_ID }); } catch {}
+    try { auditAction(req, 'DATA_PURGE_DIRECT_FAILED', { direct: true, stage: 'queue', error: e.message, patchId: DIRECT_PURGE_ID }); } catch {}
     return res.status(409).json({ ok: false, code: e.code || 'DIRECT_PURGE_FAILED', error: e.message, patchId: DIRECT_PURGE_ID });
+  }
+});
+
+app.get('/api/admin/data-purge/direct/status', requireRole('ADMIN'), async (req, res) => {
+  try {
+    const status = getDirectDataPurgeStatus({ jobId: req.query?.jobId, user: req.user });
+    const terminal = String(status.status || '').toUpperCase();
+    if ((terminal === 'SUCCEEDED' || terminal === 'FAILED') && !directPurgeTerminalAudits.has(status.jobId)) {
+      directPurgeTerminalAudits.add(status.jobId);
+      try {
+        auditAction(req, terminal === 'SUCCEEDED' ? 'DATA_PURGE_DIRECT_COMPLETED' : 'DATA_PURGE_DIRECT_FAILED', {
+          direct: true, jobId: status.jobId, deletedRows: status.deletedRows, error: status.error || '', patchId: DIRECT_PURGE_ID
+        });
+      } catch {}
+      if (terminal === 'SUCCEEDED') broadcastEvent('DATA_RESET', { at: status.completedAt || new Date().toISOString(), direct: true });
+    }
+    return res.json(status);
+  } catch (e) {
+    return res.status(404).json({ ok: false, code: e.code || 'DIRECT_PURGE_STATUS_FAILED', error: e.message, patchId: DIRECT_PURGE_ID });
   }
 });
 
