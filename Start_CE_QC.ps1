@@ -134,6 +134,8 @@ Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
 $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
 $LocalUrl = 'http://127.0.0.1:5177'
+$LaunchUrl = "$LocalUrl/purge-console.html?v=20260920-recovery-first"
+$RecoveryLaunchMode = $true
 
 function Archive-BackendLogs([string]$Reason) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -277,7 +279,12 @@ Write-Host 'Keep this window open while using CE QC.' -ForegroundColor Yellow
 Write-Host '===============================================' -ForegroundColor Green
 Write-Host ''
 
-if (-not $env:CI) { try { Start-Process $LocalUrl | Out-Null } catch {} }
+if (-not $env:CI) {
+    if ($RecoveryLaunchMode) {
+        Write-Host "Recovery launch mode: opening safe purge console before the normal dashboard." -ForegroundColor Yellow
+    }
+    try { Start-Process $LaunchUrl | Out-Null } catch {}
+}
 
 $RestartTimes = New-Object System.Collections.Generic.List[datetime]
 while ($true) {

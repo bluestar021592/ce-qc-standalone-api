@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LocalUrl = 'http://127.0.0.1:5177'
+$LaunchUrl = "$LocalUrl/purge-console.html?v=20260920-recovery-first"
 
 function Test-CeQcAlreadyRunning {
     try {
@@ -20,8 +21,8 @@ function Test-CeQcAlreadyRunning {
 
 if (Test-CeQcAlreadyRunning) {
     Write-Host '[CE-QC] Backend is already running. Reusing it without restart.' -ForegroundColor Green
-    Write-Host "[CE-QC] Opening $LocalUrl" -ForegroundColor Cyan
-    try { Start-Process $LocalUrl | Out-Null } catch {}
+    Write-Host "[CE-QC] Recovery mode opening $LaunchUrl" -ForegroundColor Cyan
+    try { Start-Process $LaunchUrl | Out-Null } catch {}
     exit 0
 }
 
