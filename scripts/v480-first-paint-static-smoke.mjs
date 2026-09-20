@@ -50,6 +50,8 @@ assert.match(purgeConsole,/\/v505-data-purge-recovery\.js\?v=20260914-v533-1/,'r
 assert.match(purgeConsole,/id="purgePreview"/,'V505 status must remain visible on the lightweight recovery page');
 assert.doesNotMatch(purgeConsole,/fetch\(['"`]\/api\/admin\/data-purge|XMLHttpRequest/i,'recovery page must not implement a second purge transport');
 assert.doesNotMatch(purgeConsole,/\/api\/admin\/data-purge\/(?:prepare|execute)/i,'recovery HTML must never bypass the canonical V505 transport owner');
+assert.doesNotMatch(purgeConsole,/#purgeStepTwo\{display:none!important\}/,'recovery console must not permanently hide explicit confirmation step');
+assert.match(purgeConsole,/\[hidden\]\{display:none!important\}#purgeStepTwo:not\(\[hidden\]\)\{display:block!important\}/,'recovery console must reveal the canonical second confirmation step after verified backup');
 
 // Execute the browser guard with two startup failure shapes:
 // 1) headers never arrive; V533 must synthesize a finite 504;
