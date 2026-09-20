@@ -78,6 +78,9 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   assert.match(owner,/readExecutionFailureDetail/,'public FAILED status must trigger an authenticated detail probe');
   assert.match(owner,/recoverJobId:String\(job\?\.jobId\|\|''\)/,'failure detail probe must bind to the exact execute job id');
   assert.match(owner,/V505_PURGE_EXECUTE_FAILED/,'exact worker error must be surfaced without trusting the public status payload');
+  assert.match(owner,/readLatestExecutionFailureDetail/,'reopening the wizard must be able to inspect retained failure evidence without starting a new backup');
+  assert.match(owner,/inspectFailed:true/,'reopen diagnostic must use an explicit inert admin probe');
+  assert.match(owner,/上一次清空未执行/);
 
   assert.match(startupProbe,/PROBE_AFTER_MS=75_000/);
   assert.match(startupProbe,/\/api\/admin\/data-purge\/prepare/);
@@ -101,6 +104,7 @@ test('V505 stale PREPARE browser probe asks only the serialized PREPARE route to
   const jobId='prepare-startup-probe-test';
   let statusReads=0;
   let preparePosts=0;
+  let diagnosticPosts=0;
   let executePosts=0;
   const context={
     console:{info(){},warn(){},error(){}},
@@ -167,6 +171,8 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
     fetch:async(url,options={})=>{
       const method=String(options.method||'GET').toUpperCase();
       if(url==='/api/admin/data-purge/prepare'&&method==='POST'){
+        let body={};try{body=JSON.parse(String(options.body||'{}'));}catch{}
+        if(body.inspectFailed===true){diagnosticPosts+=1;return responseJson({ok:true,kind:'NONE',status:'NONE',diagnostic:true});}
         preparePosts+=1;
         return responseJson(persistedExecute||challenge);
       }
@@ -195,12 +201,13 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
   node('purgePhrase').value='永久清除全部业务数据';
   context.updatePurgeButton();
   await context.executeDataPurge();
-  return {afterOpen,afterPrepare,preparePosts,executePosts,reloads,alerts,confirms,preview:node('purgePreview').innerHTML,executeUiAtSubmit};
+  return {afterOpen,afterPrepare,preparePosts,diagnosticPosts,executePosts,reloads,alerts,confirms,preview:node('purgePreview').innerHTML,executeUiAtSubmit};
 }
 
 test('V545 opening the purge wizard is inert and lost EXECUTE response recovers an already-persisted job without a second DELETE',async()=>{
   const result=await runExecuteTransportScenario({acceptedBeforeDisconnect:true});
   assert.deepEqual(result.afterOpen,{preparePosts:0,executePosts:0},'opening the purge wizard must not copy the DB or submit DELETE');
+  assert.equal(result.diagnosticPosts,1,'opening may perform one inert admin-only failed-execute diagnostic');
   assert.deepEqual(result.afterPrepare,{preparePosts:1,executePosts:0},'explicit 备份并继续 may create PREPARE but must not auto-submit DELETE');
   assert.equal(result.executePosts,1,'when first EXECUTE reached server, recovery must discover that job rather than POST DELETE again');
   assert.equal(result.preparePosts,2,'one explicit PREPARE plus one idempotent recovery probe is sufficient');
@@ -216,6 +223,7 @@ test('V545 opening the purge wizard is inert and lost EXECUTE response recovers 
 test('V545 retries EXECUTE once only after explicit final confirmation and recovery proves no execute job exists',async()=>{
   const result=await runExecuteTransportScenario({acceptedBeforeDisconnect:false});
   assert.deepEqual(result.afterOpen,{preparePosts:0,executePosts:0});
+  assert.equal(result.diagnosticPosts,1);
   assert.deepEqual(result.afterPrepare,{preparePosts:1,executePosts:0});
   assert.equal(result.executePosts,2,'second EXECUTE is allowed only after server recovery proves first request was not persisted');
   assert.equal(result.preparePosts,2);
