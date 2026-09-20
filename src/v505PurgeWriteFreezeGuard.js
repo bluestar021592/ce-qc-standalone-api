@@ -180,7 +180,7 @@ export function inspectPurgeWriteFreezeState(){
   const rawSqliteActive=Number.isFinite(until)&&until>Date.now();
   const completedPrepareIdle=rawSqliteActive&&external.active!==true&&String(external.kind||'')==='PREPARE'&&String(external.status||'')==='SUCCEEDED'&&String(external.workerState||'')==='COMPLETED_WAITING_EXPLICIT_EXECUTE';
   const sqliteActive=rawSqliteActive&&!completedPrepareIdle;
-  return {active:Boolean(sqliteActive||external.active),sealed:Boolean(external.sealed),sqliteActive,rawSqliteActive,prepareBlockSuppressed:completedPrepareIdle,until:sqliteActive?until:0,external};
+  return {active:Boolean(sqliteActive||external.active),httpWriteFreeze:Boolean(sqliteActive||external.active||completedPrepareIdle),sealed:Boolean(external.sealed),sqliteActive,rawSqliteActive,prepareBlockSuppressed:completedPrepareIdle,until:sqliteActive?until:0,external};
 }
 
 export function syncPurgeQueryOnly(active){
@@ -252,7 +252,7 @@ export function v505PurgeWriteFreezeGuard(req,res,next){
   }
 
   syncPurgeQueryOnly(protectSharedDb);
-  if(!state.active)return next();
+  if(!state.active&&!state.httpWriteFreeze)return next();
   if(allowedDuringFreeze(method,pathname,state))return next();
 
   return res.status(423).json({

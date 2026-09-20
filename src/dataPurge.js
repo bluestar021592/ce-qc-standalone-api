@@ -66,9 +66,9 @@ export async function createPurgeChallenge(user={},options={}){
           challenges.delete(challengeId);
           deletePurgeArtifacts(user,existing);
           clearPurgeBlock(db);
-          throw new Error('数据库在安全备份完成后发生变化，已停止清除。请重新开始，系统会重新创建包含最新数据的安全备份。');
+        }else{
+          return {...existing.payload,status:'SUCCEEDED',jobId:existing.jobId,recovered:true,recoveryPatch:V505_PURGE_RECOVERY_ID};
         }
-        return {...existing.payload,status:'SUCCEEDED',jobId:existing.jobId,recovered:true,recoveryPatch:V505_PURGE_RECOVERY_ID};
       }
     }else{
       challenges.delete(challengeId);

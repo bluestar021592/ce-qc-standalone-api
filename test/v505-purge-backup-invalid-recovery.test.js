@@ -28,6 +28,7 @@ test('V505 missing verified backup invalidates stale challenge and starts one fr
   const user={email:'backup-recovery-admin@example.test',username:'backup-recovery-admin',role:'ADMIN'};
   let firstStatusFile='';
   let secondStatusFile='';
+  let thirdStatusFile='';
   try{
     db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-09-11');
 
@@ -64,10 +65,24 @@ test('V505 missing verified backup invalidates stale challenge and starts one fr
     assert.notEqual(resealed.challengeId,oldChallengeId,'stale challenge must not survive backup invalidation');
     assert.ok(resealed.backup?.path&&fs.existsSync(resealed.backup.path),'replacement verified backup must exist');
     assert.notEqual(path.resolve(resealed.backup.path),path.resolve(oldBackupPath),'replacement prepare must create a distinct backup artifact');
-    assert.equal(db.prepare('SELECT COUNT(*) count FROM daily_reports').get().count,1,'backup recovery must never delete business data');
+
+    const sealedReplacementJobId=resealed.jobId;
+    const sealedReplacementChallengeId=resealed.challengeId;
+    db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-09-12');
+    const driftReplacement=await createPurgeChallenge(user,{activeRunIds:new Set()});
+    assert.ok(['QUEUED','RUNNING'].includes(String(driftReplacement.status||'').toUpperCase()),'source drift after a sealed backup must automatically start exactly one fresh prepare job instead of trapping the browser in a restart error');
+    assert.notEqual(driftReplacement.jobId,sealedReplacementJobId,'source drift must retire the stale sealed prepare generation');
+    thirdStatusFile=path.join(getRuntimeConfig().projectRoot,'public',String(driftReplacement.statusUrl||'').replace(/^\//,''));
+    const driftDone=await waitForStatus(thirdStatusFile,driftReplacement.jobId);
+    assert.equal(driftDone?.status,'SUCCEEDED',driftDone?.error||'drift replacement prepare worker did not finish');
+    const driftResealed=await createPurgeChallenge(user,{activeRunIds:new Set()});
+    assert.equal(driftResealed.status,'SUCCEEDED');
+    assert.equal(driftResealed.jobId,driftReplacement.jobId,'completed drift replacement must be reused');
+    assert.notEqual(driftResealed.challengeId,sealedReplacementChallengeId,'source drift must invalidate the stale challenge');
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM daily_reports').get().count,2,'backup recovery must never delete business data');
   }finally{
     try{closeDb();}catch{}
-    for(const file of [firstStatusFile,secondStatusFile])if(file){try{fs.rmSync(file,{force:true});}catch{}}
+    for(const file of [firstStatusFile,secondStatusFile,thirdStatusFile])if(file){try{fs.rmSync(file,{force:true});}catch{}}
     fs.rmSync(dir,{recursive:true,force:true});
   }
 });
