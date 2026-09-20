@@ -47,7 +47,7 @@ assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,
 
 assert.match(purgeConsole,/CE QC 安全清空业务数据/,'V533 must provide a lightweight authenticated recovery page when the dashboard shell is unavailable');
 assert.match(purgeConsole,/onclick="window\.openDataPurge\?\.\(\)"/,'recovery page must delegate the action to the canonical V505 UI owner');
-assert.match(purgeConsole,/\/v505-data-purge-recovery\.js\?v=20260914-v533-1/,'recovery page must load the same V505 recovery owner');
+assert.match(purgeConsole,/\/v505-data-purge-recovery\.js\?v=20260920-v555-1/,'recovery page must load the same V505 recovery owner');
 assert.match(purgeConsole,/id="purgePreview"/,'V505 status must remain visible on the lightweight recovery page');
 assert.doesNotMatch(purgeConsole,/fetch\(['"`]\/api\/admin\/data-purge|XMLHttpRequest/i,'recovery page must not implement a second purge transport');
 assert.doesNotMatch(purgeConsole,/\/api\/admin\/data-purge\/(?:prepare|execute)/i,'recovery HTML must never bypass the canonical V505 transport owner');
