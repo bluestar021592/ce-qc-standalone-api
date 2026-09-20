@@ -105,6 +105,18 @@
     return merged;
   }
 
+  async function readExecutionFailureDetail(job){
+    try{
+      const detail=await requestJson('/api/admin/data-purge/prepare',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({recoverJobId:String(job?.jobId||'')})
+      },12000);
+      if(String(detail.kind||'').toUpperCase()!=='EXECUTE')return null;
+      if(String(detail.jobId||'')!==String(job?.jobId||''))return null;
+      if(String(detail.status||'').toUpperCase()!=='FAILED')return null;
+      return detail;
+    }catch{return null;}
+  }
+
   async function pollBackgroundJob(initialJob,mode='PREPARE'){
     let job=initialJob;
     let statusUrl=String(job.statusUrl||job.pollUrl||'');
@@ -130,7 +142,17 @@
       if(String(status.jobId||'')!==String(job.jobId||''))throw new Error('后台任务编号不一致，已安全停止。');
       let state=String(status.status||'').toUpperCase();
       if(state==='SUCCEEDED')return status;
-      if(state==='FAILED')throw new Error(status.error||`${mode==='EXECUTE'?'清空':'安全备份'}后台任务失败。`);
+      if(state==='FAILED'){
+        if(mode==='EXECUTE'){
+          const detail=await readExecutionFailureDetail(job);
+          if(detail?.error){
+            const failed=new Error(detail.error);
+            failed.code='V505_PURGE_EXECUTE_FAILED';
+            throw failed;
+          }
+        }
+        throw new Error(status.error||`${mode==='EXECUTE'?'清空':'安全备份'}后台任务失败。`);
+      }
       const heartbeatAt=Number(status.heartbeatAt||0);
       const heartbeatAge=heartbeatAt>0?Date.now()-heartbeatAt:0;
       const stale=Boolean(status.heartbeatStale)||(heartbeatAt>0&&heartbeatAge>60_000);
