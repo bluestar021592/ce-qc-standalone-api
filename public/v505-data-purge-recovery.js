@@ -1,5 +1,5 @@
 (function installV505DataPurgeRecovery(global){
-  const PATCH_ID='2026-09-15-v545-explicit-two-step-purge-ui-v1';
+  const PATCH_ID='2026-09-20-v545-explicit-two-step-purge-ui-visible-execute-v2';
   const previous=global.__CE_QC_V505_DATA_PURGE_RECOVERY__;
   if(previous?.patchId===PATCH_ID)return;
   if(previous?.getStatus?.().active){
@@ -68,6 +68,15 @@
   function startElapsedClock(){clearInterval(elapsedTimer);elapsedTimer=setInterval(()=>{const node=document.getElementById('v505PurgeElapsed');if(node)node.textContent=elapsedText();},1000);}
   function stopElapsedClock(){clearInterval(elapsedTimer);elapsedTimer=null;}
   function stopConfirmClock(){clearInterval(confirmTimer);confirmTimer=null;}
+  function showExecutionProgress(){
+    const stepOne=document.getElementById('purgeStepOne');
+    const stepTwo=document.getElementById('purgeStepTwo');
+    const button=document.getElementById('purgeExecuteButton');
+    if(button)button.disabled=true;
+    if(stepTwo)stepTwo.hidden=true;
+    if(stepOne)stepOne.hidden=false;
+    renderWorking('正在提交后台事务化清空任务','最终确认已收到。页面现在只显示真实后台任务状态；不要重复点击清空。');
+  }
 
   async function submitPrepare(){
     return requestJson('/api/admin/data-purge/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'},12000);
@@ -301,7 +310,7 @@
     if(executeInFlight||prepareInFlight)return;
     if(!refreshExplicitExecuteButton()||!preparedChallenge)return alert('请先完成备份确认、准确输入“永久清除全部业务数据”，并等待安全倒计时结束。');
     if(!global.confirm('最终确认：现在将永久清除全部业务数据。安全备份、用户、权限、配置、白名单和审计不会删除。是否继续？'))return;
-    active=true;executeInFlight=true;startedAt=Date.now();startElapsedClock();stopConfirmClock();
+    active=true;executeInFlight=true;startedAt=Date.now();stopConfirmClock();showExecutionProgress();startElapsedClock();
     try{
       const result=await executeChallenge(preparedChallenge);
       if(result){
