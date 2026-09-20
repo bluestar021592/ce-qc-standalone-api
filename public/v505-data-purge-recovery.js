@@ -117,6 +117,17 @@
     }catch{return null;}
   }
 
+  async function readLatestExecutionFailureDetail(){
+    try{
+      const detail=await requestJson('/api/admin/data-purge/prepare',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inspectFailed:true})
+      },12000);
+      if(String(detail.kind||'').toUpperCase()!=='EXECUTE')return null;
+      if(String(detail.status||'').toUpperCase()!=='FAILED')return null;
+      return detail;
+    }catch{return null;}
+  }
+
   async function pollBackgroundJob(initialJob,mode='PREPARE'){
     let job=initialJob;
     let statusUrl=String(job.statusUrl||job.pollUrl||'');
@@ -370,6 +381,12 @@
     const stepTwo=document.getElementById('purgeStepTwo');
     if(stepOne)stepOne.hidden=false;if(stepTwo)stepTwo.hidden=true;if(dialog)dialog.hidden=false;
     dialogOpen=true;active=true;preparedChallenge=null;currentJob=null;stopElapsedClock();stopConfirmClock();renderIdle();
+    const priorFailure=await readLatestExecutionFailureDetail();
+    if(priorFailure?.error){
+      const node=previewNode();
+      if(node)node.innerHTML=`<div class="purge-error"><b>上一次清空未执行。</b><br>${escapeText(priorFailure.error)}<br><small>这是管理员只读诊断；尚未启动新的备份或清空任务。</small></div>`;
+      lastStatus='上一次清空失败原因已通过管理员诊断接口读取';
+    }
   }
 
   function claimPurgeOwner(){
