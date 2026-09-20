@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
 const RUNTIME_V505_URL='/v505-data-purge-recovery.js?v=20260911-v505-8';
-const V545_V505_URL='/v505-data-purge-recovery.js?v=20260915-v545-1';
+const V545_V505_URL='/v505-data-purge-recovery.js?v=20260920-v555-1';
 const STARTUP_PROBE_URL='/v505-purge-startup-probe.js?v=20260912-v505-startup-probe-2';
 const V502_URL='/v502-multidrive-backup-ui.js?v=20260912-v502-3';
 
@@ -19,6 +19,7 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   const lazy=read('public/v108-route-lazy-features.js');
   const owner=read('public/v505-data-purge-recovery.js');
   const startupProbe=read('public/v505-purge-startup-probe.js');
+  const purgeConsole=read('public/purge-console.html');
 
   const appAt=index.indexOf('/app.js?v=account-menu-20260806-1');
   const runtimeAt=index.indexOf('/v14-geometry-fixture.js?v=20260805-1');
@@ -31,21 +32,21 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   assert.ok(runtimeLoader.indexOf(RUNTIME_V505_URL)<runtimeLoader.indexOf(V502_URL));
 
   assert.match(backupLoader,/2026-09-15-v545-explicit-purge-owner-cache-bust-v1/);
-  assert.match(backupLoader,/v505-data-purge-recovery\.js\?v=20260915-v545-1/,'V502 must request the V545 owner, not leave the older one authoritative');
+  assert.match(backupLoader,/v505-data-purge-recovery\.js\?v=20260920-v555-1/,'V502 must request the visible-progress owner, not leave the older one authoritative');
   assert.match(backupLoader,/v545-explicit-two-step/,'V502 must recognize only the explicit two-step V545 owner as current');
   assert.match(backupLoader,/v505-purge-startup-probe\.js\?v=20260912-v505-startup-probe-2/);
   assert.ok(backupLoader.indexOf(STARTUP_PROBE_URL)>=0);
   assert.match(backupLoader,/script\.onload=loadStartupProbe/);
 
   assert.match(lazy,/2026-09-15-v545-explicit-purge-owner-v1/);
-  assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260915-v545-1/);
+  assert.match(lazy,/v505-data-purge-recovery\.js\?v=20260920-v555-1/);
   assert.match(lazy,/v106-purge-legacy-controls-hide\.js\?v=20260915-v545-1/);
   assert.match(lazy,/event\.stopImmediatePropagation\(\)/,'first destructive click must be capture-blocked until V545 is installed');
   assert.match(lazy,/installed\.includes\('v545-explicit-two-step'\)/,'lazy gate must refuse to invoke a stale V505 owner');
   assert.match(lazy,/loadGroup\('data'\)\.then/);
   assert.doesNotMatch(lazy,/v104-fast-purge-ui\.js/);
 
-  assert.match(owner,/2026-09-15-v545-explicit-two-step-purge-ui-v1/);
+  assert.match(owner,/2026-09-20-v545-explicit-two-step-purge-ui-visible-execute-v2/);
   assert.match(owner,/previous\?\.patchId===PATCH_ID/);
   assert.match(owner,/previous\?\.getStatus\?\.\(\)\.active/);
   assert.match(owner,/global\.continueDataPurge=v505ContinueDataPurge/,'legacy step-one button must be rebound to V545 explicit PREPARE');
@@ -55,6 +56,11 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   assert.match(owner,/String\(phrase\?\.value\|\|''\)==='永久清除全部业务数据'/,'DELETE button must require the exact destructive phrase');
   assert.match(owner,/Boolean\(checkbox\?\.checked\)/,'DELETE button must require explicit backup acknowledgement');
   assert.match(owner,/最终确认：现在将永久清除全部业务数据/,'DELETE submission must require a final user confirmation');
+  assert.match(owner,/showExecutionProgress/,'final confirmation must switch to a visible execution state before network submission');
+  assert.match(owner,/if\(stepTwo\)stepTwo\.hidden=true/,'confirmation form must be hidden once EXECUTE is accepted client-side');
+  assert.match(owner,/if\(stepOne\)stepOne\.hidden=false/,'the live status panel must be visible while EXECUTE runs');
+  assert.match(owner,/if\(button\)button\.disabled=true/,'the destructive button must disable immediately after final confirmation');
+  assert.match(purgeConsole,/v505-data-purge-recovery\.js\?v=20260920-v555-1/,'lightweight purge console must cache-bust the corrected owner');
   assert.match(owner,/v505ContinueDataPurge[\s\S]*?submitPrepareRecovering/,'PREPARE may start only from the explicit continue action');
   assert.match(owner,/v505ExecuteDataPurge[\s\S]*?executeChallenge\(preparedChallenge\)/,'EXECUTE may start only from the explicit final action');
   assert.match(owner,/setTimeout\(claimPurgeOwner,4200\)/);
@@ -108,6 +114,7 @@ test('V505 stale PREPARE browser probe asks only the serialized PREPARE route to
       }
       if(url==='/api/admin/data-purge/execute'&&method==='POST'){
         executePosts+=1;
+        if(!executeUiAtSubmit)executeUiAtSubmit={stepOneHidden:node('purgeStepOne').hidden,stepTwoHidden:node('purgeStepTwo').hidden,buttonDisabled:node('purgeExecuteButton').disabled,preview:node('purgePreview').innerHTML};
         return responseJson({ok:true});
       }
       throw new Error(`unexpected fetch ${method} ${url}`);
@@ -134,6 +141,7 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
   let preparePosts=0;
   let executePosts=0;
   let persistedExecute=null;
+  let executeUiAtSubmit=null;
   let reloads=0;
   const alerts=[];
   const confirms=[];
@@ -184,7 +192,7 @@ async function runExecuteTransportScenario({acceptedBeforeDisconnect}){
   node('purgePhrase').value='永久清除全部业务数据';
   context.updatePurgeButton();
   await context.executeDataPurge();
-  return {afterOpen,afterPrepare,preparePosts,executePosts,reloads,alerts,confirms,preview:node('purgePreview').innerHTML};
+  return {afterOpen,afterPrepare,preparePosts,executePosts,reloads,alerts,confirms,preview:node('purgePreview').innerHTML,executeUiAtSubmit};
 }
 
 test('V545 opening the purge wizard is inert and lost EXECUTE response recovers an already-persisted job without a second DELETE',async()=>{
@@ -196,6 +204,10 @@ test('V545 opening the purge wizard is inert and lost EXECUTE response recovers 
   assert.equal(result.reloads,1);
   assert.deepEqual(result.alerts,[]);
   assert.equal(result.confirms.length,2,'wizard open and final destructive submission must be two separate confirmations');
+  assert.deepEqual(result.executeUiAtSubmit?.stepOneHidden,false,'live status panel must be visible before EXECUTE fetch begins');
+  assert.deepEqual(result.executeUiAtSubmit?.stepTwoHidden,true,'confirmation controls must disappear before EXECUTE fetch begins');
+  assert.deepEqual(result.executeUiAtSubmit?.buttonDisabled,true,'destructive button must disable before EXECUTE fetch begins');
+  assert.match(String(result.executeUiAtSubmit?.preview||''),/正在提交后台事务化清空任务/);
 });
 
 test('V545 retries EXECUTE once only after explicit final confirmation and recovery proves no execute job exists',async()=>{
