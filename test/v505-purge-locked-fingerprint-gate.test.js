@@ -17,7 +17,7 @@ function functionBody(name){
   return purgeSource.slice(start,next>start?next:purgeSource.length);
 }
 
-async function waitForStatus(file,jobId,timeoutMs=30_000){
+async function waitForStatus(file,jobId,timeoutMs=90_000){
   const deadline=Date.now()+timeoutMs;
   let status=null;
   while(Date.now()<deadline){
