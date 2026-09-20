@@ -75,6 +75,9 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   assert.match(owner,/PURGE_TRANSPORT_INTERRUPTED/);
   assert.match(owner,/\^DATA_PURGE_\|\^V505_PURGE_/);
   assert.match(owner,/不要重复点击；系统会继续按持久化任务和安全锁保护/);
+  assert.match(owner,/readExecutionFailureDetail/,'public FAILED status must trigger an authenticated detail probe');
+  assert.match(owner,/recoverJobId:String\(job\?\.jobId\|\|''\)/,'failure detail probe must bind to the exact execute job id');
+  assert.match(owner,/V505_PURGE_EXECUTE_FAILED/,'exact worker error must be surfaced without trusting the public status payload');
 
   assert.match(startupProbe,/PROBE_AFTER_MS=75_000/);
   assert.match(startupProbe,/\/api\/admin\/data-purge\/prepare/);
