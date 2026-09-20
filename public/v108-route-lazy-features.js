@@ -64,7 +64,7 @@
     const purgeTrigger=event.target?.closest?.('[data-testid="one-click-purge-home"],.danger-outline[onclick*="openDataPurge"]');
     if(purgeTrigger){
       const patch=String(global.__CE_QC_V505_DATA_PURGE_RECOVERY__?.patchId||'');
-      if(patch.includes('v545-explicit-two-step')&&reassertPurgeOwner())return;
+      if(patch.includes('v555-visible-execute-progress')&&reassertPurgeOwner())return;
       // Capture-phase gate: no legacy owner may receive the destructive click.
       // Load the cache-busted V545 owner first. V545 itself opens an inert wizard;
       // backup starts only after an explicit second click on “备份并继续”.
@@ -72,7 +72,7 @@
       event.stopImmediatePropagation();
       void loadGroup('data').then(()=>{
         const installed=String(global.__CE_QC_V505_DATA_PURGE_RECOVERY__?.patchId||'');
-        if(!installed.includes('v545-explicit-two-step')||!reassertPurgeOwner())throw new Error('V545 清空任务控制器尚未就绪。');
+        if(!installed.includes('v555-visible-execute-progress')||!reassertPurgeOwner())throw new Error('V545 清空任务控制器尚未就绪。');
         purgeOwner()();
       }).catch(error=>{
         console.warn('[CE-QC][V545_PURGE_OWNER_GATE]',error);
