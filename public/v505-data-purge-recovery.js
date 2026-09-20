@@ -1,5 +1,5 @@
 (function installV505DataPurgeRecovery(global){
-  const PATCH_ID='2026-09-20-v545-explicit-two-step-purge-ui-visible-execute-v2';
+  const PATCH_ID='2026-09-20-v555-visible-execute-progress-v1';
   const previous=global.__CE_QC_V505_DATA_PURGE_RECOVERY__;
   if(previous?.patchId===PATCH_ID)return;
   if(previous?.getStatus?.().active){
