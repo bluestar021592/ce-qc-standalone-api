@@ -70,3 +70,46 @@ test('V560 direct recovery console has no backup step and posts only the direct 
   assert.match(js,/最终确认：现在将直接永久清空全部业务数据/);
   assert.doesNotMatch(js,/\/api\/admin\/data-purge\/(?:prepare|execute)/);
 });
+
+
+test('V561 queues direct purge immediately and reports detached worker progress without blocking 5177',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v561-direct-async-'));
+  process.env.DATA_DIR=dir;
+  process.env.DB_FILE=path.join(dir,'test.db');
+  process.env.CE_QC_DISABLE_CARRY_REFRESH='1';
+
+  const {getDb,closeDb}=await import('../src/db.js');
+  const {queueDirectDataPurge,getDirectDataPurgeStatus,DIRECT_PURGE_PHRASE}=await import('../src/directDataPurge.js');
+  const user={email:'async-admin@example.test',role:'ADMIN'};
+  try{
+    const db=getDb();
+    db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-09-20');
+    closeDb();
+
+    const started=Date.now();
+    const queued=queueDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user});
+    const ackMs=Date.now()-started;
+    assert.equal(queued.async,true);
+    assert.ok(ackMs<1000,`queue acknowledgement must be immediate, got ${ackMs}ms`);
+    assert.ok(queued.jobId);
+
+    let status=queued;
+    const deadline=Date.now()+15_000;
+    while(Date.now()<deadline){
+      status=getDirectDataPurgeStatus({jobId:queued.jobId,user});
+      if(['SUCCEEDED','FAILED'].includes(String(status.status||'').toUpperCase()))break;
+      await new Promise(resolve=>setTimeout(resolve,50));
+    }
+    assert.equal(status.status,'SUCCEEDED',status.error||status.message||'detached direct purge did not finish');
+    assert.ok(Number(status.deletedRows||0)>=1);
+
+    const {DatabaseSync}=await import('node:sqlite');
+    const check=new DatabaseSync(process.env.DB_FILE);
+    try{
+      assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM daily_reports').get()?.count||0),0);
+    }finally{check.close();}
+  }finally{
+    try{closeDb();}catch{}
+    fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
+  }
+});
