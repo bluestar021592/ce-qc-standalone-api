@@ -32,6 +32,7 @@ const interactiveRuntime = fs.readFileSync(path.join(root, 'src', 'v206Interacti
 const serverSource = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const uiShellLoader = fs.readFileSync(path.join(root, 'src', 'v44WhppUiPatch.js'), 'utf8');
 const bootstrapFastPath = fs.readFileSync(path.join(root, 'src', 'v43BootstrapPerfPatch.js'), 'utf8');
+const startupSourceTruth = fs.readFileSync(path.join(root, 'public', 'v81-startup-source-truth.js'), 'utf8');
 
 test('interactive facade uses the bounded interactive range owner', () => {
   assert.match(facade, /export \{ loadRangeDashboard \} from '\.\/rangeDashboardStoreInteractive\.js';/);
@@ -96,6 +97,15 @@ test('ordinary navigation never requests non-compact aggregate state', () => {
   assert.ok(hydration, 'hydratePageData must exist');
   assert.doesNotMatch(hydration[0], /api\('\/api\/state'\)/);
   assert.doesNotMatch(hydration[0], /api\('\/api\/shopee\/state'\)/);
+});
+
+test('startup recovery cannot re-enter aggregate state reads after the shell is visible', () => {
+  assert.match(startupSourceTruth, /SHELL_FIRST_NO_AGGREGATE_STATE_RECOVERY/);
+  assert.match(startupSourceTruth, /\/api\/import\/unified-latest\?compact=1/);
+  assert.match(startupSourceTruth, /\/api\/session/);
+  assert.doesNotMatch(startupSourceTruth, /\/api\/state\?compact=1/);
+  assert.doesNotMatch(startupSourceTruth, /\/api\/shopee\/state\?compact=1/);
+  assert.doesNotMatch(startupSourceTruth, /RETRY_DELAYS/);
 });
 
 test('bootstrap first paint never falls back to shipment-level unified_import_rows scans', () => {
