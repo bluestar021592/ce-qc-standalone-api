@@ -77,6 +77,11 @@ test('V547 keeps purge safety while idle reconciliation stays low-power',async()
     const session=runGuard(request('GET','/api/session'));
     assert.equal(session.nextCalled,true,'session identity may be read without refreshing the DB session');
 
+    const authBridgeLogin=runGuard(request('POST','/api/local-auth-proxy/login'));
+    assert.equal(authBridgeLogin.nextCalled,true,'read-only local auth sidecar bridge must remain reachable during PREPARE so an expired admin session cannot deadlock direct purge recovery');
+    assert.equal(authBridgeLogin.req.v505PurgeReadOnlyAuth,true);
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,1,'allowing auth bridge login must not reopen the main SQLite connection for writes');
+
     const purgeControl=runGuard(request('POST','/api/admin/data-purge/prepare'));
     assert.equal(purgeControl.nextCalled,true,'purge coordinator endpoints must remain reachable');
     assert.equal(purgeControl.req.v505PurgeReadOnlyAuth,true,'purge control authentication remains read-only');
@@ -109,6 +114,10 @@ test('V547 keeps purge safety while idle reconciliation stays low-power',async()
     assert.equal(reconciledCompleted.state.prepareBlockSuppressed,true);
     assert.equal(reconciledCompleted.state.external?.workerState,'COMPLETED_WAITING_EXPLICIT_EXECUTE');
     assert.equal(reconciledCompleted.state.external?.identityState,'TERMINAL_NO_PID_LOOKUP','completed PREPARE must not inspect a historical PID via Windows CIM');
+
+    const sealedAuthBridge=runGuard(request('POST','/api/local-auth-proxy/login'));
+    assert.equal(sealedAuthBridge.nextCalled,true,'expired ADMIN sessions must be able to re-authenticate while a completed PREPARE write-freeze is waiting');
+    assert.equal(db.prepare('PRAGMA query_only').get().query_only,0,'completed PREPARE auth bridge does not reactivate main-DB query_only');
 
     const sealedControl=runGuard(request('POST','/api/admin/data-purge/execute'));
     assert.equal(sealedControl.nextCalled,true,'explicit execute control stays reachable after completed PREPARE');

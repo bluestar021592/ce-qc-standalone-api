@@ -18,6 +18,7 @@ const PURGE_CONTROL=/^\/api\/admin\/data-purge\/(?:prepare|execute|direct)$/;
 const PURGE_STATUS=/^\/purge-status\/[a-f0-9]{48}\.json$/i;
 const SAFE_READ_APIS=new Set(['/api/health','/api/session','/api/bootstrap','/api/backups']);
 const LONG_LIVED_AFTER_AUTH=new Set(['/api/events']);
+const AUTH_BRIDGE_SAFE_POST=new Set(['/api/local-auth-proxy/login']);
 export const V547_RECONCILE_ACTIVE_MS=Math.max(5_000,Math.min(30_000,Number(process.env.V547_PURGE_ACTIVE_RECONCILE_MS||10_000)));
 export const V547_RECONCILE_IDLE_MS=Math.max(30_000,Math.min(5*60_000,Number(process.env.V547_PURGE_IDLE_RECONCILE_MS||60_000)));
 const SYSTEM_RECONCILE_USER={id:'V505_SYSTEM_HISTORICAL_STARTUP_RECONCILE'};
@@ -231,6 +232,7 @@ function readonlyUiAllowedDuringFreeze(state={}){
 function allowedDuringFreeze(method,pathname,state={}){
   if(PURGE_STATUS.test(pathname)&&['GET','HEAD'].includes(method))return true;
   if(PURGE_CONTROL.test(pathname)&&method==='POST')return true;
+  if(AUTH_BRIDGE_SAFE_POST.has(pathname)&&method==='POST')return true;
   if(SAFE_READ_APIS.has(pathname)&&['GET','HEAD'].includes(method))return true;
   if(pathname.startsWith('/api/')&&['GET','HEAD'].includes(method)&&readonlyUiAllowedDuringFreeze(state))return true;
   if(!pathname.startsWith('/api/')&&['GET','HEAD','OPTIONS'].includes(method))return true;
