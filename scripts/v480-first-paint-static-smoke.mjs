@@ -52,6 +52,10 @@ assert.doesNotMatch(purgeConsole,/fetch\(['"`]\/api\/admin\/data-purge|XMLHttpRe
 assert.doesNotMatch(purgeConsole,/\/api\/admin\/data-purge\/(?:prepare|execute)/i,'recovery HTML must never bypass the canonical V505 transport owner');
 assert.doesNotMatch(purgeConsole,/#purgeStepTwo\{display:none!important\}/,'recovery console must not permanently hide explicit confirmation step');
 assert.match(purgeConsole,/\[hidden\]\{display:none!important\}#purgeStepTwo:not\(\[hidden\]\)\{display:block!important\}/,'recovery console must reveal the canonical second confirmation step after verified backup');
+assert.match(purgeConsole,/onclick="continueDataPurge\(\)">备份并继续<\/button>/,'recovery console must expose the explicit backup-and-continue control');
+assert.match(purgeConsole,/id="purgeBackupConfirmed"[^>]*onchange="updatePurgeButton\(\)"/,'recovery console must expose the backup confirmation checkbox');
+assert.match(purgeConsole,/id="purgePhrase"[^>]*oninput="updatePurgeButton\(\)"/,'recovery console must expose the exact confirmation phrase field');
+assert.match(purgeConsole,/id="purgeExecuteButton"[^>]*onclick="executeDataPurge\(\)"[^>]*disabled>确认清空所有数据<\/button>/,'recovery console must expose the gated final purge button');
 
 // Execute the browser guard with two startup failure shapes:
 // 1) headers never arrive; V533 must synthesize a finite 504;
