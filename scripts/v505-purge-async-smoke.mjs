@@ -137,7 +137,7 @@ assert.match(preClear,/BEGIN IMMEDIATE/,'pre-clear backup must still seal writes
 assert.match(preClear,/v547-bounded-throughput/);
 
 const ui=read('public/v505-data-purge-recovery.js');
-assert.match(ui,/v545-explicit-two-step-purge-ui-v1/);
+assert.match(ui,/v555-visible-execute-progress-v1/);
 assert.doesNotMatch(ui,/requestJson\('\/api\/session'/,'purge open must never depend on a duplicate /api/session round-trip');
 assert.match(ui,/knownRole=typeof accessSession!=='undefined'/,'UI may use already-loaded session state only as a best-effort early role hint');
 assert.match(ui,/尚未开始任何备份或清空任务/,'opening the wizard must be inert');
