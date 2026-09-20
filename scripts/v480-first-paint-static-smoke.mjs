@@ -11,6 +11,7 @@ const source=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const atomic=fs.readFileSync('src/exportJobAtomicJson.js','utf8');
 const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
 const purgeConsole=fs.readFileSync('public/purge-console.html','utf8');
+const server=fs.readFileSync('server.js','utf8');
 assert.match(source,/2026-09-08-v480-preauth-static-first-paint-v1/);
 assert.match(source,/const V480_PUBLIC_ASSET_RE=\/\\\.\(\?:css\|js\|svg\|png\|jpe\?g\|webp\|gif\|ico\|woff2\?\)\$\/i/,'V480 whitelist must be explicit non-HTML browser assets only');
 assert.match(source,/express\.static\('public',\{index:false,fallthrough:true,redirect:false,maxAge:0\}\)/,'V480 must never expose index.html through the pre-auth static server');
@@ -56,6 +57,16 @@ assert.match(purgeConsole,/onclick="continueDataPurge\(\)">备份并继续<\/but
 assert.match(purgeConsole,/id="purgeBackupConfirmed"[^>]*onchange="updatePurgeButton\(\)"/,'recovery console must expose the backup confirmation checkbox');
 assert.match(purgeConsole,/id="purgePhrase"[^>]*oninput="updatePurgeButton\(\)"/,'recovery console must expose the exact confirmation phrase field');
 assert.match(purgeConsole,/id="purgeExecuteButton"[^>]*onclick="executeDataPurge\(\)"[^>]*disabled>确认清空所有数据<\/button>/,'recovery console must expose the gated final purge button');
+const recoveryHtmlRoute = server.indexOf("app.get(['/purge-console.html', '/purge-console']");
+const recoveryJsRoute = server.indexOf("app.get('/v505-data-purge-recovery.js'");
+const authMiddleware = server.indexOf('app.use(accessIdentity);');
+assert.ok(recoveryHtmlRoute >= 0 && recoveryHtmlRoute < authMiddleware,'loopback purge HTML must be served before accessIdentity');
+assert.ok(recoveryJsRoute >= 0 && recoveryJsRoute < authMiddleware,'loopback purge JS must be served before accessIdentity');
+assert.match(server,/function isLoopbackRecoveryRequest\(req\)/,'recovery pre-auth route must have an explicit loopback guard');
+assert.match(server,/\['127\.0\.0\.1', 'localhost', '::1'\]\.includes\(host\)/,'recovery pre-auth route must require loopback host');
+assert.match(server,/\['127\.0\.0\.1', '::1'\]\.includes\(remote\)/,'recovery pre-auth route must require loopback remote');
+assert.doesNotMatch(server.slice(recoveryHtmlRoute,authMiddleware),/\/api\/admin\/data-purge\/(?:prepare|execute)/,'pre-auth recovery shell must never expose purge APIs');
+
 
 // Execute the browser guard with two startup failure shapes:
 // 1) headers never arrive; V533 must synthesize a finite 504;

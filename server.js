@@ -64,6 +64,29 @@ const upload = multer({
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '50mb' }));
+
+// Recovery-only first paint: the purge console is static and contains no business
+// facts. Serve only the two recovery assets directly to a loopback browser before
+// accessIdentity so a stale/blocked auth or large-DB session read can never blank
+// the emergency purge page. All purge APIs remain behind accessIdentity + ADMIN.
+function isLoopbackRecoveryRequest(req) {
+  const host = String(req.hostname || req.get('host') || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split(':')[0];
+  const remote = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+  return ['127.0.0.1', 'localhost', '::1'].includes(host) && ['127.0.0.1', '::1'].includes(remote);
+}
+function sendLoopbackRecoveryFile(fileName, type) {
+  return (req, res, next) => {
+    if (!isLoopbackRecoveryRequest(req)) return next();
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (type) res.type(type);
+    return res.sendFile(path.join(__dirname, 'public', fileName));
+  };
+}
+app.get(['/purge-console.html', '/purge-console'], sendLoopbackRecoveryFile('purge-console.html', 'html'));
+app.get('/v505-data-purge-recovery.js', sendLoopbackRecoveryFile('v505-data-purge-recovery.js', 'application/javascript'));
+
 app.use(accessIdentity);
 app.use(sameOriginWriteGuard);
 app.use('/api/shopee', requireBusinessScope('SHOPEE'));
