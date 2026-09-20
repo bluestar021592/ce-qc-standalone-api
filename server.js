@@ -44,6 +44,7 @@ import {
   resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
+import { executeDirectDataPurge, DIRECT_PURGE_ID } from './src/directDataPurge.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,6 +87,7 @@ function sendLoopbackRecoveryFile(fileName, type) {
 }
 app.get(['/purge-console.html', '/purge-console'], sendLoopbackRecoveryFile('purge-console.html', 'html'));
 app.get('/v505-data-purge-recovery.js', sendLoopbackRecoveryFile('v505-data-purge-recovery.js', 'application/javascript'));
+app.get('/v560-direct-data-purge.js', sendLoopbackRecoveryFile('v560-direct-data-purge.js', 'application/javascript'));
 
 app.use(accessIdentity);
 app.use(sameOriginWriteGuard);
@@ -687,6 +689,20 @@ app.get('/api/state/last-report', async (req, res) => {
     canExport: Boolean(summary.finalRows || summary.scanResults || summary.dailySummary),
     state: summary
   });
+});
+
+app.post('/api/admin/data-purge/direct', requireRole('ADMIN'), async (req, res) => {
+  try {
+    const result = await executeDirectDataPurge({ phrase: req.body?.phrase, user: req.user });
+    try { getDb().exec('PRAGMA query_only=OFF'); } catch {}
+    auditAction(req, 'DATA_PURGE_DIRECT_COMPLETED', { direct: true, backupCreated: false, before: result.before, after: result.after, patchId: DIRECT_PURGE_ID });
+    broadcastEvent('DATA_RESET', { at: result.completedAt, direct: true });
+    return res.json(result);
+  } catch (e) {
+    try { getDb().exec('PRAGMA query_only=OFF'); } catch {}
+    try { auditAction(req, 'DATA_PURGE_DIRECT_FAILED', { direct: true, error: e.message, patchId: DIRECT_PURGE_ID }); } catch {}
+    return res.status(409).json({ ok: false, code: e.code || 'DIRECT_PURGE_FAILED', error: e.message, patchId: DIRECT_PURGE_ID });
+  }
 });
 
 app.post('/api/admin/data-purge/prepare', requireRole('ADMIN'), async (req, res) => {
