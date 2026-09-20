@@ -17,7 +17,7 @@
     // V104 is intentionally retired from the active data-management path.
     // V505 is the single purge owner; V106 remains only as a compatibility UI guard
     // for already-open/stale pages and does not install a competing purge workflow.
-    data:['/v505-data-purge-recovery.js?v=20260915-v545-1','/v106-purge-legacy-controls-hide.js?v=20260915-v545-1'],
+    data:['/v505-data-purge-recovery.js?v=20260920-v555-1','/v106-purge-legacy-controls-hide.js?v=20260915-v545-1'],
     carry:['/v99-carry-live-ui.js?v=20260814-1']
   };
 
