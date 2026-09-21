@@ -142,6 +142,16 @@ if (Test-Path -LiteralPath $NoBackupCleanup) {
     }
 }
 
+$RuntimeScratch = if (Test-Path -LiteralPath 'D:\') { 'D:\CE_QC_RUNTIME_TEMP\runtime' } else { Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp\runtime' }
+try {
+    New-Item -ItemType Directory -Path $RuntimeScratch -Force | Out-Null
+    $env:TEMP = $RuntimeScratch
+    $env:TMP = $RuntimeScratch
+    Write-Host "[CE-QC] Runtime TEMP/TMP redirected to: $RuntimeScratch" -ForegroundColor DarkCyan
+} catch {
+    Write-Host ("[WARN] Runtime scratch redirection failed; Windows TEMP will be used. " + $_.Exception.Message) -ForegroundColor Yellow
+}
+
 $env:CE_QC_NO_BACKUP_MODE = '1'
 $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
