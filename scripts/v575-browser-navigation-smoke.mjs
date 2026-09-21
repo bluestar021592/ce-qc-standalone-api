@@ -64,9 +64,9 @@ function fixtureHtml(){
     '<section id="importPage" class="app-page" hidden><h1>IMPORT</h1></section>'+
     '<section id="trackPage" class="app-page" hidden><h1>TRACK</h1></section>'+
     '<button id="metricButton" onclick="document.body.dataset.metric=\'clicked\'">metric</button>'+
-    '</main></div></div>'+
+    '</main>'+
     '<div id="sidebarBlocker"></div><div id="contentBlocker"></div>'+
-    '</body></html>';
+    '</div></div></body></html>';
 }
 class CDP{
   constructor(ws){this.ws=new WebSocket(ws);this.id=0;this.pending=new Map();}
