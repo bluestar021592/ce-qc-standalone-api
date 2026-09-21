@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 
 test('V560 direct purge clears business data without creating a backup or purge seal',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v560-direct-'));
