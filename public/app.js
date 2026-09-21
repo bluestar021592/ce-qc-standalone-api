@@ -162,12 +162,34 @@ async function refreshInternal() {
       if (boot?.authStatus) ceAuth = boot.authStatus;
       if (boot?.session) accessSession = boot.session;
       historyCatalog = {
-        CCSL: boot?.history?.CCSL || historyCatalog.CCSL || [],
-        SHOPEE: boot?.history?.SHOPEE || historyCatalog.SHOPEE || [],
-        UNIFIED: boot?.history?.UNIFIED || historyCatalog.UNIFIED || []
+        CCSL: boot?.history?.CCSL || [],
+        SHOPEE: boot?.history?.SHOPEE || [],
+        UNIFIED: boot?.history?.UNIFIED || []
       };
-      if (boot?.unifiedImport) unifiedImportState = boot.unifiedImport;
-      businessStates = { ...businessStates, ...(boot?.businessStates || {}) };
+      unifiedImportState = boot?.unifiedImport || null;
+      businessStates = { ...(boot?.businessStates || {}) };
+      const serverHasBusinessData = Boolean(
+        unifiedImportState?.snapshotId
+        || historyCatalog.UNIFIED.length
+        || historyCatalog.CCSL.length
+        || historyCatalog.SHOPEE.length
+        || Object.keys(businessStates).length
+      );
+      if (!serverHasBusinessData) {
+        historyModeDate = '';
+        dashboardPeriodMode = '';
+        dashboardPeriodRange = null;
+        processingNotice = null;
+        pageLoadPromises.clear();
+        pageLoadAt.clear();
+        try {
+          for (const key of Object.keys(localStorage)) {
+            if (/^ce_qc_/i.test(String(key))) localStorage.removeItem(key);
+          }
+          sessionStorage.removeItem('trackingReturnContext');
+          sessionStorage.removeItem('ce_resume_after_login');
+        } catch {}
+      }
       bootstrapLoaded = true;
     } catch (error) {
       console.warn('[startup] 快速启动接口读取失败，回退兼容加载', error);
@@ -198,12 +220,22 @@ async function refreshInternal() {
     if (auth?.authStatus) ceAuth = auth.authStatus;
     if (session) accessSession = session;
     historyCatalog = {
-      CCSL: ccslHistory?.rows || historyCatalog.CCSL || [],
-      SHOPEE: shopeeHistory?.rows || historyCatalog.SHOPEE || [],
-      UNIFIED: unifiedHistory?.rows || historyCatalog.UNIFIED || []
+      CCSL: ccslHistory?.rows || [],
+      SHOPEE: shopeeHistory?.rows || [],
+      UNIFIED: unifiedHistory?.rows || []
     };
-    if (unified?.import) unifiedImportState = unified.import;
-    if (businessResponse?.businessType) businessStates[businessResponse.businessType] = businessResponse.state || {};
+    unifiedImportState = unified?.import || null;
+    if (businessResponse?.businessType) {
+      businessStates = { [businessResponse.businessType]: businessResponse.state || {} };
+    } else if (!unifiedImportState?.snapshotId && !historyCatalog.UNIFIED.length && !historyCatalog.CCSL.length && !historyCatalog.SHOPEE.length) {
+      businessStates = {};
+      historyModeDate = '';
+      dashboardPeriodMode = '';
+      dashboardPeriodRange = null;
+      processingNotice = null;
+      pageLoadPromises.clear();
+      pageLoadAt.clear();
+    }
   }
 
   // When the selected date is the current imported date, always bind the five
