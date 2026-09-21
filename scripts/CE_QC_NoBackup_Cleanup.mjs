@@ -138,6 +138,8 @@ const launcherTempRoot=path.join(launcherRoot,'temp');
 const launcherLogsRoot=path.join(launcherRoot,'app','logs');
 const fallbackDataRoot=path.join(cfg.projectRoot||process.cwd(),'data');
 const dataTempRoot=path.join(cfg.dataDir,'temp');
+const dCandidateTempRoot=process.platform==='win32'?'D:\\CE_QC_TEST_TEMP':path.join(cfg.dataDir,'temp','candidate_tests');
+const dRuntimeTempRoot=process.platform==='win32'?'D:\\CE_QC_RUNTIME_TEMP':path.join(cfg.dataDir,'temp','runtime');
 
 const cRoot=process.platform==='win32'?'C:\\':path.parse(cfg.projectRoot).root;
 const dRoot=process.platform==='win32'&&fs.existsSync('D:\\')?'D:\\':path.parse(cfg.dataDir).root;
@@ -149,6 +151,8 @@ const removed=[
   {kind:'IMPORTS',...removeChildren(cfg.importsDir)},
   {kind:'EXPORTS',...removeChildren(cfg.exportsDir)},
   {kind:'DATA_RUNTIME_TEMP',...removeChildren(dataTempRoot)},
+  {kind:'D_CANDIDATE_TEST_TEMP',...removeChildren(dCandidateTempRoot)},
+  {kind:'D_RUNTIME_TEMP',...removeChildren(dRuntimeTempRoot)},
   {kind:'LAUNCHER_TEMP',...removeChildren(launcherTempRoot)}
 ];
 
