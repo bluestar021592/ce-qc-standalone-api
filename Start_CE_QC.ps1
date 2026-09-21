@@ -130,11 +130,11 @@ function Clear-CeQcPort([int]$Port) {
 Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
-Write-Host '[CE-QC][V575] Coordinate click recovery + WHPP home card + C/D storage proof runtime is installed.' -ForegroundColor Green
+Write-Host '[CE-QC][V576] V575 click/WHPP fixes retained + safe C/D storage reclaim runtime is installed.' -ForegroundColor Green
 
 $NoBackupCleanup = Join-Path $ProjectRoot 'scripts\CE_QC_NoBackup_Cleanup.mjs'
 if (Test-Path -LiteralPath $NoBackupCleanup) {
-    Write-Host '[CE-QC] No-backup policy: cleaning CE QC backups/temp data and reclaiming empty SQLite space...' -ForegroundColor Cyan
+    Write-Host '[CE-QC] No-backup policy: cleaning CE QC backups/temp data and safely reclaiming SQLite free pages without deleting live business rows...' -ForegroundColor Cyan
     try {
         & $NodeExe $NoBackupCleanup
         if ($LASTEXITCODE -ne 0) { Write-Host "[WARN] No-backup cleanup exited with code $LASTEXITCODE; startup will continue." -ForegroundColor Yellow }
