@@ -142,6 +142,7 @@ if (Test-Path -LiteralPath $NoBackupCleanup) {
     }
 }
 
+$env:CE_QC_NO_BACKUP_MODE = '1'
 $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
 $LocalUrl = 'http://127.0.0.1:5177'
