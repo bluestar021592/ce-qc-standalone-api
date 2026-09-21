@@ -37,12 +37,12 @@ function normalizeTopNavigation() {
   const nav = document.querySelector('.side-nav');
   if (!nav) return;
   const items = [
-    ['home','首页总看板','home','/'], ['ce','CE看板','package','/ce'], ['ceaf','CEAF空运看板','package','/ceaf'], ['tbkh','TBKH看板','package','/tbkh'], ['ali1688','ALI1688看板','package','/ali1688'],
+    ['home','首页总看板','home','/'], ['ce','CE看板','package','/ce'], ['ceaf','CEAF空运看板','package','/ceaf'], ['tbkh','TBKH看板','package','/tbkh'], ['ali1688','ALI1688看板','package','/ali1688'], ['whpp','WHPP本土看板','package','/whpp'],
     ['shopeecn','SHOPEE CN看板','bag','/shopeecn'], ['shopeevn','SHOPEE VN看板','bag','/shopeevn'], ['import','数据导入','database','/import'],
     ['tracking','轨迹查询','route','/tracking'], ['exceptions','异常明细','alert','/exceptions'], ['reports','报表导出','clipboard','/reports'],
     ['data-management','数据管理','database','/data-management'], ['settings','系统设置','settings','/settings'], ['logs','操作日志','clipboard','/logs']
   ];
-  nav.innerHTML = items.map(([page,label,icon,path]) => `<button class="side-link ${page === currentPage ? 'active' : ''} ${page === 'data-management' ? 'admin-only' : ''}" data-page="${page}" data-path="${path}" onclick="navigatePage('${page}')" ${page === 'data-management' ? 'hidden' : ''}><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-${icon}"></use></svg><span class="side-label">${label}</span></button>`).join('');
+  nav.innerHTML = items.map(([page,label,icon,path]) => `<button class="side-link ${page === currentPage ? 'active' : ''} ${page === 'data-management' ? 'admin-only' : ''}" data-page="${page}" data-path="${path}" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('${page}','','app-nav') || navigatePage('${page}')" ${page === 'data-management' ? 'hidden' : ''}><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-${icon}"></use></svg><span class="side-label">${label}</span></button>`).join('');
 }
 
 function separateLegacyPanels() {
@@ -2418,12 +2418,14 @@ function buildVisualDashboardSnapshot(fixture) {
       trend: fixture.kpiTrends?.[item.key] || [], action: actions[item.key]
     };
   });
-  const businessCards = [
-    ['total','总览',Number(fixture.ccsl?.today || 0) + Number(fixture.shopee?.all?.today || 0),'blue'],
-    ['ce','CE',fixture.ccsl?.today,'green'], ['tbkh','TBKH',6250,'orange'],
-    ['shopeecn','SHOPEE CN',fixture.shopee?.cn?.today,'purple'], ['shopeevn','SHOPEE VN',fixture.shopee?.vn?.today,'red'],
-    ['ali1688','ALI1688',1150,'cyan']
-  ].map(([key,label,value,tone]) => ({key,label,value:Number(value || 0),tone}));
+  const visualBusinessRows = [
+    ['ce','CE',fixture.ccsl?.today,'green'], ['ceaf','CEAF空运',0,'blue'], ['tbkh','TBKH',6250,'orange'],
+    ['ali1688','ALI1688',1150,'cyan'], ['whpp','WHPP本土',0,'cyan'],
+    ['shopeecn','SHOPEE CN',fixture.shopee?.cn?.today,'purple'], ['shopeevn','SHOPEE VN',fixture.shopee?.vn?.today,'red']
+  ];
+  const visualTotal = visualBusinessRows.reduce((sum,row) => sum + Number(row[2] || 0), 0);
+  const businessCards = [['total','总览',visualTotal,'blue'], ...visualBusinessRows]
+    .map(([key,label,value,tone]) => ({key,label,value:Number(value || 0),tone}));
   const coreMetrics = topKpis.slice(2).map(item => ({ key:item.key,label:item.label,value:item.value,unit:item.unit })).concat([
     {key:'self-pickup',label:'仓库自提件',value:86,unit:'件'}, {key:'cecn',label:'CECN滞留包裹',value:42,unit:'件'},
     {key:'cezt',label:'CEZT滞留包裹',value:31,unit:'件'}, {key:'580',label:'580滞留包裹',value:18,unit:'件'}
@@ -2601,6 +2603,13 @@ function buildProductionDashboardSnapshot() {
     const state = businessStates[type] || {};
     const sourceTotal = state.sourceTotal ?? state.dashboard?.sourceTotal ?? state.dailyParseSummary?.sourceTotal;
     if (sourceTotal !== undefined && sourceTotal !== null) return Number(sourceTotal || 0);
+    if (String(type).toUpperCase() === 'WHPP') {
+      return Number(state.total
+        || state.metrics?.total
+        || state.dashboard?.metrics?.total
+        || state.dailyParseSummary?.totalRecognized
+        || 0);
+    }
     if (/^SHOPEE/.test(type)) {
       return Number(state.dashboard?.recipientGroups?.ALL?.metrics?.total
         || state.dashboard?.metrics?.total
@@ -2612,15 +2621,21 @@ function buildProductionDashboardSnapshot() {
       || state.dailyParseSummary?.totalRecognized
       || 0);
   };
-  const periodSourceTotal = ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].reduce((sum, type) => sum + rangeBusinessCount(type), 0);
-  const businessCards = [
-    ['total', '总览', useSingleDayImportCounts ? Number(unifiedImportState.summary?.validUniqueWaybills || 0) : (dashboardPeriodMode ? periodSourceTotal : total), 'blue'],
+  const businessRows = [
     ['ce', 'CE', useSingleDayImportCounts ? Number(importedCounts.CE || 0) : (dashboardPeriodMode ? rangeBusinessCount('CE') : cc.total), 'green'],
     ['ceaf', 'CEAF空运', useSingleDayImportCounts ? Number(importedCounts.CEAF || 0) : rangeBusinessCount('CEAF'), 'blue'],
     ['tbkh', 'TBKH', useSingleDayImportCounts ? Number(importedCounts.TBKH || 0) : rangeBusinessCount('TBKH'), 'orange'],
+    ['ali1688', 'ALI1688', useSingleDayImportCounts ? Number(importedCounts.ALI1688 || 0) : rangeBusinessCount('ALI1688'), 'cyan'],
+    ['whpp', 'WHPP本土', useSingleDayImportCounts ? Number(importedCounts.WHPP || 0) : rangeBusinessCount('WHPP'), 'cyan'],
     ['shopeecn', 'SHOPEE CN', useSingleDayImportCounts ? Number(importedCounts.SHOPEECN || 0) : (dashboardPeriodMode ? rangeBusinessCount('SHOPEECN') : Number(shopeeState.dashboard?.recipientGroups?.CN?.metrics?.total || rangeBusinessCount('SHOPEECN'))), 'purple'],
-    ['shopeevn', 'SHOPEE VN', useSingleDayImportCounts ? Number(importedCounts.SHOPEEVN || 0) : (dashboardPeriodMode ? rangeBusinessCount('SHOPEEVN') : Number(shopeeState.dashboard?.recipientGroups?.VN?.metrics?.total || rangeBusinessCount('SHOPEEVN'))), 'red'],
-    ['ali1688', 'ALI1688', useSingleDayImportCounts ? Number(importedCounts.ALI1688 || 0) : rangeBusinessCount('ALI1688'), 'cyan']
+    ['shopeevn', 'SHOPEE VN', useSingleDayImportCounts ? Number(importedCounts.SHOPEEVN || 0) : (dashboardPeriodMode ? rangeBusinessCount('SHOPEEVN') : Number(shopeeState.dashboard?.recipientGroups?.VN?.metrics?.total || rangeBusinessCount('SHOPEEVN'))), 'red']
+  ];
+  const derivedBusinessTotal = businessRows.reduce((sum, row) => sum + Number(row[2] || 0), 0);
+  const protectedImportTotal = Number(unifiedImportState?.summary?.validUniqueWaybills || 0);
+  const totalBusinessValue = useSingleDayImportCounts && protectedImportTotal > 0 ? protectedImportTotal : derivedBusinessTotal;
+  const businessCards = [
+    ['total', '总览', totalBusinessValue, 'blue'],
+    ...businessRows
   ];
   const businessTotal = Number(businessCards[0]?.[2] || 0);
   const businessCardsWithRatios = businessCards.map(([key, label, value, tone], index) => ({

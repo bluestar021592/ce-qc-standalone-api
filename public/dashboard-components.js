@@ -248,10 +248,18 @@
   }
 
   function renderHome(snapshot) {
+    const fallbackRows = [
+      {key:'ce',label:'CE',value:snapshot.ccsl?.today || 0,tone:'green'},
+      {key:'ceaf',label:'CEAF空运',value:0,tone:'blue'},
+      {key:'tbkh',label:'TBKH',value:0,tone:'orange'},
+      {key:'ali1688',label:'ALI1688',value:0,tone:'cyan'},
+      {key:'whpp',label:'WHPP本土',value:0,tone:'cyan'},
+      {key:'shopeecn',label:'SHOPEE CN',value:snapshot.shopee?.cn?.today || 0,tone:'purple'},
+      {key:'shopeevn',label:'SHOPEE VN',value:snapshot.shopee?.vn?.today || 0,tone:'red'}
+    ];
     const fallbackCards = [
-      {key:'total',label:'总览',value:snapshot.ccsl?.today || 0,tone:'blue'}, {key:'ce',label:'CE',value:snapshot.ccsl?.today || 0,tone:'green'},
-      {key:'tbkh',label:'TBKH',value:0,tone:'orange'}, {key:'shopeecn',label:'SHOPEE CN',value:snapshot.shopee?.cn?.today || 0,tone:'purple'},
-      {key:'shopeevn',label:'SHOPEE VN',value:snapshot.shopee?.vn?.today || 0,tone:'red'}, {key:'ali1688',label:'ALI1688',value:0,tone:'cyan'}
+      {key:'total',label:'总览',value:fallbackRows.reduce((sum,row)=>sum+Number(row.value||0),0),tone:'blue'},
+      ...fallbackRows
     ];
     const fallbackMetrics = [{key:'self-pickup',label:'仓库自提件',value:0,unit:'件'},{key:'cecn',label:'CECN滞留包裹',value:0,unit:'件'},{key:'cezt',label:'CEZT滞留包裹',value:0,unit:'件'},{key:'580',label:'580滞留包裹',value:0,unit:'件'}];
     const cards = snapshot.businessCards?.length ? snapshot.businessCards : fallbackCards;

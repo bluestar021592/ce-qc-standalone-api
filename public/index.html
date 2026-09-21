@@ -5,33 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CE Express 质量控制管理系统</title>
   <script>
-  (function installV574InlineOwner(global){
+  (function installV575CoordinateOwner(global){
     'use strict';
-    if(global.__CE_QC_V574_INLINE_OWNER__) return;
-    var VERSION='2026-09-21-v574-inline-no-reload-owner-v1';
+    if(global.__CE_QC_V575_COORDINATE_OWNER__) return;
+    var VERSION='2026-09-21-v575-coordinate-nav-owner-v1';
     var doc=global.document;
     var aliases={ccsl:'ce',shopee:'shopeecn',track:'tracking'};
     var paths={home:'/',ce:'/ce',ceaf:'/ceaf',tbkh:'/tbkh',ali1688:'/ali1688',whpp:'/whpp',shopeecn:'/shopeecn',shopeevn:'/shopeevn',import:'/import',tracking:'/tracking',exceptions:'/exceptions',reports:'/reports','data-management':'/data-management',settings:'/settings',logs:'/logs'};
     var titles={home:'首页总看板',ce:'CE看板',ceaf:'CEAF空运看板',tbkh:'TBKH看板',ali1688:'ALI1688看板',whpp:'WHPP本土看板',shopeecn:'SHOPEE CN看板',shopeevn:'SHOPEE VN看板',import:'数据导入',tracking:'轨迹查询',exceptions:'异常明细',reports:'报表导出','data-management':'数据管理',settings:'系统设置',logs:'操作日志'};
-    var lastKey='',lastAt=0,diagCount=0,replayTimer=0;
-    global.__CE_QC_V574_INLINE_OWNER__={version:VERSION,installedAt:Date.now(),lastPage:'home',lastEvent:''};
+    var lastKey='',lastAt=0,diagCount=0,replayTimer=0,armed=null,redispatching=false;
+    var SIDEBAR_SELECTOR='.side-link[data-page],.side-sub[data-page]';
+    var ACTION_SELECTOR='.side-link[data-page],.side-sub[data-page],button:not(:disabled),a[href],[role="button"],[onclick],.v18-business-card,.v18-metric-card,.pixel-kpi,.pixel-metric,.pixel-chart-card,.region-block button';
+    global.__CE_QC_V575_COORDINATE_OWNER__={version:VERSION,installedAt:Date.now(),lastPage:'home',lastEvent:'',go:go};
 
-    function normalize(page){
-      page=String(page||'home').toLowerCase();
-      return aliases[page]||page;
-    }
+    function normalize(page){ page=String(page||'home').toLowerCase(); return aliases[page]||page; }
     function diag(event,page,extra){
-      if(diagCount>=12) return;
+      if(diagCount>=30) return;
       diagCount+=1;
       try{
-        var q=new URLSearchParams({event:String(event||''),page:String(page||''),extra:String(extra||'').slice(0,120),v:'574'});
+        var q=new URLSearchParams({event:String(event||''),page:String(page||''),extra:String(extra||'').slice(0,180),v:'575'});
         fetch('/api/client-diag?'+q.toString(),{credentials:'same-origin',cache:'no-store',keepalive:true}).catch(function(){});
       }catch(_){}
     }
     function targetId(page){
       if(page==='home') return 'homePage';
       if(['ce','ceaf','tbkh','ali1688'].indexOf(page)>=0) return 'ccslPage';
-      if(['shopeecn','shopeevn','whpp'].indexOf(page)>=0) return 'shopeePage';
+      if(['shopeecn','shopeevn'].indexOf(page)>=0) return 'shopeePage';
+      if(page==='whpp') return doc.getElementById('whppFastPage')?'whppFastPage':'shopeePage';
       if(page==='tracking') return 'trackPage';
       return page+'Page';
     }
@@ -41,23 +41,17 @@
         doc.querySelectorAll('.app-page').forEach(function(node){node.hidden=true;});
         var target=doc.getElementById(targetId(page));
         if(target) target.hidden=false;
-        doc.querySelectorAll('[data-page]').forEach(function(node){
-          node.classList.toggle('active',normalize(node.dataset.page)===page);
-        });
-        var title=doc.getElementById('pageTitle');
-        if(title) title.textContent=titles[page]||'首页总看板';
-        var cc=doc.querySelector('#ccslPage .page-heading h2');
-        if(cc&&['ce','ceaf','tbkh','ali1688'].indexOf(page)>=0) cc.textContent=titles[page];
-        var sh=doc.querySelector('#shopeePage .page-heading h2');
-        if(sh&&['shopeecn','shopeevn','whpp'].indexOf(page)>=0) sh.textContent=titles[page];
-        global.__CE_QC_V574_INLINE_OWNER__.lastPage=page;
+        doc.querySelectorAll('[data-page]').forEach(function(node){node.classList.toggle('active',normalize(node.dataset.page)===page);});
+        var title=doc.getElementById('pageTitle'); if(title) title.textContent=titles[page]||'首页总看板';
+        var cc=doc.querySelector('#ccslPage .page-heading h2'); if(cc&&['ce','ceaf','tbkh','ali1688'].indexOf(page)>=0) cc.textContent=titles[page];
+        var sh=doc.querySelector('#shopeePage .page-heading h2'); if(sh&&['shopeecn','shopeevn'].indexOf(page)>=0) sh.textContent=titles[page];
+        global.__CE_QC_V575_COORDINATE_OWNER__.lastPage=page;
       }catch(error){diag('PAINT_ERROR',page,error&&error.message);}
     }
     function pushPath(page){
       var target=paths[page]||'/';
-      try{
-        if(global.location.pathname!==target) global.history.pushState({ceQcPage:page},'',target+global.location.search);
-      }catch(error){diag('PUSHSTATE_ERROR',page,error&&error.message);}
+      try{ if(global.location.pathname!==target) global.history.pushState({ceQcPage:page},'',target+global.location.search); }
+      catch(error){diag('PUSHSTATE_ERROR',page,error&&error.message);}
     }
     function replayWhenReady(page,anchor){
       clearInterval(replayTimer);
@@ -70,38 +64,64 @@
           catch(error){ diag('NAV_REPLAY_ERROR',page,error&&error.message); }
           return;
         }
-        if(attempts>=100){
-          clearInterval(replayTimer);
-          diag('APP_NAV_NOT_READY',page,'10s');
-        }
+        if(attempts>=100){ clearInterval(replayTimer); diag('APP_NAV_NOT_READY',page,'10s'); }
       },100);
     }
     function go(page,anchor,reason){
       page=normalize(page);
       var key=page+'|'+String(anchor||'');
       var now=Date.now();
-      if(lastKey===key&&now-lastAt<350) return true;
-      lastKey=key;lastAt=now;
-      pushPath(page);
-      paint(page);
-      global.__CE_QC_V574_INLINE_OWNER__.lastEvent=String(reason||'nav');
+      if(lastKey===key&&now-lastAt<280) return true;
+      lastKey=key; lastAt=now;
+      pushPath(page); paint(page);
+      global.__CE_QC_V575_COORDINATE_OWNER__.lastEvent=String(reason||'nav');
       if(typeof global.navigatePage==='function'){
-        try{global.navigatePage(page,anchor||'');diag('NAV_OK',page,reason||'');return true;}
-        catch(error){diag('NAV_ERROR',page,error&&error.message);}
+        try{ global.navigatePage(page,anchor||''); diag('NAV_OK',page,reason||''); return true; }
+        catch(error){ diag('NAV_ERROR',page,error&&error.message); }
       }
       diag('NAV_DEFERRED',page,reason||'');
       replayWhenReady(page,anchor||'');
       return true;
     }
-    function sideControlFromEvent(event){
-      try{return event.target&&event.target.closest?event.target.closest('.side-link[data-page],.side-sub[data-page]'):null;}catch(_){return null;}
-    }
-    function neutralizeAt(control){
-      if(!control||!control.getBoundingClientRect||!doc.elementsFromPoint) return;
+    function rect(node){ try{return node&&node.getBoundingClientRect?node.getBoundingClientRect():null;}catch(_){return null;} }
+    function visible(node){
+      if(!node||!node.isConnected||node.hidden) return false;
       try{
-        var r=control.getBoundingClientRect();
-        if(!r.width||!r.height) return;
-        var x=r.left+r.width/2,y=r.top+r.height/2;
+        var cs=global.getComputedStyle?global.getComputedStyle(node):null;
+        if(cs&&(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0)) return false;
+        var r=rect(node); return !!(r&&r.width>0&&r.height>0);
+      }catch(_){return false;}
+    }
+    function pointInside(r,x,y){ return !!r&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom; }
+    function directAction(target){
+      try{var n=target&&target.closest?target.closest(ACTION_SELECTOR):null; return visible(n)?n:null;}catch(_){return null;}
+    }
+    function actionByCoordinates(x,y,sidebarOnly){
+      var selector=sidebarOnly?SIDEBAR_SELECTOR:ACTION_SELECTOR;
+      var best=null,bestArea=Infinity;
+      try{
+        doc.querySelectorAll(selector).forEach(function(node){
+          if(!visible(node)) return;
+          var r=rect(node); if(!pointInside(r,x,y)) return;
+          var area=Math.max(1,r.width*r.height);
+          if(area<bestArea){best=node;bestArea=area;}
+        });
+      }catch(_){}
+      return best;
+    }
+    function intendedControl(event,sidebarOnly){
+      var x=Number(event&&event.clientX),y=Number(event&&event.clientY);
+      var direct=directAction(event&&event.target);
+      if(sidebarOnly&&direct&&!direct.matches(SIDEBAR_SELECTOR)) direct=null;
+      if(direct) return direct;
+      if(!Number.isFinite(x)||!Number.isFinite(y)) return null;
+      return actionByCoordinates(x,y,sidebarOnly);
+    }
+    function neutralizeTopBlocker(event,control){
+      if(!control||!doc.elementsFromPoint) return;
+      try{
+        var x=Number(event.clientX),y=Number(event.clientY);
+        if(!Number.isFinite(x)||!Number.isFinite(y)) return;
         var stack=doc.elementsFromPoint(x,y)||[];
         for(var i=0;i<stack.length;i+=1){
           var node=stack[i];
@@ -109,61 +129,108 @@
           if(node.closest&&node.closest('.modal:not([hidden]),.tracking-drawer:not([hidden]),#accountDropdown:not([hidden])')) continue;
           if(node.matches&&node.matches('.sidebar,.side-nav,.app-shell,.app-stage,.app-body,.main-content,.topbar')) continue;
           var cs=global.getComputedStyle?global.getComputedStyle(node):null;
-          var pos=String(cs&&cs.position||'');
-          var z=parseInt(cs&&cs.zIndex||'0',10)||0;
-          var nr=node.getBoundingClientRect?node.getBoundingClientRect():null;
-          var large=nr&&nr.width>global.innerWidth*0.45&&nr.height>global.innerHeight*0.45;
+          var nr=rect(node);
+          var large=nr&&nr.width>global.innerWidth*0.35&&nr.height>global.innerHeight*0.35;
+          var pos=String(cs&&cs.position||''),z=parseInt(cs&&cs.zIndex||'0',10)||0;
           if(large||((pos==='fixed'||pos==='absolute'||pos==='sticky')&&z>=100)){
             if(node.style&&node.style.setProperty) node.style.setProperty('pointer-events','none','important');
-            if(node.setAttribute) node.setAttribute('data-ce-qc-v574-neutralized','1');
+            if(node.setAttribute) node.setAttribute('data-ce-qc-v575-neutralized','1');
+            diag('BLOCKER_NEUTRALIZED',control.dataset&&control.dataset.page||'',String(node.tagName||'')+'#'+String(node.id||'')+'.'+String(node.className||''));
           }
         }
       }catch(_){}
     }
+    function invoke(control,event,reason){
+      if(!control||control.disabled) return false;
+      var side=control.matches&&control.matches(SIDEBAR_SELECTOR)?control:(control.closest?control.closest(SIDEBAR_SELECTOR):null);
+      if(side){
+        var page=normalize(side.dataset.page||'home');
+        neutralizeTopBlocker(event,side);
+        return go(page,side.dataset.anchor||'',reason||event.type);
+      }
+      var inline=control.onclick;
+      if(typeof inline==='function'){
+        try{ inline.call(control,event); diag('ACTION_INLINE',control.id||control.dataset&&control.dataset.testid||'',reason||event.type); return true; }
+        catch(error){ diag('ACTION_ERROR',control.id||'',error&&error.message); }
+      }
+      if(control.matches&&control.matches('a[href]')){
+        var href=control.getAttribute('href');
+        if(href){ try{global.location.href=href;return true;}catch(_){} }
+      }
+      if(typeof control.click==='function'){
+        redispatching=true;
+        try{ control.click(); diag('ACTION_CLICK',control.id||control.dataset&&control.dataset.testid||'',reason||event.type); return true; }
+        catch(error){ diag('ACTION_CLICK_ERROR',control.id||'',error&&error.message); }
+        finally{redispatching=false;}
+      }
+      return false;
+    }
+    function stop(event){ if(event.preventDefault)event.preventDefault(); if(event.stopPropagation)event.stopPropagation(); if(event.stopImmediatePropagation)event.stopImmediatePropagation(); }
+    function sidebarPoint(event){
+      var sidebar=doc.querySelector('.sidebar');
+      var r=rect(sidebar),x=Number(event&&event.clientX),y=Number(event&&event.clientY);
+      return Number.isFinite(x)&&Number.isFinite(y)&&pointInside(r,x,y);
+    }
+    function onPointerDown(event){
+      if(redispatching) return;
+      harden();
+      var control=intendedControl(event,true);
+      if(!control&&sidebarPoint(event)) control=actionByCoordinates(Number(event.clientX),Number(event.clientY),true);
+      if(control){
+        armed={control:control,x:Number(event.clientX),y:Number(event.clientY),at:Date.now()};
+        if(invoke(control,event,'pointerdown-coordinate')) stop(event);
+      }else if(sidebarPoint(event)){
+        diag('SIDEBAR_POINTER_NO_CONTROL','',String(event.target&&event.target.tagName||'')+'#'+String(event.target&&event.target.id||''));
+      }
+    }
+    function onMouseDown(event){
+      if(redispatching) return;
+      if(Date.now()-lastAt<250) return;
+      var control=intendedControl(event,true);
+      if(control&&invoke(control,event,'mousedown-coordinate')) stop(event);
+    }
+    function onPointerUp(event){
+      if(redispatching) return;
+      var control=armed&&Date.now()-armed.at<1800?armed.control:intendedControl(event,false);
+      armed=null;
+      if(!control||control.matches(SIDEBAR_SELECTOR)) return;
+      neutralizeTopBlocker(event,control);
+      if(invoke(control,event,'pointerup-coordinate')) stop(event);
+    }
+    function onClick(event){
+      if(redispatching) return;
+      harden();
+      var control=intendedControl(event,false);
+      if(!control) return;
+      var side=control.matches&&control.matches(SIDEBAR_SELECTOR);
+      var key=(side?normalize(control.dataset.page||'home'):'action:'+String(control.id||control.dataset&&control.dataset.testid||control.textContent||'').slice(0,60));
+      if(key===lastKey&&Date.now()-lastAt<400){stop(event);return;}
+      neutralizeTopBlocker(event,control);
+      if(invoke(control,event,'click-coordinate')) stop(event);
+    }
     function harden(){
       try{
-        var style=doc.getElementById('ce-qc-v574-inline-style');
+        var style=doc.getElementById('ce-qc-v575-coordinate-style');
         if(!style){
-          style=doc.createElement('style');
-          style.id='ce-qc-v574-inline-style';
+          style=doc.createElement('style'); style.id='ce-qc-v575-coordinate-style';
           style.textContent=[
             'html,body,.app-stage,.app-shell,.app-body,.sidebar,.side-nav,.topbar,.main-content{pointer-events:auto!important}',
             '.app-shell{position:relative!important;z-index:2147483000!important}',
-            '.sidebar{z-index:2147483644!important;pointer-events:auto!important}',
-            '.topbar{z-index:2147483643!important;pointer-events:auto!important}',
+            '.sidebar{position:relative!important;z-index:2147483646!important;pointer-events:auto!important}',
+            '.topbar{position:relative!important;z-index:2147483645!important;pointer-events:auto!important}',
             '.side-link,.side-sub,.side-group-title,button:not(:disabled),a[href],[role="button"],[onclick]{pointer-events:auto!important;touch-action:manipulation}',
-            '[data-ce-qc-v574-neutralized="1"]{pointer-events:none!important}'
+            '[data-ce-qc-v575-neutralized="1"]{pointer-events:none!important}'
           ].join('');
           (doc.head||doc.documentElement).appendChild(style);
         }
-        doc.querySelectorAll('.side-link[data-page],.side-sub[data-page]').forEach(function(node){
-          node.removeAttribute('inert');
-          if(node.style&&node.style.setProperty) node.style.setProperty('pointer-events','auto','important');
-          neutralizeAt(node);
-        });
-        doc.documentElement.setAttribute('data-ce-qc-v574',VERSION);
+        doc.querySelectorAll(SIDEBAR_SELECTOR).forEach(function(node){node.removeAttribute('inert');if(node.style&&node.style.setProperty)node.style.setProperty('pointer-events','auto','important');});
+        doc.documentElement.setAttribute('data-ce-qc-v575',VERSION);
       }catch(_){}
     }
-    function handleSide(event){
-      var control=sideControlFromEvent(event);
-      if(!control) return false;
-      var page=normalize(control.dataset.page||'home');
-      neutralizeAt(control);
-      go(page,'',event.type);
-      if(event.preventDefault) event.preventDefault();
-      if(event.stopPropagation) event.stopPropagation();
-      if(event.stopImmediatePropagation) event.stopImmediatePropagation();
-      return true;
-    }
-    function onPointerDown(event){
-      harden();
-      handleSide(event);
-    }
-    function onClick(event){
-      harden();
-      if(handleSide(event)) return;
-    }
+
     global.addEventListener('pointerdown',onPointerDown,true);
+    global.addEventListener('mousedown',onMouseDown,true);
+    global.addEventListener('pointerup',onPointerUp,true);
     global.addEventListener('click',onClick,true);
     global.addEventListener('popstate',function(){
       var p=String(global.location.pathname||'/').toLowerCase().replace(/\/+$/,'')||'/';
@@ -171,15 +238,14 @@
       paint(page);
       if(typeof global.navigatePage==='function'){try{global.navigatePage(page);}catch(_){}}
     },true);
-    var observer=null;
     if(typeof MutationObserver==='function'){
-      observer=new MutationObserver(function(){setTimeout(harden,0);});
+      var observer=new MutationObserver(function(){setTimeout(harden,0);});
       try{observer.observe(doc.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','hidden','inert']});}catch(_){}
     }
-    [0,50,150,400,1000,2500,5000].forEach(function(ms){setTimeout(harden,ms);});
+    [0,30,100,300,800,1800,3500].forEach(function(ms){setTimeout(harden,ms);});
     setInterval(harden,2000);
     diag('OWNER_INSTALLED','home',VERSION);
-    console.info('[CE-QC][V574_INLINE_OWNER]',VERSION,'inline owner active; no full-page location.assign fallback; navigation paints locally and replays into app.js when ready.');
+    console.info('[CE-QC][V575_COORDINATE_OWNER]',VERSION,'window-first coordinate hit recovery active for sidebar and dashboard controls.');
   })(window);
   </script>
   <link rel="stylesheet" href="/style.css?v=users-20260806-1">
@@ -201,26 +267,21 @@
       </div>
 
       <nav class="side-nav">
-        <button class="side-link active" data-page="home" onclick="navigatePage('home')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-home"></use></svg><span class="side-label">首页总看板</span></button>
-        <button class="side-link" data-page="ccsl" onclick="navigatePage('ccsl')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg><span class="side-label">CCSL看板</span></button>
-        <button class="side-link" data-page="shopee" onclick="navigatePage('shopee')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bag"></use></svg><span class="side-label">SHOPEE看板</span></button>
-
-        <div class="side-group" id="importNavGroup">
-          <button class="side-group-title" onclick="toggleNavGroup('importNavGroup')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-database"></use></svg><span class="side-label">数据导入</span><svg class="ui-icon group-chevron"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></button>
-          <button class="side-sub" data-page="import" onclick="navigatePage('import','ccslImport')">CCSL日报导入</button>
-          <button class="side-sub" data-page="import" onclick="navigatePage('import','shopeeImport')">SHOPEE日报导入</button>
-          <button class="side-sub" onclick="openBackupImport()">长期JSON导入（可选）</button>
-        </div>
-
-        <div class="side-group" id="trackNavGroup">
-          <button class="side-group-title" onclick="toggleNavGroup('trackNavGroup')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-route"></use></svg><span class="side-label">轨迹查询</span><svg class="ui-icon group-chevron"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></button>
-          <button class="side-sub" data-page="track" onclick="navigatePage('track')">批量轨迹查询</button>
-          <button class="side-sub" data-page="track" onclick="navigatePage('track','trackEventsTable')">查询记录</button>
-        </div>
-
-        <button class="side-link" data-page="settings" onclick="navigatePage('settings')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-settings"></use></svg><span class="side-label">系统设置</span></button>
-        <button class="side-link" data-page="settings" onclick="navigatePage('settings','logPanel')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-clipboard"></use></svg><span class="side-label">操作日志</span></button>
-        <button id="adminDataNav" class="side-link admin-only" data-page="settings" hidden><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-database"></use></svg><span class="side-label">数据管理</span></button>
+        <button class="side-link active" data-page="home" data-path="/" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('home','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-home"></use></svg><span class="side-label">首页总看板</span></button>
+        <button class="side-link" data-page="ce" data-path="/ce" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('ce','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg><span class="side-label">CE看板</span></button>
+        <button class="side-link" data-page="ceaf" data-path="/ceaf" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('ceaf','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg><span class="side-label">CEAF空运看板</span></button>
+        <button class="side-link" data-page="tbkh" data-path="/tbkh" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('tbkh','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg><span class="side-label">TBKH看板</span></button>
+        <button class="side-link" data-page="ali1688" data-path="/ali1688" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('ali1688','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg><span class="side-label">ALI1688看板</span></button>
+        <button class="side-link" data-page="whpp" data-path="/whpp" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('whpp','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-package"></use></svg><span class="side-label">WHPP本土看板</span></button>
+        <button class="side-link" data-page="shopeecn" data-path="/shopeecn" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('shopeecn','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bag"></use></svg><span class="side-label">SHOPEE CN看板</span></button>
+        <button class="side-link" data-page="shopeevn" data-path="/shopeevn" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('shopeevn','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bag"></use></svg><span class="side-label">SHOPEE VN看板</span></button>
+        <button class="side-link" data-page="import" data-path="/import" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('import','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-database"></use></svg><span class="side-label">数据导入</span></button>
+        <button class="side-link" data-page="tracking" data-path="/tracking" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('tracking','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-route"></use></svg><span class="side-label">轨迹查询</span></button>
+        <button class="side-link" data-page="exceptions" data-path="/exceptions" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('exceptions','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-alert"></use></svg><span class="side-label">异常明细</span></button>
+        <button class="side-link" data-page="reports" data-path="/reports" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('reports','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-clipboard"></use></svg><span class="side-label">报表导出</span></button>
+        <button class="side-link admin-only" data-page="data-management" data-path="/data-management" hidden onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('data-management','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-database"></use></svg><span class="side-label">数据管理</span></button>
+        <button class="side-link" data-page="settings" data-path="/settings" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('settings','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-settings"></use></svg><span class="side-label">系统设置</span></button>
+        <button class="side-link" data-page="logs" data-path="/logs" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('logs','','inline')"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-clipboard"></use></svg><span class="side-label">操作日志</span></button>
       </nav>
 
       <button class="sidebar-collapse" onclick="toggleSidebar()" title="展开或收起菜单"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg><span class="side-label">收起菜单</span></button>
@@ -368,7 +429,6 @@
 
   <div id="metricDetailDialog" class="modal" data-testid="detail-view" hidden><div class="modal-card"><div class="panel-title"><h3 id="metricDetailTitle">指标明细</h3><button class="icon-button" data-testid="detail-close" onclick="closeMetricDetail()" title="关闭">×</button></div><div id="metricDetailBody" class="preview-table-wrap"><div class="empty-state">当前指标暂无明细</div></div></div></div>
   <div id="trackingDrawer" class="tracking-drawer" data-testid="tracking-detail" hidden><div class="tracking-drawer-panel"><div class="panel-title"><div><h3 id="trackingDrawerTitle">完整轨迹</h3><p id="trackingDrawerRule"></p></div><button class="icon-button" onclick="closeTrackingDrawer()" title="关闭">×</button></div><div id="trackingDrawerBody" class="tracking-timeline"></div></div></div>
-  <script src="/v569-final-interaction-owner.js?v=20260921-v570-1"></script>
   <script src="/dashboard-fixture-v18.js?v=20260921-v565-1"></script>
   <script src="/dashboard-data-adapter-v18.js?v=20260805-1"></script>
   <script src="/dashboard-chart-v18.js?v=20260806-1"></script>

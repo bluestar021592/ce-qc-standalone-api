@@ -25,6 +25,7 @@ assert.match(start,/D:\\CE_QC_RUNTIME_TEMP\\runtime/,'normal runtime scratch mus
 assert.match(start,/\$env:TEMP = \$RuntimeScratch/);
 assert.match(start,/\$env:TMP = \$RuntimeScratch/);
 
-assert.match(index,/v569-final-interaction-owner\.js\?v=20260921-v570-1/,'V570 right-panel interaction owner must remain shipped while storage housekeeping changes');
+assert.match(index,/2026-09-21-v575-coordinate-nav-owner-v1/,'V575 coordinate interaction owner must remain shipped while storage housekeeping changes');
+assert.doesNotMatch(index,/v569-final-interaction-owner\.js/,'retired V570 owner must not be reintroduced by storage housekeeping');
 
-console.log('[V572/V573] dual-drive storage housekeeping smoke passed · C keeps launcher/code only · D owns DB/runtime scratch · CE-QC temp/backups/old fallback data are cleaned · evidence/logs age out · live business data never silently deleted · V570 click owner retained');
+console.log('[V572/V573/V575] dual-drive storage housekeeping smoke passed · C keeps launcher/code only · D owns DB/runtime scratch · CE-QC temp/backups/old fallback data are cleaned · evidence/logs age out · live business data never silently deleted · V575 coordinate click owner retained');

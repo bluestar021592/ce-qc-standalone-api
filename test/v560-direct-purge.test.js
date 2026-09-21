@@ -197,6 +197,6 @@ test('V568 no-backup cleanup script is syntax-valid and launcher wires it before
   assert.match(source,/VACUUM/);
   assert.match(start,/CE_QC_NoBackup_Cleanup\.mjs/);
   assert.match(start,/CE_QC_NO_BACKUP_MODE = '1'/);
-  assert.match(start,/local-login\.html\?v=20260921-v568-1/);
+  assert.match(start,/local-login\.html\?v=20260921-v575-1/,'launcher must cache-bust the installed V575 login shell');
   assert.match(server,/local-login\.html/);
 });

@@ -130,7 +130,7 @@ function Clear-CeQcPort([int]$Port) {
 Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
-Write-Host '[CE-QC][V573] Click recovery + C/D storage proof runtime is installed.' -ForegroundColor Green
+Write-Host '[CE-QC][V575] Coordinate click recovery + WHPP home card + C/D storage proof runtime is installed.' -ForegroundColor Green
 
 $NoBackupCleanup = Join-Path $ProjectRoot 'scripts\CE_QC_NoBackup_Cleanup.mjs'
 if (Test-Path -LiteralPath $NoBackupCleanup) {
@@ -158,7 +158,7 @@ $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
 $LocalUrl = 'http://127.0.0.1:5177'
 $RecoveryLaunchMode = ([string]$env:CE_QC_OPEN_PURGE_CONSOLE).Trim() -eq '1'
-$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { "$LocalUrl/local-login.html?v=20260921-v568-1" }
+$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { "$LocalUrl/local-login.html?v=20260921-v575-1" }
 
 function Archive-BackendLogs([string]$Reason) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
