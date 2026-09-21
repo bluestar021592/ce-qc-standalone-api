@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig, nowIso } from '../src/db.js';
 import { BUSINESS_DATA_TABLES } from '../src/store.js';
 
-const PATCH_ID='2026-09-21-v572-dual-drive-storage-housekeeping-v1';
+const PATCH_ID='2026-09-21-v573-dual-drive-storage-proof-v1';
 const DAY_MS=24*60*60*1000;
 const EVIDENCE_RETENTION_MS=60*DAY_MS;
 const LOG_RETENTION_MS=45*DAY_MS;
@@ -153,7 +153,10 @@ const removed=[
   {kind:'DATA_RUNTIME_TEMP',...removeChildren(dataTempRoot)},
   {kind:'D_CANDIDATE_TEST_TEMP',...removeChildren(dCandidateTempRoot)},
   {kind:'D_RUNTIME_TEMP',...removeChildren(dRuntimeTempRoot)},
-  {kind:'LAUNCHER_TEMP',...removeChildren(launcherTempRoot)}
+  {kind:'LAUNCHER_TEMP',...removeChildren(launcherTempRoot)},
+  {kind:'PROJECT_CACHE',...removeChildren(path.join(cfg.projectRoot||process.cwd(),'.cache'))},
+  {kind:'PROJECT_TMP',...removeChildren(path.join(cfg.projectRoot||process.cwd(),'tmp'))},
+  {kind:'NODE_MODULE_CACHE',...removeChildren(path.join(cfg.projectRoot||process.cwd(),'node_modules','.cache'))}
 ];
 
 if(!samePath(cfg.dataDir,fallbackDataRoot)){
@@ -177,7 +180,27 @@ const tempCleanup=[
 
 const compact=compactIfPurged(cfg.dbFile);
 const drivesAfter={C:driveSnapshot(cRoot),D:driveSnapshot(dRoot)};
-const deletedBytes=[...removed,...retained,...tempCleanup].reduce((sum,item)=>sum+Number(item.deletedBytes||0),0);
+const allCleanup=[...removed,...retained,...tempCleanup];
+const deletedBytes=allCleanup.reduce((sum,item)=>sum+Number(item.deletedBytes||0),0);
+const deletedEntries=allCleanup.reduce((sum,item)=>sum+Number(item.deletedEntries||0),0);
+
+function gib(value){return Number(value||0)/(1024**3);}
+function driveLine(label,before,after){
+  if(before?.error||after?.error)return `[CE-QC][V573][STORAGE] ${label}: unable to read free-space snapshot.`;
+  const delta=Number(after?.freeBytes||0)-Number(before?.freeBytes||0);
+  const sign=delta>=0?'+':'';
+  return `[CE-QC][V573][STORAGE] ${label}: free ${gib(before?.freeBytes).toFixed(2)} GiB -> ${gib(after?.freeBytes).toFixed(2)} GiB (${sign}${gib(delta).toFixed(2)} GiB).`;
+}
+console.log(`[CE-QC][V573][STORAGE] cleanup complete: deleted ${deletedEntries} CE-QC-owned entries / ${gib(deletedBytes).toFixed(2)} GiB.`);
+console.log(driveLine('C:',drivesBefore.C,drivesAfter.C));
+console.log(driveLine('D:',drivesBefore.D,drivesAfter.D));
+if(compact?.reason==='BUSINESS_DATA_PRESENT'){
+  console.log(`[CE-QC][V573][STORAGE] SQLite retained because live business data still exists: ${gib(compact.beforeBytes).toFixed(2)} GiB at ${cfg.dbFile}. Use the explicit monthly/bi-monthly data clear when intended; the next startup will VACUUM and return free space.`);
+}else if(compact?.skipped===false){
+  console.log(`[CE-QC][V573][STORAGE] Empty SQLite compacted: ${gib(compact.beforeBytes).toFixed(2)} GiB -> ${gib(compact.afterBytes).toFixed(2)} GiB, reclaimed ${gib(compact.reclaimedBytes).toFixed(2)} GiB.`);
+}else{
+  console.log(`[CE-QC][V573][STORAGE] SQLite compact check: ${compact?.reason||'SKIPPED'}.`);
+}
 
 console.log(JSON.stringify({
   ok:true,
@@ -192,6 +215,7 @@ console.log(JSON.stringify({
   retained,
   tempCleanup,
   compact,
+  deletedEntries,
   deletedBytes,
   drivesBefore,
   drivesAfter,
