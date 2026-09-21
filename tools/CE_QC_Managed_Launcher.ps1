@@ -209,9 +209,19 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
   $linkedModules = $false
   $junctionCleanupOk = $true
   $oldBackupRoot = $env:CE_QC_BACKUP_PROJECT_ROOT
+  $oldTemp = $env:TEMP
+  $oldTmp = $env:TMP
+  $candidateScratch = $null
   try {
     Write-ManagedLog "[UPDATE] Verifying candidate $($RemoteCommit.Substring(0,[Math]::Min(8,$RemoteCommit.Length))) before installing..." Cyan
     Invoke-Exe $script:GitExe @('worktree','add','--detach','--quiet',$tempRoot,$RemoteCommit) | Out-Null
+
+    $candidateScratchBase = if (Test-Path -LiteralPath 'D:\') { 'D:\CE CCSL金边数据库\temp\candidate_tests' } else { Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp\candidate_tests' }
+    $candidateScratch = Join-Path $candidateScratchBase ("run_{0}_{1}" -f $PID,(Get-Date -Format 'yyyyMMddHHmmss'))
+    New-Item -ItemType Directory -Path $candidateScratch -Force | Out-Null
+    $env:TEMP = $candidateScratch
+    $env:TMP = $candidateScratch
+    Write-ManagedLog "[UPDATE] Candidate test scratch redirected to $candidateScratch so C: does not accumulate CE-QC test data." DarkCyan
 
     $dependencyFiles = Get-GitText @('diff','--name-only',$CurrentCommit,$RemoteCommit,'--','package.json','package-lock.json')
     $currentModules = Join-Path $ProjectRoot 'node_modules'
@@ -240,6 +250,13 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
     Write-ManagedLog ("[UPDATE] Candidate rejected; current known-good version will be kept. " + $_.Exception.Message) Yellow
     return $false
   } finally {
+    $env:TEMP = $oldTemp
+    $env:TMP = $oldTmp
+    if ($candidateScratch -and (Test-Path -LiteralPath $candidateScratch)) {
+      try { Remove-Item -LiteralPath $candidateScratch -Recurse -Force -Confirm:$false -ErrorAction Stop } catch {
+        Write-ManagedLog "[UPDATE] Candidate scratch retained for startup cleanup: $candidateScratch" Yellow
+      }
+    }
     if ($null -eq $oldBackupRoot) { Remove-Item Env:CE_QC_BACKUP_PROJECT_ROOT -ErrorAction SilentlyContinue }
     else { $env:CE_QC_BACKUP_PROJECT_ROOT = $oldBackupRoot }
     if ($linkedModules) { $junctionCleanupOk = Remove-JunctionOnly (Join-Path $tempRoot 'node_modules') }
