@@ -21,7 +21,7 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   const startupProbe=read('public/v505-purge-startup-probe.js');
   const purgeConsole=read('public/purge-console.html');
 
-  const appAt=index.indexOf('/app.js?v=account-menu-20260806-1');
+  const appAt=index.indexOf('/app.js?v=post-purge-empty-reset-20260921-1');
   const runtimeAt=index.indexOf('/v14-geometry-fixture.js?v=20260805-1');
   assert.ok(appAt>=0&&runtimeAt>appAt,'runtime loader must execute after app.js so the modern purge owner can replace the legacy inline functions');
 
