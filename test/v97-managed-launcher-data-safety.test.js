@@ -22,13 +22,15 @@ test('managed launcher owns backend with Windows kill-on-close job',()=>{
   assert.match(source,/Closing THIS window will automatically stop the backend and release port 5177/);
 });
 
-test('recovery release opens the safe purge console before any dashboard JavaScript can run',()=>{
+test('normal release opens the dashboard by default and keeps purge console explicit-only',()=>{
   const start=read('Start_CE_QC.ps1');
   const fast=read('Fast_Start_CE_QC.ps1');
-  assert.match(start,/\$LaunchUrl = "\$LocalUrl\/purge-console\.html\?v=20260920-recovery-first"/);
+  assert.match(start,/\$RecoveryLaunchMode = \(\[string\]\$env:CE_QC_OPEN_PURGE_CONSOLE\)\.Trim\(\) -eq '1'/);
+  assert.match(start,/\$LaunchUrl = if \(\$RecoveryLaunchMode\) \{ "\$LocalUrl\/purge-console\.html\?v=20260920-recovery-first" \} else \{ \$LocalUrl \}/);
   assert.match(start,/Start-Process \$LaunchUrl/);
-  assert.doesNotMatch(start,/Start-Process \$LocalUrl \| Out-Null/);
-  assert.match(fast,/\$LaunchUrl = "\$LocalUrl\/purge-console\.html\?v=20260920-recovery-first"/);
+  assert.match(fast,/\$RecoveryLaunchMode = \(\[string\]\$env:CE_QC_OPEN_PURGE_CONSOLE\)\.Trim\(\) -eq '1'/);
+  assert.match(fast,/\$LaunchUrl = if \(\$RecoveryLaunchMode\) \{ "\$LocalUrl\/purge-console\.html\?v=20260920-recovery-first" \} else \{ \$LocalUrl \}/);
+  assert.match(fast,/Opening normal dashboard/);
   assert.match(fast,/Start-Process \$LaunchUrl/);
 });
 
