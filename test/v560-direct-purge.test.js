@@ -16,6 +16,14 @@ test('V560 direct purge clears business data without creating a backup or purge 
   const cfg=getRuntimeConfig();
   try{
     db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-09-20');
+    db.exec('CREATE TABLE IF NOT EXISTS qc_tracking_ledger(id INTEGER PRIMARY KEY, shipmentCode TEXT)');
+    db.exec('CREATE TABLE IF NOT EXISTS qc_tracking_audit(id INTEGER PRIMARY KEY, shipmentCode TEXT)');
+    db.exec('CREATE TABLE IF NOT EXISTS v329_three_business_daily_cache(id INTEGER PRIMARY KEY, reportDate TEXT)');
+    db.exec('CREATE TABLE IF NOT EXISTS v334_generic_history_cache(id INTEGER PRIMARY KEY, reportDate TEXT)');
+    db.prepare('INSERT INTO qc_tracking_ledger(shipmentCode) VALUES(?)').run('OLD-TRACK-1');
+    db.prepare('INSERT INTO qc_tracking_audit(shipmentCode) VALUES(?)').run('OLD-TRACK-1');
+    db.prepare('INSERT INTO v329_three_business_daily_cache(reportDate) VALUES(?)').run('2026-09-01');
+    db.prepare('INSERT INTO v334_generic_history_cache(reportDate) VALUES(?)').run('2026-09-01');
     db.prepare("INSERT INTO audit_logs(userEmail,userRole,action,businessType,reportDate,runId,detailJson,ipAddress,createdAt) VALUES(?,?,?,?,?,?,?,?,?)")
       .run('admin@example.test','ADMIN','TEST_PRESERVE','','','','{}','127.0.0.1','2026-09-20T00:00:00Z');
     db.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt")
@@ -41,6 +49,10 @@ test('V560 direct purge clears business data without creating a backup or purge 
     const check=new verifyDb(cfg.dbFile);
     try{
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM daily_reports').get()?.count||0),0);
+      assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM qc_tracking_ledger').get()?.count||0),0,'full purge must clear V246 tracking ledger');
+      assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM qc_tracking_audit').get()?.count||0),0,'full purge must clear V246 tracking audit');
+      assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM v329_three_business_daily_cache').get()?.count||0),0,'full purge must clear three-business derived history cache');
+      assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM v334_generic_history_cache').get()?.count||0),0,'full purge must clear generic derived history cache');
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0),auditBefore,'audit history must be preserved');
       assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='data_purge_block_until'").get(),undefined,'direct purge must not leave a V505 safety block');
       assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='data_purge_last_commit_receipt'").get(),undefined,'direct purge must not leave a V505 commit receipt');
@@ -133,4 +145,15 @@ test('post-purge empty bootstrap clears stale browser business state instead of 
   assert.match(app,/\^ce_qc_/,'full purge must retire CE QC browser caches when server has no business data');
   assert.match(app,/sessionStorage\.removeItem\('trackingReturnContext'\)/);
   assert.match(html,/app\.js\?v=post-purge-empty-reset-20260921-1/,'browser must receive the corrected empty-state owner immediately after update');
+});
+
+
+test('V246 hidden tracking panel never auto-reads the heavy ledger on normal page startup',()=>{
+  const ui=fs.readFileSync('public/v246-qc-tracking.js','utf8');
+  const store=fs.readFileSync('src/store.js','utf8');
+  assert.doesNotMatch(ui,/queueMicrotask\(\(\)=>void read\(\)\)/,'normal page startup must not launch the V246 30-day ledger summary query');
+  assert.match(ui,/点击“只读取账本”时才查询/,'tracking ledger read must be explicit/manual');
+  for (const table of ['qc_tracking_ledger','qc_tracking_audit','v329_three_business_daily_cache','v334_generic_history_cache']) {
+    assert.match(store,new RegExp(`['"]${table}['"]`),`BUSINESS_DATA_TABLES must include ${table}`);
+  }
 });
