@@ -1,5 +1,5 @@
 (function installV560DirectDataPurge(global){
-  const PATCH_ID='2026-09-20-v561-direct-no-backup-async-ui-v1';
+  const PATCH_ID='2026-09-21-v568-direct-no-backup-space-reclaim-ui-v1';
   const PHRASE='永久清除全部业务数据';
   const RETURN_TO='/purge-console.html';
   let openedAt=0;
@@ -79,7 +79,7 @@
     const dialog=node('directPurgeDialog');if(dialog)dialog.hidden=false;
     const phrase=node('directPurgePhrase');if(phrase)phrase.value='';
     const preview=node('directPurgePreview');
-    if(preview)preview.innerHTML='<div class="purge-warning"><b>直接清空模式：不创建备份，不启用安全封锁。</b><br><small>仍使用 ADMIN 权限校验、5秒倒计时、最终确认和单次 SQLite 事务。用户、权限、配置、白名单、已有备份和审计不会删除。</small></div>';
+    if(preview)preview.innerHTML='<div class="purge-warning"><b>直接清空模式：不创建备份，不启用安全封锁。</b><br><small>仍使用 ADMIN 权限校验、5秒倒计时、最终确认和单次 SQLite 事务。用户、权限、配置、白名单和审计会保留；CE QC 历史备份和可再生成业务文件会同步清理。</small></div>';
     startClock();
   }
   function closeDirectDataPurge(){
@@ -96,6 +96,8 @@
     VERIFYING:'正在校验清空结果',
     COMMITTING:'正在提交清空事务',
     COMMITTED:'清空事务已提交',
+    RECLAIMING_SPACE:'正在释放数据库磁盘空间',
+    FILE_CLEANUP:'正在清理备份和业务缓存',
     FILE_CLEANUP:'正在清理临时文件',
     SUCCEEDED:'清空完成',
     FAILED:'清空失败'
@@ -146,7 +148,7 @@
     updateDirectPurgeButton();
     const button=node('directPurgeExecuteButton');
     if(button?.disabled)return alert('请准确输入“永久清除全部业务数据”，并等待5秒倒计时结束。');
-    if(!global.confirm('最终确认：现在将直接永久清空全部业务数据。不会创建新备份。用户、权限、配置、白名单、已有备份和审计会保留。是否继续？'))return;
+    if(!global.confirm('最终确认：现在将直接永久清空全部业务数据。不会创建新备份。用户、权限、配置、白名单和审计会保留；CE QC 历史备份和可再生成业务文件会同步清理。是否继续？'))return;
     active=true;stopClock();
     if(button)button.disabled=true;
     const phrase=node('directPurgePhrase');if(phrase)phrase.disabled=true;
@@ -160,7 +162,7 @@
       renderJobStatus(queued,started);
       const result=await waitForDirectPurge(queued,started);
       const deleted=Number(result.deletedRows||0);
-      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>未创建新备份；用户、权限、配置、白名单、已有备份和审计已保留。现在可以重新上传新的日报数据。</small></div>`;
+      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>未创建或保留 CE QC 业务备份；用户、权限、配置、白名单和审计已保留。现在可以重新上传新的日报数据。</small></div>`;
     }catch(error){
       active=false;
       if(isAuthExpired(error)){redirectToLogin();return;}
