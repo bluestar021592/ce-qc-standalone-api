@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LocalUrl = 'http://127.0.0.1:5177'
 $RecoveryLaunchMode = ([string]$env:CE_QC_OPEN_PURGE_CONSOLE).Trim() -eq '1'
-$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { $LocalUrl }
+$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { "$LocalUrl/local-login.html?v=20260921-v568-1" }
 
 function Test-CeQcAlreadyRunning {
     try {
