@@ -55,8 +55,8 @@ assert.match(startup,/does NOT clear the startup timer here/,'V535 must keep the
 assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
 assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
 assert.match(indexHtml,/v569-final-interaction-owner\.js\?v=20260921-v569-1/,'V569 final interaction owner must be shipped by the normal dashboard shell');
-assert.match(interaction,/2026-09-21-v569-final-interaction-owner-v1/,'V569 final interaction owner version marker must be present');
-assert.match(interaction,/candidateByGeometry/,'V569 must recover clicks by visible-control geometry when a stale layer receives the hit');
+assert.match(interaction,/2026-09-21-v570-early-window-interaction-owner-v1/,'V570 early interaction owner version marker must be present');\nassert.match(interaction,/2026-09-21-v569-final-interaction-owner-v1/,'V569 compatibility marker must remain present');
+assert.match(interaction,/candidateByGeometry/,'V570 must recover clicks by visible-control geometry when a stale layer receives the hit');\nassert.match(interaction,/activeSurface/,'V570 must prefer controls on the active right-side page over stale layers');
 assert.match(interaction,/global\.addEventListener\('click',onCapturedClick,true\)/,'V569 must own clicks at window capture before legacy document capture handlers');
 assert.match(interaction,/global\.navigatePage\(page,anchor\)/,'V569 must directly own sidebar navigation rather than redispatching into stale capture chains');
 assert.match(interaction,/setInterval\(healInteractiveSurface,5000\)/,'V569 must keep long-lived pages clickable after late legacy mutations');
@@ -165,4 +165,4 @@ const nativePost=await context.fetch('/api/admin/data-purge/prepare',{method:'PO
 assert.equal(nativePost.native,true,'write requests must bypass startup guard unchanged');
 assert.equal(nativeCalls.at(-1)?.init?.method,'POST');
 
-console.log('[V480/V533/V535/V564/V565/V569] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is toast-free + self-healing against stale full-screen blockers · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
+console.log('[V480/V533/V535/V564/V565/V569/V570] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is toast-free + self-healing against stale full-screen blockers · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
