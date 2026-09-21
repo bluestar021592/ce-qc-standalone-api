@@ -120,3 +120,17 @@ test('V561 queues direct purge immediately and reports detached worker progress 
     fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
   }
 });
+
+
+test('post-purge empty bootstrap clears stale browser business state instead of merging pre-clear snapshots',()=>{
+  const app=fs.readFileSync('public/app.js','utf8');
+  const html=fs.readFileSync('public/index.html','utf8');
+  assert.match(app,/unifiedImportState = boot\?\.unifiedImport \|\| null/,'empty bootstrap must clear stale unified import state');
+  assert.match(app,/businessStates = \{ \.\.\.\(boot\?\.businessStates \|\| \{\}\) \}/,'empty bootstrap must replace, not merge, stale business states');
+  assert.match(app,/const serverHasBusinessData = Boolean/);
+  assert.match(app,/historyModeDate = ''/);
+  assert.match(app,/dashboardPeriodMode = ''/);
+  assert.match(app,/\^ce_qc_/,'full purge must retire CE QC browser caches when server has no business data');
+  assert.match(app,/sessionStorage\.removeItem\('trackingReturnContext'\)/);
+  assert.match(html,/app\.js\?v=post-purge-empty-reset-20260921-1/,'browser must receive the corrected empty-state owner immediately after update');
+});
