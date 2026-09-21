@@ -1,6 +1,7 @@
 (function installV560DirectDataPurge(global){
   const PATCH_ID='2026-09-20-v561-direct-no-backup-async-ui-v1';
   const PHRASE='永久清除全部业务数据';
+  const RETURN_TO='/purge-console.html';
   let openedAt=0;
   let active=false;
   let timer=null;
@@ -22,6 +23,37 @@
     }finally{clearTimeout(timeout);}
   }
 
+  function isAuthExpired(error){
+    return Number(error?.status||0)===401
+      || String(error?.code||'')==='INTERNAL_AUTH_REQUIRED'
+      || error?.payload?.reloginRequired===true;
+  }
+  function loginUrl(){
+    return '/?returnTo='+encodeURIComponent(RETURN_TO);
+  }
+  function renderLoginRequired(){
+    const preview=node('directPurgePreview');
+    if(preview)preview.innerHTML='<div class="purge-error"><b>管理员登录已失效，正在跳转重新登录。</b><br><small>登录成功后会自动返回直接清空页面；不会自动执行清空。</small></div>';
+  }
+  function redirectToLogin(){
+    renderLoginRequired();
+    setTimeout(()=>global.location.replace(loginUrl()),80);
+  }
+  async function ensureAdminSession(){
+    try{
+      const session=await requestJson('/api/session',{},6000);
+      if(String(session?.user?.role||'').toUpperCase()!=='ADMIN'){
+        const error=new Error('当前账号不是 ADMIN，不能执行直接清空。');
+        error.code='DIRECT_PURGE_ADMIN_REQUIRED';
+        throw error;
+      }
+      return session;
+    }catch(error){
+      if(isAuthExpired(error)){redirectToLogin();return null;}
+      throw error;
+    }
+  }
+
   function elapsedSeconds(){return Math.max(0,Math.floor((Date.now()-openedAt)/1000));}
   function updateDirectPurgeButton(){
     const button=node('directPurgeExecuteButton');
@@ -40,6 +72,8 @@
 
   async function openDirectDataPurge(){
     if(active)return;
+    const session=await ensureAdminSession();
+    if(!session)return;
     if(!global.confirm('打开直接清空向导？不会创建新备份，也不会启用V505安全封锁。只有最终再次确认后才会删除业务数据。'))return;
     openedAt=Date.now();
     const dialog=node('directPurgeDialog');if(dialog)dialog.hidden=false;
@@ -107,6 +141,8 @@
   }
   async function executeDirectDataPurge(){
     if(active)return;
+    const session=await ensureAdminSession();
+    if(!session)return;
     updateDirectPurgeButton();
     const button=node('directPurgeExecuteButton');
     if(button?.disabled)return alert('请准确输入“永久清除全部业务数据”，并等待5秒倒计时结束。');
@@ -127,6 +163,7 @@
       if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>未创建新备份；用户、权限、配置、白名单、已有备份和审计已保留。现在可以重新上传新的日报数据。</small></div>`;
     }catch(error){
       active=false;
+      if(isAuthExpired(error)){redirectToLogin();return;}
       if(phrase)phrase.disabled=false;
       if(preview)preview.innerHTML=`<div class="purge-error"><b>直接清空未完成。</b><br>${escapeText(error.message||error)}<br><small>未显示成功前不要重复点击；把此错误直接发给开发处理即可。</small></div>`;
       openedAt=Date.now()-5000;
@@ -141,5 +178,9 @@
   global.executeDirectDataPurge=executeDirectDataPurge;
   global.updateDirectPurgeButton=updateDirectPurgeButton;
   global.__CE_QC_V560_DIRECT_PURGE__={patchId:PATCH_ID,getStatus:()=>({active,openedAt})};
+  Promise.resolve().then(()=>ensureAdminSession()).catch(error=>{
+    const preview=node('directPurgePreview');
+    if(preview)preview.innerHTML=`<div class="purge-error"><b>管理员身份检查失败。</b><br>${escapeText(error?.message||error)}</div>`;
+  });
   console.info('[CE-QC][V560_DIRECT_PURGE]',PATCH_ID);
 })(window);
