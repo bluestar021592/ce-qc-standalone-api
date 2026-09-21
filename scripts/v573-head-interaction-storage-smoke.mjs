@@ -2,33 +2,42 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const index=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
-const bridge=fs.readFileSync(new URL('../public/v573-head-interaction-bridge.js',import.meta.url),'utf8');
 const app=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const login=fs.readFileSync(new URL('../public/local-login.html',import.meta.url),'utf8');
 const cleanup=fs.readFileSync(new URL('./CE_QC_NoBackup_Cleanup.mjs',import.meta.url),'utf8');
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
+const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 
 const headEnd=index.indexOf('</head>');
-const bridgeAt=index.indexOf('/v573-head-interaction-bridge.js?v=20260921-v573-1');
+const inlineAt=index.indexOf('2026-09-21-v574-inline-no-reload-owner-v1');
 const legacyOwnerAt=index.indexOf('/v569-final-interaction-owner.js?v=20260921-v570-1');
-assert.ok(bridgeAt>0 && bridgeAt<headEnd,'V573 interaction bridge must be delivered in <head> before runtime response injectors can register click blockers');
-assert.ok(legacyOwnerAt>headEnd,'V570 compatibility owner must remain delivered after the new head-first owner');
+assert.ok(inlineAt>0 && inlineAt<headEnd,'V574 inline interaction owner must be embedded in <head> before every external asset');
+assert.ok(legacyOwnerAt>headEnd,'V570 compatibility owner must remain delivered after the inline owner');
 
-assert.match(bridge,/2026-09-21-v573-head-first-interaction-bridge-v1/);
-assert.match(bridge,/elementsFromPoint/,'real hit-test geometry must be used, not target-only click routing');
-assert.match(bridge,/global\.addEventListener\('pointerup',handle,true\)/,'pointerup capture fallback must be armed at window level');
-assert.match(bridge,/global\.addEventListener\('mouseup',handle,true\)/,'mouseup capture fallback must be armed at window level');
-assert.match(bridge,/global\.addEventListener\('click',handle,true\)/,'click capture owner must be armed at window level');
-assert.match(bridge,/node\.style\?\.setProperty\?\.\('pointer-events','none','important'\)/,'large stale blockers must be neutralizable without page reload');
-assert.match(bridge,/global\.location\.assign\(target\)/,'sidebar navigation must have a hard route fallback when SPA handlers are broken');
-assert.match(bridge,/whpp:'\/whpp'/,'WHPP must be a first-class hard route in the emergency bridge');
+assert.match(index,/global\.addEventListener\('pointerdown',onPointerDown,true\)/,'pointerdown capture must own sidebar navigation before stale handlers');
+assert.match(index,/global\.addEventListener\('click',onClick,true\)/,'click capture must stay armed at window level');
+assert.match(index,/elementsFromPoint/,'V574 must use real hit-test geometry to neutralize blockers');
+assert.doesNotMatch(index,/location\.assign\(target\)/,'V574 must never start a full-page navigation while app.js is still loading');
+assert.match(index,/replayWhenReady/,'V574 must replay the local route into app.js instead of reloading the document');
+assert.match(index,/whpp:'\/whpp'/,'WHPP must remain a first-class no-reload route');
+assert.match(index,/fetch\('\/api\/client-diag\?'/,'V574 owner must publish bounded client diagnostics without touching business data');
+const inlineMatch=index.match(/<script>\s*\(function installV574InlineOwner[\s\S]*?<\/script>/);
+assert.ok(inlineMatch,'V574 inline owner script block must exist');
+const inlineSource=inlineMatch[0].replace(/^<script>\s*/,'').replace(/<\/script>$/,'');
+new Function(inlineSource);
+
+const assetAt=server.indexOf('const v574PublicAssetStatic');
+const authAt=server.indexOf('app.use(accessIdentity)');
+assert.ok(assetAt>0&&assetAt<authAt,'V574 static JS/CSS/image fast lane must be registered before accessIdentity');
+assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server SPA routes must include /whpp');
+assert.match(server,/app\.get\('\/api\/client-diag'/,'server must expose read-only V574 client diagnostics');
 
 assert.match(app,/'\/whpp':'whpp'/,'base route parser must understand WHPP');
 assert.match(app,/\['ce', 'ceaf', 'tbkh', 'ali1688', 'whpp', 'shopeecn', 'shopeevn'/,'base navigatePage must admit WHPP instead of collapsing it to HOME');
 assert.match(app,/page === 'whpp'/,'WHPP hydration must explicitly hand off to its lazy owner');
 assert.match(app,/__CE_QC_V90_INSTANT_WHPP_NAV__/,'base runtime must preserve the dedicated WHPP rendering owner');
 
-assert.match(login,/\?auth=v573&t=/,'post-login URL must visibly identify the V573 shell, so stale installs are obvious');
+assert.match(login,/\?auth=v574&t=/,'post-login URL must visibly identify the V574 no-reload shell, so stale installs are obvious');
 assert.match(cleanup,/2026-09-21-v573-dual-drive-storage-proof-v1/);
 assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/,'startup must print a human-readable deletion result');
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/,'C free-space before/after must be printed');
@@ -40,4 +49,4 @@ assert.match(cleanup,/BUSINESS_DATA_PRESENT/,'live business DB must remain fail-
 assert.match(cleanup,/VACUUM/,'an explicitly emptied DB must still return SQLite disk space');
 assert.match(start,/\[CE-QC\]\[V573\] Click recovery \+ C\/D storage proof runtime is installed\./);
 
-console.log('[V573] head-first click recovery + WHPP route + visible C/D storage proof smoke passed');
+console.log('[V573/V574] inline no-reload click recovery + WHPP route + visible C/D storage proof smoke passed');
