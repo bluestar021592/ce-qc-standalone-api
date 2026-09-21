@@ -90,6 +90,21 @@ app.get('/v505-data-purge-recovery.js', sendLoopbackRecoveryFile('v505-data-purg
 app.get('/v560-direct-data-purge.js', sendLoopbackRecoveryFile('v560-direct-data-purge.js', 'application/javascript'));
 app.get(['/local-login.html','/local-login'], sendLoopbackRecoveryFile('local-login.html', 'html'));
 
+// V574: static browser assets contain no business/user data and must never wait on
+// auth/session/database readiness. The authenticated HTML/API surface stays protected.
+const v574PublicAssetStatic = express.static(path.join(__dirname, 'public'), {
+  index: false,
+  fallthrough: true,
+  etag: true,
+  maxAge: 0
+});
+app.use((req, res, next) => {
+  if (!/\.(?:js|mjs|css|png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|map)$/i.test(String(req.path || ''))) return next();
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  return v574PublicAssetStatic(req, res, next);
+});
+
 app.use(accessIdentity);
 app.use(sameOriginWriteGuard);
 app.use('/api/shopee', requireBusinessScope('SHOPEE'));
@@ -169,8 +184,18 @@ app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
 });
 
-app.get(['/ce', '/ceaf', '/tbkh', '/ali1688', '/shopeecn', '/shopeevn', '/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
+app.get(['/ce', '/ceaf', '/tbkh', '/ali1688', '/whpp', '/shopeecn', '/shopeevn', '/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/api/client-diag', (req, res) => {
+  const event = String(req.query?.event || '').replace(/[^A-Z0-9_:-]/gi, '').slice(0, 48);
+  const page = String(req.query?.page || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 32);
+  const extra = String(req.query?.extra || '').replace(/[\r\n\t]/g, ' ').slice(0, 160);
+  const version = String(req.query?.v || '').replace(/[^0-9.]/g, '').slice(0, 16);
+  console.log(`[CE-QC][V574_CLIENT] event=${event || '-'} page=${page || '-'} v=${version || '-'}${extra ? ` extra=${extra}` : ''}`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true });
 });
 
 app.get('/api/health', async (req, res) => {
