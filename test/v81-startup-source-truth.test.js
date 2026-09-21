@@ -35,7 +35,7 @@ test('V555 startup recovery is syntax-valid, shell-first, and never requests agg
     assert.doesNotMatch(runtime, new RegExp(heavy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 
-  assert.match(injector, /v81-startup-source-truth\\.js\\?v=20260921-v564-1/);
+  assert.match(injector, /v81-startup-source-truth\.js\?v=20260921-v564-1/);
   assert.ok(injector.indexOf('v81-startup-source-truth.js') > injector.indexOf('v72-whpp-light-state-bridge.js'));
 });
 
