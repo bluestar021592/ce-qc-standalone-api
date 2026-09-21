@@ -132,9 +132,10 @@ assert.equal(legacy.reason,'WHPP_LEGACY_HISTORY_SNAPSHOT_MISMATCH');
 // 27GB-safe read path so a later patch cannot silently reintroduce range scans.
 for(const file of ['src/v142SevenBusinessHistoryAudit.js','public/v142-history-integrity-audit.js','public/v246-qc-tracking.js'])execFileSync(process.execPath,['--check',file],{stdio:'pipe'});
 const trackingUi=fs.readFileSync('public/v246-qc-tracking.js','utf8');
-assert.match(trackingUi,/2026-09-07-v450-tracking-summary-auto-read-v1/,'V450 tracking read-only summary marker missing');
-assert.match(trackingUi,/function mount\(\)\{const panel=ensurePanel\(\);if\(panel&&!initialReadStarted\)\{initialReadStarted=true;queueMicrotask\(\(\)=>void read\(\)\);\}\}/,'tracking counters must auto-read once after mount');
-assert.match(trackingUi,/\/api\/v246\/tracking\/summary\?/,'auto read must use the summary GET route');
+assert.match(trackingUi,/2026-09-21-v563-tracking-summary-manual-read-v1/,'V563 manual tracking read-only summary marker missing');
+assert.match(trackingUi,/function mount\(\)\{ensurePanel\(\);if\(!initialReadStarted\)\{initialReadStarted=true;status\('QC追踪账本已就绪；点击“只读取账本”时才查询，不再在每次打开系统时自动扫描。'\);\}\}/,'tracking panel must mount without starting a hidden ledger read');
+assert.doesNotMatch(trackingUi,/queueMicrotask\(\(\)=>void read\(\)\)/,'normal page startup must never auto-read the heavy tracking ledger');
+assert.match(trackingUi,/\/api\/v246\/tracking\/summary\?/,'explicit manual read must still use the summary GET route');
 assert.doesNotMatch(trackingUi,/function mount\([^)]*\)[\s\S]{0,220}tracking\/reconcile/,'mount must never auto-start reconcile');
 
 const historyAudit=fs.readFileSync('src/v142SevenBusinessHistoryAudit.js','utf8');
