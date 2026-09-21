@@ -59,6 +59,7 @@ test('V560 direct purge clears business data without creating a backup or purge 
 test('V560 direct recovery console has no backup step and posts only the direct admin endpoint',()=>{
   const html=fs.readFileSync('public/purge-console.html','utf8');
   const js=fs.readFileSync('public/v560-direct-data-purge.js','utf8');
+  const access=fs.readFileSync('src/accessControl.js','utf8');
   assert.match(html,/直接清空业务数据/);
   assert.match(html,/不创建新备份、不启用安全封锁/);
   assert.doesNotMatch(html,/备份并继续|purgeBackupConfirmed|v505-data-purge-recovery\.js/);
@@ -72,6 +73,9 @@ test('V560 direct recovery console has no backup step and posts only the direct 
   assert.match(js,/永久清除全部业务数据/);
   assert.match(js,/最终确认：现在将直接永久清空全部业务数据/);
   assert.doesNotMatch(js,/\/api\/admin\/data-purge\/(?:prepare|execute)/);
+  assert.match(access,/const rawReturnTo = String\(req\.query\?\.returnTo/,'login page must accept a same-origin return target');
+  assert.match(access,/safeReturnToJson/,'login return target must be JSON-escaped before inline script use');
+  assert.match(access,/location\.replace\(target\+join\+'auth=v431&t='/,'successful login must return directly to the purge console when requested');
 });
 
 
