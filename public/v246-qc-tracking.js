@@ -1,8 +1,8 @@
 (function installV246QcTracking(global){
   if(global.__CE_QC_V246_TRACKING_UI__)return;
   global.__CE_QC_V246_TRACKING_UI__=true;
-  const VERSION='2026-08-23-v246-qc-tracking-ui-v1';
-  const V450_READONLY_SUMMARY_ID='2026-09-07-v450-tracking-summary-auto-read-v1';
+  const VERSION='2026-09-21-v563-v246-manual-ledger-read-v1';
+  const V450_READONLY_SUMMARY_ID='2026-09-21-v563-tracking-summary-manual-read-v1';
   let pollTimer=null;
   let initialReadStarted=false;
   const TYPES=['ALL','CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'];
