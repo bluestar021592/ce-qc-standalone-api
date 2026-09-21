@@ -30,6 +30,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
       .run('data_purge_block_until',String(Date.now()+60_000),new Date().toISOString());
     const auditBefore=Number(db.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0);
     const preClearDir=path.join(cfg.backupsDir,'pre_clear');
+    fs.mkdirSync(preClearDir,{recursive:true});
+    fs.writeFileSync(path.join(preClearDir,'old-backup.db'),'legacy');
     const preClearBefore=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
 
     await assert.rejects(
@@ -61,7 +63,10 @@ test('V560 direct purge clears business data without creating a backup or purge 
     }finally{check.close();}
 
     const preClearAfter=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
-    assert.equal(preClearAfter,preClearBefore,'direct purge must not create a pre_clear backup');
+    assert.ok(preClearBefore>0,'fixture must contain one legacy backup');
+    assert.equal(preClearAfter,0,'direct purge must remove legacy CE QC backups under no-backup policy');
+    assert.equal(result.backupCleanup?.retainedCount||0,0,'no safety backup may be retained');
+    assert.equal(result.compactResult?.skipped,false,'purged database should be compacted to release SQLite free pages');
   }finally{
     try{closeDb();}catch{}
     fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});
@@ -75,7 +80,7 @@ test('V560 direct recovery console has no backup step and posts only the direct 
   assert.match(html,/直接清空业务数据/);
   assert.match(html,/不创建新备份、不启用安全封锁/);
   assert.doesNotMatch(html,/备份并继续|purgeBackupConfirmed|v505-data-purge-recovery\.js/);
-  assert.match(html,/v560-direct-data-purge\.js\?v=20260921-v562-1/);
+  assert.match(html,/v560-direct-data-purge\.js\?v=20260921-v568-1/);
   assert.match(js,/\/api\/admin\/data-purge\/direct/);
   assert.match(js,/\/api\/admin\/data-purge\/direct\/status\?jobId=/,'UI must poll detached worker status instead of waiting on the destructive request');
   assert.match(js,/\/api\/session/,'direct purge must verify a fresh authenticated session before exposing destructive controls');
@@ -176,4 +181,21 @@ test('V564/V565 post-purge startup stays no-reload and self-heals stale click bl
   assert.ok(resetListener,'DATA_RESET listener must exist');
   assert.doesNotMatch(resetListener[0],/location\.reload\(\)/,'post-purge refresh failure must not reload the whole application');
   assert.match(resetListener[0],/post-purge refresh deferred/);
+});
+
+
+test('V568 no-backup cleanup script is syntax-valid and launcher wires it before backend startup',()=>{
+  const cleanup='scripts/CE_QC_NoBackup_Cleanup.mjs';
+  const syntax=spawnSync(process.execPath,['--check',path.join(process.cwd(),cleanup)],{encoding:'utf8'});
+  assert.equal(syntax.status,0,syntax.stderr||syntax.stdout);
+  const source=fs.readFileSync(cleanup,'utf8');
+  const start=fs.readFileSync('Start_CE_QC.ps1','utf8');
+  const server=fs.readFileSync('server.js','utf8');
+  assert.match(source,/CE_QC_UPDATE_VERIFY_/);
+  assert.match(source,/EVIDENCE_ARCHIVE/);
+  assert.match(source,/VACUUM/);
+  assert.match(start,/CE_QC_NoBackup_Cleanup\.mjs/);
+  assert.match(start,/CE_QC_NO_BACKUP_MODE = '1'/);
+  assert.match(start,/local-login\.html\?v=20260921-v568-1/);
+  assert.match(server,/local-login\.html/);
 });
