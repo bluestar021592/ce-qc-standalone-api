@@ -63,7 +63,7 @@
   function applyFallback(latest, session) {
     let changed = false;
     try {
-      if (session?.user) { accessSession = session; changed = true; }
+      if (session?.user) { accessSession = session; changed = true; try { sessionStorage.removeItem('ce_startup_auth_redirect_inflight'); } catch {} }
       const imported = latest?.import;
       if (imported?.snapshotId && imported?.reportDate) {
         unifiedImportState = imported;
@@ -80,14 +80,19 @@
   }
 
   function requestRelogin() {
-    try { sessionStorage.setItem('ce_resume_after_login', '1'); } catch {}
-    global.location.reload();
+    try {
+      if (sessionStorage.getItem('ce_startup_auth_redirect_inflight') === '1') return;
+      sessionStorage.setItem('ce_startup_auth_redirect_inflight', '1');
+      sessionStorage.setItem('ce_resume_after_login', '1');
+    } catch {}
+    const returnTo = `${global.location?.pathname || '/'}${global.location?.search || ''}`;
+    global.location.replace('/?returnTo=' + encodeURIComponent(returnTo));
   }
 
   async function fallbackRecover() {
     if (fallbackRunning || dispatchReady('PRIMARY_LATE', true)) return;
     fallbackRunning = true;
-    setStartupStatus('启动资料稍后补齐，界面可继续操作…', true);
+    setStartupStatus('', true);
     try {
       // Never request aggregate CCSL/SHOPEE state from startup recovery.
       // On a multi-GB production DB those compatibility reads can monopolize the
