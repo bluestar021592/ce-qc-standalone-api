@@ -7,7 +7,6 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 
 import { getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES } from './store.js';
-import { deleteAllBackups } from './backup.js';
 import { inspectV541PurgeJobWorker } from './v541PurgePidOwnership.js';
 
 export const DIRECT_PURGE_ID='2026-09-21-v568-direct-no-backup-space-reclaim-v1';
@@ -149,6 +148,39 @@ function directResetTransaction(db,onProgress=()=>{}){
 }
 
 
+function directoryBytes(root){
+  let total=0;
+  const visit=(dir)=>{
+    if(!fs.existsSync(dir))return;
+    for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
+      const target=path.join(dir,entry.name);
+      if(entry.isSymbolicLink())continue;
+      if(entry.isDirectory())visit(target);
+      else if(entry.isFile()){try{total+=Number(fs.statSync(target).size||0);}catch{}}
+    }
+  };
+  visit(root);
+  return total;
+}
+function clearManagedBackups(cfg){
+  const roots=[path.resolve(cfg.backupsDir)];
+  if(process.env.LOCALAPPDATA)roots.push(path.resolve(process.env.LOCALAPPDATA,'CE_QC_LAUNCHER','backups','pre_update'));
+  let deletedBytes=0,deletedCount=0;const failed=[];
+  for(const root of [...new Set(roots)]){
+    if(!fs.existsSync(root))continue;
+    for(const entry of fs.readdirSync(root,{withFileTypes:true})){
+      const target=path.join(root,entry.name);
+      try{
+        deletedBytes+=directoryBytes(target);
+        if(entry.isFile()){try{deletedBytes+=Number(fs.statSync(target).size||0);}catch{}}
+        fs.rmSync(target,{recursive:true,force:true,maxRetries:3,retryDelay:120});
+        deletedCount+=1;
+      }catch(error){failed.push({target,error:String(error?.message||error)});}
+    }
+  }
+  return {deletedCount,deletedBytes,retainedCount:0,failedCount:failed.length,failed};
+}
+
 function compactPurgedDatabase(dbFile,onProgress=()=>{}){
   const beforeBytes=fs.existsSync(dbFile)?Number(fs.statSync(dbFile).size||0):0;
   const db=new DatabaseSync(dbFile);
@@ -194,7 +226,7 @@ export async function executeDirectDataPurge({phrase,user={},onProgress=()=>{}}=
   onProgress({status:'RUNNING',stage:'FILE_CLEANUP',message:'数据库已清空，正在删除业务缓存、证据归档和全部 CE QC 备份。',deletedRows:Object.values(reset.before||{}).reduce((sum,value)=>sum+Number(value||0),0)});
   const fileCleanupWarnings=await clearRegenerableFiles();
   let backupCleanup={deletedCount:0,deletedBytes:0,retainedCount:0,failedCount:0};
-  try{backupCleanup=deleteAllBackups(administrator,{retainSafety:false});}
+  try{backupCleanup=clearManagedBackups(cfg);}
   catch(error){fileCleanupWarnings.push(`备份清理失败: ${error?.message||String(error)}`);}
   return {
     ok:true,
