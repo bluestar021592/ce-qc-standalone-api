@@ -29,7 +29,8 @@ assert.match(atomic,/timer\.unref\?\.\(\)/,'parent watchdog must not keep a comp
 assert.doesNotMatch(atomic,/taskkill|Stop-Process/i,'V480 parent watch must never kill unrelated processes by name or broad process scan');
 
 assert.match(startup,/2026-09-14-v533-first-paint-bounded-startup-read-v1/,'V533 startup guard must be shipped by the earliest dashboard script');
-assert.match(startup,/2026-09-14-v535-interactive-first-paint-body-bounded-v1/,'V535 interactive-first-paint guard must ship in the same earliest script');
+assert.match(startup,/2026-09-14-v535-interactive-first-paint-body-bounded-v1/,'V535 compatibility marker must remain shipped');
+assert.match(startup,/2026-09-21-v564-startup-interaction-no-toast-v1/,'V564 clickability owner must ship in the earliest dashboard script');
 assert.match(startup,/const STARTUP_TIMEOUT_MS = 3000;/,'startup reads must have a short finite budget');
 assert.match(startup,/pathname === '\/api\/bootstrap'/,'startup guard must bound the primary bootstrap read');
 assert.match(startup,/pathname\.startsWith\('\/api\/business-state\/'\)/,'startup guard must bound exact-business startup reads');
@@ -38,10 +39,11 @@ assert.match(startup,/init\?\.signal/,'startup guard must preserve explicitly-ow
 assert.match(startup,/controller\.abort\(\)/,'startup guard must actively release a timed-out browser request');
 assert.match(startup,/V533_STARTUP_READ_TIMEOUT/,'header timeout must fail one read without hanging the page');
 assert.match(startup,/forceFirstPaint\(\)/,'startup guard must make the static shell visible before app bootstrap completes');
-assert.match(startup,/function forceInteractivePaint\(\)/,'V535 must make the shell interactive independently of refresh');
-assert.match(startup,/typeof global\.renderAll === 'function'/,'V535 must render the safe shell once app.js is available');
+assert.match(startup,/function forceInteractivePaint\(\)/,'V564 must make the shell interactive independently of refresh');
+assert.doesNotMatch(startup,/系统界面已可操作，本地数据继续后台读取/,'V564 must not display the misleading startup toast');
+assert.doesNotMatch(startup,/typeof global\.renderAll === 'function'/,'startup click guard must never trigger a second renderAll pass');
+assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/,'startup click guard must never launch an automatic rescue refresh');
 assert.match(startup,/does NOT clear the startup timer here/,'V535 must keep the timeout armed after response headers arrive');
-assert.match(startup,/typeof global\.refresh === 'function'/,'startup guard may attempt only one bounded status reread after first paint');
 assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
 assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
 
@@ -121,12 +123,11 @@ assert.equal(shell.style.visibility,'visible','startup guard must reveal the she
 assert.equal(stage.style.pointerEvents,'auto','V535 must keep the stage interactive');
 assert.equal(shell.style.pointerEvents,'auto','V535 must keep the shell interactive');
 
-let renderCount=0;
-context.renderAll=()=>{renderCount+=1;};
 const interactiveTimer=timers.find(item=>item.ms===0);
-assert.ok(interactiveTimer,'V535 must schedule an immediate post-script interactive render');
+assert.ok(interactiveTimer,'V564 must schedule an immediate post-script clickability pass');
 interactiveTimer.fn();
-assert.equal(renderCount,1,'V535 must call renderAll after app.js becomes available');
+assert.equal(document.documentElement.style.pointerEvents,'auto','V564 must keep the root interactive');
+assert.equal(notices.size,0,'V564 must not leave a startup notice overlay');
 
 const headerTimerStart=timers.length;
 const headerResponse=await context.fetch('/api/bootstrap');
@@ -150,4 +151,4 @@ const nativePost=await context.fetch('/api/admin/data-purge/prepare',{method:'PO
 assert.equal(nativePost.native,true,'write requests must bypass startup guard unchanged');
 assert.equal(nativeCalls.at(-1)?.init?.method,'POST');
 
-console.log('[V480/V533/V535] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · shell becomes interactive before hydration · lightweight recovery delegates only to V505 · writes stay untouched · export descendants self-release when direct parent disappears');
+console.log('[V480/V533/V535/V564] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is one-shot and toast-free · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
