@@ -3,13 +3,15 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 
-for(const file of ['src/v89StaticAssetCachePatch.js','src/exportJobAtomicJson.js','public/dashboard-fixture-v18.js']){
+for(const file of ['src/v89StaticAssetCachePatch.js','src/exportJobAtomicJson.js','public/dashboard-fixture-v18.js','public/v569-final-interaction-owner.js']){
   const checked=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
   assert.equal(checked.status,0,`${file} syntax failed: ${checked.stderr||checked.stdout}`);
 }
 const source=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const atomic=fs.readFileSync('src/exportJobAtomicJson.js','utf8');
 const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
+const interaction=fs.readFileSync('public/v569-final-interaction-owner.js','utf8');
+const indexHtml=fs.readFileSync('public/index.html','utf8');
 const purgeConsole=fs.readFileSync('public/purge-console.html','utf8');
 const server=fs.readFileSync('server.js','utf8');
 assert.match(source,/2026-09-08-v480-preauth-static-first-paint-v1/);
@@ -52,6 +54,12 @@ assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/,'startup cli
 assert.match(startup,/does NOT clear the startup timer here/,'V535 must keep the timeout armed after response headers arrive');
 assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
 assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
+assert.match(indexHtml,/v569-final-interaction-owner\.js\?v=20260921-v569-1/,'V569 final interaction owner must be shipped by the normal dashboard shell');
+assert.match(interaction,/2026-09-21-v569-final-interaction-owner-v1/,'V569 final interaction owner version marker must be present');
+assert.match(interaction,/candidateByGeometry/,'V569 must recover clicks by visible-control geometry when a stale layer receives the hit');
+assert.match(interaction,/global\.addEventListener\('click',onCapturedClick,true\)/,'V569 must own clicks at window capture before legacy document capture handlers');
+assert.match(interaction,/global\.navigatePage\(page,anchor\)/,'V569 must directly own sidebar navigation rather than redispatching into stale capture chains');
+assert.match(interaction,/setInterval\(healInteractiveSurface,5000\)/,'V569 must keep long-lived pages clickable after late legacy mutations');
 
 assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
 assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');
@@ -157,4 +165,4 @@ const nativePost=await context.fetch('/api/admin/data-purge/prepare',{method:'PO
 assert.equal(nativePost.native,true,'write requests must bypass startup guard unchanged');
 assert.equal(nativeCalls.at(-1)?.init?.method,'POST');
 
-console.log('[V480/V533/V535/V564/V565] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is toast-free + self-healing against stale full-screen blockers · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
+console.log('[V480/V533/V535/V564/V565/V569] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is toast-free + self-healing against stale full-screen blockers · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
