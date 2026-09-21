@@ -130,6 +130,7 @@ function Clear-CeQcPort([int]$Port) {
 Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
+Write-Host '[CE-QC][V573] Click recovery + C/D storage proof runtime is installed.' -ForegroundColor Green
 
 $NoBackupCleanup = Join-Path $ProjectRoot 'scripts\CE_QC_NoBackup_Cleanup.mjs'
 if (Test-Path -LiteralPath $NoBackupCleanup) {

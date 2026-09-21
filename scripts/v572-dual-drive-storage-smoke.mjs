@@ -6,7 +6,7 @@ const launcher=fs.readFileSync(new URL('../tools/CE_QC_Managed_Launcher.ps1',imp
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
 const index=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
 
-assert.match(cleanup,/2026-09-21-v572-dual-drive-storage-housekeeping-v1/);
+assert.match(cleanup,/2026-09-21-v573-dual-drive-storage-proof-v1/);
 assert.match(cleanup,/UNUSED_C_FALLBACK_DATA/,'unused C fallback data must be removable when D is the active data root');
 assert.match(cleanup,/EVIDENCE_ARCHIVE_60D/,'evidence retention must be bounded instead of growing forever');
 assert.match(cleanup,/C_CRASH_LOGS_45D/,'launcher crash logs on C must age out');
@@ -27,4 +27,4 @@ assert.match(start,/\$env:TMP = \$RuntimeScratch/);
 
 assert.match(index,/v569-final-interaction-owner\.js\?v=20260921-v570-1/,'V570 right-panel interaction owner must remain shipped while storage housekeeping changes');
 
-console.log('[V572] dual-drive storage housekeeping smoke passed · C keeps launcher/code only · D owns DB/runtime scratch · CE-QC temp/backups/old fallback data are cleaned · evidence/logs age out · live business data never silently deleted · V570 click owner retained');
+console.log('[V572/V573] dual-drive storage housekeeping smoke passed · C keeps launcher/code only · D owns DB/runtime scratch · CE-QC temp/backups/old fallback data are cleaned · evidence/logs age out · live business data never silently deleted · V570 click owner retained');

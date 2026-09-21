@@ -49,7 +49,7 @@ button:disabled{opacity:.65;cursor:wait}.error{color:#b42318;margin-top:12px;min
       const text=await response.text(); let payload={};
       try{payload=text?JSON.parse(text):{};}catch{payload={error:text||('HTTP '+response.status)};}
       if(!response.ok)throw new Error(payload.error||'登录失败');
-      location.replace('/?auth=v568&t='+Date.now());
+      location.replace('/?auth=v573&t='+Date.now());
     }catch(error){
       err.textContent=error&&error.name==='AbortError'?'登录认证8秒内未完成，请确认黑色启动器窗口保持开启。':(error.message||'登录失败');
       btn.disabled=false;
