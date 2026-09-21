@@ -6,6 +6,7 @@ const app=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const login=fs.readFileSync(new URL('../public/local-login.html',import.meta.url),'utf8');
 const cleanup=fs.readFileSync(new URL('./CE_QC_NoBackup_Cleanup.mjs',import.meta.url),'utf8');
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
+const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 
 const headEnd=index.indexOf('</head>');
 const inlineAt=index.indexOf('2026-09-21-v574-inline-no-reload-owner-v1');
@@ -19,6 +20,17 @@ assert.match(index,/elementsFromPoint/,'V574 must use real hit-test geometry to 
 assert.doesNotMatch(index,/location\.assign\(target\)/,'V574 must never start a full-page navigation while app.js is still loading');
 assert.match(index,/replayWhenReady/,'V574 must replay the local route into app.js instead of reloading the document');
 assert.match(index,/whpp:'\/whpp'/,'WHPP must remain a first-class no-reload route');
+assert.match(index,/fetch\('\/api\/client-diag\?'/,'V574 owner must publish bounded client diagnostics without touching business data');
+const inlineMatch=index.match(/<script>\s*\(function installV574InlineOwner[\s\S]*?<\/script>/);
+assert.ok(inlineMatch,'V574 inline owner script block must exist');
+const inlineSource=inlineMatch[0].replace(/^<script>\s*/,'').replace(/<\/script>$/,'');
+new Function(inlineSource);
+
+const assetAt=server.indexOf('const v574PublicAssetStatic');
+const authAt=server.indexOf('app.use(accessIdentity)');
+assert.ok(assetAt>0&&assetAt<authAt,'V574 static JS/CSS/image fast lane must be registered before accessIdentity');
+assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server SPA routes must include /whpp');
+assert.match(server,/app\.get\('\/api\/client-diag'/,'server must expose read-only V574 client diagnostics');
 
 assert.match(app,/'\/whpp':'whpp'/,'base route parser must understand WHPP');
 assert.match(app,/\['ce', 'ceaf', 'tbkh', 'ali1688', 'whpp', 'shopeecn', 'shopeevn'/,'base navigatePage must admit WHPP instead of collapsing it to HOME');
