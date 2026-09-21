@@ -38,7 +38,7 @@ function browserExecutable(){
 }
 function fixtureHtml(){
   return '<!doctype html><html><head><meta charset="utf-8"><title>V575 browser smoke</title>'+
-    '<script>'+ownerSource.replace(/<\\/script/gi,'<\\\\/script')+'<\\/script>'+
+    '<script>'+ownerSource.split('</script').join('<\\/script')+'</script>'+
     '<style>'+
     'html,body{margin:0;width:100%;height:100%;font-family:Arial}'+
     '.app-stage,.app-shell{min-height:100vh}.sidebar{position:fixed;left:0;top:0;width:300px;height:100vh;background:#06365f;padding:12px;box-sizing:border-box}'+
