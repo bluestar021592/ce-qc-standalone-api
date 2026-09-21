@@ -20,8 +20,10 @@
   if (!global || !global.document || global.__CE_QC_V533_FIRST_PAINT_STARTUP_GUARD__) return;
   const PATCH_ID = '2026-09-14-v533-first-paint-bounded-startup-read-v1';
   const V535_PATCH_ID = '2026-09-14-v535-interactive-first-paint-body-bounded-v1';
+  const V564_PATCH_ID = '2026-09-21-v564-startup-interaction-no-toast-v1';
   global.__CE_QC_V533_FIRST_PAINT_STARTUP_GUARD__ = PATCH_ID;
   global.__CE_QC_V535_INTERACTIVE_FIRST_PAINT__ = V535_PATCH_ID;
+  global.__CE_QC_V564_STARTUP_INTERACTION__ = V564_PATCH_ID;
   const document = global.document;
 
   const STARTUP_TIMEOUT_MS = 3000;
@@ -119,15 +121,7 @@
         shell.style.opacity = '1';
         shell.style.pointerEvents = 'auto';
       }
-      if (!document.getElementById('v533StartupNotice')) {
-        const notice = document.createElement('div');
-        notice.id = 'v533StartupNotice';
-        notice.setAttribute('data-v533-first-paint', PATCH_ID);
-        notice.setAttribute('data-v535-interactive-first-paint', V535_PATCH_ID);
-        notice.textContent = '系统界面已加载，正在读取本地数据…';
-        notice.style.cssText = 'position:fixed;z-index:2147483000;top:10px;left:50%;transform:translateX(-50%);padding:7px 14px;border:1px solid #cfe0f4;border-radius:6px;background:#fff;color:#31587f;font:12px/1.4 "Microsoft YaHei",sans-serif;box-shadow:0 2px 10px #173b681a;pointer-events:none';
-        document.body.appendChild(notice);
-      }
+      document.getElementById('v533StartupNotice')?.remove();
     } catch {}
   }
 
@@ -140,24 +134,26 @@
 
   function forceInteractivePaint() {
     try {
-      const stage = document.querySelector('.app-stage');
-      const shell = document.querySelector('.app-shell');
-      if (stage) stage.style.pointerEvents = 'auto';
-      if (shell) shell.style.pointerEvents = 'auto';
-      document.body.style.pointerEvents = 'auto';
-      if (typeof global.renderAll === 'function') global.renderAll();
-      const notice = document.getElementById('v533StartupNotice');
-      if (notice) notice.textContent = '系统界面已可操作，本地数据继续后台读取…';
-      setTimeout(() => document.getElementById('v533StartupNotice')?.remove(), 1200);
+      const nodes = [
+        document.documentElement,
+        document.body,
+        document.querySelector('.app-stage'),
+        document.querySelector('.app-shell'),
+        document.querySelector('.sidebar'),
+        document.querySelector('.topbar'),
+        document.querySelector('.main-content')
+      ].filter(Boolean);
+      for (const node of nodes) node.style.pointerEvents = 'auto';
+      document.getElementById('v533StartupNotice')?.remove();
+      document.documentElement.dataset.ceQcInteractionReady = V564_PATCH_ID;
     } catch {}
   }
 
   forceFirstPaint();
-  // V535 makes the shell interactive independently from the initial refresh promise.
-  // The timer runs after the following classic scripts (including app.js) finish
-  // evaluation, so renderAll() can paint an empty/skeleton-safe state immediately.
+  // V564 never paints a startup toast and never calls renderAll from the guard.
+  // It only guarantees clickability after parser-blocking scripts finish.
   setTimeout(forceInteractivePaint, 0);
-  setTimeout(forceInteractivePaint, 800);
+  setTimeout(forceInteractivePaint, 400);
 
   if (!clearNoticeWhenRendered()) {
     const observer = new MutationObserver(() => {
@@ -167,15 +163,8 @@
     setTimeout(() => observer.disconnect(), 30000);
   }
 
-  // One bounded rescue refresh is allowed after the first startup window. This is
-  // intentionally single-shot: it cannot create a polling loop or repeat business
-  // processing. It only re-reads the same startup status endpoints.
-  setTimeout(() => {
-    try {
-      if (clearNoticeWhenRendered()) return;
-      if (typeof global.refresh === 'function') {
-        Promise.resolve(global.refresh()).catch(() => {}).finally(clearNoticeWhenRendered);
-      }
-    } catch {}
-  }, 8000);
+  // V564: no automatic rescue refresh. Startup recovery stays read-only/lightweight
+  // so a slow local SQLite read can never restart a render or interaction loop.
+  setTimeout(forceInteractivePaint, 1200);
+
 })(window);
