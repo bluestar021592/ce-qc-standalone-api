@@ -144,7 +144,8 @@ test('post-purge empty bootstrap clears stale browser business state instead of 
   assert.match(app,/dashboardPeriodMode = ''/);
   assert.match(app,/\^ce_qc_/,'full purge must retire CE QC browser caches when server has no business data');
   assert.match(app,/sessionStorage\.removeItem\('trackingReturnContext'\)/);
-  assert.match(html,/app\.js\?v=post-purge-empty-reset-20260921-1/,'browser must receive the corrected empty-state owner immediately after update');
+  assert.match(html,/app\.js\?v=20260921-v564-1/,'browser must receive the corrected empty-state and interaction owner immediately after update');
+  assert.match(html,/dashboard-fixture-v18\.js\?v=20260921-v564-1/,'browser must receive the toast-free first-paint owner immediately after update');
 });
 
 
@@ -156,4 +157,20 @@ test('V246 hidden tracking panel never auto-reads the heavy ledger on normal pag
   for (const table of ['qc_tracking_ledger','qc_tracking_audit','v329_three_business_daily_cache','v334_generic_history_cache']) {
     assert.match(store,new RegExp(`['"]${table}['"]`),`BUSINESS_DATA_TABLES must include ${table}`);
   }
+});
+
+
+test('V564 post-purge/startup interaction path never reloads the page in a loop',()=>{
+  const app=fs.readFileSync('public/app.js','utf8');
+  const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
+  const sourceTruth=fs.readFileSync('public/v81-startup-source-truth.js','utf8');
+  assert.doesNotMatch(startup,/系统界面已可操作，本地数据继续后台读取/);
+  assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/);
+  assert.doesNotMatch(startup,/typeof global\.renderAll === 'function'/);
+  assert.match(sourceTruth,/location\.replace\('\/\?returnTo='/);
+  assert.doesNotMatch(sourceTruth,/location\.reload\(\)/);
+  const resetListener=app.match(/events\.addEventListener\('DATA_RESET',[\s\S]*?\n  \}\);/);
+  assert.ok(resetListener,'DATA_RESET listener must exist');
+  assert.doesNotMatch(resetListener[0],/location\.reload\(\)/,'post-purge refresh failure must not reload the whole application');
+  assert.match(resetListener[0],/post-purge refresh deferred/);
 });
