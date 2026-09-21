@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CE质控系统内部登录</title>
+<style>
+html,body{margin:0;min-height:100%;background:#f3f6fa;color:#17324d;font-family:"Microsoft YaHei",system-ui,sans-serif}
+body{display:grid;place-items:center;min-height:100vh}
+.box{width:min(420px,calc(100% - 40px));background:#fff;border:1px solid #dce5ef;border-radius:12px;padding:30px;box-shadow:0 14px 40px #16395b18}
+h1{font-size:24px;margin:0 0 6px}.sub{color:#667085;margin:0 0 20px}
+label{display:block;margin:12px 0 5px;font-weight:700}input{box-sizing:border-box;width:100%;padding:11px 12px;border:1px solid #cbd8e5;border-radius:6px;font-size:15px}
+button{width:100%;margin-top:20px;border:0;border-radius:6px;background:#126ee8;color:#fff;padding:12px;font-weight:700;font-size:16px;cursor:pointer}
+button:disabled{opacity:.65;cursor:wait}.error{color:#b42318;margin-top:12px;min-height:24px}.hint{color:#667085;margin-top:8px;font-size:12px}
+</style>
+</head>
+<body>
+<main class="box">
+  <h1>CE质控系统内部登录</h1>
+  <p class="sub">本机入口 · 登录后进入质量控制管理系统</p>
+  <form id="login">
+    <label>用户名</label>
+    <input name="username" autocomplete="username" required autofocus>
+    <label>密码</label>
+    <input name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">登录</button>
+    <div id="error" class="error" role="alert"></div>
+    <div class="hint">独立认证通道 5179，不依赖首页数据读取。</div>
+  </form>
+</main>
+<script>
+(function(){
+  const form=document.getElementById('login');
+  const err=document.getElementById('error');
+  form.addEventListener('submit',async function(event){
+    event.preventDefault();
+    const btn=form.querySelector('button[type="submit"]');
+    btn.disabled=true; err.textContent='正在登录…';
+    const data=Object.fromEntries(new FormData(form).entries());
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),8000);
+    try{
+      const host=location.hostname||'127.0.0.1';
+      const response=await fetch('http://'+host+':5179/api/local-auth/login',{
+        method:'POST',credentials:'include',cache:'no-store',
+        headers:{'content-type':'application/json','accept':'application/json'},
+        body:JSON.stringify(data),signal:controller.signal
+      });
+      const text=await response.text(); let payload={};
+      try{payload=text?JSON.parse(text):{};}catch{payload={error:text||('HTTP '+response.status)};}
+      if(!response.ok)throw new Error(payload.error||'登录失败');
+      location.replace('/?auth=v568&t='+Date.now());
+    }catch(error){
+      err.textContent=error&&error.name==='AbortError'?'登录认证8秒内未完成，请确认黑色启动器窗口保持开启。':(error.message||'登录失败');
+      btn.disabled=false;
+    }finally{clearTimeout(timer);}
+  });
+})();
+</script>
+</body>
+</html>

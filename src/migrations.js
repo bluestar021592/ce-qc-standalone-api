@@ -62,7 +62,8 @@ export function migrateDatabase(db, cfg) {
     return { fromVersion: existingVersion, toVersion: SCHEMA_VERSION, migrated: false, backupPath: '' };
   }
 
-  const needsBackup = hasBusinessData(db);
+  const noBackupMode = /^(1|true|yes|on)$/i.test(String(process.env.CE_QC_NO_BACKUP_MODE || ''));
+  const needsBackup = hasBusinessData(db) && !noBackupMode;
   const backupPath = needsBackup ? backupDbFile(db, cfg) : '';
   if (needsBackup && !backupPath) throw new Error('数据库升级前备份失败，已停止升级。');
 

@@ -88,6 +88,7 @@ function sendLoopbackRecoveryFile(fileName, type) {
 app.get(['/purge-console.html', '/purge-console'], sendLoopbackRecoveryFile('purge-console.html', 'html'));
 app.get('/v505-data-purge-recovery.js', sendLoopbackRecoveryFile('v505-data-purge-recovery.js', 'application/javascript'));
 app.get('/v560-direct-data-purge.js', sendLoopbackRecoveryFile('v560-direct-data-purge.js', 'application/javascript'));
+app.get(['/local-login.html','/local-login'], sendLoopbackRecoveryFile('local-login.html', 'html'));
 
 app.use(accessIdentity);
 app.use(sameOriginWriteGuard);

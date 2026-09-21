@@ -131,11 +131,23 @@ Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
 
+$NoBackupCleanup = Join-Path $ProjectRoot 'scripts\CE_QC_NoBackup_Cleanup.mjs'
+if (Test-Path -LiteralPath $NoBackupCleanup) {
+    Write-Host '[CE-QC] No-backup policy: cleaning CE QC backups/temp data and reclaiming empty SQLite space...' -ForegroundColor Cyan
+    try {
+        & $NodeExe $NoBackupCleanup
+        if ($LASTEXITCODE -ne 0) { Write-Host "[WARN] No-backup cleanup exited with code $LASTEXITCODE; startup will continue." -ForegroundColor Yellow }
+    } catch {
+        Write-Host ("[WARN] No-backup cleanup failed; startup will continue. " + $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
+
+$env:CE_QC_NO_BACKUP_MODE = '1'
 $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
 $LocalUrl = 'http://127.0.0.1:5177'
 $RecoveryLaunchMode = ([string]$env:CE_QC_OPEN_PURGE_CONSOLE).Trim() -eq '1'
-$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { $LocalUrl }
+$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { "$LocalUrl/local-login.html?v=20260921-v568-1" }
 
 function Archive-BackendLogs([string]$Reason) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'

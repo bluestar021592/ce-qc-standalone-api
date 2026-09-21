@@ -68,11 +68,12 @@ export function deleteBackup(backupId, deletedBy = '') {
   return { id: item.id, fileName: item.fileName, deletedAt: nowIso() };
 }
 
-export function deleteAllBackups(deletedBy = '') {
+export function deleteAllBackups(deletedBy = '', options = {}) {
   const db = getDb();
   const cfg = getRuntimeConfig();
   const roots = managedBackupRoots(cfg);
-  const safety = newestVerifiedSafetyBackup(roots, cfg);
+  const retainSafety = options?.retainSafety !== false;
+  const safety = retainSafety ? newestVerifiedSafetyBackup(roots, cfg) : null;
   const retainedDir = safety?.directory ? path.resolve(safety.directory) : '';
   const rows = db.prepare("SELECT * FROM backup_records WHERE COALESCE(status,'ACTIVE')='ACTIVE' ORDER BY id").all();
   const deleted = [];

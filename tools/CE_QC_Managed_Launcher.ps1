@@ -233,14 +233,8 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
     try { Invoke-Exe $script:NpmExe @('run','test:golive') }
     finally { Pop-Location }
 
-    $candidateBackup = Join-Path $tempRoot 'scripts\CE_QC_PreUpdate_Backup.mjs'
-    if (-not (Test-Path -LiteralPath $candidateBackup)) { throw 'Candidate pre-update backup tool is missing.' }
-    Invoke-Exe $script:NodeExe @('--check',$candidateBackup) | Out-Null
-    $env:CE_QC_BACKUP_PROJECT_ROOT = $ProjectRoot
-    Write-ManagedLog '[UPDATE] Candidate tests passed. Creating verified SQLite online backup before code switch...' Green
-    Invoke-Exe $script:NodeExe @($candidateBackup,$CurrentCommit,$RemoteCommit) | Out-Null
-
-    Write-ManagedLog '[UPDATE] Candidate tests and verified database backup passed. Code is eligible for installation.' Green
+    Write-ManagedLog '[UPDATE] Candidate tests passed. No-backup policy is active; pre-update database backup is intentionally skipped.' Green
+    Write-ManagedLog '[UPDATE] Candidate is eligible for installation without creating or retaining a database backup.' Green
     return $true
   } catch {
     Write-ManagedLog ("[UPDATE] Candidate rejected; current known-good version will be kept. " + $_.Exception.Message) Yellow
