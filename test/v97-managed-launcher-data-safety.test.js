@@ -26,10 +26,10 @@ test('normal release opens the dashboard by default and keeps purge console expl
   const start=read('Start_CE_QC.ps1');
   const fast=read('Fast_Start_CE_QC.ps1');
   assert.match(start,/\$RecoveryLaunchMode = \(\[string\]\$env:CE_QC_OPEN_PURGE_CONSOLE\)\.Trim\(\) -eq '1'/);
-  assert.match(start,/\$LaunchUrl = if \(\$RecoveryLaunchMode\) \{ "\$LocalUrl\/purge-console\.html\?v=20260920-recovery-first" \} else \{ \$LocalUrl \}/);
+  assert.match(start,/\$LaunchUrl = if \(\$RecoveryLaunchMode\) \{ "\$LocalUrl\/purge-console\.html\?v=20260920-recovery-first" \} else \{ "\$LocalUrl\/local-login\.html\?v=20260921-v568-1" \}/);
   assert.match(start,/Start-Process \$LaunchUrl/);
   assert.match(fast,/\$RecoveryLaunchMode = \(\[string\]\$env:CE_QC_OPEN_PURGE_CONSOLE\)\.Trim\(\) -eq '1'/);
-  assert.match(fast,/\$LaunchUrl = if \(\$RecoveryLaunchMode\) \{ "\$LocalUrl\/purge-console\.html\?v=20260920-recovery-first" \} else \{ \$LocalUrl \}/);
+  assert.match(fast,/\$LaunchUrl = if \(\$RecoveryLaunchMode\) \{ "\$LocalUrl\/purge-console\.html\?v=20260920-recovery-first" \} else \{ "\$LocalUrl\/local-login\.html\?v=20260921-v568-1" \}/);
   assert.match(fast,/Opening normal dashboard/);
   assert.match(fast,/Start-Process \$LaunchUrl/);
 });
@@ -41,12 +41,13 @@ test('desktop root start no longer reuses a stale hidden 5177 backend',()=>{
   assert.doesNotMatch(source,/Fast_Start_CE_QC\.ps1/);
 });
 
-test('automatic code update validates remote candidate before installation and backup',()=>{
+test('automatic code update validates remote candidate before installation without database backup',()=>{
   const source=read(launcher);
   const validate=source.indexOf('Test-RemoteCandidate $remote');
-  const backupAt=source.indexOf('CE_QC_PreUpdate_Backup.mjs');
+  const noBackup=source.indexOf('No-backup policy is active');
   const pull=source.indexOf("@('pull','--ff-only'");
-  assert.ok(validate>=0 && backupAt>validate && pull>backupAt);
+  assert.ok(validate>=0 && noBackup>validate && pull>noBackup);
+  assert.doesNotMatch(source,/Creating verified SQLite online backup before code switch/);
   assert.match(source,/status','--porcelain','--untracked-files=no/);
   assert.match(source,/worktree','add','--detach/);
   assert.match(source,/run','test:golive/);
@@ -69,9 +70,10 @@ test('pre-update backup is syntax valid, online verified and does not mutate bus
   assert.doesNotMatch(source,/resetAppState|executePurge|永久清除/);
 });
 
-test('schema migration remains independently backup-before-transaction protected',()=>{
+test('schema migration keeps legacy backup protection but honors explicit runtime no-backup mode',()=>{
   const source=read('src/migrations.js');
   assert.match(source,/backup_before_migration_/);
+  assert.match(source,/CE_QC_NO_BACKUP_MODE/);
   const backupAt=source.indexOf('backupDbFile(db, cfg)');
   const begin=source.indexOf("db.exec('BEGIN IMMEDIATE')");
   assert.ok(backupAt>=0 && begin>backupAt);
