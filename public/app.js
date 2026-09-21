@@ -126,8 +126,13 @@ function isInternalAuthError(error) {
 }
 
 function requestInternalRelogin() {
-  sessionStorage.setItem('ce_resume_after_login', '1');
-  window.location.reload();
+  try {
+    if (sessionStorage.getItem('ce_internal_auth_redirect_inflight') === '1') return;
+    sessionStorage.setItem('ce_internal_auth_redirect_inflight', '1');
+    sessionStorage.setItem('ce_resume_after_login', '1');
+  } catch {}
+  const returnTo = `${location.pathname || '/'}${location.search || ''}`;
+  location.replace('/?returnTo=' + encodeURIComponent(returnTo));
 }
 
 async function refresh() {
@@ -2840,7 +2845,17 @@ setInterval(async () => {
 if (!visualMode && 'EventSource' in window) {
   const events = new EventSource('/api/events');
   events.addEventListener('DATA_RESET', async () => {
-    localStorage.clear(); sessionStorage.clear();
-    await refresh().catch(() => location.reload());
+    localStorage.clear();
+    try {
+      sessionStorage.removeItem('trackingReturnContext');
+      sessionStorage.removeItem('ce_resume_after_login');
+    } catch {}
+    try {
+      await refresh();
+    } catch (error) {
+      console.warn('[DATA_RESET] post-purge refresh deferred; keeping current page interactive', error);
+      renderAll();
+      setTimeout(() => { void refresh().catch(() => {}); }, 1500);
+    }
   });
 }
