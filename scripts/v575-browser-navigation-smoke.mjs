@@ -143,11 +143,12 @@ try{
   await cdp.send('Runtime.enable');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+webPort+'/fixture'});
   await waitFor(()=>cdp.eval("document.readyState==='complete'&&!!window.__CE_QC_V575_COORDINATE_OWNER__&&!!document.querySelector('[data-page=ce]')"),10000,80);
+  await cdp.eval("(()=>{const s=document.querySelector('.sidebar'),b=document.getElementById('sidebarBlocker');s.appendChild(b);Object.assign(b.style,{position:'absolute',left:'0px',top:'0px',width:'100%',height:'100%',zIndex:'2147483647',pointerEvents:'auto'});const a=document.querySelector('.app-body'),c=document.getElementById('contentBlocker');a.appendChild(c);Object.assign(c.style,{position:'fixed',left:'340px',top:'250px',width:'260px',height:'100px',zIndex:'2147483647',pointerEvents:'auto'});return true;})()");
 
   await clickAt(cdp,'.side-link[data-page="ce"]','sidebarBlocker');
   await waitFor(()=>cdp.eval("location.pathname==='/ce'&&!document.getElementById('ccslPage').hidden&&document.querySelector('[data-page=ce]').classList.contains('active')"),3000,50);
 
-  await cdp.eval("document.getElementById('sidebarBlocker').style.pointerEvents='auto'");
+  await cdp.eval("(()=>{const b=document.getElementById('sidebarBlocker');b.removeAttribute('data-ce-qc-v575-neutralized');b.style.setProperty('pointer-events','auto','important');return true;})()");
   await clickAt(cdp,'.side-link[data-page="import"]','sidebarBlocker');
   await waitFor(()=>cdp.eval("location.pathname==='/import'&&!document.getElementById('importPage').hidden&&document.querySelector('[data-page=import]').classList.contains('active')"),3000,50);
 
