@@ -9,7 +9,7 @@ const PATCH_ID='2026-09-21-v572-dual-drive-storage-housekeeping-v1';
 const DAY_MS=24*60*60*1000;
 const EVIDENCE_RETENTION_MS=60*DAY_MS;
 const LOG_RETENTION_MS=45*DAY_MS;
-const TEMP_STALE_MS=5*60*1000;
+const TEMP_STALE_MS=0;
 
 function samePath(a,b){
   const aa=path.resolve(String(a||''));
