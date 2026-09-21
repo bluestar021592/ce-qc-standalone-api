@@ -54,18 +54,18 @@ assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/,'startup cli
 assert.match(startup,/does NOT clear the startup timer here/,'V535 must keep the timeout armed after response headers arrive');
 assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
 assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
-assert.match(indexHtml,/v569-final-interaction-owner\.js\?v=20260921-v570-1/,'V570 early interaction owner must be shipped by the normal dashboard shell');
-assert.match(interaction,/2026-09-21-v570-early-window-interaction-owner-v1/,'V570 early interaction owner version marker must be present');
-assert.match(interaction,/2026-09-21-v569-final-interaction-owner-v1/,'V569 compatibility marker must remain present');
-assert.match(interaction,/candidateByGeometry/,'V570 must recover clicks by visible-control geometry when a stale layer receives the hit');
-assert.match(interaction,/activeSurface/,'V570 must prefer controls on the active right-side page over stale layers');
-assert.match(interaction,/global\.addEventListener\('click',onCapturedClick,true\)/,'V570 must own clicks at window capture before legacy window/document handlers');
-assert.match(interaction,/global\.navigatePage\(page,anchor\)/,'V570 must directly own sidebar navigation rather than redispatching into stale capture chains');
-assert.match(interaction,/setInterval\(healInteractiveSurface,5000\)/,'V570 must keep long-lived pages clickable after late legacy mutations');
-const ownerAt=indexHtml.indexOf('/v569-final-interaction-owner.js?v=20260921-v570-1');
-const legacyAt=indexHtml.indexOf('/dashboard-fixture-v18.js?v=20260921-v565-1');
-const appAt=indexHtml.indexOf('/app.js?v=20260921-v564-1');
-assert.ok(ownerAt>=0&&legacyAt>ownerAt&&appAt>ownerAt,'V570 interaction owner must register before every legacy dashboard/runtime click listener');
+assert.match(indexHtml,/2026-09-21-v575-coordinate-nav-owner-v1/,'V575 coordinate interaction owner must be embedded in the normal dashboard shell');
+assert.match(indexHtml,/function actionByCoordinates\(x,y,sidebarOnly\)/,'V575 must resolve intended controls by geometry when an overlay owns event.target');
+assert.match(indexHtml,/global\.addEventListener\('pointerdown',onPointerDown,true\)/,'V575 must own pointerdown at window capture before legacy handlers');
+assert.match(indexHtml,/global\.addEventListener\('mousedown',onMouseDown,true\)/,'V575 must also cover ordinary mouse input');
+assert.match(indexHtml,/global\.addEventListener\('pointerup',onPointerUp,true\)/,'V575 must own dashboard button release when an overlay blocks native click targeting');
+assert.match(indexHtml,/replayWhenReady/,'V575 must paint locally and replay into app.js rather than performing a full-page reload');
+assert.doesNotMatch(indexHtml,/v569-final-interaction-owner\.js/,'retired V570 interaction owner must no longer be shipped alongside V575');
+assert.match(indexHtml,/data-page="whpp"/,'canonical static sidebar must contain WHPP before any runtime mutation');
+const v575At=indexHtml.indexOf('2026-09-21-v575-coordinate-nav-owner-v1');
+const firstExternal=indexHtml.indexOf('<link rel="stylesheet"');
+assert.ok(v575At>=0&&firstExternal>v575At,'V575 interaction owner must install before external page assets');
+
 
 assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
 assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');
@@ -171,4 +171,4 @@ const nativePost=await context.fetch('/api/admin/data-purge/prepare',{method:'PO
 assert.equal(nativePost.native,true,'write requests must bypass startup guard unchanged');
 assert.equal(nativeCalls.at(-1)?.init?.method,'POST');
 
-console.log('[V480/V533/V535/V564/V565/V569/V570] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is toast-free + self-healing against stale full-screen blockers · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
+console.log('[V480/V533/V535/V564/V565/V575] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is toast-free + self-healing against stale full-screen blockers · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
