@@ -192,8 +192,8 @@ function driveLine(label,before,after){
   return `[CE-QC][V573][STORAGE] ${label}: free ${gib(before?.freeBytes).toFixed(2)} GiB -> ${gib(after?.freeBytes).toFixed(2)} GiB (${sign}${gib(delta).toFixed(2)} GiB).`;
 }
 console.log(`[CE-QC][V573][STORAGE] cleanup complete: deleted ${deletedEntries} CE-QC-owned entries / ${gib(deletedBytes).toFixed(2)} GiB.`);
-console.log(driveLine('C:',drivesBefore.C,drivesAfter.C));
-console.log(driveLine('D:',drivesBefore.D,drivesAfter.D));
+console.log(driveLine('C',drivesBefore.C,drivesAfter.C));
+console.log(driveLine('D',drivesBefore.D,drivesAfter.D));
 if(compact?.reason==='BUSINESS_DATA_PRESENT'){
   console.log(`[CE-QC][V573][STORAGE] SQLite retained because live business data still exists: ${gib(compact.beforeBytes).toFixed(2)} GiB at ${cfg.dbFile}. Use the explicit monthly/bi-monthly data clear when intended; the next startup will VACUUM and return free space.`);
 }else if(compact?.skipped===false){
