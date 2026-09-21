@@ -3,9 +3,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig, nowIso } from '../src/db.js';
-import { BUSINESS_DATA_TABLES } from '../src/store.js';
+import { compactSqliteStorage, STORAGE_COMPACTION_PATCH } from '../src/storageCompaction.js';
 
-const PATCH_ID='2026-09-21-v573-dual-drive-storage-proof-v1';
+const PATCH_ID='2026-09-21-v576-storage-reclaim-proof-v1';
 const DAY_MS=24*60*60*1000;
 const EVIDENCE_RETENTION_MS=60*DAY_MS;
 const LOG_RETENTION_MS=45*DAY_MS;
@@ -93,37 +93,16 @@ function driveSnapshot(root){
 function tableExists(db,name){
   return Boolean(db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name)?.ok);
 }
-function businessDataEmpty(db){
-  for(const table of BUSINESS_DATA_TABLES){
-    if(!tableExists(db,table))continue;
-    if(db.prepare(`SELECT 1 present FROM ${table} LIMIT 1`).get()?.present)return false;
-  }
-  return true;
-}
-function compactIfPurged(dbFile){
-  const beforeBytes=fs.existsSync(dbFile)?Number(fs.statSync(dbFile).size||0):0;
+function retireBackupRecords(dbFile){
+  if(!fs.existsSync(dbFile))return {updated:0};
   const db=new DatabaseSync(dbFile);
   try{
     db.exec('PRAGMA busy_timeout=120000');
-    if(tableExists(db,'backup_records')){
-      db.prepare("UPDATE backup_records SET status='DELETED',deletedAt=COALESCE(deletedAt,?),deletedBy=COALESCE(NULLIF(deletedBy,''),'NO_BACKUP_POLICY') WHERE COALESCE(status,'ACTIVE')<>'DELETED'").run(nowIso());
-    }
-    if(!businessDataEmpty(db)){
-      try{db.exec('PRAGMA wal_checkpoint(TRUNCATE)');}catch{}
-      return {skipped:true,reason:'BUSINESS_DATA_PRESENT',beforeBytes,afterBytes:beforeBytes,reclaimedBytes:0};
-    }
-    const pageCount=Number(db.prepare('PRAGMA page_count').get()?.page_count||0);
-    const freePages=Number(db.prepare('PRAGMA freelist_count').get()?.freelist_count||0);
-    if(beforeBytes<256*1024*1024 || freePages<1000){
-      try{db.exec('PRAGMA wal_checkpoint(TRUNCATE)');}catch{}
-      return {skipped:true,reason:'ALREADY_COMPACT',beforeBytes,afterBytes:beforeBytes,reclaimedBytes:0,pageCount,freePages};
-    }
-    console.log(`[CE-QC][V572] Business tables are empty; compacting SQLite. before=${beforeBytes} freePages=${freePages}/${pageCount}`);
-    try{db.exec('PRAGMA wal_checkpoint(TRUNCATE)');}catch{}
-    db.exec('VACUUM');
-    try{db.exec('PRAGMA optimize');}catch{}
-    const afterBytes=fs.existsSync(dbFile)?Number(fs.statSync(dbFile).size||0):0;
-    return {skipped:false,beforeBytes,afterBytes,reclaimedBytes:Math.max(0,beforeBytes-afterBytes),pageCount,freePages};
+    if(!tableExists(db,'backup_records'))return {updated:0};
+    const info=db.prepare("UPDATE backup_records SET status='DELETED',deletedAt=COALESCE(deletedAt,?),deletedBy=COALESCE(NULLIF(deletedBy,''),'NO_BACKUP_POLICY') WHERE COALESCE(status,'ACTIVE')<>'DELETED'").run(nowIso());
+    return {updated:Number(info?.changes||0)};
+  }catch(error){
+    return {updated:0,error:String(error?.message||error)};
   }finally{
     try{db.close();}catch{}
   }
@@ -178,7 +157,12 @@ const tempCleanup=[
   ...(process.env.LOCALAPPDATA?[cleanupNamedTempRoots(path.join(process.env.LOCALAPPDATA,'Temp'))]:[])
 ];
 
-const compact=compactIfPurged(cfg.dbFile);
+const backupRecordCleanup=retireBackupRecords(cfg.dbFile);
+const compact=compactSqliteStorage(cfg.dbFile,{
+  minReclaimBytes:256*1024*1024,
+  minReclaimRatio:0.08,
+  reserveBytes:1024*1024*1024
+});
 const drivesAfter={C:driveSnapshot(cRoot),D:driveSnapshot(dRoot)};
 const allCleanup=[...removed,...retained,...tempCleanup];
 const deletedBytes=allCleanup.reduce((sum,item)=>sum+Number(item.deletedBytes||0),0);
@@ -194,13 +178,16 @@ function driveLine(label,before,after){
 console.log(`[CE-QC][V573][STORAGE] cleanup complete: deleted ${deletedEntries} CE-QC-owned entries / ${gib(deletedBytes).toFixed(2)} GiB.`);
 console.log(driveLine('C',drivesBefore.C,drivesAfter.C));
 console.log(driveLine('D',drivesBefore.D,drivesAfter.D));
-if(compact?.reason==='BUSINESS_DATA_PRESENT'){
-  console.log(`[CE-QC][V573][STORAGE] SQLite retained because live business data still exists: ${gib(compact.beforeBytes).toFixed(2)} GiB at ${cfg.dbFile}. Use the explicit monthly/bi-monthly data clear when intended; the next startup will VACUUM and return free space.`);
-}else if(compact?.skipped===false){
-  console.log(`[CE-QC][V573][STORAGE] Empty SQLite compacted: ${gib(compact.beforeBytes).toFixed(2)} GiB -> ${gib(compact.afterBytes).toFixed(2)} GiB, reclaimed ${gib(compact.reclaimedBytes).toFixed(2)} GiB.`);
+if(compact?.compacted){
+  console.log(`[CE-QC][V576][STORAGE] SQLite compacted with live data preserved and quick_check=ok: ${gib(compact.beforeBytes).toFixed(2)} GiB -> ${gib(compact.afterBytes).toFixed(2)} GiB, reclaimed ${gib(compact.reclaimedBytes).toFixed(2)} GiB.`);
+}else if(compact?.reason==='INSUFFICIENT_FREE_SPACE_FOR_SAFE_VACUUM'){
+  console.log(`[CE-QC][V576][STORAGE] SQLite has ${gib(compact.reclaimableBytes).toFixed(2)} GiB reclaimable, but safe VACUUM needs about ${gib(compact.requiredFreeBytes).toFixed(2)} GiB free and only ${gib(compact.driveFreeBytes).toFixed(2)} GiB is free. No business data was deleted.`);
+}else if(compact?.ok){
+  console.log(`[CE-QC][V576][STORAGE] SQLite allocated=${gib(compact.beforeBytes).toFixed(2)} GiB, estimated live=${gib(compact.liveEstimatedBytes).toFixed(2)} GiB, reclaimable=${gib(compact.reclaimableBytes).toFixed(2)} GiB (${(Number(compact.reclaimRatio||0)*100).toFixed(1)}%). Automatic compaction skipped: ${compact.reason}.`);
 }else{
-  console.log(`[CE-QC][V573][STORAGE] SQLite compact check: ${compact?.reason||'SKIPPED'}.`);
+  console.log(`[CE-QC][V576][STORAGE] SQLite storage analysis could not compact: ${compact?.reason||'UNKNOWN'} ${compact?.detail||''}`);
 }
+console.log(`[CE-QC][V576][STORAGE] compaction engine=${STORAGE_COMPACTION_PATCH}; backup-record rows retired=${backupRecordCleanup.updated||0}.`);
 
 console.log(JSON.stringify({
   ok:true,
@@ -214,11 +201,12 @@ console.log(JSON.stringify({
   removed,
   retained,
   tempCleanup,
+  backupRecordCleanup,
   compact,
   deletedEntries,
   deletedBytes,
   drivesBefore,
   drivesAfter,
   dbFile:cfg.dbFile,
-  databasePolicy:'LIVE_BUSINESS_DATA_IS_NEVER_SILENTLY_DELETED; after explicit monthly/bi-monthly clear, startup VACUUM reclaims SQLite space'
+  databasePolicy:'LIVE_BUSINESS_DATA_IS_NEVER_SILENTLY_DELETED; V576 may VACUUM reclaimable free pages while preserving live rows, only after quick_check and free-space safety gates'
 }));
