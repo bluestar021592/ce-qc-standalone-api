@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LocalUrl = 'http://127.0.0.1:5177'
-$LaunchUrl = "$LocalUrl/purge-console.html?v=20260920-recovery-first"
+$RecoveryLaunchMode = ([string]$env:CE_QC_OPEN_PURGE_CONSOLE).Trim() -eq '1'
+$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { $LocalUrl }
 
 function Test-CeQcAlreadyRunning {
     try {
@@ -21,7 +22,11 @@ function Test-CeQcAlreadyRunning {
 
 if (Test-CeQcAlreadyRunning) {
     Write-Host '[CE-QC] Backend is already running. Reusing it without restart.' -ForegroundColor Green
-    Write-Host "[CE-QC] Recovery mode opening $LaunchUrl" -ForegroundColor Cyan
+    if ($RecoveryLaunchMode) {
+        Write-Host "[CE-QC] Explicit recovery mode opening $LaunchUrl" -ForegroundColor Yellow
+    } else {
+        Write-Host "[CE-QC] Opening normal dashboard $LaunchUrl" -ForegroundColor Cyan
+    }
     try { Start-Process $LaunchUrl | Out-Null } catch {}
     exit 0
 }
