@@ -142,7 +142,7 @@ if (Test-Path -LiteralPath $NoBackupCleanup) {
     }
 }
 
-$RuntimeScratch = if (Test-Path -LiteralPath 'D:\') { 'D:\CE CCSL金边数据库\temp\runtime' } else { Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp\runtime' }
+$RuntimeScratch = if (Test-Path -LiteralPath 'D:\') { 'D:\CE_QC_RUNTIME_TEMP\runtime' } else { Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp\runtime' }
 try {
     New-Item -ItemType Directory -Path $RuntimeScratch -Force | Out-Null
     $env:TEMP = $RuntimeScratch
