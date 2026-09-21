@@ -92,7 +92,7 @@ app.get(['/local-login.html','/local-login'], sendLoopbackRecoveryFile('local-lo
 
 // V574: static browser assets contain no business/user data and must never wait on
 // auth/session/database readiness. The authenticated HTML/API surface stays protected.
-const v574PublicAssetStatic = express.static(path.join(__dirname, 'public'), {
+const v575PublicAssetStatic = express.static(path.join(__dirname, 'public'), {
   index: false,
   fallthrough: true,
   etag: true,
@@ -102,7 +102,7 @@ app.use((req, res, next) => {
   if (!/\.(?:js|mjs|css|png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|map)$/i.test(String(req.path || ''))) return next();
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  return v574PublicAssetStatic(req, res, next);
+  return v575PublicAssetStatic(req, res, next);
 });
 
 app.use(accessIdentity);
@@ -193,7 +193,7 @@ app.get('/api/client-diag', (req, res) => {
   const page = String(req.query?.page || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 32);
   const extra = String(req.query?.extra || '').replace(/[\r\n\t]/g, ' ').slice(0, 160);
   const version = String(req.query?.v || '').replace(/[^0-9.]/g, '').slice(0, 16);
-  console.log(`[CE-QC][V574_CLIENT] event=${event || '-'} page=${page || '-'} v=${version || '-'}${extra ? ` extra=${extra}` : ''}`);
+  console.log(`[CE-QC][V575_CLIENT] event=${event || '-'} page=${page || '-'} v=${version || '-'}${extra ? ` extra=${extra}` : ''}`);
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true });
 });
