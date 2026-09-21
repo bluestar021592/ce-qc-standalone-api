@@ -26,6 +26,8 @@ test('V555 startup recovery is syntax-valid, shell-first, and never requests agg
   assert.doesNotMatch(runtime, /appState\s*=\s*ccsl\.state/);
   assert.doesNotMatch(runtime, /shopeeState\s*=\s*shopee\.state/);
   assert.doesNotMatch(runtime, /RETRY_DELAYS/);
+  assert.doesNotMatch(runtime, /location\.reload\(\)/,'startup auth recovery must never enter a full-page reload loop');
+  assert.match(runtime, /ce_startup_auth_redirect_inflight/,'startup auth redirect must be single-flight');
   assert.match(runtime, /SHELL_FIRST_NO_AGGREGATE_STATE_RECOVERY/);
   assert.doesNotMatch(runtime, /scheduleNormalRefresh/);
 
@@ -33,7 +35,7 @@ test('V555 startup recovery is syntax-valid, shell-first, and never requests agg
     assert.doesNotMatch(runtime, new RegExp(heavy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 
-  assert.match(injector, /v81-startup-source-truth\.js\?v=20260920-v555-1/);
+  assert.match(injector, /v81-startup-source-truth\\.js\\?v=20260921-v564-1/);
   assert.ok(injector.indexOf('v81-startup-source-truth.js') > injector.indexOf('v72-whpp-light-state-bridge.js'));
 });
 
