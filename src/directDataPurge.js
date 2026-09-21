@@ -7,9 +7,10 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 
 import { getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES } from './store.js';
+import { deleteAllBackups } from './backup.js';
 import { inspectV541PurgeJobWorker } from './v541PurgePidOwnership.js';
 
-export const DIRECT_PURGE_ID='2026-09-20-v561-direct-no-backup-detached-worker-v1';
+export const DIRECT_PURGE_ID='2026-09-21-v568-direct-no-backup-space-reclaim-v1';
 export const DIRECT_PURGE_PHRASE='永久清除全部业务数据';
 
 const ACTIVE_JOB_STATUS=new Set(['QUEUED','RUNNING']);
@@ -92,7 +93,7 @@ function retireLegacyPurgeArtifacts(){
 }
 async function clearRegenerableFiles(){
   const cfg=getRuntimeConfig();const warnings=[];
-  for(const dir of [cfg.exportsDir,cfg.importsDir]){
+  for(const dir of [cfg.exportsDir,cfg.importsDir,cfg.longJsonExportsDir,cfg.evidenceArchiveDir]){
     if(!fs.existsSync(dir))continue;
     for(const entry of fs.readdirSync(dir)){
       try{await fs.promises.rm(path.join(dir,entry),{recursive:true,force:true});}
@@ -147,6 +148,31 @@ function directResetTransaction(db,onProgress=()=>{}){
   }
 }
 
+
+function compactPurgedDatabase(dbFile,onProgress=()=>{}){
+  const beforeBytes=fs.existsSync(dbFile)?Number(fs.statSync(dbFile).size||0):0;
+  const db=new DatabaseSync(dbFile);
+  try{
+    db.exec('PRAGMA busy_timeout=120000');
+    const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>String(row.name||'')));
+    let remainingBusinessRows=0;
+    for(const table of BUSINESS_DATA_TABLES){
+      if(!existing.has(table))continue;
+      remainingBusinessRows+=Number(db.prepare(`SELECT COUNT(*) count FROM ${table}`).get()?.count||0);
+      if(remainingBusinessRows>0)break;
+    }
+    if(remainingBusinessRows!==0)return {skipped:true,reason:'BUSINESS_ROWS_REMAIN',remainingBusinessRows,beforeBytes,afterBytes:beforeBytes,reclaimedBytes:0};
+    onProgress({status:'RUNNING',stage:'RECLAIMING_SPACE',message:'业务数据已归零，正在释放 SQLite 占用的磁盘空间。'});
+    try{db.exec('PRAGMA wal_checkpoint(TRUNCATE)');}catch{}
+    db.exec('VACUUM');
+    try{db.exec('PRAGMA optimize');}catch{}
+  }finally{
+    try{db.close();}catch{}
+  }
+  const afterBytes=fs.existsSync(dbFile)?Number(fs.statSync(dbFile).size||0):0;
+  return {skipped:false,beforeBytes,afterBytes,reclaimedBytes:Math.max(0,beforeBytes-afterBytes)};
+}
+
 export async function executeDirectDataPurge({phrase,user={},onProgress=()=>{}}={}){
   if(String(phrase||'')!==DIRECT_PURGE_PHRASE)throw new Error(`请输入完整确认短语：${DIRECT_PURGE_PHRASE}`);
   const administrator=String(user.email||user.username||'');
@@ -164,8 +190,12 @@ export async function executeDirectDataPurge({phrase,user={},onProgress=()=>{}}=
   }finally{
     try{db.close();}catch{}
   }
-  onProgress({status:'RUNNING',stage:'FILE_CLEANUP',message:'数据库已清空，正在清理导入/导出临时文件。',deletedRows:Object.values(reset.before||{}).reduce((sum,value)=>sum+Number(value||0),0)});
+  const compactResult=compactPurgedDatabase(cfg.dbFile,onProgress);
+  onProgress({status:'RUNNING',stage:'FILE_CLEANUP',message:'数据库已清空，正在删除业务缓存、证据归档和全部 CE QC 备份。',deletedRows:Object.values(reset.before||{}).reduce((sum,value)=>sum+Number(value||0),0)});
   const fileCleanupWarnings=await clearRegenerableFiles();
+  let backupCleanup={deletedCount:0,deletedBytes:0,retainedCount:0,failedCount:0};
+  try{backupCleanup=deleteAllBackups(administrator,{retainSafety:false});}
+  catch(error){fileCleanupWarnings.push(`备份清理失败: ${error?.message||String(error)}`);}
   return {
     ok:true,
     direct:true,
@@ -178,6 +208,8 @@ export async function executeDirectDataPurge({phrase,user={},onProgress=()=>{}}=
     after:reset.after,
     completedAt:reset.completedAt,
     fileCleanupWarnings,
+    compactResult,
+    backupCleanup,
     retiredLegacyJobs,
     patchId:DIRECT_PURGE_ID
   };
