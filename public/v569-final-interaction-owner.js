@@ -32,9 +32,12 @@
   function enableNode(node){
     try{
       if(!node)return;
-      node.removeAttribute?.('inert');
-      if(node.style?.setProperty)node.style.setProperty('pointer-events','auto','important');
-      else if(node.style)node.style.pointerEvents='auto';
+      if(node.hasAttribute?.('inert'))node.removeAttribute('inert');
+      if(node.style?.setProperty){
+        const value=node.style.getPropertyValue?.('pointer-events');
+        const priority=node.style.getPropertyPriority?.('pointer-events');
+        if(value!=='auto'||priority!=='important')node.style.setProperty('pointer-events','auto','important');
+      }else if(node.style&&node.style.pointerEvents!=='auto')node.style.pointerEvents='auto';
     }catch{}
   }
 
@@ -144,7 +147,11 @@
   global.addEventListener('pointerdown',onPointerDown,true);
   global.addEventListener('click',onCapturedClick,true);
 
-  const observer=new MutationObserver(()=>healInteractiveSurface());
+  let observerTimer=null;
+  const observer=new MutationObserver(()=>{
+    clearTimeout(observerTimer);
+    observerTimer=setTimeout(healInteractiveSurface,30);
+  });
   try{observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','hidden','inert']});}catch{}
 
   healInteractiveSurface();
