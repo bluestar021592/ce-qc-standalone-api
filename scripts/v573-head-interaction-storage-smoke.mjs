@@ -27,11 +27,12 @@ assert.ok(inlineMatch,'V575 coordinate owner script block must exist');
 const inlineSource=inlineMatch[0].replace(/^<script>\s*/,'').replace(/<\/script>$/,'');
 new Function(inlineSource);
 
-const assetAt=server.indexOf('const v574PublicAssetStatic');
+const assetAt=server.indexOf('const v575PublicAssetStatic');
 const authAt=server.indexOf('app.use(accessIdentity)');
 assert.ok(assetAt>0&&assetAt<authAt,'V574 static JS/CSS/image fast lane must be registered before accessIdentity');
 assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server SPA routes must include /whpp');
-assert.match(server,/app\.get\('\/api\/client-diag'/,'server must expose read-only V574 client diagnostics');
+assert.match(server,/app\.get\('\/api\/client-diag'/,'server must expose read-only V575 client diagnostics');
+assert.match(server,/\[CE-QC\]\[V575_CLIENT\]/,'server client diagnostics must be labeled V575');
 
 assert.match(app,/'\/whpp':'whpp'/,'base route parser must understand WHPP');
 assert.match(app,/\['ce', 'ceaf', 'tbkh', 'ali1688', 'whpp', 'shopeecn', 'shopeevn'/,'base navigatePage must admit WHPP instead of collapsing it to HOME');
