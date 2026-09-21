@@ -30,7 +30,8 @@ assert.doesNotMatch(atomic,/taskkill|Stop-Process/i,'V480 parent watch must neve
 
 assert.match(startup,/2026-09-14-v533-first-paint-bounded-startup-read-v1/,'V533 startup guard must be shipped by the earliest dashboard script');
 assert.match(startup,/2026-09-14-v535-interactive-first-paint-body-bounded-v1/,'V535 compatibility marker must remain shipped');
-assert.match(startup,/2026-09-21-v564-startup-interaction-no-toast-v1/,'V564 clickability owner must ship in the earliest dashboard script');
+assert.match(startup,/2026-09-21-v564-startup-interaction-no-toast-v1/,'V564 compatibility clickability marker must remain shipped');
+assert.match(startup,/2026-09-21-v565-interaction-surface-self-heal-v1/,'V565 self-healing interaction owner must ship in the earliest dashboard script');
 assert.match(startup,/const STARTUP_TIMEOUT_MS = 3000;/,'startup reads must have a short finite budget');
 assert.match(startup,/pathname === '\/api\/bootstrap'/,'startup guard must bound the primary bootstrap read');
 assert.match(startup,/pathname\.startsWith\('\/api\/business-state\/'\)/,'startup guard must bound exact-business startup reads');
@@ -40,6 +41,11 @@ assert.match(startup,/controller\.abort\(\)/,'startup guard must actively releas
 assert.match(startup,/V533_STARTUP_READ_TIMEOUT/,'header timeout must fail one read without hanging the page');
 assert.match(startup,/forceFirstPaint\(\)/,'startup guard must make the static shell visible before app bootstrap completes');
 assert.match(startup,/function forceInteractivePaint\(\)/,'V564 must make the shell interactive independently of refresh');
+assert.match(startup,/function repairInteractionSurface\(\)/,'V565 must continuously reassert the real clickable shell during bounded startup');
+assert.match(startup,/document\.elementsFromPoint/,'V565 must inspect actual hit-testing rather than guessing from visual state');
+assert.match(startup,/ceQcRetiredClickBlocker/,'V565 must retire only detected large stale click blockers');
+assert.match(startup,/global\.addEventListener\('pointerdown', repairBlockedPointer, true\)/,'V565 must capture pointerdown before later legacy document handlers');
+assert.match(startup,/global\.addEventListener\('click', repairBlockedPointer, true\)/,'V565 must capture click before later legacy document handlers');
 assert.doesNotMatch(startup,/系统界面已可操作，本地数据继续后台读取/,'V564 must not display the misleading startup toast');
 assert.doesNotMatch(startup,/typeof global\.renderAll === 'function'/,'startup click guard must never trigger a second renderAll pass');
 assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/,'startup click guard must never launch an automatic rescue refresh');
@@ -124,9 +130,9 @@ assert.equal(stage.style.pointerEvents,'auto','V535 must keep the stage interact
 assert.equal(shell.style.pointerEvents,'auto','V535 must keep the shell interactive');
 
 const interactiveTimer=timers.find(item=>item.ms===0);
-assert.ok(interactiveTimer,'V564 must schedule an immediate post-script clickability pass');
+assert.ok(interactiveTimer,'V565 must schedule an immediate post-script interaction repair pass');
 interactiveTimer.fn();
-assert.equal(document.documentElement.style.pointerEvents,'auto','V564 must keep the root interactive');
+assert.equal(document.documentElement.style.pointerEvents,'auto','V565 must keep the root interactive');
 assert.equal(notices.size,0,'V564 must not leave a startup notice overlay');
 
 const headerTimerStart=timers.length;
@@ -151,4 +157,4 @@ const nativePost=await context.fetch('/api/admin/data-purge/prepare',{method:'PO
 assert.equal(nativePost.native,true,'write requests must bypass startup guard unchanged');
 assert.equal(nativeCalls.at(-1)?.init?.method,'POST');
 
-console.log('[V480/V533/V535/V564] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is one-shot and toast-free · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
+console.log('[V480/V533/V535/V564/V565] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is toast-free + self-healing against stale full-screen blockers · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
