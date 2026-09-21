@@ -4,11 +4,16 @@ import test from 'node:test';
 
 const app = fs.readFileSync('public/app.js', 'utf8');
 
-test('range business cards prefer immutable source totals', () => {
+test('range business cards prefer immutable source totals across all seven businesses', () => {
   assert.match(app, /const sourceTotal = state\.sourceTotal \?\? state\.dashboard\?\.sourceTotal \?\? state\.dailyParseSummary\?\.sourceTotal;/);
   assert.match(app, /if \(sourceTotal !== undefined && sourceTotal !== null\) return Number\(sourceTotal \|\| 0\);/);
-  assert.match(app, /const periodSourceTotal = \['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'\]\.reduce/);
-  assert.match(app, /dashboardPeriodMode \? periodSourceTotal : total/);
+  assert.match(app, /if \(String\(type\)\.toUpperCase\(\) === 'WHPP'\)/);
+  assert.match(app, /state\.total\s*\|\| state\.metrics\?\.total\s*\|\| state\.dashboard\?\.metrics\?\.total/);
+  for (const business of ["['ce', 'CE'","['ceaf', 'CEAF空运'","['tbkh', 'TBKH'","['ali1688', 'ALI1688'","['whpp', 'WHPP本土'","['shopeecn', 'SHOPEE CN'","['shopeevn', 'SHOPEE VN'"]) {
+    assert.ok(app.includes(business), `missing seven-business homepage row: ${business}`);
+  }
+  assert.match(app, /const derivedBusinessTotal = businessRows\.reduce\(\(sum, row\) => sum \+ Number\(row\[2\] \|\| 0\), 0\);/);
+  assert.match(app, /const businessCards = \[\s*\['total', '总览', totalBusinessValue, 'blue'\],\s*\.\.\.businessRows\s*\];/s);
 });
 
 test('Shopee period cards use source totals instead of completed-analysis totals', () => {
