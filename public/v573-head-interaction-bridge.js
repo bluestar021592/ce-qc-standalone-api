@@ -184,11 +184,11 @@
       try{global.location.assign(target);return true;}catch{return false;}
     }
   }
-  function actionKey(control,eventType){
+  function actionKey(control){
     const page=control?.dataset?.page||'';
     const id=control?.id||'';
     const text=String(control?.textContent||'').trim().slice(0,40);
-    return [eventType,page,id,text].join('|');
+    return [page,id,text].join('|');
   }
   function invoke(control,event){
     if(!control||control.disabled)return false;
@@ -243,7 +243,7 @@
 
     neutralizeBlockers(x,y,control);
 
-    const key=actionKey(control,event.type);
+    const key=actionKey(control);
     const now=Date.now();
     if(lastActionKey===key&&now-lastActionAt<300)return;
 
