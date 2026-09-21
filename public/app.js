@@ -298,6 +298,7 @@ function renderAll() {
   if (currentPage === 'home') renderHome();
   else if (['ce', 'ceaf', 'tbkh', 'ali1688'].includes(currentPage)) renderCcslPage();
   else if (['shopeecn', 'shopeevn'].includes(currentPage)) renderShopeePage();
+  else if (currentPage === 'whpp') window.__CE_QC_V90_INSTANT_WHPP_NAV__?.render?.();
   else if (currentPage === 'reports') renderReportsPage();
   else if (currentPage === 'exceptions') renderExceptionsPage();
   if (currentPage === 'logs') void runPageLoad('audit-logs', loadAuditLogs, 15000);
@@ -506,13 +507,13 @@ document.addEventListener('keydown', event => {
 
 function pageFromPath() {
   const value = location.pathname.toLowerCase();
-  const routes = { '/ce':'ce', '/ceaf':'ceaf', '/tbkh':'tbkh', '/ali1688':'ali1688', '/shopeecn':'shopeecn', '/shopeevn':'shopeevn', '/ccsl':'ce', '/shopee':'shopeecn', '/import':'import', '/tracking':'tracking', '/track':'tracking', '/exceptions':'exceptions', '/reports':'reports', '/settings':'settings', '/logs':'logs', '/data-management':'data-management' };
+  const routes = { '/ce':'ce', '/ceaf':'ceaf', '/tbkh':'tbkh', '/ali1688':'ali1688', '/whpp':'whpp', '/shopeecn':'shopeecn', '/shopeevn':'shopeevn', '/ccsl':'ce', '/shopee':'shopeecn', '/import':'import', '/tracking':'tracking', '/track':'tracking', '/exceptions':'exceptions', '/reports':'reports', '/settings':'settings', '/logs':'logs', '/data-management':'data-management' };
   for (const [path,page] of Object.entries(routes)) if (value === path || value.startsWith(`${path}/`)) return page;
   return 'home';
 }
 
 function navigatePage(page, anchor = '') {
-  currentPage = ['ce', 'ceaf', 'tbkh', 'ali1688', 'shopeecn', 'shopeevn', 'tracking', 'exceptions', 'reports', 'import', 'settings', 'logs', 'data-management'].includes(page) ? page : 'home';
+  currentPage = ['ce', 'ceaf', 'tbkh', 'ali1688', 'whpp', 'shopeecn', 'shopeevn', 'tracking', 'exceptions', 'reports', 'import', 'settings', 'logs', 'data-management'].includes(page) ? page : 'home';
   const path = currentPage === 'home' ? '/' : `/${currentPage}`;
   if (location.pathname !== path) history.pushState({}, '', path);
   renderAll();
@@ -524,6 +525,13 @@ function navigatePage(page, anchor = '') {
 
 async function hydratePageData(page) {
   try {
+    if (page === 'whpp') {
+      const lazy = window.__CE_QC_V108_ROUTE_LAZY__?.ensurePage;
+      if (typeof lazy === 'function') await lazy('whpp');
+      const owner = window.__CE_QC_V90_INSTANT_WHPP_NAV__?.navigate;
+      if (typeof owner === 'function') owner(false);
+      return;
+    }
     if (['ce', 'ceaf', 'tbkh', 'ali1688', 'shopeecn', 'shopeevn'].includes(page)) {
       const type = currentBusinessType();
       if (dashboardPeriodMode && businessStates[type]?.periodStart) return;
@@ -680,7 +688,7 @@ function renderPageVisibility() {
   const ccslPages = ['ce', 'ceaf', 'tbkh', 'ali1688'];
   const shopeePages = ['shopeecn', 'shopeevn'];
   document.querySelectorAll('.app-page').forEach(element => { element.hidden = true; });
-  const targetId = currentPage === 'home' ? 'homePage' : ccslPages.includes(currentPage) ? 'ccslPage' : shopeePages.includes(currentPage) ? 'shopeePage' : currentPage === 'tracking' ? 'trackPage' : `${currentPage}Page`;
+  const targetId = currentPage === 'home' ? 'homePage' : ccslPages.includes(currentPage) ? 'ccslPage' : (shopeePages.includes(currentPage) || currentPage === 'whpp') ? 'shopeePage' : currentPage === 'tracking' ? 'trackPage' : `${currentPage}Page`;
   const target = document.getElementById(targetId); if (target) target.hidden = false;
   document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === currentPage));
 }
@@ -693,7 +701,7 @@ function toggleNavGroup(id) { document.getElementById(id)?.classList.toggle('col
 
 function renderTopbar() {
   const state = ['shopeecn','shopeevn'].includes(currentPage) ? shopeeState : appState;
-  const titles = { home: '首页总看板', ce: 'CE看板', ceaf: 'CEAF空运看板', tbkh: 'TBKH看板', ali1688: 'ALI1688看板', shopeecn: 'SHOPEE CN看板', shopeevn: 'SHOPEE VN看板', reports: '报表数据预览', import: '数据导入', settings: '系统设置' };
+  const titles = { home: '首页总看板', ce: 'CE看板', ceaf: 'CEAF空运看板', tbkh: 'TBKH看板', ali1688: 'ALI1688看板', whpp: 'WHPP本土看板', shopeecn: 'SHOPEE CN看板', shopeevn: 'SHOPEE VN看板', reports: '报表数据预览', import: '数据导入', settings: '系统设置' };
   Object.assign(titles, { tracking: '轨迹查询', exceptions: '异常明细', logs: '操作日志', 'data-management': '数据管理', reports: '报表导出' });
   document.getElementById('pageTitle').textContent = titles[currentPage] || '首页总看板';
   const ccslHeading = document.querySelector('#ccslPage .page-heading h2'); if (ccslHeading && ['ce','ceaf','tbkh','ali1688'].includes(currentPage)) ccslHeading.textContent = titles[currentPage];
