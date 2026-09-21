@@ -16,12 +16,12 @@ assert.match(cleanup,/driveSnapshot\(dRoot\)/,'D drive free-space change must be
 assert.match(cleanup,/LIVE_BUSINESS_DATA_IS_NEVER_SILENTLY_DELETED/,'live database data must never be silently purged by housekeeping');
 assert.match(cleanup,/db\.exec\('VACUUM'\)/,'explicitly cleared database must be compacted to return disk space');
 
-assert.match(launcher,/D:\\CE CCSL金边数据库\\temp\\candidate_tests/,'candidate tests must put heavy scratch on D when D is available');
+assert.match(launcher,/D:\\CE_QC_TEST_TEMP\\candidate_tests/,'candidate tests must put heavy scratch on D when D is available');
 assert.match(launcher,/\$env:TEMP = \$candidateScratch/);
 assert.match(launcher,/\$env:TMP = \$candidateScratch/);
 assert.match(launcher,/\$env:TEMP = \$oldTemp/,'candidate temp redirect must be process-local and restored');
 
-assert.match(start,/D:\\CE CCSL金边数据库\\temp\\runtime/,'normal runtime scratch must prefer D');
+assert.match(start,/D:\\CE_QC_RUNTIME_TEMP\\runtime/,'normal runtime scratch must prefer D');
 assert.match(start,/\$env:TEMP = \$RuntimeScratch/);
 assert.match(start,/\$env:TMP = \$RuntimeScratch/);
 
