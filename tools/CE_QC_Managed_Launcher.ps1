@@ -216,7 +216,7 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
     Write-ManagedLog "[UPDATE] Verifying candidate $($RemoteCommit.Substring(0,[Math]::Min(8,$RemoteCommit.Length))) before installing..." Cyan
     Invoke-Exe $script:GitExe @('worktree','add','--detach','--quiet',$tempRoot,$RemoteCommit) | Out-Null
 
-    $candidateScratchBase = if (Test-Path -LiteralPath 'D:\') { 'D:\CE CCSL金边数据库\temp\candidate_tests' } else { Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp\candidate_tests' }
+    $candidateScratchBase = if (Test-Path -LiteralPath 'D:\') { 'D:\CE_QC_TEST_TEMP\candidate_tests' } else { Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp\candidate_tests' }
     $candidateScratch = Join-Path $candidateScratchBase ("run_{0}_{1}" -f $PID,(Get-Date -Format 'yyyyMMddHHmmss'))
     New-Item -ItemType Directory -Path $candidateScratch -Force | Out-Null
     $env:TEMP = $candidateScratch
