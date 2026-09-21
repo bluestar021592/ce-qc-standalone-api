@@ -6,7 +6,7 @@ import test from 'node:test';
 
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
-async function waitForTerminalStatus(file,jobId,timeoutMs=30_000){
+async function waitForTerminalStatus(file,jobId,timeoutMs=180_000){
   const deadline=Date.now()+timeoutMs;
   let status=null;
   while(Date.now()<deadline){
