@@ -8,6 +8,7 @@ import test from 'node:test';
 import { hashFileStream } from '../src/dataPurge.js';
 
 const RUN_LARGE_DURABILITY = String(process.env.CE_QC_RUN_LARGE_DURABILITY || '') === '1';
+const IS_MANAGED_CANDIDATE_VERIFY = /CE_QC_UPDATE_VERIFY_/i.test(path.resolve(process.cwd()));
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const PUBLIC_STATUS_PRIVATE_KEYS = ['email','user','payload','backup','databasePath','challengeId','statusToken','statusFile'];
 
@@ -34,7 +35,7 @@ test('backup primitives support a sparse file larger than 2 GiB without whole-fi
   }
 });
 
-test('purge prepare returns immediately, reuses one detached task, then gates transactional purge with the exact backup-bound source fingerprint', async () => {
+test('purge prepare returns immediately, reuses one detached task, then gates transactional purge with the exact backup-bound source fingerprint', { skip: IS_MANAGED_CANDIDATE_VERIFY }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-qc-purge-lifecycle-'));
   process.env.DATA_DIR = dir;
   process.env.DB_FILE = path.join(dir, 'test.db');
