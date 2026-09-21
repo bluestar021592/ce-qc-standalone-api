@@ -40,17 +40,18 @@ assert.match(app,/page === 'whpp'/,'WHPP hydration must explicitly hand off to i
 assert.match(app,/__CE_QC_V90_INSTANT_WHPP_NAV__/,'base runtime must preserve the dedicated WHPP rendering owner');
 
 assert.match(login,/\?auth=v575&t=/,'post-login URL must visibly identify the V575 coordinate shell, so stale installs are obvious');
-assert.match(cleanup,/2026-09-21-v573-dual-drive-storage-proof-v1/);
-assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/,'startup must print a human-readable deletion result');
+assert.match(cleanup,/2026-09-21-v576-storage-reclaim-proof-v1/);
+assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/,'startup must still print the established human-readable deletion result');
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/,'C free-space before/after must be printed');
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/,'D free-space before/after must be printed');
 assert.match(cleanup,/PROJECT_CACHE/);
 assert.match(cleanup,/PROJECT_TMP/);
 assert.match(cleanup,/NODE_MODULE_CACHE/);
-assert.match(cleanup,/BUSINESS_DATA_PRESENT/,'live business DB must remain fail-safe and not be silently deleted');
-assert.match(cleanup,/VACUUM/,'an explicitly emptied DB must still return SQLite disk space');
-assert.match(start,/\[CE-QC\]\[V575\] Coordinate click recovery \+ WHPP home card \+ C\/D storage proof runtime is installed\./);
+assert.match(cleanup,/compactSqliteStorage/,'V576 must analyze and reclaim safe SQLite freelist space while live rows remain');
+assert.match(cleanup,/No business data was deleted/,'insufficient-space path must explicitly preserve live business data');
+assert.match(cleanup,/VACUUM/,'V576 storage diagnostics must expose the safe VACUUM gate');
+assert.match(start,/\[CE-QC\]\[V576\] V575 click\/WHPP fixes retained \+ safe C\/D storage reclaim runtime is installed\./);
 
 assert.match(app,/\['whpp', 'WHPP本土'/,'production homepage must include WHPP as a first-class business card');
 assert.match(app,/state\.dashboard\?\.metrics\?\.total/,'WHPP home/range count must read unified WHPP metrics total');
-console.log('[V573/V575] coordinate click recovery + WHPP homepage + visible C/D storage proof smoke passed');
+console.log('[V573/V575/V576] coordinate click recovery + WHPP homepage + live-data-safe C/D storage reclaim smoke passed');
