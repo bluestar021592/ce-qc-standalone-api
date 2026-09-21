@@ -11,7 +11,7 @@
 <body>
   <main class="card">
     <div class="brand"><div class="mark">CE</div><div><b>CE EXPRESS · 直接清空业务数据</b><small>轻量独立入口，不加载首页看板、历史数据或趋势</small></div></div>
-    <div class="danger-note"><b>用途：</b>直接清空日报、轨迹、异常、跨日、POD锁、业务快照及派送业务数据；不创建新备份、不启用安全封锁。保留用户、权限、配置、白名单、已有备份和审计。</div>
+    <div class="danger-note"><b>用途：</b>直接清空日报、轨迹、异常、跨日、POD锁、业务快照及派送业务数据；不创建新备份、不启用安全封锁。保留用户、权限、配置、白名单和审计；现有 CE QC 备份、业务证据归档和可再生成文件会一并删除，并释放 SQLite 空闲空间。</div>
     <div class="actions">
       <button class="primary" type="button" onclick="window.openDirectDataPurge?.()">直接清空全部业务数据</button>
       <a class="ghost" href="/">返回系统首页</a>
@@ -20,7 +20,7 @@
     <div id="directPurgeDialog" class="modal" hidden>
       <div class="modal-card">
         <div id="directPurgePreview" class="purge-preview"></div>
-        <p class="danger-note">此操作不可撤销，并且不会新建恢复备份。现有用户、权限、配置、白名单、已有备份和审计不会删除。</p>
+        <p class="danger-note">此操作不可撤销，并且不会新建恢复备份。现有用户、权限、配置、白名单和审计不会删除；现有 CE QC 备份、业务证据归档和可再生成文件会永久删除。</p>
         <label class="field-label">请输入：永久清除全部业务数据<input id="directPurgePhrase" autocomplete="off" oninput="updateDirectPurgeButton()"></label>
         <p id="directPurgeCountdown" class="purge-countdown">请等待 5 秒</p>
         <div class="modal-actions">
@@ -30,6 +30,6 @@
       </div>
     </div>
   </main>
-  <script src="/v560-direct-data-purge.js?v=20260921-v562-1"></script>
+  <script src="/v560-direct-data-purge.js?v=20260921-v568-1"></script>
 </body>
 </html>
