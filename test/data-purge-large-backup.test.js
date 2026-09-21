@@ -73,7 +73,11 @@ test('purge prepare returns immediately, reuses one detached task, then gates tr
 
   const statusFile = path.join(getRuntimeConfig().projectRoot, 'public', first.statusUrl.replace(/^\//, ''));
   let status = null;
-  const deadline = Date.now() + 30_000;
+  // Local managed-updater verification on Windows may run under antivirus / slower
+  // process-spawn conditions. The worker is already detached and progress-backed;
+  // give the safety smoke enough time to observe its terminal status instead of
+  // rejecting a good candidate while the worker is still legitimately RUNNING.
+  const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     try { status = JSON.parse(fs.readFileSync(statusFile, 'utf8')); } catch {}
     if (status?.status === 'SUCCEEDED' || status?.status === 'FAILED') break;
