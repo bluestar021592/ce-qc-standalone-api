@@ -102,7 +102,11 @@ export const BUSINESS_DATA_TABLES = [
   'weekly_metric_snapshots',
   'dashboard_daily_cache',
   'dashboard_cache_dates',
-  'dashboard_cache_dirty'
+  'dashboard_cache_dirty',
+  'qc_tracking_ledger',
+  'qc_tracking_audit',
+  'v329_three_business_daily_cache',
+  'v334_generic_history_cache'
 ];
 
 export function resetAppState(nextState = {}) {
