@@ -16,7 +16,7 @@
     button.className=`side-link ${page===active?'active':''} ${page==='data-management'?'admin-only':''}`.trim();
     button.dataset.page=page;button.dataset.path=target;
     if(page==='data-management'&&!showAdmin)button.hidden=true;
-    button.setAttribute('onclick',`navigatePage('${page}')`);
+    button.setAttribute('onclick',`window.__CE_QC_V575_COORDINATE_OWNER__?.go('${page}','','v318-nav') || navigatePage('${page}')`);
     button.innerHTML=`<svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-${icon}"></use></svg><span class="side-label">${label}</span>`;
     return button;
   }
