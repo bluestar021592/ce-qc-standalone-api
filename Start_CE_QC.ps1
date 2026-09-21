@@ -158,7 +158,7 @@ $env:HOST = '0.0.0.0'
 $env:PORT = '5177'
 $LocalUrl = 'http://127.0.0.1:5177'
 $RecoveryLaunchMode = ([string]$env:CE_QC_OPEN_PURGE_CONSOLE).Trim() -eq '1'
-$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { "$LocalUrl/local-login.html?v=20260921-v568-1" }
+$LaunchUrl = if ($RecoveryLaunchMode) { "$LocalUrl/purge-console.html?v=20260920-recovery-first" } else { "$LocalUrl/local-login.html?v=20260921-v575-1" }
 
 function Archive-BackendLogs([string]$Reason) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
