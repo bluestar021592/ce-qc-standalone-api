@@ -42,7 +42,7 @@ function normalizeTopNavigation() {
     ['tracking','轨迹查询','route','/tracking'], ['exceptions','异常明细','alert','/exceptions'], ['reports','报表导出','clipboard','/reports'],
     ['data-management','数据管理','database','/data-management'], ['settings','系统设置','settings','/settings'], ['logs','操作日志','clipboard','/logs']
   ];
-  nav.innerHTML = items.map(([page,label,icon,path]) => `<button class="side-link ${page === currentPage ? 'active' : ''} ${page === 'data-management' ? 'admin-only' : ''}" data-page="${page}" data-path="${path}" onclick="navigatePage('${page}')" ${page === 'data-management' ? 'hidden' : ''}><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-${icon}"></use></svg><span class="side-label">${label}</span></button>`).join('');
+  nav.innerHTML = items.map(([page,label,icon,path]) => `<button class="side-link ${page === currentPage ? 'active' : ''} ${page === 'data-management' ? 'admin-only' : ''}" data-page="${page}" data-path="${path}" onclick="window.__CE_QC_V575_COORDINATE_OWNER__?.go('${page}','','app-nav') || navigatePage('${page}')" ${page === 'data-management' ? 'hidden' : ''}><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-${icon}"></use></svg><span class="side-label">${label}</span></button>`).join('');
 }
 
 function separateLegacyPanels() {
