@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$Patch = '2026-09-22-v578-dedicated-drive-cleanup-v1'
+$Patch = '2026-09-22-v579-dedicated-drive-cleanup-parsefix-v1'
 $Now = Get-Date
 $DeletedBytes = [int64]0
 $DeletedEntries = 0
