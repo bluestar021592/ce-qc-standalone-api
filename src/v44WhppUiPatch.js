@@ -86,6 +86,8 @@ express.application.use=function v206InteractiveFirstOwnerUse(...args){
   return previousUse.apply(this,args);
 };
 
+export function buildV509InjectedHtmlForTest(){ return buildInjectedHtml(); }
+
 export function inspectV178HtmlCache(){return {built:Boolean(injectedHtml),bytes:Buffer.byteLength(injectedHtml||'','utf8'),patchId:PATCH_ID,baseStatusLoaderCompat:V428_BASE_STATUS_LOADER_COMPAT,controlRevision:V375_CONTROL_REVISION,compatPatchId:GOLIVE_COMPAT_PATCH_ID,legacyUiBuild:V226_COMPAT_UI_BUILD,singleRunner:SINGLE_RUNNER_UI_BUILD,persistedStatus:PERSISTED_STATUS_BUILD,whppPageOwner:WHPP_PAGE_OWNER,statusEntryLockCompat:V411_STATUS_ENTRY_LOCK_LOADER_COMPAT};}
 export const V44_WHPP_UI_PATCH_ID=PATCH_ID;
 export const V554_INTERACTION_READY_PATCH_ID=V554_INTERACTION_READY_ID;
