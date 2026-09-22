@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$Patch = '2026-09-22-v578-dedicated-drive-cleanup-v1'
+$Patch = '2026-09-22-v579-dedicated-drive-cleanup-parsefix-v1'
 $Now = Get-Date
 $DeletedBytes = [int64]0
 $DeletedEntries = 0
@@ -15,7 +15,7 @@ function Write-CeLog([string]$Message) {
 
 function Get-DriveFree([string]$Letter) {
   try {
-    $d = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$Letter:'"
+    $d = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${Letter}:'"
     return [int64]$d.FreeSpace
   } catch { return [int64]0 }
 }
