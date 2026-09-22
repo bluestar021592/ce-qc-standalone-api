@@ -5,6 +5,59 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CE Express 质量控制管理系统</title>
   <script>
+  (function installV580ShellVisibilityGuard(global){
+    'use strict';
+    if(global.__CE_QC_V580_SHELL_GUARD__) return;
+    var VERSION='2026-09-22-v580-live-browser-shell-recovery-v1';
+    var doc=global.document;
+    global.__CE_QC_V580_SHELL_GUARD__={version:VERSION,repair:repair};
+
+    function pageFromPath(){
+      var p=String(global.location&&global.location.pathname||'/').toLowerCase();
+      if(p==='/ce')return 'ce'; if(p==='/ceaf')return 'ceaf'; if(p==='/tbkh')return 'tbkh';
+      if(p==='/ali1688')return 'ali1688'; if(p==='/whpp')return 'whpp';
+      if(p==='/shopeecn')return 'shopeecn'; if(p==='/shopeevn')return 'shopeevn';
+      if(p==='/import')return 'import'; if(p==='/tracking')return 'tracking';
+      if(p==='/exceptions')return 'exceptions'; if(p==='/reports')return 'reports';
+      if(p==='/data-management')return 'data-management'; if(p==='/settings')return 'settings';
+      if(p==='/logs')return 'logs'; return 'home';
+    }
+    function show(node,display){
+      if(!node)return;
+      try{node.hidden=false;node.removeAttribute('inert');node.style.setProperty('visibility','visible','important');node.style.setProperty('opacity','1','important');if(display)node.style.setProperty('display',display,'important');}catch(_){}
+    }
+    function directTarget(page){
+      if(page==='home')return doc.getElementById('homePage');
+      if(['ce','ceaf','tbkh','ali1688'].indexOf(page)>=0)return doc.getElementById('ccslPage');
+      if(['shopeecn','shopeevn'].indexOf(page)>=0)return doc.getElementById('shopeePage');
+      if(page==='whpp')return doc.getElementById('whppFastPage')||doc.getElementById('shopeePage');
+      if(page==='tracking')return doc.getElementById('trackPage');
+      return doc.getElementById(page+'Page');
+    }
+    function repair(reason){
+      try{
+        show(doc.querySelector('.app-stage'),'block');
+        show(doc.querySelector('.app-shell'),'block');
+        show(doc.querySelector('.app-body'),'flex');
+        show(doc.querySelector('.topbar'),'flex');
+        show(doc.querySelector('.main-content'),'block');
+        var page=pageFromPath();
+        var target=directTarget(page);
+        if(target) show(target,'block');
+        doc.documentElement.dataset.ceQcV580Shell=VERSION;
+        var owner=global.__CE_QC_V575_COORDINATE_OWNER__;
+        if(owner&&typeof owner.go==='function'){
+          try{owner.go(page,'','v580-shell-'+String(reason||'repair'));}catch(_){}
+        }
+      }catch(_){}
+    }
+    function boot(){repair('dom');[120,500,1200,2500,5000,9000].forEach(function(ms){global.setTimeout(function(){repair('t'+ms);},ms);});}
+    if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+    global.addEventListener('pageshow',function(){repair('pageshow');},true);
+    global.addEventListener('popstate',function(){repair('popstate');},true);
+  })(window);
+  </script>
+  <script>
   (function installV575CoordinateOwner(global){
     'use strict';
     if(global.__CE_QC_V575_COORDINATE_OWNER__) return;
