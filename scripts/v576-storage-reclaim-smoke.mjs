@@ -69,7 +69,7 @@ try{
   assert.ok(after.reclaimableBytes<2*1024*1024,'freelist should be near-zero after V576 VACUUM');
   assert.ok(beforeDelete>result.afterBytes,'final live DB must be smaller than its pre-delete allocation');
 
-  console.log('[V576/V577_STORAGE] fast startup mode defers oversized live DB before VACUUM · safety gate refuses VACUUM without enough free disk · real maintenance VACUUM preserved 1024 live rows/payload bytes · reclaimed +(result.reclaimedBytes/(1024**2)).toFixed(1)+' MiB · '+STORAGE_COMPACTION_PATCH);
+  console.log('[V576/V577_STORAGE] fast startup mode defers oversized live DB before VACUUM · safety gate refuses VACUUM without enough free disk · real maintenance VACUUM preserved 1024 live rows/payload bytes · reclaimed '+(result.reclaimedBytes/(1024**2)).toFixed(1)+' MiB · '+STORAGE_COMPACTION_PATCH);
 }finally{
   fs.rmSync(root,{recursive:true,force:true,maxRetries:20,retryDelay:100});
 }
