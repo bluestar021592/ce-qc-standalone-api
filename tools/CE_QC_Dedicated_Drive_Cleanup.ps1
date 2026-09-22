@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$Patch = '2026-09-22-v579-dedicated-drive-cleanup-parsefix-v1'
+$Patch = '2026-09-22-v580-live-browser-safe-dedicated-cleanup-v1'
 $Now = Get-Date
 $DeletedBytes = [int64]0
 $DeletedEntries = 0
@@ -86,15 +86,36 @@ $cacheRoots = @(
   (Join-Path $env:USERPROFILE '.cache'),
   (Join-Path $env:LOCALAPPDATA 'D3DSCache'),
   (Join-Path $env:LOCALAPPDATA 'CrashDumps'),
-  (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\INetCache'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\INetCache')
+)
+foreach ($p in $cacheRoots) { Remove-CeTarget $p 0 }
+
+# Never delete the live browser's Cache/Code Cache/GPUCache while Edge/Chrome is running.
+# V579 proved this can reclaim many GiB, but deleting files under a live browser risks an
+# already-open CE QC tab losing its rendered shell. Browser caches are cleaned only when
+# that browser process is not running.
+$edgeRunning = @((Get-Process msedge -ErrorAction SilentlyContinue)).Count -gt 0
+$chromeRunning = @((Get-Process chrome -ErrorAction SilentlyContinue)).Count -gt 0
+$edgeCaches = @(
   (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Cache'),
   (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Code Cache'),
-  (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\GPUCache'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\GPUCache')
+)
+$chromeCaches = @(
   (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Cache'),
   (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Code Cache'),
   (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\GPUCache')
 )
-foreach ($p in $cacheRoots) { Remove-CeTarget $p 0 }
+if ($edgeRunning) {
+  Write-CeLog '[CE-QC][V580][DEDICATED] Edge is running; live Edge caches retained for UI stability.'
+} else {
+  foreach ($p in $edgeCaches) { Remove-CeTarget $p 0 }
+}
+if ($chromeRunning) {
+  Write-CeLog '[CE-QC][V580][DEDICATED] Chrome is running; live Chrome caches retained for UI stability.'
+} else {
+  foreach ($p in $chromeCaches) { Remove-CeTarget $p 0 }
+}
 
 # Generic temp is cleaned only when entries are older than 24h, so current updater/runtime files stay protected.
 Remove-CeTarget $env:TEMP 24
@@ -126,10 +147,10 @@ $AfterC = Get-DriveFree 'C'
 $AfterD = if (Test-Path -LiteralPath 'D:\') { Get-DriveFree 'D' } else { [int64]0 }
 function GiB([int64]$Bytes) { return [math]::Round($Bytes / 1GB, 2) }
 
-Write-CeLog "[CE-QC][V578][DEDICATED] safe cleanup complete: deleted=$DeletedEntries entries, measured=$([math]::Round($DeletedBytes / 1GB, 2)) GiB, failures=$Failures."
-Write-CeLog "[CE-QC][V578][DEDICATED] C free: $(GiB $BeforeC) GiB -> $(GiB $AfterC) GiB; reclaimed=$(GiB ($AfterC-$BeforeC)) GiB."
+Write-CeLog "[CE-QC][V580][DEDICATED] safe cleanup complete: deleted=$DeletedEntries entries, measured=$([math]::Round($DeletedBytes / 1GB, 2)) GiB, failures=$Failures."
+Write-CeLog "[CE-QC][V580][DEDICATED] C free: $(GiB $BeforeC) GiB -> $(GiB $AfterC) GiB; reclaimed=$(GiB ($AfterC-$BeforeC)) GiB."
 if ($BeforeD -gt 0) {
-  Write-CeLog "[CE-QC][V578][DEDICATED] D free: $(GiB $BeforeD) GiB -> $(GiB $AfterD) GiB; reclaimed=$(GiB ($AfterD-$BeforeD)) GiB."
+  Write-CeLog "[CE-QC][V580][DEDICATED] D free: $(GiB $BeforeD) GiB -> $(GiB $AfterD) GiB; reclaimed=$(GiB ($AfterD-$BeforeD)) GiB."
 }
 
 # Surface protected system-file sizes so large C usage is explainable without deleting Windows.
@@ -138,7 +159,7 @@ foreach ($name in @('hiberfil.sys','pagefile.sys','swapfile.sys')) {
   if (Test-Path -LiteralPath $p) {
     try {
       $bytes = [int64](Get-Item -LiteralPath $p -Force).Length
-      Write-CeLog "[CE-QC][V578][DEDICATED] protected system file retained: $name = $(GiB $bytes) GiB."
+      Write-CeLog "[CE-QC][V580][DEDICATED] protected system file retained: $name = $(GiB $bytes) GiB."
     } catch {}
   }
 }
