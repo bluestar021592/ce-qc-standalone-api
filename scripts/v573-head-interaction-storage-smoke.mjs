@@ -22,7 +22,7 @@ assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME rende
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
 assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
-assert.match(response,/body=body\.replace\('\<\/body\>'|body=body\.replace\('\<\/body\>',|body=body\.replace\('<\/body>'/,'V581 response pass must inject the stable owner at the end');
+assert.match(response,/body=body\.replace\('\<\/body\>',V581_TAG\+'\\n<\/body>'\)/,'V581 response pass must inject the stable owner at the end');
 assert.match(response,/X-CE-QC-V581-Shell/);
 
 const assetAt=server.indexOf('const v575PublicAssetStatic');
