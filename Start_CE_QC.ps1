@@ -130,7 +130,17 @@ function Clear-CeQcPort([int]$Port) {
 Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
-Write-Host '[CE-QC][V577] V575 click/WHPP fixes retained + fast non-blocking C/D storage census is installed.' -ForegroundColor Green
+Write-Host '[CE-QC][V578] Dedicated C/D storage cleanup + V575 click/WHPP fixes are installed.' -ForegroundColor Green
+
+$DedicatedCleanup = Join-Path $ProjectRoot 'tools\CE_QC_Dedicated_Drive_Cleanup.ps1'
+if (Test-Path -LiteralPath $DedicatedCleanup) {
+    Write-Host '[CE-QC] Dedicated-drive cleanup: clearing CE QC leftovers + safe Windows/user caches on C and CE scratch/cache on D...' -ForegroundColor Cyan
+    try {
+        & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $DedicatedCleanup
+    } catch {
+        Write-Host ("[WARN] Dedicated-drive cleanup failed; startup will continue. " + $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
 
 $NoBackupCleanup = Join-Path $ProjectRoot 'scripts\CE_QC_NoBackup_Cleanup.mjs'
 if (Test-Path -LiteralPath $NoBackupCleanup) {
@@ -148,6 +158,10 @@ try {
     New-Item -ItemType Directory -Path $RuntimeScratch -Force | Out-Null
     $env:TEMP = $RuntimeScratch
     $env:TMP = $RuntimeScratch
+    if (Test-Path -LiteralPath 'D:\') {
+        $env:NPM_CONFIG_CACHE = 'D:\CE_QC_NPM_CACHE'
+        New-Item -ItemType Directory -Path $env:NPM_CONFIG_CACHE -Force | Out-Null
+    }
     Write-Host "[CE-QC] Runtime TEMP/TMP redirected to: $RuntimeScratch" -ForegroundColor DarkCyan
 } catch {
     Write-Host ("[WARN] Runtime scratch redirection failed; Windows TEMP will be used. " + $_.Exception.Message) -ForegroundColor Yellow
