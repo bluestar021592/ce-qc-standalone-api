@@ -15,7 +15,7 @@ function Write-CeLog([string]$Message) {
 
 function Get-DriveFree([string]$Letter) {
   try {
-    $d = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$Letter:'"
+    $d = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${Letter}:'"
     return [int64]$d.FreeSpace
   } catch { return [int64]0 }
 }
