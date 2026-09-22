@@ -8,6 +8,9 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 const index=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+const shellMatch=index.match(/<script>\s*\(function installV580ShellVisibilityGuard[\s\S]*?<\/script>/);
+assert.ok(shellMatch,'V580 inline shell guard must exist before browser smoke');
+const shellSource=shellMatch[0].replace(/^<script>\s*/,'').replace(/<\/script>$/,'');
 const match=index.match(/<script>\s*\(function installV575CoordinateOwner[\s\S]*?<\/script>/);
 assert.ok(match,'V575 inline owner must exist before browser smoke');
 const ownerSource=match[0].replace(/^<script>\s*/,'').replace(/<\/script>$/,'');
@@ -38,7 +41,7 @@ function browserExecutable(){
 }
 function fixtureHtml(){
   return '<!doctype html><html><head><meta charset="utf-8"><title>V575 browser smoke</title>'+
-    '<script>'+ownerSource.split('</script').join('<\\/script')+'</script>'+
+    '<script>'+shellSource.split('</script').join('<\\/script')+'</script>'+\n    '<script>'+ownerSource.split('</script').join('<\\/script')+'</script>'+
     '<style>'+
     'html,body{margin:0;width:100%;height:100%;font-family:Arial}'+
     '.app-stage,.app-shell{min-height:100vh}.sidebar{position:fixed;left:0;top:0;width:300px;height:100vh;background:#06365f;padding:12px;box-sizing:border-box}'+
@@ -57,14 +60,16 @@ function fixtureHtml(){
     '<button class="side-link" data-page="import">数据导入</button>'+
     '<button class="side-link" data-page="tracking">轨迹查询</button>'+
     '</nav></aside>'+
-    '<main class="app-body">'+
-    '<section id="homePage" class="app-page"><h1>HOME</h1></section>'+
+    '<main class="app-body" style="display:none;visibility:hidden;opacity:0">'+
+    '<header class="topbar" style="display:none;visibility:hidden;opacity:0">TOP</header>'+
+    '<div class="main-content" style="display:none;visibility:hidden;opacity:0">'+
+    '<section id="homePage" class="app-page" hidden><h1>HOME</h1></section>'+
     '<section id="ccslPage" class="app-page" hidden><h1>CCSL</h1></section>'+
     '<section id="shopeePage" class="app-page" hidden><h1>SHOPEE</h1></section>'+
     '<section id="importPage" class="app-page" hidden><h1>IMPORT</h1></section>'+
     '<section id="trackPage" class="app-page" hidden><h1>TRACK</h1></section>'+
     '<button id="metricButton" onclick="document.body.dataset.metric=\'clicked\'">metric</button>'+
-    '</main>'+
+    '</div></main>'+
     '<div id="sidebarBlocker"></div><div id="contentBlocker"></div>'+
     '</div></div></body></html>';
 }
@@ -142,8 +147,9 @@ try{
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+webPort+'/fixture'});
-  await waitFor(()=>cdp.eval("document.readyState==='complete'&&!!window.__CE_QC_V575_COORDINATE_OWNER__&&!!document.querySelector('[data-page=ce]')"),10000,80);
-  await cdp.eval("(()=>{const s=document.querySelector('.sidebar'),b=document.getElementById('sidebarBlocker');s.appendChild(b);Object.assign(b.style,{position:'absolute',left:'0px',top:'0px',width:'100%',height:'100%',zIndex:'2147483647',pointerEvents:'auto'});const a=document.querySelector('.app-body'),c=document.getElementById('contentBlocker');a.appendChild(c);Object.assign(c.style,{position:'fixed',left:'340px',top:'250px',width:'260px',height:'100px',zIndex:'2147483647',pointerEvents:'auto'});return true;})()");
+  await waitFor(()=>cdp.eval("document.readyState==='complete'&&!!window.__CE_QC_V580_SHELL_GUARD__&&!!window.__CE_QC_V575_COORDINATE_OWNER__&&!!document.querySelector('[data-page=ce]')"),10000,80);
+  await waitFor(()=>cdp.eval("(()=>{const a=document.querySelector('.app-body'),t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');const vis=n=>{const s=getComputedStyle(n);return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity||1)>0};return vis(a)&&vis(t)&&vis(m)&&h&&!h.hidden;})()"),3000,50);
+  await cdp.eval("(()=>{const s=document.querySelector('.sidebar'),b=document.getElementById('sidebarBlocker');s.appendChild(b);Object.assign(b.style,{position:'absolute',left:'0px',top:'0px',width:'100%',height:'100%',zIndex:'2147483647',pointerEvents:'auto'});const a=document.querySelector('.main-content'),c=document.getElementById('contentBlocker');a.appendChild(c);Object.assign(c.style,{position:'fixed',left:'340px',top:'250px',width:'260px',height:'100px',zIndex:'2147483647',pointerEvents:'auto'});return true;})()");
 
   await clickAt(cdp,'.side-link[data-page="ce"]','sidebarBlocker');
   await waitFor(()=>cdp.eval("location.pathname==='/ce'&&!document.getElementById('ccslPage').hidden&&document.querySelector('[data-page=ce]').classList.contains('active')"),3000,50);
@@ -157,7 +163,7 @@ try{
 
   const owner=await cdp.eval("window.__CE_QC_V575_COORDINATE_OWNER__");
   assert.equal(owner.version,'2026-09-21-v575-coordinate-nav-owner-v1');
-  console.log('[V575_BROWSER] real Chromium/Edge pointer smoke passed · transparent sidebar overlay intercepted native hit · CE/import still switched by coordinate recovery · blocked dashboard button still fired');
+  console.log('[V575/V580_BROWSER] real Chromium/Edge smoke passed · V580 restored hidden app-body/topbar/main-content/home · V575 coordinate owner still recovers sidebar/dashboard clicks through blockers');
 } finally {
   try{cdp&&cdp.close();}catch{}
   try{child.kill('SIGKILL');}catch{}
