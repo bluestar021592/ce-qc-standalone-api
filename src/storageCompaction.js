@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export const STORAGE_COMPACTION_PATCH='2026-09-21-v576-live-sqlite-space-reclaim-v1';
+export const STORAGE_COMPACTION_PATCH='2026-09-22-v577-fast-startup-storage-census-v1';
 
 function numberPragma(db,name){
   const row=db.prepare('PRAGMA '+name).get()||{};
@@ -34,7 +34,8 @@ function siblingBytes(file,suffix){
   return fileBytes(file+suffix);
 }
 
-export function analyzeSqliteStorage(dbFile){
+export function analyzeSqliteStorage(dbFile,options={}){
+  const verifyIntegrity=options.verifyIntegrity===true;
   const beforeBytes=fileBytes(dbFile);
   const walBytes=siblingBytes(dbFile,'-wal');
   const shmBytes=siblingBytes(dbFile,'-shm');
@@ -51,10 +52,10 @@ export function analyzeSqliteStorage(dbFile){
     const allocatedBytes=Math.max(beforeBytes,pageCount*pageSize);
     const liveEstimatedBytes=Math.max(0,allocatedBytes-reclaimableBytes);
     const reclaimRatio=allocatedBytes>0?reclaimableBytes/allocatedBytes:0;
-    const check=quickCheck(db);
+    const check=verifyIntegrity?quickCheck(db):{ok:true,detail:'FAST_METADATA_ONLY'};
     return {
       ok:check.ok,
-      reason:check.ok?'ANALYZED':'QUICK_CHECK_FAILED',
+      reason:check.ok?(verifyIntegrity?'ANALYZED_VERIFIED':'ANALYZED_FAST'):'QUICK_CHECK_FAILED',
       detail:check.detail,
       dbFile,
       beforeBytes:fileBytes(dbFile),
@@ -74,13 +75,18 @@ export function compactSqliteStorage(dbFile,options={}){
   const minReclaimRatio=Math.max(0,Math.min(1,Number(options.minReclaimRatio ?? 0.08)));
   const reserveBytes=Math.max(0,Number(options.reserveBytes ?? 1024*1024*1024));
   const force=options.force===true;
-  const before=analyzeSqliteStorage(dbFile);
+  const startupSafe=options.startupSafe===true;
+  const maxStartupVacuumBytes=Math.max(0,Number(options.maxStartupVacuumBytes ?? 4*1024*1024*1024));
+  const before=analyzeSqliteStorage(dbFile,{verifyIntegrity:false});
   if(!before.ok)return {...before,compacted:false,reclaimedBytes:0};
   if(!force && before.reclaimableBytes<minReclaimBytes){
     return {...before,compacted:false,reason:'RECLAIM_BELOW_MINIMUM',reclaimedBytes:0,minReclaimBytes,minReclaimRatio};
   }
   if(!force && before.reclaimRatio<minReclaimRatio){
     return {...before,compacted:false,reason:'RECLAIM_RATIO_BELOW_MINIMUM',reclaimedBytes:0,minReclaimBytes,minReclaimRatio};
+  }
+  if(startupSafe && !force && before.beforeBytes>maxStartupVacuumBytes){
+    return {...before,compacted:false,reason:'LARGE_DB_STARTUP_COMPACTION_DEFERRED',reclaimedBytes:0,maxStartupVacuumBytes};
   }
   const requiredFreeBytes=Math.max(reserveBytes,before.liveEstimatedBytes+reserveBytes);
   if(before.driveFreeBytes>0 && before.driveFreeBytes<requiredFreeBytes){
@@ -106,7 +112,7 @@ export function compactSqliteStorage(dbFile,options={}){
     try{db.close();}catch{}
   }
 
-  const after=analyzeSqliteStorage(dbFile);
+  const after=analyzeSqliteStorage(dbFile,{verifyIntegrity:false});
   const afterBytes=fileBytes(dbFile);
   return {
     ...after,

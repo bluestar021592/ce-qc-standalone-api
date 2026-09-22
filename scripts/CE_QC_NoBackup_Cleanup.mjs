@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig, nowIso } from '../src/db.js';
 import { compactSqliteStorage, STORAGE_COMPACTION_PATCH } from '../src/storageCompaction.js';
 
-const PATCH_ID='2026-09-21-v576-storage-reclaim-proof-v1';
+const PATCH_ID='2026-09-22-v577-fast-storage-startup-v1';
 const DAY_MS=24*60*60*1000;
 const EVIDENCE_RETENTION_MS=60*DAY_MS;
 const LOG_RETENTION_MS=45*DAY_MS;
@@ -161,7 +161,9 @@ const backupRecordCleanup=retireBackupRecords(cfg.dbFile);
 const compact=compactSqliteStorage(cfg.dbFile,{
   minReclaimBytes:256*1024*1024,
   minReclaimRatio:0.08,
-  reserveBytes:1024*1024*1024
+  reserveBytes:1024*1024*1024,
+  startupSafe:true,
+  maxStartupVacuumBytes:4*1024*1024*1024
 });
 const drivesAfter={C:driveSnapshot(cRoot),D:driveSnapshot(dRoot)};
 const allCleanup=[...removed,...retained,...tempCleanup];
@@ -182,12 +184,14 @@ if(compact?.compacted){
   console.log(`[CE-QC][V576][STORAGE] SQLite compacted with live data preserved and quick_check=ok: ${gib(compact.beforeBytes).toFixed(2)} GiB -> ${gib(compact.afterBytes).toFixed(2)} GiB, reclaimed ${gib(compact.reclaimedBytes).toFixed(2)} GiB.`);
 }else if(compact?.reason==='INSUFFICIENT_FREE_SPACE_FOR_SAFE_VACUUM'){
   console.log(`[CE-QC][V576][STORAGE] SQLite has ${gib(compact.reclaimableBytes).toFixed(2)} GiB reclaimable, but safe VACUUM needs about ${gib(compact.requiredFreeBytes).toFixed(2)} GiB free and only ${gib(compact.driveFreeBytes).toFixed(2)} GiB is free. No business data was deleted.`);
+}else if(compact?.reason==='LARGE_DB_STARTUP_COMPACTION_DEFERRED'){
+  console.log(`[CE-QC][V577][STORAGE] Fast census complete: SQLite allocated=${gib(compact.beforeBytes).toFixed(2)} GiB, estimated live=${gib(compact.liveEstimatedBytes).toFixed(2)} GiB, reclaimable=${gib(compact.reclaimableBytes).toFixed(2)} GiB (${(Number(compact.reclaimRatio||0)*100).toFixed(1)}%). Large live DB compaction is deferred so startup cannot hang; no business data was deleted.`);
 }else if(compact?.ok){
-  console.log(`[CE-QC][V576][STORAGE] SQLite allocated=${gib(compact.beforeBytes).toFixed(2)} GiB, estimated live=${gib(compact.liveEstimatedBytes).toFixed(2)} GiB, reclaimable=${gib(compact.reclaimableBytes).toFixed(2)} GiB (${(Number(compact.reclaimRatio||0)*100).toFixed(1)}%). Automatic compaction skipped: ${compact.reason}.`);
+  console.log(`[CE-QC][V577][STORAGE] SQLite allocated=${gib(compact.beforeBytes).toFixed(2)} GiB, estimated live=${gib(compact.liveEstimatedBytes).toFixed(2)} GiB, reclaimable=${gib(compact.reclaimableBytes).toFixed(2)} GiB (${(Number(compact.reclaimRatio||0)*100).toFixed(1)}%). Automatic compaction skipped: ${compact.reason}.`);
 }else{
   console.log(`[CE-QC][V576][STORAGE] SQLite storage analysis could not compact: ${compact?.reason||'UNKNOWN'} ${compact?.detail||''}`);
 }
-console.log(`[CE-QC][V576][STORAGE] compaction engine=${STORAGE_COMPACTION_PATCH}; backup-record rows retired=${backupRecordCleanup.updated||0}.`);
+console.log(`[CE-QC][V577][STORAGE] compaction engine=${STORAGE_COMPACTION_PATCH}; backup-record rows retired=${backupRecordCleanup.updated||0}.`);
 
 console.log(JSON.stringify({
   ok:true,

@@ -45,6 +45,12 @@ try{
   assert.ok(analysis.reclaimableBytes>20*1024*1024,'fixture must contain real SQLite freelist space');
   assert.ok(analysis.reclaimRatio>0.4,'fixture must have a meaningful reclaim ratio');
 
+
+  const deferred=compactSqliteStorage(dbFile,{minReclaimBytes:1,minReclaimRatio:0,startupSafe:true,maxStartupVacuumBytes:1});
+  assert.equal(deferred.compacted,false,'startup-safe mode must never VACUUM a live DB above the startup size cap');
+  assert.equal(deferred.reason,'LARGE_DB_STARTUP_COMPACTION_DEFERRED');
+  assert.equal(rowCount(),expectedCount,'startup defer must preserve live rows');
+
   const blocked=compactSqliteStorage(dbFile,{minReclaimBytes:1,minReclaimRatio:0, reserveBytes:Number.MAX_SAFE_INTEGER/4});
   assert.equal(blocked.compacted,false,'insufficient-free-space safety gate must refuse risky VACUUM');
   assert.equal(blocked.reason,'INSUFFICIENT_FREE_SPACE_FOR_SAFE_VACUUM');
@@ -63,7 +69,7 @@ try{
   assert.ok(after.reclaimableBytes<2*1024*1024,'freelist should be near-zero after V576 VACUUM');
   assert.ok(beforeDelete>result.afterBytes,'final live DB must be smaller than its pre-delete allocation');
 
-  console.log('[V576_STORAGE] live SQLite reclaim proof passed · safety gate refuses VACUUM without enough free disk · real VACUUM preserved 1024 live rows/payload bytes · reclaimed '+(result.reclaimedBytes/(1024**2)).toFixed(1)+' MiB · '+STORAGE_COMPACTION_PATCH);
+  console.log('[V576/V577_STORAGE] fast startup mode defers oversized live DB before VACUUM · safety gate refuses VACUUM without enough free disk · real maintenance VACUUM preserved 1024 live rows/payload bytes · reclaimed '+(result.reclaimedBytes/(1024**2)).toFixed(1)+' MiB · '+STORAGE_COMPACTION_PATCH);
 }finally{
   fs.rmSync(root,{recursive:true,force:true,maxRetries:20,retryDelay:100});
 }
