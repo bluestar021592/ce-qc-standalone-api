@@ -58,7 +58,7 @@ const server=http.createServer((req,res)=>{
   const routeLike=['/','/ce','/ceaf','/tbkh','/ali1688','/whpp','/shopeecn','/shopeevn','/import','/tracking','/exceptions','/reports','/settings','/logs','/data-management'];
   let file=u.pathname;
   if(routeLike.includes(file))file='/index.html';
-  file=String(file||'').replace(/^\\/+/, '');
+  file=String(file||''); while(file.startsWith('/')) file=file.slice(1);
   const abs=path.normalize(path.join(publicDir,file));
   if(!abs.startsWith(publicDir)||!fs.existsSync(abs)||fs.statSync(abs).isDirectory()){res.writeHead(404);res.end('not found');return;}
   res.writeHead(200,{'content-type':typeFor(abs),'cache-control':'no-store'});
