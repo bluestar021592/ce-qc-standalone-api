@@ -39,7 +39,7 @@ assert.match(app,/\['ce', 'ceaf', 'tbkh', 'ali1688', 'whpp', 'shopeecn', 'shopee
 assert.match(app,/page === 'whpp'/,'WHPP hydration must explicitly hand off to its lazy owner');
 assert.match(app,/__CE_QC_V90_INSTANT_WHPP_NAV__/,'base runtime must preserve the dedicated WHPP rendering owner');
 
-assert.match(login,/\?auth=v575&t=/,'post-login URL must visibly identify the V575 coordinate shell, so stale installs are obvious');
+assert.match(login,/\?auth=v580&t=/,'post-login URL must visibly identify the V580 visible-shell build, so stale installs are obvious');
 assert.match(cleanup,/2026-09-22-v577-fast-storage-startup-v1/);
 assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/,'startup must still print the established human-readable deletion result');
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/,'C free-space before/after must be printed');
