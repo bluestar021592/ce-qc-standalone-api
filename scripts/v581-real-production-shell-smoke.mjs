@@ -75,9 +75,13 @@ let cdp;
 try{
   const target=await waitFor(async()=>{const r=await fetch('http://127.0.0.1:'+debugPort+'/json');const list=await r.json();return list.find(x=>x.type==='page'&&x.webSocketDebuggerUrl)||null;});
   cdp=new CDP(target.webSocketDebuggerUrl);await cdp.open();await cdp.send('Page.enable');await cdp.send('Runtime.enable');await cdp.send('Log.enable');
-  await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v580&prodShell=1'});
-  await waitFor(()=>cdp.eval("!!document.querySelector('.sidebar')&&!!document.querySelector('.app-body')"));
-  await new Promise(r=>setTimeout(r,3000));
+  const navResult=await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v580&prodShell=1'});
+  await new Promise(r=>setTimeout(r,2500));
+  const probe=await cdp.eval("(()=>({href:location.href,readyState:document.readyState,title:document.title,body:(document.body&&document.body.innerText||'').slice(0,300),html:(document.documentElement&&document.documentElement.outerHTML||'').slice(0,500),sidebar:!!document.querySelector('.sidebar'),appBody:!!document.querySelector('.app-body')}))()");
+  console.log('[V581_PROD_SHELL_PROBE]',JSON.stringify({navResult,probe}));
+  assert.equal(probe.sidebar,true,'actual production index did not load a sidebar; probe='+JSON.stringify(probe));
+  assert.equal(probe.appBody,true,'actual production index did not load app-body; probe='+JSON.stringify(probe));
+  await new Promise(r=>setTimeout(r,1000));
   const state=await cdp.eval(`(()=>{const q=s=>document.querySelector(s);const cs=s=>q(s)?getComputedStyle(q(s)):null;const rect=s=>q(s)?q(s).getBoundingClientRect():null;return {
     readyState:document.readyState,\n    appReady:!!window.__CE_QC_V575_COORDINATE_OWNER__,
     v580:!!window.__CE_QC_V580_VISIBLE_SHELL__,
